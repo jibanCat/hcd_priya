@@ -1,0 +1,60 @@
+# hcd_analysis default configuration
+# Override any key at the CLI with --set key.subkey=value
+
+data_root: /nfs/turbo/umor-yueyingn/mfho/emu_full
+output_root: ./outputs
+
+# Redshift range (inclusive)
+z_min: 2.0
+z_max: 6.0
+
+# Subset of simulations by folder name fragment.
+# Leave empty ([]) to process all 60 simulations.
+sim_filter: []
+
+absorber_classes:
+  - LLS
+  - subDLA
+  - DLA
+
+absorber:
+  # tau_threshold: pixels above this are considered part of an absorption system.
+  # For HCD work (LLS+), a value of ~100 corresponds to NHI > 10^16 (b=30 km/s).
+  # At high z the diffuse forest already has tau >> 1, so 1.0 would catch everything.
+  tau_threshold: 100.0      # pixel tau floor for system detection
+  merge_dv_kms: 100.0       # merge gap (km/s) between adjacent blobs
+  min_pixels: 2             # minimum pixels for a valid system
+  b_init_kms: 30.0          # initial b parameter guess for Voigt fit
+  b_bounds: [1.0, 300.0]    # b parameter bounds
+  tau_fit_cap: 1.0e6        # cap on tau before Voigt fitting
+  voigt_max_iter: 200       # max Voigt fit iterations
+  mask_fill_strategy: mean_flux  # zero_tau | mean_flux | contiguous
+  min_log_nhi: 17.2         # discard absorbers below this log10(NHI) (= LLS threshold)
+
+p1d:
+  k_min: 1.0e-3
+  k_max: 2.0e-2
+  n_k_bins: 35
+  log_k_bins: true
+  n_skewers: null           # null = all skewers; set to e.g. 10000 for debug
+
+cddf:
+  A: 1.0                    # amplitude multiplier (1.0 = no change)
+  alpha: 0.0                # power-law tilt (0.0 = no tilt)
+  N_pivot: 1.0e20           # pivot column density (cm^-2)
+
+# Parallelism
+n_workers: 4                # parallel simulations
+n_workers_skewer: 1         # parallel skewer batches within one file
+skewer_batch_size: 4096     # rows per batch (memory control)
+
+prefer_grid: true           # prefer lya_forest_spectra_grid_480.hdf5
+
+# Resume: skip completed (sim, snap) pairs
+resume: true
+
+# Debug/benchmark
+benchmark: false
+debug: false
+debug_n_sims: 2
+debug_n_snaps: 3

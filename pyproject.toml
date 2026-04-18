@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hcd_analysis"
+version = "0.1.0"
+description = "HCD (High-Column-Density) absorber analysis pipeline for fake_spectra emulator outputs"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "h5py>=3.8",
+    "pyyaml>=6.0",
+    "click>=8.1",
+    "matplotlib>=3.7",
+    "joblib>=1.3",
+    "tqdm>=4.65",
+    "astropy>=5.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-cov", "ipython"]
+
+[project.scripts]
+hcd = "cli.run:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hcd_analysis*", "cli*"]
