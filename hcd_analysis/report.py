@@ -815,62 +815,99 @@ def generate_pipeline_overview_md(out_dir: Path) -> None:
 
 ## Goal
 
-Process all `fake_spectra` outputs for the lyman-alpha forest emulator
-at Great Lakes. For each (simulation, redshift) pair:
+Process all `fake_spectra` outputs for the lyman-alpha forest emulator at Great Lakes.
+Two simulation sets are processed:
 
-1. Identify HCD absorption systems (LLS, subDLA, DLA) from tau.
-2. Compute P1D(k) for the full forest and with each class masked.
-3. Measure the CDDF f(NHI, X).
-4. Compute the P1D effect of a parametric CDDF perturbation.
+- **Low-force (LF):** 60 sims in `/nfs/turbo/umor-yueyingn/mfho/emu_full/`
+- **HiRes (HF):**      3 sims in `/nfs/turbo/lsa-cavestru/mfho/priya/emu_full_hires/`
+
+For each (simulation, redshift) pair:
+
+1. Parse `SimulationICs.json` for sim parameters (npart, cosmology, UVB, feedback).
+2. Identify HCD absorption systems (LLS, subDLA, DLA) from tau via Voigt fitting.
+3. Compute P1D(k) for the full forest and with each class pixel-masked.
+4. Compute P1D(k) under sightline exclusion at 10 NHI thresholds (logN>17.2…21.0).
+5. Measure the CDDF f(NHI, X); stack into per-redshift-bin CDDFs per sim.
+6. Compute HiRes/LF convergence ratios T(k) = P1D_hires/P1D_lf at matching sims.
+7. Optionally compute P1D under a continuous CDDF perturbation f'(N)=A·f(N)·(N/Npiv)^α.
 
 ## Data flow
 
 ```
-HDF5 tau array (691200 × 1556)
-         │
-         ├─── catalog.py ──→ AbsorberCatalog (.npz)
-         │        │               │
-         │        └─ Voigt fit    └─── cddf.py ──→ f(NHI, X)
+HDF5 tau (691200 × 1556)         SimulationICs.json
          │                               │
-         └─── p1d.py ──────────────────→ P1D all variants
-                  │                          │
-                  └─ masking.py ─────────────┘
-                       │
-                       └─ cddf.py (perturbation) ──→ P1D perturbed
+         ├─── catalog.py ──→ AbsorberCatalog (.npz) ──→ cddf.py ──→ f(NHI,X)
+         │        │                                          │
+         │        └─ Voigt fit                    stack_cddf_for_sim() → cddf_stacked.npz
+         │
+         ├─── p1d.py (pixel masking) ──→ P1D all/no_DLA/no_HCD/...
+         │
+         ├─── p1d.py (sightline excl) ──→ P1D_excl(k, logN_cut) [10 cuts]
+         │
+         └─── cddf.py (perturbation)  ──→ P1D_perturbed [optional]
+
+HiRes: same flow → outputs/hires/{sim}/
+Convergence: T(k) = P1D_hires / P1D_lf for 2–3 matched sims
 ```
 
 ## Entry points
 
 ```bash
-# One simulation, one redshift
-hcd run-one --sim ns0.803... --snap 017 --config config/default.yaml
+# Full LF campaign (60 sims, all z)
+sbatch scripts/batch_greatlakes.sh              # 21 CPUs, 8hr
+
+# Full HiRes campaign (3 sims)
+sbatch scripts/batch_hires.sh                  # 4 CPUs, 2hr
+
+# Convergence ratios (after both above)
+sbatch scripts/batch_convergence.sh
 
 # One simulation, all redshifts
 hcd run-sim --sim ns0.803... --config config/default.yaml
 
-# All simulations, all redshifts
-hcd run-all --config config/default.yaml
+# HiRes sims only
+hcd run-hires --config config/default.yaml
 
-# Benchmark mode
-hcd benchmark --n-sims 2 --n-snaps 3
+# Convergence ratios (interactive)
+hcd convergence --config config/default.yaml
 ```
 
-## Outputs
+## Output file tree
 
-Each (sim, snap) pair writes to:
 ```
-outputs/{sim_name}/snap_{NNN}/
-  done              ← sentinel (skip on resume)
-  catalog.npz       ← absorber catalog
-  p1d.npz           ← P1D variants
-  p1d_ratios.npz    ← ratio arrays
-  cddf.npz          ← CDDF measurement
-  p1d_perturbed.npz ← (optional) perturbed P1D
-  meta.json         ← timing + metadata
+outputs/
+  config_used.yaml
+  {sim_name}/
+    cddf_stacked.npz        ← per-z-bin CDDF (all snaps stacked)
+    snap_{NNN}/
+      done                  ← sentinel (skip on resume)
+      catalog.npz           ← absorber catalog
+      p1d.npz               ← P1D variants (all/no_DLA/no_HCD/...)
+      p1d_ratios.npz        ← ratio arrays
+      p1d_excl.npz          ← sightline exclusion sweep (10 NHI cuts)
+      cddf.npz              ← per-snap CDDF
+      p1d_perturbed.npz     ← (optional) CDDF-perturbed P1D
+      meta.json             ← timing, absorber counts, sim_ics fields
+  hires/
+    {sim_name}/
+      convergence_ratios.npz  ← T(k) = P1D_hires / P1D_lf
+      snap_{NNN}/             ← same structure as LF
+
+figures/
+  discovery_summary.png
+  cddf_per_z_bin.png
+  p1d_curves.png
+  p1d_ratios.png
+  p1d_excl_sweep_z*.png
+  convergence_ratios.png
+  ...
 ```
 
-Figures are written to `figures/`.
-Markdown docs are in `docs/`.
+## k grid
+
+Output P1D uses 50 log-spaced bins from 1.08×10⁻³ to 5.0×10⁻² s/km.
+The first 35 bins match the PRIYA emulator kf grid; the remaining 15 extend
+to the Nyquist frequency (dv≈10 km/s → k_Nyq = 1/(2×10) = 0.05 s/km).
 """
     _write(out_dir / "pipeline_overview.md", content)
 
@@ -916,6 +953,202 @@ and ~4–8 SLURM nodes (each 36–48 cores):
         content = "\n".join(lines) + "\n"
 
     _write(out_dir / "benchmarking.md", content)
+
+
+def plot_p1d_excl_sweep(excl_result: Dict, out_dir: Path, z: float = 0.0) -> None:
+    """
+    Plot P1D vs NHI sightline-exclusion threshold.
+
+    Shows:
+    - Left panel: k P1D(k)/pi for each NHI cut (colour-coded by cut)
+    - Right panel: P1D ratio excl/all vs k, and fraction of sightlines remaining
+    """
+    plt = _get_plt()
+    if not plt:
+        return
+
+    import matplotlib.cm as cm
+
+    k = excl_result.get("k", np.array([]))
+    p1d_excl = excl_result.get("p1d_excl", np.zeros((0, 0)))   # (n_cuts, n_k)
+    frac_rem = excl_result.get("frac_remaining", np.array([]))
+    log_cuts = excl_result.get("log_nhi_cuts", [])
+
+    if len(k) == 0 or p1d_excl.ndim != 2 or p1d_excl.shape[0] == 0:
+        return
+
+    n_cuts = p1d_excl.shape[0]
+    cmap = cm.plasma
+    colors = [cmap(i / max(n_cuts - 1, 1)) for i in range(n_cuts)]
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    # Panel 1: k P1D / pi
+    ax = axes[0]
+    for ci, (cut, color) in enumerate(zip(log_cuts, colors)):
+        p1d = p1d_excl[ci]
+        valid = np.isfinite(p1d) & (p1d > 0) & (k > 0)
+        if valid.any():
+            ax.loglog(k[valid], k[valid] * p1d[valid] / np.pi, "-",
+                      color=color, lw=1.2, label=f"logN>{cut:.1f}")
+    ax.set_xlabel("k [s/km]")
+    ax.set_ylabel("k P1D / pi")
+    ax.set_title(f"P1D(k) – sightline exclusion (z={z:.2f})")
+    ax.legend(fontsize=6, ncol=2)
+    ax.grid(True, alpha=0.3)
+
+    # Panel 2: ratio excl / no-excl (first cut = most inclusive)
+    ax = axes[1]
+    p1d_ref = p1d_excl[0]  # least restrictive cut (lowest logN)
+    for ci, (cut, color) in enumerate(zip(log_cuts[1:], colors[1:]), start=1):
+        p1d = p1d_excl[ci]
+        valid = np.isfinite(p1d) & np.isfinite(p1d_ref) & (p1d_ref > 0) & (k > 0)
+        if valid.any():
+            ratio = p1d[valid] / p1d_ref[valid]
+            ax.semilogx(k[valid], ratio, "-", color=color, lw=1.2,
+                        label=f"logN>{cut:.1f}")
+    ax.axhline(1.0, color="gray", ls="--", lw=0.8)
+    ax.set_xlabel("k [s/km]")
+    ax.set_ylabel("P1D(excl) / P1D(least excl)")
+    ax.set_title("Ratio vs least-restrictive cut")
+    ax.legend(fontsize=6, ncol=2)
+    ax.grid(True, alpha=0.3)
+
+    # Panel 3: fraction of sightlines remaining
+    ax = axes[2]
+    ax.plot(log_cuts, frac_rem, "ko-", ms=5)
+    ax.set_xlabel("log10(NHI) exclusion cut")
+    ax.set_ylabel("Fraction sightlines remaining")
+    ax.set_title("Sightline survival fraction")
+    ax.axvline(20.3, color="red", ls="--", label="DLA threshold", lw=0.8)
+    ax.axvline(19.0, color="blue", ls="--", label="subDLA threshold", lw=0.8)
+    ax.axvline(17.2, color="green", ls="--", label="LLS threshold", lw=0.8)
+    ax.legend(fontsize=7)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, 1.05)
+
+    plt.tight_layout()
+    z_str = f"z{z:.2f}".replace(".", "p")
+    fig.savefig(out_dir / f"p1d_excl_sweep_{z_str}.png", dpi=150)
+    plt.close(fig)
+    logger.info("Saved p1d_excl_sweep_%s.png", z_str)
+
+
+def plot_cddf_per_z_bin(stacked_cddf: Dict, out_dir: Path, sim_name: str = "") -> None:
+    """
+    Plot stacked CDDF f(NHI, X) per redshift bin for one simulation.
+
+    Shows measured CDDF for each z-bin with shaded per-snapshot scatter.
+    """
+    plt = _get_plt()
+    if not plt:
+        return
+
+    import matplotlib.cm as cm
+
+    n_bins = len(stacked_cddf)
+    if n_bins == 0:
+        return
+
+    cmap = cm.viridis
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    z_labels = sorted(stacked_cddf.keys())
+    colors = [cmap(i / max(n_bins - 1, 1)) for i in range(n_bins)]
+
+    for label, color in zip(z_labels, colors):
+        cdata = stacked_cddf[label]
+        centres = cdata["log_nhi_centres"]
+        f_mean = cdata["f_nhi"]
+        z_mid = 0.5 * (cdata["z_min"] + cdata["z_max"])
+
+        mask = f_mean > 0
+        if not mask.any():
+            continue
+
+        ax.semilogy(centres[mask], f_mean[mask], "-", color=color, lw=1.5,
+                    label=f"z={z_mid:.2f}")
+
+        # Shade per-snapshot scatter if available
+        if "f_nhi_per_snap" in cdata and len(cdata["f_nhi_per_snap"]) > 1:
+            f_per = cdata["f_nhi_per_snap"]
+            f_lo = np.nanmin(f_per, axis=0)
+            f_hi = np.nanmax(f_per, axis=0)
+            ax.fill_between(centres[mask],
+                            np.where(f_lo[mask] > 0, f_lo[mask], np.nan),
+                            np.where(f_hi[mask] > 0, f_hi[mask], np.nan),
+                            alpha=0.15, color=color)
+
+    for logN, cls in [(17.2, "LLS"), (19.0, "subDLA"), (20.3, "DLA")]:
+        ax.axvline(logN, ls="--", color="gray", alpha=0.5, lw=0.8)
+        ax.text(logN + 0.05, ax.get_ylim()[0] if ax.get_ylim()[0] > 0 else 1e-30,
+                cls, fontsize=7, va="bottom", color="gray")
+
+    ax.set_xlabel("log10(NHI) [cm^-2]")
+    ax.set_ylabel("f(NHI, X)")
+    title = "CDDF per redshift bin"
+    if sim_name:
+        title += f"\n{sim_name[:50]}"
+    ax.set_title(title)
+    ax.legend(fontsize=7, ncol=2)
+    plt.tight_layout()
+    fig.savefig(out_dir / "cddf_per_z_bin.png", dpi=150)
+    plt.close(fig)
+    logger.info("Saved cddf_per_z_bin.png")
+
+
+def plot_convergence_ratios(
+    convergence: Dict,
+    out_dir: Path,
+) -> None:
+    """
+    Plot T(k) = P1D_hires / P1D_lf convergence ratios.
+
+    One panel per redshift, one line per matched simulation.
+    """
+    plt = _get_plt()
+    if not plt:
+        return
+
+    if not convergence:
+        return
+
+    # Collect all unique redshifts across sims
+    z_vals = sorted({z for sim_data in convergence.values() for z in sim_data.keys()})
+    if not z_vals:
+        return
+
+    n_z = len(z_vals)
+    fig, axes = plt.subplots(1, n_z, figsize=(5 * n_z, 5), squeeze=False)
+
+    import matplotlib.cm as cm
+    sim_names = list(convergence.keys())
+    colors = [cm.tab10(i / max(len(sim_names) - 1, 1)) for i in range(len(sim_names))]
+
+    for col, z in enumerate(z_vals):
+        ax = axes[0, col]
+        for sim_name, color in zip(sim_names, colors):
+            sim_data = convergence.get(sim_name, {})
+            z_data = sim_data.get(z, {})
+            if "all" in z_data:
+                k = z_data["all"]["k"]
+                T_k = z_data["all"]["T_k"]
+                valid = np.isfinite(T_k) & (k > 0)
+                if valid.any():
+                    ax.semilogx(k[valid], T_k[valid], "-", color=color, lw=1.2,
+                                label=sim_name[:20])
+        ax.axhline(1.0, color="gray", ls="--", lw=0.8)
+        ax.set_xlabel("k [s/km]")
+        ax.set_ylabel("T(k) = P1D_hires / P1D_lf")
+        ax.set_title(f"Convergence ratio z={z:.3f}")
+        ax.set_ylim(0.8, 1.2)
+        ax.legend(fontsize=6)
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    fig.savefig(out_dir / "convergence_ratios.png", dpi=150)
+    plt.close(fig)
+    logger.info("Saved convergence_ratios.png")
 
 
 def generate_all_markdown(out_dir: Path, benchmark_result: Optional[Dict] = None) -> None:
