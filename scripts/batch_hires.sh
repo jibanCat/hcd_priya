@@ -12,9 +12,9 @@
 #SBATCH --partition=standard
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=21
 #SBATCH --mem-per-cpu=8g
-#SBATCH --time=02:00:00
+#SBATCH --time=24:00:00
 #SBATCH --chdir=/home/mfho/hcd_priya
 #SBATCH --output=/home/mfho/hcd_priya/logs/hcd_hires_%j.out
 #SBATCH --error=/home/mfho/hcd_priya/logs/hcd_hires_%j.err
@@ -37,10 +37,13 @@ echo "Host:     $(hostname)"
 echo "Output:   ${OUTPUT_ROOT}/hires/"
 echo "CPUs:     ${SLURM_CPUS_PER_TASK:-4}"
 
+# n_workers=3   : 3 HiRes sims in parallel
+# n_workers_skewer=7 : 7 CPUs per sim for intra-snap skewer parallelism (21/3)
 "$PYTHON" -m cli.run run-hires \
   --config "$HCD_CONFIG" \
   --output-root "$OUTPUT_ROOT" \
-  --n-workers "${SLURM_CPUS_PER_TASK:-4}" \
+  --n-workers 3 \
+  --set "n_workers_skewer=7" \
   --verbose
 
 echo "=== HiRes done: $(date) ==="

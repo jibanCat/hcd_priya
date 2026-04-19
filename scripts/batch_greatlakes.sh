@@ -56,6 +56,10 @@ case "$MODE" in
   run-one-array)
     # SLURM array mode: each task handles one LF simulation (all its redshifts).
     # Submit: sbatch --array=0-59 scripts/batch_greatlakes.sh run-one-array
+    #
+    # n_workers=1      : only one sim per task, no need for sim-level parallelism
+    # n_workers_skewer : use ALL allocated CPUs for intra-snap skewer parallelism
+    #   (reduces catalog build from ~4.5h → ~13min per snap at 21 CPUs)
     SIM_LIST="${HCD_ROOT}/sim_list.txt"
     SIM_NAME=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$SIM_LIST")
     if [ -z "$SIM_NAME" ]; then
@@ -66,7 +70,8 @@ case "$MODE" in
     "$PYTHON" -m cli.run run-sim \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
-      --set "n_workers=${SLURM_CPUS_PER_TASK:-4}" \
+      --set "n_workers=1" \
+      --set "n_workers_skewer=${SLURM_CPUS_PER_TASK:-4}" \
       --sim "$SIM_NAME" \
       --verbose
     ;;
