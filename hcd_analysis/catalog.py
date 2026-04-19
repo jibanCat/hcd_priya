@@ -124,35 +124,23 @@ class AbsorberCatalog:
 
     def to_dataframe(self):
         """
-        Convert catalog to a pandas DataFrame with columns:
-          skewer_idx, pix_start, pix_end, NHI, log_nhi, b_kms, absorber_class,
-          fit_success, fast_mode.
-        Returns None if pandas is not available.
+        Convert catalog to a pandas DataFrame (if available) or a plain dict of arrays.
+        Columns: skewer_idx, pix_start, pix_end, NHI, log_nhi, b_kms, absorber_class.
         """
+        arrays = {
+            "skewer_idx": np.array([a.skewer_idx for a in self.absorbers], dtype=np.int32),
+            "pix_start":  np.array([a.pix_start  for a in self.absorbers], dtype=np.int32),
+            "pix_end":    np.array([a.pix_end    for a in self.absorbers], dtype=np.int32),
+            "NHI":        np.array([a.NHI        for a in self.absorbers], dtype=np.float64),
+            "log_nhi":    np.array([a.log_NHI    for a in self.absorbers], dtype=np.float64),
+            "b_kms":      np.array([a.b_kms      for a in self.absorbers], dtype=np.float64),
+            "absorber_class": np.array([a.absorber_class for a in self.absorbers]),
+        }
         try:
             import pandas as pd
+            return pd.DataFrame(arrays)
         except ImportError:
-            return None
-        if not self.absorbers:
-            return pd.DataFrame(columns=[
-                "skewer_idx", "pix_start", "pix_end", "NHI", "log_nhi",
-                "b_kms", "absorber_class", "fit_success", "fast_mode",
-            ])
-        records = [
-            {
-                "skewer_idx": a.skewer_idx,
-                "pix_start": a.pix_start,
-                "pix_end": a.pix_end,
-                "NHI": a.NHI,
-                "log_nhi": a.log_NHI,
-                "b_kms": a.b_kms,
-                "absorber_class": a.absorber_class,
-                "fit_success": a.fit_success,
-                "fast_mode": a.fast_mode,
-            }
-            for a in self.absorbers
-        ]
-        return pd.DataFrame(records)
+            return arrays  # plain dict of numpy arrays — works with compute_p1d_excl_nhi
 
     def save_npz(self, path: str | Path) -> None:
         if not self.absorbers:

@@ -440,20 +440,31 @@ def compute_p1d_excl_nhi(
     """
     from .io import iter_tau_batches
 
-    import pandas as pd
-
     n_cuts = len(log_nhi_cuts)
 
-    # Build set of excluded skewer indices per cut
-    # catalog must have 'skewer_idx' and 'log_nhi' columns
-    if catalog is not None and len(catalog) > 0:
-        if hasattr(catalog, "iterrows"):
-            # pandas DataFrame
-            skewer_idx = np.asarray(catalog["skewer_idx"])
-            log_nhi = np.asarray(catalog["log_nhi"])
+    # Extract skewer_idx and log_nhi from catalog.
+    # Accepts: AbsorberCatalog (has .absorbers list), numpy-dict, or None.
+    if catalog is not None:
+        if hasattr(catalog, "absorbers"):
+            # AbsorberCatalog object
+            absorbers = catalog.absorbers
+            if absorbers:
+                skewer_idx = np.array([a.skewer_idx for a in absorbers], dtype=np.int64)
+                log_nhi = np.array([a.log_NHI for a in absorbers], dtype=np.float64)
+            else:
+                skewer_idx = np.array([], dtype=np.int64)
+                log_nhi = np.array([], dtype=np.float64)
+        elif hasattr(catalog, "get"):
+            # dict-like
+            skewer_idx = np.asarray(catalog.get("skewer_idx", []), dtype=np.int64)
+            log_nhi = np.asarray(catalog.get("log_nhi", []), dtype=np.float64)
+        elif hasattr(catalog, "__len__") and len(catalog) > 0:
+            # pandas DataFrame (optional dependency)
+            skewer_idx = np.asarray(catalog["skewer_idx"], dtype=np.int64)
+            log_nhi = np.asarray(catalog["log_nhi"], dtype=np.float64)
         else:
-            skewer_idx = np.asarray(catalog.get("skewer_idx", []))
-            log_nhi = np.asarray(catalog.get("log_nhi", []))
+            skewer_idx = np.array([], dtype=np.int64)
+            log_nhi = np.array([], dtype=np.float64)
     else:
         skewer_idx = np.array([], dtype=np.int64)
         log_nhi = np.array([], dtype=np.float64)

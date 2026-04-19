@@ -200,7 +200,7 @@ def run_one_snap(
                 hdf5_path=entry.path,
                 nbins=header.nbins,
                 dv_kms=dv_kms,
-                catalog=catalog.to_dataframe() if hasattr(catalog, "to_dataframe") else catalog,
+                catalog=catalog,   # AbsorberCatalog accepted directly; no pandas needed
                 log_nhi_cuts=nhi_cuts,
                 batch_size=cfg.skewer_batch_size,
                 n_skewers=n_skewers_p1d,
