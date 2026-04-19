@@ -126,7 +126,6 @@ def _nested_set(d: dict, key_path: str, value: Any) -> None:
 
 def _dataclass_from_dict(cls, d: dict):
     """Recursively build a dataclass from a dict, matching nested dataclass fields."""
-    field_types = {f.name: f.type for f in dataclasses.fields(cls)}
     kwargs = {}
     for f in dataclasses.fields(cls):
         if f.name not in d:
@@ -136,6 +135,12 @@ def _dataclass_from_dict(cls, d: dict):
         ftype = f.type if not isinstance(f.type, str) else eval(f.type)
         if dataclasses.is_dataclass(ftype) and isinstance(val, dict):
             kwargs[f.name] = _dataclass_from_dict(ftype, val)
+        elif ftype is float and not isinstance(val, float):
+            # YAML may parse scientific notation without signed exponent (e.g. "1.0e6")
+            # as a string. Coerce explicitly.
+            kwargs[f.name] = float(val)
+        elif ftype is int and not isinstance(val, int):
+            kwargs[f.name] = int(val)
         else:
             kwargs[f.name] = val
     return dataclasses.replace(cls(), **kwargs)

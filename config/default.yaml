@@ -27,7 +27,7 @@ absorber:
   min_pixels: 2             # minimum pixels for a valid system
   b_init_kms: 30.0          # initial b parameter guess for Voigt fit
   b_bounds: [1.0, 300.0]    # b parameter bounds
-  tau_fit_cap: 1.0e6        # cap on tau before Voigt fitting
+  tau_fit_cap: 1.0e+06      # cap on tau before Voigt fitting (must use signed exponent for YAML float)
   voigt_max_iter: 200       # max Voigt fit iterations
   mask_fill_strategy: mean_flux  # zero_tau | mean_flux | contiguous
   min_log_nhi: 17.2         # discard absorbers below this log10(NHI) (= LLS threshold)

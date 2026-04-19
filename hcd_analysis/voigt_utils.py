@@ -154,8 +154,9 @@ def nhi_from_ew_linear(ew_kms: float) -> float:
 # Voigt fitting from tau array
 # ---------------------------------------------------------------------------
 
-def _residuals(params: np.ndarray, v: np.ndarray, tau_obs: np.ndarray, tau_cap: float) -> float:
+def _residuals(params: np.ndarray, v: np.ndarray, tau_obs: np.ndarray, tau_cap) -> float:
     """Chi^2 in log space (robust to dynamic range)."""
+    tau_cap = float(tau_cap)   # guard: YAML may pass as string "1.0e6"
     log_NHI, log_b = params
     NHI = 10.0**log_NHI
     b = 10.0**log_b
@@ -195,6 +196,10 @@ def fit_nhi_from_tau(
     b        : best-fit Doppler parameter (km/s)
     success  : True if optimiser converged
     """
+    tau_cap = float(tau_cap)   # ensure float regardless of YAML parsing
+    b_bounds = (float(b_bounds[0]), float(b_bounds[1]))  # same guard
+    b_init = float(b_init)
+
     # Initial NHI estimate from tau peak (linear approximation)
     tau_peak = float(np.clip(tau_segment.max(), 1e-12, tau_cap))
     # Very rough: NHI_guess ~ tau_peak * b / sigma_prefactor
