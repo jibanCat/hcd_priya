@@ -2,26 +2,28 @@
 # Great Lakes SLURM batch script for hcd_analysis.
 #
 # Usage:
-#   sbatch batch_greatlakes.sh run-all
-#   sbatch batch_greatlakes.sh run-sim --sim ns0.803...
-#   sbatch --array=0-59 batch_greatlakes.sh run-one-array
+#   sbatch scripts/batch_lf.sh            # all 60 LF sims
+#   sbatch scripts/batch_lf.sh run-sim --sim ns0.803...
+#   sbatch --array=0-59 scripts/batch_lf.sh run-one-array
+#   sbatch scripts/batch_hires.sh         # 3 HiRes sims
+#   sbatch scripts/batch_greatlakes.sh convergence  # after both above
 #
 # Environment variables:
 #   HCD_CONFIG   path to YAML config (default: config/default.yaml)
 #   HCD_ROOT     repo root (default: auto-detected from script location)
 
 #SBATCH --job-name=hcd_pipeline
-#SBATCH --account=YOUR_ACCOUNT          # replace with your allocation
+#SBATCH --account=cavestru0
 #SBATCH --partition=standard
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=36              # one full node
-#SBATCH --mem=180G
-#SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=21              # one standard node (21 CPUs)
+#SBATCH --mem-per-cpu=8g               # 8 GB/CPU = 168 GB total
+#SBATCH --time=08:00:00                # ~4.4h measured + safety margin
 #SBATCH --output=logs/hcd_%j.out
 #SBATCH --error=logs/hcd_%j.err
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=YOUR_EMAIL          # replace with your email
+#SBATCH --mail-user=mfho@umich.edu
 
 set -euo pipefail
 
@@ -29,23 +31,17 @@ set -euo pipefail
 # Environment setup
 # ---------------------------------------------------------------------------
 
-# Activate conda/mamba environment
-# Adjust path as needed for your Great Lakes setup
 module load python/3.11 2>/dev/null || true
 source activate hcd_env 2>/dev/null || conda activate hcd_env 2>/dev/null || true
 
-# Repo root (script is in scripts/ subdirectory)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HCD_ROOT="${HCD_ROOT:-$(dirname "$SCRIPT_DIR")}"
 cd "$HCD_ROOT"
 
-# Config
 HCD_CONFIG="${HCD_CONFIG:-config/default.yaml}"
-
-# Log directory
 mkdir -p logs
 
-echo "=== hcd_analysis pipeline ==="
+echo "=== hcd_analysis pipeline (LF) ==="
 echo "Date:     $(date)"
 echo "Host:     $(hostname)"
 echo "Root:     $HCD_ROOT"
@@ -63,8 +59,6 @@ shift || true
 case "$MODE" in
 
   run-all)
-    # Run all simulations and all redshifts.
-    # Parallelism via n_workers (set to number of CPUs).
     python -m hcd_analysis.cli.run run-all \
       --config "$HCD_CONFIG" \
       --n-workers "${SLURM_CPUS_PER_TASK:-4}" \
@@ -72,10 +66,22 @@ case "$MODE" in
       "$@"
     ;;
 
+  run-hires)
+    python -m hcd_analysis.cli.run run-hires \
+      --config "$HCD_CONFIG" \
+      --n-workers "${SLURM_CPUS_PER_TASK:-4}" \
+      --verbose \
+      "$@"
+    ;;
+
+  convergence)
+    python -m hcd_analysis.cli.run convergence \
+      --config "$HCD_CONFIG" \
+      --verbose \
+      "$@"
+    ;;
+
   run-sim)
-    # Run one simulation, all redshifts.
-    # Pass --sim as remaining argument:
-    #   sbatch batch_greatlakes.sh run-sim --sim ns0.803...
     python -m hcd_analysis.cli.run run-sim \
       --config "$HCD_CONFIG" \
       --verbose \
@@ -83,8 +89,6 @@ case "$MODE" in
     ;;
 
   run-one)
-    # Run one (sim, snap) pair.
-    #   sbatch batch_greatlakes.sh run-one --sim ns0.803... --snap 17
     python -m hcd_analysis.cli.run run-one \
       --config "$HCD_CONFIG" \
       --verbose \
@@ -92,11 +96,10 @@ case "$MODE" in
     ;;
 
   run-one-array)
-    # SLURM array mode: each array task handles one simulation.
-    # Submit with: sbatch --array=0-59 batch_greatlakes.sh run-one-array
+    # SLURM array mode: each task handles one LF simulation.
+    # Submit with: sbatch --array=0-59 scripts/batch_greatlakes.sh run-one-array
     SIM_LIST_FILE="${HCD_ROOT}/sim_list.txt"
     if [ ! -f "$SIM_LIST_FILE" ]; then
-      # Auto-generate sim list from data directory
       ls /nfs/turbo/umor-yueyingn/mfho/emu_full/ | grep '^ns' > "$SIM_LIST_FILE"
       echo "Generated $SIM_LIST_FILE with $(wc -l < "$SIM_LIST_FILE") entries"
     fi
@@ -131,7 +134,7 @@ case "$MODE" in
 
   *)
     echo "ERROR: Unknown mode: $MODE"
-    echo "Available modes: run-all, run-sim, run-one, run-one-array, benchmark, report"
+    echo "Available modes: run-all, run-hires, convergence, run-sim, run-one, run-one-array, benchmark, report"
     exit 1
     ;;
 

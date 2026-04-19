@@ -45,12 +45,19 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from .catalog import AbsorberCatalog, build_catalog, LOG_NHI_LLS_MIN
-from .cddf import CDDFPerturbation, compute_perturbed_p1d, measure_cddf
+from .cddf import (
+    CDDFPerturbation,
+    compute_perturbed_p1d,
+    measure_cddf,
+    measure_cddf_from_dataframe,
+    stack_cddf_for_sim,
+)
 from .config import PipelineConfig, save_config
-from .io import pixel_dv_kms, read_header
+from .io import pixel_dv_kms, read_header, read_sim_ics
 from .p1d import (
     ALL_VARIANTS,
     compute_all_p1d_variants,
+    compute_p1d_excl_nhi,
     compute_p1d_ratios,
     _DEFAULT_K_BINS,
 )
@@ -125,10 +132,11 @@ def run_one_snap(
     timing: Dict[str, float] = {}
 
     try:
-        # --- Load header --------------------------------------------------
+        # --- Load header + SimulationICs ----------------------------------
         t0 = time.perf_counter()
         header = read_header(entry.path)
         dv_kms = pixel_dv_kms(header)
+        ics_meta = read_sim_ics(sim_snapshot.sim)  # empty dict if file absent
         timing["header"] = time.perf_counter() - t0
 
         # --- Build absorber catalog ---------------------------------------
@@ -183,6 +191,22 @@ def run_one_snap(
         # --- P1D ratios ---------------------------------------------------
         p1d_ratios = compute_p1d_ratios(p1d_variants)
 
+        # --- NHI exclusion sweep (P1D vs sightline cut) -------------------
+        t0 = time.perf_counter()
+        nhi_cuts = cfg.p1d.nhi_excl_thresholds
+        excl_result = None
+        if nhi_cuts and catalog is not None:
+            excl_result = compute_p1d_excl_nhi(
+                hdf5_path=entry.path,
+                nbins=header.nbins,
+                dv_kms=dv_kms,
+                catalog=catalog.to_dataframe() if hasattr(catalog, "to_dataframe") else catalog,
+                log_nhi_cuts=nhi_cuts,
+                batch_size=cfg.skewer_batch_size,
+                n_skewers=n_skewers_p1d,
+            )
+        timing["excl_sweep"] = time.perf_counter() - t0
+
         # --- Measure CDDF -------------------------------------------------
         t0 = time.perf_counter()
         cddf_result = measure_cddf(catalog, header)
@@ -213,7 +237,8 @@ def run_one_snap(
 
         # --- Save outputs -------------------------------------------------
         _save_snap_outputs(out_dir, catalog, p1d_variants, p1d_ratios, cddf_result,
-                           perturbed_p1d, timing, header, sim_name, snap, z, dv_kms)
+                           perturbed_p1d, excl_result, ics_meta,
+                           timing, header, sim_name, snap, z, dv_kms)
         mark_done(cfg, sim_name, snap)
 
         result = SnapResult(
@@ -240,6 +265,8 @@ def _save_snap_outputs(
     p1d_ratios: Dict,
     cddf_result: Dict,
     perturbed_p1d: Optional[Dict],
+    excl_result: Optional[Dict],
+    ics_meta: Dict,
     timing: Dict,
     header,
     sim_name: str,
@@ -268,13 +295,23 @@ def _save_snap_outputs(
                  if not isinstance(v, (str, dict))}
     np.savez(out_dir / "cddf.npz", **cddf_save)
 
+    # NHI exclusion sweep → npz
+    if excl_result is not None:
+        excl_save = {}
+        for key, val in excl_result.items():
+            if isinstance(val, np.ndarray):
+                excl_save[key] = val
+            elif isinstance(val, (list, tuple)):
+                excl_save[key] = np.array(val)
+        np.savez(out_dir / "p1d_excl.npz", **excl_save)
+
     # Perturbed P1D → npz
     if perturbed_p1d is not None:
         pert_save = {k: v for k, v in perturbed_p1d.items()
                      if isinstance(v, np.ndarray)}
         np.savez(out_dir / "p1d_perturbed.npz", **pert_save)
 
-    # Timing + metadata → JSON
+    # Timing + metadata → JSON (includes SimulationICs fields)
     meta = {
         "sim_name": sim_name,
         "snap": snap,
@@ -287,6 +324,9 @@ def _save_snap_outputs(
         "n_absorbers": {cls: len(catalog.by_class(cls)) for cls in ["LLS", "subDLA", "DLA", "forest"]},
         "timing_s": {k: round(v, 3) for k, v in timing.items()},
     }
+    if ics_meta:
+        meta["sim_ics"] = {k: (float(v) if isinstance(v, (int, float)) else v)
+                           for k, v in ics_meta.items()}
     with open(out_dir / "meta.json", "w") as f:
         json.dump(meta, f, indent=2)
 
@@ -339,12 +379,58 @@ def run_sim_all_z(
     sim_snapshot: SimSnapshot,
     cfg: PipelineConfig,
 ) -> List[Optional[SnapResult]]:
-    """Run all redshifts for one simulation. Sequential."""
+    """Run all redshifts for one simulation, then stack per-z-bin CDDFs."""
     results = []
     for entry in sim_snapshot.entries:
         r = run_one_snap(sim_snapshot, entry, cfg)
         results.append(r)
+
+    # Stack CDDF across snapshots into per-z-bin CDDFs
+    _stack_and_save_cddf(sim_snapshot, cfg, results)
     return results
+
+
+def _stack_and_save_cddf(
+    sim_snapshot: SimSnapshot,
+    cfg: PipelineConfig,
+    results: List[Optional[SnapResult]],
+) -> None:
+    """
+    Collect per-snap CDDFs and stack them into per-redshift-bin CDDFs.
+    Saves to <output_root>/<sim>/cddf_stacked.npz.
+    """
+    cddf_list = []
+    for r in results:
+        if r is not None and r.cddf_result:
+            cddf_list.append(r.cddf_result)
+
+    if not cddf_list:
+        return
+
+    try:
+        stacked = stack_cddf_for_sim(cddf_list)
+        sim_dir = Path(cfg.output_root) / sim_snapshot.sim.name
+        sim_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save each z-bin as a group in one npz
+        save_dict = {}
+        bin_labels = []
+        for label, cdata in stacked.items():
+            safe_label = label.replace("-", "to").replace(".", "p")
+            for field in ("f_nhi", "n_absorbers", "log_nhi_centres", "log_nhi_edges",
+                          "f_nhi_per_snap"):
+                if field in cdata:
+                    save_dict[f"{safe_label}__{field}"] = np.asarray(cdata[field])
+            save_dict[f"{safe_label}__z_snapshots"] = np.array(cdata["z_snapshots"])
+            save_dict[f"{safe_label}__z_min"] = np.array([cdata["z_min"]])
+            save_dict[f"{safe_label}__z_max"] = np.array([cdata["z_max"]])
+            save_dict[f"{safe_label}__total_path"] = np.array([cdata["total_path"]])
+            bin_labels.append(label)
+
+        np.savez(sim_dir / "cddf_stacked.npz", **save_dict)
+        logger.info("  CDDF stacked for sim=%s: %d z-bins", sim_snapshot.sim.name[:30], len(bin_labels))
+    except Exception as exc:
+        logger.warning("CDDF stacking failed for sim=%s: %s", sim_snapshot.sim.name[:30], exc)
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +476,129 @@ def run_all(cfg: PipelineConfig) -> Dict[str, List[Optional[SnapResult]]]:
 
     return {ss.sim.name: results
             for ss, results in zip(snap_map, all_results_flat)}
+
+
+# ---------------------------------------------------------------------------
+# HiRes mode: process emu_full_hires and compute convergence ratios
+# ---------------------------------------------------------------------------
+
+def run_hires(cfg: PipelineConfig) -> Dict[str, List[Optional[SnapResult]]]:
+    """
+    Run the full pipeline on HiRes simulations (cfg.hires_data_root).
+    Outputs go to <output_root>/hires/<sim>/...
+    """
+    from joblib import Parallel, delayed
+
+    hires_cfg = dataclasses.replace(cfg, data_root=cfg.hires_data_root)
+    hires_cfg = dataclasses.replace(hires_cfg, output_root=str(Path(cfg.output_root) / "hires"))
+
+    snap_map = build_snapshot_map(
+        data_root=hires_cfg.data_root,
+        z_min=hires_cfg.z_min,
+        z_max=hires_cfg.z_max,
+        sim_filter=hires_cfg.sim_filter if hires_cfg.sim_filter else None,
+        prefer_grid=hires_cfg.prefer_grid,
+    )
+
+    if not snap_map:
+        logger.warning("No HiRes simulations found in %s", hires_cfg.data_root)
+        return {}
+
+    logger.info("HiRes: running %d simulations from %s", len(snap_map), hires_cfg.data_root)
+
+    Path(hires_cfg.output_root).mkdir(parents=True, exist_ok=True)
+    save_config(hires_cfg, str(Path(hires_cfg.output_root) / "config_hires.yaml"))
+
+    if hires_cfg.n_workers > 1:
+        all_results_flat = Parallel(n_jobs=hires_cfg.n_workers, verbose=10)(
+            delayed(run_sim_all_z)(ss, hires_cfg) for ss in snap_map
+        )
+    else:
+        all_results_flat = [run_sim_all_z(ss, hires_cfg) for ss in snap_map]
+
+    return {ss.sim.name: res for ss, res in zip(snap_map, all_results_flat)}
+
+
+def compute_convergence_ratios(
+    cfg: PipelineConfig,
+    variants: Optional[List[str]] = None,
+) -> Dict:
+    """
+    Compute HiRes/LowRes P1D convergence ratios T(k) = P1D_hires / P1D_lowres
+    for matching simulation parameter points.
+
+    Matching is done by sim folder name. Only sims present in BOTH data_roots
+    are included.
+
+    Returns dict: sim_name → z → variant → {'k', 'T_k'}
+    """
+    if variants is None:
+        variants = ["all", "no_HCD"]
+
+    lf_root = Path(cfg.output_root)
+    hf_root = Path(cfg.output_root) / "hires"
+
+    # Find common sims
+    lf_sims = {p.name for p in lf_root.iterdir() if p.is_dir() and not p.name.startswith(".")}
+    hf_sims = {p.name for p in hf_root.iterdir() if p.is_dir() and not p.name.startswith(".")}
+    common_sims = lf_sims & hf_sims
+
+    logger.info("Convergence ratios: %d matching sims", len(common_sims))
+
+    ratios = {}
+    for sim_name in sorted(common_sims):
+        lf_sim_dir = lf_root / sim_name
+        hf_sim_dir = hf_root / sim_name
+
+        # Find common snap directories
+        lf_snaps = {p.name: p for p in lf_sim_dir.iterdir()
+                    if p.is_dir() and p.name.startswith("snap_")}
+        hf_snaps = {p.name: p for p in hf_sim_dir.iterdir()
+                    if p.is_dir() and p.name.startswith("snap_")}
+        common_snaps = set(lf_snaps) & set(hf_snaps)
+
+        sim_ratios = {}
+        for snap_name in sorted(common_snaps):
+            lf_p = lf_snaps[snap_name]
+            hf_p = hf_snaps[snap_name]
+
+            if not (lf_p / "done").exists() or not (hf_p / "done").exists():
+                continue
+
+            try:
+                lf_meta = json.load(open(lf_p / "meta.json"))
+                z = lf_meta["z"]
+                lf_data = dict(np.load(lf_p / "p1d.npz"))
+                hf_data = dict(np.load(hf_p / "p1d.npz"))
+
+                snap_ratios = {}
+                for var in variants:
+                    k_key = f"k_{var}"
+                    p_key = f"p1d_{var}"
+                    if k_key in lf_data and k_key in hf_data:
+                        k = lf_data[k_key]
+                        p_lf = lf_data[p_key]
+                        p_hf = hf_data[p_key]
+                        with np.errstate(divide="ignore", invalid="ignore"):
+                            T_k = np.where(p_lf > 0, p_hf / p_lf, np.nan)
+                        snap_ratios[var] = {"k": k, "T_k": T_k}
+                sim_ratios[round(z, 3)] = snap_ratios
+            except Exception as exc:
+                logger.warning("Convergence ratio failed for %s/%s: %s", sim_name, snap_name, exc)
+
+        if sim_ratios:
+            ratios[sim_name] = sim_ratios
+            # Save convergence ratios per sim
+            out_path = hf_root / sim_name / "convergence_ratios.npz"
+            save_dict = {}
+            for z_val, z_data in sim_ratios.items():
+                z_label = f"z{z_val:.3f}".replace(".", "p")
+                for var, vdata in z_data.items():
+                    save_dict[f"{z_label}__{var}__k"] = vdata["k"]
+                    save_dict[f"{z_label}__{var}__T_k"] = vdata["T_k"]
+            np.savez(out_path, **save_dict)
+
+    return ratios
 
 
 # ---------------------------------------------------------------------------

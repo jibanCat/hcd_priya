@@ -287,5 +287,48 @@ def report(config_path, output_root, set_values, debug, fast, verbose, figures_d
     click.echo(f"Docs in {docs}/")
 
 
+# ---------------------------------------------------------------------------
+# run-hires: HiRes simulations
+# ---------------------------------------------------------------------------
+
+@cli.command("run-hires")
+@add_common_options
+@click.option("--n-workers", default=None, type=int, help="Override n_workers")
+def run_hires(config_path, output_root, set_values, debug, fast, verbose, n_workers):
+    """Run full analysis for HiRes simulations (hires_data_root → outputs/hires/)."""
+    setup_logging(verbose)
+    set_values = list(set_values)
+    if n_workers is not None:
+        set_values.append(f"n_workers={n_workers}")
+    cfg = make_config(config_path, output_root, set_values, debug, fast)
+
+    from hcd_analysis.pipeline import run_hires as _run_hires
+
+    all_results = _run_hires(cfg)
+    total = sum(len(v) for v in all_results.values())
+    n_ok = sum(1 for v in all_results.values() for r in v if r is not None)
+    click.echo(f"HiRes done. {n_ok}/{total} (sim, snap) pairs succeeded.")
+
+
+# ---------------------------------------------------------------------------
+# convergence: compute HiRes/LF P1D ratios
+# ---------------------------------------------------------------------------
+
+@cli.command("convergence")
+@add_common_options
+def convergence(config_path, output_root, set_values, debug, fast, verbose):
+    """Compute HiRes/LowRes P1D convergence ratios for matching sims."""
+    setup_logging(verbose)
+    cfg = make_config(config_path, output_root, set_values, debug, fast)
+
+    from hcd_analysis.pipeline import compute_convergence_ratios
+
+    ratios = compute_convergence_ratios(cfg)
+    n_sims = len(ratios)
+    n_z = sum(len(v) for v in ratios.values())
+    click.echo(f"Convergence ratios computed for {n_sims} sims, {n_z} (sim, z) entries.")
+    click.echo("Saved to outputs/hires/<sim>/convergence_ratios.npz")
+
+
 if __name__ == "__main__":
     cli()

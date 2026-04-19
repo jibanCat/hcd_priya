@@ -67,6 +67,9 @@ import numpy as np
 
 from .catalog import AbsorberCatalog, Absorber, classify_system
 
+# Standard redshift bins for stacking across snapshots
+_DEFAULT_Z_BINS = np.array([2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0])
+
 logger = logging.getLogger(__name__)
 
 # H_0 = 100 km/s/Mpc (h=1 units)
@@ -258,6 +261,142 @@ def perturbed_mask_classes(
         realizations.append(selected)
 
     return realizations
+
+
+# ---------------------------------------------------------------------------
+# DataFrame-compatible CDDF (used by pipeline when catalog is a pandas DF)
+# ---------------------------------------------------------------------------
+
+def measure_cddf_from_dataframe(
+    df,
+    z: float,
+    box_kpc_h: float,
+    hubble: float,
+    omegam: float,
+    omegal: float,
+    n_sightlines: int,
+    log_nhi_bins: Optional[np.ndarray] = None,
+    absorber_class_filter: Optional[List[str]] = None,
+) -> Dict:
+    """
+    Measure CDDF from a pandas DataFrame with columns 'log_nhi' and 'absorber_class'.
+
+    Parameters
+    ----------
+    df        : DataFrame with at least 'log_nhi' (and optionally 'absorber_class')
+    z         : redshift of the snapshot
+    ...       : box/cosmology parameters for absorption path
+    n_sightlines : total number of sightlines in the file
+    """
+    if log_nhi_bins is None:
+        log_nhi_bins = np.linspace(17.0, 23.0, 31)
+
+    dX = absorption_path_per_sightline(box_kpc_h, hubble, omegam, omegal, z)
+    total_path = n_sightlines * dX
+
+    if absorber_class_filter is not None and "absorber_class" in df.columns:
+        df = df[df["absorber_class"].isin(absorber_class_filter)]
+
+    log_nhi_vals = np.asarray(df["log_nhi"])
+    counts, edges = np.histogram(log_nhi_vals, bins=log_nhi_bins)
+    dN = 10.0**edges[1:] - 10.0**edges[:-1]
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        f_nhi = np.where(dN > 0, counts / (dN * total_path), 0.0)
+
+    centres = 0.5 * (edges[:-1] + edges[1:])
+    return {
+        "log_nhi_centres": centres,
+        "log_nhi_edges": edges,
+        "f_nhi": f_nhi,
+        "n_absorbers": counts,
+        "dX_per_sightline": dX,
+        "total_path": total_path,
+        "n_sightlines": n_sightlines,
+        "z": z,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Per-sim CDDF stacking with separate redshift bins
+# ---------------------------------------------------------------------------
+
+def stack_cddf_for_sim(
+    cddf_list: List[Dict],
+    z_bins: Optional[np.ndarray] = None,
+) -> Dict[str, Dict]:
+    """
+    Stack per-snapshot CDDFs into per-redshift-bin CDDFs for a single simulation.
+
+    Parameters
+    ----------
+    cddf_list : list of dicts returned by measure_cddf() or measure_cddf_from_dataframe()
+                Each dict must have 'z', 'f_nhi', 'n_absorbers', 'total_path',
+                'log_nhi_centres', 'log_nhi_edges'.
+    z_bins    : edges of redshift bins. Default: [2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0]
+
+    Returns
+    -------
+    dict mapping bin label (e.g. "z2.0-2.5") → stacked CDDF dict:
+      {
+        "z_min", "z_max", "z_snapshots",
+        "f_nhi"          : counts_total / (dN * total_path_total),
+        "f_nhi_per_snap" : array of per-snap f_nhi (for scatter),
+        "n_absorbers"    : summed counts,
+        "total_path"     : summed absorption path,
+        "log_nhi_centres", "log_nhi_edges",
+      }
+    """
+    if z_bins is None:
+        z_bins = _DEFAULT_Z_BINS
+
+    # Group snapshots into bins
+    bins: Dict[str, List[Dict]] = {}
+    for cddf in cddf_list:
+        z_snap = cddf["z"]
+        for i in range(len(z_bins) - 1):
+            if z_bins[i] <= z_snap < z_bins[i + 1]:
+                label = f"z{z_bins[i]:.1f}-{z_bins[i+1]:.1f}"
+                bins.setdefault(label, []).append((z_bins[i], z_bins[i + 1], cddf))
+                break
+
+    result = {}
+    for label, entries in bins.items():
+        z_min = entries[0][0]
+        z_max = entries[0][1]
+        cddfs = [e[2] for e in entries]
+
+        log_nhi_centres = cddfs[0]["log_nhi_centres"]
+        log_nhi_edges = cddfs[0]["log_nhi_edges"]
+
+        counts_total = np.zeros(len(log_nhi_centres), dtype=np.float64)
+        path_total = 0.0
+        z_snaps = []
+        f_per_snap = []
+
+        for c in cddfs:
+            counts_total += c["n_absorbers"].astype(np.float64)
+            path_total += c["total_path"]
+            z_snaps.append(c["z"])
+            f_per_snap.append(c["f_nhi"])
+
+        dN = 10.0**log_nhi_edges[1:] - 10.0**log_nhi_edges[:-1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            f_stacked = np.where(dN > 0, counts_total / (dN * path_total), 0.0)
+
+        result[label] = {
+            "z_min": z_min,
+            "z_max": z_max,
+            "z_snapshots": sorted(z_snaps),
+            "f_nhi": f_stacked,
+            "f_nhi_per_snap": np.array(f_per_snap),
+            "n_absorbers": counts_total.astype(int),
+            "total_path": path_total,
+            "log_nhi_centres": log_nhi_centres,
+            "log_nhi_edges": log_nhi_edges,
+        }
+
+    return result
 
 
 def compute_perturbed_p1d(

@@ -122,6 +122,38 @@ class AbsorberCatalog:
             counts[a.absorber_class] = counts.get(a.absorber_class, 0) + 1
         return counts
 
+    def to_dataframe(self):
+        """
+        Convert catalog to a pandas DataFrame with columns:
+          skewer_idx, pix_start, pix_end, NHI, log_nhi, b_kms, absorber_class,
+          fit_success, fast_mode.
+        Returns None if pandas is not available.
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            return None
+        if not self.absorbers:
+            return pd.DataFrame(columns=[
+                "skewer_idx", "pix_start", "pix_end", "NHI", "log_nhi",
+                "b_kms", "absorber_class", "fit_success", "fast_mode",
+            ])
+        records = [
+            {
+                "skewer_idx": a.skewer_idx,
+                "pix_start": a.pix_start,
+                "pix_end": a.pix_end,
+                "NHI": a.NHI,
+                "log_nhi": a.log_NHI,
+                "b_kms": a.b_kms,
+                "absorber_class": a.absorber_class,
+                "fit_success": a.fit_success,
+                "fast_mode": a.fast_mode,
+            }
+            for a in self.absorbers
+        ]
+        return pd.DataFrame(records)
+
     def save_npz(self, path: str | Path) -> None:
         if not self.absorbers:
             np.savez(

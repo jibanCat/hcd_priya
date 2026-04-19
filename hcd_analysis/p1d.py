@@ -64,8 +64,10 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Default k bins matching the emulator's kf grid (s/km)
-_DEFAULT_K_BINS = np.array([
+# Default k bins matching the emulator's kf grid (s/km), extended to k_Nyquist≈0.05
+# Original emulator grid: 35 bins up to ~0.0195 s/km
+# Extension: 15 additional log-spaced bins from 0.020 to 0.050 s/km
+_EMULATOR_K_BINS = np.array([
     0.001084, 0.001626, 0.002168, 0.00271,  0.003252, 0.003794,
     0.004336, 0.004878, 0.00542,  0.005962, 0.006504, 0.007046,
     0.007588, 0.00813,  0.008672, 0.009214, 0.009756, 0.010298,
@@ -73,6 +75,12 @@ _DEFAULT_K_BINS = np.array([
     0.014092, 0.014634, 0.015176, 0.015718, 0.01626,  0.016802,
     0.017344, 0.017886, 0.018428, 0.01897,  0.019512,
 ])
+# Extended to Nyquist (dv≈10 km/s → k_Nyq≈0.05 s/km)
+_EXTENDED_K_BINS = np.concatenate([
+    _EMULATOR_K_BINS,
+    np.logspace(np.log10(0.020), np.log10(0.050), 15),
+])
+_DEFAULT_K_BINS = _EXTENDED_K_BINS
 
 
 # ---------------------------------------------------------------------------
@@ -393,3 +401,114 @@ def compute_p1d_ratios(
 
     ratios["k"] = k_ref
     return ratios
+
+
+# ---------------------------------------------------------------------------
+# Sightline exclusion P1D (continuous NHI threshold sweep)
+# ---------------------------------------------------------------------------
+
+def compute_p1d_excl_nhi(
+    hdf5_path,
+    nbins: int,
+    dv_kms: float,
+    catalog,
+    log_nhi_cuts: List[float],
+    batch_size: int = 4096,
+    n_skewers: Optional[int] = None,
+    k_bins: Optional[np.ndarray] = None,
+) -> Dict[str, object]:
+    """
+    Compute P1D with sightline exclusion at each log10(NHI) threshold.
+
+    For each cut in log_nhi_cuts: sightlines that contain ANY absorber with
+    log10(NHI) >= cut are excluded entirely.  The remaining sightlines are
+    used for a two-pass streaming P1D.
+
+    Parameters
+    ----------
+    catalog       : pd.DataFrame or dict-like with columns 'skewer_idx', 'log_nhi'
+    log_nhi_cuts  : list of thresholds, e.g. [17.2, 18.0, 19.0, 20.3, 21.0]
+
+    Returns
+    -------
+    dict with keys:
+      "k"              : np.ndarray (n_k,) bin centres
+      "p1d_excl"       : np.ndarray (n_cuts, n_k)  — P1D at each cut
+      "frac_remaining" : np.ndarray (n_cuts,)       — fraction of sightlines kept
+      "mean_F_excl"    : np.ndarray (n_cuts,)       — mean flux at each cut
+      "log_nhi_cuts"   : list passed in
+    """
+    from .io import iter_tau_batches
+
+    import pandas as pd
+
+    n_cuts = len(log_nhi_cuts)
+
+    # Build set of excluded skewer indices per cut
+    # catalog must have 'skewer_idx' and 'log_nhi' columns
+    if catalog is not None and len(catalog) > 0:
+        if hasattr(catalog, "iterrows"):
+            # pandas DataFrame
+            skewer_idx = np.asarray(catalog["skewer_idx"])
+            log_nhi = np.asarray(catalog["log_nhi"])
+        else:
+            skewer_idx = np.asarray(catalog.get("skewer_idx", []))
+            log_nhi = np.asarray(catalog.get("log_nhi", []))
+    else:
+        skewer_idx = np.array([], dtype=np.int64)
+        log_nhi = np.array([], dtype=np.float64)
+
+    # For each cut: set of skewer indices to exclude
+    excluded_sets: List[set] = []
+    for cut in log_nhi_cuts:
+        mask = log_nhi >= cut
+        excluded_sets.append(set(skewer_idx[mask].tolist()))
+
+    # Get total skewer count
+    with __import__("h5py").File(hdf5_path, "r") as f:
+        total_skewers = f["tau/H/1/1215"].shape[0]
+    if n_skewers is not None:
+        total_skewers = min(total_skewers, n_skewers)
+
+    # Pass 1: compute mean_F for each cut (streaming)
+    F_sums = np.zeros(n_cuts)
+    F_ns = np.zeros(n_cuts, dtype=np.int64)
+
+    for start, end, tau_batch in iter_tau_batches(hdf5_path, batch_size=batch_size, n_skewers=n_skewers):
+        row_indices = np.arange(start, end)
+        F_batch = np.exp(-tau_batch.astype(np.float64))
+        for ci, excl in enumerate(excluded_sets):
+            keep = np.array([i not in excl for i in row_indices], dtype=bool)
+            if keep.any():
+                F_sums[ci] += F_batch[keep].sum()
+                F_ns[ci] += F_batch[keep].size
+
+    mean_F_excl = np.where(F_ns > 0, F_sums / F_ns, 1.0)
+
+    # Pass 2: accumulate P1D for each cut
+    accumulators = [P1DAccumulator(nbins, dv_kms) for _ in range(n_cuts)]
+
+    for start, end, tau_batch in iter_tau_batches(hdf5_path, batch_size=batch_size, n_skewers=n_skewers):
+        row_indices = np.arange(start, end)
+        for ci, (excl, acc) in enumerate(zip(excluded_sets, accumulators)):
+            keep = np.array([i not in excl for i in row_indices], dtype=bool)
+            if keep.any():
+                acc.add_batch(tau_batch[keep].astype(np.float64), mean_F_global=mean_F_excl[ci])
+
+    # Collect results
+    p1d_list = []
+    frac_remaining = np.zeros(n_cuts)
+    for ci, acc in enumerate(accumulators):
+        k, p1d = acc.result(k_bins)
+        p1d_list.append(p1d)
+        frac_remaining[ci] = acc.n_skewers / total_skewers if total_skewers > 0 else 0.0
+
+    p1d_excl = np.array(p1d_list)  # shape (n_cuts, n_k)
+
+    return {
+        "k": k,
+        "p1d_excl": p1d_excl,
+        "frac_remaining": frac_remaining,
+        "mean_F_excl": mean_F_excl,
+        "log_nhi_cuts": log_nhi_cuts,
+    }

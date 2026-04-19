@@ -16,9 +16,10 @@ Assumptions (confirmed by inspection):
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
-from typing import Dict, Iterator, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple
 
 import h5py
 import numpy as np
@@ -268,6 +269,55 @@ def read_snapshots_txt(sim: SimInfo) -> Dict[int, float]:
 def snap_to_z(a: float) -> float:
     """Convert scale factor a to redshift z = 1/a - 1."""
     return 1.0 / a - 1.0
+
+
+# ---------------------------------------------------------------------------
+# SimulationICs.json parsing
+# ---------------------------------------------------------------------------
+
+_ICS_FIELDS = {
+    # JSON key → output key (some sims may use slightly different keys)
+    "npart": "npart",
+    "box": "ics_box",          # kpc/h (ICs file uses same box unit)
+    "omega0": "omega0",
+    "omegab": "ics_omegab",
+    "hubble": "ics_hubble",
+    "ns": "ics_ns",
+    "scalar_amp": "scalar_amp",
+    "here_i": "here_i",
+    "here_f": "here_f",
+    "alpha_q": "alpha_q",
+    "hireionz": "ics_hireionz",
+    "bhfeedback": "ics_bhfeedback",
+    "seed": "seed",
+    "uvb": "uvb",
+}
+
+
+def read_sim_ics(sim: SimInfo) -> Dict[str, Any]:
+    """
+    Parse SimulationICs.json in the sim root folder.
+
+    Returns a flat dict with standardised keys (see _ICS_FIELDS above).
+    Returns empty dict if the file is missing or malformed (non-fatal).
+    """
+    ics_path = sim.path / "SimulationICs.json"
+    if not ics_path.exists():
+        return {}
+    try:
+        with open(ics_path) as fh:
+            raw: Dict[str, Any] = json.load(fh)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    result: Dict[str, Any] = {}
+    for json_key, out_key in _ICS_FIELDS.items():
+        # Handle case-insensitive or underscore variants
+        for candidate in (json_key, json_key.replace("_", ""), json_key.lower()):
+            if candidate in raw:
+                result[out_key] = raw[candidate]
+                break
+    return result
 
 
 def pixel_dv_kms(header: SpectraHeader) -> float:

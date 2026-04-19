@@ -2,6 +2,7 @@
 # Override any key at the CLI with --set key.subkey=value
 
 data_root: /nfs/turbo/umor-yueyingn/mfho/emu_full
+hires_data_root: /nfs/turbo/lsa-cavestru/mfho/priya/emu_full_hires
 output_root: ./outputs
 
 # Redshift range (inclusive)
@@ -33,10 +34,11 @@ absorber:
 
 p1d:
   k_min: 1.0e-3
-  k_max: 2.0e-2
+  k_max: 5.0e-2             # Nyquist for dv≈10 km/s; HiRes same dv so same limit
   n_k_bins: 35
   log_k_bins: true
   n_skewers: null           # null = all skewers; set to e.g. 10000 for debug
+  nhi_excl_thresholds: [17.2, 17.5, 18.0, 18.5, 19.0, 19.5, 20.0, 20.3, 20.5, 21.0]
 
 cddf:
   A: 1.0                    # amplitude multiplier (1.0 = no change)

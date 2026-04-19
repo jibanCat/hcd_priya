@@ -54,20 +54,27 @@ class P1DConfig:
     """P1D computation parameters."""
     # k bins for output (s/km). None → use native FFT bins.
     k_min: float = 1.0e-3   # s/km
-    k_max: float = 2.0e-2   # s/km
+    k_max: float = 5.0e-2   # s/km  (Nyquist for dv≈10 km/s)
     n_k_bins: int = 35
     log_k_bins: bool = True
     # Number of skewers to use (None → all; for debugging use e.g. 10000)
     n_skewers: Optional[int] = None
     # Axis selection: 1, 2, 3 or None (all axes)
     axes: Optional[List[int]] = None
+    # NHI thresholds for sightline-exclusion sweep (log10 NHI, cm^-2).
+    # Sightlines with ANY absorber above this cut are excluded entirely.
+    nhi_excl_thresholds: List[float] = dataclasses.field(
+        default_factory=lambda: [17.2, 17.5, 18.0, 18.5, 19.0, 19.5, 20.0, 20.3, 20.5, 21.0]
+    )
 
 
 @dataclasses.dataclass
 class PipelineConfig:
     """Top-level pipeline configuration."""
-    # Data root
+    # Data root (low-force simulations, 60 sims)
     data_root: str = "/nfs/turbo/umor-yueyingn/mfho/emu_full"
+    # HiRes data root (3 matching sims, 2× npart)
+    hires_data_root: str = "/nfs/turbo/lsa-cavestru/mfho/priya/emu_full_hires"
     # Output root
     output_root: str = "./outputs"
     # Redshift range filter (inclusive)
