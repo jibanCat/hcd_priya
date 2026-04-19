@@ -375,9 +375,10 @@ def plot_cddf_from_catalogs(records: list, out_dir: Path):
 
     ncols = min(len(z_vals), 5)
     nrows = (len(z_vals) + ncols - 1) // ncols
+    # Do NOT use sharey — each z-bin may have very different f(N) range
     fig, axes = plt.subplots(nrows, ncols,
                               figsize=(4 * ncols, 4 * nrows),
-                              sharex=True, sharey=True)
+                              sharex=True)
     axes_flat = np.array(axes).flatten() if len(z_vals) > 1 else [axes]
 
     # Prochaska+14 spline (precompute once)
@@ -400,11 +401,13 @@ def plot_cddf_from_catalogs(records: list, out_dir: Path):
                 cat.get("box_kpc_h", 120000.0), cat.get("hubble", 0.71),
                 0.3, cat.get("hubble", 0.71), z) for cat in cats_at_z)
 
+        sim_f_nhi = None
         if len(all_lognhi) and total_path > 0:
             counts, _ = np.histogram(all_lognhi, bins=log_nhi_bins)
             with np.errstate(divide="ignore", invalid="ignore"):
                 f_nhi = np.where(dN * total_path > 0,
                                  counts / (dN * total_path), np.nan)
+            sim_f_nhi = f_nhi
             mask = np.isfinite(f_nhi) & (f_nhi > 0)
             if mask.any():
                 ax.semilogy(centres[mask], f_nhi[mask], "-o", ms=3, lw=1.5,
@@ -414,14 +417,26 @@ def plot_cddf_from_catalogs(records: list, out_dir: Path):
             ax.semilogy(logN_ref, fN_ref, "k--", lw=1.5,
                         label="Prochaska+14", zorder=5)
 
+        # Auto-detect y-limits from data + reference
+        all_vals = []
+        if sim_f_nhi is not None:
+            good = sim_f_nhi[np.isfinite(sim_f_nhi) & (sim_f_nhi > 0)]
+            all_vals.extend(good.tolist())
+        if fN_ref is not None:
+            all_vals.extend(fN_ref[(logN_ref >= 17) & (logN_ref <= 22)].tolist())
+        if all_vals:
+            ylo = max(min(all_vals) / 5, 1e-30)
+            yhi = max(all_vals) * 5
+        else:
+            ylo, yhi = 1e-26, 1e-1
+        ax.set_ylim(ylo, yhi)
+
         for logN, cls in [(17.2, "LLS"), (19.0, "sub"), (20.3, "DLA")]:
             ax.axvline(logN, ls="--", color="gray", alpha=0.4, lw=0.8)
-            ax.text(logN + 0.05, ax.get_ylim()[0] if ax.get_ylim()[0] > 0 else 1e-6,
-                    cls, fontsize=6, color="gray", va="bottom")
+            ax.text(logN + 0.05, ylo * 3, cls, fontsize=6, color="gray", va="bottom")
 
         ax.set_title(f"z = {z:.2f}", fontsize=10)
         ax.set_xlim(17, 23)
-        ax.set_ylim(1e-6, 1e-1)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=7)
         if ax_i % ncols == 0:
@@ -538,13 +553,19 @@ def plot_b_parameter(records: list, out_dir: Path):
 # ---------------------------------------------------------------------------
 
 def plot_param_coverage(records: list, out_dir: Path):
-    """Scatter of sim parameter space (ns vs Ap) coloured by absorber count."""
+    """
+    Multi-panel parameter space coverage.
+    Panel 1: ns vs Ap (primary params), colored by N_DLA.
+    Panels 2-7: each astrophysical param vs N_HCD (DLA+subDLA),
+                colored by hub, to show coverage of the 9D Latin hypercube.
+    """
     try:
         from hcd_analysis.io import parse_sim_params
     except ImportError:
         print("  parse_sim_params not available, skipping param coverage plot")
         return
 
+    # Use the highest-z snapshot per sim (usually snap_004, z≈5.4) for counts
     sim_stats = {}
     for sim_name, snap, z, cat in records:
         params = parse_sim_params(sim_name)
@@ -553,42 +574,91 @@ def plot_param_coverage(records: list, out_dir: Path):
         if sim_name not in sim_stats or z > sim_stats[sim_name]["z"]:
             sim_stats[sim_name] = {
                 "z": z,
-                "ns": params["ns"],
-                "Ap": params["Ap"],
-                "n_LLS":    class_mask(cat, "LLS").sum(),
-                "n_DLA":    class_mask(cat, "DLA").sum(),
-                "n_subDLA": class_mask(cat, "subDLA").sum(),
+                "ns":        params.get("ns", np.nan),
+                "Ap":        params.get("Ap", np.nan),
+                "hub":       params.get("hub", np.nan),
+                "omegamh2":  params.get("omegamh2", np.nan),
+                "herei":     params.get("herei", np.nan),
+                "heref":     params.get("heref", np.nan),
+                "alphaq":    params.get("alphaq", np.nan),
+                "hireionz":  params.get("hireionz", np.nan),
+                "bhfeedback":params.get("bhfeedback", np.nan),
+                "n_LLS":    int(class_mask(cat, "LLS").sum()),
+                "n_DLA":    int(class_mask(cat, "DLA").sum()),
+                "n_subDLA": int(class_mask(cat, "subDLA").sum()),
             }
 
     if not sim_stats:
         print("  No parseable sim params found, skipping param coverage plot")
         return
 
-    ns_arr = np.array([v["ns"] for v in sim_stats.values()])
-    Ap_arr = np.array([v["Ap"] for v in sim_stats.values()])
-    n_DLA  = np.array([v["n_DLA"] for v in sim_stats.values()])
-    n_LLS  = np.array([v["n_LLS"] for v in sim_stats.values()])
+    vals = list(sim_stats.values())
+    def arr(k): return np.array([v[k] for v in vals])
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    ns_arr      = arr("ns")
+    Ap_arr      = arr("Ap")
+    hub_arr     = arr("hub")
+    omegamh2    = arr("omegamh2")
+    herei       = arr("herei")
+    heref       = arr("heref")
+    alphaq      = arr("alphaq")
+    hireionz    = arr("hireionz")
+    bhfeedback  = arr("bhfeedback")
+    n_DLA       = arr("n_DLA")
+    n_subDLA    = arr("n_subDLA")
+    n_LLS       = arr("n_LLS")
+    n_HCD       = n_DLA + n_subDLA + n_LLS
 
-    sc1 = axes[0].scatter(ns_arr, Ap_arr * 1e9, c=n_DLA, cmap="plasma", s=60, alpha=0.8)
-    axes[0].set_xlabel("Spectral index ns")
-    axes[0].set_ylabel("Scalar amplitude Ap [×10⁻⁹]")
-    axes[0].set_title("DLA count at highest available z")
-    plt.colorbar(sc1, ax=axes[0], label="N_DLA per sim")
-    axes[0].grid(True, alpha=0.3)
+    # ── Panel layout: 3 rows × 3 cols ─────────────────────────────────────
+    fig, axes = plt.subplots(3, 3, figsize=(15, 12))
+    axes_flat = axes.flatten()
 
-    sc2 = axes[1].scatter(ns_arr, Ap_arr * 1e9, c=n_LLS, cmap="viridis", s=60, alpha=0.8)
-    axes[1].set_xlabel("Spectral index ns")
-    axes[1].set_ylabel("Scalar amplitude Ap [×10⁻⁹]")
-    axes[1].set_title("LLS count at highest available z")
-    plt.colorbar(sc2, ax=axes[1], label="N_LLS per sim")
-    axes[1].grid(True, alpha=0.3)
+    panels = [
+        # (xarr, xlabel, yarr, ylabel, carr, clabel, title)
+        (ns_arr,    "Spectral index $n_s$",
+         Ap_arr*1e9,"$A_p$ [×10⁻⁹]",
+         n_DLA,     "N_DLA",      "Cosmo: $n_s$ vs $A_p$ | colour=N_DLA"),
+        (ns_arr,    "Spectral index $n_s$",
+         Ap_arr*1e9,"$A_p$ [×10⁻⁹]",
+         n_LLS,     "N_LLS",      "Cosmo: $n_s$ vs $A_p$ | colour=N_LLS"),
+        (hub_arr,   "Hubble $h$",
+         omegamh2,  r"$\Omega_m h^2$",
+         n_HCD,     "N_HCD",      "Cosmo: $h$ vs $\Omega_m h^2$ | colour=N_HCD"),
+        (herei,     "HeII reion. start $z_i$",
+         heref,     "HeII reion. end $z_f$",
+         n_HCD,     "N_HCD",      "HeII reion.: $z_i$ vs $z_f$ | colour=N_HCD"),
+        (alphaq,    r"$\alpha_q$ (quasar slope)",
+         herei,     "HeII reion. start $z_i$",
+         n_HCD,     "N_HCD",      r"HeII: $\alpha_q$ vs $z_i$ | colour=N_HCD"),
+        (hireionz,  "HI reion. $z_{re}$",
+         n_HCD,     "N_HCD",
+         hub_arr,   "$h$",        "HI reion.: $z_{re}$ vs N_HCD | colour=$h$"),
+        (bhfeedback,"AGN feedback strength",
+         n_HCD,     "N_HCD",
+         omegamh2,  r"$\Omega_m h^2$","AGN feedback vs N_HCD | colour=$\\Omega_m h^2$"),
+        (hireionz,  "HI reion. $z_{re}$",
+         bhfeedback,"AGN feedback",
+         n_HCD,     "N_HCD",      "HI reion. vs AGN feedback | colour=N_HCD"),
+        (alphaq,    r"$\alpha_q$",
+         heref,     "HeII reion. end $z_f$",
+         n_HCD,     "N_HCD",      r"HeII: $\alpha_q$ vs $z_f$ | colour=N_HCD"),
+    ]
 
-    fig.suptitle(f"Parameter space coverage ({len(sim_stats)} sims)", fontsize=12)
+    for ax, (xarr, xlabel, yarr, ylabel, carr, clabel, title) in zip(axes_flat, panels):
+        ok = np.isfinite(xarr) & np.isfinite(yarr) & np.isfinite(carr)
+        sc = ax.scatter(xarr[ok], yarr[ok], c=carr[ok], cmap="plasma", s=55, alpha=0.85)
+        ax.set_xlabel(xlabel, fontsize=8)
+        ax.set_ylabel(ylabel, fontsize=8)
+        ax.set_title(title, fontsize=8)
+        plt.colorbar(sc, ax=ax, label=clabel, shrink=0.85)
+        ax.grid(True, alpha=0.3)
+        ax.tick_params(labelsize=7)
+
+    fig.suptitle(f"Parameter space coverage & HCD statistics  ({len(sim_stats)} sims)",
+                 fontsize=13)
     plt.tight_layout()
     out = out_dir / "param_coverage.png"
-    fig.savefig(out, dpi=150)
+    fig.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved {out}")
 

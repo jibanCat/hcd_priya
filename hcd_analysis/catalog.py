@@ -270,6 +270,9 @@ def find_systems_in_skewer(
 # NHI measurement per system
 # ---------------------------------------------------------------------------
 
+_WING_PIXELS = 200  # ±2000 km/s at dv≈10 km/s — captures DLA damping wings
+
+
 def measure_nhi_for_system(
     tau: np.ndarray,
     pix_start: int,
@@ -284,23 +287,38 @@ def measure_nhi_for_system(
     """
     Measure NHI for one absorption system.
 
+    The fitting window is expanded by _WING_PIXELS on each side of the
+    detected segment so the Voigt fitter can see the damping wings.
+    For DLAs (logNHI≥20.3) the wings extend ±1000–2000 km/s and carry
+    most of the NHI information; fitting only the saturated core produces
+    large underestimates.
+
     Returns (NHI, b_kms, fit_success).
     """
     n = len(tau)
     if pix_end >= n:
-        # System wraps around the periodic boundary
-        seg = np.concatenate([tau[pix_start:], tau[:pix_end - n + 1]]).astype(np.float64)
+        # Periodic boundary wrap: build the full wrapped segment
+        core = np.concatenate([tau[pix_start:], tau[:pix_end - n + 1]])
     else:
-        seg = tau[pix_start:pix_end + 1].astype(np.float64)
+        core = tau[pix_start:pix_end + 1]
 
     if fast_mode:
-        NHI = nhi_from_tau_fast(seg, dv_kms)
+        NHI = nhi_from_tau_fast(core.astype(np.float64), dv_kms)
         return NHI, float("nan"), True
 
-    # Build velocity array centred on peak
-    n_pix = len(seg)
-    v_arr = np.arange(n_pix, dtype=np.float64) * dv_kms
-    v_arr -= v_arr[np.argmax(seg)]  # centre on peak
+    # Expand window by wing pixels to include damping wings
+    if pix_end >= n:
+        # For wrapped systems use the core only (wing expansion too complex)
+        seg = core.astype(np.float64)
+        peak_idx = np.argmax(seg)
+    else:
+        lo = max(0, pix_start - _WING_PIXELS)
+        hi = min(n - 1, pix_end + _WING_PIXELS)
+        seg = tau[lo:hi + 1].astype(np.float64)
+        # Peak index within the expanded segment
+        peak_idx = np.argmax(seg)
+
+    v_arr = (np.arange(len(seg), dtype=np.float64) - peak_idx) * dv_kms
 
     try:
         NHI, b, success = fit_nhi_from_tau(
@@ -312,7 +330,7 @@ def measure_nhi_for_system(
         )
     except Exception as exc:
         logger.debug("Voigt fit exception: %s", exc)
-        NHI = nhi_from_tau_fast(seg, dv_kms)
+        NHI = nhi_from_tau_fast(core.astype(np.float64), dv_kms)
         b = b_init
         success = False
 
