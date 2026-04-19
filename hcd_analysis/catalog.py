@@ -213,22 +213,27 @@ def find_systems_in_skewer(
     Find absorption systems in a single skewer tau array.
 
     Returns list of (pix_start, pix_end) tuples (inclusive).
+    For systems that wrap across the periodic box boundary, pix_end >= len(tau);
+    the wrap segment occupies pixels [pix_start:] and [:pix_end - len(tau) + 1].
 
     Algorithm:
     1. Threshold: mark pixels where tau > tau_threshold.
-    2. Find connected runs of marked pixels.
+    2. Use a doubled array to handle periodic boundary wrap-around.
     3. Merge runs separated by < merge_gap_pixels.
     4. Drop runs shorter than min_pixels.
+    5. Only return runs starting in [0, n) to avoid duplicates.
     """
+    n = len(tau)
     above = tau > tau_threshold
     if not np.any(above):
         return []
 
-    # Find runs
+    # Double the array: [tau | tau] so wrap-around runs are contiguous.
+    above2 = np.concatenate([above, above])
     runs: List[Tuple[int, int]] = []
     in_run = False
     start = 0
-    for i, v in enumerate(above):
+    for i, v in enumerate(above2):
         if v and not in_run:
             start = i
             in_run = True
@@ -236,12 +241,10 @@ def find_systems_in_skewer(
             runs.append((start, i - 1))
             in_run = False
     if in_run:
-        runs.append((start, len(above) - 1))
+        runs.append((start, 2 * n - 1))
 
     # Merge nearby runs
-    if len(runs) <= 1:
-        merged = runs
-    else:
+    if len(runs) > 1:
         merged: List[Tuple[int, int]] = [runs[0]]
         for s, e in runs[1:]:
             gap = s - merged[-1][1] - 1
@@ -249,9 +252,18 @@ def find_systems_in_skewer(
                 merged[-1] = (merged[-1][0], e)
             else:
                 merged.append((s, e))
+    else:
+        merged = list(runs)
 
-    # Filter by length
-    return [(s, e) for (s, e) in merged if (e - s + 1) >= min_pixels]
+    # Keep only runs with pix_start < n (first copy only; second copy is duplicate).
+    # pix_end may be >= n for systems wrapping across the boundary.
+    result = []
+    for s, e in merged:
+        if s >= n:
+            break  # remaining runs are duplicates from the second copy
+        if (e - s + 1) >= min_pixels:
+            result.append((s, e))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +286,12 @@ def measure_nhi_for_system(
 
     Returns (NHI, b_kms, fit_success).
     """
-    seg = tau[pix_start:pix_end + 1].astype(np.float64)
+    n = len(tau)
+    if pix_end >= n:
+        # System wraps around the periodic boundary
+        seg = np.concatenate([tau[pix_start:], tau[:pix_end - n + 1]]).astype(np.float64)
+    else:
+        seg = tau[pix_start:pix_end + 1].astype(np.float64)
 
     if fast_mode:
         NHI = nhi_from_tau_fast(seg, dv_kms)

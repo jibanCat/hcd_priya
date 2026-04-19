@@ -158,14 +158,23 @@ def read_header(path: Path) -> SpectraHeader:
         h = f["Header"].attrs
         tau_ds = f["tau/H/1/1215"]
         n_skewers = tau_ds.shape[0]
+        redshift = float(h["redshift"])
+        hubble   = float(h["hubble"])
+        omegam   = float(h["omegam"])
+        omegal   = float(h["omegal"])
+        if "Hz" in h:
+            Hz = float(h["Hz"])
+        else:
+            # Compute H(z) = 100·h·sqrt(Ωm(1+z)³ + Ωλ) [km/s/Mpc]
+            Hz = 100.0 * hubble * (omegam * (1 + redshift)**3 + omegal) ** 0.5
         return SpectraHeader(
-            redshift=float(h["redshift"]),
-            Hz=float(h["Hz"]),
+            redshift=redshift,
+            Hz=Hz,
             box=float(h["box"]),
-            hubble=float(h["hubble"]),
+            hubble=hubble,
             nbins=int(h["nbins"]),
-            omegam=float(h["omegam"]),
-            omegal=float(h["omegal"]),
+            omegam=omegam,
+            omegal=omegal,
             omegab=float(h["omegab"]),
             n_skewers=n_skewers,
         )

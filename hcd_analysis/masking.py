@@ -41,7 +41,12 @@ def build_skewer_mask(
     """
     mask = np.zeros(n_pixels, dtype=bool)
     for ab in absorbers:
-        mask[ab.pix_start:ab.pix_end + 1] = True
+        if ab.pix_end >= n_pixels:
+            # Periodic boundary wrap: system spans [..., n_pixels-1] and [0, ...]
+            mask[ab.pix_start:] = True
+            mask[:ab.pix_end - n_pixels + 1] = True
+        else:
+            mask[ab.pix_start:ab.pix_end + 1] = True
     return mask
 
 
