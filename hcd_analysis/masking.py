@@ -226,3 +226,66 @@ def iter_masked_batches(
             strategy=strategy,
         )
         yield row_start, row_end, tau_masked
+
+
+# ---------------------------------------------------------------------------
+# PRIYA-style DLA masking (arXiv:2306.05471)
+# ---------------------------------------------------------------------------
+
+def priya_dla_mask_row(
+    tau_row: np.ndarray,
+    tau_eff: float,
+    tau_dla_detect: float = 1e6,
+    tau_mask_scale: float = 0.25,
+) -> Optional[np.ndarray]:
+    """
+    Return a boolean mask for one sightline using the PRIYA DLA masking recipe.
+
+    Algorithm (PRIYA paper, Sec. 3.3):
+      1. Detect: sightline is DLA-contaminated if max(tau) > tau_dla_detect (~10^6).
+      2. Mask: pixels where tau > tau_mask_scale + tau_eff (typically 0.25 + tau_eff).
+         This threshold captures the damping wings (tau > 0.25 is 20 % of mean flux).
+      3. Fill: caller sets masked pixels to tau_eff so that delta_F = 0.
+
+    Returns None if the sightline has no DLA (max tau <= tau_dla_detect).
+    """
+    if tau_row.max() <= tau_dla_detect:
+        return None
+    return tau_row > (tau_mask_scale + tau_eff)
+
+
+def iter_priya_masked_batches(
+    hdf5_path,
+    tau_eff: float,
+    batch_size: int = 4096,
+    n_skewers: Optional[int] = None,
+    tau_dla_detect: float = 1e6,
+    tau_mask_scale: float = 0.25,
+):
+    """
+    Iterate over tau file applying PRIYA DLA masking.
+
+    For each sightline with max(tau) > tau_dla_detect (contains a DLA):
+      - mask pixels where tau > tau_mask_scale + tau_eff
+      - fill masked pixels with tau_eff (so delta_F = 0 in masked region)
+
+    Yields (row_start, row_end, tau_masked_batch) — same interface as
+    iter_masked_batches so it can be plugged into compute_p1d_single.
+    """
+    from .io import iter_tau_batches
+
+    tau_fill = tau_eff  # fill value: tau_eff → delta_F = 0
+
+    for row_start, row_end, tau_batch in iter_tau_batches(
+        hdf5_path, batch_size=batch_size, n_skewers=n_skewers
+    ):
+        tau_out = tau_batch.astype(np.float64).copy()
+        for local_i in range(tau_out.shape[0]):
+            mask = priya_dla_mask_row(
+                tau_out[local_i], tau_eff,
+                tau_dla_detect=tau_dla_detect,
+                tau_mask_scale=tau_mask_scale,
+            )
+            if mask is not None:
+                tau_out[local_i][mask] = tau_fill
+        yield row_start, row_end, tau_out

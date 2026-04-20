@@ -303,6 +303,7 @@ ALL_VARIANTS = [
     "no_subDLA",
     "no_DLA",
     "no_HCD",
+    "no_DLA_priya",   # PRIYA-style DLA masking (recommended for P1D science)
 ]
 
 _MASK_CLASSES: Dict[str, List[str]] = {
@@ -314,7 +315,59 @@ _MASK_CLASSES: Dict[str, List[str]] = {
     "only_LLS": ["subDLA", "DLA"],      # keep only LLS: mask everything else
     "only_subDLA": ["LLS", "DLA"],
     "only_DLA": ["LLS", "subDLA"],
+    # "no_DLA_priya" is handled separately — uses tau-based detection/mask
 }
+
+# PRIYA DLA mask parameters (arXiv:2306.05471)
+_PRIYA_DLA_DETECT_TAU = 1e6    # max(tau) threshold to flag a sightline as DLA
+_PRIYA_DLA_MASK_SCALE = 0.25   # mask where tau > 0.25 + tau_eff
+
+
+def compute_p1d_priya_masked(
+    hdf5_path,
+    nbins: int,
+    dv_kms: float,
+    batch_size: int = 4096,
+    n_skewers: Optional[int] = None,
+    k_bins: Optional[np.ndarray] = None,
+    tau_dla_detect: float = _PRIYA_DLA_DETECT_TAU,
+    tau_mask_scale: float = _PRIYA_DLA_MASK_SCALE,
+) -> Tuple[np.ndarray, np.ndarray, float]:
+    """
+    Compute P1D with PRIYA-style DLA masking (arXiv:2306.05471).
+
+    Two-pass algorithm:
+      Pass 1: compute tau_eff = -ln(mean_F_all) from unmasked sightlines.
+      Pass 2: for each sightline with max(tau) > tau_dla_detect (~10^6),
+              mask pixels where tau > tau_mask_scale + tau_eff, fill with tau_eff
+              (delta_F = 0 in masked region).  Other sightlines unchanged.
+
+    Returns (k_centres, p1d, mean_F_unmasked).
+    """
+    from .io import iter_tau_batches
+    from .masking import iter_priya_masked_batches
+
+    # Pass 1: compute tau_eff from ALL sightlines (unmasked)
+    F_sum, F_n = 0.0, 0
+    for _, _, tau_batch in iter_tau_batches(
+        hdf5_path, batch_size=batch_size, n_skewers=n_skewers
+    ):
+        F_sum += np.exp(-tau_batch.astype(np.float64)).sum()
+        F_n += tau_batch.size
+    mean_F_all = F_sum / F_n if F_n > 0 else 1.0
+    tau_eff = -np.log(max(mean_F_all, 1e-30))
+
+    # Pass 2: apply PRIYA mask and compute P1D
+    acc = P1DAccumulator(nbins, dv_kms)
+    for _, _, tau_batch in iter_priya_masked_batches(
+        hdf5_path, tau_eff,
+        batch_size=batch_size, n_skewers=n_skewers,
+        tau_dla_detect=tau_dla_detect, tau_mask_scale=tau_mask_scale,
+    ):
+        acc.add_batch(tau_batch, mean_F_global=mean_F_all)
+
+    k_centres, p1d = acc.result(k_bins)
+    return k_centres, p1d, mean_F_all
 
 
 def compute_all_p1d_variants(
@@ -338,6 +391,15 @@ def compute_all_p1d_variants(
 
     results = {}
     for var in variants:
+        if var == "no_DLA_priya":
+            k, p1d, mf = compute_p1d_priya_masked(
+                hdf5_path, nbins, dv_kms,
+                batch_size=batch_size, n_skewers=n_skewers, k_bins=k_bins,
+            )
+            results[var] = (k, p1d, mf)
+            logger.debug("P1D variant 'no_DLA_priya' done (tau-based), mean_F=%.4f", mf)
+            continue
+
         mask_cls = _MASK_CLASSES.get(var, [])
         if mask_cls and catalog is None:
             logger.warning("No catalog provided; skipping masked variant '%s'", var)

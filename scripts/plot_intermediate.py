@@ -856,11 +856,12 @@ def plot_p1d_from_files(p1d_records: list, out_dir: Path):
 
     # ---- Figure 1: absolute k·P1D/π, one panel per z, lines per class ----
     all_curves = [
-        ("all",           "k_all",       "p1d_all",       "k",       "-",  2.0),
-        ("no DLA",        "k_no_DLA",    "p1d_no_DLA",    "#e74c3c", "--", 1.3),
-        ("no subDLA",     "k_no_subDLA", "p1d_no_subDLA", "#f39c12", "--", 1.3),
-        ("no LLS",        "k_no_LLS",    "p1d_no_LLS",    "#27ae60", "--", 1.3),
-        ("no HCD (pure forest)", "k_no_HCD", "p1d_no_HCD","#2980b9", ":", 1.8),
+        ("all",           "k_all",            "p1d_all",            "k",       "-",  2.0),
+        ("no DLA (catalog)", "k_no_DLA",      "p1d_no_DLA",         "#e74c3c", "--", 1.0),
+        ("no DLA (PRIYA)", "k_no_DLA_priya",  "p1d_no_DLA_priya",   "#c0392b", "-",  1.5),
+        ("no subDLA",     "k_no_subDLA",       "p1d_no_subDLA",      "#f39c12", "--", 1.3),
+        ("no LLS",        "k_no_LLS",          "p1d_no_LLS",         "#27ae60", "--", 1.3),
+        ("no HCD (pure forest)", "k_no_HCD",   "p1d_no_HCD",         "#2980b9", ":", 1.8),
     ]
     n_z = len(z_vals)
     fig_a, axes_a = plt.subplots(1, n_z, figsize=(4 * n_z, 5), sharey=True)
@@ -896,21 +897,46 @@ def plot_p1d_from_files(p1d_records: list, out_dir: Path):
     print(f"Saved {out_dir / 'p1d_by_class.png'}")
 
     # ---- Figure 2: contamination ratios  P1D(X present) / P1D(forest) ----
+    # Distinguish: PRIYA masking (tau>10^6 detect + tau>0.25+tau_eff mask) vs
+    # catalog masking (Voigt-fitted pix_start/pix_end, too narrow for DLA wings).
+    # If no_DLA_priya is available, use it as the forest denominator (correct).
+    # Otherwise fall back to no_HCD from catalog masking (wings not removed).
+    has_priya = any("p1d_no_DLA_priya" in d for _, _, _, d in p1d_records)
+    forest_k   = "k_no_DLA_priya"   if has_priya else "k_no_HCD"
+    forest_p   = "p1d_no_DLA_priya" if has_priya else "p1d_no_HCD"
+    forest_lbl = "PRIYA DLA masked" if has_priya else "catalog masked (no wings!)"
+
+    contam_classes = list(_CONTAM_CLASSES)
+    if has_priya:
+        # Add PRIYA ratio: P1D_all / P1D_no_DLA_priya  (shows large-scale DLA boost)
+        contam_classes = [
+            ("all / PRIYA-masked DLA [correct]",
+             "k_all", "p1d_all", "#e74c3c"),
+        ] + contam_classes
+
     _ratio_panels(
-        p1d_records, _CONTAM_CLASSES,
-        denom_k_key="k_no_HCD", denom_p_key="p1d_no_HCD",
+        p1d_records, contam_classes,
+        denom_k_key=forest_k, denom_p_key=forest_p,
         out_path=out_dir / "p1d_contamination.png",
-        title="HCD contamination: P1D(classes present) / P1D(pure forest)  [pixel masking]",
-        ylabel="P₁D(X present) / P₁D(no HCD)",
+        title=(f"HCD contamination: P1D(X present) / P1D({forest_lbl})\n"
+               + ("" if has_priya else
+                  "⚠ PRIYA variant not yet computed — re-run pipeline for correct damping-wing masking")),
+        ylabel="P₁D(X present) / P₁D(forest)",
         ylim=(0.8, 1.25),
     )
 
     # ---- Figure 3: masking-gain ratios  P1D(excl X) / P1D(all) ----
+    mask_classes = list(_MASK_CLASSES)
+    if has_priya:
+        mask_classes = [
+            ("excl DLA (PRIYA) / all", "k_no_DLA_priya", "p1d_no_DLA_priya", "#c0392b"),
+        ] + mask_classes
+
     _ratio_panels(
-        p1d_records, _MASK_CLASSES,
+        p1d_records, mask_classes,
         denom_k_key="k_all", denom_p_key="p1d_all",
         out_path=out_dir / "p1d_masking.png",
-        title="Masking gain: P1D(excl X) / P1D(all)  [pixel masking]",
+        title="Masking gain: P1D(excl X) / P1D(all)  [PRIYA method when available]",
         ylabel="P₁D(excl X) / P₁D(all)",
         ylim=(0.8, 1.25),
     )
