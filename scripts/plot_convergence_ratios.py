@@ -43,7 +43,7 @@ for rf in ratios_files:
         T_priya = d[f"{zlbl}__no_DLA_priya__T_k"]
         # k is cyclic s/km → convert to PRIYA angular
         k_ang = 2.0 * np.pi * k
-        sel = (k_ang >= 0.009) & (k_ang <= 0.10)
+        sel = (k_ang >= 0.0009) & (k_ang <= 0.20)
         ax_all.plot(k_ang[sel], T_all[sel], lw=1.0, alpha=0.7, color=color,
                      label=f"z={zval:.1f}" if rf is ratios_files[0] else None)
         ax_priya.plot(k_ang[sel], T_priya[sel], lw=1.0, alpha=0.7, color=color,
@@ -60,7 +60,7 @@ for ax, title in zip(
     ax.set_ylabel("T(k)")
     ax.set_title(title)
     ax.grid(alpha=0.3, which="both")
-    ax.set_xlim(0.009, 0.10)
+    ax.set_xlim(0.0009, 0.20)
     ax.set_ylim(0.85, 1.25)
 ax_all.legend(fontsize=7, loc="lower left", ncol=2)
 

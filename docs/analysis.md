@@ -125,23 +125,26 @@ Rogers+2018 parameterise `P_total(k, z) / P_forest(k, z) = 1 + Σ_i α_i · f_z(
 
 ### Z-evolution of each template (one sim)
 
-18 snapshots of sim `ns0.803Ap2.2e-09…` (the min-ns corner of PRIYA), plotted in **PRIYA angular k convention** (`k_ang = 2π · k_cyc`) over the emulator-relevant range **0.009 → 0.10 rad·s/km**, colour-coded by z:
+18 snapshots of sim `ns0.803Ap2.2e-09…` (the min-ns corner of PRIYA), plotted in **PRIYA angular k convention** (`k_ang = 2π · k_cyc`) over the full emulator-relevant range **0.0009 → 0.20 rad·s/km**, colour-coded by z:
 
 ![Per-class ratio vs z for ns0.803, PRIYA k](../figures/analysis/per_class_ratio_vs_z.png)
 
-- **LLS-only / P_clean** (left): mostly flat near 1.0 at low z. At high z (yellow) the curve dips slightly toward unity then rises to 1.2-1.4 at the high-k edge (PRIYA k ≈ 0.2 rad·s/km). The grey dotted vertical marks **`k = 2π/b` at b=30 km/s ≈ 0.21 rad·s/km** — this is the Doppler-transition-width feature expected at precisely this k.
-- **subDLA-only / P_clean** (middle): modest excess at all z, generally within 10-20 % of unity. Same upturn toward k ≈ 0.2 as LLS but smaller.
-- **DLA-only / P_clean** (right): fairly flat across k at each z, ranging from ~1.3 at z=2 to ~1.4 at z=5.4. Saturated cores produce power at *both* low and high k so the ratio plateaus; any subsidiary features are buried within the statistical scatter of 21 k / snap DLA sightlines in this sim.
+- **LLS-only / P_clean** (left): large excess at very low k (1.4–3× at k ≈ 0.001 at high z), decays to ~1.05 across the central emulator range, then rises slightly toward k ≈ 0.2 at the Doppler-transition scale. The grey dotted vertical marks **`k = 2π/b` at b=30 km/s ≈ 0.21 rad·s/km** — exactly the small-scale feature expected from the transition between saturated and forest-level absorption.
+- **subDLA-only / P_clean** (middle): larger low-k amplitude than LLS (up to 3× at k ≈ 0.001), then plateau around 1.07-1.10 across the rest of the range.
+- **DLA-only / P_clean** (right): dominates at very low k (≈7× at k=0.001), plateau around 1.25-1.3 across most of the emulator range. Strong saturated-core contribution at very low k (correlated δF over ~hundreds of km/s), consistent with Rogers+2018's "Large-DLA" α_3 component carrying most of the low-k template weight.
 
-Numerical snapshot at z=3 on the flagship sim (**k in PRIYA angular convention**, range 0.009–0.10 rad·s/km):
+Numerical snapshot at z=3 on the flagship sim (**k in PRIYA angular convention**, covering 0.001–0.20 rad·s/km):
 
 | k_ang (rad·s/km) | k_cyc (s/km) | LLS/clean | subDLA/clean | DLA/clean |
 |---:|---:|---:|---:|---:|
-| 0.009 | 0.00143 | 1.21 | 1.17 | 1.33 |
-| 0.020 | 0.00318 | 1.11 | 1.10 | 1.29 |
-| 0.040 | 0.00637 | 1.05 | 1.07 | 1.26 |
-| 0.060 | 0.00955 | 1.04 | 1.07 | 1.26 |
-| 0.100 | 0.01592 | 1.04 | 1.07 | 1.27 |
+| 0.001 | 0.00016 | 1.38 | 3.07 | 6.78 |
+| 0.005 | 0.00080 | 1.23 | 1.25 | 1.34 |
+| 0.020 | 0.00320 | 1.06 | 1.07 | 1.29 |
+| 0.050 | 0.00799 | 1.04 | 1.06 | 1.27 |
+| 0.100 | 0.01591 | 1.04 | 1.06 | 1.27 |
+| 0.200 | 0.03182 | 1.08 | 1.09 | 1.28 |
+
+Note: the low-k rise at k_ang ≈ 0.001 (lowest two rows above) probes very large scales where the subDLA and DLA "template" amplitudes jump to 3× and 7× respectively. This is where the Rogers+2018 parametric template also peaks — consistent with the observational HCD contamination signal that the emulator is fit to absorb via α_i.
 
 These feed directly into `hcd_analysis.hcd_template.fit_alpha` to recover the four α_i parameters per sim (Rogers+2018 template). For ns0.803 at z=3 the effective αs will be small (~0.03-0.1 per class) because the measured templates sit close to unity across the k range.
 
@@ -149,7 +152,7 @@ These feed directly into `hcd_analysis.hcd_template.fit_alpha` to recover the fo
 
 ![Per-class ratio vs LF sim at z=3](../figures/analysis/per_class_ratio_vs_sim.png)
 
-Colour-coded by A_p (initial power amplitude). Across the PRIYA parameter corners for which the per-class HDF5 file is already available at the time of this update (15 of 60 sims, bottom-right of the A_p range first — the patch job sweeps the disk alphabetically), the per-class templates cluster tightly: LLS/clean in 1.0-1.15, subDLA/clean in 1.05-1.15, DLA/clean in 1.25-1.4 at all k in [0.009, 0.2] rad·s/km. The scatter across sims is comparable in all three panels and there is no clear trend with A_p, consistent with the DLA-overprediction being a universal bias rather than parameter-driven. Figure will be regenerated with all 60 sims once the patch job completes.
+Colour-coded by A_p (initial power amplitude). The per-class HDF5 is currently available for 18 of 60 sims (patch job 48493110 still running); curves plot across the full emulator k range 0.0009–0.20 rad·s/km. The per-class templates cluster tightly: LLS/clean in 1.0-1.3 with a low-k rise, subDLA/clean similar but with somewhat larger low-k amplitude, DLA/clean ~1.25-1.4 across the mid range with a strong low-k rise up to several x. Scatter across sims is comparable in all three panels with no clear A_p trend. Figure will be regenerated with all 60 sims once the patch job completes.
 
 ## 6. HiRes vs LF convergence — T(k) = P1D_hires / P1D_LF
 
@@ -157,7 +160,7 @@ HiRes campaign completed (job 48476499, ~5 h 16 min walltime) with 4 sims × ~18
 
 ![T(k) convergence ratio for 3 matched sims](../figures/analysis/convergence_Tk.png)
 
-*Left:* unmasked `all` P1D. *Right:* after the PRIYA DLA mask. Both panels use PRIYA angular k, range 0.009 → 0.10 rad·s/km, colour-coded by z across 2.0–5.4. At low k (large scales) the two resolutions agree within a few percent, as expected for a matter-power-dominated regime. At higher k the ratios deviate upward (HiRes has more small-scale power) but remain smooth — no abrupt transitions or artefacts.
+*Left:* unmasked `all` P1D. *Right:* after the PRIYA DLA mask. Both panels use PRIYA angular k, range 0.0009 → 0.20 rad·s/km, colour-coded by z across 2.0–5.4. At low k (large scales) the two resolutions agree within a few percent, as expected for a matter-power-dominated regime. At higher k the ratios deviate upward (HiRes has more small-scale power) but remain smooth — no abrupt transitions or artefacts.
 
 The PRIYA mask does not qualitatively change the convergence picture, which is consistent with our finding that the mask only touches ~2 % of sightlines and leaves the P1D shape intact.
 

@@ -45,8 +45,8 @@ def ratio(d, cls):
 
 # k-axis range in PRIYA angular convention (rad·s/km).
 # k_cyc = k_ang / (2π).  emulator-relevant range 0.009 → 0.2 rad·s/km.
-K_ANG_MIN = 0.009
-K_ANG_MAX = 0.10
+K_ANG_MIN = 0.0009
+K_ANG_MAX = 0.20
 
 # ---- figure 1: ratio vs z for ns0.803 ----
 sim_dir = OUTPUT / TARGET_SIM
