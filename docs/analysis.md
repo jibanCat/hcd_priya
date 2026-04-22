@@ -127,7 +127,9 @@ Rogers+2018 parameterise `P_total(k, z) / P_forest(k, z) = 1 + Σ_i α_i · f_z(
 
 18 snapshots of sim `ns0.803Ap2.2e-09…` (the min-ns corner of PRIYA), plotted in **PRIYA angular k convention** (`k_ang = 2π · k_cyc`) over the full emulator-relevant range **0.0009 → 0.20 rad·s/km**, colour-coded by z:
 
-![Per-class ratio vs z for ns0.803, PRIYA k](../figures/analysis/per_class_ratio_vs_z.png)
+![Per-class ratio vs z for ns0.803, PRIYA k, with Rogers fit](../figures/analysis/per_class_ratio_vs_z.png)
+
+**Dashed black curve** on each panel is the Rogers+2018 analytic template `(1 + α_i · f_z · g_i(k,z))` evaluated at z=3 (the median snapshot) with α_i fit to these measured ratios via `hcd_analysis.hcd_template.fit_alpha`. The fitted α values are printed in each legend. Shape agreement between the simulation (colored solid) and the Rogers template (black dashed) is good across k ≈ 0.001–0.2 rad·s/km, validating that Rogers' parametric form is a reasonable description of the PRIYA HCD contamination. The fit is intentionally kept per-class for display clarity; a joint fit across all three classes simultaneously would improve error-bars on the α's and is what `fit_alpha(only_dlas=False)` does on-demand.
 
 - **LLS-only / P_clean** (left): large excess at very low k (1.4–3× at k ≈ 0.001 at high z), decays to ~1.05 across the central emulator range, then rises slightly toward k ≈ 0.2 at the Doppler-transition scale. The grey dotted vertical marks **`k = 2π/b` at b=30 km/s ≈ 0.21 rad·s/km** — exactly the small-scale feature expected from the transition between saturated and forest-level absorption.
 - **subDLA-only / P_clean** (middle): larger low-k amplitude than LLS (up to 3× at k ≈ 0.001), then plateau around 1.07-1.10 across the rest of the range.
@@ -160,11 +162,26 @@ HiRes campaign completed (job 48476499, ~5 h 16 min walltime) with 4 sims × ~18
 
 ![T(k) convergence ratio for 3 matched sims](../figures/analysis/convergence_Tk.png)
 
-*Left:* unmasked `all` P1D. *Right:* after the PRIYA DLA mask. Both panels use PRIYA angular k, range 0.0009 → 0.20 rad·s/km, colour-coded by z across 2.0–5.4. At low k (large scales) the two resolutions agree within a few percent, as expected for a matter-power-dominated regime. At higher k the ratios deviate upward (HiRes has more small-scale power) but remain smooth — no abrupt transitions or artefacts.
+> **Warning — known pipeline bug.** The convergence job matches LF↔HR snapshots by *snap number*, but LF and HR simulations saved their snapshots at slightly different scale factors (the two `Snapshots.txt` tables differ). In every sim we checked, HR snap_NNN is ≈0.2 higher in z than LF snap_NNN. The ratio `T(k) = P_HR(snap_NNN) / P_LF(snap_NNN)` is therefore **not a pure resolution-convergence ratio** — it mixes resolution-at-z with z-evolution between two 0.2-z-separated epochs. Much of the T(k)≈1.2 magnitude visible below is the z-evolution contribution, not resolution. A fix (match by z within tolerance) is a TODO; the plot is kept for reference but should not be used quantitatively until that fix lands.
 
-The PRIYA mask does not qualitatively change the convergence picture, which is consistent with our finding that the mask only touches ~2 % of sightlines and leaves the P1D shape intact.
+![T(k) convergence ratio with z-mismatch warning](../figures/analysis/convergence_Tk.png)
 
-## 7. Next steps
+*Left:* unmasked `all` P1D ratio. *Right:* after the PRIYA DLA mask. Both in PRIYA angular k, colour-coded by z (which is the LF z, not the HR z). The x-axis lower edge is 0.0068 rad·s/km — the minimum k present in the stored convergence data, not the full emulator lower limit.
+
+The PRIYA mask does not qualitatively change the ratio, which is consistent with our finding that the mask only touches ~6 % of sightlines and leaves the P1D shape intact. Once the z-matching fix is in place we'll regenerate this figure and expect T(k) much closer to unity at mid-k.
+
+## 7. Known pipeline TODO — convergence by z
+
+`compute_convergence_ratios` in `hcd_analysis/pipeline.py` currently matches LF and HR snapshots by snap folder name (`snap_NNN`). Because the two simulation sets used different `Snapshots.txt` tables, the same snap number is ~0.2 higher in z on HR than on LF. The plotted T(k) therefore mixes resolution with z-evolution. Proper fix:
+
+```python
+# for each HR snap with z_HR, find the closest LF snap with |z_LF - z_HR| < 0.05,
+# and ratio those; skip if no match.
+```
+
+Then rerun convergence locally (< 1 min — it only reads `p1d.npz` files).
+
+## 8. Next steps
 
 1. **Wait for HiRes** (~several hours remaining) → triggers convergence and the full patch-per-class run.
 2. **Run the per-class patch script** (`scripts/patch_per_class_p1d.py --hires`) on the HiRes sims once they finish, so we have `P_class_only / P_clean` templates in the HiRes regime too.

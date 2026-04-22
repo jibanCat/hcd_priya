@@ -31,22 +31,29 @@ z_labels = sorted({k.split("__")[0] for k in d0.files})
 z_values = [float(lbl.replace("z", "").replace("p", ".")) for lbl in z_labels]
 cmap = plt.cm.plasma(np.linspace(0, 1, len(z_values)))
 
+# Determine actual k range present in the data
+_d0_k = d0[f"{z_labels[0]}__all__k"]
+k_cyc_min = float(_d0_k.min()); k_cyc_max = float(_d0_k.max())
+k_ang_data_min = 2.0 * np.pi * k_cyc_min
+k_ang_data_max = 2.0 * np.pi * k_cyc_max
+# Plot range: clamp to the requested emulator range AND to the actual data
+x_lo = max(0.0009, k_ang_data_min)
+x_hi = min(0.20,   k_ang_data_max)
+
 for rf in ratios_files:
-    sim_name = rf.parent.name[:30]
     d = np.load(rf, allow_pickle=True)
     for z_idx, (zlbl, zval) in enumerate(zip(z_labels, z_values)):
         color = cmap[z_idx]
         key_k = f"{zlbl}__all__k"
         if key_k not in d.files: continue
         k = d[key_k]
-        T_all = d[f"{zlbl}__all__T_k"]
-        T_priya = d[f"{zlbl}__no_DLA_priya__T_k"]
-        # k is cyclic s/km → convert to PRIYA angular
         k_ang = 2.0 * np.pi * k
-        sel = (k_ang >= 0.0009) & (k_ang <= 0.20)
-        ax_all.plot(k_ang[sel], T_all[sel], lw=1.0, alpha=0.7, color=color,
+        sel = (k_ang >= x_lo) & (k_ang <= x_hi)
+        ax_all.plot(k_ang[sel], d[f"{zlbl}__all__T_k"][sel],
+                     lw=1.0, alpha=0.7, color=color,
                      label=f"z={zval:.1f}" if rf is ratios_files[0] else None)
-        ax_priya.plot(k_ang[sel], T_priya[sel], lw=1.0, alpha=0.7, color=color,
+        ax_priya.plot(k_ang[sel], d[f"{zlbl}__no_DLA_priya__T_k"][sel],
+                       lw=1.0, alpha=0.7, color=color,
                        label=f"z={zval:.1f}" if rf is ratios_files[0] else None)
 
 for ax, title in zip(
@@ -60,11 +67,19 @@ for ax, title in zip(
     ax.set_ylabel("T(k)")
     ax.set_title(title)
     ax.grid(alpha=0.3, which="both")
-    ax.set_xlim(0.0009, 0.20)
-    ax.set_ylim(0.85, 1.25)
-ax_all.legend(fontsize=7, loc="lower left", ncol=2)
+    ax.set_xlim(x_lo, x_hi)
+    ax.set_ylim(0.85, 1.40)
+ax_all.legend(fontsize=7, loc="upper left", ncol=2)
 
-fig.suptitle(f"HiRes / LF convergence  ({len(ratios_files)} matched sims)")
+# Add caveat text on the figure — this is a known issue, see analysis.md §6
+fig.text(0.5, 0.02,
+         "⚠ WARNING: LF and HR snapshots at the same snap number differ by ~0.2 in z "
+         "(HR snap_NNN is labelled by LF_z but is actually at HR_z = LF_z + 0.2).  "
+         "So what is plotted is NOT a pure convergence ratio — it mixes "
+         "resolution-at-z with z-evolution-between-0.2-z-steps.  Fix deferred.",
+         ha="center", fontsize=8, color="C3", wrap=True)
+fig.subplots_adjust(bottom=0.17)
+fig.suptitle(f"HiRes / LF 'convergence' ratio  ({len(ratios_files)} paired sims)")
 fig.tight_layout()
 out = OUT / "convergence_Tk.png"
 fig.savefig(out, dpi=120); plt.close(fig)
