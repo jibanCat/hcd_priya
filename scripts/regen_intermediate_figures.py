@@ -162,26 +162,53 @@ LLS_MIN, SUBDLA_MIN, DLA_MIN = 17.2, 19.0, 20.3
 print("1. NHI distribution...")
 fig, ax = plt.subplots(1, 2, figsize=(12, 5))
 
-bins = np.linspace(17.0, 23.0, 91)
+# Use bin width 0.1 dex so class boundaries (17.2, 19.0, 20.3) divide
+# evenly into bin edges with NO narrow-boundary bins (unequal bin widths
+# at the boundaries had been causing a visual "drop" at class edges).
+# np.linspace is preferred over np.arange because the latter accumulates
+# floating-point error (e.g. 20.2999999… instead of 20.3).
+bin_width = 0.1
+n_bins_edges = round((23.0 - 17.0) / bin_width) + 1
+bins = np.linspace(17.0, 23.0, n_bins_edges)
+# Sanity check: class thresholds must coincide with bin edges to within
+# floating-point tolerance so classification and plotting agree exactly.
+for thr in (LLS_MIN, SUBDLA_MIN, DLA_MIN):
+    assert np.any(np.abs(bins - thr) < 1e-10), \
+        f"{thr} is not an exact bin edge"
+
 all_logN = np.concatenate([r["logN"] for r in records])
 
-# split by class for stacked histogram
-mask_lls = (all_logN >= LLS_MIN) & (all_logN < SUBDLA_MIN)
-mask_sub = (all_logN >= SUBDLA_MIN) & (all_logN < DLA_MIN)
-mask_dla = all_logN >= DLA_MIN
-
-ax[0].hist(all_logN[mask_lls], bins=bins, histtype="step", lw=1.8, color="C2",
-            label=f"LLS  ({mask_lls.sum():,})")
-ax[0].hist(all_logN[mask_sub], bins=bins, histtype="step", lw=1.8, color="C1",
-            label=f"subDLA  ({mask_sub.sum():,})")
-ax[0].hist(all_logN[mask_dla], bins=bins, histtype="step", lw=1.8, color="C3",
-            label=f"DLA  ({mask_dla.sum():,})")
-for thr, name in [(17.2,"LLS"),(19.0,"subDLA"),(20.3,"DLA")]:
-    ax[0].axvline(thr, color="gray", lw=0.6, ls=":")
-ax[0].set_yscale("log"); ax[0].set_xlabel("log10(N_HI)")
+# Single histogram of ALL absorbers (the ground truth, continuous across
+# class boundaries — this demonstrates there is no physical gap).
+counts_all, _ = np.histogram(all_logN, bins=bins)
+centres = 0.5 * (bins[:-1] + bins[1:])
+# Colour each bin by the class of its right edge
+class_colour = np.where(
+    bins[1:] <= SUBDLA_MIN, "C2",   # LLS
+    np.where(bins[1:] <= DLA_MIN, "C1", "C3")   # subDLA / DLA
+)
+# Plot as a single step line (monotonic, no gaps)
+ax[0].step(centres, counts_all, where="mid", color="black", lw=0.8, alpha=0.5,
+           label="all absorbers")
+# Overlay per-class coloured bars at each bin
+for c_lbl, c_colour, lo, hi, n_cls in [
+    ("LLS",    "C2", LLS_MIN, SUBDLA_MIN, ((all_logN>=LLS_MIN)&(all_logN<SUBDLA_MIN)).sum()),
+    ("subDLA", "C1", SUBDLA_MIN, DLA_MIN, ((all_logN>=SUBDLA_MIN)&(all_logN<DLA_MIN)).sum()),
+    ("DLA",    "C3", DLA_MIN, 23.0,       (all_logN>=DLA_MIN).sum()),
+]:
+    sel = (centres >= lo) & (centres < hi)
+    ax[0].bar(centres[sel], counts_all[sel], width=np.diff(bins)[sel],
+              color=c_colour, alpha=0.6, edgecolor="none",
+              label=f"{c_lbl}  ({n_cls:,})")
+for thr, name in [(17.2,"LLS boundary"),(19.0,"subDLA"),(20.3,"DLA")]:
+    ax[0].axvline(thr, color="gray", lw=0.8, ls=":")
+ax[0].set_yscale("log")
+ax[0].set_xlabel("log10(N_HI)")
 ax[0].set_ylabel("count (all sims stacked)")
-ax[0].set_title(f"NHI distribution (fresh catalogs, N={len(records)} snaps)")
-ax[0].grid(alpha=0.3); ax[0].legend()
+ax[0].set_title(f"NHI distribution (N={len(records)} snaps)\n"
+                f"single histogram, coloured by class — no physical gap")
+ax[0].grid(alpha=0.3)
+ax[0].legend(loc="lower left", fontsize=8)
 
 # Mean absorber count per sim per z
 sum_per_z = defaultdict(lambda: {"LLS": [], "subDLA": [], "DLA": []})
@@ -345,27 +372,43 @@ fig.savefig(outp, dpi=120); plt.close(fig)
 print(f"   {outp}")
 
 # =============================================================
-# 4. Parameter sensitivity: DLA count at z=3 vs each param
+# 4. Parameter sensitivity: per-class counts at z=3 vs each param
 # =============================================================
-print("4. Parameter sensitivity...")
+print("4. Parameter sensitivity (LLS / subDLA / DLA)...")
 z_target = 3.0
 snap_at_z = [r for r in records if abs(r["z"] - z_target) < 0.05]
 param_keys = list(_SIM_PARAM.keys())
-fig, axes = plt.subplots(3, 3, figsize=(12, 10), sharey=True)
-axes = axes.flatten()
-for i, pk in enumerate(param_keys):
-    ax = axes[i]
-    xs = np.array([r["params"][pk] for r in snap_at_z if pk in r["params"]])
-    ys = np.array([int((r["logN"] >= DLA_MIN).sum()) for r in snap_at_z if pk in r["params"]])
-    ax.scatter(xs, ys, s=8, alpha=0.7, color="C3")
-    ax.set_xlabel(pk)
-    ax.set_ylabel("DLA count per 691k sightlines")
-    ax.set_title(f"{pk}", fontsize=10)
-    ax.grid(alpha=0.3)
-fig.suptitle(f"DLA count vs each PRIYA parameter at z={z_target} (60 sims)")
-fig.tight_layout(rect=(0, 0, 1, 0.96))
-outp = OUT_DIR / "param_sensitivity.png"
-fig.savefig(outp, dpi=120); plt.close(fig)
-print(f"   {outp}")
+
+for cls_name, cls_color, cls_mask_fn, fname in [
+    ("LLS",    "C2", lambda lN: (lN >= LLS_MIN) & (lN < SUBDLA_MIN),
+        "param_sensitivity_LLS.png"),
+    ("subDLA", "C1", lambda lN: (lN >= SUBDLA_MIN) & (lN < DLA_MIN),
+        "param_sensitivity_subDLA.png"),
+    ("DLA",    "C3", lambda lN: lN >= DLA_MIN,
+        "param_sensitivity_DLA.png"),
+]:
+    fig, axes = plt.subplots(3, 3, figsize=(12, 10), sharey=True)
+    axes = axes.flatten()
+    for i, pk in enumerate(param_keys):
+        ax = axes[i]
+        xs = np.array([r["params"][pk] for r in snap_at_z if pk in r["params"]])
+        ys = np.array([int(cls_mask_fn(r["logN"]).sum()) for r in snap_at_z if pk in r["params"]])
+        ax.scatter(xs, ys, s=10, alpha=0.7, color=cls_color)
+        # Simple Spearman rank correlation
+        if len(xs) > 3:
+            from scipy.stats import spearmanr
+            rho, p = spearmanr(xs, ys)
+            ax.text(0.02, 0.97, f"ρ={rho:+.2f}\np={p:.2g}",
+                     transform=ax.transAxes, fontsize=7, va="top",
+                     bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="gray", alpha=0.7))
+        ax.set_xlabel(pk)
+        ax.set_ylabel(f"{cls_name} count / 691k sightlines")
+        ax.set_title(f"{pk}", fontsize=10)
+        ax.grid(alpha=0.3)
+    fig.suptitle(f"{cls_name} count vs each PRIYA parameter at z={z_target}  (60 sims)")
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    outp = OUT_DIR / fname
+    fig.savefig(outp, dpi=120); plt.close(fig)
+    print(f"   {outp}")
 
 print("\nAll figures in", OUT_DIR)

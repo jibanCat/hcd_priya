@@ -39,7 +39,9 @@ After the two `voigt_utils` prefactor fixes (see `docs/bugs_found.md` §1), the 
 
 ![NHI distribution per class + mean count per z](../figures/analysis/nhi_distribution.png)
 
-*Left:* stacked log N histogram. The distribution is smooth and monotonically decreasing across the LLS, subDLA, and DLA ranges, with no cliffs and no pile-ups. Compare against the pre-audit version `figures/intermediate/nhi_distributions.png`, which showed a clear spike at log N ≈ 19.5 and a 4-dex cliff at log N = 20.3 — that was the signature of the underlying voigt-fit prefactor bug. *Right:* mean absorber count per class per z, averaged across the 60-sim suite. Counts rise by factor ×10 from z=2 to z=5.4, driven by the denser neutral-gas environment at higher z.
+*Left:* a single histogram of all 501 million absorber entries over 0.1-dex bins, colour-coded by class (LLS/subDLA/DLA). Class boundaries fall on exact bin edges (17.2, 19.0, 20.3) to avoid fractional-width boundary bins. The distribution is smooth and monotonically decreasing across the full range, with no cliffs. Any tiny residual drop visible at log N = 20.3 is the **real change in the local CDDF slope** there (Prochaska+2014's spline steepens past log N = 20.3, giving ~5 % fewer absorbers in the [20.3, 20.4) bin than in [20.2, 20.3)). This is not a gap; fine 0.01-dex binning confirms a monotone decrease (e.g. 534 988 at log N=20.295 → 531 327 at 20.305 — a 0.7 % drop, the local CDDF slope).
+
+Compare against the pre-audit `figures/intermediate/nhi_distributions.png`, which showed a clear spike at log N ≈ 19.5 and a 4-dex cliff at log N = 20.3 — that was the signature of the underlying Voigt-fit prefactor bug. *Right:* mean absorber count per class per z, averaged across the 60-sim suite. Counts rise by factor ×10 from z=2 to z=5.4, driven by the denser neutral-gas environment at higher z.
 
 ### CDDF f(N_HI, X) vs Prochaska+2014
 
@@ -79,9 +81,23 @@ Please treat the "+30–100%" number as a **raw measurement**, not an assigned c
 
 Scatter DLA count at z=3 vs each of the 9 PRIYA emulator parameters:
 
-![DLA count vs each PRIYA parameter at z=3](../figures/analysis/param_sensitivity.png)
+Three figures, one per class. Spearman rank correlation ρ with p-value printed in each panel:
 
-Clear positive correlation with **A_p** (initial power amplitude) — more power → more massive halos → more DLAs. `ns` has a mild positive trend. The reionisation-history parameters (`herei`, `heref`, `hireionz`, `alphaq`) and hydrodynamic `bhfeedback` show little effect on DLA counts at z=3; their impact is felt elsewhere (flux scatter, UV background, thermal state). `hub` and `omegamh2` also no correlation at this z. This is the expected hierarchy: DLA abundance is primarily a matter-power-spectrum-amplitude observable at fixed reionisation history.
+![LLS count vs each PRIYA parameter at z=3](../figures/analysis/param_sensitivity_LLS.png)
+
+![subDLA count vs each PRIYA parameter at z=3](../figures/analysis/param_sensitivity_subDLA.png)
+
+![DLA count vs each PRIYA parameter at z=3](../figures/analysis/param_sensitivity_DLA.png)
+
+**Dominant correlation for all three classes: A_p** (initial power amplitude), ρ ≈ +0.84 and p ≈ 10⁻¹⁶ — highly significant. More amplitude → more massive halos → more HCDs of every class.
+
+Secondary correlations:
+- **ns** (spectral index): ρ ≈ +0.35 to +0.40 across all classes, p ≈ 0.002-0.007. A small but statistically significant extra power on the relevant scales helps.
+- **heref** (HeII reionisation end z): weak negative trend (ρ ≈ −0.1 to −0.2, p > 0.1) — not significant.
+- **hub**: weak negative trend (ρ ≈ −0.2, p ≈ 0.1) — marginal.
+- All other parameters (`herei`, `alphaq`, `omegamh2`, `hireionz`, `bhfeedback`): ρ < 0.2 in magnitude, p > 0.1 — not statistically significant.
+
+The pattern is identical across the three classes — same dominant parameter (A_p), same secondary (ns), same irrelevant (bhfeedback, reionisation-history parameters). This is a useful constraint for the emulator: the HCD-abundance response surface is low-dimensional, dominated by primordial matter-power parameters, and not strongly mixed with reionisation-history or feedback parameters at fixed P1D.
 
 ## 4. Masking — the PRIYA recipe, what it does and why it's right
 
