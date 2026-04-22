@@ -367,6 +367,179 @@ _PRIYA_DLA_DETECT_TAU = 1e6    # max(tau) threshold to flag a sightline as DLA
 _PRIYA_DLA_MASK_SCALE = 0.25   # mask where tau > 0.25 + tau_eff
 
 
+# ---------------------------------------------------------------------------
+# Per-class subset-based P1D (Rogers-style templates)
+# ---------------------------------------------------------------------------
+
+def compute_p1d_per_class(
+    hdf5_path,
+    nbins: int,
+    dv_kms: float,
+    catalog,
+    batch_size: int = 4096,
+    n_skewers: Optional[int] = None,
+    k_bins: Optional[np.ndarray] = None,
+) -> Dict[str, object]:
+    """
+    Compute four subset P1Ds in a single streaming pass.
+
+    The "highest-class" label per sightline is assigned from the catalog:
+    DLA if any absorber has log N_HI ≥ 20.3, else subDLA if any ≥ 19.0,
+    else LLS if any ≥ 17.2, else "clean" (no entry in the catalog).
+
+    Each P1D uses that subset's own <F> for δF normalisation — the Rogers
+    convention — so ratios like `P_DLA_only / P_clean` correspond directly
+    to the HCD template `P_total / P_forest` and can be fit with
+    `hcd_analysis.hcd_template.fit_alpha`.
+
+    Returns
+    -------
+    dict with keys
+      "k"                      : native k grid (cyclic s/km)
+      "P_clean" / "P_LLS_only" / "P_subDLA_only" / "P_DLA_only"  : (n_k,)
+      "mean_F_clean" / ... "mean_F_DLA"
+      "n_sightlines_clean" / ... "n_sightlines_DLA"
+      "n_total", "z" (if present in catalog)
+    """
+    from .io import iter_tau_batches
+    import h5py
+
+    # Determine total sightline count
+    with h5py.File(hdf5_path, "r") as f:
+        n_total = f["tau/H/1/1215"].shape[0]
+    if n_skewers is not None:
+        n_total = min(n_total, n_skewers)
+
+    # Build highest-class label per sightline (order matters: DLA wins over
+    # subDLA wins over LLS).
+    labels = np.full(n_total, "clean", dtype=object)
+    for ab in catalog.absorbers:
+        if ab.skewer_idx >= n_total:
+            continue
+        if ab.absorber_class == "DLA":
+            labels[ab.skewer_idx] = "DLA"
+        elif ab.absorber_class == "subDLA":
+            if labels[ab.skewer_idx] != "DLA":
+                labels[ab.skewer_idx] = "subDLA"
+        elif ab.absorber_class == "LLS":
+            if labels[ab.skewer_idx] not in ("DLA", "subDLA"):
+                labels[ab.skewer_idx] = "LLS"
+
+    classes = ("clean", "LLS", "subDLA", "DLA")
+    counts = {c: int((labels == c).sum()) for c in classes}
+    logger.debug("per-class counts: %s", counts)
+
+    # Pass 1 — per-subset <F>
+    F_sum = {c: 0.0 for c in classes}
+    F_n = {c: 0 for c in classes}
+    for s, e, tau in iter_tau_batches(hdf5_path, batch_size=batch_size, n_skewers=n_total):
+        F = np.exp(-tau.astype(np.float64))
+        lab = labels[s:e]
+        for c in classes:
+            m = lab == c
+            if m.any():
+                F_sum[c] += F[m].sum()
+                F_n[c] += F[m].size
+    mean_F = {c: (F_sum[c] / F_n[c]) if F_n[c] > 0 else 1.0 for c in classes}
+
+    # Pass 2 — per-subset P1D accumulator
+    accs = {c: P1DAccumulator(nbins, dv_kms) for c in classes}
+    for s, e, tau in iter_tau_batches(hdf5_path, batch_size=batch_size, n_skewers=n_total):
+        tau = tau.astype(np.float64)
+        lab = labels[s:e]
+        for c in classes:
+            m = lab == c
+            if m.any():
+                accs[c].add_batch(tau[m], mean_F_global=mean_F[c])
+
+    k = accs["clean"]._k_native()
+    if k_bins is not None:
+        k_bins = np.asarray(k_bins)
+
+    result = {"k": k, "n_total": n_total}
+    for c in classes:
+        if k_bins is None:
+            _, p = accs[c].result(None)
+            # `result()` re-bins onto default; for a clean native output use raw_power
+            _, p_native = accs[c].raw_power()
+            result[f"P_{c}_only" if c != "clean" else "P_clean"] = p_native
+        else:
+            k_c, p = accs[c].result(k_bins)
+            result["k"] = k_c
+            result[f"P_{c}_only" if c != "clean" else "P_clean"] = p
+        result[f"mean_F_{c}"] = mean_F[c]
+        result[f"n_sightlines_{c}"] = counts[c]
+    return result
+
+
+def save_p1d_per_class_hdf5(
+    path,
+    per_class: Dict[str, object],
+    sim_name: str,
+    snap: int,
+    z: float,
+    dv_kms: float,
+    extra_attrs: Optional[Dict[str, object]] = None,
+) -> None:
+    """
+    Write the per-class P1D dict as an HDF5 file with self-documenting
+    file-level and dataset-level attributes.  `h5ls -v` on the output
+    reveals all metadata without loading the numeric data.
+    """
+    import h5py
+    with h5py.File(str(path), "w") as f:
+        f.attrs["sim_name"] = sim_name
+        f.attrs["snap"] = int(snap)
+        f.attrs["z"] = float(z)
+        f.attrs["dv_kms"] = float(dv_kms)
+        f.attrs["k_convention"] = "cyclic (numpy rfftfreq); PRIYA_angular_k = 2*pi*this"
+        f.attrs["mean_F_convention"] = "per-subset <F>; δF = F/<F>_subset - 1"
+        f.attrs["description"] = (
+            "Per-class subset P1D templates. Each class is the 'highest' "
+            "absorber class on a sightline (DLA beats subDLA beats LLS). "
+            "Rogers+2018 template P_total/P_forest = P_<class>_only / P_clean."
+        )
+        f.attrs["source_module"] = "hcd_analysis.p1d.compute_p1d_per_class"
+        if extra_attrs:
+            for k, v in extra_attrs.items():
+                f.attrs[k] = v
+
+        # Datasets
+        d = f.create_dataset("k", data=np.asarray(per_class["k"], dtype=np.float64))
+        d.attrs["units"] = "s/km (cyclic)"
+        d.attrs["description"] = "Frequency axis for P1D (numpy rfftfreq convention)"
+
+        for c in ("clean", "LLS_only", "subDLA_only", "DLA_only"):
+            key = f"P_{c}"
+            if key in per_class:
+                d = f.create_dataset(key, data=np.asarray(per_class[key], dtype=np.float64))
+                d.attrs["units"] = "km/s"
+                d.attrs["description"] = (
+                    f"P1D(k) averaged over sightlines whose highest-class "
+                    f"absorber is {c.replace('_only','')}"
+                )
+
+        # Per-class scalars (mean_F, n_sightlines)
+        for key, desc, unit in [
+            ("mean_F_clean",  "<F> over clean sightlines", "dimensionless"),
+            ("mean_F_LLS",    "<F> over LLS sightlines",   "dimensionless"),
+            ("mean_F_subDLA", "<F> over subDLA sightlines","dimensionless"),
+            ("mean_F_DLA",    "<F> over DLA sightlines",   "dimensionless"),
+            ("n_sightlines_clean",  "count of clean sightlines", ""),
+            ("n_sightlines_LLS",    "count of LLS sightlines",   ""),
+            ("n_sightlines_subDLA", "count of subDLA sightlines",""),
+            ("n_sightlines_DLA",    "count of DLA sightlines",   ""),
+            ("n_total",             "total sightlines in the file or subsample", ""),
+        ]:
+            if key in per_class:
+                d = f.create_dataset(key, data=per_class[key])
+                d.attrs["description"] = desc
+                if unit: d.attrs["units"] = unit
+
+
+# ---------------------------------------------------------------------------
+# PRIYA-style tau-based DLA mask, applied in compute_p1d_priya_masked below
+# ---------------------------------------------------------------------------
 def compute_p1d_priya_masked(
     hdf5_path,
     nbins: int,

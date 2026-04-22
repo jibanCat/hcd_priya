@@ -67,6 +67,25 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Metadata helper
+# ---------------------------------------------------------------------------
+
+def _repo_commit() -> str:
+    """Return short git commit hash of the hcd_priya repo, or 'unknown'."""
+    import subprocess
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(Path(__file__).resolve().parent.parent),
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        )
+        return out.decode().strip()
+    except Exception:
+        return "unknown"
+
+
+# ---------------------------------------------------------------------------
 # Output path helpers
 # ---------------------------------------------------------------------------
 
@@ -206,6 +225,32 @@ def run_one_snap(
                 n_skewers=n_skewers_p1d,
             )
         timing["excl_sweep"] = time.perf_counter() - t0
+
+        # --- Per-class subset P1D (Rogers template input) -----------------
+        t0 = time.perf_counter()
+        from .p1d import compute_p1d_per_class, save_p1d_per_class_hdf5
+        per_class = compute_p1d_per_class(
+            hdf5_path=entry.path,
+            nbins=header.nbins,
+            dv_kms=dv_kms,
+            catalog=catalog,
+            batch_size=cfg.skewer_batch_size,
+            n_skewers=n_skewers_p1d,
+        )
+        save_p1d_per_class_hdf5(
+            out_dir / "p1d_per_class.h5",
+            per_class,
+            sim_name=sim_name, snap=snap, z=z, dv_kms=dv_kms,
+            extra_attrs={
+                "nbins": int(header.nbins),
+                "n_skewers_file": int(header.n_skewers),
+                "tau_threshold": float(cfg.absorber.tau_threshold),
+                "min_log_nhi": float(cfg.absorber.min_log_nhi),
+                "fast_mode": bool(cfg.absorber.fast_mode),
+                "source_commit": _repo_commit(),
+            },
+        )
+        timing["per_class_p1d"] = time.perf_counter() - t0
 
         # --- Measure CDDF -------------------------------------------------
         t0 = time.perf_counter()
