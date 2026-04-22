@@ -510,6 +510,8 @@ def compute_p1d_ratios(
     k_ref, p1d_all, _ = p1d_variants["all"]
 
     pairs = [
+        ("ratio_noDLA_priya_all", "no_DLA_priya"),   # primary production ratio
+        # Legacy catalog-based variants (now diagnostic-only; emit only if present)
         ("ratio_noDLA_all", "no_DLA"),
         ("ratio_nosubDLA_all", "no_subDLA"),
         ("ratio_noLLS_all", "no_LLS"),
@@ -522,9 +524,9 @@ def compute_p1d_ratios(
                 r = np.where(p1d_all > 0, p1d_var / p1d_all, np.nan)
             ratios[ratio_name] = r
 
-    # DLA contribution = 1 - P1D_noDLA / P1D_all
-    if "ratio_noDLA_all" in ratios:
-        ratios["ratio_DLA_contribution"] = 1.0 - ratios["ratio_noDLA_all"]
+    # DLA contribution = 1 - P1D_noDLA_priya / P1D_all  (primary production metric)
+    if "ratio_noDLA_priya_all" in ratios:
+        ratios["ratio_DLA_contribution"] = 1.0 - ratios["ratio_noDLA_priya_all"]
 
     ratios["k"] = k_ref
     return ratios
