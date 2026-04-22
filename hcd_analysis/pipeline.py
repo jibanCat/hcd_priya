@@ -163,7 +163,7 @@ def run_one_snap(
                 voigt_max_iter=cfg.absorber.voigt_max_iter,
                 batch_size=cfg.skewer_batch_size,
                 n_skewers=n_skewers,
-                fast_mode=cfg.benchmark,
+                fast_mode=cfg.absorber.fast_mode or cfg.benchmark,
                 n_workers=cfg.n_workers_skewer,
                 min_log_nhi=cfg.absorber.min_log_nhi,
             )
@@ -533,7 +533,7 @@ def compute_convergence_ratios(
     Returns dict: sim_name → z → variant → {'k', 'T_k'}
     """
     if variants is None:
-        variants = ["all", "no_HCD"]
+        variants = ["all", "no_DLA_priya"]
 
     lf_root = Path(cfg.output_root)
     hf_root = Path(cfg.output_root) / "hires"

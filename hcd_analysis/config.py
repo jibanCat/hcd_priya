@@ -27,6 +27,9 @@ class AbsorberConfig:
     """Thresholds and fitting parameters for absorber identification."""
     # Tau threshold to define the boundary of an absorption system
     tau_threshold: float = 1.0
+    # Use the sum-rule (tau-integral) NHI estimator instead of a Voigt fit.
+    # See docs/fast_mode_physics.md. Recommended default = True.
+    fast_mode: bool = True
     # Maximum velocity gap (km/s) to merge adjacent components into one system
     merge_dv_kms: float = 100.0
     # Minimum pixels for a valid system (avoids noise spikes)

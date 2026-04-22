@@ -19,16 +19,22 @@ absorber_classes:
   - DLA
 
 absorber:
+  # NHI estimator. True = sum-rule inversion (∫τdv / σ_integrated) on the
+  # detected τ>threshold core only. See docs/fast_mode_physics.md.
+  # False = Voigt fit with ±2000 km/s wing window (subject to forest bias;
+  # see docs/bugs_found.md §#5). Keep True for production.
+  fast_mode: true
   # tau_threshold: pixels above this are considered part of an absorption system.
-  # For HCD work (LLS+), a value of ~100 corresponds to NHI > 10^16 (b=30 km/s).
-  # At high z the diffuse forest already has tau >> 1, so 1.0 would catch everything.
+  # At threshold=100 with b=30 km/s, the corresponding NHI floor is ~10^16.85,
+  # safely below the LLS lower edge (log N = 17.2). The min_log_nhi filter
+  # below then discards the sub-LLS detections so only HCD systems remain.
   tau_threshold: 100.0      # pixel tau floor for system detection
   merge_dv_kms: 100.0       # merge gap (km/s) between adjacent blobs
   min_pixels: 2             # minimum pixels for a valid system
-  b_init_kms: 30.0          # initial b parameter guess for Voigt fit
-  b_bounds: [1.0, 300.0]    # b parameter bounds
-  tau_fit_cap: 1.0e+06      # cap on tau before Voigt fitting (must use signed exponent for YAML float)
-  voigt_max_iter: 200       # max Voigt fit iterations
+  b_init_kms: 30.0          # (Voigt mode only) initial b guess
+  b_bounds: [1.0, 300.0]    # (Voigt mode only) b parameter bounds
+  tau_fit_cap: 1.0e+06      # (Voigt mode only) cap on tau before fitting
+  voigt_max_iter: 200       # (Voigt mode only) max fit iterations
   mask_fill_strategy: mean_flux  # zero_tau | mean_flux | contiguous
   min_log_nhi: 17.2         # discard absorbers below this log10(NHI) (= LLS threshold)
 

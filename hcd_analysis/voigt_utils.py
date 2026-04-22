@@ -39,14 +39,26 @@ _LAMBDA_LYA_KMS = _LAMBDA_LYA_CM * _C_KMS / _C_CGS  # not meaningful, kept for d
 _F_LU = 0.4164               # oscillator strength (Lyman alpha)
 _GAMMA_LYA = 6.265e8         # s^-1 (Einstein A coefficient)
 
-# Cross-section prefactor: sigma(nu) = sigma_0 * Voigt(nu; delta_nu_D, Gamma)
-# At line center (thermal width b):
-#   sigma_peak = (sqrt(pi) * e^2 * f * lambda) / (m_e * c * b)
-# In convenient units with b in km/s:
+# Voigt optical-depth prefactor — velocity-integrated absorption cross section.
+#
+# Derivation (Draine 2011 §6.1; Ladenburg & Reiche 1913 sum rule):
+#   sigma(nu) = (pi e^2 / m_e c) * f_lu * phi(nu)      # normalised such that
+#                                                     # integral phi(nu) d nu = 1
+#   Change of variable dnu = (nu0/c) dv gives in velocity space:
+#   integral sigma(v) dv = pi e^2 f lambda / (m_e c)   [cm^2 * cm/s]
+#
+# Our phi_v is returned in (km/s)^-1 (voigt_profile_phi), so we absorb the
+# 1 km/s = 1e5 cm/s factor into the prefactor, giving units cm^2 * (km/s):
 _SIGMA_PREFACTOR = (
-    np.sqrt(np.pi) * _E_CGS**2 * _F_LU * _LAMBDA_LYA_CM / (_M_E_CGS * _C_CGS)
-)
-# _SIGMA_PREFACTOR has units cm^3/s; divide by b[km/s]*1e5 to get peak sigma in cm^2
+    np.pi * _E_CGS**2 * _F_LU * _LAMBDA_LYA_CM / (_M_E_CGS * _C_CGS)
+) / 1.0e5
+# Sanity:
+#   - Sum rule:  integral tau(v) dv = NHI * _SIGMA_PREFACTOR.
+#   - Line centre peak (small Voigt damping a, so H(0,a) ~= 1):
+#     tau_peak = NHI * _SIGMA_PREFACTOR / (sqrt(pi) * b_kms)
+#              = NHI * sqrt(pi) * e^2 * f * lambda / (m_e c b_cms)
+#     For NHI=10^20.3, b=30 km/s, this gives ~5.0e6, matching fake_spectra
+#     and textbook DLA values.
 
 # Voigt damping parameter: a = Gamma * lambda / (4*pi*b)
 # with b in cm/s and lambda in cm:
@@ -125,10 +137,8 @@ def tau_voigt(
     tau : optical depth array, same shape as v_kms
     """
     phi = voigt_profile_phi(v_kms - v0_kms, b_kms)  # (km/s)^-1
-    # sigma_total = _SIGMA_PREFACTOR / (b_kms * 1e5)  but phi already has 1/b
-    # Actually: tau = NHI * sigma_prefactor * phi
-    # where sigma_prefactor = sqrt(pi)*e^2*f*lambda/(m_e*c) in cm^2 * km/s
-    # and phi is in (km/s)^-1
+    # tau = NHI * _SIGMA_PREFACTOR * phi_v  — dimensionless.
+    # _SIGMA_PREFACTOR has units cm^2 * km/s, phi_v has units (km/s)^-1.
     return NHI * _SIGMA_PREFACTOR * phi
 
 
@@ -200,10 +210,10 @@ def fit_nhi_from_tau(
     b_bounds = (float(b_bounds[0]), float(b_bounds[1]))  # same guard
     b_init = float(b_init)
 
-    # Initial NHI estimate from tau peak (linear approximation)
+    # Initial NHI estimate inverting tau_peak = NHI * _SIGMA_PREFACTOR / (sqrt(pi) * b)
+    # (line-centre of a Gaussian-dominated Voigt), consistent with tau_voigt above.
     tau_peak = float(np.clip(tau_segment.max(), 1e-12, tau_cap))
-    # Very rough: NHI_guess ~ tau_peak * b / sigma_prefactor
-    NHI_guess = tau_peak * (b_init * 1e5) / (_SIGMA_PREFACTOR)
+    NHI_guess = tau_peak * np.sqrt(np.pi) * b_init / _SIGMA_PREFACTOR
     NHI_guess = max(NHI_guess, 1e12)
 
     # Fit in log10 space: x = [log10(NHI), log10(b)]
@@ -273,7 +283,7 @@ def nhi_from_tau_fast(
             b_eff = np.clip(b_eff, 1.0, 300.0)
         else:
             b_eff = b_assume
-        # NHI from peak: tau_peak = NHI * sigma_prefactor / (sqrt(pi) * b)
-        # → NHI = tau_peak * sqrt(pi) * b * 1e5 / sigma_prefactor
-        NHI_est = tau_peak * np.sqrt(np.pi) * b_eff * 1e5 / _SIGMA_PREFACTOR
+        # NHI from peak: tau_peak = NHI * _SIGMA_PREFACTOR / (sqrt(pi) * b_kms)
+        # → NHI = tau_peak * sqrt(pi) * b_kms / _SIGMA_PREFACTOR
+        NHI_est = tau_peak * np.sqrt(np.pi) * b_eff / _SIGMA_PREFACTOR
         return NHI_est

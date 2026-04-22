@@ -18,11 +18,24 @@ constraint without introducing large-scale power.
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from .catalog import AbsorberCatalog, Absorber
+
+
+# Default wing-expansion threshold per absorber class, in τ units.
+# The mask for one system is pixels with τ > (threshold + τ_eff), contiguous
+# around the system peak. Motivated by Rogers et al. 2018 / PRIYA §3.3: a DLA
+# damping wing that has τ > 0.25 above the forest baseline is still carrying
+# correlated flux suppression and should be removed. Scaling up for subDLA/LLS
+# where wings are weaker gives a class-appropriate mask width.
+DEFAULT_WING_THRESHOLD = {
+    "DLA":    0.25,   # PRIYA/Rogers default
+    "subDLA": 0.50,
+    "LLS":    1.00,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +242,174 @@ def iter_masked_batches(
 
 
 # ---------------------------------------------------------------------------
+# τ-space per-class mask — walk outward from each system peak until τ drops
+# below (wing_threshold[class] + τ_eff).  This generalises the PRIYA DLA
+# recipe to subDLA and LLS.  The mask width is driven by the actual τ profile,
+# so a strong DLA gets a wide damping-wing mask and a weak LLS gets a narrow
+# core mask without any hard-coded velocity limits.
+# ---------------------------------------------------------------------------
+
+def build_skewer_mask_from_tau(
+    tau_row: np.ndarray,
+    absorbers: List[Absorber],
+    tau_eff: float,
+    wing_threshold_by_class: Optional[Dict[str, float]] = None,
+) -> np.ndarray:
+    """
+    Build a mask for one skewer by expanding each absorber outward from its
+    τ-peak until τ < (wing_threshold[class] + τ_eff).
+
+    Vectorised implementation:
+      1. For each (unique) threshold value, build `above` = tau_row > threshold.
+      2. Use `np.add.reduceat` to identify contiguous "True runs" on the doubled
+         array (for periodic wrap).
+      3. For each absorber, locate the run containing its peak by a single
+         searchsorted, and mark its span.
+
+    absorbers must all have the same skewer_idx (caller's responsibility) and
+    belong to the classes we want to mask.
+    """
+    if wing_threshold_by_class is None:
+        wing_threshold_by_class = DEFAULT_WING_THRESHOLD
+
+    n = len(tau_row)
+    mask = np.zeros(n, dtype=bool)
+    if not absorbers:
+        return mask
+
+    # Group absorbers by their threshold so we only do the run-detection work
+    # once per distinct threshold value.
+    groups: Dict[float, List[Absorber]] = {}
+    for ab in absorbers:
+        thr = wing_threshold_by_class.get(ab.absorber_class, 1.0) + tau_eff
+        groups.setdefault(thr, []).append(ab)
+
+    # Doubled array for periodic-wrap handling
+    tau2 = np.concatenate([tau_row, tau_row])
+
+    for thr, abs_list in groups.items():
+        above = tau2 > thr
+        if not above.any():
+            continue
+
+        # Locate run boundaries in the doubled array via diff:
+        #   d[i] = +1 where a run starts, -1 where it ends (exclusive).
+        diff = np.diff(np.concatenate(([False], above, [False])).astype(np.int8))
+        run_starts = np.where(diff == 1)[0]
+        run_ends = np.where(diff == -1)[0]  # exclusive
+
+        for ab in abs_list:
+            # Find τ peak in this absorber's detected region (handle wrap)
+            if ab.pix_end >= n:
+                seg = tau2[ab.pix_start:ab.pix_end + 1]
+                peak = ab.pix_start + int(np.argmax(seg))  # in doubled coords
+            else:
+                seg = tau_row[ab.pix_start:ab.pix_end + 1]
+                peak = ab.pix_start + int(np.argmax(seg))  # in single coords
+
+            # searchsorted: find the run that contains `peak`
+            # run i covers [run_starts[i], run_ends[i]); peak is in run i if
+            # run_starts[i] <= peak < run_ends[i].
+            idx = int(np.searchsorted(run_starts, peak, side="right")) - 1
+            if idx < 0:
+                continue
+            s, e = int(run_starts[idx]), int(run_ends[idx])
+            if not (s <= peak < e):
+                continue  # peak isn't inside any above-threshold run
+
+            # Map [s, e) from doubled array back to mask indices (mod n).
+            # Run length is at most 2n; clip to n to avoid masking the whole
+            # skewer twice.
+            length = min(e - s, n)
+            s_mod = s % n
+            if s_mod + length <= n:
+                mask[s_mod : s_mod + length] = True
+            else:
+                mask[s_mod:] = True
+                mask[: length - (n - s_mod)] = True
+
+    return mask
+
+
+def apply_tauspace_mask_to_batch(
+    tau_batch: np.ndarray,
+    batch_start: int,
+    catalog: AbsorberCatalog,
+    mask_classes: List[str],
+    tau_eff: float,
+    wing_threshold_by_class: Optional[Dict[str, float]] = None,
+    fill_strategy: str = "mean_flux",
+) -> np.ndarray:
+    """
+    Apply τ-space per-system masking to a batch of skewers.
+
+    Unlike apply_mask_to_batch (which masks only the τ > τ_threshold core),
+    this walks outward from each system's peak into the damping wings until
+    τ drops below the class-specific wing threshold above the forest baseline.
+
+    fill_strategy:
+      "zero_tau"   : τ = 0 in masked pixels (F = 1; unphysical)
+      "mean_flux"  : τ = τ_eff in masked pixels (δF = 0; PRIYA recipe)
+      "contiguous" : log-τ interpolation across the masked segment
+    """
+    tau_out = tau_batch.astype(np.float64, copy=True)
+
+    # Group absorbers (of the requested classes) by skewer index
+    by_sl: Dict[int, List[Absorber]] = {}
+    for ab in catalog.absorbers:
+        if ab.absorber_class in mask_classes:
+            by_sl.setdefault(ab.skewer_idx, []).append(ab)
+
+    fill_fn = _FILL_FUNCTIONS.get(fill_strategy)
+    if fill_fn is None:
+        raise ValueError(f"Unknown fill strategy: {fill_strategy!r}")
+
+    for local_idx in range(tau_out.shape[0]):
+        global_idx = batch_start + local_idx
+        absorbers = by_sl.get(global_idx)
+        if not absorbers:
+            continue
+        mask = build_skewer_mask_from_tau(
+            tau_out[local_idx], absorbers, tau_eff, wing_threshold_by_class,
+        )
+        # Reuse existing fill functions. _fill_mean_flux computes its own
+        # per-row mean; for consistency with PRIYA we'd rather fill with the
+        # global τ_eff, so handle that case specifically.
+        if fill_strategy == "mean_flux":
+            tau_out[local_idx, mask] = tau_eff
+        else:
+            tau_out[local_idx] = fill_fn(tau_out[local_idx], mask)
+
+    return tau_out
+
+
+def iter_tauspace_masked_batches(
+    hdf5_path,
+    catalog: AbsorberCatalog,
+    mask_classes: List[str],
+    tau_eff: float,
+    batch_size: int = 4096,
+    n_skewers: Optional[int] = None,
+    wing_threshold_by_class: Optional[Dict[str, float]] = None,
+    fill_strategy: str = "mean_flux",
+):
+    """
+    Iterator yielding (row_start, row_end, tau_masked_batch) where the mask
+    is the τ-space per-class one built by build_skewer_mask_from_tau.
+    """
+    from .io import iter_tau_batches
+
+    for row_start, row_end, tau_batch in iter_tau_batches(
+        hdf5_path, batch_size=batch_size, n_skewers=n_skewers
+    ):
+        yield row_start, row_end, apply_tauspace_mask_to_batch(
+            tau_batch, row_start, catalog, mask_classes, tau_eff,
+            wing_threshold_by_class=wing_threshold_by_class,
+            fill_strategy=fill_strategy,
+        )
+
+
+# ---------------------------------------------------------------------------
 # PRIYA-style DLA masking (arXiv:2306.05471)
 # ---------------------------------------------------------------------------
 
@@ -243,15 +424,35 @@ def priya_dla_mask_row(
 
     Algorithm (PRIYA paper, Sec. 3.3):
       1. Detect: sightline is DLA-contaminated if max(tau) > tau_dla_detect (~10^6).
-      2. Mask: pixels where tau > tau_mask_scale + tau_eff (typically 0.25 + tau_eff).
-         This threshold captures the damping wings (tau > 0.25 is 20 % of mean flux).
-      3. Fill: caller sets masked pixels to tau_eff so that delta_F = 0.
+      2. Locate the DLA peak pixel.
+      3. Expand outward from the peak in both directions until tau drops below
+         tau_mask_scale + tau_eff.  The mask is this single CONTIGUOUS region
+         around the peak — scattered IGM pixels above the threshold elsewhere in
+         the sightline are NOT masked (they are not part of the DLA wing).
+      4. Fill: caller sets masked pixels to tau_eff so that delta_F = 0.
 
     Returns None if the sightline has no DLA (max tau <= tau_dla_detect).
     """
     if tau_row.max() <= tau_dla_detect:
         return None
-    return tau_row > (tau_mask_scale + tau_eff)
+
+    n = len(tau_row)
+    threshold = tau_mask_scale + tau_eff
+    peak = int(np.argmax(tau_row))
+
+    # Walk left from peak until tau < threshold
+    lo = peak
+    while lo > 0 and tau_row[lo - 1] >= threshold:
+        lo -= 1
+
+    # Walk right from peak until tau < threshold
+    hi = peak
+    while hi < n - 1 and tau_row[hi + 1] >= threshold:
+        hi += 1
+
+    mask = np.zeros(n, dtype=bool)
+    mask[lo:hi + 1] = True
+    return mask
 
 
 def iter_priya_masked_batches(

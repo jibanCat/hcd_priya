@@ -253,36 +253,73 @@ def compute_p1d_single(
     n_skewers: Optional[int] = None,
     fill_strategy: str = "mean_flux",
     k_bins: Optional[np.ndarray] = None,
+    mask_scheme: str = "tauspace",
+    wing_threshold_by_class: Optional[dict] = None,
+    tau_eff: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray, float]:
     """
     Compute P1D for one variant (all, or with specified classes masked).
 
-    Returns
-    -------
-    k_centres : np.ndarray (s/km)
-    p1d       : np.ndarray (km/s)
-    mean_F    : float (mean flux used for normalisation)
+    mask_scheme:
+      "tauspace" (default) — mask each system by walking outward from its
+          τ-peak until τ < (wing_threshold[class] + τ_eff).  Physically
+          motivated damping-wing mask; generalises the PRIYA DLA recipe.
+      "pixrange" — legacy pix_start..pix_end mask (τ > τ_threshold core only;
+          misses damping wings; retained for regression testing only).
+
+    Returns (k_centres, p1d, mean_F_used_for_normalisation).
     """
     from .io import iter_tau_batches
-    from .masking import iter_masked_batches
+    from .masking import iter_masked_batches, iter_tauspace_masked_batches
 
     needs_masking = bool(mask_classes and catalog is not None)
 
+    # For tauspace masking we need τ_eff = -ln⟨F⟩_unmasked.  If caller
+    # provided it (e.g. compute_all_p1d_variants computes the "all" variant
+    # first and passes its <F> down), skip the extra pass.
+    if needs_masking and mask_scheme == "tauspace" and tau_eff is None:
+        F_sum, F_n = 0.0, 0
+        for _, _, tau_batch in iter_tau_batches(
+            hdf5_path, batch_size=batch_size, n_skewers=n_skewers
+        ):
+            F_sum += np.exp(-tau_batch.astype(np.float64)).sum()
+            F_n += tau_batch.size
+        mean_F_unmasked = F_sum / F_n if F_n > 0 else 1.0
+        tau_eff = -np.log(max(mean_F_unmasked, 1e-30))
+
     def _make_iter():
-        if needs_masking:
+        if not needs_masking:
+            return iter_tau_batches(
+                hdf5_path, batch_size=batch_size, n_skewers=n_skewers,
+            )
+        if mask_scheme == "tauspace":
+            return iter_tauspace_masked_batches(
+                hdf5_path, catalog, mask_classes, tau_eff,
+                batch_size=batch_size, n_skewers=n_skewers,
+                wing_threshold_by_class=wing_threshold_by_class,
+                fill_strategy=fill_strategy,
+            )
+        if mask_scheme == "pixrange":
             return iter_masked_batches(
                 hdf5_path, catalog, mask_classes,
-                batch_size=batch_size, n_skewers=n_skewers, strategy=fill_strategy,
+                batch_size=batch_size, n_skewers=n_skewers,
+                strategy=fill_strategy,
             )
-        return iter_tau_batches(hdf5_path, batch_size=batch_size, n_skewers=n_skewers)
+        raise ValueError(f"Unknown mask_scheme: {mask_scheme!r}")
 
-    # Pass 1 (streaming): compute global mean_F without storing tau in memory.
-    F_sum = 0.0
-    F_n = 0
-    for _, _, tau_batch in _make_iter():
-        F_sum += np.exp(-tau_batch.astype(np.float64)).sum()
-        F_n += tau_batch.size
-    mean_F_global = F_sum / F_n if F_n > 0 else 1.0
+    # Pass 1 (streaming): compute the global mean_F used for delta_F
+    # normalisation.  For tauspace masking we use the unmasked <F> (so that
+    # all variants are compared against the same reference and τ_eff-filled
+    # pixels contribute δF = 0).  For pixrange we reproduce legacy behaviour.
+    if needs_masking and mask_scheme == "tauspace":
+        mean_F_global = np.exp(-tau_eff)
+    else:
+        F_sum = 0.0
+        F_n = 0
+        for _, _, tau_batch in _make_iter():
+            F_sum += np.exp(-tau_batch.astype(np.float64)).sum()
+            F_n += tau_batch.size
+        mean_F_global = F_sum / F_n if F_n > 0 else 1.0
 
     # Pass 2 (streaming): accumulate P1D with the known global mean_F.
     acc = P1DAccumulator(nbins, dv_kms)
@@ -297,13 +334,20 @@ def compute_p1d_single(
 # Multi-variant P1D (all + masked variants) in one call
 # ---------------------------------------------------------------------------
 
-ALL_VARIANTS = [
-    "all",
-    "no_LLS",
-    "no_subDLA",
-    "no_DLA",
-    "no_HCD",
-    "no_DLA_priya",   # PRIYA-style DLA masking (recommended for P1D science)
+# Production P1D variants.  See docs/masking_strategy.md.
+#   "all"           : no mask — the emulator baseline
+#   "no_DLA_priya"  : PRIYA DLA mask (arXiv:2306.05471 §3.3).
+#                     Residual LLS/subDLA contamination is handled at the
+#                     emulator level via the Rogers+2018 α template, not by
+#                     any spatial mask.
+ALL_VARIANTS = ["all", "no_DLA_priya"]
+
+# Catalog-based class masks.  Retained for diagnostics/regression only:
+# both "pixrange" and "tauspace" schemes are known to introduce mask-edge
+# artefacts above k ≈ 0.02 s/km (cyclic) and over-mask forest power at low k
+# when they touch LLS/subDLA.  See docs/bugs_found.md §#6.
+DIAGNOSTIC_VARIANTS = [
+    "no_LLS", "no_subDLA", "no_DLA", "no_HCD",
 ]
 
 _MASK_CLASSES: Dict[str, List[str]] = {
@@ -380,6 +424,8 @@ def compute_all_p1d_variants(
     n_skewers: Optional[int] = None,
     fill_strategy: str = "mean_flux",
     k_bins: Optional[np.ndarray] = None,
+    mask_scheme: str = "tauspace",
+    wing_threshold_by_class: Optional[dict] = None,
 ) -> Dict[str, Tuple[np.ndarray, np.ndarray, float]]:
     """
     Compute all requested P1D variants.
@@ -389,8 +435,24 @@ def compute_all_p1d_variants(
     if variants is None:
         variants = ALL_VARIANTS
 
+    # Compute the "all" variant first so we can share its <F> as τ_eff across
+    # all τ-space-masked variants (avoids recomputing it once per variant).
     results = {}
+    shared_tau_eff: Optional[float] = None
+    if "all" in variants:
+        k0, p0, mf0 = compute_p1d_single(
+            hdf5_path, nbins, dv_kms,
+            catalog=None, mask_classes=None,
+            batch_size=batch_size, n_skewers=n_skewers,
+            fill_strategy=fill_strategy, k_bins=k_bins,
+        )
+        results["all"] = (k0, p0, mf0)
+        shared_tau_eff = -np.log(max(mf0, 1e-30))
+        logger.debug("P1D variant 'all' done, tau_eff=%.4f", shared_tau_eff)
+
     for var in variants:
+        if var == "all":
+            continue
         if var == "no_DLA_priya":
             k, p1d, mf = compute_p1d_priya_masked(
                 hdf5_path, nbins, dv_kms,
@@ -412,6 +474,9 @@ def compute_all_p1d_variants(
             n_skewers=n_skewers,
             fill_strategy=fill_strategy,
             k_bins=k_bins,
+            mask_scheme=mask_scheme,
+            wing_threshold_by_class=wing_threshold_by_class,
+            tau_eff=shared_tau_eff,
         )
         results[var] = (k, p1d, mf)
         logger.debug("P1D variant '%s' done, mean_F=%.4f", var, mf)

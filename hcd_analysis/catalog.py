@@ -180,22 +180,32 @@ class AbsorberCatalog:
             z=float(d["z"]),
             dv_kms=float(d["dv_kms"]),
         )
-        n = len(d["skewer_idx"])
-        for i in range(n):
-            NHI = float(d["NHI"][i])
-            ab = Absorber(
-                skewer_idx=int(d["skewer_idx"][i]),
-                pix_start=int(d["pix_start"][i]),
-                pix_end=int(d["pix_end"][i]),
-                v_center=float(d["pix_start"][i] + d["pix_end"][i]) / 2.0 * cat.dv_kms,
-                NHI=NHI,
-                b_kms=float(d["b_kms"][i]),
-                log_NHI=np.log10(max(NHI, 1e1)),
-                absorber_class=classify_system(NHI),
-                fit_success=bool(d["fit_success"][i]),
-                fast_mode=bool(d["fast_mode"][i]),
-            )
-            cat.absorbers.append(ab)
+        # Materialise arrays up front. Indexing an NpzFile (d["NHI"][i])
+        # inside a loop re-reads the whole archive each time -> O(n^2).
+        si = np.asarray(d["skewer_idx"])
+        ps = np.asarray(d["pix_start"])
+        pe = np.asarray(d["pix_end"])
+        NHI = np.asarray(d["NHI"], dtype=np.float64)
+        bkms = np.asarray(d["b_kms"])
+        fs = np.asarray(d["fit_success"])
+        fm = np.asarray(d["fast_mode"])
+        log_NHI_arr = np.log10(np.maximum(NHI, 1e1))
+        dv = cat.dv_kms
+        absorbers = cat.absorbers
+        for i in range(len(si)):
+            NHI_i = float(NHI[i])
+            absorbers.append(Absorber(
+                skewer_idx=int(si[i]),
+                pix_start=int(ps[i]),
+                pix_end=int(pe[i]),
+                v_center=float(ps[i] + pe[i]) / 2.0 * dv,
+                NHI=NHI_i,
+                b_kms=float(bkms[i]),
+                log_NHI=float(log_NHI_arr[i]),
+                absorber_class=classify_system(NHI_i),
+                fit_success=bool(fs[i]),
+                fast_mode=bool(fm[i]),
+            ))
         return cat
 
 
@@ -369,17 +379,13 @@ def process_skewer_batch(
     merge_gap_pixels = max(1, int(merge_dv_kms / dv_kms))
     absorbers: List[Absorber] = []
 
-    # Rough tau floor corresponding to LLS: NHI ~ 10^17.2
-    # tau_lls_approx = NHI_lls * sigma_prefactor / (sqrt(pi) * b * 1e5)
-    # Using b=30 km/s: ~ 10^17.2 * 3.0e-12 / (sqrt(pi)*3e6) ≈ very rough
-    # In practice tau > 1 reliably catches LLS in Lya
-    # Pre-filter: skip skewers with max(tau) below the floor for min_log_nhi systems.
-    # For NHI=10^min_log_nhi, b=30 km/s: tau_peak ~ NHI * sigma_peak
-    # sigma_peak = _SIGMA_PREFACTOR / (sqrt(pi) * b * 1e5)
+    # Pre-filter: skip skewers whose max(tau) is clearly below the tau_peak
+    # expected for an absorber at NHI=10^min_log_nhi, b=30 km/s.
+    # tau_peak = NHI * _SIGMA_PREFACTOR / (sqrt(pi) * b_kms)
     from .voigt_utils import _SIGMA_PREFACTOR as _SP
     import math
     _b_ref = 30.0  # km/s reference b
-    _tau_min = (10.0**min_log_nhi) * _SP / (math.sqrt(math.pi) * _b_ref * 1e5) * 0.1
+    _tau_min = (10.0**min_log_nhi) * _SP / (math.sqrt(math.pi) * _b_ref) * 0.1
     tau_lls_floor = max(tau_threshold, _tau_min)
 
     for local_idx in range(tau_batch.shape[0]):
