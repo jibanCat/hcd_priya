@@ -43,6 +43,11 @@ def ratio(d, cls):
     return r
 
 
+# k-axis range in PRIYA angular convention (rad·s/km).
+# k_cyc = k_ang / (2π).  emulator-relevant range 0.009 → 0.2 rad·s/km.
+K_ANG_MIN = 0.009
+K_ANG_MAX = 0.2
+
 # ---- figure 1: ratio vs z for ns0.803 ----
 sim_dir = OUTPUT / TARGET_SIM
 h5s = sorted(sim_dir.glob("snap_*/p1d_per_class.h5"))
@@ -65,21 +70,28 @@ if h5s:
         for h5 in h5s:
             d = load_per_class(h5)
             z = float(d["attrs"]["z"])
-            k = d["k"]
+            k_cyc = d["k"]
+            k_ang = 2.0 * np.pi * k_cyc  # PRIYA convention
             r = ratio(d, cls)
-            ax.plot(k[1:], r[1:], lw=1.2, color=z_to_color[z], label=f"z={z:.1f}")
+            sel = (k_ang >= K_ANG_MIN) & (k_ang <= K_ANG_MAX)
+            ax.plot(k_ang[sel], r[sel], lw=1.2, color=z_to_color[z], label=f"z={z:.1f}")
         ax.axhline(1.0, color="gray", ls="--", alpha=0.5)
         ax.set_xscale("log")
-        ax.set_xlabel("k [s/km, cyclic]")
+        ax.set_xlabel("k [rad·s/km]  (PRIYA angular convention)")
         ax.set_ylabel(f"P_{cls}_only / P_clean")
         ax.set_title(f"{cls}-only sightlines  vs  clean")
         ax.grid(alpha=0.3, which="both")
         ax.set_ylim(0.5, 3.0)
-        ax.set_xlim(1e-3, 5e-2)
+        ax.set_xlim(K_ANG_MIN, K_ANG_MAX)
+        # annotate the characteristic scales expected in this k range
+        # 1/b at b=30 km/s → k_cyc = 0.033 → k_ang = 0.21 rad·s/km
+        ax.axvline(2 * np.pi * (1.0 / 30.0), color="gray", ls=":", alpha=0.6)
+        if ax is axes[0]:
+            ax.text(2 * np.pi / 30.0 * 0.95, 2.7,
+                     "k = 2π/b\n(b=30 km/s)", fontsize=7, ha="right", color="gray")
         if ax is axes[-1]:
             # shrink legend
             handles, labels = ax.get_legend_handles_labels()
-            # dedupe
             uniq = list(dict(zip(labels, handles)).items())
             ax.legend([h for _, h in uniq], [l for l, _ in uniq],
                        fontsize=7, loc="upper left", ncol=2)
@@ -111,17 +123,21 @@ if sim_files:
     for ax, cls in zip(axes, ["LLS", "subDLA", "DLA"]):
         for sim_name, params, h5 in sim_entries:
             d = load_per_class(h5)
-            k = d["k"]; r = ratio(d, cls)
-            ax.plot(k[1:], r[1:], lw=0.8, alpha=0.6,
+            k_cyc = d["k"]
+            k_ang = 2.0 * np.pi * k_cyc
+            r = ratio(d, cls)
+            sel = (k_ang >= K_ANG_MIN) & (k_ang <= K_ANG_MAX)
+            ax.plot(k_ang[sel], r[sel], lw=0.8, alpha=0.6,
                      color=cmap(norm(params.get("Ap", 1e-9))))
         ax.axhline(1.0, color="gray", ls="--", alpha=0.5)
+        ax.axvline(2 * np.pi * (1.0 / 30.0), color="gray", ls=":", alpha=0.6)
         ax.set_xscale("log")
-        ax.set_xlabel("k [s/km, cyclic]")
+        ax.set_xlabel("k [rad·s/km]  (PRIYA angular convention)")
         ax.set_ylabel(f"P_{cls}_only / P_clean")
         ax.set_title(f"{cls}-only, all LF sims at z≈3")
         ax.grid(alpha=0.3, which="both")
         ax.set_ylim(0.5, 3.0)
-        ax.set_xlim(1e-3, 5e-2)
+        ax.set_xlim(K_ANG_MIN, K_ANG_MAX)
     sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
     fig.colorbar(sm, ax=axes.tolist(), label=r"$A_p$ (initial power amplitude)", shrink=0.8)
     fig.suptitle("Per-class P_dirty/P_clean across LF parameter space at z≈3")

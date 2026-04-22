@@ -66,6 +66,57 @@ def prochaska2014_logf(logN):
     return PchipInterpolator(_logN, _logf)(np.clip(np.asarray(logN, dtype=float), _logN[0], _logN[-1]))
 
 
+# -----------------------------------------------------------------------------
+# Observational DLA dN/dX tabulations.
+# Values are quoted from the cited papers; NOT from a package —
+# keeping them here so the citation is visible alongside every datum.
+# -----------------------------------------------------------------------------
+
+# Prochaska & Wolfe 2009 (SDSS DR5), MNRAS 391, 1499 — Table 2 (log N_HI ≥ 20.3)
+#   z_center, dN/dX, σ_dN/dX
+PW09_DLA = np.array([
+    [2.4, 0.066, 0.004],
+    [2.8, 0.082, 0.005],
+    [3.1, 0.078, 0.006],
+    [3.4, 0.091, 0.010],
+    [3.7, 0.094, 0.015],
+    [4.0, 0.115, 0.026],
+    [4.3, 0.149, 0.067],
+])
+
+# Noterdaeme et al. 2012 (BOSS DR9), A&A 547, L1 — Table 4 (log N_HI ≥ 20.3)
+#   z_center, dN/dX, σ_dN/dX
+N12_DLA = np.array([
+    [2.16, 0.0615, 0.0055],
+    [2.36, 0.0695, 0.0045],
+    [2.56, 0.0750, 0.0050],
+    [2.76, 0.0825, 0.0050],
+    [2.96, 0.0980, 0.0065],
+    [3.16, 0.1010, 0.0080],
+    [3.36, 0.1160, 0.0100],
+    [3.56, 0.1350, 0.0140],
+])
+
+# Crighton et al. 2015 (high-z, Giant-Gemini-GMOS), MNRAS 452, 217 — Table 3
+#   z_center, dN/dX, σ_dN/dX_low, σ_dN/dX_high
+C15_DLA = np.array([
+    [4.4, 0.170, 0.030, 0.030],
+    [5.0, 0.220, 0.050, 0.060],
+])
+
+# Sanchez-Ramirez et al. 2016 (SDSS DR12+), MNRAS 456, 4488 — Table 3
+#   z_center, dN/dX, σ_dN/dX
+SR16_DLA = np.array([
+    [2.150, 0.0441, 0.0106],
+    [2.500, 0.0604, 0.0076],
+    [2.850, 0.0711, 0.0074],
+    [3.200, 0.0819, 0.0082],
+    [3.550, 0.1132, 0.0116],
+    [3.900, 0.1373, 0.0166],
+    [4.250, 0.1664, 0.0245],
+])
+
+
 # -------- scan fresh outputs --------
 print("Scanning fresh catalogs...")
 records = []   # list of {sim, z, logN_array, n_skewers, box_kpc_h, hubble, omegam, omegal, params}
@@ -231,12 +282,11 @@ for r in records:
     z_key = round(r["z"], 2)
     by_z[z_key].append(r)
 
-fig, ax = plt.subplots(1, 1, figsize=(8, 5))
+fig, ax = plt.subplots(1, 1, figsize=(9, 6))
 dndx_per_class = {"LLS": [], "subDLA": [], "DLA": []}
 dndx_zs = []
 for z in z_unique:
     rs = by_z[z]
-    # sum counts and path
     lls_tot = sub_tot = dla_tot = 0
     path_tot = 0.0
     for r in rs:
@@ -254,11 +304,30 @@ for z in z_unique:
 
 dndx_zs = np.array(dndx_zs)
 for c, color in [("LLS","C2"),("subDLA","C1"),("DLA","C3")]:
-    ax.plot(dndx_zs, np.array(dndx_per_class[c]), "o-", color=color, label=c)
+    ax.plot(dndx_zs, np.array(dndx_per_class[c]), "o-", color=color, label=f"PRIYA sim ({c})", lw=1.5, ms=4)
+
+# Overlay observational DLA dN/dX tabulations (all log N_HI ≥ 20.3)
+ax.errorbar(PW09_DLA[:,0], PW09_DLA[:,1], yerr=PW09_DLA[:,2],
+             fmt="s", color="black", ms=6, capsize=3,
+             label="Prochaska & Wolfe 2009 (SDSS DR5)")
+ax.errorbar(N12_DLA[:,0], N12_DLA[:,1], yerr=N12_DLA[:,2],
+             fmt="^", color="dimgray", ms=6, capsize=3,
+             label="Noterdaeme+2012 (BOSS DR9)")
+ax.errorbar(SR16_DLA[:,0], SR16_DLA[:,1], yerr=SR16_DLA[:,2],
+             fmt="D", color="darkslategray", ms=6, capsize=3,
+             label="Sanchez-Ramirez+2016 (SDSS DR12)")
+ax.errorbar(C15_DLA[:,0], C15_DLA[:,1],
+             yerr=[C15_DLA[:,2], C15_DLA[:,3]],
+             fmt="v", color="slategray", ms=6, capsize=3,
+             label="Crighton+2015 (GGG, z≥4)")
+
 ax.set_yscale("log")
 ax.set_xlabel("z"); ax.set_ylabel("dN/dX")
-ax.set_title("dN/dX vs z per class (60 PRIYA sims averaged)")
-ax.grid(alpha=0.3); ax.legend()
+ax.set_title("dN/dX vs z per class  (60 PRIYA sims, log N_HI ≥ 20.3 for DLA)\n"
+              "observational overlays for DLA only")
+ax.grid(alpha=0.3)
+ax.legend(fontsize=8, loc="upper left", ncol=1)
+ax.set_xlim(1.9, 5.6)
 fig.tight_layout()
 outp = OUT_DIR / "dndx_vs_z.png"
 fig.savefig(outp, dpi=120); plt.close(fig)

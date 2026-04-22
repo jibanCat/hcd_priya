@@ -49,11 +49,20 @@ Stacking every (sim, snap) within a z-bin gives the column-density distribution 
 
 Shape agrees with the observational Prochaska+2014 fit across log N = 17.2 → 22 at every z-bin; amplitude sits 0.3-0.8 dex above observation at the DLA end. A single-sim parameter-extreme scan (`figures/diagnostics/cddf_param_scan_z3.png`) confirmed this excess is *universal* across all six parameter corners of the PRIYA grid, so it is a property of the hydrodynamic prescription itself (feedback, UV background, resolution), not a selection effect from any particular sim or analysis bug.
 
-### dN/dX vs z
+### dN/dX vs z — and how it compares to observations
 
-![dN/dX vs z per class](../figures/analysis/dndx_vs_z.png)
+![dN/dX vs z per class, with observational DLA overlays](../figures/analysis/dndx_vs_z.png)
 
-Absorber incidence in absorption-path units, averaged across 60 sims. All three classes rise smoothly with z as expected from the denser IGM. DLA incidence grows from 0.08 at z=2 to 0.28 at z=5.4 — consistent with Bird et al. 2015 and the Prochaska DLA samples extrapolated to higher z.
+Absorber incidence in absorption-path units, averaged across 60 sims. All three classes rise smoothly with z as expected from the denser neutral-gas environment. The red curve (PRIYA DLA dN/dX) is overlaid against four observational DLA surveys:
+
+| Symbol | Paper | Sample | z range |
+|---|---|---|---|
+| ■ | Prochaska & Wolfe 2009 | SDSS DR5 | 2.4–4.3 |
+| ▲ | Noterdaeme+2012 | BOSS DR9 | 2.16–3.56 |
+| ⬥ | Sanchez-Ramirez+2016 | SDSS DR12 | 2.15–4.25 |
+| ▼ | Crighton+2015 | Giant Gemini GMOS | 4.4, 5.0 |
+
+**PRIYA sits ~30-100 % above the observations at every z**, tapering toward closer agreement at the highest z-bin. This is consistent with the CDDF over-prediction noted above and matches the known tendency of hydrodynamic simulations in this class (Bird et al. 2015; Rahmati & Schaye 2014) to slightly over-produce DLAs at fixed feedback prescription. Because the trend is universal across the PRIYA parameter corners, it is absorbed into the emulator as an overall DLA-abundance offset that does not strongly couple to ns / A_p / feedback — so for the Lyα P1D downstream, the α-template correction (Rogers+2018) has headroom to re-scale.
 
 ## 3. Parameter sensitivity — which PRIYA parameters drive HCD abundance?
 
@@ -108,29 +117,31 @@ Rogers+2018 parameterise `P_total(k, z) / P_forest(k, z) = 1 + Σ_i α_i · f_z(
 
 ### Z-evolution of each template (one sim)
 
-18 snapshots of sim `ns0.803Ap2.2e-09…` (the min-ns corner of PRIYA), colour-coded by z:
+18 snapshots of sim `ns0.803Ap2.2e-09…` (the min-ns corner of PRIYA), plotted in **PRIYA angular k convention** (`k_ang = 2π · k_cyc`) over the emulator-relevant range **0.009 → 0.2 rad·s/km**, colour-coded by z:
 
-![Per-class ratio vs z for ns0.803](../figures/analysis/per_class_ratio_vs_z.png)
+![Per-class ratio vs z for ns0.803, PRIYA k](../figures/analysis/per_class_ratio_vs_z.png)
 
-- **LLS-only/P_clean** (left): mostly flat near 1.0 at z=2. At high z (yellow), rises to 1.6 at k=10⁻³ and to 2.5 at k near Nyquist — reflecting the higher LLS incidence and stronger per-LLS impact at high z, plus the Doppler-transition-width feature at small scales.
-- **subDLA-only/P_clean** (middle): modest excess at all z, generally within 5-20 % of unity.
-- **DLA-only/P_clean** (right): fairly flat across k at each z, ranging from ~1.1 at z=2 to ~1.5 at z=5.4. The characteristic low-k bump (from the saturated-core sinc profile) isn't as prominent as one might expect because the clean subset also has statistical forest power at low k.
+- **LLS-only / P_clean** (left): mostly flat near 1.0 at low z. At high z (yellow) the curve dips slightly toward unity then rises to 1.2-1.4 at the high-k edge (PRIYA k ≈ 0.2 rad·s/km). The grey dotted vertical marks **`k = 2π/b` at b=30 km/s ≈ 0.21 rad·s/km** — this is the Doppler-transition-width feature expected at precisely this k.
+- **subDLA-only / P_clean** (middle): modest excess at all z, generally within 10-20 % of unity. Same upturn toward k ≈ 0.2 as LLS but smaller.
+- **DLA-only / P_clean** (right): fairly flat across k at each z, ranging from ~1.3 at z=2 to ~1.4 at z=5.4. Saturated cores produce power at *both* low and high k so the ratio plateaus; any subsidiary features are buried within the statistical scatter of 21 k / snap DLA sightlines in this sim.
 
-Numerical snapshot at z=3 on the flagship sim:
+Numerical snapshot at z=3 on the flagship sim (**k in PRIYA angular convention**):
 
-| k (s/km cyclic) | LLS/clean | subDLA/clean | DLA/clean |
-|---:|---:|---:|---:|
-| 0.001 | 1.21 | 1.17 | 1.33 |
-| 0.005 | 1.05 | 1.07 | 1.27 |
-| 0.010 | 1.04 | 1.07 | 1.26 |
-| 0.020 | 1.05 | 1.07 | 1.28 |
-| 0.040 | 1.13 | 1.09 | 1.31 |
+| k_ang (rad·s/km) | k_cyc (s/km) | LLS/clean | subDLA/clean | DLA/clean |
+|---:|---:|---:|---:|---:|
+| 0.010 | 0.0016 | 1.18 | 1.15 | 1.32 |
+| 0.030 | 0.0048 | 1.05 | 1.07 | 1.27 |
+| 0.060 | 0.0095 | 1.04 | 1.07 | 1.26 |
+| 0.125 | 0.020 | 1.05 | 1.07 | 1.28 |
+| 0.200 | 0.032 | 1.09 | 1.08 | 1.28 |
 
-These feed directly into `hcd_analysis.hcd_template.fit_alpha` to recover the four α_i parameters per sim (Rogers template). For ns0.803 at z=3 the effective αs should be small (~0.03-0.1 per class) because the measured templates sit close to unity.
+These feed directly into `hcd_analysis.hcd_template.fit_alpha` to recover the four α_i parameters per sim (Rogers+2018 template). For ns0.803 at z=3 the effective αs will be small (~0.03-0.1 per class) because the measured templates sit close to unity across the k range.
 
-### Parameter-scan view — how do templates vary across the 60 LF sims?
+### Parameter-scan view — templates across 15 LF sims at z=3
 
-*Figure to be added once the per-class patch job completes for all 60 sims at z=3* — will show `per_class_ratio_vs_sim.png` with LLS/subDLA/DLA ratio curves colour-coded by A_p.
+![Per-class ratio vs LF sim at z=3](../figures/analysis/per_class_ratio_vs_sim.png)
+
+Colour-coded by A_p (initial power amplitude). Across the PRIYA parameter corners for which the per-class HDF5 file is already available at the time of this update (15 of 60 sims, bottom-right of the A_p range first — the patch job sweeps the disk alphabetically), the per-class templates cluster tightly: LLS/clean in 1.0-1.15, subDLA/clean in 1.05-1.15, DLA/clean in 1.25-1.4 at all k in [0.009, 0.2] rad·s/km. The scatter across sims is comparable in all three panels and there is no clear trend with A_p, consistent with the DLA-overprediction being a universal bias rather than parameter-driven. Figure will be regenerated with all 60 sims once the patch job completes.
 
 ## 6. Next steps
 
