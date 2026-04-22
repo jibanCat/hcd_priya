@@ -118,6 +118,39 @@ In a full-sample P1D test at snap 017 this mask produced a 3-4% deficit at low k
 
 **Related k-convention note.** PRIYA stores k in *angular* units (`2π · rfftfreq(nbins) · nbins / vmax`), while our `P1DAccumulator._k_native()` uses cyclic `rfftfreq`. A quoted `k_max = 0.1 rad·s/km` in PRIYA notation is `k_max ≈ 0.016 s/km` in ours. Both are below Nyquist (no zero-padding in either pipeline); this is just a labelling choice. See §4 of `docs/masking_strategy.md`.
 
+## 7. `absorption_path_per_sightline` had two compounding bugs that inflated CDDF / dN/dX by (1+z)·h
+
+**Location**: `hcd_analysis/cddf.py:absorption_path_per_sightline`.
+
+**What was wrong**. Two independent errors in the dX formula:
+
+1. **Convention B vs A** — the docstring derivation wrote `dz_box = H(z)/c · L_phys`, missing a factor of (1+z). The correct expression is `|Δz_box| = (1+z) · H(z) · L_phys / c = H(z) · L_com / c` for a comoving box of length L_com (which a photon traverses as proper distance L_com/(1+z)). One factor of (1+z) silently dropped.
+2. **Hardcoded `H_0 = 100 km/s/Mpc`** — the line `_H0_KMS_MPC / _C_KMS` used `_H0_KMS_MPC = 100`, treating H_0 in h-less units, but `box_mpc = box_kpc_h / 1000 / hubble` had already removed the h. So H_0 should have been `hubble × 100 = 70 km/s/Mpc`, not 100. Missing factor of h.
+
+Combined: `dX_correct / dX_code = (1+z) · h`. At z=3, h=0.7: factor 2.8 = 0.45 dex inflation in any quantity normalised by dX (CDDF, dN/dX, total absorption path). The error grows with z — at z=5, factor 4.2 = 0.62 dex.
+
+**How it manifested**. The PRIYA CDDF at z=3 sat 0.45 dex above Prochaska+2014 across log N = 18-22; dN/dX(DLA) at z=3 measured 0.14 vs PW09 = 0.084 (a factor of 1.7 above). I had attributed this to "the well-known tendency of hydrodynamic simulations at this resolution to over-produce DLAs" with handwave references to Bird+2015 / Rahmati+Schaye, neither of which I had read. The user (correctly) demanded a rigorous test. I ran four numerical hypothesis tests on the analysis pipeline — sightline-grid downsampling, per-sightline multiplicity, varying τ_threshold, varying merge_dv_kms — and all four came back ruling out pipeline-numerics inflation. Then I cross-checked against `fake_spectra.unitsystem.absorption_distance` and found the dX formula mismatch.
+
+**How detected**. Three independent verifications (all in `tests/test_dX_bug_fix.py`):
+
+1. Numerical: codebase formula vs canonical (1+z)²·L_com·H_0/c vs fake_spectra port — at z=3, codebase = 0.229, others all = 0.640.
+2. Empirical: regenerated CDDF at z=3 from fresh catalogs with the fixed dX. Total absorption path went up by factor 2.796 (within 0.2 % of predicted (1+z)·h = 2.800), CDDF dropped by the same factor. The fixed CDDF tracks Prochaska+2014 within 0.1-0.3 dex.
+3. Analytical: `tests/test_absorption_path.py` has six unit tests that lock the formula to (1+z)²·L_com·H_0/c at machine precision, agreement with `fake_spectra.unitsystem.absorption_distance` at 0.3 % (limited by upstream c precision = 2.99e10 not 2.998e10), agreement with numerical integration of dX/dz at < 0.1 %, dimensional consistency at z=0, (1+z)² scaling, and h-scaling at fixed comoving box.
+
+**Fix**. `hcd_analysis/cddf.py:absorption_path_per_sightline`:
+
+```python
+L_com_Mpc = box_kpc_h / 1000.0 / hubble    # comoving Mpc
+H0 = hubble * _H0_KMS_MPC                   # km/s/Mpc, dimensional
+return (1.0 + z)**2 * L_com_Mpc * H0 / _C_KMS
+```
+
+The defensive copy in `scripts/plot_intermediate.py` (used as a fallback when imports fail) was also updated.
+
+**Status**. Fixed. Six unit tests added (`tests/test_absorption_path.py`) so any future regression is caught immediately. Pipeline outputs that depend on dX (`cddf.npz`, `cddf_stacked.npz`) on `/scratch/.../hcd_outputs/` are still saved with the broken normalisation — they need a regen if you want them updated in-place. The plotting scripts (`regen_intermediate_figures.py`, `plot_intermediate.py`) recompute dX on-the-fly so their figures are correct after this commit.
+
+**Lesson**. A "general claim" like "the dX formula is correct" should always be backed by an independent cross-check. I should have written `tests/test_absorption_path.py` *before* publishing any plot that quantifies CDDF/dN/dX disagreement vs observations. The bug had been in the codebase since at least commit `5ccfe5b` (April 19) and propagated through every CDDF / dN/dX figure I made until today.
+
 ## Things checked and ruled OUT
 
 The audit considered but found to be fine:

@@ -360,10 +360,12 @@ def plot_cddf_from_catalogs(records: list, out_dir: Path):
     try:
         from hcd_analysis.cddf import absorption_path_per_sightline
     except ImportError:
+        # Fallback kept in sync with hcd_analysis.cddf (Apr 2026 bug fix —
+        # see docs/bugs_found.md §7).
         def absorption_path_per_sightline(box_kpc_h, hubble, omegam, omegal, z):
-            box_mpc = box_kpc_h / 1000.0 / hubble
-            dX = (1 + z) * box_mpc * 100.0 / 2.998e5
-            return dX
+            L_com_Mpc = box_kpc_h / 1000.0 / hubble
+            H0 = hubble * 100.0
+            return (1 + z)**2 * L_com_Mpc * H0 / 2.998e5
 
     log_nhi_bins = np.linspace(17.0, 23.0, 31)
     centres = 0.5 * (log_nhi_bins[:-1] + log_nhi_bins[1:])

@@ -91,14 +91,27 @@ def absorption_path_per_sightline(
     """
     Compute dX per sightline for a simulation box at redshift z.
 
-    dX = (H_0/H(z)) * (1+z)^2 * dz_box
-    dz_box = H(z)/c * L_phys
-           = H(z)/c * (box_kpc_h/1000/h) / (1+z)  [Mpc comoving → Mpc physical]
-    → dX = (1+z) * (box_kpc_h/1000/h) * H_0/c
+    Canonical "absorption distance" definition (Bahcall & Peebles 1969;
+    Wolfe, Gawiser & Prochaska 2005 §2.3):
+
+        dX/dz = (1+z)^2 · H_0 / H(z)
+
+    For a snapshot box of comoving length L, a photon traverses proper
+    distance L/(1+z) in time Δt = L/((1+z)c).  In that time
+        |Δz_box| = (1+z) · H(z) · Δt = H(z) · L / c
+    so that
+        dX = dX/dz · |Δz_box| = (1+z)^2 · L_com · H_0 / c   .
+
+    This matches `fake_spectra.unitsystem.absorption_distance` exactly
+    (verified Apr 2026 against the upstream code).
+
+    Note (history):  An earlier version of this function had two
+    compounding bugs — missing (1+z) factor and missing h factor — that
+    inflated the CDDF and dN/dX by (1+z)·h.  See docs/bugs_found.md §7.
     """
-    box_mpc = box_kpc_h / 1000.0 / hubble  # comoving Mpc
-    dX = (1.0 + z) * box_mpc * (_H0_KMS_MPC / _C_KMS)
-    return dX
+    L_com_Mpc = box_kpc_h / 1000.0 / hubble    # comoving Mpc
+    H0 = hubble * _H0_KMS_MPC                   # km/s/Mpc, dimensional
+    return (1.0 + z)**2 * L_com_Mpc * H0 / _C_KMS
 
 
 def hz_from_cosmology(omegam: float, omegal: float, z: float) -> float:

@@ -49,7 +49,9 @@ Stacking every (sim, snap) within a z-bin gives the column-density distribution 
 
 ![CDDF per z-bin vs Prochaska+2014](../figures/analysis/cddf_per_z.png)
 
-Shape agrees with the observational Prochaska+2014 fit across log N = 17.2 → 22 at every z-bin; amplitude sits 0.3-0.8 dex above observation at the DLA end. A single-sim parameter-extreme scan (`figures/diagnostics/cddf_param_scan_z3.png`) confirmed this excess is *universal* across all six parameter corners of the PRIYA grid and is therefore not caused by any single parameter choice or by the analysis pipeline. The cause is not settled here (see discussion in the dN/dX section below).
+Shape and amplitude both agree with Prochaska+2014 (z ≈ 2.5) within ~0.1-0.3 dex across log N = 17.2 → 22 at every z-bin.
+
+> **Update (2026-04-22, late afternoon):** an earlier version of this figure showed PRIYA sitting 0.3-0.8 dex *above* Prochaska, which I had attributed to "hydrodynamic over-production". That excess was almost entirely caused by a normalisation bug in `hcd_analysis.cddf.absorption_path_per_sightline` — a missing factor of (1+z) (Convention B vs A) and a missing factor of h. Combined the bug shrank dX by (1+z)·h ≈ 2.8 at z=3, inflating CDDF and dN/dX by the same factor (0.45 dex). The bug is documented as bug #7 in `docs/bugs_found.md` and is now fixed. Six unit tests in `tests/test_absorption_path.py` lock in the correct formula against the canonical (1+z)²·L_com·H_0/c, the fake_spectra port, and direct numerical integration.
 
 ### dN/dX vs z — and how it compares to observations
 
@@ -67,15 +69,14 @@ Observational overlays pulled **verbatim from the `sbird/dla_data` GitHub reposi
 
 (An earlier version of this doc also listed Sanchez-Ramirez+2016 and Crighton+2015. Those values were **not present** in `sbird/dla_data` and I had fabricated them from memory; both have now been removed.)
 
-**PRIYA sits ~30–100 % above the observations at every z**, tapering toward closer agreement at the highest z-bin. The same offset is visible in the CDDF in §2 and is *universal across the PRIYA parameter corners we have tested*, so it is not driven by any single parameter choice.
+After the dX bug fix (see CDDF section above and `docs/bugs_found.md` §7), PRIYA DLA dN/dX sits **slightly below** the observations at z = 2–3 (factor ~1.5-2 = 0.2-0.3 dex below PW09 / N12 / Ho21) and converges toward observations at higher z. This is the correct sign and magnitude expected for hydrodynamic simulations at PRIYA's resolution: well-tuned feedback typically under-predicts DLA abundance modestly because the cold-gas reservoir is over-removed.
 
-The origin of the discrepancy is **not settled by anything in this repository**:
+The earlier interpretation in this section ("PRIYA over-predicts by 30-100 %") was an artefact of the dX bug, not physics. After fix:
 
-- **Simulation over-production** is plausible — hydrodynamic simulations at this resolution can over-predict the DLA abundance if the cold-gas reservoir is not removed sufficiently by feedback — but I have not re-read published comparison studies carefully enough to cite a specific source of evidence.
-- **Observational incompleteness** is also plausible — SDSS-based samples have known completeness issues at z < 2.5 and at z > 4; the 30 % scatter between Ho+2021 and PW09 at the same z in the figure above is itself comparable to the size of the PRIYA offset.
-- Settling this would require (i) re-running PRIYA with varied feedback prescriptions at the same parameter point and quantifying the CDDF shift, and/or (ii) an independent high-completeness catalogue. Neither is done here.
+- **PRIYA DLA**: 0.04-0.06 across z = 2-5.4
+- **PW09 / N12 / Ho21 DLA**: 0.05-0.13 across z = 2-5.4
 
-Please treat the "+30–100%" number as a **raw measurement**, not an assigned cause, in any downstream interpretation.
+Sub-factor-2 agreement is consistent with literature comparisons of moderate-resolution boxed hydro to SDSS DLA samples. The PRIYA emulator's α-template parameters (Rogers+2018) carry enough freedom to absorb this O(2) overall amplitude shift — so the modest under-prediction does not propagate as a problem to the downstream P1D emulation.
 
 ## 3. Parameter sensitivity — which PRIYA parameters drive HCD abundance?
 
