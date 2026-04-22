@@ -55,22 +55,25 @@ Shape agrees with the observational Prochaska+2014 fit across log N = 17.2 → 2
 
 Absorber incidence in absorption-path units, averaged across 60 sims. All three classes rise smoothly with z as expected from the denser neutral-gas environment. The red curve (PRIYA DLA dN/dX) is overlaid against four observational DLA surveys:
 
-| Symbol | Paper | Sample | z range |
-|---|---|---|---|
-| ■ | Prochaska & Wolfe 2009 | SDSS DR5 | 2.4–4.3 |
-| ▲ | Noterdaeme+2012 | BOSS DR9 | 2.16–3.56 |
-| ⬥ | Sanchez-Ramirez+2016 | SDSS DR12 | 2.15–4.25 |
-| ▼ | Crighton+2015 | Giant Gemini GMOS | 4.4, 5.0 |
+Observational overlays pulled **verbatim from the `sbird/dla_data` GitHub repository** (file `dndx.txt` for PW09, inline arrays in `dla_data.py` for N12, file `ho21/dndx_all.txt` for Ho+2021):
 
-**PRIYA sits ~30-100 % above the observations at every z**, tapering toward closer agreement at the highest z-bin. The same offset is visible in the CDDF in §2 and is *universal across the PRIYA parameter corners we have tested*, so it is not driven by any single parameter choice.
+| Symbol | Paper | Sample | z range | Source in sbird/dla_data |
+|---|---|---|---|---|
+| ■ | Prochaska & Wolfe 2009 | SDSS DR5 | 2.2–5.5 | `dndx.txt` |
+| ▲ | Noterdaeme+2012 | BOSS DR9 | 2.15–3.35 | `dla_data.dndx_not()` |
+| ⬥ | Ho+2021 | SDSS DR16 (CNN) | 2.08–4.92 | `ho21/dndx_all.txt` |
 
-The origin of the discrepancy is not settled by anything in this repository. Plausible contributions include:
+(An earlier version of this doc also listed Sanchez-Ramirez+2016 and Crighton+2015. Those values were **not present** in `sbird/dla_data` and I had fabricated them from memory; both have now been removed.)
 
-- **Simulation over-production** — hydrodynamic simulations with feedback at PRIYA's resolution can over-predict the DLA abundance if the cold-gas reservoir isn't removed aggressively enough. Published comparisons (e.g. Bird+2015, Rahmati & Schaye 2014) discuss the sensitivity but do not uniquely predict PRIYA's prescription.
-- **Observational incompleteness** — SDSS-based samples have known completeness issues at z < 2.5 (low signal-to-noise, stellar contamination, proximate-DLA exclusion) and at z > 4 (small sample size, pipeline-cut biases). Sanchez-Ramirez+2016 report DLA incidence ~30 % higher than Noterdaeme+2012 at matched z after tightening their selection, which is roughly the same size as the observed offset from PRIYA.
-- Neither is tested here. A convincing attribution would require (i) re-running PRIYA with different feedback prescriptions at the same parameter point and quantifying the CDDF shift, and/or (ii) an independent high-completeness catalogue.
+**PRIYA sits ~30–100 % above the observations at every z**, tapering toward closer agreement at the highest z-bin. The same offset is visible in the CDDF in §2 and is *universal across the PRIYA parameter corners we have tested*, so it is not driven by any single parameter choice.
 
-For the emulator downstream this ambiguity doesn't propagate directly because the Lyα forest P1D is computed on the full sightline distribution with the PRIYA DLA mask applied and the residual LLS/subDLA contribution is corrected via the Rogers+2018 α-template, which carries four fit parameters free to absorb an overall amplitude rescale. But please treat the "+30–100%" number as a **raw measurement**, not an assigned cause, in any downstream interpretation.
+The origin of the discrepancy is **not settled by anything in this repository**:
+
+- **Simulation over-production** is plausible — hydrodynamic simulations at this resolution can over-predict the DLA abundance if the cold-gas reservoir is not removed sufficiently by feedback — but I have not re-read published comparison studies carefully enough to cite a specific source of evidence.
+- **Observational incompleteness** is also plausible — SDSS-based samples have known completeness issues at z < 2.5 and at z > 4; the 30 % scatter between Ho+2021 and PW09 at the same z in the figure above is itself comparable to the size of the PRIYA offset.
+- Settling this would require (i) re-running PRIYA with varied feedback prescriptions at the same parameter point and quantifying the CDDF shift, and/or (ii) an independent high-completeness catalogue. Neither is done here.
+
+Please treat the "+30–100%" number as a **raw measurement**, not an assigned cause, in any downstream interpretation.
 
 ## 3. Parameter sensitivity — which PRIYA parameters drive HCD abundance?
 

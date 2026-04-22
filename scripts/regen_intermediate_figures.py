@@ -67,53 +67,55 @@ def prochaska2014_logf(logN):
 
 
 # -----------------------------------------------------------------------------
-# Observational DLA dN/dX tabulations.
-# Values are quoted from the cited papers; NOT from a package —
-# keeping them here so the citation is visible alongside every datum.
+# Observational DLA dN/dX tabulations, taken verbatim from the sbird/dla_data
+# repository: https://github.com/sbird/dla_data  (files dndx.txt and
+# ho21/dndx_all.txt).  Only the papers with *published dN/dX vs z tables*
+# are overlaid here; papers reporting only CDDF or Ω_DLA (Peroux+05,
+# Zafar+13, Crighton+15, Ho21 CDDF-only files) are NOT included.
 # -----------------------------------------------------------------------------
 
-# Prochaska & Wolfe 2009 (SDSS DR5), MNRAS 391, 1499 — Table 2 (log N_HI ≥ 20.3)
-#   z_center, dN/dX, σ_dN/dX
+# Prochaska & Wolfe 2009 (SDSS DR5), arXiv:0811.2003 — from dla_data/dndx.txt.
+#   columns: z_low, z_high, l_DLA, err_l_DLA, rho_HI(10^8 M_sun/Mpc^3), err_rho_HI
+#   we skip the overall z=[2.2, 5.5] bin (first row) and use the 6 narrower bins.
 PW09_DLA = np.array([
-    [2.4, 0.066, 0.004],
-    [2.8, 0.082, 0.005],
-    [3.1, 0.078, 0.006],
-    [3.4, 0.091, 0.010],
-    [3.7, 0.094, 0.015],
-    [4.0, 0.115, 0.026],
-    [4.3, 0.149, 0.067],
+    # z_lo  z_hi  l_DLA  err
+    [2.2, 2.4, 0.048, 0.006],
+    [2.4, 2.7, 0.055, 0.005],
+    [2.7, 3.0, 0.067, 0.006],
+    [3.0, 3.5, 0.084, 0.006],
+    [3.5, 4.0, 0.075, 0.009],
+    [4.0, 5.5, 0.106, 0.018],
 ])
 
-# Noterdaeme et al. 2012 (BOSS DR9), A&A 547, L1 — Table 4 (log N_HI ≥ 20.3)
-#   z_center, dN/dX, σ_dN/dX
-N12_DLA = np.array([
-    [2.16, 0.0615, 0.0055],
-    [2.36, 0.0695, 0.0045],
-    [2.56, 0.0750, 0.0050],
-    [2.76, 0.0825, 0.0050],
-    [2.96, 0.0980, 0.0065],
-    [3.16, 0.1010, 0.0080],
-    [3.36, 0.1160, 0.0100],
-    [3.56, 0.1350, 0.0140],
-])
+# Noterdaeme+2012 (BOSS DR9), arXiv:1210.1213 — reproduced from dla_data/dla_data.py:
+#     dndz = [0.2, 0.2, 0.25, 0.29, 0.36]
+#     zz   = [2.15, 2.45, 2.75, 3.05, 3.35]
+#     dzdx = [3690/11625, 4509/14841, 2867/9900, 1620/5834, 789/2883]
+#     dN/dX = dndz * dzdx
+#     xerr fixed at 0.15 (per-bin half-width); y-error bars not given in the code
+N12_Z  = np.array([2.15, 2.45, 2.75, 3.05, 3.35])
+N12_DNDZ = np.array([0.20, 0.20, 0.25, 0.29, 0.36])
+N12_DZDX = np.array([3690/11625., 4509/14841., 2867/9900., 1620/5834., 789/2883.])
+N12_DLA = np.column_stack([N12_Z, N12_DNDZ * N12_DZDX])
 
-# Crighton et al. 2015 (high-z, Giant-Gemini-GMOS), MNRAS 452, 217 — Table 3
-#   z_center, dN/dX, σ_dN/dX_low, σ_dN/dX_high
-C15_DLA = np.array([
-    [4.4, 0.170, 0.030, 0.030],
-    [5.0, 0.220, 0.050, 0.060],
+# Ho et al. 2021 (SDSS DR16, CNN DLA finder).  From dla_data/ho21/dndx_all.txt.
+# Row 0: z centres (18 bins from 2.08 to 4.92).  Row 1: median dN/dX.
+# Rows 2-3: 68% CI lower/upper.  Rows 4-5: 95% CI lower/upper.
+HO21_DNDX_Z = np.array([
+    2.083, 2.250, 2.417, 2.583, 2.750, 2.917, 3.083, 3.250, 3.417, 3.583,
+    3.750, 3.917, 4.083, 4.250, 4.417, 4.583, 4.750, 4.917,
 ])
-
-# Sanchez-Ramirez et al. 2016 (SDSS DR12+), MNRAS 456, 4488 — Table 3
-#   z_center, dN/dX, σ_dN/dX
-SR16_DLA = np.array([
-    [2.150, 0.0441, 0.0106],
-    [2.500, 0.0604, 0.0076],
-    [2.850, 0.0711, 0.0074],
-    [3.200, 0.0819, 0.0082],
-    [3.550, 0.1132, 0.0116],
-    [3.900, 0.1373, 0.0166],
-    [4.250, 0.1664, 0.0245],
+HO21_DNDX_MEDIAN = np.array([
+    0.0337, 0.0430, 0.0462, 0.0494, 0.0622, 0.0664, 0.0706, 0.0748, 0.0763,
+    0.0777, 0.0630, 0.0646, 0.0577, 0.0725, 0.1015, 0.0821, 0.1033, 0.0674,
+])
+HO21_DNDX_68_LO = np.array([
+    0.0330, 0.0421, 0.0452, 0.0482, 0.0607, 0.0647, 0.0685, 0.0722, 0.0729,
+    0.0736, 0.0584, 0.0583, 0.0503, 0.0637, 0.0888, 0.0684, 0.0812, 0.0506,
+])
+HO21_DNDX_68_HI = np.array([
+    0.0345, 0.0438, 0.0472, 0.0506, 0.0637, 0.0682, 0.0729, 0.0777, 0.0800,
+    0.0822, 0.0687, 0.0717, 0.0666, 0.0857, 0.1205, 0.1049, 0.1402, 0.1180,
 ])
 
 
@@ -306,20 +308,29 @@ dndx_zs = np.array(dndx_zs)
 for c, color in [("LLS","C2"),("subDLA","C1"),("DLA","C3")]:
     ax.plot(dndx_zs, np.array(dndx_per_class[c]), "o-", color=color, label=f"PRIYA sim ({c})", lw=1.5, ms=4)
 
-# Overlay observational DLA dN/dX tabulations (all log N_HI ≥ 20.3)
-ax.errorbar(PW09_DLA[:,0], PW09_DLA[:,1], yerr=PW09_DLA[:,2],
+# Overlay observational DLA dN/dX tabulations (all log N_HI ≥ 20.3 where
+# specified; taken from sbird/dla_data verbatim).
+
+# PW09: bin-edge format — show as horizontal error bars in z + y error
+z_mid_pw09 = 0.5*(PW09_DLA[:,0] + PW09_DLA[:,1])
+z_err_pw09 = 0.5*(PW09_DLA[:,1] - PW09_DLA[:,0])
+ax.errorbar(z_mid_pw09, PW09_DLA[:,2],
+             xerr=z_err_pw09, yerr=PW09_DLA[:,3],
              fmt="s", color="black", ms=6, capsize=3,
              label="Prochaska & Wolfe 2009 (SDSS DR5)")
-ax.errorbar(N12_DLA[:,0], N12_DLA[:,1], yerr=N12_DLA[:,2],
-             fmt="^", color="dimgray", ms=6, capsize=3,
+
+# N12: no y-errors provided; use half-bin x-error only (0.15)
+ax.errorbar(N12_DLA[:,0], N12_DLA[:,1],
+             xerr=0.15, fmt="^", color="dimgray", ms=6, capsize=3,
              label="Noterdaeme+2012 (BOSS DR9)")
-ax.errorbar(SR16_DLA[:,0], SR16_DLA[:,1], yerr=SR16_DLA[:,2],
-             fmt="D", color="darkslategray", ms=6, capsize=3,
-             label="Sanchez-Ramirez+2016 (SDSS DR12)")
-ax.errorbar(C15_DLA[:,0], C15_DLA[:,1],
-             yerr=[C15_DLA[:,2], C15_DLA[:,3]],
-             fmt="v", color="slategray", ms=6, capsize=3,
-             label="Crighton+2015 (GGG, z≥4)")
+
+# Ho+2021: median with asymmetric 68% CI error bars
+ho21_yerr_lo = HO21_DNDX_MEDIAN - HO21_DNDX_68_LO
+ho21_yerr_hi = HO21_DNDX_68_HI  - HO21_DNDX_MEDIAN
+ax.errorbar(HO21_DNDX_Z, HO21_DNDX_MEDIAN,
+             yerr=[ho21_yerr_lo, ho21_yerr_hi],
+             fmt="D", color="darkslategray", ms=5, capsize=3, alpha=0.85,
+             label="Ho+2021 (SDSS DR16)")
 
 ax.set_yscale("log")
 ax.set_xlabel("z"); ax.set_ylabel("dN/dX")

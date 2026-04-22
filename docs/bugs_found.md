@@ -19,7 +19,7 @@ with `c` in cm/s but the Voigt profile φ_v returned in (km/s)⁻¹. Two indepen
 
    ∫σ(v) dv = **π** · e² · f · λ / (m_e · c)
 
-   (Ladenburg–Reiche sum rule; Draine 2011 *Physics of the ISM* eq. 6.15). The codebase used √π instead of π.
+   (Ladenburg–Reiche sum rule; standard result in Lyα absorption textbooks). The codebase used √π instead of π.
 
 Combined, `_SIGMA_PREFACTOR` was a factor of √π · 10⁵ = 1.77 × 10⁵ too large relative to the correct velocity-space sum rule.
 
@@ -30,7 +30,7 @@ Combined, `_SIGMA_PREFACTOR` was a factor of √π · 10⁵ = 1.77 × 10⁵ too 
 **How it was detected**. Two steps:
 
 1. The NHI injection test (`tests/test_nhi_recovery.py`) showed the fitter is self-consistent on clean synthetic input (synthesise and fit with the same broken Voigt profile → round-trip works). This was initially reassuring but deceptive.
-2. A **cross-normalisation** test was added that synthesised τ using an independent physical formula (`tau_voigt_physical` in the same test file, which uses the canonical oscillator-strength formula verbatim from Draine §6.1) and then ran the codebase's fit. That test showed a 0.25 dex residual bias after the first (×10⁵) fix — which is exactly log₁₀(√π). That led to the second fix.
+2. A **cross-normalisation** test was added that synthesised τ using an independent physical formula (`tau_voigt_physical` in the same test file, which uses the canonical oscillator-strength formula) and then ran the codebase's fit. That test showed a 0.25 dex residual bias after the first (×10⁵) fix — which is exactly log₁₀(√π). That led to the second fix.
 3. A direct sum-rule check — `∫τ(v)dv = N_HI · _SIGMA_PREFACTOR` on a fine velocity grid — gave ratio = 1.0000 only after both corrections.
 
 **The fix**. `hcd_analysis/voigt_utils.py`:
@@ -49,7 +49,7 @@ and the compensating `* 1e5` factors in `fit_nhi_from_tau`'s initial guess (line
 **Verification**. After the fix:
 
 - `tests/test_tau_sum_rule.py`: sum-rule ratio = 1.0000 for all (log N, b) on the test grid.
-- For NHI = 10²⁰·³, b = 30 km/s, the codebase's `tau_voigt` peak = 5.04 × 10⁶, matching Draine 2011 eq. 6.28 to all displayed digits.
+- For NHI = 10²⁰·³, b = 30 km/s, the codebase's `tau_voigt` peak = 5.04 × 10⁶, which matches the canonical textbook τ_peak formula I derived independently from first principles.
 - Real-data spot check on 10 sightlines with max(τ) > 10⁷: post-fix fits give log N ∈ [20.99, 21.87] (all DLAs), pre-fix fits gave log N ∈ [15.99, 16.87] (all discarded).
 - Snap 017 + snap 010 full rebuilds track Prochaska+2014 CDDF within 0.3–0.8 dex — see `docs/fast_mode_physics.md` §Validation.
 

@@ -20,7 +20,7 @@ The oscillator-strength sum rule goes back to Ladenburg & Reiche (1913). In any 
 
 $$\int \sigma(\nu)\,d\nu \;=\; \frac{\pi e^2}{m_e c}\, f_{lu}$$
 
-(Draine 2011, *Physics of the Interstellar and Intergalactic Medium*, eq. 6.15; Peebles 1993 *Principles of Physical Cosmology* §23; Padmanabhan 2002 *Theoretical Astrophysics Vol. II* §9.4.)
+This is a standard result in any Lyα-absorption textbook treatment (e.g. Draine 2011, *Physics of the Interstellar and Intergalactic Medium*; note I am citing the book generally rather than a specific equation number I have not personally checked).
 
 Converting from frequency to velocity via $d\nu = (\nu_0/c)\,dv = dv/\lambda_0$:
 
@@ -59,7 +59,7 @@ The observational equivalent width
 
 $$EW_F \;=\; \int \left(1 - F(v)\right) dv$$
 
-grows linearly with N_HI in the optically thin regime (τ ≪ 1 so 1 − F ≈ τ), then saturates at the core width (the flat part of the curve of growth), then grows as √N_HI when damping wings become important (Draine 2011, Fig. 6.2). The famous consequence: for a DLA, the EW only constrains N_HI through the square-root wing dependence, and one must perform a **damping-wing fit** to extract N_HI.
+grows linearly with N_HI in the optically thin regime (τ ≪ 1 so 1 − F ≈ τ), then saturates at the core width (the flat part of the curve of growth), then grows as √N_HI when damping wings become important (standard curve-of-growth result in any absorption textbook). The famous consequence: for a DLA, the EW only constrains N_HI through the square-root wing dependence, and one must perform a **damping-wing fit** to extract N_HI.
 
 In fake_spectra output we do not have this problem. The stored quantity is τ itself, as a float32 up to ~10³⁸. A DLA with τ_peak ≈ 10⁶·⁷ is just a normal number. Summing τ over the pixels recovers ∫τdv without any saturation issue. The oscillator-strength sum rule then gives N_HI directly.
 
@@ -132,7 +132,7 @@ Factor ~1.85 variation between extremes, scaling with `Ap` as expected (more ini
 
 ![param scan](../figures/diagnostics/cddf_param_scan_z3.png)
 
-Interpretation: the residual excess is universal across the PRIYA parameter extremes and is therefore a property of the hydrodynamic modelling itself (feedback prescription, resolution, UV background), not of any particular parameter choice and not of our analysis pipeline (which is identical across all sims). A rigorous attribution would need to compare against published CDDFs from matched simulations (e.g. Bird et al. 2015 with the same UV background and feedback); for now the statement is just "this excess is universal at z = 3 across PRIYA parameter extremes."
+Interpretation: the residual excess is universal across the PRIYA parameter extremes tested and is therefore not driven by any particular parameter choice and not by our analysis pipeline (which is identical across all sims). Whether it reflects (a) a real over-production by the simulation or (b) incompleteness in the observational samples we use for comparison is not settled by anything in this repository — see §Validation in `docs/analysis.md` for a more careful discussion.
 
 ## Implications for masking
 
@@ -146,11 +146,9 @@ My earlier recommendation of a "τ-space per-class mask generalisation" was wron
 
 ## References
 
-- **Ladenburg, R. & Reiche, F.** 1913, *Annalen der Physik*, 346, 181 — original sum rule statement.
-- **Draine, B. T.** 2011, *Physics of the Interstellar and Intergalactic Medium*, Princeton University Press — Chapter 6, especially §6.1 (oscillator strengths and absorption cross section) and eq. 6.15–6.28.
-- **Peebles, P. J. E.** 1993, *Principles of Physical Cosmology*, Princeton University Press — §23 for Lyman-α absorption cross sections.
-- **Padmanabhan, T.** 2002, *Theoretical Astrophysics, Vol. II: Stars and Stellar Systems*, Cambridge — §9.4 radiative transitions.
-- **Prochaska, J. X., Herbert-Fort, S., & Wolfe, A. M.** 2005, *ApJ*, 635, 123; **Prochaska, J. X. et al.** 2014, *MNRAS*, 438, 476 — observational DLA CDDF used here as the validation reference.
-- **Rogers, K. K., Bird, S., Peiris, H. V. et al.** 2018, *MNRAS*, 476, 3716 (arXiv:1706.08532) — the HCD-template reference that motivates the P1D masking scheme.
-- **Bird, S., Haehnelt, M. G., Neeleman, M. et al.** 2015, *MNRAS*, 447, 1834 — hydrodynamic simulation predictions of the DLA CDDF and feedback sensitivity.
+- **Ladenburg, R. & Reiche, F.** 1913, *Annalen der Physik*, **347**, 181 ("Über selektive Absorption") — original oscillator-strength sum-rule paper (verified on NASA ADS bibcode 1913AnP...347..181L).
+- **Draine, B. T.** 2011, *Physics of the Interstellar and Intergalactic Medium*, Princeton University Press — cited as a standard textbook reference; I have not personally re-checked specific equation numbers.
+- **Prochaska, J. X., Madau, P., O'Meara, J. M., & Fumagalli, M.** 2014, *MNRAS*, **438**, 476 (arXiv:1310.0052) — validated against Table 2 "Results for Spline Model (Figure 7)"; the 8 spline knot values in our code match exactly. The fit is quoted by the paper as applying at **z ≈ 2.5**; our use of it at higher z in `cddf_per_z.png` is **extrapolation**, not a claim backed by the paper.
+- **Rogers, K. K., Bird, S., Peiris, H. V., Pontzen, A., Font-Ribera, A., Leistedt, B.** 2018, *MNRAS*, **476**, 3716 (arXiv:1706.08532) — the HCD-template reference that motivates the P1D spatial-mask recipe and the α-parameter correction.
 - **Bird, S.** `fake_spectra` — https://github.com/sbird/fake_spectra — the spectral generation code whose output we consume; uses the canonical oscillator-strength normalisation.
+- **Bird, S.** `dla_data` — https://github.com/sbird/dla_data — repository of observational DLA CDDF / dN/dX tabulations. Our `regen_intermediate_figures.py` script pulls the PW09, N12, and Ho+2021 dN/dX tables verbatim from this repo. No other observational comparison data is used.
