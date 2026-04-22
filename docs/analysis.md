@@ -47,7 +47,7 @@ Stacking every (sim, snap) within a z-bin gives the column-density distribution 
 
 ![CDDF per z-bin vs Prochaska+2014](../figures/analysis/cddf_per_z.png)
 
-Shape agrees with the observational Prochaska+2014 fit across log N = 17.2 → 22 at every z-bin; amplitude sits 0.3-0.8 dex above observation at the DLA end. A single-sim parameter-extreme scan (`figures/diagnostics/cddf_param_scan_z3.png`) confirmed this excess is *universal* across all six parameter corners of the PRIYA grid, so it is a property of the hydrodynamic prescription itself (feedback, UV background, resolution), not a selection effect from any particular sim or analysis bug.
+Shape agrees with the observational Prochaska+2014 fit across log N = 17.2 → 22 at every z-bin; amplitude sits 0.3-0.8 dex above observation at the DLA end. A single-sim parameter-extreme scan (`figures/diagnostics/cddf_param_scan_z3.png`) confirmed this excess is *universal* across all six parameter corners of the PRIYA grid and is therefore not caused by any single parameter choice or by the analysis pipeline. The cause is not settled here (see discussion in the dN/dX section below).
 
 ### dN/dX vs z — and how it compares to observations
 
@@ -62,7 +62,15 @@ Absorber incidence in absorption-path units, averaged across 60 sims. All three 
 | ⬥ | Sanchez-Ramirez+2016 | SDSS DR12 | 2.15–4.25 |
 | ▼ | Crighton+2015 | Giant Gemini GMOS | 4.4, 5.0 |
 
-**PRIYA sits ~30-100 % above the observations at every z**, tapering toward closer agreement at the highest z-bin. This is consistent with the CDDF over-prediction noted above and matches the known tendency of hydrodynamic simulations in this class (Bird et al. 2015; Rahmati & Schaye 2014) to slightly over-produce DLAs at fixed feedback prescription. Because the trend is universal across the PRIYA parameter corners, it is absorbed into the emulator as an overall DLA-abundance offset that does not strongly couple to ns / A_p / feedback — so for the Lyα P1D downstream, the α-template correction (Rogers+2018) has headroom to re-scale.
+**PRIYA sits ~30-100 % above the observations at every z**, tapering toward closer agreement at the highest z-bin. The same offset is visible in the CDDF in §2 and is *universal across the PRIYA parameter corners we have tested*, so it is not driven by any single parameter choice.
+
+The origin of the discrepancy is not settled by anything in this repository. Plausible contributions include:
+
+- **Simulation over-production** — hydrodynamic simulations with feedback at PRIYA's resolution can over-predict the DLA abundance if the cold-gas reservoir isn't removed aggressively enough. Published comparisons (e.g. Bird+2015, Rahmati & Schaye 2014) discuss the sensitivity but do not uniquely predict PRIYA's prescription.
+- **Observational incompleteness** — SDSS-based samples have known completeness issues at z < 2.5 (low signal-to-noise, stellar contamination, proximate-DLA exclusion) and at z > 4 (small sample size, pipeline-cut biases). Sanchez-Ramirez+2016 report DLA incidence ~30 % higher than Noterdaeme+2012 at matched z after tightening their selection, which is roughly the same size as the observed offset from PRIYA.
+- Neither is tested here. A convincing attribution would require (i) re-running PRIYA with different feedback prescriptions at the same parameter point and quantifying the CDDF shift, and/or (ii) an independent high-completeness catalogue.
+
+For the emulator downstream this ambiguity doesn't propagate directly because the Lyα forest P1D is computed on the full sightline distribution with the PRIYA DLA mask applied and the residual LLS/subDLA contribution is corrected via the Rogers+2018 α-template, which carries four fit parameters free to absorb an overall amplitude rescale. But please treat the "+30–100%" number as a **raw measurement**, not an assigned cause, in any downstream interpretation.
 
 ## 3. Parameter sensitivity — which PRIYA parameters drive HCD abundance?
 
@@ -117,7 +125,7 @@ Rogers+2018 parameterise `P_total(k, z) / P_forest(k, z) = 1 + Σ_i α_i · f_z(
 
 ### Z-evolution of each template (one sim)
 
-18 snapshots of sim `ns0.803Ap2.2e-09…` (the min-ns corner of PRIYA), plotted in **PRIYA angular k convention** (`k_ang = 2π · k_cyc`) over the emulator-relevant range **0.009 → 0.2 rad·s/km**, colour-coded by z:
+18 snapshots of sim `ns0.803Ap2.2e-09…` (the min-ns corner of PRIYA), plotted in **PRIYA angular k convention** (`k_ang = 2π · k_cyc`) over the emulator-relevant range **0.009 → 0.10 rad·s/km**, colour-coded by z:
 
 ![Per-class ratio vs z for ns0.803, PRIYA k](../figures/analysis/per_class_ratio_vs_z.png)
 
@@ -125,15 +133,15 @@ Rogers+2018 parameterise `P_total(k, z) / P_forest(k, z) = 1 + Σ_i α_i · f_z(
 - **subDLA-only / P_clean** (middle): modest excess at all z, generally within 10-20 % of unity. Same upturn toward k ≈ 0.2 as LLS but smaller.
 - **DLA-only / P_clean** (right): fairly flat across k at each z, ranging from ~1.3 at z=2 to ~1.4 at z=5.4. Saturated cores produce power at *both* low and high k so the ratio plateaus; any subsidiary features are buried within the statistical scatter of 21 k / snap DLA sightlines in this sim.
 
-Numerical snapshot at z=3 on the flagship sim (**k in PRIYA angular convention**):
+Numerical snapshot at z=3 on the flagship sim (**k in PRIYA angular convention**, range 0.009–0.10 rad·s/km):
 
 | k_ang (rad·s/km) | k_cyc (s/km) | LLS/clean | subDLA/clean | DLA/clean |
 |---:|---:|---:|---:|---:|
-| 0.010 | 0.0016 | 1.18 | 1.15 | 1.32 |
-| 0.030 | 0.0048 | 1.05 | 1.07 | 1.27 |
-| 0.060 | 0.0095 | 1.04 | 1.07 | 1.26 |
-| 0.125 | 0.020 | 1.05 | 1.07 | 1.28 |
-| 0.200 | 0.032 | 1.09 | 1.08 | 1.28 |
+| 0.009 | 0.00143 | 1.21 | 1.17 | 1.33 |
+| 0.020 | 0.00318 | 1.11 | 1.10 | 1.29 |
+| 0.040 | 0.00637 | 1.05 | 1.07 | 1.26 |
+| 0.060 | 0.00955 | 1.04 | 1.07 | 1.26 |
+| 0.100 | 0.01592 | 1.04 | 1.07 | 1.27 |
 
 These feed directly into `hcd_analysis.hcd_template.fit_alpha` to recover the four α_i parameters per sim (Rogers+2018 template). For ns0.803 at z=3 the effective αs will be small (~0.03-0.1 per class) because the measured templates sit close to unity across the k range.
 
@@ -143,7 +151,17 @@ These feed directly into `hcd_analysis.hcd_template.fit_alpha` to recover the fo
 
 Colour-coded by A_p (initial power amplitude). Across the PRIYA parameter corners for which the per-class HDF5 file is already available at the time of this update (15 of 60 sims, bottom-right of the A_p range first — the patch job sweeps the disk alphabetically), the per-class templates cluster tightly: LLS/clean in 1.0-1.15, subDLA/clean in 1.05-1.15, DLA/clean in 1.25-1.4 at all k in [0.009, 0.2] rad·s/km. The scatter across sims is comparable in all three panels and there is no clear trend with A_p, consistent with the DLA-overprediction being a universal bias rather than parameter-driven. Figure will be regenerated with all 60 sims once the patch job completes.
 
-## 6. Next steps
+## 6. HiRes vs LF convergence — T(k) = P1D_hires / P1D_LF
+
+HiRes campaign completed (job 48476499, ~5 h 16 min walltime) with 4 sims × ~18 snaps. 3 of those sims have matching LF parameter points, giving a direct convergence test:
+
+![T(k) convergence ratio for 3 matched sims](../figures/analysis/convergence_Tk.png)
+
+*Left:* unmasked `all` P1D. *Right:* after the PRIYA DLA mask. Both panels use PRIYA angular k, range 0.009 → 0.10 rad·s/km, colour-coded by z across 2.0–5.4. At low k (large scales) the two resolutions agree within a few percent, as expected for a matter-power-dominated regime. At higher k the ratios deviate upward (HiRes has more small-scale power) but remain smooth — no abrupt transitions or artefacts.
+
+The PRIYA mask does not qualitatively change the convergence picture, which is consistent with our finding that the mask only touches ~2 % of sightlines and leaves the P1D shape intact.
+
+## 7. Next steps
 
 1. **Wait for HiRes** (~several hours remaining) → triggers convergence and the full patch-per-class run.
 2. **Run the per-class patch script** (`scripts/patch_per_class_p1d.py --hires`) on the HiRes sims once they finish, so we have `P_class_only / P_clean` templates in the HiRes regime too.
