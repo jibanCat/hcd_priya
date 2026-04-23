@@ -138,11 +138,17 @@ Stale figures in `figures/intermediate/`: pre-audit; ignore.
 
 ### Priority 1 — known science-relevant issues
 
-1. **Convergence pipeline z-mismatch bug** (flagged in `docs/analysis.md` §7). `compute_convergence_ratios` in `hcd_analysis/pipeline.py` matches LF↔HR snapshots by snap folder name (`snap_NNN`), but LF and HR use different `Snapshots.txt` tables — same snap number is ~0.2 higher in z on HR than on LF. The ratio `T(k)` therefore mixes resolution with z-evolution. Fix: match by z within tolerance.
-   ```python
-   # Proposed: for each HR snap z_HR, find LF snap with |z_LF - z_HR| < 0.05
-   # and ratio those.  Skip if no match.  Rerun takes <1 min (p1d.npz already exists).
-   ```
+1. ~~**Convergence pipeline z-mismatch bug.**~~ **FIXED 2026-04-22 session 2.** `compute_convergence_ratios` in `hcd_analysis/pipeline.py` now matches LF↔HR snapshots by redshift (closest `|z_LF - z_HR| ≤ z_tol`, default 0.05), not by snap folder name. Six unit tests in `tests/test_convergence_z_match.py` lock the behaviour. Rerun against the 3 matched HiRes sims produced 53 z-matched pairs (all within |Δz|≤0.006); `figures/analysis/convergence_Tk.png` regenerated without the warning banner. See `docs/analysis.md` §6 for the updated science read-out (T(k) ≈ 1 at mid-k, standard resolution fall-off at high k).
+
+**Additional HCD analyses landed same session (§7-9 in analysis.md):**
+   - Bootstrap on dN/dX(DLA): 0/5000 samples reach any observational value → under-prediction vs PW09/N12/Ho21 is statistically significant (`scripts/hypothesis_dndx_and_ap.py`).
+   - Partial Spearman(A_p, counts | ns) = 0.90–0.93 > raw 0.83–0.84 → A_p dominance is *stronger* after controlling for ns covariance.
+   - Ω_HI + dN/dX per-class parameter sensitivity (60 LF sims, z=3): A_p dominates; Ω_HI also shows strong anti-correlation with h (−0.41 to −0.50, partly definitional) (`scripts/plot_hcd_param_sensitivity.py`).
+   - HR/LF convergence of HCD scalars: 1–4 % across-sim spread in R = Q_HR / Q_LF; MF recommended for Ω_HI(DLA), LLS scalars (`scripts/hf_lf_scalar_convergence.py`).
+   - HR/LF convergence of per-class P1D templates: 0.4–0.6 % RMS at mid-k, 5–7 % peak at low k (`scripts/hf_lf_template_convergence.py`).
+   - Analytical MF: 1-parameter linear-in-A_p cuts HR/LF error by 60–90 % for DLA scalars, 30–35 % for templates. No GP needed for a first-pass correction (`scripts/mf_analytical_fit.py`).
+   - Ω_HI formula locked: 4 unit tests in `tests/test_omega_hi.py`.
+   - Per-(sim, z) HCD summary HDF5: `figures/analysis/hcd_summary_{lf,hr}.h5` (1076 LF + 70 HR records).
 
 2. **cddf.npz / cddf_stacked.npz on scratch have broken-dX normalisation.** Options:
    - (a) rerun pipeline (~6 h, regens catalogs AND cddf.npz).

@@ -564,18 +564,83 @@ def run_hires(cfg: PipelineConfig) -> Dict[str, List[Optional[SnapResult]]]:
     return {ss.sim.name: res for ss, res in zip(snap_map, all_results_flat)}
 
 
+def _load_snap_z_map(sim_dir: Path) -> Dict[str, Tuple[Path, float]]:
+    """
+    Return {snap_name: (path, z)} for every completed snap in sim_dir.
+    A snap is considered completed iff its `done` sentinel and a parseable
+    meta.json with a numeric 'z' field both exist.
+    """
+    out: Dict[str, Tuple[Path, float]] = {}
+    if not sim_dir.is_dir():
+        return out
+    for p in sorted(sim_dir.iterdir()):
+        if not p.is_dir() or not p.name.startswith("snap_"):
+            continue
+        if not (p / "done").exists():
+            continue
+        meta_path = p / "meta.json"
+        if not meta_path.exists():
+            continue
+        try:
+            z = float(json.load(open(meta_path))["z"])
+        except Exception:
+            continue
+        out[p.name] = (p, z)
+    return out
+
+
+def _match_snaps_by_z(
+    lf_snaps: Dict[str, Tuple[Path, float]],
+    hf_snaps: Dict[str, Tuple[Path, float]],
+    z_tol: float,
+) -> List[Tuple[str, Path, float, str, Path, float]]:
+    """
+    For every HR snap, pick the LF snap with the smallest |z_LF - z_HR|,
+    provided the gap is ≤ z_tol.  Ties (equal |Δz|) are broken by the
+    lower LF snap number so the match is deterministic.
+
+    Returns a list of (hf_name, hf_path, hf_z, lf_name, lf_path, lf_z)
+    tuples, ordered by hf_z.
+    """
+    matches = []
+    # Iterate HR snaps in snap-name order for stability; sort output by z below.
+    for hf_name, (hf_p, hf_z) in sorted(hf_snaps.items()):
+        best = None  # (|Δz|, lf_name, lf_p, lf_z)
+        for lf_name, (lf_p, lf_z) in sorted(lf_snaps.items()):
+            dz = abs(lf_z - hf_z)
+            if dz > z_tol:
+                continue
+            # Strictly-less keeps the first (lowest-snap) winner on ties.
+            if best is None or dz < best[0]:
+                best = (dz, lf_name, lf_p, lf_z)
+        if best is None:
+            continue
+        _, lf_name, lf_p, lf_z = best
+        matches.append((hf_name, hf_p, hf_z, lf_name, lf_p, lf_z))
+    matches.sort(key=lambda m: m[2])
+    return matches
+
+
 def compute_convergence_ratios(
     cfg: PipelineConfig,
     variants: Optional[List[str]] = None,
+    z_tol: float = 0.05,
 ) -> Dict:
     """
     Compute HiRes/LowRes P1D convergence ratios T(k) = P1D_hires / P1D_lowres
     for matching simulation parameter points.
 
-    Matching is done by sim folder name. Only sims present in BOTH data_roots
-    are included.
+    Sim matching is by sim folder name.  Snapshot matching is by redshift
+    (closest |z_LF - z_HR| ≤ z_tol), NOT by snap folder name — the two
+    suites' Snapshots.txt tables are offset by one snap, so same-snap
+    matching mixes resolution with z-evolution.  HR snaps with no LF
+    match inside z_tol are skipped.
 
-    Returns dict: sim_name → z → variant → {'k', 'T_k'}
+    Each resulting (z, variant) entry uses the HR z as its label, since
+    the HR set is the anchor (fewer snaps, each tested against its
+    closest LF epoch).
+
+    Returns dict: sim_name → z_HR → variant → {'k', 'T_k'}
     """
     if variants is None:
         variants = ["all", "no_DLA_priya"]
@@ -585,34 +650,26 @@ def compute_convergence_ratios(
 
     # Find common sims
     lf_sims = {p.name for p in lf_root.iterdir() if p.is_dir() and not p.name.startswith(".")}
-    hf_sims = {p.name for p in hf_root.iterdir() if p.is_dir() and not p.name.startswith(".")}
+    hf_sims = {p.name for p in hf_root.iterdir() if p.is_dir() and not p.name.startswith(".")
+               and p.name != "hires"}
     common_sims = lf_sims & hf_sims
 
-    logger.info("Convergence ratios: %d matching sims", len(common_sims))
+    logger.info("Convergence ratios: %d matching sims (z_tol=%.3f)",
+                len(common_sims), z_tol)
 
     ratios = {}
     for sim_name in sorted(common_sims):
         lf_sim_dir = lf_root / sim_name
         hf_sim_dir = hf_root / sim_name
 
-        # Find common snap directories
-        lf_snaps = {p.name: p for p in lf_sim_dir.iterdir()
-                    if p.is_dir() and p.name.startswith("snap_")}
-        hf_snaps = {p.name: p for p in hf_sim_dir.iterdir()
-                    if p.is_dir() and p.name.startswith("snap_")}
-        common_snaps = set(lf_snaps) & set(hf_snaps)
+        lf_snaps = _load_snap_z_map(lf_sim_dir)
+        hf_snaps = _load_snap_z_map(hf_sim_dir)
 
         sim_ratios = {}
-        for snap_name in sorted(common_snaps):
-            lf_p = lf_snaps[snap_name]
-            hf_p = hf_snaps[snap_name]
-
-            if not (lf_p / "done").exists() or not (hf_p / "done").exists():
-                continue
-
+        for hf_name, hf_p, hf_z, lf_name, lf_p, lf_z in _match_snaps_by_z(
+            lf_snaps, hf_snaps, z_tol=z_tol
+        ):
             try:
-                lf_meta = json.load(open(lf_p / "meta.json"))
-                z = lf_meta["z"]
                 lf_data = dict(np.load(lf_p / "p1d.npz"))
                 hf_data = dict(np.load(hf_p / "p1d.npz"))
 
@@ -627,9 +684,16 @@ def compute_convergence_ratios(
                         with np.errstate(divide="ignore", invalid="ignore"):
                             T_k = np.where(p_lf > 0, p_hf / p_lf, np.nan)
                         snap_ratios[var] = {"k": k, "T_k": T_k}
-                sim_ratios[round(z, 3)] = snap_ratios
+                sim_ratios[round(hf_z, 3)] = snap_ratios
+                logger.debug(
+                    "matched %s/%s (z=%.3f) ↔ LF %s (z=%.3f), |Δz|=%.3f",
+                    sim_name, hf_name, hf_z, lf_name, lf_z, abs(hf_z - lf_z),
+                )
             except Exception as exc:
-                logger.warning("Convergence ratio failed for %s/%s: %s", sim_name, snap_name, exc)
+                logger.warning(
+                    "Convergence ratio failed for %s/%s↔%s: %s",
+                    sim_name, hf_name, lf_name, exc,
+                )
 
         if sim_ratios:
             ratios[sim_name] = sim_ratios

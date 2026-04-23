@@ -166,7 +166,8 @@ for a, f_val, lbl in [(ax[0], f_old, "broken code"),
 fig.suptitle(f"CDDF at z≈3, {len(records)} PRIYA sims stacked\n"
               f"dX bug fix: X_new/X_old = {X_new/X_old:.2f}")
 fig.tight_layout()
-outp = ROOT / "figures" / "analysis" / "cddf_bugfix_comparison.png"
+outp = ROOT / "figures" / "analysis" / "01_catalog_obs" / "cddf_bugfix_comparison.png"
+outp.parent.mkdir(parents=True, exist_ok=True)
 fig.savefig(outp, dpi=120); plt.close(fig)
 print(f"\n  wrote {outp}")
 

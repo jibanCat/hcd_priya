@@ -3,6 +3,11 @@ Plot HiRes/LF convergence T(k) = P_hires(k) / P_LF(k) at each matched sim
 and z, for both the unmasked "all" and the PRIYA-masked "no_DLA_priya"
 P1D variants.  Reads convergence_ratios.npz produced by the convergence
 SLURM job.
+
+After the z-tolerance match fix in compute_convergence_ratios (default
+z_tol = 0.05), each stored z-label is the HR z and the paired LF snap
+is the one whose z is closest to that value.  T(k) is therefore a
+genuine resolution-convergence ratio at a fixed epoch.
 """
 from __future__ import annotations
 
@@ -16,7 +21,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 HR_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/hires")
-OUT = ROOT / "figures" / "analysis"
+OUT = ROOT / "figures" / "analysis" / "03_templates_and_p1d"
+DATA = ROOT / "figures" / "analysis" / "data"
 OUT.mkdir(parents=True, exist_ok=True)
 
 ratios_files = sorted(HR_ROOT.glob("*/convergence_ratios.npz"))
@@ -71,15 +77,10 @@ for ax, title in zip(
     ax.set_ylim(0.85, 1.40)
 ax_all.legend(fontsize=7, loc="upper left", ncol=2)
 
-# Add caveat text on the figure — this is a known issue, see analysis.md §6
-fig.text(0.5, 0.02,
-         "⚠ WARNING: LF and HR snapshots at the same snap number differ by ~0.2 in z "
-         "(HR snap_NNN is labelled by LF_z but is actually at HR_z = LF_z + 0.2).  "
-         "So what is plotted is NOT a pure convergence ratio — it mixes "
-         "resolution-at-z with z-evolution-between-0.2-z-steps.  Fix deferred.",
-         ha="center", fontsize=8, color="C3", wrap=True)
-fig.subplots_adjust(bottom=0.17)
-fig.suptitle(f"HiRes / LF 'convergence' ratio  ({len(ratios_files)} paired sims)")
+fig.suptitle(
+    f"HiRes / LF convergence ratio  ({len(ratios_files)} paired sims, "
+    "z-matched within |Δz|≤0.05)"
+)
 fig.tight_layout()
 out = OUT / "convergence_Tk.png"
 fig.savefig(out, dpi=120); plt.close(fig)
