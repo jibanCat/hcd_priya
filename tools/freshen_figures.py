@@ -29,6 +29,7 @@ Dependencies: `Pillow` (already a matplotlib dependency).
 from __future__ import annotations
 
 import argparse
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -43,30 +44,39 @@ def _git(args: list[str]) -> str:
 
 
 def _git_status_modified_pngs() -> list[Path]:
-    """Return paths of tracked PNGs whose working-tree bytes differ from HEAD."""
-    out = _git(["status", "--porcelain", "--", "*.png"])
+    """Return paths of tracked PNGs whose working-tree bytes differ from HEAD.
+
+    Filters in Python from full porcelain output: git's `*.png` pathspec does
+    not cross directory boundaries, so we'd miss figures under `figures/**/`.
+    """
+    out = _git(["status", "--porcelain"])
     paths = []
     for line in out.splitlines():
-        if not line:
-            continue
-        # Porcelain format: XY  path   (X = index, Y = working tree)
         if len(line) < 3:
             continue
+        # Porcelain format: XY SP path   (X = index status, Y = worktree status).
         status = line[:2]
         path = line[3:].strip().strip('"')
-        # Only care about modified (not untracked/deleted)
-        if "M" in status and path.endswith(".png"):
+        if not path.endswith(".png"):
+            continue
+        # Only care about modified; skip untracked / deleted / renamed halves.
+        if "M" in status:
             paths.append(REPO / path)
     return paths
 
 
 def _pixel_bytes(path: Path) -> bytes:
-    """Return an RGBA bytes representation of the PNG's pixel content.
+    """Return an RGBA-pixel bytes representation of a PNG's content.
+
     Ignores PNG text chunks (creation time, software version, etc.).
+    The image dimensions are encoded as two 4-byte big-endian ints via
+    `struct.pack`, not `bytes(im.size)` — the latter would raise for any
+    dimension ≥ 256 and silently collide modulo-256 for smaller sizes.
     """
     with Image.open(path) as im:
         im = im.convert("RGBA")
-        return im.tobytes() + bytes(im.size)  # include size for strictness
+        width, height = im.size
+        return im.tobytes() + struct.pack("!II", width, height)
 
 
 def _head_pixel_bytes(rel_path: Path) -> bytes | None:
@@ -81,7 +91,8 @@ def _head_pixel_bytes(rel_path: Path) -> bytes | None:
     from io import BytesIO
     with Image.open(BytesIO(data)) as im:
         im = im.convert("RGBA")
-        return im.tobytes() + bytes(im.size)
+        width, height = im.size
+        return im.tobytes() + struct.pack("!II", width, height)
 
 
 def check(paths: list[Path]) -> tuple[list[Path], list[Path]]:

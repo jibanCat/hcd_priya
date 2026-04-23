@@ -100,17 +100,12 @@ def main():
                 if l[k] > 0 and np.isfinite(h[k]) and np.isfinite(l[k]):
                     R[k][zkey].append((sim, h[k] / l[k]))
 
-    # Need the LF Ap per sim for the linear fit; grab from the lf dict directly.
-    # Any z-row has the same Ap per sim, so pull the first one.
-    lf_ap = {}
-    for (sim, _), rec in lf.items():
-        if sim not in lf_ap:
-            lf_ap[sim] = rec.get("Ap", np.nan) if False else None
-    # Actually the LF summary stored under the 'params/Ap' dataset; re-read just that.
+    # Need per-sim LF Ap for the linear-in-Ap fit.  `_load()` stores rec
+    # without `Ap` (we only kept the z-varying quantities), so read the
+    # params/Ap column directly from the HDF5 summary.
+    lf_ap: dict[str, float] = {}
     with h5py.File(LF, "r") as f:
-        sims_all = [s.decode() for s in f["sim"][:]]
-        Ap_all = f["params/Ap"][:]
-        for s, a in zip(sims_all, Ap_all):
+        for s, a in zip([s.decode() for s in f["sim"][:]], f["params/Ap"][:]):
             lf_ap[s] = float(a)
 
     # Tabulate per (quantity, z)

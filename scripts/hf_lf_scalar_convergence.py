@@ -80,15 +80,6 @@ def load_summary(path):
     return out
 
 
-def match_hr_to_lf(hr_rec, lf_idx_by_sim, z_tol=0.05):
-    """For one HR record, pick the LF record on the same sim whose z is closest."""
-    sim, _ = None, None
-    # extract sim from keys — we'll actually pass sim-indexed lookup
-    # expects lf_idx_by_sim[sim] = list of (z, record)
-    # For this helper the caller must pass the right subset.
-    raise NotImplementedError
-
-
 def build_pairs(hr_summary, lf_summary, z_tol=0.05):
     """
     For each HR (sim, z) record, find the LF record on the same sim
