@@ -76,7 +76,7 @@ def lf_summary_arrays():
     return sims, zs, Ap, ns, data
 
 
-def held_out_hr(pairs_all, hr_all):
+def held_out_hr(hr_all):
     """Find the HR sim whose name starts with HELD_OUT_HR_PREFIX."""
     held = {}
     for (sim, zr), r in hr_all.items():
@@ -111,11 +111,18 @@ def predict_lf_at(theta_ap, theta_ns, z_target,
         return np.nan
 
     if method == "nearest":
-        # Normalised distance over log-A_p and n_s
+        # Normalised distance over log-A_p and n_s.
+        # Guard against zero range (all sims identical in one dimension).
         logAp_t = np.log10(theta_ap)
         logAp_s = np.log10(Ap_sel)
-        d = np.sqrt(((logAp_s - logAp_t) / np.ptp(logAp_s)) ** 2 +
-                    ((ns_sel - theta_ns) / np.ptp(ns_sel)) ** 2)
+        rng_ap = np.ptp(logAp_s)
+        rng_ns = np.ptp(ns_sel)
+        if rng_ap == 0.0 and rng_ns == 0.0:
+            # All candidates identical in both parameters — just return the first.
+            return float(Q_sel[0])
+        dAp = (logAp_s - logAp_t) / rng_ap if rng_ap > 0 else np.zeros_like(logAp_s)
+        dns = (ns_sel - theta_ns) / rng_ns if rng_ns > 0 else np.zeros_like(ns_sel)
+        d = np.sqrt(dAp ** 2 + dns ** 2)
         return float(Q_sel[int(np.argmin(d))])
 
     if method == "ap_regression":
@@ -133,7 +140,7 @@ def main():
     hr_all = _load(HR); lf_all = _load(LF)
     pairs = _pair(hr_all, lf_all)
 
-    held_out = held_out_hr(pairs, hr_all)
+    held_out = held_out_hr(hr_all)
     if not held_out:
         print("Error: no held-out HR sim found.")
         return

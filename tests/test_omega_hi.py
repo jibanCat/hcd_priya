@@ -44,9 +44,9 @@ def test_prefactor_at_h_equals_1():
     pref = _prefactor(sum_NHI=1.0, dX=1.0, h=1.0)
     # Hand-derived from cgs, using the exact constants in build_hcd_summary.py:
     # H_0(h=1) = 1e7 / 3.0857e24 = 3.2408e-18 /s
-    # m_H · H_0 / c = 1.67353e-24 · 3.2408e-18 / 2.99792458e10 = 1.8088e-52 g/cm
+    # m_H · H_0 / c = 1.67353e-24 · 3.2408e-18 / 2.99792458e10 = 1.8091e-52 g/cm
     # ρ_crit,0(h=1) = 1.87847e-29 g/cm³
-    # prefactor = 1.8088e-52 / 1.87847e-29 = 9.63e-24 cm²
+    # prefactor = 1.8091e-52 / 1.87847e-29 = 9.63e-24 cm²
     expected = 9.63e-24
     rel_err = abs(pref - expected) / expected
     assert rel_err < 2e-3, (
