@@ -122,3 +122,63 @@ The pipeline handles missing snapshots gracefully.
 Some simulations also contain `lya_forest_spectra.hdf5` (32000 skewers,
 1747 pixels, float64). This is a random subsample and is used only when
 the grid file is absent.
+
+---
+
+## Analysis-output data (separate from the git repo)
+
+Large generated artifacts (HDF5 summary tables, CSVs) live **outside
+git** to keep the repo lean.  Only scripts, docs, and figures that
+appear inline in the docs are version-controlled.
+
+### Paths
+
+| Where | What |
+|---|---|
+| `/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/` | Production pipeline output (per-sim `catalog.npz`, `p1d.npz`, `p1d_per_class.h5`, …). |
+| `/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/_hcd_analysis_data/` | HCD summary tables produced by analysis scripts (`hcd_summary_lf.h5`, `hcd_summary_hr.h5`, MF coefficient CSVs, bootstrap tables).  Reached via the `data_dir()` helper in `scripts/common.py`. |
+| `/nfs/turbo/umor-yueyingn/mfho/` | Long-term persistent storage (Turbo filesystem).  **TODO**: migrate `_hcd_analysis_data/` here once results are stable. |
+
+### How to override
+
+Every analysis script reads its summary files through
+
+```python
+from common import data_dir
+DATA = data_dir()
+```
+
+By default this returns the scratch path above.  To redirect (e.g. to
+Turbo), export the env var:
+
+```bash
+export HCD_DATA_DIR=/nfs/turbo/umor-yueyingn/mfho/hcd_analysis_data
+```
+
+The helper creates the directory if it doesn't exist, so relocating is
+a one-line change — no script edits needed.
+
+### Regenerating the summaries
+
+If you arrive at the repo without any data on scratch, rebuild with:
+
+```bash
+python3 scripts/build_hcd_summary.py
+```
+
+This scans `hcd_outputs/` (LF) and `hcd_outputs/hires/` (HR) and writes
+`hcd_summary_{lf,hr}.h5` into `data_dir()`.  All downstream MF scripts
+depend on these two HDF5s being present.
+
+### `.gitignore` entries
+
+The following paths are intentionally not tracked:
+
+```
+.claude/                        # local Claude Code state
+logs/                           # SLURM / pipeline logs
+figures/intermediate/           # pre-audit stale figures
+figures/analysis/data/          # generated artefacts (use scratch instead)
+__pycache__/                    # Python caches
+*.pyc
+```

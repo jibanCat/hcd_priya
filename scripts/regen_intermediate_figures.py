@@ -33,8 +33,12 @@ from hcd_analysis.cddf import absorption_path_per_sightline
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
-OUT_DIR = ROOT / "figures" / "analysis"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+OUT_CAT = ROOT / "figures" / "analysis" / "01_catalog_obs"
+OUT_SENS = ROOT / "figures" / "analysis" / "02_param_sensitivity"
+OUT_CAT.mkdir(parents=True, exist_ok=True)
+OUT_SENS.mkdir(parents=True, exist_ok=True)
+# Keep OUT_DIR as alias to OUT_CAT for legacy references below
+OUT_DIR = OUT_CAT
 
 # -------- parameter parsing helpers --------
 _SIM_PARAM = {
@@ -407,7 +411,7 @@ for cls_name, cls_color, cls_mask_fn, fname in [
         ax.grid(alpha=0.3)
     fig.suptitle(f"{cls_name} count vs each PRIYA parameter at z={z_target}  (60 sims)")
     fig.tight_layout(rect=(0, 0, 1, 0.96))
-    outp = OUT_DIR / fname
+    outp = OUT_SENS / fname
     fig.savefig(outp, dpi=120); plt.close(fig)
     print(f"   {outp}")
 

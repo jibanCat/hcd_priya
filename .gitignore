@@ -206,3 +206,17 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 tests/out/
+
+# --- HCD analysis additions ---
+# Local Claude Code / tool state
+.claude/
+
+# Pipeline + SLURM logs
+logs/
+
+# Pre-audit stale figures (regenerated on demand)
+figures/intermediate/
+
+# Data artifacts — generated under scratch, documented in docs/data_layout.md.
+# Committing these risks repo bloat; regenerate via scripts/build_hcd_summary.py
+figures/analysis/data/

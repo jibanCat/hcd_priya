@@ -135,6 +135,8 @@ Combined: `dX_correct / dX_code = (1+z) · h`. At z=3, h=0.7: factor 2.8 = 0.45 
 
 1. Numerical: codebase formula vs canonical (1+z)²·L_com·H_0/c vs fake_spectra port — at z=3, codebase = 0.229, others all = 0.640.
 2. Empirical: regenerated CDDF at z=3 from fresh catalogs with the fixed dX. Total absorption path went up by factor 2.796 (within 0.2 % of predicted (1+z)·h = 2.800), CDDF dropped by the same factor. The fixed CDDF tracks Prochaska+2014 within 0.1-0.3 dex.
+
+![CDDF before vs after the dX fix at z ≈ 3](../figures/analysis/01_catalog_obs/cddf_bugfix_comparison.png)
 3. Analytical: `tests/test_absorption_path.py` has six unit tests that lock the formula to (1+z)²·L_com·H_0/c at machine precision, agreement with `fake_spectra.unitsystem.absorption_distance` at 0.3 % (limited by upstream c precision = 2.99e10 not 2.998e10), agreement with numerical integration of dX/dz at < 0.1 %, dimensional consistency at z=0, (1+z)² scaling, and h-scaling at fixed comoving box.
 
 **Fix**. `hcd_analysis/cddf.py:absorption_path_per_sightline`:
