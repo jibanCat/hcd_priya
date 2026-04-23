@@ -117,7 +117,7 @@ def predict_lf_at(theta_ap, theta_ns, z_target,
         logAp_s = np.log10(Ap_sel)
         rng_ap = np.ptp(logAp_s)
         rng_ns = np.ptp(ns_sel)
-        if rng_ap == 0.0 and rng_ns == 0.0:
+        if not (rng_ap > 0 or rng_ns > 0):
             # All candidates identical in both parameters — just return the first.
             return float(Q_sel[0])
         dAp = (logAp_s - logAp_t) / rng_ap if rng_ap > 0 else np.zeros_like(logAp_s)
