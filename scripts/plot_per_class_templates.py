@@ -24,8 +24,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from hcd_analysis.hcd_template import template_contributions, fit_alpha
 OUTPUT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+import sys as _sys_common
+_sys_common.path.insert(0, str(Path(__file__).resolve().parent))
+from common import data_dir
+DATA = data_dir()
 OUT = ROOT / "figures" / "analysis" / "03_templates_and_p1d"
-DATA = ROOT / "figures" / "analysis" / "data"
 OUT.mkdir(parents=True, exist_ok=True)
 
 TARGET_SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"

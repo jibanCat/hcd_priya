@@ -124,6 +124,18 @@ Stress test (`scripts/hypothesis_dndx_and_ap.py`):
 
 ![Partial Spearman on A_p](../figures/analysis/02_param_sensitivity/hypothesis_partial_corr.png)
 
+Supporting context — full 9-parameter × 3-class Spearman-ρ grids at
+z ≈ 3 (60 LF sims):
+
+![Ω_HI per class vs 9 PRIYA parameters at z = 3](../figures/analysis/02_param_sensitivity/param_sens_omega_hi.png)
+
+![dN/dX per class vs 9 PRIYA parameters at z = 3](../figures/analysis/02_param_sensitivity/param_sens_dndx.png)
+
+A_p dominates every panel (ρ = +0.71…+0.84).  Secondary: n_s at +0.27…+0.42.
+Notable exception: Ω_HI (not dN/dX) shows ρ(h) = −0.41 to −0.50 — partly
+a definitional effect from the 1/h prefactor in Ω_HI, partly a PRIYA
+prior covariance between h and structure-growth parameters.
+
 - Raw Spearman(A_p, counts) = +0.83–0.84 for every class.
 - **Partial Spearman(A_p, counts | n_s) = +0.90–0.93** — *stronger* than
   the raw ρ.  A_p dominance is not an A_p/n_s covariance artefact.
@@ -428,7 +440,7 @@ for a proper (A_p × z)-coupled emulator rather than a scalar correction.
 | What | Script | Figure(s) |
 |---|---|---|
 | Aggregate per-(sim, snap) HCD scalars | `scripts/build_hcd_summary.py` | — |
-| Hypothesis tests (bootstrap + partial ρ) | `scripts/hypothesis_dndx_and_ap.py` | `04_hcd_mf/hypothesis_dndx_bootstrap.png`, `02_param_sensitivity/hypothesis_partial_corr.png` |
+| Hypothesis tests (across-sim bootstrap + partial ρ) | `scripts/hypothesis_dndx_and_ap.py` | `02_param_sensitivity/hypothesis_partial_corr.png` |
 | Per-sim cosmic-variance bootstrap | `scripts/bootstrap_dndx_per_sim.py` | `04_hcd_mf/bootstrap_dndx_per_sim.png` |
 | HR vs LF dN/dX, Ω_HI vs obs | `scripts/plot_hcd_vs_obs_with_hr.py` | `01_catalog_obs/dndx_hr_vs_lf_vs_obs_per_class.png`, `01_catalog_obs/omega_hi_hr_vs_lf_vs_obs.png` |
 | Matched-pair HR vs LF scalars | `scripts/matched_pair_hr_vs_lf.py` | `04_hcd_mf/matched_pair_*_hr_vs_lf.png` |
@@ -440,7 +452,7 @@ for a proper (A_p × z)-coupled emulator rather than a scalar correction.
 | Z-extreme strategy comparison | `scripts/mf_low_z_breakdown.py` | `04_hcd_mf/mf_low_z_breakdown.png` |
 | Global (across-z) MF fit | `scripts/mf_global_fit.py` | `04_hcd_mf/mf_global_fit_visual.png` |
 | Held-out 4th HR sim test | `scripts/mf_fourth_sim_test.py` | `04_hcd_mf/mf_fourth_sim_test.png` |
-| First-pass flat-vs-linear at (z, k) | `scripts/mf_analytical_fit.py` | `04_hcd_mf/mf_fit_templates_per_k.png` |
+| First-pass flat-vs-linear at (z, k) | `scripts/mf_analytical_fit.py` | (superseded by `mf_global_fit_visual.png`) |
 
 All summary HDF5s + CSVs live under
 [`figures/analysis/data/`](../figures/analysis/data/) — reading schema

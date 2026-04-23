@@ -21,8 +21,11 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 HR_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/hires")
+import sys as _sys_common
+_sys_common.path.insert(0, str(Path(__file__).resolve().parent))
+from common import data_dir
+DATA = data_dir()
 OUT = ROOT / "figures" / "analysis" / "03_templates_and_p1d"
-DATA = ROOT / "figures" / "analysis" / "data"
 OUT.mkdir(parents=True, exist_ok=True)
 
 ratios_files = sorted(HR_ROOT.glob("*/convergence_ratios.npz"))

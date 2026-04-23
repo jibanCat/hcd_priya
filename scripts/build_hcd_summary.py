@@ -222,8 +222,9 @@ def save_hdf5(recs: list[dict], path: Path) -> None:
 
 
 def main():
-    DATA = Path(__file__).resolve().parent.parent / "figures" / "analysis" / "data"
-    DATA.mkdir(parents=True, exist_ok=True)
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from common import data_dir
+    DATA = data_dir()
     SCRATCH = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
 
     print("Scanning LF (60-sim) root…")

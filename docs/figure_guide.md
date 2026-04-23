@@ -130,12 +130,10 @@ resolution fall-off).
 
 ## 04_hcd_mf/ — HCD multi-fidelity development
 
-All 14 figures in this subdir are catalogued in detail in
+All 12 figures in this subdir are catalogued in detail in
 [`hcd_mf_analysis.md`](hcd_mf_analysis.md).  Compact index here:
 
 ### Bootstrap + hypothesis tests
-- `hypothesis_dndx_bootstrap.png` — across-sim bootstrap (original
-  test, now deprecated in favour of per-sim).  Kept for history.
 - `bootstrap_dndx_per_sim.png` — per-sim cosmic-variance bootstrap
   with fiducial-slice highlighting (10 sims nearest eBOSS BF).  **Main
   figure for dN/dX under-prediction significance**.
@@ -156,9 +154,6 @@ All 14 figures in this subdir are catalogued in detail in
   per-class R(k) across 3 sims × ~18 z, colour-coded by z.
 
 ### MF fit development
-- `mf_fit_templates_per_k.png` — flat (black) vs linear-in-A_p (red)
-  fit of per-class template R(k, z≈3), with RMS improvement in
-  bottom row.
 - `mf_fit_vs_residuals_z3.png` — 6 scalar quantities at z = 3, scatter
   + flat + linear, residuals below.  Linear literally interpolates
   n = 3 points — 0 % residual by construction, illustrates the

@@ -36,10 +36,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
+import sys as _sys_common
+_sys_common.path.insert(0, str(Path(__file__).resolve().parent))
+from common import data_dir
+DATA = data_dir()
 OUT = ROOT / "figures" / "analysis" / "04_hcd_mf"
-DATA = ROOT / "figures" / "analysis" / "data"
 OUT.mkdir(parents=True, exist_ok=True)
-DATA.mkdir(parents=True, exist_ok=True)
 SCRATCH = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
 
 CLASSES = ["LLS", "subDLA", "DLA"]

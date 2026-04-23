@@ -36,10 +36,12 @@ sys.path.insert(0, str(ROOT))
 from hcd_analysis.cddf import absorption_path_per_sightline
 
 SCRATCH = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+import sys as _sys_common
+_sys_common.path.insert(0, str(Path(__file__).resolve().parent))
+from common import data_dir
+DATA = data_dir()
 OUT = ROOT / "figures" / "analysis" / "04_hcd_mf"
-DATA = ROOT / "figures" / "analysis" / "data"
 OUT.mkdir(parents=True, exist_ok=True)
-DATA.mkdir(parents=True, exist_ok=True)
 # Classes
 LLS_MIN, SUBDLA_MIN, DLA_MIN = 17.2, 19.0, 20.3
 CLASSES = [("LLS", LLS_MIN, SUBDLA_MIN),

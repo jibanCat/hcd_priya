@@ -31,8 +31,9 @@ import numpy as np
 from scipy.stats import spearmanr, rankdata
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "figures" / "analysis" / "data"
-DATA.mkdir(parents=True, exist_ok=True)
+sys.path.insert(0, str(ROOT / "scripts"))
+from common import data_dir
+DATA = data_dir()
 SUMMARY = DATA / "hcd_summary_lf.h5"
 # This script produces two figures — the bootstrap belongs with the MF work
 # (04_hcd_mf) and the partial-correlation is a sensitivity diagnostic (02).

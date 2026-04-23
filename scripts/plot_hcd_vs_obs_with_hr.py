@@ -37,10 +37,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
+import sys as _sys_common
+_sys_common.path.insert(0, str(Path(__file__).resolve().parent))
+from common import data_dir
+DATA = data_dir()
 OUT = ROOT / "figures" / "analysis" / "01_catalog_obs"
-DATA = ROOT / "figures" / "analysis" / "data"
 OUT.mkdir(parents=True, exist_ok=True)
-DATA.mkdir(parents=True, exist_ok=True)
 LF_H5 = DATA / "hcd_summary_lf.h5"
 HR_H5 = DATA / "hcd_summary_hr.h5"
 

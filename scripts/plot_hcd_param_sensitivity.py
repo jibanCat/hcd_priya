@@ -30,11 +30,12 @@ import numpy as np
 from scipy.stats import spearmanr
 
 ROOT = Path(__file__).resolve().parent.parent
-SUMMARY = ROOT / "figures" / "analysis" / "data" / "hcd_summary_lf.h5"
+sys.path.insert(0, str(ROOT / "scripts"))
+from common import data_dir
+DATA = data_dir()
+SUMMARY = DATA / "hcd_summary_lf.h5"
 OUT = ROOT / "figures" / "analysis" / "02_param_sensitivity"
-DATA = ROOT / "figures" / "analysis" / "data"
 OUT.mkdir(parents=True, exist_ok=True)
-DATA.mkdir(parents=True, exist_ok=True)
 PARAM_KEYS = ["ns", "Ap", "herei", "heref", "alphaq",
               "hub", "omegamh2", "hireionz", "bhfeedback"]
 CLASSES = ["LLS", "subDLA", "DLA"]
