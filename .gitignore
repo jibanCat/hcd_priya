@@ -220,3 +220,9 @@ figures/intermediate/
 # Data artifacts — generated under scratch, documented in docs/data_layout.md.
 # Committing these risks repo bloat; regenerate via scripts/build_hcd_summary.py
 figures/analysis/data/
+
+# Private data + analyses (DESI Y3, etc.)
+# Neither the figures, the scripts, nor any derived data from
+# /home/mfho/data/DESI_y3_private_data should be committed.
+figures/private/
+scripts/private/
