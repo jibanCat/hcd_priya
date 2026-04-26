@@ -152,7 +152,7 @@ Stale figures in `figures/intermediate/`: pre-audit; ignore.
 
 2. ~~**cddf.npz / cddf_stacked.npz on scratch have broken-dX normalisation.**~~ **DONE 2026-04-25** via `scripts/patch_cddf_dx.py` (option b). Walks the scratch hcd_outputs root and writes corrected siblings `cddf_corrected.npz` / `cddf_stacked_corrected.npz` next to every original — 1146 per-snap + 64 per-sim stacked patched, originals untouched. New files carry `dx_bug_patched=True`, `patch_date='2026-04-25'`, `patch_factor=(1+z)·h`. Locked by 9 tests in `tests/test_cddf_dx_patch.py`. See `docs/bugs_found.md` §7 for the full forensic note.
 
-3. **Fit Rogers α per sim** using `hcd_template.fit_alpha` on the per-class HDF5 data.  Produces an emulator-ready per-sim α table.  Inputs are all ready now.
+3. ~~**Fit Rogers α per sim**~~ **DONE 2026-04-25** in PR #2. `scripts/fit_rogers_alpha.py` fits the four-parameter α (LLS, Sub, Small-DLA, Large-DLA) per `(sim, snap)` for the 60 LF + 4 HR sims using `p1d_per_class.h5`, restricted to the PRIYA emulator k-range (0.0009–0.20 rad·s/km, angular). Outputs per-sim HDF5 plus a flat `rogers_alpha_summary.h5` under `data_dir()` for easy `(sim, z)` scans. Plotters in `scripts/plot_rogers_alpha.py` and `scripts/plot_rogers_alpha_vs_priya.py` produce the `α(z)` and `template_measured_vs_rogers_per_z` figures under `figures/analysis/03_templates_and_p1d/`.
 
 ### Priority 2 — cleanup
 
@@ -166,16 +166,20 @@ Stale figures in `figures/intermediate/`: pre-audit; ignore.
 
 8. ~~**Update `README.md`**~~ **DONE 2026-04-25.** Rebaselined: production variant list, post-audit output-file inventory (catalog.npz, p1d.npz, p1d_per_class.h5, cddf.npz / cddf_corrected.npz, cddf_stacked.npz / cddf_stacked_corrected.npz, convergence_ratios.npz, hcd_summary_{lf,hr}.h5, rogers_alpha_summary.h5), test-suite invocation, post-bug-#7 dN/dX status, k-convention call-out.
 
-### Priority 3 — science next steps
+### Priority 3 — operational / science next steps
 
 9. Consider switching to SSH for git push (the `http.postBuffer=524288000` setting works but SSH avoids Great Lakes proxy issues entirely):
    ```bash
    git remote set-url origin git@github.com:jibanCat/hcd_priya.git
    ```
 
-10. Run the full Rogers α fit per (sim, z) and store as `rogers_alpha.h5` per sim.  Then the emulator pipeline has both P1D + α-parameters as training data.
+12. **Investigate `ns0.907Ap1.5e-09…hub0.662…/snap_015`** — this snap dir has a near-empty `cddf.npz` (`total_path = 8130.6` cm vs ~175 620 for snap_016 at the same z = 3.2). Looks like a partial / restarted run that produced a stub catalog alongside the proper snap_016. The 2026-04-25 cddf-dX patch handled it correctly, but the underlying data is anomalous: either delete the stub snap dir and rerun (better), or just exclude that snap from downstream consumers.
 
-11. Reconcile the convergence fig with the LF/HR z-matching fix once applied, add to `analysis.md` §6.
+13. **Pre-audit backup `/scratch/.../hcd_outputs_pre_audit_bak_2026_04_22/`** (6.8 GB) can be deleted now that the post-audit results are validated through three PRs (#2, #3, #4) and the test suite passes end-to-end. Earlier handover note said "keep until new results fully validated" — that bar is now met.
+
+10. ~~Run the full Rogers α fit per (sim, z) and store as `rogers_alpha.h5` per sim.~~ **DONE 2026-04-25** (PR #2; see priority-1 item 3 above for details). The emulator pipeline now has both P1D and α-parameter training data via `rogers_alpha_summary.h5`.
+
+11. ~~Reconcile the convergence fig with the LF/HR z-matching fix once applied, add to `analysis.md` §6.~~ **DONE 2026-04-22 session 2** (see priority-1 item 1 above). The 53 z-matched pairs were rebuilt and `figures/analysis/convergence_Tk.png` was regenerated; `docs/analysis.md` §6 covers the read-out.
 
 ---
 
