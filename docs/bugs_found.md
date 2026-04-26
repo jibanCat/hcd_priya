@@ -149,7 +149,10 @@ return (1.0 + z)**2 * L_com_Mpc * H0 / _C_KMS
 
 The defensive copy in `scripts/plot_intermediate.py` (used as a fallback when imports fail) was also updated.
 
-**Status**. Fixed. Six unit tests added (`tests/test_absorption_path.py`) so any future regression is caught immediately. Pipeline outputs that depend on dX (`cddf.npz`, `cddf_stacked.npz`) on `/scratch/.../hcd_outputs/` are still saved with the broken normalisation — they need a regen if you want them updated in-place. The plotting scripts (`regen_intermediate_figures.py`, `plot_intermediate.py`) recompute dX on-the-fly so their figures are correct after this commit.
+**Status**. Fixed. Six unit tests added (`tests/test_absorption_path.py`) so any future regression is caught immediately.
+
+**On-scratch artefacts patched 2026-04-25** (`scripts/patch_cddf_dx.py`).
+For every `<sim>/snap_NNN/cddf.npz` (1146 files) and `<sim>/cddf_stacked.npz` (64 files: 60 LF + 4 HiRes), a corrected sibling `cddf_corrected.npz` / `cddf_stacked_corrected.npz` is written with `f_nhi /= (1+z)·h`, `dX_per_sightline *= (1+z)·h`, `total_path *= (1+z)·h`, `n_absorbers` unchanged, plus three new keys `dx_bug_patched=True`, `patch_date=b'2026-04-25'`, `patch_factor=(1+z)·h`. The original `.npz` files are left in place so consumers that haven't migrated still see the same values they always did. For stacked files the per-snap `f_nhi_per_snap` rows are corrected with their own `(1+z_i)·h`, and the stacked `f_nhi` is rebuilt from the path-weighted sum. Tests in `tests/test_cddf_dx_patch.py` (9 tests) lock the per-snap and stacked corrections.
 
 **Lesson**. A "general claim" like "the dX formula is correct" should always be backed by an independent cross-check. I should have written `tests/test_absorption_path.py` *before* publishing any plot that quantifies CDDF/dN/dX disagreement vs observations. The bug had been in the codebase since at least commit `5ccfe5b` (April 19) and propagated through every CDDF / dN/dX figure I made until today.
 

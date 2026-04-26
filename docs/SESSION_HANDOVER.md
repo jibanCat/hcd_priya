@@ -114,7 +114,7 @@ for t in tests/test_*.py; do python3 "$t"; done
 - **fresh catalogs** (`catalog.npz`) on scratch — all 60 LF sims + 4 HiRes sims, fast_mode, min_log_nhi=17.2.
 - **p1d.npz** with only `all` and `no_DLA_priya` variants — no broken class masks.
 - **p1d_per_class.h5** HDF5 with attrs — all snap dirs.
-- **cddf.npz / cddf_stacked.npz** — ⚠ still contain BROKEN dX normalisation (bug #7 fixed in-code but npz files not regenerated).  Plotting scripts that recompute dX on-the-fly give correct numbers; anyone reading the npz directly gets values too high by (1+z)·h.
+- **cddf.npz / cddf_stacked.npz** — original files still carry the broken (1+z)·h dX normalisation, but corrected siblings `cddf_corrected.npz` / `cddf_stacked_corrected.npz` were written 2026-04-25 (`scripts/patch_cddf_dx.py`). New consumers should read the `_corrected` files; old plotters that recompute dX on the fly are unaffected.
 - **convergence_ratios.npz** — correct in shape but compares **different-z** LF and HiRes snapshots (bug, see §4 below).
 
 ### Figures
@@ -150,9 +150,7 @@ Stale figures in `figures/intermediate/`: pre-audit; ignore.
    - Ω_HI formula locked: 4 unit tests in `tests/test_omega_hi.py`.
    - Per-(sim, z) HCD summary HDF5: `figures/analysis/hcd_summary_{lf,hr}.h5` (1076 LF + 70 HR records).
 
-2. **cddf.npz / cddf_stacked.npz on scratch have broken-dX normalisation.** Options:
-   - (a) rerun pipeline (~6 h, regens catalogs AND cddf.npz).
-   - (b) write quick patch script that multiplies existing cddf.npz files by 1/[(1+z)·h].  My recommendation: option (b), cheap, quick, unambiguous.
+2. ~~**cddf.npz / cddf_stacked.npz on scratch have broken-dX normalisation.**~~ **DONE 2026-04-25** via `scripts/patch_cddf_dx.py` (option b). Walks the scratch hcd_outputs root and writes corrected siblings `cddf_corrected.npz` / `cddf_stacked_corrected.npz` next to every original — 1146 per-snap + 64 per-sim stacked patched, originals untouched. New files carry `dx_bug_patched=True`, `patch_date='2026-04-25'`, `patch_factor=(1+z)·h`. Locked by 9 tests in `tests/test_cddf_dx_patch.py`. See `docs/bugs_found.md` §7 for the full forensic note.
 
 3. **Fit Rogers α per sim** using `hcd_template.fit_alpha` on the per-class HDF5 data.  Produces an emulator-ready per-sim α table.  Inputs are all ready now.
 
