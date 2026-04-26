@@ -156,11 +156,11 @@ def plot_grid(outpath: Path):
 
         for logN, cls in CLASS_LINES:
             ax.axvline(logN, ls="--", color="gray", alpha=0.4, lw=0.8)
-            ax.text(logN + 0.05, 1e-26, cls, fontsize=7, color="gray", va="bottom")
+            ax.text(logN + 0.05, 3e-17, cls, fontsize=7, color="gray", va="top")
 
         ax.set_title(f"{z_lo:.1f} ≤ z < {z_hi:.1f}", fontsize=11)
         ax.set_xlim(17, 23)
-        ax.set_ylim(1e-26, 1e-16)
+        ax.set_ylim(1e-29, 1e-16)
         ax.grid(True, alpha=0.3, which="both")
         ax.legend(fontsize=8, loc="upper right")
         if i % 2 == 0:
