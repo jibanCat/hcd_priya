@@ -156,15 +156,15 @@ Stale figures in `figures/intermediate/`: pre-audit; ignore.
 
 ### Priority 2 — cleanup
 
-4. **Update `scripts/plot_intermediate.py`** to consume the shortened variant list (no `no_LLS` / `no_subDLA` / `no_HCD` keys in current `p1d.npz`) and to read `p1d_per_class.h5` as additional input.
+4. ~~**Update `scripts/plot_intermediate.py`**~~ **DONE 2026-04-25.** Verified end-to-end run on the post-audit data — the script's existing `if k_key in d and p_key in d` guards already make it tolerant of the shortened variant list, so no functional rewrite is needed. Added a status header pointing users to the production scripts (`regen_intermediate_figures.py`, `plot_per_class_templates.py`, `plot_param_sensitivity_split.py`, `plot_rogers_alpha*.py`, `plot_convergence_ratios.py`).
 
-5. **Clean up stale `figures/intermediate/`** once `plot_intermediate.py` regenerates fresh versions.
+5. **Clean up stale `figures/intermediate/`** — **DEFERRED.** The post-audit re-run does produce updated versions of most figures, but `figures/intermediate/p1d_masking.png` is referenced in `docs/bugs_found.md` §3 as forensic evidence of the pre-audit class-mask bug ("ratios indistinguishable from 1 across the emulator range") and overwriting it would invalidate that historical claim. Resolution path if/when this is picked up later: move the pre-audit copy to `figures/diagnostics/p1d_masking_pre_audit.png`, update the bug doc reference, then regenerate `figures/intermediate/` from the current pipeline.
 
-6. **Update `docs/assumptions.md`** — currently says "tau_threshold default: 1.0" which is stale (actual default is 100 in config/default.yaml).
+6. ~~**Update `docs/assumptions.md`**~~ **DONE 2026-04-25.** `tau_threshold` corrected to 100 (with min_log_nhi rationale); fast_mode added as production default; masking strategy and PRIYA recipe added; absorption-distance formula updated to the canonical `(1+z)²·L_com·H_0/c` with the bug-#7 cross-reference; NHI bin convention clarified.
 
-7. **Update `docs/fake_spectra_integration.md`** — currently described fake_spectra as a live dependency, but we only use it as a reference codebase (never `import fake_spectra` at runtime).
+7. ~~**Update `docs/fake_spectra_integration.md`**~~ **DONE 2026-04-25.** Reframed as reference codebase only; documents the soft-import at `voigt_utils.py:72` and the cross-validation tests; spelled out which formulas were ported (line constants, Voigt-Hjerting via `wofz`, σ_int, `tau_voigt`, absorption distance) and which fake_spectra components were not.
 
-8. **Update README.md** — rebaseline numbers and output-file list given the post-audit state.
+8. ~~**Update `README.md`**~~ **DONE 2026-04-25.** Rebaselined: production variant list, post-audit output-file inventory (catalog.npz, p1d.npz, p1d_per_class.h5, cddf.npz / cddf_corrected.npz, cddf_stacked.npz / cddf_stacked_corrected.npz, convergence_ratios.npz, hcd_summary_{lf,hr}.h5, rogers_alpha_summary.h5), test-suite invocation, post-bug-#7 dN/dX status, k-convention call-out.
 
 ### Priority 3 — science next steps
 

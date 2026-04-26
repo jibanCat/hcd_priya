@@ -6,59 +6,48 @@
 - **Author:** Simeon Bird
 - **Purpose:** Compute Lyman-alpha forest spectra from cosmological simulations.
 
-## What this repo reuses from fake_spectra
+## Status: reference codebase, not a runtime dependency
 
-### Directly reused: physics constants and line parameters
+Production code paths in `hcd_priya` **do not import `fake_spectra` at runtime**. The pre-saved `tau/H/1/1215` HDF5 grids that this pipeline consumes were *originally generated* with `fake_spectra`, but everything downstream of that — system finding, NHI recovery, P1D, CDDF, masking, templates — is reimplemented locally.
 
-`hcd_analysis/voigt_utils.py` uses the same Lyman-alpha line parameters
-as fake_spectra:
-  - Lyman-alpha wavelength: lambda = 1215.67 Å
-  - Oscillator strength: f_lu = 0.4164
-  - Einstein A coefficient: Gamma = 6.265e8 s^-1
+The only `import fake_spectra` site in the package is at `hcd_analysis/voigt_utils.py:72`, inside a `try/except ImportError` block. It is used purely as a sanity hook: if `fake_spectra` happens to be installed, the module captures `voigt_profile` for cross-validation; if not, every code path proceeds with our internal Voigt implementation. No production figure or downstream artefact depends on this soft import being satisfied.
 
-These values are embedded as constants (the same values fake_spectra uses)
-to avoid a hard dependency on fake_spectra's internal module structure,
-which has changed across versions.
+## What we ported (with cross-validation)
 
-### Reused: Voigt profile computation approach
+| Component | Local source | Cross-check |
+|-----------|--------------|-------------|
+| Lyman-α line constants (λ = 1215.67 Å, f = 0.4164, Γ = 6.265 × 10⁸ s⁻¹) | `hcd_analysis/voigt_utils.py` (compile-time constants) | Bahcall–Peebles 1969 / Wolfe-Gawiser-Prochaska 2005 |
+| Voigt-Hjerting `H(a, u) = Re[wofz(u + i·a)]` | `voigt_utils.voigt_profile_phi` (`scipy.special.wofz`) | Same approach as `fake_spectra` — standard Faddeeva form |
+| Velocity-space integrated cross section `σ_int = π · e² · f · λ / (m_e · c · 1e5)` (cm² · km/s) | `voigt_utils._SIGMA_PREFACTOR` ≈ 1.3435 × 10⁻¹² | `tests/test_tau_sum_rule.py`: ratio = 1.0000 to FP after bug #1 fix |
+| Forward-model `tau_voigt(v, NHI, b, v0)` | `voigt_utils.tau_voigt` | `tests/test_nhi_recovery.py` cross-normalisation |
+| Absorption distance `dX = (1+z)² · L_com · H_0/c` | `cddf.absorption_path_per_sightline` | `tests/test_absorption_path.py` (6 tests, includes inline port of `fake_spectra.unitsystem.absorption_distance`) |
 
-`voigt_utils.voigt_profile_phi()` uses `scipy.special.wofz` (Faddeeva function),
-which is the same mathematical approach as fake_spectra's internal Voigt
-computation. The Voigt-Hjerting function H(a,u) = Re[wofz(u + i*a)] is
-standard in all modern Lyman-alpha codes.
+## What we did **not** port (and why)
 
-### Wrapped: tau_voigt() model function
+| `fake_spectra` component | Status | Reason |
+|--------------------------|--------|--------|
+| `Spectra` class | Not used | We start from saved τ, not particle data |
+| `Spectra.get_tau()` | Not applicable | τ already stored on disk |
+| `Spectra.get_col_density()` | Not applicable | Requires GADGET particle snapshots |
+| `find_absorbers()` | Reimplemented | Local `catalog.find_systems_in_skewer` operates on τ directly with our chosen thresholds |
+| `rate_interpolate` | Not used | Designed for post-processing `Spectra` objects |
 
-`voigt_utils.tau_voigt(v, NHI, b, v0)` computes the theoretical optical depth
-for a single Voigt component. This is the model function used in absorber
-fitting. It replicates what fake_spectra computes internally when generating
-synthetic spectra from particle data.
+## Newly implemented in this repo
 
-### NOT reused (why)
-
-| fake_spectra component | Status in this repo | Reason |
-|------------------------|---------------------|--------|
-| `Spectra` class | Not used | Designed for particle data; we have pre-computed tau |
-| `Spectra.get_tau()` | Not applicable | tau is already saved |
-| `Spectra.get_col_density()` | Not applicable | Requires particle data (GADGET snapshots) |
-| `find_absorbers()` | Re-implemented | Our implementation operates on tau directly |
-| `rate_interpolate` | Not used | Designed for post-processing Spectra objects |
-
-## What is newly implemented in this repo
-
-| Component | Location | Description |
-|-----------|----------|-------------|
-| Tau-based system finder | `catalog.find_systems_in_skewer()` | Connected threshold regions in velocity space |
-| Voigt fitting from tau | `voigt_utils.fit_nhi_from_tau()` | scipy L-BFGS-B fit in log space |
-| AbsorberCatalog | `catalog.AbsorberCatalog` | Serialisable container for absorber sets |
-| P1D accumulator | `p1d.P1DAccumulator` | Streaming, memory-efficient P1D computation |
-| CDDF measurement | `cddf.measure_cddf()` | From absorption path and simulation box |
-| CDDF perturbation | `cddf.CDDFPerturbation` | Continuous (A, alpha, N_pivot) model |
-| Pipeline | `pipeline.run_one_snap()` | End-to-end orchestration with resume/restart |
-| Batch scripts | `scripts/` | Great Lakes SLURM job templates |
+| Component | Location |
+|-----------|----------|
+| τ-based system finder | `catalog.find_systems_in_skewer` |
+| NHI from τ sum rule (production, fast_mode) | `catalog.nhi_from_tau_fast` (uses `_SIGMA_PREFACTOR`) |
+| Voigt fit fallback (NHI from τ profile) | `voigt_utils.fit_nhi_from_tau` (scipy L-BFGS-B in log space) |
+| `AbsorberCatalog` container | `catalog.AbsorberCatalog` |
+| Streaming `P1DAccumulator` | `p1d.P1DAccumulator` |
+| Per-class P1D HDF5 output | `p1d.compute_p1d_per_class` + `save_p1d_per_class_hdf5` |
+| CDDF measurement | `cddf.measure_cddf`, `cddf.stack_cddf_for_sim` |
+| CDDF perturbation model | `cddf.CDDFPerturbation` |
+| Rogers+2018 four-parameter HCD template | `hcd_analysis/hcd_template.py` |
+| End-to-end pipeline | `pipeline.run_one_snap`, `pipeline.run_all` |
+| Great Lakes SLURM launchers | `scripts/batch_*.sh`, `scripts/install_greatlakes.sh` |
 
 ## Installation
 
-See `docs/` section on environment setup or README for installation instructions.
-If fake_spectra is not installed, the pipeline falls back to internal Voigt
-utilities (the same physics, just without fake_spectra as a dependency).
+`fake_spectra` is **optional**. The pipeline imports it inside a `try/except ImportError` and silently falls back to internal utilities if it is not available. `scripts/install_greatlakes.sh` does install it as a convenience for users who want the soft cross-check, but no production target requires it.

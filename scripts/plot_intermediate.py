@@ -7,6 +7,24 @@ scratch output directory, without requiring a complete run.
 Loads catalog data as raw numpy arrays (no per-absorber object construction),
 so 33 × 457K absorbers loads in ~1s instead of 8+ minutes.
 
+**Status (post-audit):**
+
+This script is *legacy / exploratory*. Production figures used in the
+science narrative live elsewhere:
+
+* `scripts/regen_intermediate_figures.py`   — authoritative `figures/analysis/`
+* `scripts/plot_per_class_templates.py`     — per-class P1D templates (reads
+                                              `p1d_per_class.h5`)
+* `scripts/plot_param_sensitivity_split.py` — parameter median-split panels
+* `scripts/plot_rogers_alpha*.py`           — Rogers α fit and overlays
+* `scripts/plot_convergence_ratios.py`      — HR/LF T(k)
+
+This script still runs cleanly against the post-audit data (tolerant of the
+shortened `ALL_VARIANTS = ["all", "no_DLA_priya"]` because each variant
+access is guarded by `if k_key in d and p_key in d`), but the panels that
+depended on the legacy class-mask variants (`no_LLS`, `no_subDLA`, `no_DLA`,
+`no_HCD`) will simply skip those lines on current data.
+
 Usage:
     python3 scripts/plot_intermediate.py
     python3 scripts/plot_intermediate.py --output-root /scratch/.../hcd_outputs --out-dir figures/intermediate
