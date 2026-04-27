@@ -176,11 +176,14 @@ def process_file(
     z = header.redshift
     dv_kms = pixel_dv_kms(header)
 
-    # Tolerance: convert merge_dv_kms to pixels with a 5-px floor so that
-    # very high-resolution rand_spectra (dv_pix ≈ 1 km/s → 100 px tolerance)
-    # don't dominate, and very low-res (dv_pix ≈ 10 km/s → 10 px) don't shrink
-    # below a sensible minimum.
-    tol_pixels = max(int(round(MERGE_DV_KMS / dv_kms)), 5)
+    # Tolerance: 300 km/s, which captures the peculiar-velocity offset
+    # between fake_spectra's real-space colden and redshift-space tau.
+    # See docs/dla_truth_unmatched_analysis.md for the sweep that picked
+    # this number (the older merge_dv_kms = 100 km/s tolerance left
+    # ~14 % of unmatched truths sitting at 100-300 km/s offsets, which
+    # are real DLAs displaced by halo peculiar velocities).
+    from hcd_analysis.dla_truth import tol_pixels_for_300_kms
+    tol_pixels = tol_pixels_for_300_kms(dv_kms)
 
     with h5py.File(path, "r") as f:
         colden = f["colden/H/1"][:]            # (n_skew, nbins) cm^-2

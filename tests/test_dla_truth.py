@@ -25,6 +25,7 @@ from hcd_analysis.dla_truth import (
     find_truth_dlas_from_colden,
     match_dla_lists,
     summary_stats,
+    tol_pixels_for_300_kms,
 )
 
 
@@ -245,6 +246,61 @@ def test_2d_colden_multirow():
     )
 
 
+def test_tol_helper_300_kms():
+    """tol_pixels_for_300_kms should be ~300/dv_pix with a 5-px floor."""
+    assert tol_pixels_for_300_kms(1.0) == 300
+    assert tol_pixels_for_300_kms(10.0) == 30
+    assert tol_pixels_for_300_kms(60.0) == 5      # floor kicks in
+    assert tol_pixels_for_300_kms(1000.0) == 5
+    print("  test_tol_helper_300_kms: tol(1)=300, tol(10)=30, tol(60)=5 ✓")
+
+
+def test_peculiar_velocity_shifted_dla_matches():
+    """Regression test for the dominant T2 failure mode in the production
+    validation: a real DLA at the same physical sightline location appears
+    in colden (real-space) at one pixel and in tau (redshift-space) at a
+    pixel offset by ~peculiar velocity / dv_pix.
+
+    With dv_pix = 1 km/s and v_pec = 200 km/s offset, the truth peak is
+    at pixel 1500 and the recovered τ-span is centred at pixel 1300.
+    The matcher must pair them when tol corresponds to ≥ 200 km/s.
+    """
+    # Truth DLA (colden, real space): single 1-pixel peak at pixel 1500
+    nbins = 4096
+    truth = [TruthDLA(skewer_idx=0, pix_start=1500, pix_end=1500,
+                      pix_peak=1500, NHI_truth=4.0e20)]
+    # Recovered (τ, redshift space): wide system at [1180, 1420], NHI ~ 4e20
+    recovered = [RecoveredDLA(skewer_idx=0, pix_start=1180, pix_end=1420,
+                              NHI_recovered=4.2e20, log_NHI=20.62,
+                              absorber_class="DLA")]
+
+    # At a too-tight tolerance (50 km/s = 50 px), the truth peak (1500)
+    # is outside the recovered span [1180, 1420] + 50 = [1130, 1470], so
+    # the match fails.
+    res_tight = match_dla_lists(truth, recovered, tol_pixels=50)
+    assert len(res_tight.matched) == 0, "with 50 px tol, the v_pec-shifted DLA is missed"
+    assert len(res_tight.unmatched_truth) == 1
+    assert len(res_tight.unmatched_recovered) == 1
+
+    # At the production 300 km/s tolerance (= 300 px at dv=1), the matcher
+    # captures it.
+    tol = tol_pixels_for_300_kms(dv_pix_kms=1.0)
+    res_relaxed = match_dla_lists(truth, recovered, tol_pixels=tol)
+    assert len(res_relaxed.matched) == 1, (
+        f"at 300 km/s tol the v_pec-shifted DLA must match; got "
+        f"{len(res_relaxed.matched)}"
+    )
+    assert len(res_relaxed.unmatched_truth) == 0
+    assert len(res_relaxed.unmatched_recovered) == 0
+    pair = res_relaxed.matched[0]
+    # Sanity: the recovered NHI is correct to within a small dex
+    assert abs(pair.delta_log_nhi) < 0.05
+    print(
+        "  test_peculiar_velocity_shifted_dla_matches: "
+        f"50 px tol → 0 matches; 300 px tol → 1 match (Δlog={pair.delta_log_nhi:+.4f})"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -257,6 +313,8 @@ def main():
     test_position_matching()
     test_summary_stats_numerics()
     test_2d_colden_multirow()
+    test_tol_helper_300_kms()
+    test_peculiar_velocity_shifted_dla_matches()
     print("All tests passed.")
 
 

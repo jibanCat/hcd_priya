@@ -210,6 +210,23 @@ def find_truth_dlas_from_colden(
 # Position-tolerant matching between truth and recovered DLA lists
 # ---------------------------------------------------------------------------
 
+def tol_pixels_for_300_kms(dv_pix_kms: float) -> int:
+    """Standard tolerance for the τ vs colden matcher: 300 km/s in pixels.
+
+    300 km/s is the typical halo-scale peculiar velocity at z = 2–4 in
+    cosmological simulations.  fake_spectra computes ``colden`` in
+    real-space LOS coordinates but ``tau`` in redshift-space, so the
+    same physical DLA appears at different LOS pixels in the two
+    fields, offset by `v_pec / dv_pix_kms`.  See
+    ``docs/dla_truth_unmatched_analysis.md`` for the empirical sweep
+    that picked this number.
+
+    Floor at 5 pixels so a coarse-binned run still allows a few-pixel
+    span jitter from the τ peak-finder's contiguous-core convention.
+    """
+    return max(int(round(300.0 / dv_pix_kms)), 5)
+
+
 def match_dla_lists(
     truth: Sequence[TruthDLA],
     recovered: Sequence[RecoveredDLA],

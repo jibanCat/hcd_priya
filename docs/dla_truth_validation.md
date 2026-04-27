@@ -7,7 +7,9 @@ particle-based ground truth derived from the SPH column-density skewers in
 `rand_spectra_DLA.hdf5`. The four hypothesis-tests defined below all PASS
 on the 3 HiRes sims that carry `rand_spectra_DLA.hdf5` data; the production
 catalog is therefore validated against truth NHI to within ±0.05 dex bias
-and 0.06 dex random scatter, with 86 % completeness and 84 % purity.
+and 0.06 dex random scatter, with 97 % completeness and 95 % purity at the
+300 km/s peculiar-velocity-aware tolerance (86 % / 84 % at the original
+100 km/s tolerance — see §5 below).
 
 ## 1. Data sources
 
@@ -156,41 +158,58 @@ DLAs?" definition (denominator = recovered DLA-class only).
 
 ## 5. Results
 
-Run on 10 (sim, snap) pairs across 3 HiRes sims, total 8340 truth DLAs:
+Run on 10 (sim, snap) pairs across 3 HiRes sims, total 8340 truth DLAs.
+
+**Updated 2026-04-27:** the matcher tolerance was raised from
+`merge_dv_kms = 100 km/s` to **300 km/s** after a follow-up analysis
+(`docs/dla_truth_unmatched_analysis.md`) showed that ≈ 14 % of
+unmatched truths sit at 100–300 km/s LOS offsets — the typical
+peculiar-velocity offset between fake_spectra's real-space `colden`
+and redshift-space `tau`.  The relaxation has no effect on bias /
+scatter (the new matches have correct NHI within σ ≈ 0.06 dex), only
+on the position-matching success rate.
 
 | Hypothesis | Recovered | Verdict |
 |---|---|---|
-| H1 (no bias) | ⟨Δlog NHI⟩ = +0.0089 ± 0.0014 dex (95 % CI) | **PASS** |
-| H2 (scatter) | σ(Δlog NHI) = 0.0620 dex | **PASS** |
-| H3 (completeness) | 7212/8340 = 0.865 | **PASS** |
-| H4 (purity) | 7171/8512 = 0.842 | **PASS** |
+| H1 (no bias) | ⟨Δlog NHI⟩ = +0.0084 ± 0.0013 dex (95 % CI) | **PASS** |
+| H2 (scatter) | σ(Δlog NHI) = 0.0579 dex | **PASS** |
+| H3 (completeness) | 8097/8340 = 0.971 | **PASS** |
+| H4 (purity) | 8064/8512 = 0.947 | **PASS** |
 
-### Per-z breakdown
+### Per-z breakdown (300 km/s tolerance)
 
 | z | N_truth | N_rec(DLA) | matched | completeness | purity | ⟨Δlog NHI⟩ | σ |
 |---|---|---|---|---|---|---|---|
-| 2.0 | 187 | 191 | 154 | 0.834 | 0.806 | -0.0004 | 0.0175 |
-| 2.2 | 3901 | 3971 | 3246 | 0.839 | 0.817 | +0.0091 | 0.0638 |
-| 3.0 | 2160 | 2211 | 1881 | 0.874 | 0.851 | +0.0073 | 0.0598 |
-| 4.0 | 2092 | 2139 | 1890 | 0.907 | 0.884 | +0.0109 | 0.0635 |
+| 2.0 | 187  | 191  | 179  | 0.968 | 0.937 | -0.0003 | 0.0195 |
+| 2.2 | 3901 | 3971 | 3740 | 0.964 | 0.942 | +0.0085 | 0.0580 |
+| 3.0 | 2160 | 2211 | 2104 | 0.976 | 0.952 | +0.0071 | 0.0563 |
+| 4.0 | 2092 | 2139 | 2041 | 0.978 | 0.954 | +0.0104 | 0.0615 |
 
 Trends:
 - Bias is statistically positive at 6.4σ (95 % CI fully above zero) but
-  far below the 0.05 dex H1 threshold (it sits at 0.009 dex). The sign
+  far below the 0.05 dex H1 threshold (it sits at 0.008 dex). The sign
   is consistent with the τ → NHI sum-rule slightly over-counting because
   the τ-core's wings (τ ≈ 100 → 0) are excluded by the τ > 100 cut while
   the same colden mass *is* included on the truth side. We do not
   recommend any correction for this.
 - σ scales loosely with N: at z = 2.0 the only file has just 187 truth
-  DLAs and σ = 0.017 dex; aggregating across many files at higher z
+  DLAs and σ = 0.020 dex; aggregating across many files at higher z
   brings σ up to 0.06 dex. Both are well inside H2.
-- Completeness rises with z (0.83 → 0.91). At low z, matched truth-DLAs
-  are 5-15 % short of the truth count because some real DLAs sit in the
-  recovered LLS/subDLA bucket — sub-resolution multi-component systems
-  whose τ profile didn't quite saturate above 100. This is the "loose"
-  vs "DLA-class" distinction in H3 — the loose number stays ≥ 0.83 at
-  every z.
+- Completeness is now ≥ 96 % at every redshift bin (formerly ≥ 83 %).
 - Purity tracks completeness; no anomalies.
+
+### Comparison with the original 100 km/s tolerance
+
+| Hypothesis | 100 km/s tol (original) | 300 km/s tol (current) |
+|---|---|---|
+| H1 mean Δlog NHI | +0.0089 | +0.0084 |
+| H2 σ Δlog NHI | 0.0620 | 0.0579 |
+| H3 completeness | 0.865 | **0.971** |
+| H4 purity | 0.842 | **0.947** |
+
+Bias and scatter are essentially unchanged — confirming the additional
+matches at 100–300 km/s offsets are physically valid (correct NHI), not
+noise-driven false positives.
 
 ### NHI scatter figure
 
