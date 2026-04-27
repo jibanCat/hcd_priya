@@ -564,12 +564,134 @@ def fit_b_F_from_xi_FF(
     )
 
 
+# ---------------------------------------------------------------------------
+# Cross-correlation: b_DLA from ξ_× given b_F
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BDLAFromXiResult:
+    b_DLA: float
+    b_DLA_err: float
+    b_F_assumed: float
+    beta_DLA_assumed: float
+    beta_F_assumed: float
+    K_cross: float
+    r_centres: np.ndarray
+    xi_obs: np.ndarray
+    xi_template: np.ndarray
+    fit_mask: np.ndarray
+    n_fit_bins: int
+
+
+def fit_b_DLA_from_xi_cross(
+    xi_2d: np.ndarray,
+    npairs_2d: np.ndarray,
+    r_perp_centres: np.ndarray,
+    r_par_centres: np.ndarray,
+    k_lin: np.ndarray,
+    P_lin: np.ndarray,
+    b_F: float,
+    beta_DLA: float = 0.5,
+    beta_F: float = 1.5,
+    r_min: float = 10.0,
+    r_max: float = 40.0,
+    n_r_bins: int = 12,
+) -> BDLAFromXiResult:
+    """Fit b_DLA from the DLA × Lyα cross-correlation monopole.
+
+    Cross-Kaiser monopole prefactor (FR+2012, eq. 11):
+
+        ξ_×^(0)(r) = b_DLA · b_F · K_×(β_DLA, β_F) · ξ_lin^(0)(r)
+        K_×(β_DLA, β_F) = 1 + (β_DLA + β_F)/3 + β_DLA·β_F/5
+
+    Given the externally-fit `b_F` (from ξ_FF, the production-grade
+    estimator) and assumed Kaiser parameters, the only remaining
+    unknown is `b_DLA`.  We extract the monopole from the 2-D
+    `ξ_×(r_par, r_perp)` grid, divide out `b_F · K_× · ξ_lin`, and
+    take the geometric-mean ratio over `r ∈ [r_min, r_max]` Mpc/h.
+
+    Parameters
+    ----------
+    xi_2d, npairs_2d : (n_perp, n_par) — output of xi_cross_dla_lya
+        AFTER folding signed r_par to |r_par|.
+    r_perp_centres, r_par_centres : 1-D bin centres for the folded grid.
+    k_lin, P_lin : linear matter P at the snap's redshift, units must
+        match those of r_min/r_max (i.e. Mpc/h or km/s consistently).
+    b_F : externally-known Lyα forest bias (negative).
+    beta_DLA : DLA Kaiser β = f/b_DLA.  Default 0.5 corresponds to
+        b_DLA ≈ 2 with f ≈ 1 at z ~ 2-4.  Iterate after the first fit
+        if needed.
+    beta_F : Lyα forest β.  Default 1.5 (Slosar+11 z ≈ 2.3).
+    r_min, r_max, n_r_bins : 1-D r-bin edges for the monopole.
+
+    Returns
+    -------
+    BDLAFromXiResult
+    """
+    r_bins = np.linspace(r_min, r_max, n_r_bins + 1)
+    r_centres, xi_mono, n_p = extract_monopole(
+        xi_2d=xi_2d, npairs_2d=npairs_2d,
+        r_perp_centres=r_perp_centres, r_par_centres=r_par_centres,
+        r_bins=r_bins,
+    )
+    xi_lin = xi_lin_monopole(r_centres, k_lin, P_lin)
+    K_cross = (
+        1.0
+        + (beta_DLA + beta_F) / 3.0
+        + (beta_DLA * beta_F) / 5.0
+    )
+    template = b_F * K_cross * xi_lin                      # ξ_× / b_DLA
+
+    fit_mask = np.isfinite(xi_mono) & (template != 0) & (n_p > 0)
+    if int(fit_mask.sum()) < 4:
+        raise ValueError(
+            f"only {int(fit_mask.sum())} bins available for ξ_× fit "
+            f"in [{r_min}, {r_max}] Mpc/h"
+        )
+    # Sign expectation: b_F < 0; for r > 0 in the linear regime,
+    # ξ_lin > 0; b_DLA > 0 for halos; cross ξ_× should be NEGATIVE
+    # (a DLA pulls down the local flux).  Compute ratio and take the
+    # geometric-mean of the absolute value, restoring the sign at
+    # the end.
+    ratio = xi_mono[fit_mask] / template[fit_mask]
+    # ratio = b_DLA, with sign convention preserved.  Drop bins with
+    # ratio of opposite sign or clearly noisy.
+    sign = np.sign(np.median(ratio))
+    ratio_use = sign * ratio
+    ratio_use = ratio_use[ratio_use > 0]
+    if ratio_use.size < 4:
+        raise ValueError(
+            f"after dropping wrong-sign ratio bins, only {ratio_use.size} "
+            "survive — ξ_× is too noisy or b_F sign is inconsistent"
+        )
+    log_b_DLA = float(np.log(ratio_use).mean())
+    log_b_DLA_se = float(np.log(ratio_use).std(ddof=1) / np.sqrt(ratio_use.size))
+    b_DLA = float(sign * np.exp(log_b_DLA))
+    b_DLA_err = abs(b_DLA) * log_b_DLA_se
+
+    return BDLAFromXiResult(
+        b_DLA=b_DLA,
+        b_DLA_err=b_DLA_err,
+        b_F_assumed=b_F,
+        beta_DLA_assumed=beta_DLA,
+        beta_F_assumed=beta_F,
+        K_cross=K_cross,
+        r_centres=r_centres,
+        xi_obs=xi_mono,
+        xi_template=b_DLA * template,
+        fit_mask=fit_mask,
+        n_fit_bins=int(fit_mask.sum()),
+    )
+
+
 __all__ = [
+    "BDLAFromXiResult",
     "BFFitResult",
     "BFFromXiResult",
     "compute_p1d_clean_sightlines",
     "extract_monopole",
     "find_camb_pk_for_z",
+    "fit_b_DLA_from_xi_cross",
     "fit_b_F",
     "fit_b_F_from_xi_FF",
     "hMpc_to_kms_factor",
