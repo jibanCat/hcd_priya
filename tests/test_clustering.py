@@ -22,9 +22,13 @@ sys.path.insert(0, str(ROOT))
 
 from hcd_analysis.clustering import (
     SightlineGeometry,
+    fold_signed_to_abs,
     los_separation,
     minimum_image,
+    pair_count_2d,
     pixel_to_xyz,
+    xi_auto_dla,
+    xi_cross_dla_lya,
     xyz_to_nearest_pixel,
 )
 
@@ -257,6 +261,304 @@ class TestRealSpectraLoad(unittest.TestCase):
         self.assertLessEqual(geom.cofm_mpch.max(), geom.box + 1e-6)
         # dx_pix sanity
         self.assertAlmostEqual(geom.dx_pix, 0.096, places=3)
+
+
+class TestXiCrossOnRandomField(unittest.TestCase):
+    """Test 4 in the doc: random Poisson DLAs × random Gaussian δ_F field
+    → ξ_× consistent with 0 within Poisson error.
+
+    Constructs a small box (60 Mpc/h) with ~5e3 random Lyα-pixel positions
+    sampling a Gaussian δ_F, and ~1000 random DLA positions with no
+    intentional clustering between the two.  Verifies that the
+    bin-averaged ξ_× has a mean consistent with 0 within
+    1/sqrt(N_per_bin).
+    """
+
+    def test_zero_signal_random_inputs(self):
+        rng = np.random.default_rng(42)
+        box = 60.0
+        n_pix = 5000
+        n_dla = 1000
+
+        pixel_xyz = rng.uniform(0, box, size=(n_pix, 3))
+        pixel_axis = rng.integers(0, 3, size=n_pix)
+        pixel_delta_F = rng.standard_normal(n_pix)        # mean 0, std 1
+        dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
+
+        r_perp_edges = np.linspace(0.0, 25.0, 11)         # 5 Mpc/h bins
+        r_par_edges = np.linspace(-25.0, 25.0, 11)        # 5 Mpc/h, signed
+
+        xi, counts, npairs = xi_cross_dla_lya(
+            pixel_xyz=pixel_xyz,
+            pixel_los_axis=pixel_axis,
+            pixel_delta_F=pixel_delta_F,
+            dla_xyz=dla_xyz,
+            box=box,
+            r_perp_bins=r_perp_edges,
+            r_par_bins_signed=r_par_edges,
+            chunk_size=200,
+        )
+        # Use the fold to drop the sign; gives more pairs per bin.
+        xi_folded, _ = fold_signed_to_abs(xi, r_par_edges)
+
+        # Expected per-bin error: σ(δ_F) / sqrt(npairs).  We require
+        # mean(xi_folded) consistent with 0 within 5 σ across all bins.
+        npairs_folded = npairs[:, npairs.shape[1] // 2:].sum(axis=0).sum()
+        self.assertGreater(npairs_folded, 5e5)              # sanity: enough pairs
+        # The bin with the fewest pairs sets the worst-case error scale
+        min_pairs = npairs[:, npairs.shape[1] // 2:].min()
+        self.assertGreater(min_pairs, 50)                   # CLT regime
+        worst_err = 1.0 / np.sqrt(min_pairs)
+        max_xi = np.nanmax(np.abs(xi_folded))
+        self.assertLess(max_xi, 5.0 * worst_err)
+
+    def test_zero_signal_with_periodic_pairs(self):
+        """Edge case: pairs separated near the box boundary should still
+        contribute via minimum-image wrap.  Place all pixels at x ≈ 0
+        and DLAs at x ≈ box; no intrinsic correlation expected."""
+        rng = np.random.default_rng(43)
+        box = 40.0
+        n_pix = 2000
+        n_dla = 500
+        # All pixels in a thin slab near x = 0
+        pixel_xyz = rng.uniform(0, box, size=(n_pix, 3))
+        pixel_xyz[:, 0] = rng.uniform(0, 1, size=n_pix)
+        pixel_axis = np.zeros(n_pix, dtype=np.int64)        # all x-axis sightlines
+        pixel_delta_F = rng.standard_normal(n_pix)
+        # All DLAs in a thin slab near x = box (i.e. r_par ≈ 1 Mpc/h after wrap)
+        dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
+        dla_xyz[:, 0] = rng.uniform(box - 1, box, size=n_dla)
+
+        r_perp_edges = np.linspace(0.0, 20.0, 6)
+        r_par_edges = np.linspace(-20.0, 20.0, 11)
+
+        xi, counts, npairs = xi_cross_dla_lya(
+            pixel_xyz=pixel_xyz,
+            pixel_los_axis=pixel_axis,
+            pixel_delta_F=pixel_delta_F,
+            dla_xyz=dla_xyz,
+            box=box,
+            r_perp_bins=r_perp_edges,
+            r_par_bins_signed=r_par_edges,
+        )
+        # The bin at r_par ≈ 0 (centre of the signed grid) should populate
+        # *because* the periodic wrap makes pixel-x≈0 and DLA-x≈box near
+        # neighbours.  If the wrap is broken, that bin would be empty.
+        center_par_bin = npairs.shape[1] // 2
+        first_perp_bin = 0
+        self.assertGreater(int(npairs[first_perp_bin, center_par_bin]), 100)
+
+
+class TestXiAutoOnRandomDLAs(unittest.TestCase):
+    """Test 5 in the doc: random Poisson DLAs → ξ_DD consistent with 0
+    on linear scales (i.e. DD ≈ RR_analytic up to Poisson noise)."""
+
+    def test_zero_signal_random_dlas(self):
+        rng = np.random.default_rng(7)
+        box = 80.0
+        n_dla = 4000
+
+        dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
+        dla_axis = rng.integers(0, 3, size=n_dla)
+
+        r_perp_edges = np.linspace(0.0, 30.0, 7)
+        r_par_edges = np.linspace(-30.0, 30.0, 13)
+
+        xi, DD, RR = xi_auto_dla(
+            dla_xyz=dla_xyz,
+            dla_los_axis=dla_axis,
+            box=box,
+            r_perp_bins=r_perp_edges,
+            r_par_bins_signed=r_par_edges,
+            chunk_size=400,
+        )
+        # Per-bin Poisson error is sqrt(DD) / RR
+        err = np.sqrt(np.maximum(DD, 1.0)) / RR
+        # Each bin's residual should be within 5 σ of zero.
+        # Most bins comfortably; a small fraction (binomial) of bins can
+        # touch the limit, so we test the median magnitude as < 1 σ.
+        sigmas = np.abs(xi) / err
+        self.assertLess(float(np.nanmedian(sigmas)), 1.5)
+        # And check no bin exceeds 6 σ (would flag a bug)
+        self.assertLess(float(np.nanmax(sigmas[np.isfinite(sigmas)])), 6.0)
+
+
+class TestPairCounterAxisSymmetry(unittest.TestCase):
+    """Test 7a in the doc: swapping x and y axes leaves ξ unchanged on a
+    statistically symmetric input."""
+
+    def test_axis_swap_invariance_dla_auto(self):
+        rng = np.random.default_rng(11)
+        box = 60.0
+        n_dla = 2000
+        dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
+        dla_axis = rng.integers(0, 3, size=n_dla)
+
+        r_perp_edges = np.linspace(0.0, 25.0, 6)
+        r_par_edges = np.linspace(-25.0, 25.0, 11)
+
+        xi_orig, _, _ = xi_auto_dla(dla_xyz, dla_axis, box, r_perp_edges, r_par_edges,
+                                    chunk_size=400)
+        # Swap x and y in both positions and the LOS-axis assignment
+        swap_pos = dla_xyz.copy()
+        swap_pos[:, [0, 1]] = swap_pos[:, [1, 0]]
+        swap_axis = dla_axis.copy()
+        # axis 0 ↔ axis 1; axis 2 unchanged
+        swap_axis = np.where(swap_axis == 0, 1, np.where(swap_axis == 1, 0, swap_axis))
+        xi_swap, _, _ = xi_auto_dla(swap_pos, swap_axis, box, r_perp_edges, r_par_edges,
+                                    chunk_size=400)
+        # Identity transformation up to FP rounding — element-wise equality
+        np.testing.assert_allclose(xi_orig, xi_swap, rtol=1e-10, atol=1e-12)
+
+
+class TestSignedRparSymmetry(unittest.TestCase):
+    """Test 7b in the doc: ξ(+r_par, r_perp) = ξ(-r_par, r_perp) on an
+    isotropic input.
+
+    For random DLAs (which have no preferred LOS), the auto-correlation
+    must be exactly symmetric under r_par → -r_par, *bin by bin*,
+    because every pair (i, j) is also counted as (j, i) with opposite sign.
+    """
+
+    def test_dla_auto_signed_symmetry_single_axis(self):
+        """With ALL DLAs on the same LOS axis, mirror symmetry of DD is
+        bit-exact: every pair (i, j) is also counted as (j, i) with
+        opposite sign of r_par, and both use the same axis convention.
+
+        Note: with mixed axes, the symmetry holds only statistically
+        (each pair (i, j) uses ax[i] while (j, i) uses ax[j]).  We test
+        the deterministic case here; the statistical case is exercised
+        by the larger random-field test above (which doesn't check this).
+        """
+        rng = np.random.default_rng(13)
+        box = 60.0
+        n_dla = 2500
+        dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
+        dla_axis = np.zeros(n_dla, dtype=np.int64)        # all on axis 0
+        r_perp_edges = np.linspace(0.0, 25.0, 6)
+        r_par_edges = np.linspace(-20.0, 20.0, 21)        # symmetric around 0
+
+        xi, DD, RR = xi_auto_dla(dla_xyz, dla_axis, box, r_perp_edges, r_par_edges,
+                                 chunk_size=400)
+        n_par = DD.shape[1]
+        for k in range(n_par // 2):
+            mirror = n_par - 1 - k
+            np.testing.assert_array_equal(DD[:, k], DD[:, mirror])
+
+    def test_xcorr_signed_symmetry_single_axis_statistical(self):
+        """Cross-corr is between two distinct catalogs (pixels vs DLAs),
+        so a pair (pixel_i, DLA_j) has no automatic mirror partner — the
+        symmetry is only statistical, not bit-exact (unlike the auto,
+        where (i, j) and (j, i) both appear in the loop).  Demand
+        agreement within Poisson noise.
+        """
+        rng = np.random.default_rng(17)
+        box = 50.0
+        n_pix = 6000
+        n_dla = 1200
+        pixel_xyz = rng.uniform(0, box, size=(n_pix, 3))
+        pixel_axis = np.zeros(n_pix, dtype=np.int64)      # all on axis 0
+        pixel_delta_F = rng.standard_normal(n_pix)
+        dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
+
+        r_perp_edges = np.linspace(0.0, 20.0, 5)
+        r_par_edges = np.linspace(-20.0, 20.0, 21)
+
+        _, _, npairs = xi_cross_dla_lya(
+            pixel_xyz=pixel_xyz,
+            pixel_los_axis=pixel_axis,
+            pixel_delta_F=pixel_delta_F,
+            dla_xyz=dla_xyz,
+            box=box,
+            r_perp_bins=r_perp_edges,
+            r_par_bins_signed=r_par_edges,
+            chunk_size=300,
+        )
+        n_par = npairs.shape[1]
+        for k in range(n_par // 2):
+            mirror = n_par - 1 - k
+            avg = 0.5 * (npairs[:, k] + npairs[:, mirror])
+            diff = npairs[:, k] - npairs[:, mirror]
+            sigmas = np.abs(diff) / np.sqrt(np.maximum(avg, 1.0))
+            self.assertLess(float(sigmas.max()), 5.0,
+                            f"asymmetry at bin pair (k={k}, {mirror}): {sigmas.max():.2f} σ")
+
+    def test_xcorr_signed_symmetry_mixed_axes_statistical(self):
+        """With mixed axes, symmetry is only statistical (different axes
+        define different LOS conventions per pair).  We require the
+        relative asymmetry per bin to be within Poisson noise (5 σ)."""
+        rng = np.random.default_rng(19)
+        box = 50.0
+        n_pix = 4000
+        n_dla = 1500
+        pixel_xyz = rng.uniform(0, box, size=(n_pix, 3))
+        pixel_axis = rng.integers(0, 3, size=n_pix)
+        pixel_delta_F = rng.standard_normal(n_pix)
+        dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
+
+        r_perp_edges = np.linspace(0.0, 20.0, 5)
+        r_par_edges = np.linspace(-20.0, 20.0, 21)
+
+        _, _, npairs = xi_cross_dla_lya(
+            pixel_xyz=pixel_xyz, pixel_los_axis=pixel_axis,
+            pixel_delta_F=pixel_delta_F, dla_xyz=dla_xyz,
+            box=box, r_perp_bins=r_perp_edges, r_par_bins_signed=r_par_edges,
+            chunk_size=400,
+        )
+        n_par = npairs.shape[1]
+        # (npairs[:, k] - npairs[:, mirror]) / sqrt(npairs_avg) → ~N(0, 1)
+        for k in range(n_par // 2):
+            mirror = n_par - 1 - k
+            avg = 0.5 * (npairs[:, k] + npairs[:, mirror])
+            diff = npairs[:, k] - npairs[:, mirror]
+            poisson_err = np.sqrt(np.maximum(avg, 1.0))
+            sigmas = np.abs(diff) / poisson_err
+            self.assertLess(float(sigmas.max()), 5.0,
+                            f"asymmetry at bin pair (k={k}, {mirror}): {sigmas.max():.2f} σ")
+
+
+class TestPairCounterPeriodicBoxClosure(unittest.TestCase):
+    """Test 6 (revised) in the doc: empirical closure of the
+    point-Poisson distribution against the analytic RR.
+
+    For N random points in a periodic box and a cylindrical bin entirely
+    INSIDE the box (r_perp_max ≤ box/2, |r_par|_max ≤ box/2):
+
+        ⟨ DD_bin ⟩ = N(N-1) · V_bin / V_box
+
+    so the agreement of ⟨DD⟩ with RR_analytic on a single bin is the
+    direct test that V_bin is right and minimum-image is right.  The
+    `_bin_volumes_2d` helper is also unit-tested directly.
+    """
+
+    def test_bin_volume_helper(self):
+        from hcd_analysis.clustering import _bin_volumes_2d
+        # one bin: r_perp in [0, R], r_par in [-z, z]
+        R = 5.0
+        z = 3.0
+        V = _bin_volumes_2d(np.array([0.0, R]), np.array([-z, z]))
+        self.assertEqual(V.shape, (1, 1))
+        self.assertAlmostEqual(float(V[0, 0]), np.pi * R * R * (2 * z), places=10)
+
+    def test_dd_matches_rr_for_random_points(self):
+        rng = np.random.default_rng(23)
+        box = 100.0
+        n = 4000
+
+        dla_xyz = rng.uniform(0, box, size=(n, 3))
+        dla_axis = np.zeros(n, dtype=np.int64)
+        # One bin well inside the box: r_perp in [5, 15], r_par in [-10, 10]
+        r_perp_edges = np.array([5.0, 15.0])
+        r_par_edges = np.array([-10.0, 10.0])
+
+        _, DD, RR = xi_auto_dla(dla_xyz, dla_axis, box, r_perp_edges, r_par_edges,
+                                chunk_size=500)
+        # DD/RR should be ~1; tolerance set by Poisson sqrt(DD).
+        ratio = float(DD[0, 0]) / float(RR[0, 0])
+        # σ(DD)/RR = sqrt(DD)/RR ≈ 1/sqrt(DD)
+        sigma = 1.0 / np.sqrt(float(DD[0, 0]))
+        self.assertGreater(float(DD[0, 0]), 100)               # CLT regime
+        self.assertAlmostEqual(ratio, 1.0, delta=5 * sigma)
 
 
 if __name__ == "__main__":

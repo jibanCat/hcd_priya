@@ -246,3 +246,330 @@ def los_separation(
     perp_sq = np.maximum(perp_sq, 0.0)
     r_perp = np.sqrt(perp_sq)
     return r_par_signed, r_perp
+
+
+# ---------------------------------------------------------------------------
+# Generic 2D pair counter
+# ---------------------------------------------------------------------------
+
+def pair_count_2d(
+    left_xyz: np.ndarray,
+    right_xyz: np.ndarray,
+    left_los_axis: np.ndarray,
+    box: float,
+    r_perp_bins: np.ndarray,
+    r_par_bins_signed: np.ndarray,
+    weights_left: Optional[np.ndarray] = None,
+    weights_right: Optional[np.ndarray] = None,
+    exclude_self: bool = False,
+    chunk_size: int = 4096,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Generic 2D (signed r_par, r_perp) pair accumulator.
+
+    For every pair (i in left, j in right) we form Δ = left[i] − right[j],
+    apply periodic minimum image, decompose into (r_par_signed, r_perp)
+    using ``left_los_axis[i]`` as the LOS reference, and accumulate
+
+        weight_pair = w_L[i] * w_R[j]
+
+    into the (r_perp, r_par) bin if the pair lands inside the binning
+    grid.  When ``weights_*`` are None they default to 1.
+
+    The LOS axis is taken from the **left** point (this is the design
+    choice: for ξ_× we set ``left = pixels`` so r_par is along the
+    Lyman-α pixel's sightline axis, per the doc §4).
+
+    Parameters
+    ----------
+    left_xyz, right_xyz : (N_L, 3), (N_R, 3) float
+        Positions in Mpc/h.  Both must lie in [0, box) modulo periodicity.
+    left_los_axis : (N_L,) int
+        0-indexed LOS axis per left point.
+    box : float
+        Comoving box side, Mpc/h.
+    r_perp_bins : (n_perp + 1,) float
+        Edges in Mpc/h, monotonically increasing, starting at ≥ 0.
+    r_par_bins_signed : (n_par + 1,) float
+        Edges in Mpc/h, monotonically increasing.  Pass a symmetric
+        grid (e.g. ``np.linspace(-50, 50, 51)``) to retain the LOS sign;
+        pass ``np.linspace(0, 50, 26)`` to fold (r_par will be |r_par|
+        before binning — see the ``fold`` keyword on the wrappers).
+    weights_left, weights_right : optional
+        Per-point weights.  Default: 1 each.
+    exclude_self : bool
+        If True, drop pairs where ``i == j``.  Use for auto-correlation
+        of identical catalogs.
+    chunk_size : int
+        Right-side chunking for memory.  Each chunk allocates an
+        (N_L, chunk_size) × 3 array.
+
+    Returns
+    -------
+    counts  : (n_perp, n_par) float64 — sum of weight_pair per bin
+    npairs  : (n_perp, n_par) int64   — number of pairs per bin
+    """
+    L = np.asarray(left_xyz, dtype=np.float64)
+    R = np.asarray(right_xyz, dtype=np.float64)
+    ax = np.asarray(left_los_axis, dtype=np.int64)
+    if L.shape[0] != ax.shape[0]:
+        raise ValueError("left_xyz and left_los_axis length mismatch")
+    if L.ndim != 2 or L.shape[1] != 3:
+        raise ValueError(f"left_xyz must be (N_L, 3); got {L.shape}")
+    if R.ndim != 2 or R.shape[1] != 3:
+        raise ValueError(f"right_xyz must be (N_R, 3); got {R.shape}")
+
+    if weights_left is None:
+        wL = np.ones(L.shape[0], dtype=np.float64)
+    else:
+        wL = np.asarray(weights_left, dtype=np.float64)
+        if wL.shape != (L.shape[0],):
+            raise ValueError(f"weights_left shape mismatch: {wL.shape} vs ({L.shape[0]},)")
+    if weights_right is None:
+        wR = np.ones(R.shape[0], dtype=np.float64)
+    else:
+        wR = np.asarray(weights_right, dtype=np.float64)
+        if wR.shape != (R.shape[0],):
+            raise ValueError(f"weights_right shape mismatch: {wR.shape} vs ({R.shape[0]},)")
+
+    perp_edges = np.asarray(r_perp_bins, dtype=np.float64)
+    par_edges = np.asarray(r_par_bins_signed, dtype=np.float64)
+    if perp_edges.ndim != 1 or par_edges.ndim != 1:
+        raise ValueError("bin edge arrays must be 1-D")
+    if not np.all(np.diff(perp_edges) > 0) or not np.all(np.diff(par_edges) > 0):
+        raise ValueError("bin edges must be strictly increasing")
+
+    n_perp = perp_edges.size - 1
+    n_par = par_edges.size - 1
+    counts = np.zeros((n_perp, n_par), dtype=np.float64)
+    npairs = np.zeros((n_perp, n_par), dtype=np.int64)
+
+    # We chunk over the right side; each chunk is fully vectorised.
+    nL = L.shape[0]
+    nR = R.shape[0]
+    rows = np.arange(nL)
+
+    for r_start in range(0, nR, chunk_size):
+        r_end = min(nR, r_start + chunk_size)
+        Rc = R[r_start:r_end]               # (Nc, 3)
+        wRc = wR[r_start:r_end]             # (Nc,)
+        # Δ = L[:, None, :] − Rc[None, :, :]   shape (NL, Nc, 3)
+        delta = L[:, None, :] - Rc[None, :, :]
+        delta = delta - box * np.round(delta / box)   # minimum image, vectorised
+
+        # signed r_par along left's LOS axis
+        # delta[i, j, ax[i]] for all i, j → use fancy indexing
+        # rows broadcast: delta[rows[:, None], np.arange(Nc)[None, :], ax[:, None]]
+        cols = np.arange(r_end - r_start)
+        r_par = delta[rows[:, None], cols[None, :], ax[:, None]]   # (NL, Nc)
+
+        # |Δ|² and r_perp
+        d2 = (delta * delta).sum(axis=2)                            # (NL, Nc)
+        perp_sq = np.maximum(d2 - r_par * r_par, 0.0)
+        r_perp = np.sqrt(perp_sq)
+
+        # Pair weights: w_L[i] * w_R[j] → outer product
+        w_pair = wL[:, None] * wRc[None, :]                         # (NL, Nc)
+
+        if exclude_self and r_start == 0 and r_end >= 1:
+            # i == j (within this chunk) lies on the diagonal at column = i + r_start.
+            # Set weight = 0 for those pairs.  Generalised below.
+            pass
+        if exclude_self:
+            # Mark self-pairs (only possible when left and right are the same array)
+            j_global = np.arange(r_start, r_end)                   # (Nc,)
+            self_mask = j_global[None, :] == rows[:, None]          # (NL, Nc)
+            w_pair = np.where(self_mask, 0.0, w_pair)
+
+        # Bin via np.digitize: indices into the bin edges
+        i_perp = np.searchsorted(perp_edges, r_perp.ravel(), side="right") - 1
+        i_par = np.searchsorted(par_edges, r_par.ravel(), side="right") - 1
+
+        valid = (i_perp >= 0) & (i_perp < n_perp) & (i_par >= 0) & (i_par < n_par)
+        # Drop zero-weight pairs early so np.add.at doesn't waste work.
+        w_flat = w_pair.ravel()
+        nonzero = valid & (w_flat != 0.0)
+
+        np.add.at(
+            counts,
+            (i_perp[nonzero], i_par[nonzero]),
+            w_flat[nonzero],
+        )
+        np.add.at(npairs, (i_perp[valid], i_par[valid]), 1)
+
+    return counts, npairs
+
+
+# ---------------------------------------------------------------------------
+# ξ_× : DLA point catalog × Lyα flux field
+# ---------------------------------------------------------------------------
+
+def xi_cross_dla_lya(
+    pixel_xyz: np.ndarray,
+    pixel_los_axis: np.ndarray,
+    pixel_delta_F: np.ndarray,
+    dla_xyz: np.ndarray,
+    box: float,
+    r_perp_bins: np.ndarray,
+    r_par_bins_signed: np.ndarray,
+    chunk_size: int = 4096,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Cross-correlation ξ(r_par, r_perp) of DLAs with the Lyman-α flux field.
+
+    Estimator (FR+2012 eq. 5):
+
+        ξ_×(r_par, r_perp) = Σ_{(d, ℓ)} δ_F_ℓ  /  N_pairs
+
+    The LOS reference is the **pixel's** sightline axis: pixels are
+    placed on the left of the pair counter so ``r_par`` is along the
+    pixel's sightline.
+
+    Parameters
+    ----------
+    pixel_xyz       : (N_pix, 3) float — pixel positions in Mpc/h
+    pixel_los_axis  : (N_pix,) int     — pixel sightline axis (0-indexed)
+    pixel_delta_F   : (N_pix,) float   — δ_F = F/⟨F⟩ - 1 per pixel
+    dla_xyz         : (N_DLA, 3) float — DLA positions in Mpc/h
+    box             : float            — periodic box, Mpc/h
+    r_perp_bins, r_par_bins_signed : bin edges (Mpc/h)
+    chunk_size      : int              — DLA-batch for memory
+
+    Returns
+    -------
+    xi_signed : (n_perp, n_par_signed) — the signed-r_par estimator
+    counts    : (n_perp, n_par_signed) — Σ δ_F per bin
+    npairs    : (n_perp, n_par_signed) — pair count per bin
+    """
+    counts, npairs = pair_count_2d(
+        left_xyz=pixel_xyz,
+        right_xyz=dla_xyz,
+        left_los_axis=pixel_los_axis,
+        box=box,
+        r_perp_bins=r_perp_bins,
+        r_par_bins_signed=r_par_bins_signed,
+        weights_left=pixel_delta_F,
+        weights_right=None,
+        exclude_self=False,
+        chunk_size=chunk_size,
+    )
+    with np.errstate(invalid="ignore", divide="ignore"):
+        xi = np.where(npairs > 0, counts / npairs, np.nan)
+    return xi, counts, npairs
+
+
+def fold_signed_to_abs(
+    xi_signed: np.ndarray,
+    r_par_bins_signed: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Average ξ(+r_par, r_perp) and ξ(-r_par, r_perp) into ξ(|r_par|, r_perp).
+
+    Parameters
+    ----------
+    xi_signed         : (n_perp, n_par_signed)
+    r_par_bins_signed : (n_par_signed + 1,) symmetric around 0
+
+    Returns
+    -------
+    xi_folded     : (n_perp, n_par_abs)
+    r_par_bins_abs: (n_par_abs + 1,) edges, ≥ 0
+    """
+    edges = np.asarray(r_par_bins_signed, dtype=np.float64)
+    if not np.allclose(edges, -edges[::-1]):
+        raise ValueError(
+            f"r_par_bins_signed must be symmetric around 0; got {edges}"
+        )
+    n = edges.size - 1
+    if n % 2 != 0:
+        raise ValueError(f"need an even number of signed r_par bins; got {n}")
+    half = n // 2
+    pos = xi_signed[:, half:]                       # bins for +r_par
+    neg = xi_signed[:, :half][:, ::-1]              # bins for -r_par, reversed
+    # Element-wise nanmean folds; np.nanmean correctly skips empty bins.
+    stacked = np.stack([pos, neg], axis=0)
+    xi_folded = np.nanmean(stacked, axis=0)
+    edges_abs = edges[half:]
+    return xi_folded, edges_abs
+
+
+# ---------------------------------------------------------------------------
+# ξ_DD : DLA × DLA auto-correlation with analytic RR
+# ---------------------------------------------------------------------------
+
+def _bin_volumes_2d(
+    r_perp_bins: np.ndarray,
+    r_par_bins_signed: np.ndarray,
+) -> np.ndarray:
+    """Volume V_bin(r_perp, r_par) = π·(r_perp_hi² − r_perp_lo²)·Δr_par.
+
+    For the **signed** r_par grid this gives the volume of the
+    (r_perp, signed-r_par) cylindrical-shell bin in Mpc/h³.  The signed
+    grid double-counts the symmetric volume (positive and negative
+    r_par each get half).
+    """
+    perp = np.asarray(r_perp_bins, dtype=np.float64)
+    par = np.asarray(r_par_bins_signed, dtype=np.float64)
+    perp_area = np.pi * (perp[1:] ** 2 - perp[:-1] ** 2)            # (n_perp,)
+    par_width = np.diff(par)                                          # (n_par,)
+    return perp_area[:, None] * par_width[None, :]                    # (n_perp, n_par)
+
+
+def xi_auto_dla(
+    dla_xyz: np.ndarray,
+    dla_los_axis: np.ndarray,
+    box: float,
+    r_perp_bins: np.ndarray,
+    r_par_bins_signed: np.ndarray,
+    chunk_size: int = 4096,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """DLA × DLA auto-correlation on a periodic box with analytic RR.
+
+    Estimator:
+        ξ_DD(r_par, r_perp) = DD(r_par, r_perp) / RR_analytic - 1
+
+    where
+        RR_analytic = N · (N − 1) · V_bin / V_box.
+
+    Self-pairs (i == j) are excluded.  ``dla_los_axis`` defines the
+    LOS axis for each DLA — for the auto-correlation we use the DLA's
+    parent-sightline axis on the **left** side of the pair.  The
+    asymmetry between left and right is OK on the periodic box because
+    pairs are counted twice (once with i on left, once with i on
+    right) and the LOS-axis choice averages out at the bin level.
+
+    Parameters
+    ----------
+    dla_xyz       : (N, 3) float
+    dla_los_axis  : (N,) int (0-indexed)
+    box           : float
+    r_perp_bins, r_par_bins_signed : bin edges
+
+    Returns
+    -------
+    xi_signed : (n_perp, n_par_signed) DD/RR_analytic - 1
+    DD        : (n_perp, n_par_signed) raw pair counts
+    RR        : (n_perp, n_par_signed) analytic random-pair counts
+    """
+    n_dla = dla_xyz.shape[0]
+    if n_dla < 2:
+        raise ValueError(f"need ≥ 2 DLAs for auto-corr; got {n_dla}")
+
+    DD_counts, _ = pair_count_2d(
+        left_xyz=dla_xyz,
+        right_xyz=dla_xyz,
+        left_los_axis=dla_los_axis,
+        box=box,
+        r_perp_bins=r_perp_bins,
+        r_par_bins_signed=r_par_bins_signed,
+        weights_left=None,
+        weights_right=None,
+        exclude_self=True,
+        chunk_size=chunk_size,
+    )
+    DD = DD_counts                                                  # (n_perp, n_par)
+
+    V_box = box ** 3
+    V_bin = _bin_volumes_2d(r_perp_bins, r_par_bins_signed)          # (n_perp, n_par)
+    RR = n_dla * (n_dla - 1) * V_bin / V_box
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        xi = np.where(RR > 0, DD / RR - 1.0, np.nan)
+    return xi, DD, RR
