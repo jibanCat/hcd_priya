@@ -8,8 +8,9 @@ trusting any number from `hcd_analysis/clustering.py`**.
 References
 ----------
 
-- **Font-Ribera et al. 2012** ([arXiv:1209.4596](https://arxiv.org/abs/1209.4596)) — first measurement of DLA × Lyα ξ(r_∥, r_⊥) on BOSS DR9, recovers `b_DLA = 2.17 ± 0.20` at z ≈ 2.3.
+- **Font-Ribera et al. 2012** ([arXiv:1209.4596](https://arxiv.org/abs/1209.4596)) — first measurement of DLA × Lyα ξ(r_∥, r_⊥) on BOSS DR9, recovers `b_DLA = 2.17 ± 0.20` at z ≈ 2.3. **Estimator: a discrete DLA point catalog × the continuous Lyα flux field δ_F(x).** Lyα absorption lines are NOT used as a discrete tracer; each Lyα pixel is a sample of the continuous field.
 - **Pérez-Ràfols et al. 2014** ([arXiv:1405.3994](https://arxiv.org/abs/1405.3994)) — same observable measured in hydrodynamic simulations; provides the sim-validation pattern we follow.
+- **Farr et al. 2020 — LyaCoLoRe** ([arXiv:1912.02763](https://arxiv.org/abs/1912.02763), code https://github.com/igmhub/LyaCoLoRe) — lognormal Lyα-forest mock generator; we follow their pattern for test 8 (synthetic mock with input b, β) and use their Lyα × Lyα auto-correlation result as a sanity reference for test 11.
 
 ## 1. Coordinate system
 
@@ -137,21 +138,46 @@ the form FR+2012 use (their eq. 5).
 Linear-bias fitting window: `r_⊥ ∈ [10, 40]`, `r_∥ ∈ [10, 40]` Mpc/h
 (see §6).
 
-## 5. The auto-correlation ξ_DD(r_∥, r_⊥)
+## 5. The DLA × DLA auto-correlation ξ_DD(r_∥, r_⊥)
 
-Standard Landy–Szalay on a periodic box. For a population of N DLAs:
+On a periodic sim box the natural estimator is the
+**no-randoms-needed** form
 
 ```
-ξ_DD(r_∥, r_⊥) = (DD − 2·DR + RR) / RR
+ξ_DD(r_∥, r_⊥) = DD(r_∥, r_⊥) / RR_analytic(r_∥, r_⊥)  −  1
+
+RR_analytic   =  N_DLA · (N_DLA − 1) · V_bin / V_box
+              ≈  N_DLA² · V_bin / V_box                   (large N)
 ```
 
-with `DD`, `DR`, `RR` natural-pair counts. On a periodic box we can
-short-cut by using the analytic random-pair count `RR_analytic =
-n̄_DLA² · V_bin · V_box`, which removes the largest source of randomness
-in `RR`. Implementation will start with this and fall back to a
-finite random catalog if the analytic form looks suspect at large r.
+`V_bin` is the volume of the (r_∥, r_⊥) cell. Because the box is
+periodic and complete, `RR` has no Monte-Carlo noise — using the
+analytic count is **exact**. We do **not** carry a finite-randoms
+fallback: in the periodic-box regime the analytic form has zero error.
 
 We bin in the same (r_∥, r_⊥) grid as the cross.
+
+## 5b. The Lyα × Lyα flux auto ξ_FF(r_∥, r_⊥)
+
+Same machinery as the cross, but with the field on both sides:
+
+```
+ξ_FF(r_∥, r_⊥) =  Σ_{(ℓ, ℓ') ∈ bin} δ_F_ℓ · δ_F_ℓ'
+                  ─────────────────────────────────
+                         N_pairs in bin
+```
+
+Pixels are paired only between **distinct sightlines** (or with
+themselves at zero separation, which we exclude); same `(r_∥, r_⊥)`
+binning as the cross. This is the most-measured statistic in Lyα
+clustering surveys (Slosar+2011, du Mas des Bourboux+2020) and gives
+us a clean validation target with well-known literature values
+(`b_F ≈ −0.18`, `β_F ≈ 1.5` at z ≈ 2.3).
+
+`ξ_FF` is computationally heavier than ξ_× because both legs of the
+pair are pixels (~10⁹ × 10⁹ candidate pairs in our box). We mitigate
+with the same sightline pre-filter as the cross — only pixel pairs
+whose lateral sightline-pair is within `r_⊥ ≤ r_⊥_max` contribute.
 
 ## 6. Linear bias extraction
 
@@ -228,6 +254,7 @@ science number is published. Pattern follows
 | 8 | Bias recovery on lognormal mock | London 2019-style mock (Gaussian field → exponentiate → Poisson-sample tracers with input b_DLA, β_DLA, b_F, β_F → impose Kaiser RSDs) recovers `b_DLA = 2.0 ± 0.1` from cross monopole. **Fallback** if lognormal proves too brittle: GRF mock (no Poisson, just `δ_g = b·δ_m` on a grid) — same recovery target, simpler stochastics. |
 | 9 | Auto–cross consistency on the same mock | `b_DLA(auto) − b_DLA(cross)` consistent with 0 at 1σ |
 | 10 | FR+2012 sanity on real PRIYA | one snap at z ≈ 2.3 gives `b_DLA ∈ [1.7, 2.5]` (FR+2012's central value ± 1.5 σ) |
+| 11 | **Lyα × Lyα auto sanity** (the primary external check on the pair-counter machinery — passes BEFORE we trust ξ_× / ξ_DD) | one PRIYA snap at z ≈ 2.3: ξ_FF on linear scales recovers `b_F ∈ [−0.25, −0.12]` and `β_F ∈ [1.0, 2.0]` (Slosar+11 / du Mas des Bourboux+20 / LyaCoLoRe), AND the recovered `b_F` agrees with the same-snap `b_Lyα` from the P1D fit (§7) within 1σ |
 
 Tests 4, 5, 6, 7 are deterministic and run in CI. Tests 8, 9 are
 seeded-stochastic and must be reproducible. Test 10 runs against
@@ -255,11 +282,20 @@ before the 60-sim production sweep.
 
 This document gates the implementation. After user approval:
 
-1. `hcd_analysis/clustering.py` — coordinate conversion, ξ_× and ξ_DD pair counters, bias fitter.
-2. `hcd_analysis/lya_bias.py` — `b_Lyα` calibrator from `no_DLA_priya` P1D.
-3. `tests/test_clustering.py` — tests 1–9 above (test 10 is in `tests/validate_*.py`).
+1. `hcd_analysis/clustering.py` — coordinate conversion (DONE), ξ_× / ξ_DD / ξ_FF pair counters, bias fitter.
+2. `hcd_analysis/lya_bias.py` — `b_Lyα` calibrator from the all-HCD-masked P1D (constructed on the fly from τ + catalog, since `p1d.npz` only saves `all` and `no_DLA_priya`).
+3. `tests/test_clustering.py` — tests 1–11 (test 10 + 11 part B are in `tests/validate_*.py`).
 4. `scripts/run_clustering_one_snap.py` — one-snap driver.
-5. `scripts/plot_clustering_validation.py` — produces `figures/analysis/04_clustering/{xi_cross_2d.png, xi_auto_2d.png, bias_recovery.png, fr2012_sanity.png}`.
+5. `scripts/plot_clustering_validation.py` — produces `figures/analysis/04_clustering/{xi_cross_2d.png, xi_auto_2d.png, xi_ff_2d.png, bias_recovery.png, fr2012_sanity.png}`.
 
-Production (60 LF sims × all snaps) is **deferred** until tests 1–9
-pass and test 10 lands within the FR+2012 window.
+**Validation order (no skipping):**
+
+  * tests 1–3 (coordinate / minimum-image / par-perp decomposition) — **DONE.**
+  * tests 4–7 (deterministic estimator checks on synthetic/random fields).
+  * **test 11 first** (Lyα × Lyα auto on real PRIYA — the most-measured Lyα statistic; if `b_F` lands outside [−0.25, −0.12] something is wrong with the pair counter, mean-flux convention, or coordinate handling).
+  * test 8 (lognormal mock with input b_DLA, β_DLA, b_F, β_F → recover all four).
+  * test 9 (auto–cross consistency on the same mock).
+  * test 10 (FR+2012 sanity on real PRIYA at z ≈ 2.3).
+
+Production (60 LF sims × all snaps) is **deferred** until tests 1–11
+pass and tests 10 + 11 land within their literature windows.
