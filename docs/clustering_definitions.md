@@ -9,7 +9,8 @@ References
 ----------
 
 - **Font-Ribera et al. 2012** ([arXiv:1209.4596](https://arxiv.org/abs/1209.4596)) — first measurement of DLA × Lyα ξ(r_∥, r_⊥) on BOSS DR9, recovers `b_DLA = 2.17 ± 0.20` at z ≈ 2.3. **Estimator: a discrete DLA point catalog × the continuous Lyα flux field δ_F(x).** Lyα absorption lines are NOT used as a discrete tracer; each Lyα pixel is a sample of the continuous field.
-- **Pérez-Ràfols et al. 2014** ([arXiv:1405.3994](https://arxiv.org/abs/1405.3994)) — same observable measured in hydrodynamic simulations; provides the sim-validation pattern we follow.
+- **Bird et al. 2014** ([arXiv:1405.3994](https://arxiv.org/abs/1405.3994), Illustris) — same observable measured in hydrodynamic simulations; predicts `b_DLA = 1.7` on linear scales at z = 2.3, rising to 2.3 at `k = 1 Mpc/h` via non-linear scale-dependent bias. Provides the sim-validation pattern we follow. (The doc previously misattributed this paper to Pérez-Ràfols.)
+- **Pérez-Ràfols et al. 2018** ([arXiv:1709.00889](https://arxiv.org/abs/1709.00889), BOSS DR12) — `b_DLA = 1.99 ± 0.11` with no z-dependence across z ∈ [2, 4]; tighter than FR+2012 and a useful tension benchmark.
 - **Farr et al. 2020 — LyaCoLoRe** ([arXiv:1912.02763](https://arxiv.org/abs/1912.02763), code https://github.com/igmhub/LyaCoLoRe) — lognormal Lyα-forest mock generator; we follow their pattern for test 8 (synthetic mock with input b, β) and use their Lyα × Lyα auto-correlation result as a sanity reference for test 11.
 
 ## 1. Coordinate system

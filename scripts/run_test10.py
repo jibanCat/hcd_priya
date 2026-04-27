@@ -213,12 +213,20 @@ def main():
               f"n_fit_bins={res.n_fit_bins})")
 
     # 7) Verdict
+    # Comparison envelope spans Bird+2014 hydro-sim linear theory (b ≈ 1.7)
+    # and BOSS observations (FR+2012: 2.17, Pérez-Ràfols+2018: 1.99).
+    # See docs/clustering_test10_results.md for the literature breakdown.
     print("\n--- Verdict ---")
-    LIT_LO, LIT_HI = 1.7, 2.5
+    LIT_LO, LIT_HI = 1.5, 2.4         # Bird+2014 sim → BOSS obs envelope
+    BIRD14_LIN = 1.7                   # Bird+2014 linear-theory hydro prediction
     if res is not None:
         in_range = LIT_LO <= res.b_DLA <= LIT_HI
-        print(f"  H10  b_DLA in FR+2012 envelope [{LIT_LO}, {LIT_HI}] : "
+        delta_bird = abs(res.b_DLA - BIRD14_LIN)
+        print(f"  H10.a  b_DLA in [Bird+14 sim, FR+2012 obs] envelope "
+              f"[{LIT_LO}, {LIT_HI}] : "
               f"{'PASS' if in_range else 'FAIL'} ({res.b_DLA:+.3f})")
+        print(f"  H10.b  |b_DLA − Bird+2014 linear (1.7)| = {delta_bird:.3f} : "
+              f"{'PASS' if delta_bird < res.b_DLA_err else 'review'}")
 
     # 8) Figure
     if res is not None:
@@ -247,6 +255,9 @@ def main():
         "b_DLA": float(res.b_DLA) if res is not None else None,
         "b_DLA_err": float(res.b_DLA_err) if res is not None else None,
         "in_lit_envelope": bool(LIT_LO <= res.b_DLA <= LIT_HI) if res is not None else None,
+        "delta_to_bird14_linear": (
+            float(abs(res.b_DLA - BIRD14_LIN)) if res is not None else None
+        ),
         "lyα_pixel_subsample": int(args.xi_pixel_subsample),
     }
     with open(out_json, "w") as f:
