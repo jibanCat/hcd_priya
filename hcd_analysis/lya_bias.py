@@ -406,6 +406,15 @@ def xi_lin_monopole(
 # ---------------------------------------------------------------------------
 # Monopole extraction from a 2-D (r_par, r_perp) grid
 # ---------------------------------------------------------------------------
+#
+# A general `extract_multipoles(..., ells=(0, 2, 4))` helper used to live
+# here, but it had a subtle Jacobian bug that made the recovered
+# quadrupole / hexadecapole inconsistent with the standard Hamilton
+# multipole formula.  See `docs/clustering_multipole_jacobian_todo.md`
+# for the full diagnosis and the fix path.  Until that's done, only
+# the monopole estimator below is trusted on real data — the
+# quadrupole would need uniform-μ averaging at fixed r, which our
+# (r_⊥, r_∥)-binned pair counter does not provide.
 
 def extract_monopole(
     xi_2d: np.ndarray,
@@ -682,6 +691,18 @@ def fit_b_DLA_from_xi_cross(
         fit_mask=fit_mask,
         n_fit_bins=int(fit_mask.sum()),
     )
+
+
+# ---------------------------------------------------------------------------
+# Joint (b_DLA, β_DLA) fit — DEFERRED.  See
+# `docs/clustering_multipole_jacobian_todo.md` for the design issue
+# (npairs-weighted averaging across (r_⊥, r_∥) bins picks up an extra
+# sqrt(1-μ²) Jacobian relative to the uniform-μ averaging assumed by
+# the standard Hamilton multipole formula).  Until the pair counter is
+# rebinned in (r, μ), production uses monopole-only ξ_× via
+# `fit_b_DLA_from_xi_cross` with β_DLA fixed (and optionally iterated
+# self-consistently in the driver).
+# ---------------------------------------------------------------------------
 
 
 __all__ = [
