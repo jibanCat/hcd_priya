@@ -73,8 +73,10 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--sim", default=SIM)
     p.add_argument("--snap", default=DEFAULT_SNAP)
-    p.add_argument("--xi-pixel-subsample", type=int, default=40000,
-                   help="Lyα-pixel subsample for the cross (default 40000)")
+    p.add_argument("--xi-pixel-subsample", type=int, default=200000,
+                   help="Lyα-pixel subsample for the cross (default 200000)")
+    p.add_argument("--beta-iter", type=int, default=4,
+                   help="β_DLA self-consistency iterations (default 4)")
     p.add_argument("--b-F", type=float, default=None,
                    help="b_F to use (default: read from test 11 JSON)")
     p.add_argument("--rng-seed", type=int, default=2026)
@@ -165,24 +167,50 @@ def main():
     half = n_par // 2
     n_pair_folded = npairs[:, half:] + npairs[:, :half][:, ::-1]
 
-    # 6) Fit b_DLA from the monopole
+    # 6) Fit b_DLA from the monopole, with β_DLA self-consistency iteration.
     perp_centres = 0.5 * (r_perp_edges[:-1] + r_perp_edges[1:])
     par_centres_abs = 0.5 * (par_edges_abs[:-1] + par_edges_abs[1:])
     camb_path = find_camb_pk_for_z(sim_dir_emu / "output", geom.z_snap)
     k_h, P_h = load_camb_pk(camb_path)
-    try:
-        res = fit_b_DLA_from_xi_cross(
-            xi_2d=xi_folded, npairs_2d=n_pair_folded,
-            r_perp_centres=perp_centres, r_par_centres=par_centres_abs,
-            k_lin=k_h, P_lin=P_h,
-            b_F=b_F, beta_DLA=0.5, beta_F=1.5,
-            r_min=10.0, r_max=40.0, n_r_bins=10,
-        )
-        print(f"\n  b_DLA = {res.b_DLA:+.3f} ± {res.b_DLA_err:.3f}  "
-              f"(K_×={res.K_cross:.3f}, n_fit_bins={res.n_fit_bins})")
-    except Exception as exc:
-        print(f"\n  b_DLA fit FAILED: {exc}")
-        res = None
+
+    # Compute f(z) ≈ Ω_m(z)^0.55  (Linder 2005 fitting form)
+    Om0 = 0.26          # PRIYA / Planck-ish; close to the input header
+    Om_z = Om0 * (1.0 + geom.z_snap) ** 3 / (
+        Om0 * (1.0 + geom.z_snap) ** 3 + (1.0 - Om0)
+    )
+    f_z = float(Om_z ** 0.55)
+    print(f"  f(z={geom.z_snap:.2f}) = {f_z:.3f}; "
+          f"β_DLA iteration starts at 0.5, updates as f/b_DLA")
+
+    res = None
+    beta_DLA = 0.5
+    history = []
+    for it in range(args.beta_iter):
+        try:
+            r = fit_b_DLA_from_xi_cross(
+                xi_2d=xi_folded, npairs_2d=n_pair_folded,
+                r_perp_centres=perp_centres, r_par_centres=par_centres_abs,
+                k_lin=k_h, P_lin=P_h,
+                b_F=b_F, beta_DLA=beta_DLA, beta_F=1.5,
+                r_min=10.0, r_max=40.0, n_r_bins=10,
+            )
+        except Exception as exc:
+            print(f"  iter {it}: fit FAILED: {exc}")
+            break
+        history.append((beta_DLA, r.b_DLA, r.b_DLA_err))
+        new_beta = f_z / max(abs(r.b_DLA), 0.1)
+        print(f"  iter {it}: β_DLA={beta_DLA:.3f} → b_DLA={r.b_DLA:+.3f} "
+              f"± {r.b_DLA_err:.3f}; next β_DLA = f/b = {new_beta:.3f}")
+        res = r
+        if abs(new_beta - beta_DLA) < 5e-3:
+            print(f"  (converged at iter {it})")
+            break
+        beta_DLA = new_beta
+
+    if res is not None:
+        print(f"\n  Final b_DLA = {res.b_DLA:+.3f} ± {res.b_DLA_err:.3f}  "
+              f"(β_DLA={res.beta_DLA_assumed:.3f}, K_×={res.K_cross:.3f}, "
+              f"n_fit_bins={res.n_fit_bins})")
 
     # 7) Verdict
     print("\n--- Verdict ---")

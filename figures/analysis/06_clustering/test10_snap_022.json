@@ -4,8 +4,8 @@
   "z": 2.1999999999999975,
   "n_dla": 11655,
   "b_F_assumed": -0.14089760352385175,
-  "b_DLA": 1.422469462888888,
-  "b_DLA_err": 0.47630197257917567,
+  "b_DLA": 1.6723148873730922,
+  "b_DLA_err": 0.5434308932432952,
   "in_lit_envelope": false,
-  "ly\u03b1_pixel_subsample": 40000
+  "ly\u03b1_pixel_subsample": 200000
 }
