@@ -30,6 +30,7 @@ from hcd_analysis.clustering import (
     pair_count_2d,
     pixel_to_xyz,
     xi_auto_dla,
+    xi_auto_lya,
     xi_cross_dla_lya,
     xyz_to_nearest_pixel,
 )
@@ -696,6 +697,61 @@ class TestBuildDeltaFField(unittest.TestCase):
         self.assertGreater(res.mean_F, 0.55)
         self.assertLess(res.mean_F, 0.95)
         self.assertAlmostEqual(float(res.delta_F.mean()), 0.0, places=8)
+
+
+class TestXiAutoLya(unittest.TestCase):
+    """Smoke tests for ξ_FF = ⟨δ_F · δ_F⟩ at separation."""
+
+    def test_random_field_zero_signal(self):
+        """Random Gaussian δ_F field on a uniform 3-D point grid →
+        ξ_FF should be consistent with 0 within 5 σ on every bin
+        (i.e. white-noise field has no spatial correlation)."""
+        rng = np.random.default_rng(42)
+        box = 60.0
+        n = 4000
+        xyz = rng.uniform(0, box, size=(n, 3))
+        ax = rng.integers(0, 3, size=n)
+        df = rng.standard_normal(n)
+        r_perp_edges = np.linspace(0.0, 25.0, 6)
+        r_par_edges = np.linspace(-25.0, 25.0, 11)
+        xi, counts, npairs = xi_auto_lya(
+            pixel_xyz=xyz, pixel_los_axis=ax, pixel_delta_F=df,
+            box=box,
+            r_perp_bins=r_perp_edges, r_par_bins_signed=r_par_edges,
+            chunk_size=400,
+        )
+        # Expected: ξ ≈ 0; per-bin error ≈ σ²(δ_F · δ_F) / sqrt(npairs).
+        # For independent unit-variance δ_F, var(δ_F · δ_F') = 1 (E[δ²] · E[δ²]
+        # − E[δ]² · E[δ']² = 1).  So per-bin error = 1/sqrt(npairs).
+        valid = npairs > 50
+        self.assertTrue(valid.any())                   # at least one well-populated bin
+        sigmas = np.abs(xi[valid]) * np.sqrt(npairs[valid])
+        self.assertLess(float(sigmas.max()), 5.0)
+        self.assertLess(float(sigmas.mean()), 1.5)
+
+    def test_subsample_runs_and_reproducible(self):
+        """Subsampling produces the same xi for the same seed."""
+        rng = np.random.default_rng(7)
+        box = 50.0
+        n = 5000
+        xyz = rng.uniform(0, box, size=(n, 3))
+        ax = rng.integers(0, 3, size=n)
+        df = rng.standard_normal(n)
+        r_perp = np.linspace(0.0, 20.0, 5)
+        r_par = np.linspace(-20.0, 20.0, 9)
+
+        xi_a, _, _ = xi_auto_lya(xyz, ax, df, box, r_perp, r_par,
+                                 subsample_n=2000, rng_seed=42, chunk_size=300)
+        xi_b, _, _ = xi_auto_lya(xyz, ax, df, box, r_perp, r_par,
+                                 subsample_n=2000, rng_seed=42, chunk_size=300)
+        np.testing.assert_array_equal(np.where(np.isnan(xi_a), 0, xi_a),
+                                      np.where(np.isnan(xi_b), 0, xi_b))
+
+        xi_c, _, _ = xi_auto_lya(xyz, ax, df, box, r_perp, r_par,
+                                 subsample_n=2000, rng_seed=99, chunk_size=300)
+        # Different seed → different bin contents (large prob)
+        diff = np.nansum(np.abs(xi_a - xi_c))
+        self.assertGreater(float(diff), 0.0)
 
 
 if __name__ == "__main__":

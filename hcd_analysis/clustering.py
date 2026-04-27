@@ -706,3 +706,92 @@ def xi_auto_dla(
     with np.errstate(divide="ignore", invalid="ignore"):
         xi = np.where(RR > 0, DD / RR - 1.0, np.nan)
     return xi, DD, RR
+
+
+# ---------------------------------------------------------------------------
+# ξ_FF : Lyα × Lyα flux auto-correlation
+# ---------------------------------------------------------------------------
+
+def xi_auto_lya(
+    pixel_xyz: np.ndarray,
+    pixel_los_axis: np.ndarray,
+    pixel_delta_F: np.ndarray,
+    box: float,
+    r_perp_bins: np.ndarray,
+    r_par_bins_signed: np.ndarray,
+    subsample_n: Optional[int] = None,
+    rng_seed: int = 0,
+    chunk_size: int = 2048,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Lyman-α × Lyman-α flux auto-correlation ξ_FF(r_par, r_perp).
+
+    Estimator (per docs/clustering_definitions.md §5b):
+
+        ξ_FF(r_par, r_perp) = Σ_{(ℓ, ℓ') ∈ bin}  δ_F_ℓ · δ_F_ℓ'
+                              ──────────────────────────────────
+                                       N_pairs in bin
+
+    Both legs of the pair are pixels carrying the δ_F weight.  Self-
+    pairs (ℓ == ℓ') are excluded.  The LOS reference for each pair's
+    r_par is the LEFT pixel's sightline axis.
+
+    For HiRes-resolution snaps (≳ 10⁷ pixels), the full
+    pixel × pixel pair count is too expensive (~ 10¹⁴ pairs) — pass
+    ``subsample_n`` to randomly select that many pixels per side
+    (seeded by ``rng_seed`` for reproducibility).  A 10⁵ subsample
+    gives ~ 10¹⁰ pairs total which is tractable in seconds-to-minutes
+    and recovers the linear-scale signal well above the noise floor.
+
+    Parameters
+    ----------
+    pixel_xyz       : (N, 3) float — pixel positions in Mpc/h
+    pixel_los_axis  : (N,) int     — pixel sightline axis (0-indexed)
+    pixel_delta_F   : (N,) float   — δ_F per pixel
+    box             : float        — periodic box, Mpc/h
+    r_perp_bins, r_par_bins_signed : bin edges (Mpc/h)
+    subsample_n     : optional int  — randomly down-sample to this many pixels
+    rng_seed        : int          — RNG seed for reproducibility
+    chunk_size      : int          — right-side chunking for memory
+
+    Returns
+    -------
+    xi_signed : (n_perp, n_par) — Σ δ_F · δ_F / N_pairs per bin
+    counts    : (n_perp, n_par) — Σ δ_F · δ_F per bin
+    npairs    : (n_perp, n_par) — pair count per bin
+    """
+    pixel_xyz = np.asarray(pixel_xyz, dtype=np.float64)
+    pixel_los_axis = np.asarray(pixel_los_axis, dtype=np.int64)
+    pixel_delta_F = np.asarray(pixel_delta_F, dtype=np.float64)
+    if pixel_xyz.ndim != 2 or pixel_xyz.shape[1] != 3:
+        raise ValueError(f"pixel_xyz must be (N, 3); got {pixel_xyz.shape}")
+    n_total = pixel_xyz.shape[0]
+    if pixel_los_axis.shape != (n_total,) or pixel_delta_F.shape != (n_total,):
+        raise ValueError("pixel arrays must all have length N")
+
+    if subsample_n is not None and subsample_n < n_total:
+        rng = np.random.default_rng(rng_seed)
+        idx = rng.choice(n_total, size=int(subsample_n), replace=False)
+        idx.sort()                                          # cache-friendly
+        L_xyz = pixel_xyz[idx]
+        L_axis = pixel_los_axis[idx]
+        L_dF = pixel_delta_F[idx]
+    else:
+        L_xyz = pixel_xyz
+        L_axis = pixel_los_axis
+        L_dF = pixel_delta_F
+
+    counts, npairs = pair_count_2d(
+        left_xyz=L_xyz,
+        right_xyz=L_xyz,
+        left_los_axis=L_axis,
+        box=box,
+        r_perp_bins=r_perp_bins,
+        r_par_bins_signed=r_par_bins_signed,
+        weights_left=L_dF,
+        weights_right=L_dF,
+        exclude_self=True,
+        chunk_size=chunk_size,
+    )
+    with np.errstate(invalid="ignore", divide="ignore"):
+        xi = np.where(npairs > 0, counts / npairs, np.nan)
+    return xi, counts, npairs
