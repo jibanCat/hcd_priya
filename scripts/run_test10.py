@@ -62,7 +62,8 @@ TEST11_JSON = OUT_DIR / "test11_snap_022.json"
 
 def _load_b_F() -> float:
     if TEST11_JSON.exists():
-        d = json.load(open(TEST11_JSON))
+        with open(TEST11_JSON) as f:
+            d = json.load(f)
         if d.get("b_F_xi") is not None:
             return float(d["b_F_xi"])
     return -0.141      # fallback to the value reported in clustering_test11_results.md
@@ -98,7 +99,8 @@ def main():
     with h5py.File(spec_path, "r") as f:
         tau = f["tau/H/1/1215"][:]
         Hz = float(f["Header"].attrs["Hz"])
-    cat = np.load(str(cat_path), allow_pickle=True)
+        Om0_sim = float(f["Header"].attrs["omegam"])         # Copilot #12
+    cat = np.load(str(cat_path))                              # Copilot #6: drop allow_pickle
     F_factor = hMpc_to_kms_factor(geom.z_snap, geom.hubble, Hz)
     box_kms = geom.box / F_factor
     dv_kms = box_kms / geom.n_pix
@@ -129,21 +131,28 @@ def main():
     dla_skewer = cat["skewer_idx"][is_dla].astype(np.int64)
     dla_xyz = pixel_to_xyz(geom, dla_skewer, dla_pix_centre)
 
-    # 4) Subsampled Lyα-pixel arrays for the cross
+    # 4) Subsampled Lyα-pixel arrays for the cross.
+    #
+    # Copilot review #11 on PR #7: the previous version did
+    #     all_skewer = np.repeat(arange(n_sightlines), n_pix)
+    #     all_pixel  = np.tile(arange(n_pix), n_sightlines)
+    # which materialises three n_sightlines·n_pix arrays (~3 × 5.6 GB
+    # at LF resolution) before subsampling — wasteful and OOM-prone
+    # on smaller nodes.  Replace with np.flatnonzero on the unmasked
+    # mask (peak ~5.6 GB once) and divmod to recover (skewer, pixel).
     rng = np.random.default_rng(args.rng_seed)
-    keep_flat = ~df_res.mask.ravel()
-    all_skewer = np.repeat(np.arange(geom.n_sightlines, dtype=np.int64), geom.n_pix)
-    all_pixel = np.tile(np.arange(geom.n_pix, dtype=np.int64), geom.n_sightlines)
-    df_flat = df_res.delta_F.ravel()
-    all_skewer = all_skewer[keep_flat]
-    all_pixel = all_pixel[keep_flat]
-    df_flat = df_flat[keep_flat]
-    if 0 < args.xi_pixel_subsample < len(all_skewer):
-        idx = rng.choice(len(all_skewer), size=args.xi_pixel_subsample, replace=False)
-        idx.sort()
-        all_skewer = all_skewer[idx]
-        all_pixel = all_pixel[idx]
-        df_flat = df_flat[idx]
+    unmasked_idx = np.flatnonzero(~df_res.mask.ravel())   # one allocation
+    if 0 < args.xi_pixel_subsample < unmasked_idx.size:
+        chosen_local = rng.choice(unmasked_idx.size, size=args.xi_pixel_subsample,
+                                  replace=False)
+        chosen_local.sort()
+        chosen_idx = unmasked_idx[chosen_local]
+    else:
+        chosen_idx = unmasked_idx
+    n_pix = geom.n_pix
+    all_skewer = (chosen_idx // n_pix).astype(np.int64)
+    all_pixel = (chosen_idx % n_pix).astype(np.int64)
+    df_flat = df_res.delta_F.ravel()[chosen_idx]
     pixel_xyz = pixel_to_xyz(geom, all_skewer, all_pixel)
     pixel_axis = geom.axis[all_skewer]
     print(f"  Lyα-pixel sample size for ξ_×: {len(all_skewer):,}")
@@ -162,7 +171,12 @@ def main():
     )
     print(f"  ξ_× computed in {time.time() - t0:.1f}s; "
           f"total pairs = {npairs.sum():,}")
-    xi_folded, par_edges_abs = fold_signed_to_abs(xi_signed, r_par_edges)
+    # Copilot #13: pair-count-weighted fold, not nanmean.  Pass counts
+    # and npairs so the folded ξ uses (counts_pos+counts_neg) /
+    # (npairs_pos+npairs_neg).
+    xi_folded, par_edges_abs = fold_signed_to_abs(
+        xi_signed, r_par_edges, counts=counts, npairs=npairs,
+    )
     n_par = len(r_par_edges) - 1
     half = n_par // 2
     n_pair_folded = npairs[:, half:] + npairs[:, :half][:, ::-1]
@@ -173,13 +187,17 @@ def main():
     camb_path = find_camb_pk_for_z(sim_dir_emu / "output", geom.z_snap)
     k_h, P_h = load_camb_pk(camb_path)
 
-    # Compute f(z) ≈ Ω_m(z)^0.55  (Linder 2005 fitting form)
-    Om0 = 0.26          # PRIYA / Planck-ish; close to the input header
+    # Compute f(z) ≈ Ω_m(z)^0.55  (Linder 2005 fitting form).
+    # Copilot review #12 on PR #7: read Ω_m(z=0) from the spectra
+    # HDF5 Header instead of the hardcoded 0.26.  PRIYA varies
+    # `omegamh2` and `h` across sims; using a fixed Ω_m would put
+    # f(z) off by tens of percent on extreme grid points.
+    Om0 = Om0_sim                                # from f["Header"].attrs["omegam"]
     Om_z = Om0 * (1.0 + geom.z_snap) ** 3 / (
         Om0 * (1.0 + geom.z_snap) ** 3 + (1.0 - Om0)
     )
     f_z = float(Om_z ** 0.55)
-    print(f"  f(z={geom.z_snap:.2f}) = {f_z:.3f}; "
+    print(f"  f(z={geom.z_snap:.2f}) = {f_z:.3f} (Ω_m,0={Om0:.3f}); "
           f"β_DLA iteration starts at 0.5, updates as f/b_DLA")
 
     res = None

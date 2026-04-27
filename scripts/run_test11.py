@@ -140,26 +140,24 @@ def main():
     # 4) Build pixel arrays for ξ_FF
     print("\n--- Path 2: b_F from ξ_FF monopole ---")
     t0 = time.time()
-    # Build all (skewer, pixel) → 3D positions
-    all_skewer = np.repeat(np.arange(n_skewers, dtype=np.int64), n_pix)
-    all_pixel = np.tile(np.arange(n_pix, dtype=np.int64), n_skewers)
-    # Skip masked pixels (their δ_F = 0 contributes nothing anyway,
-    # and we'd prefer to keep the array small)
-    keep_flat = ~df_res.mask.ravel()
-    all_skewer = all_skewer[keep_flat]
-    all_pixel = all_pixel[keep_flat]
-    df_flat = df_res.delta_F.ravel()[keep_flat]
-    print(f"  unmasked pixels: {len(all_skewer):,}")
-
-    # Subsample to keep pair-count tractable
+    # Copilot review #10 on PR #7: avoid materialising full
+    # n_sightlines·n_pix index grids before subsampling.  flatnonzero
+    # on the unmasked mask, then divmod, allocates ~1× n_unmasked
+    # instead of ~3× n_total.
     rng = np.random.default_rng(args.rng_seed)
-    if args.xi_subsample > 0 and args.xi_subsample < len(all_skewer):
-        idx = rng.choice(len(all_skewer), size=args.xi_subsample, replace=False)
-        idx.sort()
-        all_skewer = all_skewer[idx]
-        all_pixel = all_pixel[idx]
-        df_flat = df_flat[idx]
-        print(f"  subsampled to {len(all_skewer):,}")
+    unmasked_idx = np.flatnonzero(~df_res.mask.ravel())
+    print(f"  unmasked pixels: {len(unmasked_idx):,}")
+    if 0 < args.xi_subsample < unmasked_idx.size:
+        chosen_local = rng.choice(unmasked_idx.size, size=args.xi_subsample,
+                                  replace=False)
+        chosen_local.sort()
+        chosen_idx = unmasked_idx[chosen_local]
+        print(f"  subsampled to {chosen_idx.size:,}")
+    else:
+        chosen_idx = unmasked_idx
+    all_skewer = (chosen_idx // n_pix).astype(np.int64)
+    all_pixel = (chosen_idx % n_pix).astype(np.int64)
+    df_flat = df_res.delta_F.ravel()[chosen_idx]
     pixel_xyz = pixel_to_xyz(geom, all_skewer, all_pixel)
     pixel_axis = geom.axis[all_skewer]
 
@@ -171,9 +169,10 @@ def main():
         box=geom.box, r_perp_bins=r_perp_edges, r_par_bins_signed=r_par_edges,
         chunk_size=2048,
     )
-    # Fold to |r_par|
-    xi_folded, par_edges_abs = fold_signed_to_abs(xi_signed, r_par_edges)
-    # Fold npairs by SUM (not nanmean) for the monopole weighting
+    # Fold to |r_par|, pair-count-weighted (Copilot #13).
+    xi_folded, par_edges_abs = fold_signed_to_abs(
+        xi_signed, r_par_edges, counts=counts, npairs=npairs,
+    )
     n_par = len(r_par_edges) - 1
     half = n_par // 2
     n_pair_folded = npairs[:, half:] + npairs[:, :half][:, ::-1]

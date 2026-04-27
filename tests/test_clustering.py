@@ -1,9 +1,32 @@
 """
 Validation tests for ``hcd_analysis/clustering.py``.
 
-This file currently covers tests **1–3** + **2b** + **3b** of the doc
-(`docs/clustering_definitions.md` §8).  Tests 4–10 (which depend on
-the pair counter) come in a follow-up commit after user approval.
+Covers (per `docs/clustering_definitions.md` §8 numbering, plus
+local additions):
+
+  1   Coordinate round-trip (skewer, pixel) ↔ xyz.
+  2   Periodic minimum-image bounds + idempotence + edge cases.
+  3   r_par² + r_perp² = |Δ|² + sign + special cases.
+  4   ξ_×: random Poisson DLAs × random Gaussian δ_F → ξ_× ≈ 0.
+  4b  Cross-correlation honours periodic minimum-image at the box
+      boundary.
+  5   ξ_DD: random Poisson DLAs → ξ_DD ≈ 0.
+  6   Periodic-box closure: ⟨DD⟩ = N(N-1) · V_bin / V_box on a single
+      bin with a uniform field.
+  7a  Axis-swap invariance of ξ_DD on uniform inputs.
+  7b  Signed-r_par symmetry of ξ_DD on a single LOS axis (bit-exact
+      on a single LOS axis; statistical otherwise).
+  +   Sightline-geometry guard rails (axis range, cofm shape).
+  +   ξ_FF random-field zero-signal smoke test, with subsample
+      reproducibility.
+  +   build_delta_F_field: empty catalog, planted DLA, ⟨F⟩ scope,
+      δ_F-zero-mean, overlap accounting, sub-LLS exclusion, real-
+      data smoke.
+  +   Real-spectra-load smoke test (skipped if HiRes file absent).
+
+Tests 8 (lognormal mock), 10 (FR+12 b_DLA gate), 11 (ξ_FF gate on
+real PRIYA) are run by ``scripts/run_test{10,11}.py`` and the
+LyaCoLoRe-pattern mock plan, NOT here in the unit-test loop.
 
 Run::
 
@@ -752,6 +775,40 @@ class TestXiAutoLya(unittest.TestCase):
         # Different seed → different bin contents (large prob)
         diff = np.nansum(np.abs(xi_a - xi_c))
         self.assertGreater(float(diff), 0.0)
+
+
+class TestExcludeSelfNpairsBugRegression(unittest.TestCase):
+    """Regression test for Copilot review #8 on PR #7.
+
+    `pair_count_2d(..., exclude_self=True)` previously zeroed self-pair
+    *weights* (so `counts` was correct) but still incremented `npairs`
+    for self-pairs.  This biased `xi = counts/npairs` low at r ≈ 0 in
+    auto-correlations.  The fix excludes self-pairs from `npairs` too.
+    """
+
+    def test_self_pair_is_not_in_npairs(self):
+        # 3 points with a unit weight each, exclude_self=True.
+        # Self-pairs (i, i) for i = 0, 1, 2 land at r = 0 (r_perp = 0,
+        # r_par = 0).  Without the fix, npairs[r_perp=0, r_par=0]
+        # would equal 3; with the fix, it's 0.
+        xyz = np.array([[10.0, 5.0, 5.0], [12.0, 5.0, 5.0], [14.0, 5.0, 5.0]])
+        ax = np.array([0, 0, 0], dtype=np.int64)
+        # r_par bin straddles 0; r_perp bin starts at 0.
+        r_perp_edges = np.array([0.0, 0.5])
+        r_par_edges = np.array([-0.5, 0.5])
+        counts, npairs = pair_count_2d(
+            left_xyz=xyz, right_xyz=xyz, left_los_axis=ax,
+            box=100.0,
+            r_perp_bins=r_perp_edges,
+            r_par_bins_signed=r_par_edges,
+            weights_left=None, weights_right=None,
+            exclude_self=True, chunk_size=10,
+        )
+        # The (r_perp ≈ 0, r_par ≈ 0) bin should have NO self-pairs and
+        # NO real pairs (the 3 points are 2 Mpc/h apart).
+        self.assertEqual(int(npairs[0, 0]), 0,
+                         f"self-pairs leaked into npairs (got {int(npairs[0,0])})")
+        self.assertEqual(float(counts[0, 0]), 0.0)
 
 
 if __name__ == "__main__":

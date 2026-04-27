@@ -177,7 +177,11 @@ def project_pk_3d_to_p1d(
 
     def P_3d_eval(k):
         out = np.zeros_like(k)
-        valid = (k > k_3d.min()) & (k < k_3d.max())
+        # Inclusive bounds — Copilot review #2 on PR #7: strict < was
+        # zeroing the integrand at the exact endpoints of k_3d, which
+        # slightly suppressed the integral.  np.interp is well-defined
+        # at endpoints, so include them.
+        valid = (k >= k_3d.min()) & (k <= k_3d.max())
         out[valid] = np.exp(np.interp(np.log(k[valid]), log_k, log_P))
         return out
 
@@ -569,7 +573,11 @@ def fit_b_F_from_xi_FF(
         xi_obs=xi_mono,
         xi_template=b_F_sq * template,
         fit_mask=fit_mask,
-        n_fit_bins=int(fit_mask.sum()),
+        # n_fit_bins reports the COUNT ACTUALLY USED by the
+        # geometric-mean fit (after the wrong-sign bin drop), per
+        # Copilot review #15 on PR #7.  fit_mask still records the
+        # pre-drop window for plotting purposes.
+        n_fit_bins=int(ratio.size),
     )
 
 
@@ -689,7 +697,10 @@ def fit_b_DLA_from_xi_cross(
         xi_obs=xi_mono,
         xi_template=b_DLA * template,
         fit_mask=fit_mask,
-        n_fit_bins=int(fit_mask.sum()),
+        # n_fit_bins reports the COUNT ACTUALLY USED in the
+        # geometric-mean fit (after the wrong-sign bin drop), per
+        # Copilot review #1 on PR #7.
+        n_fit_bins=int(ratio_use.size),
     )
 
 

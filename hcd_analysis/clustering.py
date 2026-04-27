@@ -1,14 +1,32 @@
 """
-HCD clustering — coordinate conversion, pair counters, bias extraction.
+HCD clustering — coordinate conversion, pair counters, ξ estimators,
+δ_F field builder.
 
-See ``docs/clustering_definitions.md`` for the formal spec.  This
-module is **gated** on the validation tests in
-``tests/test_clustering.py`` — do not call any function from here in a
-production run until tests 1–9 pass.
+See ``docs/clustering_definitions.md`` for the formal spec and the
+locked-in design decisions.  Real-PRIYA validation gates run by
+``scripts/run_test10.py`` and ``scripts/run_test11.py``; results
+written up in ``docs/clustering_test10_results.md`` and
+``docs/clustering_test11_results.md``.
 
-The first slice committed here covers only the coordinate / loader
-layer (tests 1–3 in the doc).  Pair counters and bias fitter come in a
-follow-up commit after user approval.
+Public API:
+
+* ``SightlineGeometry`` + ``load_sightline_geometry`` — sightline grid
+  loader, axis 0-indexed, distances in Mpc/h.
+* ``pixel_to_xyz`` / ``xyz_to_nearest_pixel`` — bidirectional
+  (skewer, pixel) ↔ 3D position with the half-pixel-offset convention.
+* ``minimum_image`` / ``los_separation`` — periodic wrap +
+  decomposition into (signed r_par, r_perp).
+* ``pair_count_2d`` — generic vectorised pair counter on the
+  (signed r_par, r_perp) grid.
+* ``xi_cross_dla_lya`` — DLA points × Lyα flux field.
+* ``xi_auto_dla`` — DLA × DLA with analytic RR on a periodic box.
+* ``xi_auto_lya`` — Lyα flux × Lyα flux (with optional pixel subsample).
+* ``build_delta_F_field`` — all-HCD-masked δ_F field per pixel.
+* ``fold_signed_to_abs`` — fold ξ(±r_par) → ξ(|r_par|), with optional
+  pair-count-weighted variant.
+
+Multipole machinery and joint (b_DLA, β_DLA) fits are **deferred** —
+see ``docs/clustering_multipole_jacobian_todo.md``.
 """
 from __future__ import annotations
 
@@ -291,9 +309,14 @@ def pair_count_2d(
         Edges in Mpc/h, monotonically increasing, starting at ≥ 0.
     r_par_bins_signed : (n_par + 1,) float
         Edges in Mpc/h, monotonically increasing.  Pass a symmetric
-        grid (e.g. ``np.linspace(-50, 50, 51)``) to retain the LOS sign;
-        pass ``np.linspace(0, 50, 26)`` to fold (r_par will be |r_par|
-        before binning — see the ``fold`` keyword on the wrappers).
+        grid (e.g. ``np.linspace(-50, 50, 51)``) to retain the LOS
+        sign; this is what production wrappers do, then call
+        ``fold_signed_to_abs`` with counts and npairs to get
+        ``|r_par|``.  Passing edges that start at 0 will silently
+        DROP all negative-r_par pairs — this function does not take
+        ``abs(r_par)`` on its own, so the previous "fold by passing
+        non-negative edges" suggestion (caught by Copilot review #5
+        on PR #7) was wrong.
     weights_left, weights_right : optional
         Per-point weights.  Default: 1 each.
     exclude_self : bool
@@ -370,23 +393,31 @@ def pair_count_2d(
         # Pair weights: w_L[i] * w_R[j] → outer product
         w_pair = wL[:, None] * wRc[None, :]                         # (NL, Nc)
 
-        if exclude_self and r_start == 0 and r_end >= 1:
-            # i == j (within this chunk) lies on the diagonal at column = i + r_start.
-            # Set weight = 0 for those pairs.  Generalised below.
-            pass
         if exclude_self:
             # Mark self-pairs (only possible when left and right are the same array)
             j_global = np.arange(r_start, r_end)                   # (Nc,)
-            self_mask = j_global[None, :] == rows[:, None]          # (NL, Nc)
-            w_pair = np.where(self_mask, 0.0, w_pair)
+            self_mask = (j_global[None, :] == rows[:, None]).ravel()  # (NL*Nc,)
+        else:
+            self_mask = None
 
         # Bin via np.digitize: indices into the bin edges
         i_perp = np.searchsorted(perp_edges, r_perp.ravel(), side="right") - 1
         i_par = np.searchsorted(par_edges, r_par.ravel(), side="right") - 1
 
         valid = (i_perp >= 0) & (i_perp < n_perp) & (i_par >= 0) & (i_par < n_par)
-        # Drop zero-weight pairs early so np.add.at doesn't waste work.
         w_flat = w_pair.ravel()
+        if self_mask is not None:
+            # Zero out self-pair weights so they don't contribute to counts.
+            w_flat = np.where(self_mask, 0.0, w_flat)
+            # Also drop self-pairs from npairs — Copilot review #8 on PR #7
+            # caught the original bug where self-pairs counted toward npairs
+            # despite being zero-weighted in counts, biasing xi = counts/npairs
+            # at r ≈ 0 for auto-correlations.
+            valid_for_npairs = valid & (~self_mask)
+        else:
+            valid_for_npairs = valid
+
+        # Drop zero-weight pairs early so np.add.at doesn't waste work.
         nonzero = valid & (w_flat != 0.0)
 
         np.add.at(
@@ -394,7 +425,11 @@ def pair_count_2d(
             (i_perp[nonzero], i_par[nonzero]),
             w_flat[nonzero],
         )
-        np.add.at(npairs, (i_perp[valid], i_par[valid]), 1)
+        np.add.at(
+            npairs,
+            (i_perp[valid_for_npairs], i_par[valid_for_npairs]),
+            1,
+        )
 
     return counts, npairs
 
@@ -459,13 +494,31 @@ def xi_cross_dla_lya(
 def fold_signed_to_abs(
     xi_signed: np.ndarray,
     r_par_bins_signed: np.ndarray,
+    counts: Optional[np.ndarray] = None,
+    npairs: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Average ξ(+r_par, r_perp) and ξ(-r_par, r_perp) into ξ(|r_par|, r_perp).
+    """Fold ξ(+r_par, r_perp) and ξ(-r_par, r_perp) into ξ(|r_par|, r_perp).
+
+    For estimators where both halves of the signed grid have the same
+    pair count (e.g. auto-correlations on isotropic fields), an
+    unweighted nanmean is correct.  For estimators where the two
+    halves can differ in pair count (the cross-correlation,
+    statistically symmetric but not bit-exact, especially with small
+    subsamples), pass ``counts`` and ``npairs`` so the fold is the
+    proper pair-count-weighted
+
+        xi_folded = (counts_pos + counts_neg) / (npairs_pos + npairs_neg)
+
+    instead of ``mean(xi_pos, xi_neg)``.  This was Copilot review #13
+    on PR #7.
 
     Parameters
     ----------
     xi_signed         : (n_perp, n_par_signed)
     r_par_bins_signed : (n_par_signed + 1,) symmetric around 0
+    counts, npairs    : (n_perp, n_par_signed) raw counts/npairs from
+        ``pair_count_2d``.  Both must be passed if either is — used
+        only for the count-weighted fold path.
 
     Returns
     -------
@@ -481,11 +534,24 @@ def fold_signed_to_abs(
     if n % 2 != 0:
         raise ValueError(f"need an even number of signed r_par bins; got {n}")
     half = n // 2
-    pos = xi_signed[:, half:]                       # bins for +r_par
-    neg = xi_signed[:, :half][:, ::-1]              # bins for -r_par, reversed
-    # Element-wise nanmean folds; np.nanmean correctly skips empty bins.
-    stacked = np.stack([pos, neg], axis=0)
-    xi_folded = np.nanmean(stacked, axis=0)
+
+    if counts is not None or npairs is not None:
+        if counts is None or npairs is None:
+            raise ValueError(
+                "must pass BOTH counts and npairs (or neither) to fold_signed_to_abs"
+            )
+        c_folded = counts[:, half:] + counts[:, :half][:, ::-1]
+        n_folded = npairs[:, half:] + npairs[:, :half][:, ::-1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            xi_folded = np.where(n_folded > 0, c_folded / n_folded, np.nan)
+    else:
+        pos = xi_signed[:, half:]                       # bins for +r_par
+        neg = xi_signed[:, :half][:, ::-1]              # bins for -r_par, reversed
+        # Unweighted nanmean — correct only when n_pairs is the same on
+        # both halves (auto-corr on a symmetric grid).  For ξ_× pass the
+        # ``counts``/``npairs`` arrays for a proper count-weighted fold.
+        stacked = np.stack([pos, neg], axis=0)
+        xi_folded = np.nanmean(stacked, axis=0)
     edges_abs = edges[half:]
     return xi_folded, edges_abs
 
