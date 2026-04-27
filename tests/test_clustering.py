@@ -21,7 +21,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from hcd_analysis.clustering import (
+    DeltaFResult,
     SightlineGeometry,
+    build_delta_F_field,
     fold_signed_to_abs,
     los_separation,
     minimum_image,
@@ -559,6 +561,141 @@ class TestPairCounterPeriodicBoxClosure(unittest.TestCase):
         sigma = 1.0 / np.sqrt(float(DD[0, 0]))
         self.assertGreater(float(DD[0, 0]), 100)               # CLT regime
         self.assertAlmostEqual(ratio, 1.0, delta=5 * sigma)
+
+
+class TestBuildDeltaFField(unittest.TestCase):
+    """Unit tests for build_delta_F_field per docs §2."""
+
+    def test_no_absorbers_no_mask(self):
+        """With an empty catalog, no pixels are masked and δ_F has zero
+        mean across the (now all-unmasked) array."""
+        rng = np.random.default_rng(0)
+        tau = rng.exponential(0.5, size=(10, 50))            # forest-like τ
+        empty = np.zeros(0, dtype=np.int64)
+        empty_f = np.zeros(0, dtype=np.float64)
+        res = build_delta_F_field(tau, empty, empty, empty, empty_f)
+        self.assertFalse(res.mask.any())
+        self.assertEqual(res.n_masked_per_class, {"LLS": 0, "subDLA": 0, "DLA": 0})
+        # δ_F has zero mean by construction
+        self.assertAlmostEqual(float(res.delta_F.mean()), 0.0, places=10)
+        # ⟨F⟩ = exp(-τ).mean() (no masking)
+        self.assertAlmostEqual(res.mean_F, float(np.exp(-tau).mean()))
+
+    def test_dla_pixels_masked_and_zero(self):
+        """A planted DLA at pixels [10, 19] on skewer 3 is masked
+        bit-perfectly; those pixels' δ_F is exactly 0."""
+        rng = np.random.default_rng(1)
+        tau = rng.exponential(0.3, size=(8, 40))
+        # Inject a strong DLA absorption block
+        tau[3, 10:20] = 1e7
+        skewer = np.array([3], dtype=np.int64)
+        s = np.array([10], dtype=np.int64)
+        e = np.array([19], dtype=np.int64)
+        nhi = np.array([2.5e20], dtype=np.float64)            # log10 = 20.40 → DLA
+        res = build_delta_F_field(tau, skewer, s, e, nhi)
+        # Mask shape
+        self.assertTrue(res.mask[3, 10:20].all())
+        self.assertEqual(int(res.mask.sum()), 10)
+        self.assertEqual(res.n_masked_per_class["DLA"], 10)
+        self.assertEqual(res.n_masked_per_class["LLS"], 0)
+        self.assertEqual(res.n_masked_per_class["subDLA"], 0)
+        # δ_F is exactly 0 on masked pixels
+        np.testing.assert_array_equal(res.delta_F[3, 10:20], 0.0)
+
+    def test_mean_F_uses_only_unmasked(self):
+        """⟨F⟩ is computed over UNMASKED pixels only; masking out the
+        saturated DLA core changes ⟨F⟩ relative to the no-mask case."""
+        tau = np.full((1, 100), 0.2)         # forest τ
+        tau[0, 40:60] = 1e6                  # DLA — F(masked) ≈ 0
+        skewer = np.array([0], dtype=np.int64)
+        s = np.array([40], dtype=np.int64)
+        e = np.array([59], dtype=np.int64)
+        nhi = np.array([5.0e20], dtype=np.float64)             # DLA
+        res = build_delta_F_field(tau, skewer, s, e, nhi)
+        expected_mean = float(np.exp(-0.2))                    # only forest pixels
+        self.assertAlmostEqual(res.mean_F, expected_mean, places=10)
+        # If we had averaged over the full array, ⟨F⟩ would be
+        # 0.8·exp(-0.2) (80 % forest + 20 % near-zero), much smaller
+        biased_mean = 0.8 * expected_mean
+        self.assertGreater(res.mean_F, biased_mean * 1.05)     # at least 5 % difference
+
+    def test_delta_F_zero_mean_over_unmasked(self):
+        """By construction δ_F over UNMASKED pixels has zero mean."""
+        rng = np.random.default_rng(2)
+        tau = rng.exponential(0.4, size=(20, 200))
+        # Plant a few HCDs of mixed classes
+        skewer = np.array([0, 5, 10], dtype=np.int64)
+        s = np.array([10, 50, 100], dtype=np.int64)
+        e = np.array([14, 55, 110], dtype=np.int64)
+        nhi = np.array([2e17, 5e19, 1e21], dtype=np.float64)   # LLS, subDLA, DLA
+        # Saturate the τ inside the masks so F is near zero
+        for sk, p0, p1 in zip(skewer, s, e):
+            tau[sk, p0 : p1 + 1] = 1e6
+        res = build_delta_F_field(tau, skewer, s, e, nhi)
+        # Verify per-class counts
+        self.assertEqual(res.n_masked_per_class["LLS"], 5)
+        self.assertEqual(res.n_masked_per_class["subDLA"], 6)
+        self.assertEqual(res.n_masked_per_class["DLA"], 11)
+        # δ_F over unmasked must have zero mean
+        unmasked_dF = res.delta_F[~res.mask]
+        self.assertAlmostEqual(float(unmasked_dF.mean()), 0.0, places=10)
+
+    def test_overlap_no_double_count(self):
+        """Two overlapping absorbers: pixels in the overlap go to the
+        absorber that touched them first; total mask count = union, not sum."""
+        tau = np.full((1, 50), 0.2)
+        # Two absorbers on skewer 0: [10, 19] (LLS) then [15, 24] (DLA)
+        skewer = np.array([0, 0], dtype=np.int64)
+        s = np.array([10, 15], dtype=np.int64)
+        e = np.array([19, 24], dtype=np.int64)
+        nhi = np.array([5e17, 5e20], dtype=np.float64)
+        res = build_delta_F_field(tau, skewer, s, e, nhi)
+        # Union covers pixels [10, 24] → 15 pixels masked
+        self.assertEqual(int(res.mask.sum()), 15)
+        # The first absorber (LLS) got pixels 10–19 newly masked: 10
+        # The second absorber (DLA) got 15–24 but 15–19 were already masked
+        # by the LLS, so it adds only 20–24 = 5 new pixels.
+        self.assertEqual(res.n_masked_per_class["LLS"], 10)
+        self.assertEqual(res.n_masked_per_class["DLA"], 5)
+        # Total = 15, matches the union.
+        total = sum(res.n_masked_per_class.values())
+        self.assertEqual(total, int(res.mask.sum()))
+
+    def test_sub_lls_below_threshold_not_masked(self):
+        """An absorber with NHI < 10^17.2 (sub-LLS) is NOT masked."""
+        tau = np.full((1, 50), 0.2)
+        skewer = np.array([0], dtype=np.int64)
+        s = np.array([20], dtype=np.int64)
+        e = np.array([24], dtype=np.int64)
+        nhi = np.array([5e16], dtype=np.float64)               # log10 = 16.7
+        res = build_delta_F_field(tau, skewer, s, e, nhi)
+        self.assertFalse(res.mask.any())
+        self.assertEqual(sum(res.n_masked_per_class.values()), 0)
+
+    def test_real_data_smoke(self):
+        """Sanity check: build δ_F on the production HiRes
+        rand_spectra (1 sim/snap), confirm ⟨F⟩ ∈ [0.6, 0.95] (Lyα
+        forest at z = 2-5).  Skipped if the file is missing."""
+        spec = Path(
+            "/nfs/turbo/lsa-cavestru/mfho/priya/emu_full_hires/"
+            "ns0.914Ap1.32e-09herei3.85heref2.65alphaq1.57hub0.742"
+            "omegamh20.141hireionz6.88bhfeedback0.04/output/SPECTRA_017/"
+            "rand_spectra_DLA.hdf5"
+        )
+        if not spec.exists():
+            self.skipTest("production HiRes spectra unavailable")
+        import h5py
+        with h5py.File(spec, "r") as f:
+            tau = f["tau/H/1/1215"][:].astype(np.float64)
+        # Use an empty catalog for the smoke test (no HCD masking needed
+        # for the ⟨F⟩ sanity check; the pre-PRIYA-mask production ⟨F⟩ is
+        # in this band).
+        empty = np.zeros(0, dtype=np.int64)
+        empty_f = np.zeros(0, dtype=np.float64)
+        res = build_delta_F_field(tau, empty, empty, empty, empty_f)
+        self.assertGreater(res.mean_F, 0.55)
+        self.assertLess(res.mean_F, 0.95)
+        self.assertAlmostEqual(float(res.delta_F.mean()), 0.0, places=8)
 
 
 if __name__ == "__main__":

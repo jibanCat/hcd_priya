@@ -512,6 +512,139 @@ def _bin_volumes_2d(
     return perp_area[:, None] * par_width[None, :]                    # (n_perp, n_par)
 
 
+# ---------------------------------------------------------------------------
+# δ_F field builder (all-HCD masked, per docs/clustering_definitions.md §2)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DeltaFResult:
+    """Output of build_delta_F_field — the all-HCD-masked Lyα flux field.
+
+    Attributes
+    ----------
+    delta_F : (n_skewers, n_pix) float64
+        F_pix / ⟨F⟩ − 1 on UNMASKED pixels; 0.0 on MASKED pixels.
+        Setting masked pixels to 0 means they contribute nothing to
+        ⟨δ_F · weight⟩ pair sums.
+    mean_F : float
+        ⟨F⟩ averaged over the UNMASKED pixels only.
+    mask : (n_skewers, n_pix) bool
+        True where the pixel is INSIDE any LLS / subDLA / DLA absorber's
+        [pix_start, pix_end] range (i.e. the pixel was masked).
+    n_masked_per_class : dict[str, int]
+        Per-class pixel-mask counts: keys "LLS", "subDLA", "DLA".  Sum
+        is total *newly-masked* pixels at each absorber (overlap is
+        not double-counted: a pixel marked by an LLS first and re-
+        covered by an overlapping subDLA increments only LLS).
+    """
+    delta_F: np.ndarray
+    mean_F: float
+    mask: np.ndarray
+    n_masked_per_class: dict
+
+
+def _classify_log_nhi(log_nhi: float) -> Optional[str]:
+    """Map log10(N_HI) to absorber class; None for sub-LLS or NaN."""
+    if not np.isfinite(log_nhi) or log_nhi < 17.2:
+        return None
+    if log_nhi < 19.0:
+        return "LLS"
+    if log_nhi < 20.3:
+        return "subDLA"
+    return "DLA"
+
+
+def build_delta_F_field(
+    tau: np.ndarray,
+    skewer_idx: np.ndarray,
+    pix_start: np.ndarray,
+    pix_end: np.ndarray,
+    NHI: np.ndarray,
+) -> DeltaFResult:
+    """Build the all-HCD-masked Lyman-α flux field δ_F per pixel.
+
+    Per `docs/clustering_definitions.md` §2:
+
+        F_ij    = exp(−τ_ij)             on unmasked pixels
+                = ⟨F⟩                     on masked pixels  → δ_F = 0
+        ⟨F⟩     = mean F over UNMASKED pixels in the snap
+        δ_F_ij  = F_ij / ⟨F⟩ − 1
+
+    where ``masked`` is "covered by ANY catalog absorber's
+    [pix_start, pix_end] with N_HI ≥ 10^17.2".  Filling masked pixels
+    with ⟨F⟩ → δ_F = 0 means they contribute nothing to ⟨δ_F · w⟩
+    pair sums in ξ_× and ξ_FF — which is the right behaviour
+    physically (we want the underlying *forest* bias, not the bias of
+    the HCDs we already cross-correlate against in ξ_×).
+
+    Parameters
+    ----------
+    tau : (n_skewers, n_pix) float
+        Optical depth array, e.g. ``f["tau/H/1/1215"][:]``.
+    skewer_idx, pix_start, pix_end : (n_abs,) int
+        Per-absorber row in the catalog.  ``pix_start`` and
+        ``pix_end`` are inclusive (matching the production
+        ``find_systems_in_skewer`` convention).
+    NHI : (n_abs,) float
+        Per-absorber recovered N_HI in cm^-2; used only to classify
+        absorbers (LLS / subDLA / DLA) for diagnostic counts.  All
+        absorbers with log10(N_HI) ≥ 17.2 are masked.
+
+    Returns
+    -------
+    DeltaFResult
+    """
+    tau = np.asarray(tau, dtype=np.float64)
+    if tau.ndim != 2:
+        raise ValueError(f"tau must be (n_skewers, n_pix); got {tau.shape}")
+    n_skewers, n_pix = tau.shape
+
+    skewer_idx = np.asarray(skewer_idx, dtype=np.int64)
+    pix_start = np.asarray(pix_start, dtype=np.int64)
+    pix_end = np.asarray(pix_end, dtype=np.int64)
+    NHI = np.asarray(NHI, dtype=np.float64)
+    if not (pix_start.shape == pix_end.shape == NHI.shape == skewer_idx.shape):
+        raise ValueError("catalog arrays must all have the same length")
+
+    mask = np.zeros((n_skewers, n_pix), dtype=bool)
+    n_masked_per_class = {"LLS": 0, "subDLA": 0, "DLA": 0}
+
+    for i in range(skewer_idx.shape[0]):
+        cls = _classify_log_nhi(np.log10(max(NHI[i], 1.0)))
+        if cls is None:
+            continue
+        sk = int(skewer_idx[i])
+        s = int(pix_start[i])
+        e = int(pix_end[i])
+        if not (0 <= sk < n_skewers):
+            continue
+        s_c = max(0, s)
+        e_c = min(n_pix - 1, e)
+        if e_c < s_c:
+            continue
+        before = int(mask[sk, s_c : e_c + 1].sum())
+        mask[sk, s_c : e_c + 1] = True
+        after = int(mask[sk, s_c : e_c + 1].sum())
+        n_masked_per_class[cls] += after - before
+
+    F = np.exp(-tau)
+    unmasked = ~mask
+    if not unmasked.any():
+        raise ValueError("all pixels are masked — cannot compute ⟨F⟩")
+    mean_F = float(F[unmasked].mean())
+    delta_F = np.zeros_like(F)
+    delta_F[unmasked] = F[unmasked] / mean_F - 1.0
+    # Masked pixels stay at 0.0 (= ⟨F⟩ / ⟨F⟩ − 1 = 0).
+
+    return DeltaFResult(
+        delta_F=delta_F,
+        mean_F=mean_F,
+        mask=mask,
+        n_masked_per_class=n_masked_per_class,
+    )
+
+
 def xi_auto_dla(
     dla_xyz: np.ndarray,
     dla_los_axis: np.ndarray,
