@@ -8,6 +8,12 @@ Covers:
   3. A run that never reaches the integrated DLA threshold is dropped.
   4. Position-tolerant matching: matched / unmatched bookkeeping is correct.
   5. summary_stats computes completeness, purity, mean / σ Δlog NHI.
+  6. 2-D colden inputs are handled with correct per-skewer bookkeeping.
+  7. tol_pixels_for_300_kms returns the expected pixel tolerance helper value.
+  8. Peculiar-velocity-shifted DLAs are matched by the 300 km/s tolerance
+     but not by the legacy 50 km/s tolerance (regression for the dominant
+     T2 unmatched-truth failure mode in PR #6 — see
+     `docs/dla_truth_unmatched_analysis.md`).
 """
 
 from __future__ import annotations

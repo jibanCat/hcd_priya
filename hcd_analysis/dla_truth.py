@@ -438,4 +438,5 @@ __all__ = [
     "match_dla_lists",
     "summary_stats",
     "recovered_from_systems",
+    "tol_pixels_for_300_kms",
 ]

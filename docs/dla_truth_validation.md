@@ -121,18 +121,28 @@ See `tests/test_dla_truth.py:test_position_matching`.
 The margin is
 
 ```
-tol_pixels = max( merge_dv_kms / dv_pix_kms, 5 )
+tol_pixels = tol_pixels_for_300_kms(dv_pix_kms) = max(round(300 / dv_pix_kms), 5)
 ```
 
-which makes the geometric tolerance match the production τ-finder's
-own merge gap (any two τ cores within `merge_dv_kms` of each other are
-treated as one system, so a recovered span ± that margin is the natural
-"this absorber" boundary). The 5-pixel floor protects very-high-
-resolution rand_spectra files from over-tight tolerances if dv ever
-drifts above 20 km/s.
+i.e. a fixed **300 km/s** tolerance converted to pixels per file. The
+choice of 300 km/s is set by the typical halo peculiar-velocity scale
+at z = 2–4 in cosmological simulations and is justified empirically by
+a tolerance sweep in `docs/dla_truth_unmatched_analysis.md`: bias and
+scatter are flat across all tolerances ≥ 30 km/s, completeness rises
+from 0.86 (at 100 km/s) to 0.97 (at 300 km/s), then saturates around
+0.98 by 500 km/s. The 5-pixel floor protects the case of unusually
+coarse-binned rand_spectra (dv ≳ 60 km/s).
 
-For the rand_spectra files at z = 3 (dv ≈ 1 km/s), tol = 100 pixels.
-For the rand_spectra files at z = 2 (dv ≈ 0.96 km/s), tol = 104 pixels.
+The original choice — `tol = max(merge_dv_kms / dv_pix, 5)` — used the
+production τ-finder's own merge gap (~100 km/s) as the reference.
+That turned out to be too tight: fake_spectra computes `colden` in
+real-space LOS bins but `tau` in redshift-space, so the same physical
+DLA appears at offsets of 100–300 km/s in the two fields, driven by
+halo peculiar velocity. The merge gap captures only the absorber's
+own internal velocity structure, not the LOS frame mismatch.
+
+For the rand_spectra files at z ≈ 3 (dv ≈ 1 km/s), tol = 300 pixels.
+For the rand_spectra files at z ≈ 2 (dv ≈ 0.96 km/s), tol ≈ 313 pixels.
 
 ## 4. Hypothesis-test gate
 

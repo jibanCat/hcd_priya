@@ -51,7 +51,19 @@ H4_PURITY = 0.70
 # ---------------------------------------------------------------------------
 
 def _aggregate_delta(h5_path: Path) -> tuple[np.ndarray, dict]:
-    """Concatenate per-(sim, snap) Δlog NHI arrays and return per-file weights."""
+    """Read the validation summary HDF5 and concatenate per-(sim, snap)
+    Δlog NHI arrays.
+
+    Returns
+    -------
+    all_dlog : np.ndarray
+        1-D concatenation of every matched-pair Δlog NHI across all files.
+    per_file : dict[str, list]
+        Per-(sim, snap) metadata used for the markdown report — keys are
+        ``sim``, ``snap``, ``z``, ``n_truth``, ``n_recovered_dla``,
+        ``n_recovered_lls_or_stronger``, ``n_matched_dla``, ``n_matched_loose``.
+        Each is a list aligned with the file index.
+    """
     all_dlog: list[np.ndarray] = []
     per_file = {
         "sim": [], "snap": [], "z": [],

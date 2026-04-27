@@ -9,10 +9,14 @@ Walks every `rand_spectra_DLA.hdf5` under the HiRes tree and, for each file:
    (`catalog.find_systems_in_skewer` + `catalog.process_skewer_batch`)
    with the production parameters from `config/default.yaml` (fast_mode,
    τ-threshold=100, merge_dv_kms=100, min_log_nhi=17.2).
-3. Matches truth ↔ recovered with a ±max(merge_dv_kms / dv_pix, 5 px)
-   tolerance and computes per-(sim, snap) summary stats:
+3. Matches truth ↔ recovered with a ±300 km/s tolerance converted to
+   pixels (`hcd_analysis.dla_truth.tol_pixels_for_300_kms`) and
+   computes per-(sim, snap) summary stats:
        N_truth, N_recovered_DLA, N_matched, completeness, purity,
        mean Δlog NHI, σ Δlog NHI.
+   The 300 km/s choice absorbs the typical halo peculiar-velocity
+   offset between fake_spectra's real-space colden and redshift-space
+   tau — see `docs/dla_truth_unmatched_analysis.md`.
 4. Aggregates into an HDF5 summary at
        figures/analysis/data/dla_truth_summary.h5
    and a multi-panel scatter PNG at
@@ -54,6 +58,7 @@ from hcd_analysis.dla_truth import (
     find_truth_dlas_from_colden,
     match_dla_lists,
     summary_stats,
+    tol_pixels_for_300_kms,
 )
 from hcd_analysis.io import pixel_dv_kms, SpectraHeader
 
@@ -182,12 +187,14 @@ def process_file(
     # this number (the older merge_dv_kms = 100 km/s tolerance left
     # ~14 % of unmatched truths sitting at 100-300 km/s offsets, which
     # are real DLAs displaced by halo peculiar velocities).
-    from hcd_analysis.dla_truth import tol_pixels_for_300_kms
     tol_pixels = tol_pixels_for_300_kms(dv_kms)
 
     with h5py.File(path, "r") as f:
         colden = f["colden/H/1"][:]            # (n_skew, nbins) cm^-2
-        tau = f["tau/H/1/1215"][:].astype(np.float64)
+        # Keep the file's native dtype here — process_skewer_batch
+        # casts to float64 row-by-row, so an eager whole-array cast
+        # would double peak memory on large HiRes arrays for no gain.
+        tau = f["tau/H/1/1215"][:]
 
     # 1) truth DLAs from colden
     truth = find_truth_dlas_from_colden(

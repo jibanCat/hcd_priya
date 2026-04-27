@@ -77,17 +77,8 @@ MIN_PIXELS = 2
 MIN_LOG_NHI = 17.2
 
 
-def _dv_per_pixel_kms(box_kpch: float, hubble: float, z: float, n_pix: int) -> float:
-    """Reproduce the dv_kms convention used in the production pipeline.
-
-    box_kpch is in comoving kpc/h; the LOS extent in km/s is
-        v_box = (box_kpch / 1000) · 100 · h · E(z) · a / h
-              = (box_kpch / 1000) · 100 · E(z) · a
-    where a = 1/(1+z).  We don't have Ω_m here so we use the actual
-    H(z) attribute below.  Divide by n_pix.
-    """
-    # We use the snapshot's actual Hz (km/s/Mpc) from the Header
-    return None  # caller passes Hz explicitly via the H5 attrs
+# dv_kms is computed inline inside ``process_one`` from the H5 Header's
+# ``Hz`` attribute and box geometry; no helper is needed here.
 
 
 def classify_unmatched(
