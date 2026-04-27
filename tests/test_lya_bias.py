@@ -26,12 +26,16 @@ sys.path.insert(0, str(ROOT))
 
 from hcd_analysis.lya_bias import (
     BFFitResult,
+    BFFromXiResult,
     compute_p1d_clean_sightlines,
+    extract_monopole,
     find_camb_pk_for_z,
     fit_b_F,
+    fit_b_F_from_xi_FF,
     hMpc_to_kms_factor,
     load_camb_pk,
     project_pk_3d_to_p1d,
+    xi_lin_monopole,
 )
 
 
@@ -210,7 +214,7 @@ class TestFitBFEndToEnd(unittest.TestCase):
         k_h, P_h = load_camb_pk(self.camb_path)
         F_factor = hMpc_to_kms_factor(z, h, Hz)
         k_3d_kms = k_h * F_factor
-        P_3d_kms = P_h * F_factor ** 3
+        P_3d_kms = P_h / (F_factor ** 3)                  # P has dims length^3
         I_kpar = project_pk_3d_to_p1d(k_par, k_3d_kms, P_3d_kms, beta_F=beta)
 
         # P1D_target = b_F² · I(k_par)
@@ -253,6 +257,95 @@ class TestFitBFEndToEnd(unittest.TestCase):
         # Sign convention: b_F < 0
         self.assertLess(result.b_F, 0)
         print(f"  test_recover_planted_b_F: {msg}")
+
+
+class TestXiLinMonopole(unittest.TestCase):
+    """For a Gaussian P_lin(k) = A·exp(-k²/k0²) the integral has a clean
+    closed form via Fourier-transform tables:
+
+        ξ_lin(r) = A · (k0³ / (8 π^{3/2})) · exp(-k0²·r²/4)
+
+    Verify the integrator returns this within 2 %."""
+
+    def test_gaussian_pk_closed_form(self):
+        A = 1.0
+        k0 = 0.5
+        k = np.linspace(0.001, 5.0, 4096)
+        P_lin = A * np.exp(-(k / k0) ** 2)
+        r = np.array([0.5, 1.0, 2.0, 4.0, 8.0])
+        xi = xi_lin_monopole(r, k, P_lin)
+        expected = (
+            A * (k0 ** 3) / (8.0 * np.pi ** 1.5)
+            * np.exp(-(k0 * r) ** 2 / 4.0)
+        )
+        np.testing.assert_allclose(xi, expected, rtol=2e-2)
+
+    def test_zero_r_returns_field_variance(self):
+        """ξ(r=0) = (1/(2π²)) ∫ k² P(k) dk = field variance σ²."""
+        k = np.linspace(0.001, 5.0, 4096)
+        P_lin = np.exp(-(k / 0.5) ** 2)
+        sigma2 = float(np.trapezoid(k ** 2 * P_lin, k) / (2.0 * np.pi ** 2))
+        xi0 = xi_lin_monopole(np.array([0.0]), k, P_lin)
+        np.testing.assert_allclose(xi0[0], sigma2, rtol=1e-12)
+
+
+class TestExtractMonopole(unittest.TestCase):
+
+    def test_single_2d_bin_to_single_1d_bin(self):
+        """A single 2-D bin at r_⊥=0, r_∥=5 with ξ=0.1 falls in the
+        r∈[4,6] bin; the monopole picks it up at the right value."""
+        xi = np.array([[0.1]])
+        n = np.array([[1000]])
+        rp = np.array([0.0])                    # perp = 0 (only LOS sep)
+        rl = np.array([5.0])
+        r_bins = np.array([0.0, 4.0, 6.0, 100.0])
+        r_c, xi_m, n_p = extract_monopole(xi, n, rp, rl, r_bins)
+        self.assertEqual(int(n_p[1]), 1000)     # bin 1 is [4, 6]
+        self.assertAlmostEqual(float(xi_m[1]), 0.1)
+
+
+class TestFitBFFromXiFF(unittest.TestCase):
+    """End-to-end: synthesise ξ_FF^(0)(r) from a known b_F, run the fit,
+    recover b_F at the few-percent level."""
+
+    def test_recover_planted_b_F(self):
+        # Linear matter spectrum (Mpc/h units, dimensionless P)
+        k = np.logspace(-3, 1, 2048)
+        P_lin = 5e3 * k / (1.0 + (k / 0.1) ** 4)        # CDM-shaped power
+        # Target ξ_FF^(0)(r) at a r-grid + Kaiser prefactor
+        b_F_in = -0.20
+        beta = 1.5
+        K = 1.0 + 2.0 / 3.0 * beta + 1.0 / 5.0 * beta ** 2
+
+        # Build a synthetic 2-D grid where ξ_2d depends only on r =
+        # sqrt(r_perp² + r_par²) — the monopole is "perfect" by
+        # construction.  Then add tiny Gaussian noise.
+        r_perp_c = np.linspace(2.5, 47.5, 19)
+        r_par_c = np.linspace(2.5, 47.5, 19)
+        n_grid = np.full((r_perp_c.size, r_par_c.size), 1000)
+
+        rng = np.random.default_rng(2026)
+        xi_2d = np.zeros_like(n_grid, dtype=np.float64)
+        for i, rp in enumerate(r_perp_c):
+            for j, rl in enumerate(r_par_c):
+                r = np.sqrt(rp * rp + rl * rl)
+                xi_lin_val = xi_lin_monopole(np.array([r]), k, P_lin)[0]
+                expected = (b_F_in ** 2) * K * xi_lin_val
+                # Sub-percent gaussian noise
+                xi_2d[i, j] = expected * (1.0 + 0.01 * rng.standard_normal())
+
+        result = fit_b_F_from_xi_FF(
+            xi_2d=xi_2d, npairs_2d=n_grid,
+            r_perp_centres=r_perp_c, r_par_centres=r_par_c,
+            k_lin=k, P_lin=P_lin, beta_F=beta,
+            r_min=10.0, r_max=40.0, n_r_bins=10,
+        )
+        rel = abs(result.b_F - b_F_in) / abs(b_F_in)
+        msg = (f"b_F (xi_FF) recovered = {result.b_F:.4f}, "
+               f"planted = {b_F_in:.4f}, rel_err = {rel:.3f}")
+        self.assertLess(rel, 0.05, msg)
+        self.assertLess(result.b_F, 0)
+        print(f"  test_fit_b_F_from_xi_FF: {msg}")
 
 
 if __name__ == "__main__":

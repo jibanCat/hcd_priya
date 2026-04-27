@@ -108,17 +108,20 @@ def find_camb_pk_for_z(sim_output_dir: Path, z: float) -> Path:
 def hMpc_to_kms_factor(z: float, hubble: float, Hz_kms_per_Mpc: float) -> float:
     """Conversion factor F such that
 
-        k_v  [s/km]    = k_r [h/Mpc]   * F
-        L_v  [km/s]    = L_r [Mpc/h]   / F
-        P_v  [(km/s)^d] = P_r [(Mpc/h)^d] * F^d
+        k_v  [s/km]      = k_r [h/Mpc]    * F
+        L_v  [km/s]      = L_r [Mpc/h]    / F
+        P_v  [(km/s)^d]  = P_r [(Mpc/h)^d] / F^d        (NOT * F^d!)
 
     Derivation: a comoving distance L [Mpc/h] in the LOS direction
     corresponds to a redshift-space velocity span
 
         Δv = a · H(z) · L_proper = (1/(1+z)) · H(z) · (L[Mpc/h] / h).
 
-    Hence  L[km/s] = L[Mpc/h] · H(z) / (h · (1+z))   = L[Mpc/h] / F⁻¹
-    with  F = h · (1+z) / H(z).
+    Hence  L[km/s] = L[Mpc/h] · H(z) / (h · (1+z)) = L[Mpc/h] / F
+    with   F = h · (1+z) / H(z).
+
+    Power spectra have dimensions of length^d, so
+    P_v / P_r = (L_v / L_r)^d = (1 / F)^d = 1 / F^d.
     """
     return hubble * (1.0 + z) / Hz_kms_per_Mpc
 
@@ -295,7 +298,8 @@ def fit_b_F(
     k_hMpc, P_Mpch3 = load_camb_pk(P_lin_camb_path)
     F = hMpc_to_kms_factor(z, hubble, Hz_kms_per_Mpc)
     k_3d_kms = k_hMpc * F                                  # s/km
-    P_3d_kms = P_Mpch3 * F ** 3                            # (km/s)^3
+    # P has units of length^3.  L_v = L_r / F, so P_v = P_r / F^3.
+    P_3d_kms = P_Mpch3 / (F ** 3)                          # (km/s)^3
 
     # 3) numerical projection at our k_par grid
     I_kpar = project_pk_3d_to_p1d(
@@ -347,12 +351,229 @@ def fit_b_F(
     )
 
 
+# ---------------------------------------------------------------------------
+# Linear matter ξ_lin(r) monopole and the b_F fit from ξ_FF
+# ---------------------------------------------------------------------------
+
+def xi_lin_monopole(
+    r: np.ndarray,
+    k: np.ndarray,
+    P_lin: np.ndarray,
+) -> np.ndarray:
+    """Compute the monopole linear-matter correlation function
+
+        ξ_lin^(0)(r) = (1/(2π²)) ∫_0^∞ dk · k² · P_lin(k) · j₀(k·r)
+                     = (1/(2π²)) ∫_0^∞ dk · k · sin(k·r) · P_lin(k) / r
+
+    via direct trapezoidal quadrature on the input k-grid.  All
+    arrays must be in CONSISTENT UNITS — pass k in s/km and P in
+    (km/s)³ to get ξ in dimensionless natural units; pass k in
+    h/Mpc and P in (Mpc/h)³ to get ξ in dimensionless units (the
+    natural scaling of the correlation function).  We use the
+    "k·sin(kr)/r" form because it stays well-behaved as r → 0
+    (sin(k·r) ≈ k·r for small r, so the integrand becomes k²·P_lin —
+    the variance of the field).
+
+    Parameters
+    ----------
+    r       : (n_r,) float — separations
+    k       : (n_k,) float — strictly increasing wavenumber grid
+    P_lin   : (n_k,) float — P_lin at those k
+
+    Returns
+    -------
+    xi : (n_r,) float
+    """
+    r = np.asarray(r, dtype=np.float64)
+    k = np.asarray(k, dtype=np.float64)
+    P = np.asarray(P_lin, dtype=np.float64)
+    if k.shape != P.shape:
+        raise ValueError("k and P_lin must match in shape")
+    if not np.all(np.diff(k) > 0):
+        raise ValueError("k must be strictly increasing")
+
+    out = np.zeros_like(r)
+    for i, ri in enumerate(r):
+        if ri <= 0:
+            # ξ(0) = (1/(2π²)) ∫ dk · k² · P_lin(k) — variance of the field
+            integrand = k * k * P
+        else:
+            integrand = k * np.sin(k * ri) * P / ri
+        out[i] = float(np.trapezoid(integrand, k)) / (2.0 * np.pi ** 2)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Monopole extraction from a 2-D (r_par, r_perp) grid
+# ---------------------------------------------------------------------------
+
+def extract_monopole(
+    xi_2d: np.ndarray,
+    npairs_2d: np.ndarray,
+    r_perp_centres: np.ndarray,
+    r_par_centres: np.ndarray,
+    r_bins: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Average a 2-D ξ(r_par, r_perp) grid over μ at fixed
+    r = sqrt(r_par² + r_perp²) — the monopole.
+
+    Each 2-D bin contributes its npairs-weighted ξ value to the 1-D
+    r-bin containing its centre.
+
+    Parameters
+    ----------
+    xi_2d, npairs_2d : (n_perp, n_par) — 2-D ξ values and pair counts
+    r_perp_centres   : (n_perp,) centres
+    r_par_centres    : (n_par,) centres (use absolute values; pass folded grid)
+    r_bins           : (n_r + 1,) edges in the same units, monotonic
+
+    Returns
+    -------
+    r_centres : (n_r,) float — bin centres
+    xi_mono   : (n_r,) float — monopole-averaged ξ per bin
+    npairs    : (n_r,) int   — pair count per 1-D bin
+    """
+    r_perp_centres = np.asarray(r_perp_centres, dtype=np.float64)
+    r_par_centres = np.asarray(r_par_centres, dtype=np.float64)
+    xi_2d = np.asarray(xi_2d, dtype=np.float64)
+    npairs_2d = np.asarray(npairs_2d, dtype=np.int64)
+    r_bins = np.asarray(r_bins, dtype=np.float64)
+
+    if xi_2d.shape != npairs_2d.shape:
+        raise ValueError("xi_2d and npairs_2d must have the same shape")
+    if xi_2d.shape != (r_perp_centres.size, r_par_centres.size):
+        raise ValueError(
+            f"xi_2d shape {xi_2d.shape} doesn't match (n_perp, n_par)="
+            f"({r_perp_centres.size}, {r_par_centres.size})"
+        )
+    if not np.all(np.diff(r_bins) > 0):
+        raise ValueError("r_bins must be strictly increasing")
+
+    # 2-D r centre per bin
+    r_grid = np.sqrt(
+        r_perp_centres[:, None] ** 2 + r_par_centres[None, :] ** 2
+    )
+    # Drop NaN ξ bins (those with 0 pairs)
+    valid = npairs_2d > 0
+    r_flat = r_grid[valid]
+    xi_flat = xi_2d[valid]
+    w_flat = npairs_2d[valid].astype(np.float64)
+
+    n_r = r_bins.size - 1
+    sum_xi_w = np.zeros(n_r, dtype=np.float64)
+    sum_w = np.zeros(n_r, dtype=np.float64)
+    n_p = np.zeros(n_r, dtype=np.int64)
+
+    bin_idx = np.searchsorted(r_bins, r_flat, side="right") - 1
+    in_range = (bin_idx >= 0) & (bin_idx < n_r)
+
+    np.add.at(sum_xi_w, bin_idx[in_range], (xi_flat * w_flat)[in_range])
+    np.add.at(sum_w, bin_idx[in_range], w_flat[in_range])
+    np.add.at(n_p, bin_idx[in_range], npairs_2d[valid].astype(np.int64)[in_range])
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        xi_mono = np.where(sum_w > 0, sum_xi_w / sum_w, np.nan)
+    r_centres = 0.5 * (r_bins[:-1] + r_bins[1:])
+    return r_centres, xi_mono, n_p
+
+
+# ---------------------------------------------------------------------------
+# b_F from ξ_FF monopole
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BFFromXiResult:
+    b_F: float
+    b_F_err: float
+    beta_F_assumed: float
+    r_centres: np.ndarray
+    xi_obs: np.ndarray
+    xi_template: np.ndarray
+    fit_mask: np.ndarray
+    n_fit_bins: int
+
+
+def fit_b_F_from_xi_FF(
+    xi_2d: np.ndarray,
+    npairs_2d: np.ndarray,
+    r_perp_centres: np.ndarray,
+    r_par_centres: np.ndarray,
+    k_lin: np.ndarray,
+    P_lin: np.ndarray,
+    beta_F: float = 1.5,
+    r_min: float = 10.0,
+    r_max: float = 40.0,
+    n_r_bins: int = 12,
+) -> BFFromXiResult:
+    """Fit b_F from the ξ_FF monopole using
+
+        ξ_FF^(0)(r) = b_F² · K(β_F) · ξ_lin^(0)(r),
+        K(β_F) = 1 + (2/3)·β_F + (1/5)·β_F²
+
+    on the linear-scale window [r_min, r_max] (Mpc/h, or matching k_lin
+    units).  β_F is fixed at the input value (default 1.5, Slosar+2011
+    z ≈ 2.3).
+
+    Returns ``BFFromXiResult`` with b_F (signed, Lyα convention < 0),
+    its 1-σ from per-bin scatter, and arrays for the fit panel.
+    """
+    r_bins = np.linspace(r_min, r_max, n_r_bins + 1)
+    r_centres, xi_mono, n_p = extract_monopole(
+        xi_2d=xi_2d, npairs_2d=npairs_2d,
+        r_perp_centres=r_perp_centres, r_par_centres=r_par_centres,
+        r_bins=r_bins,
+    )
+    xi_lin = xi_lin_monopole(r_centres, k_lin, P_lin)
+    K = 1.0 + (2.0 / 3.0) * beta_F + (1.0 / 5.0) * beta_F ** 2
+    template = K * xi_lin                                # the ξ_FF / b_F² template
+
+    fit_mask = (
+        np.isfinite(xi_mono) & (template != 0) & (n_p > 0)
+    )
+    if int(fit_mask.sum()) < 4:
+        raise ValueError(
+            f"only {int(fit_mask.sum())} bins available for the ξ_FF fit "
+            f"in [{r_min}, {r_max}] Mpc/h"
+        )
+    # Ratio fit (geometric mean across bins)
+    ratio = xi_mono[fit_mask] / template[fit_mask]
+    # Some bins have negative ratio if ξ_obs has a stochastic sign flip at
+    # the per-bin level — drop those for the geometric-mean fit; they
+    # carry zero info about the bias squared.
+    ratio = ratio[ratio > 0]
+    if ratio.size < 4:
+        raise ValueError(
+            "after dropping non-positive ratio bins, only "
+            f"{ratio.size} survive — ξ_FF has too much noise"
+        )
+    log_b_F_sq = float(np.log(ratio).mean())
+    log_b_F_sq_se = float(np.log(ratio).std(ddof=1) / np.sqrt(ratio.size))
+    b_F_sq = float(np.exp(log_b_F_sq))
+    b_F = -np.sqrt(b_F_sq)                                 # Lyα convention
+    b_F_err = abs(b_F) * 0.5 * log_b_F_sq_se
+
+    return BFFromXiResult(
+        b_F=b_F,
+        b_F_err=b_F_err,
+        beta_F_assumed=beta_F,
+        r_centres=r_centres,
+        xi_obs=xi_mono,
+        xi_template=b_F_sq * template,
+        fit_mask=fit_mask,
+        n_fit_bins=int(fit_mask.sum()),
+    )
+
+
 __all__ = [
     "BFFitResult",
+    "BFFromXiResult",
     "compute_p1d_clean_sightlines",
+    "extract_monopole",
     "find_camb_pk_for_z",
     "fit_b_F",
+    "fit_b_F_from_xi_FF",
     "hMpc_to_kms_factor",
     "load_camb_pk",
     "project_pk_3d_to_p1d",
+    "xi_lin_monopole",
 ]
