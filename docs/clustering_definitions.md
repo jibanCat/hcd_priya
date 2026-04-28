@@ -53,6 +53,24 @@ runs from 0 to box).
 All distances below are in **comoving Mpc/h**. We convert from kpc/h
 inside the loader.
 
+![](../figures/diagnostics/clustering/fig_geometry.png)
+
+**Left:** how a (DLA, Lyα-pixel) pair gets decomposed.  Sightlines
+(blue lines) run along the LOS axis — three are shown along x in
+this 2-D slice.  A DLA on one sightline (red circle) and a Lyα
+pixel on a *different* sightline (green square) form a pair with
+separation `Δ = x_pix − x_DLA`.  The decomposition `r_∥` (orange)
+takes the component along the **pixel's** sightline axis, NOT
+the DLA's; `r_⊥` (purple) is the orthogonal residual.  Picking
+the pixel's axis (not the DLA's) is the design choice in
+`hcd_analysis.clustering` and matches FR+2012.
+
+**Right:** periodic minimum-image.  Naive `Δ = 95 Mpc/h` (red)
+exceeds box/2 = 60 Mpc/h, which is wrong on a periodic box; the
+correct minimum-image `Δ = −25 Mpc/h` (green) points to the
+image of the right point in the cell to the left.  The pair
+counter applies `Δ_min = Δ − box · round(Δ / box)` element-wise.
+
 ## 2. The Lyman-α flux field — all HCDs masked
 
 Per pixel, after **masking every absorber in the catalog** (LLS + subDLA + DLA):
@@ -81,6 +99,19 @@ because it leaves LLS / subDLA pixels in place.
 
 We do **not** rescale τ to a target `⟨F⟩_obs` — PRIYA's native UVB
 mean flux is used. (See `docs/assumptions.md` item 11.)
+
+![](../figures/diagnostics/clustering/fig_delta_F_example.png)
+
+Concrete example on one synthetic sightline.  Three planted
+absorbers (LLS at log NHI = 18, subDLA at 19.7, DLA at 20.7) raise
+the τ profile (top) to amplitudes that drive `F = exp(−τ)` (middle)
+to nearly zero inside their pixel windows.  The grey bands are the
+HCD masks — pixels inside any LLS/subDLA/DLA `[pix_start, pix_end]`.
+`⟨F⟩` is computed from the **unmasked** pixels only (dotted line in
+the middle panel); masked pixels are filled with `⟨F⟩` so they
+contribute exactly 0 to `δ_F = F/⟨F⟩ − 1` (bottom).  This is the
+"all-HCD-masked" definition the cross-correlation pipeline
+consumes.
 
 ## 3. The DLA point catalog
 
@@ -300,3 +331,30 @@ This document gates the implementation. After user approval:
 
 Production (60 LF sims × all snaps) is **deferred** until tests 1–11
 pass and tests 10 + 11 land within their literature windows.
+
+---
+
+## 11. What the production data actually looks like
+
+Concrete examples that connect the math above to real PRIYA outputs:
+
+* **`ξ_FF^(0)(r)` recovery, real data** — see
+  [`docs/clustering_test11_results.md`](clustering_test11_results.md)
+  with the test 11 fit figure inlined.  Shows both the failed P1D
+  path and the successful ξ_FF path on the same z = 2.20 snap.
+
+* **`ξ_×(r, |μ|)` heatmap + monopole + quadrupole, real data** — see
+  [`docs/clustering_test10_results.md`](clustering_test10_results.md)
+  with both the legacy and the rmu joint-fit figures inlined.  The
+  rmu heatmap is a direct visualisation of the cross-correlation
+  field that the math in §4 describes.
+
+* **Multipole projection — bug & fix walkthrough** — see
+  [`docs/multipole_jacobian_explained.md`](multipole_jacobian_explained.md)
+  for four pedagogical figures showing why the legacy
+  `(r_⊥, r_∥) + npairs-weighted` projection was biased (Hamilton-1992
+  Jacobian leakage), and how the new `(r, |μ|) + uniform-μ Hamilton`
+  estimator fixes it.
+
+* **Coordinate / pair-decomposition diagram** — figure inlined at §1
+  above; **δ_F construction example** — figure inlined at §2 above.

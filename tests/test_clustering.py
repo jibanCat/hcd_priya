@@ -51,10 +51,14 @@ from hcd_analysis.clustering import (
     los_separation,
     minimum_image,
     pair_count_2d,
+    pair_count_rmu,
     pixel_to_xyz,
     xi_auto_dla,
+    xi_auto_dla_rmu,
     xi_auto_lya,
+    xi_auto_lya_rmu,
     xi_cross_dla_lya,
+    xi_cross_dla_lya_rmu,
     xyz_to_nearest_pixel,
 )
 
@@ -809,6 +813,146 @@ class TestExcludeSelfNpairsBugRegression(unittest.TestCase):
         self.assertEqual(int(npairs[0, 0]), 0,
                          f"self-pairs leaked into npairs (got {int(npairs[0,0])})")
         self.assertEqual(float(counts[0, 0]), 0.0)
+
+
+class TestPairCountRMu(unittest.TestCase):
+    """Geometric correctness for pair_count_rmu — pure-LOS pairs land
+    at |μ| ≈ 1, pure-perp pairs at |μ| ≈ 0."""
+
+    def test_pure_los_pair_lands_at_mu_one(self):
+        # Two points separated by Δ = 5 Mpc/h along the LOS axis (axis=0)
+        L_xyz = np.array([[0.0, 0.0, 0.0]])
+        R_xyz = np.array([[5.0, 0.0, 0.0]])
+        L_axis = np.array([0], dtype=np.int64)
+        # 5 r-bins covering 5 Mpc/h; 4 μ-bins on [0, 1]
+        r_edges = np.array([0.0, 4.0, 6.0, 10.0, 20.0, 50.0])
+        mu_edges = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
+        counts, npairs = pair_count_rmu(
+            L_xyz, R_xyz, L_axis, box=100.0,
+            r_bins=r_edges, mu_bins=mu_edges,
+            chunk_size=4,
+        )
+        # Pair lands in r ∈ [4, 6] (idx 1) and μ ∈ [0.75, 1.0] (idx 3).
+        self.assertEqual(int(npairs[1, 3]), 1)
+        # No leakage to other (r, μ) bins
+        self.assertEqual(int(npairs.sum()), 1)
+
+    def test_pure_perp_pair_lands_at_mu_zero(self):
+        # Two points separated by Δ = 5 Mpc/h along axis=1 (perp to LOS axis 0)
+        L_xyz = np.array([[0.0, 0.0, 0.0]])
+        R_xyz = np.array([[0.0, 5.0, 0.0]])
+        L_axis = np.array([0], dtype=np.int64)
+        r_edges = np.array([0.0, 4.0, 6.0, 10.0])
+        mu_edges = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
+        counts, npairs = pair_count_rmu(
+            L_xyz, R_xyz, L_axis, box=100.0,
+            r_bins=r_edges, mu_bins=mu_edges,
+            chunk_size=4,
+        )
+        # Pair lands in r ∈ [4, 6] (idx 1) and μ ∈ [0, 0.25] (idx 0).
+        self.assertEqual(int(npairs[1, 0]), 1)
+        self.assertEqual(int(npairs.sum()), 1)
+
+    def test_45_degree_pair_lands_near_mu_root_half(self):
+        # Δ = (3, 4, 0); LOS axis 0; r = 5, μ = 3/5 = 0.6
+        L_xyz = np.array([[0.0, 0.0, 0.0]])
+        R_xyz = np.array([[3.0, 4.0, 0.0]])
+        L_axis = np.array([0], dtype=np.int64)
+        r_edges = np.array([0.0, 4.0, 6.0])
+        mu_edges = np.array([0.0, 0.5, 0.7, 1.0])
+        counts, npairs = pair_count_rmu(
+            L_xyz, R_xyz, L_axis, box=100.0,
+            r_bins=r_edges, mu_bins=mu_edges,
+            chunk_size=4,
+        )
+        # μ = 0.6 → bin idx 1 ([0.5, 0.7])
+        self.assertEqual(int(npairs[1, 1]), 1)
+        self.assertEqual(int(npairs.sum()), 1)
+
+    def test_self_pairs_excluded_by_r0_filter(self):
+        # Even without exclude_self, r = 0 self-pairs (same point) are
+        # dropped because μ is undefined at r = 0.
+        xyz = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+        L_axis = np.array([0, 0], dtype=np.int64)
+        r_edges = np.array([0.0, 0.5, 2.0])
+        mu_edges = np.array([0.0, 0.5, 1.0])
+        counts, npairs = pair_count_rmu(
+            xyz, xyz, L_axis, box=100.0,
+            r_bins=r_edges, mu_bins=mu_edges,
+            exclude_self=False,                        # explicitly off
+            chunk_size=4,
+        )
+        # No (r ≈ 0) bin should have entries — both self-pairs at r=0
+        # are excluded by the finite_r filter.
+        self.assertEqual(int(npairs[0, :].sum()), 0,
+                         "r=0 self-pair leaked into npairs[0,:]")
+        # The two off-diagonal pairs (i=0,j=1 and i=1,j=0) at r=1 mu=1
+        # should both be counted.
+        self.assertEqual(int(npairs[1, 1]), 2)
+
+
+class TestXiCrossLyaRMuRandomZero(unittest.TestCase):
+    """ξ_cross on random Poisson DLAs × random Gaussian δ_F gives
+    ξ_×(r, μ) ≈ 0 within Poisson noise."""
+
+    def test_zero_signal_random(self):
+        rng = np.random.default_rng(42)
+        n_pix = 1000
+        n_dla = 200
+        box = 100.0
+        # Random pixels with random δ_F (mean 0)
+        pixel_xyz = rng.uniform(0, box, size=(n_pix, 3))
+        pixel_axis = rng.integers(0, 3, size=n_pix).astype(np.int64)
+        pixel_dF = rng.standard_normal(n_pix)
+        pixel_dF -= pixel_dF.mean()                         # exact zero mean
+        # Random DLAs
+        dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
+
+        r_edges = np.array([0.0, 5.0, 10.0, 20.0, 30.0])
+        mu_edges = np.linspace(0.0, 1.0, 5)
+
+        xi, counts, npairs = xi_cross_dla_lya_rmu(
+            pixel_xyz=pixel_xyz, pixel_los_axis=pixel_axis,
+            pixel_delta_F=pixel_dF, dla_xyz=dla_xyz, box=box,
+            r_bins=r_edges, mu_bins=mu_edges, chunk_size=64,
+        )
+        # Per-bin σ ~ 1/√npairs → check |ξ| < 5/√npairs in every bin.
+        with np.errstate(invalid="ignore"):
+            sigma = 5.0 / np.sqrt(np.maximum(npairs, 1))
+        bad = (np.abs(xi) > sigma) & (npairs >= 25)        # ignore tiny bins
+        self.assertEqual(int(bad.sum()), 0,
+                         f"ξ_× exceeded 5σ floor in {int(bad.sum())} bins; "
+                         f"max |ξ| / σ = {(np.abs(xi)/sigma)[npairs >= 25].max():.2f}")
+
+
+class TestXiAutoDlaRMuPeriodicClosure(unittest.TestCase):
+    """xi_auto_dla_rmu on a uniform random Poisson catalog gives
+    DD/RR ≈ 1 (i.e. ξ ≈ 0)."""
+
+    def test_dd_matches_rr_random(self):
+        rng = np.random.default_rng(123)
+        n_dla = 4000
+        box = 100.0
+        xyz = rng.uniform(0, box, size=(n_dla, 3))
+        axis = rng.integers(0, 3, size=n_dla).astype(np.int64)
+
+        r_edges = np.array([0.0, 10.0, 20.0, 30.0, 40.0])
+        mu_edges = np.linspace(0.0, 1.0, 5)
+        xi, DD, RR = xi_auto_dla_rmu(
+            dla_xyz=xyz, dla_los_axis=axis, box=box,
+            r_bins=r_edges, mu_bins=mu_edges, chunk_size=512,
+        )
+        # Outside the noisiest r=0 shell, DD/RR should be ~ 1
+        # within Poisson noise (~ 1/√DD).  Check ratio averaged
+        # over μ at each r.
+        mean_ratio = (DD.sum(axis=1) / RR.sum(axis=1))
+        # Skip the smallest r-bin (very few pairs, big fractional noise).
+        for i in range(1, len(mean_ratio)):
+            self.assertAlmostEqual(
+                mean_ratio[i], 1.0, delta=0.05,
+                msg=f"r-bin {i}: ⟨DD/RR⟩_μ = {mean_ratio[i]:.3f} "
+                    f"(expected 1.0 within Poisson)",
+            )
 
 
 if __name__ == "__main__":
