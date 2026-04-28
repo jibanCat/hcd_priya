@@ -24,6 +24,42 @@ unbiased and is the production-grade estimator going forward.
 | rperp_rpar (legacy) | +1.672 ± 0.543  | 0.569 (iterated) | 1.860 | —     | r ∈ [10, 40]   |
 | **rmu (joint)**     | **+1.740 ± 0.426** | **−0.17 ± 0.17** | 1.392 | 0.740 | r ∈ [10, 40]   |
 
+### Legacy mode — monopole-only fit
+
+![](../figures/analysis/06_clustering/test10_snap_022.png)
+
+Blue dots = observed monopole `ξ_×^(0)(r)` extracted from the (r_⊥, r_∥)
+grid via `extract_monopole`; red curve = `b_DLA·b_F·K(β)·ξ_lin^(0)`
+template at the best-fit `b_DLA = +1.67`.  β_DLA fixed at the
+self-consistency-iterated value 0.569 (Tinker+10 prior, not a
+measurement).  Single panel, single multipole — the monopole
+amplitude is the *only* constraint on b_DLA.
+
+### Hamilton mode — joint mono+quad fit on (r, |μ|) grid
+
+![](../figures/analysis/06_clustering/test10_snap_022_rmu.png)
+
+**Left** — the input ξ_×(r, |μ|) grid the new estimator uses, before
+any projection.  Mostly negative (a DLA pulls down the local flux),
+with the strongest signal at small r and weak μ-dependence at large
+r (consistent with the small recovered β_DLA).
+
+**Middle** — extracted monopole ξ_×^(0)(r) (blue dots) with the joint
+fit best-fit Kaiser model (red).  The fit window [10, 40] Mpc/h is
+shaded.  The recovered `b_DLA = +1.74` is +4 % above the legacy
+value — the doc-predicted Jacobian shift, see
+`docs/clustering_multipole_jacobian_todo.md`.
+
+**Right** — extracted quadrupole ξ_×^(2)(r) (green squares) with the
+joint fit (red).  `β_DLA = -0.17 ± 0.17` is consistent with zero;
+the cross quadrupole signal is too weak at our 11 655-DLA sample
+to constrain β reliably.  This matches the published expectation:
+FR+2012 found β_DLA = 0.4 ± 0.5 on BOSS DR9 with similar statistics.
+
+> The full pedagogical walkthrough of why the rmu pipeline is the
+> right one — including the synthesis tests that lock the bug + fix —
+> lives in [`docs/multipole_jacobian_explained.md`](multipole_jacobian_explained.md).
+
 Notes:
 
 * `b_DLA(rmu) − b_DLA(legacy) = +0.068` (~ +4 %) — directly confirms

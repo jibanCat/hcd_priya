@@ -4,6 +4,24 @@ Run: `scripts/run_test11.py` on
 `ns0.803Ap2.2e-09…/snap_022` at z = 2.20.  Verbatim output saved to
 `figures/analysis/06_clustering/test11_snap_022.{json,png}`.
 
+![](../figures/analysis/06_clustering/test11_snap_022.png)
+
+**Left panel** — P1D path (H11.a / H11.c).  The blue dots are the
+observed P1D over HCD-free sightlines; the red horizontal line is
+the linear-theory template `b_F²·I(k_par; β_F)` at the best-fit
+`b_F = -0.025` over the linear-scale fit window (grey).  The data
+turns over above the template and falls off rapidly with k_par
+because the real Lyα forest carries thermal/Jeans/non-linear damping
+that the linear template doesn't capture (see §"Why the P1D path
+fails on real data" below).
+
+**Right panel** — ξ_FF path (H11.b).  Blue dots = observed ξ_FF
+monopole, red curve = `b_F²·K(β_F)·ξ_lin^(0)(r)` template at
+`b_F = -0.141`.  At linear scales r ∈ [10, 40] Mpc/h the template
+tracks the observation cleanly because thermal damping is far
+below the resolution of the 2 Mpc/h r-bins.  This is the
+production-grade `b_F` estimator going forward.
+
 ## Summary
 
 | Sub-test | Statistic | Threshold | Recovered | Verdict |

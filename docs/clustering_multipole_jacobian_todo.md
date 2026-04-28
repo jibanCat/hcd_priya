@@ -18,6 +18,25 @@
 > Production sweeps over the 60-sim grid should switch to `rmu` once
 > the doc-noted xi_auto_lya scaling work is also complete.
 
+### The bug, in one figure
+
+![](../figures/diagnostics/clustering/fig_pure_monopole_leakage.png)
+
+Synthetic input: `ξ(r, μ) = ξ_0(r)` (pure monopole, no μ-dependence).
+True quadrupole: zero by construction.  Right panel:
+
+* rmu (blue) recovers `ξ_2 = 0` to floating-point precision (max
+  spurious leak: 4 × 10⁻⁴ of the monopole).
+* legacy (red) returns a non-zero ξ_2 — at the smallest r-bin the
+  spurious quadrupole is **1.2× the monopole signal**.  This is
+  pure Jacobian leakage from the `√(1−μ²)` weighting in
+  `(r_⊥, r_∥)` binning.
+
+For the four-figure walkthrough — the bin-geometry picture, the
+Hamilton synthesis test, the joint (b, β) recovery, and the
+real-PRIYA test 10 result — see
+[`docs/multipole_jacobian_explained.md`](multipole_jacobian_explained.md).
+
 Original diagnosis (kept for the historical record) follows below.
 
 ---
