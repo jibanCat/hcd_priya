@@ -1,0 +1,15 @@
+{
+  "sim": "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056",
+  "snap": "snap_022",
+  "z": 2.1999999999999975,
+  "mean_F": 0.8283491534905731,
+  "n_clean_sightlines": 597168,
+  "b_F_p1d": -0.02500887687454009,
+  "b_F_p1d_err": 0.0008545908660934472,
+  "b_F_xi": -0.14089760352385175,
+  "b_F_xi_err": 0.026659662839958072,
+  "p1d_in_lit": false,
+  "xi_in_lit": true,
+  "agree_1sigma": false,
+  "xi_subsample": 8000
+}

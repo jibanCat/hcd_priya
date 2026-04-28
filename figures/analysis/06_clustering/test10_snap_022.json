@@ -1,0 +1,12 @@
+{
+  "sim": "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056",
+  "snap": "snap_022",
+  "z": 2.1999999999999975,
+  "n_dla": 11655,
+  "b_F_assumed": -0.14089760352385175,
+  "b_DLA": 1.672331768620337,
+  "b_DLA_err": 0.5434498545489532,
+  "in_lit_envelope": true,
+  "delta_to_bird14_linear": 0.02766823137966301,
+  "ly\u03b1_pixel_subsample": 200000
+}
