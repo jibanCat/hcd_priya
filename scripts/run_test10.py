@@ -307,6 +307,19 @@ def main():
         r_centres = 0.5 * (r_edges[:-1] + r_edges[1:])
         mu_centres = 0.5 * (mu_edges[:-1] + mu_edges[1:])
 
+        # Save the (r, |μ|) grid so the validation plotter can re-use
+        # it without re-running the 10-min pair count.
+        out_npz = OUT_DIR / f"test10_{args.snap}{out_tag}_grid.npz"
+        np.savez(
+            str(out_npz),
+            xi_rmu=xi_rmu, npairs_rmu=npairs_rmu,
+            r_edges=r_edges, mu_edges=mu_edges,
+            r_centres=r_centres, mu_centres=mu_centres,
+            b_F_assumed=b_F, beta_F_assumed=1.5,
+            z_snap=geom.z_snap,
+        )
+        print(f"  wrote {out_npz}")
+
         try:
             jres = fit_b_beta_from_xi_cross_multipoles(
                 xi_rmu=xi_rmu, npairs_rmu=npairs_rmu,
@@ -339,31 +352,54 @@ def main():
                   f"{'PASS' if 0.3 <= jres.beta_DLA <= 0.8 else 'review'} "
                   f"({jres.beta_DLA:+.3f})")
 
-            # Figure: monopole + quadrupole panels
-            fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+            # Figure: 3-panel layout — (r, |μ|) heatmap + monopole + quadrupole
+            fig, axes = plt.subplots(1, 3, figsize=(16.5, 4.8))
             mono_mask = (jres.r_centres >= 5) & (jres.r_centres <= 50)
-            axes[0].plot(jres.r_centres[mono_mask],
-                         jres.xi_mono_obs[mono_mask], "o", color="C0",
-                         label="ξ_×^(0) obs")
-            axes[0].plot(jres.r_centres[mono_mask],
-                         jres.xi_mono_template[mono_mask], "-", color="C3",
-                         label=f"+b_D·b_F·K_0·ξ_lin^(j0)  (b_D={jres.b_DLA:+.2f})")
-            axes[0].axhline(0, color="grey", lw=0.5)
-            axes[0].set_xlabel("r [Mpc/h]"); axes[0].set_ylabel(r"$\xi^{(0)}_{\times}(r)$")
-            axes[0].grid(True, alpha=0.3); axes[0].legend(fontsize=9)
 
+            # Panel 0: ξ_×(r, |μ|) heatmap
+            extent = [mu_edges[0], mu_edges[-1], r_edges[0], r_edges[-1]]
+            im = axes[0].imshow(
+                xi_rmu, origin="lower", aspect="auto", extent=extent,
+                cmap="RdBu_r",
+                vmin=-np.nanmax(np.abs(xi_rmu)),
+                vmax=+np.nanmax(np.abs(xi_rmu)),
+            )
+            axes[0].set_xlabel(r"$|\mu| = |r_\parallel|/r$")
+            axes[0].set_ylabel("r [Mpc/h]")
+            axes[0].set_title(r"$\xi_{\times}(r, |\mu|)$  — input grid")
+            fig.colorbar(im, ax=axes[0], label=r"$\xi_{\times}$")
+
+            # Panel 1: monopole
             axes[1].plot(jres.r_centres[mono_mask],
-                         jres.xi_quad_obs[mono_mask], "s", color="C2",
-                         label="ξ_×^(2) obs")
+                         jres.xi_mono_obs[mono_mask], "o", color="C0",
+                         label=r"$\xi^{(0)}_{\times}$ obs (Hamilton)")
             axes[1].plot(jres.r_centres[mono_mask],
-                         jres.xi_quad_template[mono_mask], "-", color="C3",
-                         label=f"−b_D·b_F·K_2·ξ_lin^(j2)  (β_D={jres.beta_DLA:+.2f})")
+                         jres.xi_mono_template[mono_mask], "-", color="C3",
+                         label=f"joint fit  $b_D={jres.b_DLA:+.2f}$")
             axes[1].axhline(0, color="grey", lw=0.5)
-            axes[1].set_xlabel("r [Mpc/h]"); axes[1].set_ylabel(r"$\xi^{(2)}_{\times}(r)$")
+            axes[1].axvspan(10, 40, color="grey", alpha=0.08, label="fit window")
+            axes[1].set_xlabel("r [Mpc/h]")
+            axes[1].set_ylabel(r"$\xi^{(0)}_{\times}(r)$")
             axes[1].grid(True, alpha=0.3); axes[1].legend(fontsize=9)
+            axes[1].set_title("Monopole")
+
+            # Panel 2: quadrupole
+            axes[2].plot(jres.r_centres[mono_mask],
+                         jres.xi_quad_obs[mono_mask], "s", color="C2",
+                         label=r"$\xi^{(2)}_{\times}$ obs (Hamilton)")
+            axes[2].plot(jres.r_centres[mono_mask],
+                         jres.xi_quad_template[mono_mask], "-", color="C3",
+                         label=fr"joint fit  $\beta_D={jres.beta_DLA:+.2f}$")
+            axes[2].axhline(0, color="grey", lw=0.5)
+            axes[2].axvspan(10, 40, color="grey", alpha=0.08)
+            axes[2].set_xlabel("r [Mpc/h]")
+            axes[2].set_ylabel(r"$\xi^{(2)}_{\times}(r)$")
+            axes[2].grid(True, alpha=0.3); axes[2].legend(fontsize=9)
+            axes[2].set_title("Quadrupole")
 
             fig.suptitle(f"Test 10 (rmu) — DLA × Lyα joint mono+quad  "
-                         f"z={geom.z_snap:.2f}  (N_DLA={n_dla}, b_F={b_F:+.3f})")
+                         f"z={geom.z_snap:.2f}  (N_DLA={n_dla}, b_F={b_F:+.3f})",
+                         y=1.02)
             out_png = OUT_DIR / f"test10_{args.snap}{out_tag}.png"
             fig.tight_layout()
             fig.savefig(out_png, dpi=130, bbox_inches="tight")
