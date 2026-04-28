@@ -42,10 +42,12 @@ from hcd_analysis.clustering import (
     load_sightline_geometry,
     pixel_to_xyz,
     xi_cross_dla_lya,
+    xi_cross_dla_lya_rmu,
 )
 from hcd_analysis.lya_bias import (
     find_camb_pk_for_z,
     fit_b_DLA_from_xi_cross,
+    fit_b_beta_from_xi_cross_multipoles,
     hMpc_to_kms_factor,
     load_camb_pk,
 )
@@ -81,6 +83,14 @@ def main():
     p.add_argument("--b-F", type=float, default=None,
                    help="b_F to use (default: read from test 11 JSON)")
     p.add_argument("--rng-seed", type=int, default=2026)
+    p.add_argument("--mode", choices=["rperp_rpar", "rmu"], default="rperp_rpar",
+                   help="Pair-binning + multipole-extraction scheme.  'rperp_rpar' "
+                        "(default) is the legacy monopole-only fit; 'rmu' uses (r, |μ|) "
+                        "binning + Hamilton uniform-μ multipole extraction + joint "
+                        "(b_DLA, β_DLA) fit on monopole + quadrupole.  See "
+                        "docs/clustering_multipole_jacobian_todo.md.")
+    p.add_argument("--n-mu-bins", type=int, default=20,
+                   help="Number of |μ|-bins on [0, 1] for --mode rmu (default 20).")
     args = p.parse_args()
 
     sim_dir_emu = EMU / args.sim
@@ -157,130 +167,234 @@ def main():
     pixel_axis = geom.axis[all_skewer]
     print(f"  Lyα-pixel sample size for ξ_×: {len(all_skewer):,}")
 
-    # 5) ξ_× pair count
-    t0 = time.time()
-    r_perp_edges = np.linspace(0.0, 50.0, 26)
-    r_par_edges = np.linspace(-50.0, 50.0, 51)
-    xi_signed, counts, npairs = xi_cross_dla_lya(
-        pixel_xyz=pixel_xyz, pixel_los_axis=pixel_axis,
-        pixel_delta_F=df_flat,
-        dla_xyz=dla_xyz,
-        box=geom.box,
-        r_perp_bins=r_perp_edges, r_par_bins_signed=r_par_edges,
-        chunk_size=2048,
-    )
-    print(f"  ξ_× computed in {time.time() - t0:.1f}s; "
-          f"total pairs = {npairs.sum():,}")
-    # Copilot #13: pair-count-weighted fold, not nanmean.  Pass counts
-    # and npairs so the folded ξ uses (counts_pos+counts_neg) /
-    # (npairs_pos+npairs_neg).
-    xi_folded, par_edges_abs = fold_signed_to_abs(
-        xi_signed, r_par_edges, counts=counts, npairs=npairs,
-    )
-    n_par = len(r_par_edges) - 1
-    half = n_par // 2
-    n_pair_folded = npairs[:, half:] + npairs[:, :half][:, ::-1]
-
-    # 6) Fit b_DLA from the monopole, with β_DLA self-consistency iteration.
-    perp_centres = 0.5 * (r_perp_edges[:-1] + r_perp_edges[1:])
-    par_centres_abs = 0.5 * (par_edges_abs[:-1] + par_edges_abs[1:])
+    # 5–9) Mode-specific pair count + fit + output
     camb_path = find_camb_pk_for_z(sim_dir_emu / "output", geom.z_snap)
     k_h, P_h = load_camb_pk(camb_path)
+    LIT_LO, LIT_HI = 1.5, 2.4         # Bird+14 sim → BOSS obs envelope
+    BIRD14_LIN = 1.7                   # Bird+14 linear-theory hydro prediction
+    out_tag = "" if args.mode == "rperp_rpar" else "_rmu"
 
-    # Compute f(z) ≈ Ω_m(z)^0.55  (Linder 2005 fitting form).
-    # Copilot review #12 on PR #7: read Ω_m(z=0) from the spectra
-    # HDF5 Header instead of the hardcoded 0.26.  PRIYA varies
-    # `omegamh2` and `h` across sims; using a fixed Ω_m would put
-    # f(z) off by tens of percent on extreme grid points.
-    Om0 = Om0_sim                                # from f["Header"].attrs["omegam"]
-    Om_z = Om0 * (1.0 + geom.z_snap) ** 3 / (
-        Om0 * (1.0 + geom.z_snap) ** 3 + (1.0 - Om0)
-    )
-    f_z = float(Om_z ** 0.55)
-    print(f"  f(z={geom.z_snap:.2f}) = {f_z:.3f} (Ω_m,0={Om0:.3f}); "
-          f"β_DLA iteration starts at 0.5, updates as f/b_DLA")
+    if args.mode == "rperp_rpar":
+        # ----- legacy (r_⊥, r_∥) monopole-only path -----
+        t0 = time.time()
+        r_perp_edges = np.linspace(0.0, 50.0, 26)
+        r_par_edges = np.linspace(-50.0, 50.0, 51)
+        xi_signed, counts, npairs = xi_cross_dla_lya(
+            pixel_xyz=pixel_xyz, pixel_los_axis=pixel_axis,
+            pixel_delta_F=df_flat,
+            dla_xyz=dla_xyz,
+            box=geom.box,
+            r_perp_bins=r_perp_edges, r_par_bins_signed=r_par_edges,
+            chunk_size=2048,
+        )
+        print(f"  ξ_× computed in {time.time() - t0:.1f}s; "
+              f"total pairs = {npairs.sum():,}")
+        xi_folded, par_edges_abs = fold_signed_to_abs(
+            xi_signed, r_par_edges, counts=counts, npairs=npairs,
+        )
+        n_par = len(r_par_edges) - 1
+        half = n_par // 2
+        n_pair_folded = npairs[:, half:] + npairs[:, :half][:, ::-1]
+        perp_centres = 0.5 * (r_perp_edges[:-1] + r_perp_edges[1:])
+        par_centres_abs = 0.5 * (par_edges_abs[:-1] + par_edges_abs[1:])
 
-    res = None
-    beta_DLA = 0.5
-    history = []
-    for it in range(args.beta_iter):
+        # f(z) for β_DLA self-consistency iteration
+        Om0 = Om0_sim
+        Om_z = Om0 * (1.0 + geom.z_snap) ** 3 / (
+            Om0 * (1.0 + geom.z_snap) ** 3 + (1.0 - Om0)
+        )
+        f_z = float(Om_z ** 0.55)
+        print(f"  f(z={geom.z_snap:.2f}) = {f_z:.3f} (Ω_m,0={Om0:.3f}); "
+              f"β_DLA iteration starts at 0.5, updates as f/b_DLA")
+
+        res = None
+        beta_DLA = 0.5
+        for it in range(args.beta_iter):
+            try:
+                r = fit_b_DLA_from_xi_cross(
+                    xi_2d=xi_folded, npairs_2d=n_pair_folded,
+                    r_perp_centres=perp_centres, r_par_centres=par_centres_abs,
+                    k_lin=k_h, P_lin=P_h,
+                    b_F=b_F, beta_DLA=beta_DLA, beta_F=1.5,
+                    r_min=10.0, r_max=40.0, n_r_bins=10,
+                )
+            except Exception as exc:
+                print(f"  iter {it}: fit FAILED: {exc}")
+                break
+            new_beta = f_z / max(abs(r.b_DLA), 0.1)
+            print(f"  iter {it}: β_DLA={beta_DLA:.3f} → b_DLA={r.b_DLA:+.3f} "
+                  f"± {r.b_DLA_err:.3f}; next β_DLA = f/b = {new_beta:.3f}")
+            res = r
+            if abs(new_beta - beta_DLA) < 5e-3:
+                print(f"  (converged at iter {it})")
+                break
+            beta_DLA = new_beta
+
+        if res is not None:
+            print(f"\n  Final b_DLA = {res.b_DLA:+.3f} ± {res.b_DLA_err:.3f}  "
+                  f"(β_DLA={res.beta_DLA_assumed:.3f}, K_×={res.K_cross:.3f}, "
+                  f"n_fit_bins={res.n_fit_bins})")
+
+            # Verdict + figure + JSON
+            print("\n--- Verdict ---")
+            in_range = LIT_LO <= res.b_DLA <= LIT_HI
+            delta_bird = abs(res.b_DLA - BIRD14_LIN)
+            print(f"  H10.a  b_DLA in [Bird+14 sim, FR+12 obs] envelope "
+                  f"[{LIT_LO}, {LIT_HI}] : "
+                  f"{'PASS' if in_range else 'FAIL'} ({res.b_DLA:+.3f})")
+            print(f"  H10.b  |b_DLA − Bird+2014 linear (1.7)| = {delta_bird:.3f} : "
+                  f"{'PASS' if delta_bird < res.b_DLA_err else 'review'}")
+
+            fig, ax = plt.subplots(1, 1, figsize=(7, 5))
+            ax.plot(res.r_centres, res.xi_obs, "o", color="C0", label="ξ_×^(0) obs")
+            ax.plot(res.r_centres, res.xi_template, "-", color="C3",
+                    label=f"b_DLA·b_F·K(β)·ξ_lin  (b_DLA={res.b_DLA:+.2f})")
+            ax.axhline(0, color="grey", lw=0.5)
+            ax.set_xlabel("r [Mpc/h]")
+            ax.set_ylabel(r"$\xi_{\times}^{(0)}(r)$")
+            ax.set_title(f"Test 10 — DLA × Lyα cross  z={geom.z_snap:.2f}  "
+                         f"(N_DLA={n_dla}, b_F={b_F:+.3f})")
+            ax.grid(True, alpha=0.3)
+            ax.legend(fontsize=9)
+            out_png = OUT_DIR / f"test10_{args.snap}{out_tag}.png"
+            fig.tight_layout()
+            fig.savefig(out_png, dpi=130, bbox_inches="tight")
+            print(f"\n  wrote {out_png}")
+
+        out_json = OUT_DIR / f"test10_{args.snap}{out_tag}.json"
+        summary = {
+            "mode": args.mode,
+            "sim": args.sim, "snap": args.snap, "z": float(geom.z_snap),
+            "n_dla": n_dla,
+            "b_F_assumed": float(b_F),
+            "b_DLA": float(res.b_DLA) if res is not None else None,
+            "b_DLA_err": float(res.b_DLA_err) if res is not None else None,
+            "beta_DLA_assumed": (
+                float(res.beta_DLA_assumed) if res is not None else None
+            ),
+            "in_lit_envelope": (
+                bool(LIT_LO <= res.b_DLA <= LIT_HI) if res is not None else None
+            ),
+            "delta_to_bird14_linear": (
+                float(abs(res.b_DLA - BIRD14_LIN)) if res is not None else None
+            ),
+            "lyα_pixel_subsample": int(args.xi_pixel_subsample),
+        }
+        with open(out_json, "w") as f:
+            json.dump(summary, f, indent=2)
+        print(f"  wrote {out_json}")
+
+    else:
+        # ----- (r, |μ|) Hamilton-uniform path: joint (b_DLA, β_DLA) fit -----
+        # Uses xi_cross_dla_lya_rmu + extract_multipoles_rmu inside
+        # fit_b_beta_from_xi_cross_multipoles.  See
+        # docs/clustering_multipole_jacobian_todo.md for the design.
+        t0 = time.time()
+        r_edges = np.linspace(0.0, 50.0, 26)              # 25 r-bins, 2 Mpc/h
+        mu_edges = np.linspace(0.0, 1.0, args.n_mu_bins + 1)
+        xi_rmu, _counts, npairs_rmu = xi_cross_dla_lya_rmu(
+            pixel_xyz=pixel_xyz, pixel_los_axis=pixel_axis,
+            pixel_delta_F=df_flat,
+            dla_xyz=dla_xyz,
+            box=geom.box,
+            r_bins=r_edges, mu_bins=mu_edges,
+            chunk_size=2048,
+        )
+        print(f"  ξ_× (r, |μ|) computed in {time.time() - t0:.1f}s; "
+              f"total pairs = {npairs_rmu.sum():,}; "
+              f"grid {xi_rmu.shape}")
+
+        r_centres = 0.5 * (r_edges[:-1] + r_edges[1:])
+        mu_centres = 0.5 * (mu_edges[:-1] + mu_edges[1:])
+
         try:
-            r = fit_b_DLA_from_xi_cross(
-                xi_2d=xi_folded, npairs_2d=n_pair_folded,
-                r_perp_centres=perp_centres, r_par_centres=par_centres_abs,
+            jres = fit_b_beta_from_xi_cross_multipoles(
+                xi_rmu=xi_rmu, npairs_rmu=npairs_rmu,
+                r_centres=r_centres, mu_centres=mu_centres,
                 k_lin=k_h, P_lin=P_h,
-                b_F=b_F, beta_DLA=beta_DLA, beta_F=1.5,
-                r_min=10.0, r_max=40.0, n_r_bins=10,
+                b_F=b_F, beta_F=1.5,
+                r_min=10.0, r_max=40.0,
+                b_DLA_init=2.0, beta_DLA_init=0.5,
             )
         except Exception as exc:
-            print(f"  iter {it}: fit FAILED: {exc}")
-            break
-        history.append((beta_DLA, r.b_DLA, r.b_DLA_err))
-        new_beta = f_z / max(abs(r.b_DLA), 0.1)
-        print(f"  iter {it}: β_DLA={beta_DLA:.3f} → b_DLA={r.b_DLA:+.3f} "
-              f"± {r.b_DLA_err:.3f}; next β_DLA = f/b = {new_beta:.3f}")
-        res = r
-        if abs(new_beta - beta_DLA) < 5e-3:
-            print(f"  (converged at iter {it})")
-            break
-        beta_DLA = new_beta
+            print(f"  joint fit FAILED: {exc}")
+            jres = None
 
-    if res is not None:
-        print(f"\n  Final b_DLA = {res.b_DLA:+.3f} ± {res.b_DLA_err:.3f}  "
-              f"(β_DLA={res.beta_DLA_assumed:.3f}, K_×={res.K_cross:.3f}, "
-              f"n_fit_bins={res.n_fit_bins})")
+        if jres is not None:
+            print(f"\n  Final b_DLA  = {jres.b_DLA:+.3f} ± {jres.b_DLA_err:.3f}")
+            print(f"        β_DLA  = {jres.beta_DLA:+.3f} ± {jres.beta_DLA_err:.3f}")
+            print(f"        K_0 = {jres.K_0:.3f}, K_2 = {jres.K_2:.3f}, "
+                  f"n_fit_bins = {jres.n_fit_bins}, χ² = {jres.chi2:.2f}")
 
-    # 7) Verdict
-    # Comparison envelope spans Bird+2014 hydro-sim linear theory (b ≈ 1.7)
-    # and BOSS observations (FR+2012: 2.17, Pérez-Ràfols+2018: 1.99).
-    # See docs/clustering_test10_results.md for the literature breakdown.
-    print("\n--- Verdict ---")
-    LIT_LO, LIT_HI = 1.5, 2.4         # Bird+2014 sim → BOSS obs envelope
-    BIRD14_LIN = 1.7                   # Bird+2014 linear-theory hydro prediction
-    if res is not None:
-        in_range = LIT_LO <= res.b_DLA <= LIT_HI
-        delta_bird = abs(res.b_DLA - BIRD14_LIN)
-        print(f"  H10.a  b_DLA in [Bird+14 sim, FR+2012 obs] envelope "
-              f"[{LIT_LO}, {LIT_HI}] : "
-              f"{'PASS' if in_range else 'FAIL'} ({res.b_DLA:+.3f})")
-        print(f"  H10.b  |b_DLA − Bird+2014 linear (1.7)| = {delta_bird:.3f} : "
-              f"{'PASS' if delta_bird < res.b_DLA_err else 'review'}")
+            print("\n--- Verdict (rmu mode) ---")
+            in_range = LIT_LO <= jres.b_DLA <= LIT_HI
+            delta_bird = abs(jres.b_DLA - BIRD14_LIN)
+            print(f"  H10.a  b_DLA in [{LIT_LO}, {LIT_HI}] : "
+                  f"{'PASS' if in_range else 'FAIL'} ({jres.b_DLA:+.3f})")
+            print(f"  H10.b  |b_DLA − Bird+14 (1.7)| = {delta_bird:.3f} : "
+                  f"{'PASS' if delta_bird < jres.b_DLA_err else 'review'}")
+            # β_DLA expectation: f(z=2.2)/b_DLA ≈ 0.95 / 1.7 ≈ 0.56.
+            # Tinker+10 halo bias model gives β ≈ 0.5–0.6 at z = 2.3.
+            print(f"  H10.c  β_DLA in Tinker+10 expectation [0.3, 0.8] : "
+                  f"{'PASS' if 0.3 <= jres.beta_DLA <= 0.8 else 'review'} "
+                  f"({jres.beta_DLA:+.3f})")
 
-    # 8) Figure
-    if res is not None:
-        fig, ax = plt.subplots(1, 1, figsize=(7, 5))
-        ax.plot(res.r_centres, res.xi_obs, "o", color="C0", label="ξ_×^(0) obs")
-        ax.plot(res.r_centres, res.xi_template, "-", color="C3",
-                label=f"b_DLA·b_F·K(β)·ξ_lin  (b_DLA={res.b_DLA:+.2f})")
-        ax.axhline(0, color="grey", lw=0.5)
-        ax.set_xlabel("r [Mpc/h]")
-        ax.set_ylabel(r"$\xi_{\times}^{(0)}(r)$")
-        ax.set_title(f"Test 10 — DLA × Lyα cross  z={geom.z_snap:.2f}  "
-                     f"(N_DLA={n_dla}, b_F={b_F:+.3f})")
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=9)
-        out_png = OUT_DIR / f"test10_{args.snap}.png"
-        fig.tight_layout()
-        fig.savefig(out_png, dpi=130, bbox_inches="tight")
-        print(f"\n  wrote {out_png}")
+            # Figure: monopole + quadrupole panels
+            fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+            mono_mask = (jres.r_centres >= 5) & (jres.r_centres <= 50)
+            axes[0].plot(jres.r_centres[mono_mask],
+                         jres.xi_mono_obs[mono_mask], "o", color="C0",
+                         label="ξ_×^(0) obs")
+            axes[0].plot(jres.r_centres[mono_mask],
+                         jres.xi_mono_template[mono_mask], "-", color="C3",
+                         label=f"+b_D·b_F·K_0·ξ_lin^(j0)  (b_D={jres.b_DLA:+.2f})")
+            axes[0].axhline(0, color="grey", lw=0.5)
+            axes[0].set_xlabel("r [Mpc/h]"); axes[0].set_ylabel(r"$\xi^{(0)}_{\times}(r)$")
+            axes[0].grid(True, alpha=0.3); axes[0].legend(fontsize=9)
 
-    # 9) JSON dump
-    out_json = OUT_DIR / f"test10_{args.snap}.json"
-    summary = {
-        "sim": args.sim, "snap": args.snap, "z": float(geom.z_snap),
-        "n_dla": n_dla,
-        "b_F_assumed": float(b_F),
-        "b_DLA": float(res.b_DLA) if res is not None else None,
-        "b_DLA_err": float(res.b_DLA_err) if res is not None else None,
-        "in_lit_envelope": bool(LIT_LO <= res.b_DLA <= LIT_HI) if res is not None else None,
-        "delta_to_bird14_linear": (
-            float(abs(res.b_DLA - BIRD14_LIN)) if res is not None else None
-        ),
-        "lyα_pixel_subsample": int(args.xi_pixel_subsample),
-    }
-    with open(out_json, "w") as f:
-        json.dump(summary, f, indent=2)
-    print(f"  wrote {out_json}")
+            axes[1].plot(jres.r_centres[mono_mask],
+                         jres.xi_quad_obs[mono_mask], "s", color="C2",
+                         label="ξ_×^(2) obs")
+            axes[1].plot(jres.r_centres[mono_mask],
+                         jres.xi_quad_template[mono_mask], "-", color="C3",
+                         label=f"−b_D·b_F·K_2·ξ_lin^(j2)  (β_D={jres.beta_DLA:+.2f})")
+            axes[1].axhline(0, color="grey", lw=0.5)
+            axes[1].set_xlabel("r [Mpc/h]"); axes[1].set_ylabel(r"$\xi^{(2)}_{\times}(r)$")
+            axes[1].grid(True, alpha=0.3); axes[1].legend(fontsize=9)
+
+            fig.suptitle(f"Test 10 (rmu) — DLA × Lyα joint mono+quad  "
+                         f"z={geom.z_snap:.2f}  (N_DLA={n_dla}, b_F={b_F:+.3f})")
+            out_png = OUT_DIR / f"test10_{args.snap}{out_tag}.png"
+            fig.tight_layout()
+            fig.savefig(out_png, dpi=130, bbox_inches="tight")
+            print(f"\n  wrote {out_png}")
+
+        out_json = OUT_DIR / f"test10_{args.snap}{out_tag}.json"
+        summary = {
+            "mode": args.mode,
+            "sim": args.sim, "snap": args.snap, "z": float(geom.z_snap),
+            "n_dla": n_dla,
+            "b_F_assumed": float(b_F),
+            "b_DLA": float(jres.b_DLA) if jres is not None else None,
+            "b_DLA_err": float(jres.b_DLA_err) if jres is not None else None,
+            "beta_DLA": float(jres.beta_DLA) if jres is not None else None,
+            "beta_DLA_err": float(jres.beta_DLA_err) if jres is not None else None,
+            "K_0": float(jres.K_0) if jres is not None else None,
+            "K_2": float(jres.K_2) if jres is not None else None,
+            "chi2": float(jres.chi2) if jres is not None else None,
+            "n_fit_bins": int(jres.n_fit_bins) if jres is not None else None,
+            "in_lit_envelope": (
+                bool(LIT_LO <= jres.b_DLA <= LIT_HI) if jres is not None else None
+            ),
+            "delta_to_bird14_linear": (
+                float(abs(jres.b_DLA - BIRD14_LIN)) if jres is not None else None
+            ),
+            "lyα_pixel_subsample": int(args.xi_pixel_subsample),
+            "n_mu_bins": int(args.n_mu_bins),
+        }
+        with open(out_json, "w") as f:
+            json.dump(summary, f, indent=2)
+        print(f"  wrote {out_json}")
 
 
 if __name__ == "__main__":

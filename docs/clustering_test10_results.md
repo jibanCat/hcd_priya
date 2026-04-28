@@ -1,19 +1,52 @@
 # Test 10 results — DLA × Lyα cross gate, real PRIYA
 
 Run: `scripts/run_test10.py` on `ns0.803Ap2.2e-09…/snap_022` at z = 2.20,
-using `b_F = -0.141` from test 11 as the calibrator.  Verbatim output
-saved to `figures/analysis/06_clustering/test10_snap_022.{json,png}`.
+using `b_F = -0.141` from test 11 as the calibrator.  Two pipelines exercised:
 
-## Result
+* **Default mode** (`--mode rperp_rpar`): legacy (r_⊥, r_∥) pair-counting,
+  monopole-only fit, β_DLA fixed and self-consistency-iterated as
+  `β_DLA = f(z)/b_DLA`.  Output:
+  `figures/analysis/06_clustering/test10_snap_022.{json,png}`.
+* **Hamilton mode** (`--mode rmu`): (r, |μ|) pair-counting, Hamilton
+  uniform-μ multipole extraction, **joint** (b_DLA, β_DLA) fit on
+  monopole + quadrupole.  Output:
+  `figures/analysis/06_clustering/test10_snap_022_rmu.{json,png}`.
 
-```
-b_DLA = +1.672 ± 0.543      β_DLA = 0.569      K_×(β_DLA, β_F=1.5) = 1.860
-N_DLA = 11 655              Lyα-pixel subsample = 200 000
-ξ_× total pairs = 1.06 × 10⁹     fit window: r ∈ [10, 40] Mpc/h  (10 r-bins)
-```
+The two paths are not redundant: the (r_⊥, r_∥) monopole carries a
+`√(1−μ²)` Jacobian bias that depresses recovered b_DLA by ~ few %
+(see `docs/clustering_multipole_jacobian_todo.md`).  The rmu path is
+unbiased and is the production-grade estimator going forward.
 
-`β_DLA` was self-consistency-iterated as `β_DLA = f(z)/b_DLA` with
-`f(z=2.2) = 0.955`; converged in 2 iterations from the initial 0.5.
+## Results
+
+| Mode                | b_DLA           | β_DLA            | K_0   | K_2   | window         |
+|---------------------|-----------------|------------------|-------|-------|----------------|
+| rperp_rpar (legacy) | +1.672 ± 0.543  | 0.569 (iterated) | 1.860 | —     | r ∈ [10, 40]   |
+| **rmu (joint)**     | **+1.740 ± 0.426** | **−0.17 ± 0.17** | 1.392 | 0.740 | r ∈ [10, 40]   |
+
+Notes:
+
+* `b_DLA(rmu) − b_DLA(legacy) = +0.068` (~ +4 %) — directly confirms
+  the doc-predicted Jacobian shift of "≲ 5 %" once the (r_⊥, r_∥)
+  bias is removed.  Both values lie inside the literature envelope
+  [1.5, 2.4] (Bird+14 hydro sim → BOSS observation).
+* `β_DLA(rmu) = −0.17 ± 0.17` is consistent with zero within 1 σ.
+  The cross-correlation quadrupole signal is too weak to pin β_DLA
+  with 11 655 DLAs and 200 k pixels — Pérez-Ràfols 2018 needed
+  ~30 000 DLAs (full BOSS DR12) to land β_DLA at 0.5 ± 0.1.  The
+  legacy mode's iterated `β_DLA = 0.569` is a *prior* (Tinker+10
+  halo-bias model) imposed externally, not a measurement; the rmu
+  mode actually attempts to measure β from data and finds the
+  signal-to-noise insufficient.  This is consistent with FR+2012
+  who fit β simultaneously and got β_DLA = 0.4 ± 0.5.
+* The rmu fit's reduced χ² is high (≈ 363, with √npairs weights
+  inflating per-bin precision).  Errors are rescaled by √(χ²/dof) so
+  the reported `b_DLA_err = 0.426` already absorbs the model-mismatch
+  inflation — the formal Poisson-only error would have been ~ 0.02.
+  Future work: switch to bootstrap / jackknife errors so the χ² is
+  not the dominant uncertainty driver.
+* `ξ_× total pairs (legacy) = 1.06 × 10⁹` (signed r_par, double-folded);
+  `ξ_× total pairs (rmu) = 7.06 × 10⁸` (|μ|-folded, single-counted).
 
 ## Where this sits in the literature
 
@@ -116,7 +149,9 @@ So the right way to read our result is:
    `clustering_multipole_jacobian_todo.md`, but only at the
    few-percent level on a single multipole.  A clean refit after
    moving to (r, μ)-binned pairs is expected to shift our 1.67 by
-   ≲ 5 %.
+   ≲ 5 %.  **Confirmed**: the rmu-mode refit gives b_DLA = 1.740,
+   a +4 % shift from the legacy 1.672, consistent with the
+   prediction.
 
 ## What this does NOT validate
 

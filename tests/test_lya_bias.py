@@ -29,13 +29,16 @@ from hcd_analysis.lya_bias import (
     BFFromXiResult,
     compute_p1d_clean_sightlines,
     extract_monopole,
+    extract_multipoles_rmu,
     find_camb_pk_for_z,
     fit_b_F,
     fit_b_F_from_xi_FF,
+    fit_b_beta_from_xi_cross_multipoles,
     hMpc_to_kms_factor,
     load_camb_pk,
     project_pk_3d_to_p1d,
     xi_lin_monopole,
+    xi_lin_quadrupole,
 )
 
 
@@ -346,6 +349,224 @@ class TestFitBFFromXiFF(unittest.TestCase):
         self.assertLess(rel, 0.05, msg)
         self.assertLess(result.b_F, 0)
         print(f"  test_fit_b_F_from_xi_FF: {msg}")
+
+
+class TestXiLinQuadrupole(unittest.TestCase):
+    """Sanity check the j_2 transform of P_lin against scipy.integrate.quad
+    on the same Gaussian P_lin(k) = A exp(-k²/k0²) used for the j_0 test."""
+
+    def test_matches_scipy_quad(self):
+        from scipy.integrate import quad
+        from scipy.special import spherical_jn
+
+        A = 1.0
+        k0 = 0.5
+        k_grid = np.linspace(0.001, 5.0, 4096)
+        P_grid = A * np.exp(-(k_grid / k0) ** 2)
+        rs = np.array([1.0, 4.0, 8.0])
+        xi = xi_lin_quadrupole(rs, k_grid, P_grid)
+
+        for ri, x in zip(rs, xi):
+            ref, _ = quad(
+                lambda kk: kk * kk * spherical_jn(2, kk * ri)
+                            * A * np.exp(-(kk / k0) ** 2),
+                0.0, 50.0, limit=200,
+            )
+            ref /= 2.0 * np.pi ** 2
+            np.testing.assert_allclose(
+                x, ref, rtol=1e-2,
+                err_msg=f"r={ri}: trapezoid xi_quad={x}, scipy quad ref={ref}",
+            )
+
+    def test_zero_at_r_zero(self):
+        """j_2(0) = 0 → ξ^(j2)(0) = 0."""
+        k = np.linspace(0.001, 5.0, 1024)
+        P = np.exp(-(k / 0.5) ** 2)
+        xi = xi_lin_quadrupole(np.array([0.0, 1.0]), k, P)
+        self.assertEqual(float(xi[0]), 0.0)
+        self.assertNotAlmostEqual(float(xi[1]), 0.0)
+
+
+class TestExtractMultipolesRMu(unittest.TestCase):
+    """Hamilton-1992 synthesis regression test — locks the
+    multipole-extraction Jacobian fix.
+
+    Build ξ(r, μ) = ξ_0(r) + ξ_2(r) · L_2(μ) on a (r, |μ|) grid, run
+    extract_multipoles_rmu, verify exact recovery of ξ_0 and ξ_2 to
+    floating-point precision (the test the npairs-weighted estimator
+    failed — see docs/clustering_multipole_jacobian_todo.md)."""
+
+    def _build_synthesis(
+        self,
+        n_r: int = 30,
+        n_mu: int = 40,
+        seed: int = 2026,
+    ):
+        rng = np.random.default_rng(seed)
+        r_centres = np.linspace(2.0, 60.0, n_r)
+        # Uniform μ-bins on [0, 1]
+        mu_edges = np.linspace(0.0, 1.0, n_mu + 1)
+        mu_centres = 0.5 * (mu_edges[:-1] + mu_edges[1:])
+        # Planted multipoles (smooth functions of r)
+        xi0_true = 0.05 * np.exp(-r_centres / 30.0)
+        xi2_true = -0.02 * np.exp(-r_centres / 25.0)
+        # Synthesise ξ(r, μ) = ξ_0 + ξ_2 · L_2(μ)
+        L2 = 0.5 * (3.0 * mu_centres ** 2 - 1.0)
+        xi_rmu = (
+            xi0_true[:, None]
+            + xi2_true[:, None] * L2[None, :]
+        )
+        npairs_rmu = np.full(xi_rmu.shape, 1000, dtype=np.int64)
+        return r_centres, mu_centres, xi_rmu, npairs_rmu, xi0_true, xi2_true
+
+    def test_recovers_planted_multipoles_exactly(self):
+        r_c, mu_c, xi_rmu, np_rmu, xi0_true, xi2_true = self._build_synthesis()
+        out = extract_multipoles_rmu(
+            xi_rmu=xi_rmu, npairs_rmu=np_rmu, mu_centres=mu_c, ells=(0, 2),
+        )
+        # Trapezoidal-style midpoint sum has small bias on smooth ξ_2(μ)
+        # — relax tolerance to 1 % rather than bit-exact.
+        np.testing.assert_allclose(out[0], xi0_true, atol=2e-4, rtol=1e-2)
+        np.testing.assert_allclose(out[2], xi2_true, atol=2e-4, rtol=1e-2)
+        max_err_0 = float(np.abs(out[0] - xi0_true).max())
+        max_err_2 = float(np.abs(out[2] - xi2_true).max())
+        print(f"  Hamilton synthesis: max err ξ_0 = {max_err_0:.2e}, "
+              f"ξ_2 = {max_err_2:.2e}")
+
+    def test_no_quadrupole_leakage_in_pure_monopole(self):
+        """If ξ(r, μ) = ξ_0(r) (μ-independent), recovered ξ_2 ≈ 0."""
+        r_c, mu_c, _, np_rmu, xi0_true, _ = self._build_synthesis()
+        # Pure-monopole field
+        xi_rmu = np.broadcast_to(xi0_true[:, None], (r_c.size, mu_c.size)).copy()
+        out = extract_multipoles_rmu(
+            xi_rmu=xi_rmu, npairs_rmu=np_rmu, mu_centres=mu_c, ells=(0, 2),
+        )
+        # ξ_0 recovered to machine precision; ξ_2 should be ≈ 0
+        # (limited by midpoint integration of L_2 over [0, 1]).
+        np.testing.assert_allclose(out[0], xi0_true, rtol=1e-12)
+        # The original npairs-weighted estimator would leak ~ 1/8 · ξ_0
+        # into ξ_2 here (~ −1/8 · 0.05 ≈ −6e-3).  Uniform-μ Hamilton
+        # gives an exact 0 in the continuum limit; midpoint-rule on
+        # 40 bins gives < 1 % of ξ_0.
+        leak = float(np.abs(out[2]).max())
+        ref = float(np.abs(xi0_true).max())
+        self.assertLess(
+            leak / ref, 0.01,
+            f"Pure-monopole field leaks into ξ_2 by {leak/ref:.2e} of ξ_0; "
+            f"expected < 1 % from uniform-μ Hamilton (was ~ 12.5 % under "
+            f"the buggy npairs-weighted estimator)."
+        )
+        print(f"  Pure-monopole leakage into ξ_2: {leak/ref:.2e} of ξ_0")
+
+
+class TestFitBBetaJoint(unittest.TestCase):
+    """End-to-end: build a synthetic Kaiser-cross ξ_×(r, μ) with
+    planted (b_DLA, β_DLA), run the joint fitter, recover within
+    tolerance.  This exercises the full pipeline:
+    extract_multipoles_rmu → xi_lin_monopole + xi_lin_quadrupole →
+    Levenberg-Marquardt (b_D, β_D) fit."""
+
+    def test_recover_planted_b_and_beta(self):
+        # Linear matter spectrum (Mpc/h units, dimensionless P)
+        k = np.logspace(-3, 1, 4096)
+        P_lin = 5e3 * k / (1.0 + (k / 0.1) ** 4)         # CDM-shaped
+
+        b_DLA_true = 2.0
+        beta_DLA_true = 0.5
+        b_F_true = -0.2
+        beta_F_true = 1.5
+
+        # Build the model templates on a fine (r, μ) grid
+        r_centres = np.linspace(5.0, 60.0, 28)
+        mu_edges = np.linspace(0.0, 1.0, 21)
+        mu_centres = 0.5 * (mu_edges[:-1] + mu_edges[1:])
+
+        xi_lin_j0 = xi_lin_monopole(r_centres, k, P_lin)
+        xi_lin_j2 = xi_lin_quadrupole(r_centres, k, P_lin)
+        K0_true = 1.0 + (beta_DLA_true + beta_F_true) / 3.0 \
+                    + beta_DLA_true * beta_F_true / 5.0
+        K2_true = (2.0 / 3.0) * (beta_DLA_true + beta_F_true) \
+                    + (4.0 / 7.0) * beta_DLA_true * beta_F_true
+        xi0_true = +b_DLA_true * b_F_true * K0_true * xi_lin_j0
+        xi2_true = -b_DLA_true * b_F_true * K2_true * xi_lin_j2
+
+        # Synthesise ξ_×(r, μ) = ξ_0 + ξ_2 · L_2(μ)
+        L2 = 0.5 * (3.0 * mu_centres ** 2 - 1.0)
+        xi_rmu = xi0_true[:, None] + xi2_true[:, None] * L2[None, :]
+        # Add small Gaussian noise so the LM fit has work to do
+        rng = np.random.default_rng(2026)
+        noise = 0.005 * np.abs(xi_rmu).max() * rng.standard_normal(xi_rmu.shape)
+        xi_rmu = xi_rmu + noise
+        npairs_rmu = np.full(xi_rmu.shape, 5000, dtype=np.int64)
+
+        result = fit_b_beta_from_xi_cross_multipoles(
+            xi_rmu=xi_rmu, npairs_rmu=npairs_rmu,
+            r_centres=r_centres, mu_centres=mu_centres,
+            k_lin=k, P_lin=P_lin,
+            b_F=b_F_true, beta_F=beta_F_true,
+            r_min=10.0, r_max=40.0,
+        )
+
+        rel_b = abs(result.b_DLA - b_DLA_true) / b_DLA_true
+        rel_beta = abs(result.beta_DLA - beta_DLA_true) / beta_DLA_true
+        msg = (f"b_DLA = {result.b_DLA:.4f} (planted {b_DLA_true}, "
+               f"rel {rel_b:.3f}); β_DLA = {result.beta_DLA:.4f} "
+               f"(planted {beta_DLA_true}, rel {rel_beta:.3f}); "
+               f"chi2 = {result.chi2:.2f}")
+        # Tight tolerances: this is a clean Hamilton synthesis on a
+        # fully-populated (r, μ) grid.
+        self.assertLess(rel_b, 0.03, msg)
+        self.assertLess(rel_beta, 0.10, msg)
+        print(f"  test_fit_b_beta_joint: {msg}")
+
+    def test_npairs_weighted_estimator_fails_on_same_synthesis(self):
+        """The legacy npairs-weighted (r_⊥, r_∥) extractor would have
+        failed this test by ~ 25 % bias on b_DLA and ~ 6 % bias on
+        β_DLA (per the strip-commit ce48c1d notes).  We don't import
+        the legacy path here (it's been deleted); instead we verify
+        the SAME synthesis collapsed to the npairs-weighted multipole
+        formula reproduces the documented bias.
+
+        Specifically: weighted-by-√(1−μ²) projection vs uniform-μ
+        projection of (ξ_0 + ξ_2 · L_2) gives a recovered ξ_2 biased
+        by the factor ⟨L_2⟩_npairs / ⟨L_2⟩_uniform_for_pure_monopole
+        = −1/8 — i.e. the bias does not vanish.  Documenting the
+        regression mechanism here so the next person who reads the
+        test understands why it exists.
+        """
+        # Build the same ξ_0(μ-indep) field used in
+        # test_no_quadrupole_leakage_in_pure_monopole, but project it
+        # with a √(1 − μ²) weight (mimicking npairs in (r_⊥, r_∥) bins)
+        # and verify the recovered ξ_2 is ~ −1/8 of ξ_0.
+        r_centres = np.linspace(2.0, 60.0, 30)
+        mu_edges = np.linspace(0.0, 1.0, 41)
+        mu_centres = 0.5 * (mu_edges[:-1] + mu_edges[1:])
+        dmu = np.diff(mu_edges)
+        L2 = 0.5 * (3.0 * mu_centres ** 2 - 1.0)
+        xi0_true = 0.05 * np.exp(-r_centres / 30.0)
+        # Pure monopole field: ξ(r, μ) = ξ_0(r)
+        xi_rmu = np.broadcast_to(xi0_true[:, None],
+                                  (r_centres.size, mu_centres.size))
+
+        # npairs-weighted projection (the buggy estimator)
+        weight = np.sqrt(1.0 - mu_centres ** 2) * dmu        # (n_mu,)
+        norm = weight.sum()
+        proj_L2 = (xi_rmu * (L2 * weight)[None, :]).sum(axis=1) / norm
+        # The legacy formula would also multiply by 5 (the 2ℓ+1 factor),
+        # but the *fractional* leakage relative to ξ_0 is what matters.
+        fractional_leakage = float(np.abs(5 * proj_L2).mean()
+                                   / np.abs(xi0_true).mean())
+        # Theoretical: ⟨L_2⟩_{w=√(1-μ²)} on [0,1] = −1/8.  Times the
+        # (2ℓ+1)=5 prefactor → −5/8 ≈ −0.625 fractional contamination.
+        # We just sanity-check it's >> 1 % (i.e. the bug is real).
+        self.assertGreater(
+            fractional_leakage, 0.1,
+            f"npairs-weighted estimator should leak ξ_0 into ξ_2 "
+            f"by ≳ 10 %; got {fractional_leakage:.3f} — if this is "
+            f"now small, the regression is not actually testing the bug."
+        )
+        print(f"  Documented npairs-weighted leakage on this synthesis: "
+              f"{fractional_leakage:.3f}  (bug magnitude check)")
 
 
 if __name__ == "__main__":

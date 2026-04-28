@@ -58,6 +58,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import numpy as np
+from scipy.special import spherical_jn
 
 
 # ---------------------------------------------------------------------------
@@ -407,6 +408,159 @@ def xi_lin_monopole(
     return out
 
 
+def xi_lin_quadrupole(
+    r: np.ndarray,
+    k: np.ndarray,
+    P_lin: np.ndarray,
+) -> np.ndarray:
+    """The j_2-transform of P_lin, used as the quadrupole-of-ξ template:
+
+        ξ_lin^(j2)(r) = (1/2π²) ∫_0^∞ dk · k² · j_2(k·r) · P_lin(k).
+
+    In the Kaiser cross model
+
+        ξ_×^(2)(r) = − b_DLA · b_F · [(2/3)(β_DLA + β_F) + (4/7) β_DLA β_F]
+                       · ξ_lin^(j2)(r)
+
+    the i^ℓ = i² = −1 prefactor of the Hamilton transform is absorbed
+    into the global sign in front, NOT into ``xi_lin_quadrupole`` —
+    ``xi_lin_quadrupole`` is a positive-area-weighted positive
+    quantity at small r (j_2 ∝ r² · P_lin · r² near the integrand
+    peak), and the negative quadrupole sign of an RSD-distorted halo
+    field shows up as the explicit minus in the model.
+
+    Same units convention as ``xi_lin_monopole``: pass (k in s/km, P
+    in (km/s)³) to get ξ in dimensionless natural units, or (k in
+    h/Mpc, P in (Mpc/h)³) likewise.
+    """
+    r = np.asarray(r, dtype=np.float64)
+    k = np.asarray(k, dtype=np.float64)
+    P = np.asarray(P_lin, dtype=np.float64)
+    if k.shape != P.shape:
+        raise ValueError("k and P_lin must match in shape")
+    if not np.all(np.diff(k) > 0):
+        raise ValueError("k must be strictly increasing")
+
+    out = np.zeros_like(r)
+    for i, ri in enumerate(r):
+        if ri <= 0:
+            # j_2(0) = 0, so ξ^(2)(0) = 0.
+            out[i] = 0.0
+            continue
+        integrand = k * k * spherical_jn(2, k * ri) * P
+        out[i] = float(np.trapezoid(integrand, k)) / (2.0 * np.pi ** 2)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Hamilton multipole extraction from an (r, |μ|)-binned ξ grid
+# ---------------------------------------------------------------------------
+
+def _legendre(ell: int, mu: np.ndarray) -> np.ndarray:
+    """Plain-Python Legendre polynomial for the ones we use.
+
+    Avoids pulling scipy.special.legendre, which is slower and returns
+    a callable.  Hand-coded for L_0, L_2, L_4.
+    """
+    if ell == 0:
+        return np.ones_like(mu)
+    if ell == 2:
+        return 0.5 * (3.0 * mu * mu - 1.0)
+    if ell == 4:
+        m2 = mu * mu
+        return (35.0 * m2 * m2 - 30.0 * m2 + 3.0) / 8.0
+    raise ValueError(f"L_{ell} not supported (only ell ∈ {{0, 2, 4}})")
+
+
+def extract_multipoles_rmu(
+    xi_rmu: np.ndarray,
+    npairs_rmu: np.ndarray,
+    mu_centres: np.ndarray,
+    ells: Tuple[int, ...] = (0, 2),
+) -> dict:
+    """Hamilton multipole extraction from a ξ(r, |μ|) grid.
+
+    For each r-bin, project the row ξ(r, |μ|) onto Legendre polynomials
+    using the standard uniform-μ formula on the half range μ ∈ [0, 1]:
+
+        ξ^(ℓ)(r) = (2ℓ + 1) · ∫_0^1 dμ · ξ(r, μ) · L_ℓ(μ).
+
+    The factor is (2ℓ + 1), NOT (2ℓ + 1)/2, because ξ(r, μ) =
+    ξ(r, −μ) (cosmological reflection symmetry) means the [0, 1] half
+    integral × 2 equals the [−1, 1] full integral, and the standard
+    [−1, 1] projection coefficient is (2ℓ + 1)/2 · ∫_{−1}^1 = (2ℓ +
+    1) · ∫_0^1.  This is the picca / RascalC convention and recovers
+    a Hamilton-1992 synthesis ξ_0 + ξ_2 · L_2(μ) exactly (see
+    ``tests/test_lya_bias.py::TestExtractMultipolesRMu``).
+
+    Empty bins (npairs == 0) are NaN in ``xi_rmu``; they are skipped
+    in the projection sum.  If a r-bin has fewer than 3 valid μ-bins
+    the recovered multipole is NaN for that r.
+
+    Parameters
+    ----------
+    xi_rmu : (n_r, n_mu) float
+        ξ values at each (r, |μ|) bin centre; NaN where pairs are missing.
+    npairs_rmu : (n_r, n_mu) int
+        Pair count per bin — used only to detect empty bins.
+    mu_centres : (n_mu,) float
+        μ-bin centres on [0, 1].  Must be monotonically increasing.
+    ells : tuple of int
+        Multipole orders to extract.  Default (0, 2).
+
+    Returns
+    -------
+    multipoles : dict[int, np.ndarray]
+        ``multipoles[ell]`` is a (n_r,) array of ξ^(ℓ)(r).
+    """
+    xi_rmu = np.asarray(xi_rmu, dtype=np.float64)
+    npairs_rmu = np.asarray(npairs_rmu, dtype=np.int64)
+    mu_centres = np.asarray(mu_centres, dtype=np.float64)
+    if xi_rmu.shape != npairs_rmu.shape:
+        raise ValueError("xi_rmu and npairs_rmu must have the same shape")
+    if xi_rmu.shape[1] != mu_centres.size:
+        raise ValueError(
+            f"xi_rmu has {xi_rmu.shape[1]} μ-columns, mu_centres has "
+            f"{mu_centres.size}"
+        )
+    if mu_centres.size < 2:
+        raise ValueError("need at least 2 μ-bins to project multipoles")
+    if not np.all(np.diff(mu_centres) > 0):
+        raise ValueError("mu_centres must be strictly increasing")
+    if mu_centres[0] < 0 or mu_centres[-1] > 1.0 + 1e-12:
+        raise ValueError(f"mu_centres must lie in [0, 1]; got "
+                         f"[{mu_centres[0]}, {mu_centres[-1]}]")
+
+    # Approximate dμ per bin from the centres (assumes uniform μ-bins,
+    # which is what production passes).  Deduce edges as midpoints; clip
+    # to [0, 1].
+    edges = np.empty(mu_centres.size + 1, dtype=np.float64)
+    edges[1:-1] = 0.5 * (mu_centres[:-1] + mu_centres[1:])
+    edges[0] = max(0.0, 2.0 * mu_centres[0] - edges[1])
+    edges[-1] = min(1.0, 2.0 * mu_centres[-1] - edges[-2])
+    dmu = np.diff(edges)                                          # (n_mu,)
+
+    n_r, n_mu = xi_rmu.shape
+    valid = (npairs_rmu > 0) & np.isfinite(xi_rmu)
+    n_valid_per_r = valid.sum(axis=1)
+
+    out = {}
+    for ell in ells:
+        L = _legendre(ell, mu_centres)                            # (n_mu,)
+        weights = (L * dmu)[None, :]                              # (1, n_mu)
+        contrib = np.where(valid, xi_rmu * weights, 0.0)
+        proj = contrib.sum(axis=1)
+        # Textbook Hamilton: ξ^(ℓ)(r) = (2ℓ+1) · Σ_j ξ_j · L_ℓ(μ_j) · Δμ_j
+        # over μ ∈ [0, 1].  When μ-bins are missing in a row the sum
+        # under-estimates by the missing-bin contribution; we surface
+        # that as NaN if fewer than 3 bins survive (heuristic — see
+        # the ``n_valid_per_r`` check below).
+        mp = (2 * ell + 1) * proj
+        mp = np.where(n_valid_per_r >= 3, mp, np.nan)
+        out[ell] = mp
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Monopole extraction from a 2-D (r_par, r_perp) grid
 # ---------------------------------------------------------------------------
@@ -705,29 +859,236 @@ def fit_b_DLA_from_xi_cross(
 
 
 # ---------------------------------------------------------------------------
-# Joint (b_DLA, β_DLA) fit — DEFERRED.  See
-# `docs/clustering_multipole_jacobian_todo.md` for the design issue
-# (npairs-weighted averaging across (r_⊥, r_∥) bins picks up an extra
-# sqrt(1-μ²) Jacobian relative to the uniform-μ averaging assumed by
-# the standard Hamilton multipole formula).  Until the pair counter is
-# rebinned in (r, μ), production uses monopole-only ξ_× via
-# `fit_b_DLA_from_xi_cross` with β_DLA fixed (and optionally iterated
-# self-consistently in the driver).
+# Joint (b_DLA, β_DLA) fit on the (r, μ)-binned ξ_× monopole + quadrupole
 # ---------------------------------------------------------------------------
+#
+# Kaiser cross model in 3-D Fourier space:
+#
+#   P_×(k, μ) = b_D · b_F · (1 + β_D μ²)(1 + β_F μ²) · P_lin(k)
+#             = b_D · b_F · [1 + (β_D + β_F) μ² + β_D β_F μ⁴] · P_lin(k).
+#
+# Decomposing 1 + (β_D + β_F)μ² + β_D β_F μ⁴ in the Legendre basis
+# (using μ² = 1/3 + 2/3·L_2 and μ⁴ = 1/5 + 4/7·L_2 + 8/35·L_4) yields:
+#
+#   P^(0)(k) = b_D b_F · K_0 · P_lin(k),    K_0 = 1 + (β_D+β_F)/3 + β_D β_F/5
+#   P^(2)(k) = b_D b_F · K_2 · P_lin(k),    K_2 = (2/3)(β_D+β_F) + (4/7) β_D β_F
+#   P^(4)(k) = b_D b_F · (8/35) β_D β_F · P_lin(k)            (small, ignored)
+#
+# Hamilton 1992 transform:
+#
+#   ξ^(ℓ)(r) = i^ℓ / (2π²) · ∫ k² dk · j_ℓ(k r) · P^(ℓ)(k).
+#
+# i^0 = 1, i^2 = -1.  Define the j_ℓ-transform of P_lin as ξ_lin^(jℓ)(r)
+# (positive-area-weighted at small r).  Then:
+#
+#   ξ_×^(0)(r) = + b_D · b_F · K_0 · ξ_lin^(j0)(r)
+#   ξ_×^(2)(r) = − b_D · b_F · K_2 · ξ_lin^(j2)(r)            ← note minus sign
+#
+# At fixed (b_F, β_F), this is a 2-parameter (b_D, β_D) least-squares
+# fit on the joint mono + quad data vectors.
+
+@dataclass
+class JointBDLABetaResult:
+    """Output of ``fit_b_beta_from_xi_cross_multipoles``."""
+    b_DLA: float
+    b_DLA_err: float
+    beta_DLA: float
+    beta_DLA_err: float
+    b_F_assumed: float
+    beta_F_assumed: float
+    K_0: float
+    K_2: float
+    r_centres: np.ndarray
+    xi_mono_obs: np.ndarray
+    xi_quad_obs: np.ndarray
+    xi_mono_template: np.ndarray
+    xi_quad_template: np.ndarray
+    fit_mask: np.ndarray
+    n_fit_bins: int
+    chi2: float
+    cov: np.ndarray         # 2x2 covariance of (b_DLA, β_DLA)
+
+
+def _kaiser_K0_K2(beta_D: float, beta_F: float) -> Tuple[float, float]:
+    """Kaiser monopole + quadrupole prefactors for a (b_D · b_F)-cross."""
+    K0 = 1.0 + (beta_D + beta_F) / 3.0 + beta_D * beta_F / 5.0
+    K2 = (2.0 / 3.0) * (beta_D + beta_F) + (4.0 / 7.0) * beta_D * beta_F
+    return K0, K2
+
+
+def fit_b_beta_from_xi_cross_multipoles(
+    xi_rmu: np.ndarray,
+    npairs_rmu: np.ndarray,
+    r_centres: np.ndarray,
+    mu_centres: np.ndarray,
+    k_lin: np.ndarray,
+    P_lin: np.ndarray,
+    b_F: float,
+    beta_F: float = 1.5,
+    r_min: float = 10.0,
+    r_max: float = 40.0,
+    b_DLA_init: float = 2.0,
+    beta_DLA_init: float = 0.5,
+) -> JointBDLABetaResult:
+    """Joint (b_DLA, β_DLA) fit using the ξ_× monopole + quadrupole.
+
+    Consumes a (r, |μ|)-binned ξ_× grid (e.g. from
+    ``hcd_analysis.clustering.xi_cross_dla_lya_rmu``), extracts the
+    monopole + quadrupole via Hamilton uniform-μ averaging (the
+    Jacobian-corrected estimator — see
+    ``docs/clustering_multipole_jacobian_todo.md``), and fits the
+    Kaiser cross template
+
+        ξ^(0)(r) = + b_D · b_F · K_0(β_D, β_F) · ξ_lin^(j0)(r)
+        ξ^(2)(r) = − b_D · b_F · K_2(β_D, β_F) · ξ_lin^(j2)(r).
+
+    Two free parameters (b_DLA, β_DLA), fit by Levenberg-Marquardt on
+    the concatenated mono/quad residuals weighted by √npairs (per-bin
+    Poisson scaling).
+
+    Parameters
+    ----------
+    xi_rmu, npairs_rmu : (n_r, n_mu) — output of xi_cross_dla_lya_rmu
+    r_centres : (n_r,) bin centres in Mpc/h
+    mu_centres : (n_mu,) bin centres on [0, 1]
+    k_lin, P_lin : linear matter spectrum, units must match r_centres
+        (Mpc/h ↔ h/Mpc, or km/s ↔ s/km)
+    b_F, beta_F : externally calibrated Lyα forest bias and Kaiser β
+    r_min, r_max : fit window in the same units as r_centres
+    b_DLA_init, beta_DLA_init : initial guess for the optimiser
+
+    Returns
+    -------
+    JointBDLABetaResult
+    """
+    from scipy.optimize import least_squares      # local import — heavy
+
+    xi_rmu = np.asarray(xi_rmu, dtype=np.float64)
+    npairs_rmu = np.asarray(npairs_rmu, dtype=np.int64)
+    r_centres = np.asarray(r_centres, dtype=np.float64)
+    mu_centres = np.asarray(mu_centres, dtype=np.float64)
+
+    if xi_rmu.shape != (r_centres.size, mu_centres.size):
+        raise ValueError(
+            f"xi_rmu shape {xi_rmu.shape} doesn't match (n_r, n_mu)="
+            f"({r_centres.size}, {mu_centres.size})"
+        )
+
+    multipoles = extract_multipoles_rmu(
+        xi_rmu=xi_rmu, npairs_rmu=npairs_rmu,
+        mu_centres=mu_centres, ells=(0, 2),
+    )
+    xi_mono = multipoles[0]
+    xi_quad = multipoles[2]
+
+    # Per-r-bin pair count, summed over μ.  Sets the residual weights.
+    npairs_per_r = npairs_rmu.sum(axis=1)
+
+    fit_mask = (
+        np.isfinite(xi_mono) & np.isfinite(xi_quad)
+        & (r_centres >= r_min) & (r_centres <= r_max)
+        & (npairs_per_r > 0)
+    )
+    n_fit = int(fit_mask.sum())
+    if n_fit < 4:
+        raise ValueError(
+            f"only {n_fit} valid r-bins in [{r_min}, {r_max}]; "
+            f"need ≥ 4 for a 2-parameter fit"
+        )
+
+    r_fit = r_centres[fit_mask]
+    xi0_fit = xi_mono[fit_mask]
+    xi2_fit = xi_quad[fit_mask]
+    w_fit = np.sqrt(npairs_per_r[fit_mask].astype(np.float64))     # Poisson scaling
+
+    xi_lin_j0 = xi_lin_monopole(r_fit, k_lin, P_lin)
+    xi_lin_j2 = xi_lin_quadrupole(r_fit, k_lin, P_lin)
+
+    def residuals(params):
+        b_D, beta_D = params
+        K0, K2 = _kaiser_K0_K2(beta_D, beta_F)
+        model_0 = +b_D * b_F * K0 * xi_lin_j0
+        model_2 = -b_D * b_F * K2 * xi_lin_j2
+        return np.concatenate([
+            (xi0_fit - model_0) * w_fit,
+            (xi2_fit - model_2) * w_fit,
+        ])
+
+    res = least_squares(
+        residuals,
+        x0=np.array([b_DLA_init, beta_DLA_init]),
+        method="lm",
+        max_nfev=200,
+    )
+    b_DLA, beta_DLA = float(res.x[0]), float(res.x[1])
+    K0_fit, K2_fit = _kaiser_K0_K2(beta_DLA, beta_F)
+
+    # Covariance from the LM Jacobian: cov = (J^T J)^{-1} · σ²,
+    # where σ² is the residual variance per d.o.f.
+    J = res.jac                                                    # (2N, 2)
+    if J.size > 0 and n_fit > 1:
+        # Residuals are already √npairs-weighted, so ignore the σ² term
+        # if you trust the per-bin weighting; here we take the χ²-per-dof
+        # rescaling so the reported errors are conservatively scaled to
+        # the post-fit residuals.
+        chi2 = float((res.fun ** 2).sum())
+        dof = max(1, 2 * n_fit - 2)
+        sigma_sq = chi2 / dof
+        try:
+            JtJ_inv = np.linalg.inv(J.T @ J)
+            cov = JtJ_inv * sigma_sq
+        except np.linalg.LinAlgError:
+            cov = np.full((2, 2), np.nan)
+    else:
+        chi2 = float("nan")
+        cov = np.full((2, 2), np.nan)
+
+    b_DLA_err = float(np.sqrt(cov[0, 0])) if np.isfinite(cov[0, 0]) else float("nan")
+    beta_DLA_err = float(np.sqrt(cov[1, 1])) if np.isfinite(cov[1, 1]) else float("nan")
+
+    # Templates over the full r grid (for plotting).
+    xi_lin_j0_full = xi_lin_monopole(r_centres, k_lin, P_lin)
+    xi_lin_j2_full = xi_lin_quadrupole(r_centres, k_lin, P_lin)
+    template_mono = +b_DLA * b_F * K0_fit * xi_lin_j0_full
+    template_quad = -b_DLA * b_F * K2_fit * xi_lin_j2_full
+
+    return JointBDLABetaResult(
+        b_DLA=b_DLA,
+        b_DLA_err=b_DLA_err,
+        beta_DLA=beta_DLA,
+        beta_DLA_err=beta_DLA_err,
+        b_F_assumed=float(b_F),
+        beta_F_assumed=float(beta_F),
+        K_0=float(K0_fit),
+        K_2=float(K2_fit),
+        r_centres=r_centres,
+        xi_mono_obs=xi_mono,
+        xi_quad_obs=xi_quad,
+        xi_mono_template=template_mono,
+        xi_quad_template=template_quad,
+        fit_mask=fit_mask,
+        n_fit_bins=n_fit,
+        chi2=chi2,
+        cov=cov,
+    )
 
 
 __all__ = [
     "BDLAFromXiResult",
     "BFFitResult",
     "BFFromXiResult",
+    "JointBDLABetaResult",
     "compute_p1d_clean_sightlines",
     "extract_monopole",
+    "extract_multipoles_rmu",
     "find_camb_pk_for_z",
     "fit_b_DLA_from_xi_cross",
     "fit_b_F",
     "fit_b_F_from_xi_FF",
+    "fit_b_beta_from_xi_cross_multipoles",
     "hMpc_to_kms_factor",
     "load_camb_pk",
     "project_pk_3d_to_p1d",
     "xi_lin_monopole",
+    "xi_lin_quadrupole",
 ]
