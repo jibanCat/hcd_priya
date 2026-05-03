@@ -570,7 +570,10 @@ def extract_multipoles_rmu(
         # bins are missing, dividing by Σ_valid Δμ_j extrapolates the
         # surviving μ-bins to the full range; this is more accurate
         # than letting missing bins contribute zero.
-        proj = np.where(norm_per_r > 0, proj_partial / norm_per_r, 0.0)
+        # Use NaN (not 0) as the fallback so rows with zero coverage
+        # propagate NaN directly; the n_valid_per_r >= 3 check then
+        # acts purely as a quality gate for sparsely-covered rows.
+        proj = np.where(norm_per_r > 0, proj_partial / norm_per_r, np.nan)
         mp = (2 * ell + 1) * proj
         mp = np.where(n_valid_per_r >= 3, mp, np.nan)
         out[ell] = mp
@@ -961,15 +964,16 @@ def fit_b_beta_from_xi_cross_multipoles(
     Two free parameters (b_DLA, β_DLA), fit by Levenberg-Marquardt on
     the concatenated mono/quad residuals.  Weights are derived from
     the per-bin Poisson variance propagated through the Hamilton
-    projection:
+    projection (including the norm_per_r renormalisation applied inside
+    ``extract_multipoles_rmu`` for partially-populated μ-bin rows):
 
-        Var(ξ^(ℓ)(r)) ∝ (2ℓ+1)² · Σ_j (L_ℓ(μ_j)·Δμ_j)² / N_ij
+        Var(ξ^(ℓ)(r)) ∝ (2ℓ+1)² / norm_per_r² · Σ_j (L_ℓ(μ_j)·Δμ_j)² / N_ij
 
-    so the quadrupole carries the (2ℓ+1)² = 25 amplification correctly
-    relative to the monopole, instead of being weighted equally with
-    a single √Σ_j N_ij as the original implementation did.  The overall
-    Poisson normalisation is unknown and absorbs into the χ²/dof
-    rescaling on the covariance below.
+    where norm_per_r = Σ_valid Δμ_j ≤ 1.  For fully-populated rows
+    norm_per_r = 1 and the formula reduces to the simpler form.  The
+    quadrupole carries the (2ℓ+1)² = 25 amplification correctly
+    relative to the monopole.  The overall Poisson normalisation is
+    unknown and absorbs into the χ²/dof rescaling on the covariance.
 
     Parameters
     ----------
@@ -1026,8 +1030,16 @@ def fit_b_beta_from_xi_cross_multipoles(
     xi2_fit = xi_quad[fit_mask]
 
     # Per-bin Poisson variance propagated through the Hamilton projection.
-    # σ²(r, ℓ) ∝ (2ℓ+1)² · Σ_j (L_ℓ(μ_j) · Δμ_j)² / N_ij; the overall
-    # constant is unknown and is absorbed by the χ²/dof rescaling below.
+    # extract_multipoles_rmu renormalises by norm_per_r = Σ_valid Δμ_j so
+    # that partially-populated rows still target the full [0, 1] integral.
+    # The renormalisation divides the multipole estimate by norm_per_r, so
+    # the Poisson variance picks up a 1/norm_per_r² factor:
+    #
+    #   σ²(r, ℓ) ∝ (2ℓ+1)² / norm_per_r² · Σ_j (L_ℓ(μ_j) · Δμ_j)² / N_ij
+    #
+    # For fully-populated rows norm_per_r = 1 (the Σ_j Δμ_j = 1 identity),
+    # so the correction is a no-op in practice.  The overall Poisson
+    # normalisation is unknown and is absorbed by the χ²/dof rescaling below.
     mu_edges_inferred = np.empty(mu_centres.size + 1, dtype=np.float64)
     mu_edges_inferred[1:-1] = 0.5 * (mu_centres[:-1] + mu_centres[1:])
     mu_edges_inferred[0] = max(0.0, 2.0 * mu_centres[0] - mu_edges_inferred[1])
@@ -1038,8 +1050,12 @@ def fit_b_beta_from_xi_cross_multipoles(
     inv_N = np.where(npairs_rmu > 0,
                      1.0 / np.maximum(npairs_rmu, 1).astype(np.float64),
                      0.0)
-    var0_per_r = ((L0_mu * dmu) ** 2 * inv_N).sum(axis=1)           # ∝ σ²(r, 0)
-    var2_per_r = (5.0 ** 2) * ((L2_mu * dmu) ** 2 * inv_N).sum(axis=1)  # ∝ σ²(r, 2)
+    # norm_per_r: same computation as inside extract_multipoles_rmu.
+    dmu_valid = np.where(npairs_rmu > 0, dmu[None, :], 0.0)
+    norm_per_r = dmu_valid.sum(axis=1)                              # (n_r,)
+    norm_sq = np.maximum(norm_per_r ** 2, 1e-30)                   # guard ÷0
+    var0_per_r = ((L0_mu * dmu) ** 2 * inv_N).sum(axis=1) / norm_sq      # ∝ σ²(r, 0)
+    var2_per_r = (5.0 ** 2) * ((L2_mu * dmu) ** 2 * inv_N).sum(axis=1) / norm_sq  # ∝ σ²(r, 2)
     eps = 1e-30
     w0 = 1.0 / np.sqrt(np.maximum(var0_per_r[fit_mask], eps))
     w2 = 1.0 / np.sqrt(np.maximum(var2_per_r[fit_mask], eps))
