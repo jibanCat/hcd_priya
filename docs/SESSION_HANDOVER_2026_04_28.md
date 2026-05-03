@@ -55,9 +55,9 @@ ddfec6c Inline figures into all clustering .md docs for review
   leakage check, joint-fit recovery, geometric correctness for
   `pair_count_rmu`) — all green.
 * Real PRIYA result on the same z = 2.20 snap as test 10:
-  **`b_DLA = 1.740 ± 0.426`** (rmu joint fit) vs **`1.672 ± 0.543`**
+  **`b_DLA = 1.740 ± 0.414`** (rmu joint fit) vs **`1.672 ± 0.543`**
   (legacy).  +4 % shift matches the doc-predicted ≲ 5 % Jacobian
-  correction.  β_DLA = −0.17 ± 0.17, consistent with 0 — quadrupole
+  correction.  β_DLA = −0.17 ± 0.27, consistent with 0 — quadrupole
   signal too weak at 11 655 DLAs (matches FR+2012 published
   expectation).
 
@@ -222,8 +222,8 @@ These are the things you'd otherwise stub your toe on:
 
 ## 6. Open caveats / known limitations
 
-1. **β_DLA error inflation.**  PR-8's reported `b_DLA_err = 0.426`
-   absorbs `√(χ²/dof) ≈ √(363) ≈ 19` of model-mismatch inflation.
+1. **β_DLA error inflation.**  PR-8's reported `b_DLA_err = 0.414`
+   absorbs `√(χ²/dof) ≈ √(279) ≈ 16.7` of model-mismatch inflation.
    The formal Poisson-only error is ~ 0.02.  Reviewers (or you)
    may push to switch to bootstrap / jackknife; doable but not
    yet done.

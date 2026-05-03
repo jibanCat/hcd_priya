@@ -287,7 +287,8 @@ class TestXiLinMonopole(unittest.TestCase):
         """ξ(r=0) = (1/(2π²)) ∫ k² P(k) dk = field variance σ²."""
         k = np.linspace(0.001, 5.0, 4096)
         P_lin = np.exp(-(k / 0.5) ** 2)
-        sigma2 = float(np.trapezoid(k ** 2 * P_lin, k) / (2.0 * np.pi ** 2))
+        from scipy.integrate import trapezoid
+        sigma2 = float(trapezoid(k ** 2 * P_lin, k) / (2.0 * np.pi ** 2))
         xi0 = xi_lin_monopole(np.array([0.0]), k, P_lin)
         np.testing.assert_allclose(xi0[0], sigma2, rtol=1e-12)
 
@@ -519,20 +520,20 @@ class TestFitBBetaJoint(unittest.TestCase):
         self.assertLess(rel_beta, 0.10, msg)
         print(f"  test_fit_b_beta_joint: {msg}")
 
-    def test_npairs_weighted_estimator_fails_on_same_synthesis(self):
-        """The legacy npairs-weighted (r_⊥, r_∥) extractor would have
-        failed this test by ~ 25 % bias on b_DLA and ~ 6 % bias on
-        β_DLA (per the strip-commit ce48c1d notes).  We don't import
-        the legacy path here (it's been deleted); instead we verify
-        the SAME synthesis collapsed to the npairs-weighted multipole
-        formula reproduces the documented bias.
+    def test_legacy_npairs_weighting_leakage_is_documented(self):
+        """Document the *mechanism* of the legacy bug — this is NOT a
+        code-path regression test.
 
-        Specifically: weighted-by-√(1−μ²) projection vs uniform-μ
-        projection of (ξ_0 + ξ_2 · L_2) gives a recovered ξ_2 biased
-        by the factor ⟨L_2⟩_npairs / ⟨L_2⟩_uniform_for_pure_monopole
-        = −1/8 — i.e. the bias does not vanish.  Documenting the
-        regression mechanism here so the next person who reads the
-        test understands why it exists.
+        The actual canary against a regression to npairs-weighted
+        extraction is
+        ``test_no_quadrupole_leakage_in_pure_monopole`` above, which
+        exercises the real ``extract_multipoles_rmu`` and asserts < 1 %
+        leakage.  Here we hand-roll the buggy projection inline (the
+        legacy code was deleted in commit ``ce48c1d``) to verify the
+        analytical bias formula: ⟨L_2⟩ under √(1−μ²) weighting on
+        [0, 1] is −1/8, so a pure-ξ_0 field gets ≳ 10 % spurious
+        quadrupole.  Keep this so the next reader understands *why*
+        the (r, μ) pipeline exists.
         """
         # Build the same ξ_0(μ-indep) field used in
         # test_no_quadrupole_leakage_in_pure_monopole, but project it

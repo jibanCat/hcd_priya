@@ -279,11 +279,15 @@ and the matching catalog).
    non-linear scale-dependent bias (Bird+2014 §5.2) — a separate
    PR.
 
-2. **χ²/dof ≈ 363** on the real-data fit is large.  The reported
-   `b_DLA_err = 0.426` is rescaled by `√(χ²/dof)` so it absorbs
+2. **χ²/dof ≈ 279** on the real-data fit is large.  The reported
+   `b_DLA_err = 0.414` is rescaled by `√(χ²/dof)` so it absorbs
    model-mismatch inflation; the formal Poisson-only error would
-   have been `~ 0.02`.  Future work: switch to bootstrap /
-   jackknife errors so χ² is not the dominant uncertainty driver.
+   have been `~ 0.02`.  (The earlier number `χ²/dof ≈ 363` came
+   from the original √Σ_j N_ij weighting that put mono and quad
+   on equal footing; the now-current per-bin variance weighting
+   correctly down-weights the noisier quadrupole and gives a more
+   honest χ².)  Future work: switch to bootstrap / jackknife
+   errors so χ² is not the dominant uncertainty driver.
 
 3. **Hexadecapole (ℓ = 4)** is supported by `extract_multipoles_rmu`
    but unused in the current fit.  In the Kaiser cross model

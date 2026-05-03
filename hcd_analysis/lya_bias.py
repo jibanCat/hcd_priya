@@ -58,6 +58,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import numpy as np
+from scipy.integrate import trapezoid as _trapezoid  # numpy 1.x has no _trapezoid
 from scipy.special import spherical_jn
 
 
@@ -201,7 +202,7 @@ def project_pk_3d_to_p1d(
         kaiser = (1.0 + beta_F * mu * mu) ** 2
         integrand = k_perp * kaiser * P_3d_eval(k3)        # k_perp · ...
         # Trapezoidal integration ∫ f(k_perp) dk_perp.
-        out[i] = np.trapezoid(integrand, k_perp) / (2.0 * np.pi)
+        out[i] = _trapezoid(integrand, k_perp) / (2.0 * np.pi)
     return out
 
 
@@ -404,7 +405,7 @@ def xi_lin_monopole(
             integrand = k * k * P
         else:
             integrand = k * np.sin(k * ri) * P / ri
-        out[i] = float(np.trapezoid(integrand, k)) / (2.0 * np.pi ** 2)
+        out[i] = float(_trapezoid(integrand, k)) / (2.0 * np.pi ** 2)
     return out
 
 
@@ -448,7 +449,7 @@ def xi_lin_quadrupole(
             out[i] = 0.0
             continue
         integrand = k * k * spherical_jn(2, k * ri) * P
-        out[i] = float(np.trapezoid(integrand, k)) / (2.0 * np.pi ** 2)
+        out[i] = float(_trapezoid(integrand, k)) / (2.0 * np.pi ** 2)
     return out
 
 
@@ -493,9 +494,15 @@ def extract_multipoles_rmu(
     a Hamilton-1992 synthesis ξ_0 + ξ_2 · L_2(μ) exactly (see
     ``tests/test_lya_bias.py::TestExtractMultipolesRMu``).
 
-    Empty bins (npairs == 0) are NaN in ``xi_rmu``; they are skipped
-    in the projection sum.  If a r-bin has fewer than 3 valid μ-bins
-    the recovered multipole is NaN for that r.
+    Empty bins (npairs == 0) are NaN in ``xi_rmu``.  The projection sum
+    skips them and is renormalised by the surviving Σ Δμ_j so the
+    estimator targets the *full* [0, 1] integral instead of the
+    partial-coverage one (i.e. missing bins are filled in by the
+    valid-bin average rather than contributing zero).  On a fully-
+    populated row Σ(valid Δμ_j) == 1 and the renormalisation is a
+    no-op.  If a r-bin has fewer than 3 valid μ-bins the recovered
+    multipole is NaN for that r — the renormalisation can't be
+    trusted on rows that sparse.
 
     Parameters
     ----------
@@ -544,17 +551,26 @@ def extract_multipoles_rmu(
     valid = (npairs_rmu > 0) & np.isfinite(xi_rmu)
     n_valid_per_r = valid.sum(axis=1)
 
+    # Σ(valid Δμ_j) per r-row.  Equals 1 when every μ-bin is populated;
+    # smaller when bins are missing.  Used to renormalise the partial
+    # sum so the projection still targets ∫_0^1 instead of the
+    # truncated integral.
+    dmu_valid = np.where(valid, dmu[None, :], 0.0)
+    norm_per_r = dmu_valid.sum(axis=1)                            # (n_r,)
+
     out = {}
     for ell in ells:
         L = _legendre(ell, mu_centres)                            # (n_mu,)
         weights = (L * dmu)[None, :]                              # (1, n_mu)
         contrib = np.where(valid, xi_rmu * weights, 0.0)
-        proj = contrib.sum(axis=1)
-        # Textbook Hamilton: ξ^(ℓ)(r) = (2ℓ+1) · Σ_j ξ_j · L_ℓ(μ_j) · Δμ_j
-        # over μ ∈ [0, 1].  When μ-bins are missing in a row the sum
-        # under-estimates by the missing-bin contribution; we surface
-        # that as NaN if fewer than 3 bins survive (heuristic — see
-        # the ``n_valid_per_r`` check below).
+        proj_partial = contrib.sum(axis=1)
+        # Hamilton: ξ^(ℓ)(r) = (2ℓ+1) · ∫_0^1 dμ ξ(r,μ) L_ℓ(μ).
+        # On a fully-populated row, Σ_j L_j Δμ_j = ∫_0^1 L dμ and
+        # Σ Δμ_j = 1, so dividing by norm_per_r is a no-op.  When some
+        # bins are missing, dividing by Σ_valid Δμ_j extrapolates the
+        # surviving μ-bins to the full range; this is more accurate
+        # than letting missing bins contribute zero.
+        proj = np.where(norm_per_r > 0, proj_partial / norm_per_r, 0.0)
         mp = (2 * ell + 1) * proj
         mp = np.where(n_valid_per_r >= 3, mp, np.nan)
         out[ell] = mp
@@ -943,8 +959,17 @@ def fit_b_beta_from_xi_cross_multipoles(
         ξ^(2)(r) = − b_D · b_F · K_2(β_D, β_F) · ξ_lin^(j2)(r).
 
     Two free parameters (b_DLA, β_DLA), fit by Levenberg-Marquardt on
-    the concatenated mono/quad residuals weighted by √npairs (per-bin
-    Poisson scaling).
+    the concatenated mono/quad residuals.  Weights are derived from
+    the per-bin Poisson variance propagated through the Hamilton
+    projection:
+
+        Var(ξ^(ℓ)(r)) ∝ (2ℓ+1)² · Σ_j (L_ℓ(μ_j)·Δμ_j)² / N_ij
+
+    so the quadrupole carries the (2ℓ+1)² = 25 amplification correctly
+    relative to the monopole, instead of being weighted equally with
+    a single √Σ_j N_ij as the original implementation did.  The overall
+    Poisson normalisation is unknown and absorbs into the χ²/dof
+    rescaling on the covariance below.
 
     Parameters
     ----------
@@ -999,7 +1024,25 @@ def fit_b_beta_from_xi_cross_multipoles(
     r_fit = r_centres[fit_mask]
     xi0_fit = xi_mono[fit_mask]
     xi2_fit = xi_quad[fit_mask]
-    w_fit = np.sqrt(npairs_per_r[fit_mask].astype(np.float64))     # Poisson scaling
+
+    # Per-bin Poisson variance propagated through the Hamilton projection.
+    # σ²(r, ℓ) ∝ (2ℓ+1)² · Σ_j (L_ℓ(μ_j) · Δμ_j)² / N_ij; the overall
+    # constant is unknown and is absorbed by the χ²/dof rescaling below.
+    mu_edges_inferred = np.empty(mu_centres.size + 1, dtype=np.float64)
+    mu_edges_inferred[1:-1] = 0.5 * (mu_centres[:-1] + mu_centres[1:])
+    mu_edges_inferred[0] = max(0.0, 2.0 * mu_centres[0] - mu_edges_inferred[1])
+    mu_edges_inferred[-1] = min(1.0, 2.0 * mu_centres[-1] - mu_edges_inferred[-2])
+    dmu = np.diff(mu_edges_inferred)                                # (n_mu,)
+    L0_mu = np.ones_like(mu_centres)
+    L2_mu = 0.5 * (3.0 * mu_centres ** 2 - 1.0)
+    inv_N = np.where(npairs_rmu > 0,
+                     1.0 / np.maximum(npairs_rmu, 1).astype(np.float64),
+                     0.0)
+    var0_per_r = ((L0_mu * dmu) ** 2 * inv_N).sum(axis=1)           # ∝ σ²(r, 0)
+    var2_per_r = (5.0 ** 2) * ((L2_mu * dmu) ** 2 * inv_N).sum(axis=1)  # ∝ σ²(r, 2)
+    eps = 1e-30
+    w0 = 1.0 / np.sqrt(np.maximum(var0_per_r[fit_mask], eps))
+    w2 = 1.0 / np.sqrt(np.maximum(var2_per_r[fit_mask], eps))
 
     xi_lin_j0 = xi_lin_monopole(r_fit, k_lin, P_lin)
     xi_lin_j2 = xi_lin_quadrupole(r_fit, k_lin, P_lin)
@@ -1010,8 +1053,8 @@ def fit_b_beta_from_xi_cross_multipoles(
         model_0 = +b_D * b_F * K0 * xi_lin_j0
         model_2 = -b_D * b_F * K2 * xi_lin_j2
         return np.concatenate([
-            (xi0_fit - model_0) * w_fit,
-            (xi2_fit - model_2) * w_fit,
+            (xi0_fit - model_0) * w0,
+            (xi2_fit - model_2) * w2,
         ])
 
     res = least_squares(

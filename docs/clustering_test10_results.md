@@ -22,7 +22,7 @@ unbiased and is the production-grade estimator going forward.
 | Mode                | b_DLA           | β_DLA            | K_0   | K_2   | window         |
 |---------------------|-----------------|------------------|-------|-------|----------------|
 | rperp_rpar (legacy) | +1.672 ± 0.543  | 0.569 (iterated) | 1.860 | —     | r ∈ [10, 40]   |
-| **rmu (joint)**     | **+1.740 ± 0.426** | **−0.17 ± 0.17** | 1.392 | 0.740 | r ∈ [10, 40]   |
+| **rmu (joint)**     | **+1.740 ± 0.414** | **−0.17 ± 0.27** | 1.392 | 0.740 | r ∈ [10, 40]   |
 
 ### Legacy mode — monopole-only fit
 
@@ -51,7 +51,7 @@ value — the doc-predicted Jacobian shift, see
 `docs/clustering_multipole_jacobian_todo.md`.
 
 **Right** — extracted quadrupole ξ_×^(2)(r) (green squares) with the
-joint fit (red).  `β_DLA = -0.17 ± 0.17` is consistent with zero;
+joint fit (red).  `β_DLA = -0.17 ± 0.27` is consistent with zero;
 the cross quadrupole signal is too weak at our 11 655-DLA sample
 to constrain β reliably.  This matches the published expectation:
 FR+2012 found β_DLA = 0.4 ± 0.5 on BOSS DR9 with similar statistics.
@@ -66,7 +66,7 @@ Notes:
   the doc-predicted Jacobian shift of "≲ 5 %" once the (r_⊥, r_∥)
   bias is removed.  Both values lie inside the literature envelope
   [1.5, 2.4] (Bird+14 hydro sim → BOSS observation).
-* `β_DLA(rmu) = −0.17 ± 0.17` is consistent with zero within 1 σ.
+* `β_DLA(rmu) = −0.17 ± 0.27` is consistent with zero within 1 σ.
   The cross-correlation quadrupole signal is too weak to pin β_DLA
   with 11 655 DLAs and 200 k pixels — Pérez-Ràfols 2018 needed
   ~30 000 DLAs (full BOSS DR12) to land β_DLA at 0.5 ± 0.1.  The
@@ -75,12 +75,14 @@ Notes:
   mode actually attempts to measure β from data and finds the
   signal-to-noise insufficient.  This is consistent with FR+2012
   who fit β simultaneously and got β_DLA = 0.4 ± 0.5.
-* The rmu fit's reduced χ² is high (≈ 363, with √npairs weights
-  inflating per-bin precision).  Errors are rescaled by √(χ²/dof) so
-  the reported `b_DLA_err = 0.426` already absorbs the model-mismatch
-  inflation — the formal Poisson-only error would have been ~ 0.02.
-  Future work: switch to bootstrap / jackknife errors so the χ² is
-  not the dominant uncertainty driver.
+* The rmu fit's reduced χ² is high (≈ 279, after switching the
+  residual weighting from a single √Σ_j N_ij to the per-bin Hamilton
+  variance σ²(r,ℓ) ∝ (2ℓ+1)²·Σ_j (L_ℓ·Δμ_j)²/N_ij — see the
+  `fit_b_beta_from_xi_cross_multipoles` docstring).  Errors are
+  rescaled by √(χ²/dof) so the reported `b_DLA_err = 0.414` already
+  absorbs the model-mismatch inflation — the formal Poisson-only
+  error would have been ~ 0.02.  Future work: switch to bootstrap /
+  jackknife errors so the χ² is not the dominant uncertainty driver.
 * `ξ_× total pairs (legacy) = 1.06 × 10⁹` (signed r_par, double-folded);
   `ξ_× total pairs (rmu) = 7.06 × 10⁸` (|μ|-folded, single-counted).
 
