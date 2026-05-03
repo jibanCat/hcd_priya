@@ -24,9 +24,18 @@ Public API:
 * ``build_delta_F_field`` — all-HCD-masked δ_F field per pixel.
 * ``fold_signed_to_abs`` — fold ξ(±r_par) → ξ(|r_par|), with optional
   pair-count-weighted variant.
+* ``pair_count_rmu`` — pair counter binned directly in (r, |μ|) for
+  unbiased Hamilton-formula multipole extraction.
+* ``xi_cross_dla_lya_rmu`` / ``xi_auto_dla_rmu`` / ``xi_auto_lya_rmu``
+  — wrappers that mirror the (r_⊥, r_∥) versions but return
+  (r, |μ|)-binned ξ.
 
-Multipole machinery and joint (b_DLA, β_DLA) fits are **deferred** —
-see ``docs/clustering_multipole_jacobian_todo.md``.
+Multipole extraction and the joint (b_DLA, β_DLA) fit live in
+``hcd_analysis.lya_bias`` (``extract_multipoles_rmu``,
+``fit_b_beta_from_xi_cross_multipoles``).  They consume the (r, |μ|)
+output of the wrappers above; the (r_⊥, r_∥) path is preserved for
+back-compat (the monopole-only Jacobian bias is O(few %), see
+``docs/clustering_multipole_jacobian_todo.md``).
 """
 from __future__ import annotations
 
@@ -435,6 +444,183 @@ def pair_count_2d(
 
 
 # ---------------------------------------------------------------------------
+# (r, |μ|)-binned pair counter — unbiased multipole extraction
+# ---------------------------------------------------------------------------
+#
+# Why this exists
+# ---------------
+# `pair_count_2d` bins by (r_⊥, r_∥).  Inside an r-shell at fixed r,
+# the per-μ density of npairs is *not* uniform — it is ∝ √(1−μ²)
+# because the natural cell volume at fixed r is dV = 2π r² √(1−μ²) dr dμ.
+# Using npairs as the weight when projecting ξ onto Legendre
+# polynomials therefore evaluates ⟨L_ℓ⟩_npairs instead of the standard
+# uniform-μ ⟨L_ℓ⟩ that the Hamilton 1992 multipole formula assumes.
+# For ℓ = 2 this leaks ξ^(0) into the recovered ξ^(2) by ~ −1/8.
+#
+# Binning pairs directly in (r, |μ|) eliminates the Jacobian: every
+# pair lands in its own (r_bin, μ_bin) without the volume distortion,
+# so a uniform-μ Hamilton sum gives the right multipoles.
+#
+# See `docs/clustering_multipole_jacobian_todo.md` for the full
+# diagnosis (Option A is what's implemented here).
+
+def pair_count_rmu(
+    left_xyz: np.ndarray,
+    right_xyz: np.ndarray,
+    left_los_axis: np.ndarray,
+    box: float,
+    r_bins: np.ndarray,
+    mu_bins: np.ndarray,
+    weights_left: Optional[np.ndarray] = None,
+    weights_right: Optional[np.ndarray] = None,
+    exclude_self: bool = False,
+    chunk_size: int = 4096,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Pair counter binned by (r, |μ|), where r = |Δ⃗| and μ = (Δ⃗·ê_LOS)/r.
+
+    Same chunking + minimum-image convention as ``pair_count_2d``.
+    The LOS reference is the **left** point's sightline axis, matching
+    the cross-correlation convention of placing pixels on the left so
+    r_∥ is along the Lyα pixel's sightline.
+
+    Pairs at exactly r = 0 (self-pairs) carry an undefined μ; they are
+    dropped from both ``counts`` and ``npairs`` regardless of the
+    ``exclude_self`` flag (this matches what auto-correlations want;
+    cross-correlations don't have r = 0 pairs unless a DLA happens to
+    coincide with the centre of a pixel).
+
+    Parameters
+    ----------
+    left_xyz, right_xyz : (N_L, 3), (N_R, 3) float64
+        Positions in Mpc/h.
+    left_los_axis : (N_L,) int (0-indexed)
+    box : float
+        Periodic box side, Mpc/h.
+    r_bins : (n_r + 1,) float
+        Edges in Mpc/h, ≥ 0, monotonically increasing.
+    mu_bins : (n_mu + 1,) float
+        Edges in [0, 1], monotonically increasing.  We bin |μ| only:
+        ξ(r, μ) = ξ(r, −μ) by reflection symmetry, so binning |μ| just
+        doubles the per-bin pair count without biasing — this matches
+        the picca / RascalC convention.
+    weights_left, weights_right, exclude_self, chunk_size :
+        Same semantics as ``pair_count_2d``.
+
+    Returns
+    -------
+    counts  : (n_r, n_mu) float64 — Σ w_pair per bin.
+    npairs  : (n_r, n_mu) int64   — pair count per bin (also drops r=0).
+    """
+    L = np.asarray(left_xyz, dtype=np.float64)
+    R = np.asarray(right_xyz, dtype=np.float64)
+    ax = np.asarray(left_los_axis, dtype=np.int64)
+    if L.shape[0] != ax.shape[0]:
+        raise ValueError("left_xyz and left_los_axis length mismatch")
+    if L.ndim != 2 or L.shape[1] != 3:
+        raise ValueError(f"left_xyz must be (N_L, 3); got {L.shape}")
+    if R.ndim != 2 or R.shape[1] != 3:
+        raise ValueError(f"right_xyz must be (N_R, 3); got {R.shape}")
+
+    if weights_left is None:
+        wL = np.ones(L.shape[0], dtype=np.float64)
+    else:
+        wL = np.asarray(weights_left, dtype=np.float64)
+        if wL.shape != (L.shape[0],):
+            raise ValueError(f"weights_left shape mismatch: {wL.shape} vs ({L.shape[0]},)")
+    if weights_right is None:
+        wR = np.ones(R.shape[0], dtype=np.float64)
+    else:
+        wR = np.asarray(weights_right, dtype=np.float64)
+        if wR.shape != (R.shape[0],):
+            raise ValueError(f"weights_right shape mismatch: {wR.shape} vs ({R.shape[0]},)")
+
+    r_edges = np.asarray(r_bins, dtype=np.float64)
+    mu_edges = np.asarray(mu_bins, dtype=np.float64)
+    if r_edges.ndim != 1 or mu_edges.ndim != 1:
+        raise ValueError("bin edge arrays must be 1-D")
+    if not np.all(np.diff(r_edges) > 0) or not np.all(np.diff(mu_edges) > 0):
+        raise ValueError("bin edges must be strictly increasing")
+    if r_edges[0] < 0:
+        raise ValueError(f"r_bins must start at >= 0; got {r_edges[0]}")
+    if mu_edges[0] < 0.0 or mu_edges[-1] > 1.0 + 1e-12:
+        raise ValueError(
+            f"mu_bins must lie in [0, 1] (we bin |μ|); got [{mu_edges[0]}, {mu_edges[-1]}]"
+        )
+
+    n_r = r_edges.size - 1
+    n_mu = mu_edges.size - 1
+    counts = np.zeros((n_r, n_mu), dtype=np.float64)
+    npairs = np.zeros((n_r, n_mu), dtype=np.int64)
+
+    nL = L.shape[0]
+    nR = R.shape[0]
+    rows = np.arange(nL)
+
+    for r_start in range(0, nR, chunk_size):
+        r_end = min(nR, r_start + chunk_size)
+        Rc = R[r_start:r_end]
+        wRc = wR[r_start:r_end]
+        delta = L[:, None, :] - Rc[None, :, :]
+        delta = delta - box * np.round(delta / box)             # minimum image
+
+        cols = np.arange(r_end - r_start)
+        r_par = delta[rows[:, None], cols[None, :], ax[:, None]]   # (NL, Nc) signed
+        d2 = (delta * delta).sum(axis=2)                            # (NL, Nc)
+        # r and |μ| — guard against r == 0 (self-pairs etc.).
+        r_3d = np.sqrt(d2)
+        finite_r = r_3d > 0
+        # Compute |μ| only where r > 0; elsewhere set to 0 and let the
+        # `valid` mask drop the bin.
+        abs_mu = np.zeros_like(r_3d)
+        np.divide(np.abs(r_par), r_3d, out=abs_mu, where=finite_r)
+        # Clip just under 1.0 so |μ| == 1 (pure LOS pair) lands INSIDE
+        # the rightmost μ-bin instead of being excluded by the `i_mu <
+        # n_mu` boundary check (np.searchsorted with side="right"
+        # places exact upper-edge matches above the last bin).  Also
+        # absorbs the 1-ulp |Δ_par| > |Δ| floating-point overflow.
+        abs_mu = np.minimum(abs_mu, 1.0 - 1e-12)
+
+        w_pair = wL[:, None] * wRc[None, :]
+
+        if exclude_self:
+            j_global = np.arange(r_start, r_end)
+            self_mask = (j_global[None, :] == rows[:, None]).ravel()
+        else:
+            self_mask = None
+
+        i_r = np.searchsorted(r_edges, r_3d.ravel(), side="right") - 1
+        i_mu = np.searchsorted(mu_edges, abs_mu.ravel(), side="right") - 1
+
+        # Drop r==0 pairs (undefined μ) and out-of-range bins.
+        valid = (
+            finite_r.ravel()
+            & (i_r >= 0) & (i_r < n_r)
+            & (i_mu >= 0) & (i_mu < n_mu)
+        )
+        w_flat = w_pair.ravel()
+        if self_mask is not None:
+            w_flat = np.where(self_mask, 0.0, w_flat)
+            valid_for_npairs = valid & (~self_mask)
+        else:
+            valid_for_npairs = valid
+
+        nonzero = valid & (w_flat != 0.0)
+
+        np.add.at(
+            counts,
+            (i_r[nonzero], i_mu[nonzero]),
+            w_flat[nonzero],
+        )
+        np.add.at(
+            npairs,
+            (i_r[valid_for_npairs], i_mu[valid_for_npairs]),
+            1,
+        )
+
+    return counts, npairs
+
+
+# ---------------------------------------------------------------------------
 # ξ_× : DLA point catalog × Lyα flux field
 # ---------------------------------------------------------------------------
 
@@ -481,6 +667,41 @@ def xi_cross_dla_lya(
         box=box,
         r_perp_bins=r_perp_bins,
         r_par_bins_signed=r_par_bins_signed,
+        weights_left=pixel_delta_F,
+        weights_right=None,
+        exclude_self=False,
+        chunk_size=chunk_size,
+    )
+    with np.errstate(invalid="ignore", divide="ignore"):
+        xi = np.where(npairs > 0, counts / npairs, np.nan)
+    return xi, counts, npairs
+
+
+def xi_cross_dla_lya_rmu(
+    pixel_xyz: np.ndarray,
+    pixel_los_axis: np.ndarray,
+    pixel_delta_F: np.ndarray,
+    dla_xyz: np.ndarray,
+    box: float,
+    r_bins: np.ndarray,
+    mu_bins: np.ndarray,
+    chunk_size: int = 4096,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(r, |μ|)-binned variant of ``xi_cross_dla_lya``.
+
+    Same estimator (FR+2012 eq. 5: Σ δ_F over pairs / N_pairs), same
+    LOS-axis convention (pixel side = left), but binned in (r, |μ|)
+    so the output can be fed straight to
+    ``hcd_analysis.lya_bias.extract_multipoles_rmu`` for unbiased
+    Hamilton multipole extraction.
+    """
+    counts, npairs = pair_count_rmu(
+        left_xyz=pixel_xyz,
+        right_xyz=dla_xyz,
+        left_los_axis=pixel_los_axis,
+        box=box,
+        r_bins=r_bins,
+        mu_bins=mu_bins,
         weights_left=pixel_delta_F,
         weights_right=None,
         exclude_self=False,
@@ -774,6 +995,76 @@ def xi_auto_dla(
     return xi, DD, RR
 
 
+def _bin_volumes_rmu(
+    r_bins: np.ndarray,
+    mu_bins: np.ndarray,
+) -> np.ndarray:
+    """Volume V_bin(r, μ) = (4π/3)·(r_hi³ − r_lo³)·Δμ on the |μ| ∈ [0,1] grid.
+
+    Each (r, |μ|) shell sweeps both hemispheres of μ (we bin |μ|, so
+    each bin actually represents 2·Δμ of the full [-1, 1] range).  The
+    volume of an annular shell at fixed r covering Δμ on |μ| is
+
+        dV = ∫_shell d³x = ∫_r0^r1 4π r² dr · 2 · Δμ_abs / 2
+           = (4π/3)·(r1³ − r0³) · Δμ_abs
+
+    The factor of 2 from "both hemispheres" cancels the factor of
+    1/2 you'd get if you parameterised by signed μ ∈ [−1, 1] and
+    only this hemisphere — net result (4π/3)·(r1³ − r0³)·Δμ_abs.
+    """
+    r = np.asarray(r_bins, dtype=np.float64)
+    mu = np.asarray(mu_bins, dtype=np.float64)
+    r_vol = (4.0 / 3.0) * np.pi * (r[1:] ** 3 - r[:-1] ** 3)        # (n_r,)
+    mu_width = np.diff(mu)                                           # (n_mu,)
+    return r_vol[:, None] * mu_width[None, :]                        # (n_r, n_mu)
+
+
+def xi_auto_dla_rmu(
+    dla_xyz: np.ndarray,
+    dla_los_axis: np.ndarray,
+    box: float,
+    r_bins: np.ndarray,
+    mu_bins: np.ndarray,
+    chunk_size: int = 4096,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(r, |μ|)-binned variant of ``xi_auto_dla``.
+
+    Same DD/RR_analytic − 1 estimator on the periodic box, but binned
+    in (r, |μ|) for unbiased multipole extraction.  Self-pairs are
+    excluded.
+
+    Returns
+    -------
+    xi : (n_r, n_mu)  DD/RR_analytic - 1
+    DD : (n_r, n_mu)  raw pair counts
+    RR : (n_r, n_mu)  analytic random-pair counts
+    """
+    n_dla = dla_xyz.shape[0]
+    if n_dla < 2:
+        raise ValueError(f"need ≥ 2 DLAs for auto-corr; got {n_dla}")
+
+    DD, _ = pair_count_rmu(
+        left_xyz=dla_xyz,
+        right_xyz=dla_xyz,
+        left_los_axis=dla_los_axis,
+        box=box,
+        r_bins=r_bins,
+        mu_bins=mu_bins,
+        weights_left=None,
+        weights_right=None,
+        exclude_self=True,
+        chunk_size=chunk_size,
+    )
+
+    V_box = box ** 3
+    V_bin = _bin_volumes_rmu(r_bins, mu_bins)
+    RR = n_dla * (n_dla - 1) * V_bin / V_box
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        xi = np.where(RR > 0, DD / RR - 1.0, np.nan)
+    return xi, DD, RR
+
+
 # ---------------------------------------------------------------------------
 # ξ_FF : Lyα × Lyα flux auto-correlation
 # ---------------------------------------------------------------------------
@@ -853,6 +1144,62 @@ def xi_auto_lya(
         box=box,
         r_perp_bins=r_perp_bins,
         r_par_bins_signed=r_par_bins_signed,
+        weights_left=L_dF,
+        weights_right=L_dF,
+        exclude_self=True,
+        chunk_size=chunk_size,
+    )
+    with np.errstate(invalid="ignore", divide="ignore"):
+        xi = np.where(npairs > 0, counts / npairs, np.nan)
+    return xi, counts, npairs
+
+
+def xi_auto_lya_rmu(
+    pixel_xyz: np.ndarray,
+    pixel_los_axis: np.ndarray,
+    pixel_delta_F: np.ndarray,
+    box: float,
+    r_bins: np.ndarray,
+    mu_bins: np.ndarray,
+    subsample_n: Optional[int] = None,
+    rng_seed: int = 0,
+    chunk_size: int = 2048,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(r, |μ|)-binned variant of ``xi_auto_lya``.
+
+    Same Σ δ_F δ_F / N_pairs estimator, same subsample mechanic, same
+    self-pair exclusion, same LOS-axis convention (left = pixel) — but
+    binned in (r, |μ|) so multipoles can be extracted with the
+    Hamilton uniform-μ formula via ``extract_multipoles_rmu``.
+    """
+    pixel_xyz = np.asarray(pixel_xyz, dtype=np.float64)
+    pixel_los_axis = np.asarray(pixel_los_axis, dtype=np.int64)
+    pixel_delta_F = np.asarray(pixel_delta_F, dtype=np.float64)
+    if pixel_xyz.ndim != 2 or pixel_xyz.shape[1] != 3:
+        raise ValueError(f"pixel_xyz must be (N, 3); got {pixel_xyz.shape}")
+    n_total = pixel_xyz.shape[0]
+    if pixel_los_axis.shape != (n_total,) or pixel_delta_F.shape != (n_total,):
+        raise ValueError("pixel arrays must all have length N")
+
+    if subsample_n is not None and subsample_n < n_total:
+        rng = np.random.default_rng(rng_seed)
+        idx = rng.choice(n_total, size=int(subsample_n), replace=False)
+        idx.sort()
+        L_xyz = pixel_xyz[idx]
+        L_axis = pixel_los_axis[idx]
+        L_dF = pixel_delta_F[idx]
+    else:
+        L_xyz = pixel_xyz
+        L_axis = pixel_los_axis
+        L_dF = pixel_delta_F
+
+    counts, npairs = pair_count_rmu(
+        left_xyz=L_xyz,
+        right_xyz=L_xyz,
+        left_los_axis=L_axis,
+        box=box,
+        r_bins=r_bins,
+        mu_bins=mu_bins,
         weights_left=L_dF,
         weights_right=L_dF,
         exclude_self=True,

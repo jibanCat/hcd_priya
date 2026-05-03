@@ -1,0 +1,20 @@
+{
+  "mode": "rmu",
+  "sim": "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056",
+  "snap": "snap_022",
+  "z": 2.1999999999999975,
+  "n_dla": 11655,
+  "b_F_assumed": -0.14089760352385175,
+  "b_DLA": 1.740157285969798,
+  "b_DLA_err": 0.4141782142078253,
+  "beta_DLA": -0.17033966350725654,
+  "beta_DLA_err": 0.2735910761230202,
+  "K_0": 1.3921182131120708,
+  "K_2": 0.7404347984651329,
+  "chi2": 7809.824095464363,
+  "n_fit_bins": 15,
+  "in_lit_envelope": true,
+  "delta_to_bird14_linear": 0.04015728596979806,
+  "ly\u03b1_pixel_subsample": 200000,
+  "n_mu_bins": 20
+}
