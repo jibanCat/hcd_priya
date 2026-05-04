@@ -21,6 +21,42 @@ If you finish one quickly and want a follow-up, every project has an
 
 ---
 
+## Recommended starter path  (4–7 weeks, A1 → B1 → B2)
+
+The science focus for a new student should be the **CDDF / dN/dX
+studies in section B** — that is where the project most needs new
+work, and the deliverables there are paper-figure-quality.
+
+But before going into B you should do one short project from
+section A.  The reason: B's deliverables interpret per-class CDDF /
+dN/dX values, and to interpret them honestly you need to know the
+*error budget* of the underlying NHI catalog.  Skipping A and going
+straight into B is feasible but you risk over-claiming on features
+that turn out to be inside the catalog's measurement error.
+
+The recommended sequence is:
+
+| Step | Project | Why this one | Time |
+|------|---------|--------------|------|
+| 1 | **A1.** Voigt vs fast-mode NHI residuals on 100 DLAs | Builds intuition for what "log NHI = 20.5" means at the per-absorber level — bias, scatter, and where each estimator goes wrong.  The figure you produce will be cited from your B-project notes whenever a feature lives within ~0.3 dex of a class boundary. | 1–2 weeks |
+| 2 | **B1.** dN/dX redshift evolution | Natural follow-up.  You already trust the NHI values from step 1; now use them to make the canonical "sim vs observation" figure across redshift.  Single-sim is fine for the first pass. | 1–2 weeks |
+| 3 | **B2.** CDDF parameter sensitivity across the 60-LF LHS | The big-finish project.  Uses the full cached dataset (`hcd_summary_lf.h5` + the 60 `cddf_corrected.npz` files) to identify which of the 9 parameters drive HCD abundance.  This output directly informs the HCD emulator's parameter priors. | 2–3 weeks |
+
+Optional add-on: if you finish step 1 quickly and have time before
+step 2, **A2** (τ-threshold sensitivity) is a one-week addition that
+deepens the same catalog-level understanding without distracting from
+the B arc.
+
+If steps 1–3 leave time at the end of the term, **B3** (multi-source
+CDDF observational comparison) is the natural fourth project: it lets
+you finish the term with a single high-quality figure that compares
+your B1/B2 simulation results to the broader observational landscape.
+
+The full project list below is for reference and follow-up choices —
+the recommended path is the three rows above.
+
+---
+
 ## How to start
 
 1. Read the four tutorial notebooks in order: 00 → 04.  Make sure you
@@ -30,8 +66,9 @@ If you finish one quickly and want a follow-up, every project has an
 2. Read `docs/SESSION_HANDOVER_2026_04_28.md` (the most recent state of
    the project) and skim `docs/SESSION_HANDOVER.md` (the previous
    audit handover) for context.
-3. Pick a project below.  Open a feature branch named for the project
-   (e.g. `student/voigt-vs-fast-residuals`) and put any new code under
+3. Start on **A1** (the recommended starter; see the table above).
+   Open a feature branch named for the project (e.g.
+   `student/voigt-vs-fast-residuals`) and put any new code under
    `scripts/` and any new figures under `figures/analysis/`.
 4. Use the existing test pattern in `tests/test_*.py`: write a small
    regression test for any general claim you make, *before* you write
