@@ -34,6 +34,15 @@ want to edit an explanation, prefer to edit the build script and re-run::
 then re-execute the affected notebook.  This keeps text and code in one
 auditable place.
 
+## Project ideas after the tutorials
+
+Once you've worked through the five notebooks and want a self-contained
+project to take on, see [`STUDENT_PROJECTS.md`](STUDENT_PROJECTS.md).
+It lists ~12 projects organised by theme (catalog diagnostics, CDDF
+studies, P1D systematics, clustering, emulator scaffolding) with
+difficulty, time estimates, deliverables, and entry-point file pointers
+for each.
+
 ## What's next after these tutorials
 
 The four observables you've now learned to read — `catalog`,
