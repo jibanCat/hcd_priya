@@ -578,8 +578,13 @@ F_row = np.exp(-tau_row)
 dv = float(meta['dv_kms'])
 v  = np.arange(len(tau_row)) * dv  # km/s along the sightline
 
-# Show a window around the absorber.
-half_window = 800.0  # km/s on each side
+# Show a window that scales with the absorber's width so the saturated
+# core does not fill the visible region.  At minimum ±2500 km/s, or twice
+# the core width — whichever is larger.  This DLA's core is ~2760 km/s
+# wide, so the window ends up ~±5500 km/s and the damping wings + a
+# stretch of continuum on each side are clearly visible.
+absorber_width_kms = (dla.pix_end - dla.pix_start + 1) * dv
+half_window = max(2.0 * absorber_width_kms, 2500.0)
 v_centre = 0.5 * (dla.pix_start + dla.pix_end) * dv
 sel = (v > v_centre - half_window) & (v < v_centre + half_window)
 
@@ -1286,7 +1291,11 @@ for col, (cls, sk, ps, pe, ln) in enumerate(EXAMPLES):
     F_row   = np.exp(-tau_row)
     v       = np.arange(len(tau_row)) * dv
     v_centre = 0.5 * (ps + pe) * dv
-    half = 600.0  # km/s window on each side
+    # Window scales with absorber width so the DLA core does not fill the
+    # whole panel.  At least ±1000 km/s (so the LLS panel still has
+    # context); for the DLA panel this gives ~±2000 km/s.
+    absorber_width_kms = (pe - ps + 1) * dv
+    half = max(2.0 * absorber_width_kms, 1000.0)
     sel = (v > v_centre - half) & (v < v_centre + half)
 
     ax_t = axes[0, col]
@@ -1659,7 +1668,7 @@ axes[-1].set_xlabel('v (km/s)')
 # Zoom around the absorber for clarity
 v_centre = 0.5 * (DLA_PS + DLA_PE) * dv
 for ax in axes:
-    ax.set_xlim(v_centre - 1500, v_centre + 1500)
+    ax.set_xlim(v_centre - 2500, v_centre + 2500)
 fig.tight_layout()
 plt.show()
 """),
@@ -1721,7 +1730,7 @@ for name, F in F_filled.items():
 ax.axvspan(v_full[mask_tauspace].min(),
            v_full[mask_tauspace].max(),
            color='C1', alpha=0.15, label='mask region')
-ax.set(xlim=(v_centre - 1500, v_centre + 1500),
+ax.set(xlim=(v_centre - 2500, v_centre + 2500),
        ylim=(-0.05, 1.10),
        xlabel='v (km/s)', ylabel='F',
        title='Three fill strategies on the same tauspace mask')
