@@ -374,25 +374,35 @@ sims that have *every* snapshot output:
 """),
 
         code("""
-from hcd_analysis.io import read_snapshots_txt
+# The authoritative per-(sim, snap) redshift is meta.json["z"] in each
+# processed-output snap directory.  Two ways to recover the full snap-z
+# mapping for one sim:
+#
+#   (1) Read each snap_NNN/meta.json directly (works for every sim that has
+#       any processed outputs at all — this is the path we use here).
+#   (2) Read the raw-data side's output/Snapshots.txt via
+#       hcd_analysis.io.read_snapshots_txt(sim_info).  This is the original
+#       source of truth but is missing for some sims (early-stopped runs,
+#       or sims whose Snapshots.txt was never written).
+import json
 
-# Note: read_snapshots_txt expects the *raw-data* sim path (with output/Snapshots.txt),
-# not the hcd_outputs path. So we point at the Turbo location.
-from hcd_analysis.io import SimInfo
-example_sim = SimInfo(
-    name=example,
-    path=DATA_ROOT / example,
-    params=params,
-)
-snap_to_a = read_snapshots_txt(example_sim)
+sim_dir = HCD_OUT_ROOT / example
+snap_dirs = sorted(p for p in sim_dir.iterdir()
+                   if p.is_dir() and p.name.startswith('snap_'))
 
-print(f'{len(snap_to_a)} snapshots in Snapshots.txt for this sim:')
+print(f'{len(snap_dirs)} snapshots present on disk for this sim:')
 print(f'{"snap":>4}  {"a":>8}  {"z":>6}')
-for snap in sorted(snap_to_a):
-    a = snap_to_a[snap]
-    z = 1.0 / a - 1.0
-    if 2.0 <= z <= 6.0:
-        print(f'{snap:>4d}  {a:>8.4f}  {z:>6.3f}')
+for sd in snap_dirs:
+    with open(sd / 'meta.json') as f:
+        m = json.load(f)
+    z = float(m['z'])
+    a = 1.0 / (1.0 + z)
+    snap_num = int(m['snap'])
+    print(f'{snap_num:>4d}  {a:>8.4f}  {z:>6.3f}')
+
+# Sanity-check the snap→z mapping against the canonical table at the top of
+# this notebook.  Any sim that skipped a canonical snap will show a
+# mismatch; that's expected (the table is the "fully run" mapping).
 """),
 
         md("""
@@ -413,6 +423,10 @@ you have a specific reason:
 
 * `cddf.npz` — original (buggy) CDDF before the `(1+z)·h` absorption-path
   fix.  **Always prefer `cddf_corrected.npz`.**
+* `cddf_corrected.npz.tmp.npz` — stale write-then-rename artifact left
+  behind by the patch script (the script writes to a `.tmp.npz` and
+  renames, but a small number of snaps never finished the rename).
+  Safe to ignore; contents are identical to `cddf_corrected.npz`.
 * `p1d.npz`, `p1d_excl.npz`, `p1d_ratios.npz` — older / aggregate P1D
   variants superseded by `p1d_per_class.h5` for emulator inputs.
 * `done` — empty marker file the pipeline writes when the (sim, snap) is
@@ -741,6 +755,15 @@ always touch:
 
 Everything else (`colden`, `tau_obs`, `temperature`, `velocity`) exists
 but is **empty** — they were not stored.  Don't try to read from them.
+
+**Why `float32` is enough for `τ`.**  float32 has ~7 decimal digits of
+precision.  `τ` in this simulation ranges from `~10⁻⁵` in the optically
+thin forest to `~10⁹` at the line centre of a strong DLA — but the
+*relative* precision needed per pixel is ~1 % (set by sightline-to-sightline
+sampling noise, not by float roundoff).  Seven significant digits gives
+~`10⁻⁷` relative precision, which is two orders of magnitude better
+than the sampling-noise floor.  Storing `τ` as float64 would double the
+3 GB raw files for no measurable gain in any downstream observable.
 """),
 
         code("""
@@ -952,6 +975,34 @@ in the optically thin regime.  Units of `f` are **cm²**
 (since `[dN_{HI}] = cm^{-2}` and `dX` is dimensionless), so the y-axis
 on a CDDF plot is always cm².
 
+**Why `dX = (1+z)² (H₀/H(z)) dz`?**  Start from a population of
+absorbers with fixed *comoving* number density `n₀` and cross section
+`σ`.  The number we encounter along a sightline per unit redshift is
+
+$$
+\\frac{dN}{dz} \\;=\\; n_{\\rm phys}(z)\\,\\sigma\\,\\frac{dr}{dz}
+\\;=\\; n_{0}(1+z)^{3}\\,\\sigma\\,\\frac{c}{H(z)(1+z)}
+\\;=\\; n_{0}\\,\\sigma\\,\\frac{c\\,(1+z)^{2}}{H(z)}.
+$$
+
+The factor `(1+z)³` converts comoving to proper number density, and
+`dr/dz = c/[H(z)(1+z)]` is the proper-distance differential.  Now
+*define*
+
+$$
+dX \\;\\equiv\\; (1+z)^{2}\\,\\frac{H_{0}}{H(z)}\\,dz
+\\quad\\Longrightarrow\\quad
+\\frac{dN}{dX} \\;=\\; n_{0}\\,\\sigma\\,\\frac{c}{H_{0}},
+$$
+
+which is **constant in `z` for a non-evolving population**.  `dX` is
+just `dz` rescaled by exactly the cosmology factor needed to make a
+constant comoving density show up as a flat `dN/dX(z)`.  This is the
+useful property of the absorption-distance variable — any
+**evolution** seen in `dN/dX(z)` is then a real signal about the
+absorber population (Bahcall & Peebles 1969 introduced the concept;
+Wolfe, Gawiser & Prochaska 2005 §3.2 is the standard modern review).
+
 **Per-sightline construction (the part that bit me when I tried to
 reproduce this from scratch).**  The differential is `dz` along the
 sightline.  A single skewer is one velocity-box's worth of length
@@ -1117,10 +1168,24 @@ else:
 """),
 
         md("""
-The two sets should match closely; small discrepancies (~1e-4) are
-expected because the summary file uses an integer truncation when
-counting per-class absorbers, while we re-derived it from the binned
-CDDF.
+Expected agreement, with one subtlety:
+
+* **LLS** should match the summary file exactly (the lower class
+  boundary at log NHI = 17.2 is also the catalog's minimum, and the
+  upper boundary at 19.0 *is* a bin edge of the 30-bin CDDF grid).
+* **subDLA** and **DLA** will typically differ from the summary file
+  at the **~5–15 %** level.  This is **not** a bug — it's a binning
+  artifact.  The histogram-summation we did here counts absorbers in
+  whole `log NHI` bins, but the class boundaries 19.0 and 20.3 do not
+  fall on bin edges, so absorbers in the boundary bins get
+  mis-attributed.  The summary file (`hcd_summary_lf.h5`) computes
+  per-class counts directly from each absorber's `log10(NHI)` —
+  ungridded, exact — and is therefore the authoritative value.
+
+In short: **for class statistics, classify by absorber NHI, not by
+binned CDDF**.  We computed it both ways here on purpose to make this
+point explicit; the histogram form is convenient for plotting `f(N_HI)`
+but is not exact for `dN/dX` per class.
 
 ## 4. Compare against Ho+21
 
@@ -1543,8 +1608,22 @@ For now, just be aware that **`P_DLA_only` on disk is at one specific
    how the four templates shift.  This is exactly the kind of ablation
    we run when calibrating the emulator threshold choices.
 3. **Parseval check.**  Pick one clean sightline, compute its δF and
-   FFT, and verify that `(1/L) · ∫ |FFT|² dk = ⟨δF²⟩` to within
-   floating-point precision.  This catches normalisation bugs.
+   FFT, and verify Parseval's theorem.  Conventions used by
+   `compute_p1d_per_class`:
+
+   * Use `np.fft.rfft` on `delta_F = F/⟨F⟩ − 1` (real input → one-sided
+     k array via `np.fft.rfftfreq(nbins, d=dv_kms)`, cyclic units).
+     Multiply by `dv_kms` so the result has units of velocity, then
+     square the modulus and divide by the box length `L = nbins * dv_kms`:
+     `P(k) = (dv * |rfft(δF)|)² / L`.
+   * Sum over k with a **factor-of-two boost** on the non-DC and
+     non-Nyquist bins (because rfft returned the one-sided spectrum
+     and `|F̃(−k)|² = |F̃(k)|²`):
+     `var_from_P = (2/L) * sum(P[1:-1]) * dk + (P[0]+P[-1])/L * dk`
+     where `dk = 1/L` (cyclic) or equivalently `(1/L) * (P[0]+P[-1] + 2*P[1:-1].sum())`.
+   * Verify it equals `np.var(delta_F, ddof=0)` to ~1e-12 relative
+     precision on a clean sightline.  Any mismatch points at a missing
+     `dv`/`L` factor or a wrong rfft-vs-fft convention.
 
 ## Where to next
 
