@@ -155,6 +155,19 @@ def test_write_cache_two_row_round_trip():
     print("write_cache: 2-row round-trip OK")
 
 
+def test_verify_round_trip_against_source_first_pair():
+    from hcd_analysis.p1d import _DEFAULT_K_BINS
+    pairs = bec.discover_sim_snap_pairs(HCD_ROOT)[:1]
+    k_target = _DEFAULT_K_BINS
+    rows = [bec.build_row(s, sn, sd, k_target) for s, sn, sd in pairs]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "observables.h5"
+        bec.write_cache(rows, k_target, out)
+        bec.verify_round_trip(out, sim=pairs[0][0], snap=pairs[0][1], root=HCD_ROOT)
+    print("verify_round_trip: OK")
+
+
 if __name__ == "__main__":
     test_discover_sim_snap_pairs_returns_nonempty()
     test_per_file_readers_on_first_pair()
@@ -163,4 +176,5 @@ if __name__ == "__main__":
     test_dndx_per_class_matches_manual_sum_on_first_pair()
     test_build_row_schema_first_pair()
     test_write_cache_two_row_round_trip()
+    test_verify_round_trip_against_source_first_pair()
     print("OK")

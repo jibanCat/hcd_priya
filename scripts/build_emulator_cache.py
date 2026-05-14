@@ -13,6 +13,7 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import datetime
 import json
 import re
@@ -224,3 +225,79 @@ def write_cache(rows: list[dict], k_target: np.ndarray, output_path: Path) -> No
             f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0))
         for key in _PER_ROW_2D_KEYS:
             f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0))
+
+
+_DEFAULT_HCD_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+
+
+def verify_round_trip(cache_path: Path, sim: str, snap: int,
+                      root: Path = _DEFAULT_HCD_ROOT) -> None:
+    """Re-load one row from the cache and compare back to source files."""
+    with h5py.File(cache_path, "r") as f:
+        sim_names = f["sim_name"][...].astype(str)
+        snaps = f["snap"][...]
+        mask = (sim_names == sim) & (snaps == snap)
+        if mask.sum() != 1:
+            raise AssertionError(f"row ({sim}, {snap}) not unique in cache "
+                                 f"({mask.sum()} matches)")
+        i = int(np.where(mask)[0][0])
+        cached = {
+            "z": float(f["z"][i]),
+            "params": f["params"][i],
+            "P_clean": f["P_clean"][i],
+            "dNdX_DLA": float(f["dNdX_DLA"][i]),
+            "k_target": f["k_target"][...],
+        }
+
+    match = [(s, sn, sd) for s, sn, sd in discover_sim_snap_pairs(root)
+             if s == sim and sn == snap]
+    if not match:
+        raise AssertionError(f"({sim}, {snap}) not found under {root}")
+    _, _, snap_dir = match[0]
+    row = build_row(sim, snap, snap_dir, cached["k_target"])
+
+    assert np.isclose(cached["z"], row["z"]), f"z mismatch: {cached['z']} vs {row['z']}"
+    assert np.allclose(cached["params"], row["params"]), "params mismatch"
+    assert np.allclose(cached["P_clean"], row["P_clean"], equal_nan=True), "P_clean mismatch"
+    assert np.isclose(cached["dNdX_DLA"], row["dNdX_DLA"]), "dNdX_DLA mismatch"
+    print(f"verify_round_trip: ({sim}, snap_{snap:03d}) matches source OK")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Build the HCD-emulator observables cache (Phase 1).")
+    parser.add_argument("--root", type=Path, default=_DEFAULT_HCD_ROOT,
+                        help="Root scratch directory containing per-sim folders.")
+    parser.add_argument("--output", type=Path,
+                        default=REPO_ROOT / "hcd_analysis" / "_emulator_data" / "observables.h5",
+                        help="Output HDF5 path (will be overwritten).")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="If set, only process the first N pairs (for dry runs).")
+    parser.add_argument("--spot-check", action="store_true",
+                        help="After building, re-verify the first row against source files.")
+    args = parser.parse_args()
+
+    from hcd_analysis.p1d import _DEFAULT_K_BINS
+    k_target = _DEFAULT_K_BINS
+
+    pairs = discover_sim_snap_pairs(args.root)
+    if args.limit is not None:
+        pairs = pairs[: args.limit]
+    print(f"Found {len(pairs)} (sim, snap) pairs under {args.root}")
+
+    rows = []
+    for i, (sim, snap, snap_dir) in enumerate(pairs):
+        rows.append(build_row(sim, snap, snap_dir, k_target))
+        if (i + 1) % 100 == 0 or (i + 1) == len(pairs):
+            print(f"  built {i + 1}/{len(pairs)}")
+
+    write_cache(rows, k_target, args.output)
+    print(f"Wrote cache to {args.output}  ({args.output.stat().st_size / 1e6:.2f} MB)")
+
+    if args.spot_check and rows:
+        verify_round_trip(args.output, sim=rows[0]["sim_name"], snap=rows[0]["snap"],
+                          root=args.root)
+
+
+if __name__ == "__main__":
+    main()
