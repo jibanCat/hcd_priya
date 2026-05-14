@@ -5,6 +5,8 @@ Run with: python3 tests/test_emulator_cache.py
 import sys
 from pathlib import Path
 
+import numpy as np
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
@@ -55,7 +57,32 @@ def test_per_file_readers_on_first_pair():
           f"p1d k.shape={p1d['k'].shape}")
 
 
+def test_interp_p1d_loglog_pure_power_law_recovers_input():
+    # P(k) = A k^n on a fine source grid; log-log interpolation onto a
+    # coarse subgrid should reproduce A k^n exactly (log-log linear interp
+    # is exact for power laws).
+    k_src = np.geomspace(1e-3, 5e-2, 200)
+    A, n = 7.3, -1.4
+    P_src = A * k_src**n
+
+    k_target = np.geomspace(2e-3, 3e-2, 25)
+    P_interp = bec.interp_p1d_loglog(k_src, P_src, k_target)
+    assert np.allclose(P_interp, A * k_target**n, rtol=1e-10)
+
+
+def test_interp_p1d_loglog_out_of_range_is_nan():
+    k_src = np.geomspace(1e-3, 2e-2, 100)
+    P_src = np.ones_like(k_src)
+    k_target = np.array([5e-4, 1e-2, 5e-2])  # below, inside, above source range
+    P_interp = bec.interp_p1d_loglog(k_src, P_src, k_target)
+    assert np.isnan(P_interp[0])
+    assert P_interp[1] == 1.0
+    assert np.isnan(P_interp[2])
+
+
 if __name__ == "__main__":
     test_discover_sim_snap_pairs_returns_nonempty()
     test_per_file_readers_on_first_pair()
+    test_interp_p1d_loglog_pure_power_law_recovers_input()
+    test_interp_p1d_loglog_out_of_range_is_nan()
     print("OK")

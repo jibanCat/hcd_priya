@@ -68,3 +68,31 @@ def read_p1d_per_class(snap_dir: Path) -> dict:
             arr = f[key][...]
             out[key] = arr.item() if arr.shape == () else arr
     return out
+
+
+def interp_p1d_loglog(k_src: np.ndarray, P_src: np.ndarray,
+                      k_target: np.ndarray) -> np.ndarray:
+    """Log-log linear interpolation of P(k) from `k_src` onto `k_target`.
+
+    Out-of-range targets (k_target < k_src.min() or > k_src.max()) are
+    set to NaN. Non-positive P values in the source are dropped before
+    log-spacing the interpolation (P1D should be > 0 in practice; this
+    guards against floating-point edge cases).
+    """
+    k_src = np.asarray(k_src, dtype=np.float64)
+    P_src = np.asarray(P_src, dtype=np.float64)
+    k_target = np.asarray(k_target, dtype=np.float64)
+
+    pos = P_src > 0
+    if pos.sum() < 2:
+        return np.full(k_target.shape, np.nan)
+
+    log_k_src = np.log(k_src[pos])
+    log_P_src = np.log(P_src[pos])
+
+    k_lo, k_hi = k_src[pos].min(), k_src[pos].max()
+    in_range = (k_target >= k_lo) & (k_target <= k_hi)
+
+    out = np.full(k_target.shape, np.nan)
+    out[in_range] = np.exp(np.interp(np.log(k_target[in_range]), log_k_src, log_P_src))
+    return out
