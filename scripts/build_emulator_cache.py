@@ -96,3 +96,20 @@ def interp_p1d_loglog(k_src: np.ndarray, P_src: np.ndarray,
     out = np.full(k_target.shape, np.nan)
     out[in_range] = np.exp(np.interp(np.log(k_target[in_range]), log_k_src, log_P_src))
     return out
+
+
+_LLS_LOW, _LLS_HIGH = 17.2, 19.0
+_SUB_LOW, _SUB_HIGH = 19.0, 20.3
+_DLA_LOW = 20.3
+
+
+def compute_dndx_per_class(cddf: dict) -> dict[str, float]:
+    """Sum absorber counts per class and divide by total path-length dX."""
+    centres = cddf["log_nhi_centres"]
+    n_abs = cddf["n_absorbers"]
+    total_path = float(cddf["total_path"])
+
+    lls = float(n_abs[(centres >= _LLS_LOW) & (centres < _LLS_HIGH)].sum() / total_path)
+    sub = float(n_abs[(centres >= _SUB_LOW) & (centres < _SUB_HIGH)].sum() / total_path)
+    dla = float(n_abs[centres >= _DLA_LOW].sum() / total_path)
+    return {"dNdX_LLS": lls, "dNdX_subDLA": sub, "dNdX_DLA": dla}

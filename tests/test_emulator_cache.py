@@ -80,9 +80,35 @@ def test_interp_p1d_loglog_out_of_range_is_nan():
     assert np.isnan(P_interp[2])
 
 
+def test_dndx_per_class_matches_manual_sum_on_first_pair():
+    pairs = bec.discover_sim_snap_pairs(HCD_ROOT)
+    _, _, snap_dir = pairs[0]
+    cddf = bec.read_cddf(snap_dir)
+
+    result = bec.compute_dndx_per_class(cddf)
+
+    centres = cddf["log_nhi_centres"]
+    n_abs = cddf["n_absorbers"]
+    total_path = float(cddf["total_path"])
+    lls_mask = (centres >= 17.2) & (centres < 19.0)
+    sub_mask = (centres >= 19.0) & (centres < 20.3)
+    dla_mask = (centres >= 20.3)
+    ref = {
+        "dNdX_LLS":    float(n_abs[lls_mask].sum() / total_path),
+        "dNdX_subDLA": float(n_abs[sub_mask].sum() / total_path),
+        "dNdX_DLA":    float(n_abs[dla_mask].sum() / total_path),
+    }
+    for k in ref:
+        assert np.isclose(result[k], ref[k], rtol=1e-12), \
+            f"{k}: got {result[k]}, expected {ref[k]}"
+    print(f"dNdX: LLS={result['dNdX_LLS']:.4f}  "
+          f"subDLA={result['dNdX_subDLA']:.4f}  DLA={result['dNdX_DLA']:.4f}")
+
+
 if __name__ == "__main__":
     test_discover_sim_snap_pairs_returns_nonempty()
     test_per_file_readers_on_first_pair()
     test_interp_p1d_loglog_pure_power_law_recovers_input()
     test_interp_p1d_loglog_out_of_range_is_nan()
+    test_dndx_per_class_matches_manual_sum_on_first_pair()
     print("OK")
