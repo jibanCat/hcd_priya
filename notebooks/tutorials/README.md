@@ -3,6 +3,38 @@
 Five short notebooks that walk a new student through the per-(sim, snap)
 HCD outputs from the ground up.  Read them in order:
 
+## Before you start
+
+1. **Install the package.**  Follow the install instructions in the
+   [top-level `README.md`](../../README.md#installation) — either run
+   `bash scripts/install_greatlakes.sh` on Great Lakes, or do the generic
+   `pip install -r requirements.txt && pip install -e .` path on a
+   laptop / other cluster.  The tutorial notebooks need `pandas`,
+   `jupyter`, and `nbformat` in addition to the runtime stack; all are
+   pulled in by `requirements.txt`.
+
+2. **Confirm data access.**  All five notebooks read from two paths:
+
+   - Raw spectra (Turbo): `/nfs/turbo/umor-yueyingn/mfho/emu_full`
+   - Processed outputs (scratch): `/scratch/cavestru_root/cavestru0/mfho/hcd_outputs`
+
+   On Great Lakes both are mounted on every login / compute node; from
+   anywhere else you'll need a tunnel or a local copy of one (sim, snap).
+   `ls` either path before running NB 00 — if it errors, fix the mount
+   first and don't go further.
+
+3. **Pick a working example sim.**  Every notebook uses the same example,
+   `ns0.81Ap1.6e-09…bhfeedback0.0333` at snap 022 (z = 2.0).  Use a
+   different one if you like, but keep one (sim, snap) consistent across
+   all five notebooks the first time through.
+
+4. **Run them as Jupyter notebooks**, not the CLI.  `jupyter lab` or
+   `jupyter notebook` in this directory will pick them up.  The committed
+   `.ipynb` files contain executed outputs you can read offline — but
+   you'll learn more by re-executing and tweaking parameters.
+
+## Reading order
+
 | # | Notebook | What it covers |
 |---|----------|----------------|
 | 0 | [`00_dataset_layout.ipynb`](00_dataset_layout.ipynb) | Where the raw spectra and processed outputs live, how the 9-D parameter point is encoded in the simulation folder name, the snapshot ↔ redshift mapping, and what files exist for each (sim, snap). |
@@ -261,6 +293,13 @@ want to edit an explanation, prefer to edit the build script and re-run::
 
 then re-execute the affected notebook.  This keeps text and code in one
 auditable place.
+
+Every figure produced by a notebook is also saved to
+`notebooks/tutorials/figures/NB<XX>_<short_name>.png` at `dpi = 200` (the
+notebooks' built-in `save_fig()` helper handles this).  These PNGs are
+reproducible from a re-execution and are intended to be the canonical
+"production" copy of the tutorial figures, e.g. for embedding into
+documentation or slide decks.
 
 ## Project ideas after the tutorials
 
