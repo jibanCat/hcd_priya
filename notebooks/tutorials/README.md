@@ -163,8 +163,9 @@ look at the background reading below.
    which is which?  (Hint: cyclic frequency vs angular frequency.)
 3. The DLA template ratio `P_DLA_only / P_clean` shows a low-k
    enhancement and a high-k upturn.  What real-space feature drives
-   each?  See figure caption in the
-   `figures/diagnostics/p1d_masking/per_class_realspace_fourier.png`.
+   each?  (Hint: the low-k enhancement is the long-lever-arm response
+   of `⟨F⟩` to one rare absorber on a sightline; the high-k upturn is
+   the Fourier transform of the absorber's own velocity profile.)
 4. If you raise the NHI threshold for the "DLA" class from 20.3 to
    20.5, do you expect `P_DLA_only` at low k to *rise* or *fall*?
    Argue from first principles.

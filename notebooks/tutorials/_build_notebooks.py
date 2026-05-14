@@ -134,9 +134,9 @@ def build_00():
         md("""
 # 00 — Dataset layout
 
-This is the first of four tutorial notebooks for the HCD (high-column-density
-absorber) catalog and emulator-input dataset.  By the end of the four notebooks
-you will be able to:
+This is the first of **five** tutorial notebooks for the HCD
+(high-column-density absorber) catalog and emulator-input dataset.  By
+the end of the five notebooks you will be able to:
 
 | Notebook | What you'll learn |
 |---|---|
@@ -144,6 +144,7 @@ you will be able to:
 | 01 | How to read the per-sim **absorber catalog** (`catalog.npz`) and the underlying **raw spectra** HDF5 file; visualise a single DLA. |
 | 02 | How to read the cached **CDDF** and **dN/dX** for one (sim, snap) and how to recompute them from the catalog (and reproduce a literature comparison plot). |
 | 03 | How to read the cached **per-class P1D** templates (`p1d_per_class.h5`) and how to recompute them from raw spectra + catalog using the project's own helpers. |
+| 04 | A single sightline end-to-end: τ(v) → F(v), the finder algorithm stage-by-stage, fast vs Voigt NHI estimation, masking and fill strategies. |
 
 Why this matters: the per-sim outputs in this dataset are the inputs to the
 HCD emulator we are building.  Before you can train or evaluate that emulator
@@ -151,27 +152,68 @@ you need to be confident that you understand — and can reproduce — the four
 observables on disk.
 
 **Audience.** A new graduate student or RA picking up this project for the
-first time.  We assume comfort with numpy / matplotlib / h5py and basic
-familiarity with the Lyman-α forest as a cosmological probe.  We do not
-assume any prior exposure to this codebase.
+first time.  We assume comfort with numpy / matplotlib / h5py.  We do **not**
+assume prior exposure to the Lyα forest, to this codebase, or to
+emulator-building.  The primer immediately below establishes the
+physical picture; if you already know the field, skim it and skip to
+the glossary in §0.
+"""),
 
-## Why this dataset exists (1-paragraph context)
+        md("""
+## What is the Lyα forest? (and what is this project trying to do?)
 
-The Lyman-α forest is the absorption produced by neutral hydrogen on its
-way from a distant quasar to us; its statistics (mean flux, 1D power
-spectrum, clustering) are sensitive to cosmology and to the IGM
-thermal/ionisation state.  Most of the forest is optically thin, but a
-small fraction of sightlines hit dense gas clouds — **Lyman-Limit
-Systems (LLS)**, **subDLAs**, and **Damped Lyα Absorbers (DLAs)** — that
-are optically thick enough to bias the inferred forest statistics if
-left in.  This project's job is to **identify those high column-density
-(HCD) systems** in the simulated forest, mask or template-correct their
-contribution, and provide the resulting per-class observables to a
-downstream emulator.
+A six-bullet primer for a first-day grad student.
 
-The dataset you are about to read consists of ~1000 (simulation,
-snapshot) outputs from the **PRIYA** simulation suite at Great Lakes,
-each summarised into a few-MB folder of catalogs and power spectra.
+* **The forest as a transmission spectrum.**  Light from a distant
+  quasar passes through the intergalactic medium (IGM) on its way to
+  us.  Wherever there's neutral hydrogen along the line of sight, the
+  Lyα transition (rest wavelength 1215.67 Å) absorbs a piece of the
+  spectrum.  What we observe is therefore not the IGM itself but a
+  *transmission spectrum* `F(λ) = exp(−τ(λ))`, where `τ` is the
+  velocity-integrated optical depth.  The "forest" is the dense forest
+  of overlapping low-τ absorption features that this transmission
+  spectrum acquires between the quasar's Lyα and Lyβ rest lines.
+
+* **Two phases of the IGM.**  Most pixels in the forest are *optically
+  thin* — they trace small density fluctuations of warm, photoionised
+  hydrogen, and `τ` for a given pixel scales roughly as `(1+δ_b)^α` at
+  fixed photoionisation rate.  A *small* fraction of sightlines pass
+  through self-shielded, dense, cold gas — the **HCDs**: Lyman-Limit
+  Systems (LLS), sub-DLAs, and Damped Lyα Absorbers (DLAs), in
+  ascending order of `N_HI`.  These are the rare, optically-thick tail
+  on the same continuous distribution of column densities.
+
+* **Why P1D is the canonical observable.**  Observational surveys
+  (BOSS, eBOSS, DESI, HiRes) report `⟨F⟩(z)` and the *1D flux power
+  spectrum* `P_{1D}(k, z)` measured along each sightline, because 3D
+  forest statistics require quasar pair sampling that's only just
+  becoming feasible.  The 1D power spectrum is what cosmology
+  constraints from the Lyα forest are based on, and it's what the
+  downstream HCD emulator in this project will need to reproduce.
+
+* **The HCD problem in one sentence.**  A DLA on a sightline lowers
+  that sightline's `⟨F⟩` and adds correlated power at low `k` that
+  *masquerades as cosmology* — leaving it in biases inferred parameters.
+  This project's job is to separate the HCD-induced contribution from
+  the forest signal, so that downstream analyses can either mask HCDs
+  out or marginalise over a per-class template.
+
+* **Map from physics to observables to notebooks.**  Four observables
+  drop out of this picture:
+    1. The **absorber catalog** — one row per HCD with `(N_HI, b, v_0)` — is
+       what NB01 walks through.
+    2. The **CDDF** `f(N_HI)` and its integral **dN/dX** — number
+       statistics of HCDs as a function of column density — are NB02.
+    3. The **per-class P1D** templates `(P_clean, P_LLS_only,
+       P_subDLA_only, P_DLA_only)` — *what HCDs add to the forest power
+       spectrum, decomposed by class* — are NB03.
+    4. The **per-spectrum view** — masking and fill strategies on a
+       single sightline — is NB04.
+
+* **Reading suggestion before continuing.**  If anything above is
+  unfamiliar, skim §1–3 of Croft+1998 or §1–3 of Wolfe, Gawiser &
+  Prochaska 2005 before you start NB01.  Both are linked from
+  `notebooks/tutorials/README.md` under "Background reading".
 """),
 
         md("""
@@ -194,8 +236,8 @@ notebooks define them more carefully on first use.
 | **P1D(k)** | 1D flux power spectrum, P1D = ⟨|FFT[δF]|²⟩ · dv / N.  Units of velocity (km/s) when `k` is in s/km. |
 | **Cyclic vs angular k** | Cyclic: `k_cyc = m / L` (units s/km if L in km/s); angular: `k_ang = 2π k_cyc` (rad·s/km).  The HDF5 files store `k_cyc` (from `numpy.fft.rfftfreq`); PRIYA emulator plots use `k_ang`. |
 | **Rogers per-class P1D** | Four-template decomposition of the P1D into `P_clean`, `P_LLS_only`, `P_subDLA_only`, `P_DLA_only`, each normalised by its **own subset's** mean flux.  Used as a parametric HCD-bias template downstream. |
-| **fast-mode NHI** vs **Voigt NHI** | Two ways to turn τ(v) into a column density: the fast estimator inverts the τ sum-rule on the core (0.1–0.3 dex bias); the Voigt fitter fits a single-component Voigt profile on a wider window (more accurate at DLA NHI where wings carry the information). |
-| **`(1+z)·h` bug** | Historical absorption-distance bug in `cddf.npz` (factor of `(1+z)·h` missing).  Always use `cddf_corrected.npz`. |
+| **fast-mode NHI** vs **Voigt NHI** | Two ways to turn τ(v) into a column density.  The **fast** estimator applies the Ladenburg–Reiche sum rule directly to the τ array (`N_HI = Σ τ_i dv / σ_int`); this is *exact* for noise-free, complete profiles — the only error source is truncation of pixels below `τ_threshold`, which is `< 0.005 dex` worst case (full derivation in `docs/fast_mode_physics.md`).  The **Voigt** fit fits a single-component Voigt profile on a widened window; it agrees with fast mode to `< 0.001 dex` on clean profiles, but gives you `b` for free and is more robust to a single contaminating absorber inside the fit window.  Fast mode is the production LF setting; Voigt is the HR setting (HR has the SNR to use `b`). |
+| **`(1+z)·h` bug** | Historical absorption-distance bug: the original `cddf.npz` was **inflated** by a missing `(1+z)·h` factor in the path-length denominator.  The corrected file is the original divided by `patch_factor = (1+z)·h` (≈ 2.0 at z=2, h=0.67).  Always use `cddf_corrected.npz`. |
 """),
 
         md("""
@@ -297,8 +339,8 @@ Each simulation writes ~20 snapshots between z = 6 and z = 2.  The mapping
 from snapshot index to scale factor `a` lives in
 `<sim>/output/Snapshots.txt`; redshift is `z = 1/a − 1`.
 
-The standard snapshots and their redshifts (constant across simulations,
-because PRIYA picks a fixed list of `a` values):
+The canonical-numbering table below maps snap index → redshift for
+sims that have *every* snapshot output:
 
 | Snap | z    |  | Snap | z    |
 |------|------|--|------|------|
@@ -313,14 +355,22 @@ because PRIYA picks a fixed list of `a` values):
 | 012  | 3.80 |  | 022  | 2.20 |
 | 013  | 3.74 |  | 023  | 2.00 |
 
-**Two practical caveats:**
+**Three practical caveats — read these:**
 
-1. Not every sim has every snapshot.  Snap 022 (z = 2.2) and snap 023
-   (z = 2.0) are missing in many sims — sims that were not run all the
-   way down to z = 2.  Always check before assuming a (sim, snap) is
-   present.
-2. We ignore snap 016 (z = 3.20) for some analyses where it overlaps
-   awkwardly with neighbouring snaps; see the analysis docs for context.
+1. **Sims can have different snap-z mappings.**  Each sim has its own
+   `Snapshots.txt`, and sims that were stopped early or that skipped
+   intermediate outputs end up with snaps that look like the table
+   above but point to a different scale factor.  Concretely: the
+   example sim used throughout this tutorial has its `snap_022` at
+   **z = 2.0** (not 2.2), because that sim's output schedule skipped
+   one of the higher-z snaps.  **`meta.json["z"]` is the authoritative
+   z for any (sim, snap) — always read it; never rely on snap
+   number alone.**
+2. Not every sim has every snapshot.  Snap 022 (canonical z = 2.2) and
+   snap 023 (canonical z = 2.0) are missing in some sims that weren't
+   run all the way down.
+3. We ignore snap 016 (canonical z = 3.20) for some analyses where it
+   overlaps awkwardly with neighbouring snaps; see the analysis docs.
 """),
 
         code("""
@@ -411,6 +461,15 @@ This matters for emulator construction: you can't just stack the on-disk
 P1Ds into a `(N_sims, n_k)` matrix without first interpolating onto a
 shared k-grid.  We'll come back to this in notebook 03; for now just
 remember it.
+
+**Note on k convention.**  The `k` array stored in `p1d_per_class.h5`
+is the **cyclic** wavenumber from `numpy.fft.rfftfreq` (units of
+`s/km`).  The project-wide convention adopted by PRIYA / Rogers / the
+HCD emulator inputs is the **angular** wavenumber `k_ang = 2π · k_cyc`
+(units of `rad·s/km`).  **NB03 §1b makes the switch explicit** and
+every subsequent plot in NB03 — plus the in-repo cache at
+`hcd_analysis/_emulator_data/observables.h5` — is in angular units.
+When you read `k` directly off disk, multiply by `2π` first.
 """),
 
         md("""
@@ -422,6 +481,9 @@ remember it.
   reproduce a literature-comparison figure.
 * **Notebook 03** — recompute the per-class P1D from raw spectra +
   catalog using the project helpers.
+* **Notebook 04** — walk one sightline end-to-end: τ(v) / F(v) per
+  class, the finder algorithm stage-by-stage, fast vs Voigt NHI, and
+  the three mask × three fill matrix.
 
 If you ever want a quick reference for any of the file schemas, run::
 
@@ -1064,8 +1126,28 @@ CDDF.
 
 The Ho+21 CDDF tables live at `/home/mfho/DLA_data/ho21/`.  At z = 2.2
 the closest table is `cddf_z225.txt`.  We overplot to check the sim
-follows the observed CDDF roughly (it should, within a few × 10x at the
-DLA range; LLS / subDLA tend to be over-predicted by current sims).
+follows the observed CDDF roughly: at the DLA range the sim and the
+data agree to within a factor of a few, but **LLS and sub-DLAs tend to
+be over-predicted by current PRIYA-class sims**.
+
+Two physical reasons this happens (both contribute, neither is
+quantitatively settled):
+
+1. **UV background amplitude.**  The CDDF at log NHI ≈ 17.2–19 is set
+   by the photoionisation rate `Γ_UV` of the meta-galactic UV
+   background.  PRIYA uses a Faucher-Giguère 2020 (or similar) UVB
+   prescription; if the true UVB is stronger at z ~ 2–3 than that
+   prescription says, real sightlines are more ionised and the
+   observed sub-DLA count drops.  See `docs/analysis.md` and the
+   FG'20 background papers for the prescription details.
+2. **Small-scale structure / sub-grid clumping.**  At PRIYA's
+   resolution (`Mpc/h` scale), the self-shielded LLS column is only
+   marginally resolved; sub-grid treatments of clumping and
+   self-shielding affect the column distribution at log NHI ≈ 17–19
+   strongly.  Higher-resolution runs (the HR set) typically lower the
+   LLS prediction by 0.1–0.3 dex without changing the DLA prediction
+   much, which is the signature of a resolution effect rather than a
+   cosmological one.
 
 This is exactly the figure that `scripts/plot_cddf_vs_ho21.py` produces
 for all four redshift bins; here we do just the one corresponding to our
@@ -1158,7 +1240,7 @@ By the end of this notebook you will:
    subsample using `hcd_analysis.p1d.compute_p1d_per_class` and confirm
    it matches the cached version.
 
-This is the longest of the four notebooks because it ends at the
+This is the longest of the five notebooks because it ends at the
 boundary of the emulator work.
 
 **Why per-class P1D matters.**  The observed forest P1D mixes
@@ -1808,18 +1890,28 @@ Once a system's pixel range is known, we have to turn its `tau` profile
 into a column density.  Two estimators are available:
 
 * **Fast estimator** (`hcd_analysis.voigt_utils.nhi_from_tau_fast`):
-  integrates τ over the core to get the equivalent width, then inverts
-  the linear curve-of-growth (optically thin) or peak-area relation
-  (thick).  Errors of 0.1–0.3 dex; ~10× faster.  This is what the
+  applies the Ladenburg–Reiche sum rule directly to the τ array:
+  `N_HI = Σ τ_i · dv / σ_int`.  This is **exact** for a noise-free,
+  complete absorption profile — the integrated absorption is a fixed
+  atomic-physics constant regardless of line shape.  The only error
+  source is **truncation** of pixels below `τ_threshold`, and that
+  truncation costs **< 0.005 dex** even in the worst case (an LLS at
+  the detection boundary with extreme thermal broadening); for any
+  log NHI ≥ 18 it's < 0.002 dex, and for DLAs it's immeasurable.
+  Full derivation: `docs/fast_mode_physics.md`.  This is what the
   production LF run uses.
 * **Voigt fit** (`fit_nhi_from_tau`): expands the window by ±200 pixels
-  to capture damping wings, then fits a single Voigt profile in
-  log-space.  Slower, more accurate at high NHI where the wings carry
-  the column-density information.  Used by the HiRes run.
+  and fits a single Voigt profile in log-space.  Recovers the same NHI
+  as fast mode to < 0.001 dex on clean profiles (both are measuring
+  `∫τdv`, just by different routes), but **also returns `b`** and is
+  more robust when a single nearby low-τ absorber contaminates the
+  fast-mode integration window.  Used by the HiRes run, which has the
+  SNR to make `b` measurable.
 
-For DLAs the Voigt fit can be 0.5 dex more accurate than fast mode
-because most of the NHI sits in the wings, not the core.  We
-demonstrate on the clean DLA from §1.
+The two estimators **agree** on clean DLAs.  The Voigt fit's real
+advantage isn't accuracy at high NHI — it's giving you `b` and being
+forgiving about a single contaminating absorber in the window.  We
+demonstrate both on the DLA from §1 below.
 
 **Voigt-profile constants** (you'll need these for the damping-wing
 concept-check question in the tutorial README):

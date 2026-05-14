@@ -86,37 +86,42 @@ These build directly on tutorial notebook 04 and require no new
 infrastructure.  They are good first projects to verify your
 understanding before tackling something larger.
 
-### A1. Voigt vs fast-mode NHI residuals on 100 DLAs
+### A1. Verify the sum-rule prediction: fast vs Voigt NHI on real spectra
 
 **Difficulty.** Entry.  **Time.** 1–2 weeks.
 **Prereqs.** NB04.
 
-The production LF catalog uses the fast NHI estimator
-(`nhi_from_tau_fast`) for speed, which has nominal 0.1–0.3 dex error.
-Quantify the bias for DLAs specifically by re-fitting 100 randomly
-selected DLAs with `fit_nhi_from_tau` (Voigt) and comparing.
+`docs/fast_mode_physics.md` predicts that the fast estimator
+(`nhi_from_tau_fast`) is the **exact Ladenburg–Reiche sum rule** on the
+τ array, with the only error being truncation of pixels below
+`τ_threshold` — quantified as < 0.005 dex worst case and < 0.001 dex
+for DLAs.  Your job is to **verify that prediction on real
+spectra**: are the residuals between fast mode and a wider-window
+Voigt fit (`fit_nhi_from_tau`) actually that small in practice, on
+PRIYA simulated profiles?  If they aren't, *why* — what real-data
+effect is in play that the clean-Voigt theory doesn't capture?
 
 **Deliverable.**
 
-- A figure showing `log(NHI_voigt) − log(NHI_fast)` as a function of
-  `log(NHI_fast)`, with median and 16/84-percentile bands.
-- A one-paragraph summary in `docs/` answering: is the fast estimator
-  biased high, low, or unbiased at log NHI ≥ 20.3?  Does the bias
-  grow with NHI?
+- A figure showing `log(NHI_voigt) − log(NHI_fast)` for 100 randomly
+  selected DLAs, with median and 16/84-percentile bands.  Expectation:
+  scatter at the < 0.005 dex level, no systematic offset.
+- A one-paragraph summary in `docs/` answering: do real PRIYA spectra
+  confirm the < 0.005 dex prediction?  If not, identify the dominant
+  excess-residual cause (contaminating absorbers inside the Voigt fit
+  window? non-Voigt velocity structure? cosmic-ray-like τ spikes?).
 
 **Pointers.**
 
 - `hcd_analysis/voigt_utils.py` — both estimators
 - `hcd_analysis/catalog.py:measure_nhi_for_system` — how the production
   pipeline uses each
-- `docs/fast_mode_physics.md` — sum-rule derivation that motivates fast
-  mode
+- `docs/fast_mode_physics.md` — the sum-rule prediction this project tests
 - `docs/dla_truth_validation.md` — independent particle-based truth
-  comparison; your residuals can be cross-referenced against the
-  ±0.05 dex bias measured there.
+  comparison (±0.05 dex bias) you can cross-reference against.
 
-**Extensions.** Repeat for subDLA and LLS — the fast estimator is
-expected to do *worse* in the optically-thin regime where damping
+**Extensions.** Repeat for subDLA and LLS — these are smaller systems
+where forest contamination of the Voigt fit window is the dominant
 wings carry less information.
 
 ---
@@ -300,7 +305,7 @@ as a function of k.
 - `hcd_analysis/p1d.py:compute_p1d_single` accepts `mask_scheme`
   (`pixrange` or `tauspace`) and `compute_p1d_priya_masked` is the
   PRIYA path.
-- `figures/diagnostics/p1d_masking/priya_mask_comparison.png` —
+- `figures/diagnostics/priya_mask_comparison.png` —
   there's already a 4-way comparison done in the audit; your job is
   to refresh and quantify it on a different sim.
 
@@ -347,7 +352,7 @@ Read that file first.  These are open research problems, not exercises.
 ### D1. Tighten β_DLA via LF+HR + z-stacking
 
 **Difficulty.** Advanced.  **Time.** 1–2 months.
-**Prereqs.** All four notebooks, plus
+**Prereqs.** All five notebooks, plus
 `docs/multipole_jacobian_explained.md` and `docs/clustering_test10_results.md`.
 
 Current PR-#8 result: `β_DLA = −0.17 ± 0.27` on 11 655 DLAs at z = 2.2
@@ -375,7 +380,7 @@ similar.
 ### D2. ξ_FF FFT estimator
 
 **Difficulty.** Advanced.  **Time.** 1–2 months.
-**Prereqs.** All four notebooks, plus FFT-based 3D correlation function
+**Prereqs.** All five notebooks, plus FFT-based 3D correlation function
 literature (Sefusatti, Crocce).
 
 Direct pair counting is O(N²) and infeasible for ξ_FF on 691k
@@ -423,7 +428,7 @@ range where convergence is < 5%.
 
 - `scripts/matched_pair_hr_vs_lf.py` already does this for global
   P1D; extend to per-class.
-- `figures/diagnostics/p1d_masking/hires_vs_lf_subset.png` is the
+- `figures/diagnostics/hires_vs_lf_subset.png` is the
   existing HR/LF comparison plot for one pair.
 
 **Extensions.** Use the convergence cut as a `k_max` for emulator
