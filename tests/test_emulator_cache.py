@@ -112,7 +112,8 @@ def test_build_row_schema_first_pair():
     pairs = bec.discover_sim_snap_pairs(HCD_ROOT)
     sim_name, snap, snap_dir = pairs[0]
 
-    row = bec.build_row(sim_name, snap, snap_dir, _DEFAULT_K_BINS)
+    # Cache uses angular k throughout; convert here too.
+    row = bec.build_row(sim_name, snap, snap_dir, 2.0 * np.pi * _DEFAULT_K_BINS)
 
     # scalars
     assert row["sim_name"] == sim_name
@@ -135,7 +136,7 @@ def test_build_row_schema_first_pair():
 def test_write_cache_two_row_round_trip():
     from hcd_analysis.p1d import _DEFAULT_K_BINS
     pairs = bec.discover_sim_snap_pairs(HCD_ROOT)[:2]
-    k_target = _DEFAULT_K_BINS
+    k_target = 2.0 * np.pi * _DEFAULT_K_BINS  # angular, project convention
     rows = [bec.build_row(s, sn, sd, k_target) for s, sn, sd in pairs]
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -158,7 +159,7 @@ def test_write_cache_two_row_round_trip():
 def test_verify_round_trip_against_source_first_pair():
     from hcd_analysis.p1d import _DEFAULT_K_BINS
     pairs = bec.discover_sim_snap_pairs(HCD_ROOT)[:1]
-    k_target = _DEFAULT_K_BINS
+    k_target = 2.0 * np.pi * _DEFAULT_K_BINS  # angular, project convention
     rows = [bec.build_row(s, sn, sd, k_target) for s, sn, sd in pairs]
 
     with tempfile.TemporaryDirectory() as tmp:

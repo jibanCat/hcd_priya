@@ -597,6 +597,21 @@ print(f'meta:     LLS={meta["n_absorbers"]["LLS"]:,}  '
 """),
 
         md("""
+**Expected output for the example sim/snap above** (z = 2.0):
+
+```
+computed: LLS=55,070  subDLA=17,641  DLA=9,051     (total 81,762)
+meta:     LLS=55,070  subDLA=17,641  DLA=9,051
+```
+
+If your numbers don't match this triple to the digit, the most likely
+causes are a wrong NHI cut (the catalog enforces `log NHI ≥ 17.2` at
+write time, so the LLS count should reproduce exactly) or a different
+catalog file.  The `computed` row and the `meta` row should always
+agree because they're derived from the same NHI column.
+"""),
+
+        md("""
 ## 3. log NHI distribution
 
 A canonical first plot: the per-absorber log NHI distribution, with the
@@ -835,11 +850,13 @@ The pipeline writes two CDDF files:
 * `cddf_corrected.npz` — the corrected version after the absorption-path
   fix described in `docs/bugs_found.md` §7.
 
-The bug was a missing factor of `(1+z)·h` in the absorption path
-denominator.  The corrected file divides by an extra `(1+z)·h` to fix it
-in-place (`patch_factor` is stored as an attribute).  Always use
-`_corrected.npz` going forward; only touch `cddf.npz` if you are
-auditing the bugfix itself.
+The bug was a missing factor of `(1+z)·h` in the absorption-path
+denominator of the original `cddf.npz`.  The corrected file divides by
+an extra `(1+z)·h` to fix it in-place; the stored attribute
+`patch_factor` is exactly that ratio, so at z = 2.0 with h ≈ 0.67 the
+patch factor is `(1+z)·h ≈ 2.005`.  Always use `_corrected.npz` going
+forward; only touch `cddf.npz` if you are auditing the bugfix itself
+(it's kept around for that purpose).
 """),
 
         code("""
@@ -872,6 +889,29 @@ explicit z-dependence so that `f(N_HI)` is approximately z-independent
 in the optically thin regime.  Units of `f` are **cm²**
 (since `[dN_{HI}] = cm^{-2}` and `dX` is dimensionless), so the y-axis
 on a CDDF plot is always cm².
+
+**Per-sightline construction (the part that bit me when I tried to
+reproduce this from scratch).**  The differential is `dz` along the
+sightline.  A single skewer is one velocity-box's worth of length
+`L_v = nbins · dv_kms` in km/s units, which translates to a comoving
+redshift increment
+
+$$
+\\Delta z \\;=\\; (1 + z)\\,\\frac{L_v}{c}.
+$$
+
+Plugging into `dX = (1+z)² · (H₀/H(z)) · dz` gives the per-skewer
+absorption distance
+
+$$
+dX_{\\rm skewer} \\;=\\; (1 + z)^2\\,\\frac{H_0}{H(z)}\\,\\Delta z
+\\;=\\; (1 + z)^3\\,\\frac{H_0}{H(z)}\\,\\frac{L_v}{c}.
+$$
+
+The total path is then `total_path = n_skewers · dX_skewer`.  This
+formula — not the bare Hubble-flow proper length `L_v / H(z)` — is
+what the pipeline writes to `cddf['dX_per_sightline']`.  Using Hubble
+proper length instead gets you off by ~`(1+z)²` and ~500x at z = 2.
 
 In code this is:
 
@@ -1198,9 +1238,37 @@ with h5py.File(SNAP_DIR / 'p1d_per_class.h5', 'r') as f:
     mF_clean = float(f['mean_F_clean'][()])
     mF_dla   = float(f['mean_F_DLA'][()])
 
-print(f'k grid: len={len(k)}  k_min={k[1]:.4g} (k[0]=0 is DC)  k_max={k[-1]:.4g}  s/km')
+print(f'k grid: len={len(k)}  k_min={k[1]:.4g} (k[0]=0 is DC)  k_max={k[-1]:.4g}  s/km   (cyclic, on-disk)')
 print(f'sightlines: total={n_total:,}  clean={n_clean:,}  LLS={n_lls:,}  subDLA={n_sub:,}  DLA={n_dla:,}')
 print(f'<F>_clean = {mF_clean:.4f}    <F>_DLA = {mF_dla:.4f}')
+"""),
+
+        md("""
+## 1b. The k convention used throughout this project: **angular k**
+
+The HDF5 file stores `k` from `numpy.fft.rfftfreq`, which is **cyclic**
+wavenumber `k_cyc = m / L_v` in units of `s/km`.  The standard
+convention for PRIYA Lyα analyses (Bird+2023, Rogers+2018, all
+downstream emulator inputs) is the **angular** wavenumber
+
+$$
+k_{\\rm ang} \\;=\\; 2\\pi\\, k_{\\rm cyc}
+\\qquad(\\text{units: } {\\rm rad}\\cdot s/km).
+$$
+
+We adopt the same convention here.  From this point on in NB03 — and
+in the in-repo emulator cache (`hcd_analysis/_emulator_data/observables.h5`,
+see §4) — every plotted and stored `k` is `k_ang`.  When you load
+`p1d_per_class.h5` directly, multiply the on-disk `k` by `2π` to get
+into the project convention.  The P1D *values* are numerically
+unchanged by this relabel (the prefactor cancels because of how
+Parseval's theorem partitions across the two conventions); only the
+x-axis shifts.
+"""),
+
+        code("""
+# From here on, work in angular k_ang = 2*pi * k_cyc throughout.
+k_ang = 2.0 * np.pi * k        # rad·s/km
 """),
 
         md("""
@@ -1229,10 +1297,10 @@ for arr, lbl, c in [(p_clean, f'clean       (n = {n_clean:,})',  'C0'),
                     (p_lls,   f'LLS only    (n = {n_lls:,})',    'C1'),
                     (p_sub,   f'subDLA only (n = {n_sub:,})',    'C2'),
                     (p_dla,   f'DLA only    (n = {n_dla:,})',    'C3')]:
-    sel = (k > 0) & (arr > 0)
-    ax.loglog(k[sel], arr[sel], '-', label=lbl, color=c)
+    sel = (k_ang > 0) & (arr > 0)
+    ax.loglog(k_ang[sel], arr[sel], '-', label=lbl, color=c)
 
-ax.set_xlabel(r'cyclic wavenumber $k$  (s/km)')
+ax.set_xlabel(r'angular wavenumber $k$  (rad$\\cdot$s/km)')
 ax.set_ylabel(r'$P_{1\\rm D}(k)$  (km/s)')
 ax.set_title(f'Rogers per-class P1D templates  (z = {meta["z"]:.2f})')
 ax.legend(loc='lower left')
@@ -1243,15 +1311,15 @@ plt.show()
         code("""
 # The Rogers-style template ratio: P_<class> / P_clean
 fig, ax = plt.subplots(figsize=(8, 4.5))
-sel = (k > 0) & (p_clean > 0)
+sel = (k_ang > 0) & (p_clean > 0)
 
 for arr, lbl, c in [(p_lls, 'LLS only / clean',    'C1'),
                     (p_sub, 'subDLA only / clean', 'C2'),
                     (p_dla, 'DLA only / clean',    'C3')]:
-    ax.semilogx(k[sel], arr[sel] / p_clean[sel], '-', label=lbl, color=c)
+    ax.semilogx(k_ang[sel], arr[sel] / p_clean[sel], '-', label=lbl, color=c)
 
 ax.axhline(1.0, color='k', linestyle=':', linewidth=0.8, label=r'$P_{\\rm class}/P_{\\rm clean} = 1$')
-ax.set_xlabel(r'cyclic wavenumber $k$  (s/km)')
+ax.set_xlabel(r'angular wavenumber $k$  (rad$\\cdot$s/km)')
 ax.set_ylabel(r'$P_{\\rm class\\,only}\\,/\\,P_{\\rm clean}$  (dimensionless)')
 ax.set_title('Rogers per-class HCD templates (ratio form)')
 ax.legend(loc='upper left')
@@ -1324,24 +1392,24 @@ can see the agreement at low/intermediate k:
 """),
 
         code("""
-k_re = result['k']
+k_re       = 2.0 * np.pi * result['k']        # convert to angular up-front
 p_clean_re = result['P_clean']
 p_dla_re   = result['P_DLA_only']
 
 # Same k-grid because nbins and dv_kms match.  Sanity-check that.
-assert k_re.shape == k.shape, 'k-grid mismatch — nbins must differ'
-assert np.allclose(k_re, k, rtol=1e-12, atol=0)
+assert k_re.shape == k_ang.shape, 'k-grid mismatch — nbins must differ'
+assert np.allclose(k_re, k_ang, rtol=1e-12, atol=0)
 
 fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
 for ax_, cached, sub, lbl in zip(axes,
                                  (p_clean, p_dla),
                                  (p_clean_re, p_dla_re),
                                  ('P_clean  (km/s)', 'P_DLA_only  (km/s)')):
-    sel = (k > 0) & (cached > 0)
-    ax_.loglog(k[sel], cached[sel], 'k-', label='cached (full 691k sightlines)')
-    sel2 = (k > 0) & (sub > 0)
-    ax_.loglog(k[sel2], sub[sel2], 'C1--', label='recomputed (30k subsample)')
-    ax_.set_xlabel(r'cyclic wavenumber $k$  (s/km)')
+    sel = (k_ang > 0) & (cached > 0)
+    ax_.loglog(k_ang[sel], cached[sel], 'k-', label='cached (full 691k sightlines)')
+    sel2 = (k_ang > 0) & (sub > 0)
+    ax_.loglog(k_ang[sel2], sub[sel2], 'C1--', label='recomputed (30k subsample)')
+    ax_.set_xlabel(r'angular wavenumber $k$  (rad$\\cdot$s/km)')
     ax_.set_ylabel(lbl)
     ax_.set_title(lbl.split(' ')[0])
     ax_.legend(loc='lower left')
@@ -1399,11 +1467,20 @@ For now, just be aware that **`P_DLA_only` on disk is at one specific
 ## Where to next
 
 You're now equipped to read every observable this dataset produces.  The
-next milestone is **phase 1 of the HCD emulator work**: building a
-single in-repo HDF5 cache that stacks the per-(sim, snap) observables
-across all 1076 outputs onto a shared k- and NHI-grid.  See
-`docs/SESSION_HANDOVER_2026_04_28.md` and the next planning thread for
-details.
+next milestone is **phase 1 of the HCD emulator work**: a single in-repo
+HDF5 cache that stacks the per-(sim, snap) observables across all 1076
+outputs onto a shared (angular) k-grid and a shared NHI-grid.  That
+cache lives at `hcd_analysis/_emulator_data/observables.h5` (gitignored;
+rebuild with `python3 scripts/build_emulator_cache.py --spot-check`) and
+the row schema follows §1b of this notebook: `k_target` is angular,
+the per-class P1D arrays are pre-interpolated onto it, and rows missing
+the high-k tail (because their native Nyquist is below the top bin)
+are NaN-masked rather than extrapolated.
+
+If you want to extend any of this, see the **F-track projects**
+("Emulator scaffolding") in `notebooks/tutorials/STUDENT_PROJECTS.md` —
+project **F1** is in particular a direct continuation of this notebook
+(multi-sim shared k-grid choice + interpolation policy).
 """),
     ]
     return write_notebook("03_recomputing_per_class_p1d.ipynb", cells)
@@ -1743,6 +1820,62 @@ into a column density.  Two estimators are available:
 For DLAs the Voigt fit can be 0.5 dex more accurate than fast mode
 because most of the NHI sits in the wings, not the core.  We
 demonstrate on the clean DLA from §1.
+
+**Voigt-profile constants** (you'll need these for the damping-wing
+concept-check question in the tutorial README):
+
+| Symbol | Value | Meaning |
+|---|---|---|
+| `λ_α` | 1215.67 Å | Lyα rest wavelength |
+| `ν_α` | `c / λ_α` ≈ 2.466 × 10¹⁵ Hz | Lyα rest frequency |
+| `f_α` | 0.4164 | Lyα oscillator strength |
+| `γ_α` | 6.265 × 10⁸ s⁻¹ | Lyα natural damping rate (`Γ_natural / 2π`) |
+| `σ_α,int` | `πe²f_α / (m_e c)` ≈ 0.0110 cm² · Hz | line-integrated cross section |
+
+**Lorentzian damping-wing formula** (valid for `|Δv| ≫ b`, i.e. far
+enough from line center that the Doppler core is no longer relevant):
+
+$$
+\\tau_{\\rm wing}(\\Delta v)
+\\;\\approx\\;
+\\frac{N_{\\rm HI}\\, \\sigma_{\\alpha,{\\rm int}}\\, \\gamma_{\\alpha}}
+     {4\\pi^{2}\\,(\\nu_{\\alpha}\\,\\Delta v/c)^{2}}
+\\;=\\;
+\\frac{N_{\\rm HI}\\, \\sigma_{\\alpha,{\\rm int}}\\, \\gamma_{\\alpha}\\, c^{2}}
+     {4\\pi^{2}\\,\\nu_{\\alpha}^{2}\\,\\Delta v^{2}}.
+$$
+
+Solving `τ_wing = 1` for `Δv` gives the wing-saturation radius — the
+velocity offset where the absorption stops being optically thick.
+For a `log N_HI = 21`, `b = 25 km/s` DLA this works out to about
+**±1600 km/s** (well outside the catalog's `(pix_start, pix_end)` core,
+which is why §2b widens the fit window).  Plug your numbers into the
+cell below to verify against one of the real DLAs in this snap.
+"""),
+
+        code("""
+# Voigt / damping-wing constants
+LAMBDA_ALPHA  = 1215.67e-8       # cm
+NU_ALPHA      = 2.998e10 / LAMBDA_ALPHA          # Hz
+F_ALPHA       = 0.4164
+GAMMA_ALPHA   = 6.265e8          # s^-1
+SIGMA_INT     = 0.01103          # cm^2 * Hz   (pi e^2 f / (m_e c))
+
+
+def tau_wing_lorentz(nhi, dv_kms):
+    '''Lorentzian-wing tau (valid for |dv_kms| >> b).  dv_kms can be array-like.'''
+    dnu_Hz = NU_ALPHA * (np.asarray(dv_kms) * 1e5) / 2.998e10  # Δv in cm/s → Δν in Hz
+    return nhi * SIGMA_INT * GAMMA_ALPHA / (4.0 * np.pi**2 * dnu_Hz**2)
+
+
+# Concept-check helper: where does tau drop to 1 for a chosen NHI?
+def dv_crit_km_s(nhi_test):
+    '''Solve tau_wing = 1 for |dv| in km/s.'''
+    return np.sqrt(nhi_test * SIGMA_INT * GAMMA_ALPHA / (4.0 * np.pi**2)) \\
+           * 2.998e10 / NU_ALPHA / 1e5
+
+for log_nhi in (20.3, 21.0, 21.5):
+    print(f'log NHI = {log_nhi}:  |Δv| where τ=1  ≈  {dv_crit_km_s(10**log_nhi):7.1f}  km/s')
 """),
 
         code("""
@@ -1932,6 +2065,11 @@ masked region without injecting large-scale power.  `zero_tau` is
 useful only as a sanity check.  `contiguous` is occasionally useful for
 narrow LLS masks where you want continuity but it can underestimate
 mean flux when the mask is wide.
+
+**Production default for this project: `mask = priya` + `fill = mean_flux`.**
+That's the pair used by `compute_p1d_priya_masked` and the
+`no_DLA_priya` variant the upstream emulator consumes.  Any new
+ablation should be reported relative to this baseline.
 """),
 
         code("""

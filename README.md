@@ -67,8 +67,15 @@ Verify:
 
 ```bash
 python -c "import hcd_analysis; print(hcd_analysis.__file__)"
-hcd --help
+hcd --help                    # if step 3 (pip install -e .) bound the entrypoint
+python -m cli.run --help      # equivalent fallback if `hcd` isn't on $PATH
 ```
+
+If the `hcd` script isn't on `$PATH` (common when installing into a
+conda env whose `bin/` directory hasn't been re-activated, or when you
+skipped `pip install -e .` and rely on the in-tree package only), use
+`python -m cli.run` everywhere this README writes `hcd`.  Output is
+identical.
 
 The five tutorial notebooks under `notebooks/tutorials/` walk a new user
 through the data products from the ground up; see

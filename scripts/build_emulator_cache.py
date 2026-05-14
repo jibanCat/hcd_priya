@@ -5,6 +5,12 @@ CDDF, dN/dX, and parameter-vector observables into one HDF5 file at
 `hcd_analysis/_emulator_data/observables.h5`. Read-only over the
 source data; no recomputation from raw spectra.
 
+The shared k-grid is `2 * pi * _DEFAULT_K_BINS` — angular wavenumber
+in rad·s/km, the PRIYA convention used throughout this project. The
+on-disk `p1d_per_class.h5` files store the cyclic rfftfreq k; we
+convert both `k_src` and `k_target` to angular before interpolating,
+so every dataset in the cache lives in the project convention.
+
 Usage:
     python3 scripts/build_emulator_cache.py \
         [--root /scratch/cavestru_root/cavestru0/mfho/hcd_outputs] \
@@ -135,7 +141,9 @@ def build_row(sim_name: str, snap: int, snap_dir: Path,
     p1d = read_p1d_per_class(snap_dir)
     dndx = compute_dndx_per_class(cddf)
 
-    k_src = p1d["k"]
+    # Convert source k (cyclic rfftfreq on disk) to angular before interpolation.
+    # k_target is already angular; see _DEFAULT_K_BINS_ANGULAR in main().
+    k_src_angular = 2.0 * np.pi * p1d["k"]
     row = {
         "sim_name": sim_name,
         "snap": int(snap),
@@ -144,10 +152,10 @@ def build_row(sim_name: str, snap: int, snap_dir: Path,
         "dv_kms": float(meta["dv_kms"]),
         "nbins_native": int(meta["nbins"]),
         "n_total_sightlines": int(meta["n_skewers"]),
-        "P_clean":       interp_p1d_loglog(k_src, p1d["P_clean"],       k_target),
-        "P_LLS_only":    interp_p1d_loglog(k_src, p1d["P_LLS_only"],    k_target),
-        "P_subDLA_only": interp_p1d_loglog(k_src, p1d["P_subDLA_only"], k_target),
-        "P_DLA_only":    interp_p1d_loglog(k_src, p1d["P_DLA_only"],    k_target),
+        "P_clean":       interp_p1d_loglog(k_src_angular, p1d["P_clean"],       k_target),
+        "P_LLS_only":    interp_p1d_loglog(k_src_angular, p1d["P_LLS_only"],    k_target),
+        "P_subDLA_only": interp_p1d_loglog(k_src_angular, p1d["P_subDLA_only"], k_target),
+        "P_DLA_only":    interp_p1d_loglog(k_src_angular, p1d["P_DLA_only"],    k_target),
         "mean_F_clean":  float(p1d["mean_F_clean"]),
         "mean_F_LLS":    float(p1d["mean_F_LLS"]),
         "mean_F_subDLA": float(p1d["mean_F_subDLA"]),
@@ -206,7 +214,8 @@ def write_cache(rows: list[dict], k_target: np.ndarray, output_path: Path) -> No
         f.attrs["created_utc"] = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
         f.attrs["git_sha"] = _git_sha(REPO_ROOT)
         f.attrs["n_rows"] = n
-        f.attrs["k_target_source"] = "hcd_analysis.p1d._DEFAULT_K_BINS"
+        f.attrs["k_target_source"] = "2 * pi * hcd_analysis.p1d._DEFAULT_K_BINS"
+        f.attrs["k_convention"] = "angular (rad*s/km), PRIYA convention"
         f.attrs["interp_method"] = "loglog_linear_NaN_outside"
 
         f.create_dataset("k_target", data=np.asarray(k_target, dtype=np.float64))
@@ -278,7 +287,9 @@ def main() -> None:
     args = parser.parse_args()
 
     from hcd_analysis.p1d import _DEFAULT_K_BINS
-    k_target = _DEFAULT_K_BINS
+    # _DEFAULT_K_BINS is cyclic (s/km); convert to angular (rad*s/km) at the
+    # cache layer so every downstream consumer reads the project convention.
+    k_target = 2.0 * np.pi * _DEFAULT_K_BINS
 
     pairs = discover_sim_snap_pairs(args.root)
     print(f"Found {len(pairs)} (sim, snap) pairs under {args.root}")
