@@ -3,8 +3,10 @@
 Run with: python3 tests/test_emulator_cache.py
 """
 import sys
+import tempfile
 from pathlib import Path
 
+import h5py
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -130,6 +132,29 @@ def test_build_row_schema_first_pair():
           f"P_clean finite frac = {np.isfinite(row['P_clean']).mean():.2f}")
 
 
+def test_write_cache_two_row_round_trip():
+    from hcd_analysis.p1d import _DEFAULT_K_BINS
+    pairs = bec.discover_sim_snap_pairs(HCD_ROOT)[:2]
+    k_target = _DEFAULT_K_BINS
+    rows = [bec.build_row(s, sn, sd, k_target) for s, sn, sd in pairs]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "observables.h5"
+        bec.write_cache(rows, k_target, out)
+        assert out.exists()
+
+        with h5py.File(out, "r") as f:
+            assert f["params"].shape == (2, 9)
+            assert f["P_clean"].shape == (2, 50)
+            assert f["k_target"].shape == (50,)
+            assert list(f["param_names"][...].astype(str)) == list(bec.PARAM_ORDER)
+            assert float(f["z"][0]) == rows[0]["z"]
+            assert np.array_equal(f["params"][0], rows[0]["params"])
+            assert np.allclose(f["P_clean"][0], rows[0]["P_clean"], equal_nan=True)
+            assert "git_sha" in f.attrs
+    print("write_cache: 2-row round-trip OK")
+
+
 if __name__ == "__main__":
     test_discover_sim_snap_pairs_returns_nonempty()
     test_per_file_readers_on_first_pair()
@@ -137,4 +162,5 @@ if __name__ == "__main__":
     test_interp_p1d_loglog_out_of_range_is_nan()
     test_dndx_per_class_matches_manual_sum_on_first_pair()
     test_build_row_schema_first_pair()
+    test_write_cache_two_row_round_trip()
     print("OK")

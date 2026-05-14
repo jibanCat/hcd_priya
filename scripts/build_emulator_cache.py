@@ -13,8 +13,10 @@ Usage:
 """
 from __future__ import annotations
 
+import datetime
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -161,3 +163,64 @@ def build_row(sim_name: str, snap: int, snap_dir: Path,
         **dndx,
     }
     return row
+
+
+def _git_sha(repo: Path) -> str:
+    try:
+        out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                             capture_output=True, text=True, check=True)
+        return out.stdout.strip()
+    except Exception:
+        return "unknown"
+
+
+_VECTOR_FLOAT_KEYS = (
+    "z", "dv_kms", "total_path_dX",
+    "mean_F_clean", "mean_F_LLS", "mean_F_subDLA", "mean_F_DLA",
+    "dNdX_LLS", "dNdX_subDLA", "dNdX_DLA",
+)
+_VECTOR_INT_KEYS = (
+    "snap", "nbins_native", "n_total_sightlines",
+    "n_sightlines_clean", "n_sightlines_LLS",
+    "n_sightlines_subDLA", "n_sightlines_DLA",
+)
+_PER_CLASS_P1D_KEYS = ("P_clean", "P_LLS_only", "P_subDLA_only", "P_DLA_only")
+_PER_ROW_2D_KEYS = ("f_nhi", "n_absorbers")
+
+
+def write_cache(rows: list[dict], k_target: np.ndarray, output_path: Path) -> None:
+    """Stack `rows` into one HDF5 file at `output_path`."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    n = len(rows)
+
+    sim_names = np.array([r["sim_name"] for r in rows], dtype=h5py.string_dtype())
+    params = np.stack([r["params"] for r in rows], axis=0)
+    log_nhi_centres = rows[0]["log_nhi_centres"]
+    log_nhi_edges = rows[0]["log_nhi_edges"]
+    for r in rows[1:]:
+        assert np.array_equal(r["log_nhi_centres"], log_nhi_centres), \
+            "log_nhi_centres mismatch across rows"
+
+    with h5py.File(output_path, "w") as f:
+        f.attrs["created_utc"] = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        f.attrs["git_sha"] = _git_sha(REPO_ROOT)
+        f.attrs["n_rows"] = n
+        f.attrs["k_target_source"] = "hcd_analysis.p1d._DEFAULT_K_BINS"
+        f.attrs["interp_method"] = "loglog_linear_NaN_outside"
+
+        f.create_dataset("k_target", data=np.asarray(k_target, dtype=np.float64))
+        f.create_dataset("param_names",
+                         data=np.array(list(PARAM_ORDER), dtype=h5py.string_dtype()))
+        f.create_dataset("sim_name", data=sim_names)
+        f.create_dataset("params", data=params)
+        f.create_dataset("log_nhi_centres", data=log_nhi_centres)
+        f.create_dataset("log_nhi_edges", data=log_nhi_edges)
+
+        for key in _VECTOR_FLOAT_KEYS:
+            f.create_dataset(key, data=np.array([r[key] for r in rows], dtype=np.float64))
+        for key in _VECTOR_INT_KEYS:
+            f.create_dataset(key, data=np.array([r[key] for r in rows], dtype=np.int32))
+        for key in _PER_CLASS_P1D_KEYS:
+            f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0))
+        for key in _PER_ROW_2D_KEYS:
+            f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0))
