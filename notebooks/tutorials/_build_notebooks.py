@@ -1056,6 +1056,7 @@ if HO21.exists():
 else:
     print('Ho+21 reference file not found at', HO21, '— skipping overlay.')
 
+ax.set_xlim(1e17, 1e22)  # clip to the LLS-DLA range where both curves are defined
 ax.set_xlabel(r'$N_{\\rm HI}$  (cm$^{-2}$)')
 ax.set_ylabel(r'$f(N_{\\rm HI})$  (cm$^{2}$)')
 ax.set_title(r'CDDF: simulation vs Ho+21 at z $\\approx$ 2.2')
