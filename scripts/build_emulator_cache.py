@@ -281,9 +281,10 @@ def main() -> None:
     k_target = _DEFAULT_K_BINS
 
     pairs = discover_sim_snap_pairs(args.root)
+    print(f"Found {len(pairs)} (sim, snap) pairs under {args.root}")
     if args.limit is not None:
         pairs = pairs[: args.limit]
-    print(f"Found {len(pairs)} (sim, snap) pairs under {args.root}")
+        print(f"  --limit {args.limit}: processing first {len(pairs)} only")
 
     rows = []
     for i, (sim, snap, snap_dir) in enumerate(pairs):
