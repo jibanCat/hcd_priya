@@ -2,6 +2,7 @@
 numpy>=1.24
 scipy>=1.10
 h5py>=3.8
+pandas>=2.0          # used by hcd_analysis.cddf.measure_cddf_from_dataframe (NB02)
 
 # Config / CLI
 pyyaml>=6.0
@@ -16,6 +17,11 @@ tqdm>=4.65
 
 # Astronomy units / cosmology helpers
 astropy>=5.3
+
+# Tutorial notebooks (notebooks/tutorials/*.ipynb).  Only needed if you want
+# to run / regenerate the tutorial notebooks; not required for the pipeline.
+nbformat>=5.9
+jupyter>=1.0
 
 # fake_spectra from Simeon Bird (must be installed separately - see docs/fake_spectra_integration.md)
 # pip install git+https://github.com/sbird/fake_spectra.git

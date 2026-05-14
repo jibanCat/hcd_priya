@@ -11,6 +11,7 @@ dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
     "h5py>=3.8",
+    "pandas>=2.0",
     "pyyaml>=6.0",
     "click>=8.1",
     "matplotlib>=3.7",
@@ -21,6 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov", "ipython"]
+tutorials = ["jupyter>=1.0", "nbformat>=5.9"]
 
 [project.scripts]
 hcd = "cli.run:cli"

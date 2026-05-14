@@ -31,12 +31,53 @@ For each `(simulation, snapshot)`:
 
 Full details: [`docs/data_layout.md`](docs/data_layout.md).
 
+## Installation
+
+**Requires Python ≥ 3.9.** `fake_spectra` is an optional reference codebase
+(soft import only); the pipeline runs without it.
+
+**Great Lakes / cluster** — the supported installer (creates a conda env,
+installs `fake_spectra`, then `pip install -e .`):
+
+```bash
+bash scripts/install_greatlakes.sh
+```
+
+**Generic / laptop / other cluster** — manual install:
+
+```bash
+# 1. (recommended) make and activate a fresh env, e.g. with conda:
+conda create -n hcd_env python=3.11 -y && conda activate hcd_env
+
+# 2. install runtime + tutorial deps (jupyter, nbformat, pandas, …):
+pip install -r requirements.txt
+
+# 3. install this package in editable mode:
+pip install -e .
+
+# 4. optionally install fake_spectra (only needed for a few comparison helpers
+#    in hcd_analysis/voigt_utils.py and the reference cross-checks):
+pip install git+https://github.com/sbird/fake_spectra.git
+
+# 5. (optional) install dev / tutorial extras explicitly:
+pip install -e ".[dev,tutorials]"
+```
+
+Verify:
+
+```bash
+python -c "import hcd_analysis; print(hcd_analysis.__file__)"
+hcd --help
+```
+
+The five tutorial notebooks under `notebooks/tutorials/` walk a new user
+through the data products from the ground up; see
+[`notebooks/tutorials/README.md`](notebooks/tutorials/README.md) for the
+recommended reading order and the A1 → B1 → B2 starter project path.
+
 ## Quick start
 
 ```bash
-# Install (Great Lakes)
-bash scripts/install_greatlakes.sh
-
 # One snap (debug)
 hcd run-one --sim ns0.803Ap2.2e-09 --snap 17 --debug --verbose
 
