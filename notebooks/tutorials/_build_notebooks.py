@@ -174,22 +174,32 @@ A six-bullet primer for a first-day grad student.
   of overlapping low-τ absorption features that this transmission
   spectrum acquires between the quasar's Lyα and Lyβ rest lines.
 
-* **Two phases of the IGM.**  Most pixels in the forest are *optically
-  thin* — they trace small density fluctuations of warm, photoionised
-  hydrogen, and `τ` for a given pixel scales roughly as `(1+δ_b)^α` at
-  fixed photoionisation rate.  A *small* fraction of sightlines pass
-  through self-shielded, dense, cold gas — the **HCDs**: Lyman-Limit
-  Systems (LLS), sub-DLAs, and Damped Lyα Absorbers (DLAs), in
-  ascending order of `N_HI`.  These are the rare, optically-thick tail
-  on the same continuous distribution of column densities.
+* **Two optical-depth regimes of the IGM.**  Most pixels in the
+  forest are *optically thin* — they trace small density fluctuations
+  of warm, photoionised hydrogen, and `τ` for a given pixel scales
+  roughly as `(1+δ_b)^α` at fixed photoionisation rate.  A *small*
+  fraction of sightlines pass through self-shielded, dense, cold gas
+  — the **HCDs**: Lyman-Limit Systems (LLS), sub-DLAs, and Damped Lyα
+  Absorbers (DLAs), in ascending order of `N_HI`.  These are the
+  rare, optically-thick tail on the same continuous distribution of
+  column densities.  ("Two phases" here is shorthand for *two
+  optical-depth regimes* — it does not refer to the thermodynamic
+  phase taxonomy of the IGM, where the warm-diffuse forest, the WHIM,
+  and condensed structures are distinct components.)
 
 * **Why P1D is the canonical observable.**  Observational surveys
   (BOSS, eBOSS, DESI, HiRes) report `⟨F⟩(z)` and the *1D flux power
-  spectrum* `P_{1D}(k, z)` measured along each sightline, because 3D
-  forest statistics require quasar pair sampling that's only just
-  becoming feasible.  The 1D power spectrum is what cosmology
-  constraints from the Lyα forest are based on, and it's what the
-  downstream HCD emulator in this project will need to reproduce.
+  spectrum* `P_{1D}(k, z)` measured along each sightline.  Most of
+  the per-quasar information content in the Lyα forest lives in the
+  along-sightline (1D) statistics at small scales, where the matter
+  power spectrum is close to non-linear and most constraining for
+  cosmology.  **3D Lyα statistics** (the BAO peak in `ξ_FF`,
+  cross-correlations with quasars) are *complementary* and have been
+  routinely measured with BOSS/eBOSS/DESI pair catalogs since
+  Slosar+11 / Busca+13 — but the 1D power spectrum remains where most
+  cosmology constraints (`σ_8`, `n_s`, warm dark matter limits, etc.)
+  come from, and it is what the downstream HCD emulator in this
+  project will need to reproduce.
 
 * **The HCD problem in one sentence.**  A DLA on a sightline lowers
   that sightline's `⟨F⟩` and adds correlated power at low `k` that
@@ -608,8 +618,12 @@ A few things worth noting in the above:
   | subDLA | [19.0, 20.3) |
   | DLA    | ≥ 20.3       |
 
-  These boundaries are fixed across the project — they are the
-  conventional Wolfe & Prochaska classifications.
+  These boundaries are fixed across the project.  The DLA threshold
+  log NHI = 20.3 is the canonical Wolfe definition (Wolfe, Gawiser &
+  Prochaska 2005); the sub-DLA cut at 19.0 is from Péroux et al.
+  2003 (MNRAS 346, 1103, arXiv:astro-ph/0306387); the LLS lower edge
+  at 17.2 corresponds to `τ_LL ≈ 1` (Lyman-limit optical depth of
+  unity; `N_HI = 1/σ_LL ≈ 1.6 × 10¹⁷ cm⁻²`).
 """),
 
         md("""
@@ -698,8 +712,9 @@ forest, not an HCD).
 **What to look for.**  The histogram should slope down steeply with NHI
 — the canonical observed CDDF goes roughly as `f(N_HI) ∝ N_HI^{-1.5}`
 between the LLS and DLA ranges, which means the per-decade counts drop
-by a factor of ~3 across the LLS → DLA range.  The class boundary lines
-at 17.2 / 19.0 / 20.3 are conventional cuts (Wolfe & Prochaska); the
+by a factor of ~3 across the LLS → DLA range.  The class boundary
+lines at 17.2 (LLS lower edge, τ_LL ≈ 1), 19.0 (sub-DLA, Péroux+2003),
+and 20.3 (DLA, Wolfe+Gawiser+Prochaska 2005) are conventional cuts; the
 flat plateau on the low-NHI side is a catalog-construction effect (we
 detect any pixel run with τ > 100, but only assign NHI estimates above
 the 17.2 threshold).
@@ -938,8 +953,10 @@ The pipeline writes two CDDF files:
 The bug was a missing factor of `(1+z)·h` in the absorption-path
 denominator of the original `cddf.npz`.  The corrected file divides by
 an extra `(1+z)·h` to fix it in-place; the stored attribute
-`patch_factor` is exactly that ratio, so at z = 2.0 with h ≈ 0.67 the
-patch factor is `(1+z)·h ≈ 2.005`.  Always use `_corrected.npz` going
+`patch_factor` is exactly that ratio.  For the example sim used in
+this tutorial (`h = 0.668`) at z = 2.0, that is
+`(1+z)·h = 3.0 · 0.668 = 2.004`.  For a typical PRIYA sim with
+`h ≈ 0.67` you'd get ≈ 2.01.  Always use `_corrected.npz` going
 forward; only touch `cddf.npz` if you are auditing the bugfix itself
 (it's kept around for that purpose).
 """),
@@ -1000,8 +1017,11 @@ just `dz` rescaled by exactly the cosmology factor needed to make a
 constant comoving density show up as a flat `dN/dX(z)`.  This is the
 useful property of the absorption-distance variable — any
 **evolution** seen in `dN/dX(z)` is then a real signal about the
-absorber population (Bahcall & Peebles 1969 introduced the concept;
-Wolfe, Gawiser & Prochaska 2005 §3.2 is the standard modern review).
+absorber population.  Bahcall & Peebles 1969 (ApJ 156, L7) introduced
+the underlying constant-comoving-density integral; the explicit `X(z)`
+variable in its modern form is **Tytler 1987 (ApJ 321, 49)**; Wolfe,
+Gawiser & Prochaska 2005 §3.2 (ARA&A 43, 861) is the standard modern
+review.
 
 **Per-sightline construction (the part that bit me when I tried to
 reproduce this from scratch).**  The differential is `dz` along the
@@ -1195,24 +1215,40 @@ follows the observed CDDF roughly: at the DLA range the sim and the
 data agree to within a factor of a few, but **LLS and sub-DLAs tend to
 be over-predicted by current PRIYA-class sims**.
 
-Two physical reasons this happens (both contribute, neither is
-quantitatively settled):
+Several physical reasons this happens; the first two are most cited
+but the others appear in the literature too (none is quantitatively
+settled):
 
 1. **UV background amplitude.**  The CDDF at log NHI ≈ 17.2–19 is set
    by the photoionisation rate `Γ_UV` of the meta-galactic UV
-   background.  PRIYA uses a Faucher-Giguère 2020 (or similar) UVB
-   prescription; if the true UVB is stronger at z ~ 2–3 than that
-   prescription says, real sightlines are more ionised and the
-   observed sub-DLA count drops.  See `docs/analysis.md` and the
-   FG'20 background papers for the prescription details.
-2. **Small-scale structure / sub-grid clumping.**  At PRIYA's
-   resolution (`Mpc/h` scale), the self-shielded LLS column is only
-   marginally resolved; sub-grid treatments of clumping and
-   self-shielding affect the column distribution at log NHI ≈ 17–19
-   strongly.  Higher-resolution runs (the HR set) typically lower the
-   LLS prediction by 0.1–0.3 dex without changing the DLA prediction
-   much, which is the signature of a resolution effect rather than a
-   cosmological one.
+   background.  PRIYA uses a Faucher-Giguère 2020 UVB prescription
+   (Faucher-Giguère 2020, MNRAS 493, 1614; arXiv:1903.08657); if the
+   true UVB is stronger at z ~ 2–3 than that prescription says, real
+   sightlines are more ionised and the observed sub-DLA count drops.
+   See `docs/analysis.md` for how this enters the pipeline.
+2. **Small-scale structure / sub-grid clumping and self-shielding.**
+   At PRIYA's resolution (`Mpc/h` scale), the self-shielded LLS
+   column is only marginally resolved; sub-grid treatments of
+   clumping and self-shielding affect the column distribution at
+   log NHI ≈ 17–19 strongly (see McQuinn, Oh & Faucher-Giguère 2011
+   or Rahmati et al. 2013 for the relevant self-shielding
+   prescriptions).  Higher-resolution runs (the HR set) typically
+   lower the LLS prediction by 0.1–0.3 dex without changing the DLA
+   prediction much, which is the signature of a resolution effect
+   rather than a cosmological one.
+3. **Missing large-scale modes / box-size effects.**  The LF
+   simulation boxes have `L_box ~ 60–100 Mpc/h`; modes larger than
+   the box are absent, which underpopulates the HCD-hosting halo
+   mass function relative to a `Gpc/h` mock.  Bird et al. 2014
+   (1405.3994) argues this contributes at the ~10–20 % level for the
+   sub-DLA and LLS regimes specifically.
+4. **Observational completeness.**  Real LLS/sub-DLA detections at
+   `log NHI ≈ 17–19` are damping-wing-poor and so sensitive to
+   continuum-placement systematics and to proximate-DLA blending;
+   real surveys may *under*-count this regime, which would
+   contribute to the apparent sim-over-prediction independently of
+   any sim defect.  Ho+21 and Berg+17 discuss the completeness
+   correction.
 
 This is exactly the figure that `scripts/plot_cddf_vs_ho21.py` produces
 for all four redshift bins; here we do just the one corresponding to our
@@ -2000,7 +2036,7 @@ concept-check question in the tutorial README):
 | `λ_α` | 1215.67 Å | Lyα rest wavelength |
 | `ν_α` | `c / λ_α` ≈ 2.466 × 10¹⁵ Hz | Lyα rest frequency |
 | `f_α` | 0.4164 | Lyα oscillator strength |
-| `γ_α` | 6.265 × 10⁸ s⁻¹ | Lyα natural damping rate (`Γ_natural / 2π`) |
+| `γ_α` | 6.265 × 10⁸ s⁻¹ | Lyα natural damping rate (full Einstein-A coefficient A₂₁; the Lorentzian wing uses γ_α directly, *not* γ_α/2π) |
 | `σ_α,int` | `πe²f_α / (m_e c)` ≈ 0.0110 cm² · Hz | line-integrated cross section |
 
 **Lorentzian damping-wing formula** (valid for `|Δv| ≫ b`, i.e. far
@@ -2215,7 +2251,10 @@ but they differ on what to do with the wings:
   *global* τ-peak of the sightline, and only kicks in if the sightline
   has any pixel with τ > 10⁶ (i.e. contains a DLA).  This is the
   production mask used in `compute_p1d_priya_masked` and is what feeds
-  the emulator's `no_DLA_priya` variant.
+  the emulator's `no_DLA_priya` variant.  The `τ > 10⁶` trigger
+  threshold corresponds to log NHI ≈ 20.3 for typical Doppler widths
+  and is the PRIYA recipe described in Bird et al. 2023 §3.3
+  (arXiv:2306.05471).
 """),
 
         md("""

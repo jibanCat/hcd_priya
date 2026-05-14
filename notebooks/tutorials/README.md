@@ -146,9 +146,13 @@ look at the background reading below.
    `(1+z)·h`.  At z = 2.2 with h = 0.67, what is that factor numerically?
    Why is this the difference between a 0.3 dex offset vs Prochaska+05
    and a 0.0 dex one?
-3. dN/dX(DLA) at z = 2.2 is ~0.05 in this sim.  What does that number
-   mean physically?  Convert it to "expected DLAs per unit comoving
-   Mpc/h sightline length".
+3. dN/dX(DLA) at z = 2.0 is ~0.032 in the example sim, vs ~0.05 in
+   the observations (Prochaska & Wolfe 2009, Noterdaeme+12, Ho+21).
+   What does that number mean physically?  Convert ~0.05 to "expected
+   DLAs per unit comoving Mpc/h sightline length".  Why is the
+   simulated value a factor ~1.5 below observation? (Hint: see
+   NB02 §4 — UVB amplitude and sub-grid clumping are the leading
+   candidates.)
 4. The simulation tends to over-predict the LLS regime relative to
    Ho+21.  Name two physical reasons this could be (a hint: think
    about UV background and small-scale density fluctuations).
@@ -205,8 +209,10 @@ programming, here are some starting points by topic.
 - **Palanque-Delabrouille et al. 2013** — "The one-dimensional Lyα
   forest power spectrum from BOSS".  Modern P1D measurement and
   systematics.
-- **Khaire, Walther, Hennawi et al. 2024** — the PRIYA simulation
-  suite paper.  This is the suite our 60 LF + 4 HR sims came from.
+- **Bird, Fernandez, Ho et al. 2023** (MNRAS 526, 3392;
+  arXiv:2306.05471) — the PRIYA simulation suite paper.  This is the
+  suite our 60 LF + 4 HR sims came from.  Read §2 for the LHS
+  parameter scheme that names every folder under `HCD_OUT_ROOT`.
 
 ### High column-density absorbers (HCDs)
 
@@ -215,9 +221,11 @@ programming, here are some starting points by topic.
   classification and the physics of damping wings.
 - **Prochaska, Herbert-Fort, Wolfe 2005** — the SDSS DLA CDDF that
   notebook 02 compares against.
-- **Bird et al. 2014** ("Damped Lyα systems at low redshift") — first
-  hydrodynamic prediction of DLA bias.  Section 5 is what feeds the
-  scale-dependent-bias TODO in `SESSION_HANDOVER_2026_04_28.md` §4D.
+- **Bird, Vogelsberger, Haehnelt et al. 2014** ("Damped Lyα absorbers
+  as a probe of cosmic gas", MNRAS 445, 2313; arXiv:1405.3994) —
+  hydrodynamic prediction of DLA bias and the f(N_HI) shape.
+  Section 5 is what feeds the scale-dependent-bias TODO in
+  `SESSION_HANDOVER_2026_04_28.md` §4D.
 - **Font-Ribera, Kirkby et al. 2012** — the BOSS DLA-Lyα cross
   correlation that the project's clustering pipeline mirrors.
 - **Pérez-Ràfols et al. 2018** — DR12 DLA bias measurement.  This is

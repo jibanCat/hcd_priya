@@ -159,8 +159,9 @@ right thing to know.
 ### A3. Multi-component absorber detection
 
 **Difficulty.** Intermediate.  **Time.** 2–4 weeks.
-**Prereqs.** NB04, plus reading Cooke et al. 2018 §3 (or any paper on
-DLA Voigt fitting).
+**Prereqs.** NB04, plus reading Cooke, Pettini & Steidel 2018
+(arXiv:1710.11129, MNRAS 476, 4271) §3 (or any paper on DLA Voigt
+fitting).
 
 The current Voigt fitter assumes a single component per absorber.
 Real DLAs often have multiple velocity components (visible as multiple
@@ -202,8 +203,11 @@ plotting and statistical comparisons against observations.
 **Prereqs.** NB02.
 
 For one sim, plot dN/dX(DLA), dN/dX(subDLA), dN/dX(LLS) as functions
-of redshift over all available snapshots.  Compare against PRIYA
-papers (Bird+2017, Khaire+2024) and BOSS/DESI compilations.
+of redshift over all available snapshots.  Compare against the PRIYA
+suite paper (Bird et al. 2023, MNRAS 526, 3392, arXiv:2306.05471) and
+the DLA-bias predictions in Bird, Haehnelt, Neeleman et al. 2017
+(arXiv:1605.06151, MNRAS 466, 2111), plus BOSS/DESI dN/dX
+compilations (Prochaska & Wolfe 2009, Noterdaeme+2012, Ho+2021).
 
 **Deliverable.**
 
