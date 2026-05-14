@@ -105,10 +105,36 @@ def test_dndx_per_class_matches_manual_sum_on_first_pair():
           f"subDLA={result['dNdX_subDLA']:.4f}  DLA={result['dNdX_DLA']:.4f}")
 
 
+def test_build_row_schema_first_pair():
+    from hcd_analysis.p1d import _DEFAULT_K_BINS
+    pairs = bec.discover_sim_snap_pairs(HCD_ROOT)
+    sim_name, snap, snap_dir = pairs[0]
+
+    row = bec.build_row(sim_name, snap, snap_dir, _DEFAULT_K_BINS)
+
+    # scalars
+    assert row["sim_name"] == sim_name
+    assert row["snap"] == snap
+    assert row["params"].shape == (9,)
+    assert 0 < row["z"] < 10
+    # P1D arrays match k_target shape
+    for key in ("P_clean", "P_LLS_only", "P_subDLA_only", "P_DLA_only"):
+        assert row[key].shape == (50,)
+    # CDDF arrays
+    assert row["f_nhi"].shape == (30,)
+    assert row["n_absorbers"].shape == (30,)
+    # dN/dX scalars
+    for key in ("dNdX_LLS", "dNdX_subDLA", "dNdX_DLA"):
+        assert key in row and np.isfinite(row[key])
+    print(f"build_row: z={row['z']:.3f}  "
+          f"P_clean finite frac = {np.isfinite(row['P_clean']).mean():.2f}")
+
+
 if __name__ == "__main__":
     test_discover_sim_snap_pairs_returns_nonempty()
     test_per_file_readers_on_first_pair()
     test_interp_p1d_loglog_pure_power_law_recovers_input()
     test_interp_p1d_loglog_out_of_range_is_nan()
     test_dndx_per_class_matches_manual_sum_on_first_pair()
+    test_build_row_schema_first_pair()
     print("OK")

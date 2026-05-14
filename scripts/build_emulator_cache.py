@@ -83,14 +83,14 @@ def interp_p1d_loglog(k_src: np.ndarray, P_src: np.ndarray,
     P_src = np.asarray(P_src, dtype=np.float64)
     k_target = np.asarray(k_target, dtype=np.float64)
 
-    pos = P_src > 0
-    if pos.sum() < 2:
+    valid = (P_src > 0) & (k_src > 0)
+    if valid.sum() < 2:
         return np.full(k_target.shape, np.nan)
 
-    log_k_src = np.log(k_src[pos])
-    log_P_src = np.log(P_src[pos])
+    log_k_src = np.log(k_src[valid])
+    log_P_src = np.log(P_src[valid])
 
-    k_lo, k_hi = k_src[pos].min(), k_src[pos].max()
+    k_lo, k_hi = k_src[valid].min(), k_src[valid].max()
     in_range = (k_target >= k_lo) & (k_target <= k_hi)
 
     out = np.full(k_target.shape, np.nan)
@@ -113,3 +113,51 @@ def compute_dndx_per_class(cddf: dict) -> dict[str, float]:
     sub = float(n_abs[(centres >= _SUB_LOW) & (centres < _SUB_HIGH)].sum() / total_path)
     dla = float(n_abs[centres >= _DLA_LOW].sum() / total_path)
     return {"dNdX_LLS": lls, "dNdX_subDLA": sub, "dNdX_DLA": dla}
+
+
+PARAM_ORDER = ("ns", "Ap", "herei", "heref", "alphaq",
+               "hub", "omegamh2", "hireionz", "bhfeedback")
+
+
+def build_row(sim_name: str, snap: int, snap_dir: Path,
+              k_target: np.ndarray) -> dict:
+    """Assemble one (sim, snap) row matching the output HDF5 schema."""
+    params_dict = parse_sim_params(sim_name)
+    if params_dict is None:
+        raise ValueError(f"could not parse params from sim folder name: {sim_name!r}")
+    params = np.array([params_dict[k] for k in PARAM_ORDER], dtype=np.float64)
+
+    meta = read_meta(snap_dir)
+    cddf = read_cddf(snap_dir)
+    p1d = read_p1d_per_class(snap_dir)
+    dndx = compute_dndx_per_class(cddf)
+
+    k_src = p1d["k"]
+    row = {
+        "sim_name": sim_name,
+        "snap": int(snap),
+        "params": params,
+        "z": float(meta["z"]),
+        "dv_kms": float(meta["dv_kms"]),
+        "nbins_native": int(meta["nbins"]),
+        "n_total_sightlines": int(meta["n_skewers"]),
+        "P_clean":       interp_p1d_loglog(k_src, p1d["P_clean"],       k_target),
+        "P_LLS_only":    interp_p1d_loglog(k_src, p1d["P_LLS_only"],    k_target),
+        "P_subDLA_only": interp_p1d_loglog(k_src, p1d["P_subDLA_only"], k_target),
+        "P_DLA_only":    interp_p1d_loglog(k_src, p1d["P_DLA_only"],    k_target),
+        "mean_F_clean":  float(p1d["mean_F_clean"]),
+        "mean_F_LLS":    float(p1d["mean_F_LLS"]),
+        "mean_F_subDLA": float(p1d["mean_F_subDLA"]),
+        "mean_F_DLA":    float(p1d["mean_F_DLA"]),
+        "n_sightlines_clean":  int(p1d["n_sightlines_clean"]),
+        "n_sightlines_LLS":    int(p1d["n_sightlines_LLS"]),
+        "n_sightlines_subDLA": int(p1d["n_sightlines_subDLA"]),
+        "n_sightlines_DLA":    int(p1d["n_sightlines_DLA"]),
+        "log_nhi_centres": np.asarray(cddf["log_nhi_centres"], dtype=np.float64),
+        "log_nhi_edges":   np.asarray(cddf["log_nhi_edges"], dtype=np.float64),
+        "f_nhi":           np.asarray(cddf["f_nhi"], dtype=np.float64),
+        "n_absorbers":     np.asarray(cddf["n_absorbers"], dtype=np.int64),
+        "total_path_dX":   float(cddf["total_path"]),
+        **dndx,
+    }
+    return row
