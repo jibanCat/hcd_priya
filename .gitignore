@@ -221,6 +221,9 @@ figures/intermediate/
 # Committing these risks repo bloat; regenerate via scripts/build_hcd_summary.py
 figures/analysis/data/
 
+# Emulator training cache (Phase 1 — built by scripts/build_emulator_cache.py)
+hcd_analysis/_emulator_data/
+
 # Private data + analyses (DESI Y3, etc.)
 # Neither the figures, the scripts, nor any derived data from
 # /home/mfho/data/DESI_y3_private_data should be committed.
