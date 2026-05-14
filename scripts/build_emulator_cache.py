@@ -13,9 +13,13 @@ Usage:
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
+
+import h5py
+import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -45,3 +49,22 @@ def discover_sim_snap_pairs(root: Path) -> list[tuple[str, int, Path]]:
                 continue
             pairs.append((sim_dir.name, int(m.group(1)), snap_dir))
     return pairs
+
+
+def read_meta(snap_dir: Path) -> dict:
+    with open(snap_dir / "meta.json") as f:
+        return json.load(f)
+
+
+def read_cddf(snap_dir: Path) -> dict:
+    with np.load(snap_dir / "cddf_corrected.npz") as data:
+        return {key: data[key] for key in data.files}
+
+
+def read_p1d_per_class(snap_dir: Path) -> dict:
+    out: dict = {}
+    with h5py.File(snap_dir / "p1d_per_class.h5", "r") as f:
+        for key in f.keys():
+            arr = f[key][...]
+            out[key] = arr.item() if arr.shape == () else arr
+    return out
