@@ -363,3 +363,84 @@ git checkout phase2-emulator-jax
   varying snap-z mappings (the example sim's snap_022 is z = 2.0, not
   2.2 as the canonical table says).
 - Re-introduce CDDF-bin-sum dN/dX. Use `meta['n_absorbers']`.
+
+---
+
+## 9. Phase 2 scope pivot (2026-05-15 PM)
+
+**User direction (late session):** the Phase 2 scope has changed.
+Mean-flux sampling, originally deferred to Phase 3, is now part of
+Phase 2 and should be done **the same way PRIYA does it** in
+`/home/mfho/lya_emulator_full/lyaemu/coarse_grid.py` — produce ~10
+`τ₀` points per (sim, snap) by rescaling `τ → α · τ`, evaluate the
+four per-class P1Ds at each rescaled mean flux, and keep the resulting
+per-class P_dirty templates **tightly coupled to CDDF statistics**.
+
+### Implications
+
+- The locked architecture (JAX, shared encoder, Head A → CDDF + dN/dX,
+  Head B → (latent, τ₀) → 3-class P1D + P_clean) **still holds**. What
+  changes is the training data: ~10 × 1076 ≈ 10,760 rows
+  (sim, snap, τ₀) instead of 1076.
+- The current Phase 1 cache `observables.h5` has only the natural-τ₀
+  row per (sim, snap), so a **second cache** is needed
+  (`observables_tau0.h5`) keyed by (sim, snap, α_idx) — see design
+  memo §3.
+- "Tightly coupled to CDDF" interpreted (design memo §2) as a soft
+  consistency coupling via shared latent + τ₀-replicated CDDF targets
+  + a mean-flux-consistency auxiliary loss term — **not** a hard
+  architectural constraint.
+- The four per-class P1Ds use the *subset's own* mean flux for δF
+  normalisation (Rogers convention). When τ₀-rescaling, that
+  subset-mean has to be recomputed for each α — we can't just
+  linearly rescale the cached P1Ds.
+
+### Two background-agent reports written end-of-session
+
+Both are committed under `docs/superpowers/`:
+
+1. **[`2026-05-15-phase2-design-memo.md`](superpowers/2026-05-15-phase2-design-memo.md)**
+   — emulator-side architecture under the new scope. Covers data flow,
+   CDDF coupling interpretation, training-set sizing, revisited answers
+   to the five Phase-2 design questions, and concrete next actions.
+   **Headline recommendations:** τ₀-sweep happens in the data, not the
+   model; add a second `observables_tau0.h5` cache rather than
+   modifying the Phase 1 cache; loader + model can be implemented
+   *before* the PRIYA-cache builder if both agree on the schema.
+
+2. **[`2026-05-15-priya-coarse-grid-dive.md`](superpowers/2026-05-15-priya-coarse-grid-dive.md)**
+   — PRIYA-side code archaeology of
+   `/home/mfho/lya_emulator_full/lyaemu/coarse_grid.py`. Covers the τ₀
+   sampling mechanism (count, range, spacing, rescaling), the
+   training-set construction call-chain, on-disk layout, k-grid
+   handling, emulator I/O mapping, whether HCDs are touched at all in
+   PRIYA, what we can port vs adapt, and open questions.
+   *(Filed by the parallel agent; may or may not have landed by the
+   time this handover is written — check the file's existence.)*
+
+### Reading order for the next session (Phase 2 pickup)
+
+1. This file §9 first, then §4 to refresh the original Phase 2 brief.
+2. `docs/superpowers/2026-05-15-priya-coarse-grid-dive.md` — what
+   PRIYA does and what we can port.
+3. `docs/superpowers/2026-05-15-phase2-design-memo.md` — how we adapt
+   it for the per-class HCD case.
+4. `scripts/build_emulator_cache.py` — Phase 1 cache builder; Phase 2's
+   τ₀-extended cache will follow the same TDD structure and may reuse
+   `discover_sim_snap_pairs`, `read_p1d_per_class`, and
+   `interp_p1d_loglog` directly.
+5. Settle open design questions raised by the PRIYA dive, then draft
+   `docs/superpowers/plans/2026-05-15-phase2-jax-emulator.md`.
+
+### Concrete next actions (from design memo §5)
+
+1. Write the Phase 2 implementation plan.
+2. Implement the data loader (`hcd_analysis/emulator/data.py`) — can
+   start before the PRIYA-cache builder if the schema is agreed.
+3. Implement the JAX model (`hcd_analysis/emulator/model.py`) — also
+   not blocked on PRIYA cache.
+4. **Blocked on PRIYA-code-dive findings:** the τ₀-cache builder
+   `scripts/build_emulator_cache_tau0.py`.
+5. **Can start without PRIYA findings:** loader, model, training-loop
+   skeleton, unit tests on a synthetic 100-row cache, NaN-mask
+   handling tests.
