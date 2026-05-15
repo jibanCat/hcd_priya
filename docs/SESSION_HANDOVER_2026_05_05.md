@@ -1,5 +1,19 @@
 # Session handover — 2026-05-05 (joint-emulator-scaffold + student tutorials)
 
+> **⚠️ This handover is a point-in-time snapshot from 2026-05-05 and is now
+> superseded.**  At the time it was written, Phase 1 of the HCD emulator
+> had **not** started.  Phase 1 has since landed in this branch
+> (`scripts/build_emulator_cache.py`, `tests/test_emulator_cache.py`, and
+> the gitignored `hcd_analysis/_emulator_data/observables.h5`), together
+> with three rounds of tutorial validation (student × 2 + teacher +
+> referee).  For the current state of the branch, read PR #9
+> (https://github.com/jibanCat/hcd_priya/pull/9) and the more recent
+> handover entries in
+> `/home/mfho/.claude/projects/-home-mfho-hcd-priya/memory/project_hcd_priya.md`.
+> The remainder of this document is preserved for historical context only.
+
+---
+
 **Read this first** if you are picking up the *emulator scaffolding /
 student-tutorial* thread.  This is a separate thread from the
 clustering work covered in

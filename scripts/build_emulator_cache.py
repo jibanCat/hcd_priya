@@ -40,8 +40,15 @@ SNAP_DIR_RE = re.compile(r"^snap_(\d{3})$")
 
 def discover_sim_snap_pairs(root: Path) -> list[tuple[str, int, Path]]:
     """Return [(sim_folder_name, snap_number, snap_dir_path), ...] for every
-    valid (sim, snap) under `root`. A pair is valid only if `meta.json`,
-    `cddf_corrected.npz`, and `p1d_per_class.h5` all exist in the snap dir.
+    *fully processed* (sim, snap) under `root`. A pair is included only if:
+
+    - `meta.json`, `cddf_corrected.npz`, `p1d_per_class.h5` all exist, AND
+    - the pipeline's `done` empty-marker file is present.
+
+    The `done` check is critical: the pipeline writes the three data files
+    incrementally as it runs and only touches `done` after the full snap is
+    written, so a partially-failed run can leave the data files in place
+    with no `done`. See scripts/build_hcd_summary.py for the same filter.
     """
     pairs: list[tuple[str, int, Path]] = []
     for sim_dir in sorted(root.iterdir()):
@@ -53,7 +60,7 @@ def discover_sim_snap_pairs(root: Path) -> list[tuple[str, int, Path]]:
             m = SNAP_DIR_RE.match(snap_dir.name)
             if not m or not snap_dir.is_dir():
                 continue
-            required = ["meta.json", "cddf_corrected.npz", "p1d_per_class.h5"]
+            required = ["meta.json", "cddf_corrected.npz", "p1d_per_class.h5", "done"]
             if not all((snap_dir / f).exists() for f in required):
                 continue
             pairs.append((sim_dir.name, int(m.group(1)), snap_dir))
@@ -107,21 +114,25 @@ def interp_p1d_loglog(k_src: np.ndarray, P_src: np.ndarray,
     return out
 
 
-_LLS_LOW, _LLS_HIGH = 17.2, 19.0
-_SUB_LOW, _SUB_HIGH = 19.0, 20.3
-_DLA_LOW = 20.3
+def compute_dndx_per_class(meta_n_absorbers: dict, total_path: float) -> dict[str, float]:
+    """Per-class dN/dX from the *unbinned* meta.json absorber counts.
 
+    Reads `meta["n_absorbers"]` (a dict like {"LLS": 55070, "subDLA": 17641,
+    "DLA": 9051, "forest": 0}) and divides each by total absorption-path
+    length. This matches the authoritative computation in
+    scripts/build_hcd_summary.py.
 
-def compute_dndx_per_class(cddf: dict) -> dict[str, float]:
-    """Sum absorber counts per class and divide by total path-length dX."""
-    centres = cddf["log_nhi_centres"]
-    n_abs = cddf["n_absorbers"]
-    total_path = float(cddf["total_path"])
-
-    lls = float(n_abs[(centres >= _LLS_LOW) & (centres < _LLS_HIGH)].sum() / total_path)
-    sub = float(n_abs[(centres >= _SUB_LOW) & (centres < _SUB_HIGH)].sum() / total_path)
-    dla = float(n_abs[centres >= _DLA_LOW].sum() / total_path)
-    return {"dNdX_LLS": lls, "dNdX_subDLA": sub, "dNdX_DLA": dla}
+    Earlier versions of this function summed CDDF bin counts whose centres
+    fell in each class range; that approach mis-attributes the entire
+    [20.2, 20.4) bin to DLA (because the 20.3 boundary falls on a bin
+    centre) and skews subDLA / DLA dN/dX by ~5–15 %. We classify by
+    catalog NHI value instead.
+    """
+    return {
+        "dNdX_LLS":    float(meta_n_absorbers["LLS"])    / total_path,
+        "dNdX_subDLA": float(meta_n_absorbers["subDLA"]) / total_path,
+        "dNdX_DLA":    float(meta_n_absorbers["DLA"])    / total_path,
+    }
 
 
 PARAM_ORDER = ("ns", "Ap", "herei", "heref", "alphaq",
@@ -139,7 +150,7 @@ def build_row(sim_name: str, snap: int, snap_dir: Path,
     meta = read_meta(snap_dir)
     cddf = read_cddf(snap_dir)
     p1d = read_p1d_per_class(snap_dir)
-    dndx = compute_dndx_per_class(cddf)
+    dndx = compute_dndx_per_class(meta["n_absorbers"], float(cddf["total_path"]))
 
     # Convert source k (cyclic rfftfreq on disk) to angular before interpolation.
     # k_target is already angular; see _DEFAULT_K_BINS_ANGULAR in main().
@@ -199,6 +210,11 @@ _PER_ROW_2D_KEYS = ("f_nhi", "n_absorbers")
 
 def write_cache(rows: list[dict], k_target: np.ndarray, output_path: Path) -> None:
     """Stack `rows` into one HDF5 file at `output_path`."""
+    if not rows:
+        raise ValueError(
+            "write_cache called with no rows; nothing to write. "
+            "Check --limit, --root, and discover_sim_snap_pairs() output."
+        )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     n = len(rows)
 

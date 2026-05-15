@@ -82,29 +82,68 @@ def test_interp_p1d_loglog_out_of_range_is_nan():
     assert np.isnan(P_interp[2])
 
 
-def test_dndx_per_class_matches_manual_sum_on_first_pair():
+def test_dndx_per_class_uses_unbinned_meta_counts():
+    """compute_dndx_per_class must read meta['n_absorbers'] directly (unbinned
+    per-class counts from the catalog) and NOT sum CDDF histogram bins. The
+    CDDF grid has a bin centred at log NHI = 20.3, so a bin-based approach
+    mis-attributes [20.2, 20.4) entirely to DLA and undercounts subDLAs.
+    See scripts/build_hcd_summary.py:134-138 for the authoritative reference
+    computation we lock against here.
+    """
     pairs = bec.discover_sim_snap_pairs(HCD_ROOT)
     _, _, snap_dir = pairs[0]
+    meta = bec.read_meta(snap_dir)
     cddf = bec.read_cddf(snap_dir)
-
-    result = bec.compute_dndx_per_class(cddf)
-
-    centres = cddf["log_nhi_centres"]
-    n_abs = cddf["n_absorbers"]
     total_path = float(cddf["total_path"])
-    lls_mask = (centres >= 17.2) & (centres < 19.0)
-    sub_mask = (centres >= 19.0) & (centres < 20.3)
-    dla_mask = (centres >= 20.3)
+
+    result = bec.compute_dndx_per_class(meta["n_absorbers"], total_path)
+
+    # Reference = exactly meta['n_absorbers'] / total_path (no binning).
+    n = meta["n_absorbers"]
     ref = {
-        "dNdX_LLS":    float(n_abs[lls_mask].sum() / total_path),
-        "dNdX_subDLA": float(n_abs[sub_mask].sum() / total_path),
-        "dNdX_DLA":    float(n_abs[dla_mask].sum() / total_path),
+        "dNdX_LLS":    float(n["LLS"])    / total_path,
+        "dNdX_subDLA": float(n["subDLA"]) / total_path,
+        "dNdX_DLA":    float(n["DLA"])    / total_path,
     }
     for k in ref:
         assert np.isclose(result[k], ref[k], rtol=1e-12), \
             f"{k}: got {result[k]}, expected {ref[k]}"
-    print(f"dNdX: LLS={result['dNdX_LLS']:.4f}  "
+    print(f"dNdX (unbinned): LLS={result['dNdX_LLS']:.4f}  "
           f"subDLA={result['dNdX_subDLA']:.4f}  DLA={result['dNdX_DLA']:.4f}")
+
+
+def test_dndx_unbinned_differs_from_bin_sum_at_class_boundary():
+    """Regression: the CDDF bin-sum approach (rejected) disagrees with the
+    unbinned meta count on subDLA/DLA at the 5-15% level on the first
+    available pair, exactly because the 0.2-dex CDDF grid has a bin centred
+    on the 20.3 boundary. If a future refactor reintroduces the binned
+    approach, this test makes the divergence visible.
+    """
+    pairs = bec.discover_sim_snap_pairs(HCD_ROOT)
+    _, _, snap_dir = pairs[0]
+    meta = bec.read_meta(snap_dir)
+    cddf = bec.read_cddf(snap_dir)
+    total_path = float(cddf["total_path"])
+
+    unbinned = bec.compute_dndx_per_class(meta["n_absorbers"], total_path)
+
+    centres = cddf["log_nhi_centres"]
+    n_abs = cddf["n_absorbers"]
+    binned = {
+        "dNdX_LLS":    float(n_abs[(centres >= 17.2) & (centres < 19.0)].sum()) / total_path,
+        "dNdX_subDLA": float(n_abs[(centres >= 19.0) & (centres < 20.3)].sum()) / total_path,
+        "dNdX_DLA":    float(n_abs[centres >= 20.3].sum())                      / total_path,
+    }
+    # LLS bin edges align with the catalog floor and the 19.0 cut → match.
+    assert np.isclose(unbinned["dNdX_LLS"], binned["dNdX_LLS"], rtol=1e-12)
+    # subDLA + DLA boundaries don't align → must differ.
+    assert not np.isclose(unbinned["dNdX_subDLA"], binned["dNdX_subDLA"], rtol=1e-3), \
+        "subDLA dN/dX matched the binned approach — class-boundary regression broke."
+    assert not np.isclose(unbinned["dNdX_DLA"], binned["dNdX_DLA"], rtol=1e-3), \
+        "DLA dN/dX matched the binned approach — class-boundary regression broke."
+    print(f"dNdX divergence (binned vs unbinned) on first pair:  "
+          f"subDLA = {binned['dNdX_subDLA']/unbinned['dNdX_subDLA'] - 1:+.1%}  "
+          f"DLA = {binned['dNdX_DLA']/unbinned['dNdX_DLA'] - 1:+.1%}")
 
 
 def test_build_row_schema_first_pair():
@@ -174,7 +213,8 @@ if __name__ == "__main__":
     test_per_file_readers_on_first_pair()
     test_interp_p1d_loglog_pure_power_law_recovers_input()
     test_interp_p1d_loglog_out_of_range_is_nan()
-    test_dndx_per_class_matches_manual_sum_on_first_pair()
+    test_dndx_per_class_uses_unbinned_meta_counts()
+    test_dndx_unbinned_differs_from_bin_sum_at_class_boundary()
     test_build_row_schema_first_pair()
     test_write_cache_two_row_round_trip()
     test_verify_round_trip_against_source_first_pair()
