@@ -410,13 +410,80 @@ Both are committed under `docs/superpowers/`:
 
 2. **[`2026-05-15-priya-coarse-grid-dive.md`](superpowers/2026-05-15-priya-coarse-grid-dive.md)**
    — PRIYA-side code archaeology of
-   `/home/mfho/lya_emulator_full/lyaemu/coarse_grid.py`. Covers the τ₀
-   sampling mechanism (count, range, spacing, rescaling), the
-   training-set construction call-chain, on-disk layout, k-grid
-   handling, emulator I/O mapping, whether HCDs are touched at all in
-   PRIYA, what we can port vs adapt, and open questions.
-   *(Filed by the parallel agent; may or may not have landed by the
-   time this handover is written — check the file's existence.)*
+   `/home/mfho/lya_emulator_full/lyaemu/coarse_grid.py`.
+   **Headline findings:**
+     - τ₀ sampling = `MeanFluxFactor.get_params()` in
+       `lyaemu/mean_flux.py:159-172`, 10 points,
+       `np.linspace(α_lo, α_hi, 10)` with endpoint-shift
+       (`coarse_grid.py:540-545`), α-range ≈ `[0.66, 1.36]` at the
+       KODIAQ slope limits, **uniform in α** (not log, not LHS).
+     - α is a redshift-independent multiplicative factor applied to
+       `obs_mean_tau(z) = 2.3e-3 × (1+z)^3.65`; the per-z mean-flux
+       target is `exp(-α · obs_mean_tau(z))`, passed via
+       `mean_flux_desired` into `fake_spectra.get_flux_power_1D`,
+       which re-solves α and recomputes `F = exp(-ατ)` per
+       sightline.  τ field is read **once per snap** and rescaled in
+       memory across the 10 α values.
+     - Loop structure: `for α in dpvals: for sim in sims:` (α-outer,
+       sim-inner; coarse_grid.py:561-572).  Training tensor is
+       `(n_α · n_sim, n_z · n_kf_native)` flattened across z-bins.
+     - On-disk format: one HDF5 file
+       `{basedir}/mf_emulator_flux_vectors.hdf5` with datasets
+       `params`, `flux_vectors`, `kfmpc`, `kfkms`, `zout`.  k-grid
+       in **comoving Mpc/h** (cyclic, box-mode-spaced).  Per-sim
+       km/s grid recovered via `velfac`.
+     - PRIYA emulator stack: GPy ARD `Linear + RBF` GPs, **one GP
+       per z-bin** (`MultiBinGP`), output normalised by per-bin
+       median P_F.  z is *not* an input — z is the bin selector.
+     - **PRIYA is forest-only at the emulator level.**  HCDs enter
+       only at the spectrum stage (`tau_thresh` masks pixels) and
+       at the post-prediction stage (Rogers+2018 `DLA4corr`
+       analytic multiplier, 4-class amplitudes `α_lls, α_sub,
+       α_sdla, α_ldla` as nuisance parameters at likelihood time).
+       **No per-class P1D training signal anywhere.**  The
+       four-class P1D emulator we're building in `hcd_priya` is
+       genuinely new.
+     - Directly portable: `mean_flux.py` whole module, endpoint-
+       shift, `gpemulator.SkLearnGP/MultiBinGP` skeleton,
+       `flux_power.rebin_power_to_kms`, HDF5 schema (extend with
+       per-class blocks).
+     - Adapt: four-class output structure, sightline classifier by
+       N_HI (PRIYA only thresholds pixels), CDDF coupling
+       (no precedent), per-class kmax.
+     - Hard dependency: `fake_spectra` (PyPI: `fake-spectra`, same
+       author as PRIYA).
+
+### Seven open questions surfaced by the PRIYA dive
+
+These need to be settled by the user before the τ₀-cache builder code is
+written; the design memo plus the loader and model can start without them.
+
+1. **"Tightly coupled to CDDF statistics" — operationalisation?**
+   PRIYA has no precedent.  Three candidate readings:
+   (a) condition GP inputs on a few CDDF moments;
+   (b) emit per-class P1D + a separate CDDF predictor, combine
+   downstream; (c) joint emulator output `(P1D_forest, P1D_LLS,
+   P1D_subDLA, P1D_DLA, CDDF_bins)`.  Design memo §2 leans
+   toward (c)-lite via shared latent + τ₀-replicated CDDF targets;
+   user confirmation needed.
+2. **Four-class partition definition.** Rogers+2018
+   LLS / sub-DLA / small-DLA / large-DLA, or the
+   17.2 / 19.0 / 20.3 boundaries we already use in
+   `hcd_priya`?
+3. **τ₀ count: 10, or more?** PRIYA tuned 10 for forest-only.  A
+   four-class build with smaller per-class SNR may want more.
+4. **Mean-flux model: global α, or per-class α?** PRIYA's
+   `mean_flux_desired` is one global α; for HCDs this may need to
+   differ per class (DLAs already saturate).
+5. **k-grid: keep PRIYA's Mpc/h native + rebin at predict-time, or
+   pre-rebin to a shared km/s grid at training?** PRIYA does the
+   former; our angular-k cache already chose the latter.
+6. **HCD masking semantics.** PRIYA's `tau_thresh` *masks pixels*.
+   For per-class P1D we need to *select sightlines* by integrated
+   N_HI class.  `fake_spectra` helper, or new sightline classifier?
+   (The hcd_priya `catalog.npz` already has this — likely reusable.)
+7. **Multi-fidelity?** PRIYA has LF/HF tiers and `SingleBinAR1`.
+   Porting both, or single-fidelity first?
 
 ### Reading order for the next session (Phase 2 pickup)
 
