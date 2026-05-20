@@ -4,6 +4,7 @@ Run with: python3 tests/test_emulator_cache_tau0.py
 """
 import sys
 import tempfile
+from functools import partial
 from pathlib import Path
 
 import h5py
@@ -173,6 +174,95 @@ def test_run_build_one_pair_end_to_end():
     print("run_build one-pair end-to-end: OK")
 
 
+def _write_tau_hdf5(path, tau):
+    with h5py.File(path, "w") as f:
+        f.create_dataset("tau/H/1/1215", data=tau.astype(np.float32))
+
+
+def test_freeze_core_equals_uniform_when_no_core_pixels():
+    """With all native tau < 1e6, freeze-core and uniform rescale are
+    identical — nothing is frozen (spec sec. 9)."""
+    from hcd_analysis.p1d import compute_p1d_per_class
+    from hcd_analysis.catalog import AbsorberCatalog
+    from hcd_analysis.tau0_rescale import freeze_core_rescale
+
+    rng = np.random.default_rng(1)
+    nbins = 128
+    tau = rng.uniform(0.0, 5.0, size=(64, nbins))  # all << 1e6
+    cat = AbsorberCatalog(sim_name="syn", snap=0, z=3.0, dv_kms=10.0)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "spec.hdf5"
+        _write_tau_hdf5(path, tau)
+        frozen = compute_p1d_per_class(
+            path, nbins=nbins, dv_kms=10.0, catalog=cat,
+            tau_transform=partial(freeze_core_rescale, alpha=1.3, tau_freeze=1.0e6))
+        uniform = compute_p1d_per_class(
+            path, nbins=nbins, dv_kms=10.0, catalog=cat,
+            tau_transform=partial(freeze_core_rescale, alpha=1.3, tau_freeze=np.inf))
+    assert np.allclose(frozen["P_clean"], uniform["P_clean"])
+    assert np.isclose(frozen["mean_F_clean"], uniform["mean_F_clean"])
+    print("freeze-core == uniform when no core pixels: OK")
+
+
+def test_freeze_core_differs_from_uniform_with_core_pixels():
+    """With pixels above tau_freeze present, freeze-core and uniform rescale
+    give different P1D — frozen pixels keep native tau while uniform rescales
+    them further by alpha (spec sec. 9).
+
+    Production tau_freeze is 1e6, but exp(-1e6) and exp(-1.3e6) are both
+    identically 0.0 in float64, so the physics is pinned here with a synthetic
+    tau_freeze=3.0: pixels with tau > 3 are frozen at their native value,
+    while the uniform transform (tau_freeze=inf) rescales them by alpha=1.3,
+    producing a numerically visible difference in F and therefore in P1D.
+    """
+    from hcd_analysis.p1d import compute_p1d_per_class
+    from hcd_analysis.catalog import AbsorberCatalog
+    from hcd_analysis.tau0_rescale import freeze_core_rescale
+
+    rng = np.random.default_rng(2)
+    nbins = 128
+    tau = rng.uniform(0.0, 2.5, size=(64, nbins))   # all pixels well below tau_freeze=3
+    tau[:8, 64] = 5.0  # 8 sightlines get a "core" pixel (tau > tau_freeze=3)
+
+    # Verify the physics: frozen pixel stays at 5.0; uniform scales to 1.3*5=6.5
+    assert np.isclose(freeze_core_rescale(np.array([5.0]), alpha=1.3, tau_freeze=3.0), 5.0)
+    assert np.isclose(freeze_core_rescale(np.array([5.0]), alpha=1.3, tau_freeze=np.inf), 6.5)
+
+    cat = AbsorberCatalog(sim_name="syn", snap=0, z=3.0, dv_kms=10.0)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "spec.hdf5"
+        _write_tau_hdf5(path, tau)
+        frozen = compute_p1d_per_class(
+            path, nbins=nbins, dv_kms=10.0, catalog=cat,
+            tau_transform=partial(freeze_core_rescale, alpha=1.3, tau_freeze=3.0))
+        uniform = compute_p1d_per_class(
+            path, nbins=nbins, dv_kms=10.0, catalog=cat,
+            tau_transform=partial(freeze_core_rescale, alpha=1.3, tau_freeze=np.inf))
+    # Frozen cores: F = exp(-5.0) ≈ 0.0067; uniform: F = exp(-6.5) ≈ 0.0015 — numerically distinct
+    assert not np.allclose(frozen["P_clean"], uniform["P_clean"]), \
+        "freeze-core and uniform must differ when pixels exceed tau_freeze"
+    assert not np.isclose(frozen["mean_F_clean"], uniform["mean_F_clean"]), \
+        "mean_F must differ: frozen cores contribute more flux than uniformly-rescaled cores"
+    print("freeze-core != uniform with core pixels: OK")
+
+
+def test_cddf_block_is_single_per_snap():
+    """The CDDF block is built once per (sim, snap) and is therefore
+    tau0-invariant by construction (spec sec. 3)."""
+    pairs = bt0.discover_tau0_pairs(_HCD_ROOT, _EMU_ROOT)
+    sim, snap, snap_dir, raw = pairs[0]
+    from hcd_analysis.p1d import _DEFAULT_K_BINS
+    k_target = 2.0 * np.pi * _DEFAULT_K_BINS
+    rows, block = bt0.build_tau0_rows(
+        sim, snap, snap_dir, raw, np.array([0.7, 1.0, 1.3]), k_target,
+        tau_freeze=1.0e6, n_skewers=4096)
+    assert len(rows) == 3
+    assert isinstance(block, dict)
+    assert block["f_nhi"].shape == (30,)  # one block, not 3
+    print("CDDF block single-per-snap (tau0-invariant): OK")
+
+
 if __name__ == "__main__":
     test_locate_raw_tau_file_finds_grid_file()
     test_locate_raw_tau_file_returns_none_when_missing()
@@ -181,4 +271,7 @@ if __name__ == "__main__":
     test_run_build_one_pair_end_to_end()
     test_discover_tau0_pairs_returns_nonempty()
     test_build_tau0_rows_integration_small()
+    test_freeze_core_equals_uniform_when_no_core_pixels()
+    test_freeze_core_differs_from_uniform_with_core_pixels()
+    test_cddf_block_is_single_per_snap()
     print("OK")
