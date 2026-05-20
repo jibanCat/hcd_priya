@@ -148,3 +148,79 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_grid,
         **dndx,
     }
     return rows, snap_block
+
+
+_ROW_FLOAT_KEYS = (
+    "alpha", "tau0", "z", "dv_kms",
+    "mean_F_clean", "mean_F_LLS", "mean_F_subDLA", "mean_F_DLA",
+)
+_ROW_INT_KEYS = (
+    "snap", "alpha_idx", "nbins_native", "snap_group_idx",
+    "n_sightlines_clean", "n_sightlines_LLS",
+    "n_sightlines_subDLA", "n_sightlines_DLA",
+)
+_ROW_P1D_KEYS = ("P_clean", "P_LLS_only", "P_subDLA_only", "P_DLA_only")
+_SNAP_FLOAT_KEYS = ("total_path_dX", "dNdX_LLS", "dNdX_subDLA", "dNdX_DLA")
+_SNAP_2D_KEYS = ("f_nhi", "n_absorbers")
+
+
+def write_cache_tau0(rows, snap_blocks, k_target, output_path,
+                     tier, tau_freeze, alpha_range):
+    """Stack per-alpha `rows` + per-snap `snap_blocks` into one HDF5 cache.
+
+    Each row carries `snap_group_idx`, an index into the snap_* datasets.
+    """
+    if not rows:
+        raise ValueError("write_cache_tau0 called with no rows; nothing to write.")
+    if not snap_blocks:
+        raise ValueError("write_cache_tau0 called with no snap_blocks.")
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    log_nhi_centres = snap_blocks[0]["log_nhi_centres"]
+    log_nhi_edges = snap_blocks[0]["log_nhi_edges"]
+    for b in snap_blocks[1:]:
+        assert np.array_equal(b["log_nhi_centres"], log_nhi_centres), \
+            "log_nhi_centres mismatch across snap_blocks"
+
+    with h5py.File(output_path, "w") as f:
+        f.attrs["created_utc"] = (
+            datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z")
+        f.attrs["git_sha"] = bec._git_sha(REPO_ROOT)
+        f.attrs["n_rows"] = len(rows)
+        f.attrs["n_snaps"] = len(snap_blocks)
+        f.attrs["rescale_tier"] = tier
+        f.attrs["tau_freeze"] = float(tau_freeze)
+        f.attrs["alpha_range"] = np.asarray(alpha_range, dtype=np.float64)
+        f.attrs["k_convention"] = "angular (rad*s/km), PRIYA convention"
+
+        f.create_dataset("k_target", data=np.asarray(k_target, dtype=np.float64))
+        f.create_dataset("param_names",
+                         data=np.array(list(bec.PARAM_ORDER), dtype=h5py.string_dtype()))
+        f.create_dataset("log_nhi_centres", data=log_nhi_centres)
+        f.create_dataset("log_nhi_edges", data=log_nhi_edges)
+
+        # --- per-row (sim, snap, alpha) datasets ---
+        f.create_dataset("sim_name",
+                         data=np.array([r["sim_name"] for r in rows],
+                                       dtype=h5py.string_dtype()))
+        f.create_dataset("params", data=np.stack([r["params"] for r in rows], axis=0))
+        for key in _ROW_FLOAT_KEYS:
+            f.create_dataset(key, data=np.array([r[key] for r in rows], dtype=np.float64))
+        for key in _ROW_INT_KEYS:
+            f.create_dataset(key, data=np.array([r[key] for r in rows], dtype=np.int32))
+        for key in _ROW_P1D_KEYS:
+            f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0))
+
+        # --- per-(sim, snap) tau0-invariant CDDF datasets ---
+        f.create_dataset("snap_sim_name",
+                         data=np.array([b["sim_name"] for b in snap_blocks],
+                                       dtype=h5py.string_dtype()))
+        f.create_dataset("snap_snap",
+                         data=np.array([b["snap"] for b in snap_blocks], dtype=np.int32))
+        for key in _SNAP_FLOAT_KEYS:
+            f.create_dataset("snap_" + key,
+                             data=np.array([b[key] for b in snap_blocks], dtype=np.float64))
+        for key in _SNAP_2D_KEYS:
+            f.create_dataset("snap_" + key,
+                             data=np.stack([b[key] for b in snap_blocks], axis=0))
