@@ -224,3 +224,88 @@ def write_cache_tau0(rows, snap_blocks, k_target, output_path,
         for key in _SNAP_2D_KEYS:
             f.create_dataset("snap_" + key,
                              data=np.stack([b[key] for b in snap_blocks], axis=0))
+
+
+def tier_to_tau_freeze(tier: str) -> float:
+    """Map a --tier letter to its tau_freeze boundary.
+
+    B = freeze-core production (tau_freeze = 1e6).
+    A = uniform-rescale twin   (tau_freeze = inf) — a deliberately-wrong
+        systematic baseline; see spec sec. 3.
+    """
+    if tier == "B":
+        return TAU_FREEZE_DEFAULT
+    if tier == "A":
+        return np.inf
+    raise ValueError(f"unknown tier {tier!r}; expected 'A' or 'B'")
+
+
+def _default_output(tier: str) -> Path:
+    name = "observables_tau0.h5" if tier == "B" else "observables_tau0_uniform.h5"
+    return REPO_ROOT / "hcd_analysis" / "_emulator_data" / name
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Build the tau0-extended HCD-emulator cache (Phase 2).")
+    parser.add_argument("--hcd-root", type=Path, default=_DEFAULT_HCD_ROOT)
+    parser.add_argument("--emu-root", type=Path, default=_DEFAULT_EMU_ROOT)
+    parser.add_argument("--tier", choices=["A", "B"], default="B",
+                        help="B = freeze-core (default); A = uniform-rescale twin.")
+    parser.add_argument("--n-alpha", type=int, default=20)
+    parser.add_argument("--limit", type=int, default=None,
+                        help="Process at most N (sim, snap) pairs.")
+    parser.add_argument("--offset", type=int, default=0,
+                        help="Skip the first M pairs (for sharded array jobs).")
+    parser.add_argument("--n-skewers", type=int, default=None,
+                        help="Limit skewers per snap (dry runs only).")
+    parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--spot-check", action="store_true",
+                        help="After writing, re-verify row 0: tau0 == -ln(mean_F_clean).")
+    args = parser.parse_args()
+
+    from hcd_analysis.p1d import _DEFAULT_K_BINS
+    k_target = 2.0 * np.pi * _DEFAULT_K_BINS
+
+    tau_freeze = tier_to_tau_freeze(args.tier)
+    alpha_grid = make_alpha_grid(n=args.n_alpha)
+    output = args.output if args.output is not None else _default_output(args.tier)
+
+    pairs = discover_tau0_pairs(args.hcd_root, args.emu_root)
+    print(f"Found {len(pairs)} tau0-buildable (sim, snap) pairs")
+    pairs = pairs[args.offset:]
+    if args.limit is not None:
+        pairs = pairs[: args.limit]
+    print(f"Processing {len(pairs)} pairs (offset={args.offset}, limit={args.limit}); "
+          f"tier={args.tier} (tau_freeze={tau_freeze}); n_alpha={args.n_alpha}")
+
+    all_rows, snap_blocks = [], []
+    for i, (sim, snap, snap_dir, raw) in enumerate(pairs):
+        rows, block = build_tau0_rows(
+            sim, snap, snap_dir, raw, alpha_grid, k_target,
+            tau_freeze=tau_freeze, n_skewers=args.n_skewers)
+        gi = len(snap_blocks)
+        for r in rows:
+            r["snap_group_idx"] = gi
+        all_rows.extend(rows)
+        snap_blocks.append(block)
+        if (i + 1) % 10 == 0 or (i + 1) == len(pairs):
+            print(f"  built {i + 1}/{len(pairs)} pairs ({len(all_rows)} rows)")
+
+    write_cache_tau0(all_rows, snap_blocks, k_target, output,
+                     tier=args.tier, tau_freeze=tau_freeze,
+                     alpha_range=(float(alpha_grid[0]), float(alpha_grid[-1])))
+    print(f"Wrote {output}  ({output.stat().st_size / 1e6:.2f} MB, "
+          f"{len(all_rows)} rows, {len(snap_blocks)} snaps)")
+
+    if args.spot_check and all_rows:
+        with h5py.File(output, "r") as f:
+            tau0_0 = float(f["tau0"][0])
+            mfc_0 = float(f["mean_F_clean"][0])
+        assert np.isclose(tau0_0, -np.log(mfc_0)), \
+            f"spot-check failed: tau0={tau0_0} != -ln(mean_F_clean)={-np.log(mfc_0)}"
+        print(f"spot-check: row 0 tau0={tau0_0:.4f} == -ln(mean_F_clean) OK")
+
+
+if __name__ == "__main__":
+    main()

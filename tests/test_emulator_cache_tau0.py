@@ -140,10 +140,45 @@ def test_write_cache_tau0_round_trip():
     print("write_cache_tau0: round-trip OK")
 
 
+def test_tier_to_tau_freeze_mapping():
+    assert bt0.tier_to_tau_freeze("B") == 1.0e6
+    assert bt0.tier_to_tau_freeze("A") == np.inf
+
+
+def test_run_build_one_pair_end_to_end():
+    """End-to-end: discover -> build 2 alpha -> write -> reload."""
+    from hcd_analysis.p1d import _DEFAULT_K_BINS
+    pairs = bt0.discover_tau0_pairs(_HCD_ROOT, _EMU_ROOT)[:1]
+    k_target = 2.0 * np.pi * _DEFAULT_K_BINS
+    alpha_grid = np.array([0.8, 1.2])
+
+    all_rows, snap_blocks = [], []
+    for sim, snap, snap_dir, raw in pairs:
+        rows, block = bt0.build_tau0_rows(
+            sim, snap, snap_dir, raw, alpha_grid, k_target,
+            tau_freeze=1.0e6, n_skewers=4096)
+        gi = len(snap_blocks)
+        for r in rows:
+            r["snap_group_idx"] = gi
+        all_rows.extend(rows)
+        snap_blocks.append(block)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "observables_tau0.h5"
+        bt0.write_cache_tau0(all_rows, snap_blocks, k_target, out,
+                             tier="B", tau_freeze=1.0e6, alpha_range=(0.8, 1.2))
+        with h5py.File(out, "r") as f:
+            assert f["P_clean"].shape == (2, 50)
+            assert f["snap_f_nhi"].shape == (1, 30)
+    print("run_build one-pair end-to-end: OK")
+
+
 if __name__ == "__main__":
     test_locate_raw_tau_file_finds_grid_file()
     test_locate_raw_tau_file_returns_none_when_missing()
     test_write_cache_tau0_round_trip()
+    test_tier_to_tau_freeze_mapping()
+    test_run_build_one_pair_end_to_end()
     test_discover_tau0_pairs_returns_nonempty()
     test_build_tau0_rows_integration_small()
     print("OK")
