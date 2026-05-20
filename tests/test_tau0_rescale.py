@@ -56,6 +56,44 @@ def test_tau0_from_mean_flux_inverts_exp():
     assert np.isclose(tau0_from_mean_flux(1.0), 0.0)
 
 
+def _make_synthetic_tau_hdf5(path, tau):
+    """Write a (n_skewers, nbins) tau array as a SPECTRA-style HDF5 file."""
+    with h5py.File(path, "w") as f:
+        f.create_dataset("tau/H/1/1215", data=tau.astype(np.float32))
+
+
+def test_compute_p1d_per_class_tau_transform_changes_mean_flux():
+    from hcd_analysis.p1d import compute_p1d_per_class
+    from hcd_analysis.catalog import AbsorberCatalog
+
+    rng = np.random.default_rng(0)
+    nbins = 128
+    tau = rng.uniform(0.0, 2.0, size=(64, nbins))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "spec.hdf5"
+        _make_synthetic_tau_hdf5(path, tau)
+        cat = AbsorberCatalog(sim_name="syn", snap=0, z=3.0, dv_kms=10.0)
+
+        base = compute_p1d_per_class(path, nbins=nbins, dv_kms=10.0, catalog=cat)
+        scaled = compute_p1d_per_class(
+            path, nbins=nbins, dv_kms=10.0, catalog=cat,
+            tau_transform=lambda t: 2.0 * t,
+        )
+        ident = compute_p1d_per_class(
+            path, nbins=nbins, dv_kms=10.0, catalog=cat,
+            tau_transform=lambda t: t,
+        )
+
+    # empty catalog => every sightline is "clean"
+    assert base["n_sightlines_clean"] == 64
+    assert np.isclose(base["mean_F_clean"], np.exp(-tau).mean())
+    assert np.isclose(scaled["mean_F_clean"], np.exp(-2.0 * tau).mean())
+    # identity transform reproduces the no-transform result exactly
+    assert np.allclose(ident["P_clean"], base["P_clean"])
+    assert np.isclose(ident["mean_F_clean"], base["mean_F_clean"])
+
+
 if __name__ == "__main__":
     test_freeze_core_rescale_freezes_cores_scales_thin()
     test_freeze_core_rescale_uniform_when_tau_freeze_inf()
@@ -63,4 +101,5 @@ if __name__ == "__main__":
     test_make_alpha_grid_spans_range_inclusive()
     test_make_alpha_grid_default_count()
     test_tau0_from_mean_flux_inverts_exp()
+    test_compute_p1d_per_class_tau_transform_changes_mean_flux()
     print("OK")
