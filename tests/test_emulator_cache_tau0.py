@@ -35,7 +35,23 @@ def test_locate_raw_tau_file_returns_none_when_missing():
         assert found is None
 
 
+_HCD_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+_EMU_ROOT = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
+
+
+def test_discover_tau0_pairs_returns_nonempty():
+    pairs = bt0.discover_tau0_pairs(_HCD_ROOT, _EMU_ROOT)
+    assert len(pairs) >= 1, "no tau0-buildable (sim, snap) pairs found"
+    sim, snap, snap_dir, raw = pairs[0]
+    assert isinstance(sim, str) and sim.startswith("ns")
+    assert isinstance(snap, int)
+    assert (snap_dir / "catalog.npz").exists()
+    assert raw.exists() and raw.suffix == ".hdf5"
+    print(f"discover_tau0_pairs: {len(pairs)} pairs; first = ({sim}, snap_{snap:03d})")
+
+
 if __name__ == "__main__":
     test_locate_raw_tau_file_finds_grid_file()
     test_locate_raw_tau_file_returns_none_when_missing()
+    test_discover_tau0_pairs_returns_nonempty()
     print("OK")

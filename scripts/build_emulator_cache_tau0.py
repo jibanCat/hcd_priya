@@ -61,3 +61,18 @@ def locate_raw_tau_file(emu_root, sim_name: str, snap: int):
     if fallback.exists():
         return fallback
     return None
+
+
+def discover_tau0_pairs(hcd_root, emu_root):
+    """Return [(sim_name, snap, snap_dir, raw_tau_path), ...] for every
+    (sim, snap) that has Phase-1 outputs, a native catalog.npz, AND a
+    locatable raw fake_spectra tau grid."""
+    out = []
+    for sim, snap, snap_dir in bec.discover_sim_snap_pairs(Path(hcd_root)):
+        if not (snap_dir / "catalog.npz").exists():
+            continue
+        raw = locate_raw_tau_file(emu_root, sim, snap)
+        if raw is None:
+            continue
+        out.append((sim, snap, snap_dir, raw))
+    return out
