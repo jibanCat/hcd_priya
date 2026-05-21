@@ -24,6 +24,15 @@ ALPHA_LO_DEFAULT = 0.66
 ALPHA_HI_DEFAULT = 1.36
 N_ALPHA_DEFAULT = 20
 
+# PRIYA's published mean-flux factor grid (Kim 2013 slope-alpha) is exactly
+# np.linspace(PRIYA_ALPHA_LO, PRIYA_ALPHA_HI, 10), sim-INDEPENDENT (verified
+# across all 60 LF sims; spread 0). The Phase-2 production grid refines this so
+# PRIYA's exact 10 alpha land on a subset of our grid -> bit-identical
+# comparison of the PRIYA-matching rows. See make_alpha_grid_priya_aligned.
+PRIYA_ALPHA_LO = 0.6555563811131029
+PRIYA_ALPHA_HI = 1.2956838823026422
+N_ALPHA_PRIYA = 10
+
 
 def freeze_core_rescale(tau, alpha, tau_freeze=TAU_FREEZE_DEFAULT):
     """LEGACY (2026-05-17 plan); superseded by the Tier-P PRIYA-compatible
@@ -56,6 +65,27 @@ def make_alpha_grid(n=N_ALPHA_DEFAULT, lo=ALPHA_LO_DEFAULT, hi=ALPHA_HI_DEFAULT)
     if n < 2:
         raise ValueError(f"n must be >= 2, got {n}")
     return np.linspace(lo, hi, n)
+
+
+def make_alpha_grid_priya_aligned(refine=2):
+    """Mean-flux alpha grid that CONTAINS PRIYA's exact 10 alpha as a subset.
+
+    PRIYA samples 10 alpha = linspace(PRIYA_ALPHA_LO, PRIYA_ALPHA_HI, 10) with
+    step s = (hi-lo)/9. We sample at step s/`refine` starting from PRIYA_ALPHA_LO,
+    for `refine`*10 points total. PRIYA's points then land on indices
+    0, refine, 2*refine, ... (e.g. even indices for refine=2), enabling
+    bit-identical comparison of the PRIYA-matching rows. The extra
+    (refine-1)*... points above the top extend the absorption range slightly.
+
+    refine=2 -> 20 points (PRIYA's 10 at even indices + 9 midpoints + 1
+    half-step extension above PRIYA_ALPHA_HI).
+    """
+    if refine < 1:
+        raise ValueError(f"refine must be >= 1, got {refine}")
+    s = (PRIYA_ALPHA_HI - PRIYA_ALPHA_LO) / (N_ALPHA_PRIYA - 1)
+    step = s / refine
+    n = refine * N_ALPHA_PRIYA
+    return PRIYA_ALPHA_LO + step * np.arange(n)
 
 
 def obs_mean_tau_kim2013(z):

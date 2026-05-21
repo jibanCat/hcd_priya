@@ -33,7 +33,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import build_emulator_cache as bec  # noqa: E402
-from hcd_analysis.tau0_rescale import make_alpha_grid  # noqa: E402
+from hcd_analysis.tau0_rescale import make_alpha_grid_priya_aligned  # noqa: E402
 
 _DEFAULT_HCD_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
 _DEFAULT_EMU_ROOT = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
@@ -46,7 +46,21 @@ def locate_raw_tau_file(emu_root, sim_name: str, snap: int):
             lya_forest_spectra_grid_480.hdf5  (preferred)
             lya_forest_spectra.hdf5            (fallback)
     """
-    spectra_dir = Path(emu_root) / sim_name / "output" / f"SPECTRA_{snap:03d}"
+    found = _grid_in_dir(Path(emu_root) / sim_name / "output" / f"SPECTRA_{snap:03d}")
+    if found is not None:
+        return found
+    # Fallback: the Phase-1 (hcd_outputs) and raw (emu_full) folder names can
+    # round the 9 params differently (e.g. the 4th HR sim is alphaq1.57/
+    # omegamh20.141 in hcd_outputs but alphaq1.58/omegamh20.142 in emu_full).
+    # Match the emu_root folder by parsed params instead of by exact name.
+    alt = _match_emu_folder_by_params(emu_root, sim_name)
+    if alt is not None:
+        return _grid_in_dir(Path(emu_root) / alt / "output" / f"SPECTRA_{snap:03d}")
+    return None
+
+
+def _grid_in_dir(spectra_dir):
+    """Return the grid (preferred) or fallback tau HDF5 in a SPECTRA dir, or None."""
     if not spectra_dir.is_dir():
         return None
     grid = spectra_dir / "lya_forest_spectra_grid_480.hdf5"
@@ -58,18 +72,57 @@ def locate_raw_tau_file(emu_root, sim_name: str, snap: int):
     return None
 
 
-def discover_tau0_pairs(hcd_root, emu_root):
+def _match_emu_folder_by_params(emu_root, sim_name, rtol=0.015):
+    """Return the emu_root folder whose parsed 9 params match `sim_name`'s to
+    within `rtol` on every param, or None if there is no unique match.
+
+    Used when the exact-name path is absent because hcd_outputs and emu_full
+    round the folder-name params differently. rtol=1.5% safely spans the
+    <0.7% rounding gap while staying far below the inter-sim separation.
+    """
+    target = bec.parse_sim_params(sim_name)
+    if target is None:
+        return None
+    match = None
+    for d in sorted(Path(emu_root).iterdir()):
+        if not d.is_dir():
+            continue
+        p = bec.parse_sim_params(d.name)
+        if p is None:
+            continue
+        if all(abs(p[k] - target[k]) <= rtol * max(abs(target[k]), 1e-30)
+               for k in target):
+            if match is not None and match != d.name:
+                return None  # ambiguous -> refuse to guess
+            match = d.name
+    return match
+
+
+def discover_tau0_pairs(hcd_root, emu_root, include_hires=True):
     """Return [(sim_name, snap, snap_dir, raw_tau_path), ...] for every
     (sim, snap) that has Phase-1 outputs, a native catalog.npz, AND a
-    locatable raw fake_spectra tau grid."""
+    locatable raw fake_spectra tau grid.
+
+    LF sims live directly under `hcd_root`; the 4 HR sims live under
+    `hcd_root/hires`. Both have their raw tau (and SimulationICs.json) under
+    `emu_root/<sim>` (bare, no hires/ prefix). The list is LF-first then HR,
+    each sorted by (sim, snap) via bec.discover_sim_snap_pairs, so --offset/
+    --limit sharding is deterministic.
+    """
+    roots = [Path(hcd_root)]
+    if include_hires:
+        hires = Path(hcd_root) / "hires"
+        if hires.is_dir():
+            roots.append(hires)
     out = []
-    for sim, snap, snap_dir in bec.discover_sim_snap_pairs(Path(hcd_root)):
-        if not (snap_dir / "catalog.npz").exists():
-            continue
-        raw = locate_raw_tau_file(emu_root, sim, snap)
-        if raw is None:
-            continue
-        out.append((sim, snap, snap_dir, raw))
+    for root in roots:
+        for sim, snap, snap_dir in bec.discover_sim_snap_pairs(root):
+            if not (snap_dir / "catalog.npz").exists():
+                continue
+            raw = locate_raw_tau_file(emu_root, sim, snap)
+            if raw is None:
+                continue
+            out.append((sim, snap, snap_dir, raw))
     return out
 
 
@@ -298,7 +351,9 @@ def main() -> None:
         description="Build the tau0-extended HCD-emulator cache (Phase 2).")
     parser.add_argument("--hcd-root", type=Path, default=_DEFAULT_HCD_ROOT)
     parser.add_argument("--emu-root", type=Path, default=_DEFAULT_EMU_ROOT)
-    parser.add_argument("--n-alpha", type=int, default=20)
+    parser.add_argument("--alpha-refine", type=int, default=2,
+                        help="PRIYA-aligned grid: refine*10 alpha containing "
+                             "PRIYA's 10 (default 2 -> 20 alpha).")
     parser.add_argument("--limit", type=int, default=None,
                         help="Process at most N (sim, snap) pairs.")
     parser.add_argument("--offset", type=int, default=0,
@@ -313,7 +368,7 @@ def main() -> None:
     from hcd_analysis.p1d import _DEFAULT_K_BINS
     k_target = 2.0 * np.pi * _DEFAULT_K_BINS
 
-    alpha_slope_grid = make_alpha_grid(n=args.n_alpha)
+    alpha_slope_grid = make_alpha_grid_priya_aligned(refine=args.alpha_refine)
     output = args.output or _default_output()
 
     pairs = discover_tau0_pairs(args.hcd_root, args.emu_root)
@@ -322,7 +377,7 @@ def main() -> None:
     if args.limit is not None:
         pairs = pairs[: args.limit]
     print(f"Processing {len(pairs)} pairs (offset={args.offset}, limit={args.limit}); "
-          f"n_alpha={args.n_alpha}")
+          f"n_alpha={len(alpha_slope_grid)} (PRIYA-aligned, refine={args.alpha_refine})")
 
     all_rows, snap_blocks = [], []
     for i, (sim, snap, snap_dir, raw) in enumerate(pairs):

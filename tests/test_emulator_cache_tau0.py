@@ -45,6 +45,35 @@ def test_snap_z_to_priya_grid():
     assert np.isclose(bt0._snap_z_to_priya_grid(2.199), 2.2)
 
 
+def test_discover_tau0_pairs_includes_hires_and_is_sorted():
+    """discover_tau0_pairs must include the 4 HR sims (under hcd_root/hires)
+    and return a deterministic LF-first-then-HR order for stable sharding."""
+    pairs = bt0.discover_tau0_pairs(_HCD_ROOT, _EMU_ROOT, include_hires=True)
+    pairs_lf_only = bt0.discover_tau0_pairs(_HCD_ROOT, _EMU_ROOT, include_hires=False)
+    assert len(pairs) > len(pairs_lf_only), "HR sims not added"
+    # HR sims are those whose snap_dir is under .../hires/. All 4 should be
+    # found: 3 by exact emu_full name, and the 4th (ns0.914...) via the
+    # params-based fallback in locate_raw_tau_file (its emu_full folder rounds
+    # alphaq/omegamh2 differently: 1.58/0.142 vs the Phase-1 1.57/0.141).
+    hr = [p for p in pairs if "/hires/" in str(p[2])]
+    hr_sims = sorted({p[0] for p in hr})
+    assert len(hr_sims) == 4, f"expected 4 buildable HR sims, got {len(hr_sims)}: {hr_sims}"
+    # The 4th HR sim's raw tau must resolve (via the params fallback) even
+    # though its emu_full folder name differs from the Phase-1 name.
+    sim4 = "ns0.914Ap1.32e-09herei3.85heref2.65alphaq1.57hub0.742omegamh20.141hireionz6.88bhfeedback0.04"
+    raw4 = bt0.locate_raw_tau_file(_EMU_ROOT, sim4, 4)
+    assert raw4 is not None and raw4.exists(), f"4th HR raw tau not located: {raw4}"
+    assert "alphaq1.58" in str(raw4), f"expected params-fallback match: {raw4}"
+    # raw tau for HR resolves under emu_root/<sim> (bare, no hires prefix)
+    for sim, snap, snap_dir, raw in hr[:3]:
+        assert raw.exists() and "/hires/" not in str(raw), raw
+    # deterministic: two calls give identical ordering
+    pairs2 = bt0.discover_tau0_pairs(_HCD_ROOT, _EMU_ROOT, include_hires=True)
+    assert [p[:2] for p in pairs] == [p[:2] for p in pairs2], "ordering not stable"
+    print(f"discover_tau0_pairs: {len(pairs)} total ({len(pairs_lf_only)} LF + "
+          f"{len(hr)} HR rows across {len(hr_sims)} HR sims)")
+
+
 def test_read_priya_params_matches_priya_array():
     """_read_priya_params (SimulationICs.json + Ap pivot transform) must
     reproduce PRIYA's params row to machine precision for several sims."""
@@ -179,6 +208,7 @@ if __name__ == "__main__":
     test_locate_raw_tau_file_finds_grid_file()
     test_locate_raw_tau_file_returns_none_when_missing()
     test_snap_z_to_priya_grid()
+    test_discover_tau0_pairs_includes_hires_and_is_sorted()
     test_read_priya_params_matches_priya_array()
     test_write_cache_tau0_round_trip()
     test_build_tau0_rows_tier_p_matches_priya()

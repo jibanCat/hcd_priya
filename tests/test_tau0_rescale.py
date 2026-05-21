@@ -104,6 +104,21 @@ def test_kim_slope_alpha_to_target_F_matches_obs_mean_tau():
     assert np.isclose(target, expected, rtol=1e-12), f"got {target}, expected {expected}"
 
 
+def test_make_alpha_grid_priya_aligned_contains_priya():
+    from hcd_analysis.tau0_rescale import (
+        make_alpha_grid_priya_aligned, PRIYA_ALPHA_LO, PRIYA_ALPHA_HI, N_ALPHA_PRIYA,
+    )
+    grid = make_alpha_grid_priya_aligned(refine=2)
+    assert grid.shape == (20,), grid.shape
+    assert np.all(np.diff(grid) > 0), "grid must be strictly increasing"
+    # PRIYA's exact 10 alpha must land on the even indices to <1e-12.
+    priya = np.linspace(PRIYA_ALPHA_LO, PRIYA_ALPHA_HI, N_ALPHA_PRIYA)
+    assert np.allclose(grid[::2], priya, atol=1e-12), \
+        f"PRIYA alpha not a subset:\n grid[::2]={grid[::2]}\n priya={priya}"
+    n_match = sum(np.any(np.abs(grid - p) < 1e-12) for p in priya)
+    assert n_match == 10, n_match
+
+
 if __name__ == "__main__":
     test_freeze_core_rescale_freezes_cores_scales_thin()
     test_freeze_core_rescale_uniform_when_tau_freeze_inf()
@@ -113,4 +128,5 @@ if __name__ == "__main__":
     test_tau0_from_mean_flux_inverts_exp()
     test_compute_p1d_per_class_tau_transform_changes_mean_flux()
     test_kim_slope_alpha_to_target_F_matches_obs_mean_tau()
+    test_make_alpha_grid_priya_aligned_contains_priya()
     print("OK")
