@@ -1,13 +1,12 @@
-"""Build the tau0-extended HCD-emulator training cache (Phase 2).
+"""Build the tau0-extended HCD-emulator training cache (Phase 2, v2.0).
 
-For every fully-processed (sim, snap) pair, rescale the raw fake_spectra
-optical-depth grid with the freeze-core recipe at each of N alpha values
-and stack the per-class P1D into observables_tau0.h5. The CDDF / dN/dX are
-tau0-invariant and stored once per (sim, snap).
-
-A --tier flag selects the rescale recipe:
-  B (default) : freeze-core (tau_freeze = 1e6)        -> observables_tau0.h5
-  A           : uniform rescale (tau_freeze = inf)    -> observables_tau0_uniform.h5
+For every fully-processed (sim, snap) pair, drive fake_spectra directly (via
+hcd_analysis.priya_p1d) at each of N alpha-slope values to produce both:
+  Tier P : PRIYA-compatible total P1D over all sightlines (bit-identical to
+           PRIYA's flux_vectors), after the _filter_single_tau_complex mask.
+  Tier C : per-class P1D (clean/LLS/subDLA/DLA) on the unfiltered tau, sharing
+           Tier P's mean-flux normalisation (scale + target_F).
+The CDDF / dN/dX are tau0-invariant and stored once per (sim, snap).
 
 See docs/superpowers/specs/2026-05-17-phase2-hcd-emulator-design.md.
 
@@ -15,7 +14,7 @@ Usage:
     python3 scripts/build_emulator_cache_tau0.py \
         [--hcd-root /scratch/cavestru_root/cavestru0/mfho/hcd_outputs] \
         [--emu-root /nfs/turbo/umor-yueyingn/mfho/emu_full] \
-        [--tier B] [--n-alpha 20] [--limit N] [--offset M] \
+        [--n-alpha 20] [--limit N] [--offset M] \
         [--n-skewers N] [--output PATH] [--spot-check]
 """
 from __future__ import annotations
@@ -24,7 +23,6 @@ import argparse
 import datetime
 import subprocess
 import sys
-from functools import partial
 from pathlib import Path
 
 import h5py
@@ -35,10 +33,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import build_emulator_cache as bec  # noqa: E402
-from hcd_analysis.tau0_rescale import (  # noqa: E402
-    freeze_core_rescale, make_alpha_grid, tau0_from_mean_flux,
-    TAU_FREEZE_DEFAULT,
-)
+from hcd_analysis.tau0_rescale import make_alpha_grid  # noqa: E402
 
 _DEFAULT_HCD_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
 _DEFAULT_EMU_ROOT = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
@@ -78,17 +73,40 @@ def discover_tau0_pairs(hcd_root, emu_root):
     return out
 
 
-def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_grid,
-                    k_target, tau_freeze, n_skewers=None):
-    """Build the per-alpha rows and the per-snap CDDF block for one (sim, snap).
+# PRIYA's zout grid runs 2.0..5.4 in steps of 0.2; snapshot redshifts can land
+# slightly off (e.g. 4.600013). For bit-compatibility with PRIYA's training
+# data the mean-flux model must use the GRID z, not the snapshot's exact z
+# (obs_mean_tau ∝ (1+z)^3.65; an off-grid z gives a ~1e-5 P1D bias — see
+# docs/superpowers/2026-05-20-priya-p1d-consistency-check.md §6c).
+def _snap_z_to_priya_grid(z):
+    """Round a snapshot redshift to PRIYA's zout grid (nearest multiple of 0.2)."""
+    return round(float(z) / 0.2) * 0.2
 
-    Returns (rows, snap_block):
-      rows       : list of dicts, one per alpha (per-class P1D + scalars)
-      snap_block : one dict with the tau0-invariant CDDF / dN/dX
+
+def _read_tau(raw_tau_path, n_skewers=None):
+    """Read the full tau grid into memory as float64 (optionally first n_skewers)."""
+    with h5py.File(raw_tau_path, "r") as f:
+        ds = f["tau/H/1/1215"]
+        if n_skewers is not None:
+            return ds[:n_skewers].astype(np.float64)
+        return ds[...].astype(np.float64)
+
+
+def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
+                    k_target, n_skewers=None):
+    """Build per-alpha rows (Tier-P total + Tier-C per-class P1D) and the
+    per-snap CDDF block for one (sim, snap), driving fake_spectra directly.
+
+    Tier P: PRIYA-compatible total P1D over all sightlines after the
+    _filter_single_tau_complex DLA mask. Bit-identical to PRIYA's flux_vectors.
+    Tier C: per-class (clean/LLS/subDLA/DLA) P1D on the UNFILTERED tau, sharing
+    Tier P's scale + target_F (so they decompose against the total).
+
+    Returns (rows, snap_block).
     """
     from hcd_analysis.catalog import AbsorberCatalog
     from hcd_analysis.io import read_header
-    from hcd_analysis.p1d import compute_p1d_per_class
+    from hcd_analysis.priya_p1d import compute_tier_p_p1d, compute_tier_c_p1d
 
     params_dict = bec.parse_sim_params(sim_name)
     if params_dict is None:
@@ -100,41 +118,47 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_grid,
     dndx = bec.compute_dndx_per_class(meta["n_absorbers"], float(cddf["total_path"]))
     catalog = AbsorberCatalog.load_npz(snap_dir / "catalog.npz")
 
-    header = read_header(raw_tau_path)
-    nbins = int(header.nbins)
+    nbins = int(read_header(raw_tau_path).nbins)
     dv_kms = float(meta["dv_kms"])
+    vmax = nbins * dv_kms
+    z_meta = float(meta["z"])
+    z_grid = _snap_z_to_priya_grid(z_meta)
+
+    tau_unfilt = _read_tau(raw_tau_path, n_skewers=n_skewers)
 
     rows = []
-    for a_idx, alpha in enumerate(alpha_grid):
-        per_class = compute_p1d_per_class(
-            raw_tau_path, nbins=nbins, dv_kms=dv_kms, catalog=catalog,
-            n_skewers=n_skewers,
-            tau_transform=partial(freeze_core_rescale, alpha=float(alpha),
-                                  tau_freeze=tau_freeze),
-        )
-        k_src_angular = 2.0 * np.pi * per_class["k"]
+    for a_idx, alpha in enumerate(alpha_slope_grid):
+        alpha = float(alpha)
+        # Tier P needs a filtered copy (the filter mutates tau in place).
+        tau_filt = tau_unfilt.copy()
+        kf_p, P_tier_p, target_F, scale = compute_tier_p_p1d(
+            tau_filt, vmax, alpha_slope=alpha, z=z_grid)
+        del tau_filt
+        # Tier C on the unfiltered tau, sharing Tier P's normalisation.
+        kf_c, by_class, n_by_class, _, _ = compute_tier_c_p1d(
+            tau_unfilt, vmax, alpha_slope=alpha, z=z_grid, catalog=catalog,
+            external_scale=scale, external_target_F=target_F)
         rows.append({
             "sim_name": sim_name,
             "snap": int(snap),
-            "alpha": float(alpha),
+            "alpha_slope": alpha,
             "alpha_idx": int(a_idx),
-            "tau0": tau0_from_mean_flux(per_class["mean_F_clean"]),
-            "params": params,
-            "z": float(meta["z"]),
+            "z_meta": z_meta,
+            "z_grid": float(z_grid),
             "dv_kms": dv_kms,
             "nbins_native": nbins,
-            "P_clean":       bec.interp_p1d_loglog(k_src_angular, per_class["P_clean"], k_target),
-            "P_LLS_only":    bec.interp_p1d_loglog(k_src_angular, per_class["P_LLS_only"], k_target),
-            "P_subDLA_only": bec.interp_p1d_loglog(k_src_angular, per_class["P_subDLA_only"], k_target),
-            "P_DLA_only":    bec.interp_p1d_loglog(k_src_angular, per_class["P_DLA_only"], k_target),
-            "mean_F_clean":  float(per_class["mean_F_clean"]),
-            "mean_F_LLS":    float(per_class["mean_F_LLS"]),
-            "mean_F_subDLA": float(per_class["mean_F_subDLA"]),
-            "mean_F_DLA":    float(per_class["mean_F_DLA"]),
-            "n_sightlines_clean":  int(per_class["n_sightlines_clean"]),
-            "n_sightlines_LLS":    int(per_class["n_sightlines_LLS"]),
-            "n_sightlines_subDLA": int(per_class["n_sightlines_subDLA"]),
-            "n_sightlines_DLA":    int(per_class["n_sightlines_DLA"]),
+            "target_F": float(target_F),
+            "scale": float(scale),
+            "params": params,
+            "P_tier_p": bec.interp_p1d_loglog(kf_p, P_tier_p, k_target),
+            "P_clean":  bec.interp_p1d_loglog(kf_c, by_class["clean"], k_target),
+            "P_LLS":    bec.interp_p1d_loglog(kf_c, by_class["LLS"], k_target),
+            "P_subDLA": bec.interp_p1d_loglog(kf_c, by_class["subDLA"], k_target),
+            "P_DLA":    bec.interp_p1d_loglog(kf_c, by_class["DLA"], k_target),
+            "n_clean":  int(n_by_class["clean"]),
+            "n_LLS":    int(n_by_class["LLS"]),
+            "n_subDLA": int(n_by_class["subDLA"]),
+            "n_DLA":    int(n_by_class["DLA"]),
         })
 
     snap_block = {
@@ -150,22 +174,17 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_grid,
     return rows, snap_block
 
 
-_ROW_FLOAT_KEYS = (
-    "alpha", "tau0", "z", "dv_kms",
-    "mean_F_clean", "mean_F_LLS", "mean_F_subDLA", "mean_F_DLA",
-)
+_ROW_FLOAT_KEYS = ("alpha_slope", "target_F", "scale", "z_meta", "z_grid", "dv_kms")
 _ROW_INT_KEYS = (
     "snap", "alpha_idx", "nbins_native", "snap_group_idx",
-    "n_sightlines_clean", "n_sightlines_LLS",
-    "n_sightlines_subDLA", "n_sightlines_DLA",
+    "n_clean", "n_LLS", "n_subDLA", "n_DLA",
 )
-_ROW_P1D_KEYS = ("P_clean", "P_LLS_only", "P_subDLA_only", "P_DLA_only")
+_ROW_P1D_KEYS = ("P_tier_p", "P_clean", "P_LLS", "P_subDLA", "P_DLA")
 _SNAP_FLOAT_KEYS = ("total_path_dX", "dNdX_LLS", "dNdX_subDLA", "dNdX_DLA")
 _SNAP_2D_KEYS = ("f_nhi", "n_absorbers")
 
 
-def write_cache_tau0(rows, snap_blocks, k_target, output_path,
-                     tier, tau_freeze, alpha_range):
+def write_cache_tau0(rows, snap_blocks, k_target, output_path, alpha_range):
     """Stack per-alpha `rows` + per-snap `snap_blocks` into one HDF5 cache.
 
     Each row carries `snap_group_idx`, an index into the snap_* datasets.
@@ -189,8 +208,12 @@ def write_cache_tau0(rows, snap_blocks, k_target, output_path,
         f.attrs["git_sha"] = bec._git_sha(REPO_ROOT)
         f.attrs["n_rows"] = len(rows)
         f.attrs["n_snaps"] = len(snap_blocks)
-        f.attrs["rescale_tier"] = tier
-        f.attrs["tau_freeze"] = float(tau_freeze)
+        f.attrs["cache_version"] = "2.0"
+        f.attrs["priya_convention"] = (
+            "Kim 2013 slope-alpha (obs_mean_tau=2.3e-3(1+z)^3.65); "
+            "fake_spectra _filter_single_tau_complex(tau_thresh=1e6, thresh2=0.25); "
+            "flux_power window=False spec_res=0")
+        f.attrs["tau_thresh"] = 1.0e6
         f.attrs["alpha_range"] = np.asarray(alpha_range, dtype=np.float64)
         f.attrs["k_convention"] = "angular (rad*s/km), PRIYA convention"
 
@@ -226,23 +249,8 @@ def write_cache_tau0(rows, snap_blocks, k_target, output_path,
                              data=np.stack([b[key] for b in snap_blocks], axis=0))
 
 
-def tier_to_tau_freeze(tier: str) -> float:
-    """Map a --tier letter to its tau_freeze boundary.
-
-    B = freeze-core production (tau_freeze = 1e6).
-    A = uniform-rescale twin   (tau_freeze = inf) — a deliberately-wrong
-        systematic baseline; see spec sec. 3.
-    """
-    if tier == "B":
-        return TAU_FREEZE_DEFAULT
-    if tier == "A":
-        return np.inf
-    raise ValueError(f"unknown tier {tier!r}; expected 'A' or 'B'")
-
-
-def _default_output(tier: str) -> Path:
-    name = "observables_tau0.h5" if tier == "B" else "observables_tau0_uniform.h5"
-    return REPO_ROOT / "hcd_analysis" / "_emulator_data" / name
+def _default_output() -> Path:
+    return REPO_ROOT / "hcd_analysis" / "_emulator_data" / "observables_tau0.h5"
 
 
 def main() -> None:
@@ -250,8 +258,6 @@ def main() -> None:
         description="Build the tau0-extended HCD-emulator cache (Phase 2).")
     parser.add_argument("--hcd-root", type=Path, default=_DEFAULT_HCD_ROOT)
     parser.add_argument("--emu-root", type=Path, default=_DEFAULT_EMU_ROOT)
-    parser.add_argument("--tier", choices=["A", "B"], default="B",
-                        help="B = freeze-core (default); A = uniform-rescale twin.")
     parser.add_argument("--n-alpha", type=int, default=20)
     parser.add_argument("--limit", type=int, default=None,
                         help="Process at most N (sim, snap) pairs.")
@@ -261,15 +267,14 @@ def main() -> None:
                         help="Limit skewers per snap (dry runs only).")
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--spot-check", action="store_true",
-                        help="After writing, re-verify row 0: tau0 == -ln(mean_F_clean).")
+                        help="After writing, verify row 0 P_tier_p is finite.")
     args = parser.parse_args()
 
     from hcd_analysis.p1d import _DEFAULT_K_BINS
     k_target = 2.0 * np.pi * _DEFAULT_K_BINS
 
-    tau_freeze = tier_to_tau_freeze(args.tier)
-    alpha_grid = make_alpha_grid(n=args.n_alpha)
-    output = args.output if args.output is not None else _default_output(args.tier)
+    alpha_slope_grid = make_alpha_grid(n=args.n_alpha)
+    output = args.output or _default_output()
 
     pairs = discover_tau0_pairs(args.hcd_root, args.emu_root)
     print(f"Found {len(pairs)} tau0-buildable (sim, snap) pairs")
@@ -277,13 +282,13 @@ def main() -> None:
     if args.limit is not None:
         pairs = pairs[: args.limit]
     print(f"Processing {len(pairs)} pairs (offset={args.offset}, limit={args.limit}); "
-          f"tier={args.tier} (tau_freeze={tau_freeze}); n_alpha={args.n_alpha}")
+          f"n_alpha={args.n_alpha}")
 
     all_rows, snap_blocks = [], []
     for i, (sim, snap, snap_dir, raw) in enumerate(pairs):
         rows, block = build_tau0_rows(
-            sim, snap, snap_dir, raw, alpha_grid, k_target,
-            tau_freeze=tau_freeze, n_skewers=args.n_skewers)
+            sim, snap, snap_dir, raw, alpha_slope_grid, k_target,
+            n_skewers=args.n_skewers)
         gi = len(snap_blocks)
         for r in rows:
             r["snap_group_idx"] = gi
@@ -293,18 +298,19 @@ def main() -> None:
             print(f"  built {i + 1}/{len(pairs)} pairs ({len(all_rows)} rows)")
 
     write_cache_tau0(all_rows, snap_blocks, k_target, output,
-                     tier=args.tier, tau_freeze=tau_freeze,
-                     alpha_range=(float(alpha_grid[0]), float(alpha_grid[-1])))
+                     alpha_range=(float(alpha_slope_grid[0]),
+                                  float(alpha_slope_grid[-1])))
     print(f"Wrote {output}  ({output.stat().st_size / 1e6:.2f} MB, "
           f"{len(all_rows)} rows, {len(snap_blocks)} snaps)")
 
     if args.spot_check and all_rows:
         with h5py.File(output, "r") as f:
-            tau0_0 = float(f["tau0"][0])
-            mfc_0 = float(f["mean_F_clean"][0])
-        assert np.isclose(tau0_0, -np.log(mfc_0)), \
-            f"spot-check failed: tau0={tau0_0} != -ln(mean_F_clean)={-np.log(mfc_0)}"
-        print(f"spot-check: row 0 tau0={tau0_0:.4f} == -ln(mean_F_clean) OK")
+            assert np.isfinite(f["P_tier_p"][0]).any(), \
+                "spot-check failed: row 0 P_tier_p has no finite values"
+            med_target_F = float(np.median(f["target_F"][...]))
+            med_scale = float(np.median(f["scale"][...]))
+        print(f"spot-check: row 0 P_tier_p finite OK; "
+              f"median target_F={med_target_F:.4f} scale={med_scale:.4f}")
 
 
 if __name__ == "__main__":
