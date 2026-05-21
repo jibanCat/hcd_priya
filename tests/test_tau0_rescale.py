@@ -94,6 +94,16 @@ def test_compute_p1d_per_class_tau_transform_changes_mean_flux():
     assert np.isclose(ident["mean_F_clean"], base["mean_F_clean"])
 
 
+def test_kim_slope_alpha_to_target_F_matches_obs_mean_tau():
+    """The Tier P / Tier C convention is target_F = exp(-alpha * obs_mean_tau_Kim(z)).
+    Verify the helper agrees with the Kim 2013 (0711.1862) formula."""
+    from hcd_analysis.tau0_rescale import slope_alpha_to_target_F
+    # at z=3, Kim 2013: obs_mean_tau = 2.3e-3 * 4^3.65
+    target = slope_alpha_to_target_F(alpha_slope=1.0, z=3.0)
+    expected = np.exp(-2.3e-3 * 4.0 ** 3.65)
+    assert np.isclose(target, expected, rtol=1e-12), f"got {target}, expected {expected}"
+
+
 if __name__ == "__main__":
     test_freeze_core_rescale_freezes_cores_scales_thin()
     test_freeze_core_rescale_uniform_when_tau_freeze_inf()
@@ -102,4 +112,5 @@ if __name__ == "__main__":
     test_make_alpha_grid_default_count()
     test_tau0_from_mean_flux_inverts_exp()
     test_compute_p1d_per_class_tau_transform_changes_mean_flux()
+    test_kim_slope_alpha_to_target_F_matches_obs_mean_tau()
     print("OK")

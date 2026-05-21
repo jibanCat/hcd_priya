@@ -26,7 +26,10 @@ N_ALPHA_DEFAULT = 20
 
 
 def freeze_core_rescale(tau, alpha, tau_freeze=TAU_FREEZE_DEFAULT):
-    """Rescale optically-thin pixels by `alpha`; freeze self-shielded cores.
+    """LEGACY (2026-05-17 plan); superseded by the Tier-P PRIYA-compatible
+    recipe in hcd_analysis.priya_p1d. Retained for Phase-1 regression tests.
+
+    Rescale optically-thin pixels by `alpha`; freeze self-shielded cores.
 
     Parameters
     ----------
@@ -55,8 +58,23 @@ def make_alpha_grid(n=N_ALPHA_DEFAULT, lo=ALPHA_LO_DEFAULT, hi=ALPHA_HI_DEFAULT)
     return np.linspace(lo, hi, n)
 
 
+def obs_mean_tau_kim2013(z):
+    """Kim 2013 (arXiv 0711.1862) fit: tau_obs(z) = 2.3e-3 * (1+z)^3.65.
+    Same formula as fake_spectra.fluxstatistics.obs_mean_tau; duplicated
+    here so it can be called without loading fake_spectra (which needs gsl)."""
+    return 2.3e-3 * (1.0 + np.asarray(z, dtype=np.float64)) ** 3.65
+
+
+def slope_alpha_to_target_F(alpha_slope, z):
+    """PRIYA convention: target_F(alpha, z) = exp(-alpha * tau_obs_Kim2013(z))."""
+    return np.exp(-alpha_slope * obs_mean_tau_kim2013(z))
+
+
 def tau0_from_mean_flux(mean_flux):
-    """Mean optical depth tau0 = -ln<F> from a (rescaled) state's clean <F>."""
+    """LEGACY (2026-05-17 plan); superseded by the Tier-P PRIYA-compatible
+    recipe in hcd_analysis.priya_p1d. Retained for Phase-1 regression tests.
+
+    Mean optical depth tau0 = -ln<F> from a (rescaled) state's clean <F>."""
     mf = float(mean_flux)
     if mf <= 0.0:
         raise ValueError(f"mean_flux must be > 0, got {mf}")
