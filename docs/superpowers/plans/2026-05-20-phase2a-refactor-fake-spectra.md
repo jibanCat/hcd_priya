@@ -531,8 +531,15 @@ single-pass version that, for each (sim, snap):
 
 1. Read raw τ once.
 2. Apply `_apply_priya_filter` once → `tau_P` (a copy or in-place).
-3. For each α in `make_alpha_grid()`:
-   - target_F = `slope_alpha_to_target_F(α, z)`.
+3. **Snap the redshift to PRIYA's `zout` grid** before computing target_F:
+   `z_grid = round((z_meta) / 0.2) * 0.2` (zout runs 2.0..5.4 in steps of 0.2).
+   This is REQUIRED for Tier-P bit-compatibility with PRIYA — see the
+   consistency-check doc §6c (sim 44 z=4.6 landed at meta z=4.600013; using
+   the meta z instead of the grid z=4.6 produces a ~1e-5 P1D bias because
+   `obs_mean_tau ∝ (1+z)^3.65`). Store BOTH `z_meta` (provenance) and
+   `z_grid` (used for target_F) in the cache row.
+4. For each α in `make_alpha_grid()`:
+   - target_F = `slope_alpha_to_target_F(α, z_grid)`  (NOT z_meta).
    - Tier P: `kf, P_P, _, scale = compute_tier_p_p1d(tau_P.copy_or_not, vmax, α, z)`.
    - Tier C: `kf_c, by_class, n_by_class, _, _ = compute_tier_c_p1d(tau_unfiltered, vmax, α, z, catalog, external_scale=scale, external_target_F=target_F)`.
    - Pack one cache row per α.

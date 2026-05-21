@@ -296,11 +296,52 @@ array (`scripts/consistency_checks/sbatch_multipoint.sh`):
 | all max\|r−1\| < user's 1 % target ? | yes (by 3 orders of magnitude) |
 
 **Verdict: the v3 recipe reproduces PRIYA's flux_vectors at floating-point
-precision across the LF training parameter space.** Slight elevation of
-max\|r−1\| at the highest z (z = 4.6) — up to 1.89 × 10⁻⁵ for sim 44 —
-correlates with DLA-flagged sightline count (more filter calls → more FP
-accumulation). Even there the deviation is 530× below the user's 1 %
-acceptance bar.
+precision across the LF training parameter space.** The single elevated point
+(sim 44, z = 4.6, max\|r−1\| up to 1.89 × 10⁻⁵) has a fully-understood,
+non-bug cause — see §6c. Even un-fixed it is 530× below the user's 1 %
+acceptance bar; with the z-source fix it drops to the same ~10⁻⁶ level as
+every other point.
+
+## 6c. Root cause of the sim-44 / z=4.6 outlier — redshift source mismatch
+
+The one (sim, snap) pair that sat at ~10⁻⁵ instead of ~10⁻⁷ was traced to a
+**redshift-source mismatch**, not a pipeline defect.
+
+- sim 44's snap_008 has `meta.json["z"] = 4.600013` — the simulation output
+  landed slightly off the target z = 4.6. sim 0 and sim 29's snap_008 landed
+  at exactly 4.6.
+- My consistency script computed `target_F = exp(-α · obs_mean_tau(z))` using
+  **meta.json's actual z (4.600013)**.
+- PRIYA built its flux_vectors using its **`zout` grid value (exactly 4.6)**.
+- `obs_mean_tau(z) = 2.3e-3 (1+z)^3.65`, so the 2.3 × 10⁻⁶ relative z
+  difference becomes an 8.47 × 10⁻⁶ relative `obs_mean_tau` difference, which
+  scales by α into the P1D bias.
+
+Decisive test (`flux_power` on the same filtered τ, only the z used for
+`obs_mean_tau` changed):
+
+| z fed to obs_mean_tau | median(r) | max\|r−1\| |
+|--|--|--|
+| meta.json z = 4.600013 | 1.00001136 | 1.35 × 10⁻⁵ |
+| PRIYA zout z = 4.6 | 1.00000009 | 1.87 × 10⁻⁶ |
+
+Snapping z to the PRIYA grid collapses the bias to the same machine-precision
+floor as every other point. The sign (positive — smaller target_F ⇒ larger
+δF ⇒ larger P), the α-scaling, and the magnitude all match the analytic
+prediction `d(P)/P ≈ 2 α · d(obs_mean_tau)/obs_mean_tau`.
+
+**Conclusion:** the P1D machinery is correct. The outlier was an artefact of
+feeding the *snapshot's* true redshift into the mean-flux model where PRIYA
+fed the *grid* redshift.
+
+**Action for the production builder** (folded into the refactor plan, Task 4):
+when computing `target_F` for a snapshot, **round the redshift to the nearest
+PRIYA `zout` grid value** (multiples of 0.2 from 2.0 to 5.4) rather than using
+`meta.json["z"]` verbatim — this is what makes the Tier-P P1D bit-compatible
+with PRIYA's training data. (Physically `meta.json["z"]` is the more accurate
+redshift, but for *training-data alignment* with PRIYA the grid z is the
+correct convention; the ~10⁻⁵ difference is cosmologically negligible and the
+emulator's `A_c` amplitudes would absorb it anyway.)
 
 Plot: `docs/superpowers/figs/2026-05-20-priya-p1d-multipoint-ratios.png`
 (3 sims × 4 z grid, 10 α overlaid per panel, y-axis ±10⁻⁴).
