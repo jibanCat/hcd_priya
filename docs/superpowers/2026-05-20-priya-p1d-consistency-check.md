@@ -34,6 +34,32 @@ Match point: sim 0
 (`ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056`),
 snap 17 (z = 3.0), PRIYA row 344 with α = 1.011183.
 
+---
+
+## FINAL VERDICT (read this first)
+
+**The Phase-2 P1D pipeline — when built on fake_spectra's actual machinery —
+reproduces PRIYA's published LF training data
+(`mf_emulator_flux_vectors_tau1000000.hdf5`) to floating-point precision.**
+
+- **120-point grid verified** (3 sims × 4 z × 10 α): worst max\|r−1\| =
+  1.89 × 10⁻⁵, worst std = 1.58 × 10⁻⁶, median of medians = 1.00000002
+  (§6b). That is **>500× inside the user's <1 % requirement.**
+- **The single elevated point** (sim 44, z = 4.6) was root-caused to a
+  redshift-source mismatch (snapshot landed at z=4.600013, PRIYA uses
+  grid z=4.6); snapping z to the grid drops it to the same ~10⁻⁶ floor as
+  every other point (§6c). **No pipeline defect.**
+- **What makes it work** (and what the shipped Phase-2a code does NOT do):
+  drive `fake_spectra.fluxstatistics.flux_power` +
+  `Spectra._filter_single_tau_complex` + `_rescale_mean_flux` directly, with
+  `mean_flux_desired = exp(−α · obs_mean_tau_Kim2013(z_grid))` (slope-α
+  convention). The repo's `compute_p1d_per_class` + direct-α path is 7 % off
+  (§ "v1 → v2 → v3").
+
+**Status: the Phase-2a refactor
+(`docs/superpowers/plans/2026-05-20-phase2a-refactor-fake-spectra.md`) is
+cleared to execute** — its Task-0 verification gate is green.
+
 Plots:
 - **Headline (v3 vs v2 overlay + 1e-6 zoom):**
   `docs/superpowers/figs/2026-05-20-priya-p1d-ratio-v3.png`
