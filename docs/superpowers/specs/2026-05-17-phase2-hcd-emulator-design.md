@@ -2,9 +2,51 @@
 
 **Date:** 2026-05-17
 **Branch:** `phase2-emulator-jax`
-**Status:** approved design, ready for implementation plan
+**Status:** approved design — **partially superseded 2026-05-20 (see banner)**
 **Supersedes the open questions in:** `docs/SESSION_HANDOVER_2026_05_15.md` §9,
 `docs/superpowers/2026-05-15-phase2-design-memo.md`
+
+> ## ⚠️ PARTIALLY SUPERSEDED — 2026-05-20
+>
+> A PRIYA bit-identity consistency check
+> (`docs/superpowers/2026-05-20-priya-p1d-consistency-check.md`) showed the
+> P1D pipeline must be built on `fake_spectra`'s actual machinery to match
+> PRIYA's training data (verified to floating-point precision, 120 points).
+> The following sections of THIS spec are revised by that work and the
+> refactor plan `docs/superpowers/plans/2026-05-20-phase2a-refactor-fake-spectra.md`:
+>
+> - **§3 (τ₀ "freeze-core" recipe) → REVISED.** Freeze-core is NOT the
+>   production recipe. The cache now has two tiers (the user's 2026-05-20
+>   framing):
+>   - **Tier P (baseline, PRIYA-compatible):** `fake_spectra`'s
+>     `_filter_single_tau_complex` (`tau_thresh=1e6`, destructive DLA
+>     trough-fill) → survey-equivalent total P1D. This is what the main
+>     forest emulator trains on.
+>   - **Tier C (HCD adds-on):** per-class P1D (clean/LLS/subDLA/DLA) on the
+>     UNFILTERED τ, sharing Tier-P's mean-flux normalisation. Used to build
+>     the HCD adds-on module that re-adds DLA contribution at inference.
+>   - **Freeze-core is now a *future* Tier-C masking variant**, not the
+>     production recipe — alongside future NHI≥20.3-cut and Rahmati
+>     partial-self-shielding options.
+> - **Mean-flux convention → CLARIFIED.** α is PRIYA's **Kim 2013
+>   slope-multiplier** on `obs_mean_tau(z)=2.3e-3(1+z)^3.65`, NOT a direct
+>   τ-multiplier. The τ-rescale is solved by `_rescale_mean_flux`. Redshift
+>   is snapped to PRIYA's `zout` grid (multiples of 0.2) before computing
+>   the mean-flux target.
+> - **§4 (cache schema) → REVISED to v2.0.** Per-row datasets are now
+>   `P_tier_p` + `P_clean`/`P_LLS`/`P_subDLA`/`P_DLA` (stored SEPARATELY, not
+>   as ratios) + `n_clean`/`n_LLS`/`n_subDLA`/`n_DLA` + `target_F`/`scale`/
+>   `z_meta`/`z_grid`/`alpha_slope`. Top-level attrs add `cache_version="2.0"`,
+>   `priya_convention`, `tau_thresh`. See the refactor plan §"Task 4 / write_cache_tau0".
+> - **§9 (validation) → AUGMENTED.** The headline validation is now the PRIYA
+>   bit-identity multi-point test (`tests/test_priya_p1d.py`), not the
+>   freeze-core physics unit tests (those move to the legacy
+>   `hcd_analysis/tau0_rescale.py` path).
+>
+> §5 (architecture: encoder + Head A/B), §6 (loss), §7 (likelihood), §8
+> (splits), §10-§14 are UNCHANGED by the 2026-05-20 work. Read the sections
+> below as historical design rationale; where they conflict with the banner,
+> the banner wins.
 
 This spec was produced through a brainstorming session backed by eight research
 agents (PRIYA/`fake_spectra` code dives, self-shielding astrophysics, a
