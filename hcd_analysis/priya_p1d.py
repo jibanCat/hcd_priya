@@ -9,7 +9,7 @@ fake_spectra._spectra_priv).
 """
 from __future__ import annotations
 from types import SimpleNamespace
-from typing import Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
@@ -62,3 +62,94 @@ def compute_tier_p_p1d(tau: np.ndarray, vmax: float,
     from fake_spectra.fluxstatistics import mean_flux
     scale = float(mean_flux(tau, target_F))
     return kf[1:], P[1:], target_F, scale
+
+
+def _classify_sightlines(catalog, n_skewers: int) -> Dict[str, np.ndarray]:
+    """Return a dict of boolean masks, one per class label.
+
+    Mirrors the highest-class promotion rule already used by
+    hcd_analysis.p1d.compute_p1d_per_class (DLA wins over subDLA wins over
+    LLS; everything else is "clean"). Uses each Absorber's pre-computed
+    `absorber_class` field, NOT a re-thresholded log_NHI — the absorber's
+    class is the authoritative label (Phase-1 catalog builder applied the
+    thresholds at fit time).
+    """
+    labels = np.full(n_skewers, "clean", dtype=object)
+    for ab in catalog.absorbers:
+        if ab.skewer_idx >= n_skewers:
+            continue
+        if ab.absorber_class == "DLA":
+            labels[ab.skewer_idx] = "DLA"
+        elif ab.absorber_class == "subDLA":
+            if labels[ab.skewer_idx] != "DLA":
+                labels[ab.skewer_idx] = "subDLA"
+        elif ab.absorber_class == "LLS":
+            if labels[ab.skewer_idx] not in ("DLA", "subDLA"):
+                labels[ab.skewer_idx] = "LLS"
+    return {c: (labels == c) for c in ("clean", "LLS", "subDLA", "DLA")}
+
+
+def _per_class_p1d_at_scale(tau_class: np.ndarray, vmax: float,
+                             scale: float, target_F: float):
+    """Mirror fake_spectra.fluxstatistics.flux_power but with predetermined
+    (scale, target_F) — used by Tier C so all four classes share Tier P's
+    mean-flux normalisation. Returns (kf[1:], P[1:]) like flux_power does."""
+    nspec, npix = tau_class.shape
+    if nspec == 0:
+        kf = _flux_power_bins(vmax, npix)
+        return kf[1:], np.zeros(npix // 2 + 1)[1:]
+    mfp = np.zeros(npix // 2 + 1, dtype=tau_class.dtype)
+    for i in range(10):
+        end = min((i + 1) * nspec // 10, nspec)
+        s = i * nspec // 10
+        if end == s:
+            continue
+        dflux = np.exp(-scale * tau_class[s:end]) / target_F - 1.0
+        mfp += vmax * np.sum(_powerspectrum(dflux, axis=1), axis=0)
+    mfp /= nspec
+    kf = _flux_power_bins(vmax, npix)
+    return kf[1:], mfp[1:]
+
+
+def compute_tier_c_p1d(tau: np.ndarray, vmax: float,
+                       alpha_slope: float, z: float,
+                       catalog,
+                       external_scale: Optional[float] = None,
+                       external_target_F: Optional[float] = None,
+                       ):
+    """Per-class P1Ds (clean, LLS, subDLA, DLA) on the UNFILTERED tau.
+
+    If `external_scale` / `external_target_F` are given (the production path,
+    set from a prior Tier-P call), use those so the four classes share Tier
+    P's mean-flux normalisation. Otherwise compute target_F from
+    obs_mean_tau(z) and solve scale on the full tau (independent
+    Tier-C-only path, useful for unit tests).
+
+    Returns:
+        kf      : k-grid (s/km, angular), shape (npix//2,)
+        by_class: dict[label] -> P1D array, shape (npix//2,)
+        n_by_class: dict[label] -> sightline count
+        target_F, scale (the values used)
+    """
+    from fake_spectra.fluxstatistics import mean_flux
+
+    if external_target_F is None:
+        target_F = float(np.exp(-alpha_slope * obs_mean_tau(z)))
+    else:
+        target_F = float(external_target_F)
+    if external_scale is None:
+        scale = float(mean_flux(tau, target_F))
+    else:
+        scale = float(external_scale)
+
+    masks = _classify_sightlines(catalog, tau.shape[0])
+    out: Dict[str, np.ndarray] = {}
+    n_out: Dict[str, int] = {}
+    kf_ref = None
+    for label, mask in masks.items():
+        kf, P = _per_class_p1d_at_scale(tau[mask], vmax, scale, target_F)
+        if kf_ref is None:
+            kf_ref = kf
+        out[label] = P
+        n_out[label] = int(mask.sum())
+    return kf_ref, out, n_out, target_F, scale

@@ -57,6 +57,41 @@ def test_tier_p_bit_identical_to_priya_at_sim0_z3_alpha1():
           f"med(r)={np.median(ratio):.7f}  max|r-1|={np.max(np.abs(ratio-1)):.3e}")
 
 
+def test_tier_c_matches_filter_free_sum_at_alpha_one():
+    """When tau_thresh=inf (no filter), the sightline-weighted sum of the four
+    Tier-C P1Ds must equal the Tier-P-without-filter P1D — to floating-point.
+    This guards against bugs in the per-class accumulator."""
+    from hcd_analysis.priya_p1d import compute_tier_c_p1d, compute_tier_p_p1d
+    from hcd_analysis.catalog import AbsorberCatalog
+
+    tau_p = f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5"
+    meta_p = f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/meta.json"
+    cat_p = f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/catalog.npz"
+    with open(meta_p) as f: m = json.load(f)
+    vmax = int(m["nbins"]) * float(m["dv_kms"])
+    z = float(m["z"])
+    with h5py.File(tau_p, "r") as f:
+        tau = f["tau/H/1/1215"][...].astype(np.float64)
+    catalog = AbsorberCatalog.load_npz(cat_p)
+
+    alpha = 1.0
+    # Tier P with filter disabled => total P1D over all sightlines, no DLA mask
+    kf_P, P_P, target_F, scale = compute_tier_p_p1d(
+        tau.copy(), vmax, alpha_slope=alpha, z=z, tau_thresh=np.inf)
+    # Tier C: per-class P1Ds with the same scale + target_F
+    kf_C, by_class, n_by_class, _, _ = compute_tier_c_p1d(
+        tau, vmax, alpha_slope=alpha, z=z, catalog=catalog,
+        external_scale=scale, external_target_F=target_F)
+    # weights = n_class / n_total
+    n_total = sum(n_by_class.values())
+    P_recombined = sum((n_by_class[c]/n_total) * by_class[c] for c in by_class)
+    assert np.allclose(P_recombined, P_P, rtol=1e-10), \
+        f"per-class sum != total P1D at alpha=1 (no filter), worst rel diff "\
+        f"= {np.max(np.abs(P_recombined/P_P - 1)):.3e}"
+    print("OK — Tier C sums to Tier P at alpha=1 with no filter")
+
+
 if __name__ == "__main__":
     test_tier_p_bit_identical_to_priya_at_sim0_z3_alpha1()
+    test_tier_c_matches_filter_free_sum_at_alpha_one()
     print("OK")
