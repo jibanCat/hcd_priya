@@ -170,7 +170,36 @@ def test_priya_p1d_bit_identical_multipoint():
     print(f"OK multipoint: {n_pts} points, worst max|r-1| = {worst:.3e}")
 
 
+def test_bin_sightlines_by_nhi():
+    from types import SimpleNamespace
+    from hcd_analysis.priya_p1d import (
+        bin_sightlines_by_nhi, tier_c_labels, N_TIER_C_BINS, FINE_NHI_EDGES)
+    # Edges (14): [17.2, ...7 LLS..., 19.0, ...5 subDLA..., 20.3, 21.0]
+    # classes: 0 clean | 1..7 LLS | 8..12 subDLA | 13 DLA-edge [20.3,21.0) | 14 >=21.0
+    ab = lambda i, lognhi: SimpleNamespace(skewer_idx=i, log_NHI=lognhi)
+    cat = SimpleNamespace(absorbers=[
+        ab(1, 17.3),    # LLS, [17.2,17.4571) -> class 1
+        ab(2, 19.0),    # subDLA floor (exact edge) -> class 8
+        ab(3, 20.4),    # DLA edge [20.3,21.0) -> class 13
+        ab(4, 23.1),    # DLA tail >=21.0 -> class 14
+        ab(5, 18.0), ab(5, 20.9),  # highest wins: 20.9 -> DLA edge -> class 13
+    ])
+    cls = bin_sightlines_by_nhi(cat, n_skewers=6)
+    assert cls.shape == (6,)
+    assert cls[0] == 0          # clean (no absorber)
+    assert cls[1] == 1          # 17.3
+    assert cls[2] == 8          # 19.0 exact subDLA edge
+    assert cls[3] == 13         # 20.4
+    assert cls[4] == 14         # overflow tail
+    assert cls[5] == 13         # max(18.0,20.9)=20.9
+    assert len(FINE_NHI_EDGES) == 14 and N_TIER_C_BINS == 15
+    assert tier_c_labels()[0] == "clean"
+    assert tier_c_labels()[-1].startswith(">=")
+    print("OK bin_sightlines_by_nhi")
+
+
 if __name__ == "__main__":
+    test_bin_sightlines_by_nhi()
     test_tier_p_bit_identical_to_priya_at_sim0_z3_alpha1()
     test_tier_c_matches_filter_free_sum_at_alpha_one()
     test_priya_p1d_bit_identical_multipoint()

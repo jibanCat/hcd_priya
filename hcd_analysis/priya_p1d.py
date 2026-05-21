@@ -89,6 +89,50 @@ def _classify_sightlines(catalog, n_skewers: int) -> Dict[str, np.ndarray]:
     return {c: (labels == c) for c in ("clean", "LLS", "subDLA", "DLA")}
 
 
+# Fine-N_HI Tier-C bins, anchored at the physical class boundaries (user
+# decision 2026-05-21): LLS 17.2, subDLA 19.0, DLA 20.3 are EXACT edges, with
+# linear ~0.26-dex spacing inside the LLS and subDLA bands and a coarse DLA
+# tail (most DLAs are survey-masked; only the near-20.3 edge leaks in).
+# Sightlines are binned by their HIGHEST absorber's log_NHI. Class layout (15):
+#   0      : clean (no absorber >= 17.2)
+#   1..7   : LLS    [17.2, 19.0)  (7 uniform bins)
+#   8..12  : subDLA [19.0, 20.3)  (5 uniform bins)
+#   13     : DLA edge [20.3, 21.0)
+#   14     : DLA tail >= 21.0
+# 17.2/19.0/20.3 are exact edges -> LLS/subDLA/DLA reconstruct exactly. P1D is
+# sightline-additive, so any class is a count-weighted sum (merge_fine_to_classes).
+_LLS_EDGES = np.linspace(17.2, 19.0, 8)        # 7 bins (~0.257 dex)
+_SUBDLA_EDGES = np.linspace(19.0, 20.3, 6)     # 5 bins (0.26 dex)
+_DLA_EDGES = np.array([20.3, 21.0])            # DLA edge bin; >=21.0 overflow
+FINE_NHI_EDGES = np.round(
+    np.unique(np.concatenate([_LLS_EDGES, _SUBDLA_EDGES, _DLA_EDGES])), 4)  # 14 edges
+N_TIER_C_BINS = len(FINE_NHI_EDGES) + 1                                     # 15
+
+
+def tier_c_labels():
+    """Human-readable label per Tier-C class index (len == N_TIER_C_BINS)."""
+    labs = ["clean"]
+    for lo, hi in zip(FINE_NHI_EDGES[:-1], FINE_NHI_EDGES[1:]):
+        labs.append(f"{lo:.2f}-{hi:.2f}")
+    labs.append(f">={FINE_NHI_EDGES[-1]:.2f}")
+    return labs
+
+
+def bin_sightlines_by_nhi(catalog, n_skewers: int) -> np.ndarray:
+    """Return an int class index (0..N_TIER_C_BINS-1) per sightline, by the
+    sightline's highest-log_NHI absorber. 0 = clean (no absorber)."""
+    maxnhi = np.full(n_skewers, -np.inf)
+    for ab in catalog.absorbers:
+        if (ab.skewer_idx < n_skewers and ab.log_NHI >= FINE_NHI_EDGES[0]
+                and ab.log_NHI > maxnhi[ab.skewer_idx]):
+            maxnhi[ab.skewer_idx] = ab.log_NHI
+    cls = np.zeros(n_skewers, dtype=np.int64)         # clean = 0
+    finite = np.isfinite(maxnhi)
+    d = np.digitize(maxnhi[finite], FINE_NHI_EDGES)   # digitize 0..14; clipped to 1..14 below (0 only for sub-17.2)
+    cls[finite] = np.clip(d, 1, len(FINE_NHI_EDGES))  # <17.2->1; >=21.0->14
+    return cls
+
+
 def _per_class_p1d_at_scale(tau_class: np.ndarray, vmax: float,
                              scale: float, target_F: float):
     """Mirror fake_spectra.fluxstatistics.flux_power but with predetermined
