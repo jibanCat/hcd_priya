@@ -92,6 +92,47 @@ def _read_tau(raw_tau_path, n_skewers=None):
         return ds[...].astype(np.float64)
 
 
+# PRIYA's emulator parameter "Ap" is the primordial scalar amplitude at the
+# Lya pivot k_p = pi/4 /Mpc, while CAMB's `scalar_amp` (As) is at k_0 = 0.05
+# /Mpc. They are the same amplitude at different pivots:
+#   Ap = As * (k_p / k_0)^(ns - 1),  with k_p/k_0 = (pi/4)/0.05 = 5*pi.
+# Verified to machine precision against PRIYA's params array across the LF
+# grid (sim 0/29/44). See docs/SESSION_HANDOVER_2026_05_20.md.
+_AP_PIVOT_RATIO = 5.0 * np.pi  # k_p/k_0
+
+
+def _read_priya_params(raw_tau_path):
+    """Return the PRIYA-exact 9-param vector (in bec.PARAM_ORDER) for a sim,
+    read from its SimulationICs.json.
+
+    Folder-name parsing (bec.parse_sim_params) rounds the params (off by up to
+    ~0.4% from PRIYA's Latin-hypercube values), so we read full precision from
+    SimulationICs.json instead. 8 cosmo params map directly; `Ap` is converted
+    from CAMB `scalar_amp` (As) to PRIYA's Lya-pivot Ap via _AP_PIVOT_RATIO.
+
+    `raw_tau_path` is <emu_root>/<sim>/output/SPECTRA_NNN/<grid>.hdf5, so the
+    SimulationICs.json lives two parents up from the SPECTRA dir.
+    """
+    import json
+    ics_path = Path(raw_tau_path).resolve().parents[2] / "SimulationICs.json"
+    with open(ics_path) as f:
+        ics = json.load(f)
+    ns = float(ics["ns"])
+    ap = float(ics["scalar_amp"]) * _AP_PIVOT_RATIO ** (ns - 1.0)
+    vals = {
+        "ns": ns,
+        "Ap": ap,
+        "herei": float(ics["here_i"]),
+        "heref": float(ics["here_f"]),
+        "alphaq": float(ics["alpha_q"]),
+        "hub": float(ics["hubble"]),
+        "omegamh2": float(ics["omega0"]) * float(ics["hubble"]) ** 2,
+        "hireionz": float(ics["hireionz"]),
+        "bhfeedback": float(ics["bhfeedback"]),
+    }
+    return np.array([vals[k] for k in bec.PARAM_ORDER], dtype=np.float64)
+
+
 def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
                     k_target, n_skewers=None):
     """Build per-alpha rows (Tier-P total + Tier-C per-class P1D) and the
@@ -108,10 +149,9 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
     from hcd_analysis.io import read_header
     from hcd_analysis.priya_p1d import compute_tier_p_p1d, compute_tier_c_p1d
 
-    params_dict = bec.parse_sim_params(sim_name)
-    if params_dict is None:
-        raise ValueError(f"cannot parse params from sim folder name: {sim_name!r}")
-    params = np.array([params_dict[k] for k in bec.PARAM_ORDER], dtype=np.float64)
+    # PRIYA-exact params from SimulationICs.json (full precision; folder-name
+    # parsing rounds them, and PRIYA's "Ap" is at a different pivot than CAMB As).
+    params = _read_priya_params(raw_tau_path)
 
     meta = bec.read_meta(snap_dir)
     cddf = bec.read_cddf(snap_dir)

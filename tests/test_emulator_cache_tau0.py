@@ -45,6 +45,30 @@ def test_snap_z_to_priya_grid():
     assert np.isclose(bt0._snap_z_to_priya_grid(2.199), 2.2)
 
 
+def test_read_priya_params_matches_priya_array():
+    """_read_priya_params (SimulationICs.json + Ap pivot transform) must
+    reproduce PRIYA's params row to machine precision for several sims."""
+    import build_emulator_cache as bec
+    # (sim_idx in PRIYA params, hcd_outputs folder, any snap with a grid file)
+    cases = [
+        (44, "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"),
+        (0,  "ns0.842Ap1.36e-09herei3.51heref2.85alphaq2hub0.658omegamh20.14hireionz6.72bhfeedback0.0453"),
+        (29, "ns0.901Ap1.22e-09herei3.93heref2.87alphaq1.68hub0.712omegamh20.146hireionz6.97bhfeedback0.068"),
+    ]
+    with h5py.File(_PRIYA_FILE, "r") as f:
+        priya_params = f["params"][...]
+    for sim_idx, folder in cases:
+        raw = _EMU_ROOT / folder / "output" / "SPECTRA_008" / "lya_forest_spectra_grid_480.hdf5"
+        if not raw.exists():
+            print(f"SKIP _read_priya_params for sim {sim_idx} (no raw tau)")
+            continue
+        ours = bt0._read_priya_params(raw)
+        theirs = priya_params[sim_idx, 1:].astype(np.float64)  # col 0 is alpha
+        rel = np.max(np.abs(ours / theirs - 1.0))
+        assert rel < 1e-6, f"sim {sim_idx}: param mismatch max rel {rel:.3e}\nours={ours}\nPRIYA={theirs}"
+    print("read_priya_params matches PRIYA params array (max rel < 1e-6): OK")
+
+
 def _fake_row(sim, snap, a_idx, alpha, snap_group_idx, nk):
     return {
         "sim_name": sim, "snap": snap, "alpha_slope": alpha, "alpha_idx": a_idx,
@@ -155,6 +179,7 @@ if __name__ == "__main__":
     test_locate_raw_tau_file_finds_grid_file()
     test_locate_raw_tau_file_returns_none_when_missing()
     test_snap_z_to_priya_grid()
+    test_read_priya_params_matches_priya_array()
     test_write_cache_tau0_round_trip()
     test_build_tau0_rows_tier_p_matches_priya()
     print("OK")
