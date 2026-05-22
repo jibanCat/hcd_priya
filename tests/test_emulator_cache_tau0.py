@@ -113,6 +113,7 @@ def _fake_rows(nk, nrows=3):
             "kfkms": np.linspace(5e-4, 0.08, nk),
             "P_tier_p": np.full(nk, 5.0),
             "P_tier_c": np.tile(np.arange(NB)[:, None], (1, nk)).astype(float),
+            "P_tier_c_filtered": np.tile(np.arange(NB)[:, None], (1, nk)).astype(float) * 0.9,
             "tier_c_counts": np.arange(NB, dtype=np.int64),
             "snap_group_idx": i,
         })
@@ -127,11 +128,12 @@ def test_write_cache_tau0_round_trip(tmp_path=Path("/tmp")):
     out = tmp_path / "rt_tau0.h5"
     bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(1.0, 1.2), n_k=nk)
     with h5py.File(out, "r") as f:
-        assert f.attrs["cache_version"] == "3.0"
+        assert f.attrs["cache_version"] == "3.1"
         assert f.attrs["n_k"] == nk
         assert f["P_tier_p"].shape == (3, nk)
         assert f["kfkms"].shape == (3, nk)
         assert f["P_tier_c"].shape == (3, pp.N_TIER_C_BINS, nk)
+        assert f["P_tier_c_filtered"].shape == (3, pp.N_TIER_C_BINS, nk)
         assert f["tier_c_counts"].shape == (3, pp.N_TIER_C_BINS)
         assert list(f["tier_c_labels"].asstr()[...]) == pp.tier_c_labels()
         assert np.allclose(f["P_tier_p"][0], 5.0)
@@ -190,16 +192,34 @@ def test_merge_v3_synthetic(tmp_path=Path("/tmp")):
     out = tmp_path / "merged.h5"
     mg.merge_shards([str(tmp_path / f"shard_{i}.h5") for i in range(2)], out)
     with h5py.File(out, "r") as f:
-        assert f.attrs["cache_version"] == "3.0"
+        assert f.attrs["cache_version"] == "3.1"
         assert f.attrs["n_k"] == nk
         assert f["P_tier_p"].shape == (4, nk)
         assert f["kfkms"].shape == (4, nk)
         assert f["P_tier_c"].shape == (4, pp.N_TIER_C_BINS, nk)
+        assert f["P_tier_c_filtered"].shape == (4, pp.N_TIER_C_BINS, nk)
         assert f["tier_c_counts"].shape[0] == 4
         gi = f["snap_group_idx"][...]
         assert gi.tolist() == [0, 0, 1, 1]   # second shard's snap remapped
         assert list(f["tier_c_labels"].asstr()[...]) == pp.tier_c_labels()
-    print("OK merge v3.0 synthetic")
+    print("OK merge v3.1 synthetic")
+
+
+def test_filtered_tier_c_reconstructs_priya():
+    SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
+    SNAP, NK = 17, 172
+    sd = Path(f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}")
+    raw = Path(f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
+    if not (sd.exists() and raw.exists()):
+        print("SKIP filtered_tier_c (data unavailable)"); return
+    rows, _ = bt0.build_tau0_rows(SIM, SNAP, sd, raw, np.array([1.0]), n_k=NK)
+    r = rows[0]
+    assert r["P_tier_c_filtered"].shape == (bt0_pp.N_TIER_C_BINS, NK)
+    N = int(r["tier_c_counts"].sum())
+    recon = (r["tier_c_counts"][:, None] / N * r["P_tier_c_filtered"]).sum(0)
+    rel = np.max(np.abs(recon / r["P_tier_p"] - 1))
+    assert rel < 1e-9, f"filtered Tier-C != Tier P (=PRIYA): max|r-1|={rel:.2e}"
+    print(f"RESULT OK filtered Tier-C reconstructs PRIYA exactly: max|r-1|={rel:.2e}")
 
 
 def test_build_tau0_rows_hr_matches_priya_6sim():
@@ -254,5 +274,6 @@ if __name__ == "__main__":
     test_write_cache_tau0_round_trip()
     test_merge_v3_synthetic()
     test_build_tau0_rows_tier_p_matches_priya()
+    test_filtered_tier_c_reconstructs_priya()
     test_build_tau0_rows_hr_matches_priya_6sim()
     print("OK")

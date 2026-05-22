@@ -96,7 +96,7 @@ def merge_shards(shard_paths, output_path):
         f.attrs["git_sha"] = bec._git_sha(REPO_ROOT)
         f.attrs["n_rows"] = total_rows
         f.attrs["n_snaps"] = total_snaps
-        f.attrs["cache_version"] = "3.0"
+        f.attrs["cache_version"] = "3.1"
         f.attrs["n_k"] = first_n_k
         f.attrs["priya_convention"] = (
             "Kim 2013 slope-alpha (obs_mean_tau=2.3e-3(1+z)^3.65); "

@@ -232,10 +232,17 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
         tau_filt = tau_unfilt.copy()
         kf_p, P_tier_p, target_F, scale = compute_tier_p_p1d(
             tau_filt, vmax, alpha_slope=alpha, z=z_grid)
+        # Filtered Tier C: per-class on PRIYA's whole-array-filtered tau (sums to Tier P).
+        _, P_by_bin_filt, n_by_bin_filt, _, _ = compute_tier_c_p1d(
+            tau_filt, vmax, alpha_slope=alpha, z=z_grid, catalog=catalog,
+            external_scale=scale, external_target_F=target_F)
         del tau_filt
+        # Unfiltered Tier C (for the HCD add-back path):
         kf_c, P_by_bin, n_by_bin, _, _ = compute_tier_c_p1d(
             tau_unfilt, vmax, alpha_slope=alpha, z=z_grid, catalog=catalog,
             external_scale=scale, external_target_F=target_F)
+        assert np.array_equal(n_by_bin, n_by_bin_filt), \
+            "N_HI class counts differ between filtered and unfiltered Tier C"
         if a_idx == 0:
             assert len(kf_p) >= n_k and len(kf_c) >= n_k, \
                 f"native grid {len(kf_p)} bins < n_k={n_k} for {sim_name} snap {snap}"
@@ -249,6 +256,7 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
             "kfkms": kf_p[:n_k].astype(np.float64),
             "P_tier_p": P_tier_p[:n_k].astype(np.float64),
             "P_tier_c": P_by_bin[:, :n_k].astype(np.float64),
+            "P_tier_c_filtered": P_by_bin_filt[:, :n_k].astype(np.float64),
             "tier_c_counts": n_by_bin.astype(np.int64),
         })
 
@@ -268,7 +276,7 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
 _ROW_FLOAT_KEYS = ("alpha_slope", "target_F", "scale", "z_meta", "z_grid", "dv_kms")
 _ROW_INT_KEYS = ("snap", "alpha_idx", "nbins_native", "snap_group_idx")
 _ROW_P1D_KEYS = ("kfkms", "P_tier_p")          # 2-D (n_rows, n_k)
-_ROW_TIERC_KEYS = ("P_tier_c",)                 # 3-D (n_rows, N_TIER_C_BINS, n_k)
+_ROW_TIERC_KEYS = ("P_tier_c", "P_tier_c_filtered")  # 3-D (n_rows, N_TIER_C_BINS, n_k)
 _ROW_COUNT_KEYS = ("tier_c_counts",)            # 2-D (n_rows, N_TIER_C_BINS)
 _SNAP_FLOAT_KEYS = ("total_path_dX", "dNdX_LLS", "dNdX_subDLA", "dNdX_DLA")
 _SNAP_2D_KEYS = ("f_nhi", "n_absorbers")
@@ -298,7 +306,7 @@ def write_cache_tau0(rows, snap_blocks, output_path, alpha_range, n_k):
         f.attrs["git_sha"] = bec._git_sha(REPO_ROOT)
         f.attrs["n_rows"] = len(rows)
         f.attrs["n_snaps"] = len(snap_blocks)
-        f.attrs["cache_version"] = "3.0"
+        f.attrs["cache_version"] = "3.1"
         f.attrs["n_k"] = int(n_k)
         f.attrs["priya_convention"] = (
             "Kim 2013 slope-alpha (obs_mean_tau=2.3e-3(1+z)^3.65); "
@@ -307,6 +315,10 @@ def write_cache_tau0(rows, snap_blocks, output_path, alpha_range, n_k):
         f.attrs["tau_thresh"] = 1.0e6
         f.attrs["alpha_range"] = np.asarray(alpha_range, dtype=np.float64)
         f.attrs["k_convention"] = "angular (rad*s/km) native FFT grid, PRIYA convention"
+        f.attrs["tier_c_note"] = (
+            "P_tier_c = per-class P1D on UNFILTERED tau (HCD add-back); "
+            "P_tier_c_filtered = on PRIYA tau=1e6-filtered tau "
+            "(count-weighted sum == Tier P).")
 
         f.create_dataset("tier_c_labels",
                          data=np.array(tier_c_labels(), dtype=h5py.string_dtype()))
