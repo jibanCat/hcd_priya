@@ -46,8 +46,10 @@ def locate_raw_tau_file(emu_root, sim_name: str, snap: int):
     """Return the raw fake_spectra tau HDF5 for (sim_name, snap), or None.
 
     Layout: <emu_root>/<sim_name>/output/SPECTRA_<NNN>/
-            lya_forest_spectra_grid_480.hdf5  (preferred)
-            lya_forest_spectra.hdf5            (fallback)
+            lya_forest_spectra_grid_480.hdf5  (required; 691200-skewer PRIYA product)
+
+    Only the 691200-skewer grid_480 file is accepted.  The low-res 32k
+    lya_forest_spectra.hdf5 is never used (it cannot match PRIYA bit-identity).
     """
     found = _grid_in_dir(Path(emu_root) / sim_name / "output" / f"SPECTRA_{snap:03d}")
     if found is not None:
@@ -63,16 +65,16 @@ def locate_raw_tau_file(emu_root, sim_name: str, snap: int):
 
 
 def _grid_in_dir(spectra_dir):
-    """Return the grid (preferred) or fallback tau HDF5 in a SPECTRA dir, or None."""
+    """Return the 691200-skewer PRIYA grid tau file in a SPECTRA dir, or None.
+
+    The low-res `lya_forest_spectra.hdf5` fallback (32000 skewers) is
+    intentionally NOT used: PRIYA bit-identity requires the grid_480 product.
+    A dir with only the fallback (e.g. ns0.907/SPECTRA_015, a 32k z=3.2
+    duplicate) is therefore skipped."""
     if not spectra_dir.is_dir():
         return None
     grid = spectra_dir / "lya_forest_spectra_grid_480.hdf5"
-    if grid.exists():
-        return grid
-    fallback = spectra_dir / "lya_forest_spectra.hdf5"
-    if fallback.exists():
-        return fallback
-    return None
+    return grid if grid.exists() else None
 
 
 def _match_emu_folder_by_params(emu_root, sim_name, rtol=0.015):

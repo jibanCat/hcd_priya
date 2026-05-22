@@ -235,6 +235,24 @@ def test_filtered_tier_c_reconstructs_priya():
     print(f"RESULT OK filtered Tier-C reconstructs PRIYA exactly: max|r-1|={rel:.2e}")
 
 
+def test_grid_in_dir_requires_grid_480(tmp_path=None):
+    import tempfile, os
+    base = Path(tempfile.mkdtemp())
+    # dir A: only the low-res fallback -> must be skipped (None)
+    a = base / "SPECTRA_015"; a.mkdir()
+    (a / "lya_forest_spectra.hdf5").write_bytes(b"x")
+    assert bt0._grid_in_dir(a) is None, "fallback-only dir must NOT be located"
+    # dir B: has the grid_480 -> must be returned
+    b = base / "SPECTRA_016"; b.mkdir()
+    g = b / "lya_forest_spectra_grid_480.hdf5"; g.write_bytes(b"x")
+    assert bt0._grid_in_dir(b) == g, "grid_480 must be located"
+    # dir C: empty -> None
+    c = base / "SPECTRA_099"; c.mkdir()
+    assert bt0._grid_in_dir(c) is None
+    import shutil; shutil.rmtree(base)
+    print("OK _grid_in_dir requires grid_480")
+
+
 def test_build_tau0_rows_hr_matches_priya_6sim():
     """One HR (sim, z, alpha) row vs the new 6-sim PRIYA HR reference, native grid.
     N_K is READ from the ref (525), not hardcoded — confirms Tier P (tau_thresh=1e6)
@@ -281,6 +299,7 @@ if __name__ == "__main__":
     test_locate_raw_tau_file_finds_grid_file()
     test_locate_raw_tau_file_returns_none_when_missing()
     test_snap_z_to_priya_grid()
+    test_grid_in_dir_requires_grid_480()
     test_discover_lf_pairs_sorted_no_hires()
     test_discover_hr_pairs_six_sims()
     test_discover_dedups_one_snap_per_grid_z()
