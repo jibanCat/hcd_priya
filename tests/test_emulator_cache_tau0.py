@@ -99,20 +99,6 @@ def test_read_priya_params_matches_priya_array():
     print("read_priya_params matches PRIYA params array (max rel < 1e-6): OK")
 
 
-def _fake_row(sim, snap, a_idx, alpha, snap_group_idx, nk):
-    return {
-        "sim_name": sim, "snap": snap, "alpha_slope": alpha, "alpha_idx": a_idx,
-        "snap_group_idx": snap_group_idx,
-        "target_F": 0.7 - 0.01 * a_idx, "scale": 0.95, "z_meta": 3.000013,
-        "z_grid": 3.0, "dv_kms": 10.0, "nbins_native": 1250,
-        "params": np.arange(9, dtype=np.float64),
-        "P_tier_p": np.full(nk, 5.0), "P_clean": np.full(nk, 4.0),
-        "P_LLS": np.full(nk, 3.0), "P_subDLA": np.full(nk, 2.0),
-        "P_DLA": np.full(nk, 1.0),
-        "n_clean": 600, "n_LLS": 50, "n_subDLA": 20, "n_DLA": 10,
-    }
-
-
 def _fake_snap_block(sim, snap):
     return {
         "sim_name": sim, "snap": snap,
@@ -124,34 +110,45 @@ def _fake_snap_block(sim, snap):
     }
 
 
-def test_write_cache_tau0_round_trip():
-    sim = "ns0.8Ap2e-09herei4heref3alphaq2hub0.7omegamh20.14hireionz7bhfeedback0.03"
-    nk = 50
-    k_target = np.geomspace(0.007, 0.31, nk)
-    rows = [_fake_row(sim, 10, i, 0.66 + 0.05 * i, snap_group_idx=0, nk=nk) for i in range(3)]
-    snap_blocks = [_fake_snap_block(sim, 10)]
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "observables_tau0.h5"
-        bt0.write_cache_tau0(rows, snap_blocks, k_target, out, alpha_range=(0.66, 1.36))
-        with h5py.File(out, "r") as f:
-            assert f["P_tier_p"].shape == (3, nk)
-            assert f["P_clean"].shape == (3, nk)
-            assert f["P_DLA"].shape == (3, nk)
-            assert f["alpha_slope"].shape == (3,)
-            assert f["target_F"].shape == (3,)
-            assert f["scale"].shape == (3,)
-            assert f["z_grid"].shape == (3,)
-            assert f["n_DLA"].shape == (3,)
-            assert f["snap_group_idx"].shape == (3,)
-            assert np.all(f["snap_group_idx"][...] == 0)
-            assert f["snap_f_nhi"].shape == (1, 30)
-            assert f["snap_dNdX_DLA"].shape == (1,)
-            assert f["k_target"].shape == (nk,)
-            assert f.attrs["cache_version"] == "2.0"
-            assert f.attrs["tau_thresh"] == 1.0e6
-            assert np.allclose(f["P_tier_p"][0], 5.0)
-            assert np.allclose(f["P_DLA"][0], 1.0)
-    print("write_cache_tau0 v2.0: round-trip OK")
+def _fake_rows(nk, nrows=3):
+    from hcd_analysis.priya_p1d import N_TIER_C_BINS as NB
+    rows = []
+    for i in range(nrows):
+        rows.append({
+            "sim_name": f"sim{i%2}", "snap": 10 + i, "alpha_slope": 1.0 + 0.1*i,
+            "alpha_idx": i, "z_meta": 3.0, "z_grid": 3.0, "dv_kms": 10.0,
+            "nbins_native": 1228, "target_F": 0.7, "scale": 0.9,
+            "params": np.arange(9, dtype=np.float64),
+            "kfkms": np.linspace(5e-4, 0.08, nk),
+            "P_tier_p": np.full(nk, 5.0),
+            "P_tier_c": np.tile(np.arange(NB)[:, None], (1, nk)).astype(float),
+            "tier_c_counts": np.arange(NB, dtype=np.int64),
+            "snap_group_idx": i,
+        })
+    return rows
+
+
+def test_write_cache_tau0_round_trip(tmp_path=Path("/tmp")):
+    import hcd_analysis.priya_p1d as pp
+    nk = 172
+    rows = _fake_rows(nk)
+    snap_blocks = [_fake_snap_block(f"sim{i%2}", 10 + i) for i in range(3)]
+    out = tmp_path / "rt_tau0.h5"
+    bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(1.0, 1.2), n_k=nk)
+    with h5py.File(out, "r") as f:
+        assert f.attrs["cache_version"] == "3.0"
+        assert f.attrs["n_k"] == nk
+        assert f["P_tier_p"].shape == (3, nk)
+        assert f["kfkms"].shape == (3, nk)
+        assert f["P_tier_c"].shape == (3, pp.N_TIER_C_BINS, nk)
+        assert f["tier_c_counts"].shape == (3, pp.N_TIER_C_BINS)
+        assert list(f["tier_c_labels"].asstr()[...]) == pp.tier_c_labels()
+        assert np.allclose(f["P_tier_p"][0], 5.0)
+        assert "k_target" not in f
+        assert f["tier_c_counts"].dtype == np.int64
+        assert np.allclose(f["tier_c_nhi_edges"][...], pp.FINE_NHI_EDGES)
+        assert f["snap_group_idx"][...].tolist() == [0, 1, 2]
+    print("OK write_cache_tau0 v3.0 round-trip")
 
 
 def _have_fake_spectra():

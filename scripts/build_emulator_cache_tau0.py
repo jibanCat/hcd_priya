@@ -270,22 +270,25 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
 
 
 _ROW_FLOAT_KEYS = ("alpha_slope", "target_F", "scale", "z_meta", "z_grid", "dv_kms")
-_ROW_INT_KEYS = (
-    "snap", "alpha_idx", "nbins_native", "snap_group_idx",
-    "n_clean", "n_LLS", "n_subDLA", "n_DLA",
-)
-_ROW_P1D_KEYS = ("P_tier_p", "P_clean", "P_LLS", "P_subDLA", "P_DLA")
+_ROW_INT_KEYS = ("snap", "alpha_idx", "nbins_native", "snap_group_idx")
+_ROW_P1D_KEYS = ("kfkms", "P_tier_p")          # 2-D (n_rows, n_k)
+_ROW_TIERC_KEYS = ("P_tier_c",)                 # 3-D (n_rows, N_TIER_C_BINS, n_k)
+_ROW_COUNT_KEYS = ("tier_c_counts",)            # 2-D (n_rows, N_TIER_C_BINS)
 _SNAP_FLOAT_KEYS = ("total_path_dX", "dNdX_LLS", "dNdX_subDLA", "dNdX_DLA")
 _SNAP_2D_KEYS = ("f_nhi", "n_absorbers")
 
 
-def write_cache_tau0(rows, snap_blocks, k_target, output_path, alpha_range):
-    """Stack per-alpha `rows` + per-snap `snap_blocks` into one HDF5 cache.
+def write_cache_tau0(rows, snap_blocks, output_path, alpha_range, n_k):
+    """Stack per-alpha `rows` + per-snap `snap_blocks` into one HDF5 cache (v3.0).
 
     Each row carries `snap_group_idx`, an index into the snap_* datasets.
+    Schema v3.0: per-row kfkms + P_tier_p (2-D), P_tier_c (3-D),
+    tier_c_counts (2-D); tier_c_labels/tier_c_nhi_edges descriptors; no k_target.
     """
+    from hcd_analysis.priya_p1d import tier_c_labels, FINE_NHI_EDGES, N_TIER_C_BINS
+    assert len(tier_c_labels()) == N_TIER_C_BINS == len(FINE_NHI_EDGES) + 1
     if not rows:
-        raise ValueError("write_cache_tau0 called with no rows; nothing to write.")
+        raise ValueError("write_cache_tau0 called with no rows.")
     if not snap_blocks:
         raise ValueError("write_cache_tau0 called with no snap_blocks.")
     output_path = Path(output_path)
@@ -293,26 +296,25 @@ def write_cache_tau0(rows, snap_blocks, k_target, output_path, alpha_range):
 
     log_nhi_centres = snap_blocks[0]["log_nhi_centres"]
     log_nhi_edges = snap_blocks[0]["log_nhi_edges"]
-    for b in snap_blocks[1:]:
-        assert np.array_equal(b["log_nhi_centres"], log_nhi_centres), \
-            "log_nhi_centres mismatch across snap_blocks"
 
     with h5py.File(output_path, "w") as f:
-        f.attrs["created_utc"] = (
-            datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z")
+        f.attrs["created_utc"] = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
         f.attrs["git_sha"] = bec._git_sha(REPO_ROOT)
         f.attrs["n_rows"] = len(rows)
         f.attrs["n_snaps"] = len(snap_blocks)
-        f.attrs["cache_version"] = "2.0"
+        f.attrs["cache_version"] = "3.0"
+        f.attrs["n_k"] = int(n_k)
         f.attrs["priya_convention"] = (
             "Kim 2013 slope-alpha (obs_mean_tau=2.3e-3(1+z)^3.65); "
             "fake_spectra _filter_single_tau_complex(tau_thresh=1e6, thresh2=0.25); "
-            "flux_power window=False spec_res=0")
+            "flux_power window=False spec_res=0; native k-grid (first n_k FFT bins)")
         f.attrs["tau_thresh"] = 1.0e6
         f.attrs["alpha_range"] = np.asarray(alpha_range, dtype=np.float64)
-        f.attrs["k_convention"] = "angular (rad*s/km), PRIYA convention"
+        f.attrs["k_convention"] = "angular (rad*s/km) native FFT grid, PRIYA convention"
 
-        f.create_dataset("k_target", data=np.asarray(k_target, dtype=np.float64))
+        f.create_dataset("tier_c_labels",
+                         data=np.array(tier_c_labels(), dtype=h5py.string_dtype()))
+        f.create_dataset("tier_c_nhi_edges", data=np.asarray(FINE_NHI_EDGES, dtype=np.float64))
         f.create_dataset("param_names",
                          data=np.array(list(bec.PARAM_ORDER), dtype=h5py.string_dtype()))
         f.create_dataset("log_nhi_centres", data=log_nhi_centres)
@@ -329,6 +331,10 @@ def write_cache_tau0(rows, snap_blocks, k_target, output_path, alpha_range):
             f.create_dataset(key, data=np.array([r[key] for r in rows], dtype=np.int32))
         for key in _ROW_P1D_KEYS:
             f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0))
+        for key in _ROW_TIERC_KEYS:
+            f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0))
+        for key in _ROW_COUNT_KEYS:
+            f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0).astype(np.int64))
 
         # --- per-(sim, snap) tau0-invariant CDDF datasets ---
         f.create_dataset("snap_sim_name",
