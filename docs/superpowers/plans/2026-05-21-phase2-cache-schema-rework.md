@@ -865,6 +865,60 @@ git commit -m "test: Tier-C non-DLA classes reproduce PRIYA tau=1e6 P1D (decompo
 
 ---
 
+### Task 9: Filtered Tier-C tier (exact PRIYA reconstruction from per-class)
+
+Per user 2026-05-22: the unfiltered Tier C (for "PRIYA + HCD add-back") sums to
+the *unfiltered* total, not PRIYA. To let the per-class decomposition reproduce
+PRIYA exactly (and define a clean non-DLA forest), ALSO store a **filtered Tier
+C**: the 15-bin per-class P1D computed on PRIYA's τ=1e6-filtered τ (the SAME
+whole-array filter Tier P uses), then split by N_HI class. Its count-weighted
+sum == Tier P (= PRIYA) to 1e-10. **Consistency requirement (user-flagged):** the
+filter MUST be the τ-based whole-array PRIYA filter applied BEFORE the N_HI split
+— never a per-N_HI-class filter (that would drop the τ-saturated subDLAs PRIYA
+heals and break the identity). The classification (counts) is by N_HI and is
+shared with the unfiltered tier.
+
+**Files:** `scripts/build_emulator_cache_tau0.py` (build_tau0_rows + _ROW_TIERC_KEYS),
+`tests/test_emulator_cache_tau0.py`. (merge needs no change — it composes from
+`bt0._ROW_TIERC_KEYS`.) Cost: +1 per-class flux_power-equiv per α (~+50% Tier C;
+reuses Tier P's already-filtered τ, no extra filtering).
+
+- [ ] **Step 1: failing test** — in `tests/test_emulator_cache_tau0.py`, add a
+  test that builds one LF row (ns0.803 snap_017, n_k=172, the bit-identity sim)
+  and asserts the FILTERED Tier C reconstructs Tier P (=PRIYA) exactly:
+```python
+def test_filtered_tier_c_reconstructs_priya():
+    SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
+    SNAP, NK = 17, 172
+    sd = Path(f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}")
+    raw = Path(f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
+    if not (sd.exists() and raw.exists()):
+        print("SKIP filtered_tier_c (data unavailable)"); return
+    rows, _ = bt0.build_tau0_rows(SIM, SNAP, sd, raw, np.array([1.0]), n_k=NK)
+    r = rows[0]
+    assert r["P_tier_c_filtered"].shape == (bt0_pp.N_TIER_C_BINS, NK)
+    N = int(r["tier_c_counts"].sum())
+    recon = (r["tier_c_counts"][:, None] / N * r["P_tier_c_filtered"]).sum(0)
+    rel = np.max(np.abs(recon / r["P_tier_p"] - 1))
+    assert rel < 1e-9, f"filtered Tier-C != Tier P (=PRIYA): max|r-1|={rel:.2e}"
+    print(f"RESULT OK filtered Tier-C reconstructs PRIYA exactly: max|r-1|={rel:.2e}")
+```
+- [ ] **Step 2: run → fail** (`P_tier_c_filtered` KeyError).
+- [ ] **Step 3:** in `build_tau0_rows`, keep `tau_filt` after Tier P (don't `del`
+  it) and compute a SECOND `compute_tier_c_p1d(tau_filt, ..., external_scale=scale,
+  external_target_F=target_F)` → `P_by_bin_filt, n_by_bin_filt`; assert
+  `np.array_equal(n_by_bin, n_by_bin_filt)` (same N_HI classification); add row key
+  `"P_tier_c_filtered": P_by_bin_filt[:, :n_k].astype(np.float64)`. Add
+  `"P_tier_c_filtered"` to `_ROW_TIERC_KEYS`. Bump `cache_version` to `"3.1"` and
+  extend the Tier-C docstring/labels note: `P_tier_c` = unfiltered (HCD add-back),
+  `P_tier_c_filtered` = PRIYA-filtered (sums to Tier P). Update the round-trip +
+  `_fake_rows` to include `P_tier_c_filtered`.
+- [ ] **Step 4: run → pass** (emu-3.9 env; expect `RESULT OK filtered Tier-C
+  reconstructs PRIYA exactly: max|r-1|=...e-1x`, plus the existing tests still green).
+- [ ] **Step 5: commit** `feat: filtered Tier-C tier — per-class reconstructs PRIYA exactly (v3.1)`.
+
+---
+
 ## Post-rework (not gating the schema; tracked in handover §4)
 
 - Size + launch the production sbatch arrays per fidelity (LF ~1076 pairs; HR 6 sims) once HR Phase-1 (job 50612177) is complete. ~70 min/pair @ 20 α.

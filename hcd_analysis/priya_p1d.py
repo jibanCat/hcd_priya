@@ -136,8 +136,10 @@ def compute_tier_c_p1d(tau: np.ndarray, vmax: float,
                        external_scale: Optional[float] = None,
                        external_target_F: Optional[float] = None,
                        ):
-    """Per-fine-N_HI-bin P1Ds on the UNFILTERED tau, sharing Tier P's
-    (scale, target_F) when given. Returns:
+    """Per-fine-N_HI-bin P1Ds on the GIVEN tau, sharing Tier P's
+    (scale, target_F) when given. Pass UNFILTERED tau for the HCD add-back tier,
+    or PRIYA's whole-array tau=1e6-filtered tau for the exact-reconstruction tier
+    (its count-weighted sum then equals Tier P). Returns:
         kf        : native k-grid (s/km, angular), shape (npix//2,)
         P_by_bin  : (N_TIER_C_BINS, npix//2) per-bin P1D (count-weighted sums
                     reconstruct any class; see merge_fine_to_classes)
