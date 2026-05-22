@@ -110,6 +110,47 @@ def test_fine_bins_reconstruct_subdla_split():
     print("OK fine->class reconstruction at 19.0 edge")
 
 
+def test_tier_c_nonDLA_reproduces_priya_filtered():
+    from hcd_analysis.priya_p1d import compute_tier_p_p1d, compute_tier_c_p1d
+    from hcd_analysis.catalog import AbsorberCatalog
+    SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
+    SNAP=17; NK=172; ZIDX=8; ROW=344
+    tau_p=f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5"
+    cat_p=f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/catalog.npz"
+    meta_p=f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/meta.json"
+    priya="/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/mf_emulator_flux_vectors_tau1000000.hdf5"
+    if not all(os.path.exists(p) for p in (tau_p,cat_p,meta_p,priya)):
+        print("SKIP tier_c_nonDLA (data unavailable)"); return
+    with open(meta_p) as fh: m=json.load(fh)
+    vmax=int(m["nbins"])*float(m["dv_kms"]); z=round(float(m["z"])/0.2)*0.2  # PRIYA grid z
+    with h5py.File(tau_p,"r") as fh: tau=fh["tau/H/1/1215"][...].astype(np.float64)
+    catalog=AbsorberCatalog.load_npz(cat_p)
+    with h5py.File(priya,"r") as fh:
+        alpha=float(fh["params"][ROW,0])
+        P_priya=fh["flux_vectors"][ROW,ZIDX*NK:(ZIDX+1)*NK].astype(np.float64)
+    # Tier P filters tau in place; reuse the SAME filtered tau for Tier C so the
+    # per-class partition is exact against Tier P.
+    tau_f=tau.copy()
+    kf_p,P_p,tF,scale=compute_tier_p_p1d(tau_f, vmax, alpha_slope=alpha, z=z)
+    assert np.max(np.abs(P_p[:NK]/P_priya-1))<1e-4, "Tier P != PRIYA (precondition)"
+    kf_c,P_by_bin,n_by_bin,_,_=compute_tier_c_p1d(
+        tau_f, vmax, alpha, z, catalog=catalog, external_scale=scale, external_target_F=tF)
+    N=int(n_by_bin.sum())
+    P_all=(n_by_bin[:,None]/N*P_by_bin).sum(0)
+    P_nonDLA=(n_by_bin[:13,None]/N*P_by_bin[:13]).sum(0)   # classes 0..12 = forest+LLS+subDLA
+    n_dla=int(n_by_bin[13:].sum())
+    # EXACT: all classes on the filtered tau reconstruct Tier P (= PRIYA)
+    assert np.allclose(P_all, P_p, rtol=1e-10), \
+        f"filtered partition != Tier P, worst {np.max(np.abs(P_all/P_p-1)):.2e}"
+    # DIAGNOSTIC: non-DLA classes vs PRIYA's filtered P1D
+    res=np.abs(P_nonDLA[:NK]/P_priya-1)
+    print(f"RESULT Tier-C decomposition: filtered partition EXACT; "
+          f"non-DLA vs PRIYA max|r-1|={res.max():.3e} med={np.median(res):.3e} "
+          f"(n_DLA={n_dla}/{N}={n_dla/N:.2%})  [target <1%]")
+    assert res.max() < 0.05, f"non-DLA residual {res.max():.3e} >5% — investigate"
+    print("OK tier_c_nonDLA_reproduces_priya_filtered")
+
+
 def _snap_to_grid(z):
     return round(float(z) / 0.2) * 0.2
 
@@ -222,5 +263,6 @@ if __name__ == "__main__":
     test_tier_p_bit_identical_to_priya_at_sim0_z3_alpha1()
     test_tier_c_fine_bins_sum_to_total_at_alpha_one()
     test_fine_bins_reconstruct_subdla_split()
+    test_tier_c_nonDLA_reproduces_priya_filtered()
     test_priya_p1d_bit_identical_multipoint()
     print("OK")
