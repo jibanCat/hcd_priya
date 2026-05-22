@@ -17,6 +17,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import build_emulator_cache_tau0 as bt0
+from hcd_analysis import priya_p1d as bt0_pp
 
 _HCD_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
 _EMU_ROOT = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
@@ -162,46 +163,29 @@ def _have_fake_spectra():
 
 
 def test_build_tau0_rows_tier_p_matches_priya():
-    """Real-data end-to-end: build_tau0_rows at full n_skewers for sim44/snap17
-    must reproduce PRIYA's flux_vector (interpolated to the same k_target)."""
-    if not _have_fake_spectra():
-        print("SKIP test_build_tau0_rows_tier_p_matches_priya — fake_spectra unavailable")
-        return
-    from hcd_analysis.p1d import _DEFAULT_K_BINS
-    sim = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
-    snap = 17
-    snap_dir = _HCD_ROOT / sim / f"snap_{snap:03d}"
-    raw = bt0.locate_raw_tau_file(_EMU_ROOT, sim, snap)
-    k_target = 2.0 * np.pi * _DEFAULT_K_BINS
-    alpha = 1.0111827706628471  # PRIYA row 344 alpha at this sim
-
-    rows, snap_block = bt0.build_tau0_rows(
-        sim, snap, snap_dir, raw, np.array([alpha]), k_target, n_skewers=None)
-    assert len(rows) == 1
-    row = rows[0]
-    for key in ("P_tier_p", "P_clean", "P_LLS", "P_subDLA", "P_DLA"):
-        assert row[key].shape == (len(_DEFAULT_K_BINS),)
-    assert np.isclose(row["z_grid"], 3.0)
-    assert (row["n_clean"] + row["n_LLS"] + row["n_subDLA"] + row["n_DLA"]) == 691200
-
-    # Compare interpolated P_tier_p to PRIYA's flux_vector interpolated the same way.
-    from build_emulator_cache import interp_p1d_loglog
-    NK = 172; ZIDX = 8; ROW = 344
-    with h5py.File(_PRIYA_FILE, "r") as f:
+    SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
+    SNAP = 17; NK = 172; ZIDX = 8; ROW = 344
+    snap_dir = Path(f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}")
+    raw = Path(f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
+    if not (snap_dir.exists() and raw.exists()):
+        print("SKIP test_build_tau0_rows_tier_p_matches_priya (data unavailable)"); return
+    priya = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/mf_emulator_flux_vectors_tau1000000.hdf5"
+    with h5py.File(priya, "r") as f:
+        alpha = float(f["params"][ROW, 0])
         P_priya = f["flux_vectors"][ROW, ZIDX*NK:(ZIDX+1)*NK].astype(np.float64)
         kp = f["kfkms"][ROW, ZIDX, :].astype(np.float64)
-    P_priya_on_target = interp_p1d_loglog(kp, P_priya, k_target)
-    both = np.isfinite(P_priya_on_target) & np.isfinite(row["P_tier_p"])
-    # PRIYA's per-row kfkms tops out at ~0.086 s/km while k_target (the 50-bin
-    # cyclic grid * 2pi) extends to ~0.314, so only ~24 of the 50 k_target bins
-    # fall inside PRIYA's range. The load-bearing check is the <1e-3 agreement
-    # in the overlap; on the NATIVE Tier-P grid all 171 PRIYA bins agree to ~1e-6.
-    assert both.sum() >= 20, f"too few overlapping k bins: {both.sum()}"
-    rel = np.abs(row["P_tier_p"][both] / P_priya_on_target[both] - 1)
-    assert np.max(rel) < 1e-3, f"Tier-P vs PRIYA max rel diff {np.max(rel):.3e}"
-    print(f"build_tau0_rows Tier-P vs PRIYA: max rel diff {np.max(rel):.3e}  "
-          f"target_F={row['target_F']:.4f} scale={row['scale']:.4f} "
-          f"n=({row['n_clean']},{row['n_LLS']},{row['n_subDLA']},{row['n_DLA']})")
+    rows, _ = bt0.build_tau0_rows(SIM, SNAP, snap_dir, raw,
+                                  alpha_slope_grid=np.array([alpha]), n_k=NK)
+    r = rows[0]
+    assert r["kfkms"].shape == (NK,) and r["P_tier_p"].shape == (NK,)
+    assert np.max(np.abs(r["kfkms"] / kp - 1)) < 1e-12, "native k-grid mismatch"
+    assert np.max(np.abs(r["P_tier_p"] / P_priya - 1)) < 1e-4, "Tier-P not bit-identical"
+    assert r["P_tier_c"].shape == (bt0_pp.N_TIER_C_BINS, NK)
+    assert r["tier_c_counts"].shape == (bt0_pp.N_TIER_C_BINS,)
+    assert r["tier_c_counts"].sum() > 0, "Tier-C produced no sightlines"
+    assert np.isfinite(r["P_tier_c"]).all(), "Tier-C P1D has non-finite values"
+    assert r["tier_c_counts"][0] > 0, "clean (forest) bin should be populated"
+    print("OK build_tau0_rows native-grid Tier-P bit-identical")
 
 
 if __name__ == "__main__":

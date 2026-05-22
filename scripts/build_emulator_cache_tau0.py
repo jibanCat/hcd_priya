@@ -187,14 +187,19 @@ def _read_priya_params(raw_tau_path):
 
 
 def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
-                    k_target, n_skewers=None):
-    """Build per-alpha rows (Tier-P total + Tier-C per-class P1D) and the
+                    n_k, n_skewers=None):
+    """Build per-alpha rows (Tier-P total + Tier-C per-fine-bin P1D) and the
     per-snap CDDF block for one (sim, snap), driving fake_spectra directly.
 
     Tier P: PRIYA-compatible total P1D over all sightlines after the
     _filter_single_tau_complex DLA mask. Bit-identical to PRIYA's flux_vectors.
-    Tier C: per-class (clean/LLS/subDLA/DLA) P1D on the UNFILTERED tau, sharing
-    Tier P's scale + target_F (so they decompose against the total).
+    Stores the first n_k NATIVE FFT bins (no interpolation to a fixed angular
+    k_target grid).
+    n_k: number of leading native-FFT k-bins to retain (must be <= the snap's
+    native grid length, approximately nbins//2).
+    Tier C: per-fine-NHI-bin (N_TIER_C_BINS=15) P1D on the UNFILTERED tau,
+    sharing Tier P's scale + target_F (so they decompose against the total).
+    Stores P_by_bin[:, :n_k] and n_by_bin counts.
 
     Returns (rows, snap_block).
     """
@@ -211,47 +216,44 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
     dndx = bec.compute_dndx_per_class(meta["n_absorbers"], float(cddf["total_path"]))
     catalog = AbsorberCatalog.load_npz(snap_dir / "catalog.npz")
 
-    nbins = int(read_header(raw_tau_path).nbins)
+    hdr = read_header(raw_tau_path)
+    nbins = int(hdr.nbins)
+    z_raw = float(hdr.redshift)
     dv_kms = float(meta["dv_kms"])
     vmax = nbins * dv_kms
+
     z_meta = float(meta["z"])
     z_grid = _snap_z_to_priya_grid(z_meta)
+    # Defensive: raw header z must agree with Phase-1 meta z (catches mis-pairing
+    # across the cross-sim SPECTRA-numbering differences).
+    assert abs(z_raw - z_meta) < 1e-2, \
+        f"z mismatch raw={z_raw} meta={z_meta} for {sim_name} snap {snap}"
 
     tau_unfilt = _read_tau(raw_tau_path, n_skewers=n_skewers)
-
     rows = []
     for a_idx, alpha in enumerate(alpha_slope_grid):
         alpha = float(alpha)
-        # Tier P needs a filtered copy (the filter mutates tau in place).
         tau_filt = tau_unfilt.copy()
         kf_p, P_tier_p, target_F, scale = compute_tier_p_p1d(
             tau_filt, vmax, alpha_slope=alpha, z=z_grid)
         del tau_filt
-        # Tier C on the unfiltered tau, sharing Tier P's normalisation.
-        kf_c, by_class, n_by_class, _, _ = compute_tier_c_p1d(
+        kf_c, P_by_bin, n_by_bin, _, _ = compute_tier_c_p1d(
             tau_unfilt, vmax, alpha_slope=alpha, z=z_grid, catalog=catalog,
             external_scale=scale, external_target_F=target_F)
+        if a_idx == 0:
+            assert len(kf_p) >= n_k and len(kf_c) >= n_k, \
+                f"native grid {len(kf_p)} bins < n_k={n_k} for {sim_name} snap {snap}"
         rows.append({
-            "sim_name": sim_name,
-            "snap": int(snap),
-            "alpha_slope": alpha,
-            "alpha_idx": int(a_idx),
-            "z_meta": z_meta,
-            "z_grid": float(z_grid),
-            "dv_kms": dv_kms,
-            "nbins_native": nbins,
-            "target_F": float(target_F),
-            "scale": float(scale),
+            "sim_name": sim_name, "snap": int(snap),
+            "alpha_slope": alpha, "alpha_idx": int(a_idx),
+            "z_meta": z_meta, "z_grid": float(z_grid),
+            "dv_kms": dv_kms, "nbins_native": nbins,
+            "target_F": float(target_F), "scale": float(scale),
             "params": params,
-            "P_tier_p": bec.interp_p1d_loglog(kf_p, P_tier_p, k_target),
-            "P_clean":  bec.interp_p1d_loglog(kf_c, by_class["clean"], k_target),
-            "P_LLS":    bec.interp_p1d_loglog(kf_c, by_class["LLS"], k_target),
-            "P_subDLA": bec.interp_p1d_loglog(kf_c, by_class["subDLA"], k_target),
-            "P_DLA":    bec.interp_p1d_loglog(kf_c, by_class["DLA"], k_target),
-            "n_clean":  int(n_by_class["clean"]),
-            "n_LLS":    int(n_by_class["LLS"]),
-            "n_subDLA": int(n_by_class["subDLA"]),
-            "n_DLA":    int(n_by_class["DLA"]),
+            "kfkms": kf_p[:n_k].astype(np.float64),
+            "P_tier_p": P_tier_p[:n_k].astype(np.float64),
+            "P_tier_c": P_by_bin[:, :n_k].astype(np.float64),
+            "tier_c_counts": n_by_bin.astype(np.int64),
         })
 
     snap_block = {
