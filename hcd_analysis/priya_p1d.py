@@ -9,7 +9,7 @@ fake_spectra._spectra_priv).
 """
 from __future__ import annotations
 from types import SimpleNamespace
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -62,31 +62,6 @@ def compute_tier_p_p1d(tau: np.ndarray, vmax: float,
     from fake_spectra.fluxstatistics import mean_flux
     scale = float(mean_flux(tau, target_F))
     return kf[1:], P[1:], target_F, scale
-
-
-def _classify_sightlines(catalog, n_skewers: int) -> Dict[str, np.ndarray]:
-    """Return a dict of boolean masks, one per class label.
-
-    Mirrors the highest-class promotion rule already used by
-    hcd_analysis.p1d.compute_p1d_per_class (DLA wins over subDLA wins over
-    LLS; everything else is "clean"). Uses each Absorber's pre-computed
-    `absorber_class` field, NOT a re-thresholded log_NHI — the absorber's
-    class is the authoritative label (Phase-1 catalog builder applied the
-    thresholds at fit time).
-    """
-    labels = np.full(n_skewers, "clean", dtype=object)
-    for ab in catalog.absorbers:
-        if ab.skewer_idx >= n_skewers:
-            continue
-        if ab.absorber_class == "DLA":
-            labels[ab.skewer_idx] = "DLA"
-        elif ab.absorber_class == "subDLA":
-            if labels[ab.skewer_idx] != "DLA":
-                labels[ab.skewer_idx] = "subDLA"
-        elif ab.absorber_class == "LLS":
-            if labels[ab.skewer_idx] not in ("DLA", "subDLA"):
-                labels[ab.skewer_idx] = "LLS"
-    return {c: (labels == c) for c in ("clean", "LLS", "subDLA", "DLA")}
 
 
 # Fine-N_HI Tier-C bins, anchored at the physical class boundaries (user
@@ -161,39 +136,44 @@ def compute_tier_c_p1d(tau: np.ndarray, vmax: float,
                        external_scale: Optional[float] = None,
                        external_target_F: Optional[float] = None,
                        ):
-    """Per-class P1Ds (clean, LLS, subDLA, DLA) on the UNFILTERED tau.
-
-    If `external_scale` / `external_target_F` are given (the production path,
-    set from a prior Tier-P call), use those so the four classes share Tier
-    P's mean-flux normalisation. Otherwise compute target_F from
-    obs_mean_tau(z) and solve scale on the full tau (independent
-    Tier-C-only path, useful for unit tests).
-
-    Returns:
-        kf      : k-grid (s/km, angular), shape (npix//2,)
-        by_class: dict[label] -> P1D array, shape (npix//2,)
-        n_by_class: dict[label] -> sightline count
-        target_F, scale (the values used)
+    """Per-fine-N_HI-bin P1Ds on the UNFILTERED tau, sharing Tier P's
+    (scale, target_F) when given. Returns:
+        kf        : native k-grid (s/km, angular), shape (npix//2,)
+        P_by_bin  : (N_TIER_C_BINS, npix//2) per-bin P1D (count-weighted sums
+                    reconstruct any class; see merge_fine_to_classes)
+        n_by_bin  : (N_TIER_C_BINS,) int sightline counts
+        target_F, scale
     """
     from fake_spectra.fluxstatistics import mean_flux
-
     if external_target_F is None:
         target_F = float(np.exp(-alpha_slope * obs_mean_tau(z)))
     else:
         target_F = float(external_target_F)
-    if external_scale is None:
-        scale = float(mean_flux(tau, target_F))
-    else:
-        scale = float(external_scale)
+    scale = float(mean_flux(tau, target_F)) if external_scale is None else float(external_scale)
 
-    masks = _classify_sightlines(catalog, tau.shape[0])
-    out: Dict[str, np.ndarray] = {}
-    n_out: Dict[str, int] = {}
+    cls = bin_sightlines_by_nhi(catalog, tau.shape[0])
+    P_by_bin, n_by_bin = [], np.zeros(N_TIER_C_BINS, dtype=np.int64)
     kf_ref = None
-    for label, mask in masks.items():
+    for c in range(N_TIER_C_BINS):
+        mask = (cls == c)
         kf, P = _per_class_p1d_at_scale(tau[mask], vmax, scale, target_F)
         if kf_ref is None:
             kf_ref = kf
-        out[label] = P
-        n_out[label] = int(mask.sum())
-    return kf_ref, out, n_out, target_F, scale
+        P_by_bin.append(P)
+        n_by_bin[c] = int(mask.sum())
+    return kf_ref, np.stack(P_by_bin, axis=0), n_by_bin, target_F, scale
+
+
+def merge_fine_to_classes(P_by_bin, n_by_bin, bin_ranges):
+    """Count-weighted merge of fine bins into coarse classes.
+    `bin_ranges` is a list of (lo, hi) half-open class-index ranges. Returns a
+    list of P1D arrays, one per range (zeros where a range has no sightlines)."""
+    out = []
+    for lo, hi in bin_ranges:
+        n = n_by_bin[lo:hi]
+        ntot = int(n.sum())
+        if ntot == 0:
+            out.append(np.zeros(P_by_bin.shape[1]))
+        else:
+            out.append((n[:, None] / ntot * P_by_bin[lo:hi]).sum(axis=0))
+    return out

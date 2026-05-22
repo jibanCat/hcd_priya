@@ -57,38 +57,57 @@ def test_tier_p_bit_identical_to_priya_at_sim0_z3_alpha1():
           f"med(r)={np.median(ratio):.7f}  max|r-1|={np.max(np.abs(ratio-1)):.3e}")
 
 
-def test_tier_c_matches_filter_free_sum_at_alpha_one():
-    """When tau_thresh=inf (no filter), the sightline-weighted sum of the four
-    Tier-C P1Ds must equal the Tier-P-without-filter P1D — to floating-point.
-    This guards against bugs in the per-class accumulator."""
+def test_tier_c_fine_bins_sum_to_total_at_alpha_one():
+    """Count-weighted sum of all fine-N_HI bin P1Ds == Tier-P-no-filter P1D."""
     from hcd_analysis.priya_p1d import compute_tier_c_p1d, compute_tier_p_p1d
     from hcd_analysis.catalog import AbsorberCatalog
-
     tau_p = f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5"
     meta_p = f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/meta.json"
     cat_p = f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/catalog.npz"
-    with open(meta_p) as f: m = json.load(f)
-    vmax = int(m["nbins"]) * float(m["dv_kms"])
-    z = float(m["z"])
-    with h5py.File(tau_p, "r") as f:
-        tau = f["tau/H/1/1215"][...].astype(np.float64)
+    with open(meta_p) as fh: m = json.load(fh)
+    vmax = int(m["nbins"]) * float(m["dv_kms"]); z = float(m["z"])
+    with h5py.File(tau_p, "r") as fh:
+        tau = fh["tau/H/1/1215"][...].astype(np.float64)
     catalog = AbsorberCatalog.load_npz(cat_p)
-
-    alpha = 1.0
-    # Tier P with filter disabled => total P1D over all sightlines, no DLA mask
     kf_P, P_P, target_F, scale = compute_tier_p_p1d(
-        tau.copy(), vmax, alpha_slope=alpha, z=z, tau_thresh=np.inf)
-    # Tier C: per-class P1Ds with the same scale + target_F
-    kf_C, by_class, n_by_class, _, _ = compute_tier_c_p1d(
-        tau, vmax, alpha_slope=alpha, z=z, catalog=catalog,
+        tau.copy(), vmax, alpha_slope=1.0, z=z, tau_thresh=np.inf)
+    kf_C, P_by_bin, n_by_bin, _, _ = compute_tier_c_p1d(
+        tau, vmax, alpha_slope=1.0, z=z, catalog=catalog,
         external_scale=scale, external_target_F=target_F)
-    # weights = n_class / n_total
-    n_total = sum(n_by_class.values())
-    P_recombined = sum((n_by_class[c]/n_total) * by_class[c] for c in by_class)
+    n_total = int(n_by_bin.sum())
+    P_recombined = (n_by_bin[:, None] / n_total * P_by_bin).sum(axis=0)
     assert np.allclose(P_recombined, P_P, rtol=1e-10), \
-        f"per-class sum != total P1D at alpha=1 (no filter), worst rel diff "\
-        f"= {np.max(np.abs(P_recombined/P_P - 1)):.3e}"
-    print("OK — Tier C sums to Tier P at alpha=1 with no filter")
+        f"fine-bin sum != total; worst {np.max(np.abs(P_recombined/P_P-1)):.3e}"
+    assert np.array_equal(kf_C, kf_P)
+    print(f"OK fine-bin sum==total ({P_by_bin.shape[0]} bins, n={n_total})")
+
+
+def test_fine_bins_reconstruct_subdla_split():
+    """Merging fine bins at the aligned 19.0 edge reproduces a direct
+    clean+LLS vs subDLA+DLA split (mechanics of count-weighted reconstruction)."""
+    from hcd_analysis.priya_p1d import (
+        compute_tier_c_p1d, compute_tier_p_p1d, merge_fine_to_classes,
+        _per_class_p1d_at_scale, bin_sightlines_by_nhi, FINE_NHI_EDGES)
+    from hcd_analysis.catalog import AbsorberCatalog
+    tau_p = f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5"
+    meta_p = f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/meta.json"
+    cat_p = f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/catalog.npz"
+    with open(meta_p) as fh: m = json.load(fh)
+    vmax = int(m["nbins"]) * float(m["dv_kms"]); z = float(m["z"])
+    with h5py.File(tau_p, "r") as fh:
+        tau = fh["tau/H/1/1215"][...].astype(np.float64)
+    catalog = AbsorberCatalog.load_npz(cat_p)
+    _, _, tF, sc = compute_tier_p_p1d(tau.copy(), vmax, 1.0, z, tau_thresh=np.inf)
+    kf_C, P_by_bin, n_by_bin, _, _ = compute_tier_c_p1d(
+        tau, vmax, 1.0, z, catalog=catalog, external_scale=sc, external_target_F=tF)
+    # 19.0 is FINE_NHI_EDGES[7]; class index just above it is 8. Split classes
+    # [0..8) (clean+LLS, max log_NHI < 19.0) vs [8..15) (subDLA+DLA).
+    split_idx = int(np.where(np.isclose(FINE_NHI_EDGES, 19.0))[0][0]) + 1   # = 8
+    P_lo = merge_fine_to_classes(P_by_bin, n_by_bin, [(0, split_idx)])[0]
+    cls = bin_sightlines_by_nhi(catalog, tau.shape[0])
+    _, P_direct = _per_class_p1d_at_scale(tau[cls < split_idx], vmax, sc, tF)
+    assert np.allclose(P_lo, P_direct, rtol=1e-10)
+    print("OK fine->class reconstruction at 19.0 edge")
 
 
 def _snap_to_grid(z):
@@ -201,6 +220,7 @@ def test_bin_sightlines_by_nhi():
 if __name__ == "__main__":
     test_bin_sightlines_by_nhi()
     test_tier_p_bit_identical_to_priya_at_sim0_z3_alpha1()
-    test_tier_c_matches_filter_free_sum_at_alpha_one()
+    test_tier_c_fine_bins_sum_to_total_at_alpha_one()
+    test_fine_bins_reconstruct_subdla_split()
     test_priya_p1d_bit_identical_multipoint()
     print("OK")
