@@ -68,6 +68,7 @@ def merge_shards(shard_paths, output_path):
                     top[k] = f[k][...]
                 alpha_range = f.attrs["alpha_range"]
                 first_n_k = int(f.attrs["n_k"])
+                tier_c_note = f.attrs.get("tier_c_note", None)
             else:
                 for k in ("tier_c_nhi_edges", "log_nhi_centres", "log_nhi_edges"):
                     assert np.allclose(f[k][...], top[k]), f"{k} mismatch in {sp}"
@@ -106,6 +107,8 @@ def merge_shards(shard_paths, output_path):
         f.attrs["alpha_range"] = alpha_range
         f.attrs["k_convention"] = "angular (rad*s/km) native FFT grid, PRIYA convention"
         f.attrs["merged_from_n_shards"] = len(shard_paths)
+        if tier_c_note is not None:
+            f.attrs["tier_c_note"] = tier_c_note
 
         for k in _TOP_LEVEL:
             f.create_dataset(k, data=top[k])

@@ -1,4 +1,4 @@
-"""Build the tau0-extended HCD-emulator training cache (Phase 2, v2.0).
+"""Build the tau0-extended HCD-emulator training cache (Phase 2, v3.1).
 
 For every fully-processed (sim, snap) pair, drive fake_spectra directly (via
 hcd_analysis.priya_p1d) at each of N alpha-slope values to produce both:
@@ -101,13 +101,20 @@ def _match_emu_folder_by_params(emu_root, sim_name, rtol=0.015):
     return match
 
 
-def discover_tau0_pairs(hcd_root, emu_root, fidelity="lf"):
+def discover_tau0_pairs(hcd_root, emu_root, fidelity="lf", max_off_grid=0.05):
     """Return [(sim, snap, snap_dir, raw_tau_path), ...] for one fidelity.
 
     fidelity='lf': sims directly under hcd_root; raw under emu_root/<sim>.
     fidelity='hr': pass hcd_root = the hcd_outputs BASE; /hires is appended
     automatically; raw under emu_root/<sim> (emu_full_hires_2). Pairs are
-    returned in the deterministic (sim, snap) order from bec.discover_sim_snap_pairs."""
+    returned in the deterministic (sim, snap) order from bec.discover_sim_snap_pairs.
+
+    Deduplication: for each (sim, z_grid) only the snap whose meta z is CLOSEST
+    to the PRIYA grid is kept. Any kept snap still more than max_off_grid from
+    the grid is skipped with a WARN (protects against ~7% wrong mean-flux
+    normalization from off-grid snaps getting the wrong target_F).
+    """
+    import json
     if fidelity == "hr":
         root = Path(hcd_root) / "hires"
     else:
@@ -120,7 +127,23 @@ def discover_tau0_pairs(hcd_root, emu_root, fidelity="lf"):
         if raw is None:
             continue
         out.append((sim, snap, snap_dir, raw))
-    return out
+
+    best = {}   # (sim, round(z_grid,4)) -> (off_grid_distance, pair)
+    for sim, snap, snap_dir, raw in out:
+        z_meta = float(json.load(open(snap_dir / "meta.json"))["z"])
+        z_grid = _snap_z_to_priya_grid(z_meta)
+        off = abs(z_meta - z_grid)
+        key = (sim, round(z_grid, 4))
+        if key not in best or off < best[key][0]:
+            best[key] = (off, (sim, snap, snap_dir, raw))
+    deduped = []
+    for (sim, z_grid), (off, pair) in best.items():
+        if off > max_off_grid:
+            print(f"  WARN: skip off-grid snap {pair[0][:20]} {pair[1]} "
+                  f"(z_grid={z_grid}, off={off:.3f} > {max_off_grid})")
+            continue
+        deduped.append(pair)
+    return sorted(deduped, key=lambda p: (p[0], p[1]))
 
 
 # PRIYA's zout grid runs 2.0..5.4 in steps of 0.2; snapshot redshifts can land
@@ -283,10 +306,10 @@ _SNAP_2D_KEYS = ("f_nhi", "n_absorbers")
 
 
 def write_cache_tau0(rows, snap_blocks, output_path, alpha_range, n_k):
-    """Stack per-alpha `rows` + per-snap `snap_blocks` into one HDF5 cache (v3.0).
+    """Stack per-alpha `rows` + per-snap `snap_blocks` into one HDF5 cache (v3.1).
 
     Each row carries `snap_group_idx`, an index into the snap_* datasets.
-    Schema v3.0: per-row kfkms + P_tier_p (2-D), P_tier_c (3-D),
+    Schema v3.1: per-row kfkms + P_tier_p (2-D), P_tier_c (3-D),
     tier_c_counts (2-D); tier_c_labels/tier_c_nhi_edges descriptors; no k_target.
     """
     from hcd_analysis.priya_p1d import tier_c_labels, FINE_NHI_EDGES, N_TIER_C_BINS

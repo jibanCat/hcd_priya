@@ -1,4 +1,4 @@
-"""Tests for scripts/build_emulator_cache_tau0.py (v2.0, fake_spectra-driven).
+"""Tests for scripts/build_emulator_cache_tau0.py (v3.1, fake_spectra-driven).
 
 Real-data tests need the emu-3.9 + GSL env:
     export LD_LIBRARY_PATH=/sw/pkgs/arc/stacks/gcc/10.3.0/gsl/2.7/lib:/home/mfho/.conda/envs/emu-3.9/lib:$LD_LIBRARY_PATH
@@ -141,15 +141,28 @@ def test_write_cache_tau0_round_trip(tmp_path=Path("/tmp")):
         assert f["tier_c_counts"].dtype == np.int64
         assert np.allclose(f["tier_c_nhi_edges"][...], pp.FINE_NHI_EDGES)
         assert f["snap_group_idx"][...].tolist() == [0, 1, 2]
-    print("OK write_cache_tau0 v3.0 round-trip")
+    print("OK write_cache_tau0 v3.1 round-trip")
 
 
-def _have_fake_spectra():
-    try:
-        import hcd_analysis.priya_p1d  # noqa: F401
-        return True
-    except ImportError:
-        return False
+def test_discover_dedups_one_snap_per_grid_z():
+    pairs = bt0.discover_tau0_pairs(_HCD_ROOT, _EMU_LF, fidelity="lf")
+    # no duplicate (sim, z_grid)
+    seen = {}
+    import json as _json
+    for sim, snap, sd, raw in pairs:
+        zg = bt0._snap_z_to_priya_grid(float(_json.load(open(sd / "meta.json"))["z"]))
+        key = (sim, round(zg, 4))
+        assert key not in seen, f"duplicate (sim,z_grid) {key}: snaps {seen[key]} and {snap}"
+        seen[key] = snap
+    # every kept snap is within 0.05 of its grid z
+    for sim, snap, sd, raw in pairs:
+        z = float(_json.load(open(sd / "meta.json"))["z"])
+        assert abs(z - bt0._snap_z_to_priya_grid(z)) <= 0.05, f"{sim} {snap} too far off-grid"
+    # ns0.907: the on-grid snaps survive, the off-grid extras (snap_015 z3.27, snap_018 z2.67) are gone
+    n907 = [snap for sim, snap, sd, raw in pairs if "ns0.907Ap1.5e-09" in sim]
+    assert 16 in n907 and 15 not in n907, "ns0.907 should keep snap_016 (z3.2), drop snap_015 (z3.27)"
+    assert 19 in n907 and 18 not in n907, "ns0.907 should keep snap_019 (z2.6), drop snap_018 (z2.67)"
+    print(f"OK discovery dedup: {len(pairs)} LF pairs, one per (sim,z_grid)")
 
 
 def test_build_tau0_rows_tier_p_matches_priya():
@@ -270,6 +283,7 @@ if __name__ == "__main__":
     test_snap_z_to_priya_grid()
     test_discover_lf_pairs_sorted_no_hires()
     test_discover_hr_pairs_six_sims()
+    test_discover_dedups_one_snap_per_grid_z()
     test_read_priya_params_matches_priya_array()
     test_write_cache_tau0_round_trip()
     test_merge_v3_synthetic()
