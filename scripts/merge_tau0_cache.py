@@ -7,8 +7,8 @@ own shard .h5. This script concatenates them:
   - per-row datasets  -> concatenated along axis 0
   - per-snap datasets -> concatenated along axis 0
   - snap_group_idx    -> remapped by the cumulative per-shard snap offset
-  - top-level shared datasets (k_target, param_names, log_nhi_*) -> from shard 0
-    (asserted identical across shards)
+  - top-level shared datasets (tier_c_labels, tier_c_nhi_edges, param_names,
+    log_nhi_*) -> from shard 0 (numeric ones asserted identical across shards)
 
 Usage:
     python3 scripts/merge_tau0_cache.py \
@@ -32,9 +32,10 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import build_emulator_cache as bec  # noqa: E402
 import build_emulator_cache_tau0 as bt0  # noqa: E402
 
-_TOP_LEVEL = ("k_target", "param_names", "log_nhi_centres", "log_nhi_edges")
+_TOP_LEVEL = ("tier_c_labels", "tier_c_nhi_edges", "param_names",
+              "log_nhi_centres", "log_nhi_edges")
 _ROW_STR = ("sim_name",)
-_ROW_ARR = ("params",) + bt0._ROW_P1D_KEYS
+_ROW_ARR = ("params",) + bt0._ROW_P1D_KEYS + bt0._ROW_TIERC_KEYS + bt0._ROW_COUNT_KEYS
 _ROW_FLOAT = bt0._ROW_FLOAT_KEYS
 _ROW_INT = bt0._ROW_INT_KEYS  # includes snap_group_idx (remapped specially)
 _SNAP_STR = ("snap_sim_name",)
@@ -66,9 +67,13 @@ def merge_shards(shard_paths, output_path):
                 for k in _TOP_LEVEL:
                     top[k] = f[k][...]
                 alpha_range = f.attrs["alpha_range"]
+                first_n_k = int(f.attrs["n_k"])
             else:
-                for k in ("k_target", "log_nhi_centres", "log_nhi_edges"):
+                for k in ("tier_c_nhi_edges", "log_nhi_centres", "log_nhi_edges"):
                     assert np.allclose(f[k][...], top[k]), f"{k} mismatch in {sp}"
+                assert int(f.attrs["n_k"]) == first_n_k, f"n_k mismatch in {sp}"
+                assert list(f["tier_c_labels"][...]) == list(top["tier_c_labels"]), \
+                    f"tier_c_labels mismatch in {sp}"
 
             # per-row: remap snap_group_idx by the running snap offset
             for k in _ROW_STR + _ROW_ARR + _ROW_FLOAT + _ROW_INT:
@@ -91,14 +96,15 @@ def merge_shards(shard_paths, output_path):
         f.attrs["git_sha"] = bec._git_sha(REPO_ROOT)
         f.attrs["n_rows"] = total_rows
         f.attrs["n_snaps"] = total_snaps
-        f.attrs["cache_version"] = "2.0"
+        f.attrs["cache_version"] = "3.0"
+        f.attrs["n_k"] = first_n_k
         f.attrs["priya_convention"] = (
             "Kim 2013 slope-alpha (obs_mean_tau=2.3e-3(1+z)^3.65); "
             "fake_spectra _filter_single_tau_complex(tau_thresh=1e6, thresh2=0.25); "
-            "flux_power window=False spec_res=0")
+            "flux_power window=False spec_res=0; native k-grid (first n_k FFT bins)")
         f.attrs["tau_thresh"] = 1.0e6
         f.attrs["alpha_range"] = alpha_range
-        f.attrs["k_convention"] = "angular (rad*s/km), PRIYA convention"
+        f.attrs["k_convention"] = "angular (rad*s/km) native FFT grid, PRIYA convention"
         f.attrs["merged_from_n_shards"] = len(shard_paths)
 
         for k in _TOP_LEVEL:

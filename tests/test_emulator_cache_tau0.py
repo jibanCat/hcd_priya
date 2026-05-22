@@ -176,6 +176,32 @@ def test_build_tau0_rows_tier_p_matches_priya():
     print("OK build_tau0_rows native-grid Tier-P bit-identical")
 
 
+def test_merge_v3_synthetic(tmp_path=Path("/tmp")):
+    import scripts.merge_tau0_cache as mg
+    import hcd_analysis.priya_p1d as pp
+    nk = 172
+    for si in range(2):
+        rows = _fake_rows(nk, nrows=2)
+        for r in rows:
+            r["snap_group_idx"] = 0  # one snap per shard
+        blocks = [_fake_snap_block(f"sim{si}", 0)]
+        bt0.write_cache_tau0(rows, blocks, tmp_path / f"shard_{si}.h5",
+                             alpha_range=(1.0, 1.2), n_k=nk)
+    out = tmp_path / "merged.h5"
+    mg.merge_shards([str(tmp_path / f"shard_{i}.h5") for i in range(2)], out)
+    with h5py.File(out, "r") as f:
+        assert f.attrs["cache_version"] == "3.0"
+        assert f.attrs["n_k"] == nk
+        assert f["P_tier_p"].shape == (4, nk)
+        assert f["kfkms"].shape == (4, nk)
+        assert f["P_tier_c"].shape == (4, pp.N_TIER_C_BINS, nk)
+        assert f["tier_c_counts"].shape[0] == 4
+        gi = f["snap_group_idx"][...]
+        assert gi.tolist() == [0, 0, 1, 1]   # second shard's snap remapped
+        assert list(f["tier_c_labels"].asstr()[...]) == pp.tier_c_labels()
+    print("OK merge v3.0 synthetic")
+
+
 if __name__ == "__main__":
     test_locate_raw_tau_file_finds_grid_file()
     test_locate_raw_tau_file_returns_none_when_missing()
@@ -184,5 +210,6 @@ if __name__ == "__main__":
     test_discover_hr_pairs_six_sims()
     test_read_priya_params_matches_priya_array()
     test_write_cache_tau0_round_trip()
+    test_merge_v3_synthetic()
     test_build_tau0_rows_tier_p_matches_priya()
     print("OK")
