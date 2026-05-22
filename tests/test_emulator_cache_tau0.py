@@ -202,6 +202,48 @@ def test_merge_v3_synthetic(tmp_path=Path("/tmp")):
     print("OK merge v3.0 synthetic")
 
 
+def test_build_tau0_rows_hr_matches_priya_6sim():
+    """One HR (sim, z, alpha) row vs the new 6-sim PRIYA HR reference, native grid.
+    N_K is READ from the ref (525), not hardcoded — confirms Tier P (tau_thresh=1e6)
+    is bit-identical to PRIYA's hires flux vectors."""
+    import json
+    HR_REF = "/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2/mf_emulator_flux_vectors_tau1000000.hdf5"
+    EMU_HR = "/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2"
+    HCD_BASE = "/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"   # discover appends /hires
+    if not Path(HR_REF).exists():
+        print("SKIP HR bit-identity (6-sim ref unavailable)"); return
+    pairs = bt0.discover_tau0_pairs(HCD_BASE, EMU_HR, fidelity="hr")
+    if not pairs:
+        print("SKIP HR bit-identity (no HR Phase-1 catalogs)"); return
+    cand = None
+    for sim, snap, sd, raw in pairs:
+        z = bt0._snap_z_to_priya_grid(json.load(open(sd / "meta.json"))["z"])
+        if abs(z - 3.0) < 1e-6:
+            cand = (sim, snap, sd, raw); break
+    assert cand, "no HR z=3.0 pair"
+    sim, snap, sd, raw = cand
+    my_params = bt0._read_priya_params(raw)            # 9 cosmo in bec.PARAM_ORDER
+    with h5py.File(HR_REF, "r") as f:
+        params = f["params"][...]; fv = f["flux_vectors"][...]
+        zout = f["zout"][...]
+        NK = int(f["kfkms"].shape[-1])                 # 525, read from the ref
+        sim_rows = np.where(np.all(np.isclose(params[:, 1:], my_params[None, :],
+                                              rtol=1e-4), axis=1))[0]
+        assert len(sim_rows) > 0, "HR sim not found in PRIYA ref by params"
+        row = int(sim_rows[0]); alpha = float(params[row, 0])
+        zidx = int(np.argmin(np.abs(zout - 3.0)))
+        P_priya = fv[row, zidx*NK:(zidx+1)*NK].astype(np.float64)
+        kp = f["kfkms"][row, zidx, :].astype(np.float64)
+    rows, _ = bt0.build_tau0_rows(sim, snap, sd, raw,
+                                  alpha_slope_grid=np.array([alpha]), n_k=NK)
+    r = rows[0]
+    assert r["kfkms"].shape == (NK,), f"expected {NK} k-bins, got {r['kfkms'].shape}"
+    assert np.max(np.abs(r["kfkms"] / kp - 1)) < 1e-10, "HR native k-grid mismatch"
+    rel = np.max(np.abs(r["P_tier_p"] / P_priya - 1))
+    assert rel < 1e-4, f"HR Tier-P not bit-identical to PRIYA hires vectors: max|r-1|={rel:.3e}"
+    print(f"RESULT OK HR bit-identity sim={sim[:24]} z=3.0 alpha={alpha:.4f} N_K={NK} max|r-1|={rel:.3e}")
+
+
 if __name__ == "__main__":
     test_locate_raw_tau_file_finds_grid_file()
     test_locate_raw_tau_file_returns_none_when_missing()
@@ -212,4 +254,5 @@ if __name__ == "__main__":
     test_write_cache_tau0_round_trip()
     test_merge_v3_synthetic()
     test_build_tau0_rows_tier_p_matches_priya()
+    test_build_tau0_rows_hr_matches_priya_6sim()
     print("OK")
