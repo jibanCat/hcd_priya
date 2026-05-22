@@ -12,9 +12,10 @@ See docs/superpowers/specs/2026-05-17-phase2-hcd-emulator-design.md.
 
 Usage:
     python3 scripts/build_emulator_cache_tau0.py \
+        [--fidelity {lf,hr}] \
         [--hcd-root /scratch/cavestru_root/cavestru0/mfho/hcd_outputs] \
         [--emu-root /nfs/turbo/umor-yueyingn/mfho/emu_full] \
-        [--n-alpha 20] [--limit N] [--offset M] \
+        [--alpha-refine 2] [--limit N] [--offset M] \
         [--n-skewers N] [--output PATH] [--spot-check]
 """
 from __future__ import annotations
@@ -35,8 +36,10 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import build_emulator_cache as bec  # noqa: E402
 from hcd_analysis.tau0_rescale import make_alpha_grid_priya_aligned  # noqa: E402
 
-_DEFAULT_HCD_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
-_DEFAULT_EMU_ROOT = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
+_HCD_OUTPUTS = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+_LF_EMU_ROOT = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
+_HR_EMU_ROOT = Path("/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2")
+_N_K = {"lf": 172, "hr": 525}
 
 
 def locate_raw_tau_file(emu_root, sim_name: str, snap: int):
@@ -98,31 +101,25 @@ def _match_emu_folder_by_params(emu_root, sim_name, rtol=0.015):
     return match
 
 
-def discover_tau0_pairs(hcd_root, emu_root, include_hires=True):
-    """Return [(sim_name, snap, snap_dir, raw_tau_path), ...] for every
-    (sim, snap) that has Phase-1 outputs, a native catalog.npz, AND a
-    locatable raw fake_spectra tau grid.
+def discover_tau0_pairs(hcd_root, emu_root, fidelity="lf"):
+    """Return [(sim, snap, snap_dir, raw_tau_path), ...] for one fidelity.
 
-    LF sims live directly under `hcd_root`; the 4 HR sims live under
-    `hcd_root/hires`. Both have their raw tau (and SimulationICs.json) under
-    `emu_root/<sim>` (bare, no hires/ prefix). The list is LF-first then HR,
-    each sorted by (sim, snap) via bec.discover_sim_snap_pairs, so --offset/
-    --limit sharding is deterministic.
-    """
-    roots = [Path(hcd_root)]
-    if include_hires:
-        hires = Path(hcd_root) / "hires"
-        if hires.is_dir():
-            roots.append(hires)
+    fidelity='lf': sims directly under hcd_root; raw under emu_root/<sim>.
+    fidelity='hr': pass hcd_root = the hcd_outputs BASE; /hires is appended
+    automatically; raw under emu_root/<sim> (emu_full_hires_2). Pairs are
+    returned in the deterministic (sim, snap) order from bec.discover_sim_snap_pairs."""
+    if fidelity == "hr":
+        root = Path(hcd_root) / "hires"
+    else:
+        root = Path(hcd_root)
     out = []
-    for root in roots:
-        for sim, snap, snap_dir in bec.discover_sim_snap_pairs(root):
-            if not (snap_dir / "catalog.npz").exists():
-                continue
-            raw = locate_raw_tau_file(emu_root, sim, snap)
-            if raw is None:
-                continue
-            out.append((sim, snap, snap_dir, raw))
+    for sim, snap, snap_dir in bec.discover_sim_snap_pairs(root):
+        if not (snap_dir / "catalog.npz").exists():
+            continue
+        raw = locate_raw_tau_file(emu_root, sim, snap)
+        if raw is None:
+            continue
+        out.append((sim, snap, snap_dir, raw))
     return out
 
 
@@ -193,8 +190,7 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
 
     Tier P: PRIYA-compatible total P1D over all sightlines after the
     _filter_single_tau_complex DLA mask. Bit-identical to PRIYA's flux_vectors.
-    Stores the first n_k NATIVE FFT bins (no interpolation to a fixed angular
-    k_target grid).
+    Stores the first n_k native FFT bins.
     n_k: number of leading native-FFT k-bins to retain (must be <= the snap's
     native grid length, approximately nbins//2).
     Tier C: per-fine-NHI-bin (N_TIER_C_BINS=15) P1D on the UNFILTERED tau,
@@ -350,15 +346,16 @@ def write_cache_tau0(rows, snap_blocks, output_path, alpha_range, n_k):
                              data=np.stack([b[key] for b in snap_blocks], axis=0))
 
 
-def _default_output() -> Path:
-    return REPO_ROOT / "hcd_analysis" / "_emulator_data" / "observables_tau0.h5"
+def _default_output(fidelity) -> Path:
+    return REPO_ROOT / "hcd_analysis" / "_emulator_data" / f"observables_tau0_{fidelity}.h5"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build the tau0-extended HCD-emulator cache (Phase 2).")
-    parser.add_argument("--hcd-root", type=Path, default=_DEFAULT_HCD_ROOT)
-    parser.add_argument("--emu-root", type=Path, default=_DEFAULT_EMU_ROOT)
+    parser.add_argument("--fidelity", choices=("lf", "hr"), default="lf")
+    parser.add_argument("--hcd-root", type=Path, default=None)
+    parser.add_argument("--emu-root", type=Path, default=None)
     parser.add_argument("--alpha-refine", type=int, default=2,
                         help="PRIYA-aligned grid: refine*10 alpha containing "
                              "PRIYA's 10 (default 2 -> 20 alpha).")
@@ -373,37 +370,37 @@ def main() -> None:
                         help="After writing, verify row 0 P_tier_p is finite.")
     args = parser.parse_args()
 
-    from hcd_analysis.p1d import _DEFAULT_K_BINS
-    k_target = 2.0 * np.pi * _DEFAULT_K_BINS
-
+    fid = args.fidelity
+    hcd_root = args.hcd_root or _HCD_OUTPUTS
+    emu_root = args.emu_root or (_HR_EMU_ROOT if fid == "hr" else _LF_EMU_ROOT)
+    n_k = _N_K[fid]
     alpha_slope_grid = make_alpha_grid_priya_aligned(refine=args.alpha_refine)
-    output = args.output or _default_output()
+    output = args.output or _default_output(fid)
 
-    pairs = discover_tau0_pairs(args.hcd_root, args.emu_root)
-    print(f"Found {len(pairs)} tau0-buildable (sim, snap) pairs")
+    pairs = discover_tau0_pairs(hcd_root, emu_root, fidelity=fid)
+    print(f"[{fid}] Found {len(pairs)} tau0-buildable (sim, snap) pairs (n_k={n_k})")
     pairs = pairs[args.offset:]
     if args.limit is not None:
         pairs = pairs[: args.limit]
     print(f"Processing {len(pairs)} pairs (offset={args.offset}, limit={args.limit}); "
-          f"n_alpha={len(alpha_slope_grid)} (PRIYA-aligned, refine={args.alpha_refine})")
+          f"n_alpha={len(alpha_slope_grid)}")
 
     all_rows, snap_blocks = [], []
     for i, (sim, snap, snap_dir, raw) in enumerate(pairs):
-        rows, block = build_tau0_rows(
-            sim, snap, snap_dir, raw, alpha_slope_grid, k_target,
-            n_skewers=args.n_skewers)
+        rows, block = build_tau0_rows(sim, snap, snap_dir, raw, alpha_slope_grid,
+                                      n_k=n_k, n_skewers=args.n_skewers)
         gi = len(snap_blocks)
         for r in rows:
             r["snap_group_idx"] = gi
         all_rows.extend(rows)
         snap_blocks.append(block)
         if (i + 1) % 10 == 0 or (i + 1) == len(pairs):
-            print(f"  built {i + 1}/{len(pairs)} pairs ({len(all_rows)} rows)")
+            print(f"  built {i+1}/{len(pairs)} pairs ({len(all_rows)} rows)")
 
-    write_cache_tau0(all_rows, snap_blocks, k_target, output,
-                     alpha_range=(float(alpha_slope_grid[0]),
-                                  float(alpha_slope_grid[-1])))
-    print(f"Wrote {output}  ({output.stat().st_size / 1e6:.2f} MB, "
+    write_cache_tau0(all_rows, snap_blocks, output,
+                     alpha_range=(float(alpha_slope_grid[0]), float(alpha_slope_grid[-1])),
+                     n_k=n_k)
+    print(f"Wrote {output} ({output.stat().st_size/1e6:.2f} MB, "
           f"{len(all_rows)} rows, {len(snap_blocks)} snaps)")
 
     if args.spot_check and all_rows:
