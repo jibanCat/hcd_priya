@@ -40,7 +40,7 @@ def test_per_file_readers_on_first_pair():
 
     cddf = bec.read_cddf(snap_dir)
     for key in ("log_nhi_centres", "log_nhi_edges", "f_nhi", "n_absorbers", "total_path"):
-        assert key in cddf, f"missing {key} in cddf_corrected.npz"
+        assert key in cddf, f"missing {key} in cddf.npz"
     assert cddf["log_nhi_centres"].shape == (30,)
     assert cddf["log_nhi_edges"].shape == (31,)
     assert cddf["f_nhi"].shape == (30,)

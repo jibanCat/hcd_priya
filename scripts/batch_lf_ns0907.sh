@@ -41,15 +41,10 @@ echo "=== Phase-1 re-run: LF ns0.907 (resume:false) === $(date)"
   --set n_workers_skewer=20 \
   --verbose
 
-# run-sim writes cddf.npz but discover_sim_snap_pairs + the tau0 builder require
-# cddf_corrected.npz. The (1+z)*h dX bug is fixed in current code, so the fresh
-# cddf is already correct -> the "corrected" file is a COPY (do NOT run
-# patch_cddf_dx.py, which would double-divide). Scoped to ns0.907 only.
-echo "=== materialising cddf_corrected.npz copies for ns0.907 ==="
-for s in "${OUTPUT_ROOT}"/ns0.907*/snap_*/; do
-  [ -f "${s}/cddf.npz" ] && cp -f "${s}/cddf.npz" "${s}/cddf_corrected.npz"
-done
-for sim in "${OUTPUT_ROOT}"/ns0.907*/; do
-  [ -f "${sim}/cddf_stacked.npz" ] && cp -f "${sim}/cddf_stacked.npz" "${sim}/cddf_stacked_corrected.npz"
-done
+# SUPERSEDED by the all-60 LF re-run (batch_lf_rerun_all.sh, job 50696155).
+# Kept for reference. As of 2026-05-22 the cddf_corrected.npz dual naming is
+# retired: discover_sim_snap_pairs + the tau0 builder read cddf.npz directly, so
+# no copy step is needed. The (1+z)*h dX bug is fixed in current code, so the
+# fresh cddf is already correct (do NOT run patch_cddf_dx.py — it would
+# double-divide).
 echo "=== ns0.907 Phase-1 re-run done: $(date) ==="

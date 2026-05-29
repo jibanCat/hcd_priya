@@ -56,17 +56,9 @@ echo "CPUs:     ${SLURM_CPUS_PER_TASK:-30}"
 
 # The current pipeline writes a CORRECT cddf.npz (the (1+z)*h dX bug #7 was
 # fixed in-code, commit c210990 — verified: ns0.972 dX_per_sightline matches the
-# fixed (1+z)^2*L*H0/c formula). But discover_sim_snap_pairs + the tau0 builder
-# require cddf_corrected.npz / cddf_stacked_corrected.npz (the legacy patched
-# name). Since the fresh cddf is ALREADY correct, the "corrected" file is just a
-# COPY — do NOT run patch_cddf_dx.py here (it would wrongly divide by (1+z)*h
-# a second time). This makes all 6 reprocessed sims discoverable.
-echo "=== materialising cddf_corrected.npz copies (fresh cddf is already correct) ==="
-for snap in "${OUTPUT_ROOT}"/hires/ns*/snap_*/; do
-  [ -f "${snap}/cddf.npz" ] && cp -f "${snap}/cddf.npz" "${snap}/cddf_corrected.npz"
-done
-for sim in "${OUTPUT_ROOT}"/hires/ns*/; do
-  [ -f "${sim}/cddf_stacked.npz" ] && cp -f "${sim}/cddf_stacked.npz" "${sim}/cddf_stacked_corrected.npz"
-done
+# fixed (1+z)^2*L*H0/c formula). As of 2026-05-22 the legacy cddf_corrected.npz
+# dual naming is RETIRED: discover_sim_snap_pairs + the tau0 builder now read
+# cddf.npz directly, so no copy step is needed. Do NOT run patch_cddf_dx.py here
+# (it would wrongly divide by (1+z)*h a second time on the already-correct cddf).
 
 echo "=== HiRes all-6 done: $(date) ==="
