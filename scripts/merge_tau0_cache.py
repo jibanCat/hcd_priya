@@ -78,6 +78,11 @@ def merge_shards(shard_paths, output_path):
                 assert int(f.attrs["n_k"]) == first_n_k, f"n_k mismatch in {sp}"
                 assert list(f["tier_c_labels"][...]) == list(top["tier_c_labels"]), \
                     f"tier_c_labels mismatch in {sp}"
+                # Provenance: the calibrated freeze threshold must match across
+                # shards (it is what calibration varies; a silent mismatch would
+                # misrepresent some rows in the merged cache).
+                assert f.attrs.get("tau_freeze_tierc", None) == tau_freeze_tierc, \
+                    f"tau_freeze_tierc mismatch in {sp}"
 
             # per-row: remap snap_group_idx by the running snap offset
             for k in _ROW_STR + _ROW_ARR + _ROW_FLOAT + _ROW_INT:

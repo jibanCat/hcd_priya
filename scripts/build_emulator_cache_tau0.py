@@ -34,7 +34,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import build_emulator_cache as bec  # noqa: E402
-from hcd_analysis.tau0_rescale import make_alpha_grid_priya_aligned  # noqa: E402
+from hcd_analysis.tau0_rescale import make_alpha_grid_priya_aligned, freeze_core_rescale  # noqa: E402
 
 _HCD_OUTPUTS = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
 _LF_EMU_ROOT = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
@@ -280,13 +280,16 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
             external_scale=scale, external_target_F=target_F,
             tau_freeze=TAU_FREEZE_TIERC)
         # Per-class <F> on the frozen field (for the shared-vs-per-class target_F
-        # disentanglement). Classification is tau_freeze-invariant.
+        # disentanglement). Classification is tau_freeze-invariant. NaN sentinel
+        # for empty classes (count==0) — consumers MUST mask on tier_c_counts>0
+        # before reducing over mean_F_by_bin.
         cls = bin_sightlines_by_nhi(catalog, tau_unfilt.shape[0])
         mean_F_by_bin = np.full(N_TIER_C_BINS, np.nan)
         for c in range(N_TIER_C_BINS):
             sel = tau_unfilt[cls == c]
             if sel.size:
-                tau_eff = np.where(sel > TAU_FREEZE_TIERC, sel, scale * sel)
+                # same freeze recipe as P_tier_c_frozen (shared helper, DRY)
+                tau_eff = freeze_core_rescale(sel, scale, TAU_FREEZE_TIERC)
                 mean_F_by_bin[c] = float(np.mean(np.exp(-tau_eff)))
         rows.append({
             "sim_name": sim_name, "snap": int(snap),

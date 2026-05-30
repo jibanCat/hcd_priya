@@ -17,6 +17,8 @@ from fake_spectra.fluxstatistics import (
     flux_power, obs_mean_tau, _powerspectrum, _flux_power_bins,
 )
 from fake_spectra.spectra import Spectra
+
+from hcd_analysis.tau0_rescale import freeze_core_rescale
 # Unbound method, reads only `self.nbins`. Calling via a SimpleNamespace
 # stand-in avoids constructing a full Spectra (which needs a snapshot dir).
 _filter_single_tau_complex = Spectra._filter_single_tau_complex
@@ -132,7 +134,7 @@ def _per_class_p1d_at_scale(tau_class: np.ndarray, vmax: float,
         if end == s:
             continue
         chunk = tau_class[s:end]
-        tau_eff = np.where(chunk > tau_freeze, chunk, scale * chunk)
+        tau_eff = freeze_core_rescale(chunk, scale, tau_freeze)
         dflux = np.exp(-tau_eff) / target_F - 1.0
         mfp += vmax * np.sum(_powerspectrum(dflux, axis=1), axis=0)
     mfp /= nspec
