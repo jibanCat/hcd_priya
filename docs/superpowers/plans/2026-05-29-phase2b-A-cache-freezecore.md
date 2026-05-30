@@ -387,11 +387,26 @@ $PY scripts/build_emulator_cache_tau0.py --fidelity lf --offset 0 --limit 1 \
 ```
 Record `sacct -j <id> --format=Elapsed,AllocCPUS,TotalCPU,MaxRSS`.
 
-- [ ] **Step 2: Compute the array size**
+- [ ] **Step 2: Determine the BILLING MODEL and the real per-pair billed cost**
 
-From the per-pair Elapsed + MaxRSS: confirm per-pair wall (~2 h expected with the frozen tier), set `--mem` to MaxRSS×1.3, choose shard width so total wall on the array is ≤1–2 days (LF 1072 + HR 103 pairs). Record the numbers in a comment block at the top of `batch_tau0_production.sh` (Task 6).
+⚠️ HARD BUDGET CONSTRAINT: cavestru0 has **≤ ~4000 CPU-h** available (user, 2026-05-29). The naive full build (LF 1072 + HR 103 pairs × 20 α, frozen+uniform tiers) is estimated at **~10–20k CPU-h** — over budget by 3–5×.
 
-- [ ] **Step 3: (no commit — measurement only; record numbers in Task 6 script)**
+Determine how cavestru0 bills: **AllocCPUS × Elapsed** (most common) vs **actual TotalCPU**. From the Task-5 `sacct`: the pilot showed TotalCPU≈3.4 CPU-h but AllocCPUS×Elapsed≈19 CPU-h for one run — a ~5× difference, so the billing model decides whether this fits at all. Confirm with the cluster docs / `sacctmgr`/`sreport` for the cavestru0 allocation. Compute the projected **billed** CPU-h for the full build under the confirmed model.
+
+- [ ] **Step 3: Build the budget-reconciliation table + levers**
+
+If the projected billed CPU-h exceeds the remaining cavestru0 balance, quantify each lever and present options:
+- **Cores/task ↓** — the build is ~18% CPU-efficient (mostly serial); allocate the *minimum* cores the per-task memory (MaxRSS×1.3) requires, not more. (If billed by AllocCPUS×Elapsed, this is the biggest lever.)
+- **α grid 20 → 10** — use only the 10 PRIYA-exact α (drop the refinement); ~halves per-pair compute. (Costs α-resolution for Head B.)
+- **Uniform twin on a SUBSET only** — compute `P_tier_c` (uniform) only on a calibration subset large enough to measure the freeze-vs-uniform systematic, not the full grid; production stores frozen + filtered only. Saves ~the extra Tier-C pass (~25–30%).
+- **Pair subset** — fewer z per sim or a sim subset (last resort; hurts coverage).
+- **Alternate account** — if another allocation has headroom.
+
+Record the chosen scope + the projected billed CPU-h in a comment block at the top of `batch_tau0_production.sh`.
+
+- [ ] **Step 4: ⚠️ STOP — present profiling + budget to the user and get EXPLICIT permission**
+
+Do NOT proceed to Task 6 Step 3 (sbatch the full array) until the user has seen the profiled per-pair cost, the projected total billed CPU-h, the chosen scope/levers, and has explicitly approved. (User instruction, 2026-05-29: careful profiling + ask permission before any run >~4000 CPU-h on cavestru0.)
 
 ---
 
@@ -408,8 +423,9 @@ A `#SBATCH --array=` sharded driver: each task processes a contiguous shard via 
 
 Run the array with a 1-shard, `--limit 2` smoke test; confirm output shard files appear with `cache_version=3.2` and `P_tier_c_frozen` present.
 
-- [ ] **Step 3: Launch the full LF + HR arrays**
+- [ ] **Step 3: Launch the full LF + HR arrays — ONLY after Task 5 Step 4 permission**
 
+⚠️ GATE: requires the user's explicit approval from Task 5 Step 4 (profiled CPU-h within the cavestru0 budget). Do NOT `sbatch` the full array before that.
 `sbatch scripts/batch_tau0_production.sh` (LF), then the HR variant. Record job IDs. (SLURM emails on completion; the next session must check — no in-session watcher survives.)
 
 - [ ] **Step 4: Commit the script**
