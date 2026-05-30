@@ -58,7 +58,7 @@ def merge_shards(shard_paths, output_path):
     n_snaps_so_far = 0
     top = {}
     alpha_range = None
-    tau_freeze_tierc = None
+    tier_c_recipe = None
 
     for si, sp in enumerate(shard_paths):
         with h5py.File(sp, "r") as f:
@@ -71,18 +71,15 @@ def merge_shards(shard_paths, output_path):
                 alpha_range = f.attrs["alpha_range"]
                 first_n_k = int(f.attrs["n_k"])
                 tier_c_note = f.attrs.get("tier_c_note", None)
-                tau_freeze_tierc = f.attrs.get("tau_freeze_tierc", None)
+                tier_c_recipe = f.attrs.get("tier_c_recipe", None)
             else:
                 for k in ("tier_c_nhi_edges", "log_nhi_centres", "log_nhi_edges"):
                     assert np.allclose(f[k][...], top[k]), f"{k} mismatch in {sp}"
                 assert int(f.attrs["n_k"]) == first_n_k, f"n_k mismatch in {sp}"
                 assert list(f["tier_c_labels"][...]) == list(top["tier_c_labels"]), \
                     f"tier_c_labels mismatch in {sp}"
-                # Provenance: the calibrated freeze threshold must match across
-                # shards (it is what calibration varies; a silent mismatch would
-                # misrepresent some rows in the merged cache).
-                assert f.attrs.get("tau_freeze_tierc", None) == tau_freeze_tierc, \
-                    f"tau_freeze_tierc mismatch in {sp}"
+                assert f.attrs.get("tier_c_recipe", None) == tier_c_recipe, \
+                    f"tier_c_recipe mismatch in {sp}"
 
             # per-row: remap snap_group_idx by the running snap offset
             for k in _ROW_STR + _ROW_ARR + _ROW_FLOAT + _ROW_INT:
@@ -105,15 +102,15 @@ def merge_shards(shard_paths, output_path):
         f.attrs["git_sha"] = bec._git_sha(REPO_ROOT)
         f.attrs["n_rows"] = total_rows
         f.attrs["n_snaps"] = total_snaps
-        f.attrs["cache_version"] = "3.2"
+        f.attrs["cache_version"] = "3.3"
         f.attrs["n_k"] = first_n_k
         f.attrs["priya_convention"] = (
             "Kim 2013 slope-alpha (obs_mean_tau=2.3e-3(1+z)^3.65); "
             "fake_spectra _filter_single_tau_complex(tau_thresh=1e6, thresh2=0.25); "
             "flux_power window=False spec_res=0; native k-grid (first n_k FFT bins)")
         f.attrs["tau_thresh"] = 1.0e6
-        if tau_freeze_tierc is not None:
-            f.attrs["tau_freeze_tierc"] = float(tau_freeze_tierc)
+        if tier_c_recipe is not None:
+            f.attrs["tier_c_recipe"] = tier_c_recipe
         f.attrs["alpha_range"] = alpha_range
         f.attrs["k_convention"] = "angular (rad*s/km) native FFT grid, PRIYA convention"
         f.attrs["merged_from_n_shards"] = len(shard_paths)

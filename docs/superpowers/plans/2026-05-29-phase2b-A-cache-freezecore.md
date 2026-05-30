@@ -1,4 +1,18 @@
-# Phase-2b A — Tier-C freeze-core cache fix + production τ₀ build — Implementation Plan
+# Phase-2b A — Tier-C cache recipe + production τ₀ build — Implementation Plan
+
+> **⚠️ STATUS UPDATE 2026-05-30 — read first.** Tasks 1–3 (the `tau_freeze` knob
+> + v3.2 frozen-tier cache) were implemented and reviewed (HEAD f7c2151). Then a
+> one-snapshot sensitivity scan (`scripts/diag_tau_freeze_sensitivity.py`) showed
+> the **per-pixel freeze is a numerical no-op** (self-shielded pixels are
+> saturated → frozen ≡ scaled). So the design pivoted to the **plain uniform
+> rescale** (cache **v3.3**, frozen twin removed; the `tau_freeze` knob stays as a
+> no-op option). **Task 4 (calibrate τ_freeze vs fake_spectra ground truth) is
+> CANCELLED** — PART re-extraction is infeasible and the freeze is moot; the
+> damping-wing residual is documented and deferred to Phase 3 (absorber-level
+> Voigt freeze). Tasks 5–7 (1-pair timing → **budget-gated** production build →
+> merge) stand, now with the uniform (single unfiltered Tier-C) recipe. See spec
+> §2a for the resolved investigation. The Task 1–4 text below is kept as the
+> as-executed record; **do not re-run Task 4.**
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

@@ -20,9 +20,17 @@ here), `docs/superpowers/2026-05-29-wc-dndx-poisson-coupling.md` (w_c↔dN/dX),
 1. **Head B re-parametrized** — drop the free `P_tier_p` and the separate clean
    filtered output; **emit the HCD delta `Δ_c` directly**; keep dense per-k
    outputs (**no PCA basis**).
-2. **Freeze-core restored in the unfiltered Tier-C cache path NOW**, with a
-   lower (calibrated) self-shielding threshold, and **store the uniform-rescale
-   twin** alongside for the freeze-vs-uniform systematic.
+2. **Production uses the plain UNIFORM rescale (UPDATED 2026-05-30).** A
+   per-pixel `tau_freeze` was implemented and then shown to be a **numerical
+   no-op** (`scripts/diag_tau_freeze_sensitivity.py`: self-shielded pixels have
+   τ≫1 → flux already saturated → frozen ≡ scaled, bit-identical per-class P1D at
+   any threshold ≥~10). So the cache stores only the uniform unfiltered Tier-C
+   (no frozen twin). The `tau_freeze` knob remains in `compute_tier_c_p1d` (a
+   no-op default) for a future absorber-level (Voigt-profile) **wing** treatment.
+   The residual approximation — the Γ-insensitive **damping wings** are still
+   scaled (a per-pixel threshold can't isolate them) — is a documented systematic
+   deferred to Phase 3. PART re-extraction ground truth is infeasible now;
+   threshold/recipe anchored to literature (Rahmati+2013 / Rogers+2018).
 3. **dN/dX prior centered on observed incidence** (PW14/DESI), width brackets the
    sim; the "keep w_c near sim default" intent moves to the `A_c` amplitude prior.
 4. **τ₀-response validation reframed as reconstruction-internal** (controls for
@@ -40,9 +48,9 @@ focus of the physics review.
 
 **In scope (Phase-2b):** the Equinox model (shared encoder + Head A + Head B);
 loader; NaN-safe masked loss; the likelihood contract (total-P1D reconstruction,
-single cosmic-variance covariance, nuisances); validation incl. the τ₀-response,
-the freeze-vs-uniform systematic, and a likelihood-closure gate. **Plus the
-cache-builder changes in §2a** (freeze-core + twin), which gate the build.
+single cosmic-variance covariance, nuisances); validation incl. the τ₀-response
+and a likelihood-closure gate. The cache builder is **uniform-rescale** (§2a;
+the per-pixel freeze was proven a no-op).
 
 **Out of scope (Phase 3):** multi-fidelity LF/HF (HR = systematic + validation
 only); 15-bin fine emulation (loader flag, untrained); heteroscedastic
@@ -66,40 +74,43 @@ Per snap-block (τ₀-invariant): `f_nhi[30]`, `n_absorbers[30]`, `total_path_dX
 **Class collapse 15→4** in the loader (`merge_fine_to_classes`): clean=0; LLS=1–7;
 subDLA=8–12; DLA=13–14. **τ₀ coordinate:** `τ₀ = −ln(target_F)` per row.
 
-### 2a. Cache-builder changes REQUIRED before the production build (decision #2)
+### 2a. Tier-C recipe: uniform rescale (the freeze-core investigation, resolved)
 
-The current unfiltered Tier-C path (`_per_class_p1d_at_scale` in
-`hcd_analysis/priya_p1d.py`) computes `exp(−scale·τ)` over the **whole** τ array
-with **no freeze**, so it unphysically rescales partially-self-shielded gas
-(τ ~ 10³–10⁵; subDLA bodies + inner damping wings) that should be Γ-insensitive.
-This corrupts the per-class τ₀ response — the headline physics. Fixes:
+**Motivation (the original concern).** The unfiltered Tier-C path
+(`_per_class_p1d_at_scale` in `hcd_analysis/priya_p1d.py`) rescales τ by
+`exp(−scale·τ)`. A uniform rescale is only rigorous for optically-thin forest
+gas (`n_HI ∝ Γ⁻¹`); for self-shielded gas (`n_HI → Γ⁰`) it is unphysical. The
+review (C1) worried this corrupts the per-class τ₀ response.
 
-1. **Freeze-core in the unfiltered Tier-C P1D.** Replace the uniform `exp(−scale·τ)`
-   with `exp(−τ_eff)`, `τ_eff = where(τ > τ_freeze, τ, scale·τ)` — freeze
-   self-shielded pixels, rescale the optically-thin rest. Reuse the existing
-   `freeze_core_rescale` machinery (`hcd_analysis/tau0_rescale.py`), but adapted
-   to the fake_spectra `scale` (not the legacy `alpha`).
-   **Tier P is unchanged** (it is the *filtered* total and keeps PRIYA
-   bit-identity — bit-identity only constrains Tier P, not the per-class tier).
-2. **`τ_freeze` is NOT 1e6.** The legacy default (`TAU_FREEZE_DEFAULT=1e6` ↔
-   log N_HI ≳19.3) only protects fully-saturated cores. The transition gas that
-   must be frozen sits lower. **Set `τ_freeze` at the Rahmati+2013 self-shielding
-   onset**, bracketed `τ_freeze ∈ [10³, 10⁶]`, and **finalise it by a pre-build
-   mini-calibration** (one sim, a few snaps, 3–4 `τ_freeze` values) against the
-   fake_spectra ground-truth spot-checks (§8). Provenance for the starting value:
-   Rahmati+2013 self-shielding density `n_{H,SSh}` (their fitting formula, Γ- and
-   z-dependent); map to per-pixel Lyα τ via the pipeline's τ↔local-N_HI relation.
-   Record the chosen value + calibration in the cache attrs. (Do not hard-code an
-   unsourced number; the calibration pins it.)
-3. **Store the uniform-rescale twin.** Compute the unfiltered Tier-C P1D **both**
-   ways (frozen + uniform) and store both blocks. The τ read + FFT are already
-   paid, so the only cost is one extra `[15,172]` block/row — this gives the
-   freeze-vs-uniform systematic (§8) without a re-run.
-4. **Store per-class mean-F** so the shared-vs-per-class `target_F` disentangle-
-   ment (the τ₀-response control, §8) is possible later without a re-run.
+**Investigation.** A scale-based `tau_freeze` knob was added (freeze pixels with
+native τ > τ_freeze, scale the rest) — `_per_class_p1d_at_scale(..., tau_freeze)`
+and `compute_tier_c_p1d(..., tau_freeze)`, default `inf` = uniform — and a
+one-snapshot sensitivity scan run (`scripts/diag_tau_freeze_sensitivity.py`,
+ns0.803 z=3, τ_freeze ∈ {∞,1e5,1e4,1e3,3e2}).
 
-These are cache-builder edits (`priya_p1d.py`, `build_emulator_cache_tau0.py`),
-gating the production build; the emulator consumes the result.
+**Result (2026-05-30): the per-pixel freeze is a numerical no-op.** The per-class
+P1D and the τ₀-response are **bit-identical** across all thresholds. Reason: a
+self-shielded pixel has `τ_Lyα ≫ 1`, so its flux `exp(−τ) ≈ 0` (saturated) and
+its contrast `δF = −1` **whether frozen or scaled** — `exp(−400)` vs `exp(−312)`
+both vanish. The freeze could only bite at moderate τ ~ O(1), which is the
+optically-thin **forest** that *should* be scaled. So C1, while physically valid,
+does **not** bite numerically; the cores are saturated-invariant.
+
+**Decision: production uses the plain UNIFORM rescale.** The cache stores the
+uniform unfiltered Tier-C only (cache **v3.3**; no frozen twin — it would be
+identical). The `tau_freeze` knob stays in the code (no-op default). `Tier P` and
+the filtered tier are unchanged (PRIYA bit-identity intact). Per-class ⟨F⟩
+(`mean_F_by_bin`, computed under uniform) is kept for the shared-vs-per-class
+normalization check.
+
+**Residual systematic (deferred to Phase 3).** The one real piece a per-pixel
+threshold *cannot* address is the **damping wings**: Γ-insensitive (set by total
+N_HI) but with *low* per-pixel τ, so indistinguishable from forest pixels — they
+get scaled. Capturing this needs an **absorber-level (Voigt-profile) freeze** à
+la Rogers+2018, not a τ threshold. Documented; its magnitude is bounded by the
+low-k part of the per-class response (the C2 ratio diagnostic) and deferred. PART
+re-extraction (the self-consistent-Γ ground truth) is infeasible now, so the
+treatment is anchored to literature (Rahmati+2013 self-shielding; Rogers+2018).
 
 ---
 
@@ -200,9 +211,10 @@ internals.
   carry the "near sim default" intent); class-specific incidence `(A_c, γ_c…)` →
   `w_c`; static emulator-error covariance from day one. No separate T₀/γ thermal
   nuisance (heat params are in the 9 sim params).
-- **`A_subDLA` priors must be re-derived against the NEW (freeze-core) cache** —
-  the τ_freeze change alters the subDLA filtered-tier masking fraction, shifting
-  what `A_subDLA` means. Do not carry over from the uniform cache.
+- **`A_subDLA` semantics:** the filtered tier uses `tau_thresh=1e6`, which masks
+  100% of DLAs but only ~56% of subDLAs — so `P_subDLA^filt` is a partially-masked
+  hybrid and `A_subDLA` absorbs the resulting amplitude ambiguity. (No freeze-core
+  re-derivation needed — production is uniform; the filtered tier is unchanged.)
 
 ---
 
@@ -226,15 +238,15 @@ internals.
 
 - **k-fold LOSO**, error stratified by class × k-band × z × α/τ₀-band.
 - **Tier-P (& clean) vs PRIYA** bit-anchor cross-check.
-- **fake_spectra Tier-C ground-truth spot-checks (GATING).** Re-extract per-class
-  P1D at a genuinely scaled Γ at a handful of (sim,z,Γ); confirm the freeze-core
-  proxy matches. Also drives the §2a `τ_freeze` mini-calibration. **Restored from
-  the 2026-05-17 spec** (the 2026-05-29 draft had dropped it).
-- **Freeze-vs-uniform systematic** — from the §2a twin; k/class-resolved; carried
-  in the covariance.
+- **Tier-C recipe sensitivity (DONE).** `scripts/diag_tau_freeze_sensitivity.py`
+  showed the per-pixel freeze is a numerical no-op → uniform rescale adopted
+  (§2a). The self-consistent-Γ ground truth (PART re-extraction) is infeasible;
+  the **damping-wing** systematic is deferred to Phase 3 and bounded by the
+  low-k per-class response.
 - **τ₀-response test, REFRAMED** (decision #4): reconstruction-internal
-  consistency, run with **per-class `target_F` vs shared** and **frozen vs uniform**
-  controls — not a "physical class-ordering" rubber stamp.
+  consistency, run with the **per-class `target_F` vs shared** control — not a
+  "physical class-ordering" rubber stamp. (No frozen-vs-uniform control — proven
+  identical.)
 - **Cross-class additivity** — `Σ_c w_c·Δ_c` vs directly-computed
   `(P_total^unfilt − P_tier_p)`; pin as a unit test.
 - **DLA-shape clustering check** — `P_DLA` from DLA-only vs all-max-class-DLA
@@ -269,13 +281,12 @@ internals.
 Tags: `[cache | model | loss | likelihood | validation | infra]`, effort S/M/L,
 impact H/M/L.
 
-### A. BEFORE the production cache build (timing-critical)
-1. `[cache]` Freeze-core in unfiltered Tier-C (scale-based) + **store the uniform
-   twin**. *M / H.*
-2. `[cache]` Pin `τ_freeze` via the pre-build mini-calibration (3–4 values, one
-   sim) against fake_spectra ground-truth; record in attrs. *M / H.*
-3. `[validation]` fake_spectra Tier-C ground-truth spot-check harness. *M / H.*
-4. `[cache]` Store per-class mean-F (for the τ₀-response control). *S / M.*
+### A. Cache builder (DONE — uniform-rescale v3.3)
+1. `[cache]` ✅ `tau_freeze` knob added (no-op default) + one-snapshot sensitivity
+   scan → per-pixel freeze proven a no-op → **uniform rescale** adopted; cache
+   v3.3 stores uniform unfiltered Tier-C + filtered + per-class ⟨F⟩ (no frozen
+   twin). `[model]` HEAD f7c2151 + the v3.3 simplification.
+   (Damping-wing absorber-level treatment deferred to Phase 3.)
 
 ### B. BEFORE training
 5. `[loss]` NaN-safe masked loss + finite-gradient test. *S / H.*
@@ -291,8 +302,8 @@ impact H/M/L.
 
 ### C. BEFORE inference / error budget
 12. `[validation]` k-fold LOSO error vector (+ DLA high-k shot-noise flags). *M / H.*
-13. `[validation]` Reframed τ₀-response gate; cross-class additivity test;
-    DLA-shape clustering check; freeze-vs-uniform systematic. *S–M / M.*
+13. `[validation]` Reframed τ₀-response gate (per-class vs shared `target_F`
+    control); cross-class additivity test; DLA-shape clustering check. *S–M / M.*
 14. `[likelihood]` Difference form as default; ratio as toggle; re-derive
     `A_subDLA` priors against the freeze-core cache. *S / M.*
 
@@ -313,8 +324,10 @@ multi-fidelity LF/HF → PART-particle DLA UV response → CDDF as independent v
 
 ## 12. Risks / items the reviewers (incl. meta) surfaced
 
-- **`τ_freeze` choice** — physically uncertain; mitigated by the twin + the
-  ground-truth calibration. The most important number to get approximately right.
+- **Damping-wing systematic (was the `τ_freeze` concern)** — RESOLVED for the
+  cores (per-pixel freeze is a no-op; uniform adopted). The wings remain
+  Γ-insensitive-but-scaled; absorber-level Voigt freeze deferred to Phase 3, its
+  magnitude bounded by the low-k per-class response (C2 diagnostic).
 - **Δ_c sign change at low k** — handled by the sign-safe transform; verify the
   transform is smooth through zero.
 - **Head A↔B loss coupling via the structural total** — desirable but must be in

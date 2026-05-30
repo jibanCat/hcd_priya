@@ -113,7 +113,6 @@ def _fake_rows(nk, nrows=3):
             "kfkms": np.linspace(5e-4, 0.08, nk),
             "P_tier_p": np.full(nk, 5.0),
             "P_tier_c": np.tile(np.arange(NB)[:, None], (1, nk)).astype(float),
-            "P_tier_c_frozen": np.tile(np.arange(NB)[:, None], (1, nk)).astype(float) * 1.1,
             "P_tier_c_filtered": np.tile(np.arange(NB)[:, None], (1, nk)).astype(float) * 0.9,
             "tier_c_counts": np.arange(NB, dtype=np.int64),
             "mean_F_by_bin": np.linspace(0.5, 0.9, NB),
@@ -130,12 +129,13 @@ def test_write_cache_tau0_round_trip(tmp_path=Path("/tmp")):
     out = tmp_path / "rt_tau0.h5"
     bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(1.0, 1.2), n_k=nk)
     with h5py.File(out, "r") as f:
-        assert f.attrs["cache_version"] == "3.2"
+        assert f.attrs["cache_version"] == "3.3"
+        assert f.attrs["tier_c_recipe"] == "uniform"
         assert f.attrs["n_k"] == nk
         assert f["P_tier_p"].shape == (3, nk)
         assert f["kfkms"].shape == (3, nk)
         assert f["P_tier_c"].shape == (3, pp.N_TIER_C_BINS, nk)
-        assert f["P_tier_c_frozen"].shape == (3, pp.N_TIER_C_BINS, nk)
+        assert "P_tier_c_frozen" not in f      # frozen tier removed (per-pixel freeze no-op)
         assert f["P_tier_c_filtered"].shape == (3, pp.N_TIER_C_BINS, nk)
         assert f["tier_c_counts"].shape == (3, pp.N_TIER_C_BINS)
         assert f["mean_F_by_bin"].shape == (3, pp.N_TIER_C_BINS)
@@ -145,7 +145,7 @@ def test_write_cache_tau0_round_trip(tmp_path=Path("/tmp")):
         assert f["tier_c_counts"].dtype == np.int64
         assert np.allclose(f["tier_c_nhi_edges"][...], pp.FINE_NHI_EDGES)
         assert f["snap_group_idx"][...].tolist() == [0, 1, 2]
-    print("OK write_cache_tau0 v3.2 round-trip")
+    print("OK write_cache_tau0 v3.3 round-trip")
 
 
 def test_discover_dedups_one_snap_per_grid_z():
@@ -209,24 +209,26 @@ def test_merge_v3_synthetic(tmp_path=Path("/tmp")):
     out = tmp_path / "merged.h5"
     mg.merge_shards([str(tmp_path / f"shard_{i}.h5") for i in range(2)], out)
     with h5py.File(out, "r") as f:
-        assert f.attrs["cache_version"] == "3.2"
+        assert f.attrs["cache_version"] == "3.3"
+        assert f.attrs["tier_c_recipe"] == "uniform"
         assert f.attrs["n_k"] == nk
         assert f["P_tier_p"].shape == (4, nk)
         assert f["kfkms"].shape == (4, nk)
         assert f["P_tier_c"].shape == (4, pp.N_TIER_C_BINS, nk)
-        assert f["P_tier_c_frozen"].shape == (4, pp.N_TIER_C_BINS, nk)
+        assert "P_tier_c_frozen" not in f
         assert f["P_tier_c_filtered"].shape == (4, pp.N_TIER_C_BINS, nk)
         assert f["tier_c_counts"].shape[0] == 4
         assert f["mean_F_by_bin"].shape == (4, pp.N_TIER_C_BINS)
         gi = f["snap_group_idx"][...]
         assert gi.tolist() == [0, 0, 1, 1]   # second shard's snap remapped
         assert list(f["tier_c_labels"].asstr()[...]) == pp.tier_c_labels()
-    print("OK merge v3.2 synthetic")
+    print("OK merge v3.3 synthetic")
 
 
-def test_v32_frozen_tier_roundtrip():
-    """write_cache_tau0 stores P_tier_c_frozen[15,nk] and mean_F_by_bin[15];
-    round-trips; cache_version bumped to 3.2."""
+def test_v33_uniform_schema_roundtrip():
+    """v3.3 uniform-only schema: stores P_tier_c (uniform unfiltered),
+    P_tier_c_filtered, mean_F_by_bin; P_tier_c_frozen is REMOVED (the per-pixel
+    freeze was proven a numerical no-op); tier_c_recipe='uniform'."""
     import os
     import hcd_analysis.priya_p1d as pp
     nk = bt0._N_K["lf"]
@@ -238,7 +240,6 @@ def test_v32_frozen_tier_roundtrip():
                     snap_group_idx=0, target_F=0.7, scale=0.8,
                     params=np.zeros(9), kfkms=np.linspace(1e-3, 0.1, nk),
                     P_tier_p=np.ones(nk), P_tier_c=np.ones((NB, nk)),
-                    P_tier_c_frozen=2*np.ones((NB, nk)),
                     P_tier_c_filtered=np.ones((NB, nk)),
                     tier_c_counts=np.arange(NB, dtype=np.int64),
                     mean_F_by_bin=np.linspace(0.5, 0.9, NB))
@@ -248,18 +249,18 @@ def test_v32_frozen_tier_roundtrip():
     out = os.path.join(tempfile.mkdtemp(), "c.h5")
     bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(0.0, 1.0), n_k=nk)
     with h5py.File(out, "r") as f:
-        assert f.attrs["cache_version"] == "3.2", \
-            f"expected cache_version='3.2', got '{f.attrs['cache_version']}'"
-        assert f["P_tier_c_frozen"].shape == (2, NB, nk), \
-            f"P_tier_c_frozen shape mismatch: {f['P_tier_c_frozen'].shape}"
+        assert f.attrs["cache_version"] == "3.3", \
+            f"expected cache_version='3.3', got '{f.attrs['cache_version']}'"
+        assert f.attrs["tier_c_recipe"] == "uniform"
+        assert "P_tier_c_frozen" not in f, "frozen tier should be removed in v3.3"
+        assert "tau_freeze_tierc" not in f.attrs, "tau_freeze_tierc attr should be gone"
+        assert f["P_tier_c"].shape == (2, NB, nk)
+        assert f["P_tier_c_filtered"].shape == (2, NB, nk)
         assert f["mean_F_by_bin"].shape == (2, NB), \
             f"mean_F_by_bin shape mismatch: {f['mean_F_by_bin'].shape}"
-        assert np.allclose(f["P_tier_c_frozen"][0], 2.0), \
-            "P_tier_c_frozen[0] should be all 2.0"
         assert np.allclose(f["mean_F_by_bin"][1], np.linspace(0.5, 0.9, NB)), \
             "mean_F_by_bin[1] round-trip failed"
-        assert "tau_freeze_tierc" in f.attrs, "tau_freeze_tierc attr missing"
-    print("OK v3.2 frozen-tier + mean_F round-trip")
+    print("OK v3.3 uniform-only schema round-trip (frozen tier removed)")
 
 
 def test_filtered_tier_c_reconstructs_priya():
@@ -349,7 +350,7 @@ if __name__ == "__main__":
     test_discover_dedups_one_snap_per_grid_z()
     test_read_priya_params_matches_priya_array()
     test_write_cache_tau0_round_trip()
-    test_v32_frozen_tier_roundtrip()
+    test_v33_uniform_schema_roundtrip()
     test_merge_v3_synthetic()
     test_build_tau0_rows_tier_p_matches_priya()
     test_filtered_tier_c_reconstructs_priya()
