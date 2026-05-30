@@ -82,6 +82,10 @@ _DLA_EDGES = np.array([20.3, 21.0])            # DLA edge bin; >=21.0 overflow
 FINE_NHI_EDGES = np.round(
     np.unique(np.concatenate([_LLS_EDGES, _SUBDLA_EDGES, _DLA_EDGES])), 4)  # 14 edges
 N_TIER_C_BINS = len(FINE_NHI_EDGES) + 1                                     # 15
+# Self-shielding freeze threshold for the UNFILTERED Tier-C path. NOT the PRIYA
+# 1e6 trough-fill threshold (that is the *filtered* tier). Default value to be
+# pinned by scripts/calibrate_tau_freeze.py; override per-call. Spec 2026-05-29 §2a.
+TAU_FREEZE_TIERC = 1.0e4
 
 
 def tier_c_labels():
@@ -141,11 +145,15 @@ def compute_tier_c_p1d(tau: np.ndarray, vmax: float,
                        catalog,
                        external_scale: Optional[float] = None,
                        external_target_F: Optional[float] = None,
+                       tau_freeze: float = np.inf,
                        ):
     """Per-fine-N_HI-bin P1Ds on the GIVEN tau, sharing Tier P's
     (scale, target_F) when given. Pass UNFILTERED tau for the HCD add-back tier,
     or PRIYA's whole-array tau=1e6-filtered tau for the exact-reconstruction tier
-    (its count-weighted sum then equals Tier P). Returns:
+    (its count-weighted sum then equals Tier P). `tau_freeze`: forwarded to
+    _per_class_p1d_at_scale — pixels with native tau > tau_freeze keep native
+    optical depth (self-shielded, UVB-insensitive); tau_freeze=inf (default)
+    reproduces the uniform rescale. Returns:
         kf        : native k-grid (s/km, angular), shape (npix//2,)
         P_by_bin  : (N_TIER_C_BINS, npix//2) per-bin P1D (count-weighted sums
                     reconstruct any class; see merge_fine_to_classes)
@@ -164,7 +172,8 @@ def compute_tier_c_p1d(tau: np.ndarray, vmax: float,
     kf_ref = None
     for c in range(N_TIER_C_BINS):
         mask = (cls == c)
-        kf, P = _per_class_p1d_at_scale(tau[mask], vmax, scale, target_F)
+        kf, P = _per_class_p1d_at_scale(tau[mask], vmax, scale, target_F,
+                                        tau_freeze=tau_freeze)
         if kf_ref is None:
             kf_ref = kf
         P_by_bin.append(P)

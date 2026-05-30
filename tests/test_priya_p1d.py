@@ -285,9 +285,33 @@ def test_per_class_freeze_core_thin_and_frozen():
     print("OK freeze-core: inf==uniform, finite freeze bites in the transition regime")
 
 
+def test_compute_tier_c_freeze_passthrough():
+    """compute_tier_c_p1d forwards tau_freeze; default inf == current behavior;
+    counts are tau_freeze-invariant; a finite freeze changes the per-bin P1D
+    (exercised in the moderate-tau regime so the freeze actually bites)."""
+    import numpy as np
+    from hcd_analysis.priya_p1d import compute_tier_c_p1d, N_TIER_C_BINS
+
+    class _Ab:
+        def __init__(self, idx, nhi): self.skewer_idx, self.log_NHI = idx, nhi
+    class _Cat:
+        absorbers = [_Ab(0, 20.5), _Ab(1, 18.0)]   # sightline0=DLA, sightline1=LLS
+    rng = np.random.default_rng(1)
+    tau = rng.uniform(0.0, 5.0, size=(4, 64))       # moderate tau, NO saturated core
+    kw = dict(vmax=1000.0, alpha_slope=1.0, z=3.0, catalog=_Cat(),
+              external_scale=0.8, external_target_F=0.7)
+    _, P_inf, n_inf, _, _ = compute_tier_c_p1d(tau, **kw)                 # default inf
+    _, P_frz, n_frz, _, _ = compute_tier_c_p1d(tau, tau_freeze=2.0, **kw) # freeze bites at tau>2
+    assert P_inf.shape == (N_TIER_C_BINS, 64 // 2)
+    assert np.array_equal(n_inf, n_frz), "counts are tau_freeze-invariant"
+    assert not np.allclose(P_inf, P_frz), "freeze changes the per-bin P1D"
+    print("OK compute_tier_c_p1d tau_freeze passthrough")
+
+
 if __name__ == "__main__":
     test_bin_sightlines_by_nhi()
     test_per_class_freeze_core_thin_and_frozen()
+    test_compute_tier_c_freeze_passthrough()
     test_tier_p_bit_identical_to_priya_at_sim0_z3_alpha1()
     test_tier_c_fine_bins_sum_to_total_at_alpha_one()
     test_fine_bins_reconstruct_subdla_split()
