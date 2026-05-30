@@ -260,25 +260,29 @@ def test_bin_sightlines_by_nhi():
 
 def test_per_class_freeze_core_thin_and_frozen():
     """tau_freeze=inf reproduces the uniform rescale exactly; a finite
-    tau_freeze leaves frozen pixels at native exp(-tau) and scales the rest."""
+    tau_freeze leaves frozen pixels at native tau and scales the rest, which
+    changes the per-class P1D. The freeze must bite in the TRANSITION regime
+    (moderate tau): fully-saturated cores (tau>~745) underflow exp(-tau)->0
+    either way, so the physically-relevant difference lives at moderate tau."""
     import numpy as np
     from hcd_analysis.priya_p1d import _per_class_p1d_at_scale
     rng = np.random.default_rng(0)
-    tau = rng.uniform(0.0, 5.0, size=(64, 128))
-    tau[:, 0] = 1.0e7  # saturated core column
+    tau = rng.uniform(0.0, 5.0, size=(64, 128))   # forest + transition-regime tau
     vmax, scale, tF = 1000.0, 0.8, 0.7
+    tfreeze = 2.0                                  # splits the [0,5] range
 
     kf_u, P_u = _per_class_p1d_at_scale(tau, vmax, scale, tF)                 # uniform
     kf_i, P_i = _per_class_p1d_at_scale(tau, vmax, scale, tF, tau_freeze=np.inf)
     assert np.allclose(P_u, P_i, rtol=0, atol=0), "tau_freeze=inf must equal uniform"
 
-    kf_f, P_f = _per_class_p1d_at_scale(tau, vmax, scale, tF, tau_freeze=1.0e4)
-    chunk = tau[:64]
-    tau_eff = np.where(chunk > 1.0e4, chunk, scale * chunk)
-    assert np.all(tau_eff[:, 0] == tau[:64, 0]), "core frozen at native tau"
-    assert np.allclose(tau_eff[:, 1:], scale * chunk[:, 1:]), "thin pixels scaled"
+    kf_f, P_f = _per_class_p1d_at_scale(tau, vmax, scale, tF, tau_freeze=tfreeze)
+    tau_eff = np.where(tau > tfreeze, tau, scale * tau)
+    frozen, thin = tau > tfreeze, tau <= tfreeze
+    assert frozen.any() and thin.any(), "both regimes must be populated"
+    assert np.all(tau_eff[frozen] == tau[frozen]), "frozen pixels keep native tau"
+    assert np.allclose(tau_eff[thin], scale * tau[thin]), "thin pixels scaled by scale"
     assert not np.allclose(P_f, P_u), "freeze must change the per-class P1D"
-    print("OK freeze-core: inf==uniform, finite freezes cores")
+    print("OK freeze-core: inf==uniform, finite freeze bites in the transition regime")
 
 
 if __name__ == "__main__":
