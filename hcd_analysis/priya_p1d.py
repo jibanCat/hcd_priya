@@ -45,6 +45,14 @@ def compute_tier_p_p1d(tau: np.ndarray, vmax: float,
                        ) -> Tuple[np.ndarray, np.ndarray, float, float]:
     """PRIYA-compatible total P1D over all sightlines, after filter.
 
+    GOLD REFERENCE — do NOT delete. The production cache builder
+    (scripts/build_emulator_cache_tau0.py) no longer calls this in its hot path
+    (it computes Tier P as the count-weighted sum of the filtered Tier-C pieces,
+    which avoids flux_power's ~34 GB peak and is verified bit-identical here to
+    ~9e-15, scripts/verify_tierp_sum_identity.py). This routine is retained as the
+    authoritative flux_power reference: the bit-identity tests and that verify
+    script exercise it. Keep it exercised so the reference can't silently drift.
+
     Pipeline:
       1. mean_flux_desired = exp(-alpha_slope * obs_mean_tau_Kim2013(z))
       2. Apply _filter_single_tau_complex to tau (modifies in place).

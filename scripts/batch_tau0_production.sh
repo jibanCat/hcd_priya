@@ -1,16 +1,18 @@
 #!/bin/bash
-# Great Lakes ARRAY — production tau0 cache build (v3.3 uniform, 10 alpha).
+# Great Lakes ARRAY — production tau0 cache build (v3.3 uniform, 20 alpha).
 #
-# Cost (profiled job 51140681 + diag_alpha_density.py): 10 alpha is sufficient
-# (<=0.35% interp error). ~1 h/pair wall, ~31-39 GB peak. Great Lakes bills
-# max(cores, mem/7)*walltime, so memory floors the cost; we request 48 GB (safe
-# for the max-nbins pairs) + 2 cores. Projected ~6-8k CPU-h total (LF 1072 + HR
-# 103 pairs) — under the 20k cavestru/yueyingn0 ceiling.
+# 20 alpha (--alpha-refine 2): PRIYA-exact 10 at even indices + 10 midpoints,
+# enabling the held-out-alpha validation (train on PRIYA-10, predict midpoints).
+# Memory-OPTIMIZED build (Tier P = sum of filtered pieces, no flux_power) ->
+# peak ~the 2 tau arrays, NOT ~34 GB. Great Lakes bills max(cores, mem/7)*wall,
+# so --mem floors the cost. *** SHARD_SIZE, --mem and --time below are placeholders
+# pending the 1-pair RE-TIMING on the optimized build; set --mem ~= peak*1.2 and
+# SHARD_SIZE so per-task wall < ~20 h, then submit. ***
 #
-# Usage:
-#   LF: sbatch --array=0-71 --export=ALL,FIDELITY=lf,SHARD_SIZE=15 scripts/batch_tau0_production.sh
-#   HR: sbatch --array=0-6  --export=ALL,FIDELITY=hr,SHARD_SIZE=15 scripts/batch_tau0_production.sh
-#   smoke: sbatch --array=0-0 --time=04:00:00 --export=ALL,FIDELITY=lf,SHARD_SIZE=2 scripts/batch_tau0_production.sh
+# Usage (resource flags finalized post-re-timing; override --mem/--time/SHARD_SIZE):
+#   LF: sbatch --array=0-N --mem=<M>g --time=<T> --export=ALL,FIDELITY=lf,SHARD_SIZE=<S> scripts/batch_tau0_production.sh
+#   HR: sbatch --array=0-M --mem=<M>g --time=<T> --export=ALL,FIDELITY=hr,SHARD_SIZE=<S> scripts/batch_tau0_production.sh
+#   (nbins-tiered: submit low/mid/high-nbins offset ranges as separate arrays with their own --mem.)
 #SBATCH --job-name=tau0_prod
 #SBATCH --account=yueyingn0
 #SBATCH --partition=standard
@@ -41,6 +43,6 @@ echo "=== tau0 prod ${FIDELITY} shard ${TID} (offset=${OFFSET} limit=${SHARD_SIZ
 "$PY" scripts/build_emulator_cache_tau0.py \
     --fidelity "$FIDELITY" \
     --offset "$OFFSET" --limit "$SHARD_SIZE" \
-    --alpha-refine 1 \
+    --alpha-refine 2 \
     --output "$OUT" --spot-check
 echo "=== done: $(date) ==="

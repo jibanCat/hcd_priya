@@ -45,7 +45,7 @@ _SNAP_FLOAT = tuple("snap_" + k for k in bt0._SNAP_FLOAT_KEYS)
 _SNAP_2D = tuple("snap_" + k for k in bt0._SNAP_2D_KEYS)
 
 
-def merge_shards(shard_paths, output_path):
+def merge_shards(shard_paths, output_path, expect_rows=None, expect_pairs=None):
     shard_paths = sorted(shard_paths)
     if not shard_paths:
         raise ValueError("no shard files matched")
@@ -80,6 +80,8 @@ def merge_shards(shard_paths, output_path):
                     f"tier_c_labels mismatch in {sp}"
                 assert f.attrs.get("tier_c_recipe", None) == tier_c_recipe, \
                     f"tier_c_recipe mismatch in {sp}"
+                assert np.allclose(f.attrs["alpha_range"], alpha_range), \
+                    f"alpha_range mismatch in {sp} (different --alpha-refine?)"
 
             # per-row: remap snap_group_idx by the running snap offset
             for k in _ROW_STR + _ROW_ARR + _ROW_FLOAT + _ROW_INT:
@@ -96,6 +98,19 @@ def merge_shards(shard_paths, output_path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     total_rows = sum(len(a) for a in row_data["sim_name"])
     total_snaps = sum(len(a) for a in snap_data["snap_snap"])
+    # Completeness guards: a silently failed/OOM'd shard just vanishes from the
+    # glob, so the merge would otherwise succeed with missing pairs undetected.
+    sims = np.concatenate([np.asarray(a).ravel() for a in row_data["sim_name"]])
+    snaps = np.concatenate([np.asarray(a).ravel() for a in row_data["snap"]])
+    n_pairs = len({(s, int(p)) for s, p in zip(sims.tolist(), snaps.tolist())})
+    print(f"  merged {total_rows} rows across {n_pairs} unique (sim,snap) pairs "
+          f"from {len(shard_paths)} shards")
+    if expect_rows is not None:
+        assert total_rows == expect_rows, \
+            f"row-count mismatch: merged {total_rows} != expected {expect_rows} (failed shard?)"
+    if expect_pairs is not None:
+        assert n_pairs == expect_pairs, \
+            f"pair-count mismatch: merged {n_pairs} != expected {expect_pairs} (missing shard?)"
 
     with h5py.File(output_path, "w") as f:
         f.attrs["created_utc"] = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
@@ -141,8 +156,13 @@ def main():
     ap.add_argument("--shards", required=True,
                     help="glob pattern for shard .h5 files (quote it).")
     ap.add_argument("--output", type=Path, required=True)
+    ap.add_argument("--expect-rows", type=int, default=None,
+                    help="assert merged row count (= n_pairs * n_alpha); catches failed shards.")
+    ap.add_argument("--expect-pairs", type=int, default=None,
+                    help="assert merged unique (sim,snap) count; catches missing shards.")
     args = ap.parse_args()
-    merge_shards(glob.glob(args.shards), args.output)
+    merge_shards(glob.glob(args.shards), args.output,
+                 expect_rows=args.expect_rows, expect_pairs=args.expect_pairs)
 
 
 if __name__ == "__main__":

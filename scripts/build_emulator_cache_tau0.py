@@ -226,8 +226,8 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
     """
     from hcd_analysis.catalog import AbsorberCatalog
     from hcd_analysis.io import read_header
-    from hcd_analysis.priya_p1d import (compute_tier_p_p1d, compute_tier_c_p1d,
-                                        bin_sightlines_by_nhi, N_TIER_C_BINS)
+    from hcd_analysis.priya_p1d import (compute_tier_c_p1d, bin_sightlines_by_nhi,
+                                        N_TIER_C_BINS, _apply_priya_filter)
 
     # PRIYA-exact params from SimulationICs.json (full precision; folder-name
     # parsing rounds them, and PRIYA's "Ap" is at a different pivot than CAMB As).
@@ -255,23 +255,31 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
     rows = []
     for a_idx, alpha in enumerate(alpha_slope_grid):
         alpha = float(alpha)
+        # --- Tier P + filtered Tier C (PRIYA path), MEMORY-OPTIMIZED ---
+        # Tier P (the total) == count-weighted sum of the filtered per-class
+        # pieces, verified bit-identical to fake_spectra flux_power to ~9e-15 on
+        # real data (scripts/verify_tierp_sum_identity.py). So: filter tau in
+        # place, compute the filtered Tier-C (which solves the mean-flux `scale`
+        # internally), then SUM the pieces -> Tier P. This AVOIDS the monolithic
+        # flux_power call, whose ~4-full-array peak (~34 GB) set the SLURM memory
+        # bill. compute_tier_p_p1d (flux_power) is retained UNCHANGED as the gold
+        # reference in hcd_analysis.priya_p1d + tests + verify_tierp_sum_identity.py.
         tau_filt = tau_unfilt.copy()
-        kf_p, P_tier_p, target_F, scale = compute_tier_p_p1d(
-            tau_filt, vmax, alpha_slope=alpha, z=z_grid)
-        # Filtered Tier C: per-class on PRIYA's whole-array-filtered tau (sums to Tier P).
-        _, P_by_bin_filt, n_by_bin_filt, _, _ = compute_tier_c_p1d(
-            tau_filt, vmax, alpha_slope=alpha, z=z_grid, catalog=catalog,
-            external_scale=scale, external_target_F=target_F)
+        _apply_priya_filter(tau_filt, tau_thresh=1.0e6)
+        kf_c, P_by_bin_filt, n_by_bin_filt, target_F, scale = compute_tier_c_p1d(
+            tau_filt, vmax, alpha_slope=alpha, z=z_grid, catalog=catalog)
         del tau_filt
-        # Unfiltered Tier C (for the HCD add-back path):
-        kf_c, P_by_bin, n_by_bin, _, _ = compute_tier_c_p1d(
+        N_sl = int(n_by_bin_filt.sum())
+        P_tier_p = (n_by_bin_filt[:, None] / N_sl * P_by_bin_filt).sum(axis=0)
+        # Unfiltered Tier C (for the HCD add-back path), SAME scale/target_F:
+        _, P_by_bin, n_by_bin, _, _ = compute_tier_c_p1d(
             tau_unfilt, vmax, alpha_slope=alpha, z=z_grid, catalog=catalog,
             external_scale=scale, external_target_F=target_F)
         assert np.array_equal(n_by_bin, n_by_bin_filt), \
             "N_HI class counts differ between filtered and unfiltered Tier C"
         if a_idx == 0:
-            assert len(kf_p) >= n_k and len(kf_c) >= n_k, \
-                f"native grid {len(kf_p)} bins < n_k={n_k} for {sim_name} snap {snap}"
+            assert len(kf_c) >= n_k, \
+                f"native grid {len(kf_c)} bins < n_k={n_k} for {sim_name} snap {snap}"
         # Per-class <F> under the uniform rescale (for the shared-vs-per-class
         # target_F disentanglement). NaN sentinel for empty classes (count==0) —
         # consumers MUST mask on tier_c_counts>0 before reducing over mean_F_by_bin.
@@ -294,7 +302,7 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
             "dv_kms": dv_kms, "nbins_native": nbins,
             "target_F": float(target_F), "scale": float(scale),
             "params": params,
-            "kfkms": kf_p[:n_k].astype(np.float64),
+            "kfkms": kf_c[:n_k].astype(np.float64),
             "P_tier_p": P_tier_p[:n_k].astype(np.float64),
             "P_tier_c": P_by_bin[:, :n_k].astype(np.float64),
             "P_tier_c_filtered": P_by_bin_filt[:, :n_k].astype(np.float64),
@@ -470,7 +478,21 @@ def main() -> None:
                 "spot-check failed: row 0 P_tier_p has no finite values"
             med_target_F = float(np.median(f["target_F"][...]))
             med_scale = float(np.median(f["scale"][...]))
-        print(f"spot-check: row 0 P_tier_p finite OK; "
+            # Cheap integrity invariant (NO flux_power): the stored Tier P must
+            # equal the count-weighted sum of the stored filtered Tier-C pieces
+            # (it is, by construction) — guards against a write/desync bug. The
+            # flux_power identity itself is checked offline by
+            # scripts/verify_tierp_sum_identity.py.
+            ptp = f["P_tier_p"][...]
+            pcf = f["P_tier_c_filtered"][...]
+            cnt = f["tier_c_counts"][...].astype(np.float64)
+            w = cnt / cnt.sum(axis=1, keepdims=True)
+            recon = np.einsum("rc,rck->rk", w, pcf)
+            m = np.isfinite(ptp) & np.isfinite(recon) & (ptp != 0)
+            rel = np.abs(recon[m] / ptp[m] - 1.0)
+            assert rel.max() < 1e-10, \
+                f"integrity: Tier P != sum(filtered pieces), max|r-1|={rel.max():.2e}"
+        print(f"spot-check: row 0 P_tier_p finite OK; integrity max|r-1|={rel.max():.2e}; "
               f"median target_F={med_target_F:.4f} scale={med_scale:.4f}")
 
 
