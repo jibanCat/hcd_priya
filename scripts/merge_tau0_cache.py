@@ -35,7 +35,8 @@ import build_emulator_cache_tau0 as bt0  # noqa: E402
 _TOP_LEVEL = ("tier_c_labels", "tier_c_nhi_edges", "param_names",
               "log_nhi_centres", "log_nhi_edges")
 _ROW_STR = ("sim_name",)
-_ROW_ARR = ("params",) + bt0._ROW_P1D_KEYS + bt0._ROW_TIERC_KEYS + bt0._ROW_COUNT_KEYS
+_ROW_ARR = (("params",) + bt0._ROW_P1D_KEYS + bt0._ROW_TIERC_KEYS
+            + bt0._ROW_COUNT_KEYS + bt0._ROW_MEANF_KEYS)
 _ROW_FLOAT = bt0._ROW_FLOAT_KEYS
 _ROW_INT = bt0._ROW_INT_KEYS  # includes snap_group_idx (remapped specially)
 _SNAP_STR = ("snap_sim_name",)
@@ -57,6 +58,7 @@ def merge_shards(shard_paths, output_path):
     n_snaps_so_far = 0
     top = {}
     alpha_range = None
+    tau_freeze_tierc = None
 
     for si, sp in enumerate(shard_paths):
         with h5py.File(sp, "r") as f:
@@ -69,6 +71,7 @@ def merge_shards(shard_paths, output_path):
                 alpha_range = f.attrs["alpha_range"]
                 first_n_k = int(f.attrs["n_k"])
                 tier_c_note = f.attrs.get("tier_c_note", None)
+                tau_freeze_tierc = f.attrs.get("tau_freeze_tierc", None)
             else:
                 for k in ("tier_c_nhi_edges", "log_nhi_centres", "log_nhi_edges"):
                     assert np.allclose(f[k][...], top[k]), f"{k} mismatch in {sp}"
@@ -97,13 +100,15 @@ def merge_shards(shard_paths, output_path):
         f.attrs["git_sha"] = bec._git_sha(REPO_ROOT)
         f.attrs["n_rows"] = total_rows
         f.attrs["n_snaps"] = total_snaps
-        f.attrs["cache_version"] = "3.1"
+        f.attrs["cache_version"] = "3.2"
         f.attrs["n_k"] = first_n_k
         f.attrs["priya_convention"] = (
             "Kim 2013 slope-alpha (obs_mean_tau=2.3e-3(1+z)^3.65); "
             "fake_spectra _filter_single_tau_complex(tau_thresh=1e6, thresh2=0.25); "
             "flux_power window=False spec_res=0; native k-grid (first n_k FFT bins)")
         f.attrs["tau_thresh"] = 1.0e6
+        if tau_freeze_tierc is not None:
+            f.attrs["tau_freeze_tierc"] = float(tau_freeze_tierc)
         f.attrs["alpha_range"] = alpha_range
         f.attrs["k_convention"] = "angular (rad*s/km) native FFT grid, PRIYA convention"
         f.attrs["merged_from_n_shards"] = len(shard_paths)

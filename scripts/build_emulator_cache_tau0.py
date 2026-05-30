@@ -226,7 +226,9 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
     """
     from hcd_analysis.catalog import AbsorberCatalog
     from hcd_analysis.io import read_header
-    from hcd_analysis.priya_p1d import compute_tier_p_p1d, compute_tier_c_p1d
+    from hcd_analysis.priya_p1d import (compute_tier_p_p1d, compute_tier_c_p1d,
+                                        TAU_FREEZE_TIERC, bin_sightlines_by_nhi,
+                                        N_TIER_C_BINS)
 
     # PRIYA-exact params from SimulationICs.json (full precision; folder-name
     # parsing rounds them, and PRIYA's "Ap" is at a different pivot than CAMB As).
@@ -271,6 +273,21 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
         if a_idx == 0:
             assert len(kf_p) >= n_k and len(kf_c) >= n_k, \
                 f"native grid {len(kf_p)} bins < n_k={n_k} for {sim_name} snap {snap}"
+        # Frozen unfiltered Tier C (PRODUCTION HCD add-back): self-shielded gas
+        # held at native tau; thin pixels scaled. tau_freeze pinned by calibration.
+        _, P_by_bin_frozen, _, _, _ = compute_tier_c_p1d(
+            tau_unfilt, vmax, alpha_slope=alpha, z=z_grid, catalog=catalog,
+            external_scale=scale, external_target_F=target_F,
+            tau_freeze=TAU_FREEZE_TIERC)
+        # Per-class <F> on the frozen field (for the shared-vs-per-class target_F
+        # disentanglement). Classification is tau_freeze-invariant.
+        cls = bin_sightlines_by_nhi(catalog, tau_unfilt.shape[0])
+        mean_F_by_bin = np.full(N_TIER_C_BINS, np.nan)
+        for c in range(N_TIER_C_BINS):
+            sel = tau_unfilt[cls == c]
+            if sel.size:
+                tau_eff = np.where(sel > TAU_FREEZE_TIERC, sel, scale * sel)
+                mean_F_by_bin[c] = float(np.mean(np.exp(-tau_eff)))
         rows.append({
             "sim_name": sim_name, "snap": int(snap),
             "alpha_slope": alpha, "alpha_idx": int(a_idx),
@@ -281,8 +298,10 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
             "kfkms": kf_p[:n_k].astype(np.float64),
             "P_tier_p": P_tier_p[:n_k].astype(np.float64),
             "P_tier_c": P_by_bin[:, :n_k].astype(np.float64),
+            "P_tier_c_frozen": P_by_bin_frozen[:, :n_k].astype(np.float64),
             "P_tier_c_filtered": P_by_bin_filt[:, :n_k].astype(np.float64),
             "tier_c_counts": n_by_bin.astype(np.int64),
+            "mean_F_by_bin": mean_F_by_bin.astype(np.float64),
         })
 
     snap_block = {
@@ -301,20 +320,23 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
 _ROW_FLOAT_KEYS = ("alpha_slope", "target_F", "scale", "z_meta", "z_grid", "dv_kms")
 _ROW_INT_KEYS = ("snap", "alpha_idx", "nbins_native", "snap_group_idx")
 _ROW_P1D_KEYS = ("kfkms", "P_tier_p")          # 2-D (n_rows, n_k)
-_ROW_TIERC_KEYS = ("P_tier_c", "P_tier_c_filtered")  # 3-D (n_rows, N_TIER_C_BINS, n_k)
+_ROW_TIERC_KEYS = ("P_tier_c", "P_tier_c_frozen", "P_tier_c_filtered")  # 3-D (n_rows, N_TIER_C_BINS, n_k)
 _ROW_COUNT_KEYS = ("tier_c_counts",)            # 2-D (n_rows, N_TIER_C_BINS)
+_ROW_MEANF_KEYS = ("mean_F_by_bin",)            # 2-D (n_rows, N_TIER_C_BINS)
 _SNAP_FLOAT_KEYS = ("total_path_dX", "dNdX_LLS", "dNdX_subDLA", "dNdX_DLA")
 _SNAP_2D_KEYS = ("f_nhi", "n_absorbers")
 
 
 def write_cache_tau0(rows, snap_blocks, output_path, alpha_range, n_k):
-    """Stack per-alpha `rows` + per-snap `snap_blocks` into one HDF5 cache (v3.1).
+    """Stack per-alpha `rows` + per-snap `snap_blocks` into one HDF5 cache (v3.2).
 
     Each row carries `snap_group_idx`, an index into the snap_* datasets.
-    Schema v3.1: per-row kfkms + P_tier_p (2-D), P_tier_c (3-D),
-    tier_c_counts (2-D); tier_c_labels/tier_c_nhi_edges descriptors; no k_target.
+    Schema v3.2: per-row kfkms + P_tier_p (2-D), P_tier_c / P_tier_c_frozen /
+    P_tier_c_filtered (3-D), tier_c_counts / mean_F_by_bin (2-D);
+    tier_c_labels/tier_c_nhi_edges descriptors; no k_target.
     """
-    from hcd_analysis.priya_p1d import tier_c_labels, FINE_NHI_EDGES, N_TIER_C_BINS
+    from hcd_analysis.priya_p1d import (tier_c_labels, FINE_NHI_EDGES, N_TIER_C_BINS,
+                                        TAU_FREEZE_TIERC)
     assert len(tier_c_labels()) == N_TIER_C_BINS == len(FINE_NHI_EDGES) + 1
     if not rows:
         raise ValueError("write_cache_tau0 called with no rows.")
@@ -331,17 +353,20 @@ def write_cache_tau0(rows, snap_blocks, output_path, alpha_range, n_k):
         f.attrs["git_sha"] = bec._git_sha(REPO_ROOT)
         f.attrs["n_rows"] = len(rows)
         f.attrs["n_snaps"] = len(snap_blocks)
-        f.attrs["cache_version"] = "3.1"
+        f.attrs["cache_version"] = "3.2"
         f.attrs["n_k"] = int(n_k)
         f.attrs["priya_convention"] = (
             "Kim 2013 slope-alpha (obs_mean_tau=2.3e-3(1+z)^3.65); "
             "fake_spectra _filter_single_tau_complex(tau_thresh=1e6, thresh2=0.25); "
             "flux_power window=False spec_res=0; native k-grid (first n_k FFT bins)")
         f.attrs["tau_thresh"] = 1.0e6
+        f.attrs["tau_freeze_tierc"] = float(TAU_FREEZE_TIERC)
         f.attrs["alpha_range"] = np.asarray(alpha_range, dtype=np.float64)
         f.attrs["k_convention"] = "angular (rad*s/km) native FFT grid, PRIYA convention"
         f.attrs["tier_c_note"] = (
-            "P_tier_c = per-class P1D on UNFILTERED tau (HCD add-back); "
+            "P_tier_c = per-class P1D on UNFILTERED tau, uniform rescale (twin); "
+            "P_tier_c_frozen = frozen variant (tau>tau_freeze_tierc kept native, "
+            "production HCD add-back); "
             "P_tier_c_filtered = on PRIYA tau=1e6-filtered tau "
             "(count-weighted sum == Tier P).")
 
@@ -368,6 +393,8 @@ def write_cache_tau0(rows, snap_blocks, output_path, alpha_range, n_k):
             f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0))
         for key in _ROW_COUNT_KEYS:
             f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0).astype(np.int64))
+        for key in _ROW_MEANF_KEYS:
+            f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0).astype(np.float64))
 
         # --- per-(sim, snap) tau0-invariant CDDF datasets ---
         f.create_dataset("snap_sim_name",
