@@ -19,7 +19,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=48g
+#SBATCH --mem=44g
 #SBATCH --time=24:00:00
 #SBATCH --chdir=/home/mfho/hcd_priya
 #SBATCH --output=/home/mfho/hcd_priya/logs/tau0_prod_%A_%a.out
@@ -32,14 +32,14 @@ export LD_LIBRARY_PATH=/sw/pkgs/arc/stacks/gcc/10.3.0/gsl/2.7/lib:/home/mfho/.co
 PY=/home/mfho/.conda/envs/emu-3.9/bin/python3
 
 FIDELITY=${FIDELITY:-lf}
-SHARD_SIZE=${SHARD_SIZE:-15}
+SHARD_SIZE=${SHARD_SIZE:-12}
 TID=${SLURM_ARRAY_TASK_ID:-0}
 OFFSET=$(( TID * SHARD_SIZE ))
 OUTDIR=/scratch/cavestru_root/cavestru0/mfho/tau0_shards
 mkdir -p "$OUTDIR" "$(dirname /home/mfho/hcd_priya/logs/x)"
 OUT="$OUTDIR/observables_tau0_${FIDELITY}.shard$(printf '%03d' "$TID").h5"
 
-echo "=== tau0 prod ${FIDELITY} shard ${TID} (offset=${OFFSET} limit=${SHARD_SIZE}, 10 alpha) start: $(date) ==="
+echo "=== tau0 prod ${FIDELITY} shard ${TID} (offset=${OFFSET} limit=${SHARD_SIZE}, 20 alpha) start: $(date) ==="
 "$PY" scripts/build_emulator_cache_tau0.py \
     --fidelity "$FIDELITY" \
     --offset "$OFFSET" --limit "$SHARD_SIZE" \
