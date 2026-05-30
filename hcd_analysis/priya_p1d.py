@@ -109,10 +109,14 @@ def bin_sightlines_by_nhi(catalog, n_skewers: int) -> np.ndarray:
 
 
 def _per_class_p1d_at_scale(tau_class: np.ndarray, vmax: float,
-                             scale: float, target_F: float):
+                             scale: float, target_F: float,
+                             tau_freeze: float = np.inf):
     """Mirror fake_spectra.fluxstatistics.flux_power but with predetermined
     (scale, target_F) — used by Tier C so all four classes share Tier P's
-    mean-flux normalisation. Returns (kf[1:], P[1:]) like flux_power does."""
+    mean-flux normalisation. `tau_freeze`: pixels with native tau > tau_freeze
+    keep their native optical depth (self-shielded, UVB-insensitive); the rest
+    are rescaled by `scale`. tau_freeze=inf reproduces the uniform rescale.
+    Returns (kf[1:], P[1:]) like flux_power does."""
     nspec, npix = tau_class.shape
     if nspec == 0:
         kf = _flux_power_bins(vmax, npix)
@@ -123,7 +127,9 @@ def _per_class_p1d_at_scale(tau_class: np.ndarray, vmax: float,
         s = i * nspec // 10
         if end == s:
             continue
-        dflux = np.exp(-scale * tau_class[s:end]) / target_F - 1.0
+        chunk = tau_class[s:end]
+        tau_eff = np.where(chunk > tau_freeze, chunk, scale * chunk)
+        dflux = np.exp(-tau_eff) / target_F - 1.0
         mfp += vmax * np.sum(_powerspectrum(dflux, axis=1), axis=0)
     mfp /= nspec
     kf = _flux_power_bins(vmax, npix)
