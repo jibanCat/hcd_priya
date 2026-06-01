@@ -74,3 +74,39 @@ def test_emulator_endtoend_runs():
     m = Emulator(in_dim=10, n_k=8, key=key)
     pred = m(jnp.zeros(10), tau0=jnp.array(0.3))
     assert set(pred) >= {"f_nhi", "dndx", "P_filt", "delta"}
+
+
+def test_emulator_vmap_over_tau0_and_structural_grad():
+    # JAX foot-gun guards for Head B / structural total (all model tests above
+    # are UNBATCHED). Two real risks the unbatched tests miss:
+    #   (a) jnp.atleast_1d(tau0)+concatenate must batch a per-row scalar tau0
+    #       under jax.vmap. A scalar reshaped inside a vmapped fn (e.g. a naive
+    #       tau0.reshape(1)) silently breaks here; atleast_1d is the safe form.
+    #   (b) grad must flow finitely through structural_tier_p w.r.t. BOTH inputs.
+    key = jax.random.PRNGKey(5)
+    m = Emulator(in_dim=10, n_k=6, key=key)
+
+    # (a) vmap over BOTH x and a batched (per-row scalar) tau0
+    X = jnp.ones((5, 10))
+    T = jnp.linspace(0.1, 0.5, 5)  # shape (5,), one scalar tau0 per row
+    pred = jax.vmap(lambda x, t: m(x, t))(X, T)
+    assert pred["P_filt"].shape == (5, 4, 6)
+    assert pred["delta"].shape == (5, 3, 6)
+    assert pred["f_nhi"].shape == (5, 30)
+    assert pred["P_filt"].dtype == jnp.float64
+    # batched matches per-row eager (no silent shape/broadcast corruption)
+    eager0 = m(X[0], T[0])
+    assert jnp.allclose(pred["P_filt"][0], eager0["P_filt"])
+
+    # (b) structural_tier_p: batched einsum == manual loop; grad finite on both args
+    w = jax.random.uniform(jax.random.PRNGKey(6), (5, 4))
+    P = jax.random.uniform(jax.random.PRNGKey(7), (5, 4, 6)) + 0.1
+    tp = structural_tier_p(w, P)
+    assert tp.shape == (5, 6)
+    ref = jnp.stack([jnp.einsum("c,ck->k", w[i], P[i]) for i in range(5)])
+    assert jnp.allclose(tp, ref)
+    gw = jax.grad(lambda v: structural_tier_p(v, P[0]).sum())(w[0])
+    gp = jax.grad(lambda v: structural_tier_p(w[0], v).sum())(P[0])
+    assert jnp.all(jnp.isfinite(gw)) and jnp.all(jnp.isfinite(gp))
+    # all-ones P_filt -> Tier-P total == sum(w) (the structural identity)
+    assert jnp.allclose(structural_tier_p(w[0], jnp.ones((4, 6))), w[0].sum())

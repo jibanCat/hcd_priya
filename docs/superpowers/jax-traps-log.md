@@ -86,6 +86,27 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
 - **Lesson:** one `split` per module, one subkey per parameterised submodule;
   add a key-sensitivity test, never just a shape test.
 
+## 6. scalar `tau0` reshaped inside a vmapped fn — **GUARDED**
+- **Where:** Task 9 (`hcd_analysis/emulator/model.py`, `HeadB.__call__` / `Emulator`).
+- **Symptom (if unguarded):** Head B builds its trunk input as
+  `concatenate([latent, <tau0-as-1d>])`. The forward pass with an unbatched scalar
+  tau0 looks fine, but under `jax.vmap(lambda x,t: m(x,t))(X(B,10), T(B,))` a naive
+  `tau0.reshape(1)` (or `jnp.array([tau0])`) corrupts: vmap strips the leading batch
+  axis so each traced tau0 is 0-d, and a hard `reshape(1)` either errors or, worse,
+  re-materialises a wrong shape that broadcasts silently.
+- **Cause:** under `vmap` the per-row tau0 is a 0-d traced scalar; rank-changing ops
+  must be rank-relative, not absolute. `jnp.atleast_1d(tau0)` promotes 0-d→(1,) and
+  leaves (1,) untouched, so it composes correctly with the batched concatenate.
+- **Fix:** keep `jnp.atleast_1d(tau0)` (NOT `.reshape(1)`); pinned by
+  `test_emulator_vmap_over_tau0_and_structural_grad` (vmap over a (B,) tau0 →
+  (B,4,n_k)/(B,3,n_k), batched output matches per-row eager). Commit <SHA>.
+- **Lesson:** inside a function that will be `vmap`-ped, use rank-relative shape ops
+  (`atleast_1d`/`[..., None]`), never absolute `reshape(k)`; always add a batched
+  (vmap) test, not just an unbatched forward test. (Reshape correctness separately
+  verified: Head B's `out.reshape(7,n_k)` is row-major → 4 contiguous P_filt rows then
+  3 delta rows, NOT interleaved; structural_tier_p einsum batches + grads finitely on
+  both args, all-ones→sum(w) identity holds.)
+
 ---
 
 ## Trap template (append new entries above this line)
