@@ -99,7 +99,7 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   leaves (1,) untouched, so it composes correctly with the batched concatenate.
 - **Fix:** keep `jnp.atleast_1d(tau0)` (NOT `.reshape(1)`); pinned by
   `test_emulator_vmap_over_tau0_and_structural_grad` (vmap over a (B,) tau0 →
-  (B,4,n_k)/(B,3,n_k), batched output matches per-row eager). Commit <SHA>.
+  (B,4,n_k)/(B,3,n_k), batched output matches per-row eager). Commit fcde747.
 - **Lesson:** inside a function that will be `vmap`-ped, use rank-relative shape ops
   (`atleast_1d`/`[..., None]`), never absolute `reshape(k)`; always add a batched
   (vmap) test, not just an unbatched forward test. (Reshape correctness separately
