@@ -67,6 +67,25 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   `docs/superpowers/2026-06-01-emu-jax-env.md`.
 - **Lesson:** isolate the JAX env hard; `PYTHONNOUSERSITE=1` is mandatory here.
 
+## 5. PRNG key reuse across `Linear` layers — **GUARDED**
+- **Where:** Task 8 (`hcd_analysis/emulator/model.py`, `Encoder`/`HeadA`).
+- **Symptom (if unguarded):** every `eqx.nn.Linear` built from the *same* key gets
+  identically-correlated init weights → reduced effective capacity / a silent
+  init bug that never raises and is invisible in a forward-shape test.
+- **Cause:** JAX RNG is explicit and stateless; passing one key to N constructors
+  reuses it. `Encoder` correctly does `ks = jax.random.split(key, len(widths))`
+  and `HeadA` does `k1,k2,k3 = jax.random.split(key, 3)`, so each `Linear` gets a
+  distinct subkey. (Note: `Encoder` and `HeadA` are *constructed* with the same
+  top-level key in the test — harmless, they are separate modules; the risk is
+  *within* a module.)
+- **Fix:** split once per module, one subkey per `Linear`; pinned by
+  `test_encoder_layer_keys_distinct` (reproducible from same key, differs on a new
+  key). Verified the `layers: list` field is a proper pytree (6 array leaves for
+  optax) and that latent stays float64 even on float32 input (weights are f64 →
+  matmul promotes). Commit <PENDING>.
+- **Lesson:** one `split` per module, one subkey per parameterised submodule;
+  add a key-sensitivity test, never just a shape test.
+
 ---
 
 ## Trap template (append new entries above this line)
