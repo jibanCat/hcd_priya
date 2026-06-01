@@ -82,7 +82,7 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   `test_encoder_layer_keys_distinct` (reproducible from same key, differs on a new
   key). Verified the `layers: list` field is a proper pytree (6 array leaves for
   optax) and that latent stays float64 even on float32 input (weights are f64 →
-  matmul promotes). Commit <PENDING>.
+  matmul promotes). Commit `5f64b6f`.
 - **Lesson:** one `split` per module, one subkey per parameterised submodule;
   add a key-sensitivity test, never just a shape test.
 
