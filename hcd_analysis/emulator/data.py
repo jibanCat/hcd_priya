@@ -111,3 +111,28 @@ def apply_norm(x, stats):
 
 def invert_norm(z, stats):
     return z * stats["std"] + stats["mean"]
+
+
+# --- Cross-validation / extrapolation splits (spec sec.7) ---------------------
+
+def kfold_loso(sim_name, n_folds=8):
+    """Return [(train_row_idx, val_row_idx), ...]; sims partitioned into n_folds
+    disjoint groups, each group held out as validation once."""
+    sims = np.array(sorted(set(sim_name)))
+    groups = np.array_split(sims, n_folds)
+    all_idx = np.arange(len(sim_name))
+    folds = []
+    for held in groups:
+        if len(held) == 0:
+            continue
+        is_val = np.isin(sim_name, held)
+        folds.append((all_idx[~is_val], all_idx[is_val]))
+    return folds
+
+def tau0_edge_holdout(tau0, frac=0.15):
+    """Hold out the low+high tau0 tails (the extrapolation probe in tau0-space)."""
+    order = np.argsort(tau0)
+    k = max(1, int(round(frac * len(tau0) / 2)))
+    ho = np.concatenate([order[:k], order[-k:]])
+    tr = np.setdiff1d(np.arange(len(tau0)), ho)
+    return tr, ho

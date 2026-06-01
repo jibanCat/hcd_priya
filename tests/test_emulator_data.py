@@ -60,3 +60,22 @@ def test_norm_uses_only_train_rows():
     assert np.allclose(stats["mean"], x[:5].mean(0))
     z = apply_norm(x, stats)
     assert np.allclose(z[:5].mean(0), 0.0, atol=1e-9)
+
+from hcd_analysis.emulator.data import kfold_loso, tau0_edge_holdout
+
+def test_kfold_loso_every_sim_held_once(tmp_path):
+    path = tmp_path / "obs.h5"; write_synthetic_cache(path, n_sims=6, snaps_per_sim=2, n_alpha=4)
+    d = load_cache(path)
+    folds = kfold_loso(d["sim_name"], n_folds=3)
+    held = set()
+    for tr, va in folds:
+        assert set(tr).isdisjoint(va)
+        held |= set(d["sim_name"][va])
+    assert held == set(d["sim_name"])
+
+def test_tau0_edge_holdout_picks_extremes(tmp_path):
+    path = tmp_path / "obs.h5"; write_synthetic_cache(path, n_sims=4, snaps_per_sim=3, n_alpha=4)
+    d = load_cache(path)
+    tr, ho = tau0_edge_holdout(d["tau0"], frac=0.2)
+    assert d["tau0"][ho].min() <= d["tau0"][tr].min()
+    assert d["tau0"][ho].max() >= d["tau0"][tr].max()
