@@ -154,6 +154,29 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   from the skeleton on deserialise, so the load-time skeleton must carry the right value.
   Don't let `filter_value_and_grad` mask the bug: test plain `value_and_grad` too.
 
+## 9. likelihood grad must flow through ALL inputs + the Head-A↔Head-B w_c coupling — **GUARDED**
+- **Where:** Task 16 (`hcd_analysis/emulator/likelihood.py`), commit `<this commit>`, caught by the JAX review.
+- **Symptom (if untested):** the only differentiability test pinned `jax.grad` w.r.t. `delta`
+  only. Two real risks went unpinned: (a) grad w.r.t. `w_hcd`/`A_hcd` in both forms; (b) the
+  spec-§6 coupling where the **same** `w_c` feeds BOTH the structural `P_tier_p = Σ_c w_c·P_filt`
+  (Head A) and the HCD add-back `Σ_HCD w_c·A_c·Δ_c`. If a future refactor accidentally detached
+  `w_c` from one path (e.g. `stop_gradient`, or recomputing `P_tier_p` from a constant), the
+  forward stays correct and the delta-only test stays green, but the inference gradient is wrong.
+- **Cause:** nothing JAX-pathological here (einsum is fully differentiable, x64 on, finite) — the
+  trap is **test coverage**: a grad test that exercises one argument silently certifies the others.
+- **Fix:** added `test_difference_grad_through_w_and_A` (finite + float64 grads of both forms w.r.t.
+  w/A/delta; checks `∂/∂A_c = w_c·Σ_k Δ_c` so the A-path is provably live) and
+  `test_structural_coupling_grad_through_wc` (grad of `total_p1d_difference(structural_tier_p(w),
+  w[1:], A, Δ)` w.r.t. the full 4-vector `w_c` equals `struct + addback`; clean class[0] = struct
+  only, HCD classes[1:] strictly differ from struct-only → both paths contribute). Verified jit==eager
+  for all three fns, cov symmetric/diagonal/PSD, ratio A=1→no deviation, additivity to 1e-12.
+  Note the **intentional** 3-vs-4 asymmetry: the add-back is HCD-only (3 classes) because the clean
+  class lives entirely in the structural `P_tier_p`; the covariance correctly uses the 4-class
+  `sigma_emu`/`w_c` (clean emu error is real and belongs in the budget). Sound.
+- **Lesson:** for a multi-input differentiable contract, write one finite-grad assertion **per
+  argument**, and where two outputs share a parameter, pin that the grad picks up **both**
+  contributions (compare against the analytic struct+addback), not just that it is finite.
+
 ---
 
 ## Trap template (append new entries above this line)
