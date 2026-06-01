@@ -86,3 +86,28 @@ def load_cache(path):
     out["w_c_cache"] = np.where(N > 0, coarse_counts / np.maximum(N, 1), 0.0)
     out["inv_nc"] = np.where(coarse_counts > 0, 1.0 / np.maximum(coarse_counts, 1), 0.0)
     return out
+
+
+# --- Channel transforms + train-split normalisation (spec sec.10) -------------
+
+def signed_log(x):                 # sign-safe transform for Delta_c (smooth through 0)
+    return np.arcsinh(x)
+
+def signed_log_inv(y):
+    return np.sinh(y)
+
+def safe_log(x, floor=1e-30):
+    return np.log(np.maximum(x, floor))
+
+def fit_norm(x, train_idx):
+    xt = x[train_idx]
+    mean = np.nanmean(xt, axis=0)
+    std = np.nanstd(xt, axis=0)
+    std = np.where(std < 1e-12, 1.0, std)
+    return {"mean": mean, "std": std}
+
+def apply_norm(x, stats):
+    return (x - stats["mean"]) / stats["std"]
+
+def invert_norm(z, stats):
+    return z * stats["std"] + stats["mean"]

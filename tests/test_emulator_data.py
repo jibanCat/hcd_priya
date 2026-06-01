@@ -47,3 +47,16 @@ def test_load_collapses_15_to_4_and_builds_tau0_masks_weights(tmp_path):
     assert (d["mask"] == np.isfinite(d["P_tier_p"])).all()
     assert d["inv_nc"].shape == (R, 4)
     assert np.all(np.isfinite(d["inv_nc"]))
+
+from hcd_analysis.emulator.data import signed_log, signed_log_inv, fit_norm, apply_norm
+
+def test_signed_log_roundtrip_through_zero():
+    x = np.array([-5.0, -1e-9, 0.0, 1e-9, 3.0])
+    assert np.allclose(signed_log_inv(signed_log(x)), x, atol=1e-12)
+
+def test_norm_uses_only_train_rows():
+    x = np.arange(20.0).reshape(10, 2)
+    stats = fit_norm(x, train_idx=np.arange(5))
+    assert np.allclose(stats["mean"], x[:5].mean(0))
+    z = apply_norm(x, stats)
+    assert np.allclose(z[:5].mean(0), 0.0, atol=1e-9)
