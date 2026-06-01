@@ -107,6 +107,27 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   3 delta rows, NOT interleaved; structural_tier_p einsum batches + grads finitely on
   both args, all-ones→sum(w) identity holds.)
 
+## 7. `masked_mse` only sanitises NaN, not inf — precondition: mask ⊇ non-finite — **WATCH**
+- **Where:** Task 10 (`masked_mse` in `model.py`), surfaced by the adversarial JAX review.
+- **Symptom:** `nan_to_num(target, nan=0.0)` replaces NaN with 0 but leaves ±inf untouched.
+  An ±inf target at a **masked-out** position is harmless (the `where` zeros it: grad 0,
+  verified at 1st and 2nd order). But an ±inf target at an **unmasked** position survives:
+  forward `inf`, gradient `-inf` (`pred − inf` diff). `0·weight` does **not** rescue it
+  (`0 · inf = NaN` — confirmed: zero-weight on an unmasked-inf gives a NaN grad).
+- **Cause:** the function sanitises only the NaN sentinel; inf is not in the contract.
+- **Why it's WATCH, not HIT:** the data pipeline (`data.py`) uses **NaN** as the sole
+  above-Nyquist sentinel (`np.full(...,nan)`, `summ[allnan]=nan`) and sets
+  `mask = isfinite(P_tier_p)`, so by construction `mask == isfinite(target)` and no inf
+  ever reaches a finite/unmasked bin. The joint loss also materialises the full mask
+  (`m3 & ones_like(target,bool)`) so `sum(mask)` counts the right element total.
+- **Fix (optional hardening, not yet applied):** `nan_to_num(target)` with default
+  posinf/neginf clamps inf to a huge finite too — strictly safer at zero cost to the
+  in-contract path. Left as-is per spec ("NaN-safe"); pinned that masked-inf is safe by
+  `test_masked_mse_inf_target_at_masked_position`.
+- **Lesson:** `nan_to_num(nan=0.0)` is NaN-only; if a non-finite value can ever sit at an
+  *unmasked* element, clamp inf too. Keep the invariant `mask == isfinite(target)` enforced
+  at the data boundary so the loss never has to.
+
 ---
 
 ## Trap template (append new entries above this line)

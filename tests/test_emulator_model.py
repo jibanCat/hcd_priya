@@ -121,3 +121,68 @@ def test_masked_mse_nan_safe_gradients():
     assert jnp.isfinite(val)
     assert jnp.all(jnp.isfinite(grad))
     assert grad[1] == 0.0 and grad[3] == 0.0
+
+
+def test_masked_mse_inf_target_at_masked_position():
+    # Adversarial: a masked-out target may be +/-inf (not just NaN). The masked
+    # branch must zero it BEFORE it can poison the where-gradient (0*inf=NaN trap).
+    pred = jnp.array([1.0, 2.0, 3.0, 4.0])
+    targ = jnp.array([1.0, jnp.inf, 3.0, -jnp.inf])
+    mask = jnp.array([True, False, True, False])
+    val, grad = jax.value_and_grad(lambda p: masked_mse(p, targ, mask))(pred)
+    assert jnp.isfinite(val)
+    assert jnp.all(jnp.isfinite(grad))
+    assert grad[1] == 0.0 and grad[3] == 0.0  # masked inf positions: zero gradient
+
+
+def test_masked_mse_fully_masked_no_div_zero():
+    # Adversarial: mask all-False -> denom floored to 1 (no 0/0). Forward 0, grad all-0.
+    pred = jnp.array([1.0, 2.0, 3.0, 4.0])
+    targ = jnp.full(4, jnp.nan)
+    mask = jnp.zeros(4, bool)
+    val, grad = jax.value_and_grad(lambda p: masked_mse(p, targ, mask))(pred)
+    assert val == 0.0
+    assert jnp.all(jnp.isfinite(grad)) and jnp.all(grad == 0.0)
+
+
+def test_masked_mse_zero_weight_empty_class():
+    # Adversarial: a per-class 1/n_c weight can have a 0 entry (empty class). A zero
+    # weight must contribute zero gradient, not NaN, even at a masked NaN target.
+    pred = jnp.array([1.0, 2.0, 3.0, 4.0])
+    targ = jnp.array([0.5, jnp.nan, 1.0, 2.0])
+    mask = jnp.isfinite(targ)
+    weight = jnp.array([0.5, 0.0, 1.0, 2.0])  # idx1: empty class (zero weight) + NaN target
+    val, grad = jax.value_and_grad(lambda p: masked_mse(p, targ, mask, weight))(pred)
+    assert jnp.isfinite(val)
+    assert jnp.all(jnp.isfinite(grad))
+    assert grad[1] == 0.0  # zero weight -> zero gradient
+
+
+def test_masked_mse_batched_broadcast_jit_and_double_grad():
+    # Realistic joint-loss shape: pred/target (B,4,K), mask broadcast to full shape
+    # (as the joint loss does via `m3 & ones_like(target, bool)`), NaN above Nyquist.
+    import numpy as np
+    B, C, K = 3, 4, 6
+    rng = np.random.default_rng(0)
+    pred = jnp.array(rng.standard_normal((B, C, K)))
+    targ = rng.standard_normal((B, C, K))
+    m2d = np.ones((B, K), bool)
+    m2d[0, 4:] = False
+    m2d[2, 5:] = False
+    full = np.broadcast_to(m2d[:, None, :], (B, C, K))
+    targ[~full] = np.nan
+    targ = jnp.array(targ)
+    mask = jnp.array(full)  # materialised full mask, as the joint loss passes
+    eager = masked_mse(pred, targ, mask)
+    jitted = eqx.filter_jit(masked_mse)(pred, targ, mask)
+    assert jnp.isfinite(eager) and jnp.allclose(eager, jitted)
+    grad = jax.grad(lambda p: masked_mse(p, targ, mask))(pred)
+    assert jnp.all(jnp.isfinite(grad))
+    assert jnp.all(grad[jnp.array(~full)] == 0.0)  # zero grad at masked positions
+    # denom counts exactly the unmasked elements (mean over intended elements)
+    assert float(jnp.sum(mask.astype(jnp.float64))) == int(full.sum())
+    # float64 under x64
+    assert eager.dtype == jnp.float64 and grad.dtype == jnp.float64
+    # second-order: hessian-diag finite on the NaN batch
+    hess = jax.jacfwd(jax.grad(lambda p: masked_mse(p, targ, mask)))(pred)
+    assert jnp.all(jnp.isfinite(hess))
