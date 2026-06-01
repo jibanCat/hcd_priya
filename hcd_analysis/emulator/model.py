@@ -46,7 +46,7 @@ class HeadB(eqx.Module):
     """
     trunk: eqx.nn.Linear
     out: eqx.nn.Linear
-    n_k: int
+    n_k: int = eqx.field(static=True)
 
     def __init__(self, latent=64, n_k=172, key=None):
         k1, k2 = jax.random.split(key, 2)
@@ -96,3 +96,27 @@ def masked_mse(pred, target, mask, weight=None):
         sq = sq * weight
     denom = jnp.maximum(jnp.sum(mask.astype(sq.dtype)), 1.0)
     return jnp.sum(sq) / denom
+
+
+def joint_loss(model, batch, term_w=None):
+    """Single joint scalar (spec sec.4). Per-element means balance the 172 vs 3
+    channel counts; term_w optionally rescales the named terms."""
+    term_w = term_w or {"f_nhi": 1.0, "dndx": 1.0, "P_filt": 1.0, "delta": 1.0, "meanF": 0.1}
+    preds = jax.vmap(model)(batch["x"], batch["tau0"])
+    la_cddf = masked_mse(preds["f_nhi"], batch["t_f_nhi"],
+                         jnp.ones_like(batch["t_f_nhi"], bool),
+                         weight=batch["inv_nalpha"][:, None])
+    la_dndx = masked_mse(preds["dndx"], batch["t_dndx"],
+                         jnp.ones_like(batch["t_dndx"], bool),
+                         weight=batch["inv_nalpha"][:, None])
+    m3 = batch["mask"][:, None, :]
+    wcls4 = batch["inv_nc"][:, :, None]
+    wcls3 = batch["inv_nc"][:, 1:, None]
+    lb_pf = masked_mse(preds["P_filt"], batch["t_P_filt"],
+                       m3 & jnp.ones_like(batch["t_P_filt"], bool), weight=wcls4)
+    lb_dl = masked_mse(preds["delta"], batch["t_delta"],
+                       m3 & jnp.ones_like(batch["t_delta"], bool), weight=wcls3)
+    l_meanF = jnp.mean((batch["mean_F_clean"] - jnp.exp(-batch["tau0"])) ** 2)
+    return (term_w["f_nhi"]*la_cddf + term_w["dndx"]*la_dndx
+            + term_w["P_filt"]*lb_pf + term_w["delta"]*lb_dl
+            + term_w["meanF"]*l_meanF)

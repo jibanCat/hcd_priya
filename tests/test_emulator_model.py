@@ -1,6 +1,7 @@
 import jax, jax.numpy as jnp, equinox as eqx
 from hcd_analysis.emulator.model import Encoder, HeadA, HeadB, Emulator, structural_tier_p
 from hcd_analysis.emulator.model import masked_mse
+from hcd_analysis.emulator.model import joint_loss
 
 
 def test_encoder_headA_shapes_and_tau0_independence():
@@ -186,3 +187,22 @@ def test_masked_mse_batched_broadcast_jit_and_double_grad():
     # second-order: hessian-diag finite on the NaN batch
     hess = jax.jacfwd(jax.grad(lambda p: masked_mse(p, targ, mask)))(pred)
     assert jnp.all(jnp.isfinite(hess))
+
+
+def test_joint_loss_scalar_finite_and_grads_finite():
+    key = jax.random.PRNGKey(3)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+    batch = {
+        "x": jnp.zeros((2,10)), "tau0": jnp.array([0.3, 0.5]),
+        "t_f_nhi": jnp.zeros((2,30)), "t_dndx": jnp.zeros((2,3)),
+        "t_P_filt": jnp.where(jnp.arange(8) < 6, 1.0, jnp.nan)[None,None,:]*jnp.ones((2,4,8)),
+        "t_delta": jnp.zeros((2,3,8)),
+        "mask": (jnp.arange(8) < 6)[None,:]*jnp.ones((2,8), bool),
+        "inv_nc": jnp.array([[1.,1/10,1/7,0.],[1.,1/10,1/7,1/3]]),
+        "inv_nalpha": jnp.array([0.25, 0.25]),
+        "mean_F_clean": jnp.array([0.7, 0.6]),
+    }
+    val, grad = jax.value_and_grad(lambda mm: joint_loss(mm, batch))(m)
+    assert jnp.isfinite(val)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    assert all(jnp.all(jnp.isfinite(g)) for g in leaves)
