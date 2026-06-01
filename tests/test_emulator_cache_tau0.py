@@ -42,6 +42,33 @@ def test_locate_raw_tau_file_returns_none_when_missing():
         assert bt0.locate_raw_tau_file(Path(tmp), "ns0.8Ap2e-09", 10) is None
 
 
+_NS0907 = ("ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662"
+           "omegamh20.144hireionz7.47bhfeedback0.0347")
+
+
+def test_raw_spectra_index_ns0907_ladder_offset():
+    # ns0.907 has a raw SPECTRA ladder gap (snap 15/18): its Phase-1 snap_17 is
+    # the z=2.8 snapshot, whose grid_480 tau lives in raw SPECTRA_018 (SPECTRA_017
+    # is a z=3.0 grid). All other (sim, snap) map 1:1. Without this the build's
+    # z_raw-vs-z_meta assert trips on this single pair (production shard 44).
+    assert bt0._raw_spectra_index(_NS0907, 17) == 18
+    assert bt0._raw_spectra_index(_NS0907, 16) == 16
+    assert bt0._raw_spectra_index(_NS0907, 18) == 18
+    assert bt0._raw_spectra_index("ns0.803Ap2e-09herei4", 17) == 17  # other sims unaffected
+
+
+def test_locate_raw_tau_file_ns0907_snap17_maps_to_spectra018():
+    with tempfile.TemporaryDirectory() as tmp:
+        emu_root = Path(tmp)
+        # Lay down BOTH SPECTRA_017 and SPECTRA_018 grid files; snap 17 must pick 018.
+        for s in (17, 18):
+            d = emu_root / _NS0907 / "output" / f"SPECTRA_{s:03d}"
+            d.mkdir(parents=True)
+            (d / "lya_forest_spectra_grid_480.hdf5").write_bytes(b"")
+        got = bt0.locate_raw_tau_file(emu_root, _NS0907, 17)
+        assert got == emu_root / _NS0907 / "output" / "SPECTRA_018" / "lya_forest_spectra_grid_480.hdf5"
+
+
 def test_snap_z_to_priya_grid():
     assert np.isclose(bt0._snap_z_to_priya_grid(4.600013), 4.6)
     assert np.isclose(bt0._snap_z_to_priya_grid(3.0), 3.0)
@@ -343,6 +370,8 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
 if __name__ == "__main__":
     test_locate_raw_tau_file_finds_grid_file()
     test_locate_raw_tau_file_returns_none_when_missing()
+    test_raw_spectra_index_ns0907_ladder_offset()
+    test_locate_raw_tau_file_ns0907_snap17_maps_to_spectra018()
     test_snap_z_to_priya_grid()
     test_grid_in_dir_requires_grid_480()
     test_discover_lf_pairs_sorted_no_hires()

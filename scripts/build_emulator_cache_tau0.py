@@ -42,6 +42,28 @@ _HR_EMU_ROOT = Path("/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_
 _N_K = {"lf": 172, "hr": 525}
 
 
+# ns0.907 has an anomalous raw SPECTRA ladder (gaps at snap 15/18; see
+# docs/SESSION_HANDOVER_2026_05_22.md). Its Phase-1 snap_17 is the z=2.8
+# snapshot, but the z=2.8 grid_480 raw tau lives in raw dir SPECTRA_018 --
+# SPECTRA_017 holds a z=3.0 grid_480. Every other sim maps Phase-1 snap ->
+# raw SPECTRA_<snap> 1:1. Without this override the build's z_raw-vs-z_meta
+# assert (build_tau0_rows) trips on this single (sim, z) pair. Keyed by a
+# substring of the sim name so it matches the full param-suffixed folder.
+_RAW_SPECTRA_DIR_OVERRIDE = {
+    ("ns0.907", 17): 18,
+}
+
+
+def _raw_spectra_index(sim_name: str, snap: int) -> int:
+    """Map a Phase-1 snap index to its raw SPECTRA_<NNN> dir index.
+
+    Identity for all sims except the documented ns0.907 ladder offset."""
+    for (tag, s), raw_s in _RAW_SPECTRA_DIR_OVERRIDE.items():
+        if s == snap and tag in sim_name:
+            return raw_s
+    return snap
+
+
 def locate_raw_tau_file(emu_root, sim_name: str, snap: int):
     """Return the raw fake_spectra tau HDF5 for (sim_name, snap), or None.
 
@@ -50,8 +72,11 @@ def locate_raw_tau_file(emu_root, sim_name: str, snap: int):
 
     Only the 691200-skewer grid_480 file is accepted.  The low-res 32k
     lya_forest_spectra.hdf5 is never used (it cannot match PRIYA bit-identity).
+    The raw SPECTRA dir index is `snap` for every sim except the documented
+    ns0.907 ladder offset (see _RAW_SPECTRA_DIR_OVERRIDE).
     """
-    found = _grid_in_dir(Path(emu_root) / sim_name / "output" / f"SPECTRA_{snap:03d}")
+    raw_snap = _raw_spectra_index(sim_name, snap)
+    found = _grid_in_dir(Path(emu_root) / sim_name / "output" / f"SPECTRA_{raw_snap:03d}")
     if found is not None:
         return found
     # Fallback: the Phase-1 (hcd_outputs) and raw (emu_full) folder names can
@@ -60,7 +85,7 @@ def locate_raw_tau_file(emu_root, sim_name: str, snap: int):
     # Match the emu_root folder by parsed params instead of by exact name.
     alt = _match_emu_folder_by_params(emu_root, sim_name)
     if alt is not None:
-        return _grid_in_dir(Path(emu_root) / alt / "output" / f"SPECTRA_{snap:03d}")
+        return _grid_in_dir(Path(emu_root) / alt / "output" / f"SPECTRA_{raw_snap:03d}")
     return None
 
 
