@@ -271,8 +271,11 @@ def _collapse_p1d(p15, counts15):
     """Count-weighted collapse of fine-bin P1D to coarse classes (R,15,K)->(R,4,K).
 
     A coarse class P1D is the count-weighted mean of its fine bins (each fine
-    P1D is already normalised by its own count); empty coarse classes -> NaN row.
-    NaN-safe: uses nansum over fine bins with the per-fine counts as weights.
+    P1D is already normalised by its own count). An empty coarse class (zero
+    counts) collapses to 0.0 (the cache stores finite zeros for empty classes;
+    this is REQUIRED so the structural sum Sum_c w_c*P_filt stays finite, since
+    w_c=0 there and 0*NaN would poison the total). A bin that is NaN across ALL
+    fine sub-bins (above native Nyquist) stays NaN for masking.
     """
     R, _, K = p15.shape
     out = np.full((R, 4, K), np.nan)
