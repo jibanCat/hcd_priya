@@ -41,6 +41,31 @@ _LF_EMU_ROOT = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
 _HR_EMU_ROOT = Path("/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2")
 _N_K = {"lf": 172, "hr": 525}
 
+# Canonical LLS / subDLA / DLA log_NHI class boundaries (single source of truth).
+# 17.2 = clean->LLS, 19.0 = LLS->subDLA, 20.3 = subDLA->DLA. These MUST be members
+# of hcd_analysis.priya_p1d.FINE_NHI_EDGES (the Tier-C fine edges) so that the
+# dN/dX per-class partition and the Tier-C P1D partition land on identical N_HI
+# boundaries -- otherwise power is silently misattributed between classes.
+# Enforced at build time by _assert_class_edges() (called from main()).
+# NOTE (follow-up): scripts/diag_wc_from_dndx.py and scripts/diag_crossclass_coupling.py
+# duplicate these edges and should be refactored to import COARSE_CLASS_EDGES from here.
+COARSE_CLASS_EDGES = (17.2, 19.0, 20.3)
+
+
+def _assert_class_edges() -> None:
+    """Fail the build if the coarse class edges are not Tier-C FINE_NHI_EDGES members.
+
+    Guards against silent drift between the dN/dX class partition (this module)
+    and the Tier-C P1D partition (hcd_analysis.priya_p1d.FINE_NHI_EDGES).
+    """
+    from hcd_analysis.priya_p1d import FINE_NHI_EDGES
+    for edge in COARSE_CLASS_EDGES:
+        if not np.isclose(FINE_NHI_EDGES, edge, atol=1e-9).any():
+            raise ValueError(
+                f"Class edge {edge} is not a member of FINE_NHI_EDGES "
+                f"({np.asarray(FINE_NHI_EDGES)}); the dN/dX class partition and the "
+                "Tier-C partition would disagree -> silent power misattribution.")
+
 
 # ns0.907 has an anomalous raw SPECTRA ladder (gaps at snap 15/18; see
 # docs/SESSION_HANDOVER_2026_05_22.md). Its Phase-1 snap_17 is the z=2.8
@@ -463,6 +488,8 @@ def main() -> None:
     parser.add_argument("--spot-check", action="store_true",
                         help="After writing, verify row 0 P_tier_p is finite.")
     args = parser.parse_args()
+
+    _assert_class_edges()  # fail fast if dN/dX and Tier-C class edges have drifted
 
     fid = args.fidelity
     hcd_root = args.hcd_root or _HCD_OUTPUTS

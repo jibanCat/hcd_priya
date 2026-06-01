@@ -367,7 +367,17 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
     print(f"RESULT OK HR bit-identity sim={sim[:24]} z=3.0 alpha={alpha:.4f} N_K={NK} max|r-1|={rel:.3e}")
 
 
+def test_dndx_class_edges_match_fine_nhi_edges():
+    from hcd_analysis.priya_p1d import FINE_NHI_EDGES
+    import numpy as np
+    import scripts.build_emulator_cache_tau0 as bt0
+    for edge in (17.2, 19.0, 20.3):
+        assert np.isclose(FINE_NHI_EDGES, edge, atol=1e-9).any(), f"{edge} not in FINE_NHI_EDGES"
+    assert bt0.COARSE_CLASS_EDGES == (17.2, 19.0, 20.3)
+
+
 if __name__ == "__main__":
+    test_dndx_class_edges_match_fine_nhi_edges()
     test_locate_raw_tau_file_finds_grid_file()
     test_locate_raw_tau_file_returns_none_when_missing()
     test_raw_spectra_index_ns0907_ladder_offset()
