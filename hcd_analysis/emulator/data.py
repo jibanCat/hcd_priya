@@ -2,6 +2,12 @@
 
 15->4 coarse-class collapse, tau0 coordinate, native-Nyquist NaN masks, and the
 analytic 1/n_c sample-variance weights. See spec sec.4, sec.7, sec.9.
+
+Empty-class contract: a coarse class with zero counts collapses to 0.0 (the
+cache stores finite zeros for empty classes), which keeps the structural sum
+``P_tier_p = Σ_c w_c·P_filt`` finite (its ``w_c=0`` would turn any NaN into NaN
+via ``0·NaN``). Only a bin that is NaN across all fine sub-bins (above native
+Nyquist) stays NaN, so it can be masked out downstream.
 """
 from __future__ import annotations
 import h5py, numpy as np
@@ -14,7 +20,19 @@ def _collapse_counts(counts15):
 
 def _collapse_p1d(p15, counts15):
     """Count-weighted collapse of fine-bin P1D to coarse classes (R,15,K)->(R,4,K).
-    Empty coarse classes -> NaN row. NaN-safe over fine bins."""
+
+    NaN-safe over fine bins. An *empty* coarse class (zero counts) collapses to
+    0.0, not NaN: the production cache stores finite zeros for empty classes
+    (see ``priya_p1d._per_class_p1d_at_scale``), and the downstream structural
+    sum ``P_tier_p = Σ_c w_c·P_filt`` weights an empty class by ``w_c=0`` — a
+    NaN there would poison the whole total via ``0·NaN=NaN``. Only a bin that is
+    NaN across *all* fine sub-bins (genuinely above native Nyquist) stays NaN so
+    it can be masked.
+
+    Corner case: when a single k mixes finite and NaN fine sub-bins within one
+    coarse class, NaN sub-bins contribute 0 while their weight stays in the
+    denominator, slightly under-weighting the surviving finite sub-bins. This is
+    a documented, accepted approximation (no behaviour change)."""
     R, _, K = p15.shape
     out = np.full((R, 4, K), np.nan)
     for ci, s in enumerate(COARSE_SLICES):
@@ -23,6 +41,8 @@ def _collapse_p1d(p15, counts15):
         seg = p15[:, s, :]
         contrib = np.where(np.isfinite(seg), seg, 0.0) * w[:, :, None]
         summ = contrib.sum(1)
+        # Fires only for the Nyquist-NaN case (ALL fine sub-bins NaN), NOT for
+        # zero-count empties (those have finite zeros and correctly stay 0.0).
         allnan = (~np.isfinite(seg)).all(1)
         summ[allnan] = np.nan
         out[:, ci, :] = summ
@@ -61,6 +81,8 @@ def load_cache(path):
     out["tau0"] = -np.log(out["target_F"])
     out["mask"] = np.isfinite(out["P_tier_p"])
     N = coarse_counts.sum(1, keepdims=True)
-    out["w_c_cache"] = coarse_counts / N
+    # Guard 0/0 (a row with zero total counts is unreachable in practice but
+    # must not silently produce NaN), mirroring the inv_nc guard below.
+    out["w_c_cache"] = np.where(N > 0, coarse_counts / np.maximum(N, 1), 0.0)
     out["inv_nc"] = np.where(coarse_counts > 0, 1.0 / np.maximum(coarse_counts, 1), 0.0)
     return out
