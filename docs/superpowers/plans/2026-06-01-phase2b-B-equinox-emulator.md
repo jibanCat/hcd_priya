@@ -30,10 +30,12 @@
 
 **Conventions:** numpy for the loader/IO (host side); JAX (`jnp`) for everything inside the differentiable path (model, loss, `dndx_wc`, likelihood). The loader returns numpy; the train step converts to `jnp`. Keep `dndx_wc.w_c_from_dndx` JAX-pure (no python branching on traced values).
 
-**Env activation (all test/run commands assume):**
+**Env activation (all test/run commands assume).** ⚠️ `PYTHONNOUSERSITE=1` is
+MANDATORY — without it the interpreter silently borrows stale packages (numpy<2,
+h5py) from `~/.local`. See `docs/superpowers/2026-06-01-emu-jax-env.md`.
 ```bash
 export EMUJAX=/home/mfho/.conda/envs/emu-jax/bin/python3
-PYTHONPATH=/home/mfho/hcd_priya $EMUJAX -m pytest <test> -v
+PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya $EMUJAX -m pytest <test> -v
 ```
 
 ---
