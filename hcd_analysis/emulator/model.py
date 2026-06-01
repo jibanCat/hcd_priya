@@ -84,3 +84,15 @@ def structural_tier_p(w_c, P_filt_lin):
     Batches over leading dims; differentiable.
     """
     return jnp.einsum("...c,...ck->...k", w_c, P_filt_lin)
+
+
+def masked_mse(pred, target, mask, weight=None):
+    """NaN-safe masked MSE. Sanitise target to finite BEFORE the masked diff so the
+    jnp.where double-NaN-gradient trap never fires; guard the denominator with max(n,1)."""
+    target_safe = jnp.nan_to_num(target, nan=0.0)
+    diff = jnp.where(mask, pred - target_safe, 0.0)
+    sq = diff ** 2
+    if weight is not None:
+        sq = sq * weight
+    denom = jnp.maximum(jnp.sum(mask.astype(sq.dtype)), 1.0)
+    return jnp.sum(sq) / denom

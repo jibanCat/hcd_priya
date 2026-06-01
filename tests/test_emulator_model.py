@@ -1,5 +1,6 @@
 import jax, jax.numpy as jnp, equinox as eqx
 from hcd_analysis.emulator.model import Encoder, HeadA, HeadB, Emulator, structural_tier_p
+from hcd_analysis.emulator.model import masked_mse
 
 
 def test_encoder_headA_shapes_and_tau0_independence():
@@ -110,3 +111,13 @@ def test_emulator_vmap_over_tau0_and_structural_grad():
     assert jnp.all(jnp.isfinite(gw)) and jnp.all(jnp.isfinite(gp))
     # all-ones P_filt -> Tier-P total == sum(w) (the structural identity)
     assert jnp.allclose(structural_tier_p(w[0], jnp.ones((4, 6))), w[0].sum())
+
+
+def test_masked_mse_nan_safe_gradients():
+    pred = jnp.array([1.0, 2.0, 3.0, 4.0])
+    targ = jnp.array([1.0, jnp.nan, 3.0, jnp.nan])
+    mask = jnp.isfinite(targ)
+    val, grad = jax.value_and_grad(lambda p: masked_mse(p, targ, mask))(pred)
+    assert jnp.isfinite(val)
+    assert jnp.all(jnp.isfinite(grad))
+    assert grad[1] == 0.0 and grad[3] == 0.0
