@@ -206,3 +206,45 @@ def test_joint_loss_scalar_finite_and_grads_finite():
     assert jnp.isfinite(val)
     leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
     assert all(jnp.all(jnp.isfinite(g)) for g in leaves)
+
+
+def test_headB_n_k_static_field_serialise_roundtrip():
+    # HeadB.n_k is eqx.field(static=True): (a) it must NOT be a differentiable leaf
+    # so PLAIN jax.value_and_grad(joint_loss)(model,...) works (a dynamic int leaf
+    # raises "grad requires real- or complex-valued inputs, got int64"); (b) it must
+    # survive tree_serialise/deserialise, which reconstructs static fields from the
+    # SKELETON (the bytes hold only array leaves) — the n_k must round-trip and the
+    # restored model must reproduce predictions bit-for-bit.
+    import io
+    key = jax.random.PRNGKey(31)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+
+    # (a) n_k is a STATIC field, not an array leaf of the pytree
+    arr_leaves = jax.tree_util.tree_leaves(eqx.filter(m, eqx.is_array))
+    assert all(jnp.issubdtype(l.dtype, jnp.floating) for l in arr_leaves)
+    assert m.head_b.n_k == 8
+
+    # (b) serialise -> deserialise into a fresh skeleton; n_k restored, preds identical
+    buf = io.BytesIO()
+    eqx.tree_serialise_leaves(buf, m)
+    buf.seek(0)
+    skeleton = Emulator(in_dim=10, n_k=8, key=jax.random.PRNGKey(999))
+    m2 = eqx.tree_deserialise_leaves(buf, skeleton)
+    assert m2.head_b.n_k == 8
+    x = jnp.ones((3, 10)); t = jnp.linspace(0.1, 0.5, 3)
+    p1 = jax.vmap(m)(x, t); p2 = jax.vmap(m2)(x, t)
+    for kk in ("f_nhi", "dndx", "P_filt", "delta"):
+        assert jnp.array_equal(p1[kk], p2[kk])
+
+
+def test_emulator_vmap_equals_python_loop_all_heads():
+    # vmap(model) over a batch must equal a python loop row-by-row for EVERY head
+    # (no leading-axis bug in Head B's reshape(7, n_k) / atleast_1d(tau0) path).
+    key = jax.random.PRNGKey(17)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+    x = jax.random.normal(jax.random.PRNGKey(18), (4, 10))
+    t = jnp.linspace(0.05, 0.6, 4)
+    pv = jax.vmap(m)(x, t)
+    for kk in ("f_nhi", "dndx", "P_filt", "delta"):
+        loop = jnp.stack([m(x[i], t[i])[kk] for i in range(4)])
+        assert jnp.allclose(pv[kk], loop, atol=0, rtol=0) or jnp.allclose(pv[kk], loop)

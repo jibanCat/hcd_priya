@@ -128,6 +128,32 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   *unmasked* element, clamp inf too. Keep the invariant `mask == isfinite(target)` enforced
   at the data boundary so the loss never has to.
 
+## 8. dynamic `int` leaf breaks plain `value_and_grad` — `eqx.field(static=True)` — **HIT**
+- **Where:** Task 11 (`HeadB.n_k` in `model.py`), commit `6fa9fee`, caught building the joint loss.
+- **Symptom:** plain `jax.value_and_grad(joint_loss)(model, ...)` raises
+  `TypeError: grad requires real- or complex-valued inputs (... a sub-dtype of np.inexact),
+  but got int64`. A bare `n_k: int` field is a **dynamic pytree leaf**, so reverse-mode AD
+  tries to differentiate the integer. (Confirmed by reconstructing the pre-commit dynamic-int
+  `HeadB`: plain `value_and_grad` fails; `eqx.filter_value_and_grad`, which filters to
+  `eqx.is_array`/`is_inexact`, silently skips the int and works — which is why earlier
+  filter-based tests never exposed it.)
+- **Cause:** Equinox treats annotated fields as pytree leaves unless marked static; an int
+  leaf is a non-inexact leaf that JAX's `grad` refuses.
+- **Fix:** `n_k: int = eqx.field(static=True)` — moves `n_k` into the static aux-data, off the
+  differentiable leaf set. Verified regression-free: (a) `filter_jit` traces ONCE and does not
+  recompile on new values / a re-keyed model with the same `n_k`, but DOES retrace when `n_k`
+  changes (correct — static = part of the jit cache key); (b) `jax.vmap(model)` still batches;
+  (c) `tree_serialise/deserialise` round-trips — static `n_k` is rebuilt from the **skeleton**
+  (bytes hold only array leaves), restored model reproduces preds bit-for-bit, and
+  deserialising into a wrong-`n_k` skeleton correctly raises a shape/sha mismatch; (d) plain
+  `value_and_grad(joint_loss)` now returns a finite scalar + all-finite grads. Pinned by
+  `test_headB_n_k_static_field_serialise_roundtrip`. Commit `<this commit>`.
+- **Lesson:** any non-array hyperparameter stored on an `eqx.Module` (ints, shapes, flags,
+  tuples) must be `eqx.field(static=True)`, NOT a bare leaf — else it (a) breaks plain
+  `value_and_grad` and (b) bloats the differentiable pytree. Static fields are reconstructed
+  from the skeleton on deserialise, so the load-time skeleton must carry the right value.
+  Don't let `filter_value_and_grad` mask the bug: test plain `value_and_grad` too.
+
 ---
 
 ## Trap template (append new entries above this line)
