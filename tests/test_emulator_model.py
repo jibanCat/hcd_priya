@@ -1,5 +1,5 @@
 import jax, jax.numpy as jnp, equinox as eqx
-from hcd_analysis.emulator.model import Encoder, HeadA
+from hcd_analysis.emulator.model import Encoder, HeadA, HeadB, Emulator, structural_tier_p
 
 
 def test_encoder_headA_shapes_and_tau0_independence():
@@ -54,3 +54,23 @@ def test_jit_vmap_and_finite_grads():
     assert jnp.all(jnp.isfinite(g_enc))
     g_ha = jax.grad(lambda l: ha(l)["f_nhi"].sum() + ha(l)["dndx"].sum())(lat)
     assert jnp.all(jnp.isfinite(g_ha))
+
+
+def test_headB_outputs_and_structural_tier_p():
+    key = jax.random.PRNGKey(1)
+    hb = HeadB(latent=64, n_k=8, key=key)
+    lat = jnp.zeros(64); tau0 = jnp.array(0.3)
+    out = hb(lat, tau0)
+    assert out["P_filt"].shape == (4, 8)
+    assert out["delta"].shape == (3, 8)
+    w = jnp.array([0.7, 0.18, 0.07, 0.05]); P_filt_lin = jnp.ones((4, 8))
+    tp = structural_tier_p(w, P_filt_lin)
+    assert tp.shape == (8,)
+    assert jnp.allclose(tp, w.sum())
+
+
+def test_emulator_endtoend_runs():
+    key = jax.random.PRNGKey(2)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+    pred = m(jnp.zeros(10), tau0=jnp.array(0.3))
+    assert set(pred) >= {"f_nhi", "dndx", "P_filt", "delta"}

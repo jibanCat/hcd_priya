@@ -36,3 +36,51 @@ class HeadA(eqx.Module):
     def __call__(self, latent):
         h = jax.nn.gelu(self.trunk(latent))
         return {"f_nhi": self.cddf(h), "dndx": self.dndx(h)}
+
+
+class HeadB(eqx.Module):
+    """tau0-dependent head: 4 filtered class P1D (log-space) + 3 HCD deltas.
+
+    Reads concat(latent, tau0). The 7*n_k output is reshaped to (7, n_k) and
+    split into 4 P_filt (clean,LLS,subDLA,DLA) and 3 delta (LLS,subDLA,DLA).
+    """
+    trunk: eqx.nn.Linear
+    out: eqx.nn.Linear
+    n_k: int
+
+    def __init__(self, latent=64, n_k=172, key=None):
+        k1, k2 = jax.random.split(key, 2)
+        self.n_k = n_k
+        self.trunk = eqx.nn.Linear(latent + 1, 256, key=k1)
+        self.out = eqx.nn.Linear(256, 7 * n_k, key=k2)
+
+    def __call__(self, latent, tau0):
+        h = jax.nn.gelu(self.trunk(jnp.concatenate([latent, jnp.atleast_1d(tau0)])))
+        y = self.out(h).reshape(7, self.n_k)
+        return {"P_filt": y[:4], "delta": y[4:]}
+
+
+class Emulator(eqx.Module):
+    """Full emulator: Encoder -> {HeadA (tau0-invariant), HeadB (tau0-dependent)}."""
+    enc: Encoder
+    head_a: HeadA
+    head_b: HeadB
+
+    def __init__(self, in_dim=10, n_k=172, key=None):
+        k1, k2, k3 = jax.random.split(key, 3)
+        self.enc = Encoder(in_dim=in_dim, key=k1)
+        self.head_a = HeadA(latent=64, key=k2)
+        self.head_b = HeadB(latent=64, n_k=n_k, key=k3)
+
+    def __call__(self, x, tau0):
+        lat = self.enc(x)
+        return {**self.head_a(lat), **self.head_b(lat, tau0)}
+
+
+def structural_tier_p(w_c, P_filt_lin):
+    """Structural Tier-P total = Sum_c w_c * P_c^filt (LINEAR space).
+
+    w_c: (...,4); P_filt_lin: (...,4,K) LINEAR space. Returns (...,K).
+    Batches over leading dims; differentiable.
+    """
+    return jnp.einsum("...c,...ck->...k", w_c, P_filt_lin)
