@@ -248,3 +248,17 @@ def test_emulator_vmap_equals_python_loop_all_heads():
     for kk in ("f_nhi", "dndx", "P_filt", "delta"):
         loop = jnp.stack([m(x[i], t[i])[kk] for i in range(4)])
         assert jnp.allclose(pv[kk], loop, atol=0, rtol=0) or jnp.allclose(pv[kk], loop)
+
+
+def test_headA_outputs_are_tau0_invariant_by_gradient():
+    # Task 12: Head A (f_nhi, dN/dX) must be EXACTLY tau0-invariant. It is structural
+    # (Head A consumes only the latent, never tau0), so the Jacobian wrt tau0 is exactly
+    # zero -- a gradient test, not a value test (spec sec.8).
+    key = jax.random.PRNGKey(4)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+    x = jnp.ones(10)
+    def fa(tau0):
+        p = m(x, tau0)
+        return jnp.concatenate([p["f_nhi"], p["dndx"]])
+    J = jax.jacfwd(fa)(jnp.array(0.4))
+    assert jnp.allclose(J, 0.0, atol=0.0)  # exactly zero: Head A does not consume tau0
