@@ -15,6 +15,43 @@ import h5py, numpy as np
 COARSE_SLICES = (slice(0, 1), slice(1, 8), slice(8, 13), slice(13, 15))
 COARSE_NAMES = ("clean", "LLS", "subDLA", "DLA")
 
+# --- Unit-cube input normalization (spec sec.10 / preprocessing audit) --------
+# PRIYA's design box for the production grid, pulled verbatim from the saved
+# emulator config that THIS cache reproduces:
+#   /home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/emulator_params.json
+#   ("param_names":{ns:0,Ap:1,herei:2,heref:3,alphaq:4,hub:5,omegamh2:6,
+#                    hireionz:7,bhfeedback:8}, "param_limits":[...])
+# This is the actual Emulator.param_limits serialized for this grid (it widens
+# the coarse_grid.py code defaults at L93-124, e.g. ns_hi=1.05, herei_hi=4.5).
+# All 60 PRIYA design points map into [0,1] under these limits (verified).
+# Aligned BY NAME to OUR cache param order
+# [ns, Ap, herei, heref, alphaq, hub, omegamh2, hireionz, bhfeedback]
+# (== PRIYA's param_names order, so the alignment is the identity).
+PARAM_LIMITS = np.array([
+    [0.8,    1.05],     # ns        (emulator_params.json param_limits[0])
+    [1.2e-9, 2.6e-9],   # Ap        (param_limits[1])
+    [3.5,    4.5],      # herei     (param_limits[2])
+    [2.2,    3.2],      # heref     (param_limits[3])
+    [1.3,    3.0],      # alphaq    (param_limits[4])
+    [0.65,   0.75],     # hub       (param_limits[5])
+    [0.14,   0.146],    # omegamh2  (param_limits[6])
+    [6.5,    8.0],      # hireionz  (param_limits[7])
+    [0.03,   0.07],     # bhfeedback(param_limits[8])
+], dtype=np.float64)
+
+# PRIYA zout grid range (coarse_grid.py L153-154: max_z=5.4, min_z=2.0).
+Z_LIMITS = (2.0, 5.4)
+
+
+def normalize_params(params):
+    """Map raw params (...,9) to the unit cube (...,9) via PRIYA's design box.
+
+    Vectorized, finite, and monotonic. Values outside the design box map
+    outside [0,1] (caller can flag via the in-domain check)."""
+    lo = PARAM_LIMITS[:, 0]
+    hi = PARAM_LIMITS[:, 1]
+    return (np.asarray(params) - lo) / (hi - lo)
+
 def _collapse_counts(counts15):
     return np.stack([counts15[:, s].sum(1) for s in COARSE_SLICES], axis=1)
 
@@ -85,6 +122,18 @@ def load_cache(path):
     # must not silently produce NaN), mirroring the inv_nc guard below.
     out["w_c_cache"] = np.where(N > 0, coarse_counts / np.maximum(N, 1), 0.0)
     out["inv_nc"] = np.where(coarse_counts > 0, 1.0 / np.maximum(coarse_counts, 1), 0.0)
+
+    # --- Normalized encoder input x = [params_unit (9), z_unit (1)] -----------
+    params_unit = normalize_params(out["params"])                  # (R,9)
+    z_unit = (out["z_grid"] - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
+    out["params_unit"] = params_unit
+    out["x"] = np.concatenate([params_unit, z_unit[:, None]], axis=1)  # (R,10)
+    out["in_domain"] = np.all((params_unit >= -1e-9)
+                              & (params_unit <= 1 + 1e-9), axis=1)
+    n_oob = int((~out["in_domain"]).sum())
+    if n_oob:
+        print(f"WARN load_cache: {n_oob}/{len(out['in_domain'])} rows "
+              f"out of PRIYA param domain (params_unit outside [0,1])")
     return out
 
 

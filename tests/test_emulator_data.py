@@ -79,3 +79,23 @@ def test_tau0_edge_holdout_picks_extremes(tmp_path):
     tr, ho = tau0_edge_holdout(d["tau0"], frac=0.2)
     assert d["tau0"][ho].min() <= d["tau0"][tr].min()
     assert d["tau0"][ho].max() >= d["tau0"][tr].max()
+
+from hcd_analysis.emulator.data import PARAM_LIMITS, normalize_params
+
+def test_param_limits_cover_nine_params_in_cache_order():
+    # PARAM_LIMITS is (9,2) lo/hi aligned to the cache param order
+    assert PARAM_LIMITS.shape == (9, 2)
+    assert np.all(PARAM_LIMITS[:, 1] > PARAM_LIMITS[:, 0])
+
+def test_normalize_params_maps_to_unit_cube(tmp_path):
+    path = tmp_path / "obs.h5"; write_synthetic_cache(path)   # fixture params are uniform(0.5,1.5)
+    d = load_cache(path)
+    # load_cache must now expose normalized model input x = [params_unit (9), z_unit (1)]
+    assert "x" in d and d["x"].shape == (d["params"].shape[0], 10)
+    # real-cache params (when in-domain) normalize into [0,1]; synthetic may be out-of-domain ->
+    # normalize_params must still be finite and monotonic. Check a known in-range point maps right:
+    lo, hi = PARAM_LIMITS[:, 0], PARAM_LIMITS[:, 1]
+    mid = lo + 0.5 * (hi - lo)
+    assert np.allclose(normalize_params(mid[None, :])[0], 0.5)
+    assert np.allclose(normalize_params(lo[None, :])[0], 0.0)
+    assert np.allclose(normalize_params(hi[None, :])[0], 1.0)
