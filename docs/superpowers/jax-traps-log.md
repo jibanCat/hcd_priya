@@ -177,6 +177,33 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   argument**, and where two outputs share a parameter, pin that the grad picks up **both**
   contributions (compare against the analytic struct+addback), not just that it is finite.
 
+## 10. `delta_c(z)` polynomial: batched-z + grad-through-z were untested — **GUARDED**
+- **Where:** Task 6 (`delta_c`/`w_c_corrected` in `dndx_wc.py`), commit `c94efc0`, caught by the JAX review.
+- **Symptom (if untested):** the shipped tests only exercised **scalar** z and grad w.r.t.
+  `dndx`. Two real, distinct risks went unpinned: (a) **batched z** — `delta_c` builds
+  `jnp.stack([z**2,z,1], axis=-1) @ coeffs.T`, so a (N,) z must give (N,4); an `axis`
+  slip would only surface batched (the vmap/likelihood path), never scalar. (b) **grad
+  through the continuous z polynomial path** — the likelihood differentiates `δ_c(z)`;
+  a scalar `dndx`-only grad test certifies neither z nor the all-zero-`dndx` renorm edge
+  (`w/sum(w)` is a latent 0/0 if a class ever collapsed).
+- **Cause:** not JAX-pathological — pure **test coverage**. Verified concretely: code is
+  float64, JAX-pure (no python branch on traced z), jit==eager for both fns scalar+batched;
+  sum-to-1 holds to ≤2.2e-16 at z∈{2.0,3.0,5.4} incl. tiny/zero `dndx`; grad w.r.t. each
+  of the 4 components, w.r.t. continuous z, the full `dndx→w_c→scalar` chain, and the
+  all-zero-`dndx` z-grad are all finite (the 0/0 does not materialise — `w_clean=1` keeps
+  the denom = 1+δ_clean ≠ 0). Coeffs cross-checked **byte-exact** against
+  `2026-06-01-delta_c-coeffs.md` (max abs diff 0.0); `delta_c` == `np.polyval` to 6.9e-18
+  (matmul-vs-Horner rounding, no-op). Physics direction correct: at the coupling point
+  (dndx≈[0.36,0.10,0.05], Xbar=0.642, z=3) δ_c=[+0.0066,−0.0104,−0.0154,−0.0166] moves
+  w_c clean↑ / HCD↓ — the sign the calibrated mean δ_c implies.
+- **Fix:** added `test_wc_corrected_batched_z_shape_and_sum_at_extremes` (batched (N,4),
+  sum-to-1 ≤1e-10 at z-extremes + zero `dndx` → [1,0,0,0]) and
+  `test_wc_corrected_grad_through_continuous_z_is_finite` (finite grad through z, incl.
+  all-zero-`dndx` renorm edge). Commit `<this commit>`.
+- **Lesson:** a polynomial-in-z map differentiated by the likelihood needs a batched-shape
+  test AND a grad-through-z test, not just scalar-value + grad-w.r.t.-the-other-arg.
+  Cross-check frozen coeffs byte-exact against the calibration record, not "looks small".
+
 ---
 
 ## Trap template (append new entries above this line)
