@@ -1,79 +1,97 @@
 # Lyα-forest P1D emulator architecture — literature review (PCA vs polynomial vs MLP; GP vs NN)
 
-**Date:** 2026-06-02. Source: a deep-research workflow (5 search angles → fetch → 3-vote
-adversarial verification → 70 web-verified, non-refuted claims quoting primary sources).
-Question: for our Phase-2b emulator (~60 LF sims, 9 cosmo/IGM params + z + τ₀, P1D split
-by HCD class, differentiable for HMC), is a **dense per-k MLP with no PCA** justified, or
-should we use PCA / a Gaussian Process / a polynomial-chaos surrogate?
+**Date:** 2026-06-02. Source: deep-research workflow `wf_25749b73-8f9` (5 angles, 16 primary
+sources fetched, 76 claims → 25 verified by 3-vote adversarial check → 22 confirmed, 3 refuted,
+6 synthesized findings). **This supersedes an earlier same-day draft that was built from a
+partial journal read and over-stated the MLP case** — the corrected conclusions are below.
+
+Question: for our Phase-2b emulator (~60 LF sims, 9 cosmo/IGM params + z + τ₀, P1D split by
+HCD class, differentiable for HMC) — PCA / polynomial / MLP, and GP vs NN?
 
 ---
 
-## 1. Polynomial surrogates — SUPERSEDED
-Rogers, Bird, Peiris, Verde, Font-Ribera & Pontzen 2019, "An Emulator for the Lyman-α
-Forest" (arXiv:1812.04654, JCAP 02(2019)050): GP emulator from **21 small simulations**
-(Latin-hypercube sampling), ~1.5% typical / 4% worst-case accuracy, and **explicitly
-outperforms prior quadratic-polynomial interpolation**. ⇒ Polynomial / polynomial-chaos is
-the old approach, beaten by GP. **Do not use.**
+## 1. The field is GP-dominated; raw per-k MLP is the least-supported option
+- **Rogers/Bird 2019** (arXiv:1812.04654, JCAP 02 050): **GP**, 21 LHS sims, 1.5%/4% accuracy;
+  explicitly beats quadratic-polynomial *interpolation*. No PCA.
+- **Fernandez, Ho & Bird 2022** (arXiv:2207.06445, MNRAS 517,3200) — PRIYA method paper: **GP**,
+  multi-fidelity Kennedy–O'Hagan; per-k separate GPs (scale-dependent LF↔HF correlation); "neural"
+  appears 0×; nonlinear NARGP no better (≤0.08%). No PCA.
+- **Production PRIYA (Bird+2023, arXiv:2306.05471):** **GP**, and **ABANDONED per-k GPs** for a
+  single GP-per-redshift across the full k range (memory/speed), negligible accuracy loss. ⇒ the
+  "PRIYA per-k" design is the 2022 precursor, not the production 2023 emulator.
+- **Walther+2024/2025** (arXiv:2412.05372, JCAP 05 099): **GP** (george, Matérn-5/2), 18 Nyx sims,
+  one GP per z predicting all k bins.
 
-## 2. PCA / dimensionality reduction — NOT the norm; per-k is standard
-Fernandez, Ho & Bird 2022, "A multifidelity emulator for the Lyman-α forest flux power
-spectrum" (arXiv:2207.06445, MNRAS 517,3200) — the **PRIYA-lineage** emulator — states
-verbatim: *"Since our target summary statistic is a vector, we model each k bin of the flux
-power spectrum with a separate GP. The primary reason for this choice"* is to preserve the
-**scale-dependence**. That is per-k emulation, the **opposite of PCA compression**. ⇒ Our
-"no PCA, keep per-k structure" choice **matches the PRIYA design philosophy**. ✓
+## 2. The one NN emulator does NOT regress raw per-k bins — it regresses polynomial coefficients
+**LaCE-NN, Cabayol-García et al. 2023** (arXiv:2305.19064, MNRAS 525,3499): a neural network P1D
+emulator, **sub-percent (k∥=0.1–4 Mpc⁻¹, z=2–4.5), used in DESI**. Crucially, **both** the LaCE GP
+and NN **compress P1D into low-order polynomial coefficients in log-P1D** — GP default
+`emu_type='polyfit'`, `ndeg=4`; NN class `MDNemulator_polyfit` maps params → ~5–7 poly coeffs
+(deg-5 for k≤4, deg-7 extended), reconstructing `P1D = yscalings·exp(poly(k, coeffs))`. **Not PCA,
+not raw k-bins.** The `igmhub/LaCE` repo ships both `gp_emulator.py` (GPy) and `nn_emulator.py`
+(PyTorch). So the modern NN precedent uses a **polynomial smoothing prior over k**, regressing a
+handful of coefficients — exactly to cut output dimensionality + overfitting in the low-data regime.
 
-## 3. GP vs NN — the field uses BOTH
+## 3. PCA — avoid; not used in any Lyα P1D emulator
+PCA appears only in CMB emulators (CosmoPower/-JAX), applied **selectively** to TE/lensing spectra
+that have zero-crossings / are log-incompatible (512/64 components). The matter power spectrum
+(closest smooth-positive analog to P1D) uses the **direct, no-PCA** NN mapping. A smooth, positive,
+log-able P1D is precisely the case where PCA is *not* motivated. (Verifier caveat: the reason is
+log-incompatibility, not smoothness; and CosmoPower is CMB, an analogy not direct Lyα precedent.)
 
-**GP lineage (incumbent, Bird group / PRIYA):**
-- Rogers/Bird 2019 (1812.04654): GP, 21 sims, beats polynomial.
-- Fernandez, Ho & Bird 2022 (2207.06445): **GP, not NN** (no neural network in the paper);
-  multi-fidelity **Kennedy–O'Hagan (KO / AR1) linear** model for the main results; per-k
-  separate GPs; *"A GP provides closed-form expressions for predictions … naturally comes
-  with uncertainty quantification."* Nonlinear deep-GP (**NARGP**, Perdikaris+2017) is in the
-  appendix and gives only **~0.08%** improvement while needing more HF sims ⇒ linear preferred.
-- Walther, Schöneberg, Chabanier, Armengaud et al. 2024 (arXiv:2412.05372, JCAP 05(2025)099):
-  **GP emulator** for the **Lyssa** suite (18 high-res Nyx sims, 120 Mpc, 4096³), eBOSS P1D.
+## 4. Polynomial — two distinct roles (don't conflate)
+- (a) Polynomial **interpolation over the parameter space** — a baseline GP beats (Rogers 2019).
+  Avoid. Polynomial-chaos-expansion proper is used by **no** surveyed Lyα P1D emulator.
+- (b) Polynomial **compression of the P1D vector over k** — the de facto LaCE smoothing layer
+  (deg 4–7), regressed by either GP or NN. **Recommended** for smooth P1D.
 
-**NN lineage (modern, used by DESI):**
-- Cabayol-García, Chaves-Montero, Font-Ribera & Pedersen 2023, "A neural network emulator for
-  the Lyman-α 1D flux power spectrum" (arXiv:2305.19064, MNRAS 525,3499) — the **LaCE-NN**
-  emulator: NN surrogate, **sub-percent precision across k∥=0.1–4 Mpc⁻¹, z=2–4.5**; used in
-  DESI Lyα analyses.
-- The **LaCE** package (`github.com/igmhub/LaCE`) ships **both** `gp_emulator.py` and
-  `nn_emulator.py` (+ `nn_architecture.py`) — the field maintains GP and NN side by side.
+## 5. Training-set regime
+GP is proven viable at **18–21 sims** (Bird+2019, Walther+2024) — below our ~60. BUT those LHCs
+varied **~5 params**; ours has **9 + z + τ₀**, so *dimensionality*, not sim count, is the real
+constraint, and 60 sims in ~11-D is sparse. (Synthesis confidence: MEDIUM — no surveyed paper
+matches our exact config: HCD-class split, explicit τ₀ dim, JAX-HMC differentiability.)
 
-**Training-set sizes:** GP works at ~18–21 sims; our ~60 LF is comfortable for either.
+## 6. The HMC/differentiability axis is the LEAST-evidenced (and is our novel requirement)
+**No surveyed Lyα P1D emulator performs gradient-based HMC/NUTS via autodiff** — GPs dominate and
+are sampled with non-gradient methods. The CosmoPower claims asserting JAX-differentiable HMC were
+**REFUTED** (1-2 votes) and are CMB anyway. So autodiff-HMC through the emulator is the genuine
+reason to choose an NN, but it is *not* well-precedented in this field — which makes getting the
+output representation right (smoothing prior) more important, not less.
 
-## 4. Assessment for our setup
+---
 
-| Choice | Verdict | Why |
-|---|---|---|
-| PCA compression | **Avoid** | PRIYA-lineage emulates per-k specifically to keep scale-dependence; PCA would smear low-k vs high-k. |
-| Polynomial / PCE | **Avoid** | GP beats quadratic polynomial (Rogers 2019). |
-| Dense per-k outputs | **Keep** | matches the per-k GP philosophy. |
-| **MLP vs GP** | **MLP defensible; GP is the small-sample alternative** | see below. |
+## 7. Assessment + recommendation for our setup
+| Axis | Verdict |
+|---|---|
+| PCA/SVD | **Avoid** — absent from all Lyα P1D emulators; smooth positive P1D doesn't motivate it. |
+| Polynomial-chaos over params | **Avoid** — GP beats it; nobody uses it. |
+| Raw dense per-k MLP, no smoothing | **Least-supported** — the field uses GP, or NN-on-poly-coeffs. |
+| GP | Field-proven at low sims, free uncertainty; but **not autodiff-friendly** for our HMC, and awkward for our ~1240 structured outputs + τ₀ + joint heads. |
+| **NN + polynomial-coefficient outputs (LaCE pattern)** | **Recommended** — keeps autodiff for HMC AND adds the smoothing prior critical at ~60 sims/11-D; the only NN precedent in the field does exactly this. |
 
-**Why MLP is well-motivated for *us* (beyond LaCE-NN precedent):** we emulate **~1240 outputs**
-(f_nhi[30] + dN/dX[3] + 4×172 filtered class P1D + 3×172 Δ_c) with a **structural sum identity**
-(`P_tier_p = Σ_c w_c·P_c^filt`), a **τ₀ dimension**, and **joint CDDF↔P1D coupling**. A shared
-encoder + joint heads + end-to-end differentiability (for HMC) fits a single NN far better than
-~1240 independent GPs. PRIYA's GP solves the *simpler* single-total-P1D problem (172 per-k GPs).
+**Concrete recommendation:** keep the NN (for the structural sum + τ₀ + joint CDDF/P1D + autodiff
+needs that GPs can't easily meet), but **change Head B's output representation from raw 172 per-k
+bins to ~5–7 polynomial coefficients of log-`P_c^filt` per class** (Chebyshev/Legendre in log-k),
+reconstructing `P_c^filt` from the coefficients. This is the LaCE smoothing prior, not PCA, and is
+the field-standard way to regularize a smooth P1D in the low-data regime.
 
-**The one real caveat (the small-sample regime):** with only ~60 sims, GP is more data-efficient
-and gives **uncertainty for free**, whereas an MLP can overfit ~60 points and we must *construct*
-the uncertainty (the k-fold LOSO error vector). Mitigations already in the plan: AdamW weight
-decay, k-fold LOSO error vector (Task 14), held-out-α/τ₀ validation (Tasks 4, 15).
+**The one real tension (the report's open question):** polynomial-coefficient compression assumes
+a smooth k-shape. The filtered `P_c^filt` is smooth/positive/log-able → fine. But the HCD delta
+`Δ_c` **flips sign at low k** and has a damping-wing turnover a low-order log-polynomial cannot
+capture. ⇒ Adopt poly-coeff compression for `P_c^filt` only; keep `Δ_c` in the dense/arcsinh form
+(or a representation that handles the sign change). Validate that the compressed `P_c^filt` still
+recovers the structural `P_tier_p = Σ_c w_c·P_c^filt` to the required precision.
 
-## 5. Recommendation
-Keep the **dense per-k MLP, no PCA, no polynomial** — right for our richer per-class /
-structural / differentiable problem, with the LaCE-NN precedent. Mitigate the small-sample
-overfitting risk with the planned regularization + LOSO error vector. **Optional validation
-baseline:** a per-k GP cross-check (PRIYA-native) on one or two output channels once the cache
-lands, to confirm the MLP isn't leaving accuracy on the table at ~60 sims.
+## Open questions (from the report)
+1. Does any DESI-era Lyα emulator actually do autodiff-HMC? (None found — we'd be early.)
+2. How does poly-coeff compression interact with HCD-class-split P1D where contaminants add
+   non-smooth k-structure (our `Δ_c` sign flip)?
+3. At 9+z+τ₀ params with ~60 LF sims, does a GP stay accurate, or does dimensionality favor an
+   NN coefficient-emulator? (Argues for NN.)
+4. τ₀ as an emulator input (Walther/lym1d) vs analytic post-emulation rescale — which preserves
+   differentiability most cleanly? (We use it as a Head-B input.)
 
 ## Sources
-Rogers/Bird 2019 (1812.04654); Fernandez, Ho & Bird 2022 (2207.06445, MNRAS 517,3200);
-Walther et al. 2024 (2412.05372, JCAP 05(2025)099); Cabayol-García et al. 2023 (2305.19064,
-MNRAS 525,3499); LaCE package (github.com/igmhub/LaCE). Method: deep-research workflow
-wf_25749b73-8f9, 70 verified non-refuted claims.
+Rogers/Bird 2019 (1812.04654); Fernandez/Ho/Bird 2022 (2207.06445); PRIYA Bird+2023 (2306.05471);
+Walther+2024/2025 (2412.05372); Cabayol-García+2023 (2305.19064, MNRAS 525,3499); LaCE
+(github.com/igmhub/LaCE); CosmoPower-JAX (2305.06347). 3 refuted claims logged in the workflow result.
