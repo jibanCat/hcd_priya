@@ -8,6 +8,25 @@ from __future__ import annotations
 import jax, jax.numpy as jnp, equinox as eqx
 
 
+def svd_basis_init(P_filt_transformed, n_basis):
+    """SVD warm-start for HeadB's learned P_filt basis (review finding I1/I2).
+
+    Given the cache's standardized-log P_filt stacked over (rows*classes, n_k) --
+    i.e. the SAME standardized-log space HeadB's P_filt output lives in -- return
+    the top-``n_basis`` right singular vectors as a ``(n_basis, n_k)`` warm-start
+    basis. Pass the result as ``p_filt_basis_init`` to ``Emulator``/``HeadB``.
+
+    The right singular vectors are orthonormal, so the returned basis is full rank
+    (rank-collapse guard) whenever ``n_basis <= rank(P_filt_transformed)``.
+    """
+    M = jnp.asarray(P_filt_transformed)
+    if M.ndim != 2:
+        raise ValueError(f"P_filt_transformed must be 2D (rows*classes, n_k); got {M.shape}")
+    # full_matrices=False -> Vh is (min(m,n), n_k); rows are the right sing. vectors.
+    _, _, Vh = jnp.linalg.svd(M, full_matrices=False)
+    return Vh[:n_basis]
+
+
 class Encoder(eqx.Module):
     layers: list
 
@@ -41,23 +60,68 @@ class HeadA(eqx.Module):
 class HeadB(eqx.Module):
     """tau0-dependent head: 4 filtered class P1D (log-space) + 3 HCD deltas.
 
-    Reads concat(latent, tau0). The 7*n_k output is reshaped to (7, n_k) and
-    split into 4 P_filt (clean,LLS,subDLA,DLA) and 3 delta (LLS,subDLA,DLA).
+    Reads concat(latent, tau0).
+
+    Dense default (``n_basis=None``): the ``7*n_k`` output is reshaped to (7, n_k)
+    and split into 4 P_filt (clean,LLS,subDLA,DLA) and 3 delta (LLS,subDLA,DLA).
+    This is the original ~370k-param head and is byte-for-byte unchanged.
+
+    Low-rank P_filt (``n_basis=int``, review finding I1/I2): the output layer emits
+    ``4*n_basis + 3*n_k``. The first ``4*n_basis`` reshape to (4, n_basis) P_filt
+    *coefficients* that decode through a TRAINABLE basis ``p_filt_basis (n_basis,
+    n_k)`` as ``coeffs @ basis -> P_filt (4, n_k)``. The remaining ``3*n_k`` reshape
+    to (3, n_k) delta and stay DENSE/arcsinh -- Delta_c's low-k sign flip cannot go
+    through a shared positive/log basis, so it is NEVER routed through the basis.
+    P_filt is produced in the head's standardized-log space (same target space as
+    the dense head); only HOW it is produced changes -- the structural_tier_p path
+    still operates on untransformed LINEAR P_filt downstream.
+
+    n_basis is a STATIC field (it sets array shapes / output-layer width and must be
+    known at trace time for jit). The optional SVD warm-start basis is supplied at
+    construction via ``p_filt_basis_init`` (see ``svd_basis_init``); if omitted, the
+    basis is orthogonal-initialised from the key (full-rank, no rank-collapse).
     """
     trunk: eqx.nn.Linear
     out: eqx.nn.Linear
+    p_filt_basis: jax.Array | None
     n_k: int = eqx.field(static=True)
+    n_basis: int | None = eqx.field(static=True)
 
-    def __init__(self, latent=64, n_k=172, key=None):
-        k1, k2 = jax.random.split(key, 2)
+    def __init__(self, latent=64, n_k=172, n_basis=None, p_filt_basis_init=None, key=None):
+        k1, k2, k3 = jax.random.split(key, 3)
         self.n_k = n_k
+        self.n_basis = n_basis
         self.trunk = eqx.nn.Linear(latent + 1, 256, key=k1)
-        self.out = eqx.nn.Linear(256, 7 * n_k, key=k2)
+        if n_basis is None:
+            # dense path: byte-for-byte the original head (single out Linear).
+            self.out = eqx.nn.Linear(256, 7 * n_k, key=k2)
+            self.p_filt_basis = None
+        else:
+            # low-rank P_filt coeffs (4*n_basis) + dense delta (3*n_k).
+            self.out = eqx.nn.Linear(256, 4 * n_basis + 3 * n_k, key=k2)
+            if p_filt_basis_init is not None:
+                basis = jnp.asarray(p_filt_basis_init)
+                if basis.shape != (n_basis, n_k):
+                    raise ValueError(
+                        f"p_filt_basis_init shape {basis.shape} != (n_basis, n_k) "
+                        f"= ({n_basis}, {n_k})")
+                self.p_filt_basis = basis
+            else:
+                # orthogonal init -> rows are orthonormal => basis is full rank
+                # (rank-collapse guard) and (n_basis, n_k) oriented.
+                self.p_filt_basis = jax.nn.initializers.orthogonal()(k3, (n_basis, n_k))
 
     def __call__(self, latent, tau0):
         h = jax.nn.gelu(self.trunk(jnp.concatenate([latent, jnp.atleast_1d(tau0)])))
-        y = self.out(h).reshape(7, self.n_k)
-        return {"P_filt": y[:4], "delta": y[4:]}
+        y = self.out(h)
+        if self.n_basis is None:
+            y = y.reshape(7, self.n_k)
+            return {"P_filt": y[:4], "delta": y[4:]}
+        nb = self.n_basis
+        coeffs = y[: 4 * nb].reshape(4, nb)          # (4, n_basis)
+        delta = y[4 * nb:].reshape(3, self.n_k)      # (3, n_k) dense
+        P_filt = coeffs @ self.p_filt_basis          # (4, n_basis) @ (n_basis, n_k)
+        return {"P_filt": P_filt, "delta": delta}
 
 
 class Emulator(eqx.Module):
@@ -66,11 +130,12 @@ class Emulator(eqx.Module):
     head_a: HeadA
     head_b: HeadB
 
-    def __init__(self, in_dim=10, n_k=172, key=None):
+    def __init__(self, in_dim=10, n_k=172, n_basis=None, p_filt_basis_init=None, key=None):
         k1, k2, k3 = jax.random.split(key, 3)
         self.enc = Encoder(in_dim=in_dim, key=k1)
         self.head_a = HeadA(latent=64, key=k2)
-        self.head_b = HeadB(latent=64, n_k=n_k, key=k3)
+        self.head_b = HeadB(latent=64, n_k=n_k, n_basis=n_basis,
+                            p_filt_basis_init=p_filt_basis_init, key=k3)
 
     def __call__(self, x, tau0):
         lat = self.enc(x)

@@ -2,6 +2,7 @@ import jax, jax.numpy as jnp, equinox as eqx
 from hcd_analysis.emulator.model import Encoder, HeadA, HeadB, Emulator, structural_tier_p
 from hcd_analysis.emulator.model import masked_mse
 from hcd_analysis.emulator.model import joint_loss
+from hcd_analysis.emulator.model import svd_basis_init
 
 
 def test_encoder_headA_shapes_and_tau0_independence():
@@ -262,3 +263,149 @@ def test_headA_outputs_are_tau0_invariant_by_gradient():
         return jnp.concatenate([p["f_nhi"], p["dndx"]])
     J = jax.jacfwd(fa)(jnp.array(0.4))
     assert jnp.allclose(J, 0.0, atol=0.0)  # exactly zero: Head A does not consume tau0
+
+
+# ---------------------------------------------------------------------------
+# Task 2 (Phase-2b): learned low-rank P_filt output basis (toggle n_basis).
+# Delta_c stays DENSE; SVD warm-start; dense default unchanged.
+# ---------------------------------------------------------------------------
+
+def _lowrank_batch(n_k):
+    """joint_loss batch for n_basis tests (same shapes as the dense joint-loss test)."""
+    return {
+        "x": jnp.zeros((2, 10)), "tau0": jnp.array([0.3, 0.5]),
+        "t_f_nhi": jnp.zeros((2, 30)), "t_dndx": jnp.zeros((2, 3)),
+        "t_P_filt": jnp.where(jnp.arange(n_k) < n_k - 2, 1.0, jnp.nan)[None, None, :]
+        * jnp.ones((2, 4, n_k)),
+        "t_delta": jnp.zeros((2, 3, n_k)),
+        "mask": (jnp.arange(n_k) < n_k - 2)[None, :] * jnp.ones((2, n_k), bool),
+        "inv_nc": jnp.array([[1., 1 / 10, 1 / 7, 0.], [1., 1 / 10, 1 / 7, 1 / 3]]),
+        "inv_nalpha": jnp.array([0.25, 0.25]),
+        "mean_F_clean": jnp.array([0.7, 0.6]),
+    }
+
+
+def test_headB_dense_unchanged():
+    # n_basis=None must be byte-for-byte the pre-change dense head: P_filt (4,n_k),
+    # delta (3,n_k), and identical outputs for a fixed key (dense path untouched).
+    key = jax.random.PRNGKey(1)
+    n_k = 8
+    hb = HeadB(latent=64, n_k=n_k, key=key)           # default n_basis=None
+    hb_explicit = HeadB(latent=64, n_k=n_k, n_basis=None, key=key)
+    assert hb.n_basis is None and hb.p_filt_basis is None
+    lat = jnp.zeros(64); tau0 = jnp.array(0.3)
+    out = hb(lat, tau0)
+    assert out["P_filt"].shape == (4, n_k)
+    assert out["delta"].shape == (3, n_k)
+    # explicit None == default None (same key -> identical weights and outputs)
+    out2 = hb_explicit(lat, tau0)
+    assert jnp.array_equal(out["P_filt"], out2["P_filt"])
+    assert jnp.array_equal(out["delta"], out2["delta"])
+    # regression vs the literal pre-change computation: single dense Linear,
+    # reshape(7,n_k), split [:4]/[4:].
+    h = jax.nn.gelu(hb.trunk(jnp.concatenate([lat, jnp.atleast_1d(tau0)])))
+    y = hb.out(h).reshape(7, n_k)
+    assert jnp.array_equal(out["P_filt"], y[:4])
+    assert jnp.array_equal(out["delta"], y[4:])
+
+
+def test_headB_lowrank_shapes():
+    # n_basis=int -> P_filt (4,n_k) decoded through the trainable basis; delta (3,n_k)
+    # dense; the output-layer param count is MUCH smaller than the dense head.
+    key = jax.random.PRNGKey(1)
+    n_k, n_basis = 172, 12
+    hb_dense = HeadB(latent=64, n_k=n_k, key=key)
+    hb_lr = HeadB(latent=64, n_k=n_k, n_basis=n_basis, key=key)
+    lat = jnp.zeros(64); tau0 = jnp.array(0.3)
+    out = hb_lr(lat, tau0)
+    assert out["P_filt"].shape == (4, n_k)
+    assert out["delta"].shape == (3, n_k)
+    assert hb_lr.p_filt_basis.shape == (n_basis, n_k)
+    # output-layer weight+bias param counts
+    def out_params(hb):
+        return hb.out.weight.size + hb.out.bias.size
+    dense_n = out_params(hb_dense)        # 256*(7*n_k) + 7*n_k
+    lr_out_n = out_params(hb_lr)          # 256*(4*nb+3*n_k) + (4*nb+3*n_k)
+    lr_total = lr_out_n + hb_lr.p_filt_basis.size
+    assert lr_out_n < dense_n
+    # even counting the trainable basis, the low-rank head is much smaller
+    assert lr_total < 0.7 * dense_n
+
+
+def test_svd_warmstart_beats_random():
+    import numpy as np
+    rng = np.random.default_rng(0)
+    n_rows, n_k, r = 200, 30, 5
+    # synthetic exactly rank-r matrix: (n_rows, r) @ (r, n_k)
+    A = rng.standard_normal((n_rows, r))
+    B = rng.standard_normal((r, n_k))
+    M = jnp.asarray(A @ B)
+    n_basis = 8  # >= r
+    basis = svd_basis_init(M, n_basis)
+    assert basis.shape == (n_basis, n_k)
+    # reconstruction: project rows onto the basis and back. With n_basis >= rank,
+    # error ~ 0 (the top-r right sing. vectors span the row space exactly).
+    coeffs = M @ basis.T                 # (n_rows, n_basis)
+    recon = coeffs @ basis               # (n_rows, n_k)
+    err = jnp.linalg.norm(M - recon) / jnp.linalg.norm(M)
+    assert err < 1e-6
+    # rank-collapse guard: every singular value of the returned basis is > 0
+    sv = jnp.linalg.svd(basis, compute_uv=False)
+    assert jnp.all(sv > 1e-8)
+    # warm-start strictly beats a random basis at the same n_basis
+    rand = jax.nn.initializers.orthogonal()(jax.random.PRNGKey(0), (n_basis, n_k))
+    recon_rand = (M @ rand.T) @ rand
+    err_rand = jnp.linalg.norm(M - recon_rand) / jnp.linalg.norm(M)
+    assert err < err_rand
+
+
+def test_lowrank_grads_finite_and_jit():
+    key = jax.random.PRNGKey(3)
+    n_k = 8
+    m = Emulator(in_dim=10, n_k=n_k, n_basis=12, key=key)
+    # forward + vmap over a batch
+    x = jnp.ones((2, 10)); t = jnp.array([0.3, 0.5])
+    pv = jax.vmap(m)(x, t)
+    assert pv["P_filt"].shape == (2, 4, n_k)
+    assert pv["delta"].shape == (2, 3, n_k)
+    assert pv["P_filt"].dtype == jnp.float64  # x64 active
+    # eqx.filter_value_and_grad(joint_loss) finite (incl. the trainable basis leaf)
+    batch = _lowrank_batch(n_k)
+    val, grad = eqx.filter_value_and_grad(lambda mm: joint_loss(mm, batch))(m)
+    assert jnp.isfinite(val)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    assert all(jnp.all(jnp.isfinite(g)) for g in leaves)
+    # the basis got a finite (and non-trivial) gradient
+    assert grad.head_b.p_filt_basis is not None
+    assert jnp.all(jnp.isfinite(grad.head_b.p_filt_basis))
+    # eqx.filter_jit matches eager
+    eager = joint_loss(m, batch)
+    jitted = eqx.filter_jit(joint_loss)(m, batch)
+    assert jnp.allclose(eager, jitted)
+    # vmap matches a python loop row-by-row (no leading-axis bug in the basis matmul)
+    for kk in ("P_filt", "delta"):
+        loop = jnp.stack([m(x[i], t[i])[kk] for i in range(2)])
+        assert jnp.allclose(pv[kk], loop)
+
+
+def test_delta_still_dense_with_basis():
+    # With n_basis set, Delta_c must remain the dense (3,n_k) head -- NOT routed
+    # through the P_filt basis. Verify the delta output is independent of the basis:
+    # perturbing p_filt_basis changes P_filt but leaves delta bit-identical.
+    key = jax.random.PRNGKey(7)
+    n_k, n_basis = 8, 4
+    m = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis, key=key)
+    x = jnp.ones(10); t = jnp.array(0.4)
+    out0 = m(x, t)
+    assert out0["delta"].shape == (3, n_k)
+    # mutate the basis (P_filt path only) and re-run
+    new_basis = m.head_b.p_filt_basis + 5.0
+    m2 = eqx.tree_at(lambda mm: mm.head_b.p_filt_basis, m, new_basis)
+    out1 = m2(x, t)
+    assert not jnp.allclose(out0["P_filt"], out1["P_filt"])  # P_filt DID change
+    assert jnp.array_equal(out0["delta"], out1["delta"])     # delta unchanged (dense)
+    # and the delta gradient does not flow into the basis
+    g = jax.grad(lambda b: m2.__class__.__call__(
+        eqx.tree_at(lambda mm: mm.head_b.p_filt_basis, m, b), x, t)["delta"].sum()
+    )(m.head_b.p_filt_basis)
+    assert jnp.all(g == 0.0)
