@@ -99,3 +99,101 @@ def test_normalize_params_maps_to_unit_cube(tmp_path):
     assert np.allclose(normalize_params(mid[None, :])[0], 0.5)
     assert np.allclose(normalize_params(lo[None, :])[0], 0.0)
     assert np.allclose(normalize_params(hi[None, :])[0], 1.0)
+
+
+# --- A1: make_batch target-transform + train-split normalization --------------
+from hcd_analysis.emulator.data import (
+    fit_target_norm, make_batch, untransform_prediction, safe_log,
+)
+
+
+def _load_fixture(tmp_path, **kw):
+    path = tmp_path / "obs.h5"
+    write_synthetic_cache(path, **kw)
+    return load_cache(path)
+
+
+def test_make_batch_keys_and_shapes(tmp_path):
+    d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    R = d["x"].shape[0]
+    train_idx = np.arange(R)[: R - 4]            # hold out the last snap-block's alphas
+    norm = fit_target_norm(d, train_idx)
+    idx = np.array([0, 1, 5, 9, 13])
+    b = make_batch(d, idx, norm)
+    K = d["P_filt"].shape[2]
+    n = len(idx)
+    assert b["x"].shape == (n, 10)
+    assert b["tau0"].shape == (n,)
+    assert b["t_f_nhi"].shape == (n, 30)
+    assert b["t_dndx"].shape == (n, 3)
+    assert b["t_P_filt"].shape == (n, 4, K)
+    assert b["t_delta"].shape == (n, 3, K)
+    assert b["mask"].shape == (n, K)
+    assert b["mask"].dtype == bool
+    assert b["inv_nc"].shape == (n, 4)
+    assert b["inv_nalpha"].shape == (n,)
+    assert b["mean_F_clean"].shape == (n,)
+    # all float64
+    for k in ("x", "tau0", "t_f_nhi", "t_dndx", "t_P_filt", "t_delta",
+              "inv_nc", "inv_nalpha", "mean_F_clean"):
+        assert b[k].dtype == np.float64, k
+    # x must be the unit-cube input untouched
+    assert np.allclose(b["x"], d["x"][idx])
+    # f_nhi/dndx (per-block) finite everywhere
+    assert np.isfinite(b["t_f_nhi"]).all()
+    assert np.isfinite(b["t_dndx"]).all()
+    # t_P_filt / t_delta finite where mask True
+    m3 = b["mask"][:, None, :]
+    assert np.isfinite(b["t_P_filt"][np.broadcast_to(m3, b["t_P_filt"].shape)]).all()
+    assert np.isfinite(b["t_delta"][np.broadcast_to(m3, b["t_delta"].shape)]).all()
+
+
+def test_target_norm_roundtrip_to_physical(tmp_path):
+    d = _load_fixture(tmp_path, n_k=8)
+    R = d["x"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    # raw transform round-trip is exact
+    from hcd_analysis.emulator.data import (
+        signed_log, signed_log_inv, apply_norm, invert_norm,
+    )
+    P = d["P_filt"][:5]                                   # may contain NaN above Nyquist
+    z = apply_norm(safe_log(P), norm["P_filt"])
+    Prt = np.exp(invert_norm(z, norm["P_filt"]))
+    fin = np.isfinite(P)
+    assert np.allclose(Prt[fin], P[fin], atol=1e-10, rtol=1e-10)
+    Dl = d["delta"][:5]
+    zd = apply_norm(signed_log(Dl), norm["delta"])
+    Drt = signed_log_inv(invert_norm(zd, norm["delta"]))
+    find = np.isfinite(Dl)
+    assert np.allclose(Drt[find], Dl[find], atol=1e-10, rtol=1e-10)
+    # untransform_prediction recovers physical P_filt / delta from standardized targets
+    idx = np.arange(5)
+    b = make_batch(d, idx, norm)
+    pred = {"f_nhi": b["t_f_nhi"], "dndx": b["t_dndx"],
+            "P_filt": b["t_P_filt"], "delta": b["t_delta"]}
+    phys = untransform_prediction(pred, norm)
+    okP = np.isfinite(d["P_filt"][idx])
+    assert np.allclose(phys["P_filt"][okP], d["P_filt"][idx][okP], atol=1e-9)
+    okD = np.isfinite(d["delta"][idx])
+    assert np.allclose(phys["delta"][okD], d["delta"][idx][okD], atol=1e-9)
+
+
+def test_inv_nalpha_counts_alpha_siblings(tmp_path):
+    d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    R = d["x"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    b = make_batch(d, np.arange(R), norm)
+    assert np.allclose(b["inv_nalpha"], 0.25)
+
+
+def test_train_norm_uses_only_train_blocks(tmp_path):
+    d = _load_fixture(tmp_path, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=8)
+    R = d["x"].shape[0]
+    full = fit_target_norm(d, np.arange(R))
+    # take a subset of snap-blocks (drop the last sim's rows): stats must differ
+    sub = np.arange(R)[: R // 2]
+    part = fit_target_norm(d, sub)
+    # at least one channel's mean differs (train-only normalization)
+    assert not np.allclose(part["P_filt"]["mean"], full["P_filt"]["mean"])
+    assert not np.allclose(part["f_nhi"]["mean"], full["f_nhi"]["mean"])
+    assert not np.allclose(part["delta"]["mean"], full["delta"]["mean"])

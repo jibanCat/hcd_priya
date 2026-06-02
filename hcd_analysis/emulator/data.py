@@ -162,6 +162,103 @@ def invert_norm(z, stats):
     return z * stats["std"] + stats["mean"]
 
 
+# --- A1: per-channel transform registry + train-split target normalization ----
+#
+# joint_loss compares model predictions to standardized targets t_* that live in
+# log/arcsinh space; this section is the missing PRODUCER of those targets. Each
+# channel has a (forward, inverse) transform pair applied BEFORE standardization:
+#   f_nhi, dndx, P_filt -> safe_log / exp          (strictly-positive amplitudes)
+#   delta               -> signed_log / signed_log_inv  (arcsinh, smooth through 0)
+TARGET_TRANSFORMS = {
+    "f_nhi":  (safe_log, np.exp),
+    "dndx":   (safe_log, np.exp),
+    "P_filt": (safe_log, np.exp),
+    "delta":  (signed_log, signed_log_inv),
+}
+TARGET_CHANNELS = ("f_nhi", "dndx", "P_filt", "delta")
+
+
+def fit_target_norm(d, train_idx):
+    """Per-channel {mean,std} in TRANSFORMED space, TRAIN ROWS ONLY (spec sec.10).
+
+    f_nhi/dndx are per-snap-block (G rows); we restrict to the blocks that any
+    train row maps into (via snap_group_idx) so block-level stats are train-only
+    too. P_filt/delta are per-row (R rows). All stats are NaN-aware (NaN bins
+    above native Nyquist are ignored) via fit_norm's nanmean/nanstd.
+
+    Returns ``norm_stats`` with keys f_nhi, dndx, P_filt, delta, each a dict
+    {mean, std} broadcastable against the transformed channel array.
+    """
+    train_idx = np.asarray(train_idx)
+    train_blocks = np.unique(d["snap_group_idx"][train_idx])
+    fwd = lambda ch: TARGET_TRANSFORMS[ch][0]
+    stats = {
+        "f_nhi":  fit_norm(fwd("f_nhi")(d["snap_f_nhi"]), train_blocks),
+        "dndx":   fit_norm(fwd("dndx")(d["snap_dNdX"]), train_blocks),
+        "P_filt": fit_norm(fwd("P_filt")(d["P_filt"]), train_idx),
+        "delta":  fit_norm(fwd("delta")(d["delta"]), train_idx),
+    }
+    return stats
+
+
+def make_batch(d, idx, norm_stats):
+    """Assemble the exact dict joint_loss consumes for rows ``idx`` (spec sec.4).
+
+    Targets t_* are in standardized log/arcsinh space; bins above native Nyquist
+    stay NaN (joint_loss is NaN-safe). Inputs x are the already-unit-cube encoder
+    inputs and are NOT re-transformed. mean_F_clean is a documented placeholder
+    (see below). Everything is float64.
+    """
+    idx = np.asarray(idx)
+    grp = d["snap_group_idx"][idx]                         # (n,) block index per row
+
+    t_f_nhi = apply_norm(safe_log(d["snap_f_nhi"][grp]), norm_stats["f_nhi"])   # (n,30)
+    t_dndx = apply_norm(safe_log(d["snap_dNdX"][grp]), norm_stats["dndx"])      # (n,3)
+    t_P_filt = apply_norm(safe_log(d["P_filt"][idx]), norm_stats["P_filt"])     # (n,4,K)
+    t_delta = apply_norm(signed_log(d["delta"][idx]), norm_stats["delta"])      # (n,3,K)
+
+    # inv_nalpha: 1 / (#rows sharing this row's snap-block) over the FULL cache,
+    # so alpha-siblings (same snap, different alpha rescale) each get weight 1/n_a
+    # and a snap-block is not over-counted relative to its number of alpha samples.
+    block_counts = np.bincount(d["snap_group_idx"],
+                               minlength=int(d["snap_group_idx"].max()) + 1)
+    inv_nalpha = 1.0 / block_counts[grp].astype(np.float64)                     # (n,)
+
+    # mean_F_clean: PLACEHOLDER. The cache does not store a per-row clean-class
+    # mean flux, so we use exp(-tau0) (the definitional mean flux that tau0
+    # encodes). A3 (the meanF loss term) is dead today (no model gradient) and
+    # will supply the real clean-class mean flux when it is wired; this keeps
+    # the batch key present and finite until then.  TODO(A3): real mean_F_clean.
+    mean_F_clean = np.exp(-d["tau0"][idx]).astype(np.float64)                   # (n,)
+
+    return {
+        "x": d["x"][idx].astype(np.float64),
+        "tau0": d["tau0"][idx].astype(np.float64),
+        "t_f_nhi": t_f_nhi.astype(np.float64),
+        "t_dndx": t_dndx.astype(np.float64),
+        "t_P_filt": t_P_filt.astype(np.float64),
+        "t_delta": t_delta.astype(np.float64),
+        "mask": d["mask"][idx].astype(bool),
+        "inv_nc": d["inv_nc"][idx].astype(np.float64),
+        "inv_nalpha": inv_nalpha,
+        "mean_F_clean": mean_F_clean,
+    }
+
+
+def untransform_prediction(pred_dict, norm_stats):
+    """Standardized log/arcsinh prediction dict -> physical-space dict.
+
+    Inverse of the make_batch target transform: invert_norm then the channel's
+    inverse transform (exp / sinh). Used by inference and the A2 end-to-end
+    structural-identity test. Channels absent from pred_dict are skipped.
+    """
+    out = {}
+    for ch, arr in pred_dict.items():
+        inv = TARGET_TRANSFORMS[ch][1]
+        out[ch] = inv(invert_norm(np.asarray(arr), norm_stats[ch]))
+    return out
+
+
 # --- Cross-validation / extrapolation splits (spec sec.7) ---------------------
 
 def kfold_loso(sim_name, n_folds=8):
