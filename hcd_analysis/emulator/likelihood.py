@@ -21,9 +21,33 @@ def total_p1d_ratio(P_tier_p, alpha_hcd, ratio_hcd):
     return P_tier_p * (1.0 + jnp.einsum("...c,...ck->...k", alpha_hcd, ratio_hcd))
 
 
-def assemble_covariance(cosmic_var, sigma_emu, weights, dla_shot_flag, shot_inflate=10.0):
-    """Total cov = diag(cosmic variance) + per-class emulator error propagated through w_c
-    (quadrature). DLA high-k shot-limited bins inflated so uncertainty isn't understated."""
-    emu_var = jnp.einsum("c,ck->k", weights**2, sigma_emu**2)
+def assemble_covariance(cosmic_cov, sigma_Pfilt, w_c, sigma_delta, alpha_hcd,
+                        dla_shot_flag, shot_inflate=10.0):
+    """Total covariance = cosmic covariance + diag(emulator-error variance).
+
+    The two emulator-error channels propagate through DIFFERENT amplitudes, so
+    they cannot share one weights array (the previous bug):
+      - the structural baseline ``P_tier_p = Σ_c w_c·P_c^filt`` propagates the
+        4-class filtered-P1D error ``sigma_Pfilt`` through ``w_c``;
+      - the HCD add-back ``Σ_{c∈HCD} α_c·Δ_c`` propagates the 3-class delta error
+        ``sigma_delta`` through ``alpha_hcd``.
+    Both add in quadrature.
+
+    Args:
+      cosmic_cov:  (K,) variance vector (-> diag) OR full (K,K) covariance matrix
+                   (off-diagonal cosmic variance). Detected by ndim.
+      sigma_Pfilt: (4,K) per-class filtered-P1D emulator 1-sigma error.
+      w_c:         (4,) structural class weights.
+      sigma_delta: (3,K) per-class HCD-delta emulator 1-sigma error.
+      alpha_hcd:   (3,) per-class HCD incidence amplitudes.
+      dla_shot_flag: (K,) bool; high-k DLA shot-limited bins to inflate.
+      shot_inflate:  multiplier applied to the emu variance on flagged bins.
+
+    Returns (K,K) covariance. Differentiable / JAX-pure."""
+    emu_var = (jnp.einsum("c,ck->k", w_c**2, sigma_Pfilt**2)            # P_filt channel
+               + jnp.einsum("c,ck->k", alpha_hcd**2, sigma_delta**2))   # delta channel
     emu_var = jnp.where(dla_shot_flag, emu_var * shot_inflate, emu_var)
-    return jnp.diag(cosmic_var + emu_var)
+    cosmic_cov = jnp.asarray(cosmic_cov)
+    # ndim is static at trace time, so a plain python branch keeps this jit-clean.
+    cosmic_cov_full = jnp.diag(cosmic_cov) if cosmic_cov.ndim == 1 else cosmic_cov
+    return cosmic_cov_full + jnp.diag(emu_var)

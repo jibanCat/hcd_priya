@@ -233,23 +233,19 @@ def test_fnhi_zero_bin_floor_is_bounded_and_invertible(tmp_path):
     """The real cache has STRUCTURAL zeros in f_nhi (CDDF): bin 0 is all-zero and
     the high-NHI tail bins are partially zero. safe_log sends those to the floor
     log(1e-30) ~= -69.08, which (a) must stay finite through normalization and
-    (b) must invert to ~0 (not NaN/inf). This pins the documented floor behaviour
-    so a future floor change can't silently corrupt the CDDF target norm.
+    (b) must invert to ~0 (not NaN/inf). This pins the floor behaviour so a future
+    floor change can't silently corrupt the CDDF target norm.
 
-    KNOWN LIMITATION (untested risk surfaced by review): for a partially-zero bin
-    the floor value enters fit_norm's mean/std as if it were a real datum, so that
-    bin's standardization is floor-contaminated. Accepted for now (CDDF amplitude,
-    not P1D); this test documents and bounds it rather than asserting it away."""
+    A4b: the floor is now MASKED out of the norm fit (the zero bins are excluded
+    from mean/std), so a fully-zero bin's norm falls back to the neutral 0/1
+    guard and is NOT floor-contaminated. See
+    test_fnhi_zero_bin_masked_out_of_norm_and_loss for the masking proof."""
     d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
     # inject the real-cache structure: bin 0 fully zero, last bin partially zero
     d["snap_f_nhi"][:, 0] = 0.0
     d["snap_f_nhi"][::2, -1] = 0.0
     R = d["x"].shape[0]
     norm = fit_target_norm(d, np.arange(R))
-    floor = safe_log(0.0)
-    # bin 0: every block at the floor -> mean==floor, std collapsed to the 1.0 guard
-    assert np.isclose(norm["f_nhi"]["mean"][0], floor)
-    assert np.isclose(norm["f_nhi"]["std"][0], 1.0)
     # all norm stats finite (floor did not produce NaN/inf)
     assert np.isfinite(norm["f_nhi"]["mean"]).all()
     assert np.isfinite(norm["f_nhi"]["std"]).all() and np.all(norm["f_nhi"]["std"] > 0)
@@ -259,3 +255,45 @@ def test_fnhi_zero_bin_floor_is_bounded_and_invertible(tmp_path):
     zero_mask = d["snap_f_nhi"][d["snap_group_idx"]] == 0.0
     assert np.all(np.abs(phys["f_nhi"][zero_mask]) <= 1e-29)
     assert np.isfinite(phys["f_nhi"]).all()
+
+
+def test_fnhi_zero_bin_masked_out_of_norm_and_loss(tmp_path):
+    """A4b: a fully-zero f_nhi bin is (a) MASKED out of the norm fit so its
+    mean/std are NOT floor-contaminated (mean != log(1e-30)), and (b) emitted in
+    make_batch's t_f_nhi_mask as False so it contributes ZERO gradient to the
+    Head-A loss. Compare against the pre-fix floor-contaminated values to prove
+    the mask actually changed the norm."""
+    import jax, jax.numpy as jnp
+    from hcd_analysis.emulator.model import joint_loss, Emulator
+    d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    d["snap_f_nhi"][:, 0] = 0.0                     # bin 0 structurally all-zero
+    R = d["x"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    floor = safe_log(0.0)
+
+    # (a) bin 0 norm is the neutral fallback (no valid data), NOT the floor value
+    assert not np.isclose(norm["f_nhi"]["mean"][0], floor)
+    assert np.isclose(norm["f_nhi"]["mean"][0], 0.0)   # fit_norm neutral fallback
+    assert np.isclose(norm["f_nhi"]["std"][0], 1.0)
+    # a nonzero bin's norm is a real (non-floor, non-neutral) statistic
+    assert norm["f_nhi"]["mean"][1] != 0.0
+
+    # (b) make_batch masks bin 0 out of the Head-A loss
+    b = make_batch(d, np.arange(R), norm)
+    assert b["t_f_nhi_mask"].shape == b["t_f_nhi"].shape
+    assert not b["t_f_nhi_mask"][:, 0].any()           # bin 0 masked everywhere
+    assert b["t_f_nhi_mask"][:, 1:].all()              # other bins unmasked
+
+    # the masked bin contributes zero gradient: corrupt the bin-0 TARGET only;
+    # loss & model-grad must be unchanged (masked out).
+    bj = {k: (jnp.asarray(v) if hasattr(v, "dtype") else v) for k, v in b.items()}
+    m = Emulator(in_dim=10, n_k=d["P_filt"].shape[2], key=jax.random.PRNGKey(0))
+    v0, g0 = jax.value_and_grad(lambda mm: joint_loss(mm, bj))(m)
+    t2 = bj["t_f_nhi"].at[:, 0].set(1e6)
+    bj2 = dict(bj); bj2["t_f_nhi"] = t2
+    v1, g1 = jax.value_and_grad(lambda mm: joint_loss(mm, bj2))(m)
+    import equinox as eqx
+    assert jnp.array_equal(v0, v1)
+    for a, c in zip(jax.tree_util.tree_leaves(eqx.filter(g0, eqx.is_array)),
+                    jax.tree_util.tree_leaves(eqx.filter(g1, eqx.is_array))):
+        assert jnp.array_equal(a, c)

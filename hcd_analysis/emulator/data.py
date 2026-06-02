@@ -10,6 +10,7 @@ via ``0·NaN``). Only a bin that is NaN across all fine sub-bins (above native
 Nyquist) stays NaN, so it can be masked out downstream.
 """
 from __future__ import annotations
+import warnings
 import h5py, numpy as np
 
 COARSE_SLICES = (slice(0, 1), slice(1, 8), slice(8, 13), slice(13, 15))
@@ -148,11 +149,25 @@ def signed_log_inv(y):
 def safe_log(x, floor=1e-30):
     return np.log(np.maximum(x, floor))
 
-def fit_norm(x, train_idx):
+def fit_norm(x, train_idx, valid_mask=None):
+    """Per-column {mean,std} over train rows, NaN-aware.
+
+    valid_mask (same shape as x, optional): elements that are False are excluded
+    from the mean/std (A4b: structural-zero bins floored by safe_log must not
+    contaminate the f_nhi/dN/dX norm). NaN entries are always ignored too."""
     xt = x[train_idx]
-    mean = np.nanmean(xt, axis=0)
-    std = np.nanstd(xt, axis=0)
-    std = np.where(std < 1e-12, 1.0, std)
+    if valid_mask is not None:
+        mt = valid_mask[train_idx]
+        xt = np.where(mt, xt, np.nan)   # invalid -> NaN -> ignored by nanmean/nanstd
+    with warnings.catch_warnings():
+        # all-invalid columns are handled by the finite-fallback below; the
+        # "empty slice" / "ddof<=0" warnings from nanmean/nanstd are expected.
+        warnings.simplefilter("ignore", RuntimeWarning)
+        mean = np.nanmean(xt, axis=0)
+        std = np.nanstd(xt, axis=0)
+    # a column with no valid entries -> NaN mean/std; fall back to neutral 0/1.
+    mean = np.where(np.isfinite(mean), mean, 0.0)
+    std = np.where(np.isfinite(std) & (std >= 1e-12), std, 1.0)
     return {"mean": mean, "std": std}
 
 def apply_norm(x, stats):
@@ -192,9 +207,15 @@ def fit_target_norm(d, train_idx):
     train_idx = np.asarray(train_idx)
     train_blocks = np.unique(d["snap_group_idx"][train_idx])
     fwd = lambda ch: TARGET_TRANSFORMS[ch][0]
+    # A4b: f_nhi (CDDF) and dN/dX have STRUCTURAL zeros (e.g. CDDF bin 0 is all-
+    # zero) that safe_log floors to log(1e-30) ~= -69. Fit the f_nhi/dndx norm
+    # over the NONZERO (and finite) bins ONLY so the floor never contaminates
+    # mean/std.
+    f_nhi_valid = np.isfinite(d["snap_f_nhi"]) & (d["snap_f_nhi"] > 0)
+    dndx_valid = np.isfinite(d["snap_dNdX"]) & (d["snap_dNdX"] > 0)
     stats = {
-        "f_nhi":  fit_norm(fwd("f_nhi")(d["snap_f_nhi"]), train_blocks),
-        "dndx":   fit_norm(fwd("dndx")(d["snap_dNdX"]), train_blocks),
+        "f_nhi":  fit_norm(fwd("f_nhi")(d["snap_f_nhi"]), train_blocks, f_nhi_valid),
+        "dndx":   fit_norm(fwd("dndx")(d["snap_dNdX"]), train_blocks, dndx_valid),
         "P_filt": fit_norm(fwd("P_filt")(d["P_filt"]), train_idx),
         "delta":  fit_norm(fwd("delta")(d["delta"]), train_idx),
     }
@@ -217,6 +238,12 @@ def make_batch(d, idx, norm_stats):
     t_P_filt = apply_norm(safe_log(d["P_filt"][idx]), norm_stats["P_filt"])     # (n,4,K)
     t_delta = apply_norm(signed_log(d["delta"][idx]), norm_stats["delta"])      # (n,3,K)
 
+    # A4b: Head-A masks = finite AND (cache value > 0). The CDDF/dN/dX structural
+    # zeros (e.g. f_nhi bin 0) are safe_log-floored to ~-69; mask them out of the
+    # Head-A loss (joint_loss uses these instead of jnp.ones_like).
+    t_f_nhi_mask = (np.isfinite(d["snap_f_nhi"][grp]) & (d["snap_f_nhi"][grp] > 0))
+    t_dndx_mask = (np.isfinite(d["snap_dNdX"][grp]) & (d["snap_dNdX"][grp] > 0))
+
     # inv_nalpha: 1 / (#rows sharing this row's snap-block) over the FULL cache,
     # so alpha-siblings (same snap, different alpha rescale) each get weight 1/n_a
     # and a snap-block is not over-counted relative to its number of alpha samples.
@@ -224,11 +251,11 @@ def make_batch(d, idx, norm_stats):
                                minlength=int(d["snap_group_idx"].max()) + 1)
     inv_nalpha = 1.0 / block_counts[grp].astype(np.float64)                     # (n,)
 
-    # mean_F_clean: PLACEHOLDER. The cache does not store a per-row clean-class
-    # mean flux, so we use exp(-tau0) (the definitional mean flux that tau0
-    # encodes). A3 (the meanF loss term) is dead today (no model gradient) and
-    # will supply the real clean-class mean flux when it is wired; this keeps
-    # the batch key present and finite until then.  TODO(A3): real mean_F_clean.
+    # mean_F_clean: kept (unused by the loss) for batch-contract stability. The
+    # A3 meanF loss term was removed (it had zero model gradient — see joint_loss);
+    # mean-flux consistency is structural (tau0 = -ln(target_F) is an input). We
+    # use exp(-tau0), the definitional mean flux tau0 encodes, until a dedicated
+    # mean-F head is wired (deferred, out of scope).
     mean_F_clean = np.exp(-d["tau0"][idx]).astype(np.float64)                   # (n,)
 
     return {
@@ -238,6 +265,8 @@ def make_batch(d, idx, norm_stats):
         "t_dndx": t_dndx.astype(np.float64),
         "t_P_filt": t_P_filt.astype(np.float64),
         "t_delta": t_delta.astype(np.float64),
+        "t_f_nhi_mask": t_f_nhi_mask.astype(bool),
+        "t_dndx_mask": t_dndx_mask.astype(bool),
         "mask": d["mask"][idx].astype(bool),
         "inv_nc": d["inv_nc"][idx].astype(np.float64),
         "inv_nalpha": inv_nalpha,

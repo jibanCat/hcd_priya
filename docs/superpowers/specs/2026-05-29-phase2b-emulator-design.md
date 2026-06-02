@@ -131,9 +131,11 @@ params(9) ⊕ z  →  encoder MLP [10 → 256 → 128 → 64]  →  latent (64)
   `Δ_c = P_c^unfilt − P_c^filt` (LLS/subDLA/DLA; clean Δ≈0, fixed to 0 — its core
   is untouched). Dense per-k outputs (**no PCA** — it would smear the low-k vs
   high-k structure the freeze-core fix protects).
-  - **`P_tier_p` is reconstructed structurally** as `Σ_c w_c·P_c^filt` (exact
-    cache identity to 8e-15) — not a free output. This turns the old "total-
-    reconstruction anchor" from a soft penalty into an exact identity.
+  - **`P_tier_p` is reconstructed structurally** as `Σ_c w_c·P_c^filt` —
+    structural (not a free output); exact on the cache (bit-identity to 8e-15),
+    and on the trained reconstruction accurate to the emulator error in
+    `P_c^filt`. This turns the old "total-reconstruction anchor" from a soft
+    penalty into a structural relation.
   - **`P_c^unfilt` reconstructed** as `P_c^filt + Δ_c` only if needed downstream.
   - **`Δ_c` uses a sign-safe transform** (signed-log / `arcsinh`) — Δ flips sign
     at low k (the unfiltered DLA can sit below filtered there), so plain log is

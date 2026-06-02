@@ -165,14 +165,27 @@ def masked_mse(pred, target, mask, weight=None):
 
 def joint_loss(model, batch, term_w=None):
     """Single joint scalar (spec sec.4). Per-element means balance the 172 vs 3
-    channel counts; term_w optionally rescales the named terms."""
-    term_w = term_w or {"f_nhi": 1.0, "dndx": 1.0, "P_filt": 1.0, "delta": 1.0, "meanF": 0.1}
+    channel counts; term_w optionally rescales the named terms.
+
+    A4: with A1's per-channel standardization, every channel's per-element-mean
+    MSE is O(1) in transformed space and the four terms are comparable, so the
+    default term_w is UNIFORM (spec sec.4: per-element means + standardized
+    channels remove the count/scale imbalance — no hand-sweep). It stays an
+    optional override.
+
+    A3: the old meanF term (mean((mean_F_clean - exp(-tau0))^2)) was removed —
+    mean-flux consistency is structural (tau0 = -ln(target_F) is an INPUT, and
+    the clean-class P1D is emulated), and the term depended only on `batch`, not
+    `model`, so it carried zero model gradient. A dedicated mean-F head is deferred.
+    """
+    term_w = term_w or {"f_nhi": 1.0, "dndx": 1.0, "P_filt": 1.0, "delta": 1.0}
     preds = jax.vmap(model)(batch["x"], batch["tau0"])
+    # A4b: Head-A masks exclude the safe_log-floored structural-zero CDDF/dN/dX bins.
     la_cddf = masked_mse(preds["f_nhi"], batch["t_f_nhi"],
-                         jnp.ones_like(batch["t_f_nhi"], bool),
+                         batch["t_f_nhi_mask"],
                          weight=batch["inv_nalpha"][:, None])
     la_dndx = masked_mse(preds["dndx"], batch["t_dndx"],
-                         jnp.ones_like(batch["t_dndx"], bool),
+                         batch["t_dndx_mask"],
                          weight=batch["inv_nalpha"][:, None])
     m3 = batch["mask"][:, None, :]
     wcls4 = batch["inv_nc"][:, :, None]
@@ -181,7 +194,5 @@ def joint_loss(model, batch, term_w=None):
                        m3 & jnp.ones_like(batch["t_P_filt"], bool), weight=wcls4)
     lb_dl = masked_mse(preds["delta"], batch["t_delta"],
                        m3 & jnp.ones_like(batch["t_delta"], bool), weight=wcls3)
-    l_meanF = jnp.mean((batch["mean_F_clean"] - jnp.exp(-batch["tau0"])) ** 2)
     return (term_w["f_nhi"]*la_cddf + term_w["dndx"]*la_dndx
-            + term_w["P_filt"]*lb_pf + term_w["delta"]*lb_dl
-            + term_w["meanF"]*l_meanF)
+            + term_w["P_filt"]*lb_pf + term_w["delta"]*lb_dl)

@@ -198,6 +198,8 @@ def test_joint_loss_scalar_finite_and_grads_finite():
         "t_f_nhi": jnp.zeros((2,30)), "t_dndx": jnp.zeros((2,3)),
         "t_P_filt": jnp.where(jnp.arange(8) < 6, 1.0, jnp.nan)[None,None,:]*jnp.ones((2,4,8)),
         "t_delta": jnp.zeros((2,3,8)),
+        "t_f_nhi_mask": jnp.ones((2,30), bool),
+        "t_dndx_mask": jnp.ones((2,3), bool),
         "mask": (jnp.arange(8) < 6)[None,:]*jnp.ones((2,8), bool),
         "inv_nc": jnp.array([[1.,1/10,1/7,0.],[1.,1/10,1/7,1/3]]),
         "inv_nalpha": jnp.array([0.25, 0.25]),
@@ -278,6 +280,8 @@ def _lowrank_batch(n_k):
         "t_P_filt": jnp.where(jnp.arange(n_k) < n_k - 2, 1.0, jnp.nan)[None, None, :]
         * jnp.ones((2, 4, n_k)),
         "t_delta": jnp.zeros((2, 3, n_k)),
+        "t_f_nhi_mask": jnp.ones((2, 30), bool),
+        "t_dndx_mask": jnp.ones((2, 3), bool),
         "mask": (jnp.arange(n_k) < n_k - 2)[None, :] * jnp.ones((2, n_k), bool),
         "inv_nc": jnp.array([[1., 1 / 10, 1 / 7, 0.], [1., 1 / 10, 1 / 7, 1 / 3]]),
         "inv_nalpha": jnp.array([0.25, 0.25]),
@@ -465,3 +469,142 @@ def test_lowrank_serialise_roundtrip_and_structural_composition():
         return structural_tier_p(w, pf).sum()
     gb = jax.grad(struct_loss)(m.head_b.p_filt_basis)
     assert jnp.all(jnp.isfinite(gb)) and jnp.any(gb != 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Phase-2b final review batch: A2 (structural-identity roundtrip), A3 (dead
+# meanF removed), A4 (uniform/comparable term_w).
+# ---------------------------------------------------------------------------
+
+def test_structural_identity_through_transform_roundtrip(tmp_path):
+    """A2: the transform/inverse COMPOSITION preserves the structural identity
+    the spec leans on. Take a cache row's LINEAR P_filt (4,K) and its w_c;
+    transform to the A1 target space (safe_log + apply_norm), invert back
+    (invert_norm + exp, as untransform_prediction does), and confirm
+    structural_tier_p(w_c, recovered linear P_filt) reproduces the cache's
+    einsum(w_c, linear P_filt) to ~1e-10. (NOT a trained-model claim — this
+    pins the transform composition on cache arrays.)"""
+    import numpy as np
+    from tests.emulator._fixture import write_synthetic_cache
+    from hcd_analysis.emulator.data import (
+        load_cache, fit_target_norm, safe_log, apply_norm, invert_norm,
+    )
+    path = tmp_path / "obs.h5"
+    write_synthetic_cache(path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    d = load_cache(path)
+    R = d["x"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+
+    # pick a fully-finite (below-Nyquist) row so the whole (4,K) is comparable
+    finite_rows = np.where(np.isfinite(d["P_filt"]).all(axis=(1, 2)))[0]
+    assert finite_rows.size > 0
+    row = int(finite_rows[0])
+    P_lin = d["P_filt"][row]                          # (4,K) LINEAR
+    w_c = d["w_c_cache"][row]                          # (4,)
+
+    # forward to the A1 target space, then invert (untransform_prediction style)
+    t = apply_norm(safe_log(P_lin), norm["P_filt"])    # standardized log
+    P_lin_rt = np.exp(invert_norm(t, norm["P_filt"]))  # back to linear
+
+    cache_tier_p = np.einsum("c,ck->k", w_c, P_lin)    # cache structural total
+    rt_tier_p = np.asarray(structural_tier_p(jnp.asarray(w_c), jnp.asarray(P_lin_rt)))
+    assert np.allclose(rt_tier_p, cache_tier_p, atol=1e-10, rtol=1e-10)
+    # also matches the cache's stored P_tier_p on the finite bins
+    assert np.allclose(rt_tier_p, d["P_tier_p"][row], atol=1e-10, rtol=1e-10)
+
+
+def _joint_batch(n_k=8):
+    """A standardized synthetic joint-loss batch (Head-A masks present)."""
+    return {
+        "x": jnp.zeros((2, 10)), "tau0": jnp.array([0.3, 0.5]),
+        "t_f_nhi": jnp.zeros((2, 30)), "t_dndx": jnp.zeros((2, 3)),
+        "t_P_filt": jnp.where(jnp.arange(n_k) < n_k - 2, 1.0, jnp.nan)[None, None, :]
+        * jnp.ones((2, 4, n_k)),
+        "t_delta": jnp.zeros((2, 3, n_k)),
+        "t_f_nhi_mask": jnp.ones((2, 30), bool),
+        "t_dndx_mask": jnp.ones((2, 3), bool),
+        "mask": (jnp.arange(n_k) < n_k - 2)[None, :] * jnp.ones((2, n_k), bool),
+        "inv_nc": jnp.array([[1., 1 / 10, 1 / 7, 0.], [1., 1 / 10, 1 / 7, 1 / 3]]),
+        "inv_nalpha": jnp.array([0.25, 0.25]),
+        "mean_F_clean": jnp.array([0.7, 0.6]),
+    }
+
+
+def test_joint_loss_independent_of_meanF_and_grads_finite():
+    """A3: the dead meanF term is gone. joint_loss must (a) not reference
+    mean_F_clean (perturbing it leaves the loss & grad bit-identical), and
+    (b) still produce a finite scalar with finite model gradients."""
+    key = jax.random.PRNGKey(33)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+    batch = _joint_batch(8)
+    val, grad = jax.value_and_grad(lambda mm: joint_loss(mm, batch))(m)
+    assert jnp.isfinite(val)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    assert all(jnp.all(jnp.isfinite(g)) for g in leaves)
+
+    # mean_F_clean no longer enters the loss: corrupt it -> identical value & grad
+    batch2 = dict(batch)
+    batch2["mean_F_clean"] = jnp.array([99.0, -99.0])
+    val2, grad2 = jax.value_and_grad(lambda mm: joint_loss(mm, batch2))(m)
+    assert jnp.array_equal(val, val2)
+    g1 = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    g2 = jax.tree_util.tree_leaves(eqx.filter(grad2, eqx.is_array))
+    for a, b in zip(g1, g2):
+        assert jnp.array_equal(a, b)
+
+    # joint_loss also works if mean_F_clean is absent entirely (truly unused)
+    batch3 = {k: v for k, v in batch.items() if k != "mean_F_clean"}
+    val3 = joint_loss(m, batch3)
+    assert jnp.array_equal(val, val3)
+
+
+def test_uniform_term_w_terms_comparable():
+    """A4: with A1-standardized targets, the four per-channel loss terms are
+    within ~1 order of magnitude of each other (no channel dominates), so the
+    uniform default term_w is justified — no hand-sweep needed."""
+    import numpy as np
+    from hcd_analysis.emulator.model import masked_mse
+    key = jax.random.PRNGKey(41)
+    m = Emulator(in_dim=10, n_k=12, key=key)
+    rng = np.random.default_rng(0)
+    n_k = 12
+    # standardized synthetic targets: ~unit-variance (the A1 transformed space)
+    batch = {
+        "x": jnp.array(rng.standard_normal((4, 10))),
+        "tau0": jnp.array(rng.uniform(0.1, 0.6, 4)),
+        "t_f_nhi": jnp.array(rng.standard_normal((4, 30))),
+        "t_dndx": jnp.array(rng.standard_normal((4, 3))),
+        "t_P_filt": jnp.array(rng.standard_normal((4, 4, n_k))),
+        "t_delta": jnp.array(rng.standard_normal((4, 3, n_k))),
+        "t_f_nhi_mask": jnp.ones((4, 30), bool),
+        "t_dndx_mask": jnp.ones((4, 3), bool),
+        "mask": jnp.ones((4, n_k), bool),
+        "inv_nc": jnp.ones((4, 4)),
+        "inv_nalpha": jnp.ones(4),
+        "mean_F_clean": jnp.array(rng.uniform(0.4, 0.8, 4)),
+    }
+    preds = jax.vmap(m)(batch["x"], batch["tau0"])
+    m3 = batch["mask"][:, None, :]
+    terms = {
+        "f_nhi": masked_mse(preds["f_nhi"], batch["t_f_nhi"], batch["t_f_nhi_mask"],
+                            weight=batch["inv_nalpha"][:, None]),
+        "dndx": masked_mse(preds["dndx"], batch["t_dndx"], batch["t_dndx_mask"],
+                           weight=batch["inv_nalpha"][:, None]),
+        "P_filt": masked_mse(preds["P_filt"], batch["t_P_filt"],
+                             m3 & jnp.ones_like(batch["t_P_filt"], bool),
+                             weight=batch["inv_nc"][:, :, None]),
+        "delta": masked_mse(preds["delta"], batch["t_delta"],
+                            m3 & jnp.ones_like(batch["t_delta"], bool),
+                            weight=batch["inv_nc"][:, 1:, None]),
+    }
+    vals = jnp.array(list(terms.values()))
+    assert jnp.all(jnp.isfinite(vals)) and jnp.all(vals > 0)
+    # within ~1 order of magnitude: max/min ratio < 10
+    assert float(jnp.max(vals) / jnp.min(vals)) < 10.0
+
+    # default term_w is uniform and meanF-free: passing only the four uniform
+    # weights must reproduce the default-arg behaviour exactly (no missing key).
+    default = joint_loss(m, batch)
+    explicit = joint_loss(m, batch,
+                          term_w={"f_nhi": 1.0, "dndx": 1.0, "P_filt": 1.0, "delta": 1.0})
+    assert jnp.array_equal(default, explicit)
