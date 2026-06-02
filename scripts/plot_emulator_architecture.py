@@ -31,6 +31,9 @@ C_HEADB = "#ffcc80"
 C_OUT_A = "#66bb6a"
 C_OUT_B = "#fb8c00"
 C_STRUCT = "#ce93d8"
+C_LIK    = "#80cbc4"   # teal — likelihood / inference layer
+C_ALPHA  = "#26a69a"   # teal accent — free per-class nuisance alpha_c
+C_LIK_EC = "#00695c"   # dark teal edge for the likelihood block
 C_BLOCK = {"enc": "#e3f2fd", "a": "#e8f5e9", "b": "#fff3e0"}
 EDGE = "#37474f"
 
@@ -84,8 +87,8 @@ def bottom(b):
     return (x + w / 2, y)
 
 
-fig, ax = plt.subplots(figsize=(18, 10.5))
-ax.set_xlim(0, 18)
+fig, ax = plt.subplots(figsize=(23, 10.5))
+ax.set_xlim(0, 23)
 ax.set_ylim(0, 10.5)
 ax.axis("off")
 
@@ -190,13 +193,87 @@ arrow(ax, right(o_pfilt), (sx + 0.3, sy + 0.3), color="#6a1b9a", lw=1.6,
       label="$P_c^{filt}$", rad=0.45, label_fs=8.5)
 arrow(ax, top(s_box), bottom(o_tierp), color="#6a1b9a", lw=1.8, rad=0.2)
 
+# ======================= LIKELIHOOD / INFERENCE block ===================
+# Data-space model:  P_obs(k) = P_tier_p + Sum_{c in HCD} alpha_c * Delta_c
+lx, ly, lw, lh = 17.2, 0.55, 5.55, 9.05
+block_bg(ax, lx, ly, lw, lh, "Likelihood / inference", C_LIK, C_LIK_EC)
+
+# --- the data-space model equation (banner at the top of the block) ---
+l_eq = box(ax, lx + 0.3, ly + lh - 1.15, lw - 0.6, 0.78,
+           "$P_{\\mathrm{obs}}(k) = P_{\\mathrm{tier}\\,p} + "
+           "\\sum_{c\\in\\mathrm{HCD}} \\alpha_c\\,\\Delta_c$",
+           "#b2dfdb", fontsize=12.5, fontweight="bold", ec=C_LIK_EC)
+
+# --- forest baseline node (P_tier_p flows IN) ---
+l_base = box(ax, lx + 0.35, ly + 5.55, 2.3, 0.95,
+             "$P_{\\mathrm{tier}\\,p}$\nforest baseline\n$(\\sum_c w_c P_c^{\\mathrm{filt}})$",
+             "#b2dfdb", fontsize=8.5, ec=C_LIK_EC)
+
+# --- per-class HCD templates (Delta_c flows IN) ---
+l_delta = box(ax, lx + 0.35, ly + 2.35, 2.3, 0.95,
+              f"$\\Delta_c$  [3, {N_K}]\nper-class HCD\ntemplates",
+              "#b2dfdb", fontsize=8.5, ec=C_LIK_EC)
+
+# --- free per-class nuisance node alpha_c ---
+l_alpha = box(ax, lx + 0.35, ly + 3.95, 2.3, 0.95,
+              "$\\alpha_c$  [3]\nfree nuisance\nLLS, subDLA, DLA",
+              C_ALPHA, fontsize=8.5, fontweight="bold", ec=C_LIK_EC)
+ax.text(lx + 1.5, ly + 3.85,
+        "$\\alpha_c$ = effective residual (post-masking)\nincidence — free, fit from P1D",
+        ha="center", va="top", fontsize=7.6, color=C_LIK_EC, style="italic")
+
+# --- the multiply / sum node ---
+l_mul = box(ax, lx + 3.25, ly + 4.05, 1.0, 1.0,
+            "$\\alpha_c\\,\\Delta_c$\n$\\oplus$",
+            "#4db6ac", fontsize=10, fontweight="bold", ec=C_LIK_EC)
+
+# --- final data-space total P1D node ---
+l_pobs = box(ax, lx + 3.05, ly + 5.85, 2.15, 1.05,
+             f"$P_{{\\mathrm{{obs}}}}(k)$  [{N_K}]\nTOTAL P1D\n→ compared to data",
+             "#26a69a", fontsize=9, fontweight="bold", ec=C_LIK_EC)
+
+# inflows: P_tier_p baseline + Delta_c templates -> P_obs / multiply node
+arrow(ax, right(o_tierp), left(l_base), color=C_LIK_EC, lw=1.7,
+      label="baseline", rad=-0.18, label_fs=8)
+arrow(ax, right(o_delta), (lx + 0.35, ly + 2.55), color=C_LIK_EC, lw=1.7,
+      label="templates", rad=0.30, label_fs=8)
+# Delta_c and alpha_c into the multiply node
+arrow(ax, right(l_delta), bottom(l_mul), color=C_LIK_EC, lw=1.6, rad=-0.25)
+arrow(ax, right(l_alpha), left(l_mul), color=C_ALPHA, lw=2.0, rad=0.0)
+# baseline + (alpha_c Delta_c) -> P_obs total
+arrow(ax, right(l_base), (l_pobs[0], l_pobs[1] + 0.25),
+      color=C_LIK_EC, lw=1.7, rad=-0.20)
+arrow(ax, top(l_mul), bottom(l_pobs), color=C_LIK_EC, lw=1.8, rad=0.18)
+
+# --- PRIOR arrow: Head A dN/dX -> w_c -> alpha_c prior (dashed/one-sided) ---
+arrow(ax, bottom(o_dndx), top(l_alpha), color="#00897b", lw=1.8, ls=":",
+      rad=-0.45)
+ax.text(lx + 0.6, ly + 5.1,
+        "prior on $\\alpha_c$ centered on sim $w_c$(dN/dX),\n"
+        "wide / one-sided (PRIYA-style)",
+        ha="left", va="center", fontsize=7.6, color="#00695c",
+        fontweight="bold",
+        bbox=dict(boxstyle="round,pad=0.22", fc="white", ec="#00897b",
+                  ls=":", lw=1.2))
+
+# --- deliverable annotation ---
+ax.text(lx + lw / 2, ly + 0.95,
+        "$\\alpha_c$ posterior  $\\Rightarrow$  rough per-class\n"
+        "effective dN/dX  (HCD deliverable)",
+        ha="center", va="center", fontsize=9, color="#004d40",
+        fontweight="bold",
+        bbox=dict(boxstyle="round,pad=0.3", fc="#e0f2f1", ec=C_LIK_EC,
+                  lw=1.4))
+
 # ======================= legend / notes =================================
 legend_handles = [
     Line2D([0], [0], marker="s", color="w", markerfacecolor=C_ENC, markersize=13, label="Encoder layer"),
     Line2D([0], [0], marker="s", color="w", markerfacecolor=C_HEADA, markersize=13, label="Head A layer ($\\tau_0$-free)"),
     Line2D([0], [0], marker="s", color="w", markerfacecolor=C_HEADB, markersize=13, label="Head B layer ($\\tau_0$-dep.)"),
     Line2D([0], [0], marker="s", color="w", markerfacecolor=C_STRUCT, markersize=13, label="Structural (non-NN) op"),
+    Line2D([0], [0], marker="s", color="w", markerfacecolor=C_ALPHA, markersize=13, label="Free nuisance $\\alpha_c$ (likelihood)"),
     Line2D([0], [0], color="#c62828", lw=2.0, label="$\\tau_0$ data path"),
+    Line2D([0], [0], color="#00897b", lw=1.8, ls=":", label="$\\alpha_c$ prior (Head A dN/dX $\\to w_c$)"),
 ]
 ax.legend(handles=legend_handles, loc="lower left", fontsize=9.5,
           framealpha=0.95, ncol=1, bbox_to_anchor=(0.005, 0.005))
@@ -208,7 +285,8 @@ ax.text(0.3, 4.6,
         ha="left", va="top", fontsize=9, color="#37474f",
         bbox=dict(boxstyle="round,pad=0.4", fc="#fafafa", ec="#b0bec5", lw=1.0))
 
-fig.suptitle("Phase-2b HCD P1D + CDDF emulator (as-built)",
+fig.suptitle("Phase-2b HCD P1D + CDDF emulator "
+             "(as-built; single-$\\alpha_c$ likelihood, 2026-06-02)",
              fontsize=18, fontweight="bold", y=0.985)
 
 out_dir = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
