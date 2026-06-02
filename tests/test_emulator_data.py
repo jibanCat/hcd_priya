@@ -197,3 +197,65 @@ def test_train_norm_uses_only_train_blocks(tmp_path):
     assert not np.allclose(part["P_filt"]["mean"], full["P_filt"]["mean"])
     assert not np.allclose(part["f_nhi"]["mean"], full["f_nhi"]["mean"])
     assert not np.allclose(part["delta"]["mean"], full["delta"]["mean"])
+
+
+def test_target_norm_no_val_leak(tmp_path):
+    """STRICT leak guard: corrupting val rows (and their snap-blocks) must NOT
+    move any train-only norm stat. Pins both the per-row (P_filt/delta) and the
+    per-block (f_nhi/dndx via snap_group_idx) channels against val/test leakage."""
+    d = _load_fixture(tmp_path, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=8)
+    val = d["sim_name"] == "sim3"
+    train_idx = np.where(~val)[0]
+    norm = fit_target_norm(d, train_idx)
+
+    # stats must equal an independent train-only computation (no val rows used)
+    exp_pf = np.nanmean(safe_log(d["P_filt"][train_idx]), axis=0)
+    assert np.allclose(norm["P_filt"]["mean"], exp_pf, equal_nan=True)
+    train_blocks = np.unique(d["snap_group_idx"][train_idx])
+    exp_f = np.nanmean(safe_log(d["snap_f_nhi"][train_blocks]), axis=0)
+    assert np.allclose(norm["f_nhi"]["mean"], exp_f, equal_nan=True)
+
+    # corrupt ONLY val rows + the snap-blocks they (and only they) map into
+    d2 = {k: (v.copy() if hasattr(v, "copy") else v) for k, v in d.items()}
+    d2["P_filt"][val] *= 1e6
+    d2["delta"][val] *= 1e6
+    val_blocks = np.unique(d["snap_group_idx"][np.where(val)[0]])
+    train_only_blocks = np.setdiff1d(val_blocks, train_blocks)  # blocks no train row touches
+    d2["snap_f_nhi"][train_only_blocks] *= 1e6
+    d2["snap_dNdX"][train_only_blocks] *= 1e6
+    norm2 = fit_target_norm(d2, train_idx)
+    for ch in ("f_nhi", "dndx", "P_filt", "delta"):
+        assert np.allclose(norm[ch]["mean"], norm2[ch]["mean"], equal_nan=True), ch
+        assert np.allclose(norm[ch]["std"], norm2[ch]["std"], equal_nan=True), ch
+
+
+def test_fnhi_zero_bin_floor_is_bounded_and_invertible(tmp_path):
+    """The real cache has STRUCTURAL zeros in f_nhi (CDDF): bin 0 is all-zero and
+    the high-NHI tail bins are partially zero. safe_log sends those to the floor
+    log(1e-30) ~= -69.08, which (a) must stay finite through normalization and
+    (b) must invert to ~0 (not NaN/inf). This pins the documented floor behaviour
+    so a future floor change can't silently corrupt the CDDF target norm.
+
+    KNOWN LIMITATION (untested risk surfaced by review): for a partially-zero bin
+    the floor value enters fit_norm's mean/std as if it were a real datum, so that
+    bin's standardization is floor-contaminated. Accepted for now (CDDF amplitude,
+    not P1D); this test documents and bounds it rather than asserting it away."""
+    d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    # inject the real-cache structure: bin 0 fully zero, last bin partially zero
+    d["snap_f_nhi"][:, 0] = 0.0
+    d["snap_f_nhi"][::2, -1] = 0.0
+    R = d["x"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    floor = safe_log(0.0)
+    # bin 0: every block at the floor -> mean==floor, std collapsed to the 1.0 guard
+    assert np.isclose(norm["f_nhi"]["mean"][0], floor)
+    assert np.isclose(norm["f_nhi"]["std"][0], 1.0)
+    # all norm stats finite (floor did not produce NaN/inf)
+    assert np.isfinite(norm["f_nhi"]["mean"]).all()
+    assert np.isfinite(norm["f_nhi"]["std"]).all() and np.all(norm["f_nhi"]["std"] > 0)
+    # round-trip of a zero bin returns ~0 (floor 1e-30), never NaN/inf
+    b = make_batch(d, np.arange(R), norm)
+    phys = untransform_prediction({"f_nhi": b["t_f_nhi"]}, norm)
+    zero_mask = d["snap_f_nhi"][d["snap_group_idx"]] == 0.0
+    assert np.all(np.abs(phys["f_nhi"][zero_mask]) <= 1e-29)
+    assert np.isfinite(phys["f_nhi"]).all()
