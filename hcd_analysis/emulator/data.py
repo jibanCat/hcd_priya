@@ -193,6 +193,17 @@ TARGET_TRANSFORMS = {
 TARGET_CHANNELS = ("f_nhi", "dndx", "P_filt", "delta")
 
 
+def _valid_target_mask(arr):
+    """Shared f_nhi/dN/dX validity predicate (M2): finite AND strictly positive.
+
+    Single source of truth used by BOTH fit_target_norm (to exclude structural
+    zeros from the norm fit) and make_batch (to mask them out of the Head-A
+    loss), so the two can never desync. The CDDF/dN/dX have STRUCTURAL zeros
+    (e.g. f_nhi bin 0) that safe_log floors to log(1e-30) ~= -69; this predicate
+    flags exactly those (and NaN bins) as invalid."""
+    return np.isfinite(arr) & (arr > 0)
+
+
 def fit_target_norm(d, train_idx):
     """Per-channel {mean,std} in TRANSFORMED space, TRAIN ROWS ONLY (spec sec.10).
 
@@ -211,8 +222,8 @@ def fit_target_norm(d, train_idx):
     # zero) that safe_log floors to log(1e-30) ~= -69. Fit the f_nhi/dndx norm
     # over the NONZERO (and finite) bins ONLY so the floor never contaminates
     # mean/std.
-    f_nhi_valid = np.isfinite(d["snap_f_nhi"]) & (d["snap_f_nhi"] > 0)
-    dndx_valid = np.isfinite(d["snap_dNdX"]) & (d["snap_dNdX"] > 0)
+    f_nhi_valid = _valid_target_mask(d["snap_f_nhi"])
+    dndx_valid = _valid_target_mask(d["snap_dNdX"])
     stats = {
         "f_nhi":  fit_norm(fwd("f_nhi")(d["snap_f_nhi"]), train_blocks, f_nhi_valid),
         "dndx":   fit_norm(fwd("dndx")(d["snap_dNdX"]), train_blocks, dndx_valid),
@@ -241,8 +252,8 @@ def make_batch(d, idx, norm_stats):
     # A4b: Head-A masks = finite AND (cache value > 0). The CDDF/dN/dX structural
     # zeros (e.g. f_nhi bin 0) are safe_log-floored to ~-69; mask them out of the
     # Head-A loss (joint_loss uses these instead of jnp.ones_like).
-    t_f_nhi_mask = (np.isfinite(d["snap_f_nhi"][grp]) & (d["snap_f_nhi"][grp] > 0))
-    t_dndx_mask = (np.isfinite(d["snap_dNdX"][grp]) & (d["snap_dNdX"][grp] > 0))
+    t_f_nhi_mask = _valid_target_mask(d["snap_f_nhi"][grp])
+    t_dndx_mask = _valid_target_mask(d["snap_dNdX"][grp])
 
     # inv_nalpha: 1 / (#rows sharing this row's snap-block) over the FULL cache,
     # so alpha-siblings (same snap, different alpha rescale) each get weight 1/n_a
@@ -311,3 +322,28 @@ def tau0_edge_holdout(tau0, frac=0.15):
     ho = np.concatenate([order[:k], order[-k:]])
     tr = np.setdiff1d(np.arange(len(tau0)), ho)
     return tr, ho
+
+
+def make_splits(d, fold, n_folds=8, holdout_frac=0.15):
+    """Compose the tau0-edge holdout x LOSO split for one fold (spec sec.7).
+
+    Returns ``(train_idx, val_idx, holdout_idx)`` where:
+      - ``holdout_idx`` is the tau0-edge extrapolation probe (``tau0_edge_holdout``),
+        excluded from BOTH train and val so it stays entirely unseen;
+      - the remaining pool is LOSO-partitioned (``kfold_loso``) into ``n_folds``,
+        and ``train_idx``/``val_idx`` are this ``fold``'s train/val rows with the
+        holdout removed from each.
+
+    Mirrors the inline CLI logic in scripts/train_emulator.py so the composition
+    is unit-testable (disjointness + LOSO no-straddle)."""
+    _, holdout_idx = tau0_edge_holdout(d["tau0"], frac=holdout_frac)
+    pool_mask = np.ones(len(d["tau0"]), bool)
+    pool_mask[holdout_idx] = False
+
+    folds = kfold_loso(d["sim_name"], n_folds=n_folds)
+    if fold >= len(folds):
+        raise IndexError(f"fold {fold} out of range (have {len(folds)} folds)")
+    tr, va = folds[fold]
+    train_idx = tr[pool_mask[tr]]   # drop holdout rows from train
+    val_idx = va[pool_mask[va]]     # and from val
+    return train_idx, val_idx, holdout_idx

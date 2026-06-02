@@ -80,6 +80,69 @@ def test_tau0_edge_holdout_picks_extremes(tmp_path):
     assert d["tau0"][ho].min() <= d["tau0"][tr].min()
     assert d["tau0"][ho].max() >= d["tau0"][tr].max()
 
+
+from hcd_analysis.emulator.data import make_splits
+
+
+def test_make_splits_holdout_disjoint_from_train_and_val(tmp_path):
+    """make_splits: holdout disjoint from BOTH train and val; train/val disjoint;
+    union covers all rows; LOSO (no sim straddles train/val)."""
+    path = tmp_path / "obs.h5"
+    write_synthetic_cache(path, n_sims=8, snaps_per_sim=2, n_alpha=4)
+    d = load_cache(path)
+    n_rows = len(d["tau0"])
+    for fold in range(8):
+        tr, va, ho = make_splits(d, fold, n_folds=8, holdout_frac=0.15)
+        s_tr, s_va, s_ho = set(tr), set(va), set(ho)
+        assert s_ho.isdisjoint(s_tr), fold
+        assert s_ho.isdisjoint(s_va), fold
+        assert s_tr.isdisjoint(s_va), fold
+        # union covers every row exactly once
+        assert s_tr | s_va | s_ho == set(range(n_rows)), fold
+        assert len(tr) + len(va) + len(ho) == n_rows, fold
+        # LOSO: no sim appears in both train and val
+        assert set(d["sim_name"][tr]).isdisjoint(set(d["sim_name"][va])), fold
+
+
+def test_make_splits_matches_inline_cli_logic(tmp_path):
+    """make_splits reproduces the old inline tau0-holdout x LOSO composition."""
+    path = tmp_path / "obs.h5"
+    write_synthetic_cache(path, n_sims=6, snaps_per_sim=2, n_alpha=4)
+    d = load_cache(path)
+    fold, n_folds, frac = 1, 4, 0.15
+    # old inline logic
+    tr_pool, holdout = tau0_edge_holdout(d["tau0"], frac=frac)
+    pool_mask = np.zeros(len(d["tau0"]), bool); pool_mask[tr_pool] = True
+    folds = kfold_loso(d["sim_name"], n_folds=n_folds)
+    tr0, va0 = folds[fold]
+    tr0 = tr0[pool_mask[tr0]]; va0 = va0[pool_mask[va0]]
+    # new helper
+    tr1, va1, ho1 = make_splits(d, fold, n_folds=n_folds, holdout_frac=frac)
+    assert np.array_equal(np.sort(tr0), np.sort(tr1))
+    assert np.array_equal(np.sort(va0), np.sort(va1))
+    assert np.array_equal(np.sort(holdout), np.sort(ho1))
+
+
+from hcd_analysis.emulator.data import _valid_target_mask
+
+
+def test_valid_target_mask_shared(tmp_path):
+    """M2: make_batch's f_nhi/dndx mask == fit_target_norm's masking predicate
+    (both go through the single _valid_target_mask helper)."""
+    d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    d["snap_f_nhi"][:, 0] = 0.0        # structural zero -> invalid
+    R = d["x"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    idx = np.arange(R)
+    b = make_batch(d, idx, norm)
+    grp = d["snap_group_idx"][idx]
+    # the predicate make_batch emits must equal _valid_target_mask on the same data
+    assert np.array_equal(b["t_f_nhi_mask"], _valid_target_mask(d["snap_f_nhi"][grp]))
+    assert np.array_equal(b["t_dndx_mask"], _valid_target_mask(d["snap_dNdX"][grp]))
+    # and the helper is the one fit_target_norm uses for f_nhi/dndx validity
+    assert np.array_equal(_valid_target_mask(d["snap_f_nhi"]),
+                          np.isfinite(d["snap_f_nhi"]) & (d["snap_f_nhi"] > 0))
+
 from hcd_analysis.emulator.data import PARAM_LIMITS, normalize_params
 
 def test_param_limits_cover_nine_params_in_cache_order():

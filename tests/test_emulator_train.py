@@ -22,6 +22,7 @@ from hcd_analysis.emulator.model import Emulator, joint_loss
 from hcd_analysis.emulator.train import (
     make_optimizer, train_step, evaluate, train_fold,
     save_checkpoint, load_checkpoint, aggregate_error_vector,
+    _pad_batch, _iter_minibatches, _to_jnp_batch,
 )
 
 N_K = 8
@@ -138,6 +139,131 @@ def test_checkpoint_roundtrip(tmp_path):
     for ch in norm_stats:
         for stat in norm_stats[ch]:
             assert np.allclose(norm_stats[ch][stat], norm2[ch][stat])
+
+
+def test_padded_batch_matches_unpadded(tmp_path):
+    """CS-I2: a padded fixed-size batch gives loss/grad numerically identical
+    (~1e-12) to the unpadded ragged batch (padding contributes nothing), and the
+    padded batch has the FIXED (batch_size, ...) leading shape."""
+    from hcd_analysis.emulator.data import fit_target_norm, make_batch
+    d = _small_cache(tmp_path)
+    R = d["P_filt"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    # ragged set: not a multiple of batch_size
+    idx = np.arange(7)
+    batch_size = 16
+    ragged = _to_jnp_batch(make_batch(d, idx, norm))
+    padded = _pad_batch(ragged, batch_size)
+    # fixed leading shape on every array
+    for k, v in padded.items():
+        assert np.asarray(v).shape[0] == batch_size, k
+    assert len(ragged["x"]) == 7
+
+    m = Emulator(in_dim=10, n_k=d["P_filt"].shape[2], key=jax.random.PRNGKey(0))
+    lr, gr = eqx.filter_value_and_grad(joint_loss)(m, ragged)
+    lp, gp = eqx.filter_value_and_grad(joint_loss)(m, padded)
+    assert abs(float(lr) - float(lp)) <= 1e-12 * max(1.0, abs(float(lr)))
+    for a, b in zip(jax.tree_util.tree_leaves(eqx.filter(gr, eqx.is_array)),
+                    jax.tree_util.tree_leaves(eqx.filter(gp, eqx.is_array))):
+        assert np.allclose(np.asarray(a), np.asarray(b), atol=1e-12, rtol=0)
+
+
+def test_pad_batch_noop_when_full(tmp_path):
+    from hcd_analysis.emulator.data import fit_target_norm, make_batch
+    d = _small_cache(tmp_path)
+    norm = fit_target_norm(d, np.arange(d["P_filt"].shape[0]))
+    full = _to_jnp_batch(make_batch(d, np.arange(8), norm))
+    assert _pad_batch(full, 8) is full   # exact passthrough, no copy
+
+
+def test_train_step_single_trace_with_padding(tmp_path):
+    """CS-I2: with padding, every minibatch in an epoch shares ONE leading shape,
+    so train_step traces exactly once. Verified two ways: (1) all padded batches
+    have leading dim == batch_size; (2) a wrapped joint_loss compile counter fires
+    once across the epoch."""
+    from hcd_analysis.emulator.data import fit_target_norm, make_batch
+    d = _small_cache(tmp_path)
+    R = d["P_filt"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    rng = np.random.default_rng(0)
+    train_idx = np.arange(R)             # R = 4*2*4 = 32; ragged at batch_size below
+    batch_size = 10
+
+    shapes = set()
+    n_batches = 0
+    for mb in _iter_minibatches(rng, train_idx, batch_size):
+        b = _pad_batch(_to_jnp_batch(make_batch(d, mb, norm)), batch_size)
+        shapes.add(np.asarray(b["x"]).shape)
+        n_batches += 1
+    assert n_batches >= 2            # genuinely ragged (last batch < batch_size)
+    assert shapes == {(batch_size, 10)}   # exactly ONE static shape
+
+    # compile counter: wrap a jit'd step and assert one trace across the epoch
+    trace_count = {"n": 0}
+
+    @eqx.filter_jit
+    def counted_step(model, opt, opt_state, batch):
+        trace_count["n"] += 1   # Python side-effect fires only on (re)trace
+        loss, grads = eqx.filter_value_and_grad(joint_loss)(model, batch)
+        updates, opt_state = opt.update(grads, opt_state, eqx.filter(model, eqx.is_array))
+        model = eqx.apply_updates(model, updates)
+        return model, opt_state, loss
+
+    m = Emulator(in_dim=10, n_k=d["P_filt"].shape[2], key=jax.random.PRNGKey(0))
+    opt = make_optimizer(lr=1e-3)
+    opt_state = opt.init(eqx.filter(m, eqx.is_array))
+    for mb in _iter_minibatches(rng, train_idx, batch_size):
+        b = _pad_batch(_to_jnp_batch(make_batch(d, mb, norm)), batch_size)
+        m, opt_state, _ = counted_step(m, opt, opt_state, b)
+    assert trace_count["n"] == 1, f"train_step retraced {trace_count['n']} times"
+
+
+def test_train_fold_returns_best_not_last(tmp_path):
+    """The returned model IS the best-epoch model (lowest val loss), not the last:
+    evaluate(returned_model, val_batch) == min(history['val_loss'])."""
+    from hcd_analysis.emulator.data import fit_target_norm, make_batch
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+    # long run + tiny patience so val rises after the minimum and we early-stop
+    model, norm_stats, hist = train_fold(
+        d, tr, va, n_basis=None, lr=5e-2, epochs=60, batch_size=8,
+        seed=0, key=jax.random.PRNGKey(0), patience=5,
+    )
+    best_val = float(np.min(hist["val_loss"]))
+    val_batch = _to_jnp_batch(make_batch(d, va, norm_stats))
+    got = float(evaluate(model, val_batch))
+    assert abs(got - best_val) <= 1e-6, (got, best_val)
+    # sanity: val actually rose after the min (otherwise the test is vacuous)
+    argmin = int(np.argmin(hist["val_loss"]))
+    assert argmin < len(hist["val_loss"]) - 1 or len(hist["val_loss"]) == 60
+
+
+def test_checkpoint_meta_has_kgrid(tmp_path):
+    """M4: saved .meta.json records the k-grid (kfkms + n_k) and the cache id, and
+    load reconstructs. n_k matches len(kfkms)."""
+    import json
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+    arch_cfg = {"in_dim": 10, "n_k": N_K, "n_basis": None}
+    model, norm_stats, _ = train_fold(
+        d, tr, va, n_basis=None, lr=1e-3, epochs=3, batch_size=8,
+        seed=0, key=jax.random.PRNGKey(0),
+    )
+    prefix = str(tmp_path / "ckpt_kg")
+    cache_path = str(tmp_path / "obs.h5")
+    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=0,
+                    kfkms=d["kfkms"], cache_path=cache_path)
+    with open(prefix + ".meta.json") as f:
+        meta = json.load(f)
+    assert meta["n_k"] == N_K
+    assert len(meta["kfkms"]) == N_K
+    assert np.allclose(meta["kfkms"], d["kfkms"][0])
+    assert meta["cache_path"] == cache_path
+    # load_checkpoint still round-trips with the enriched meta
+    model2, meta2, norm2 = load_checkpoint(prefix)
+    assert meta2["n_k"] == N_K and meta2["cache_path"] == cache_path
 
 
 def test_aggregate_error_vector_shape_and_dla_flag():

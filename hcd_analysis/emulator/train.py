@@ -64,6 +64,39 @@ def _iter_minibatches(rng, idx, batch_size):
         yield idx[perm[start:start + batch_size]]
 
 
+def _pad_batch(batch, batch_size):
+    """Pad a (possibly ragged) batch up to a FIXED ``batch_size`` leading dim with
+    ZERO-CONTRIBUTION rows, so ``train_step`` traces ONCE (CS-I2).
+
+    The final minibatch has size ``len(train_idx) % batch_size`` — a 2nd leading
+    shape that forces ``train_step`` to recompile. We pad every array up to
+    ``batch_size`` and neutralise the padded rows so ``joint_loss`` gives them
+    exactly zero contribution AND zero gradient:
+      - ``mask`` -> False (all k): masked_mse zeros the diff there and the False
+        rows add nothing to its ``sum(mask)`` denominator, so the loss is
+        numerically identical to the unpadded ragged batch;
+      - ``t_f_nhi_mask`` / ``t_dndx_mask`` -> False (Head-A masks);
+      - ``inv_nc`` -> 0 (all classes), ``inv_nalpha`` -> 0: belt-and-suspenders
+        zero weight so even an unmasked element would carry no gradient.
+    Other arrays are zero-padded (their values are irrelevant once masked/zero-
+    weighted). Returns the batch unchanged when it is already ``batch_size``."""
+    n = len(batch["x"])
+    if n >= batch_size:
+        return batch
+    pad = batch_size - n
+    out = {}
+    for k, v in batch.items():
+        v = jnp.asarray(v)
+        pad_width = [(0, pad)] + [(0, 0)] * (v.ndim - 1)
+        if k in ("mask", "t_f_nhi_mask", "t_dndx_mask"):
+            out[k] = jnp.pad(v, pad_width, constant_values=False)  # padded -> masked out
+        elif k in ("inv_nc", "inv_nalpha"):
+            out[k] = jnp.pad(v, pad_width, constant_values=0)      # zero weight (belt+suspenders)
+        else:
+            out[k] = jnp.pad(v, pad_width, constant_values=0)
+    return out
+
+
 def _to_jnp_batch(b):
     return {k: jnp.asarray(v) for k, v in b.items()}
 
@@ -121,13 +154,18 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
     for ep in range(epochs):
         ep_losses = []
         ep_gnorms = []
-        ep_lr = float(lr_sched(step))
         for mb in _iter_minibatches(rng, train_idx, batch_size):
-            batch = _to_jnp_batch(make_batch(d, mb, norm_stats))
+            # CS-I2: pad the (ragged) final minibatch to a FIXED batch_size with
+            # zero-contribution rows, so train_step keeps ONE static shape (traces once).
+            batch = _pad_batch(_to_jnp_batch(make_batch(d, mb, norm_stats)), batch_size)
             model, opt_state, loss, gnorm = train_step(model, opt, opt_state, batch)
             ep_losses.append(float(loss))
             ep_gnorms.append(float(gnorm))
             step += 1
+        # CS-I1: the optimizer (cosine_decay_schedule) owns the schedule and advances
+        # per minibatch step — it is the source of truth. Log the LR actually in effect
+        # AFTER the epoch's last update (step == #updates so far), not the epoch's first step.
+        ep_lr = float(lr_sched(step))
         val_loss = float(evaluate(model, val_batch))
         history["train_loss"].append(float(np.mean(ep_losses)))
         history["val_loss"].append(val_loss)
@@ -147,11 +185,28 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
     return best_model, norm_stats, history
 
 
-def save_checkpoint(path, model, arch_cfg, norm_stats, seed):
-    """Serialise eqx leaves + JSON meta {arch_cfg, seed} + pickled norm_stats."""
+def save_checkpoint(path, model, arch_cfg, norm_stats, seed,
+                    kfkms=None, cache_path=None):
+    """Serialise eqx leaves + JSON meta + pickled norm_stats.
+
+    M4: the meta now records the k-grid identity so a checkpoint is self-
+    describing — ``kfkms`` (the cache's k-grid, list of floats; ``n_k`` derived
+    from it) and ``cache_path`` (the cache the model was trained on). Either may
+    be omitted (back-compat), in which case the corresponding key is null."""
     eqx.tree_serialise_leaves(str(path) + ".eqx", model)
+    meta = {"arch_cfg": arch_cfg, "seed": int(seed),
+            "cache_path": (str(cache_path) if cache_path is not None else None)}
+    if kfkms is not None:
+        # cache kfkms is (R, n_k) (per-row, shared grid); store the single k-grid.
+        kf = np.asarray(kfkms)
+        kgrid = kf[0] if kf.ndim == 2 else np.atleast_1d(kf).ravel()
+        meta["kfkms"] = kgrid.astype(float).tolist()
+        meta["n_k"] = int(kgrid.shape[0])
+    else:
+        meta["kfkms"] = None
+        meta["n_k"] = arch_cfg.get("n_k")
     with open(str(path) + ".meta.json", "w") as f:
-        json.dump({"arch_cfg": arch_cfg, "seed": int(seed)}, f)
+        json.dump(meta, f)
     with open(str(path) + ".norm.pkl", "wb") as f:
         pickle.dump(norm_stats, f)
 

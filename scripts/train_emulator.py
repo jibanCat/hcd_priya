@@ -23,7 +23,7 @@ import jax
 import jax.numpy as jnp
 
 from hcd_analysis.emulator.data import (
-    load_cache, kfold_loso, tau0_edge_holdout, fit_target_norm,
+    load_cache, make_splits, fit_target_norm,
     untransform_prediction, COARSE_NAMES,
 )
 from hcd_analysis.emulator import train as T
@@ -146,16 +146,13 @@ def main():
           f"({time.time()-t0:.1f}s)")
 
     # Exclude the tau0-edge holdout from EVERYTHING (extrapolation probe stays unseen).
-    tr_pool, holdout = tau0_edge_holdout(d["tau0"], frac=args.holdout_frac)
-    pool_mask = np.zeros(len(d["tau0"]), bool); pool_mask[tr_pool] = True
-
-    folds = kfold_loso(d["sim_name"], n_folds=args.n_folds)
-    if args.fold >= len(folds):
-        raise SystemExit(f"--fold {args.fold} out of range (have {len(folds)} folds)")
-    tr, va = folds[args.fold]
-    tr = tr[pool_mask[tr]]   # drop holdout rows from train
-    va = va[pool_mask[va]]   # and from val
-    print(f"fold {args.fold}/{len(folds)}: train={len(tr)} val={len(va)} "
+    # make_splits owns the tau0-holdout x LOSO composition (see data.make_splits).
+    try:
+        tr, va, holdout = make_splits(
+            d, args.fold, n_folds=args.n_folds, holdout_frac=args.holdout_frac)
+    except IndexError as e:
+        raise SystemExit(f"--fold {e}")
+    print(f"fold {args.fold}/{args.n_folds}: train={len(tr)} val={len(va)} "
           f"(holdout {len(holdout)} excluded)")
 
     # epoch timing via a lightweight per-epoch wrapper: train_fold owns the loop, so
@@ -176,7 +173,8 @@ def main():
     print(f"peak RSS: {_peak_mem_mb():.0f} MB")
 
     arch_cfg = {"in_dim": 10, "n_k": n_k, "n_basis": args.n_basis}
-    T.save_checkpoint(args.out, model, arch_cfg, norm_stats, seed=args.seed)
+    T.save_checkpoint(args.out, model, arch_cfg, norm_stats, seed=args.seed,
+                      kfkms=d["kfkms"], cache_path=args.cache)
     print(f"checkpoint -> {args.out}.eqx / .meta.json / .norm.pkl")
 
     # figures + history
