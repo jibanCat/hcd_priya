@@ -252,6 +252,34 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
 
 ---
 
+## 13. `alpha_to_dndx` M0-inverse: infeasible-w edge + clamp-grad were untested — **GUARDED**
+- **Where:** Task 3 (Phase-2b) `alpha_to_dndx` analytic telescoping inverse + `delta_c(z)` `jnp.clip`
+  z-range clamp in `hcd_analysis/emulator/dndx_wc.py`, commit `518d76d`, caught by the JAX review.
+- **Symptom (if untested):** the shipped tests pinned the exact inverse (≈1e-13), the renorm-caveat
+  roundtrip, clamp boundary VALUES, and jit/vmap/float64 + grad-wrt-alpha — but three real risks were
+  unpinned: (a) **infeasible-w edge** — `alpha_c` is a FREE flat-log HMC param, so proposals can imply
+  `w_DLA>1` or `w_sub>1-w_DLA` (negative telescoping arg); the `_LOG_FLOOR=1e-12` clip must keep BOTH
+  value and grad finite, not NaN; (b) **clamp-grad** of `delta_c` — 0 on the extrapolation plateau,
+  finite/nonzero inside; (c) **grad-through-(A,γ)** of the PW14 forward law that feeds the likelihood.
+- **Cause:** not JAX-pathological — test coverage of the contract HMC relies on. Verified (this review):
+  the top-down inversion (`mu_DLA=-ln(1-w_DLA)`, `mu_sub=-ln(1-w_sub/(1-w_DLA))`,
+  `mu_LLS=-ln(1-w_LLS/((1-w_DLA)-w_sub))`) is the exact inverse of `w_c_from_mu`; index map
+  (w_LLS,w_sub,w_DLA)=alpha[...,0,1,2] correct; the apply_delta=True roundtrip's ~2.3% LLS error is a
+  TEST-ONLY artifact (forward `w_c_corrected` renormalises over 4 classes; production `alpha_c` is a free
+  amplitude read out by the telescoping inverse, not un-renormalised) — sound framing. NOTE: at the
+  infeasible edge the clip leaks a stiff but finite grad (`~1e12` from `1/_LOG_FLOOR` in the LLS/sub
+  denominators) — finite, so HMC won't NaN, but the floor magnitude is what bounds that gradient.
+- **Fix:** added `test_alpha_to_dndx_edge_domain_and_clamp_grads` (finite value+grad at w_DLA>1,
+  w_sub>1-w_DLA, w_DLA==1; clamp grad 0-outside/finite-inside) and
+  `test_alpha_from_dndx_law_grad_through_A_gamma` (finite grad wrt A and γ + end-to-end chain). 13 green.
+  (commit `<this commit>`)
+- **Lesson:** when a clipped log-inverse sits behind a FREE flat-(log)-prior HMC param, test the
+  infeasible-domain proposals explicitly — "exact inverse on valid inputs" does NOT cover the edge the
+  sampler will actually visit. A `jnp.clip` z-clamp gives a 0 grad on the plateau (correct, by design),
+  but assert it so a future refactor to a python branch / unclamped poly is caught.
+
+---
+
 ## Trap template (append new entries above this line)
 ```
 ## N. <short name> — HIT | GUARDED | WATCH

@@ -123,3 +123,40 @@ def test_alpha_to_dndx_jax_pure():
 def test_delta_c_resid_std_shape():
     assert DELTA_C_RESID_STD.shape == (4,)
     assert np.all(np.array(DELTA_C_RESID_STD) > 0)
+
+
+def test_alpha_to_dndx_edge_domain_and_clamp_grads():
+    # Edge alpha_c that imply infeasible w (DLA fraction >= 1, or w_sub > 1-w_DLA):
+    # the _LOG_FLOOR clip must keep value AND grad finite (not NaN) so HMC proposals
+    # in the infeasible region degrade gracefully instead of poisoning the trajectory.
+    Xbar = jnp.array(0.642); z = jnp.array(3.0)
+    edges = [jnp.array([0.0, 0.0, 1.5]),    # w_DLA > 1
+             jnp.array([0.1, 0.8, 0.5]),    # w_sub > 1 - w_DLA  (negative telescoping arg)
+             jnp.array([0.0, 0.0, 1.0])]    # exactly w_DLA == 1 (clip boundary)
+    for w in edges:
+        out = alpha_to_dndx(w, Xbar, z, apply_delta=False)
+        assert jnp.all(jnp.isfinite(out)), f"value not finite at edge {w}"
+        g = jax.grad(lambda a: jnp.sum(alpha_to_dndx(a, Xbar, z, apply_delta=False)))(w)
+        assert jnp.all(jnp.isfinite(g)), f"grad not finite at edge {w}"
+
+    # delta_c clamp-grad: 0 outside the fit range (plateau), finite & nonzero inside.
+    g_lo = jax.grad(lambda zz: jnp.sum(delta_c(zz)))(jnp.array(1.0))   # below Z_FIT_LO
+    g_hi = jax.grad(lambda zz: jnp.sum(delta_c(zz)))(jnp.array(7.0))   # above Z_FIT_HI
+    g_in = jax.grad(lambda zz: jnp.sum(delta_c(zz)))(jnp.array(3.5))   # inside
+    assert float(g_lo) == 0.0 and float(g_hi) == 0.0
+    assert jnp.isfinite(g_in) and abs(float(g_in)) > 0.0
+
+
+def test_alpha_from_dndx_law_grad_through_A_gamma():
+    # The forward law feeds the likelihood; grad of alpha_c w.r.t. the free (A, gamma)
+    # power-law params must be finite (and the end-to-end fwd->inverse chain too).
+    A = jnp.array([0.5, 0.12, 0.04]); gamma = jnp.array([1.0, 0.8, 0.5])
+    Xbar = jnp.array(0.642); z = jnp.array(3.0)
+    gA = jax.grad(lambda a: jnp.sum(alpha_from_dndx_law(a, gamma, Xbar, z)))(A)
+    gg = jax.grad(lambda g: jnp.sum(alpha_from_dndx_law(A, g, Xbar, z)))(gamma)
+    assert jnp.all(jnp.isfinite(gA)) and jnp.all(jnp.isfinite(gg))
+    # end-to-end: A -> alpha_c -> dN/dX readout
+    def chain(a):
+        al = alpha_from_dndx_law(a, gamma, Xbar, z)
+        return jnp.sum(alpha_to_dndx(al, Xbar, z, apply_delta=True))
+    assert jnp.all(jnp.isfinite(jax.grad(chain)(A)))
