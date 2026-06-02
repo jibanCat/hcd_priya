@@ -70,3 +70,56 @@ def test_wc_corrected_grad_through_continuous_z_is_finite():
     assert jnp.isfinite(gz)
     gz0 = jax.grad(lambda zz: w_c_corrected(jnp.zeros(3), Xbar, zz)[0])(z)  # all-zero edge
     assert jnp.isfinite(gz0)
+
+
+# --- Task 3: alpha_c(z) PW14 forward + analytic M0-inverse -----------------------
+from hcd_analysis.emulator.dndx_wc import (
+    dndx_powerlaw, alpha_from_dndx_law, alpha_to_dndx,
+    Z_FIT_LO, Z_FIT_HI, DELTA_C_RESID_STD,
+)
+
+
+def test_alpha_to_dndx_exact_inverse_of_wc():
+    # Telescoping inverse must exactly invert w_c_from_mu on the HCD classes.
+    rng = np.random.default_rng(0)
+    mu = jnp.array(rng.uniform(0.0, 1.5, size=(64, 3)))      # mu>0, (N,3)
+    w = w_c_from_mu(mu)                                       # (N,4)
+    Xbar = jnp.full((64,), 0.642); z = jnp.full((64,), 3.0)
+    mu_rec = alpha_to_dndx(w[..., 1:], Xbar, z, apply_delta=False) * Xbar[..., None]
+    assert np.allclose(np.array(mu_rec), np.array(mu), atol=1e-10, rtol=0)
+
+
+def test_forward_inverse_roundtrip_with_delta():
+    # forward law -> alpha_c(z) -> inverse recovers dN/dX up to the renorm caveat.
+    A = jnp.array([0.5, 0.12, 0.04]); gamma = jnp.array([1.0, 0.8, 0.5])
+    Xbar = jnp.array(0.642); z = jnp.array(3.0)
+    dndx0 = dndx_powerlaw(z, A, gamma)                       # (3,)
+    alpha = alpha_from_dndx_law(A, gamma, Xbar, z)           # (3,)
+    dndx_rec = alpha_to_dndx(alpha, Xbar, z, apply_delta=True)
+    # Exact only up to the 4-class renorm factor (small-HCD regime ~ sub-percent here).
+    assert np.allclose(np.array(dndx_rec), np.array(dndx0), rtol=0.03, atol=0)
+
+
+def test_delta_c_clamped_outside_fit_range():
+    # deg-2 fit clamped to [Z_FIT_LO, Z_FIT_HI]: boundary value, not divergent quadratic.
+    assert np.allclose(np.array(delta_c(jnp.array(1.0))), np.array(delta_c(jnp.array(Z_FIT_LO))))
+    assert np.allclose(np.array(delta_c(jnp.array(7.0))), np.array(delta_c(jnp.array(Z_FIT_HI))))
+    assert np.all(np.isfinite(np.array(delta_c(jnp.array([1.0, 7.0, 100.0])))))
+
+
+def test_alpha_to_dndx_jax_pure():
+    # jit + vmap over batched (alpha, Xbar, z); grad finite; float64.
+    alpha = jnp.array([[0.18, 0.06, 0.03], [0.10, 0.04, 0.01]])
+    Xbar = jnp.array([0.642, 0.55]); z = jnp.array([3.0, 4.0])
+    f = jax.jit(jax.vmap(lambda a, x, zz: alpha_to_dndx(a, x, zz, apply_delta=True)))
+    out = f(alpha, Xbar, z)
+    assert out.shape == (2, 3)
+    assert out.dtype == jnp.float64
+    assert np.all(np.isfinite(np.array(out)))
+    g = jax.grad(lambda a: alpha_to_dndx(a, jnp.array(0.642), jnp.array(3.0))[2])(alpha[0])
+    assert jnp.all(jnp.isfinite(g))
+
+
+def test_delta_c_resid_std_shape():
+    assert DELTA_C_RESID_STD.shape == (4,)
+    assert np.all(np.array(DELTA_C_RESID_STD) > 0)
