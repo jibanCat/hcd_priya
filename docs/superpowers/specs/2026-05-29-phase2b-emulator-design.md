@@ -212,6 +212,15 @@ Per-class P1Ds are model internals. The HCD sector follows the field standard
   simulation** because the data's DLA-finder completeness/purity reshape the residual
   CDDF (Rogers&Bird: "clipping changes the survey CDDF"). Head A's dN/dX is the prior
   CENTER, not a second free amplitude.
+- **`α_c` is z-dependent, parametrized LOW-ORDER** (matched to DESI DR1, arXiv:2601.21432
+  §5.2): NOT free-per-z-bin, NOT a single constant — either a **2-redshift-node interpolation**
+  (DESI: nodes z≈2.2, 4.2, "equivalent to a single power-law in z") or a **PW14 `A_c(1+z)^{γ_c}`**
+  law (~2 params/class). The *shape* z-evolution is carried by the emulated `Δ_c(k,z)` (more
+  flexible than DESI's fixed Rogers `a(z),b(z)` kernel); the *abundance* z-evolution lives in
+  `α_c(z)`. DESI uses broad **flat-log** priors on `f_i^HCD∈[−11,−0.03]`; PRIYA uses one-sided
+  positive; our default centers on the sim `w_c(dN/dX)` — all viable (DESI flag: the **LLS
+  amplitude is strongly degenerate with cosmology**, so an external LLS-incidence prior is
+  advisable). The `M₀`-inverse maps the `α_c(z)` posterior → per-class effective dN/dX(z).
 - **Difference form is the DEFAULT** (preserves the forest↔HCD cross-term). Ratio is
   an alternative toggle.
 - **Head A↔Head B coupling** is now via the `α_c` PRIOR (centered on `w_c(dN/dX)`),

@@ -113,8 +113,35 @@ it; or (ii) make the filtered tier use the survey's actual masking. Flag for the
 build; (i) is the lighter touch and matches how Rogers adds residual contamination to a
 clipped baseline.
 
+## 7. DESI DR1 per-z HCD marginalization (arXiv:2601.21432 §4.2/§5.2 — PDF-verified)
+The DESI DR1 P1D **cosmology** paper (Chaves-Montero, Font-Ribera, McDonald et al.) is the
+closest production precedent for the per-z treatment. Model (Eq. 4.7):
+`C_HCD = 1 + f_norm + Σ_i f_i^HCD·[a_i(z)·e^{b_i(z)·k} − 1]^{-2}` (multiplicative, 4 classes).
+- **Shape z-evolution FIXED** to Rogers+2018: `a_i(z)=a₀[(1+z)/3]^{a₁}`, `b_i(z)=b₀[(1+z)/3]^{b₁}`
+  (Table 3 = Rogers Table 2; pivot re-set z=3; the `(1+z)^{-3.55}` prefactor and `c(z)` dropped).
+- **Amplitude per-z marginalization:** NOT per-z-bin-free, NOT a single constant — each class's
+  `f_i^HCD` is constrained at **2 redshift nodes (z=2.2, 4.2) and linearly interpolated**
+  (*"equivalent to a single power-law redshift evolution"*). ⇒ **8 HCD amplitude params total**
+  (4 classes × 2 nodes). The 2-node interpolation is the structural smoothness prior; no extra
+  covariance/Gaussian z-coupling.
+- **Priors (Table 4):** broad **flat on log f_i^HCD ∈ [−11, −0.03]**; `f_norm` fixed to 0
+  (degenerate with mean flux). No Gaussian priors.
+- **Interpretation:** *"the DLA parameters will primarily reflect the efficiency of the [finder]"*
+  (~70% complete for N_HI>2e20). They flag the **LLS amplitude as strongly degenerate with
+  cosmology** and recommend **external LLS-abundance priors** as a future fix.
+
+### Implication for our `α_c` (resolves the α_c(z) design)
+`α_c` **must be z-dependent but parametrized low-order**, not free-per-z. Split:
+- **shape** z-evolution → our **emulated `Δ_c(k,z)`** (cosmology+τ₀+z-dependent; more flexible than
+  DESI's fixed Rogers `a(z),b(z)`);
+- **amplitude/abundance** z-evolution → a smooth `α_c(z)`: a **2-node interpolation** (DESI) or a
+  **PW14 `A_c(1+z)^{γ_c}`** law (~2 params/class), giving the dN/dX(z) trend by construction.
+- **prior:** DESI flat-log (conservative) | PRIYA one-sided-positive | sim-`w_c(dN/dX)`-centered
+  (our spec). The `M₀`-inverse maps the `α_c(z)` posterior → per-class effective dN/dX(z).
+
 ## Sources
 McDonald+2005 (astro-ph/0407378); Rogers&Bird 2018 (1706.08532) + 3D (1711.06275);
+DESI DR1 cosmology (2601.21432, §4.2/§5.2/Tables 3–4); Karaçaylı+2025 (2505.07974);
 Chabanier+2019 (1812.03554); PD+2019/2020 (1911.09073); eBOSS emulator (2412.05372);
 Ravoux+2023 (2306.06311); Karaçaylı+2025 (2505.07974); DESI DR1 cosmo (2601.21432);
 PRIYA 2025 (2509.18271); Parks+2018 (1709.04962); Ho-Bird-Garnett (2103.10964);

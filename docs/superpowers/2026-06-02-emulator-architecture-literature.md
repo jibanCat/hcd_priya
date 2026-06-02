@@ -91,6 +91,24 @@ recovers the structural `P_tier_p = Σ_c w_c·P_c^filt` to the required precisio
 4. τ₀ as an emulator input (Walther/lym1d) vs analytic post-emulation rescale — which preserves
    differentiability most cleanly? (We use it as a Head-B input.)
 
+## 8. DECISION (2026-06-02, user)
+**Option A — raw per-k NN, NO fixed PCA/polynomial pre-compression, NO GP.** Rationale:
+- The effective P1D training set is **~60×20 ≈ 1200 rows** (the τ₀/α augmentation), not 60; dN/dX
+  is per-sim (60, τ₀-invariant) but adequate with **clever regularization**.
+- The **broader cosmological power-spectrum / galaxy-clustering emulator field is NN-dominated**;
+  the Lyα-specific GP dominance surveyed above is historical (Bird-group). The deep-research was
+  Lyα-scoped, which biased toward GP — noted.
+- Keep the dense per-k NN already built (Tasks 8–11) → **no rework** for Option A.
+
+**Preferred refinement (better than fixed PCA/poly): in-network LEARNED latent reduction.** Add a
+trainable low-rank output basis to Head B (`Head B → small code (n_basis≈8–16) → learned decoder →
+172 k-bins`, i.e. learned end-to-end "PCA"). Advantages over fixed PCA/polynomial: learns the
+optimal basis from data; regularizes via the bottleneck; fully autodiff for HMC; and a learned
+basis **can represent the `Δ_c` low-k sign flip** that a fixed log-polynomial cannot — so it also
+resolves §7's tension. Implement as a toggleable variant (`n_basis`) to A/B against the dense head
+in the k-fold LOSO sweep. Regularize via: the bottleneck + AdamW weight decay + LOSO error vector +
+early stopping.
+
 ## Sources
 Rogers/Bird 2019 (1812.04654); Fernandez/Ho/Bird 2022 (2207.06445); PRIYA Bird+2023 (2306.05471);
 Walther+2024/2025 (2412.05372); Cabayol-García+2023 (2305.19064, MNRAS 525,3499); LaCE
