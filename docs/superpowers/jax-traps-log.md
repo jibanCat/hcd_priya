@@ -222,6 +222,34 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   layout, it'll just return the wrong shape/numbers. Assert reduction identities (alpha=0)
   with `array_equal`, not `allclose`.
 
+## 12. low-rank P_filt basis: serialise round-trip + structural-composition were untested — **GUARDED**
+- **Where:** Task 2 (Phase-2b) low-rank P_filt output bottleneck (`HeadB`/`Emulator` `n_basis`,
+  trainable `p_filt_basis`, `svd_basis_init` in `model.py`), commit `6d6f745`, caught by the JAX review.
+- **Symptom (if untested):** the shipped tests pinned dense-unchanged, low-rank shapes/param-reduction,
+  SVD warm-start, finite grads/jit/vmap, and Δ_c-independence — but two real risks went unpinned:
+  (a) **serialisation** — the new `p_filt_basis` is an array leaf and `n_basis` is a *static* field;
+  `tree_serialise/deserialise` must round-trip the basis bit-for-bit while rebuilding `n_basis` from
+  the SKELETON (the existing round-trip test covered only the DENSE model), and a wrong-`n_basis`
+  (or dense) skeleton must RAISE rather than mis-load; (b) **structural composition** — the whole point
+  of the bottleneck is that linear-space P_filt from the low-rank head still feeds `structural_tier_p`'s
+  `(…,4,n_k)` einsum and the all-ones-`w_c`→sum-over-classes identity.
+- **Cause:** not JAX-pathological — pure **test coverage** of the contract the new code relies on.
+  Verified concretely (this review): x64 on; all 17 differentiable leaves float (basis included);
+  round-trip bit-exact; deserialise into `n_basis-1` and `n_basis=None` skeletons both raise `RuntimeError`;
+  `structural_tier_p(ones, exp(P_filt_lowrank))` == sum-over-4-classes, grad through the basis finite+nonzero.
+  Also confirmed the dense path is byte-for-byte the literal pre-change code (reconstructed `OldHeadB`:
+  trunk/out weights+bias and outputs `array_equal`) — the `split(key,2)→split(key,3)` change is a no-op
+  here because this jaxlib's `split` yields the same first-k subkeys for any total ≥ k (the unused `k3`
+  is harmless on the dense branch); `n_basis=int` resolves the `if self.n_basis is None` branch at trace
+  time (filter_jit traces once across re-keyed same-`n_basis` models, retraces on `n_basis` change).
+  SVD `n_basis > rank` still returns orthonormal full-rank rows (rank-collapse guard holds).
+- **Fix:** added `test_lowrank_serialise_roundtrip_and_structural_composition` (round-trip bit-exact,
+  wrong-skeleton raises, structural einsum + sum identity + finite grad-through-basis). All 21 green. (commit `<this commit>`)
+- **Lesson:** when a feature adds a NEW array leaf gated by a NEW static field, the dense serialise test
+  does NOT cover it — add a round-trip test at the new config AND assert a wrong-static skeleton raises.
+  For an output-reparametrisation bottleneck, pin that the downstream consumer (`structural_tier_p`) still
+  composes on the reparametrised output, not just that the head's own forward/grad is finite.
+
 ---
 
 ## Trap template (append new entries above this line)

@@ -409,3 +409,59 @@ def test_delta_still_dense_with_basis():
         eqx.tree_at(lambda mm: mm.head_b.p_filt_basis, m, b), x, t)["delta"].sum()
     )(m.head_b.p_filt_basis)
     assert jnp.all(g == 0.0)
+
+
+def test_lowrank_serialise_roundtrip_and_structural_composition():
+    # JAX-traps-log #8 generalised to the low-rank head: (a) tree_serialise/deserialise
+    # must round-trip an n_basis=int model bit-for-bit -- the trainable p_filt_basis is
+    # an array leaf carried in the bytes, while n_basis (static) is rebuilt from the
+    # SKELETON; deserialising into a wrong-n_basis skeleton must RAISE (shape mismatch),
+    # not silently mis-load. (b) the bottleneck's downstream contract: linear-space
+    # P_filt produced by the low-rank head still satisfies structural_tier_p's einsum
+    # (4,n_k) and the all-ones w_c -> sum-over-classes identity.
+    import io
+    key = jax.random.PRNGKey(123)
+    n_k, n_basis = 8, 6
+    m = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis, key=key)
+
+    # (a) every differentiable leaf (incl. the basis) is float; basis is a real leaf
+    arr_leaves = jax.tree_util.tree_leaves(eqx.filter(m, eqx.is_array))
+    assert all(jnp.issubdtype(l.dtype, jnp.floating) for l in arr_leaves)
+    assert m.head_b.p_filt_basis.shape == (n_basis, n_k)
+
+    buf = io.BytesIO()
+    eqx.tree_serialise_leaves(buf, m)
+    buf.seek(0)
+    skeleton = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis, key=jax.random.PRNGKey(999))
+    m2 = eqx.tree_deserialise_leaves(buf, skeleton)
+    assert m2.head_b.n_basis == n_basis
+    assert jnp.array_equal(m.head_b.p_filt_basis, m2.head_b.p_filt_basis)
+    x = jnp.ones((3, 10)); t = jnp.linspace(0.1, 0.5, 3)
+    p1 = jax.vmap(m)(x, t); p2 = jax.vmap(m2)(x, t)
+    for kk in ("f_nhi", "dndx", "P_filt", "delta"):
+        assert jnp.array_equal(p1[kk], p2[kk])
+
+    # deserialising into a wrong-n_basis (and dense) skeleton must raise, never silently load
+    for bad_skel in (Emulator(in_dim=10, n_k=n_k, n_basis=n_basis - 1, key=key),
+                     Emulator(in_dim=10, n_k=n_k, n_basis=None, key=key)):
+        buf.seek(0)
+        try:
+            eqx.tree_deserialise_leaves(buf, bad_skel)
+            raised = False
+        except Exception:
+            raised = True
+        assert raised
+
+    # (b) structural_tier_p contract on the low-rank LINEAR P_filt output
+    pf_lin = jnp.exp(p1["P_filt"])                      # (3,4,n_k) untransformed linear
+    w = jnp.ones((3, 4))
+    tp = structural_tier_p(w, pf_lin)
+    assert tp.shape == (3, n_k)
+    assert jnp.allclose(tp, pf_lin.sum(axis=1))         # all-ones w_c -> sum over classes
+    # grad flows finitely back through the basis via the structural sum
+    def struct_loss(b):
+        mm = eqx.tree_at(lambda z: z.head_b.p_filt_basis, m, b)
+        pf = jnp.exp(jax.vmap(mm)(x, t)["P_filt"])
+        return structural_tier_p(w, pf).sum()
+    gb = jax.grad(struct_loss)(m.head_b.p_filt_basis)
+    assert jnp.all(jnp.isfinite(gb)) and jnp.any(gb != 0.0)
