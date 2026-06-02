@@ -189,32 +189,51 @@ Single joint scalar loss, log/sign-space, NaN-safe.
 
 ---
 
-## 6. Likelihood-consumption contract
+## 6. Likelihood-consumption contract  (REVISED 2026-06-01 — single per-class α_c)
 
-**Data-space object = the TOTAL P1D**, summed over all classes (filtered DLA/subDLA
-included), with a **single cosmic-variance covariance**. Per-class P1Ds are model
-internals.
+**Data-space object = the TOTAL P1D**, with a **single cosmic-variance covariance**.
+Per-class P1Ds are model internals. The HCD sector follows the field standard
+(Rogers & Bird 2018; DESI DR1; PRIYA 2025) — see
+`docs/superpowers/2026-06-01-hcd-marginalization-literature.md`.
 
-    P_obs(k,z) = P_tier_p  +  Σ_{c∈HCD} w_c · A_c · Δ_c          (Δ_c = P_c^unfilt − P_c^filt)
-    P_tier_p   = Σ_c w_c · P_c^filt                              (structural, §3)
+    P_obs(k,z) = P_tier_p(k,z)  +  Σ_{c∈HCD} α_c · Δ_c(k,z)      (Δ_c = P_c^unfilt − P_c^filt)
+    P_tier_p   = Σ_c w_c · P_c^filt                              (structural baseline, §3)
 
-- **Difference form is the DEFAULT** (preserves the real forest↔HCD cross-term;
-  endorsed by both reviewers). Ratio kept as an alternative toggle only.
-- **The total now back-propagates through `w_c` (Head A + δ_c).** This couples
-  Head A and Head B at the loss level (desirable — ties the total to incidence);
-  the finite-grad test (§5) must cover this combined path.
-- **Covariance:** the total's cosmic variance, with the **per-class emulator-error
-  vector propagated into the total through the weights** (in quadrature). The
-  error vector must flag k-bins where the DLA class is **shot-limited** (near-zero
-  effective sightlines at high k) — otherwise it understates DLA uncertainty.
-- **Nuisances:** `τ₀` (Head B input); `A_LLS,A_subDLA,A_DLA` (tight `N(1,·)`;
-  carry the "near sim default" intent); class-specific incidence `(A_c, γ_c…)` →
-  `w_c`; static emulator-error covariance from day one. No separate T₀/γ thermal
-  nuisance (heat params are in the 9 sim params).
-- **`A_subDLA` semantics:** the filtered tier uses `tau_thresh=1e6`, which masks
-  100% of DLAs but only ~56% of subDLAs — so `P_subDLA^filt` is a partially-masked
-  hybrid and `A_subDLA` absorbs the resulting amplitude ambiguity. (No freeze-core
-  re-derivation needed — production is uniform; the filtered tier is unchanged.)
+- **One free amplitude per HCD class, `α_c`** — NOT the old redundant `w_c·A_c`
+  product. `α_c` IS the **effective, residual (post-masking) incidence** of class c
+  (∝ a CDDF integral over that class's N_HI range for the *survey's* unmasked
+  population). **P1D constrains it directly** (the distinct per-class damping-wing
+  shapes of `Δ_c` separate the classes), and **its posterior is the rough per-class
+  effective dN/dX** — the headline HCD deliverable. (The earlier "P1D can't give
+  dN/dX / w_c–A_c degeneracy" framing was wrong; corrected here.)
+- **Prior on `α_c`:** centered on Head A's **sim-intrinsic** `w_c(dN/dX)` (cosmology-
+  driven, via the M₀+δ_c map), but **wide / one-sided-positive** (PRIYA-style) so it
+  can float to the data's residual value, which **legitimately differs from the
+  simulation** because the data's DLA-finder completeness/purity reshape the residual
+  CDDF (Rogers&Bird: "clipping changes the survey CDDF"). Head A's dN/dX is the prior
+  CENTER, not a second free amplitude.
+- **Difference form is the DEFAULT** (preserves the forest↔HCD cross-term). Ratio is
+  an alternative toggle.
+- **Head A↔Head B coupling** is now via the `α_c` PRIOR (centered on `w_c(dN/dX)`),
+  plus the structural `P_tier_p = Σ_c w_c·P_c^filt` baseline which still uses the
+  sim-intrinsic `w_c`. The finite-grad test (§5) covers `dN/dX → w_c → P_tier_p`.
+- **Covariance:** total cosmic variance + the **per-class emulator-error vector
+  propagated through the per-class weights** (in quadrature), with DLA high-k
+  **shot-limited** bins flagged so DLA uncertainty isn't understated.
+- **Nuisances:** `τ₀` (Head B input); the per-class `α_c` (above); static emulator-
+  error covariance from day one. No separate `A_c` amplitude (subsumed into `α_c`);
+  no separate T₀/γ thermal nuisance (heat params are in the 9 sim params).
+- **Half-masking is subsumed:** `α_subDLA` directly IS the effective post-masking
+  sub-DLA incidence, so the old "`A_subDLA` absorbs the ~56%-masked hybrid" note is no
+  longer a separate parameter — it lives in `α_subDLA`'s value/prior.
+- **Baseline subtlety (resolve when wiring):** `P_tier_p` uses the *sim's* filter
+  (`tau_thresh=1e6`) and *sim's* `w_c`; the data's masking differs. Default framing:
+  keep `P_tier_p` as the sim-filtered baseline and let `α_c·Δ_c` add back the residual
+  relative to it (matches Rogers adding residual contamination to a clipped baseline).
+  Alternative: rebuild the filtered tier at the survey's masking. See the lit-review §6.
+- **`Δ_c` shape caveat:** Rogers/DESI fix the per-class shape (cosmology-independent,
+  z-evolving); ours **emulates** it (cosmology+τ₀-dependent). Validate that the emulated
+  `Δ_c` reduces to the Rogers `1/(a e^{bk}−1)^2` kernels at fiducial cosmology (§8).
 
 ---
 

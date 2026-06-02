@@ -1155,6 +1155,16 @@ git commit -m "feat(phase2b): validation — reframed tau0-response, additivity,
 
 ## Task 16: likelihood.py — total-P1D contract (difference default + ratio toggle) + covariance
 
+> **REVISED 2026-06-01 (single per-class α_c).** Per the HCD literature review
+> (`docs/superpowers/2026-06-01-hcd-marginalization-literature.md`) and spec §6, the HCD
+> term uses ONE free amplitude per class, `α_c` = effective residual (post-masking)
+> incidence — NOT the old `w_c·A_c` product. The reparametrized form is
+> `P_obs = P_tier_p + Σ_c α_c·Δ_c` (signatures `total_p1d_difference(P_tier_p, alpha_hcd,
+> delta_hcd)`, `total_p1d_ratio(P_tier_p, alpha_hcd, ratio_hcd)`); `α_c` has a prior
+> centered on the sim `w_c(dN/dX)` but wide/one-sided-positive (PRIYA-style). `α_c`'s
+> posterior IS the rough per-class effective dN/dX. The code blocks below (the original
+> `w_hcd, A_hcd` two-amplitude form) are SUPERSEDED — see the reparametrization commit.
+
 **Files:**
 - Create: `hcd_analysis/emulator/likelihood.py`
 - Test: `tests/test_emulator_likelihood.py`
@@ -1226,7 +1236,7 @@ git add hcd_analysis/emulator/likelihood.py tests/test_emulator_likelihood.py
 git commit -m "feat(phase2b): total-P1D likelihood — difference default + ratio toggle + covariance"
 ```
 
-> **A_subDLA semantics (spec §6):** the filtered tier masks 100% of DLAs but only ~56% of subDLAs, so `P_subDLA^filt` is a partial hybrid and `A_subDLA` absorbs the amplitude ambiguity. Re-derive its prior width against the merged v3.3 cache when the likelihood priors are finalised (a short follow-up once Task 2 of the *cache* plan lands the merge).
+> **Sub-DLA half-masking (spec §6, REVISED):** the filtered tier masks 100% of DLAs but only ~56% of subDLAs. Under the single-`α_c` reparametrization this is **subsumed**: `α_subDLA` directly IS the effective post-masking sub-DLA incidence, so there is no separate `A_subDLA` parameter — the half-masking lives in `α_subDLA`'s value and one-sided prior. Set the `α_c` prior centers from the merged v3.3 cache `w_c(dN/dX)` once it lands.
 
 ---
 
