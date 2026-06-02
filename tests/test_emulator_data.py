@@ -104,6 +104,32 @@ def test_make_splits_holdout_disjoint_from_train_and_val(tmp_path):
         assert set(d["sim_name"][tr]).isdisjoint(set(d["sim_name"][va])), fold
 
 
+import os
+import pytest
+
+_REAL_LF_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+
+
+@pytest.mark.skipif(not os.path.exists(_REAL_LF_CACHE),
+                    reason="real merged LF cache not present")
+def test_make_splits_disjoint_on_real_lf_cache():
+    """A-list referee guard: run make_splits' disjointness/LOSO/union invariants on
+    the REAL merged LF cache (not just the synthetic fixture), since the production
+    sweep splits this exact cache. Spot-checks a few folds across the LOSO set."""
+    d = load_cache(_REAL_LF_CACHE)
+    n_rows = len(d["tau0"])
+    n_folds = len(kfold_loso(d["sim_name"], n_folds=8))
+    for fold in (0, n_folds // 2, n_folds - 1):
+        tr, va, ho = make_splits(d, fold, n_folds=8, holdout_frac=0.15)
+        s_tr, s_va, s_ho = set(tr.tolist()), set(va.tolist()), set(ho.tolist())
+        assert s_ho.isdisjoint(s_tr), fold
+        assert s_ho.isdisjoint(s_va), fold
+        assert s_tr.isdisjoint(s_va), fold
+        assert s_tr | s_va | s_ho == set(range(n_rows)), fold
+        assert len(tr) + len(va) + len(ho) == n_rows, fold
+        assert set(d["sim_name"][tr]).isdisjoint(set(d["sim_name"][va])), fold
+
+
 def test_make_splits_matches_inline_cli_logic(tmp_path):
     """make_splits reproduces the old inline tau0-holdout x LOSO composition."""
     path = tmp_path / "obs.h5"

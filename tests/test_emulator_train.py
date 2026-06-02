@@ -168,6 +168,52 @@ def test_padded_batch_matches_unpadded(tmp_path):
         assert np.allclose(np.asarray(a), np.asarray(b), atol=1e-12, rtol=0)
 
 
+def test_padded_batch_matches_unpadded_with_structural_zeros_and_nan(tmp_path):
+    """CS-I2 referee guard: padded == unpadded loss/grad EVEN when the real rows
+    carry the hard cases the bare-fixture test misses — structural-zero Head-A
+    targets (t_f_nhi_mask/t_dndx_mask have False entries) AND NaN P_filt targets
+    (above-Nyquist rows). This is the genuine no-leak path: a padded row whose
+    target is NaN/zero-masked must contribute exactly 0 to loss AND grad, with no
+    NaN/inf leak through masked_mse."""
+    from hcd_analysis.emulator.data import fit_target_norm, make_batch
+    d = _small_cache(tmp_path)
+    # inject structural zeros so the Head-A validity masks actually carry False
+    d["snap_f_nhi"][:, 0] = 0.0
+    d["snap_f_nhi"][1, 4] = 0.0
+    d["snap_dNdX"][0, 1] = 0.0
+    R = d["P_filt"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    idx = np.arange(R)                       # all rows: spans every class + Nyquist-NaN
+    batch_size = R + 9                        # ragged: forces padding
+    ragged = _to_jnp_batch(make_batch(d, idx, norm))
+    # the masks MUST contain False entries (else this test degenerates to the easy one)
+    assert (~np.asarray(ragged["t_f_nhi_mask"])).any(), "no structural-zero in Head-A mask"
+    assert np.isnan(np.asarray(ragged["t_P_filt"])).any(), "no NaN P_filt target present"
+    padded = _pad_batch(ragged, batch_size)
+
+    m = Emulator(in_dim=10, n_k=d["P_filt"].shape[2], key=jax.random.PRNGKey(1))
+    lr, gr = eqx.filter_value_and_grad(joint_loss)(m, ragged)
+    lp, gp = eqx.filter_value_and_grad(joint_loss)(m, padded)
+    assert np.isfinite(float(lp)), "padded loss not finite (NaN/inf leak)"
+    assert abs(float(lr) - float(lp)) <= 1e-12 * max(1.0, abs(float(lr)))
+    for a, b in zip(jax.tree_util.tree_leaves(eqx.filter(gr, eqx.is_array)),
+                    jax.tree_util.tree_leaves(eqx.filter(gp, eqx.is_array))):
+        a = np.asarray(a); b = np.asarray(b)
+        assert np.all(np.isfinite(b)), "padded grad leaf has NaN/inf"
+        # grads here are O(1e13); the only diff is float64 reassociation from the
+        # larger (padded) reduction, so the match is RELATIVE (machine precision),
+        # not absolute. rtol=1e-10 is ~4 orders above the observed 7e-14.
+        assert np.allclose(a, b, rtol=1e-10, atol=1e-12)
+
+    # adversarial: even if a PADDED target itself were NaN (not just zero-padded),
+    # the mask-False on padded rows must still floor its contribution to zero.
+    import jax.numpy as _jnp
+    tpf = np.asarray(padded["t_P_filt"]).copy(); tpf[R:] = np.nan
+    padded_nan = {**padded, "t_P_filt": _jnp.asarray(tpf)}
+    lp2 = float(joint_loss(m, padded_nan))
+    assert np.isfinite(lp2) and abs(lp2 - float(lr)) <= 1e-12 * max(1.0, abs(float(lr)))
+
+
 def test_pad_batch_noop_when_full(tmp_path):
     from hcd_analysis.emulator.data import fit_target_norm, make_batch
     d = _small_cache(tmp_path)
