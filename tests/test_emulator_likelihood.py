@@ -85,6 +85,57 @@ def test_structural_coupling_grad_through_wc():
     assert jnp.allclose(g, struct, atol=1e-12)
 
 
+def test_batched_alpha_matches_vmap_and_loop():
+    """The ellipsis einsum must batch over leading dims: (B,3)/(B,3,K)->(B,K),
+    consistent with a per-row vmap. Guards the `...c,...ck->...k` contract that the
+    single-alpha refactor introduced."""
+    K, B = 8, 5
+    rng = np.random.default_rng(10)
+    P_tier_p = jnp.array(rng.uniform(0.5, 1.5, (B, K)))
+    alpha = jnp.array(rng.uniform(0.0, 1.0, (B, 3)))
+    delta = jnp.array(rng.normal(0, 0.05, (B, 3, K)))
+    ratio = jnp.array(rng.normal(0, 0.05, (B, 3, K)))
+
+    bd = total_p1d_difference(P_tier_p, alpha, delta)
+    br = total_p1d_ratio(P_tier_p, alpha, ratio)
+    assert bd.shape == (B, K) and br.shape == (B, K)
+    vd = jax.vmap(total_p1d_difference)(P_tier_p, alpha, delta)
+    vr = jax.vmap(total_p1d_ratio)(P_tier_p, alpha, ratio)
+    assert jnp.allclose(bd, vd, atol=1e-14)
+    assert jnp.allclose(br, vr, atol=1e-14)
+
+
+def test_ratio_form_alpha_zero_identity():
+    """Ratio form must collapse to P_obs == P_tier_p EXACTLY at alpha=0 (spec sec.6);
+    difference form likewise. Exactness, not just allclose."""
+    K = 8
+    rng = np.random.default_rng(11)
+    P_tier_p = jnp.array(rng.uniform(0.5, 1.5, K))
+    ratio = jnp.array(rng.normal(0, 0.05, (3, K)))
+    delta = jnp.array(rng.normal(0, 0.05, (3, K)))
+    assert jnp.array_equal(total_p1d_ratio(P_tier_p, jnp.zeros(3), ratio), P_tier_p)
+    assert jnp.array_equal(total_p1d_difference(P_tier_p, jnp.zeros(3), delta), P_tier_p)
+
+
+def test_jit_matches_eager_both_forms():
+    """jax.jit must reproduce eager for both forms, unbatched and batched."""
+    K, B = 8, 4
+    rng = np.random.default_rng(12)
+    P_tier_p = jnp.array(rng.uniform(0.5, 1.5, K))
+    alpha = jnp.array(rng.uniform(0.0, 1.0, 3))
+    delta = jnp.array(rng.normal(0, 0.05, (3, K)))
+    ratio = jnp.array(rng.normal(0, 0.05, (3, K)))
+    assert jnp.allclose(jax.jit(total_p1d_difference)(P_tier_p, alpha, delta),
+                        total_p1d_difference(P_tier_p, alpha, delta), atol=1e-14)
+    assert jnp.allclose(jax.jit(total_p1d_ratio)(P_tier_p, alpha, ratio),
+                        total_p1d_ratio(P_tier_p, alpha, ratio), atol=1e-14)
+    P_b = jnp.array(rng.uniform(0.5, 1.5, (B, K)))
+    a_b = jnp.array(rng.uniform(0.0, 1.0, (B, 3)))
+    d_b = jnp.array(rng.normal(0, 0.05, (B, 3, K)))
+    assert jnp.allclose(jax.jit(total_p1d_difference)(P_b, a_b, d_b),
+                        total_p1d_difference(P_b, a_b, d_b), atol=1e-14)
+
+
 def test_covariance_inflates_dla_high_k():
     K = 8
     sigma = jnp.ones((4, K)) * 0.01

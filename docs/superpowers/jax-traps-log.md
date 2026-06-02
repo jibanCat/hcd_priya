@@ -204,6 +204,24 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   test AND a grad-through-z test, not just scalar-value + grad-w.r.t.-the-other-arg.
   Cross-check frozen coeffs byte-exact against the calibration record, not "looks small".
 
+## 11. single-alpha likelihood: `...c,...ck->...k` batching + ratio alpha=0 identity untested — **GUARDED**
+- **Where:** `hcd_analysis/emulator/likelihood.py` (`total_p1d_difference`, `total_p1d_ratio`),
+  refactor `58b0dc7` (drop redundant `w_c*A_c` -> single `alpha_c`).
+- **Symptom:** none observed; the refactor swapped the explicit `c,c,ck->k` einsum for an
+  ellipsis `...c,...ck->...k` (to support batched sampler calls) but the test file only
+  exercised unbatched (3,)/(3,K) inputs, and neither the ratio-form `alpha=0 -> P_obs=P_tier_p`
+  identity nor jit-vs-eager were guarded.
+- **Cause:** ellipsis einsum silently accepts/mis-broadcasts wrong leading-dim layouts;
+  an `alpha=0` "identity" that is only `allclose` rather than exact can mask a stray
+  `+eps` or reordering. Both are exactly the kind of contract the refactor newly relies on.
+- **Fix:** added `test_batched_alpha_matches_vmap_and_loop` (B,3)/(B,3,K)->(B,K) == vmap,
+  `test_ratio_form_alpha_zero_identity` (`jnp.array_equal`, both forms), and
+  `test_jit_matches_eager_both_forms` (unbatched + batched). All green.  (commit 20ab26a)
+- **Lesson:** when you switch a fixed-index einsum to an ellipsis form for batching, add a
+  vmap-equivalence test at the new rank immediately — the ellipsis won't error on a bad
+  layout, it'll just return the wrong shape/numbers. Assert reduction identities (alpha=0)
+  with `array_equal`, not `allclose`.
+
 ---
 
 ## Trap template (append new entries above this line)
