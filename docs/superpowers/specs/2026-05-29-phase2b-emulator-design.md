@@ -249,7 +249,14 @@ Per-class P1Ds are model internals. The HCD sector follows the field standard
   sim-intrinsic `w_c`. The finite-grad test (§5) covers `dN/dX → w_c → P_tier_p`.
 - **Covariance:** total cosmic variance + the **per-class emulator-error vector
   propagated through the per-class weights** (in quadrature), with DLA high-k
-  **shot-limited** bins flagged so DLA uncertainty isn't understated.
+  **shot-limited** bins flagged so DLA uncertainty isn't understated. **REVISED
+  2026-06-02 — `C_emu` is τ₀-aware** (folds the τ₀×cosmology findings, memory
+  `phase2-tau0-cosmology-interaction`): the error vector is stratified `(4,K,Zb,Tb)`,
+  the fractional σ is multiplied by the predicted `P_c²` (units fix — the prior
+  `Σ w_c²·σ²` dropped the `P_c²` factor), `C_emu(θ,τ₀)` is smoothly τ₀-indexed, and
+  the now-state-dependent `−½logdet C` term enters the logL (a real NUTS gradient on
+  τ₀). Full design + closure/SBC + DLA σ_cosmo + mean-flux prior:
+  `docs/superpowers/2026-06-02-tau0-error-model-and-closure-design.md`.
 - **Nuisances:** `τ₀` (Head B input); the per-class `α_c` (above); static emulator-
   error covariance from day one. No separate `A_c` amplitude (subsumed into `α_c`);
   no separate T₀/γ thermal nuisance (heat params are in the 9 sim params).
