@@ -375,16 +375,49 @@ def test_staged_train_freezes_baseline_in_stage2(tmp_path):
                                  "p_resid": 1., "delta": 1.})
     batch = _pad_batch(_to_jnp_batch(make_batch(d, tr, norm)), 16)
 
-    base_w0 = np.asarray(m.head_base.out.weight).copy()
+    # BaselineHead is now a DEEP stack (layers list); its output Linear is layers[-1].
+    base_w0 = np.asarray(m.head_base.layers[-1].weight).copy()
     headb_w0 = np.asarray(m.head_b.out.weight).copy()
     for _ in range(5):
         diff, opt_state, _, _ = train_step_partitioned(
             diff, static, opt, opt_state, batch, loss_fn)
     m2 = eqx.combine(diff, static)
     # BaselineHead frozen: bit-identical
-    assert np.array_equal(np.asarray(m2.head_base.out.weight), base_w0)
+    assert np.array_equal(np.asarray(m2.head_base.layers[-1].weight), base_w0)
     # Head B moved (it was trainable and got gradient from the residual term)
     assert not np.array_equal(np.asarray(m2.head_b.out.weight), headb_w0)
+
+
+def test_baseline_head_actually_trains_nonstaged(tmp_path):
+    """REGRESSION (CS-referee gap): the θ-blind BASELINE head must ACTUALLY fit its
+    target after a short NON-STAGED train. Before the Σ(weight·mask) loss fix the
+    inv_nc weighting shrank the baseline-term gradient ~6e-3, so the baseline barely
+    moved (term (b) stuck ~0.84·σ_cosmo). With the weighted-mean norm + deep head the
+    baseline fit ratio RMS(P_filt_base − t_p_base)/std(t_p_base) must drop WELL below
+    1 (here <0.3) on a short run — i.e. the baseline genuinely trains.
+
+    n_basis == n_k (=8) here so the low-rank SVD basis is FULL rank: the synthetic
+    fixture's targets are random (NOT low-rank, unlike real spectra), so a smaller
+    basis would cap the fit for a fixture-specific reason that has nothing to do with
+    whether the head trains. Full rank isolates the optimization (the thing under
+    test) from the representation."""
+    from hcd_analysis.emulator.data import make_batch
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+    model, norm_stats, hist = train_fold(
+        d, tr, va, n_basis=N_K, lr=1e-2, epochs=300, batch_size=8,
+        seed=0, key=jax.random.PRNGKey(0), patience=300,
+    )
+    # baseline fit on the TRAIN rows (the θ-blind cell-mean target it is fit against).
+    b = make_batch(d, tr, norm_stats)
+    base = np.asarray(jax.vmap(model)(jnp.asarray(b["x"]), jnp.asarray(b["tau0"]))
+                      ["P_filt_base"])                       # (n,4,K) standardized m̂
+    tgt = np.asarray(b["t_p_base"])                          # (n,4,K) standardized cell-mean
+    m = np.isfinite(tgt)
+    fit_ratio = float(np.sqrt(np.mean((base[m] - tgt[m]) ** 2))
+                      / np.std(tgt[m]))
+    assert fit_ratio < 0.3, f"baseline did not train: fit_ratio={fit_ratio:.3f}"
 
 
 def test_aggregate_error_vector_shape_and_dla_flag():

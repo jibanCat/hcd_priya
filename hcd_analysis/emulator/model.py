@@ -58,7 +58,7 @@ class HeadA(eqx.Module):
 
 
 class BaselineHead(eqx.Module):
-    """θ-BLIND P_filt baseline head (normalization REDESIGN).
+    """θ-BLIND P_filt baseline head (normalization REDESIGN; DEEP recipe).
 
     Input is ONLY ``[z, τ₀]`` (2-dim) -- it is blind to the 9 cosmology/IGM params
     BY CONSTRUCTION (it never sees the shared latent, which encodes θ). Output is
@@ -66,27 +66,46 @@ class BaselineHead(eqx.Module):
     classes (the dominant ~99.5% predictable variation = the Kennedy-O'Hagan
     structured mean). Because θ never enters, ∂m̂/∂θ = 0 exactly.
 
+    Depth/width are configurable (``n_layers`` hidden layers of ``width``; default
+    n_layers=3, width=256). The validated sub-percent recipe
+    (scripts/feasibility_subpercent.py Exp 2 / scripts/diag_tilt_bias_lf_hr.py)
+    PROVED a 1-hidden-layer head plateaus at ~0.10–0.18·σ_cosmo, while a ≥3-layer
+    w256 head drops the baseline misfit (term (b)) to ~0.03–0.05·σ_cosmo — so the
+    production default is deep.
+
     Mirrors HeadB's P_filt path: low-rank when ``n_basis`` is set (4 coeffs ×
     n_basis through its OWN trainable basis ``p_filt_basis``), dense (4*n_k)
     otherwise. Lives in the same standardized-log target space as the baseline
     target t_p_base = (cell_mean − mu_marg)/sig_marg.
+
+    ``n_layers``/``width``/``n_k``/``n_basis`` are STATIC fields (they set array
+    shapes / layer counts and must be known at trace time for jit).
     """
-    trunk: eqx.nn.Linear
-    out: eqx.nn.Linear
+    layers: list
     p_filt_basis: jax.Array | None
     n_k: int = eqx.field(static=True)
     n_basis: int | None = eqx.field(static=True)
+    n_layers: int = eqx.field(static=True)
+    width: int = eqx.field(static=True)
 
-    def __init__(self, n_k=172, width=64, n_basis=None, p_filt_basis_init=None, key=None):
-        k1, k2, k3 = jax.random.split(key, 3)
+    def __init__(self, n_k=172, width=256, n_layers=3, n_basis=None,
+                 p_filt_basis_init=None, key=None):
+        if n_layers < 1:
+            raise ValueError(f"BaselineHead n_layers must be >= 1, got {n_layers}")
         self.n_k = n_k
         self.n_basis = n_basis
-        self.trunk = eqx.nn.Linear(2, width, key=k1)     # input is ONLY [z, tau0]
+        self.n_layers = n_layers
+        self.width = width
+        out_dim = 4 * n_k if n_basis is None else 4 * n_basis
+        # n_layers hidden Linears (input ONLY [z, tau0]) + a final output Linear.
+        ks = jax.random.split(key, n_layers + 2)
+        dims = [2] + [width] * n_layers          # [2, w, w, ..., w]
+        hidden = [eqx.nn.Linear(dims[i], dims[i + 1], key=ks[i]) for i in range(n_layers)]
+        out = eqx.nn.Linear(width, out_dim, key=ks[n_layers])
+        self.layers = hidden + [out]
         if n_basis is None:
-            self.out = eqx.nn.Linear(width, 4 * n_k, key=k2)
             self.p_filt_basis = None
         else:
-            self.out = eqx.nn.Linear(width, 4 * n_basis, key=k2)
             if p_filt_basis_init is not None:
                 basis = jnp.asarray(p_filt_basis_init)
                 if basis.shape != (n_basis, n_k):
@@ -95,14 +114,16 @@ class BaselineHead(eqx.Module):
                         f"= ({n_basis}, {n_k})")
                 self.p_filt_basis = basis
             else:
-                self.p_filt_basis = jax.nn.initializers.orthogonal()(k3, (n_basis, n_k))
+                self.p_filt_basis = jax.nn.initializers.orthogonal()(
+                    ks[n_layers + 1], (n_basis, n_k))
 
     def __call__(self, z, tau0):
         # θ-BLIND: only (z, τ₀) enter; the shared latent (which encodes θ) is NEVER
         # passed in. This is what makes the baseline structurally identifiable.
-        inp = jnp.stack([jnp.atleast_1d(z)[0], jnp.atleast_1d(tau0)[0]])
-        h = jax.nn.gelu(self.trunk(inp))
-        y = self.out(h)
+        x = jnp.stack([jnp.atleast_1d(z)[0], jnp.atleast_1d(tau0)[0]])
+        for lin in self.layers[:-1]:
+            x = jax.nn.gelu(lin(x))
+        y = self.layers[-1](x)
         if self.n_basis is None:
             return y.reshape(4, self.n_k)
         coeffs = y.reshape(4, self.n_basis)
@@ -199,11 +220,15 @@ class Emulator(eqx.Module):
     head_b: HeadB
 
     def __init__(self, in_dim=10, n_k=172, n_basis=None, p_filt_basis_init=None,
-                 baseline_basis_init=None, key=None):
+                 baseline_basis_init=None, baseline_n_layers=3, baseline_width=256,
+                 key=None):
         k1, k2, k3, k4 = jax.random.split(key, 4)
         self.enc = Encoder(in_dim=in_dim, key=k1)
         self.head_a = HeadA(latent=64, key=k2)
+        # DEEP θ-blind baseline (validated recipe): default 3 hidden layers × w256
+        # so term (b) collapses from ~0.84·σ_cosmo to ~0.03–0.05·σ_cosmo.
         self.head_base = BaselineHead(n_k=n_k, n_basis=n_basis,
+                                      n_layers=baseline_n_layers, width=baseline_width,
                                       p_filt_basis_init=baseline_basis_init, key=k3)
         self.head_b = HeadB(latent=64, n_k=n_k, n_basis=n_basis,
                             p_filt_basis_init=p_filt_basis_init, key=k4)
@@ -227,13 +252,32 @@ def structural_tier_p(w_c, P_filt_lin):
 
 
 def masked_mse(pred, target, mask, weight=None):
-    """NaN-safe masked MSE. Sanitise target to finite BEFORE the masked diff so the
-    jnp.where double-NaN-gradient trap never fires; guard the denominator with max(n,1)."""
+    """NaN-safe masked WEIGHTED-MEAN squared error.
+
+    Sanitise target to finite BEFORE the masked diff so the jnp.where double-NaN-
+    gradient trap never fires; guard the denominator with max(·,1).
+
+    GRADIENT-SCALE FIX (validated recipe, scripts/feasibility_subpercent.py): when a
+    ``weight`` is supplied this is a TRUE weighted mean — the denominator is
+    ``Σ(weight·mask)``, NOT the raw masked count ``Σ(mask)``. The old form divided
+    the weighted numerator by the *unweighted* count, so a per-class inv_nc weight
+    (≈1/n_c, e.g. 6e-3 for a populous class) silently SHRANK the term's absolute
+    gradient by that factor — the baseline head could not train (term (b) stuck at
+    ~0.84·σ_cosmo). Normalizing by Σ(weight·mask) restores the absolute scale while
+    PRESERVING inv_nc's relative intent: each masked element's contribution is its
+    weight ÷ the total weight, so an alpha-sibling block down-weighted by 1/n_a (or a
+    class by 1/n_c) still gets proportionally less say — it is just no longer globally
+    scaled down. With no weight this is the plain masked mean (Σ(mask) denominator),
+    unchanged."""
     target_safe = jnp.nan_to_num(target, nan=0.0)
     diff = jnp.where(mask, pred - target_safe, 0.0)
     sq = diff ** 2
     if weight is not None:
-        sq = sq * weight
+        # broadcast (weight·mask) is the effective per-element weight; the weighted
+        # mean divides by its sum so the absolute gradient scale is weight-independent.
+        w = weight * mask.astype(sq.dtype)
+        denom = jnp.maximum(jnp.sum(w), 1.0)
+        return jnp.sum(sq * weight) / denom
     denom = jnp.maximum(jnp.sum(mask.astype(sq.dtype)), 1.0)
     return jnp.sum(sq) / denom
 

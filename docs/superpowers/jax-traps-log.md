@@ -448,6 +448,36 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   the absolute (unit-cube) shift against the prior width and the Fisher condition number before quoting σ-units;
   and separate the TRAIN tilt (representation/high-k cleanliness) from the VAL tilt (finite-sim generalization).
 
+## weighted-mask loss norm + frozen-baseline two-phase train — GUARDED
+- **Where:** `hcd_analysis/emulator/model.py::masked_mse`, `hcd_analysis/emulator/train.py::train_fold`
+  (productionize the validated sub-percent recipe).
+- **Symptom (loss):** the θ-blind BaselineHead would not train in the joint loop — term (b) (baseline misfit)
+  stuck at ~0.84·σ_cosmo. The baseline-term gradient norm was ~1.5e-7 on a real LF batch.
+- **Cause (loss):** `masked_mse` weighted the squared diff by `inv_nc` (≈1/n_c, ~6e-3 for a populous class)
+  but divided by the *unweighted* masked count `Σ(mask)`. That is NOT a weighted mean — it globally SHRINKS the
+  term's gradient by the weight magnitude. (`weight·Σ(diff²)/Σ(mask)` ≠ a mean; the absolute scale rides on the
+  weight.)
+- **Fix (loss):** make it a TRUE weighted mean — `Σ(weight·diff²)/Σ(weight·mask)`. Preserves inv_nc's RELATIVE
+  intent (each element's say = its weight ÷ total weight) but restores the absolute gradient scale. Baseline-head
+  grad norm jumped ~7e4× (1.5e-7 → 1.1e-2); term (b) → 0.031·σ_cosmo after the deep head trains. NaN-safety
+  unchanged (target sanitised + masked diff zeroed before the weight multiply; `max(Σ,1)` denom guard; zero-weight
+  → zero contribution to BOTH numerator and `Σ(weight·mask)` denom, so padded/empty rows still contribute exactly 0).
+- **Symptom (train):** even after pre-fitting the deep θ-blind baseline to its 0.03·σ_cosmo floor, term (b)
+  RE-INFLATED to ~0.21 (regression test fixture: fit_ratio 0.24 → 0.49) once the JOINT loop ran.
+- **Cause (train):** the joint optimizer keeps stepping the baseline leaves; the inv_nc-weighted `p_base` term at
+  the shared joint LR DRIFTS the baseline off its pre-fit minimum (minibatch noise + competition with the much
+  larger residual/CDDF terms). The validated feasibility recipe never jointly fine-tuned the baseline — it trained
+  baseline and residual as SEPARATE fixed fits.
+- **Fix (train):** two-phase, NOT the buggy 3-stage `staged` schedule — pre-fit the baseline alone to its floor
+  (`_prefit_baseline`, baseline-only AdamW on the (z,τ₀)-cell table via `eqx.partition`), then FREEZE it during the
+  joint loop (`freeze_baseline=True` default whenever a pre-fit ran; `eqx.partition` + `train_step_partitioned`
+  so the joint optimizer never sees its leaves). The θ-blind structured mean stays pinned; the joint loop trains
+  only encoder/Head A/Head B (the θ-dependent residual). Term (b) held at 0.031·σ_cosmo on production LF fold-0.
+- **Lesson:** (1) any masked/weighted reduction used as a LOSS must normalize by the SAME weight it applies in the
+  numerator (`Σ(w·mask)`), else per-sample weights silently rescale the gradient and a term can't train. (2) When a
+  head is pre-trained to a floor that a different objective doesn't reward, FREEZE it (eqx.partition) during the
+  shared loop, or it drifts back — pre-fit alone is not enough.
+
 ---
 
 ## Trap template (append new entries above this line)

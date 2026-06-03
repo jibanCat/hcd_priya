@@ -24,6 +24,7 @@ import optax
 from hcd_analysis.emulator.model import Emulator, joint_loss, p_resid_loss
 from hcd_analysis.emulator.data import (
     fit_target_norm, fit_baseline_residual_norm, make_batch, safe_log, apply_norm,
+    cell_id,
 )
 
 
@@ -120,6 +121,81 @@ def _warmstart_bases(d, train_idx, norm_stats, n_basis, n_k):
     return out[0], out[1]   # (residual, baseline)
 
 
+def _baseline_cell_table(d, train_idx, norm_stats):
+    """Per distinct (z,τ₀)-CELL: (z_unit, τ₀) input + σ_marg-standardized cell-mean
+    target t_p_base (4,K), exactly the θ-blind BASELINE head's target space.
+
+    The baseline head maps (z,τ₀)→(4,K); under LOSO a cell's target is its
+    train-cell-mean (shared across the 60 cosmologies). Collapsing the train rows
+    to one entry per distinct cell makes the pre-fit a small, well-posed regression
+    (≈306 cells on LF) — the same construction the validated feasibility recipe
+    (scripts/feasibility_subpercent.py Exp 2) trained the deep baseline on.
+    Returns (z_cells, tau0_cells, target (Nc,4,K), mask (Nc,4,K))."""
+    train_idx = np.asarray(train_idx)
+    pf = norm_stats["P_filt"]
+    cells = cell_id(d, train_idx)
+    z_unit = d["x"][:, 9]
+    uc = np.unique(cells)
+    cz, ct, cy = [], [], []
+    for cc in uc:
+        rows = train_idx[cells == cc]
+        cz.append(z_unit[rows][0])
+        ct.append(d["tau0"][rows][0])
+        cy.append(pf["cell_mean"][int(cc)])          # (4,K) train cell-mean (logP)
+    cz = np.asarray(cz, np.float64)
+    ct = np.asarray(ct, np.float64)
+    cy = np.stack(cy)                                # (Nc,4,K)
+    tgt = (cy - pf["mu_marg"]) / pf["sig_marg"]      # σ_marg-standardized cell-mean
+    return cz, ct, tgt, np.isfinite(tgt)
+
+
+def _prefit_baseline(model, d, train_idx, norm_stats, *, epochs, lr, seed):
+    """Pre-fit ONLY the θ-blind BaselineHead to its cell-mean floor (validated recipe).
+
+    The deep baseline needs MANY gradient steps to reach term (b) ≈ 0.03–0.05·σ_cosmo
+    (feasibility Exp 2 used ~12–15k epochs of baseline-only training); in the joint
+    non-staged loop the baseline shares steps with the residual head and the joint
+    early-stop (driven by the much larger p_resid/f_nhi terms) cuts it off long before
+    convergence. So we train the baseline alone here — on the (z,τ₀)-cell table, with
+    the Σ(mask) weighted-mean loss (no inv_nc shrink) — and hand the joint loop a
+    baseline that already sits at its floor. The joint loop then fine-tunes everything.
+
+    Trains ONLY ``model.head_base`` via eqx.partition (the encoder/Head A/Head B leaves
+    are frozen here). Returns the model with the fitted baseline. No-op if epochs<=0.
+    """
+    if epochs is None or epochs <= 0:
+        return model
+    cz, ct, tgt, mask = _baseline_cell_table(d, train_idx, norm_stats)
+    Z = jnp.asarray(cz)
+    T = jnp.asarray(ct)
+    Y = jnp.asarray(np.where(mask, tgt, 0.0))
+    Mk = jnp.asarray(mask.astype(np.float64))
+
+    # partition: only head_base trainable (everything else static/frozen).
+    base_mask = _trainable_mask(model, train_baseline=True, train_rest=False)
+    diff_model, static_model = eqx.partition(model, base_mask)
+    opt = optax.adamw(optax.cosine_decay_schedule(lr, max(epochs, 1)), weight_decay=1e-7)
+    opt_state = opt.init(eqx.filter(diff_model, eqx.is_array))
+
+    def loss(dm):
+        m = eqx.combine(dm, static_model)
+        pred = jax.vmap(lambda z, t: m.head_base(z, t))(Z, T)   # (Nc,4,K)
+        # Σ(weight·mask) weighted-mean MSE with uniform weight == plain masked mean
+        # (the per-cell baseline target carries no inv_nc; uniform is the right norm).
+        diff = jnp.where(Mk > 0, pred - Y, 0.0)
+        return jnp.sum(diff ** 2) / jnp.maximum(jnp.sum(Mk), 1.0)
+
+    @eqx.filter_jit
+    def step(dm, st):
+        l, g = eqx.filter_value_and_grad(loss)(dm)
+        u, st = opt.update(g, st, eqx.filter(dm, eqx.is_array))
+        return eqx.apply_updates(dm, u), st, l
+
+    for _ in range(epochs):
+        diff_model, opt_state, _ = step(diff_model, opt_state)
+    return eqx.combine(diff_model, static_model)
+
+
 def _iter_minibatches(rng, idx, batch_size):
     """Yield shuffled minibatches of row indices for one epoch."""
     idx = np.asarray(idx)
@@ -167,12 +243,28 @@ def _to_jnp_batch(b):
 
 def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
                batch_size=512, seed=0, key=None, patience=10, n_k=None,
-               staged=False):
+               staged=False, prefit_baseline_epochs=8000, prefit_baseline_lr=2e-3,
+               freeze_baseline=None):
     """Train one LOSO fold on ``train_idx``, validating on ``val_idx`` each epoch.
 
     - Fits the train-split target normalisation (``fit_target_norm``) on ``train_idx``.
     - SVD warm-starts both P_filt bases (REDESIGN: baseline + residual) when
       ``n_basis`` is set.
+    - PRE-FITS the θ-blind BaselineHead to its cell-mean floor (validated recipe;
+      ``prefit_baseline_epochs`` baseline-only steps) BEFORE the joint loop, so term
+      (b) reaches ~0.03–0.05·σ_cosmo. The joint early-stop is driven by the much
+      larger p_resid/f_nhi terms and would otherwise cut the deep baseline off long
+      before convergence. Set ``prefit_baseline_epochs=0`` to disable (the joint loop
+      then trains the baseline from the SVD warm-start only).
+    - FREEZES the pre-fit baseline during the joint loop (``freeze_baseline``, default
+      True whenever a pre-fit ran). This mirrors the validated recipe (Exp 4 trained
+      the baseline + residual as SEPARATE fixed fits, never jointly fine-tuned): if
+      the baseline kept training jointly it DRIFTS off its floor (the inv_nc-weighted
+      p_base term at shared LR pulls it), re-inflating term (b). With it frozen the
+      joint loop trains only the encoder/Head A/Head B (the θ-dependent residual),
+      while the θ-blind baseline stays pinned. This is NOT the buggy 3-stage
+      ``staged`` schedule — it is a clean two-phase: fit the θ-blind structured mean,
+      freeze it, train the θ-dependent signal.
     - Minibatched AdamW with cosine-decay LR (over the total #steps), early stop on
       the validation loss with ``patience`` epochs.
 
@@ -207,11 +299,32 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
                      p_filt_basis_init=p_filt_basis_init,
                      baseline_basis_init=baseline_basis_init, key=key)
 
+    # VALIDATED RECIPE: pre-fit the deep θ-blind baseline to its cell-mean floor so
+    # term (b) collapses (the joint early-stop can't drive the baseline there alone).
+    did_prefit = prefit_baseline_epochs is not None and prefit_baseline_epochs > 0
+    model = _prefit_baseline(model, d, train_idx, norm_stats,
+                             epochs=prefit_baseline_epochs, lr=prefit_baseline_lr,
+                             seed=seed)
+    # Freeze the pre-fit baseline during the joint loop unless explicitly overridden
+    # (default: freeze iff a pre-fit ran, so the baseline doesn't drift off its floor).
+    if freeze_baseline is None:
+        freeze_baseline = did_prefit
+
     steps_per_epoch = max(1, int(np.ceil(len(train_idx) / batch_size)))
     total_steps = steps_per_epoch * epochs
     opt = make_optimizer(lr=lr, steps=total_steps)
-    opt_state = opt.init(eqx.filter(model, eqx.is_array))
     lr_sched = optax.cosine_decay_schedule(lr, total_steps)
+
+    # When freezing the baseline, partition it out so the joint optimizer never
+    # touches its leaves (the θ-blind structured mean stays pinned at its floor);
+    # the joint loop then trains only the encoder / Head A / Head B residual.
+    if freeze_baseline:
+        join_mask = _trainable_mask(model, train_baseline=False, train_rest=True)
+        diff_model, static_model = eqx.partition(model, join_mask)
+        opt_state = opt.init(eqx.filter(diff_model, eqx.is_array))
+        joint_loss_fn = _loss_with_term_w(None)   # default uniform term_w
+    else:
+        opt_state = opt.init(eqx.filter(model, eqx.is_array))
 
     val_batch = _to_jnp_batch(make_batch(d, val_idx, norm_stats))
 
@@ -227,7 +340,12 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
             # CS-I2: pad the (ragged) final minibatch to a FIXED batch_size with
             # zero-contribution rows, so train_step keeps ONE static shape (traces once).
             batch = _pad_batch(_to_jnp_batch(make_batch(d, mb, norm_stats)), batch_size)
-            model, opt_state, loss, gnorm = train_step(model, opt, opt_state, batch)
+            if freeze_baseline:
+                diff_model, opt_state, loss, gnorm = train_step_partitioned(
+                    diff_model, static_model, opt, opt_state, batch, joint_loss_fn)
+                model = eqx.combine(diff_model, static_model)
+            else:
+                model, opt_state, loss, gnorm = train_step(model, opt, opt_state, batch)
             ep_losses.append(float(loss))
             ep_gnorms.append(float(gnorm))
             step += 1
