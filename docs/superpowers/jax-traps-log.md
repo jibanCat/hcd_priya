@@ -350,6 +350,40 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
 
 ---
 
+## N+1. Cubic-spline k-mapping = a HOST-precomputed constant matrix W, not an in-graph solve — **GUARDED**
+- **Where:** `scripts/feasibility_diff_spline.py` (differentiable spline k-mapping feasibility for HMC).
+- **Symptom (avoided):** the obvious implementation evaluates a cubic spline inside the forward pass — a
+  tridiagonal `linalg.solve` for the node second-derivatives + a `searchsorted` bracket lookup + per-interval
+  Hermite blend, all on TRACED values. Under `jit`/`grad`/`vmap` that drags a (re)solve and data-dependent
+  gather into every leapfrog step, and `searchsorted` on traced data is a control-flow trap.
+- **Cause/insight:** a cubic spline interpolant is **LINEAR in the node values** — the `A M = B y` solve and the
+  Hermite blend are both linear maps of `y`, so the entire `sim_k -> data_k` evaluation collapses to a single
+  dense matrix `W (n_data, n_sim)` that depends ONLY on the two (fixed) k-grids. Assemble `W` ONCE on the host
+  (numpy `linalg.solve` + `searchsorted`), freeze it as a `jnp` constant, and the forward pass is just
+  `logP_data = W @ logP_sim`. Verified: `jax.jacobian(W@y wrt y)` equals `W` to 0.0 and is point-independent
+  (genuinely linear); `grad` through `exp(W@(coeffs@basis))*C_res` matches finite-diff to <1e-6 and the
+  closed-form `2 W^T(W y)` to 1e-14; jit/vmap/vmap(grad) clean. No `∂P/∂k` term is ever needed — the resolution
+  window `C_res=1+2 f_res R² k²` is pointwise at the fixed data k.
+- **Equivalent cleaner form:** pre-apply `W` to the SVD basis (`basis_data = basis @ W.T`, built once per
+  (fidelity, data-grid)); then `logP_data = coeffs @ basis_data`. Bit-identical to `W@(coeffs@basis)` (max diff
+  7e-15) and cheaper (one matmul over n_basis≈12 cols instead of K=172/525). The basis vectors are NOT
+  individually smoother than a logP row (higher SVD modes oscillate) — irrelevant, since `W` is the same operator.
+- **Accuracy/measurement trap (HONEST):** do NOT report "full-grid spline onto data grid vs scipy" as an
+  interpolation ERROR — it is `W==scipy` (Test 1) re-stated, trivially ~0 (spline-reproduces-spline; the data
+  grid is COARSER than the dense sim grid within range). The honest within-range numbers are the INDEPENDENT
+  round-trip (sim->data->sim vs known cache values: med 0.05–0.35%, p95 0.5–1.5%) and a conservative
+  half-density DECIM bound (med ~0.4%, p95 ~1.3–2%). Also note the cache's per-row k-grids are EXACT scalar
+  multiples of a single uniform-linear template (per-row std of the ratio ~5e-16 — a z-rescale), so the decoder
+  emits on ONE canonical sim grid; `W` is built against that.
+- **BC + range:** use **not-a-knot** (scipy default; no spurious edge curvature for a smooth power law;
+  max|W|≈1.05, Lebesgue row-sum≈1.6 — no edge amplification, no NaN/Inf). CUT the likelihood to the validated
+  sim range (LF k≤0.069, HR k≤~0.20 s/km); KODIAQ high-k beyond the LF Nyquist 0.069 -> HR fidelity or cut.
+- **Lesson:** for ANY fixed-grid interpolation in an HMC forward model, check if the interpolant is linear in the
+  values (cubic/linear splines are) → precompute it as a constant matrix on the host. Never run the solve/gather
+  in-graph, and never benchmark a self-reproducing interp against itself.
+
+---
+
 ## Trap template (append new entries above this line)
 ```
 ## N. <short name> — HIT | GUARDED | WATCH
