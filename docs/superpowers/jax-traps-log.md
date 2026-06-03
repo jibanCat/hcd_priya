@@ -421,6 +421,35 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
 
 ---
 
+## 22. Fisher-bias δθ/σ explodes when J is rank-deficient (6-sim HR LOSO) — **HIT** (diagnostic)
+- **Where:** `scripts/diag_tilt_bias_lf_hr.py` `fisher_bias()`: J = `jax.jacfwd(r̂)(θ_unit)·σ_cosmo`
+  (∂logP̂/∂θ over the 9 unit-cube params), bias δθ = (JᵀC⁻¹J)⁻¹JᵀC⁻¹δ reported in σ_i = √diag(JᵀC⁻¹J)⁻¹.
+- **Symptom:** HR (6 sims, 6-fold LOSO → **1 val cosmology**, residual head trained on **5**) gives an apparent
+  ns bias of **+6.9σ** and a Fisher posterior σ_ns = **4.8 in unit-cube terms** (the whole prior box is width 1!),
+  Fisher cond ≈ 4e7, and absolute `dtheta_unit[ns]` = **+33** (33× the prior width — physically impossible). LF
+  (60 sims) is clean and physical: σ_ns=0.21, bias +0.057σ, dtheta_unit +0.012.
+- **Cause:** a residual head trained on ~5 cosmologies learns an almost flat θ→signal map, so the autodiff
+  Jacobian J is tiny and near rank-deficient over 9 params. F=JᵀC⁻¹J is then near-singular; both σ_i=√diag(F⁻¹)
+  AND the pseudo-inverse F⁻¹JᵀC⁻¹δ blow up. The ratio δθ/σ is two large ill-conditioned numbers divided — it is
+  NOT a meaningful "6.9σ shift", and the ridge (1e-12·tr) only stops a hard NaN, it does not restore rank.
+- **Fix:** sanity-gate the Fisher on the ABSOLUTE bias vs the prior width (`dtheta_unit` ≫ 1 ⇒ J degenerate ⇒
+  the σ-units are meaningless), and report the Fisher condition number. Trust per-σ bias only when σ_i ≪ prior
+  width AND cond is moderate (LF: σ≈0.2–5, cond 1e6 borderline but dtheta_unit≪1 ⇒ OK). For a genuine HR
+  systematic test you need MORE HR cosmologies (or a learned multi-fidelity prior on J), not this 6-sim suite.
+- **Confirmation (train-vs-val tilt, k≥1e-3 clean):** LF TRAIN slope +0.00%/dex (RMS 0.02%), VAL +0.14%/dex
+  (RMS 0.38%) on 8 held-out sims — fits AND generalizes, recipe removed the LF tilt. HR TRAIN +0.12%/dex
+  (RMS **0.14%** — the HR REPRESENTATION is clean across the KODIAQ band, no intrinsic high-k systematic) but
+  VAL **−4.51%/dex (RMS 4.21%)** on the **1** held-out HR cosmology. The HR "tilt" is therefore ENTIRELY the
+  5→1-sim LOSO generalization gap, NOT a high-k representation defect. So the HR/MF high-k channel has no
+  built-in systematic; only the per-σ bias is unquotable from this 6-sim suite (degenerate J).
+- **Lesson:** when you autodiff an emulator for a Jacobian-based bias/Fisher, the result is only physical if the
+  emulator's PARAMETER RESPONSE is itself well-resolved. With few training sims the response (hence J) is
+  rank-deficient and any F⁻¹ quantity (σ, bias-in-σ, parameter covariance) is an artifact. Always cross-check
+  the absolute (unit-cube) shift against the prior width and the Fisher condition number before quoting σ-units;
+  and separate the TRAIN tilt (representation/high-k cleanliness) from the VAL tilt (finite-sim generalization).
+
+---
+
 ## Trap template (append new entries above this line)
 ```
 ## N. <short name> — HIT | GUARDED | WATCH
