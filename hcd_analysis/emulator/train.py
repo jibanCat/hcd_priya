@@ -21,10 +21,20 @@ import jax.numpy as jnp
 import equinox as eqx
 import optax
 
-from hcd_analysis.emulator.model import Emulator, joint_loss
+from hcd_analysis.emulator.model import Emulator, joint_loss, p_resid_loss
 from hcd_analysis.emulator.data import (
-    fit_target_norm, make_batch, safe_log, apply_norm,
+    fit_target_norm, fit_baseline_residual_norm, make_batch, safe_log, apply_norm,
 )
+
+
+def _fit_norm(d, train_idx):
+    """Merged target normalization: the per-channel transforms (fit_target_norm)
+    PLUS the P_filt baseline/residual (z,tau0)-conditional stats
+    (fit_baseline_residual_norm). make_batch needs BOTH to emit t_p_base/t_p_resid
+    (the normalization REDESIGN); with only fit_target_norm it silently falls back
+    to the old global-sigma P_filt path."""
+    return {**fit_target_norm(d, train_idx),
+            **fit_baseline_residual_norm(d, train_idx)}
 
 
 def make_optimizer(lr=1e-3, steps=None, weight_decay=1e-4):
@@ -50,10 +60,60 @@ def train_step(model, opt, opt_state, batch):
     return model, opt_state, loss, grad_norm
 
 
+def _loss_with_term_w(term_w):
+    """Build a joint_loss closure with a fixed term_w (for the staged schedule).
+
+    Zeroing a term's weight removes both its forward contribution AND its gradient,
+    so a stage trains only the heads that feed its non-zero terms (in conjunction
+    with parameter freezing for clean isolation)."""
+    def _loss(model, batch):
+        return joint_loss(model, batch, term_w=term_w)
+    return _loss
+
+
+@eqx.filter_jit
+def train_step_partitioned(diff_model, static_model, opt, opt_state, batch, loss_fn):
+    """One AdamW step over a FROZEN/TRAINABLE partition (staged training).
+
+    ``diff_model``/``static_model`` come from ``eqx.partition`` on a trainable-leaf
+    filter spec; grads are taken only wrt ``diff_model`` so the static (frozen)
+    leaves never move. ``loss_fn(model, batch)`` is a closure (e.g. a term_w-fixed
+    joint_loss). Returns (diff_model, opt_state, loss, grad_norm)."""
+    def _wrapped(dm):
+        model = eqx.combine(dm, static_model)
+        return loss_fn(model, batch)
+    loss, grads = eqx.filter_value_and_grad(_wrapped)(diff_model)
+    grad_norm = _global_grad_norm(grads)
+    updates, opt_state = opt.update(grads, opt_state, eqx.filter(diff_model, eqx.is_array))
+    diff_model = eqx.apply_updates(diff_model, updates)
+    return diff_model, opt_state, loss, grad_norm
+
+
 @eqx.filter_jit
 def evaluate(model, batch):
     """Scalar ``joint_loss`` with no gradient (validation)."""
     return joint_loss(model, batch)
+
+
+def _warmstart_bases(d, train_idx, norm_stats, n_basis, n_k):
+    """SVD warm-starts for (residual_basis, baseline_basis) in the REDESIGN.
+
+    Builds the per-head target arrays from a make_batch on train rows (which already
+    produces t_p_base / t_p_resid in each head's standardized space), stacks over
+    (rows*classes, n_k), drops NaN (above-Nyquist) rows, and SVD-warm-starts each
+    basis. Returns (resid_basis_init, baseline_basis_init), each None when n_basis
+    is None or there aren't enough finite rows."""
+    if n_basis is None:
+        return None, None
+    from hcd_analysis.emulator.model import svd_basis_init
+    b = make_batch(d, train_idx, norm_stats)
+    out = []
+    for key in ("t_p_resid", "t_p_base"):
+        M = np.asarray(b[key]).reshape(-1, n_k)
+        M = M[np.all(np.isfinite(M), axis=1)]
+        out.append(svd_basis_init(jnp.asarray(M), n_basis)
+                   if M.shape[0] >= n_basis else None)
+    return out[0], out[1]   # (residual, baseline)
 
 
 def _iter_minibatches(rng, idx, batch_size):
@@ -102,18 +162,27 @@ def _to_jnp_batch(b):
 
 
 def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
-               batch_size=512, seed=0, key=None, patience=10, n_k=None):
+               batch_size=512, seed=0, key=None, patience=10, n_k=None,
+               staged=False):
     """Train one LOSO fold on ``train_idx``, validating on ``val_idx`` each epoch.
 
     - Fits the train-split target normalisation (``fit_target_norm``) on ``train_idx``.
-    - SVD warm-starts HeadB's P_filt basis from the train split's transformed,
-      standardized P_filt when ``n_basis`` is set.
+    - SVD warm-starts both P_filt bases (REDESIGN: baseline + residual) when
+      ``n_basis`` is set.
     - Minibatched AdamW with cosine-decay LR (over the total #steps), early stop on
       the validation loss with ``patience`` epochs.
+
+    ``staged=True`` dispatches to the 3-stage schedule (``train_fold_staged``):
+    (1) baseline head only, (2) freeze baseline + train residual/delta/Head-A,
+    (3) joint fine-tune. Early-stop on the val RESIDUAL (cosmology) loss.
 
     Returns ``(best_model, norm_stats, history)`` where history holds per-epoch
     ``train_loss, val_loss, grad_norm, lr`` lists.
     """
+    if staged:
+        return train_fold_staged(
+            d, train_idx, val_idx, n_basis=n_basis, lr=lr, epochs=epochs,
+            batch_size=batch_size, seed=seed, key=key, patience=patience, n_k=n_k)
     if key is None:
         key = jax.random.PRNGKey(seed)
     train_idx = np.asarray(train_idx)
@@ -122,21 +191,17 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
         n_k = d["P_tier_p"].shape[1]
 
     rng = np.random.default_rng(seed)
-    norm_stats = fit_target_norm(d, train_idx)
+    norm_stats = _fit_norm(d, train_idx)
 
-    # SVD warm-start: build basis in the SAME standardized-log space HeadB emits.
-    p_filt_basis_init = None
-    if n_basis is not None:
-        from hcd_analysis.emulator.model import svd_basis_init
-        P = d["P_filt"][train_idx]                              # (n,4,K)
-        P_std = apply_norm(safe_log(P), norm_stats["P_filt"])   # standardized-log
-        P_std = P_std.reshape(-1, n_k)
-        P_std = P_std[np.all(np.isfinite(P_std), axis=1)]       # drop NaN (Nyquist) rows
-        if P_std.shape[0] >= n_basis:
-            p_filt_basis_init = svd_basis_init(jnp.asarray(P_std), n_basis)
+    # SVD warm-start the two P_filt bases (REDESIGN): the BASELINE basis from the
+    # σ_marg-standardized cell-mean targets (t_p_base), the RESIDUAL basis from the
+    # σ_cosmo-whitened residual targets (t_p_resid) -- each in its head's own space.
+    p_filt_basis_init, baseline_basis_init = _warmstart_bases(
+        d, train_idx, norm_stats, n_basis, n_k)
 
     model = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis,
-                     p_filt_basis_init=p_filt_basis_init, key=key)
+                     p_filt_basis_init=p_filt_basis_init,
+                     baseline_basis_init=baseline_basis_init, key=key)
 
     steps_per_epoch = max(1, int(np.ceil(len(train_idx) / batch_size)))
     total_steps = steps_per_epoch * epochs
@@ -183,6 +248,133 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
 
     history = {k: np.asarray(v) for k, v in history.items()}
     return best_model, norm_stats, history
+
+
+def _trainable_mask(model, train_baseline, train_rest):
+    """Boolean pytree marking which array leaves are TRAINABLE in a stage.
+
+    ``train_baseline`` toggles the BaselineHead (head_base) leaves; ``train_rest``
+    toggles every OTHER array leaf (encoder, Head A, Head B). Used with
+    ``eqx.partition`` to freeze a head: a False leaf is moved to ``static`` and its
+    gradient is never taken, so it cannot move."""
+    is_arr = eqx.filter(model, eqx.is_array)
+    # all array leaves -> train_rest, then override the head_base subtree -> train_baseline.
+    full = jax.tree_util.tree_map(lambda _: train_rest, is_arr)
+    full = eqx.tree_at(
+        lambda m: m.head_base, full,
+        replace=jax.tree_util.tree_map(
+            lambda _: train_baseline, eqx.filter(model.head_base, eqx.is_array)))
+    return full
+
+
+def _run_stage(model, norm_stats, d, train_idx, val_batch, *, n_epochs,
+               batch_size, rng, term_w, train_baseline, train_rest, lr,
+               history, patience_resid):
+    """Run one training stage with frozen/trainable partition + term_w, early-
+    stopping on the val residual loss. Returns the best-by-resid model in this
+    stage and appends per-epoch diagnostics to ``history``."""
+    mask = _trainable_mask(model, train_baseline, train_rest)
+    diff_model, static_model = eqx.partition(model, mask)
+    steps_per_epoch = max(1, int(np.ceil(len(train_idx) / batch_size)))
+    opt = make_optimizer(lr=lr, steps=steps_per_epoch * max(n_epochs, 1))
+    opt_state = opt.init(eqx.filter(diff_model, eqx.is_array))
+    loss_fn = _loss_with_term_w(term_w)
+
+    best_resid = np.inf
+    best_model = eqx.combine(diff_model, static_model)
+    stall = 0
+    for _ in range(n_epochs):
+        ep_losses, ep_g = [], []
+        for mb in _iter_minibatches(rng, train_idx, batch_size):
+            batch = _pad_batch(_to_jnp_batch(make_batch(d, mb, norm_stats)), batch_size)
+            diff_model, opt_state, loss, gnorm = train_step_partitioned(
+                diff_model, static_model, opt, opt_state, batch, loss_fn)
+            ep_losses.append(float(loss)); ep_g.append(float(gnorm))
+        model_now = eqx.combine(diff_model, static_model)
+        vresid = float(p_resid_loss(model_now, val_batch))
+        history["train_loss"].append(float(np.mean(ep_losses)))
+        history["val_loss"].append(float(evaluate(model_now, val_batch)))
+        history["val_resid_loss"].append(vresid)
+        history["grad_norm"].append(float(np.mean(ep_g)))
+        history["lr"].append(lr)
+        if vresid < best_resid - 1e-9:
+            best_resid = vresid
+            best_model = model_now
+            stall = 0
+        else:
+            stall += 1
+            if stall >= patience_resid:
+                break
+    return best_model
+
+
+def train_fold_staged(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
+                      batch_size=512, seed=0, key=None, patience=10, n_k=None):
+    """3-stage training (normalization REDESIGN), early-stop on val RESIDUAL loss.
+
+    Stage 1 (~1/3 epochs): train BaselineHead (+ its basis) on the BASELINE term
+      only (term_w p_base=1, all others 0; only head_base trainable).
+    Stage 2 (~1/2 epochs): FREEZE BaselineHead; train Head B (residual + delta) and
+      Head A on their terms (p_base=0; p_resid/f_nhi/dndx/delta=1).
+    Stage 3 (rest): joint fine-tune ALL heads at a small LR (all terms on).
+
+    The early-stop metric in every stage is the val RESIDUAL (cosmology) loss
+    (``p_resid_loss``) — the quantity inference needs, NOT the marginal MSE. Returns
+    ``(best_model, norm_stats, history)`` with a ``val_resid_loss`` history key.
+    """
+    if key is None:
+        key = jax.random.PRNGKey(seed)
+    train_idx = np.asarray(train_idx)
+    val_idx = np.asarray(val_idx)
+    if n_k is None:
+        n_k = d["P_tier_p"].shape[1]
+    rng = np.random.default_rng(seed)
+    norm_stats = _fit_norm(d, train_idx)
+
+    p_filt_basis_init, baseline_basis_init = _warmstart_bases(
+        d, train_idx, norm_stats, n_basis, n_k)
+    model = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis,
+                     p_filt_basis_init=p_filt_basis_init,
+                     baseline_basis_init=baseline_basis_init, key=key)
+
+    val_batch = _to_jnp_batch(make_batch(d, val_idx, norm_stats))
+    history = {"train_loss": [], "val_loss": [], "val_resid_loss": [],
+               "grad_norm": [], "lr": [], "stage": []}
+
+    e1 = max(1, epochs // 3)
+    e2 = max(1, epochs // 2)
+    e3 = max(1, epochs - e1 - e2)
+    patience_resid = patience
+
+    # Stage 1: baseline head only (θ-blind cell-mean fit).
+    n0 = len(history["val_resid_loss"])
+    model = _run_stage(
+        model, norm_stats, d, train_idx, val_batch, n_epochs=e1, batch_size=batch_size,
+        rng=rng, term_w={"f_nhi": 0., "dndx": 0., "p_base": 1., "p_resid": 0., "delta": 0.},
+        train_baseline=True, train_rest=False, lr=lr, history=history,
+        patience_resid=patience_resid)
+    history["stage"] += [1] * (len(history["val_resid_loss"]) - n0)
+
+    # Stage 2: freeze baseline; train residual + delta + Head A.
+    n0 = len(history["val_resid_loss"])
+    model = _run_stage(
+        model, norm_stats, d, train_idx, val_batch, n_epochs=e2, batch_size=batch_size,
+        rng=rng, term_w={"f_nhi": 1., "dndx": 1., "p_base": 0., "p_resid": 1., "delta": 1.},
+        train_baseline=False, train_rest=True, lr=lr, history=history,
+        patience_resid=patience_resid)
+    history["stage"] += [2] * (len(history["val_resid_loss"]) - n0)
+
+    # Stage 3: joint fine-tune ALL heads at a small LR.
+    n0 = len(history["val_resid_loss"])
+    model = _run_stage(
+        model, norm_stats, d, train_idx, val_batch, n_epochs=e3, batch_size=batch_size,
+        rng=rng, term_w={"f_nhi": 1., "dndx": 1., "p_base": 1., "p_resid": 1., "delta": 1.},
+        train_baseline=True, train_rest=True, lr=lr * 0.1, history=history,
+        patience_resid=patience_resid)
+    history["stage"] += [3] * (len(history["val_resid_loss"]) - n0)
+
+    history = {k: np.asarray(v) for k, v in history.items()}
+    return model, norm_stats, history
 
 
 def save_checkpoint(path, model, arch_cfg, norm_stats, seed,

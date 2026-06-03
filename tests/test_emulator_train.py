@@ -19,8 +19,9 @@ from hcd_analysis.emulator.data import (
     load_cache, fit_target_norm, make_batch, kfold_loso,
 )
 from hcd_analysis.emulator.model import Emulator, joint_loss
+from hcd_analysis.emulator.model import p_resid_loss
 from hcd_analysis.emulator.train import (
-    make_optimizer, train_step, evaluate, train_fold,
+    make_optimizer, train_step, evaluate, train_fold, train_fold_staged,
     save_checkpoint, load_checkpoint, aggregate_error_vector,
     _pad_batch, _iter_minibatches, _to_jnp_batch,
 )
@@ -34,7 +35,8 @@ def _toy_batch(key, B=4, n_k=N_K):
         "tau0": jnp.linspace(0.2, 0.6, B),
         "t_f_nhi": jnp.zeros((B, 30)),
         "t_dndx": jnp.zeros((B, 3)),
-        "t_P_filt": jnp.ones((B, 4, n_k)),
+        "t_p_base": jnp.ones((B, 4, n_k)),
+        "t_p_resid": jnp.ones((B, 4, n_k)),
         "t_delta": jnp.zeros((B, 3, n_k)),
         "t_f_nhi_mask": jnp.ones((B, 30), bool),
         "t_dndx_mask": jnp.ones((B, 3), bool),
@@ -135,10 +137,17 @@ def test_checkpoint_roundtrip(tmp_path):
         assert np.array_equal(np.asarray(pred0[k]), np.asarray(pred1[k])), k
     assert meta["seed"] == 2
     assert meta["arch_cfg"] == arch_cfg
-    # norm_stats round-trip
+    # norm_stats round-trip. P_filt now holds the structured baseline/residual stats
+    # (mu_marg/sig_marg/sig_cosmo arrays + a cell_mean dict); compare each shape.
     for ch in norm_stats:
         for stat in norm_stats[ch]:
-            assert np.allclose(norm_stats[ch][stat], norm2[ch][stat])
+            v1, v2 = norm_stats[ch][stat], norm2[ch][stat]
+            if isinstance(v1, dict):       # cell_mean: {cell_id -> (4,K)}
+                assert set(v1) == set(v2)
+                for cid in v1:
+                    assert np.allclose(v1[cid], v2[cid], equal_nan=True)
+            else:
+                assert np.allclose(v1, v2, equal_nan=True)
 
 
 def test_padded_batch_matches_unpadded(tmp_path):
@@ -188,7 +197,7 @@ def test_padded_batch_matches_unpadded_with_structural_zeros_and_nan(tmp_path):
     ragged = _to_jnp_batch(make_batch(d, idx, norm))
     # the masks MUST contain False entries (else this test degenerates to the easy one)
     assert (~np.asarray(ragged["t_f_nhi_mask"])).any(), "no structural-zero in Head-A mask"
-    assert np.isnan(np.asarray(ragged["t_P_filt"])).any(), "no NaN P_filt target present"
+    assert np.isnan(np.asarray(ragged["t_p_resid"])).any(), "no NaN P_filt residual target present"
     padded = _pad_batch(ragged, batch_size)
 
     m = Emulator(in_dim=10, n_k=d["P_filt"].shape[2], key=jax.random.PRNGKey(1))
@@ -208,8 +217,8 @@ def test_padded_batch_matches_unpadded_with_structural_zeros_and_nan(tmp_path):
     # adversarial: even if a PADDED target itself were NaN (not just zero-padded),
     # the mask-False on padded rows must still floor its contribution to zero.
     import jax.numpy as _jnp
-    tpf = np.asarray(padded["t_P_filt"]).copy(); tpf[R:] = np.nan
-    padded_nan = {**padded, "t_P_filt": _jnp.asarray(tpf)}
+    tpf = np.asarray(padded["t_p_resid"]).copy(); tpf[R:] = np.nan
+    padded_nan = {**padded, "t_p_resid": _jnp.asarray(tpf)}
     lp2 = float(joint_loss(m, padded_nan))
     assert np.isfinite(lp2) and abs(lp2 - float(lr)) <= 1e-12 * max(1.0, abs(float(lr)))
 
@@ -310,6 +319,72 @@ def test_checkpoint_meta_has_kgrid(tmp_path):
     # load_checkpoint still round-trips with the enriched meta
     model2, meta2, norm2 = load_checkpoint(prefix)
     assert meta2["n_k"] == N_K and meta2["cache_path"] == cache_path
+
+
+def test_staged_train_reduces_residual_loss(tmp_path):
+    """REDESIGN: staged train_fold (baseline -> freeze+residual -> joint) LOWERS the
+    val RESIDUAL (cosmology) loss, and the BaselineHead is FROZEN in stage 2 (its
+    params do not change between the end of stage 1 and the end of stage 2)."""
+    from hcd_analysis.emulator.data import fit_target_norm, make_batch
+    import equinox as eqx
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+
+    # measure the val residual loss BEFORE training (fresh model on this split)
+    norm0 = fit_target_norm(d, tr)
+    val_batch = _to_jnp_batch(make_batch(d, va, norm0))
+    m0 = Emulator(in_dim=10, n_k=N_K, n_basis=4, key=jax.random.PRNGKey(0))
+    resid0 = float(p_resid_loss(m0, val_batch))
+
+    model, norm_stats, hist = train_fold(
+        d, tr, va, n_basis=4, lr=1e-2, epochs=30, batch_size=8,
+        seed=0, key=jax.random.PRNGKey(0), staged=True,
+    )
+    # history carries the per-epoch val residual loss + stage labels
+    assert "val_resid_loss" in hist and "stage" in hist
+    assert set(np.unique(hist["stage"])).issubset({1, 2, 3})
+    # the trained model's val residual loss is below the untrained baseline
+    val_batch2 = _to_jnp_batch(make_batch(d, va, norm_stats))
+    resid_final = float(p_resid_loss(model, val_batch2))
+    assert resid_final < resid0, (resid_final, resid0)
+    # and below the FIRST stage-1 epoch's residual (cosmology genuinely improved)
+    assert resid_final < float(hist["val_resid_loss"][0]) + 1e-9
+
+
+def test_staged_train_freezes_baseline_in_stage2(tmp_path):
+    """In stage 2 the BaselineHead is frozen via eqx.partition: train it in stage 1,
+    then run a stage-2-style partitioned step and confirm head_base leaves do NOT
+    move while Head B / Head A leaves DO."""
+    from hcd_analysis.emulator.data import fit_target_norm, make_batch
+    import equinox as eqx
+    from hcd_analysis.emulator.train import (
+        _trainable_mask, train_step_partitioned, _loss_with_term_w, make_optimizer)
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+    norm = fit_target_norm(d, tr)
+    m = Emulator(in_dim=10, n_k=N_K, n_basis=4, key=jax.random.PRNGKey(1))
+
+    # stage-2 partition: baseline frozen, the rest trainable
+    mask = _trainable_mask(m, train_baseline=False, train_rest=True)
+    diff, static = eqx.partition(m, mask)
+    opt = make_optimizer(lr=1e-2)
+    opt_state = opt.init(eqx.filter(diff, eqx.is_array))
+    loss_fn = _loss_with_term_w({"f_nhi": 1., "dndx": 1., "p_base": 0.,
+                                 "p_resid": 1., "delta": 1.})
+    batch = _pad_batch(_to_jnp_batch(make_batch(d, tr, norm)), 16)
+
+    base_w0 = np.asarray(m.head_base.out.weight).copy()
+    headb_w0 = np.asarray(m.head_b.out.weight).copy()
+    for _ in range(5):
+        diff, opt_state, _, _ = train_step_partitioned(
+            diff, static, opt, opt_state, batch, loss_fn)
+    m2 = eqx.combine(diff, static)
+    # BaselineHead frozen: bit-identical
+    assert np.array_equal(np.asarray(m2.head_base.out.weight), base_w0)
+    # Head B moved (it was trainable and got gradient from the residual term)
+    assert not np.array_equal(np.asarray(m2.head_b.out.weight), headb_w0)
 
 
 def test_aggregate_error_vector_shape_and_dla_flag():

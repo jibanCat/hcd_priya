@@ -193,6 +193,7 @@ def test_normalize_params_maps_to_unit_cube(tmp_path):
 # --- A1: make_batch target-transform + train-split normalization --------------
 from hcd_analysis.emulator.data import (
     fit_target_norm, make_batch, untransform_prediction, safe_log,
+    fit_baseline_residual_norm, reconstruct_P_filt, cell_id,
 )
 
 
@@ -215,7 +216,10 @@ def test_make_batch_keys_and_shapes(tmp_path):
     assert b["tau0"].shape == (n,)
     assert b["t_f_nhi"].shape == (n, 30)
     assert b["t_dndx"].shape == (n, 3)
-    assert b["t_P_filt"].shape == (n, 4, K)
+    # REDESIGN: t_P_filt replaced by t_p_base + t_p_resid (both (n,4,K)).
+    assert b["t_p_base"].shape == (n, 4, K)
+    assert b["t_p_resid"].shape == (n, 4, K)
+    assert "t_P_filt" not in b
     assert b["t_delta"].shape == (n, 3, K)
     assert b["mask"].shape == (n, K)
     assert b["mask"].dtype == bool
@@ -223,7 +227,7 @@ def test_make_batch_keys_and_shapes(tmp_path):
     assert b["inv_nalpha"].shape == (n,)
     assert b["mean_F_clean"].shape == (n,)
     # all float64
-    for k in ("x", "tau0", "t_f_nhi", "t_dndx", "t_P_filt", "t_delta",
+    for k in ("x", "tau0", "t_f_nhi", "t_dndx", "t_p_base", "t_p_resid", "t_delta",
               "inv_nc", "inv_nalpha", "mean_F_clean"):
         assert b[k].dtype == np.float64, k
     # x must be the unit-cube input untouched
@@ -231,9 +235,10 @@ def test_make_batch_keys_and_shapes(tmp_path):
     # f_nhi/dndx (per-block) finite everywhere
     assert np.isfinite(b["t_f_nhi"]).all()
     assert np.isfinite(b["t_dndx"]).all()
-    # t_P_filt / t_delta finite where mask True
+    # t_p_base / t_p_resid / t_delta finite where mask True
     m3 = b["mask"][:, None, :]
-    assert np.isfinite(b["t_P_filt"][np.broadcast_to(m3, b["t_P_filt"].shape)]).all()
+    assert np.isfinite(b["t_p_base"][np.broadcast_to(m3, b["t_p_base"].shape)]).all()
+    assert np.isfinite(b["t_p_resid"][np.broadcast_to(m3, b["t_p_resid"].shape)]).all()
     assert np.isfinite(b["t_delta"][np.broadcast_to(m3, b["t_delta"].shape)]).all()
 
 
@@ -241,25 +246,22 @@ def test_target_norm_roundtrip_to_physical(tmp_path):
     d = _load_fixture(tmp_path, n_k=8)
     R = d["x"].shape[0]
     norm = fit_target_norm(d, np.arange(R))
-    # raw transform round-trip is exact
+    # raw delta transform round-trip is exact (delta keeps the flat-norm path)
     from hcd_analysis.emulator.data import (
         signed_log, signed_log_inv, apply_norm, invert_norm,
     )
-    P = d["P_filt"][:5]                                   # may contain NaN above Nyquist
-    z = apply_norm(safe_log(P), norm["P_filt"])
-    Prt = np.exp(invert_norm(z, norm["P_filt"]))
-    fin = np.isfinite(P)
-    assert np.allclose(Prt[fin], P[fin], atol=1e-10, rtol=1e-10)
     Dl = d["delta"][:5]
     zd = apply_norm(signed_log(Dl), norm["delta"])
     Drt = signed_log_inv(invert_norm(zd, norm["delta"]))
     find = np.isfinite(Dl)
     assert np.allclose(Drt[find], Dl[find], atol=1e-10, rtol=1e-10)
-    # untransform_prediction recovers physical P_filt / delta from standardized targets
+    # untransform_prediction recovers physical P_filt (from baseline+residual targets)
+    # and delta from standardized targets.
     idx = np.arange(5)
     b = make_batch(d, idx, norm)
     pred = {"f_nhi": b["t_f_nhi"], "dndx": b["t_dndx"],
-            "P_filt": b["t_P_filt"], "delta": b["t_delta"]}
+            "P_filt_base": b["t_p_base"], "P_filt_resid": b["t_p_resid"],
+            "delta": b["t_delta"]}
     phys = untransform_prediction(pred, norm)
     okP = np.isfinite(d["P_filt"][idx])
     assert np.allclose(phys["P_filt"][okP], d["P_filt"][idx][okP], atol=1e-9)
@@ -282,8 +284,9 @@ def test_train_norm_uses_only_train_blocks(tmp_path):
     # take a subset of snap-blocks (drop the last sim's rows): stats must differ
     sub = np.arange(R)[: R // 2]
     part = fit_target_norm(d, sub)
-    # at least one channel's mean differs (train-only normalization)
-    assert not np.allclose(part["P_filt"]["mean"], full["P_filt"]["mean"])
+    # at least one channel's mean differs (train-only normalization). P_filt now
+    # holds the structured baseline/residual stats; check its marginal mean (mu_marg).
+    assert not np.allclose(part["P_filt"]["mu_marg"], full["P_filt"]["mu_marg"])
     assert not np.allclose(part["f_nhi"]["mean"], full["f_nhi"]["mean"])
     assert not np.allclose(part["delta"]["mean"], full["delta"]["mean"])
 
@@ -297,9 +300,11 @@ def test_target_norm_no_val_leak(tmp_path):
     train_idx = np.where(~val)[0]
     norm = fit_target_norm(d, train_idx)
 
-    # stats must equal an independent train-only computation (no val rows used)
+    # stats must equal an independent train-only computation (no val rows used).
+    # P_filt now holds the structured baseline/residual stats; mu_marg is the
+    # marginal per-(c,k) mean of logP over train rows.
     exp_pf = np.nanmean(safe_log(d["P_filt"][train_idx]), axis=0)
-    assert np.allclose(norm["P_filt"]["mean"], exp_pf, equal_nan=True)
+    assert np.allclose(norm["P_filt"]["mu_marg"], exp_pf, equal_nan=True)
     train_blocks = np.unique(d["snap_group_idx"][train_idx])
     exp_f = np.nanmean(safe_log(d["snap_f_nhi"][train_blocks]), axis=0)
     assert np.allclose(norm["f_nhi"]["mean"], exp_f, equal_nan=True)
@@ -313,9 +318,16 @@ def test_target_norm_no_val_leak(tmp_path):
     d2["snap_f_nhi"][train_only_blocks] *= 1e6
     d2["snap_dNdX"][train_only_blocks] *= 1e6
     norm2 = fit_target_norm(d2, train_idx)
-    for ch in ("f_nhi", "dndx", "P_filt", "delta"):
+    for ch in ("f_nhi", "dndx", "delta"):
         assert np.allclose(norm[ch]["mean"], norm2[ch]["mean"], equal_nan=True), ch
         assert np.allclose(norm[ch]["std"], norm2[ch]["std"], equal_nan=True), ch
+    # P_filt structured stats: marginal + cosmo-scale unchanged by val corruption
+    for stat in ("mu_marg", "sig_marg", "sig_cosmo"):
+        assert np.allclose(norm["P_filt"][stat], norm2["P_filt"][stat], equal_nan=True), stat
+    # the per-cell means dict is over the SAME train cells with the SAME values
+    assert set(norm["P_filt"]["cell_mean"]) == set(norm2["P_filt"]["cell_mean"])
+    for cid, cm in norm["P_filt"]["cell_mean"].items():
+        assert np.allclose(cm, norm2["P_filt"]["cell_mean"][cid], equal_nan=True), cid
 
 
 def test_fnhi_zero_bin_floor_is_bounded_and_invertible(tmp_path):
@@ -386,3 +398,112 @@ def test_fnhi_zero_bin_masked_out_of_norm_and_loss(tmp_path):
     for a, c in zip(jax.tree_util.tree_leaves(eqx.filter(g0, eqx.is_array)),
                     jax.tree_util.tree_leaves(eqx.filter(g1, eqx.is_array))):
         assert jnp.array_equal(a, c)
+
+
+# ---------------------------------------------------------------------------
+# Phase-2b normalization REDESIGN: θ-blind baseline + σ_cosmo-whitened residual.
+# ---------------------------------------------------------------------------
+
+def test_cell_id_groups_same_z_alpha(tmp_path):
+    """cell_id encodes (round(z,4), alpha_idx): two rows share a cell iff same
+    rounded z AND same alpha_idx; distinct (z,α) -> distinct ids."""
+    d = _load_fixture(tmp_path, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=8)
+    cid = cell_id(d)
+    R = len(d["z_grid"])
+    assert cid.shape == (R,)
+    # n distinct cells == n distinct (round(z,4), alpha_idx) pairs
+    pairs = set(zip(np.round(d["z_grid"], 4).tolist(), d["alpha_idx"].tolist()))
+    assert len(np.unique(cid)) == len(pairs)
+    # rows with the same (z,α) get the same id; different (z,α) differ
+    for i in range(R):
+        for j in range(R):
+            same = (round(float(d["z_grid"][i]), 4) == round(float(d["z_grid"][j]), 4)
+                    and d["alpha_idx"][i] == d["alpha_idx"][j])
+            assert (cid[i] == cid[j]) == same
+
+
+def test_residual_target_unit_variance(tmp_path):
+    """REDESIGN core claim: the σ_cosmo-whitened residual target has ~O(1) std (the
+    re-whitening works) and sig_cosmo < sig_marg per (c,k) (the burial factor — the
+    cosmology signal is a small slice of the marginal spread)."""
+    d = _load_fixture(tmp_path, n_sims=6, snaps_per_sim=2, n_alpha=4, n_k=8)
+    R = d["x"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    pf = norm["P_filt"]
+    # pf computed standalone must match the one inside fit_target_norm
+    assert np.allclose(pf["sig_cosmo"],
+                       fit_baseline_residual_norm(d, np.arange(R))["sig_cosmo"],
+                       equal_nan=True)
+    b = make_batch(d, np.arange(R), norm)
+    tpr = np.asarray(b["t_p_resid"])
+    fin = np.isfinite(tpr)
+    std = np.nanstd(tpr[fin])
+    # ~unit variance: O(1), within a generous band (the fixture is random, not
+    # physical, but the whitening still pins it to ~1).
+    assert 0.2 < std < 5.0, std
+    # sig_cosmo < sig_marg per (c,k) wherever there is genuine within-cell spread
+    # (excludes the neutral sig_cosmo==1 fallback bins with no cosmology signal).
+    sc, sm = pf["sig_cosmo"], pf["sig_marg"]
+    real = (sc != 1.0) & np.isfinite(sm) & (sm > 1e-9)
+    assert real.any()
+    assert np.all(sc[real] < sm[real] + 1e-9)
+    # median burial ratio < 1 (sig_cosmo is a slice of sig_marg)
+    ratio = sc[real] / sm[real]
+    assert np.median(ratio) < 1.0
+
+
+def test_cell_mean_covers_all_cells_under_loso(tmp_path):
+    """Under LOSO every VAL row's (z,τ₀)-cell exists in the TRAIN cells (LOSO holds
+    out SIMS, not cells), so make_batch never has to fall back to mu_marg."""
+    d = _load_fixture(tmp_path, n_sims=8, snaps_per_sim=2, n_alpha=4, n_k=8)
+    for fold in range(8):
+        tr, va, ho = make_splits(d, fold, n_folds=8, holdout_frac=0.15)
+        pf = fit_baseline_residual_norm(d, tr)
+        train_cells = set(pf["cell_mean"].keys())
+        val_cells = set(int(c) for c in cell_id(d, va))
+        assert val_cells <= train_cells, (fold, val_cells - train_cells)
+
+
+def test_reconstruction_roundtrip(tmp_path):
+    """REDESIGN: given t_p_base, t_p_resid (built from a known logP) and the stats,
+    reconstruct_P_filt / untransform_prediction recover the original LINEAR P_filt to
+    ~1e-10. Pins logP̂ = (m̂·sig_marg+mu_marg) + sig_cosmo·r̂ -> exp as the exact
+    inverse of make_batch's split."""
+    d = _load_fixture(tmp_path, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=8)
+    R = d["x"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    idx = np.arange(R)
+    b = make_batch(d, idx, norm)
+    # direct reconstruct_P_filt
+    P_rt = reconstruct_P_filt(b["t_p_base"], b["t_p_resid"], norm["P_filt"])
+    ok = np.isfinite(d["P_filt"][idx])
+    assert np.allclose(P_rt[ok], d["P_filt"][idx][ok], atol=1e-10, rtol=1e-10)
+    # via untransform_prediction (the inference entry point)
+    phys = untransform_prediction(
+        {"P_filt_base": b["t_p_base"], "P_filt_resid": b["t_p_resid"]}, norm)
+    assert np.allclose(phys["P_filt"][ok], d["P_filt"][idx][ok], atol=1e-10, rtol=1e-10)
+
+
+def test_loso_assert_fires_off_cells():
+    """fit_baseline_residual_norm asserts every cell has a train sim under LOSO.
+    Here we feed a NON-LOSO split (a whole cell missing from train) and confirm the
+    cell_mean dict simply omits it (make_batch then warns + falls back to mu_marg).
+    This pins the documented fallback contract."""
+    import warnings as _w
+    import tempfile, os
+    from tests.emulator._fixture import write_synthetic_cache
+    from hcd_analysis.emulator.data import load_cache
+    p = os.path.join(tempfile.mkdtemp(), "obs.h5")
+    write_synthetic_cache(p, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=8)
+    d = load_cache(p)
+    cid = cell_id(d)
+    # train = all rows EXCEPT one whole cell; val = that cell -> not in train_cells
+    target_cell = int(cid[0])
+    train_idx = np.where(cid != target_cell)[0]
+    val_idx = np.where(cid == target_cell)[0]
+    norm = fit_target_norm(d, train_idx)
+    assert target_cell not in norm["P_filt"]["cell_mean"]
+    with _w.catch_warnings(record=True) as rec:
+        _w.simplefilter("always")
+        make_batch(d, val_idx, norm)
+    assert any("fell back to mu_marg" in str(w.message) for w in rec)

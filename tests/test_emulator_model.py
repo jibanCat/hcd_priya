@@ -1,7 +1,8 @@
 import jax, jax.numpy as jnp, equinox as eqx
-from hcd_analysis.emulator.model import Encoder, HeadA, HeadB, Emulator, structural_tier_p
+from hcd_analysis.emulator.model import (
+    Encoder, HeadA, HeadB, BaselineHead, Emulator, structural_tier_p)
 from hcd_analysis.emulator.model import masked_mse
-from hcd_analysis.emulator.model import joint_loss
+from hcd_analysis.emulator.model import joint_loss, p_resid_loss
 from hcd_analysis.emulator.model import svd_basis_init
 
 
@@ -64,7 +65,8 @@ def test_headB_outputs_and_structural_tier_p():
     hb = HeadB(latent=64, n_k=8, key=key)
     lat = jnp.zeros(64); tau0 = jnp.array(0.3)
     out = hb(lat, tau0)
-    assert out["P_filt"].shape == (4, 8)
+    # REDESIGN: HeadB's P_filt output is now the residual r̂ (key P_filt_resid).
+    assert out["P_filt_resid"].shape == (4, 8)
     assert out["delta"].shape == (3, 8)
     w = jnp.array([0.7, 0.18, 0.07, 0.05]); P_filt_lin = jnp.ones((4, 8))
     tp = structural_tier_p(w, P_filt_lin)
@@ -76,7 +78,8 @@ def test_emulator_endtoend_runs():
     key = jax.random.PRNGKey(2)
     m = Emulator(in_dim=10, n_k=8, key=key)
     pred = m(jnp.zeros(10), tau0=jnp.array(0.3))
-    assert set(pred) >= {"f_nhi", "dndx", "P_filt", "delta"}
+    # REDESIGN: P_filt is split into P_filt_base (θ-blind) + P_filt_resid (residual).
+    assert set(pred) >= {"f_nhi", "dndx", "P_filt_base", "P_filt_resid", "delta"}
 
 
 def test_emulator_vmap_over_tau0_and_structural_grad():
@@ -93,13 +96,14 @@ def test_emulator_vmap_over_tau0_and_structural_grad():
     X = jnp.ones((5, 10))
     T = jnp.linspace(0.1, 0.5, 5)  # shape (5,), one scalar tau0 per row
     pred = jax.vmap(lambda x, t: m(x, t))(X, T)
-    assert pred["P_filt"].shape == (5, 4, 6)
+    assert pred["P_filt_resid"].shape == (5, 4, 6)
+    assert pred["P_filt_base"].shape == (5, 4, 6)
     assert pred["delta"].shape == (5, 3, 6)
     assert pred["f_nhi"].shape == (5, 30)
-    assert pred["P_filt"].dtype == jnp.float64
+    assert pred["P_filt_resid"].dtype == jnp.float64
     # batched matches per-row eager (no silent shape/broadcast corruption)
     eager0 = m(X[0], T[0])
-    assert jnp.allclose(pred["P_filt"][0], eager0["P_filt"])
+    assert jnp.allclose(pred["P_filt_resid"][0], eager0["P_filt_resid"])
 
     # (b) structural_tier_p: batched einsum == manual loop; grad finite on both args
     w = jax.random.uniform(jax.random.PRNGKey(6), (5, 4))
@@ -193,10 +197,12 @@ def test_masked_mse_batched_broadcast_jit_and_double_grad():
 def test_joint_loss_scalar_finite_and_grads_finite():
     key = jax.random.PRNGKey(3)
     m = Emulator(in_dim=10, n_k=8, key=key)
+    _tpf = jnp.where(jnp.arange(8) < 6, 1.0, jnp.nan)[None,None,:]*jnp.ones((2,4,8))
     batch = {
         "x": jnp.zeros((2,10)), "tau0": jnp.array([0.3, 0.5]),
         "t_f_nhi": jnp.zeros((2,30)), "t_dndx": jnp.zeros((2,3)),
-        "t_P_filt": jnp.where(jnp.arange(8) < 6, 1.0, jnp.nan)[None,None,:]*jnp.ones((2,4,8)),
+        "t_p_base": _tpf,
+        "t_p_resid": _tpf,
         "t_delta": jnp.zeros((2,3,8)),
         "t_f_nhi_mask": jnp.ones((2,30), bool),
         "t_dndx_mask": jnp.ones((2,3), bool),
@@ -236,21 +242,82 @@ def test_headB_n_k_static_field_serialise_roundtrip():
     assert m2.head_b.n_k == 8
     x = jnp.ones((3, 10)); t = jnp.linspace(0.1, 0.5, 3)
     p1 = jax.vmap(m)(x, t); p2 = jax.vmap(m2)(x, t)
-    for kk in ("f_nhi", "dndx", "P_filt", "delta"):
+    for kk in ("f_nhi", "dndx", "P_filt_base", "P_filt_resid", "delta"):
         assert jnp.array_equal(p1[kk], p2[kk])
 
 
 def test_emulator_vmap_equals_python_loop_all_heads():
     # vmap(model) over a batch must equal a python loop row-by-row for EVERY head
-    # (no leading-axis bug in Head B's reshape(7, n_k) / atleast_1d(tau0) path).
+    # (no leading-axis bug in Head B's reshape(7, n_k) / atleast_1d(tau0) path,
+    # nor in the BaselineHead's z=x[...,9] indexing).
     key = jax.random.PRNGKey(17)
     m = Emulator(in_dim=10, n_k=8, key=key)
     x = jax.random.normal(jax.random.PRNGKey(18), (4, 10))
     t = jnp.linspace(0.05, 0.6, 4)
     pv = jax.vmap(m)(x, t)
-    for kk in ("f_nhi", "dndx", "P_filt", "delta"):
+    for kk in ("f_nhi", "dndx", "P_filt_base", "P_filt_resid", "delta"):
         loop = jnp.stack([m(x[i], t[i])[kk] for i in range(4)])
         assert jnp.allclose(pv[kk], loop, atol=0, rtol=0) or jnp.allclose(pv[kk], loop)
+
+
+def test_baseline_head_is_theta_blind():
+    # REDESIGN: the BaselineHead's P_filt_base output must be EXACTLY blind to the 9
+    # cosmology/IGM params (it takes only z, τ₀ by construction). The Jacobian of
+    # P_filt_base wrt the 9 params is exactly zero. (z = x[9], so we differentiate
+    # only the first 9 entries of x.)
+    key = jax.random.PRNGKey(8)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+    z_unit = jnp.array(0.42)
+    tau0 = jnp.array(0.4)
+
+    def base_of_theta(theta9):
+        x = jnp.concatenate([theta9, jnp.atleast_1d(z_unit)])
+        return m(x, tau0)["P_filt_base"]
+
+    theta0 = jnp.linspace(0.1, 0.9, 9)
+    J = jax.jacfwd(base_of_theta)(theta0)            # (4, n_k, 9)
+    assert jnp.allclose(J, 0.0, atol=0.0)            # exactly zero: θ never enters the baseline
+    # but the residual head IS θ-dependent (sanity: not also accidentally blind)
+    def resid_of_theta(theta9):
+        x = jnp.concatenate([theta9, jnp.atleast_1d(z_unit)])
+        return m(x, tau0)["P_filt_resid"]
+    Jr = jax.jacfwd(resid_of_theta)(theta0)
+    assert jnp.any(jnp.abs(Jr) > 0.0)                # θ flows into the residual
+    # and the baseline DOES depend on z (it is the (z,τ₀)-conditional mean)
+    Jz = jax.jacfwd(lambda zz: m(
+        jnp.concatenate([theta0, jnp.atleast_1d(zz)]), tau0)["P_filt_base"])(z_unit)
+    assert jnp.any(jnp.abs(Jz) > 0.0)
+
+
+def test_baseline_head_standalone_is_theta_blind_and_shaped():
+    # BaselineHead in isolation: input is ONLY (z, τ₀); output (4, n_k); low-rank ok.
+    key = jax.random.PRNGKey(80)
+    for n_basis in (None, 5):
+        bh = BaselineHead(n_k=8, n_basis=n_basis, key=key)
+        out = bh(jnp.array(0.3), jnp.array(0.5))
+        assert out.shape == (4, 8)
+        # vmap over a batch of (z, τ₀)
+        zb = jnp.linspace(0.1, 0.9, 6); tb = jnp.linspace(0.2, 0.6, 6)
+        ob = jax.vmap(bh)(zb, tb)
+        assert ob.shape == (6, 4, 8)
+        assert ob.dtype == jnp.float64
+
+
+def test_p_resid_loss_is_residual_term_only():
+    # p_resid_loss == the σ_cosmo residual MSE term inside joint_loss (the early-stop
+    # metric). Build a batch where t_p_base != t_p_resid; p_resid_loss must depend ONLY
+    # on the residual head + t_p_resid.
+    key = jax.random.PRNGKey(91)
+    n_k = 8
+    m = Emulator(in_dim=10, n_k=n_k, key=key)
+    batch = _joint_batch(n_k)
+    base_loss = float(p_resid_loss(m, batch))
+    # corrupt t_p_base only -> p_resid_loss unchanged
+    b2 = dict(batch); b2["t_p_base"] = batch["t_p_base"] + 7.0
+    assert float(p_resid_loss(m, b2)) == base_loss
+    # corrupt t_p_resid -> p_resid_loss DOES change
+    b3 = dict(batch); b3["t_p_resid"] = jnp.zeros_like(batch["t_p_resid"])
+    assert float(p_resid_loss(m, b3)) != base_loss
 
 
 def test_headA_outputs_are_tau0_invariant_by_gradient():
@@ -274,11 +341,13 @@ def test_headA_outputs_are_tau0_invariant_by_gradient():
 
 def _lowrank_batch(n_k):
     """joint_loss batch for n_basis tests (same shapes as the dense joint-loss test)."""
+    _tpf = (jnp.where(jnp.arange(n_k) < n_k - 2, 1.0, jnp.nan)[None, None, :]
+            * jnp.ones((2, 4, n_k)))
     return {
         "x": jnp.zeros((2, 10)), "tau0": jnp.array([0.3, 0.5]),
         "t_f_nhi": jnp.zeros((2, 30)), "t_dndx": jnp.zeros((2, 3)),
-        "t_P_filt": jnp.where(jnp.arange(n_k) < n_k - 2, 1.0, jnp.nan)[None, None, :]
-        * jnp.ones((2, 4, n_k)),
+        "t_p_base": _tpf,
+        "t_p_resid": _tpf,
         "t_delta": jnp.zeros((2, 3, n_k)),
         "t_f_nhi_mask": jnp.ones((2, 30), bool),
         "t_dndx_mask": jnp.ones((2, 3), bool),
@@ -299,17 +368,18 @@ def test_headB_dense_unchanged():
     assert hb.n_basis is None and hb.p_filt_basis is None
     lat = jnp.zeros(64); tau0 = jnp.array(0.3)
     out = hb(lat, tau0)
-    assert out["P_filt"].shape == (4, n_k)
+    # REDESIGN: P_filt output key is now P_filt_resid (the residual), same shape.
+    assert out["P_filt_resid"].shape == (4, n_k)
     assert out["delta"].shape == (3, n_k)
     # explicit None == default None (same key -> identical weights and outputs)
     out2 = hb_explicit(lat, tau0)
-    assert jnp.array_equal(out["P_filt"], out2["P_filt"])
+    assert jnp.array_equal(out["P_filt_resid"], out2["P_filt_resid"])
     assert jnp.array_equal(out["delta"], out2["delta"])
     # regression vs the literal pre-change computation: single dense Linear,
-    # reshape(7,n_k), split [:4]/[4:].
+    # reshape(7,n_k), split [:4]/[4:] (the arithmetic is byte-for-byte unchanged).
     h = jax.nn.gelu(hb.trunk(jnp.concatenate([lat, jnp.atleast_1d(tau0)])))
     y = hb.out(h).reshape(7, n_k)
-    assert jnp.array_equal(out["P_filt"], y[:4])
+    assert jnp.array_equal(out["P_filt_resid"], y[:4])
     assert jnp.array_equal(out["delta"], y[4:])
 
 
@@ -322,7 +392,7 @@ def test_headB_lowrank_shapes():
     hb_lr = HeadB(latent=64, n_k=n_k, n_basis=n_basis, key=key)
     lat = jnp.zeros(64); tau0 = jnp.array(0.3)
     out = hb_lr(lat, tau0)
-    assert out["P_filt"].shape == (4, n_k)
+    assert out["P_filt_resid"].shape == (4, n_k)
     assert out["delta"].shape == (3, n_k)
     assert hb_lr.p_filt_basis.shape == (n_basis, n_k)
     # output-layer weight+bias param counts
@@ -370,9 +440,10 @@ def test_lowrank_grads_finite_and_jit():
     # forward + vmap over a batch
     x = jnp.ones((2, 10)); t = jnp.array([0.3, 0.5])
     pv = jax.vmap(m)(x, t)
-    assert pv["P_filt"].shape == (2, 4, n_k)
+    assert pv["P_filt_resid"].shape == (2, 4, n_k)
+    assert pv["P_filt_base"].shape == (2, 4, n_k)
     assert pv["delta"].shape == (2, 3, n_k)
-    assert pv["P_filt"].dtype == jnp.float64  # x64 active
+    assert pv["P_filt_resid"].dtype == jnp.float64  # x64 active
     # eqx.filter_value_and_grad(joint_loss) finite (incl. the trainable basis leaf)
     batch = _lowrank_batch(n_k)
     val, grad = eqx.filter_value_and_grad(lambda mm: joint_loss(mm, batch))(m)
@@ -387,7 +458,7 @@ def test_lowrank_grads_finite_and_jit():
     jitted = eqx.filter_jit(joint_loss)(m, batch)
     assert jnp.allclose(eager, jitted)
     # vmap matches a python loop row-by-row (no leading-axis bug in the basis matmul)
-    for kk in ("P_filt", "delta"):
+    for kk in ("P_filt_resid", "P_filt_base", "delta"):
         loop = jnp.stack([m(x[i], t[i])[kk] for i in range(2)])
         assert jnp.allclose(pv[kk], loop)
 
@@ -402,11 +473,11 @@ def test_delta_still_dense_with_basis():
     x = jnp.ones(10); t = jnp.array(0.4)
     out0 = m(x, t)
     assert out0["delta"].shape == (3, n_k)
-    # mutate the basis (P_filt path only) and re-run
+    # mutate HeadB's basis (P_filt residual path only) and re-run
     new_basis = m.head_b.p_filt_basis + 5.0
     m2 = eqx.tree_at(lambda mm: mm.head_b.p_filt_basis, m, new_basis)
     out1 = m2(x, t)
-    assert not jnp.allclose(out0["P_filt"], out1["P_filt"])  # P_filt DID change
+    assert not jnp.allclose(out0["P_filt_resid"], out1["P_filt_resid"])  # residual DID change
     assert jnp.array_equal(out0["delta"], out1["delta"])     # delta unchanged (dense)
     # and the delta gradient does not flow into the basis
     g = jax.grad(lambda b: m2.__class__.__call__(
@@ -442,7 +513,7 @@ def test_lowrank_serialise_roundtrip_and_structural_composition():
     assert jnp.array_equal(m.head_b.p_filt_basis, m2.head_b.p_filt_basis)
     x = jnp.ones((3, 10)); t = jnp.linspace(0.1, 0.5, 3)
     p1 = jax.vmap(m)(x, t); p2 = jax.vmap(m2)(x, t)
-    for kk in ("f_nhi", "dndx", "P_filt", "delta"):
+    for kk in ("f_nhi", "dndx", "P_filt_base", "P_filt_resid", "delta"):
         assert jnp.array_equal(p1[kk], p2[kk])
 
     # deserialising into a wrong-n_basis (and dense) skeleton must raise, never silently load
@@ -456,16 +527,18 @@ def test_lowrank_serialise_roundtrip_and_structural_composition():
             raised = True
         assert raised
 
-    # (b) structural_tier_p contract on the low-rank LINEAR P_filt output
-    pf_lin = jnp.exp(p1["P_filt"])                      # (3,4,n_k) untransformed linear
+    # (b) structural_tier_p contract holds on any (3,4,n_k) LINEAR-shaped P_filt; the
+    # low-rank residual head feeds the reconstruction downstream, so we pin the einsum
+    # identity on exp(P_filt_resid) (a stand-in linear (4,n_k) array of the right shape).
+    pf_lin = jnp.exp(p1["P_filt_resid"])                # (3,4,n_k) shape contract
     w = jnp.ones((3, 4))
     tp = structural_tier_p(w, pf_lin)
     assert tp.shape == (3, n_k)
     assert jnp.allclose(tp, pf_lin.sum(axis=1))         # all-ones w_c -> sum over classes
-    # grad flows finitely back through the basis via the structural sum
+    # grad flows finitely back through HeadB's basis via the structural sum
     def struct_loss(b):
         mm = eqx.tree_at(lambda z: z.head_b.p_filt_basis, m, b)
-        pf = jnp.exp(jax.vmap(mm)(x, t)["P_filt"])
+        pf = jnp.exp(jax.vmap(mm)(x, t)["P_filt_resid"])
         return structural_tier_p(w, pf).sum()
     gb = jax.grad(struct_loss)(m.head_b.p_filt_basis)
     assert jnp.all(jnp.isfinite(gb)) and jnp.any(gb != 0.0)
@@ -477,17 +550,17 @@ def test_lowrank_serialise_roundtrip_and_structural_composition():
 # ---------------------------------------------------------------------------
 
 def test_structural_identity_through_transform_roundtrip(tmp_path):
-    """A2: the transform/inverse COMPOSITION preserves the structural identity
-    the spec leans on. Take a cache row's LINEAR P_filt (4,K) and its w_c;
-    transform to the A1 target space (safe_log + apply_norm), invert back
-    (invert_norm + exp, as untransform_prediction does), and confirm
+    """A2 (REDESIGN): the baseline+residual transform/inverse COMPOSITION preserves
+    the structural identity the spec leans on. Take a cache row's LINEAR P_filt (4,K)
+    and its w_c; build the baseline/residual targets via make_batch, reconstruct
+    LINEAR P_filt (reconstruct_P_filt, as untransform_prediction does), and confirm
     structural_tier_p(w_c, recovered linear P_filt) reproduces the cache's
-    einsum(w_c, linear P_filt) to ~1e-10. (NOT a trained-model claim — this
-    pins the transform composition on cache arrays.)"""
+    einsum(w_c, linear P_filt) to ~1e-10. (NOT a trained-model claim — this pins the
+    transform composition on cache arrays.)"""
     import numpy as np
     from tests.emulator._fixture import write_synthetic_cache
     from hcd_analysis.emulator.data import (
-        load_cache, fit_target_norm, safe_log, apply_norm, invert_norm,
+        load_cache, fit_target_norm, make_batch, reconstruct_P_filt,
     )
     path = tmp_path / "obs.h5"
     write_synthetic_cache(path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
@@ -502,9 +575,9 @@ def test_structural_identity_through_transform_roundtrip(tmp_path):
     P_lin = d["P_filt"][row]                          # (4,K) LINEAR
     w_c = d["w_c_cache"][row]                          # (4,)
 
-    # forward to the A1 target space, then invert (untransform_prediction style)
-    t = apply_norm(safe_log(P_lin), norm["P_filt"])    # standardized log
-    P_lin_rt = np.exp(invert_norm(t, norm["P_filt"]))  # back to linear
+    # forward to the baseline/residual target space, then reconstruct (untransform style)
+    b = make_batch(d, np.array([row]), norm)
+    P_lin_rt = reconstruct_P_filt(b["t_p_base"][0], b["t_p_resid"][0], norm["P_filt"])
 
     cache_tier_p = np.einsum("c,ck->k", w_c, P_lin)    # cache structural total
     rt_tier_p = np.asarray(structural_tier_p(jnp.asarray(w_c), jnp.asarray(P_lin_rt)))
@@ -515,11 +588,13 @@ def test_structural_identity_through_transform_roundtrip(tmp_path):
 
 def _joint_batch(n_k=8):
     """A standardized synthetic joint-loss batch (Head-A masks present)."""
+    _tpf = (jnp.where(jnp.arange(n_k) < n_k - 2, 1.0, jnp.nan)[None, None, :]
+            * jnp.ones((2, 4, n_k)))
     return {
         "x": jnp.zeros((2, 10)), "tau0": jnp.array([0.3, 0.5]),
         "t_f_nhi": jnp.zeros((2, 30)), "t_dndx": jnp.zeros((2, 3)),
-        "t_P_filt": jnp.where(jnp.arange(n_k) < n_k - 2, 1.0, jnp.nan)[None, None, :]
-        * jnp.ones((2, 4, n_k)),
+        "t_p_base": _tpf,
+        "t_p_resid": _tpf,
         "t_delta": jnp.zeros((2, 3, n_k)),
         "t_f_nhi_mask": jnp.ones((2, 30), bool),
         "t_dndx_mask": jnp.ones((2, 3), bool),
@@ -574,7 +649,8 @@ def test_uniform_term_w_terms_comparable():
         "tau0": jnp.array(rng.uniform(0.1, 0.6, 4)),
         "t_f_nhi": jnp.array(rng.standard_normal((4, 30))),
         "t_dndx": jnp.array(rng.standard_normal((4, 3))),
-        "t_P_filt": jnp.array(rng.standard_normal((4, 4, n_k))),
+        "t_p_base": jnp.array(rng.standard_normal((4, 4, n_k))),
+        "t_p_resid": jnp.array(rng.standard_normal((4, 4, n_k))),
         "t_delta": jnp.array(rng.standard_normal((4, 3, n_k))),
         "t_f_nhi_mask": jnp.ones((4, 30), bool),
         "t_dndx_mask": jnp.ones((4, 3), bool),
@@ -585,14 +661,16 @@ def test_uniform_term_w_terms_comparable():
     }
     preds = jax.vmap(m)(batch["x"], batch["tau0"])
     m3 = batch["mask"][:, None, :]
+    mask4 = m3 & jnp.ones_like(batch["t_p_resid"], bool)
     terms = {
         "f_nhi": masked_mse(preds["f_nhi"], batch["t_f_nhi"], batch["t_f_nhi_mask"],
                             weight=batch["inv_nalpha"][:, None]),
         "dndx": masked_mse(preds["dndx"], batch["t_dndx"], batch["t_dndx_mask"],
                            weight=batch["inv_nalpha"][:, None]),
-        "P_filt": masked_mse(preds["P_filt"], batch["t_P_filt"],
-                             m3 & jnp.ones_like(batch["t_P_filt"], bool),
+        "p_base": masked_mse(preds["P_filt_base"], batch["t_p_base"], mask4,
                              weight=batch["inv_nc"][:, :, None]),
+        "p_resid": masked_mse(preds["P_filt_resid"], batch["t_p_resid"], mask4,
+                              weight=batch["inv_nc"][:, :, None]),
         "delta": masked_mse(preds["delta"], batch["t_delta"],
                             m3 & jnp.ones_like(batch["t_delta"], bool),
                             weight=batch["inv_nc"][:, 1:, None]),
@@ -602,9 +680,9 @@ def test_uniform_term_w_terms_comparable():
     # within ~1 order of magnitude: max/min ratio < 10
     assert float(jnp.max(vals) / jnp.min(vals)) < 10.0
 
-    # default term_w is uniform and meanF-free: passing only the four uniform
+    # default term_w is uniform and meanF-free: passing only the five uniform
     # weights must reproduce the default-arg behaviour exactly (no missing key).
     default = joint_loss(m, batch)
-    explicit = joint_loss(m, batch,
-                          term_w={"f_nhi": 1.0, "dndx": 1.0, "P_filt": 1.0, "delta": 1.0})
+    explicit = joint_loss(m, batch, term_w={"f_nhi": 1.0, "dndx": 1.0,
+                                            "p_base": 1.0, "p_resid": 1.0, "delta": 1.0})
     assert jnp.array_equal(default, explicit)

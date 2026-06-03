@@ -80,8 +80,11 @@ def fold_resid_neff(d, model, val_idx, norm_stats, z_band_of_row, n_bands):
     x = jnp.asarray(d["x"][val_idx])
     tau0 = jnp.asarray(d["tau0"][val_idx])
     pred = jax.vmap(model)(x, tau0)
+    # REDESIGN: reconstruct linear P_filt from the θ-blind baseline + the residual.
     P_pred = untransform_prediction(
-        {"P_filt": np.asarray(pred["P_filt"])}, norm_stats)["P_filt"]   # (Nval,4,K) linear
+        {"P_filt_base": np.asarray(pred["P_filt_base"]),
+         "P_filt_resid": np.asarray(pred["P_filt_resid"])},
+        norm_stats)["P_filt"]                                          # (Nval,4,K) linear
     P_true = d["P_filt"][val_idx]                                        # (Nval,4,K) linear
     mask_k = d["mask"][val_idx]                                          # (Nval,K) finite Tier-P
     coarse = d["coarse_counts"][val_idx].astype(float)                  # (Nval,4)

@@ -80,8 +80,10 @@ def _fig_pred_vs_true(model, d, val_idx, norm_stats, fold, figdir, n_rows=3):
     rows = np.asarray(val_idx)[:n_rows]
     x = jnp.asarray(d["x"][rows]); tau0 = jnp.asarray(d["tau0"][rows])
     pred = jax.vmap(model)(x, tau0)
-    # invert standardized-log P_filt -> linear
-    P_pred = untransform_prediction({"P_filt": np.asarray(pred["P_filt"])}, norm_stats)["P_filt"]
+    # REDESIGN: reconstruct linear P_filt from the θ-blind baseline + the residual.
+    P_pred = untransform_prediction(
+        {"P_filt_base": np.asarray(pred["P_filt_base"]),
+         "P_filt_resid": np.asarray(pred["P_filt_resid"])}, norm_stats)["P_filt"]
     P_true = d["P_filt"][rows]   # (n,4,K) linear cache
     kf = d["kfkms"][rows]
 
@@ -127,6 +129,9 @@ def main():
     ap.add_argument("--figdir", default="figures/analysis/04_emulator")
     ap.add_argument("--profile", action="store_true",
                     help="single short fold; print device + timing")
+    ap.add_argument("--staged", action="store_true",
+                    help="3-stage training (baseline -> freeze+residual -> joint); "
+                         "early-stop on val residual (cosmology) loss")
     args = ap.parse_args()
 
     print("jax.devices():", jax.devices())
@@ -161,7 +166,7 @@ def main():
     model, norm_stats, history = T.train_fold(
         d, tr, va, n_basis=args.n_basis, lr=args.lr, epochs=args.epochs,
         batch_size=args.batch, seed=args.seed, key=jax.random.PRNGKey(args.seed),
-        patience=args.patience, n_k=n_k,
+        patience=args.patience, n_k=n_k, staged=args.staged,
     )
     train_wall = time.time() - t_train
     n_ep = len(history["train_loss"])

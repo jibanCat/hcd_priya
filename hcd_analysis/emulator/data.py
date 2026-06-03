@@ -204,6 +204,96 @@ def _valid_target_mask(arr):
     return np.isfinite(arr) & (arr > 0)
 
 
+def cell_id(d, idx=None):
+    """Encode each row's (z,τ₀)-cell = (round(z_grid,4), alpha_idx) -> int.
+
+    A "cell" is the conditioning coordinate the baseline head is blind-to-θ over:
+    the SAME (z, τ₀-slope) shared across the 60 cosmologies. Two rows share a cell
+    iff they have the same rounded z_grid AND the same alpha_idx (the τ₀-slope grid
+    index). We pack (z_key, alpha_idx) into a single int64 via a stable lexicographic
+    encoding (z dominates) so cells are comparable/hashable across calls.
+
+    ``idx`` selects rows (default all). Returns an int64 array of shape (len(idx),).
+    """
+    if idx is None:
+        idx = np.arange(len(d["z_grid"]))
+    idx = np.asarray(idx)
+    z_key = np.round(np.asarray(d["z_grid"])[idx], 4)
+    a_idx = np.asarray(d["alpha_idx"])[idx].astype(np.int64)
+    # z grid is discrete (PRIYA zout); map each distinct rounded z to a dense rank
+    # so the packed key is a small, stable integer (round-off-proof vs hashing floats).
+    uniq_z = np.unique(np.round(np.asarray(d["z_grid"]), 4))
+    z_rank = np.searchsorted(uniq_z, z_key).astype(np.int64)   # 0..(n_z-1)
+    n_alpha = int(np.asarray(d["alpha_idx"]).max()) + 1
+    return z_rank * n_alpha + a_idx
+
+
+def fit_baseline_residual_norm(d, train_idx):
+    """Per-(c,k) baseline/residual normalization for P_filt (spec: redesign).
+
+    Decomposes ``logP = safe_log(P_filt)`` (R,4,K) over (z,τ₀)-CELLS into:
+      - ``cell_mean[cell] -> (4,K)`` : the within-cell mean of logP over TRAIN rows
+        (the (z,τ₀)-CONDITIONAL MEAN, ~99.5% of the per-k log-variance).
+      - ``mu_marg, sig_marg (4,K)``  : global per-(c,k) mean/std of logP over train
+        rows (to σ_marg-standardize the BASELINE head output, which targets the
+        cell-mean spectrum).
+      - ``sig_cosmo (4,K)``          : sqrt(mean over cells of the within-cell variance
+        of logP) — a per-(c,k) CONSTANT = the cosmology signal scale (the ~0.4%).
+
+    The residual ``(logP − m[cell]) / sig_cosmo`` is ~unit variance and IS the
+    cosmology signal; the baseline target ``(m[cell] − mu_marg)/sig_marg`` is the
+    σ_marg-standardized cell-mean. All stats are NaN-aware (above-Nyquist NaN bins
+    are ignored, reusing fit_norm's nanmean/nanstd machinery).
+
+    Under LOSO every (z,α) cell has ≥1 train sim (LOSO holds out SIMS, not cells),
+    asserted here. Returns ``norm_stats_pf`` =
+    ``{"mu_marg","sig_marg","sig_cosmo", "cell_mean": {cell_id:(4,K)}}``.
+    """
+    train_idx = np.asarray(train_idx)
+    logP = safe_log(d["P_filt"])                 # (R,4,K); NaN above Nyquist
+    logP_tr = logP[train_idx]                    # (n,4,K)
+
+    # marginal (global) per-(c,k) mean/std over train rows -> standardize baseline head.
+    marg = fit_norm(logP_tr.reshape(len(train_idx), -1),
+                    np.arange(len(train_idx)))
+    shp = logP.shape[1:]                          # (4,K)
+    mu_marg = marg["mean"].reshape(shp)
+    sig_marg = marg["std"].reshape(shp)
+
+    # per-cell mean over train rows + within-cell variance accumulation.
+    cells_tr = cell_id(d, train_idx)
+    cell_mean = {}
+    # within-cell variance: average over cells of Var_within(logP) per (c,k).
+    within_var_sum = np.zeros(shp)                # Σ_cells Var_within (per (c,k))
+    within_var_cnt = np.zeros(shp)                # # cells contributing (per (c,k))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        for cid in np.unique(cells_tr):
+            sel = train_idx[cells_tr == cid]
+            block = logP[sel]                     # (m,4,K)
+            cm = np.nanmean(block, axis=0)        # (4,K) cell mean (NaN where all-NaN)
+            cm = np.where(np.isfinite(cm), cm, mu_marg)  # all-NaN bin -> fall back to mu_marg
+            cell_mean[int(cid)] = cm
+            wv = np.nanvar(block, axis=0)         # within-cell variance (4,K)
+            ok = np.isfinite(wv)
+            within_var_sum += np.where(ok, wv, 0.0)
+            within_var_cnt += ok.astype(float)
+    sig_cosmo = np.sqrt(np.where(within_var_cnt > 0,
+                                 within_var_sum / np.maximum(within_var_cnt, 1),
+                                 0.0))
+    # a (c,k) with no within-cell spread (e.g. a single train sim per cell, or an
+    # empty class) -> sig_cosmo 0; floor to a neutral 1.0 so the residual whitening
+    # never divides by zero (those bins carry no cosmology signal anyway).
+    sig_cosmo = np.where(sig_cosmo >= 1e-12, sig_cosmo, 1.0)
+
+    return {
+        "mu_marg": mu_marg,
+        "sig_marg": sig_marg,
+        "sig_cosmo": sig_cosmo,
+        "cell_mean": cell_mean,
+    }
+
+
 def fit_target_norm(d, train_idx):
     """Per-channel {mean,std} in TRANSFORMED space, TRAIN ROWS ONLY (spec sec.10).
 
@@ -227,7 +317,12 @@ def fit_target_norm(d, train_idx):
     stats = {
         "f_nhi":  fit_norm(fwd("f_nhi")(d["snap_f_nhi"]), train_blocks, f_nhi_valid),
         "dndx":   fit_norm(fwd("dndx")(d["snap_dNdX"]), train_blocks, dndx_valid),
-        "P_filt": fit_norm(fwd("P_filt")(d["P_filt"]), train_idx),
+        # P_filt: the normalization REDESIGN. norm_stats["P_filt"] is the structured
+        # baseline/residual dict (mu_marg, sig_marg, sig_cosmo, cell_mean), NOT the
+        # old flat {mean,std}. The θ-blind baseline head targets the σ_marg-
+        # standardized cell-mean; the residual head targets the σ_cosmo-whitened
+        # within-cell cosmology signal. See fit_baseline_residual_norm.
+        "P_filt": fit_baseline_residual_norm(d, train_idx),
         "delta":  fit_norm(fwd("delta")(d["delta"]), train_idx),
     }
     return stats
@@ -246,8 +341,32 @@ def make_batch(d, idx, norm_stats):
 
     t_f_nhi = apply_norm(safe_log(d["snap_f_nhi"][grp]), norm_stats["f_nhi"])   # (n,30)
     t_dndx = apply_norm(safe_log(d["snap_dNdX"][grp]), norm_stats["dndx"])      # (n,3)
-    t_P_filt = apply_norm(safe_log(d["P_filt"][idx]), norm_stats["P_filt"])     # (n,4,K)
     t_delta = apply_norm(signed_log(d["delta"][idx]), norm_stats["delta"])      # (n,3,K)
+
+    # P_filt normalization REDESIGN: split into the θ-blind BASELINE target
+    # t_p_base (σ_marg-standardized cell-mean) and the σ_cosmo-whitened RESIDUAL
+    # target t_p_resid (the cosmology signal). See fit_baseline_residual_norm.
+    pf = norm_stats["P_filt"]
+    logP = safe_log(d["P_filt"][idx])                                          # (n,4,K)
+    cells = cell_id(d, idx)                                                    # (n,)
+    m_cell = np.empty_like(logP)                                              # (n,4,K) cell-mean per row
+    cell_mean = pf["cell_mean"]
+    n_fallback = 0
+    for r, cid in enumerate(cells):
+        cm = cell_mean.get(int(cid))
+        if cm is None:
+            # Shouldn't happen under LOSO (it holds out SIMS, not cells); fall back
+            # to mu_marg (a zero-cosmology-signal row) and warn.
+            cm = pf["mu_marg"]
+            n_fallback += 1
+        m_cell[r] = cm
+    if n_fallback:
+        warnings.warn(
+            f"make_batch: {n_fallback}/{len(idx)} rows in a cell absent from "
+            f"train_cells; fell back to mu_marg (unexpected under LOSO)",
+            RuntimeWarning)
+    t_p_base = (m_cell - pf["mu_marg"]) / pf["sig_marg"]                        # (n,4,K)
+    t_p_resid = (logP - m_cell) / pf["sig_cosmo"]                              # (n,4,K)
 
     # A4b: Head-A masks = finite AND (cache value > 0). The CDDF/dN/dX structural
     # zeros (e.g. f_nhi bin 0) are safe_log-floored to ~-69; mask them out of the
@@ -274,7 +393,8 @@ def make_batch(d, idx, norm_stats):
         "tau0": d["tau0"][idx].astype(np.float64),
         "t_f_nhi": t_f_nhi.astype(np.float64),
         "t_dndx": t_dndx.astype(np.float64),
-        "t_P_filt": t_P_filt.astype(np.float64),
+        "t_p_base": t_p_base.astype(np.float64),
+        "t_p_resid": t_p_resid.astype(np.float64),
         "t_delta": t_delta.astype(np.float64),
         "t_f_nhi_mask": t_f_nhi_mask.astype(bool),
         "t_dndx_mask": t_dndx_mask.astype(bool),
@@ -285,15 +405,39 @@ def make_batch(d, idx, norm_stats):
     }
 
 
-def untransform_prediction(pred_dict, norm_stats):
-    """Standardized log/arcsinh prediction dict -> physical-space dict.
+def reconstruct_P_filt(P_filt_base, P_filt_resid, pf_stats):
+    """Reconstruct LINEAR P_filt from the two-head outputs (normalization REDESIGN).
 
-    Inverse of the make_batch target transform: invert_norm then the channel's
-    inverse transform (exp / sinh). Used by inference and the A2 end-to-end
-    structural-identity test. Channels absent from pred_dict are skipped.
+    logP̂ = (m̂·sig_marg + mu_marg) + sig_cosmo·r̂, where m̂ = baseline-head output
+    (σ_marg-standardized cell-mean) and r̂ = residual-head output (σ_cosmo-whitened
+    cosmology signal); then exp -> linear P_filt. ``pf_stats`` is the structured
+    P_filt norm dict (mu_marg, sig_marg, sig_cosmo). Differentiable; the only θ
+    dependence is through r̂ (the baseline is θ-blind), so
+    ∂logP̂/∂θ = sig_cosmo·∂r̂/∂θ.
+    """
+    base = np.asarray(P_filt_base)
+    resid = np.asarray(P_filt_resid)
+    logP = (base * pf_stats["sig_marg"] + pf_stats["mu_marg"]) \
+        + pf_stats["sig_cosmo"] * resid
+    return np.exp(logP)
+
+
+def untransform_prediction(pred_dict, norm_stats):
+    """Standardized prediction dict -> physical-space dict.
+
+    For f_nhi/dndx/delta: inverse of make_batch's transform (invert_norm then the
+    channel's inverse exp/sinh). For P_filt (the normalization REDESIGN): supply
+    BOTH ``P_filt_base`` and ``P_filt_resid`` and the structured norm_stats["P_filt"]
+    dict; reconstruction is ``reconstruct_P_filt`` -> linear P_filt under key
+    ``P_filt``. Channels absent from pred_dict are skipped.
     """
     out = {}
+    if "P_filt_base" in pred_dict and "P_filt_resid" in pred_dict:
+        out["P_filt"] = reconstruct_P_filt(
+            pred_dict["P_filt_base"], pred_dict["P_filt_resid"], norm_stats["P_filt"])
     for ch, arr in pred_dict.items():
+        if ch in ("P_filt_base", "P_filt_resid"):
+            continue
         inv = TARGET_TRANSFORMS[ch][1]
         out[ch] = inv(invert_norm(np.asarray(arr), norm_stats[ch]))
     return out
