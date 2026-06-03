@@ -114,15 +114,31 @@ treatment is anchored to literature (Rahmati+2013 self-shielding; Rogers+2018).
 
 ---
 
-## 3. Architecture (Equinox, LF, n_k=172)
+## 3. Architecture (Equinox, LF, n_k=172) — REVISED 2026-06-02 (baseline+residual P_filt)
 
 ```
-params(9) ⊕ z  →  encoder MLP [10 → 256 → 128 → 64]  →  latent (64)
-                                              ├── Head A branch [64 → 64 → 33]   (τ₀-invariant)
-                                              │       → f_nhi[30] + dN/dX[3]
-                                              └── Head B [65 → 256 → 7×172]       (τ₀-dependent)
-                          concat(latent, τ₀) ↗      → 4 filtered class P1D + 3 HCD deltas Δ_c
+params(9) ⊕ z  →  encoder MLP [10 → 256 → 128 → 64]  →  latent (64, encodes θ)
+                                   ├── Head A branch [64 → 64 → 33]   (τ₀-invariant)
+                                   │       → f_nhi[30] + dN/dX[3]
+                                   └── Head B (P1D), two paths:
+  (z, τ₀) ────────────────────────────→ BASELINE head [2 → … → 4·n_basis→4×172]  (θ-BLIND)
+                                   │        → m̂(z,τ₀): the (z,τ₀)-conditional mean log-P1D (the dominant ~99.5%)
+  concat(latent, τ₀) ─────────────────→ RESIDUAL head [65 → 256 → 4·n_basis + 3×172]
+                                            → r̂(θ,z,τ₀): cosmology residual (σ_cosmo units) + 3 HCD Δ_c
+   logP_filt = (m̂·σ_marg + μ_marg) + σ_cosmo·r̂   ⇒   exp   (θ-response = σ_cosmo·∂r̂/∂θ)
 ```
+
+**The normalization redesign (why two P_filt heads).** The cosmology (θ) signal is only ~0.4% of the
+per-k log-variance of P_filt; ~99.5% is the (z,τ₀) variation (which the network gets as INPUTS). A
+single P1D head standardized by the *marginal* σ_k buries θ, so an MSE under-resolves it (held-out
+within-cell θ-tracking corr ~0.80). Fix (Kennedy–O'Hagan structured mean / Δ-learning, **in-network so
+no stored reference / no interpolation**; see `2026-06-02-normalization-fix-research.md`): a **θ-blind
+baseline head** `m̂(z,τ₀)` carries the dominant (z,τ₀)-conditional mean; a **residual head** `r̂(θ,z,τ₀)`
+carries the cosmology signal, trained in **conditional σ_cosmo units** (the within-(z,τ₀)-cell std) so
+the loss budget is cosmology. **VALIDATED:** fold-0 within-cell θ-tracking **0.80 → 0.96**, exact
+reconstruction round-trip (1e-16). Trained **joint (non-staged)** — the 3-stage schedule had a bug
+(stage-1 did not train the baseline head). Absolute per-class RMS now ~6–18% (clean-limited) → a tuning
+step (epochs/capacity) to reach ~1%, not structural.
 
 - **Head A** (latent only, own short branch — decision: separate branch so Head
   B's ~20× gradient volume does not pull the shared encoder off τ₀-invariance):
@@ -141,8 +157,11 @@ params(9) ⊕ z  →  encoder MLP [10 → 256 → 128 → 64]  →  latent (64)
     at low k (the unfiltered DLA can sit below filtered there), so plain log is
     undefined.
 - **Output transforms:** log-space for `f_nhi`, `dN/dX`, the filtered P1Ds;
-  sign-safe for `Δ_c`. Standardise each channel by **training-split** mean/std in
-  the transformed space; store stats in the checkpoint.
+  sign-safe (`arcsinh`) for `Δ_c`. Standardise by **training-split** stats in the
+  transformed space, stored in the checkpoint. **P_filt uses the (z,τ₀)-CONDITIONAL
+  normalization above** (baseline `μ_marg/σ_marg` + residual `σ_cosmo`), NOT a single
+  marginal σ_k — that conditional scaling is what un-buries the cosmology signal.
+  (f_nhi/dN/dX likely need the same per-z conditional treatment — TODO, see §3 note.)
 - **No reserved heteroscedastic slots** (Phase 3); predictive uncertainty is the
   static per-(class,k,z) error vector from k-fold LOSO (§8).
 
