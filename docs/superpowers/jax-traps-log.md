@@ -280,6 +280,76 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
 
 ---
 
+## 14. baseline+residual P_filt redesign: θ-blindness is structural, sig_cosmo=0 div, exp overflow — **GUARDED**
+- **Where:** Phase-2b normalization REDESIGN — `BaselineHead`/`Emulator`/`reconstruct_P_filt`/
+  `fit_baseline_residual_norm` in `hcd_analysis/emulator/{model,data}.py`, HEAD `6098dcf`, JAX-referee pass.
+- **Symptom (if untested):** the redesign splits P_filt into a θ-BLIND baseline `m̂(z,τ₀)` + a residual
+  `r̂(θ,z,τ₀)`, with `logP=(m̂·σ_marg+μ_marg)+σ_cosmo·r̂`. Three real risks: (a) **θ-blindness is only as
+  good as the wiring** — if `BaselineHead` ever saw the latent (which encodes θ), or the Emulator passed a
+  param instead of `z=x[9]`, `∂m̂/∂θ≠0` and the baseline stops being structurally identifiable; the forward
+  shapes stay correct and no test fails. (b) **σ_cosmo=0 division** — `σ_cosmo` = sqrt(mean-over-cells of
+  within-cell variance); a cell with a SINGLE train sim has within-var 0, and an all-NaN (c,k) has 0
+  contributing cells → `σ_cosmo=0` → `t_p_resid=(logP−m)/0 = inf/NaN`. (c) **exp overflow** — the clean
+  class spans logP up to ~9.2 (linear ~1e4); an untrained/large standardized output could overflow `exp`.
+- **Cause:** not JAX-pathological — pure **contract coverage** of the new normalization. Verified by RUNNING
+  (this review): (a) `jax.jacfwd(P_filt_base)` w.r.t. the 9 params is **EXACTLY 0.0** (`all(J==0)`, finite)
+  for BOTH dense and low-rank, and the full `∂(reconstructed logP)/∂θ == σ_cosmo·∂r̂/∂θ` to **max abs diff
+  0.0** — the θ-response flows ONLY through the residual; baseline correctly DOES depend on z/τ₀ (nonzero
+  d/dz, d/dτ₀). `z=x[9]` wiring confirmed (changing a param leaves base EXACTLY unchanged; changing z
+  perturbs it). (b) the `np.where(sig_cosmo>=1e-12, sig_cosmo, 1.0)` floor + `within_var_cnt>0` guard makes
+  a single-sim-per-cell fit (synthetic n_sims=1) produce `σ_cosmo≡1.0` with NO RuntimeWarning escaping and
+  `t_p_resid` finite (max|.|=0, since logP==cell_mean for a lone sim); `nanvar` of a single finite value is
+  0 (not NaN) so it pools as 0, and an all-NaN (c,k) gives NaN var → `ok=False` → excluded. The σ_cosmo/
+  σ_marg (4,K) broadcast over (n,4,K) is correct (trailing-dim). (c) exp is safe by a wide margin — real
+  recon max ~1.7e3; even a 10σ stress (logP≈16.8) → exp 2e7, far below f64 overflow (~709 in the exponent /
+  1.8e308). Reconstruction round-trips to **~1e-15** on the real LF+HR cache (train AND val — LOSO holds out
+  sims, not cells, so no mu_marg fallback fires), `reconstruct_P_filt` grad finite (matches σ_marg·P /
+  σ_cosmo·P exactly), and `structural_tier_p` consumes the LINEAR recon (not log), reproducing cache
+  `P_tier_p` to 5e-16. `n_k`/`n_basis` are STATIC (jit traces once, retraces only on `n_basis` change);
+  serialise round-trips bit-exact and a wrong-`n_basis`/dense skeleton RAISES. NaN-grad double-where trap:
+  the masked-MSE invariant `mask ⊇ NaN(t_p_resid)` HOLDS (all NaN target bins masked out), so `joint_loss`/
+  `p_resid_loss` give all-finite grads even on a batch with above-Nyquist NaN (synthetic n_k=16). NOTE: both
+  PRODUCTION caches (`observables_tau0_lf.h5` n_k=172, `_hr.h5` n_k=525) currently carry NO above-Nyquist
+  NaN bins — the NaN path is exercised only by the synthetic fixture; if a future cache reintroduces Nyquist
+  NaN, the guard is already in place.
+- **Fix:** no code change needed — the guards (θ-blind wiring, σ_cosmo floor, masked-MSE double-where,
+  static fields) are all present and correct. Existing `tests/test_emulator_{model,data}.py` (52) pass.
+- **Lesson:** when a "blind" sub-model's identifiability is STRUCTURAL (it must not see θ), pin it with a
+  `jacfwd==0 EXACTLY` test on the real param axis AND assert the full response equals the intended path
+  (`σ_cosmo·∂r̂/∂θ`) — a forward-shape test certifies neither. A conditional-variance whitening (`σ_cosmo`)
+  needs a single-sim-per-cell test (within-var 0 → div-by-0) with `simplefilter("error")` to catch a leaked
+  RuntimeWarning, not just "looks finite on the production cache."
+
+---
+
+## N. Fourier-feature trunk over-fits the grid → interp/smoothness blow-up — **HIT** (prototype)
+- **Where:** `scripts/proto_continuous_kdecoder.py` (continuous-in-k DeepONet decoder feasibility).
+- **Symptom:** a `φ(k)=MLP(γ(logk))` trunk with γ = bandlimited Fourier features of log-k reconstructs the
+  TRAIN k-bins beautifully (Test A: n_freq=64 → 0.27% fracRMS, ≈ SVD-12 ceiling 0.18%) but, fit to only the
+  KEPT bins, HALLUCINATES between them: Test-B held-out p95 explodes to 30–95% and max to hundreds of percent,
+  and the dense reconstruction oscillates (Test-C TV(dense)/TV(grid) ≈ 8–30, not ≈1). More Fourier frequencies
+  IMPROVE on-grid recon but WORSEN interpolation — the classic aliasing trade-off.
+- **Cause:** a free MLP on Fourier features has NO smoothness prior controlling its value at unobserved k.
+  Per-row least-squares coeffs fit to the kept bins excite the basis's between-bin excursions. Nothing in the
+  data loss penalises wiggle off the training grid. (Distinct from a numerical NaN trap — it is a
+  modelling/identifiability trap that a forward-shape or on-grid-recon test would NOT catch.)
+- **Fix:** add an explicit **curvature smoothness prior** to the fit loss — penalise the mean-square second
+  derivative `∂²φ_i/∂(logk)²` of every basis function on a dense log-k grid (`jnp.diff(Pc, n=2, axis=1)/dlk²`),
+  weight λ≈3e-3; plus a per-row coeff ridge ≈1e-3 to damp the few rows whose tail blows up. This is the learned
+  analogue of the cubic spline's second-derivative-minimising property. With it, Test-B p95 drops to ~1.5–2.3%
+  (≈ spline) and TV ratio → ~1. ALSO bandlimit the Fourier bank to the GLOBAL log-k Nyquist `f_max=(K/2)/L`
+  (≈16.7 cycles/unit-logk for the 172-bin LF grid) — NOT the high-k local Nyquist (~85), which the sparse
+  low-k sampling cannot constrain.
+- **Residual caveat (HONEST):** even regularised, the held-out MAX stays large (~40–80%) but ONLY at the 1–2
+  lowest-k bins, where the LINEAR-k grid gives a factor-~2 jump in log-k (the single widest gap) — the cubic
+  spline's max is also elevated there (~13%). This is a test artefact of holding out the sparsest log-k corner,
+  not a generic interpolation failure; production never holds out the lowest-k bin.
+- **Lesson:** a continuous/implicit decoder (DeepONet trunk, SIREN, neural field) needs a SMOOTHNESS prior
+  (curvature penalty) AND a sampling-honest bandlimit, or it over-fits the training grid and is useless OFF it.
+  Test interpolation to HELD-OUT coordinates and dense-grid total-variation, never just on-grid reconstruction.
+
+---
+
 ## Trap template (append new entries above this line)
 ```
 ## N. <short name> — HIT | GUARDED | WATCH
