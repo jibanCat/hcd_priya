@@ -384,6 +384,43 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
 
 ---
 
+## 20. θ-blind baseline head under-resolves a smooth 2D map with 1 hidden layer — WATCH
+- **Where:** `scripts/feasibility_subpercent.py` (Exp 2), `hcd_analysis/emulator/model.py::BaselineHead`.
+- **Symptom:** the deployed baseline mis-fit (term b) sat at ~0.84·σ_cosmo. Two causes, BOTH needed: (i) the
+  `inv_nc` loss weighting in `joint_loss` shrinks the masked-MSE denominator's effective weight on the baseline
+  term to ~6e-3 (the design's known #13); (ii) even with the loss fixed to a uniform `Σ(weight·mask)`
+  normalization and trained hard, the production `BaselineHead` (a SINGLE hidden layer: `Linear(2,w)->gelu->
+  Linear(w,4·n_basis)`) plateaus at ~0.10·σ_cosmo and will not go lower regardless of width or epochs.
+- **Cause/insight:** the baseline target is the (z,τ₀)→(4,K) cell-mean — a smooth 2-D→high-dim regression on
+  306 points whose SVD rank is ~8 (recon <0.05% in P at rank-8). The REPRESENTATION is trivially low-rank, so the
+  residual ~0.10·σ_cosmo is an OPTIMIZATION/approximation floor of the shallow `(z,τ₀)`-MLP, NOT a rank/loss
+  floor. Going to 3 hidden layers (width 256) collapses (b) to 0.03–0.05·σ_cosmo — below the finite-sim floor
+  (~0.11·σ_cosmo). Nothing JAX-numerical here; it is a capacity/identifiability observation a one-layer head
+  hides.
+- **Fix:** (a) normalize the baseline loss by `Σ(weight·mask)` not the `inv_nc`-shrunk sum; (b) give the baseline
+  head ≥3 hidden layers (or it caps term (b) at ~0.10·σ_cosmo). Verified on fold-0: clean (b) 0.84 -> 0.028,
+  DLA 0.84 -> 0.047 σ_cosmo with d3/w256.
+- **Lesson:** when a "baseline/structured-mean" head is the deployed reference (its error is amplified by the
+  small σ_cosmo), separately verify its REPRESENTATION floor (SVD of the target) AND its head's ACHIEVABLE fit
+  (capacity sweep) — a per-element loss that looks converged (4e-8 here) can still leave the head 20× above its
+  representation floor because a tiny loss in σ_marg units is large in σ_cosmo units.
+
+## 21. residual-head (a) is finite-sim generalization-limited, not capacity-limited — WATCH
+- **Where:** `scripts/feasibility_subpercent.py` (Exp 3): encoder + `HeadB` residual path, perfect (empirical)
+  baseline, trained hard on fold-0.
+- **Symptom:** residual-head fit (a)=RMS(r̂−t_resid)/σ_cosmo reaches TRAIN 0.07–0.10 but VAL (held-out sims)
+  0.16 (clean/LLS), 0.21 (subDLA), 0.57 (DLA). Sweeping rank (8/12/24), weight decay (1e-3..1e-2) and epochs
+  barely moves the val number (clean stays ~0.155–0.16).
+- **Cause/insight:** the residual head maps 9-D cosmology θ → within-cell signal, learned from only ~52 train
+  cosmologies; the val (a) is the LOSO held-out-sim generalization gap = the irreducible finite-60-sim floor, NOT
+  an under-regularization or capacity artifact (it is robust to wd/rank). This is the binding constraint on
+  sub-percent absolute accuracy (deployed fracP ≈ √((a)²+(b)²)·σ_cosmo[logP], σ_cosmo[logP]≈0.077–0.099/class).
+- **Lesson:** for an emulator trained on few simulations, separate the TRAIN fit floor (representation/optimization)
+  from the VAL floor (finite-sample generalization) by reporting BOTH on a LOSO held-out-sim split. Do not chase
+  the train floor with capacity — the deployed error is the val floor, set by the number of sims.
+
+---
+
 ## Trap template (append new entries above this line)
 ```
 ## N. <short name> — HIT | GUARDED | WATCH
