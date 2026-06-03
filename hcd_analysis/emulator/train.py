@@ -33,8 +33,12 @@ def _fit_norm(d, train_idx):
     (fit_baseline_residual_norm). make_batch needs BOTH to emit t_p_base/t_p_resid
     (the normalization REDESIGN); with only fit_target_norm it silently falls back
     to the old global-sigma P_filt path."""
-    return {**fit_target_norm(d, train_idx),
-            **fit_baseline_residual_norm(d, train_idx)}
+    ns = fit_target_norm(d, train_idx)
+    # REDESIGN: norm_stats["P_filt"] must be the STRUCTURED baseline/residual dict
+    # (cell_mean, mu_marg, sig_marg, sig_cosmo) -- both make_batch (pf=norm_stats
+    # ["P_filt"]) and reconstruct_P_filt read it there. Overwrites the old {mean,std}.
+    ns["P_filt"] = fit_baseline_residual_norm(d, train_idx)
+    return ns
 
 
 def make_optimizer(lr=1e-3, steps=None, weight_decay=1e-4):
