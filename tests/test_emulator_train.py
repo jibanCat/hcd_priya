@@ -163,8 +163,12 @@ def test_padded_batch_matches_unpadded(tmp_path):
     batch_size = 16
     ragged = _to_jnp_batch(make_batch(d, idx, norm))
     padded = _pad_batch(ragged, batch_size)
-    # fixed leading shape on every array
+    # fixed leading shape on every per-row ARRAY (n_cells is a STATIC python-int
+    # scalar segment count — no leading batch dim to pad, carried through as-is).
     for k, v in padded.items():
+        if k == "n_cells":
+            assert isinstance(v, int)
+            continue
         assert np.asarray(v).shape[0] == batch_size, k
     assert len(ragged["x"]) == 7
 
@@ -473,3 +477,48 @@ def test_aggregate_error_vector_shape_and_dla_flag():
     assert ev["dla_shot_flag"].shape == (8,)
     assert ev["dla_shot_flag"][6] and ev["dla_shot_flag"][7]
     assert not ev["dla_shot_flag"][0]
+
+
+def test_train_fold_finalized_recipe_runs_with_debias_and_datarange(tmp_path):
+    """FINALIZED RECIPE: train_fold with w_coh>0 (FLAT coherent de-bias) AND
+    datarange=True (soft out-of-range down-weight) runs end-to-end, logs the new
+    val_coh_loss history (finite, since w_coh>0), early-stops, and returns a model
+    whose val (resid + w_coh·coh) early-stop metric equals the history minimum."""
+    from hcd_analysis.emulator.data import make_batch, edge_emphasis_k_weight
+    from hcd_analysis.emulator.model import p_resid_loss, coherent_resid_loss
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+    kw = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=3.0, lowk_extra=2.0)
+    term_w = {"f_nhi": 1., "dndx": 1., "p_base": 1., "p_resid": 8., "delta": 1.}
+    model, norm, hist = train_fold(
+        d, tr, va, n_basis=N_K, lr=1e-2, epochs=40, batch_size=8, seed=0,
+        key=jax.random.PRNGKey(0), patience=6, term_w=term_w, k_weight=kw,
+        w_coh=80.0, datarange=True, weight_decay=3e-4,
+        early_stop_metric="auto", prefit_baseline_epochs=200)
+    _check_history(hist)
+    # val_coh_loss must be present AND finite (w_coh>0 activates it)
+    assert "val_coh_loss" in hist and len(hist["val_coh_loss"]) >= 1
+    assert np.all(np.isfinite(hist["val_coh_loss"]))
+    # the early-stop metric is (val_resid + w_coh·val_coh) when frozen + w_coh>0;
+    # recompute on the SAME batch flavor the loop used (k_weight + datarange) and
+    # confirm the returned (best) model sits at the history minimum of that metric.
+    val_batch = _to_jnp_batch(make_batch(d, va, norm, k_weight=kw, datarange=True))
+    got = (float(p_resid_loss(model, val_batch, use_k_weight=True, use_datarange=True))
+           + 80.0 * float(coherent_resid_loss(model, val_batch)))
+    hist_metric = hist["val_resid_loss"] + 80.0 * hist["val_coh_loss"]
+    assert abs(got - float(np.min(hist_metric))) <= 1e-6
+
+
+def test_train_fold_w_coh_zero_matches_no_debias(tmp_path):
+    """w_coh=0 (default) leaves val_coh_loss NaN (the term is skipped) and the model
+    trains exactly as before — back-compat for the no-de-bias path."""
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+    model, norm, hist = train_fold(
+        d, tr, va, n_basis=N_K, lr=1e-2, epochs=20, batch_size=8, seed=0,
+        key=jax.random.PRNGKey(0), patience=5, prefit_baseline_epochs=200)
+    assert "val_coh_loss" in hist
+    assert np.all(np.isnan(hist["val_coh_loss"]))   # w_coh=0 -> coh not computed
+    assert hist["train_loss"][-1] < hist["train_loss"][0]

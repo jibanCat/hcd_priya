@@ -555,6 +555,31 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
 
 ---
 
+## 25. coherent de-bias `num_segments` static count must be a PYTHON INT in the batch, not a jnp leaf — **HIT**
+- **Where:** finalizing the LF backbone — productionizing the FLAT coherent de-bias term
+  (`model.coherent_debias_term`, wired through `joint_loss(w_coh)` / `train_fold`).
+  `make_batch` emits the per-row `cell` id AND `n_cells` (= n_z·n_alpha, the
+  `jax.ops.segment_sum(..., num_segments=n_cells)` count).
+- **Symptom:** `int(batch["n_cells"])` raised `ConcretizationTypeError: Abstract tracer
+  value encountered where concrete value is expected` the moment the de-bias loss ran
+  inside the jit'd `train_step_partitioned`. The traceback fingered a `dynamic_nodonate`
+  batch leaf — `n_cells` had been turned into a traced `int64[]` array by `_to_jnp_batch`.
+- **Cause:** `num_segments` sets the segment-sum OUTPUT SHAPE, so it must be a STATIC
+  python int at trace time. `_to_jnp_batch` blindly `jnp.asarray`'d every batch value,
+  so `n_cells` became a traced array leaf of the jit'd step — and `int(tracer)` is illegal
+  inside jit (the value isn't known until runtime).
+- **Fix:** keep `n_cells` a PLAIN PYTHON INT in the batch dict (special-case it in BOTH
+  `_to_jnp_batch` and `_pad_batch` — `int(v)`, never `jnp.asarray`). `eqx.filter_jit`
+  partitions on `eqx.is_array`; a python int is not an array, so it lands in the STATIC
+  (hashable) side and `coherent_debias_term`'s `int(batch["n_cells"])` is a no-op concrete
+  read. (A numpy/jnp 0-d scalar also fails `eqx.filter`'s array test? — no: jnp 0-d IS an
+  array; numpy 0-d IS an array too. Only a bare python int is reliably static.)
+- **Lesson:** any quantity that sets an array SHAPE inside jit (segment counts, reshape
+  dims, slice lengths) must reach the traced fn as a STATIC python scalar, not a batch
+  array leaf. When a batch dict flows through a generic `{k: jnp.asarray(v)}` converter,
+  special-case the shape-setting scalars to stay python ints (or pass them as separate
+  static args), or jit will trace them and `int(...)`/`.reshape(...)` will raise.
+
 ## Trap template (append new entries above this line)
 ```
 ## N. <short name> — HIT | GUARDED | WATCH

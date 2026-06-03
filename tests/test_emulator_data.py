@@ -548,3 +548,79 @@ def test_loso_assert_fires_off_cells():
         _w.simplefilter("always")
         make_batch(d, val_idx, norm)
     assert any("fell back to mu_marg" in str(w.message) for w in rec)
+
+
+# --- FINALIZED RECIPE: cell/n_cells emission + data-range scoping --------------
+
+def test_make_batch_emits_cell_and_n_cells(tmp_path):
+    """make_batch must carry the global (z,τ₀)-cell id per row + the STATIC scalar
+    n_cells = n_z·n_alpha (the segment count for the coherent de-bias term). cell ids
+    must be in [0, n_cells) and match cell_id(d, idx)."""
+    from hcd_analysis.emulator.data import cell_id
+    d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    R = d["x"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    idx = np.array([0, 1, 5, 9, 13, 20])
+    b = make_batch(d, idx, norm)
+    assert "cell" in b and "n_cells" in b
+    assert b["cell"].shape == (len(idx),)
+    assert np.array_equal(b["cell"], cell_id(d, idx).astype(np.int32))
+    n_z = len(np.unique(np.round(d["z_grid"], 4)))
+    n_alpha = int(d["alpha_idx"].max()) + 1
+    assert int(b["n_cells"]) == n_z * n_alpha
+    assert b["cell"].max() < int(b["n_cells"]) and b["cell"].min() >= 0
+    assert np.asarray(b["n_cells"]).ndim == 0     # scalar (segment count, static)
+
+
+def test_datarange_mask_z_and_k_cut(tmp_path):
+    """datarange_mask: in-range iff z∈[z_lo,z_hi] AND k≥k_min. Defaults z∈[2.2,4.6],
+    k≥1e-3. NaN k -> out-of-range. Custom bounds honored."""
+    from hcd_analysis.emulator.data import datarange_mask, DATA_RANGE
+    d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    # fixture z_grid is {2.0, 2.4}; k grid linspace(1e-3, 0.1, 8) (all >= 1e-3)
+    m = datarange_mask(d)                                # defaults
+    z = d["z_grid"]; kf = d["kfkms"]
+    in_z = (z >= DATA_RANGE["z_lo"] - 1e-9) & (z <= DATA_RANGE["z_hi"] + 1e-9)
+    in_k = np.isfinite(kf) & (kf >= DATA_RANGE["k_min"])
+    assert np.array_equal(m, in_z[:, None] & in_k)
+    # z=2.0 rows are out-of-range (below 2.2); z=2.4 rows in-range
+    assert not m[z < 2.2].any()
+    assert m[np.isclose(z, 2.4)].any()
+    # custom k_min above all k -> all out-of-range
+    m_hik = datarange_mask(d, k_min=1.0)
+    assert not m_hik.any()
+    # custom z range that includes 2.0 -> those rows now in-range (k passes)
+    m_loz = datarange_mask(d, z_lo=1.9, z_hi=5.0)
+    assert m_loz[np.isclose(z, 2.0)].any()
+
+
+def test_datarange_loss_weight_soft_factor(tmp_path):
+    """datarange_loss_weight: in-range bins -> 1.0, out-of-range -> oor_weight (~0.2,
+    a SOFT factor, not 0). Shape (n,K); configurable factor."""
+    from hcd_analysis.emulator.data import (
+        datarange_loss_weight, datarange_mask, DATARANGE_OOR_WEIGHT)
+    d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    idx = np.arange(d["x"].shape[0])
+    w = datarange_loss_weight(d, idx)
+    K = d["kfkms"].shape[1]
+    assert w.shape == (len(idx), K) and w.dtype == np.float64
+    in_range = datarange_mask(d)[idx]
+    assert np.allclose(w[in_range], 1.0)
+    assert np.allclose(w[~in_range], DATARANGE_OOR_WEIGHT)
+    assert DATARANGE_OOR_WEIGHT > 0.0          # SOFT, not a hard zero
+    # custom factor
+    w2 = datarange_loss_weight(d, idx, oor_weight=0.5)
+    assert np.allclose(w2[~in_range], 0.5)
+
+
+def test_make_batch_datarange_weight_emission(tmp_path):
+    """make_batch(datarange=True) carries datarange_weight (n,K); absent by default."""
+    from hcd_analysis.emulator.data import datarange_loss_weight
+    d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    norm = fit_target_norm(d, np.arange(d["x"].shape[0]))
+    idx = np.array([0, 1, 5, 9, 13])
+    b_off = make_batch(d, idx, norm)
+    assert "datarange_weight" not in b_off
+    b_on = make_batch(d, idx, norm, datarange=True)
+    assert b_on["datarange_weight"].shape == (len(idx), d["kfkms"].shape[1])
+    assert np.array_equal(b_on["datarange_weight"], datarange_loss_weight(d, idx))

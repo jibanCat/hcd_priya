@@ -292,3 +292,44 @@ def test_covariance_fractional_units_dimensional():
                               a["P_filt"], a["delta_scale"], dla_shot_flag=flag)
     evals = jnp.linalg.eigvalsh(0.5 * (cov + cov.T))
     assert jnp.all(evals >= -1e-9)
+
+
+def test_covariance_nan_safe_datarange_restriction():
+    """DATA-RANGE CONTRACT: the emulator error vector is built data-range-restricted
+    (z∈[2.2,4.6], k≥1e-3) upstream, so out-of-range (class,k) cells arrive as NaN.
+    assemble_covariance must be NaN-SAFE: a NaN σ contributes EXACTLY ZERO emu
+    variance for that cell (the data doesn't constrain it) — identical to passing a
+    0 σ there — while the cosmic covariance for those modes is untouched."""
+    K = 8
+    a = _cov_args(K, seed=11)
+    cosmic = jnp.ones(K) * 1e-3
+    flag = jnp.zeros(K, bool)
+
+    # mark the lowest 2 k-bins (k<1e-3 proxy) out-of-range -> NaN in BOTH channels
+    sig_pf_nan = a["sigma_Pfilt"].at[:, :2].set(jnp.nan)
+    sig_dl_nan = a["sigma_delta"].at[:, :2].set(jnp.nan)
+    # the equivalent "zeroed" error vector (the data-range cells contribute nothing)
+    sig_pf_zero = a["sigma_Pfilt"].at[:, :2].set(0.0)
+    sig_dl_zero = a["sigma_delta"].at[:, :2].set(0.0)
+
+    cov_nan = assemble_covariance(cosmic, sig_pf_nan, a["w_c"], sig_dl_nan,
+                                  a["alpha_hcd"], a["P_filt"], a["delta_scale"],
+                                  dla_shot_flag=flag)
+    cov_zero = assemble_covariance(cosmic, sig_pf_zero, a["w_c"], sig_dl_zero,
+                                   a["alpha_hcd"], a["P_filt"], a["delta_scale"],
+                                   dla_shot_flag=flag)
+    assert jnp.all(jnp.isfinite(cov_nan))                       # no NaN leak
+    assert jnp.allclose(cov_nan, cov_zero, atol=1e-14)          # NaN == zeroed cell
+    # the out-of-range diagonal carries ONLY the cosmic variance (no emu penalty)
+    dnan = jnp.diag(cov_nan)
+    assert jnp.allclose(dnan[:2], cosmic[:2], atol=1e-14)
+    # in-range bins still carry the emu variance (strictly above the cosmic floor)
+    assert jnp.all(dnan[2:] > cosmic[2:])
+
+    # differentiable through the NaN-safe path (grad wrt w_c finite)
+    def trace_of(w_c):
+        return jnp.trace(assemble_covariance(
+            cosmic, sig_pf_nan, w_c, sig_dl_nan, a["alpha_hcd"],
+            a["P_filt"], a["delta_scale"], dla_shot_flag=flag))
+    g = jax.grad(trace_of)(a["w_c"])
+    assert jnp.all(jnp.isfinite(g))

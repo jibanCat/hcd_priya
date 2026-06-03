@@ -21,7 +21,9 @@ import jax.numpy as jnp
 import equinox as eqx
 import optax
 
-from hcd_analysis.emulator.model import Emulator, joint_loss, p_resid_loss
+from hcd_analysis.emulator.model import (
+    Emulator, joint_loss, p_resid_loss, coherent_resid_loss,
+)
 from hcd_analysis.emulator.data import (
     fit_target_norm, fit_baseline_residual_norm, make_batch, safe_log, apply_norm,
     cell_id,
@@ -65,14 +67,16 @@ def train_step(model, opt, opt_state, batch):
     return model, opt_state, loss, grad_norm
 
 
-def _loss_with_term_w(term_w):
-    """Build a joint_loss closure with a fixed term_w (for the staged schedule).
+def _loss_with_term_w(term_w, w_coh=0.0):
+    """Build a joint_loss closure with a fixed term_w (+ optional FLAT coherent
+    de-bias weight ``w_coh``) for the staged / frozen-baseline schedule.
 
     Zeroing a term's weight removes both its forward contribution AND its gradient,
     so a stage trains only the heads that feed its non-zero terms (in conjunction
-    with parameter freezing for clean isolation)."""
+    with parameter freezing for clean isolation). ``w_coh>0`` adds the FLAT coherent
+    de-bias regularizer (requires cell/n_cells in the batch)."""
     def _loss(model, batch):
-        return joint_loss(model, batch, term_w=term_w)
+        return joint_loss(model, batch, term_w=term_w, w_coh=w_coh)
     return _loss
 
 
@@ -226,26 +230,41 @@ def _pad_batch(batch, batch_size):
     pad = batch_size - n
     out = {}
     for k, v in batch.items():
+        # n_cells is a STATIC python int (the segment count), not a per-row array —
+        # it has no leading batch dim to pad; carry it through as a plain int so
+        # eqx.filter_jit keeps it static (not a traced leaf). See _to_jnp_batch.
+        if k == "n_cells":
+            out[k] = int(v)
+            continue
         v = jnp.asarray(v)
         pad_width = [(0, pad)] + [(0, 0)] * (v.ndim - 1)
         if k in ("mask", "t_f_nhi_mask", "t_dndx_mask"):
             out[k] = jnp.pad(v, pad_width, constant_values=False)  # padded -> masked out
         elif k in ("inv_nc", "inv_nalpha"):
             out[k] = jnp.pad(v, pad_width, constant_values=0)      # zero weight (belt+suspenders)
-        else:
+        elif k == "cell":
+            # padded rows -> cell 0 (a valid bin), but mask=False so they add 0 to
+            # BOTH the segment-sum numerator and count — inert in coherent_debias_term.
             out[k] = jnp.pad(v, pad_width, constant_values=0)
+        else:
+            out[k] = jnp.pad(v, pad_width, constant_values=0)      # datarange_weight etc -> 0 (masked anyway)
     return out
 
 
 def _to_jnp_batch(b):
-    return {k: jnp.asarray(v) for k, v in b.items()}
+    # n_cells is the STATIC segment count for the coherent de-bias term — keep it a
+    # PLAIN PYTHON INT (not a jnp array) so eqx.filter_jit treats it as a static
+    # (hashable) arg, NOT a traced leaf. As a traced int64[] leaf, the int(...) in
+    # coherent_debias_term would raise ConcretizationTypeError inside jit.
+    return {k: (int(v) if k == "n_cells" else jnp.asarray(v)) for k, v in b.items()}
 
 
 def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
                batch_size=512, seed=0, key=None, patience=10, n_k=None,
                staged=False, prefit_baseline_epochs=8000, prefit_baseline_lr=2e-3,
                freeze_baseline=None, term_w=None, k_weight=None,
-               early_stop_metric="auto", weight_decay=1e-4):
+               early_stop_metric="auto", weight_decay=1e-4,
+               w_coh=0.0, datarange=False, datarange_kw=None):
     """Train one LOSO fold on ``train_idx``, validating on ``val_idx`` each epoch.
 
     - Fits the train-split target normalisation (``fit_target_norm``) on ``train_idx``.
@@ -287,13 +306,27 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
     - ``weight_decay`` (AdamW): mild L2 on the trainable leaves for residual-head
       generalization (default 1e-4, unchanged).
 
+    FINALIZED-RECIPE knobs (the two productionized wins):
+    - ``w_coh`` (float): the FLAT coherent de-bias REGULARIZER weight (the winning
+      flat_w80; default 0 OFF, set ~80 for production). Adds
+      ``w_coh·coherent_debias_term`` to the joint loss — penalizes the per-(z,τ₀)-cell
+      θ-mean of the residual fit error (UNIFORM in k), flattening the coherent low-k
+      tilt the per-sim MSE leaves free. Drives gate failures 3/8→1/8, ns RMS
+      0.182→0.133σ (jax-traps #24). When >0 the early-stop metric folds it in
+      (resid + coh) so the stop tracks both.
+    - ``datarange`` (bool): SOFT down-weight out-of-range (z∉[2.2,4.6] OR k<1e-3) bins
+      by ~0.2 in the P_filt-channel loss terms (keeps z>4.6's regularizing signal but
+      focuses capacity in-range). ``datarange_kw`` (dict, optional) overrides the
+      z/k cut + soft factor (z_lo/z_hi/k_min/oor_weight).
+
     ``staged=True`` dispatches to the 3-stage schedule (``train_fold_staged``):
     (1) baseline head only, (2) freeze baseline + train residual/delta/Head-A,
     (3) joint fine-tune. Early-stop on the val RESIDUAL (cosmology) loss.
 
     Returns ``(best_model, norm_stats, history)`` where history holds per-epoch
-    ``train_loss, val_loss, val_resid_loss, grad_norm, lr`` lists.
+    ``train_loss, val_loss, val_resid_loss, val_coh_loss, grad_norm, lr`` lists.
     """
+    datarange_kw = datarange_kw or {}
     if staged:
         return train_fold_staged(
             d, train_idx, val_idx, n_basis=n_basis, lr=lr, epochs=epochs,
@@ -346,9 +379,17 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
     opt = make_optimizer(lr=lr, steps=total_steps, weight_decay=weight_decay)
     lr_sched = optax.cosine_decay_schedule(lr, total_steps)
 
-    # make_batch closure carrying the k-weight (per-row tiled inside make_batch).
+    # make_batch closure carrying the k-weight (per-row tiled) AND the data-range
+    # soft down-weight (when datarange=True). The cell/n_cells keys (for the coherent
+    # de-bias term) are emitted unconditionally by make_batch.
     def _mb(idx):
-        return make_batch(d, idx, norm_stats, k_weight=k_weight)
+        return make_batch(d, idx, norm_stats, k_weight=k_weight,
+                          datarange=datarange, **datarange_kw)
+
+    # The training loss closure: joint_loss with the fold's term_w AND the FLAT
+    # coherent de-bias weight w_coh (the data-range down-weight rides inside the
+    # batch via make_batch(datarange=...), so it needs no separate plumbing).
+    loss_fn = _loss_with_term_w(term_w, w_coh=w_coh)
 
     # When freezing the baseline, partition it out so the joint optimizer never
     # touches its leaves (the θ-blind structured mean stays pinned at its floor);
@@ -357,17 +398,22 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
         join_mask = _trainable_mask(model, train_baseline=False, train_rest=True)
         diff_model, static_model = eqx.partition(model, join_mask)
         opt_state = opt.init(eqx.filter(diff_model, eqx.is_array))
-        joint_loss_fn = _loss_with_term_w(term_w)   # term_w (e.g. up-weighted p_resid)
     else:
-        opt_state = opt.init(eqx.filter(model, eqx.is_array))
+        # Non-frozen path: partition with an ALL-trainable mask so we can still drive
+        # the SAME loss_fn closure (carrying w_coh/term_w) through the partitioned
+        # step. (Identity partition: static_model has no array leaves.)
+        join_mask = _trainable_mask(model, train_baseline=True, train_rest=True)
+        diff_model, static_model = eqx.partition(model, join_mask)
+        opt_state = opt.init(eqx.filter(diff_model, eqx.is_array))
 
     val_batch = _to_jnp_batch(_mb(val_idx))
-    # the early-stop residual metric uses the SAME k-emphasis the loss optimizes,
-    # so the stop tracks what training drives (edge-emphasised cosmology MSE).
+    # the early-stop residual metric uses the SAME k-emphasis + data-range weight the
+    # loss optimizes, so the stop tracks what training drives.
     use_kw_es = k_weight is not None
+    use_dr_es = datarange
 
     history = {"train_loss": [], "val_loss": [], "val_resid_loss": [],
-               "grad_norm": [], "lr": []}
+               "val_coh_loss": [], "grad_norm": [], "lr": []}
     best_metric = np.inf
     best_model = model
     stall = 0
@@ -379,12 +425,9 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
             # CS-I2: pad the (ragged) final minibatch to a FIXED batch_size with
             # zero-contribution rows, so train_step keeps ONE static shape (traces once).
             batch = _pad_batch(_to_jnp_batch(_mb(mb)), batch_size)
-            if freeze_baseline:
-                diff_model, opt_state, loss, gnorm = train_step_partitioned(
-                    diff_model, static_model, opt, opt_state, batch, joint_loss_fn)
-                model = eqx.combine(diff_model, static_model)
-            else:
-                model, opt_state, loss, gnorm = train_step(model, opt, opt_state, batch)
+            diff_model, opt_state, loss, gnorm = train_step_partitioned(
+                diff_model, static_model, opt, opt_state, batch, loss_fn)
+            model = eqx.combine(diff_model, static_model)
             ep_losses.append(float(loss))
             ep_gnorms.append(float(gnorm))
             step += 1
@@ -393,15 +436,24 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
         # AFTER the epoch's last update (step == #updates so far), not the epoch's first step.
         ep_lr = float(lr_sched(step))
         val_loss = float(evaluate(model, val_batch))
-        val_resid = float(p_resid_loss(model, val_batch, use_k_weight=use_kw_es))
+        val_resid = float(p_resid_loss(model, val_batch, use_k_weight=use_kw_es,
+                                       use_datarange=use_dr_es))
+        val_coh = float(coherent_resid_loss(model, val_batch)) if w_coh > 0.0 else np.nan
         history["train_loss"].append(float(np.mean(ep_losses)))
         history["val_loss"].append(val_loss)
         history["val_resid_loss"].append(val_resid)
+        history["val_coh_loss"].append(val_coh)
         history["grad_norm"].append(float(np.mean(ep_gnorms)))
         history["lr"].append(ep_lr)
 
         # EARLY-STOP / restore-best on the chosen metric (residual when frozen).
+        # With the FLAT coherent de-bias active (w_coh>0), fold the val coherent term
+        # into the stop metric (resid + w_coh·coh) so the stop tracks BOTH the per-sim
+        # cosmology MSE and the per-cell de-bias the loss optimizes (the winning
+        # "resid+coh" stop; jax-traps #24). Else stop on resid (frozen) or joint.
         metric = val_resid if stop_on_resid else val_loss
+        if w_coh > 0.0 and stop_on_resid:
+            metric = val_resid + w_coh * val_coh
         if metric < best_metric - 1e-9:
             best_metric = metric
             best_model = model

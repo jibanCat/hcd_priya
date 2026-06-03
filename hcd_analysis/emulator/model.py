@@ -305,7 +305,72 @@ def _k_weight_from_batch(batch):
     return kw[0][None, None, :]      # (1,1,K), row-invariant profile
 
 
-def joint_loss(model, batch, term_w=None):
+def _datarange_weight_from_batch(batch):
+    """Per-(z,k) DATA-RANGE soft down-weight -> broadcastable (B,1,K), or None.
+
+    Data-range SCOPING (the in-range capacity-focus knob): out-of-range bins
+    (z∉[z_lo,z_hi] OR k<k_min) are SOFT down-weighted by a factor ~0.2 (NOT
+    hard-zeroed — z>4.6's signal still regularizes the encoder, just gets less
+    say). The weight is built host-side per ROW (so it depends on each row's z) ×
+    per-k (the k-cut is row-invariant) and carried in the batch under
+    ``datarange_weight`` (B,K); see ``data.datarange_loss_weight``. Absent the key,
+    the P_filt-channel terms are un-down-weighted (back-compat / full footprint).
+
+    Returns (B,1,K) so it broadcasts against the (B,4,K) / (B,3,K) P_filt-channel
+    MSE. Padded rows are masked out anyway, so their weight value is irrelevant."""
+    dw = batch.get("datarange_weight")
+    if dw is None:
+        return None
+    dw = jnp.atleast_2d(dw)          # (B,K)
+    return dw[:, None, :]            # (B,1,K)
+
+
+def coherent_debias_term(preds, batch):
+    """FLAT coherent de-bias: Σ_cell ⟨ r̂ − t_p_resid ⟩_θ², per-(z,τ₀)-CELL mean.
+
+    The de-bias REGULARIZER (productionized from scripts/push_residual_refine.py,
+    the winning ``flat_w80`` recipe; jax-traps #24). For each global (z,τ₀)-cell it
+    forms the per-cell MEAN OVER SIMS (cosmologies) of the residual fit error
+    ``(r̂ − t_p_resid)``, then averages its square over the populated cells / valid
+    (class,k). Because the training target t_p_resid = (logP − cell_mean)/σ_cosmo has
+    ⟨t_p_resid⟩_θ = 0 per cell BY CONSTRUCTION, this drives the systematic θ-mean of
+    the residual head toward zero — i.e. it FLATTENS the coherent k-tilt the per-sim
+    MSE leaves an unconstrained coherent d.o.f. (the per-sim MSE is dominated by the
+    CV scatter and does NOT directly penalize the per-cell θ-mean offset).
+
+    UNIFORM in k DELIBERATELY: the FLAT (no edge-weight) k-shape was the winner — it
+    de-biases all bands evenly. Edge-weighting this term OVER-corrects low-k and
+    trades it for a mid-band regression (jax-traps #24); inverse-CV makes low-k
+    worse. So this term carries NO ``k_weight`` (unlike the per-sim p_resid term).
+
+    Requires ``batch["cell"]`` (global (z,τ₀)-cell id, int (B,)) and the STATIC
+    scalar ``batch["n_cells"]`` (number of distinct global cells = n_z·n_alpha; the
+    segment count). NaN-safe: above-Nyquist bins are zeroed via the per-row Nyquist
+    mask BEFORE the segment-sum and excluded from the per-cell count. Padded rows
+    (mask all-False) add 0 to both numerator and count, so they are inert.
+
+    Returns a scalar. ``num_segments`` is read as a python int from batch["n_cells"]
+    (it sets the segment-sum output shape and so must be static at trace time — it is
+    a fold-level constant, traced once)."""
+    n_cells = int(batch["n_cells"])
+    rhat = preds["P_filt_resid"]                            # (B,4,K)
+    t = jnp.nan_to_num(batch["t_p_resid"], nan=0.0)         # (B,4,K)
+    m = batch["mask"][:, None, :]                           # (B,1,K) Nyquist mask
+    err = jnp.where(m, rhat - t, 0.0)                       # (B,4,K) per-row resid error
+    seg = batch["cell"]                                     # (B,) global cell id
+    # per-cell sum of err and of the mask (# finite sims contributing per (c,k))
+    num = jax.ops.segment_sum(err, seg, num_segments=n_cells)             # (N,4,K)
+    cnt = jax.ops.segment_sum(
+        jnp.broadcast_to(m.astype(err.dtype), err.shape), seg,
+        num_segments=n_cells)                                            # (N,4,K)
+    cell_mean_err = jnp.where(cnt > 0, num / jnp.maximum(cnt, 1.0), 0.0)  # ⟨r̂−t⟩_θ
+    sq = cell_mean_err ** 2
+    valid = (cnt > 0).astype(sq.dtype)
+    denom = jnp.maximum(jnp.sum(valid), 1.0)
+    return jnp.sum(sq) / denom
+
+
+def joint_loss(model, batch, term_w=None, w_coh=0.0):
     """Single joint scalar (spec sec.4). Per-element means balance the 172 vs 3
     channel counts; term_w optionally rescales the named terms.
 
@@ -326,6 +391,12 @@ def joint_loss(model, batch, term_w=None):
     additionally re-weights the p_resid term PER-k (low/high-k edge emphasis); see
     ``_k_weight_from_batch``.
 
+    ``w_coh`` adds the FLAT coherent de-bias REGULARIZER ``w_coh·coherent_debias_term``
+    (the productionized flat_w80 winner; default 80 in train_fold). It requires the
+    batch carry ``cell``/``n_cells``; with w_coh<=0 the term (and the requirement) is
+    skipped. The de-bias term is UNIFORM in k (do NOT edge-weight it — flat is the
+    winner; see ``coherent_debias_term`` / jax-traps #24).
+
     A3: the old meanF term was removed (zero model gradient; structural mean-flux).
     """
     term_w = term_w or {"f_nhi": 1.0, "dndx": 1.0,
@@ -342,21 +413,36 @@ def joint_loss(model, batch, term_w=None):
     wcls4 = batch["inv_nc"][:, :, None]
     wcls3 = batch["inv_nc"][:, 1:, None]
     mask4 = m3 & jnp.ones_like(batch["t_p_resid"], bool)
+    # data-range SOFT down-weight (factor ~0.2) for out-of-range (z,k) bins — keeps
+    # z>4.6/low-k regularizing signal but focuses capacity in the DESI data range.
+    # Applied to the residual + baseline + delta terms (the P_filt channels) so the
+    # standardized-space MSE attends in-range; None when the batch omits it.
+    rng_w = _datarange_weight_from_batch(batch)              # (B,1,K) or None
     # BASELINE term: θ-blind cell-mean fit (σ_marg-standardized). inv_nc-weighted.
-    lb_base = masked_mse(preds["P_filt_base"], batch["t_p_base"], mask4, weight=wcls4)
+    w_base = wcls4 if rng_w is None else wcls4 * rng_w
+    lb_base = masked_mse(preds["P_filt_base"], batch["t_p_base"], mask4, weight=w_base)
     # COSMOLOGY term: σ_cosmo-whitened residual (the signal inference needs). The
-    # per-k k_weight (if present) emphasizes the band edges (the A_p low-k fix).
+    # per-k k_weight (if present) emphasizes the band edges (the A_p low-k fix); the
+    # data-range weight (if present) softens out-of-range bins.
     kw = _k_weight_from_batch(batch)
-    w_resid = wcls4 if kw is None else wcls4 * kw
+    w_resid = wcls4
+    if kw is not None:
+        w_resid = w_resid * kw
+    if rng_w is not None:
+        w_resid = w_resid * rng_w
     lb_resid = masked_mse(preds["P_filt_resid"], batch["t_p_resid"], mask4, weight=w_resid)
+    w_dl = wcls3 if rng_w is None else wcls3 * rng_w
     lb_dl = masked_mse(preds["delta"], batch["t_delta"],
-                       m3 & jnp.ones_like(batch["t_delta"], bool), weight=wcls3)
-    return (term_w["f_nhi"]*la_cddf + term_w["dndx"]*la_dndx
-            + term_w["p_base"]*lb_base + term_w["p_resid"]*lb_resid
-            + term_w["delta"]*lb_dl)
+                       m3 & jnp.ones_like(batch["t_delta"], bool), weight=w_dl)
+    total = (term_w["f_nhi"]*la_cddf + term_w["dndx"]*la_dndx
+             + term_w["p_base"]*lb_base + term_w["p_resid"]*lb_resid
+             + term_w["delta"]*lb_dl)
+    if w_coh > 0.0:
+        total = total + w_coh * coherent_debias_term(preds, batch)
+    return total
 
 
-def p_resid_loss(model, batch, use_k_weight=False):
+def p_resid_loss(model, batch, use_k_weight=False, use_datarange=False):
     """The COSMOLOGY (σ_cosmo-whitened residual) term alone — the early-stop /
     validation metric for the redesign (the quantity inference cares about).
 
@@ -364,7 +450,9 @@ def p_resid_loss(model, batch, use_k_weight=False):
     per-row Nyquist mask. Lower == better cosmology resolution. When
     ``use_k_weight`` and the batch carries ``k_weight``, the SAME per-k emphasis the
     training loss uses is applied here too, so the early-stop metric tracks the
-    quantity the loss optimizes (and the band-edge attention is reflected in it)."""
+    quantity the loss optimizes (and the band-edge attention is reflected in it).
+    When ``use_datarange`` and the batch carries ``datarange_weight``, the data-range
+    soft down-weight is applied too (so the stop tracks the in-range-focused loss)."""
     preds = jax.vmap(model)(batch["x"], batch["tau0"])
     mask4 = batch["mask"][:, None, :] & jnp.ones_like(batch["t_p_resid"], bool)
     wcls4 = batch["inv_nc"][:, :, None]
@@ -372,4 +460,18 @@ def p_resid_loss(model, batch, use_k_weight=False):
         kw = _k_weight_from_batch(batch)
         if kw is not None:
             wcls4 = wcls4 * kw
+    if use_datarange:
+        rng_w = _datarange_weight_from_batch(batch)
+        if rng_w is not None:
+            wcls4 = wcls4 * rng_w
     return masked_mse(preds["P_filt_resid"], batch["t_p_resid"], mask4, weight=wcls4)
+
+
+def coherent_resid_loss(model, batch):
+    """The FLAT coherent de-bias term value alone (val-side monitor / early-stop).
+
+    Σ_cell ⟨ r̂ − t_p_resid ⟩_θ² over the populated (z,τ₀)-cells (see
+    ``coherent_debias_term``). Lower == less systematic per-cell θ-mean residual (a
+    flatter coherent k-tilt). Requires ``cell``/``n_cells`` in the batch."""
+    preds = jax.vmap(model)(batch["x"], batch["tau0"])
+    return coherent_debias_term(preds, batch)

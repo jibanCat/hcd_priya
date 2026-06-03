@@ -43,6 +43,17 @@ PARAM_LIMITS = np.array([
 # PRIYA zout grid range (coarse_grid.py L153-154: max_z=5.4, min_z=2.0).
 Z_LIMITS = (2.0, 5.4)
 
+# DESI DR1 P1D DATA RANGE (the modes the data actually constrain). The cache
+# footprint is wider (z∈{2.0..5.4}, k∈[4.4e-4..0.076]); z=2.0 and z>4.6 are
+# out-of-range, and the lowest k bins (<1e-3) are below DESI's k_min. The training
+# loss SOFT down-weights out-of-range bins (keeps their regularizing signal but
+# focuses capacity in-range), and the emulator-error budget (C_emu) is RESTRICTED to
+# this range so it only covers modes the data constrain. Configurable everywhere.
+DATA_RANGE = {"z_lo": 2.2, "z_hi": 4.6, "k_min": 1e-3}
+# soft out-of-range down-weight factor (NOT a hard zero — z>4.6's signal still
+# regularizes the encoder, just gets ~5× less say; validated factor).
+DATARANGE_OOR_WEIGHT = 0.2
+
 
 def normalize_params(params):
     """Map raw params (...,9) to the unit cube (...,9) via PRIYA's design box.
@@ -365,7 +376,47 @@ def edge_emphasis_k_weight(kfkms, edge_gain=3.0, lowk_extra=1.0, mid_frac=0.5):
     return w
 
 
-def make_batch(d, idx, norm_stats, k_weight=None):
+def datarange_mask(d, z_lo=None, z_hi=None, k_min=None):
+    """Per-(row,k) boolean DATA-RANGE mask: in-range iff z∈[z_lo,z_hi] AND k≥k_min.
+
+    The modes the DESI DR1 P1D data constrain (defaults from ``DATA_RANGE``:
+    z∈[2.2,4.6], k≥1e-3 s/km). Used to RESTRICT the emulator-error budget (the
+    error vector / C_emu) to the data range, and as the basis for the training
+    SOFT down-weight (``datarange_loss_weight``). The z test is per-ROW (each row's
+    z_grid), the k test is per-row (each row's kfkms grid).
+
+    Returns a ``(R, K)`` bool array (R = len(d["z_grid"])). NaN k bins are treated
+    as out-of-range (False)."""
+    z_lo = DATA_RANGE["z_lo"] if z_lo is None else z_lo
+    z_hi = DATA_RANGE["z_hi"] if z_hi is None else z_hi
+    k_min = DATA_RANGE["k_min"] if k_min is None else k_min
+    z = np.asarray(d["z_grid"])                                  # (R,)
+    kf = np.asarray(d["kfkms"])                                  # (R,K)
+    in_z = (z >= z_lo - 1e-9) & (z <= z_hi + 1e-9)               # (R,)
+    in_k = np.isfinite(kf) & (kf >= k_min)                      # (R,K)
+    return in_z[:, None] & in_k                                  # (R,K)
+
+
+def datarange_loss_weight(d, idx, z_lo=None, z_hi=None, k_min=None,
+                          oor_weight=None):
+    """Per-(row,k) SOFT data-range loss weight (n,K) for rows ``idx``.
+
+    In-range (z,k) bins get weight 1.0; OUT-of-range bins (z∉[z_lo,z_hi] OR k<k_min)
+    get the soft factor ``oor_weight`` (~0.2, NOT a hard zero — keeps z>4.6's signal
+    regularizing the encoder while focusing capacity in-range). Carried into the
+    batch as ``datarange_weight`` and applied by ``joint_loss`` to the P_filt-channel
+    (baseline/residual/delta) MSE terms. Defaults from ``DATA_RANGE`` /
+    ``DATARANGE_OOR_WEIGHT``.
+
+    Returns a float64 (n,K) array."""
+    oor_weight = DATARANGE_OOR_WEIGHT if oor_weight is None else oor_weight
+    idx = np.asarray(idx)
+    in_range = datarange_mask(d, z_lo=z_lo, z_hi=z_hi, k_min=k_min)[idx]   # (n,K)
+    return np.where(in_range, 1.0, oor_weight).astype(np.float64)
+
+
+def make_batch(d, idx, norm_stats, k_weight=None, datarange=False,
+               z_lo=None, z_hi=None, k_min=None, oor_weight=None):
     """Assemble the exact dict joint_loss consumes for rows ``idx`` (spec sec.4).
 
     Targets t_* are in standardized log/arcsinh space; bins above native Nyquist
@@ -377,6 +428,16 @@ def make_batch(d, idx, norm_stats, k_weight=None):
     ``edge_emphasis_k_weight``). When given it is carried in the batch under
     ``k_weight`` and ``joint_loss``/``p_resid_loss`` apply it to the cosmology
     (p_resid) term. Absent -> the loss is the uniform inv_nc-weighted MSE.
+
+    ``datarange`` (bool), optional: when True, carry the per-(row,k) SOFT data-range
+    down-weight (``datarange_loss_weight``) in the batch under ``datarange_weight``,
+    which ``joint_loss`` applies to the P_filt-channel terms (out-of-range bins get
+    ``oor_weight``≈0.2). The z/k cut + soft factor are configurable
+    (``z_lo``/``z_hi``/``k_min``/``oor_weight``; defaults from ``DATA_RANGE``).
+
+    The batch ALSO carries the global (z,τ₀)-``cell`` id (per row, int) and the
+    static scalar ``n_cells`` (= n_z·n_alpha = the segment count) so the coherent
+    de-bias term (``model.coherent_debias_term``) can segment-sum per cell.
     """
     idx = np.asarray(idx)
     grp = d["snap_group_idx"][idx]                         # (n,) block index per row
@@ -430,6 +491,14 @@ def make_batch(d, idx, norm_stats, k_weight=None):
     # mean-F head is wired (deferred, out of scope).
     mean_F_clean = np.exp(-d["tau0"][idx]).astype(np.float64)                   # (n,)
 
+    # global (z,τ₀)-cell id per row + the static segment count n_cells = n_z·n_alpha
+    # (cell_id packs z_rank·n_alpha + alpha_idx, so the max id is n_z·n_alpha-1). The
+    # coherent de-bias term segment-sums the residual error per cell over num_segments
+    # = n_cells (a fold-level constant; traced once).
+    n_z = int(np.unique(np.round(np.asarray(d["z_grid"]), 4)).shape[0])
+    n_alpha = int(np.asarray(d["alpha_idx"]).max()) + 1
+    n_cells = n_z * n_alpha
+
     batch = {
         "x": d["x"][idx].astype(np.float64),
         "tau0": d["tau0"][idx].astype(np.float64),
@@ -444,6 +513,8 @@ def make_batch(d, idx, norm_stats, k_weight=None):
         "inv_nc": d["inv_nc"][idx].astype(np.float64),
         "inv_nalpha": inv_nalpha,
         "mean_F_clean": mean_F_clean,
+        "cell": cells.astype(np.int32),
+        "n_cells": np.int64(n_cells),
     }
     if k_weight is not None:
         # carried as a PER-ROW (n,K) tile so it pads/batches like every other array
@@ -451,6 +522,11 @@ def make_batch(d, idx, norm_stats, k_weight=None):
         # row 0 (all rows identical) — see model._k_weight_from_batch.
         kw = np.asarray(k_weight, dtype=np.float64).ravel()
         batch["k_weight"] = np.broadcast_to(kw, (len(idx), kw.shape[0])).astype(np.float64)
+    if datarange:
+        # per-(row,k) SOFT down-weight; out-of-range bins get oor_weight (~0.2).
+        # Per-ROW (depends on z), so it pads/batches like every other array.
+        batch["datarange_weight"] = datarange_loss_weight(
+            d, idx, z_lo=z_lo, z_hi=z_hi, k_min=k_min, oor_weight=oor_weight)
     return batch
 
 

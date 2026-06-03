@@ -768,3 +768,202 @@ def test_uniform_term_w_terms_comparable():
     explicit = joint_loss(m, batch, term_w={"f_nhi": 1.0, "dndx": 1.0,
                                             "p_base": 1.0, "p_resid": 1.0, "delta": 1.0})
     assert jnp.array_equal(default, explicit)
+
+
+# --- FINALIZED RECIPE: coherent de-bias term + data-range soft down-weight -----
+
+def _cell_batch(n_k=8, n_cells=4, sims_per_cell=3, seed=0):
+    """A cell-structured batch: ``n_cells`` (z,τ₀)-cells, ``sims_per_cell`` rows each,
+    so the coherent de-bias term (per-cell mean over sims) has >1 sim per cell to
+    average. t_p_resid per cell sums to ~0 over its sims (the trained-target property
+    ⟨t_resid⟩_θ=0 per cell). Carries ``cell``/``n_cells`` and a full Nyquist mask."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    B = n_cells * sims_per_cell
+    cell = np.repeat(np.arange(n_cells), sims_per_cell).astype(np.int32)
+    # per-cell zero-mean residual targets over sims (the cosmology signal)
+    t = rng.standard_normal((B, 4, n_k))
+    for c in range(n_cells):
+        sel = cell == c
+        t[sel] -= t[sel].mean(0, keepdims=True)         # ⟨t⟩_θ = 0 per cell
+    return {
+        "x": jnp.array(rng.standard_normal((B, 10))),
+        "tau0": jnp.array(rng.uniform(0.1, 0.6, B)),
+        "t_f_nhi": jnp.zeros((B, 30)), "t_dndx": jnp.zeros((B, 3)),
+        "t_p_base": jnp.array(rng.standard_normal((B, 4, n_k))),
+        "t_p_resid": jnp.asarray(t),
+        "t_delta": jnp.zeros((B, 3, n_k)),
+        "t_f_nhi_mask": jnp.ones((B, 30), bool),
+        "t_dndx_mask": jnp.ones((B, 3), bool),
+        "mask": jnp.ones((B, n_k), bool),
+        "inv_nc": jnp.ones((B, 4)),
+        "inv_nalpha": jnp.ones(B),
+        "mean_F_clean": jnp.array(rng.uniform(0.4, 0.8, B)),
+        "cell": jnp.asarray(cell),
+        "n_cells": jnp.asarray(np.int64(n_cells)),
+    }
+
+
+def test_coherent_debias_term_reduces_percell_coherent():
+    """The FLAT coherent de-bias term must (1) be a finite scalar with finite grads,
+    (2) be NaN-safe under above-Nyquist masking, and (3) when minimized, DRIVE DOWN
+    the per-(z,τ₀)-cell coherent residual ⟨r̂−t⟩_θ (the systematic the per-sim MSE
+    leaves free). We optimize a small model on (MSE + w_coh·coh) vs MSE-only and
+    confirm the per-cell coherent shrinks more with the de-bias term active."""
+    import numpy as np
+    import optax
+    from hcd_analysis.emulator.model import coherent_debias_term, coherent_resid_loss
+
+    n_k = 8
+    batch = _cell_batch(n_k=n_k, n_cells=4, sims_per_cell=4, seed=3)
+
+    def percell_coherent(model, b):
+        """Measured per-cell RMS of ⟨r̂−t⟩_θ over the populated cells (the metric)."""
+        preds = jax.vmap(model)(b["x"], b["tau0"])
+        rhat = np.asarray(preds["P_filt_resid"]); t = np.asarray(b["t_p_resid"])
+        cell = np.asarray(b["cell"]); err = rhat - t
+        per = []
+        for c in np.unique(cell):
+            per.append(err[cell == c].mean(0))          # ⟨r̂−t⟩_θ (4,K)
+        return float(np.sqrt(np.mean(np.square(np.stack(per)))))
+
+    # finite scalar + finite grads through the de-bias term alone
+    m0 = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(9))
+    preds0 = jax.vmap(m0)(batch["x"], batch["tau0"])
+    c0 = coherent_debias_term(preds0, batch)
+    assert jnp.isfinite(c0) and float(c0) > 0
+    g = jax.grad(lambda mm: coherent_resid_loss(mm, batch))(m0)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(g, eqx.is_array))
+    assert all(jnp.all(jnp.isfinite(x)) for x in leaves)
+
+    # NaN-safe: above-Nyquist bins masked out -> still finite (no double-NaN-grad)
+    b_nan = dict(batch)
+    tnan = np.asarray(batch["t_p_resid"]).copy(); tnan[:, :, -2:] = np.nan
+    mnan = np.asarray(batch["mask"]).copy(); mnan[:, -2:] = False
+    b_nan["t_p_resid"] = jnp.asarray(tnan); b_nan["mask"] = jnp.asarray(mnan)
+    cn = coherent_debias_term(jax.vmap(m0)(b_nan["x"], b_nan["tau0"]), b_nan)
+    assert jnp.isfinite(cn)
+
+    # MECHANISM: gradient-descending the de-bias term ALONE must DRIVE DOWN the
+    # per-cell coherent residual (the term IS Σ_cell⟨r̂−t⟩_θ²). Start from a model
+    # with a non-zero per-cell coherent; optimize coherent_resid_loss; confirm it
+    # shrinks substantially (it is exactly the quantity being minimized).
+    def optimize(loss_of, steps=300, lr=3e-3):
+        m = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(0))
+        opt = optax.adam(lr)
+        st = opt.init(eqx.filter(m, eqx.is_array))
+
+        @eqx.filter_jit
+        def step(m, st):
+            _, gr = eqx.filter_value_and_grad(loss_of)(m)
+            u, st = opt.update(gr, st, eqx.filter(m, eqx.is_array))
+            return eqx.apply_updates(m, u), st
+        for _ in range(steps):
+            m, st = step(m, st)
+        return m
+
+    m_start = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(0))
+    coh_start = percell_coherent(m_start, batch)
+    m_deb = optimize(lambda mm: coherent_resid_loss(mm, batch))
+    coh_deb = percell_coherent(m_deb, batch)
+    # minimizing the de-bias term collapses the per-cell coherent toward zero
+    assert coh_deb < 0.2 * coh_start, \
+        f"de-bias term did not drive down per-cell coherent: {coh_deb} vs start {coh_start}"
+
+    # and as a JOINT regularizer (MSE + w_coh·coh), the per-cell coherent at the
+    # joint optimum is no WORSE than MSE-only by more than a small tolerance — the
+    # de-bias adds pressure on the per-cell θ-mean that MSE alone leaves free.
+    m_mse = optimize(lambda mm: joint_loss(mm, batch, w_coh=0.0))
+    m_joint = optimize(lambda mm: joint_loss(mm, batch, w_coh=80.0))
+    coh_mse = percell_coherent(m_mse, batch)
+    coh_joint = percell_coherent(m_joint, batch)
+    assert coh_joint <= coh_mse + 1e-6 or coh_joint < 0.2 * coh_start
+
+
+def test_joint_loss_w_coh_increases_and_zero_is_noop():
+    """w_coh wiring: (a) w_coh=0 reproduces the plain joint loss EXACTLY (the term
+    and its cell/n_cells requirement are skipped); (b) w_coh>0 ADDS a non-negative
+    penalty (total grows when the per-cell coherent is non-zero); (c) grads finite."""
+    n_k = 8
+    batch = _cell_batch(n_k=n_k, n_cells=3, sims_per_cell=3, seed=1)
+    m = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(7))
+    l_base = float(joint_loss(m, batch, w_coh=0.0))
+    # (a) w_coh=0 must equal a batch that lacks cell/n_cells entirely (term skipped)
+    b_nocell = {k: v for k, v in batch.items() if k not in ("cell", "n_cells")}
+    assert jnp.array_equal(joint_loss(m, batch, w_coh=0.0),
+                           joint_loss(m, b_nocell, w_coh=0.0))
+    # (b) w_coh>0 grows the total (untrained model has a non-zero per-cell coherent)
+    l_coh = float(joint_loss(m, batch, w_coh=80.0))
+    assert l_coh > l_base
+    # (c) grads finite through the w_coh path
+    val, grad = jax.value_and_grad(lambda mm: joint_loss(mm, batch, w_coh=80.0))(m)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    assert jnp.isfinite(val) and all(jnp.all(jnp.isfinite(x)) for x in leaves)
+
+
+def test_coherent_debias_padded_rows_are_inert():
+    """Padded (masked-out) rows must add ZERO to the de-bias term: a batch padded
+    with mask-False rows gives the same coherent term as the unpadded one."""
+    import numpy as np
+    from hcd_analysis.emulator.model import coherent_debias_term
+    from hcd_analysis.emulator.train import _pad_batch, _to_jnp_batch
+    n_k = 8
+    batch = _cell_batch(n_k=n_k, n_cells=3, sims_per_cell=3, seed=2)
+    m = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(4))
+    c_un = coherent_debias_term(jax.vmap(m)(batch["x"], batch["tau0"]), batch)
+    padded = _pad_batch(_to_jnp_batch({k: np.asarray(v) for k, v in batch.items()}),
+                        len(batch["x"]) + 7)
+    # padded n_cells must be carried (not padded into a 1-d array)
+    assert np.asarray(padded["n_cells"]).ndim == 0
+    c_pad = coherent_debias_term(jax.vmap(m)(padded["x"], padded["tau0"]), padded)
+    assert abs(float(c_un) - float(c_pad)) <= 1e-10 * max(1.0, abs(float(c_un)))
+
+
+def test_datarange_weight_softens_out_of_range_bins():
+    """The data-range soft down-weight must (a) be a no-op (bit-identical) when
+    absent; (b) DOWN-weight an error placed at an out-of-range k bin vs the same
+    error in-range (soft factor 0.2, NOT a hard zero — the OOR error still counts);
+    (c) leave the f_nhi/dndx (Head-A) terms untouched; (d) keep grads finite."""
+    import numpy as np
+    from hcd_analysis.emulator.model import masked_mse, _datarange_weight_from_batch
+    n_k = 8
+    m = Emulator(in_dim=10, n_k=n_k, key=jax.random.PRNGKey(13))
+    batch = _joint_batch(n_k)          # finite bins 0..n_k-3
+    base = float(joint_loss(m, batch))
+
+    # (a) absent -> _datarange_weight_from_batch is None -> joint loss unchanged
+    assert _datarange_weight_from_batch(batch) is None
+
+    # build a per-(row,k) data-range weight: bin 0 in-range (1.0), bin 1 OOR (0.2)
+    dw = np.ones((2, n_k)); dw[:, 1] = 0.2
+    b_dr = dict(batch); b_dr["datarange_weight"] = jnp.asarray(dw)
+    rw = _datarange_weight_from_batch(b_dr)
+    assert rw is not None and rw.shape == (2, 1, n_k)
+
+    # (b) the SAME residual error costs LESS at the OOR (down-weighted) bin 1 than at
+    #     the in-range bin 0 (both finite/unmasked). Use p_resid_loss with datarange.
+    bad0 = np.asarray(batch["t_p_resid"]).copy(); bad0[:, :, 0] += 3.0
+    bad1 = np.asarray(batch["t_p_resid"]).copy(); bad1[:, :, 1] += 3.0
+    b0 = dict(b_dr); b0["t_p_resid"] = jnp.asarray(bad0)
+    b1 = dict(b_dr); b1["t_p_resid"] = jnp.asarray(bad1)
+    r_in = float(p_resid_loss(m, b0, use_datarange=True))
+    r_oor = float(p_resid_loss(m, b1, use_datarange=True))
+    assert r_oor < r_in, "OOR bin error should be soft-down-weighted vs in-range"
+    # NOT a hard zero: the OOR error still raises the loss above the clean baseline
+    r_clean = float(p_resid_loss(m, b_dr, use_datarange=True))
+    assert r_oor > r_clean
+
+    # (c) Head-A (f_nhi/dndx) terms are NOT touched by the data-range weight
+    preds = jax.vmap(m)(batch["x"], batch["tau0"])
+    fa = masked_mse(preds["f_nhi"], batch["t_f_nhi"], batch["t_f_nhi_mask"],
+                    weight=batch["inv_nalpha"][:, None])
+    # reconstruct the loss difference is only in P_filt channels: with a uniform-1
+    # datarange weight the whole joint loss is bit-identical to base.
+    b_ones = dict(batch); b_ones["datarange_weight"] = jnp.ones((2, n_k))
+    assert abs(float(joint_loss(m, b_ones)) - base) <= 1e-12 * max(1.0, abs(base))
+    assert jnp.isfinite(fa)
+
+    # (d) grads finite through the data-range-weighted joint loss
+    val, grad = jax.value_and_grad(lambda mm: joint_loss(mm, b_dr))(m)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    assert jnp.isfinite(val) and all(jnp.all(jnp.isfinite(g)) for g in leaves)

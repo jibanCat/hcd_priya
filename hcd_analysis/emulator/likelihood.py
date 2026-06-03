@@ -59,9 +59,20 @@ def assemble_covariance(cosmic_cov, sigma_Pfilt, w_c, sigma_delta, alpha_hcd,
       dla_shot_flag: (K,) bool; high-k DLA shot-limited bins to inflate.
       shot_inflate:  multiplier applied to the emu variance on flagged bins.
 
+    DATA-RANGE CONTRACT: the emulator error vector (``sigma_Pfilt``/``sigma_delta``)
+    is built DATA-RANGE-RESTRICTED upstream (``run_loso_sweep.fold_resid_neff``,
+    ``data.datarange_mask``: z∈[2.2,4.6], k≥1e-3) so the emu-error budget only covers
+    modes the DESI data constrain. Out-of-range (z,k) cells therefore arrive as NaN
+    (no kept residuals). This function is NaN-SAFE: a NaN σ contributes ZERO emu
+    variance for that (class,k) — the data does not constrain it, so it adds no
+    emulator-error penalty. The cosmic covariance still governs those modes.
+
     Returns (K,K) covariance. Differentiable / JAX-pure."""
     # σ_* are FRACTIONAL; P_filt / delta_scale supply the absolute scale so the
-    # emu variance is in the same (absolute P1D)² units as cosmic_cov.
+    # emu variance is in the same (absolute P1D)² units as cosmic_cov. NaN-safe:
+    # data-range-restricted out-of-range cells arrive NaN -> contribute 0 variance.
+    sigma_Pfilt = jnp.nan_to_num(jnp.asarray(sigma_Pfilt), nan=0.0)
+    sigma_delta = jnp.nan_to_num(jnp.asarray(sigma_delta), nan=0.0)
     emu_var = (jnp.einsum("c,ck,ck->k", w_c**2, sigma_Pfilt**2, P_filt**2)         # P_filt channel
                + jnp.einsum("c,ck,ck->k", alpha_hcd**2, sigma_delta**2,           # delta channel
                             delta_scale**2))
