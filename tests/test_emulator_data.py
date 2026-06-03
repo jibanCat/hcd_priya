@@ -242,6 +242,47 @@ def test_make_batch_keys_and_shapes(tmp_path):
     assert np.isfinite(b["t_delta"][np.broadcast_to(m3, b["t_delta"].shape)]).all()
 
 
+def test_edge_emphasis_k_weight_shape_and_profile():
+    """edge_emphasis_k_weight: mean-1 over finite bins, U-shaped (edges > mid in log k),
+    all-ones when both gains are 0, and a noop on non-finite/zero k bins."""
+    from hcd_analysis.emulator.data import edge_emphasis_k_weight
+    kf = np.geomspace(4e-4, 7e-2, 172)
+    w = edge_emphasis_k_weight(kf, edge_gain=3.0, lowk_extra=2.0)
+    assert w.shape == kf.shape
+    assert np.isclose(w.mean(), 1.0, atol=1e-12)         # mean-1 normalization
+    # both EDGES out-weight the geometric-centre bin (U-shape in log k)
+    mid = int(np.argmin(np.abs(np.log10(kf) - np.log10(np.sqrt(kf[0] * kf[-1])))))
+    assert w[0] > w[mid] and w[-1] > w[mid]
+    # the lowest-k bin (where A_p's coherent residual lives) is up-weighted vs mid
+    assert w[0] > 1.0
+    # uniform (both gains 0) -> all ones
+    w0 = edge_emphasis_k_weight(kf, edge_gain=0.0, lowk_extra=0.0)
+    assert np.allclose(w0, 1.0)
+    # non-finite / zero k bins fall back to weight 1
+    kbad = kf.copy(); kbad[3] = np.nan; kbad[7] = 0.0
+    wb = edge_emphasis_k_weight(kbad, edge_gain=3.0, lowk_extra=2.0)
+    assert wb[3] == 1.0 and wb[7] == 1.0
+
+
+def test_make_batch_carries_k_weight_per_row(tmp_path):
+    """make_batch(k_weight=...) tiles the (K,) profile to a per-row (n,K) array so it
+    pads/batches like every other array; absent the arg there is no k_weight key."""
+    d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    R = d["x"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    idx = np.array([0, 1, 5, 9])
+    K = d["P_filt"].shape[2]
+    # without k_weight: key absent (back-compat)
+    assert "k_weight" not in make_batch(d, idx, norm)
+    # with k_weight: tiled to (n, K), each row identical
+    kw = np.linspace(0.5, 2.0, K)
+    b = make_batch(d, idx, norm, k_weight=kw)
+    assert b["k_weight"].shape == (len(idx), K)
+    assert b["k_weight"].dtype == np.float64
+    for r in range(len(idx)):
+        assert np.allclose(b["k_weight"][r], kw)
+
+
 def test_target_norm_roundtrip_to_physical(tmp_path):
     d = _load_fixture(tmp_path, n_k=8)
     R = d["x"].shape[0]

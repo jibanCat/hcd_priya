@@ -244,7 +244,8 @@ def _to_jnp_batch(b):
 def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
                batch_size=512, seed=0, key=None, patience=10, n_k=None,
                staged=False, prefit_baseline_epochs=8000, prefit_baseline_lr=2e-3,
-               freeze_baseline=None):
+               freeze_baseline=None, term_w=None, k_weight=None,
+               early_stop_metric="auto", weight_decay=1e-4):
     """Train one LOSO fold on ``train_idx``, validating on ``val_idx`` each epoch.
 
     - Fits the train-split target normalisation (``fit_target_norm``) on ``train_idx``.
@@ -265,15 +266,33 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
       while the θ-blind baseline stays pinned. This is NOT the buggy 3-stage
       ``staged`` schedule — it is a clean two-phase: fit the θ-blind structured mean,
       freeze it, train the θ-dependent signal.
-    - Minibatched AdamW with cosine-decay LR (over the total #steps), early stop on
-      the validation loss with ``patience`` epochs.
+    - Minibatched AdamW with cosine-decay LR (over the total #steps), early stop with
+      ``patience`` epochs.
+
+    RESIDUAL-HEAD TUNING (the A_p low-k bias fix):
+    - ``term_w`` (dict, optional) rescales the joint loss terms. UP-WEIGHTING
+      ``p_resid`` (e.g. {"p_resid": 4.0, ...}) concentrates the optimizer on the
+      cosmology signal inference needs (the uniform default dilutes it 1:5). Default
+      None -> uniform.
+    - ``k_weight`` (K,)-array, optional: a per-k EMPHASIS for the cosmology term
+      (low/high-k band edges, where the deployed residual is biased — A_p lives at
+      low-k). See ``data.edge_emphasis_k_weight``. Carried into every batch.
+    - ``early_stop_metric``: "auto" (default) early-stops on the val RESIDUAL
+      (cosmology) loss whenever the baseline is frozen — that is the inference-
+      relevant quantity, and the residual overfits past its val minimum on this
+      60-sim fold, so patience/restore-best on p_resid is the proper stop. "joint"
+      forces the old total-val-loss stop; "resid" forces the residual stop. When the
+      baseline is NOT frozen "auto" falls back to the joint loss (the baseline is
+      still moving so the total loss is the right monitor).
+    - ``weight_decay`` (AdamW): mild L2 on the trainable leaves for residual-head
+      generalization (default 1e-4, unchanged).
 
     ``staged=True`` dispatches to the 3-stage schedule (``train_fold_staged``):
     (1) baseline head only, (2) freeze baseline + train residual/delta/Head-A,
     (3) joint fine-tune. Early-stop on the val RESIDUAL (cosmology) loss.
 
     Returns ``(best_model, norm_stats, history)`` where history holds per-epoch
-    ``train_loss, val_loss, grad_norm, lr`` lists.
+    ``train_loss, val_loss, val_resid_loss, grad_norm, lr`` lists.
     """
     if staged:
         return train_fold_staged(
@@ -310,10 +329,26 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
     if freeze_baseline is None:
         freeze_baseline = did_prefit
 
+    # Resolve the early-stop metric: "auto" -> residual when the baseline is frozen
+    # (the cosmology term is then the only thing moving and the inference-relevant one),
+    # else the joint total loss.
+    if early_stop_metric == "auto":
+        stop_on_resid = bool(freeze_baseline)
+    elif early_stop_metric in ("resid", "p_resid"):
+        stop_on_resid = True
+    elif early_stop_metric == "joint":
+        stop_on_resid = False
+    else:
+        raise ValueError(f"early_stop_metric must be auto/resid/joint, got {early_stop_metric!r}")
+
     steps_per_epoch = max(1, int(np.ceil(len(train_idx) / batch_size)))
     total_steps = steps_per_epoch * epochs
-    opt = make_optimizer(lr=lr, steps=total_steps)
+    opt = make_optimizer(lr=lr, steps=total_steps, weight_decay=weight_decay)
     lr_sched = optax.cosine_decay_schedule(lr, total_steps)
+
+    # make_batch closure carrying the k-weight (per-row tiled inside make_batch).
+    def _mb(idx):
+        return make_batch(d, idx, norm_stats, k_weight=k_weight)
 
     # When freezing the baseline, partition it out so the joint optimizer never
     # touches its leaves (the θ-blind structured mean stays pinned at its floor);
@@ -322,14 +357,18 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
         join_mask = _trainable_mask(model, train_baseline=False, train_rest=True)
         diff_model, static_model = eqx.partition(model, join_mask)
         opt_state = opt.init(eqx.filter(diff_model, eqx.is_array))
-        joint_loss_fn = _loss_with_term_w(None)   # default uniform term_w
+        joint_loss_fn = _loss_with_term_w(term_w)   # term_w (e.g. up-weighted p_resid)
     else:
         opt_state = opt.init(eqx.filter(model, eqx.is_array))
 
-    val_batch = _to_jnp_batch(make_batch(d, val_idx, norm_stats))
+    val_batch = _to_jnp_batch(_mb(val_idx))
+    # the early-stop residual metric uses the SAME k-emphasis the loss optimizes,
+    # so the stop tracks what training drives (edge-emphasised cosmology MSE).
+    use_kw_es = k_weight is not None
 
-    history = {"train_loss": [], "val_loss": [], "grad_norm": [], "lr": []}
-    best_val = np.inf
+    history = {"train_loss": [], "val_loss": [], "val_resid_loss": [],
+               "grad_norm": [], "lr": []}
+    best_metric = np.inf
     best_model = model
     stall = 0
     step = 0
@@ -339,7 +378,7 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
         for mb in _iter_minibatches(rng, train_idx, batch_size):
             # CS-I2: pad the (ragged) final minibatch to a FIXED batch_size with
             # zero-contribution rows, so train_step keeps ONE static shape (traces once).
-            batch = _pad_batch(_to_jnp_batch(make_batch(d, mb, norm_stats)), batch_size)
+            batch = _pad_batch(_to_jnp_batch(_mb(mb)), batch_size)
             if freeze_baseline:
                 diff_model, opt_state, loss, gnorm = train_step_partitioned(
                     diff_model, static_model, opt, opt_state, batch, joint_loss_fn)
@@ -354,13 +393,17 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
         # AFTER the epoch's last update (step == #updates so far), not the epoch's first step.
         ep_lr = float(lr_sched(step))
         val_loss = float(evaluate(model, val_batch))
+        val_resid = float(p_resid_loss(model, val_batch, use_k_weight=use_kw_es))
         history["train_loss"].append(float(np.mean(ep_losses)))
         history["val_loss"].append(val_loss)
+        history["val_resid_loss"].append(val_resid)
         history["grad_norm"].append(float(np.mean(ep_gnorms)))
         history["lr"].append(ep_lr)
 
-        if val_loss < best_val - 1e-9:
-            best_val = val_loss
+        # EARLY-STOP / restore-best on the chosen metric (residual when frozen).
+        metric = val_resid if stop_on_resid else val_loss
+        if metric < best_metric - 1e-9:
+            best_metric = metric
             best_model = model
             stall = 0
         else:

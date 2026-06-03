@@ -282,6 +282,29 @@ def masked_mse(pred, target, mask, weight=None):
     return jnp.sum(sq) / denom
 
 
+def _k_weight_from_batch(batch):
+    """Per-k residual loss weight -> broadcastable (1,1,K), or None.
+
+    The RESIDUAL-HEAD k-emphasis knob (A_p low-k bias fix). When the batch carries a
+    ``k_weight`` array (shape (B,K) — a per-row tile of one (K,) profile, so it pads/
+    batches like every other array; all rows identical), the COSMOLOGY (``p_resid``)
+    term's per-element weight becomes ``inv_nc · k_weight`` so the optimizer attends
+    MORE to the up-weighted band edges (low-k where the Lyα amplitude Δ²_* — hence
+    A_p — pivots, and high-k) where the deployed residual was biased. Absent the key,
+    the residual term is the plain inv_nc-weighted MSE (back-compat / uniform).
+    Edge-emphasis fixes COHERENT bias; the CV/sampling SCATTER at low-k is left to
+    early-stop + C_emu (not chased).
+
+    Reads row 0 (the profile is row-invariant) and returns (1,1,K) so it broadcasts
+    against the (B,4,K) residual MSE without depending on the (padded) batch size.
+    """
+    kw = batch.get("k_weight")
+    if kw is None:
+        return None
+    kw = jnp.atleast_2d(kw)          # (B,K) (or (K,) -> (1,K))
+    return kw[0][None, None, :]      # (1,1,K), row-invariant profile
+
+
 def joint_loss(model, batch, term_w=None):
     """Single joint scalar (spec sec.4). Per-element means balance the 172 vs 3
     channel counts; term_w optionally rescales the named terms.
@@ -296,9 +319,12 @@ def joint_loss(model, batch, term_w=None):
     p_resid, delta) are all O(1) in standardized space, so the default term_w is
     UNIFORM.
 
-    A4: with per-channel standardization every term's per-element-mean MSE is O(1)
-    in transformed space, so the default term_w is uniform (no hand-sweep). It
-    stays an optional override.
+    ``term_w`` rescales the named terms. ``p_resid`` is the inference-relevant
+    cosmology term — UP-WEIGHTING it (e.g. term_w["p_resid"]>1) concentrates the
+    optimizer on the signal the likelihood needs (the joint default uniform dilutes
+    it 1:5 vs f_nhi/dndx/p_base/delta). The optional batch key ``k_weight`` (K,)
+    additionally re-weights the p_resid term PER-k (low/high-k edge emphasis); see
+    ``_k_weight_from_batch``.
 
     A3: the old meanF term was removed (zero model gradient; structural mean-flux).
     """
@@ -318,8 +344,11 @@ def joint_loss(model, batch, term_w=None):
     mask4 = m3 & jnp.ones_like(batch["t_p_resid"], bool)
     # BASELINE term: θ-blind cell-mean fit (σ_marg-standardized). inv_nc-weighted.
     lb_base = masked_mse(preds["P_filt_base"], batch["t_p_base"], mask4, weight=wcls4)
-    # COSMOLOGY term: σ_cosmo-whitened residual (the signal inference needs).
-    lb_resid = masked_mse(preds["P_filt_resid"], batch["t_p_resid"], mask4, weight=wcls4)
+    # COSMOLOGY term: σ_cosmo-whitened residual (the signal inference needs). The
+    # per-k k_weight (if present) emphasizes the band edges (the A_p low-k fix).
+    kw = _k_weight_from_batch(batch)
+    w_resid = wcls4 if kw is None else wcls4 * kw
+    lb_resid = masked_mse(preds["P_filt_resid"], batch["t_p_resid"], mask4, weight=w_resid)
     lb_dl = masked_mse(preds["delta"], batch["t_delta"],
                        m3 & jnp.ones_like(batch["t_delta"], bool), weight=wcls3)
     return (term_w["f_nhi"]*la_cddf + term_w["dndx"]*la_dndx
@@ -327,13 +356,20 @@ def joint_loss(model, batch, term_w=None):
             + term_w["delta"]*lb_dl)
 
 
-def p_resid_loss(model, batch):
+def p_resid_loss(model, batch, use_k_weight=False):
     """The COSMOLOGY (σ_cosmo-whitened residual) term alone — the early-stop /
     validation metric for the redesign (the quantity inference cares about).
 
     inv_nc-weighted masked MSE of the residual head vs t_p_resid, NaN-safe over the
-    per-row Nyquist mask. Lower == better cosmology resolution."""
+    per-row Nyquist mask. Lower == better cosmology resolution. When
+    ``use_k_weight`` and the batch carries ``k_weight``, the SAME per-k emphasis the
+    training loss uses is applied here too, so the early-stop metric tracks the
+    quantity the loss optimizes (and the band-edge attention is reflected in it)."""
     preds = jax.vmap(model)(batch["x"], batch["tau0"])
     mask4 = batch["mask"][:, None, :] & jnp.ones_like(batch["t_p_resid"], bool)
-    return masked_mse(preds["P_filt_resid"], batch["t_p_resid"], mask4,
-                      weight=batch["inv_nc"][:, :, None])
+    wcls4 = batch["inv_nc"][:, :, None]
+    if use_k_weight:
+        kw = _k_weight_from_batch(batch)
+        if kw is not None:
+            wcls4 = wcls4 * kw
+    return masked_mse(preds["P_filt_resid"], batch["t_p_resid"], mask4, weight=wcls4)

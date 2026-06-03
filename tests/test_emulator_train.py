@@ -294,6 +294,50 @@ def test_train_fold_returns_best_not_last(tmp_path):
     assert argmin < len(hist["val_loss"]) - 1 or len(hist["val_loss"]) == 60
 
 
+def test_train_fold_kweight_term_w_resid_earlystop(tmp_path):
+    """RESIDUAL-HEAD TUNING: train_fold accepts term_w (p_resid up-weight), k_weight
+    (per-k emphasis) and early_stop_metric; it runs, logs val_resid_loss, and when
+    the baseline is frozen (a pre-fit ran) the returned model is the best-by-RESIDUAL
+    epoch (restore-best on the cosmology metric), not the last."""
+    from hcd_analysis.emulator.data import make_batch, edge_emphasis_k_weight
+    from hcd_analysis.emulator.model import p_resid_loss
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+    kw = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=3.0, lowk_extra=2.0)
+    term_w = {"f_nhi": 1., "dndx": 1., "p_base": 1., "p_resid": 4., "delta": 1.}
+    # short pre-fit so the baseline is frozen (auto -> residual early-stop), long-ish
+    # joint loop + small patience so the residual rises after its min and we stop.
+    model, norm, hist = train_fold(
+        d, tr, va, n_basis=N_K, lr=2e-2, epochs=50, batch_size=8, seed=0,
+        key=jax.random.PRNGKey(0), patience=4, term_w=term_w, k_weight=kw,
+        early_stop_metric="auto", prefit_baseline_epochs=200)
+    _check_history(hist)
+    assert "val_resid_loss" in hist and len(hist["val_resid_loss"]) >= 1
+    # the returned (best) model's val RESIDUAL loss equals the history minimum (the
+    # early-stop metric is the residual when the baseline is frozen). Recompute with
+    # the SAME k-weighted metric the loop used.
+    val_batch = _to_jnp_batch(make_batch(d, va, norm, k_weight=kw))
+    got = float(p_resid_loss(model, val_batch, use_k_weight=True))
+    assert abs(got - float(np.min(hist["val_resid_loss"]))) <= 1e-6
+
+
+def test_train_fold_joint_earlystop_backcompat(tmp_path):
+    """early_stop_metric='joint' reproduces the original total-val-loss stop: the
+    returned model's joint val loss equals the history minimum (and k_weight=None /
+    term_w=None is the uniform back-compat path)."""
+    from hcd_analysis.emulator.data import make_batch
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+    model, norm, hist = train_fold(
+        d, tr, va, n_basis=None, lr=5e-2, epochs=60, batch_size=8, seed=0,
+        key=jax.random.PRNGKey(0), patience=5, early_stop_metric="joint")
+    best_val = float(np.min(hist["val_loss"]))
+    val_batch = _to_jnp_batch(make_batch(d, va, norm))
+    assert abs(float(evaluate(model, val_batch)) - best_val) <= 1e-6
+
+
 def test_checkpoint_meta_has_kgrid(tmp_path):
     """M4: saved .meta.json records the k-grid (kfkms + n_k) and the cache id, and
     load reconstructs. n_k matches len(kfkms)."""

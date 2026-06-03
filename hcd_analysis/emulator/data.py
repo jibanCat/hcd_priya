@@ -328,13 +328,55 @@ def fit_target_norm(d, train_idx):
     return stats
 
 
-def make_batch(d, idx, norm_stats):
+def edge_emphasis_k_weight(kfkms, edge_gain=3.0, lowk_extra=1.0, mid_frac=0.5):
+    """Per-k RESIDUAL loss weight (K,): a U-shaped low/high-k EDGE emphasis.
+
+    The deployed residual head is flat mid-band but biased at the band EDGES — low-k
+    (where the Lyα amplitude Δ²_* pivots, so A_p maps onto a coherent low-k residual)
+    and high-k. This builds a smooth weight in log10(k) that is ~1 in the mid-band and
+    rises toward both edges, so the optimizer (and the early-stop metric) attend MORE
+    to the edges where the COHERENT bias lives.
+
+    Profile: let u = (log10 k − log10 k_lo)/(log10 k_hi − log10 k_lo) ∈ [0,1] over the
+    finite k-range. The weight is ``1 + edge_gain·g(u)`` where g(u) is a symmetric
+    parabola ``(2u−1)²`` (0 at mid, 1 at both edges), PLUS an extra low-k ramp
+    ``lowk_extra·(1−u)`` so the A_p-relevant low-k edge gets additional pull (A_p is
+    the priority param). ``mid_frac`` is unused historically; kept for signature
+    stability. The weight is normalized to mean 1 over finite bins so the overall
+    p_resid term scale (hence its balance against term_w) is unchanged — only the
+    RELATIVE per-k attention shifts. Non-finite/zero k bins get weight 1.
+
+    Returns a float64 (K,) array. With edge_gain=0 and lowk_extra=0 it is all-ones
+    (the uniform/back-compat case).
+    """
+    k = np.asarray(kfkms, dtype=np.float64)
+    if k.ndim == 2:
+        k = k[0]
+    w = np.ones_like(k)
+    good = np.isfinite(k) & (k > 0)
+    if good.sum() < 2 or (edge_gain == 0.0 and lowk_extra == 0.0):
+        return w
+    lk = np.log10(k[good])
+    u = (lk - lk.min()) / max(lk.max() - lk.min(), 1e-12)      # 0 at low-k .. 1 at high-k
+    g = (2.0 * u - 1.0) ** 2                                    # symmetric edge bump
+    wg = 1.0 + edge_gain * g + lowk_extra * (1.0 - u)          # +extra low-k ramp
+    wg = wg / wg.mean()                                        # mean-1 over finite bins
+    w[good] = wg
+    return w
+
+
+def make_batch(d, idx, norm_stats, k_weight=None):
     """Assemble the exact dict joint_loss consumes for rows ``idx`` (spec sec.4).
 
     Targets t_* are in standardized log/arcsinh space; bins above native Nyquist
     stay NaN (joint_loss is NaN-safe). Inputs x are the already-unit-cube encoder
     inputs and are NOT re-transformed. mean_F_clean is a documented placeholder
     (see below). Everything is float64.
+
+    ``k_weight`` (K,), optional: a per-k RESIDUAL loss emphasis (see
+    ``edge_emphasis_k_weight``). When given it is carried in the batch under
+    ``k_weight`` and ``joint_loss``/``p_resid_loss`` apply it to the cosmology
+    (p_resid) term. Absent -> the loss is the uniform inv_nc-weighted MSE.
     """
     idx = np.asarray(idx)
     grp = d["snap_group_idx"][idx]                         # (n,) block index per row
@@ -388,7 +430,7 @@ def make_batch(d, idx, norm_stats):
     # mean-F head is wired (deferred, out of scope).
     mean_F_clean = np.exp(-d["tau0"][idx]).astype(np.float64)                   # (n,)
 
-    return {
+    batch = {
         "x": d["x"][idx].astype(np.float64),
         "tau0": d["tau0"][idx].astype(np.float64),
         "t_f_nhi": t_f_nhi.astype(np.float64),
@@ -403,6 +445,13 @@ def make_batch(d, idx, norm_stats):
         "inv_nalpha": inv_nalpha,
         "mean_F_clean": mean_F_clean,
     }
+    if k_weight is not None:
+        # carried as a PER-ROW (n,K) tile so it pads/batches like every other array
+        # (_pad_batch zero-pads it; padded rows are masked out anyway). The loss reads
+        # row 0 (all rows identical) — see model._k_weight_from_batch.
+        kw = np.asarray(k_weight, dtype=np.float64).ravel()
+        batch["k_weight"] = np.broadcast_to(kw, (len(idx), kw.shape[0])).astype(np.float64)
+    return batch
 
 
 def reconstruct_P_filt(P_filt_base, P_filt_resid, pf_stats):

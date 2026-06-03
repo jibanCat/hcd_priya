@@ -320,6 +320,88 @@ def test_p_resid_loss_is_residual_term_only():
     assert float(p_resid_loss(m, b3)) != base_loss
 
 
+def test_joint_loss_k_weight_emphasizes_residual_band():
+    # RESIDUAL-HEAD k-emphasis (A_p low-k fix): a per-k k_weight in the batch must
+    # (a) leave the loss UNCHANGED vs uniform when k_weight is all-ones (mean-1 noop);
+    # (b) reweight ONLY the p_resid term so a residual error concentrated at the
+    #     up-weighted bins counts MORE than the same error at down-weighted bins;
+    # (c) leave the f_nhi/dndx/p_base/delta terms bit-identical (k_weight touches
+    #     only the cosmology residual term); (d) gradients stay finite.
+    import numpy as np
+    key = jax.random.PRNGKey(71)
+    n_k = 8
+    m = Emulator(in_dim=10, n_k=n_k, key=key)
+    batch = _joint_batch(n_k)
+
+    # (a) all-ones k_weight (B,K) is a no-op
+    base = float(joint_loss(m, batch))
+    b_ones = dict(batch); b_ones["k_weight"] = jnp.ones((2, n_k))
+    assert abs(float(joint_loss(m, b_ones)) - base) <= 1e-12 * max(1.0, abs(base))
+
+    # _joint_batch masks the last 2 bins (above Nyquist); the FINITE bins are 0..n_k-3.
+    # (b) a k_weight that heavily up-weights a finite low-k bin changes the p_resid
+    #     term (the residual head has a non-zero error there).
+    kw = np.ones(n_k); kw[0] = 8.0; kw = kw / kw.mean()      # heavy at finite bin 0
+    b_kw = dict(batch); b_kw["k_weight"] = jnp.broadcast_to(jnp.asarray(kw), (2, n_k))
+    assert float(joint_loss(m, b_kw)) != base                # the residual term moved
+
+    # p_resid_loss with use_k_weight must reflect the SAME emphasis
+    r_uniform = float(p_resid_loss(m, b_kw, use_k_weight=False))
+    r_weighted = float(p_resid_loss(m, b_kw, use_k_weight=True))
+    assert r_weighted != r_uniform
+
+    # (c) place a residual error at the HEAVY finite bin (0) vs a LIGHT finite bin
+    #     (n_k-3): the weighted metric must penalise the heavy-bin error MORE.
+    light = n_k - 3
+    bad_heavy = np.asarray(batch["t_p_resid"]).copy(); bad_heavy[:, :, 0] += 3.0
+    bad_light = np.asarray(batch["t_p_resid"]).copy(); bad_light[:, :, light] += 3.0
+    b_h = dict(batch); b_h["t_p_resid"] = jnp.asarray(bad_heavy)
+    b_h["k_weight"] = jnp.broadcast_to(jnp.asarray(kw), (2, n_k))
+    b_l = dict(batch); b_l["t_p_resid"] = jnp.asarray(bad_light)
+    b_l["k_weight"] = jnp.broadcast_to(jnp.asarray(kw), (2, n_k))
+    r_heavy = float(p_resid_loss(m, b_h, use_k_weight=True))
+    r_light = float(p_resid_loss(m, b_l, use_k_weight=True))
+    assert r_heavy > r_light          # heavy-bin error costs more under the emphasis
+
+    # (d) gradients finite through the k-weighted joint loss
+    val, grad = jax.value_and_grad(lambda mm: joint_loss(mm, b_kw))(m)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    assert jnp.isfinite(val) and all(jnp.all(jnp.isfinite(g)) for g in leaves)
+
+
+def test_k_weight_only_touches_p_resid_term():
+    # The k_weight must NOT leak into f_nhi/dndx/p_base/delta. Build two batches that
+    # differ ONLY in k_weight; the four non-residual per-term MSEs must be identical.
+    import numpy as np
+    from hcd_analysis.emulator.model import masked_mse
+    key = jax.random.PRNGKey(72)
+    n_k = 8
+    m = Emulator(in_dim=10, n_k=n_k, key=key)
+    batch = _joint_batch(n_k)
+    kw = np.linspace(0.5, 2.0, n_k); kw = kw / kw.mean()
+
+    def terms(b):
+        preds = jax.vmap(m)(b["x"], b["tau0"])
+        m3 = b["mask"][:, None, :]
+        mask4 = m3 & jnp.ones_like(b["t_p_resid"], bool)
+        return dict(
+            f_nhi=float(masked_mse(preds["f_nhi"], b["t_f_nhi"], b["t_f_nhi_mask"],
+                                   weight=b["inv_nalpha"][:, None])),
+            dndx=float(masked_mse(preds["dndx"], b["t_dndx"], b["t_dndx_mask"],
+                                  weight=b["inv_nalpha"][:, None])),
+            p_base=float(masked_mse(preds["P_filt_base"], b["t_p_base"], mask4,
+                                    weight=b["inv_nc"][:, :, None])),
+            delta=float(masked_mse(preds["delta"], b["t_delta"],
+                                   m3 & jnp.ones_like(b["t_delta"], bool),
+                                   weight=b["inv_nc"][:, 1:, None])),
+        )
+    t0 = terms(batch)
+    b_kw = dict(batch); b_kw["k_weight"] = jnp.broadcast_to(jnp.asarray(kw), (2, n_k))
+    t1 = terms(b_kw)
+    for k in t0:
+        assert t0[k] == t1[k], k    # k_weight does not touch the non-residual terms
+
+
 def test_headA_outputs_are_tau0_invariant_by_gradient():
     # Task 12: Head A (f_nhi, dN/dX) must be EXACTLY tau0-invariant. It is structural
     # (Head A consumes only the latent, never tau0), so the Jacobian wrt tau0 is exactly

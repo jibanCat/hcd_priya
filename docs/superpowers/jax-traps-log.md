@@ -480,6 +480,40 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
 
 ---
 
+## 23. residual-head A_p Fisher-bias: overfit + seed-UNSTABLE unless the low/high-k EDGES are weighted — HIT
+- **Where:** `hcd_analysis/emulator/{model.py,data.py,train.py}` (joint_loss `k_weight`, `edge_emphasis_k_weight`,
+  train_fold `term_w`/`k_weight`/`early_stop_metric`), diagnosed by `scripts/diag_ap_fisher_bias.py`.
+- **Symptom:** the deployed LF fold-0 emulator's A_p (primordial amplitude) Fisher-bias was **+0.26σ** (over the
+  0.2σ gate) while n_s was fine (+0.009σ). The pred/true fractional residual was flat mid-band but biased at the
+  band EDGES — coherent ⟨P̂/P−1⟩ ≈ −1.6% at low-k (k<0.005) and +1.5% at high-k. Because the Lyα amplitude Δ²_*
+  pivots at k_*≈0.009 s/km, a coherent low-k residual maps onto A_p.
+- **Two distinct causes:** (a) the residual head OVERFITS past its val minimum (~epoch 16–37 on this 60-sim fold)
+  — the joint early-stop on the TOTAL val loss let it run to epoch 140 (the walkthrough), inflating the low-k
+  coherent residual. (b) The joint loss trained `p_resid` with UNIFORM `term_w` (diluted 1:5 vs f_nhi/dndx/p_base/
+  delta) and NO per-k weight, so the optimizer ignored the sparse, noisy band edges where A_p lives.
+- **Key finding (the trap):** early-stopping on the val RESIDUAL alone FIXES the overfit but is **seed-UNSTABLE for
+  A_p** — at uniform `term_w` the A_p bias swung 0.03σ (seed0) → 0.97σ (seed1) → 1.18σ (seed2). Different inits
+  land the residual head in different low-k coherent-residual states; with no edge pressure the optimizer never
+  removes the coherent low-k component, and A_p (a low-k-leveraged amplitude) reads it off. The bias is NOT a
+  capacity floor — it is an unconstrained low-k coherent degree of freedom.
+- **Fix (robust):** up-weight the cosmology term (`term_w["p_resid"]=8`) + a U-shaped per-k EDGE-emphasis weight on
+  the p_resid term (`edge_emphasis_k_weight(edge_gain=3, lowk_extra=2)`, mean-1 normalized so the term scale is
+  unchanged — only the relative low/high-k attention shifts) + mild weight-decay (3e-4) + early-stop on the
+  (k-weighted) residual. A_p bias → **+0.030σ (seed0), +0.025σ (seed1), −0.146σ (seed2)** — ALL under the gate;
+  n_s stayed <0.2σ; deployed median |P̂/P−1| dropped to 0.84% clean (sub-1% clean/LLS/subDLA); honest (a) 0.249→
+  0.204·σ_cosmo. The frozen θ-blind baseline (b)=0.031·σ_cosmo was untouched.
+- **Test trap (minor):** a unit test that up-weights a k-bin to prove the k_weight bites MUST pick a FINITE
+  (below-Nyquist, unmasked) bin — masked_mse zeros NaN/above-Nyquist bins before the weight multiply, so weighting
+  a masked bin is a numerical no-op (the loss is bit-identical and the `!=` assertion fails). Place the probe error
+  on a finite bin.
+- **Lesson:** when an emulator error biases a parameter that leverages a specific k-band (A_p↔low-k), an unweighted
+  MSE leaves that band an unconstrained coherent d.o.f. — the bias is then seed-dependent and an early-stop only
+  caps the magnitude, not the direction. Put PRINCIPLED per-k pressure (edge/inverse-CV) on the band the parameter
+  reads, decompose the residual there into COHERENT (fixable) vs CV-SCATTER (budget in C_emu), and gate on the
+  ABSOLUTE unit-cube shift + Fisher σ vs prior width (trap #22), not the σ-ratio alone, for the degenerate dirs.
+
+---
+
 ## Trap template (append new entries above this line)
 ```
 ## N. <short name> — HIT | GUARDED | WATCH

@@ -58,9 +58,24 @@ PARAM_NAMES = ["ns", "Ap", "herei", "heref", "alphaq",
 # Training / model helpers
 # ----------------------------------------------------------------------------- #
 
-def train_or_load(d, *, fold=0, n_basis=12, epochs=140, lr=1e-3, batch=512,
+# RESIDUAL-HEAD TUNING (the A_p low-k bias fix, scripts/diag_ap_fisher_bias.py
+# sweep). The DEPLOYED production recipe: up-weight the cosmology (p_resid) term,
+# emphasise the low/high-k band EDGES where the deployed residual was biased, mild
+# weight-decay, and early-stop on the val RESIDUAL (cosmology) loss (the residual
+# overfits past its val minimum on this 60-sim fold). This drove the A_p Fisher-bias
+# from +0.26σ (untuned, overfit) to ~+0.03σ ROBUSTLY across seeds (uniform/early-stop
+# -only was seed-unstable: A_p swung 0.03→1.2σ), with n_s <0.2σ and deployed median
+# |P̂/P−1| <1% (clean/LLS/subDLA).
+RESID_TUNE = dict(
+    term_w={"f_nhi": 1.0, "dndx": 1.0, "p_base": 1.0, "p_resid": 8.0, "delta": 1.0},
+    edge_gain=3.0, lowk_extra=2.0, weight_decay=3e-4, early_stop_metric="auto",
+)
+
+
+def train_or_load(d, *, fold=0, n_basis=24, epochs=180, lr=1e-3, batch=512,
                   seed=0, reuse=False):
-    """Train fold-0 (staged=False) or reload the cached checkpoint."""
+    """Train fold-0 (staged=False, the tuned residual recipe) or reload the cache."""
+    from hcd_analysis.emulator.data import edge_emphasis_k_weight
     n_k = d["P_tier_p"].shape[1]
     tr, va, ho = make_splits(d, fold, n_folds=8, holdout_frac=0.15)
     if reuse and Path(CKPT + ".eqx").exists():
@@ -70,11 +85,15 @@ def train_or_load(d, *, fold=0, n_basis=12, epochs=140, lr=1e-3, batch=512,
         print(f"[reuse] loaded {CKPT} (n_basis={meta['arch_cfg']['n_basis']})")
         return model, norm, history, (tr, va, ho)
     print(f"[train] fold={fold} epochs={epochs} n_basis={n_basis} "
-          f"train={len(tr)} val={len(va)} holdout={len(ho)}")
+          f"train={len(tr)} val={len(va)} holdout={len(ho)}  (tuned residual recipe)")
+    k_weight = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=RESID_TUNE["edge_gain"],
+                                      lowk_extra=RESID_TUNE["lowk_extra"])
     model, norm, history = T.train_fold(
         d, tr, va, n_basis=n_basis, lr=lr, epochs=epochs, batch_size=batch,
-        seed=seed, key=jax.random.PRNGKey(seed), patience=20, n_k=n_k,
-        staged=False)
+        seed=seed, key=jax.random.PRNGKey(seed), patience=30, n_k=n_k,
+        staged=False, term_w=RESID_TUNE["term_w"], k_weight=k_weight,
+        early_stop_metric=RESID_TUNE["early_stop_metric"],
+        weight_decay=RESID_TUNE["weight_decay"])
     arch_cfg = {"in_dim": 10, "n_k": n_k, "n_basis": n_basis}
     T.save_checkpoint(CKPT, model, arch_cfg, norm, seed=seed,
                       kfkms=d["kfkms"], cache_path=CACHE)
@@ -476,8 +495,8 @@ def fig09_cosmology_response(model, d, idx_pool, norm, kf, params=("ns", "Ap")):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--epochs", type=int, default=140)
-    ap.add_argument("--n-basis", type=int, default=12)
+    ap.add_argument("--epochs", type=int, default=180)
+    ap.add_argument("--n-basis", type=int, default=24)
     ap.add_argument("--reuse", action="store_true",
                     help="reload the cached walkthrough checkpoint instead of retraining")
     args = ap.parse_args()
