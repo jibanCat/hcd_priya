@@ -139,10 +139,12 @@ def test_jit_matches_eager_both_forms():
 def _cov_args(K=8, seed=0):
     rng = np.random.default_rng(seed)
     return dict(
-        sigma_Pfilt=jnp.array(rng.uniform(0.005, 0.02, (4, K))),
+        sigma_Pfilt=jnp.array(rng.uniform(0.005, 0.02, (4, K))),   # FRACTIONAL (δP/P)
         w_c=jnp.array([0.7, 0.18, 0.07, 0.05]),
-        sigma_delta=jnp.array(rng.uniform(0.005, 0.02, (3, K))),
+        sigma_delta=jnp.array(rng.uniform(0.005, 0.02, (3, K))),   # FRACTIONAL (δΔ/Δ)
         alpha_hcd=jnp.array([1.1, 0.9, 1.2]),
+        P_filt=jnp.array(rng.uniform(0.5, 1.5, (4, K))),           # absolute scale (4,K)
+        delta_scale=jnp.array(rng.uniform(0.05, 0.5, (3, K))),     # |Δ_c| absolute scale (3,K)
     )
 
 
@@ -152,10 +154,12 @@ def test_covariance_inflates_dla_high_k():
     cosmic = jnp.ones(K) * 1e-3
     cov_noflag = assemble_covariance(cosmic, a["sigma_Pfilt"], a["w_c"],
                                      a["sigma_delta"], a["alpha_hcd"],
+                                     a["P_filt"], a["delta_scale"],
                                      dla_shot_flag=jnp.zeros(K, bool))
     flag = jnp.arange(K) >= 6
     cov_flag = assemble_covariance(cosmic, a["sigma_Pfilt"], a["w_c"],
                                    a["sigma_delta"], a["alpha_hcd"],
+                                   a["P_filt"], a["delta_scale"],
                                    dla_shot_flag=flag)
     assert jnp.all(jnp.diag(cov_flag)[6:] > jnp.diag(cov_noflag)[6:])
     # off-flag bins unchanged
@@ -172,20 +176,23 @@ def test_covariance_full_offdiagonal_preserved():
     cosmic_full = jnp.array(A @ A.T) + 1e-3 * jnp.eye(K)   # SPD with off-diagonals
     flag = jnp.zeros(K, bool)
     cov = assemble_covariance(cosmic_full, a["sigma_Pfilt"], a["w_c"],
-                              a["sigma_delta"], a["alpha_hcd"], dla_shot_flag=flag)
+                              a["sigma_delta"], a["alpha_hcd"],
+                              a["P_filt"], a["delta_scale"], dla_shot_flag=flag)
     assert cov.shape == (K, K)
     # off-diagonals preserved exactly (emu var is diagonal-only)
     off = ~jnp.eye(K, dtype=bool)
     assert jnp.allclose(cov[off], cosmic_full[off])
     assert jnp.any(cov[off] != 0.0)
-    # diagonal = cosmic diag + emu var
-    emu_var = (jnp.einsum("c,ck->k", a["w_c"]**2, a["sigma_Pfilt"]**2)
-               + jnp.einsum("c,ck->k", a["alpha_hcd"]**2, a["sigma_delta"]**2))
+    # diagonal = cosmic diag + emu var (σ_* FRACTIONAL × absolute scale²)
+    emu_var = (jnp.einsum("c,ck,ck->k", a["w_c"]**2, a["sigma_Pfilt"]**2, a["P_filt"]**2)
+               + jnp.einsum("c,ck,ck->k", a["alpha_hcd"]**2, a["sigma_delta"]**2,
+                            a["delta_scale"]**2))
     assert jnp.allclose(jnp.diag(cov), jnp.diag(cosmic_full) + emu_var)
 
     # (K,) vector input -> pure diagonal cov
     cov_vec = assemble_covariance(jnp.diag(cosmic_full), a["sigma_Pfilt"], a["w_c"],
-                                  a["sigma_delta"], a["alpha_hcd"], dla_shot_flag=flag)
+                                  a["sigma_delta"], a["alpha_hcd"],
+                                  a["P_filt"], a["delta_scale"], dla_shot_flag=flag)
     assert jnp.allclose(cov_vec, jnp.diag(jnp.diag(cov)))
 
 
@@ -198,11 +205,14 @@ def test_covariance_both_error_channels_contribute():
     cosmic = jnp.zeros(K)
     flag = jnp.zeros(K, bool)
     full = jnp.diag(assemble_covariance(cosmic, a["sigma_Pfilt"], a["w_c"],
-                                        a["sigma_delta"], a["alpha_hcd"], dla_shot_flag=flag))
+                                        a["sigma_delta"], a["alpha_hcd"],
+                                        a["P_filt"], a["delta_scale"], dla_shot_flag=flag))
     no_pf = jnp.diag(assemble_covariance(cosmic, jnp.zeros((4, K)), a["w_c"],
-                                         a["sigma_delta"], a["alpha_hcd"], dla_shot_flag=flag))
+                                         a["sigma_delta"], a["alpha_hcd"],
+                                         a["P_filt"], a["delta_scale"], dla_shot_flag=flag))
     no_dl = jnp.diag(assemble_covariance(cosmic, a["sigma_Pfilt"], a["w_c"],
-                                         jnp.zeros((3, K)), a["alpha_hcd"], dla_shot_flag=flag))
+                                         jnp.zeros((3, K)), a["alpha_hcd"],
+                                         a["P_filt"], a["delta_scale"], dla_shot_flag=flag))
     assert jnp.all(no_pf < full) and jnp.all(no_dl < full)
     # the two channels sum to the full emu variance (quadrature/additive in var)
     assert jnp.allclose(no_pf + no_dl, full)
@@ -216,14 +226,69 @@ def test_covariance_jit_and_differentiable():
     cosmic = jnp.ones(K) * 1e-3
     flag = jnp.arange(K) >= 6
     eager = assemble_covariance(cosmic, a["sigma_Pfilt"], a["w_c"],
-                                a["sigma_delta"], a["alpha_hcd"], dla_shot_flag=flag)
+                                a["sigma_delta"], a["alpha_hcd"],
+                                a["P_filt"], a["delta_scale"], dla_shot_flag=flag)
     jitted = jax.jit(assemble_covariance, static_argnums=())(
-        cosmic, a["sigma_Pfilt"], a["w_c"], a["sigma_delta"], a["alpha_hcd"], flag)
+        cosmic, a["sigma_Pfilt"], a["w_c"], a["sigma_delta"], a["alpha_hcd"],
+        a["P_filt"], a["delta_scale"], flag)
     assert jnp.allclose(eager, jitted)
 
     def trace_cov(w_c, alpha):
         return jnp.trace(assemble_covariance(cosmic, a["sigma_Pfilt"], w_c,
-                                             a["sigma_delta"], alpha, dla_shot_flag=flag))
+                                             a["sigma_delta"], alpha,
+                                             a["P_filt"], a["delta_scale"], dla_shot_flag=flag))
     gw, ga = jax.grad(trace_cov, argnums=(0, 1))(a["w_c"], a["alpha_hcd"])
     assert jnp.all(jnp.isfinite(gw)) and jnp.all(jnp.isfinite(ga))
     assert jnp.any(gw != 0.0) and jnp.any(ga != 0.0)
+
+
+def test_covariance_fractional_units_dimensional():
+    """UNITS CONTRACT: σ_Pfilt / σ_delta are FRACTIONAL; P_filt / delta_scale
+    supply the absolute scale. Dimensional consequences:
+
+      (a) scaling P_filt by 10× scales the P_filt-channel emu variance by 100×
+          (variance ∝ P_filt²), with the delta channel held fixed;
+      (b) scaling delta_scale by 10× scales the delta-channel emu variance by 100×;
+      (c) a fractional σ of 0.0 gives ZERO emu contribution from that channel
+          regardless of the absolute scale (the pre-fix absolute-add bug would
+          have leaked a nonzero, scale-independent term);
+      (d) the assembled covariance is PSD.
+    """
+    K = 8
+    a = _cov_args(K, seed=5)
+    cosmic = jnp.zeros(K)               # isolate the emu variance
+    flag = jnp.zeros(K, bool)
+
+    def emu(P_filt=None, delta_scale=None, s_pf=None, s_dl=None):
+        return jnp.diag(assemble_covariance(
+            cosmic, a["sigma_Pfilt"] if s_pf is None else s_pf, a["w_c"],
+            a["sigma_delta"] if s_dl is None else s_dl, a["alpha_hcd"],
+            a["P_filt"] if P_filt is None else P_filt,
+            a["delta_scale"] if delta_scale is None else delta_scale,
+            dla_shot_flag=flag))
+
+    # (a) P_filt channel scales as P_filt²; isolate it by zeroing the delta σ.
+    base_pf = emu(s_dl=jnp.zeros((3, K)))
+    scal_pf = emu(P_filt=a["P_filt"] * 10.0, s_dl=jnp.zeros((3, K)))
+    assert jnp.allclose(scal_pf, base_pf * 100.0)
+
+    # (b) delta channel scales as delta_scale²; isolate it by zeroing the P_filt σ.
+    base_dl = emu(s_pf=jnp.zeros((4, K)))
+    scal_dl = emu(delta_scale=a["delta_scale"] * 10.0, s_pf=jnp.zeros((4, K)))
+    assert jnp.allclose(scal_dl, base_dl * 100.0)
+
+    # (c) zero FRACTIONAL σ -> exactly zero emu contribution for that channel,
+    #     independent of the (large) absolute scale.
+    assert jnp.array_equal(emu(s_pf=jnp.zeros((4, K))), base_dl)   # only delta survives
+    assert jnp.array_equal(emu(s_dl=jnp.zeros((3, K))), base_pf)   # only P_filt survives
+    assert jnp.all(emu(s_pf=jnp.zeros((4, K)), s_dl=jnp.zeros((3, K))) == 0.0)
+
+    # (d) PSD: add a cosmic SPD floor and check eigenvalues >= 0.
+    rng = np.random.default_rng(21)
+    A = rng.standard_normal((K, K))
+    cosmic_spd = jnp.array(A @ A.T) + 1e-3 * jnp.eye(K)
+    cov = assemble_covariance(cosmic_spd, a["sigma_Pfilt"], a["w_c"],
+                              a["sigma_delta"], a["alpha_hcd"],
+                              a["P_filt"], a["delta_scale"], dla_shot_flag=flag)
+    evals = jnp.linalg.eigvalsh(0.5 * (cov + cov.T))
+    assert jnp.all(evals >= -1e-9)
