@@ -512,6 +512,47 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   reads, decompose the residual there into COHERENT (fixable) vs CV-SCATTER (budget in C_emu), and gate on the
   ABSOLUTE unit-cube shift + Fisher σ vs prior width (trap #22), not the σ-ratio alone, for the degenerate dirs.
 
+## 24. low-k coherent residual is a TRAIN→VAL GENERALIZATION GAP, not a trainable offset — **HIT (diagnosis)** + **GUARDED (de-bias term helps)**
+- **Where:** residual-head refine (`scripts/push_residual_refine.py`), pushing trap #23 further
+  (the PI rejected the coherent low-k tilt the edge-emphasis only HALVED).
+- **Symptom:** the coherent residual (mean over cosmologies per (z,τ₀,k)) at clean/subDLA k<0.005
+  stays ~1.0–1.2% (vs the 0.73% CV floor) regardless of how hard you push the per-sim MSE / edge
+  weight. An explicit COHERENT de-bias loss term (penalize `Σ_cell ⟨r̂−t_resid⟩_θ²`, the per-cell
+  cosmology-mean of the residual fit error — the thing MSE leaves free because MSE is dominated by
+  the per-sim CV scatter) at low/moderate weight does NOTHING to the VAL coherent.
+- **Cause (the decomposition that settled it):** measure the per-cell coherent on TRAIN vs VAL
+  separately. Baseline: clean k<0.005 coherent = **0.45% TRAIN vs 1.22% VAL**; subDLA 0.23% vs 1.05%.
+  The model FITS the train cosmologies' low-k coherent structure fine — the val coherent is a pure
+  **generalization gap**. At k<0.005 there are only ~10 modes with ~1% per-mode CV, so 52 train sims
+  carry almost no information about a held-out cosmology's low-k coherent amplitude. The de-bias term
+  at w=8 drove TRAIN even lower (0.31%) while VAL was unchanged/slightly worse (1.40%) — confirming
+  it's not a trainable offset. The per-fold spread is itself the signature: fold-0 val coherent 0.95%,
+  fold-1 0.31% (some held-out sims sit closer to the train manifold).
+- **Fix (what genuinely helps):** a STRONG coherent de-bias term DOES pull the val coherent toward the
+  CV floor — but ONLY with a **FLAT (uniform-k)** weight at high strength (`w_coh≈80`), acting as a
+  REGULARIZER that stops the residual head chasing per-train-sim low-k fluctuations that don't
+  generalize. An EDGE-weighted coherent term (reusing trap #23's U-shape) over-corrects low-k and
+  TRADES it for a mid-band regression (clean mid 0.70→1.24% per-cell at w=40); INVERSE-CV weighting
+  makes low-k WORSE (it down-weights the high-CV low-k). More residual rank (n_basis 24→32→48) does
+  NOT shrink the gap (it is not a representation limit) and at 48 over-fits (worse + A_p −0.35σ).
+- **8-fold validation (the honest net):** flat-w80 vs the production baseline (73009c5, w_coh=0):
+  **gate failures (|A_p| or |n_s| > 0.2σ) 1/8 vs 3/8**; n_s RMS 0.133 vs 0.182σ; A_p RMS 0.150 vs
+  0.147σ; clean low-k per-cell coherent ≤ CV floor on **6/8 vs 4/8** folds (mean 0.71 vs 0.76%);
+  deployed clean median 0.55 vs 0.64%. A NET improvement — BUT no recipe is uniformly safe: a ~0.3σ
+  PER-FOLD A_p/n_s swing persists in BOTH (baseline fails folds 1/4/5; flat-w80 fails fold-3). The de-
+  bias REDISTRIBUTES which fold fails rather than removing the scatter, because that scatter is the
+  finite-sim (60-cosmology LOSO) sampling of the low-k Jacobian, not a fittable bias.
+- **Scoring trap (important):** `diag_ap_fisher_bias.coherent_vs_cv` pools ALL z=3 rows and means over
+  sims — this MIXES the τ₀(alpha) cells and UNDER-states the true per-(z,τ₀) coherent (the PI's spec
+  `Σ_cell⟨·⟩_θ²`). Score the coherent PER-CELL (`percell_coherent`): the per-cell numbers run higher
+  (baseline clean mid 0.43% pooled vs 0.70% per-cell) and the band trades are only visible there.
+- **Lesson:** before throwing capacity/loss-terms at a coherent emulator bias, split it TRAIN-vs-VAL.
+  If TRAIN≪VAL it is a finite-sim generalization gap, NOT a fittable systematic — no training pressure
+  removes it; a strong FLAT de-bias regularizer nudges it toward the CV floor, and the residue is
+  irreducible on that sim set (budget it in C_emu). Targeted (edge/inverse-CV) weights TRADE bands;
+  uniform spreads the pressure. And always score the coherent on the SAME grouping the metric specifies
+  (per-cell), not a pooled proxy.
+
 ---
 
 ## Trap template (append new entries above this line)
