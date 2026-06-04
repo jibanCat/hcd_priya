@@ -306,6 +306,91 @@ class DeltaHead(eqx.Module):
         return self.coeffs(cond) @ basis                # (n_classes, K)
 
 
+class FixedMeanHead(eqx.Module):
+    """The DEFAULT (delta_mode='none') head: a FIXED, THETA-INDEPENDENT z-resolved
+    mean correction on top of the per-k ``log_rho``.
+
+    The validated MF default (commit d93fadc / scripts/diag_mf_complexity.py): the
+    LF->HF correction is ~94-95% the fixed resolution tilt and only ~5% theta-
+    departure, and the learned MLP delta-head OVER-FITS that 5% on 6 HF sims (n_s
+    Fisher bias 4 sigma).  The rho(k,z)-ONLY model (this head + log_rho) cures it
+    (worst |n_s|~2 sigma, |A_p|~1.4 sigma -- best for A_p, the priority param).
+
+    ``MultiFidelity.g`` returns ``log_rho[None,:] + head(cond, basis)``.  This head
+    returns ``gbar(z,k) - log_rho`` (the per-z fixed mean MINUS the per-k global
+    mean), so the combined g is exactly ``gbar(z,k)`` -- the THETA-INDEPENDENT,
+    z-resolved mean LF->HF log-ratio.  ALL theta-dependence stays in f_LF; there is
+    NO learned theta-correction (the over-fit head is removed from this path).
+
+    ``gbar_tab`` (Nz, n_classes, K) is the per-z fixed-mean table MINUS log_rho;
+    ``z_tab`` (Nz,) the sorted physical z grid.  At eval the head linearly
+    interpolates the table in z (clamped at the table edges) from cond[9] (z_unit).
+    Differentiable & jittable; ``coeffs`` returns zeros (no basis is used, so the
+    coeff-L2 term is a no-op for this head).
+    """
+    gbar_tab: jax.Array        # (Nz, n_classes, K)  fixed z-trend (gbar - log_rho)
+    z_tab: jax.Array           # (Nz,) physical z, ascending
+    n_classes: int = eqx.field(static=True)
+    n_basis: int = eqx.field(static=True)
+
+    def __init__(self, gbar_tab, z_tab, n_basis=4):
+        self.gbar_tab = jnp.asarray(gbar_tab)
+        self.z_tab = jnp.asarray(z_tab)
+        self.n_classes = int(jnp.asarray(gbar_tab).shape[1])
+        self.n_basis = int(n_basis)
+
+    def coeffs(self, cond):
+        return jnp.zeros((self.n_classes, self.n_basis))
+
+    def __call__(self, cond, basis):
+        z_unit = cond[9]
+        z_phys = z_unit * (Z_LIMITS[1] - Z_LIMITS[0]) + Z_LIMITS[0]
+        # linear interp in z per (class,k); jnp.interp clamps at the table edges.
+        def per_ck(col):                                   # col over z: (Nz,)
+            return jnp.interp(z_phys, self.z_tab, col)
+        flat = self.gbar_tab.reshape(self.z_tab.shape[0], -1)   # (Nz, C*K)
+        vals = jax.vmap(per_ck, in_axes=1)(flat)                # (C*K,)
+        return vals.reshape(self.n_classes, -1)
+
+
+class GlobalLinearHead(eqx.Module):
+    """delta_mode='linear': rho + a SINGLE GLOBAL linear-in-theta amplitude * a
+    fixed smooth per-class k-shape (the sweep's variant (b)).
+
+    The MINIMAL smooth theta-correction, for users who want a WEAK theta term WITH
+    an explicit A_p-direction prior (the global linear amplitude can be priored
+    toward the A_p direction).  g_delta(theta,z,k) = a(theta) * shape_c(k), where
+    a(theta) = w . (cond - 0.5) + b is ONE scalar linear functional of the
+    conditioning (9 cosmo params + z_unit + tau0), and shape_c(k) = S[c] @ basis is
+    a per-class smooth k-shape.  Params: (in_dim + 1) + n_classes*n_basis -- a tiny,
+    smooth, near-fixed correction.  Differentiable & jittable; coeffs() returns
+    a(theta)*S (per-class basis coeffs, so the coeff-L2 term controls it).
+    """
+    w: jax.Array               # (in_dim,) linear weights (cosmo + z_unit + tau0)
+    b: jax.Array               # () scalar bias
+    S: jax.Array               # (n_classes, n_basis) per-class smooth k-shape coeffs
+    n_classes: int = eqx.field(static=True)
+    n_basis: int = eqx.field(static=True)
+
+    def __init__(self, in_dim=11, n_classes=N_CLASSES, n_basis=4, key=None):
+        k1, k2 = jax.random.split(key)
+        self.w = 1e-3 * jax.random.normal(k1, (in_dim,))
+        self.b = jnp.zeros(())
+        self.S = 1e-3 * jax.random.normal(k2, (n_classes, n_basis))
+        self.n_classes = int(n_classes)
+        self.n_basis = int(n_basis)
+
+    def amp(self, cond):
+        # centre the unit-cube inputs at 0.5 so a==b at the fiducial centre.
+        return jnp.dot(self.w, cond - 0.5) + self.b
+
+    def coeffs(self, cond):
+        return self.amp(cond) * self.S                 # (n_classes, n_basis)
+
+    def __call__(self, cond, basis):
+        return self.coeffs(cond) @ basis               # (n_classes, K)
+
+
 def make_cond(x, tau0):
     """Conditioning vector for the DeltaHead: [params_unit(9), z_unit(1), tau0(1)].
 
@@ -318,13 +403,36 @@ def make_cond(x, tau0):
 # The full multi-fidelity forward model
 # ---------------------------------------------------------------------------- #
 class MultiFidelity(eqx.Module):
-    """P_MF = ( rho(k) * f_LF * exp(g) ) * res_corr  -- the full MF forward model.
+    """P_MF = ( rho(k,z) * f_LF ) * res_corr  -- the full MF forward model.
 
-    Holds the FROZEN LF backbone (``lf_model`` + its ``lf_norm`` stats, carried as
-    STATIC python objects -- the LF model is not trained here), the learned
-    ``DeltaHead`` (the only trainable submodule), the FIXED smooth k-basis, the
-    log-ratio prior ``log_rho`` (per-k; default 0 == rho==1), and the FIXED res_corr
-    table.  All forward methods are pure & differentiable in (theta, tau0).
+    DEFAULT forward model (``delta_mode='none'``, validated -- commit d93fadc /
+    scripts/diag_mf_complexity.py):
+
+        log P_MF = log P_hat_LF(theta,z,k) + rho(k,z) + log res_corr(z,k)
+
+    where ``rho(k,z) = log_rho(k) + gbar(z,k)-correction`` is the FIXED per-(k,z)
+    mean LF->HF log-ratio (THETA-INDEPENDENT: ALL theta-dependence lives in f_LF).
+    This is the rho(k,z)-ONLY model -- the learned MLP delta-head is REMOVED from the
+    default path because it OVER-FITS the theta-gradient on 6 HF sims (n_s Fisher
+    bias 4 sigma; the LF->HF correction is 94-95% fixed resolution tilt, only ~5%
+    theta-departure).  rho(k,z)-only cures it (worst |n_s|~2 sigma, |A_p|~1.4 sigma --
+    best for A_p, the priority param).
+
+    The trainable submodule is held in ``delta_head`` and selected by
+    ``delta_mode`` (carried as a STATIC field, informational):
+      * ``'none'``   -- ``FixedMeanHead``: g == gbar(z,k), no theta term (DEFAULT).
+      * ``'linear'`` -- ``GlobalLinearHead``: rho + ONE global linear-in-theta
+                        amplitude * a fixed per-class k-shape (the minimal smooth
+                        theta-correction, for users wanting a weak theta term WITH an
+                        A_p-direction prior; sweep variant (b)).
+      * ``'mlp'``    -- ``DeltaHead``: the over-fit learned MLP (kept for diagnostics
+                        / ablation ONLY -- NOT recommended; n_s Fisher bias 4 sigma).
+    All three share the ``(cond, basis) -> (n_classes, K)`` head interface so the
+    forward (``g``) is identical; only the head's functional form differs.
+
+    Also holds the FROZEN LF backbone (``lf_model`` + ``lf_norm``), the FIXED smooth
+    k-basis, the per-k ``log_rho``, and the FIXED res_corr table.  All forward
+    methods are pure & differentiable in (theta, tau0).
 
     Grids (all log10-k, jnp float64, STATIC arrays):
       * ``lf_logk``   -- the LF backbone's native 172-bin grid (for the LF eval);
@@ -333,16 +441,19 @@ class MultiFidelity(eqx.Module):
     The LF backbone is FROZEN via ``jax.lax.stop_gradient`` on its weights inside the
     forward (see ``_freeze``/``lf_predict_logP``): HMC grads of logP flow to the
     INPUT theta through the LF forward, but NEVER to the LF parameters, so only the
-    DeltaHead is ever trained.  (NB: ``lf_model`` is a NORMAL dynamic field -- NOT a
-    ``static`` field: a static field holding a sub-Module does NOT freeze it because
-    equinox recurses into it AND the static-captured copy can desync from the
-    differentiated leaves, so the stop_gradient would not bind; keeping it dynamic
-    gives a single, unambiguous leaf set that ``_freeze``'s stop_gradient pins to
-    zero gradient.  ``train_delta_head`` optimizes the DeltaHead alone, so the LF
-    leaves never reach the optimizer regardless.)  ``lf_norm`` is a dict of plain
-    numpy arrays (host-side constants read via ``jnp.asarray``) and stays static.
+    delta_head (when it has trainable leaves) is ever trained.  (NB: ``lf_model`` is a
+    NORMAL dynamic field -- NOT a ``static`` field: a static field holding a
+    sub-Module does NOT freeze it because equinox recurses into it AND the
+    static-captured copy can desync from the differentiated leaves, so the
+    stop_gradient would not bind; keeping it dynamic gives a single, unambiguous leaf
+    set that ``_freeze``'s stop_gradient pins to zero gradient.)  ``lf_norm`` is a
+    dict of plain numpy arrays (host-side constants read via ``jnp.asarray``) and
+    stays static.  NB the default ``FixedMeanHead`` has NO trainable leaves (its
+    ``gbar_tab``/``z_tab`` are fixed host-side tables, dynamic leaves but not
+    optimized), so the default MF forward is a PURE fixed function of (theta,tau0)
+    that is still fully HMC-differentiable in theta through f_LF.
     """
-    delta_head: DeltaHead
+    delta_head: eqx.Module
     lf_model: Emulator
     basis: jax.Array
     log_rho: jax.Array
@@ -352,10 +463,11 @@ class MultiFidelity(eqx.Module):
     logk_rc: jax.Array
     rc_vals: jax.Array
     n_tail: int = eqx.field(static=True)
+    delta_mode: str = eqx.field(static=True)
     lf_norm: object = eqx.field(static=True)
 
     def __init__(self, lf_model, lf_norm, eval_logk, lf_logk, delta_head, basis,
-                 log_rho, z_rc, logk_rc, rc_vals, n_tail=6):
+                 log_rho, z_rc, logk_rc, rc_vals, n_tail=6, delta_mode="none"):
         self.lf_model = lf_model
         # lf_norm is a STATIC field: a fixed host-side constant (the LF backbone's
         # P_filt/channel norm dict), read via jnp.asarray in the forward and never
@@ -375,6 +487,10 @@ class MultiFidelity(eqx.Module):
         self.logk_rc = jnp.asarray(logk_rc)
         self.rc_vals = jnp.asarray(rc_vals)
         self.n_tail = n_tail
+        if delta_mode not in ("none", "linear", "mlp"):
+            raise ValueError(
+                f"delta_mode must be 'none'|'linear'|'mlp', got {delta_mode!r}")
+        self.delta_mode = delta_mode
 
     # -- pieces -------------------------------------------------------------- #
     def lf_logP(self, x, tau0):
@@ -383,7 +499,13 @@ class MultiFidelity(eqx.Module):
                                     x, tau0, self.eval_logk, n_tail=self.n_tail)
 
     def g(self, x, tau0):
-        """Learned log-ratio correction g (4, K_eval) = log_rho + delta_head."""
+        """Log-ratio correction g (4, K_eval) = log_rho + delta_head(cond, basis).
+
+        For the DEFAULT ``delta_mode='none'`` the head is a ``FixedMeanHead`` whose
+        output is ``gbar(z,k)-log_rho``, so ``g == gbar(z,k)`` -- the FIXED,
+        THETA-INDEPENDENT z-resolved mean LF->HF log-ratio (all theta-dependence is
+        in f_LF).  For ``'linear'``/``'mlp'`` the head adds a (small) learned
+        theta-correction on top of log_rho."""
         cond = make_cond(x, tau0)
         return self.log_rho[None, :] + self.delta_head(cond, self.basis)
 
@@ -518,6 +640,35 @@ def mean_log_ratio_rho(targets, eval_logk):
         return np.nanmean(g.reshape(-1, g.shape[-1]), axis=0)
 
 
+def fixed_mean_table(targets, log_rho, *, train_mask_rows=None):
+    """Per-z fixed-mean table ``gbar(z,k) - log_rho`` for the FixedMeanHead (default).
+
+    ``gbar(z,k)`` is the THETA-INDEPENDENT mean LF->HF log-ratio at each redshift,
+    averaged over ALL sims & alpha at that z (the population fixed mean).  We
+    subtract the per-k global ``log_rho`` so the table is what ``FixedMeanHead``
+    adds ON TOP of ``log_rho`` (then ``MultiFidelity.g == log_rho + (gbar-log_rho)
+    == gbar(z,k)``).  For HF-LOSO build it from TRAIN rows only (``train_mask_rows``)
+    so the held-out sim never leaks into the fixed mean.
+
+    Returns ``(tab (Nz, n_classes, K), z_tab (Nz,))`` -- host-side numpy, z ascending.
+    """
+    rows = (np.arange(targets["x"].shape[0]) if train_mask_rows is None
+            else np.asarray(train_mask_rows))
+    g = targets["g"][rows]                               # (B,4,K)
+    z = np.round(targets["x"][rows, 9] * (Z_LIMITS[1] - Z_LIMITS[0]) + Z_LIMITS[0], 2)
+    zvals = np.array(sorted(set(z)))
+    K = g.shape[-1]
+    log_rho = np.asarray(log_rho)
+    tab = np.zeros((len(zvals), N_CLASSES, K))
+    with np.errstate(invalid="ignore"):
+        for i, zz in enumerate(zvals):
+            m = (z == zz)
+            gm = np.nanmean(g[m], axis=0)                # (4,K) mean over sims&alpha at z
+            gm = np.where(np.isfinite(gm), gm, 0.0)
+            tab[i] = gm - log_rho[None, :]               # subtract per-k global mean
+    return tab, zvals
+
+
 @eqx.filter_value_and_grad
 def _loss_and_grad(delta_head, basis, log_rho, cond, g_target, mask, w_k,
                    coeff_l2, mean_prior_w):
@@ -592,6 +743,87 @@ def train_delta_head(targets, basis, log_rho, eval_logk, *, train_mask_rows=None
     return head, {"loss": history}
 
 
+def train_global_linear_head(targets, basis, log_rho, eval_logk, *,
+                             train_mask_rows=None, n_basis=4, lr=3e-3, epochs=400,
+                             coeff_l2=1e-1, mean_prior_w=1e-1, w_k=None, seed=0,
+                             ap_dir=None, ap_prior_w=0.0):
+    """Fit the ``GlobalLinearHead`` (delta_mode='linear') on the measured g targets.
+
+    The sweep's variant (b): ONE global linear-in-theta amplitude * a fixed per-class
+    k-shape.  Same masked weighted-MSE + coeff-L2 + mean-ratio prior as
+    ``train_delta_head`` (so it's scored identically), PLUS an OPTIONAL A_p-direction
+    prior on the linear weight ``w``: if ``ap_dir`` (in_dim,) is given, add
+    ``ap_prior_w * || w - (w.u_hat) u_hat ||^2`` where ``u_hat = ap_dir/|ap_dir|`` --
+    i.e. softly pull the global amplitude to vary ONLY along the A_p direction (so the
+    weak theta term is interpretable as an A_p amplitude tweak, not a free n_s tilt).
+    ``ap_prior_w=0`` (default) leaves it a free global linear amplitude.
+    Returns ``(head, history)``.  Full-batch Adam.
+    """
+    import optax
+    K = basis.shape[1]
+    rows = (np.arange(targets["x"].shape[0]) if train_mask_rows is None
+            else np.asarray(train_mask_rows))
+    cond = jnp.asarray(np.concatenate(
+        [targets["x"][rows], targets["tau0"][rows][:, None]], axis=1))   # (B,in)
+    g_target = jnp.asarray(np.nan_to_num(targets["g"][rows], nan=0.0))
+    mask = jnp.asarray(np.isfinite(targets["g"][rows]))
+    w_k = jnp.ones(K) if w_k is None else jnp.asarray(w_k)
+    basis_j = jnp.asarray(basis); log_rho_j = jnp.asarray(log_rho)
+
+    head = GlobalLinearHead(in_dim=cond.shape[1], n_classes=N_CLASSES,
+                            n_basis=n_basis, key=jax.random.PRNGKey(seed))
+    if ap_dir is not None and ap_prior_w > 0.0:
+        u = jnp.asarray(ap_dir)
+        u = u / jnp.maximum(jnp.linalg.norm(u), 1e-30)
+    else:
+        u = None
+
+    @eqx.filter_value_and_grad
+    def loss_fn(head):
+        g_pred = jax.vmap(lambda c: head(c, basis_j))(cond)            # (B,4,K)
+        g_full = log_rho_j[None, None, :] + g_pred
+        diff = jnp.where(mask, g_full - g_target, 0.0)
+        wk = w_k[None, None, :]
+        data = jnp.sum((diff ** 2) * wk) / jnp.maximum(jnp.sum(wk * mask), 1.0)
+        coeffs = jax.vmap(head.coeffs)(cond)
+        l2 = coeff_l2 * jnp.mean(coeffs ** 2)
+        mean_g = jnp.mean(g_pred, axis=2)
+        prior = mean_prior_w * jnp.mean(mean_g ** 2)
+        ap_term = 0.0
+        if u is not None:
+            # penalize the component of w ORTHOGONAL to the A_p direction.
+            w_perp = head.w - jnp.dot(head.w, u) * u
+            ap_term = ap_prior_w * jnp.sum(w_perp ** 2)
+        return data + l2 + prior + ap_term
+
+    opt = optax.adam(lr)
+    opt_state = opt.init(eqx.filter(head, eqx.is_array))
+
+    @eqx.filter_jit
+    def step(head, opt_state):
+        loss, grad = loss_fn(head)
+        updates, opt_state = opt.update(grad, opt_state, eqx.filter(head, eqx.is_array))
+        head = eqx.apply_updates(head, updates)
+        return head, opt_state, loss
+
+    history = []
+    for _ in range(epochs):
+        head, opt_state, loss = step(head, opt_state)
+        history.append(float(loss))
+    return head, {"loss": history}
+
+
+def build_default_head(targets, log_rho, *, train_mask_rows=None, n_basis=4):
+    """Build the DEFAULT (delta_mode='none') ``FixedMeanHead`` from measured targets.
+
+    Convenience wrapper: computes the per-z fixed-mean table (``fixed_mean_table``)
+    and returns a ready ``FixedMeanHead``.  NO fitting -- the fixed mean is a pure
+    average over the (train) rows.  Use with ``build_multifidelity(..., log_rho=...,
+    delta_mode='none')``."""
+    tab, ztab = fixed_mean_table(targets, log_rho, train_mask_rows=train_mask_rows)
+    return FixedMeanHead(tab, ztab, n_basis=n_basis)
+
+
 # ---------------------------------------------------------------------------- #
 # Convenience: load the frozen LF backbone + build a MultiFidelity
 # ---------------------------------------------------------------------------- #
@@ -605,17 +837,28 @@ def load_lf_backbone(fold=0, ckpt_dir="checkpoints"):
     return model, meta, norm, lf_logk
 
 
-def build_multifidelity(lf_model, lf_norm, lf_logk, delta_head, *, eval_logk,
-                        log_rho=None, n_basis=4, res_dir=RES_CORR_DIR, n_tail=6):
-    """Assemble a ``MultiFidelity`` from a frozen LF backbone + a trained DeltaHead.
+_HEAD_MODE = {"FixedMeanHead": "none", "GlobalLinearHead": "linear",
+              "DeltaHead": "mlp"}
 
-    ``log_rho`` (K,) optional (default zeros == rho==1).  Builds the smooth k-basis
-    and loads res_corr internally.  Returns the ``MultiFidelity`` module."""
+
+def build_multifidelity(lf_model, lf_norm, lf_logk, delta_head, *, eval_logk,
+                        log_rho=None, n_basis=4, res_dir=RES_CORR_DIR, n_tail=6,
+                        delta_mode=None):
+    """Assemble a ``MultiFidelity`` from a frozen LF backbone + a head.
+
+    ``delta_head`` is one of ``FixedMeanHead`` (default 'none'), ``GlobalLinearHead``
+    ('linear'), or ``DeltaHead`` ('mlp').  ``delta_mode`` is inferred from the head
+    TYPE when None (override only for a custom head).  ``log_rho`` (K,) optional
+    (default zeros == rho==1).  Builds the smooth k-basis and loads res_corr
+    internally.  Returns the ``MultiFidelity`` module."""
     basis = smooth_k_basis(jnp.asarray(eval_logk), n_basis=n_basis)
     if log_rho is None:
         log_rho = np.zeros(len(eval_logk))
+    if delta_mode is None:
+        delta_mode = _HEAD_MODE.get(type(delta_head).__name__, "mlp")
     z_rc, logk_rc, rc_vals = load_res_corr(res_dir)
     return MultiFidelity(
         lf_model=lf_model, lf_norm=lf_norm, eval_logk=eval_logk, lf_logk=lf_logk,
         delta_head=delta_head, basis=basis, log_rho=log_rho,
-        z_rc=z_rc, logk_rc=logk_rc, rc_vals=rc_vals, n_tail=n_tail)
+        z_rc=z_rc, logk_rc=logk_rc, rc_vals=rc_vals, n_tail=n_tail,
+        delta_mode=delta_mode)

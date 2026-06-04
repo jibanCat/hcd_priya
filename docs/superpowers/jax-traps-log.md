@@ -626,6 +626,28 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   explicitly with `eqx.filter_jit`, or jit a plain function that closes over (or takes as a
   filtered arg) the module. Bound-method jit silently turns the whole module into a static arg.
 
+## 28. Polymorphic Equinox head + a head with NO trainable leaves (rho-only MF default) — WATCH
+- **Where:** the MF `delta_mode` refactor (`multifidelity.py`): the default
+  `FixedMeanHead` (delta_mode='none') replaces the over-fit learned `DeltaHead`.
+- **Symptom:** none observed — a design note. `MultiFidelity.delta_head` is now one of
+  three `eqx.Module` types (`FixedMeanHead`/`GlobalLinearHead`/`DeltaHead`) sharing a
+  `(cond, basis) -> (n_classes, K)` interface, selected by a STATIC `delta_mode` string.
+- **Cause/care points:** (a) the default `FixedMeanHead` carries `gbar_tab`/`z_tab` as
+  DYNAMIC array leaves but they are a FIXED host-side table, never optimized — so the
+  default MF forward is a pure fixed function of (theta,tau0) yet still fully HMC-
+  differentiable in theta THROUGH f_LF (the only theta-path). `eqx.filter_grad` of the MF
+  wrt the head gives all-zero grads for FixedMeanHead's leaves (no loss touches them) —
+  that's correct, not a bug. (b) `delta_mode` is a `static=True` str field, hashable, so
+  `eqx.filter_jit` is fine. (c) the head is selected by TYPE in `build_multifidelity`
+  (`_HEAD_MODE` map); pass `delta_mode=` explicitly only for a custom head type.
+- **Fix:** keep the head interface uniform (`coeffs(cond)` + `__call__(cond, basis)`); the
+  forward `g = log_rho + head(cond, basis)` is identical across modes. FixedMeanHead's
+  `coeffs` returns zeros so the shared coeff-L2 loss term is a harmless no-op.
+- **Lesson:** an Equinox "head" need not have trainable params — a dynamic array leaf that
+  no loss differentiates is a frozen lookup table that still flows fine through jit/grad.
+  Keep the variant selector a hashable static scalar, and the head interface uniform so the
+  forward/jit/vmap/grad code is mode-agnostic.
+
 ## Trap template (append new entries above this line)
 ```
 ## N. <short name> — HIT | GUARDED | WATCH

@@ -61,6 +61,40 @@ def test_norm_uses_only_train_rows():
     z = apply_norm(x, stats)
     assert np.allclose(z[:5].mean(0), 0.0, atol=1e-9)
 
+
+def test_fit_norm_relative_std_floor_lifts_collapsed_columns():
+    """min_std_frac floors a near-degenerate column's std at a fraction of the
+    channel median, so a standardized value of an off-train sample no longer
+    explodes — while well-conditioned columns stay BIT-IDENTICAL (floor only
+    raises, never lowers). Mirrors the Δ_c std-collapse fix in fit_target_norm."""
+    rng = np.random.default_rng(0)
+    n_rows, n_cols = 200, 5
+    x = rng.normal(scale=1.0, size=(n_rows, n_cols))
+    # column 0 is a COLLAPSED bin: ~constant on train -> std ~1e-7
+    x[:, 0] = 1.0 + 1e-7 * rng.normal(size=n_rows)
+    tr = np.arange(n_rows)
+
+    base = fit_norm(x, tr, min_std_frac=0.0)
+    floored = fit_norm(x, tr, min_std_frac=0.01)
+
+    # the collapsed column's std is lifted to the relative floor (1% of the
+    # median over the populated columns), well above its raw ~1e-7.
+    median_std = float(np.median(base["std"]))
+    assert base["std"][0] < 1e-5                       # raw std is collapsed
+    assert floored["std"][0] >= 0.01 * median_std * (1 - 1e-9)
+    assert floored["std"][0] > base["std"][0] * 100    # genuinely raised
+    # well-conditioned columns (std >> floor) are untouched, bit-for-bit
+    wc = base["std"] > 10 * 0.01 * median_std
+    assert wc.sum() >= 3
+    assert np.array_equal(floored["std"][wc], base["std"][wc])
+    assert np.array_equal(floored["mean"], base["mean"])  # mean never touched
+
+    # a normal off-train sample standardizes sanely under the floor (no blow-up).
+    probe = np.zeros(n_cols)                            # ~3.5e6 sigma raw on col 0
+    z_raw = np.abs((probe - base["mean"]) / base["std"])[0]
+    z_floored = np.abs((probe - floored["mean"]) / floored["std"])[0]
+    assert z_raw > 1e4 and z_floored < 1e3 and z_floored < z_raw
+
 from hcd_analysis.emulator.data import kfold_loso, tau0_edge_holdout
 
 def test_kfold_loso_every_sim_held_once(tmp_path):
@@ -308,6 +342,41 @@ def test_target_norm_roundtrip_to_physical(tmp_path):
     assert np.allclose(phys["P_filt"][okP], d["P_filt"][idx][okP], atol=1e-9)
     okD = np.isfinite(d["delta"][idx])
     assert np.allclose(phys["delta"][okD], d["delta"][idx][okD], atol=1e-9)
+
+
+def test_delta_channel_std_floor_tames_collapsed_bin(tmp_path):
+    """Δ_c std-collapse fix: fit_target_norm floors the delta-channel std at
+    DELTA_STD_FLOOR_FRAC * median std (via fit_norm's min_std_frac), so a bin
+    whose train std collapses toward zero (the LOSO low-k behaviour: ~2.5e-7,
+    standardizing a normal val delta to ~9e4) no longer explodes the standardized
+    target — while the well-conditioned bins stay untouched."""
+    from hcd_analysis.emulator.data import (
+        DELTA_STD_FLOOR_FRAC, signed_log, apply_norm,
+    )
+    d = _load_fixture(tmp_path, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=8)
+    # Force a COLLAPSED delta bin (class 0, k 0): nearly identical across all rows
+    # (the LOSO low-k delta-std-collapse the fix targets). delta is (R,3,K).
+    d["delta"] = d["delta"].copy()
+    d["delta"][:, 0, 0] = 1.0 + 1e-7 * np.arange(d["delta"].shape[0])
+    R = d["x"].shape[0]
+
+    norm = fit_target_norm(d, np.arange(R))
+    std = norm["delta"]["std"]
+    finite = np.isfinite(std) & (std >= 1e-12)
+    floor = DELTA_STD_FLOOR_FRAC * float(np.median(std[finite]))
+
+    # the collapsed bin's std is lifted to (at least) the relative floor.
+    coll = std.reshape(3, -1)[0, 0]
+    assert coll >= floor * (1 - 1e-9)
+    assert coll > 1e-6                                  # well above the raw ~1e-7 collapse
+    # every populated std now respects the floor (no near-zero std survives).
+    assert np.all(std[finite] >= floor * (1 - 1e-9))
+
+    # a normal off-train delta standardizes sanely (no ~9e4 blow-up) on that bin.
+    probe = np.zeros((1,) + d["delta"].shape[1:])      # delta=0 everywhere
+    z = apply_norm(signed_log(probe), norm["delta"])
+    assert np.abs(z.reshape(1, 3, -1)[0, 0, 0]) < 1e4
+    assert np.isfinite(z).all()
 
 
 def test_inv_nalpha_counts_alpha_siblings(tmp_path):

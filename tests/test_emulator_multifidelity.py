@@ -305,6 +305,195 @@ def test_mf_lf_backbone_is_frozen(lf_backbone):
 
 
 # --------------------------------------------------------------------------- #
+# delta_mode: rho(k,z)-only DEFAULT ('none') + 'linear' + 'mlp' variants
+# --------------------------------------------------------------------------- #
+def _build_mf_mode(lf_backbone, mode, n_basis=4, log_rho=None):
+    """Build a MultiFidelity for a given delta_mode with a synthetic head."""
+    d, model, norm, lf_logk = lf_backbone
+    eval_logk = np.linspace(np.log10(1e-3), np.log10(0.15), 20)
+    K = len(eval_logk)
+    if log_rho is None:
+        log_rho = np.zeros(K)
+    if mode == "none":
+        # a synthetic per-z fixed-mean table (Nz=3) so FixedMeanHead interpolates;
+        # make it z-varying (per-row offset) so the z-dependence is exercised.
+        z_tab = np.array([2.5, 3.0, 4.0])
+        tab = 0.1 * np.ones((3, MF.N_CLASSES, K))
+        tab += np.array([0.0, 0.05, 0.12])[:, None, None]   # distinct per-z trend
+        head = MF.FixedMeanHead(tab, z_tab, n_basis=n_basis)
+    elif mode == "linear":
+        head = MF.GlobalLinearHead(in_dim=11, n_classes=MF.N_CLASSES,
+                                   n_basis=n_basis, key=jax.random.PRNGKey(5))
+    elif mode == "mlp":
+        head = MF.DeltaHead(n_basis=n_basis, in_dim=11, width=8, n_layers=1,
+                            key=jax.random.PRNGKey(3))
+    mf = MF.build_multifidelity(model, norm, lf_logk, head, eval_logk=eval_logk,
+                                log_rho=log_rho, n_basis=n_basis)
+    return mf, eval_logk
+
+
+def test_default_delta_mode_is_none():
+    """The PRODUCTION default delta_mode is 'none' (the validated rho(k,z)-only
+    model): MultiFidelity's __init__ default and build_multifidelity's inferred
+    mode for a FixedMeanHead are both 'none'."""
+    import inspect
+    sig = inspect.signature(MF.MultiFidelity.__init__)
+    assert sig.parameters["delta_mode"].default == "none"
+    assert MF._HEAD_MODE["FixedMeanHead"] == "none"
+
+
+def test_mf_invalid_delta_mode_raises(lf_backbone):
+    """An unknown delta_mode is rejected at construction time."""
+    d, model, norm, lf_logk = lf_backbone
+    eval_logk = np.linspace(np.log10(1e-3), np.log10(0.15), 20)
+    basis = MF.smooth_k_basis(jnp.asarray(eval_logk), 4)
+    z_rc, logk_rc, rc_vals = MF.load_res_corr()
+    head = MF.FixedMeanHead(np.zeros((2, MF.N_CLASSES, 20)), np.array([2.5, 4.0]))
+    with pytest.raises(ValueError, match="delta_mode"):
+        MF.MultiFidelity(model, norm, eval_logk, lf_logk, head, basis,
+                         np.zeros(20), z_rc, logk_rc, rc_vals, delta_mode="bogus")
+
+
+def test_fixed_mean_head_is_theta_independent(lf_backbone):
+    """delta_mode='none' (FixedMeanHead): g is THETA-INDEPENDENT at fixed (z,tau0).
+    Two DIFFERENT theta share identical g (all theta-dependence is in f_LF), and
+    g varies with z (the z-resolved fixed mean).  This is the core property of the
+    rho(k,z)-only default."""
+    mf, _ = _build_mf_mode(lf_backbone, "none")
+    d = lf_backbone[0]
+    # two rows with different params but we pin the SAME z_unit/tau0 to isolate theta.
+    x0 = jnp.asarray(d["x"][0]); tau0 = jnp.asarray(d["tau0"][0])
+    theta_a = x0.at[:9].set(0.2); theta_b = x0.at[:9].set(0.8)   # same z (x[9]), diff theta
+    g_a = np.asarray(mf.g(theta_a, tau0)); g_b = np.asarray(mf.g(theta_b, tau0))
+    assert np.allclose(g_a, g_b, atol=1e-12)            # theta-independent
+    # but g DOES vary with z (the z-resolved fixed mean table).
+    z_lo = x0.at[9].set(0.1); z_hi = x0.at[9].set(0.9)
+    assert not np.allclose(np.asarray(mf.g(z_lo, tau0)), np.asarray(mf.g(z_hi, tau0)))
+    # the delta-head coeffs are zeros (no basis / no learned theta term).
+    cond = MF.make_cond(x0, tau0)
+    assert np.allclose(np.asarray(mf.delta_head.coeffs(cond)), 0.0)
+
+
+def test_fixed_mean_head_g_equals_gbar(lf_backbone):
+    """The combined g == gbar(z,k): log_rho + (gbar - log_rho) == gbar.  With a
+    nonzero log_rho the FixedMeanHead's table (gbar - log_rho) must cancel it so g
+    recovers the per-z fixed mean exactly."""
+    K = 20
+    eval_logk = np.linspace(np.log10(1e-3), np.log10(0.15), K)
+    log_rho = np.linspace(-0.3, 0.5, K)                 # nonzero per-k rho
+    d, model, norm, lf_logk = lf_backbone
+    z_tab = np.array([2.5, 3.0, 4.0])
+    gbar = 0.05 + 0.02 * np.arange(K)[None, None, :] * np.ones((3, MF.N_CLASSES, 1))
+    tab = gbar - log_rho[None, None, :]                 # FixedMeanHead stores gbar - rho
+    head = MF.FixedMeanHead(tab, z_tab)
+    mf = MF.build_multifidelity(model, norm, lf_logk, head, eval_logk=eval_logk,
+                                log_rho=log_rho)
+    x = jnp.asarray(d["x"][0]).at[9].set(
+        float((3.0 - MF.Z_LIMITS[0]) / (MF.Z_LIMITS[1] - MF.Z_LIMITS[0])))  # z=3.0
+    tau0 = jnp.asarray(d["tau0"][0])
+    g = np.asarray(mf.g(x, tau0))                        # (4,K)
+    assert np.allclose(g, gbar[1], atol=1e-9)           # == gbar at z=3.0 (table row 1)
+
+
+@pytest.mark.parametrize("mode", ["none", "linear", "mlp"])
+def test_mf_mode_forward_positive_and_hmc_differentiable(lf_backbone, mode):
+    """All three delta_modes give a strictly-positive forward and are HMC-
+    differentiable in theta (grad + 2nd-order finite)."""
+    mf, eval_logk = _build_mf_mode(lf_backbone, mode)
+    assert mf.delta_mode == mode
+    d = lf_backbone[0]
+    x0 = jnp.asarray(d["x"][0]); tau0 = jnp.asarray(d["tau0"][0])
+    P = np.asarray(mf.P_mf(x0, tau0))
+    assert P.shape == (4, len(eval_logk)) and np.all(P > 0)
+    # grad wrt theta finite
+    f = lambda th: mf.logP_mf(jnp.concatenate([th, x0[9:10]]), tau0).sum()
+    g = np.asarray(jax.grad(f)(x0[:9]))
+    assert g.shape == (9,) and np.all(np.isfinite(g))
+    # 2nd-order (NUTS) finite
+    hvp = np.asarray(jax.grad(lambda th: jax.grad(f)(th).sum())(x0[:9]))
+    assert np.all(np.isfinite(hvp))
+    # jit pattern
+    P_j = np.asarray(eqx.filter_jit(lambda m, xx, tt: m.P_mf(xx, tt))(mf, x0, tau0))
+    assert np.allclose(P_j, P, atol=1e-12)
+
+
+def test_global_linear_head_amp_is_linear(lf_backbone):
+    """delta_mode='linear' (GlobalLinearHead): the amplitude is a SINGLE linear
+    functional of the conditioning, and equals the bias b at the unit-cube centre."""
+    head = MF.GlobalLinearHead(in_dim=11, n_classes=4, n_basis=4,
+                               key=jax.random.PRNGKey(0))
+    # zero out random init then set a known linear map.
+    head = eqx.tree_at(lambda h: (h.w, h.b),
+                       head, (jnp.arange(11.0), jnp.asarray(0.3)))
+    centre = jnp.full(11, 0.5)
+    assert np.isclose(float(head.amp(centre)), 0.3)     # amp == b at centre
+    # linearity: amp(2x - centre) - amp(centre) == 2*(amp(x) - amp(centre))? Check
+    # plain linearity of amp(cond) = w.(cond-0.5)+b.
+    c1 = jnp.full(11, 0.7); c2 = jnp.full(11, 0.9)
+    lhs = float(head.amp(c1) + head.amp(c2) - 2 * head.amp(centre))
+    rhs = float(head.amp(c1 + c2 - centre) - head.amp(centre))
+    assert np.isclose(lhs, rhs)
+
+
+def test_train_global_linear_head_reduces_loss_and_ap_prior(tmp_path):
+    """train_global_linear_head fits and reduces the loss; the optional A_p-direction
+    prior pulls the linear weight toward the A_p axis (orthogonal component shrinks)."""
+    lfp = tmp_path / "lf.h5"; hrp = tmp_path / "hr.h5"
+    write_synthetic_cache(lfp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
+    write_synthetic_cache(hrp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
+    lf = _sanitize_unit_cube(load_cache(lfp)); hr = _sanitize_unit_cube(load_cache(hrp))
+    pairs = MF.match_hr_to_lf(lf, hr)
+    norm = fit_target_norm(lf, np.arange(len(lf["z_grid"])))
+    model = Emulator(in_dim=10, n_k=lf["P_tier_p"].shape[1], n_basis=4,
+                     key=jax.random.PRNGKey(0))
+    lf_logk = np.log10(lf["kfkms"][0])
+    k_eval, eval_logk = MF.build_eval_grid(hr, k_max=0.05, n_k=16)
+    tg = MF.measure_delta_targets(lf, hr, model, norm, lf_logk, eval_logk, pairs)
+    basis = np.asarray(MF.smooth_k_basis(jnp.asarray(eval_logk), 4))
+    log_rho = np.nan_to_num(MF.mean_log_ratio_rho(tg, eval_logk), nan=0.0)
+
+    head, hist = MF.train_global_linear_head(
+        tg, basis, log_rho, eval_logk, n_basis=4, epochs=80, lr=3e-3,
+        coeff_l2=1e-2, mean_prior_w=1e-2)
+    assert hist["loss"][-1] < hist["loss"][0]
+
+    # with an A_p-direction prior, the weight's component orthogonal to ap_dir shrinks.
+    ap_dir = np.zeros(11); ap_dir[0] = 1.0              # say param 0 is the A_p axis
+    head_p, _ = MF.train_global_linear_head(
+        tg, basis, log_rho, eval_logk, n_basis=4, epochs=120, lr=3e-3,
+        coeff_l2=1e-2, mean_prior_w=1e-2, ap_dir=ap_dir, ap_prior_w=1e2)
+    w = np.asarray(head_p.w)
+    perp = w.copy(); perp[0] = 0.0                       # component orthogonal to ap_dir
+    assert np.linalg.norm(perp) < 1e-2                   # strongly suppressed by the prior
+
+
+def test_build_default_head_builds_fixed_mean(tmp_path):
+    """build_default_head returns a FixedMeanHead whose table is the per-z fixed
+    mean minus log_rho, and build_multifidelity infers delta_mode='none'."""
+    lfp = tmp_path / "lf.h5"; hrp = tmp_path / "hr.h5"
+    write_synthetic_cache(lfp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
+    write_synthetic_cache(hrp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
+    lf = _sanitize_unit_cube(load_cache(lfp)); hr = _sanitize_unit_cube(load_cache(hrp))
+    pairs = MF.match_hr_to_lf(lf, hr)
+    norm = fit_target_norm(lf, np.arange(len(lf["z_grid"])))
+    model = Emulator(in_dim=10, n_k=lf["P_tier_p"].shape[1], n_basis=4,
+                     key=jax.random.PRNGKey(0))
+    lf_logk = np.log10(lf["kfkms"][0])
+    k_eval, eval_logk = MF.build_eval_grid(hr, k_max=0.05, n_k=16)
+    tg = MF.measure_delta_targets(lf, hr, model, norm, lf_logk, eval_logk, pairs)
+    log_rho = np.nan_to_num(MF.mean_log_ratio_rho(tg, eval_logk), nan=0.0)
+
+    head = MF.build_default_head(tg, log_rho, n_basis=4)
+    assert isinstance(head, MF.FixedMeanHead)
+    mf = MF.build_multifidelity(model, norm, lf_logk, head, eval_logk=eval_logk,
+                                log_rho=log_rho, n_basis=4)
+    assert mf.delta_mode == "none"
+    # forward is finite & positive
+    P = np.asarray(mf.P_mf(jnp.asarray(lf["x"][0]), jnp.asarray(lf["tau0"][0])))
+    assert P.shape == (4, 16) and np.all(P > 0)
+
+
+# --------------------------------------------------------------------------- #
 # delta target measurement + training on a synthetic HR<->LF pair
 # --------------------------------------------------------------------------- #
 def test_match_and_measure_and_train(tmp_path):

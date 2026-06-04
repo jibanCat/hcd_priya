@@ -160,12 +160,25 @@ def signed_log_inv(y):
 def safe_log(x, floor=1e-30):
     return np.log(np.maximum(x, floor))
 
-def fit_norm(x, train_idx, valid_mask=None):
+def fit_norm(x, train_idx, valid_mask=None, min_std_frac=0.0):
     """Per-column {mean,std} over train rows, NaN-aware.
 
     valid_mask (same shape as x, optional): elements that are False are excluded
     from the mean/std (A4b: structural-zero bins floored by safe_log must not
-    contaminate the f_nhi/dN/dX norm). NaN entries are always ignored too."""
+    contaminate the f_nhi/dN/dX norm). NaN entries are always ignored too.
+
+    ``min_std_frac`` (default 0 == off): floor each column's std at
+    ``min_std_frac * median(finite column stds)`` — a RELATIVE floor that guards
+    against a near-degenerate column whose train-row std COLLAPSES toward zero
+    (which would otherwise blow up the standardized target by ~1/std). The hard
+    ``std >= 1e-12 -> 1.0`` fallback (an empty/constant column) is applied FIRST
+    and is unaffected. The relative floor only ever RAISES a too-small std toward
+    the channel scale; well-conditioned columns (std >> the floor) are untouched.
+    The median is taken over the columns whose std passed the hard 1e-12 guard
+    (the populated columns), so an all-empty channel falls back cleanly to 1.0.
+    See the ``delta`` channel in ``fit_target_norm``: under LOSO its low-k std
+    collapses to ~2.5e-7 (172/516 bins < 1e-3), standardizing a normal val delta
+    to ~9e4 and corrupting the Δ_c term that feeds C_emu."""
     xt = x[train_idx]
     if valid_mask is not None:
         mt = valid_mask[train_idx]
@@ -178,7 +191,15 @@ def fit_norm(x, train_idx, valid_mask=None):
         std = np.nanstd(xt, axis=0)
     # a column with no valid entries -> NaN mean/std; fall back to neutral 0/1.
     mean = np.where(np.isfinite(mean), mean, 0.0)
-    std = np.where(np.isfinite(std) & (std >= 1e-12), std, 1.0)
+    populated = np.isfinite(std) & (std >= 1e-12)
+    std = np.where(populated, std, 1.0)
+    if min_std_frac > 0.0 and np.any(populated):
+        # RELATIVE floor: a small fraction of the channel's typical (median) std.
+        # Reference scale is the median over POPULATED columns only, so collapsed
+        # bins don't drag the reference down and empty bins (now 1.0) don't drag
+        # it up. Floor never lowers a std, only raises a collapsed one.
+        floor = min_std_frac * float(np.median(std[populated]))
+        std = np.maximum(std, floor)
     return {"mean": mean, "std": std}
 
 def apply_norm(x, stats):
@@ -202,6 +223,13 @@ TARGET_TRANSFORMS = {
     "delta":  (signed_log, signed_log_inv),
 }
 TARGET_CHANNELS = ("f_nhi", "dndx", "P_filt", "delta")
+
+# Δ_c (delta channel) std floor: under LOSO the delta std collapses at low-k
+# (~2.5e-7 in ~1/3 of bins), so we floor each (c,k) std at this fraction of the
+# channel's median std (see fit_norm's min_std_frac / fit_target_norm). 1% is a
+# conservative relative floor: it lifts collapsed bins toward the channel scale
+# without perturbing the well-conditioned bins (whose std is ≫ the floor).
+DELTA_STD_FLOOR_FRAC = 0.01
 
 
 def _valid_target_mask(arr):
@@ -334,7 +362,14 @@ def fit_target_norm(d, train_idx):
         # standardized cell-mean; the residual head targets the σ_cosmo-whitened
         # within-cell cosmology signal. See fit_baseline_residual_norm.
         "P_filt": fit_baseline_residual_norm(d, train_idx),
-        "delta":  fit_norm(fwd("delta")(d["delta"]), train_idx),
+        # delta (Δ_c = P_unfiltered − P_filtered): under LOSO the low-k std
+        # COLLAPSES (~2.5e-7 in 172/516 bins), so a normal val delta standardizes
+        # to ~9e4 and corrupts the Δ_c → C_emu term (the fold-3 val_loss spike).
+        # Floor the per-(c,k) std at 1% of the channel's median std (DELTA_STD_FLOOR_FRAC)
+        # — a principled relative floor that lifts the collapsed bins to the channel
+        # scale while leaving the well-conditioned bins (std ≫ floor) untouched.
+        "delta":  fit_norm(fwd("delta")(d["delta"]), train_idx,
+                           min_std_frac=DELTA_STD_FLOOR_FRAC),
     }
     return stats
 
