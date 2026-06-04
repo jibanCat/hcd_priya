@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 
 from hcd_analysis.emulator.data import load_cache
 from hcd_analysis.emulator import train as T
-from hcd_analysis.emulator.predict import predict_P_tier_p
+from hcd_analysis.emulator.predict import predict_P_tier_p, predict_P_filt
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = str(ROOT / "hcd_analysis/_emulator_data/observables_tau0_lf.h5")
@@ -63,6 +63,23 @@ def dlnP_dtheta(model, theta9, z_unit, tau0, w_c, pf):
     def flog(t):
         return jnp.log(predict_P_tier_p(model, t, z_unit, tau0, w_c, pf))
     return np.asarray(jax.jacfwd(flog)(jnp.asarray(theta9)))
+
+
+def dlnP_dtau0(model, theta9, z_unit, tau0, w_c, pf):
+    """∂ ln P_tier_p / ∂τ₀ (the mean-flux response), shape (K,)."""
+    def flog(t):
+        return jnp.log(predict_P_tier_p(model, theta9, z_unit, t, w_c, pf))
+    return np.asarray(jax.jacfwd(flog)(tau0))
+
+
+def dlnPc_dtheta(model, theta9, z_unit, tau0, pf):
+    """Per-class ∂ ln P_filt_c / ∂θ_unit, shape (4, K, 9)."""
+    def flog(t):
+        return jnp.log(predict_P_filt(model, t, z_unit, tau0, pf))   # (4,K)
+    return np.asarray(jax.jacfwd(flog)(jnp.asarray(theta9)))         # (4,K,9)
+
+
+CLS = ("clean", "LLS", "subDLA", "DLA")
 
 
 def rep_row(d, z_fid):
@@ -207,8 +224,43 @@ def main():
     fig.savefig(fpath, dpi=150); plt.close(fig)
     print(f"wrote {fpath}")
 
+    # --- EXTRA plots: ∂lnP/∂τ₀ (mean flux) + per-class ∂lnP_c/∂{Ap,ns} ------------
+    fig2, ax2 = plt.subplots(1, 3, figsize=(18, 5))
+    # (1) mean-flux response across z
+    tau0_rms = {}
+    for zf in (2.4, 3.0, 3.6, 4.2):
+        rz, zuz, t0z = rep_row(d, zf)
+        wz = jnp.asarray(np.asarray(d["w_c_cache"][rz]).reshape(4))
+        kfz = np.asarray(d["kfkms"][rz]); gz = np.isfinite(kfz)
+        Jt = dlnP_dtau0(model, theta0, zuz, t0z, wz, pf)
+        tau0_rms[zf] = float(np.sqrt(np.mean(Jt[gz] ** 2)))
+        ax2[0].semilogx(kfz[gz], smooth(Jt[gz], 7), lw=1.8,
+                        label=f"z={zf} (RMS {tau0_rms[zf]:.2f})")
+    ax2[0].axhline(0, color="k", lw=0.6); ax2[0].grid(alpha=0.3)
+    ax2[0].set_xlabel("k [s/km]"); ax2[0].set_ylabel("∂lnP_tier_p/∂τ₀")
+    ax2[0].set_title("∂lnP/∂τ₀ — mean-flux response vs z\n(more absorption ⇒ less small-scale power)")
+    ax2[0].legend(fontsize=8)
+    # (2,3) per-class ∂lnP_c/∂Ap and ∂lnP_c/∂ns at z=3
+    Jc = dlnPc_dtheta(model, theta0, z_unit, tau0_mid, pf)       # (4,K,9)
+    for col, (ip, nm) in enumerate([(1, "Ap"), (0, "ns")]):
+        a = ax2[1 + col]
+        for ci, cn in enumerate(CLS):
+            a.semilogx(kfg, smooth(Jc[ci, g, ip], 7), lw=1.8, label=cn)
+        a.axhline(0, color="k", lw=0.6); a.grid(alpha=0.3)
+        a.set_xlabel("k [s/km]"); a.set_ylabel(f"∂lnP_c/∂{nm}")
+        a.set_title(f"per-class ∂lnP_c/∂{nm} (z=3)\n(clean vs HCD response)")
+        a.legend(fontsize=8)
+    fig2.suptitle("Extra gradient diagnostics — mean-flux (τ₀) + per-class responses (z=3)",
+                  fontsize=13)
+    fig2.tight_layout()
+    f2 = OUTDIR / "grad_physics_extra.png"
+    fig2.savefig(f2, dpi=150); plt.close(fig2)
+    print(f"wrote {f2}  (τ₀ RMS by z: " +
+          " ".join(f"z{z}={v:.2f}" for z, v in tau0_rms.items()) + ")")
+
     out = dict(
         roughness={p: float(v) for p, v in zip(PARAMS, rough)},
+        tau0_response_rms_by_z={str(z): v for z, v in tau0_rms.items()},
         cross_param_resid_corr_median=float(np.median(np.abs(offdiag))),
         Ap_mean=float(np.mean(dAp)), Ap_flatness=Ap_flatness, ns_cross_k=ns_cross_k,
         herei_rms_by_z={str(zf): v[2] for zf, v in herei_by_z.items()},
