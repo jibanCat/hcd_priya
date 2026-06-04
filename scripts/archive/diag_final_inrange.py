@@ -36,7 +36,8 @@ from hcd_analysis.emulator.data import (
 from hcd_analysis.emulator import train as T
 
 # reuse the validated, apples-to-apples scoring from the data-range diagnostic
-from scripts.diag_datarange_mask import (
+# (both diagnostics archived together under scripts/archive/ during PR-prep)
+from scripts.archive.diag_datarange_mask import (
     build_fisher_rows, fisher_project, slice_masks, coherent_tilt,
     load_cv_band, band_rms, cv_band_value, load_per_class_floor,
     CLS, PARAMS, Z_DATA, K_DATA_MIN, LOWK, MIDK, HIGHK,
