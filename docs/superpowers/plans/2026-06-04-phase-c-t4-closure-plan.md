@@ -40,13 +40,25 @@ Primary gate = the **interior production regime**; the τ₀-edge is demoted to 
 | **A1 interior-τ₀ (PRIMARY)** | τ₀≈Becker/Turner ⟨F⟩(z), θ interior | the real-data regime | coverage ≥ nominal; bias <0.2σ |
 | **A2 θ-hull extrapolation** | θ_true near/outside the 60-sim convex hull | the 60-sim NN is weakest in 9-D θ, NOT τ₀ (emulator M1) | bias-vs-(θ-hull-distance) flat |
 | **A3 HCD-template mismatch** | perturbed DLA core (Voigt wing / Rogers kernel) + survey-completeness incidence redistribution | the closure is circular on shape; DESI 15% / our 30% DLA RMSE (Lyα M1) | bias <0.3σ; α absorbs it |
-| **A4 metals (SiIII)** | inject a McDonald-form SiIII oscillation (k<0.06) | metals absent from model+mock; largest KODIAQ high-k systematic (Lyα N1) | k<0.06 cosmology unbiased w/ a SiIII nuisance or the cut+inflation |
-| **A5 HeII-patchy / IGM-thermal floor** | sightline-to-sightline stochastic variance + 5% bhfeedback departure at high k | proves the k<0.06 cap contains the out-of-scope band (Lyα N2) | in-scope cosmology unbiased |
+| **A4 metals (SiIII)** | a SiIII oscillation in BOTH mock and fit | metals go IN the likelihood (PI; DESI DR1 optimal estimator, Karaçaylı 2025) | SiIII nuisance marginalized w/o biasing A_p/n_s; metal side-band cov carried |
+| **A5 HeII-patchy (in-situ)** | the σ_CV stochastic-HeII variance term in C_emu | HeII patchy is IN-SITU in PRIYA via the thermal params (PI — a UNIQUE feature); mean modeled, stochastic floor = σ_CV | thermal params + σ_CV C_emu capture it; in-scope cosmology unbiased |
 | **A6 τ₀-ladder edge (robustness)** | off/between-ladder τ₀ | the documented τ₀-flat-C_emu probe (demoted) | reported, not a gate |
 
 Mock-truth must extrapolate the **forward model** (the emulator) past the design too, not just the
 error vector (CS N4). The mock noise covariance must include **resolution/window + noise-power
 subtraction** at the KODIAQ k-edge, not idealized (Lyα N3).
+
+**Two physics terms now IN the model (PI decisions, 2026-06-04):**
+- **Metals (SiIII) — a forward-model nuisance, not just a mock.** Add a SiIII term to `P_obs`
+  (McDonald+2006-form: `P_obs → P_obs·(1 + a²_SiIII + 2 a_SiIII·cos(k·Δv_SiIII))`, Δv_SiIII the
+  λ1207→Lyα velocity split; a_SiIII a free nuisance, the param PRIYA fits on this data), differentiable.
+  **Carry the metal SIDE-BAND power covariance budget** — DESI DR1's optimal estimator (Karaçaylı 2025,
+  arXiv:2505.07974) measures metal power in a side band and subtracts it, leaving a covariance term →
+  add a `C_metal` contribution to C. (A SiIII module + a `meanflux_prior`-style producer for a_SiIII.)
+- **HeII patchy is IN-SITU (a unique PRIYA feature), NOT a separate term.** The bubbles are painted to
+  halos and driven by the thermal params (herei/heref/alphaq) the emulator already conditions on, so the
+  MEAN HeII response is modeled. Only the sightline-to-sightline STOCHASTIC patchiness is extra — carry it
+  as the **σ_CV stochastic-HeII variance** in C_emu (the design's σ_CV term), validated by the A5 arm.
 
 ## 2. Validate C_emu as an error model (emulator M3/M4/M5 — the gap v1 missed)
 
