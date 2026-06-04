@@ -197,6 +197,36 @@ def test_hcd_incidence_prior_centers_on_observed_not_sim():
     assert float(sig_hi[2]) > 0.10 * float(mu_hi[2]), "DLA σ must widen above z=3.5"
 
 
+def test_log_lik_multiz_equals_loop_sum():
+    """CS review M2/M3: the vmap-over-z likelihood-only sum == an explicit per-z loop, and is
+    differentiable in θ and the per-z τ₀ vector."""
+    rng = np.random.default_rng(5)
+    n_z, n_k, n_tb = 3, 12, 4
+    c = _ctx(n_k=n_k, n_tb=n_tb)
+    model, pf = c["model"], c["pf"]
+    z = np.array([2.6, 3.0, 3.6]); z_unit = np.array([0.3, 0.5, 0.7])
+    tau0_vec = jnp.asarray([0.30, 0.40, 0.55]); theta9 = c["theta9"]; alpha = c["alpha_hcd"]
+    ac = c["alpha_centres"]
+    sigma_zb = jnp.asarray(rng.uniform(0.01, 0.05, (n_z, 4, n_k, n_tb)))
+    cosmic = jnp.asarray(rng.uniform(1.0, 4.0, (n_z, n_k)))
+    dla_core = jnp.asarray(rng.uniform(0.0, 0.5, (n_z, n_k)))
+    flag = jnp.zeros((n_z, n_k), bool); valid_k = jnp.ones((n_z, n_k), bool)
+    P_data = jnp.asarray(np.stack([
+        np.asarray(predict_P_obs(model, theta9, float(z_unit[i]), float(tau0_vec[i]), alpha,
+                                 pf, dla_core[i])) + rng.normal(0, 0.3, n_k) for i in range(n_z)]))
+    kw = dict(pf_stats=pf, z=z, z_unit=z_unit, sigma_zb=sigma_zb, alpha_centres=ac,
+              cosmic_cov=cosmic, P_data=P_data, dla_core=dla_core, dla_shot_flag=flag, valid_k=valid_k)
+    total = float(I.log_lik_multiz(model, theta9, tau0_vec, alpha, **kw))
+    loop = sum(float(I.log_lik_single_z(
+        model, theta9, float(z_unit[i]), float(z[i]), float(tau0_vec[i]), alpha, pf_stats=pf,
+        sigma_zb=sigma_zb[i], alpha_centres=ac, cosmic_cov=cosmic[i], P_data=P_data[i],
+        dla_core=dla_core[i], dla_shot_flag=flag[i], valid_k=valid_k[i])) for i in range(n_z))
+    assert np.isclose(total, loop, rtol=1e-10), f"vmap {total} vs loop {loop}"
+    g = jax.grad(lambda th: I.log_lik_multiz(model, th, tau0_vec, alpha, **kw))(theta9)
+    gt = jax.grad(lambda t: I.log_lik_multiz(model, theta9, t, alpha, **kw))(tau0_vec)
+    assert np.isfinite(np.asarray(g)).all() and np.isfinite(np.asarray(gt)).all()
+
+
 def test_unit_box_logprior_zero_inside_finite_grad_outside():
     assert float(I.unit_box_logprior(jnp.full(9, 0.5))) == 0.0
     out = jnp.array([0.5] * 8 + [1.3])

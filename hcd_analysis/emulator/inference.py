@@ -157,6 +157,30 @@ def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     return -0.5 * (r @ sol)
 
 
+def log_lik_multiz(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, z, z_unit, sigma_zb,
+                   alpha_centres, cosmic_cov, P_data, dla_core, dla_shot_flag, valid_k,
+                   shot_inflate=10.0, cemu_inflate=1.0, include_logdet=True):
+    """LIKELIHOOD-ONLY multi-z log-likelihood = Σ_z log_lik_single_z (no priors).
+
+    The data-bin sum is **vmap'd over the z-axis** (K is fixed across bins → no padding; CS
+    review M2): θ9 + α are shared (closed over), ``tau0_vec`` is per-z, and the per-z arrays
+    (``z, z_unit, sigma_zb, cosmic_cov, P_data, dla_core, dla_shot_flag, valid_k``) carry a
+    leading z-axis. This is the LIKELIHOOD-ONLY payload for numpyro's ``factor`` / Cobaya's
+    ``logp`` — priors are added separately (CS review M3: never double-count). Differentiable.
+    """
+    def one(tau0_z, z_z, zu_z, sz, cc, pd, dc, flag, vk):
+        return log_lik_single_z(
+            model, theta9, zu_z, z_z, tau0_z, alpha_hcd, pf_stats=pf_stats, sigma_zb=sz,
+            alpha_centres=alpha_centres, cosmic_cov=cc, P_data=pd, dla_core=dc,
+            dla_shot_flag=flag, valid_k=vk, shot_inflate=shot_inflate,
+            cemu_inflate=cemu_inflate, include_logdet=include_logdet)
+    per_z = jax.vmap(one)(jnp.asarray(tau0_vec), jnp.asarray(z), jnp.asarray(z_unit),
+                          jnp.asarray(sigma_zb), jnp.asarray(cosmic_cov), jnp.asarray(P_data),
+                          jnp.asarray(dla_core), jnp.asarray(dla_shot_flag),
+                          jnp.asarray(valid_k))
+    return jnp.sum(per_z)
+
+
 def log_posterior_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
                            pf_stats, sigma_zb, alpha_centres, cosmic_cov, P_data, dla_core,
                            dla_shot_flag, tau0_mu, tau0_sigma, alpha_mu, alpha_sigma,
