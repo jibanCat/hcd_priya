@@ -1,0 +1,74 @@
+# hcd_analysis config — Phase-1 (re)processing of ALL 6 HiRes sims from the
+# emu_full_hires_2 6-sim reference. (3 of the 6 are fresh re-runs, not copies,
+# so every catalog is regenerated from the canonical raw tau — user 2026-05-21.)
+# Identical to config/default.yaml EXCEPT hires_data_root + resume:false.
+# resume:false FORCES reprocessing of every snap (overwrites any stale catalog
+# built from the old emu_full_hires raw tau). Outputs land under
+# <output-root>/hires/<sim>/snap_NNN/ (pass
+# --output-root /scratch/cavestru_root/cavestru0/mfho/hcd_outputs).
+
+data_root: /nfs/turbo/umor-yueyingn/mfho/emu_full
+hires_data_root: /scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2
+output_root: ./outputs
+
+# Redshift range (inclusive)
+z_min: 2.0
+z_max: 6.0
+
+# All 6 HiRes sims found under hires_data_root (emu_full_hires_2 has exactly 6).
+sim_filter: []
+
+absorber_classes:
+  - LLS
+  - subDLA
+  - DLA
+
+absorber:
+  # NHI estimator. True = sum-rule inversion (∫τdv / σ_integrated) on the
+  # detected τ>threshold core only. See docs/fast_mode_physics.md.
+  # False = Voigt fit with ±2000 km/s wing window (subject to forest bias;
+  # see docs/bugs_found.md §#5). Keep True for production.
+  fast_mode: true
+  # tau_threshold: pixels above this are considered part of an absorption system.
+  # At threshold=100 with b=30 km/s, the corresponding NHI floor is ~10^16.85,
+  # safely below the LLS lower edge (log N = 17.2). The min_log_nhi filter
+  # below then discards the sub-LLS detections so only HCD systems remain.
+  tau_threshold: 100.0      # pixel tau floor for system detection
+  merge_dv_kms: 100.0       # merge gap (km/s) between adjacent blobs
+  min_pixels: 2             # minimum pixels for a valid system
+  b_init_kms: 30.0          # (Voigt mode only) initial b guess
+  b_bounds: [1.0, 300.0]    # (Voigt mode only) b parameter bounds
+  tau_fit_cap: 1.0e+06      # (Voigt mode only) cap on tau before fitting
+  voigt_max_iter: 200       # (Voigt mode only) max fit iterations
+  mask_fill_strategy: mean_flux  # zero_tau | mean_flux | contiguous
+  min_log_nhi: 17.2         # discard absorbers below this log10(NHI) (= LLS threshold)
+
+p1d:
+  k_min: 1.0e-3
+  k_max: 5.0e-2             # Nyquist for dv≈10 km/s; HiRes same dv so same limit
+  n_k_bins: 35
+  log_k_bins: true
+  n_skewers: null           # null = all skewers; set to e.g. 10000 for debug
+  nhi_excl_thresholds: [17.2, 17.5, 18.0, 18.5, 19.0, 19.5, 20.0, 20.3, 20.5, 21.0]
+
+cddf:
+  A: 1.0                    # amplitude multiplier (1.0 = no change)
+  alpha: 0.0                # power-law tilt (0.0 = no tilt)
+  N_pivot: 1.0e20           # pivot column density (cm^-2)
+
+# Parallelism (overridden on the CLI for the batch job)
+n_workers: 4                # parallel simulations
+n_workers_skewer: 1         # parallel skewer batches within one file
+skewer_batch_size: 4096     # rows per batch (memory control)
+
+prefer_grid: true           # prefer lya_forest_spectra_grid_480.hdf5
+
+# Resume: FALSE -> reprocess every snap (regenerate all catalogs from
+# emu_full_hires_2, overwriting any stale ones from the old raw-tau path).
+resume: false
+
+# Debug/benchmark
+benchmark: false
+debug: false
+debug_n_sims: 2
+debug_n_snaps: 3

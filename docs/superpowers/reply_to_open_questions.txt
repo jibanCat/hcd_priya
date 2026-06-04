@@ -1,0 +1,40 @@
+8. Open questions for the user
+"Tightly coupled to CDDF statistics" — what is the intended coupling? PRIYA has no precedent for putting CDDF moments into the emulator's input vector. Options I see: (a) condition GP inputs on CDDF parameters (a few f(N) amplitude/slope numbers); (b) emit per-class P1D + a separate CDDF predictor and combine analytically downstream; (c) train a joint emulator whose output is (P1D_forest, P1D_LLS, P1D_subDLA, P1D_DLA, CDDF_bins). Which is the design?
+
+Reply:
+c is the design in my mind. CDDF can be separate from the P1D, as we used to have T0 emulator. So basically two separate emulators is fine, but it would be nice to check if jointly training CDDF/P1D can help improve accuracy.
+
+
+Four-class partition definition. Are the four classes the Rogers-2018 LLS / sub-DLA / small-DLA / large-DLA, or a different N_HI partition? The α-correction in gp_wrap.py:78-113 uses Rogers's four-class binning — should we mirror it exactly?
+
+Reply:
+yes mirror it. But I think if you can propose some flexible NHI binning such that we can postprocess input he class definition at downstream that would be better - for example, at the inference time I can input nhi bins of my classes of the HCD emulator then it automatically knows how to translate that into different classes of P1D ... So if there is a way can learn P_dirty in a NHI continuous way that might be a better plan, though I don't think anyone thought about this before. This can be double verify with fixed four class plan afterward anyway. 
+
+τ₀ count for the new emulator: keep 10, or change? 10 was tuned for the forest in 2018; a four-class build may want more (because each class is smaller signal-to-noise). User said 10, so I will assume 10 unless told otherwise.
+
+Reply:
+20.
+
+Mean-flux model in the per-class emulator. Does α act on the forest class only (because HCDs by construction saturate)? Or per-class with separate α per class? PRIYA's current mean_flux_desired is global — one α rescales all pixels uniformly.
+
+Reply:
+we discussed before. So probably yes affect to subDLA/LLS, but not DLA. And the impact to subDLA/LLS might be different from impact on the forest.
+I have some particle fields data for PRIYA at LF suite store in /scratch/yueyingn_root/yueyingn0/mfho/priya/PART/
+so you could test different response of UV background to the subDLA/LLS.
+
+k-grid. Do we keep the Mpc/h native grid (box-mode spacing) and rebin to data k at predict-time, or pre-rebin to a shared km/s grid at training-set construction? PRIYA does the former; a per-class build may want the latter to avoid four interp1d calls per predict.
+
+Reply:
+safer to have former as training data (more robust). At the emulator stage we could use latter.
+
+HCD masking semantics. Right now tau_thresh masks pixels. For a per-class build we want to select sightlines (or sub-segments) by N_HI class, not just clip-and-keep. Is there an existing fake_spectra helper, or do we need to write the sightline classifier from scratch?
+
+Reply:
+You can search fake_spectra first. But I think we have done the classifer thing this repo already? So that's why we have HCD catalogs?
+
+Multi-fidelity? PRIYA has LF (fakespectra_basedir) and HF (HRfakespectra_basedir) tiers and SingleBinAR1. Are we porting the multi-fidelity layer, or building single-fidelity first?
+
+Reply:
+Let's build the neural net emulator for single-fidelity first. And then on top of single fidelity NN, we build a residual layer for multi-fidelity NN.
+It's possible now since we have 6 HR in contrast to 3 HR in 2023, I store 6 HR in here: /scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2/
+

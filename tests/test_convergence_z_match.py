@@ -30,6 +30,13 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# hcd_analysis.config -> yaml, hcd_analysis.pipeline -> joblib (the emu-3.9 pipeline
+# env). Skip cleanly when absent rather than failing collection (a single collection
+# error makes the whole ``pytest tests/`` run abort with zero tests).
+import pytest
+pytest.importorskip("yaml")
+pytest.importorskip("joblib")
+
 from hcd_analysis.config import PipelineConfig
 from hcd_analysis.pipeline import compute_convergence_ratios
 

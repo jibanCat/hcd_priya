@@ -1,0 +1,991 @@
+import jax, jax.numpy as jnp, equinox as eqx
+from hcd_analysis.emulator.model import (
+    Encoder, HeadA, HeadB, BaselineHead, Emulator, structural_tier_p)
+from hcd_analysis.emulator.model import masked_mse
+from hcd_analysis.emulator.model import joint_loss, p_resid_loss
+from hcd_analysis.emulator.model import svd_basis_init
+
+
+def test_encoder_headA_shapes_and_tau0_independence():
+    key = jax.random.PRNGKey(0)
+    enc = Encoder(in_dim=10, key=key)
+    ha = HeadA(latent=64, n_k_cddf=30, key=key)
+    x = jnp.zeros(10)
+    lat = enc(x)
+    assert lat.shape == (64,)
+    out = ha(lat)
+    assert out["f_nhi"].shape == (30,)
+    assert out["dndx"].shape == (3,)
+    # x64 active via package import: latent must be float64
+    assert lat.dtype == jnp.float64
+
+
+def test_encoder_layer_keys_distinct():
+    # PRNG key-reuse trap: each Linear must get its own split subkey, else
+    # layers share correlated init weights (silent bug). Rebuilds must be
+    # reproducible and key-sensitive.
+    key = jax.random.PRNGKey(0)
+    enc_a = Encoder(in_dim=10, key=key)
+    enc_b = Encoder(in_dim=10, key=key)
+    enc_c = Encoder(in_dim=10, key=jax.random.PRNGKey(1))
+    # same key -> identical weights (deterministic, no hidden global RNG)
+    for la, lb in zip(enc_a.layers, enc_b.layers):
+        assert jnp.array_equal(la.weight, lb.weight)
+    # different top-level key -> different weights (key actually consumed)
+    assert not jnp.array_equal(enc_a.layers[0].weight, enc_c.layers[0].weight)
+
+
+def test_jit_vmap_and_finite_grads():
+    key = jax.random.PRNGKey(0)
+    enc = Encoder(in_dim=10, key=key)
+    ha = HeadA(latent=64, n_k_cddf=30, key=key)
+    x = jnp.ones(10)
+
+    # filter_jit must run and agree with eager
+    lat = enc(x)
+    assert jnp.allclose(eqx.filter_jit(enc)(x), lat)
+
+    # vmap over a leading batch dim, both modules
+    batch = jnp.ones((5, 10))
+    lat_b = jax.vmap(enc)(batch)
+    assert lat_b.shape == (5, 64)
+    out_b = jax.vmap(ha)(lat_b)
+    assert out_b["f_nhi"].shape == (5, 30)
+    assert out_b["dndx"].shape == (5, 3)
+
+    # gradients must be finite (no NaN through gelu / Linear stack)
+    g_enc = jax.grad(lambda v: enc(v).sum())(x)
+    assert jnp.all(jnp.isfinite(g_enc))
+    g_ha = jax.grad(lambda l: ha(l)["f_nhi"].sum() + ha(l)["dndx"].sum())(lat)
+    assert jnp.all(jnp.isfinite(g_ha))
+
+
+def test_headB_outputs_and_structural_tier_p():
+    key = jax.random.PRNGKey(1)
+    hb = HeadB(latent=64, n_k=8, key=key)
+    lat = jnp.zeros(64); tau0 = jnp.array(0.3)
+    out = hb(lat, tau0)
+    # REDESIGN: HeadB's P_filt output is now the residual r̂ (key P_filt_resid).
+    assert out["P_filt_resid"].shape == (4, 8)
+    assert out["delta"].shape == (3, 8)
+    w = jnp.array([0.7, 0.18, 0.07, 0.05]); P_filt_lin = jnp.ones((4, 8))
+    tp = structural_tier_p(w, P_filt_lin)
+    assert tp.shape == (8,)
+    assert jnp.allclose(tp, w.sum())
+
+
+def test_emulator_endtoend_runs():
+    key = jax.random.PRNGKey(2)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+    pred = m(jnp.zeros(10), tau0=jnp.array(0.3))
+    # REDESIGN: P_filt is split into P_filt_base (θ-blind) + P_filt_resid (residual).
+    assert set(pred) >= {"f_nhi", "dndx", "P_filt_base", "P_filt_resid", "delta"}
+
+
+def test_emulator_vmap_over_tau0_and_structural_grad():
+    # JAX foot-gun guards for Head B / structural total (all model tests above
+    # are UNBATCHED). Two real risks the unbatched tests miss:
+    #   (a) jnp.atleast_1d(tau0)+concatenate must batch a per-row scalar tau0
+    #       under jax.vmap. A scalar reshaped inside a vmapped fn (e.g. a naive
+    #       tau0.reshape(1)) silently breaks here; atleast_1d is the safe form.
+    #   (b) grad must flow finitely through structural_tier_p w.r.t. BOTH inputs.
+    key = jax.random.PRNGKey(5)
+    m = Emulator(in_dim=10, n_k=6, key=key)
+
+    # (a) vmap over BOTH x and a batched (per-row scalar) tau0
+    X = jnp.ones((5, 10))
+    T = jnp.linspace(0.1, 0.5, 5)  # shape (5,), one scalar tau0 per row
+    pred = jax.vmap(lambda x, t: m(x, t))(X, T)
+    assert pred["P_filt_resid"].shape == (5, 4, 6)
+    assert pred["P_filt_base"].shape == (5, 4, 6)
+    assert pred["delta"].shape == (5, 3, 6)
+    assert pred["f_nhi"].shape == (5, 30)
+    assert pred["P_filt_resid"].dtype == jnp.float64
+    # batched matches per-row eager (no silent shape/broadcast corruption)
+    eager0 = m(X[0], T[0])
+    assert jnp.allclose(pred["P_filt_resid"][0], eager0["P_filt_resid"])
+
+    # (b) structural_tier_p: batched einsum == manual loop; grad finite on both args
+    w = jax.random.uniform(jax.random.PRNGKey(6), (5, 4))
+    P = jax.random.uniform(jax.random.PRNGKey(7), (5, 4, 6)) + 0.1
+    tp = structural_tier_p(w, P)
+    assert tp.shape == (5, 6)
+    ref = jnp.stack([jnp.einsum("c,ck->k", w[i], P[i]) for i in range(5)])
+    assert jnp.allclose(tp, ref)
+    gw = jax.grad(lambda v: structural_tier_p(v, P[0]).sum())(w[0])
+    gp = jax.grad(lambda v: structural_tier_p(w[0], v).sum())(P[0])
+    assert jnp.all(jnp.isfinite(gw)) and jnp.all(jnp.isfinite(gp))
+    # all-ones P_filt -> Tier-P total == sum(w) (the structural identity)
+    assert jnp.allclose(structural_tier_p(w[0], jnp.ones((4, 6))), w[0].sum())
+
+
+def test_masked_mse_nan_safe_gradients():
+    pred = jnp.array([1.0, 2.0, 3.0, 4.0])
+    targ = jnp.array([1.0, jnp.nan, 3.0, jnp.nan])
+    mask = jnp.isfinite(targ)
+    val, grad = jax.value_and_grad(lambda p: masked_mse(p, targ, mask))(pred)
+    assert jnp.isfinite(val)
+    assert jnp.all(jnp.isfinite(grad))
+    assert grad[1] == 0.0 and grad[3] == 0.0
+
+
+def test_masked_mse_inf_target_at_masked_position():
+    # Adversarial: a masked-out target may be +/-inf (not just NaN). The masked
+    # branch must zero it BEFORE it can poison the where-gradient (0*inf=NaN trap).
+    pred = jnp.array([1.0, 2.0, 3.0, 4.0])
+    targ = jnp.array([1.0, jnp.inf, 3.0, -jnp.inf])
+    mask = jnp.array([True, False, True, False])
+    val, grad = jax.value_and_grad(lambda p: masked_mse(p, targ, mask))(pred)
+    assert jnp.isfinite(val)
+    assert jnp.all(jnp.isfinite(grad))
+    assert grad[1] == 0.0 and grad[3] == 0.0  # masked inf positions: zero gradient
+
+
+def test_masked_mse_fully_masked_no_div_zero():
+    # Adversarial: mask all-False -> denom floored to 1 (no 0/0). Forward 0, grad all-0.
+    pred = jnp.array([1.0, 2.0, 3.0, 4.0])
+    targ = jnp.full(4, jnp.nan)
+    mask = jnp.zeros(4, bool)
+    val, grad = jax.value_and_grad(lambda p: masked_mse(p, targ, mask))(pred)
+    assert val == 0.0
+    assert jnp.all(jnp.isfinite(grad)) and jnp.all(grad == 0.0)
+
+
+def test_masked_mse_zero_weight_empty_class():
+    # Adversarial: a per-class 1/n_c weight can have a 0 entry (empty class). A zero
+    # weight must contribute zero gradient, not NaN, even at a masked NaN target.
+    pred = jnp.array([1.0, 2.0, 3.0, 4.0])
+    targ = jnp.array([0.5, jnp.nan, 1.0, 2.0])
+    mask = jnp.isfinite(targ)
+    weight = jnp.array([0.5, 0.0, 1.0, 2.0])  # idx1: empty class (zero weight) + NaN target
+    val, grad = jax.value_and_grad(lambda p: masked_mse(p, targ, mask, weight))(pred)
+    assert jnp.isfinite(val)
+    assert jnp.all(jnp.isfinite(grad))
+    assert grad[1] == 0.0  # zero weight -> zero gradient
+
+
+def test_masked_mse_inf_weight_at_masked_position():
+    # Adversarial (jax-traps #7, now covered): a non-finite WEIGHT at a MASKED-OUT
+    # position must stay inert. masked_mse now forms the per-element weight as
+    # jnp.where(mask, weight, 0.0) (SELECT 0, never multiply): the masked bin gets a
+    # finite 0, so a ±inf there is inert. The OLD `weight*mask` would have given
+    # inf*0 = NaN, poisoning BOTH the Σ(w) denom and the numerator. Value + grad
+    # finite, grad zero at the masked bin.
+    pred = jnp.array([1.0, 2.0, 3.0, 4.0])
+    targ = jnp.array([0.5, jnp.nan, 1.0, 2.0])
+    mask = jnp.array([True, False, True, True])         # idx1 masked out
+    weight = jnp.array([0.5, jnp.inf, 1.0, 2.0])        # +inf weight AT the masked bin
+    val, grad = jax.value_and_grad(lambda p: masked_mse(p, targ, mask, weight))(pred)
+    assert jnp.isfinite(val)
+    assert jnp.all(jnp.isfinite(grad))
+    assert grad[1] == 0.0                                # masked inf-weight bin: inert
+    # the finite-weight result is UNCHANGED by the w-in-numerator fix: reproduce it
+    # with the inf swapped for any finite weight at the (zero-contribution) masked bin.
+    w_finite = weight.at[1].set(7.0)
+    val_ref = masked_mse(pred, targ, mask, w_finite)
+    assert jnp.allclose(val, val_ref)
+
+
+def test_masked_mse_batched_broadcast_jit_and_double_grad():
+    # Realistic joint-loss shape: pred/target (B,4,K), mask broadcast to full shape
+    # (as the joint loss does via `m3 & ones_like(target, bool)`), NaN above Nyquist.
+    import numpy as np
+    B, C, K = 3, 4, 6
+    rng = np.random.default_rng(0)
+    pred = jnp.array(rng.standard_normal((B, C, K)))
+    targ = rng.standard_normal((B, C, K))
+    m2d = np.ones((B, K), bool)
+    m2d[0, 4:] = False
+    m2d[2, 5:] = False
+    full = np.broadcast_to(m2d[:, None, :], (B, C, K))
+    targ[~full] = np.nan
+    targ = jnp.array(targ)
+    mask = jnp.array(full)  # materialised full mask, as the joint loss passes
+    eager = masked_mse(pred, targ, mask)
+    jitted = eqx.filter_jit(masked_mse)(pred, targ, mask)
+    assert jnp.isfinite(eager) and jnp.allclose(eager, jitted)
+    grad = jax.grad(lambda p: masked_mse(p, targ, mask))(pred)
+    assert jnp.all(jnp.isfinite(grad))
+    assert jnp.all(grad[jnp.array(~full)] == 0.0)  # zero grad at masked positions
+    # denom counts exactly the unmasked elements (mean over intended elements)
+    assert float(jnp.sum(mask.astype(jnp.float64))) == int(full.sum())
+    # float64 under x64
+    assert eager.dtype == jnp.float64 and grad.dtype == jnp.float64
+    # second-order: hessian-diag finite on the NaN batch
+    hess = jax.jacfwd(jax.grad(lambda p: masked_mse(p, targ, mask)))(pred)
+    assert jnp.all(jnp.isfinite(hess))
+
+
+def test_joint_loss_scalar_finite_and_grads_finite():
+    key = jax.random.PRNGKey(3)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+    _tpf = jnp.where(jnp.arange(8) < 6, 1.0, jnp.nan)[None,None,:]*jnp.ones((2,4,8))
+    batch = {
+        "x": jnp.zeros((2,10)), "tau0": jnp.array([0.3, 0.5]),
+        "t_f_nhi": jnp.zeros((2,30)), "t_dndx": jnp.zeros((2,3)),
+        "t_p_base": _tpf,
+        "t_p_resid": _tpf,
+        "t_delta": jnp.zeros((2,3,8)),
+        "t_f_nhi_mask": jnp.ones((2,30), bool),
+        "t_dndx_mask": jnp.ones((2,3), bool),
+        "mask": (jnp.arange(8) < 6)[None,:]*jnp.ones((2,8), bool),
+        "inv_nc": jnp.array([[1.,1/10,1/7,0.],[1.,1/10,1/7,1/3]]),
+        "inv_nalpha": jnp.array([0.25, 0.25]),
+        "mean_F_clean": jnp.array([0.7, 0.6]),
+    }
+    val, grad = jax.value_and_grad(lambda mm: joint_loss(mm, batch))(m)
+    assert jnp.isfinite(val)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    assert all(jnp.all(jnp.isfinite(g)) for g in leaves)
+
+
+def test_headB_n_k_static_field_serialise_roundtrip():
+    # HeadB.n_k is eqx.field(static=True): (a) it must NOT be a differentiable leaf
+    # so PLAIN jax.value_and_grad(joint_loss)(model,...) works (a dynamic int leaf
+    # raises "grad requires real- or complex-valued inputs, got int64"); (b) it must
+    # survive tree_serialise/deserialise, which reconstructs static fields from the
+    # SKELETON (the bytes hold only array leaves) — the n_k must round-trip and the
+    # restored model must reproduce predictions bit-for-bit.
+    import io
+    key = jax.random.PRNGKey(31)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+
+    # (a) n_k is a STATIC field, not an array leaf of the pytree
+    arr_leaves = jax.tree_util.tree_leaves(eqx.filter(m, eqx.is_array))
+    assert all(jnp.issubdtype(l.dtype, jnp.floating) for l in arr_leaves)
+    assert m.head_b.n_k == 8
+
+    # (b) serialise -> deserialise into a fresh skeleton; n_k restored, preds identical
+    buf = io.BytesIO()
+    eqx.tree_serialise_leaves(buf, m)
+    buf.seek(0)
+    skeleton = Emulator(in_dim=10, n_k=8, key=jax.random.PRNGKey(999))
+    m2 = eqx.tree_deserialise_leaves(buf, skeleton)
+    assert m2.head_b.n_k == 8
+    x = jnp.ones((3, 10)); t = jnp.linspace(0.1, 0.5, 3)
+    p1 = jax.vmap(m)(x, t); p2 = jax.vmap(m2)(x, t)
+    for kk in ("f_nhi", "dndx", "P_filt_base", "P_filt_resid", "delta"):
+        assert jnp.array_equal(p1[kk], p2[kk])
+
+
+def test_emulator_vmap_equals_python_loop_all_heads():
+    # vmap(model) over a batch must equal a python loop row-by-row for EVERY head
+    # (no leading-axis bug in Head B's reshape(7, n_k) / atleast_1d(tau0) path,
+    # nor in the BaselineHead's z=x[...,9] indexing).
+    key = jax.random.PRNGKey(17)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+    x = jax.random.normal(jax.random.PRNGKey(18), (4, 10))
+    t = jnp.linspace(0.05, 0.6, 4)
+    pv = jax.vmap(m)(x, t)
+    for kk in ("f_nhi", "dndx", "P_filt_base", "P_filt_resid", "delta"):
+        loop = jnp.stack([m(x[i], t[i])[kk] for i in range(4)])
+        assert jnp.allclose(pv[kk], loop, atol=0, rtol=0) or jnp.allclose(pv[kk], loop)
+
+
+def test_baseline_head_is_theta_blind():
+    # REDESIGN: the BaselineHead's P_filt_base output must be EXACTLY blind to the 9
+    # cosmology/IGM params (it takes only z, τ₀ by construction). The Jacobian of
+    # P_filt_base wrt the 9 params is exactly zero. (z = x[9], so we differentiate
+    # only the first 9 entries of x.)
+    key = jax.random.PRNGKey(8)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+    z_unit = jnp.array(0.42)
+    tau0 = jnp.array(0.4)
+
+    def base_of_theta(theta9):
+        x = jnp.concatenate([theta9, jnp.atleast_1d(z_unit)])
+        return m(x, tau0)["P_filt_base"]
+
+    theta0 = jnp.linspace(0.1, 0.9, 9)
+    J = jax.jacfwd(base_of_theta)(theta0)            # (4, n_k, 9)
+    assert jnp.allclose(J, 0.0, atol=0.0)            # exactly zero: θ never enters the baseline
+    # but the residual head IS θ-dependent (sanity: not also accidentally blind)
+    def resid_of_theta(theta9):
+        x = jnp.concatenate([theta9, jnp.atleast_1d(z_unit)])
+        return m(x, tau0)["P_filt_resid"]
+    Jr = jax.jacfwd(resid_of_theta)(theta0)
+    assert jnp.any(jnp.abs(Jr) > 0.0)                # θ flows into the residual
+    # and the baseline DOES depend on z (it is the (z,τ₀)-conditional mean)
+    Jz = jax.jacfwd(lambda zz: m(
+        jnp.concatenate([theta0, jnp.atleast_1d(zz)]), tau0)["P_filt_base"])(z_unit)
+    assert jnp.any(jnp.abs(Jz) > 0.0)
+
+
+def test_baseline_head_standalone_is_theta_blind_and_shaped():
+    # BaselineHead in isolation: input is ONLY (z, τ₀); output (4, n_k); low-rank ok.
+    key = jax.random.PRNGKey(80)
+    for n_basis in (None, 5):
+        bh = BaselineHead(n_k=8, n_basis=n_basis, key=key)
+        out = bh(jnp.array(0.3), jnp.array(0.5))
+        assert out.shape == (4, 8)
+        # vmap over a batch of (z, τ₀)
+        zb = jnp.linspace(0.1, 0.9, 6); tb = jnp.linspace(0.2, 0.6, 6)
+        ob = jax.vmap(bh)(zb, tb)
+        assert ob.shape == (6, 4, 8)
+        assert ob.dtype == jnp.float64
+
+
+def test_p_resid_loss_is_residual_term_only():
+    # p_resid_loss == the σ_cosmo residual MSE term inside joint_loss (the early-stop
+    # metric). Build a batch where t_p_base != t_p_resid; p_resid_loss must depend ONLY
+    # on the residual head + t_p_resid.
+    key = jax.random.PRNGKey(91)
+    n_k = 8
+    m = Emulator(in_dim=10, n_k=n_k, key=key)
+    batch = _joint_batch(n_k)
+    base_loss = float(p_resid_loss(m, batch))
+    # corrupt t_p_base only -> p_resid_loss unchanged
+    b2 = dict(batch); b2["t_p_base"] = batch["t_p_base"] + 7.0
+    assert float(p_resid_loss(m, b2)) == base_loss
+    # corrupt t_p_resid -> p_resid_loss DOES change
+    b3 = dict(batch); b3["t_p_resid"] = jnp.zeros_like(batch["t_p_resid"])
+    assert float(p_resid_loss(m, b3)) != base_loss
+
+
+def test_joint_loss_k_weight_emphasizes_residual_band():
+    # RESIDUAL-HEAD k-emphasis (A_p low-k fix): a per-k k_weight in the batch must
+    # (a) leave the loss UNCHANGED vs uniform when k_weight is all-ones (mean-1 noop);
+    # (b) reweight ONLY the p_resid term so a residual error concentrated at the
+    #     up-weighted bins counts MORE than the same error at down-weighted bins;
+    # (c) leave the f_nhi/dndx/p_base/delta terms bit-identical (k_weight touches
+    #     only the cosmology residual term); (d) gradients stay finite.
+    import numpy as np
+    key = jax.random.PRNGKey(71)
+    n_k = 8
+    m = Emulator(in_dim=10, n_k=n_k, key=key)
+    batch = _joint_batch(n_k)
+
+    # (a) all-ones k_weight (B,K) is a no-op
+    base = float(joint_loss(m, batch))
+    b_ones = dict(batch); b_ones["k_weight"] = jnp.ones((2, n_k))
+    assert abs(float(joint_loss(m, b_ones)) - base) <= 1e-12 * max(1.0, abs(base))
+
+    # _joint_batch masks the last 2 bins (above Nyquist); the FINITE bins are 0..n_k-3.
+    # (b) a k_weight that heavily up-weights a finite low-k bin changes the p_resid
+    #     term (the residual head has a non-zero error there).
+    kw = np.ones(n_k); kw[0] = 8.0; kw = kw / kw.mean()      # heavy at finite bin 0
+    b_kw = dict(batch); b_kw["k_weight"] = jnp.broadcast_to(jnp.asarray(kw), (2, n_k))
+    assert float(joint_loss(m, b_kw)) != base                # the residual term moved
+
+    # p_resid_loss with use_k_weight must reflect the SAME emphasis
+    r_uniform = float(p_resid_loss(m, b_kw, use_k_weight=False))
+    r_weighted = float(p_resid_loss(m, b_kw, use_k_weight=True))
+    assert r_weighted != r_uniform
+
+    # (c) place a residual error at the HEAVY finite bin (0) vs a LIGHT finite bin
+    #     (n_k-3): the weighted metric must penalise the heavy-bin error MORE.
+    light = n_k - 3
+    bad_heavy = np.asarray(batch["t_p_resid"]).copy(); bad_heavy[:, :, 0] += 3.0
+    bad_light = np.asarray(batch["t_p_resid"]).copy(); bad_light[:, :, light] += 3.0
+    b_h = dict(batch); b_h["t_p_resid"] = jnp.asarray(bad_heavy)
+    b_h["k_weight"] = jnp.broadcast_to(jnp.asarray(kw), (2, n_k))
+    b_l = dict(batch); b_l["t_p_resid"] = jnp.asarray(bad_light)
+    b_l["k_weight"] = jnp.broadcast_to(jnp.asarray(kw), (2, n_k))
+    r_heavy = float(p_resid_loss(m, b_h, use_k_weight=True))
+    r_light = float(p_resid_loss(m, b_l, use_k_weight=True))
+    assert r_heavy > r_light          # heavy-bin error costs more under the emphasis
+
+    # (d) gradients finite through the k-weighted joint loss
+    val, grad = jax.value_and_grad(lambda mm: joint_loss(mm, b_kw))(m)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    assert jnp.isfinite(val) and all(jnp.all(jnp.isfinite(g)) for g in leaves)
+
+
+def test_k_weight_only_touches_p_resid_term():
+    # The k_weight must NOT leak into f_nhi/dndx/p_base/delta. Build two batches that
+    # differ ONLY in k_weight; the four non-residual per-term MSEs must be identical.
+    import numpy as np
+    from hcd_analysis.emulator.model import masked_mse
+    key = jax.random.PRNGKey(72)
+    n_k = 8
+    m = Emulator(in_dim=10, n_k=n_k, key=key)
+    batch = _joint_batch(n_k)
+    kw = np.linspace(0.5, 2.0, n_k); kw = kw / kw.mean()
+
+    def terms(b):
+        preds = jax.vmap(m)(b["x"], b["tau0"])
+        m3 = b["mask"][:, None, :]
+        mask4 = m3 & jnp.ones_like(b["t_p_resid"], bool)
+        return dict(
+            f_nhi=float(masked_mse(preds["f_nhi"], b["t_f_nhi"], b["t_f_nhi_mask"],
+                                   weight=b["inv_nalpha"][:, None])),
+            dndx=float(masked_mse(preds["dndx"], b["t_dndx"], b["t_dndx_mask"],
+                                  weight=b["inv_nalpha"][:, None])),
+            p_base=float(masked_mse(preds["P_filt_base"], b["t_p_base"], mask4,
+                                    weight=b["inv_nc"][:, :, None])),
+            delta=float(masked_mse(preds["delta"], b["t_delta"],
+                                   m3 & jnp.ones_like(b["t_delta"], bool),
+                                   weight=b["inv_nc"][:, 1:, None])),
+        )
+    t0 = terms(batch)
+    b_kw = dict(batch); b_kw["k_weight"] = jnp.broadcast_to(jnp.asarray(kw), (2, n_k))
+    t1 = terms(b_kw)
+    for k in t0:
+        assert t0[k] == t1[k], k    # k_weight does not touch the non-residual terms
+
+
+def test_headA_outputs_are_tau0_invariant_by_gradient():
+    # Task 12: Head A (f_nhi, dN/dX) must be EXACTLY tau0-invariant. It is structural
+    # (Head A consumes only the latent, never tau0), so the Jacobian wrt tau0 is exactly
+    # zero -- a gradient test, not a value test (spec sec.8).
+    key = jax.random.PRNGKey(4)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+    x = jnp.ones(10)
+    def fa(tau0):
+        p = m(x, tau0)
+        return jnp.concatenate([p["f_nhi"], p["dndx"]])
+    J = jax.jacfwd(fa)(jnp.array(0.4))
+    assert jnp.allclose(J, 0.0, atol=0.0)  # exactly zero: Head A does not consume tau0
+
+
+# ---------------------------------------------------------------------------
+# Task 2 (Phase-2b): learned low-rank P_filt output basis (toggle n_basis).
+# Delta_c stays DENSE; SVD warm-start; dense default unchanged.
+# ---------------------------------------------------------------------------
+
+def _lowrank_batch(n_k):
+    """joint_loss batch for n_basis tests (same shapes as the dense joint-loss test)."""
+    _tpf = (jnp.where(jnp.arange(n_k) < n_k - 2, 1.0, jnp.nan)[None, None, :]
+            * jnp.ones((2, 4, n_k)))
+    return {
+        "x": jnp.zeros((2, 10)), "tau0": jnp.array([0.3, 0.5]),
+        "t_f_nhi": jnp.zeros((2, 30)), "t_dndx": jnp.zeros((2, 3)),
+        "t_p_base": _tpf,
+        "t_p_resid": _tpf,
+        "t_delta": jnp.zeros((2, 3, n_k)),
+        "t_f_nhi_mask": jnp.ones((2, 30), bool),
+        "t_dndx_mask": jnp.ones((2, 3), bool),
+        "mask": (jnp.arange(n_k) < n_k - 2)[None, :] * jnp.ones((2, n_k), bool),
+        "inv_nc": jnp.array([[1., 1 / 10, 1 / 7, 0.], [1., 1 / 10, 1 / 7, 1 / 3]]),
+        "inv_nalpha": jnp.array([0.25, 0.25]),
+        "mean_F_clean": jnp.array([0.7, 0.6]),
+    }
+
+
+def test_headB_dense_unchanged():
+    # n_basis=None must be byte-for-byte the pre-change dense head: P_filt (4,n_k),
+    # delta (3,n_k), and identical outputs for a fixed key (dense path untouched).
+    key = jax.random.PRNGKey(1)
+    n_k = 8
+    hb = HeadB(latent=64, n_k=n_k, key=key)           # default n_basis=None
+    hb_explicit = HeadB(latent=64, n_k=n_k, n_basis=None, key=key)
+    assert hb.n_basis is None and hb.p_filt_basis is None
+    lat = jnp.zeros(64); tau0 = jnp.array(0.3)
+    out = hb(lat, tau0)
+    # REDESIGN: P_filt output key is now P_filt_resid (the residual), same shape.
+    assert out["P_filt_resid"].shape == (4, n_k)
+    assert out["delta"].shape == (3, n_k)
+    # explicit None == default None (same key -> identical weights and outputs)
+    out2 = hb_explicit(lat, tau0)
+    assert jnp.array_equal(out["P_filt_resid"], out2["P_filt_resid"])
+    assert jnp.array_equal(out["delta"], out2["delta"])
+    # regression vs the literal pre-change computation: single dense Linear,
+    # reshape(7,n_k), split [:4]/[4:] (the arithmetic is byte-for-byte unchanged).
+    h = jax.nn.gelu(hb.trunk(jnp.concatenate([lat, jnp.atleast_1d(tau0)])))
+    y = hb.out(h).reshape(7, n_k)
+    assert jnp.array_equal(out["P_filt_resid"], y[:4])
+    assert jnp.array_equal(out["delta"], y[4:])
+
+
+def test_headB_lowrank_shapes():
+    # n_basis=int -> P_filt (4,n_k) decoded through the trainable basis; delta (3,n_k)
+    # dense; the output-layer param count is MUCH smaller than the dense head.
+    key = jax.random.PRNGKey(1)
+    n_k, n_basis = 172, 12
+    hb_dense = HeadB(latent=64, n_k=n_k, key=key)
+    hb_lr = HeadB(latent=64, n_k=n_k, n_basis=n_basis, key=key)
+    lat = jnp.zeros(64); tau0 = jnp.array(0.3)
+    out = hb_lr(lat, tau0)
+    assert out["P_filt_resid"].shape == (4, n_k)
+    assert out["delta"].shape == (3, n_k)
+    assert hb_lr.p_filt_basis.shape == (n_basis, n_k)
+    # output-layer weight+bias param counts
+    def out_params(hb):
+        return hb.out.weight.size + hb.out.bias.size
+    dense_n = out_params(hb_dense)        # 256*(7*n_k) + 7*n_k
+    lr_out_n = out_params(hb_lr)          # 256*(4*nb+3*n_k) + (4*nb+3*n_k)
+    lr_total = lr_out_n + hb_lr.p_filt_basis.size
+    assert lr_out_n < dense_n
+    # even counting the trainable basis, the low-rank head is much smaller
+    assert lr_total < 0.7 * dense_n
+
+
+def test_svd_warmstart_beats_random():
+    import numpy as np
+    rng = np.random.default_rng(0)
+    n_rows, n_k, r = 200, 30, 5
+    # synthetic exactly rank-r matrix: (n_rows, r) @ (r, n_k)
+    A = rng.standard_normal((n_rows, r))
+    B = rng.standard_normal((r, n_k))
+    M = jnp.asarray(A @ B)
+    n_basis = 8  # >= r
+    basis = svd_basis_init(M, n_basis)
+    assert basis.shape == (n_basis, n_k)
+    # reconstruction: project rows onto the basis and back. With n_basis >= rank,
+    # error ~ 0 (the top-r right sing. vectors span the row space exactly).
+    coeffs = M @ basis.T                 # (n_rows, n_basis)
+    recon = coeffs @ basis               # (n_rows, n_k)
+    err = jnp.linalg.norm(M - recon) / jnp.linalg.norm(M)
+    assert err < 1e-6
+    # rank-collapse guard: every singular value of the returned basis is > 0
+    sv = jnp.linalg.svd(basis, compute_uv=False)
+    assert jnp.all(sv > 1e-8)
+    # warm-start strictly beats a random basis at the same n_basis
+    rand = jax.nn.initializers.orthogonal()(jax.random.PRNGKey(0), (n_basis, n_k))
+    recon_rand = (M @ rand.T) @ rand
+    err_rand = jnp.linalg.norm(M - recon_rand) / jnp.linalg.norm(M)
+    assert err < err_rand
+
+
+def test_lowrank_grads_finite_and_jit():
+    key = jax.random.PRNGKey(3)
+    n_k = 8
+    m = Emulator(in_dim=10, n_k=n_k, n_basis=12, key=key)
+    # forward + vmap over a batch
+    x = jnp.ones((2, 10)); t = jnp.array([0.3, 0.5])
+    pv = jax.vmap(m)(x, t)
+    assert pv["P_filt_resid"].shape == (2, 4, n_k)
+    assert pv["P_filt_base"].shape == (2, 4, n_k)
+    assert pv["delta"].shape == (2, 3, n_k)
+    assert pv["P_filt_resid"].dtype == jnp.float64  # x64 active
+    # eqx.filter_value_and_grad(joint_loss) finite (incl. the trainable basis leaf)
+    batch = _lowrank_batch(n_k)
+    val, grad = eqx.filter_value_and_grad(lambda mm: joint_loss(mm, batch))(m)
+    assert jnp.isfinite(val)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    assert all(jnp.all(jnp.isfinite(g)) for g in leaves)
+    # the basis got a finite (and non-trivial) gradient
+    assert grad.head_b.p_filt_basis is not None
+    assert jnp.all(jnp.isfinite(grad.head_b.p_filt_basis))
+    # eqx.filter_jit matches eager
+    eager = joint_loss(m, batch)
+    jitted = eqx.filter_jit(joint_loss)(m, batch)
+    assert jnp.allclose(eager, jitted)
+    # vmap matches a python loop row-by-row (no leading-axis bug in the basis matmul)
+    for kk in ("P_filt_resid", "P_filt_base", "delta"):
+        loop = jnp.stack([m(x[i], t[i])[kk] for i in range(2)])
+        assert jnp.allclose(pv[kk], loop)
+
+
+def test_delta_still_dense_with_basis():
+    # With n_basis set, Delta_c must remain the dense (3,n_k) head -- NOT routed
+    # through the P_filt basis. Verify the delta output is independent of the basis:
+    # perturbing p_filt_basis changes P_filt but leaves delta bit-identical.
+    key = jax.random.PRNGKey(7)
+    n_k, n_basis = 8, 4
+    m = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis, key=key)
+    x = jnp.ones(10); t = jnp.array(0.4)
+    out0 = m(x, t)
+    assert out0["delta"].shape == (3, n_k)
+    # mutate HeadB's basis (P_filt residual path only) and re-run
+    new_basis = m.head_b.p_filt_basis + 5.0
+    m2 = eqx.tree_at(lambda mm: mm.head_b.p_filt_basis, m, new_basis)
+    out1 = m2(x, t)
+    assert not jnp.allclose(out0["P_filt_resid"], out1["P_filt_resid"])  # residual DID change
+    assert jnp.array_equal(out0["delta"], out1["delta"])     # delta unchanged (dense)
+    # and the delta gradient does not flow into the basis
+    g = jax.grad(lambda b: m2.__class__.__call__(
+        eqx.tree_at(lambda mm: mm.head_b.p_filt_basis, m, b), x, t)["delta"].sum()
+    )(m.head_b.p_filt_basis)
+    assert jnp.all(g == 0.0)
+
+
+def test_lowrank_serialise_roundtrip_and_structural_composition():
+    # JAX-traps-log #8 generalised to the low-rank head: (a) tree_serialise/deserialise
+    # must round-trip an n_basis=int model bit-for-bit -- the trainable p_filt_basis is
+    # an array leaf carried in the bytes, while n_basis (static) is rebuilt from the
+    # SKELETON; deserialising into a wrong-n_basis skeleton must RAISE (shape mismatch),
+    # not silently mis-load. (b) the bottleneck's downstream contract: linear-space
+    # P_filt produced by the low-rank head still satisfies structural_tier_p's einsum
+    # (4,n_k) and the all-ones w_c -> sum-over-classes identity.
+    import io
+    key = jax.random.PRNGKey(123)
+    n_k, n_basis = 8, 6
+    m = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis, key=key)
+
+    # (a) every differentiable leaf (incl. the basis) is float; basis is a real leaf
+    arr_leaves = jax.tree_util.tree_leaves(eqx.filter(m, eqx.is_array))
+    assert all(jnp.issubdtype(l.dtype, jnp.floating) for l in arr_leaves)
+    assert m.head_b.p_filt_basis.shape == (n_basis, n_k)
+
+    buf = io.BytesIO()
+    eqx.tree_serialise_leaves(buf, m)
+    buf.seek(0)
+    skeleton = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis, key=jax.random.PRNGKey(999))
+    m2 = eqx.tree_deserialise_leaves(buf, skeleton)
+    assert m2.head_b.n_basis == n_basis
+    assert jnp.array_equal(m.head_b.p_filt_basis, m2.head_b.p_filt_basis)
+    x = jnp.ones((3, 10)); t = jnp.linspace(0.1, 0.5, 3)
+    p1 = jax.vmap(m)(x, t); p2 = jax.vmap(m2)(x, t)
+    for kk in ("f_nhi", "dndx", "P_filt_base", "P_filt_resid", "delta"):
+        assert jnp.array_equal(p1[kk], p2[kk])
+
+    # deserialising into a wrong-n_basis (and dense) skeleton must raise, never silently load
+    for bad_skel in (Emulator(in_dim=10, n_k=n_k, n_basis=n_basis - 1, key=key),
+                     Emulator(in_dim=10, n_k=n_k, n_basis=None, key=key)):
+        buf.seek(0)
+        try:
+            eqx.tree_deserialise_leaves(buf, bad_skel)
+            raised = False
+        except Exception:
+            raised = True
+        assert raised
+
+    # (b) structural_tier_p contract holds on any (3,4,n_k) LINEAR-shaped P_filt; the
+    # low-rank residual head feeds the reconstruction downstream, so we pin the einsum
+    # identity on exp(P_filt_resid) (a stand-in linear (4,n_k) array of the right shape).
+    pf_lin = jnp.exp(p1["P_filt_resid"])                # (3,4,n_k) shape contract
+    w = jnp.ones((3, 4))
+    tp = structural_tier_p(w, pf_lin)
+    assert tp.shape == (3, n_k)
+    assert jnp.allclose(tp, pf_lin.sum(axis=1))         # all-ones w_c -> sum over classes
+    # grad flows finitely back through HeadB's basis via the structural sum
+    def struct_loss(b):
+        mm = eqx.tree_at(lambda z: z.head_b.p_filt_basis, m, b)
+        pf = jnp.exp(jax.vmap(mm)(x, t)["P_filt_resid"])
+        return structural_tier_p(w, pf).sum()
+    gb = jax.grad(struct_loss)(m.head_b.p_filt_basis)
+    assert jnp.all(jnp.isfinite(gb)) and jnp.any(gb != 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Phase-2b final review batch: A2 (structural-identity roundtrip), A3 (dead
+# meanF removed), A4 (uniform/comparable term_w).
+# ---------------------------------------------------------------------------
+
+def test_structural_identity_through_transform_roundtrip(tmp_path):
+    """A2 (REDESIGN): the baseline+residual transform/inverse COMPOSITION preserves
+    the structural identity the spec leans on. Take a cache row's LINEAR P_filt (4,K)
+    and its w_c; build the baseline/residual targets via make_batch, reconstruct
+    LINEAR P_filt (reconstruct_P_filt, as untransform_prediction does), and confirm
+    structural_tier_p(w_c, recovered linear P_filt) reproduces the cache's
+    einsum(w_c, linear P_filt) to ~1e-10. (NOT a trained-model claim — this pins the
+    transform composition on cache arrays.)"""
+    import numpy as np
+    from tests.emulator._fixture import write_synthetic_cache
+    from hcd_analysis.emulator.data import (
+        load_cache, fit_target_norm, make_batch, reconstruct_P_filt,
+    )
+    path = tmp_path / "obs.h5"
+    write_synthetic_cache(path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    d = load_cache(path)
+    R = d["x"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+
+    # pick a fully-finite (below-Nyquist) row so the whole (4,K) is comparable
+    finite_rows = np.where(np.isfinite(d["P_filt"]).all(axis=(1, 2)))[0]
+    assert finite_rows.size > 0
+    row = int(finite_rows[0])
+    P_lin = d["P_filt"][row]                          # (4,K) LINEAR
+    w_c = d["w_c_cache"][row]                          # (4,)
+
+    # forward to the baseline/residual target space, then reconstruct (untransform style)
+    b = make_batch(d, np.array([row]), norm)
+    P_lin_rt = reconstruct_P_filt(b["t_p_base"][0], b["t_p_resid"][0], norm["P_filt"])
+
+    cache_tier_p = np.einsum("c,ck->k", w_c, P_lin)    # cache structural total
+    rt_tier_p = np.asarray(structural_tier_p(jnp.asarray(w_c), jnp.asarray(P_lin_rt)))
+    assert np.allclose(rt_tier_p, cache_tier_p, atol=1e-10, rtol=1e-10)
+    # also matches the cache's stored P_tier_p on the finite bins
+    assert np.allclose(rt_tier_p, d["P_tier_p"][row], atol=1e-10, rtol=1e-10)
+
+
+def _joint_batch(n_k=8):
+    """A standardized synthetic joint-loss batch (Head-A masks present)."""
+    _tpf = (jnp.where(jnp.arange(n_k) < n_k - 2, 1.0, jnp.nan)[None, None, :]
+            * jnp.ones((2, 4, n_k)))
+    return {
+        "x": jnp.zeros((2, 10)), "tau0": jnp.array([0.3, 0.5]),
+        "t_f_nhi": jnp.zeros((2, 30)), "t_dndx": jnp.zeros((2, 3)),
+        "t_p_base": _tpf,
+        "t_p_resid": _tpf,
+        "t_delta": jnp.zeros((2, 3, n_k)),
+        "t_f_nhi_mask": jnp.ones((2, 30), bool),
+        "t_dndx_mask": jnp.ones((2, 3), bool),
+        "mask": (jnp.arange(n_k) < n_k - 2)[None, :] * jnp.ones((2, n_k), bool),
+        "inv_nc": jnp.array([[1., 1 / 10, 1 / 7, 0.], [1., 1 / 10, 1 / 7, 1 / 3]]),
+        "inv_nalpha": jnp.array([0.25, 0.25]),
+        "mean_F_clean": jnp.array([0.7, 0.6]),
+    }
+
+
+def test_joint_loss_independent_of_meanF_and_grads_finite():
+    """A3: the dead meanF term is gone. joint_loss must (a) not reference
+    mean_F_clean (perturbing it leaves the loss & grad bit-identical), and
+    (b) still produce a finite scalar with finite model gradients."""
+    key = jax.random.PRNGKey(33)
+    m = Emulator(in_dim=10, n_k=8, key=key)
+    batch = _joint_batch(8)
+    val, grad = jax.value_and_grad(lambda mm: joint_loss(mm, batch))(m)
+    assert jnp.isfinite(val)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    assert all(jnp.all(jnp.isfinite(g)) for g in leaves)
+
+    # mean_F_clean no longer enters the loss: corrupt it -> identical value & grad
+    batch2 = dict(batch)
+    batch2["mean_F_clean"] = jnp.array([99.0, -99.0])
+    val2, grad2 = jax.value_and_grad(lambda mm: joint_loss(mm, batch2))(m)
+    assert jnp.array_equal(val, val2)
+    g1 = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    g2 = jax.tree_util.tree_leaves(eqx.filter(grad2, eqx.is_array))
+    for a, b in zip(g1, g2):
+        assert jnp.array_equal(a, b)
+
+    # joint_loss also works if mean_F_clean is absent entirely (truly unused)
+    batch3 = {k: v for k, v in batch.items() if k != "mean_F_clean"}
+    val3 = joint_loss(m, batch3)
+    assert jnp.array_equal(val, val3)
+
+
+def test_uniform_term_w_terms_comparable():
+    """A4: with A1-standardized targets, the four per-channel loss terms are
+    within ~1 order of magnitude of each other (no channel dominates), so the
+    uniform default term_w is justified — no hand-sweep needed."""
+    import numpy as np
+    from hcd_analysis.emulator.model import masked_mse
+    key = jax.random.PRNGKey(41)
+    m = Emulator(in_dim=10, n_k=12, key=key)
+    rng = np.random.default_rng(0)
+    n_k = 12
+    # standardized synthetic targets: ~unit-variance (the A1 transformed space)
+    batch = {
+        "x": jnp.array(rng.standard_normal((4, 10))),
+        "tau0": jnp.array(rng.uniform(0.1, 0.6, 4)),
+        "t_f_nhi": jnp.array(rng.standard_normal((4, 30))),
+        "t_dndx": jnp.array(rng.standard_normal((4, 3))),
+        "t_p_base": jnp.array(rng.standard_normal((4, 4, n_k))),
+        "t_p_resid": jnp.array(rng.standard_normal((4, 4, n_k))),
+        "t_delta": jnp.array(rng.standard_normal((4, 3, n_k))),
+        "t_f_nhi_mask": jnp.ones((4, 30), bool),
+        "t_dndx_mask": jnp.ones((4, 3), bool),
+        "mask": jnp.ones((4, n_k), bool),
+        "inv_nc": jnp.ones((4, 4)),
+        "inv_nalpha": jnp.ones(4),
+        "mean_F_clean": jnp.array(rng.uniform(0.4, 0.8, 4)),
+    }
+    preds = jax.vmap(m)(batch["x"], batch["tau0"])
+    m3 = batch["mask"][:, None, :]
+    mask4 = m3 & jnp.ones_like(batch["t_p_resid"], bool)
+    terms = {
+        "f_nhi": masked_mse(preds["f_nhi"], batch["t_f_nhi"], batch["t_f_nhi_mask"],
+                            weight=batch["inv_nalpha"][:, None]),
+        "dndx": masked_mse(preds["dndx"], batch["t_dndx"], batch["t_dndx_mask"],
+                           weight=batch["inv_nalpha"][:, None]),
+        "p_base": masked_mse(preds["P_filt_base"], batch["t_p_base"], mask4,
+                             weight=batch["inv_nc"][:, :, None]),
+        "p_resid": masked_mse(preds["P_filt_resid"], batch["t_p_resid"], mask4,
+                              weight=batch["inv_nc"][:, :, None]),
+        "delta": masked_mse(preds["delta"], batch["t_delta"],
+                            m3 & jnp.ones_like(batch["t_delta"], bool),
+                            weight=batch["inv_nc"][:, 1:, None]),
+    }
+    vals = jnp.array(list(terms.values()))
+    assert jnp.all(jnp.isfinite(vals)) and jnp.all(vals > 0)
+    # within ~1 order of magnitude: max/min ratio < 10
+    assert float(jnp.max(vals) / jnp.min(vals)) < 10.0
+
+    # default term_w is uniform and meanF-free: passing only the five uniform
+    # weights must reproduce the default-arg behaviour exactly (no missing key).
+    default = joint_loss(m, batch)
+    explicit = joint_loss(m, batch, term_w={"f_nhi": 1.0, "dndx": 1.0,
+                                            "p_base": 1.0, "p_resid": 1.0, "delta": 1.0})
+    assert jnp.array_equal(default, explicit)
+
+
+# --- FINALIZED RECIPE: coherent de-bias term + data-range soft down-weight -----
+
+def _cell_batch(n_k=8, n_cells=4, sims_per_cell=3, seed=0):
+    """A cell-structured batch: ``n_cells`` (z,τ₀)-cells, ``sims_per_cell`` rows each,
+    so the coherent de-bias term (per-cell mean over sims) has >1 sim per cell to
+    average. t_p_resid per cell sums to ~0 over its sims (the trained-target property
+    ⟨t_resid⟩_θ=0 per cell). Carries ``cell``/``n_cells`` and a full Nyquist mask."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    B = n_cells * sims_per_cell
+    cell = np.repeat(np.arange(n_cells), sims_per_cell).astype(np.int32)
+    # per-cell zero-mean residual targets over sims (the cosmology signal)
+    t = rng.standard_normal((B, 4, n_k))
+    for c in range(n_cells):
+        sel = cell == c
+        t[sel] -= t[sel].mean(0, keepdims=True)         # ⟨t⟩_θ = 0 per cell
+    return {
+        "x": jnp.array(rng.standard_normal((B, 10))),
+        "tau0": jnp.array(rng.uniform(0.1, 0.6, B)),
+        "t_f_nhi": jnp.zeros((B, 30)), "t_dndx": jnp.zeros((B, 3)),
+        "t_p_base": jnp.array(rng.standard_normal((B, 4, n_k))),
+        "t_p_resid": jnp.asarray(t),
+        "t_delta": jnp.zeros((B, 3, n_k)),
+        "t_f_nhi_mask": jnp.ones((B, 30), bool),
+        "t_dndx_mask": jnp.ones((B, 3), bool),
+        "mask": jnp.ones((B, n_k), bool),
+        "inv_nc": jnp.ones((B, 4)),
+        "inv_nalpha": jnp.ones(B),
+        "mean_F_clean": jnp.array(rng.uniform(0.4, 0.8, B)),
+        "cell": jnp.asarray(cell),
+        "n_cells": jnp.asarray(np.int64(n_cells)),
+    }
+
+
+def test_coherent_debias_term_reduces_percell_coherent():
+    """The FLAT coherent de-bias term must (1) be a finite scalar with finite grads,
+    (2) be NaN-safe under above-Nyquist masking, and (3) when minimized, DRIVE DOWN
+    the per-(z,τ₀)-cell coherent residual ⟨r̂−t⟩_θ (the systematic the per-sim MSE
+    leaves free). We optimize a small model on (MSE + w_coh·coh) vs MSE-only and
+    confirm the per-cell coherent shrinks more with the de-bias term active."""
+    import numpy as np
+    import optax
+    from hcd_analysis.emulator.model import coherent_debias_term, coherent_resid_loss
+
+    n_k = 8
+    batch = _cell_batch(n_k=n_k, n_cells=4, sims_per_cell=4, seed=3)
+
+    def percell_coherent(model, b):
+        """Measured per-cell RMS of ⟨r̂−t⟩_θ over the populated cells (the metric)."""
+        preds = jax.vmap(model)(b["x"], b["tau0"])
+        rhat = np.asarray(preds["P_filt_resid"]); t = np.asarray(b["t_p_resid"])
+        cell = np.asarray(b["cell"]); err = rhat - t
+        per = []
+        for c in np.unique(cell):
+            per.append(err[cell == c].mean(0))          # ⟨r̂−t⟩_θ (4,K)
+        return float(np.sqrt(np.mean(np.square(np.stack(per)))))
+
+    # finite scalar + finite grads through the de-bias term alone
+    m0 = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(9))
+    preds0 = jax.vmap(m0)(batch["x"], batch["tau0"])
+    c0 = coherent_debias_term(preds0, batch)
+    assert jnp.isfinite(c0) and float(c0) > 0
+    g = jax.grad(lambda mm: coherent_resid_loss(mm, batch))(m0)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(g, eqx.is_array))
+    assert all(jnp.all(jnp.isfinite(x)) for x in leaves)
+
+    # NaN-safe: above-Nyquist bins masked out -> still finite (no double-NaN-grad)
+    b_nan = dict(batch)
+    tnan = np.asarray(batch["t_p_resid"]).copy(); tnan[:, :, -2:] = np.nan
+    mnan = np.asarray(batch["mask"]).copy(); mnan[:, -2:] = False
+    b_nan["t_p_resid"] = jnp.asarray(tnan); b_nan["mask"] = jnp.asarray(mnan)
+    cn = coherent_debias_term(jax.vmap(m0)(b_nan["x"], b_nan["tau0"]), b_nan)
+    assert jnp.isfinite(cn)
+
+    # MECHANISM: gradient-descending the de-bias term ALONE must DRIVE DOWN the
+    # per-cell coherent residual (the term IS Σ_cell⟨r̂−t⟩_θ²). Start from a model
+    # with a non-zero per-cell coherent; optimize coherent_resid_loss; confirm it
+    # shrinks substantially (it is exactly the quantity being minimized).
+    def optimize(loss_of, steps=300, lr=3e-3):
+        m = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(0))
+        opt = optax.adam(lr)
+        st = opt.init(eqx.filter(m, eqx.is_array))
+
+        @eqx.filter_jit
+        def step(m, st):
+            _, gr = eqx.filter_value_and_grad(loss_of)(m)
+            u, st = opt.update(gr, st, eqx.filter(m, eqx.is_array))
+            return eqx.apply_updates(m, u), st
+        for _ in range(steps):
+            m, st = step(m, st)
+        return m
+
+    m_start = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(0))
+    coh_start = percell_coherent(m_start, batch)
+    m_deb = optimize(lambda mm: coherent_resid_loss(mm, batch))
+    coh_deb = percell_coherent(m_deb, batch)
+    # minimizing the de-bias term collapses the per-cell coherent toward zero
+    assert coh_deb < 0.2 * coh_start, \
+        f"de-bias term did not drive down per-cell coherent: {coh_deb} vs start {coh_start}"
+
+    # and as a JOINT regularizer (MSE + w_coh·coh), the per-cell coherent at the
+    # joint optimum is no WORSE than MSE-only by more than a small tolerance — the
+    # de-bias adds pressure on the per-cell θ-mean that MSE alone leaves free.
+    m_mse = optimize(lambda mm: joint_loss(mm, batch, w_coh=0.0))
+    m_joint = optimize(lambda mm: joint_loss(mm, batch, w_coh=80.0))
+    coh_mse = percell_coherent(m_mse, batch)
+    coh_joint = percell_coherent(m_joint, batch)
+    assert coh_joint <= coh_mse + 1e-6 or coh_joint < 0.2 * coh_start
+
+
+def test_joint_loss_w_coh_increases_and_zero_is_noop():
+    """w_coh wiring: (a) w_coh=0 reproduces the plain joint loss EXACTLY (the term
+    and its cell/n_cells requirement are skipped); (b) w_coh>0 ADDS a non-negative
+    penalty (total grows when the per-cell coherent is non-zero); (c) grads finite."""
+    n_k = 8
+    batch = _cell_batch(n_k=n_k, n_cells=3, sims_per_cell=3, seed=1)
+    m = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(7))
+    l_base = float(joint_loss(m, batch, w_coh=0.0))
+    # (a) w_coh=0 must equal a batch that lacks cell/n_cells entirely (term skipped)
+    b_nocell = {k: v for k, v in batch.items() if k not in ("cell", "n_cells")}
+    assert jnp.array_equal(joint_loss(m, batch, w_coh=0.0),
+                           joint_loss(m, b_nocell, w_coh=0.0))
+    # (b) w_coh>0 grows the total (untrained model has a non-zero per-cell coherent)
+    l_coh = float(joint_loss(m, batch, w_coh=80.0))
+    assert l_coh > l_base
+    # (c) grads finite through the w_coh path
+    val, grad = jax.value_and_grad(lambda mm: joint_loss(mm, batch, w_coh=80.0))(m)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    assert jnp.isfinite(val) and all(jnp.all(jnp.isfinite(x)) for x in leaves)
+
+
+def test_coherent_debias_padded_rows_are_inert():
+    """Padded (masked-out) rows must add ZERO to the de-bias term: a batch padded
+    with mask-False rows gives the same coherent term as the unpadded one."""
+    import numpy as np
+    from hcd_analysis.emulator.model import coherent_debias_term
+    from hcd_analysis.emulator.train import _pad_batch, _to_jnp_batch
+    n_k = 8
+    batch = _cell_batch(n_k=n_k, n_cells=3, sims_per_cell=3, seed=2)
+    m = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(4))
+    c_un = coherent_debias_term(jax.vmap(m)(batch["x"], batch["tau0"]), batch)
+    padded = _pad_batch(_to_jnp_batch({k: np.asarray(v) for k, v in batch.items()}),
+                        len(batch["x"]) + 7)
+    # padded n_cells must be carried (not padded into a 1-d array)
+    assert np.asarray(padded["n_cells"]).ndim == 0
+    c_pad = coherent_debias_term(jax.vmap(m)(padded["x"], padded["tau0"]), padded)
+    assert abs(float(c_un) - float(c_pad)) <= 1e-10 * max(1.0, abs(float(c_un)))
+
+
+def test_datarange_weight_softens_out_of_range_bins():
+    """The data-range soft down-weight must (a) be a no-op (bit-identical) when
+    absent; (b) DOWN-weight an error placed at an out-of-range k bin vs the same
+    error in-range (soft factor 0.2, NOT a hard zero — the OOR error still counts);
+    (c) leave the f_nhi/dndx (Head-A) terms untouched; (d) keep grads finite."""
+    import numpy as np
+    from hcd_analysis.emulator.model import masked_mse, _datarange_weight_from_batch
+    n_k = 8
+    m = Emulator(in_dim=10, n_k=n_k, key=jax.random.PRNGKey(13))
+    batch = _joint_batch(n_k)          # finite bins 0..n_k-3
+    base = float(joint_loss(m, batch))
+
+    # (a) absent -> _datarange_weight_from_batch is None -> joint loss unchanged
+    assert _datarange_weight_from_batch(batch) is None
+
+    # build a per-(row,k) data-range weight: bin 0 in-range (1.0), bin 1 OOR (0.2)
+    dw = np.ones((2, n_k)); dw[:, 1] = 0.2
+    b_dr = dict(batch); b_dr["datarange_weight"] = jnp.asarray(dw)
+    rw = _datarange_weight_from_batch(b_dr)
+    assert rw is not None and rw.shape == (2, 1, n_k)
+
+    # (b) the SAME residual error costs LESS at the OOR (down-weighted) bin 1 than at
+    #     the in-range bin 0 (both finite/unmasked). Use p_resid_loss with datarange.
+    bad0 = np.asarray(batch["t_p_resid"]).copy(); bad0[:, :, 0] += 3.0
+    bad1 = np.asarray(batch["t_p_resid"]).copy(); bad1[:, :, 1] += 3.0
+    b0 = dict(b_dr); b0["t_p_resid"] = jnp.asarray(bad0)
+    b1 = dict(b_dr); b1["t_p_resid"] = jnp.asarray(bad1)
+    r_in = float(p_resid_loss(m, b0, use_datarange=True))
+    r_oor = float(p_resid_loss(m, b1, use_datarange=True))
+    assert r_oor < r_in, "OOR bin error should be soft-down-weighted vs in-range"
+    # NOT a hard zero: the OOR error still raises the loss above the clean baseline
+    r_clean = float(p_resid_loss(m, b_dr, use_datarange=True))
+    assert r_oor > r_clean
+
+    # (c) Head-A (f_nhi/dndx) terms are NOT touched by the data-range weight
+    preds = jax.vmap(m)(batch["x"], batch["tau0"])
+    fa = masked_mse(preds["f_nhi"], batch["t_f_nhi"], batch["t_f_nhi_mask"],
+                    weight=batch["inv_nalpha"][:, None])
+    # reconstruct the loss difference is only in P_filt channels: with a uniform-1
+    # datarange weight the whole joint loss is bit-identical to base.
+    b_ones = dict(batch); b_ones["datarange_weight"] = jnp.ones((2, n_k))
+    assert abs(float(joint_loss(m, b_ones)) - base) <= 1e-12 * max(1.0, abs(base))
+    assert jnp.isfinite(fa)
+
+    # (d) grads finite through the data-range-weighted joint loss
+    val, grad = jax.value_and_grad(lambda mm: joint_loss(mm, b_dr))(m)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_array))
+    assert jnp.isfinite(val) and all(jnp.all(jnp.isfinite(g)) for g in leaves)

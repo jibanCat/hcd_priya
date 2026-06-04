@@ -1,0 +1,28 @@
+{
+  "n_epochs": 67,
+  "final_train_loss": 0.4180203113405106,
+  "final_val_loss": 0.27669561674707804,
+  "theta_tracking_corr": 0.9779565549654072,
+  "theta_spread_ratio": 0.9913604820495034,
+  "perclass_abs_frac_rms": {
+    "clean": 0.016531866107867527,
+    "LLS": 0.015982178609409706,
+    "subDLA": 0.0175227367230625,
+    "DLA": 0.025344180371893985
+  },
+  "cosmology_logvar_fraction_pct": {
+    "clean": 0.3734601050571264,
+    "LLS": 0.4087400668135228,
+    "subDLA": 0.4129976865465918,
+    "DLA": 0.5738963590158945
+  },
+  "sig_cosmo_over_sig_marg_median": 0.0773814931634009,
+  "baseline_head_rms_sigmarg": 0.0030586489906490526,
+  "val_per_term_loss": {
+    "f_nhi": 0.06154155989367726,
+    "dndx": 0.015391804218158472,
+    "p_base": 1.418882427099519e-05,
+    "p_resid": 0.05625663109074333,
+    "delta": 0.04843927020527601
+  }
+}

@@ -379,6 +379,7 @@ def compute_p1d_per_class(
     batch_size: int = 4096,
     n_skewers: Optional[int] = None,
     k_bins: Optional[np.ndarray] = None,
+    tau_transform=None,
 ) -> Dict[str, object]:
     """
     Compute four subset P1Ds in a single streaming pass.
@@ -391,6 +392,13 @@ def compute_p1d_per_class(
     convention — so ratios like `P_DLA_only / P_clean` correspond directly
     to the HCD template `P_total / P_forest` and can be fit with
     `hcd_analysis.hcd_template.fit_alpha`.
+
+    Parameters
+    ----------
+    tau_transform : callable or None
+        If given, applied to each native float64 tau batch before <F> and
+        P1D accumulation, in BOTH passes. Used to inject the freeze-core
+        mean-flux rescale (see hcd_analysis.tau0_rescale).
 
     Returns
     -------
@@ -433,7 +441,10 @@ def compute_p1d_per_class(
     F_sum = {c: 0.0 for c in classes}
     F_n = {c: 0 for c in classes}
     for s, e, tau in iter_tau_batches(hdf5_path, batch_size=batch_size, n_skewers=n_total):
-        F = np.exp(-tau.astype(np.float64))
+        tau = tau.astype(np.float64)
+        if tau_transform is not None:
+            tau = tau_transform(tau)
+        F = np.exp(-tau)
         lab = labels[s:e]
         for c in classes:
             m = lab == c
@@ -446,6 +457,8 @@ def compute_p1d_per_class(
     accs = {c: P1DAccumulator(nbins, dv_kms) for c in classes}
     for s, e, tau in iter_tau_batches(hdf5_path, batch_size=batch_size, n_skewers=n_total):
         tau = tau.astype(np.float64)
+        if tau_transform is not None:
+            tau = tau_transform(tau)
         lab = labels[s:e]
         for c in classes:
             m = lab == c

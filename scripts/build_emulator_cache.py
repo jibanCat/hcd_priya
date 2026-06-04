@@ -42,7 +42,7 @@ def discover_sim_snap_pairs(root: Path) -> list[tuple[str, int, Path]]:
     """Return [(sim_folder_name, snap_number, snap_dir_path), ...] for every
     *fully processed* (sim, snap) under `root`. A pair is included only if:
 
-    - `meta.json`, `cddf_corrected.npz`, `p1d_per_class.h5` all exist, AND
+    - `meta.json`, `cddf.npz`, `p1d_per_class.h5` all exist, AND
     - the pipeline's `done` empty-marker file is present.
 
     The `done` check is critical: the pipeline writes the three data files
@@ -60,7 +60,7 @@ def discover_sim_snap_pairs(root: Path) -> list[tuple[str, int, Path]]:
             m = SNAP_DIR_RE.match(snap_dir.name)
             if not m or not snap_dir.is_dir():
                 continue
-            required = ["meta.json", "cddf_corrected.npz", "p1d_per_class.h5", "done"]
+            required = ["meta.json", "cddf.npz", "p1d_per_class.h5", "done"]
             if not all((snap_dir / f).exists() for f in required):
                 continue
             pairs.append((sim_dir.name, int(m.group(1)), snap_dir))
@@ -73,7 +73,10 @@ def read_meta(snap_dir: Path) -> dict:
 
 
 def read_cddf(snap_dir: Path) -> dict:
-    with np.load(snap_dir / "cddf_corrected.npz") as data:
+    # `cddf.npz` is native-correct everywhere as of the 2026-05-22 all-LF/HR
+    # Phase-1 re-runs (the in-code (1+z)*h dX fix, commit c210990). The legacy
+    # `cddf_corrected.npz` dual naming has been retired; do NOT read it.
+    with np.load(snap_dir / "cddf.npz") as data:
         return {key: data[key] for key in data.files}
 
 
