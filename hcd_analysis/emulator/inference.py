@@ -54,8 +54,11 @@ def gaussian_logprior(value, mu, sigma):
 # / Prochaska+2010 / Fumagalli+2013 (LLS), Zafar+2013 (subDLA), Prochaska&Wolfe2009 /
 # Noterdaeme+2012 (DLA)). Fractional widths σ/μ per class; LLS TIGHT (cosmology-degenerate,
 # DESI DR1). DLA centered on the residual post-masking fraction (masking ~70% complete).
-HCD_PRIOR_FRAC_SIGMA = (0.15, 0.25, 0.10)   # σ/μ for (LLS, subDLA, DLA)
+HCD_PRIOR_FRAC_SIGMA = (0.15, 0.40, 0.10)   # σ/μ: LLS TIGHT (cosmology-degenerate); subDLA
+#   BROAD (poor measurement — the Zafar-vs-O'Meara factor-2); DLA tight at z≤3.5, widened
+#   above (see HCD_DLA_Z_RELIABLE).
 HCD_DLA_RESIDUAL_FRAC = 0.30                 # DLA residual incidence ≈ 0.30 × data incidence
+HCD_DLA_Z_RELIABLE = 3.5                     # DLA dN/dX unreliable beyond this z → widen σ_DLA
 HCD_Z_PIVOT = 3.0
 # PRIYA-sim-vs-observed dN/dX offset (literature / PRIYA-sim) per class, as a POWER-LAW in
 # (1+z) — mirroring the τ₀ Kim-curve+slope model. PRIYA does NOT match the data: the
@@ -64,7 +67,10 @@ HCD_Z_PIVOT = 3.0
 # d ln(lit/sim)/d ln(1+z), fit by scripts/plot_dndx_vs_literature.py (PRIYA vs
 # Prochaska&Wolfe09 / Zafar13 / O'Meara13):
 HCD_LIT_OVER_SIM = (1.06, 0.76, 1.34)        # (LLS, subDLA, DLA): data/sim at z_pivot=3.0
-HCD_LIT_OVER_SIM_SLOPE = (0.95, 0.15, 1.08)  # d ln(lit/sim) / d ln(1+z)
+# DLA slope deliberately WEAK (0.4, the conservative Ω_DLA∝(1+z)^0.4): the raw fit (+1.08,
+# or +1.90 on z≤3.5) is dominated by z>3.5 DLA dN/dX that the literature does not measure
+# reliably — so do not impose a strong DLA z-evolution; let the data set it (σ widened above).
+HCD_LIT_OVER_SIM_SLOPE = (0.95, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
 
 
 def lit_over_sim_at_z(z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SLOPE,
@@ -92,7 +98,10 @@ def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None):
     r = lit_over_sim_at_z(z) if lit_over_sim is None else jnp.asarray(lit_over_sim)
     fl, fs, fd = HCD_PRIOR_FRAC_SIGMA
     mu = jnp.stack([r[0] * w[0], r[1] * w[1], HCD_DLA_RESIDUAL_FRAC * r[2] * w[2]])
-    sigma = jnp.stack([fl * mu[0], fs * mu[1], fd * mu[2]])
+    # DLA dN/dX is unreliable beyond z≈3.5 → widen σ_DLA above it (weak high-z prior) so the
+    # data, not the prior, sets the high-z DLA incidence.
+    dla_inflate = 1.0 + jnp.clip(jnp.asarray(z) - HCD_DLA_Z_RELIABLE, 0.0, None)
+    sigma = jnp.stack([fl * mu[0], fs * mu[1], fd * mu[2] * dla_inflate])
     return mu, sigma
 
 

@@ -177,21 +177,24 @@ def test_hcd_incidence_prior_centers_on_observed_not_sim():
     assert np.allclose(np.asarray(mu0), [0.06, 0.02, 0.30 * 0.01])
     # the DEFAULT offset (PRIYA over-predicts subDLA, under-predicts DLA) shifts the centers
     r = I.HCD_LIT_OVER_SIM
-    mu, sig = I.hcd_incidence_prior(w)
+    mu, sig = I.hcd_incidence_prior(w)   # z = pivot = 3.0 (≤3.5 → no DLA σ inflation)
     assert np.allclose(np.asarray(mu), [r[0] * 0.06, r[1] * 0.02, 0.30 * r[2] * 0.01])
-    assert np.allclose(np.asarray(sig), [0.15 * mu[0], 0.25 * mu[1], 0.10 * mu[2]])
+    # widths: LLS tight 0.15, subDLA BROAD 0.40 (poor measurement), DLA 0.10 at z≤3.5
+    assert np.allclose(np.asarray(sig), [0.15 * mu[0], 0.40 * mu[1], 0.10 * mu[2]])
     assert float(mu[1]) < 0.02, "subDLA center below sim weight (PRIYA over-predicts)"
     assert float(mu[2]) > 0.30 * 0.01, "DLA residual center above naive 0.30× (PRIYA under-predicts)"
     g = jax.grad(lambda a: jnp.sum(I.gaussian_logprior(a, mu, sig)))(
         jnp.asarray([0.05, 0.015, 0.004]))
     assert np.isfinite(np.asarray(g)).all()
-    # z-SLOPE (the τ₀-analog): lit/sim rises with z (lit dN/dX evolves faster), so the
-    # LLS/DLA prior centers grow toward high z; the pivot z recovers the base ratio.
+    # z-SLOPE (the τ₀-analog): centers grow toward high z; pivot recovers the base ratio.
     assert np.allclose(np.asarray(I.lit_over_sim_at_z(I.HCD_Z_PIVOT)), I.HCD_LIT_OVER_SIM)
     mu_lo, _ = I.hcd_incidence_prior(w, z=2.4)
-    mu_hi, _ = I.hcd_incidence_prior(w, z=4.4)
+    mu_hi, sig_hi = I.hcd_incidence_prior(w, z=4.4)
     assert float(mu_hi[0]) > float(mu_lo[0]), "LLS center must grow with z (slope>0)"
-    assert float(mu_hi[2]) > float(mu_lo[2]), "DLA center must grow with z (slope>0)"
+    # DLA z-slope is WEAK now (+0.40 not +1.08) but still positive
+    assert float(mu_hi[2]) > float(mu_lo[2]), "DLA center grows weakly with z"
+    # DLA σ WIDENS beyond z=3.5 (data, not prior, sets high-z DLA)
+    assert float(sig_hi[2]) > 0.10 * float(mu_hi[2]), "DLA σ must widen above z=3.5"
 
 
 def test_unit_box_logprior_zero_inside_finite_grad_outside():
