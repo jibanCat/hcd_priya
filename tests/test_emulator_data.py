@@ -638,7 +638,41 @@ def test_make_batch_emits_cell_and_n_cells(tmp_path):
     n_alpha = int(d["alpha_idx"].max()) + 1
     assert int(b["n_cells"]) == n_z * n_alpha
     assert b["cell"].max() < int(b["n_cells"]) and b["cell"].min() >= 0
-    assert np.asarray(b["n_cells"]).ndim == 0     # scalar (segment count, static)
+    # n_cells MUST be a PLAIN PYTHON int (segment count, static), not np.int64:
+    # coherent_debias_term feeds it to segment_sum as num_segments, which must be a
+    # static python int under jax.jit. np.int64 traces as an int64[] leaf and raises
+    # ConcretizationTypeError when a raw make_batch dict is jitted (jax-traps #25).
+    # NB the old `np.asarray(...).ndim == 0` assert PASSED on np.int64 — it did not
+    # catch this; the isinstance(int) check does.
+    assert isinstance(b["n_cells"], int) and not isinstance(b["n_cells"], bool)
+
+
+def test_coherent_debias_term_jits_on_raw_make_batch(tmp_path):
+    """coherent_debias_term under eqx.filter_jit on a RAW make_batch dict (NO
+    _to_jnp_batch).
+
+    REGRESSION (jax-traps #25): the upcoming likelihood/sampler will jit a raw
+    make_batch batch directly — it does NOT route through train._to_jnp_batch /
+    _pad_batch, which special-case n_cells to a python int. eqx.filter_jit keeps
+    non-array leaves STATIC, so a PYTHON-int n_cells stays a static num_segments and
+    the `int(batch["n_cells"])` inside coherent_debias_term is legal. An np.int64 is an
+    array leaf (eqx.is_array True), so it would be TRACED and raise
+    ConcretizationTypeError here — which is exactly the bug make_batch's
+    `int(n_cells)` fix prevents. (Verified: this body raises under the old np.int64
+    emission and passes with the python-int fix.)"""
+    import jax, equinox as eqx
+    from hcd_analysis.emulator.model import Emulator, coherent_debias_term
+    d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
+    R = d["x"].shape[0]
+    norm = fit_target_norm(d, np.arange(R))
+    idx = np.array([0, 1, 5, 9, 13, 20])
+    b = make_batch(d, idx, norm)                 # RAW dict (np arrays + python-int n_cells)
+    n_k = d["P_filt"].shape[2]
+    model = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(0))
+    preds = jax.vmap(model)(b["x"], b["tau0"])   # P_filt_resid etc. (B,4,K)
+    # filter_jit WITHOUT _to_jnp_batch — python-int n_cells stays a static arg.
+    val = eqx.filter_jit(coherent_debias_term)(preds, b)
+    assert np.isfinite(float(val))
 
 
 def test_datarange_mask_z_and_k_cut(tmp_path):

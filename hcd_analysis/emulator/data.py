@@ -285,7 +285,10 @@ def fit_baseline_residual_norm(d, train_idx):
     are ignored, reusing fit_norm's nanmean/nanstd machinery).
 
     Under LOSO every (z,α) cell has ≥1 train sim (LOSO holds out SIMS, not cells),
-    asserted here. Returns ``norm_stats_pf`` =
+    so cells are populated by construction. This is NOT asserted — an all-NaN
+    (c,k) bin within a populated cell silently falls back to ``mu_marg`` (the
+    global per-(c,k) mean), so a missing/empty bin degrades gracefully rather than
+    erroring. Returns ``norm_stats_pf`` =
     ``{"mu_marg","sig_marg","sig_cosmo", "cell_mean": {cell_id:(4,K)}}``.
     """
     train_idx = np.asarray(train_idx)
@@ -549,7 +552,12 @@ def make_batch(d, idx, norm_stats, k_weight=None, datarange=False,
         "inv_nalpha": inv_nalpha,
         "mean_F_clean": mean_F_clean,
         "cell": cells.astype(np.int32),
-        "n_cells": np.int64(n_cells),
+        # n_cells is the STATIC segment count for the coherent de-bias term — emit a
+        # PLAIN PYTHON int (NOT np.int64). coherent_debias_term feeds it to
+        # segment_sum as num_segments, which MUST be a static python int under
+        # jax.jit; an np.int64 traces as an int64[] leaf and raises
+        # ConcretizationTypeError when a raw make_batch dict is jitted (jax-traps #25).
+        "n_cells": int(n_cells),
     }
     if k_weight is not None:
         # carried as a PER-ROW (n,K) tile so it pads/batches like every other array
