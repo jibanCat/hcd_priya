@@ -1,0 +1,40 @@
+{
+  "ckpt": "/home/mfho/hcd_priya/checkpoints/decomp_nb24_fold0",
+  "z_fid": 3.0,
+  "h": 0.001,
+  "z_unit": 0.2941176470588235,
+  "gate_median": 0.0001,
+  "gate_max": 0.01,
+  "per_tau0_position": {
+    "ladder_lo": {
+      "tau0": 0.23760569924505812,
+      "median": 7.33344157762912e-08,
+      "p99": 2.7440215817155647e-06,
+      "max": 4.487705334010879e-05,
+      "worst_Jfd_frac_of_peak": 0.00017393423525063458,
+      "n_nonfinite": 0
+    },
+    "mid": {
+      "tau0": 0.3600572784283971,
+      "median": 7.218989197433374e-08,
+      "p99": 2.712566152603374e-06,
+      "max": 4.9960745906571355e-05,
+      "worst_Jfd_frac_of_peak": 1.2508943112711852e-06,
+      "n_nonfinite": 0
+    },
+    "ladder_hi": {
+      "tau0": 0.48250885761173606,
+      "median": 7.12139561581784e-08,
+      "p99": 2.7387634514039577e-06,
+      "max": 3.918791197126867e-05,
+      "worst_Jfd_frac_of_peak": 0.00021335590614538904,
+      "n_nonfinite": 0
+    }
+  },
+  "sweep": {
+    "n": 80,
+    "nonfinite_Pobs": 0,
+    "nonfinite_grad": 0
+  },
+  "passed": true
+}
