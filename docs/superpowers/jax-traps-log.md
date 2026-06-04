@@ -580,6 +580,52 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   special-case the shape-setting scalars to stay python ints (or pass them as separate
   static args), or jit will trace them and `int(...)`/`.reshape(...)` will raise.
 
+## 26. `eqx.field(static=True)` does NOT freeze a sub-Module — use `stop_gradient` on its params — **HIT**
+- **Where:** the multi-fidelity layer (`hcd_analysis/emulator/multifidelity.py`,
+  `MultiFidelity`/`_freeze`/`lf_predict_logP`). The FROZEN LF backbone is held inside the
+  trainable MF module; HMC needs `∂logP/∂θ` to flow through the LF forward (wrt the INPUT
+  theta) but must NEVER perturb the LF WEIGHTS.
+- **Symptom:** declaring `lf_model: Emulator = eqx.field(static=True)` did NOT freeze it.
+  `eqx.partition(mf, eqx.is_array)` still recursed into the "static" sub-Module and exposed
+  its weights as DYNAMIC leaves, and `eqx.filter_grad(loss)(mf)` returned NON-ZERO grads on
+  `grad.lf_model.*` (0.7-scale), i.e. the LF weights were being differentiated. (The isolated
+  `freeze(model)` worked, but through the static field the captured-vs-differentiated copies
+  desynced so the in-forward `stop_gradient` did not bind to the leaves grad saw.)
+- **Cause:** `static=True` only makes a field part of the treedef when its value is genuinely
+  static (hashable / non-pytree). A field holding an `eqx.Module` is itself a PYTREE, so
+  equinox recurses into it and its arrays remain dynamic leaves — `static` does not "freeze"
+  a sub-network. And mixing a static-captured copy with the differentiated dynamic leaves
+  means an in-forward `stop_gradient` on the static copy doesn't pin the leaves grad tracks.
+- **Fix:** make `lf_model` a NORMAL dynamic field (single unambiguous leaf set) and freeze it
+  in the forward with `_freeze`: `p, s = eqx.partition(model, eqx.is_array); p =
+  tree_map(jax.lax.stop_gradient, p); model = eqx.combine(p, s)`. `stop_gradient` is a no-op
+  on the value and zeroes the backward pass to those leaves, so the LF weights get EXACTLY
+  zero grad while `∂logP/∂θ` (input) still flows. The optimizer (`train_delta_head`) filters
+  to the DeltaHead alone, so the LF leaves never reach it either way. (Test:
+  `test_mf_lf_backbone_is_frozen` asserts `grad.lf_model` leaves are all 0 while the head's
+  are finite & nonzero.)
+- **Lesson:** to FREEZE a sub-Module inside a trainable Equinox module, do NOT rely on
+  `eqx.field(static=...)` — `stop_gradient` its parameters in the forward (or partition it out
+  and `eqx.combine` a stop_gradient'd copy). Reserve `static=` for genuinely static scalars /
+  shapes / non-array host objects.
+
+## 27. `jax.jit(module.method)` hashes the module as a static arg → `unhashable type: 'list'` — **GUARDED**
+- **Where:** the MF forward (`MultiFidelity.P_mf`/`logP_mf`, `multifidelity.py`). Trying to
+  jit the forward for the HMC sampler.
+- **Symptom:** `jax.jit(mf.P_mf)(x, tau0)` raised `TypeError: unhashable type: 'list'`. The
+  forward, `vmap`, and grad were all fine eagerly; only this jit form broke.
+- **Cause:** jitting a BOUND METHOD captures the module (`self`) as a traced/static positional
+  arg; JAX hashes static args, and the `DeltaHead.layers` field is a python `list` (an Equinox
+  `eqx.Module` is a pytree, not hashable). So the hash of the "static" module fails.
+- **Fix:** use the Equinox jit idiom — `eqx.filter_jit(fn)(mf, x, tau0)` (partitions the module
+  into array/static and only hashes the static part), or close the module over a lambda:
+  `jax.jit(lambda x, t: mf.P_mf(x, t))` (module is a captured constant, not an arg). `vmap` is
+  unaffected: `jax.vmap(lambda x, t: mf.P_mf(x, t))`. Documented in `P_mf`'s docstring + locked
+  by `test_mf_jit_patterns`.
+- **Lesson:** never `jax.jit` a bound method of an Equinox/pytree module — jit the module
+  explicitly with `eqx.filter_jit`, or jit a plain function that closes over (or takes as a
+  filtered arg) the module. Bound-method jit silently turns the whole module into a static arg.
+
 ## Trap template (append new entries above this line)
 ```
 ## N. <short name> — HIT | GUARDED | WATCH
