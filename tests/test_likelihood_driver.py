@@ -24,7 +24,7 @@ import pytest
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator.predict import predict_P_obs
 from hcd_analysis.emulator.likelihood import (
-    sigma_at_tau0, gaussian_loglik, assemble_covariance, _KIM_AMP, _KIM_SLOPE,
+    sigma_at_tau0, gaussian_loglik, _KIM_AMP, _KIM_SLOPE,
 )
 from hcd_analysis.emulator import inference as I
 
@@ -38,21 +38,20 @@ def _ctx(n_k=12, n_basis=6, n_tb=4, seed=0, nan=False):
     pf = {"mu_marg": jnp.asarray(rng.normal(-2, 0.5, (4, n_k))),
           "sig_marg": jnp.asarray(rng.uniform(0.5, 1.5, (4, n_k))),
           "sig_cosmo": jnp.asarray(rng.uniform(0.02, 0.1, (4, n_k)))}
-    w_c = jnp.asarray(rng.uniform(0.5, 1.0, 4))
-    delta = jnp.asarray(rng.uniform(-0.3, 0.3, (3, n_k)))
-    alpha_hcd = jnp.asarray(rng.uniform(0.5, 1.5, 3))
+    dla_core = jnp.asarray(rng.uniform(0.0, 0.5, n_k))     # DLA-core add-back (K,)
+    alpha_hcd = jnp.asarray(rng.uniform(0.0, 0.5, 3))      # effective per-class incidence
     sigma_np = rng.uniform(0.01, 0.05, (4, n_k, n_tb))
     cosmic_np = rng.uniform(1.0, 4.0, n_k)
     z, z_unit, theta9 = 3.0, 0.5, jnp.full(9, 0.5)
     P_data = np.asarray(predict_P_obs(model, theta9, z_unit, 0.40, alpha_hcd,
-                                      w_c, pf, delta)) + rng.normal(0, 0.5, n_k)
+                                      pf, dla_core)) + rng.normal(0, 0.5, n_k)
     valid_k = np.ones(n_k, bool)
     if nan:
         sigma_np[:, -2:, :] = np.nan          # all-NaN-over-Tb rows (Nyquist)
         sigma_np[:, -3, 0] = np.nan           # partial-NaN row (one band empty)
         P_data[-2:] = np.nan                  # no data at out-of-range bins
         valid_k[-2:] = False
-    return dict(model=model, theta9=theta9, z=z, z_unit=z_unit, w_c=w_c, delta=delta,
+    return dict(model=model, theta9=theta9, z=z, z_unit=z_unit, dla_core=dla_core,
                 alpha_hcd=alpha_hcd, pf=pf, sigma_zb=jnp.asarray(sigma_np),
                 alpha_centres=jnp.asarray([0.66, 0.83, 1.15, 1.33]),
                 cosmic_cov=jnp.asarray(cosmic_np), dla_shot_flag=jnp.zeros(n_k, bool),
@@ -61,10 +60,11 @@ def _ctx(n_k=12, n_basis=6, n_tb=4, seed=0, nan=False):
 
 def _f(c, include_logdet=True, cemu_inflate=1.0):
     return lambda th, t, a: I.log_lik_single_z(
-        c["model"], th, c["z_unit"], c["z"], t, a, w_c=c["w_c"], delta_hcd=c["delta"],
+        c["model"], th, c["z_unit"], c["z"], t, a,
         pf_stats=c["pf"], sigma_zb=c["sigma_zb"], alpha_centres=c["alpha_centres"],
-        cosmic_cov=c["cosmic_cov"], P_data=c["P_data"], dla_shot_flag=c["dla_shot_flag"],
-        valid_k=c["valid_k"], cemu_inflate=cemu_inflate, include_logdet=include_logdet)
+        cosmic_cov=c["cosmic_cov"], P_data=c["P_data"], dla_core=c["dla_core"],
+        dla_shot_flag=c["dla_shot_flag"], valid_k=c["valid_k"],
+        cemu_inflate=cemu_inflate, include_logdet=include_logdet)
 
 
 def test_sigma_at_tau0_recovers_band_value_at_centre():
@@ -104,15 +104,32 @@ def test_driver_finite_and_differentiable():
     assert np.isfinite(float(gt)) and np.isfinite(np.asarray(ga)).all()
 
 
-def test_dlogL_dtau0_matches_finite_diff_and_logdet_is_load_bearing():
+def test_dlogL_dtau0_matches_finite_diff():
+    """Autodiff ∂logL/∂τ₀ (full, logdet-bearing) matches central FD at non-zero residual."""
     c = _ctx(); f_full = _f(c, include_logdet=True)
     t0 = 0.40
     g_full = float(jax.grad(lambda t: f_full(c["theta9"], t, c["alpha_hcd"]))(t0))
     ff = lambda t: float(f_full(c["theta9"], t, c["alpha_hcd"]))
     fd = (ff(t0 + 1e-4) - ff(t0 - 1e-4)) / 2e-4
     assert np.isclose(g_full, fd, rtol=1e-4), f"grad {g_full} vs FD {fd}"
-    g_nolog = float(jax.grad(lambda t: _f(c, include_logdet=False)(c["theta9"], t, c["alpha_hcd"]))(t0))
-    assert abs(g_full - g_nolog) > 1e-6 * (abs(g_full) + 1.0), "logdet must be load-bearing"
+
+
+def test_logdet_is_load_bearing_at_zero_residual():
+    """Scale-independent negative control: at r=0 the chi2 gradient vanishes, so any
+    ∂logL/∂τ₀ is PURELY the logdet term. The full driver must have a non-zero τ₀
+    gradient there; the chi2-only (no-logdet) driver must be ≈0."""
+    c = _ctx()
+    t0 = 0.40
+    # zero-residual data: P_data = P_obs(t0) so r(t0)=0 exactly
+    P_obs = np.asarray(predict_P_obs(c["model"], c["theta9"], c["z_unit"], t0,
+                                     c["alpha_hcd"], c["pf"], c["dla_core"]))
+    c0 = dict(c, P_data=jnp.asarray(P_obs), valid_k=jnp.ones(len(P_obs), bool))
+    g_full = float(jax.grad(lambda t: _f(c0, include_logdet=True)(c0["theta9"], t, c0["alpha_hcd"]))(t0))
+    g_nolog = float(jax.grad(lambda t: _f(c0, include_logdet=False)(c0["theta9"], t, c0["alpha_hcd"]))(t0))
+    assert abs(g_nolog) < 1e-8, f"chi2 gradient at r=0 must vanish, got {g_nolog}"
+    # the logdet drives a non-zero τ₀ gradient that DOMINATES the (vanishing) chi2 one
+    assert abs(g_full) > 1e-7 and abs(g_full) > 50 * abs(g_nolog), \
+        f"logdet must drive ∂logL/∂τ₀ at r=0: g_full={g_full}, g_nolog={g_nolog}"
 
 
 def test_C1_nan_sigma_and_data_give_finite_gradient():
@@ -137,19 +154,30 @@ def test_I1_degenerate_covariance_is_jittered_finite():
     assert np.isfinite(val) and np.isfinite(np.asarray(g)).all()
 
 
-def test_cemu_inflate_scales_emulator_variance():
+def test_cemu_inflate_raises_emulator_variance_in_driver():
+    """cemu_inflate scales the driver's per-class emu_var -> a more negative −½logdet C
+    (the conservative-inflation knob, review I1). Compare the driver's logL with vs without
+    inflation at zero residual (r=0 so only the logdet term differs)."""
     c = _ctx()
-    sig_ck = sigma_at_tau0(c["sigma_zb"], c["alpha_centres"], c["z"], 0.4)
-    from hcd_analysis.emulator.predict import predict_P_filt
-    P_filt = predict_P_filt(c["model"], c["theta9"], c["z_unit"], 0.4, c["pf"])
-    dscale = jnp.abs(c["delta"])
-    base = assemble_covariance(jnp.zeros(P_filt.shape[1]), sig_ck, c["w_c"],
-                               jnp.zeros((3, P_filt.shape[1])), c["alpha_hcd"], P_filt,
-                               dscale, c["dla_shot_flag"], cemu_inflate=1.0)
-    infl = assemble_covariance(jnp.zeros(P_filt.shape[1]), sig_ck, c["w_c"],
-                               jnp.zeros((3, P_filt.shape[1])), c["alpha_hcd"], P_filt,
-                               dscale, c["dla_shot_flag"], cemu_inflate=4.0)
-    assert np.allclose(np.diag(np.asarray(infl)), 4.0 * np.diag(np.asarray(base)), rtol=1e-6)
+    # zero-residual data so logL = −½logdet C; inflation grows C -> logL decreases.
+    P_obs = np.asarray(predict_P_obs(c["model"], c["theta9"], c["z_unit"], 0.4,
+                                     c["alpha_hcd"], c["pf"], c["dla_core"]))
+    c2 = dict(c, P_data=jnp.asarray(P_obs), valid_k=jnp.ones(len(P_obs), bool))
+    ll1 = float(_f(c2, cemu_inflate=1.0)(c2["theta9"], 0.4, c2["alpha_hcd"]))
+    ll4 = float(_f(c2, cemu_inflate=4.0)(c2["theta9"], 0.4, c2["alpha_hcd"]))
+    assert ll4 < ll1, "cemu_inflate must enlarge C_emu (more negative −½logdet)"
+
+
+def test_hcd_incidence_prior_from_fiducial_weights():
+    """Literature-calibrated incidence prior: LLS/subDLA center on the sim weight, DLA on
+    the 0.30× residual; widths are the literature fractional σ/μ × center."""
+    w = jnp.array([0.06, 0.02, 0.01])      # fiducial (LLS, subDLA, DLA) sim weights
+    mu, sig = I.hcd_incidence_prior(w)
+    assert np.allclose(np.asarray(mu), [0.06, 0.02, 0.30 * 0.01])
+    assert np.allclose(np.asarray(sig), [0.15 * 0.06, 0.25 * 0.02, 0.10 * 0.30 * 0.01])
+    g = jax.grad(lambda a: jnp.sum(I.gaussian_logprior(a, mu, sig)))(
+        jnp.asarray([0.05, 0.02, 0.003]))
+    assert np.isfinite(np.asarray(g)).all()
 
 
 def test_unit_box_logprior_zero_inside_finite_grad_outside():

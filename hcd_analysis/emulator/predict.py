@@ -55,21 +55,48 @@ def predict_P_tier_p(model, theta9, z_unit, tau0, w_c, pf_stats):
     return structural_tier_p(jnp.asarray(w_c), P_filt)
 
 
-def predict_P_obs(model, theta9, z_unit, tau0, alpha_hcd, w_c, pf_stats, delta_hcd):
-    """Total observed P1D (K,): P_tier_p + Σ_{c∈HCD} α_c·Δ_c.
+def _excess_from_P_filt(P_filt, dla_core):
+    """Per-class HCD excess-over-clean R_c = P_c − P_clean (3,K) from the emulated P_filt.
+
+    The CORRECTED HCD contamination object (Rogers&Bird 2018 / DESI DR1 / PRIYA form):
+    the EXCESS power of class-c sightlines over the clean forest — NOT the old filter
+    residual P_c^unf − P_c^filt (which was ≡0 for LLS). FILTERED for LLS/subDLA (filt≈unfilt
+    there); UNFILTERED for DLA (the data's residual unmasked DLAs are full systems, so
+    P_DLA^unf = P_filt[DLA] + ``dla_core``, dla_core = the DLA-core add-back
+    P_DLA^unf − P_DLA^filt). ``P_filt`` is (4,K): clean, LLS, subDLA, DLA (filtered).
+    """
+    P_clean = P_filt[0]
+    P_dla_unf = P_filt[3] + jnp.asarray(dla_core)
+    return jnp.stack([P_filt[1] - P_clean,        # LLS    filtered  − clean
+                      P_filt[2] - P_clean,        # subDLA filtered  − clean
+                      P_dla_unf - P_clean])        # DLA    unfiltered − clean
+
+
+def predict_excess(model, theta9, z_unit, tau0, pf_stats, dla_core):
+    """Live-emulated per-class HCD excess templates R_c = P_c − P_clean (3,K).
+    Differentiable in (θ9, τ₀). See ``_excess_from_P_filt``."""
+    return _excess_from_P_filt(
+        predict_P_filt(model, theta9, z_unit, tau0, pf_stats), dla_core)
+
+
+def predict_P_obs(model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_core):
+    """Total observed P1D (K,): **P_clean + Σ_{c∈HCD} α_c·(P_c − P_clean)** — the corrected
+    HCD-marginalization forward model.
+
+    Clean-forest baseline + the live-emulated excess templates (≡ the multiplicative
+    P_clean·[1 + Σ_c α_c·(P_c/P_clean − 1)] form; the additive/multiplicative and
+    Δ-vs-reweight forks are algebraically the same model — Lyα+CS agent verdict 2026-06-04).
+    α_c = the effective post-masking per-class incidence (LLS, subDLA, DLA), prior-centered
+    on the structural w_c(dN/dX); α_c = w_c reproduces the sim's contaminated P_tier_p.
+    This fixes the Δ_LLS≡0 bug (the old P_c^unf−P_c^filt template).
 
     Args:
-      model:      trained ``Emulator``.
-      theta9:     (9,) unit-cube cosmology/IGM params.
-      z_unit:     scalar unit-cube redshift coordinate (x[9]).
-      tau0:       scalar mean-flux coordinate (= −ln⟨F⟩).
-      alpha_hcd:  (3,) per-class HCD effective-incidence amplitudes (LLS, subDLA, DLA).
-      w_c:        (4,) structural class weights.
-      pf_stats:   the structured P_filt norm dict (mu_marg/sig_marg/sig_cosmo).
-      delta_hcd:  (3,K) per-class HCD Δ_c templates.
+      alpha_hcd:  (3,) effective per-class incidence (LLS, subDLA, DLA).
+      pf_stats:   structured P_filt norm dict; dla_core: (K,) DLA-core add-back template.
 
-    Differentiable in (θ9, τ₀, α). ∂P_obs/∂α_c = Δ_c.
+    Differentiable in (θ9, τ₀, α). ∂P_obs/∂α_c = (P_c − P_clean) (≠0 for LLS now).
     """
-    P_tier_p = predict_P_tier_p(model, theta9, z_unit, tau0, w_c, pf_stats)
-    add_back = jnp.einsum("c,ck->k", jnp.asarray(alpha_hcd), jnp.asarray(delta_hcd))
-    return P_tier_p + add_back
+    P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)   # (4,K) emulated
+    P_clean = P_filt[0]
+    excess = _excess_from_P_filt(P_filt, dla_core)                   # (3,K)
+    return P_clean + jnp.einsum("c,ck->k", jnp.asarray(alpha_hcd), excess)

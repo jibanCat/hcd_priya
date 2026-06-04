@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from hcd_analysis.emulator.model import Emulator
-from hcd_analysis.emulator.predict import predict_P_obs, predict_P_filt
+from hcd_analysis.emulator.predict import predict_P_obs, predict_P_filt, predict_excess
 
 
 def _tiny_model_and_stats(n_k=20, n_basis=8, seed=0):
@@ -27,10 +27,9 @@ def _tiny_model_and_stats(n_k=20, n_basis=8, seed=0):
         "sig_marg": jnp.asarray(rng.uniform(0.5, 1.5, (4, n_k))),
         "sig_cosmo": jnp.asarray(rng.uniform(0.02, 0.10, (4, n_k))),
     }
-    w_c = jnp.asarray(rng.uniform(0.5, 1.0, 4))
-    delta_hcd = jnp.asarray(rng.uniform(-0.3, 0.3, (3, n_k)))
-    alpha_hcd = jnp.asarray(rng.uniform(0.5, 1.5, 3))
-    return model, pf_stats, w_c, delta_hcd, alpha_hcd, n_k
+    dla_core = jnp.asarray(rng.uniform(0.0, 0.5, n_k))   # DLA-core add-back (P_DLA^unf−P_DLA^filt)
+    alpha_hcd = jnp.asarray(rng.uniform(0.0, 0.4, 3))    # effective per-class incidence
+    return model, pf_stats, dla_core, alpha_hcd, n_k
 
 
 def _central_fd(f, x, h=1e-3):
@@ -45,11 +44,11 @@ def _central_fd(f, x, h=1e-3):
 
 
 def test_dPobs_dtheta_autodiff_matches_finite_diff():
-    model, pf, w_c, delta, alpha, n_k = _tiny_model_and_stats()
+    model, pf, dla_core, alpha, n_k = _tiny_model_and_stats()
     z_unit, tau0 = 0.5, 0.4
 
     def f(theta9):
-        return predict_P_obs(model, theta9, z_unit, tau0, alpha, w_c, pf, delta)
+        return predict_P_obs(model, theta9, z_unit, tau0, alpha, pf, dla_core)
 
     theta0 = jnp.full(9, 0.5)
     J_ad = np.asarray(jax.jacfwd(f)(theta0))          # (K, 9)
@@ -64,33 +63,36 @@ def test_dPobs_dtheta_autodiff_matches_finite_diff():
 
 
 def test_dPobs_dtau0_and_dalpha_autodiff_matches_finite_diff():
-    model, pf, w_c, delta, alpha, n_k = _tiny_model_and_stats(seed=1)
+    model, pf, dla_core, alpha, n_k = _tiny_model_and_stats(seed=1)
     z_unit = 0.5
     theta0 = jnp.full(9, 0.5)
 
     # d/dtau0
     def g(tau0):
-        return predict_P_obs(model, theta0, z_unit, tau0, alpha, w_c, pf, delta)
+        return predict_P_obs(model, theta0, z_unit, tau0, alpha, pf, dla_core)
     Jt_ad = np.asarray(jax.jacfwd(g)(0.4))            # (K,)
     Jt_fd = (np.asarray(g(0.4 + 1e-3)) - np.asarray(g(0.4 - 1e-3))) / 2e-3
     rel_t = np.abs(Jt_ad - Jt_fd) / (np.abs(Jt_fd) + 1e-8 * np.max(np.abs(Jt_fd)))
     assert np.isfinite(Jt_ad).all() and np.median(rel_t) < 1e-4
 
-    # d/dalpha_c  (analytic: should equal the delta template, since P_obs = ... + Σ α_c Δ_c)
+    # d/dalpha_c == the EXCESS template (P_c − P_clean), the corrected HCD object.
     def h(a):
-        return predict_P_obs(model, theta0, z_unit, 0.4, a, w_c, pf, delta)
+        return predict_P_obs(model, theta0, z_unit, 0.4, a, pf, dla_core)
     Ja_ad = np.asarray(jax.jacfwd(h)(alpha))          # (K, 3)
-    assert np.allclose(Ja_ad, np.asarray(delta).T, rtol=1e-10, atol=1e-12), \
-        "∂P_obs/∂α_c must equal the Δ_c template exactly"
+    excess = np.asarray(predict_excess(model, theta0, z_unit, 0.4, pf, dla_core))  # (3,K)
+    assert np.allclose(Ja_ad, excess.T, rtol=1e-9, atol=1e-12), \
+        "∂P_obs/∂α_c must equal the corrected excess template (P_c − P_clean)"
+    # KEY: the LLS excess is NON-ZERO now (the old Δ_LLS≡0 bug is fixed)
+    assert np.sqrt(np.mean(excess[0] ** 2)) > 1e-6, "LLS excess must be non-zero"
 
 
 def test_P_obs_finite_across_unit_cube_sweep():
     """No NaN/Inf in P_obs OR its θ-gradient anywhere in [0,1]^9 (HMC won't blow up)."""
-    model, pf, w_c, delta, alpha, n_k = _tiny_model_and_stats(seed=2)
+    model, pf, dla_core, alpha, n_k = _tiny_model_and_stats(seed=2)
     rng = np.random.default_rng(7)
 
     def f(theta9, z_unit, tau0):
-        return predict_P_obs(model, theta9, z_unit, tau0, alpha, w_c, pf, delta)
+        return predict_P_obs(model, theta9, z_unit, tau0, alpha, pf, dla_core)
 
     grad_norm = jax.jit(lambda th, z, t: jnp.linalg.norm(jax.jacfwd(f)(th, z, t)))
     for _ in range(50):
@@ -104,7 +106,7 @@ def test_P_obs_finite_across_unit_cube_sweep():
 def test_predict_P_filt_matches_numpy_reconstruct():
     """The jnp reconstruct mirror must equal data.reconstruct_P_filt bit-close."""
     from hcd_analysis.emulator.data import reconstruct_P_filt
-    model, pf, w_c, delta, alpha, n_k = _tiny_model_and_stats(seed=3)
+    model, pf, dla_core, alpha, n_k = _tiny_model_and_stats(seed=3)
     x = jnp.concatenate([jnp.full(9, 0.3), jnp.asarray([0.6])])
     pred = model(x, 0.5)
     P_jax = np.asarray(predict_P_filt(model, jnp.full(9, 0.3), 0.6, 0.5, pf))
