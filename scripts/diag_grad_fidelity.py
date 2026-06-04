@@ -65,6 +65,80 @@ def rel_err(J_ad, J_fd):
     return np.abs(J_ad - J_fd) / denom
 
 
+def cov2corr(C):
+    s = np.sqrt(np.diag(C))
+    return C / np.outer(s, s)
+
+
+def fig_perparam_overlay(kf, J_ad, J_fd, per_param_med, path):
+    """One panel per parameter: autodiff (line) vs central-FD (×) of ∂P_obs/∂θ_i vs k.
+    The visual proof that EVERY parameter's response is captured, not just the median."""
+    g = np.isfinite(kf)
+    fig, axes = plt.subplots(3, 3, figsize=(14, 10), sharex=True)
+    for i, ax in enumerate(axes.flat):
+        ax.plot(kf[g], J_ad[g, i], lw=1.8, color="tab:blue", label="autodiff")
+        ax.plot(kf[g], J_fd[g, i], "x", ms=4, color="tab:red", label="finite-diff")
+        ax.set_xscale("log")
+        ax.axhline(0, color="k", lw=0.6)
+        ax.set_title(f"∂P_obs/∂{PARAMS[i]}   (median rel-err {per_param_med[i]:.1e})",
+                     fontsize=9)
+        ax.grid(alpha=0.3)
+        if i == 0:
+            ax.legend(fontsize=8)
+        if i >= 6:
+            ax.set_xlabel("k [s/km]")
+    fig.suptitle("Per-parameter ∂P_obs/∂θ — emulator autodiff vs finite-diff (mid-ladder τ₀)",
+                 fontsize=12)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150); plt.close(fig)
+    print(f"  wrote {path}")
+
+
+def fig_convergence_fisher_tau0(hs, med_rel_h, rel_all, F_corr, kf, J_ad_pos, path):
+    """2×2 reading panel:
+       (a) FD step-size convergence (median rel-err vs h) — the V: truncation ∝h²
+           decreasing then roundoff rising; the autodiff sits at the floor (rigorous proof).
+       (b) per-element rel-err histogram (bulk near machine eps).
+       (c) emulator-implied Fisher CORRELATION (9×9; DESI-like diagonal cov, ILLUSTRATIVE)
+           — the parameter degeneracy structure the gradients imply.
+       (d) τ₀-dependence of ∂logP/∂A_p across the ladder (the τ₀×cosmology interaction
+           the τ₀-aware C_emu is built to carry)."""
+    fig, ax = plt.subplots(2, 2, figsize=(14, 10))
+    # (a) convergence V
+    ax[0, 0].loglog(hs, med_rel_h, "o-", color="tab:blue")
+    ax[0, 0].set_xlabel("finite-diff step h (unit-cube)")
+    ax[0, 0].set_ylabel("median rel-err (autodiff vs FD)")
+    ax[0, 0].set_title("(a) FD step-size convergence — autodiff at the floor")
+    ax[0, 0].grid(alpha=0.3, which="both")
+    # (b) histogram
+    rl = rel_all[np.isfinite(rel_all) & (rel_all > 0)]
+    ax[0, 1].hist(np.log10(rl), bins=60, color="tab:green", alpha=0.8)
+    ax[0, 1].axvline(np.log10(np.median(rl)), color="k", ls="--",
+                     label=f"median {np.median(rl):.1e}")
+    ax[0, 1].set_xlabel("log10 per-element rel-err"); ax[0, 1].set_ylabel("count")
+    ax[0, 1].set_title("(b) gradient-error distribution"); ax[0, 1].legend(fontsize=8)
+    # (c) Fisher correlation
+    im = ax[1, 0].imshow(F_corr, vmin=-1, vmax=1, cmap="RdBu_r")
+    ax[1, 0].set_xticks(range(9)); ax[1, 0].set_xticklabels(PARAMS, rotation=90, fontsize=8)
+    ax[1, 0].set_yticks(range(9)); ax[1, 0].set_yticklabels(PARAMS, fontsize=8)
+    ax[1, 0].set_title("(c) emulator-implied Fisher correlation\n(DESI-like diag cov — ILLUSTRATIVE)")
+    fig.colorbar(im, ax=ax[1, 0], fraction=0.046)
+    # (d) τ₀-dependence of ∂logP/∂A_p (A_p column, summed |∂P| over classes already in P_obs)
+    g = np.isfinite(kf)
+    iAp = 1
+    for name, J in J_ad_pos.items():
+        ax[1, 1].semilogx(kf[g], J[g, iAp], lw=1.6, label=f"τ₀ {name}")
+    ax[1, 1].axhline(0, color="k", lw=0.6)
+    ax[1, 1].set_xlabel("k [s/km]"); ax[1, 1].set_ylabel("∂P_obs/∂A_p")
+    ax[1, 1].set_title("(d) τ₀-dependence of the A_p response\n(the interaction C_emu must carry)")
+    ax[1, 1].legend(fontsize=8); ax[1, 1].grid(alpha=0.3)
+    fig.suptitle("Gradient diagnostics — convergence, error distribution, Fisher, τ₀-dependence",
+                 fontsize=12)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150); plt.close(fig)
+    print(f"  wrote {path}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ckpt", default=str(ROOT / "checkpoints/decomp_nb24_fold0"))
@@ -102,6 +176,7 @@ def main():
     # --- gate at each τ₀ position --------------------------------------------------
     per_pos = {}
     rel_mid = None
+    J_ad_pos = {}                                     # per-τ₀-position autodiff Jacobians
     for name, tau0 in positions.items():
         def f(theta9, _tau0=tau0):
             return predict_P_obs(model, theta9, z_unit, _tau0, alpha, w_c, pf, delta)
@@ -117,6 +192,7 @@ def main():
                              max=float(np.max(r)),
                              worst_Jfd_frac_of_peak=float(np.abs(J_fd[iworst]) / scale),
                              n_nonfinite=int((~np.isfinite(J_ad)).sum()))
+        J_ad_pos[name] = J_ad
         if name == "mid":
             rel_mid, J_ad_mid, J_fd_mid = r, J_ad, J_fd
         print(f"  [{name:9s} τ₀={tau0:.4f}] median={per_pos[name]['median']:.2e} "
@@ -173,9 +249,44 @@ def main():
     fig.savefig(fpath, dpi=150); plt.close(fig)
     print(f"  wrote {fpath}")
 
+    # ---- extra diagnostic READING plots -----------------------------------------
+    per_param_med = np.median(rel_mid, axis=0)        # (9,) median rel-err per param
+    print("  per-param median rel-err: " +
+          "  ".join(f"{p}={m:.1e}" for p, m in zip(PARAMS, per_param_med)))
+
+    # (1) per-parameter autodiff-vs-FD overlay (all 9)
+    fig_perparam_overlay(kf, J_ad_mid, J_fd_mid, per_param_med,
+                         OUTDIR / "grad_fidelity_perparam.png")
+
+    # (2) FD step-size convergence V: median rel-err vs h (autodiff fixed = J_ad_mid)
+    def f_mid(theta9):
+        return predict_P_obs(model, theta9, z_unit, positions["mid"], alpha, w_c, pf, delta)
+    hs = np.logspace(-6, -1, 11)
+    med_rel_h = [float(np.median(rel_err(J_ad_mid, central_fd_jac(f_mid, theta0, h=h))))
+                 for h in hs]
+    print("  FD-convergence (h, median rel-err): " +
+          "  ".join(f"{h:.0e}:{m:.1e}" for h, m in zip(hs, med_rel_h)))
+
+    # (3) emulator-implied Fisher correlation (DESI-like 5% diagonal cov — ILLUSTRATIVE,
+    #     the real C_emu+C_cosmic lands in Task 3; this shows the degeneracy structure)
+    P_obs_mid = np.asarray(f_mid(theta0))             # (K,)
+    kok = (np.isfinite(kf) & np.isfinite(P_obs_mid) & (P_obs_mid != 0.0)
+           & np.isfinite(J_ad_mid).all(axis=1))
+    J9 = J_ad_mid[kok]                                 # (M,9)
+    Cinv = 1.0 / (0.05 * np.abs(P_obs_mid[kok])) ** 2  # DESI-like 5% per-mode
+    F = (J9.T * Cinv) @ J9
+    F += 1e-12 * np.trace(F) / 9 * np.eye(9)
+    F_corr = cov2corr(np.linalg.inv(F))
+    fig_convergence_fisher_tau0(hs, med_rel_h, rel_mid, F_corr, kf, J_ad_pos,
+                                OUTDIR / "grad_fidelity_convergence_fisher.png")
+
     out = dict(ckpt=args.ckpt, z_fid=args.z_fid, h=args.h, z_unit=z_unit,
                gate_median=GATE_MEDIAN, gate_max=GATE_MAX,
                per_tau0_position=per_pos,
+               per_param_median_rel_err={PARAMS[i]: float(per_param_med[i]) for i in range(9)},
+               fd_convergence={f"{h:.0e}": m for h, m in zip(hs, med_rel_h)},
+               fisher_corr_params=list(PARAMS),
+               fisher_corr=F_corr.tolist(),
                sweep=dict(n=args.n_sweep, nonfinite_Pobs=n_nf_val, nonfinite_grad=n_nf_grad),
                passed=bool(passed))
     jpath = OUTDIR / "grad_fidelity.json"
