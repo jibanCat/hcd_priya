@@ -27,15 +27,17 @@ infer cosmology. The model is assembled in three layers:
 - **τ₀(z) = −ln⟨F⟩(z)** = the mean-flux nuisance, sampled per z.
 - **α_c** = the per-class effective HCD incidence *after* masking (LLS, subDLA, DLA).
 
-Architecture at a glance (`../../figures/analysis/04_emulator/emulator_architecture.png`):
+Architecture as 4 zoomed sub-panels (encoder → Head A / Head B → structural + the corrected
+HCD likelihood):
 
-![architecture](../../figures/analysis/04_emulator/emulator_architecture.png)
+![architecture](../../figures/analysis/04_emulator/emulator_architecture_panels.png)
 
 One **shared encoder** (10→256→128→64) feeds three heads: **Head A** (τ₀-invariant
 abundances: CDDF + dN/dX), a **θ-blind baseline head** (the z,τ₀ mean of P_filt), and a
-**residual head** (the cosmology signal + the Δ channel). The "normalization redesign"
-(§5) combines them into per-class linear `P_filt`; the structural + HCD layers finish the
-forward model.
+**residual head** (the cosmology signal). The "normalization redesign" (§5) combines them
+into per-class linear `P_filt`; the structural + **corrected HCD** layers (panel 4, §6)
+finish the forward model. (The older single-diagram view is
+`emulator_architecture.png`.)
 
 ---
 
@@ -100,11 +102,25 @@ side-show — it is how the HCD abundance enters the P1D baseline.
 |---|---|
 | ![A3](../../figures/analysis/06_performance_walkthrough/A3_wc_ptierp_coupling.png) | ![A4](../../figures/analysis/06_performance_walkthrough/A4_head_a_error_heatmap.png) |
 
-Headline: dN/dX recovered to **1.25–1.65%** (DLA 1.25%), the w_c→P_tier_p coupling faithful to **0.04%**
-(≤2.5% target met ~10×). The α_c prior is centered on Head A's w_c
-(`../../figures/analysis/06_performance_walkthrough/A5_alpha_prior_sanity.png`). So *no* —
-not all the plots are the cosmology/MF head; Head A is fully validated, it just wasn't in
-the recent Phase-C gradient round (which is Head-B/likelihood-facing).
+Headline: dN/dX recovered to **1.25–1.65%** (DLA 1.25%) — this is the **fractional error in
+LOG space** (the emulator trains on `safe_log(dN/dX)`; the % is `RMS(Δ ln dN/dX)`), the
+w_c→P_tier_p coupling (Head A's predicted dN/dX → w_c via M₀ → the structural sum `P_tier_p
+= Σ_c w_c·P_c` reconstructs the true total to **0.04%**, i.e. the abundances assemble the
+baseline correctly). So *no* — not all plots are the cosmology/MF head; Head A is fully
+validated, it just wasn't in the recent Phase-C gradient round (Head-B/likelihood-facing).
+
+**vs the literature (physical units — does PRIYA match the data?):** the pred-vs-true above
+shows the emulator tracks the *sim*; this shows whether the *sim* tracks the *observations*
+(it informs the incidence prior, §6.5). dN/dX(z) per class (A6) and the CDDF f(N_HI) (A7):
+
+| dN/dX(z) vs literature | CDDF f(N_HI) vs literature |
+|---|---|
+| ![A6](../../figures/analysis/06_performance_walkthrough/A6_dndx_vs_literature.png) | ![A7](../../figures/analysis/06_performance_walkthrough/A7_cddf_vs_literature.png) |
+
+PRIYA reproduces the LLS incidence (~0.98) but **over-predicts subDLA (×1.31) and
+under-predicts DLA (×0.70)**; the CDDF shows the same — PRIYA's DLA f(N_HI) is low near the
+20.3 edge (×0.59 vs Noterdaeme) and high at the 10^21.5 break. This sim-vs-data offset is
+what the §6.5 incidence prior centers on (NOT α=1), with the z-slope.
 
 ---
 
