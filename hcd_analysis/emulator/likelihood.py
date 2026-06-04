@@ -1,6 +1,10 @@
 """Total-P1D likelihood contract (spec sec.6). Difference form is the DEFAULT."""
 from __future__ import annotations
+import jax
 import jax.numpy as jnp
+
+# Kim2013 central mean-flux curve (== data.KIM_AMP/SLOPE) for the τ₀→α ladder mapping.
+_KIM_AMP, _KIM_SLOPE = 2.3e-3, 3.65
 
 
 def total_p1d_difference(P_tier_p, alpha_hcd, delta_hcd):
@@ -81,3 +85,40 @@ def assemble_covariance(cosmic_cov, sigma_Pfilt, w_c, sigma_delta, alpha_hcd,
     # ndim is static at trace time, so a plain python branch keeps this jit-clean.
     cosmic_cov_full = jnp.diag(cosmic_cov) if cosmic_cov.ndim == 1 else cosmic_cov
     return cosmic_cov_full + jnp.diag(emu_var)
+
+
+def sigma_at_tau0(sigma_zb, alpha_centres, z, tau0):
+    """τ₀-interpolate the τ₀-BANDED fractional error to a sampled τ₀ (Phase-C §1.3b).
+
+    The error vector is τ₀-aware: ``sigma`` is (C,K,Zb,Tb) over τ₀-LADDER bands whose
+    centres are stored in the z-independent ladder coordinate α=τ₀/Kim(z)
+    (``data.make_tau0_bands``). For a data bin at fixed ``z`` with SAMPLED mean-flux
+    ``tau0``, select that z-band's slice ``sigma_zb`` (C,K,Tb), map τ₀→α, and linearly
+    interpolate over the band centres -> (C,K). Differentiable in τ₀ (piecewise-linear;
+    finite gradient a.e., fine for NUTS); ``jnp.interp`` clamps flat outside the centres
+    so the ladder extremes are safe.
+
+    Args:
+      sigma_zb:      (C,K,Tb) the error vector at the data z-band.
+      alpha_centres: (Tb,) ascending τ₀-band centres in α units.
+      z:             scalar data redshift (fixed). tau0: scalar sampled mean-flux.
+    Returns (C,K) fractional error at the sampled τ₀.
+    """
+    alpha = jnp.asarray(tau0) / (_KIM_AMP * (1.0 + jnp.asarray(z)) ** _KIM_SLOPE)
+    interp1 = lambda s_tb: jnp.interp(alpha, jnp.asarray(alpha_centres), s_tb)
+    return jax.vmap(jax.vmap(interp1))(jnp.asarray(sigma_zb))      # (C,K)
+
+
+def gaussian_loglik(r, C):
+    """−½ rᵀC⁻¹r − ½ logdet C  (the logdet-bearing Gaussian, design §1.3c).
+
+    C (K,K) SPD, r (K,). Cholesky for BOTH the quadratic form and the logdet so the
+    term is exact and JAX differentiates through C's dependence on (θ,τ₀) — the logdet
+    is NOT constant once C depends on sampled params and MUST be carried (omitting it
+    biases τ₀ toward larger-σ regions). Returns a scalar.
+    """
+    r = jnp.asarray(r)
+    L = jnp.linalg.cholesky(jnp.asarray(C))
+    sol = jax.scipy.linalg.cho_solve((L, True), r)
+    half_logdet = jnp.sum(jnp.log(jnp.diag(L)))     # ½ logdet C = Σ log diag(L)
+    return -0.5 * (r @ sol) - half_logdet
