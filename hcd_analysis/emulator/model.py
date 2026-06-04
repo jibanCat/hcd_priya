@@ -255,7 +255,10 @@ def masked_mse(pred, target, mask, weight=None):
     """NaN-safe masked WEIGHTED-MEAN squared error.
 
     Sanitise target to finite BEFORE the masked diff so the jnp.where double-NaN-
-    gradient trap never fires; guard the denominator with max(·,1).
+    gradient trap never fires; guard the denominator with max(·,1). The ``weight`` is
+    also NaN-safe at masked bins: it is SELECTED to 0 there via jnp.where (not
+    weight·mask), so a non-finite weight at a masked position can never form 0·inf=NaN
+    (jax-traps #7 — weights now covered, not just the target).
 
     GRADIENT-SCALE FIX (validated recipe, scripts/feasibility_subpercent.py): when a
     ``weight`` is supplied this is a TRUE weighted mean — the denominator is
@@ -273,11 +276,17 @@ def masked_mse(pred, target, mask, weight=None):
     diff = jnp.where(mask, pred - target_safe, 0.0)
     sq = diff ** 2
     if weight is not None:
-        # broadcast (weight·mask) is the effective per-element weight; the weighted
-        # mean divides by its sum so the absolute gradient scale is weight-independent.
-        w = weight * mask.astype(sq.dtype)
+        # effective per-element weight = weight at UNMASKED bins, exactly 0 at masked.
+        # Use jnp.where (NOT weight*mask): a non-finite weight at a masked bin would
+        # make weight*0 = ±inf*0 = NaN, poisoning BOTH the Σ(w) denominator and the
+        # sq*w numerator (the "NaN-safe" claim). jnp.where SELECTS 0.0 there instead of
+        # multiplying, so a ±inf masked weight is fully inert. At unmasked bins this is
+        # exactly ``weight`` (mask broadcast against weight), so every current finite-
+        # weight value — and gradient scale — is preserved bit-for-bit.
+        w = jnp.where(mask.astype(bool), weight, 0.0)
+        w = jnp.broadcast_to(w, sq.shape)
         denom = jnp.maximum(jnp.sum(w), 1.0)
-        return jnp.sum(sq * weight) / denom
+        return jnp.sum(sq * w) / denom
     denom = jnp.maximum(jnp.sum(mask.astype(sq.dtype)), 1.0)
     return jnp.sum(sq) / denom
 

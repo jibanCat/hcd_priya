@@ -164,6 +164,28 @@ def test_masked_mse_zero_weight_empty_class():
     assert grad[1] == 0.0  # zero weight -> zero gradient
 
 
+def test_masked_mse_inf_weight_at_masked_position():
+    # Adversarial (jax-traps #7, now covered): a non-finite WEIGHT at a MASKED-OUT
+    # position must stay inert. masked_mse now forms the per-element weight as
+    # jnp.where(mask, weight, 0.0) (SELECT 0, never multiply): the masked bin gets a
+    # finite 0, so a ±inf there is inert. The OLD `weight*mask` would have given
+    # inf*0 = NaN, poisoning BOTH the Σ(w) denom and the numerator. Value + grad
+    # finite, grad zero at the masked bin.
+    pred = jnp.array([1.0, 2.0, 3.0, 4.0])
+    targ = jnp.array([0.5, jnp.nan, 1.0, 2.0])
+    mask = jnp.array([True, False, True, True])         # idx1 masked out
+    weight = jnp.array([0.5, jnp.inf, 1.0, 2.0])        # +inf weight AT the masked bin
+    val, grad = jax.value_and_grad(lambda p: masked_mse(p, targ, mask, weight))(pred)
+    assert jnp.isfinite(val)
+    assert jnp.all(jnp.isfinite(grad))
+    assert grad[1] == 0.0                                # masked inf-weight bin: inert
+    # the finite-weight result is UNCHANGED by the w-in-numerator fix: reproduce it
+    # with the inf swapped for any finite weight at the (zero-contribution) masked bin.
+    w_finite = weight.at[1].set(7.0)
+    val_ref = masked_mse(pred, targ, mask, w_finite)
+    assert jnp.allclose(val, val_ref)
+
+
 def test_masked_mse_batched_broadcast_jit_and_double_grad():
     # Realistic joint-loss shape: pred/target (B,4,K), mask broadcast to full shape
     # (as the joint loss does via `m3 & ones_like(target, bool)`), NaN above Nyquist.

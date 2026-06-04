@@ -107,7 +107,7 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   3 delta rows, NOT interleaved; structural_tier_p einsum batches + grads finitely on
   both args, all-ones→sum(w) identity holds.)
 
-## 7. `masked_mse` only sanitises NaN, not inf — precondition: mask ⊇ non-finite — **WATCH**
+## 7. `masked_mse` only sanitises NaN, not inf — precondition: mask ⊇ non-finite — **WATCH** (weights now covered)
 - **Where:** Task 10 (`masked_mse` in `model.py`), surfaced by the adversarial JAX review.
 - **Symptom:** `nan_to_num(target, nan=0.0)` replaces NaN with 0 but leaves ±inf untouched.
   An ±inf target at a **masked-out** position is harmless (the `where` zeros it: grad 0,
@@ -124,6 +124,17 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   posinf/neginf clamps inf to a huge finite too — strictly safer at zero cost to the
   in-contract path. Left as-is per spec ("NaN-safe"); pinned that masked-inf is safe by
   `test_masked_mse_inf_target_at_masked_position`.
+- **Update (Phase-2b PR-prep — WEIGHTS now covered):** the same `0·inf=NaN` landmine
+  also lived on the `weight` path. The masked weight was formed as `weight*mask`, so a
+  non-finite weight at a masked bin gave `inf*0 = NaN` — poisoning BOTH the `Σ(weight·
+  mask)` denominator and the (then `sq*weight`) numerator, despite the masked-bin diff
+  being zeroed. Not reachable today (all weights finite) but a latent landmine for the
+  inference layer. **Fixed:** the masked weight is now `jnp.where(mask, weight, 0.0)`
+  (SELECT 0, never multiply by 0), so a ±inf masked weight is fully inert; at unmasked
+  bins it is exactly `weight`, preserving every finite-weight value + gradient scale
+  bit-for-bit (the 5 other masked_mse tests still pass unchanged). Pinned by
+  `test_masked_mse_inf_weight_at_masked_position`. So: target NaN-safe (nan_to_num),
+  target masked-inf safe (where-diff), and weight masked-non-finite safe (where-weight).
 - **Lesson:** `nan_to_num(nan=0.0)` is NaN-only; if a non-finite value can ever sit at an
   *unmasked* element, clamp inf too. Keep the invariant `mask == isfinite(target)` enforced
   at the data boundary so the loss never has to.
@@ -574,6 +585,16 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   (hashable) side and `coherent_debias_term`'s `int(batch["n_cells"])` is a no-op concrete
   read. (A numpy/jnp 0-d scalar also fails `eqx.filter`'s array test? — no: jnp 0-d IS an
   array; numpy 0-d IS an array too. Only a bare python int is reliably static.)
+- **Update (Phase-2b PR-prep — fixed AT SOURCE):** `make_batch` (`data.py`) was emitting
+  `"n_cells": np.int64(n_cells)` — a numpy 0-d, which `eqx.is_array` treats as an ARRAY.
+  It only worked because `_to_jnp_batch`/`_pad_batch` re-cast it to `int`. The upcoming
+  likelihood/sampler will `eqx.filter_jit` a RAW `make_batch` dict (no `_to_jnp_batch`
+  detour) — `np.int64` would then trace as an `int64[]` leaf and `int(...)` would raise.
+  Fixed at the boundary: `data.py` now emits `int(n_cells)`. The train.py special-cases
+  are now belt-and-suspenders (still correct, kept). Regression: `tests/test_emulator_data.py
+  ::test_coherent_debias_term_jits_on_raw_make_batch` `eqx.filter_jit`s the bare batch;
+  and the strengthened `test_make_batch_emits_cell_and_n_cells` asserts `isinstance(int)`
+  (the old `np.asarray(...).ndim==0` PASSED on np.int64 and would NOT have caught this).
 - **Lesson:** any quantity that sets an array SHAPE inside jit (segment counts, reshape
   dims, slice lengths) must reach the traced fn as a STATIC python scalar, not a batch
   array leaf. When a batch dict flows through a generic `{k: jnp.asarray(v)}` converter,
