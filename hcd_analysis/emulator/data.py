@@ -644,6 +644,59 @@ def tau0_edge_holdout(tau0, frac=0.15):
     return tr, ho
 
 
+# Kim2013 central mean-flux curve (== tau0_rescale.obs_mean_tau_kim2013): the cache's
+# tau0 = alpha_factor * KIM_AMP*(1+z)^KIM_SLOPE, so alpha_factor = tau0/Kim(z) is the
+# z-INDEPENDENT ladder coordinate (the natural axis for a smooth sigma(tau0) interp).
+KIM_AMP, KIM_SLOPE = 2.3e-3, 3.65
+
+
+def tau0_ladder_factor(tau0, z_grid):
+    """The z-independent τ₀-ladder factor α = τ₀ / [KIM_AMP·(1+z)^KIM_SLOPE].
+
+    The consumer maps a sampled τ₀ at redshift z to this α to interpolate σ(c,k,z,τ₀)
+    over the τ₀-band centres (which are stored in α units). Differentiable-friendly
+    (pure arithmetic)."""
+    return np.asarray(tau0) / (KIM_AMP * (1.0 + np.asarray(z_grid)) ** KIM_SLOPE)
+
+
+def make_tau0_bands(tau0, z_grid, n_tb=4):
+    """Partition rows into ``n_tb`` τ₀-LADDER bands by the z-independent factor α.
+
+    Design (τ₀-error-model §1.1): the two OUTER bands ISOLATE the ladder extreme
+    rungs (where the τ₀×cosmology interaction is hardest / the emulator residual
+    largest); the interior rungs are quantile-split into the remaining ``n_tb-2``
+    bands. For ``n_tb < 3`` falls back to plain α-quantile bands (no extreme isolation).
+
+    Returns ``(tau0_band_of_row (R,) int in [0,n_tb), alpha_centres (n_tb,))`` — the
+    per-band mean ladder factor α (z-independent), the abscissa the consumer
+    interpolates σ(τ₀) over (map a sampled τ₀ at z to α=τ₀/Kim(z), interp over centres).
+    """
+    alpha = tau0_ladder_factor(tau0, z_grid)
+    band = np.full(alpha.shape, -1, int)
+    if n_tb < 3:
+        edges = np.unique(np.quantile(alpha, np.linspace(0, 1, n_tb + 1)))
+        if len(edges) < n_tb + 1:
+            edges = np.linspace(alpha.min(), alpha.max(), n_tb + 1)
+        edges[0], edges[-1] = -np.inf, np.inf
+        band = np.clip(np.digitize(alpha, edges[1:-1], right=False), 0, n_tb - 1)
+    else:
+        rungs = np.unique(np.round(alpha, 6))
+        lo, hi = rungs.min(), rungs.max()
+        atol = 1e-4 * (hi - lo) + 1e-12
+        band[np.abs(alpha - lo) <= atol] = 0                 # least-absorption edge
+        band[np.abs(alpha - hi) <= atol] = n_tb - 1          # most-absorption edge
+        interior = band < 0
+        if interior.any():
+            edges = np.unique(np.quantile(alpha[interior], np.linspace(0, 1, n_tb - 1)))
+            if len(edges) < n_tb - 1:
+                edges = np.linspace(alpha[interior].min(), alpha[interior].max(), n_tb - 1)
+            ib = np.clip(np.digitize(alpha[interior], edges[1:-1], right=False), 0, n_tb - 3)
+            band[interior] = 1 + ib
+    centres = np.array([np.mean(alpha[band == b]) if (band == b).any() else np.nan
+                        for b in range(n_tb)])
+    return band.astype(int), centres
+
+
 def make_splits(d, fold, n_folds=8, holdout_frac=0.15):
     """Compose the tau0-edge holdout x LOSO split for one fold (spec sec.7).
 
