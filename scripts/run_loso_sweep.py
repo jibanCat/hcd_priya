@@ -93,6 +93,14 @@ def fold_resid_neff(d, model, val_idx, norm_stats, z_band_of_row, n_bands,
         Σ_{r in z-band} coarse_counts[r, class]
     broadcast over k (k-independent — counts are per-row, not per-k). DLA high-k cells
     that are shot-noise-limited surface via the small DLA coarse_counts.
+
+    CAVEAT (review I1): the catalog is tau0-invariant, so all n_alpha tau0 rows of a
+    given snap carry IDENTICAL coarse_counts. neff is therefore inflated by the alpha
+    multiplicity (~20x) AND summed across snaps — read it as a RELATIVE shot-noise
+    proxy, not a literal independent-sightline count. With the full grid the per-row
+    DLA count (~8000+) sits far above any reasonable shot threshold, so the DLA shot
+    flag is expected-INERT here; it is wired for sparser real-data catalogs. Divide
+    by n_alpha (and use a per-sightline floor) before reading neff as an absolute count.
     """
     val_idx = np.asarray(val_idx)
     x = jnp.asarray(d["x"][val_idx])
@@ -324,7 +332,12 @@ def main():
     t0 = time.time()
     d = load_cache(args.cache)
     n_k = d["P_tier_p"].shape[1]
-    kgrid = d["kfkms"][0]                                  # shared k-grid (R,n_k)
+    # Representative k-grid for labelling the error vector + figures. kfkms is NOT
+    # identical across rows (per-snap vmax differs; max dev ~3% LF / ~9% HR at high
+    # k). Training/residuals use each row's OWN grid per-index; only this saved label
+    # is row-0's grid, so downstream likelihood must treat error_vector["kfkms"] as a
+    # representative grid, not exact per-mode k. (Review I2.)
+    kgrid = d["kfkms"][0]                                  # representative k-grid (n_k,)
     print(f"loaded cache {args.cache}: {d['P_tier_p'].shape[0]} rows, n_k={n_k}, "
           f"{len(set(d['sim_name']))} sims ({time.time()-t0:.1f}s)")
 

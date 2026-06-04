@@ -106,10 +106,19 @@ def build_training_nb():
     ))
 
     cells.append(code(
-        "# Environment is set by the `emu-jax` kernelspec:",
-        "#   PYTHONNOUSERSITE=1, PYTHONPATH=/home/mfho/hcd_priya, CPU-only JAX.",
-        "import os",
-        "os.chdir('/home/mfho/hcd_priya')   # so relative repo paths resolve from notebooks/",
+        "# The `emu-jax` kernelspec sets CPU-only JAX + PYTHONNOUSERSITE.",
+        "import os, sys",
+        "from pathlib import Path",
+        "# Portable repo-root detection (no hardcoded user path): honor HCD_PRIYA_ROOT,",
+        "# else walk up from the CWD to the dir that contains the hcd_analysis package.",
+        "ROOT = Path(os.environ.get('HCD_PRIYA_ROOT', '')).expanduser()",
+        "if not (ROOT / 'hcd_analysis').is_dir():",
+        "    ROOT = next((p for p in [Path.cwd(), *Path.cwd().parents]",
+        "                 if (p / 'hcd_analysis').is_dir()), Path.cwd())",
+        "os.chdir(ROOT)                       # so relative repo paths resolve",
+        "if str(ROOT) not in sys.path:",
+        "    sys.path.insert(0, str(ROOT))    # so 'import hcd_analysis' works for any kernel",
+        "print('repo root:', ROOT)",
         "import time, json",
         "import numpy as np",
         "import matplotlib.pyplot as plt",
@@ -140,7 +149,7 @@ def build_training_nb():
     ))
 
     cells.append(code(
-        "LF_CACHE = '/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5'",
+        "LF_CACHE = str(ROOT / 'hcd_analysis/_emulator_data/observables_tau0_lf.h5')",
         "t0 = time.time()",
         "d = load_cache(LF_CACHE)",
         "n_k = d['P_tier_p'].shape[1]",
@@ -360,7 +369,7 @@ def build_training_nb():
     ))
 
     cells.append(code(
-        "ckpt = '/home/mfho/hcd_priya/checkpoints/walkthrough_nb_fold0'",
+        "ckpt = str(ROOT / 'checkpoints/walkthrough_nb_fold0')",
         "recipe = dict(",
         "    n_basis=FINAL_RECIPE['n_basis'], p_resid_w=FINAL_RECIPE['p_resid_w'],",
         "    edge_gain=FINAL_RECIPE['edge_gain'], lowk_extra=FINAL_RECIPE['lowk_extra'],",
@@ -392,7 +401,7 @@ def build_training_nb():
         "likelihood covariance. To reproduce:",
         "",
         "```bash",
-        "PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \\",
+        "PYTHONNOUSERSITE=1 PYTHONPATH=\"$PWD\" \\   # run from the repo root",
         "  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_loso_sweep.py",
         "#   add --smoke for a fast 2-fold / few-epoch end-to-end check",
         "```",
@@ -440,11 +449,18 @@ def build_plotting_nb():
     ))
 
     cells.append(code(
-        "# The `emu-jax` kernelspec sets the environment (CPU JAX, PYTHONPATH).",
-        "import os",
-        "os.chdir('/home/mfho/hcd_priya')   # so relative repo paths resolve from notebooks/",
-        "import json, warnings",
+        "# The `emu-jax` kernelspec sets CPU-only JAX + PYTHONNOUSERSITE.",
+        "import os, sys",
         "from pathlib import Path",
+        "# Portable repo-root detection (see 01_emulator_training.ipynb).",
+        "ROOT = Path(os.environ.get('HCD_PRIYA_ROOT', '')).expanduser()",
+        "if not (ROOT / 'hcd_analysis').is_dir():",
+        "    ROOT = next((p for p in [Path.cwd(), *Path.cwd().parents]",
+        "                 if (p / 'hcd_analysis').is_dir()), Path.cwd())",
+        "os.chdir(ROOT)",
+        "if str(ROOT) not in sys.path:",
+        "    sys.path.insert(0, str(ROOT))",
+        "import json, warnings",
         "import numpy as np",
         "import matplotlib.pyplot as plt",
         "import jax, jax.numpy as jnp",
@@ -742,7 +758,7 @@ def build_plotting_nb():
         "outside the notebook (incl. the headline-numbers JSON):",
         "",
         "```bash",
-        "PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \\",
+        "PYTHONNOUSERSITE=1 PYTHONPATH=\"$PWD\" \\   # run from the repo root",
         "  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_performance_walkthrough.py",
         "#   add --no-mf to skip B6 if the HR cache / res_corr table is unavailable",
         "```",

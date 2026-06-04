@@ -102,7 +102,14 @@ def train_step_partitioned(diff_model, static_model, opt, opt_state, batch, loss
 
 @eqx.filter_jit
 def evaluate(model, batch):
-    """Scalar ``joint_loss`` with no gradient (validation)."""
+    """Scalar ``joint_loss`` with no gradient (validation).
+
+    NOTE: this uses the UNIFORM default ``joint_loss`` (no term_w/k_weight/w_coh),
+    so the ``early_stop_metric="joint"`` path does not match a non-uniform training
+    objective. Harmless in production: the finalized recipe freezes the baseline ->
+    ``stop_on_resid=True``, making this val_loss logged-only. Only relevant if you
+    early-stop on "joint" with a weighted recipe.
+    """
     return joint_loss(model, batch)
 
 

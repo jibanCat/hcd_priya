@@ -62,7 +62,7 @@ from hcd_analysis.emulator.model import structural_tier_p
 # ---------------------------------------------------------------------------- #
 # Paths / constants
 # ---------------------------------------------------------------------------- #
-ROOT = Path("/home/mfho/hcd_priya")
+ROOT = Path(__file__).resolve().parents[1]   # repo root (portable; NB02 reuses W.ROOT)
 CACHE = str(ROOT / "hcd_analysis/_emulator_data/observables_tau0_lf.h5")
 CKPT = str(ROOT / "checkpoints/final_fold{f}")
 OUTDIR = ROOT / "figures/analysis/06_performance_walkthrough"

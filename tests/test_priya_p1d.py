@@ -17,8 +17,14 @@ try:
     from fake_spectra.fluxstatistics import obs_mean_tau
     _has_fs = True
 except ImportError as e:
-    print(f"SKIP — fake_spectra unavailable ({e}); requires emu-3.9 env with gsl")
-    sys.exit(0)
+    # Skip cleanly at COLLECTION time. A bare ``sys.exit(0)`` here raises
+    # SystemExit during pytest collection -> INTERNALERROR that aborts the whole
+    # ``pytest tests/`` run; ``pytest.skip(allow_module_level=True)`` records a
+    # normal module skip instead. (When run directly via emu-3.9's python3 the
+    # imports succeed, so this branch is pytest-only.)
+    import pytest
+    pytest.skip(f"fake_spectra unavailable ({e}); requires emu-3.9 env with gsl",
+                allow_module_level=True)
 
 
 PRIYA_FILE = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/mf_emulator_flux_vectors_tau1000000.hdf5"

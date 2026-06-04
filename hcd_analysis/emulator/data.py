@@ -496,15 +496,23 @@ def make_batch(d, idx, norm_stats, k_weight=None, datarange=False,
     for r, cid in enumerate(cells):
         cm = cell_mean.get(int(cid))
         if cm is None:
-            # Shouldn't happen under LOSO (it holds out SIMS, not cells); fall back
-            # to mu_marg (a zero-cosmology-signal row) and warn.
+            # Cell absent from the train split. Under LOSO this never happens (it
+            # holds out SIMS, not cells). It DOES happen — for most rows — when
+            # scoring the tau0-EDGE holdout, which removes whole z-slices, so those
+            # (z,alpha) cells have no train row and the baseline cell-mean is unknown.
+            # Falling back to mu_marg makes t_p_base/t_p_resid here NON-PHYSICAL
+            # (large), so do NOT per-head score tau0-edge holdout batches; the
+            # extrapolation probe must use physical-space (linear P_filt) error via
+            # reconstruct_P_filt, which round-trips these rows exactly (see make_splits).
             cm = pf["mu_marg"]
             n_fallback += 1
         m_cell[r] = cm
     if n_fallback:
         warnings.warn(
             f"make_batch: {n_fallback}/{len(idx)} rows in a cell absent from "
-            f"train_cells; fell back to mu_marg (unexpected under LOSO)",
+            f"train_cells; fell back to mu_marg. Expected for tau0-edge-holdout "
+            f"batches (whole z-slices removed); those rows' t_p_base/t_p_resid are "
+            f"non-physical — score such holdouts in physical space, not per-head.",
             RuntimeWarning)
     t_p_base = (m_cell - pf["mu_marg"]) / pf["sig_marg"]                        # (n,4,K)
     t_p_resid = (logP - m_cell) / pf["sig_cosmo"]                              # (n,4,K)

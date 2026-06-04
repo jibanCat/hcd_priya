@@ -24,6 +24,11 @@ def svd_basis_init(P_filt_transformed, n_basis):
         raise ValueError(f"P_filt_transformed must be 2D (rows*classes, n_k); got {M.shape}")
     # full_matrices=False -> Vh is (min(m,n), n_k); rows are the right sing. vectors.
     _, _, Vh = jnp.linalg.svd(M, full_matrices=False)
+    if n_basis > Vh.shape[0]:
+        raise ValueError(
+            f"n_basis={n_basis} exceeds available singular vectors {Vh.shape[0]} "
+            f"(= min(rows*classes, n_k) for input {M.shape}); the warm-start would "
+            f"be rank-deficient. Reduce n_basis to <= {Vh.shape[0]}.")
     return Vh[:n_basis]
 
 

@@ -16,6 +16,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
+# build_emulator_cache_tau0 -> priya_p1d -> fake_spectra (GSL-linked). Skip the
+# module cleanly when that env is absent rather than failing collection. (The
+# synthetic round-trip / merge tests are also exercised by test_emulator_cache.py,
+# which has no fake_spectra dependency.)
+import pytest
+pytest.importorskip("fake_spectra")
+
 import build_emulator_cache_tau0 as bt0
 from hcd_analysis import priya_p1d as bt0_pp
 
