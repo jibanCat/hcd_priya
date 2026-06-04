@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import pickle
+import subprocess
+from pathlib import Path
 
 import numpy as np
 import jax
@@ -153,7 +155,7 @@ def _baseline_cell_table(d, train_idx, norm_stats):
     return cz, ct, tgt, np.isfinite(tgt)
 
 
-def _prefit_baseline(model, d, train_idx, norm_stats, *, epochs, lr, seed):
+def _prefit_baseline(model, d, train_idx, norm_stats, *, epochs, lr):
     """Pre-fit ONLY the θ-blind BaselineHead to its cell-mean floor (validated recipe).
 
     The deep baseline needs MANY gradient steps to reach term (b) ≈ 0.03–0.05·σ_cosmo
@@ -355,8 +357,7 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
     # term (b) collapses (the joint early-stop can't drive the baseline there alone).
     did_prefit = prefit_baseline_epochs is not None and prefit_baseline_epochs > 0
     model = _prefit_baseline(model, d, train_idx, norm_stats,
-                             epochs=prefit_baseline_epochs, lr=prefit_baseline_lr,
-                             seed=seed)
+                             epochs=prefit_baseline_epochs, lr=prefit_baseline_lr)
     # Freeze the pre-fit baseline during the joint loop unless explicitly overridden
     # (default: freeze iff a pre-fit ran, so the baseline doesn't drift off its floor).
     if freeze_baseline is None:
@@ -489,7 +490,12 @@ def _run_stage(model, norm_stats, d, train_idx, val_batch, *, n_epochs,
                history, patience_resid):
     """Run one training stage with frozen/trainable partition + term_w, early-
     stopping on the val residual loss. Returns the best-by-resid model in this
-    stage and appends per-epoch diagnostics to ``history``."""
+    stage and appends per-epoch diagnostics to ``history``.
+
+    ABLATION-ONLY: the sole caller is ``train_fold_staged`` (the 3-stage ablation
+    path). The production FINAL_RECIPE uses ``train_fold`` (single joint loop with a
+    prefit+frozen baseline). See ``train_fold_staged``'s note. Kept (still tested),
+    not on the deployed path."""
     mask = _trainable_mask(model, train_baseline, train_rest)
     diff_model, static_model = eqx.partition(model, mask)
     steps_per_epoch = max(1, int(np.ceil(len(train_idx) / batch_size)))
@@ -528,6 +534,14 @@ def _run_stage(model, norm_stats, d, train_idx, val_batch, *, n_epochs,
 def train_fold_staged(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
                       batch_size=512, seed=0, key=None, patience=10, n_k=None):
     """3-stage training (normalization REDESIGN), early-stop on val RESIDUAL loss.
+
+    ABLATION-ONLY — NOT THE PRODUCTION PATH. This is the deferred-bug 3-stage
+    ablation (baseline-only -> freeze+residual -> joint fine-tune). The deployed
+    FINAL_RECIPE trains via ``train_fold`` (a single joint loop with a deep θ-blind
+    baseline PRE-FIT then FROZEN — see ``_prefit_baseline`` / ``train_fold``); it does
+    NOT call this. Retained because it is still exercised by the test suite (staged-
+    train ablation tests) and documents the staged alternative; do not delete and do
+    not point production checkpoints at it.
 
     Stage 1 (~1/3 epochs): train BaselineHead (+ its basis) on the BASELINE term
       only (term_w p_base=1, all others 0; only head_base trainable).
@@ -594,16 +608,65 @@ def train_fold_staged(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=10
     return model, norm_stats, history
 
 
+def _git_sha():
+    """Best-effort short git SHA of the repo this module lives in (None on failure).
+
+    Records exactly which code trained the frozen LF backbone so the MF / likelihood
+    that load it are fully reproducible. Never raises — a checkpoint must still save
+    outside a git tree (returns None instead)."""
+    repo = Path(__file__).resolve().parents[2]            # .../hcd_priya
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5)
+        return out.stdout.strip() if out.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def _arch_cfg_from_model(model):
+    """Derive the COMPLETE Emulator constructor kwargs from a trained model.
+
+    The skeleton ``load_checkpoint`` rebuilds is ``Emulator(**arch_cfg)`` — so
+    arch_cfg must carry EVERY static arch knob, not just in_dim/n_k/n_basis. A
+    non-default baseline depth/width (baseline_n_layers/baseline_width) omitted from
+    the caller's arch_cfg would deserialise into the wrong skeleton. We read the
+    truth straight off the model's static fields so it can never disagree with the
+    caller (``run_loso_sweep.py`` only passes in_dim/n_k/n_basis)."""
+    return {
+        "in_dim": int(model.enc.layers[0].in_features),
+        "n_k": int(model.head_b.n_k),
+        "n_basis": (int(model.head_b.n_basis)
+                    if model.head_b.n_basis is not None else None),
+        "baseline_n_layers": int(model.head_base.n_layers),
+        "baseline_width": int(model.head_base.width),
+    }
+
+
 def save_checkpoint(path, model, arch_cfg, norm_stats, seed,
-                    kfkms=None, cache_path=None):
+                    kfkms=None, cache_path=None, recipe=None):
     """Serialise eqx leaves + JSON meta + pickled norm_stats.
 
     M4: the meta now records the k-grid identity so a checkpoint is self-
     describing — ``kfkms`` (the cache's k-grid, list of floats; ``n_k`` derived
     from it) and ``cache_path`` (the cache the model was trained on). Either may
-    be omitted (back-compat), in which case the corresponding key is null."""
+    be omitted (back-compat), in which case the corresponding key is null.
+
+    REPRODUCIBILITY (Phase-2b PR-prep): the stored ``arch_cfg`` is COMPLETED from the
+    model's own static fields (``_arch_cfg_from_model`` — adds baseline_n_layers/
+    baseline_width that the caller omits, so a non-default baseline depth round-trips),
+    and the meta also records the git SHA (``git_sha``) and the FINAL_RECIPE training
+    knobs (``recipe``: w_coh, term_w, edge_gain/lowk, datarange, …). The frozen LF
+    backbone the MF/likelihood load is then fully reproducible from the checkpoint
+    alone — previously the recipe lived only in the separate hist.json."""
     eqx.tree_serialise_leaves(str(path) + ".eqx", model)
-    meta = {"arch_cfg": arch_cfg, "seed": int(seed),
+    # complete the caller's arch_cfg from the model's static fields (caller-supplied
+    # keys win on conflict, but the model is the source of truth for the arch).
+    full_arch = _arch_cfg_from_model(model)
+    full_arch.update(arch_cfg or {})
+    meta = {"arch_cfg": full_arch, "seed": int(seed),
+            "git_sha": _git_sha(),
+            "recipe": (dict(recipe) if recipe is not None else None),
             "cache_path": (str(cache_path) if cache_path is not None else None)}
     if kfkms is not None:
         # cache kfkms is (R, n_k) (per-row, shared grid); store the single k-grid.
@@ -613,7 +676,7 @@ def save_checkpoint(path, model, arch_cfg, norm_stats, seed,
         meta["n_k"] = int(kgrid.shape[0])
     else:
         meta["kfkms"] = None
-        meta["n_k"] = arch_cfg.get("n_k")
+        meta["n_k"] = full_arch.get("n_k")
     with open(str(path) + ".meta.json", "w") as f:
         json.dump(meta, f)
     with open(str(path) + ".norm.pkl", "wb") as f:

@@ -136,7 +136,16 @@ def test_checkpoint_roundtrip(tmp_path):
     for k in pred0:
         assert np.array_equal(np.asarray(pred0[k]), np.asarray(pred1[k])), k
     assert meta["seed"] == 2
-    assert meta["arch_cfg"] == arch_cfg
+    # save_checkpoint COMPLETES arch_cfg from the model's static fields, so the stored
+    # arch_cfg is a SUPERSET of the caller's (adds baseline_n_layers/baseline_width).
+    for k, v in arch_cfg.items():
+        assert meta["arch_cfg"][k] == v, k
+    assert meta["arch_cfg"]["baseline_n_layers"] == 3      # Emulator default
+    assert meta["arch_cfg"]["baseline_width"] == 256
+    # reproducibility meta: git SHA recorded (str or None outside a git tree), and
+    # recipe is None here (no recipe passed).
+    assert "git_sha" in meta and (meta["git_sha"] is None or isinstance(meta["git_sha"], str))
+    assert meta["recipe"] is None
     # norm_stats round-trip. P_filt now holds the structured baseline/residual stats
     # (mu_marg/sig_marg/sig_cosmo arrays + a cell_mean dict); compare each shape.
     for ch in norm_stats:
@@ -367,6 +376,51 @@ def test_checkpoint_meta_has_kgrid(tmp_path):
     # load_checkpoint still round-trips with the enriched meta
     model2, meta2, norm2 = load_checkpoint(prefix)
     assert meta2["n_k"] == N_K and meta2["cache_path"] == cache_path
+
+
+def test_checkpoint_roundtrip_nondefault_baseline_depth(tmp_path):
+    """FIX 5: a NON-default baseline depth/width must survive save->load. The caller's
+    arch_cfg omits baseline_n_layers/baseline_width (as run_loso_sweep.py does); if
+    save_checkpoint did NOT complete arch_cfg from the model, load_checkpoint would
+    rebuild the 3-layer/w256 DEFAULT skeleton and tree_deserialise_leaves would fail
+    (mismatched layer count) or silently load into the wrong arch. Build a 1-layer/w32
+    baseline, round-trip with a MINIMAL arch_cfg, and confirm predictions match
+    bit-for-bit + the stored arch_cfg carries the non-default depth + recipe."""
+    import json
+    from hcd_analysis.emulator.data import fit_target_norm
+    d = _small_cache(tmp_path)
+    R = d["P_filt"].shape[0]
+    norm_stats = fit_target_norm(d, np.arange(R))
+    # NON-default baseline arch (default is n_layers=3, width=256).
+    model = Emulator(in_dim=10, n_k=N_K, n_basis=4,
+                     baseline_n_layers=1, baseline_width=32,
+                     key=jax.random.PRNGKey(7))
+    x = jnp.asarray(d["x"][:3]); tau0 = jnp.asarray(d["tau0"][:3])
+    pred0 = jax.vmap(model)(x, tau0)
+
+    # MINIMAL caller arch_cfg (no baseline_* keys), as run_loso_sweep.py passes.
+    arch_cfg = {"in_dim": 10, "n_k": N_K, "n_basis": 4}
+    recipe = {"w_coh": 80.0, "edge_gain": 3.0, "lowk_extra": 2.0, "datarange": True,
+              "term_w": {"f_nhi": 1.0, "p_resid": 8.0}}
+    prefix = str(tmp_path / "ckpt_deep")
+    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=7, recipe=recipe)
+
+    with open(prefix + ".meta.json") as f:
+        meta = json.load(f)
+    # the stored arch_cfg was COMPLETED from the model -> non-default depth/width.
+    assert meta["arch_cfg"]["baseline_n_layers"] == 1
+    assert meta["arch_cfg"]["baseline_width"] == 32
+    assert meta["arch_cfg"]["n_basis"] == 4 and meta["arch_cfg"]["in_dim"] == 10
+    # recipe + git SHA recorded for reproducibility.
+    assert meta["recipe"] == recipe
+    assert "git_sha" in meta
+
+    # load_checkpoint rebuilds the CORRECT (non-default) skeleton -> predictions match.
+    model2, meta2, _ = load_checkpoint(prefix)
+    assert model2.head_base.n_layers == 1 and model2.head_base.width == 32
+    pred1 = jax.vmap(model2)(x, tau0)
+    for k in pred0:
+        assert np.array_equal(np.asarray(pred0[k]), np.asarray(pred1[k])), k
 
 
 def test_staged_train_reduces_residual_loss(tmp_path):

@@ -370,10 +370,21 @@ def main():
         print(f"  trained {n_ep} epochs in {time.time()-tf:.1f}s; "
               f"early-stop ep {es}; best_val_loss={float(np.min(history['val_loss'])):.6g}")
 
+        # FINAL_RECIPE training knobs (frozen with the checkpoint AND the hist.json so
+        # the LF backbone the MF/likelihood load is fully reproducible — w_coh, term_w,
+        # edge_gain/lowk, datarange, …).
+        recipe = dict(
+            n_basis=args.n_basis, p_resid_w=args.p_resid_w, edge_gain=args.edge_gain,
+            lowk_extra=args.lowk_extra, w_coh=args.w_coh, weight_decay=args.weight_decay,
+            datarange=datarange, patience=args.patience, epochs=args.epochs,
+            term_w=term_w)
+
+        # arch_cfg here is the MINIMAL caller view; save_checkpoint COMPLETES it from
+        # the model's static fields (adds baseline_n_layers/baseline_width).
         arch_cfg = {"in_dim": 10, "n_k": n_k, "n_basis": args.n_basis}
         ckpt = f"{args.out}_fold{fold}"
         T.save_checkpoint(ckpt, model, arch_cfg, norm_stats, seed=args.seed,
-                          kfkms=d["kfkms"], cache_path=args.cache)
+                          kfkms=d["kfkms"], cache_path=args.cache, recipe=recipe)
         print(f"  checkpoint -> {ckpt}.eqx / .meta.json / .norm.pkl")
 
         # SAVE per-fold per-epoch history (+ per-term metrics) to disk for the
@@ -382,10 +393,7 @@ def main():
         hist_path = Path(args.histdir) / f"final_fold{fold}.hist.json"
         hist_json = {k: np.asarray(v).astype(float).tolist() for k, v in history.items()}
         hist_json["early_stop_epoch"] = es
-        hist_json["recipe"] = dict(
-            n_basis=args.n_basis, p_resid_w=args.p_resid_w, edge_gain=args.edge_gain,
-            lowk_extra=args.lowk_extra, w_coh=args.w_coh, weight_decay=args.weight_decay,
-            datarange=datarange, patience=args.patience, epochs=args.epochs)
+        hist_json["recipe"] = recipe
         with open(hist_path, "w") as f:
             _json.dump(hist_json, f, indent=2)
         print(f"  history -> {hist_path}")
