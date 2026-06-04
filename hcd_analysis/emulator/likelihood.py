@@ -26,7 +26,8 @@ def total_p1d_ratio(P_tier_p, alpha_hcd, ratio_hcd):
 
 
 def assemble_covariance(cosmic_cov, sigma_Pfilt, w_c, sigma_delta, alpha_hcd,
-                        P_filt, delta_scale, dla_shot_flag, shot_inflate=10.0):
+                        P_filt, delta_scale, dla_shot_flag, shot_inflate=10.0,
+                        cemu_inflate=1.0):
     """Total covariance = cosmic covariance + diag(emulator-error variance).
 
     UNITS CONTRACT (the bug this signature fixes):
@@ -81,6 +82,13 @@ def assemble_covariance(cosmic_cov, sigma_Pfilt, w_c, sigma_delta, alpha_hcd,
                + jnp.einsum("c,ck,ck->k", alpha_hcd**2, sigma_delta**2,           # delta channel
                             delta_scale**2))
     emu_var = jnp.where(dla_shot_flag, emu_var * shot_inflate, emu_var)
+    # CONSERVATIVE INFLATION (design §1.3d/e): the rank-≤12 SVD basis makes the emulator
+    # error strongly k-CORRELATED, so a purely DIAGONAL C_emu under-states the
+    # k-integrated uncertainty and OVER-tightens the posterior (anti-conservative for SBC
+    # coverage; cf. Rogers+2019). ``cemu_inflate`` is the documented scalar safeguard
+    # (the closure/SBC, T4, brackets coverage between this diagonal and PRIYA's rank-1
+    # fully-correlated outer(σ,σ); the k×k shrinkage upgrade is gated on that χ²).
+    emu_var = emu_var * cemu_inflate
     cosmic_cov = jnp.asarray(cosmic_cov)
     # ndim is static at trace time, so a plain python branch keeps this jit-clean.
     cosmic_cov_full = jnp.diag(cosmic_cov) if cosmic_cov.ndim == 1 else cosmic_cov
@@ -105,20 +113,34 @@ def sigma_at_tau0(sigma_zb, alpha_centres, z, tau0):
     Returns (C,K) fractional error at the sampled τ₀.
     """
     alpha = jnp.asarray(tau0) / (_KIM_AMP * (1.0 + jnp.asarray(z)) ** _KIM_SLOPE)
+    # CRITICAL (jax-trap): sanitize the interp YDATA *before* jnp.interp, not the result
+    # after. Interpolating between NaN y-points (an all-NaN-over-Tb (c,k) row — the high-k
+    # Nyquist / out-of-range cells) gives value=NaN (sanitizable) but slope=NaN, which a
+    # downstream nan_to_num does NOT fix -> jax.grad wrt τ₀ returns NaN and NUTS dies.
+    sig = jnp.nan_to_num(jnp.asarray(sigma_zb), nan=0.0)
     interp1 = lambda s_tb: jnp.interp(alpha, jnp.asarray(alpha_centres), s_tb)
-    return jax.vmap(jax.vmap(interp1))(jnp.asarray(sigma_zb))      # (C,K)
+    return jax.vmap(jax.vmap(interp1))(sig)                        # (C,K)
 
 
-def gaussian_loglik(r, C):
+def gaussian_loglik(r, C, jitter=1e-10):
     """−½ rᵀC⁻¹r − ½ logdet C  (the logdet-bearing Gaussian, design §1.3c).
 
     C (K,K) SPD, r (K,). Cholesky for BOTH the quadratic form and the logdet so the
     term is exact and JAX differentiates through C's dependence on (θ,τ₀) — the logdet
     is NOT constant once C depends on sampled params and MUST be carried (omitting it
     biases τ₀ toward larger-σ regions). Returns a scalar.
+
+    ``jitter`` adds a small SPD floor (relative to ⟨diag C⟩) BEFORE the factorization:
+    ``jnp.linalg.cholesky`` RETURNS NaN (does not raise) on a non-SPD / zero-diagonal C,
+    silently poisoning the value and the gradient. A zero diagonal can arise when a bin
+    has zero cosmic variance AND zero emulator variance (a NaN-zeroed σ row); a
+    finite-mock cosmic_cov can also be marginally indefinite. The jitter removes both.
     """
     r = jnp.asarray(r)
-    L = jnp.linalg.cholesky(jnp.asarray(C))
+    C = jnp.asarray(C)
+    K = C.shape[-1]
+    C = C + (jitter * jnp.mean(jnp.diag(C))) * jnp.eye(K)
+    L = jnp.linalg.cholesky(C)
     sol = jax.scipy.linalg.cho_solve((L, True), r)
     half_logdet = jnp.sum(jnp.log(jnp.diag(L)))     # ½ logdet C = Σ log diag(L)
     return -0.5 * (r @ sol) - half_logdet

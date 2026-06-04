@@ -669,6 +669,27 @@ it preemptively (test pins it); **WATCH** = not yet relevant, flagged for later.
   Keep the variant selector a hashable static scalar, and the head interface uniform so the
   forward/jit/vmap/grad code is mode-agnostic.
 
+## 29. `jnp.interp` with NaN in the YDATA gives a NaN GRADIENT even when the value is `nan_to_num`'d afterward — **HIT**
+- **Where:** Phase-C T3 `likelihood.sigma_at_tau0` (τ₀-interpolation of the banded error
+  vector), surfacing in `inference.log_lik_single_z`. Found by the JAX-review agent on the
+  REAL `error_vector.npz` (4 all-NaN-over-τ₀-band (c,k) rows per z-band, the high-k Nyquist
+  / out-of-range cells).
+- **Symptom:** `log_lik` value is finite (looks fine) but `jax.grad(...)` wrt τ₀ returns
+  **NaN at every realistic τ₀** → NUTS dies on the first leapfrog. The downstream
+  `assemble_covariance` `jnp.nan_to_num` sanitises the VALUE but not the gradient.
+- **Cause:** `jnp.interp(x, xp, yp)` between two NaN `yp` points → value=NaN (sanitizable)
+  but slope=NaN. A `nan_to_num` on the *output* cannot recover the already-NaN tangent
+  (same family as the masked-MSE double-`where` trap #7: the NaN is in the differentiated
+  op's input, not its output).
+- **Fix:** `jnp.nan_to_num` the YDATA **before** `jnp.interp`, not the result after:
+  `jnp.interp(alpha, centres, jnp.nan_to_num(s_tb, nan=0.0))`. Plus a `valid_k` mask +
+  `nan_to_num(P_data)` in the driver so out-of-range bins carry no residual, and an SPD
+  jitter in `gaussian_loglik` (Cholesky RETURNS NaN, not raises, on a zero/indefinite C).
+  (commit <pending>; regression: `tests/test_likelihood_driver.py::test_C1_*`/`::test_I1_*`.)
+- **Lesson:** sanitise inputs to the differentiated op, not its output. Test the
+  gradient on the REAL artifact (NaN-laden), not a clean synthetic fixture — the original
+  test used `rng.uniform` σ with no NaN and never exercised the NUTS-killer path.
+
 ## Trap template (append new entries above this line)
 ```
 ## N. <short name> — HIT | GUARDED | WATCH

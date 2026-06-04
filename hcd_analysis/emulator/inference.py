@@ -17,7 +17,8 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from .predict import predict_P_obs, predict_P_filt
+from .predict import predict_P_filt
+from .model import structural_tier_p
 from .likelihood import sigma_at_tau0, assemble_covariance, gaussian_loglik
 
 # PRIYA / coarse_grid order — the names the Cobaya/numpyro adapters expose.
@@ -53,7 +54,8 @@ def gaussian_logprior(value, mu, sigma):
 def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
                      w_c, delta_hcd, pf_stats, sigma_zb, alpha_centres,
                      cosmic_cov, P_data, dla_shot_flag,
-                     sigma_delta_zb=None, shot_inflate=10.0, include_logdet=True):
+                     sigma_delta_zb=None, shot_inflate=10.0, cemu_inflate=1.0,
+                     valid_k=None, include_logdet=True):
     """Per-z Gaussian log-likelihood with the τ₀-AWARE C_emu + the logdet term.
 
       logL_z = −½ rᵀC⁻¹r − ½ logdet C,   r = P_data − P_obs(θ,τ₀,α),
@@ -61,12 +63,19 @@ def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
 
     ``sigma_zb`` (4,K,Tb) is the τ₀-banded P_filt error at this data z-band;
     ``alpha_centres`` (Tb,) its band centres. ``sigma_delta_zb`` (3,K,Tb) is the
-    optional HCD-Δ error (None → 0, the MVP; the Δ-channel error vector is a follow-up).
-    ``include_logdet=False`` is the NEGATIVE CONTROL (drops the logdet — must change the
-    τ₀ gradient). Differentiable in (θ9, τ₀, α).
+    optional HCD-Δ error (None → 0, the MVP; the Δ-channel error vector is a follow-up
+    — review I2: σ_δ=0 OPTIMISTICALLY validates the α_c/A_p budget, restore before real
+    data). ``cemu_inflate`` is the conservative C_emu inflation (review I1). ``valid_k``
+    (bool, K; FIXED, not traced) neutralises out-of-range / Nyquist bins (σ all-NaN,
+    P_data NaN) so they carry no info and no NaN gradient. ``include_logdet=False`` is
+    the NEGATIVE CONTROL (drops the logdet — must change the τ₀ gradient). Differentiable
+    in (θ9, τ₀, α).
     """
-    P_obs = predict_P_obs(model, theta9, z_unit, tau0, alpha_hcd, w_c, pf_stats, delta_hcd)
+    # ONE emulator forward (review M2: predict_P_obs internally re-did predict_P_filt).
     P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)          # (4,K) abs scale
+    P_tier_p = structural_tier_p(jnp.asarray(w_c), P_filt)                  # (K,)
+    P_obs = P_tier_p + jnp.einsum("c,ck->k", jnp.asarray(alpha_hcd),
+                                  jnp.asarray(delta_hcd))                   # (K,)
     sigma_ck = sigma_at_tau0(sigma_zb, alpha_centres, z, tau0)              # (4,K)
     n_k = P_filt.shape[1]
     if sigma_delta_zb is None:
@@ -75,12 +84,19 @@ def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
         sigma_delta_ck = sigma_at_tau0(sigma_delta_zb, alpha_centres, z, tau0)
     delta_scale = jnp.abs(jnp.asarray(delta_hcd))                           # (3,K)
     C = assemble_covariance(cosmic_cov, sigma_ck, w_c, sigma_delta_ck, alpha_hcd,
-                            P_filt, delta_scale, dla_shot_flag, shot_inflate)
-    r = jnp.asarray(P_data) - P_obs
+                            P_filt, delta_scale, dla_shot_flag, shot_inflate,
+                            cemu_inflate=cemu_inflate)
+    # NaN-safe residual: sanitise P_data (out-of-range bins are NaN) BEFORE the subtract
+    # so the where-branch can't poison the gradient; valid_k zeroes those bins' residual.
+    r = jnp.nan_to_num(jnp.asarray(P_data), nan=0.0) - P_obs
+    if valid_k is not None:
+        r = jnp.where(jnp.asarray(valid_k), r, 0.0)
     if include_logdet:
         return gaussian_loglik(r, C)
-    # negative control: chi2 only, no logdet
-    L = jnp.linalg.cholesky(C)
+    # negative control: chi2 only, no logdet (still SPD-jittered for a fair comparison)
+    K = C.shape[-1]
+    Cj = C + (1e-10 * jnp.mean(jnp.diag(C))) * jnp.eye(K)
+    L = jnp.linalg.cholesky(Cj)
     sol = jax.scipy.linalg.cho_solve((L, True), r)
     return -0.5 * (r @ sol)
 
@@ -89,18 +105,26 @@ def log_posterior_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
                            w_c, delta_hcd, pf_stats, sigma_zb, alpha_centres,
                            cosmic_cov, P_data, dla_shot_flag,
                            tau0_mu, tau0_sigma, sigma_delta_zb=None,
-                           shot_inflate=10.0, include_logdet=True,
-                           box_sharpness=1e3):
+                           shot_inflate=10.0, cemu_inflate=1.0, valid_k=None,
+                           include_logdet=True, box_sharpness=1e3):
     """Single-z log-POSTERIOR = log-likelihood + smooth unit-box prior + τ₀ mean-flux
     Gaussian. The differentiable scalar a single-z-bin NUTS run targets (the multi-z
     posterior sums ``log_lik_single_z`` over data bins + ONE box prior + the per-z τ₀
-    Gaussian — wired in the closure/data driver, T4)."""
+    Gaussian — wired in the closure/data driver, T4).
+
+    PRIOR NOTE (review M1): ``unit_box_logprior`` is a SMOOTH soft-wall, used only for
+    the raw-``log_prob`` (blackjax) path; it slightly softens the box edge (a known
+    bias risk for edge-railing params like heref). The DEFAULT numpyro adapter instead
+    declares θ ~ Uniform(0,1) and lets numpyro's automatic logit bijector enforce an
+    EXACTLY-flat in-box prior with finite gradients — so production should NOT add this
+    soft term (set box_sharpness=0 / rely on the bijector). Kept here for the
+    sampler-agnostic single-z target + tests."""
     ll = log_lik_single_z(
         model, theta9, z_unit, z, tau0, alpha_hcd, w_c=w_c, delta_hcd=delta_hcd,
         pf_stats=pf_stats, sigma_zb=sigma_zb, alpha_centres=alpha_centres,
         cosmic_cov=cosmic_cov, P_data=P_data, dla_shot_flag=dla_shot_flag,
         sigma_delta_zb=sigma_delta_zb, shot_inflate=shot_inflate,
-        include_logdet=include_logdet)
+        cemu_inflate=cemu_inflate, valid_k=valid_k, include_logdet=include_logdet)
     lp = unit_box_logprior(theta9, sharpness=box_sharpness)
     lp += meanflux_logprior(tau0, tau0_mu, tau0_sigma)
     return ll + lp
