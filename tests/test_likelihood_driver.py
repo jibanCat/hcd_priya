@@ -185,6 +185,13 @@ def test_hcd_incidence_prior_centers_on_observed_not_sim():
     g = jax.grad(lambda a: jnp.sum(I.gaussian_logprior(a, mu, sig)))(
         jnp.asarray([0.05, 0.015, 0.004]))
     assert np.isfinite(np.asarray(g)).all()
+    # z-SLOPE (the τ₀-analog): lit/sim rises with z (lit dN/dX evolves faster), so the
+    # LLS/DLA prior centers grow toward high z; the pivot z recovers the base ratio.
+    assert np.allclose(np.asarray(I.lit_over_sim_at_z(I.HCD_Z_PIVOT)), I.HCD_LIT_OVER_SIM)
+    mu_lo, _ = I.hcd_incidence_prior(w, z=2.4)
+    mu_hi, _ = I.hcd_incidence_prior(w, z=4.4)
+    assert float(mu_hi[0]) > float(mu_lo[0]), "LLS center must grow with z (slope>0)"
+    assert float(mu_hi[2]) > float(mu_lo[2]), "DLA center must grow with z (slope>0)"
 
 
 def test_unit_box_logprior_zero_inside_finite_grad_outside():

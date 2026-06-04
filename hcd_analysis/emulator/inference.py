@@ -56,26 +56,40 @@ def gaussian_logprior(value, mu, sigma):
 # DESI DR1). DLA centered on the residual post-masking fraction (masking ~70% complete).
 HCD_PRIOR_FRAC_SIGMA = (0.15, 0.25, 0.10)   # σ/μ for (LLS, subDLA, DLA)
 HCD_DLA_RESIDUAL_FRAC = 0.30                 # DLA residual incidence ≈ 0.30 × data incidence
-# PRIYA-sim-vs-observed dN/dX offset = (literature / PRIYA-sim) per class, measured by
-# scripts/plot_dndx_vs_literature.py (PRIYA vs Prochaska&Wolfe09 / Zafar13 / O'Meara13):
-# PRIYA is NOT centered on the data (subDLA over-, DLA under-predicted), so the α prior
-# center must be shifted by this ratio — else α absorbs the sim-vs-data discrepancy.
-HCD_LIT_OVER_SIM = (0.98, 0.76, 1.43)        # (LLS, subDLA, DLA): data incidence / sim
+HCD_Z_PIVOT = 3.0
+# PRIYA-sim-vs-observed dN/dX offset (literature / PRIYA-sim) per class, as a POWER-LAW in
+# (1+z) — mirroring the τ₀ Kim-curve+slope model. PRIYA does NOT match the data: the
+# observed dN/dX evolves FASTER with z than the sim (γ_lit > γ_sim), so a single
+# z-independent ratio mis-centers the prior at the z edges. (lit/sim)@z_pivot + the slope
+# d ln(lit/sim)/d ln(1+z), fit by scripts/plot_dndx_vs_literature.py (PRIYA vs
+# Prochaska&Wolfe09 / Zafar13 / O'Meara13):
+HCD_LIT_OVER_SIM = (1.06, 0.76, 1.34)        # (LLS, subDLA, DLA): data/sim at z_pivot=3.0
+HCD_LIT_OVER_SIM_SLOPE = (0.95, 0.15, 1.08)  # d ln(lit/sim) / d ln(1+z)
 
 
-def hcd_incidence_prior(w_c_fid, lit_over_sim=HCD_LIT_OVER_SIM):
+def lit_over_sim_at_z(z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SLOPE,
+                      z_pivot=HCD_Z_PIVOT):
+    """z-dependent (literature/sim) dN/dX ratio per class — a power-law in (1+z):
+    r_c(z) = r_c(z_p)·((1+z)/(1+z_p))^s_c. The α-prior center tracks the OBSERVED dN/dX_c(z)
+    evolution this way (the τ₀-analog: a fixed curve + slope, not a single number)."""
+    r = jnp.asarray(ratio_pivot); s = jnp.asarray(slope)
+    return r * ((1.0 + jnp.asarray(z)) / (1.0 + z_pivot)) ** s
+
+
+def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None):
     """Per-class HCD incidence prior (μ, σ) on α_c (the effective per-class sightline weight
-    in ``predict_P_obs``), centered on the OBSERVED incidence (NOT the sim's), from the
-    fiducial sim weights ``w_c_fid`` = (w_LLS, w_subDLA, w_DLA) × the literature/sim offset
-    ``lit_over_sim``. LLS/subDLA are largely UNMASKED → center = (lit/sim)·w_c; DLA is
-    ~70%-masked → center = HCD_DLA_RESIDUAL_FRAC·(lit/sim)·w_DLA (the residual). α=w_c (the
-    sim) is NOT the prior center because PRIYA mis-predicts subDLA/DLA incidence by ~30%
-    (see scripts/plot_dndx_vs_literature.py). Widths = literature fractional σ/μ × center.
+    in ``predict_P_obs``), centered on the OBSERVED incidence AT the data redshift ``z``
+    (NOT the sim's), from the fiducial sim weights ``w_c_fid`` = (w_LLS, w_subDLA, w_DLA) ×
+    the z-SLOPE literature/sim ratio (``lit_over_sim_at_z(z)``; override with
+    ``lit_over_sim``). LLS/subDLA largely UNMASKED → center = (lit/sim)(z)·w_c; DLA
+    ~70%-masked → center = HCD_DLA_RESIDUAL_FRAC·(lit/sim)(z)·w_DLA (the residual). α=w_c
+    (the sim) is NOT the center: PRIYA mis-predicts subDLA/DLA dN/dX AND its z-slope (see
+    scripts/plot_dndx_vs_literature.py). Widths = literature fractional σ/μ × center.
     Returns (alpha_mu (3,), alpha_sigma (3,)); DLA should additionally be one-sided
     (half-normal/softplus) in the sampler.
     """
     w = jnp.asarray(w_c_fid)                                    # (3,)
-    r = jnp.asarray(lit_over_sim)                               # (3,) data/sim
+    r = lit_over_sim_at_z(z) if lit_over_sim is None else jnp.asarray(lit_over_sim)
     fl, fs, fd = HCD_PRIOR_FRAC_SIGMA
     mu = jnp.stack([r[0] * w[0], r[1] * w[1], HCD_DLA_RESIDUAL_FRAC * r[2] * w[2]])
     sigma = jnp.stack([fl * mu[0], fs * mu[1], fd * mu[2]])

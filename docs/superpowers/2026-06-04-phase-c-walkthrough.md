@@ -222,11 +222,21 @@ data (you flagged this): plotting PRIYA's sim dN/dX vs the literature
 | **subDLA** | **1.31** | **0.76·w_subDLA** | 0.25 | PRIYA *over*-predicts subDLA → shift center down |
 | **DLA** | **0.70** | **0.30·1.43·w_DLA** (residual) | 0.10, one-sided | masking ~70% complete; PRIYA *under*-predicts DLA |
 
-So the prior center = `(lit/sim)·w_c` (× the 0.30 masking residual for DLA), `HCD_LIT_OVER_SIM
-= (0.98, 0.76, 1.43)`. **Open refinement (your call): make this a z-SLOPE prior** — the
-observed dN/dX_c(z) evolves strongly (LLS 0.29→0.78 over z=2.4→4.2), so the center should
-follow a power-law in (1+z) with a sampled (amplitude, slope) per class, exactly mirroring
-the τ₀ Kim-curve+slope model — rather than the single z-independent ratio above. See §9.
+So the prior center = `(lit/sim)(z)·w_c` (× the 0.30 masking residual for DLA). **The
+lit/sim ratio is a z-SLOPE power-law** (implemented, mirroring the τ₀ Kim-curve+slope model —
+your call): `r_c(z) = r_c(z_p)·((1+z)/(1+z_p))^s_c`. The observed dN/dX evolves *faster* with
+z than PRIYA (γ_lit > γ_sim), so a single z-independent ratio mis-centers the prior at the
+z-edges. Fit (`plot_dndx_vs_literature.py`, pivot z=3):
+
+| class | (lit/sim)@z=3 | z-slope s_c = γ_lit−γ_sim |
+|---|---|---|
+| LLS | 1.06 | **+0.95** (γ_sim 1.36, γ_lit 2.31) |
+| subDLA | 0.76 | +0.15 |
+| DLA | 1.34 | **+1.08** (γ_sim 0.43, γ_lit 1.50) |
+
+`inference.hcd_incidence_prior(w_c, z)` evaluates this at the data z. (Production can
+additionally *sample* a small (amp, slope) deviation per class — the τ₀-analog — to
+marginalize the incidence-evolution uncertainty.)
 
 ---
 

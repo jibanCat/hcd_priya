@@ -92,6 +92,21 @@ def main():
     fig.savefig(OUT, dpi=150); plt.close(fig)
     print("wrote", OUT)
 
+    # --- power-law fits for the z-SLOPE incidence prior (inference.HCD_LIT_OVER_SIM* ) ---
+    # The lit/sim ratio is a power-law in (1+z): r_c(z) = r_c(z_p)·((1+z)/(1+z_p))^s_c,
+    # s_c = γ_lit − γ_sim. Mirrors the τ₀ Kim-curve+slope model.
+    z_p = 3.0
+    print(f"\nz-slope incidence-prior fits (pivot z={z_p}):")
+    for j, c in enumerate(CLS):
+        inr = (zg >= 2.2) & (zg <= 4.6) & (dndx[:, j] > 0)
+        gs = np.polyfit(np.log(1 + zg[inr]), np.log(dndx[inr, j]), 1)   # sim slope, intercept
+        zl, vl, _, _ = LIT[c]
+        gl = np.polyfit(np.log(1 + np.array(zl)), np.log(np.array(vl)), 1)
+        sim_zp = np.exp(gs[1]) * (1 + z_p) ** gs[0]
+        lit_zp = np.exp(gl[1]) * (1 + z_p) ** gl[0]
+        print(f"  {c:7} gamma_sim={gs[0]:+.2f} gamma_lit={gl[0]:+.2f}  "
+              f"(lit/sim)@z{z_p:.0f}={lit_zp/sim_zp:.2f}  ratio_slope={gl[0]-gs[0]:+.2f}")
+
 
 if __name__ == "__main__":
     main()
