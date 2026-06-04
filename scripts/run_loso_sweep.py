@@ -99,8 +99,12 @@ def fold_resid_neff(d, model, val_idx, norm_stats, z_band_of_row, n_bands,
     multiplicity (~20x) AND summed across snaps — read it as a RELATIVE shot-noise
     proxy, not a literal independent-sightline count. With the full grid the per-row
     DLA count (~8000+) sits far above any reasonable shot threshold, so the DLA shot
-    flag is expected-INERT here; it is wired for sparser real-data catalogs. Divide
-    by n_alpha (and use a per-sightline floor) before reading neff as an absolute count.
+    flag is expected-INERT -- which is the DESIRED state: the DLA TEMPLATE is calibrated
+    from the simulation (many DLA sightlines), while the observed P1D is measured on
+    DLA-MASKED spectra, so the emulator's DLA sector fits only the masking-residual
+    amplitude (alpha_DLA), not raw DLA absorption. The flag guards sim-side template
+    shot noise, not a data-side concern. Divide by n_alpha (and use a per-sightline
+    floor) before reading neff as an absolute count.
     """
     val_idx = np.asarray(val_idx)
     x = jnp.asarray(d["x"][val_idx])
