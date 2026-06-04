@@ -168,15 +168,22 @@ def test_cemu_inflate_raises_emulator_variance_in_driver():
     assert ll4 < ll1, "cemu_inflate must enlarge C_emu (more negative −½logdet)"
 
 
-def test_hcd_incidence_prior_from_fiducial_weights():
-    """Literature-calibrated incidence prior: LLS/subDLA center on the sim weight, DLA on
-    the 0.30× residual; widths are the literature fractional σ/μ × center."""
+def test_hcd_incidence_prior_centers_on_observed_not_sim():
+    """The incidence prior centers on the OBSERVED incidence = (lit/sim)·w_c (not the sim
+    weight), since PRIYA mis-predicts subDLA/DLA by ~30%; DLA on the 0.30× residual."""
     w = jnp.array([0.06, 0.02, 0.01])      # fiducial (LLS, subDLA, DLA) sim weights
+    # with lit==sim the center is the bare sim weight (LLS/subDLA) / 0.30× (DLA)
+    mu0, _ = I.hcd_incidence_prior(w, lit_over_sim=(1.0, 1.0, 1.0))
+    assert np.allclose(np.asarray(mu0), [0.06, 0.02, 0.30 * 0.01])
+    # the DEFAULT offset (PRIYA over-predicts subDLA, under-predicts DLA) shifts the centers
+    r = I.HCD_LIT_OVER_SIM
     mu, sig = I.hcd_incidence_prior(w)
-    assert np.allclose(np.asarray(mu), [0.06, 0.02, 0.30 * 0.01])
-    assert np.allclose(np.asarray(sig), [0.15 * 0.06, 0.25 * 0.02, 0.10 * 0.30 * 0.01])
+    assert np.allclose(np.asarray(mu), [r[0] * 0.06, r[1] * 0.02, 0.30 * r[2] * 0.01])
+    assert np.allclose(np.asarray(sig), [0.15 * mu[0], 0.25 * mu[1], 0.10 * mu[2]])
+    assert float(mu[1]) < 0.02, "subDLA center below sim weight (PRIYA over-predicts)"
+    assert float(mu[2]) > 0.30 * 0.01, "DLA residual center above naive 0.30× (PRIYA under-predicts)"
     g = jax.grad(lambda a: jnp.sum(I.gaussian_logprior(a, mu, sig)))(
-        jnp.asarray([0.05, 0.02, 0.003]))
+        jnp.asarray([0.05, 0.015, 0.004]))
     assert np.isfinite(np.asarray(g)).all()
 
 

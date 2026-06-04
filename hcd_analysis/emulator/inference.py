@@ -55,22 +55,30 @@ def gaussian_logprior(value, mu, sigma):
 # Noterdaeme+2012 (DLA)). Fractional widths σ/μ per class; LLS TIGHT (cosmology-degenerate,
 # DESI DR1). DLA centered on the residual post-masking fraction (masking ~70% complete).
 HCD_PRIOR_FRAC_SIGMA = (0.15, 0.25, 0.10)   # σ/μ for (LLS, subDLA, DLA)
-HCD_DLA_RESIDUAL_FRAC = 0.30                 # DLA residual incidence ≈ 0.30 × sim
+HCD_DLA_RESIDUAL_FRAC = 0.30                 # DLA residual incidence ≈ 0.30 × data incidence
+# PRIYA-sim-vs-observed dN/dX offset = (literature / PRIYA-sim) per class, measured by
+# scripts/plot_dndx_vs_literature.py (PRIYA vs Prochaska&Wolfe09 / Zafar13 / O'Meara13):
+# PRIYA is NOT centered on the data (subDLA over-, DLA under-predicted), so the α prior
+# center must be shifted by this ratio — else α absorbs the sim-vs-data discrepancy.
+HCD_LIT_OVER_SIM = (0.98, 0.76, 1.43)        # (LLS, subDLA, DLA): data incidence / sim
 
 
-def hcd_incidence_prior(w_c_fid):
-    """Per-class HCD incidence prior (μ, σ) on α_c (the effective per-class sightline
-    weight in ``predict_P_obs``), from the FIDUCIAL sim weights ``w_c_fid`` = (w_LLS,
-    w_subDLA, w_DLA). LLS/subDLA center on the sim weight (largely UNMASKED → α≈w_c);
-    DLA centers on ``HCD_DLA_RESIDUAL_FRAC``×w_DLA (the ~30% residual after ~70%-complete
-    masking). Widths are the literature fractional σ/μ × the center. Returns
-    (alpha_mu (3,), alpha_sigma (3,)). DLA should additionally be one-sided (half-normal
-    / softplus) in the sampler. α=w_c reproduces the sim's contaminated P_tier_p.
+def hcd_incidence_prior(w_c_fid, lit_over_sim=HCD_LIT_OVER_SIM):
+    """Per-class HCD incidence prior (μ, σ) on α_c (the effective per-class sightline weight
+    in ``predict_P_obs``), centered on the OBSERVED incidence (NOT the sim's), from the
+    fiducial sim weights ``w_c_fid`` = (w_LLS, w_subDLA, w_DLA) × the literature/sim offset
+    ``lit_over_sim``. LLS/subDLA are largely UNMASKED → center = (lit/sim)·w_c; DLA is
+    ~70%-masked → center = HCD_DLA_RESIDUAL_FRAC·(lit/sim)·w_DLA (the residual). α=w_c (the
+    sim) is NOT the prior center because PRIYA mis-predicts subDLA/DLA incidence by ~30%
+    (see scripts/plot_dndx_vs_literature.py). Widths = literature fractional σ/μ × center.
+    Returns (alpha_mu (3,), alpha_sigma (3,)); DLA should additionally be one-sided
+    (half-normal/softplus) in the sampler.
     """
     w = jnp.asarray(w_c_fid)                                    # (3,)
+    r = jnp.asarray(lit_over_sim)                               # (3,) data/sim
     fl, fs, fd = HCD_PRIOR_FRAC_SIGMA
-    mu = jnp.stack([w[0], w[1], HCD_DLA_RESIDUAL_FRAC * w[2]])
-    sigma = jnp.stack([fl * w[0], fs * w[1], fd * HCD_DLA_RESIDUAL_FRAC * w[2]])
+    mu = jnp.stack([r[0] * w[0], r[1] * w[1], HCD_DLA_RESIDUAL_FRAC * r[2] * w[2]])
+    sigma = jnp.stack([fl * mu[0], fs * mu[1], fd * mu[2]])
     return mu, sigma
 
 

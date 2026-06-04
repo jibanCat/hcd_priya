@@ -139,93 +139,94 @@ LLS 0.59% / subDLA 0.67% / DLA 0.97%; A_p Fisher-bias RMS 0.067σ, 0/8 gate fail
 
 ---
 
-## 6. The HCD Δ template — *your main concern: is this overcomplicated?*
+## 6. The HCD template — **REDESIGNED 2026-06-04** (your concern was a real bug)
 
-### 6.1 How Δ_c is actually built (you were unsure — here it is, exactly)
+> **Status:** the bug you flagged was real; the redesign below is **implemented + tested**
+> (commit `86eda00`, reusing the trained checkpoints — no retrain). Decided with a
+> Lyα-cosmology agent + a CS/numerics agent (which disagreed; physics won — see §6.4).
 
-Δ_c is **built directly from the P1D classes** — your instinct is right, that's already
-what it is. In the cache builder, for each (sim, z, τ₀-rung):
+### 6.1 The bug: the old Δ_c was the *filter residual*, not the contamination
+
+The old cache template (`data.py:128`) was `Δ_c = P_c^unfiltered − P_c^filtered` (the power
+the internal τ=1e6 filter removes). That is **wrong**: the data has DLA **masking**, not a
+τ-filter, so the contamination you marginalize is the **excess over the clean forest**.
+Worse, the filter never touches LLS, so (measured at z=3):
+
+| class | OLD `P_c^unf − P_c^filt` | CORRECT `P_c − P_clean` |
+|---|---|---|
+| LLS | **0.0000** (α_LLS inert!) | 0.066 |
+| subDLA | 0.185 | 0.143 (filt) / 0.272 (unf) |
+| DLA | 0.858 | 0.447 (filt) / 0.942 (unf) |
+
+**Δ_LLS was identically zero → α_LLS did nothing in the likelihood.** Your call.
+
+### 6.2 The corrected forward model (implemented)
 
 ```
-   P_c^filt  = per-class P1D on PRIYA-FILTERED τ (τ_thresh = 1e6 removes DLA cores)
-   P_c^unfilt= per-class P1D on UNFILTERED τ   (same scale & target_F as Tier-P)
-   Δ_c(k,z,τ₀) = P_c^unfilt − P_c^filt          (3 HCD classes: LLS, subDLA, DLA)
+   P_obs = P_clean + Σ_{c∈HCD} α_c·(P_c − P_clean)   ≡   P_clean·[1 + Σ_c α_c·(P_c/P_clean − 1)]
 ```
+- **Template = `P_c − P_clean`** (excess over the clean forest — Rogers&Bird 2018 / DESI DR1
+  / PRIYA), **filtered for LLS/subDLA**, **unfiltered for DLA** (the data's residual unmasked
+  DLAs are *full* systems; `P_DLA^unf = P_filt[DLA] + dla_core`). Fixes Δ_LLS≡0; ∂P_obs/∂α_c
+  = (P_c − P_clean) ≠ 0 for LLS now.
+- **`P_c`, `P_clean` are LIVE-emulated** each step (from the existing P_filt head) → the
+  template carries the θ,τ₀ sensitivity Rogers lacked **and** preserves the normalization
+  Rogers stripped (your two objections, both fixed).
+- **α_c = effective post-masking per-class incidence**; α_c = w_c reproduces the sim's
+  contaminated P_tier_p; α_c → dN/dX via the M₀-inverse.
 
-So Δ_c is the **power the HCD masking removes** — a transparent geometric difference of
-two P1D class spectra, not a fitted object. It flips sign at low k (the unfiltered DLA
-sits *below* the filtered there), which is why the cache stores it in **arcsinh** space.
+The per-class templates (B7) + the raw Tier-C τ₀ response (the input to the excess):
 
-The per-class templates + their τ₀ response:
-
-| Δ_c templates (per class, vs k) | Raw Tier-C P_c^unfilt vs τ₀ at z≈3 (the *input* to Δ_c) |
+| Δ_c templates (per class, vs k) | Raw Tier-C P_c^unfilt vs τ₀ at z≈3 |
 |---|---|
 | ![B7](../../figures/analysis/06_performance_walkthrough/B7_delta_c_templates.png) | ![tierc](../../figures/analysis/03_templates_and_p1d/tierc_tau0_response_z3.png) |
 
-### 6.2 How Δ_c is *used* (the forward model) — already the simple, field-standard form
+### 6.3 "Δ-template vs reweight" and "additive vs multiplicative" are *non-forks*
 
-In the likelihood (`likelihood.total_p1d_difference`, `predict.predict_P_obs`):
+The Lyα agent proved they're algebraically the same model: `P_clean + Σ α_c(P_c − P_clean)`
+*is* a reweighting of the class mix, and with the clean-forest baseline the additive and
+multiplicative forms are identical. So the design question reduced to the template
+*definition* (fixed above) + the filtered/unfiltered split (fixed above). The dense
+**learned Δ head is dropped** (it was 516/1575 unused DOF, an over-fit risk like the MF δ);
+the excess now comes for free from the emulated P_filt — exactly your "reweight the P_c"
+instinct, lowest-DOF.
 
-```
-   P_obs = P_tier_p + Σ_{c∈HCD} α_c · Δ_c ,    ∂P_obs/∂α_c = Δ_c
-```
+### 6.4 Why physics won over the CS agent (and the DLA caveat)
 
-**Δ_c is a FIXED template; α_c is a single free amplitude per class** (the effective
-residual incidence after masking). This is exactly the Rogers & Bird 2018 / DESI DR1 /
-PRIYA "fixed-shape, free-abundance" convention — the *simple* form. Good news: at the
-inference layer we are already doing the low-DOF thing.
+The CS agent argued (numerically, soundly) to *keep* `P_c^unf − P_c^filt` and "drop α_LLS."
+But it optimized the **wrong object** — it treated the sim's internal filter residual as the
+physical contamination. The Lyα agent (verified vs Rogers/DESI/PRIYA) is right: the
+contamination is `P_c − P_clean`, and once you use it, α_LLS is identifiable (no need to
+drop it). Two valid CS findings were kept: don't float the structural w_c *and* α_c on the
+same direction (α rides on the fixed w_c), and reuse the trap-#29 interp guard.
 
-### 6.3 Where the complexity actually is — and why your concern is valid
-
-The complication is **not** the template or the forward model — it's that the **model also
-carries a *learned* Δ_c head** (`HeadB`'s `delta` output): a **dense 3×172** prediction
-(NOT low-rank-compressed, because the sign flip breaks a positive-log basis), in arcsinh
-space. That's **516 (LF) / 1575 (HR) free outputs** for the Δ channel — the highest-DOF,
-least-constrained part of the network, and it is **not even wired into the current
-likelihood** (which uses the fixed cache Δ_c). So we are paying the training cost + the
-over-fit risk of a high-DOF learned Δ head that inference doesn't use.
-
-This is the **same pattern as the MF head**: the learned δ(θ,z,k) over-fit 6 HF sims and we
-replaced it with the low-DOF ρ-only form. Your instinct — *decrease the DOF, prefer a
-simple template* — applies here too.
-
-### 6.4 The Rogers-style low-DOF alternative — already prototyped, and it fits well
-
-The repo already has `fit_rogers_alpha.py`: fit the measured ratio
-`r_c(k) = P_c/P_clean ≈ 1 + α_c·K_c(k)` with a **fixed low-order kernel K_c(k)** and a
-**single amplitude α_c** per (class, z). The comparison:
+The Rogers low-order-kernel cross-check (`fit_rogers_alpha.py`, `r_c ≈ 1+α_c K_c`) fits the
+measured excess to **RMSE ≈ 0.03–0.11 (LLS), 0.06–0.13 (subDLA), 0.26–0.33 (DLA)** — good
+for LLS/subDLA, **worse for DLA** (~30%, the noisiest class). So the exact emulated excess
+(not a smooth kernel) earns its keep for DLA:
 
 ![rogers](../../figures/analysis/03_templates_and_p1d/template_measured_vs_rogers_per_z.png)
 
-Rows = LLS / subDLA / DLA; columns = z = 2.2…4.6. The dashed Rogers template tracks the
-measured ratio with a *single* amplitude per panel to **RMSE ≈ 0.03–0.11 (LLS),
-0.06–0.13 (subDLA), but 0.26–0.33 (DLA)** (the annotations in each panel). So a low-DOF
-kernel captures **LLS/subDLA well** (few-to-~13%) but is a **noticeably worse fit for DLA**
-(~30% RMSE on a ratio that runs 1→12 — a real low-k misfit, since DLA is the noisiest,
-lowest-count class). **Takeaway:** we do *not* need a 516-DOF learned Δ head — but the DLA
-class is exactly where the *exact* fixed cache Δ_c earns its keep over a smooth kernel.
+### 6.5 The incidence priors (literature-calibrated, implemented)
 
-α(z) per class + the fit χ²:
-| α_c vs PRIYA fit | α_c(z) + reduced χ² |
-|---|---|
-| ![ravp](../../figures/analysis/03_templates_and_p1d/rogers_alpha_vs_priya_fit.png) | ![raz](../../figures/analysis/03_templates_and_p1d/rogers_alpha_vs_z.png) |
+`α_c` gets a TIGHT informative Gaussian incidence prior (`inference.hcd_incidence_prior`),
+**centered on the OBSERVED incidence, not PRIYA's sim** — because PRIYA does *not* match the
+data (you flagged this): plotting PRIYA's sim dN/dX vs the literature
+(`scripts/plot_dndx_vs_literature.py`):
 
-### 6.5 The three options for the Δ template (a decision for you — §9)
+![A6](../../figures/analysis/06_performance_walkthrough/A6_dndx_vs_literature.png)
 
-| Option | DOF | Pros | Cons |
-|---|---|---|---|
-| **(a) Fixed cache Δ_c** (interp in z,τ₀) | 0 learned | exact measured shape; no fit | carries sim noise; needs z,τ₀ interpolation of a 3×172 array |
-| **(b) Rogers low-order kernel** `1+α_c K_c(k)` | ~1 α_c/class (+a fixed kernel) | lowest DOF; smooth; field-standard; already prototyped; fits to few % | a kernel-shape approximation; needs the kernel's mild z-dependence |
-| **(c) Dense learned Δ head** (current model) | 516/1575 | flexible | over-fit risk (cf. MF δ); not wired to inference; opaque |
+| class | PRIYA/obs | prior center | σ/μ | rationale |
+|---|---|---|---|---|
+| **LLS** | 0.98 | (lit/sim)·w_LLS ≈ w_LLS | **0.15 (tight)** | cosmology-degenerate (DESI DR1) → tight |
+| **subDLA** | **1.31** | **0.76·w_subDLA** | 0.25 | PRIYA *over*-predicts subDLA → shift center down |
+| **DLA** | **0.70** | **0.30·1.43·w_DLA** (residual) | 0.10, one-sided | masking ~70% complete; PRIYA *under*-predicts DLA |
 
-**My recommendation (adjusted for the DLA misfit):** **drop (c)** — the dense learned Δ
-head is unused at inference and an over-fit risk (cf. the MF δ). The likelihood **already
-uses (a) the fixed cache Δ_c**, which is exact for *all* classes (incl. DLA) at **zero
-learned DOF** — so the practical change is just to formally remove the unused learned head
-from the model. Adopt **(b) the Rogers low-order kernel** as a smooth, even-lower-DOF
-option for **LLS/subDLA** (where it fits to ≲13%), but **keep the exact cache Δ_c for DLA**
-(where the kernel misfits ~30%). Net: reduce DOF without sacrificing the DLA shape — your
-instinct, with the one DLA caveat the corrected RMSE numbers surface.
+So the prior center = `(lit/sim)·w_c` (× the 0.30 masking residual for DLA), `HCD_LIT_OVER_SIM
+= (0.98, 0.76, 1.43)`. **Open refinement (your call): make this a z-SLOPE prior** — the
+observed dN/dX_c(z) evolves strongly (LLS 0.29→0.78 over z=2.4→4.2), so the center should
+follow a power-law in (1+z) with a sampled (amplitude, slope) per class, exactly mirroring
+the τ₀ Kim-curve+slope model — rather than the single z-independent ratio above. See §9.
 
 ---
 
