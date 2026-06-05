@@ -19,7 +19,7 @@ import jax
 import jax.numpy as jnp
 
 from .predict import predict_P_filt
-from .likelihood import sigma_at_tau0, gaussian_loglik
+from .likelihood import sigma_at_tau0, rho_at_tau0, gaussian_loglik
 
 # PRIYA / coarse_grid order — the names the Cobaya/numpyro adapters expose.
 PARAM_NAMES = ("ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2",
@@ -109,14 +109,27 @@ def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None):
 def predict_P_obs_and_cov_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
                                    pf_stats, sigma_zb, alpha_centres, cosmic_cov,
                                    dla_core, dla_shot_flag, shot_inflate=10.0,
-                                   cemu_inflate=1.0):
+                                   cemu_inflate=1.0, rho_zb=None):
     """Per-z (P_obs (K,), C (K,K)) — the EXACT forward model + covariance the
     likelihood uses, factored out so the closure mock can draw its noise from the
     IDENTICAL C (Leg A's contract: C_mock == C_like; closure_mocks calls this).
 
       P_obs = P_clean + Σ_{c∈HCD} α_c·(P_c − P_clean)
-      C     = cosmic_cov + diag(emu_var),
-      emu_var = Σ_c coef_c²·σ_c(k,z,τ₀)²·P_c²,  coef = [1−Σα, α_LLS, α_subDLA, α_DLA].
+      C     = cosmic_cov + diag(emu_var).
+
+    emu_var is C_emu's per-k variance, in ONE of two forms (C stays DIAGONAL IN k either way
+    — the CS decomposition confirmed no k-correlation; only the per-k class structure changes):
+
+      DIAGONAL (default, ``rho_zb=None``):
+        emu_var = Σ_c coef_c²·σ_c(k,z,τ₀)²·P_c²,  coef = [1−Σα, α_LLS, α_subDLA, α_DLA].
+      CROSS-CLASS (opt-in, ``rho_zb`` (C,C,K,Tb) given):
+        emu_var = Σ_{c,c'} coef_c·coef_c'·ρ_cc'(k,z,τ₀)·P_c·P_c',
+        ρ_cc'(k,z,τ₀) = the τ₀-interp'd 4×4 cross-class second moment of the held-out
+        FRACTIONAL residual (``build_xclass_error_vector``). The DIAGONAL ρ_cc=σ_c² recovers
+        the diagonal form; the OFF-diagonals add the class-coupling (the 4 per-class residuals
+        share ONE network → coherently correlated). ρ is a sample covariance ⇒ SPD ⇒
+        emu_var = coefᵀ(P∘ρ∘P)coef ≥ 0 GUARANTEED. Differentiable in (θ,τ₀,α): ∂/∂α now
+        carries the cross terms (∂emu_var/∂α_c = 2 Σ_c' coef_c'·ρ_cc'·P_c·P_c' · ∂coef_c/∂α).
 
     No data, no residual, no jitter — JUST the model mean and covariance (the jitter is
     added inside ``gaussian_loglik`` / the mock's Cholesky). Differentiable in (θ9,τ₀,α).
@@ -128,10 +141,16 @@ def predict_P_obs_and_cov_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     a = jnp.asarray(alpha_hcd)                                              # (3,)
     coef = jnp.concatenate([jnp.atleast_1d(1.0 - jnp.sum(a)), a])          # (4,) [clean,LLS,sub,DLA]
     P_obs = jnp.einsum("c,ck->k", coef, P_cls)                             # = P_clean + Σ α_c(P_c−P_clean)
-    # C_emu: per-class fractional σ (τ₀-interp'd) weighted by each class's coeff in P_obs
-    sigma_ck = sigma_at_tau0(sigma_zb, alpha_centres, z, tau0)              # (4,K) fractional
-    emu_var = jnp.einsum("c,ck,ck->k", coef ** 2,
-                         jnp.nan_to_num(sigma_ck) ** 2, P_cls ** 2)         # Σ coef²·σ²·P_c²
+    # C_emu per-k variance: cross-class 4×4 block (opt-in) OR the per-class diagonal (default).
+    if rho_zb is not None:
+        rho_ck = rho_at_tau0(rho_zb, alpha_centres, z, tau0)               # (4,4,K) τ₀-interp'd
+        # emu_var(k) = Σ_{c,c'} coef_c·coef_c'·ρ_cc'(k)·P_c·P_c'  (≥0: ρ SPD ⇒ coefᵀ(P∘ρ∘P)coef≥0).
+        emu_var = jnp.einsum("c,d,cdk,ck,dk->k", coef, coef,
+                             jnp.nan_to_num(rho_ck), P_cls, P_cls)
+    else:
+        sigma_ck = sigma_at_tau0(sigma_zb, alpha_centres, z, tau0)          # (4,K) fractional
+        emu_var = jnp.einsum("c,ck,ck->k", coef ** 2,
+                             jnp.nan_to_num(sigma_ck) ** 2, P_cls ** 2)     # Σ coef²·σ²·P_c²
     emu_var = jnp.where(dla_shot_flag, emu_var * shot_inflate, emu_var) * cemu_inflate
     cosmic = jnp.asarray(cosmic_cov)
     C = (jnp.diag(cosmic) if cosmic.ndim == 1 else cosmic) + jnp.diag(emu_var)
@@ -141,7 +160,7 @@ def predict_P_obs_and_cov_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
 def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
                      pf_stats, sigma_zb, alpha_centres, cosmic_cov, P_data, dla_core,
                      dla_shot_flag, shot_inflate=10.0, cemu_inflate=1.0,
-                     valid_k=None, include_logdet=True):
+                     valid_k=None, include_logdet=True, rho_zb=None):
     """Per-z Gaussian log-likelihood for the CORRECTED HCD forward model + the logdet term.
 
       P_obs = P_clean + Σ_{c∈HCD} α_c·(P_c − P_clean)          (clean-forest baseline)
@@ -159,6 +178,9 @@ def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     τ₀-banded (Tb axis); ``cemu_inflate`` is the conservative inflation (review I1);
     ``valid_k`` (bool, K; FIXED, not traced) neutralises out-of-range/Nyquist bins (σ
     all-NaN, P_data NaN) so they carry no info and no NaN gradient.
+    ``rho_zb`` (opt-in): a (4,4,K,Tb) cross-class block → C_emu uses the cross-class form
+    emu_var = Σ_cc' coef_c·coef_c'·ρ_cc'·P_c·P_c' (the off-diagonals capture the coherent
+    cross-class correlation the single network induces; recovers the diagonal when ρ=diag(σ²)).
     ``include_logdet=False`` = the negative control. Differentiable in (θ9, τ₀, α).
 
     The (P_obs, C) assembly is shared with ``predict_P_obs_and_cov_single_z`` so the
@@ -167,7 +189,8 @@ def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     P_obs, C = predict_P_obs_and_cov_single_z(
         model, theta9, z_unit, z, tau0, alpha_hcd, pf_stats=pf_stats, sigma_zb=sigma_zb,
         alpha_centres=alpha_centres, cosmic_cov=cosmic_cov, dla_core=dla_core,
-        dla_shot_flag=dla_shot_flag, shot_inflate=shot_inflate, cemu_inflate=cemu_inflate)
+        dla_shot_flag=dla_shot_flag, shot_inflate=shot_inflate, cemu_inflate=cemu_inflate,
+        rho_zb=rho_zb)
     # NaN-safe residual: sanitise P_data (out-of-range bins NaN) BEFORE the subtract so
     # the where-branch can't poison the gradient; valid_k zeroes those bins' residual.
     r = jnp.nan_to_num(jnp.asarray(P_data), nan=0.0) - P_obs
@@ -185,7 +208,7 @@ def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
 
 def log_lik_multiz(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, z, z_unit, sigma_zb,
                    alpha_centres, cosmic_cov, P_data, dla_core, dla_shot_flag, valid_k,
-                   shot_inflate=10.0, cemu_inflate=1.0, include_logdet=True):
+                   shot_inflate=10.0, cemu_inflate=1.0, include_logdet=True, rho_zb=None):
     """LIKELIHOOD-ONLY multi-z log-likelihood = Σ_z log_lik_single_z (no priors).
 
     The data-bin sum is **vmap'd over the z-axis** (K is fixed across bins → no padding; CS
@@ -193,17 +216,27 @@ def log_lik_multiz(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, z, z_unit, s
     (``z, z_unit, sigma_zb, cosmic_cov, P_data, dla_core, dla_shot_flag, valid_k``) carry a
     leading z-axis. This is the LIKELIHOOD-ONLY payload for numpyro's ``factor`` / Cobaya's
     ``logp`` — priors are added separately (CS review M3: never double-count). Differentiable.
-    """
-    def one(tau0_z, z_z, zu_z, sz, cc, pd, dc, flag, vk):
+
+    ``rho_zb`` (opt-in cross-class C_emu): None → the diagonal σ path (default, unchanged);
+    a (n_z,4,4,K,Tb) array → the cross-class 4×4 block per z (vmapped over the leading z-axis
+    like the other per-z leaves). Whether None is decided STATICALLY (python), so the vmap
+    in_axes never traces over a None leaf and the diagonal path never recompiles."""
+    use_xclass = rho_zb is not None
+    def one(tau0_z, z_z, zu_z, sz, cc, pd, dc, flag, vk, rz):
         return log_lik_single_z(
             model, theta9, zu_z, z_z, tau0_z, alpha_hcd, pf_stats=pf_stats, sigma_zb=sz,
             alpha_centres=alpha_centres, cosmic_cov=cc, P_data=pd, dla_core=dc,
             dla_shot_flag=flag, valid_k=vk, shot_inflate=shot_inflate,
-            cemu_inflate=cemu_inflate, include_logdet=include_logdet)
-    per_z = jax.vmap(one)(jnp.asarray(tau0_vec), jnp.asarray(z), jnp.asarray(z_unit),
-                          jnp.asarray(sigma_zb), jnp.asarray(cosmic_cov), jnp.asarray(P_data),
-                          jnp.asarray(dla_core), jnp.asarray(dla_shot_flag),
-                          jnp.asarray(valid_k))
+            cemu_inflate=cemu_inflate, include_logdet=include_logdet, rho_zb=rz)
+    # rho_zb maps over the z-axis when present (in_axes 0), else is broadcast as None
+    # (in_axes None — a non-array leaf vmap passes through unmapped).
+    in_axes = (0,) * 9 + (0 if use_xclass else None,)
+    rz_arg = jnp.asarray(rho_zb) if use_xclass else None
+    per_z = jax.vmap(one, in_axes=in_axes)(
+        jnp.asarray(tau0_vec), jnp.asarray(z), jnp.asarray(z_unit),
+        jnp.asarray(sigma_zb), jnp.asarray(cosmic_cov), jnp.asarray(P_data),
+        jnp.asarray(dla_core), jnp.asarray(dla_shot_flag),
+        jnp.asarray(valid_k), rz_arg)
     return jnp.sum(per_z)
 
 
@@ -211,7 +244,7 @@ def log_posterior_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
                            pf_stats, sigma_zb, alpha_centres, cosmic_cov, P_data, dla_core,
                            dla_shot_flag, tau0_mu, tau0_sigma, alpha_mu, alpha_sigma,
                            shot_inflate=10.0, cemu_inflate=1.0, valid_k=None,
-                           include_logdet=True, box_sharpness=1e3):
+                           include_logdet=True, box_sharpness=1e3, rho_zb=None):
     """Single-z log-POSTERIOR = log-likelihood + smooth unit-box prior + τ₀ mean-flux
     Gaussian + the per-class HCD **incidence prior** on α (TIGHT informative Gaussian
     centered on the structural w_c(dN/dX); LLS especially tight — it's cosmology-degenerate,
@@ -226,7 +259,7 @@ def log_posterior_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
         model, theta9, z_unit, z, tau0, alpha_hcd, pf_stats=pf_stats, sigma_zb=sigma_zb,
         alpha_centres=alpha_centres, cosmic_cov=cosmic_cov, P_data=P_data, dla_core=dla_core,
         dla_shot_flag=dla_shot_flag, shot_inflate=shot_inflate, cemu_inflate=cemu_inflate,
-        valid_k=valid_k, include_logdet=include_logdet)
+        valid_k=valid_k, include_logdet=include_logdet, rho_zb=rho_zb)
     lp = unit_box_logprior(theta9, sharpness=box_sharpness)
     lp += meanflux_logprior(tau0, tau0_mu, tau0_sigma)
     lp += jnp.sum(gaussian_logprior(alpha_hcd, alpha_mu, alpha_sigma))     # HCD incidence prior

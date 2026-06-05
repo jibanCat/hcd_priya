@@ -62,7 +62,7 @@ DIVERGENCE_RETRY_TARGET_ACCEPT = (0.95, 0.99)
 # Build a production ctx from final_fold0 + error_vector.npz.
 # ----------------------------------------------------------------------------
 def build_ctx(n_z=3, seed=0, ckpt=CKPT, error_vector=ERROR_VECTOR,
-              shot_inflate=10.0, cemu_inflate=1.0):
+              shot_inflate=10.0, cemu_inflate=1.0, xclass_error_vector=None):
     """Build a real Ctx matched to the production (final_fold0, error_vector.npz) pair.
 
     Picks ``n_z`` in-range redshifts, maps each to its z-band slice of the (4,K,Zb,Tb)
@@ -71,6 +71,12 @@ def build_ctx(n_z=3, seed=0, ckpt=CKPT, error_vector=ERROR_VECTOR,
     the forward-modelled truth (an MVP placeholder — see LYA-CONSULT in the report). The
     returned P_data is a placeholder (the SBC overwrites it per mock); the truth here is
     only a sane fiducial for the fixture, NOT a Leg-A truth.
+
+    ``xclass_error_vector`` (opt-in): a path to ``error_vector_xclass.npz`` →  the ctx
+    carries the CROSS-CLASS 4×4 block ``rho_zb`` (n_z,4,4,K,Tb), so the closure's C_emu uses
+    the cross-class form (the off-diagonals capture the coherent cross-class correlation).
+    Default None → the diagonal σ path (UNCHANGED). The cross-class block is sliced onto the
+    SAME per-z z-band grid as ``sigma_zb`` and shares the diagonal vector's band scheme.
     """
     model, meta, norm = T.load_checkpoint(ckpt)
     pf = {k: jnp.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
@@ -86,6 +92,17 @@ def build_ctx(n_z=3, seed=0, ckpt=CKPT, error_vector=ERROR_VECTOR,
     z = np.linspace(2.4, 4.2, n_z)
     zb_of_z = np.clip(np.digitize(z, z_band_edges[1:-1]), 0, Zb - 1)
     sigma_zb = jnp.asarray(np.stack([sigma[:, :, zb_of_z[i], :] for i in range(n_z)]))  # (n_z,4,K,Tb)
+
+    # OPT-IN cross-class block, sliced onto the SAME per-z z-band grid as sigma_zb.
+    rho_zb = None
+    if xclass_error_vector is not None:
+        evx = np.load(xclass_error_vector, allow_pickle=True)
+        rho = evx["rho"]                               # (4,4,K,Zb,Tb)
+        assert rho.shape[2:] == (K, Zb, Tb), \
+            f"xclass rho {rho.shape} incompatible with diagonal grid (K,Zb,Tb)=({K},{Zb},{Tb})"
+        assert np.allclose(np.asarray(evx["tau0_band_centres"]), np.asarray(alpha_centres)), \
+            "xclass τ₀-band centres differ from the diagonal error vector"
+        rho_zb = jnp.asarray(np.stack([rho[:, :, :, zb_of_z[i], :] for i in range(n_z)]))  # (n_z,4,4,K,Tb)
 
     # z_unit per the cache Z_LIMITS (2.0..5.4)
     z_unit = jnp.asarray((z - 2.0) / (5.4 - 2.0))
@@ -122,7 +139,8 @@ def build_ctx(n_z=3, seed=0, ckpt=CKPT, error_vector=ERROR_VECTOR,
         dla_core=dla_core, dla_shot_flag=dla_shot_flag, valid_k=valid_k, w_c_fid=w_c_fid,
         tau0_mu=tau0_mu, tau0_sigma=tau0_sigma, alpha_hcd_mu=jnp.asarray(alpha_mu_),
         alpha_hcd_sigma=jnp.asarray(alpha_sd_), n_z=n_z, K=int(K), Tb=int(Tb),
-        shot_inflate=shot_inflate, cemu_inflate=cemu_inflate, include_logdet=True)
+        shot_inflate=shot_inflate, cemu_inflate=cemu_inflate, include_logdet=True,
+        rho_zb=rho_zb)
     return ctx
 
 

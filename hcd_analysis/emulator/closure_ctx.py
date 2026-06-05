@@ -65,6 +65,10 @@ class Ctx(eqx.Module):
     shot_inflate: float = eqx.field(static=True)
     cemu_inflate: float = eqx.field(static=True)
     include_logdet: bool = eqx.field(static=True)
+    # OPT-IN cross-class C_emu block (n_z,4,4,K,Tb); None → the diagonal σ path (DEFAULT).
+    # A None leaf is an empty pytree node (no trace cost); the diagonal closure is unchanged.
+    # Defaulted ⇒ must come last (dataclass field-ordering); back-compat constructors omit it.
+    rho_zb: jnp.ndarray = None
 
 
 def ctx_kim(z):
@@ -85,7 +89,7 @@ def log_lik_from_ctx(theta9, tau0_vec, alpha_hcd, ctx: Ctx):
         alpha_centres=ctx.alpha_centres, cosmic_cov=ctx.cosmic_cov, P_data=ctx.P_data,
         dla_core=ctx.dla_core, dla_shot_flag=ctx.dla_shot_flag, valid_k=ctx.valid_k,
         shot_inflate=ctx.shot_inflate, cemu_inflate=ctx.cemu_inflate,
-        include_logdet=ctx.include_logdet)
+        include_logdet=ctx.include_logdet, rho_zb=ctx.rho_zb)
 
 
 # ----------------------------------------------------------------------------

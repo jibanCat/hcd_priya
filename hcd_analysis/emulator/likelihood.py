@@ -122,6 +122,35 @@ def sigma_at_tau0(sigma_zb, alpha_centres, z, tau0):
     return jax.vmap(jax.vmap(interp1))(sig)                        # (C,K)
 
 
+def rho_at_tau0(rho_zb, alpha_centres, z, tau0):
+    """τ₀-interpolate the τ₀-BANDED CROSS-CLASS block to a sampled τ₀ (the 4×4 analog of
+    ``sigma_at_tau0``).
+
+    The cross-class error block is τ₀-aware: ``rho_zb`` is (C,C,K,Tb) over τ₀-LADDER bands
+    whose centres are stored in the z-independent ladder coordinate α=τ₀/Kim(z)
+    (``data.make_tau0_bands``). For a data bin at fixed ``z`` with SAMPLED mean-flux
+    ``tau0``, map τ₀→α and linearly interpolate the (C,C,K) block over the band centres ->
+    (C,C,K). Differentiable in τ₀ (piecewise-linear; finite gradient a.e., fine for NUTS);
+    ``jnp.interp`` clamps flat outside the centres so the ladder extremes are safe.
+
+    Mirrors ``sigma_at_tau0`` EXACTLY (same NaN-guard, same interp), just on the 4×4×K block
+    instead of the 4×K diagonal: the YDATA (over Tb) is sanitised BEFORE ``jnp.interp`` so an
+    all-NaN-over-Tb (c,c',k) row (the high-k Nyquist / out-of-range cells) gives value=0 AND
+    slope=0 — NOT a NaN slope that would poison ∂/∂τ₀ and kill NUTS.
+
+    Args:
+      rho_zb:        (C,C,K,Tb) the cross-class block at the data z-band.
+      alpha_centres: (Tb,) ascending τ₀-band centres in α units.
+      z:             scalar data redshift (fixed). tau0: scalar sampled mean-flux.
+    Returns (C,C,K) cross-class block at the sampled τ₀.
+    """
+    alpha = jnp.asarray(tau0) / (_KIM_AMP * (1.0 + jnp.asarray(z)) ** _KIM_SLOPE)
+    rho = jnp.nan_to_num(jnp.asarray(rho_zb), nan=0.0)            # (C,C,K,Tb)
+    interp1 = lambda r_tb: jnp.interp(alpha, jnp.asarray(alpha_centres), r_tb)
+    # vmap over the (C,C,K) leading axes; interp over the trailing Tb axis.
+    return jax.vmap(jax.vmap(jax.vmap(interp1)))(rho)            # (C,C,K)
+
+
 def gaussian_loglik(r, C, jitter=1e-10):
     """−½ rᵀC⁻¹r − ½ logdet C  (the logdet-bearing Gaussian, design §1.3c).
 

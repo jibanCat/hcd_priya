@@ -67,15 +67,23 @@ def truth_vector(ctx: Ctx, truth):
 
 def _cov_at(ctx: Ctx, truth):
     """(P_obs, C) per z at the truth — the SAME assembly the likelihood uses.
-    Returns (P_obs (n_z,K), C (n_z,K,K))."""
-    def one(z, zu, t0, sz, cc, dc, flag):
+    Returns (P_obs (n_z,K), C (n_z,K,K)).
+
+    Threads ``ctx.rho_zb`` (None → diagonal C_emu, DEFAULT; a (n_z,4,4,K,Tb) block → the
+    cross-class C_emu) so the mock noise is drawn from the IDENTICAL C the cross-class
+    likelihood factorizes (Leg-A's C_mock == C_like contract holds in BOTH C_emu modes)."""
+    use_xclass = ctx.rho_zb is not None
+    def one(z, zu, t0, sz, cc, dc, flag, rz):
         return predict_P_obs_and_cov_single_z(
             ctx.model, truth["theta9"], zu, z, t0, truth["alpha_hcd"],
             pf_stats=ctx.pf_stats, sigma_zb=sz, alpha_centres=ctx.alpha_centres,
             cosmic_cov=cc, dla_core=dc, dla_shot_flag=flag,
-            shot_inflate=ctx.shot_inflate, cemu_inflate=ctx.cemu_inflate)
-    P_obs, C = jax.vmap(one)(ctx.z, ctx.z_unit, truth["tau0_vec"], ctx.sigma_zb,
-                             ctx.cosmic_cov, ctx.dla_core, ctx.dla_shot_flag)
+            shot_inflate=ctx.shot_inflate, cemu_inflate=ctx.cemu_inflate, rho_zb=rz)
+    in_axes = (0, 0, 0, 0, 0, 0, 0, 0 if use_xclass else None)
+    rz_arg = ctx.rho_zb if use_xclass else None
+    P_obs, C = jax.vmap(one, in_axes=in_axes)(
+        ctx.z, ctx.z_unit, truth["tau0_vec"], ctx.sigma_zb,
+        ctx.cosmic_cov, ctx.dla_core, ctx.dla_shot_flag, rz_arg)
     return P_obs, C
 
 
@@ -115,6 +123,6 @@ def make_leg_a_mock(ctx: Ctx, truth, key):
         tau0_sigma=ctx.tau0_sigma, alpha_hcd_mu=ctx.alpha_hcd_mu,
         alpha_hcd_sigma=ctx.alpha_hcd_sigma, n_z=ctx.n_z, K=ctx.K, Tb=ctx.Tb,
         shot_inflate=ctx.shot_inflate, cemu_inflate=ctx.cemu_inflate,
-        include_logdet=ctx.include_logdet)
+        include_logdet=ctx.include_logdet, rho_zb=ctx.rho_zb)
     info = {"key": key, "L": L, "P_obs": P_obs}
     return ctx_mock, truth_vector(ctx, truth), info
