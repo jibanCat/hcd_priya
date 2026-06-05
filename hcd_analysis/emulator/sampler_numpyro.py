@@ -73,15 +73,16 @@ def numpyro_model(ctx: Ctx):
     numpyro.factor("loglik", log_lik_from_ctx(theta9, tau0_vec, alpha_hcd, ctx))
 
 
-def make_nuts(ctx: Ctx):
+def make_nuts(ctx: Ctx, target_accept=0.9):
     """The NUTS kernel: dense mass over the unconstrained block (the [θ,τ₀] physics
-    correlation), target_accept 0.9, init_to_median. ctx is bound via the model closure."""
-    return NUTS(numpyro_model, dense_mass=True, target_accept_prob=0.9,
+    correlation), ``target_accept`` (0.9 default; raise toward 0.95–0.99 to clear
+    divergences on a hard mock), init_to_median. ctx is bound via the model closure."""
+    return NUTS(numpyro_model, dense_mass=True, target_accept_prob=float(target_accept),
                 init_strategy=init_to_median)
 
 
 def run_nuts(ctx: Ctx, *, n_warmup, n_samples, seed, num_chains=1,
-             progress_bar=False):
+             target_accept=0.9, progress_bar=False):
     """Run NUTS on ``ctx`` and return ``(samples_dict, n_divergences, extra)``.
 
     ``samples_dict`` holds every sample/deterministic site (incl. ``tau0_vec`` and
@@ -91,7 +92,7 @@ def run_nuts(ctx: Ctx, *, n_warmup, n_samples, seed, num_chains=1,
 
     Trace/jit happens ONLY over the sampled params (ctx closed over the model closure),
     so re-running on a NEW mock with the SAME shapes does not recompile."""
-    kernel = make_nuts(ctx)
+    kernel = make_nuts(ctx, target_accept=target_accept)
     mcmc = MCMC(kernel, num_warmup=int(n_warmup), num_samples=int(n_samples),
                 num_chains=int(num_chains), progress_bar=progress_bar)
     mcmc.run(jax.random.PRNGKey(int(seed)), ctx, extra_fields=("diverging",))

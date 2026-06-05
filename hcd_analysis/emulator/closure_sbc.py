@@ -46,6 +46,17 @@ REPO = "/home/mfho/hcd_priya"
 CKPT = f"{REPO}/checkpoints/final_fold0"
 ERROR_VECTOR = f"{REPO}/checkpoints/error_vector.npz"
 
+# The ECDF simultaneous-band gate is only correctly sized for L≳99 thinned draws: under a
+# TRUE discrete-uniform rank null the band (calibrated on CONTINUOUS uniforms) over-rejects
+# at small L — measured type-I = 0.20 at L=49, 0.05 at L=99, 0.043 at L≥199 (verify script
+# 2026-06-05). So the gate is only VALID at L_eff ≥ L_FLOOR; below it the pass/fail is
+# PATH-only (the --smoke regime). Production thins to L≳99 where the gate is well-calibrated.
+L_FLOOR = 99
+# Re-run a divergent mock at higher target_accept before excluding it: HMC divergences
+# cluster on hard geometry (not random wrt truth), so silent exclusion biases the kept set
+# toward easy regions (CS review). Escalate target_accept; exclude only if still divergent.
+DIVERGENCE_RETRY_TARGET_ACCEPT = (0.95, 0.99)
+
 
 # ----------------------------------------------------------------------------
 # Build a production ctx from final_fold0 + error_vector.npz.
@@ -174,15 +185,28 @@ def run_leg_a_sbc(ctx0: Ctx, *, n_mocks, n_warmup, n_samples, seed, thin=True,
         ctx_mock, truth_vec, _info = make_leg_a_mock(ctx0, truth, k_mock)
         truth_vec = np.asarray(truth_vec)
 
-        samples, n_div, _extra = run_nuts(
-            ctx_mock, n_warmup=n_warmup, n_samples=n_samples,
-            seed=int(jax.random.randint(k_nuts, (), 0, 2**31 - 1)))
+        # run NUTS; on divergence, ESCALATE target_accept and re-run the SAME mock before
+        # excluding (divergences are not random wrt truth → silent exclusion biases the set).
+        base_seed = int(jax.random.randint(k_nuts, (), 0, 2**31 - 1))
+        ta_schedule = (0.9,) + tuple(DIVERGENCE_RETRY_TARGET_ACCEPT)
+        samples = n_div = None
+        for attempt, ta in enumerate(ta_schedule):
+            samples, n_div, _extra = run_nuts(
+                ctx_mock, n_warmup=n_warmup, n_samples=n_samples,
+                seed=base_seed + attempt, target_accept=ta)
+            if n_div == 0:
+                if attempt and verbose:
+                    print(f"  [mock {m}] cleared divergences at target_accept={ta}")
+                break
+            if verbose:
+                print(f"  [mock {m}] {n_div} divergence(s) at target_accept={ta}"
+                      + (" -> retry" if attempt < len(ta_schedule) - 1 else ""))
         n_div_total += n_div
-        if n_div > 0:
+        if n_div > 0:                               # still divergent after the schedule
             n_divergent_mocks += 1
             n_excluded += 1
             if verbose:
-                print(f"  [mock {m}] {n_div} divergence(s) -> FLAGGED + excluded")
+                print(f"  [mock {m}] still divergent after retries -> FLAGGED + excluded")
             continue
 
         draws = _draws_matrix(samples, ctx0.n_z)        # (Lraw, P)
@@ -232,8 +256,12 @@ def run_leg_a_sbc(ctx0: Ctx, *, n_mocks, n_warmup, n_samples, seed, thin=True,
             passed[nm] = bool(ok)
             ecdf_bands[nm] = (lower, upper, ecdf, grid)
 
-    return dict(names=all_names, ranks=ranks, L=L_eff, n_div_total=n_div_total,
-                n_divergent=n_divergent_mocks, n_excluded=n_excluded,
+    # the ECDF gate is only correctly sized at L_eff ≥ L_FLOOR (see the constant); below it
+    # the bands over-reject and pass/fail is PATH-only, not a calibration verdict.
+    gate_valid = bool(L_eff >= L_FLOOR)
+    return dict(names=all_names, ranks=ranks, L=L_eff, gate_valid=gate_valid,
+                n_div_total=n_div_total, n_divergent=n_divergent_mocks,
+                n_excluded=n_excluded,
                 n_kept=int(ranks.shape[0]) if ranks.size else 0,
                 passed=passed, ecdf_bands=ecdf_bands)
 
@@ -253,14 +281,15 @@ def _smoke(args):
     print("\n========== Leg-A SBC smoke summary ==========")
     print(f"mocks kept={res['n_kept']}/{args.n_mocks}  "
           f"divergent(excluded)={res['n_divergent']}  total_div={res['n_div_total']}  "
-          f"L(thinned ranked-against)={res['L']}")
+          f"L(thinned ranked-against)={res['L']}  gate_valid(L≥{L_FLOOR})={res['gate_valid']}")
     if res["passed"]:
         print(f"per-quantity ECDF-band pass/fail (prob={args.prob}):")
         for nm in res["names"]:
             print(f"  {nm:14s} : {'PASS' if res['passed'][nm] else 'FAIL'}")
         n_pass = sum(res["passed"].values())
-        print(f"\n{n_pass}/{len(res['names'])} quantities PASS "
-              f"(smoke N is tiny — pass/fail here only proves the PATH runs, not coverage)")
+        verdict = ("a CALIBRATION verdict" if res["gate_valid"]
+                   else f"PATH-only — L={res['L']}<{L_FLOOR}, the band over-rejects at small L")
+        print(f"\n{n_pass}/{len(res['names'])} quantities PASS ({verdict})")
     else:
         print("no kept mocks -> no band test (increase N or reduce divergences)")
     return res

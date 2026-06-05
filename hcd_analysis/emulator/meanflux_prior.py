@@ -11,9 +11,13 @@ the ladder coord σ/Kim numerically huge; we use a wide MULTIPLE of the nominal 
 """
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
 
 from .data import KIM_AMP, KIM_SLOPE
+
+assert jax.config.read("jax_enable_x64"), \
+    "x64 must be on (import hcd_analysis.emulator before jax)"
 
 # Nominal fractional width of the mean-flux prior, δτ₀/τ₀. The Kim2013 / Becker19 ⟨F⟩(z)
 # is measured to a few-percent; 0.05 is a conservative measurement-width MVP value (the

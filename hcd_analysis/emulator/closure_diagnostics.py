@@ -24,6 +24,17 @@ from __future__ import annotations
 import numpy as np
 from scipy import stats
 
+# Module RNG for the randomized tie-break in the rank statistics. Seeded so SBC ranks are
+# REPRODUCIBLE across runs (CS review); float64 NUTS draws ~never tie, so the fixed seed has
+# negligible statistical effect. Re-seed via ``seed_tie_break`` if a fresh stream is wanted.
+_TIE_RNG = np.random.default_rng(0)
+
+
+def seed_tie_break(seed):
+    """Re-seed the rank tie-break RNG (for reproducible SBC runs)."""
+    global _TIE_RNG
+    _TIE_RNG = np.random.default_rng(seed)
+
 
 # ============================================================================
 # ITEM 1a — SBC rank statistic + thinning to ESS
@@ -106,7 +117,7 @@ def sbc_rank(theta_true, draws):
     lt = int(np.sum(draws < theta_true))
     eq = int(np.sum(draws == theta_true))
     if eq:  # randomized tie-break preserves exact uniformity
-        lt += int(np.random.randint(0, eq + 1))
+        lt += int(_TIE_RNG.integers(0, eq + 1))
     return lt
 
 
@@ -255,7 +266,7 @@ def loglik_rank(loglik_true, loglik_draws):
     lt = int(np.sum(loglik_draws < loglik_true))
     eq = int(np.sum(loglik_draws == loglik_true))
     if eq:
-        lt += int(np.random.randint(0, eq + 1))
+        lt += int(_TIE_RNG.integers(0, eq + 1))
     return lt
 
 
