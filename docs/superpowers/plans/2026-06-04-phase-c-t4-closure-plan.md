@@ -147,3 +147,31 @@ Leg-A true-SBC (smoke → N≈400) → the C_emu validation (whitening, C_emu/C_
 Leg-B interior-τ₀ + θ-hull (the gate) → the degeneracy + τ₀-param arms → the HCD/metal/HeII
 perturbation arms → the PRIYA overlay. Surface coverage, bias-vs-hull, the DLA-low-k bias, and the
 whitening figures as they land.
+
+## 8. After the closure — real-data fit + BLINDING protocol (Phase-D)
+The closure above is the *frozen-on-mocks* half of the anti-confirmation-bias toolkit; the real
+DESI DR1 + KODIAQ-SQUAD fit adds blinding. **Decision (statistician agent 2026-06-05; mirrors the
+DESI DR1 Lyα cosmology paper arXiv:2601.21432; full rationale in memory [[blinding-strategy]]):**
+
+- **Parameter-blind ONLY the cosmological (A_p, n_s) — NOT a data-vector cosmology shift.** In a
+  P1D+IGM fit the nuisances (τ₀(z), thermal, HCD, metals, resolution) are *built* to absorb smooth
+  (k,z) distortions, and a cosmology data-shift IS such a distortion → it partially self-unblinds AND
+  biases nuisance recovery (the Muir-2020 additive-data-shift is safe for 3×2pt, not P1D). Use a hidden
+  additive offset `θ_shown = θ_inferred + δ`, `δ_{Ap,ns} ~ U(−3σ_prior, +3σ_prior)` from a
+  SHA256(project+commit) seed COMMITTED to `blind.lock` but never de-hashed (email the hash to a
+  colleague). Leave ALL nuisances FREE + VISIBLE (watch for negative τ₀, runaway resolution, prior rails).
+- **Freeze first (does most of the work):** pre-register (`analysis.lock`) the k/z cuts, covariance
+  choice, `cemu_inflate`, nuisance-model complexity, outlier/χ² rules, priors, and the decision tree —
+  locked on the SBC closure + mocks BEFORE `plya` is ever fit.
+- **Sequence (sequential — they catch different failures):** Leg-A/Leg-B SBC *unblinded on mocks*
+  (catches pipeline bugs blinding can't) → freeze + commit seed → blind real-data NUTS fit (view only
+  `θ_shown`) → pre-registered unblinding checklist (χ²/dof in range, nuisances off rails, SBC ranks
+  uniform, residuals featureless, robustness over the *pre-registered* variations only) → **unblind
+  ONCE, NO changes after** (the load-bearing rule across DES Y3 / DESI BAO / DESI DR1 Lyα).
+- **Data + usage** for this step: `docs/superpowers/2026-06-05-desi-dr1-p1d-usage.md` (metals: KEEP the
+  SiIII/SiII McDonald model term, add NO C_metal; resolution: the data is DECONVOLVED — don't convolve,
+  template-marginalize `exp(2 b_res k² R_z²)` or leave in C; use the full COVARIANCE + `cov_diag_inflation`
+  on the diagonal; cuts `1e-3 < k < 0.5π/R_z`, z=2.2–4.2). Note `plya` is the TRUE measurement (not
+  numerically blinded — "blind" = analysis-blind provenance), so for the eventual fit it's directly usable.
+- **Nothing to build during the closure** — wire the lightweight blinding infra (the 2-param offset display
+  + `blind.lock`/`analysis.lock`) at this Phase-D step.
