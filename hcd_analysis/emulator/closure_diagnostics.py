@@ -121,7 +121,13 @@ def sbc_ranks_multiparam(theta_true_vec, draws):
 def rank_histogram_bins(L, n_mocks, target_per_bin=20):
     """Choose B so that (L+1) is a MULTIPLE of B (Talts+2018: else the histogram has
     structurally uneven bin occupancy that fakes non-uniformity), and ~target_per_bin
-    mocks land per bin. Returns B (number of bins)."""
+    mocks land per bin. Returns B (number of bins).
+
+    NB: if (L+1) is PRIME (e.g. L=100 → 101) the only divisors are 1 and L+1, so this
+    degenerates to B=1 (a useless single-bin histogram). Pick L so (L+1) is highly
+    composite — the design's L=99 (L+1=100 → 1,2,4,5,10,20,25,50,100) is the right choice.
+    Only affects the optional secondary rank-histogram figure; the primary gate is the
+    ECDF band (``ecdf_pit_bands``), which does not use these bins."""
     B_target = max(1, int(round(n_mocks / target_per_bin)))
     # largest divisor of (L+1) that is <= B_target (fall back to 1)
     divisors = [b for b in range(1, L + 2) if (L + 1) % b == 0]
@@ -202,6 +208,10 @@ def ecdf_pit_bands(ranks, n_draws, prob=0.95, n_grid=100, n_sim=2000, rng=None):
     ecdf = np.searchsorted(pit_sorted, grid, side="right") / N
 
     # simultaneous band: at grid point z, count ~ Binom(N, z); band on count/N.
+    # γ is calibrated on the n_grid INTERIOR points; we then apply the band on the
+    # n_grid+1 grid (incl. the 0/1 endpoints). The endpoints are deterministic (ecdf=0 at
+    # z=0, =1 at z=1, both forced inside below), so the 1-point mismatch is conservative —
+    # it cannot make the band falsely tight. Harmless; left as-is intentionally.
     gamma = _ecdf_band_gamma(N, n_grid, n_sim=n_sim, prob=prob, rng=rng)
     # interior + endpoints; at z=0 lower=0,upper=0-ish; at z=1 both =1.
     lower = stats.binom.ppf(gamma / 2.0, N, grid) / N
@@ -400,7 +410,11 @@ def coverage_at_inflate(truths_per_mock, draws_per_mock, inflate, q, sigma_scale
       draws_per_mock:  list of (L,) per-mock draw arrays for ONE param.
       inflate:         scalar C_emu inflation factor.
       q:               coverage level (0.95).
-      sigma_scale_fn:  callable inflate -> per-param posterior-σ multiplier (≥1).
+      sigma_scale_fn:  callable inflate -> per-param posterior-σ multiplier (≥1). NOTE this
+                       is NOT √inflate: C = cosmic_cov + inflate·C_emu, so inflating ONLY the
+                       C_emu block widens the posterior σ by LESS than √inflate (the exact
+                       factor is the Fisher projection of the inflated block). Supply the
+                       Fisher/Gaussian-linear σ-ratio; do NOT pass ``lambda x: np.sqrt(x)``.
       interval:        "central" or "hpd".
     Returns: coverage fraction.
     """

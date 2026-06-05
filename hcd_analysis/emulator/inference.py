@@ -5,10 +5,11 @@ Mirrors PRIYA's (Ho 2023/2024) parameter contract so the cosmology community dri
 as before: the 9 cosmo/IGM params (``data.PARAM_LIMITS`` order, identical to PRIYA's
 ``coarse_grid``), mean-flux as per-z ``tau0`` (PRIYA's ``mean_flux="per_z"``), and HCD
 nuisance as per-class ``alpha_hcd`` (LLS, subDLA, DLA — the single-amplitude analog of
-PRIYA's ``a_lls/a_dla``). Wires ``predict.predict_P_obs`` + the τ₀-aware C_emu
-(``likelihood.sigma_at_tau0`` → ``assemble_covariance``) + the logdet Gaussian
-(``likelihood.gaussian_loglik``) + a SMOOTH bounded prior (replacing PRIYA's ``-inf``
-wall so NUTS gets finite gradients).
+PRIYA's ``a_lls/a_dla``). Wires ``predict.predict_P_obs`` + the τ₀-aware per-class C_emu
+(``likelihood.sigma_at_tau0`` interp, then ``emu_var = Σ_c coef_c²·σ_c²·P_c²`` assembled
+INLINE in ``log_lik_single_z`` — NOT the legacy ``likelihood.assemble_covariance``, which is
+superseded) + the logdet Gaussian (``likelihood.gaussian_loglik``) + a SMOOTH bounded prior
+(replacing PRIYA's ``-inf`` wall so NUTS gets finite gradients).
 
 Everything is JAX-pure and differentiable in (θ_unit, tau0, alpha_hcd).
 """

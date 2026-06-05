@@ -189,7 +189,8 @@ Worse, the filter never touches LLS, so (measured at z=3):
   template carries the θ,τ₀ sensitivity Rogers lacked **and** preserves the normalization
   Rogers stripped (your two objections, both fixed).
 - **α_c = effective post-masking per-class incidence**; α_c = w_c reproduces the sim's
-  contaminated P_tier_p; α_c → dN/dX via the M₀-inverse.
+  contaminated P_tier_p **up to the DLA-core add-back** (the unfiltered-DLA path adds
+  `w_DLA·dla_core`, ~0.34% of P — exact for the filtered classes); α_c → dN/dX via the M₀-inverse.
 
 The per-class templates (B7) + the raw Tier-C τ₀ response (the input to the excess):
 
@@ -235,8 +236,8 @@ data (you flagged this): plotting PRIYA's sim dN/dX vs the literature
 | class | PRIYA/obs | prior center | σ/μ | rationale |
 |---|---|---|---|---|
 | **LLS** | 0.98 | (lit/sim)·w_LLS ≈ w_LLS | **0.15 (tight)** | cosmology-degenerate (DESI DR1) → tight |
-| **subDLA** | **1.31** | **0.76·w_subDLA** | 0.25 | PRIYA *over*-predicts subDLA → shift center down |
-| **DLA** | **0.70** | **0.30·1.43·w_DLA** (residual) | 0.10, one-sided | masking ~70% complete; PRIYA *under*-predicts DLA |
+| **subDLA** | **1.31** | **0.76·w_subDLA** | 0.40 | PRIYA *over*-predicts subDLA → shift center down; broad (Zafar-vs-O'Meara ×2) |
+| **DLA** | **0.70** | **0.30·1.34·w_DLA** (residual) | 0.10, one-sided | masking ~70% complete; PRIYA *under*-predicts DLA |
 
 So the prior center = `(lit/sim)(z)·w_c` (× the 0.30 masking residual for DLA). **The
 lit/sim ratio is a z-SLOPE power-law** (implemented, mirroring the τ₀ Kim-curve+slope model —

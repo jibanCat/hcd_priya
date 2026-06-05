@@ -5,18 +5,19 @@ the structural Tier-P + HCD add-back, i.e. the END-TO-END differentiable forward
 the Phase-C gradient gate (``scripts/diag_grad_fidelity.py``) and the likelihood driver
 (Task 3) call. Every function here is JAX-pure and differentiable in (θ, τ₀, α).
 
-Contract (matches ``likelihood.total_p1d_difference`` and ``model.structural_tier_p``):
+Contract (CORRECTED HCD forward model — redesign 2026-06-04, supersedes the old
+``P_tier_p + Σα·Δ_c`` with the ≡0-for-LLS filter-residual template):
 
     P_filt(θ,z,τ₀)  = exp( (m̂·sig_marg + mu_marg) + sig_cosmo·r̂ )      # (4,K) LINEAR
-    P_tier_p        = Σ_c w_c · P_filt_c                                  # (K,)
-    P_obs           = P_tier_p + Σ_{c∈HCD} α_c · Δ_c                      # (K,)
+    R_c             = P_c − P_clean   (filtered LLS/subDLA; unfiltered DLA)# (3,K) excess
+    P_obs           = P_clean + Σ_{c∈HCD} α_c · R_c                       # (K,)
 
 The θ-dependence enters ONLY through r̂ = HeadB's ``P_filt_resid`` (the baseline m̂ is
-θ-blind), so ∂logP̂/∂θ = sig_cosmo·∂r̂/∂θ — verified by the gradient gate. Δ_c is passed
-in as the per-class HCD template (field-standard fixed-template / free-amplitude form,
-cf. Rogers & Bird 2018 / PRIYA 2025); ∂P_obs/∂α_c = Δ_c exactly. A future refinement
-(Task 3) may re-evaluate an emulated Δ_c(θ,τ₀) each step — it would flow through the
-same SVD-basis machinery this gate already exercises via ``P_filt_resid``.
+θ-blind), so ∂logP̂/∂θ = sig_cosmo·∂r̂/∂θ — verified by the gradient gate. The excess
+templates R_c are LIVE-emulated from P_filt each step (field-standard fixed-shape /
+free-amplitude form, cf. Rogers & Bird 2018 / PRIYA 2025); ∂P_obs/∂α_c = R_c = (P_c −
+P_clean), now ≠0 for LLS. ``predict_P_tier_p`` (the structural Σ_c w_c·P_filt) remains
+for the clean-path diagnostics but is NOT the HCD forward model. See README.md §Forward-model.
 """
 from __future__ import annotations
 

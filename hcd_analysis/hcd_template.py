@@ -1,27 +1,41 @@
 """
 Rogers+2018 HCD contamination template for P1D (arXiv:1706.08532).
 
-This module implements the four-parameter HCD correction
+Two forms from Rogers, Bird, Peiris, Pontzen (2018), *MNRAS* 476, 3716 (coeffs Table 2):
 
-    P_total(k, z) / P_forest(k, z) = 1 + Σ_i  α_i · f_z(z) · g_i(k, z)
+  • `template_factor` — the MULTI-CLASS model (their Eq. 8) with FLOATING amplitudes:
+
+        P_total/P_forest = 1 + Σ_i  α_i · f_z(z) · g_i(k, z)
+
+    Here α₀ is fixed to 1 and the per-class high-k plateaus c_i(z) are absorbed into the
+    floating normalization (Rogers: "c(z) is degenerate with α_Forest"). Use this when the
+    α_i are free nuisance parameters fit/marginalized against data.
+
+  • `class_ratio` — the FIXED per-class ratio (their Eq. 6) INCLUDING the c(z) plateau:
+
+        P1D_i/P1D_forest = f_z(z) · g_i(k, z) + c_i(z)
+
+    This is the paper's locked prediction per class (no free amplitude); c₀_LargeDLA=0.334
+    gives a genuine sub-1 high-k suppression. Use this to compare a measured per-class
+    ratio against Rogers directly.
 
 with
 
     f_z(z)   = ((1+z) / (1+z_0))^{-3.55},   z_0 = 2,
     g_i(k,z) = (a_i(z) · exp(b_i(z) · k) − 1)^{-2},
-    a_i(z)   = a_i^0 · ((1+z)/(1+z_0))^{a_i^1},
-    b_i(z)   = b_i^0 · ((1+z)/(1+z_0))^{b_i^1},
+    a_i(z)   = a_i^0 · ((1+z)/(1+z_0))^{a_i^1},   b_i, c_i likewise,
 
-and i runs over (LLS, Sub-DLA, Small-DLA, Large-DLA). Coefficient tables
-from Rogers, Bird, Peiris, Pontzen (2018), *MNRAS* 476, 3716 table 3.
+and i runs over (LLS, Sub-DLA, Small-DLA, Large-DLA).
 
 k-CONVENTION
 ------------
-The template uses k in the *angular*-frequency convention PRIYA and
-Rogers both adopt:  k [rad·s/km] = 2π · k_cyclic [s/km].
+The template uses k in the *angular* convention PRIYA and Rogers both adopt:
+k [s/km] = 2π · k_cyclic.  Rogers §3.2 absorbs the 2π into k (kernel e^{-ikx}); his
+fundamental k≈9e-4 = 2π/7111 (L=7111 km/s @ z=2). PRIYA/fake_spectra kfkms is the SAME
+angular grid (`kf *= 2π·npix/vmax`), so pass cache kfkms DIRECTLY (no /2π).
 
-Use `template_factor_from_cyclic_k(k_cyc, ...)` if your k is the cyclic
-`rfftfreq`-style k that our `P1DAccumulator` produces.
+Use `template_factor_from_cyclic_k(k_cyc, ...)` only if your k is a raw cyclic
+`rfftfreq`-style k (e.g. our `p1d.P1DAccumulator`, NOT the angular emulator cache).
 """
 from __future__ import annotations
 
@@ -35,6 +49,9 @@ _A0 = np.array([2.2001, 1.5083, 1.1415, 0.8633])
 _A1 = np.array([0.0134, 0.0994, 0.0937, 0.2943])
 _B0 = np.array([36.449, 81.388, 162.95, 429.58])
 _B1 = np.array([-0.0674, -0.2287, 0.0126, -0.4964])
+# c(z) high-k plateau (Eq. 6 only); absorbed into the floating α₀ in the Eq. 8 model.
+_C0 = np.array([0.9849, 0.8667, 0.6572, 0.3339])
+_C1 = np.array([-0.0631, 0.0196, 0.1169, 0.4653])
 
 _CLASS_LABELS = ("LLS", "Sub-DLA", "Small-DLA", "Large-DLA")
 
@@ -106,6 +123,32 @@ def template_factor(
     for name in _CLASS_LABELS:
         factor += (c[name] - 1.0)
     return factor
+
+
+def class_ratio(k_angular: np.ndarray, z: float) -> Dict[str, np.ndarray]:
+    """Rogers+2018 **Eq. 6** — the FIXED per-class ratio P1D_i/P1D_forest at ANGULAR k.
+
+    Unlike `template_factor` (Eq. 8, floating α with the c-plateaus absorbed into α₀), this
+    is the paper's locked prediction per class, INCLUDING the additive c(z) high-k plateau:
+
+        P1D_i/P1D_forest(k,z) = f_z(z) · (a_i(z)·e^{b_i(z)·k} − 1)^{-2} + c_i(z)
+
+    so the ratio → c_i(z) at high k (c₀_LargeDLA=0.334 → a genuine sub-1 suppression) and
+    is NOT pure-boost. Use to compare a measured per-class ratio against Rogers directly.
+    Returns a dict keyed by class label; each value has shape `k_angular.shape`.
+
+    NB Large-DLA has a₀<1 → a low-k POLE where a·e^{bk}=1 (k≈ln(1/a)/b); expected, not a bug.
+    """
+    k = np.asarray(k_angular, dtype=np.float64)
+    a_z, b_z = _az_bz(z)
+    zfac = (1.0 + z) / (1.0 + _Z_PIVOT)
+    z_weight = zfac ** _Z_SCALING_INDEX
+    c_z = _C0 * zfac ** _C1
+    out = {}
+    for i, name in enumerate(_CLASS_LABELS):
+        g = (a_z[i] * np.exp(b_z[i] * k) - 1.0) ** -2
+        out[name] = z_weight * g + c_z[i]
+    return out
 
 
 def template_factor_from_cyclic_k(
