@@ -106,6 +106,38 @@ def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None):
     return mu, sigma
 
 
+def predict_P_obs_and_cov_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
+                                   pf_stats, sigma_zb, alpha_centres, cosmic_cov,
+                                   dla_core, dla_shot_flag, shot_inflate=10.0,
+                                   cemu_inflate=1.0):
+    """Per-z (P_obs (K,), C (K,K)) — the EXACT forward model + covariance the
+    likelihood uses, factored out so the closure mock can draw its noise from the
+    IDENTICAL C (Leg A's contract: C_mock == C_like; closure_mocks calls this).
+
+      P_obs = P_clean + Σ_{c∈HCD} α_c·(P_c − P_clean)
+      C     = cosmic_cov + diag(emu_var),
+      emu_var = Σ_c coef_c²·σ_c(k,z,τ₀)²·P_c²,  coef = [1−Σα, α_LLS, α_subDLA, α_DLA].
+
+    No data, no residual, no jitter — JUST the model mean and covariance (the jitter is
+    added inside ``gaussian_loglik`` / the mock's Cholesky). Differentiable in (θ9,τ₀,α).
+    """
+    P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)          # (4,K) emulated
+    P_clean = P_filt[0]
+    P_dla_unf = P_filt[3] + jnp.asarray(dla_core)                           # unfiltered DLA
+    P_cls = jnp.stack([P_clean, P_filt[1], P_filt[2], P_dla_unf])           # (4,K) class powers
+    a = jnp.asarray(alpha_hcd)                                              # (3,)
+    coef = jnp.concatenate([jnp.atleast_1d(1.0 - jnp.sum(a)), a])          # (4,) [clean,LLS,sub,DLA]
+    P_obs = jnp.einsum("c,ck->k", coef, P_cls)                             # = P_clean + Σ α_c(P_c−P_clean)
+    # C_emu: per-class fractional σ (τ₀-interp'd) weighted by each class's coeff in P_obs
+    sigma_ck = sigma_at_tau0(sigma_zb, alpha_centres, z, tau0)              # (4,K) fractional
+    emu_var = jnp.einsum("c,ck,ck->k", coef ** 2,
+                         jnp.nan_to_num(sigma_ck) ** 2, P_cls ** 2)         # Σ coef²·σ²·P_c²
+    emu_var = jnp.where(dla_shot_flag, emu_var * shot_inflate, emu_var) * cemu_inflate
+    cosmic = jnp.asarray(cosmic_cov)
+    C = (jnp.diag(cosmic) if cosmic.ndim == 1 else cosmic) + jnp.diag(emu_var)
+    return P_obs, C
+
+
 def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
                      pf_stats, sigma_zb, alpha_centres, cosmic_cov, P_data, dla_core,
                      dla_shot_flag, shot_inflate=10.0, cemu_inflate=1.0,
@@ -128,21 +160,14 @@ def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     ``valid_k`` (bool, K; FIXED, not traced) neutralises out-of-range/Nyquist bins (σ
     all-NaN, P_data NaN) so they carry no info and no NaN gradient.
     ``include_logdet=False`` = the negative control. Differentiable in (θ9, τ₀, α).
+
+    The (P_obs, C) assembly is shared with ``predict_P_obs_and_cov_single_z`` so the
+    closure mock draws noise from the IDENTICAL covariance.
     """
-    P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)          # (4,K) emulated
-    P_clean = P_filt[0]
-    P_dla_unf = P_filt[3] + jnp.asarray(dla_core)                           # unfiltered DLA
-    P_cls = jnp.stack([P_clean, P_filt[1], P_filt[2], P_dla_unf])           # (4,K) class powers
-    a = jnp.asarray(alpha_hcd)                                              # (3,)
-    coef = jnp.concatenate([jnp.atleast_1d(1.0 - jnp.sum(a)), a])          # (4,) [clean,LLS,sub,DLA]
-    P_obs = jnp.einsum("c,ck->k", coef, P_cls)                             # = P_clean + Σ α_c(P_c−P_clean)
-    # C_emu: per-class fractional σ (τ₀-interp'd) weighted by each class's coeff in P_obs
-    sigma_ck = sigma_at_tau0(sigma_zb, alpha_centres, z, tau0)              # (4,K) fractional
-    emu_var = jnp.einsum("c,ck,ck->k", coef ** 2,
-                         jnp.nan_to_num(sigma_ck) ** 2, P_cls ** 2)         # Σ coef²·σ²·P_c²
-    emu_var = jnp.where(dla_shot_flag, emu_var * shot_inflate, emu_var) * cemu_inflate
-    cosmic = jnp.asarray(cosmic_cov)
-    C = (jnp.diag(cosmic) if cosmic.ndim == 1 else cosmic) + jnp.diag(emu_var)
+    P_obs, C = predict_P_obs_and_cov_single_z(
+        model, theta9, z_unit, z, tau0, alpha_hcd, pf_stats=pf_stats, sigma_zb=sigma_zb,
+        alpha_centres=alpha_centres, cosmic_cov=cosmic_cov, dla_core=dla_core,
+        dla_shot_flag=dla_shot_flag, shot_inflate=shot_inflate, cemu_inflate=cemu_inflate)
     # NaN-safe residual: sanitise P_data (out-of-range bins NaN) BEFORE the subtract so
     # the where-branch can't poison the gradient; valid_k zeroes those bins' residual.
     r = jnp.nan_to_num(jnp.asarray(P_data), nan=0.0) - P_obs
