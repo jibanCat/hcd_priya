@@ -72,6 +72,10 @@ Statistician agent, field-grounded; mirrors DESI DR1 Lyα cosmology (arXiv:2601.
   ONCE, NO changes after** (the load-bearing rule across DES Y3 / DESI BAO / DESI DR1 Lyα).
 - **Single-PI sealing**: commit the seed BEFORE the first real-data fit so post-hoc reconstruction is
   git-detectable; encrypt nothing (only the 2-number offset is sealed). Nothing to build during the closure.
+- **RESULTS PRIVACY (2026-06-05):** the REAL DESI fit's cosmology HEADLINES (posteriors/chains/param
+  tables/contour figures) stay LOCAL — `figures/private/desi_production/` + `results_local/` (gitignored).
+  COMMITTABLE: the code, the blinding infra, MOCK/closure/Leg-B fits, and ALL KODIAQ-SQUAD results.
+  (memory `desi-results-privacy`; `.gitignore` "DESI REAL-DATA PRODUCTION" block.)
 
 ## 7. Key conventions / gotchas
 - Env (MANDATORY): `PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu /home/mfho/.conda/envs/emu-jax/bin/python3`. x64 hard-asserted on `import hcd_analysis.emulator`.

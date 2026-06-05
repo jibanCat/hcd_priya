@@ -242,3 +242,14 @@ scripts/consistency_checks/sbatch_logs/
 # /home/mfho/data/DESI_y3_private_data should be committed.
 figures/private/
 scripts/private/
+
+# --- DESI REAL-DATA PRODUCTION run: results stay LOCAL (data-governance, 2026-06-05) ---
+# Policy: the cosmology HEADLINES from fitting the REAL DESI P1D (posteriors, chains,
+# parameter tables, contour/headline figures) must NOT be committed or shared online.
+# COMMITTABLE (not covered here): DESI blinding infra, MOCK/closure/Leg-B fits (mocks, not
+# real data), the data-binding CODE, and ALL KODIAQ-SQUAD real-data results (KS is public).
+# Route DESI production outputs into these gitignored locations:
+figures/private/desi_production/
+results_local/
+*.desi_production.npz
+*.desi_production.json

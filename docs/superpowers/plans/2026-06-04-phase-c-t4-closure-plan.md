@@ -175,3 +175,8 @@ DESI DR1 Lyα cosmology paper arXiv:2601.21432; full rationale in memory [[blind
   numerically blinded — "blind" = analysis-blind provenance), so for the eventual fit it's directly usable.
 - **Nothing to build during the closure** — wire the lightweight blinding infra (the 2-param offset display
   + `blind.lock`/`analysis.lock`) at this Phase-D step.
+- **RESULTS PRIVACY (data-governance, 2026-06-05):** the cosmology HEADLINES from the REAL DESI fit
+  (posteriors, chains, parameter tables, contour figures) **stay LOCAL — do NOT commit/share online**
+  (DESI policy). Route them to the gitignored `figures/private/desi_production/` + `results_local/`.
+  COMMITTABLE: the data-binding CODE, the blinding infra, all MOCK/closure/Leg-B fits (mocks, not the real
+  `plya`), and ALL KODIAQ-SQUAD results (KS is public). See memory `desi-results-privacy`.
