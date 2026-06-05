@@ -46,7 +46,11 @@ LAMBDA_LYA = 1215.67          # Lyα rest wavelength [Å]
 LAMBDA_SiIII = 1206.50        # SiIII line [Å]
 LAMBDA_SiII = 1190.42         # SiII line [Å]  (1190/1193 doublet; use 1190.42 leading line)
 # McDonald (2006) metal-damping smoothing scale [s/km] (companion Eq. 4.3).
-METAL_KS = 0.009
+# SiIII/SiII–Lyα decorrelation scale k_x (companion arXiv:2601.21432 Eq. 4.3): the cosine
+# cross-term is multiplied by the SIGMOID D_x(k)=2−2/(1+exp(−k/k_x)); k_x is a FREE nuisance
+# the sampler fits. These are off-state defaults (irrelevant when a=0; metals default OFF).
+K_SiIII_DEFAULT = 0.05         # s/km, sigmoid decorrelation scale (free nuisance)
+K_SiII_DEFAULT = 0.05
 # DESI spectral pixel width used for the resolution proxy R_z [Å] (usage doc Eq. 4.8).
 DESI_PIXEL_ANGSTROM = 0.8
 
@@ -219,24 +223,25 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
 # ============================================================================ #
 #  Forward-model nuisances (differentiable; per-leg-configurable, default OFF)
 # ============================================================================ #
-def _metal_factor(k, *, a_SiIII=0.0, a_SiII=0.0):
-    """McDonald-form metal contamination multiplier (usage doc Eq. 4.3):
+def _metal_factor(k, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT):
+    """Metal contamination multiplier — companion arXiv:2601.21432 Eq. 4.2–4.3:
 
-        P → P · (1 + f_metals(k)·exp(−k²/2 k_s²)),
-        f_metals = (a²_SiIII + 2 a_SiIII cos(k·Δv_SiIII))
-                 + (a²_SiII  + 2 a_SiII  cos(k·Δv_SiII)),
+        P → P · (1 + C_LyαSiIII + C_LyαSiII),
+        C_LyαX = a_X²  +  2 a_X · cos(k·Δv_X) · D_X(k),   D_X(k) = 2 − 2/(1 + exp(−k/k_X)).
 
-    with the Gaussian damping k_s = METAL_KS, and Δv the Lyα→line velocity split
-    Δv = c·ln(λ_Lyα/λ_line).  a_SiIII=a_SiII=0 ⇒ factor ≡ 1 (no metals).  Differentiable in
-    (a_SiIII, a_SiII).  LYA-CONSULT: the (1+f)·exp(−k²/2k_s²) placement of the damping (whole
-    f vs only the cosine) follows the usage-doc one-liner; confirm vs companion Eq. 4.3."""
+    The CONSTANT a_X² term is UNDAMPED; the SIGMOID decorrelation D_X (k_X a FREE nuisance)
+    multiplies ONLY the oscillatory cosine cross-term — NOT a Gaussian on the whole (1+f) (the
+    earlier usage-doc one-liner `(1+f)·exp(−k²/2k_s²)` was wrong; Lyα-confirmed 2026-06-05).
+    Δv_X = c·ln(λ_Lyα/λ_X).  a_SiIII=a_SiII=0 ⇒ factor ≡ 1.  Differentiable in
+    (a_SiIII, a_SiII, k_SiIII, k_SiII)."""
     k = jnp.asarray(k)
     dv_SiIII = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiIII)
     dv_SiII = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiII)
-    damp = jnp.exp(-(k ** 2) / (2.0 * METAL_KS ** 2))
-    f = (a_SiIII ** 2 + 2.0 * a_SiIII * jnp.cos(k * dv_SiIII)) \
-        + (a_SiII ** 2 + 2.0 * a_SiII * jnp.cos(k * dv_SiII))
-    return 1.0 + f * damp
+    D_SiIII = 2.0 - 2.0 / (1.0 + jnp.exp(-k / k_SiIII))      # sigmoid decorrelation, →1 low-k →0 high-k
+    D_SiII = 2.0 - 2.0 / (1.0 + jnp.exp(-k / k_SiII))
+    f = (a_SiIII ** 2 + 2.0 * a_SiIII * jnp.cos(k * dv_SiIII) * D_SiIII) \
+        + (a_SiII ** 2 + 2.0 * a_SiII * jnp.cos(k * dv_SiII) * D_SiII)
+    return 1.0 + f
 
 
 def _resolution_factor(k, R_z, *, b_res=0.0):
@@ -270,7 +275,8 @@ def _emu_var_on_cache(model, theta9, z_unit, z, tau0, alpha_hcd, *,
 
 def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_core,
                          cache_k, leg, sigma_zb=None, alpha_centres=None,
-                         cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0, b_res=0.0,
+                         cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
+                         k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
                          rho_zb=None):
     """Bind the emulator forward model to ONE leg's grid → flat (P_model (N,), C_total (N,N)).
 
@@ -316,7 +322,8 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
         P_z = jnp.interp(k_sub, cache_k, P_cache)
         # (2) forward-model nuisances (gated; default OFF → factor ≡ 1)
         if leg.metals_on:
-            P_z = P_z * _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII)
+            P_z = P_z * _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII,
+                                      k_SiIII=k_SiIII, k_SiII=k_SiII)
         if leg.resolution_on:
             P_z = P_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res)
         P_model = P_model.at[jnp.asarray(rows)].set(P_z)
@@ -330,7 +337,8 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
             ev_z = jnp.interp(k_sub, cache_k, ev_cache)
             # emu var transforms by the SAME multiplicative nuisance factors² (variance units)
             if leg.metals_on:
-                ev_z = ev_z * _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII) ** 2
+                ev_z = ev_z * _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII,
+                                            k_SiIII=k_SiIII, k_SiII=k_SiII) ** 2
             if leg.resolution_on:
                 ev_z = ev_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res) ** 2
             emu_var_flat = emu_var_flat.at[jnp.asarray(rows)].set(ev_z)
@@ -344,7 +352,8 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
 # ============================================================================ #
 def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_core,
                 cache_k, z_global=None, sigma_zb_per_leg=None, alpha_centres=None,
-                cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0, b_res=0.0,
+                cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
+                k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
                 jitter=1e-10, return_parts=False):
     """Multi-leg Gaussian log-likelihood against the REAL data.
 
@@ -383,7 +392,8 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
         P_model, C_total = predict_P_obs_on_leg(
             model, theta9, tau0_vec, alpha_hcd, pf_stats=pf_stats, dla_core=dla_core,
             cache_k=cache_k, leg=leg, sigma_zb=szb, alpha_centres=alpha_centres,
-            cemu_inflate=cemu_inflate, a_SiIII=a_SiIII, a_SiII=a_SiII, b_res=b_res)
+            cemu_inflate=cemu_inflate, a_SiIII=a_SiIII, a_SiII=a_SiII,
+            k_SiIII=k_SiIII, k_SiII=k_SiII, b_res=b_res)
         r = jnp.asarray(leg.P_data) - P_model
         ll = gaussian_loglik(r, C_total, jitter=jitter)
         total = total + ll
