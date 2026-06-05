@@ -3,21 +3,35 @@
 A differentiable JAX/Equinox emulator of the **per-class 1D Lyα flux power spectrum**
 `P_filt(θ, z, τ₀)` for HCD-marginalized cosmological inference. It mirrors the PRIYA
 (Ho 2023/2024) parameter contract so the cosmology community drives it like PRIYA, and it
-is end-to-end autodiff so it plugs into gradient-based samplers (NUTS/numpyro, blackjax)
-and a Cobaya adapter.
+is end-to-end autodiff so its likelihood (`inference.log_lik_multiz` /
+`log_posterior_single_z`) is ready to wrap in a gradient-based sampler (NUTS/numpyro,
+blackjax) or a PRIYA-style Cobaya adapter. **The sampler/Cobaya wrappers are forthcoming
+(Phase-C T4) — not yet shipped; today you call the differentiable likelihood directly.**
 
-> **TL;DR usage**
+> **TL;DR usage** (standalone-runnable; builds the inputs from a cache row)
 > ```python
-> import hcd_analysis.emulator                       # enables JAX float64 on import
+> import hcd_analysis.emulator                        # enables JAX float64 on import
+> import jax.numpy as jnp
 > from hcd_analysis.emulator import train as T
+> from hcd_analysis.emulator.data import load_cache
 > from hcd_analysis.emulator.predict import predict_P_obs, predict_P_filt
 >
 > model, meta, norm = T.load_checkpoint("checkpoints/final_fold0")
-> pf = norm["P_filt"]                                 # structured P_filt norm dict
-> P_filt = predict_P_filt(model, theta9_unit, z_unit, tau0, pf)          # (4,K) clean,LLS,subDLA,DLA
-> P_obs  = predict_P_obs(model, theta9_unit, z_unit, tau0, alpha_hcd, pf, dla_core)  # (K,) total
+> pf = norm["P_filt"]                                  # structured P_filt norm dict (mu/sig_marg, sig_cosmo)
+>
+> d   = load_cache("hcd_analysis/_emulator_data/observables_tau0_lf.h5")
+> row = 0                                              # or construct your own inputs — see §4
+> theta9 = jnp.asarray(d["params_unit"][row])          # (9,) UNIT cube; else (θ_phys−lo)/(hi−lo)
+> z_unit = float(d["x"][row, 9])                       # = (z − 2.0)/3.4
+> tau0   = float(d["tau0"][row])                       # = −ln(target_F)
+> alpha  = jnp.asarray(d["w_c_cache"][row, 1:])        # (3,) per-class incidence (LLS,subDLA,DLA)
+> dla_core = jnp.asarray(d["delta"][row, 2])           # (K,) DLA-core add-back
+>
+> P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf)                  # (4,K) clean,LLS,subDLA,DLA
+> P_obs  = predict_P_obs(model, theta9, z_unit, tau0, alpha, pf, dla_core)  # (K,)  total
 > ```
-> All inputs are UNIT-CUBE; everything is differentiable in `(θ9, τ₀, α)`.
+> All emulator inputs are UNIT-CUBE. `predict_P_obs`/`predict_excess` are differentiable in
+> `(θ9, τ₀, α)`; `predict_P_filt` in `(θ9, τ₀)`.
 
 ---
 
@@ -72,8 +86,9 @@ P_filt        = exp(logP̂)                         # (4,K) LINEAR: clean, LLS, 
   (the HCD excess is computed from `P_filt` instead, see §3). Dead weight, harmless.
 
 **Multi-fidelity** (`multifidelity.py`): the LF backbone above + a high-fidelity (HiRes /
-KODIAQ-SQUAD) `ρ(k,z)` correction layer. The default deployed mean-flux head is the
-ρ(k,z)-only `FixedMeanHead`.
+KODIAQ-SQUAD) `ρ(k,z)` correction layer. The default deployed HiRes correction is the
+ρ(k,z)-only `FixedMeanHead` — a mean-*correction* head (it returns `ḡ(z,k) − log ρ`), NOT a
+mean-flux head; mean flux is handled structurally via τ₀.
 
 ---
 
@@ -120,8 +135,9 @@ Key functions (all JAX-pure, differentiable in `θ9, τ₀, α`):
 
 - Feed the emulator **unit-cube** `θ9 ∈ [0,1]^9`. Map physical→unit with `PARAM_LIMITS`:
   `θ9 = (θ_phys − lo) / (hi − lo)`. `data.normalize_params` / the `params_unit` cache field do this.
-- `z_unit` = z mapped into the cache's z scaling; `τ₀ = −ln(target_F)` (the per-z mean-flux
-  optical depth — PRIYA's `mean_flux="per_z"`). `α_hcd` = `(3,)` per-class incidence.
+- `z_unit = (z − 2.0)/(5.4 − 2.0)` — a linear map over `data.Z_LIMITS=(2.0, 5.4)` (e.g. z=3 →
+  0.2941); `τ₀ = −ln(target_F)` (the per-z mean-flux optical depth — PRIYA's
+  `mean_flux="per_z"`). `α_hcd` = `(3,)` per-class incidence (LLS, subDLA, DLA).
 
 **Checkpoints** (`checkpoints/`): each fold is a 4-file bundle
 `final_fold{0..7}.{eqx, meta.json, norm.pkl, hist.json}`:
@@ -129,7 +145,10 @@ Key functions (all JAX-pure, differentiable in `θ9, τ₀, α`):
 - `.eqx` — Equinox leaves; `.meta.json` — `arch_cfg` + `seed`; `.norm.pkl` — train-split norm
   stats (the `P_filt` dict with `mu_marg/sig_marg/sig_cosmo`, + f_nhi/dndx/delta stats);
   `.hist.json` — per-epoch loss history.
-- `T.load_checkpoint(path)` → `(model, meta, norm)`. Deployed production = 8-fold LOSO.
+- `T.load_checkpoint(path)` → `(model, meta, norm)`. Deployed production = 8-fold LOSO. Use a
+  **single** fold's model for the point prediction (`final_fold0` is the canonical default) —
+  do NOT ensemble the folds at inference; the fold-to-fold LOSO spread is already captured as
+  the σ budget in `error_vector.npz` and enters the likelihood through `C_emu`.
 
 **Error vector** (`checkpoints/error_vector.npz`) — the emulator-error budget for the
 likelihood: `sigma (4, K=172, Zb=3, Tb=4)` = per-(class, k, z-band, τ₀-band) RMS fractional
@@ -146,8 +165,8 @@ LOSO residual, `tau0_band_centres (4,)`, `z_band_edges`, `dla_shot_flag (K,)`. C
 - **τ₀ ladder coordinate**: `α_factor = τ₀ / Kim2013(z)` is the z-INDEPENDENT ladder axis
   (`data.tau0_ladder_factor`) — the natural axis for the smooth `σ(τ₀)` interpolation.
 - **Data range** (`data.DATA_RANGE`): z∈[2.2, 4.6], `k_min=1e-3`. The cache is wider
-  (z∈{2.0..5.4}, k∈[4.4e-4, 0.069]); out-of-range bins are SOFT down-weighted in training and
-  EXCLUDED from `C_emu`. Decision (2026-06-04): keep `k_min=1e-3`.
+  (z∈{2.0..5.4}, angular k∈[3.5e-4, 0.098]); out-of-range bins are SOFT down-weighted in
+  training and EXCLUDED from `C_emu`. Decision (2026-06-04): keep `k_min=1e-3`.
 - **Per-class power uses a single shared global ⟨F⟩** (`target_F`), not per-subset — so class
   offsets are real physics, not a sightline-count artifact.
 
