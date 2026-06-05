@@ -162,9 +162,9 @@ def main():
     tau0_z = d["tau0"][rows]
     r_mid = rows[np.argmin(np.abs(tau0_z - np.median(tau0_z)))]
     z_unit = float(d["x"][r_mid, 9])
-    w_c = jnp.asarray(np.asarray(d["w_c_cache"][r_mid]).reshape(4))
-    delta = jnp.asarray(d["delta"][r_mid])             # (3,172)
-    alpha = jnp.asarray(np.full(3, 1.0))               # prior-centre amplitudes
+    w_c = np.asarray(d["w_c_cache"][r_mid]).reshape(4)
+    dla_core = jnp.asarray(d["delta"][r_mid, 2])        # (K,) DLA-class core add-back
+    alpha = jnp.asarray(w_c[1:])                        # sim incidence => P_obs == P_tier_p
     kf = np.asarray(d["kfkms"][r_mid])
     theta0 = jnp.full(9, 0.5)                          # cube-centre fiducial
 
@@ -179,7 +179,7 @@ def main():
     J_ad_pos = {}                                     # per-τ₀-position autodiff Jacobians
     for name, tau0 in positions.items():
         def f(theta9, _tau0=tau0):
-            return predict_P_obs(model, theta9, z_unit, _tau0, alpha, w_c, pf, delta)
+            return predict_P_obs(model, theta9, z_unit, _tau0, alpha, pf, dla_core)
         J_ad = np.asarray(jax.jacfwd(f)(theta0))       # (K,9)
         J_fd = central_fd_jac(f, theta0, h=args.h)     # (K,9)
         r = rel_err(J_ad, J_fd)
@@ -203,12 +203,12 @@ def main():
     # --- finiteness sweep over the unit cube + τ₀ ---------------------------------
     rng = np.random.default_rng(0)
     grad_norm = jax.jit(lambda th, zu, t: jnp.linalg.norm(
-        jax.jacfwd(lambda x: predict_P_obs(model, x, zu, t, alpha, w_c, pf, delta))(th)))
+        jax.jacfwd(lambda x: predict_P_obs(model, x, zu, t, alpha, pf, dla_core))(th)))
     n_nf_val = n_nf_grad = 0
     for _ in range(args.n_sweep):
         th = jnp.asarray(rng.uniform(0, 1, 9))
         zu = float(rng.uniform(0, 1)); t = float(rng.uniform(tau0_lo, tau0_hi))
-        val = predict_P_obs(model, th, zu, t, alpha, w_c, pf, delta)
+        val = predict_P_obs(model, th, zu, t, alpha, pf, dla_core)
         n_nf_val += int((~np.isfinite(np.asarray(val))).any())
         n_nf_grad += int(not np.isfinite(float(grad_norm(th, zu, t))))
     print(f"  [sweep {args.n_sweep}] nonfinite P_obs={n_nf_val} grad={n_nf_grad}")
@@ -260,7 +260,7 @@ def main():
 
     # (2) FD step-size convergence V: median rel-err vs h (autodiff fixed = J_ad_mid)
     def f_mid(theta9):
-        return predict_P_obs(model, theta9, z_unit, positions["mid"], alpha, w_c, pf, delta)
+        return predict_P_obs(model, theta9, z_unit, positions["mid"], alpha, pf, dla_core)
     hs = np.logspace(-6, -1, 11)
     med_rel_h = [float(np.median(rel_err(J_ad_mid, central_fd_jac(f_mid, theta0, h=h))))
                  for h in hs]
