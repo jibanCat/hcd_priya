@@ -1,0 +1,29 @@
+# slope-prior RERUN (production g_fixed, DLA-masked, exact bias)  PARAM_NAMES=['ns', 'Ap', 'herei', 'heref', 'alphaq', 'hub', 'omegamh2', 'hireionz', 'bhfeedback']
+# lit dN/dX power-law: A=[0.0321 0.0243 0.0065]  gamma=[1.774 0.806 1.692] (LLS,subDLA,DLA)
+# sigma_s_lit=[0.52 0.53 0.33]  slope center=0 (production framing)  z_pivot=3.0
+
+# ===== fold-0 HELD-OUT sims (emulator never saw them) — n=8 =====
+# z-edge inflation factor (mean over legs, beta=1.0) = 1.25  sigma_anchor={'DESI': 0.12, 'KS': 0.27}
+# sim_label                      ns_u  Ap_u | width sig(Ap) sig(ns) | bias/σ  A_p(FULL/EMU)  n_s(FULL/EMU)
+  ns0.803Ap2.2e-09herei4.05heref 0.013 0.717 | lit  0.3827  0.1768 | A_p -0.780/-0.686  n_s +0.066/+0.069
+  ns0.813Ap2.51e-09herei3.84here 0.051 0.934 | lit  0.4126  0.1780 | A_p +1.175/+1.318  n_s -2.722/-2.630
+  ns0.816Ap1.55e-09herei3.55here 0.065 0.250 | lit  0.3116  0.2118 | A_p +1.880/+1.925  n_s +0.400/+0.291
+  ns0.816Ap2.58e-09herei3.73here 0.065 0.983 | lit  0.5499  0.2017 | A_p -0.221/-0.128  n_s +0.384/+0.472
+  ns0.81Ap1.6e-09herei3.59heref2 0.039 0.283 | lit  0.4869  0.1320 | A_p +0.933/+0.961  n_s +0.726/+0.617
+  ns0.81Ap2.54e-09herei4.29heref 0.042 0.958 | lit  0.4266  0.1362 | A_p -0.334/-0.256  n_s -0.190/-0.030
+  ns0.823Ap1.92e-09herei3.79here 0.091 0.517 | lit  0.3840  0.2307 | A_p +1.154/+1.224  n_s -0.049/-0.125
+  ns0.829Ap2.39e-09herei3.63here 0.117 0.850 | lit  0.4856  0.1270 | A_p -0.222/-0.138  n_s -0.761/-0.593
+
+# ===== fold-0 SUMMARY (gate: |bias|<0.2σ on BOTH A_p and n_s; EMU = pipeline baseline ~+0.03σ) =====
+  [lit ] FULL bias/σ  A_p: mean +0.448 max|1.880|  n_s: mean -0.268 max|2.722|  ||  EMU-only  A_p: mean +0.527  n_s: mean -0.241  ||  σ(A_p) 0.4300 σ(n_s) 0.1743
+  [edge] FULL bias/σ  A_p: mean +0.449 max|1.878|  n_s: mean -0.266 max|2.716|  ||  EMU-only  A_p: mean +0.526  n_s: mean -0.237  ||  σ(A_p) 0.4306 σ(n_s) 0.1748
+  [2x  ] FULL bias/σ  A_p: mean +0.449 max|1.871|  n_s: mean -0.258 max|2.696|  ||  EMU-only  A_p: mean +0.523  n_s: mean -0.224  ||  σ(A_p) 0.4328 σ(n_s) 0.1767
+
+# ===== INTERIOR-n_s spot checks (emulator IN-SAMPLE; shape-gap bias valid, emu error understated) =====
+# sim_label                      ns_u  Ap_u | width sig(Ap) sig(ns) | bias/σ  A_p(FULL/EMU)  n_s(FULL/EMU)
+  ns0.909Ap1.81e-09herei4.04here 0.436 0.436 | lit  0.3245  0.1720 | A_p +0.279/+0.329  n_s -1.330/-1.344  (fold 3)
+  ns0.927Ap2.11e-09herei3.67here 0.507 0.650 | lit  0.4692  0.2156 | A_p +0.828/+0.841  n_s +0.161/+0.179  (fold 4)
+  ns0.933Ap1.83e-09herei4.09here 0.533 0.450 | lit  0.3912  0.1754 | A_p -0.565/-0.614  n_s -0.063/-0.119  (fold 5)
+
+[fig] /home/mfho/hcd_priya/figures/analysis/05_likelihood/legb_slope_prior_rerun.png
+[done]

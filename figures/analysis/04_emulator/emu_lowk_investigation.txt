@@ -1,0 +1,37 @@
+# basis orthonormality check: ||BBᵀ−I||_max = 2.682e+00
+# EMU low-k investigation  n_basis=24  K=172  bins/band=[12, 37, 123] (low/mid/high)  classes=['clean', 'LLS', 'subDLA', 'DLA']
+# basis is GLOBAL over all k (model.py:135); 121/172 bins are high-k -> low-k under-served test
+
+# ===== PART A/C: per-k-band emulator error vs the IRREDUCIBLE rank-24 TRUTH-SVD floor =====
+# std-log units; coherent = signed mean over sims (the bias-relevant part); emu/floor: ≈1 rank-limited, ≫1 trainable
+# class    band            emu_err(RMS)   truth-floor(RMS)   emu/floor   coherent_mean±scatter
+  clean   low  k<5e-3      0.0193        0.0011           17.86x     -0.0091 ± 0.0088
+  clean   mid  5e-3-0.02   0.0077        0.0011            6.75x     +0.0028 ± 0.0057
+  clean   high 0.02-0.069  0.0139        0.0011           12.36x     +0.0059 ± 0.0121
+  LLS     low  k<5e-3      0.0219        0.0020           11.14x     -0.0091 ± 0.0112
+  LLS     mid  5e-3-0.02   0.0088        0.0028            3.18x     +0.0042 ± 0.0056
+  LLS     high 0.02-0.069  0.0139        0.0022            6.27x     +0.0066 ± 0.0114
+  subDLA  low  k<5e-3      0.0233        0.0035            6.61x     -0.0067 ± 0.0102
+  subDLA  mid  5e-3-0.02   0.0104        0.0048            2.15x     +0.0068 ± 0.0039
+  subDLA  high 0.02-0.069  0.0168        0.0040            4.16x     +0.0091 ± 0.0140
+  DLA     low  k<5e-3      0.0222        0.0043            5.18x     +0.0074 ± 0.0071
+  DLA     mid  5e-3-0.02   0.0216        0.0059            3.68x     +0.0197 ± 0.0096
+  DLA     high 0.02-0.069  0.0239        0.0055            4.37x     +0.0173 ± 0.0194
+
+# ===== PART B: where in k is the A_p/n_s EMU bias SOURCED? (mask ΔP_emu by leg-k band) =====
+# (bias in σ; EMU baseline = forward at sim's EXACT shape, so this is PURE emulator error)
+#   FULL (all k):  A_p mean +0.617  n_s mean -0.191
+#   low  k<5e-3    : A_p mean -0.056 (scatter 0.279)   n_s mean +0.117
+#   mid  5e-3-0.02 : A_p mean -0.050 (scatter 0.441)   n_s mean +0.006
+#   high 0.02-0.069: A_p mean +0.723 (scatter 0.720)   n_s mean -0.314
+
+# ===== PART D: leakage probe (low-k vs high-k residual correlation across sims) + MF (Q2) =====
+#   corr(low-k coherent err, high-k coherent err) across 8 sims = -0.612
+#   (strong correlation => the global basis COUPLES the bands = the leakage channel; ~0 => independent)
+#   Q2/MF: the closure is LF-cache-truth vs LF-emulated; MF (LF→HF correction) is in NEITHER side
+#   => MF cannot CAUSE this residual (structural). But MF acts at high-k (k>0.02); if PART B shows
+#   the A_p bias is sourced from high-k leaking to low-k, MF wiring WILL perturb the same channel
+#   => re-measure after MF. If A_p bias is sourced from low-k bins directly, MF is irrelevant to it.
+
+[fig] /home/mfho/hcd_priya/figures/analysis/04_emulator/emu_lowk_investigation.png
+[done]
