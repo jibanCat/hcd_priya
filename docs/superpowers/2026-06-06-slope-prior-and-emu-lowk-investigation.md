@@ -10,6 +10,28 @@ decisions + the two checkpoint-corrected errors), the 4-lens onboarding + checkp
 `docs/superpowers/onboarding/2026-06-06-*.md`, scripts `scripts/diag_legb_slope_prior_rerun.py`
 and `scripts/diag_emu_lowk_investigation.py`, golden guard `tests/test_legb_golden.py`.
 
+> **⚠️ CHECKPOINT-2 CORRECTIONS (2026-06-06, `wf_959680e8`, 4/4 lenses GO-WITH-CHANGES — read
+> `onboarding/2026-06-06-checkpoint2-meta.md`).** All NUMBERS below reproduced bit-for-bit, but three
+> framings in §2–§3 were overstated and are corrected here:
+> 1. **"z-COHERENT, same sign at every z" is WRONG.** The per-z A_p contribution is **z-LOCALIZED**
+>    (~53% from z≈2.0–2.3, ~25% from z≈3.5–3.7/HeII, mixed-sign between); the raw P_filt error
+>    sign-flips in z (|mean_z|/std_z≈0.45). The ×18.6 is **force-summation across z-bins** (a diagonal
+>    cov can't tell summed structure from noise), NOT physical coherence, and NOT √N. The conclusion
+>    "diagonal-in-k/z C_emu can't whiten it → need a structured C_emu" SURVIVES, but the C_emu must be
+>    **z-resolved/edge-weighted**, not a global rank-1 z-coherent mode.
+> 2. **+0.62σ and r=−0.61 are n=8 POINT ESTIMATES, not settled facts.** A_p: t≈1.58, 4 pos/4 neg
+>    signs, 95% CI ≈ [−0.26,+1.32]. r=−0.61: p≈0.11, CI crosses 0. The **n_s EMU mean −0.24σ is a
+>    single-outlier artifact** (drop ns0.813's −2.6σ → +0.10σ; no coherent n_s EMU bias). The high-k
+>    +0.72σ is the one ~3σ-real piece (t≈2.9).
+> 3. **§3 reconciliation has NO committed script** (only this prose) and the "1.26× ruler / 3%-diagonal"
+>    legs were verified by no lens. The z=3↔full-z ×18.6 leg DID reproduce on all four. Also: the rerun
+>    KS keep extends to k=0.0627 (violates the locked KS k<0.06 cap) — re-run KS-capped before quoting
+>    as production; and the all-8 fold-0 sims are low-n_s box-edge (interior checks are emulator in-sample).
+>
+> **What stands unchanged:** the slope-prior settlement (FULL−EMU <0.17σ, ×1.04, golden guard) — the
+> part that gates the refactor — is the most robust result (4/4 re-derived it). The slope-prior refactor
+> PROCEEDS; the C_emu-vs-retrain fork is NOT decided here (see checkpoint2-meta §Fork + Open items).
+
 ---
 
 ## 0. TL;DR
