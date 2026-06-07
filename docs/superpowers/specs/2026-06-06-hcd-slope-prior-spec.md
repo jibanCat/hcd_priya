@@ -215,6 +215,23 @@ emulator error cancel, so this is the trustworthy quantity):**
   for the **correlated-in-k/z C_emu (§0b-2, not built)**, NOT the slope prior's job. The slope-gating
   conclusion is independent of it (rests on the FULL−EMU differential).
 
+## 8b. ALL-FOLDS RE-MEASUREMENT (2026-06-06 — reverses the parameter, not the existence)
+
+`scripts/diag_emu_bias_allfolds.py` → `figures/analysis/04_emulator/emu_bias_allfolds.{png,txt}`.
+EMU bias over ALL 8 folds, **each fold's OWN held-out emulator** (`final_fold{0..7}`), KS capped
+k<0.06, 60 honestly-held-out sims spanning n_s_unit 0.013–0.958, bootstrap CI:
+- **A_p: mean +0.03σ, 95% CI [−0.22, +0.29], t=0.23, 31+/29−.** ⇒ the +0.62σ from §8 was a
+  **low-n_s box-edge fluctuation** (fold-0 sims are all n_s_unit<0.12); on the honest set the
+  **A_p EMU bias is consistent with ZERO.** (Large per-mock scatter, max 3.4σ, is coverage-consistent.)
+- **n_s: mean −0.65σ, 95% CI [−0.85, −0.43], t=−5.84, 10+/50−.** ⇒ the REAL coherent emulator bias is
+  on **n_s, NEGATIVE** (emulator under-predicts the tilt), highly significant, NOT a box-edge artifact
+  (corr with edge-proximity −0.04), survives dropping the largest outlier (−0.61σ).
+- ⇒ **The investigation was right in KIND (a real coherent emulator-sourced bias a diagonal C_emu
+  can't whiten) but WRONG in PARAMETER** — it is n_s at −0.65σ, not A_p at +0.6σ. The fold-0-only
+  sample (all low-n_s) mis-attributed it to A_p. Cleaner root-cause target: why the emulator coherently
+  UNDER-predicts the n_s tilt — a k-shape/SVD-basis question, consistent with the high-k coupling.
+- The slope-prior settlement is UNAFFECTED (rests on FULL−EMU, which cancels this shared term).
+
 ## 9. PI calls that remain (3):
 1. **The gate-vs-widen-vs-C_emu fork, AFTER the step-2 rerun.** If the exact production-framing bias
    (A_p or n_s) lands in 0.18–0.25σ: (a) widen the slope prior (cheap ×1.04, but width-INSENSITIVE so
