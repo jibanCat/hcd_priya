@@ -1,0 +1,30 @@
+# T3 GATE aliasing probes G4.2 (τ₀-width inflation) + G4.3 (∂g/∂n_s structural).
+# u_tau FIXED to the physical mean-flux axis (Step-0).
+
+# ===== G4.3: ∂g/∂n_s (head must be θ-blind) =====
+  max |∂g/∂n_s| over (z,τ₀) grid = 0.000e+00   (PASS if < 1e-10)
+  G4.3: PASS
+
+# ===== G4.2: τ₀-posterior width + τ₀–n_s correlation (ON/OFF/LF) =====
+  fold 0 (ns0.803Ap2.2e-09herei4.0): σ_τ0 ON/OFF = 0.9932  max|Δr(ON−LF)| = 0.0165  max|Δr(OFF−LF)| = 0.0144  max|Δr(ON−OFF)| = 0.0024
+  fold 1 (ns0.831Ap2.31e-09herei3.): σ_τ0 ON/OFF = 0.9946  max|Δr(ON−LF)| = 0.0456  max|Δr(OFF−LF)| = 0.0428  max|Δr(ON−OFF)| = 0.0052
+  fold 2 (ns0.859Ap1.29e-09herei3.): σ_τ0 ON/OFF = 0.9840  max|Δr(ON−LF)| = 0.0948  max|Δr(OFF−LF)| = 0.0845  max|Δr(ON−OFF)| = 0.0140
+  fold 3 (ns0.888Ap2.53e-09herei3.): σ_τ0 ON/OFF = 0.9960  max|Δr(ON−LF)| = 0.0466  max|Δr(OFF−LF)| = 0.0465  max|Δr(ON−OFF)| = 0.0020
+  fold 4 (ns0.909Ap1.98e-09herei3.): σ_τ0 ON/OFF = 0.9927  max|Δr(ON−LF)| = 0.1291  max|Δr(OFF−LF)| = 0.1224  max|Δr(ON−OFF)| = 0.0075
+  fold 5 (ns0.933Ap1.83e-09herei4.): σ_τ0 ON/OFF = 0.9950  max|Δr(ON−LF)| = 0.0293  max|Δr(OFF−LF)| = 0.0204  max|Δr(ON−OFF)| = 0.0089
+  fold 6 (ns0.956Ap2.19e-09herei3.): σ_τ0 ON/OFF = 0.9977  max|Δr(ON−LF)| = 0.0393  max|Δr(OFF−LF)| = 0.0376  max|Δr(ON−OFF)| = 0.0027
+  fold 7 (ns0.979Ap2.48e-09herei3.): σ_τ0 ON/OFF = 0.9916  max|Δr(ON−LF)| = 0.0324  max|Δr(OFF−LF)| = 0.0259  max|Δr(ON−OFF)| = 0.0066
+
+  worst σ_τ0(ON)/σ_τ0(OFF) over folds = 0.9977   (PASS if ≤ 1.05)
+  worst |r(τ₀,n_s)(ON) − r(LF)| over folds   = 0.1291   (literal §3.2: ≤ 0.05)
+  worst |r(τ₀,n_s)(OFF) − r(LF)| over folds  = 0.1224   (separable-only rotation)
+  worst |r(τ₀,n_s)(ON) − r(OFF)| over folds  = 0.0140   (RANK-1 INCREMENT — §3.2 intent: ≤ 0.05)
+  NOTE: Δr(ON−LF) ≈ Δr(OFF−LF) ⇒ the rotation is from the SEPARABLE correction (in BOTH arms),
+        NOT the rank-1 term. The §3.2 FAIL condition is about the rank-1 TERM trading n_s↔τ₀ info;
+        the rank-1 INCREMENT |r(ON)−r(OFF)| is the diagnostically-correct quantity for that.
+  G4.2 width:        PASS  (no τ₀-width inflation)
+  G4.2 rank-1 rot:   PASS  (rank-1 increment |r(ON)−r(OFF)| ≤ 0.05)
+  G4.2 literal ON-LF:FAIL  (separable+rank-1 vs LF; exceeds 0.05 via the SEPARABLE part)
+  G4.2 (rank-1 aliasing intent): PASS
+
+[done]

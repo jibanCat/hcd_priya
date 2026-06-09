@@ -1,0 +1,88 @@
+# EMU bias, ALL 8 folds, each fold's OWN held-out emulator, KS z_lo=2.4 (SHIPPED default), KS<0.06. forward-only Fisher.
+# Certification of the SHIPPED production default. Reference: emu_bias_allfolds.txt is z_lo=2.0 (n_s -0.646sigma).
+# fold  sim                            ns_u  Ap_u   bias(A_p)/sigma  bias(n_s)/sigma
+  0    ns0.803Ap2.2e-09herei4.05heref 0.013 0.717    -0.552      +0.383
+  0    ns0.813Ap2.51e-09herei3.84here 0.051 0.934    +0.156      -0.716
+  0    ns0.816Ap1.55e-09herei3.55here 0.065 0.250    +1.028      +0.067
+  0    ns0.816Ap2.58e-09herei3.73here 0.065 0.983    -0.102      +0.218
+  0    ns0.81Ap1.6e-09herei3.59heref2 0.039 0.283    +0.467      +0.794
+  0    ns0.81Ap2.54e-09herei4.29heref 0.042 0.958    -0.455      +0.720
+  0    ns0.823Ap1.92e-09herei3.79here 0.091 0.517    +0.774      -0.369
+  0    ns0.829Ap2.39e-09herei3.63here 0.117 0.850    +0.031      -0.324
+  1    ns0.831Ap2.31e-09herei3.71here 0.125 0.792    +0.235      -0.066
+  1    ns0.836Ap1.88e-09herei3.83here 0.143 0.483    +0.523      +0.276
+  1    ns0.838Ap1.48e-09herei3.98here 0.154 0.197    +0.314      -0.204
+  1    ns0.842Ap1.36e-09herei3.51here 0.169 0.117    +1.028      -0.087
+  1    ns0.849Ap1.64e-09herei3.77here 0.195 0.317    +0.320      +0.011
+  1    ns0.849Ap2.02e-09herei3.95here 0.195 0.583    -0.656      -0.810
+  1    ns0.852Ap2.07e-09herei3.88here 0.208 0.625    +0.453      +0.143
+  1    ns0.855Ap1.78e-09herei3.65here 0.221 0.417    -0.409      -0.699
+  2    ns0.859Ap1.29e-09herei3.92here 0.236 0.066    +0.003      +0.006
+  2    ns0.862Ap1.41e-09herei3.89here 0.247 0.150    -0.031      -0.232
+  2    ns0.868Ap1.32e-09herei4.03here 0.273 0.083    -0.013      -0.446
+  2    ns0.873Ap1.26e-09herei3.96here 0.292 0.042    -0.091      +0.009
+  2    ns0.875Ap2.25e-09herei3.61here 0.299 0.750    -0.841      -0.516
+  2    ns0.881Ap2.16e-09herei3.71here 0.325 0.683    +0.091      +0.222
+  2    ns0.881Ap2.25e-09herei3.75here 0.325 0.750    +0.213      +0.299
+  2    ns0.885Ap2.32e-09herei4.06here 0.339 0.803    +0.194      +0.436
+  3    ns0.888Ap2.53e-09herei3.53here 0.351 0.950    -0.208      +0.004
+  3    ns0.894Ap1.84e-09herei4.46here 0.375 0.458    +0.170      +0.504
+  3    ns0.894Ap2.02e-09herei3.91here 0.377 0.583    -0.260      -0.164
+  3    ns0.901Ap1.22e-09herei3.93here 0.403 0.017    +0.201      +0.211
+  3    ns0.905Ap1.79e-09herei3.97here 0.419 0.419    +0.303      +0.208
+  3    ns0.907Ap1.5e-09herei3.75heref 0.429 0.217    +0.438      +0.632
+  3    ns0.909Ap1.76e-09herei4.07here 0.436 0.400    +0.245      +0.232
+  3    ns0.909Ap1.81e-09herei4.04here 0.436 0.436    -0.458      -0.629
+  4    ns0.909Ap1.98e-09herei3.75here 0.438 0.558    -0.110      -0.105
+  4    ns0.914Ap1.27e-09herei3.97here 0.455 0.050    -0.279      -0.384
+  4    ns0.914Ap1.32e-09herei3.85here 0.455 0.083    +0.010      +0.486
+  4    ns0.915Ap1.49e-09herei3.54here 0.458 0.208    +0.275      +0.137
+  4    ns0.91Ap2.18e-09herei3.76heref 0.441 0.697    -0.028      +0.399
+  4    ns0.927Ap2.11e-09herei3.67here 0.507 0.650    -0.204      +0.186
+  4    ns0.92Ap2.06e-09herei3.69heref 0.481 0.617    +0.167      +0.067
+  5    ns0.933Ap1.83e-09herei4.09here 0.533 0.450    -0.232      +0.093
+  5    ns0.935Ap1.37e-09herei4.38here 0.542 0.125    -0.178      -0.303
+  5    ns0.936Ap1.99e-09herei3.68here 0.544 0.566    -0.102      -0.028
+  5    ns0.946Ap1.55e-09herei3.85here 0.585 0.250    +0.245      -0.176
+  5    ns0.946Ap2.48e-09herei4.05here 0.585 0.917    -1.081      +0.034
+  5    ns0.94Ap1.97e-09herei3.57heref 0.559 0.550    +0.391      +0.422
+  5    ns0.953Ap1.74e-09herei4.07here 0.611 0.383    -0.424      -0.242
+  6    ns0.956Ap2.19e-09herei3.62here 0.625 0.708    +0.060      +0.090
+  6    ns0.957Ap1.62e-09herei3.54here 0.626 0.303    -0.476      -0.587
+  6    ns0.959Ap2.34e-09herei3.81here 0.637 0.817    +0.217      -0.013
+  6    ns0.966Ap1.46e-09herei3.55here 0.663 0.183    -0.179      +0.293
+  6    ns0.972Ap1.69e-09herei3.87here 0.689 0.350    -0.143      +0.146
+  6    ns0.977Ap1.96e-09herei4.12here 0.708 0.542    +0.234      +0.308
+  6    ns0.979Ap1.78e-09herei3.65here 0.715 0.417    -0.061      -0.002
+  7    ns0.979Ap2.48e-09herei3.99here 0.715 0.917    -0.161      +0.053
+  7    ns0.982Ap1.81e-09herei3.62here 0.729 0.434    +0.237      +0.116
+  7    ns0.985Ap2.44e-09herei4.01here 0.741 0.883    +0.004      +0.171
+  7    ns0.992Ap2.3e-09herei3.95heref 0.767 0.783    +0.386      +0.574
+  7    ns0.998Ap1.61e-09herei3.79here 0.792 0.292    +0.484      +0.083
+  7    ns1.02Ap2.43e-09herei4.04heref 0.875 0.875    +0.283      +0.361
+  7    ns1.04Ap1.73e-09herei4.21heref 0.958 0.375    -0.412      -0.472
+
+# ===== POOLED over ALL 60 honestly-held-out sims (KS z_lo=2.4 SHIPPED) =====
+  A_p: mean +0.034sigma  bootstrap95% [-0.065, +0.132]  t=+0.66  signs 33+/27-  max|1.08|
+  n_s: mean +0.030sigma  bootstrap95% [-0.060, +0.120]  t=+0.65  signs 37+/23-  max|0.81|
+  A_p: drop largest |outlier| (-1.08) -> mean +0.053sigma
+  n_s: drop largest |outlier| (-0.81) -> mean +0.045sigma
+  corr(|A_p bias|, n_s box-edge proximity) = +0.289  (near 0 => NOT a box-edge artifact)
+  n_s_unit range covered: 0.013..0.958
+
+# ANCHOR: committed all-folds z_lo=2.0 n_s = -0.646sigma; all-folds z_lo=2.6 n_s = +0.038sigma;
+#         inferred z_lo=2.4 subset(30) = +0.041sigma; attribution-removal = +0.038sigma.
+#         GATE: this 60-sim z_lo=2.4 n_s must be in-gate (|bias|<0.2sigma) to certify the shipped default.
+
+[fig] /home/mfho/hcd_priya/figures/analysis/04_emulator/emu_bias_allfolds_zlo24.png
+[done]
+
+# ===== C1 CERTIFICATION VERDICT (Bayesian/PPL, 2026-06-08) =====
+# SHIPPED z_lo=2.4 default IS CERTIFIED on the full 60-sim set:
+#   n_s = +0.030 sigma  (|bias| << 0.2 sigma gate)  vs z_lo=2.0 = -0.646 sigma  => -0.65 sigma bias RESOLVED.
+#   A_p = +0.034 sigma  (in-gate).
+# Triangulation (all within 6-sim noise of each other):
+#   60-sim z_lo=2.4 (THIS, DIRECT) = +0.030 ; inferred subset(30) = +0.041 ; attribution-removal = +0.038 ;
+#   60-sim z_lo=2.6 (DIRECT)       = +0.038.
+# The production default no longer rests on a biased 30-sim subset (blocker C1 of the meta-review CLOSED).
+# n_s sign balance flips 10+/50- (z_lo=2.0) -> 37+/23- (z_lo=2.4): the coherent downward pull is gone.
