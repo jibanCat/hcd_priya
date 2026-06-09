@@ -1,0 +1,121 @@
+# KS z-cut series + KS k_max scan of the n_s (and A_p) EMU bias.
+# FORWARD-ONLY Fisher MAP-shift, no retraining. emu_bias_one_sim REUSED from diag_emu_bias_allfolds.py.
+# Each fold uses its own held-out emulator (final_fold{f}); DESI untouched in every config.
+# BASELINE z_lo=2.0,k=0.06 on ALL folds [0, 1, 2, 3, 4, 5, 6, 7] (60 sims); SCAN configs on subset [0, 2, 5, 7].
+
+# --- threading confirmation (KS z-grid + n_keep per config) ---
+  A z_lo=2.0,k=0.06 : KS z=[2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6] n_keep=70 k=[0.0198,0.0498]
+  A z_lo=2.1,k=0.06 : KS z=[2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6] n_keep=65 k=[0.0198,0.0498]
+  A z_lo=2.3,k=0.06 : KS z=[2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6] n_keep=60 k=[0.0198,0.0498]
+  A z_lo=2.8,k=0.06 : KS z=[2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6] n_keep=50 k=[0.0198,0.0498]
+  B z_lo=2.0,k=0.04 : KS z=[2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6] n_keep=56 k=[0.0198,0.0396]
+  B z_lo=2.0,k=0.03 : KS z=[2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6] n_keep=28 k=[0.0198,0.0250]
+  B z_lo=2.0,k=0.02 : KS z=[2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6] n_keep=14 k=[0.0198,0.0198]
+
+# ============================================================
+# ANCHOR: baseline z_lo=2.0, k=0.06 on ALL 8 folds / 60 sims (must reproduce ~ -0.646)
+# ============================================================
+  ALL-FOLDS  n=60  n_s bias = -0.646sig  boot95%[-0.854,-0.429]  t=-5.84  signs 10+/50-   A_p = +0.031sig   KS-split -0.685  DESI-split +0.039
+  --> headline emu_bias_allfolds.txt: n_s -0.646, A_p +0.031.  MATCH
+
+# ============================================================
+# (A) KS z-cut series  (k_max=0.06 fixed)  -- SCAN subset folds [0, 2, 5, 7]
+# ============================================================
+#  z_lo   n   n_s bias[sig]  boot95%            t      signs(+/-)   A_p bias[sig]  KS-split   DESI-split
+  2.0   30    -0.775     [-1.039,-0.528]   -5.74   4+/26-    -0.291       -0.826     +0.051
+  2.1   30    +0.052     [-0.083,+0.182]   +0.75  18+/12-    +0.024       -0.003     +0.055
+  2.3   30    +0.041     [-0.089,+0.172]   +0.61  19+/11-    +0.010       -0.025     +0.067
+  2.8   30    +0.049     [-0.074,+0.177]   +0.75  17+/13-    -0.029       -0.007     +0.056
+
+  subset-baseline check: z_lo=2.0 (subset [0, 2, 5, 7]) n_s = -0.775sig vs ALL-folds anchor -0.646sig  (the scan trend below is read off the subset)
+
+# ============================================================
+# (B) KS k_max scan  (z_lo=2.0 fixed; z=2.0/2.2 bins PRESENT) -- SCAN subset folds [0, 2, 5, 7]
+# ============================================================
+#  k_max   n   n_s bias[sig]  boot95%            t      signs(+/-)   A_p bias[sig]  KS-split   DESI-split
+  0.06   30    -0.775     [-1.039,-0.528]   -5.74   4+/26-    -0.291       -0.826     +0.051   (=A z_lo=2.0)
+  0.04   30    -0.756     [-0.986,-0.542]   -6.50   2+/28-    -0.222       -0.810     +0.055
+  0.03   30    -0.425     [-0.581,-0.278]   -5.32   6+/24-    -0.079       -0.517     +0.092
+  0.02   30    -0.278     [-0.408,-0.154]   -4.22   8+/22-    -0.056       -0.381     +0.103
+
+# ============================================================
+# (C) KS k_max scan at z_lo=2.8 (residual high-z bias high-k?) -- SCAN subset folds [0, 2, 5, 7]
+# ============================================================
+#  k_max   n   n_s bias[sig]  boot95%            t      A_p bias[sig]  KS-split   DESI-split
+  0.06   30    +0.049     [-0.074,+0.177]   +0.75   -0.029       -0.007     +0.056   (=A z_lo=2.8)
+  0.04   30    +0.062     [-0.040,+0.169]   +1.14   -0.040       -0.002     +0.064
+  0.03   30    +0.107     [+0.019,+0.200]   +2.26   -0.023       +0.004     +0.103
+  0.02   30    +0.112     [+0.026,+0.204]   +2.41   -0.010       +0.003     +0.110
+
+# NOTE: the original run was killed by the harness after the C k=0.03 row (heavy-node-load
+# slowdown). The final config (C k_max=0.02, z_lo=2.8) + verdict + figure were regenerated
+# offline from the harvested per-config numbers (all 12 configs complete, identical machinery).
+
+# ============================================================
+# VERDICT (regenerated offline; all 12 configs complete)
+# ============================================================
+  ANCHOR (all 8 folds, 60 sims): n_s -0.646sig (headline -0.646), A_p +0.031sig; KS-split -0.685, DESI-split +0.039.
+  (A) z-cut (subset [0,2,5,7]): -0.775(z2.0) -> +0.052(z2.1) -> +0.041(z2.3) -> +0.049(z2.8).  COLLAPSES to <0.2sig the instant KS z=2.0 is dropped.
+  (B) k_max @ z_lo=2.0: -0.775(0.06) -> -0.756(0.04) -> -0.425(0.03) -> -0.278(0.02).  NOT high-k sourced: removing k>0.04 leaves -0.756sig
+      (unchanged); the bias is broadband/low-k and survives down to the single lowest-k bin (-0.278sig).
+  (C) k_max @ z_lo=2.8: +0.049 -> +0.062 -> +0.107 -> +0.112; KS-split ~0 throughout -> retained z>=2.8 KS is CLEAN at all k (small + drift is DESI-side).
+
+  TWO-LINE VERDICT:
+  1) Dropping low-z KS (z<2.1) REMOVES the n_s EMU bias: -0.65/-0.78sig -> ~+0.05sig (inside +/-0.2 gate).
+  2) The low-z KS bias is NOT high-k sourced (removing k>0.04 keeps -0.76sig); it is broadband/low-k.
+
+[fig] /home/mfho/hcd_priya/figures/analysis/04_emulator/nsbias_kscut_scan.png
+[npz] /home/mfho/hcd_priya/figures/analysis/04_emulator/nsbias_kscut_scan.npz
+[done]
+
+
+# ############################################################
+# EXTENSION (diag_nsbias_kscut_scan_2426.py): add KS z_lo=2.4 and z_lo=2.6
+# Same machinery, same subset folds [0,2,5,7], k_max=0.06 fixed. z_lo=2.3 re-run as anchor.
+# ############################################################
+
+# --- threading confirmation (KS z-grid + n_keep) for z_lo in {2.3, 2.4, 2.6} ---
+  z_lo=2.3,k=0.06 : KS z=[2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6] n_keep=60 k=[0.0198,0.0498]
+  z_lo=2.4,k=0.06 : KS z=[2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6] n_keep=60 k=[0.0198,0.0498]
+  z_lo=2.6,k=0.06 : KS z=[2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6] n_keep=55 k=[0.0198,0.0498]
+
+# ============================================================
+# z-cut subset scan (k_max=0.06; folds [0, 2, 5, 7])
+# ============================================================
+#  z_lo   n   n_s bias[sig]  boot95%            t      signs(+/-)   A_p bias[sig]  KS-split   DESI-split
+  2.3   30    +0.041     [-0.089,+0.172]   +0.61  19+/11-    +0.010       -0.025     +0.067   [IN-GATE]
+  2.4   30    +0.041     [-0.089,+0.172]   +0.61  19+/11-    +0.010       -0.025     +0.067   [IN-GATE]
+  2.6   30    +0.046     [-0.081,+0.178]   +0.69  18+/12-    -0.005       -0.014     +0.060   [IN-GATE]
+
+  consistency anchor: z_lo=2.3 here = +0.041sig  (prior scan: +0.041sig)
+
+# ============================================================
+# z_lo=2.6 ALL FOLDS [0, 1, 2, 3, 4, 5, 6, 7] (60 sims) -- recommended-cut all-folds number
+# ============================================================
+  ALL-FOLDS  n=60  n_s bias = +0.038sig  boot95%[-0.052,+0.128]  t=+0.83  signs 36+/24-   A_p = +0.026sig   KS-split -0.006  DESI-split +0.045   [IN-GATE]
+  (cf. z_lo=2.6 subset [0, 2, 5, 7] = +0.046sig; z_lo=2.0 all-folds anchor was -0.646, subset -0.775)
+
+# ============================================================
+# COMBINED z-cut series (subset folds [0,2,5,7], k_max=0.06): z_lo in {2.0,2.1,2.3,2.4,2.6,2.8}
+# ============================================================
+#  z_lo    n_s bias[sig]   boot95%             A_p bias[sig]   KS-split   DESI-split   in-gate?  source
+  2.0     -0.775      [-1.039,-0.528]    -0.291        -0.826     +0.051      NO      prior(subset)
+  2.1     +0.052      [-0.083,+0.182]    +0.024        -0.003     +0.055      YES     prior(subset)
+  2.3     +0.041      [-0.089,+0.172]    +0.010        -0.025     +0.067      YES     prior(subset)
+  2.4     +0.041      [-0.089,+0.172]    +0.010        -0.025     +0.067      YES     new(subset)
+  2.6     +0.046      [-0.081,+0.178]    -0.005        -0.014     +0.060      YES     new(subset)
+  2.8     +0.049      [-0.074,+0.177]    -0.029        -0.007     +0.056      YES     prior(subset)
+  2.6*    +0.038      [-0.052,+0.128]    +0.026        -0.006     +0.045      YES     ALL-FOLDS(60)
+  anchor z2.0 ALL-folds (prior) = -0.646sig (KS-split -0.685, DESI-split +0.039)
+
+# ============================================================
+# VERDICT (do 2.4/2.6 close as well as 2.8?)
+# ============================================================
+  z_lo=2.4: n_s +0.041sig (t=+0.61, 19+/11-), A_p +0.010sig, KS-split -0.025, DESI-split +0.067 -> INSIDE +/-0.2 gate
+  z_lo=2.6: n_s +0.046sig (t=+0.69, 18+/12-), A_p -0.005sig, KS-split -0.014, DESI-split +0.060 -> INSIDE +/-0.2 gate
+  z_lo=2.3 anchor reproduced: +0.041sig (prior +0.041) -- consistent.
+  ONE-LINE: z_lo=2.4 and 2.6 BOTH close as cleanly as 2.8 (all inside +/-0.2sig); closure already achieved the instant KS z=2.0+2.2 are dropped (z_lo>=2.4).
+
+[fig] /home/mfho/hcd_priya/figures/analysis/04_emulator/nsbias_kscut_scan.png
+[npz] /home/mfho/hcd_priya/figures/analysis/04_emulator/nsbias_kscut_scan.npz
+[done-2426]
