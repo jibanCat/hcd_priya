@@ -35,7 +35,7 @@ import jax.numpy as jnp
 
 from .data import KIM_AMP, KIM_SLOPE
 from .predict import predict_P_obs
-from .likelihood import sigma_at_tau0, gaussian_loglik
+from .likelihood import sigma_at_tau0, rho_at_tau0, gaussian_loglik
 
 assert jax.config.read("jax_enable_x64"), \
     "x64 must be on (import hcd_analysis.emulator before jax)"
@@ -147,7 +147,7 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
 
 
 def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
-                *, z_lo=2.0, z_hi=4.6, drop_first4=True, k_max=CACHE_KMAX,
+                *, z_lo=2.4, z_hi=4.6, drop_first4=True, k_max=CACHE_KMAX,
                 metals_on=False, resolution_on=False):
     """Load KODIAQ-SQUAD conservative-mode P1D → a post-cut ``DataLeg``.
 
@@ -156,6 +156,12 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
     z∈[2.0,4.6], 13 k-bins/z). Cuts: drop the first 4 k-bins (k ≤ 0.0158; Karaçaylı
     2306.06316 Fig 11 underestimate the error there) + cut k ≤ k_max=0.069 (the emulator
     Nyquist; the analysis caps k<0.06 — note KS is HR but we cap at the cache k_max).
+    ``z_lo`` defaults to **2.4** (drops the z=2.0+2.2 KS bins, which carried ~86% of a −0.65σ
+    coherent n_s closure bias; dropping z<2.4 removes it → +0.04σ). z=2.4 is the MINIMAL
+    closure-clean cut; low-z KS P1D is compromised by DLA-finder incompleteness, and the
+    published KODIAQ-SQUAD analysis uses the more conservative z<2.8 — set ``z_lo=2.8`` for that
+    (opt-in). PI decision 2026-06-08 = 2.4 default.
+    See docs/superpowers/plans/2026-06-08-ns-bias-rootcause-diagnostics-plan.md.
 
     metals_on=False / resolution_on=False by default: KS conservative mode already SUBTRACTS
     metals/continuum/resolution + inflates its covariance, so re-applying the SiIII/resolution
@@ -255,11 +261,23 @@ def _resolution_factor(k, R_z, *, b_res=0.0):
 #  Model → leg binding
 # ============================================================================ #
 def _emu_var_on_cache(model, theta9, z_unit, z, tau0, alpha_hcd, *,
-                      pf_stats, sigma_zb, alpha_centres, dla_core, cemu_inflate):
+                      pf_stats, sigma_zb, alpha_centres, dla_core, cemu_inflate,
+                      rho_zb=None):
     """Per-z emulator-error variance on the CACHE k-grid (K_cache,), assembled EXACTLY as
-    ``inference.predict_P_obs_and_cov_single_z`` does (the diagonal σ path):
-      emu_var = Σ_c coef_c²·σ_c(k,z,τ₀)²·P_c²,  coef = [1−Σα, α_LLS, α_subDLA, α_DLA].
-    NaN-safe (out-of-range cache cells σ→0).  Differentiable in (θ9, τ₀, α)."""
+    ``inference.predict_P_obs_and_cov_single_z`` does. ONE of two forms (C stays DIAGONAL
+    IN k either way — only the per-k class structure changes):
+
+      DIAGONAL (default, ``rho_zb=None``):
+        emu_var = Σ_c coef_c²·σ_c(k,z,τ₀)²·P_c²,  coef = [1−Σα, α_LLS, α_subDLA, α_DLA].
+      CROSS-CLASS (opt-in, ``rho_zb`` (4,4,Kc,Tb) given):
+        emu_var = Σ_{c,c'} coef_c·coef_c'·ρ_cc'(k,z,τ₀)·P_c·P_c',
+        ρ the τ₀-interp'd 4×4 cross-class block (``rho_at_tau0``); the diagonal ρ_cc=σ_c²
+        recovers the diagonal form. ρ a sample covariance ⇒ SPD ⇒ emu_var ≥ 0 GUARANTEED.
+
+    The cross-class path here is the EXACT k-grid analog of
+    ``inference.predict_P_obs_and_cov_single_z``'s ``rho_zb`` branch (same einsum, same
+    NaN-guard via ``rho_at_tau0``). NaN-safe (out-of-range cache cells σ/ρ→0).
+    Differentiable in (θ9, τ₀, α)."""
     from .predict import predict_P_filt
     P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)        # (4,Kc)
     P_clean = P_filt[0]
@@ -267,9 +285,15 @@ def _emu_var_on_cache(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     P_cls = jnp.stack([P_clean, P_filt[1], P_filt[2], P_dla_unf])         # (4,Kc)
     a = jnp.asarray(alpha_hcd)
     coef = jnp.concatenate([jnp.atleast_1d(1.0 - jnp.sum(a)), a])         # (4,)
-    sigma_ck = sigma_at_tau0(sigma_zb, alpha_centres, z, tau0)            # (4,Kc) fractional
-    emu_var = jnp.einsum("c,ck,ck->k", coef ** 2,
-                         jnp.nan_to_num(sigma_ck) ** 2, P_cls ** 2)
+    if rho_zb is not None:
+        rho_ck = rho_at_tau0(rho_zb, alpha_centres, z, tau0)             # (4,4,Kc) τ₀-interp'd
+        # emu_var(k) = Σ_{c,c'} coef_c·coef_c'·ρ_cc'(k)·P_c·P_c'  (≥0: ρ SPD).
+        emu_var = jnp.einsum("c,d,cdk,ck,dk->k", coef, coef,
+                             jnp.nan_to_num(rho_ck), P_cls, P_cls)
+    else:
+        sigma_ck = sigma_at_tau0(sigma_zb, alpha_centres, z, tau0)        # (4,Kc) fractional
+        emu_var = jnp.einsum("c,ck,ck->k", coef ** 2,
+                             jnp.nan_to_num(sigma_ck) ** 2, P_cls ** 2)
     return emu_var * cemu_inflate
 
 
@@ -294,6 +318,12 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     the mock-noise generator supplies its own C).  Differentiable in
     (θ9, τ₀_vec, α, a_SiIII, a_SiII, b_res).
 
+    ``rho_zb`` (opt-in, (n_z,4,4,Kc,Tb)): the CROSS-CLASS 4×4 block per z (its leading axis
+    matches ``sigma_zb``'s); when given, C_emu's per-k variance uses the cross-class form
+    (``emu_var = Σ_cc' coef_c·coef_c'·ρ_cc'·P_c·P_c'``) instead of the diagonal
+    Σ coef²σ²P². ``alpha_centres`` is still required (the τ₀-interp abscissa). Default None →
+    the diagonal σ path (UNCHANGED). Mirrors the ``sigma_zb`` per-z plumbing.
+
     NOTE per-z C_emu blocks are placed on the FLAT diagonal in the SAME z-major order as the
     leg's rows (``leg.z_idx``), so C_emu's ordering matches C_data (CS-REVIEW)."""
     cache_k = jnp.asarray(cache_k)
@@ -301,11 +331,15 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     z_idx = np.asarray(leg.z_idx)
     R_z = jnp.asarray(leg.R_z)
     tau0_vec = jnp.asarray(tau0_vec)
+    alpha_hcd = jnp.asarray(alpha_hcd)   # (3,) broadcast to all z, OR (n_z,3) per-z incidence
     N = k_leg.shape[0]
 
     P_model = jnp.zeros(N)
     emu_var_flat = jnp.zeros(N)
-    have_emu = sigma_zb is not None and alpha_centres is not None
+    # C_emu fires if EITHER the diagonal σ OR the cross-class ρ is supplied (with the
+    # τ₀-interp abscissa). The cross-class path reads ρ only; the diagonal reads σ only.
+    have_emu = ((sigma_zb is not None or rho_zb is not None)
+                and alpha_centres is not None)
 
     for iz in range(leg.n_z):
         rows = np.where(z_idx == iz)[0]
@@ -315,9 +349,10 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
         z_unit = float(leg.z_unit[iz])
         tau0 = tau0_vec[iz]
         k_sub = k_leg[jnp.asarray(rows)]
+        alpha_z = alpha_hcd if alpha_hcd.ndim == 1 else alpha_hcd[iz]  # per-z HCD incidence
 
         # (1) P_obs on the cache grid
-        P_cache = predict_P_obs(model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_core)
+        P_cache = predict_P_obs(model, theta9, z_unit, tau0, alpha_z, pf_stats, dla_core)
         # (3) interp to the leg's k (bin centres); model is smooth → linear interp.
         P_z = jnp.interp(k_sub, cache_k, P_cache)
         # (2) forward-model nuisances (gated; default OFF → factor ≡ 1)
@@ -330,10 +365,12 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
 
         # (4) C_emu: per-k emu variance interp'd onto the leg k
         if have_emu:
+            rho_zb_z = rho_zb[iz] if rho_zb is not None else None
+            sigma_zb_z = sigma_zb[iz] if sigma_zb is not None else None
             ev_cache = _emu_var_on_cache(
-                model, theta9, z_unit, z, tau0, alpha_hcd, pf_stats=pf_stats,
-                sigma_zb=sigma_zb[iz], alpha_centres=alpha_centres, dla_core=dla_core,
-                cemu_inflate=cemu_inflate)
+                model, theta9, z_unit, z, tau0, alpha_z, pf_stats=pf_stats,
+                sigma_zb=sigma_zb_z, alpha_centres=alpha_centres, dla_core=dla_core,
+                cemu_inflate=cemu_inflate, rho_zb=rho_zb_z)
             ev_z = jnp.interp(k_sub, cache_k, ev_cache)
             # emu var transforms by the SAME multiplicative nuisance factors² (variance units)
             if leg.metals_on:
@@ -354,7 +391,7 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
                 cache_k, z_global=None, sigma_zb_per_leg=None, alpha_centres=None,
                 cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
                 k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
-                jitter=1e-10, return_parts=False):
+                jitter=1e-10, return_parts=False, rho_zb_per_leg=None):
     """Multi-leg Gaussian log-likelihood against the REAL data.
 
     The legs are INDEPENDENT surveys (DESI & KS share z-VALUES but are different
@@ -365,6 +402,10 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
     its own z-bins by nearest-z match (DESI z⊂global, KS z⊂global).  ``sigma_zb_per_leg`` is
     a dict {leg.name: (n_z_leg,4,Kc,Tb)} of the emulator error vector ALREADY sliced to that
     leg's z-bins (or None for a data-cov-only fit).
+
+    ``rho_zb_per_leg`` (opt-in): a dict {leg.name: (n_z_leg,4,4,Kc,Tb)} of the CROSS-CLASS
+    block sliced to each leg's z-bins → C_emu uses the cross-class form (mirrors
+    ``sigma_zb_per_leg``). Default None → the diagonal σ path (UNCHANGED).
 
     Differentiable in (θ9, τ₀_global, α, a_SiIII, a_SiII, b_res).  ``return_parts`` →
     (logL, {name: (logL_leg, chi2_leg, dof_leg)}) for the χ²/dof diagnostic.
@@ -388,12 +429,15 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
         szb = None
         if sigma_zb_per_leg is not None:
             szb = sigma_zb_per_leg.get(leg.name)
+        rzb = None
+        if rho_zb_per_leg is not None:
+            rzb = rho_zb_per_leg.get(leg.name)
 
         P_model, C_total = predict_P_obs_on_leg(
             model, theta9, tau0_vec, alpha_hcd, pf_stats=pf_stats, dla_core=dla_core,
             cache_k=cache_k, leg=leg, sigma_zb=szb, alpha_centres=alpha_centres,
             cemu_inflate=cemu_inflate, a_SiIII=a_SiIII, a_SiII=a_SiII,
-            k_SiIII=k_SiIII, k_SiII=k_SiII, b_res=b_res)
+            k_SiIII=k_SiIII, k_SiII=k_SiII, b_res=b_res, rho_zb=rzb)
         r = jnp.asarray(leg.P_data) - P_model
         ll = gaussian_loglik(r, C_total, jitter=jitter)
         total = total + ll

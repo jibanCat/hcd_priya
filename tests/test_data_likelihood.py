@@ -132,7 +132,8 @@ def test_ks_cdata_symmetric_spd_and_matches_file():
     assert w.min() > 0, f"KS C_data not SPD; min eig {w.min():.3e}"
     # cross-check the loaded P/k against a fresh raw parse + the same cut
     z, k, P = DL._read_ks_p1d(KS_BASE + "final-conservative-p1d-karacayli_etal2021.txt")
-    keep = (z >= 2.0 - 1e-6) & (z <= 4.6 + 1e-6) & (k <= DL.CACHE_KMAX + 1e-9) & (k > DL.KS_DROP_KMAX)
+    # z_lo default is 2.4 (low-z KS dropped: DLA incompleteness + the n_s closure-bias fix); match it.
+    keep = (z >= 2.4 - 1e-6) & (z <= 4.6 + 1e-6) & (k <= DL.CACHE_KMAX + 1e-9) & (k > DL.KS_DROP_KMAX)
     assert np.allclose(leg.P_data, P[keep])
     assert np.allclose(leg.k, k[keep])
 
@@ -287,3 +288,149 @@ def test_meanflux_per_z_frac_sigma_array():
     fs = jnp.asarray([0.03, 0.05, 0.08])
     mu, sig = MF.meanflux_tau0_prior(z, frac_sigma=fs, center="becker13")
     assert np.allclose(np.asarray(sig), np.asarray(fs) * np.asarray(mu), rtol=1e-10)
+
+
+# ============================================================================ #
+#  Cross-class C_emu on the leg grid (the Leg-B real-cov path)
+# ============================================================================ #
+from hcd_analysis.emulator.likelihood import _KIM_AMP, _KIM_SLOPE  # noqa: E402
+
+
+def _diag_rho_leg(sigma_zb):
+    """ρ = diag(σ²): the (n_z,4,4,K,Tb) block with diagonal σ² and zero off-diagonals — the
+    construction that recovers the diagonal C_emu exactly (per-z analog of the xclass test)."""
+    n_z, n_c, K, Tb = sigma_zb.shape
+    rho = jnp.zeros((n_z, n_c, n_c, K, Tb))
+    for iz in range(n_z):
+        for cc in range(n_c):
+            rho = rho.at[iz, cc, cc].set(sigma_zb[iz, cc] ** 2)
+    return rho
+
+
+def _build_leg_for_xclass():
+    """A small synthetic single-z DataLeg (no real-data dependency) so the cross-class leg
+    binding is exercised stand-alone: 1 z at z=3.0, a handful of k inside the cache range."""
+    k = np.array([0.005, 0.01, 0.02, 0.03, 0.04], float)
+    N = k.shape[0]
+    z = np.array([3.0])
+    leg = DL.DataLeg(
+        name="SYN", z=z, z_unit=DL._z_unit(z), k=k, z_row=np.full(N, 3.0),
+        z_idx=np.zeros(N, int), P_data=np.zeros(N), C_data=np.eye(N) * 1e-2,
+        R_z=DL.desi_resolution_R(z), n_z=1, n_per_z=np.array([N]),
+        metals_on=False, resolution_on=False)
+    return leg
+
+
+def _emu_var_on_leg(c, leg, *, sigma_zb=None, rho_zb=None, tau0):
+    """diag(C_total − C_data) on the leg = the emu_var the binding placed on the diagonal."""
+    tau0_vec = jnp.asarray([tau0])
+    _, C_total = DL.predict_P_obs_on_leg(
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
+        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
+        alpha_centres=c["alpha_centres"], rho_zb=rho_zb)
+    return np.diag(np.asarray(C_total)) - np.diag(np.asarray(leg.C_data))
+
+
+def test_leg_xclass_diag_equals_diagonal_path_at_band_centre():
+    """ρ=diag(σ²) reproduces the diagonal emu_var on a leg EXACTLY at a τ₀-band centre (where
+    the τ₀-interp is the identity), the per-leg analog of test_xclass_cemu's band-centre pin."""
+    c = _emu_ctx()
+    leg = _build_leg_for_xclass()
+    sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
+    rho = _diag_rho_leg(sigma_zb)
+    for tb in range(c["n_tb"]):
+        tau0 = float(c["alpha_centres"][tb]) * _KIM_AMP * (1 + 3.0) ** _KIM_SLOPE
+        ev_diag = _emu_var_on_leg(c, leg, sigma_zb=sigma_zb, tau0=tau0)
+        ev_xcl = _emu_var_on_leg(c, leg, sigma_zb=sigma_zb, rho_zb=rho, tau0=tau0)
+        assert np.allclose(ev_diag, ev_xcl, rtol=1e-10, atol=1e-18), \
+            f"ρ=diag(σ²) must reproduce the diagonal leg emu_var at band centre tb={tb}"
+
+
+def test_leg_xclass_positive_offdiagonal_increases_emu_var():
+    """A POSITIVE off-diagonal ρ_cc' (coupled coefs share a sign: α>0 ⇒ all coef>0) INCREASES
+    the leg emu_var — the class-coupling inflation that fixes the diagonal under-sizing."""
+    c = _emu_ctx()
+    leg = _build_leg_for_xclass()
+    sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
+    base = _diag_rho_leg(sigma_zb)
+    tau0 = float(c["alpha_centres"][1]) * _KIM_AMP * (1 + 3.0) ** _KIM_SLOPE
+    ev_base = _emu_var_on_leg(c, leg, rho_zb=base, tau0=tau0)
+    # add a positive subDLA(2)–DLA(3) coupling ρ_23 = +0.6·√(ρ_22·ρ_33).
+    coup = 0.6 * jnp.sqrt(sigma_zb[0, 2] ** 2 * sigma_zb[0, 3] ** 2)        # (K,Tb)
+    rho_pos = base.at[0, 2, 3].set(coup).at[0, 3, 2].set(coup)
+    ev_pos = _emu_var_on_leg(c, leg, rho_zb=rho_pos, tau0=tau0)
+    assert np.all(ev_pos >= ev_base - 1e-15), "positive coupling must not lower the leg emu_var"
+    assert np.any(ev_pos > ev_base + 1e-12), "positive coupling must raise some leg emu_var bins"
+
+
+def test_leg_xclass_differentiable_in_tau0_and_alpha():
+    """∂/∂(τ₀,α) of a leg's emu_var stays finite on the cross-class path (the τ₀-interp of the
+    4×4 block must not poison the gradient — the rho_at_tau0 NaN-guard analog on the leg)."""
+    c = _emu_ctx()
+    leg = _build_leg_for_xclass()
+    sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
+    base = _diag_rho_leg(sigma_zb)
+    coup = 0.5 * jnp.sqrt(sigma_zb[0, 1] ** 2 * sigma_zb[0, 2] ** 2)
+    rho = base.at[0, 1, 2].set(coup).at[0, 2, 1].set(coup)
+
+    def total_emu(t0, a):
+        _, C = DL.predict_P_obs_on_leg(
+            c["model"], c["theta9"], jnp.asarray([t0]), a, pf_stats=c["pf"],
+            dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
+            alpha_centres=c["alpha_centres"], rho_zb=rho)
+        return jnp.sum(jnp.diag(C))
+
+    tau0 = float(c["alpha_centres"][1]) * _KIM_AMP * (1 + 3.0) ** _KIM_SLOPE
+    gt, ga = jax.grad(total_emu, argnums=(0, 1))(tau0, c["alpha_hcd"])
+    assert np.isfinite(float(gt)), "∂(leg emu_var)/∂τ₀ NaN (x-class)"
+    assert np.isfinite(np.asarray(ga)).all(), "∂(leg emu_var)/∂α NaN (x-class)"
+
+
+@pytest.mark.skipif(not (_have_desi and _have_ks), reason="data not present")
+def test_data_loglik_rho_per_leg_threads_and_increases_emu_var():
+    """The rho_zb_per_leg plumbing reaches each leg's C_emu: a positive-off-diagonal ρ raises
+    the per-leg χ² floor (larger C_emu ⇒ the same residual whitens to a smaller χ²) relative to
+    the diagonal-equivalent ρ=diag(σ²), and the joint logL stays finite + differentiable."""
+    c = _emu_ctx()
+    legs = [DL.load_desi_leg(), DL.load_ks_leg()]
+    z_global = np.unique(np.round(np.concatenate([legs[0].z, legs[1].z]), 6))
+    tau0_global = jnp.asarray(MF.becker13_tau0(jnp.asarray(z_global)))
+    szb = {leg.name: _sigma_zb_for_leg(leg, c["n_k"], c["n_tb"], c["rng"]) for leg in legs}
+    rho_diag = {leg.name: _diag_rho_leg(szb[leg.name]) for leg in legs}
+    rho_coup = {}
+    for leg in legs:
+        b = rho_diag[leg.name]
+        s = szb[leg.name]
+        coup = 0.6 * jnp.sqrt(s[:, 2] ** 2 * s[:, 3] ** 2)                 # (n_z,K,Tb)
+        for iz in range(leg.n_z):
+            b = b.at[iz, 2, 3].set(coup[iz]).at[iz, 3, 2].set(coup[iz])
+        rho_coup[leg.name] = b
+
+    def chi2(rho_per_leg):
+        _, parts = DL.data_loglik(
+            c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs, pf_stats=c["pf"],
+            dla_core=c["dla_core"], cache_k=c["cache_k"], z_global=z_global,
+            sigma_zb_per_leg=szb, alpha_centres=c["alpha_centres"],
+            rho_zb_per_leg=rho_per_leg, return_parts=True)
+        return {nm: parts[nm][1] for nm in parts}
+
+    chi2_diag = chi2(rho_diag)
+    chi2_coup = chi2(rho_coup)
+    # positive off-diagonal ⇒ larger C_emu ⇒ smaller χ² for the SAME residual, per leg.
+    for nm in chi2_diag:
+        assert chi2_coup[nm] <= chi2_diag[nm] + 1e-6, \
+            f"[{nm}] cross-class coupling must not raise χ² (it enlarges C_emu): " \
+            f"{chi2_coup[nm]:.4g} vs {chi2_diag[nm]:.4g}"
+    assert any(chi2_coup[nm] < chi2_diag[nm] - 1e-6 for nm in chi2_diag), \
+        "the cross-class coupling must materially change at least one leg's χ²"
+
+    # finite + differentiable joint logL on the cross-class path
+    def f(theta9, tau0, alpha):
+        return DL.data_loglik(
+            c["model"], theta9, tau0, alpha, legs, pf_stats=c["pf"], dla_core=c["dla_core"],
+            cache_k=c["cache_k"], z_global=z_global, sigma_zb_per_leg=szb,
+            alpha_centres=c["alpha_centres"], rho_zb_per_leg=rho_coup)
+    assert np.isfinite(float(f(c["theta9"], tau0_global, c["alpha_hcd"])))
+    gth, gt, ga = jax.grad(f, argnums=(0, 1, 2))(c["theta9"], tau0_global, c["alpha_hcd"])
+    assert np.isfinite(np.asarray(gth)).all() and np.isfinite(np.asarray(gt)).all() \
+        and np.isfinite(np.asarray(ga)).all(), "x-class joint logL grads must be finite"
