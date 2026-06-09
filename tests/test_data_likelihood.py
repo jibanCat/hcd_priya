@@ -1,8 +1,9 @@
 """Phase-C data-binding layer tests — REAL DESI DR1 + KODIAQ-SQUAD P1D legs.
 
 Pins (per the task spec):
-  Loaders:  DESI 12z×85k → post-cut shape; KS first-4-bins dropped + k≤cache_kmax; C_data
-            symmetric SPD; the npz/file reads match the on-disk values.
+  Loaders:  DESI 12z×85k → post-cut shape; KS keeps full klow≈0.0055 by default (drop_first4=False)
+            + k≤cache_kmax, opt-in drop_first4 still works; C_data symmetric SPD; the npz/file
+            reads match the on-disk values.
   Binding:  predict_P_obs_on_leg returns finite (P_model, C_total) on each leg; SPD C_total;
             jnp.interp round-trips the cache grid to itself (identity at cache k).
   Metals:   a_SiIII=0 → P unchanged; a_SiIII>0 → oscillation present; differentiable.
@@ -111,16 +112,25 @@ def test_desi_cdata_symmetric_spd():
 
 
 @pytest.mark.skipif(not _have_ks, reason="KS data not present")
-def test_ks_loader_drops_first4_and_caps_kmax():
+def test_ks_loader_keeps_full_klow_by_default_and_opt_in_drops_first4():
+    # (a) DEFAULT drop_first4=False (PI/KS-author decision 2026-06-09): keep the FULL native
+    # k-range from klow≈0.0055 s/km; still cap at the cache Nyquist 0.069.
     leg = DL.load_ks_leg()
     assert leg.name == "KS"
-    # first 4 k-bins are k ≤ 0.0157527 → dropped; lowest kept k is the 5th bin (~0.0198)
-    assert leg.k.min() > DL.KS_DROP_KMAX, f"first-4 not dropped: kmin={leg.k.min()}"
-    assert np.isclose(leg.k.min(), 0.0198315, atol=1e-4)
-    # cap at the cache Nyquist 0.069
+    assert np.isclose(leg.k.min(), 0.0055, atol=1e-4), \
+        f"default must keep klow≈0.0055, got kmin={leg.k.min()}"
+    assert leg.k.min() < DL.KS_DROP_KMAX, "default must NOT drop the low-k bins"
+    # cap at the cache Nyquist 0.069 (the 0.079/0.099 native bins are dropped)
     assert leg.k.max() <= DL.CACHE_KMAX + 1e-9
-    # z range 2.0–4.6
+    # z range default 2.4–4.6
     assert leg.z.min() >= 2.0 - 1e-6 and leg.z.max() <= 4.6 + 1e-6
+    # (b) OPT-IN drop_first4=True still works: drops the low-k bins → lowest kept k ≈ 0.0198
+    leg4 = DL.load_ks_leg(drop_first4=True)
+    assert leg4.k.min() > DL.KS_DROP_KMAX, f"drop_first4=True must drop low-k: kmin={leg4.k.min()}"
+    assert np.isclose(leg4.k.min(), 0.0198315, atol=1e-4)
+    assert leg4.k.max() <= DL.CACHE_KMAX + 1e-9
+    # the default leg has strictly more rows (the low-k bins re-added per z)
+    assert leg.k.shape[0] > leg4.k.shape[0]
 
 
 @pytest.mark.skipif(not _have_ks, reason="KS data not present")
@@ -133,7 +143,8 @@ def test_ks_cdata_symmetric_spd_and_matches_file():
     # cross-check the loaded P/k against a fresh raw parse + the same cut
     z, k, P = DL._read_ks_p1d(KS_BASE + "final-conservative-p1d-karacayli_etal2021.txt")
     # z_lo default is 2.4 (low-z KS dropped: DLA incompleteness + the n_s closure-bias fix); match it.
-    keep = (z >= 2.4 - 1e-6) & (z <= 4.6 + 1e-6) & (k <= DL.CACHE_KMAX + 1e-9) & (k > DL.KS_DROP_KMAX)
+    # drop_first4=False is now the default → NO low-k drop; keep z≥2.4 + k≤cache_kmax only.
+    keep = (z >= 2.4 - 1e-6) & (z <= 4.6 + 1e-6) & (k <= DL.CACHE_KMAX + 1e-9)
     assert np.allclose(leg.P_data, P[keep])
     assert np.allclose(leg.k, k[keep])
 

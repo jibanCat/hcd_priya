@@ -52,10 +52,38 @@ NUTS-healthy, and (b) extrapolate the cost of a full coverage run before request
 | ESS / sample | n_s 0.30, A_p 0.35, τ₀(z≈3) 0.99 |
 | leapfrogs/sample | 31 (≈22.5 ms/leapfrog) |
 
-**Cost extrapolation** (target ESS≈400/param; production mtd=10 → leapfrog inflation ×4.7; wall≈CPU-h;
-embarrassingly parallel over mocks): **≈2.4 CPU-h/mock → N=99 ≈ 245 CPU-h, N=600 ≈ 1490 CPU-h** (incl. the
-postprocess fix below). **Both are well within the ~4000 CPU-h cavestru0 budget.** 0 divergences + 0.99
+**Cost extrapolation (smoke, optimistic — SUPERSEDED by MF-REPROFILE-02 §1.5):** ≈2.4 CPU-h/mock. The smoke
+ran at mtd=5 (trees capped); the firm mtd=10 re-profile (§1.5) gives **~6 CPU-h/mock**. 0 divergences + 0.99
 accept ⇒ the 25-dim dense-mass geometry is healthy through the MF forward.
+
+## 1.5 Run MF-REPROFILE-02 — firm cost at production mtd=10 + KS klow=0.0055 (2026-06-09)
+
+Two changes since MF-SMOKE-01: (a) **KS now keeps its full native k-range from klow=0.0055** (`drop_first4=
+False`, PI/KS-author decision — the Fig-11 caution is misleading); the all-folds n_s bias **stays in-gate**
+(+0.035σ vs +0.030σ old-KS; the added low-k bins are emulator-clean,
+`emu_bias_allfolds_zlo24_kslow.txt`). KS leg = 12 z × 11 k = **132 rows**, k∈[0.0055, 0.063]; golden
+regenerated; 70 tests green; mf=False byte-identical. (b) The **`get_samples` postprocess waste is fixed**
+(`closure_legb._legb_reconstruct_deterministics` host-side; `fast_postprocess=True` default; byte-identical
+to the replay, max|Δ|=0; removes the 237.6 s/mock).
+
+**Firm profile** (mtd=10, dense-mass 25-dim, 813 data rows = DESI 681 + KS 132; `scripts/profile_legb_mtd10.py`,
+`figures/analysis/05_likelihood/legb_mtd10_profile.txt`): per-leapfrog 235 ms; leapfrogs/sample 88.6
+(**0/60 max-depth hits** at mtd=10 — trees do NOT saturate, unlike the mtd=5 smoke); ESS/sample n_s 0.444,
+A_p 0.446, τ₀ 0.630; **0 divergences**, accept 0.974 (the new low-k KS bins did not degrade the geometry).
+
+**FIRM cost** (target ESS≥400 on n_s → ~902 samples; per-sample 20.8 s; 1 chain ≈ 1 core ⇒ wall≈CPU-h):
+**~6 CPU-h/mock.**
+
+| warmup | per-mock | N=99 | N=300 | N=600 |
+|---|---|---|---|---|
+| 40 (measured) | 5.45 CPU-h | 540 | 1635 | 3271 |
+| 150 (realistic) | 6.1 CPU-h | 602 | 1825 | 3651 |
+| 250 (conservative) | 6.7 CPU-h | 660 | 2010 | 3999 |
+
+**N=99 ≈ 600 CPU-h (safe), N≈300 ≈ 1.6–2.0k CPU-h (comfortable), N=600 ≈ 3.65–4.0k CPU-h (AT the ~4000
+cavestru0 ceiling — not safely affordable without levers** — fewer warmup, lower ESS target, or fewer mocks).
+(Note: a first 100+100 mtd=10 run was killed after ~19 CPU-h on a pathological deep-tree warmup; the firm
+numbers are from a budget-respecting 40+60 re-run.)
 
 > **Efficiency flag for the production run:** numpyro `mcmc.get_samples()` JIT-replays the full MF
 > likelihood to recover the `deterministic` sites (`tau0_vec`, `alpha_hcd_z`, `alpha_dla`) — **237.6 s/mock**,
@@ -97,8 +125,9 @@ affordable (~245 CPU-h @ N=99). Recovery is not interpretable at n=1/ESS≈20.
 
 The certification run. **Gates:** coverage ≥ nominal (per-param rank-uniformity is diagnostic-only for
 Leg-B) **and** |bias| < 0.2σ on **A_p AND n_s**, through the MF forward + floor, KS z_lo=2.4.
-- **Scale:** N ≥ 99 (L_FLOOR=99 for the ECDF diagnostic; the budget memory wants N≥99 with production
-  samples). N=99 ≈ 245 CPU-h; N=600 ≈ 1490 CPU-h. SLURM-only, sharded per-mock (`fold_in` seeding).
+- **Scale (FIRM, §1.5):** N ≥ 99 (L_FLOOR=99 for the ECDF diagnostic). **N=99 ≈ 600 CPU-h (safe); N≈300 ≈
+  1.6–2.0k (comfortable); N=600 ≈ 3.65–4.0k (at the ~4000 ceiling — needs levers).** SLURM-only, sharded
+  per-mock (`fold_in` seeding); `fast_postprocess=True` now default (postprocess waste removed).
 - **Pre-launch:** (i) the get_samples postprocess fix (§1.1); (ii) confirm SLURM account + N with the PI;
   (iii) bump n_samples so the thinned L ≥ 99 given ESS≈0.3/sample (so ~1300+ samples/param → profile the
   real per-mock wall at production mtd before the full fan-out).
@@ -110,6 +139,11 @@ Leg-B) **and** |bias| < 0.2σ on **A_p AND n_s**, through the MF forward + floor
 ---
 
 ## Log
-- **MF-SMOKE-01** (2026-06-09): profiling mock, fold 0. Healthy, affordable (~245 CPU-h @ N=99), floor sane
-  (χ²/dof≈1). Not a verdict (n=1). Artifacts: `figures/analysis/05_likelihood/mf_closure_smoke.{txt,npz}` +
-  the 3 figures above; `scripts/profile_mf_closure_smoke.py`.
+- **MF-SMOKE-01** (2026-06-09): profiling mock, fold 0. Healthy, floor sane (χ²/dof≈1). Not a verdict (n=1).
+  Cost (mtd=5, optimistic) superseded by MF-REPROFILE-02. Artifacts:
+  `figures/analysis/05_likelihood/mf_closure_smoke.{txt,npz}` + the 3 figures above; `scripts/profile_mf_closure_smoke.py`.
+- **MF-REPROFILE-02** (2026-06-09): KS klow=0.0055 (full range; bias stays in-gate +0.035σ), `get_samples`
+  postprocess fixed, firm mtd=10 profile → **~6 CPU-h/mock** (N=99 ≈600, N=600 ≈3.65–4.0k = at ceiling).
+  0 divergences, accept 0.974. Artifacts: `figures/analysis/05_likelihood/legb_mtd10_profile.{txt,npz}`,
+  `figures/analysis/04_emulator/emu_bias_allfolds_zlo24_kslow.{txt,png}`; `scripts/profile_legb_mtd10.py`,
+  `scripts/diag_emu_bias_allfolds_zlo24_kslow.py`.

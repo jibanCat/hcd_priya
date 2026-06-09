@@ -64,6 +64,9 @@ def main():
     ap.add_argument("--mock", type=int, default=0, help="which held-out sim index")
     ap.add_argument("--dense-mass", action="store_true", default=True)
     ap.add_argument("--diag-mass", action="store_true")
+    ap.add_argument("--legacy-postprocess", action="store_true",
+                    help="restore numpyro's default deterministic-replay postprocess "
+                         "(for an A/B timing of the MF-SMOKE-01 efficiency fix)")
     args = ap.parse_args()
     dense_mass = (not args.diag_mass)
 
@@ -99,11 +102,26 @@ def main():
     kernel = NUTS(lambda: C._legb_model(ctx, mock_legs, core_per_leg),
                   dense_mass=bool(dense_mass), target_accept_prob=0.9,
                   max_tree_depth=int(args.max_tree_depth), init_strategy=init_to_median)
+    # MF-SMOKE-01 EFFICIENCY FIX: numpyro's DEFAULT postprocess re-runs the FULL _legb_model
+    # (incl. the 681×681 + 132×132 Cholesky loglik factor) once per collected sample just to
+    # recover the deterministic sites (tau0_vec, alpha_dla, alpha_hcd_z) — 237.6 s/mock waste.
+    # Pass a TRANSFORM-ONLY postprocess (constrain via the cheap priors-only model) and
+    # reconstruct the deterministics host-side (byte-identical, verified rtol=0). The
+    # --legacy-postprocess flag restores the replay for an A/B timing.
+    postprocess_fn = None
+    if not args.legacy_postprocess:
+        from numpyro.infer.util import constrain_fn
+
+        def postprocess_fn(z):
+            return constrain_fn(lambda: C._legb_priors_only(ctx), (), {}, z,
+                                return_deterministic=False)
     mcmc = MCMC(kernel, num_warmup=int(args.n_warmup), num_samples=int(args.n_samples),
-                num_chains=1, progress_bar=False)
+                num_chains=1, progress_bar=False, postprocess_fn=postprocess_fn)
 
     print(f"[mf-smoke] NUTS warmup={args.n_warmup} samples={args.n_samples} "
-          f"dense_mass={dense_mass} max_tree_depth={args.max_tree_depth} — RUNNING…")
+          f"dense_mass={dense_mass} max_tree_depth={args.max_tree_depth} "
+          f"postprocess={'LEGACY-replay' if args.legacy_postprocess else 'FAST-transform-only'} "
+          f"— RUNNING…")
     t0 = time.perf_counter()
     # numpyro HMCState exposes "diverging", "num_steps" (leapfrog count/sample), "accept_prob",
     # "mean_accept_prob". tree DEPTH is NOT a field → derive it from num_steps: a NUTS tree of
@@ -117,7 +135,12 @@ def main():
     print("[mf-smoke] extracting samples…")
     te = time.perf_counter()
     samples = {k: np.asarray(v) for k, v in mcmc.get_samples().items()}
-    print(f"[mf-smoke]   get_samples in {time.perf_counter()-te:.1f}s")
+    if not args.legacy_postprocess:
+        # the fast postprocess skipped the deterministic replay → reconstruct host-side.
+        samples = {k: np.asarray(v)
+                   for k, v in C._legb_reconstruct_deterministics(ctx, samples).items()}
+    t_postprocess = time.perf_counter() - te
+    print(f"[mf-smoke]   get_samples (+host-side dets) in {t_postprocess:.1f}s")
     te = time.perf_counter()
     extra = {k: np.asarray(v) for k, v in mcmc.get_extra_fields().items()}
     print(f"[mf-smoke]   get_extra_fields in {time.perf_counter()-te:.1f}s; computing ESS…")
@@ -190,6 +213,8 @@ def main():
     A("")
     A("## profiling")
     A(f"  wall-clock (sampling+warmup, 1 chain): {wall:.1f} s")
+    A(f"  postprocess (get_samples + host-side dets): {t_postprocess:.1f} s  "
+      f"[{'LEGACY replay' if args.legacy_postprocess else 'FAST transform-only (MF-SMOKE-01 fix)'}]")
     A(f"  divergences: {n_div} / {n_samp}  (rate {100.0*n_div/max(n_samp,1):.1f}%)")
     A(f"  max_tree_depth hits: {int((tree_depth >= args.max_tree_depth).sum())} / {n_samp}  "
       f"(mean depth {np.mean(tree_depth) if tree_depth.size else np.nan:.2f}, "

@@ -40,6 +40,7 @@ import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 from numpyro.infer import NUTS, MCMC, init_to_median
+from numpyro.infer.util import constrain_fn
 
 from . import train as T
 from .data import load_cache, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS
@@ -552,20 +553,76 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
         ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg))
 
 
+def _legb_priors_only(ctx):
+    """The SAME prior sample sites as ``_legb_model`` but with NO ``numpyro.factor`` loglik and
+    NO deterministic sites — used only as the model passed to ``constrain_fn`` in the cheap
+    transform-only postprocess (below). Tracing this is cheap (priors, no 681×681 Cholesky)."""
+    zg = jnp.asarray(ctx.z_global)
+    numpyro.sample("theta_unit", dist.Uniform(jnp.zeros(9), jnp.ones(9)).to_event(1))
+    kim = _kim(zg)
+    numpyro.sample("alpha_ladder",
+                   dist.Normal(ctx.tau0_mu / kim, ctx.tau0_sigma / kim).to_event(1))
+    numpyro.sample("alpha_lls", dist.Normal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]))
+    numpyro.sample("alpha_subdla", dist.Normal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1]))
+    numpyro.sample("alpha_dla_raw", dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
+
+
+def _legb_reconstruct_deterministics(ctx, samples):
+    """Reconstruct the three ``numpyro.deterministic`` sites of ``_legb_model``
+    (``tau0_vec``, ``alpha_dla``, ``alpha_hcd_z``) host-side from the raw latent samples —
+    so the cheap (priors-only) postprocess can SKIP the per-sample full-model deterministic
+    replay (the 237.6 s/mock waste flagged in MF-SMOKE-01) yet return a samples dict
+    BYTE-IDENTICAL to numpyro's default ``get_samples()``. Returns a NEW dict (the input plus
+    the three deterministic keys)."""
+    zg = jnp.asarray(ctx.z_global)
+    kim = _kim(zg)
+    alpha_ladder = jnp.asarray(samples["alpha_ladder"])              # (L, nZg)
+    tau0_vec = alpha_ladder * kim
+    alpha_dla = jax.nn.softplus(jnp.asarray(samples["alpha_dla_raw"]))  # (L,)
+    alpha_pivot = jnp.stack([jnp.asarray(samples["alpha_lls"]),
+                             jnp.asarray(samples["alpha_subdla"]),
+                             alpha_dla], axis=-1)                     # (L, 3)
+    shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** jnp.asarray(HCD_LIT_OVER_SIM_SLOPE)
+    alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg[None, :, :]      # (L, nZg, 3)
+    out = dict(samples)
+    out["tau0_vec"] = tau0_vec
+    out["alpha_dla"] = alpha_dla
+    out["alpha_hcd_z"] = alpha_hcd_z
+    return out
+
+
 def _run_nuts_legb(ctx, mock_legs, dla_core_per_leg, *, n_warmup, n_samples, seed,
-                   target_accept=0.9, dense_mass=True, max_tree_depth=10):
+                   target_accept=0.9, dense_mass=True, max_tree_depth=10,
+                   fast_postprocess=True):
     """NUTS on the Leg-B model. PRODUCTION uses ``dense_mass=True`` (the [θ,τ₀] correlation is
     the physics) + ``max_tree_depth=10``. The SMOKE caps ``max_tree_depth`` (and may use a
     diagonal mass) to bound the per-step leapfrog count — the dense-mass adaptation on the
     26-dim θ+τ₀+α posterior is expensive (early warmup hits the max tree depth before the
-    mass matrix conditions the geometry). The cap only affects efficiency, not correctness."""
+    mass matrix conditions the geometry). The cap only affects efficiency, not correctness.
+
+    EFFICIENCY (MF-SMOKE-01 fix): numpyro's DEFAULT postprocess re-runs the FULL ``_legb_model``
+    (incl. the 681×681 + 132×132 Cholesky ``numpyro.factor`` loglik) once per collected sample
+    just to recover the ``deterministic`` sites — 237.6 s/mock of pure waste. With
+    ``fast_postprocess=True`` (default) we instead pass a TRANSFORM-ONLY postprocess that
+    constrains via the cheap PRIORS-ONLY model (no loglik factor) and reconstruct ``tau0_vec`` /
+    ``alpha_dla`` / ``alpha_hcd_z`` host-side. The returned samples dict is byte-identical to the
+    default (verified rtol=0). Set ``fast_postprocess=False`` to restore the legacy replay."""
     kernel = NUTS(lambda: _legb_model(ctx, mock_legs, dla_core_per_leg),
                   dense_mass=bool(dense_mass), target_accept_prob=float(target_accept),
                   max_tree_depth=int(max_tree_depth), init_strategy=init_to_median)
+    postprocess_fn = None
+    if fast_postprocess:
+        # numpyro calls postprocess_fn(z_dict) per collected sample; constrain via the
+        # priors-only trace (cheap) — no deterministic replay, no loglik factor.
+        def postprocess_fn(z):
+            return constrain_fn(lambda: _legb_priors_only(ctx), (), {}, z,
+                                return_deterministic=False)
     mcmc = MCMC(kernel, num_warmup=int(n_warmup), num_samples=int(n_samples),
-                num_chains=1, progress_bar=False)
+                num_chains=1, progress_bar=False, postprocess_fn=postprocess_fn)
     mcmc.run(jax.random.PRNGKey(int(seed)), extra_fields=("diverging",))
     samples = mcmc.get_samples()
+    if fast_postprocess:
+        samples = _legb_reconstruct_deterministics(ctx, samples)
     diverging = np.asarray(mcmc.get_extra_fields().get("diverging", np.zeros(0, bool)))
     return samples, int(diverging.sum())
 

@@ -154,15 +154,17 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
 
 
 def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
-                *, z_lo=2.4, z_hi=4.6, drop_first4=True, k_max=CACHE_KMAX,
+                *, z_lo=2.4, z_hi=4.6, drop_first4=False, k_max=CACHE_KMAX,
                 metals_on=False, resolution_on=False, mf_floor_on=True):
     """Load KODIAQ-SQUAD conservative-mode P1D → a post-cut ``DataLeg``.
 
     Format: pipe-separated ``final-conservative-p1d-karacayli_etal2021.txt`` (z|k|P|e) +
     the 182×182 ``final-conservative-covariance-karacayli_etal2021.txt`` (z-major,
-    z∈[2.0,4.6], 13 k-bins/z). Cuts: drop the first 4 k-bins (k ≤ 0.0158; Karaçaylı
-    2306.06316 Fig 11 underestimate the error there) + cut k ≤ k_max=0.069 (the emulator
-    Nyquist; the analysis caps k<0.06 — note KS is HR but we cap at the cache k_max).
+    z∈[2.0,4.6], 13 k-bins/z). Cuts: keep the FULL native k-range from **klow=0.0055 s/km**
+    (``drop_first4=False`` default — PI/KS-author decision 2026-06-09: the Karaçaylı 2306.06316
+    Fig-11 "first-4-bins error underestimate" caution is MISLEADING; keep those bins) + cut
+    k ≤ k_max=0.069 (the emulator Nyquist; the analysis caps k<0.06). ``drop_first4=True`` is
+    available as opt-in.
     ``z_lo`` defaults to **2.4** (drops the z=2.0+2.2 KS bins, which carried ~86% of a −0.65σ
     coherent n_s closure bias; dropping z<2.4 removes it → +0.04σ). z=2.4 is the MINIMAL
     closure-clean cut; low-z KS P1D is compromised by DLA-finder incompleteness, and the
