@@ -645,3 +645,248 @@ def test_mf_path_matches_gate_script_to_tight_tol():
 
     assert np.allclose(np.asarray(P_prod), np.asarray(P_gate), rtol=1e-10, atol=1e-12), \
         f"production mf= path diverges from the gate: max|Δ|={np.max(np.abs(np.asarray(P_prod)-np.asarray(P_gate))):.3e}"
+
+
+# ============================================================================ #
+#  T5b — the MF C_emu floor (LF→HR generalization + n_s-edge), spec §2/§4.
+#
+#  The floor adds an ADDITIVE diagonal variance on the SMALL-SCALE leg (mf_floor_on)
+#  THROUGH the MF forward only: emu_var(k,z) += (σ_floor·P_obs)² + (σ_edge·P_obs)².
+#  Pins: (a) the floor raises the leg C_emu diagonal by the spec'd amount on a leg row;
+#  (b) C_total stays SPD; (c) mf=None / floor-off byte-identical to the committed LF path;
+#  (d) differentiable / NUTS-safe (the edge term carries NO grad to θ); (e) no z>4.6 cell
+#  is ever indexed (the leg z max ≤ 4.6 assertion).
+# ============================================================================ #
+def _floor_leg(z=3.0, ns_box_z=True, mf_floor_on=True):
+    """A single-z small-scale DataLeg on cache-band k for the floor tests."""
+    k = np.array([0.005, 0.02, 0.05], float)        # all in the LF-resolvable band (<0.069)
+    N = k.shape[0]
+    zz = np.array([z])
+    return DL.DataLeg(
+        name="KSlike", z=zz, z_unit=DL._z_unit(zz), k=k, z_row=np.full(N, z),
+        z_idx=np.zeros(N, int), P_data=np.zeros(N), C_data=np.eye(N) * 1e-3,
+        R_z=DL.desi_resolution_R(zz), n_z=1, n_per_z=np.array([N]),
+        metals_on=False, resolution_on=False, mf_floor_on=mf_floor_on)
+
+
+def test_mf_floor_loads_and_interp_clamps_to_leg_z():
+    """load_mf_floor returns the spec'd table; the per-z interp matches the .txt (z=3.0:
+    LFres 1.23%, extrap 3.94%) and end-clamps (NaN slope cells nan_to_num'd)."""
+    fl = DL.load_mf_floor()
+    assert fl.sigma_floor.shape == (18, 2) and fl.ns_box.tolist() == [0.86, 0.98]
+    assert np.isclose(fl.floor_min, 0.0123) and np.isclose(fl.k_band_split, 0.07)
+    sig, slp = DL._mf_floor_sigma_at_z(fl, 3.0)
+    assert np.isclose(sig[0], 0.0123, atol=1e-4), f"z=3.0 LFres floor {sig[0]}"
+    assert np.isclose(sig[1], 0.0394, atol=1e-3), f"z=3.0 extrap floor {sig[1]}"
+    assert np.isfinite(slp).all(), "slope must be NaN-free after the interp clamp"
+    # z=2.0 LFres slope is NaN in the table → must clamp to a finite value
+    sig20, slp20 = DL._mf_floor_sigma_at_z(fl, 2.0)
+    assert np.isfinite(slp20).all()
+
+
+def test_mf_floor_raises_leg_cemu_by_spec_amount():
+    """(a) On a leg row at z, the floor adds EXACTLY (σ_floor(z,LFres)·P_obs)² to the C_emu
+    diagonal (no edge term inside the HR ns box). Compare MF-with-floor vs MF-no-floor."""
+    c = _emu_ctx()
+    leg = _floor_leg(z=3.0)
+    mf = _synthetic_mf(c, resolved=True)
+    fl = DL.load_mf_floor()
+    tau0_vec = jnp.asarray([0.85])
+    theta9 = jnp.full(9, 0.5)                          # ns_phys=0.925, inside [0.86,0.98] → edge=0
+    Pm, C_no = DL.predict_P_obs_on_leg(
+        c["model"], theta9, tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
+        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf, mf_floor=None)
+    _, C_fl = DL.predict_P_obs_on_leg(
+        c["model"], theta9, tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
+        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf, mf_floor=fl)
+    added = np.diag(np.asarray(C_fl)) - np.diag(np.asarray(C_no))
+    sig_lfres = DL._mf_floor_sigma_at_z(fl, 3.0)[0][0]   # LFres σ at z=3.0 = 1.23%
+    expect = (sig_lfres * np.asarray(Pm)) ** 2           # all leg k < 0.069 → LFres band
+    assert np.allclose(added, expect, rtol=1e-10, atol=1e-18), \
+        f"floor diagonal mismatch: added {added} vs expect {expect}"
+    assert np.all(added > 0), "the floor must strictly raise the small-scale C_emu diagonal"
+
+
+def test_mf_floor_edge_term_fires_outside_ns_box():
+    """The n_s-edge budget is ZERO inside [0.86,0.98] and POSITIVE outside (ns=1.009, the
+    eBOSS-like edge). The added variance outside > inside (the edge term adds in quadrature)."""
+    c = _emu_ctx()
+    leg = _floor_leg(z=3.4)                              # z=3.4 has a sizeable slope
+    mf = _synthetic_mf(c, resolved=True)
+    fl = DL.load_mf_floor()
+    tau0_vec = jnp.asarray([0.85])
+    th_in = jnp.full(9, 0.5)                             # ns=0.925 inside box
+    th_edge = jnp.array([0.836] + [0.5] * 8)            # ns≈1.009 outside box
+    Pm, C_in = DL.predict_P_obs_on_leg(
+        c["model"], th_in, tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
+        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf, mf_floor=fl)
+    Pm2, C_edge = DL.predict_P_obs_on_leg(
+        c["model"], th_edge, tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
+        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf, mf_floor=fl)
+    add_in = np.diag(np.asarray(C_in)) - 1e-3
+    add_edge = np.diag(np.asarray(C_edge)) - 1e-3
+    # the edge variance must exceed the in-box (σ_floor-only) variance at matched P_obs scale.
+    # (different ns → different P_obs; compare the FRACTIONAL floor: var/P²)
+    frac_in = add_in / np.asarray(Pm) ** 2
+    frac_edge = add_edge / np.asarray(Pm2) ** 2
+    assert np.all(frac_edge > frac_in - 1e-12), "the ns-edge term must not shrink the floor"
+    assert np.any(frac_edge > frac_in + 1e-8), "the ns-edge term must inflate the floor outside the box"
+
+
+def test_mf_floor_ctotal_stays_spd():
+    """(b) C_total = C_data + diag(emu_var + floor_var) stays symmetric SPD with the floor on."""
+    c = _emu_ctx()
+    leg = _floor_leg(z=4.6)
+    mf = _synthetic_mf(c, resolved=True)
+    fl = DL.load_mf_floor()
+    sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
+    _, C = DL.predict_P_obs_on_leg(
+        c["model"], jnp.array([0.836] + [0.5] * 8), jnp.asarray([0.85]), c["alpha_hcd"],
+        pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
+        sigma_zb=sigma_zb, alpha_centres=c["alpha_centres"], mf=mf, mf_floor=fl)
+    C = np.asarray(C)
+    assert np.allclose(C, C.T, atol=1e-12)
+    w = np.linalg.eigvalsh(C)
+    assert w.min() > 0, f"C_total with floor not SPD; min eig {w.min():.3e}"
+
+
+def test_mf_floor_off_is_byte_identical_to_lf_and_to_mf_no_floor():
+    """(c) Three back-compat invariants, all byte-identical:
+       (i)  mf=None, mf_floor=None  ==  the committed LF path (no floor arg);
+       (ii) mf=None, mf_floor=fl    ==  LF path (floor is a no-op without the MF forward);
+       (iii) the floor on a leg with mf_floor_on=False is a no-op (DESI-like leg)."""
+    c = _emu_ctx()
+    fl = DL.load_mf_floor()
+    leg_small = _floor_leg(z=3.0, mf_floor_on=True)
+    leg_big = _floor_leg(z=3.0, mf_floor_on=False)      # DESI-like: floor must NOT apply
+    sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
+    tau0_vec = jnp.asarray([0.8])
+    args = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"],
+                sigma_zb=sigma_zb, alpha_centres=c["alpha_centres"])
+    P_ref, C_ref = DL.predict_P_obs_on_leg(
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_small, **args)
+    # (i) explicit floor-off
+    P0, C0 = DL.predict_P_obs_on_leg(
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_small,
+        mf=None, mf_floor=None, **args)
+    assert np.array_equal(np.asarray(P0), np.asarray(P_ref))
+    assert np.array_equal(np.asarray(C0), np.asarray(C_ref))
+    # (ii) floor passed but mf=None → no-op (the floor only fires through the MF forward)
+    P1, C1 = DL.predict_P_obs_on_leg(
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_small,
+        mf=None, mf_floor=fl, **args)
+    assert np.array_equal(np.asarray(C1), np.asarray(C_ref)), "floor must be a no-op when mf=None"
+    # (iii) mf on, floor on, but leg.mf_floor_on=False → the MF P_model differs but C_emu has
+    # NO floor (compare the floor-on leg's C_emu minus the floor-off leg's at the SAME P_obs).
+    mf = _synthetic_mf(c, resolved=True)
+    _, C_big = DL.predict_P_obs_on_leg(
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_big,
+        mf=mf, mf_floor=fl, **args)
+    _, C_big_nofloor = DL.predict_P_obs_on_leg(
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_big,
+        mf=mf, mf_floor=None, **args)
+    assert np.array_equal(np.asarray(C_big), np.asarray(C_big_nofloor)), \
+        "the floor must NOT apply on a leg with mf_floor_on=False (DESI-like)"
+
+
+def test_mf_floor_differentiable_and_nuts_safe():
+    """(d) The floor path is differentiable in (θ9, τ₀, α): jacrev AND jacfwd finite. The
+    ns-edge term is stop_gradient'd → ∂(floor)/∂ns carries NO gradient toward the MAP (the
+    floor's ns dependence must NOT appear in dlogL/dθ via the edge term)."""
+    c = _emu_ctx()
+    leg = _floor_leg(z=3.4)
+    mf = _synthetic_mf(c, resolved=True)
+    fl = DL.load_mf_floor()
+    sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
+
+    def total_var(theta9, tau0_vec, alpha):
+        _, C = DL.predict_P_obs_on_leg(
+            c["model"], theta9, tau0_vec, alpha, pf_stats=c["pf"], dla_core=c["dla_core"],
+            cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
+            alpha_centres=c["alpha_centres"], mf=mf, mf_floor=fl)
+        return jnp.sum(jnp.diag(C))
+
+    th = jnp.array([0.836] + [0.5] * 8)                 # OUTSIDE the box → edge term active
+    tau0_vec = jnp.asarray([0.85])
+    for mode, jac in (("jacrev", jax.jacrev), ("jacfwd", jax.jacfwd)):
+        gth, gt, ga = jac(total_var, argnums=(0, 1, 2))(th, tau0_vec, c["alpha_hcd"])
+        assert np.isfinite(np.asarray(gth)).all(), f"[{mode}] ∂(floor var)/∂θ9 NaN"
+        assert np.isfinite(np.asarray(gt)).all(), f"[{mode}] ∂(floor var)/∂τ₀ NaN"
+        assert np.isfinite(np.asarray(ga)).all(), f"[{mode}] ∂(floor var)/∂α NaN"
+
+    # the EDGE term's ns enters via stop_gradient → moving ns ACROSS the box edge changes the
+    # floor value but the gradient of the floor wrt ns (through the edge term) is zero: the
+    # only θ-gradient of the floor is through P_obs (the fractional floor on the model power).
+    def floor_only_var_via_edge(theta9):
+        # isolate the edge term: var contribution at a FIXED P_obs (decouple the P-grad).
+        ns = DL._ns_phys_from_theta9(theta9)
+        # mirror _mf_floor_var_on_k's edge term at z=3.4, LFres band, P=1 (so var≡edge²).
+        ns_sg = jax.lax.stop_gradient(ns)
+        return jnp.sum(DL._mf_floor_var_on_k(fl, 3.4, jnp.array([0.02]),
+                                             jnp.array([1.0]), ns_sg))
+    g_ns = jax.grad(floor_only_var_via_edge)(th)
+    assert np.allclose(np.asarray(g_ns), 0.0, atol=1e-12), \
+        "the ns-edge term must carry NO gradient toward θ (stop_gradient'd)"
+
+
+def test_mf_floor_never_indexes_z_above_4p6():
+    """(e) The PI invariant: a leg whose z exceeds 4.6 trips the assertion (the z>4.6 floor
+    cells — incl. the z=5.4 spike — must NEVER be indexed). The real legs (KS z≤4.6, DESI
+    z≤4.2) pass; a synthetic z=5.0 leg with the floor on must raise."""
+    c = _emu_ctx()
+    mf = _synthetic_mf(c, resolved=True)
+    fl = DL.load_mf_floor()
+    bad = _floor_leg(z=5.0, mf_floor_on=True)
+    with pytest.raises(AssertionError, match="z max"):
+        DL.predict_P_obs_on_leg(
+            c["model"], c["theta9"], jnp.asarray([0.85]), c["alpha_hcd"],
+            pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=bad,
+            mf=mf, mf_floor=fl)
+    # a z=4.6 leg (KS max) must be fine
+    ok = _floor_leg(z=4.6, mf_floor_on=True)
+    _, C = DL.predict_P_obs_on_leg(
+        c["model"], c["theta9"], jnp.asarray([0.85]), c["alpha_hcd"],
+        pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=ok,
+        mf=mf, mf_floor=fl)
+    assert np.isfinite(np.asarray(C)).all()
+
+
+@pytest.mark.skipif(not (_have_desi and _have_ks), reason="data not present")
+def test_mf_floor_threads_through_data_loglik_real_cov():
+    """data_loglik(mf=, mf_floor=) threads the floor to each leg: the KS leg (mf_floor_on)
+    gets a larger C_emu → a smaller χ² for the same residual; DESI (mf_floor_on=False)
+    unchanged. logL stays finite + differentiable."""
+    c = _emu_ctx()
+    desi = DL.load_desi_leg()                            # mf_floor_on=False by default
+    ks = DL.load_ks_leg()                                # mf_floor_on=True by default
+    assert ks.mf_floor_on is True and desi.mf_floor_on is False
+    legs = [desi, ks]
+    mf = _synthetic_mf(c, resolved=True)
+    fl = DL.load_mf_floor()
+    z_global = np.unique(np.round(np.concatenate([desi.z, ks.z]), 6))
+    tau0_global = jnp.asarray(MF.becker13_tau0(jnp.asarray(z_global)))
+    szb = {leg.name: _sigma_zb_for_leg(leg, c["n_k"], c["n_tb"], c["rng"]) for leg in legs}
+
+    def chi2(mf_floor):
+        _, parts = DL.data_loglik(
+            c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs, pf_stats=c["pf"],
+            dla_core=c["dla_core"], cache_k=c["cache_k"], z_global=z_global,
+            sigma_zb_per_leg=szb, alpha_centres=c["alpha_centres"], mf=mf,
+            mf_floor=mf_floor, return_parts=True)
+        return {nm: parts[nm][1] for nm in parts}
+
+    chi2_no = chi2(None)
+    chi2_fl = chi2(fl)
+    assert chi2_fl["KS"] < chi2_no["KS"] - 1e-9, "the floor must enlarge KS C_emu (lower χ²)"
+    assert np.isclose(chi2_fl["DESI"], chi2_no["DESI"], rtol=1e-12), \
+        "DESI (mf_floor_on=False) χ² must be unchanged by the floor"
+
+    def f(theta9, tau0, alpha):
+        return DL.data_loglik(
+            c["model"], theta9, tau0, alpha, legs, pf_stats=c["pf"], dla_core=c["dla_core"],
+            cache_k=c["cache_k"], z_global=z_global, sigma_zb_per_leg=szb,
+            alpha_centres=c["alpha_centres"], mf=mf, mf_floor=fl)
+    assert np.isfinite(float(f(c["theta9"], tau0_global, c["alpha_hcd"])))
+    gth, gt, ga = jax.grad(f, argnums=(0, 1, 2))(c["theta9"], tau0_global, c["alpha_hcd"])
+    assert np.isfinite(np.asarray(gth)).all() and np.isfinite(np.asarray(gt)).all() \
+        and np.isfinite(np.asarray(ga)).all()

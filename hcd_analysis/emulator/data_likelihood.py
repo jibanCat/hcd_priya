@@ -83,6 +83,12 @@ class DataLeg(NamedTuple):
       n_z, n_per_z: counts (n_per_z is per-z if ragged; here a (Nz,) int array)
       metals_on   : bool    whether the SiIII/SiII model term is applied for this leg
       resolution_on: bool   whether the exp(2 b_res k² R_z²) template knob is applied
+      mf_floor_on : bool    whether the MF C_emu floor (LF→HR generalization, §2.3 of the
+                            floor spec) is added on this leg's C_emu when ``mf`` is enabled.
+                            TRUE on the SMALL-SCALE leg(s) only (KS, and high-k DESI rows
+                            above the LF Nyquist); the low-k DESI leg stays FALSE (it is
+                            below the resolution regime and must not be inflated). Default
+                            FALSE → back-compatible (no floor on the DESI leg).
     """
     name: str
     z: np.ndarray
@@ -97,6 +103,7 @@ class DataLeg(NamedTuple):
     n_per_z: np.ndarray
     metals_on: bool
     resolution_on: bool
+    mf_floor_on: bool = False
 
 
 def _z_unit(z):
@@ -115,7 +122,7 @@ def desi_resolution_R(z):
 # ============================================================================ #
 def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
                   *, z_lo=2.2, z_hi=4.2, k_min=DESI_KMIN, metals_on=True,
-                  resolution_on=False, add_cov_diag_inflation=True):
+                  resolution_on=False, add_cov_diag_inflation=True, mf_floor_on=False):
     """Load DESI DR1 P1D → a post-cut ``DataLeg`` (usage doc §"Covariance + cuts").
 
     Cuts (z-major flat layout, ``row_is_zmajor=True``):
@@ -143,12 +150,12 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
 
     return _assemble_leg("DESI", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
-                         resolution_on=resolution_on)
+                         resolution_on=resolution_on, mf_floor_on=mf_floor_on)
 
 
 def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
                 *, z_lo=2.4, z_hi=4.6, drop_first4=True, k_max=CACHE_KMAX,
-                metals_on=False, resolution_on=False):
+                metals_on=False, resolution_on=False, mf_floor_on=True):
     """Load KODIAQ-SQUAD conservative-mode P1D → a post-cut ``DataLeg``.
 
     Format: pipe-separated ``final-conservative-p1d-karacayli_etal2021.txt`` (z|k|P|e) +
@@ -181,7 +188,7 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
     # (conservative mode already deconvolves + inflates), so R_z is unused unless toggled on.
     return _assemble_leg("KS", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
-                         resolution_on=resolution_on)
+                         resolution_on=resolution_on, mf_floor_on=mf_floor_on)
 
 
 def _read_ks_p1d(path):
@@ -202,7 +209,7 @@ def _read_ks_p1d(path):
 
 
 def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
-                  metals_on, resolution_on):
+                  metals_on, resolution_on, mf_floor_on=False):
     """Sub-select the kept (z,k) rows + their covariance block, build the z-major flat
     DataLeg.  The covariance is row/col-sliced by the SAME boolean mask as the data so the
     flat-row ordering matches C_data exactly (CS-REVIEW: ordering invariant)."""
@@ -223,7 +230,7 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
     return DataLeg(
         name=name, z=z, z_unit=_z_unit(z), k=k, z_row=z_row, z_idx=z_idx,
         P_data=P_data, C_data=C_data, R_z=R_z, n_z=len(z), n_per_z=n_per_z,
-        metals_on=metals_on, resolution_on=resolution_on)
+        metals_on=metals_on, resolution_on=resolution_on, mf_floor_on=mf_floor_on)
 
 
 # ============================================================================ #
@@ -320,6 +327,117 @@ def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_
 
 
 # ============================================================================ #
+#  MF C_emu floor (LF→HR generalization + n_s-edge extrapolation), T4/T5b.
+#
+#  The spec (docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md) sizes a
+#  z-resolved, per-band ADDITIVE diagonal variance term that inflates C_emu on the
+#  SMALL-SCALE leg(s) to cover the residual the FIXED θ-blind MF correction leaves
+#  AFTER it is applied (the LF→HR generalization error), plus a SEPARATE n_s-edge
+#  extrapolation budget for ns outside the HR cluster [0.86, 0.98].
+#
+#  Two terms, ADDED in quadrature on the variance, both fractional on the TOTAL P_obs:
+#    §2  sigma_floor(z, band)          — in-cluster generalization, FIXED, ns-independent
+#    §4  sigma_edge(z, band; ns)       — out-of-cluster ns-extrapolation, ns-DEPENDENT
+#  Assembly (small-scale leg only): emu_var(k,z) += [(σ_floor + ... ⊕ σ_edge)·P_obs(k)]²
+#  i.e. emu_var(k,z) += (sigma_floor·P_obs)² + (sigma_edge·P_obs)².
+#
+#  Both terms carry NO gradient toward the MAP (stop_gradient'd): they are a fixed
+#  data-side table (σ_floor) and a fixed FUNCTION of ns (σ_edge). They only widen the
+#  posterior; they cannot bias θ. The legs only reach z=4.6 (KS) / z=4.2 (DESI), so the
+#  z>4.6 floor cells (incl. the flagged single-sim z=5.4 spike) are NEVER indexed — we
+#  interpolate/clamp σ_floor(z,·) onto the LEG z's; out-of-range z>z_grid.max() would
+#  pin to the last grid value but is never reached (asserted at build time).
+# ============================================================================ #
+class MFFloor(NamedTuple):
+    """The z-resolved per-band MF C_emu floor table (from ``mf_cemu_floor.npz``).
+
+    Fields (numpy on the host; jnp-cast where used in the differentiable path):
+      z_grid       : (Nz_floor,)   the floor z-grid (2.0…5.4; only z ≤ 4.6 are reached).
+      sigma_floor  : (Nz_floor, 2) fractional in-cluster floor σ [LFres(k<0.069), extrap(k≥0.07)].
+      slope        : (Nz_floor, 2) |d coherent/d ns| per (z, band) for the edge budget.
+      k_band_split : float         the LFres/extrap band edge in angular k (0.07 s/km).
+      ns_box       : (2,)          the HR ns cluster box [0.86, 0.98] for d_ns(ns).
+      floor_min    : float         the FLOOR_MIN lower bound on σ_floor (1.23%).
+      edge_slope_mult : float      the 2× on the (noisy 6-sim) edge slope (spec §4.1).
+    """
+    z_grid: np.ndarray
+    sigma_floor: np.ndarray
+    slope: np.ndarray
+    k_band_split: float
+    ns_box: np.ndarray
+    floor_min: float
+    edge_slope_mult: float
+
+
+# the LFres/extrap band edge: LF-resolvable k<0.069 | extrapolated k≥0.07. The spec
+# uses 0.07 as the cut for "band(k)"; bins with k≥this are the extrapolated band.
+MF_FLOOR_K_BAND_SPLIT = 0.07
+
+
+def load_mf_floor(npz_path="/home/mfho/hcd_priya/figures/analysis/04_emulator/mf_cemu_floor.npz",
+                  *, k_band_split=MF_FLOOR_K_BAND_SPLIT, edge_slope_mult=2.0):
+    """Load the certified MF C_emu floor table → an ``MFFloor`` (spec §2/§4).
+
+    Reads the z-resolved per-band ``sigma_floor`` (in-cluster generalization) + ``slope``
+    (the |d coherent/d ns| edge-budget rate) + the HR ``ns_box`` + ``FLOOR_MIN``. The
+    npz stores the floor for z∈[2.0,5.4]; the leg binding only ever indexes z ≤ 4.6, so
+    the z>4.6 cells (incl. the flagged z=5.4 spike) are carried but never read."""
+    d = np.load(npz_path, allow_pickle=True)
+    return MFFloor(
+        z_grid=np.asarray(d["z_grid"], float),
+        sigma_floor=np.asarray(d["sigma_floor"], float),       # (Nz,2)
+        slope=np.asarray(d["slope"], float),                   # (Nz,2)
+        k_band_split=float(k_band_split),
+        ns_box=np.asarray(d["ns_box"], float),                 # (2,)
+        floor_min=float(d["FLOOR_MIN"]),
+        edge_slope_mult=float(edge_slope_mult))
+
+
+def _mf_floor_sigma_at_z(floor: MFFloor, z):
+    """Interpolate (and end-clamp) the per-band σ_floor + slope onto a scalar leg z.
+
+    Returns (sigma_floor_z (2,), slope_z (2,)) at the LEG redshift ``z`` via 1-D linear
+    interp on the floor z-grid, clamped to the grid ends (np.interp clamps for free).
+    Host-side numpy (the floor is a FIXED θ-blind table; no gradient). The slope is
+    end-clamped too (NaN slope cells — e.g. z=2.0 LFres — are nan_to_num'd to 0)."""
+    zg = floor.z_grid
+    sig = np.array([np.interp(float(z), zg, floor.sigma_floor[:, b]) for b in range(2)])
+    slp = np.array([np.interp(float(z), zg, np.nan_to_num(floor.slope[:, b])) for b in range(2)])
+    return sig, slp
+
+
+def _mf_floor_var_on_k(floor: MFFloor, z, k_sub, P_obs_sub, ns):
+    """The MF C_emu floor VARIANCE on a single z's leg rows (the additive diagonal term).
+
+    Per row k: pick the band (LFres if k<k_band_split else extrap), then
+        var(k) = [(σ_floor(z,band) ⊕? ) · P_obs(k)]²  +  [σ_edge(z,band;ns) · P_obs(k)]²
+    with σ_edge = max( edge_slope_mult·|slope(z,band)|·d_ns , 0.5·σ_floor·(d_ns/0.03) ) and
+    d_ns(ns) = max(ns − ns_hi, ns_lo − ns, 0) (zero inside the HR box; the edge term then
+    vanishes and only σ_floor remains).
+
+    The σ_floor/slope table is FIXED (θ-blind, no grad). ``ns`` enters σ_edge only through
+    d_ns(ns); the caller stop_gradients ns so the edge term carries NO gradient toward the
+    MAP (spec §4.1). P_obs_sub IS differentiable (the floor is fractional on the model
+    P_obs), so the term grows/shrinks with the predicted power — exactly the spec's
+    ``(σ·P_obs)²``. Returns a (len(k_sub),) variance, in ABSOLUTE P² units."""
+    sig_z, slp_z = _mf_floor_sigma_at_z(floor, z)              # (2,), (2,) host
+    # d_ns: 0 inside [ns_lo, ns_hi]; the distance outside otherwise (stop-grad'd by caller).
+    ns_lo, ns_hi = float(floor.ns_box[0]), float(floor.ns_box[1])
+    d_ns = jnp.maximum(jnp.maximum(ns - ns_hi, ns_lo - ns), 0.0)
+    # per-band → per-row via the k mask (LFres band 0, extrap band 1).
+    k_sub = jnp.asarray(k_sub)
+    is_extrap = (k_sub >= floor.k_band_split)
+    sig_floor_row = jnp.where(is_extrap, sig_z[1], sig_z[0])   # (Nrow,)
+    slope_row = jnp.where(is_extrap, slp_z[1], slp_z[0])
+    # σ_edge(z, band; ns) = max( mult·|slope|·d_ns , 0.5·σ_floor·(d_ns/0.03) )   (spec §4.1).
+    sig_edge_row = jnp.maximum(floor.edge_slope_mult * jnp.abs(slope_row) * d_ns,
+                               0.5 * sig_floor_row * (d_ns / 0.03))
+    P = jnp.asarray(P_obs_sub)
+    # ADD in quadrature on the variance: (σ_floor·P)² + (σ_edge·P)².
+    return (sig_floor_row * P) ** 2 + (sig_edge_row * P) ** 2
+
+
+# ============================================================================ #
 #  Model → leg binding
 # ============================================================================ #
 def _emu_var_on_cache(model, theta9, z_unit, z, tau0, alpha_hcd, *,
@@ -359,11 +477,21 @@ def _emu_var_on_cache(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     return emu_var * cemu_inflate
 
 
+# ns is theta9[0] on the unit cube; PRIYA's design box maps it to physical ns.
+# (data.PARAM_LIMITS[0] = [0.8, 1.05]; the floor's ns_box is in PHYSICAL ns.)
+_NS_CUBE_LO, _NS_CUBE_HI = 0.8, 1.05
+
+
+def _ns_phys_from_theta9(theta9):
+    """Physical n_s = 0.8 + 0.25·θ9[0] (PRIYA's unit-cube → ns design box)."""
+    return _NS_CUBE_LO + (jnp.asarray(theta9)[0]) * (_NS_CUBE_HI - _NS_CUBE_LO)
+
+
 def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_core,
                          cache_k, leg, sigma_zb=None, alpha_centres=None,
                          cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
                          k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
-                         rho_zb=None, mf=None):
+                         rho_zb=None, mf=None, mf_floor=None):
     """Bind the emulator forward model to ONE leg's grid → flat (P_model (N,), C_total (N,N)).
 
     For each z in ``leg.z``:
@@ -396,8 +524,21 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     PROMOTED, certified gate path (``scripts/diag_emu_bias_allfolds_mf.py``). The LF backbone
     in ``mf`` is FROZEN (no grad to its weights); pass the SAME frozen backbone object as
     both ``model`` and ``mf.lf_model`` so the production forward is bit-identical to the
-    gate. C_total is taken from the UNCHANGED LF path (the MF C_emu floor is a follow-up;
-    this wiring touches P_obs ONLY). Differentiable in (θ9, τ₀_vec, α)."""
+    gate. C_total is taken from the UNCHANGED LF path EXCEPT the MF C_emu floor (below).
+    Differentiable in (θ9, τ₀_vec, α).
+
+    ``mf_floor`` (opt-in, default None): an ``MFFloor`` table (``load_mf_floor``). When
+    given AND ``mf is not None`` AND ``leg.mf_floor_on`` is True (the SMALL-SCALE leg — KS,
+    or a high-k DESI row above the LF Nyquist), the LF→HR generalization floor + the
+    n_s-edge extrapolation budget are ADDED to the C_emu diagonal in variance units:
+    ``emu_var(k,z) += (σ_floor(z,band(k))·P_obs)² + (σ_edge(z,band(k);ns)·P_obs)²``
+    (spec docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md §2.3/§4.2). The
+    floor is a FIXED θ-blind data-side table; the edge term's ns-dependence is
+    stop_gradient'd → it widens the posterior, it cannot bias the MAP. The floor is applied
+    on the leg z's via 1-D interp/clamp of σ_floor(z,·); the legs only reach z≤4.6 so the
+    z>4.6 cells (incl. the flagged z=5.4 spike) are NEVER indexed. With ``mf_floor=None``
+    (or on a leg with ``mf_floor_on=False``, or ``mf=None``) C_total is the UNCHANGED LF
+    path (byte-identical, back-compat)."""
     cache_k = jnp.asarray(cache_k)
     k_leg = jnp.asarray(leg.k)
     z_idx = np.asarray(leg.z_idx)
@@ -408,10 +549,24 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
 
     P_model = jnp.zeros(N)
     emu_var_flat = jnp.zeros(N)
+    floor_var_flat = jnp.zeros(N)
     # C_emu fires if EITHER the diagonal σ OR the cross-class ρ is supplied (with the
     # τ₀-interp abscissa). The cross-class path reads ρ only; the diagonal reads σ only.
     have_emu = ((sigma_zb is not None or rho_zb is not None)
                 and alpha_centres is not None)
+    # The MF C_emu floor fires only THROUGH the MF forward, on the small-scale leg(s).
+    have_floor = (mf is not None) and (mf_floor is not None) and bool(leg.mf_floor_on)
+    if have_floor:
+        # PI invariant: the legs only reach z≤4.6 (DESI 4.2, KS 4.6); the z>4.6 floor cells
+        # (incl. the flagged single-sim z=5.4 spike) are NEVER indexed. Assert it loudly so
+        # a future leg-z change can't silently start reading the un-trustworthy high-z cells.
+        assert float(np.max(leg.z)) <= 4.6 + 1e-6, (
+            f"MF floor: leg {leg.name} z max {float(np.max(leg.z)):.3f} > 4.6 — the floor "
+            f"table above z=4.6 (incl. the z=5.4 spike) is NOT trustworthy and must not be "
+            f"indexed (spec PI note)")
+        # the n_s-edge term is a FIXED function of ns that carries NO gradient toward the MAP
+        # (it widens the posterior near the cluster edge; it must not pull θ). stop_gradient.
+        ns_phys_sg = jax.lax.stop_gradient(_ns_phys_from_theta9(theta9))
 
     for iz in range(leg.n_z):
         rows = np.where(z_idx == iz)[0]
@@ -456,7 +611,15 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                 ev_z = ev_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res) ** 2
             emu_var_flat = emu_var_flat.at[jnp.asarray(rows)].set(ev_z)
 
-    C_total = jnp.asarray(leg.C_data) + jnp.diag(emu_var_flat)
+        # MF C_emu floor: the LF→HR generalization term + the n_s-edge extrapolation budget,
+        # ADDED in variance units on the total (post-nuisance) model P_obs (spec §2.3/§4.2).
+        # P_z is differentiable (fractional floor on the model power); the ns-edge term's
+        # ns is stop_gradient'd so the floor never pulls the MAP — it only widens C_total.
+        if have_floor:
+            fv_z = _mf_floor_var_on_k(mf_floor, z, k_sub, P_z, ns_phys_sg)
+            floor_var_flat = floor_var_flat.at[jnp.asarray(rows)].set(fv_z)
+
+    C_total = jnp.asarray(leg.C_data) + jnp.diag(emu_var_flat + floor_var_flat)
     return P_model, C_total
 
 
@@ -467,7 +630,8 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
                 cache_k, z_global=None, sigma_zb_per_leg=None, alpha_centres=None,
                 cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
                 k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
-                jitter=1e-10, return_parts=False, rho_zb_per_leg=None, mf=None):
+                jitter=1e-10, return_parts=False, rho_zb_per_leg=None, mf=None,
+                mf_floor=None):
     """Multi-leg Gaussian log-likelihood against the REAL data.
 
     The legs are INDEPENDENT surveys (DESI & KS share z-VALUES but are different
@@ -486,9 +650,14 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
     ``mf`` (opt-in, default None → the LF reference path): a ``MultiFidelity`` (eval grid ==
     cache grid) threaded to every leg's ``predict_P_obs_on_leg`` so P_obs goes through the
     PROMOTED, certified through-MF forward (LF P_filt × exp(g + log res_corr) per class).
-    The LF backbone is FROZEN; C_total is unchanged (the MF C_emu floor is a follow-up).
-    Default None keeps the LF path byte-identical (back-compat). The SAME frozen backbone
-    object should be passed as both ``model`` and ``mf.lf_model``.
+    The LF backbone is FROZEN. Default None keeps the LF path byte-identical (back-compat).
+    The SAME frozen backbone object should be passed as both ``model`` and ``mf.lf_model``.
+
+    ``mf_floor`` (opt-in, default None): an ``MFFloor`` (``load_mf_floor``) threaded to every
+    leg's ``predict_P_obs_on_leg``. When given AND ``mf is not None``, the LF→HR generalization
+    floor + the n_s-edge extrapolation budget are ADDED to C_emu on the SMALL-SCALE leg(s)
+    (``leg.mf_floor_on``; KS by default, DESI off) in variance units. θ-blind (fixed table +
+    stop_gradient'd ns-edge): widens the posterior, never pulls the MAP. None → no floor.
 
     Differentiable in (θ9, τ₀_global, α, a_SiIII, a_SiII, b_res).  ``return_parts`` →
     (logL, {name: (logL_leg, chi2_leg, dof_leg)}) for the χ²/dof diagnostic.
@@ -520,7 +689,8 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
             model, theta9, tau0_vec, alpha_hcd, pf_stats=pf_stats, dla_core=dla_core,
             cache_k=cache_k, leg=leg, sigma_zb=szb, alpha_centres=alpha_centres,
             cemu_inflate=cemu_inflate, a_SiIII=a_SiIII, a_SiII=a_SiII,
-            k_SiIII=k_SiIII, k_SiII=k_SiII, b_res=b_res, rho_zb=rzb, mf=mf)
+            k_SiIII=k_SiIII, k_SiII=k_SiII, b_res=b_res, rho_zb=rzb, mf=mf,
+            mf_floor=mf_floor)
         r = jnp.asarray(leg.P_data) - P_model
         ll = gaussian_loglik(r, C_total, jitter=jitter)
         total = total + ll
