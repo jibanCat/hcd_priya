@@ -71,6 +71,13 @@ CACHE_PATH = f"{REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 L_FLOOR = 99
 DIVERGENCE_RETRY_TARGET_ACCEPT = (0.95, 0.99)
 
+# STEP-A M3 (z-slope MARGINALIZED, real-fit config): the HCD per-class incidence z-slope s_c
+# is SAMPLED (not fixed to HCD_LIT_OVER_SIM_SLOPE). Prior is centered on the forward's own
+# fixed slope (so M3 isolates the marginalization COST, not a center-shift bias) at the
+# literature WLS 1σ width (scripts/diag_legb_slope_prior_tradeoff: WLS fit of dN/dX vs PRIYA
+# with the quoted literature dN/dX error bars; class order LLS, subDLA, DLA).
+ZSLOPE_PRIOR_SIGMA = (0.52, 0.53, 0.33)
+
 
 # ============================================================================ #
 #  LegBCtx — the frozen leg context the numpyro model + mock generator share.
@@ -115,6 +122,10 @@ class LegBCtx(NamedTuple):
     cemu_inflate: float
     mf: object = None
     mf_floor: object = None
+    marginalize_zslope: bool = False     # STEP-A M3: sample the HCD per-class z-slope s_c
+                                         # (real-fit config) instead of the fixed power-law.
+    zslope_mu: object = None             # (3,) prior center on s_c (default HCD_LIT_OVER_SIM_SLOPE)
+    zslope_sigma: object = None          # (3,) prior width on s_c (default the literature WLS σ_s)
 
 
 def _kim(z):
@@ -311,7 +322,9 @@ def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="becker13", mf=None):
     CLOSEST to the production observational anchor (``tau0_anchor="becker13"`` ⟨τ_eff⟩(z) —
     the interior-τ₀ regime the data actually visits, plan A1 PRIMARY). This makes the mock a
     realistic interior-regime draw, not a ladder extreme. ``tau0_anchor=None`` keeps the
-    central (median-τ₀) ladder row instead.
+    central (median-τ₀) ladder row instead. ``tau0_anchor="extreme_hi"`` /``"extreme_lo"``
+    select the most-/least-absorption ladder RUNG (max/min τ₀) — the STEP-A M2 probe of the
+    ladder extreme where the τ₀×cosmology interaction (and the emulator residual) is hardest.
 
     Pools the sim's rows over z (data range z∈[2.2,4.6], finite P_filt). Returns dict:
       z          (nZs,)         the sim's available redshifts (ascending, one per z);
@@ -347,6 +360,10 @@ def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="becker13", mf=None):
         if tau0_anchor == "becker13":
             target = float(becker13_tau0(jnp.asarray(float(zz))))
             pick = sub[int(np.argmin(np.abs(tau0_all[sub] - target)))]
+        elif tau0_anchor == "extreme_hi":            # most-absorption ladder rung (max τ₀)
+            pick = sub[int(np.argmax(tau0_all[sub]))]
+        elif tau0_anchor == "extreme_lo":            # least-absorption ladder rung (min τ₀)
+            pick = sub[int(np.argmin(tau0_all[sub]))]
         else:                                        # central (median-τ₀) ladder row
             pick = sub[int(np.argmin(np.abs(tau0_all[sub] - np.median(tau0_all[sub]))))]
         keep_rows.append(int(pick))
@@ -549,10 +566,30 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     alpha_pivot = jnp.stack([a_lls, a_sub, a_dla])              # (3,) pivot-z (z=3) amplitudes
     # z-RESOLVED incidence α_c(z) = α_pivot · ((1+z)/(1+z_p))^s_c (the dN/dX slope) — the fix:
     # the forward must track the mock's per-z w_c(z) (rises ~3.5× over z), not a z-constant α.
-    shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** jnp.asarray(HCD_LIT_OVER_SIM_SLOPE)
+    # STEP-A M3: when ctx.marginalize_zslope, s_c is SAMPLED (the real-fit config) instead of
+    # the fixed HCD_LIT_OVER_SIM_SLOPE; otherwise the fixed literature power-law slope is used.
+    s_c = _zslope_sites(ctx)
+    shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** s_c
     alpha_hcd = numpyro.deterministic("alpha_hcd_z", alpha_pivot[None, :] * shape_zg)  # (n_zg,3)
     numpyro.factor("loglik", _data_loglik_legcore(
         ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg))
+
+
+def _zslope_sites(ctx):
+    """The HCD per-class z-slope s_c (3,). FIXED to HCD_LIT_OVER_SIM_SLOPE unless
+    ``ctx.marginalize_zslope`` (STEP-A M3) — then SAMPLE s_lls/s_subdla/s_dla ~ Normal at the
+    ctx prior (default: center HCD_LIT_OVER_SIM_SLOPE, width ZSLOPE_PRIOR_SIGMA). Shared by
+    ``_legb_model`` (with the factor) and ``_legb_priors_only`` (transform-only postprocess)."""
+    if not getattr(ctx, "marginalize_zslope", False):
+        return jnp.asarray(HCD_LIT_OVER_SIM_SLOPE)
+    mu = (jnp.asarray(HCD_LIT_OVER_SIM_SLOPE) if ctx.zslope_mu is None
+          else jnp.asarray(ctx.zslope_mu))
+    sg = (jnp.asarray(ZSLOPE_PRIOR_SIGMA) if ctx.zslope_sigma is None
+          else jnp.asarray(ctx.zslope_sigma))
+    s_lls = numpyro.sample("s_lls", dist.Normal(mu[0], sg[0]))
+    s_sub = numpyro.sample("s_subdla", dist.Normal(mu[1], sg[1]))
+    s_dla = numpyro.sample("s_dla", dist.Normal(mu[2], sg[2]))
+    return jnp.stack([s_lls, s_sub, s_dla])
 
 
 def _legb_priors_only(ctx):
@@ -567,6 +604,14 @@ def _legb_priors_only(ctx):
     numpyro.sample("alpha_lls", dist.Normal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]))
     numpyro.sample("alpha_subdla", dist.Normal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1]))
     numpyro.sample("alpha_dla_raw", dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
+    if getattr(ctx, "marginalize_zslope", False):
+        mu = (jnp.asarray(HCD_LIT_OVER_SIM_SLOPE) if ctx.zslope_mu is None
+              else jnp.asarray(ctx.zslope_mu))
+        sg = (jnp.asarray(ZSLOPE_PRIOR_SIGMA) if ctx.zslope_sigma is None
+              else jnp.asarray(ctx.zslope_sigma))
+        numpyro.sample("s_lls", dist.Normal(mu[0], sg[0]))
+        numpyro.sample("s_subdla", dist.Normal(mu[1], sg[1]))
+        numpyro.sample("s_dla", dist.Normal(mu[2], sg[2]))
 
 
 def _legb_reconstruct_deterministics(ctx, samples):
@@ -584,8 +629,17 @@ def _legb_reconstruct_deterministics(ctx, samples):
     alpha_pivot = jnp.stack([jnp.asarray(samples["alpha_lls"]),
                              jnp.asarray(samples["alpha_subdla"]),
                              alpha_dla], axis=-1)                     # (L, 3)
-    shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** jnp.asarray(HCD_LIT_OVER_SIM_SLOPE)
-    alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg[None, :, :]      # (L, nZg, 3)
+    if getattr(ctx, "marginalize_zslope", False) and "s_lls" in samples:
+        s_c = jnp.stack([jnp.asarray(samples["s_lls"]),
+                         jnp.asarray(samples["s_subdla"]),
+                         jnp.asarray(samples["s_dla"])], axis=-1)     # (L, 3)
+        # shape_zg per draw: ((1+z)/(1+z_p))^{s_c} → (L, nZg, 3)
+        ratio = (1.0 + zg)[None, :, None] / (1.0 + HCD_Z_PIVOT)
+        shape_zg = ratio ** s_c[:, None, :]                          # (L, nZg, 3)
+        alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg             # (L, nZg, 3)
+    else:
+        shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** jnp.asarray(HCD_LIT_OVER_SIM_SLOPE)
+        alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg[None, :, :]      # (L, nZg, 3)
     out = dict(samples)
     out["tau0_vec"] = tau0_vec
     out["alpha_dla"] = alpha_dla
