@@ -520,7 +520,12 @@ def dispatch(cfg, *, workers, nuts_kwargs, smoke=False):
     # [0, workers) and leave the remaining cores as headroom. A small free-slot pool recycles a
     # core when its chain finishes. (If taskset is absent we fall back to env caps only.)
     have_taskset = _which("taskset")
-    free_cores = list(range(min(workers, os.cpu_count() or workers)))
+    # PIN to the ALLOWED cpuset: a SLURM cgroup gives a NON-CONTIGUOUS set (e.g.
+    # [1,2,5,6,9,10,14,18,...]); range(workers) would taskset out-of-set ids -> "Invalid
+    # argument" and FAIL those chains. Use os.sched_getaffinity. (fixed 2026-06-09)
+    _allowed = sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") \
+        else list(range(os.cpu_count() or workers))
+    free_cores = _allowed[:workers]
 
     def launch(chain, core):
         cmd = []
