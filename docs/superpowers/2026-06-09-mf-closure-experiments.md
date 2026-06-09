@@ -138,6 +138,37 @@ Leg-B) **and** |bias| < 0.2σ on **A_p AND n_s**, through the MF forward + floor
 
 ---
 
+## 3. VALIDATION-PLAN REVIEW VERDICT (2026-06-09, wf_3c2812d7; reports `onboarding/2026-06-09-valreview-{bayesian,cs,lya,meta}.md`)
+
+3-lens review (Bayesian + CS + Lyα) of "convergence-first vs SBC coverage ensemble." **All 3 =
+ENDORSE_WITH_CHANGES; coverage ensemble = CONDITIONAL (Bayesian/CS) / NOT-NEEDED (Lyα).** §2's original
+single-fold N≥99–600 ensemble is **SUPERSEDED** by this.
+
+- **Subfield standard (read from the PDFs):** Lyα-P1D cosmology analyses do NOT run SBC/coverage ensembles.
+  The paper we reproduce (Fernandez+2024, 2309.03943): R-1<0.01 + one MAP HF recovery + one seed-varied LF
+  mock + LOSO — "coverage/SBC/blind" appear 0× in 41 pages. DESI-DR1 (2601.21432, 2026): 30 LOSO +
+  cross-suite recovery + blinding, still no SBC. SBC is for amortized SBI (opposite regime). **Our
+  convergence-first plan already meets/exceeds the field bar.**
+- **The big single-fold ensemble is REJECTED on a verified code fact:** `closure_legb.py:688`
+  `sim=sims[m%len(sims)]` cycles only the ~8 held-out sims of `final_fold0`, and the 8 LOSO folds are
+  **n_s-ORDERED** → fold-0's held-out set is the **lowest-n_s octant (n_s∈[0.803,0.829])**. So N≥99 reuses
+  8 fixed truths with fresh noise (NOT prior-drawn truths) → **saturates by N~30–40** (N=300–600 = pure
+  waste), AND those truths sit **tens of σ from the real fit at n_s~1.009** — a fold-0 coverage run
+  certifies width at the wrong cosmology. The Leg-B null is also NOT rank-uniform → the L_FLOOR=99/rank-ECDF
+  is a Leg-A object, never gates Leg-B.
+- **THE BAR (meta, anchored to the subfield):** Gelman-Rubin **R-1<0.01 across ≥4 DISPERSED-INIT chains**
+  per fiducial (ESS≥400 bulk+tail, 0 divergences post-ladder, E-BFMI>0.3, no funnel) **AND per-mock
+  |bias z|<0.2σ on (A_p,n_s)** — R-hat is BLIND to a coherent bias, so both are required — across fiducials
+  that **SPAN the real-fit cosmology incl. a high-n_s mock at n_s~0.96–1.0 (from a HIGH fold; final_fold0
+  maxes at 0.829)**, with the **HCD z-slope MARGINALIZED in ≥1 mock** (anti-circularity), + the existing
+  LOSO/C_emu/floor/blinding.
+- **CRITICAL harness fixes before STEP A:** (0) golden-assert `fast_postprocess` rtol=0 (no guard on disk);
+  (1) replace `init_to_median` (closure_legb.py:612) with **dispersed inits** — else split-R-hat is
+  meaningless; warmup≥150 (40 killed a run); separate seed axis `fold_in(k_nuts,chain_id)`; 1 chain/SLURM-task.
+- **Decision rule:** run STEP A (~130 CPU-h); **if clean → bar MET, SKIP the ensemble.** Only a
+  calibrated-interval headline OR truth-dependent edge bias justifies a **SMALL MULTI-FOLD** (N~48–99,
+  pooled across folds to span n_s) cross-check — never single-fold big-N, never gate on the ECDF.
+
 ## Log
 - **MF-SMOKE-01** (2026-06-09): profiling mock, fold 0. Healthy, floor sane (χ²/dof≈1). Not a verdict (n=1).
   Cost (mtd=5, optimistic) superseded by MF-REPROFILE-02. Artifacts:
