@@ -114,17 +114,18 @@ The diagnostic ladder ran to a conclusion. Headline: the −0.65σ is **NOT** a 
 coverage (#2), τ₀-channel (#1), tilt-attenuation (D1: β≈0.98), or C_emu-sizing problem. The z-attribution
 (`scripts/diag_nsbias_z_attribution.py`) localized **86% to the KS leg at z=2.0+2.2; DESI is +0.04σ (clean)**.
 Two converging causes, both low-z/small-scale:
-1. **Closure bias = low-z KS data quality.** KS z=2.0/2.2 are real Karaçaylı-2021 rows but are exactly the
-   low-z P1D the PI's KODIAQ-SQUAD paper excludes (z<2.8, DLA-finder incompleteness). Dropping KS z<2.8
-   (`load_ks_leg z_lo=2.8`) collapses the bias **−0.78σ → +0.05σ** (`scripts/diag_nsbias_kscut_scan.py`).
-   Within KS it is broadband over k=0.02–0.04 (NOT k>0.04-specific).
+1. **Closure bias = low-z KS data quality.** KS z=2.0/2.2 are real Karaçaylı-2021 rows but are low-z P1D
+   compromised by DLA-finder incompleteness (the PI's KODIAQ-SQUAD paper uses the more conservative z<2.8).
+   Dropping KS z<2.4 (`load_ks_leg z_lo=2.4`, the SHIPPED default — PI decision 2026-06-08) collapses the
+   bias **−0.78σ → +0.04σ** (`scripts/diag_nsbias_kscut_scan.py`); z=2.4 is the minimal closure-clean cut
+   and z<2.8 is available as opt-in. Within KS it is broadband over k=0.02–0.04 (NOT k>0.04-specific).
 2. **Real-fit systematic = LF resolution (the PI's MF hypothesis, CONFIRMED).**
    `scripts/diag_lf_vs_hr_highk.py` (vs `observables_tau0_hr.h5`, 6 overlap sims, exact τ₀-rung match): LF is
    **−6% power-deficient at low-z high-k** (z=2.0 −7.6%), tilt-shaped (+4% low-k → −6% high-k), coherent
    6/6 sims, matching PRIYA ~7% convergence. The LF-only emulator carries this vs reality(HR) → biases real
    n_s low. **Distinct from the closure bias** (LF-vs-LF, fixed by the z-cut); fixed by MF wiring.
 
-**ACTIONS:** (a) make `load_ks_leg z_lo=2.8` the default (the PI's published cut) → closure validates clean;
+**ACTIONS:** (a) `load_ks_leg z_lo=2.4` is the SHIPPED default (PI decision 2026-06-08; 2.8 opt-in) → closure clean (all-folds cert C1 pending);
 (b) proceed with the planned MF wiring for the real-fit high-k systematic, then re-run
 `diag_emu_bias_allfolds.py` through the MF forward to quantify residual at z=2.8–3.4 high-k. DESI primary
 cosmology was never biased. The diagnostic-ladder tasks below (D2–D7) are now SUPERSEDED by this resolution;

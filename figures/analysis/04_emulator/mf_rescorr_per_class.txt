@@ -1,0 +1,115 @@
+================================================================================
+PER-CLASS LF->HR resolution correction rho_c = P_HR_c / P_LF_c
+FORWARD cache analysis (no training, no emulator). 4 coarse classes.
+================================================================================
+matched HR rows = 2060 ; HR sims = 6 ; z grid = 18 ; alpha rungs = 20
+shared k-grid: 40 log-bins, k=[0.0100,0.0690] s/km
+  (HR log-log interpolated onto the shared grid within HR support; LF same)
+high-k band (reporting): k>=0.0442 s/km (top quartile)
+low-z band  (reporting): z<=2.4
+n_s-bias reference level: ~1% in logP
+
+HR sims (ns):
+  ns=0.859 Ap=1.292e-09
+  ns=0.885 Ap=2.324e-09
+  ns=0.909 Ap=1.981e-09
+  ns=0.914 Ap=1.317e-09
+  ns=0.972 Ap=1.690e-09
+  ns=0.979 Ap=1.783e-09
+  ns span [0.859, 0.979] (clustered mid-high)
+
+--------------------------------------------------------------------------------
+(1) rho_c at (z=2.2, k=0.0488 s/km), 6-sim mean:
+--------------------------------------------------------------------------------
+  clean  : rho = 1.0561  (+5.61% in P)   inter-sim std = 0.0071
+  LLS    : rho = 1.0531  (+5.31% in P)   inter-sim std = 0.0042
+  subDLA : rho = 1.0495  (+4.95% in P)   inter-sim std = 0.0105
+  DLA    : rho = 1.0538  (+5.38% in P)   inter-sim std = 0.0187
+
+  low-z(z<=2.4) high-k(top quartile) BAND-mean rho_c:
+    clean  : rho = 1.0677  (+6.77% in P)   mean inter-sim std = 0.0065
+    LLS    : rho = 1.0616  (+6.16% in P)   mean inter-sim std = 0.0063
+    subDLA : rho = 1.0630  (+6.30% in P)   mean inter-sim std = 0.0099
+    DLA    : rho = 1.0668  (+6.68% in P)   mean inter-sim std = 0.0136
+
+--------------------------------------------------------------------------------
+(2) INTER-CLASS SPREAD: rho_c - rho_clean (the per-class deviation)
+--------------------------------------------------------------------------------
+  class      max|rho_c-rho_clean|         (z,k) of max  band-mean|diff|
+  LLS                      0.0238      (z=2.0,k=0.069)           0.0065
+  subDLA                   0.0239      (z=2.0,k=0.012)           0.0067
+  DLA                      0.0472      (z=2.0,k=0.057)           0.0111
+
+  clean correction DEPTH (low-z high-k band) = |rho_clean-1| = 0.0677 (6.77% in P)
+  LLS    : max|diff|=+2.38pp = 0.35x the correction depth; band-mean|diff|=0.65pp = 0.10x
+  subDLA : max|diff|=+2.39pp = 0.35x the correction depth; band-mean|diff|=0.67pp = 0.10x
+  DLA    : max|diff|=+4.72pp = 0.70x the correction depth; band-mean|diff|=1.11pp = 0.16x
+
+  WORST band-mean inter-class |rho_c-rho_clean| = 1.11pp
+  WORST pointwise inter-class |rho_c-rho_clean|  = 4.72pp
+  (compare to the ~1% n_s-bias logP level)
+
+--------------------------------------------------------------------------------
+(3) EXCESS TEMPLATE R_c = P_c - P_clean : its LF->HR ratio (P_HR exc/P_LF exc)
+--------------------------------------------------------------------------------
+  This is what enters the forward model P_obs = P_clean + Sum_c alpha_c R_c.
+  KEY: the 'excess' is SIGNED and SIGN-STABLE per class --
+    LLS    : R_c > 0 (adds a little power at low k, ~0 at high k)
+    subDLA : R_c < 0 (SUPPRESSES power; ~-15% of clean)
+    DLA    : R_c < 0 (strongly suppresses; ~-50% of clean)
+  The ratio rho_excess = R_HR/R_LF is well-defined where R_LF and R_HR share
+  sign AND |R_LF/P_clean| is sizeable (>2%); near R_c~0 the ratio is unstable.
+
+  LLS    : excess/clean (low-z hik median) = +0.7% of clean P (SIGN +)
+           rho_excess (well-defined cells): all-band mean=0.978  low-z hik mean=0.823
+           rho_clean low-z hik = 1.068  -> |rho_excess-rho_clean| band-mean = 26.63pp
+           (70% of finite (z,k) cells have a sizeable, sign-stable excess => ratio well-defined)
+  subDLA : excess/clean (low-z hik median) = -14.5% of clean P (SIGN -)
+           rho_excess (well-defined cells): all-band mean=0.986  low-z hik mean=1.093
+           rho_clean low-z hik = 1.068  -> |rho_excess-rho_clean| band-mean = 3.74pp
+           (100% of finite (z,k) cells have a sizeable, sign-stable excess => ratio well-defined)
+  DLA    : excess/clean (low-z hik median) = -49.9% of clean P (SIGN -)
+           rho_excess (well-defined cells): all-band mean=0.965  low-z hik mean=1.065
+           rho_clean low-z hik = 1.068  -> |rho_excess-rho_clean| band-mean = 0.93pp
+           (100% of finite (z,k) cells have a sizeable, sign-stable excess => ratio well-defined)
+
+  INTERPRETATION: where the excess is SIZEABLE (subDLA/DLA: large negative,
+  ~60-100% of cells well-defined), rho_excess ~ rho_clean -> the clean rho
+  applied to the whole P_obs (clean + signed excess) resolution-corrects the
+  excess CORRECTLY. The LLS excess is tiny (<1% of clean) and sign-changes
+  toward high k, so its ratio is ill-conditioned -- but a tiny excess carries
+  negligible weight in P_obs, so a clean rho mis-correcting it is harmless.
+
+--------------------------------------------------------------------------------
+(4) PER-CLASS DATA QUALITY: coarse-class counts (tier_c_counts collapsed)
+--------------------------------------------------------------------------------
+  Counts are sightline x pixel contributions to each class' P1D (NOT #sightlines).
+  class       LF mean cnt    LF lowz cnt    HR mean cnt    HR lowz cnt   inter-sim CoV(rho)
+  clean            395914         588178         379898         565285               0.61%
+  LLS              193155          67496         191186          82221               0.60%
+  subDLA            70384          22913          83037          29213               0.94%
+  DLA               31747          12612          37079          14481               1.28%
+
+  The CoV(rho) (inter-sim scatter / mean) is the noise proxy: classes with
+  fewer counts (DLA) have noisier per-row P1D -> larger CoV. A class whose
+  rho_c differs from clean by LESS than its own CoV is noise-dominated: the
+  6 HR sims cannot resolve a real per-class difference there.
+
+================================================================================
+VERDICT
+================================================================================
+  - clean rho low-z high-k = +6.77% in P (matches prior clean-only diags ~+6 to +9%).
+  - WORST inter-class band-mean |rho_c - rho_clean| = 1.11pp, pointwise worst 4.72pp.
+  - DLA inter-sim CoV(rho) low-z high-k = 1.28% (the noisiest class).
+  => The inter-class difference is at the ~1% n_s level (borderline): a
+     single clean rho is mostly adequate but may leave a ~n_s-level per-class
+     residual on the largest-excess class. Flag; revisit with more HR sims.
+
+  HONESTY CAVEAT: only 6 HR sims, ns in [0.859,0.979] (clustered mid-high).
+  The excess R_c = P_c - P_clean is a small difference of two large noisy
+  numbers -> its LF->HR ratio is intrinsically noisier than rho_clean, and
+  for DLA (fewest counts) the per-class signal may be at or below the 6-sim
+  noise floor. Where the inter-class |diff| is < the per-class CoV, the 6-sim
+  statistics CANNOT resolve a real per-class difference -- 'class-independent'
+  there means 'not distinguishable', not 'proven identical'.
+================================================================================
