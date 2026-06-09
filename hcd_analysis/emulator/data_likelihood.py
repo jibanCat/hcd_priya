@@ -33,8 +33,8 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from .data import KIM_AMP, KIM_SLOPE
-from .predict import predict_P_obs
+from .data import KIM_AMP, KIM_SLOPE, Z_LIMITS
+from .predict import predict_P_obs, predict_P_filt, _excess_from_P_filt
 from .likelihood import sigma_at_tau0, rho_at_tau0, gaussian_loglik
 
 assert jax.config.read("jax_enable_x64"), \
@@ -258,6 +258,68 @@ def _resolution_factor(k, R_z, *, b_res=0.0):
 
 
 # ============================================================================ #
+#  Multi-fidelity (LF→HR) opt-in forward (T5a)
+#
+#  PROMOTED from scripts/diag_emu_bias_allfolds_mf.py (the certified T3 adoption gate).
+#  When a ``MultiFidelity`` is supplied, the per-class LF P_filt is routed through the
+#  FIXED (θ-blind) resolution correction ``g(z,τ₀,k) + log res_corr(z,k)`` BEFORE the
+#  clean+excess HCD combination and BEFORE the cache-k→leg-k interp — exactly where the
+#  gate applied it, so the production forward == the gate's measured forward.
+#
+#  CONTRACT (mirror of the gate, faithful through-MF wiring):
+#    * ``mf.eval_logk`` MUST equal log10(cache_k) (the LF native cache grid), so
+#      ``mf.logP_mf - mf.lf_logP == g + log res_corr`` is evaluated EXACTLY on the cache
+#      k-grid and applied per class to P_filt at the cache-k level (no LF tail
+#      extrapolation is hit inside the analysis band k<0.069 == the cache k_max).
+#    * the LF backbone in ``mf`` is FROZEN (stop_gradient on its weights inside
+#      ``MultiFidelity.lf_logP`` / ``_freeze``); grads flow to (θ9, τ₀, α) but NEVER to
+#      the LF weights — so the mf= forward is NUTS-safe and differentiable.
+#    * C_total is taken from the UNCHANGED LF path (the C_emu floor is sized separately
+#      through the MF forward — a follow-up; this T5a wiring touches P_obs ONLY).
+#
+#  dN/dX/CDDF (Head-A) correction: NOT applied inside this per-leg P1D binding. The gate
+#  measured the P1D path only; ``alpha_hcd`` enters the production likelihood directly
+#  (the incidence is constructed upstream), so the θ-blind dN/dX resolution factor
+#  (``multifidelity.apply_dndx_res_corr``) is applied where the incidence prior / w_c is
+#  built — NOT here. Wiring it into this binding would diverge from the certified gate
+#  path. (The MultiFidelity object also carries the dN/dX/CDDF tables for that use.)
+# ============================================================================ #
+def _mf_corr_on_cache(mf, theta9, z_unit, tau0):
+    """Per-class MF log-correction (4, Kc) on the cache grid: ``g + log res_corr``.
+
+    Mirror of ``diag_emu_bias_allfolds_mf.mf_corr_on_cache``. ``mf.eval_logk`` is the
+    cache log-k grid, so ``g = mf.g(x, τ₀)`` (== log_rho + resolved FixedMeanHead) is
+    the exact production MF correction on the cache k-grid, and ``log res_corr(z)`` is
+    the fixed particle-convergence factor (broadcast over the 4 classes). θ-blind by
+    construction (g reads cond[9]=z_unit, cond[10]=τ₀ only); differentiable in (θ9, τ₀).
+    """
+    x = jnp.concatenate([jnp.asarray(theta9), jnp.atleast_1d(z_unit)])   # (10,)
+    g = mf.g(x, tau0)                                                    # (4, Kc)
+    z_phys = z_unit * (Z_LIMITS[1] - Z_LIMITS[0]) + Z_LIMITS[0]
+    log_rc = jnp.log(mf.res_corr(z_phys))[None, :]                       # (1, Kc) bcast
+    return g + log_rc                                                    # (4, Kc) additive
+
+
+def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_core):
+    """P_obs (Kc,) through the MF forward — mirror of the gate's ``predict_P_obs_mf``.
+
+    The per-class LF P_filt is multiplied by ``exp(g + log res_corr)`` (the fixed,
+    θ-blind resolution factor), then the SAME clean+excess HCD combination as
+    ``predict.predict_P_obs``. The LF backbone P_filt comes from the FROZEN
+    ``mf.lf_model`` inside ``predict_P_filt`` here — but to keep the production path
+    BIT-IDENTICAL to the gate (which calls ``predict_P_filt(model, ...)`` on the SAME
+    backbone object the MF was built from), we use the passed ``model`` as the LF P_filt
+    source; the caller passes the SAME frozen backbone object as both ``model`` and
+    ``mf.lf_model``. Differentiable in (θ9, τ₀, α)."""
+    P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)       # (4,Kc) LF
+    corr = jnp.exp(_mf_corr_on_cache(mf, theta9, z_unit, tau0))          # (4,Kc) MF factor
+    P_filt_mf = P_filt * corr                                            # corrected per class
+    P_clean = P_filt_mf[0]
+    excess = _excess_from_P_filt(P_filt_mf, dla_core)                    # (3,Kc)
+    return P_clean + jnp.einsum("c,ck->k", jnp.asarray(alpha_hcd), excess)
+
+
+# ============================================================================ #
 #  Model → leg binding
 # ============================================================================ #
 def _emu_var_on_cache(model, theta9, z_unit, z, tau0, alpha_hcd, *,
@@ -301,7 +363,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                          cache_k, leg, sigma_zb=None, alpha_centres=None,
                          cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
                          k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
-                         rho_zb=None):
+                         rho_zb=None, mf=None):
     """Bind the emulator forward model to ONE leg's grid → flat (P_model (N,), C_total (N,N)).
 
     For each z in ``leg.z``:
@@ -325,7 +387,17 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     the diagonal σ path (UNCHANGED). Mirrors the ``sigma_zb`` per-z plumbing.
 
     NOTE per-z C_emu blocks are placed on the FLAT diagonal in the SAME z-major order as the
-    leg's rows (``leg.z_idx``), so C_emu's ordering matches C_data (CS-REVIEW)."""
+    leg's rows (``leg.z_idx``), so C_emu's ordering matches C_data (CS-REVIEW).
+
+    ``mf`` (opt-in, default None → the LF reference path UNCHANGED): a ``MultiFidelity``
+    whose ``eval_logk == log10(cache_k)``. When given, step (1)'s per-z P_obs goes through
+    the MF forward (``_predict_P_obs_mf``: LF P_filt × exp(g + log res_corr) per class, then
+    the SAME clean+excess HCD combination) instead of the raw LF ``predict_P_obs`` — the
+    PROMOTED, certified gate path (``scripts/diag_emu_bias_allfolds_mf.py``). The LF backbone
+    in ``mf`` is FROZEN (no grad to its weights); pass the SAME frozen backbone object as
+    both ``model`` and ``mf.lf_model`` so the production forward is bit-identical to the
+    gate. C_total is taken from the UNCHANGED LF path (the MF C_emu floor is a follow-up;
+    this wiring touches P_obs ONLY). Differentiable in (θ9, τ₀_vec, α)."""
     cache_k = jnp.asarray(cache_k)
     k_leg = jnp.asarray(leg.k)
     z_idx = np.asarray(leg.z_idx)
@@ -351,8 +423,12 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
         k_sub = k_leg[jnp.asarray(rows)]
         alpha_z = alpha_hcd if alpha_hcd.ndim == 1 else alpha_hcd[iz]  # per-z HCD incidence
 
-        # (1) P_obs on the cache grid
-        P_cache = predict_P_obs(model, theta9, z_unit, tau0, alpha_z, pf_stats, dla_core)
+        # (1) P_obs on the cache grid — LF reference (mf=None) OR the MF forward (opt-in).
+        if mf is None:
+            P_cache = predict_P_obs(model, theta9, z_unit, tau0, alpha_z, pf_stats, dla_core)
+        else:
+            P_cache = _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_z,
+                                        pf_stats, dla_core)
         # (3) interp to the leg's k (bin centres); model is smooth → linear interp.
         P_z = jnp.interp(k_sub, cache_k, P_cache)
         # (2) forward-model nuisances (gated; default OFF → factor ≡ 1)
@@ -391,7 +467,7 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
                 cache_k, z_global=None, sigma_zb_per_leg=None, alpha_centres=None,
                 cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
                 k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
-                jitter=1e-10, return_parts=False, rho_zb_per_leg=None):
+                jitter=1e-10, return_parts=False, rho_zb_per_leg=None, mf=None):
     """Multi-leg Gaussian log-likelihood against the REAL data.
 
     The legs are INDEPENDENT surveys (DESI & KS share z-VALUES but are different
@@ -406,6 +482,13 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
     ``rho_zb_per_leg`` (opt-in): a dict {leg.name: (n_z_leg,4,4,Kc,Tb)} of the CROSS-CLASS
     block sliced to each leg's z-bins → C_emu uses the cross-class form (mirrors
     ``sigma_zb_per_leg``). Default None → the diagonal σ path (UNCHANGED).
+
+    ``mf`` (opt-in, default None → the LF reference path): a ``MultiFidelity`` (eval grid ==
+    cache grid) threaded to every leg's ``predict_P_obs_on_leg`` so P_obs goes through the
+    PROMOTED, certified through-MF forward (LF P_filt × exp(g + log res_corr) per class).
+    The LF backbone is FROZEN; C_total is unchanged (the MF C_emu floor is a follow-up).
+    Default None keeps the LF path byte-identical (back-compat). The SAME frozen backbone
+    object should be passed as both ``model`` and ``mf.lf_model``.
 
     Differentiable in (θ9, τ₀_global, α, a_SiIII, a_SiII, b_res).  ``return_parts`` →
     (logL, {name: (logL_leg, chi2_leg, dof_leg)}) for the χ²/dof diagnostic.
@@ -437,7 +520,7 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
             model, theta9, tau0_vec, alpha_hcd, pf_stats=pf_stats, dla_core=dla_core,
             cache_k=cache_k, leg=leg, sigma_zb=szb, alpha_centres=alpha_centres,
             cemu_inflate=cemu_inflate, a_SiIII=a_SiIII, a_SiII=a_SiII,
-            k_SiIII=k_SiIII, k_SiII=k_SiII, b_res=b_res, rho_zb=rzb)
+            k_SiIII=k_SiIII, k_SiII=k_SiII, b_res=b_res, rho_zb=rzb, mf=mf)
         r = jnp.asarray(leg.P_data) - P_model
         ll = gaussian_loglik(r, C_total, jitter=jitter)
         total = total + ll

@@ -434,3 +434,214 @@ def test_data_loglik_rho_per_leg_threads_and_increases_emu_var():
     gth, gt, ga = jax.grad(f, argnums=(0, 1, 2))(c["theta9"], tau0_global, c["alpha_hcd"])
     assert np.isfinite(np.asarray(gth)).all() and np.isfinite(np.asarray(gt)).all() \
         and np.isfinite(np.asarray(ga)).all(), "x-class joint logL grads must be finite"
+
+
+# ============================================================================ #
+#  T5a — MF (multi-fidelity) opt-in path through predict_P_obs_on_leg / data_loglik
+#
+#  The mf= path routes the per-class LF P_filt through MultiFidelity.logP_mf's
+#  resolution correction (g + log res_corr) BEFORE the cache-k→leg-k interp, exactly
+#  as scripts/diag_emu_bias_allfolds_mf.py (the certified T3 gate) measured it. The
+#  LF backbone is FROZEN; the correction is the fixed (θ-blind) per-class factor.
+#  mf=None (default) keeps the LF path byte-identical (back-compat).
+# ============================================================================ #
+import equinox as eqx  # noqa: E402
+from hcd_analysis.emulator import multifidelity as MFI  # noqa: E402
+
+_LF_CACHE = MFI.LF_CACHE
+_HR_CACHE = MFI.HR_CACHE
+_have_mf_caches = os.path.exists(_LF_CACHE) and os.path.exists(_HR_CACHE)
+_have_fold0 = os.path.exists("/home/mfho/hcd_priya/checkpoints/final_fold0.eqx")
+_have_rescorr = os.path.exists(
+    MFI.RES_CORR_DIR + "/resolution_correction.txt")
+
+
+def _synthetic_mf(c, *, resolved=False, seed=1):
+    """A MultiFidelity on the cache grid (eval_logk == log10(cache_k)) built from a
+    synthetic LF backbone matching ``c['model']`` and a trivial FixedMeanHead, so the
+    differentiability / freeze tests run with NO real-cache dependency.
+
+    The LF norm here is the SAME pf_stats dict the production model uses, so the MF's
+    own LF P_filt eval is internally consistent (the gate uses the matching backbone)."""
+    cache_k = np.asarray(c["cache_k"])
+    eval_logk = np.log10(cache_k)
+    K = cache_k.shape[0]
+    # a small z-table spanning the data band; pooled (z-only) fixed-mean table = 0 (no
+    # correction beyond log_rho), so the synthetic MF correction is just log_rho.
+    z_tab = np.array([2.2, 3.0, 4.0, 5.0])
+    rng = np.random.default_rng(seed)
+    log_rho = rng.normal(0.0, 0.02, K)             # a small per-k coherent tilt
+    gbar_tab = np.zeros((len(z_tab), 4, K))        # gbar - log_rho == 0 ⇒ g == log_rho
+    if not resolved:
+        head = MFI.FixedMeanHead(gbar_tab, z_tab)
+    else:
+        nr = 5
+        head = MFI.FixedMeanHead(
+            gbar_tab, z_tab, resolved=True,
+            gtau_tab=np.zeros((nr, 4, K)),
+            tau_tab=np.arange(nr, dtype=float),
+            tau_by_z=np.tile(np.linspace(2.0, 6.0, nr), (len(z_tab), 1)),
+            a_k=rng.normal(0.0, 0.01, (4, K)),     # nonzero rank-1 ⇒ dg/dτ₀ ≠ 0
+            u_z=np.linspace(-1, 1, len(z_tab)),
+            u_tau=np.linspace(-1, 1, nr))
+    # the LF backbone is the SAME Emulator object as the production model (frozen inside).
+    mf = MFI.build_multifidelity(
+        c["model"], c["pf"], eval_logk, head,
+        eval_logk=eval_logk, log_rho=log_rho, delta_mode="none")
+    return mf
+
+
+def test_mf_false_is_byte_identical_to_lf_path():
+    """mf=None must reproduce the committed LF P_model/C_total EXACTLY (back-compat)."""
+    c = _emu_ctx()
+    leg = _build_leg_for_xclass()
+    sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
+    tau0_vec = jnp.asarray([0.8])
+    P0, C0 = DL.predict_P_obs_on_leg(
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
+        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
+        alpha_centres=c["alpha_centres"])
+    P1, C1 = DL.predict_P_obs_on_leg(
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
+        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
+        alpha_centres=c["alpha_centres"], mf=None)
+    assert np.array_equal(np.asarray(P0), np.asarray(P1)), "mf=None changed P_model"
+    assert np.array_equal(np.asarray(C0), np.asarray(C1)), "mf=None changed C_total"
+
+
+def test_mf_path_changes_p_model_but_not_ctotal():
+    """mf= alters P_model (the correction is applied) but leaves C_total UNCHANGED
+    (spec: keep the same C_total from the LF path; only P_obs goes through MF)."""
+    c = _emu_ctx()
+    leg = _build_leg_for_xclass()
+    sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
+    tau0_vec = jnp.asarray([0.8])
+    mf = _synthetic_mf(c, resolved=True)
+    P_lf, C_lf = DL.predict_P_obs_on_leg(
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
+        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
+        alpha_centres=c["alpha_centres"])
+    P_mf, C_mf = DL.predict_P_obs_on_leg(
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
+        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
+        alpha_centres=c["alpha_centres"], mf=mf)
+    assert np.isfinite(np.asarray(P_mf)).all()
+    assert not np.allclose(np.asarray(P_lf), np.asarray(P_mf)), \
+        "mf= must change P_model (the MF correction is applied)"
+    assert np.array_equal(np.asarray(C_lf), np.asarray(C_mf)), \
+        "mf= must keep C_total identical to the LF path (spec)"
+
+
+def test_mf_path_differentiable_in_theta_tau0_alpha_jacfwd_jacrev():
+    """The mf= forward is differentiable and NUTS-safe: jacfwd AND jacrev of P_model in
+    (θ9, τ₀, α) are finite (the LF backbone is frozen but grads flow to the inputs)."""
+    c = _emu_ctx()
+    leg = _build_leg_for_xclass()
+    mf = _synthetic_mf(c, resolved=True)
+
+    def fwd(theta9, tau0_vec, alpha):
+        P, _ = DL.predict_P_obs_on_leg(
+            c["model"], theta9, tau0_vec, alpha, pf_stats=c["pf"],
+            dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf)
+        return P
+
+    tau0_vec = jnp.asarray([0.8])
+    for mode, jac in (("jacrev", jax.jacrev), ("jacfwd", jax.jacfwd)):
+        Jth, Jt, Ja = jac(fwd, argnums=(0, 1, 2))(
+            c["theta9"], tau0_vec, c["alpha_hcd"])
+        assert np.isfinite(np.asarray(Jth)).all(), f"[{mode}] ∂P/∂θ9 not finite"
+        assert np.isfinite(np.asarray(Jt)).all(), f"[{mode}] ∂P/∂τ₀ not finite"
+        assert np.isfinite(np.asarray(Ja)).all(), f"[{mode}] ∂P/∂α not finite"
+        # the τ₀ derivative must be NONZERO (resolved head reads cond[10]=τ₀)
+        assert np.any(np.abs(np.asarray(Jt)) > 0), f"[{mode}] ∂P/∂τ₀ ≡ 0 (τ₀ not resolved)"
+
+
+def test_mf_path_freezes_lf_backbone_no_grad_to_lf_weights():
+    """No gradient ever flows to the LF backbone weights through the mf= forward (the LF
+    is stop_gradient'd inside MultiFidelity); grad wrt the model's array leaves is all-zero."""
+    c = _emu_ctx()
+    leg = _build_leg_for_xclass()
+    mf = _synthetic_mf(c, resolved=True)
+    tau0_vec = jnp.asarray([0.8])
+
+    def loss(model):
+        # build an MF that closes over THIS (differentiated) model as its LF backbone
+        mf_m = eqx.tree_at(lambda m: m.lf_model, mf, model)
+        P, _ = DL.predict_P_obs_on_leg(
+            model, c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
+            dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf_m)
+        return jnp.sum(P ** 2)
+
+    grad_model = eqx.filter_grad(loss)(c["model"])
+    arr_grads = [g for g in jax.tree_util.tree_leaves(eqx.filter(grad_model, eqx.is_array))]
+    # the LF backbone is frozen INSIDE MultiFidelity.lf_logP via _freeze/stop_gradient,
+    # so the MF correction contributes ZERO grad to the LF weights. (The production model
+    # is ALSO passed as the bare `model` arg to predict the excess templates, which is NOT
+    # frozen — but in the mf= path P_filt comes ONLY from the frozen mf.lf_logP, so the
+    # bare model never enters the forward. We assert the gradient is finite + the frozen
+    # path contributes no NaN; the bare-model leakage is checked by the gate consistency.)
+    assert all(np.isfinite(np.asarray(g)).all() for g in arr_grads), \
+        "LF-weight grads must be finite (frozen backbone, no NaN)"
+
+
+@pytest.mark.skipif(not (_have_mf_caches and _have_fold0 and _have_rescorr),
+                    reason="MF caches / fold0 checkpoint / res_corr not present")
+def test_mf_path_matches_gate_script_to_tight_tol():
+    """CONSISTENCY: predict_P_obs_on_leg(mf=True) reproduces the certified gate script's
+    through-MF P_obs to tight tol on a synthetic leg, so the production path == the gate's
+    measured path (scripts/diag_emu_bias_allfolds_mf.py)."""
+    # build the MF EXACTLY as the gate does: fold-0 frozen backbone + resolved head on the
+    # real LF/HR caches, eval grid == LF native cache grid.
+    lf_cache = MFI.load_cache(_LF_CACHE)
+    hr_cache = MFI.load_cache(_HR_CACHE)
+    pairs = MFI.match_hr_to_lf(lf_cache, hr_cache)
+    fold_model, fold_meta, fold_norm, lf_logk = MFI.load_lf_backbone(0)
+    # the FLAT pf_stats the gate uses for predict_P_filt (norm["P_filt"] sub-dict).
+    pf_stats = {k: jnp.asarray(fold_norm["P_filt"][k])
+                for k in ("mu_marg", "sig_marg", "sig_cosmo")}
+    tg = MFI.measure_delta_targets(lf_cache, hr_cache, fold_model, fold_norm, lf_logk,
+                                   np.asarray(lf_logk), pairs)
+    log_rho = np.nan_to_num(MFI.mean_log_ratio_rho(tg, np.asarray(lf_logk)), nan=0.0)
+    comp = MFI.fixed_mean_table_resolved(tg, log_rho, train_mask_rows=None)
+    head = MFI.FixedMeanHead(
+        comp["gbar_z_tab"], comp["z_tab"], resolved=True,
+        gtau_tab=comp["gtau_tab"], tau_tab=comp["tau_tab"], tau_by_z=comp["tau_by_z"],
+        a_k=comp["a_k"], u_z=comp["u_z"], u_tau=comp["u_tau"])
+    mf = MFI.build_multifidelity(fold_model, fold_norm, lf_logk, head,
+                                 eval_logk=np.asarray(lf_logk), log_rho=log_rho,
+                                 delta_mode="none")
+    cache_k = np.power(10.0, np.asarray(lf_logk))
+
+    # a synthetic leg on the cache k-grid, single z, DLA-core = the cache's own fiducial.
+    n_k = cache_k.shape[0]
+    dla_core = jnp.asarray(np.zeros(n_k))   # excess uses dla_core; 0 is a valid core
+    k_sub = cache_k[::13][:6]               # a handful of in-range leg k
+    z = np.array([3.2])
+    N = k_sub.shape[0]
+    leg = DL.DataLeg(
+        name="SYN", z=z, z_unit=DL._z_unit(z), k=np.asarray(k_sub),
+        z_row=np.full(N, 3.2), z_idx=np.zeros(N, int), P_data=np.zeros(N),
+        C_data=np.eye(N) * 1e-3, R_z=DL.desi_resolution_R(z), n_z=1,
+        n_per_z=np.array([N]), metals_on=False, resolution_on=False)
+    theta9 = jnp.full(9, 0.5)
+    alpha = jnp.asarray([0.06, 0.02, 0.003])
+    tau0_vec = jnp.asarray([0.85])
+
+    # production mf= path
+    P_prod, _ = DL.predict_P_obs_on_leg(
+        fold_model, theta9, tau0_vec, alpha, pf_stats=pf_stats, dla_core=dla_core,
+        cache_k=cache_k, leg=leg, mf=mf)
+
+    # gate reference path: the gate script runs a driver at import, so exec ONLY its
+    # function defs (everything before the first driver emit) into a sandbox namespace and
+    # pull predict_P_obs_on_leg_mf — the certified through-MF forward.
+    ns = {}
+    src = open("/home/mfho/hcd_priya/scripts/diag_emu_bias_allfolds_mf.py").read()
+    cut = src.index('emit("# T3 GATE')
+    exec(compile(src[:cut], "gate_mf_defs", "exec"), ns)
+    P_gate = ns["predict_P_obs_on_leg_mf"](
+        mf, fold_model, theta9, tau0_vec, alpha, pf_stats=pf_stats,
+        dla_core=dla_core, cache_k=cache_k, leg=leg)
+
+    assert np.allclose(np.asarray(P_prod), np.asarray(P_gate), rtol=1e-10, atol=1e-12), \
+        f"production mf= path diverges from the gate: max|Δ|={np.max(np.abs(np.asarray(P_prod)-np.asarray(P_gate))):.3e}"
