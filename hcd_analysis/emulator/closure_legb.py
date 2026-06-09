@@ -39,8 +39,10 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from numpyro.infer import NUTS, MCMC, init_to_median
+import numpyro.diagnostics as npd
+from numpyro.infer import NUTS, MCMC, init_to_median, init_to_sample
 from numpyro.infer.util import constrain_fn
+from scipy.stats import norm as _scipy_norm
 
 from . import train as T
 from .data import load_cache, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS
@@ -593,12 +595,22 @@ def _legb_reconstruct_deterministics(ctx, samples):
 
 def _run_nuts_legb(ctx, mock_legs, dla_core_per_leg, *, n_warmup, n_samples, seed,
                    target_accept=0.9, dense_mass=True, max_tree_depth=10,
-                   fast_postprocess=True):
+                   fast_postprocess=True, init_strategy=None, return_extra=False):
     """NUTS on the Leg-B model. PRODUCTION uses ``dense_mass=True`` (the [θ,τ₀] correlation is
     the physics) + ``max_tree_depth=10``. The SMOKE caps ``max_tree_depth`` (and may use a
     diagonal mass) to bound the per-step leapfrog count — the dense-mass adaptation on the
     26-dim θ+τ₀+α posterior is expensive (early warmup hits the max tree depth before the
     mass matrix conditions the geometry). The cap only affects efficiency, not correctness.
+
+    ``init_strategy`` (default ``init_to_median``): the numpyro init. The convergence path
+    (``run_legb_convergence``) passes ``init_to_sample`` (a DISPERSED prior draw per chain) so
+    the chains start spread across the prior — a PRE-REQUISITE for split-R-hat to be a valid
+    convergence diagnostic (identical ``init_to_median`` starts defeat the between-chain
+    variance R-hat relies on; CRITICAL, val-review bayesian §5/concern-1).
+
+    ``return_extra=True`` also returns the raw extra-field dict (``diverging``, ``energy``,
+    ``num_steps``) the convergence battery needs (E-BFMI from energy, max-tree-depth saturation
+    from num_steps); the default keeps the legacy ``(samples, n_div)`` 2-tuple.
 
     EFFICIENCY (MF-SMOKE-01 fix): numpyro's DEFAULT postprocess re-runs the FULL ``_legb_model``
     (incl. the 681×681 + 132×132 Cholesky ``numpyro.factor`` loglik) once per collected sample
@@ -607,9 +619,10 @@ def _run_nuts_legb(ctx, mock_legs, dla_core_per_leg, *, n_warmup, n_samples, see
     constrains via the cheap PRIORS-ONLY model (no loglik factor) and reconstruct ``tau0_vec`` /
     ``alpha_dla`` / ``alpha_hcd_z`` host-side. The returned samples dict is byte-identical to the
     default (verified rtol=0). Set ``fast_postprocess=False`` to restore the legacy replay."""
+    strat = init_to_median if init_strategy is None else init_strategy
     kernel = NUTS(lambda: _legb_model(ctx, mock_legs, dla_core_per_leg),
                   dense_mass=bool(dense_mass), target_accept_prob=float(target_accept),
-                  max_tree_depth=int(max_tree_depth), init_strategy=init_to_median)
+                  max_tree_depth=int(max_tree_depth), init_strategy=strat)
     postprocess_fn = None
     if fast_postprocess:
         # numpyro calls postprocess_fn(z_dict) per collected sample; constrain via the
@@ -619,12 +632,223 @@ def _run_nuts_legb(ctx, mock_legs, dla_core_per_leg, *, n_warmup, n_samples, see
                                 return_deterministic=False)
     mcmc = MCMC(kernel, num_warmup=int(n_warmup), num_samples=int(n_samples),
                 num_chains=1, progress_bar=False, postprocess_fn=postprocess_fn)
-    mcmc.run(jax.random.PRNGKey(int(seed)), extra_fields=("diverging",))
+    # accept either a PRNGKey (convergence path seeds chains on a separate fold_in axis) or an
+    # int seed (the legacy base_seed+attempt retry stream).
+    run_key = seed if isinstance(seed, jax.Array) else jax.random.PRNGKey(int(seed))
+    mcmc.run(run_key, extra_fields=("diverging", "energy", "num_steps"))
     samples = mcmc.get_samples()
     if fast_postprocess:
         samples = _legb_reconstruct_deterministics(ctx, samples)
-    diverging = np.asarray(mcmc.get_extra_fields().get("diverging", np.zeros(0, bool)))
-    return samples, int(diverging.sum())
+    ef = mcmc.get_extra_fields()
+    diverging = np.asarray(ef.get("diverging", np.zeros(0, bool)))
+    n_div = int(diverging.sum())
+    if return_extra:
+        extra = dict(diverging=diverging,
+                     energy=np.asarray(ef.get("energy", np.zeros(0))),
+                     num_steps=np.asarray(ef.get("num_steps", np.zeros(0, int))))
+        return samples, n_div, extra
+    return samples, n_div
+
+
+# ============================================================================ #
+#  STEP-A convergence battery (rank-R-hat / bulk+tail-ESS / E-BFMI) + multichain.
+#
+#  arviz is NOT installed in emu-jax; these are the standard Vehtari+2021 (2008.10250)
+#  estimators implemented on numpyro's (chain,draw) primitives (split_gelman_rubin,
+#  effective_sample_size) — rank-normalize/fold the pooled draws first, exactly as arviz
+#  does for ``az.rhat(method="rank")`` / ``az.ess(method={"bulk","tail"})``.
+# ============================================================================ #
+def _rank_normalize(x):
+    """Rank-normalize a (C,N) array over the POOLED CN draws → normal scores via the
+    Blom (r-3/8)/(n-1/4) plotting position + Φ⁻¹ (the arviz/Vehtari rank-R-hat transform).
+    Returns the same (C,N) shape."""
+    x = np.asarray(x, float)
+    C, N = x.shape
+    flat = x.reshape(-1)
+    # average ranks (1..CN), ties → mean rank (matches scipy 'average').
+    order = np.argsort(flat, kind="stable")
+    ranks = np.empty(flat.size, float)
+    ranks[order] = np.arange(1, flat.size + 1, dtype=float)
+    # resolve ties to the mean rank within each tie group.
+    uniq, inv, counts = np.unique(flat, return_inverse=True, return_counts=True)
+    csum = np.cumsum(counts)
+    start = csum - counts
+    mean_rank = (start + csum + 1) / 2.0     # mean of the integer ranks in [start+1, csum]
+    ranks = mean_rank[inv]
+    z = _scipy_norm.ppf((ranks - 3.0 / 8.0) / (flat.size - 0.25))
+    return z.reshape(C, N)
+
+
+def _ess_indicator(x, q):
+    """tail-ESS building block: ESS of the indicator series 1[x <= quantile_q(x)] (Vehtari+2021
+    §4.3). ``x`` is (C,N); the quantile is over the POOLED draws."""
+    x = np.asarray(x, float)
+    thr = np.quantile(x, q)
+    ind = (x <= thr).astype(float)
+    if ind.std() == 0:                        # degenerate (all on one side) → ESS undefined
+        return np.nan
+    return float(npd.effective_sample_size(ind))
+
+
+def convergence_battery(packed, names, *, energy=None, num_steps=None,
+                        max_tree_depth=10, n_div=0):
+    """The STEP-A convergence battery from MULTI-CHAIN packed draws.
+
+    ``packed`` : (C, N, P) — C chains, N draws, P params (the ``_draws_matrix`` packing).
+    ``names``  : (P,) param names.
+    ``energy`` : (C, N) HMC energy per chain (for E-BFMI); ``num_steps`` (C, N) tree size.
+
+    Returns a dict with PER-PARAM rank-normalized split-R-hat, bulk-ESS, tail-ESS, plus the
+    scalar E-BFMI (min over chains), divergence count, and max-tree-depth saturation fraction.
+    All standard (Vehtari+2021 / Betancourt+2016 E-BFMI). Computed with numpyro's
+    ``split_gelman_rubin`` / ``effective_sample_size`` on rank-normalized/folded draws (the
+    arviz rank-R-hat + bulk/tail-ESS recipe), since arviz is absent in this env."""
+    packed = np.asarray(packed, float)
+    C, N, P = packed.shape
+    rhat = np.full(P, np.nan)
+    ess_bulk = np.full(P, np.nan)
+    ess_tail = np.full(P, np.nan)
+    can_multichain = C >= 2 and N >= 4         # split_gelman_rubin needs draws ≥4
+    for p in range(P):
+        col = packed[:, :, p]                  # (C, N)
+        zr = _rank_normalize(col)              # rank-normalized (folded by the normal scores)
+        if can_multichain:
+            rhat[p] = float(npd.split_gelman_rubin(zr))
+        # bulk-ESS = ESS of the rank-normalized draws.
+        ess_bulk[p] = float(npd.effective_sample_size(zr))
+        # tail-ESS = min ESS of the 5%/95% quantile-indicator series (on the RAW draws).
+        e05 = _ess_indicator(col, 0.05); e95 = _ess_indicator(col, 0.95)
+        cands = [e for e in (e05, e95) if np.isfinite(e)]
+        ess_tail[p] = float(min(cands)) if cands else np.nan
+
+    # E-BFMI per chain (Betancourt 2016, 1604.00695 Eq. 6.1): Σ(ΔE)² / Σ(E-Ē)². Healthy ≳0.3.
+    ebfmi = np.array([])
+    if energy is not None and np.asarray(energy).size:
+        en = np.asarray(energy, float)
+        if en.ndim == 1:
+            en = en[None, :]
+        eb = []
+        for c in range(en.shape[0]):
+            e = en[c]
+            denom = np.sum((e - e.mean()) ** 2)
+            eb.append(float(np.sum(np.diff(e) ** 2) / denom) if denom > 0 else np.nan)
+        ebfmi = np.array(eb)
+
+    # max-tree-depth saturation: fraction of draws that hit the cap (2**mtd-1 leapfrogs).
+    sat_frac = np.nan
+    if num_steps is not None and np.asarray(num_steps).size:
+        ns = np.asarray(num_steps).reshape(-1)
+        sat_frac = float(np.mean(ns >= (2 ** int(max_tree_depth) - 1)))
+
+    def _nanmin(a):
+        a = np.asarray(a, float)
+        return float(np.nanmin(a)) if a.size and np.isfinite(a).any() else np.nan
+
+    def _nanmax(a):
+        a = np.asarray(a, float)
+        return float(np.nanmax(a)) if a.size and np.isfinite(a).any() else np.nan
+
+    return dict(
+        names=list(names), n_chains=C, n_draws=N,
+        rhat={names[p]: float(rhat[p]) for p in range(P)},
+        ess_bulk={names[p]: float(ess_bulk[p]) for p in range(P)},
+        ess_tail={names[p]: float(ess_tail[p]) for p in range(P)},
+        rhat_max=_nanmax(rhat) if can_multichain else np.nan,
+        ess_bulk_min=_nanmin(ess_bulk),
+        ess_tail_min=_nanmin(ess_tail),
+        ebfmi=ebfmi, ebfmi_min=_nanmin(ebfmi),
+        n_divergent=int(n_div), max_tree_depth=int(max_tree_depth),
+        treedepth_sat_frac=sat_frac)
+
+
+def run_legb_convergence(ctx: LegBCtx, d, *, sim=None, mock_index=0, n_chains=4,
+                         n_warmup=250, n_samples=400, seed=0, fold=0,
+                         dense_mass=True, max_tree_depth=10, target_accept=0.9,
+                         chain_ids=None, verbose=True):
+    """STEP-A convergence-MODE multichain fit of ONE mock (the R-hat path).
+
+    Differs from ``run_legb`` (the coverage path) in three review-mandated ways:
+      1. DISPERSED inits — each chain uses ``init_to_sample`` (an over-dispersed prior draw),
+         NOT ``init_to_median`` (identical starts make split-R-hat meaningless; CRITICAL).
+      2. warmup ≥ 150 (default 250) — 40 under-conditions the 25-dim dense mass.
+      3. a SEPARATE seed axis — chains seed on ``fold_in(key_nuts, chain_id)``, DISTINCT from
+         the ``base_seed + attempt`` divergence-retry stream of ``run_legb`` (no collision).
+
+    SHARDABLE 1 chain/SLURM-task: pass a single ``chain_ids=[c]`` per task (and ``n_chains``
+    is then just the merge target); each task computes its own chain and the host merges them
+    for the battery. We DELIBERATELY do NOT use numpyro ``num_chains>1`` (on CPU it serializes
+    the chains in one process — the wrapper's (mock,chain) sharding is the embarrassing-parallel
+    form, val-review CS §c/SLURM).
+
+    Returns ``dict(packed=(C,N,P), names, truth_vec, kept_global, battery, per_chain_div, sim)``.
+    The convergence battery (``convergence_battery``) carries rank-R-hat / bulk+tail-ESS /
+    E-BFMI / divergences / tree-depth saturation per param."""
+    sims, _va = held_out_sims(d, fold=fold)
+    if sim is None:
+        sim = sims[mock_index % len(sims)]
+    truth_sim = make_truth_from_sim(d, sim, fold=fold, mf=ctx.mf)
+
+    # mock-noise key on the per-mock fold_in axis (SAME mock across all chains: chains differ
+    # only in their NUTS seed, sharing one mock dataset — the R-hat between-chain variance is
+    # then purely the sampler's, not the data's).
+    key0 = jax.random.PRNGKey(int(seed))
+    k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, int(mock_index)), 2)
+    mock_legs, truth_pack, info = make_legb_mock(ctx, truth_sim, k_mock)
+    core_per_leg = _mock_core_per_leg(ctx, truth_sim)
+    kept_global = truth_pack["kept_global_z"]
+
+    truth_vec = np.concatenate([
+        truth_pack["theta9"], truth_pack["tau0_global"][kept_global], truth_pack["alpha_hcd"]])
+
+    ids = list(range(int(n_chains))) if chain_ids is None else list(chain_ids)
+    packed_chains, energies, num_steps_all, per_chain_div, init_vals = [], [], [], [], []
+    for cid in ids:
+        # SEPARATE seed axis: fold_in(k_nuts, chain_id) — distinct from base_seed+attempt.
+        chain_key = jax.random.fold_in(k_nuts, int(cid))
+        samples, n_div, extra = _run_nuts_legb(
+            ctx, mock_legs, core_per_leg, n_warmup=n_warmup, n_samples=n_samples,
+            seed=chain_key, target_accept=target_accept, dense_mass=dense_mass,
+            max_tree_depth=max_tree_depth, init_strategy=init_to_sample, return_extra=True)
+        draws = _draws_matrix(samples, kept_global)         # (N, P)
+        packed_chains.append(draws)
+        energies.append(extra["energy"]); num_steps_all.append(extra["num_steps"])
+        per_chain_div.append(int(n_div))
+        # record the per-chain INITIAL constrained draw (1st kept sample) to verify dispersion.
+        init_vals.append(draws[0])
+        if verbose:
+            print(f"  [conv chain {cid}] sim={sim[:20]}… draws={draws.shape[0]} div={n_div} "
+                  f"E-BFMI={_ebfmi1(extra['energy']):.2f}")
+
+    packed = np.stack(packed_chains, axis=0)                # (C, N, P)
+    n_theta, n_alpha = 9, 3
+    names = list(PARAM_NAMES) + ["alpha_lls", "alpha_subdla", "alpha_dla"]
+    # the packed-draw column order is θ9, τ₀(kept), α3 — name the τ₀ block by global-z index.
+    tau0_names = [f"tau0_z{i}" for i in range(int(kept_global.sum()))]
+    packed_names = list(PARAM_NAMES) + tau0_names + ["alpha_lls", "alpha_subdla", "alpha_dla"]
+
+    battery = convergence_battery(
+        packed, packed_names, energy=np.stack(energies) if energies else None,
+        num_steps=np.stack(num_steps_all) if num_steps_all else None,
+        max_tree_depth=max_tree_depth, n_div=int(sum(per_chain_div)))
+    # per-chain init spread vs the within-chain posterior sd (dispersion check, R-hat validity).
+    init_arr = np.stack(init_vals)                          # (C, P)
+    post_sd = packed.reshape(-1, packed.shape[-1]).std(axis=0)
+    init_spread = init_arr.std(axis=0)
+    battery["init_spread"] = init_spread
+    battery["post_sd"] = post_sd
+    battery["init_spread_over_postsd"] = np.where(post_sd > 0, init_spread / post_sd, np.nan)
+    return dict(packed=packed, names=packed_names, truth_vec=truth_vec,
+                kept_global=kept_global, battery=battery,
+                per_chain_div=per_chain_div, sim=sim)
+
+
+def _ebfmi1(energy):
+    """E-BFMI of a single chain's energy series (helper for the per-chain print)."""
+    e = np.asarray(energy, float)
+    if e.size < 2:
+        return np.nan
+    denom = np.sum((e - e.mean()) ** 2)
+    return float(np.sum(np.diff(e) ** 2) / denom) if denom > 0 else np.nan
 
 
 def _mock_core_per_leg(ctx, truth_sim):
@@ -881,6 +1105,43 @@ def _smoke(args):
     return ctx, d, res
 
 
+def _smoke_convergence(args):
+    """STEP-A convergence-MODE smoke: ONE mock, ≥2 dispersed-init chains, the full battery."""
+    print(f"[legb-conv] building ctx from {CKPT} (+ xclass C_emu)")
+    desi_kw = dict(z_lo=args.z_lo, z_hi=args.z_hi) if args.z_lo or args.z_hi < 4.2 else None
+    ctx, d = build_legb_ctx(cemu_inflate=args.cemu_inflate, use_xclass=not args.diag_cemu,
+                            with_mf=args.mf, mf_with_floor=not args.no_floor,
+                            desi_kwargs=desi_kw)
+    if args.desi_only:
+        ctx = ctx._replace(legs=[leg for leg in ctx.legs if leg.name == "DESI"])
+    print(f"[legb-conv] legs: " + ", ".join(
+        f"{leg.name}(n_z={leg.n_z}, N={leg.k.shape[0]})" for leg in ctx.legs))
+    print(f"[legb-conv] {args.chains} chains × {args.n_samples} samples (warmup {args.n_warmup}) "
+          f"dispersed init_to_sample, dense_mass={not args.diag_mass}, mtd={args.max_tree_depth}")
+
+    res = run_legb_convergence(
+        ctx, d, mock_index=args.mock_index, n_chains=args.chains, n_warmup=args.n_warmup,
+        n_samples=args.n_samples, seed=args.seed, dense_mass=not args.diag_mass,
+        max_tree_depth=args.max_tree_depth)
+    b = res["battery"]
+    print("\n========== STEP-A convergence battery ==========")
+    print(f"sim={res['sim'][:40]}  chains={b['n_chains']}  draws/chain={b['n_draws']}  "
+          f"divergent={b['n_divergent']}")
+    print(f"rank-split-R-hat max = {b['rhat_max']:.4f}  (gate <1.01)")
+    print(f"bulk-ESS min = {b['ess_bulk_min']:.0f}   tail-ESS min = {b['ess_tail_min']:.0f}  "
+          f"(gate ≥400)")
+    print(f"E-BFMI min = {b['ebfmi_min']:.3f} (gate >0.3)   "
+          f"tree-depth saturation = {b['treedepth_sat_frac']:.3f} (gate <~0.02)")
+    print(f"\n  {'param':12s} {'R-hat':>7s} {'ESSbulk':>8s} {'ESStail':>8s} "
+          f"{'init/postsd':>11s}")
+    for i, nm in enumerate(res["names"]):
+        print(f"  {nm:12s} {b['rhat'][nm]:7.3f} {b['ess_bulk'][nm]:8.0f} "
+              f"{b['ess_tail'][nm]:8.0f} {b['init_spread_over_postsd'][i]:11.2f}")
+    print(f"\nper-chain divergences: {res['per_chain_div']}")
+    print("[caveat] smoke depth → R-hat is finite/computed, NOT necessarily <1.01.")
+    return ctx, d, res
+
+
 def main():
     ap = argparse.ArgumentParser(description="Phase-C T4b Leg-B closure on the real grids")
     ap.add_argument("--smoke", action="store_true",
@@ -908,8 +1169,17 @@ def main():
     ap.add_argument("--no-floor", action="store_true",
                     help="with --mf, DISABLE the MF C_emu floor (default ON)")
     ap.add_argument("--figures", action="store_true", help="emit the 3 diagnostic figures")
+    ap.add_argument("--convergence", action="store_true",
+                    help="STEP-A convergence MODE: one mock, ≥2 dispersed-init chains, "
+                         "rank-R-hat / bulk+tail-ESS / E-BFMI battery (the multichain path)")
+    ap.add_argument("--chains", type=int, default=4,
+                    help="convergence mode: number of dispersed-init chains (default 4)")
+    ap.add_argument("--mock-index", type=int, default=0,
+                    help="convergence mode: which held-out mock (cycles the fold's sims)")
     args = ap.parse_args()
-    if args.smoke:
+    if args.convergence:
+        _smoke_convergence(args)
+    elif args.smoke:
         ctx, d, res = _smoke(args)
         if args.figures:
             from . import closure_legb_figs as F  # lazy (matplotlib)
