@@ -46,7 +46,8 @@ from scipy.stats import norm as _scipy_norm
 
 from . import train as T
 from .data import load_cache, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS
-from .meanflux_prior import meanflux_tau0_prior, becker13_tau0
+from .meanflux_prior import (meanflux_tau0_prior, becker13_tau0, tau0_alpha_priya,
+                             TAU0_AMP_RANGE, DTAU0_RANGE, TAU0_PIVOT_Z)
 from .inference import (PARAM_NAMES, hcd_incidence_prior,
                         HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT)
 from .sampler_numpyro import _dla_raw_mu
@@ -134,6 +135,11 @@ class LegBCtx(NamedTuple):
                                          # (real-fit config) instead of the fixed power-law.
     zslope_mu: object = None             # (3,) prior center on s_c (default HCD_LIT_OVER_SIM_SLOPE)
     zslope_sigma: object = None          # (3,) prior width on s_c (default the literature WLS σ_s)
+    # PRIYA mean-flux model (replaces the 13 per-z τ₀ rungs): α(z)=τ₀·((1+z)/(1+z_p))^dτ₀, τ₀(z)=α·Kim07.
+    # UNIFORM priors (Bird+2023 §2.7.1; arXiv:2509.18271). tau0_mu/tau0_sigma above are now legacy.
+    tau0_amp_range: object = TAU0_AMP_RANGE   # PRIYA uniform prior on amplitude τ₀ (center 1.0=Kim)
+    dtau0_range: object = DTAU0_RANGE         # PRIYA uniform prior on slope dτ₀ (center 0=Kim slope)
+    tau0_pivot_z: float = TAU0_PIVOT_Z        # the (1+z)/(1+z_p) pivot (PRIYA z_p=3)
 
 
 def _kim(z):
@@ -608,9 +614,13 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     zg = jnp.asarray(ctx.z_global)
     theta9 = numpyro.sample("theta_unit", dist.Uniform(jnp.zeros(9), jnp.ones(9)).to_event(1))
     kim = _kim(zg)
-    alpha_ladder = numpyro.sample(
-        "alpha_ladder", dist.Normal(ctx.tau0_mu / kim, ctx.tau0_sigma / kim).to_event(1))
-    tau0_global = numpyro.deterministic("tau0_vec", alpha_ladder * kim)
+    # PRIYA mean-flux: α(z)=τ₀·((1+z)/(1+z_p))^dτ₀, τ₀(z)=α·Kim07 — 2 GLOBAL uniform params, NOT
+    # 13 free per-z rungs, so τ₀ cannot absorb emulator residual into per-z wiggle that biases A_p.
+    tau0_amp = numpyro.sample("tau0_amp",
+                              dist.Uniform(ctx.tau0_amp_range[0], ctx.tau0_amp_range[1]))
+    dtau0 = numpyro.sample("dtau0", dist.Uniform(ctx.dtau0_range[0], ctx.dtau0_range[1]))
+    alpha_z = tau0_alpha_priya(zg, tau0_amp, dtau0, z_pivot=ctx.tau0_pivot_z)
+    tau0_global = numpyro.deterministic("tau0_vec", alpha_z * kim)
     a_lls = numpyro.sample("alpha_lls",
                            dist.Normal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]))
     a_sub = numpyro.sample("alpha_subdla",
@@ -651,11 +661,9 @@ def _legb_priors_only(ctx):
     """The SAME prior sample sites as ``_legb_model`` but with NO ``numpyro.factor`` loglik and
     NO deterministic sites — used only as the model passed to ``constrain_fn`` in the cheap
     transform-only postprocess (below). Tracing this is cheap (priors, no 681×681 Cholesky)."""
-    zg = jnp.asarray(ctx.z_global)
     numpyro.sample("theta_unit", dist.Uniform(jnp.zeros(9), jnp.ones(9)).to_event(1))
-    kim = _kim(zg)
-    numpyro.sample("alpha_ladder",
-                   dist.Normal(ctx.tau0_mu / kim, ctx.tau0_sigma / kim).to_event(1))
+    numpyro.sample("tau0_amp", dist.Uniform(ctx.tau0_amp_range[0], ctx.tau0_amp_range[1]))
+    numpyro.sample("dtau0", dist.Uniform(ctx.dtau0_range[0], ctx.dtau0_range[1]))
     numpyro.sample("alpha_lls", dist.Normal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]))
     numpyro.sample("alpha_subdla", dist.Normal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1]))
     numpyro.sample("alpha_dla_raw", dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
@@ -678,8 +686,10 @@ def _legb_reconstruct_deterministics(ctx, samples):
     the three deterministic keys)."""
     zg = jnp.asarray(ctx.z_global)
     kim = _kim(zg)
-    alpha_ladder = jnp.asarray(samples["alpha_ladder"])              # (L, nZg)
-    tau0_vec = alpha_ladder * kim
+    tau0_amp = jnp.asarray(samples["tau0_amp"])                      # (L,)
+    dtau0 = jnp.asarray(samples["dtau0"])                            # (L,)
+    alpha_z = tau0_amp[:, None] * ((1.0 + zg)[None, :] / (1.0 + ctx.tau0_pivot_z)) ** dtau0[:, None]
+    tau0_vec = alpha_z * kim[None, :]                                # (L, nZg)
     alpha_dla = jax.nn.softplus(jnp.asarray(samples["alpha_dla_raw"]))  # (L,)
     alpha_pivot = jnp.stack([jnp.asarray(samples["alpha_lls"]),
                              jnp.asarray(samples["alpha_subdla"]),

@@ -55,6 +55,79 @@ def becker13_tau0(z):
     return BECKER13_TAU0 * ((1.0 + z) / (1.0 + BECKER13_ZREF)) ** BECKER13_BETA + BECKER13_C
 
 
+# PRIYA-NATIVE mean-flux model (Bird+2023 §2.7.1 Eq.2.14-15; the SAME form + priors in the
+# eBOSS fit Fernandez+2024 arXiv:2309.03943 AND the KODIAQ-SQUAD fit arXiv:2509.18271):
+#   τ_eff(z) = τ₀·((1+z)/4)^dτ₀·τ_Kim(z),  τ_Kim = 0.0023(1+z)^3.65 (Kim07), pivot z=3, NO +C.
+# 2 GLOBAL params (amplitude τ₀, slope dτ₀), UNIFORM priors (NOT a tight Gaussian — arXiv:2509.18271
+# §5: "τ₀ absorbs residual HCD contamination at high k … should not be placed with a Gaussian prior
+# unless co-varied with a HCD a_HCD"). The degeneracy-break is the SMOOTH 2-param structure (no
+# per-z wiggle) + co-varying HCD, not a tight prior. These REPLACE the 13 independent per-z rungs.
+TAU0_AMP_RANGE = (0.75, 1.25)    # PRIYA uniform prior on amplitude τ₀ (×, center 1.0 = Kim07)
+DTAU0_RANGE = (-0.40, 0.25)      # PRIYA uniform prior on slope dτ₀ (center 0 = Kim07 slope)
+TAU0_PIVOT_Z = 3.0               # the (1+z)/(1+z_p) pivot (PRIYA (1+z)/4 → z_p=3)
+# (legacy τ₀-space power-law-with-C widths, kept for the Becker-anchored utility path only:)
+TAU0_LOGA_SIGMA = 0.05
+TAU0_BETA_SIGMA = 0.15
+
+
+def tau0_alpha_priya(z, tau0_amp, dtau0, *, z_pivot=TAU0_PIVOT_Z):
+    """PRIYA mean-flux model in the α = τ₀/Kim LADDER coordinate (Bird+2023 §2.7.1, Eq.2.14–15:
+    τ_eff = τ₀·((1+z)/4)^dτ₀·τ_Kim): ``α(z) = tau0_amp · ((1+z)/(1+z_pivot))^dtau0``.
+
+    Replaces the 13 INDEPENDENT per-z α rungs with this 2-parameter smooth curve, so τ₀ evolves
+    on a physically-informed amplitude+slope (PRIYA-native) instead of a free per-z wiggle that
+    biases A_p. ``tau0_amp=1, dtau0=0`` = the Kim central rung (the cache ladder anchor).
+    Multiply by ``kim_tau0(z)`` for τ₀(z). Differentiable in (tau0_amp, dtau0) for NUTS."""
+    z = jnp.asarray(z)
+    return tau0_amp * ((1.0 + z) / (1.0 + z_pivot)) ** dtau0
+
+
+def fit_tau0_alpha_priya(z, alpha_z, *, z_pivot=TAU0_PIVOT_Z):
+    """LSQ (tau0_amp, dtau0) for a sim's per-z α(z)=τ₀/Kim — the CLOSURE truth params (and the
+    real-fit prior center when fed Becker/Kim). Linear fit of log α vs log((1+z)/(1+z_pivot))."""
+    import numpy as _np
+    z = _np.asarray(z, float); a = _np.asarray(alpha_z, float)
+    x = _np.log((1.0 + z) / (1.0 + z_pivot))
+    b, c = _np.polyfit(x, _np.log(a), 1)       # slope b = dtau0, intercept c = log(tau0_amp)
+    return float(_np.exp(c)), float(b)
+
+
+def tau0_powerlaw(z, logA, beta, *, zref=BECKER13_ZREF, c=0.0):
+    """Smooth physical τ₀(z) = exp(logA)·((1+z)/(1+zref))^beta + c (Becker-form power-law).
+
+    The 2-parameter (amplitude logA + slope beta) mean-flux model that REPLACES the 13
+    independent per-z τ₀ rungs in the closure — so τ₀ evolves on a physically-informed
+    amplitude+slope, not a free per-z wiggle that A_p trades against. Differentiable in
+    (logA, beta) for NUTS; ``c`` is the fixed Becker continuum/metal offset (or 0)."""
+    z = jnp.asarray(z)
+    return jnp.exp(logA) * ((1.0 + z) / (1.0 + zref)) ** beta + c
+
+
+def fit_tau0_powerlaw(z, tau0, *, zref=BECKER13_ZREF):
+    """Least-squares (logA, beta, c) for a sim's per-z τ₀(z) — the CLOSURE truth params.
+
+    Fit log(τ₀−c) linear in log((1+z)/(1+zref)); grid the small offset ``c`` then linfit
+    (c is the Becker continuum term, small). Returns floats (logA, beta, c). Pure-numpy
+    (host-side; used to set the closure mock's true τ₀ amplitude+slope, and the
+    closure prior center)."""
+    import numpy as _np
+    z = _np.asarray(z, dtype=float); tau0 = _np.asarray(tau0, dtype=float)
+    best = None
+    for c in _np.linspace(-0.20, 0.05, 26):
+        y = tau0 - c
+        if _np.any(y <= 0):
+            continue
+        x = _np.log((1.0 + z) / (1.0 + zref))
+        b, a = _np.polyfit(x, _np.log(y), 1)          # slope b, intercept a = logA
+        resid = _np.sum((a + b * x - _np.log(y)) ** 2)
+        if best is None or resid < best[0]:
+            best = (resid, a, b, c)
+    if best is None:
+        raise ValueError("fit_tau0_powerlaw: no positive (τ₀−c) branch found")
+    _, logA, beta, c = best
+    return float(logA), float(beta), float(c)
+
+
 def meanflux_tau0_prior(z, *, frac_sigma=DEFAULT_FRAC_SIGMA, flat=False, center="kim"):
     """Per-z mean-flux prior ``(tau0_mu, tau0_sigma)`` in τ₀ units.
 

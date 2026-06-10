@@ -53,7 +53,7 @@ def test_fast_postprocess_matches_replay_golden():
     s_slow, _ = C._run_nuts_legb(ctx, mock_legs, core, fast_postprocess=False, **kw)
 
     # The raw latent sites must already match (same kernel, same seed) — sanity.
-    for site in ("theta_unit", "alpha_ladder", "alpha_lls", "alpha_subdla", "alpha_dla_raw"):
+    for site in ("theta_unit", "tau0_amp", "dtau0", "alpha_lls", "alpha_subdla", "alpha_dla_raw"):
         np.testing.assert_array_equal(
             np.asarray(s_fast[site]), np.asarray(s_slow[site]),
             err_msg=f"latent site {site!r} differs across postprocess paths (seed mismatch?)")
