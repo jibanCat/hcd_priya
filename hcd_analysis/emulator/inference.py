@@ -54,11 +54,24 @@ def gaussian_logprior(value, mu, sigma):
 # HCD incidence priors — literature-calibrated (2026-06-04 Lyα agent; sources: O'Meara+2013
 # / Prochaska+2010 / Fumagalli+2013 (LLS), Zafar+2013 (subDLA), Prochaska&Wolfe2009 /
 # Noterdaeme+2012 (DLA)). Fractional widths σ/μ per class; LLS TIGHT (cosmology-degenerate,
-# DESI DR1). DLA centered on the residual post-masking fraction (masking ~70% complete).
-HCD_PRIOR_FRAC_SIGMA = (0.15, 0.40, 0.10)   # σ/μ: LLS TIGHT (cosmology-degenerate); subDLA
-#   BROAD (poor measurement — the Zafar-vs-O'Meara factor-2); DLA tight at z≤3.5, widened
-#   above (see HCD_DLA_Z_RELIABLE).
-HCD_DLA_RESIDUAL_FRAC = 0.30                 # DLA residual incidence ≈ 0.30 × data incidence
+# DESI DR1). DLA on the per-leg unmasked-DLA residual (PI-confirmed final intent 2026-06-09).
+HCD_PRIOR_FRAC_SIGMA = (0.15, 0.40, 0.50)   # σ/μ: LLS TIGHT (cosmology-degenerate); subDLA
+#   BROAD (poor measurement — the Zafar-vs-O'Meara factor-2); DLA WIDE 0.50 = the
+#   masking-completeness uncertainty (the DLA-finder misses ~10% with a broad completeness
+#   width), widened further above z=3.5 (see HCD_DLA_Z_RELIABLE).
+# §0c DLA prior (PI-confirmed final intent 2026-06-09): the DLA-finder masking is INCOMPLETE —
+# the finder misses ~10% of DLAs (completeness ~90%), so those ~10% REMAIN as full unmasked DLA
+# systems in the DESI data (and the closure TARGET MOCK). The α_DLA prior is therefore centered
+# on that 10% residual incidence and α_DLA is MARGINALIZED (sampled, NOT fixed) over it: the
+# closure tests whether HCD-marginalization recovers cosmology DESPITE the DLA residual. The
+# residual is leg-specific — KS fully masks DLAs (0% residual), DESI carries the 10% — handled
+# by the per-leg DataLeg.dla_forward_frac in data_likelihood (this prior is the DESI center).
+# α_DLA is one-sided (softplus, sampler_numpyro) → α_DLA ≥ 0 (a completeness fraction).
+HCD_DLA_RESIDUAL_FRAC = 0.10                 # DLA residual incidence = 0.10 × data incidence
+#   (the DESI 10% unmasked-DLA residual; was 0.30 for the WRONG ~70%-masking model, then 0.05
+#   for the WRONG "α_DLA≈0 / masked-to-clean" revert). With w_DLA≈0.04 the α_DLA prior center is
+#   ≈0.004 (σ/μ=0.50, one-sided softplus → a 10%-scale residual the forward marginalizes); the
+#   closure truth's α_DLA is 0.10·w_DLA on DESI / 0 on KS (per-leg DLA-forward axis).
 HCD_DLA_Z_RELIABLE = 3.5                     # DLA dN/dX unreliable beyond this z → widen σ_DLA
 HCD_Z_PIVOT = 3.0
 # PRIYA-sim-vs-observed dN/dX offset (literature / PRIYA-sim) per class, as a POWER-LAW in
@@ -88,12 +101,16 @@ def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None):
     in ``predict_P_obs``), centered on the OBSERVED incidence AT the data redshift ``z``
     (NOT the sim's), from the fiducial sim weights ``w_c_fid`` = (w_LLS, w_subDLA, w_DLA) ×
     the z-SLOPE literature/sim ratio (``lit_over_sim_at_z(z)``; override with
-    ``lit_over_sim``). LLS/subDLA largely UNMASKED → center = (lit/sim)(z)·w_c; DLA
-    ~70%-masked → center = HCD_DLA_RESIDUAL_FRAC·(lit/sim)(z)·w_DLA (the residual). α=w_c
-    (the sim) is NOT the center: PRIYA mis-predicts subDLA/DLA dN/dX AND its z-slope (see
-    scripts/plot_dndx_vs_literature.py). Widths = literature fractional σ/μ × center.
+    ``lit_over_sim``). LLS/subDLA largely UNMASKED → center = (lit/sim)(z)·w_c; the DLA class is
+    INCOMPLETELY masked (the finder misses ~10%, PI-confirmed final intent 2026-06-09) → center =
+    HCD_DLA_RESIDUAL_FRAC·(lit/sim)(z)·w_DLA = 0.10·(...) (the unmasked-DLA residual the forward
+    MARGINALIZES over; leg-specific via data_likelihood.dla_forward_frac — this is the DESI
+    center, KS forward DLA term is 0). α=w_c (the sim) is NOT the LLS/subDLA center: PRIYA
+    mis-predicts subDLA/DLA dN/dX AND its z-slope (see scripts/plot_dndx_vs_literature.py).
+    Widths = literature fractional σ/μ × center (DLA σ/μ=0.50, masking-completeness).
     Returns (alpha_mu (3,), alpha_sigma (3,)); DLA should additionally be one-sided
-    (half-normal/softplus) in the sampler.
+    (half-normal/softplus) in the sampler — α_DLA ≥ 0 (a completeness fraction), sampled
+    (marginalized) over the 10% residual center.
     """
     w = jnp.asarray(w_c_fid)                                    # (3,)
     r = lit_over_sim_at_z(z) if lit_over_sim is None else jnp.asarray(lit_over_sim)
@@ -248,7 +265,7 @@ def log_posterior_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     """Single-z log-POSTERIOR = log-likelihood + smooth unit-box prior + τ₀ mean-flux
     Gaussian + the per-class HCD **incidence prior** on α (TIGHT informative Gaussian
     centered on the structural w_c(dN/dX); LLS especially tight — it's cosmology-degenerate,
-    DESI DR1; DLA centered on the residual post-masking fraction). The differentiable scalar
+    DESI DR1; DLA centered on the 10% unmasked-DLA residual, marginalized). The differentiable scalar
     a single-z-bin NUTS run targets (the multi-z posterior sums ``log_lik_single_z`` over
     data bins + ONE box prior + the per-z τ₀ Gaussian + the α prior — T4 driver).
 

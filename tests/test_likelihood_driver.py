@@ -169,20 +169,25 @@ def test_cemu_inflate_raises_emulator_variance_in_driver():
 
 
 def test_hcd_incidence_prior_centers_on_observed_not_sim():
-    """The incidence prior centers on the OBSERVED incidence = (lit/sim)·w_c (not the sim
-    weight), since PRIYA mis-predicts subDLA/DLA by ~30%; DLA on the 0.30× residual."""
+    """The incidence prior centers on the OBSERVED incidence = (lit/sim)·w_c (LLS/subDLA, the
+    ORIGINAL design), since PRIYA mis-predicts subDLA dN/dX; α_DLA on the 10% unmasked-DLA
+    residual = 0.10·(lit/sim)·w_DLA, σ/μ=0.50 (the DLA finder misses ~10%; α_DLA is MARGINALIZED
+    over it — §0c, PI-confirmed final intent 2026-06-09)."""
     w = jnp.array([0.06, 0.02, 0.01])      # fiducial (LLS, subDLA, DLA) sim weights
-    # with lit==sim the center is the bare sim weight (LLS/subDLA) / 0.30× (DLA)
+    fr = I.HCD_DLA_RESIDUAL_FRAC           # 0.10 (the DESI unmasked-DLA residual center)
+    fl, fs, fd = I.HCD_PRIOR_FRAC_SIGMA    # (0.15, 0.40, 0.50) — LLS/subDLA unchanged, DLA wide
+    # with lit==sim the LLS/subDLA centers are the bare sim weight; DLA on the 10% residual.
     mu0, _ = I.hcd_incidence_prior(w, lit_over_sim=(1.0, 1.0, 1.0))
-    assert np.allclose(np.asarray(mu0), [0.06, 0.02, 0.30 * 0.01])
-    # the DEFAULT offset (PRIYA over-predicts subDLA, under-predicts DLA) shifts the centers
+    assert np.allclose(np.asarray(mu0), [0.06, 0.02, fr * 0.01])
+    # the DEFAULT offset (PRIYA over-predicts subDLA) shifts the LLS/subDLA centers.
     r = I.HCD_LIT_OVER_SIM
     mu, sig = I.hcd_incidence_prior(w)   # z = pivot = 3.0 (≤3.5 → no DLA σ inflation)
-    assert np.allclose(np.asarray(mu), [r[0] * 0.06, r[1] * 0.02, 0.30 * r[2] * 0.01])
-    # widths: LLS tight 0.15, subDLA BROAD 0.40 (poor measurement), DLA 0.10 at z≤3.5
-    assert np.allclose(np.asarray(sig), [0.15 * mu[0], 0.40 * mu[1], 0.10 * mu[2]])
+    assert np.allclose(np.asarray(mu), [r[0] * 0.06, r[1] * 0.02, fr * r[2] * 0.01])
+    # widths: LLS tight 0.15, subDLA BROAD 0.40 (poor measurement), DLA WIDE 0.50 at z≤3.5
+    assert np.allclose(np.asarray(sig), [fl * mu[0], fs * mu[1], fd * mu[2]])
     assert float(mu[1]) < 0.02, "subDLA center below sim weight (PRIYA over-predicts)"
-    assert float(mu[2]) > 0.30 * 0.01, "DLA residual center above naive 0.30× (PRIYA under-predicts)"
+    assert np.isclose(float(mu[2]), fr * r[2] * 0.01, rtol=1e-10), \
+        "α_DLA center must be 0.10·(lit/sim)·w_DLA (the unmasked-DLA residual)"
     g = jax.grad(lambda a: jnp.sum(I.gaussian_logprior(a, mu, sig)))(
         jnp.asarray([0.05, 0.015, 0.004]))
     assert np.isfinite(np.asarray(g)).all()
@@ -194,7 +199,7 @@ def test_hcd_incidence_prior_centers_on_observed_not_sim():
     # DLA z-slope is WEAK now (+0.40 not +1.08) but still positive
     assert float(mu_hi[2]) > float(mu_lo[2]), "DLA center grows weakly with z"
     # DLA σ WIDENS beyond z=3.5 (data, not prior, sets high-z DLA)
-    assert float(sig_hi[2]) > 0.10 * float(mu_hi[2]), "DLA σ must widen above z=3.5"
+    assert float(sig_hi[2]) > fd * float(mu_hi[2]), "DLA σ must widen above z=3.5"
 
 
 def test_log_lik_multiz_equals_loop_sum():

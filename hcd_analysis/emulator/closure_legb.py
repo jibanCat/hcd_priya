@@ -78,6 +78,14 @@ DIVERGENCE_RETRY_TARGET_ACCEPT = (0.95, 0.99)
 # with the quoted literature dN/dX error bars; class order LLS, subDLA, DLA).
 ZSLOPE_PRIOR_SIGMA = (0.52, 0.53, 0.33)
 
+# PER-LEG DLA-residual fraction in the closure TARGET MOCK (§0c, PI-confirmed final intent
+# 2026-06-09): the 10% unmasked-DLA residual belongs in the target. The DLA finder misses ~10%
+# of DLAs (completeness ~90%) → on DESI those 10% REMAIN as full systems in the target; KS fully
+# masks DLAs → 0% residual. make_truth_from_sim builds the DLA-MASKED baseline + the FULL DLA
+# excess add-back; make_legb_mock adds ``TRUTH_DLA_FRAC[leg]``·excess per leg. This is the truth
+# side; the forward marginalizes α_DLA over it (DataLeg.dla_forward_frac: DESI 1.0 / KS 0.0).
+TRUTH_DLA_FRAC = {"DESI": 0.10, "KS": 0.0}
+
 
 # ============================================================================ #
 #  LegBCtx — the frozen leg context the numpyro model + mock generator share.
@@ -328,10 +336,18 @@ def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="becker13", mf=None):
 
     Pools the sim's rows over z (data range z∈[2.2,4.6], finite P_filt). Returns dict:
       z          (nZs,)         the sim's available redshifts (ascending, one per z);
-      P_obs_true (nZs, K)       per-z contaminated P1D on the cache grid;
+      P_obs_true (nZs, K)       per-z DLA-MASKED baseline P1D on the cache grid: the
+                                contaminated Tier-P with the DLA class held at the CLEAN level
+                                (the τ=1e6-filtered + LLS/subDLA-contaminated forest, no DLA
+                                excess). The per-leg DLA residual is ADDED in make_legb_mock;
+      dla_excess_true (nZs, K)  the per-z FULL DLA excess add-back w_DLA·(P_DLA^unf − P_clean),
+                                P_DLA^unf = cache P_filt[DLA] + the DLA core. make_legb_mock adds
+                                TRUTH_DLA_FRAC[leg]·this to the baseline (DESI 0.10 / KS 0.0) —
+                                the §0c per-leg unmasked-DLA residual in the TARGET MOCK;
       params_unit (9,)          the truth θ (unit-cube; same for all the sim's rows);
       tau0       (nZs,)         the truth τ₀(z) (cache tau0 = −ln⟨F⟩, the selected ladder row);
-      dla_core   (nZs, K)       the per-z DLA core (cache delta[,2]) of the selected row;
+      dla_core   (nZs, K)       the per-z DLA core (cache delta[,2]); used by the FORWARD's DLA
+                                excess template (and the dla_excess_true add-back above);
       w_c        (3,)           the sim's structural α=w_c (its own contamination, z-mean).
     """
     sim_name = str(sim_name)
@@ -372,29 +388,44 @@ def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="becker13", mf=None):
     z = z_grid[keep_rows]
     K = P_filt.shape[-1]
     P_obs = np.zeros((len(keep_rows), K))
+    dla_excess = np.zeros((len(keep_rows), K))
     dla_core = np.zeros((len(keep_rows), K))
     th_truth = jnp.asarray(params_unit[keep_rows[0]])
     z_unit_rows = (z_grid[keep_rows] - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
     for i, r in enumerate(keep_rows):
         a = w_c[r, 1:]                               # (3,) [LLS,sub,DLA] the sim's contamination
         coef = np.concatenate([[1.0 - a.sum()], a])  # (4,)
-        core_r = delta[r, 2]                         # (K,) DLA core add-back
+        core_r = delta[r, 2]                         # (K,) DLA core (forward template + excess add-back)
         if mf is None:
             corr = np.ones((4, K))                    # LF-resolution truth (no correction)
         else:
             # GATE INVARIANT: the SAME fixed per-class MF factor exp(g + log res_corr) the
-            # forward applies, at this row's (θ, z, τ₀). The DLA core add-back is UNCORRECTED
-            # (added AFTER the per-class P_filt correction, mirroring _excess_from_P_filt /
-            # _predict_P_obs_mf), so the truth is reproduced when θ→truth in the MF forward.
+            # forward applies, at this row's (θ, z, τ₀). The per-class P_filt correction
+            # mirrors _excess_from_P_filt / _predict_P_obs_mf so the truth is reproduced when
+            # θ→truth in the MF forward.
             corr = np.asarray(jnp.exp(DL._mf_corr_on_cache(
                 mf, th_truth, jnp.asarray(float(z_unit_rows[i])),
                 jnp.asarray(float(tau0_all[r])))))    # (4, K)
-        P_cls = np.stack([P_filt[r, 0] * corr[0], P_filt[r, 1] * corr[1],
-                          P_filt[r, 2] * corr[2], P_filt[r, 3] * corr[3] + core_r])
+        # §0c DLA handling (PI-confirmed final intent 2026-06-09): the DLA-finder masking is
+        # INCOMPLETE (misses ~10%). The closure TARGET MOCK carries the unmasked-DLA residual.
+        # We build TWO pieces here: (1) the DLA-MASKED baseline (the DLA class held at the CLEAN
+        # level — the τ=1e6-filtered + LLS/subDLA-contaminated forest, NO DLA excess), and (2)
+        # the FULL DLA excess add-back w_DLA·(P_DLA^unf − P_clean), P_DLA^unf = P_filt[DLA]+core.
+        # make_legb_mock then adds TRUTH_DLA_FRAC[leg]·excess to the baseline per leg (DESI 0.10,
+        # KS 0.0) — i.e. DESI's target retains 10% of the full DLA systems the finder misses,
+        # KS's target none. The forward marginalizes α_DLA over this (the closure asks: does
+        # HCD-marginalization recover cosmology DESPITE the DLA residual?).
+        P_clean_corr = P_filt[r, 0] * corr[0]
+        P_cls = np.stack([P_clean_corr, P_filt[r, 1] * corr[1],
+                          P_filt[r, 2] * corr[2], P_clean_corr])   # DLA class → clean (masked baseline)
         P_obs[i] = np.einsum("c,ck->k", coef, P_cls)
+        # full DLA excess: w_DLA·(P_DLA^unf − P_clean), P_DLA^unf = P_filt[DLA]·corr + core.
+        P_dla_unf = P_filt[r, 3] * corr[3] + core_r
+        dla_excess[i] = a[2] * (P_dla_unf - P_clean_corr)
         dla_core[i] = core_r
     return dict(
-        z=z, P_obs_true=P_obs, params_unit=params_unit[keep_rows[0]],
+        z=z, P_obs_true=P_obs, dla_excess_true=dla_excess,
+        params_unit=params_unit[keep_rows[0]],
         tau0=tau0_all[keep_rows], dla_core=dla_core,
         w_c=np.median(w_c[keep_rows, 1:], axis=0), rows=keep_rows)
 
@@ -421,10 +452,17 @@ def make_legb_mock(ctx: LegBCtx, truth_sim, key):
     Returns ``(mock_legs, truth_pack, info)``:
       mock_legs  — copies of ctx.legs with P_data := the noisy mock (kept-z rows only);
       truth_pack — dict(theta9, tau0_global (on z_global), alpha_hcd, kept_global_z (bool));
-      info       — dict(key, per-leg dropped-z, the sim z used).
+      info       — dict(key, per-leg dropped-z, the sim z used, the noiseless truth_on_leg).
+
+    PER-LEG DLA RESIDUAL (§0c, PI-confirmed final intent 2026-06-09): the truth-on-leg is the
+    DLA-MASKED baseline ``P_obs_true`` PLUS ``TRUTH_DLA_FRAC[leg.name]``·``dla_excess_true`` (the
+    full DLA excess). DESI carries 0.10·excess (the ~10% the DLA finder misses → full systems
+    remain); KS carries 0% (KS fully masks DLAs). The forward marginalizes α_DLA over this
+    residual (DataLeg.dla_forward_frac scales the forward DLA term per leg: DESI 1.0 / KS 0.0).
     """
     z_sim = np.asarray(truth_sim["z"])
-    P_sim = np.asarray(truth_sim["P_obs_true"])     # (nZs, K)
+    P_sim = np.asarray(truth_sim["P_obs_true"])         # (nZs, K) masked baseline
+    dla_excess_sim = np.asarray(truth_sim["dla_excess_true"])  # (nZs, K) full DLA excess
     tau0_sim = np.asarray(truth_sim["tau0"])
     cache_k = np.asarray(ctx.cache_k)
     z_tol = 0.15                                    # nearest-z map tolerance (cache Δz=0.2)
@@ -432,13 +470,18 @@ def make_legb_mock(ctx: LegBCtx, truth_sim, key):
     keys = jax.random.split(key, len(ctx.legs))
     mock_legs = []
     dropped = {}
+    truth_on_leg_out = {}
     for li, leg in enumerate(ctx.legs):
         N = leg.k.shape[0]
         P_mock = np.array(leg.P_data, float).copy()
         keep_row = np.zeros(N, bool)
         drop_z = []
-        # build the clean truth-on-leg per z, then add cosmic noise over the kept rows.
-        P_truth_on_leg = np.zeros(N)
+        # the per-leg DLA-residual fraction for the TARGET MOCK (DESI 0.10 / KS 0.0); default 0.0
+        # for any unrecognised leg (no DLA residual added unless explicitly DESI).
+        truth_frac = float(TRUTH_DLA_FRAC.get(leg.name, 0.0))
+        # build the truth-on-leg per z = masked baseline + truth_frac·(full DLA excess), then add
+        # cosmic noise over the kept rows.
+        P_truth_on_leg = np.full(N, np.nan)
         for iz in range(leg.n_z):
             zz = float(leg.z[iz])
             j = int(np.argmin(np.abs(z_sim - zz)))
@@ -447,10 +490,13 @@ def make_legb_mock(ctx: LegBCtx, truth_sim, key):
                 continue
             rows = np.where(np.asarray(leg.z_idx) == iz)[0]
             k_sub = np.asarray(leg.k)[rows]
+            # per-leg target P1D on the cache grid: masked baseline + the leg's DLA residual.
+            P_target_cache = P_sim[j] + truth_frac * dla_excess_sim[j]
             P_truth_on_leg[rows] = np.asarray(
-                jnp.interp(jnp.asarray(k_sub), jnp.asarray(cache_k), jnp.asarray(P_sim[j])))
+                jnp.interp(jnp.asarray(k_sub), jnp.asarray(cache_k), jnp.asarray(P_target_cache)))
             keep_row[rows] = True
         dropped[leg.name] = drop_z
+        truth_on_leg_out[leg.name] = P_truth_on_leg.copy()
 
         # ε ~ N(0, C_data) over the KEPT rows (cosmic-only; jittered Cholesky).
         if keep_row.any():
@@ -477,11 +523,20 @@ def make_legb_mock(ctx: LegBCtx, truth_sim, key):
             kept_global[i] = True
         else:
             tau0_global[i] = float(becker13_tau0(jnp.asarray(zz)))  # placeholder (unused: no data there)
+    # truth α: LLS/subDLA = the sim's structural w_c (the real residual the closure marginalizes).
+    # DLA = TRUTH_DLA_FRAC["DESI"]·w_DLA = 0.10·w_DLA — the §0c per-leg DLA residual the forward
+    # marginalizes over (PI-confirmed final intent 2026-06-09). The DESI target carries 0.10·(full
+    # DLA excess) and the DESI forward DLA term is live (dla_forward_frac=1.0), so at θ→truth the
+    # consistency point is α_DLA = 0.10·w_DLA. (On KS the target carries 0% AND the forward DLA
+    # term is 0, so the KS leg is α_DLA-blind — consistent for any α_DLA.) The α_DLA prior is
+    # centered on this 10% residual (HCD_DLA_RESIDUAL_FRAC=0.10) and is MARGINALIZED (sampled).
+    alpha_truth = np.asarray(truth_sim["w_c"]).copy()             # (3,) [LLS,sub,DLA]
+    alpha_truth[2] = TRUTH_DLA_FRAC["DESI"] * alpha_truth[2]      # 0.10·w_DLA (the DESI residual)
     truth_pack = dict(
         theta9=np.asarray(truth_sim["params_unit"]),
-        tau0_global=tau0_global, alpha_hcd=np.asarray(truth_sim["w_c"]),
+        tau0_global=tau0_global, alpha_hcd=alpha_truth,
         kept_global_z=kept_global)
-    info = dict(key=key, dropped=dropped, z_sim=z_sim)
+    info = dict(key=key, dropped=dropped, z_sim=z_sim, truth_on_leg=truth_on_leg_out)
     return mock_legs, truth_pack, info
 
 

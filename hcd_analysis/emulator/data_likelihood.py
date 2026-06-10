@@ -89,6 +89,15 @@ class DataLeg(NamedTuple):
                             above the LF Nyquist); the low-k DESI leg stays FALSE (it is
                             below the resolution regime and must not be inflated). Default
                             FALSE → back-compatible (no floor on the DESI leg).
+      dla_forward_frac : float  the PER-LEG scale on the sampled α_DLA's DLA-excess contribution
+                            in the forward (§0c, PI-confirmed final intent 2026-06-09). The
+                            DLA-finder masking is leg-specific: KS fully masks DLAs (0% residual,
+                            ``KS_DLA_FORWARD_FRAC=0.0`` → the KS forward DLA term is 0, matching
+                            the 0% KS closure target); DESI carries the ~10% unmasked-DLA
+                            residual the forward MARGINALIZES α_DLA over (``DESI_DLA_FORWARD_FRAC
+                            =1.0`` → the full sampled α_DLA). The forward DLA-excess term becomes
+                            ``dla_forward_frac · α_DLA · (P_DLA_unf − P_clean)``. Default 1.0
+                            (back-compat: the full DLA forward, byte-identical for the DESI leg).
     """
     name: str
     z: np.ndarray
@@ -104,6 +113,15 @@ class DataLeg(NamedTuple):
     metals_on: bool
     resolution_on: bool
     mf_floor_on: bool = False
+    dla_forward_frac: float = 1.0
+
+
+# PER-LEG DLA-forward fraction (§0c, PI-confirmed final intent 2026-06-09): the leg-specific
+# scale on the sampled α_DLA's DLA-excess contribution. DESI carries the ~10% unmasked-DLA
+# residual (the finder misses ~10% → full systems remain) so the forward keeps the FULL sampled
+# α_DLA; KS fully masks DLAs so the forward DLA term is ZERO (matching the 0% KS closure target).
+DESI_DLA_FORWARD_FRAC = 1.0
+KS_DLA_FORWARD_FRAC = 0.0
 
 
 def _z_unit(z):
@@ -150,7 +168,8 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
 
     return _assemble_leg("DESI", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
-                         resolution_on=resolution_on, mf_floor_on=mf_floor_on)
+                         resolution_on=resolution_on, mf_floor_on=mf_floor_on,
+                         dla_forward_frac=DESI_DLA_FORWARD_FRAC)
 
 
 def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
@@ -190,7 +209,8 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
     # (conservative mode already deconvolves + inflates), so R_z is unused unless toggled on.
     return _assemble_leg("KS", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
-                         resolution_on=resolution_on, mf_floor_on=mf_floor_on)
+                         resolution_on=resolution_on, mf_floor_on=mf_floor_on,
+                         dla_forward_frac=KS_DLA_FORWARD_FRAC)
 
 
 def _read_ks_p1d(path):
@@ -211,7 +231,7 @@ def _read_ks_p1d(path):
 
 
 def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
-                  metals_on, resolution_on, mf_floor_on=False):
+                  metals_on, resolution_on, mf_floor_on=False, dla_forward_frac=1.0):
     """Sub-select the kept (z,k) rows + their covariance block, build the z-major flat
     DataLeg.  The covariance is row/col-sliced by the SAME boolean mask as the data so the
     flat-row ordering matches C_data exactly (CS-REVIEW: ordering invariant)."""
@@ -232,7 +252,8 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
     return DataLeg(
         name=name, z=z, z_unit=_z_unit(z), k=k, z_row=z_row, z_idx=z_idx,
         P_data=P_data, C_data=C_data, R_z=R_z, n_z=len(z), n_per_z=n_per_z,
-        metals_on=metals_on, resolution_on=resolution_on, mf_floor_on=mf_floor_on)
+        metals_on=metals_on, resolution_on=resolution_on, mf_floor_on=mf_floor_on,
+        dla_forward_frac=dla_forward_frac)
 
 
 # ============================================================================ #
@@ -547,6 +568,14 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     R_z = jnp.asarray(leg.R_z)
     tau0_vec = jnp.asarray(tau0_vec)
     alpha_hcd = jnp.asarray(alpha_hcd)   # (3,) broadcast to all z, OR (n_z,3) per-z incidence
+    # PER-LEG DLA-forward scaling (§0c): the sampled α_DLA's DLA-excess contribution is scaled by
+    # leg.dla_forward_frac (DESI 1.0 → full residual; KS 0.0 → the forward DLA term is 0, matching
+    # the 0% KS closure target). We fold the per-leg fraction into the DLA component of α so BOTH
+    # the forward P_obs AND the C_emu DLA-class coefficient stay consistent (KS → 0 on both).
+    dff = float(getattr(leg, "dla_forward_frac", 1.0))
+    if dff != 1.0:
+        dla_scale = jnp.array([1.0, 1.0, dff])             # (3,) [LLS, subDLA, DLA]
+        alpha_hcd = alpha_hcd * (dla_scale if alpha_hcd.ndim == 1 else dla_scale[None, :])
     N = k_leg.shape[0]
 
     P_model = jnp.zeros(N)

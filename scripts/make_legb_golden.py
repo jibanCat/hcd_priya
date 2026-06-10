@@ -38,7 +38,11 @@ alpha3 = jnp.asarray(np.median(d["w_c_cache"][:, 1:], axis=0))   # (3,) LLS, sub
 
 saved = {"theta9": np.asarray(theta9), "alpha3": np.asarray(alpha3)}
 meta = dict(note="legacy (3,)-alpha broadcast forward; build_legb_ctx production config; "
-                 "theta=0.5 unit, tau0=becker13(z_leg), alpha=median w_c_cache")
+                 "theta=0.5 unit, tau0=becker13(z_leg), alpha=median w_c_cache. "
+                 "INCLUDES the per-leg DLA-forward axis (§0c, 2026-06-09): "
+                 "DataLeg.dla_forward_frac DESI=1.0 (full DLA forward, byte-identical to the "
+                 "pre-§0c golden) / KS=0.0 (KS forward DLA term zeroed -> KS P/C drop the DLA "
+                 "channel, ~2% on P). Regenerated 2026-06-09 for the §0c per-leg DLA residual.")
 for leg in ctx.legs:
     tau0_vec = MF.becker13_tau0(jnp.asarray(leg.z))
     szb = ctx.sigma_zb_per_leg.get(leg.name)
