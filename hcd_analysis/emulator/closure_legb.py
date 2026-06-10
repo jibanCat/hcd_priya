@@ -47,7 +47,7 @@ from scipy.stats import norm as _scipy_norm
 from . import train as T
 from .data import load_cache, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS
 from .meanflux_prior import (meanflux_tau0_prior, becker13_tau0, tau0_alpha_priya,
-                             TAU0_AMP_RANGE, DTAU0_RANGE, TAU0_PIVOT_Z)
+                             fit_tau0_alpha_priya, TAU0_AMP_RANGE, DTAU0_RANGE, TAU0_PIVOT_Z)
 from .inference import (PARAM_NAMES, hcd_incidence_prior,
                         HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT)
 from .sampler_numpyro import _dla_raw_mu
@@ -131,8 +131,12 @@ class LegBCtx(NamedTuple):
     cemu_inflate: float
     mf: object = None
     mf_floor: object = None
-    marginalize_zslope: bool = False     # STEP-A M3: sample the HCD per-class z-slope s_c
-                                         # (real-fit config) instead of the fixed power-law.
+    marginalize_zslope: bool = True      # DEFAULT (2026-06-10): sample the HCD per-class z-slope
+                                         # s_c with the literature dN/dX slope±1σ prior — so the HCD
+                                         # incidence evolves on a PHYSICAL amplitude(pivot α)+slope,
+                                         # not a fixed power-law (mirrors the τ₀ amplitude+slope; the
+                                         # PI: break HCD–A_p–τ₀ degeneracy via physical priors on
+                                         # BOTH). Set False only for the fixed-slope ablation.
     zslope_mu: object = None             # (3,) prior center on s_c (default HCD_LIT_OVER_SIM_SLOPE)
     zslope_sigma: object = None          # (3,) prior width on s_c (default the literature WLS σ_s)
     # PRIYA mean-flux model (replaces the 13 per-z τ₀ rungs): α(z)=τ₀·((1+z)/(1+z_p))^dτ₀, τ₀(z)=α·Kim07.
@@ -314,7 +318,7 @@ def held_out_sims(d, fold=0):
     return sorted(set(np.asarray(d["sim_name"])[va])), va
 
 
-def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="becker13", mf=None):
+def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="priya", mf=None):
     """Assemble a multi-z SIM-TRUTH from one held-out sim's cache rows.
 
     The truth P1D per z is the cache's MEASURED contaminated power at α=w_c (the sim's own
@@ -379,7 +383,15 @@ def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="becker13", mf=None):
     keep_rows = []
     for zz in np.unique(z_of):
         sub = cand[z_of == zz]
-        if tau0_anchor == "becker13":
+        if isinstance(tau0_anchor, (tuple, list)):   # PRIYA-curve anchor (tau0_amp, dτ₀)
+            amp_t, dt_t = float(tau0_anchor[0]), float(tau0_anchor[1])
+            target = float(tau0_alpha_priya(jnp.asarray(float(zz)), amp_t, dt_t)
+                           * _kim(jnp.asarray(float(zz))))
+            pick = sub[int(np.argmin(np.abs(tau0_all[sub] - target)))]
+        elif tau0_anchor == "priya":                 # PRIYA central curve τ₀=1,dτ₀=0 (=Kim) — the
+            target = float(_kim(jnp.asarray(float(zz))))   # default for the PRIYA 2-param model
+            pick = sub[int(np.argmin(np.abs(tau0_all[sub] - target)))]
+        elif tau0_anchor == "becker13":
             target = float(becker13_tau0(jnp.asarray(float(zz))))
             pick = sub[int(np.argmin(np.abs(tau0_all[sub] - target)))]
         elif tau0_anchor == "extreme_hi":            # most-absorption ladder rung (max τ₀)
@@ -429,10 +441,17 @@ def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="becker13", mf=None):
         P_dla_unf = P_filt[r, 3] * corr[3] + core_r
         dla_excess[i] = a[2] * (P_dla_unf - P_clean_corr)
         dla_core[i] = core_r
+    # the truth PRIYA (amp, dτ₀): best-fit of the selected per-z τ₀(z) in the α=τ₀/Kim coord —
+    # the closure bias-z for the mean flux is computed against these (the forward samples
+    # tau0_amp/dtau0; for a "priya"/tuple anchor these recover the requested curve to the
+    # ladder-discretization floor, the self-consistency the 13-rung→2-param swap requires).
+    _alpha_sel = tau0_all[keep_rows] / np.asarray(_kim(jnp.asarray(z)))
+    tau0_amp_true, dtau0_true = fit_tau0_alpha_priya(np.asarray(z), _alpha_sel)
     return dict(
         z=z, P_obs_true=P_obs, dla_excess_true=dla_excess,
         params_unit=params_unit[keep_rows[0]],
         tau0=tau0_all[keep_rows], dla_core=dla_core,
+        tau0_amp=tau0_amp_true, dtau0=dtau0_true,
         w_c=np.median(w_c[keep_rows, 1:], axis=0), rows=keep_rows)
 
 

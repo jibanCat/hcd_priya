@@ -32,6 +32,19 @@ def test_priors_only_has_priya_tau0_sites_not_alpha_ladder():
     assert float(tr["dtau0"]["fn"].high) == DTAU0_RANGE[1]
 
 
+def test_hcd_zslope_marginalized_by_default():
+    # Phase-2: the HCD per-class z-slope is sampled by default (physical amplitude+slope).
+    ctx = _fake_ctx(); ctx.marginalize_zslope = True
+    tr = handlers.trace(handlers.seed(
+        lambda: CL._legb_priors_only(ctx), jax.random.PRNGKey(1))).get_trace()
+    assert {"s_lls", "s_subdla", "s_dla"} <= set(tr)
+
+
+def test_legbctx_default_marginalizes_zslope():
+    # the NamedTuple default flipped to True (build_legb_ctx inherits it)
+    assert CL.LegBCtx._field_defaults["marginalize_zslope"] is True
+
+
 def test_reconstruct_tau0_vec_from_amp_dtau0():
     ctx = _fake_ctx()
     zg = jnp.asarray(ctx.z_global); L = 5
