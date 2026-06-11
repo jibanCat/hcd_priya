@@ -10,6 +10,7 @@ by physics, not emulation). Output: figures/analysis/05_likelihood/emu_hub_bhfb_
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_param_response.py
 """
+import numpy as np
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import hcd_analysis.emulator  # x64
