@@ -197,6 +197,20 @@ def build_config(verbose=False):
                  sigma_lls=0.15, sim=_SIM_MED)
     add_fiducial("D_llsmed30", 6, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
                  sigma_lls=0.30, sim=_SIM_MED)
+    # MULTI-FOLD width check (PI 2026-06-11): repeat the matched-center σ0.15 vs σ0.30 contrast across
+    # folds spanning n_s, to test whether the n_s −0.94σ (D_llsmed σ0.15) is the LLS WIDTH or this
+    # sim's LOSO scatter (sign-flips across folds ⇒ scatter), and whether σ0.15-matched recovers A_p
+    # generally. All median-w_LLS (ratio≈1.01), box-interior. With fold6 above: 4 folds, n_s 0.907–0.982.
+    _MED_FOLDS = {
+        3: "ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662omegamh20.144hireionz7.47bhfeedback0.0347",
+        5: "ns0.953Ap1.74e-09herei4.07heref2.93alphaq2.31hub0.692omegamh20.142hireionz7.38bhfeedback0.0573",
+        7: "ns0.982Ap1.81e-09herei3.62heref2.78alphaq1.78hub0.72omegamh20.143hireionz7.55bhfeedback0.0421",
+    }
+    for _f, _s in _MED_FOLDS.items():
+        add_fiducial(f"D_lmed{_f}_15", _f, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
+                     sigma_lls=0.15, sim=_s)
+        add_fiducial(f"D_lmed{_f}_30", _f, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
+                     sigma_lls=0.30, sim=_s)
 
     if verbose:
         print(f"[config] resolved {len(cfg)} chains")
