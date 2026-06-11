@@ -116,14 +116,17 @@ def build_config(verbose=False):
 
     cfg = []
 
-    def add_fiducial(mock_id, fold, target_ns, *, survey, prior_center="sim_mean",
-                     sigma_lls=None, tau0_extreme=False, n_chains=4):
-        ns, sim = _closest_sim(fold_sims[fold], target_ns)
+    def add_fiducial(mock_id, fold, target_ns=None, *, survey, prior_center="sim_mean",
+                     sigma_lls=None, sigma_subdla=None, tau0_extreme=False, n_chains=4, sim=None):
+        if sim is None:
+            ns, sim = _closest_sim(fold_sims[fold], target_ns)
+        else:
+            ns = _ns_of_sim(d, sim, PARAM_LIMITS)
         for c in range(n_chains):
             cfg.append(dict(
                 id=f"{mock_id}_c{c}", mock_id=mock_id, tier="P4", fold=fold, ckpt=ckpt_of(fold),
                 sim=sim, n_s=round(ns, 4), survey=survey, prior_center=prior_center,
-                sigma_lls=sigma_lls, tau0_extreme=tau0_extreme,
+                sigma_lls=sigma_lls, sigma_subdla=sigma_subdla, tau0_extreme=tau0_extreme,
                 mf=False, z_slope_marginalized=False, hr_truth=False,
                 chain_id=c, n_chains=n_chains, seed=0))
 
@@ -140,6 +143,27 @@ def build_config(verbose=False):
     add_fiducial("D_f6_lit", 6, 0.966, survey="DESI", prior_center="lit")     # real-fit prior center
     add_fiducial("D_f6_sig40", 6, 0.966, survey="DESI", sigma_lls=0.40)       # looser LLS width
     add_fiducial("D_f6_tau0x", 6, 0.966, survey="DESI", tau0_extreme=True)    # τ₀-funnel check
+
+    # === Phase-4b (2026-06-11): σ_LLS + σ_subDLA width scans + IGM-parameter stress fiducials ===
+    # Width scans at the D_f6 Planck mock (same sim → same noise → clean bias-vs-width):
+    for sl in (0.08, 0.25, 0.80):
+        add_fiducial(f"D_f6_sigL{int(round(sl*100)):02d}", 6, 0.966, survey="DESI", sigma_lls=sl, n_chains=3)
+    for ss in (0.20, 0.80, 1.50):
+        add_fiducial(f"D_f6_sigS{int(round(ss*100)):03d}", 6, 0.966, survey="DESI", sigma_subdla=ss, n_chains=3)
+    # IGM-parameter stress fiducials (DESI, sim-mean center): the held-out sim at each IGM extreme.
+    import numpy as _np
+    from hcd_analysis.emulator.inference import PARAM_NAMES as _PN
+    _pidx = {n: i for i, n in enumerate(_PN)}; _sn = _np.asarray(d["sim_name"]); _pu = d["params_unit"]
+    _all = sorted(set(s for lst in fold_sims.values() for _, s in lst))
+    def _punit(s, p): return float(_pu[_np.where(_sn == s)[0][0], _pidx[p]])
+    def _fold_of(s):
+        for f, lst in fold_sims.items():
+            if s in [ss for _, ss in lst]: return f
+    def _igm_pick(p, hi): return (max if hi else min)((_punit(s, p), s) for s in _all)[1]
+    for nm, p, hi in [("IGM_herei_hi", "herei", True), ("IGM_heref_lo", "heref", False),
+                      ("IGM_heref_hi", "heref", True), ("IGM_alphaq_lo", "alphaq", False),
+                      ("IGM_alphaq_hi", "alphaq", True), ("IGM_bhfb_lo", "bhfeedback", False)]:
+        s = _igm_pick(p, hi); add_fiducial(nm, _fold_of(s), survey="DESI", sim=s, n_chains=4)
 
     if verbose:
         print(f"[config] resolved {len(cfg)} chains")
@@ -353,6 +377,9 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     if chain.get("sigma_lls"):     # σ_LLS width-sensitivity arm
         sig = ctx.alpha_hcd_sigma.at[0].set(float(chain["sigma_lls"]) * float(ctx.alpha_hcd_mu[0]))
         ctx = ctx._replace(alpha_hcd_sigma=sig)
+    if chain.get("sigma_subdla"):  # σ_subDLA width-sensitivity arm
+        sig = ctx.alpha_hcd_sigma.at[1].set(float(chain["sigma_subdla"]) * float(ctx.alpha_hcd_mu[1]))
+        ctx = ctx._replace(alpha_hcd_sigma=sig)
 
     key0 = jax.random.PRNGKey(int(chain["seed"]))
     k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, int(mock_index)), 2)
@@ -382,6 +409,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         sim=chain["sim"], n_s=chain["n_s"], mf=bool(chain["mf"]),
         survey=chain.get("survey", "DESI"), prior_center=chain.get("prior_center", "lit"),
         sigma_lls=(float(chain["sigma_lls"]) if chain.get("sigma_lls") else 0.0),
+        sigma_subdla=(float(chain["sigma_subdla"]) if chain.get("sigma_subdla") else 0.0),
         z_slope_marginalized=bool(chain["z_slope_marginalized"]),
         hr_truth=bool(chain["hr_truth"]), tau0_extreme=bool(chain["tau0_extreme"]),
         chain_index=int(chain["chain_id"]), n_chains_target=int(chain["n_chains"]),
