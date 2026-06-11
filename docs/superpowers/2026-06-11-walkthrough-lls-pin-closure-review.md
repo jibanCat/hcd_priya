@@ -65,13 +65,22 @@ restriction (which forbids the IGM-edge corners where the emulator extrapolates)
 
 ## 4. Corrections — what the referees over-turned (I had over-stated these)
 
-1. **"The DESI ~1σ A_p is the *width*, not the center" — CONFOUNDED.** The fold6 sim is
-   **LLS-poor** (its w_LLS ≈ 77.5% of the population median), so the DESI prior — centered on the
-   *population-median* ×1.06 — sits **+0.75–0.90σ ABOVE the mock truth even in the "matched" arm**.
-   So D_lls_m's +1.01σ is a tight prior at a genuinely *offset (high)* center, not "right center,
-   width hurts." The width *is* a real lever (σ0.30 helps), but the center-vs-width separation is
-   **not cleanly demonstrated** by these arms. → needs a sim with w_LLS≈median, or center on this
-   sim's own w_c.
+1. **"The DESI ~1σ A_p is the *width*, not the center" — OVERTURNED: it is the CENTER.** *(Resolved
+   2026-06-11 with the un-confounding arm `D_llsmed`.)* The fold6-Planck sim is **LLS-poor** (w_LLS ≈
+   77.5% of the population median), so its "matched ×1.06" arm actually sat +0.8σ high. Re-running on
+   a sim with **w_LLS ≈ the population median (ratio 0.992)** — so the lit prior center genuinely
+   equals the mock truth — gives: **σ0.15 (tight) → A_p −0.05σ AND α_LLS +0.11σ (faithful)**; σ0.30 →
+   A_p −0.73σ (looser prior lets the degeneracy pull α_LLS −1.7σ off-truth). This is the **opposite**
+   of the offset-center arms (where loosening *helped*). **⇒ the DESI A_p lever is the prior CENTER
+   (the external LLS-abundance pin), not the width** — vindicating the *original* "center offset is
+   the source" headline over the later "width is the lever" framing.
+
+   ![width vs center](../../figures/analysis/05_likelihood/lls_width_vs_center.png)
+
+   *Two caveats:* (i) the A_p↔n_s width tradeoff persists even at the matched center — σ0.15 leaves
+   n_s **−0.94σ** (borderline) while σ0.30 gives n_s −0.17σ but A_p −0.73σ; whether the n_s −0.94σ is
+   the LLS width or this sim's own LOSO n_s bias needs the multi-fold check. (ii) the σ0.30 matched
+   arm had ESS-tail 61 / 1 div — its numbers are the least reliable.
 2. **"K_lls recovers the LLS dN/dX faithfully (+0.002σ)" — NOT a clean certificate.** The α_LLS
    bias_z is contaminated by two conventions: the truth_vec α is the z-**median** (~z3.3) while the
    sampled α is the z=3.0 **pivot** (~+18% offset → ~+1σ artifact), and the forward z-slope (0.95)

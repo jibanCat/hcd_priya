@@ -142,5 +142,17 @@ A_p↔n_s redistribution). The α_LLS *nuisance* wanders ~1σ either way (the A_
 tight prior pins α_LLS faithful-but-biases-A_p; a moderate prior frees A_p but lets α_LLS drift) — but
 the cosmology *target* recovers in-gate at σ0.30. KS (broad, matched) remains the cleanest (A_p
 +0.004σ, α_LLS faithful). **Net per-survey LLS prior: DESI σ0.30 / KS σ0.40, both on the survey's
-external center.** The closure did its job — it caught that the DESI *width*, not the center, was the
-live A_p lever, and confirmed the fix.
+external center.**
+
+**⚠️ UPDATE (2026-06-11, un-confounding arm `D_llsmed`): the dominant A_p lever is the prior CENTER,
+not the width.** The D_lls_m "matched" arm was *not* truly matched — its fold6-Planck sim is LLS-poor
+(w_LLS ≈ 77.5% of the population-median the prior centers on), so it sat +0.8σ high. Re-run on a sim
+with **w_LLS ≈ population median**: **σ0.15 (tight) → A_p −0.05σ + α_LLS faithful (+0.11σ)**; σ0.30 →
+A_p −0.73σ (the looser prior lets the A_p↔α_LLS degeneracy pull α_LLS −1.7σ off-truth). So **with a
+correct center, tight is BEST for A_p**; the σ0.30 "moderate width" was *compensating for a wrong
+center*, not a fundamental fix. **⇒ the external per-survey LLS-abundance pin (the CENTER) is the
+real-fit A_p lever** — re-elevated to the top priority. **Caveats keeping the width OPEN:** even at the
+matched center the A_p↔n_s width tradeoff persists (σ0.15: n_s −0.94σ borderline; σ0.30: n_s −0.17σ
+but A_p −0.73σ, ESS-tail 61), and it is one sim/fold — so **σ0.30 stays the default pending the
+multi-fold validation**; if the center is externally well-pinned, σ0.15 may be preferable for A_p
+(watching n_s). Figure: `lls_width_vs_center.png`.
