@@ -116,55 +116,33 @@ def build_config(verbose=False):
 
     cfg = []
 
-    def add_fiducial(mock_id, tier, fold, target_ns, *, mf, n_chains=4, sim=None,
-                     z_slope_marginalized=False, hr_truth=False, tau0_extreme=False):
-        if sim is None:
-            ns, sim = _closest_sim(fold_sims[fold], target_ns)
-        else:
-            ns = _ns_of_sim(d, sim, PARAM_LIMITS)
+    def add_fiducial(mock_id, fold, target_ns, *, survey, prior_center="sim_mean",
+                     sigma_lls=None, tau0_extreme=False, n_chains=4):
+        ns, sim = _closest_sim(fold_sims[fold], target_ns)
         for c in range(n_chains):
             cfg.append(dict(
-                id=f"{mock_id}_c{c}", mock_id=mock_id, tier=tier, fold=fold, ckpt=ckpt_of(fold),
-                sim=sim, n_s=round(ns, 4), mf=mf, z_slope_marginalized=z_slope_marginalized,
-                hr_truth=hr_truth, tau0_extreme=tau0_extreme, chain_id=c, n_chains=n_chains,
-                seed=0))
+                id=f"{mock_id}_c{c}", mock_id=mock_id, tier="P4", fold=fold, ckpt=ckpt_of(fold),
+                sim=sim, n_s=round(ns, 4), survey=survey, prior_center=prior_center,
+                sigma_lls=sigma_lls, tau0_extreme=tau0_extreme,
+                mf=False, z_slope_marginalized=False, hr_truth=False,
+                chain_id=c, n_chains=n_chains, seed=0))
 
-    def add_single(mock_id, tier, fold, sim, *, mf=False):
-        ns = _ns_of_sim(d, sim, PARAM_LIMITS)
-        cfg.append(dict(
-            id=mock_id, mock_id=mock_id, tier=tier, fold=fold, ckpt=ckpt_of(fold),
-            sim=sim, n_s=round(ns, 4), mf=mf, z_slope_marginalized=False, hr_truth=False,
-            tau0_extreme=False, chain_id=0, n_chains=1, seed=0))
-
-    # ---- TIER 1 L1a: convergence fiducials, 4 dispersed chains each (12 chains) ----
-    add_fiducial("L1a_fold0", "L1a", 0, 0.81, mf=False)
-    add_fiducial("L1a_fold4", "L1a", 4, 0.92, mf=False)
-    add_fiducial("L1a_fold7", "L1a", 7, 1.0, mf=False)
-
-    # ---- TIER 1 L1b: bias, 2 held-out sims/fold × 8 folds spanning n_s, 1 chain (16 chains) --
-    for f in range(N_FOLDS):
-        lo_ns, lo_sim = fold_sims[f][0]
-        hi_ns, hi_sim = fold_sims[f][-1]
-        add_single(f"L1b_fold{f}_lo", "L1b", f, lo_sim)
-        add_single(f"L1b_fold{f}_hi", "L1b", f, hi_sim)
-
-    # ---- TIER 2 MF fiducials, 4 dispersed chains each (16 chains) ----
-    # M1: fold7 n_s≈1.019 truth, through-MF forward + truth (the gate invariant).
-    add_fiducial("M1", "M2tier", 7, 1.019, mf=True)
-    # M2: fold7 n_s≈1.040, τ₀ anchor set to a ladder EXTREME (not the becker13 interior).
-    add_fiducial("M2", "M2tier", 7, 1.040, mf=True, tau0_extreme=True)
-    # M3: M1's truth (same fold7 n_s≈1.019 sim) BUT the HCD per-class z-slope MARGINALIZED.
-    m1 = next(c for c in cfg if c["mock_id"] == "M1")
-    add_fiducial("M3", "M2tier", 7, 1.019, mf=True, sim=m1["sim"], z_slope_marginalized=True)
-    # M4: HR-resolution truth — the HR sim n_s≈0.979 (lives in fold6's held-out LF pool), the
-    # make_truth_from_sim HR/MF path with the fold6 emulator + fold6 MF correction.
-    hr_sim = _resolve_hr_sim(d, fold_sims, PARAM_LIMITS, target_ns=0.979)
-    add_fiducial("M4", "M2tier", hr_sim["fold"], hr_sim["n_s"], mf=True, sim=hr_sim["sim"],
-                 hr_truth=True)
+    # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
+    # Supersedes the old joint+13-rung STEP-A list. DESI-only + KS-only, sim-mean (NON-circular) HCD
+    # prior center, spanning INTERIOR n_s (avoid the fold0 n_s wall). 4 dispersed chains each.
+    add_fiducial("D_f3", 3, 0.90, survey="DESI")     # n_s≈0.90
+    add_fiducial("D_f4", 4, 0.92, survey="DESI")     # n_s≈0.92
+    add_fiducial("D_f6", 6, 0.966, survey="DESI")    # n_s≈0.966 (Planck) — reference point
+    add_fiducial("D_f7", 7, 1.00, survey="DESI")     # n_s≈1.0 (eBOSS / extrapolation ridge)
+    add_fiducial("K_f4", 4, 0.92, survey="KS")       # KS leg, mid n_s
+    add_fiducial("K_f6", 6, 0.966, survey="KS")      # KS leg, Planck n_s
+    # SENSITIVITY arms at the fold6 (Planck) DESI point:
+    add_fiducial("D_f6_lit", 6, 0.966, survey="DESI", prior_center="lit")     # real-fit prior center
+    add_fiducial("D_f6_sig40", 6, 0.966, survey="DESI", sigma_lls=0.40)       # looser LLS width
+    add_fiducial("D_f6_tau0x", 6, 0.966, survey="DESI", tau0_extreme=True)    # τ₀-funnel check
 
     if verbose:
-        print(f"[config] resolved {len(cfg)} chains; HR sim n_s={hr_sim['n_s']:.4f} "
-              f"(fold {hr_sim['fold']})")
+        print(f"[config] resolved {len(cfg)} chains")
     return cfg
 
 
@@ -325,7 +303,8 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         build_legb_ctx, held_out_sims, make_truth_from_sim, make_legb_mock,
         _mock_core_per_leg, _run_nuts_legb, _draws_matrix, CACHE_PATH,
         ZSLOPE_PRIOR_SIGMA)
-    from hcd_analysis.emulator.inference import PARAM_NAMES, HCD_LIT_OVER_SIM_SLOPE
+    from hcd_analysis.emulator.inference import (PARAM_NAMES, HCD_LIT_OVER_SIM_SLOPE,
+                                                 hcd_incidence_prior)
 
     fold = chain["fold"]
     # MOCK INDEX: run_legb_convergence selects the sim by mock_index OR an explicit sim. We pass
@@ -349,12 +328,31 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
                            zslope_mu=jnp.asarray(HCD_LIT_OVER_SIM_SLOPE),
                            zslope_sigma=jnp.asarray(ZSLOPE_PRIOR_SIGMA))
 
-    # TRUTH: MF-resolution (gate invariant) when mf is set; LF otherwise. τ₀ anchor = the
-    # most-absorption ladder EXTREME for M2 (tau0_extreme; the rung where the τ₀×cosmology
-    # interaction is hardest), else the becker13 interior anchor (the regime the data visits).
-    tau0_anchor = "extreme_hi" if chain["tau0_extreme"] else "becker13"
+    # SEPARATE per-survey inference (2026-06-10): keep only this chain's leg (no joint DESI+KS).
+    ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == chain.get("survey", "DESI")])
+
+    # TRUTH: MF-resolution (gate invariant) when mf is set; LF otherwise. τ₀ anchor = a PRIYA
+    # curve (the new 2-param model — closure self-consistency needs it; "becker13" was only
+    # 2-param-representable to ~6.6% and is RETIRED). For M2 (tau0_extreme) use the upper PRIYA
+    # prior corner (high amplitude+slope) to stress the τ₀×cosmology interaction; else the
+    # central PRIYA curve (τ₀=1, dτ₀=0 = Kim), the regime the data visits.
+    tau0_anchor = (1.20, 0.20) if chain["tau0_extreme"] else "priya"
     truth_sim = make_truth_from_sim(d, chain["sim"], fold=fold, tau0_anchor=tau0_anchor,
                                     mf=ctx.mf)
+
+    # PRIOR CENTER (non-circular closure, 2026-06-10): re-center the HCD α prior.
+    #   "lit"      = build_legb_ctx default (lit/sim·w_c_med) — the real-fit prior.
+    #   "sim_mean" = the sim-population median w_c (lit_over_sim=1) — the NON-circular closure center.
+    #   "truth"    = this sim's own w_c (circular reference only).
+    pc = chain.get("prior_center", "lit")
+    wc_c = (np.nanmedian(d["w_c_cache"][:, 1:], axis=0) if pc == "sim_mean"
+            else np.asarray(truth_sim["w_c"]) if pc == "truth" else None)
+    if wc_c is not None:
+        amu, asd = hcd_incidence_prior(jnp.asarray(wc_c), z=3.0, lit_over_sim=jnp.ones(3))
+        ctx = ctx._replace(alpha_hcd_mu=amu, alpha_hcd_sigma=asd)
+    if chain.get("sigma_lls"):     # σ_LLS width-sensitivity arm
+        sig = ctx.alpha_hcd_sigma.at[0].set(float(chain["sigma_lls"]) * float(ctx.alpha_hcd_mu[0]))
+        ctx = ctx._replace(alpha_hcd_sigma=sig)
 
     key0 = jax.random.PRNGKey(int(chain["seed"]))
     k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, int(mock_index)), 2)
@@ -382,6 +380,8 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     out = dict(
         chain_id=chain["id"], mock_id=chain["mock_id"], tier=chain["tier"], fold=fold,
         sim=chain["sim"], n_s=chain["n_s"], mf=bool(chain["mf"]),
+        survey=chain.get("survey", "DESI"), prior_center=chain.get("prior_center", "lit"),
+        sigma_lls=(float(chain["sigma_lls"]) if chain.get("sigma_lls") else 0.0),
         z_slope_marginalized=bool(chain["z_slope_marginalized"]),
         hr_truth=bool(chain["hr_truth"]), tau0_extreme=bool(chain["tau0_extreme"]),
         chain_index=int(chain["chain_id"]), n_chains_target=int(chain["n_chains"]),
