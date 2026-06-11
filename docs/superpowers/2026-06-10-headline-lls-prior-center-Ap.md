@@ -74,9 +74,9 @@ is not a clean fix** — the cosmology bias **redistributes from A_p into n_s** 
 removing it.* The clean removal requires the **center** to be right (external pin); the width should be
 **moderate**, chosen to keep the center-mismatch bias acceptable on *both* A_p and n_s without over-widening.
 
-**Still open (future):** a fuller σ_LLS scan at a fixed *non-circular* center, mapping the A_p↔n_s
-trade-off, to pick the moderate width; and — most important — settling the **external LLS-abundance pin
-per survey** so the center is right in the first place.
+**→ Now done (Phase-4b below):** the fuller σ_LLS scan (0.08→0.80) *and* a subDLA scan are run and mapped
+in [the Phase-4b width scans](#phase-4b--the-full-hcd-prior-width-scans). Still open: settling the
+**external LLS-abundance pin per survey** so the center is right in the first place.
 
 ## Phase-4 full result (36/36 complete)
 
@@ -104,3 +104,94 @@ tight-LLS-prior×offset interaction, not a sampling pathology.
   bias *directions* are robust, the exact σ values less so.
 - The cross-fiducial ±1σ scatter (panel A) is center-offset + per-sim emulator-LOSO + noise combined; the
   same-mock arms (panel B) isolate the prior knobs cleanly, the cross-fiducial scatter does not.
+
+---
+
+# Phase-4b — the full HCD prior-width scans
+
+*2026-06-11. 42 new chains (PROD config, NW250/NS400/mtd10, 3 chains per width point, 4 per IGM fiducial),
+0 divergences everywhere, R-hat ≤ 1.015. Two scans on the **same mock D_f6** (n_s=0.966, sim-mean center,
+same noise) varying **one** HCD prior width at a time, plus 6 IGM-parameter stress fiducials.*
+
+![HCD prior-width scans](../../figures/analysis/05_likelihood/p4b_hcd_width_scans.png)
+
+## σ_LLS scan (subDLA width fixed at the 0.40 default)
+
+| σ_LLS/μ | bias A_p | bias n_s | joint √(A_p²+n_s²) |
+|---|---|---|---|
+| 0.08 (very tight) | +1.13σ | −0.18σ | 1.15 |
+| 0.15 (default) | +1.02σ | −0.03σ | 1.02 |
+| **0.25** | **+0.55σ** | **+0.30σ** | **0.63** |
+| **0.40** | **+0.29σ** | **+0.54σ** | **0.61** |
+| 0.80 (very flat) | −0.21σ | +0.92σ | 0.94 |
+
+**The LLS width is a monotonic A_p↔n_s lever.** Tightening pins α_LLS → A_p compensates high (up to +1.13σ);
+loosening lets the data pull α_LLS back → A_p relaxes and even crosses zero (−0.21σ at 0.80), but the bias
+**redistributes into n_s** (−0.18→+0.92σ). The **joint** cosmology bias is minimized in a **moderate band
+σ_LLS≈0.25–0.40 (~0.6σ)** and rises at *both* ends. So neither tight nor flat is right — the recommended
+width is moderate, and it must sit on a *correct* center (the external pin).
+
+## σ_subDLA scan (LLS width fixed at the 0.15 default)
+
+| σ_subDLA/μ | bias A_p | bias n_s | joint |
+|---|---|---|---|
+| 0.20 | +0.71σ | −0.51σ | 0.87 |
+| 0.40 (default) | +1.02σ | −0.03σ | 1.02 |
+| 0.80 | +1.43σ | +0.45σ | 1.50 |
+| 1.50 | +1.50σ | +0.62σ | 1.63 |
+
+**The subDLA width behaves oppositely — loosening it *worsens* A_p monotonically** (+0.71→+1.50σ) and also
+pushes n_s up. The joint bias is smallest at the **tight** end. So the fix is *not* "loosen everything":
+**keep the subDLA prior tight.** (Mechanism: subDLA is the least data-constrained HCD class — see the
++1–3σ subDLA mis-recovery in the IGM table below — so a loose subDLA prior just hands the emulator/τ₀
+misfit a free low-k knob that A_p then has to fight.)
+
+**Recommendation for the real fit:** moderate σ_LLS (≈0.25–0.40) on an externally-pinned center; **tight**
+σ_subDLA (≤0.20–0.40). One ESS caveat: `D_f6_sigS020` had ESS-tail 82 (short) so its −0.51σ n_s is the
+least certain point; the directions are robust.
+
+---
+
+# Phase-4b — IGM-stress fiducials: the bias is emulator-LOSO-driven, not HCD-driven
+
+*The PI's question: under IGM-parameter stress, is the cosmology biased, and **is it sensitive to the HCD
+nuisances**? Six fiducials at the extremes of HeII-reionization (start/end), QSO spectral slope, and
+BH-feedback, each run with the **default** HCD prior, 4 chains.*
+
+![IGM HCD-sensitivity](../../figures/analysis/05_likelihood/p4b_igm_hcd_sensitivity.png)
+
+| fiducial | fold | bias A_p | bias n_s | corr(A_p,α_LLS) | corr(n_s,α_subDLA) | α_subDLA rec | **emu-LOSO Fisher A_p** |
+|---|---|---|---|---|---|---|---|
+| baseline D_f6 | 6 | +1.02 | −0.03 | −0.17 | +0.24 | +1.82σ low | (n/a) |
+| αq slope LOW | 2 | +0.07 | +0.06 | −0.23 | +0.37 | +2.74σ low | −0.22 |
+| BH-feedback LOW | 1 | −0.65 | +0.28 | −0.26 | +0.16 | +1.03σ low | +1.29 |
+| HeII-end LOW | 2 | +0.10 | −0.79 | −0.15 | +0.34 | +1.31σ low | −1.09 |
+| HeII-end HIGH | 4 | +0.07 | **+1.59** | −0.10 | +0.37 | +1.29σ low | −1.11 |
+| **HeII-start HIGH** | 3 | **+2.03** | **+1.13** | −0.17 | +0.26 | +2.87σ low | +0.30 |
+| **QSO slope HIGH** | 1 | **+3.74** | **+2.63** | −0.18 | +0.10 | +3.09σ low | **+3.45** |
+
+**Three findings:**
+
+1. **The HCD↔cosmology coupling is FLAT.** corr(A_p, α_LLS) sits at −0.10…−0.26 across *every* fiducial
+   and **does not grow with IGM stress** — the worst-biased mock (QSO-slope-HIGH, A_p +3.74σ) has the same
+   −0.18 coupling as baseline. The default HCD priors pin the nuisances, so any degeneracy is spent on the
+   prior and the bias is a *mean shift*, not a widened/correlated posterior. **HCD marginalization is not
+   the channel through which IGM stress biases cosmology** — the PI's prime worry is de-risked.
+
+2. **The worst case is pure emulator-LOSO error.** QSO-slope-HIGH's closure A_p +3.74σ is reproduced almost
+   exactly by the *standalone* emulator-LOSO Fisher bias **+3.45σ** (Δ=+0.29) — the likelihood adds
+   essentially nothing. This catastrophic corner is the emulator being inaccurate at a held-out
+   parameter-space *edge* (the known LOSO partition artifact), faithfully propagated. HeII-start-HIGH is the
+   one case where the closure (+2.03σ) exceeds its emulator bias (+0.30σ) by ~1.7σ — there the tight-prior
+   mechanism adds on top (and its α_subDLA is the most mis-recovered, +2.87σ). And HCD/τ₀ freedom can even
+   *absorb* emulator error (BH-feedback-LOW: closure −0.65σ vs emulator +1.29σ).
+
+3. **subDLA is the weak nuisance.** α_subDLA is recovered 1–3σ *below* truth in every fiducial (worst where
+   cosmology bias is worst), confirming it is poorly constrained by the data — which is exactly why the
+   σ_subDLA scan says to keep its prior tight.
+
+**Implication for the real fit:** the residual cosmology-bias risk at IGM extremes is an **emulator
+accuracy** problem at parameter-space edges, *not* an HCD-marginalization problem. Real DESI/KS data sit in
+the IGM interior (not at these held-out edges), and the analysis already carries an emulator-bias term in
+C_emu; the HCD-specific lever remains the LLS/subDLA prior **width** (moderate LLS, tight subDLA) on a
+**correct external center**.
