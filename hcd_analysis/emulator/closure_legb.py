@@ -93,6 +93,42 @@ TRUTH_DLA_FRAC = {"DESI": 0.10, "KS": 0.0}
 # (set both to 0/1 to recover the old full-box prior for a diagnostic arm).
 _THETA_UNIT_LO, _THETA_UNIT_HI = sampling_unit_bounds()
 
+# --- Phase-4d test-3: METAL injection into the MOCK (host/numpy) ------------------------------
+# Inject metal contamination the FORWARD's reduced _metal_factor cannot fully reproduce, to test
+# whether the baseline cosmology stays unbiased. Two forms (metal survey 2026-06-11, agent):
+#   form="desi_full" — the full DESI DR1 model (arXiv:2601.21432): Lyα–SiIII + Lyα–SiII DOUBLET
+#     (1190.42/1193.28 Å, ratio r), both as sigmoid-decorrelated multiplicative cross-terms, PLUS
+#     an ADDITIVE same-ion SiII–SiII term (Gaussian-damped, intra-doublet frequency) — the piece a
+#     multiplicative (1+f) factor STRUCTURALLY cannot match (the bias probe).
+#   form="eboss" — the McDonald/eBOSS SiIIIcorr (lya_emulator_full): 1 + aa² + 2aa·cos(2271·k),
+#     aa = f_SiIII/(1−⟨F⟩), NO decorrelation, SiIII only.
+# Amplitudes are f_X (the metal flux decrement); the effective oscillation amplitude is A_X =
+# f_X/(1−⟨F⟩). Defaults: f_SiIII≈0.009 (PRIYA-eBOSS), SiII/SiII-SiII sub-dominant.
+_LAMBDA_SiIIb = 1193.28      # second SiII doublet line [Å] (leading line DL.LAMBDA_SiII=1190.42)
+
+def metal_inject(P, k, mean_flux, *, form="desi_full", f_SiIII=0.009, f_SiII=0.004,
+                 f_SiII_SiII=0.002, r_doublet=0.5, k_damp=0.05, k_decorr=0.05):
+    """Return the metal-contaminated mock P1D (numpy). ⟨F⟩=mean_flux (=exp(−τ_eff)); a=0 ⇒ P."""
+    k = np.asarray(k, float)
+    one_minus_F = max(1.0 - float(mean_flux), 1e-3)
+    A3 = f_SiIII / one_minus_F
+    if form == "eboss":                                   # McDonald/eBOSS SiIIIcorr, no decorrelation
+        return P * (1.0 + A3 ** 2 + 2.0 * A3 * np.cos(2271.0 * k))
+    # --- desi_full ---
+    dvA = DL.C_KMS * np.log(DL.LAMBDA_LYA / DL.LAMBDA_SiIII)     # Lyα–SiIII
+    dva = DL.C_KMS * np.log(DL.LAMBDA_LYA / DL.LAMBDA_SiII)      # Lyα–SiII line a (1190.42)
+    dvb = DL.C_KMS * np.log(DL.LAMBDA_LYA / _LAMBDA_SiIIb)       # Lyα–SiII line b (1193.28)
+    dvd = DL.C_KMS * np.log(_LAMBDA_SiIIb / DL.LAMBDA_SiII)      # SiII intra-doublet (~719 km/s)
+    D = 2.0 - 2.0 / (1.0 + np.exp(-k / k_decorr))               # sigmoid decorrelation (DESI)
+    A2 = f_SiII / one_minus_F
+    C_LyaSiIII = A3 ** 2 + 2.0 * A3 * np.cos(dvA * k) * D
+    C_LyaSiII = A2 ** 2 * (1.0 + r_doublet ** 2) \
+        + 2.0 * A2 * (np.cos(dvb * k) + r_doublet * np.cos(dva * k)) * D
+    # ADDITIVE same-ion SiII–SiII (Gaussian-damped) — unfittable by the multiplicative _metal_factor:
+    C_SiII_SiII = f_SiII_SiII * (1.0 + r_doublet ** 2 + 2.0 * r_doublet * np.cos(dvd * k)) \
+        * np.exp(-(k / k_damp) ** 2)
+    return P * (1.0 + C_LyaSiIII + C_LyaSiII + C_SiII_SiII)
+
 
 # ============================================================================ #
 #  LegBCtx — the frozen leg context the numpyro model + mock generator share.
