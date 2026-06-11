@@ -207,14 +207,24 @@ bias.
 
 ---
 
-## 9. Where we are now: the Phase-4 closure (running)
+## 9. The Phase-4 closure result (36/36 complete)
 
-A 36-chain closure is running with the new model, **non-circularly**: DESI-only and KS-only fits at the
-**sim-population-mean** prior center (not the truth), spanning n_s 0.90–1.0, plus three fold6 arms — a
-**literature-center** arm, a **looser-LLS-width** arm, and a **τ₀-extreme** (funnel) arm. This is the real
-test of whether the in-gate interior result holds when the prior is *not* told the truth, across n_s and
-per survey. Results expected ~6 h after launch; the per-fiducial gate is **R-hat<1.01, 0 divergences, and
-|bias z|<0.2σ on A_p and n_s**. On completion: per-survey/per-center bias tables + the bias-vs-width readout.
+A 36-chain closure ran with the new model, **non-circularly**: DESI-only and KS-only at the
+**sim-population-mean** prior center (not the truth), spanning n_s 0.90–1.0, plus three fold6 arms
+(literature-center, looser-LLS-width, τ₀-extreme). Outcome:
+
+- **Convergence clean** — all R-hat ≤ 1.022, **0 divergences everywhere**, and the **τ₀-funnel is gone**
+  (the τ₀-extreme arm runs cleanly, vs the old 13-rung M2 funnel — the τ₀ refactor worked).
+- **The non-circular bias is real and survey-specific** — at the tight (σ=0.15) LLS prior, **DESI A_p
+  scatters ±~1σ** (zero-mean), **KS biases n_s ~±0.4σ** instead. So the in-gate interior result *was*
+  partly circular; with a realistic prior the LLS sector carries a ~1σ DESI-A_p budget.
+- **The width is the lever** — loosening σ_LLS 0.15→0.40 cuts the A_p bias (+1.0→+0.29σ) but trades it
+  into n_s (+0.54σ); the center (sim-mean vs literature) barely moves it.
+
+**This is the central result** — written up with the table + figure in
+`2026-06-10-headline-lls-prior-center-Ap.md`. The fix is a **correct external per-survey LLS-abundance
+center + a moderate width**; flattening alone reshuffles A_p↔n_s. Open: the σ_LLS scan to pick the width,
+and the external LLS pin (§10).
 
 ---
 

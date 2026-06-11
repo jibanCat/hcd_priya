@@ -1,84 +1,106 @@
-# Headline — the LLS prior *center* carries ~1σ of the DESI A_p
+# Headline — a tight LLS prior carries ~1σ of the DESI A_p (the width is the lever)
 
-*2026-06-10. A focused finding doc (preliminary; the Phase-4 run is still completing). The closure
-machinery is unbiased when the prior is right, but the **center of the LLS-incidence prior** — a quantity
-we set, not measure from the P1D — moves the DESI cosmology amplitude A_p by **~1σ**. This is the dominant
-*real-fit* A_p risk, and it is a prior/data problem, not a likelihood bug.*
+*2026-06-10, updated 2026-06-11 with the clean same-mock isolation. A focused finding doc. The closure
+machinery is unbiased when the prior is right, but a **tight LLS-incidence prior whose center is offset
+from the data's true LLS abundance** moves the DESI cosmology amplitude A_p by **~1σ**. The controllable
+lever is the prior **width**; the source is the **center offset**. This is the dominant real-fit A_p risk,
+and it is a prior/data problem, not a likelihood bug.*
+
+> **Note on a mid-investigation correction:** an earlier version of this doc headlined "the prior
+> *center* carries ~1σ," based on a truth-center-vs-offset-center comparison that used *different* mock
+> noise. The clean same-mock arms (below) show the *width* is the demonstrated lever and that two offset
+> centers (sim-mean vs literature) give the *same* A_p — so the accurate statement is "a *tight* prior
+> *enforcing* an offset center." Kept here as the record.
 
 ---
 
 ## The claim, in one line
 
-In the separate-inference closure, with the LLS prior centered on a **realistic (non-circular)** value
-rather than the truth, **DESI A_p scatters by ~±1σ**, and changing *only* the LLS prior center at a fixed
-fiducial moves A_p by **~0.8σ**. KS is much less sensitive. So **how well we know the LLS abundance of the
-data sample sets a ~1σ floor on the DESI A_p error** unless it is pinned externally.
+In the separate-inference closure, at the current LLS-prior width (σ/μ=0.15, fairly **tight**), **DESI A_p
+is biased ~1σ** whenever the prior center is offset from the sim's true LLS abundance — and across
+fiducials it scatters ±~1σ (zero-mean). **Loosening the prior (σ/μ→0.40) cuts the A_p bias to +0.29σ** —
+but trades it into n_s (+0.54σ) and widens A_p. KS is much less sensitive. So the LLS prior is a ~1σ
+DESI-A_p lever, controlled by its **width** and sourced by its **center offset**.
 
-![LLS-center → A_p budget](../../figures/analysis/05_likelihood/lls_center_ap_budget.png)
+![LLS-prior → A_p budget](../../figures/analysis/05_likelihood/lls_center_ap_budget.png)
 
-- **(A)** At the **sim-population-mean** LLS prior center (non-circular — the prior is *not* told the
-  truth), DESI A_p scatters ±~1σ across fiducials and **flips sign** (D_f3 −0.92σ, D_f4 −0.62σ, D_f6
-  +1.02σ); KS stays within ~±0.4σ.
-- **(B)** The clean cut: at the **same** fiducial (D_f6, n_s=0.966), changing *only* the LLS prior center
-  from the truth to the sim-mean moves A_p from **+0.20σ → +1.02σ** — a **+0.82σ** shift from the prior
-  center alone.
+- **(A)** At a non-circular (sim-population-mean) LLS center, **DESI A_p scatters ±~1σ, zero-mean**
+  (D_f3 −0.92, D_f4 −0.62, D_f6 +1.02, D_f7 +0.01σ; RMS 0.75σ); **KS stays within ±0.4σ** (survey-specific
+  — DESI biases A_p, KS biases n_s).
+- **(B)** The clean cut — **same mock** (same noise), only the prior knob changes:
+  - **center sim-mean vs literature, both σ=0.15: A_p +1.02σ vs +0.99σ** — the center (within this offset
+    range) **barely matters**.
+  - **width σ=0.15 → 0.40 (same center): A_p +1.02σ → +0.29σ** — the **width is the strong lever**.
+  - the truth-center reference (+0.20σ, dotted) is much smaller but used different noise, so it only
+    *suggests* the offset is the source — it isn't a clean cut.
 
 ## Why this happens (the mechanism)
 
-LLS absorption adds low-k power that is **interchangeable with the clustering amplitude** to the
-likelihood — so A_p and the LLS amplitude α_LLS are degenerate (we saw corr ≈ −0.3 to −0.5). Critically,
-**the data cannot pin the LLS amplitude on its own** (the LLS/subDLA templates are collinear over the
-measured k-range), so α_LLS is effectively **set by its prior**. If the prior *center* is offset from the
-sample's true LLS abundance, α_LLS is pulled to the wrong value and **A_p compensates** — by ~1σ for an
-offset of order the sim-population spread.
+LLS absorption adds low-k power **interchangeable with the clustering amplitude**, so A_p ↔ α_LLS are
+degenerate, and the data **cannot pin α_LLS on its own** (the LLS/subDLA templates are collinear over the
+measured k-range) — so α_LLS is effectively **set by its prior**. Then:
+- A **tight** prior **enforces** the prior center. If that center is offset from the sim's true LLS
+  abundance (both sim-mean and literature are ~+11–17% high for D_f6's sim), α_LLS is pinned high and
+  **A_p compensates ~1σ**.
+- A **looser** prior lets the **data pull α_LLS back toward truth**, so the center offset bites less →
+  A_p bias drops. The cost: A_p widens, and the residual offset **redistributes into n_s**.
 
-DESI is more exposed than KS because DESI's low-k modes are exactly where the LLS damping wings and the
-clustering amplitude overlap; KS's bias shows up more in n_s.
+DESI is more exposed than KS because its low-k modes are where the LLS damping wings and the clustering
+amplitude overlap; KS's bias surfaces in n_s instead.
 
-## Why it matters
+## Why it matters + the fix
 
-- The closure **machinery is unbiased** — center the prior on the truth and A_p recovers in-gate (+0.20σ).
-  So this is **not a likelihood bug**.
-- But in the **real fit** we don't know the truth; we center the LLS prior on literature, and **the data
-  sample's actual LLS abundance can differ** (selection bias — the PRIYA-KS paper's published α_LLS≈2 case
-  is exactly this). So the LLS-prior-center accuracy is a **~1σ A_p error budget**.
-- ⟹ The decisive real-fit lever is an **external LLS-abundance measurement of the specific sample**, per
-  survey (not a shared/assumed center) — and the prior should be **moderately** informative so a slightly
-  wrong center can be partly corrected by the data, not pinned.
+- The machinery is **unbiased** (truth-centered → in-gate), so this is **not a likelihood bug**.
+- In the real fit we don't know the truth; the prior center comes from literature and the sample's true
+  LLS abundance can differ (selection bias — the PRIYA-KS published α_LLS≈2 case). So the LLS prior is a
+  **~1σ A_p error budget**.
+- **The fix needs BOTH knobs:** (1) a **correct center** — an external, per-survey LLS-abundance
+  measurement of the specific sample (not an assumed/shared center); (2) a **moderate width** — not tight
+  (σ=0.15 enforces a wrong center) and not flat (which only reshuffles A_p↔n_s and widens A_p). Loosening
+  alone is *not* a fix.
 
-## Caveats (this is preliminary)
+## The flatter-prior question — ANSWERED (your future-check)
 
-- **n = 3 DESI fiducials**; the Phase-4 run is still completing (D_f7 + the sensitivity arms pending). The
-  ±1σ is the current scatter, not a converged error budget.
-- **Panel B mixes one confound:** the truth-center (+0.20σ) and sim-mean (+1.02σ) runs used *different
-  noise seeds*, so part of the +0.82σ is noise, not purely the center. **The clean test is the
-  `D_f6_lit` arm** (same mock, same noise, only the center → literature) — *pending* — which will isolate
-  the center effect exactly. The forward-only Laplace scan (below) already showed the directional center
-  dependence.
-- The cross-fiducial ±1σ scatter (Panel A) is **center-offset + per-sim emulator-LOSO error + noise**
-  combined; the center is *one* contributor, cleanly isolated only by the same-mock arm.
-- Some chains are ESS-short (D_f6 tail 155 vs 400 target); the cert proper wants longer chains.
+The σ_LLS=0.40 arm (`D_f6_sig40`, same mock as D_f6) directly tested it:
 
-Supporting forward-only preview (the center × width dependence):
+| same mock, sim-mean center | bias A_p | bias n_s | A_p width | ESS-tail |
+|---|---|---|---|---|
+| σ_LLS=0.15 (tight) | +1.02σ | −0.03σ | 0.072 | 155 |
+| σ_LLS=0.40 (flatter) | **+0.29σ** | **+0.54σ** | 0.090 | 102 |
 
-![LLS prior sensitivity (Laplace)](../../figures/analysis/05_likelihood/lls_prior_sensitivity.png)
+**Verdict:** a flatter prior **does** reduce the A_p sensitivity (your hypothesis holds for A_p), **but it
+is not a clean fix** — the cosmology bias **redistributes from A_p into n_s** (−0.03→+0.54σ), A_p widens
+(+25%), and the geometry gets harder (ESS 155→102). So *flattening alone reshuffles the bias rather than
+removing it.* The clean removal requires the **center** to be right (external pin); the width should be
+**moderate**, chosen to keep the center-mismatch bias acceptable on *both* A_p and n_s without over-widening.
 
-## ⚠️ FUTURE CHECK — does this hold for a *flatter* prior?
+**Still open (future):** a fuller σ_LLS scan at a fixed *non-circular* center, mapping the A_p↔n_s
+trade-off, to pick the moderate width; and — most important — settling the **external LLS-abundance pin
+per survey** so the center is right in the first place.
 
-**Open question to test (PI's note):** the ~1σ A_p sensitivity is measured at the *current* LLS prior
-width (σ/μ=0.15 — fairly **strong**). A strong prior on a wrong center is exactly what pins α_LLS and
-biases A_p. **Hypothesis:** a **flatter (looser) LLS prior** lets the data pull α_LLS toward the truth, so
-the center offset matters *less* → the A_p shift shrinks — at the cost of a wider A_p posterior (since A_p
-then absorbs more of the unconstrained LLS direction).
+## Phase-4 full result (36/36 complete)
 
-- **First data point:** the `D_f6_sig40` arm (σ_LLS 0.15→0.40, same mock as D_f6) — *pending*; compare its
-  A_p bias to D_f6's +1.02σ.
-- **Future work:** a fuller width scan (σ_LLS → wide/uniform) at a fixed non-circular center, mapping the
-  **bias-vs-width trade-off** in full NUTS (the Laplace above is only directional and under-states the
-  bias ~×3). The right LLS-prior width is where the center-mismatch bias is acceptable *and* A_p stays
-  usefully constrained.
+| mock | survey | n_s | center | σ_LLS | τ₀-ext | R-hat | div | bias A_p | bias n_s |
+|---|---|---|---|---|---|---|---|---|---|
+| D_f3 | DESI | 0.901 | sim-mean | 0.15 | | 1.006 | 0 | −0.92 | +0.10 |
+| D_f4 | DESI | 0.920 | sim-mean | 0.15 | | 1.008 | 0 | −0.62 | +0.36 |
+| D_f6 | DESI | 0.966 | sim-mean | 0.15 | | 1.010 | 0 | +1.02 | −0.03 |
+| D_f7 | DESI | 0.998 | sim-mean | 0.15 | | 1.009 | 0 | +0.01 | −0.44 |
+| K_f4 | KS | 0.920 | sim-mean | 0.15 | | 1.022 | 0 | −0.43 | −0.35 |
+| K_f6 | KS | 0.966 | sim-mean | 0.15 | | 1.011 | 0 | +0.02 | +0.39 |
+| **D_f6_lit** | DESI | 0.966 | **lit** | 0.15 | | 1.006 | 0 | **+0.99** | −0.12 |
+| **D_f6_sig40** | DESI | 0.966 | sim-mean | **0.40** | | 1.004 | 0 | **+0.29** | **+0.54** |
+| **D_f6_tau0x** | DESI | 0.966 | sim-mean | 0.15 | **Y** | 1.009 | 0 | +1.16 | +0.87 |
 
-If a flatter prior removes most of the ~1σ sensitivity, the real-fit recipe is "loosen the LLS prior +
-externally pin the center"; if it doesn't (A_p stays biased because the center still dominates), then the
-external pin is mandatory and tightness is secondary. **This is the key thing to settle before the real
-fit.**
+**Convergence: clean** — every fiducial R-hat ≤ 1.022 (K_f4 the only one >1.01), **0 divergences everywhere**.
+**The τ₀-funnel is RESOLVED:** the τ₀-extreme arm (`D_f6_tau0x`, truth at the upper PRIYA corner) has 0
+divergences and R-hat 1.009 — the smooth 2-param τ₀ handles the extreme with no funnel (the old 13-rung M2
+had R-hat 1.019 + a funnel). It *does* still bias cosmology (A_p +1.16, n_s +0.87σ) — but via the same
+tight-LLS-prior×offset interaction, not a sampling pathology.
+
+## Caveats
+
+- Several arms are ESS-short (102–413 tail vs the 400 target); the cert proper wants longer chains — the
+  bias *directions* are robust, the exact σ values less so.
+- The cross-fiducial ±1σ scatter (panel A) is center-offset + per-sim emulator-LOSO + noise combined; the
+  same-mock arms (panel B) isolate the prior knobs cleanly, the cross-fiducial scatter does not.
