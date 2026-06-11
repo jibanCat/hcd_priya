@@ -328,7 +328,7 @@ def held_out_sims(d, fold=0):
     return sorted(set(np.asarray(d["sim_name"])[va])), va
 
 
-def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="priya", mf=None):
+def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="priya", mf=None, lls_truth_boost=1.0):
     """Assemble a multi-z SIM-TRUTH from one held-out sim's cache rows.
 
     The truth P1D per z is the cache's MEASURED contaminated power at α=w_c (the sim's own
@@ -421,8 +421,9 @@ def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="priya", mf=None):
     th_truth = jnp.asarray(params_unit[keep_rows[0]])
     z_unit_rows = (z_grid[keep_rows] - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
     for i, r in enumerate(keep_rows):
-        a = w_c[r, 1:]                               # (3,) [LLS,sub,DLA] the sim's contamination
-        coef = np.concatenate([[1.0 - a.sum()], a])  # (4,)
+        a = np.asarray(w_c[r, 1:], dtype=float).copy()  # (3,) [LLS,sub,DLA] the sim's contamination
+        a[0] = a[0] * lls_truth_boost                # inject a survey-level LLS excess into the MOCK
+        coef = np.concatenate([[1.0 - a.sum()], a])  # (4,) clean fraction drops as LLS rises
         core_r = delta[r, 2]                         # (K,) DLA core (forward template + excess add-back)
         if mf is None:
             corr = np.ones((4, K))                    # LF-resolution truth (no correction)
@@ -462,7 +463,8 @@ def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="priya", mf=None):
         params_unit=params_unit[keep_rows[0]],
         tau0=tau0_all[keep_rows], dla_core=dla_core,
         tau0_amp=tau0_amp_true, dtau0=dtau0_true,
-        w_c=np.median(w_c[keep_rows, 1:], axis=0), rows=keep_rows)
+        w_c=np.median(w_c[keep_rows, 1:], axis=0) * np.array([lls_truth_boost, 1.0, 1.0]),
+        rows=keep_rows)
 
 
 def _chol_jitter(C, jitter=1e-10):

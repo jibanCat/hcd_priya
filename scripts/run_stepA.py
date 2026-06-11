@@ -117,7 +117,8 @@ def build_config(verbose=False):
     cfg = []
 
     def add_fiducial(mock_id, fold, target_ns=None, *, survey, prior_center="sim_mean",
-                     sigma_lls=None, sigma_subdla=None, tau0_extreme=False, n_chains=4, sim=None):
+                     sigma_lls=None, sigma_subdla=None, tau0_extreme=False, n_chains=4, sim=None,
+                     lls_truth_boost=1.0):
         if sim is None:
             ns, sim = _closest_sim(fold_sims[fold], target_ns)
         else:
@@ -127,6 +128,7 @@ def build_config(verbose=False):
                 id=f"{mock_id}_c{c}", mock_id=mock_id, tier="P4", fold=fold, ckpt=ckpt_of(fold),
                 sim=sim, n_s=round(ns, 4), survey=survey, prior_center=prior_center,
                 sigma_lls=sigma_lls, sigma_subdla=sigma_subdla, tau0_extreme=tau0_extreme,
+                lls_truth_boost=lls_truth_boost,
                 mf=False, z_slope_marginalized=False, hr_truth=False,
                 chain_id=c, n_chains=n_chains, seed=0))
 
@@ -164,6 +166,16 @@ def build_config(verbose=False):
                       ("IGM_heref_hi", "heref", True), ("IGM_alphaq_lo", "alphaq", False),
                       ("IGM_alphaq_hi", "alphaq", True), ("IGM_bhfb_lo", "bhfeedback", False)]:
         s = _igm_pick(p, hi); add_fiducial(nm, _fold_of(s), survey="DESI", sim=s, n_chains=4)
+
+    # === Phase-4c (2026-06-11): per-survey LLS pin VALIDATION (real-fit "lit" prior) ===
+    # Each survey's MOCK carries that survey's effective LLS level, fit with that survey's pin:
+    #   D_lls — DESI leg, DESI pin (1.06× cosmic-avg, σ0.15); mock at the sim level (≈cosmic, the
+    #           DESI-pin target to ~6%). Validates the real-fit DESI closure + α_LLS→dN/dX recovery.
+    #   K_lls — KS leg, KS pin (2.5×1.06=2.65× cosmic, σ0.40 broad); mock LLS BOOSTED ×2.65 to the
+    #           KS selection level (arXiv:2509.18271). Validates that the boosted pin recovers
+    #           cosmology + the boosted α_LLS when the data genuinely carries the excess.
+    add_fiducial("D_lls", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.0)
+    add_fiducial("K_lls", 6, 0.966, survey="KS",   prior_center="lit", lls_truth_boost=2.65)
 
     if verbose:
         print(f"[config] resolved {len(cfg)} chains")
@@ -362,7 +374,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     # central PRIYA curve (τ₀=1, dτ₀=0 = Kim), the regime the data visits.
     tau0_anchor = (1.20, 0.20) if chain["tau0_extreme"] else "priya"
     truth_sim = make_truth_from_sim(d, chain["sim"], fold=fold, tau0_anchor=tau0_anchor,
-                                    mf=ctx.mf)
+                                    mf=ctx.mf, lls_truth_boost=float(chain.get("lls_truth_boost", 1.0)))
 
     # PRIOR CENTER (non-circular closure, 2026-06-10): re-center the HCD α prior.
     #   "lit"      = build_legb_ctx default (lit/sim·w_c_med) — the real-fit prior.
@@ -420,6 +432,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         survey=chain.get("survey", "DESI"), prior_center=chain.get("prior_center", "lit"),
         sigma_lls=(float(chain["sigma_lls"]) if chain.get("sigma_lls") else 0.0),
         sigma_subdla=(float(chain["sigma_subdla"]) if chain.get("sigma_subdla") else 0.0),
+        lls_truth_boost=float(chain.get("lls_truth_boost", 1.0)),
         z_slope_marginalized=bool(chain["z_slope_marginalized"]),
         hr_truth=bool(chain["hr_truth"]), tau0_extreme=bool(chain["tau0_extreme"]),
         chain_index=int(chain["chain_id"]), n_chains_target=int(chain["n_chains"]),
