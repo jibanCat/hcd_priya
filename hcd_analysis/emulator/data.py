@@ -40,6 +40,42 @@ PARAM_LIMITS = np.array([
     [0.03,   0.07],     # bhfeedback(param_limits[8])
 ], dtype=np.float64)
 
+# --- SAMPLING prior box (the NUTS prior; a SUB-BOX of the emulator's training box) ----------
+# The emulator is TRAINED on the widened PARAM_LIMITS box above, but the PRIYA design DENSITY is
+# sparse in the widened corners: the Bird+2023 LHS densely sampled only the ORIGINAL coarse_grid.py
+# box, and the widening (ns_hi 0.995->1.05, herei_hi 4.1->4.5, heref_lo 2.6->2.2, alphaq_hi
+# 2.5->3.0) added only a few design points. The held-out emulator EXTRAPOLATES badly there —
+# Phase-4b closure: a mock at alphaq=2.98 recovered A_p +3.7sigma, at herei=4.46 +2.0sigma (both
+# OUTSIDE the original box), and the bias equalled the standalone emulator-LOSO Fisher bias (pure
+# emulator edge error, not a likelihood/HCD effect). So NUTS samples the IGM params (herei, heref,
+# alphaq) only over their ORIGINAL PRIYA ranges — NO retrain (the emulator box is unchanged; we
+# just do not FIT at its corners). n_s is KEPT extended to 1.05 (PI 2026-06-08: the real n_s may
+# exceed 0.995, eBOSS ~1.009) with the C_emu step-inflation above 0.995 covering the sparse n_s
+# ridge; Ap/hub/omegamh2/hireionz/bhfeedback are identical between the two boxes.
+SAMPLING_LIMITS = np.array([
+    [0.8,    1.05],     # ns        KEEP extended (PI 2026-06-08) + C_emu step-inflation > 0.995
+    [1.2e-9, 2.6e-9],   # Ap        (identical to PARAM_LIMITS)
+    [3.5,    4.1],      # herei     RESTRICT to original PRIYA (widened box had 4.5)
+    [2.6,    3.2],      # heref     RESTRICT to original PRIYA (widened box had 2.2 lo)
+    [1.3,    2.5],      # alphaq    RESTRICT to original PRIYA (widened box had 3.0)
+    [0.65,   0.75],     # hub
+    [0.14,   0.146],    # omegamh2
+    [6.5,    8.0],      # hireionz
+    [0.03,   0.07],     # bhfeedback
+], dtype=np.float64)
+
+
+def sampling_unit_bounds(limits=None):
+    """(lo, hi) of the SAMPLING prior in the emulator's UNIT cube (each mapped via the WIDENED
+    PARAM_LIMITS the emulator normalizes with). NUTS samples ``theta_unit ~ Uniform(lo, hi)`` to
+    stay inside the well-designed PRIYA interior WITHOUT altering the emulator normalization (the
+    unit cube still spans the full training box). Defaults to ``SAMPLING_LIMITS``; the restricted
+    IGM params get a sub-unit-interval, the kept-extended params get [0, 1]."""
+    lim = SAMPLING_LIMITS if limits is None else np.asarray(limits, dtype=np.float64)
+    lo = normalize_params(lim[:, 0])
+    hi = normalize_params(lim[:, 1])
+    return np.clip(lo, 0.0, 1.0), np.clip(hi, 0.0, 1.0)
+
 # PRIYA zout grid range (coarse_grid.py L153-154: max_z=5.4, min_z=2.0).
 Z_LIMITS = (2.0, 5.4)
 

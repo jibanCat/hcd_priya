@@ -369,9 +369,19 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     #   "sim_mean" = the sim-population median w_c (lit_over_sim=1) — the NON-circular closure center.
     #   "truth"    = this sim's own w_c (circular reference only).
     pc = chain.get("prior_center", "lit")
-    wc_c = (np.nanmedian(d["w_c_cache"][:, 1:], axis=0) if pc == "sim_mean"
-            else np.asarray(truth_sim["w_c"]) if pc == "truth" else None)
-    if wc_c is not None:
+    survey = chain.get("survey", "DESI")
+    if pc == "lit":
+        # REAL-FIT prior: per-survey effective-LLS pin (DESI cosmic-avg/tight; KS boosted ~2.5×/broad,
+        # arXiv:2509.18271 §4.3.3). subDLA/DLA survey-agnostic. DESI boost=1.0+σ0.15 == the old
+        # build_legb_ctx default (no change); only survey="KS" shifts the center+width.
+        wc_med = np.nanmedian(d["w_c_cache"][:, 1:], axis=0)
+        amu, asd = hcd_incidence_prior(jnp.asarray(wc_med), z=3.0, survey=survey)
+        ctx = ctx._replace(alpha_hcd_mu=amu, alpha_hcd_sigma=asd)
+    else:
+        # NON-circular closure cert: center on the sim population (sim_mean) or this sim (truth);
+        # lit_over_sim=1 → no literature/survey offset (the cert tests recovery, not the real prior).
+        wc_c = (np.nanmedian(d["w_c_cache"][:, 1:], axis=0) if pc == "sim_mean"
+                else np.asarray(truth_sim["w_c"]))
         amu, asd = hcd_incidence_prior(jnp.asarray(wc_c), z=3.0, lit_over_sim=jnp.ones(3))
         ctx = ctx._replace(alpha_hcd_mu=amu, alpha_hcd_sigma=asd)
     if chain.get("sigma_lls"):     # σ_LLS width-sensitivity arm

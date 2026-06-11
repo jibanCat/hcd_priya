@@ -80,11 +80,33 @@ HCD_Z_PIVOT = 3.0
 # z-independent ratio mis-centers the prior at the z edges. (lit/sim)@z_pivot + the slope
 # d ln(lit/sim)/d ln(1+z), fit by scripts/plot_dndx_vs_literature.py (PRIYA vs
 # Prochaska&Wolfe09 / Zafar13 / O'Meara13):
-HCD_LIT_OVER_SIM = (1.06, 0.76, 1.34)        # (LLS, subDLA, DLA): data/sim at z_pivot=3.0
+HCD_LIT_OVER_SIM = (1.06, 1.00, 1.34)        # (LLS, subDLA, DLA): data/sim at z_pivot=3.0
+# subDLA centered on the SIM (1.00), NOT the old Zafar+2013 0.76: that literature value is
+# factor-2 uncertain (Zafar-vs-O'Meara; Berg+2019 XQ-100 revises it), and PRIYA produces subDLAs
+# IN-SITU (Rahmati+2013 self-shielding) so the sim is the faithful prior here. The old 0.76 sat
+# −0.8σ below the sim subDLA incidence → pulled α_subDLA low and leaked into n_s (corr≈+0.3; HCD
+# referee 2026-06-11). The broad σ/μ=0.40 (HCD_PRIOR_FRAC_SIGMA[1]) marginalizes the residual
+# subDLA-abundance uncertainty rather than imposing an offset center.
 # DLA slope deliberately WEAK (0.4, the conservative Ω_DLA∝(1+z)^0.4): the raw fit (+1.08,
 # or +1.90 on z≤3.5) is dominated by z>3.5 DLA dN/dX that the literature does not measure
 # reliably — so do not impose a strong DLA z-evolution; let the data set it (σ widened above).
 HCD_LIT_OVER_SIM_SLOPE = (0.95, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
+
+# --- PER-SURVEY effective LLS-abundance pin (real-fit prior; 2026-06-11 Lyα-agent + PI) --------
+# The LLS prior CENTER is the dominant DESI-A_p risk (a tight prior at an offset center moves A_p
+# ~1σ; see the Phase-4b headline). The effective LLS incidence is SURVEY-SPECIFIC:
+#   DESI DR1 — large, homogeneous, magnitude/redshift-selected forest sample → the cosmic-average
+#     literature dN/dX is appropriate (boost 1.0), and TIGHT (cosmology-degenerate).
+#   KODIAQ-SQUAD — archival high-res echelle, deliberately includes DLA/absorber-rich sightlines →
+#     the data prefer ~2–3× the PRIYA LLS (arXiv:2509.18271 §4.3.3: α_LLS≈2 ⇒ "triple the LLS in
+#     PRIYA"; ≈2.5× the cosmic average). The excess is SELECTION, not cosmic — and ↑α_LLS mimics
+#     ↑A_p — so use a HIGH CENTER but a BROAD width (PI 2026-06-11): the KS data set it within an
+#     informative window rather than the prior imposing a possibly-wrong tight number.
+# A multiplier on the cosmic-average (lit/sim) LLS center, applied ONLY when ``survey`` is given
+# (the closure's sim-mean cert passes survey=None and is unaffected).
+HCD_LLS_SURVEY_BOOST = {"DESI": 1.0, "KS": 2.5}
+# per-survey LLS fractional width σ/μ (overrides HCD_PRIOR_FRAC_SIGMA[0] when survey given):
+HCD_LLS_SURVEY_FRAC_SIGMA = {"DESI": 0.15, "KS": 0.40}
 
 
 def lit_over_sim_at_z(z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SLOPE,
@@ -96,7 +118,7 @@ def lit_over_sim_at_z(z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SL
     return r * ((1.0 + jnp.asarray(z)) / (1.0 + z_pivot)) ** s
 
 
-def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None):
+def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None):
     """Per-class HCD incidence prior (μ, σ) on α_c (the effective per-class sightline weight
     in ``predict_P_obs``), centered on the OBSERVED incidence AT the data redshift ``z``
     (NOT the sim's), from the fiducial sim weights ``w_c_fid`` = (w_LLS, w_subDLA, w_DLA) ×
@@ -115,7 +137,14 @@ def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None):
     w = jnp.asarray(w_c_fid)                                    # (3,)
     r = lit_over_sim_at_z(z) if lit_over_sim is None else jnp.asarray(lit_over_sim)
     fl, fs, fd = HCD_PRIOR_FRAC_SIGMA
-    mu = jnp.stack([r[0] * w[0], r[1] * w[1], HCD_DLA_RESIDUAL_FRAC * r[2] * w[2]])
+    # PER-SURVEY effective-LLS pin (real fit only; survey=None leaves the closure cert untouched):
+    # boost the LLS CENTER (KS selection excess) and override its fractional WIDTH (DESI tight / KS
+    # broad). subDLA/DLA are survey-agnostic here (DLA is masked; subDLA tracks the cosmic average).
+    lls_boost = 1.0
+    if survey is not None:
+        lls_boost = HCD_LLS_SURVEY_BOOST.get(survey, 1.0)
+        fl = HCD_LLS_SURVEY_FRAC_SIGMA.get(survey, fl)
+    mu = jnp.stack([lls_boost * r[0] * w[0], r[1] * w[1], HCD_DLA_RESIDUAL_FRAC * r[2] * w[2]])
     # DLA dN/dX is unreliable beyond z≈3.5 → widen σ_DLA above it (weak high-z prior) so the
     # data, not the prior, sets the high-z DLA incidence.
     dla_inflate = 1.0 + jnp.clip(jnp.asarray(z) - HCD_DLA_Z_RELIABLE, 0.0, None)

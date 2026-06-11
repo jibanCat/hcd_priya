@@ -45,7 +45,7 @@ from numpyro.infer.util import constrain_fn
 from scipy.stats import norm as _scipy_norm
 
 from . import train as T
-from .data import load_cache, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS
+from .data import load_cache, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS, sampling_unit_bounds
 from .meanflux_prior import (meanflux_tau0_prior, becker13_tau0, tau0_alpha_priya,
                              fit_tau0_alpha_priya, TAU0_AMP_RANGE, DTAU0_RANGE, TAU0_PIVOT_Z)
 from .inference import (PARAM_NAMES, hcd_incidence_prior,
@@ -86,6 +86,12 @@ ZSLOPE_PRIOR_SIGMA = (0.52, 0.53, 0.33)
 # excess add-back; make_legb_mock adds ``TRUTH_DLA_FRAC[leg]``·excess per leg. This is the truth
 # side; the forward marginalizes α_DLA over it (DataLeg.dla_forward_frac: DESI 1.0 / KS 0.0).
 TRUTH_DLA_FRAC = {"DESI": 0.10, "KS": 0.0}
+
+# Default NUTS theta prior bounds (unit cube): the IGM params (herei/heref/alphaq) restricted to
+# the ORIGINAL PRIYA box, n_s kept extended — see data.SAMPLING_LIMITS. Resolved at import so the
+# LegBCtx default (None) maps to these in _legb_model/_legb_priors_only; override via ctx fields
+# (set both to 0/1 to recover the old full-box prior for a diagnostic arm).
+_THETA_UNIT_LO, _THETA_UNIT_HI = sampling_unit_bounds()
 
 
 # ============================================================================ #
@@ -144,6 +150,10 @@ class LegBCtx(NamedTuple):
     tau0_amp_range: object = TAU0_AMP_RANGE   # PRIYA uniform prior on amplitude τ₀ (center 1.0=Kim)
     dtau0_range: object = DTAU0_RANGE         # PRIYA uniform prior on slope dτ₀ (center 0=Kim slope)
     tau0_pivot_z: float = TAU0_PIVOT_Z        # the (1+z)/(1+z_p) pivot (PRIYA z_p=3)
+    # NUTS theta prior bounds in the UNIT cube (None → _THETA_UNIT_LO/_HI = IGM params restricted
+    # to original PRIYA, n_s extended; see data.SAMPLING_LIMITS). Set both to 0/1 for the full box.
+    theta_unit_lo: object = None              # (9,) lower bound on theta_unit
+    theta_unit_hi: object = None              # (9,) upper bound on theta_unit
 
 
 def _kim(z):
@@ -631,7 +641,9 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     the single ``factor`` = the per-leg-core multi-leg real-cov loglik (``_data_loglik_legcore``
     over ``mock_legs``)."""
     zg = jnp.asarray(ctx.z_global)
-    theta9 = numpyro.sample("theta_unit", dist.Uniform(jnp.zeros(9), jnp.ones(9)).to_event(1))
+    _lo_u = jnp.asarray(_THETA_UNIT_LO if getattr(ctx, "theta_unit_lo", None) is None else ctx.theta_unit_lo)
+    _hi_u = jnp.asarray(_THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi)
+    theta9 = numpyro.sample("theta_unit", dist.Uniform(_lo_u, _hi_u).to_event(1))
     kim = _kim(zg)
     # PRIYA mean-flux: α(z)=τ₀·((1+z)/(1+z_p))^dτ₀, τ₀(z)=α·Kim07 — 2 GLOBAL uniform params, NOT
     # 13 free per-z rungs, so τ₀ cannot absorb emulator residual into per-z wiggle that biases A_p.
@@ -640,10 +652,13 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     dtau0 = numpyro.sample("dtau0", dist.Uniform(ctx.dtau0_range[0], ctx.dtau0_range[1]))
     alpha_z = tau0_alpha_priya(zg, tau0_amp, dtau0, z_pivot=ctx.tau0_pivot_z)
     tau0_global = numpyro.deterministic("tau0_vec", alpha_z * kim)
+    # α_LLS/α_subDLA are incidence weights → physically ≥0. TruncatedNormal(low=0) keeps the
+    # (μ,σ) interpretation but removes the α<0 mass (and the Σα>1 negative-clean tail) that a
+    # plain Normal admits — material at the KS-boosted LLS center (HCD referee 2026-06-11).
     a_lls = numpyro.sample("alpha_lls",
-                           dist.Normal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]))
+                           dist.TruncatedNormal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0], low=0.0))
     a_sub = numpyro.sample("alpha_subdla",
-                           dist.Normal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1]))
+                           dist.TruncatedNormal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1], low=0.0))
     a_dla_raw = numpyro.sample("alpha_dla_raw",
                                dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
     a_dla = numpyro.deterministic("alpha_dla", jax.nn.softplus(a_dla_raw))
@@ -680,11 +695,13 @@ def _legb_priors_only(ctx):
     """The SAME prior sample sites as ``_legb_model`` but with NO ``numpyro.factor`` loglik and
     NO deterministic sites — used only as the model passed to ``constrain_fn`` in the cheap
     transform-only postprocess (below). Tracing this is cheap (priors, no 681×681 Cholesky)."""
-    numpyro.sample("theta_unit", dist.Uniform(jnp.zeros(9), jnp.ones(9)).to_event(1))
+    _lo_u = jnp.asarray(_THETA_UNIT_LO if getattr(ctx, "theta_unit_lo", None) is None else ctx.theta_unit_lo)
+    _hi_u = jnp.asarray(_THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi)
+    numpyro.sample("theta_unit", dist.Uniform(_lo_u, _hi_u).to_event(1))
     numpyro.sample("tau0_amp", dist.Uniform(ctx.tau0_amp_range[0], ctx.tau0_amp_range[1]))
     numpyro.sample("dtau0", dist.Uniform(ctx.dtau0_range[0], ctx.dtau0_range[1]))
-    numpyro.sample("alpha_lls", dist.Normal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]))
-    numpyro.sample("alpha_subdla", dist.Normal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1]))
+    numpyro.sample("alpha_lls", dist.TruncatedNormal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0], low=0.0))
+    numpyro.sample("alpha_subdla", dist.TruncatedNormal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1], low=0.0))
     numpyro.sample("alpha_dla_raw", dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
     if getattr(ctx, "marginalize_zslope", False):
         mu = (jnp.asarray(HCD_LIT_OVER_SIM_SLOPE) if ctx.zslope_mu is None
