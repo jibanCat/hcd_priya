@@ -187,6 +187,16 @@ def build_config(verbose=False):
     # the old σ0.15 gave +1.01σ). Uses the survey pin center (1.06×) with the explicit 0.30 width.
     add_fiducial("D_lls_m30", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
                  sigma_lls=0.30)
+    # UN-CONFOUND width-vs-center (Bayesian referee 2026-06-11): the D_lls_m fold6-Planck sim is
+    # LLS-POOR (w_LLS≈77.5% of the population median the DESI prior centers on) → its "matched" arm
+    # was actually +0.8σ HIGH. Re-run on a sim whose w_LLS ≈ the population median (ratio 0.992) so
+    # the lit prior center genuinely EQUALS the mock truth — then σ0.15 vs σ0.30 isolates the WIDTH
+    # effect alone. If σ0.15 STILL biases A_p here, it is the width; if it recovers, it was the center.
+    _SIM_MED = "ns0.972Ap1.69e-09herei3.87heref2.65alphaq2.12hub0.722omegamh20.144hireionz7.53bhfeedback0.0507"
+    add_fiducial("D_llsmed",   6, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
+                 sigma_lls=0.15, sim=_SIM_MED)
+    add_fiducial("D_llsmed30", 6, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
+                 sigma_lls=0.30, sim=_SIM_MED)
 
     if verbose:
         print(f"[config] resolved {len(cfg)} chains")
