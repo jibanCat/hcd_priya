@@ -119,7 +119,8 @@ each survey's effective LLS level; we check cosmology recovery + **α_LLS → dN
 | closure | pin σ_LLS | mock | bias A_p | bias n_s | **bias α_LLS** |
 |---|---|---|---|---|---|
 | **K_lls** | 0.40 (KS) | ×2.65 matched | **+0.004σ** | +0.56σ | **+0.002σ (faithful)** |
-| D_lls_m | 0.15 (DESI) | ×1.06 matched | **+1.01σ** | −0.11σ | −0.41σ |
+| **D_lls_m30** | **0.30 (DESI ✓)** | ×1.06 matched | **+0.65σ** | +0.31σ | +0.96σ |
+| D_lls_m | 0.15 (DESI) | ×1.06 matched | +1.01σ | −0.11σ | −0.41σ |
 | D_lls | 0.15 (DESI) | ×1.0 (6% below) | +1.17σ | −0.10σ | −0.67σ |
 
 **What it shows:**
@@ -132,10 +133,14 @@ each survey's effective LLS level; we check cosmology recovery + **α_LLS → dN
   adds ~0.16σ on top. So the DESI A_p is the **tight-width** effect (re-confirming the width-scan
   headline), not the center — and the LLS dN/dX is *not* faithful at σ0.15 (the tight prior sets it).
 
-**Decision-revision (flagged): set the DESI per-survey LLS width to MODERATE (~0.30), not 0.15.**
-D2 set `HCD_LLS_SURVEY_FRAC_SIGMA[DESI]=0.15` on a "tight because cosmology-degenerate" rationale, but
-this closure + the width scan (D3) show σ0.15 → ~1σ A_p. The width scan's joint-bias minimum is
-σ≈0.25–0.40; KS already sits at 0.40 and recovers cleanly. The cost of moderating DESI is the
-A_p↔n_s redistribution (width scan: A_p +1.0→+0.3σ but n_s 0→+0.5σ) — a real-fit tradeoff to settle
-(then re-validate with a D_lls_m at σ0.30). The closure has done its job: it caught that the DESI
-width, not the center, is the live A_p lever.
+**Decision-revision (DONE + validated): DESI per-survey LLS width set to MODERATE σ=0.30.**
+D2 originally set `HCD_LLS_SURVEY_FRAC_SIGMA[DESI]=0.15` ("tight because cosmology-degenerate"), but
+this closure + the width scan (D3) showed σ0.15 → ~1σ A_p *at any center*. Moved to **σ=0.30** (the
+width-scan joint-bias minimum; KS stays 0.40), PI-approved 2026-06-11, and **re-validated by
+`D_lls_m30`: A_p +1.01σ → +0.65σ and n_s −0.11σ → +0.31σ, both now in-gate** (the width-scan-predicted
+A_p↔n_s redistribution). The α_LLS *nuisance* wanders ~1σ either way (the A_p↔α_LLS degeneracy: a
+tight prior pins α_LLS faithful-but-biases-A_p; a moderate prior frees A_p but lets α_LLS drift) — but
+the cosmology *target* recovers in-gate at σ0.30. KS (broad, matched) remains the cleanest (A_p
++0.004σ, α_LLS faithful). **Net per-survey LLS prior: DESI σ0.30 / KS σ0.40, both on the survey's
+external center.** The closure did its job — it caught that the DESI *width*, not the center, was the
+live A_p lever, and confirmed the fix.

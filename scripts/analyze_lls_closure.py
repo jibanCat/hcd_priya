@@ -8,9 +8,9 @@ alpha_LLS posterior (mean +/- sd) vs its mock truth -- alpha_LLS IS the effectiv
 import glob, os, json, numpy as np
 
 CK = "checkpoints/stepA"
-FIDS = ["D_lls_m", "D_lls", "K_lls"]
-LABEL = {"D_lls_m": "DESI pin, matched (×1.06)", "D_lls": "DESI pin, sim mock (×1.0, 6% below)",
-         "K_lls": "KS pin, ×2.65 boosted (matched)"}
+FIDS = ["D_lls_m30", "D_lls_m", "D_lls", "K_lls"]
+LABEL = {"D_lls_m30": "DESI σ0.30, matched (×1.06)", "D_lls_m": "DESI σ0.15, matched (×1.06)",
+         "D_lls": "DESI σ0.15, sim mock (×1.0)", "K_lls": "KS σ0.40, ×2.65 (matched)"}
 
 def pooled(fid):
     ps = sorted(glob.glob(f"{CK}/{fid}_c*.npz"))
