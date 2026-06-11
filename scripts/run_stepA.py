@@ -174,12 +174,14 @@ def build_config(verbose=False):
     #   K_lls — KS leg, KS pin (2.5×1.06=2.65× cosmic, σ0.40 broad); mock LLS BOOSTED ×2.65 to the
     #           KS selection level (arXiv:2509.18271). Validates that the boosted pin recovers
     #           cosmology + the boosted α_LLS when the data genuinely carries the excess.
-    add_fiducial("D_lls", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.0)
+    # NOTE: D_lls/D_lls_m pinned to the ORIGINAL σ_LLS=0.15 (the DESI default was later moved to 0.30,
+    # b5cc088) so the σ0.15-vs-σ0.30 contrast (D_lls_m vs D_lls_m30) stays reproducible from config.
+    add_fiducial("D_lls", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.0, sigma_lls=0.15)
     add_fiducial("K_lls", 6, 0.966, survey="KS",   prior_center="lit", lls_truth_boost=2.65)
     # MATCHED-center arms (mock LLS == the survey pin center): isolates pin self-consistency from
     # the center-OFFSET sensitivity. D_lls (boost 1.0) is 6% below the DESI 1.06× pin → the
     # center-sensitivity arm; D_lls_m (boost 1.06) sits ON the DESI pin center → the clean DESI case.
-    add_fiducial("D_lls_m", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06)
+    add_fiducial("D_lls_m", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15)
     # D_lls_m30: matched DESI at the MODERATE σ_LLS=0.30 (the new HCD_LLS_SURVEY_FRAC_SIGMA[DESI];
     # PI 2026-06-11) — re-validates that DESI recovers A_p in-gate at the moderate width (D_lls_m at
     # the old σ0.15 gave +1.01σ). Uses the survey pin center (1.06×) with the explicit 0.30 width.

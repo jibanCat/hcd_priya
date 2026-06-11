@@ -231,6 +231,9 @@ checkpoints/*.pkl
 checkpoints/*.norm.pkl
 checkpoints/*.meta.json
 checkpoints/*.npz
+checkpoints/**/*.npz
+checkpoints/**/*.out
+checkpoints/stepA/*.json
 *.npy
 *.h5
 
