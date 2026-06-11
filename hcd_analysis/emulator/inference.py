@@ -105,8 +105,12 @@ HCD_LIT_OVER_SIM_SLOPE = (0.95, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
 # A multiplier on the cosmic-average (lit/sim) LLS center, applied ONLY when ``survey`` is given
 # (the closure's sim-mean cert passes survey=None and is unaffected).
 HCD_LLS_SURVEY_BOOST = {"DESI": 1.0, "KS": 2.5}
-# per-survey LLS fractional width σ/μ (overrides HCD_PRIOR_FRAC_SIGMA[0] when survey given):
-HCD_LLS_SURVEY_FRAC_SIGMA = {"DESI": 0.15, "KS": 0.40}
+# per-survey LLS fractional width σ/μ (overrides HCD_PRIOR_FRAC_SIGMA[0] when survey given). Both
+# MODERATE: DESI=0.30 (the width-scan joint-bias minimum 0.25–0.40) — the per-survey closure
+# (2026-06-11, D_lls_m) showed a TIGHT σ0.15 carries ~1σ A_p EVEN at the correct center (it is the
+# width, not the center) and pins the LLS dN/dX off-truth, so 0.15 was too tight. KS=0.40 (broad;
+# selection-driven, recovers A_p + dN/dX clean).
+HCD_LLS_SURVEY_FRAC_SIGMA = {"DESI": 0.30, "KS": 0.40}
 
 
 def lit_over_sim_at_z(z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SLOPE,
