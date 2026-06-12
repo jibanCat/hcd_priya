@@ -118,7 +118,7 @@ def build_config(verbose=False):
 
     def add_fiducial(mock_id, fold, target_ns=None, *, survey, prior_center="sim_mean",
                      sigma_lls=None, sigma_subdla=None, tau0_extreme=False, n_chains=4, sim=None,
-                     lls_truth_boost=1.0):
+                     lls_truth_boost=1.0, mf=False):
         if sim is None:
             ns, sim = _closest_sim(fold_sims[fold], target_ns)
         else:
@@ -129,7 +129,7 @@ def build_config(verbose=False):
                 sim=sim, n_s=round(ns, 4), survey=survey, prior_center=prior_center,
                 sigma_lls=sigma_lls, sigma_subdla=sigma_subdla, tau0_extreme=tau0_extreme,
                 lls_truth_boost=lls_truth_boost,
-                mf=False, z_slope_marginalized=False, hr_truth=False,
+                mf=bool(mf), z_slope_marginalized=False, hr_truth=False,
                 chain_id=c, n_chains=n_chains, seed=0))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -211,6 +211,22 @@ def build_config(verbose=False):
                      sigma_lls=0.15, sim=_s)
         add_fiducial(f"D_lmed{_f}_30", _f, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
                      sigma_lls=0.30, sim=_s)
+
+    # === Phase-5a Test A (2026-06-11): MF gate-invariant M-tier re-run at HR cosmologies ===
+    # with_mf=True → truth = MF-corrected LF AND forward = MF-corrected LF (the GATE INVARIANT: the
+    # correction cancels in ΔP). Confirms MF does not ALIAS cosmology and that A_p/n_s recover at HR
+    # cosmologies with the CURRENT baseline (per-survey pin, box, τ₀ 2-param, subDLA 1.0, α≥0). The old
+    # STEP-A M4 had A_p +1.63σ (pre-fix HCD→A_p) — this re-run tests whether the fixes carried it in-gate.
+    # sim-mean (non-circular cert) center, DESI leg. (The genuine resolution test = Phase-5a Test B, the
+    # real-HR-truth HF-LOSO, which needs the make_hr_truth_from_cache builder.)
+    _hr_seen = set()
+    for _tns in (0.90, 0.95, 0.979):
+        _hr = _resolve_hr_sim(d, fold_sims, PARAM_LIMITS, target_ns=_tns)
+        if _hr["sim"] in _hr_seen:
+            continue
+        _hr_seen.add(_hr["sim"])
+        add_fiducial(f"M_hr{int(round(_hr['n_s'] * 1000))}", _hr["fold"], survey="DESI",
+                     sim=_hr["sim"], mf=True)
 
     if verbose:
         print(f"[config] resolved {len(cfg)} chains")
