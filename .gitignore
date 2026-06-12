@@ -235,6 +235,16 @@ checkpoints/**/*.npz
 checkpoints/**/*.out
 checkpoints/stepA/*.json
 *.npy
+
+# Superpowers working notes + working/closure diagnostic figures live in the PRIVATE notes repo
+# /home/mfho/hcd_priya_notes (github.com/jibanCat/hcd_priya_notes) — NOT here. Ignored so future
+# script outputs to these paths are not re-committed to the code repo. See docs/SUPERPOWERS_NOTES.md.
+docs/superpowers/
+figures/analysis/05_likelihood/
+figures/analysis/05_multifidelity/
+figures/analysis/05_truth_validation/
+figures/analysis/06_clustering/
+figures/analysis/review/
 *.h5
 
 # sbatch logs — ephemeral, large
