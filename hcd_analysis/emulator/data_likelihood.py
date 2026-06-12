@@ -461,6 +461,115 @@ def _mf_floor_var_on_k(floor: MFFloor, z, k_sub, P_obs_sub, ns):
 
 
 # ============================================================================ #
+#  SHAPE-AWARE MF C_emu floor (Phase-5a, 2026-06-12).
+# ----------------------------------------------------------------------------#
+#  The diagonal floor above (_mf_floor_var_on_k) inflates each (z,k) cell
+#  INDEPENDENTLY. Phase-5a Test B (the genuine HF-LOSO closure) showed the LF→HR
+#  resolution residual is a COHERENT k-tilt (78% rank-1, coherent across z) that
+#  biases n_s up to +2.8σ — a CORRELATED structure a diagonal floor cannot absorb
+#  without grossly over-inflating every cell. The shape floor adds the measured
+#  per-held-out-sim LOSO-eps OUTER-PRODUCT as a (low-rank) covariance:
+#
+#    f_shape[(z,k),(z',k')] = (1/N_sim) Σ_sim eps_sim(z,k)·eps_sim(z',k')   (fractional)
+#
+#  whose DIAGONAL is the per-(z,k) mean-square eps (the RMS the diagonal floor
+#  undersized) and whose OFF-DIAGONAL is the coherent tilt + cross-z coherence the
+#  n_s direction reads. On a leg: C_shape[i,j] = infl²·f_bound[i,j]·P_obs[i]·P_obs[j]
+#  (f_bound = f_shape interpolated onto the leg's flat (z,k) rows). f_shape is PSD
+#  (a sum of outer products) ⇒ C_shape PSD ⇒ C_total stays PD. θ-blind & fixed (the
+#  only θ-coupling is the fractional ·P_obs⊗P_obs scaling, like the diagonal floor).
+#  Built by scripts/build_mf_shape_floor.py → mf_cemu_shape.npz.
+# ============================================================================ #
+class MFShape(NamedTuple):
+    """The shape-aware MF C_emu floor table (from ``mf_cemu_shape.npz``).
+      z       : (Nz_c,)            cache z grid (≤ z_max, the legs only reach z≤4.6).
+      k       : (Nk_c,)            cache angular-k grid (the LF Nyquist band 0.01–0.069 s/km).
+      f_shape : (Nz_c·Nk_c, ...)   fractional LOSO-eps second-moment (z-major flat, symmetric PSD).
+      n_sim   : int                the number of held-out HR sims it was built from.
+    """
+    z: np.ndarray
+    k: np.ndarray
+    f_shape: np.ndarray
+    n_sim: int
+
+
+def load_mf_shape(npz_path="/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_shape.npz"):
+    """Load the shape-aware MF floor table → an ``MFShape`` (scripts/build_mf_shape_floor.py)."""
+    d = np.load(npz_path, allow_pickle=True)
+    return MFShape(z=np.asarray(d["z"], float), k=np.asarray(d["k"], float),
+                   f_shape=np.asarray(d["f_shape"], float), n_sim=int(d["n_sim"]))
+
+
+def _logk_interp_weights(k_target, k_grid):
+    """Linear-in-log10(k) interpolation weights of one target k onto ``k_grid`` (Nk,).
+    Two nonzero entries (the bracketing cache-k bins); ZERO outside [k_grid.min, k_grid.max]
+    (the shape floor is NOT extrapolated beyond the LF Nyquist band it was measured on)."""
+    lk = np.log10(np.asarray(k_grid, float)); x = np.log10(float(k_target))
+    w = np.zeros(len(lk))
+    if x < lk[0] - 1e-12 or x > lk[-1] + 1e-12:
+        return w
+    j = int(min(max(np.searchsorted(lk, x) - 1, 0), len(lk) - 2))
+    t = (x - lk[j]) / (lk[j + 1] - lk[j])
+    w[j] = 1.0 - t; w[j + 1] = t
+    return w
+
+
+def mf_shape_cov_for_leg(shape, leg, z_tol=0.1):
+    """The leg's FRACTIONAL shape covariance ``C_shape_frac`` (N,N), z-major matching the leg's
+    flat rows: ``C_shape_frac = S f_shape Sᵀ`` with ``S`` (N, Nz_c·Nk_c) interpolating each flat
+    row's (z,k) onto the cache grid (nearest cache-z; linear-in-log-k; zero beyond the LF band).
+    Host numpy (θ-blind, fixed; precompute once per leg). PSD (f_shape PSD ⇒ S f_shape Sᵀ PSD).
+
+    Works for any table with ``.z``/``.k``/``.f_shape`` (the resolution ``MFShape`` AND the
+    LF-emulator-coherence ``MFEmuCoh``). ``z_tol`` (cache half-Δz): a leg row whose z is FARTHER
+    than ``z_tol`` from every cache z gets a ZERO binder row — no silent z-extrapolation. The
+    resolution table spans z≤4.6 so every leg z (DESI≤4.2, KS≤4.6) is in support (byte-identical
+    to before); the emucoh table spans z≤4.4 (full leg-z), so all DESI z (≤4.2) are floored and only
+    KS's z=4.6 bin (the one row beyond the table) correctly vanishes."""
+    zc, kc, F = shape.z, shape.k, shape.f_shape
+    Nz_c, Nk_c = len(zc), len(kc)
+    z_row = np.asarray(leg.z)[np.asarray(leg.z_idx)]   # (N,) z of each flat row
+    k_row = np.asarray(leg.k)                          # (N,)
+    N = len(k_row)
+    S = np.zeros((N, Nz_c * Nk_c))
+    for i in range(N):
+        zi = int(np.argmin(np.abs(zc - z_row[i])))     # nearest cache z
+        if abs(float(zc[zi]) - float(z_row[i])) > z_tol:
+            continue                                   # leg z outside the table's z support → zero row
+        S[i, zi * Nk_c:(zi + 1) * Nk_c] = _logk_interp_weights(k_row[i], kc)
+    return S @ F @ S.T
+
+
+class MFEmuCoh(NamedTuple):
+    """The 60-sim LF-EMULATOR-COHERENCE C_emu table (from ``mf_cemu_emucoh.npz``,
+    scripts/build_mf_emucoh_floor.py). Same shape as ``MFShape`` (z, k, fractional second-moment
+    f_shape on the (z,k) flat grid) so it binds via ``mf_shape_cov_for_leg`` verbatim — but it is
+    a DIFFERENT residual: the LF emulator's held-out (8-fold, 60-sim LOSO) k-coherent generalization
+    gap (clean class), NOT the LF→HR resolution residual. Built over the FULL leg-z range (z∈[2.0,4.4],
+    13 bins) — the within-z coherence persists 0.59–0.79 across all z (incl. He-II reion z≈3–4), so it
+    is NOT restricted to low-z; top-m truncated (top-15 ≈ 96.8% of trace).
+
+    NOTE (conservative diagonal): its diagonal is the COHERENT part of the LF-emulator error, a SUBSET
+    of the existing ``emu_var`` (the cross-class ρ diagonal = the FULL per-cell second moment). The
+    assembly adds the emucoh term in full (diagonal + off-diagonal), so on a leg with no separate
+    diagonal floor (DESI, ``mf_floor_on=False``) the coherent diagonal is added ON TOP of ``emu_var``
+    — a small CONSERVATIVE over-count (over-widens ~×1.3 on the clean diagonal, never biases). The
+    n_s-relevant value is the OFF-diagonal. A per-term diagonal allocation (absorb the emucoh diagonal
+    into ``emu_var``, add only its off-diagonal) is a documented next-iteration refinement."""
+    z: np.ndarray
+    k: np.ndarray
+    f_shape: np.ndarray
+    n_sim: int
+
+
+def load_mf_emucoh(npz_path="/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"):
+    """Load the 60-sim LF-emulator-coherence table → an ``MFEmuCoh`` (scripts/build_mf_emucoh_floor.py)."""
+    d = np.load(npz_path, allow_pickle=True)
+    return MFEmuCoh(z=np.asarray(d["z"], float), k=np.asarray(d["k"], float),
+                    f_shape=np.asarray(d["f_shape"], float), n_sim=int(d["n_sim"]))
+
+
+# ============================================================================ #
 #  Model → leg binding
 # ============================================================================ #
 def _emu_var_on_cache(model, theta9, z_unit, z, tau0, alpha_hcd, *,
@@ -514,7 +623,9 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                          cache_k, leg, sigma_zb=None, alpha_centres=None,
                          cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
                          k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
-                         rho_zb=None, mf=None, mf_floor=None):
+                         rho_zb=None, mf=None, mf_floor=None,
+                         mf_shape_cov=None, mf_shape_infl=1.0,
+                         mf_emucoh_cov=None, mf_emucoh_infl=1.0):
     """Bind the emulator forward model to ONE leg's grid → flat (P_model (N,), C_total (N,N)).
 
     For each z in ``leg.z``:
@@ -650,7 +761,39 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
             fv_z = _mf_floor_var_on_k(mf_floor, z, k_sub, P_z, ns_phys_sg)
             floor_var_flat = floor_var_flat.at[jnp.asarray(rows)].set(fv_z)
 
-    C_total = jnp.asarray(leg.C_data) + jnp.diag(emu_var_flat + floor_var_flat)
+    # Collect the FIXED-amplitude k-coherent off-diagonal C_emu terms (each a fractional PSD
+    # covariance × infl²): the LF→HR RESOLUTION shape floor (6-HR) and the LF-EMULATOR-coherence
+    # term (60-sim). Both bind via mf_shape_cov_for_leg and scale by the SAME θ-INDEPENDENT
+    # fiducial power (see the CRITICAL note below). The list generalizes the single-term path.
+    shape_terms = []
+    if mf_shape_cov is not None:
+        shape_terms.append((jnp.asarray(mf_shape_cov), mf_shape_infl))
+    if mf_emucoh_cov is not None:
+        shape_terms.append((jnp.asarray(mf_emucoh_cov), mf_emucoh_infl))
+
+    if not shape_terms:
+        # LF / diagonal-floor path — byte-identical to before (back-compat).
+        C_total = jnp.asarray(leg.C_data) + jnp.diag(emu_var_flat + floor_var_flat)
+    else:
+        # k-coherent off-diagonal C_emu (Phase-5a): Σ of fractional eps/coherence outer-products,
+        # each scaled by infl² and a FIXED (θ-INDEPENDENT) fiducial power outer product. Conservative:
+        # never reduce the existing diagonal floor — top each diagonal up to max(floor_var, Σ shape_diag)
+        # and add the (PSD) coherent covariance(s). PD-safe: C_data PD + diag(≥0) + Σ PSD ⇒ C_total PD.
+        #
+        # CRITICAL (2026-06-12): the fiducial amplitude must be θ-INDEPENDENT (the leg's data
+        # power), NOT the live P_model. A covariance that scales with the SAMPLED model power
+        # (∝ P_model²) lets the fit inflate its own error in the coherent-tilt direction by
+        # moving a parameter — a θ-dependent-covariance pathology that, for a rank-1 off-diagonal
+        # mode, made the n_s posterior SHRINK and the MAP drift AWAY from truth (validation:
+        # live-P infl1.0/1.5/2.0 → ns +3.2/+3.5/+3.7σ, worse than the +2.8σ baseline, σ shrinking
+        # — impossible for a fixed PSD add, hence diagnostic of the θ-dependence). A fixed fiducial
+        # makes each term a CONSTANT matrix ⇒ adding it can only WIDEN the marginal (PSD
+        # monotonicity) and the MAP de-biases per the linear GLS analysis.
+        P_fid = jnp.nan_to_num(jnp.asarray(leg.P_data))          # θ-independent fiducial amplitude
+        PP = P_fid[:, None] * P_fid[None, :]
+        C_shape = sum((infl ** 2) * cov * PP for cov, infl in shape_terms)   # Σ of PSD ⇒ PSD
+        topup = jnp.maximum(0.0, floor_var_flat - jnp.diag(C_shape))
+        C_total = jnp.asarray(leg.C_data) + jnp.diag(emu_var_flat + topup) + C_shape
     return P_model, C_total
 
 
@@ -662,7 +805,8 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
                 cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
                 k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
                 jitter=1e-10, return_parts=False, rho_zb_per_leg=None, mf=None,
-                mf_floor=None):
+                mf_floor=None, mf_shape_per_leg=None, mf_shape_infl=1.0,
+                mf_emucoh_per_leg=None, mf_emucoh_infl=1.0):
     """Multi-leg Gaussian log-likelihood against the REAL data.
 
     The legs are INDEPENDENT surveys (DESI & KS share z-VALUES but are different
@@ -716,12 +860,15 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
         if rho_zb_per_leg is not None:
             rzb = rho_zb_per_leg.get(leg.name)
 
+        msc = mf_shape_per_leg.get(leg.name) if mf_shape_per_leg is not None else None
+        mec = mf_emucoh_per_leg.get(leg.name) if mf_emucoh_per_leg is not None else None
         P_model, C_total = predict_P_obs_on_leg(
             model, theta9, tau0_vec, alpha_hcd, pf_stats=pf_stats, dla_core=dla_core,
             cache_k=cache_k, leg=leg, sigma_zb=szb, alpha_centres=alpha_centres,
             cemu_inflate=cemu_inflate, a_SiIII=a_SiIII, a_SiII=a_SiII,
             k_SiIII=k_SiIII, k_SiII=k_SiII, b_res=b_res, rho_zb=rzb, mf=mf,
-            mf_floor=mf_floor)
+            mf_floor=mf_floor, mf_shape_cov=msc, mf_shape_infl=mf_shape_infl,
+            mf_emucoh_cov=mec, mf_emucoh_infl=mf_emucoh_infl)
         r = jnp.asarray(leg.P_data) - P_model
         ll = gaussian_loglik(r, C_total, jitter=jitter)
         total = total + ll

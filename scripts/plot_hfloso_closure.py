@@ -100,7 +100,7 @@ def main():
     ax.legend(fontsize=8)
 
     fig.suptitle("Phase-5a Test B — genuine HF-LOSO closure (real measured HR truth, MF correction "
-                 "fit excluding it; DESI leg, MF C_emu floor ON)", fontsize=11)
+                 "fit excluding it; DESI leg, NO MF floor on DESI)", fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     out = f"{NOTES_FIG}/hfloso_closure_bias.png"
     fig.savefig(out, dpi=130)

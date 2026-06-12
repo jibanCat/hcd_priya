@@ -143,6 +143,9 @@ def main():
     ap.add_argument("--error-vector", default=DEFAULT_EV,
                     help="the existing DIAGONAL error vector (carries z/τ₀ bands + sigma)")
     ap.add_argument("--n-folds", type=int, default=8)
+    ap.add_argument("--exclude-folds", default="",
+                    help="comma-sep folds to EXCLUDE from the pool (Leg-B de-circularization: "
+                         "exclude the fold whose held-out sims are the Leg-B mock truths, e.g. '0')")
     ap.add_argument("--z-bands", type=int, default=3)
     ap.add_argument("--tau0-bands", type=int, default=4)
     ap.add_argument("--out", default=DEFAULT_OUT)
@@ -190,9 +193,13 @@ def main():
     # each fold contributes its OWN val rows (LOSO: a sim is held out in exactly one fold),
     # so pooling concatenates DISJOINT held-out rows → the pooled set is every sim's held-out
     # residual exactly once. Stash each row's (z-band, τ₀-band) so the cells pool correctly.
+    exclude = set(int(x) for x in args.exclude_folds.split(",") if x.strip() != "")
     rfrac_pool, zband_pool, tband_pool = [], [], []
     n_rows_per_fold = []
     for f in range(args.n_folds):
+        if f in exclude:
+            print(f"  fold {f}: EXCLUDED from the pool (Leg-B de-circularization)")
+            continue
         model, meta, norm = T.load_checkpoint(f"{args.ckpt_prefix}{f}")
         _tr, va, _ho = make_splits(d, f, n_folds=args.n_folds)
         rfrac = fold_rfrac(d, model, va, norm, datarange=True)         # (Nval,4,K)
@@ -206,8 +213,9 @@ def main():
     zband_pool = np.concatenate(zband_pool, axis=0)                    # (Npool,)
     tband_pool = np.concatenate(tband_pool, axis=0)                    # (Npool,)
     Npool = rfrac_pool.shape[0]
-    print(f"pooled {Npool} held-out rows across {args.n_folds} folds "
-          f"({time.time()-t0:.1f}s)")
+    print(f"pooled {Npool} held-out rows across {args.n_folds - len(exclude)} folds"
+          + (f" (EXCLUDED folds {sorted(exclude)})" if exclude else "")
+          + f" ({time.time()-t0:.1f}s)")
 
     # --- per-cell 4×4 ρ block --------------------------------------------------
     rho = xclass_rho(rfrac_pool, zband_pool, tband_pool, args.z_bands,

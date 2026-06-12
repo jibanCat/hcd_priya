@@ -173,6 +173,18 @@ class LegBCtx(NamedTuple):
     cemu_inflate: float
     mf: object = None
     mf_floor: object = None
+    # SHAPE-AWARE MF floor (Phase-5a, 2026-06-12): the low-rank LOSO-eps outer-product C_emu
+    # covariance (mf_shape_per_leg = {leg.name: (N,N) fractional}, mf_shape_infl the inflation).
+    # Fired on a leg when an entry is present — captures the coherent k-tilt the diagonal floor
+    # cannot. None → off (back-compat). See data_likelihood.MFShape / mf_shape_cov_for_leg.
+    mf_shape_per_leg: object = None
+    mf_shape_infl: float = 1.0
+    # 60-sim LF-EMULATOR-COHERENCE C_emu term (Phase-5a, 2026-06-12): the k-coherent emulator
+    # generalization gap (8-fold/60-sim LOSO), a SECOND off-diagonal C_emu term distinct from the
+    # 6-HR resolution shape floor. Built/bound the same way (fixed-P_data amplitude). None → off.
+    # NOT gated on `with_mf` — it is an LF-emulator residual (applies on the LF path too).
+    mf_emucoh_per_leg: object = None
+    mf_emucoh_infl: float = 1.0
     marginalize_zslope: bool = True      # DEFAULT (2026-06-10): sample the HCD per-class z-slope
                                          # s_c with the literature dN/dX slope±1σ prior — so the HCD
                                          # incidence evolves on a PHYSICAL amplitude(pivot α)+slope,
@@ -203,7 +215,10 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    xclass_error_vector=XCLASS_ERROR_VECTOR, cemu_inflate=1.0,
                    metals_on=False, desi_kwargs=None, ks_kwargs=None,
                    use_xclass=True, with_mf=False, mf_fold=0, mf_with_floor=True,
-                   mf_exclude_held=False):
+                   mf_exclude_held=False, mf_shape=False, mf_shape_infl=1.0,
+                   mf_shape_legs=("DESI", "KS"), mf_shape_npz=None,
+                   mf_emucoh=False, mf_emucoh_infl=1.0,
+                   mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None):
     """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
     z-bins. The cross-class ρ (``use_xclass=True``, the default; the matched
     ``error_vector_xclass.npz`` pair) is the production C_emu — the diagonal σ is carried too
@@ -275,13 +290,31 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         mf_obj, mf_floor_obj = build_mf_correction(
             fold=mf_fold, with_floor=mf_with_floor, exclude_held_hr=mf_exclude_held)
 
+    # SHAPE-AWARE MF floor (Phase-5a): the per-leg fractional LOSO-eps outer-product covariance
+    # (precomputed once, θ-blind). Fired on the named legs (default DESI+KS) when with_mf+mf_shape.
+    mf_shape_per_leg = None
+    if with_mf and mf_shape:
+        shape_tab = DL.load_mf_shape(mf_shape_npz) if mf_shape_npz else DL.load_mf_shape()
+        mf_shape_per_leg = {leg.name: DL.mf_shape_cov_for_leg(shape_tab, leg)
+                            for leg in legs if leg.name in set(mf_shape_legs)}
+
+    # 60-sim LF-emulator-coherence term — NOT gated on with_mf (it is an LF-emulator residual,
+    # measured from the 8-fold/60-sim LOSO, valid on the LF reference path too).
+    mf_emucoh_per_leg = None
+    if mf_emucoh:
+        ec_tab = DL.load_mf_emucoh(mf_emucoh_npz) if mf_emucoh_npz else DL.load_mf_emucoh()
+        mf_emucoh_per_leg = {leg.name: DL.mf_shape_cov_for_leg(ec_tab, leg)
+                             for leg in legs if leg.name in set(mf_emucoh_legs)}
+
     ctx = LegBCtx(
         model=model, pf_stats=pf, dla_core_leg=dla_core_leg, legs=legs, cache_k=cache_k,
         z_global=z_global, sigma_zb_per_leg=sigma_zb_per_leg,
         rho_zb_per_leg=(rho_zb_per_leg if rho is not None else None),
         alpha_centres=alpha_centres, tau0_mu=tau0_mu, tau0_sigma=tau0_sigma,
         alpha_hcd_mu=jnp.asarray(alpha_mu), alpha_hcd_sigma=jnp.asarray(alpha_sd),
-        cemu_inflate=float(cemu_inflate), mf=mf_obj, mf_floor=mf_floor_obj)
+        cemu_inflate=float(cemu_inflate), mf=mf_obj, mf_floor=mf_floor_obj,
+        mf_shape_per_leg=mf_shape_per_leg, mf_shape_infl=float(mf_shape_infl),
+        mf_emucoh_per_leg=mf_emucoh_per_leg, mf_emucoh_infl=float(mf_emucoh_infl))
     return ctx, d
 
 
@@ -707,10 +740,16 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
         keep = np.isfinite(P_data)
         if not keep.any():
             continue
+        msc = (ctx.mf_shape_per_leg.get(leg.name)
+               if getattr(ctx, "mf_shape_per_leg", None) is not None else None)
+        mec = (ctx.mf_emucoh_per_leg.get(leg.name)
+               if getattr(ctx, "mf_emucoh_per_leg", None) is not None else None)
         P_model, C_total = DL.predict_P_obs_on_leg(
             ctx.model, theta9, tau0_vec, alpha_leg, pf_stats=ctx.pf_stats, dla_core=core,
             cache_k=ctx.cache_k, leg=leg, sigma_zb=szb, alpha_centres=ctx.alpha_centres,
-            cemu_inflate=ctx.cemu_inflate, rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor)
+            cemu_inflate=ctx.cemu_inflate, rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor,
+            mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
+            mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0))
         kr = jnp.asarray(np.where(keep)[0])
         r = jnp.asarray(P_data[keep]) - P_model[kr]
         C_sub = C_total[jnp.ix_(kr, kr)]

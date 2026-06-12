@@ -118,7 +118,8 @@ def build_config(verbose=False):
 
     def add_fiducial(mock_id, fold, target_ns=None, *, survey, prior_center="sim_mean",
                      sigma_lls=None, sigma_subdla=None, tau0_extreme=False, n_chains=4, sim=None,
-                     lls_truth_boost=1.0, mf=False, hr_truth=False):
+                     lls_truth_boost=1.0, mf=False, hr_truth=False, mf_shape=0.0, desi_floor=False,
+                     mf_emucoh=0.0):
         if sim is None:
             ns, sim = _closest_sim(fold_sims[fold], target_ns)
         else:
@@ -130,6 +131,7 @@ def build_config(verbose=False):
                 sigma_lls=sigma_lls, sigma_subdla=sigma_subdla, tau0_extreme=tau0_extreme,
                 lls_truth_boost=lls_truth_boost,
                 mf=bool(mf), z_slope_marginalized=False, hr_truth=bool(hr_truth),
+                mf_shape=float(mf_shape), desi_floor=bool(desi_floor), mf_emucoh=float(mf_emucoh),
                 chain_id=c, n_chains=n_chains, seed=0))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -242,6 +244,24 @@ def build_config(verbose=False):
         _ns = _ns_of_sim(d, _hs, PARAM_LIMITS)
         add_fiducial(f"HFLOSO{int(round(_ns * 1000))}", _f, survey="DESI", sim=_hs,
                      mf=True, hr_truth=True, prior_center="truth")
+
+    # === Phase-5a SHAPE-FLOOR validation (2026-06-12): the genuine HF-LOSO worst cases re-run
+    # with the shape-aware MF floor (fires on the DESI leg). Compares: the existing DIAGONAL floor
+    # (the simpler fix) vs the shape floor at infl∈{1.0,1.5,2.0}. Worst sims = ns0.972 (+2.80σ)
+    # and ns0.979 (+1.08σ). HFLOSOSF{ns}_{tag} so the battery analysis groups them. ===
+    for _hs in _hrn:
+        _f = _fold_of(_hs)
+        if _f is None:
+            continue
+        _ns = _ns_of_sim(d, _hs, PARAM_LIMITS)
+        if int(round(_ns * 1000)) not in (972, 979):
+            continue
+        _base = dict(survey="DESI", sim=_hs, mf=True, hr_truth=True, prior_center="truth")
+        _tag = int(round(_ns * 1000))
+        add_fiducial(f"HFSFdiag{_tag}", _f, desi_floor=True, **_base)              # diagonal floor on DESI
+        add_fiducial(f"HFSF10_{_tag}", _f, mf_shape=1.0, **_base)                  # shape floor infl 1.0
+        add_fiducial(f"HFSF15_{_tag}", _f, mf_shape=1.5, **_base)                  # shape floor infl 1.5
+        add_fiducial(f"HFSF20_{_tag}", _f, mf_shape=2.0, **_base)                  # shape floor infl 2.0
 
     if verbose:
         print(f"[config] resolved {len(cfg)} chains")
@@ -421,10 +441,21 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
 
     # fold-matched emulator backbone; the error vector is the production (fold0) C_emu (the ONE
     # matched xclass pair; there is no per-fold error vector — see SESSION_HANDOVER §248).
+    # Phase-5a shape-floor validation knobs: mf_shape>0 fires the shape-aware MF floor on the
+    # tested leg (the survey of this chain) at that inflation; desi_floor turns the EXISTING
+    # diagonal MF floor ON for DESI (the simpler-fix comparison arm).
+    _infl = float(chain.get("mf_shape", 0.0) or 0.0)
+    _einfl = float(chain.get("mf_emucoh", 0.0) or 0.0)   # 60-sim LF-emulator-coherence C_emu term
+    _survey = chain.get("survey", "DESI")
+    _desi_kw = {"mf_floor_on": True} if chain.get("desi_floor") else None
     ctx, d = build_legb_ctx(
         ckpt=chain["ckpt"], with_mf=bool(chain["mf"]),
         mf_fold=fold, mf_with_floor=bool(chain["mf"]),
-        mf_exclude_held=bool(chain.get("hr_truth", False)))   # HF-LOSO: MF fit EXCLUDING this HR sim
+        mf_exclude_held=bool(chain.get("hr_truth", False)),    # HF-LOSO: MF fit EXCLUDING this HR sim
+        mf_shape=(_infl > 0), mf_shape_infl=(_infl if _infl > 0 else 1.0),
+        mf_shape_legs=(_survey,),
+        mf_emucoh=(_einfl > 0), mf_emucoh_infl=(_einfl if _einfl > 0 else 1.0),
+        mf_emucoh_legs=(_survey,), desi_kwargs=_desi_kw)
 
     if chain["z_slope_marginalized"]:
         ctx = ctx._replace(marginalize_zslope=True,
@@ -508,6 +539,8 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         lls_truth_boost=float(chain.get("lls_truth_boost", 1.0)),
         z_slope_marginalized=bool(chain["z_slope_marginalized"]),
         hr_truth=bool(chain["hr_truth"]), tau0_extreme=bool(chain["tau0_extreme"]),
+        mf_shape=float(chain.get("mf_shape", 0.0) or 0.0), desi_floor=bool(chain.get("desi_floor", False)),
+        mf_emucoh=float(chain.get("mf_emucoh", 0.0) or 0.0),
         chain_index=int(chain["chain_id"]), n_chains_target=int(chain["n_chains"]),
         # battery inputs: the per-chain packed draws + the extra fields (energy/num_steps/diverg).
         packed=draws.astype(np.float64), names=np.array(packed_names),
