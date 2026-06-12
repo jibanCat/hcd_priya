@@ -8,7 +8,7 @@ ENV: getdist lives in the `emu-3.9` env (NOT emu-jax). Run with:
   /home/mfho/.conda/envs/emu-3.9/bin/python3 scripts/plot_posterior_getdist.py [FID] [p1,p2,...]
 e.g.  ... plot_posterior_getdist.py D_llsmed ns,Ap,hub,bhfeedback,alpha_lls
 """
-import sys, glob
+import sys, glob, os
 import numpy as np
 import matplotlib; matplotlib.use("Agg")
 from getdist import MCSamples, plots
@@ -56,7 +56,9 @@ g = plots.get_subplot_plotter(width_inch=2.0 + 1.5 * len(SHOW))
 g.settings.alpha_filled_add = 0.5
 g.triangle_plot([mcs], filled=True, markers=markers,
                 marker_args={"color": "k", "lw": 1.2}, title_limit=1)
-out = f"figures/analysis/05_likelihood/posterior_getdist_{FID}.png"
+_OUTDIR = "/home/mfho/hcd_priya_notes/figures/analysis/05_likelihood"  # diagnostic figs -> notes repo
+os.makedirs(_OUTDIR, exist_ok=True)
+out = f"{_OUTDIR}/posterior_getdist_{FID}.png"
 g.export(out)
 print("wrote", out)
 for i, nm in enumerate(SHOW):

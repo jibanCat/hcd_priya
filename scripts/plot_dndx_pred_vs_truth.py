@@ -10,6 +10,7 @@ per-survey pin is anchored to (bottom row).
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_dndx_pred_vs_truth.py
 """
+import os
 import numpy as np
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -22,7 +23,8 @@ from hcd_analysis.emulator.train import load_checkpoint
 from hcd_analysis.emulator import closure_legb as C
 
 CACHE = "hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-OUT = "figures/analysis/05_likelihood/dndx_pred_vs_truth.png"
+OUT = "/home/mfho/hcd_priya_notes/figures/analysis/05_likelihood/dndx_pred_vs_truth.png"  # -> notes repo
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 CLS = ["LLS", "subDLA", "DLA"]; COL = {"LLS": "#2ca02c", "subDLA": "#ff7f0e", "DLA": "#d62728"}
 
 # literature dN/dX(z) (same tables as plot_dndx_vs_literature.py)
