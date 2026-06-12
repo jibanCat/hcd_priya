@@ -202,7 +202,8 @@ def _kim(z):
 def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    xclass_error_vector=XCLASS_ERROR_VECTOR, cemu_inflate=1.0,
                    metals_on=False, desi_kwargs=None, ks_kwargs=None,
-                   use_xclass=True, with_mf=False, mf_fold=0, mf_with_floor=True):
+                   use_xclass=True, with_mf=False, mf_fold=0, mf_with_floor=True,
+                   mf_exclude_held=False):
     """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
     z-bins. The cross-class ρ (``use_xclass=True``, the default; the matched
     ``error_vector_xclass.npz`` pair) is the production C_emu — the diagonal σ is carried too
@@ -272,7 +273,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     mf_obj = mf_floor_obj = None
     if with_mf:
         mf_obj, mf_floor_obj = build_mf_correction(
-            fold=mf_fold, with_floor=mf_with_floor)
+            fold=mf_fold, with_floor=mf_with_floor, exclude_held_hr=mf_exclude_held)
 
     ctx = LegBCtx(
         model=model, pf_stats=pf, dla_core_leg=dla_core_leg, legs=legs, cache_k=cache_k,
@@ -501,6 +502,59 @@ def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="priya", mf=None, lls_t
         tau0_amp=tau0_amp_true, dtau0=dtau0_true,
         w_c=np.median(w_c[keep_rows, 1:], axis=0) * np.array([lls_truth_boost, 1.0, 1.0]),
         rows=keep_rows)
+
+
+def make_hr_truth_from_cache(sim_name, target_k, *, tau0_anchor="priya"):
+    """Genuine HF-LOSO truth: a held-out HR sim's REAL measured P1D (HR resolution, NO MF
+    correction), built like ``make_truth_from_sim`` but read DIRECTLY from the HR cache and
+    interpolated onto ``target_k`` (= the LF cache grid the forward evaluates on). The forward
+    (LF emulator × the MF correction fit EXCLUDING this sim) is then compared to this real HR truth
+    — the integrated (in-the-inference) version of the forward-only MF-LOSO. Same dict contract as
+    ``make_truth_from_sim`` so ``make_legb_mock`` consumes it unchanged."""
+    from hcd_analysis.emulator import multifidelity as MF
+    d = MF.load_cache(MF.HR_CACHE)
+    sim_name = str(sim_name)
+    names = np.array([s.decode() if isinstance(s, bytes) else s for s in d["sim_name"]])
+    z_grid = d["z_grid"]; P_filt = d["P_filt"]; delta = d["delta"]; w_c = d["w_c_cache"]
+    tau0_all = d["tau0"]; params_unit = d["params_unit"]; kf = d["kfkms"]
+    rows = np.where(names == sim_name)[0]
+    cand = np.array([int(r) for r in rows
+                     if (2.2 - 1e-6 <= z_grid[r] <= 4.6 + 1e-6) and np.isfinite(P_filt[r]).all()])
+    if cand.size == 0:
+        raise ValueError(f"HR sim {sim_name!r} has no in-range finite rows in the HR cache")
+    z_of = np.round(z_grid[cand], 4)
+    keep_rows = []
+    for zz in np.unique(z_of):                       # one ladder row per z (the τ₀-anchor)
+        sub = cand[z_of == zz]
+        if isinstance(tau0_anchor, (tuple, list)):
+            amp_t, dt_t = float(tau0_anchor[0]), float(tau0_anchor[1])
+            target = float(tau0_alpha_priya(jnp.asarray(float(zz)), amp_t, dt_t) * _kim(jnp.asarray(float(zz))))
+        elif tau0_anchor == "becker13":
+            target = float(becker13_tau0(jnp.asarray(float(zz))))
+        else:                                         # "priya" (Kim central) default
+            target = float(_kim(jnp.asarray(float(zz))))
+        keep_rows.append(int(sub[int(np.argmin(np.abs(tau0_all[sub] - target)))]))
+    keep_rows = np.array(sorted(keep_rows, key=lambda r: z_grid[r]))
+    z = z_grid[keep_rows]; tk = np.asarray(target_k, dtype=float)
+    P_obs = np.zeros((len(keep_rows), tk.size)); dla_excess = np.zeros_like(P_obs); dla_core = np.zeros_like(P_obs)
+    for i, r in enumerate(keep_rows):
+        a = np.asarray(w_c[r, 1:], dtype=float)       # HR sim's own contamination (no boost)
+        coef = np.concatenate([[1.0 - a.sum()], a])
+        Pc = P_filt[r, 0]                             # REAL HR clean (corr = 1; this IS the truth)
+        P_cls = np.stack([Pc, P_filt[r, 1], P_filt[r, 2], Pc])     # DLA-masked baseline
+        P_obs_hr = np.einsum("c,ck->k", coef, P_cls)
+        dexc_hr = a[2] * ((P_filt[r, 3] + delta[r, 2]) - Pc)       # full DLA excess
+        kr = np.asarray(kf[r]); ok = np.isfinite(P_obs_hr) & (kr > 0)
+        P_obs[i] = np.interp(tk, kr[ok], P_obs_hr[ok])            # HR grid (525) -> LF forward grid
+        dla_excess[i] = np.interp(tk, kr[ok], dexc_hr[ok])
+        dla_core[i] = np.interp(tk, kr[ok], np.asarray(delta[r, 2])[ok])
+    _alpha_sel = tau0_all[keep_rows] / np.asarray(_kim(jnp.asarray(z)))
+    tau0_amp_true, dtau0_true = fit_tau0_alpha_priya(np.asarray(z), _alpha_sel)
+    return dict(
+        z=z, P_obs_true=P_obs, dla_excess_true=dla_excess,
+        params_unit=params_unit[keep_rows[0]], tau0=tau0_all[keep_rows], dla_core=dla_core,
+        tau0_amp=tau0_amp_true, dtau0=dtau0_true,
+        w_c=np.median(w_c[keep_rows, 1:], axis=0), rows=keep_rows)
 
 
 def _chol_jitter(C, jitter=1e-10):

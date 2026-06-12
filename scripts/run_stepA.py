@@ -118,7 +118,7 @@ def build_config(verbose=False):
 
     def add_fiducial(mock_id, fold, target_ns=None, *, survey, prior_center="sim_mean",
                      sigma_lls=None, sigma_subdla=None, tau0_extreme=False, n_chains=4, sim=None,
-                     lls_truth_boost=1.0, mf=False):
+                     lls_truth_boost=1.0, mf=False, hr_truth=False):
         if sim is None:
             ns, sim = _closest_sim(fold_sims[fold], target_ns)
         else:
@@ -129,7 +129,7 @@ def build_config(verbose=False):
                 sim=sim, n_s=round(ns, 4), survey=survey, prior_center=prior_center,
                 sigma_lls=sigma_lls, sigma_subdla=sigma_subdla, tau0_extreme=tau0_extreme,
                 lls_truth_boost=lls_truth_boost,
-                mf=bool(mf), z_slope_marginalized=False, hr_truth=False,
+                mf=bool(mf), z_slope_marginalized=False, hr_truth=bool(hr_truth),
                 chain_id=c, n_chains=n_chains, seed=0))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -227,6 +227,21 @@ def build_config(verbose=False):
         _hr_seen.add(_hr["sim"])
         add_fiducial(f"M_hr{int(round(_hr['n_s'] * 1000))}", _hr["fold"], survey="DESI",
                      sim=_hr["sim"], mf=True)
+
+    # === Phase-5a Test B (2026-06-11): GENUINE HF-LOSO — real HR truth + MF correction EXCLUDING it ===
+    # For each of the 6 HR sims: truth = its REAL measured P1D (make_hr_truth_from_cache, no MF);
+    # forward = LF emu × MF correction fit WITHOUT it (mf_exclude_held via hr_truth=True). Tests the
+    # MF-resolution GENERALIZATION in the inference (the integrated MF-LOSO). prior_center="truth"
+    # centers the HCD α on the HR sim's own w_c → isolates the resolution from the LLS-center lever.
+    from hcd_analysis.emulator import multifidelity as _MF
+    _hrn = sorted(set(s.decode() if isinstance(s, bytes) else s for s in _MF.load_cache(_MF.HR_CACHE)["sim_name"]))
+    for _hs in _hrn:
+        _f = _fold_of(_hs)
+        if _f is None:
+            continue
+        _ns = _ns_of_sim(d, _hs, PARAM_LIMITS)
+        add_fiducial(f"HFLOSO{int(round(_ns * 1000))}", _f, survey="DESI", sim=_hs,
+                     mf=True, hr_truth=True, prior_center="truth")
 
     if verbose:
         print(f"[config] resolved {len(cfg)} chains")
@@ -387,7 +402,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     import hcd_analysis.emulator  # noqa: F401
     from hcd_analysis.emulator import closure_legb as C
     from hcd_analysis.emulator.closure_legb import (
-        build_legb_ctx, held_out_sims, make_truth_from_sim, make_legb_mock,
+        build_legb_ctx, held_out_sims, make_truth_from_sim, make_hr_truth_from_cache, make_legb_mock,
         _mock_core_per_leg, _run_nuts_legb, _draws_matrix, CACHE_PATH,
         ZSLOPE_PRIOR_SIGMA)
     from hcd_analysis.emulator.inference import (PARAM_NAMES, HCD_LIT_OVER_SIM_SLOPE,
@@ -408,7 +423,8 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     # matched xclass pair; there is no per-fold error vector — see SESSION_HANDOVER §248).
     ctx, d = build_legb_ctx(
         ckpt=chain["ckpt"], with_mf=bool(chain["mf"]),
-        mf_fold=fold, mf_with_floor=bool(chain["mf"]))
+        mf_fold=fold, mf_with_floor=bool(chain["mf"]),
+        mf_exclude_held=bool(chain.get("hr_truth", False)))   # HF-LOSO: MF fit EXCLUDING this HR sim
 
     if chain["z_slope_marginalized"]:
         ctx = ctx._replace(marginalize_zslope=True,
@@ -424,8 +440,14 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     # prior corner (high amplitude+slope) to stress the τ₀×cosmology interaction; else the
     # central PRIYA curve (τ₀=1, dτ₀=0 = Kim), the regime the data visits.
     tau0_anchor = (1.20, 0.20) if chain["tau0_extreme"] else "priya"
-    truth_sim = make_truth_from_sim(d, chain["sim"], fold=fold, tau0_anchor=tau0_anchor,
-                                    mf=ctx.mf, lls_truth_boost=float(chain.get("lls_truth_boost", 1.0)))
+    if chain.get("hr_truth"):
+        # GENUINE HF-LOSO: truth = the held-out HR sim's REAL measured P1D (no MF correction);
+        # the ctx MF correction was fit EXCLUDING this sim (mf_exclude_held above), so the forward
+        # (LF emu × held-out MF) vs this real HR truth tests the MF-resolution GENERALIZATION.
+        truth_sim = make_hr_truth_from_cache(chain["sim"], ctx.cache_k, tau0_anchor=tau0_anchor)
+    else:
+        truth_sim = make_truth_from_sim(d, chain["sim"], fold=fold, tau0_anchor=tau0_anchor,
+                                        mf=ctx.mf, lls_truth_boost=float(chain.get("lls_truth_boost", 1.0)))
 
     # PRIOR CENTER (non-circular closure, 2026-06-10): re-center the HCD α prior.
     #   "lit"      = build_legb_ctx default (lit/sim·w_c_med) — the real-fit prior.
