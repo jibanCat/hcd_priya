@@ -187,6 +187,9 @@ class LegBCtx(NamedTuple):
     mf_emucoh_infl: float = 1.0
     mf_emucoh_offdiag_only: bool = False   # per-term diagonal allocation: absorb emucoh's diagonal
                                            # into emu_var (max), add only its off-diagonal (2026-06-12)
+    sample_metals: bool = False          # opt-in (2026-06-13): sample a SHARED a_SiIII metal nuisance
+    a_siiii_max: float = 0.15            # and apply _metal_factor on metals_on legs (DESI/eBOSS). Off
+                                         # by default → golden byte-exact (a_SiIII=0 ⇒ factor≡1).
     marginalize_zslope: bool = True      # DEFAULT (2026-06-10): sample the HCD per-class z-slope
                                          # s_c with the literature dN/dX slope±1σ prior — so the HCD
                                          # incidence evolves on a PHYSICAL amplitude(pivot α)+slope,
@@ -222,7 +225,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    mf_shape_legs=("DESI", "KS"), mf_shape_npz=None,
                    mf_emucoh=False, mf_emucoh_infl=1.0,
                    mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
-                   mf_emucoh_offdiag_only=False):
+                   mf_emucoh_offdiag_only=False, sample_metals=False, a_siiii_max=0.15):
     """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
     z-bins. The cross-class ρ (``use_xclass=True``, the default; the matched
     ``error_vector_xclass.npz`` pair) is the production C_emu — the diagonal σ is carried too
@@ -324,7 +327,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         cemu_inflate=float(cemu_inflate), mf=mf_obj, mf_floor=mf_floor_obj,
         mf_shape_per_leg=mf_shape_per_leg, mf_shape_infl=float(mf_shape_infl),
         mf_emucoh_per_leg=mf_emucoh_per_leg, mf_emucoh_infl=float(mf_emucoh_infl),
-        mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only))
+        mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
+        sample_metals=bool(sample_metals), a_siiii_max=float(a_siiii_max))
     return ctx, d
 
 
@@ -607,9 +611,13 @@ def _chol_jitter(C, jitter=1e-10):
     return jnp.linalg.cholesky(Cj)
 
 
-def make_legb_mock(ctx: LegBCtx, truth_sim, key):
+def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0):
     """Build a Leg-B mock from a sim-truth: interpolate the sim-truth P1D onto each leg's k,
     draw ε ~ N(0, C_data) (cosmic-ONLY) per leg, ``mock = truth_on_leg + ε``.
+
+    ``inject_a_siiii`` > 0 multiplies the truth-on-leg by the SiIII metal factor (the SAME
+    ``_metal_factor`` the forward uses) on metals_on legs BEFORE noise — the SiIII-injection cert
+    arm (a forward with ``sample_metals`` should then absorb it into a_SiIII with no n_s/A_p leak).
 
     MOCK-TRUTH → LEG mapping (documented choice): the sim has one z per cache row. For each
     leg z-bin we NEAREST-Z map to the sim's available z (the cache z grid is Δz=0.2, and the
@@ -665,6 +673,11 @@ def make_legb_mock(ctx: LegBCtx, truth_sim, key):
             P_truth_on_leg[rows] = np.asarray(
                 jnp.interp(jnp.asarray(k_sub), jnp.asarray(cache_k), jnp.asarray(P_target_cache)))
             keep_row[rows] = True
+        # SiIII injection (cert arm): multiply the truth by the McDonald SiIII factor on metals_on
+        # legs, with the SAME _metal_factor the forward uses (so a_SiIII can absorb it exactly).
+        if inject_a_siiii > 0 and leg.metals_on:
+            mfac = np.asarray(DL._metal_factor(jnp.asarray(leg.k), a_SiIII=float(inject_a_siiii)))
+            P_truth_on_leg = np.where(np.isfinite(P_truth_on_leg), P_truth_on_leg * mfac, P_truth_on_leg)
         dropped[leg.name] = drop_z
         truth_on_leg_out[leg.name] = P_truth_on_leg.copy()
 
@@ -723,7 +736,7 @@ def make_legb_mock(ctx: LegBCtx, truth_sim, key):
 #  restriction (dropped-z mock rows are NaN and carry no info).
 # ============================================================================ #
 def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs,
-                         dla_core_per_leg, *, return_parts=False):
+                         dla_core_per_leg, *, return_parts=False, a_siiii=0.0):
     """``data_loglik`` but with a PER-LEG-Z dla_core (the mock's sim core). ``data_loglik``
     takes ONE (K,) core; here each leg z uses its own, so we call ``predict_P_obs_on_leg``
     per leg with that leg's core threaded through a per-z loop is overkill — instead we note
@@ -757,6 +770,7 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
         P_model, C_total = DL.predict_P_obs_on_leg(
             ctx.model, theta9, tau0_vec, alpha_leg, pf_stats=ctx.pf_stats, dla_core=core,
             cache_k=ctx.cache_k, leg=leg, sigma_zb=szb, alpha_centres=ctx.alpha_centres,
+            a_SiIII=a_siiii,                                   # applied only on metals_on legs
             cemu_inflate=ctx.cemu_inflate, rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor,
             mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
             mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
@@ -812,8 +826,13 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     s_c = _zslope_sites(ctx)
     shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** s_c
     alpha_hcd = numpyro.deterministic("alpha_hcd_z", alpha_pivot[None, :] * shape_zg)  # (n_zg,3)
+    # SHARED SiIII metal amplitude (opt-in; eBOSS+DESI are metals_on, KS is not). OFF by default
+    # (a_SiIII=0 ⇒ _metal_factor≡1 ⇒ golden byte-exact). Uniform[0, a_siiii_max]; the physical
+    # a_SiIII = f_SiIII/(1−⟨F⟩) ≈ 0.045 sits well inside.
+    a_siiii = (numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
+               if getattr(ctx, "sample_metals", False) else 0.0)
     numpyro.factor("loglik", _data_loglik_legcore(
-        ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg))
+        ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg, a_siiii=a_siiii))
 
 
 def _zslope_sites(ctx):
@@ -853,6 +872,8 @@ def _legb_priors_only(ctx):
         numpyro.sample("s_lls", dist.Normal(mu[0], sg[0]))
         numpyro.sample("s_subdla", dist.Normal(mu[1], sg[1]))
         numpyro.sample("s_dla", dist.Normal(mu[2], sg[2]))
+    if getattr(ctx, "sample_metals", False):     # MUST mirror _legb_model's site (same order)
+        numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
 
 
 def _legb_reconstruct_deterministics(ctx, samples):
@@ -1176,7 +1197,10 @@ def _draws_matrix(samples, kept_global):
     a_lls = np.asarray(samples["alpha_lls"])[:, None]
     a_sub = np.asarray(samples["alpha_subdla"])[:, None]
     a_dla = np.asarray(samples["alpha_dla"])[:, None]
-    return np.concatenate([theta, tau0, a_lls, a_sub, a_dla], axis=1)
+    cols = [theta, tau0, a_lls, a_sub, a_dla]
+    if "a_SiIII" in samples:                                 # opt-in metal nuisance (appended LAST)
+        cols.append(np.asarray(samples["a_SiIII"])[:, None])
+    return np.concatenate(cols, axis=1)
 
 
 def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,

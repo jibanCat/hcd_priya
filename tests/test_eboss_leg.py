@@ -144,3 +144,61 @@ def test_eboss_binding_finite_and_spd():
     assert np.allclose(Cn, Cn.T) and np.linalg.eigvalsh(Cn).min() > 0   # SPD
     g = jax.grad(ll)(theta9)
     assert np.all(np.isfinite(np.asarray(g)))
+
+
+# ----------------------------------------------------------------------------- #
+#  a_SiIII metal nuisance wiring (opt-in ctx.sample_metals; golden-guarded off)
+# ----------------------------------------------------------------------------- #
+def test_draws_matrix_appends_a_siiii_only_when_present():
+    from hcd_analysis.emulator import closure_legb as C
+    L, nz = 5, 3
+    base = {"theta_unit": np.zeros((L, 9)), "tau0_vec": np.zeros((L, nz)),
+            "alpha_lls": np.zeros(L), "alpha_subdla": np.zeros(L), "alpha_dla": np.zeros(L)}
+    keep = np.ones(nz, bool)
+    d0 = C._draws_matrix(dict(base), keep)
+    d1 = C._draws_matrix(dict(base, a_SiIII=np.full(L, 0.04)), keep)
+    assert d0.shape[1] == 9 + nz + 3                 # no a_SiIII column when absent
+    assert d1.shape[1] == 9 + nz + 3 + 1             # appended LAST when present
+    assert np.allclose(d1[:, -1], 0.04)
+
+
+@pytest.mark.skipif(not _have, reason="eBOSS npz not built")
+@pytest.mark.parametrize("marg_zslope", [False, True])   # both real-fit configs: metals × zslope
+def test_legb_model_priors_only_site_order_match(marg_zslope):
+    # the fast-postprocess constrain_fn relies on _legb_priors_only having the SAME sample sites IN
+    # THE SAME ORDER as _legb_model. With sample_metals=True, a_SiIII must appear in both, last —
+    # and the zslope block (when marginalized) must not reorder relative to it.
+    import jax
+    import numpyro
+    from numpyro import handlers
+    from hcd_analysis.emulator import closure_legb as C
+    ctx, _ = C.build_legb_ctx(ckpt="/home/mfho/hcd_priya/checkpoints/final_fold6",
+                              with_eboss=True, sample_metals=True)
+    ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "eBOSS"],
+                       marginalize_zslope=marg_zslope)
+    truth = C.make_truth_from_sim(C.load_cache(C.CACHE_PATH),
+                                  C.held_out_sims(C.load_cache(C.CACHE_PATH), fold=6)[0][0], fold=6)
+    mock_legs, _, _ = C.make_legb_mock(ctx, truth, jax.random.PRNGKey(0))
+    core = C._mock_core_per_leg(ctx, truth)
+
+    def sites(model, *a):
+        tr = handlers.trace(handlers.seed(model, jax.random.PRNGKey(1))).get_trace(*a)
+        return [k for k, v in tr.items() if v["type"] == "sample" and not v.get("is_observed")]
+    s_model = sites(C._legb_model, ctx, mock_legs, core)
+    s_prior = sites(C._legb_priors_only, ctx)
+    assert "a_SiIII" in s_model and s_model[-1] == "a_SiIII"
+    assert s_model == s_prior, f"site-order mismatch: model {s_model} vs priors {s_prior}"
+
+
+def test_eboss_si_cert_arms_inject_and_sample():
+    import sys as _sys
+    _sys.path.insert(0, "/home/mfho/hcd_priya/scripts")
+    import run_stepA  # noqa
+    cfg = run_stepA.build_config()
+    for base in ("E_f5_si", "E_f6_si", "E_f7_si"):
+        chs = [c for c in cfg if c["mock_id"] == base]
+        assert len(chs) == 4
+        for c in chs:
+            assert c["sample_metals"] is True
+            assert abs(float(c["inject_a_siiii"]) - 0.045) < 1e-9
+            assert c["survey"] == "eBOSS"

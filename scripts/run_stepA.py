@@ -119,7 +119,8 @@ def build_config(verbose=False):
     def add_fiducial(mock_id, fold, target_ns=None, *, survey, prior_center="sim_mean",
                      sigma_lls=None, sigma_subdla=None, tau0_extreme=False, n_chains=4, sim=None,
                      lls_truth_boost=1.0, mf=False, hr_truth=False, mf_shape=0.0, desi_floor=False,
-                     mf_emucoh=0.0, mf_emucoh_offdiag_only=False):
+                     mf_emucoh=0.0, mf_emucoh_offdiag_only=False, sample_metals=False,
+                     inject_a_siiii=0.0):
         if sim is None:
             ns, sim = _closest_sim(fold_sims[fold], target_ns)
         else:
@@ -133,6 +134,7 @@ def build_config(verbose=False):
                 mf=bool(mf), z_slope_marginalized=False, hr_truth=bool(hr_truth),
                 mf_shape=float(mf_shape), desi_floor=bool(desi_floor), mf_emucoh=float(mf_emucoh),
                 mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
+                sample_metals=bool(sample_metals), inject_a_siiii=float(inject_a_siiii),
                 chain_id=c, n_chains=n_chains, seed=0))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -268,6 +270,20 @@ def build_config(verbose=False):
     # chains / |bias z|<0.2σ / χ²~1.
     for _enm, _ef, _ens in [("E_f5", 5, 0.95), ("E_f6", 6, 0.966), ("E_f7", 7, 1.00)]:
         add_fiducial(_enm, _ef, _ens, survey="eBOSS")
+    # eBOSS WITH MF (PI 2026-06-13): Fernandez+2024 ran the resolution correction, and the MF
+    # correction is a TILT (~+4% low-k → −6% high-k) whose low-k end reaches the eBOSS band — n_s
+    # reads the tilt. mf=True applies the MF-corrected forward AND truth (the gate-invariant Test-A
+    # style → should recover ≈ the LF result IF MF doesn't alias cosmology on eBOSS; same sims as the
+    # LF E_f* so the LF-vs-MF comparison is at matched cosmology/noise). The forward MF imprint on the
+    # eBOSS low-k tilt is quantified separately (scripts/diag_eboss_mf_imprint.py).
+    for _enm, _ef, _ens in [("E_f5_mf", 5, 0.95), ("E_f6_mf", 6, 0.966), ("E_f7_mf", 7, 1.00)]:
+        add_fiducial(_enm, _ef, _ens, survey="eBOSS", mf=True)
+    # eBOSS SiIII-INJECTION cert (PI 2026-06-13): inject SiIII (a_SiIII≈0.045 = f_SiIII/(1−⟨F⟩), a
+    # ±9% ripple, ~6.7 periods in-band) into the mock truth AND sample a_SiIII in the forward. The
+    # decisive test (Bayesian lens): does a_SiIII absorb the in-band ripple with NO n_s/A_p leakage?
+    # Compare to the LF E_f* (no metals): if cosmology recovery matches, SiIII is cleanly marginalized.
+    for _enm, _ef, _ens in [("E_f5_si", 5, 0.95), ("E_f6_si", 6, 0.966), ("E_f7_si", 7, 1.00)]:
+        add_fiducial(_enm, _ef, _ens, survey="eBOSS", sample_metals=True, inject_a_siiii=0.045)
 
     # === Phase-5a Test A (2026-06-11): MF gate-invariant M-tier re-run at HR cosmologies ===
     # with_mf=True → truth = MF-corrected LF AND forward = MF-corrected LF (the GATE INVARIANT: the
@@ -509,6 +525,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         mf_fold=fold, mf_with_floor=bool(chain["mf"]),
         mf_exclude_held=bool(chain.get("hr_truth", False)),    # HF-LOSO: MF fit EXCLUDING this HR sim
         with_eboss=(_survey == "eBOSS"),                       # eBOSS DR14 leg (low-k shakedown)
+        sample_metals=bool(chain.get("sample_metals", False)), # shared a_SiIII nuisance (eBOSS/DESI)
         mf_shape=(_infl > 0), mf_shape_infl=(_infl if _infl > 0 else 1.0),
         mf_shape_legs=(_survey,),
         mf_emucoh=(_einfl > 0), mf_emucoh_infl=(_einfl if _einfl > 0 else 1.0),
@@ -566,7 +583,8 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
 
     key0 = jax.random.PRNGKey(int(chain["seed"]))
     k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, int(mock_index)), 2)
-    mock_legs, truth_pack, info = make_legb_mock(ctx, truth_sim, k_mock)
+    mock_legs, truth_pack, info = make_legb_mock(
+        ctx, truth_sim, k_mock, inject_a_siiii=float(chain.get("inject_a_siiii", 0.0) or 0.0))
     core_per_leg = _mock_core_per_leg(ctx, truth_sim)
     kept_global = truth_pack["kept_global_z"]
 
@@ -578,11 +596,14 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         max_tree_depth=max_tree_depth, init_strategy=init_to_sample, return_extra=True)
     wall = time.time() - t0
 
-    draws = _draws_matrix(samples, kept_global)            # (N, P)
+    draws = _draws_matrix(samples, kept_global)            # (N, P) — _draws_matrix appends a_SiIII if sampled
     tau0_names = [f"tau0_z{i}" for i in range(int(kept_global.sum()))]
     packed_names = list(PARAM_NAMES) + tau0_names + ["alpha_lls", "alpha_subdla", "alpha_dla"]
     truth_vec = np.concatenate([
         truth_pack["theta9"], truth_pack["tau0_global"][kept_global], truth_pack["alpha_hcd"]])
+    if bool(chain.get("sample_metals", False)):            # match the a_SiIII column _draws_matrix added
+        packed_names = packed_names + ["a_SiIII"]           # truth a_SiIII = the injected amplitude
+        truth_vec = np.concatenate([truth_vec, [float(chain.get("inject_a_siiii", 0.0) or 0.0)]])
 
     num_steps = np.asarray(extra["num_steps"])
     mtd_sat = float(np.mean(num_steps >= (2 ** int(max_tree_depth) - 1))) if num_steps.size else float("nan")
@@ -599,6 +620,8 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         mf_shape=float(chain.get("mf_shape", 0.0) or 0.0), desi_floor=bool(chain.get("desi_floor", False)),
         mf_emucoh=float(chain.get("mf_emucoh", 0.0) or 0.0),
         mf_emucoh_offdiag_only=bool(chain.get("mf_emucoh_offdiag_only", False)),
+        sample_metals=bool(chain.get("sample_metals", False)),
+        inject_a_siiii=float(chain.get("inject_a_siiii", 0.0) or 0.0),
         chain_index=int(chain["chain_id"]), n_chains_target=int(chain["n_chains"]),
         # battery inputs: the per-chain packed draws + the extra fields (energy/num_steps/diverg).
         packed=draws.astype(np.float64), names=np.array(packed_names),
