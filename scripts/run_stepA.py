@@ -120,7 +120,7 @@ def build_config(verbose=False):
                      sigma_lls=None, sigma_subdla=None, tau0_extreme=False, n_chains=4, sim=None,
                      lls_truth_boost=1.0, mf=False, hr_truth=False, mf_shape=0.0, desi_floor=False,
                      mf_emucoh=0.0, mf_emucoh_offdiag_only=False, sample_metals=False,
-                     inject_a_siiii=0.0):
+                     inject_a_siiii=0.0, subdla_center_shift=0.0):
         if sim is None:
             ns, sim = _closest_sim(fold_sims[fold], target_ns)
         else:
@@ -135,6 +135,7 @@ def build_config(verbose=False):
                 mf_shape=float(mf_shape), desi_floor=bool(desi_floor), mf_emucoh=float(mf_emucoh),
                 mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
                 sample_metals=bool(sample_metals), inject_a_siiii=float(inject_a_siiii),
+                subdla_center_shift=float(subdla_center_shift),
                 chain_id=c, n_chains=n_chains, seed=0))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -284,6 +285,17 @@ def build_config(verbose=False):
     # Compare to the LF E_f* (no metals): if cosmology recovery matches, SiIII is cleanly marginalized.
     for _enm, _ef, _ens in [("E_f5_si", 5, 0.95), ("E_f6_si", 6, 0.966), ("E_f7_si", 7, 1.00)]:
         add_fiducial(_enm, _ef, _ens, survey="eBOSS", sample_metals=True, inject_a_siiii=0.045)
+
+    # === Cosmology-safety arm (#9 referee-panel must-do, 2026-06-13): subDLA prior-CENTER shift ===
+    # The panel upheld DO-NOT-BUILD the HCD-class C_emu term but flagged the subDLA pull is NOT
+    # orthogonal to cosmology (closure corr(subDLA, n_s)=+0.82). The one residual risk: on REAL data a
+    # MIS-CENTERED subDLA prior could drag n_s along that degeneracy. This arm tests it on the JOINT
+    # DESI+KS legs (the production combination, where KS could re-activate the subDLA<->A_p channel):
+    # for 2 mocks, run the subDLA prior center at 0 / +1σ / −1σ and verify n_s/A_p MEANS stay <0.3σ.
+    for _xnm, _xf, _xns in [("XS_f6", 6, 0.966), ("XS_f4", 4, 0.92)]:
+        for _sh, _tag in [(0.0, "_s0"), (1.0, "_sp"), (-1.0, "_sm")]:
+            add_fiducial(_xnm + _tag, _xf, _xns, survey="DESI+KS",
+                         prior_center="sim_mean", subdla_center_shift=_sh)
 
     # === Phase-5a Test A (2026-06-11): MF gate-invariant M-tier re-run at HR cosmologies ===
     # with_mf=True → truth = MF-corrected LF AND forward = MF-corrected LF (the GATE INVARIANT: the
@@ -536,8 +548,10 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
                            zslope_mu=jnp.asarray(HCD_LIT_OVER_SIM_SLOPE),
                            zslope_sigma=jnp.asarray(ZSLOPE_PRIOR_SIGMA))
 
-    # SEPARATE per-survey inference (2026-06-10): keep only this chain's leg (no joint DESI+KS).
-    ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == chain.get("survey", "DESI")])
+    # SEPARATE per-survey inference (2026-06-10): keep only this chain's leg(s). A "+"-joined survey
+    # (e.g. "DESI+KS", the cosmology-safety arm) keeps BOTH legs for a genuine joint fit.
+    _keep = chain.get("survey", "DESI").split("+")
+    ctx = ctx._replace(legs=[l for l in ctx.legs if l.name in _keep])
 
     # TRUTH: MF-resolution (gate invariant) when mf is set; LF otherwise. τ₀ anchor = a PRIYA
     # curve (the new 2-param model — closure self-consistency needs it; "becker13" was only
@@ -580,6 +594,14 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     if chain.get("sigma_subdla"):  # σ_subDLA width-sensitivity arm
         sig = ctx.alpha_hcd_sigma.at[1].set(float(chain["sigma_subdla"]) * float(ctx.alpha_hcd_mu[1]))
         ctx = ctx._replace(alpha_hcd_sigma=sig)
+    # subDLA prior-CENTER shift (cosmology-safety arm, #9 panel must-do 2026-06-13): deliberately
+    # MIS-SPECIFY the subDLA incidence prior center by shift·σ_subDLA and ask whether it drags the
+    # cosmology MEAN — the residual risk the panel flagged (closure corr(subDLA pull, n_s bias)=+0.82,
+    # harmless only because the prior isn't binding; a wrong prior CENTER on real data could become so).
+    _subshift = float(chain.get("subdla_center_shift", 0.0) or 0.0)
+    if _subshift != 0.0:
+        mu = ctx.alpha_hcd_mu.at[1].add(_subshift * float(ctx.alpha_hcd_sigma[1]))
+        ctx = ctx._replace(alpha_hcd_mu=mu)
 
     key0 = jax.random.PRNGKey(int(chain["seed"]))
     k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, int(mock_index)), 2)
