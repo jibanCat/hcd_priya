@@ -119,7 +119,7 @@ def build_config(verbose=False):
     def add_fiducial(mock_id, fold, target_ns=None, *, survey, prior_center="sim_mean",
                      sigma_lls=None, sigma_subdla=None, tau0_extreme=False, n_chains=4, sim=None,
                      lls_truth_boost=1.0, mf=False, hr_truth=False, mf_shape=0.0, desi_floor=False,
-                     mf_emucoh=0.0):
+                     mf_emucoh=0.0, mf_emucoh_offdiag_only=False):
         if sim is None:
             ns, sim = _closest_sim(fold_sims[fold], target_ns)
         else:
@@ -132,6 +132,7 @@ def build_config(verbose=False):
                 lls_truth_boost=lls_truth_boost,
                 mf=bool(mf), z_slope_marginalized=False, hr_truth=bool(hr_truth),
                 mf_shape=float(mf_shape), desi_floor=bool(desi_floor), mf_emucoh=float(mf_emucoh),
+                mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
                 chain_id=c, n_chains=n_chains, seed=0))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -246,6 +247,17 @@ def build_config(verbose=False):
     for _base, _fld, _kw in _EMUCOH_BASE:
         add_fiducial(f"{_base}_EC0", _fld, survey="DESI", mf_emucoh=0.0, **_kw)   # OFF control
         add_fiducial(f"{_base}_EC1", _fld, survey="DESI", mf_emucoh=1.0, **_kw)   # ON (infl=1)
+
+    # EC2: per-term DIAGONAL ALLOCATION re-validation (cosmology referee follow-on, 2026-06-12) —
+    # same as EC1 (emucoh ON, infl=1) but mf_emucoh_offdiag_only=True: absorb emucoh's diagonal into
+    # emu_var (via max) and add ONLY its off-diagonal, dropping the conservative ×1.3 on-top DESI
+    # diagonal. Representative subset (the fold7 outlier emucoh helped most + a worsened + a typical):
+    # does the off-diagonal still de-bias fold7 while the tighter diagonal keeps coverage ≥ nominal?
+    _EMUCOH_ODA = {"D_f3", "D_f6", "D_lmed7_15", "D_llsmed"}
+    for _base, _fld, _kw in _EMUCOH_BASE:
+        if _base in _EMUCOH_ODA:
+            add_fiducial(f"{_base}_EC2", _fld, survey="DESI", mf_emucoh=1.0,
+                         mf_emucoh_offdiag_only=True, **_kw)
 
     # === Phase-5a Test A (2026-06-11): MF gate-invariant M-tier re-run at HR cosmologies ===
     # with_mf=True → truth = MF-corrected LF AND forward = MF-corrected LF (the GATE INVARIANT: the
@@ -479,6 +491,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     # diagonal MF floor ON for DESI (the simpler-fix comparison arm).
     _infl = float(chain.get("mf_shape", 0.0) or 0.0)
     _einfl = float(chain.get("mf_emucoh", 0.0) or 0.0)   # 60-sim LF-emulator-coherence C_emu term
+    _eoda = bool(chain.get("mf_emucoh_offdiag_only", False))   # per-term diagonal allocation
     _survey = chain.get("survey", "DESI")
     _desi_kw = {"mf_floor_on": True} if chain.get("desi_floor") else None
     ctx, d = build_legb_ctx(
@@ -488,7 +501,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         mf_shape=(_infl > 0), mf_shape_infl=(_infl if _infl > 0 else 1.0),
         mf_shape_legs=(_survey,),
         mf_emucoh=(_einfl > 0), mf_emucoh_infl=(_einfl if _einfl > 0 else 1.0),
-        mf_emucoh_legs=(_survey,), desi_kwargs=_desi_kw)
+        mf_emucoh_legs=(_survey,), mf_emucoh_offdiag_only=_eoda, desi_kwargs=_desi_kw)
 
     if chain["z_slope_marginalized"]:
         ctx = ctx._replace(marginalize_zslope=True,
@@ -574,6 +587,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         hr_truth=bool(chain["hr_truth"]), tau0_extreme=bool(chain["tau0_extreme"]),
         mf_shape=float(chain.get("mf_shape", 0.0) or 0.0), desi_floor=bool(chain.get("desi_floor", False)),
         mf_emucoh=float(chain.get("mf_emucoh", 0.0) or 0.0),
+        mf_emucoh_offdiag_only=bool(chain.get("mf_emucoh_offdiag_only", False)),
         chain_index=int(chain["chain_id"]), n_chains_target=int(chain["n_chains"]),
         # battery inputs: the per-chain packed draws + the extra fields (energy/num_steps/diverg).
         packed=draws.astype(np.float64), names=np.array(packed_names),

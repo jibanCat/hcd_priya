@@ -24,6 +24,8 @@ import run_stepA  # noqa: E402
 # the 8 baselines mirrored as a matched (OFF control, ON) pair by the EMUCOH validation block.
 BASES = ["D_f3", "D_f4", "D_f6", "D_f7", "D_lmed3_15", "D_lmed5_15", "D_lmed7_15", "D_llsmed"]
 PAIRS = [(f"{b}_EC0", f"{b}_EC1") for b in BASES]
+# EC2 = the per-term diagonal-allocation re-validation arm (EC1 + mf_emucoh_offdiag_only) on a subset.
+ODA_BASES = ["D_f3", "D_f6", "D_lmed7_15", "D_llsmed"]
 
 # fields that ARE allowed to differ between an OFF baseline chain and its ON copy.
 ALLOWED_DIFF = {"id", "mock_id", "mf_emucoh"}
@@ -85,7 +87,26 @@ def test_ON_copy_is_byte_identical_to_OFF_except_emucoh(by_mock):
             assert co["fold"] == cn["fold"] and co["sim"] == cn["sim"] and co["seed"] == cn["seed"]
 
 
-def test_total_config_grew_by_64_chains(by_mock):
-    # 8 baselines × 2 arms (EC0 + EC1) × 4 chains. Sanity that we didn't drop/dup an arm.
-    ec_chains = sum(len(by_mock[off]) + len(by_mock[on]) for off, on in PAIRS)
-    assert ec_chains == 64
+def test_total_config_grew_by_80_chains(by_mock):
+    # 8 baselines × (EC0 + EC1) + 4 EC2 = (16 + 4) mocks × 4 chains. Sanity vs drop/dup.
+    ec_chains = (sum(len(by_mock[off]) + len(by_mock[on]) for off, on in PAIRS)
+                 + sum(len(by_mock[f"{b}_EC2"]) for b in ODA_BASES))
+    assert ec_chains == 80
+
+
+def test_EC2_is_EC1_plus_offdiag_only(by_mock):
+    # EC2 must be byte-identical to EC1 except mf_emucoh_offdiag_only (True vs False); same fold/sim/
+    # seed ⇒ identical mock, only the diagonal allocation differs. EC1/EC0 carry offdiag_only=False.
+    for b in ODA_BASES:
+        ec1 = {c["chain_id"]: c for c in by_mock[f"{b}_EC1"]}
+        ec2 = {c["chain_id"]: c for c in by_mock[f"{b}_EC2"]}
+        assert set(ec1) == set(ec2) == {0, 1, 2, 3}
+        for cid in (0, 1, 2, 3):
+            c1, c2 = ec1[cid], ec2[cid]
+            assert c1.get("mf_emucoh_offdiag_only") is False
+            assert c2.get("mf_emucoh_offdiag_only") is True
+            assert float(c1["mf_emucoh"]) == float(c2["mf_emucoh"]) == 1.0
+            for key in (set(c1) | set(c2)):
+                if key in {"id", "mock_id", "mf_emucoh_offdiag_only"}:
+                    continue
+                assert c1.get(key) == c2.get(key), f"{b}_EC2 chain {cid} field {key!r} differs from EC1"

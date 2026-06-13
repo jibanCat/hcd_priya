@@ -27,7 +27,7 @@ def main():
     R.HEALTH_JSON = f"{R.CKPT_DIR}/health_emucoh.json"
     R.HEALTH_TXT = f"{R.CKPT_DIR}/health_emucoh.txt"
 
-    cfg = [c for c in R.build_config() if c["mock_id"].endswith(("_EC0", "_EC1"))]
+    cfg = [c for c in R.build_config() if c["mock_id"].endswith(("_EC0", "_EC1", "_EC2"))]
     mocks = sorted(set(c["mock_id"] for c in cfg))
     print(f"[emucoh-pool] {len(cfg)} chains over {len(mocks)} mocks: {mocks}", flush=True)
     nuts = dict(R.PROD)

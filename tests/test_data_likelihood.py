@@ -28,9 +28,11 @@ from hcd_analysis.emulator import meanflux_prior as MF
 
 DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 KS_BASE = "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
+EBOSS_NPZ = "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz"
 
 _have_desi = os.path.exists(DESI_NPZ)
 _have_ks = os.path.exists(KS_BASE + "final-conservative-p1d-karacayli_etal2021.txt")
+_have_eboss = os.path.exists(EBOSS_NPZ)
 
 
 # ----------------------------------------------------------------------------- #
@@ -272,6 +274,36 @@ def test_data_loglik_block_diagonal_equals_sum_of_legs():
         man += float(gaussian_loglik(jnp.asarray(leg.P_data) - Pm, Ct))
     assert np.isclose(float(total), man, rtol=1e-10), f"joint {total} vs sum {man}"
     assert set(parts) == {"DESI", "KS"}
+
+
+@pytest.mark.skipif(not (_have_desi and _have_ks and _have_eboss), reason="data not present")
+def test_data_loglik_three_legs_with_eboss_block_diagonal():
+    """eBOSS composes into the multi-leg block-diagonal likelihood: joint logL == sum of the three
+    independent per-leg gaussian_logliks, finite gradients (step-review gap, 2026-06-13)."""
+    from hcd_analysis.emulator.likelihood import gaussian_loglik
+    c = _emu_ctx()
+    legs = [DL.load_desi_leg(), DL.load_ks_leg(), DL.load_eboss_leg()]
+    z_global = np.unique(np.round(np.concatenate([l.z for l in legs]), 6))
+    tau0_global = jnp.asarray(MF.becker13_tau0(jnp.asarray(z_global)))
+    szb = {leg.name: _sigma_zb_for_leg(leg, c["n_k"], c["n_tb"], c["rng"]) for leg in legs}
+    kw = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], z_global=z_global,
+              sigma_zb_per_leg=szb, alpha_centres=c["alpha_centres"])
+    total, parts = DL.data_loglik(c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs,
+                                  return_parts=True, **kw)
+    man = 0.0
+    for leg in legs:
+        sel = np.array([int(np.argmin(np.abs(z_global - zz))) for zz in leg.z])
+        Pm, Ct = DL.predict_P_obs_on_leg(
+            c["model"], c["theta9"], tau0_global[jnp.asarray(sel)], c["alpha_hcd"],
+            pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
+            sigma_zb=szb[leg.name], alpha_centres=c["alpha_centres"])
+        man += float(gaussian_loglik(jnp.asarray(leg.P_data) - Pm, Ct))
+    assert np.isclose(float(total), man, rtol=1e-10), f"joint {total} vs sum {man}"
+    assert set(parts) == {"DESI", "KS", "eBOSS"}
+    # finite gradient through the 3-leg joint logL (θ9)
+    g = jax.grad(lambda th: DL.data_loglik(c["model"], th, tau0_global, c["alpha_hcd"], legs,
+                                           **kw))(c["theta9"])
+    assert np.all(np.isfinite(np.asarray(g)))
 
 
 # ============================================================================ #

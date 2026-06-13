@@ -103,6 +103,44 @@ def test_emucoh_offdiag_pd_and_backcompat():
 
 
 @pytest.mark.skipif(not (_have_e and _have_desi), reason="emucoh npz / DESI data missing")
+def test_emucoh_offdiag_only_per_term_diagonal_allocation():
+    """Per-term diagonal allocation (cosmology referee 2026-06-12): mf_emucoh_offdiag_only=True
+    absorbs emucoh's diagonal into emu_var (via max) and adds ONLY its off-diagonal — the OFF-diagonal
+    coherent structure is preserved, the diagonal is NOT added on top (less conservative), and PD holds.
+    Default (False) is byte-identical to the on-top behavior."""
+    c = _emu_ctx()
+    e = DL.load_mf_emucoh(EMUCOH_NPZ)
+    leg = DL.load_desi_leg()
+    Cf = DL.mf_shape_cov_for_leg(e, leg)
+    tau0 = jnp.full(leg.n_z, 0.9)
+    # a nonzero diagonal C_emu (emu_var>0) is required for the per-term allocation to have any effect
+    # (with emu_var=0, max(0, emucoh_diag)=emucoh_diag = the on-top value — correctly no reduction).
+    n_k = np.asarray(c["cache_k"]).shape[0]
+    rng = np.random.default_rng(1)
+    sig = jnp.asarray(rng.uniform(0.02, 0.06, (leg.n_z, 4, n_k, 4)))   # (n_z, n_class, n_k, n_tb)
+    ac = jnp.asarray([0.66, 0.83, 1.15, 1.33])
+    kw = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
+              sigma_zb=sig, alpha_centres=ac, mf_emucoh_cov=Cf, mf_emucoh_infl=1.0)
+    _, C_full = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **kw)
+    _, C_oda = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+                                       mf_emucoh_offdiag_only=True, **kw)
+    _, C_def = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+                                       mf_emucoh_offdiag_only=False, **kw)
+    Cfull, Coda, Cdef = np.asarray(C_full), np.asarray(C_oda), np.asarray(C_def)
+    # explicit False == default (byte-identical)
+    assert np.array_equal(Cfull, Cdef)
+    # off-diagonal coherent structure IDENTICAL (only the diagonal allocation differs)
+    offdiff = (Coda - np.diag(np.diag(Coda))) - (Cfull - np.diag(np.diag(Cfull)))
+    assert np.max(np.abs(offdiff)) < 1e-10
+    # diagonal NOT added on top → reduced (never larger), and strictly smaller somewhere on DESI
+    # (emucoh diag absorbed into emu_var rather than summed)
+    assert np.all(np.diag(Coda) <= np.diag(Cfull) + 1e-12)
+    assert np.min(np.diag(Coda) - np.diag(Cfull)) < -1e-12
+    # still PD
+    assert np.linalg.eigvalsh(Coda).min() > 0
+
+
+@pytest.mark.skipif(not (_have_e and _have_desi), reason="emucoh npz / DESI data missing")
 def test_emucoh_cov_theta_independent():
     c = _emu_ctx()
     e = DL.load_mf_emucoh(EMUCOH_NPZ)

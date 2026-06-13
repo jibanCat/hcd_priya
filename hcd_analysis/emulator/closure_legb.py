@@ -185,6 +185,8 @@ class LegBCtx(NamedTuple):
     # NOT gated on `with_mf` — it is an LF-emulator residual (applies on the LF path too).
     mf_emucoh_per_leg: object = None
     mf_emucoh_infl: float = 1.0
+    mf_emucoh_offdiag_only: bool = False   # per-term diagonal allocation: absorb emucoh's diagonal
+                                           # into emu_var (max), add only its off-diagonal (2026-06-12)
     marginalize_zslope: bool = True      # DEFAULT (2026-06-10): sample the HCD per-class z-slope
                                          # s_c with the literature dN/dX slope±1σ prior — so the HCD
                                          # incidence evolves on a PHYSICAL amplitude(pivot α)+slope,
@@ -218,7 +220,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    mf_exclude_held=False, mf_shape=False, mf_shape_infl=1.0,
                    mf_shape_legs=("DESI", "KS"), mf_shape_npz=None,
                    mf_emucoh=False, mf_emucoh_infl=1.0,
-                   mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None):
+                   mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
+                   mf_emucoh_offdiag_only=False):
     """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
     z-bins. The cross-class ρ (``use_xclass=True``, the default; the matched
     ``error_vector_xclass.npz`` pair) is the production C_emu — the diagonal σ is carried too
@@ -314,7 +317,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         alpha_hcd_mu=jnp.asarray(alpha_mu), alpha_hcd_sigma=jnp.asarray(alpha_sd),
         cemu_inflate=float(cemu_inflate), mf=mf_obj, mf_floor=mf_floor_obj,
         mf_shape_per_leg=mf_shape_per_leg, mf_shape_infl=float(mf_shape_infl),
-        mf_emucoh_per_leg=mf_emucoh_per_leg, mf_emucoh_infl=float(mf_emucoh_infl))
+        mf_emucoh_per_leg=mf_emucoh_per_leg, mf_emucoh_infl=float(mf_emucoh_infl),
+        mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only))
     return ctx, d
 
 
@@ -749,7 +753,8 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
             cache_k=ctx.cache_k, leg=leg, sigma_zb=szb, alpha_centres=ctx.alpha_centres,
             cemu_inflate=ctx.cemu_inflate, rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor,
             mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
-            mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0))
+            mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
+            mf_emucoh_offdiag_only=getattr(ctx, "mf_emucoh_offdiag_only", False))
         kr = jnp.asarray(np.where(keep)[0])
         r = jnp.asarray(P_data[keep]) - P_model[kr]
         C_sub = C_total[jnp.ix_(kr, kr)]

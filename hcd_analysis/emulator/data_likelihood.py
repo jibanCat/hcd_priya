@@ -122,6 +122,9 @@ class DataLeg(NamedTuple):
 # α_DLA; KS fully masks DLAs so the forward DLA term is ZERO (matching the 0% KS closure target).
 DESI_DLA_FORWARD_FRAC = 1.0
 KS_DLA_FORWARD_FRAC = 0.0
+# eBOSS DR14 (Chabanier+2019): DLAs are MASKED (the Pk1D_syst.dat carries DLAmask +
+# DLAcompleteness residual in C_data), so the forward DLA-excess term is ZERO (like KS, not DESI).
+EBOSS_DLA_FORWARD_FRAC = 0.0
 
 
 def _z_unit(z):
@@ -211,6 +214,46 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
                          dla_forward_frac=KS_DLA_FORWARD_FRAC)
+
+
+def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
+                   *, z_lo=2.2, z_hi=4.6, k_min=0.0, k_max=CACHE_KMAX,
+                   metals_on=True, resolution_on=False, mf_floor_on=False,
+                   dla_forward_frac=EBOSS_DLA_FORWARD_FRAC):
+    """Load eBOSS DR14 P1D (Chabanier+2019, 1812.03554) → a post-cut ``DataLeg`` (block-diag cov).
+
+    Format: the npz from ``scripts/convert_eboss_dr14_p1d.py`` (z, k, plya, sigma, cov, syst_*).
+    13 z∈[2.2,4.6] × 35 k∈[0.001084,0.019512] s/km, z-MAJOR; k ANGULAR (no 2π, the cache
+    convention). The covariance is BLOCK-DIAGONAL over the 13 z (per-z 35×35 corr × σσᵀ, no
+    cross-z covariance); slicing by a full-z-block mask preserves the block-diagonal structure.
+
+    Cuts: z∈[z_lo,z_hi] (default keeps all 13 z — eBOSS is LOW-k so it has NO low-z small-scale
+    resolution pathology, unlike KS z<2.4); k∈(k_min,k_max] (default k_min=0 keeps all eBOSS k,
+    k_max=CACHE_KMAX is a no-op since eBOSS max k=0.0195 ≪ 0.069).
+
+    PI-CONFIRMED flags (2026-06-13): metals_on=True — eBOSS data is NOT metal-subtracted (the
+    reference SiIII correction is commented out, lyaemu/likelihood.py); SiIII (Δv≈2270) oscillates
+    ~6.7 periods in-band at ~5–9%, so it MUST be forward-modeled (a shared ``a_SiIII`` nuisance with
+    DESI) or it aliases into the n_s tilt — the single biggest eBOSS risk. (NOTE: a_SiIII SAMPLING in
+    the closure is the Phase-4d test-3 follow-on; until wired, metals_on=True is a no-op with a_SiIII=0.)
+    dla_forward_frac=0.0 — DLAs masked, residual in C_data (like KS). mf_floor_on=False / no emucoh —
+    eBOSS is a LARGE-scale leg below the high-k floor/emucoh regime (emucoh band k≥0.01 is zero at the
+    A_p pivot k≈0.009). resolution_on=False — eBOSS resolution syst (~2e-4 in-band) stays in C_data.
+    """
+    d = np.load(npz_path, allow_pickle=True)
+    z = np.asarray(d["z"], float)              # (455,) z-major
+    k = np.asarray(d["k"], float)              # (455,) angular k
+    P = np.asarray(d["plya"], float)
+    cov = np.asarray(d["cov"], float).copy()   # (455,455) block-diag STAT+SYST
+
+    keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k > k_min) & (k <= k_max + 1e-9)
+
+    # eBOSS has no resolution proxy in the table; reuse the DESI-style proxy as a placeholder for
+    # the (default-OFF) resolution knob, exactly like load_ks_leg.
+    return _assemble_leg("eBOSS", z, k, P, cov, keep,
+                         R_func=desi_resolution_R, metals_on=metals_on,
+                         resolution_on=resolution_on, mf_floor_on=mf_floor_on,
+                         dla_forward_frac=dla_forward_frac)
 
 
 def _read_ks_p1d(path):
@@ -625,7 +668,8 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                          k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
                          rho_zb=None, mf=None, mf_floor=None,
                          mf_shape_cov=None, mf_shape_infl=1.0,
-                         mf_emucoh_cov=None, mf_emucoh_infl=1.0):
+                         mf_emucoh_cov=None, mf_emucoh_infl=1.0,
+                         mf_emucoh_offdiag_only=False):
     """Bind the emulator forward model to ONE leg's grid → flat (P_model (N,), C_total (N,N)).
 
     For each z in ``leg.z``:
@@ -765,11 +809,16 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     # covariance × infl²): the LF→HR RESOLUTION shape floor (6-HR) and the LF-EMULATOR-coherence
     # term (60-sim). Both bind via mf_shape_cov_for_leg and scale by the SAME θ-INDEPENDENT
     # fiducial power (see the CRITICAL note below). The list generalizes the single-term path.
+    # each term: (fractional cov, infl, offdiag_only). offdiag_only=True (the per-term diagonal
+    # allocation, cosmology referee 2026-06-12) absorbs that term's diagonal into emu_var via max
+    # (never under-count) and adds ONLY its off-diagonal — appropriate for emucoh, whose diagonal is
+    # a SUBSET of the existing emu_var (so the default on-top add ×1.3 over-widens the clean diagonal).
+    # The 6-HR resolution floor is a SEPARATE error source (not in emu_var) → always full-matrix.
     shape_terms = []
     if mf_shape_cov is not None:
-        shape_terms.append((jnp.asarray(mf_shape_cov), mf_shape_infl))
+        shape_terms.append((jnp.asarray(mf_shape_cov), mf_shape_infl, False))
     if mf_emucoh_cov is not None:
-        shape_terms.append((jnp.asarray(mf_emucoh_cov), mf_emucoh_infl))
+        shape_terms.append((jnp.asarray(mf_emucoh_cov), mf_emucoh_infl, bool(mf_emucoh_offdiag_only)))
 
     if not shape_terms:
         # LF / diagonal-floor path — byte-identical to before (back-compat).
@@ -791,9 +840,22 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
         # monotonicity) and the MAP de-biases per the linear GLS analysis.
         P_fid = jnp.nan_to_num(jnp.asarray(leg.P_data))          # θ-independent fiducial amplitude
         PP = P_fid[:, None] * P_fid[None, :]
-        C_shape = sum((infl ** 2) * cov * PP for cov, infl in shape_terms)   # Σ of PSD ⇒ PSD
+        # Build Σ of terms. For an offdiag_only term, absorb its diagonal into emu_var via max (so it
+        # is neither double-counted nor under-counted) and add only its off-diagonal. PD-safe: with
+        # emu_var_eff ≥ that term's diagonal, C_total = C_data + diag(emu_var_eff − diag + topup) +
+        # Σ_full-PSD-terms, i.e. PD C_data + diag(≥0) + Σ PSD ⇒ PD (the off-diag-only term is the full
+        # PSD term minus its diagonal, and the subtracted diagonal is restored inside emu_var_eff).
+        C_shape = jnp.zeros_like(jnp.asarray(leg.C_data))
+        emu_var_eff = emu_var_flat
+        for cov, infl, offdiag_only in shape_terms:
+            term = (infl ** 2) * cov * PP                        # PSD
+            if offdiag_only:
+                td = jnp.diagonal(term)
+                emu_var_eff = jnp.maximum(emu_var_eff, td)        # absorb diagonal (never under-count)
+                term = term - jnp.diag(td)                        # add only off-diagonal
+            C_shape = C_shape + term
         topup = jnp.maximum(0.0, floor_var_flat - jnp.diag(C_shape))
-        C_total = jnp.asarray(leg.C_data) + jnp.diag(emu_var_flat + topup) + C_shape
+        C_total = jnp.asarray(leg.C_data) + jnp.diag(emu_var_eff + topup) + C_shape
     return P_model, C_total
 
 
@@ -806,7 +868,8 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
                 k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
                 jitter=1e-10, return_parts=False, rho_zb_per_leg=None, mf=None,
                 mf_floor=None, mf_shape_per_leg=None, mf_shape_infl=1.0,
-                mf_emucoh_per_leg=None, mf_emucoh_infl=1.0):
+                mf_emucoh_per_leg=None, mf_emucoh_infl=1.0,
+                mf_emucoh_offdiag_only=False):
     """Multi-leg Gaussian log-likelihood against the REAL data.
 
     The legs are INDEPENDENT surveys (DESI & KS share z-VALUES but are different
@@ -868,7 +931,8 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
             cemu_inflate=cemu_inflate, a_SiIII=a_SiIII, a_SiII=a_SiII,
             k_SiIII=k_SiIII, k_SiII=k_SiII, b_res=b_res, rho_zb=rzb, mf=mf,
             mf_floor=mf_floor, mf_shape_cov=msc, mf_shape_infl=mf_shape_infl,
-            mf_emucoh_cov=mec, mf_emucoh_infl=mf_emucoh_infl)
+            mf_emucoh_cov=mec, mf_emucoh_infl=mf_emucoh_infl,
+            mf_emucoh_offdiag_only=mf_emucoh_offdiag_only)
         r = jnp.asarray(leg.P_data) - P_model
         ll = gaussian_loglik(r, C_total, jitter=jitter)
         total = total + ll
