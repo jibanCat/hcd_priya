@@ -216,6 +216,7 @@ def _kim(z):
 def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    xclass_error_vector=XCLASS_ERROR_VECTOR, cemu_inflate=1.0,
                    metals_on=False, desi_kwargs=None, ks_kwargs=None,
+                   with_eboss=False, eboss_kwargs=None,
                    use_xclass=True, with_mf=False, mf_fold=0, mf_with_floor=True,
                    mf_exclude_held=False, mf_shape=False, mf_shape_infl=1.0,
                    mf_shape_legs=("DESI", "KS"), mf_shape_npz=None,
@@ -258,8 +259,13 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     desi = DL.load_desi_leg(metals_on=metals_on, **(desi_kwargs or {}))
     ks = DL.load_ks_leg(**(ks_kwargs or {}))
     legs = [desi, ks]
+    # eBOSS DR14 (Chabanier+2019) — opt-in third leg (the low-k production shakedown). Its own
+    # flag defaults (metals_on=True SiIII / dla_forward_frac=0 / no MF floor — it's a LARGE-scale
+    # leg, NOT in mf_shape_legs/mf_emucoh_legs below) apply unless overridden via eboss_kwargs.
+    if with_eboss:
+        legs.append(DL.load_eboss_leg(**(eboss_kwargs or {})))
 
-    z_global = np.unique(np.round(np.concatenate([desi.z, ks.z]), 6))
+    z_global = np.unique(np.round(np.concatenate([leg.z for leg in legs]), 6))
 
     # slice the error vector onto each leg's z-bins (digitize into the z-band edges).
     sigma_zb_per_leg, rho_zb_per_leg = {}, {}

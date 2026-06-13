@@ -259,6 +259,16 @@ def build_config(verbose=False):
             add_fiducial(f"{_base}_EC2", _fld, survey="DESI", mf_emucoh=1.0,
                          mf_emucoh_offdiag_only=True, **_kw)
 
+    # === eBOSS DR14 closure cert (2026-06-13): the low-k PRODUCTION SHAKEDOWN before KS. Held-out-sim
+    # recovery on the eBOSS leg (survey="eBOSS" → run_one_chain builds build_legb_ctx with_eboss and
+    # filters the ctx to the eBOSS-only leg). Fiducials span n_s incl. Planck 0.966. sim-mean
+    # (non-circular) center, LF path. NOTE: a_SiIII is NOT yet sampled (Phase-4d test-3 follow-on) →
+    # this is the BASIC RECOVERY cert (the emulator is most accurate at eBOSS low-k → expect clean);
+    # the decisive SiIII-injection arm follows once a_SiIII is wired. Gate: R-1<0.01 / ≥4 dispersed
+    # chains / |bias z|<0.2σ / χ²~1.
+    for _enm, _ef, _ens in [("E_f5", 5, 0.95), ("E_f6", 6, 0.966), ("E_f7", 7, 1.00)]:
+        add_fiducial(_enm, _ef, _ens, survey="eBOSS")
+
     # === Phase-5a Test A (2026-06-11): MF gate-invariant M-tier re-run at HR cosmologies ===
     # with_mf=True → truth = MF-corrected LF AND forward = MF-corrected LF (the GATE INVARIANT: the
     # correction cancels in ΔP). Confirms MF does not ALIAS cosmology and that A_p/n_s recover at HR
@@ -498,6 +508,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         ckpt=chain["ckpt"], with_mf=bool(chain["mf"]),
         mf_fold=fold, mf_with_floor=bool(chain["mf"]),
         mf_exclude_held=bool(chain.get("hr_truth", False)),    # HF-LOSO: MF fit EXCLUDING this HR sim
+        with_eboss=(_survey == "eBOSS"),                       # eBOSS DR14 leg (low-k shakedown)
         mf_shape=(_infl > 0), mf_shape_infl=(_infl if _infl > 0 else 1.0),
         mf_shape_legs=(_survey,),
         mf_emucoh=(_einfl > 0), mf_emucoh_infl=(_einfl if _einfl > 0 else 1.0),
