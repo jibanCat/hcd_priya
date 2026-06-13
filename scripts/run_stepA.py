@@ -214,6 +214,39 @@ def build_config(verbose=False):
         add_fiducial(f"D_lmed{_f}_30", _f, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
                      sigma_lls=0.30, sim=_s)
 
+    # === Phase-5a EMUCOH closure validation (2026-06-12): the BLOCKING referee gate for the
+    # 60-sim LF-emulator k-coherent C_emu term ("emucoh"). The term is wired (run_one_chain
+    # mf_emucoh knob) + unit-tested + 4-referee-reviewed, but has NO inference-level validation;
+    # both the Bayesian and cosmology referees call that blocking before production.
+    #
+    # DESIGN: mirror the two multi-fold families that exhibit the per-fold A_p/n_s LOSO scatter the
+    # emucoh term is meant to absorb. For each baseline we run a MATCHED PAIR with CURRENT code —
+    # "_EC0" (mf_emucoh=0, the OFF control) and "_EC1" (mf_emucoh=1.0, infl=1, ON) — IDENTICAL in
+    # every other field (same fold+sim+seed ⇒ byte-identical mock data + noise; mock generation does
+    # not read mf_emucoh). We run the OFF arm FRESH rather than reuse the old D_f*/D_lmed* checkpoints
+    # so that code drift since those ran (e.g. the 2026-06-11 LLS-prior hardening) cannot confound
+    # emucoh; the old checkpoints remain a free back-compat cross-check. These mocks carry NO MF floor
+    # (mf=False, no mf_shape/desi_floor) so the emucoh term is isolated cleanly.
+    #   Family A (sim-mean center)          — D_f3/4/6/7      (folds 3,4,6,7; OFF A_p z-RMS ~0.75σ).
+    #   Family B (matched-lit center σ0.15) — D_lmed{3,5,7}_15 + D_llsmed (folds 3,5,7,6; OFF n_s
+    #                                         sign-flips ±~0.9σ; A_p fold7 +2.44σ ridge outlier).
+    # Triad to read EC1 vs EC0 (scripts/analyze_emucoh_validation.py): per-fold point-estimate scatter
+    # SHRINKS, σ_Ap/σ_ns WIDEN (PSD monotonicity — a SHRINK is the θ-dependent-covariance bug
+    # signature), |bias z| coverage → nominal.
+    _EMUCOH_BASE = [
+        ("D_f3",       3, dict(target_ns=0.90)),
+        ("D_f4",       4, dict(target_ns=0.92)),
+        ("D_f6",       6, dict(target_ns=0.966)),
+        ("D_f7",       7, dict(target_ns=1.00)),
+        ("D_lmed3_15", 3, dict(prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15, sim=_MED_FOLDS[3])),
+        ("D_lmed5_15", 5, dict(prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15, sim=_MED_FOLDS[5])),
+        ("D_lmed7_15", 7, dict(prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15, sim=_MED_FOLDS[7])),
+        ("D_llsmed",   6, dict(prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15, sim=_SIM_MED)),
+    ]
+    for _base, _fld, _kw in _EMUCOH_BASE:
+        add_fiducial(f"{_base}_EC0", _fld, survey="DESI", mf_emucoh=0.0, **_kw)   # OFF control
+        add_fiducial(f"{_base}_EC1", _fld, survey="DESI", mf_emucoh=1.0, **_kw)   # ON (infl=1)
+
     # === Phase-5a Test A (2026-06-11): MF gate-invariant M-tier re-run at HR cosmologies ===
     # with_mf=True → truth = MF-corrected LF AND forward = MF-corrected LF (the GATE INVARIANT: the
     # correction cancels in ΔP). Confirms MF does not ALIAS cosmology and that A_p/n_s recover at HR
