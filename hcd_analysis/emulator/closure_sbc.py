@@ -62,7 +62,8 @@ DIVERGENCE_RETRY_TARGET_ACCEPT = (0.95, 0.99)
 # Build a production ctx from final_fold0 + error_vector.npz.
 # ----------------------------------------------------------------------------
 def build_ctx(n_z=3, seed=0, ckpt=CKPT, error_vector=ERROR_VECTOR,
-              shot_inflate=10.0, cemu_inflate=1.0, xclass_error_vector=None):
+              shot_inflate=10.0, cemu_inflate=1.0, xclass_error_vector=None,
+              ensemble_ckpts=None):
     """Build a real Ctx matched to the production (final_fold0, error_vector.npz) pair.
 
     Picks ``n_z`` in-range redshifts, maps each to its z-band slice of the (4,K,Zb,Tb)
@@ -77,8 +78,16 @@ def build_ctx(n_z=3, seed=0, ckpt=CKPT, error_vector=ERROR_VECTOR,
     the cross-class form (the off-diagonals capture the coherent cross-class correlation).
     Default None → the diagonal σ path (UNCHANGED). The cross-class block is sliced onto the
     SAME per-z z-band grid as ``sigma_zb`` and shares the diagonal vector's band scheme.
+
+    ``ensemble_ckpts`` (opt-in, for the PRODUCTION SBC): a list of checkpoint prefixes →
+    the ctx's model is the N-seed ``EnsembleEmulator`` (the forward is the mean of P_filt
+    over members). Default None → the single-``ckpt`` path is UNCHANGED.
     """
-    model, meta, norm = T.load_checkpoint(ckpt)
+    if ensemble_ckpts is not None:
+        from hcd_analysis.emulator.ensemble import load_ensemble
+        model, meta, norm = load_ensemble(list(ensemble_ckpts))
+    else:
+        model, meta, norm = T.load_checkpoint(ckpt)
     pf = {k: jnp.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
     ev = np.load(error_vector, allow_pickle=True)
     sigma = ev["sigma"]                                # (4,K,Zb,Tb)
@@ -170,8 +179,59 @@ def _loglik_of_draws(ctx_mock, draws):
     return np.asarray(jax.vmap(one)(jnp.asarray(draws)))
 
 
+def _mock_for_index(ctx0: Ctx, key0, m):
+    """Draw the truth + matched-C mock for SBC mock index ``m`` as a PURE function of
+    ``(key0, m)`` via ``jax.random.fold_in`` — so a SLURM shard (a subset of mock indices)
+    reproduces EXACTLY the mocks a single full run would draw (the Talts+2018 valid-SBC
+    requirement). Returns ``(truth, ctx_mock, truth_vec, k_nuts)`` (k_nuts seeds NUTS)."""
+    k_truth, k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, int(m)), 3)
+    truth = draw_leg_a_truth(ctx0, k_truth)
+    ctx_mock, truth_vec, _info = make_leg_a_mock(ctx0, truth, k_mock)
+    return truth, ctx_mock, np.asarray(truth_vec), k_nuts
+
+
+def aggregate_leg_a(records, n_z, *, prob=0.95):
+    """Merge per-mock records (from ``run_leg_a_sbc(return_per_mock=True)``, possibly across
+    many SLURM shards) into ONE common-L_eff SBC rank set + per-quantity ECDF pass/fail.
+
+    ``records``: dicts with ``truth_vec`` (P,), ``draws`` ((L,P) or None if the mock was
+    excluded for divergence/degeneracy), ``ll_true``, ``ll_draws`` (L,), ``n_div``. Subsamples
+    EVERY rankable mock's draws to ``L_eff = min L`` (evenly-spaced) so all rank against the
+    SAME #draws — the only construction giving Uniform{0..L_eff} ranks (Talts+2018). Returns
+    the same dict shape ``run_leg_a_sbc`` historically returned."""
+    all_names = list(param_names(n_z)) + ["loglik"]
+    rankable = [r for r in records
+                if r.get("draws") is not None and np.asarray(r["draws"]).shape[0] >= 2]
+    L_list = [int(np.asarray(r["draws"]).shape[0]) for r in rankable]
+    L_eff = int(min(L_list)) if L_list else 0
+    rank_rows = []
+    if rankable and L_eff >= 2:
+        for rec in rankable:
+            draws = np.asarray(rec["draws"]); lld = np.asarray(rec["ll_draws"])
+            sub = np.linspace(0, draws.shape[0] - 1, L_eff).round().astype(int)
+            pranks = sbc_ranks_multiparam(np.asarray(rec["truth_vec"]), draws[sub])  # (P,)
+            llrank = loglik_rank(float(rec["ll_true"]), lld[sub])
+            rank_rows.append(np.concatenate([pranks, [llrank]]))
+    ranks = np.array(rank_rows, dtype=int)                      # (n_kept, P+1)
+    passed, ecdf_bands = {}, {}
+    if ranks.size and L_eff >= 2:
+        for j, nm in enumerate(all_names):
+            lower, upper, ecdf, ok, grid = ecdf_pit_bands(ranks[:, j], L_eff, prob=prob)
+            passed[nm] = bool(ok)
+            ecdf_bands[nm] = (lower, upper, ecdf, grid)
+    n_div_total = int(sum(int(r.get("n_div", 0)) for r in records))
+    n_divergent = int(sum(1 for r in records if int(r.get("n_div", 0)) > 0))
+    n_excluded = int(len(records) - len(rankable))
+    # the ECDF gate is only correctly sized at L_eff ≥ L_FLOOR; below it the bands over-reject
+    # and pass/fail is PATH-only, not a calibration verdict.
+    return dict(names=all_names, ranks=ranks, L=L_eff, gate_valid=bool(L_eff >= L_FLOOR),
+                n_div_total=n_div_total, n_divergent=n_divergent, n_excluded=n_excluded,
+                n_kept=int(ranks.shape[0]) if ranks.size else 0,
+                passed=passed, ecdf_bands=ecdf_bands)
+
+
 def run_leg_a_sbc(ctx0: Ctx, *, n_mocks, n_warmup, n_samples, seed, thin=True,
-                  prob=0.95, verbose=True):
+                  prob=0.95, verbose=True, mock_indices=None, return_per_mock=False):
     """Full Leg-A true-SBC over ``n_mocks`` mocks. Returns a dict of per-quantity ranks +
     pass/fail + divergence bookkeeping.
 
@@ -188,20 +248,14 @@ def run_leg_a_sbc(ctx0: Ctx, *, n_mocks, n_warmup, n_samples, seed, thin=True,
       passed        — {name: bool} from ecdf_pit_bands;
       ecdf_bands    — {name: (lower,upper,ecdf,grid)} for plotting.
     """
-    names = param_names(ctx0.n_z)
-    key = jax.random.PRNGKey(int(seed))
+    key0 = jax.random.PRNGKey(int(seed))
+    idxs = list(range(int(n_mocks))) if mock_indices is None else list(mock_indices)
 
-    kept = []               # per kept mock: truth_vec, thinned draws, ll_true, ll_draws
-    L_list = []
-    n_div_total = 0
-    n_divergent_mocks = 0
-    n_excluded = 0
-
-    for m in range(int(n_mocks)):
-        key, k_truth, k_mock, k_nuts = jax.random.split(key, 4)
-        truth = draw_leg_a_truth(ctx0, k_truth)
-        ctx_mock, truth_vec, _info = make_leg_a_mock(ctx0, truth, k_mock)
-        truth_vec = np.asarray(truth_vec)
+    records = []            # per mock: truth_vec, draws (or None if excluded), ll_*, n_div
+    for m in idxs:
+        # the mock is a PURE function of (key0, m) via fold_in → a shard subset reproduces
+        # exactly the mocks a full run would draw (Talts+2018 valid sharded SBC).
+        truth, ctx_mock, truth_vec, k_nuts = _mock_for_index(ctx0, key0, m)
 
         # run NUTS; on divergence, ESCALATE target_accept and re-run the SAME mock before
         # excluding (divergences are not random wrt truth → silent exclusion biases the set).
@@ -219,12 +273,11 @@ def run_leg_a_sbc(ctx0: Ctx, *, n_mocks, n_warmup, n_samples, seed, thin=True,
             if verbose:
                 print(f"  [mock {m}] {n_div} divergence(s) at target_accept={ta}"
                       + (" -> retry" if attempt < len(ta_schedule) - 1 else ""))
-        n_div_total += n_div
         if n_div > 0:                               # still divergent after the schedule
-            n_divergent_mocks += 1
-            n_excluded += 1
             if verbose:
                 print(f"  [mock {m}] still divergent after retries -> FLAGGED + excluded")
+            records.append(dict(truth_vec=truth_vec, draws=None, ll_true=None,
+                                ll_draws=None, n_div=int(n_div)))
             continue
 
         draws = _draws_matrix(samples, ctx0.n_z)        # (Lraw, P)
@@ -234,54 +287,27 @@ def run_leg_a_sbc(ctx0: Ctx, *, n_mocks, n_warmup, n_samples, seed, thin=True,
             draws_t, step, ess_min = draws, 1, float(draws.shape[0])
         L = draws_t.shape[0]
         if L < 2:                                        # degenerate chain: cannot rank
-            n_excluded += 1
             if verbose:
                 print(f"  [mock {m}] thinned to L={L} (<2) -> excluded")
+            records.append(dict(truth_vec=truth_vec, draws=None, ll_true=None,
+                                ll_draws=None, n_div=0))
             continue
 
-        # log-lik of the truth + thinned draws on the SAME mock data (Modrak+2023);
-        # stash with the draws and defer ranking until L_common is known (below) so EVERY
-        # mock is ranked against the IDENTICAL number of draws (valid-on-one-grid, Talts+2018).
+        # log-lik of the truth + thinned draws on the SAME mock data (Modrak+2023); ranking is
+        # DEFERRED to aggregate_leg_a so EVERY mock (across shards) ranks against the IDENTICAL
+        # #draws L_eff (valid-on-one-grid, Talts+2018).
         ll_true = float(log_lik_from_ctx(
             jnp.asarray(truth["theta9"]), jnp.asarray(truth["tau0_vec"]),
             jnp.asarray(truth["alpha_hcd"]), ctx_mock))
         ll_draws = _loglik_of_draws(ctx_mock, draws_t)          # (L,)
-        kept.append(dict(truth_vec=truth_vec, draws=draws_t, ll_true=ll_true,
-                         ll_draws=ll_draws))
-        L_list.append(L)
+        records.append(dict(truth_vec=truth_vec, draws=draws_t, ll_true=ll_true,
+                            ll_draws=ll_draws, n_div=0))
         if verbose:
             print(f"  [mock {m}] L={L} (step {step}, ess_min {ess_min:.1f})")
 
-    all_names = list(names) + ["loglik"]
-    passed, ecdf_bands = {}, {}
-    # ONE common grid: subsample EVERY mock's thinned draws to L_common = min over mocks
-    # (evenly-spaced indices — NOT clipping the ranks, which would corrupt uniformity).
-    # SBC ranks are only Uniform{0..L_common} if all mocks rank against the same #draws.
-    L_eff = int(min(L_list)) if L_list else 0
-    rank_rows = []
-    if kept and L_eff >= 2:
-        for rec in kept:
-            sub = np.linspace(0, rec["draws"].shape[0] - 1, L_eff).round().astype(int)
-            d = rec["draws"][sub]                               # (L_eff, P)
-            lld = rec["ll_draws"][sub]                          # (L_eff,)
-            pranks = sbc_ranks_multiparam(rec["truth_vec"], d)  # (P,)
-            llrank = loglik_rank(rec["ll_true"], lld)
-            rank_rows.append(np.concatenate([pranks, [llrank]]))
-    ranks = np.array(rank_rows, dtype=int)                      # (n_kept, P+1)
-    if ranks.size and L_eff >= 2:
-        for j, nm in enumerate(all_names):
-            lower, upper, ecdf, ok, grid = ecdf_pit_bands(ranks[:, j], L_eff, prob=prob)
-            passed[nm] = bool(ok)
-            ecdf_bands[nm] = (lower, upper, ecdf, grid)
-
-    # the ECDF gate is only correctly sized at L_eff ≥ L_FLOOR (see the constant); below it
-    # the bands over-reject and pass/fail is PATH-only, not a calibration verdict.
-    gate_valid = bool(L_eff >= L_FLOOR)
-    return dict(names=all_names, ranks=ranks, L=L_eff, gate_valid=gate_valid,
-                n_div_total=n_div_total, n_divergent=n_divergent_mocks,
-                n_excluded=n_excluded,
-                n_kept=int(ranks.shape[0]) if ranks.size else 0,
-                passed=passed, ecdf_bands=ecdf_bands)
+    if return_per_mock:
+        return records                              # raw per-mock records for the shard merge
+    return aggregate_leg_a(records, ctx0.n_z, prob=prob)
 
 
 # ----------------------------------------------------------------------------
