@@ -267,7 +267,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
                    mf_emucoh_offdiag_only=False, sample_metals=False, a_siiii_max=0.15,
                    hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0,
-                   hcd_2d_tilt=False):
+                   hcd_2d_tilt=False, ensemble_ckpts=None):
     """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
     z-bins. The cross-class ρ (``use_xclass=True``, the default; the matched
     ``error_vector_xclass.npz`` pair) is the production C_emu — the diagonal σ is carried too
@@ -284,7 +284,13 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     ``mf_fold=0`` is byte-identical to the ``final_fold0`` ``ctx.model``, so the bare-model
     P_filt and the frozen ``mf.lf_model`` agree (the gate faithfulness invariant).
     """
-    model, meta, norm = T.load_checkpoint(ckpt)
+    if ensemble_ckpts is not None:
+        # production SBC: the N-seed ensemble forward (mean of P_filt over members). The
+        # single-ckpt path (ensemble_ckpts=None) is UNCHANGED.
+        from hcd_analysis.emulator.ensemble import load_ensemble
+        model, meta, norm = load_ensemble(list(ensemble_ckpts))
+    else:
+        model, meta, norm = T.load_checkpoint(ckpt)
     pf = {k: jnp.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
 
     ev = np.load(error_vector, allow_pickle=True)
@@ -807,6 +813,73 @@ def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0):
         kept_global_z=kept_global)
     info = dict(key=key, dropped=dropped, z_sim=z_sim, truth_on_leg=truth_on_leg_out)
     return mock_legs, truth_pack, info
+
+
+# ============================================================================ #
+#  Leg-A (rank-uniformity SBC) on the leg grids — draw truth from the PRIOR, matched-C self-draw.
+# ============================================================================ #
+def draw_leg_a_leg_truth(ctx: LegBCtx, key):
+    """Draw a Leg-A truth from the legb PRIORS for a rank-uniformity SBC on the leg grids.
+
+    Traces ``_legb_priors_only`` (the EXACT prior sites of ``_legb_model``) for one sample, then
+    reconstructs the deterministics (τ₀(z), z-resolved α) host-side via
+    ``_legb_reconstruct_deterministics``. Returns a truth_pack matching ``make_legb_mock``'s
+    contract: ``theta9`` (9,), ``tau0_global`` (nZg,), ``alpha_hcd`` (3,) PIVOT [LLS,sub,DLA] for
+    the rank truth-vector, ``alpha_hcd_z`` (nZg,3) Z-RESOLVED for the forward, ``a_siiii``,
+    ``kept_global_z`` (all True — Leg-A keeps every leg z), plus the raw latent sites (``raw``)."""
+    from numpyro import handlers as _nph
+    tr = _nph.trace(_nph.seed(_legb_priors_only, key)).get_trace(ctx)
+    raw = {nm: site["value"] for nm, site in tr.items() if site.get("type") == "sample"}
+    samples1 = {k: jnp.asarray(v)[None] for k, v in raw.items()}      # length-1 L axis
+    rec = _legb_reconstruct_deterministics(ctx, samples1)
+    a_lls = float(rec["alpha_lls"][0]) if "alpha_lls" in rec else float(raw["alpha_lls"])
+    a_sub = float(rec["alpha_subdla"][0]) if "alpha_subdla" in rec else float(raw["alpha_subdla"])
+    a_dla = float(rec["alpha_dla"][0])
+    return dict(
+        theta9=np.asarray(raw["theta_unit"]),
+        tau0_global=np.asarray(rec["tau0_vec"][0]),                  # (nZg,)
+        alpha_hcd=np.array([a_lls, a_sub, a_dla]),                   # (3,) pivot (rank truth-vec)
+        alpha_hcd_z=np.asarray(rec["alpha_hcd_z"][0]),              # (nZg,3) z-resolved (forward)
+        a_siiii=(float(raw["a_SiIII"]) if "a_SiIII" in raw else 0.0),
+        kept_global_z=np.ones(len(ctx.z_global), bool), raw=raw)
+
+
+def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key):
+    """Leg-A self-draw on the leg grids: forward-model the prior-drawn truth on each leg with the
+    SAME ``predict_P_obs_on_leg`` the likelihood uses, then add ε ~ N(0, C_total(truth)) over ALL
+    rows. C_mock ≡ C_like AND the noiseless mock == P_model(truth) → the rank-uniformity null is
+    EXACT (Talts+2018). Returns ``(mock_legs, info)``; ``info['chol'][leg]`` /
+    ``info['truth_on_leg'][leg]`` per leg."""
+    zg = np.asarray(ctx.z_global)
+    theta9 = jnp.asarray(truth_pack["theta9"])
+    tau0_global = jnp.asarray(truth_pack["tau0_global"])
+    alpha_hcd_z = jnp.asarray(truth_pack["alpha_hcd_z"])
+    a_siiii = float(truth_pack.get("a_siiii", 0.0))
+    keys = jax.random.split(key, len(ctx.legs))
+    mock_legs, chol_out, truth_on_leg_out = [], {}, {}
+    for li, leg in enumerate(ctx.legs):
+        sel = jnp.asarray([int(np.argmin(np.abs(zg - zz))) for zz in leg.z])
+        szb = ctx.sigma_zb_per_leg.get(leg.name) if ctx.sigma_zb_per_leg else None
+        rzb = ctx.rho_zb_per_leg.get(leg.name) if ctx.rho_zb_per_leg else None
+        msc = (ctx.mf_shape_per_leg.get(leg.name)
+               if getattr(ctx, "mf_shape_per_leg", None) is not None else None)
+        mec = (ctx.mf_emucoh_per_leg.get(leg.name)
+               if getattr(ctx, "mf_emucoh_per_leg", None) is not None else None)
+        P_model, C_total = DL.predict_P_obs_on_leg(
+            ctx.model, theta9, tau0_global[sel], alpha_hcd_z[sel], pf_stats=ctx.pf_stats,
+            dla_core=dla_core_per_leg[leg.name], cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
+            alpha_centres=ctx.alpha_centres, a_SiIII=a_siiii, cemu_inflate=ctx.cemu_inflate,
+            rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor,
+            mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
+            mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
+            mf_emucoh_offdiag_only=getattr(ctx, "mf_emucoh_offdiag_only", False))
+        Lc = _chol_jitter(C_total)
+        g = jax.random.normal(keys[li], (leg.k.shape[0],))
+        eps = np.asarray(jnp.einsum("ij,j->i", Lc, g))
+        mock_legs.append(leg._replace(P_data=np.asarray(P_model) + eps))
+        chol_out[leg.name] = np.asarray(Lc)
+        truth_on_leg_out[leg.name] = np.asarray(P_model)
+    return mock_legs, dict(key=key, chol=chol_out, truth_on_leg=truth_on_leg_out)
 
 
 # ============================================================================ #
@@ -1464,7 +1537,7 @@ def _packed_names_for(samples, kept_global):
 def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
              cemu_inflate=None, fold=0, q_levels=(0.68, 0.95), verbose=True,
              dense_mass=True, max_tree_depth=10, mock_indices=None,
-             return_per_mock=False):
+             return_per_mock=False, leg_a=False):
     """Leg-B coverage over ``n_mocks`` held-out-sim mocks. Per mock: make_legb_mock → NUTS
     against the real-cov multi-leg likelihood → thin → rank the truth θ per param + the
     loglik rank → per-param empirical coverage at ``q_levels`` + bias.
@@ -1479,22 +1552,37 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
     ECDF), or the per-mock list if ``return_per_mock``."""
     if cemu_inflate is not None:
         ctx = ctx._replace(cemu_inflate=float(cemu_inflate))
-    sims, _va = held_out_sims(d, fold=fold)
     key0 = jax.random.PRNGKey(int(seed))
     idxs = list(range(int(n_mocks))) if mock_indices is None else list(mock_indices)
+    if leg_a:
+        # Leg-A rank-uniformity SBC: truths drawn from the PRIOR; the fiducial DLA core is the
+        # MATCHED core used by both the mock forward and the likelihood (so C_mock ≡ C_like).
+        # z-mean the (n_z,K) fiducial → the (K,) per-leg core predict_P_obs_on_leg expects.
+        fid_core = {name: jnp.asarray(np.nanmean(np.asarray(v), axis=0))
+                    for name, v in _fiducial_dla_core_per_leg(d, ctx.legs, ctx.cache_k).items()}
+    else:
+        sims, _va = held_out_sims(d, fold=fold)
 
     # cycle through the held-out sims (n_mocks may exceed the #sims → reuse with fresh noise).
     per_mock = []
     n_div_total = 0
     n_divergent = 0
     for m in idxs:
-        sim = sims[m % len(sims)]
-        # the mock TRUTH is built at the SAME resolution as the forward: if ctx.mf is set, the
-        # gate invariant applies the MF correction to BOTH (it cancels in the closure ΔP).
-        truth_sim = make_truth_from_sim(d, sim, fold=fold, mf=ctx.mf)
-        k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, m), 2)
-        mock_legs, truth_pack, info = make_legb_mock(ctx, truth_sim, k_mock)
-        core_per_leg = _mock_core_per_leg(ctx, truth_sim)
+        if leg_a:
+            # Leg-A self-draw: truth ~ prior, matched-C mock; a PURE fn of (seed,m) → shardable.
+            k_truth, k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, m), 3)
+            truth_pack = draw_leg_a_leg_truth(ctx, k_truth)
+            mock_legs, info = make_leg_a_legmock(ctx, fid_core, truth_pack, k_mock)
+            core_per_leg = fid_core
+            sim = "leg_a_prior"
+        else:
+            sim = sims[m % len(sims)]
+            # the mock TRUTH is built at the SAME resolution as the forward: if ctx.mf is set, the
+            # gate invariant applies the MF correction to BOTH (it cancels in the closure ΔP).
+            truth_sim = make_truth_from_sim(d, sim, fold=fold, mf=ctx.mf)
+            k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, m), 2)
+            mock_legs, truth_pack, info = make_legb_mock(ctx, truth_sim, k_mock)
+            core_per_leg = _mock_core_per_leg(ctx, truth_sim)
 
         base_seed = int(jax.random.randint(k_nuts, (), 0, 2**31 - 1))
         ta_sched = (0.9,) + tuple(DIVERGENCE_RETRY_TARGET_ACCEPT)
