@@ -121,7 +121,8 @@ def build_config(verbose=False):
                      lls_truth_boost=1.0, mf=False, hr_truth=False, mf_shape=0.0, desi_floor=False,
                      mf_emucoh=0.0, mf_emucoh_offdiag_only=False, sample_metals=False,
                      inject_a_siiii=0.0, subdla_center_shift=0.0,
-                     hierarchical_hcd=False, hcd_ratio_infl=1.0, hcd_center_shift=0.0):
+                     hierarchical_hcd=False, hcd_ratio_infl=1.0, hcd_center_shift=0.0,
+                     z_slope_marginalized=False):
         if sim is None:
             ns, sim = _closest_sim(fold_sims[fold], target_ns)
         else:
@@ -132,7 +133,7 @@ def build_config(verbose=False):
                 sim=sim, n_s=round(ns, 4), survey=survey, prior_center=prior_center,
                 sigma_lls=sigma_lls, sigma_subdla=sigma_subdla, tau0_extreme=tau0_extreme,
                 lls_truth_boost=lls_truth_boost,
-                mf=bool(mf), z_slope_marginalized=False, hr_truth=bool(hr_truth),
+                mf=bool(mf), z_slope_marginalized=bool(z_slope_marginalized), hr_truth=bool(hr_truth),
                 mf_shape=float(mf_shape), desi_floor=bool(desi_floor), mf_emucoh=float(mf_emucoh),
                 mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
                 sample_metals=bool(sample_metals), inject_a_siiii=float(inject_a_siiii),
@@ -325,6 +326,25 @@ def build_config(verbose=False):
                      hierarchical_hcd=True, hcd_ratio_infl=1.0, hcd_center_shift=1.0)
         add_fiducial(_hnm + "_HBm", _hf, _hns, survey="DESI+KS", prior_center="sim_mean",
                      hierarchical_hcd=True, hcd_ratio_infl=1.0, hcd_center_shift=-1.0)
+
+    # === v2 SUBMANIFOLD test (PI insight 2026-06-14): hierarchical-HCD + z-slope MARGINALIZED ===
+    # HB_f6 showed Option B (1D A_HCD, FIXED slopes) RELOCATES the n_s coupling onto the A_HCD center
+    # (+0.51σ per ±1σ, corr +0.52). The PI's physics: the HCD classes trace a correlated 2D submanifold
+    # (CDDF amplitude × DIFFERENTIAL z-evolution — the N_HI-rich gas evolves differently with z, measured
+    # in PRIYA's HR/LF dN/dX: LLS swings 1.29→0.96 while subDLA/DLA stay ~flat). Collapsing to 1D threw
+    # away the z-evolution dimension, whose z-tilt signature is ORTHOGONAL to the n_s k-tilt and could
+    # DECORRELATE A_HCD from n_s if the data constrains it. Test: marginalize the per-class z-slope
+    # (s_lls/s_subdla/s_dla sampled) ON TOP of Option B and re-measure the A_HCD-center→n_s coupling.
+    # If it drops below the 0.51σ fixed-slope value → the z-dimension breaks the coupling → refine to a
+    # tight 1–2 param submanifold (one CDDF z-tilt + class-differential slopes fixed from the HR dN/dX).
+    # NOT launched here — config only; launch after HB_f4 lands (run_hz_pool.py).
+    for _zfn, _zff, _zfns in [("HZ_f6", 6, 0.966), ("HZ_f4", 4, 0.92)]:
+        add_fiducial(_zfn + "_z0", _zff, _zfns, survey="DESI+KS", prior_center="sim_mean",
+                     hierarchical_hcd=True, hcd_ratio_infl=1.0, z_slope_marginalized=True)
+        add_fiducial(_zfn + "_zp", _zff, _zfns, survey="DESI+KS", prior_center="sim_mean",
+                     hierarchical_hcd=True, hcd_ratio_infl=1.0, z_slope_marginalized=True, hcd_center_shift=1.0)
+        add_fiducial(_zfn + "_zm", _zff, _zfns, survey="DESI+KS", prior_center="sim_mean",
+                     hierarchical_hcd=True, hcd_ratio_infl=1.0, z_slope_marginalized=True, hcd_center_shift=-1.0)
 
     # === Phase-5a Test A (2026-06-11): MF gate-invariant M-tier re-run at HR cosmologies ===
     # with_mf=True → truth = MF-corrected LF AND forward = MF-corrected LF (the GATE INVARIANT: the
