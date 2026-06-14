@@ -49,7 +49,7 @@ from .data import load_cache, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS, samplin
 from .meanflux_prior import (meanflux_tau0_prior, becker13_tau0, tau0_alpha_priya,
                              fit_tau0_alpha_priya, TAU0_AMP_RANGE, DTAU0_RANGE, TAU0_PIVOT_Z)
 from .inference import (PARAM_NAMES, hcd_incidence_prior,
-                        HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT)
+                        HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC)
 from .sampler_numpyro import _dla_raw_mu
 from . import data_likelihood as DL
 from .closure_diagnostics import (
@@ -207,6 +207,24 @@ class LegBCtx(NamedTuple):
     # to original PRIYA, n_s extended; see data.SAMPLING_LIMITS). Set both to 0/1 for the full box.
     theta_unit_lo: object = None              # (9,) lower bound on theta_unit
     theta_unit_hi: object = None              # (9,) upper bound on theta_unit
+    # HIERARCHICAL HCD-incidence prior ("Option B", 2026-06-13): reparametrize the 3 independent
+    # HCD α sites as ONE likelihood-constrained MULTIPLIER A_hcd (= the LLS prior verbatim) × two
+    # prior-pinned RATIOS r_subdla/r_dla → α_LLS=A_hcd, α_subDLA=A_hcd·r_subdla, α_DLA=A_hcd·r_dla
+    # (re-emitted as numpyro.deterministic under the EXISTING names). Collapses the flat
+    # subDLA↔DLA exchange direction (the n_s-leak source) onto one fixed-shape additive amplitude
+    # + prior-pinned shape ratios. The existing per-class z-slope s_c is UNCHANGED, so the ratio
+    # ALREADY evolves as r_c(z)=r_c·((1+z)/(1+z_p))^(s_c−s_LLS) (the differential-CDDF-slope fix).
+    hierarchical_hcd: bool = False            # OFF (default) → BYTE-IDENTICAL to the legacy 3-site code
+    hcd_noncentered: bool = False             # LocScaleReparam-style non-centered fallback (same site
+                                              # names → site-order test passes). Centered is correct
+                                              # by the BENIGN orientation; this is the tested fallback.
+    # The ratio prior centers/widths (2,) [r_subdla, r_dla]. CLOSURE (must-fix #1): centers from the
+    # RAW sim w_c ratios (median(w_sub)/median(w_LLS), HCD_DLA_RESIDUAL_FRAC·median(w_DLA)/median(w_LLS))
+    # so the held-out-sim closure TRUTH matches the center to within the per-sim CV; widths
+    # (0.10, 0.12)·center × hcd_ratio_infl. None (default) → build_legb_ctx auto-derives.
+    hcd_ratio_mu: object = None               # (2,) [r_subdla, r_dla] prior centers
+    hcd_ratio_sigma: object = None            # (2,) [r_subdla, r_dla] prior widths
+    hcd_ratio_infl: float = 1.0               # the MANDATORY width-scan knob {0.5,1,2,3}×
 
 
 def _kim(z):
@@ -225,7 +243,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    mf_shape_legs=("DESI", "KS"), mf_shape_npz=None,
                    mf_emucoh=False, mf_emucoh_infl=1.0,
                    mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
-                   mf_emucoh_offdiag_only=False, sample_metals=False, a_siiii_max=0.15):
+                   mf_emucoh_offdiag_only=False, sample_metals=False, a_siiii_max=0.15,
+                   hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0):
     """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
     z-bins. The cross-class ρ (``use_xclass=True``, the default; the matched
     ``error_vector_xclass.npz`` pair) is the production C_emu — the diagonal σ is carried too
@@ -297,6 +316,21 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     w_c_med = np.median(d["w_c_cache"][:, 1:], axis=0)     # (3,) structural weights
     alpha_mu, alpha_sd = hcd_incidence_prior(jnp.asarray(w_c_med), z=3.0)
 
+    # HIERARCHICAL HCD ratio-prior centers/widths (must-fix #1, the LOAD-BEARING fix). The ratio
+    # centers are derived from the RAW sim w_c POOL MEDIANS (the SAME pool w_c_med medians above) —
+    # r_sub = median(w_subDLA)/median(w_LLS), r_dla = HCD_DLA_RESIDUAL_FRAC·median(w_DLA)/median(w_LLS)
+    # — NOT from alpha_hcd_mu (which bakes in the lit/sim 1.06/1.00/1.34 offset). This makes the
+    # closure TRUTH (= the held-out sim's w_sub/w_LLS and 0.10·w_DLA/w_LLS, make_legb_mock:716-717)
+    # match the prior CENTER to within the per-sim CV — a tight prior at an OFFSET center would
+    # re-create the exact center-bias this redesign kills, relocated onto r (verified: alpha_hcd_mu
+    # centers put the closure truth at −0.81σ subDLA / +2.64σ DLA, and fail SBC). Widths are
+    # (0.10, 0.12)·center × hcd_ratio_infl (the CLOSURE defense-in-depth widths, ≥ the bare 7%/10%
+    # CV; the real fit inflates to ~25–30% for CDDF-shape uncertainty via hcd_ratio_infl).
+    r_sub_center = float(w_c_med[1] / w_c_med[0])
+    r_dla_center = float(HCD_DLA_RESIDUAL_FRAC * w_c_med[2] / w_c_med[0])
+    hcd_ratio_mu = jnp.asarray([r_sub_center, r_dla_center])
+    hcd_ratio_sigma = jnp.asarray([0.10 * r_sub_center, 0.12 * r_dla_center]) * float(hcd_ratio_infl)
+
     mf_obj = mf_floor_obj = None
     if with_mf:
         mf_obj, mf_floor_obj = build_mf_correction(
@@ -328,7 +362,10 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         mf_shape_per_leg=mf_shape_per_leg, mf_shape_infl=float(mf_shape_infl),
         mf_emucoh_per_leg=mf_emucoh_per_leg, mf_emucoh_infl=float(mf_emucoh_infl),
         mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
-        sample_metals=bool(sample_metals), a_siiii_max=float(a_siiii_max))
+        sample_metals=bool(sample_metals), a_siiii_max=float(a_siiii_max),
+        hierarchical_hcd=bool(hierarchical_hcd), hcd_noncentered=bool(hcd_noncentered),
+        hcd_ratio_mu=hcd_ratio_mu, hcd_ratio_sigma=hcd_ratio_sigma,
+        hcd_ratio_infl=float(hcd_ratio_infl))
     return ctx, d
 
 
@@ -795,7 +832,24 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     """The numpyro model: ``sampler_numpyro``'s priors (θ~Uniform^9 + auto-bijector; τ₀ in
     the α-ladder coord on the GLOBAL z grid; α_lls/subdla~Normal, α_dla~softplus(Normal)) with
     the single ``factor`` = the per-leg-core multi-leg real-cov loglik (``_data_loglik_legcore``
-    over ``mock_legs``)."""
+    over ``mock_legs``).
+
+    HIERARCHICAL HCD prior (``ctx.hierarchical_hcd``, default OFF → byte-identical legacy code):
+    the 3 independent HCD α sites become ONE likelihood-constrained MULTIPLIER ``A_hcd`` (= the LLS
+    prior verbatim) × two prior-pinned RATIOS ``r_subdla``/``r_dla`` (see ``_hcd_sites``). The
+    derived α are re-emitted as ``numpyro.deterministic`` under the EXISTING names; the existing
+    per-class z-slope ``s_c`` is UNCHANGED, so the ratio already evolves with the DIFFERENTIAL CDDF
+    slope r_c(z)=r_c·((1+z)/(1+z_p))^(s_c−s_LLS) (the must-fix #2 fix is FREE).
+
+    FUNNEL (centered is correct — must-fix #6): the classic Neal funnel needs a WIDE multiplier ×
+    a likelihood-CONSTRAINED latent. Here the orientation is BENIGN: the likelihood-constrained
+    factor is the MULTIPLIER ``A_hcd`` (the dominant, cosmology-degenerate, best-resolved LLS
+    amplitude), while the PINNED factor is the ratio ``r`` (σ_r ≪ the likelihood's r-resolving
+    power). This is NOT "the likelihood barely sees r" — subDLA IS likelihood-informed
+    (post_sd 0.021 < prior 0.036); the point is WHICH factor the likelihood pins. Centered, dense
+    mass, target 0.9 → expect 0 divergences. ``ctx.hcd_noncentered`` is a tested LocScaleReparam-
+    style fallback (same site names → site-order preserved); the 0-divergence gate is the empirical
+    check (test_legb_hier_hcd.test_on_branch_nuts_zero_divergences_and_finite)."""
     zg = jnp.asarray(ctx.z_global)
     _lo_u = jnp.asarray(_THETA_UNIT_LO if getattr(ctx, "theta_unit_lo", None) is None else ctx.theta_unit_lo)
     _hi_u = jnp.asarray(_THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi)
@@ -808,17 +862,11 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     dtau0 = numpyro.sample("dtau0", dist.Uniform(ctx.dtau0_range[0], ctx.dtau0_range[1]))
     alpha_z = tau0_alpha_priya(zg, tau0_amp, dtau0, z_pivot=ctx.tau0_pivot_z)
     tau0_global = numpyro.deterministic("tau0_vec", alpha_z * kim)
-    # α_LLS/α_subDLA are incidence weights → physically ≥0. TruncatedNormal(low=0) keeps the
-    # (μ,σ) interpretation but removes the α<0 mass (and the Σα>1 negative-clean tail) that a
-    # plain Normal admits — material at the KS-boosted LLS center (HCD referee 2026-06-11).
-    a_lls = numpyro.sample("alpha_lls",
-                           dist.TruncatedNormal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0], low=0.0))
-    a_sub = numpyro.sample("alpha_subdla",
-                           dist.TruncatedNormal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1], low=0.0))
-    a_dla_raw = numpyro.sample("alpha_dla_raw",
-                               dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
-    a_dla = numpyro.deterministic("alpha_dla", jax.nn.softplus(a_dla_raw))
-    alpha_pivot = jnp.stack([a_lls, a_sub, a_dla])              # (3,) pivot-z (z=3) amplitudes
+    # The HCD pivot-z (z=3) amplitudes (3,) [LLS, subDLA, DLA]. The shared ``_hcd_sites`` helper
+    # samples EITHER the legacy 3 independent α sites (alpha_lls/subdla TruncatedNormal(low=0),
+    # alpha_dla_raw Normal→softplus; default — byte-exact) OR, when ctx.hierarchical_hcd, the
+    # reparam A_hcd · r → α (re-emitted as deterministics under the SAME names alpha_lls/subdla/dla).
+    alpha_pivot = _hcd_sites(ctx)              # (3,) pivot-z amplitudes
     # z-RESOLVED incidence α_c(z) = α_pivot · ((1+z)/(1+z_p))^s_c (the dN/dX slope) — the fix:
     # the forward must track the mock's per-z w_c(z) (rises ~3.5× over z), not a z-constant α.
     # STEP-A M3: when ctx.marginalize_zslope, s_c is SAMPLED (the real-fit config) instead of
@@ -833,6 +881,63 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
                if getattr(ctx, "sample_metals", False) else 0.0)
     numpyro.factor("loglik", _data_loglik_legcore(
         ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg, a_siiii=a_siiii))
+
+
+def _hcd_sites(ctx):
+    """The HCD pivot-z (z=3) incidence amplitudes α_pivot (3,) [LLS, subDLA, DLA]. SHARED by
+    ``_legb_model`` (with the factor) and ``_legb_priors_only`` (the transform-only postprocess) so
+    the sample sites stay ORDER-IDENTICAL across both — the fast-postprocess constrain_fn relies on
+    it (mirrors ``_zslope_sites``).
+
+    LEGACY branch (default, ``ctx.hierarchical_hcd`` False → BYTE-EXACT): the 3 independent sites
+      alpha_lls/alpha_subdla ~ TruncatedNormal(μ_c, σ_c, low=0); alpha_dla_raw ~ Normal →
+      alpha_dla = deterministic(softplus(raw)). Identical to the pre-Option-B code.
+
+    HIERARCHICAL branch (``ctx.hierarchical_hcd`` True): ONE likelihood-constrained MULTIPLIER
+      A_hcd ~ TruncatedNormal(μ_LLS, σ_LLS, low=0)   (= the LLS prior verbatim)
+      r_subdla ~ TruncatedNormal(r_sub_center, σ_r_sub, low=0)
+      r_dla    ~ TruncatedNormal(r_dla_center, σ_r_dla, low=0)
+      α = deterministic: alpha_lls=A_hcd, alpha_subdla=A_hcd·r_subdla, alpha_dla=A_hcd·r_dla
+      (re-emitted under the EXISTING names → all downstream code is unchanged). When
+      ``ctx.hcd_noncentered``, the SAME three sites are sampled standard-normal/uniform-base and
+      transformed (a LocScaleReparam-style non-centered fallback) — site NAMES are identical so the
+      site-order test passes; the 0-divergence gate decides centered vs non-centered."""
+    if not getattr(ctx, "hierarchical_hcd", False):
+        # ---- LEGACY (byte-exact) ----
+        a_lls = numpyro.sample("alpha_lls",
+                               dist.TruncatedNormal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0], low=0.0))
+        a_sub = numpyro.sample("alpha_subdla",
+                               dist.TruncatedNormal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1], low=0.0))
+        a_dla_raw = numpyro.sample("alpha_dla_raw",
+                                   dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
+        a_dla = numpyro.deterministic("alpha_dla", jax.nn.softplus(a_dla_raw))
+        return jnp.stack([a_lls, a_sub, a_dla])
+
+    # ---- HIERARCHICAL (Option B) ----
+    A_mu, A_sg = ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]        # A_hcd = the LLS prior verbatim
+    rmu = jnp.asarray(ctx.hcd_ratio_mu)                             # (2,) [r_sub, r_dla] centers
+    rsg = jnp.asarray(ctx.hcd_ratio_sigma)                          # (2,) widths
+    if getattr(ctx, "hcd_noncentered", False):
+        # LocScaleReparam-style: sample a standard base, transform to the truncated-at-0 quantity.
+        # We use the (rare) explicit non-centered form numpyro's TransformReparam would synthesize,
+        # but keep the SAMPLE-SITE names identical (A_hcd/r_subdla/r_dla) so the site-order test is
+        # unaffected. The base is a unit TruncatedNormal shifted/scaled — equivalent in distribution
+        # to the centered TruncatedNormal(low=0), with the funnel-friendly geometry decoupled.
+        z_A = numpyro.sample("A_hcd_base", dist.TruncatedNormal(0.0, 1.0, low=-A_mu / A_sg))
+        A_hcd = numpyro.deterministic("A_hcd", A_mu + A_sg * z_A)
+        z_rs = numpyro.sample("r_subdla_base", dist.TruncatedNormal(0.0, 1.0, low=-rmu[0] / rsg[0]))
+        r_subdla = numpyro.deterministic("r_subdla", rmu[0] + rsg[0] * z_rs)
+        z_rd = numpyro.sample("r_dla_base", dist.TruncatedNormal(0.0, 1.0, low=-rmu[1] / rsg[1]))
+        r_dla = numpyro.deterministic("r_dla", rmu[1] + rsg[1] * z_rd)
+    else:
+        A_hcd = numpyro.sample("A_hcd", dist.TruncatedNormal(A_mu, A_sg, low=0.0))
+        r_subdla = numpyro.sample("r_subdla", dist.TruncatedNormal(rmu[0], rsg[0], low=0.0))
+        r_dla = numpyro.sample("r_dla", dist.TruncatedNormal(rmu[1], rsg[1], low=0.0))
+    # derived α under the EXISTING names (so _draws_matrix / _loglik_of_draws / corner are unchanged).
+    a_lls = numpyro.deterministic("alpha_lls", A_hcd)
+    a_sub = numpyro.deterministic("alpha_subdla", A_hcd * r_subdla)
+    a_dla = numpyro.deterministic("alpha_dla", A_hcd * r_dla)
+    return jnp.stack([a_lls, a_sub, a_dla])
 
 
 def _zslope_sites(ctx):
@@ -861,38 +966,61 @@ def _legb_priors_only(ctx):
     numpyro.sample("theta_unit", dist.Uniform(_lo_u, _hi_u).to_event(1))
     numpyro.sample("tau0_amp", dist.Uniform(ctx.tau0_amp_range[0], ctx.tau0_amp_range[1]))
     numpyro.sample("dtau0", dist.Uniform(ctx.dtau0_range[0], ctx.dtau0_range[1]))
-    numpyro.sample("alpha_lls", dist.TruncatedNormal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0], low=0.0))
-    numpyro.sample("alpha_subdla", dist.TruncatedNormal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1], low=0.0))
-    numpyro.sample("alpha_dla_raw", dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
-    if getattr(ctx, "marginalize_zslope", False):
-        mu = (jnp.asarray(HCD_LIT_OVER_SIM_SLOPE) if ctx.zslope_mu is None
-              else jnp.asarray(ctx.zslope_mu))
-        sg = (jnp.asarray(ZSLOPE_PRIOR_SIGMA) if ctx.zslope_sigma is None
-              else jnp.asarray(ctx.zslope_sigma))
-        numpyro.sample("s_lls", dist.Normal(mu[0], sg[0]))
-        numpyro.sample("s_subdla", dist.Normal(mu[1], sg[1]))
-        numpyro.sample("s_dla", dist.Normal(mu[2], sg[2]))
+    # the HCD pivot α sites — SHARED with _legb_model via _hcd_sites so the sample-site order is
+    # IDENTICAL in both branches (legacy 3-site vs hierarchical A_hcd/r_subdla/r_dla). The
+    # deterministics it emits are dropped by constrain_fn(return_deterministic=False).
+    _hcd_sites(ctx)
+    _zslope_sites(ctx)                            # mirrors _legb_model (s_c when marginalize_zslope)
     if getattr(ctx, "sample_metals", False):     # MUST mirror _legb_model's site (same order)
         numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
 
 
 def _legb_reconstruct_deterministics(ctx, samples):
-    """Reconstruct the three ``numpyro.deterministic`` sites of ``_legb_model``
-    (``tau0_vec``, ``alpha_dla``, ``alpha_hcd_z``) host-side from the raw latent samples —
-    so the cheap (priors-only) postprocess can SKIP the per-sample full-model deterministic
-    replay (the 237.6 s/mock waste flagged in MF-SMOKE-01) yet return a samples dict
-    BYTE-IDENTICAL to numpyro's default ``get_samples()``. Returns a NEW dict (the input plus
-    the three deterministic keys)."""
+    """Reconstruct the ``numpyro.deterministic`` sites of ``_legb_model``
+    (``tau0_vec``, ``alpha_dla``, ``alpha_hcd_z`` and — in the hierarchical branch — also
+    ``alpha_lls``/``alpha_subdla``) host-side from the raw latent samples — so the cheap
+    (priors-only) postprocess can SKIP the per-sample full-model deterministic replay (the
+    237.6 s/mock waste flagged in MF-SMOKE-01) yet return a samples dict BYTE-IDENTICAL to
+    numpyro's default ``get_samples()``. Returns a NEW dict (the input plus the deterministic keys).
+
+    HIERARCHICAL seam (must-fix #4): in the Option-B branch, ``constrain_fn(return_deterministic=
+    False)`` keeps only the SAMPLE sites (A_hcd/r_subdla/r_dla, or their *_base latents in the
+    non-centered fallback) and DROPS the derived α deterministics — but ``_draws_matrix`` /
+    ``_loglik_of_draws`` read alpha_lls/alpha_subdla/alpha_dla BY NAME. So we MUST rebuild AND
+    RE-INSERT all three (alpha_lls=A_hcd, alpha_subdla=A_hcd·r_subdla, alpha_dla=A_hcd·r_dla)."""
+    out = dict(samples)
     zg = jnp.asarray(ctx.z_global)
     kim = _kim(zg)
     tau0_amp = jnp.asarray(samples["tau0_amp"])                      # (L,)
     dtau0 = jnp.asarray(samples["dtau0"])                            # (L,)
     alpha_z = tau0_amp[:, None] * ((1.0 + zg)[None, :] / (1.0 + ctx.tau0_pivot_z)) ** dtau0[:, None]
     tau0_vec = alpha_z * kim[None, :]                                # (L, nZg)
-    alpha_dla = jax.nn.softplus(jnp.asarray(samples["alpha_dla_raw"]))  # (L,)
-    alpha_pivot = jnp.stack([jnp.asarray(samples["alpha_lls"]),
-                             jnp.asarray(samples["alpha_subdla"]),
-                             alpha_dla], axis=-1)                     # (L, 3)
+    if getattr(ctx, "hierarchical_hcd", False):
+        # rebuild A_hcd/r from the *_base latents in the non-centered fallback (constrain_fn drops
+        # the A_hcd/r deterministics there); else they are the sample sites directly.
+        if "A_hcd" in samples:
+            A_hcd = jnp.asarray(samples["A_hcd"])
+            r_subdla = jnp.asarray(samples["r_subdla"])
+            r_dla = jnp.asarray(samples["r_dla"])
+        else:
+            A_mu, A_sg = ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]
+            rmu = jnp.asarray(ctx.hcd_ratio_mu); rsg = jnp.asarray(ctx.hcd_ratio_sigma)
+            A_hcd = A_mu + A_sg * jnp.asarray(samples["A_hcd_base"])
+            r_subdla = rmu[0] + rsg[0] * jnp.asarray(samples["r_subdla_base"])
+            r_dla = rmu[1] + rsg[1] * jnp.asarray(samples["r_dla_base"])
+            out["A_hcd"] = A_hcd
+            out["r_subdla"] = r_subdla
+            out["r_dla"] = r_dla
+        alpha_lls = A_hcd                                            # (L,)
+        alpha_subdla = A_hcd * r_subdla                              # (L,)
+        alpha_dla = A_hcd * r_dla                                    # (L,)
+        out["alpha_lls"] = alpha_lls
+        out["alpha_subdla"] = alpha_subdla
+    else:
+        alpha_lls = jnp.asarray(samples["alpha_lls"])
+        alpha_subdla = jnp.asarray(samples["alpha_subdla"])
+        alpha_dla = jax.nn.softplus(jnp.asarray(samples["alpha_dla_raw"]))  # (L,)
+    alpha_pivot = jnp.stack([alpha_lls, alpha_subdla, alpha_dla], axis=-1)  # (L, 3)
     if getattr(ctx, "marginalize_zslope", False) and "s_lls" in samples:
         s_c = jnp.stack([jnp.asarray(samples["s_lls"]),
                          jnp.asarray(samples["s_subdla"]),
@@ -904,7 +1032,6 @@ def _legb_reconstruct_deterministics(ctx, samples):
     else:
         shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** jnp.asarray(HCD_LIT_OVER_SIM_SLOPE)
         alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg[None, :, :]      # (L, nZg, 3)
-    out = dict(samples)
     out["tau0_vec"] = tau0_vec
     out["alpha_dla"] = alpha_dla
     out["alpha_hcd_z"] = alpha_hcd_z
@@ -1117,6 +1244,8 @@ def run_legb_convergence(ctx: LegBCtx, d, *, sim=None, mock_index=0, n_chains=4,
 
     truth_vec = np.concatenate([
         truth_pack["theta9"], truth_pack["tau0_global"][kept_global], truth_pack["alpha_hcd"]])
+    if getattr(ctx, "hierarchical_hcd", False):
+        truth_vec = np.concatenate([truth_vec, _hcd_latent_truths(truth_pack["alpha_hcd"])])
 
     ids = list(range(int(n_chains))) if chain_ids is None else list(chain_ids)
     packed_chains, energies, num_steps_all, per_chain_div, init_vals = [], [], [], [], []
@@ -1138,11 +1267,10 @@ def run_legb_convergence(ctx: LegBCtx, d, *, sim=None, mock_index=0, n_chains=4,
                   f"E-BFMI={_ebfmi1(extra['energy']):.2f}")
 
     packed = np.stack(packed_chains, axis=0)                # (C, N, P)
-    n_theta, n_alpha = 9, 3
-    names = list(PARAM_NAMES) + ["alpha_lls", "alpha_subdla", "alpha_dla"]
-    # the packed-draw column order is θ9, τ₀(kept), α3 — name the τ₀ block by global-z index.
-    tau0_names = [f"tau0_z{i}" for i in range(int(kept_global.sum()))]
-    packed_names = list(PARAM_NAMES) + tau0_names + ["alpha_lls", "alpha_subdla", "alpha_dla"]
+    # the packed-draw column names mirror _draws_matrix EXACTLY (θ9, τ₀(kept), α3, [A_hcd/r…],
+    # [a_SiIII]) — built from the last chain's samples dict so the hierarchical latents / metal
+    # nuisance columns are named when present (must-fix #5: index by name, not position).
+    packed_names = _packed_names_for(samples, kept_global)
 
     battery = convergence_battery(
         packed, packed_names, energy=np.stack(energies) if energies else None,
@@ -1197,10 +1325,40 @@ def _draws_matrix(samples, kept_global):
     a_lls = np.asarray(samples["alpha_lls"])[:, None]
     a_sub = np.asarray(samples["alpha_subdla"])[:, None]
     a_dla = np.asarray(samples["alpha_dla"])[:, None]
-    cols = [theta, tau0, a_lls, a_sub, a_dla]
+    cols = [theta, tau0, a_lls, a_sub, a_dla]               # the derived α (back-compat: ALWAYS here)
+    # HIERARCHICAL latents (Option B): append A_hcd/r_subdla/r_dla AFTER the derived α (back-compat
+    # — the α block stays at its positional home; downstream indexes α by name, must-fix #5). The
+    # truth_vec tail (w_LLS, w_sub/w_LLS, 0.10·w_DLA/w_LLS) is appended in the driver to match.
+    for nm in ("A_hcd", "r_subdla", "r_dla"):
+        if nm in samples:
+            cols.append(np.asarray(samples[nm])[:, None])
     if "a_SiIII" in samples:                                 # opt-in metal nuisance (appended LAST)
         cols.append(np.asarray(samples["a_SiIII"])[:, None])
     return np.concatenate(cols, axis=1)
+
+
+def _hcd_latent_truths(alpha_hcd_truth):
+    """The (A_hcd, r_subdla, r_dla) TRUTH for an HB mock from the truth α=[w_LLS, w_sub, 0.10·w_DLA]
+    (truth_pack["alpha_hcd"], make_legb_mock:716-717). A_hcd=w_LLS; r_subdla=w_sub/w_LLS;
+    r_dla=(0.10·w_DLA)/w_LLS — appended to truth_vec to align with the A_hcd/r_subdla/r_dla draw
+    columns _draws_matrix adds in the hierarchical branch."""
+    a = np.asarray(alpha_hcd_truth, float)
+    return np.array([a[0], a[1] / a[0], a[2] / a[0]])
+
+
+def _packed_names_for(samples, kept_global):
+    """The packed-draw column NAMES matching ``_draws_matrix(samples, kept_global)``'s columns —
+    [θ9, τ₀(kept), alpha_lls, alpha_subdla, alpha_dla, (A_hcd, r_subdla, r_dla), (a_SiIII)]. Built
+    from the SAME presence checks so names stay aligned with the columns (the α stay at their
+    positional home; the appended latents/metal go after — must-fix #5 indexes α by name)."""
+    tau0_names = [f"tau0_z{i}" for i in range(int(np.asarray(kept_global).sum()))]
+    names = list(PARAM_NAMES) + tau0_names + ["alpha_lls", "alpha_subdla", "alpha_dla"]
+    for nm in ("A_hcd", "r_subdla", "r_dla"):
+        if nm in samples:
+            names.append(nm)
+    if "a_SiIII" in samples:
+        names.append("a_SiIII")
+    return names
 
 
 def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
@@ -1265,6 +1423,8 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
             truth_pack["theta9"],
             truth_pack["tau0_global"][kept_global],
             truth_pack["alpha_hcd"]])
+        if getattr(ctx, "hierarchical_hcd", False):          # align with the appended A_hcd/r columns
+            truth_vec = np.concatenate([truth_vec, _hcd_latent_truths(truth_pack["alpha_hcd"])])
 
         # loglik of the truth + draws on the SAME mock data (Modrak rank).
         ll_true = float(_data_loglik_legcore(
@@ -1317,18 +1477,27 @@ def _aggregate_legb(per_mock, *, q_levels):
     L_list = [rec["L"] for rec in per_mock]
     L_eff = int(min(L_list))
 
+    # COLUMN INDEXING (must-fix #5 — the pre-existing positional bug). The α used to be indexed by
+    # NEGATIVE position (-3,-2,-1) into BOTH ``draws`` and ``truth_vec``, assuming "α are the last
+    # 3". But ``_draws_matrix`` APPENDS a_SiIII (and, hierarchical, A_hcd/r_subdla/r_dla) AFTER the
+    # α columns, while ``truth_vec`` does NOT → the negative index lands on [subdla, dla, a_SiIII]
+    # on the metals path (mis-aligned). BOTH layouts share the SAME positive α block
+    # [θ9, τ₀(nKeptZ), α_lls, α_sub, α_dla, ...] so index α by its NAME-derived POSITIVE position
+    # (θ9 → j; α → 9 + nKeptZ + (j−9)); the per-mock nKeptZ comes from rec["kept_global"].
+    def _col_of(rec, j):
+        if j < n_theta:
+            return j
+        n_kept = int(np.asarray(rec["kept_global"]).sum())
+        return n_theta + n_kept + (j - n_theta)     # the α block start + the class offset (0,1,2)
+
     # coverage at each q for the cosmo+α params (the always-present block).
     coverage = {}
     for q in q_levels:
         cov_q = {}
         for j, nm in enumerate(names):
-            # column index in the packed truth_vec: θ9 are 0..8; α are the LAST 3.
-            if j < n_theta:
-                col = j
-            else:
-                col = -(n_alpha - (j - n_theta))    # -3,-2,-1
             truths, ints = [], []
             for rec in per_mock:
+                col = _col_of(rec, j)
                 tv = rec["truth_vec"]
                 draws_col = rec["draws"][:, col]
                 lo, hi = central_interval(draws_col, q)
@@ -1341,9 +1510,9 @@ def _aggregate_legb(per_mock, *, q_levels):
     # well-calibrated+unbiased → mean≈0). The mean over N mocks has s.e. ≈ std/√N.
     bias = {}
     for j, nm in enumerate(names):
-        col = j if j < n_theta else -(n_alpha - (j - n_theta))
         zs = []
         for rec in per_mock:
+            col = _col_of(rec, j)
             dc = rec["draws"][:, col]; sd = float(dc.std())
             if sd > 0:
                 zs.append((float(rec["truth_vec"][col]) - float(dc.mean())) / sd)

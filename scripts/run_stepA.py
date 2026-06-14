@@ -120,7 +120,8 @@ def build_config(verbose=False):
                      sigma_lls=None, sigma_subdla=None, tau0_extreme=False, n_chains=4, sim=None,
                      lls_truth_boost=1.0, mf=False, hr_truth=False, mf_shape=0.0, desi_floor=False,
                      mf_emucoh=0.0, mf_emucoh_offdiag_only=False, sample_metals=False,
-                     inject_a_siiii=0.0, subdla_center_shift=0.0):
+                     inject_a_siiii=0.0, subdla_center_shift=0.0,
+                     hierarchical_hcd=False, hcd_ratio_infl=1.0):
         if sim is None:
             ns, sim = _closest_sim(fold_sims[fold], target_ns)
         else:
@@ -136,6 +137,7 @@ def build_config(verbose=False):
                 mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
                 sample_metals=bool(sample_metals), inject_a_siiii=float(inject_a_siiii),
                 subdla_center_shift=float(subdla_center_shift),
+                hierarchical_hcd=bool(hierarchical_hcd), hcd_ratio_infl=float(hcd_ratio_infl),
                 chain_id=c, n_chains=n_chains, seed=0))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -296,6 +298,25 @@ def build_config(verbose=False):
         for _sh, _tag in [(0.0, "_s0"), (1.0, "_sp"), (-1.0, "_sm")]:
             add_fiducial(_xnm + _tag, _xf, _xns, survey="DESI+KS",
                          prior_center="sim_mean", subdla_center_shift=_sh)
+
+    # === HIERARCHICAL HCD-prior closure ("Option B", 2026-06-13): PAIRED ON-vs-OFF validation ===
+    # The A_hcd × {r_subdla, r_dla} reparam collapses the flat subDLA↔DLA exchange direction (the
+    # n_s-leak source flagged by the XS cosmology-safety arm: closure corr(subDLA pull, n_s)=+0.82)
+    # onto ONE fixed-shape additive amplitude + prior-pinned shape ratios. Run on the JOINT DESI+KS
+    # legs (the production combination where KS could re-activate the subDLA↔A_p channel), sim-mean
+    # (NON-circular) HCD center. Each baseline runs a MATCHED PAIR with the SAME fold/sim/seed (the
+    # mock data + noise are byte-identical; mock generation does NOT read hierarchical_hcd):
+    #   "_HB0" — hierarchical_hcd=False (the legacy 3-independent-α control);
+    #   "_HB1" — hierarchical_hcd=True  (the reparam, hcd_ratio_infl=1 = the closure 10%/12% widths).
+    # The validation gate (design doc §"Validation gate"): bias_z(ON)==bias_z(OFF) within MC + the
+    # subDLA mean bias collapses + the ±1σ subDLA-center n_s coupling drops <0.3σ + 0 divergences.
+    # NOT launched here — config only. (run_stepA.run_one_chain threads hierarchical_hcd through
+    # build_legb_ctx; the ratio centers/widths auto-derive from the raw sim w_c, must-fix #1.)
+    for _hnm, _hf, _hns in [("HB_f6", 6, 0.966), ("HB_f4", 4, 0.92)]:
+        add_fiducial(_hnm + "_HB0", _hf, _hns, survey="DESI+KS", prior_center="sim_mean",
+                     hierarchical_hcd=False)
+        add_fiducial(_hnm + "_HB1", _hf, _hns, survey="DESI+KS", prior_center="sim_mean",
+                     hierarchical_hcd=True, hcd_ratio_infl=1.0)
 
     # === Phase-5a Test A (2026-06-11): MF gate-invariant M-tier re-run at HR cosmologies ===
     # with_mf=True → truth = MF-corrected LF AND forward = MF-corrected LF (the GATE INVARIANT: the
@@ -506,8 +527,8 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     from hcd_analysis.emulator import closure_legb as C
     from hcd_analysis.emulator.closure_legb import (
         build_legb_ctx, held_out_sims, make_truth_from_sim, make_hr_truth_from_cache, make_legb_mock,
-        _mock_core_per_leg, _run_nuts_legb, _draws_matrix, CACHE_PATH,
-        ZSLOPE_PRIOR_SIGMA)
+        _mock_core_per_leg, _run_nuts_legb, _draws_matrix, _packed_names_for, _hcd_latent_truths,
+        CACHE_PATH, ZSLOPE_PRIOR_SIGMA)
     from hcd_analysis.emulator.inference import (PARAM_NAMES, HCD_LIT_OVER_SIM_SLOPE,
                                                  hcd_incidence_prior)
 
@@ -541,7 +562,11 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         mf_shape=(_infl > 0), mf_shape_infl=(_infl if _infl > 0 else 1.0),
         mf_shape_legs=(_survey,),
         mf_emucoh=(_einfl > 0), mf_emucoh_infl=(_einfl if _einfl > 0 else 1.0),
-        mf_emucoh_legs=(_survey,), mf_emucoh_offdiag_only=_eoda, desi_kwargs=_desi_kw)
+        mf_emucoh_legs=(_survey,), mf_emucoh_offdiag_only=_eoda, desi_kwargs=_desi_kw,
+        # HIERARCHICAL HCD prior ("Option B"): A_hcd × {r_subdla, r_dla} reparam (default OFF →
+        # byte-identical). The ratio centers are auto-derived from the RAW sim w_c pool (must-fix #1).
+        hierarchical_hcd=bool(chain.get("hierarchical_hcd", False)),
+        hcd_ratio_infl=float(chain.get("hcd_ratio_infl", 1.0) or 1.0))
 
     if chain["z_slope_marginalized"]:
         ctx = ctx._replace(marginalize_zslope=True,
@@ -618,13 +643,15 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         max_tree_depth=max_tree_depth, init_strategy=init_to_sample, return_extra=True)
     wall = time.time() - t0
 
-    draws = _draws_matrix(samples, kept_global)            # (N, P) — _draws_matrix appends a_SiIII if sampled
-    tau0_names = [f"tau0_z{i}" for i in range(int(kept_global.sum()))]
-    packed_names = list(PARAM_NAMES) + tau0_names + ["alpha_lls", "alpha_subdla", "alpha_dla"]
+    draws = _draws_matrix(samples, kept_global)            # (N, P) — appends A_hcd/r_…/a_SiIII if present
+    # the packed column NAMES mirror _draws_matrix EXACTLY: θ9, τ₀(kept), α3, [A_hcd/r_subdla/r_dla
+    # when hierarchical], [a_SiIII when sampled] (must-fix #5: index α by name downstream).
+    packed_names = list(_packed_names_for(samples, kept_global))
     truth_vec = np.concatenate([
         truth_pack["theta9"], truth_pack["tau0_global"][kept_global], truth_pack["alpha_hcd"]])
+    if bool(chain.get("hierarchical_hcd", False)):         # match the A_hcd/r_subdla/r_dla draw columns
+        truth_vec = np.concatenate([truth_vec, _hcd_latent_truths(truth_pack["alpha_hcd"])])
     if bool(chain.get("sample_metals", False)):            # match the a_SiIII column _draws_matrix added
-        packed_names = packed_names + ["a_SiIII"]           # truth a_SiIII = the injected amplitude
         truth_vec = np.concatenate([truth_vec, [float(chain.get("inject_a_siiii", 0.0) or 0.0)]])
 
     num_steps = np.asarray(extra["num_steps"])
@@ -644,6 +671,8 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         mf_emucoh_offdiag_only=bool(chain.get("mf_emucoh_offdiag_only", False)),
         sample_metals=bool(chain.get("sample_metals", False)),
         inject_a_siiii=float(chain.get("inject_a_siiii", 0.0) or 0.0),
+        hierarchical_hcd=bool(chain.get("hierarchical_hcd", False)),
+        hcd_ratio_infl=float(chain.get("hcd_ratio_infl", 1.0) or 1.0),
         chain_index=int(chain["chain_id"]), n_chains_target=int(chain["n_chains"]),
         # battery inputs: the per-chain packed draws + the extra fields (energy/num_steps/diverg).
         packed=draws.astype(np.float64), names=np.array(packed_names),

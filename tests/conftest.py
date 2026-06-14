@@ -8,3 +8,8 @@ non-emulator tests.
 """
 import jax
 jax.config.update("jax_enable_x64", True)
+
+
+def pytest_configure(config):
+    # register the `slow` marker (the ~8-min NUTS 0-divergence funnel smoke is marked slow).
+    config.addinivalue_line("markers", "slow: marks slow tests (deselect with '-m \"not slow\"')")

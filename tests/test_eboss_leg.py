@@ -163,17 +163,20 @@ def test_draws_matrix_appends_a_siiii_only_when_present():
 
 
 @pytest.mark.skipif(not _have, reason="eBOSS npz not built")
-@pytest.mark.parametrize("marg_zslope", [False, True])   # both real-fit configs: metals × zslope
-def test_legb_model_priors_only_site_order_match(marg_zslope):
+@pytest.mark.parametrize("hierarchical_hcd", [False, True])   # legacy 3-α vs Option-B A_hcd×r reparam
+@pytest.mark.parametrize("marg_zslope", [False, True])   # both real-fit configs: metals × zslope × hier
+def test_legb_model_priors_only_site_order_match(marg_zslope, hierarchical_hcd):
     # the fast-postprocess constrain_fn relies on _legb_priors_only having the SAME sample sites IN
     # THE SAME ORDER as _legb_model. With sample_metals=True, a_SiIII must appear in both, last —
-    # and the zslope block (when marginalized) must not reorder relative to it.
+    # and the zslope block (when marginalized) and the HCD block (legacy vs hierarchical) must not
+    # reorder relative to it.
     import jax
     import numpyro
     from numpyro import handlers
     from hcd_analysis.emulator import closure_legb as C
     ctx, _ = C.build_legb_ctx(ckpt="/home/mfho/hcd_priya/checkpoints/final_fold6",
-                              with_eboss=True, sample_metals=True)
+                              with_eboss=True, sample_metals=True,
+                              hierarchical_hcd=hierarchical_hcd)
     ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "eBOSS"],
                        marginalize_zslope=marg_zslope)
     truth = C.make_truth_from_sim(C.load_cache(C.CACHE_PATH),
@@ -188,6 +191,13 @@ def test_legb_model_priors_only_site_order_match(marg_zslope):
     s_prior = sites(C._legb_priors_only, ctx)
     assert "a_SiIII" in s_model and s_model[-1] == "a_SiIII"
     assert s_model == s_prior, f"site-order mismatch: model {s_model} vs priors {s_prior}"
+    # the HCD block identity: A_hcd present ⇔ hierarchical; the legacy α absent in the hier branch.
+    if hierarchical_hcd:
+        assert {"A_hcd", "r_subdla", "r_dla"}.issubset(set(s_model))
+        assert not ({"alpha_lls", "alpha_subdla", "alpha_dla_raw"} & set(s_model))
+    else:
+        assert {"alpha_lls", "alpha_subdla", "alpha_dla_raw"}.issubset(set(s_model))
+        assert "A_hcd" not in s_model
 
 
 def test_eboss_si_cert_arms_inject_and_sample():
