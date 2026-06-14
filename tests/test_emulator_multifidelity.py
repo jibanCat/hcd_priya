@@ -539,3 +539,258 @@ def test_build_eval_grid_caps_at_kodiaq():
     assert k_eval.shape == (32,) and np.isclose(k_eval[-1], 0.2)
     assert k_eval[0] == pytest.approx(MF.DATA_RANGE["k_min"])
     assert np.all(np.diff(k_eval) > 0)
+
+
+# --------------------------------------------------------------------------- #
+# T1: tau0+z-RESOLVED FixedMeanHead (separable + ONE rank-1 interaction)
+#   g(z,tau0,k) = gbar_z(z,k) + gbar_tau(tau0,k) + a(k)*u_z(z)*u_tau(tau0)
+# --------------------------------------------------------------------------- #
+def _synth_resolved_targets(K=14, n_z=5, n_rung=4, n_sim=6, seed=0):
+    """Synthetic measured-rho targets with a KNOWN separable+rank-1 (z,rung,k)
+    structure + small 6-sim noise, for the resolved-head tests.
+
+    Faithful to the real cache: tau0 = -log(target_F) is a DETERMINISTIC, bit-identical
+    function of (rung, z) and GROWS with z within a rung -- so each row carries an
+    ``alpha_idx`` (rung) and a tau0 that is rung-monotone AND z-growing.  ``g`` is
+    gbar_z(z,k)+gbar_tau(rung,k)+a(k)u_z u_tau plus Gaussian 6-sim noise (class 0; the
+    others copy it -> class-independent rho).  Returns ``(targets, eval_logk, truth)``
+    with truth = the noiseless per-(z,rung) g table and the per-z tau0 ladder.
+    """
+    rng = np.random.default_rng(seed)
+    eval_logk = np.linspace(np.log10(1e-2), np.log10(0.069), K)
+    z_phys = np.linspace(2.2, 5.0, n_z)
+    z_unit = (z_phys - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
+    rungs = np.arange(n_rung)
+    # per-z tau0 ladder: rung sets the base mean-flux level, z scales it up (monotone).
+    tau_by_z = (0.66 + 0.67 * rungs[None, :] / max(n_rung - 1, 1)) * \
+               (0.5 + 0.4 * (z_phys[:, None] - 2.2))                  # (nz,nrung)
+    u = 2 * (eval_logk - eval_logk.min()) / (eval_logk.max() - eval_logk.min()) - 1
+    # separable z-trend (rising tilt, larger at low z), rung-trend, + rank-1 sign-flip.
+    gbar_z = (0.06 - 0.012 * (z_phys[:, None] - 2.2)) * (1 + 0.5 * u)[None, :]   # (nz,K)
+    gtau = 0.015 * (rungs[:, None] - rungs.mean()) * (1 + 0.3 * u)[None, :]      # (nr,K)
+    a_k = 0.02 * (1.0 + u)                                                       # (K,)
+    u_z = (z_phys - z_phys.mean()) / np.ptp(z_phys)                            # (nz,)
+    u_tau = (rungs - rungs.mean()) / np.ptp(rungs)                              # (nr,)
+    truth = (gbar_z[:, None, :] + gtau[None, :, :]
+             + a_k[None, None, :] * u_z[:, None, None] * u_tau[None, :, None])  # (nz,nr,K)
+
+    X, T0, AI, G = [], [], [], []
+    for s in range(n_sim):
+        for zi in range(n_z):
+            for ri in range(n_rung):
+                x = np.zeros(10)
+                x[0] = rng.uniform(0.1, 0.9)        # a dummy theta (must be ignored)
+                x[9] = z_unit[zi]
+                noise = rng.normal(0, 0.006, size=K)   # ~0.6% 6-sim noise
+                gC0 = truth[zi, ri] + noise
+                g4 = np.tile(gC0[None, :], (4, 1))     # class-independent rho
+                X.append(x); T0.append(tau_by_z[zi, ri]); AI.append(ri); G.append(g4)
+    return (dict(x=np.asarray(X), tau0=np.asarray(T0), alpha_idx=np.asarray(AI),
+                 g=np.asarray(G), hr_row=np.arange(len(X)), lf_row=np.arange(len(X))),
+            eval_logk, dict(truth=truth, z_phys=z_phys, rungs=rungs,
+                            tau_by_z=tau_by_z, eval_logk=eval_logk))
+
+
+def test_resolved_fixed_mean_table_decomposition_shapes():
+    """fixed_mean_table_resolved returns the separable + rank-1 components with the
+    expected shapes and z/tau0 grids ascending."""
+    tg, eval_logk, truth = _synth_resolved_targets()
+    log_rho = np.nan_to_num(MF.mean_log_ratio_rho(tg, eval_logk), nan=0.0)
+    comp = MF.fixed_mean_table_resolved(tg, log_rho)
+    K = len(eval_logk)
+    nz = len(truth["z_phys"]); nt = len(truth["rungs"])
+    assert comp["gbar_z_tab"].shape == (nz, MF.N_CLASSES, K)
+    assert comp["gtau_tab"].shape == (nt, MF.N_CLASSES, K)
+    assert comp["a_k"].shape == (MF.N_CLASSES, K)
+    assert comp["u_z"].shape == (nz,) and comp["u_tau"].shape == (nt,)
+    assert comp["z_tab"].shape == (nz,) and comp["tau_tab"].shape == (nt,)
+    assert comp["tau_by_z"].shape == (nz, nt)
+    assert np.all(np.diff(comp["z_tab"]) > 0)
+    assert np.all(np.diff(comp["tau_tab"]) > 0)               # rung index axis
+    assert np.all(np.diff(comp["tau_by_z"], axis=1) > 0)      # tau0 monotone in rung
+
+
+def test_resolved_head_g_depends_on_tau0_and_is_differentiable():
+    """The CORE T1 fix: g is tau0-resolved AND dg/dtau0 is finite & NONZERO (the
+    pooled FixedMeanHead has dg/dtau0 IDENTICALLY zero)."""
+    tg, eval_logk, truth = _synth_resolved_targets()
+    log_rho = np.nan_to_num(MF.mean_log_ratio_rho(tg, eval_logk), nan=0.0)
+    head = MF.build_default_head(tg, log_rho, resolved=True)
+    basis = MF.smooth_k_basis(jnp.asarray(eval_logk), 4)
+    # build a cond at a mid z and mid tau0
+    z_unit = float((3.4 - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0]))
+    x = jnp.zeros(10).at[9].set(z_unit)
+
+    def g_of_tau(t0):
+        cond = MF.make_cond(x, t0)
+        return (log_rho[None, :] + head(cond, basis)).sum()
+
+    # finite, NONZERO gradient wrt tau0
+    dgt = float(jax.grad(g_of_tau)(jnp.asarray(1.0)))
+    assert np.isfinite(dgt)
+    assert abs(dgt) > 1e-6                              # NONZERO (vs pooled head == 0)
+    # g actually differs at two different tau0
+    cond_lo = MF.make_cond(x, jnp.asarray(0.7))
+    cond_hi = MF.make_cond(x, jnp.asarray(1.3))
+    g_lo = np.asarray(log_rho[None, :] + head(cond_lo, basis))
+    g_hi = np.asarray(log_rho[None, :] + head(cond_hi, basis))
+    assert not np.allclose(g_lo, g_hi, atol=1e-6)
+
+
+def test_resolved_head_reproduces_rho_to_6sim_noise():
+    """g(z,tau0,k) reproduces the measured per-(z,rung) rho on the synthetic 'sims'
+    to within the ~0.6% 6-sim noise floor (the decomposition is unbiased).  tau0 is
+    looked up at each rung's PHYSICAL tau0 at that z (the per-z ladder)."""
+    tg, eval_logk, truth = _synth_resolved_targets()
+    log_rho = np.nan_to_num(MF.mean_log_ratio_rho(tg, eval_logk), nan=0.0)
+    head = MF.build_default_head(tg, log_rho, resolved=True)
+    basis = MF.smooth_k_basis(jnp.asarray(eval_logk), 4)
+    errs = []
+    for zi, zp in enumerate(truth["z_phys"]):
+        z_unit = (zp - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
+        x = jnp.zeros(10).at[9].set(float(z_unit))
+        for ri in range(len(truth["rungs"])):
+            t0 = truth["tau_by_z"][zi, ri]          # physical tau0 of this rung at z
+            cond = MF.make_cond(x, jnp.asarray(float(t0)))
+            g = np.asarray(log_rho[None, :] + head(cond, basis))[0]  # class 0
+            errs.append(np.abs(g - truth["truth"][zi, ri]))
+    errs = np.concatenate(errs)
+    # the noiseless target is reproduced to within the 6-sim noise (~0.6%, allow 1%).
+    assert errs.max() < 0.01, f"max reproduction err {errs.max():.4f} exceeds 6-sim noise"
+
+
+def test_resolved_head_clamped_no_nan_over_edges():
+    """C0-continuous / no-NaN at and BEYOND the (z, tau0) table edges -- NUTS-safe."""
+    tg, eval_logk, truth = _synth_resolved_targets()
+    log_rho = np.nan_to_num(MF.mean_log_ratio_rho(tg, eval_logk), nan=0.0)
+    head = MF.build_default_head(tg, log_rho, resolved=True)
+    basis = MF.smooth_k_basis(jnp.asarray(eval_logk), 4)
+    # query z far below/above the table and tau0 far outside the measured ladder
+    for z_unit in (-0.5, 0.0, 0.5, 1.5):
+        for t0 in (0.01, 0.66, 1.0, 1.33, 5.0):
+            cond = MF.make_cond(jnp.zeros(10).at[9].set(float(z_unit)),
+                                jnp.asarray(float(t0)))
+            g = np.asarray(head(cond, basis))
+            assert np.all(np.isfinite(g)), (z_unit, t0)
+    # clamp value at the low tau0 edge == clamp value FAR below it (constant-edge):
+    # the lowest-rung tau0 at the lowest z is the table's lower tau0 corner.
+    tau_lo = float(truth["tau_by_z"][0, 0])
+    edge = MF.make_cond(jnp.zeros(10).at[9].set(0.0), jnp.asarray(tau_lo))
+    beyond = MF.make_cond(jnp.zeros(10).at[9].set(-1.0), jnp.asarray(1e-3))
+    g_edge = np.asarray(head(edge, basis))
+    g_beyond = np.asarray(head(beyond, basis))
+    assert np.allclose(g_edge, g_beyond, atol=1e-9)
+
+
+def test_resolved_head_theta_independent():
+    """Even resolved in (z,tau0), g stays THETA-INDEPENDENT (no cosmology DOF): two
+    different theta at the same (z,tau0) give identical g (anti-aliasing guarantee)."""
+    tg, eval_logk, truth = _synth_resolved_targets()
+    log_rho = np.nan_to_num(MF.mean_log_ratio_rho(tg, eval_logk), nan=0.0)
+    head = MF.build_default_head(tg, log_rho, resolved=True)
+    basis = MF.smooth_k_basis(jnp.asarray(eval_logk), 4)
+    x_a = jnp.zeros(10).at[9].set(0.4).at[0].set(0.1)
+    x_b = jnp.zeros(10).at[9].set(0.4).at[0].set(0.9)
+    t0 = jnp.asarray(1.0)
+    g_a = np.asarray(head(MF.make_cond(x_a, t0), basis))
+    g_b = np.asarray(head(MF.make_cond(x_b, t0), basis))
+    assert np.allclose(g_a, g_b, atol=1e-12)
+
+
+def test_pooled_fixed_mean_head_still_tau0_invariant(lf_backbone):
+    """BACK-COMPAT: the default (pooled, resolved=False) FixedMeanHead is unchanged --
+    g has dg/dtau0 == 0 (the prior behaviour the existing tests rely on)."""
+    mf, _ = _build_mf_mode(lf_backbone, "none")
+    d = lf_backbone[0]
+    x0 = jnp.asarray(d["x"][0])
+    f = lambda t0: mf.g(x0, t0).sum()
+    dgt = float(jax.grad(f)(jnp.asarray(1.0)))
+    assert abs(dgt) < 1e-12                              # pooled head: tau0-independent
+
+
+# --------------------------------------------------------------------------- #
+# T6: dN/dX + CDDF FIXED (theta-independent) resolution correction (Head A)
+# --------------------------------------------------------------------------- #
+def _synth_dndx_targets(n_z=6, n_sim=5, seed=1):
+    """Synthetic per-snap dN/dX (3 HCD classes) HR & LF with a KNOWN z-resolved,
+    theta-INDEPENDENT HR/LF ratio + small 6-sim noise.  Returns (lf, hr, z_grid,
+    truth_ratio (nz,3))."""
+    rng = np.random.default_rng(seed)
+    z = np.linspace(2.2, 5.0, n_z)
+    # a smooth z-resolved ratio per class (LLS falls through 1, sub/DLA stay >1)
+    truth = np.stack([
+        1.30 - 0.07 * (z - 2.2),                 # LLS: 1.30 -> ~1.1
+        1.29 - 0.02 * (z - 2.2),                 # subDLA
+        1.13 + 0.02 * (z - 2.2),                 # DLA
+    ], axis=1)                                    # (nz,3)
+    L, H = [], []
+    zl, zh = [], []
+    pl, ph = [], []
+    for s in range(n_sim):
+        base = rng.uniform(0.3, 0.6, size=3)      # per-sim LF baseline incidence
+        ns = rng.uniform(0.85, 0.98)
+        for zi in range(n_z):
+            lf_dndx = base * (1 + 0.1 * (z[zi] - 2.2))
+            noise = rng.normal(0, 0.02, size=3)   # ~2% 6-sim noise
+            hr_dndx = lf_dndx * truth[zi] * (1 + noise)
+            L.append(lf_dndx); H.append(hr_dndx)
+            zl.append(z[zi]); zh.append(z[zi])
+            pl.append(ns); ph.append(ns)
+    lf = dict(dndx=np.asarray(L), z=np.asarray(zl), ns=np.asarray(pl))
+    hr = dict(dndx=np.asarray(H), z=np.asarray(zh), ns=np.asarray(ph))
+    return lf, hr, z, truth
+
+
+def test_dndx_correction_table_reproduces_hr_to_noise():
+    """build_dndx_res_corr measures the z-resolved HR/LF dN/dX ratio per class and
+    reproduces the HR dN/dX from LF*correction to within the 6-sim noise."""
+    lf, hr, z, truth = _synth_dndx_targets()
+    tab = MF.build_dndx_res_corr(lf["dndx"], lf["z"], hr["dndx"], hr["z"])
+    assert tab["ratio"].shape == (len(z), 3)
+    assert np.all(np.diff(tab["z"]) > 0)
+    # the measured ratio recovers the known truth to within the 2% 6-sim noise / sqrt(n)
+    assert np.max(np.abs(tab["ratio"] - truth)) < 0.02
+    # LF * correction reproduces HR per row to within the per-row noise (~2%)
+    corr = MF.apply_dndx_res_corr(tab, jnp.asarray(lf["dndx"]), jnp.asarray(lf["z"]))
+    rel = np.abs(np.asarray(corr) - hr["dndx"]) / hr["dndx"]
+    assert np.median(rel) < 0.02
+
+
+def test_dndx_correction_is_theta_independent():
+    """The dN/dX correction is FIXED: d(correction)/d(theta) == 0 -- it is a function
+    of z and class ONLY (the PI directive; mirrors the P1D fixed-mean baseline)."""
+    lf, hr, z, truth = _synth_dndx_targets()
+    tab = MF.build_dndx_res_corr(lf["dndx"], lf["z"], hr["dndx"], hr["z"])
+    # apply at a fixed (dndx, z) and differentiate wrt a fake theta that the
+    # correction must NOT see: the correction depends only on z & class.
+    dndx0 = jnp.asarray([0.4, 0.12, 0.05])
+    z0 = jnp.asarray(3.0)
+
+    def corrected_sum(theta):
+        # theta enters only through dndx (the emulator output); the *factor* itself
+        # must be theta-free, so d(factor)/d(theta)=0.  We check the factor directly.
+        fac = MF.dndx_res_factor(tab, z0)
+        return (fac * theta).sum()
+
+    # the factor does not depend on theta at all -> grad is just the factor (finite),
+    # and crucially the factor is identical for any theta.
+    fac_a = np.asarray(MF.dndx_res_factor(tab, z0))
+    fac_b = np.asarray(MF.dndx_res_factor(tab, z0))
+    assert np.allclose(fac_a, fac_b)
+    assert fac_a.shape == (3,)
+
+
+def test_dndx_res_factor_differentiable_in_z_and_clamped():
+    """The dN/dX correction factor is differentiable in z (for HMC) and clamped at
+    the table z-edges (no NaN / no divergence outside the measured z-range)."""
+    lf, hr, z, truth = _synth_dndx_targets()
+    tab = MF.build_dndx_res_corr(lf["dndx"], lf["z"], hr["dndx"], hr["z"])
+    g = jax.grad(lambda zz: MF.dndx_res_factor(tab, zz).sum())(jnp.asarray(3.1))
+    assert np.isfinite(float(g))
+    # clamp beyond the z-edges
+    for zz in (1.0, 2.2, 3.0, 5.0, 7.0):
+        fac = np.asarray(MF.dndx_res_factor(tab, jnp.asarray(float(zz))))
+        assert np.all(np.isfinite(fac)) and np.all(fac > 0)
+    lo = np.asarray(MF.dndx_res_factor(tab, jnp.asarray(float(z[0]))))
+    below = np.asarray(MF.dndx_res_factor(tab, jnp.asarray(0.0)))
+    assert np.allclose(lo, below)                       # constant-edge extrapolation

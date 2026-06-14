@@ -1,0 +1,128 @@
+# T3 GATE — EMU bias THROUGH the MF forward (resolved separable+rank-1 g + res_corr).
+# all 8 folds, each fold's OWN held-out LF backbone; HF-LOSO head when an HR sim is held out.
+# KS z_lo=2.4 (SHIPPED), KS<0.06, same C_total as LF. forward-only Fisher.
+# LF baseline (emu_bias_allfolds_zlo24.txt): n_s +0.030σ, A_p +0.034σ.
+# u_tau FIXED to the physical mean-flux axis (Step-0 Bayesian rec).
+# fold sim                            ns_u  Ap_u  bias(A_p)/σ bias(n_s)/σ  HRloso a_rms
+  0   ns0.803Ap2.2e-09herei4.05heref 0.013 0.717   -0.625     +0.448    -    0.3353
+  0   ns0.813Ap2.51e-09herei3.84here 0.051 0.934   +0.325     -0.978    -    0.3353
+  0   ns0.816Ap1.55e-09herei3.55here 0.065 0.250   +1.368     +0.005    -    0.3353
+  0   ns0.816Ap2.58e-09herei3.73here 0.065 0.983   -0.077     +0.216    -    0.3353
+  0   ns0.81Ap1.6e-09herei3.59heref2 0.039 0.283   +0.685     +0.769    -    0.3353
+  0   ns0.81Ap2.54e-09herei4.29heref 0.042 0.958   -0.503     +0.870    -    0.3353
+  0   ns0.823Ap1.92e-09herei3.79here 0.091 0.517   +0.957     -0.420    -    0.3353
+  0   ns0.829Ap2.39e-09herei3.63here 0.117 0.850   +0.064     -0.448    -    0.3353
+  1   ns0.831Ap2.31e-09herei3.71here 0.125 0.792   +0.348     -0.044    -    0.3421
+  1   ns0.836Ap1.88e-09herei3.83here 0.143 0.483   +0.507     +0.266    -    0.3421
+  1   ns0.838Ap1.48e-09herei3.98here 0.154 0.197   +0.327     -0.216    -    0.3421
+  1   ns0.842Ap1.36e-09herei3.51here 0.169 0.117   +1.083     -0.119    -    0.3421
+  1   ns0.849Ap1.64e-09herei3.77here 0.195 0.317   +0.351     +0.012    -    0.3421
+  1   ns0.849Ap2.02e-09herei3.95here 0.195 0.583   -0.680     -0.829    -    0.3421
+  1   ns0.852Ap2.07e-09herei3.88here 0.208 0.625   +0.421     +0.060    -    0.3421
+  1   ns0.855Ap1.78e-09herei3.65here 0.221 0.417   -0.468     -0.908    -    0.3421
+  2   ns0.859Ap1.29e-09herei3.92here 0.236 0.066   +0.009     +0.040    Y    0.2794
+  2   ns0.862Ap1.41e-09herei3.89here 0.247 0.150   -0.024     -0.216    -    0.2794
+  2   ns0.868Ap1.32e-09herei4.03here 0.273 0.083   +0.009     -0.423    -    0.2794
+  2   ns0.873Ap1.26e-09herei3.96here 0.292 0.042   -0.098     -0.053    -    0.2794
+  2   ns0.875Ap2.25e-09herei3.61here 0.299 0.750   -0.894     -0.607    -    0.2794
+  2   ns0.881Ap2.16e-09herei3.71here 0.325 0.683   +0.128     +0.281    -    0.2794
+  2   ns0.881Ap2.25e-09herei3.75here 0.325 0.750   +0.333     +0.438    -    0.2794
+  2   ns0.885Ap2.32e-09herei4.06here 0.339 0.803   +0.228     +0.464    Y    0.2794
+  3   ns0.888Ap2.53e-09herei3.53here 0.351 0.950   -0.237     -0.010    -    0.3538
+  3   ns0.894Ap1.84e-09herei4.46here 0.375 0.458   +0.218     +0.611    -    0.3538
+  3   ns0.894Ap2.02e-09herei3.91here 0.377 0.583   -0.266     -0.273    -    0.3538
+  3   ns0.901Ap1.22e-09herei3.93here 0.403 0.017   +0.195     +0.221    -    0.3538
+  3   ns0.905Ap1.79e-09herei3.97here 0.419 0.419   +0.322     +0.248    -    0.3538
+  3   ns0.907Ap1.5e-09herei3.75heref 0.429 0.217   +0.322     +0.747    -    0.3538
+  3   ns0.909Ap1.76e-09herei4.07here 0.436 0.400   +0.253     +0.215    -    0.3538
+  3   ns0.909Ap1.81e-09herei4.04here 0.436 0.436   -0.493     -0.775    -    0.3538
+  4   ns0.909Ap1.98e-09herei3.75here 0.438 0.558   -0.074     -0.137    Y    0.2977
+  4   ns0.914Ap1.27e-09herei3.97here 0.455 0.050   -0.335     -0.424    -    0.2977
+  4   ns0.914Ap1.32e-09herei3.85here 0.455 0.083   -0.012     +0.610    -    0.2977
+  4   ns0.915Ap1.49e-09herei3.54here 0.458 0.208   +0.360     +0.136    -    0.2977
+  4   ns0.91Ap2.18e-09herei3.76heref 0.441 0.697   -0.031     +0.397    -    0.2977
+  4   ns0.927Ap2.11e-09herei3.67here 0.507 0.650   -0.166     +0.125    -    0.2977
+  4   ns0.92Ap2.06e-09herei3.69heref 0.481 0.617   +0.193     +0.062    -    0.2977
+  5   ns0.933Ap1.83e-09herei4.09here 0.533 0.450   -0.242     +0.224    -    0.3668
+  5   ns0.935Ap1.37e-09herei4.38here 0.542 0.125   -0.258     -0.213    -    0.3668
+  5   ns0.936Ap1.99e-09herei3.68here 0.544 0.566   -0.051     +0.022    -    0.3668
+  5   ns0.946Ap1.55e-09herei3.85here 0.585 0.250   +0.302     -0.224    -    0.3668
+  5   ns0.946Ap2.48e-09herei4.05here 0.585 0.917   -1.238     -0.035    -    0.3668
+  5   ns0.94Ap1.97e-09herei3.57heref 0.559 0.550   +0.528     +0.554    -    0.3668
+  5   ns0.953Ap1.74e-09herei4.07here 0.611 0.383   -0.488     -0.223    -    0.3668
+  6   ns0.956Ap2.19e-09herei3.62here 0.625 0.708   +0.052     +0.064    -    0.3135
+  6   ns0.957Ap1.62e-09herei3.54here 0.626 0.303   -0.550     -0.727    -    0.3135
+  6   ns0.959Ap2.34e-09herei3.81here 0.637 0.817   +0.260     +0.031    -    0.3135
+  6   ns0.966Ap1.46e-09herei3.55here 0.663 0.183   -0.198     +0.286    -    0.3135
+  6   ns0.972Ap1.69e-09herei3.87here 0.689 0.350   -0.136     +0.190    Y    0.3135
+  6   ns0.977Ap1.96e-09herei4.12here 0.708 0.542   +0.279     +0.325    -    0.3135
+  6   ns0.979Ap1.78e-09herei3.65here 0.715 0.417   -0.103     +0.006    Y    0.3135
+  7   ns0.979Ap2.48e-09herei3.99here 0.715 0.917   -0.138     +0.087    -    0.3621
+  7   ns0.982Ap1.81e-09herei3.62here 0.729 0.434   +0.307     +0.115    -    0.3621
+  7   ns0.985Ap2.44e-09herei4.01here 0.741 0.883   -0.021     +0.150    -    0.3621
+  7   ns0.992Ap2.3e-09herei3.95heref 0.767 0.783   +0.366     +0.596    -    0.3621
+  7   ns0.998Ap1.61e-09herei3.79here 0.792 0.292   +0.606     +0.004    -    0.3621
+  7   ns1.02Ap2.43e-09herei4.04heref 0.875 0.875   +0.386     +0.470    -    0.3621
+  7   ns1.04Ap1.73e-09herei4.21heref 0.958 0.375   -0.368     -0.478    -    0.3621
+
+# ===== POOLED over ALL 60 held-out sims — MF ON (rank-1 on) =====
+  A_p: mean +0.0553σ  bootstrap95% [-0.057,+0.169]  t=+0.94  signs 32+/28-  max|1.37|
+  n_s: mean +0.0264σ  bootstrap95% [-0.079,+0.130]  t=+0.49  signs 37+/23-  max|0.98|
+  z-resolved n_s bias contribution (mean over sims), per z-bin:
+    z∈[2.0,2.8): n_s +0.0137σ   A_p +0.0272σ
+    z∈[2.8,3.4): n_s +0.0378σ   A_p +0.0026σ
+    z∈[3.4,6.0): n_s -0.0252σ   A_p +0.0254σ
+  [exactness] Σ_z n_s bias = +0.0264σ  (must == pooled n_s +0.0264σ; |Δ|=1.67e-13)
+
+# ===== POOLED over ALL 60 held-out sims — MF OFF (rank-1 OFF) =====
+  A_p: mean +0.0541σ  bootstrap95% [-0.058,+0.168]  t=+0.92  signs 32+/28-  max|1.37|
+  n_s: mean +0.0267σ  bootstrap95% [-0.077,+0.130]  t=+0.50  signs 37+/23-  max|0.96|
+  z-resolved n_s bias contribution (mean over sims), per z-bin:
+    z∈[2.0,2.8): n_s +0.0146σ   A_p +0.0268σ
+    z∈[2.8,3.4): n_s +0.0374σ   A_p +0.0019σ
+    z∈[3.4,6.0): n_s -0.0252σ   A_p +0.0254σ
+  [exactness] Σ_z n_s bias = +0.0267σ  (must == pooled n_s +0.0267σ; |Δ|=7.07e-14)
+
+# ===== G4.1 ALIASING: rank-1 ON vs OFF =====
+  Δn_s (ON-OFF) = -0.0003σ   (PASS if |Δn_s| ≤ 0.10σ)
+  ΔA_p (ON-OFF) = +0.0012σ
+  Δ per z-bin (n_s):
+    z∈[2.0,2.8): Δn_s -0.0008σ
+    z∈[2.8,3.4): Δn_s +0.0004σ
+    z∈[3.4,6.0): Δn_s +0.0001σ
+  G4.1: PASS  (Δn_s not > 0.10σ)
+
+[npz] /home/mfho/hcd_priya/figures/analysis/04_emulator/emu_bias_allfolds_mf.npz
+[done]
+
+# ============================================================================ #
+# T3 ADOPTION-GATE VERDICT (CS/JAX, 2026-06-09) — consolidated from this file +
+#   emu_bias_allfolds_mf_g3.txt (G3) + emu_bias_allfolds_mf_aliasing.txt (G4.2/G4.3)
+# Step-0: u_tau FIXED to the physical mean-flux axis (not a free SVD vector). T1 tests 37/37 pass.
+# Construction: MF correction (g + log res_corr) applied at the cache-k level to BOTH the
+#   forward AND the truth P_filt (the spec-3.1 invariant: a theta-blind correction applied to
+#   all 60 closure sims must NOT change the closure n_s bias; ΔP is then pure MF emulator error,
+#   NOT a forward-vs-truth resolution mismatch). LF backbone frozen, KS z_lo=2.4, KS<0.06, same C_total.
+#
+#   G1  n_s pooled (60-sim) through MF = +0.0264σ   |.|≤0.2σ  + no-regress vs LF +0.030σ   => PASS
+#   G2  A_p pooled (60-sim) through MF = +0.0553σ   |.|≤0.2σ  (LF +0.034σ; Δ+0.021σ in noise) => PASS
+#   G3  z∈[2.8,3.4] k≥0.0442 signed coherent logP residual: LF +0.4268 -> MF ~0.0000           => PASS
+#   G4.1 rank-1 ON vs OFF  Δn_s = -0.0003σ  (≤0.10σ, NOT z-localized)                            => PASS
+#   G4.3 |∂g/∂n_s| = 0.000e+00  (head structurally θ-blind)                                      => PASS
+#   G4.2 σ_τ0(ON)/σ_τ0(OFF) worst = 0.9977 (≤1.05, NO width inflation)                            => PASS
+#        rank-1 INCREMENT |r(τ0,n_s)(ON)-r(OFF)| worst = 0.0140 (≤0.05; the rank-1 aliasing intent) => PASS
+#        LITERAL |r(τ0,n_s)(ON)-r(LF)| worst = 0.1291 (>0.05)                                      => exceeds threshold
+#          BUT |r(OFF-LF)|≈|r(ON-LF)| at every fold ⇒ the rotation is the SEPARABLE correction
+#          (present in the SAFE-FLOOR pure-separable arm too), NOT the rank-1 term. Per spec §2
+#          "pure separable cannot alias"; the rank-1 increment is clean.
+#
+# OVERALL: G1,G2,G3,G4.1,G4.3 PASS; G4.2 PASS on width + on the rank-1-aliasing intent. The ONLY
+#   threshold exceeded is the LITERAL r(ON)-r(LF), driven by the SEPARABLE (safe-floor) correction
+#   rotating the τ0–n_s degeneracy ~0.13 vs LF — a property of the MF correction as a whole, not
+#   rank-1 aliasing. RECOMMEND: ADOPT the separable+rank-1 form (rank-1 is demonstrably clean), and
+#   FLAG the separable-driven τ0–n_s rotation as a real-fit coverage note for PI/Bayesian review
+#   (it does NOT bias the closure n_s — G1 +0.026σ — but it does reshape the joint geometry).
+#   Rank-1 amplitude a_k·u_z·u_tau rms ~0.077 (max ~0.099) in KS band >> per-sim ρ noise ~0.6-1.3%
+#   (spec §4 satisfied: NOT fitting noise). NOTE: z-bin attribution is EXACT (Σ_z=pooled to 1e-13).
+# dN/dX double-count: HCD_LIT_OVER_SIM=(1.06,0.76,1.34) is fit lit/LF-sim (plot_dndx_vs_literature.py
+#   reads observables_tau0_lf.h5) -> LF→HR dN/dX correction is NEW info, composes (LF→HR→lit), NO double-count.

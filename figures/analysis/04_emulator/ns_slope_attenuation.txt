@@ -1,0 +1,64 @@
+# Task D1 — n_s tilt-response ATTENUATION β = slope_emu / slope_true (clean class, logP).
+# Sign convention: slope = ∂logP_clean/∂n_s (unit-cube n_s). β<1 ⇒ EMU under-predicts
+#   the n_s tilt response (attenuation, the bias signature); β≈1 ⇒ no attenuation.
+# k-grid: cache angular k (172 bins), data band z∈[2.2,4.6]. high-k tilt band k>0.02.
+
+[1] TRUTH n_s response — per-(z,τ₀-rung) cell OLS of logP_clean on 9 cosmo params.
+    cells kept (≥12 sims): 260  (skipped 0 sparse)  sims/cell min=59 median=60 max=60
+    [sanity vs /tmp/resp_shapes.npz::ns_resp] shape corr=+0.998 (expect strongly positive); my slope_true_mean: low-k(k<0.005) mean=-0.089, high-k(k>0.02) mean=+0.146
+    truth slope zero-crossing(s) at k≈0.0044 (expect ~0.005); resp_shapes crossing at k≈[0.00444024]
+
+[2] EMU n_s response — jacrev of log predict_P_filt[clean] wrt n_s, all 8 folds' held-out sims.
+    fold 0: 8 held-out sims, cumulative matched rows=1978
+    fold 1: 8 held-out sims, cumulative matched rows=3957
+    fold 2: 8 held-out sims, cumulative matched rows=5936
+    fold 3: 8 held-out sims, cumulative matched rows=7893
+    fold 4: 7 held-out sims, cumulative matched rows=9624
+    fold 5: 7 held-out sims, cumulative matched rows=11356
+    fold 6: 7 held-out sims, cumulative matched rows=13088
+    fold 7: 7 held-out sims, cumulative matched rows=14820
+    TOTAL matched held-out rows: 14820  (each (K=172,))
+    [sanity] emu vs truth n_s-slope SHAPE corr=+0.9970; zero-crossing emu k≈[0.00444024], truth k≈[0.00444024] (close ⇒ autodiff slope is the right object).
+
+[3] β attenuation metrics.
+    pooled β (median over masked row,k) = 0.978
+    pooled β (mean   over masked row,k) = 0.979
+    divide-free β (regression slope_emu~slope_true through origin) = 0.980
+    divide-free β (regression with intercept)                      = 0.986 (intercept -0.0013)
+    [mask] kept |slope_true| > p40 = 0.1283; kept 1529368/2549040 (row,k) cells
+    β<1 ⇒ attenuation. Here β≈0.98 (divide-free).
+
+[3a] β vs k (feedback #3: k-tilt DoF). β_reg(k) = Σ_row emu·true / Σ_row true² per k.
+    β low-k (k≤0.02):  mean=+0.939  energy-wt=+0.878
+    β high-k (k>0.02): mean=+0.988  energy-wt=+0.985   (NOT high-k concentrated)
+    n_s TILT lobe peaks at k=0.0270 (slope_true=+0.165); β there = +0.959
+
+[3b] β vs τ₀-rung (feedback #1: τ₀ regime). β_reg per alpha_idx (low rung = least absorption).
+    β by τ₀-rung (alpha_idx→β): 0:1.02, 1:1.02, 2:1.01, 3:1.01, 4:1.00, 5:1.00, 6:0.99, 7:0.99, 8:0.99, 9:0.98, 10:0.98, 11:0.97, 12:0.97, 13:0.97, 14:0.96, 15:0.96, 16:0.96, 17:0.96, 18:0.95, 19:0.95
+    LOW-τ₀ rungs (idx≤6) mean β=+1.006  |  HIGH-τ₀ rungs (idx≥12) mean β=+0.959
+    FLAT in τ₀ (#1 a channel, not the cause)
+
+[3c] β vs n_s_unit (feedback #2: extrapolation). β_reg in n_s_unit bins.
+    n_s_unit∈[0.0,0.3): β=+1.000  (n_rows=5194)
+    n_s_unit∈[0.3,0.7): β=+0.982  (n_rows=7399)
+    n_s_unit∈[0.7,0.9): β=+0.924  (n_rows=1979)
+    n_s_unit∈[0.9,1.0): β=+0.936  (n_rows=248)
+    INTERIOR n_s_unit∈[0.1,0.9] β=+0.978  (n_rows=12841)
+
+[4] Bias self-consistency check (back-of-envelope).
+    Using divide-free β = 0.980: EMU recovers ~98% of the true n_s tilt.
+    SIGN: β<1 ⇒ shallower emulated tilt ⇒ the fit pulls n_s DOWN (negative bias) — the SIGN of the observed −0.65σ is REPRODUCED.
+    MAGNITUDE: predicted |n_s bias| ≈ (1−β)·(Δns/σ) ≲ 0.06σ even at the box edge (Δns/σ~3). This is FAR SMALLER than the observed −0.65σ.
+    => The measured attenuation (1−β≈0.02) is the RIGHT SIGN but ~10–30× too
+       WEAK to explain −0.65σ on its own. n_s response tracking is essentially faithful;
+       the −0.65σ must come from a residual the n_s-slope object here does NOT capture
+       (coherent low-k/structural residual, the Fisher projection mixing, or C_emu sizing).
+    (1-param idealization; the true Fisher projection mixes A_p/τ₀, but A_p bias≈0.)
+
+[VERDICT]
+    β≈1 (=0.98, interior 0.98, flat in τ₀, NOT high-k concentrated) — the n_s tilt is tracked ~faithfully. The tiny (1−β)≈0.02 attenuation has the right SIGN but is ~10–30× too weak to explain −0.65σ. NOT attenuation; re-weight the root-cause to D5/D6.
+
+[npz] /home/mfho/hcd_priya/figures/analysis/04_emulator/ns_slope_attenuation.npz
+[png] /home/mfho/hcd_priya/figures/analysis/04_emulator/ns_slope_attenuation.png
+[txt] /home/mfho/hcd_priya/figures/analysis/04_emulator/ns_slope_attenuation.txt
+[done]

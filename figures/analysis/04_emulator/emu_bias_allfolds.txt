@@ -1,0 +1,73 @@
+# EMU bias, ALL 8 folds, each fold's OWN held-out emulator, KS capped k<0.06. forward-only Fisher.
+# fold  sim                            ns_u  Ap_u   bias(A_p)/σ  bias(n_s)/σ
+  0    ns0.803Ap2.2e-09herei4.05heref 0.013 0.717    -0.377      -0.210
+  0    ns0.813Ap2.51e-09herei3.84here 0.051 0.934    +1.346      -2.448
+  0    ns0.816Ap1.55e-09herei3.55here 0.065 0.250    +1.693      +0.012
+  0    ns0.816Ap2.58e-09herei3.73here 0.065 0.983    -0.003      +0.262
+  0    ns0.81Ap1.6e-09herei3.59heref2 0.039 0.283    +0.959      -0.096
+  0    ns0.81Ap2.54e-09herei4.29heref 0.042 0.958    -0.173      -0.209
+  0    ns0.823Ap1.92e-09herei3.79here 0.091 0.517    +1.212      -0.273
+  0    ns0.829Ap2.39e-09herei3.63here 0.117 0.850    +0.102      -0.803
+  1    ns0.831Ap2.31e-09herei3.71here 0.125 0.792    +3.449      +2.499
+  1    ns0.836Ap1.88e-09herei3.83here 0.143 0.483    +1.905      +1.582
+  1    ns0.838Ap1.48e-09herei3.98here 0.154 0.197    +0.606      +0.008
+  1    ns0.842Ap1.36e-09herei3.51here 0.169 0.117    +0.397      -0.333
+  1    ns0.849Ap1.64e-09herei3.77here 0.195 0.317    +1.291      +0.767
+  1    ns0.849Ap2.02e-09herei3.95here 0.195 0.583    -0.089      -1.638
+  1    ns0.852Ap2.07e-09herei3.88here 0.208 0.625    +1.270      +1.114
+  1    ns0.855Ap1.78e-09herei3.65here 0.221 0.417    +0.582      -0.264
+  2    ns0.859Ap1.29e-09herei3.92here 0.236 0.066    -0.765      -0.759
+  2    ns0.862Ap1.41e-09herei3.89here 0.247 0.150    +0.077      -0.594
+  2    ns0.868Ap1.32e-09herei4.03here 0.273 0.083    -0.849      -1.401
+  2    ns0.873Ap1.26e-09herei3.96here 0.292 0.042    -1.088      -0.989
+  2    ns0.875Ap2.25e-09herei3.61here 0.299 0.750    -0.429      -0.204
+  2    ns0.881Ap2.16e-09herei3.71here 0.325 0.683    +0.308      +0.094
+  2    ns0.881Ap2.25e-09herei3.75here 0.325 0.750    -0.217      -0.380
+  2    ns0.885Ap2.32e-09herei4.06here 0.339 0.803    +0.979      +0.067
+  3    ns0.888Ap2.53e-09herei3.53here 0.351 0.950    -1.017      -0.948
+  3    ns0.894Ap1.84e-09herei4.46here 0.375 0.458    +0.301      -0.185
+  3    ns0.894Ap2.02e-09herei3.91here 0.377 0.583    -0.797      -1.115
+  3    ns0.901Ap1.22e-09herei3.93here 0.403 0.017    +0.141      -0.924
+  3    ns0.905Ap1.79e-09herei3.97here 0.419 0.419    -0.146      -0.732
+  3    ns0.907Ap1.5e-09herei3.75heref 0.429 0.217    +0.508      -1.140
+  3    ns0.909Ap1.76e-09herei4.07here 0.436 0.400    +0.274      -0.380
+  3    ns0.909Ap1.81e-09herei4.04here 0.436 0.436    -0.963      -1.331
+  4    ns0.909Ap1.98e-09herei3.75here 0.438 0.558    +0.952      -0.578
+  4    ns0.914Ap1.27e-09herei3.97here 0.455 0.050    -1.106      -0.720
+  4    ns0.914Ap1.32e-09herei3.85here 0.455 0.083    -0.608      -0.428
+  4    ns0.915Ap1.49e-09herei3.54here 0.458 0.208    -0.309      -1.427
+  4    ns0.91Ap2.18e-09herei3.76heref 0.441 0.697    -0.018      -1.340
+  4    ns0.927Ap2.11e-09herei3.67here 0.507 0.650    +0.306      -1.171
+  4    ns0.92Ap2.06e-09herei3.69heref 0.481 0.617    +0.911      -1.588
+  5    ns0.933Ap1.83e-09herei4.09here 0.533 0.450    -1.621      -1.214
+  5    ns0.935Ap1.37e-09herei4.38here 0.542 0.125    -1.819      -1.815
+  5    ns0.936Ap1.99e-09herei3.68here 0.544 0.566    -1.970      -1.514
+  5    ns0.946Ap1.55e-09herei3.85here 0.585 0.250    -1.629      -2.706
+  5    ns0.946Ap2.48e-09herei4.05here 0.585 0.917    -1.537      -0.853
+  5    ns0.94Ap1.97e-09herei3.57heref 0.559 0.550    -1.640      -1.064
+  5    ns0.953Ap1.74e-09herei4.07here 0.611 0.383    -2.177      -1.720
+  6    ns0.956Ap2.19e-09herei3.62here 0.625 0.708    -0.775      -0.935
+  6    ns0.957Ap1.62e-09herei3.54here 0.626 0.303    +0.101      -1.007
+  6    ns0.959Ap2.34e-09herei3.81here 0.637 0.817    +1.068      -0.031
+  6    ns0.966Ap1.46e-09herei3.55here 0.663 0.183    +0.386      -1.275
+  6    ns0.972Ap1.69e-09herei3.87here 0.689 0.350    +0.513      -0.830
+  6    ns0.977Ap1.96e-09herei4.12here 0.708 0.542    +0.773      +0.001
+  6    ns0.979Ap1.78e-09herei3.65here 0.715 0.417    +0.675      -1.179
+  7    ns0.979Ap2.48e-09herei3.99here 0.715 0.917    -0.202      -0.277
+  7    ns0.982Ap1.81e-09herei3.62here 0.729 0.434    +0.526      -0.617
+  7    ns0.985Ap2.44e-09herei4.01here 0.741 0.883    -0.028      -0.378
+  7    ns0.992Ap2.3e-09herei3.95heref 0.767 0.783    -0.064      -0.475
+  7    ns0.998Ap1.61e-09herei3.79here 0.792 0.292    +0.178      -1.363
+  7    ns1.02Ap2.43e-09herei4.04heref 0.875 0.875    -0.239      -0.387
+  7    ns1.04Ap1.73e-09herei4.21heref 0.958 0.375    +0.723      -0.928
+
+# ===== POOLED over ALL 60 honestly-held-out sims =====
+  A_p: mean +0.031σ  bootstrap95% [-0.221, +0.293]  t=+0.23  signs 31+/29-  max|3.45|
+  n_s: mean -0.646σ  bootstrap95% [-0.854, -0.429]  t=-5.84  signs 10+/50-  max|2.71|
+  A_p: drop largest |outlier| (+3.45) -> mean -0.027σ
+  n_s: drop largest |outlier| (-2.71) -> mean -0.611σ
+  corr(|A_p bias|, n_s box-edge proximity) = -0.039  (near 0 => NOT a box-edge artifact)
+  n_s_unit range covered: 0.013..0.958 (was 0.013..0.117 for fold-0 only)
+
+[fig] /home/mfho/hcd_priya/figures/analysis/04_emulator/emu_bias_allfolds.png
+[done]

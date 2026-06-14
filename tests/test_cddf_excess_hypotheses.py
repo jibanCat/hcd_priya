@@ -30,6 +30,11 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+import pytest
+
+# build_catalog (hcd_analysis.catalog) lazily imports joblib; skip the whole module cleanly when
+# joblib is absent rather than hard-failing at call time (matches tests/test_convergence_z_match.py).
+pytest.importorskip("joblib")
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))

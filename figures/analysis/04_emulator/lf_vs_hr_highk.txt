@@ -1,0 +1,61 @@
+==============================================================================
+LF vs HR cached clean-forest P1D — direct forward resolution discrepancy
+delta(z,k) = (P_LF - P_HR)/P_HR   [clean class, matched sim/z/alpha-rung]
+==============================================================================
+HR cache: /home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_hr.h5
+  per-class P1D cache (analogous to LF). n_k_HR=525 (Nyquist ~0.20 s/km).
+LF cache: /home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5  (n_k_LF=172, Nyquist ~0.069 s/km)
+overlap sims = 6 (all 6 HR design points are exact LF points;
+  alpha/tau0 rung matched EXACTLY — alpha_slope bit-identical per idx).
+matched (sim,z,alpha) rows = 2060; finite delta(k) samples = 318740.
+compare band: k in (LF k_min, 0.069] s/km; HR log-log interpolated onto LF k.
+
+--- (2) low-k vs high-k, low-z vs high-z (signed mean delta, %) ---
+  ALL z           : low-k(k<0.02) mean= +3.798% (n=92240)   high-k(k>0.04) mean= -0.275% (n=133020)
+  low-z (2.0, 2.4): low-k(k<0.02) mean= +4.338% (n= 5260)   high-k(k>0.04) mean= -6.458% (n= 7760)
+  high-z (3.2, 3.6): low-k(k<0.02) mean= +3.909% (n=15560)   high-k(k>0.04) mean= -0.814% (n=22840)
+  z=2.0-2.2       : low-k(k<0.02) mean= +4.338% (n= 5260)   high-k(k>0.04) mean= -6.458% (n= 7760)
+  z=3.4           : low-k(k<0.02) mean= +3.857% (n= 5200)   high-k(k>0.04) mean= -0.826% (n= 7580)
+
+--- (3) sign-coherence across sims (low-z high-k band k>0.04) ---
+  low-z (2.0, 2.4): per-sim mean delta = [-6.73, -6.66, -5.87, -5.64, -6.80, -6.74]% ; 6/6 sims negative
+  z=2.0-2.2       : per-sim mean delta = [-6.73, -6.66, -5.87, -5.64, -6.80, -6.74]% ; 6/6 sims negative
+  high-z (3.2, 3.6): per-sim mean delta = [-1.30, -2.30, -1.49, +0.35, -0.19, +0.22]% ; 4/6 sims negative
+  ALL z           : per-sim mean delta = [+0.01, -2.12, +0.11, +0.77, +0.18, -0.53]% ; 2/6 sims negative
+
+--- (2b) k-growth of delta (signed mean %, low-z vs high-z) ---
+  k-band [s/km]            low-z mean  high-z mean
+  [0.005,0.010)            +4.938%      +4.294%
+  [0.010,0.020)            +3.720%      +3.018%
+  [0.020,0.040)            -0.331%      +0.403%
+  [0.040,0.069)            -6.458%      -0.814%
+
+--- (2c) full z-trend of high-k LF->HR deficit (avg over 6 sims x 20 alpha) ---
+      z  delta(k>0.04)  delta@k~0.069
+    2.0         -7.59%         -9.96%
+    2.2         -6.27%         -8.05%
+    2.4         -4.25%         -5.46%
+    2.6         -2.73%         -3.43%
+    2.8         -1.73%         -1.92%
+    3.0         -1.31%         -1.07%
+    3.2         -1.16%         -0.59%
+    3.4         -0.83%         +0.08%
+    3.6         -0.47%         +0.64%
+    3.8         +0.10%         +1.48%
+    4.0         +0.37%         +1.84%
+    4.2         +0.41%         +1.80%
+    4.4         +0.71%         +2.11%
+    4.6         +1.11%         +2.44%
+    4.8         +1.59%         +2.87%
+    5.0         +2.27%         +3.36%
+    5.2         +3.13%         +4.13%
+    5.4         +2.64%         +3.65%
+
+--- sanity vs PRIYA published convergence (~7% @ k=0.07, worst z~3-4) ---
+  |delta| near k=0.06-0.069: ALL-z signed mean=+0.22% (rms 4.13%, n=39520); low-z -8.32% ; high-z +0.05%
+
+--- (3/4) comparison to the emulator residual driving the -0.65sigma n_s ---
+  Emulator coherent held-out residual P_hat/P_true-1 (embias_stats_summary.json):
+    low-k +0.025% , mid-k +0.013% , high-k -0.023%  (emulator UNDER-predicts at high k).
+  n_s bias is NEGATIVE -0.65sigma (diag_emu_bias_allfolds.py; 50/60 sims neg).
+  Sign convention here: delta=(P_LF-P_HR)/P_HR>0 means LF cache has EXCESS power vs HR.

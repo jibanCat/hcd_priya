@@ -1,0 +1,91 @@
+# T4 C_emu FLOOR — 6-fold HR-LOSO of the LF->HR resolution correction (RAW-CACHE footing).
+# eval grid: 48 log-bins, k=[0.0010,0.1000] s/km.
+# band split: LF-resolvable k<0.069 (44 bins) | extrapolated k>=0.07 (4 bins, fed through loglog_interp_extrap).
+# INFLATE=1.35 (n=6 sampling, spec §3); FLOOR_MIN=0.0123 (global worst x1.35).
+# FOOTING: g measured on RAW LF/HR CACHE P1D (NOT the LF emulator) -> isolates the LF->HR
+#   resolution-correction generalization from the LF emulator's own point error near the
+#   native Nyquist (-50% in P; a SEPARATE object = the LF emulator's per-k C_emu). The
+#   tail-extrapolation IS exercised (cache backbone through loglog_interp_extrap); the
+#   backbone cancels in g_LOSO-g_true so only the correction's generalization remains.
+# SCOPE: covers LF->HR GENERALIZATION ONLY. HR->truth is the LOCKED k<0.06 cap.
+# class: CLEAN (0) — P_obs is clean-dominated; per-class spread <=1.1pp < the floor (spec §2.3).
+# 6 HR sims, ns_phys: 0.859, 0.885, 0.909, 0.914, 0.972, 0.979
+
+  LOSO sim ns=0.859: worst|coherent| (all z) LFres=0.0124  extrap=0.0954
+  LOSO sim ns=0.885: worst|coherent| (all z) LFres=0.0172  extrap=0.0836
+  LOSO sim ns=0.909: worst|coherent| (all z) LFres=0.0169  extrap=0.0658
+  LOSO sim ns=0.914: worst|coherent| (all z) LFres=0.0217  extrap=0.0559
+  LOSO sim ns=0.972: worst|coherent| (all z) LFres=0.0181  extrap=0.0509
+  LOSO sim ns=0.979: worst|coherent| (all z) LFres=0.1939  extrap=0.1456
+
+# anchor cross-check (low-z<=2.6 LF-resolvable coherent): worst-per-sim |.| = 0.38%  [mf_rescorr_loso.txt raw-cache anchor: +0.91%]
+
+# ===== sigma_floor(z, band)  [LF->HR generalization, FIXED, ns-independent] =====
+#   z     LF-resolvable(k<0.069)   extrapolated(k>=0.07)   [flags]
+   2.0        1.23%                   3.63%       SPARSE(<4 sims)
+   2.2        1.23%                   4.04%       
+   2.4        1.23%                   4.84%       LFres single-sim-driven
+   2.6        1.23%                   4.77%       LFres single-sim-driven
+   2.8        1.23%                   5.65%       LFres single-sim-driven
+   3.0        1.23%                   3.94%       
+   3.2        1.23%                   4.44%       
+   3.4        1.23%                   3.94%       extrap single-sim-driven
+   3.6        1.31%                   3.43%       LFres single-sim-driven; extrap single-sim-driven
+   3.8        1.77%                   4.30%       LFres single-sim-driven
+   4.0        1.68%                   3.98%       LFres single-sim-driven; extrap single-sim-driven
+   4.2        1.67%                   2.76%       LFres single-sim-driven; extrap single-sim-driven
+   4.4        1.57%                   1.96%       LFres single-sim-driven; extrap single-sim-driven
+   4.6        1.68%                   4.12%       LFres single-sim-driven
+   4.8        1.65%                   3.02%       LFres single-sim-driven
+   5.0        1.54%                   7.24%       LFres single-sim-driven; extrap single-sim-driven
+   5.2        1.40%                   7.55%       LFres single-sim-driven; extrap single-sim-driven
+   5.4       26.17%                  19.65%       LFres single-sim-driven
+#  FLAGS: SPARSE = <4 HR sims cover this z (floor pinned to FLOOR_MIN). single-sim-driven =
+#  the worst sim is >3x the median |coherent| of the other 5 -> a CEILING (likely 6-sim noise
+#  at the high-z He-II regime, spec §5: 'CANNOT distinguish a real z=5 sign-flip from 6-sim
+#  noise in a single z-bin'), NOT a robust floor. Recommend the assembler CAP these cells at
+#  the next-largest per-z floor (or carry as-is with the flag) pending more HR sims.
+
+  GLOBAL max sigma_floor: LFres=26.17%  extrap=19.65%
+  (>= FLOOR_MIN=1.23% everywhere; the extrapolated band is larger — the LF tail
+   extrapolation above the Nyquist is where the correction is least reliable, as spec §2.2 expects.
+   The DATA rows sit below k<0.06 (LF-resolvable band); the extrapolated band sizes the eval-grid
+   / cosmic-variance leakage above the Nyquist, NOT the kept data rows.)
+
+# ===== sigma_edge(z, band; ns)  [n_s OUT-of-cluster extrapolation, ns-DEPENDENT] =====
+# reported at ns_query=1.009 (eBOSS-like; AT/above the HR ceiling 0.98); d_ns=0.029 outside [0.86,0.98].
+# sigma_edge = max( 2.0*|d coherent/d ns|*d_ns , 0.5*sigma_floor*(d_ns/0.03) ).
+#   z     |slope|_LFres  |slope|_extrap   sigma_edge_LFres  sigma_edge_extrap
+   2.0        nan          nan          0.59%             1.75%
+   2.2     0.0066       0.1006          0.59%             1.95%
+   2.4     0.0223       0.1359          0.59%             2.34%
+   2.6     0.0484       0.0363          0.59%             2.30%
+   2.8     0.0807       0.2011          0.59%             2.73%
+   3.0     0.0952       0.2026          0.59%             1.91%
+   3.2     0.1094       0.2917          0.63%             2.15%
+   3.4     0.1251       0.3852          0.73%             2.23%
+   3.6     0.1111       0.2475          0.64%             1.66%
+   3.8     0.0745       0.2162          0.86%             2.08%
+   4.0     0.0142       0.2669          0.81%             1.92%
+   4.2     0.0178       0.1552          0.81%             1.34%
+   4.4     0.0371       0.0197          0.76%             0.95%
+   4.6     0.0612       0.0387          0.81%             1.99%
+   4.8     0.0806       0.0272          0.80%             1.46%
+   5.0     0.0773       0.5024          0.74%             3.50%
+   5.2     0.0714       0.2699          0.68%             3.65%
+   5.4     1.0646       1.6880         12.65%             9.79%
+
+  GLOBAL max sigma_edge @ ns=1.009: LFres=12.65%  extrap=9.79%
+
+# DISCIPLINE (n=6):
+#  - CAN: size the in-cluster LF->HR generalization floor + its sampling inflation (worst-per-sim,
+#    z-resolved, per-band). CANNOT: certify the amplitude OUTSIDE ns in [0.86,0.98] (the sigma_edge
+#    term — an INFLATION not a measurement; the 6-sim slope is noisy, hence 2x+floor).
+#  - CANNOT distinguish a real z>=5 sign-flip from 6-sim noise in a single z-bin (mitigated by the
+#    FLOOR_MIN max). CANNOT cover HR->truth (k<0.06 cap) nor the LF-emulator point error (its own C_emu).
+#  - ASSEMBLY (CS agent, small-scale leg ONLY): emu_var(k,z) += (sigma_floor(z,band(k))*P_obs)^2
+#    + (sigma_edge(z,band(k);ns)*P_obs)^2.  ns>0.98 posterior is GUARDED, not nominal.
+
+[npz] /home/mfho/hcd_priya/figures/analysis/04_emulator/mf_cemu_floor.npz
+[png] /home/mfho/hcd_priya/figures/analysis/04_emulator/mf_cemu_floor.png
+[done]

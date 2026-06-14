@@ -26,7 +26,7 @@ import jax.numpy as jnp
 
 from hcd_analysis.emulator.data import (
     load_cache, make_splits, untransform_prediction, COARSE_NAMES,
-    datarange_mask, DATA_RANGE,
+    datarange_mask, DATA_RANGE, make_tau0_bands,
 )
 from hcd_analysis.emulator import train as T
 
@@ -69,8 +69,9 @@ def make_z_bands(z_grid, n_bands):
 # --- per-fold residual / neff stratification ----------------------------------
 
 def fold_resid_neff(d, model, val_idx, norm_stats, z_band_of_row, n_bands,
+                    tau0_band_of_row=None, n_tb=1,
                     datarange=True, z_lo=None, z_hi=None, k_min=None):
-    """Per-fold RMS fractional residual + effective sightline count, (4,K,Zb).
+    """Per-fold RMS fractional residual + effective sightline count, (4,K,Zb,Tb).
 
     Residual definition (per val-row r, class c, k-bin k):
         rfrac[r,c,k] = (P_filt_pred[r,c,k] - P_filt_true[r,c,k]) / P_filt_true[r,c,k]
@@ -85,9 +86,12 @@ def fold_resid_neff(d, model, val_idx, norm_stats, z_band_of_row, n_bands,
     vector / C_emu) only covers modes the data constrain. Out-of-range (z,k) bins are
     dropped (their residual is set NaN and excluded from the RMS).
 
-    Per (class,k,z-band) cell we reduce the kept residuals to their RMS over the val
-    rows in that z-band — ``aggregate_error_vector`` then RMS-combines these per-fold
-    per-cell values over folds. Empty cells (no kept rows) are NaN (nan-safe later).
+    Per (class,k,z-band,τ₀-band) cell we reduce the kept residuals to their RMS over the
+    val rows in that cell — ``aggregate_error_vector`` then RMS-combines these per-fold
+    per-cell values over folds. The τ₀-band axis (``tau0_band_of_row``, ``n_tb``; the
+    outer bands isolate the ladder extremes, ``data.make_tau0_bands``) makes the error
+    vector τ₀-AWARE for the C_emu consumer. ``tau0_band_of_row=None``/``n_tb=1`` reduces
+    to the old z-only behaviour (trailing singleton). Empty cells are NaN (nan-safe later).
 
     neff definition: effective sightline count per (class,k,z-band) =
         Σ_{r in z-band} coarse_counts[r, class]
@@ -119,6 +123,8 @@ def fold_resid_neff(d, model, val_idx, norm_stats, z_band_of_row, n_bands,
     mask_k = d["mask"][val_idx]                                          # (Nval,K) finite Tier-P
     coarse = d["coarse_counts"][val_idx].astype(float)                  # (Nval,4)
     zband = z_band_of_row[val_idx]                                      # (Nval,)
+    tband = (np.asarray(tau0_band_of_row)[val_idx] if tau0_band_of_row is not None
+             else np.zeros(len(val_idx), int))                         # (Nval,) τ₀-band
 
     Nval, n_cls, K = P_true.shape
     keep = (np.isfinite(P_pred) & np.isfinite(P_true) & (P_true != 0.0)
@@ -131,16 +137,17 @@ def fold_resid_neff(d, model, val_idx, norm_stats, z_band_of_row, n_bands,
         rfrac = (P_pred - P_true) / P_true
     rfrac = np.where(keep, rfrac, np.nan)
 
-    sigma = np.full((n_cls, K, n_bands), np.nan)
-    neff = np.zeros((n_cls, K, n_bands))
+    sigma = np.full((n_cls, K, n_bands, n_tb), np.nan)
+    neff = np.zeros((n_cls, K, n_bands, n_tb))
     for zb in range(n_bands):
-        sel = (zband == zb)
-        if not sel.any():
-            continue
-        rb = rfrac[sel]                                                  # (nb,4,K)
-        with np.errstate(invalid="ignore"):
-            sigma[:, :, zb] = np.sqrt(np.nanmean(rb ** 2, axis=0))       # (4,K) RMS over rows
-        neff[:, :, zb] = coarse[sel].sum(axis=0)[:, None]               # (4,1)->(4,K)
+        for tb in range(n_tb):
+            sel = (zband == zb) & (tband == tb)
+            if not sel.any():
+                continue
+            rb = rfrac[sel]                                              # (nb,4,K)
+            with np.errstate(invalid="ignore"):
+                sigma[:, :, zb, tb] = np.sqrt(np.nanmean(rb ** 2, axis=0))  # (4,K)
+            neff[:, :, zb, tb] = coarse[sel].sum(axis=0)[:, None]       # (4,1)->(4,K)
     return sigma, neff, P_pred, P_true, mask_k
 
 
@@ -296,6 +303,9 @@ def main():
     ap.add_argument("--lr", type=float, default=FINAL_RECIPE["lr"])
     ap.add_argument("--batch", type=int, default=FINAL_RECIPE["batch"])
     ap.add_argument("--z-bands", type=int, default=3)
+    ap.add_argument("--tau0-bands", type=int, default=4,
+                    help="τ₀-ladder bands for the error vector (outer bands isolate "
+                         "the ladder extremes); 1 = τ₀-flat (old behaviour)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--patience", type=int, default=FINAL_RECIPE["patience"])
     ap.add_argument("--holdout-frac", type=float, default=0.15)
@@ -367,6 +377,16 @@ def main():
         print(f"  band {zb}: {sel.sum()} rows, z in "
               f"[{zz.min():.2f}, {zz.max():.2f}]")
 
+    # τ₀-LADDER bands (Phase-C T2): the error vector becomes τ₀-aware. Outer bands
+    # isolate the ladder extremes (data.make_tau0_bands); centres are in α=τ₀/Kim(z).
+    tau0_band_of_row, tau0_band_centres = make_tau0_bands(
+        d["tau0"], d["z_grid"], args.tau0_bands)
+    print(f"τ₀-bands ({args.tau0_bands}) α-centres: "
+          f"{np.array2string(tau0_band_centres, precision=3)}")
+    for tb in range(args.tau0_bands):
+        sel = tau0_band_of_row == tb
+        print(f"  τ₀-band {tb}: {sel.sum()} rows")
+
     resid_folds, neff_folds, histories = [], [], {}
     per_fold_summary = []
     for fold in range(args.n_folds):
@@ -416,7 +436,8 @@ def main():
         print(f"  history -> {hist_path}")
 
         sigma, neff, P_pred, P_true, mask_k = fold_resid_neff(
-            d, model, va, norm_stats, z_band_of_row, args.z_bands, datarange=datarange)
+            d, model, va, norm_stats, z_band_of_row, args.z_bands,
+            tau0_band_of_row=tau0_band_of_row, n_tb=args.tau0_bands, datarange=datarange)
         resid_folds.append(sigma)
         neff_folds.append(neff)
         histories[fold] = history
@@ -440,24 +461,26 @@ def main():
 
     # --- aggregate error vector + DLA shot flag -------------------------------
     ev = T.aggregate_error_vector(resid_folds, neff_folds)
-    sigma = ev["sigma"]                       # (4,K,Zb)
+    sigma = ev["sigma"]                       # (4,K,Zb,Tb) τ₀-aware
     dla_shot_flag = ev["dla_shot_flag"]       # (K,)
+    sigma_zonly = np.sqrt(np.nanmean(sigma ** 2, axis=3))   # (4,K,Zb) τ₀-marginalized
 
     out_npz = Path(args.out).parent / "error_vector.npz"
     np.savez(
         out_npz,
-        sigma=sigma,
+        sigma=sigma,                          # (4,K,Zb,Tb) — the τ₀-aware vector
         dla_shot_flag=dla_shot_flag,
         z_band_edges=z_band_edges,
+        tau0_band_centres=tau0_band_centres,  # (Tb,) α=τ₀/Kim(z) band centres
         class_names=np.array(COARSE_NAMES),
         kfkms=kgrid,
     )
-    print(f"\nerror vector -> {out_npz}")
+    print(f"\nerror vector -> {out_npz}  (sigma shape {sigma.shape})")
 
     # --- figures --------------------------------------------------------------
     fp_loss = fig_loss_curves(histories, args.figdir)
     fp_conv = fig_perfold_convergence(histories, args.figdir)
-    fp_evk = fig_error_vs_k(sigma, kgrid, z_band_edges, args.figdir)
+    fp_evk = fig_error_vs_k(sigma_zonly, kgrid, z_band_edges, args.figdir)
     fp_flag = fig_dla_shotflag(dla_shot_flag, kgrid, args.figdir)
     print("figures:")
     for p in (fp_loss, fp_conv, fp_evk, fp_flag):

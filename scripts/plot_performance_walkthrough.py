@@ -534,40 +534,50 @@ def figB6_mf_high_k(d_lf):
 
 
 def figB7_delta_c_templates(models, norms, splits, d, kf):
-    """B7: the Delta_c HCD templates (HeadB delta output) per class vs k, across z.
+    """B7: the CORRECTED per-class HCD excess templates R_c = P_c − P_clean, across z.
 
-    Delta_c is the per-HCD-class log-ratio template that re-weights the structural
-    P_tier_p; here we show the deployed (untransformed) Delta_c for LLS/subDLA/DLA at
-    several held-out z slices."""
+    These are the actual objects the forward model uses: P_obs = P_clean + Σ_c α_c·R_c,
+    with R_c live-emulated each step (predict_excess). This REPLACES the deprecated HeadB
+    `delta` head (P_c^unf − P_c^filt), which gave Δ_LLS≡0 — a numerical no-op that
+    visually contradicted the corrected design. For DLA we overlay the FILTERED excess
+    (P_filt[DLA]−P_clean) and the UNFILTERED excess actually used
+    (P_filt[DLA]+dla_core−P_clean) to make the masking add-back explicit."""
+    from hcd_analysis.emulator.predict import predict_excess, predict_P_filt
     model, norm = models[0], norms[0]
+    pf = norm["P_filt"]
     _, va, _ = splits[0]
     z_all = np.round(d["z_grid"], 3)
     zs = np.unique(z_all[va])
     z_pick = zs[np.linspace(0, len(zs) - 1, 4).astype(int)]
 
     fig, axes = plt.subplots(1, 3, figsize=(16, 4.8), sharex=True)
-    for ci, nm in enumerate(HCD):       # delta is the 3 HCD classes
+    for ci, nm in enumerate(HCD):       # the 3 HCD classes
         ax = axes[ci]
         for zi, zval in enumerate(z_pick):
             rows = va[np.isclose(z_all[va], zval)]
             r0 = rows[len(rows) // 2]
-            pred = jax.vmap(model)(jnp.asarray(d["x"][[r0]]), jnp.asarray(d["tau0"][[r0]]))
-            phys = untransform_prediction({"delta": np.asarray(pred["delta"])}, norm)
-            dlt = phys["delta"][0, ci]                       # (K,)
-            ax.plot(kf, dlt, color=f"C{zi}", lw=1.4, label=f"z={zval:.2f}")
+            theta9 = jnp.asarray(d["x"][r0, :9]); z_unit = float(d["x"][r0, 9])
+            tau0 = float(d["tau0"][r0]); dla_core = jnp.asarray(d["delta"][r0, 2])
+            R = np.asarray(predict_excess(model, theta9, z_unit, tau0, pf, dla_core))  # (3,K)
+            ax.plot(kf, R[ci], color=f"C{zi}", lw=1.4, label=f"z={zval:.2f}")
+            if nm == "DLA":             # overlay the filtered (pre-unmask) DLA excess
+                P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf)
+                R_filt = np.asarray(P_filt[3] - P_filt[0])
+                ax.plot(kf, R_filt, color=f"C{zi}", lw=1.0, ls=":", alpha=0.7)
         ax.set_xscale("log")
         # symlog y: the very-low-k spike (out-of-range) AND the in-range tail are both
         # legible; the linthresh keeps the small in-range structure resolved.
         ax.set_yscale("symlog", linthresh=0.05)
         ax.axhline(0, color="k", lw=0.6)
         ax.axvspan(kf.min(), DATA_RANGE["k_min"], color="grey", alpha=0.12)
-        ax.set_title(f"Δ_c — {nm}"); ax.grid(alpha=0.3, which="both")
+        ttl = f"R_c — {nm}" + ("  (solid=unfilt used, dotted=filt)" if nm == "DLA" else "")
+        ax.set_title(ttl); ax.grid(alpha=0.3, which="both")
         ax.set_xlabel("k  [s/km]")
         if ci == 0:
-            ax.set_ylabel("Δ_c (HCD template, physical; symlog)"); ax.legend(fontsize=8)
-    fig.suptitle("B7 — Δ_c HCD class templates per k across held-out z slices (fold-0)\n"
-                 "the per-class shape that re-weights the structural P_tier_p; symlog-y; "
-                 "low-k sign-flip is physical (grey = below data k_min)")
+            ax.set_ylabel("R_c = P_c − P_clean (physical; symlog)"); ax.legend(fontsize=8)
+    fig.suptitle("B7 — corrected per-class HCD excess R_c = P_c − P_clean across held-out z (fold-0)\n"
+                 "the object the forward model re-weights: P_obs = P_clean + Σ α_c·R_c; "
+                 "LLS now NON-zero (old P_c^unf−P_c^filt gave Δ_LLS≡0); grey = below data k_min")
     p = OUTDIR / "B7_delta_c_templates.png"
     fig.tight_layout(); fig.savefig(p, dpi=160); plt.close(fig)
     return p

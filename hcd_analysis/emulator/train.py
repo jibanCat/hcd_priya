@@ -706,12 +706,16 @@ def load_checkpoint(path):
 def aggregate_error_vector(resid_folds, neff_folds, shot_thresh=1.0):
     """RMS-over-folds error vector + a DLA high-k shot-noise flag.
 
-    ``resid_folds``, ``neff_folds``: lists of (4, K, Zb) arrays (per fold). Returns
-    ``sigma`` = RMS of residuals over folds and ``dla_shot_flag`` (K,) True where
-    the worst-case DLA effective count over folds/z-bands is below ``shot_thresh``.
+    ``resid_folds``, ``neff_folds``: lists of per-fold arrays shaped ``(4,K,Zb)`` OR
+    ``(4,K,Zb,Tb)`` (the τ₀-band axis added in Phase-C T2). Returns ``sigma`` = RMS of
+    residuals over folds (SAME trailing shape) and ``dla_shot_flag`` (K,) True where
+    the worst-case DLA effective count over folds AND all z/τ₀ bands is below
+    ``shot_thresh``.
     """
-    R = np.stack(resid_folds, 0)                 # (F,4,K,Zb)
+    R = np.stack(resid_folds, 0)                 # (F,4,K,Zb[,Tb])
     N = np.stack(neff_folds, 0)
-    sigma = np.sqrt(np.nanmean(R ** 2, axis=0))  # (4,K,Zb)
-    dla_neff = N[:, 3, :, :].min(axis=(0, 2))    # worst-case DLA neff per k
+    sigma = np.sqrt(np.nanmean(R ** 2, axis=0))  # (4,K,Zb[,Tb])
+    dla = N[:, 3]                                 # (F,K,Zb[,Tb])
+    band_axes = tuple([0] + list(range(2, dla.ndim)))   # folds + all band axes
+    dla_neff = dla.min(axis=band_axes)           # (K,) worst-case DLA neff per k
     return {"sigma": sigma, "dla_shot_flag": dla_neff < shot_thresh}

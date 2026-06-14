@@ -17,9 +17,25 @@ from hcd_analysis.hcd_template import (
     template_factor,
     template_factor_from_cyclic_k,
     template_contributions,
+    class_ratio,
     fit_alpha,
     correct_p1d,
+    _C0,
 )
+
+
+def test_class_ratio_eq6_has_c_plateau():
+    """Eq.6 per-class ratio -> c_i(z) at high k (NOT pure boost); c0_LargeDLA<1 => sub-1."""
+    k = np.linspace(1e-3, 0.1, 400)          # angular s/km
+    r = class_ratio(k, 3.0)
+    # at the largest k the boost term ~0, ratio -> c(z); c0 LLS≈0.985, LargeDLA≈0.334
+    assert 0.9 < r["LLS"][-1] < 1.0, r["LLS"][-1]
+    assert r["Large-DLA"][-1] < 0.5, r["Large-DLA"][-1]      # genuine sub-1 plateau
+    # high-k plateau matches the c0 table to the z-scaling
+    zfac = (1 + 3.0) / (1 + 2.0)
+    assert np.allclose(r["Large-DLA"][-1], _C0[3] * zfac ** 0.4653, rtol=0.05)
+    # low-k boost is above the plateau for LLS (real contamination)
+    assert r["LLS"][0] > r["LLS"][-1]
 
 
 def _user_reference_DLA4corr(kf, z, alpha):

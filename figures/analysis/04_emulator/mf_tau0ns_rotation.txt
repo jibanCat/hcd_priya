@@ -1,0 +1,33 @@
+# TASK A — τ₀–n_s rotation: ABSOLUTE marginal σ(n_s)/σ(τ₀) + r under LF/OFF/ON.
+# C_post = (F+P)^{-1}, SAME Fisher as the gate. τ₀-block = z∈[2.4,3.4] diag mean.
+# Widening (σ_MF/σ_LF ≥ 1) is conservative; tightening (<1) is the dangerous case.
+# one representative held-out sim per fold (matches the gate aliasing probe).
+#
+# fold sim                       σ(n_s)  σ(n_s) σ(n_s)  | σ(τ0) σ(τ0) σ(τ0) | r(τ0,n_s)
+#                                  LF    OFF    ON      |  LF    OFF    ON   | LF   OFF   ON
+  0  ns0.803Ap2.2e-09herei4.05h 0.1885 0.1800 0.1800 | 0.0065 0.0064 0.0064 | +0.298 +0.286 +0.284
+  1  ns0.831Ap2.31e-09herei3.71 0.2309 0.2123 0.2123 | 0.0069 0.0068 0.0068 | -0.328 -0.370 -0.373
+  2  ns0.859Ap1.29e-09herei3.92 0.1063 0.0977 0.0978 | 0.0072 0.0070 0.0069 | +0.401 +0.355 +0.341
+  3  ns0.888Ap2.53e-09herei3.53 0.2830 0.2697 0.2699 | 0.0072 0.0070 0.0070 | +0.375 +0.367 +0.365
+  4  ns0.909Ap1.98e-09herei3.75 0.0772 0.0738 0.0736 | 0.0077 0.0074 0.0073 | +0.280 +0.180 +0.173
+  5  ns0.933Ap1.83e-09herei4.09 0.1412 0.1312 0.1313 | 0.0070 0.0070 0.0070 | +0.239 +0.251 +0.247
+  6  ns0.956Ap2.19e-09herei3.62 0.2682 0.2523 0.2527 | 0.0073 0.0072 0.0072 | +0.449 +0.447 +0.450
+  7  ns0.979Ap2.48e-09herei3.99 0.2363 0.2204 0.2207 | 0.0069 0.0067 0.0067 | +0.216 +0.190 +0.184
+
+# ===== SUMMARY (ratio MF/LF; >1 = WIDENING = conservative) =====
+  σ(n_s) ratio ON/LF : mean 0.9386  range [0.9197, 0.9548]
+  σ(n_s) ratio OFF/LF: mean 0.9382  range [0.9195, 0.9555]
+  σ(n_s) ratio ON/OFF: mean 1.0004  range [0.9979, 1.0018]
+  σ(τ0)  ratio ON/LF : mean 0.9747  range [0.9528, 0.9989]
+  σ(τ0)  ratio OFF/LF: mean 0.9814  range [0.9598, 1.0039]
+  σ(τ0)  ratio ON/OFF: mean 0.9931  range [0.9840, 0.9977]
+
+  Δr(ON−LF)  : mean -0.0325  worst|·| 0.1073
+  Δr(OFF−LF) : mean -0.0279  worst|·| 0.0998
+  Δr(ON−OFF) : mean -0.0046  worst|·| 0.0140
+
+  VERDICT inputs: min σ(n_s) ON/LF = 0.9197; min σ(τ0) ON/LF = 0.9528
+  (ratio ≥ 1.0 in EVERY fold ⇒ the rotation only WIDENS — conservative, cannot under-cover)
+
+[npz] /home/mfho/hcd_priya/figures/analysis/04_emulator/mf_tau0ns_rotation.npz
+[done]

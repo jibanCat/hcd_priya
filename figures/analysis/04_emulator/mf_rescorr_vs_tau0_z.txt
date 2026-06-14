@@ -1,0 +1,55 @@
+================================================================================
+MF LF->HR resolution correction rho = P_HR/P_LF  vs  tau0 (mean flux) and z
+FORWARD cache analysis (no training). Clean-forest P1D, 6 HR sims (= LF pts).
+================================================================================
+reference k-grid: 40 log bins, k in [0.01,0.069] s/km (LF Nyquist).
+  HR log-log interpolated DOWN onto LF k-grid; never extrapolated.
+matched HR rows: 2060;  HR sims: 6;  z bins: 18 (2.0..5.4).
+tau0 ladder: alpha_idx 0..19.  alpha_slope = tau0-rescale multiplier:
+  rung 0  -> alpha_slope=0.656  (LOW tau0 / HIGH <F>, target_F~0.626)
+  rung 19 -> alpha_slope=1.331  (HIGH tau0 / LOW <F>, target_F~0.431)
+HR sims ns span [0.859,0.979], Ap [1.29e-09,2.32e-09] (clustered mid-high).
+
+CONVENTION: rho = P_HR/P_LF. rho>1 => LF is power-DEFICIENT (correction boosts).
+
+--------------------------------------------------------------------------------
+rho(z, tau0-rung, k) at selected grid points (6-sim mean):
+--------------------------------------------------------------------------------
+  k ~ 0.0200 s/km:
+     z \ rung        #0(s=0.66)      #9(s=0.98)     #19(s=1.33)
+     z=2.2                0.9841          0.9738          0.9678
+     z=3.6                0.9719          0.9859          0.9938
+     z=5.0                0.9977          0.9743          0.9508
+
+  k ~ 0.0400 s/km:
+     z \ rung        #0(s=0.66)      #9(s=0.98)     #19(s=1.33)
+     z=2.2                1.0476          1.0313          1.0189
+     z=3.6                1.0055          1.0116          1.0106
+     z=5.0                1.0217          0.9874          0.9498
+
+  k ~ 0.0595 s/km:
+     z \ rung        #0(s=0.66)      #9(s=0.98)     #19(s=1.33)
+     z=2.2                1.1064          1.0802          1.0560
+     z=3.6                1.0113          1.0038          0.9925
+     z=5.0                1.0231          0.9778          0.9281
+
+  k ~ 0.0488 s/km:
+     z \ rung        #0(s=0.66)      #9(s=0.98)     #19(s=1.33)
+     z=2.2                1.0761          1.0562          1.0393
+     z=3.6                1.0126          1.0133          1.0079
+     z=5.0                1.0257          0.9868          0.9444
+
+--------------------------------------------------------------------------------
+STRENGTH of each axis at k~0.0488 s/km (rho range = peak-to-peak):
+--------------------------------------------------------------------------------
+  z-driven swing of rho (max over rungs of rho.max_z - rho.min_z): 0.1221  (12.2 pp in P);  median over rungs 9.3 pp
+  tau0-driven swing of rho (max over z of rho.max_rung - rho.min_rung): 0.0909  (9.1 pp in P);  median over z 3.4 pp
+  worst |rho-1| cell: z=2.0 rung#0 (alpha_slope=0.66) -> rho=1.0860 (+8.6%)
+  prior-finding check (z=2.2, k~0.049): rung0 rho=1.0761 (+7.6%)  vs  rung19 rho=1.0393 (+3.9%)  => low-tau0 boost +3.7pp larger.
+
+================================================================================
+READOUT:
+  z-dependence of rho: full swing ~12.2 pp in P (k~0.05); rho is largest (LF most deficient) at LOW z, falling toward high z.
+  tau0-dependence of rho: full swing ~9.1 pp in P at fixed z,k; rho is larger at LOW tau0 (high <F>) than HIGH tau0.
+  => DOMINANT axis = z (z-swing/tau0-swing ~ 1.3x). Both axes matter for the MF correction; tau0 contributes a non-negligible ~9.1pp secondary trend.
+================================================================================

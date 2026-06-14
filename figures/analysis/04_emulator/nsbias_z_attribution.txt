@@ -1,0 +1,89 @@
+# n_s EMU-bias z-bin ATTRIBUTION. all 8 folds, each fold's own held-out emulator, KS<0.06.
+# forward-only Fisher MAP-shift, instrumented from diag_emu_bias_allfolds.py. cemu_mode=prod.
+# z_global (14): 2.000 2.200 2.400 2.600 2.800 3.000 3.200 3.400 3.600 3.800 4.000 4.200 4.400 4.600
+# legs: DESI(n_z=11) KS(n_z=14, k<0.06)
+
+# ===== ANCHOR: pooled n_s bias over 60 held-out sims =====
+  n_s mean bias = -0.6461 sigma   (headline emu_bias_allfolds.txt = -0.646)
+  A_p mean bias = +0.0310 sigma   (headline = +0.031)
+  signs n_s: 10+/50-
+
+# GATE sum_z <bias_z> = -0.6461  vs  <total n_s bias> = -0.6461  (|diff|=2.10e-13)
+
+# ===== per-z <bias_z>(n_s) attribution (sigma), 60 sims =====
+#   z      DESI       KS        total      %share(|.|)
+  2.000  +0.0000  -0.4728  -0.4728    59.3%
+  2.200  -0.0076  -0.2036  -0.2112    26.5%
+  2.400  +0.0029  +0.0094  +0.0123     1.5%
+  2.600  +0.0168  -0.0014  +0.0155     1.9%
+  2.800  +0.0245  +0.0045  +0.0291     3.6%
+  3.000  +0.0145  -0.0034  +0.0111     1.4%
+  3.200  +0.0087  -0.0126  -0.0039     0.5%
+  3.400  +0.0106  -0.0031  +0.0075     0.9%
+  3.600  -0.0081  -0.0015  -0.0096     1.2%
+  3.800  -0.0069  +0.0013  -0.0057     0.7%
+  4.000  -0.0128  -0.0009  -0.0137     1.7%
+  4.200  -0.0037  -0.0010  -0.0047     0.6%
+  4.400  +0.0000  +0.0001  +0.0001     0.0%
+  4.600  +0.0000  -0.0001  -0.0001     0.0%
+  ----   --------   --------   --------
+  TOTAL  +0.0388  -0.6850  -0.6461
+  DESI total = +0.0388 sigma  (-6% of total)
+  KS   total = -0.6850 sigma  (106% of total)
+
+# top contributing z-bins (by |contribution|):
+  z=2.000: -0.4728 sigma  (59.3% share)
+  z=2.200: -0.2112 sigma  (26.5% share)
+  z=2.800: +0.0291 sigma  (3.6% share)
+  z=2.600: +0.0155 sigma  (1.9% share)
+  z=4.000: -0.0137 sigma  (1.7% share)
+  z=2.400: +0.0123 sigma  (1.5% share)
+
+# PRIOR-CLAIM CHECK (signed share of total -0.65sigma):
+  z in [2.0,2.3]: contribution -0.6840 sigma = 106% of total  (prior claim ~53%)
+  z in [3.5,3.7]: contribution -0.0096 sigma = 1% of total  (prior claim ~25%)
+
+# cumulative sum_z'<=z <bias_z'>(n_s):
+  z<=2.000: -0.4728 sigma
+  z<=2.200: -0.6840 sigma
+  z<=2.400: -0.6717 sigma
+  z<=2.600: -0.6562 sigma
+  z<=2.800: -0.6272 sigma
+  z<=3.000: -0.6160 sigma
+  z<=3.200: -0.6199 sigma
+  z<=3.400: -0.6124 sigma
+  z<=3.600: -0.6220 sigma
+  z<=3.800: -0.6277 sigma
+  z<=4.000: -0.6414 sigma
+  z<=4.200: -0.6461 sigma
+  z<=4.400: -0.6460 sigma
+  z<=4.600: -0.6461 sigma
+
+# ===== C_emu TOGGLE on pooled n_s bias =====
+  data_only  : pooled n_s bias = -0.6597 sigma
+  inflate2   : pooled n_s bias = -0.6344 sigma
+  prod       : pooled n_s bias = -0.6461 sigma  (C_total = C_data + C_emu, prod)
+  data_only  : C_emu=0 (cosmic-only)  -> -0.6597 sigma
+  inflate2   : C_emu x2               -> -0.6344 sigma
+
+# ===== FOLD STRUCTURE: LOSO folds are contiguous sorted-ns blocks =====
+#  fold  n  mean_ns_u  (mean_ns-global)  mean_bias(n_s)
+   0     8   0.060      -0.354         -0.4705
+   1     8   0.176      -0.239         +0.4668
+   2     8   0.292      -0.123         -0.5207
+   3     8   0.403      -0.012         -0.8444
+   4     7   0.462      +0.047         -1.0362
+   5     7   0.566      +0.151         -1.5551
+   6     7   0.666      +0.251         -0.7509
+   7     7   0.797      +0.382         -0.6319
+  global mean ns_u = 0.415
+  corr( fold_mean_ns - global,  fold_mean_bias ) = -0.516
+  per-sim fit: bias = -1.263*ns_u + -0.122   corr(ns_u,bias)=-0.349
+
+[fig] /home/mfho/hcd_priya/figures/analysis/04_emulator/nsbias_z_attribution.png
+[fig] /home/mfho/hcd_priya/figures/analysis/04_emulator/nsbias_cumulative_z.png
+[fig] /home/mfho/hcd_priya/figures/analysis/04_emulator/nsbias_coherent_residual_zk.png
+[fig] /home/mfho/hcd_priya/figures/analysis/04_emulator/nsbias_fold_structure.png
+[fig] /home/mfho/hcd_priya/figures/analysis/04_emulator/nsbias_cemu_toggle.png
+[npz] /home/mfho/hcd_priya/figures/analysis/04_emulator/nsbias_z_attribution.npz
+[done]

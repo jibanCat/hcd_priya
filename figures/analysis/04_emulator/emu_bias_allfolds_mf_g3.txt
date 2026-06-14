@@ -1,0 +1,17 @@
+# G3: z∈[2.8,3.4], k≥0.0442 s/km signed-coherent logP residual, class 0 (clean).
+#   LF-forward residual = g (full deficit); MF-forward residual = g - g_corr (HF-LOSO).
+#   n high-k bins (k≥0.0442): 63/172;  rows in z-band: 480
+# sim                         LF |mean resid|   MF |mean resid|   reduced?
+  ns0.859Ap1.29e-09herei3.92  0.4166          0.0122         YES
+  ns0.885Ap2.32e-09herei4.06  0.2883          0.1662         YES
+  ns0.909Ap1.98e-09herei3.75  0.3755          0.0615         YES
+  ns0.914Ap1.32e-09herei3.85  0.5824          0.1867         YES
+  ns0.972Ap1.69e-09herei3.87  0.4903          0.0762         YES
+  ns0.979Ap1.78e-09herei3.65  0.4077          0.0229         YES
+
+# POOLED (6-sim HF-LOSO) signed coherent mean in the G3 band:
+  LF-forward |mean residual| = 0.4268  (raw deficit, signed mean +0.4268)
+  MF-forward |mean residual| = 0.0000  (after correction, signed mean +0.0000)
+  reduction factor = 426797430.3x
+  G3: PASS  (MF |mean| < LF |mean|)
+[done]

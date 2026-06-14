@@ -1,0 +1,101 @@
+==============================================================================
+MF LF->HR resolution-correction LOSO validation (FORWARD cache, no training)
+==============================================================================
+correction form tested: g(sim,z,k,alpha) = log P_HR_clean - log P_LF_clean
+  (the repo default delta_mode='none' applies gbar(z,k) = <g>_sims,alpha @ z,
+   theta-INDEPENDENT; this test measures g on RAW cache P1D, no emulator)
+shared k-grid: LF native 40 bins, k=[0.0100,0.0690] s/km
+  (HR log-log interpolated DOWN onto LF grid; never extrapolated)
+matched HR rows: 2060 ; HR sims: 6
+high-k band (reporting): k>=0.0442 s/km (top quartile)
+low-z band (reporting):  z<=2.6
+
+HR sims and their ns / Ap (unit-cube ns at index 0):
+  ns0.859Ap1.29e-09herei3.92heref2.7 ns=0.859 Ap=1.292e-09  ns_unit=0.236
+  ns0.885Ap2.32e-09herei4.06heref2.9 ns=0.885 Ap=2.324e-09  ns_unit=0.339
+  ns0.909Ap1.98e-09herei3.75heref3.0 ns=0.909 Ap=1.981e-09  ns_unit=0.438
+  ns0.914Ap1.32e-09herei3.85heref2.6 ns=0.914 Ap=1.317e-09  ns_unit=0.455
+  ns0.972Ap1.69e-09herei3.87heref2.6 ns=0.972 Ap=1.690e-09  ns_unit=0.689
+  ns0.979Ap1.78e-09herei3.65heref2.8 ns=0.979 Ap=1.783e-09  ns_unit=0.715
+  ns span: [0.859, 0.979]  Ap span: [1.29e-09, 2.32e-09]
+
+------------------------------------------------------------------------------
+TEST 1a: inter-sim scatter of rho  std_over_sims(rho)/|mean(rho)| per (z,k)
+------------------------------------------------------------------------------
+  mean(rho) overall: 0.9881  (so the mean correction is -1.2% in P)
+  inter-sim CoV(rho) pooled all (z,k):   median=0.0088  max=0.0518
+  inter-sim CoV(rho) LOW-z HIGH-k band:  median=0.0062  max=0.0090
+  mean correction LOW-z HIGH-k:          rho=1.0582 (+5.8% in P)
+
+------------------------------------------------------------------------------
+TEST 1b: regress inter-sim log-rho on unit-cube theta (6 sims)
+------------------------------------------------------------------------------
+  per (z,k) cell, univariate R^2 of log-rho vs each single param, then
+  averaged over LOW-z HIGH-k cells (which param drives any theta-dependence):
+  (cells used: 30 of 40 low-z high-k)
+    Ap           mean univariate R^2 = 0.310  (median 0.242)
+    hub          mean univariate R^2 = 0.233  (median 0.187)
+    omegamh2     mean univariate R^2 = 0.213  (median 0.205)
+    alphaq       mean univariate R^2 = 0.202  (median 0.055)
+    heref        mean univariate R^2 = 0.197  (median 0.143)
+    ns           mean univariate R^2 = 0.153  (median 0.119)
+    bhfeedback   mean univariate R^2 = 0.133  (median 0.058)
+    hireionz     mean univariate R^2 = 0.074  (median 0.010)
+    herei        mean univariate R^2 = 0.043  (median 0.036)
+  NOTE: with only 6 sims and 9 params, a FULL multivariate fit is rank-
+  deficient (R^2->1 trivially, no DOF) -- univariate R^2 above is the honest
+  signal. High univariate R^2 for a param just means rho CORRELATES with it
+  across these 6 clustered sims; it cannot isolate causation from 6 points.
+
+------------------------------------------------------------------------------
+TEST 1c: tau0 (alpha-rung) dependence of rho -- rung 0 vs rung 19
+------------------------------------------------------------------------------
+  rung0  (alpha low)  mean rho all(z,k): 0.9980 (-0.2%);  LOW-z HIGH-k: 1.0814 (+8.1%)
+  rung19 (alpha high) mean rho all(z,k): 0.9784 (-2.2%);  LOW-z HIGH-k: 1.0387 (+3.9%)
+  rung0 - rung19 (LOW-z HIGH-k) in rho:  +0.0427  (+4.3 percentage-points in P)
+  => tau0 shifts the correction by ~4.3pp; the repo carries
+     a per-(z,k) mean POOLED over alpha (gbar pools tau0). If this shift is
+     non-negligible vs the n_s level, a tau0-resolved correction is warranted.
+
+------------------------------------------------------------------------------
+TEST 2: 6-fold LOSO  -- gbar from 5 sims applied to held-out HR's LF
+------------------------------------------------------------------------------
+  (mirrors FixedMeanHead/fixed_mean_table: per-z mean log-ratio, theta-indep;
+   eps(z,k) = P_pred/P_HR - 1, the residual a FIXED correction leaves)
+  LOSO eps pooled ALL (z,k):      RMS=1.94%  median|eps|=0.81%  max|eps|=16.71%
+  LOSO eps LOW-z HIGH-k:          RMS=1.47%  median|eps|=1.02%  max|eps|=4.78%
+  LOSO eps LOW-z HIGH-k COHERENT (signed mean): +0.01%  (this is the ~n_s-bias-relevant coherent logP residual)
+
+  per-held-out-sim coherent (mean) low-z high-k eps:
+    sim 0 (ns=0.859): coherent=+0.05%  RMS=1.18%
+    sim 1 (ns=0.885): coherent=-0.34%  RMS=1.49%
+    sim 2 (ns=0.909): coherent=+0.26%  RMS=1.39%
+    sim 3 (ns=0.914): coherent=+0.91%  RMS=1.66%
+    sim 4 (ns=0.972): coherent=-0.70%  RMS=1.54%
+    sim 5 (ns=0.979): coherent=-0.12%  RMS=1.52%
+  WORST per-sim coherent low-z high-k: +0.91%  (spread -0.70% .. +0.91%)
+  (the pooled signed mean cancels opposite-sign sims; the worst per-sim
+   coherent offset is the honest n_s-bias-relevant residual.)
+
+==============================================================================
+VERDICT (numbers above):
+------------------------------------------------------------------------------
+  - the resolution correction itself is ~+5.8% in P (low-z high-k);
+    i.e. the LF is ~-5.5% deficient there (matches the
+    prior diag_lf_vs_hr_highk ~-6%).
+  - inter-sim CoV(rho) low-z high-k median ~0.6% : the raw theta(+alpha)-spread of the correction across the 6 sims (SMALL).
+  - LOSO: WORST per-sim coherent low-z high-k residual ~+0.91%, per-sim RMS up to ~1.5%.
+    Compare to: correction effect ~|5.8|%, and the n_s-bias level ~1% logP.
+  -> WORST per-sim coherent residual < 1% (the n_s level) and RMS well below
+     the correction: over THIS 6-sim sub-volume the THETA-INDEPENDENT
+     correction GENERALIZES well enough that the FIXED gbar does NOT itself
+     re-introduce a coherent n_s-level bias. MF does not merely reshuffle it.
+
+  COVERAGE CAVEAT (critical): the 6 HR sims span ns in [0.859, 0.979] only,
+  Ap 1.29e-09-2.32e-09, clustered mid-high. This LOSO tests theta-insensitivity ONLY
+  over that sub-volume. LOW-ns and the sparse ns>0.98 / >1.0 edge are UNTESTED.
+  With 6 points this is a WEAK (necessary, not sufficient) test: leave-one-out
+  over 6 clustered sims cannot certify theta-insensitivity globally; it can only
+  show whether a fixed correction self-consistently predicts a held-out sim
+  INSIDE this cluster. Extrapolation to the prior edges is not validated here.
+==============================================================================
