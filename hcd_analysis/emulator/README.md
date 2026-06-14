@@ -205,26 +205,8 @@ Add `--smoke` for a fast shape/finiteness check. A θ-blind baseline pre-fit
 (`train._prefit_baseline`) runs before the joint fit so the baseline is structurally
 identifiable.
 
-### 7a. Held-out LOSO error vs wavenumber
-
-The 8-fold group-k LOSO certifies generalization on *held-out cosmologies*. The per-fold
-scalar val-RMS (clean 0.84–1.61 %, DLA worst 1.41–4.39 %, overall 1.0–2.4 %; A_p/n_s Fisher
-bias **0/8** over the gate) is summarized in the notes' validation Doc A. The figure below
-resolves that same held-out error **as a function of angular wavenumber k** (k = 2π/λ_v, fed
-direct — no /2π), per HCD class. It pools `P_emu/P_true − 1` over **all 18 224 held-out rows
-across all 8 folds**, each predicted by *that fold's own* held-out checkpoint
-(`final_fold{0..7}`) — the honest LOSO generalization error, **not** the in-sample production
-ensemble. (Rebuild with `scripts/diag_emu_loso_perk.py`; arrays in the sibling `.npz`.)
-
-![Per-k held-out LOSO prediction error](../../figures/analysis/04_emulator/loso_perk_pred_error.png)
-
-Median `|P_emu/P_true − 1|` is a shallow **U in k**: highest at the lowest, cosmic-variance-
-sparse modes (~1.0–1.3 %), best near k≈0.02–0.04 s/km (**clean/LLS/subDLA 0.39–0.48 %, DLA
-0.74 %**), then rising back to **clean 0.99 %, LLS 1.01 %, subDLA 1.11 %, DLA 1.50 %** at the
-Nyquist k≈0.069 s/km (the n_k=172 grid top), with a thin above-Nyquist tail (some rows' physical
-k reaches ~0.086) climbing to ~1.3–1.6 %. The class ordering is monotone clean < LLS < subDLA <
-**DLA (worst at every k)**, matching the scalar table. The dotted line on each panel is the
-in-range LOSO median for that class.
+(Held-out LOSO validation — per-fold RMS, the A_p/n_s Fisher gate, and the per-k error
+breakdown — lives in the private notes repo: `docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md`.)
 
 ---
 
