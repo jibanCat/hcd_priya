@@ -122,7 +122,7 @@ def build_config(verbose=False):
                      mf_emucoh=0.0, mf_emucoh_offdiag_only=False, sample_metals=False,
                      inject_a_siiii=0.0, subdla_center_shift=0.0,
                      hierarchical_hcd=False, hcd_ratio_infl=1.0, hcd_center_shift=0.0,
-                     z_slope_marginalized=False):
+                     hcd_2d_tilt=False, z_slope_marginalized=False):
         if sim is None:
             ns, sim = _closest_sim(fold_sims[fold], target_ns)
         else:
@@ -139,7 +139,7 @@ def build_config(verbose=False):
                 sample_metals=bool(sample_metals), inject_a_siiii=float(inject_a_siiii),
                 subdla_center_shift=float(subdla_center_shift),
                 hierarchical_hcd=bool(hierarchical_hcd), hcd_ratio_infl=float(hcd_ratio_infl),
-                hcd_center_shift=float(hcd_center_shift),
+                hcd_center_shift=float(hcd_center_shift), hcd_2d_tilt=bool(hcd_2d_tilt),
                 chain_id=c, n_chains=n_chains, seed=0))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -345,6 +345,28 @@ def build_config(verbose=False):
                      hierarchical_hcd=True, hcd_ratio_infl=1.0, z_slope_marginalized=True, hcd_center_shift=1.0)
         add_fiducial(_zfn + "_zm", _zff, _zfns, survey="DESI+KS", prior_center="sim_mean",
                      hierarchical_hcd=True, hcd_ratio_infl=1.0, z_slope_marginalized=True, hcd_center_shift=-1.0)
+
+    # === 2D AMPLITUDE×TILT submanifold closure (HT arms, PI refinement 2026-06-14) ===
+    # The PI's 2D submanifold: a GENUINE 2-dof HCD sector = pivot AMPLITUDE A_HCD × a GLOBAL z-TILT
+    # B_HCD, with the class-differential z-evolution FIXED (δs_c = HCD_LIT_OVER_SIM_SLOPE − slope[0]):
+    #   α_c(z) = A_HCD · r_c · ((1+z)/(1+z_p))^(B_HCD + δs_c).
+    # B_HCD is the DATA-constrained 2nd submanifold dimension whose z-tilt signature is ORTHOGONAL
+    # to the n_s k-tilt — the hypothesis (HZ diagnosis) is that this z-evolution dof DECORRELATES
+    # A_HCD from n_s, fixing the relocation that Option B-1D (A_HCD × FIXED ratios) suffered (the
+    # A_HCD-center→n_s coupling +0.51σ). Differs from HZ (free per-class s_*): HT ties the slopes to
+    # ONE B_HCD + FIXED δs_c (one z-tilt dof, not three) — the tight submanifold the HZ note proposed.
+    # Joint DESI+KS (the production combination), sim_mean (NON-circular) center, hcd_2d_tilt=True.
+    # A_HCD-center 0/+1σ/−1σ via hcd_center_shift (the cosmology-safety arm: does the 2D tilt keep
+    # the A_HCD-center→n_s coupling <0.3σ?). 2 folds × 3 shifts × 4 chains = 24 chains. NOT launched
+    # here — config only. (run_one_chain threads hcd_2d_tilt → build_legb_ctx; the closure δs_c /
+    # B_HCD center/width auto-derive from HCD_LIT_OVER_SIM_SLOPE, self-consistent with the forward.)
+    for _tfn, _tff, _tfns in [("HT_f6", 6, 0.966), ("HT_f4", 4, 0.92)]:
+        add_fiducial(_tfn + "_t0", _tff, _tfns, survey="DESI+KS", prior_center="sim_mean",
+                     hierarchical_hcd=True, hcd_2d_tilt=True, hcd_ratio_infl=1.0)
+        add_fiducial(_tfn + "_tp", _tff, _tfns, survey="DESI+KS", prior_center="sim_mean",
+                     hierarchical_hcd=True, hcd_2d_tilt=True, hcd_ratio_infl=1.0, hcd_center_shift=1.0)
+        add_fiducial(_tfn + "_tm", _tff, _tfns, survey="DESI+KS", prior_center="sim_mean",
+                     hierarchical_hcd=True, hcd_2d_tilt=True, hcd_ratio_infl=1.0, hcd_center_shift=-1.0)
 
     # === Phase-5a Test A (2026-06-11): MF gate-invariant M-tier re-run at HR cosmologies ===
     # with_mf=True → truth = MF-corrected LF AND forward = MF-corrected LF (the GATE INVARIANT: the
@@ -556,7 +578,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     from hcd_analysis.emulator.closure_legb import (
         build_legb_ctx, held_out_sims, make_truth_from_sim, make_hr_truth_from_cache, make_legb_mock,
         _mock_core_per_leg, _run_nuts_legb, _draws_matrix, _packed_names_for, _hcd_latent_truths,
-        CACHE_PATH, ZSLOPE_PRIOR_SIGMA)
+        _hcd_latent_truths_2d, CACHE_PATH, ZSLOPE_PRIOR_SIGMA)
     from hcd_analysis.emulator.inference import (PARAM_NAMES, HCD_LIT_OVER_SIM_SLOPE,
                                                  hcd_incidence_prior)
 
@@ -594,9 +616,15 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         # HIERARCHICAL HCD prior ("Option B"): A_hcd × {r_subdla, r_dla} reparam (default OFF →
         # byte-identical). The ratio centers are auto-derived from the RAW sim w_c pool (must-fix #1).
         hierarchical_hcd=bool(chain.get("hierarchical_hcd", False)),
-        hcd_ratio_infl=float(chain.get("hcd_ratio_infl", 1.0) or 1.0))
+        hcd_ratio_infl=float(chain.get("hcd_ratio_infl", 1.0) or 1.0),
+        # 2D AMPLITUDE×TILT submanifold (HT arms): A_hcd × global z-tilt B_hcd × FIXED ratios; the
+        # per-class slope s_c = B_hcd + δs_c REPLACES the marginalize_zslope sampling. Requires
+        # hierarchical_hcd; the closure δs_c / B_hcd center+width auto-derive from the forward slopes.
+        hcd_2d_tilt=bool(chain.get("hcd_2d_tilt", False)))
 
-    if chain["z_slope_marginalized"]:
+    # z-slope marginalization is a NO-OP under the 2D tilt (which sets s_c = B_hcd + δs_c itself);
+    # _legb_model ignores marginalize_zslope when hcd_2d_tilt, but keep the ctx clean (don't set it).
+    if chain["z_slope_marginalized"] and not bool(chain.get("hcd_2d_tilt", False)):
         ctx = ctx._replace(marginalize_zslope=True,
                            zslope_mu=jnp.asarray(HCD_LIT_OVER_SIM_SLOPE),
                            zslope_sigma=jnp.asarray(ZSLOPE_PRIOR_SIGMA))
@@ -687,7 +715,9 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     packed_names = list(_packed_names_for(samples, kept_global))
     truth_vec = np.concatenate([
         truth_pack["theta9"], truth_pack["tau0_global"][kept_global], truth_pack["alpha_hcd"]])
-    if bool(chain.get("hierarchical_hcd", False)):         # match the A_hcd/r_subdla/r_dla draw columns
+    if bool(chain.get("hcd_2d_tilt", False)):              # match the A_hcd/B_hcd/r_subdla/r_dla columns
+        truth_vec = np.concatenate([truth_vec, _hcd_latent_truths_2d(truth_pack["alpha_hcd"], ctx)])
+    elif bool(chain.get("hierarchical_hcd", False)):       # match the A_hcd/r_subdla/r_dla draw columns
         truth_vec = np.concatenate([truth_vec, _hcd_latent_truths(truth_pack["alpha_hcd"])])
     if bool(chain.get("sample_metals", False)):            # match the a_SiIII column _draws_matrix added
         truth_vec = np.concatenate([truth_vec, [float(chain.get("inject_a_siiii", 0.0) or 0.0)]])
@@ -711,6 +741,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         inject_a_siiii=float(chain.get("inject_a_siiii", 0.0) or 0.0),
         hierarchical_hcd=bool(chain.get("hierarchical_hcd", False)),
         hcd_ratio_infl=float(chain.get("hcd_ratio_infl", 1.0) or 1.0),
+        hcd_2d_tilt=bool(chain.get("hcd_2d_tilt", False)),
         chain_index=int(chain["chain_id"]), n_chains_target=int(chain["n_chains"]),
         # battery inputs: the per-chain packed draws + the extra fields (energy/num_steps/diverg).
         packed=draws.astype(np.float64), names=np.array(packed_names),

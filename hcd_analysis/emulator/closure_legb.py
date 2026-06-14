@@ -78,6 +78,12 @@ DIVERGENCE_RETRY_TARGET_ACCEPT = (0.95, 0.99)
 # literature WLS 1σ width (scripts/diag_legb_slope_prior_tradeoff: WLS fit of dN/dX vs PRIYA
 # with the quoted literature dN/dX error bars; class order LLS, subDLA, DLA).
 ZSLOPE_PRIOR_SIGMA = (0.52, 0.53, 0.33)
+# FULL per-class HCD-incidence z-slope d ln w_c(z)/d ln(1+z), 60-sim-population median (measured
+# 2026-06-14, scripts/diag_hcd_zslope_nsbias.py). This is the slope the mock TRUTH actually carries
+# (the held-out sim's native w_c(z)) — the RIGHT center for the 2D B_HCD tilt. It is a DIFFERENT
+# object from inference.HCD_LIT_OVER_SIM_SLOPE=(0.95,0.15,0.40) (the lit/sim-RATIO slope). per-sim
+# LLS scatter ≈0.07; subDLA/DLA differentials δs=(0,+0.29,−0.10).
+HCD_INCIDENCE_SLOPE = (2.465, 2.758, 2.366)
 
 # PER-LEG DLA-residual fraction in the closure TARGET MOCK (§0c, PI-confirmed final intent
 # 2026-06-09): the 10% unmasked-DLA residual belongs in the target. The DLA finder misses ~10%
@@ -225,6 +231,22 @@ class LegBCtx(NamedTuple):
     hcd_ratio_mu: object = None               # (2,) [r_subdla, r_dla] prior centers
     hcd_ratio_sigma: object = None            # (2,) [r_subdla, r_dla] prior widths
     hcd_ratio_infl: float = 1.0               # the MANDATORY width-scan knob {0.5,1,2,3}×
+    # 2D AMPLITUDE×TILT submanifold variant of the hierarchical prior ("hcd_2d_tilt", 2026-06-14):
+    # Option B (1D A_HCD × FIXED ratios) RELOCATED the n_s coupling onto the A_HCD center (the gate
+    # diagnosis). The fix: give the HCD sector a GENUINE 2D submanifold = pivot AMPLITUDE A_HCD × a
+    # GLOBAL z-TILT B_HCD, with the class-differential z-evolution FIXED —
+    #   α_c(z) = A_HCD · r_c · ((1+z)/(1+z_p))^(B_HCD + δs_c),  δs_LLS ≡ 0.
+    # A_HCD ~ TruncatedNormal(alpha_hcd_mu[0], alpha_hcd_sigma[0], low=0)  (the LLS prior verbatim);
+    # B_HCD ~ Normal(hcd_btilt_mu, hcd_btilt_sigma)  (the GLOBAL HCD z-tilt — the DATA-constrained
+    # 2nd submanifold dimension, orthogonal to the n_s k-tilt); r_subdla/r_dla = the SAME Option-B
+    # ratios. The per-class slope s_c = B_HCD + δs_c REPLACES the marginalize_zslope sampling (so 2D
+    # mode IGNORES marginalize_zslope). At B_HCD = hcd_btilt_mu the forward z-evolution MATCHES the
+    # mock truth's full incidence slope HCD_INCIDENCE_SLOPE (~2.4 — the closure anchor). REQUIRES hierarchical_hcd=True
+    # (it builds on the A_hcd × r reparam). OFF (default) → byte-identical (legacy OR Option B).
+    hcd_2d_tilt: bool = False
+    hcd_dslope: object = None                 # (3,) δs_c FIXED class-differential slopes (δs_LLS≡0)
+    hcd_btilt_mu: float = None                # B_HCD prior center (= s_LLS slope center)
+    hcd_btilt_sigma: float = None             # B_HCD prior width (= the LLS slope-prior width)
 
 
 def _kim(z):
@@ -244,7 +266,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    mf_emucoh=False, mf_emucoh_infl=1.0,
                    mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
                    mf_emucoh_offdiag_only=False, sample_metals=False, a_siiii_max=0.15,
-                   hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0):
+                   hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0,
+                   hcd_2d_tilt=False):
     """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
     z-bins. The cross-class ρ (``use_xclass=True``, the default; the matched
     ``error_vector_xclass.npz`` pair) is the production C_emu — the diagonal σ is carried too
@@ -331,6 +354,30 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     hcd_ratio_mu = jnp.asarray([r_sub_center, r_dla_center])
     hcd_ratio_sigma = jnp.asarray([0.10 * r_sub_center, 0.12 * r_dla_center]) * float(hcd_ratio_infl)
 
+    # 2D AMPLITUDE×TILT submanifold (hcd_2d_tilt): the GLOBAL HCD z-tilt B_HCD + FIXED class-
+    # differential slopes δs_c. CLOSURE defaults use the FULL per-class incidence z-slope the mock
+    # TRUTH actually carries — the 60-sim-population median of d ln w_c(z)/d ln(1+z) (HCD_INCIDENCE_SLOPE,
+    # measured 2026-06-14), NOT the lit/sim-RATIO slope HCD_LIT_OVER_SIM_SLOPE=(0.95,…) which is a
+    # DIFFERENT object (the mock w_c(z) evolves at LLS slope ~2.4, not 0.95; a B-center at 0.95 would
+    # put the truth at ~2.8σ and fight the data, re-leaking into n_s — the impl-review finding):
+    #   δs_c       = HCD_INCIDENCE_SLOPE − HCD_INCIDENCE_SLOPE[0] = (0.0, +0.29, −0.10)
+    #   btilt_mu   = HCD_INCIDENCE_SLOPE[0] = 2.465  (so at B_HCD=btilt_mu, the forward z-evolution
+    #                MATCHES the truth; the B_HCD coverage-truth = btilt_mu = the population LLS slope)
+    #   btilt_sigma= ZSLOPE_PRIOR_SIGMA[0] = 0.52  (kept WIDE so B floats + the data constrain it)
+    # REAL-FIT (later): swap HCD_INCIDENCE_SLOPE → the literature dN/dX slopes (HR/observed). The
+    # marginalize_zslope default forward (centered 0.95) is a SEPARATE, mostly-harmless mis-centering:
+    # the data recover the slope ~2.5 and n_s is ⊥ slope (scripts/diag_hcd_zslope_nsbias.py).
+    hcd_2d_tilt = bool(hcd_2d_tilt)
+    hcd_dslope = hcd_btilt_mu = hcd_btilt_sigma = None
+    if hcd_2d_tilt:
+        if not hierarchical_hcd:
+            raise ValueError("hcd_2d_tilt=True requires hierarchical_hcd=True "
+                             "(the 2D submanifold builds on the A_hcd × r reparam)")
+        _slope = np.asarray(HCD_INCIDENCE_SLOPE, float)
+        hcd_dslope = jnp.asarray(_slope - _slope[0])             # (3,) δs_c, δs_LLS≡0
+        hcd_btilt_mu = float(_slope[0])                          # B_HCD center = full LLS incidence slope
+        hcd_btilt_sigma = float(ZSLOPE_PRIOR_SIGMA[0])           # B_HCD width (wide → B floats)
+
     mf_obj = mf_floor_obj = None
     if with_mf:
         mf_obj, mf_floor_obj = build_mf_correction(
@@ -365,7 +412,9 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         sample_metals=bool(sample_metals), a_siiii_max=float(a_siiii_max),
         hierarchical_hcd=bool(hierarchical_hcd), hcd_noncentered=bool(hcd_noncentered),
         hcd_ratio_mu=hcd_ratio_mu, hcd_ratio_sigma=hcd_ratio_sigma,
-        hcd_ratio_infl=float(hcd_ratio_infl))
+        hcd_ratio_infl=float(hcd_ratio_infl),
+        hcd_2d_tilt=hcd_2d_tilt, hcd_dslope=hcd_dslope,
+        hcd_btilt_mu=hcd_btilt_mu, hcd_btilt_sigma=hcd_btilt_sigma)
     return ctx, d
 
 
@@ -866,12 +915,14 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     # samples EITHER the legacy 3 independent α sites (alpha_lls/subdla TruncatedNormal(low=0),
     # alpha_dla_raw Normal→softplus; default — byte-exact) OR, when ctx.hierarchical_hcd, the
     # reparam A_hcd · r → α (re-emitted as deterministics under the SAME names alpha_lls/subdla/dla).
-    alpha_pivot = _hcd_sites(ctx)              # (3,) pivot-z amplitudes
+    alpha_pivot, s_override = _hcd_sites(ctx)  # (3,) pivot-z amplitudes (+ optional s_c override)
     # z-RESOLVED incidence α_c(z) = α_pivot · ((1+z)/(1+z_p))^s_c (the dN/dX slope) — the fix:
     # the forward must track the mock's per-z w_c(z) (rises ~3.5× over z), not a z-constant α.
     # STEP-A M3: when ctx.marginalize_zslope, s_c is SAMPLED (the real-fit config) instead of
     # the fixed HCD_LIT_OVER_SIM_SLOPE; otherwise the fixed literature power-law slope is used.
-    s_c = _zslope_sites(ctx)
+    # 2D AMPLITUDE×TILT mode: _hcd_sites returns s_override = B_hcd + δs_c (it sets the slopes via
+    # the global tilt B_hcd), which BYPASSES _zslope_sites / marginalize_zslope entirely.
+    s_c = s_override if s_override is not None else _zslope_sites(ctx)
     shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** s_c
     alpha_hcd = numpyro.deterministic("alpha_hcd_z", alpha_pivot[None, :] * shape_zg)  # (n_zg,3)
     # SHARED SiIII metal amplitude (opt-in; eBOSS+DESI are metals_on, KS is not). OFF by default
@@ -884,10 +935,13 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
 
 
 def _hcd_sites(ctx):
-    """The HCD pivot-z (z=3) incidence amplitudes α_pivot (3,) [LLS, subDLA, DLA]. SHARED by
-    ``_legb_model`` (with the factor) and ``_legb_priors_only`` (the transform-only postprocess) so
-    the sample sites stay ORDER-IDENTICAL across both — the fast-postprocess constrain_fn relies on
-    it (mirrors ``_zslope_sites``).
+    """The HCD pivot-z (z=3) incidence amplitudes α_pivot (3,) [LLS, subDLA, DLA] AND an optional
+    per-class z-slope override. Returns ``(alpha_pivot (3,), s_override)`` — ``s_override`` is
+    ``None`` (legacy / Option B → ``_legb_model`` calls ``_zslope_sites`` as today) or the (3,)
+    slopes s_c = B_hcd + δs_c (the 2D AMPLITUDE×TILT mode, which sets its OWN slopes and so
+    BYPASSES ``_zslope_sites`` / ``marginalize_zslope``). SHARED by ``_legb_model`` (with the
+    factor) and ``_legb_priors_only`` (the transform-only postprocess) so the sample sites stay
+    ORDER-IDENTICAL across both — the fast-postprocess constrain_fn relies on it.
 
     LEGACY branch (default, ``ctx.hierarchical_hcd`` False → BYTE-EXACT): the 3 independent sites
       alpha_lls/alpha_subdla ~ TruncatedNormal(μ_c, σ_c, low=0); alpha_dla_raw ~ Normal →
@@ -901,7 +955,14 @@ def _hcd_sites(ctx):
       (re-emitted under the EXISTING names → all downstream code is unchanged). When
       ``ctx.hcd_noncentered``, the SAME three sites are sampled standard-normal/uniform-base and
       transformed (a LocScaleReparam-style non-centered fallback) — site NAMES are identical so the
-      site-order test passes; the 0-divergence gate decides centered vs non-centered."""
+      site-order test passes; the 0-divergence gate decides centered vs non-centered.
+
+    2D AMPLITUDE×TILT branch (``ctx.hcd_2d_tilt`` True, requires hierarchical_hcd): the same A_hcd
+      and r_subdla/r_dla, PLUS a GLOBAL z-tilt B_hcd ~ Normal(hcd_btilt_mu, hcd_btilt_sigma)
+      sampled RIGHT AFTER A_hcd (so the site order is A_hcd, B_hcd, r_subdla, r_dla). The pivot α
+      are still A_hcd·r (the B_hcd z-evolution lives in alpha_hcd_z, NOT the pivot — back-compat for
+      _draws_matrix/coverage). Returns s_override = B_hcd + δs_c (the per-class slope), which
+      REPLACES _zslope_sites (the 2D mode sets its own slopes — marginalize_zslope is bypassed)."""
     if not getattr(ctx, "hierarchical_hcd", False):
         # ---- LEGACY (byte-exact) ----
         a_lls = numpyro.sample("alpha_lls",
@@ -911,9 +972,10 @@ def _hcd_sites(ctx):
         a_dla_raw = numpyro.sample("alpha_dla_raw",
                                    dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
         a_dla = numpyro.deterministic("alpha_dla", jax.nn.softplus(a_dla_raw))
-        return jnp.stack([a_lls, a_sub, a_dla])
+        return jnp.stack([a_lls, a_sub, a_dla]), None
 
-    # ---- HIERARCHICAL (Option B) ----
+    # ---- HIERARCHICAL (Option B) / 2D AMPLITUDE×TILT ----
+    two_d = getattr(ctx, "hcd_2d_tilt", False)
     A_mu, A_sg = ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]        # A_hcd = the LLS prior verbatim
     rmu = jnp.asarray(ctx.hcd_ratio_mu)                             # (2,) [r_sub, r_dla] centers
     rsg = jnp.asarray(ctx.hcd_ratio_sigma)                          # (2,) widths
@@ -925,19 +987,31 @@ def _hcd_sites(ctx):
         # to the centered TruncatedNormal(low=0), with the funnel-friendly geometry decoupled.
         z_A = numpyro.sample("A_hcd_base", dist.TruncatedNormal(0.0, 1.0, low=-A_mu / A_sg))
         A_hcd = numpyro.deterministic("A_hcd", A_mu + A_sg * z_A)
+        s_override = _btilt_site(ctx) if two_d else None           # B_hcd sampled AFTER A_hcd
         z_rs = numpyro.sample("r_subdla_base", dist.TruncatedNormal(0.0, 1.0, low=-rmu[0] / rsg[0]))
         r_subdla = numpyro.deterministic("r_subdla", rmu[0] + rsg[0] * z_rs)
         z_rd = numpyro.sample("r_dla_base", dist.TruncatedNormal(0.0, 1.0, low=-rmu[1] / rsg[1]))
         r_dla = numpyro.deterministic("r_dla", rmu[1] + rsg[1] * z_rd)
     else:
         A_hcd = numpyro.sample("A_hcd", dist.TruncatedNormal(A_mu, A_sg, low=0.0))
+        s_override = _btilt_site(ctx) if two_d else None           # B_hcd sampled AFTER A_hcd
         r_subdla = numpyro.sample("r_subdla", dist.TruncatedNormal(rmu[0], rsg[0], low=0.0))
         r_dla = numpyro.sample("r_dla", dist.TruncatedNormal(rmu[1], rsg[1], low=0.0))
     # derived α under the EXISTING names (so _draws_matrix / _loglik_of_draws / corner are unchanged).
+    # In the 2D mode this is the PIVOT (z_p) α — the z-evolution lives in alpha_hcd_z via s_override.
     a_lls = numpyro.deterministic("alpha_lls", A_hcd)
     a_sub = numpyro.deterministic("alpha_subdla", A_hcd * r_subdla)
     a_dla = numpyro.deterministic("alpha_dla", A_hcd * r_dla)
-    return jnp.stack([a_lls, a_sub, a_dla])
+    return jnp.stack([a_lls, a_sub, a_dla]), s_override
+
+
+def _btilt_site(ctx):
+    """The GLOBAL HCD z-tilt site B_hcd ~ Normal(hcd_btilt_mu, hcd_btilt_sigma) → the per-class
+    slope vector s_c = B_hcd + δs_c (2D AMPLITUDE×TILT mode). δs_LLS≡0, so at B_hcd=hcd_btilt_mu
+    the slopes equal the full incidence slope HCD_INCIDENCE_SLOPE (~2.4 — the closure anchor that
+    MATCHES the mock truth's native w_c(z) evolution)."""
+    B_hcd = numpyro.sample("B_hcd", dist.Normal(ctx.hcd_btilt_mu, ctx.hcd_btilt_sigma))
+    return B_hcd + jnp.asarray(ctx.hcd_dslope)                      # (3,) s_c = B_hcd + δs_c
 
 
 def _zslope_sites(ctx):
@@ -967,10 +1041,14 @@ def _legb_priors_only(ctx):
     numpyro.sample("tau0_amp", dist.Uniform(ctx.tau0_amp_range[0], ctx.tau0_amp_range[1]))
     numpyro.sample("dtau0", dist.Uniform(ctx.dtau0_range[0], ctx.dtau0_range[1]))
     # the HCD pivot α sites — SHARED with _legb_model via _hcd_sites so the sample-site order is
-    # IDENTICAL in both branches (legacy 3-site vs hierarchical A_hcd/r_subdla/r_dla). The
-    # deterministics it emits are dropped by constrain_fn(return_deterministic=False).
-    _hcd_sites(ctx)
-    _zslope_sites(ctx)                            # mirrors _legb_model (s_c when marginalize_zslope)
+    # IDENTICAL in both branches (legacy 3-site vs hierarchical A_hcd/r_subdla/r_dla, vs 2D
+    # A_hcd/B_hcd/r_subdla/r_dla). The deterministics it emits are dropped by
+    # constrain_fn(return_deterministic=False).
+    _alpha_pivot, _s_override = _hcd_sites(ctx)
+    # 2D mode sets s_c via B_hcd (sampled inside _hcd_sites) and BYPASSES _zslope_sites — so mirror
+    # _legb_model: only call _zslope_sites when _hcd_sites did NOT supply the slopes (legacy/Option B).
+    if _s_override is None:
+        _zslope_sites(ctx)                        # mirrors _legb_model (s_c when marginalize_zslope)
     if getattr(ctx, "sample_metals", False):     # MUST mirror _legb_model's site (same order)
         numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
 
@@ -1021,7 +1099,15 @@ def _legb_reconstruct_deterministics(ctx, samples):
         alpha_subdla = jnp.asarray(samples["alpha_subdla"])
         alpha_dla = jax.nn.softplus(jnp.asarray(samples["alpha_dla_raw"]))  # (L,)
     alpha_pivot = jnp.stack([alpha_lls, alpha_subdla, alpha_dla], axis=-1)  # (L, 3)
-    if getattr(ctx, "marginalize_zslope", False) and "s_lls" in samples:
+    if getattr(ctx, "hcd_2d_tilt", False) and "B_hcd" in samples:
+        # 2D AMPLITUDE×TILT: the per-class slope s_c = B_hcd + δs_c (NOT a sampled s_* block). The
+        # pivot α (A·r) carry the amplitude; the z-evolution is the B_hcd-driven power-law.
+        B = jnp.asarray(samples["B_hcd"])                            # (L,)
+        s_c = B[:, None] + jnp.asarray(ctx.hcd_dslope)[None, :]      # (L, 3)
+        ratio = (1.0 + zg)[None, :, None] / (1.0 + HCD_Z_PIVOT)
+        shape_zg = ratio ** s_c[:, None, :]                          # (L, nZg, 3)
+        alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg             # (L, nZg, 3)
+    elif getattr(ctx, "marginalize_zslope", False) and "s_lls" in samples:
         s_c = jnp.stack([jnp.asarray(samples["s_lls"]),
                          jnp.asarray(samples["s_subdla"]),
                          jnp.asarray(samples["s_dla"])], axis=-1)     # (L, 3)
@@ -1244,7 +1330,9 @@ def run_legb_convergence(ctx: LegBCtx, d, *, sim=None, mock_index=0, n_chains=4,
 
     truth_vec = np.concatenate([
         truth_pack["theta9"], truth_pack["tau0_global"][kept_global], truth_pack["alpha_hcd"]])
-    if getattr(ctx, "hierarchical_hcd", False):
+    if getattr(ctx, "hcd_2d_tilt", False):                # 2D: A_hcd, B_hcd, r_subdla, r_dla
+        truth_vec = np.concatenate([truth_vec, _hcd_latent_truths_2d(truth_pack["alpha_hcd"], ctx)])
+    elif getattr(ctx, "hierarchical_hcd", False):
         truth_vec = np.concatenate([truth_vec, _hcd_latent_truths(truth_pack["alpha_hcd"])])
 
     ids = list(range(int(n_chains))) if chain_ids is None else list(chain_ids)
@@ -1329,7 +1417,9 @@ def _draws_matrix(samples, kept_global):
     # HIERARCHICAL latents (Option B): append A_hcd/r_subdla/r_dla AFTER the derived α (back-compat
     # — the α block stays at its positional home; downstream indexes α by name, must-fix #5). The
     # truth_vec tail (w_LLS, w_sub/w_LLS, 0.10·w_DLA/w_LLS) is appended in the driver to match.
-    for nm in ("A_hcd", "r_subdla", "r_dla"):
+    # 2D AMPLITUDE×TILT: B_hcd is inserted right after A_hcd (A_hcd, B_hcd, r_subdla, r_dla); the
+    # truth_vec tail then carries (w_LLS, s_LLS_center, r_sub, r_dla) via _hcd_latent_truths_2d.
+    for nm in ("A_hcd", "B_hcd", "r_subdla", "r_dla"):
         if nm in samples:
             cols.append(np.asarray(samples[nm])[:, None])
     if "a_SiIII" in samples:                                 # opt-in metal nuisance (appended LAST)
@@ -1346,6 +1436,16 @@ def _hcd_latent_truths(alpha_hcd_truth):
     return np.array([a[0], a[1] / a[0], a[2] / a[0]])
 
 
+def _hcd_latent_truths_2d(alpha_hcd_truth, ctx):
+    """The (A_hcd, B_hcd, r_subdla, r_dla) TRUTH for an HT (2D AMPLITUDE×TILT) mock. A_hcd=w_LLS;
+    B_hcd_truth = hcd_btilt_mu = HCD_INCIDENCE_SLOPE[0] (the population LLS incidence slope ~2.46 —
+    the mock's per-z α evolves at ~2.4, within the per-sim scatter ~0.07 of this; δs_LLS≡0);
+    r_subdla=w_sub/w_LLS; r_dla=0.10·w_DLA/w_LLS. Appended to truth_vec to align with the
+    A_hcd/B_hcd/r_subdla/r_dla draw columns _draws_matrix adds in the 2D branch."""
+    a = np.asarray(alpha_hcd_truth, float)
+    return np.array([a[0], float(ctx.hcd_btilt_mu), a[1] / a[0], a[2] / a[0]])
+
+
 def _packed_names_for(samples, kept_global):
     """The packed-draw column NAMES matching ``_draws_matrix(samples, kept_global)``'s columns —
     [θ9, τ₀(kept), alpha_lls, alpha_subdla, alpha_dla, (A_hcd, r_subdla, r_dla), (a_SiIII)]. Built
@@ -1353,7 +1453,7 @@ def _packed_names_for(samples, kept_global):
     positional home; the appended latents/metal go after — must-fix #5 indexes α by name)."""
     tau0_names = [f"tau0_z{i}" for i in range(int(np.asarray(kept_global).sum()))]
     names = list(PARAM_NAMES) + tau0_names + ["alpha_lls", "alpha_subdla", "alpha_dla"]
-    for nm in ("A_hcd", "r_subdla", "r_dla"):
+    for nm in ("A_hcd", "B_hcd", "r_subdla", "r_dla"):
         if nm in samples:
             names.append(nm)
     if "a_SiIII" in samples:
@@ -1423,7 +1523,9 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
             truth_pack["theta9"],
             truth_pack["tau0_global"][kept_global],
             truth_pack["alpha_hcd"]])
-        if getattr(ctx, "hierarchical_hcd", False):          # align with the appended A_hcd/r columns
+        if getattr(ctx, "hcd_2d_tilt", False):               # align with A_hcd/B_hcd/r_subdla/r_dla
+            truth_vec = np.concatenate([truth_vec, _hcd_latent_truths_2d(truth_pack["alpha_hcd"], ctx)])
+        elif getattr(ctx, "hierarchical_hcd", False):        # align with the appended A_hcd/r columns
             truth_vec = np.concatenate([truth_vec, _hcd_latent_truths(truth_pack["alpha_hcd"])])
 
         # loglik of the truth + draws on the SAME mock data (Modrak rank).
