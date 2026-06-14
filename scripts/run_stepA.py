@@ -121,7 +121,7 @@ def build_config(verbose=False):
                      lls_truth_boost=1.0, mf=False, hr_truth=False, mf_shape=0.0, desi_floor=False,
                      mf_emucoh=0.0, mf_emucoh_offdiag_only=False, sample_metals=False,
                      inject_a_siiii=0.0, subdla_center_shift=0.0,
-                     hierarchical_hcd=False, hcd_ratio_infl=1.0):
+                     hierarchical_hcd=False, hcd_ratio_infl=1.0, hcd_center_shift=0.0):
         if sim is None:
             ns, sim = _closest_sim(fold_sims[fold], target_ns)
         else:
@@ -138,6 +138,7 @@ def build_config(verbose=False):
                 sample_metals=bool(sample_metals), inject_a_siiii=float(inject_a_siiii),
                 subdla_center_shift=float(subdla_center_shift),
                 hierarchical_hcd=bool(hierarchical_hcd), hcd_ratio_infl=float(hcd_ratio_infl),
+                hcd_center_shift=float(hcd_center_shift),
                 chain_id=c, n_chains=n_chains, seed=0))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -317,6 +318,13 @@ def build_config(verbose=False):
                      hierarchical_hcd=False)
         add_fiducial(_hnm + "_HB1", _hf, _hns, survey="DESI+KS", prior_center="sim_mean",
                      hierarchical_hcd=True, hcd_ratio_infl=1.0)
+        # A_HCD-center ±1σ cosmology-safety arm (design must-fix #3, gate-side): under Option B the
+        # n_s coupling relocates onto the overall HCD amplitude, so mis-specify the A_HCD center ±1σ
+        # and verify n_s/A_p MEANS stay <0.3σ (the hierarchical analog of the XS subDLA-center arm).
+        add_fiducial(_hnm + "_HBp", _hf, _hns, survey="DESI+KS", prior_center="sim_mean",
+                     hierarchical_hcd=True, hcd_ratio_infl=1.0, hcd_center_shift=1.0)
+        add_fiducial(_hnm + "_HBm", _hf, _hns, survey="DESI+KS", prior_center="sim_mean",
+                     hierarchical_hcd=True, hcd_ratio_infl=1.0, hcd_center_shift=-1.0)
 
     # === Phase-5a Test A (2026-06-11): MF gate-invariant M-tier re-run at HR cosmologies ===
     # with_mf=True → truth = MF-corrected LF AND forward = MF-corrected LF (the GATE INVARIANT: the
@@ -626,6 +634,16 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     _subshift = float(chain.get("subdla_center_shift", 0.0) or 0.0)
     if _subshift != 0.0:
         mu = ctx.alpha_hcd_mu.at[1].add(_subshift * float(ctx.alpha_hcd_sigma[1]))
+        ctx = ctx._replace(alpha_hcd_mu=mu)
+    # A_HCD prior-CENTER shift (hierarchical-HCD cosmology-safety arm, design must-fix #3 2026-06-13):
+    # the ON-branch ANALOG of subdla_center_shift (which is a no-op under hierarchical_hcd, since the
+    # subDLA center is DERIVED = A_hcd·r). Under Option B the n_s coupling RELOCATES onto the overall
+    # HCD amplitude A_HCD, so THIS is the knob that certifies net cosmology safety: _hcd_sites reads
+    # ctx.alpha_hcd_mu[0] for A_hcd, so shifting it by shift·σ_A mis-specifies the whole HCD amplitude
+    # (all three α centers scale together via α_c=A_hcd·r_c) and we ask whether n_s/A_p means move.
+    _hcdshift = float(chain.get("hcd_center_shift", 0.0) or 0.0)
+    if _hcdshift != 0.0:
+        mu = ctx.alpha_hcd_mu.at[0].add(_hcdshift * float(ctx.alpha_hcd_sigma[0]))
         ctx = ctx._replace(alpha_hcd_mu=mu)
 
     key0 = jax.random.PRNGKey(int(chain["seed"]))
