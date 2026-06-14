@@ -209,7 +209,7 @@ programming, here are some starting points by topic.
 - **Palanque-Delabrouille et al. 2013** — "The one-dimensional Lyα
   forest power spectrum from BOSS".  Modern P1D measurement and
   systematics.
-- **Bird, Fernandez, Ho et al. 2023** (MNRAS 526, 3392;
+- **Bird, Fernandez, Ho et al. 2023** (JCAP 10, 037;
   arXiv:2306.05471) — the PRIYA simulation suite paper.  This is the
   suite our 60 LF + 4 HR sims came from.  Read §2 for the LHS
   parameter scheme that names every folder under `HCD_OUT_ROOT`.
@@ -221,8 +221,9 @@ programming, here are some starting points by topic.
   classification and the physics of damping wings.
 - **Prochaska, Herbert-Fort, Wolfe 2005** — the SDSS DLA CDDF that
   notebook 02 compares against.
-- **Bird, Vogelsberger, Haehnelt et al. 2014** ("Damped Lyα absorbers
-  as a probe of cosmic gas", MNRAS 445, 2313; arXiv:1405.3994) —
+- **Bird, Vogelsberger, Haehnelt et al. 2014** ("Damped Lyman α
+  absorbers as a probe of stellar feedback", MNRAS 445, 2313;
+  arXiv:1405.3994) —
   hydrodynamic prediction of DLA bias and the f(N_HI) shape.
   Section 5 is what feeds the scale-dependent-bias TODO in
   `SESSION_HANDOVER_2026_04_28.md` §4D.
