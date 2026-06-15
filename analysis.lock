@@ -20,6 +20,13 @@
     "use_xclass": true
   },
   "created_utc": "2026-06-15T01:06:57.251715+00:00",
+  "decisions": {
+    "ks_zlo": {
+      "baseline": 2.4,
+      "diagnostic": 2.8,
+      "note": "PI 2026-06-14: KS z_lo=2.4 is the BASELINE real fit (root real_ks; the minimal closure-clean cut, PI decision 2026-06-08). KS z_lo=2.8 is a DIAGNOSTIC comparison (the KS-author published more-conservative cut; drops the z=2.4/2.6 bins, 132->110 rows) run via scripts/batch_real_fit_ks_z28.sh -> distinct root real_ks_z28, same blind.lock. Wired through run_real_fit --ks-zlo -> build_real_ctx(ks_zlo=) -> build_legb_ctx(ks_kwargs={z_lo}). Does NOT change the baseline."
+    }
+  },
   "emulator": {
     "ensemble_members": [
       "final_prod_seed0",

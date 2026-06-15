@@ -99,13 +99,17 @@ def _packed_to_physical(draws, names):
     return out
 
 
-def build_real_ctx(survey, *, single_member=False, ensemble_glob=None):
+def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=None):
     """The PRODUCTION ctx for a real-data fit, then RESTRICTED to the requested survey's leg.
 
     Baseline flags mirror run_prod_sbc_shard.build (use_xclass, MF + floor, emucoh off-diag-only,
     hierarchical_hcd=False). ``metals_on``/``sample_metals`` follow the survey (eBOSS/DESI bear a
     shared a_SiIII; KS does not). ``with_eboss`` is True only for the eboss survey (so the eBOSS
     leg is assembled at all). We then keep ONLY the requested leg in ctx.legs.
+
+    ``ks_zlo`` (default None → the loader's authoritative z_lo=2.4 baseline) overrides ONLY the KS
+    leg's low-z cut via ks_kwargs={"z_lo": ks_zlo}. The PI's z2.4=baseline / z2.8=diagnostic
+    comparison (KS-author published cut is the more-conservative z<2.8; see load_ks_leg docstring).
     """
     import glob as _glob
     members = sorted(p[:-4] for p in _glob.glob((ensemble_glob or (PROD_PREFIX + "*")) + ".eqx"))
@@ -115,11 +119,13 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None):
 
     info = SURVEY[survey]
     metals = bool(info["metals"])
+    ks_kw = {"z_lo": float(ks_zlo)} if ks_zlo is not None else None  # KS low-z cut override (diagnostic)
     ctx, d = build_legb_ctx(
         ensemble_ckpts=ens, use_xclass=True,
         with_mf=True, mf_with_floor=True,
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         with_eboss=(survey == "eboss"),
+        ks_kwargs=ks_kw,                  # threads z_lo into load_ks_leg (default None → z_lo=2.4 baseline)
         metals_on=metals,                 # applies the SiIII/SiII forward term on metals_on legs
         sample_metals=metals,             # samples the shared a_SiIII nuisance (Uniform[0, a_max])
         survey=info["leg"],               # PER-SURVEY LLS pin: DESI 1.0×/σ0.30, KS 2.5×/σ0.40 (eBOSS→cosmic-avg)
@@ -138,7 +144,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None):
 
 
 def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_depth=10,
-                 seed=20260614, single_member=False, verbose=True):
+                 seed=20260614, single_member=False, ks_zlo=None, verbose=True):
     """Multi-chain dispersed NUTS on the REAL leg.P_data (NO mock). Returns
     ``dict(packed_chains, names, battery, per_chain_div, members, leg_name, n_real_rows)``.
 
@@ -146,7 +152,7 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
     diagnostic — IDENTICAL to run_legb_convergence's chain seeding (the validated path), but the
     LIKELIHOOD points at the real data (ctx.legs already carry leg.P_data = the measurement; we
     do NOT overwrite it with a mock)."""
-    ctx, d, members = build_real_ctx(survey, single_member=single_member)
+    ctx, d, members = build_real_ctx(survey, single_member=single_member, ks_zlo=ks_zlo)
     leg = ctx.legs[0]
     n_real = int(np.isfinite(np.asarray(leg.P_data)).sum())
 
@@ -295,6 +301,11 @@ def main():
                     help="DANGER: export UNBLINDED. Only after freeze + the authorized unblind.")
     ap.add_argument("--single-member", action="store_true",
                     help="final_prod_seed0 only (cheap de-risk; NOT the production ensemble)")
+    ap.add_argument("--ks-zlo", type=float, default=2.4,
+                    help="KS leg low-z cut (only for --survey ks). 2.4 = PI BASELINE (default); "
+                         "2.8 = the KS-author published conservative DIAGNOSTIC. Routes a "
+                         "non-baseline value to a distinct root (real_ks_z<NN>) so it never "
+                         "clobbers the z2.4 baseline.")
     ap.set_defaults(blind=True)
     a = ap.parse_args()
 
@@ -309,15 +320,22 @@ def main():
     info = SURVEY[a.survey]
     out_dir = a.out_dir or (PRIVATE_DIR if info["private"] else PUBLIC_DIR)
     root = f"real_{a.survey}"
+    # KS z_lo routing: only KS honors --ks-zlo. A NON-baseline z_lo (≠2.4) is a DIAGNOSTIC and
+    # routes to a distinct root (real_ks_z28 for z_lo=2.8) so it never clobbers the z2.4 baseline.
+    ks_zlo = a.ks_zlo if a.survey == "ks" else None
+    if a.survey == "ks" and abs(a.ks_zlo - 2.4) > 1e-6:
+        root = f"real_ks_z{int(round(a.ks_zlo * 10)):02d}"   # e.g. z_lo=2.8 -> real_ks_z28
 
     print(f"=== REAL-DATA fit  survey={a.survey}  leg={info['leg']}  "
-          f"blind={a.blind}  private={info['private']}  out={out_dir} ===")
+          f"blind={a.blind}  private={info['private']}  out={out_dir}"
+          f"{f'  KS z_lo={a.ks_zlo}  root={root}' if a.survey == 'ks' else ''} ===")
     print(f"    NUTS: chains={a.n_chains} warmup={a.n_warmup} samples={a.n_samples} "
           f"mtd={a.max_tree_depth} dense-mass=True  (ensemble{'=single' if a.single_member else '=N'})")
 
     result = run_real_fit(
         a.survey, n_chains=a.n_chains, n_warmup=a.n_warmup, n_samples=a.n_samples,
-        max_tree_depth=a.max_tree_depth, seed=a.seed, single_member=a.single_member)
+        max_tree_depth=a.max_tree_depth, seed=a.seed, single_member=a.single_member,
+        ks_zlo=ks_zlo)
 
     bat = result["battery"]
     print(f"--- sampler health (UNBLINDED) survey={a.survey} ---")
@@ -332,7 +350,7 @@ def main():
     chain_files, rec = export_getdist(
         result, out_dir, root, offset=offset, blind=a.blind, survey=a.survey,
         meta=dict(blind_lock=os.path.abspath(a.blind_lock) if a.blind else None,
-                  seed=a.seed))
+                  seed=a.seed, ks_zlo=(a.ks_zlo if a.survey == "ks" else None)))
     print(f"=== wrote {len(chain_files)} chains -> {out_dir}/{root}.*.txt "
           f"(+ .paramnames .yaml .health.json) | A_p/n_s BLINDED={a.blind} ===")
     if info["private"]:

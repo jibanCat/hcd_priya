@@ -399,6 +399,26 @@ def build_config(verbose=False):
         add_fiducial(f"HFLOSO{int(round(_ns * 1000))}", _f, survey="DESI", sim=_hs,
                      mf=True, hr_truth=True, prior_center="truth")
 
+    # === Phase-5a MF n_s HIGH-K CERTIFICATION on DESI+KS (PI-approved 2026-06-14) ===
+    # The open item (notes 2026-06-12-phase5a-mf-hf-closure §"Next steps": "re-run Test B on BOTH
+    # DESI and KS, require the n_s bias |z|<1"; 2026-06-14-decisions §7): the DESI-only Test B gave a
+    # coherent n_s tilt up to +2.80σ at ns0.972 that the σ-only shape-floor can't de-bias. This is the
+    # PRODUCTION cert: re-run the GENUINE HF-LOSO Test B THROUGH the production MF forward on the JOINT
+    # DESI+KS legs (survey="DESI+KS" → run_one_chain keeps BOTH legs; KS carries its mf_floor_on=True,
+    # DESI no floor — the production baseline). Per HR sim: truth = its REAL measured P1D
+    # (make_hr_truth_from_cache, no MF), forward = LF emu × MF correction fit EXCLUDING it
+    # (mf_exclude_held via hr_truth=True), prior_center="truth" (isolates resolution from the LLS
+    # center). VERDICT GATE: per-fold n_s |bias_z| < 1 (ideally <0.2σ) on the DESI+KS joint. If it
+    # holds, the production MF controls the high-k n_s tilt; if not, a θ-resolved res_corr / wider σ
+    # is needed. 6 HR sims × 4 chains = 24 chains; CPU forward, no SLURM. id = HFLOSO_DK{ns}.
+    for _hs in _hrn:
+        _f = _fold_of(_hs)
+        if _f is None:
+            continue
+        _ns = _ns_of_sim(d, _hs, PARAM_LIMITS)
+        add_fiducial(f"HFLOSO_DK{int(round(_ns * 1000))}", _f, survey="DESI+KS", sim=_hs,
+                     mf=True, hr_truth=True, prior_center="truth")
+
     # === Phase-5a SHAPE-FLOOR validation (2026-06-12): the genuine HF-LOSO worst cases re-run
     # with the shape-aware MF floor (fires on the DESI leg). Compares: the existing DIAGONAL floor
     # (the simpler fix) vs the shape floor at infl∈{1.0,1.5,2.0}. Worst sims = ns0.972 (+2.80σ)
