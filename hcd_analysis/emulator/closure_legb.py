@@ -267,7 +267,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
                    mf_emucoh_offdiag_only=False, sample_metals=False, a_siiii_max=0.15,
                    hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0,
-                   hcd_2d_tilt=False, ensemble_ckpts=None):
+                   hcd_2d_tilt=False, ensemble_ckpts=None, survey=None):
     """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
     z-bins. The cross-class ρ (``use_xclass=True``, the default; the matched
     ``error_vector_xclass.npz`` pair) is the production C_emu — the diagonal σ is carried too
@@ -343,7 +343,9 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     tau0_mu, tau0_sigma = meanflux_tau0_prior(jnp.asarray(z_global), center="becker13")
     # HCD incidence prior from the cache's structural w_c at z_pivot (LLS,subDLA,DLA).
     w_c_med = np.median(d["w_c_cache"][:, 1:], axis=0)     # (3,) structural weights
-    alpha_mu, alpha_sd = hcd_incidence_prior(jnp.asarray(w_c_med), z=3.0)
+    # survey=None (closure/SBC) → cosmic-average LLS pin (unchanged); survey="DESI"/"KS" (real fit)
+    # → the per-survey LLS center+width pin (DESI 1.0×/σ0.30, KS 2.5×/σ0.40) per the locked baseline.
+    alpha_mu, alpha_sd = hcd_incidence_prior(jnp.asarray(w_c_med), z=3.0, survey=survey)
 
     # HIERARCHICAL HCD ratio-prior centers/widths (must-fix #1, the LOAD-BEARING fix). The ratio
     # centers are derived from the RAW sim w_c POOL MEDIANS (the SAME pool w_c_med medians above) —

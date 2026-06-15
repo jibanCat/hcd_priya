@@ -1,0 +1,279 @@
+{
+  "analysis": "hcd_priya real-data blind P1D cosmology fit",
+  "blinding": {
+    "offset_sigma_multiple": 3.0,
+    "params": [
+      "ns",
+      "Ap"
+    ],
+    "prior_sigma": {
+      "Ap": 4.0414518843273807e-10,
+      "ns": 0.07216878364870323
+    },
+    "seed_ref": "blind.lock (seed_str = project_string@git_commit); offset applied at VIEW time"
+  },
+  "covariance": {
+    "cemu_inflate": 1.0,
+    "emucoh": "ON (off-diagonal-only)",
+    "mf": "ON",
+    "mf_floor": "ON",
+    "use_xclass": true
+  },
+  "created_utc": "2026-06-15T01:06:57.251715+00:00",
+  "emulator": {
+    "ensemble_members": [
+      "final_prod_seed0",
+      "final_prod_seed1",
+      "final_prod_seed2",
+      "final_prod_seed3",
+      "final_prod_seed4"
+    ],
+    "forward": "ensemble-mean over members",
+    "n_members": 5
+  },
+  "git_commit": "e66de70",
+  "legs": {
+    "DESI": {
+      "dla_forward_frac": 1.0,
+      "k_max": 0.04094021,
+      "k_min": 0.00125,
+      "metals_on": true,
+      "mf_floor_on": false,
+      "n_rows": 681,
+      "n_z": 11,
+      "name": "DESI",
+      "z": [
+        2.2,
+        2.4,
+        2.6,
+        2.8,
+        3.0,
+        3.2,
+        3.4,
+        3.6,
+        3.8,
+        4.0,
+        4.2
+      ]
+    },
+    "KS": {
+      "dla_forward_frac": 0.0,
+      "k_max": 0.0627126,
+      "k_min": 0.0055,
+      "metals_on": false,
+      "mf_floor_on": true,
+      "n_rows": 132,
+      "n_z": 12,
+      "name": "KS",
+      "z": [
+        2.4,
+        2.6,
+        2.8,
+        3.0,
+        3.2,
+        3.4,
+        3.6,
+        3.8,
+        4.0,
+        4.2,
+        4.4,
+        4.6
+      ]
+    },
+    "eBOSS": {
+      "dla_forward_frac": 0.0,
+      "k_max": 0.019512,
+      "k_min": 0.001084,
+      "metals_on": true,
+      "mf_floor_on": false,
+      "n_rows": 455,
+      "n_z": 13,
+      "name": "eBOSS",
+      "z": [
+        2.2,
+        2.4,
+        2.6,
+        2.8,
+        3.0,
+        3.2,
+        3.4,
+        3.6,
+        3.8,
+        4.0,
+        4.2,
+        4.4,
+        4.6
+      ]
+    }
+  },
+  "nuts": {
+    "dense_mass": true,
+    "init": "init_to_sample (dispersed)",
+    "max_tree_depth": 10,
+    "n_chains": 4,
+    "n_samples": 600,
+    "n_warmup": 250,
+    "target_accept": 0.9
+  },
+  "outputs": {
+    "format": "GetDist/cobaya (.txt + .paramnames + .yaml + .health.json)",
+    "private": "results_local/desi_production/ (DESI; gitignored)",
+    "public": "results/real_fit/ (eBOSS, KS)"
+  },
+  "priors": {
+    "emulator_norm_box": {
+      "Ap": [
+        1.2e-09,
+        2.6e-09
+      ],
+      "alphaq": [
+        1.3,
+        3.0
+      ],
+      "bhfeedback": [
+        0.03,
+        0.07
+      ],
+      "heref": [
+        2.2,
+        3.2
+      ],
+      "herei": [
+        3.5,
+        4.5
+      ],
+      "hireionz": [
+        6.5,
+        8.0
+      ],
+      "hub": [
+        0.65,
+        0.75
+      ],
+      "ns": [
+        0.8,
+        1.05
+      ],
+      "omegamh2": [
+        0.14,
+        0.146
+      ]
+    },
+    "hcd": {
+      "alpha_hcd_mu": [
+        0.2908612702546296,
+        0.09020109953703703,
+        0.005710024594907408
+      ],
+      "alpha_hcd_sigma": [
+        0.04362919053819444,
+        0.03608043981481481,
+        0.002855012297453704
+      ],
+      "dla_residual_frac": 0.1,
+      "frac_sigma": [
+        0.15,
+        0.4,
+        0.5
+      ],
+      "hierarchical": false,
+      "lit_over_sim": [
+        1.06,
+        1.0,
+        1.34
+      ],
+      "lit_over_sim_slope": [
+        0.95,
+        0.15,
+        0.4
+      ],
+      "marginalize_zslope": true,
+      "note": "PER-SURVEY LLS pin for the real fit (survey=): DESI 1.0x/sig0.30, KS 2.5x/sig0.40, eBOSS cosmic 1.0x/sig0.15; survey=None stays cosmic-average for the closure/SBC",
+      "z_pivot": 3.0
+    },
+    "metals": {
+      "a_siiii_max": 0.15,
+      "legs_metals_on": [
+        "DESI",
+        "eBOSS"
+      ],
+      "sample_a_SiIII": true
+    },
+    "tau0": {
+      "amp_range": [
+        0.75,
+        1.25
+      ],
+      "dtau0_range": [
+        -0.4,
+        0.25
+      ],
+      "model": "PRIYA amp x slope",
+      "pivot_z": 3.0
+    },
+    "theta_sampling_box": {
+      "Ap": [
+        1.2e-09,
+        2.6e-09
+      ],
+      "alphaq": [
+        1.3,
+        2.5
+      ],
+      "bhfeedback": [
+        0.03,
+        0.07
+      ],
+      "heref": [
+        2.6,
+        3.2
+      ],
+      "herei": [
+        3.5,
+        4.1
+      ],
+      "hireionz": [
+        6.5,
+        8.0
+      ],
+      "hub": [
+        0.65,
+        0.75
+      ],
+      "ns": [
+        0.8,
+        1.05
+      ],
+      "omegamh2": [
+        0.14,
+        0.146
+      ]
+    },
+    "zslope": {
+      "mu": [
+        0.95,
+        0.15,
+        0.4
+      ],
+      "sigma": [
+        0.52,
+        0.53,
+        0.33
+      ]
+    }
+  },
+  "surveys": {
+    "desi": {
+      "leg": "DESI",
+      "private": true
+    },
+    "eboss": {
+      "leg": "eBOSS",
+      "private": false
+    },
+    "ks": {
+      "leg": "KS",
+      "private": false
+    }
+  }
+}
