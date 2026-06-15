@@ -270,3 +270,6 @@ figures/private/desi_production/
 results_local/
 *.desi_production.npz
 *.desi_production.json
+
+# unblind workflow lives in the PRIVATE notes repo (privacy policy)
+notebooks/unblind_eboss_ks.*
