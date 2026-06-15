@@ -562,41 +562,68 @@ background on the dN/dX → w_c → α maps is in module `dndx_wc.py` and `[[pha
 
 ## Demo E — How HCDs nudge the cosmology (the LLS↔forest degeneracy)
 
-This is the underlying reason for the whole exercise. An HCD's low-k power excess, from its damping
-wing, looks over the DESI band almost exactly like a change in the forest amplitude, and that low-k
-confusion is the degeneracy. The HCD contamination is therefore degenerate with cosmology: the data
-alone cannot fully separate "more LLS" from "more `A_p` or a different `n_s`." We measured this
-explicitly. In the joint DESI+KS measurement the pure-LLS template sits 91% inside the forest
-(`A_p`, `n_s`) plane on DESI, with `cos(LLS, A_p) = 0.81`; only about 9% of it is orthogonal and
-therefore distinguishable, and on the high-k KS leg the degeneracy drops to 64% in-plane. The
+This is the underlying reason for the whole exercise. The HCD contamination is degenerate with the
+cosmology, and the cleanest way to read that off is the posterior correlation matrix below, which is
+the standard summary of a parameter degeneracy: each entry is the correlation between two parameters
+under the data Fisher information plus the HCD priors. The cell that matters is `corr(A_HCD, n_s) =
++0.83`: the HCD amplitude and the tilt move together. The same column shows `corr(A_HCD, A_p) =
+−0.84`, so `A_HCD` is strongly coupled to both forest-amplitude directions at once.
+
+![Posterior correlation matrix (A_p, n_s, A_HCD, B_HCD, r_sub)](../../figures/analysis/04_emulator/degeneracy_fisher_corr_matrix.png)
+
+*Posterior correlation matrix (data Fisher + HCD priors) over the two cosmology parameters (`A_p`,
+`n_s`), the HCD amplitude `A_HCD`, its z-tilt `B_HCD` and the subDLA-to-LLS ratio `r_sub`. The
+boxed cell is `corr(A_HCD, n_s) = +0.83`. The data-only correlation (no HCD prior) is ≈ 0: the
+coupling is prior-mediated. `A_HCD` is pinned by its external prior, and that pinned amplitude reads
+to the forest as a change in `A_p`/`n_s`. The z-tilt `B_HCD` is nearly orthogonal to `A_p`
+(`corr ≈ −0.27`) but is data-starved, so it cannot break the coupling (see below).*
+
+The mechanism is the damping wing. An HCD's low-k power excess, from its damping wing, looks over the
+DESI band almost exactly like a change in the forest amplitude, and that low-k confusion is the
+degeneracy: the data alone cannot fully separate "more LLS" from "more `A_p` or a different `n_s`."
+That is why the off-diagonal correlation is large, and why it is *prior*-mediated rather than
+intrinsic to the data. With no HCD prior the data place almost no constraint on `A_HCD`, so its
+correlation with the cosmology is ≈ 0; it is only once the external incidence prior pins `A_HCD` that
+the pinned amplitude propagates into the forest plane and the `+0.83` correlation appears. The
 practical consequence is that a ±1σ shift in where we centre the HCD-amplitude prior drags `n_s` by
-roughly 0.5σ, a real and irreducible systematic that a tighter prior cannot remove.
+roughly 0.5σ. This factorises exactly as 0.5σ = corr(A_HCD, n_s) × prior-dominance ≈ 0.83 × 0.62, so
+it is a real and irreducible systematic: a tighter prior shrinks the prior-dominance factor but
+leaves the correlation untouched, and therefore cannot remove the coupling.
 
-The degeneracy-breaker is not the damping wing in general but specifically its high-k Voigt deficit:
-that high-k shape is what KS sees and what separates LLS from a pure amplitude change (the cure),
-whereas the low-k excess is what mimics amplitude in the first place (the confusion).
-
-A single-fiducial Fisher reference script (`scripts/diag_hcd_cosmo_degeneracy_ref.py`, DESI leg)
-reproduces these numbers as 0.84 / 93% / 65% — consistent with the joint-panel headline to ~2%;
-the small offset is the single-fiducial-vs-joint method difference, not a disagreement.
+The geometry behind the correlation is the projection of the LLS template into the forest plane,
+shown next. It quantifies the same degeneracy as an in-plane fraction: how much of the whitened LLS
+template lies inside the forest (`A_p`, `n_s`) directions the data constrain.
 
 ![LLS template projected into the forest (A_p, n_s) plane](../../figures/analysis/04_emulator/degeneracy_lls_inplane_projection.png)
 
-*This figure shows the ref-script (single-fiducial Fisher, DESI-leg) values, consistent with the
-joint-panel headline (91% DESI / 64% KS / cos 0.81). Left: the C_data-whitened pure-LLS template
-lies 93% inside the forest (A_p, n_s) plane on DESI (only ~7% orthogonal). Right: how much of the
-LLS template the forest can absorb — 93% on DESI's (A_p, n_s), 98% once the τ₀ nuisances are added,
-dropping to 65% on the high-k KS leg (which is what breaks the degeneracy, via the high-k Voigt
-deficit).*
+*The pure-LLS amplitude template projected into the C_data-whitened forest (`A_p`, `n_s`) plane.
+Left (DESI leg): the template lies 93% inside the forest plane (`|cos(LLS, A_p)| = 0.84`; only ~7%
+orthogonal). Right: how much of the template the forest can absorb — 93% on DESI's (`A_p`, `n_s`),
+98% once the τ₀ nuisances are added, dropping to 65% on the high-k KS leg. These are the
+single-fiducial Fisher ref-script (DESI-leg) values; the joint DESI+KS panel headline is 91%
+in-plane on DESI / 64% on KS with `cos(LLS, A_p) = 0.81`, consistent to ~2% (the small offset is the
+single-fiducial-vs-joint method difference, not a disagreement).*
+
+The drop from 91% in-plane on DESI to 64% on the high-k KS leg is the degeneracy-breaker. It is not
+the damping wing in general but specifically its high-k Voigt deficit: that high-k shape is what KS
+sees and what separates LLS from a pure amplitude change (the cure), whereas the low-k excess is what
+mimics the amplitude in the first place (the confusion). The z-tilt of the HCD incidence (`B_HCD`) is
+genuinely orthogonal to `A_p`, but it carries far too little signal to help, which is why the
+correlation matrix above is unchanged when it is marginalised.
+
+To see this degeneracy in a full posterior rather than at the Fisher level, the eBOSS closure corner
+of Demo B above (`eboss_corner_cosmo_E_f6.png`) shows the `n_s`–`α` contours directly. The
+correlation matrix here is the primary summary; the corner is the worked example.
 
 Two points follow for the real fit. First, the accuracy of the external LLS-incidence prior centre
 matters, because a wrong centre is the 0.5σ-per-1σ systematic. Second, the genuine
 degeneracy-breaker is the high-k KS leg together with the damping-wing high-k Voigt deficit (the
 low-k excess is the confusion, the high-k deficit is the cure), not a tighter incidence prior. The
-full derivation, the Fisher correlation matrix and the factorisation 0.5σ = corr × prior-dominance
-are in notes `docs/superpowers/2026-06-14-hcd-cosmology-degeneracy.md`, with the related figures
-`degeneracy_fisher_corr_matrix.png`, `degeneracy_prior_center_law.png` and
-`degeneracy_snr_amplitude_vs_ztilt.png` in the notes `04_emulator/`.
+full derivation, the correlation matrix and the factorisation 0.5σ = corr × prior-dominance are in
+notes `docs/superpowers/2026-06-14-hcd-cosmology-degeneracy.md`, with the related figures
+`degeneracy_prior_center_law.png` and `degeneracy_snr_amplitude_vs_ztilt.png` in the notes
+`04_emulator/`. All three correlation/projection figures are reproduced by
+`scripts/diag_hcd_cosmo_degeneracy_ref.py`.
 
 ---
 

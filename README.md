@@ -90,7 +90,48 @@ PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
 
 ---
 
+## Data and checkpoints
+
+The repository ships the code, not the data or the trained models. To set
+expectations before the Quickstart:
+
+- **The raw catalogs and skewers are not distributed here.** The PRIYA τ skewers
+  and the per-(sim, snap) absorber catalogs are large and live on the cluster;
+  they are gitignored (`outputs/`, `*.h5`). Building them is a Great Lakes job.
+- **The full τ₀ training cache is not distributed here.** The v3.3 LF cache,
+  `hcd_analysis/_emulator_data/observables_tau0_lf.h5`, is 1.1 GB and gitignored.
+- **The trained checkpoints are not distributed here.** A checkpoint bundle is
+  only ~6 MB, but its binary leaves (`checkpoints/*.eqx`, `*.norm.pkl`,
+  `*.meta.json`) are gitignored, so a usable checkpoint is not present in a fresh
+  clone either.
+
+What you actually need to run the emulator or the likelihood yourself is modest:
+a trained checkpoint bundle plus at least a slice of the τ₀ cache — one LOSO fold
+is enough to exercise the forward model and the likelihood on real cache rows.
+You do not need the full 1.1 GB cache or a cluster for that.
+
+A data and model release is planned but not yet available (work in progress). The
+natural home for the one-fold cache slice and a checkpoint is a dedicated data
+repository, which the PI (M. Ho) will create; it is deferred for now. Until then,
+request the checkpoint and a cache slice from the PI (mfho@umich.edu) or open an
+issue. Please do not commit any large data or model artefacts to this code
+repository.
+
+Throughout the rest of this README, each stage is marked with what it needs:
+**requires the full data / Great Lakes (not in this repo)** for anything that
+builds the catalogs, the full cache, or trains the emulator; and
+**runnable anywhere with a checkpoint + a cache slice** for the portable pieces
+(the forward-model API, reading the data structure).
+
+---
+
 ## Quickstart
+
+**Runnable anywhere with a checkpoint + a cache slice** (one LOSO fold of the
+cache is sufficient; see [Data and checkpoints](#data-and-checkpoints)). It does
+not require the full 1.1 GB cache or a cluster, but it does need the trained
+checkpoint and at least the one cache row it reads, neither of which is in the
+repository.
 
 The smallest end-to-end example loads the trained emulator and calls the forward
 model to predict a contaminated P1D. Run it with the `emu-jax` environment string
@@ -129,6 +170,10 @@ own inputs, is given in the emulator README linked below.
 ---
 
 ## HCD catalog construction (quickstart)
+
+**Requires the full data / Great Lakes (not in this repo).** This step reads the
+raw PRIYA τ skewers, which are large and not distributed here; it is a cluster
+job. The structure of the products it describes can still be read for reference.
 
 The HCD catalog is the foundation the rest of the pipeline rests on: it records,
 for every PRIYA simulation and redshift, which sightlines intersect a dense
@@ -189,6 +234,10 @@ below; expand it to the full string from
 
 ### Stage 1 — the simulation P1D, absorber catalog and τ₀ cache
 
+**Requires the full data / Great Lakes (not in this repo).** This stage reads the
+raw PRIYA spectra and builds the 1.1 GB τ₀ cache; neither the inputs nor the
+assembled cache is distributed here (both are gitignored).
+
 The first stage turns raw PRIYA spectra into the products everything downstream
 depends on: the per-sightline P1D, the absorber catalog (which sightlines
 intersect an LLS, subDLA or DLA, as described in the section above), the
@@ -219,6 +268,12 @@ Build the τ₀ cache for the emulator:
 ```
 
 ### Stage 2 — the HCD-marginalised emulator
+
+**Training requires the full data / Great Lakes (not in this repo)** — the LOSO
+sweep needs the full τ₀ cache. **Using a trained emulator is runnable anywhere
+with a checkpoint + a cache slice** (the [Quickstart](#quickstart) above and the
+emulator README's forward-model API), once a checkpoint and at least one cache
+row are obtained from the PI.
 
 A differentiable JAX/Equinox network learns the per-class P1D as a smooth
 function of the cosmology θ, the redshift z and τ₀. The central design choice is
@@ -252,6 +307,10 @@ reference for anything emulator-specific:
 
 ### Stage 3 — the differentiable likelihood
 
+**Runnable anywhere with a checkpoint + a cache slice.** The likelihood is a pure
+Python/JAX API that runs on top of a loaded checkpoint; it needs the DESI/KS data
+bindings and a cache slice but not the full cache or a cluster.
+
 The emulator's `P_obs` is wired into a Gaussian log-likelihood that compares the
 prediction to the data (the DESI DR1 and KODIAQ-SQUAD P1D) through an
 emulator-error covariance and physically motivated priors. The HCD incidence
@@ -277,6 +336,10 @@ from hcd_analysis.emulator.inference import log_lik_multiz, hcd_incidence_prior
 ```
 
 ### Stage 4 — inference and closure
+
+**Requires a checkpoint + a cache slice (not in this repo); not a cluster.** A
+short closure or eBOSS chain runs on CPU once a checkpoint and a cache slice are
+in place; the production all-sims ensemble is heavier and was run on the cluster.
 
 The final stage samples the posterior with NUTS, the No-U-Turn Sampler, a
 gradient-based MCMC method that exploits the differentiable likelihood, and
@@ -367,5 +430,6 @@ notebooks/tutorials/     five starter notebooks for new students
 tests/                   science-claim regression tests
 docs/                    analysis.md, bugs_found.md, data_layout.md, handover, ...
 figures/analysis/        all analysis + validation figures
-checkpoints/             trained emulator bundles (final_fold0.*) + error_vector.npz
+checkpoints/             trained emulator bundles (final_fold0.*) + error_vector.npz — gitignored, not in this repo (see Data and checkpoints)
+hcd_analysis/_emulator_data/  the 1.1 GB τ₀ cache — gitignored, not in this repo (see Data and checkpoints)
 ```
