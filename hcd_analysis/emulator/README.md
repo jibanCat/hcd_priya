@@ -489,33 +489,54 @@ eBOSS-certification section of the notes validation docs (`05_truth_validation/`
 
 ## Demo C — Does emulator error bias the cosmology? (the LOSO Fisher gate)
 
-A small RMS error is necessary but not sufficient. What we require is that whatever residual error
-the emulator carries does not push the recovered cosmology in a consistent direction; a
-biased-but-precise emulator is worse than a noisy-but-unbiased one. We therefore project each
-held-out fold's residual onto the (`A_p`, `n_s`) Fisher directions (the directions the data
-actually constrain) and ask how many σ of cosmology bias the emulator error injects. This is the
-appropriate measure of cosmological accuracy, more meaningful than any raw per-row spectrum.
+A small held-out RMS error is necessary but not sufficient. What an inference requires is that
+whatever residual error the emulator carries does not displace the recovered cosmology in a
+consistent direction: a biased-but-precise emulator is worse for inference than a noisy-but-unbiased
+one, because the bias propagates directly into the parameter estimate while the noise is absorbed by
+the error model. The cosmologically meaningful question is therefore not how large the spectral
+residual is but how much it shifts `A_p` and `n_s`, in units of the posterior width those parameters
+will have.
 
-The per-fold cosmology bias is everywhere well inside the ±0.2σ acceptance gate; none of the 8
-folds fail on either parameter, with an RMS bias of 0.067σ (A_p) and 0.071σ (n_s). The emulator is
-thus validated as unbiased in the cosmology on held-out simulations (the per-fold LOSO gate), not
-merely as small-RMS. This is the held-out-sim cosmology gate, subject to the production-SBC caveat
-of Demo A: the per-fold LOSO result is what the production ensemble inherits, and the
-ensemble-level SBC is still pending.
+We answer this with a per-fold acceptance gate. For each of the eight LOSO folds we take that fold's
+own held-out emulator and its held-out simulations, form the residual `ΔP = P_truth − P_forward`
+(forward at the simulation's exact mean flux and incidence, DLA-masked, so `ΔP` is pure emulator
+error), and project it onto the (`A_p`, `n_s`) Fisher directions the data actually constrain. The
+projection is the linearised maximum-likelihood displacement,
+`bias = [(F + Π)⁻¹ Jᵀ C⁻¹ ΔP] / σ`, where `J` is the forward Jacobian, `C` the data covariance,
+`F` the Fisher information, `Π` the prior precision, and `σ` the marginal posterior width; the
+result is a cosmology shift in σ. The acceptance requirement is `|bias_z| < 0.2σ` for every fold
+and both parameters. This per-fold object is what the deployed model inherits; it is the production
+gate, distinct from the per-simulation scatter discussed below.
 
-![Per-fold A_p / n_s emulator bias across all folds](../../figures/analysis/04_emulator/emu_bias_allfolds.png)
+All eight folds sit well inside the ±0.2σ band on both parameters: 0 of 8 fail. The per-fold RMS
+bias is 0.067σ for `A_p` and 0.071σ for `n_s`, so the typical fold injects under a tenth of a
+posterior width. The emulator is thus validated as unbiased in the cosmology on held-out
+simulations, not merely as small-RMS. This is the held-out-sim cosmology gate, subject to the
+production-SBC caveat of Demo A: the per-fold LOSO result is what the production all-sims ensemble
+inherits, and the ensemble-level SBC is still pending before the real fit.
 
-*Per-sim `A_p` and `n_s` Fisher bias (in σ) over all 60 honestly-held-out sims (each scored by its
-own held-out emulator), with the ±0.2σ gate drawn — i.e. unbiased *on held-out sims* (the per-fold
-LOSO gate). The deployed forward (with the MF correction) tightens the pooled mean bias to n_s
-+0.026σ / A_p +0.055σ (see the `_mf` summary). The per-fold RMS is 0.067σ / 0.071σ, 0/8 fail.*
+![Per-fold A_p and n_s Fisher bias across the 8 LOSO folds, inside the ±0.2σ gate](../../figures/analysis/04_emulator/B5_fisher_bias_perfold.png)
+
+*Per-fold `A_p` (left) and `n_s` (right) Fisher bias, in σ, one bar per LOSO fold. The shaded band
+is the ±0.2σ acceptance gate and the dotted lines mark the per-fold RMS (0.067σ for `A_p`, 0.071σ
+for `n_s`). Every fold is inside the gate on both parameters (0/8 fail). This is the per-FOLD gate
+— the production object — not the per-simulation cloud.*
+
+There is a finer-grained view in which the same projection is computed for each of the 60
+held-out simulations individually rather than pooled per fold; that per-simulation scatter is wider
+(the box-corner simulations are noisier) and is recorded in the validation document. Pooled over all
+60 held-out simulations and pushed through the deployed multi-fidelity forward, the mean bias is
+`n_s +0.026σ` and `A_p +0.055σ`, consistent with no bias (bootstrap 95% intervals straddle zero).
+The per-fold gate above is the headline; the per-simulation pool is the supporting detail.
 
 To reproduce:
 
 ```bash
+# per-fold A_p/n_s Fisher bias (the figure above), via the performance-walkthrough builder:
 PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_bias_allfolds.py
-# the deployed forward (through the multi-fidelity layer):
+  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_performance_walkthrough.py   # → B5_fisher_bias_perfold.png
+# per-simulation pool and the deployed multi-fidelity forward (the +0.026σ / +0.055σ pooled means):
+#   scripts/diag_emu_bias_allfolds.py
 #   scripts/diag_emu_bias_allfolds_mf.py   → figures/analysis/04_emulator/emu_bias_allfolds_mf.txt
 ```
 
