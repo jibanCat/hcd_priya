@@ -419,6 +419,26 @@ def build_config(verbose=False):
         add_fiducial(f"HFLOSO_DK{int(round(_ns * 1000))}", _f, survey="DESI+KS", sim=_hs,
                      mf=True, hr_truth=True, prior_center="truth")
 
+    # === Phase-5a MF n_s HIGH-K CERTIFICATION on KS-ONLY (PI-approved 2026-06-14) — PER-SURVEY ===
+    # The real fits are SEPARATE per survey, so the cert must be per-survey too: the DESI-only
+    # (HFLOSO*) and KS-only (HFLOSO_KS*) Test-B are the HEADLINE; the joint DESI+KS (HFLOSO_DK*)
+    # above is context/secondary. Identical GENUINE HF-LOSO Test B as HFLOSO_DK, but on the KS-ONLY
+    # leg (survey="KS" → run_one_chain keeps ONLY the KS leg; with_eboss=False and the DESI leg is
+    # filtered OUT). KS carries its loader default mf_floor_on=True (the small-scale leg), and the
+    # production MF forward (with_mf=True, mf_with_floor=True) is on; the HF-LOSO MF correction is
+    # fit EXCLUDING this HR sim (mf_exclude_held via hr_truth=True). Per HR sim: truth = its REAL
+    # measured P1D (make_hr_truth_from_cache, no MF), prior_center="truth" (isolates resolution from
+    # the LLS center). VERDICT GATE: per-fold n_s |bias_z| < 1 (ideally <0.2σ) on KS-only. KS reaches
+    # higher k than DESI, so this is the decisive high-k tilt test for the KS real fit. 5 HR sims ×
+    # 4 chains = 20 chains; CPU forward, no SLURM. id = HFLOSO_KS{ns}.
+    for _hs in _hrn:
+        _f = _fold_of(_hs)
+        if _f is None:
+            continue
+        _ns = _ns_of_sim(d, _hs, PARAM_LIMITS)
+        add_fiducial(f"HFLOSO_KS{int(round(_ns * 1000))}", _f, survey="KS", sim=_hs,
+                     mf=True, hr_truth=True, prior_center="truth")
+
     # === Phase-5a SHAPE-FLOOR validation (2026-06-12): the genuine HF-LOSO worst cases re-run
     # with the shape-aware MF floor (fires on the DESI leg). Compares: the existing DIAGONAL floor
     # (the simpler fix) vs the shape floor at infl∈{1.0,1.5,2.0}. Worst sims = ns0.972 (+2.80σ)
