@@ -208,7 +208,7 @@ gradient sampler, plus the HCD-incidence prior. Below: the check that the HCD
 incidence prior does not bias cosmology — the θ-bias from a mis-centered prior
 stays inside the 0.2σ gate, and the prior tightens θ rather than shifting it.
 
-![HCD incidence prior does not bias cosmology: bias inside the gate, prior tightens not shifts](figures/analysis/05_likelihood/hcd_prior_cosmology.png)
+![HCD incidence prior does not bias cosmology: bias inside the gate, prior tightens not shifts](figures/analysis/06_validation_summary/hcd_prior_cosmology.png)
 
 Exercise the likelihood (it is a Python API, not a one-shot script). The snippet
 below is **illustrative import only — it will not produce output as-is; the full
@@ -233,7 +233,7 @@ how many of the held-out mocks recover truth inside ±1σ, with zero sampler
 divergences. Below: the Leg-B closure coverage summary (HCD mock closure, the
 subDLA degeneracy diagnostic, and eBOSS DR14 low-k recovery).
 
-![Leg-B closure coverage summary: mock recovery in-gate, 0 divergences, eBOSS DR14 recovery](figures/analysis/05_likelihood/closure_coverage_summary.png)
+![Leg-B closure coverage summary: mock recovery in-gate, 0 divergences, eBOSS DR14 recovery](figures/analysis/06_validation_summary/coverage_summary.png)
 
 *This is the **Leg-B / closure coverage headline** (the production-readiness summary
 panel). It is distinct from the per-mock closure-coverage detail shown in the
