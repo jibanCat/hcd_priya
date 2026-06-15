@@ -1,0 +1,16 @@
+{
+  "blind_params": [
+    "ns",
+    "Ap"
+  ],
+  "created_utc": "2026-06-15T01:28:23.543539+00:00",
+  "git_commit": "aefaf51",
+  "note": "BLIND SEED ONLY. The offset is derived from seed_str at view time and is NOT stored here. Do not record the offset anywhere committable until UNBLINDING.",
+  "offset_sigma_multiple": 3.0,
+  "prior_sigma": {
+    "Ap": 4.0414518843273807e-10,
+    "ns": 0.07216878364870323
+  },
+  "project_string": "hcd_priya_real_fit_v1",
+  "seed_str": "hcd_priya_real_fit_v1@aefaf51"
+}
