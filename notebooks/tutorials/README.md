@@ -200,60 +200,85 @@ programming, here are some starting points by topic.
 ### The Lyman-α forest as a cosmological probe
 
 - **Croft, Weinberg, Katz, Hernquist 1998** — "Recovery of the Power
-  Spectrum of Mass Fluctuations from Observations of the Lyα Forest".
+  Spectrum of Mass Fluctuations from Observations of the Lyα Forest"
+  ([arXiv:astro-ph/9708018](https://arxiv.org/abs/astro-ph/9708018)).
   The original Lyα-cosmology paper; reading just §1–§3 gives you the
   conceptual basis for everything else.
 - **McDonald, Miralda-Escudé et al. 2000, 2006** — definitive P1D
-  papers from the SDSS era.  The 2006 paper formalises the P1D
-  estimator we use today.
+  papers from the SDSS era
+  ([2000: arXiv:astro-ph/9911196](https://arxiv.org/abs/astro-ph/9911196);
+  [2006: arXiv:astro-ph/0405013](https://arxiv.org/abs/astro-ph/0405013)).
+  The 2006 paper formalises the P1D estimator we use today.
 - **Palanque-Delabrouille et al. 2013** — "The one-dimensional Lyα
-  forest power spectrum from BOSS".  Modern P1D measurement and
-  systematics.
+  forest power spectrum from BOSS"
+  ([arXiv:1306.5896](https://arxiv.org/abs/1306.5896)).  Modern P1D
+  measurement and systematics.
 - **Bird, Fernandez, Ho et al. 2023** (JCAP 10, 037;
-  arXiv:2306.05471) — the PRIYA simulation suite paper.  This is the
-  suite our 60 LF + 4 HR sims came from.  Read §2 for the LHS
-  parameter scheme that names every folder under `HCD_OUT_ROOT`.
+  [arXiv:2306.05471](https://arxiv.org/abs/2306.05471)) — the PRIYA
+  simulation suite paper.  This is the suite our 60 LF + 4 HR sims came
+  from.  Read §2 for the LHS parameter scheme that names every folder
+  under `HCD_OUT_ROOT`.
 
 ### High column-density absorbers (HCDs)
 
-- **Wolfe, Gawiser, Prochaska 2005** (ARA&A 43, 861) — the canonical
-  DLA review.  Sections 1–3 cover the LLS / subDLA / DLA
+- **Wolfe, Gawiser, Prochaska 2005** (ARA&A 43, 861;
+  [arXiv:astro-ph/0509481](https://arxiv.org/abs/astro-ph/0509481)) —
+  the canonical DLA review.  Sections 1–3 cover the LLS / subDLA / DLA
   classification and the physics of damping wings.
-- **Prochaska, Herbert-Fort, Wolfe 2005** — the SDSS DLA CDDF that
-  notebook 02 compares against.
+- **Prochaska, Herbert-Fort, Wolfe 2005** (ApJ 635, 123;
+  [arXiv:astro-ph/0508361](https://arxiv.org/abs/astro-ph/0508361)) —
+  the SDSS DLA CDDF that notebook 02 compares against.
 - **Bird, Vogelsberger, Haehnelt et al. 2014** ("Damped Lyman α
   absorbers as a probe of stellar feedback", MNRAS 445, 2313;
-  arXiv:1405.3994) —
+  [arXiv:1405.3994](https://arxiv.org/abs/1405.3994)) —
   hydrodynamic prediction of DLA bias and the f(N_HI) shape.
   Section 5 is what feeds the scale-dependent-bias TODO in
   `SESSION_HANDOVER_2026_04_28.md` §4D.
-- **Font-Ribera, Kirkby et al. 2012** — the BOSS DLA-Lyα cross
-  correlation that the project's clustering pipeline mirrors.
-- **Pérez-Ràfols et al. 2018** — DR12 DLA bias measurement.  This is
-  the observation our `b_DLA` estimate is being compared against.
-- **Ho, Bird, Garnett 2021** — modern neural DLA finder; we use their
-  CDDF tables for the observation overlay in NB 02.
+- **Font-Ribera, Miralda-Escudé et al. 2012** (JCAP 11, 059;
+  [arXiv:1209.4596](https://arxiv.org/abs/1209.4596)) — the BOSS DLA-Lyα
+  cross correlation that the project's clustering pipeline mirrors.
+- **Pérez-Ràfols et al. 2018** (MNRAS 473, 3019;
+  [arXiv:1709.00889](https://arxiv.org/abs/1709.00889)) — DR12 DLA bias
+  measurement.  This is the observation our `b_DLA` estimate is being
+  compared against.
+- **Ho, Bird, Garnett 2021** (MNRAS 507, 704;
+  [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) — modern neural
+  DLA finder; we use their CDDF tables for the observation overlay in
+  NB 02.
 
 ### Voigt profile and line-transfer
 
-- **Draine 2011, _Physics of the ISM_, §6** — textbook derivation of
-  the Voigt profile from radiative transfer.  This is the
-  cleanest single source.
+- **Draine 2011, _Physics of the Interstellar and Intergalactic
+  Medium_, §6**
+  ([ADS:2011piim.book.....D](https://ui.adsabs.harvard.edu/abs/2011piim.book.....D/abstract);
+  Princeton Univ. Press, ISBN 978-0-691-12214-4 — a textbook, no
+  arXiv) — derivation of the Voigt profile from radiative transfer.
+  This is the cleanest single source.
 - **Tepper-García 2006** — analytic approximation to the Voigt
-  function that's faster than `scipy.special.wofz`.  Several
-  fake-spectra implementations use it.
+  function that's faster than `scipy.special.wofz`
+  ([arXiv:astro-ph/0602124](https://arxiv.org/abs/astro-ph/0602124)).
+  Several fake-spectra implementations use it.
 
 ### Statistics / numerics
 
-- **Numerical Recipes** (Press, Teukolsky, Vetterling, Flannery) —
-  Ch. 13 (FFT) is the right reference for the P1D estimator.
-- **Hamilton 1992** — multipole expansion of the correlation function.
+- **Numerical Recipes** (Press, Teukolsky, Vetterling, Flannery, 3rd
+  ed. 2007, Cambridge Univ. Press, ISBN 978-0-521-88068-8;
+  [numerical.recipes](https://numerical.recipes) — a textbook, no
+  arXiv) — Ch. 13 (FFT) is the right reference for the P1D estimator.
+- **Hamilton 1992** — multipole expansion of the correlation function
+  (ApJ 385, L5;
+  [ADS:1992ApJ...385L...5H](https://ui.adsabs.harvard.edu/abs/1992ApJ...385L...5H/abstract);
+  pre-arXiv, so ADS rather than arXiv).
   This is the formalism behind the rmu Hamilton-multipole fit in
   `docs/multipole_jacobian_explained.md`.
-- **Kaiser 1987** — redshift-space distortions.  The basis for the
+- **Kaiser 1987** — redshift-space distortions (MNRAS 227, 1;
+  [ADS:1987MNRAS.227....1K](https://ui.adsabs.harvard.edu/abs/1987MNRAS.227....1K/abstract);
+  pre-arXiv, so ADS rather than arXiv).  The basis for the
   `(b_DLA, β_DLA)` joint-fit model.
 - **Goodman & Weare 2010** — affine-invariant ensemble MCMC (the
-  algorithm behind `emcee`).  Useful background for the eventual
+  algorithm behind `emcee`; Comm. App. Math. Comput. Sci. 5, 65;
+  [DOI:10.2140/camcos.2010.5.65](https://doi.org/10.2140/camcos.2010.5.65);
+  math journal, no arXiv).  Useful background for the eventual
   emulator MCMC.
 
 ### Programming and tools
