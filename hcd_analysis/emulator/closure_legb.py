@@ -846,12 +846,70 @@ def draw_leg_a_leg_truth(ctx: LegBCtx, key):
         kept_global_z=np.ones(len(ctx.z_global), bool), raw=raw)
 
 
-def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key):
+# --------------------------------------------------------------------------------------------- #
+#  Data-nuisance injection hooks (the BIAS gate). On the Leg-A self-draw the cosmology bias is
+#  ZERO by construction; these inject a nuisance the production forward CANNOT fit (or a truth
+#  offset from the per-survey LLS pin) so the recovered A_p/n_s shift isolates that nuisance.
+# --------------------------------------------------------------------------------------------- #
+def apply_lls_truth_boost(truth_pack, boost):
+    """Return a COPY of ``truth_pack`` with the LLS incidence (pivot ``alpha_hcd[0]`` AND the
+    z-resolved ``alpha_hcd_z[:,0]`` column) multiplied by ``boost`` (>1 ⇒ the mock carries a
+    survey-level LLS excess relative to the prior pin center). subDLA/DLA, θ9, τ₀ and a_SiIII are
+    untouched; the input is NOT mutated (deep-copies the two LLS-bearing arrays). ``boost=1`` is
+    the identity. The LLS-excess arm of the data-nuisance bias gate uses this to put the truth at
+    the per-survey lit/sim LLS center while the forward keeps the (cosmic-average / DESI) pin."""
+    out = dict(truth_pack)                                    # shallow copy of the dict
+    a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
+    a[0] = a[0] * float(boost)
+    out["alpha_hcd"] = a
+    if truth_pack.get("alpha_hcd_z") is not None:
+        az = np.array(truth_pack["alpha_hcd_z"], float)       # fresh (nZg,3)
+        az[:, 0] = az[:, 0] * float(boost)
+        out["alpha_hcd_z"] = az
+    return out
+
+
+def _meanflux_on_leg(ctx, leg, truth_pack):
+    """Per-leg-z mean flux ⟨F⟩(z)=exp(−τ_eff(z)) from the truth mean flux on z_global.
+
+    NOTE (the load-bearing fix): ``truth_pack["tau0_global"]`` is ALREADY τ_eff(z)=α(z)·Kim07
+    (built as ``tau0_vec = alpha_z·kim`` in _legb_model / _legb_reconstruct_deterministics, i.e.
+    the cache ``tau0 = −ln⟨F⟩`` coordinate), NOT the bare α-ladder coord. So we use it DIRECTLY —
+    multiplying by Kim again would double-apply it and make ⟨F⟩=exp(−α·Kim²), inflating the
+    injected metal amplitude up to ~6× at low z (where Kim is smallest). Returns a (leg.n_z,)
+    array aligned with ``leg.z`` (nearest-z map onto z_global, mirroring make_leg_a_legmock's
+    `sel`)."""
+    zg = np.asarray(ctx.z_global)
+    tau_eff_global = np.asarray(truth_pack["tau0_global"])    # (nZg,) τ_eff = α·Kim = −ln⟨F⟩
+    sel = np.array([int(np.argmin(np.abs(zg - zz))) for zz in leg.z])
+    tau_eff = tau_eff_global[sel]                             # (n_z,)
+    return np.exp(-tau_eff)                                   # ⟨F⟩(z)
+
+
+def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
+                       inject_metal_misspec=None, inject_resolution=None):
     """Leg-A self-draw on the leg grids: forward-model the prior-drawn truth on each leg with the
     SAME ``predict_P_obs_on_leg`` the likelihood uses, then add ε ~ N(0, C_total(truth)) over ALL
     rows. C_mock ≡ C_like AND the noiseless mock == P_model(truth) → the rank-uniformity null is
     EXACT (Talts+2018). Returns ``(mock_legs, info)``; ``info['chol'][leg]`` /
-    ``info['truth_on_leg'][leg]`` per leg."""
+    ``info['truth_on_leg'][leg]`` per leg.
+
+    DATA-NUISANCE INJECTION (the bias gate; default None ⇒ byte-identical to the clean self-draw):
+    when set, the contaminant multiplies the NOISELESS ``P_model`` BEFORE the ε draw (mirroring
+    make_legb_mock's SiIII inject at line 772), so the recorded ``truth_on_leg`` and the mock both
+    carry it but the FORWARD likelihood (which the gate keeps clean of the unfittable mode) cannot.
+
+      ``inject_metal_misspec``: dict, e.g. {"form":"desi_full","f_SiIII":0.009,"f_SiII":0.004,
+        "f_SiII_SiII":0.002,...} forwarded as kwargs to ``metal_inject``. Applied ONLY on legs with
+        ``leg.metals_on`` (DESI/eBOSS), PER z-block: ⟨F⟩(z) from the truth τ₀ (``_meanflux_on_leg``)
+        feeds metal_inject on that z's rows. The desi_full form carries an ADDITIVE SiII–SiII term
+        the multiplicative forward _metal_factor STRUCTURALLY cannot fit (the bias probe).
+      ``inject_resolution``: dict, e.g. {"b_res":0.02} → multiply P_model by
+        ``_resolution_factor(k, R_z, b_res)`` per z-block on ALL legs (the production forward has
+        resolution_on=False so it cannot fit this distortion — the probe). R_z is the leg's own
+        per-z resolution scale (``leg.R_z``)."""
+    metal_kw = dict(inject_metal_misspec) if inject_metal_misspec else None
+    res_b = float(inject_resolution["b_res"]) if inject_resolution else None
     zg = np.asarray(ctx.z_global)
     theta9 = jnp.asarray(truth_pack["theta9"])
     tau0_global = jnp.asarray(truth_pack["tau0_global"])
@@ -875,12 +933,36 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key):
             mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
             mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
             mf_emucoh_offdiag_only=getattr(ctx, "mf_emucoh_offdiag_only", False))
+        P_model = np.array(P_model, float)                     # host (writable): nuisance injection
+        # DATA-NUISANCE INJECTION (default OFF). Multiply the noiseless P_model by the host
+        # contaminant BEFORE the ε draw, per z-block (mirrors make_legb_mock's per-z loop).
+        if metal_kw is not None and leg.metals_on:
+            Fbar = _meanflux_on_leg(ctx, leg, truth_pack)     # (n_z,) ⟨F⟩(z) from the truth τ₀
+            k_leg = np.asarray(leg.k)
+            z_idx = np.asarray(leg.z_idx)
+            for iz in range(leg.n_z):
+                rows = np.where(z_idx == iz)[0]
+                if rows.size == 0:
+                    continue
+                P_model[rows] = metal_inject(P_model[rows], k_leg[rows], float(Fbar[iz]),
+                                             **metal_kw)
+        if res_b is not None:
+            k_leg = np.asarray(leg.k)
+            z_idx = np.asarray(leg.z_idx)
+            R_z = np.asarray(leg.R_z)
+            for iz in range(leg.n_z):
+                rows = np.where(z_idx == iz)[0]
+                if rows.size == 0:
+                    continue
+                fac = np.asarray(DL._resolution_factor(
+                    jnp.asarray(k_leg[rows]), float(R_z[iz]), b_res=res_b))
+                P_model[rows] = P_model[rows] * fac
         Lc = _chol_jitter(C_total)
         g = jax.random.normal(keys[li], (leg.k.shape[0],))
         eps = np.asarray(jnp.einsum("ij,j->i", Lc, g))
-        mock_legs.append(leg._replace(P_data=np.asarray(P_model) + eps))
+        mock_legs.append(leg._replace(P_data=P_model + eps))
         chol_out[leg.name] = np.asarray(Lc)
-        truth_on_leg_out[leg.name] = np.asarray(P_model)
+        truth_on_leg_out[leg.name] = P_model.copy()
     # 'dropped' (empty per leg — Leg-A keeps every z) matches make_legb_mock's info contract,
     # which run_legb reads when building the per-mock record.
     return mock_legs, dict(key=key, chol=chol_out, truth_on_leg=truth_on_leg_out,
@@ -1542,7 +1624,7 @@ def _packed_names_for(samples, kept_global):
 def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
              cemu_inflate=None, fold=0, q_levels=(0.68, 0.95), verbose=True,
              dense_mass=True, max_tree_depth=10, mock_indices=None,
-             return_per_mock=False, leg_a=False):
+             return_per_mock=False, leg_a=False, inject_spec=None):
     """Leg-B coverage over ``n_mocks`` held-out-sim mocks. Per mock: make_legb_mock → NUTS
     against the real-cov multi-leg likelihood → thin → rank the truth θ per param + the
     loglik rank → per-param empirical coverage at ``q_levels`` + bias.
@@ -1577,7 +1659,20 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
             # Leg-A self-draw: truth ~ prior, matched-C mock; a PURE fn of (seed,m) → shardable.
             k_truth, k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, m), 3)
             truth_pack = draw_leg_a_leg_truth(ctx, k_truth)
-            mock_legs, info = make_leg_a_legmock(ctx, fid_core, truth_pack, k_mock)
+            # DATA-NUISANCE INJECTION (the bias gate; inject_spec=None ⇒ byte-identical to the
+            # clean self-draw — the no-op guarantee). "lls_truth_boost" offsets the TRUTH LLS from
+            # the per-survey pin BEFORE the forward; "metal_misspec"/"resolution" inject a mode the
+            # forward cannot fit into the noiseless mock.
+            if inject_spec:
+                if inject_spec.get("lls_truth_boost") is not None:
+                    truth_pack = apply_lls_truth_boost(
+                        truth_pack, float(inject_spec["lls_truth_boost"]))
+                mock_legs, info = make_leg_a_legmock(
+                    ctx, fid_core, truth_pack, k_mock,
+                    inject_metal_misspec=inject_spec.get("metal_misspec"),
+                    inject_resolution=inject_spec.get("resolution"))
+            else:
+                mock_legs, info = make_leg_a_legmock(ctx, fid_core, truth_pack, k_mock)
             core_per_leg = fid_core
             sim = "leg_a_prior"
         else:
