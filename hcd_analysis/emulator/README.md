@@ -54,7 +54,8 @@ To build and run it:
 6. [Quickstart](#6-quickstart) — a self-contained snippet
 7. [Conventions & gotchas](#7-conventions--gotchas) — the points that commonly cause trouble
 8. [Likelihood & inference](#8-likelihood--inference) — the differentiable log-likelihood and priors
-9. [Module map](#9-module-map)
+9. [Blinding the real-data fit](#9-blinding-the-real-data-fit-a_p-n_s) — the parameter-blind on A_p, n_s and how to unblind
+10. [Module map](#10-module-map)
 
 To see that it works, the demos are:
 - [Demo A — Mock inference (closure / SBC)](#demo-a--does-the-inference-recover-the-truth-closure--sbc)
@@ -677,7 +678,101 @@ latest 4-agent review status.
 
 ---
 
-## 9. Module map
+## 9. Blinding the real-data fit (A_p, n_s)
+
+The real-data cosmology fit is run blind so that no analysis choice can be tuned, consciously or
+not, towards a preferred answer. The blind is implemented in `hcd_analysis/emulator/blinding.py`
+and driven by `scripts/run_real_fit.py`.
+
+### What is blinded, and why parameter-blind
+
+The fit is parameter-blind on exactly the two cosmology parameters the measurement reports: the
+spectral index `n_s` and the forest power amplitude `A_p`. No other parameter is blinded. The blind
+is a hidden additive offset on the inferred values,
+
+```
+θ_shown = θ_inferred + δ ,     δ_{A_p, n_s} ~ Uniform(−3σ_prior, +3σ_prior),
+```
+
+drawn once and fixed. We blind on the posterior rather than on the data because a data-side
+cosmology shift would be partly absorbed by the mean-flux and HCD nuisances (the τ₀/nuisance
+degeneracy) and so would not cleanly hide the cosmology. A constant additive offset on the final
+inferred `A_p`/`n_s` columns is an exactly invertible hide that the analysis cannot see through —
+every downstream summary is computed on `θ_shown` — yet it unblinds with a single subtraction.
+
+### The mechanism
+
+`σ_prior` is the standard deviation of the uniform NUTS prior over the sampling box
+(`data.SAMPLING_LIMITS`): `σ_prior = (hi − lo)/√12`. Numerically (from `blind.lock`),
+`σ(A_p) = 4.04e-10` and `σ(n_s) = 0.0722`. The ±3σ window is wider than the expected posterior —
+the data constrain `A_p`/`n_s` far better than the prior — so the blind genuinely hides the headline
+while remaining a fixed, reproducible transform.
+
+The offset is derived deterministically from a SHA256 seed string, salted per parameter so the two
+offsets are independent: `u = SHA256("{seed_str}|{param}")` read as a `[0,1)` fraction, then
+`δ = (2u − 1)·(3·σ_prior)`. The seed string is `seed_str = "{project_string}@{git_commit}"`. The
+frozen lock (`blind.lock` at the repo root) has `project_string = "hcd_priya_real_fit_v1"` and
+`git_commit = "aefaf51"`, so `seed_str = "hcd_priya_real_fit_v1@aefaf51"`.
+
+`blind.lock` stores the seed only — the project string, the commit, `seed_str`, `blind_params`,
+`σ_prior` and the ±3σ multiple. It deliberately does not store the offset values; the offset is
+recomputed from the seed at view time. `write_blind_lock` refuses to overwrite an existing lock, so
+the seed is frozen once written.
+
+The offset is applied at export time, not baked into the chains: only the `A_p` and `n_s` values
+move. Sampler health (R̂, divergences, ESS, E-BFMI) and all nuisance parameters (τ₀, dτ₀, α_HCD per
+class, the z-slope, a_SiIII) remain fully visible, so convergence and the nuisance posteriors can be
+judged while blind.
+
+### The protocol
+
+The locked order is: production SBC → freeze the analysis (config, emulator ensemble and priors all
+fixed) → blind → unblind once. Unblinding happens a single time, only after the analysis is frozen
+and the production-ensemble SBC gate passes. That production SBC is still pending.
+
+### Artifacts and where they live
+
+`scripts/run_real_fit.py` runs 4 dispersed NUTS chains per survey and writes GetDist/cobaya chains:
+`<root>.{c}.txt` + `<root>.paramnames` + `<root>.yaml` + `<root>.health.json`. Each `.txt` row is
+`weight  minusloglike  <θ9...>  <nuisances...>`; with `blind=True` (the default) the `A_p`/`n_s`
+columns of the θ9 block are shifted by `δ` at export (`export_getdist`), not in the in-memory chains.
+The `.health.json` carries the sampler diagnostics and is unblinded-safe — reading health does not
+reveal cosmology.
+
+DESI and eBOSS are fit separately, not jointly. The eBOSS and KS chains are public
+(`results/real_fit/`); the DESI chains are private and gitignored (`results_local/desi_production/`).
+The KS baseline is `z_lo = 2.4`; a `z_lo = 2.8` run is a diagnostic comparison.
+
+### How to unblind
+
+Unblinding is the exact inverse, `θ_inferred = θ_shown − δ`, applied to the `A_p`/`n_s` columns only.
+The public API:
+
+```python
+from hcd_analysis.emulator import blinding as BL
+offset = BL.offset_from_lock("blind.lock")              # recompute δ from the frozen seed
+unblinded = BL.unblind(samples, offset, columns=names)  # subtract δ on A_p / n_s only
+```
+
+where `samples` is the `(N, P)` GetDist sample matrix and `names` its column names (the
+`.paramnames` order). To re-run the fit unblinded from scratch, `run_real_fit.py` exposes
+`--no-blind`, documented in-code as the danger path to be used only after freeze and the authorized
+unblind.
+
+Per the project's privacy policy the actual unblinding is run by the PI. The eBOSS+KS unblinding
+notebook lives in the private notes repository, not here:
+`hcd_priya_notes/notebooks/2026-06-15-unblind_eboss_ks.ipynb`. DESI cosmology results are private,
+and no unblinded numbers are reproduced in this public README.
+
+To unblind (PI, once, post-freeze):
+1. confirm the production SBC passed and the analysis is frozen;
+2. confirm `blind.lock` is the intended frozen seed;
+3. open the private notebook (or call `BL.unblind`, or re-run with `--no-blind`);
+4. it is a one-time reveal — record the date.
+
+---
+
+## 10. Module map
 
 | file | role |
 |---|---|
