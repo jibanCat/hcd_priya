@@ -879,7 +879,10 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key):
         mock_legs.append(leg._replace(P_data=np.asarray(P_model) + eps))
         chol_out[leg.name] = np.asarray(Lc)
         truth_on_leg_out[leg.name] = np.asarray(P_model)
-    return mock_legs, dict(key=key, chol=chol_out, truth_on_leg=truth_on_leg_out)
+    # 'dropped' (empty per leg — Leg-A keeps every z) matches make_legb_mock's info contract,
+    # which run_legb reads when building the per-mock record.
+    return mock_legs, dict(key=key, chol=chol_out, truth_on_leg=truth_on_leg_out,
+                           dropped={leg.name: [] for leg in ctx.legs})
 
 
 # ============================================================================ #

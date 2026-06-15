@@ -98,6 +98,20 @@ def test_leg_a_legmock_is_a_matched_self_draw(ctx_d):
                                np.asarray(P_ref))
 
 
+def test_run_legb_leg_a_end_to_end(ctx_d):
+    """run_legb(leg_a=True) produces per-mock records compatible with aggregate_leg_a (the
+    shard→merge path the pilot uses). One tiny NUTS on the single-model leg ctx."""
+    from hcd_analysis.emulator.closure_sbc import aggregate_leg_a
+    ctx, d = ctx_d
+    recs = LB.run_legb(ctx, d, n_mocks=1, mock_indices=[0], return_per_mock=True, leg_a=True,
+                       n_warmup=8, n_samples=8, seed=0, verbose=False)
+    assert isinstance(recs, list) and len(recs) == 1
+    for k in ("truth_vec", "draws", "ll_true", "ll_draws", "n_div"):
+        assert k in recs[0]
+    res = aggregate_leg_a(recs, len(ctx.z_global), prob=0.95)
+    assert "ranks" in res and "names" in res and "L" in res
+
+
 @pytest.mark.skipif(len(glob.glob(PROD + "*.eqx")) < 2, reason="prod ensemble absent")
 def test_build_legb_ctx_ensemble():
     paths = sorted(p[:-4] for p in glob.glob(PROD + "*.eqx"))
