@@ -112,6 +112,24 @@ def test_run_legb_leg_a_end_to_end(ctx_d):
     assert "ranks" in res and "names" in res and "L" in res
 
 
+def test_run_legb_leg_a_metals_no_offbyone():
+    """Pilot-blocker guard: with sample_metals (the pilot baseline), run_legb(leg_a) must produce
+    truth_vec/draws/names that ALIGN (the a_SiIII column), and aggregate_leg_a must not crash."""
+    from hcd_analysis.emulator.closure_sbc import aggregate_leg_a
+    try:
+        ctx, d = LB.build_legb_ctx(use_xclass=True, sample_metals=True)
+    except Exception as e:
+        pytest.skip(f"metals ctx unavailable: {e}")
+    recs = LB.run_legb(ctx, d, n_mocks=1, mock_indices=[0], return_per_mock=True, leg_a=True,
+                       n_warmup=8, n_samples=8, seed=0, verbose=False)
+    assert len(recs) == 1
+    r = recs[0]
+    assert "a_SiIII" in r["names"]
+    assert len(r["truth_vec"]) == np.asarray(r["draws"]).shape[1] == len(r["names"])
+    res = aggregate_leg_a(recs, len(ctx.z_global), prob=0.95)     # must NOT raise
+    assert "a_SiIII" in res["names"] and res["names"][-1] == "loglik"
+
+
 @pytest.mark.skipif(len(glob.glob(PROD + "*.eqx")) < 2, reason="prod ensemble absent")
 def test_build_legb_ctx_ensemble():
     paths = sorted(p[:-4] for p in glob.glob(PROD + "*.eqx"))

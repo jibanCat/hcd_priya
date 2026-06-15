@@ -1618,6 +1618,8 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
             truth_vec = np.concatenate([truth_vec, _hcd_latent_truths_2d(truth_pack["alpha_hcd"], ctx)])
         elif getattr(ctx, "hierarchical_hcd", False):        # align with the appended A_hcd/r columns
             truth_vec = np.concatenate([truth_vec, _hcd_latent_truths(truth_pack["alpha_hcd"])])
+        if getattr(ctx, "sample_metals", False):             # align with _draws_matrix's LAST a_SiIII col
+            truth_vec = np.concatenate([truth_vec, [float(truth_pack.get("a_siiii", 0.0))]])
 
         # loglik of the truth + draws on the SAME mock data (Modrak rank).
         ll_true = float(_data_loglik_legcore(
@@ -1630,6 +1632,7 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
 
         per_mock.append(dict(sim=sim, truth_vec=truth_vec, draws=draws_t, L=L,
                              ll_true=ll_true, ll_draws=ll_draws_t,
+                             names=_packed_names_for(samples, kept_global),
                              kept_global=kept_global, dropped=info["dropped"],
                              n_div=n_div))
         if verbose:

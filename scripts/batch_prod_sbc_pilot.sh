@@ -40,5 +40,5 @@ mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
 echo "=== prod-sbc pilot shard ${TID}/${N_SHARDS} (N_MOCKS=${N_MOCKS}, ${NCPU} cpu) start: $(date) ==="
 "$PY" -u scripts/run_prod_sbc_shard.py \
     --shard "$TID" --n-shards "$N_SHARDS" --n-mocks "$N_MOCKS" \
-    --out-dir "$OUTDIR"
+    --out-dir "$OUTDIR" ${EXTRA_ARGS:-}
 echo "=== done: $(date) ==="

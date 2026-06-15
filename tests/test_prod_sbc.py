@@ -100,6 +100,23 @@ def test_aggregate_leg_a_empty_is_safe():
     assert res["n_kept"] == 0 and res["L"] == 0 and res["gate_valid"] is False
 
 
+def test_aggregate_leg_a_uses_record_names_with_metals_column():
+    """The leg path with sample_metals appends an a_SiIII column to draws+truth_vec and stores
+    `names`; aggregate_leg_a must use those names (NOT param_names(n_z)) — else the a_SiIII column
+    is an off-by-one that IndexErrors in sbc_ranks_multiparam."""
+    rng = np.random.default_rng(2)
+    n_z = 3
+    P = 9 + n_z + 3 + 1                       # + a_SiIII (the leg-path metals column)
+    names = ([f"p{i}" for i in range(9)] + [f"tau0_z{i}" for i in range(n_z)]
+             + ["alpha_lls", "alpha_subdla", "alpha_dla", "a_SiIII"])
+    recs = [dict(truth_vec=rng.normal(size=P), draws=rng.normal(size=(120, P)),
+                 ll_true=float(rng.normal()), ll_draws=rng.normal(size=120),
+                 names=names, n_div=0) for _ in range(4)]
+    res = S.aggregate_leg_a(recs, n_z, prob=0.95)            # must NOT raise
+    assert res["ranks"].shape == (4, P + 1)
+    assert "a_SiIII" in res["names"] and res["names"][-1] == "loglik"
+
+
 # ---------------------------------------------------------------------------
 # (d) run_leg_a_sbc return_per_mock + mock_indices (one tiny NUTS)
 # ---------------------------------------------------------------------------

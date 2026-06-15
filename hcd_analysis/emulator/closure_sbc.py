@@ -199,7 +199,11 @@ def aggregate_leg_a(records, n_z, *, prob=0.95):
     EVERY rankable mock's draws to ``L_eff = min L`` (evenly-spaced) so all rank against the
     SAME #draws — the only construction giving Uniform{0..L_eff} ranks (Talts+2018). Returns
     the same dict shape ``run_leg_a_sbc`` historically returned."""
-    all_names = list(param_names(n_z)) + ["loglik"]
+    # Prefer the per-mock packed column NAMES (the leg path stores them via _packed_names_for; they
+    # include the a_SiIII / hierarchical-latent columns _draws_matrix appends, and use the mock's
+    # kept-z tau0 count). Fall back to param_names(n_z) for cache-grid records without names.
+    _rec_names = next((r["names"] for r in records if r.get("names")), None)
+    all_names = (list(_rec_names) if _rec_names is not None else list(param_names(n_z))) + ["loglik"]
     rankable = [r for r in records
                 if r.get("draws") is not None and np.asarray(r["draws"]).shape[0] >= 2]
     L_list = [int(np.asarray(r["draws"]).shape[0]) for r in rankable]
