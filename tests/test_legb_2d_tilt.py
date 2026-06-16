@@ -164,8 +164,10 @@ def test_model_priors_only_site_order_match_2d(two_d, hierarchical, sample_metal
         assert s_model[3:7] == ["A_hcd", "B_hcd", "r_subdla", "r_dla"]
         for nm in ("s_lls", "s_subdla", "s_dla", "alpha_lls", "alpha_dla_raw"):
             assert nm not in s_model
+    # res_corr alpha nuisance (Task 1.3) is the last block; a_SiIII present iff sampling metals.
+    assert s_model[-2:] == ["alpha_res", "alpha_res_slope"]
     if sample_metals:
-        assert s_model[-1] == "a_SiIII"
+        assert "a_SiIII" in s_model
     else:
         assert "a_SiIII" not in s_model
 

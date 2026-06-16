@@ -189,7 +189,8 @@ def test_legb_model_priors_only_site_order_match(marg_zslope, hierarchical_hcd):
         return [k for k, v in tr.items() if v["type"] == "sample" and not v.get("is_observed")]
     s_model = sites(C._legb_model, ctx, mock_legs, core)
     s_prior = sites(C._legb_priors_only, ctx)
-    assert "a_SiIII" in s_model and s_model[-1] == "a_SiIII"
+    # a_SiIII present; the res_corr alpha nuisance (Task 1.3) is the last block, in matched order.
+    assert "a_SiIII" in s_model and s_model[-2:] == ["alpha_res", "alpha_res_slope"]
     assert s_model == s_prior, f"site-order mismatch: model {s_model} vs priors {s_prior}"
     # the HCD block identity: A_hcd present ⇔ hierarchical; the legacy α absent in the hier branch.
     if hierarchical_hcd:
