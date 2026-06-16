@@ -97,6 +97,30 @@ KODIAQ_BAND = (0.07, 0.2)    # the high-k band the LF cannot reach on its own
 # ---------------------------------------------------------------------------- #
 # res_corr (fixed particle-convergence factor)
 # ---------------------------------------------------------------------------- #
+# Flat-LCDM constants for the L15 box fundamental (kbox).  These pin the res_corr
+# anchor scale (5x kbox) and are the PRIYA/res_corr table's reference cosmology; they
+# are FIXED (the anchor is a fixed-cosmology resolution artifact, not a fit param).
+_RC_H0 = 70.0
+_RC_h = 0.7
+_RC_OM = 0.30
+_RC_OL = 0.70
+
+
+def kbox_skm(z):
+    """The L15 (15 Mpc/h) box fundamental wavenumber in s/km at redshift ``z``.
+
+    ``kbox(z) = (2*pi / 15) * h * (1+z) / H(z)`` with the flat-LCDM Hubble rate
+    ``H(z) = H0 * sqrt(Om*(1+z)^3 + OL)`` (h=0.7, Om=0.30, OL=0.70, H0=70 km/s/Mpc),
+    so the (2*pi/L_box) comoving fundamental [h/Mpc] is converted to velocity units
+    [s/km] via the Hubble flow ``a*H(z)/h = H(z)/((1+z)*h)``.  Works for scalar or
+    array ``z`` (pure jnp -- jittable / differentiable).  At z=3 this is ~0.00376 s/km;
+    the res_corr table is anchored to 1 below ``anchor_mult * kbox(z)`` (default 5x).
+    """
+    z = jnp.asarray(z)
+    Hz = _RC_H0 * (_RC_OM * (1.0 + z) ** 3 + _RC_OL) ** 0.5
+    return (2.0 * jnp.pi / 15.0) * _RC_h * (1.0 + z) / Hz
+
+
 def load_res_corr(res_dir=RES_CORR_DIR):
     """Load the fixed L15n512/L15n384 resolution-correction table.
 
@@ -119,7 +143,7 @@ def load_res_corr(res_dir=RES_CORR_DIR):
     return zo[order], np.log10(kf[order]), rc[order]
 
 
-def interp_res_corr(z_rc, logk_rc, rc_vals, z_eval, k_eval):
+def interp_res_corr(z_rc, logk_rc, rc_vals, z_eval, k_eval, anchor_mult=5.0):
     """Differentiable res_corr at (z_eval, k_eval): bilinear over a PER-Z k-grid.
 
     ``z_rc (Nz,)`` ascending; ``logk_rc (Nz, Nk)`` per-z ascending log10-k grids;
@@ -130,7 +154,21 @@ def interp_res_corr(z_rc, logk_rc, rc_vals, z_eval, k_eval):
     -- the table covers z in [2.2, 5.0] and k in [0.003, 0.242] s/km, which spans
     the KODIAQ band; the clamp guards the few cache rows at z<2.2 / k below the table
     k_min.  Fully jittable / differentiable (linear interp via searchsorted + lerp).
-    """
+
+    LOW-k ANCHOR (Task 1.1):  the raw L15n512/L15n384 table has a spurious +6.3%
+    bump at its k_min (z=3: k~0.0037 s/km, rc~1.063) -- a few-mode resolution artifact
+    AT the L15 box fundamental -- that the old clamped edge injected into the data's
+    lowest bins.  We force res_corr -> 1 BELOW ``anchor_mult * kbox_skm(z_eval)``
+    (default 5x the box fundamental) via a smooth tanh blend (width 0.12 dex in
+    log10 k), leaving res_corr UNCHANGED well above the anchor:
+
+        w = 0.5*(1 + tanh((log10 k - log10(anchor_mult*kbox(z))) / 0.12))
+        rc <- 1 + (rc - 1)*w
+
+    so w -> 0 (rc -> 1) far below the anchor and w -> 1 (rc unchanged) far above.
+    ``anchor_mult=0.0`` DISABLES the anchor and reproduces the raw clamped table
+    exactly (the regression reference; the ``anchor_mult>0`` guard is a STATIC python
+    comparison on the kwarg, so the branch is traced-value-free / jittable)."""
     z_rc = jnp.asarray(z_rc); logk_rc = jnp.asarray(logk_rc); rc_vals = jnp.asarray(rc_vals)
     logk = jnp.log10(k_eval)
 
@@ -144,7 +182,14 @@ def interp_res_corr(z_rc, logk_rc, rc_vals, z_eval, k_eval):
 
     c0 = row_interp(iz)              # (K,)
     c1 = row_interp(iz + 1)         # (K,)
-    return c0 * (1 - wz) + c1 * wz
+    rc = c0 * (1 - wz) + c1 * wz
+
+    if anchor_mult > 0:
+        # smooth tanh blend to rc==1 below anchor_mult*kbox(z), width 0.12 dex.
+        logk_anchor = jnp.log10(anchor_mult * kbox_skm(z_eval))
+        w = 0.5 * (1.0 + jnp.tanh((logk - logk_anchor) / 0.12))
+        rc = 1.0 + (rc - 1.0) * w
+    return rc
 
 
 # ---------------------------------------------------------------------------- #
