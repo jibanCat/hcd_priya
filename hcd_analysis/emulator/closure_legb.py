@@ -270,7 +270,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    metals_on=False, desi_kwargs=None, ks_kwargs=None,
                    with_eboss=False, eboss_kwargs=None,
                    use_xclass=True, with_mf=False, mf_fold=0, mf_with_floor=True,
-                   mf_exclude_held=False, mf_shape=False, mf_shape_infl=1.0,
+                   mf_exclude_held=False, mf_target_hr_sim=None, mf_shape=False, mf_shape_infl=1.0,
                    mf_shape_legs=("DESI", "KS"), mf_shape_npz=None,
                    mf_emucoh=False, mf_emucoh_infl=1.0,
                    mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
@@ -397,8 +397,12 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
 
     mf_obj = mf_floor_obj = None
     if with_mf:
+        # mf_target_hr_sim (Task 1.5): with mf_exclude_held, drop EXACTLY this one HR sim from
+        # the MF head fit (genuine leave-ONE-out) instead of the whole LF fold group. None →
+        # whole-group held (back-compat); a NO-OP when mf_exclude_held=False.
         mf_obj, mf_floor_obj = build_mf_correction(
-            fold=mf_fold, with_floor=mf_with_floor, exclude_held_hr=mf_exclude_held)
+            fold=mf_fold, with_floor=mf_with_floor, exclude_held_hr=mf_exclude_held,
+            target_hr_sim=mf_target_hr_sim)
 
     # SHAPE-AWARE MF floor (Phase-5a): the per-leg fractional LOSO-eps outer-product covariance
     # (precomputed once, θ-blind). Fired on the named legs (default DESI+KS) when with_mf+mf_shape.
@@ -436,7 +440,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
 
 
 def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
-                        with_floor=True, floor_npz=None):
+                        with_floor=True, floor_npz=None, target_hr_sim=None):
     """Build the production MF correction (resolved separable + rank-1 FixedMeanHead +
     fixed res_corr) on the LF native cache grid for a fold, REUSING the certified gate
     construction (scripts/diag_emu_bias_allfolds_mf.build_mf_for_fold). Returns
@@ -448,7 +452,16 @@ def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
     ALL HR sims (the PRODUCTION correction, which is what the closure forward should use:
     the closure tests the emulator-as-likelihood with the production MF, not the LOSO floor).
     ``with_floor=True`` also loads the certified ``MFFloor`` (the LF→HR + n_s-edge C_emu
-    floor) from ``mf_cemu_floor.npz``."""
+    floor) from ``mf_cemu_floor.npz``.
+
+    ``target_hr_sim`` (Task 1.5, default None → whole-group back-compat): when set together
+    with ``exclude_held_hr=True``, the head is fit EXCLUDING ONLY this one HR sim (genuine
+    leave-ONE-out), independent of the LF fold group. Two HR sims can share an LF fold group
+    (fold 2 → {ns0.859, ns0.885}; fold 6 → {ns0.972, ns0.979}); the whole-group held set then
+    silently does leave-TWO-out → the head is fit on 4 HR sims → a worse correction → an
+    inflated apparent bias. ``target_hr_sim`` pins the held set to EXACTLY {target_hr_sim} so
+    the fold-mate is retained (5 HR sims, not 4). ``target_hr_sim=None`` keeps the whole-group
+    held set (bit-identical back-compat); it is a NO-OP when ``exclude_held_hr=False``."""
     from hcd_analysis.emulator import multifidelity as MF
     lf_cache = MF.load_cache(MF.LF_CACHE)
     hr_cache = MF.load_cache(MF.HR_CACHE)
@@ -456,15 +469,13 @@ def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
     fold_model, _fold_meta, fold_norm, lf_logk = MF.load_lf_backbone(fold)
     eval_logk = np.asarray(lf_logk)
 
-    # HF-LOSO row mask (optional): exclude the fold's held-out HR sims from the head fit.
+    # HF-LOSO row mask (optional): exclude the held-out HR sim(s) from the head fit. The held
+    # set is whole-group (target_hr_sim=None, back-compat) or EXACTLY {target_hr_sim} (true LOO).
     train_rows = None
     if exclude_held_hr:
         from .data import load_cache as _lc
         d = _lc(CACHE_PATH)
-        sims, _ = held_out_sims(d, fold=fold)
-        hr_sims = set(s.decode() if isinstance(s, bytes) else s
-                      for s in hr_cache["sim_name"])
-        held = set(s for s in sims if s in hr_sims)
+        held = held_hr_set(d, hr_cache["sim_name"], fold=fold, target_hr_sim=target_hr_sim)
         hr_row_sim = np.array([s.decode() if isinstance(s, bytes) else s
                                for s in hr_cache["sim_name"][[h for h, _ in pairs]]])
         train_rows = np.where(~np.isin(hr_row_sim, list(held)))[0] if held else None
@@ -513,6 +524,47 @@ def held_out_sims(d, fold=0):
     Returns the sorted unique sim names in the val split."""
     _tr, va, _ho = make_splits(d, fold)
     return sorted(set(np.asarray(d["sim_name"])[va])), va
+
+
+def held_hr_set(d, hr_sim_names, fold=0, target_hr_sim=None):
+    """The set of HR sims to HOLD OUT of the MF head fit for ``fold`` (Task 1.5).
+
+    The MF-correction HF-LOSO row mask drops the rows whose HR sim is in this set, so the
+    RETAINED HR sims (the complement against the 6 HR sims) are what the head is fit on.
+
+    * ``target_hr_sim is None`` → BACK-COMPAT (whole-group held): the LF fold-group held set
+      intersected with the HR sims — byte-for-byte what ``build_mf_correction`` computed
+      before, i.e. ``{s for s in held_out_sims(d, fold)[0] if s in <decoded hr_sim_names>}``.
+      For a leave-TWO-out fold (two HR sims share the LF group: fold 2 / fold 6) this is a
+      2-element set — the legacy (buggy) leave-two-out behavior, preserved on purpose.
+    * ``target_hr_sim is not None`` → TRUE LOO: returns EXACTLY ``{target_hr_sim}`` (drop only
+      the one sim under test), independent of the LF fold group, so the fold-mate is retained
+      (5 HR sims fit, not 4). ``target_hr_sim`` must be one of the HR sims.
+
+    ``hr_sim_names`` = the HR cache sim-name array (``hr_cache["sim_name"]``; bytes or str
+    entries both accepted, decoded internally). PURE (no I/O): the caller supplies ``d`` and
+    the HR sim-name array.
+    """
+    hr_sims = set(s.decode() if isinstance(s, bytes) else str(s) for s in hr_sim_names)
+    if target_hr_sim is not None:
+        target = target_hr_sim.decode() if isinstance(target_hr_sim, bytes) else str(target_hr_sim)
+        # raise (not assert: must survive python -O) — a typo'd target would otherwise silently
+        # fit the WRONG MF correction and corrupt the cert.
+        if target not in hr_sims:
+            raise ValueError(
+                f"target_hr_sim {target!r} is not an HR sim; HR sims = {sorted(hr_sims)}")
+        # defensive: the target must actually be held out of THIS fold's LF val group, else the cert
+        # would fit a fold-N backbone with the wrong sim held (silent target<->fold mis-pairing).
+        sims, _ = held_out_sims(d, fold=fold)
+        fold_hr = set(s.decode() if isinstance(s, bytes) else str(s) for s in sims) & hr_sims
+        if target not in fold_hr:
+            raise ValueError(
+                f"target_hr_sim {target!r} is not in fold {fold}'s held HR group {sorted(fold_hr)} "
+                "— target<->fold mis-pairing")
+        return {target}
+    sims, _ = held_out_sims(d, fold=fold)
+    decoded_sims = (s.decode() if isinstance(s, bytes) else str(s) for s in sims)
+    return set(s for s in decoded_sims if s in hr_sims)
 
 
 def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="priya", mf=None, lls_truth_boost=1.0):

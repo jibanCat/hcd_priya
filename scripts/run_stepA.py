@@ -647,6 +647,10 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         ckpt=chain["ckpt"], with_mf=bool(chain["mf"]),
         mf_fold=fold, mf_with_floor=bool(chain["mf"]),
         mf_exclude_held=bool(chain.get("hr_truth", False)),    # HF-LOSO: MF fit EXCLUDING this HR sim
+        # TRUE leave-ONE-out (Task 1.5): drop EXACTLY this HR sim from the MF head fit, not the
+        # whole LF fold group (two HR sims can share a group → leave-TWO-out → an inflated bias).
+        # Only the hr_truth (HF-LOSO) arms opt in; None for every other caller (back-compat).
+        mf_target_hr_sim=(chain["sim"] if chain.get("hr_truth", False) else None),
         with_eboss=(_survey == "eBOSS"),                       # eBOSS DR14 leg (low-k shakedown)
         sample_metals=bool(chain.get("sample_metals", False)), # shared a_SiIII nuisance (eBOSS/DESI)
         mf_shape=(_infl > 0), mf_shape_infl=(_infl if _infl > 0 else 1.0),
