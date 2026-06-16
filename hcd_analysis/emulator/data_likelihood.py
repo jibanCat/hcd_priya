@@ -41,6 +41,10 @@ assert jax.config.read("jax_enable_x64"), \
     "x64 must be on (import hcd_analysis.emulator before jax)"
 
 # --- physical constants -------------------------------------------------------
+# res_corr AMPLITUDE nuisance pivot (Task 1.3): α(z) = α₀·((1+z)/(1+Z_PIVOT))^s. The
+# multi-fidelity res_corr (HF→n512 particle-convergence factor) amplitude is marginalized
+# FORWARD-ONLY at the chokepoint ``_mf_corr_on_cache`` via this z-slope around z=3.
+Z_PIVOT = 3.0
 C_KMS = 299792.458            # speed of light [km/s]
 LAMBDA_LYA = 1215.67          # Lyα rest wavelength [Å]
 LAMBDA_SiIII = 1206.50        # SiIII line [Å]
@@ -357,24 +361,38 @@ def _resolution_factor(k, R_z, *, b_res=0.0):
 #  built — NOT here. Wiring it into this binding would diverge from the certified gate
 #  path. (The MultiFidelity object also carries the dN/dX/CDDF tables for that use.)
 # ============================================================================ #
-def _mf_corr_on_cache(mf, theta9, z_unit, tau0):
-    """Per-class MF log-correction (4, Kc) on the cache grid: ``g + log res_corr``.
+def _mf_corr_on_cache(mf, theta9, z_unit, tau0, alpha_res=None):
+    """Per-class MF log-correction (4, Kc) on the cache grid: ``g + α(z)·log res_corr``.
 
     Mirror of ``diag_emu_bias_allfolds_mf.mf_corr_on_cache``. ``mf.eval_logk`` is the
     cache log-k grid, so ``g = mf.g(x, τ₀)`` (== log_rho + resolved FixedMeanHead) is
     the exact production MF correction on the cache k-grid, and ``log res_corr(z)`` is
     the fixed particle-convergence factor (broadcast over the 4 classes). θ-blind by
     construction (g reads cond[9]=z_unit, cond[10]=τ₀ only); differentiable in (θ9, τ₀).
+
+    ``alpha_res`` (Task 1.3, FORWARD-ONLY marginalization of the res_corr amplitude):
+    a ``(alpha0, s)`` tuple ⇒ scale ``log res_corr`` by the scalar (per-z)
+    ``α(z) = alpha0·((1+z)/(1+Z_PIVOT))^s`` before adding. ``None`` (the DEFAULT) ⇒
+    α≡1 ⇒ this returns ``g + log res_corr`` BIT-IDENTICALLY (the multiply is skipped, so
+    the Task-1.2 MF golden is byte-exact). ``(1.0, 0.0)`` is the explicit no-op.
     """
     x = jnp.concatenate([jnp.asarray(theta9), jnp.atleast_1d(z_unit)])   # (10,)
     g = mf.g(x, tau0)                                                    # (4, Kc)
     z_phys = z_unit * (Z_LIMITS[1] - Z_LIMITS[0]) + Z_LIMITS[0]
     log_rc = jnp.log(mf.res_corr(z_phys))[None, :]                       # (1, Kc) bcast
-    return g + log_rc                                                    # (4, Kc) additive
+    if alpha_res is None:
+        return g + log_rc                                               # (4, Kc) byte-exact no-op
+    alpha0, s = alpha_res
+    alpha_z = alpha0 * ((1.0 + z_phys) / (1.0 + Z_PIVOT)) ** s          # scalar (per z)
+    return g + alpha_z * log_rc                                         # (4, Kc) additive
 
 
-def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_core):
+def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_core,
+                      alpha_res=None):
     """P_obs (Kc,) through the MF forward — mirror of the gate's ``predict_P_obs_mf``.
+
+    ``alpha_res`` (Task 1.3): threaded FORWARD-ONLY into ``_mf_corr_on_cache`` to scale the
+    res_corr amplitude by ``α(z)``; ``None`` (default) ⇒ α≡1 ⇒ byte-exact back-compat.
 
     The per-class LF P_filt is multiplied by ``exp(g + log res_corr)`` (the fixed,
     θ-blind resolution factor), then the SAME clean+excess HCD combination as
@@ -385,7 +403,8 @@ def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_
     source; the caller passes the SAME frozen backbone object as both ``model`` and
     ``mf.lf_model``. Differentiable in (θ9, τ₀, α)."""
     P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)       # (4,Kc) LF
-    corr = jnp.exp(_mf_corr_on_cache(mf, theta9, z_unit, tau0))          # (4,Kc) MF factor
+    corr = jnp.exp(_mf_corr_on_cache(mf, theta9, z_unit, tau0,
+                                     alpha_res=alpha_res))               # (4,Kc) MF factor
     P_filt_mf = P_filt * corr                                            # corrected per class
     P_clean = P_filt_mf[0]
     excess = _excess_from_P_filt(P_filt_mf, dla_core)                    # (3,Kc)
@@ -669,7 +688,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                          rho_zb=None, mf=None, mf_floor=None,
                          mf_shape_cov=None, mf_shape_infl=1.0,
                          mf_emucoh_cov=None, mf_emucoh_infl=1.0,
-                         mf_emucoh_offdiag_only=False):
+                         mf_emucoh_offdiag_only=False, alpha_res=None):
     """Bind the emulator forward model to ONE leg's grid → flat (P_model (N,), C_total (N,N)).
 
     For each z in ``leg.z``:
@@ -716,7 +735,15 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     on the leg z's via 1-D interp/clamp of σ_floor(z,·); the legs only reach z≤4.6 so the
     z>4.6 cells (incl. the flagged z=5.4 spike) are NEVER indexed. With ``mf_floor=None``
     (or on a leg with ``mf_floor_on=False``, or ``mf=None``) C_total is the UNCHANGED LF
-    path (byte-identical, back-compat)."""
+    path (byte-identical, back-compat).
+
+    ``alpha_res`` (opt-in, Task 1.3, default None → byte-identical back-compat): a
+    ``(alpha0, s)`` tuple marginalizing the multi-fidelity res_corr AMPLITUDE
+    FORWARD-ONLY — ``log res_corr → α(z)·log res_corr`` with
+    ``α(z) = alpha0·((1+z)/(1+Z_PIVOT))^s`` (Z_PIVOT=3.0), threaded into
+    ``_predict_P_obs_mf → _mf_corr_on_cache``. Affects P_model ONLY (the forward), not
+    C_total. ``None`` (and ``(1.0, 0.0)``) ⇒ α≡1 ⇒ the MF golden is byte-exact. Only fires
+    through the MF forward (``mf is not None``)."""
     cache_k = jnp.asarray(cache_k)
     k_leg = jnp.asarray(leg.k)
     z_idx = np.asarray(leg.z_idx)
@@ -769,7 +796,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
             P_cache = predict_P_obs(model, theta9, z_unit, tau0, alpha_z, pf_stats, dla_core)
         else:
             P_cache = _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_z,
-                                        pf_stats, dla_core)
+                                        pf_stats, dla_core, alpha_res=alpha_res)
         # (3) interp to the leg's k (bin centres); model is smooth → linear interp.
         P_z = jnp.interp(k_sub, cache_k, P_cache)
         # (2) forward-model nuisances (gated; default OFF → factor ≡ 1)

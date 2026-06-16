@@ -78,6 +78,15 @@ DIVERGENCE_RETRY_TARGET_ACCEPT = (0.95, 0.99)
 # literature WLS 1σ width (scripts/diag_legb_slope_prior_tradeoff: WLS fit of dN/dX vs PRIYA
 # with the quoted literature dN/dX error bars; class order LLS, subDLA, DLA).
 ZSLOPE_PRIOR_SIGMA = (0.52, 0.53, 0.33)
+# res_corr AMPLITUDE nuisance α(z) = α₀·((1+z)/(1+Z_PIVOT))^s (Task 1.3), marginalized
+# FORWARD-ONLY through the MF chokepoint. Priors LOCKED by the Phase-0 Fisher gate:
+#   α₀ ~ TruncatedNormal(loc=1.0, scale=SIGMA_A0, low=0.0)  — wide symmetric, truncated >0
+#                                                             so P_MF = exp(α·log_rc)·… > 0;
+#   s  ~ Normal(0.0, SIGMA_S)                                — modest z-slope (Phase-0: α is
+#                                                             NOT degenerate with dτ₀ → keep s).
+# Z_PIVOT (z=3) is owned by data_likelihood (DL.Z_PIVOT) — the α(z) pivot used at the chokepoint.
+SIGMA_A0 = 1.0
+SIGMA_S = 0.5
 # FULL per-class HCD-incidence z-slope d ln w_c(z)/d ln(1+z), 60-sim-population median (measured
 # 2026-06-14, scripts/diag_hcd_zslope_nsbias.py). This is the slope the mock TRUTH actually carries
 # (the held-out sim's native w_c(z)) — the RIGHT center for the 2D B_HCD tilt. It is a DIFFERENT
@@ -982,7 +991,8 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
 #  restriction (dropped-z mock rows are NaN and carry no info).
 # ============================================================================ #
 def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs,
-                         dla_core_per_leg, *, return_parts=False, a_siiii=0.0):
+                         dla_core_per_leg, *, return_parts=False, a_siiii=0.0,
+                         alpha_res=None):
     """``data_loglik`` but with a PER-LEG-Z dla_core (the mock's sim core). ``data_loglik``
     takes ONE (K,) core; here each leg z uses its own, so we call ``predict_P_obs_on_leg``
     per leg with that leg's core threaded through a per-z loop is overkill — instead we note
@@ -991,7 +1001,12 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
     keep the core matched (forward core == truth core, so it cancels in the emu-error sizing
     and the truth P_obs is reproduced when θ→truth), we pass each leg its OWN (K,) core that
     is the z-MEAN of that leg's per-z cores (a documented MVP — the per-z core variation is
-    tiny vs the P1D, and the DLA sector is un-certified by Leg B without arm A3 anyway)."""
+    tiny vs the P1D, and the DLA sector is un-certified by Leg B without arm A3 anyway).
+
+    ``alpha_res`` (Task 1.3): the sampled res_corr-amplitude ``(alpha0, s)`` tuple, threaded
+    FORWARD-ONLY into ``predict_P_obs_on_leg`` (it scales ``log res_corr`` by α(z) in the MF
+    forward). ``None`` (default) ⇒ α≡1 ⇒ byte-exact back-compat. The TRUTH path never sets it
+    (α≡1 there) so the nuisance does NOT cancel in the closure."""
     total = 0.0
     parts = {}
     from .likelihood import gaussian_loglik
@@ -1020,7 +1035,8 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
             cemu_inflate=ctx.cemu_inflate, rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor,
             mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
             mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
-            mf_emucoh_offdiag_only=getattr(ctx, "mf_emucoh_offdiag_only", False))
+            mf_emucoh_offdiag_only=getattr(ctx, "mf_emucoh_offdiag_only", False),
+            alpha_res=alpha_res)                              # res_corr amplitude nuisance (fwd-only)
         kr = jnp.asarray(np.where(keep)[0])
         r = jnp.asarray(P_data[keep]) - P_model[kr]
         C_sub = C_total[jnp.ix_(kr, kr)]
@@ -1090,8 +1106,15 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     # a_SiIII = f_SiIII/(1−⟨F⟩) ≈ 0.045 sits well inside.
     a_siiii = (numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
                if getattr(ctx, "sample_metals", False) else 0.0)
+    # res_corr AMPLITUDE nuisance (Task 1.3): α(z)=α₀·((1+z)/(1+Z_PIVOT))^s, marginalized
+    # FORWARD-ONLY (threaded into _data_loglik_legcore → predict_P_obs_on_leg → the MF
+    # chokepoint; NOT into the truth → no closure cancellation). Two sites, amplitude THEN
+    # slope; _legb_priors_only MUST mirror this order (constrain_fn traces it).
+    alpha_res = numpyro.sample("alpha_res", dist.TruncatedNormal(1.0, SIGMA_A0, low=0.0))
+    alpha_res_slope = numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
     numpyro.factor("loglik", _data_loglik_legcore(
-        ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg, a_siiii=a_siiii))
+        ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg, a_siiii=a_siiii,
+        alpha_res=(alpha_res, alpha_res_slope)))
 
 
 def _hcd_sites(ctx):
@@ -1211,6 +1234,10 @@ def _legb_priors_only(ctx):
         _zslope_sites(ctx)                        # mirrors _legb_model (s_c when marginalize_zslope)
     if getattr(ctx, "sample_metals", False):     # MUST mirror _legb_model's site (same order)
         numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
+    # res_corr AMPLITUDE nuisance (Task 1.3) — MUST mirror _legb_model's two sites in the SAME
+    # order (amplitude before slope), at the SAME relative position (last), or constrain_fn corrupts.
+    numpyro.sample("alpha_res", dist.TruncatedNormal(1.0, SIGMA_A0, low=0.0))
+    numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
 
 
 def _legb_reconstruct_deterministics(ctx, samples):
