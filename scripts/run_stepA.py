@@ -682,7 +682,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     from hcd_analysis.emulator.closure_legb import (
         build_legb_ctx, held_out_sims, make_truth_from_sim, make_hr_truth_from_cache, make_legb_mock,
         _mock_core_per_leg, _run_nuts_legb, _draws_matrix, _packed_names_for, _hcd_latent_truths,
-        _hcd_latent_truths_2d, CACHE_PATH, ZSLOPE_PRIOR_SIGMA)
+        _hcd_latent_truths_2d, CACHE_PATH, ZSLOPE_PRIOR_SIGMA, HCD_INCIDENCE_SLOPE)
     from hcd_analysis.emulator.inference import (PARAM_NAMES, HCD_LIT_OVER_SIM_SLOPE,
                                                  hcd_incidence_prior)
 
@@ -733,8 +733,11 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     # z-slope marginalization is a NO-OP under the 2D tilt (which sets s_c = B_hcd + δs_c itself);
     # _legb_model ignores marginalize_zslope when hcd_2d_tilt, but keep the ctx clean (don't set it).
     if chain["z_slope_marginalized"] and not bool(chain.get("hcd_2d_tilt", False)):
+        # CENTER on the SIM incidence-weight slope HCD_INCIDENCE_SLOPE (~2.4, the slope the mock
+        # truth's w_c(z) carries — makes dN/dX(z) RISE with z), NOT the lit/sim RATIO slope
+        # HCD_LIT_OVER_SIM_SLOPE (~0.95). Matches the _zslope_sites None-default + the 2D-tilt anchor.
         ctx = ctx._replace(marginalize_zslope=True,
-                           zslope_mu=jnp.asarray(HCD_LIT_OVER_SIM_SLOPE),
+                           zslope_mu=jnp.asarray(HCD_INCIDENCE_SLOPE),
                            zslope_sigma=jnp.asarray(ZSLOPE_PRIOR_SIGMA))
 
     # SEPARATE per-survey inference (2026-06-10): keep only this chain's leg(s). A "+"-joined survey

@@ -211,7 +211,8 @@ class LegBCtx(NamedTuple):
                                          # not a fixed power-law (mirrors the τ₀ amplitude+slope; the
                                          # PI: break HCD–A_p–τ₀ degeneracy via physical priors on
                                          # BOTH). Set False only for the fixed-slope ablation.
-    zslope_mu: object = None             # (3,) prior center on s_c (default HCD_LIT_OVER_SIM_SLOPE)
+    zslope_mu: object = None             # (3,) prior center on s_c (None → HCD_INCIDENCE_SLOPE ~2.4,
+                                         # the SIM incidence-weight slope; see _zslope_sites)
     zslope_sigma: object = None          # (3,) prior width on s_c (default the literature WLS σ_s)
     # PRIYA mean-flux model (replaces the 13 per-z τ₀ rungs): α(z)=τ₀·((1+z)/(1+z_p))^dτ₀, τ₀(z)=α·Kim07.
     # UNIFORM priors (Bird+2023 §2.7.1; arXiv:2509.18271). tau0_mu/tau0_sigma above are now legacy.
@@ -1214,8 +1215,9 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     alpha_pivot, s_override = _hcd_sites(ctx)  # (3,) pivot-z amplitudes (+ optional s_c override)
     # z-RESOLVED incidence α_c(z) = α_pivot · ((1+z)/(1+z_p))^s_c (the dN/dX slope) — the fix:
     # the forward must track the mock's per-z w_c(z) (rises ~3.5× over z), not a z-constant α.
-    # STEP-A M3: when ctx.marginalize_zslope, s_c is SAMPLED (the real-fit config) instead of
-    # the fixed HCD_LIT_OVER_SIM_SLOPE; otherwise the fixed literature power-law slope is used.
+    # STEP-A M3: when ctx.marginalize_zslope, s_c is SAMPLED (the real-fit config) centered on
+    # HCD_INCIDENCE_SLOPE (~2.4, the SIM incidence-weight slope the mock truth carries); otherwise
+    # s_c is FIXED to that same incidence slope (NOT the lit/sim ratio HCD_LIT_OVER_SIM_SLOPE).
     # 2D AMPLITUDE×TILT mode: _hcd_sites returns s_override = B_hcd + δs_c (it sets the slopes via
     # the global tilt B_hcd), which BYPASSES _zslope_sites / marginalize_zslope entirely.
     s_c = s_override if s_override is not None else _zslope_sites(ctx)
@@ -1318,13 +1320,20 @@ def _btilt_site(ctx):
 
 
 def _zslope_sites(ctx):
-    """The HCD per-class z-slope s_c (3,). FIXED to HCD_LIT_OVER_SIM_SLOPE unless
+    """The HCD per-class z-slope s_c (3,). FIXED to HCD_INCIDENCE_SLOPE unless
     ``ctx.marginalize_zslope`` (STEP-A M3) — then SAMPLE s_lls/s_subdla/s_dla ~ Normal at the
-    ctx prior (default: center HCD_LIT_OVER_SIM_SLOPE, width ZSLOPE_PRIOR_SIGMA). Shared by
-    ``_legb_model`` (with the factor) and ``_legb_priors_only`` (transform-only postprocess)."""
+    ctx prior (default: center HCD_INCIDENCE_SLOPE, width ZSLOPE_PRIOR_SIGMA). Shared by
+    ``_legb_model`` (with the factor) and ``_legb_priors_only`` (transform-only postprocess).
+
+    CENTER = HCD_INCIDENCE_SLOPE (~2.4) — the SIM incidence-WEIGHT slope d ln w_c(z)/d ln(1+z)
+    the held-out-sim mock TRUTH actually carries, so the forward dN/dX(z) RISES with z (matching
+    the truth + literature). DISTINCT from inference.HCD_LIT_OVER_SIM_SLOPE (~0.95, the lit/sim
+    RATIO slope — a z=3-pivot prior-center quantity): centering s_c on the ratio slope made the
+    predicted dN/dX(z) FALL with z and put the mock truth 2.9–6σ off-center (the wrong-object bug).
+    Matches the already-correct 2D-tilt anchor (_btilt_site / build_legb_ctx → HCD_INCIDENCE_SLOPE)."""
     if not getattr(ctx, "marginalize_zslope", False):
-        return jnp.asarray(HCD_LIT_OVER_SIM_SLOPE)
-    mu = (jnp.asarray(HCD_LIT_OVER_SIM_SLOPE) if ctx.zslope_mu is None
+        return jnp.asarray(HCD_INCIDENCE_SLOPE)
+    mu = (jnp.asarray(HCD_INCIDENCE_SLOPE) if ctx.zslope_mu is None
           else jnp.asarray(ctx.zslope_mu))
     sg = (jnp.asarray(ZSLOPE_PRIOR_SIGMA) if ctx.zslope_sigma is None
           else jnp.asarray(ctx.zslope_sigma))
@@ -1423,7 +1432,10 @@ def _legb_reconstruct_deterministics(ctx, samples):
         shape_zg = ratio ** s_c[:, None, :]                          # (L, nZg, 3)
         alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg             # (L, nZg, 3)
     else:
-        shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** jnp.asarray(HCD_LIT_OVER_SIM_SLOPE)
+        # fixed-slope fallback (non-2D, non-marginalized readout) — byte-consistent with the
+        # _zslope_sites FIXED branch: the SIM incidence slope HCD_INCIDENCE_SLOPE (~2.4), NOT the
+        # lit/sim ratio HCD_LIT_OVER_SIM_SLOPE (the wrong-object slope).
+        shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** jnp.asarray(HCD_INCIDENCE_SLOPE)
         alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg[None, :, :]      # (L, nZg, 3)
     out["tau0_vec"] = tau0_vec
     out["alpha_dla"] = alpha_dla
