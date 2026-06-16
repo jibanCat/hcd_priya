@@ -137,6 +137,36 @@ def test_interp_res_corr_anchored_to_one_below_5kbox():
     assert np.allclose(rc_hi_anch, rc_hi_raw, atol=1e-6)  # untouched at high k
 
 
+def test_interp_res_corr_default_is_5x():
+    # COSMOLOGY-REFEREE regression pin (Task 1.2): the PRODUCTION default anchor is 5x the
+    # L15 box fundamental.  The MF production forward (predict_P_obs_on_leg(..., mf=mf) ->
+    # _mf_corr_on_cache -> mf.res_corr) calls interp_res_corr with the anchor_mult kwarg
+    # OMITTED, so it inherits whatever the DEFAULT is.  This test pins that default == 5.0:
+    # interp_res_corr(...) with the kwarg omitted MUST be BIT-IDENTICAL to
+    # interp_res_corr(..., anchor_mult=5.0), and DISCRIMINABLY different from 3.0 (the
+    # pre-Task-1.1 value).  A future silent change to the default (e.g. back to 3.0, or to
+    # 4.0) flips this test red BEFORE it can move the n_s-driving low-k DESI bins.
+    from hcd_analysis.emulator.multifidelity import (
+        load_res_corr, interp_res_corr, kbox_skm)
+    z_rc, logk_rc, rc = load_res_corr()
+    z = 3.0
+    kb = float(kbox_skm(z))                      # ~0.0037560 s/km (verified)
+    # a k grid that STRADDLES the anchor: from 0.5x kbox (deep in the anchor zone, where the
+    # anchor_mult choice matters most) up to 0.1 s/km (well above any of {3,5}x kbox, where
+    # all anchors agree) — so the 5x-vs-3x discrimination is exercised in the blend region.
+    k_eval = jnp.asarray(np.geomspace(0.5 * kb, 0.1, 40))
+    rc_default = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_eval))
+    rc_5x = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_eval, anchor_mult=5.0))
+    rc_3x = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_eval, anchor_mult=3.0))
+    # the default IS 5.0: bit-identical (rtol 1e-12, atol 0 — exact, same code path).
+    np.testing.assert_allclose(rc_default, rc_5x, rtol=1e-12, atol=0.0,
+                               err_msg="interp_res_corr default anchor_mult is no longer 5.0")
+    # and it is NOT 3.0 — the test discriminates the default (the 3x anchor moves the blend
+    # edge to ~0.011 s/km vs 5x's ~0.019, so they differ measurably in the straddle region).
+    assert not np.allclose(rc_default, rc_3x, rtol=1e-6, atol=0.0), \
+        "interp_res_corr default coincides with anchor_mult=3.0 — the 5x default is not pinned"
+
+
 # --------------------------------------------------------------------------- #
 # log-log interp / extrap
 # --------------------------------------------------------------------------- #
