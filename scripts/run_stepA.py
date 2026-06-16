@@ -120,7 +120,7 @@ def build_config(verbose=False):
                      sigma_lls=None, sigma_subdla=None, tau0_extreme=False, n_chains=4, sim=None,
                      lls_truth_boost=1.0, mf=False, hr_truth=False, mf_shape=0.0, desi_floor=False,
                      mf_emucoh=0.0, mf_emucoh_offdiag_only=False, sample_metals=False,
-                     inject_a_siiii=0.0, subdla_center_shift=0.0,
+                     inject_a_siiii=0.0, inject_res_corr=None, subdla_center_shift=0.0,
                      hierarchical_hcd=False, hcd_ratio_infl=1.0, hcd_center_shift=0.0,
                      hcd_2d_tilt=False, z_slope_marginalized=False):
         if sim is None:
@@ -137,6 +137,7 @@ def build_config(verbose=False):
                 mf_shape=float(mf_shape), desi_floor=bool(desi_floor), mf_emucoh=float(mf_emucoh),
                 mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
                 sample_metals=bool(sample_metals), inject_a_siiii=float(inject_a_siiii),
+                inject_res_corr=(dict(inject_res_corr) if inject_res_corr else None),
                 subdla_center_shift=float(subdla_center_shift),
                 hierarchical_hcd=bool(hierarchical_hcd), hcd_ratio_infl=float(hcd_ratio_infl),
                 hcd_center_shift=float(hcd_center_shift), hcd_2d_tilt=bool(hcd_2d_tilt),
@@ -439,6 +440,40 @@ def build_config(verbose=False):
         add_fiducial(f"HFLOSO_KS{int(round(_ns * 1000))}", _f, survey="KS", sim=_hs,
                      mf=True, hr_truth=True, prior_center="truth")
 
+    # === Phase-2 res_corr INJECTION-RECOVERY gate (TASK-1.6, spec §4.2) — the DECISIVE n_s-safety
+    # gate for the anchor+marginalize design. The marginalized res_corr amplitude alpha_res(/_slope)
+    # is ALWAYS sampled in _legb_model (Task 1.3, no flag), so an HFLOSO-style cert with alpha free
+    # is the forward. This arm injects the worst-n_s-projecting, OUT-OF-SPAN, z>=2.8-localized
+    # log-res_corr basis member b1 (built by scripts/build_res_corr_injection_basis.py, provably
+    # C_data^-1-orthogonal to the alpha(z) span, cos<0.8) into the mock TRUTH ONLY (never the
+    # forward → it cannot cancel; it is the misspecification alpha_res must absorb). PAIRED design:
+    # a CLEAN control (no injection) + an INJECTED arm at the SAME (sim, fold, seed) so the mocks
+    # share byte-identical base truth + noise and differ ONLY by exp(b1) on the z>=2.8 truth. The
+    # Phase-2 gate (run-time, compute-gated) reads the pair from the checkpoints and asserts
+    # |Delta(mean-truth)|+2SE < 0.3·sigma_ref(n_s) on A_p AND n_s, per survey. Config-only here (no
+    # NUTS): the b1 member is loaded inside make_legb_mock from the (path, member, strength) spec.
+    _RC_BASIS = f"{REPO}/hcd_analysis/_emulator_data/res_corr_injection_basis.npz"
+    _rc_spec = dict(path=_RC_BASIS, member="b1", strength=1.0)   # the pre-selected gate member
+    for _survey, _tag in (("DESI", "D"), ("KS", "K"), ("eBOSS", "E")):
+        # gate the genuine HF-LOSO worst-tilt sims (the high-k legs where res_corr matters); eBOSS
+        # has no HR cache entry, so it falls back to a clean LF mock at a Planck-ish n_s.
+        if _survey == "eBOSS":
+            add_fiducial(f"RCINJ{_tag}_clean", 6, 0.966, survey="eBOSS", prior_center="truth")
+            add_fiducial(f"RCINJ{_tag}_inj",   6, 0.966, survey="eBOSS", prior_center="truth",
+                         inject_res_corr=_rc_spec)
+            continue
+        for _hs in _hrn:
+            _f = _fold_of(_hs)
+            if _f is None:
+                continue
+            _ns = _ns_of_sim(d, _hs, PARAM_LIMITS)
+            if int(round(_ns * 1000)) not in (972, 979):     # the two worst-tilt HF-LOSO sims
+                continue
+            _t = int(round(_ns * 1000))
+            _base = dict(survey=_survey, sim=_hs, mf=True, hr_truth=True, prior_center="truth")
+            add_fiducial(f"RCINJ{_tag}_clean{_t}", _f, **_base)                       # paired control
+            add_fiducial(f"RCINJ{_tag}_inj{_t}",   _f, inject_res_corr=_rc_spec, **_base)  # injected
+
     # === Phase-5a SHAPE-FLOOR validation (2026-06-12): the genuine HF-LOSO worst cases re-run
     # with the shape-aware MF floor (fires on the DESI leg). Compares: the existing DIAGONAL floor
     # (the simpler fix) vs the shape floor at infl∈{1.0,1.5,2.0}. Worst sims = ns0.972 (+2.80σ)
@@ -740,8 +775,13 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
 
     key0 = jax.random.PRNGKey(int(chain["seed"]))
     k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, int(mock_index)), 2)
+    # res_corr injection arm (TASK-1.6): inject an OUT-OF-SPAN log-res_corr misspecification into
+    # the leg-binned mock TRUTH ONLY (never the forward) so the paired clean-vs-injected gate can
+    # test that marginalizing alpha_res protects n_s. The spec is the (path, member, strength) dict
+    # the injection-arm config builds; None ⇒ no-op (the default for every non-injection chain).
     mock_legs, truth_pack, info = make_legb_mock(
-        ctx, truth_sim, k_mock, inject_a_siiii=float(chain.get("inject_a_siiii", 0.0) or 0.0))
+        ctx, truth_sim, k_mock, inject_a_siiii=float(chain.get("inject_a_siiii", 0.0) or 0.0),
+        inject_res_corr=chain.get("inject_res_corr", None))
     core_per_leg = _mock_core_per_leg(ctx, truth_sim)
     kept_global = truth_pack["kept_global_z"]
 
@@ -783,6 +823,10 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         mf_emucoh_offdiag_only=bool(chain.get("mf_emucoh_offdiag_only", False)),
         sample_metals=bool(chain.get("sample_metals", False)),
         inject_a_siiii=float(chain.get("inject_a_siiii", 0.0) or 0.0),
+        # res_corr injection provenance (TASK-1.6 paired gate): the (path, member, strength) spec
+        # this chain injected into the mock TRUTH, or "" for a clean (non-injected) chain. Lets the
+        # paired clean-vs-injected analysis identify the two arms straight from the checkpoint.
+        inject_res_corr=json.dumps(chain.get("inject_res_corr", None), default=str),
         hierarchical_hcd=bool(chain.get("hierarchical_hcd", False)),
         hcd_ratio_infl=float(chain.get("hcd_ratio_infl", 1.0) or 1.0),
         hcd_2d_tilt=bool(chain.get("hcd_2d_tilt", False)),

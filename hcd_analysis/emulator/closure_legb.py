@@ -766,13 +766,73 @@ def _chol_jitter(C, jitter=1e-10):
     return jnp.linalg.cholesky(Cj)
 
 
-def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0):
+def _resolve_res_corr_inject(inject_res_corr, leg_name, n_rows):
+    """Resolve the ``inject_res_corr`` spec into this leg's log-perturbation b-vector (on the
+    leg k-grid, shape ``(n_rows,)``). Returns ``None`` (a true no-op) when no injection applies.
+
+    TASK-1.6 res_corr injection harness (spec §4.2). The injection is a per-leg multiplicative
+    LOG-res_corr perturbation applied to the leg-binned TRUTH ONLY (``P_truth_on_leg *= exp(b)``),
+    analogous to the SiIII ``mfac`` multiply but in log-space. It is the OUT-OF-SPAN
+    misspecification the marginalized ``alpha_res`` must absorb — it NEVER enters the forward, so
+    it does NOT cancel in a closure. The strength is SEPARATE from the sampled ``alpha_res``.
+
+    Accepted spec forms (``inject_res_corr``):
+      * ``None``                → no-op (returns ``None``; the default, byte-identical).
+      * ``{"path": <npz>, "member": "b1"|"b2", "strength": float}``
+            → loads ``{leg_name}_{member}`` from the basis npz (the flat z-major log-perturbation
+              on the leg k-grid, the SAME order/shape as ``leg.k``) and scales it by ``strength``.
+              This is the form ``run_stepA``'s injection arm passes.
+      * ``{leg_name: b_vector, ...}``
+            → an explicit per-leg b-vector dict (already strength-scaled). Legs absent from the
+              dict get no injection.
+
+    Returns the strength-scaled b-vector ``strength * b_{member}_{leg}`` (or the explicit vector),
+    or ``None`` if this leg has no injection."""
+    if inject_res_corr is None:
+        return None
+    if not isinstance(inject_res_corr, dict):
+        raise TypeError(
+            f"inject_res_corr must be None or a dict, got {type(inject_res_corr).__name__}")
+    # (path, member, strength) form — the run_stepA arm's spec.
+    if "path" in inject_res_corr or "member" in inject_res_corr:
+        path = inject_res_corr["path"]
+        member = inject_res_corr.get("member", "b1")
+        strength = float(inject_res_corr.get("strength", 1.0))
+        basis = np.load(path, allow_pickle=True)
+        key = f"{leg_name}_{member}"
+        if key not in basis.files:
+            raise KeyError(
+                f"inject_res_corr: {key!r} not in basis {path!r} (have {sorted(basis.files)})")
+        b = np.asarray(basis[key], dtype=float)
+        if b.shape != (n_rows,):
+            raise ValueError(
+                f"inject_res_corr: basis {key} shape {b.shape} != leg-truth shape {(n_rows,)}")
+        return strength * b
+    # explicit {leg_name: b_vector} form.
+    if leg_name not in inject_res_corr:
+        return None
+    b = np.asarray(inject_res_corr[leg_name], dtype=float)
+    if b.shape != (n_rows,):
+        raise ValueError(
+            f"inject_res_corr[{leg_name!r}] shape {b.shape} != leg-truth shape {(n_rows,)}")
+    return b
+
+
+def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0, inject_res_corr=None):
     """Build a Leg-B mock from a sim-truth: interpolate the sim-truth P1D onto each leg's k,
     draw ε ~ N(0, C_data) (cosmic-ONLY) per leg, ``mock = truth_on_leg + ε``.
 
     ``inject_a_siiii`` > 0 multiplies the truth-on-leg by the SiIII metal factor (the SAME
     ``_metal_factor`` the forward uses) on metals_on legs BEFORE noise — the SiIII-injection cert
     arm (a forward with ``sample_metals`` should then absorb it into a_SiIII with no n_s/A_p leak).
+
+    ``inject_res_corr`` (default ``None`` ⇒ byte-identical no-op) injects an OUT-OF-SPAN res_corr
+    misspecification into the leg-binned TRUTH ONLY (TASK-1.6, spec §4.2): a per-leg log-res_corr
+    perturbation ``b`` (on the leg k-grid) applied as ``P_truth_on_leg *= exp(b)`` at the SAME point
+    ``inject_a_siiii`` multiplies (AFTER SiIII, BEFORE the cosmic-noise draw). It is the
+    misspecification the marginalized ``alpha_res`` must absorb; it has a SEPARATE injection
+    strength from the sampled ``alpha_res`` and NEVER touches the forward (so it does not cancel in
+    a closure). See ``_resolve_res_corr_inject`` for the accepted spec forms.
 
     MOCK-TRUTH → LEG mapping (documented choice): the sim has one z per cache row. For each
     leg z-bin we NEAREST-Z map to the sim's available z (the cache z grid is Δz=0.2, and the
@@ -833,6 +893,14 @@ def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0):
         if inject_a_siiii > 0 and leg.metals_on:
             mfac = np.asarray(DL._metal_factor(jnp.asarray(leg.k), a_SiIII=float(inject_a_siiii)))
             P_truth_on_leg = np.where(np.isfinite(P_truth_on_leg), P_truth_on_leg * mfac, P_truth_on_leg)
+        # res_corr injection (TASK-1.6 cert arm): multiply the leg-binned truth by exp(b_leg), the
+        # OUT-OF-SPAN log-res_corr misspecification on the leg k-grid (same flat z-major order as
+        # leg.k). TRUTH-ONLY — the forward never sees it, so it cannot cancel in a closure. Applied
+        # AFTER the SiIII inject, BEFORE the noise draw, on the finite (kept) rows only.
+        b_inj = _resolve_res_corr_inject(inject_res_corr, leg.name, N)
+        if b_inj is not None:
+            efac = np.exp(b_inj)
+            P_truth_on_leg = np.where(np.isfinite(P_truth_on_leg), P_truth_on_leg * efac, P_truth_on_leg)
         dropped[leg.name] = drop_z
         truth_on_leg_out[leg.name] = P_truth_on_leg.copy()
 
