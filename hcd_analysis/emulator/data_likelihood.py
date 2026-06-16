@@ -61,9 +61,9 @@ DESI_PIXEL_ANGSTROM = 0.8
 # The emulator cache k-grid Nyquist (angular k, s/km == 1/Å in the velocity-equiv
 # convention the data + cache share). The emulator cannot predict above this.
 CACHE_KMAX = 0.069
-# KS: drop the first four k-bins (Karaçaylı 2306.06316 Fig 11 — they underestimate the
-# error). The fourth bin centre is 0.0157527, so keep k > 0.0158.
-KS_DROP_KMAX = 0.0158
+# KS keeps its FULL native k-range from klow≈0.0055 s/km. The Karaçaylı 2306.06316 Fig-11
+# "first-4-bins error underestimate" caution is MISLEADING (PI/KS-author decision, reaffirmed
+# repeatedly) — those low-k bins are ALWAYS kept. There is NO low-k KS drop knob.
 # DESI continuum-floor low-k cut + half-Nyquist resolution high-k cut (usage doc §"cuts").
 DESI_KMIN = 1e-3
 
@@ -180,17 +180,16 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
 
 
 def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
-                *, z_lo=2.4, z_hi=4.6, drop_first4=False, k_max=CACHE_KMAX,
+                *, z_lo=2.4, z_hi=4.6, k_max=CACHE_KMAX,
                 metals_on=False, resolution_on=False, mf_floor_on=True):
     """Load KODIAQ-SQUAD conservative-mode P1D → a post-cut ``DataLeg``.
 
     Format: pipe-separated ``final-conservative-p1d-karacayli_etal2021.txt`` (z|k|P|e) +
     the 182×182 ``final-conservative-covariance-karacayli_etal2021.txt`` (z-major,
     z∈[2.0,4.6], 13 k-bins/z). Cuts: keep the FULL native k-range from **klow=0.0055 s/km**
-    (``drop_first4=False`` default — PI/KS-author decision 2026-06-09: the Karaçaylı 2306.06316
-    Fig-11 "first-4-bins error underestimate" caution is MISLEADING; keep those bins) + cut
-    k ≤ k_max=0.069 (the emulator Nyquist; the analysis caps k<0.06). ``drop_first4=True`` is
-    available as opt-in.
+    (PI/KS-author decision 2026-06-09, reaffirmed repeatedly: the Karaçaylı 2306.06316 Fig-11
+    "first-4-bins error underestimate" caution is MISLEADING — those low-k bins are ALWAYS kept,
+    there is NO low-k KS drop) + cut k ≤ k_max=0.069 (the emulator Nyquist; the analysis caps k<0.06).
     ``z_lo`` defaults to **2.4** (drops the z=2.0+2.2 KS bins, which carried ~86% of a −0.65σ
     coherent n_s closure bias; dropping z<2.4 removes it → +0.04σ). z=2.4 is the MINIMAL
     closure-clean cut; low-z KS P1D is compromised by DLA-finder incompleteness, and the
@@ -208,8 +207,6 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
     cov = np.loadtxt(cov_file)                  # (182,182) z-major
 
     keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k <= k_max + 1e-9)
-    if drop_first4:
-        keep &= (k > KS_DROP_KMAX)
 
     # KS has no resolution proxy in this file; reuse the DESI-style proxy as a placeholder
     # for the (default-OFF) resolution knob.  LYA-CONSULT: KS resolution is OFF by default
