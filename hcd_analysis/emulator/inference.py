@@ -146,6 +146,64 @@ HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X = {"DESI": 0.30, "eBOSS": 0.30, "DESI+KS": 0.3
 # guard is preserved). See the spec 2026-06-17-hcd-prior-redetermination.
 HCD_LLS_REALFIT_ZSLOPE = 2.127
 
+# --- LITERATURE dN/dX power-laws (A, γ) per HCD class -------------------------------------------
+# dN/dX_c(z) = A_c·(1+z)^γ_c, the WLS over the literature points (derive_hcd_lls_width.py /
+# plot_dndx_vs_literature.py). The LLS law (O'Meara13/Fumagalli13/Prochaska10; A=0.0201, γ=2.127,
+# χ²/dof=0.72) is the REAL-FIT LLS prior CENTER anchor: hcd_lls_realfit_alpha_center builds α_LLS at
+# the z-pivot from this law DIRECTLY (alt-(b)), round-tripping the lit dN/dX to <0.34% — see the
+# HCD-pivot CENTER-construction fix (2026-06-17). subDLA/DLA laws are display/round-trip references.
+HCD_LIT_DNDX_LAW = {"LLS": (0.0201, 2.127), "subDLA": (0.0211, 0.937), "DLA": (0.0076, 1.592)}
+
+# --- HCD prior PIVOT GUARD (PI 2026-06-17, the CENTER-construction bug) -------------------------
+# THE BUG: the LLS/subDLA pivot AMPLITUDE was built from w_c_med = nanmedian(w_c_cache[:,1:], axis=0)
+# — the MEDIAN over ALL z-groups (z=2.0–5.4). Since w_c rises monotonically with z, that all-z median
+# (LLS 0.274) equals the z≈3.6 value, but it is consumed as the z=3 PIVOT → the LLS α-center came out
+# ~1.45× too high (0.291 instead of the z=3-consistent ~0.194–0.200), overshooting the lit dN/dX law
+# 2.05× at z=2.4 / 1.63× at z=3 (worst at low z) = the LLS→n_s leak. The FIX builds the pivot from the
+# z=3 STRUCTURAL w_c (closure/SBC) or the lit dN/dX law directly (real fit). These bands let a future
+# revert to nanmedian(...all z...) TRIP at runtime: the z=3-consistent LLS α-center is ≈0.19–0.21
+# (sim z=3 w_c·1.06 = 0.2004; lit-law alt-(b) = 0.1938), the all-z-median value is ≈0.29 (DESI boost).
+HCD_PIVOT_LLS_ALPHA_Z3_BAND = (0.16, 0.24)   # z=3-consistent LLS α-pivot (DESI/cosmic-avg boost 1.0)
+HCD_PIVOT_LLS_ALLZ_MEDIAN = 0.2909           # the BUGGY all-z-median LLS α-pivot (z≈3.6) — must NOT recur
+HCD_PIVOT_GUARD_REL = 0.05                   # |α − all-z-median| must exceed this·all-z-median
+
+
+def hcd_lls_realfit_alpha_center(Xbar_z, z=HCD_Z_PIVOT, boost=1.0):
+    """REAL-FIT LLS α-pivot CENTER built from the literature dN/dX power-law DIRECTLY (the validated
+    alt-(b)): dN/dX_LLS(z) = A·(1+z)^γ (HCD_LIT_DNDX_LAW["LLS"]) → α_LLS(z) via the EXACT telescoping
+    w_c map (dndx_wc.alpha_from_dndx_law), round-tripping the lit dN/dX to <0.34%. ``Xbar_z`` = the
+    cache mean-absorption-path-per-sightline at ``z`` (the z=3 pivot value). Returns the scalar
+    α_LLS center (× ``boost`` for the per-survey selection excess). At z=3, Xbar≈0.632 → α_LLS≈0.194
+    — the z=3-consistent center, NOT the all-z-median ~0.291 (the CENTER-construction bug)."""
+    from hcd_analysis.emulator.dndx_wc import alpha_from_dndx_law
+    A = jnp.asarray([HCD_LIT_DNDX_LAW[c][0] for c in ("LLS", "subDLA", "DLA")])
+    g = jnp.asarray([HCD_LIT_DNDX_LAW[c][1] for c in ("LLS", "subDLA", "DLA")])
+    z_arr = jnp.atleast_1d(jnp.asarray(z, float))
+    Xb_arr = jnp.atleast_1d(jnp.asarray(Xbar_z, float))
+    alpha = alpha_from_dndx_law(A, g, Xb_arr, z_arr)          # (...,3) (LLS,subDLA,DLA)
+    return float(boost) * float(jnp.asarray(alpha).reshape(-1, 3)[0, 0])
+
+
+def assert_hcd_pivot_z3(alpha_mu, z, where, *, boost=1.0):
+    """PIVOT GUARD (PI 2026-06-17): the LLS α-PIVOT center ``alpha_mu`` (scalar, the LLS slot of the
+    hcd_incidence_prior μ — already ×survey boost) must be the z=3 value, NOT the all-z median (=z≈3.6).
+    Only checked at the z=3 pivot (the slope-cancellation point the center is built at). FIRES if the
+    LLS α-center is ≈ the buggy all-z-median 0.291 (×boost) → a future revert to
+    nanmedian(w_c_cache[...all z...]) trips here. See the HCD-pivot dN/dX low-z overshoot bug."""
+    if abs(float(z) - float(HCD_Z_PIVOT)) > 1e-6:
+        return                                                # only meaningful at the z=3 pivot
+    a = float(alpha_mu)
+    allz = float(HCD_PIVOT_LLS_ALLZ_MEDIAN) * float(boost)    # the buggy z≈3.6 value (per boost)
+    lo, hi = (b * float(boost) for b in HCD_PIVOT_LLS_ALPHA_Z3_BAND)
+    assert abs(a - allz) > HCD_PIVOT_GUARD_REL * allz, (
+        f"HCD LLS α-PIVOT center [{where}] = {a:.4f} ≈ the all-z-median (z≈3.6) value {allz:.4f} — "
+        f"the HCD pivot MUST use the z=3 w_c, NOT the median-over-all-z (= z≈3.6). See the dN/dX "
+        f"low-z overshoot bug (CENTER-construction fix 2026-06-17).")
+    assert lo <= a <= hi, (
+        f"HCD LLS α-PIVOT center [{where}] = {a:.4f} outside the z=3-consistent band [{lo:.4f},{hi:.4f}] "
+        f"(boost={boost}). Expected ≈0.194 (lit-law) / ≈0.200 (sim z=3 w_c·1.06). A center near the "
+        f"all-z-median {allz:.4f} (= z≈3.6) is the CENTER-construction bug. See the dN/dX low-z overshoot.")
+
 
 def lit_over_sim_at_z(z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SLOPE,
                       z_pivot=HCD_Z_PIVOT):

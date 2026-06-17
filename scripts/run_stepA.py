@@ -713,11 +713,14 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     from hcd_analysis.emulator.closure_legb import (
         build_legb_ctx, held_out_sims, make_truth_from_sim, make_hr_truth_from_cache, make_legb_mock,
         _mock_core_per_leg, _run_nuts_legb, _draws_matrix, _packed_names_for, _hcd_latent_truths,
-        _hcd_latent_truths_2d, CACHE_PATH, ZSLOPE_PRIOR_SIGMA, HCD_INCIDENCE_SLOPE)
+        _hcd_latent_truths_2d, CACHE_PATH, ZSLOPE_PRIOR_SIGMA, HCD_INCIDENCE_SLOPE,
+        hcd_pivot_wc_and_xbar)
     # NB: HCD_LIT_OVER_SIM_SLOPE is deliberately NOT imported — it is the lit/sim RATIO slope
     # (prior-center at the z=3 PIVOT only), NEVER the forward z-exponent. The forward z-slope is
     # closure_legb.HCD_INCIDENCE_SLOPE (imported above). See hcd-dndx-zslope-bug.
-    from hcd_analysis.emulator.inference import PARAM_NAMES, hcd_incidence_prior
+    from hcd_analysis.emulator.inference import (PARAM_NAMES, hcd_incidence_prior,
+        hcd_lls_realfit_alpha_center, assert_hcd_pivot_z3, HCD_LLS_SURVEY_BOOST,
+        HCD_LLS_SURVEY_FRAC_SIGMA, HCD_PRIOR_FRAC_SIGMA, HCD_Z_PIVOT)
 
     fold = chain["fold"]
     # MOCK INDEX: run_legb_convergence selects the sim by mock_index OR an explicit sim. We pass
@@ -851,19 +854,29 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     #   "truth"    = this sim's own w_c (circular reference only).
     pc = chain.get("prior_center", "lit")
     survey = chain.get("survey", "DESI")
+    # CENTER-CONSTRUCTION FIX (PI 2026-06-17): build the pivot from the z=3 STRUCTURAL w_c, NOT the
+    # all-z median nanmedian(w_c_cache[:,1:]) (=z≈3.6 — the dN/dX low-z overshoot bug). The same
+    # cache, restricted to the z=3 pivot rows. (truth_sim["w_c"] is already this sim's z=3 w_c.)
+    wc_z3, Xbar_z3 = hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT)
     if pc == "lit":
         # REAL-FIT prior: per-survey effective-LLS pin (DESI cosmic-avg/tight; KS boosted ~2.5×/broad,
-        # arXiv:2509.18271 §4.3.3). subDLA/DLA survey-agnostic. DESI boost=1.0+σ0.15 == the old
-        # build_legb_ctx default (no change); only survey="KS" shifts the center+width.
-        wc_med = np.nanmedian(d["w_c_cache"][:, 1:], axis=0)
-        amu, asd = hcd_incidence_prior(jnp.asarray(wc_med), z=3.0, survey=survey)
+        # arXiv:2509.18271 §4.3.3). subDLA/DLA survey-agnostic. The LLS center is built from the lit
+        # dN/dX law DIRECTLY (alt-(b), hcd_lls_realfit_alpha_center ≈0.194×boost) — the same construction
+        # build_legb_ctx(survey=…) uses — NOT the sim z=3 w_c·(lit/sim). subDLA/DLA from the z=3 w_c.
+        amu, asd = hcd_incidence_prior(jnp.asarray(wc_z3), z=HCD_Z_PIVOT, survey=survey)
+        _boost = HCD_LLS_SURVEY_BOOST.get(survey, 1.0)
+        amu = amu.at[0].set(hcd_lls_realfit_alpha_center(Xbar_z3, z=HCD_Z_PIVOT, boost=_boost))
+        _fl = HCD_LLS_SURVEY_FRAC_SIGMA.get(survey, float(HCD_PRIOR_FRAC_SIGMA[0]))
+        asd = asd.at[0].set(_fl * amu[0])
+        assert_hcd_pivot_z3(float(np.asarray(amu)[0]), z=HCD_Z_PIVOT,
+                            where=f"run_stepA pc=lit survey={survey}", boost=_boost)
         ctx = ctx._replace(alpha_hcd_mu=amu, alpha_hcd_sigma=asd)
     else:
-        # NON-circular closure cert: center on the sim population (sim_mean) or this sim (truth);
-        # lit_over_sim=1 → no literature/survey offset (the cert tests recovery, not the real prior).
-        wc_c = (np.nanmedian(d["w_c_cache"][:, 1:], axis=0) if pc == "sim_mean"
-                else np.asarray(truth_sim["w_c"]))
-        amu, asd = hcd_incidence_prior(jnp.asarray(wc_c), z=3.0, lit_over_sim=jnp.ones(3))
+        # NON-circular closure cert: center on the sim population z=3 w_c (sim_mean) or this sim's z=3
+        # w_c (truth); lit_over_sim=1 → no literature/survey offset (the cert tests recovery, not the
+        # real prior). Uses the z=3 STRUCTURAL w_c (not the all-z median) — the CENTER-construction fix.
+        wc_c = (wc_z3 if pc == "sim_mean" else np.asarray(truth_sim["w_c"]))
+        amu, asd = hcd_incidence_prior(jnp.asarray(wc_c), z=HCD_Z_PIVOT, lit_over_sim=jnp.ones(3))
         ctx = ctx._replace(alpha_hcd_mu=amu, alpha_hcd_sigma=asd)
     if chain.get("sigma_lls"):     # σ_LLS width-sensitivity arm
         sig = ctx.alpha_hcd_sigma.at[0].set(float(chain["sigma_lls"]) * float(ctx.alpha_hcd_mu[0]))

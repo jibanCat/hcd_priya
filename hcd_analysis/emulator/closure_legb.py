@@ -50,7 +50,9 @@ from .meanflux_prior import (meanflux_tau0_prior, becker13_tau0, tau0_alpha_priy
                              fit_tau0_alpha_priya, TAU0_AMP_RANGE, DTAU0_RANGE, TAU0_PIVOT_Z)
 from .inference import (PARAM_NAMES, hcd_incidence_prior,
                         HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC,
-                        HCD_LLS_REALFIT_ZSLOPE)
+                        HCD_LLS_REALFIT_ZSLOPE, HCD_LLS_SURVEY_BOOST,
+                        HCD_LLS_SURVEY_FRAC_SIGMA, HCD_PRIOR_FRAC_SIGMA,
+                        hcd_lls_realfit_alpha_center, assert_hcd_pivot_z3)
 from .sampler_numpyro import _dla_raw_mu
 from . import data_likelihood as DL
 from .closure_diagnostics import (
@@ -114,6 +116,40 @@ def _assert_forward_zslope_center(center, where):
         f"HCD_INCIDENCE_SLOPE (~2.4, the SIM incidence-weight slope), NOT the lit/sim RATIO slope "
         f"HCD_LIT_OVER_SIM_SLOPE (~0.95). The forward exponent was reverted to the wrong object. "
         f"See hcd-dndx-zslope-bug.")
+
+
+def hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT, z_tol=0.05):
+    """The HCD-prior PIVOT structural inputs from the cache, AT the z=3 pivot (the CENTER-construction
+    fix, PI 2026-06-17). Returns ``(w_c_z3 (3,), Xbar_z3 scalar)``:
+
+      w_c_z3 = median of the cache structural w_c[LLS,subDLA,DLA] over the rows AT z≈z_pivot — the
+               z=3 PIVOT structural weight, NOT the all-z median nanmedian(w_c_cache[:,1:]) (=z≈3.6,
+               the BUG: w_c rises monotonically so the all-z median over-estimates the z=3 pivot ~1.45×).
+      Xbar_z3 = the cache mean-absorption-path-per-sightline Xbar(z) evaluated at z_pivot (deg-2 z-fit),
+               the input the lit-dN/dX-law LLS center (hcd_lls_realfit_alpha_center) needs.
+
+    Both are built from the SAME cache the all-z median came from, only restricted to the z=3 pivot
+    rows (w_c) / fit and evaluated at z=3 (Xbar). See the dN/dX low-z overshoot CENTER-construction bug.
+    """
+    wc = np.asarray(d["w_c_cache"])                      # (R,4) clean,LLS,subDLA,DLA
+    zrow = np.asarray(d["z_grid"])
+    sel = np.abs(zrow - float(z_pivot)) < float(z_tol)
+    assert sel.sum() > 0, f"no cache rows within {z_tol} of z_pivot={z_pivot}"
+    w_c_z3 = np.nanmedian(wc[sel, 1:], axis=0)           # (3,) z=3 structural w_c
+
+    # Xbar(z) deg-2 fit (same construction as plot_hcd_prior_dndx_overlay.build_xbar): per-group
+    # Xbar = X_tot / N_sl, N_sl from the telescoping clean-fraction, fit in z, evaluated at z=3.
+    gid = np.asarray(d["snap_group_idx"]); Xtot = np.asarray(d["snap_total_path_dX"])
+    dndx = np.asarray(d["snap_dNdX"]); Ng = dndx.shape[0]
+    zg = np.array([zrow[gid == g][0] for g in range(Ng)])
+    wc_g = np.array([np.nanmedian(wc[gid == g], axis=0) for g in range(Ng)])
+    mu_sum = -np.log(np.clip(wc_g[:, 0], 1e-6, None))
+    Nsl = np.where(mu_sum > 0, dndx.sum(axis=1) * Xtot / mu_sum, np.nan)
+    Xbar = Xtot / Nsl
+    ok = np.isfinite(Xbar) & (zg >= 2.1) & (zg <= 4.7)
+    cf = np.polyfit(zg[ok], Xbar[ok], 2)
+    Xbar_z3 = float(np.polyval(cf, float(z_pivot)))
+    return w_c_z3, Xbar_z3
 
 
 # PER-LEG DLA-residual fraction in the closure TARGET MOCK (§0c, PI-confirmed final intent
@@ -379,13 +415,35 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
 
     # priors on the GLOBAL z grid: Becker+2013 τ₀ (production anchor) + HCD incidence.
     tau0_mu, tau0_sigma = meanflux_tau0_prior(jnp.asarray(z_global), center="becker13")
-    # HCD incidence prior from the cache's structural w_c at z_pivot (LLS,subDLA,DLA).
-    w_c_med = np.median(d["w_c_cache"][:, 1:], axis=0)     # (3,) structural weights
+    # HCD incidence prior from the cache's structural w_c AT THE z=3 PIVOT (LLS,subDLA,DLA).
+    # CENTER-CONSTRUCTION FIX (PI 2026-06-17): build the pivot from the z=3 STRUCTURAL w_c, NOT the
+    # all-z median nanmedian(w_c_cache[:,1:]). Because w_c rises monotonically with z, the all-z median
+    # (LLS 0.274) equals the z≈3.6 value → consumed as the z=3 pivot it over-stated the LLS center ~1.45×
+    # (α_pivot 0.291 vs the z=3-consistent ~0.194–0.200), overshooting the lit dN/dX 2.05× @z2.4 = the
+    # LLS→n_s leak. hcd_pivot_wc_and_xbar restricts the SAME cache to the z=3 pivot rows. See the dN/dX
+    # low-z overshoot bug. γ_LLS (forward z-slope) and σ_LLS (width) are UNCHANGED.
+    w_c_med, Xbar_z3 = hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT)   # (3,) z=3 structural w_c, Xbar(z=3)
     # survey=None (closure/SBC) → cosmic-average LLS pin (unchanged); survey="DESI"/"KS"/… (real fit)
     # → the per-survey LLS center+width pin (DESI 1.0×/σ0.15, KS 2.5×/σ0.40; PI re-determination
     # 2026-06-17). The PI WIDTH RULE 1× value is the lit measurement error (σ_LLS=0.15); the 2×
     # cosmic-variance hedge is HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X (toggle here if a hedge ctx is needed).
-    alpha_mu, alpha_sd = hcd_incidence_prior(jnp.asarray(w_c_med), z=3.0, survey=survey)
+    alpha_mu, alpha_sd = hcd_incidence_prior(jnp.asarray(w_c_med), z=HCD_Z_PIVOT, survey=survey)
+    # REAL-FIT LLS center: prefer the lit dN/dX law DIRECTLY (alt-(b)) — α_LLS(z=3) from
+    # A=0.0201·(1+z)^2.127 through the EXACT w_c map (hcd_lls_realfit_alpha_center), round-tripping the
+    # lit dN/dX to <0.34% (≈0.194×boost). On the REAL FIT PRIYA≠data, so the LLS center must track the
+    # literature dN/dX, not the sim's z=3 w_c·(lit/sim). The CLOSURE/SBC (survey=None) keeps the sim z=3
+    # w_c center (its held-out-sim mocks carry the sim incidence). subDLA/DLA centers are unchanged.
+    if survey is not None:
+        _boost = HCD_LLS_SURVEY_BOOST.get(survey, 1.0)
+        alpha_mu = alpha_mu.at[0].set(hcd_lls_realfit_alpha_center(Xbar_z3, z=HCD_Z_PIVOT, boost=_boost))
+        # keep the σ/μ width invariant (PI WIDTH RULE: 1× lit measurement error) at the new center.
+        _fl = HCD_LLS_SURVEY_FRAC_SIGMA.get(survey, float(HCD_PRIOR_FRAC_SIGMA[0]))
+        alpha_sd = alpha_sd.at[0].set(_fl * alpha_mu[0])
+    # PIVOT GUARD (PI's explicit ask): the LLS α-pivot center MUST be the z=3 value, NOT the all-z
+    # median (z≈3.6). A future revert to nanmedian(w_c_cache[...all z...]) trips this at build time.
+    _guard_boost = HCD_LLS_SURVEY_BOOST.get(survey, 1.0) if survey is not None else 1.0
+    assert_hcd_pivot_z3(float(np.asarray(alpha_mu)[0]), z=HCD_Z_PIVOT,
+                        where=f"build_legb_ctx survey={survey}", boost=_guard_boost)
 
     # REAL-FIT LLS forward z-slope (litWLS, PI re-determination 2026-06-17): when ``survey`` is given
     # (a real-data fit), the LLS forward z-evolution must track the literature WLS slope γ_LLS=2.127
@@ -401,8 +459,10 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         _assert_forward_zslope_center(survey_zslope_mu, f"build_legb_ctx survey={survey} litWLS zslope_mu")
 
     # HIERARCHICAL HCD ratio-prior centers/widths (must-fix #1, the LOAD-BEARING fix). The ratio
-    # centers are derived from the RAW sim w_c POOL MEDIANS (the SAME pool w_c_med medians above) —
-    # r_sub = median(w_subDLA)/median(w_LLS), r_dla = HCD_DLA_RESIDUAL_FRAC·median(w_DLA)/median(w_LLS)
+    # centers are derived from the z=3 PIVOT sim w_c (``w_c_med`` is now the z=3 structural weight —
+    # the CENTER-construction fix re-derived it at the pivot, PI 2026-06-17; they previously inherited
+    # the same all-z-median bug as the LLS/subDLA pivot) —
+    # r_sub = w_subDLA(z3)/w_LLS(z3), r_dla = HCD_DLA_RESIDUAL_FRAC·w_DLA(z3)/w_LLS(z3)
     # — NOT from alpha_hcd_mu (which bakes in the lit/sim 1.06/1.00/1.34 offset). This makes the
     # closure TRUTH (= the held-out sim's w_sub/w_LLS and 0.10·w_DLA/w_LLS, make_legb_mock:716-717)
     # match the prior CENTER to within the per-sim CV — a tight prior at an OFFSET center would
