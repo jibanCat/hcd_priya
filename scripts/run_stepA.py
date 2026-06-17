@@ -233,6 +233,36 @@ def build_config(verbose=False):
         add_fiducial(f"D_lmed{_f}_30", _f, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
                      sigma_lls=0.30, sim=_s)
 
+    # === FINALIZED-PRIOR VALIDATING CLOSURE SWEEP (DV arms, PI 2026-06-17) =================== #
+    # Re-validate the CORRECTED + FINALIZED HCD prior (a04d501 litWLS γ_LLS=2.127 + 25a51bc z=3
+    # pivot-construction fix) on the real-fit-direction LLS center. ALL arms use prior_center="lit"
+    # (the per-survey effective-LLS pin) + zslope_realfit=True (center the forward LLS z-slope on the
+    # litWLS γ_LLS=2.127 the REAL fit uses, vs the mock). σ_LLS=0.15 is the production 1× lit-error
+    # width that leaks into cosmology; the σ-isolator pair (DV_sig15 vs DV_sig30) on the SAME median-
+    # w_LLS sim/noise decides whether 0.15 is safe or 0.30 is needed. _SIM_MED = the fold-6 median-
+    # w_LLS sim (ratio≈0.992: lit prior center ≈ mock truth, so σ isolates the WIDTH alone). Launched
+    # via the SLURM array batch_stepA_cosmo_dv.sh into a SEPARATE dir (checkpoints/stepA_dv).
+    #   DV_f3        — DESI fold3 (n_s≈0.90), lit-boosted mock: the DESI n_s-pull arm (should drop
+    #                  from the +1.43σ old-prior baseline toward <0.5σ).
+    #   DV_XS_f6_s0  — DESI+KS joint fold6 Planck, sim_mean subDLA center (shift 0): the joint-leg
+    #                  finalized-prior closure (KS re-activation channel check).
+    #   DV_sig15     — σ-isolator 1× (σ_LLS=0.15) on _SIM_MED: the load-bearing arm.
+    #   DV_sig30     — σ-isolator 2× (σ_LLS=0.30) on the SAME _SIM_MED/noise: does the historical
+    #                  +1.01σ A_p reappear at 0.15 but vanish at 0.30? (→ then 0.15 is the width).
+    #   DV_littruth  — real-fit-direction LEAK arm: lit-boosted mock (no explicit target_ns → fold6
+    #                  median-w sim via _SIM_MED) at σ_LLS=0.15; the litWLS-center leak gate
+    #                  (criterion ≈0.00σ).
+    add_fiducial("DV_f3", 3, 0.90, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
+                 sigma_lls=0.15, zslope_realfit=True)
+    add_fiducial("DV_XS_f6_s0", 6, 0.966, survey="DESI+KS", prior_center="lit", sigma_lls=0.15,
+                 subdla_center_shift=0.0, zslope_realfit=True)
+    add_fiducial("DV_sig15", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
+                 sigma_lls=0.15, sim=_SIM_MED, zslope_realfit=True)
+    add_fiducial("DV_sig30", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
+                 sigma_lls=0.30, sim=_SIM_MED, zslope_realfit=True)
+    add_fiducial("DV_littruth", 6, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
+                 sigma_lls=0.15, sim=_SIM_MED, zslope_realfit=True)
+
     # === Phase-5a EMUCOH closure validation (2026-06-12): the BLOCKING referee gate for the
     # 60-sim LF-emulator k-coherent C_emu term ("emucoh"). The term is wired (run_one_chain
     # mf_emucoh knob) + unit-tested + 4-referee-reviewed, but has NO inference-level validation;
