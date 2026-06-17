@@ -1356,6 +1356,10 @@ def _btilt_site(ctx):
     slope vector s_c = B_hcd + δs_c (2D AMPLITUDE×TILT mode). δs_LLS≡0, so at B_hcd=hcd_btilt_mu
     the slopes equal the full incidence slope HCD_INCIDENCE_SLOPE (~2.4 — the closure anchor that
     MATCHES the mock truth's native w_c(z) evolution)."""
+    # GUARD the 2D-tilt forward exponent center (Gap-1, hcd-dndx-zslope-bug): ctx.hcd_btilt_mu is
+    # the CONCRETE prior center (trace-safe), NOT the sampled B_hcd — catches a 0.95 reversion that
+    # a future ctx._replace(hcd_btilt_mu=...) / new builder could otherwise slip past the build guard.
+    _assert_forward_zslope_center(ctx.hcd_btilt_mu, "_btilt_site")
     B_hcd = numpyro.sample("B_hcd", dist.Normal(ctx.hcd_btilt_mu, ctx.hcd_btilt_sigma))
     return B_hcd + jnp.asarray(ctx.hcd_dslope)                      # (3,) s_c = B_hcd + δs_c
 

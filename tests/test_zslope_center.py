@@ -38,6 +38,19 @@ def _fake_ctx(marginalize_zslope=False, zslope_mu=None, zslope_sigma=None):
     )
 
 
+def test_btilt_site_runtime_guard_catches_reverted_2d_center():
+    """Gap-1 (adversarial-recurrence review): the 2D-tilt RUNTIME exponent site _btilt_site must
+    ALSO trip the guard on a 0.95 reversion of hcd_btilt_mu — not only the build-time guard — so a
+    future ctx._replace(hcd_btilt_mu=...) / new builder cannot silently revert the 2D forward slope.
+    The guard is _btilt_site's first line, so it raises before numpyro.sample (no trace needed)."""
+    bad = SimpleNamespace(hcd_btilt_mu=float(HCD_LIT_OVER_SIM_SLOPE[0]),   # 0.95, the wrong object
+                          hcd_btilt_sigma=0.5, hcd_dslope=[0.0, 0.293, -0.099])
+    with pytest.raises(AssertionError):
+        CL._btilt_site(bad)
+    # the correct incidence-weight center passes the guard
+    CL._assert_forward_zslope_center(float(CL.HCD_INCIDENCE_SLOPE[0]), "_btilt_site")
+
+
 def test_fixed_branch_returns_incidence_slope_not_ratio_slope():
     """marginalize_zslope=False → _zslope_sites returns the SIM incidence slope
     HCD_INCIDENCE_SLOPE (the mock-truth w_c(z) slope), NOT the lit/sim ratio HCD_LIT_OVER_SIM_SLOPE."""
