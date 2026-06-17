@@ -10,6 +10,7 @@ import functools
 import glob
 import os
 import pickle
+import re
 
 print = functools.partial(print, flush=True)
 
@@ -55,18 +56,41 @@ def main():
     ap.add_argument("--figdir", default="/home/mfho/hcd_priya/figures/analysis/06_validation_summary")
     a = ap.parse_args()
 
-    per_mock, seen, n_z = [], set(), None
+    # PER-MOCK pkls WIN over shard pkls on a mock-index conflict (the per-mock checkpoint is the
+    # authoritative unit of progress; the shard pkl may be a stale partial). So load per-mock first,
+    # then fill in any mock not already covered from the shard pkls. The per-mock record dict has no
+    # 'm' key — the index is parsed from the FILENAME ``mock_{m:04d}.pkl``.
+    by_mock, n_z = {}, None
+    mock_re = re.compile(r"mock_(\d+)\.pkl$")
+    for fn in sorted(glob.glob(os.path.join(a.shard_dir, "mock_*.pkl"))):
+        mobj = mock_re.search(os.path.basename(fn))
+        if mobj is None:
+            continue
+        mi = int(mobj.group(1))
+        with open(fn, "rb") as f:
+            rec = pickle.load(f)
+        by_mock[mi] = rec                      # per-mock file is authoritative
+    n_mock_files = len(by_mock)
     for fn in sorted(glob.glob(os.path.join(a.shard_dir, "shard_*.pkl"))):
         with open(fn, "rb") as f:
             dd = pickle.load(f)
         n_z = dd["n_z"] if n_z is None else n_z
         assert dd["n_z"] == n_z, f"shard {fn} n_z={dd['n_z']} != {n_z}"
         for rec, mi in zip(dd["per_mock"], dd["idxs"]):
-            if mi in seen:
-                continue
-            seen.add(mi); per_mock.append(rec)
-    if not per_mock:
-        raise SystemExit(f"no shards in {a.shard_dir}")
+            by_mock.setdefault(int(mi), rec)   # per-mock pkl (if any) already set → it WINS
+    if n_z is None:
+        # only per-mock pkls present → infer n_z from a record's kept_global length.
+        for rec in by_mock.values():
+            kg = rec.get("kept_global")
+            if kg is not None:
+                n_z = int(len(kg)); break
+    if not by_mock:
+        raise SystemExit(f"no shard_*.pkl or mock_*.pkl in {a.shard_dir}")
+    per_mock = [by_mock[mi] for mi in sorted(by_mock)]
+    if n_z is None:
+        raise SystemExit(f"could not infer n_z in {a.shard_dir}")
+    print(f"merged {len(per_mock)} mocks  ({n_mock_files} from per-mock pkls, "
+          f"{len(per_mock) - n_mock_files} from shard pkls)")
     res = aggregate_leg_a(per_mock, n_z, prob=a.prob)
 
     print("\n===== Production-ensemble Leg-A SBC (rank uniformity) =====")
