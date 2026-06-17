@@ -26,7 +26,7 @@ from numpyro import handlers
 
 from hcd_analysis.emulator import closure_legb as CL
 from hcd_analysis.emulator.inference import (HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT,
-                                             lit_over_sim_at_z)
+                                             lit_over_sim_at_z, HCD_LLS_REALFIT_ZSLOPE)
 import pytest
 
 
@@ -92,6 +92,45 @@ def test_marginalized_explicit_mu_is_respected():
         lambda: CL._zslope_sites(ctx), jax.random.PRNGKey(0))).get_trace()
     locs = np.array([float(tr[nm]["fn"].loc) for nm in ("s_lls", "s_subdla", "s_dla")])
     np.testing.assert_allclose(locs, np.asarray(custom), rtol=0, atol=0)
+
+
+# --------------------------------------------------------------------------- #
+#  PI re-determination 2026-06-17: the REAL-FIT (survey) path uses litWLS γ_LLS  #
+#  = 2.127 for the LLS forward z-slope; the CLOSURE (survey=None) stays 2.465.   #
+# --------------------------------------------------------------------------- #
+def test_realfit_litwls_lls_slope_constant_and_guard():
+    """The real-fit LLS forward z-slope is the literature WLS slope γ_LLS=2.127 (NOT the sim
+    incidence slope 2.465 the closure carries, NOR the lit/sim RATIO slope 0.95). It is ABOVE the
+    forward-z-slope guard floor (1.5) so _assert_forward_zslope_center PASSES it (the swap is
+    permitted, the 0.95-ratio-slope guard intent preserved)."""
+    assert HCD_LLS_REALFIT_ZSLOPE == pytest.approx(2.127, abs=1e-6), \
+        "the real-fit LLS forward z-slope must be the litWLS γ_LLS=2.127"
+    # distinct from the closure sim-truth slope AND the lit/sim ratio slope
+    assert HCD_LLS_REALFIT_ZSLOPE != pytest.approx(float(CL.HCD_INCIDENCE_SLOPE[0]))   # != 2.465
+    assert HCD_LLS_REALFIT_ZSLOPE > float(HCD_LIT_OVER_SIM_SLOPE[0])                   # != 0.95
+    # the litWLS LLS slope passes the guard (2.127 > 1.5)
+    CL._assert_forward_zslope_center(HCD_LLS_REALFIT_ZSLOPE, "litWLS LLS slope")
+    # and the full real-fit zslope_mu vector (litWLS LLS, sim subDLA/DLA) passes the LLS-slot guard
+    realfit_mu = np.array([HCD_LLS_REALFIT_ZSLOPE, CL.HCD_INCIDENCE_SLOPE[1], CL.HCD_INCIDENCE_SLOPE[2]])
+    CL._assert_forward_zslope_center(realfit_mu, "real-fit litWLS zslope_mu")
+
+
+def test_realfit_survey_path_centers_lls_on_litwls():
+    """Trace the marginalize-zslope sites with the REAL-FIT zslope_mu = (2.127, sim_subDLA, sim_DLA):
+    s_lls centers on the litWLS slope 2.127 while subDLA/DLA stay on the SIM incidence slope. This
+    is the real-fit survey-path center build_legb_ctx(survey=…) now plumbs (the CLOSURE survey=None
+    keeps the None-default center HCD_INCIDENCE_SLOPE — test_marginalized_default above)."""
+    realfit_mu = jnp.asarray([HCD_LLS_REALFIT_ZSLOPE,
+                              float(CL.HCD_INCIDENCE_SLOPE[1]), float(CL.HCD_INCIDENCE_SLOPE[2])])
+    ctx = _fake_ctx(marginalize_zslope=True, zslope_mu=realfit_mu)
+    tr = handlers.trace(handlers.seed(
+        lambda: CL._zslope_sites(ctx), jax.random.PRNGKey(0))).get_trace()
+    locs = np.array([float(tr[nm]["fn"].loc) for nm in ("s_lls", "s_subdla", "s_dla")])
+    assert locs[0] == pytest.approx(2.127, abs=1e-6), "real-fit s_lls center must be litWLS 2.127"
+    assert locs[1] == pytest.approx(float(CL.HCD_INCIDENCE_SLOPE[1]), abs=1e-6)   # subDLA stays sim
+    assert locs[2] == pytest.approx(float(CL.HCD_INCIDENCE_SLOPE[2]), abs=1e-6)   # DLA stays sim
+    # and the closure None-default is the SIM LLS slope 2.465 — the two paths DIFFER on the LLS slot.
+    assert locs[0] != pytest.approx(float(CL.HCD_INCIDENCE_SLOPE[0]))
 
 
 # --------------------------------------------------------------------------- #

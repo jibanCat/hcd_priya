@@ -28,13 +28,48 @@ def test_survey_pin_center_and_width():
     # DESI LLS center == no boost (boost 1.0); KS center == 2.5 x DESI
     np.testing.assert_allclose(muD[0], muN[0], rtol=1e-6)
     np.testing.assert_allclose(muK[0] / muD[0], INF.HCD_LLS_SURVEY_BOOST["KS"], rtol=1e-6)
-    # widths sigma/mu: DESI 0.30, KS 0.40, None = HCD_PRIOR_FRAC_SIGMA[0] (0.15)
+    # widths sigma/mu: DESI 0.15 (PI re-determination 2026-06-17, 1x lit measurement error),
+    # KS 0.40 (broad), None = HCD_PRIOR_FRAC_SIGMA[0] (0.15)
+    assert INF.HCD_LLS_SURVEY_FRAC_SIGMA["DESI"] == pytest.approx(0.15)   # the re-determined 1x knob
+    assert INF.HCD_LLS_SURVEY_FRAC_SIGMA["KS"] == pytest.approx(0.40)     # KS stays broad
     assert sdD[0] / muD[0] == pytest.approx(INF.HCD_LLS_SURVEY_FRAC_SIGMA["DESI"])
     assert sdK[0] / muK[0] == pytest.approx(INF.HCD_LLS_SURVEY_FRAC_SIGMA["KS"])
     assert sdN[0] / muN[0] == pytest.approx(INF.HCD_PRIOR_FRAC_SIGMA[0])
     # subDLA/DLA centers are survey-agnostic (only LLS is boosted)
     np.testing.assert_allclose(muD[1:], muN[1:], rtol=1e-6)
     np.testing.assert_allclose(muK[1:], muN[1:], rtol=1e-6)
+
+
+def test_eboss_and_dk_survey_pins():
+    """The PI re-determination adds eBOSS + DESI+KS keys to the per-survey LLS pin: both at the
+    cosmic-average center (boost 1.0) and the 1x re-determined width 0.15 (same as DESI)."""
+    for sv in ("eBOSS", "DESI+KS"):
+        assert INF.HCD_LLS_SURVEY_BOOST[sv] == pytest.approx(1.0)            # cosmic-average center
+        assert INF.HCD_LLS_SURVEY_FRAC_SIGMA[sv] == pytest.approx(0.15)      # 1x lit measurement error
+        mu, sd = map(np.asarray, INF.hcd_incidence_prior(W, z=3.0, survey=sv))
+        muN, _ = map(np.asarray, INF.hcd_incidence_prior(W, z=3.0))
+        np.testing.assert_allclose(mu[0], muN[0], rtol=1e-6)                 # no boost
+        assert sd[0] / mu[0] == pytest.approx(0.15)
+
+
+def test_lls_width_hedge_2x_toggle():
+    """The 2x cosmic-variance hedge (use_lls_width_hedge2x=True) doubles the DESI/eBOSS/DESI+KS LLS
+    width to 0.30; KS (already broad) is unchanged. The 1x primary stays the default."""
+    assert INF.HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X["DESI"] == pytest.approx(0.30)
+    assert INF.HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X["eBOSS"] == pytest.approx(0.30)
+    assert INF.HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X["KS"] == pytest.approx(0.40)   # KS unchanged
+    for sv in ("DESI", "eBOSS", "DESI+KS"):
+        mu1, sd1 = map(np.asarray, INF.hcd_incidence_prior(W, z=3.0, survey=sv))
+        mu2, sd2 = map(np.asarray, INF.hcd_incidence_prior(W, z=3.0, survey=sv,
+                                                           use_lls_width_hedge2x=True))
+        np.testing.assert_allclose(mu1, mu2, rtol=1e-6)            # center unchanged
+        assert sd1[0] / mu1[0] == pytest.approx(0.15)             # 1x primary
+        assert sd2[0] / mu2[0] == pytest.approx(0.30)             # 2x hedge
+    # KS: hedge is a no-op (already 0.40)
+    _, sdK1 = map(np.asarray, INF.hcd_incidence_prior(W, z=3.0, survey="KS"))
+    _, sdK2 = map(np.asarray, INF.hcd_incidence_prior(W, z=3.0, survey="KS",
+                                                      use_lls_width_hedge2x=True))
+    np.testing.assert_allclose(sdK1, sdK2, rtol=1e-6)
 
 
 @pytest.mark.skipif(not os.path.exists(_CACHE), reason="LF cache not present")
@@ -53,6 +88,8 @@ def test_lls_truth_boost_propagates_to_mock_and_truth():
 
 if __name__ == "__main__":
     test_survey_pin_center_and_width()
+    test_eboss_and_dk_survey_pins()
+    test_lls_width_hedge_2x_toggle()
     if os.path.exists(_CACHE):
         test_lls_truth_boost_propagates_to_mock_and_truth()
-    print("[hcd-survey-pin] per-survey center/width + lls_truth_boost propagation OK.")
+    print("[hcd-survey-pin] per-survey center/width (1x=0.15) + 2x hedge + lls_truth_boost OK.")

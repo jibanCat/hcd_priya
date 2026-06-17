@@ -115,13 +115,36 @@ HCD_LIT_OVER_SIM_SLOPE = (0.95, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
 #     informative window rather than the prior imposing a possibly-wrong tight number.
 # A multiplier on the cosmic-average (lit/sim) LLS center, applied ONLY when ``survey`` is given
 # (the closure's sim-mean cert passes survey=None and is unaffected).
-HCD_LLS_SURVEY_BOOST = {"DESI": 1.0, "KS": 2.5}
-# per-survey LLS fractional width σ/μ (overrides HCD_PRIOR_FRAC_SIGMA[0] when survey given). Both
-# MODERATE: DESI=0.30 (the width-scan joint-bias minimum 0.25–0.40) — the per-survey closure
-# (2026-06-11, D_lls_m) showed a TIGHT σ0.15 carries ~1σ A_p EVEN at the correct center (it is the
-# width, not the center) and pins the LLS dN/dX off-truth, so 0.15 was too tight. KS=0.40 (broad;
-# selection-driven, recovers A_p + dN/dX clean).
-HCD_LLS_SURVEY_FRAC_SIGMA = {"DESI": 0.30, "KS": 0.40}
+HCD_LLS_SURVEY_BOOST = {"DESI": 1.0, "eBOSS": 1.0, "DESI+KS": 1.0, "KS": 2.5}
+# --- PI WIDTH RULE (2026-06-17 re-determination, PI-approved) ----------------------------------
+# per-survey LLS fractional width σ/μ (overrides HCD_PRIOR_FRAC_SIGMA[0] when survey given). The PI
+# rule: set σ_LLS to 1–2× the LITERATURE dN/dX MEASUREMENT error (1× ideal; 2× = cosmic-variance
+# hedge). The 1× value is DERIVED from the lit dN/dX measurement uncertainty for LLS (O'Meara13 /
+# Fumagalli13 / Prochaska10): the WLS-fit normalization error at z=3 (χ²-inflated) AND the per-point
+# scatter about the WLS power-law, taken as max → fractional σ/μ ≈ 0.16 → the clean 1× knob 0.15
+# (scripts/derive_hcd_lls_width.py prints the breakdown; 2× = 0.30, the cosmic-variance hedge arm).
+#   DESI / eBOSS / DESI+KS  — 1× = 0.15 (TIGHT, the litWLS-anchored real-fit primary; the
+#     litWLS CENTER's z-evolution — not the width — was the dominant low-z LLS→n_s leak, so a 0.15
+#     width at the lit-anchored center now sits ON the data-truth, zero prior-pull leak BY
+#     CONSTRUCTION; gated on the litWLS-σ0.15 closure NUTS reproducing the historical width isolator).
+#   KS — stays 0.40 (broad; selection-driven LLS excess, z<2.4 cut → corr(LLS,n_s)≈0.07, no leak).
+# The PRIMARY (1×) is HCD_LLS_SURVEY_FRAC_SIGMA; the 2× cosmic-variance HEDGE arm is the easily-
+# toggled HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X (use_lls_width_hedge2x=True in hcd_incidence_prior).
+HCD_LLS_SURVEY_FRAC_SIGMA = {"DESI": 0.15, "eBOSS": 0.15, "DESI+KS": 0.15, "KS": 0.40}
+# 2× cosmic-variance hedge (double the 1× lit measurement error); KS unchanged (already broad).
+HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X = {"DESI": 0.30, "eBOSS": 0.30, "DESI+KS": 0.30, "KS": 0.40}
+
+# --- REAL-FIT LLS forward z-slope (litWLS, 2026-06-17 PI re-determination) ----------------------
+# The LLS prior CENTER's z-EVOLUTION is the dominant low-z LLS→n_s leak lever (NOT the width). On
+# the REAL FIT (data; PRIYA≠data, the forest follows the literature dN/dX) the LLS forward z-slope
+# must track the literature WLS power-law slope γ_LLS=+2.127 (lit dN/dX_LLS(z)=A·(1+z)^γ, A≈0.0201,
+# WLS over O'Meara13/Fumagalli13/Prochaska10), NOT the sim incidence slope 2.465 (which over-predicts
+# low-z LLS by +62–87% vs lit/truth). The CLOSURE/SBC path (survey=None, sim-truth mocks) STAYS on
+# closure_legb.HCD_INCIDENCE_SLOPE=2.465 (the slope the mock carries). subDLA/DLA keep the sim
+# incidence slope on BOTH paths (only LLS is lit-anchored on the real fit). γ=2.127 > the forward
+# z-slope guard floor 1.5, so the swap passes _assert_forward_zslope_center (the 0.95 ratio-slope
+# guard is preserved). See the spec 2026-06-17-hcd-prior-redetermination.
+HCD_LLS_REALFIT_ZSLOPE = 2.127
 
 
 def lit_over_sim_at_z(z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SLOPE,
@@ -133,7 +156,8 @@ def lit_over_sim_at_z(z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SL
     return r * ((1.0 + jnp.asarray(z)) / (1.0 + z_pivot)) ** s
 
 
-def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None):
+def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None,
+                        use_lls_width_hedge2x=False):
     """Per-class HCD incidence prior (μ, σ) on α_c (the effective per-class sightline weight
     in ``predict_P_obs``), centered on the OBSERVED incidence AT the data redshift ``z``
     (NOT the sim's), from the fiducial sim weights ``w_c_fid`` = (w_LLS, w_subDLA, w_DLA) ×
@@ -158,7 +182,9 @@ def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None):
     lls_boost = 1.0
     if survey is not None:
         lls_boost = HCD_LLS_SURVEY_BOOST.get(survey, 1.0)
-        fl = HCD_LLS_SURVEY_FRAC_SIGMA.get(survey, fl)
+        # PI WIDTH RULE: 1× lit measurement error (primary) or the 2× cosmic-variance hedge.
+        _fsig = HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X if use_lls_width_hedge2x else HCD_LLS_SURVEY_FRAC_SIGMA
+        fl = _fsig.get(survey, fl)
     mu = jnp.stack([lls_boost * r[0] * w[0], r[1] * w[1], HCD_DLA_RESIDUAL_FRAC * r[2] * w[2]])
     # DLA dN/dX is unreliable beyond z≈3.5 → widen σ_DLA above it (weak high-z prior) so the
     # data, not the prior, sets the high-z DLA incidence.

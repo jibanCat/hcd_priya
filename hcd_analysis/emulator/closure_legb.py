@@ -49,7 +49,8 @@ from .data import load_cache, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS, samplin
 from .meanflux_prior import (meanflux_tau0_prior, becker13_tau0, tau0_alpha_priya,
                              fit_tau0_alpha_priya, TAU0_AMP_RANGE, DTAU0_RANGE, TAU0_PIVOT_Z)
 from .inference import (PARAM_NAMES, hcd_incidence_prior,
-                        HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC)
+                        HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC,
+                        HCD_LLS_REALFIT_ZSLOPE)
 from .sampler_numpyro import _dla_raw_mu
 from . import data_likelihood as DL
 from .closure_diagnostics import (
@@ -380,9 +381,24 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     tau0_mu, tau0_sigma = meanflux_tau0_prior(jnp.asarray(z_global), center="becker13")
     # HCD incidence prior from the cache's structural w_c at z_pivot (LLS,subDLA,DLA).
     w_c_med = np.median(d["w_c_cache"][:, 1:], axis=0)     # (3,) structural weights
-    # survey=None (closure/SBC) → cosmic-average LLS pin (unchanged); survey="DESI"/"KS" (real fit)
-    # → the per-survey LLS center+width pin (DESI 1.0×/σ0.30, KS 2.5×/σ0.40) per the locked baseline.
+    # survey=None (closure/SBC) → cosmic-average LLS pin (unchanged); survey="DESI"/"KS"/… (real fit)
+    # → the per-survey LLS center+width pin (DESI 1.0×/σ0.15, KS 2.5×/σ0.40; PI re-determination
+    # 2026-06-17). The PI WIDTH RULE 1× value is the lit measurement error (σ_LLS=0.15); the 2×
+    # cosmic-variance hedge is HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X (toggle here if a hedge ctx is needed).
     alpha_mu, alpha_sd = hcd_incidence_prior(jnp.asarray(w_c_med), z=3.0, survey=survey)
+
+    # REAL-FIT LLS forward z-slope (litWLS, PI re-determination 2026-06-17): when ``survey`` is given
+    # (a real-data fit), the LLS forward z-evolution must track the literature WLS slope γ_LLS=2.127
+    # (the lit dN/dX_LLS(z) power-law), NOT the sim incidence slope 2.465 (which over-predicts low-z
+    # LLS by +62–87% vs lit/truth → the LLS→n_s leak). subDLA/DLA keep the sim incidence slope. The
+    # CLOSURE/SBC path (survey=None, sim-truth mocks) keeps zslope_mu=None → _zslope_sites centers on
+    # HCD_INCIDENCE_SLOPE=(2.465,…) (the sim-truth slope the held-out-sim mock carries) — UNCHANGED.
+    # γ=2.127 > the forward z-slope guard floor 1.5, so this passes _assert_forward_zslope_center.
+    survey_zslope_mu = None
+    if survey is not None:
+        _incid = np.asarray(HCD_INCIDENCE_SLOPE, float)
+        survey_zslope_mu = jnp.asarray([HCD_LLS_REALFIT_ZSLOPE, _incid[1], _incid[2]])
+        _assert_forward_zslope_center(survey_zslope_mu, f"build_legb_ctx survey={survey} litWLS zslope_mu")
 
     # HIERARCHICAL HCD ratio-prior centers/widths (must-fix #1, the LOAD-BEARING fix). The ratio
     # centers are derived from the RAW sim w_c POOL MEDIANS (the SAME pool w_c_med medians above) —
@@ -468,7 +484,10 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         hcd_ratio_mu=hcd_ratio_mu, hcd_ratio_sigma=hcd_ratio_sigma,
         hcd_ratio_infl=float(hcd_ratio_infl),
         hcd_2d_tilt=hcd_2d_tilt, hcd_dslope=hcd_dslope,
-        hcd_btilt_mu=hcd_btilt_mu, hcd_btilt_sigma=hcd_btilt_sigma)
+        hcd_btilt_mu=hcd_btilt_mu, hcd_btilt_sigma=hcd_btilt_sigma,
+        # REAL-FIT (survey != None) litWLS LLS forward z-slope center (2.127, sim_sub, sim_DLA);
+        # survey=None (closure/SBC) → None → _zslope_sites centers on HCD_INCIDENCE_SLOPE (sim-truth).
+        zslope_mu=survey_zslope_mu)
     return ctx, d
 
 

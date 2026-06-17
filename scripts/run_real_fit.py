@@ -10,7 +10,11 @@ printed and stored UNBLINDED — only the A_p / n_s VALUES are hidden.
 
 PRODUCTION BASELINE (the locked decisions; mirrors scripts/run_prod_sbc_shard.py):
   - 2-param PRIYA τ₀ (amplitude × slope, uniform priors);
-  - lit-pinned per-class HCD incidence (hierarchical_hcd=False — the referee baseline);
+  - lit-pinned per-class HCD incidence (hierarchical_hcd=False — the referee baseline). The LLS
+    forward z-slope is the litWLS γ_LLS=2.127 (PI re-determination 2026-06-17): build_legb_ctx(survey=…)
+    plumbs ctx.zslope_mu=(2.127, sim_subDLA, sim_DLA) on this REAL-FIT path (survey != None), so the
+    LLS center tracks the literature dN/dX(z) — NOT the sim incidence slope 2.465 (closure/SBC only).
+    σ_LLS = 0.15 (1× lit measurement error, PI WIDTH RULE; 2× cosmic-variance hedge available);
   - emucoh (off-diagonal-only) + cross-class C_emu;
   - MF P1D correction + the LF→HR / n_s-edge C_emu floor;
   - eBOSS+DESI metals: a SHARED a_SiIII nuisance (sample_metals=True when the survey is metal-bearing);

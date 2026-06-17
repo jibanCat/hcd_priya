@@ -47,7 +47,10 @@ import numpy as np
 
 REPO = "/home/mfho/hcd_priya"
 PY = "/home/mfho/.conda/envs/emu-jax/bin/python3"
-CKPT_DIR = f"{REPO}/checkpoints/stepA"
+# CKPT_DIR is env-overridable (STEPA_CKPT_DIR) so a re-run on a CORRECTED forward can write to a
+# SEPARATE dir (e.g. checkpoints/stepA_slfix/) without overwriting the existing baseline checkpoints
+# and without colliding on the single-writer health.json. Default = the canonical stepA dir.
+CKPT_DIR = os.environ.get("STEPA_CKPT_DIR", f"{REPO}/checkpoints/stepA")
 HEALTH_JSON = f"{CKPT_DIR}/health.json"
 HEALTH_TXT = f"{CKPT_DIR}/health.txt"
 
@@ -122,7 +125,7 @@ def build_config(verbose=False):
                      mf_emucoh=0.0, mf_emucoh_offdiag_only=False, sample_metals=False,
                      inject_a_siiii=0.0, inject_res_corr=None, subdla_center_shift=0.0,
                      hierarchical_hcd=False, hcd_ratio_infl=1.0, hcd_center_shift=0.0,
-                     hcd_2d_tilt=False, z_slope_marginalized=False, seed=0):
+                     hcd_2d_tilt=False, z_slope_marginalized=False, zslope_realfit=False, seed=0):
         # ``seed`` (default 0 = back-compat for every legacy battery) sets the PRNGKey root, hence the
         # MOCK-NOISE key k_mock = split(fold_in(PRNGKey(seed), mock_index)) in run_one_chain. Distinct
         # seeds at the SAME (survey, sim, fold) therefore give INDEPENDENT cosmic-noise realizations —
@@ -147,6 +150,7 @@ def build_config(verbose=False):
                 subdla_center_shift=float(subdla_center_shift),
                 hierarchical_hcd=bool(hierarchical_hcd), hcd_ratio_infl=float(hcd_ratio_infl),
                 hcd_center_shift=float(hcd_center_shift), hcd_2d_tilt=bool(hcd_2d_tilt),
+                zslope_realfit=bool(zslope_realfit),
                 chain_id=c, n_chains=n_chains, seed=int(seed)))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -355,7 +359,8 @@ def build_config(verbose=False):
 
     # === 2D AMPLITUDE×TILT submanifold closure (HT arms, PI refinement 2026-06-14) ===
     # The PI's 2D submanifold: a GENUINE 2-dof HCD sector = pivot AMPLITUDE A_HCD × a GLOBAL z-TILT
-    # B_HCD, with the class-differential z-evolution FIXED (δs_c = HCD_LIT_OVER_SIM_SLOPE − slope[0]):
+    # B_HCD, with the class-differential z-evolution FIXED (δs_c = HCD_INCIDENCE_SLOPE − slope[0],
+    # the SIM incidence-weight slope; NOT the lit/sim ratio — see hcd-dndx-zslope-bug):
     #   α_c(z) = A_HCD · r_c · ((1+z)/(1+z_p))^(B_HCD + δs_c).
     # B_HCD is the DATA-constrained 2nd submanifold dimension whose z-tilt signature is ORTHOGONAL
     # to the n_s k-tilt — the hypothesis (HZ diagnosis) is that this z-evolution dof DECORRELATES
@@ -366,7 +371,7 @@ def build_config(verbose=False):
     # A_HCD-center 0/+1σ/−1σ via hcd_center_shift (the cosmology-safety arm: does the 2D tilt keep
     # the A_HCD-center→n_s coupling <0.3σ?). 2 folds × 3 shifts × 4 chains = 24 chains. NOT launched
     # here — config only. (run_one_chain threads hcd_2d_tilt → build_legb_ctx; the closure δs_c /
-    # B_HCD center/width auto-derive from HCD_LIT_OVER_SIM_SLOPE, self-consistent with the forward.)
+    # B_HCD center/width auto-derive from HCD_INCIDENCE_SLOPE, self-consistent with the forward.)
     for _tfn, _tff, _tfns in [("HT_f6", 6, 0.966), ("HT_f4", 4, 0.92)]:
         add_fiducial(_tfn + "_t0", _tff, _tfns, survey="DESI+KS", prior_center="sim_mean",
                      hierarchical_hcd=True, hcd_2d_tilt=True, hcd_ratio_infl=1.0)
@@ -520,6 +525,32 @@ def build_config(verbose=False):
         add_fiducial(f"HFSF10_{_tag}", _f, mf_shape=1.0, **_base)                  # shape floor infl 1.0
         add_fiducial(f"HFSF15_{_tag}", _f, mf_shape=1.5, **_base)                  # shape floor infl 1.5
         add_fiducial(f"HFSF20_{_tag}", _f, mf_shape=2.0, **_base)                  # shape floor infl 2.0
+
+    # === 2D-TILT HCD-MODEL OVERRIDE (env-gated, 2026-06-17) ============================== #
+    # HCD-slope-model SELECTION re-run: the 1D re-centered power-law (the slfix batch) ran the 4
+    # per-survey closure mocks D_f3 / K_f4 / XS_f6_s0 / E_f5 with the FIXED/marginalized 1D HCD
+    # z-slope. This override re-runs the SAME 4 mocks (same fold/sim/seed/noise → byte-identical
+    # mock data) but with the 2D AMPLITUDE×TILT HCD model (hcd_2d_tilt=True + hierarchical_hcd=True),
+    # which lets the DATA float the global z-tilt B_HCD (centered on HCD_INCIDENCE_SLOPE[0]=2.465 with
+    # FIXED per-class δs_c). The ONLY change vs slfix is the HCD-slope MODEL — so the n_s/A_p recovery
+    # diff isolates which slope model recovers truth best. Activated ONLY when STEPA_2DTILT_MOCKS is set
+    # (a comma-list of mock_ids, or "default" = the 4 per-survey closures); BYTE-IDENTICAL when unset, so
+    # every other battery/golden is untouched. Output dir is selected SEPARATELY via STEPA_CKPT_DIR
+    # (=checkpoints/stepA_2dtilt) so the slfix checkpoints are never overwritten.
+    _2d_env = os.environ.get("STEPA_2DTILT_MOCKS", "").strip()
+    if _2d_env:
+        _2d_mocks = ({"D_f3", "K_f4", "XS_f6_s0", "E_f5"} if _2d_env.lower() == "default"
+                     else set(m.strip() for m in _2d_env.split(",") if m.strip()))
+        _n_flipped = 0
+        for c in cfg:
+            if c["mock_id"] in _2d_mocks:
+                c["hcd_2d_tilt"] = True
+                c["hierarchical_hcd"] = True
+                c["hcd_ratio_infl"] = 1.0
+                _n_flipped += 1
+        if verbose:
+            print(f"[config] STEPA_2DTILT_MOCKS={_2d_env!r} -> 2D-tilt+hierarchical on "
+                  f"{sorted(_2d_mocks)} ({_n_flipped} chains flipped)")
 
     if verbose:
         print(f"[config] resolved {len(cfg)} chains")
@@ -683,8 +714,10 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         build_legb_ctx, held_out_sims, make_truth_from_sim, make_hr_truth_from_cache, make_legb_mock,
         _mock_core_per_leg, _run_nuts_legb, _draws_matrix, _packed_names_for, _hcd_latent_truths,
         _hcd_latent_truths_2d, CACHE_PATH, ZSLOPE_PRIOR_SIGMA, HCD_INCIDENCE_SLOPE)
-    from hcd_analysis.emulator.inference import (PARAM_NAMES, HCD_LIT_OVER_SIM_SLOPE,
-                                                 hcd_incidence_prior)
+    # NB: HCD_LIT_OVER_SIM_SLOPE is deliberately NOT imported — it is the lit/sim RATIO slope
+    # (prior-center at the z=3 PIVOT only), NEVER the forward z-exponent. The forward z-slope is
+    # closure_legb.HCD_INCIDENCE_SLOPE (imported above). See hcd-dndx-zslope-bug.
+    from hcd_analysis.emulator.inference import PARAM_NAMES, hcd_incidence_prior
 
     fold = chain["fold"]
     # MOCK INDEX: run_legb_convergence selects the sim by mock_index OR an explicit sim. We pass
@@ -721,6 +754,10 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         mf_shape_legs=(_survey,),
         mf_emucoh=(_einfl > 0), mf_emucoh_infl=(_einfl if _einfl > 0 else 1.0),
         mf_emucoh_legs=(_survey,), mf_emucoh_offdiag_only=_eoda, desi_kwargs=_desi_kw,
+        # DIAGNOSTIC (decomp): res_corr low-k anchor multiple. Default 5.0 = production anchor
+        # (byte-identical for every existing chain); 0.0 = NO anchor (raw clamped res_corr table).
+        # The decomp diagnostic sets chain["mf_anchor_mult"]=0.0 for the "minus-anchor" variant.
+        mf_anchor_mult=float(chain.get("mf_anchor_mult", 5.0)),
         # HIERARCHICAL HCD prior ("Option B"): A_hcd × {r_subdla, r_dla} reparam (default OFF →
         # byte-identical). The ratio centers are auto-derived from the RAW sim w_c pool (must-fix #1).
         hierarchical_hcd=bool(chain.get("hierarchical_hcd", False)),
@@ -730,15 +767,63 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         # hierarchical_hcd; the closure δs_c / B_hcd center+width auto-derive from the forward slopes.
         hcd_2d_tilt=bool(chain.get("hcd_2d_tilt", False)))
 
-    # z-slope marginalization is a NO-OP under the 2D tilt (which sets s_c = B_hcd + δs_c itself);
-    # _legb_model ignores marginalize_zslope when hcd_2d_tilt, but keep the ctx clean (don't set it).
-    if chain["z_slope_marginalized"] and not bool(chain.get("hcd_2d_tilt", False)):
-        # CENTER on the SIM incidence-weight slope HCD_INCIDENCE_SLOPE (~2.4, the slope the mock
-        # truth's w_c(z) carries — makes dN/dX(z) RISE with z), NOT the lit/sim RATIO slope
-        # HCD_LIT_OVER_SIM_SLOPE (~0.95). Matches the _zslope_sites None-default + the 2D-tilt anchor.
-        ctx = ctx._replace(marginalize_zslope=True,
-                           zslope_mu=jnp.asarray(HCD_INCIDENCE_SLOPE),
-                           zslope_sigma=jnp.asarray(ZSLOPE_PRIOR_SIGMA))
+    # DIAGNOSTIC (decomp): FIX the res_corr-amplitude nuisance alpha_res to the no-op (alpha0=1,
+    # s=0, NOT sampled) instead of marginalizing it. Default False = production (alpha SAMPLED,
+    # byte-identical). The "minus-alpha" decomp variant sets chain["fix_alpha_res"]=True.
+    if bool(chain.get("fix_alpha_res", False)):
+        ctx = ctx._replace(fix_alpha_res=True)
+
+    # HYPOTHESIS #3 (res_corr COVARIANCE form, PI 2026-06-16): inject a rank-1 FRACTIONAL
+    # res_corr-shape C_emu term sigma_res^2·dhat dhat^T (dhat = anchored log res_corr) into the
+    # mf_shape_per_leg slot, INSTEAD of marginalizing the res_corr amplitude alpha(z). Used with
+    # fix_alpha_res=True so alpha is NOT floated. Default None → byte-identical no-op (the npz is
+    # only read when this chain key is set, so every existing arm/golden is untouched). The cov is
+    # on the leg's flat (z,k) grid; we assert k/z-alignment to the live leg before binding.
+    _rccov = chain.get("res_corr_shape_cov_npz")
+    if _rccov:
+        _cd = np.load(_rccov, allow_pickle=True)
+        _per_leg = {}
+        for _leg in ctx.legs:
+            _key = f"{_leg.name}_cov"
+            if _key not in _cd.files:
+                continue                                   # leg not covered by this cov → skip
+            _cov = np.asarray(_cd[_key], float)
+            _n = np.asarray(_leg.k).shape[0]
+            assert _cov.shape == (_n, _n), (
+                f"res_corr_shape_cov[{_leg.name}] {_cov.shape} != leg ({_n},{_n})")
+            assert np.allclose(np.asarray(_leg.k), np.asarray(_cd[f"{_leg.name}_k"])), \
+                f"res_corr_shape_cov[{_leg.name}]: leg k grid mismatch (cov built on a different grid)"
+            _per_leg[_leg.name] = jnp.asarray(_cov)
+        ctx = ctx._replace(mf_shape_per_leg=_per_leg,
+                           mf_shape_infl=float(chain.get("res_corr_shape_cov_infl", 1.0)))
+
+    # CLOSURE/SBC sim-truth z-slope center (PI re-determination 2026-06-17): run_stepA is the
+    # CLOSURE driver — its held-out-sim mocks carry the SIM incidence slope HCD_INCIDENCE_SLOPE
+    # (2.465,…), NOT the litWLS γ_LLS=2.127 the REAL fit uses. build_legb_ctx(survey=…) now plumbs
+    # the litWLS LLS zslope_mu for the REAL fit, so the CLOSURE must RESET zslope_mu back to the
+    # sim-truth center here (regardless of z_slope_marginalized) so the forward LLS slope tracks the
+    # mock truth. (The litWLS-direction closure arm — a lit-truth mock — is a SEPARATE fiducial; it
+    # sets zslope_realfit=True to opt INTO the litWLS center against a lit-drawn truth.)
+    _zslope_realfit = bool(chain.get("zslope_realfit", False))
+    if not bool(chain.get("hcd_2d_tilt", False)):
+        if _zslope_realfit:
+            # REAL-FIT-DIRECTION arm (zslope_realfit=True): center the LLS forward z-slope on the
+            # litWLS γ_LLS=2.127 (sim subDLA/DLA), the slope the REAL fit uses — to validate the
+            # real-fit-direction LLS→n_s leak against this mock. subDLA/DLA stay sim incidence slope.
+            from hcd_analysis.emulator.inference import HCD_LLS_REALFIT_ZSLOPE
+            _inc = np.asarray(HCD_INCIDENCE_SLOPE, float)
+            ctx = ctx._replace(marginalize_zslope=True,
+                               zslope_mu=jnp.asarray([HCD_LLS_REALFIT_ZSLOPE, _inc[1], _inc[2]]),
+                               zslope_sigma=jnp.asarray(ZSLOPE_PRIOR_SIGMA))
+        else:
+            # CLOSURE default: CENTER on the SIM incidence-weight slope HCD_INCIDENCE_SLOPE (~2.4, the
+            # slope the held-out-sim mock truth's w_c(z) carries — dN/dX(z) RISES with z), NOT the
+            # lit/sim RATIO slope HCD_LIT_OVER_SIM_SLOPE (~0.95) NOR the litWLS real-fit slope 2.127.
+            # Matches the _zslope_sites None-default + the 2D-tilt anchor. Pinned marginalized or fixed.
+            ctx = ctx._replace(zslope_mu=jnp.asarray(HCD_INCIDENCE_SLOPE))
+            if chain["z_slope_marginalized"]:
+                ctx = ctx._replace(marginalize_zslope=True,
+                                   zslope_sigma=jnp.asarray(ZSLOPE_PRIOR_SIGMA))
 
     # SEPARATE per-survey inference (2026-06-10): keep only this chain's leg(s). A "+"-joined survey
     # (e.g. "DESI+KS", the cosmology-safety arm) keeps BOTH legs for a genuine joint fit.
@@ -862,6 +947,10 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         hierarchical_hcd=bool(chain.get("hierarchical_hcd", False)),
         hcd_ratio_infl=float(chain.get("hcd_ratio_infl", 1.0) or 1.0),
         hcd_2d_tilt=bool(chain.get("hcd_2d_tilt", False)),
+        # litWLS real-fit-direction LLS z-slope arm (PI re-determination 2026-06-17): True → the
+        # forward LLS z-slope is centered on γ_LLS=2.127 (the real-fit center) vs this mock; the
+        # closure default (False) keeps the sim-truth slope 2.465. Lets the analysis flag the arm.
+        zslope_realfit=bool(chain.get("zslope_realfit", False)),
         # mock-noise SEED (the PRNGKey root → k_mock). The RCINJ injection gate pairs the clean &
         # injected arms by (survey, sim, fold, seed); distinct seeds = independent noise draws.
         seed=int(chain.get("seed", 0)),
