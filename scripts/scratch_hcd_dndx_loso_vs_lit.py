@@ -5,7 +5,10 @@ Map (the exact one the forward uses, verified by round-trip to the cache snap_dN
   posterior alpha_pivot_c  (LLS, subDLA, DLA)  [per-class incidence WEIGHT at z_pivot=3]
     -> alpha_c(z) = alpha_pivot_c * ((1+z)/(1+3))**s_c            (forward z-evolution)
     -> dN/dX_c(z) = alpha_to_dndx(alpha_c(z), Xbar(z), z)         (dndx_wc telescoping inverse)
-s_c = HCD_INCIDENCE_SLOPE = (2.465,2.758,2.366) for the fixed-slope closures (the SIM incidence-weight
+s_c is the FORWARD z-slope, read PER DRAW from the chain so each band reflects its ACTUAL fitted
+z-evolution: 2D-tilt chains use s_c = B_hcd + δs_c (per-draw B_hcd column); marginalized chains use
+the sampled s_lls/s_subdla/s_dla (or the prior CENTER HCD_INCIDENCE_SLOPE when those columns aren't
+packed); fixed-slope chains use HCD_INCIDENCE_SLOPE = (2.465,2.758,2.366) (the SIM incidence-weight
 slope the mock truth carries; NOT the lit/sim RATIO slope HCD_LIT_OVER_SIM_SLOPE=(0.95,…)).
 Xbar(z) = X_tot/N_sl from the LF cache (mean absorption path per sightline).
 
@@ -97,11 +100,20 @@ def build_xbar():
 
 
 def dndx_from_alpha_pivot(alpha_pivot, z, slope, xbar_fn):
-    """(...,3) alpha_pivot -> dN/dX_c(z) array of shape (nz, 3). alpha_pivot can be (3,) or (N,3)."""
+    """(...,3) alpha_pivot -> dN/dX_c(z) array of shape (nz, 3). alpha_pivot can be (3,) or (N,3).
+
+    ``slope`` is the FORWARD z-evolution exponent s_c and may be either
+      - a (3,) per-class vector (the FIXED-slope readout: HCD_INCIDENCE_SLOPE), applied to every draw, OR
+      - a (N,3) PER-DRAW array (marginalized s_lls/s_subdla/s_dla or 2D B_hcd+δs_c posterior columns) —
+        so each posterior draw's band carries its OWN fitted z-evolution (+ the inter-draw spread)."""
     a = np.atleast_2d(np.asarray(alpha_pivot))                       # (N,3)
     z = np.atleast_1d(np.asarray(z, float))                          # (nz,)
-    s = np.asarray(slope)                                            # (3,)
-    shape = ((1.0 + z)[None, :, None] / (1.0 + ZP)) ** s[None, None, :]   # (1,nz,3)
+    s = np.asarray(slope, float)
+    if s.ndim == 1:                                                  # FIXED (3,) → broadcast over draws
+        shape = ((1.0 + z)[None, :, None] / (1.0 + ZP)) ** s[None, None, :]   # (1,nz,3)
+    else:                                                           # PER-DRAW (N,3) → one slope per draw
+        assert s.shape[0] == a.shape[0], f"per-draw slope {s.shape} vs alpha {a.shape}"
+        shape = ((1.0 + z)[None, :, None] / (1.0 + ZP)) ** s[:, None, :]      # (N,nz,3)
     alpha_z = a[:, None, :] * shape                                  # (N,nz,3)
     Xb = np.asarray(xbar_fn(z))                                      # (nz,)
     out = np.empty_like(alpha_z)
@@ -111,24 +123,54 @@ def dndx_from_alpha_pivot(alpha_pivot, z, slope, xbar_fn):
     return out                                                      # (N,nz,3)
 
 
+def _draw_slopes(z, nm, pk):
+    """Resolve the PER-DRAW forward z-slope s_c (Ndraw,3) for one chain npz, from its CHAIN TYPE:
+      - 2D AMPLITUDE×TILT (hcd_2d_tilt): s_c = B_hcd + δs_c per draw (δs_c = HCD_INCIDENCE_SLOPE −
+        HCD_INCIDENCE_SLOPE[0], the FIXED class-differential the forward uses). B_hcd is a packed col.
+      - marginalize_zslope: s_c = the sampled s_lls/s_subdla/s_dla posterior columns IF present in the
+        packed draws (future-proof — current _draws_matrix does NOT pack them); else fall back to the
+        marginalized prior CENTER HCD_INCIDENCE_SLOPE (the None-default), broadcast to all draws.
+      - fixed-slope: HCD_INCIDENCE_SLOPE (the SIM incidence-weight slope the mock truth carries),
+        broadcast to all draws.
+    Returns (slopes (Ndraw,3), kind) where kind ∈ {"2d","marg","marg_prior","fixed"} for the legend."""
+    N = pk.shape[0]
+    incid = np.asarray(HCD_INCIDENCE_SLOPE, float)
+    is_2d = ("hcd_2d_tilt" in z.files and bool(z["hcd_2d_tilt"])) or ("B_hcd" in nm)
+    is_marg = bool(z["z_slope_marginalized"])
+    if is_2d and "B_hcd" in nm:
+        B = pk[:, nm.index("B_hcd")]                                 # (N,)
+        dslope = incid - incid[0]                                    # (3,) δs_c, δs_LLS≡0
+        return B[:, None] + dslope[None, :], "2d"
+    if is_marg and all(s in nm for s in ("s_lls", "s_subdla", "s_dla")):
+        sidx = [nm.index(s) for s in ("s_lls", "s_subdla", "s_dla")]
+        return pk[:, sidx], "marg"
+    if is_marg:                                                     # sampled but not packed → prior center
+        return np.tile(incid[None, :], (N, 1)), "marg_prior"
+    return np.tile(incid[None, :], (N, 1)), "fixed"                  # fixed-slope closure
+
+
 def pool_posterior(base):
-    """Return dict: alpha_draws (Ndraw,3) pooled over chains, truth_alpha (3,), meta."""
+    """Return dict: alpha_draws (Ndraw,3) pooled over chains, slope_draws (Ndraw,3), truth_alpha (3,),
+    meta. slope_draws is the PER-DRAW forward z-slope (2D B_hcd+δs_c / marginalized s_c / fixed)."""
     cs = chains_for(base)
     if not cs:
         return None
-    draws, meta = [], None
+    draws, slopes, kinds, meta = [], [], set(), None
     for c in cs:
         z = np.load(c, allow_pickle=True)
         nm = list(z["names"]); pk = z["packed"]
         idx = [nm.index(x) for x in ("alpha_lls", "alpha_subdla", "alpha_dla")]
         draws.append(pk[:, idx])
+        s_draw, kind = _draw_slopes(z, nm, pk)
+        slopes.append(s_draw); kinds.add(kind)
         if meta is None:
             tv = z["truth_vec"]
             meta = dict(fold=int(z["fold"]), ns=float(z["n_s"]), survey=str(z["survey"]),
                         prior=str(z["prior_center"]), sim=str(z["sim"]),
                         truth_alpha=np.array([tv[i] for i in idx]),
                         zslope=bool(z["z_slope_marginalized"]))
-    return dict(alpha=np.concatenate(draws, 0), **meta)
+    return dict(alpha=np.concatenate(draws, 0), slope=np.concatenate(slopes, 0),
+                slope_kind=("+".join(sorted(kinds))), **meta)
 
 
 def truth_dndx_for_sim(sim, d, zg, dndx_cache):
@@ -145,9 +187,12 @@ def truth_dndx_for_sim(sim, d, zg, dndx_cache):
 
 def main():
     xbar_fn, d, zg_cache, dndx_cache = build_xbar()
-    # FORWARD z-slope = the SIM incidence-WEIGHT slope HCD_INCIDENCE_SLOPE (~2.4, the slope the
-    # mock truth's w_c(z) carries → dN/dX(z) RISES with z), NOT the lit/sim RATIO slope
-    # HCD_LIT_OVER_SIM_SLOPE (~0.95, the wrong-object slope that made the bands FALL with z).
+    # FORWARD z-slope DEFAULT (truth + fixed-slope chains) = the SIM incidence-WEIGHT slope
+    # HCD_INCIDENCE_SLOPE (~2.4, the slope the mock truth's w_c(z) carries → dN/dX(z) RISES with z),
+    # NOT the lit/sim RATIO slope HCD_LIT_OVER_SIM_SLOPE (~0.95, the wrong-object slope that made the
+    # bands FALL with z). Marginalized / 2D-tilt chains instead FLOAT s_c and the posterior bands
+    # below use the PER-DRAW fitted slope (pool_posterior → p["slope"]); SLOPE is only the truth +
+    # fixed-slope-chain default.
     SLOPE = np.asarray(HCD_INCIDENCE_SLOPE)
 
     # --- gather per-survey, per-fold posterior dN/dX(z) ---
@@ -159,17 +204,21 @@ def main():
             p = pool_posterior(b)
             if p is None:
                 print(f"  [skip] no chains for {b}"); continue
-            slope = SLOPE  # fixed-slope closures (zslope=False) → the SIM incidence-weight slope
+            # PER-DRAW forward z-slope: each posterior draw evolves α_pivot across z with its OWN
+            # fitted s_c (2D B_hcd+δs_c / marginalized s_lls/s_subdla/s_dla), so the band reflects the
+            # ACTUAL fitted z-evolution + its spread; fixed-slope chains keep HCD_INCIDENCE_SLOPE.
+            slope = p["slope"]                                            # (N,3) per-draw
             dd = dndx_from_alpha_pivot(p["alpha"], zgrid, slope, xbar_fn)   # (N,nz,3)
             med = np.median(dd, 0); lo = np.percentile(dd, 16, 0); hi = np.percentile(dd, 84, 0)
-            # truth alpha -> truth dN/dX(z) via the same map (the posterior-space truth)
-            td = dndx_from_alpha_pivot(p["truth_alpha"][None, :], zgrid, slope, xbar_fn)[0]
+            # truth alpha -> truth dN/dX(z) at the SIM incidence slope SLOPE (the slope the mock
+            # truth's native w_c(z) carries — the posterior-space truth, independent of the fit).
+            td = dndx_from_alpha_pivot(p["truth_alpha"][None, :], zgrid, SLOPE, xbar_fn)[0]
             # the sim's native cache dN/dX (independent ground truth, full incidence)
             zt, ndt = truth_dndx_for_sim(p["sim"], d, zg_cache, dndx_cache)
             recs.append(dict(base=b, fold=p["fold"], ns=p["ns"], prior=p["prior"],
                              zgrid=zgrid, med=med, lo=lo, hi=hi, truth_alpha_dndx=td,
                              sim_z=zt, sim_dndx=ndt))
-            print(f"  {survey:8s} {b:16s} fold={p['fold']} ns={p['ns']:.3f} "
+            print(f"  {survey:8s} {b:16s} fold={p['fold']} ns={p['ns']:.3f} slope={p['slope_kind']} "
                   f"dNdX@z3 LLS={med[np.argmin(abs(zgrid-3)),0]:.3f} "
                   f"sub={med[np.argmin(abs(zgrid-3)),1]:.3f} DLA={med[np.argmin(abs(zgrid-3)),2]:.4f}")
         records[survey] = recs

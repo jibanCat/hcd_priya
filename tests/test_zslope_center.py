@@ -25,7 +25,9 @@ from types import SimpleNamespace
 from numpyro import handlers
 
 from hcd_analysis.emulator import closure_legb as CL
-from hcd_analysis.emulator.inference import HCD_LIT_OVER_SIM_SLOPE
+from hcd_analysis.emulator.inference import (HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT,
+                                             lit_over_sim_at_z)
+import pytest
 
 
 def _fake_ctx(marginalize_zslope=False, zslope_mu=None, zslope_sigma=None):
@@ -68,8 +70,10 @@ def test_marginalized_default_center_is_incidence_slope():
 
 
 def test_marginalized_explicit_mu_is_respected():
-    """An explicit ctx.zslope_mu still overrides (the fix only changes the None-DEFAULT center)."""
-    custom = jnp.asarray([1.1, 1.2, 1.3])
+    """An explicit ctx.zslope_mu still overrides (the fix only changes the None-DEFAULT center).
+    Use a center above the forward-z-slope guard floor (incidence-slope-like) — an explicit center
+    is a forward EXPONENT center too, so it must still be a legitimate incidence slope (>1.5)."""
+    custom = jnp.asarray([2.6, 2.7, 2.5])
     ctx = _fake_ctx(marginalize_zslope=True, zslope_mu=custom)
     tr = handlers.trace(handlers.seed(
         lambda: CL._zslope_sites(ctx), jax.random.PRNGKey(0))).get_trace()
@@ -77,7 +81,125 @@ def test_marginalized_explicit_mu_is_respected():
     np.testing.assert_allclose(locs, np.asarray(custom), rtol=0, atol=0)
 
 
+# --------------------------------------------------------------------------- #
+#  5b. The 2D-tilt B_hcd center is HCD_INCIDENCE_SLOPE[0] (cache-free anchor).   #
+# --------------------------------------------------------------------------- #
+def test_2d_btilt_center_is_incidence_slope_lls():
+    """The 2D AMPLITUDE×TILT global-tilt center B_hcd_mu = HCD_INCIDENCE_SLOPE[0] (the LLS incidence
+    slope ~2.46), and the class-differential δs_c = HCD_INCIDENCE_SLOPE − HCD_INCIDENCE_SLOPE[0] so
+    that at B_hcd = center the per-class slopes equal HCD_INCIDENCE_SLOPE — NOT the lit/sim ratio.
+    (build_legb_ctx wires these from real cache; here we pin the CONSTANTS the wiring uses, so this
+    runs without the cache — test_legb_2d_tilt covers the full ctx build when the cache is present.)"""
+    incid = np.asarray(CL.HCD_INCIDENCE_SLOPE)
+    ratio = np.asarray(HCD_LIT_OVER_SIM_SLOPE)
+    btilt_mu = float(incid[0])
+    assert btilt_mu == pytest.approx(2.465, abs=1e-9), f"B_hcd center {btilt_mu} != HCD_INCIDENCE_SLOPE[0]"
+    assert not np.isclose(btilt_mu, float(ratio[0])), \
+        f"B_hcd center is the lit/sim RATIO LLS slope {ratio[0]} — the wrong-object bug"
+    # and the guard would PASS this center but FAIL the ratio center.
+    CL._assert_forward_zslope_center(btilt_mu, "test 2D center")
+    with pytest.raises(AssertionError):
+        CL._assert_forward_zslope_center(float(ratio[0]), "test ratio center")
+
+
+# --------------------------------------------------------------------------- #
+#  5c. SIGN test — the forward dN/dX(z) RISES with z (the test that catches the  #
+#      bug: with the 0.95 ratio slope it FALLS).                                 #
+# --------------------------------------------------------------------------- #
+def _dndx_z_at_slope(slope, z, xbar):
+    """Forward dN/dX_c(z) = alpha_to_dndx(α_pivot·((1+z)/(1+z_p))^s_c, Xbar(z), z) — the EXACT map
+    scripts/scratch_hcd_dndx_loso_vs_lit.py uses. ``xbar`` is Xbar(z) (mean absorption path per
+    sightline), which RISES with z in PRIYA (the cache fit goes ~0.45→1.08 over z 2.4→4.2). That
+    rising denominator is what makes the SIGN of d ln dN/dX/d ln(1+z) discriminating: at the
+    incidence slope (~2.4) the (1+z)^s_c growth WINS → dN/dX rises; at the ratio slope (~0.95) the
+    rising Xbar WINS → dN/dX FALLS (the bug). Representative, illustrative Xbar(z) — matches the
+    real cache trend without loading the 1 GB cache."""
+    from hcd_analysis.emulator.dndx_wc import alpha_to_dndx
+    alpha_pivot = np.array([0.27, 0.09, 0.004])      # representative LLS/subDLA/DLA pivot weights
+    zp = float(HCD_Z_PIVOT)
+    s = np.asarray(slope, float)
+    out = np.empty((len(z), 3))
+    for i, zz in enumerate(z):
+        a_z = alpha_pivot * ((1.0 + zz) / (1.0 + zp)) ** s
+        out[i] = np.asarray(alpha_to_dndx(jnp.asarray(a_z), jnp.asarray(float(xbar[i])),
+                                          jnp.asarray(float(zz))))
+    return out
+
+
+# Xbar(z) RISING with z, matching the PRIYA cache fit (build_xbar) over the in-range z window.
+_Z_GRID = np.array([2.4, 3.0, 3.6, 4.2])
+_XBAR_Z = np.array([0.454, 0.632, 0.839, 1.076])      # ≈ the real cache Xbar(z) at these z
+
+
+def test_forward_dndx_rises_with_z_at_incidence_slope():
+    """The forward dN/dX_c(z) built at the INCIDENCE slope HCD_INCIDENCE_SLOPE RISES with z for ALL
+    three HCD classes (d ln dN/dX / d ln(1+z) > 0) — matching the literature + mock truth. This is
+    the SIGN test that would have caught the wrong-object bug (and catches any future reversion).
+    Uses the rising Xbar(z) of the real cache so the sign is the figure's sign (see _dndx_z_at_slope)."""
+    dndx = _dndx_z_at_slope(CL.HCD_INCIDENCE_SLOPE, _Z_GRID, _XBAR_Z)
+    lz = np.log(1.0 + _Z_GRID)
+    for j, cls in enumerate(("LLS", "subDLA", "DLA")):
+        slope_fit = np.polyfit(lz, np.log(dndx[:, j]), 1)[0]   # d ln dN/dX / d ln(1+z)
+        assert slope_fit > 0.0, (
+            f"forward dN/dX_{cls}(z) FALLS with z (d ln dN/dX/d ln(1+z)={slope_fit:.3f} ≤ 0) at the "
+            f"incidence slope — a sign the forward z-exponent reverted to the lit/sim RATIO slope "
+            f"(~0.95). See hcd-dndx-zslope-bug.")
+
+
+def test_forward_dndx_falls_with_z_at_ratio_slope_documents_the_bug():
+    """The COMPLEMENT (documents the bug's symptom): at the WRONG lit/sim RATIO slope
+    HCD_LIT_OVER_SIM_SLOPE the forward dN/dX(z) FALLS with z for ALL three classes (the rising Xbar(z)
+    overwhelms the shallow (1+z)^0.95 growth) — exactly the failure the figure showed. Pins WHY the
+    incidence slope is required, and that the sign FLIPS between the two slope objects."""
+    dndx = _dndx_z_at_slope(HCD_LIT_OVER_SIM_SLOPE, _Z_GRID, _XBAR_Z)
+    lz = np.log(1.0 + _Z_GRID)
+    for j, cls in enumerate(("LLS", "subDLA", "DLA")):
+        slope_fit = np.polyfit(lz, np.log(dndx[:, j]), 1)[0]
+        assert slope_fit < 0.0, (
+            f"sanity: with the 0.95 ratio slope dN/dX_{cls}(z) should FALL (got {slope_fit:+.3f}); if "
+            f"this fails the bug's symptom changed — revisit the forward map / Xbar(z) regime.")
+
+
+# --------------------------------------------------------------------------- #
+#  5d. HCD_LIT_OVER_SIM_SLOPE is consumed ONLY at the z=3 pivot (slope cancels). #
+# --------------------------------------------------------------------------- #
+def test_ratio_slope_only_acts_off_pivot_not_at_z3():
+    """lit_over_sim_at_z(z=3) is UNCHANGED if the ratio slope is zeroed — i.e. HCD_LIT_OVER_SIM_SLOPE
+    has NO effect at the z=3 PIVOT (its only legitimate consumption point); it acts ONLY off-pivot.
+    This pins that the ratio slope is a z=3-pivot prior-center quantity, never the forward exponent."""
+    zp = float(HCD_Z_PIVOT)
+    at_pivot = np.asarray(lit_over_sim_at_z(jnp.asarray(zp)))
+    at_pivot_zeroed = np.asarray(lit_over_sim_at_z(jnp.asarray(zp), slope=jnp.zeros(3)))
+    np.testing.assert_allclose(at_pivot, at_pivot_zeroed, rtol=0, atol=1e-12,
+                               err_msg="lit_over_sim_at_z(z=3) depends on the ratio slope — it must "
+                                       "cancel at the pivot (the slope's only consumption point).")
+    # off-pivot, the slope DOES matter (so the test above isn't vacuous):
+    z_off = zp + 1.0
+    full = np.asarray(lit_over_sim_at_z(jnp.asarray(z_off)))
+    zeroed = np.asarray(lit_over_sim_at_z(jnp.asarray(z_off), slope=jnp.zeros(3)))
+    assert not np.allclose(full, zeroed), "ratio slope must act OFF the pivot (else the test is vacuous)"
+
+
+# --------------------------------------------------------------------------- #
+#  Guard fires on a 0.95 reversion of the forward-exponent CENTER.              #
+# --------------------------------------------------------------------------- #
+def test_guard_fires_on_ratio_slope_reversion():
+    """The runtime guard _assert_forward_zslope_center RAISES if the forward z-slope center is
+    reverted to the lit/sim RATIO slope (~0.95), and PASSES on the incidence slope (~2.4)."""
+    CL._assert_forward_zslope_center(CL.HCD_INCIDENCE_SLOPE, "incidence ok")
+    with pytest.raises(AssertionError, match="hcd-dndx-zslope-bug"):
+        CL._assert_forward_zslope_center(HCD_LIT_OVER_SIM_SLOPE, "ratio reversion")
+
+
+def test_fixed_branch_guard_catches_a_reverted_constant(monkeypatch):
+    """If a future edit reverts the module constant HCD_INCIDENCE_SLOPE to the ratio slope, the
+    _zslope_sites FIXED branch raises via the guard (reversion fails LOUDLY at trace time)."""
+    monkeypatch.setattr(CL, "HCD_INCIDENCE_SLOPE", tuple(HCD_LIT_OVER_SIM_SLOPE))
+    ctx = _fake_ctx(marginalize_zslope=False)
+    with pytest.raises(AssertionError, match="hcd-dndx-zslope-bug"):
+        CL._zslope_sites(ctx)
+
+
 if __name__ == "__main__":
     import sys
-    import pytest
     sys.exit(pytest.main([__file__, "-q"]))

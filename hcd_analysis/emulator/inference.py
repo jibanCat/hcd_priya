@@ -91,12 +91,17 @@ HCD_LIT_OVER_SIM = (1.06, 1.00, 1.34)        # (LLS, subDLA, DLA): data/sim at z
 # or +1.90 on z≤3.5) is dominated by z>3.5 DLA dN/dX that the literature does not measure
 # reliably — so do not impose a strong DLA z-evolution; let the data set it (σ widened above).
 HCD_LIT_OVER_SIM_SLOPE = (0.95, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
-# NB: this is the lit/sim RATIO slope — the z-evolution of the (literature dN/dX)/(PRIYA dN/dX)
-# ratio. Its ONLY legitimate use is the lit_over_sim_at_z α-prior CENTER, evaluated at the z=3
-# pivot where the slope CANCELS (zero production effect). It is a DISTINCT object from the FORWARD
-# HCD incidence-weight slope closure_legb.HCD_INCIDENCE_SLOPE=(2.465,2.758,2.366) (~2.4 — the SIM
-# w_c(z) slope d ln w_c/d ln(1+z) that the mock truth carries and the forward α_c(z) must track).
-# Do NOT use HCD_LIT_OVER_SIM_SLOPE as the forward z-slope center (that was the wrong-object bug).
+# ============================ READ THIS BEFORE USING THIS CONSTANT ============================
+# This is the lit/sim RATIO slope — d ln[(literature dN/dX)/(PRIYA dN/dX)]/d ln(1+z). It is the
+# PRIOR CENTER at the z=3 PIVOT ONLY (where the slope CANCELS — zero production effect), consumed
+# EXCLUSIVELY by lit_over_sim_at_z(z=z_pivot). It is NEVER a forward z-exponent.
+#   ⇒ The FORWARD HCD incidence-weight z-slope s_c in α_c(z)=α_pivot·((1+z)/4)^s_c is a DISTINCT
+#     object: closure_legb.HCD_INCIDENCE_SLOPE=(2.465,2.758,2.366) (~2.4 — the SIM w_c(z) slope
+#     d ln w_c/d ln(1+z) the mock truth carries and the forward α_c(z) must track).
+# Using THIS (0.95) ratio slope as the forward exponent makes the predicted dN/dX(z) FALL with z
+# (truth + literature RISE) and puts the mock-truth slope 2.9–6σ off-center — the wrong-object bug
+# that has recurred 3+ times. See hcd-dndx-zslope-bug (notes) + tests/test_zslope_center.py.
+# =============================================================================================
 
 # --- PER-SURVEY effective LLS-abundance pin (real-fit prior; 2026-06-11 Lyα-agent + PI) --------
 # The LLS prior CENTER is the dominant DESI-A_p risk (a tight prior at an offset center moves A_p

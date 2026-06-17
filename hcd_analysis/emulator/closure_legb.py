@@ -94,6 +94,27 @@ SIGMA_S = 0.5
 # LLS scatter ≈0.07; subDLA/DLA differentials δs=(0,+0.29,−0.10).
 HCD_INCIDENCE_SLOPE = (2.465, 2.758, 2.366)
 
+# Forward z-slope sanity threshold: the incidence slope is ~2.4 (LLS 2.465); the WRONG lit/sim
+# RATIO slope HCD_LIT_OVER_SIM_SLOPE is ~0.95. A center below this floor means someone reverted the
+# forward z-exponent to the ratio slope (the wrong-object bug). Kept comfortably below 2.465 and
+# above 0.95 so it catches a 0.95 reversion but never false-trips on the legitimate incidence center.
+_FWD_ZSLOPE_FLOOR = 1.5
+
+
+def _assert_forward_zslope_center(center, where):
+    """GUARD the FORWARD HCD z-slope PRIOR CENTER (NOT individual sampled draws): the LLS-class
+    center MUST be the incidence slope HCD_INCIDENCE_SLOPE (~2.4), never the lit/sim RATIO slope
+    HCD_LIT_OVER_SIM_SLOPE (~0.95). ``center`` is a CONCRETE (constant) array — HCD_INCIDENCE_SLOPE,
+    ctx.zslope_mu, or hcd_btilt_mu — so float() is trace-safe (it is never a traced NUTS sample).
+    Catches a 0.95 reversion of the forward exponent; see hcd-dndx-zslope-bug."""
+    c0 = float(np.asarray(center).reshape(-1)[0])
+    assert c0 > _FWD_ZSLOPE_FLOOR, (
+        f"HCD forward z-slope center [{where}] = {c0:.4f} is below {_FWD_ZSLOPE_FLOOR} — it must be "
+        f"HCD_INCIDENCE_SLOPE (~2.4, the SIM incidence-weight slope), NOT the lit/sim RATIO slope "
+        f"HCD_LIT_OVER_SIM_SLOPE (~0.95). The forward exponent was reverted to the wrong object. "
+        f"See hcd-dndx-zslope-bug.")
+
+
 # PER-LEG DLA-residual fraction in the closure TARGET MOCK (§0c, PI-confirmed final intent
 # 2026-06-09): the 10% unmasked-DLA residual belongs in the target. The DLA finder misses ~10%
 # of DLAs (completeness ~90%) → on DESI those 10% REMAIN as full systems in the target; KS fully
@@ -257,6 +278,11 @@ class LegBCtx(NamedTuple):
     hcd_dslope: object = None                 # (3,) δs_c FIXED class-differential slopes (δs_LLS≡0)
     hcd_btilt_mu: float = None                # B_HCD prior center (= s_LLS slope center)
     hcd_btilt_sigma: float = None             # B_HCD prior width (= the LLS slope-prior width)
+    fix_alpha_res: bool = False               # DIAGNOSTIC (default False → SAMPLE alpha_res, byte-
+    #                                           identical to production). True → DO NOT sample the two
+    #                                           res_corr-amplitude sites; pass the fixed no-op
+    #                                           (alpha0=1, s=0) into the forward. Used by the decomp
+    #                                           diagnostic to isolate alpha's contribution.
 
 
 def _kim(z):
@@ -271,7 +297,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    metals_on=False, desi_kwargs=None, ks_kwargs=None,
                    with_eboss=False, eboss_kwargs=None,
                    use_xclass=True, with_mf=False, mf_fold=0, mf_with_floor=True,
-                   mf_exclude_held=False, mf_target_hr_sim=None, mf_shape=False, mf_shape_infl=1.0,
+                   mf_exclude_held=False, mf_target_hr_sim=None, mf_anchor_mult=5.0,
+                   mf_shape=False, mf_shape_infl=1.0,
                    mf_shape_legs=("DESI", "KS"), mf_shape_npz=None,
                    mf_emucoh=False, mf_emucoh_infl=1.0,
                    mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
@@ -395,15 +422,20 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         hcd_dslope = jnp.asarray(_slope - _slope[0])             # (3,) δs_c, δs_LLS≡0
         hcd_btilt_mu = float(_slope[0])                          # B_HCD center = full LLS incidence slope
         hcd_btilt_sigma = float(ZSLOPE_PRIOR_SIGMA[0])           # B_HCD width (wide → B floats)
+        # GUARD: the 2D B_HCD center is the incidence slope (~2.4), never the lit/sim ratio (~0.95).
+        _assert_forward_zslope_center(hcd_btilt_mu, "build_legb_ctx hcd_btilt_mu (2D-tilt)")
 
     mf_obj = mf_floor_obj = None
     if with_mf:
         # mf_target_hr_sim (Task 1.5): with mf_exclude_held, drop EXACTLY this one HR sim from
         # the MF head fit (genuine leave-ONE-out) instead of the whole LF fold group. None →
         # whole-group held (back-compat); a NO-OP when mf_exclude_held=False.
+        # mf_anchor_mult (DIAGNOSTIC, default 5.0 = production anchor / byte-identical):
+        # 0.0 DISABLES the res_corr low-k anchor (raw clamped table) — used by the decomp
+        # diagnostic to isolate the anchor's contribution to the coherent n_s bias.
         mf_obj, mf_floor_obj = build_mf_correction(
             fold=mf_fold, with_floor=mf_with_floor, exclude_held_hr=mf_exclude_held,
-            target_hr_sim=mf_target_hr_sim)
+            target_hr_sim=mf_target_hr_sim, anchor_mult=mf_anchor_mult)
 
     # SHAPE-AWARE MF floor (Phase-5a): the per-leg fractional LOSO-eps outer-product covariance
     # (precomputed once, θ-blind). Fired on the named legs (default DESI+KS) when with_mf+mf_shape.
@@ -441,7 +473,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
 
 
 def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
-                        with_floor=True, floor_npz=None, target_hr_sim=None):
+                        with_floor=True, floor_npz=None, target_hr_sim=None,
+                        anchor_mult=5.0):
     """Build the production MF correction (resolved separable + rank-1 FixedMeanHead +
     fixed res_corr) on the LF native cache grid for a fold, REUSING the certified gate
     construction (scripts/diag_emu_bias_allfolds_mf.build_mf_for_fold). Returns
@@ -491,7 +524,8 @@ def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
         gtau_tab=comp["gtau_tab"], tau_tab=comp["tau_tab"], tau_by_z=comp["tau_by_z"],
         a_k=a_k, u_z=comp["u_z"], u_tau=comp["u_tau"])
     mf = MF.build_multifidelity(fold_model, fold_norm, lf_logk, head,
-                                eval_logk=eval_logk, log_rho=log_rho, delta_mode="none")
+                                eval_logk=eval_logk, log_rho=log_rho, delta_mode="none",
+                                anchor_mult=anchor_mult)
     mf_floor = None
     if with_floor:
         mf_floor = (DL.load_mf_floor(floor_npz) if floor_npz
@@ -1232,8 +1266,15 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     # FORWARD-ONLY (threaded into _data_loglik_legcore → predict_P_obs_on_leg → the MF
     # chokepoint; NOT into the truth → no closure cancellation). Two sites, amplitude THEN
     # slope; _legb_priors_only MUST mirror this order (constrain_fn traces it).
-    alpha_res = numpyro.sample("alpha_res", dist.TruncatedNormal(1.0, SIGMA_A0, low=0.0))
-    alpha_res_slope = numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
+    # DIAGNOSTIC (ctx.fix_alpha_res, default False → SAMPLE both sites, byte-identical): when
+    # True, DO NOT sample alpha_res/alpha_res_slope — pin them to the fixed no-op (alpha0=1, s=0,
+    # i.e. α(z)≡1, the production res_corr UNMODIFIED) in the forward. This isolates the
+    # alpha-marginalization's contribution to the n_s bias (the decomp diagnostic).
+    if getattr(ctx, "fix_alpha_res", False):
+        alpha_res, alpha_res_slope = 1.0, 0.0
+    else:
+        alpha_res = numpyro.sample("alpha_res", dist.TruncatedNormal(1.0, SIGMA_A0, low=0.0))
+        alpha_res_slope = numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
     numpyro.factor("loglik", _data_loglik_legcore(
         ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg, a_siiii=a_siiii,
         alpha_res=(alpha_res, alpha_res_slope)))
@@ -1332,9 +1373,11 @@ def _zslope_sites(ctx):
     predicted dN/dX(z) FALL with z and put the mock truth 2.9–6σ off-center (the wrong-object bug).
     Matches the already-correct 2D-tilt anchor (_btilt_site / build_legb_ctx → HCD_INCIDENCE_SLOPE)."""
     if not getattr(ctx, "marginalize_zslope", False):
+        _assert_forward_zslope_center(HCD_INCIDENCE_SLOPE, "_zslope_sites fixed")
         return jnp.asarray(HCD_INCIDENCE_SLOPE)
-    mu = (jnp.asarray(HCD_INCIDENCE_SLOPE) if ctx.zslope_mu is None
-          else jnp.asarray(ctx.zslope_mu))
+    mu_src = HCD_INCIDENCE_SLOPE if ctx.zslope_mu is None else ctx.zslope_mu
+    _assert_forward_zslope_center(mu_src, "_zslope_sites marginalize_zslope center")
+    mu = jnp.asarray(mu_src)
     sg = (jnp.asarray(ZSLOPE_PRIOR_SIGMA) if ctx.zslope_sigma is None
           else jnp.asarray(ctx.zslope_sigma))
     s_lls = numpyro.sample("s_lls", dist.Normal(mu[0], sg[0]))
@@ -1365,8 +1408,11 @@ def _legb_priors_only(ctx):
         numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
     # res_corr AMPLITUDE nuisance (Task 1.3) — MUST mirror _legb_model's two sites in the SAME
     # order (amplitude before slope), at the SAME relative position (last), or constrain_fn corrupts.
-    numpyro.sample("alpha_res", dist.TruncatedNormal(1.0, SIGMA_A0, low=0.0))
-    numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
+    # DIAGNOSTIC fix_alpha_res: when set, _legb_model does NOT sample these two sites, so the
+    # priors-only mirror MUST drop them too (else constrain_fn's site set desyncs).
+    if not getattr(ctx, "fix_alpha_res", False):
+        numpyro.sample("alpha_res", dist.TruncatedNormal(1.0, SIGMA_A0, low=0.0))
+        numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
 
 
 def _legb_reconstruct_deterministics(ctx, samples):
