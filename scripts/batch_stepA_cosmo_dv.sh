@@ -14,7 +14,9 @@
 #   DV_XS_f6_s0_c{0..3}  DESI+KS fold6 Planck, sim_mean subDLA (shift 0) — the joint-leg closure
 #   DV_sig15_c{0..3}     σ-isolator 1× (σ_LLS=0.15) on the median-w_LLS sim — LOAD-BEARING
 #   DV_sig30_c{0..3}     σ-isolator 2× (σ_LLS=0.30) on the SAME sim/noise — does +1.01σ A_p reappear?
-#   DV_littruth_c{0..3}  real-fit-direction LEAK arm (lit-boosted, σ0.15) — leak gate (≈0.00σ)
+#   DV_littruth_c{0..3}  real-fit-direction LEAK gate: mock truth AT lit center (boost=1.0, σ0.15) —
+#                        leak gate (≈0.00σ). FIXED 2026-06-17: first launch used boost=1.06 = byte-
+#                        identical to DV_sig15; boost=1.0 is the genuine zero-offset arm.
 # DESI chains ~1.0-2.0 CPU-h, DESI+KS ~1.2-1.5 CPU-h, median-w sim ~0.9-1.1 CPU-h.
 # Total budget ~20-30 CPU-h. (cavestru1 cap 5000 CPU-h — far under.)
 #

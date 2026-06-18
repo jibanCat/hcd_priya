@@ -249,9 +249,14 @@ def build_config(verbose=False):
     #   DV_sig15     — σ-isolator 1× (σ_LLS=0.15) on _SIM_MED: the load-bearing arm.
     #   DV_sig30     — σ-isolator 2× (σ_LLS=0.30) on the SAME _SIM_MED/noise: does the historical
     #                  +1.01σ A_p reappear at 0.15 but vanish at 0.30? (→ then 0.15 is the width).
-    #   DV_littruth  — real-fit-direction LEAK arm: lit-boosted mock (no explicit target_ns → fold6
-    #                  median-w sim via _SIM_MED) at σ_LLS=0.15; the litWLS-center leak gate
-    #                  (criterion ≈0.00σ).
+    #   DV_littruth  — real-fit-direction LEAK gate: mock HCD truth sitting AT the lit prior center
+    #                  (zero offset), σ_LLS=0.15; criterion ≈0.00σ n_s leak.
+    #                  *** FIX 2026-06-17 (PI-caught): the FIRST launch used lls_truth_boost=1.06 on
+    #                  _SIM_MED, which is byte-IDENTICAL to DV_sig15 (sim pin makes target_ns moot) —
+    #                  the arm collapsed onto sig15 and never ran the leak test. On _SIM_MED the lit
+    #                  center ≈ mock truth at boost=1.0 (ratio 0.992), so boost=1.0 puts the truth AT
+    #                  the center (the zero-offset leak gate), distinct from sig15's deliberate +6%
+    #                  truth-vs-center offset (boost 1.06). DO NOT set this back to 1.06 — that is sig15.
     add_fiducial("DV_f3", 3, 0.90, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
                  sigma_lls=0.15, zslope_realfit=True)
     add_fiducial("DV_XS_f6_s0", 6, 0.966, survey="DESI+KS", prior_center="lit", sigma_lls=0.15,
@@ -260,7 +265,7 @@ def build_config(verbose=False):
                  sigma_lls=0.15, sim=_SIM_MED, zslope_realfit=True)
     add_fiducial("DV_sig30", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
                  sigma_lls=0.30, sim=_SIM_MED, zslope_realfit=True)
-    add_fiducial("DV_littruth", 6, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
+    add_fiducial("DV_littruth", 6, survey="DESI", prior_center="lit", lls_truth_boost=1.0,
                  sigma_lls=0.15, sim=_SIM_MED, zslope_realfit=True)
 
     # === Phase-5a EMUCOH closure validation (2026-06-12): the BLOCKING referee gate for the
