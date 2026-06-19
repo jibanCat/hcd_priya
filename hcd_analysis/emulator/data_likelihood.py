@@ -685,7 +685,8 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                          rho_zb=None, mf=None, mf_floor=None,
                          mf_shape_cov=None, mf_shape_infl=1.0,
                          mf_emucoh_cov=None, mf_emucoh_infl=1.0,
-                         mf_emucoh_offdiag_only=False, alpha_res=None):
+                         mf_emucoh_offdiag_only=False, alpha_res=None,
+                         require_zresolved=False):
     """Bind the emulator forward model to ONE leg's grid → flat (P_model (N,), C_total (N,N)).
 
     For each z in ``leg.z``:
@@ -740,13 +741,33 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     ``α(z) = alpha0·((1+z)/(1+Z_PIVOT))^s`` (Z_PIVOT=3.0), threaded into
     ``_predict_P_obs_mf → _mf_corr_on_cache``. Affects P_model ONLY (the forward), not
     C_total. ``None`` (and ``(1.0, 0.0)``) ⇒ α≡1 ⇒ the MF golden is byte-exact. Only fires
-    through the MF forward (``mf is not None``)."""
+    through the MF forward (``mf is not None``).
+
+    ``require_zresolved`` (opt-in, default False → byte-identical): when True, ASSERT
+    ``alpha_hcd`` is z-RESOLVED (ndim==2, (n_z,3)) — a (3,) z-flat alpha raises. The DEPLOYED
+    ``_legb_model`` + the SBC re-scoring (``_loglik_of_draws``/``ll_true``) set this so a future
+    z-flat regression on a load-bearing path fails LOUDLY instead of producing a quiet
+    z-structured residual (the recurring z-flat-alpha bug class). Default False keeps the legacy
+    (3,)-broadcast back-compat for the diagnostic/figure callers that pass it intentionally."""
     cache_k = jnp.asarray(cache_k)
     k_leg = jnp.asarray(leg.k)
     z_idx = np.asarray(leg.z_idx)
     R_z = jnp.asarray(leg.R_z)
     tau0_vec = jnp.asarray(tau0_vec)
     alpha_hcd = jnp.asarray(alpha_hcd)   # (3,) broadcast to all z, OR (n_z,3) per-z incidence
+    # GUARD (opt-in, default OFF → byte-identical back-compat): a (3,) z-FLAT alpha is silently
+    # broadcast to every z below (alpha_hcd.ndim==1 → the same incidence at all z). That is a
+    # recurring bug-class in the NON-deployed re-scoring paths (SBC loglik-rank, the walkthrough
+    # figure): the mock TRUTH is z-RESOLVED (per-z w_c rises ~3.5× over z) but a z-flat forward
+    # predicts a spurious z-ramp. The DEPLOYED _legb_model + real-fit pass the z-resolved
+    # alpha_hcd_z (n_z,3); they set require_zresolved=True so any future z-flat regression on the
+    # load-bearing paths fails LOUDLY here instead of producing quiet z-structured residuals.
+    if require_zresolved:
+        assert alpha_hcd.ndim == 2, (
+            f"predict_P_obs_on_leg(require_zresolved=True): alpha_hcd must be z-RESOLVED "
+            f"(n_z,3), got ndim={alpha_hcd.ndim} shape={tuple(alpha_hcd.shape)}. A (3,) z-flat "
+            f"alpha would be silently broadcast to all z and produce a spurious z-ramp vs the "
+            f"z-resolved truth (closure_legb._loglik_of_draws/ll_true regression).")
     # PER-LEG DLA-forward scaling (§0c): the sampled α_DLA's DLA-excess contribution is scaled by
     # leg.dla_forward_frac (DESI 1.0 → full residual; KS 0.0 → the forward DLA term is 0, matching
     # the 0% KS closure target). We fold the per-leg fraction into the DLA component of α so BOTH
