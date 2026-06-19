@@ -50,34 +50,64 @@ def _mock_path(out_dir, m):
 
 
 def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_depth, seed,
-              dense_mass=True, verbose=True):
+              dense_mass=True, verbose=True, leg_a=True, run_cfg=None):
     """Run (or load) ONE mock and persist it to ``{out_dir}/mock_{m:04d}.pkl``.
 
     SKIP-IF-EXISTS: if the per-mock pkl is already on disk (a previous task / attempt finished it)
     just load + return it — no re-NUTS. Otherwise call ``run_legb`` for the SINGLE mock index ``m``
     (its RNG is ``fold_in(seed, m)``, the SAME mock a full run would draw), then ATOMICALLY write
     the one record (tmp + os.replace) so a crash mid-write cannot leave a truncated pkl. Returns the
-    per-mock record dict (the same dict ``run_legb(return_per_mock=True)`` puts in its list)."""
+    per-mock record dict (the same dict ``run_legb(return_per_mock=True)`` puts in its list).
+
+    CONFIG-KEY GUARD (2026-06-19): the per-mock pkl is keyed by INDEX ONLY (``mock_{m:04d}.pkl``),
+    with NO leg_a / cemu_variant / amp_sigma discriminator. So a held-out (or cemu-variant /
+    width-check) run pointed at an ``--out-dir`` that already holds self-draw (or differently-
+    configured) pkls would SILENTLY ``SKIP`` and load the WRONG config — quietly mixing two
+    different SBC populations in one directory. We now STAMP the run config (``run_cfg``: leg_a,
+    cemu_variant, amp_sigma) into the record dict under ``run_cfg`` and, on the skip branch, ASSERT
+    the existing pkl's stamp MATCHES the requested one — RAISING on a mismatch (so a config clash is
+    a loud failure, not a silent wrong-config load). Pre-stamp pkls (no ``run_cfg`` key) are treated
+    as a clash when a non-default config is requested (a conservative, fail-loud default).
+
+    ``leg_a`` (default True = the SELF-DRAW production SBC): when False, ``run_legb`` builds the
+    mock from a HELD-OUT SIM (make_legb_mock + held_out_sims, fold 0) so the mock TRUTH is the sim's
+    MEASURED power and the likelihood forward is the EMULATOR prediction — the path that CONTAINS
+    emulator error (the honest C_emu instrument; the self-draw cancels emu error by construction)."""
     os.makedirs(out_dir, exist_ok=True)
+    cfg = dict(run_cfg) if run_cfg else {}
     path = _mock_path(out_dir, m)
     if os.path.exists(path):
         with open(path, "rb") as f:
             rec = pickle.load(f)
+        existing = rec.get("run_cfg")
+        # The DEFAULT (pre-2026-06-19) config every un-stamped pkl was written under.
+        default_cfg = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0)
+        # A PRE-STAMP pkl (no run_cfg) is treated as the default config — so resuming a DEFAULT run
+        # over old pkls still works, but a non-default (held-out / cemu-variant / width-check) run
+        # over those same old pkls correctly CLASHES (it would otherwise silently load self-draws).
+        eff_existing = existing if existing is not None else default_cfg
+        if eff_existing != cfg:
+            raise RuntimeError(
+                f"[mock {m}] config CLASH at {path}: existing pkl run_cfg={existing} "
+                f"(effective {eff_existing}) != requested {cfg}. The per-mock pkl is keyed by index "
+                f"only; a held-out / cemu-variant / width-check run must use a SEPARATE --out-dir "
+                f"(or delete the stale pkl). Refusing to load the wrong-config mock.")
         if verbose:
-            print(f"  [mock {m}] SKIP (exists) -> {path}")
+            print(f"  [mock {m}] SKIP (exists, cfg match {cfg}) -> {path}")
         return rec
 
     records = run_legb(ctx, d, n_mocks=n_mocks, mock_indices=[int(m)], return_per_mock=True,
-                       leg_a=True, n_warmup=n_warmup, n_samples=n_samples, seed=seed,
+                       leg_a=leg_a, n_warmup=n_warmup, n_samples=n_samples, seed=seed,
                        dense_mass=dense_mass, max_tree_depth=max_tree_depth, verbose=verbose)
     assert len(records) == 1, f"expected 1 record for mock {m}, got {len(records)}"
     rec = records[0]
+    rec["run_cfg"] = cfg            # STAMP the config so a later skip can verify it (the guard above)
     tmp = path + f".tmp.{os.getpid()}"
     with open(tmp, "wb") as f:
         pickle.dump(rec, f)
     os.replace(tmp, path)        # atomic on POSIX (same dir)
     if verbose:
-        print(f"  [mock {m}] wrote -> {path} (n_div={rec.get('n_div', 0)})")
+        print(f"  [mock {m}] wrote -> {path} (n_div={rec.get('n_div', 0)}, cfg={cfg})")
     return rec
 
 
@@ -103,36 +133,108 @@ def main():
                     help="run on final_prod_seed0 only (cheap de-risk; NOT the production object)")
     ap.add_argument("--no-shard-pkl", dest="write_shard_pkl", action="store_false",
                     help="skip the back-compat end-of-run shard_*.pkl (per-mock pkls are the unit)")
+    # HELD-OUT-SIM hook (2026-06-18): leg_a=True (default) is the SELF-DRAW production SBC (mock and
+    # likelihood share the forward → emulator error CANCELS by construction). --held-out flips to
+    # leg_a=False: the mock TRUTH is a held-out-sim's MEASURED power and the forward is the emulator
+    # prediction → the path that CONTAINS emulator error (the honest C_emu instrument).
+    ap.add_argument("--held-out", dest="leg_a", action="store_false",
+                    help="leg_a=False: held-out-sim mocks (make_legb_mock + held_out_sims) — CONTAINS "
+                         "emulator error (the C_emu fix gate). Default = leg_a=True self-draw.")
+    # C_EMU-VARIANT hook (2026-06-18): which C_emu the FORWARD likelihood uses. Env SBC_CEMU_VARIANT
+    # (or --cemu-variant) ∈ {current, fixed, oldc}:
+    #   current : the deployed production C_emu (mf_emucoh ON @ the [0.0102,0.069] table, mf_shape OFF).
+    #   fixed   : MODE-1 + MODE-2 fix — mf_emucoh @ the LOW-K table (covers [0.001,0.069]) AND mf_shape ON.
+    #   oldc    : explicit control == 'current' (the matched OLD-C arm for the fixed-vs-control compare).
+    # Threaded into build_legb_ctx and ASSERTED to propagate (no silent no-op) below.
+    ap.add_argument("--cemu-variant", default=None,
+                    choices=["current", "fixed", "oldc"],
+                    help="C_emu the forward uses (overrides env SBC_CEMU_VARIANT). Default: env or 'current'.")
     ap.add_argument("--out-dir", required=True)
-    ap.set_defaults(with_mf=True, with_eboss=True, res_corr_on=False, write_shard_pkl=True)
+    ap.set_defaults(with_mf=True, with_eboss=True, res_corr_on=False, write_shard_pkl=True, leg_a=True)
     a = ap.parse_args()
 
     members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
     if not members:
         raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
     ens = [members[0]] if a.single_member else members
+    # WIDTH-CHECK override (env SBC_SUBDLA_AMP_SIGMA>0): set the subDLA AMPLITUDE prior sigma/mu for the
+    # referee-mandated 0.40-vs-0.20 over-dispersion pre-check. Default 0 => unchanged production prior.
+    # The override threads via inference.HCD_PRIOR_FRAC_SIGMA -> build_legb_ctx (verified to propagate to
+    # ctx.alpha_hcd_sigma[1]); asserted below so it can never silently no-op (the referee's #1 hazard).
+    _amp_sig = float(os.environ.get("SBC_SUBDLA_AMP_SIGMA", "0"))
+    if _amp_sig > 0:
+        from hcd_analysis.emulator import inference as _I
+        _pf = _I.HCD_PRIOR_FRAC_SIGMA
+        _I.HCD_PRIOR_FRAC_SIGMA = (_pf[0], _amp_sig, _pf[2])
+        print(f"[width-check] subDLA AMPLITUDE sigma/mu overridden {_pf[1]} -> {_amp_sig}")
+    # C_EMU VARIANT resolution (CLI > env > 'current'). 'fixed' = MODE-1 (low-k emucoh table) +
+    # MODE-2 (mf_shape ON); 'current'/'oldc' = the deployed C_emu. Asserted to propagate below.
+    LOWK_EMUCOH_NPZ = f"{REPO}/hcd_analysis/_emulator_data/mf_cemu_emucoh_lowk.npz"
+    variant = a.cemu_variant or os.environ.get("SBC_CEMU_VARIANT", "current")
+    assert variant in ("current", "fixed", "oldc"), f"bad SBC_CEMU_VARIANT {variant!r}"
+    a.cemu_variant = variant      # resolved value into the namespace so vars(a) records it in meta
+    _fixed = (variant == "fixed")
+    _emucoh_npz = LOWK_EMUCOH_NPZ if _fixed else None
+    if _fixed and not os.path.exists(LOWK_EMUCOH_NPZ):
+        raise SystemExit(f"--cemu-variant fixed needs {LOWK_EMUCOH_NPZ} (run build_mf_emucoh_floor "
+                         f"with CEMU_OUT_NPZ pointing there)")
+    print(f"[cemu-variant] {variant}  (mf_shape={'ON' if _fixed else 'off'}, "
+          f"emucoh_npz={'LOWK' if _fixed else 'default[0.0102,0.069]'})  leg_a={a.leg_a}")
     # the PRODUCTION baseline (referee: standard per-class HCD, hierarchical_hcd=False).
     ctx, d = build_legb_ctx(
         ensemble_ckpts=ens, use_xclass=True,
         with_mf=a.with_mf, mf_with_floor=a.with_mf,
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
+        mf_emucoh_npz=_emucoh_npz,                    # None → default table; LOWK → the fix (MODE 1)
+        mf_shape=_fixed,                              # MODE 2 (LF→HR resolution tilt) ON only when fixed
         with_eboss=a.with_eboss, metals_on=a.with_eboss, sample_metals=a.with_eboss,
         hierarchical_hcd=False)
+    # PROPAGATION ASSERTS (the referee's #1 hazard — a flag that silently no-ops). Verify the
+    # variant actually changed the deployed C_emu on the DESI leg (the low-k binding leg).
+    import numpy as _np
+    _desi = [l for l in ctx.legs if l.name.upper().startswith("DESI")][0]
+    _ec = ctx.mf_emucoh_per_leg.get(_desi.name) if getattr(ctx, "mf_emucoh_per_leg", None) else None
+    assert _ec is not None, "mf_emucoh_per_leg NOT set on DESI — emucoh term silently OFF"
+    _msc = ctx.mf_shape_per_leg.get(_desi.name) if getattr(ctx, "mf_shape_per_leg", None) else None
+    if _fixed:
+        assert _msc is not None and _np.any(_np.asarray(_msc) != 0.0), \
+            "fixed variant: mf_shape_per_leg NOT populated on DESI — MODE-2 silently no-op"
+        # MODE-1: the low-k emucoh binder must carry coherent covariance on rows below k=0.0102.
+        _klo = _np.asarray(_desi.k) < 0.0102
+        _ecd = _np.diag(_np.asarray(_ec))
+        assert _klo.sum() > 0 and _np.any(_ecd[_klo] > 0), \
+            "fixed variant: low-k emucoh binder has NO covariance below k=0.0102 — MODE-1 silently no-op"
+        print(f"[cemu-variant] VERIFIED fixed: mf_shape on DESI nonzero; emucoh covers "
+              f"{int((_ecd[_klo]>0).sum())}/{int(_klo.sum())} DESI rows below k=0.0102")
+    else:
+        assert getattr(ctx, "mf_shape_per_leg", None) is None, \
+            "current variant: mf_shape_per_leg should be None (MODE-2 off)"
+        print(f"[cemu-variant] VERIFIED current: mf_shape off; emucoh = default table")
+    if _amp_sig > 0:
+        _r = float(_np.asarray(ctx.alpha_hcd_sigma)[1] / _np.asarray(ctx.alpha_hcd_mu)[1])
+        assert abs(_r - _amp_sig) < 0.01, f"subDLA amp-width override NO-OP: ctx ratio {_r:.4f} != {_amp_sig}"
+        print(f"[width-check] verified ctx.alpha_hcd_sigma[1]/mu[1] = {_r:.4f}")
     n_members = len(getattr(ctx.model, "members", [None]))
     n_z = len(ctx.z_global)
     idxs = [m for m in range(a.n_mocks) if m % a.n_shards == a.shard]
     print(f"[shard {a.shard}/{a.n_shards}] mocks={idxs}  members={n_members}  "
           f"legs={[l.name for l in ctx.legs]}  n_z={n_z}  mf={a.with_mf} eboss={a.with_eboss}  "
+          f"cemu_variant={variant} leg_a={a.leg_a}(held_out={not a.leg_a})  "
           f"res_corr_on={a.res_corr_on}(flag-not-wired; default-forward) "
           f"(warmup={a.n_warmup} samples={a.n_samples} mtd={a.max_tree_depth})")
 
     # PER-MOCK loop: one mock at a time, checkpoint + skip after each (bounds RSS, ≤1 mock lost
     # per OOM/wall, resumable). The end-of-run shard pkl is still written for back-compat.
+    # CONFIG STAMP (2026-06-19): the discriminators that change the SBC POPULATION but NOT the pkl
+    # filename (index-only). _run_mock writes this into each record and asserts it matches on a skip,
+    # so a held-out / cemu-variant / width-check run cannot silently load self-draw (or other-config)
+    # pkls left in the same --out-dir.
+    run_cfg = dict(leg_a=bool(a.leg_a), cemu_variant=str(variant), amp_sigma=float(_amp_sig))
     records = []
     for m in idxs:
         rec = _run_mock(ctx, d, m, a.out_dir, n_mocks=a.n_mocks, n_warmup=a.n_warmup,
                         n_samples=a.n_samples, max_tree_depth=a.max_tree_depth, seed=a.seed,
-                        dense_mass=True, verbose=True)
+                        dense_mass=True, verbose=True, leg_a=a.leg_a, run_cfg=run_cfg)
         records.append(rec)
 
     if a.write_shard_pkl:
