@@ -67,6 +67,65 @@ CACHE_KMAX = 0.069
 # DESI continuum-floor low-k cut + half-Nyquist resolution high-k cut (usage doc §"cuts").
 DESI_KMIN = 1e-3
 
+# ============================================================================ #
+#  COVARIANCE-CORRECTNESS FIXES (2026-06-18, low-k n_s reliability arc).
+#  Both WIDEN the low-k covariance to match the published DESI DR1 cosmology
+#  analysis (Chaves-Montero arXiv:2601.21432) + the eBOSS PRIYA analysis
+#  (Fernandez+2024 arXiv:2309.03943). Neither de-biases the forward; they soften
+#  the +5.5σ low-k n_s pull computed against the currently-deployed covariance.
+#  Both are ENV-GATED and REVERSIBLE (unset → byte-identical to the deployed path).
+#  See docs/superpowers/2026-06-18-{desi-p1d-lowk-data-reliability,
+#  cosmic-variance-floor-lowk}.md (notes repo).
+# ----------------------------------------------------------------------------#
+#  Fix 1 — DESI SNR>3 measurement + covariance (the cosmology-paper baseline).
+#  The Chaves-Montero DR1 cosmology fit uses the SNR>3 subsample (62,807 QSO) with
+#  its OWN full 1020×1020 covariance + a +5% STAT-uncertainty inflation at all (k,z)
+#  ("possible percent-level large-scale biases", CCD image sims). Our default loads
+#  the SNR>1 baseline. Set HCD_DESI_SNR3=1 to swap to the SNR>3 npz; the +5% stat
+#  inflation rides along with it (on the SEPARATE cov_stat block: cov += (1.05²−1)·cov_stat).
+DESI_SNR3_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d_snr3.npz"
+DESI_SNR3_STAT_INFLATE = 1.05         # +5% on the STAT uncertainty (paper baseline)
+
+
+def _env_flag(name):
+    """True iff the env var ``name`` is set to a truthy token (1/true/yes/on)."""
+    import os
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# ----------------------------------------------------------------------------#
+#  Fix 2 — restore the ~2% finite-box cosmic-variance (σ_CV) floor at low k.
+#  Fernandez+2024 (eBOSS PRIYA, Eq 3.1) carries K = K_BOSS + σ_GP σ_GPᵀ + σ_CV σ_CVᵀ;
+#  σ_CV ≈ 2% of P, significant ONLY at k<2.5e-3 s/km (the finite 120 Mpc/h box),
+#  negligible at high k. Our deployed C_total drops it. Set HCD_CV_FLOOR=1 to ADD it
+#  back as an additive term scaled by the data power: var += (f_CV(k)·P_data)².
+#  f_CV(k) = CV_FLOOR_FRAC for k ≤ CV_FLOOR_K_FULL, tapering linearly to 0 at
+#  CV_FLOOR_K_ZERO (so it is a smooth low-k-only floor, off above ~3e-3). DIAGONAL by
+#  default (HCD_CV_FLOOR_RANK1=1 makes it Fernandez's fully-correlated rank-1 σ_CV σ_CVᵀ).
+CV_FLOOR_FRAC = 0.02                  # 2% of P (Fernandez/PRIYA large-scale CV level)
+CV_FLOOR_K_FULL = 2.5e-3              # full amplitude at k ≤ this (s/km)
+CV_FLOOR_K_ZERO = 3.0e-3              # tapered to 0 by this k (negligible above)
+
+
+def _cv_floor_frac(k):
+    """The fractional σ_CV(k): CV_FLOOR_FRAC at k≤K_FULL, linearly →0 at K_ZERO, 0 above."""
+    k = np.asarray(k, float)
+    t = (CV_FLOOR_K_ZERO - k) / (CV_FLOOR_K_ZERO - CV_FLOOR_K_FULL)   # 1 at K_FULL, 0 at K_ZERO
+    return CV_FLOOR_FRAC * np.clip(t, 0.0, 1.0)
+
+
+def _add_cv_floor(C_data, k, P_data, *, rank1=False):
+    """Add the σ_CV low-k floor to a leg's data covariance (Fix 2). Returns a NEW array.
+    DIAGONAL: C += diag((f_CV·P)²).  RANK1 (Fernandez Eq 3.1 form): C += s sᵀ, s=f_CV·P
+    (fully correlated across the low-k rows). Pure numpy, host-side (C_data is fixed)."""
+    s = _cv_floor_frac(k) * np.asarray(P_data, float)        # (N,) absolute σ_CV per row
+    C = np.asarray(C_data, float).copy()
+    if rank1:
+        C += np.outer(s, s)
+    else:
+        C[np.diag_indices_from(C)] += s ** 2
+    return C
+
 
 # ============================================================================ #
 #  DataLeg container
@@ -147,7 +206,8 @@ def desi_resolution_R(z):
 # ============================================================================ #
 def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
                   *, z_lo=2.2, z_hi=4.2, k_min=DESI_KMIN, metals_on=True,
-                  resolution_on=False, add_cov_diag_inflation=True, mf_floor_on=False):
+                  resolution_on=False, add_cov_diag_inflation=True, mf_floor_on=False,
+                  use_snr3=None, snr3_stat_inflate=None, add_cv_floor=None):
     """Load DESI DR1 P1D → a post-cut ``DataLeg`` (usage doc §"Covariance + cuts").
 
     Cuts (z-major flat layout, ``row_is_zmajor=True``):
@@ -159,14 +219,42 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
     metals_on=True (DESI forward-models SiIII/SiII per the usage doc); resolution_on=False
     by default (the residual resolution mode stays in C — usage doc option (a); the template
     knob is offered but OFF). The data is DECONVOLVED → compare theory directly (no window).
+
+    COVARIANCE-CORRECTNESS FIXES (2026-06-18, REVERSIBLE, env-gated; see the module
+    constants block). All three default to ``None`` → read the corresponding env flag, so
+    UNSET env ⇒ byte-identical to the deployed SNR>1 path (back-compat); an explicit
+    True/False overrides the env for tests.
+      * ``use_snr3``         (env ``HCD_DESI_SNR3``): load the SNR>3 npz (``DESI_SNR3_NPZ``,
+        the Chaves-Montero cosmology baseline, 62,807 QSO) + its OWN covariance instead of
+        the SNR>1 baseline. Same z/k grid, larger low-k errors. Auto-applies the +5% stat
+        inflation below unless ``snr3_stat_inflate`` is set otherwise.
+      * ``snr3_stat_inflate`` (default → ``DESI_SNR3_STAT_INFLATE``=1.05 when SNR>3 is on):
+        inflate the STAT uncertainty by this factor (paper's +5% for large-scale biases):
+        ``cov += (f²−1)·cov_stat``. Only applied when SNR>3 is active.
+      * ``add_cv_floor``     (env ``HCD_CV_FLOOR``): add the Fernandez σ_CV ~2% finite-box
+        floor to the low-k rows (``_add_cv_floor``). Diagonal unless ``HCD_CV_FLOOR_RANK1``.
     """
+    use_snr3 = _env_flag("HCD_DESI_SNR3") if use_snr3 is None else bool(use_snr3)
+    add_cv_floor = _env_flag("HCD_CV_FLOOR") if add_cv_floor is None else bool(add_cv_floor)
+    if use_snr3:
+        # Fix 1: the cosmology-paper baseline (SNR>3 measurement + its own covariance).
+        npz_path = DESI_SNR3_NPZ
     d = np.load(npz_path, allow_pickle=True)
     z = np.asarray(d["z"], float)              # (1020,) z-major
     k = np.asarray(d["k"], float)              # (1020,) angular k
     P = np.asarray(d["plya"], float)
     cov = np.asarray(d["cov"], float).copy()   # full STAT+SYST
+    if use_snr3:
+        # Fix 1: +5% STAT-uncertainty inflation (paper's large-scale-bias allowance), applied
+        # on the SEPARATE stat block so the syst part is untouched: cov += (f²−1)·cov_stat.
+        f = DESI_SNR3_STAT_INFLATE if snr3_stat_inflate is None else float(snr3_stat_inflate)
+        cov = cov + (f ** 2 - 1.0) * np.asarray(d["cov_stat"], float)
     if add_cov_diag_inflation:
         cov[np.diag_indices_from(cov)] += np.asarray(d["cov_diag_inflation"], float)
+    if add_cv_floor:
+        # Fix 2: the σ_CV ~2% finite-box floor on the low-k rows (full-grid; the k-taper
+        # zeroes it above ~3e-3, and the post-cut sub-selection keeps only the kept rows).
+        cov = _add_cv_floor(cov, k, P, rank1=_env_flag("HCD_CV_FLOOR_RANK1"))
 
     # z-dependent k cut: k < 0.5π/R_z(z) with R_z from the DESI resolution proxy.
     R_row = desi_resolution_R(z)
@@ -220,7 +308,7 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
 def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
                    *, z_lo=2.2, z_hi=4.6, k_min=0.0, k_max=CACHE_KMAX,
                    metals_on=True, resolution_on=False, mf_floor_on=False,
-                   dla_forward_frac=EBOSS_DLA_FORWARD_FRAC):
+                   dla_forward_frac=EBOSS_DLA_FORWARD_FRAC, add_cv_floor=None):
     """Load eBOSS DR14 P1D (Chabanier+2019, 1812.03554) → a post-cut ``DataLeg`` (block-diag cov).
 
     Format: the npz from ``scripts/convert_eboss_dr14_p1d.py`` (z, k, plya, sigma, cov, syst_*).
@@ -241,11 +329,16 @@ def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
     eBOSS is a LARGE-scale leg below the high-k floor/emucoh regime (emucoh band k≥0.01 is zero at the
     A_p pivot k≈0.009). resolution_on=False — eBOSS resolution syst (~2e-4 in-band) stays in C_data.
     """
+    add_cv_floor = _env_flag("HCD_CV_FLOOR") if add_cv_floor is None else bool(add_cv_floor)
     d = np.load(npz_path, allow_pickle=True)
     z = np.asarray(d["z"], float)              # (455,) z-major
     k = np.asarray(d["k"], float)              # (455,) angular k
     P = np.asarray(d["plya"], float)
     cov = np.asarray(d["cov"], float).copy()   # (455,455) block-diag STAT+SYST
+    if add_cv_floor:
+        # Fix 2 (2026-06-18): the Fernandez+2024 σ_CV ~2% finite-box floor at k<2.5e-3 — this
+        # is the eBOSS PRIYA analysis it was MEASURED for. ENV-gated/reversible (HCD_CV_FLOOR).
+        cov = _add_cv_floor(cov, k, P, rank1=_env_flag("HCD_CV_FLOOR_RANK1"))
 
     keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k > k_min) & (k <= k_max + 1e-9)
 
