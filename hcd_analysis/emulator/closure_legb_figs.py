@@ -27,6 +27,22 @@ from .closure_legb import (
 FIGDIR = "/home/mfho/hcd_priya/figures/analysis/05_likelihood"
 
 
+def _truth_alpha_zresolved_on_leg(truth, leg):
+    """The Z-RESOLVED truth incidence α(z) (n_z,3) on a leg's z-bins — the per-z sim w_c (rises
+    ~3.5× over z), NOT the z-flat z-median ``truth['w_c']`` the figure used to pass (which the
+    binding silently broadcasts → a SPURIOUS z-ramp in P_emu vs the z-resolved P_truth). EXACTLY
+    the "EXACT per-z w_c(z)" arm of scripts/diag_legb_zresolved_alpha_check.py (the reference that
+    does it right): ``truth['w_c_z']`` (per-z [LLS,sub,DLA] = ``d['w_c_cache'][truth['rows'],1:]``)
+    nearest-z mapped onto the leg z. The figure's P_truth is the DLA-MASKED baseline P_obs_true, so
+    — matching the diag reference — the DLA column is the raw per-z w_c (no §0c 10% scaling; the
+    masked baseline holds the DLA class at the clean level either way)."""
+    import numpy as _np
+    z_sim = _np.asarray(truth["z"])
+    w_c_z = _np.asarray(truth["w_c_z"], float)              # (nZs,3) per-z structural w_c
+    sel = _np.array([int(_np.argmin(_np.abs(z_sim - zz))) for zz in _np.asarray(leg.z)])
+    return jnp.asarray(w_c_z[sel])                          # (n_z,3) z-resolved (the fix)
+
+
 def _plt():
     import matplotlib
     matplotlib.use("Agg")
@@ -64,10 +80,11 @@ def fig_cemu_on_leg(ctx, d, figdir=FIGDIR):
         ax = axes[0][li]
         sel = np.array([int(np.argmin(np.abs(zg - zz))) for zz in leg.z])
         tau0_vec = jnp.asarray(truth_tau0_on_leg(truth, leg))
+        a_zr = _truth_alpha_zresolved_on_leg(truth, leg)     # Z-RESOLVED truth α(z) for C_emu sizing
         ev_x = _emu_var_for_leg(ctx, leg, jnp.asarray(truth["params_unit"]), tau0_vec,
-                                jnp.asarray(truth["w_c"]), core[leg.name], use_xclass=True)
+                                a_zr, core[leg.name], use_xclass=True)
         ev_d = _emu_var_for_leg(ctx, leg, jnp.asarray(truth["params_unit"]), tau0_vec,
-                                jnp.asarray(truth["w_c"]), core[leg.name], use_xclass=False)
+                                a_zr, core[leg.name], use_xclass=False)
         cdata = np.diag(np.asarray(leg.C_data))
         k = np.asarray(leg.k)
         zr = np.asarray(leg.z_row)
@@ -132,7 +149,8 @@ def fig_mock_example(ctx, d, figdir=FIGDIR, seed=0):
         tau0_vec = jnp.asarray(truth_tau0_on_leg(truth, leg))
         P_emu, _ = DL.predict_P_obs_on_leg(
             ctx.model, jnp.asarray(truth["params_unit"]), tau0_vec,
-            jnp.asarray(truth["w_c"]), pf_stats=ctx.pf_stats, dla_core=core[leg.name],
+            _truth_alpha_zresolved_on_leg(truth, leg),       # Z-RESOLVED truth α(z) (was z-flat w_c)
+            pf_stats=ctx.pf_stats, dla_core=core[leg.name],
             cache_k=ctx.cache_k, leg=leg, sigma_zb=None, alpha_centres=None)
         P_emu = np.asarray(P_emu)
         P_truth = np.zeros(leg.k.shape[0])

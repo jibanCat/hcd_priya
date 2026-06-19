@@ -811,13 +811,19 @@ def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="priya", mf=None, lls_t
     # ladder-discretization floor, the self-consistency the 13-rung→2-param swap requires).
     _alpha_sel = tau0_all[keep_rows] / np.asarray(_kim(jnp.asarray(z)))
     tau0_amp_true, dtau0_true = fit_tau0_alpha_priya(np.asarray(z), _alpha_sel)
+    # PER-Z structural w_c (nZs,3) [LLS,sub,DLA] — the Z-RESOLVED truth incidence the z-flat ``w_c``
+    # (z-median, below) drops. Used to build the z-resolved truth alpha for the SBC loglik-rank
+    # re-scoring (make_legb_mock → truth_pack['alpha_hcd_z']); the LLS column carries the same
+    # lls_truth_boost the z-median does (matches make_truth_from_sim's per-row a[0] boost above).
+    w_c_z = np.asarray(w_c[keep_rows, 1:], float).copy()
+    w_c_z[:, 0] = w_c_z[:, 0] * lls_truth_boost
     return dict(
         z=z, P_obs_true=P_obs, dla_excess_true=dla_excess,
         params_unit=params_unit[keep_rows[0]],
         tau0=tau0_all[keep_rows], dla_core=dla_core,
         tau0_amp=tau0_amp_true, dtau0=dtau0_true,
         w_c=np.median(w_c[keep_rows, 1:], axis=0) * np.array([lls_truth_boost, 1.0, 1.0]),
-        rows=keep_rows)
+        w_c_z=w_c_z, rows=keep_rows)
 
 
 def make_hr_truth_from_cache(sim_name, target_k, *, tau0_anchor="priya"):
@@ -1050,11 +1056,28 @@ def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0, inject_r
     # consistency point is α_DLA = 0.10·w_DLA. (On KS the target carries 0% AND the forward DLA
     # term is 0, so the KS leg is α_DLA-blind — consistent for any α_DLA.) The α_DLA prior is
     # centered on this 10% residual (HCD_DLA_RESIDUAL_FRAC=0.10) and is MARGINALIZED (sampled).
-    alpha_truth = np.asarray(truth_sim["w_c"]).copy()             # (3,) [LLS,sub,DLA]
+    alpha_truth = np.asarray(truth_sim["w_c"]).copy()             # (3,) [LLS,sub,DLA] z-MEDIAN pivot
     alpha_truth[2] = TRUTH_DLA_FRAC["DESI"] * alpha_truth[2]      # 0.10·w_DLA (the DESI residual)
+    # Z-RESOLVED truth alpha (nZg,3) for the SBC loglik-rank re-scoring (ll_true): the mock
+    # truth-on-leg uses the per-z sim P1D (z-resolved contamination), so re-scoring with a z-FLAT
+    # alpha produces a spurious z-ramp. Map the per-z sim w_c (``truth_sim['w_c_z']``, nearest-z onto
+    # z_global) and apply the SAME §0c DLA 10% residual scaling to the DLA column as the z-flat
+    # pivot above. Dropped-z rows (no sim z within z_tol) fall back to the z-median pivot (they carry
+    # NO data so they never affect the likelihood). Matches scripts/diag_legb_zresolved_alpha_check.
+    if truth_sim.get("w_c_z") is not None:
+        w_c_z = np.asarray(truth_sim["w_c_z"], float)            # (nZs,3) per-z structural w_c
+        alpha_hcd_z = np.tile(alpha_truth, (len(zg), 1))        # (nZg,3) default = z-median pivot
+        for i, zz in enumerate(zg):
+            j = int(np.argmin(np.abs(z_sim - zz)))
+            if abs(z_sim[j] - zz) <= z_tol:
+                az = w_c_z[j].copy()
+                az[2] = TRUTH_DLA_FRAC["DESI"] * az[2]           # 0.10·w_DLA(z) (the per-z residual)
+                alpha_hcd_z[i] = az
+    else:
+        alpha_hcd_z = np.tile(alpha_truth, (len(zg), 1))
     truth_pack = dict(
         theta9=np.asarray(truth_sim["params_unit"]),
-        tau0_global=tau0_global, alpha_hcd=alpha_truth,
+        tau0_global=tau0_global, alpha_hcd=alpha_truth, alpha_hcd_z=alpha_hcd_z,
         kept_global_z=kept_global)
     info = dict(key=key, dropped=dropped, z_sim=z_sim, truth_on_leg=truth_on_leg_out)
     return mock_legs, truth_pack, info
@@ -1226,7 +1249,7 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
 # ============================================================================ #
 def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs,
                          dla_core_per_leg, *, return_parts=False, a_siiii=0.0,
-                         alpha_res=None):
+                         alpha_res=None, require_zresolved=False):
     """``data_loglik`` but with a PER-LEG-Z dla_core (the mock's sim core). ``data_loglik``
     takes ONE (K,) core; here each leg z uses its own, so we call ``predict_P_obs_on_leg``
     per leg with that leg's core threaded through a per-z loop is overkill — instead we note
@@ -1240,7 +1263,12 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
     ``alpha_res`` (Task 1.3): the sampled res_corr-amplitude ``(alpha0, s)`` tuple, threaded
     FORWARD-ONLY into ``predict_P_obs_on_leg`` (it scales ``log res_corr`` by α(z) in the MF
     forward). ``None`` (default) ⇒ α≡1 ⇒ byte-exact back-compat. The TRUTH path never sets it
-    (α≡1 there) so the nuisance does NOT cancel in the closure."""
+    (α≡1 there) so the nuisance does NOT cancel in the closure.
+
+    ``require_zresolved`` (default False → back-compat) forwards to ``predict_P_obs_on_leg``'s
+    guard: when True ASSERT ``alpha_hcd`` is z-RESOLVED ((n_zg,3), so the per-leg slice is (n_z,3))
+    — a (3,) z-flat alpha raises. The DEPLOYED ``_legb_model`` + the SBC re-scoring paths
+    (``_loglik_of_draws``/``ll_true``) pass True so any future z-flat regression fails LOUDLY."""
     total = 0.0
     parts = {}
     from .likelihood import gaussian_loglik
@@ -1270,7 +1298,8 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
             mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
             mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
             mf_emucoh_offdiag_only=getattr(ctx, "mf_emucoh_offdiag_only", False),
-            alpha_res=alpha_res)                              # res_corr amplitude nuisance (fwd-only)
+            alpha_res=alpha_res,                              # res_corr amplitude nuisance (fwd-only)
+            require_zresolved=require_zresolved)              # guard: assert z-resolved alpha (opt-in)
         kr = jnp.asarray(np.where(keep)[0])
         r = jnp.asarray(P_data[keep]) - P_model[kr]
         C_sub = C_total[jnp.ix_(kr, kr)]
@@ -1356,7 +1385,8 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
         alpha_res_slope = numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
     numpyro.factor("loglik", _data_loglik_legcore(
         ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg, a_siiii=a_siiii,
-        alpha_res=(alpha_res, alpha_res_slope)))
+        alpha_res=(alpha_res, alpha_res_slope),
+        require_zresolved=True))   # alpha_hcd here is the z-resolved alpha_hcd_z deterministic
 
 
 def _hcd_sites(ctx):
@@ -2007,10 +2037,18 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
             truth_vec = np.concatenate([truth_vec, [float(truth_pack.get("a_siiii", 0.0))]])
 
         # loglik of the truth + draws on the SAME mock data (Modrak rank).
+        # Z-RESOLVED-ALPHA FIX (2026-06-19): use the z-RESOLVED truth alpha (truth_pack
+        # ['alpha_hcd_z'], (nZg,3)) — NOT the z-FLAT pivot truth_pack['alpha_hcd'] (3,). The mock
+        # truth-on-leg is z-resolved (per-z sim P1D / per-z prior draw), so re-scoring the truth
+        # loglik with a z-flat alpha mismatched the data and shifted ll_true → a spurious
+        # loglik-rank. Both the leg-A self-draw (draw_leg_a_leg_truth) and the held-out path
+        # (make_legb_mock) now carry alpha_hcd_z. require_zresolved=True fails loudly on a regression.
+        _a_si_true = float(truth_pack.get("a_siiii", 0.0))
         ll_true = float(_data_loglik_legcore(
             ctx, jnp.asarray(truth_pack["theta9"]),
             jnp.asarray(truth_pack["tau0_global"]),
-            jnp.asarray(truth_pack["alpha_hcd"]), mock_legs, core_per_leg))
+            jnp.asarray(truth_pack["alpha_hcd_z"]), mock_legs, core_per_leg,
+            a_siiii=_a_si_true, require_zresolved=True))
         ll_draws = _loglik_of_draws(ctx, mock_legs, core_per_leg, samples, kept_global)
         # thin ll_draws by the SAME step.
         ll_draws_t = ll_draws[::step][:L]
@@ -2031,16 +2069,27 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
 
 def _loglik_of_draws(ctx, mock_legs, core_per_leg, samples, kept_global):
     """log_lik(draw, mock) for each raw draw — the Modrak loglik rank (uses the FULL τ₀ vec,
-    not just kept z; the dropped z carry no data so they don't affect the likelihood)."""
-    theta = jnp.asarray(np.asarray(samples["theta_unit"]))      # (L,9)
-    tau0 = jnp.asarray(np.asarray(samples["tau0_vec"]))         # (L,nZ)
-    a = jnp.asarray(np.stack([np.asarray(samples["alpha_lls"]),
-                              np.asarray(samples["alpha_subdla"]),
-                              np.asarray(samples["alpha_dla"])], axis=1))  # (L,3)
+    not just kept z; the dropped z carry no data so they don't affect the likelihood).
 
-    def one(th, t0, al):
-        return _data_loglik_legcore(ctx, th, t0, al, mock_legs, core_per_leg)
-    return np.asarray(jax.vmap(one)(theta, tau0, a))
+    Z-RESOLVED-ALPHA FIX (2026-06-19): this used to REBUILD a z-FLAT (L,3) pivot alpha from
+    samples['alpha_lls'/'alpha_subdla'/'alpha_dla'] and pass it to _data_loglik_legcore, which
+    silently broadcasts it to every z — but the DEPLOYED forward (_legb_model) and the mock TRUTH
+    are z-RESOLVED (per-z w_c rises ~3.5× over z), so the z-flat re-scoring produced a SPURIOUS
+    z-structured residual that contaminated the reported SBC loglik-rank gate. We now use the
+    z-resolved ``samples['alpha_hcd_z']`` (L,nZg,3) deterministic — EXACTLY as
+    scripts/run_real_fit.py::_loglik_chain — and pass require_zresolved=True so a regression to a
+    z-flat alpha here fails LOUDLY (the deployed mean / param-rank SBC were always clean; only this
+    loglik-rank path was contaminated)."""
+    theta = jnp.asarray(np.asarray(samples["theta_unit"]))      # (L,9)
+    tau0 = jnp.asarray(np.asarray(samples["tau0_vec"]))         # (L,nZg)
+    a_z = jnp.asarray(np.asarray(samples["alpha_hcd_z"]))       # (L,nZg,3) Z-RESOLVED (the fix)
+    a_si = (jnp.asarray(np.asarray(samples["a_SiIII"])) if "a_SiIII" in samples
+            else jnp.zeros(theta.shape[0]))
+
+    def one(th, t0, al, asi):
+        return _data_loglik_legcore(ctx, th, t0, al, mock_legs, core_per_leg,
+                                    a_siiii=asi, require_zresolved=True)
+    return np.asarray(jax.vmap(one)(theta, tau0, a_z, a_si))
 
 
 def _aggregate_legb(per_mock, *, q_levels):
