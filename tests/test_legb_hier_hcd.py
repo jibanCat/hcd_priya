@@ -76,17 +76,22 @@ def test_off_branch_site_list_is_the_current_code():
     truth = C.make_truth_from_sim(d, sims[0], fold=0)
     mock_legs, _, _ = C.make_legb_mock(ctx, truth, jax.random.PRNGKey(0))
     core = C._mock_core_per_leg(ctx, truth)
-    # DEFAULT ctx (marginalize_zslope True): the legacy 3 independent α + the z-slope block.
+    # DEFAULT ctx (marginalize_zslope True): the legacy 3 independent α + the z-slope block + the
+    # res_corr-amplitude nuisance block (alpha_res, alpha_res_slope — added by d0de534/7a28e8d,
+    # ALWAYS sampled unless ctx.fix_alpha_res, so they are the LAST two sites here).
     s = _sites(C._legb_model, ctx, mock_legs, core)
     assert s == ["theta_unit", "tau0_amp", "dtau0",
                  "alpha_lls", "alpha_subdla", "alpha_dla_raw",
-                 "s_lls", "s_subdla", "s_dla"]
+                 "s_lls", "s_subdla", "s_dla",
+                 "alpha_res", "alpha_res_slope"]
     assert "A_hcd" not in s and "r_subdla" not in s and "r_dla" not in s
-    # z-slope OFF → the clean legacy HCD block (the 3 independent α sites, no reparam).
+    # z-slope OFF → the clean legacy HCD block (the 3 independent α sites, no reparam) + the
+    # res_corr nuisance block (still sampled — independent of marginalize_zslope).
     ctx0 = ctx._replace(marginalize_zslope=False)
     s0 = _sites(C._legb_model, ctx0, mock_legs, core)
     assert s0 == ["theta_unit", "tau0_amp", "dtau0",
-                  "alpha_lls", "alpha_subdla", "alpha_dla_raw"]
+                  "alpha_lls", "alpha_subdla", "alpha_dla_raw",
+                  "alpha_res", "alpha_res_slope"]
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
@@ -99,10 +104,13 @@ def test_off_branch_potential_byte_exact_vs_legacy():
     truth = C.make_truth_from_sim(d, sims[0], fold=0)
     mock_legs, _, _ = C.make_legb_mock(ctx, truth, jax.random.PRNGKey(0))
     core = C._mock_core_per_leg(ctx, truth)
-    # a fixed constrained point in the LEGACY parametrization.
+    # a fixed constrained point in the LEGACY parametrization (+ the res_corr nuisance sites,
+    # ALWAYS sampled in the current model — pin them at the no-op α₀=1, slope=0 so the point is
+    # fully specified and the potential is deterministic).
     point = dict(theta_unit=jnp.full(9, 0.5), tau0_amp=jnp.asarray(1.0),
                  dtau0=jnp.asarray(0.0), alpha_lls=jnp.asarray(0.27),
-                 alpha_subdla=jnp.asarray(0.09), alpha_dla_raw=jnp.asarray(-2.0))
+                 alpha_subdla=jnp.asarray(0.09), alpha_dla_raw=jnp.asarray(-2.0),
+                 alpha_res=jnp.asarray(1.0), alpha_res_slope=jnp.asarray(0.0))
     lp = _potential_at(C._legb_model, ctx, mock_legs, core, point=point)
     assert np.isfinite(lp)
     # re-evaluate with a ctx that has the hierarchical fields EXPLICITLY at their defaults —
@@ -169,8 +177,12 @@ def test_model_priors_only_site_order_match(hierarchical, marg_zslope, sample_me
     else:
         assert {"alpha_lls", "alpha_subdla", "alpha_dla_raw"}.issubset(set(s_model))
         assert "A_hcd" not in s_model
+    # the res_corr-amplitude nuisance block (alpha_res, alpha_res_slope) is ALWAYS the LAST two
+    # sites (added by d0de534/7a28e8d, sampled unless ctx.fix_alpha_res); a_SiIII — when metals —
+    # is sampled JUST BEFORE it (so it is third-from-last, not last).
+    assert s_model[-2:] == ["alpha_res", "alpha_res_slope"]
     if sample_metals:
-        assert s_model[-1] == "a_SiIII"
+        assert s_model[-3] == "a_SiIII"
     else:
         assert "a_SiIII" not in s_model
 
