@@ -1,7 +1,20 @@
 # HCD-marginalised Lyα P1D emulator (`hcd_analysis.emulator`)
 
 This is the emulator at the centre of the Lyman-α cosmology analysis. The document describes what
-it does, why it is built the way it is, and how to run it.
+it does, why it is built the way it is, and how to **use the deployed ensemble** and how to
+**rebuild it from scratch**.
+
+> **Stamp.** Documents the emulator as of code commit **da9e237** (`HEAD` = **da9e237**;
+> walkthrough/figures). The **deployed** checkpoints (`checkpoints/final_prod_seed{0..4}`) were
+> trained at git_sha **5f51fc6** (stamped in each `.meta.json`). Dated **2026-06-21**.
+
+The **deployed production emulator** is the 5-member all-sims ensemble
+`checkpoints/final_prod_seed{0..4}` — the object the real fit and the production SBC actually load.
+It is **trained on every simulation** (no hold-out), so its pred-vs-true accuracy is an **in-sample
+fit-quality** statement, *not* a generalisation claim. The generalisation evidence is the **8-fold
+LOSO walkthrough** (`checkpoints/final_fold{0..7}`) and the `C_emu` error vector; see §5 and the
+[performance walkthrough](#section-perf) below. The single-model `final_fold0` used in older
+quick-starts is a closure-validation stand-in, **not** the deployed object.
 
 ### Overview
 
@@ -45,17 +58,226 @@ headline validation document is
 
 ### Where to go
 
-To build and run it:
+To **use the deployed ensemble** (start here):
+- [Quick start — the deployed ensemble](#section-quickstart) — load the 5 members, predict a P1D
+- [Inputs / conventions](#section-inputs) — θ9 unit cube, `z_unit`, τ₀, α_hcd
+- [Gotchas](#section-gotchas) — x64 ordering, per-member files, the in-sample caveat
+- [Reproduce the ensemble from scratch](#section-reproduce) — `train_production_emulator.py`, the recipe, the cache
+- [Performance — walkthrough figures](#section-perf) — accuracy, response, dN/dX
+
+Background and the rest of the pipeline:
 1. [Environment](#1-environment-mandatory) — the environment string it must be run with
 2. [The τ₀ cache](#2-the-τ₀-cache) — the training data: what it is and how to load it
 3. [Architecture](#3-architecture) — the structure of the network and the reasons for it
-4. [Training](#4-training) — how to run it and what a healthy run looks like
+4. [Training (LOSO + production)](#4-training-loso--production) — how to run it and what a healthy run looks like
 5. [Forward model / prediction](#5-forward-model--prediction) — turning the network into a P1D
-6. [Quickstart](#6-quickstart) — a self-contained snippet
+6. [Quickstart (single-model, cache-row)](#6-quickstart-single-model-cache-row) — the older single-net snippet
 7. [Conventions & gotchas](#7-conventions--gotchas) — the points that commonly cause trouble
 8. [Likelihood & inference](#8-likelihood--inference) — the differentiable log-likelihood and priors
 9. [Blinding the real-data fit](#9-blinding-the-real-data-fit-a_p-n_s) — the parameter-blind on A_p, n_s and how to unblind
 10. [Module map](#10-module-map)
+
+---
+
+<a id="section-quickstart"></a>
+## Quick start — use the deployed ensemble
+
+Load the 5 production members and predict the per-class clean P1D. **`import
+hcd_analysis.emulator` must precede any `jax` import** — it flips on float64, and the structural
+identities break under float32. Run everything with the [environment string](#1-environment-mandatory).
+
+```python
+import glob, numpy as np
+import hcd_analysis.emulator                      # x64 ON — MUST precede any jax import
+import jax.numpy as jnp
+from hcd_analysis.emulator.ensemble import load_ensemble
+from hcd_analysis.emulator.predict import predict_P_filt
+
+REPO = "/home/mfho/hcd_priya"
+paths = sorted(p[:-4] for p in glob.glob(f"{REPO}/checkpoints/final_prod_seed*.eqx"))
+ens, meta, norm = load_ensemble(paths)            # asserts all 5 members share the P_filt norm
+pf = {k: jnp.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
+
+theta9 = jnp.full(9, 0.5)                          # unit cube [0,1]^9 (box centre)
+z = 3.0; z_unit = (z - 2.0) / 3.4                  # z_unit = (z − 2)/3.4
+tau0 = 0.35                                        # = −ln⟨F⟩
+P_filt = predict_P_filt(ens, theta9, z_unit, tau0, pf)   # (4, K=172): clean, LLS, subDLA, DLA
+```
+
+`predict_P_filt(ens, …)` returns the **mean over the 5 members of the reconstructed (post-`exp`,
+linear) `P_filt`** — `P_filt` is exp-nonlinear, so the mean is taken after the `exp`; all members
+share one norm. The forward duck-types on the ensemble's `.members`, so the *same* call works for a
+single model. The rows are the four HCD classes (clean, LLS, subDLA, DLA), `K = 172` angular k-bins.
+
+**Verified sanity output** (re-run 2026-06-21 with the env string, all 5 members present):
+
+```
+PATHS: ['final_prod_seed0', …, 'final_prod_seed4']     n_members: 5
+P_filt shape: (4, 172)  dtype: float64
+class row maxima (clean,LLS,subDLA,DLA): [40.27, 52.57, 58.11, 36.69]
+clean P_filt[0,:5]: [40.27 38.90 37.72 34.99 33.80]
+git_sha in meta: 5f51fc6
+```
+
+**Canonical inference entry.** The likelihood and SBC load the ensemble through
+`build_legb_ctx` (`closure_legb.py:369-373`) — exactly how `run_real_fit.py` and
+`run_prod_sbc_shard.py` invoke it:
+
+```python
+from glob import glob
+from hcd_analysis.emulator.closure_legb import build_legb_ctx
+ens = sorted(glob("checkpoints/final_prod_seed*.eqx"))
+ctx = build_legb_ctx(..., ensemble_ckpts=ens)      # ensemble_ckpts is not None → load_ensemble path
+```
+
+With `ensemble_ckpts=None` the same builder loads the single-model path (`final_fold0`) instead; the
+ensemble branch threads the member-mean P_filt through the entire likelihood unchanged (`P_obs` is
+linear in `P_filt`, so member-mean commutes with the forward).
+
+---
+
+<a id="section-inputs"></a>
+## Inputs / conventions
+
+The three forward arguments, all on bounded coordinates:
+
+- **`theta9`** — the 9 PRIYA parameters on the **unit cube** `[0,1]^9`, in the order
+  `(ns, Ap, herei, heref, alphaq, hub, omegamh2, hireionz, bhfeedback)`. Map physical → unit
+  per-parameter linearly via `data.PARAM_LIMITS` (`θ9 = (θ_phys − lo)/(hi − lo)`, or use
+  `data.normalize_params`). The limits:
+
+  | param | physical range | unit→physical |
+  |---|---|---|
+  | `ns` | [0.80, 1.05] | `0.80 + 0.25·θ` |
+  | `Ap` | [1.2e-9, 2.6e-9] | forest-pivot amplitude (k = 0.78 Mpc⁻¹, **not** the CMB pivot) |
+  | `herei` | [3.5, 4.5] | He-II reion start |
+  | `heref` | [2.2, 3.2] | He-II reion end |
+  | `alphaq` | [1.3, 3.0] | quasar spectral slope |
+  | `hub` | [0.65, 0.75] | h |
+  | `omegamh2` | [0.14, 0.146] | Ω_m h² |
+  | `hireionz` | [6.5, 8.0] | H reion redshift |
+  | `bhfeedback` | [0.03, 0.07] | BH feedback |
+
+- **`z_unit`** = `(z − 2.0)/3.4` — a linear map over `data.Z_LIMITS = (2.0, 5.4)` (so 5.4 − 2.0 =
+  3.4; e.g. z = 3 → 0.2941). `x = [θ9, z_unit]` is the 10-vector the encoder consumes.
+- **`tau0`** = `−ln⟨F⟩`, the mean-flux optical depth (how absorbed the forest is on average); per-z.
+
+The **HCD incidence `alpha_hcd` `(3,)`** (LLS, subDLA, DLA) enters only `predict_P_obs` and
+`predict_excess` — it is the free per-class amplitude of the HCD contamination. It does **not** enter
+`predict_P_filt`, which returns the four per-class clean spectra before any contamination is applied.
+
+---
+
+<a id="section-gotchas"></a>
+## Gotchas
+
+- **x64 import ordering.** `import hcd_analysis.emulator` runs
+  `jax.config.update("jax_enable_x64", True)` and **must precede any `jax` import**. The structural
+  identities (`P_tier_p = Σ_c w_c·P_filt`, the telescoping `Σ w_c = 1`) hold at the bit level only in
+  float64.
+- **The env string is mandatory.** Always launch with
+  `PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3`
+  (CPU-pinned, deterministic; see §1).
+- **Per-member files.** Each ensemble member is a **four-file bundle**:
+  `final_prod_seed{S}.{eqx, meta.json, norm.pkl, hist.json}`. `load_ensemble` needs `.eqx` +
+  `.meta.json` + `.norm.pkl` for all 5; it **asserts** every member shares the same `P_filt` norm
+  (`mu_marg/sig_marg/sig_cosmo`) — a differing norm signals a wiring error and aborts.
+- **The in-sample caveat (load-bearing).** The production ensemble **saw all 60 sims** in training,
+  so `final_prod_seed*` pred-vs-true is **in-sample fit quality, NOT generalisation**. The
+  generalisation evidence is the LOSO held-out walkthrough (`final_fold{0..7}`) and the `C_emu` error
+  vector. Never relabel an in-sample number as an accuracy/generalisation claim (see [Performance](#section-perf)).
+- **Head-A is in standardized-log space.** `predict_P_filt` returns linear P1D, but the Head-A
+  channels (`dndx`, `f_nhi`) are emitted in **standardized-log** space — invert the norm
+  (`apply_norm`/`safe_log` pair in `data.py`, keys `norm["dndx"]`, `norm["f_nhi"]`) to get physical
+  incidence/CDDF. The walkthrough's `predict_headA_ens` does this.
+- **`EnsembleEmulator` has no `__call__`.** It is a thin pytree holding `.members`; only the
+  `predict.py` Head-B functions (`predict_P_filt/excess/P_obs/P_tier_p`) duck-type on `.members` to
+  return the member-mean. Do not call the ensemble object directly.
+
+---
+
+<a id="section-reproduce"></a>
+## Reproduce the ensemble from scratch
+
+The deployed ensemble is built by `scripts/train_production_emulator.py` (**not**
+`run_loso_sweep.py` — that is the validation sweep). It trains on **all 60 LF sims + all 20 τ₀
+rungs with NO simulation hold-out**; only a fixed **10% row-val split** (`VAL_SEED = 12345`, shared
+across all members) is held out for restore-best early-stop. Run it once per seed (0..4); the 5
+checkpoints are the ensemble.
+
+The hyperparameters are the **`RECIPE` dict** — byte-for-byte the LOSO `FINAL_RECIPE`:
+
+```python
+RECIPE = dict(n_basis=24, p_resid_w=8.0, edge_gain=3.0, lowk_extra=2.0,   # low-rank + k-weighting
+              w_coh=80.0, weight_decay=3e-4, datarange=True,              # de-bias + soft data-range
+              epochs=180, patience=25, lr=1e-3, batch=512)                # AdamW + cosine decay
+# arch_cfg: in_dim=10, n_k=172, n_basis=24; encoder/baseline 3×256
+```
+
+Commands (with the [env string](#1-environment-mandatory), abbreviated `<env>`):
+
+```bash
+for S in 0 1 2 3 4; do <env> scripts/train_production_emulator.py --seed $S; done   # → final_prod_seed{S}.*
+<env> scripts/validate_production_ensemble.py                                       # fit-quality + ensemble-benefit gate
+```
+
+**Cache provenance.** Training reads
+`hcd_analysis/_emulator_data/observables_tau0_lf.h5` — the **v3.3 LF cache**: 21 440 rows × 172 k ×
+60 sims × 20 α-rungs, angular k 4e-4–6.9e-2 s/km, built by
+`scripts/build_emulator_cache_tau0.py` (env `emu-3.9`) + `merge_tau0_cache.py`, from the PRIYA LF
+runs (Bird, Fernandez, Ho et al. 2023, [arXiv:2306.05471](https://arxiv.org/abs/2306.05471)).
+
+**Multi-fidelity & error budget** (reused, not regenerated by retraining):
+- The MF layer (`multifidelity.py`, the ρ(k,z)-only `FixedMeanHead` default) wraps the **frozen LF
+  backbone** at inference and is built from the HR cache. It is attached by the likelihood
+  (`build_legb_ctx(with_mf=…)`), not by `train_production_emulator.py`.
+- `C_emu = checkpoints/error_vector.npz` — the **8-fold LOSO** error budget. The all-sims ensemble
+  reuses it (conservative: it is the held-out generalisation budget, applied to a model trained on
+  *more* data). Retraining the ensemble does **not** regenerate it.
+
+The checkpoint `git_sha` stamped in each `.meta.json` is **5f51fc6**.
+
+---
+
+<a id="section-perf"></a>
+## Performance — walkthrough figures
+
+The figures below are from the **deployed production ensemble** walkthrough (committed at
+**da9e237**); the full set, captions and the framing table live in
+[`figures/analysis/06_performance_walkthrough/README.md`](../../figures/analysis/06_performance_walkthrough/README.md),
+raw numbers in `06_performance_walkthrough/headline_numbers.json` (dual-keyed:
+`loso_held_out` = generalisation, `ensemble_in_sample` = the deployed all-sims fit).
+
+**Headline frac-P1D RMS** (in-range, per class clean / LLS / subDLA / DLA):
+- **Deployed ensemble (in-sample fit quality):** **0.5 / 0.6 / 0.7 / 1.6 %**
+- **LOSO held-out (the generalisation accuracy claim):** **1.1 / 1.2 / 1.3 / 2.5 %**
+
+![B1 — predicted vs true P1D](../../figures/analysis/06_performance_walkthrough/B1_pred_vs_true_p1d.png)
+
+*B1 — reconstructed linear P1D vs cache, per class (solid = true, dashed = LOSO **held-out**, dotted
+= **in-sample** ensemble). Both hug zero across the resolved band.*
+
+![B2 — deployed fractional P1D error vs k](../../figures/analysis/06_performance_walkthrough/B2_deployed_frac_err_vs_k.png)
+
+*B2 — `|pred/true − 1|` vs k over all folds' val rows: solid+IQR = LOSO **held-out** (the accuracy
+claim, 1.1/1.2/1.3/2.5%), dashed = **in-sample** ensemble (~2× lower, the deployed-fit reference),
+dotted = cosmic-variance floor.*
+
+![B3 — deployed cosmology response](../../figures/analysis/06_performance_walkthrough/B3_cosmology_response.png)
+
+*B3 — the differentiable cosmology response `∂lnP/∂θ` vs k that the HMC consumes, from the
+**production ensemble** (a deployed-object property, not an accuracy claim). `n_s` flips sign across
+k; `A_p`/`h` carry the largest coherent amplitudes.*
+
+![A1 — dN/dX predicted vs true](../../figures/analysis/06_performance_walkthrough/A1_dndx_pred_vs_true.png)
+
+*A1 — Head-A `dN/dX` accuracy vs z (solid/dashed = LOSO **held-out** median/p95 ≈ 1.3–1.7%; dotted =
+**in-sample** ensemble ≈ 0.5–0.6%). Error rises only at the count-limited off-DESI z extremes.*
+
+Companion accuracy figures: B5 (per-fold A_p/n_s Fisher bias, the inference gate — all 8 folds
+inside ±0.2σ) and A6/A7 (dN/dX and CDDF vs literature) are reproduced in Demos C–E below.
+
+
 
 To see that it works, the demos are:
 - [Demo A — Mock inference (closure / SBC)](#demo-a--does-the-inference-recover-the-truth-closure--sbc)
@@ -220,9 +442,14 @@ isolatable residual term.
 
 ---
 
-## 4. Training
+## 4. Training (LOSO + production)
 
-Training is driven by the eight-fold LOSO sweep `scripts/run_loso_sweep.py`. LOSO,
+The **deployed** model is the all-sims production ensemble — its build recipe is in
+[Reproduce the ensemble from scratch](#section-reproduce) above. This section covers the **8-fold
+LOSO sweep**, which is the *validation* path (closure + `C_emu` calibration), not the deployed
+object.
+
+Validation training is driven by the eight-fold LOSO sweep `scripts/run_loso_sweep.py`. LOSO,
 leave-one-simulation-out, partitions the 60 simulations into eight groups; for each fold we hold
 out a whole group of simulations, train on the rest, and test on the held-out group. Because the
 held-out simulations are entire cosmologies the network has never seen, this is an honest test of
@@ -258,12 +485,12 @@ which the regularised residual head is designed to prevent.
 
 *A clean joint-loss curve: train and val track each other and plateau — no over-fitting.*
 
-There is an important distinction between the folds and the production model. The eight LOSO folds
-exist for closure validation and for calibrating the emulator-error budget (`C_emu`). The deployed
-point prediction uses a single model; the folds should not be ensembled at inference. The
-fold-to-fold spread is already captured as the σ budget in `error_vector.npz` and enters the
-likelihood through `C_emu`. Before the real fit we train an all-sims production emulator with no
-hold-out; `final_fold0` is the canonical stand-in for now.
+There is an important distinction between the folds and the deployed model. The eight LOSO folds
+exist for closure validation and for calibrating the emulator-error budget (`C_emu`); they are
+**not** ensembled at inference, and the fold-to-fold spread is captured as the σ budget in
+`error_vector.npz` (consumed through `C_emu`). The **deployed** model is the separate **all-sims
+production ensemble** `final_prod_seed{0..4}` (see [Reproduce](#section-reproduce)) — *not*
+`final_fold0`, which is only a closure stand-in for the single-model path.
 
 This stage yields one checkpoint bundle per fold (see §6) together with the LOSO error vector.
 
@@ -340,10 +567,12 @@ cosmology, the mean flux and the HCD incidence, ready to feed the likelihood.
 
 ---
 
-## 6. Quickstart
+## 6. Quickstart (single-model, cache-row)
 
-The snippet below is self-contained; it builds the inputs from a cache row so that the whole flow
-is visible at once.
+> For the **deployed ensemble**, use the [Quick start](#section-quickstart) at the top. The snippet
+> below is the older **single-model** flow (`final_fold0`, the closure stand-in), kept because it
+> builds the inputs from a cache row so the whole flow — `predict_P_obs` and the α/dla_core
+> plumbing — is visible at once.
 
 ```python
 import hcd_analysis.emulator                        # enables JAX float64 on import
