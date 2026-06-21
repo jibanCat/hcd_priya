@@ -277,6 +277,14 @@ class LegBCtx(NamedTuple):
     tau0_amp_range: object = TAU0_AMP_RANGE   # PRIYA uniform prior on amplitude τ₀ (center 1.0=Kim)
     dtau0_range: object = DTAU0_RANGE         # PRIYA uniform prior on slope dτ₀ (center 0=Kim slope)
     tau0_pivot_z: float = TAU0_PIVOT_Z        # the (1+z)/(1+z_p) pivot (PRIYA z_p=3)
+    # INFORMATIVE-τ₀ arm (2026-06-21): replace the UNIFORM prior on the two mean-flux sites with a
+    # centered TruncatedNormal, truncated to the SAME physical range (tau0_amp_range/dtau0_range).
+    # Each field is None (→ Uniform, the DEFAULT — byte-identical) OR a (mu, sigma) tuple (→
+    # TruncatedNormal(mu, sigma, low=range[0], high=range[1])). Sampled via _sample_tau0_sites in
+    # BOTH _legb_model and _legb_priors_only (identical site names/order). PRIYA/Bird+2023 note the
+    # τ₀ amplitude is well measured by the data; this arm gives the closure a Kim-centered prior.
+    tau0_amp_gauss: object = None             # None → Uniform; (mu, sigma) → TruncatedNormal on τ₀ amp
+    dtau0_gauss: object = None                # None → Uniform; (mu, sigma) → TruncatedNormal on dτ₀
     # NUTS theta prior bounds in the UNIT cube (None → _THETA_UNIT_LO/_HI = IGM params restricted
     # to original PRIYA, n_s extended; see data.SAMPLING_LIMITS). Set both to 0/1 for the full box.
     theta_unit_lo: object = None              # (9,) lower bound on theta_unit
@@ -1135,6 +1143,23 @@ def apply_lls_truth_boost(truth_pack, boost):
     return out
 
 
+def apply_subdla_truth_boost(truth_pack, boost):
+    """Return a COPY of ``truth_pack`` with the subDLA incidence (pivot ``alpha_hcd[1]`` AND the
+    z-resolved ``alpha_hcd_z[:,1]`` column) multiplied by ``boost`` — the SIBLING of
+    ``apply_lls_truth_boost`` for the subDLA-displacement arm of the data-nuisance bias gate. LLS
+    (index 0), DLA (index 2), θ9, τ₀ and a_SiIII are untouched; the input is NOT mutated
+    (deep-copies the two subDLA-bearing arrays). ``boost=1`` is the identity."""
+    out = dict(truth_pack)                                    # shallow copy of the dict
+    a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
+    a[1] = a[1] * float(boost)
+    out["alpha_hcd"] = a
+    if truth_pack.get("alpha_hcd_z") is not None:
+        az = np.array(truth_pack["alpha_hcd_z"], float)       # fresh (nZg,3)
+        az[:, 1] = az[:, 1] * float(boost)
+        out["alpha_hcd_z"] = az
+    return out
+
+
 def _meanflux_on_leg(ctx, leg, truth_pack):
     """Per-leg-z mean flux ⟨F⟩(z)=exp(−τ_eff(z)) from the truth mean flux on z_global.
 
@@ -1316,6 +1341,19 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
     return total
 
 
+def _sample_tau0_sites(ctx):
+    """Sample (tau0_amp, dtau0): Uniform by default; TruncatedNormal centered on (mu,sigma),
+    truncated to the physical range, when ctx.{tau0_amp_gauss,dtau0_gauss} is set (the
+    informative-τ₀ arm). IDENTICAL site names/order to the legacy code in both model twins."""
+    la, ha = ctx.tau0_amp_range; ld, hd = ctx.dtau0_range
+    ga = getattr(ctx, "tau0_amp_gauss", None); gd = getattr(ctx, "dtau0_gauss", None)
+    tau0_amp = (numpyro.sample("tau0_amp", dist.Uniform(la, ha)) if ga is None
+                else numpyro.sample("tau0_amp", dist.TruncatedNormal(ga[0], ga[1], low=la, high=ha)))
+    dtau0 = (numpyro.sample("dtau0", dist.Uniform(ld, hd)) if gd is None
+             else numpyro.sample("dtau0", dist.TruncatedNormal(gd[0], gd[1], low=ld, high=hd)))
+    return tau0_amp, dtau0
+
+
 def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     """The numpyro model: ``sampler_numpyro``'s priors (θ~Uniform^9 + auto-bijector; τ₀ in
     the α-ladder coord on the GLOBAL z grid; α_lls/subdla~Normal, α_dla~softplus(Normal)) with
@@ -1345,9 +1383,7 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     kim = _kim(zg)
     # PRIYA mean-flux: α(z)=τ₀·((1+z)/(1+z_p))^dτ₀, τ₀(z)=α·Kim07 — 2 GLOBAL uniform params, NOT
     # 13 free per-z rungs, so τ₀ cannot absorb emulator residual into per-z wiggle that biases A_p.
-    tau0_amp = numpyro.sample("tau0_amp",
-                              dist.Uniform(ctx.tau0_amp_range[0], ctx.tau0_amp_range[1]))
-    dtau0 = numpyro.sample("dtau0", dist.Uniform(ctx.dtau0_range[0], ctx.dtau0_range[1]))
+    tau0_amp, dtau0 = _sample_tau0_sites(ctx)
     alpha_z = tau0_alpha_priya(zg, tau0_amp, dtau0, z_pivot=ctx.tau0_pivot_z)
     tau0_global = numpyro.deterministic("tau0_vec", alpha_z * kim)
     # The HCD pivot-z (z=3) amplitudes (3,) [LLS, subDLA, DLA]. The shared ``_hcd_sites`` helper
@@ -1506,8 +1542,7 @@ def _legb_priors_only(ctx):
     _lo_u = jnp.asarray(_THETA_UNIT_LO if getattr(ctx, "theta_unit_lo", None) is None else ctx.theta_unit_lo)
     _hi_u = jnp.asarray(_THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi)
     numpyro.sample("theta_unit", dist.Uniform(_lo_u, _hi_u).to_event(1))
-    numpyro.sample("tau0_amp", dist.Uniform(ctx.tau0_amp_range[0], ctx.tau0_amp_range[1]))
-    numpyro.sample("dtau0", dist.Uniform(ctx.dtau0_range[0], ctx.dtau0_range[1]))
+    _sample_tau0_sites(ctx)
     # the HCD pivot α sites — SHARED with _legb_model via _hcd_sites so the sample-site order is
     # IDENTICAL in both branches (legacy 3-site vs hierarchical A_hcd/r_subdla/r_dla, vs 2D
     # A_hcd/B_hcd/r_subdla/r_dla). The deterministics it emits are dropped by
@@ -1985,6 +2020,9 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
                 if inject_spec.get("lls_truth_boost") is not None:
                     truth_pack = apply_lls_truth_boost(
                         truth_pack, float(inject_spec["lls_truth_boost"]))
+                if inject_spec.get("subdla_truth_boost") is not None:
+                    truth_pack = apply_subdla_truth_boost(
+                        truth_pack, float(inject_spec["subdla_truth_boost"]))
                 mock_legs, info = make_leg_a_legmock(
                     ctx, fid_core, truth_pack, k_mock,
                     inject_metal_misspec=inject_spec.get("metal_misspec"),

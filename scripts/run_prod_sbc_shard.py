@@ -50,7 +50,7 @@ def _mock_path(out_dir, m):
 
 
 def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_depth, seed,
-              dense_mass=True, verbose=True, leg_a=True, run_cfg=None):
+              dense_mass=True, verbose=True, leg_a=True, run_cfg=None, fold=0, inject_spec=None):
     """Run (or load) ONE mock and persist it to ``{out_dir}/mock_{m:04d}.pkl``.
 
     SKIP-IF-EXISTS: if the per-mock pkl is already on disk (a previous task / attempt finished it)
@@ -81,12 +81,40 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
             rec = pickle.load(f)
         existing = rec.get("run_cfg")
         # The DEFAULT (pre-2026-06-19) config every un-stamped pkl was written under.
-        default_cfg = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0)
+        default_cfg = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="all", fold=0,
+                           tau0_prior_sigma=0.0, subdla_truth_boost=1.0)
         # A PRE-STAMP pkl (no run_cfg) is treated as the default config — so resuming a DEFAULT run
         # over old pkls still works, but a non-default (held-out / cemu-variant / width-check) run
         # over those same old pkls correctly CLASHES (it would otherwise silently load self-draws).
         eff_existing = existing if existing is not None else default_cfg
-        if eff_existing != cfg:
+        # BACK-COMPAT (2026-06-21): pkls written before the `leg` stamp was added lack that key. The
+        # per-leg runs are leg-separated by --out-dir, so a leg-less pkl in a per-leg dir IS that leg —
+        # don't CLASH on the missing `leg` key alone (but still enforce leg_a/cemu_variant/amp_sigma
+        # exactly, so a self-draw pkl can never load into a held-out run). Prevents a halt when a
+        # DESI/eBOSS straggler (launched before the stamp) is resubmitted.
+        _req = dict(cfg)
+        if "leg" not in eff_existing:
+            _req.pop("leg", None)
+        # BACK-COMPAT (2026-06-21, fold stamp): pkls written before the `fold` stamp lack that key and
+        # were ALL the ensemble/fold-0 path (run_cfg.fold==0). Don't CLASH on the missing key alone
+        # WHEN the current run is also fold 0 (the default ensemble path) — pop it so a fold-0 resume
+        # over pre-stamp pkls still works. A --fold k>0 run carries fold=k in `cfg`, which then differs
+        # from the popped (==0-equivalent) existing => it correctly CLASHES (a fold-7 single-net run
+        # must never load an ensemble/fold-0 pkl: a different held-out population).
+        if "fold" not in eff_existing and int(_req.get("fold", 0)) == 0:
+            _req.pop("fold", None)
+        # BACK-COMPAT (2026-06-21, τ₀-prior + subDLA-truth stamps): pkls written before these stamps
+        # lack the keys and were ALL the DEFAULT (uniform τ₀ / un-displaced truth: 0.0 / 1.0). Don't
+        # CLASH on a missing key alone WHEN the current run is at that default — pop it so a default
+        # resume over pre-stamp pkls still works. A NON-default run (informative prior σ>0 or boost≠1)
+        # carries a distinct value in `cfg`, which then differs from the popped (==default-equivalent)
+        # existing => it correctly CLASHES (an informative/displaced run must never load a uniform/
+        # un-displaced pkl: a different SBC population / mock truth).
+        if "tau0_prior_sigma" not in eff_existing and float(_req.get("tau0_prior_sigma", 0.0)) == 0.0:
+            _req.pop("tau0_prior_sigma", None)
+        if "subdla_truth_boost" not in eff_existing and float(_req.get("subdla_truth_boost", 1.0)) == 1.0:
+            _req.pop("subdla_truth_boost", None)
+        if eff_existing != _req:
             raise RuntimeError(
                 f"[mock {m}] config CLASH at {path}: existing pkl run_cfg={existing} "
                 f"(effective {eff_existing}) != requested {cfg}. The per-mock pkl is keyed by index "
@@ -96,9 +124,13 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
             print(f"  [mock {m}] SKIP (exists, cfg match {cfg}) -> {path}")
         return rec
 
+    # fold THREADS into run_legb's held-out path: held_out_sims(d, fold=fold) +
+    # make_truth_from_sim(d, sim, fold=fold) draw THIS fold's EXCLUDED sims as the mock TRUTH (so a
+    # --fold k run's truth sims match the fold-k single net the forward uses). fold=0 = back-compat.
     records = run_legb(ctx, d, n_mocks=n_mocks, mock_indices=[int(m)], return_per_mock=True,
-                       leg_a=leg_a, n_warmup=n_warmup, n_samples=n_samples, seed=seed,
-                       dense_mass=dense_mass, max_tree_depth=max_tree_depth, verbose=verbose)
+                       leg_a=leg_a, fold=int(fold), n_warmup=n_warmup, n_samples=n_samples, seed=seed,
+                       dense_mass=dense_mass, max_tree_depth=max_tree_depth, verbose=verbose,
+                       inject_spec=inject_spec)
     assert len(records) == 1, f"expected 1 record for mock {m}, got {len(records)}"
     rec = records[0]
     rec["run_cfg"] = cfg            # STAMP the config so a later skip can verify it (the guard above)
@@ -123,6 +155,14 @@ def main():
     ap.add_argument("--max-tree-depth", type=int, default=10)   # match the production leg fit
     ap.add_argument("--no-mf", dest="with_mf", action="store_false")
     ap.add_argument("--no-eboss", dest="with_eboss", action="store_false")
+    # PER-LEG SBC (2026-06-21): the deployed real analysis is PER-LEG, not joint. DESI and eBOSS share
+    # many quasars (eBOSS QSOs are a large subset of DESI's) so a block-diagonal joint fit double-counts;
+    # KODIAQ/KS is INDEPENDENT high-res echelle (no QSO overlap) — per-leg there is a deliberate
+    # conservative choice forgoing joint constraining power, not a double-count fix. '--leg X' restricts
+    # the likelihood to ONE survey leg; 'all' = the (validation-only) joint fit. Per-leg posteriors are
+    # NOT naively combinable. Metals per leg: DESI metals_on (DR1 model); a_SiIII fit on DESI+eBOSS only.
+    ap.add_argument("--leg", choices=["all", "DESI", "KS", "eBOSS"], default="all",
+                    help="restrict the SBC likelihood to one survey leg (per-leg = the deployed analysis)")
     ap.add_argument("--res-corr-on", dest="res_corr_on", action="store_true",
                     help="(placeholder) keep res_corr ON; the NORC flag is not yet wired in the "
                          "forward — see the module docstring. Recorded in meta only.")
@@ -149,6 +189,22 @@ def main():
     ap.add_argument("--cemu-variant", default=None,
                     choices=["current", "fixed", "oldc"],
                     help="C_emu the forward uses (overrides env SBC_CEMU_VARIANT). Default: env or 'current'.")
+    # TRUE-LOSO HELD-OUT hook (2026-06-21): the default held-out path uses the PRODUCTION ENSEMBLE
+    # (final_prod_seed*, which SAW ALL sims) on held_out_sims(fold=0) — every fold-0 sim is LOW n_s,
+    # so that "held-out" run is BOTH not-truly-held-out (the net saw those sims in training) AND
+    # n_s-BOUNDARY-CONFOUNDED (only the lowest-n_s edge is tested). --fold k flips to the SINGLE
+    # per-fold LOSO net final_fold{k} (trained EXCLUDING fold k) tested on held_out_sims(fold=k) —
+    # a TRUE held-out SBC, and sweeping k=0..7 covers the whole n_s box (the folds are n_s-sorted:
+    # fold 0 = lowest n_s, fold 7 = highest). Default None = the back-compat ensemble/fold-0 path.
+    ap.add_argument("--fold", type=int, choices=list(range(8)), default=None,
+                    help="TRUE-LOSO held-out SBC: use the single per-fold net final_fold{k} (excl. "
+                         "fold k) on held_out_sims(fold=k). Default None = production ensemble on "
+                         "fold 0 (back-compat). Composes with --leg.")
+    ap.add_argument("--prod-emu", action="store_true",
+                    help="A/B for the LOSO-tilt diagnostic (2026-06-21): with --fold k, forward with the "
+                         "PRODUCTION ENSEMBLE (saw all sims, in-sample) instead of final_fold{k}, but on "
+                         "the SAME fold-k sims + SAME mf_fold=k. Only the emulator differs vs --fold k, so "
+                         "the pull-vs-n_s tilt isolates the LOSO out-of-sample (extrapolation) effect.")
     ap.add_argument("--out-dir", required=True)
     ap.set_defaults(with_mf=True, with_eboss=True, res_corr_on=False, write_shard_pkl=True, leg_a=True)
     a = ap.parse_args()
@@ -167,6 +223,19 @@ def main():
         _pf = _I.HCD_PRIOR_FRAC_SIGMA
         _I.HCD_PRIOR_FRAC_SIGMA = (_pf[0], _amp_sig, _pf[2])
         print(f"[width-check] subDLA AMPLITUDE sigma/mu overridden {_pf[1]} -> {_amp_sig}")
+    # INFORMATIVE-τ₀ PRIOR (env SBC_TAU0_PRIOR_SIGMA>0): replace the UNIFORM prior on the two mean-flux
+    # sites (tau0_amp, dtau0) with a Kim-centered TruncatedNormal (amp center 1.0 = the injected closure
+    # truth, dtau0 center 0.0), truncated to the same physical range. SBC_TAU0_DTAU0_SIGMA overrides the
+    # dτ₀ width (default = the amp σ). Threaded onto the ctx via _replace (tau0_amp_gauss/dtau0_gauss)
+    # at the per-leg finalization below, then ASSERTED so it can never silently no-op. Default 0 => off
+    # (uniform, byte-identical).
+    _tau0_prior_sig = float(os.environ.get("SBC_TAU0_PRIOR_SIGMA", "0"))
+    _tau0_dtau0_sig = float(os.environ.get("SBC_TAU0_DTAU0_SIGMA", str(_tau0_prior_sig)))
+    # subDLA TRUTH DISPLACEMENT (env SBC_SUBDLA_TRUTH_BOOST != 1.0): scale the mock-truth subDLA
+    # incidence (alpha_hcd[1] / alpha_hcd_z[:,1]) by this factor so the truth carries a subDLA excess
+    # the forward keeps at the prior pin — the subDLA sibling of the LLS-excess bias-gate arm. Threaded
+    # into the inject_spec dict reaching run_legb. Default 1.0 => identity (no displacement).
+    _subdla_truth_boost = float(os.environ.get("SBC_SUBDLA_TRUTH_BOOST", "1"))
     # C_EMU VARIANT resolution (CLI > env > 'current'). 'fixed' = MODE-1 (low-k emucoh table) +
     # MODE-2 (mf_shape ON); 'current'/'oldc' = the deployed C_emu. Asserted to propagate below.
     LOWK_EMUCOH_NPZ = f"{REPO}/hcd_analysis/_emulator_data/mf_cemu_emucoh_lowk.npz"
@@ -180,36 +249,103 @@ def main():
                          f"with CEMU_OUT_NPZ pointing there)")
     print(f"[cemu-variant] {variant}  (mf_shape={'ON' if _fixed else 'off'}, "
           f"emucoh_npz={'LOWK' if _fixed else 'default[0.0102,0.069]'})  leg_a={a.leg_a}")
+    # PER-LEG config (a.leg): DESI carries its DR1 metal model; each single leg fits a_SiIII; eBOSS is
+    # only built when selected (or for the joint 'all'). build_legb_ctx always constructs DESI+KS, so
+    # the requested single leg is sliced out of ctx.legs after the build.
+    if a.leg == "all":
+        _metals_on, _sample_metals, _build_eboss = a.with_eboss, a.with_eboss, a.with_eboss
+    else:
+        _build_eboss   = (a.leg == "eBOSS")
+        _metals_on     = (a.leg == "DESI")     # DESI DR1 metal model (PI: DESI needs metals per-leg)
+        # Fit a_SiIII ONLY where the forward actually applies a metal factor (metals_on legs): DESI
+        # (its DR1 model) and eBOSS (DR14 not SiIII-subtracted). KS=KODIAQ-HR runs metals_on=False
+        # (metals live in its covariance / conservative mode) and run_real_fit deploys KS metals=False,
+        # so sampling a_SiIII for KS would be an INERT, deployment-mismatched extra dim (panel 2026-06-21).
+        _sample_metals = (a.leg in ("DESI", "eBOSS"))
+    # FOLD ROUTING (2026-06-21): --fold k selects the TRUE-LOSO single net final_fold{k} (the
+    # else-branch of build_legb_ctx, ensemble_ckpts=None) with mf_fold=k so the MF backbone matches
+    # the fold-k LF net, and held_out_sims(fold=k) supplies that fold's EXCLUDED sims (run_legb fold,
+    # threaded below). --fold None keeps the production ENSEMBLE (ensemble_ckpts=ens) on mf_fold=0.
+    _fold = a.fold                                    # None => ensemble/fold-0 back-compat
+    if _fold is not None and a.prod_emu:
+        # PROD-EMU A/B: production ensemble (saw all sims, in-sample) on fold-k sims, SAME mf_fold=k as
+        # the LOSO run -> only the main emulator differs, so the tilt isolates the LOSO extrapolation.
+        _build_kw = dict(ensemble_ckpts=ens, mf_fold=int(_fold))
+        print(f"[fold] PROD-EMU A/B: production ENSEMBLE + mf_fold={_fold} on held_out_sims(fold={_fold}) "
+              f"(in-sample emulator; vs the LOSO final_fold{_fold})")
+    elif _fold is not None:
+        _build_kw = dict(ckpt=f"{REPO}/checkpoints/final_fold{_fold}", mf_fold=int(_fold))
+        print(f"[fold] TRUE-LOSO held-out: single net final_fold{_fold} + mf_fold={_fold} "
+              f"(held_out_sims(fold={_fold}))")
+    else:
+        _build_kw = dict(ensemble_ckpts=ens)          # mf_fold defaults to 0 (unchanged)
     # the PRODUCTION baseline (referee: standard per-class HCD, hierarchical_hcd=False).
     ctx, d = build_legb_ctx(
-        ensemble_ckpts=ens, use_xclass=True,
+        use_xclass=True,
         with_mf=a.with_mf, mf_with_floor=a.with_mf,
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         mf_emucoh_npz=_emucoh_npz,                    # None → default table; LOWK → the fix (MODE 1)
         mf_shape=_fixed,                              # MODE 2 (LF→HR resolution tilt) ON only when fixed
-        with_eboss=a.with_eboss, metals_on=a.with_eboss, sample_metals=a.with_eboss,
-        hierarchical_hcd=False)
-    # PROPAGATION ASSERTS (the referee's #1 hazard — a flag that silently no-ops). Verify the
-    # variant actually changed the deployed C_emu on the DESI leg (the low-k binding leg).
-    import numpy as _np
-    _desi = [l for l in ctx.legs if l.name.upper().startswith("DESI")][0]
-    _ec = ctx.mf_emucoh_per_leg.get(_desi.name) if getattr(ctx, "mf_emucoh_per_leg", None) else None
-    assert _ec is not None, "mf_emucoh_per_leg NOT set on DESI — emucoh term silently OFF"
-    _msc = ctx.mf_shape_per_leg.get(_desi.name) if getattr(ctx, "mf_shape_per_leg", None) else None
-    if _fixed:
-        assert _msc is not None and _np.any(_np.asarray(_msc) != 0.0), \
-            "fixed variant: mf_shape_per_leg NOT populated on DESI — MODE-2 silently no-op"
-        # MODE-1: the low-k emucoh binder must carry coherent covariance on rows below k=0.0102.
-        _klo = _np.asarray(_desi.k) < 0.0102
-        _ecd = _np.diag(_np.asarray(_ec))
-        assert _klo.sum() > 0 and _np.any(_ecd[_klo] > 0), \
-            "fixed variant: low-k emucoh binder has NO covariance below k=0.0102 — MODE-1 silently no-op"
-        print(f"[cemu-variant] VERIFIED fixed: mf_shape on DESI nonzero; emucoh covers "
-              f"{int((_ecd[_klo]>0).sum())}/{int(_klo.sum())} DESI rows below k=0.0102")
+        with_eboss=_build_eboss, metals_on=_metals_on, sample_metals=_sample_metals,
+        hierarchical_hcd=False, **_build_kw)
+    if a.leg != "all":
+        _pre = [l.name for l in ctx.legs]
+        ctx = ctx._replace(legs=[l for l in ctx.legs if l.name.upper().startswith(a.leg.upper())])
+        assert len(ctx.legs) == 1, f"--leg {a.leg}: expected 1 leg, got {[l.name for l in ctx.legs]} (pre={_pre})"
+        print(f"[per-leg] restricted to {a.leg}: legs={[l.name for l in ctx.legs]}  "
+              f"metals_on={_metals_on} sample_metals={_sample_metals}")
+    # INFORMATIVE-τ₀ PRIOR ARM: when SBC_TAU0_PRIOR_SIGMA>0, swap the UNIFORM τ₀ sites for a
+    # Kim-centered TruncatedNormal (center = the injected closure truth: amp 1.0, dτ₀ 0.0). Done
+    # AFTER the per-leg filtering so it lands on the FINAL ctx, then ASSERTED so it can never
+    # silently no-op (mirrors the SBC_SUBDLA_AMP_SIGMA assert pattern).
+    if _tau0_prior_sig > 0:
+        ctx = ctx._replace(tau0_amp_gauss=(1.0, _tau0_prior_sig),
+                           dtau0_gauss=(0.0, _tau0_dtau0_sig))
+        print(f"[tau0-prior] informative TruncatedNormal: amp N(1.0,{_tau0_prior_sig}) "
+              f"dtau0 N(0.0,{_tau0_dtau0_sig}) (else uniform)")
+        assert ctx.tau0_amp_gauss is not None, "SBC_TAU0_PRIOR_SIGMA NO-OP: ctx.tau0_amp_gauss is None"
+        assert ctx.dtau0_gauss is not None, "SBC_TAU0_PRIOR_SIGMA NO-OP: ctx.dtau0_gauss is None"
     else:
-        assert getattr(ctx, "mf_shape_per_leg", None) is None, \
-            "current variant: mf_shape_per_leg should be None (MODE-2 off)"
-        print(f"[cemu-variant] VERIFIED current: mf_shape off; emucoh = default table")
+        print(f"[tau0-prior] uniform (SBC_TAU0_PRIOR_SIGMA=0)")
+    # subDLA TRUTH DISPLACEMENT ARM: when SBC_SUBDLA_TRUTH_BOOST != 1.0, thread it into the inject_spec
+    # dict reaching run_legb (apply_subdla_truth_boost scales the mock-truth subDLA column). Default
+    # 1.0 => no inject_spec key (byte-identical clean self-draw).
+    _inject_spec = None
+    if _subdla_truth_boost != 1.0:
+        # NO-OP GUARD (referee MUST-FIX): the inject_spec hook in run_legb fires ONLY on the
+        # leg_a=True (self-draw) branch; the held-out branch ignores inject_spec, so a displaced
+        # truth under --held-out would silently run a CLEAN mock mislabeled as displaced. Forbid it.
+        assert a.leg_a, ("SBC_SUBDLA_TRUTH_BOOST requires self-draw (leg_a=True); --held-out "
+                         "ignores inject_spec and would silently no-op the displacement")
+        _inject_spec = {"subdla_truth_boost": float(_subdla_truth_boost)}
+        print(f"[subdla-truth] displacing mock-truth subDLA incidence by ×{_subdla_truth_boost}")
+    else:
+        print(f"[subdla-truth] no displacement (SBC_SUBDLA_TRUTH_BOOST=1.0)")
+    # PROPAGATION ASSERTS (the referee's #1 hazard — a flag that silently no-ops). The emucoh/shape
+    # binders live on DESI+KS; verify on DESI when it is present in the (possibly filtered) legs.
+    import numpy as _np
+    _desi_legs = [l for l in ctx.legs if l.name.upper().startswith("DESI")]
+    if _desi_legs:
+        _desi = _desi_legs[0]
+        _ec = ctx.mf_emucoh_per_leg.get(_desi.name) if getattr(ctx, "mf_emucoh_per_leg", None) else None
+        assert _ec is not None, "mf_emucoh_per_leg NOT set on DESI — emucoh term silently OFF"
+        _msc = ctx.mf_shape_per_leg.get(_desi.name) if getattr(ctx, "mf_shape_per_leg", None) else None
+        if _fixed:
+            assert _msc is not None and _np.any(_np.asarray(_msc) != 0.0), \
+                "fixed variant: mf_shape_per_leg NOT populated on DESI — MODE-2 silently no-op"
+            # MODE-1: the low-k emucoh binder must carry coherent covariance on rows below k=0.0102.
+            _klo = _np.asarray(_desi.k) < 0.0102
+            _ecd = _np.diag(_np.asarray(_ec))
+            assert _klo.sum() > 0 and _np.any(_ecd[_klo] > 0), \
+                "fixed variant: low-k emucoh binder has NO covariance below k=0.0102 — MODE-1 silently no-op"
+            print(f"[cemu-variant] VERIFIED fixed: mf_shape on DESI nonzero; emucoh covers "
+                  f"{int((_ecd[_klo]>0).sum())}/{int(_klo.sum())} DESI rows below k=0.0102")
+        else:
+            assert getattr(ctx, "mf_shape_per_leg", None) is None, \
+                "current variant: mf_shape_per_leg should be None (MODE-2 off)"
+            print(f"[cemu-variant] VERIFIED current: mf_shape off; emucoh = default table")
+    else:
+        print(f"[cemu-variant] DESI not in legs (--leg {a.leg}); DESI-binder asserts skipped")
     if _amp_sig > 0:
         _r = float(_np.asarray(ctx.alpha_hcd_sigma)[1] / _np.asarray(ctx.alpha_hcd_mu)[1])
         assert abs(_r - _amp_sig) < 0.01, f"subDLA amp-width override NO-OP: ctx ratio {_r:.4f} != {_amp_sig}"
@@ -217,7 +353,8 @@ def main():
     n_members = len(getattr(ctx.model, "members", [None]))
     n_z = len(ctx.z_global)
     idxs = [m for m in range(a.n_mocks) if m % a.n_shards == a.shard]
-    print(f"[shard {a.shard}/{a.n_shards}] mocks={idxs}  members={n_members}  "
+    _fold_s = "ensemble/fold0" if _fold is None else f"final_fold{_fold}/fold{_fold}"
+    print(f"[shard {a.shard}/{a.n_shards}] mocks={idxs}  members={n_members}  fold={_fold_s}  "
           f"legs={[l.name for l in ctx.legs]}  n_z={n_z}  mf={a.with_mf} eboss={a.with_eboss}  "
           f"cemu_variant={variant} leg_a={a.leg_a}(held_out={not a.leg_a})  "
           f"res_corr_on={a.res_corr_on}(flag-not-wired; default-forward) "
@@ -229,12 +366,24 @@ def main():
     # filename (index-only). _run_mock writes this into each record and asserts it matches on a skip,
     # so a held-out / cemu-variant / width-check run cannot silently load self-draw (or other-config)
     # pkls left in the same --out-dir.
-    run_cfg = dict(leg_a=bool(a.leg_a), cemu_variant=str(variant), amp_sigma=float(_amp_sig))
+    run_cfg = dict(leg_a=bool(a.leg_a), cemu_variant=str(variant), amp_sigma=float(_amp_sig),
+                   leg=str(a.leg),    # per-leg discriminator (panel 2026-06-21): a KS pkl must not
+                                      # silently load a DESI pkl if two legs ever share an --out-dir.
+                   fold=int(a.fold) if a.fold is not None else 0,   # TRUE-LOSO discriminator
+                                      # (2026-06-21): a fold-7 single-net pkl must not silently load
+                                      # into a fold-0/ensemble run (different held-out population).
+                   tau0_prior_sigma=float(_tau0_prior_sig),   # informative-τ₀ discriminator (2026-06-21):
+                                      # an informative-prior pkl must never load into a uniform run (or
+                                      # vice versa) — distinct SBC population.
+                   subdla_truth_boost=float(_subdla_truth_boost))   # subDLA-displacement discriminator
+                                      # (2026-06-21): a displaced-truth pkl must never load into an
+                                      # un-displaced run (different mock truth).
     records = []
     for m in idxs:
         rec = _run_mock(ctx, d, m, a.out_dir, n_mocks=a.n_mocks, n_warmup=a.n_warmup,
                         n_samples=a.n_samples, max_tree_depth=a.max_tree_depth, seed=a.seed,
-                        dense_mass=True, verbose=True, leg_a=a.leg_a, run_cfg=run_cfg)
+                        dense_mass=True, verbose=True, leg_a=a.leg_a, run_cfg=run_cfg,
+                        fold=(a.fold if a.fold is not None else 0), inject_spec=_inject_spec)
         records.append(rec)
 
     if a.write_shard_pkl:
