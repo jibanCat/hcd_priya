@@ -135,3 +135,66 @@ def test_merge_dedups_mock_in_both_shard_and_mockpkl(merger, tmp_path):
             by_mock.setdefault(int(mi), rec)
     assert list(by_mock.keys()) == [0]
     assert by_mock[0]["_marker"] == "permock", "per-mock pkl must win the dedup"
+
+
+# --- CONFIG-KEY CLASH guard (run_prod_sbc_shard.py:62-122, added 2026-06-19) -------------------
+# The per-mock pkl is keyed by INDEX ONLY (mock_{m:04d}.pkl), with no leg_a / cemu_variant /
+# amp_sigma / tau0 / subdla discriminator. A held-out (or cemu-variant / width-check / informative-
+# prior) run pointed at an --out-dir that already holds differently-configured pkls would otherwise
+# SILENTLY skip-load the WRONG SBC population. The guard stamps run_cfg into each record and, on the
+# skip branch, RAISES on a stamp mismatch. These exercise that skip-branch guard ONLY — the clash
+# check precedes run_legb, so they need no ctx/NUTS (ctx=d=None) and run fast + deterministically.
+
+_FULL_SELFDRAW = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="all", fold=0,
+                      tau0_prior_sigma=0.0, subdla_truth_boost=1.0)
+# the 2026-06-19 stamp, written BEFORE the leg/fold/tau0/subdla keys were added (a pre-stamp resume):
+_PARTIAL_2026_06_19 = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0)
+# unused-but-required kwargs (consumed only on the run_legb path, which the guard never reaches):
+_DUMMY = dict(n_mocks=1, n_warmup=1, n_samples=1, max_tree_depth=1, seed=0, verbose=False)
+
+
+def _write_stub_mock(runner, out_dir, m, run_cfg, marker="ondisk"):
+    """Pre-write a per-mock pkl with a chosen run_cfg stamp (or none) + a readback marker."""
+    os.makedirs(out_dir, exist_ok=True)
+    rec = dict(_marker=marker)
+    if run_cfg is not None:
+        rec["run_cfg"] = dict(run_cfg)
+    with open(runner._mock_path(out_dir, m), "wb") as f:
+        pickle.dump(rec, f)
+
+
+def test_config_clash_raises_on_leg_a_mismatch(runner, tmp_path):
+    """Self-draw pkl on disk + a HELD-OUT (leg_a=False) request for the same index → RuntimeError,
+    not a silent wrong-config skip-load."""
+    out = str(tmp_path / "clash_leg_a")
+    _write_stub_mock(runner, out, 0, _FULL_SELFDRAW)
+    req = dict(_FULL_SELFDRAW, leg_a=False)                  # held-out over a self-draw pkl
+    with pytest.raises(RuntimeError, match="config CLASH"):
+        runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
+
+
+def test_config_match_loads_without_nuts(runner, tmp_path):
+    """An EXACT config match → SKIP-load the existing pkl (returned verbatim, no re-NUTS)."""
+    out = str(tmp_path / "match")
+    _write_stub_mock(runner, out, 0, _FULL_SELFDRAW, marker="loaded-me")
+    rec = runner._run_mock(None, None, 0, out, run_cfg=dict(_FULL_SELFDRAW), **_DUMMY)
+    assert rec["_marker"] == "loaded-me", "exact-config match must load the on-disk pkl, not re-run"
+
+
+def test_config_backcompat_prestamp_resumes_under_default(runner, tmp_path):
+    """A 2026-06-19-stamped pkl (no leg/fold/tau0/subdla keys) resumed under the modern DEFAULT
+    config must LOAD — the back-compat pops drop the missing-key diffs — not clash."""
+    out = str(tmp_path / "backcompat")
+    _write_stub_mock(runner, out, 0, _PARTIAL_2026_06_19, marker="resumed")
+    rec = runner._run_mock(None, None, 0, out, run_cfg=dict(_FULL_SELFDRAW), **_DUMMY)
+    assert rec["_marker"] == "resumed", "pre-stamp pkl must resume under the default config"
+
+
+def test_config_clash_nondefault_over_prestamp(runner, tmp_path):
+    """A NON-default run (informative τ₀, σ>0) over a pre-stamp DEFAULT pkl must CLASH — the
+    back-compat pop excuses a MISSING key only when the request is ALSO at that key's default."""
+    out = str(tmp_path / "clash_informative")
+    _write_stub_mock(runner, out, 0, _PARTIAL_2026_06_19)
+    req = dict(_FULL_SELFDRAW, tau0_prior_sigma=0.05)        # informative τ₀ over an un-stamped uniform pkl
+    with pytest.raises(RuntimeError, match="config CLASH"):
+        runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
