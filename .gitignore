@@ -293,3 +293,6 @@ scripts/analyze_mf_nscert_*.py
 scripts/batch_mf_nscert_*.sh
 # their scratch figures / npz outputs
 figures/analysis/04_emulator/embias_*
+
+# internal multi-agent review scratch (archived in the notes repo)
+REVIEW_*.md
