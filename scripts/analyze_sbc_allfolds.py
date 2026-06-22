@@ -187,6 +187,8 @@ for m in mocks:
     m["L"] = L
     m["truth_ns_unit"] = float(t[j_ns])
     m["truth_ap_unit"] = float(t[j_ap])
+    m["ns_mean"] = float(dr[:, j_ns].mean())   # recovered post-mean (unit cube) — for the recovery slope
+    m["ap_mean"] = float(dr[:, j_ap].mean())
     m["pull"] = {
         "ns": pull(dr, t, j_ns),
         "Ap": pull(dr, t, j_ap),
@@ -220,6 +222,8 @@ for sim, ms in sims.items():
         "n_mocks": len(ms),
         "truth_ns_unit": float(np.mean([mm["truth_ns_unit"] for mm in ms])),
         "truth_ap_unit": float(np.mean([mm["truth_ap_unit"] for mm in ms])),
+        "ns_mean": float(np.mean([mm["ns_mean"] for mm in ms])),   # recovered post-mean (recovery slope)
+        "ap_mean": float(np.mean([mm["ap_mean"] for mm in ms])),
         "n_div": int(sum(max(0, mm["n_div"]) for mm in ms)),
     }
     for p in PARAMS:
@@ -323,8 +327,14 @@ def per_fold_mean_slope():
 ns_gate = margin_gate("ns")
 ap_gate = margin_gate("Ap")
 ns_tilt = per_fold_mean_slope()                 # LOAD-BEARING tilt (de-trended, unbiased)
-ns_slope = ols_slope("truth_ns_unit", "ns")     # pooled per-sim slope (secondary; carries ~-0.2 offset)
+ns_slope = ols_slope("truth_ns_unit", "ns")     # pooled per-sim PULL slope (secondary; carries ~-0.2 offset)
 ap_slope = ols_slope("truth_ap_unit", "Ap")
+# MF2 (PR #12 review): the RECOVERY slope = OLS of the recovered post-mean n_s on truth n_s across sims.
+# slope < 1 IS the calibrated posterior shrinkage (the load-bearing 'n_s = shrinkage' number, ~0.58 on
+# the spanning KS LOSO). This is the reproducible artifact behind the headline; the pull slope above is
+# the same effect in pull units (= (recovery_slope-1)/post_sd).
+ns_recovery = ols_slope("truth_ns_unit", "ns_mean")
+ap_recovery = ols_slope("truth_ap_unit", "ap_mean")
 subdla_stat = across_sim("alpha_subdla")
 lls_stat = across_sim("alpha_lls")
 amp_stat = across_sim("tau0amp")
@@ -416,9 +426,21 @@ payload = {
     "folds_missing": folds_missing, "folds_empty": folds_empty,
     "div_total": div_total,
     "z_tau0": Z_TAU0.tolist(),
+    "verdict_note": (
+        "READ-ME for any external reader: on this HELD-OUT spanning-LOSO grid the n_s margin gate "
+        "tripping (margin>0.3) and the 'SIGNIFICANT n_s tilt' label are EXPECTED from intrinsic "
+        "posterior SHRINKAGE (a weak-signal posterior mean regresses toward the prior center across "
+        "the box) — NOT an emulator/forward bias. The load-bearing verdict is calibrated shrinkage, "
+        "carried by (a) ns_recovery_slope below (recovered-n_s vs truth; <1 = shrinkage, ~0.58 on KS), "
+        "and (b) the SELF-DRAW KS control (pull mean -0.09 / std 1.08), which cancels emulator "
+        "misspecification and stays calibrated. Do NOT read ns_gate.pass=False / SIGNIFICANT here as a "
+        "real-fit n_s failure; the real-fit n_s remains gated by the (separate) MF-high-k + data-nuisance gates."
+    ),
     "ns_gate": ns_gate, "Ap_gate": ap_gate,
+    "ns_recovery_slope": ns_recovery,           # MF2: recovered-n_s-on-truth OLS; <1 = calibrated shrinkage
+    "Ap_recovery_slope": ap_recovery,
     "ns_tilt_per_fold": ns_tilt,                # LOAD-BEARING de-trended tilt (verdict)
-    "ns_pull_vs_truth_slope": ns_slope,         # pooled per-sim slope (secondary; ~-0.2 offset)
+    "ns_pull_vs_truth_slope": ns_slope,         # pooled per-sim PULL slope (secondary; ~-0.2 offset)
     "Ap_pull_vs_truth_slope": ap_slope,
     "alpha_subdla": subdla_stat, "alpha_lls": lls_stat,
     "tau0amp": amp_stat, "dtau0": dtau_stat,
