@@ -1,6 +1,6 @@
 """Diagnose the Phase-2b P1D normalization + what the trained emulator actually learns.
 
-Produces the figures for docs/superpowers/2026-06-02-training-walkthrough.md:
+Produces the figures for hcd_priya_notes/docs/superpowers/2026-06-02-training-walkthrough.md:
  1. variance decomposition: cosmology vs (z,tau0) fraction of per-k log-variance
  2. spectrum spread: per-k mean P1D +/- total std (tau0/z) vs +/- within-cell std (cosmology)
  3. fold-0 cosmology tracking: pred-dev vs true-dev from the (z,tau0)-cell mean

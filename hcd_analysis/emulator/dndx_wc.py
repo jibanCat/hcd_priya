@@ -1,6 +1,6 @@
 """dN/dX -> w_c diagonal telescoping-Poisson map (M0) + JAX-pure delta_c(z).
 
-See docs/superpowers/2026-05-29-wc-dndx-poisson-coupling.md. JAX-pure: no python
+See hcd_priya_notes/docs/superpowers/2026-05-29-wc-dndx-poisson-coupling.md. JAX-pure: no python
 branching on traced values, so the whole dN/dX -> w_c -> P_obs path is one jit.
 Class order throughout: (clean, LLS, subDLA, DLA); mu/dN-dX inputs are the 3 HCD
 classes in order (LLS, subDLA, DLA).
@@ -26,7 +26,7 @@ def mu_from_dndx(dndx, Xbar):
 
 # Frozen delta_c(z) deg-2 coeffs from scripts/calibrate_delta_c.py (89 LF shards,
 # 1060 snap-blocks, 60 sims). np.polyval order [a2,a1,a0]; class order
-# (clean, LLS, subDLA, DLA). See docs/superpowers/2026-06-01-delta_c-coeffs.md.
+# (clean, LLS, subDLA, DLA). See hcd_priya_notes/docs/superpowers/2026-06-01-delta_c-coeffs.md.
 _DELTA_C_COEFFS = jnp.array([
     [-0.0044601756018632,    0.02941370276821661,  -0.04147804040644924],   # clean
     [-7.391610723256435e-06, 0.008526578464137916, -0.03592195195833433],   # LLS
@@ -41,7 +41,7 @@ _DELTA_C_COEFFS = jnp.array([
 Z_FIT_LO, Z_FIT_HI = 2.0, 5.4
 
 # Per-class fit-residual std of delta_c (clean,LLS,subDLA,DLA), from
-# docs/superpowers/2026-06-01-delta_c-coeffs.md. These are the per-class w_c/alpha_c
+# hcd_priya_notes/docs/superpowers/2026-06-01-delta_c-coeffs.md. These are the per-class w_c/alpha_c
 # PRIOR WIDTHS: the irreducible cosmology-dependent delta_c scatter at fixed z that the
 # deg-2 z-trend fit cannot remove.
 DELTA_C_RESID_STD = jnp.array([0.0093, 0.0059, 0.0032, 0.0016])

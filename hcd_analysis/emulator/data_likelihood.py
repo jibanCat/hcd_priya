@@ -7,7 +7,7 @@ on the cache's own 172 angular-k grid (the sim/closure path); THIS module binds 
 emulator forward model to the OBSERVED survey grids (DESI 85 angular-k × 12 z, KS 13
 angular-k × 14 z), applying the published cuts + covariances.
 
-Contract (per ``docs/superpowers/2026-06-05-desi-dr1-p1d-usage.md``):
+Contract (per ``hcd_priya_notes/docs/superpowers/2026-06-05-desi-dr1-p1d-usage.md``):
 
   per leg ``DataLeg``:  z (Nz,), k (Nz*Nk flat or (Nz,Nk)), P_data (N,), C_data (N,N),
                         R_z (Nz,) resolution, plus systematic-model flags.
@@ -74,7 +74,7 @@ DESI_KMIN = 1e-3
 #  (Fernandez+2024 arXiv:2309.03943). Neither de-biases the forward; they soften
 #  the +5.5σ low-k n_s pull computed against the currently-deployed covariance.
 #  Both are ENV-GATED and REVERSIBLE (unset → byte-identical to the deployed path).
-#  See docs/superpowers/2026-06-18-{desi-p1d-lowk-data-reliability,
+#  See hcd_priya_notes/docs/superpowers/2026-06-18-{desi-p1d-lowk-data-reliability,
 #  cosmic-variance-floor-lowk}.md (notes repo).
 # ----------------------------------------------------------------------------#
 #  Fix 1 — DESI SNR>3 measurement + covariance (the cosmology-paper baseline).
@@ -283,7 +283,7 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
     closure-clean cut; low-z KS P1D is compromised by DLA-finder incompleteness, and the
     published KODIAQ-SQUAD analysis uses the more conservative z<2.8 — set ``z_lo=2.8`` for that
     (opt-in). PI decision 2026-06-08 = 2.4 default.
-    See docs/superpowers/plans/2026-06-08-ns-bias-rootcause-diagnostics-plan.md.
+    See hcd_priya_notes/docs/superpowers/plans/2026-06-08-ns-bias-rootcause-diagnostics-plan.md.
 
     metals_on=False / resolution_on=False by default: KS conservative mode already SUBTRACTS
     metals/continuum/resolution + inflates its covariance, so re-applying the SiIII/resolution
@@ -504,7 +504,7 @@ def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_
 # ============================================================================ #
 #  MF C_emu floor (LF→HR generalization + n_s-edge extrapolation), T4/T5b.
 #
-#  The spec (docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md) sizes a
+#  The spec (hcd_priya_notes/docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md) sizes a
 #  z-resolved, per-band ADDITIVE diagonal variance term that inflates C_emu on the
 #  SMALL-SCALE leg(s) to cover the residual the FIXED θ-blind MF correction leaves
 #  AFTER it is applied (the LF→HR generalization error), plus a SEPARATE n_s-edge
@@ -820,7 +820,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     or a high-k DESI row above the LF Nyquist), the LF→HR generalization floor + the
     n_s-edge extrapolation budget are ADDED to the C_emu diagonal in variance units:
     ``emu_var(k,z) += (σ_floor(z,band(k))·P_obs)² + (σ_edge(z,band(k);ns)·P_obs)²``
-    (spec docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md §2.3/§4.2). The
+    (spec hcd_priya_notes/docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md §2.3/§4.2). The
     floor is a FIXED θ-blind data-side table; the edge term's ns-dependence is
     stop_gradient'd → it widens the posterior, it cannot bias the MAP. The floor is applied
     on the leg z's via 1-D interp/clamp of σ_floor(z,·); the legs only reach z≤4.6 so the

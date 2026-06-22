@@ -1,7 +1,7 @@
 """res_corr AMPLITUDE nuisance α(z) — forward-only marginalization (Task 1.3, TDD).
 
-Plan : docs/superpowers/plans/2026-06-16-res-corr-anchor-marginalize-plan.md (Task 1.3)
-Spec : docs/superpowers/specs/2026-06-16-res-corr-anchor-marginalize-design.md (§3.2/§5)
+Plan : hcd_priya_notes/docs/superpowers/plans/2026-06-16-res-corr-anchor-marginalize-plan.md (Task 1.3)
+Spec : hcd_priya_notes/docs/superpowers/specs/2026-06-16-res-corr-anchor-marginalize-design.md (§3.2/§5)
 
 The multi-fidelity ``res_corr`` correction (``mf.res_corr``, the HF→n512 particle-convergence
 factor) is currently a FIXED, zero-uncertainty deterministic factor whose high-k amplitude is

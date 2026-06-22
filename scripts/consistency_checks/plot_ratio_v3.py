@@ -1,7 +1,7 @@
 """Ratio plot v3: fake_spectra direct call (with PRIYA's actual filter).
 
-Reads:  docs/superpowers/figs/2026-05-20-priya-p1d-consistency-v3.npz
-Writes: docs/superpowers/figs/2026-05-20-priya-p1d-ratio-v3.png
+Reads:  hcd_priya_notes/docs/superpowers/figs/2026-05-20-priya-p1d-consistency-v3.npz
+Writes: hcd_priya_notes/docs/superpowers/figs/2026-05-20-priya-p1d-ratio-v3.png
 """
 from pathlib import Path
 import matplotlib

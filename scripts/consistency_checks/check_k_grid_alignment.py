@@ -9,8 +9,8 @@ Two hypotheses:
 Output: print direct mode-by-mode ratio (no interpolation) and the k-grid
 diff. Save a new ratio plot.
 
-Reads:  docs/superpowers/figs/2026-05-20-priya-p1d-consistency.npz
-Writes: docs/superpowers/figs/2026-05-20-priya-p1d-ratio-direct.png
+Reads:  hcd_priya_notes/docs/superpowers/figs/2026-05-20-priya-p1d-consistency.npz
+Writes: hcd_priya_notes/docs/superpowers/figs/2026-05-20-priya-p1d-ratio-direct.png
 
 Note: the .npz from the v2 run stores `kf_kms` (my native, 625 bins) and
 `priya_kfkms` (PRIYA stored, 172 bins). We can do the no-interp comparison

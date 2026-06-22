@@ -1,7 +1,7 @@
 """Overlay + ratio plot for the fake_spectra-based consistency check.
 
-Reads:  docs/superpowers/figs/2026-05-20-priya-p1d-consistency.npz
-Writes: docs/superpowers/figs/2026-05-20-priya-p1d-overlay.png
+Reads:  hcd_priya_notes/docs/superpowers/figs/2026-05-20-priya-p1d-consistency.npz
+Writes: hcd_priya_notes/docs/superpowers/figs/2026-05-20-priya-p1d-overlay.png
 """
 from pathlib import Path
 import matplotlib

@@ -10,7 +10,7 @@ Run in emu-3.9 env with GSL loaded:
     conda activate emu-3.9
     python3 scripts/consistency_checks/priya_p1d_consistency_one_snap.py \\
         --sim-idx 44 --sim-folder ns0.803... --snap 17 --z-idx 8 \\
-        --out docs/superpowers/figs/multipoint_sim44_snap17.npz
+        --out hcd_priya_notes/docs/superpowers/figs/multipoint_sim44_snap17.npz
 """
 import argparse
 import json

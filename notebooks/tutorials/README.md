@@ -232,8 +232,9 @@ programming, here are some starting points by topic.
   absorbers as a probe of stellar feedback", MNRAS 445, 2313;
   [arXiv:1405.3994](https://arxiv.org/abs/1405.3994)) —
   hydrodynamic prediction of DLA bias and the f(N_HI) shape.
-  Section 5 is what feeds the scale-dependent-bias TODO in
-  `SESSION_HANDOVER_2026_04_28.md` §4D.
+  Section 5 is what feeds the scale-dependent-bias TODO tracked in the project
+  handoffs (archived in the private notes repo,
+  `hcd_priya_notes/docs/code-repo-archive/handovers/`).
 - **Font-Ribera, Miralda-Escudé et al. 2012** (JCAP 11, 059;
   [arXiv:1209.4596](https://arxiv.org/abs/1209.4596)) — the BOSS DLA-Lyα
   cross correlation that the project's clustering pipeline mirrors.
@@ -297,8 +298,8 @@ programming, here are some starting points by topic.
 
 | Topic | File |
 |---|---|
-| Project state, current TODOs | `docs/SESSION_HANDOVER_2026_04_28.md` |
-| Older audit context (CDDF / fast-mode / per-class templates) | `docs/SESSION_HANDOVER.md` |
+| Project state, current TODOs | private notes repo: `hcd_priya_notes/docs/superpowers/` (latest session handoff) |
+| Older audit context (CDDF / fast-mode / per-class templates) | archived: `hcd_priya_notes/docs/code-repo-archive/handovers/` |
 | Bug history (the seven bugs the audit caught) | `docs/bugs_found.md` |
 | Why fast-mode NHI estimation works | `docs/fast_mode_physics.md` |
 | Mask choice rationale | `docs/masking_strategy.md` |
@@ -352,6 +353,7 @@ The four observables you've now learned to read — `catalog`,
 the HCD emulator under construction.  The next milestone is **phase 1
 of the emulator work**: building a single in-repo HDF5 cache that stacks
 the per-(sim, snap) observables across all 1076 outputs onto a shared
-k-grid and NHI-grid.  See `docs/SESSION_HANDOVER_2026_04_28.md` for the
+k-grid and NHI-grid.  See the project handoffs in the private notes repo
+(`hcd_priya_notes/docs/code-repo-archive/handovers/`) for the
 overall project state and the next planning thread for the emulator
 design.

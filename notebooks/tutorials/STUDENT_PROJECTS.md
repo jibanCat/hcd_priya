@@ -63,8 +63,8 @@ the recommended path is the three rows above.
    can run them on your machine, not just look at the committed
    outputs — the moment you change `n_skewers` or pick a different
    sim, you're already doing science.
-2. Read `docs/SESSION_HANDOVER_2026_04_28.md` (the most recent state of
-   the project) and skim `docs/SESSION_HANDOVER.md` (the previous
+2. Read `hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER_2026_04_28.md` (the most recent state of
+   the project) and skim `hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER.md` (the previous
    audit handover) for context.
 3. Start on **A1** (the recommended starter; see the table above).
    Open a feature branch named for the project (e.g.
@@ -350,7 +350,7 @@ dependent template.
 
 ## D. Clustering  (advanced)
 
-These come straight out of `docs/SESSION_HANDOVER_2026_04_28.md` §4.
+These come straight out of `hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER_2026_04_28.md` §4.
 Read that file first.  These are open research problems, not exercises.
 
 ### D1. Tighten β_DLA via LF+HR + z-stacking
@@ -512,7 +512,7 @@ To avoid duplicating work, here's what's already in the repo:
 
 - 60 LF + 4 HR simulations fully processed: catalog, CDDF, P1D, per-
   class P1D, P1D-with-PRIYA-mask, P1D ratios.  See
-  `docs/SESSION_HANDOVER.md` §1 for the production state.
+  `hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER.md` §1 for the production state.
 - Catalog validation against particle-based truth on the 4 HR sims.
   See `docs/dla_truth_validation.md` and
   `docs/dla_truth_unmatched_analysis.md`.

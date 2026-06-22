@@ -308,7 +308,7 @@ What each piece does:
 - `JAX_PLATFORMS=cpu` and `CUDA_VISIBLE_DEVICES=""` pin execution to the CPU, which is deterministic
   and avoids GPU surprises.
 - The JAX/Equinox traps we have already encountered are logged in
-  `docs/superpowers/jax-traps-log.md` (for example trap #29: sanitise `jnp.interp` y-data before
+  `hcd_priya_notes/docs/superpowers/jax-traps-log.md` (for example trap #29: sanitise `jnp.interp` y-data before
   the call, not after).
 
 This yields a working float64 JAX runtime that can `import` the package.
@@ -522,7 +522,7 @@ Reading it:
   4-class form is also what PRIYA-on-KODIAQ-SQUAD uses,
   [arXiv:2509.18271](https://arxiv.org/abs/2509.18271)). Unlike the fixed Rogers kernel, ours
   carries the θ, τ₀ sensitivity and preserves the global-⟨F⟩ normalisation. See
-  `docs/superpowers/2026-06-04-phase-c-walkthrough.md` §6 and
+  `hcd_priya_notes/docs/superpowers/2026-06-04-phase-c-walkthrough.md` §6 and
   `[[hcd-template-rogers-normalization]]`.
 
 The figure below shows an example fold-0 prediction (dashed) over the cache truth (solid), per
@@ -679,8 +679,8 @@ To reproduce, the closure and SBC machinery is `hcd_analysis/emulator/closure_di
 (PIT-ECDF bands, rank tests, coverage). The coverage figure is built by
 `hcd_priya_notes/figures/analysis/06_validation_summary/make_coverage_summary.py` from the
 closure-chain outputs (`checkpoints/stepA/`). The full writeup is in notes
-`docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md` (validation summary) and the
-closure plan `docs/superpowers/plans/2026-06-04-phase-c-t4-closure-plan.md`.
+`hcd_priya_notes/docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md` (validation summary) and the
+closure plan `hcd_priya_notes/docs/superpowers/plans/2026-06-04-phase-c-t4-closure-plan.md`.
 
 ---
 
@@ -771,7 +771,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBL
 ```
 
 The full writeup, with the acceptance gate, the per-fold numbers and the MF-forward G-gates, is in
-notes `docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md` §2b.
+notes `hcd_priya_notes/docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md` §2b.
 
 ---
 
@@ -871,7 +871,7 @@ matters, because a wrong centre is the 0.5σ-per-1σ systematic. Second, the gen
 degeneracy-breaker is the high-k KS leg together with the damping-wing high-k Voigt deficit (the
 low-k excess is the confusion, the high-k deficit is the cure), not a tighter incidence prior. The
 full derivation, the correlation matrix and the factorisation 0.5σ = corr × prior-dominance are in
-notes `docs/superpowers/2026-06-14-hcd-cosmology-degeneracy.md`, with the related figures
+notes `hcd_priya_notes/docs/superpowers/2026-06-14-hcd-cosmology-degeneracy.md`, with the related figures
 `degeneracy_prior_center_law.png` and `degeneracy_snr_amplitude_vs_ztilt.png` in the notes
 `04_emulator/`. All three correlation/projection figures are reproduced by
 `scripts/diag_hcd_cosmo_degeneracy_ref.py`.
@@ -901,8 +901,8 @@ The closures these tools drive validate the architecture that the production all
 inherits; the ensemble-level production SBC is the final inference-calibration gate and remains
 pending before the real fit (notes `2026-06-14-validation-likelihood-production.md` §6).
 
-See `docs/superpowers/plans/2026-06-04-phase-c-t4-closure-plan.md` for the closure/SBC harness
-(Phase-C T4, in progress) and `docs/superpowers/2026-06-04-phase-c-checkpoint-review.md` for the
+See `hcd_priya_notes/docs/superpowers/plans/2026-06-04-phase-c-t4-closure-plan.md` for the closure/SBC harness
+(Phase-C T4, in progress) and `hcd_priya_notes/docs/superpowers/2026-06-04-phase-c-checkpoint-review.md` for the
 latest 4-agent review status.
 
 ---

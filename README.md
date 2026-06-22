@@ -389,8 +389,8 @@ the notes repo (see below).
 - The validation results (held-out LOSO error, coverage, the closure gates and
   the Fisher checks) are kept in the private notes repository, indexed from
   `hcd_priya_notes/docs/superpowers/INDEX.md`. Begin with
-  `docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md` for the emulator
-  validation and `docs/superpowers/2026-06-14-validation-likelihood-production.md`
+  `hcd_priya_notes/docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md` for the emulator
+  validation and `hcd_priya_notes/docs/superpowers/2026-06-14-validation-likelihood-production.md`
   for the likelihood and closure.
 
 ---
@@ -413,8 +413,10 @@ is merged to `main`. The current branch `phase2c-likelihood` carries the
 differentiable likelihood and the inference and closure work; these closures
 validate the architecture that the production N=5 ensemble inherits, but the
 ensemble-level production SBC is the final inference-calibration gate and remains
-pending before the real fit. See `docs/SESSION_HANDOVER_2026_06_05.md` for the
-live process-level state.
+pending before the real fit. The live process-level state is tracked in the
+private notes repository (`hcd_priya_notes/docs/superpowers/`, latest
+`2026-06-21-session-handoff.md`; the older dated handovers are archived under
+`hcd_priya_notes/docs/code-repo-archive/handovers/`).
 
 ---
 

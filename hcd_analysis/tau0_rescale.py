@@ -5,7 +5,7 @@ optical depth tau. The physically-correct recipe ("freeze-core") rescales
 optically-thin pixels by a factor alpha while *freezing* self-shielded
 saturated cores (native tau > TAU_FREEZE_DEFAULT) at their native value:
 self-shielded gas does not respond to the UV background. See
-docs/superpowers/specs/2026-05-17-phase2-hcd-emulator-design.md sec. 3.
+hcd_priya_notes/docs/superpowers/specs/2026-05-17-phase2-hcd-emulator-design.md sec. 3.
 
 A uniform rescale ("Tier A", a deliberately-wrong systematic twin) is
 recovered with tau_freeze = inf.

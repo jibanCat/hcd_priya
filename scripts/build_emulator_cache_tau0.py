@@ -8,7 +8,7 @@ hcd_analysis.priya_p1d) at each of N alpha-slope values to produce both:
            Tier P's mean-flux normalisation (scale + target_F).
 The CDDF / dN/dX are tau0-invariant and stored once per (sim, snap).
 
-See docs/superpowers/specs/2026-05-17-phase2-hcd-emulator-design.md.
+See hcd_priya_notes/docs/superpowers/specs/2026-05-17-phase2-hcd-emulator-design.md.
 
 Usage:
     python3 scripts/build_emulator_cache_tau0.py \
@@ -68,7 +68,7 @@ def _assert_class_edges() -> None:
 
 
 # ns0.907 has an anomalous raw SPECTRA ladder (gaps at snap 15/18; see
-# docs/SESSION_HANDOVER_2026_05_22.md). Its Phase-1 snap_17 is the z=2.8
+# hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER_2026_05_22.md). Its Phase-1 snap_17 is the z=2.8
 # snapshot, but the z=2.8 grid_480 raw tau lives in raw dir SPECTRA_018 --
 # SPECTRA_017 holds a z=3.0 grid_480. Every other sim maps Phase-1 snap ->
 # raw SPECTRA_<snap> 1:1. Without this override the build's z_raw-vs-z_meta
@@ -202,7 +202,7 @@ def discover_tau0_pairs(hcd_root, emu_root, fidelity="lf", max_off_grid=0.05):
 # slightly off (e.g. 4.600013). For bit-compatibility with PRIYA's training
 # data the mean-flux model must use the GRID z, not the snapshot's exact z
 # (obs_mean_tau ∝ (1+z)^3.65; an off-grid z gives a ~1e-5 P1D bias — see
-# docs/superpowers/2026-05-20-priya-p1d-consistency-check.md §6c).
+# hcd_priya_notes/docs/superpowers/2026-05-20-priya-p1d-consistency-check.md §6c).
 def _snap_z_to_priya_grid(z):
     """Round a snapshot redshift to PRIYA's zout grid (nearest multiple of 0.2)."""
     return round(float(z) / 0.2) * 0.2
@@ -222,7 +222,7 @@ def _read_tau(raw_tau_path, n_skewers=None):
 # /Mpc. They are the same amplitude at different pivots:
 #   Ap = As * (k_p / k_0)^(ns - 1),  with k_p/k_0 = (pi/4)/0.05 = 5*pi.
 # Verified to machine precision against PRIYA's params array across the LF
-# grid (sim 0/29/44). See docs/SESSION_HANDOVER_2026_05_20.md.
+# grid (sim 0/29/44). See hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER_2026_05_20.md.
 _AP_PIVOT_RATIO = 5.0 * np.pi  # k_p/k_0
 
 

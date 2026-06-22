@@ -1,7 +1,7 @@
 """All-folds (60-sim) certification of the SHIPPED KS z_lo=2.4 default — n_s/A_p EMU bias.
 
-This is TASK C1 from docs/superpowers/plans/2026-06-08-mf-tau0-resolved-implementation-plan.md
-and CRITICAL blocker C1 of docs/superpowers/onboarding/2026-06-08-review2-meta.md.
+This is TASK C1 from hcd_priya_notes/docs/superpowers/plans/2026-06-08-mf-tau0-resolved-implementation-plan.md
+and CRITICAL blocker C1 of hcd_priya_notes/docs/superpowers/onboarding/2026-06-08-review2-meta.md.
 
 `load_ks_leg` now defaults to **z_lo=2.4** (the PI decision 2026-06-08, commit 7de7f7a). The
 authoritative all-folds reference `emu_bias_allfolds.txt` (n_s mean −0.646σ) was generated at the

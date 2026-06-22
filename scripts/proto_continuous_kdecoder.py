@@ -28,7 +28,7 @@ ENV (mandatory):
         /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/proto_continuous_kdecoder.py
 
 x64 is enabled package-wide by ``import hcd_analysis.emulator`` (see that
-package's __init__ and docs/superpowers/jax-traps-log.md §1).
+package's __init__ and hcd_priya_notes/docs/superpowers/jax-traps-log.md §1).
 """
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 """TASK B — the T4 small-scale C_emu floor (LF->HR generalization budget).
 
-Per docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md, runs the HONEST
+Per hcd_priya_notes/docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md, runs the HONEST
 6-fold HR-LOSO of the LF->HR resolution correction, on the production forward's
 log-ratio object g(z,tau0,k) = log_rho + resolved separable+rank-1 FixedMeanHead,
 EXERCISED through the SAME loglog_interp/extrap the production forward uses (so the

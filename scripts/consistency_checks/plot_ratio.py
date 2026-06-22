@@ -1,7 +1,7 @@
 """Ratio-only plot: P_mine / P_PRIYA vs k, at the tight 0.1% scale.
 
-Reads:  docs/superpowers/figs/2026-05-20-priya-p1d-consistency.npz
-Writes: docs/superpowers/figs/2026-05-20-priya-p1d-ratio.png
+Reads:  hcd_priya_notes/docs/superpowers/figs/2026-05-20-priya-p1d-consistency.npz
+Writes: hcd_priya_notes/docs/superpowers/figs/2026-05-20-priya-p1d-ratio.png
 """
 from pathlib import Path
 import matplotlib
