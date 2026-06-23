@@ -53,6 +53,9 @@ def draw_leg_a_truth(ctx: Ctx, key):
     # α_lls/α_subdla ~ Normal; α_dla ~ softplus(Normal latent)
     a_lls = ctx.alpha_hcd_mu[0] + ctx.alpha_hcd_sigma[0] * jax.random.normal(k_lls)
     a_sub = ctx.alpha_hcd_mu[1] + ctx.alpha_hcd_sigma[1] * jax.random.normal(k_sub)
+    # mock-TRUTH α_DLA: latent scale 1.0 MIRRORS the PRIOR (sampler_numpyro / closure_legb._hcd_sites).
+    # This identity is load-bearing for self-draw SBC (truth ~ the same broad σ/μ≈1.2 one-sided prior) —
+    # if that prior scale ever changes, change it HERE too. Full note at closure_legb.py:_hcd_sites.
     a_dla_raw = _dla_raw_mu(ctx.alpha_hcd_mu[2]) + 1.0 * jax.random.normal(k_dla)
     a_dla = jax.nn.softplus(a_dla_raw)
     alpha_hcd = jnp.stack([a_lls, a_sub, a_dla])

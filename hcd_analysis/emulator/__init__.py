@@ -1,7 +1,7 @@
 """Phase-2b JAX/Equinox HCD P1D + CDDF emulator.
 
-See docs/superpowers/specs/2026-05-29-phase2b-emulator-design.md and
-docs/superpowers/plans/2026-06-01-phase2b-B-equinox-emulator.md.
+See hcd_priya_notes/docs/superpowers/specs/2026-05-29-phase2b-emulator-design.md and
+hcd_priya_notes/docs/superpowers/plans/2026-06-01-phase2b-B-equinox-emulator.md.
 
 The whole emulator pipeline runs in float64: the structural identities
 (P_tier_p = Sum_c w_c*P_filt, telescoping w_c sum-to-1) are bit-level and break

@@ -42,21 +42,48 @@ def test_load_res_corr_shapes_and_range():
 
 
 def test_interp_res_corr_matches_table_on_grid():
+    # CORRECTED for the res_corr anchor (Task 1.1): the production interp now blends
+    # res_corr -> 1 below 5x the L15 box fundamental (kbox_skm), so on-grid bins
+    # BELOW / near the anchor no longer equal the raw table.  Exact table recovery is
+    # now (a) the anchor_mult=0.0 (NO-anchor) reference path on the FULL grid, and
+    # (b) the anchored path on bins WELL ABOVE the anchor (k > 10*kbox, where the
+    # tanh blend has saturated to w~1).
     z, logk, rc = MF.load_res_corr()
-    # evaluate exactly at a table z and its own k-grid -> recover the table row.
-    zi = 5
+    zi = 5                                          # z = 3.2
+    zz = z[zi]
     k_eval = jnp.asarray(10.0 ** logk[zi])
-    got = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(z[zi]), k_eval))
-    assert np.allclose(got, rc[zi], rtol=1e-9, atol=1e-9)
+    # (a) anchor_mult=0.0 reproduces the raw table EXACTLY on-grid (regression ref).
+    got_raw = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(zz), k_eval,
+                                            anchor_mult=0.0))
+    assert np.allclose(got_raw, rc[zi], rtol=1e-9, atol=1e-9)
+    # (b) anchored path on bins well above the anchor (k > 10*kbox) matches the table;
+    #     the tanh tail is asymptotic (worst ~4e-5 at the cut), so use a high-k tol.
+    kbox = float(MF.kbox_skm(zz))                   # ~0.00377 at z=3.2
+    kgrid = 10.0 ** logk[zi]
+    hi = kgrid > 10.0 * kbox                        # 49/59 bins kept
+    got_anch = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(zz),
+                                             jnp.asarray(kgrid)))
+    assert hi.sum() >= 40
+    assert np.allclose(got_anch[hi], rc[zi][hi], rtol=0, atol=1e-3)
 
 
 def test_interp_res_corr_high_k_suppression_and_clamp():
+    # CORRECTED for the res_corr anchor (Task 1.1): the old probe k=0.01 sits INSIDE
+    # the anchor zone at z=3 (5*kbox ~ 0.0188 s/km), so res_corr there is now ~1, not
+    # the raw table value.  Probe the high-k suppression ABOVE the anchor, and add the
+    # anchor assertion (res_corr ~ 1 below 5*kbox).
     z, logk, rc = MF.load_res_corr()
-    k = jnp.asarray(np.array([0.01, 0.1, 0.18]))
+    kb = float(MF.kbox_skm(3.0))                     # ~0.00376 s/km
+    # high-k probe, all WELL above 5*kbox (~0.0188): suppression untouched by the anchor.
+    k = jnp.asarray(np.array([0.05, 0.1, 0.18]))
     val = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(3.0), k))
-    # high-k is suppressed relative to low-k (the ~10% particle-convergence drop)
+    # high-k is suppressed relative to mid-k (the ~10% particle-convergence drop)
     assert val[2] < val[0]
     assert np.all((val > 0.8) & (val < 1.1))
+    # the anchor: res_corr ~ 1 below 5*kbox (the +6% low-k bump is blended away).
+    klo = jnp.asarray(np.array([0.5 * kb, 1.0 * kb]))   # deep in the anchored zone
+    vlo = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(3.0), klo))
+    assert np.allclose(vlo, 1.0, atol=2e-3)
     # edge clamp: z and k beyond the table support stay finite & in-range
     big = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(6.0),
                                         jnp.asarray(np.array([1e-4, 5.0]))))
@@ -72,6 +99,72 @@ def test_interp_res_corr_differentiable_and_jit():
     jf = jax.jit(lambda zz, kk: MF.interp_res_corr(z, logk, rc, zz, kk))
     assert np.allclose(np.asarray(jf(jnp.asarray(3.0), k)),
                        np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(3.0), k)))
+
+
+# --- Task 1.1: anchor res_corr -> 1 below 5x the L15 box fundamental --------- #
+# NEW behaviour (TDD): interp_res_corr blends res_corr -> 1 below 5*kbox_skm(z) with a
+# smooth tanh (width 0.12 dex), killing the spurious +6.3% low-k bump (at z=3 it sits at
+# the table k_min ~0.0037 s/km, rc ~1.0626) that the old CLAMPED edge injected into the
+# data's lowest bins.  A module-level kbox_skm(z) helper + an anchor_mult kwarg (default
+# 5.0; anchor_mult=0.0 == NO anchoring, reproduces the raw table) are added by the CS
+# partner.  Verified numbers (z=3): kbox_skm(3)=0.0037560, 5*kbox=0.018780;
+# raw rc at k_min (=0.0037269) = 1.0626489 (+6.26%); raw rc at k=0.063 = 0.964847 (-3.5%).
+#
+# TWO EXISTING TESTS BREAK and are corrected ABOVE (see their CORRECTED docstrings):
+#   * test_interp_res_corr_matches_table_on_grid -- asserted EXACT table recovery on the
+#     FULL on-grid k row; bins at/below the anchor now blend toward 1, so exact recovery
+#     is moved to (a) the anchor_mult=0.0 reference path and (b) bins k > 10*kbox.
+#   * test_interp_res_corr_high_k_suppression_and_clamp -- probed k=0.01, which is now
+#     INSIDE the anchor zone (5*kbox~0.0188 at z=3) where rc~1; probe moved above the
+#     anchor and an rc~1-below-5*kbox assertion added.
+def test_interp_res_corr_anchored_to_one_below_5kbox():
+    # res_corr must be ~1 well below 5x the L15 box fundamental, and UNCHANGED well above.
+    from hcd_analysis.emulator.multifidelity import (
+        load_res_corr, interp_res_corr, kbox_skm)
+    z_rc, logk_rc, rc = load_res_corr()
+    z = 3.0
+    kb = float(kbox_skm(z))              # ~0.0037560 s/km (verified)
+    # deep in the anchored zone, INCLUDING the +6.3% bump (raw rc ~1.0616-1.0626 here):
+    k_lo = np.array([0.5 * kb, 1.0 * kb])
+    # well above 5*kbox (~0.0188): the tanh blend has saturated (k=0.1 is ~6 widths above,
+    # k=0.18 ~8 widths) so the anchored path equals the raw table to ~5e-7 -- "untouched".
+    k_hi = np.array([0.1, 0.18])
+    rc_lo = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_lo))
+    rc_hi_anch = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_hi))
+    # unanchored reference for k_hi (anchor_mult=0.0 == raw table path)
+    rc_hi_raw = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_hi, anchor_mult=0.0))
+    assert np.allclose(rc_lo, 1.0, atol=2e-3)             # anchored to 1 at low k
+    assert np.allclose(rc_hi_anch, rc_hi_raw, atol=1e-6)  # untouched at high k
+
+
+def test_interp_res_corr_default_is_5x():
+    # COSMOLOGY-REFEREE regression pin (Task 1.2): the PRODUCTION default anchor is 5x the
+    # L15 box fundamental.  The MF production forward (predict_P_obs_on_leg(..., mf=mf) ->
+    # _mf_corr_on_cache -> mf.res_corr) calls interp_res_corr with the anchor_mult kwarg
+    # OMITTED, so it inherits whatever the DEFAULT is.  This test pins that default == 5.0:
+    # interp_res_corr(...) with the kwarg omitted MUST be BIT-IDENTICAL to
+    # interp_res_corr(..., anchor_mult=5.0), and DISCRIMINABLY different from 3.0 (the
+    # pre-Task-1.1 value).  A future silent change to the default (e.g. back to 3.0, or to
+    # 4.0) flips this test red BEFORE it can move the n_s-driving low-k DESI bins.
+    from hcd_analysis.emulator.multifidelity import (
+        load_res_corr, interp_res_corr, kbox_skm)
+    z_rc, logk_rc, rc = load_res_corr()
+    z = 3.0
+    kb = float(kbox_skm(z))                      # ~0.0037560 s/km (verified)
+    # a k grid that STRADDLES the anchor: from 0.5x kbox (deep in the anchor zone, where the
+    # anchor_mult choice matters most) up to 0.1 s/km (well above any of {3,5}x kbox, where
+    # all anchors agree) — so the 5x-vs-3x discrimination is exercised in the blend region.
+    k_eval = jnp.asarray(np.geomspace(0.5 * kb, 0.1, 40))
+    rc_default = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_eval))
+    rc_5x = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_eval, anchor_mult=5.0))
+    rc_3x = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_eval, anchor_mult=3.0))
+    # the default IS 5.0: bit-identical (rtol 1e-12, atol 0 — exact, same code path).
+    np.testing.assert_allclose(rc_default, rc_5x, rtol=1e-12, atol=0.0,
+                               err_msg="interp_res_corr default anchor_mult is no longer 5.0")
+    # and it is NOT 3.0 — the test discriminates the default (the 3x anchor moves the blend
+    # edge to ~0.011 s/km vs 5x's ~0.019, so they differ measurably in the straddle region).
+    assert not np.allclose(rc_default, rc_3x, rtol=1e-6, atol=0.0), \
+        "interp_res_corr default coincides with anchor_mult=3.0 — the 5x default is not pinned"
 
 
 # --------------------------------------------------------------------------- #

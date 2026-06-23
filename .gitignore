@@ -242,7 +242,8 @@ checkpoints/stepA/*.json
 
 # Superpowers working notes + working/closure diagnostic figures live in the PRIVATE notes repo
 # /home/mfho/hcd_priya_notes (github.com/jibanCat/hcd_priya_notes) — NOT here. Ignored so future
-# script outputs to these paths are not re-committed to the code repo. See docs/SUPERPOWERS_NOTES.md.
+# script outputs to these paths are not re-committed to the code repo. See
+# hcd_priya_notes/docs/code-repo-archive/SUPERPOWERS_NOTES.md.
 docs/superpowers/
 figures/analysis/05_likelihood/
 figures/analysis/05_multifidelity/
@@ -270,3 +271,29 @@ figures/private/desi_production/
 results_local/
 *.desi_production.npz
 *.desi_production.json
+
+# unblind workflow lives in the PRIVATE notes repo (privacy policy)
+notebooks/unblind_eboss_ks.*
+
+# --- SCRATCH SPRAWL (2026-06-19): throwaway one-off diagnostics that polluted `git status`. ---
+# These naming conventions are EXPLORATORY scratch (mechanism probes, nscert sweeps, ad-hoc cov
+# audits, embias lenses) — NOT part of the committed analysis. Ignoring them keeps `git status`
+# clean. NOTE: .gitignore does NOT untrack already-tracked files, so the two committed
+# diag_legb_slope_prior_*.py (and any other ALREADY-tracked script matching a pattern below) stay
+# tracked; this only suppresses the UNTRACKED scratch. To commit a new file matching a pattern,
+# `git add -f` it.
+scratch_*.py
+throwaway_*.py
+scripts/scratch_*.py
+scripts/throwaway_*.py
+scripts/embias_*.py
+scripts/diag_legb_*.py
+scripts/_cov_*
+scripts/run_mf_nscert_*.py
+scripts/analyze_mf_nscert_*.py
+scripts/batch_mf_nscert_*.sh
+# their scratch figures / npz outputs
+figures/analysis/04_emulator/embias_*
+
+# internal multi-agent review scratch (archived in the notes repo)
+REVIEW_*.md

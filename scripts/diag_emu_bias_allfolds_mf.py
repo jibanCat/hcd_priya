@@ -5,7 +5,7 @@ baseline: n_s +0.030σ, A_p +0.034σ). The ONLY load-bearing change: the per-cla
 forward goes THROUGH the MF correction `g(z,τ₀,k) + log res_corr(z,k)` (resolved
 separable + rank-1 FixedMeanHead + the fixed particle-convergence res_corr) instead of
 the raw LF `predict_P_filt`. The LF backbone is FROZEN (only the fixed MF correction is
-added). This is the contract of docs/superpowers/onboarding/2026-06-08-mf-gate-spec.md.
+added). This is the contract of hcd_priya_notes/docs/superpowers/onboarding/2026-06-08-mf-gate-spec.md.
 
 FAITHFUL through-MF wiring (spec §1.1): the MF eval grid is set EQUAL to the LF native
 cache grid (`eval_logk = lf_logk`, 172 bins up to 0.0694 s/km), so the MF correction

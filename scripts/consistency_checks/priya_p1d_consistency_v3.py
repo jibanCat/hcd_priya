@@ -15,7 +15,7 @@ Run in emu-3.9 env with GSL loaded:
     python3 scripts/consistency_checks/priya_p1d_consistency_v3.py
 
 Outputs:
-    docs/superpowers/figs/2026-05-20-priya-p1d-consistency-v3.npz
+    hcd_priya_notes/docs/superpowers/figs/2026-05-20-priya-p1d-consistency-v3.npz
 """
 import os, sys, json, time
 from pathlib import Path

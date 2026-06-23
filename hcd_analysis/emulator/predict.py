@@ -44,8 +44,21 @@ def predict_P_filt(model, theta9, z_unit, tau0, pf_stats):
 
     ``model`` is a trained ``Emulator``; ``x = [θ9(9), z_unit(1)]`` is the encoder input.
     Differentiable in θ9 and τ₀.
+
+    ``model`` may also be an ``ensemble.EnsembleEmulator`` (detected by duck-typing on its
+    ``.members`` attribute — ``Emulator`` has no such field): then the result is the MEAN
+    over members of the reconstructed (post-exp) per-class P_filt. The mean is taken AFTER
+    reconstruction because P_filt is exp-nonlinear in (base, resid); this matches the
+    production ensemble definition (``validate_production_ensemble.py``). Threading it here
+    propagates the ensemble through predict_P_obs / predict_excess / the closure forward.
     """
     x = jnp.concatenate([jnp.asarray(theta9), jnp.asarray(z_unit)[None]])
+    members = getattr(model, "members", None)
+    if members is not None:
+        per = jnp.stack([
+            reconstruct_P_filt_jax(p["P_filt_base"], p["P_filt_resid"], pf_stats)
+            for p in (m(x, tau0) for m in members)], axis=0)        # (M,4,K)
+        return jnp.mean(per, axis=0)                                # (4,K)
     pred = model(x, tau0)
     return reconstruct_P_filt_jax(pred["P_filt_base"], pred["P_filt_resid"], pf_stats)
 

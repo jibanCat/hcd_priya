@@ -7,7 +7,7 @@ A map of the **foundational, notebook-referenced** figures that live in this cod
 > PRIVATE notes repo** `/home/mfho/hcd_priya_notes` (github.com/jibanCat/hcd_priya_notes):
 > `figures/analysis/{05_likelihood, 05_multifidelity, 05_truth_validation}`,
 > `figures/analysis/06_clustering`, `figures/analysis/review`, and the whole
-> `docs/superpowers/` tree (plans, specs, onboarding/reviews, reflections, walkthroughs).
+> `hcd_priya_notes/docs/superpowers/` tree (plans, specs, onboarding/reviews, reflections, walkthroughs).
 >
 > **Cross-repo link convention** (the two repos are siblings under `/home/mfho/`): from a
 > notes doc, foundational figures here are linked `../../../hcd_priya/figures/analysis/<dir>/...`;
@@ -47,5 +47,5 @@ Pipeline / recovery / masking / real-space–Fourier sanity checks, plus a `clus
 ### Not tracked / elsewhere
 - `figures/private/` — DESI REAL-DATA cosmology results (gitignored, local only).
 - `figures/intermediate/` — scratch / intermediate render output.
-- Working diagnostics (`05_*`, `06_clustering`, `review`) + all `docs/superpowers/` notes →
+- Working diagnostics (`05_*`, `06_clustering`, `review`) + all `hcd_priya_notes/docs/superpowers/` notes →
   the private notes repo `/home/mfho/hcd_priya_notes`.

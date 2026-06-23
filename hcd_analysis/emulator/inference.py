@@ -91,6 +91,17 @@ HCD_LIT_OVER_SIM = (1.06, 1.00, 1.34)        # (LLS, subDLA, DLA): data/sim at z
 # or +1.90 on z≤3.5) is dominated by z>3.5 DLA dN/dX that the literature does not measure
 # reliably — so do not impose a strong DLA z-evolution; let the data set it (σ widened above).
 HCD_LIT_OVER_SIM_SLOPE = (0.95, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
+# ============================ READ THIS BEFORE USING THIS CONSTANT ============================
+# This is the lit/sim RATIO slope — d ln[(literature dN/dX)/(PRIYA dN/dX)]/d ln(1+z). It is the
+# PRIOR CENTER at the z=3 PIVOT ONLY (where the slope CANCELS — zero production effect), consumed
+# EXCLUSIVELY by lit_over_sim_at_z(z=z_pivot). It is NEVER a forward z-exponent.
+#   ⇒ The FORWARD HCD incidence-weight z-slope s_c in α_c(z)=α_pivot·((1+z)/4)^s_c is a DISTINCT
+#     object: closure_legb.HCD_INCIDENCE_SLOPE=(2.465,2.758,2.366) (~2.4 — the SIM w_c(z) slope
+#     d ln w_c/d ln(1+z) the mock truth carries and the forward α_c(z) must track).
+# Using THIS (0.95) ratio slope as the forward exponent makes the predicted dN/dX(z) FALL with z
+# (truth + literature RISE) and puts the mock-truth slope 2.9–6σ off-center — the wrong-object bug
+# that has recurred 3+ times. See hcd-dndx-zslope-bug (notes) + tests/test_zslope_center.py.
+# =============================================================================================
 
 # --- PER-SURVEY effective LLS-abundance pin (real-fit prior; 2026-06-11 Lyα-agent + PI) --------
 # The LLS prior CENTER is the dominant DESI-A_p risk (a tight prior at an offset center moves A_p
@@ -104,13 +115,94 @@ HCD_LIT_OVER_SIM_SLOPE = (0.95, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
 #     informative window rather than the prior imposing a possibly-wrong tight number.
 # A multiplier on the cosmic-average (lit/sim) LLS center, applied ONLY when ``survey`` is given
 # (the closure's sim-mean cert passes survey=None and is unaffected).
-HCD_LLS_SURVEY_BOOST = {"DESI": 1.0, "KS": 2.5}
-# per-survey LLS fractional width σ/μ (overrides HCD_PRIOR_FRAC_SIGMA[0] when survey given). Both
-# MODERATE: DESI=0.30 (the width-scan joint-bias minimum 0.25–0.40) — the per-survey closure
-# (2026-06-11, D_lls_m) showed a TIGHT σ0.15 carries ~1σ A_p EVEN at the correct center (it is the
-# width, not the center) and pins the LLS dN/dX off-truth, so 0.15 was too tight. KS=0.40 (broad;
-# selection-driven, recovers A_p + dN/dX clean).
-HCD_LLS_SURVEY_FRAC_SIGMA = {"DESI": 0.30, "KS": 0.40}
+HCD_LLS_SURVEY_BOOST = {"DESI": 1.0, "eBOSS": 1.0, "DESI+KS": 1.0, "KS": 2.5}
+# --- PI WIDTH RULE (2026-06-17 re-determination, PI-approved) ----------------------------------
+# per-survey LLS fractional width σ/μ (overrides HCD_PRIOR_FRAC_SIGMA[0] when survey given). The PI
+# rule: set σ_LLS to 1–2× the LITERATURE dN/dX MEASUREMENT error (1× ideal; 2× = cosmic-variance
+# hedge). The 1× value is DERIVED from the lit dN/dX measurement uncertainty for LLS (O'Meara13 /
+# Fumagalli13 / Prochaska10): the WLS-fit normalization error at z=3 (χ²-inflated) AND the per-point
+# scatter about the WLS power-law, taken as max → fractional σ/μ ≈ 0.16 → the clean 1× knob 0.15
+# (scripts/derive_hcd_lls_width.py prints the breakdown; 2× = 0.30, the cosmic-variance hedge arm).
+#   DESI / eBOSS / DESI+KS  — 1× = 0.15 (TIGHT, the litWLS-anchored real-fit primary; the
+#     litWLS CENTER's z-evolution — not the width — was the dominant low-z LLS→n_s leak, so a 0.15
+#     width at the lit-anchored center now sits ON the data-truth, zero prior-pull leak BY
+#     CONSTRUCTION; gated on the litWLS-σ0.15 closure NUTS reproducing the historical width isolator).
+#   KS — stays 0.40 (broad; selection-driven LLS excess, z<2.4 cut → corr(LLS,n_s)≈0.07, no leak).
+# The PRIMARY (1×) is HCD_LLS_SURVEY_FRAC_SIGMA; the 2× cosmic-variance HEDGE arm is the easily-
+# toggled HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X (use_lls_width_hedge2x=True in hcd_incidence_prior).
+HCD_LLS_SURVEY_FRAC_SIGMA = {"DESI": 0.15, "eBOSS": 0.15, "DESI+KS": 0.15, "KS": 0.40}
+# 2× cosmic-variance hedge (double the 1× lit measurement error); KS unchanged (already broad).
+HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X = {"DESI": 0.30, "eBOSS": 0.30, "DESI+KS": 0.30, "KS": 0.40}
+
+# --- REAL-FIT LLS forward z-slope (litWLS, 2026-06-17 PI re-determination) ----------------------
+# The LLS prior CENTER's z-EVOLUTION is the dominant low-z LLS→n_s leak lever (NOT the width). On
+# the REAL FIT (data; PRIYA≠data, the forest follows the literature dN/dX) the LLS forward z-slope
+# must track the literature WLS power-law slope γ_LLS=+2.127 (lit dN/dX_LLS(z)=A·(1+z)^γ, A≈0.0201,
+# WLS over O'Meara13/Fumagalli13/Prochaska10), NOT the sim incidence slope 2.465 (which over-predicts
+# low-z LLS by +62–87% vs lit/truth). The CLOSURE/SBC path (survey=None, sim-truth mocks) STAYS on
+# closure_legb.HCD_INCIDENCE_SLOPE=2.465 (the slope the mock carries). subDLA/DLA keep the sim
+# incidence slope on BOTH paths (only LLS is lit-anchored on the real fit). γ=2.127 > the forward
+# z-slope guard floor 1.5, so the swap passes _assert_forward_zslope_center (the 0.95 ratio-slope
+# guard is preserved). See the spec 2026-06-17-hcd-prior-redetermination.
+HCD_LLS_REALFIT_ZSLOPE = 2.127
+
+# --- LITERATURE dN/dX power-laws (A, γ) per HCD class -------------------------------------------
+# dN/dX_c(z) = A_c·(1+z)^γ_c, the WLS over the literature points (derive_hcd_lls_width.py /
+# plot_dndx_vs_literature.py). The LLS law (O'Meara13/Fumagalli13/Prochaska10; A=0.0201, γ=2.127,
+# χ²/dof=0.72) is the REAL-FIT LLS prior CENTER anchor: hcd_lls_realfit_alpha_center builds α_LLS at
+# the z-pivot from this law DIRECTLY (alt-(b)), round-tripping the lit dN/dX to <0.34% — see the
+# HCD-pivot CENTER-construction fix (2026-06-17). subDLA/DLA laws are display/round-trip references.
+HCD_LIT_DNDX_LAW = {"LLS": (0.0201, 2.127), "subDLA": (0.0211, 0.937), "DLA": (0.0076, 1.592)}
+
+# --- HCD prior PIVOT GUARD (PI 2026-06-17, the CENTER-construction bug) -------------------------
+# THE BUG: the LLS/subDLA pivot AMPLITUDE was built from w_c_med = nanmedian(w_c_cache[:,1:], axis=0)
+# — the MEDIAN over ALL z-groups (z=2.0–5.4). Since w_c rises monotonically with z, that all-z median
+# (LLS 0.274) equals the z≈3.6 value, but it is consumed as the z=3 PIVOT → the LLS α-center came out
+# ~1.45× too high (0.291 instead of the z=3-consistent ~0.194–0.200), overshooting the lit dN/dX law
+# 2.05× at z=2.4 / 1.63× at z=3 (worst at low z) = the LLS→n_s leak. The FIX builds the pivot from the
+# z=3 STRUCTURAL w_c (closure/SBC) or the lit dN/dX law directly (real fit). These bands let a future
+# revert to nanmedian(...all z...) TRIP at runtime: the z=3-consistent LLS α-center is ≈0.19–0.21
+# (sim z=3 w_c·1.06 = 0.2004; lit-law alt-(b) = 0.1938), the all-z-median value is ≈0.29 (DESI boost).
+HCD_PIVOT_LLS_ALPHA_Z3_BAND = (0.16, 0.24)   # z=3-consistent LLS α-pivot (DESI/cosmic-avg boost 1.0)
+HCD_PIVOT_LLS_ALLZ_MEDIAN = 0.2909           # the BUGGY all-z-median LLS α-pivot (z≈3.6) — must NOT recur
+HCD_PIVOT_GUARD_REL = 0.05                   # |α − all-z-median| must exceed this·all-z-median
+
+
+def hcd_lls_realfit_alpha_center(Xbar_z, z=HCD_Z_PIVOT, boost=1.0):
+    """REAL-FIT LLS α-pivot CENTER built from the literature dN/dX power-law DIRECTLY (the validated
+    alt-(b)): dN/dX_LLS(z) = A·(1+z)^γ (HCD_LIT_DNDX_LAW["LLS"]) → α_LLS(z) via the EXACT telescoping
+    w_c map (dndx_wc.alpha_from_dndx_law), round-tripping the lit dN/dX to <0.34%. ``Xbar_z`` = the
+    cache mean-absorption-path-per-sightline at ``z`` (the z=3 pivot value). Returns the scalar
+    α_LLS center (× ``boost`` for the per-survey selection excess). At z=3, Xbar≈0.632 → α_LLS≈0.194
+    — the z=3-consistent center, NOT the all-z-median ~0.291 (the CENTER-construction bug)."""
+    from hcd_analysis.emulator.dndx_wc import alpha_from_dndx_law
+    A = jnp.asarray([HCD_LIT_DNDX_LAW[c][0] for c in ("LLS", "subDLA", "DLA")])
+    g = jnp.asarray([HCD_LIT_DNDX_LAW[c][1] for c in ("LLS", "subDLA", "DLA")])
+    z_arr = jnp.atleast_1d(jnp.asarray(z, float))
+    Xb_arr = jnp.atleast_1d(jnp.asarray(Xbar_z, float))
+    alpha = alpha_from_dndx_law(A, g, Xb_arr, z_arr)          # (...,3) (LLS,subDLA,DLA)
+    return float(boost) * float(jnp.asarray(alpha).reshape(-1, 3)[0, 0])
+
+
+def assert_hcd_pivot_z3(alpha_mu, z, where, *, boost=1.0):
+    """PIVOT GUARD (PI 2026-06-17): the LLS α-PIVOT center ``alpha_mu`` (scalar, the LLS slot of the
+    hcd_incidence_prior μ — already ×survey boost) must be the z=3 value, NOT the all-z median (=z≈3.6).
+    Only checked at the z=3 pivot (the slope-cancellation point the center is built at). FIRES if the
+    LLS α-center is ≈ the buggy all-z-median 0.291 (×boost) → a future revert to
+    nanmedian(w_c_cache[...all z...]) trips here. See the HCD-pivot dN/dX low-z overshoot bug."""
+    if abs(float(z) - float(HCD_Z_PIVOT)) > 1e-6:
+        return                                                # only meaningful at the z=3 pivot
+    a = float(alpha_mu)
+    allz = float(HCD_PIVOT_LLS_ALLZ_MEDIAN) * float(boost)    # the buggy z≈3.6 value (per boost)
+    lo, hi = (b * float(boost) for b in HCD_PIVOT_LLS_ALPHA_Z3_BAND)
+    assert abs(a - allz) > HCD_PIVOT_GUARD_REL * allz, (
+        f"HCD LLS α-PIVOT center [{where}] = {a:.4f} ≈ the all-z-median (z≈3.6) value {allz:.4f} — "
+        f"the HCD pivot MUST use the z=3 w_c, NOT the median-over-all-z (= z≈3.6). See the dN/dX "
+        f"low-z overshoot bug (CENTER-construction fix 2026-06-17).")
+    assert lo <= a <= hi, (
+        f"HCD LLS α-PIVOT center [{where}] = {a:.4f} outside the z=3-consistent band [{lo:.4f},{hi:.4f}] "
+        f"(boost={boost}). Expected ≈0.194 (lit-law) / ≈0.200 (sim z=3 w_c·1.06). A center near the "
+        f"all-z-median {allz:.4f} (= z≈3.6) is the CENTER-construction bug. See the dN/dX low-z overshoot.")
 
 
 def lit_over_sim_at_z(z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SLOPE,
@@ -122,7 +214,8 @@ def lit_over_sim_at_z(z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SL
     return r * ((1.0 + jnp.asarray(z)) / (1.0 + z_pivot)) ** s
 
 
-def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None):
+def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None,
+                        use_lls_width_hedge2x=False):
     """Per-class HCD incidence prior (μ, σ) on α_c (the effective per-class sightline weight
     in ``predict_P_obs``), centered on the OBSERVED incidence AT the data redshift ``z``
     (NOT the sim's), from the fiducial sim weights ``w_c_fid`` = (w_LLS, w_subDLA, w_DLA) ×
@@ -147,7 +240,9 @@ def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None):
     lls_boost = 1.0
     if survey is not None:
         lls_boost = HCD_LLS_SURVEY_BOOST.get(survey, 1.0)
-        fl = HCD_LLS_SURVEY_FRAC_SIGMA.get(survey, fl)
+        # PI WIDTH RULE: 1× lit measurement error (primary) or the 2× cosmic-variance hedge.
+        _fsig = HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X if use_lls_width_hedge2x else HCD_LLS_SURVEY_FRAC_SIGMA
+        fl = _fsig.get(survey, fl)
     mu = jnp.stack([lls_boost * r[0] * w[0], r[1] * w[1], HCD_DLA_RESIDUAL_FRAC * r[2] * w[2]])
     # DLA dN/dX is unreliable beyond z≈3.5 → widen σ_DLA above it (weak high-z prior) so the
     # data, not the prior, sets the high-z DLA incidence.

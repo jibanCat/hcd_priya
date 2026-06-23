@@ -106,11 +106,15 @@ def test_off_legacy_byte_exact_when_2d_off():
     ctx = ctx._replace(marginalize_zslope=False)
     mock_legs, core, _, _ = _mock(ctx, d)
     s = _sites(C._legb_model, ctx, mock_legs, core)
+    # the legacy 3 independent α + the res_corr-amplitude nuisance block (alpha_res,
+    # alpha_res_slope — added by d0de534/7a28e8d, ALWAYS sampled unless ctx.fix_alpha_res).
     assert s == ["theta_unit", "tau0_amp", "dtau0",
-                 "alpha_lls", "alpha_subdla", "alpha_dla_raw"]
+                 "alpha_lls", "alpha_subdla", "alpha_dla_raw",
+                 "alpha_res", "alpha_res_slope"]
     point = dict(theta_unit=jnp.full(9, 0.5), tau0_amp=jnp.asarray(1.0),
                  dtau0=jnp.asarray(0.0), alpha_lls=jnp.asarray(0.27),
-                 alpha_subdla=jnp.asarray(0.09), alpha_dla_raw=jnp.asarray(-2.0))
+                 alpha_subdla=jnp.asarray(0.09), alpha_dla_raw=jnp.asarray(-2.0),
+                 alpha_res=jnp.asarray(1.0), alpha_res_slope=jnp.asarray(0.0))
     lp = _potential_at(C._legb_model, ctx, mock_legs, core, point=point)
     # an explicitly-defaulted 2D field must not perturb the OFF math.
     ctx2 = ctx._replace(hcd_2d_tilt=False, hcd_dslope=None, hcd_btilt_mu=None, hcd_btilt_sigma=None)
@@ -125,13 +129,17 @@ def test_off_optionB_byte_exact_when_2d_off():
     mock_legs, core, _, _ = _mock(ctx, d)
     # Option-B sites (with the default marginalize_zslope=True → s_* block present).
     s = _sites(C._legb_model, ctx, mock_legs, core)
+    # Option-B reparam (A_hcd·r) + the per-class z-slope block + the res_corr-amplitude nuisance
+    # block (alpha_res, alpha_res_slope — added by d0de534/7a28e8d, ALWAYS sampled).
     assert s == ["theta_unit", "tau0_amp", "dtau0",
-                 "A_hcd", "r_subdla", "r_dla", "s_lls", "s_subdla", "s_dla"]
+                 "A_hcd", "r_subdla", "r_dla", "s_lls", "s_subdla", "s_dla",
+                 "alpha_res", "alpha_res_slope"]
     assert "B_hcd" not in s
     point = dict(theta_unit=jnp.full(9, 0.5), tau0_amp=jnp.asarray(1.0),
                  dtau0=jnp.asarray(0.0), A_hcd=jnp.asarray(0.27),
                  r_subdla=jnp.asarray(0.33), r_dla=jnp.asarray(0.016),
-                 s_lls=jnp.asarray(0.95), s_subdla=jnp.asarray(0.15), s_dla=jnp.asarray(0.40))
+                 s_lls=jnp.asarray(0.95), s_subdla=jnp.asarray(0.15), s_dla=jnp.asarray(0.40),
+                 alpha_res=jnp.asarray(1.0), alpha_res_slope=jnp.asarray(0.0))
     lp = _potential_at(C._legb_model, ctx, mock_legs, core, point=point)
     ctx2 = ctx._replace(hcd_2d_tilt=False, hcd_dslope=None, hcd_btilt_mu=None, hcd_btilt_sigma=None)
     lp2 = _potential_at(C._legb_model, ctx2, mock_legs, core, point=point)
@@ -164,8 +172,10 @@ def test_model_priors_only_site_order_match_2d(two_d, hierarchical, sample_metal
         assert s_model[3:7] == ["A_hcd", "B_hcd", "r_subdla", "r_dla"]
         for nm in ("s_lls", "s_subdla", "s_dla", "alpha_lls", "alpha_dla_raw"):
             assert nm not in s_model
+    # res_corr alpha nuisance (Task 1.3) is the last block; a_SiIII present iff sampling metals.
+    assert s_model[-2:] == ["alpha_res", "alpha_res_slope"]
     if sample_metals:
-        assert s_model[-1] == "a_SiIII"
+        assert "a_SiIII" in s_model
     else:
         assert "a_SiIII" not in s_model
 

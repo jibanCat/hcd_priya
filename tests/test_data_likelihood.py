@@ -1,8 +1,8 @@
 """Phase-C data-binding layer tests — REAL DESI DR1 + KODIAQ-SQUAD P1D legs.
 
 Pins (per the task spec):
-  Loaders:  DESI 12z×85k → post-cut shape; KS keeps full klow≈0.0055 by default (drop_first4=False)
-            + k≤cache_kmax, opt-in drop_first4 still works; C_data symmetric SPD; the npz/file
+  Loaders:  DESI 12z×85k → post-cut shape; KS ALWAYS keeps full klow≈0.0055 (no low-k drop knob)
+            + k≤cache_kmax; C_data symmetric SPD; the npz/file
             reads match the on-disk values.
   Binding:  predict_P_obs_on_leg returns finite (P_model, C_total) on each leg; SPD C_total;
             jnp.interp round-trips the cache grid to itself (identity at cache k).
@@ -114,25 +114,22 @@ def test_desi_cdata_symmetric_spd():
 
 
 @pytest.mark.skipif(not _have_ks, reason="KS data not present")
-def test_ks_loader_keeps_full_klow_by_default_and_opt_in_drops_first4():
-    # (a) DEFAULT drop_first4=False (PI/KS-author decision 2026-06-09): keep the FULL native
-    # k-range from klow≈0.0055 s/km; still cap at the cache Nyquist 0.069.
+def test_ks_loader_always_keeps_full_klow():
+    # KS ALWAYS keeps the FULL native k-range from klow≈0.0055 s/km (PI/KS-author decision,
+    # reaffirmed repeatedly: the Fig-11 "first-4-bins" caution is MISLEADING). There is no
+    # low-k drop knob — the klow≈0.0055 bins must never be dropped.
     leg = DL.load_ks_leg()
     assert leg.name == "KS"
     assert np.isclose(leg.k.min(), 0.0055, atol=1e-4), \
-        f"default must keep klow≈0.0055, got kmin={leg.k.min()}"
-    assert leg.k.min() < DL.KS_DROP_KMAX, "default must NOT drop the low-k bins"
+        f"KS must keep klow≈0.0055, got kmin={leg.k.min()}"
     # cap at the cache Nyquist 0.069 (the 0.079/0.099 native bins are dropped)
     assert leg.k.max() <= DL.CACHE_KMAX + 1e-9
     # z range default 2.4–4.6
     assert leg.z.min() >= 2.0 - 1e-6 and leg.z.max() <= 4.6 + 1e-6
-    # (b) OPT-IN drop_first4=True still works: drops the low-k bins → lowest kept k ≈ 0.0198
-    leg4 = DL.load_ks_leg(drop_first4=True)
-    assert leg4.k.min() > DL.KS_DROP_KMAX, f"drop_first4=True must drop low-k: kmin={leg4.k.min()}"
-    assert np.isclose(leg4.k.min(), 0.0198315, atol=1e-4)
-    assert leg4.k.max() <= DL.CACHE_KMAX + 1e-9
-    # the default leg has strictly more rows (the low-k bins re-added per z)
-    assert leg.k.shape[0] > leg4.k.shape[0]
+    # the drop knob is gone: passing drop_first4 must raise (cannot silently drop low-k)
+    with pytest.raises(TypeError):
+        DL.load_ks_leg(drop_first4=True)
+    assert not hasattr(DL, "KS_DROP_KMAX"), "KS_DROP_KMAX must be removed (no low-k drop)"
 
 
 @pytest.mark.skipif(not _have_ks, reason="KS data not present")

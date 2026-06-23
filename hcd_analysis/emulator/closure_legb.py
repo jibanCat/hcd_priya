@@ -49,7 +49,10 @@ from .data import load_cache, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS, samplin
 from .meanflux_prior import (meanflux_tau0_prior, becker13_tau0, tau0_alpha_priya,
                              fit_tau0_alpha_priya, TAU0_AMP_RANGE, DTAU0_RANGE, TAU0_PIVOT_Z)
 from .inference import (PARAM_NAMES, hcd_incidence_prior,
-                        HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC)
+                        HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC,
+                        HCD_LLS_REALFIT_ZSLOPE, HCD_LLS_SURVEY_BOOST,
+                        HCD_LLS_SURVEY_FRAC_SIGMA, HCD_PRIOR_FRAC_SIGMA,
+                        hcd_lls_realfit_alpha_center, assert_hcd_pivot_z3)
 from .sampler_numpyro import _dla_raw_mu
 from . import data_likelihood as DL
 from .closure_diagnostics import (
@@ -78,12 +81,76 @@ DIVERGENCE_RETRY_TARGET_ACCEPT = (0.95, 0.99)
 # literature WLS 1σ width (scripts/diag_legb_slope_prior_tradeoff: WLS fit of dN/dX vs PRIYA
 # with the quoted literature dN/dX error bars; class order LLS, subDLA, DLA).
 ZSLOPE_PRIOR_SIGMA = (0.52, 0.53, 0.33)
+# res_corr AMPLITUDE nuisance α(z) = α₀·((1+z)/(1+Z_PIVOT))^s (Task 1.3), marginalized
+# FORWARD-ONLY through the MF chokepoint. Priors LOCKED by the Phase-0 Fisher gate:
+#   α₀ ~ TruncatedNormal(loc=1.0, scale=SIGMA_A0, low=0.0)  — wide symmetric, truncated >0
+#                                                             so P_MF = exp(α·log_rc)·… > 0;
+#   s  ~ Normal(0.0, SIGMA_S)                                — modest z-slope (Phase-0: α is
+#                                                             NOT degenerate with dτ₀ → keep s).
+# Z_PIVOT (z=3) is owned by data_likelihood (DL.Z_PIVOT) — the α(z) pivot used at the chokepoint.
+SIGMA_A0 = 1.0
+SIGMA_S = 0.5
 # FULL per-class HCD-incidence z-slope d ln w_c(z)/d ln(1+z), 60-sim-population median (measured
 # 2026-06-14, scripts/diag_hcd_zslope_nsbias.py). This is the slope the mock TRUTH actually carries
 # (the held-out sim's native w_c(z)) — the RIGHT center for the 2D B_HCD tilt. It is a DIFFERENT
 # object from inference.HCD_LIT_OVER_SIM_SLOPE=(0.95,0.15,0.40) (the lit/sim-RATIO slope). per-sim
 # LLS scatter ≈0.07; subDLA/DLA differentials δs=(0,+0.29,−0.10).
 HCD_INCIDENCE_SLOPE = (2.465, 2.758, 2.366)
+
+# Forward z-slope sanity threshold: the incidence slope is ~2.4 (LLS 2.465); the WRONG lit/sim
+# RATIO slope HCD_LIT_OVER_SIM_SLOPE is ~0.95. A center below this floor means someone reverted the
+# forward z-exponent to the ratio slope (the wrong-object bug). Kept comfortably below 2.465 and
+# above 0.95 so it catches a 0.95 reversion but never false-trips on the legitimate incidence center.
+_FWD_ZSLOPE_FLOOR = 1.5
+
+
+def _assert_forward_zslope_center(center, where):
+    """GUARD the FORWARD HCD z-slope PRIOR CENTER (NOT individual sampled draws): the LLS-class
+    center MUST be the incidence slope HCD_INCIDENCE_SLOPE (~2.4), never the lit/sim RATIO slope
+    HCD_LIT_OVER_SIM_SLOPE (~0.95). ``center`` is a CONCRETE (constant) array — HCD_INCIDENCE_SLOPE,
+    ctx.zslope_mu, or hcd_btilt_mu — so float() is trace-safe (it is never a traced NUTS sample).
+    Catches a 0.95 reversion of the forward exponent; see hcd-dndx-zslope-bug."""
+    c0 = float(np.asarray(center).reshape(-1)[0])
+    assert c0 > _FWD_ZSLOPE_FLOOR, (
+        f"HCD forward z-slope center [{where}] = {c0:.4f} is below {_FWD_ZSLOPE_FLOOR} — it must be "
+        f"HCD_INCIDENCE_SLOPE (~2.4, the SIM incidence-weight slope), NOT the lit/sim RATIO slope "
+        f"HCD_LIT_OVER_SIM_SLOPE (~0.95). The forward exponent was reverted to the wrong object. "
+        f"See hcd-dndx-zslope-bug.")
+
+
+def hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT, z_tol=0.05):
+    """The HCD-prior PIVOT structural inputs from the cache, AT the z=3 pivot (the CENTER-construction
+    fix, PI 2026-06-17). Returns ``(w_c_z3 (3,), Xbar_z3 scalar)``:
+
+      w_c_z3 = median of the cache structural w_c[LLS,subDLA,DLA] over the rows AT z≈z_pivot — the
+               z=3 PIVOT structural weight, NOT the all-z median nanmedian(w_c_cache[:,1:]) (=z≈3.6,
+               the BUG: w_c rises monotonically so the all-z median over-estimates the z=3 pivot ~1.45×).
+      Xbar_z3 = the cache mean-absorption-path-per-sightline Xbar(z) evaluated at z_pivot (deg-2 z-fit),
+               the input the lit-dN/dX-law LLS center (hcd_lls_realfit_alpha_center) needs.
+
+    Both are built from the SAME cache the all-z median came from, only restricted to the z=3 pivot
+    rows (w_c) / fit and evaluated at z=3 (Xbar). See the dN/dX low-z overshoot CENTER-construction bug.
+    """
+    wc = np.asarray(d["w_c_cache"])                      # (R,4) clean,LLS,subDLA,DLA
+    zrow = np.asarray(d["z_grid"])
+    sel = np.abs(zrow - float(z_pivot)) < float(z_tol)
+    assert sel.sum() > 0, f"no cache rows within {z_tol} of z_pivot={z_pivot}"
+    w_c_z3 = np.nanmedian(wc[sel, 1:], axis=0)           # (3,) z=3 structural w_c
+
+    # Xbar(z) deg-2 fit (same construction as plot_hcd_prior_dndx_overlay.build_xbar): per-group
+    # Xbar = X_tot / N_sl, N_sl from the telescoping clean-fraction, fit in z, evaluated at z=3.
+    gid = np.asarray(d["snap_group_idx"]); Xtot = np.asarray(d["snap_total_path_dX"])
+    dndx = np.asarray(d["snap_dNdX"]); Ng = dndx.shape[0]
+    zg = np.array([zrow[gid == g][0] for g in range(Ng)])
+    wc_g = np.array([np.nanmedian(wc[gid == g], axis=0) for g in range(Ng)])
+    mu_sum = -np.log(np.clip(wc_g[:, 0], 1e-6, None))
+    Nsl = np.where(mu_sum > 0, dndx.sum(axis=1) * Xtot / mu_sum, np.nan)
+    Xbar = Xtot / Nsl
+    ok = np.isfinite(Xbar) & (zg >= 2.1) & (zg <= 4.7)
+    cf = np.polyfit(zg[ok], Xbar[ok], 2)
+    Xbar_z3 = float(np.polyval(cf, float(z_pivot)))
+    return w_c_z3, Xbar_z3
+
 
 # PER-LEG DLA-residual fraction in the closure TARGET MOCK (§0c, PI-confirmed final intent
 # 2026-06-09): the 10% unmasked-DLA residual belongs in the target. The DLA finder misses ~10%
@@ -202,13 +269,22 @@ class LegBCtx(NamedTuple):
                                          # not a fixed power-law (mirrors the τ₀ amplitude+slope; the
                                          # PI: break HCD–A_p–τ₀ degeneracy via physical priors on
                                          # BOTH). Set False only for the fixed-slope ablation.
-    zslope_mu: object = None             # (3,) prior center on s_c (default HCD_LIT_OVER_SIM_SLOPE)
+    zslope_mu: object = None             # (3,) prior center on s_c (None → HCD_INCIDENCE_SLOPE ~2.4,
+                                         # the SIM incidence-weight slope; see _zslope_sites)
     zslope_sigma: object = None          # (3,) prior width on s_c (default the literature WLS σ_s)
     # PRIYA mean-flux model (replaces the 13 per-z τ₀ rungs): α(z)=τ₀·((1+z)/(1+z_p))^dτ₀, τ₀(z)=α·Kim07.
     # UNIFORM priors (Bird+2023 §2.7.1; arXiv:2509.18271). tau0_mu/tau0_sigma above are now legacy.
     tau0_amp_range: object = TAU0_AMP_RANGE   # PRIYA uniform prior on amplitude τ₀ (center 1.0=Kim)
     dtau0_range: object = DTAU0_RANGE         # PRIYA uniform prior on slope dτ₀ (center 0=Kim slope)
     tau0_pivot_z: float = TAU0_PIVOT_Z        # the (1+z)/(1+z_p) pivot (PRIYA z_p=3)
+    # INFORMATIVE-τ₀ arm (2026-06-21): replace the UNIFORM prior on the two mean-flux sites with a
+    # centered TruncatedNormal, truncated to the SAME physical range (tau0_amp_range/dtau0_range).
+    # Each field is None (→ Uniform, the DEFAULT — byte-identical) OR a (mu, sigma) tuple (→
+    # TruncatedNormal(mu, sigma, low=range[0], high=range[1])). Sampled via _sample_tau0_sites in
+    # BOTH _legb_model and _legb_priors_only (identical site names/order). PRIYA/Bird+2023 note the
+    # τ₀ amplitude is well measured by the data; this arm gives the closure a Kim-centered prior.
+    tau0_amp_gauss: object = None             # None → Uniform; (mu, sigma) → TruncatedNormal on τ₀ amp
+    dtau0_gauss: object = None                # None → Uniform; (mu, sigma) → TruncatedNormal on dτ₀
     # NUTS theta prior bounds in the UNIT cube (None → _THETA_UNIT_LO/_HI = IGM params restricted
     # to original PRIYA, n_s extended; see data.SAMPLING_LIMITS). Set both to 0/1 for the full box.
     theta_unit_lo: object = None              # (9,) lower bound on theta_unit
@@ -247,6 +323,11 @@ class LegBCtx(NamedTuple):
     hcd_dslope: object = None                 # (3,) δs_c FIXED class-differential slopes (δs_LLS≡0)
     hcd_btilt_mu: float = None                # B_HCD prior center (= s_LLS slope center)
     hcd_btilt_sigma: float = None             # B_HCD prior width (= the LLS slope-prior width)
+    fix_alpha_res: bool = False               # DIAGNOSTIC (default False → SAMPLE alpha_res, byte-
+    #                                           identical to production). True → DO NOT sample the two
+    #                                           res_corr-amplitude sites; pass the fixed no-op
+    #                                           (alpha0=1, s=0) into the forward. Used by the decomp
+    #                                           diagnostic to isolate alpha's contribution.
 
 
 def _kim(z):
@@ -261,13 +342,14 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    metals_on=False, desi_kwargs=None, ks_kwargs=None,
                    with_eboss=False, eboss_kwargs=None,
                    use_xclass=True, with_mf=False, mf_fold=0, mf_with_floor=True,
-                   mf_exclude_held=False, mf_shape=False, mf_shape_infl=1.0,
+                   mf_exclude_held=False, mf_target_hr_sim=None, mf_anchor_mult=5.0,
+                   mf_shape=False, mf_shape_infl=1.0,
                    mf_shape_legs=("DESI", "KS"), mf_shape_npz=None,
                    mf_emucoh=False, mf_emucoh_infl=1.0,
                    mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
                    mf_emucoh_offdiag_only=False, sample_metals=False, a_siiii_max=0.15,
                    hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0,
-                   hcd_2d_tilt=False):
+                   hcd_2d_tilt=False, ensemble_ckpts=None, survey=None):
     """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
     z-bins. The cross-class ρ (``use_xclass=True``, the default; the matched
     ``error_vector_xclass.npz`` pair) is the production C_emu — the diagonal σ is carried too
@@ -284,7 +366,13 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     ``mf_fold=0`` is byte-identical to the ``final_fold0`` ``ctx.model``, so the bare-model
     P_filt and the frozen ``mf.lf_model`` agree (the gate faithfulness invariant).
     """
-    model, meta, norm = T.load_checkpoint(ckpt)
+    if ensemble_ckpts is not None:
+        # production SBC: the N-seed ensemble forward (mean of P_filt over members). The
+        # single-ckpt path (ensemble_ckpts=None) is UNCHANGED.
+        from hcd_analysis.emulator.ensemble import load_ensemble
+        model, meta, norm = load_ensemble(list(ensemble_ckpts))
+    else:
+        model, meta, norm = T.load_checkpoint(ckpt)
     pf = {k: jnp.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
 
     ev = np.load(error_vector, allow_pickle=True)
@@ -335,13 +423,54 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
 
     # priors on the GLOBAL z grid: Becker+2013 τ₀ (production anchor) + HCD incidence.
     tau0_mu, tau0_sigma = meanflux_tau0_prior(jnp.asarray(z_global), center="becker13")
-    # HCD incidence prior from the cache's structural w_c at z_pivot (LLS,subDLA,DLA).
-    w_c_med = np.median(d["w_c_cache"][:, 1:], axis=0)     # (3,) structural weights
-    alpha_mu, alpha_sd = hcd_incidence_prior(jnp.asarray(w_c_med), z=3.0)
+    # HCD incidence prior from the cache's structural w_c AT THE z=3 PIVOT (LLS,subDLA,DLA).
+    # CENTER-CONSTRUCTION FIX (PI 2026-06-17): build the pivot from the z=3 STRUCTURAL w_c, NOT the
+    # all-z median nanmedian(w_c_cache[:,1:]). Because w_c rises monotonically with z, the all-z median
+    # (LLS 0.274) equals the z≈3.6 value → consumed as the z=3 pivot it over-stated the LLS center ~1.45×
+    # (α_pivot 0.291 vs the z=3-consistent ~0.194–0.200), overshooting the lit dN/dX 2.05× @z2.4 = the
+    # LLS→n_s leak. hcd_pivot_wc_and_xbar restricts the SAME cache to the z=3 pivot rows. See the dN/dX
+    # low-z overshoot bug. γ_LLS (forward z-slope) and σ_LLS (width) are UNCHANGED.
+    w_c_med, Xbar_z3 = hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT)   # (3,) z=3 structural w_c, Xbar(z=3)
+    # survey=None (closure/SBC) → cosmic-average LLS pin (unchanged); survey="DESI"/"KS"/… (real fit)
+    # → the per-survey LLS center+width pin (DESI 1.0×/σ0.15, KS 2.5×/σ0.40; PI re-determination
+    # 2026-06-17). The PI WIDTH RULE 1× value is the lit measurement error (σ_LLS=0.15); the 2×
+    # cosmic-variance hedge is HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X (toggle here if a hedge ctx is needed).
+    alpha_mu, alpha_sd = hcd_incidence_prior(jnp.asarray(w_c_med), z=HCD_Z_PIVOT, survey=survey)
+    # REAL-FIT LLS center: prefer the lit dN/dX law DIRECTLY (alt-(b)) — α_LLS(z=3) from
+    # A=0.0201·(1+z)^2.127 through the EXACT w_c map (hcd_lls_realfit_alpha_center), round-tripping the
+    # lit dN/dX to <0.34% (≈0.194×boost). On the REAL FIT PRIYA≠data, so the LLS center must track the
+    # literature dN/dX, not the sim's z=3 w_c·(lit/sim). The CLOSURE/SBC (survey=None) keeps the sim z=3
+    # w_c center (its held-out-sim mocks carry the sim incidence). subDLA/DLA centers are unchanged.
+    if survey is not None:
+        _boost = HCD_LLS_SURVEY_BOOST.get(survey, 1.0)
+        alpha_mu = alpha_mu.at[0].set(hcd_lls_realfit_alpha_center(Xbar_z3, z=HCD_Z_PIVOT, boost=_boost))
+        # keep the σ/μ width invariant (PI WIDTH RULE: 1× lit measurement error) at the new center.
+        _fl = HCD_LLS_SURVEY_FRAC_SIGMA.get(survey, float(HCD_PRIOR_FRAC_SIGMA[0]))
+        alpha_sd = alpha_sd.at[0].set(_fl * alpha_mu[0])
+    # PIVOT GUARD (PI's explicit ask): the LLS α-pivot center MUST be the z=3 value, NOT the all-z
+    # median (z≈3.6). A future revert to nanmedian(w_c_cache[...all z...]) trips this at build time.
+    _guard_boost = HCD_LLS_SURVEY_BOOST.get(survey, 1.0) if survey is not None else 1.0
+    assert_hcd_pivot_z3(float(np.asarray(alpha_mu)[0]), z=HCD_Z_PIVOT,
+                        where=f"build_legb_ctx survey={survey}", boost=_guard_boost)
+
+    # REAL-FIT LLS forward z-slope (litWLS, PI re-determination 2026-06-17): when ``survey`` is given
+    # (a real-data fit), the LLS forward z-evolution must track the literature WLS slope γ_LLS=2.127
+    # (the lit dN/dX_LLS(z) power-law), NOT the sim incidence slope 2.465 (which over-predicts low-z
+    # LLS by +62–87% vs lit/truth → the LLS→n_s leak). subDLA/DLA keep the sim incidence slope. The
+    # CLOSURE/SBC path (survey=None, sim-truth mocks) keeps zslope_mu=None → _zslope_sites centers on
+    # HCD_INCIDENCE_SLOPE=(2.465,…) (the sim-truth slope the held-out-sim mock carries) — UNCHANGED.
+    # γ=2.127 > the forward z-slope guard floor 1.5, so this passes _assert_forward_zslope_center.
+    survey_zslope_mu = None
+    if survey is not None:
+        _incid = np.asarray(HCD_INCIDENCE_SLOPE, float)
+        survey_zslope_mu = jnp.asarray([HCD_LLS_REALFIT_ZSLOPE, _incid[1], _incid[2]])
+        _assert_forward_zslope_center(survey_zslope_mu, f"build_legb_ctx survey={survey} litWLS zslope_mu")
 
     # HIERARCHICAL HCD ratio-prior centers/widths (must-fix #1, the LOAD-BEARING fix). The ratio
-    # centers are derived from the RAW sim w_c POOL MEDIANS (the SAME pool w_c_med medians above) —
-    # r_sub = median(w_subDLA)/median(w_LLS), r_dla = HCD_DLA_RESIDUAL_FRAC·median(w_DLA)/median(w_LLS)
+    # centers are derived from the z=3 PIVOT sim w_c (``w_c_med`` is now the z=3 structural weight —
+    # the CENTER-construction fix re-derived it at the pivot, PI 2026-06-17; they previously inherited
+    # the same all-z-median bug as the LLS/subDLA pivot) —
+    # r_sub = w_subDLA(z3)/w_LLS(z3), r_dla = HCD_DLA_RESIDUAL_FRAC·w_DLA(z3)/w_LLS(z3)
     # — NOT from alpha_hcd_mu (which bakes in the lit/sim 1.06/1.00/1.34 offset). This makes the
     # closure TRUTH (= the held-out sim's w_sub/w_LLS and 0.10·w_DLA/w_LLS, make_legb_mock:716-717)
     # match the prior CENTER to within the per-sim CV — a tight prior at an OFFSET center would
@@ -377,11 +506,20 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         hcd_dslope = jnp.asarray(_slope - _slope[0])             # (3,) δs_c, δs_LLS≡0
         hcd_btilt_mu = float(_slope[0])                          # B_HCD center = full LLS incidence slope
         hcd_btilt_sigma = float(ZSLOPE_PRIOR_SIGMA[0])           # B_HCD width (wide → B floats)
+        # GUARD: the 2D B_HCD center is the incidence slope (~2.4), never the lit/sim ratio (~0.95).
+        _assert_forward_zslope_center(hcd_btilt_mu, "build_legb_ctx hcd_btilt_mu (2D-tilt)")
 
     mf_obj = mf_floor_obj = None
     if with_mf:
+        # mf_target_hr_sim (Task 1.5): with mf_exclude_held, drop EXACTLY this one HR sim from
+        # the MF head fit (genuine leave-ONE-out) instead of the whole LF fold group. None →
+        # whole-group held (back-compat); a NO-OP when mf_exclude_held=False.
+        # mf_anchor_mult (DIAGNOSTIC, default 5.0 = production anchor / byte-identical):
+        # 0.0 DISABLES the res_corr low-k anchor (raw clamped table) — used by the decomp
+        # diagnostic to isolate the anchor's contribution to the coherent n_s bias.
         mf_obj, mf_floor_obj = build_mf_correction(
-            fold=mf_fold, with_floor=mf_with_floor, exclude_held_hr=mf_exclude_held)
+            fold=mf_fold, with_floor=mf_with_floor, exclude_held_hr=mf_exclude_held,
+            target_hr_sim=mf_target_hr_sim, anchor_mult=mf_anchor_mult)
 
     # SHAPE-AWARE MF floor (Phase-5a): the per-leg fractional LOSO-eps outer-product covariance
     # (precomputed once, θ-blind). Fired on the named legs (default DESI+KS) when with_mf+mf_shape.
@@ -414,12 +552,16 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         hcd_ratio_mu=hcd_ratio_mu, hcd_ratio_sigma=hcd_ratio_sigma,
         hcd_ratio_infl=float(hcd_ratio_infl),
         hcd_2d_tilt=hcd_2d_tilt, hcd_dslope=hcd_dslope,
-        hcd_btilt_mu=hcd_btilt_mu, hcd_btilt_sigma=hcd_btilt_sigma)
+        hcd_btilt_mu=hcd_btilt_mu, hcd_btilt_sigma=hcd_btilt_sigma,
+        # REAL-FIT (survey != None) litWLS LLS forward z-slope center (2.127, sim_sub, sim_DLA);
+        # survey=None (closure/SBC) → None → _zslope_sites centers on HCD_INCIDENCE_SLOPE (sim-truth).
+        zslope_mu=survey_zslope_mu)
     return ctx, d
 
 
 def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
-                        with_floor=True, floor_npz=None):
+                        with_floor=True, floor_npz=None, target_hr_sim=None,
+                        anchor_mult=5.0):
     """Build the production MF correction (resolved separable + rank-1 FixedMeanHead +
     fixed res_corr) on the LF native cache grid for a fold, REUSING the certified gate
     construction (scripts/diag_emu_bias_allfolds_mf.build_mf_for_fold). Returns
@@ -431,7 +573,16 @@ def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
     ALL HR sims (the PRODUCTION correction, which is what the closure forward should use:
     the closure tests the emulator-as-likelihood with the production MF, not the LOSO floor).
     ``with_floor=True`` also loads the certified ``MFFloor`` (the LF→HR + n_s-edge C_emu
-    floor) from ``mf_cemu_floor.npz``."""
+    floor) from ``mf_cemu_floor.npz``.
+
+    ``target_hr_sim`` (Task 1.5, default None → whole-group back-compat): when set together
+    with ``exclude_held_hr=True``, the head is fit EXCLUDING ONLY this one HR sim (genuine
+    leave-ONE-out), independent of the LF fold group. Two HR sims can share an LF fold group
+    (fold 2 → {ns0.859, ns0.885}; fold 6 → {ns0.972, ns0.979}); the whole-group held set then
+    silently does leave-TWO-out → the head is fit on 4 HR sims → a worse correction → an
+    inflated apparent bias. ``target_hr_sim`` pins the held set to EXACTLY {target_hr_sim} so
+    the fold-mate is retained (5 HR sims, not 4). ``target_hr_sim=None`` keeps the whole-group
+    held set (bit-identical back-compat); it is a NO-OP when ``exclude_held_hr=False``."""
     from hcd_analysis.emulator import multifidelity as MF
     lf_cache = MF.load_cache(MF.LF_CACHE)
     hr_cache = MF.load_cache(MF.HR_CACHE)
@@ -439,15 +590,13 @@ def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
     fold_model, _fold_meta, fold_norm, lf_logk = MF.load_lf_backbone(fold)
     eval_logk = np.asarray(lf_logk)
 
-    # HF-LOSO row mask (optional): exclude the fold's held-out HR sims from the head fit.
+    # HF-LOSO row mask (optional): exclude the held-out HR sim(s) from the head fit. The held
+    # set is whole-group (target_hr_sim=None, back-compat) or EXACTLY {target_hr_sim} (true LOO).
     train_rows = None
     if exclude_held_hr:
         from .data import load_cache as _lc
         d = _lc(CACHE_PATH)
-        sims, _ = held_out_sims(d, fold=fold)
-        hr_sims = set(s.decode() if isinstance(s, bytes) else s
-                      for s in hr_cache["sim_name"])
-        held = set(s for s in sims if s in hr_sims)
+        held = held_hr_set(d, hr_cache["sim_name"], fold=fold, target_hr_sim=target_hr_sim)
         hr_row_sim = np.array([s.decode() if isinstance(s, bytes) else s
                                for s in hr_cache["sim_name"][[h for h, _ in pairs]]])
         train_rows = np.where(~np.isin(hr_row_sim, list(held)))[0] if held else None
@@ -462,7 +611,8 @@ def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
         gtau_tab=comp["gtau_tab"], tau_tab=comp["tau_tab"], tau_by_z=comp["tau_by_z"],
         a_k=a_k, u_z=comp["u_z"], u_tau=comp["u_tau"])
     mf = MF.build_multifidelity(fold_model, fold_norm, lf_logk, head,
-                                eval_logk=eval_logk, log_rho=log_rho, delta_mode="none")
+                                eval_logk=eval_logk, log_rho=log_rho, delta_mode="none",
+                                anchor_mult=anchor_mult)
     mf_floor = None
     if with_floor:
         mf_floor = (DL.load_mf_floor(floor_npz) if floor_npz
@@ -496,6 +646,47 @@ def held_out_sims(d, fold=0):
     Returns the sorted unique sim names in the val split."""
     _tr, va, _ho = make_splits(d, fold)
     return sorted(set(np.asarray(d["sim_name"])[va])), va
+
+
+def held_hr_set(d, hr_sim_names, fold=0, target_hr_sim=None):
+    """The set of HR sims to HOLD OUT of the MF head fit for ``fold`` (Task 1.5).
+
+    The MF-correction HF-LOSO row mask drops the rows whose HR sim is in this set, so the
+    RETAINED HR sims (the complement against the 6 HR sims) are what the head is fit on.
+
+    * ``target_hr_sim is None`` → BACK-COMPAT (whole-group held): the LF fold-group held set
+      intersected with the HR sims — byte-for-byte what ``build_mf_correction`` computed
+      before, i.e. ``{s for s in held_out_sims(d, fold)[0] if s in <decoded hr_sim_names>}``.
+      For a leave-TWO-out fold (two HR sims share the LF group: fold 2 / fold 6) this is a
+      2-element set — the legacy (buggy) leave-two-out behavior, preserved on purpose.
+    * ``target_hr_sim is not None`` → TRUE LOO: returns EXACTLY ``{target_hr_sim}`` (drop only
+      the one sim under test), independent of the LF fold group, so the fold-mate is retained
+      (5 HR sims fit, not 4). ``target_hr_sim`` must be one of the HR sims.
+
+    ``hr_sim_names`` = the HR cache sim-name array (``hr_cache["sim_name"]``; bytes or str
+    entries both accepted, decoded internally). PURE (no I/O): the caller supplies ``d`` and
+    the HR sim-name array.
+    """
+    hr_sims = set(s.decode() if isinstance(s, bytes) else str(s) for s in hr_sim_names)
+    if target_hr_sim is not None:
+        target = target_hr_sim.decode() if isinstance(target_hr_sim, bytes) else str(target_hr_sim)
+        # raise (not assert: must survive python -O) — a typo'd target would otherwise silently
+        # fit the WRONG MF correction and corrupt the cert.
+        if target not in hr_sims:
+            raise ValueError(
+                f"target_hr_sim {target!r} is not an HR sim; HR sims = {sorted(hr_sims)}")
+        # defensive: the target must actually be held out of THIS fold's LF val group, else the cert
+        # would fit a fold-N backbone with the wrong sim held (silent target<->fold mis-pairing).
+        sims, _ = held_out_sims(d, fold=fold)
+        fold_hr = set(s.decode() if isinstance(s, bytes) else str(s) for s in sims) & hr_sims
+        if target not in fold_hr:
+            raise ValueError(
+                f"target_hr_sim {target!r} is not in fold {fold}'s held HR group {sorted(fold_hr)} "
+                "— target<->fold mis-pairing")
+        return {target}
+    sims, _ = held_out_sims(d, fold=fold)
+    decoded_sims = (s.decode() if isinstance(s, bytes) else str(s) for s in sims)
+    return set(s for s in decoded_sims if s in hr_sims)
 
 
 def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="priya", mf=None, lls_truth_boost=1.0):
@@ -628,13 +819,19 @@ def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="priya", mf=None, lls_t
     # ladder-discretization floor, the self-consistency the 13-rung→2-param swap requires).
     _alpha_sel = tau0_all[keep_rows] / np.asarray(_kim(jnp.asarray(z)))
     tau0_amp_true, dtau0_true = fit_tau0_alpha_priya(np.asarray(z), _alpha_sel)
+    # PER-Z structural w_c (nZs,3) [LLS,sub,DLA] — the Z-RESOLVED truth incidence the z-flat ``w_c``
+    # (z-median, below) drops. Used to build the z-resolved truth alpha for the SBC loglik-rank
+    # re-scoring (make_legb_mock → truth_pack['alpha_hcd_z']); the LLS column carries the same
+    # lls_truth_boost the z-median does (matches make_truth_from_sim's per-row a[0] boost above).
+    w_c_z = np.asarray(w_c[keep_rows, 1:], float).copy()
+    w_c_z[:, 0] = w_c_z[:, 0] * lls_truth_boost
     return dict(
         z=z, P_obs_true=P_obs, dla_excess_true=dla_excess,
         params_unit=params_unit[keep_rows[0]],
         tau0=tau0_all[keep_rows], dla_core=dla_core,
         tau0_amp=tau0_amp_true, dtau0=dtau0_true,
         w_c=np.median(w_c[keep_rows, 1:], axis=0) * np.array([lls_truth_boost, 1.0, 1.0]),
-        rows=keep_rows)
+        w_c_z=w_c_z, rows=keep_rows)
 
 
 def make_hr_truth_from_cache(sim_name, target_k, *, tau0_anchor="priya"):
@@ -697,13 +894,73 @@ def _chol_jitter(C, jitter=1e-10):
     return jnp.linalg.cholesky(Cj)
 
 
-def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0):
+def _resolve_res_corr_inject(inject_res_corr, leg_name, n_rows):
+    """Resolve the ``inject_res_corr`` spec into this leg's log-perturbation b-vector (on the
+    leg k-grid, shape ``(n_rows,)``). Returns ``None`` (a true no-op) when no injection applies.
+
+    TASK-1.6 res_corr injection harness (spec §4.2). The injection is a per-leg multiplicative
+    LOG-res_corr perturbation applied to the leg-binned TRUTH ONLY (``P_truth_on_leg *= exp(b)``),
+    analogous to the SiIII ``mfac`` multiply but in log-space. It is the OUT-OF-SPAN
+    misspecification the marginalized ``alpha_res`` must absorb — it NEVER enters the forward, so
+    it does NOT cancel in a closure. The strength is SEPARATE from the sampled ``alpha_res``.
+
+    Accepted spec forms (``inject_res_corr``):
+      * ``None``                → no-op (returns ``None``; the default, byte-identical).
+      * ``{"path": <npz>, "member": "b1"|"b2", "strength": float}``
+            → loads ``{leg_name}_{member}`` from the basis npz (the flat z-major log-perturbation
+              on the leg k-grid, the SAME order/shape as ``leg.k``) and scales it by ``strength``.
+              This is the form ``run_stepA``'s injection arm passes.
+      * ``{leg_name: b_vector, ...}``
+            → an explicit per-leg b-vector dict (already strength-scaled). Legs absent from the
+              dict get no injection.
+
+    Returns the strength-scaled b-vector ``strength * b_{member}_{leg}`` (or the explicit vector),
+    or ``None`` if this leg has no injection."""
+    if inject_res_corr is None:
+        return None
+    if not isinstance(inject_res_corr, dict):
+        raise TypeError(
+            f"inject_res_corr must be None or a dict, got {type(inject_res_corr).__name__}")
+    # (path, member, strength) form — the run_stepA arm's spec.
+    if "path" in inject_res_corr or "member" in inject_res_corr:
+        path = inject_res_corr["path"]
+        member = inject_res_corr.get("member", "b1")
+        strength = float(inject_res_corr.get("strength", 1.0))
+        basis = np.load(path, allow_pickle=True)
+        key = f"{leg_name}_{member}"
+        if key not in basis.files:
+            raise KeyError(
+                f"inject_res_corr: {key!r} not in basis {path!r} (have {sorted(basis.files)})")
+        b = np.asarray(basis[key], dtype=float)
+        if b.shape != (n_rows,):
+            raise ValueError(
+                f"inject_res_corr: basis {key} shape {b.shape} != leg-truth shape {(n_rows,)}")
+        return strength * b
+    # explicit {leg_name: b_vector} form.
+    if leg_name not in inject_res_corr:
+        return None
+    b = np.asarray(inject_res_corr[leg_name], dtype=float)
+    if b.shape != (n_rows,):
+        raise ValueError(
+            f"inject_res_corr[{leg_name!r}] shape {b.shape} != leg-truth shape {(n_rows,)}")
+    return b
+
+
+def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0, inject_res_corr=None):
     """Build a Leg-B mock from a sim-truth: interpolate the sim-truth P1D onto each leg's k,
     draw ε ~ N(0, C_data) (cosmic-ONLY) per leg, ``mock = truth_on_leg + ε``.
 
     ``inject_a_siiii`` > 0 multiplies the truth-on-leg by the SiIII metal factor (the SAME
     ``_metal_factor`` the forward uses) on metals_on legs BEFORE noise — the SiIII-injection cert
     arm (a forward with ``sample_metals`` should then absorb it into a_SiIII with no n_s/A_p leak).
+
+    ``inject_res_corr`` (default ``None`` ⇒ byte-identical no-op) injects an OUT-OF-SPAN res_corr
+    misspecification into the leg-binned TRUTH ONLY (TASK-1.6, spec §4.2): a per-leg log-res_corr
+    perturbation ``b`` (on the leg k-grid) applied as ``P_truth_on_leg *= exp(b)`` at the SAME point
+    ``inject_a_siiii`` multiplies (AFTER SiIII, BEFORE the cosmic-noise draw). It is the
+    misspecification the marginalized ``alpha_res`` must absorb; it has a SEPARATE injection
+    strength from the sampled ``alpha_res`` and NEVER touches the forward (so it does not cancel in
+    a closure). See ``_resolve_res_corr_inject`` for the accepted spec forms.
 
     MOCK-TRUTH → LEG mapping (documented choice): the sim has one z per cache row. For each
     leg z-bin we NEAREST-Z map to the sim's available z (the cache z grid is Δz=0.2, and the
@@ -764,6 +1021,14 @@ def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0):
         if inject_a_siiii > 0 and leg.metals_on:
             mfac = np.asarray(DL._metal_factor(jnp.asarray(leg.k), a_SiIII=float(inject_a_siiii)))
             P_truth_on_leg = np.where(np.isfinite(P_truth_on_leg), P_truth_on_leg * mfac, P_truth_on_leg)
+        # res_corr injection (TASK-1.6 cert arm): multiply the leg-binned truth by exp(b_leg), the
+        # OUT-OF-SPAN log-res_corr misspecification on the leg k-grid (same flat z-major order as
+        # leg.k). TRUTH-ONLY — the forward never sees it, so it cannot cancel in a closure. Applied
+        # AFTER the SiIII inject, BEFORE the noise draw, on the finite (kept) rows only.
+        b_inj = _resolve_res_corr_inject(inject_res_corr, leg.name, N)
+        if b_inj is not None:
+            efac = np.exp(b_inj)
+            P_truth_on_leg = np.where(np.isfinite(P_truth_on_leg), P_truth_on_leg * efac, P_truth_on_leg)
         dropped[leg.name] = drop_z
         truth_on_leg_out[leg.name] = P_truth_on_leg.copy()
 
@@ -799,14 +1064,200 @@ def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0):
     # consistency point is α_DLA = 0.10·w_DLA. (On KS the target carries 0% AND the forward DLA
     # term is 0, so the KS leg is α_DLA-blind — consistent for any α_DLA.) The α_DLA prior is
     # centered on this 10% residual (HCD_DLA_RESIDUAL_FRAC=0.10) and is MARGINALIZED (sampled).
-    alpha_truth = np.asarray(truth_sim["w_c"]).copy()             # (3,) [LLS,sub,DLA]
+    alpha_truth = np.asarray(truth_sim["w_c"]).copy()             # (3,) [LLS,sub,DLA] z-MEDIAN pivot
     alpha_truth[2] = TRUTH_DLA_FRAC["DESI"] * alpha_truth[2]      # 0.10·w_DLA (the DESI residual)
+    # Z-RESOLVED truth alpha (nZg,3) for the SBC loglik-rank re-scoring (ll_true): the mock
+    # truth-on-leg uses the per-z sim P1D (z-resolved contamination), so re-scoring with a z-FLAT
+    # alpha produces a spurious z-ramp. Map the per-z sim w_c (``truth_sim['w_c_z']``, nearest-z onto
+    # z_global) and apply the SAME §0c DLA 10% residual scaling to the DLA column as the z-flat
+    # pivot above. Dropped-z rows (no sim z within z_tol) fall back to the z-median pivot (they carry
+    # NO data so they never affect the likelihood). Matches scripts/diag_legb_zresolved_alpha_check.
+    if truth_sim.get("w_c_z") is not None:
+        w_c_z = np.asarray(truth_sim["w_c_z"], float)            # (nZs,3) per-z structural w_c
+        alpha_hcd_z = np.tile(alpha_truth, (len(zg), 1))        # (nZg,3) default = z-median pivot
+        for i, zz in enumerate(zg):
+            j = int(np.argmin(np.abs(z_sim - zz)))
+            if abs(z_sim[j] - zz) <= z_tol:
+                az = w_c_z[j].copy()
+                az[2] = TRUTH_DLA_FRAC["DESI"] * az[2]           # 0.10·w_DLA(z) (the per-z residual)
+                alpha_hcd_z[i] = az
+    else:
+        alpha_hcd_z = np.tile(alpha_truth, (len(zg), 1))
     truth_pack = dict(
         theta9=np.asarray(truth_sim["params_unit"]),
-        tau0_global=tau0_global, alpha_hcd=alpha_truth,
+        tau0_global=tau0_global, alpha_hcd=alpha_truth, alpha_hcd_z=alpha_hcd_z,
         kept_global_z=kept_global)
     info = dict(key=key, dropped=dropped, z_sim=z_sim, truth_on_leg=truth_on_leg_out)
     return mock_legs, truth_pack, info
+
+
+# ============================================================================ #
+#  Leg-A (rank-uniformity SBC) on the leg grids — draw truth from the PRIOR, matched-C self-draw.
+# ============================================================================ #
+def draw_leg_a_leg_truth(ctx: LegBCtx, key):
+    """Draw a Leg-A truth from the legb PRIORS for a rank-uniformity SBC on the leg grids.
+
+    Traces ``_legb_priors_only`` (the EXACT prior sites of ``_legb_model``) for one sample, then
+    reconstructs the deterministics (τ₀(z), z-resolved α) host-side via
+    ``_legb_reconstruct_deterministics``. Returns a truth_pack matching ``make_legb_mock``'s
+    contract: ``theta9`` (9,), ``tau0_global`` (nZg,), ``alpha_hcd`` (3,) PIVOT [LLS,sub,DLA] for
+    the rank truth-vector, ``alpha_hcd_z`` (nZg,3) Z-RESOLVED for the forward, ``a_siiii``,
+    ``kept_global_z`` (all True — Leg-A keeps every leg z), plus the raw latent sites (``raw``)."""
+    from numpyro import handlers as _nph
+    tr = _nph.trace(_nph.seed(_legb_priors_only, key)).get_trace(ctx)
+    raw = {nm: site["value"] for nm, site in tr.items() if site.get("type") == "sample"}
+    samples1 = {k: jnp.asarray(v)[None] for k, v in raw.items()}      # length-1 L axis
+    rec = _legb_reconstruct_deterministics(ctx, samples1)
+    a_lls = float(rec["alpha_lls"][0]) if "alpha_lls" in rec else float(raw["alpha_lls"])
+    a_sub = float(rec["alpha_subdla"][0]) if "alpha_subdla" in rec else float(raw["alpha_subdla"])
+    a_dla = float(rec["alpha_dla"][0])
+    return dict(
+        theta9=np.asarray(raw["theta_unit"]),
+        tau0_global=np.asarray(rec["tau0_vec"][0]),                  # (nZg,)
+        alpha_hcd=np.array([a_lls, a_sub, a_dla]),                   # (3,) pivot (rank truth-vec)
+        alpha_hcd_z=np.asarray(rec["alpha_hcd_z"][0]),              # (nZg,3) z-resolved (forward)
+        a_siiii=(float(raw["a_SiIII"]) if "a_SiIII" in raw else 0.0),
+        kept_global_z=np.ones(len(ctx.z_global), bool), raw=raw)
+
+
+# --------------------------------------------------------------------------------------------- #
+#  Data-nuisance injection hooks (the BIAS gate). On the Leg-A self-draw the cosmology bias is
+#  ZERO by construction; these inject a nuisance the production forward CANNOT fit (or a truth
+#  offset from the per-survey LLS pin) so the recovered A_p/n_s shift isolates that nuisance.
+# --------------------------------------------------------------------------------------------- #
+def apply_lls_truth_boost(truth_pack, boost):
+    """Return a COPY of ``truth_pack`` with the LLS incidence (pivot ``alpha_hcd[0]`` AND the
+    z-resolved ``alpha_hcd_z[:,0]`` column) multiplied by ``boost`` (>1 ⇒ the mock carries a
+    survey-level LLS excess relative to the prior pin center). subDLA/DLA, θ9, τ₀ and a_SiIII are
+    untouched; the input is NOT mutated (deep-copies the two LLS-bearing arrays). ``boost=1`` is
+    the identity. The LLS-excess arm of the data-nuisance bias gate uses this to put the truth at
+    the per-survey lit/sim LLS center while the forward keeps the (cosmic-average / DESI) pin."""
+    out = dict(truth_pack)                                    # shallow copy of the dict
+    a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
+    a[0] = a[0] * float(boost)
+    out["alpha_hcd"] = a
+    if truth_pack.get("alpha_hcd_z") is not None:
+        az = np.array(truth_pack["alpha_hcd_z"], float)       # fresh (nZg,3)
+        az[:, 0] = az[:, 0] * float(boost)
+        out["alpha_hcd_z"] = az
+    return out
+
+
+def apply_subdla_truth_boost(truth_pack, boost):
+    """Return a COPY of ``truth_pack`` with the subDLA incidence (pivot ``alpha_hcd[1]`` AND the
+    z-resolved ``alpha_hcd_z[:,1]`` column) multiplied by ``boost`` — the SIBLING of
+    ``apply_lls_truth_boost`` for the subDLA-displacement arm of the data-nuisance bias gate. LLS
+    (index 0), DLA (index 2), θ9, τ₀ and a_SiIII are untouched; the input is NOT mutated
+    (deep-copies the two subDLA-bearing arrays). ``boost=1`` is the identity."""
+    out = dict(truth_pack)                                    # shallow copy of the dict
+    a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
+    a[1] = a[1] * float(boost)
+    out["alpha_hcd"] = a
+    if truth_pack.get("alpha_hcd_z") is not None:
+        az = np.array(truth_pack["alpha_hcd_z"], float)       # fresh (nZg,3)
+        az[:, 1] = az[:, 1] * float(boost)
+        out["alpha_hcd_z"] = az
+    return out
+
+
+def _meanflux_on_leg(ctx, leg, truth_pack):
+    """Per-leg-z mean flux ⟨F⟩(z)=exp(−τ_eff(z)) from the truth mean flux on z_global.
+
+    NOTE (the load-bearing fix): ``truth_pack["tau0_global"]`` is ALREADY τ_eff(z)=α(z)·Kim07
+    (built as ``tau0_vec = alpha_z·kim`` in _legb_model / _legb_reconstruct_deterministics, i.e.
+    the cache ``tau0 = −ln⟨F⟩`` coordinate), NOT the bare α-ladder coord. So we use it DIRECTLY —
+    multiplying by Kim again would double-apply it and make ⟨F⟩=exp(−α·Kim²), inflating the
+    injected metal amplitude up to ~6× at low z (where Kim is smallest). Returns a (leg.n_z,)
+    array aligned with ``leg.z`` (nearest-z map onto z_global, mirroring make_leg_a_legmock's
+    `sel`)."""
+    zg = np.asarray(ctx.z_global)
+    tau_eff_global = np.asarray(truth_pack["tau0_global"])    # (nZg,) τ_eff = α·Kim = −ln⟨F⟩
+    sel = np.array([int(np.argmin(np.abs(zg - zz))) for zz in leg.z])
+    tau_eff = tau_eff_global[sel]                             # (n_z,)
+    return np.exp(-tau_eff)                                   # ⟨F⟩(z)
+
+
+def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
+                       inject_metal_misspec=None, inject_resolution=None):
+    """Leg-A self-draw on the leg grids: forward-model the prior-drawn truth on each leg with the
+    SAME ``predict_P_obs_on_leg`` the likelihood uses, then add ε ~ N(0, C_total(truth)) over ALL
+    rows. C_mock ≡ C_like AND the noiseless mock == P_model(truth) → the rank-uniformity null is
+    EXACT (Talts+2018). Returns ``(mock_legs, info)``; ``info['chol'][leg]`` /
+    ``info['truth_on_leg'][leg]`` per leg.
+
+    DATA-NUISANCE INJECTION (the bias gate; default None ⇒ byte-identical to the clean self-draw):
+    when set, the contaminant multiplies the NOISELESS ``P_model`` BEFORE the ε draw (mirroring
+    make_legb_mock's SiIII inject at line 772), so the recorded ``truth_on_leg`` and the mock both
+    carry it but the FORWARD likelihood (which the gate keeps clean of the unfittable mode) cannot.
+
+      ``inject_metal_misspec``: dict, e.g. {"form":"desi_full","f_SiIII":0.009,"f_SiII":0.004,
+        "f_SiII_SiII":0.002,...} forwarded as kwargs to ``metal_inject``. Applied ONLY on legs with
+        ``leg.metals_on`` (DESI/eBOSS), PER z-block: ⟨F⟩(z) from the truth τ₀ (``_meanflux_on_leg``)
+        feeds metal_inject on that z's rows. The desi_full form carries an ADDITIVE SiII–SiII term
+        the multiplicative forward _metal_factor STRUCTURALLY cannot fit (the bias probe).
+      ``inject_resolution``: dict, e.g. {"b_res":0.02} → multiply P_model by
+        ``_resolution_factor(k, R_z, b_res)`` per z-block on ALL legs (the production forward has
+        resolution_on=False so it cannot fit this distortion — the probe). R_z is the leg's own
+        per-z resolution scale (``leg.R_z``)."""
+    metal_kw = dict(inject_metal_misspec) if inject_metal_misspec else None
+    res_b = float(inject_resolution["b_res"]) if inject_resolution else None
+    zg = np.asarray(ctx.z_global)
+    theta9 = jnp.asarray(truth_pack["theta9"])
+    tau0_global = jnp.asarray(truth_pack["tau0_global"])
+    alpha_hcd_z = jnp.asarray(truth_pack["alpha_hcd_z"])
+    a_siiii = float(truth_pack.get("a_siiii", 0.0))
+    keys = jax.random.split(key, len(ctx.legs))
+    mock_legs, chol_out, truth_on_leg_out = [], {}, {}
+    for li, leg in enumerate(ctx.legs):
+        sel = jnp.asarray([int(np.argmin(np.abs(zg - zz))) for zz in leg.z])
+        szb = ctx.sigma_zb_per_leg.get(leg.name) if ctx.sigma_zb_per_leg else None
+        rzb = ctx.rho_zb_per_leg.get(leg.name) if ctx.rho_zb_per_leg else None
+        msc = (ctx.mf_shape_per_leg.get(leg.name)
+               if getattr(ctx, "mf_shape_per_leg", None) is not None else None)
+        mec = (ctx.mf_emucoh_per_leg.get(leg.name)
+               if getattr(ctx, "mf_emucoh_per_leg", None) is not None else None)
+        P_model, C_total = DL.predict_P_obs_on_leg(
+            ctx.model, theta9, tau0_global[sel], alpha_hcd_z[sel], pf_stats=ctx.pf_stats,
+            dla_core=dla_core_per_leg[leg.name], cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
+            alpha_centres=ctx.alpha_centres, a_SiIII=a_siiii, cemu_inflate=ctx.cemu_inflate,
+            rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor,
+            mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
+            mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
+            mf_emucoh_offdiag_only=getattr(ctx, "mf_emucoh_offdiag_only", False))
+        P_model = np.array(P_model, float)                     # host (writable): nuisance injection
+        # DATA-NUISANCE INJECTION (default OFF). Multiply the noiseless P_model by the host
+        # contaminant BEFORE the ε draw, per z-block (mirrors make_legb_mock's per-z loop).
+        if metal_kw is not None and leg.metals_on:
+            Fbar = _meanflux_on_leg(ctx, leg, truth_pack)     # (n_z,) ⟨F⟩(z) from the truth τ₀
+            k_leg = np.asarray(leg.k)
+            z_idx = np.asarray(leg.z_idx)
+            for iz in range(leg.n_z):
+                rows = np.where(z_idx == iz)[0]
+                if rows.size == 0:
+                    continue
+                P_model[rows] = metal_inject(P_model[rows], k_leg[rows], float(Fbar[iz]),
+                                             **metal_kw)
+        if res_b is not None:
+            k_leg = np.asarray(leg.k)
+            z_idx = np.asarray(leg.z_idx)
+            R_z = np.asarray(leg.R_z)
+            for iz in range(leg.n_z):
+                rows = np.where(z_idx == iz)[0]
+                if rows.size == 0:
+                    continue
+                fac = np.asarray(DL._resolution_factor(
+                    jnp.asarray(k_leg[rows]), float(R_z[iz]), b_res=res_b))
+                P_model[rows] = P_model[rows] * fac
+        Lc = _chol_jitter(C_total)
+        g = jax.random.normal(keys[li], (leg.k.shape[0],))
+        eps = np.asarray(jnp.einsum("ij,j->i", Lc, g))
+        mock_legs.append(leg._replace(P_data=P_model + eps))
+        chol_out[leg.name] = np.asarray(Lc)
+        truth_on_leg_out[leg.name] = P_model.copy()
+    # 'dropped' (empty per leg — Leg-A keeps every z) matches make_legb_mock's info contract,
+    # which run_legb reads when building the per-mock record.
+    return mock_legs, dict(key=key, chol=chol_out, truth_on_leg=truth_on_leg_out,
+                           dropped={leg.name: [] for leg in ctx.legs})
 
 
 # ============================================================================ #
@@ -822,7 +1273,8 @@ def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0):
 #  restriction (dropped-z mock rows are NaN and carry no info).
 # ============================================================================ #
 def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs,
-                         dla_core_per_leg, *, return_parts=False, a_siiii=0.0):
+                         dla_core_per_leg, *, return_parts=False, a_siiii=0.0,
+                         alpha_res=None, require_zresolved=False):
     """``data_loglik`` but with a PER-LEG-Z dla_core (the mock's sim core). ``data_loglik``
     takes ONE (K,) core; here each leg z uses its own, so we call ``predict_P_obs_on_leg``
     per leg with that leg's core threaded through a per-z loop is overkill — instead we note
@@ -831,7 +1283,17 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
     keep the core matched (forward core == truth core, so it cancels in the emu-error sizing
     and the truth P_obs is reproduced when θ→truth), we pass each leg its OWN (K,) core that
     is the z-MEAN of that leg's per-z cores (a documented MVP — the per-z core variation is
-    tiny vs the P1D, and the DLA sector is un-certified by Leg B without arm A3 anyway)."""
+    tiny vs the P1D, and the DLA sector is un-certified by Leg B without arm A3 anyway).
+
+    ``alpha_res`` (Task 1.3): the sampled res_corr-amplitude ``(alpha0, s)`` tuple, threaded
+    FORWARD-ONLY into ``predict_P_obs_on_leg`` (it scales ``log res_corr`` by α(z) in the MF
+    forward). ``None`` (default) ⇒ α≡1 ⇒ byte-exact back-compat. The TRUTH path never sets it
+    (α≡1 there) so the nuisance does NOT cancel in the closure.
+
+    ``require_zresolved`` (default False → back-compat) forwards to ``predict_P_obs_on_leg``'s
+    guard: when True ASSERT ``alpha_hcd`` is z-RESOLVED ((n_zg,3), so the per-leg slice is (n_z,3))
+    — a (3,) z-flat alpha raises. The DEPLOYED ``_legb_model`` + the SBC re-scoring paths
+    (``_loglik_of_draws``/``ll_true``) pass True so any future z-flat regression fails LOUDLY."""
     total = 0.0
     parts = {}
     from .likelihood import gaussian_loglik
@@ -860,7 +1322,9 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
             cemu_inflate=ctx.cemu_inflate, rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor,
             mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
             mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
-            mf_emucoh_offdiag_only=getattr(ctx, "mf_emucoh_offdiag_only", False))
+            mf_emucoh_offdiag_only=getattr(ctx, "mf_emucoh_offdiag_only", False),
+            alpha_res=alpha_res,                              # res_corr amplitude nuisance (fwd-only)
+            require_zresolved=require_zresolved)              # guard: assert z-resolved alpha (opt-in)
         kr = jnp.asarray(np.where(keep)[0])
         r = jnp.asarray(P_data[keep]) - P_model[kr]
         C_sub = C_total[jnp.ix_(kr, kr)]
@@ -875,6 +1339,19 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
     if return_parts:
         return total, parts
     return total
+
+
+def _sample_tau0_sites(ctx):
+    """Sample (tau0_amp, dtau0): Uniform by default; TruncatedNormal centered on (mu,sigma),
+    truncated to the physical range, when ctx.{tau0_amp_gauss,dtau0_gauss} is set (the
+    informative-τ₀ arm). IDENTICAL site names/order to the legacy code in both model twins."""
+    la, ha = ctx.tau0_amp_range; ld, hd = ctx.dtau0_range
+    ga = getattr(ctx, "tau0_amp_gauss", None); gd = getattr(ctx, "dtau0_gauss", None)
+    tau0_amp = (numpyro.sample("tau0_amp", dist.Uniform(la, ha)) if ga is None
+                else numpyro.sample("tau0_amp", dist.TruncatedNormal(ga[0], ga[1], low=la, high=ha)))
+    dtau0 = (numpyro.sample("dtau0", dist.Uniform(ld, hd)) if gd is None
+             else numpyro.sample("dtau0", dist.TruncatedNormal(gd[0], gd[1], low=ld, high=hd)))
+    return tau0_amp, dtau0
 
 
 def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
@@ -906,9 +1383,7 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     kim = _kim(zg)
     # PRIYA mean-flux: α(z)=τ₀·((1+z)/(1+z_p))^dτ₀, τ₀(z)=α·Kim07 — 2 GLOBAL uniform params, NOT
     # 13 free per-z rungs, so τ₀ cannot absorb emulator residual into per-z wiggle that biases A_p.
-    tau0_amp = numpyro.sample("tau0_amp",
-                              dist.Uniform(ctx.tau0_amp_range[0], ctx.tau0_amp_range[1]))
-    dtau0 = numpyro.sample("dtau0", dist.Uniform(ctx.dtau0_range[0], ctx.dtau0_range[1]))
+    tau0_amp, dtau0 = _sample_tau0_sites(ctx)
     alpha_z = tau0_alpha_priya(zg, tau0_amp, dtau0, z_pivot=ctx.tau0_pivot_z)
     tau0_global = numpyro.deterministic("tau0_vec", alpha_z * kim)
     # The HCD pivot-z (z=3) amplitudes (3,) [LLS, subDLA, DLA]. The shared ``_hcd_sites`` helper
@@ -918,8 +1393,9 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     alpha_pivot, s_override = _hcd_sites(ctx)  # (3,) pivot-z amplitudes (+ optional s_c override)
     # z-RESOLVED incidence α_c(z) = α_pivot · ((1+z)/(1+z_p))^s_c (the dN/dX slope) — the fix:
     # the forward must track the mock's per-z w_c(z) (rises ~3.5× over z), not a z-constant α.
-    # STEP-A M3: when ctx.marginalize_zslope, s_c is SAMPLED (the real-fit config) instead of
-    # the fixed HCD_LIT_OVER_SIM_SLOPE; otherwise the fixed literature power-law slope is used.
+    # STEP-A M3: when ctx.marginalize_zslope, s_c is SAMPLED (the real-fit config) centered on
+    # HCD_INCIDENCE_SLOPE (~2.4, the SIM incidence-weight slope the mock truth carries); otherwise
+    # s_c is FIXED to that same incidence slope (NOT the lit/sim ratio HCD_LIT_OVER_SIM_SLOPE).
     # 2D AMPLITUDE×TILT mode: _hcd_sites returns s_override = B_hcd + δs_c (it sets the slopes via
     # the global tilt B_hcd), which BYPASSES _zslope_sites / marginalize_zslope entirely.
     s_c = s_override if s_override is not None else _zslope_sites(ctx)
@@ -930,8 +1406,23 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     # a_SiIII = f_SiIII/(1−⟨F⟩) ≈ 0.045 sits well inside.
     a_siiii = (numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
                if getattr(ctx, "sample_metals", False) else 0.0)
+    # res_corr AMPLITUDE nuisance (Task 1.3): α(z)=α₀·((1+z)/(1+Z_PIVOT))^s, marginalized
+    # FORWARD-ONLY (threaded into _data_loglik_legcore → predict_P_obs_on_leg → the MF
+    # chokepoint; NOT into the truth → no closure cancellation). Two sites, amplitude THEN
+    # slope; _legb_priors_only MUST mirror this order (constrain_fn traces it).
+    # DIAGNOSTIC (ctx.fix_alpha_res, default False → SAMPLE both sites, byte-identical): when
+    # True, DO NOT sample alpha_res/alpha_res_slope — pin them to the fixed no-op (alpha0=1, s=0,
+    # i.e. α(z)≡1, the production res_corr UNMODIFIED) in the forward. This isolates the
+    # alpha-marginalization's contribution to the n_s bias (the decomp diagnostic).
+    if getattr(ctx, "fix_alpha_res", False):
+        alpha_res, alpha_res_slope = 1.0, 0.0
+    else:
+        alpha_res = numpyro.sample("alpha_res", dist.TruncatedNormal(1.0, SIGMA_A0, low=0.0))
+        alpha_res_slope = numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
     numpyro.factor("loglik", _data_loglik_legcore(
-        ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg, a_siiii=a_siiii))
+        ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg, a_siiii=a_siiii,
+        alpha_res=(alpha_res, alpha_res_slope),
+        require_zresolved=True))   # alpha_hcd here is the z-resolved alpha_hcd_z deterministic
 
 
 def _hcd_sites(ctx):
@@ -969,6 +1460,13 @@ def _hcd_sites(ctx):
                                dist.TruncatedNormal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0], low=0.0))
         a_sub = numpyro.sample("alpha_subdla",
                                dist.TruncatedNormal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1], low=0.0))
+        # NOTE (PR#12 e2e-review): the latent Normal SCALE is hardcoded 1.0 — NOT ctx.alpha_hcd_sigma[2].
+        # So α_DLA's encoded prior is a deliberately-BROAD one-sided softplus(Normal) with effective
+        # σ/μ ≈ 1.2 (right-skewed) — ~2.5× the named HCD_PRIOR_FRAC_SIGMA[2]=0.50 — and the z>3.5
+        # dla_inflate widening of σ_DLA is INERT here. This is the conservative direction (the DLA sector
+        # is un-certified by Leg B / needs arm A3). DO NOT rescale unilaterally: closure_mocks.py:56 and
+        # sampler_numpyro.py draw the mock TRUTH from this IDENTICAL dist, so any width change must be
+        # mirrored at all three sites or it breaks self-draw SBC rank-uniformity.
         a_dla_raw = numpyro.sample("alpha_dla_raw",
                                    dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
         a_dla = numpyro.deterministic("alpha_dla", jax.nn.softplus(a_dla_raw))
@@ -1010,19 +1508,32 @@ def _btilt_site(ctx):
     slope vector s_c = B_hcd + δs_c (2D AMPLITUDE×TILT mode). δs_LLS≡0, so at B_hcd=hcd_btilt_mu
     the slopes equal the full incidence slope HCD_INCIDENCE_SLOPE (~2.4 — the closure anchor that
     MATCHES the mock truth's native w_c(z) evolution)."""
+    # GUARD the 2D-tilt forward exponent center (Gap-1, hcd-dndx-zslope-bug): ctx.hcd_btilt_mu is
+    # the CONCRETE prior center (trace-safe), NOT the sampled B_hcd — catches a 0.95 reversion that
+    # a future ctx._replace(hcd_btilt_mu=...) / new builder could otherwise slip past the build guard.
+    _assert_forward_zslope_center(ctx.hcd_btilt_mu, "_btilt_site")
     B_hcd = numpyro.sample("B_hcd", dist.Normal(ctx.hcd_btilt_mu, ctx.hcd_btilt_sigma))
     return B_hcd + jnp.asarray(ctx.hcd_dslope)                      # (3,) s_c = B_hcd + δs_c
 
 
 def _zslope_sites(ctx):
-    """The HCD per-class z-slope s_c (3,). FIXED to HCD_LIT_OVER_SIM_SLOPE unless
+    """The HCD per-class z-slope s_c (3,). FIXED to HCD_INCIDENCE_SLOPE unless
     ``ctx.marginalize_zslope`` (STEP-A M3) — then SAMPLE s_lls/s_subdla/s_dla ~ Normal at the
-    ctx prior (default: center HCD_LIT_OVER_SIM_SLOPE, width ZSLOPE_PRIOR_SIGMA). Shared by
-    ``_legb_model`` (with the factor) and ``_legb_priors_only`` (transform-only postprocess)."""
+    ctx prior (default: center HCD_INCIDENCE_SLOPE, width ZSLOPE_PRIOR_SIGMA). Shared by
+    ``_legb_model`` (with the factor) and ``_legb_priors_only`` (transform-only postprocess).
+
+    CENTER = HCD_INCIDENCE_SLOPE (~2.4) — the SIM incidence-WEIGHT slope d ln w_c(z)/d ln(1+z)
+    the held-out-sim mock TRUTH actually carries, so the forward dN/dX(z) RISES with z (matching
+    the truth + literature). DISTINCT from inference.HCD_LIT_OVER_SIM_SLOPE (~0.95, the lit/sim
+    RATIO slope — a z=3-pivot prior-center quantity): centering s_c on the ratio slope made the
+    predicted dN/dX(z) FALL with z and put the mock truth 2.9–6σ off-center (the wrong-object bug).
+    Matches the already-correct 2D-tilt anchor (_btilt_site / build_legb_ctx → HCD_INCIDENCE_SLOPE)."""
     if not getattr(ctx, "marginalize_zslope", False):
-        return jnp.asarray(HCD_LIT_OVER_SIM_SLOPE)
-    mu = (jnp.asarray(HCD_LIT_OVER_SIM_SLOPE) if ctx.zslope_mu is None
-          else jnp.asarray(ctx.zslope_mu))
+        _assert_forward_zslope_center(HCD_INCIDENCE_SLOPE, "_zslope_sites fixed")
+        return jnp.asarray(HCD_INCIDENCE_SLOPE)
+    mu_src = HCD_INCIDENCE_SLOPE if ctx.zslope_mu is None else ctx.zslope_mu
+    _assert_forward_zslope_center(mu_src, "_zslope_sites marginalize_zslope center")
+    mu = jnp.asarray(mu_src)
     sg = (jnp.asarray(ZSLOPE_PRIOR_SIGMA) if ctx.zslope_sigma is None
           else jnp.asarray(ctx.zslope_sigma))
     s_lls = numpyro.sample("s_lls", dist.Normal(mu[0], sg[0]))
@@ -1038,8 +1549,7 @@ def _legb_priors_only(ctx):
     _lo_u = jnp.asarray(_THETA_UNIT_LO if getattr(ctx, "theta_unit_lo", None) is None else ctx.theta_unit_lo)
     _hi_u = jnp.asarray(_THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi)
     numpyro.sample("theta_unit", dist.Uniform(_lo_u, _hi_u).to_event(1))
-    numpyro.sample("tau0_amp", dist.Uniform(ctx.tau0_amp_range[0], ctx.tau0_amp_range[1]))
-    numpyro.sample("dtau0", dist.Uniform(ctx.dtau0_range[0], ctx.dtau0_range[1]))
+    _sample_tau0_sites(ctx)
     # the HCD pivot α sites — SHARED with _legb_model via _hcd_sites so the sample-site order is
     # IDENTICAL in both branches (legacy 3-site vs hierarchical A_hcd/r_subdla/r_dla, vs 2D
     # A_hcd/B_hcd/r_subdla/r_dla). The deterministics it emits are dropped by
@@ -1051,6 +1561,13 @@ def _legb_priors_only(ctx):
         _zslope_sites(ctx)                        # mirrors _legb_model (s_c when marginalize_zslope)
     if getattr(ctx, "sample_metals", False):     # MUST mirror _legb_model's site (same order)
         numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
+    # res_corr AMPLITUDE nuisance (Task 1.3) — MUST mirror _legb_model's two sites in the SAME
+    # order (amplitude before slope), at the SAME relative position (last), or constrain_fn corrupts.
+    # DIAGNOSTIC fix_alpha_res: when set, _legb_model does NOT sample these two sites, so the
+    # priors-only mirror MUST drop them too (else constrain_fn's site set desyncs).
+    if not getattr(ctx, "fix_alpha_res", False):
+        numpyro.sample("alpha_res", dist.TruncatedNormal(1.0, SIGMA_A0, low=0.0))
+        numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
 
 
 def _legb_reconstruct_deterministics(ctx, samples):
@@ -1116,7 +1633,10 @@ def _legb_reconstruct_deterministics(ctx, samples):
         shape_zg = ratio ** s_c[:, None, :]                          # (L, nZg, 3)
         alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg             # (L, nZg, 3)
     else:
-        shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** jnp.asarray(HCD_LIT_OVER_SIM_SLOPE)
+        # fixed-slope fallback (non-2D, non-marginalized readout) — byte-consistent with the
+        # _zslope_sites FIXED branch: the SIM incidence slope HCD_INCIDENCE_SLOPE (~2.4), NOT the
+        # lit/sim ratio HCD_LIT_OVER_SIM_SLOPE (the wrong-object slope).
+        shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** jnp.asarray(HCD_INCIDENCE_SLOPE)
         alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg[None, :, :]      # (L, nZg, 3)
     out["tau0_vec"] = tau0_vec
     out["alpha_dla"] = alpha_dla
@@ -1464,7 +1984,7 @@ def _packed_names_for(samples, kept_global):
 def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
              cemu_inflate=None, fold=0, q_levels=(0.68, 0.95), verbose=True,
              dense_mass=True, max_tree_depth=10, mock_indices=None,
-             return_per_mock=False):
+             return_per_mock=False, leg_a=False, inject_spec=None):
     """Leg-B coverage over ``n_mocks`` held-out-sim mocks. Per mock: make_legb_mock → NUTS
     against the real-cov multi-leg likelihood → thin → rank the truth θ per param + the
     loglik rank → per-param empirical coverage at ``q_levels`` + bias.
@@ -1477,24 +1997,63 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
 
     Returns ``_aggregate_legb`` (coverage 68/95% + per-param bias + the DIAGNOSTIC-ONLY rank
     ECDF), or the per-mock list if ``return_per_mock``."""
+    # inject_spec is a LEG-A-ONLY hook (the data-nuisance bias gate). The held-out branch below
+    # (make_legb_mock) does NOT thread it, so honouring it on a held-out run would SILENTLY drop the
+    # injection. Fail loud instead — PR#12 review follow-up (b); generalizes the run_prod_sbc_shard.py
+    # subdla_truth_boost assert to EVERY inject key (lls/subdla_truth_boost, metal_misspec, resolution).
+    if inject_spec and not leg_a:
+        raise ValueError(
+            "run_legb: inject_spec is honoured only on the Leg-A self-draw path (leg_a=True); the "
+            "held-out branch ignores it. Refusing to silently drop the injection on a held-out run.")
     if cemu_inflate is not None:
         ctx = ctx._replace(cemu_inflate=float(cemu_inflate))
-    sims, _va = held_out_sims(d, fold=fold)
     key0 = jax.random.PRNGKey(int(seed))
     idxs = list(range(int(n_mocks))) if mock_indices is None else list(mock_indices)
+    if leg_a:
+        # Leg-A rank-uniformity SBC: truths drawn from the PRIOR; the fiducial DLA core is the
+        # MATCHED core used by both the mock forward and the likelihood (so C_mock ≡ C_like).
+        # z-mean the (n_z,K) fiducial → the (K,) per-leg core predict_P_obs_on_leg expects.
+        fid_core = {name: jnp.asarray(np.nanmean(np.asarray(v), axis=0))
+                    for name, v in _fiducial_dla_core_per_leg(d, ctx.legs, ctx.cache_k).items()}
+    else:
+        sims, _va = held_out_sims(d, fold=fold)
 
     # cycle through the held-out sims (n_mocks may exceed the #sims → reuse with fresh noise).
     per_mock = []
     n_div_total = 0
     n_divergent = 0
     for m in idxs:
-        sim = sims[m % len(sims)]
-        # the mock TRUTH is built at the SAME resolution as the forward: if ctx.mf is set, the
-        # gate invariant applies the MF correction to BOTH (it cancels in the closure ΔP).
-        truth_sim = make_truth_from_sim(d, sim, fold=fold, mf=ctx.mf)
-        k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, m), 2)
-        mock_legs, truth_pack, info = make_legb_mock(ctx, truth_sim, k_mock)
-        core_per_leg = _mock_core_per_leg(ctx, truth_sim)
+        if leg_a:
+            # Leg-A self-draw: truth ~ prior, matched-C mock; a PURE fn of (seed,m) → shardable.
+            k_truth, k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, m), 3)
+            truth_pack = draw_leg_a_leg_truth(ctx, k_truth)
+            # DATA-NUISANCE INJECTION (the bias gate; inject_spec=None ⇒ byte-identical to the
+            # clean self-draw — the no-op guarantee). "lls_truth_boost" offsets the TRUTH LLS from
+            # the per-survey pin BEFORE the forward; "metal_misspec"/"resolution" inject a mode the
+            # forward cannot fit into the noiseless mock.
+            if inject_spec:
+                if inject_spec.get("lls_truth_boost") is not None:
+                    truth_pack = apply_lls_truth_boost(
+                        truth_pack, float(inject_spec["lls_truth_boost"]))
+                if inject_spec.get("subdla_truth_boost") is not None:
+                    truth_pack = apply_subdla_truth_boost(
+                        truth_pack, float(inject_spec["subdla_truth_boost"]))
+                mock_legs, info = make_leg_a_legmock(
+                    ctx, fid_core, truth_pack, k_mock,
+                    inject_metal_misspec=inject_spec.get("metal_misspec"),
+                    inject_resolution=inject_spec.get("resolution"))
+            else:
+                mock_legs, info = make_leg_a_legmock(ctx, fid_core, truth_pack, k_mock)
+            core_per_leg = fid_core
+            sim = "leg_a_prior"
+        else:
+            sim = sims[m % len(sims)]
+            # the mock TRUTH is built at the SAME resolution as the forward: if ctx.mf is set, the
+            # gate invariant applies the MF correction to BOTH (it cancels in the closure ΔP).
+            truth_sim = make_truth_from_sim(d, sim, fold=fold, mf=ctx.mf)
+            k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, m), 2)
+            mock_legs, truth_pack, info = make_legb_mock(ctx, truth_sim, k_mock)
+            core_per_leg = _mock_core_per_leg(ctx, truth_sim)
 
         base_seed = int(jax.random.randint(k_nuts, (), 0, 2**31 - 1))
         ta_sched = (0.9,) + tuple(DIVERGENCE_RETRY_TARGET_ACCEPT)
@@ -1527,18 +2086,29 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
             truth_vec = np.concatenate([truth_vec, _hcd_latent_truths_2d(truth_pack["alpha_hcd"], ctx)])
         elif getattr(ctx, "hierarchical_hcd", False):        # align with the appended A_hcd/r columns
             truth_vec = np.concatenate([truth_vec, _hcd_latent_truths(truth_pack["alpha_hcd"])])
+        if getattr(ctx, "sample_metals", False):             # align with _draws_matrix's LAST a_SiIII col
+            truth_vec = np.concatenate([truth_vec, [float(truth_pack.get("a_siiii", 0.0))]])
 
         # loglik of the truth + draws on the SAME mock data (Modrak rank).
+        # Z-RESOLVED-ALPHA FIX (2026-06-19): use the z-RESOLVED truth alpha (truth_pack
+        # ['alpha_hcd_z'], (nZg,3)) — NOT the z-FLAT pivot truth_pack['alpha_hcd'] (3,). The mock
+        # truth-on-leg is z-resolved (per-z sim P1D / per-z prior draw), so re-scoring the truth
+        # loglik with a z-flat alpha mismatched the data and shifted ll_true → a spurious
+        # loglik-rank. Both the leg-A self-draw (draw_leg_a_leg_truth) and the held-out path
+        # (make_legb_mock) now carry alpha_hcd_z. require_zresolved=True fails loudly on a regression.
+        _a_si_true = float(truth_pack.get("a_siiii", 0.0))
         ll_true = float(_data_loglik_legcore(
             ctx, jnp.asarray(truth_pack["theta9"]),
             jnp.asarray(truth_pack["tau0_global"]),
-            jnp.asarray(truth_pack["alpha_hcd"]), mock_legs, core_per_leg))
+            jnp.asarray(truth_pack["alpha_hcd_z"]), mock_legs, core_per_leg,
+            a_siiii=_a_si_true, require_zresolved=True))
         ll_draws = _loglik_of_draws(ctx, mock_legs, core_per_leg, samples, kept_global)
         # thin ll_draws by the SAME step.
         ll_draws_t = ll_draws[::step][:L]
 
         per_mock.append(dict(sim=sim, truth_vec=truth_vec, draws=draws_t, L=L,
                              ll_true=ll_true, ll_draws=ll_draws_t,
+                             names=_packed_names_for(samples, kept_global),
                              kept_global=kept_global, dropped=info["dropped"],
                              n_div=n_div))
         if verbose:
@@ -1552,16 +2122,27 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
 
 def _loglik_of_draws(ctx, mock_legs, core_per_leg, samples, kept_global):
     """log_lik(draw, mock) for each raw draw — the Modrak loglik rank (uses the FULL τ₀ vec,
-    not just kept z; the dropped z carry no data so they don't affect the likelihood)."""
-    theta = jnp.asarray(np.asarray(samples["theta_unit"]))      # (L,9)
-    tau0 = jnp.asarray(np.asarray(samples["tau0_vec"]))         # (L,nZ)
-    a = jnp.asarray(np.stack([np.asarray(samples["alpha_lls"]),
-                              np.asarray(samples["alpha_subdla"]),
-                              np.asarray(samples["alpha_dla"])], axis=1))  # (L,3)
+    not just kept z; the dropped z carry no data so they don't affect the likelihood).
 
-    def one(th, t0, al):
-        return _data_loglik_legcore(ctx, th, t0, al, mock_legs, core_per_leg)
-    return np.asarray(jax.vmap(one)(theta, tau0, a))
+    Z-RESOLVED-ALPHA FIX (2026-06-19): this used to REBUILD a z-FLAT (L,3) pivot alpha from
+    samples['alpha_lls'/'alpha_subdla'/'alpha_dla'] and pass it to _data_loglik_legcore, which
+    silently broadcasts it to every z — but the DEPLOYED forward (_legb_model) and the mock TRUTH
+    are z-RESOLVED (per-z w_c rises ~3.5× over z), so the z-flat re-scoring produced a SPURIOUS
+    z-structured residual that contaminated the reported SBC loglik-rank gate. We now use the
+    z-resolved ``samples['alpha_hcd_z']`` (L,nZg,3) deterministic — EXACTLY as
+    scripts/run_real_fit.py::_loglik_chain — and pass require_zresolved=True so a regression to a
+    z-flat alpha here fails LOUDLY (the deployed mean / param-rank SBC were always clean; only this
+    loglik-rank path was contaminated)."""
+    theta = jnp.asarray(np.asarray(samples["theta_unit"]))      # (L,9)
+    tau0 = jnp.asarray(np.asarray(samples["tau0_vec"]))         # (L,nZg)
+    a_z = jnp.asarray(np.asarray(samples["alpha_hcd_z"]))       # (L,nZg,3) Z-RESOLVED (the fix)
+    a_si = (jnp.asarray(np.asarray(samples["a_SiIII"])) if "a_SiIII" in samples
+            else jnp.zeros(theta.shape[0]))
+
+    def one(th, t0, al, asi):
+        return _data_loglik_legcore(ctx, th, t0, al, mock_legs, core_per_leg,
+                                    a_siiii=asi, require_zresolved=True)
+    return np.asarray(jax.vmap(one)(theta, tau0, a_z, a_si))
 
 
 def _aggregate_legb(per_mock, *, q_levels):

@@ -7,7 +7,7 @@ on the cache's own 172 angular-k grid (the sim/closure path); THIS module binds 
 emulator forward model to the OBSERVED survey grids (DESI 85 angular-k × 12 z, KS 13
 angular-k × 14 z), applying the published cuts + covariances.
 
-Contract (per ``docs/superpowers/2026-06-05-desi-dr1-p1d-usage.md``):
+Contract (per ``hcd_priya_notes/docs/superpowers/2026-06-05-desi-dr1-p1d-usage.md``):
 
   per leg ``DataLeg``:  z (Nz,), k (Nz*Nk flat or (Nz,Nk)), P_data (N,), C_data (N,N),
                         R_z (Nz,) resolution, plus systematic-model flags.
@@ -41,6 +41,10 @@ assert jax.config.read("jax_enable_x64"), \
     "x64 must be on (import hcd_analysis.emulator before jax)"
 
 # --- physical constants -------------------------------------------------------
+# res_corr AMPLITUDE nuisance pivot (Task 1.3): α(z) = α₀·((1+z)/(1+Z_PIVOT))^s. The
+# multi-fidelity res_corr (HF→n512 particle-convergence factor) amplitude is marginalized
+# FORWARD-ONLY at the chokepoint ``_mf_corr_on_cache`` via this z-slope around z=3.
+Z_PIVOT = 3.0
 C_KMS = 299792.458            # speed of light [km/s]
 LAMBDA_LYA = 1215.67          # Lyα rest wavelength [Å]
 LAMBDA_SiIII = 1206.50        # SiIII line [Å]
@@ -57,11 +61,70 @@ DESI_PIXEL_ANGSTROM = 0.8
 # The emulator cache k-grid Nyquist (angular k, s/km == 1/Å in the velocity-equiv
 # convention the data + cache share). The emulator cannot predict above this.
 CACHE_KMAX = 0.069
-# KS: drop the first four k-bins (Karaçaylı 2306.06316 Fig 11 — they underestimate the
-# error). The fourth bin centre is 0.0157527, so keep k > 0.0158.
-KS_DROP_KMAX = 0.0158
+# KS keeps its FULL native k-range from klow≈0.0055 s/km. The Karaçaylı 2306.06316 Fig-11
+# "first-4-bins error underestimate" caution is MISLEADING (PI/KS-author decision, reaffirmed
+# repeatedly) — those low-k bins are ALWAYS kept. There is NO low-k KS drop knob.
 # DESI continuum-floor low-k cut + half-Nyquist resolution high-k cut (usage doc §"cuts").
 DESI_KMIN = 1e-3
+
+# ============================================================================ #
+#  COVARIANCE-CORRECTNESS FIXES (2026-06-18, low-k n_s reliability arc).
+#  Both WIDEN the low-k covariance to match the published DESI DR1 cosmology
+#  analysis (Chaves-Montero arXiv:2601.21432) + the eBOSS PRIYA analysis
+#  (Fernandez+2024 arXiv:2309.03943). Neither de-biases the forward; they soften
+#  the +5.5σ low-k n_s pull computed against the currently-deployed covariance.
+#  Both are ENV-GATED and REVERSIBLE (unset → byte-identical to the deployed path).
+#  See hcd_priya_notes/docs/superpowers/2026-06-18-{desi-p1d-lowk-data-reliability,
+#  cosmic-variance-floor-lowk}.md (notes repo).
+# ----------------------------------------------------------------------------#
+#  Fix 1 — DESI SNR>3 measurement + covariance (the cosmology-paper baseline).
+#  The Chaves-Montero DR1 cosmology fit uses the SNR>3 subsample (62,807 QSO) with
+#  its OWN full 1020×1020 covariance + a +5% STAT-uncertainty inflation at all (k,z)
+#  ("possible percent-level large-scale biases", CCD image sims). Our default loads
+#  the SNR>1 baseline. Set HCD_DESI_SNR3=1 to swap to the SNR>3 npz; the +5% stat
+#  inflation rides along with it (on the SEPARATE cov_stat block: cov += (1.05²−1)·cov_stat).
+DESI_SNR3_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d_snr3.npz"
+DESI_SNR3_STAT_INFLATE = 1.05         # +5% on the STAT uncertainty (paper baseline)
+
+
+def _env_flag(name):
+    """True iff the env var ``name`` is set to a truthy token (1/true/yes/on)."""
+    import os
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# ----------------------------------------------------------------------------#
+#  Fix 2 — restore the ~2% finite-box cosmic-variance (σ_CV) floor at low k.
+#  Fernandez+2024 (eBOSS PRIYA, Eq 3.1) carries K = K_BOSS + σ_GP σ_GPᵀ + σ_CV σ_CVᵀ;
+#  σ_CV ≈ 2% of P, significant ONLY at k<2.5e-3 s/km (the finite 120 Mpc/h box),
+#  negligible at high k. Our deployed C_total drops it. Set HCD_CV_FLOOR=1 to ADD it
+#  back as an additive term scaled by the data power: var += (f_CV(k)·P_data)².
+#  f_CV(k) = CV_FLOOR_FRAC for k ≤ CV_FLOOR_K_FULL, tapering linearly to 0 at
+#  CV_FLOOR_K_ZERO (so it is a smooth low-k-only floor, off above ~3e-3). DIAGONAL by
+#  default (HCD_CV_FLOOR_RANK1=1 makes it Fernandez's fully-correlated rank-1 σ_CV σ_CVᵀ).
+CV_FLOOR_FRAC = 0.02                  # 2% of P (Fernandez/PRIYA large-scale CV level)
+CV_FLOOR_K_FULL = 2.5e-3              # full amplitude at k ≤ this (s/km)
+CV_FLOOR_K_ZERO = 3.0e-3              # tapered to 0 by this k (negligible above)
+
+
+def _cv_floor_frac(k):
+    """The fractional σ_CV(k): CV_FLOOR_FRAC at k≤K_FULL, linearly →0 at K_ZERO, 0 above."""
+    k = np.asarray(k, float)
+    t = (CV_FLOOR_K_ZERO - k) / (CV_FLOOR_K_ZERO - CV_FLOOR_K_FULL)   # 1 at K_FULL, 0 at K_ZERO
+    return CV_FLOOR_FRAC * np.clip(t, 0.0, 1.0)
+
+
+def _add_cv_floor(C_data, k, P_data, *, rank1=False):
+    """Add the σ_CV low-k floor to a leg's data covariance (Fix 2). Returns a NEW array.
+    DIAGONAL: C += diag((f_CV·P)²).  RANK1 (Fernandez Eq 3.1 form): C += s sᵀ, s=f_CV·P
+    (fully correlated across the low-k rows). Pure numpy, host-side (C_data is fixed)."""
+    s = _cv_floor_frac(k) * np.asarray(P_data, float)        # (N,) absolute σ_CV per row
+    C = np.asarray(C_data, float).copy()
+    if rank1:
+        C += np.outer(s, s)
+    else:
+        C[np.diag_indices_from(C)] += s ** 2
+    return C
 
 
 # ============================================================================ #
@@ -143,7 +206,8 @@ def desi_resolution_R(z):
 # ============================================================================ #
 def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
                   *, z_lo=2.2, z_hi=4.2, k_min=DESI_KMIN, metals_on=True,
-                  resolution_on=False, add_cov_diag_inflation=True, mf_floor_on=False):
+                  resolution_on=False, add_cov_diag_inflation=True, mf_floor_on=False,
+                  use_snr3=None, snr3_stat_inflate=None, add_cv_floor=None):
     """Load DESI DR1 P1D → a post-cut ``DataLeg`` (usage doc §"Covariance + cuts").
 
     Cuts (z-major flat layout, ``row_is_zmajor=True``):
@@ -155,14 +219,42 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
     metals_on=True (DESI forward-models SiIII/SiII per the usage doc); resolution_on=False
     by default (the residual resolution mode stays in C — usage doc option (a); the template
     knob is offered but OFF). The data is DECONVOLVED → compare theory directly (no window).
+
+    COVARIANCE-CORRECTNESS FIXES (2026-06-18, REVERSIBLE, env-gated; see the module
+    constants block). All three default to ``None`` → read the corresponding env flag, so
+    UNSET env ⇒ byte-identical to the deployed SNR>1 path (back-compat); an explicit
+    True/False overrides the env for tests.
+      * ``use_snr3``         (env ``HCD_DESI_SNR3``): load the SNR>3 npz (``DESI_SNR3_NPZ``,
+        the Chaves-Montero cosmology baseline, 62,807 QSO) + its OWN covariance instead of
+        the SNR>1 baseline. Same z/k grid, larger low-k errors. Auto-applies the +5% stat
+        inflation below unless ``snr3_stat_inflate`` is set otherwise.
+      * ``snr3_stat_inflate`` (default → ``DESI_SNR3_STAT_INFLATE``=1.05 when SNR>3 is on):
+        inflate the STAT uncertainty by this factor (paper's +5% for large-scale biases):
+        ``cov += (f²−1)·cov_stat``. Only applied when SNR>3 is active.
+      * ``add_cv_floor``     (env ``HCD_CV_FLOOR``): add the Fernandez σ_CV ~2% finite-box
+        floor to the low-k rows (``_add_cv_floor``). Diagonal unless ``HCD_CV_FLOOR_RANK1``.
     """
+    use_snr3 = _env_flag("HCD_DESI_SNR3") if use_snr3 is None else bool(use_snr3)
+    add_cv_floor = _env_flag("HCD_CV_FLOOR") if add_cv_floor is None else bool(add_cv_floor)
+    if use_snr3:
+        # Fix 1: the cosmology-paper baseline (SNR>3 measurement + its own covariance).
+        npz_path = DESI_SNR3_NPZ
     d = np.load(npz_path, allow_pickle=True)
     z = np.asarray(d["z"], float)              # (1020,) z-major
     k = np.asarray(d["k"], float)              # (1020,) angular k
     P = np.asarray(d["plya"], float)
     cov = np.asarray(d["cov"], float).copy()   # full STAT+SYST
+    if use_snr3:
+        # Fix 1: +5% STAT-uncertainty inflation (paper's large-scale-bias allowance), applied
+        # on the SEPARATE stat block so the syst part is untouched: cov += (f²−1)·cov_stat.
+        f = DESI_SNR3_STAT_INFLATE if snr3_stat_inflate is None else float(snr3_stat_inflate)
+        cov = cov + (f ** 2 - 1.0) * np.asarray(d["cov_stat"], float)
     if add_cov_diag_inflation:
         cov[np.diag_indices_from(cov)] += np.asarray(d["cov_diag_inflation"], float)
+    if add_cv_floor:
+        # Fix 2: the σ_CV ~2% finite-box floor on the low-k rows (full-grid; the k-taper
+        # zeroes it above ~3e-3, and the post-cut sub-selection keeps only the kept rows).
+        cov = _add_cv_floor(cov, k, P, rank1=_env_flag("HCD_CV_FLOOR_RANK1"))
 
     # z-dependent k cut: k < 0.5π/R_z(z) with R_z from the DESI resolution proxy.
     R_row = desi_resolution_R(z)
@@ -176,23 +268,22 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
 
 
 def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
-                *, z_lo=2.4, z_hi=4.6, drop_first4=False, k_max=CACHE_KMAX,
+                *, z_lo=2.4, z_hi=4.6, k_max=CACHE_KMAX,
                 metals_on=False, resolution_on=False, mf_floor_on=True):
     """Load KODIAQ-SQUAD conservative-mode P1D → a post-cut ``DataLeg``.
 
     Format: pipe-separated ``final-conservative-p1d-karacayli_etal2021.txt`` (z|k|P|e) +
     the 182×182 ``final-conservative-covariance-karacayli_etal2021.txt`` (z-major,
     z∈[2.0,4.6], 13 k-bins/z). Cuts: keep the FULL native k-range from **klow=0.0055 s/km**
-    (``drop_first4=False`` default — PI/KS-author decision 2026-06-09: the Karaçaylı 2306.06316
-    Fig-11 "first-4-bins error underestimate" caution is MISLEADING; keep those bins) + cut
-    k ≤ k_max=0.069 (the emulator Nyquist; the analysis caps k<0.06). ``drop_first4=True`` is
-    available as opt-in.
+    (PI/KS-author decision 2026-06-09, reaffirmed repeatedly: the Karaçaylı 2306.06316 Fig-11
+    "first-4-bins error underestimate" caution is MISLEADING — those low-k bins are ALWAYS kept,
+    there is NO low-k KS drop) + cut k ≤ k_max=0.069 (the emulator Nyquist; the analysis caps k<0.06).
     ``z_lo`` defaults to **2.4** (drops the z=2.0+2.2 KS bins, which carried ~86% of a −0.65σ
     coherent n_s closure bias; dropping z<2.4 removes it → +0.04σ). z=2.4 is the MINIMAL
     closure-clean cut; low-z KS P1D is compromised by DLA-finder incompleteness, and the
     published KODIAQ-SQUAD analysis uses the more conservative z<2.8 — set ``z_lo=2.8`` for that
     (opt-in). PI decision 2026-06-08 = 2.4 default.
-    See docs/superpowers/plans/2026-06-08-ns-bias-rootcause-diagnostics-plan.md.
+    See hcd_priya_notes/docs/superpowers/plans/2026-06-08-ns-bias-rootcause-diagnostics-plan.md.
 
     metals_on=False / resolution_on=False by default: KS conservative mode already SUBTRACTS
     metals/continuum/resolution + inflates its covariance, so re-applying the SiIII/resolution
@@ -204,8 +295,6 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
     cov = np.loadtxt(cov_file)                  # (182,182) z-major
 
     keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k <= k_max + 1e-9)
-    if drop_first4:
-        keep &= (k > KS_DROP_KMAX)
 
     # KS has no resolution proxy in this file; reuse the DESI-style proxy as a placeholder
     # for the (default-OFF) resolution knob.  LYA-CONSULT: KS resolution is OFF by default
@@ -219,7 +308,7 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
 def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
                    *, z_lo=2.2, z_hi=4.6, k_min=0.0, k_max=CACHE_KMAX,
                    metals_on=True, resolution_on=False, mf_floor_on=False,
-                   dla_forward_frac=EBOSS_DLA_FORWARD_FRAC):
+                   dla_forward_frac=EBOSS_DLA_FORWARD_FRAC, add_cv_floor=None):
     """Load eBOSS DR14 P1D (Chabanier+2019, 1812.03554) → a post-cut ``DataLeg`` (block-diag cov).
 
     Format: the npz from ``scripts/convert_eboss_dr14_p1d.py`` (z, k, plya, sigma, cov, syst_*).
@@ -240,11 +329,16 @@ def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
     eBOSS is a LARGE-scale leg below the high-k floor/emucoh regime (emucoh band k≥0.01 is zero at the
     A_p pivot k≈0.009). resolution_on=False — eBOSS resolution syst (~2e-4 in-band) stays in C_data.
     """
+    add_cv_floor = _env_flag("HCD_CV_FLOOR") if add_cv_floor is None else bool(add_cv_floor)
     d = np.load(npz_path, allow_pickle=True)
     z = np.asarray(d["z"], float)              # (455,) z-major
     k = np.asarray(d["k"], float)              # (455,) angular k
     P = np.asarray(d["plya"], float)
     cov = np.asarray(d["cov"], float).copy()   # (455,455) block-diag STAT+SYST
+    if add_cv_floor:
+        # Fix 2 (2026-06-18): the Fernandez+2024 σ_CV ~2% finite-box floor at k<2.5e-3 — this
+        # is the eBOSS PRIYA analysis it was MEASURED for. ENV-gated/reversible (HCD_CV_FLOOR).
+        cov = _add_cv_floor(cov, k, P, rank1=_env_flag("HCD_CV_FLOOR_RANK1"))
 
     keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k > k_min) & (k <= k_max + 1e-9)
 
@@ -357,24 +451,38 @@ def _resolution_factor(k, R_z, *, b_res=0.0):
 #  built — NOT here. Wiring it into this binding would diverge from the certified gate
 #  path. (The MultiFidelity object also carries the dN/dX/CDDF tables for that use.)
 # ============================================================================ #
-def _mf_corr_on_cache(mf, theta9, z_unit, tau0):
-    """Per-class MF log-correction (4, Kc) on the cache grid: ``g + log res_corr``.
+def _mf_corr_on_cache(mf, theta9, z_unit, tau0, alpha_res=None):
+    """Per-class MF log-correction (4, Kc) on the cache grid: ``g + α(z)·log res_corr``.
 
     Mirror of ``diag_emu_bias_allfolds_mf.mf_corr_on_cache``. ``mf.eval_logk`` is the
     cache log-k grid, so ``g = mf.g(x, τ₀)`` (== log_rho + resolved FixedMeanHead) is
     the exact production MF correction on the cache k-grid, and ``log res_corr(z)`` is
     the fixed particle-convergence factor (broadcast over the 4 classes). θ-blind by
     construction (g reads cond[9]=z_unit, cond[10]=τ₀ only); differentiable in (θ9, τ₀).
+
+    ``alpha_res`` (Task 1.3, FORWARD-ONLY marginalization of the res_corr amplitude):
+    a ``(alpha0, s)`` tuple ⇒ scale ``log res_corr`` by the scalar (per-z)
+    ``α(z) = alpha0·((1+z)/(1+Z_PIVOT))^s`` before adding. ``None`` (the DEFAULT) ⇒
+    α≡1 ⇒ this returns ``g + log res_corr`` BIT-IDENTICALLY (the multiply is skipped, so
+    the Task-1.2 MF golden is byte-exact). ``(1.0, 0.0)`` is the explicit no-op.
     """
     x = jnp.concatenate([jnp.asarray(theta9), jnp.atleast_1d(z_unit)])   # (10,)
     g = mf.g(x, tau0)                                                    # (4, Kc)
     z_phys = z_unit * (Z_LIMITS[1] - Z_LIMITS[0]) + Z_LIMITS[0]
     log_rc = jnp.log(mf.res_corr(z_phys))[None, :]                       # (1, Kc) bcast
-    return g + log_rc                                                    # (4, Kc) additive
+    if alpha_res is None:
+        return g + log_rc                                               # (4, Kc) byte-exact no-op
+    alpha0, s = alpha_res
+    alpha_z = alpha0 * ((1.0 + z_phys) / (1.0 + Z_PIVOT)) ** s          # scalar (per z)
+    return g + alpha_z * log_rc                                         # (4, Kc) additive
 
 
-def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_core):
+def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_core,
+                      alpha_res=None):
     """P_obs (Kc,) through the MF forward — mirror of the gate's ``predict_P_obs_mf``.
+
+    ``alpha_res`` (Task 1.3): threaded FORWARD-ONLY into ``_mf_corr_on_cache`` to scale the
+    res_corr amplitude by ``α(z)``; ``None`` (default) ⇒ α≡1 ⇒ byte-exact back-compat.
 
     The per-class LF P_filt is multiplied by ``exp(g + log res_corr)`` (the fixed,
     θ-blind resolution factor), then the SAME clean+excess HCD combination as
@@ -385,7 +493,8 @@ def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_
     source; the caller passes the SAME frozen backbone object as both ``model`` and
     ``mf.lf_model``. Differentiable in (θ9, τ₀, α)."""
     P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)       # (4,Kc) LF
-    corr = jnp.exp(_mf_corr_on_cache(mf, theta9, z_unit, tau0))          # (4,Kc) MF factor
+    corr = jnp.exp(_mf_corr_on_cache(mf, theta9, z_unit, tau0,
+                                     alpha_res=alpha_res))               # (4,Kc) MF factor
     P_filt_mf = P_filt * corr                                            # corrected per class
     P_clean = P_filt_mf[0]
     excess = _excess_from_P_filt(P_filt_mf, dla_core)                    # (3,Kc)
@@ -395,7 +504,7 @@ def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_
 # ============================================================================ #
 #  MF C_emu floor (LF→HR generalization + n_s-edge extrapolation), T4/T5b.
 #
-#  The spec (docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md) sizes a
+#  The spec (hcd_priya_notes/docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md) sizes a
 #  z-resolved, per-band ADDITIVE diagonal variance term that inflates C_emu on the
 #  SMALL-SCALE leg(s) to cover the residual the FIXED θ-blind MF correction leaves
 #  AFTER it is applied (the LF→HR generalization error), plus a SEPARATE n_s-edge
@@ -669,7 +778,8 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                          rho_zb=None, mf=None, mf_floor=None,
                          mf_shape_cov=None, mf_shape_infl=1.0,
                          mf_emucoh_cov=None, mf_emucoh_infl=1.0,
-                         mf_emucoh_offdiag_only=False):
+                         mf_emucoh_offdiag_only=False, alpha_res=None,
+                         require_zresolved=False):
     """Bind the emulator forward model to ONE leg's grid → flat (P_model (N,), C_total (N,N)).
 
     For each z in ``leg.z``:
@@ -710,19 +820,47 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     or a high-k DESI row above the LF Nyquist), the LF→HR generalization floor + the
     n_s-edge extrapolation budget are ADDED to the C_emu diagonal in variance units:
     ``emu_var(k,z) += (σ_floor(z,band(k))·P_obs)² + (σ_edge(z,band(k);ns)·P_obs)²``
-    (spec docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md §2.3/§4.2). The
+    (spec hcd_priya_notes/docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md §2.3/§4.2). The
     floor is a FIXED θ-blind data-side table; the edge term's ns-dependence is
     stop_gradient'd → it widens the posterior, it cannot bias the MAP. The floor is applied
     on the leg z's via 1-D interp/clamp of σ_floor(z,·); the legs only reach z≤4.6 so the
     z>4.6 cells (incl. the flagged z=5.4 spike) are NEVER indexed. With ``mf_floor=None``
     (or on a leg with ``mf_floor_on=False``, or ``mf=None``) C_total is the UNCHANGED LF
-    path (byte-identical, back-compat)."""
+    path (byte-identical, back-compat).
+
+    ``alpha_res`` (opt-in, Task 1.3, default None → byte-identical back-compat): a
+    ``(alpha0, s)`` tuple marginalizing the multi-fidelity res_corr AMPLITUDE
+    FORWARD-ONLY — ``log res_corr → α(z)·log res_corr`` with
+    ``α(z) = alpha0·((1+z)/(1+Z_PIVOT))^s`` (Z_PIVOT=3.0), threaded into
+    ``_predict_P_obs_mf → _mf_corr_on_cache``. Affects P_model ONLY (the forward), not
+    C_total. ``None`` (and ``(1.0, 0.0)``) ⇒ α≡1 ⇒ the MF golden is byte-exact. Only fires
+    through the MF forward (``mf is not None``).
+
+    ``require_zresolved`` (opt-in, default False → byte-identical): when True, ASSERT
+    ``alpha_hcd`` is z-RESOLVED (ndim==2, (n_z,3)) — a (3,) z-flat alpha raises. The DEPLOYED
+    ``_legb_model`` + the SBC re-scoring (``_loglik_of_draws``/``ll_true``) set this so a future
+    z-flat regression on a load-bearing path fails LOUDLY instead of producing a quiet
+    z-structured residual (the recurring z-flat-alpha bug class). Default False keeps the legacy
+    (3,)-broadcast back-compat for the diagnostic/figure callers that pass it intentionally."""
     cache_k = jnp.asarray(cache_k)
     k_leg = jnp.asarray(leg.k)
     z_idx = np.asarray(leg.z_idx)
     R_z = jnp.asarray(leg.R_z)
     tau0_vec = jnp.asarray(tau0_vec)
     alpha_hcd = jnp.asarray(alpha_hcd)   # (3,) broadcast to all z, OR (n_z,3) per-z incidence
+    # GUARD (opt-in, default OFF → byte-identical back-compat): a (3,) z-FLAT alpha is silently
+    # broadcast to every z below (alpha_hcd.ndim==1 → the same incidence at all z). That is a
+    # recurring bug-class in the NON-deployed re-scoring paths (SBC loglik-rank, the walkthrough
+    # figure): the mock TRUTH is z-RESOLVED (per-z w_c rises ~3.5× over z) but a z-flat forward
+    # predicts a spurious z-ramp. The DEPLOYED _legb_model + real-fit pass the z-resolved
+    # alpha_hcd_z (n_z,3); they set require_zresolved=True so any future z-flat regression on the
+    # load-bearing paths fails LOUDLY here instead of producing quiet z-structured residuals.
+    if require_zresolved:
+        assert alpha_hcd.ndim == 2, (
+            f"predict_P_obs_on_leg(require_zresolved=True): alpha_hcd must be z-RESOLVED "
+            f"(n_z,3), got ndim={alpha_hcd.ndim} shape={tuple(alpha_hcd.shape)}. A (3,) z-flat "
+            f"alpha would be silently broadcast to all z and produce a spurious z-ramp vs the "
+            f"z-resolved truth (closure_legb._loglik_of_draws/ll_true regression).")
     # PER-LEG DLA-forward scaling (§0c): the sampled α_DLA's DLA-excess contribution is scaled by
     # leg.dla_forward_frac (DESI 1.0 → full residual; KS 0.0 → the forward DLA term is 0, matching
     # the 0% KS closure target). We fold the per-leg fraction into the DLA component of α so BOTH
@@ -769,7 +907,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
             P_cache = predict_P_obs(model, theta9, z_unit, tau0, alpha_z, pf_stats, dla_core)
         else:
             P_cache = _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_z,
-                                        pf_stats, dla_core)
+                                        pf_stats, dla_core, alpha_res=alpha_res)
         # (3) interp to the leg's k (bin centres); model is smooth → linear interp.
         P_z = jnp.interp(k_sub, cache_k, P_cache)
         # (2) forward-model nuisances (gated; default OFF → factor ≡ 1)

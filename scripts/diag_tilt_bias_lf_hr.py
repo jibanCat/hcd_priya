@@ -23,7 +23,7 @@ and the HR τ₀ caches, fold-0 LOSO. Three pieces:
      fiducial cosmology+z. δ = the deployed log-error (logP̂ − logP_true) on
      held-out sims. C = a DESI-DR1-like diagonal per-mode covariance (per-mode %
      error on the clean channel; the HCD channels carry the 15% DLA systematic
-     floor from docs/superpowers/2026-06-01-hcd-marginalization-literature.md,
+     floor from hcd_priya_notes/docs/superpowers/2026-06-01-hcd-marginalization-literature.md,
      Karaçaylı+2025). Bias δθ_i = [(JᵀC⁻¹J)⁻¹JᵀC⁻¹δ]_i in units of the Fisher
      posterior σ_i = sqrt(diag (JᵀC⁻¹J)⁻¹). Reported for ALL 9 params, focus on
      ns & Ap, for LF and HR separately over their own k-ranges.
@@ -66,7 +66,7 @@ KODIAQ_BAND = (0.07, 0.20)        # s/km
 #   clean P1D: 3% per-mode statistical+continuum error (DESI DR1 ~few-% per (k,z)).
 #   HCD channels (LLS/subDLA/DLA): the 15% DLA systematic FLOOR
 #     (Karaçaylı+2025, σ_DLA = 0.15·r_DLA·P_smooth; see
-#      docs/superpowers/2026-06-01-hcd-marginalization-literature.md L54).
+#      hcd_priya_notes/docs/superpowers/2026-06-01-hcd-marginalization-literature.md L54).
 SIGMA_FRAC = {"clean": 0.03, "LLS": 0.15, "subDLA": 0.15, "DLA": 0.15}
 
 CACHES = {

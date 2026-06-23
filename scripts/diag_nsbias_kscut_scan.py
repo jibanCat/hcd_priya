@@ -3,9 +3,9 @@
 FORWARD-ONLY (Fisher MAP-shift, no NUTS, no retraining). REUSES `emu_bias_one_sim` from
 scripts/diag_emu_bias_allfolds.py verbatim (imported, not re-derived). The ONLY thing that
 varies between configs is the `ks_kwargs` threaded into `build_legb_ctx` ->
-`data_likelihood.load_ks_leg(..., z_lo=Z, z_hi=4.6, drop_first4=True, k_max=K)`. DESI is
-untouched in every config; the KS covariance is sliced by the SAME `keep` mask so dropped
-bins are removed cleanly. Physics is otherwise IDENTICAL to the headline -0.646sigma anchor
+`data_likelihood.load_ks_leg(..., z_lo=Z, z_hi=4.6, k_max=K)`. KS ALWAYS keeps its full
+native k-range from klow≈0.0055 (no low-k drop). DESI is untouched in every config; the KS
+covariance is sliced by the SAME `keep` mask so cut bins are removed cleanly. Physics is otherwise IDENTICAL to the headline -0.646sigma anchor
 (DLA masking, sigma_zb/rho_zb/cemu_inflate, alpha_centres -- all carried by `ctx`).
 
 Two studies:

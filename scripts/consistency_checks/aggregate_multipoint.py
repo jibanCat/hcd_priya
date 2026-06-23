@@ -2,10 +2,10 @@
   - a summary table (CSV-style printed to stdout + written to docs/figs/),
   - a single-figure overview: ratio bands per (sim, z) overlaid vs k.
 
-Reads:  docs/superpowers/figs/multipoint/sim{idx}_snap{N}.npz  (12 files)
+Reads:  hcd_priya_notes/docs/superpowers/figs/multipoint/sim{idx}_snap{N}.npz  (12 files)
 Writes:
-  docs/superpowers/figs/2026-05-20-priya-p1d-multipoint-summary.csv
-  docs/superpowers/figs/2026-05-20-priya-p1d-multipoint-ratios.png
+  hcd_priya_notes/docs/superpowers/figs/2026-05-20-priya-p1d-multipoint-summary.csv
+  hcd_priya_notes/docs/superpowers/figs/2026-05-20-priya-p1d-multipoint-ratios.png
 """
 from pathlib import Path
 import csv

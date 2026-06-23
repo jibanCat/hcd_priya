@@ -1,61 +1,434 @@
-# HCD-marginalized Lyα P1D emulator (`hcd_analysis.emulator`)
+# HCD-marginalised Lyα P1D emulator (`hcd_analysis.emulator`)
 
-A differentiable JAX/Equinox emulator of the **per-class 1D Lyα flux power spectrum**
-`P_filt(θ, z, τ₀)` for HCD-marginalized cosmological inference. It mirrors the PRIYA
-(Ho 2023/2024) parameter contract so the cosmology community drives it like PRIYA, and it
-is end-to-end autodiff so its likelihood (`inference.log_lik_multiz` /
-`log_posterior_single_z`) is ready to wrap in a gradient-based sampler (NUTS/numpyro,
-blackjax) or a PRIYA-style Cobaya adapter. **The sampler/Cobaya wrappers are forthcoming
-(Phase-C T4) — not yet shipped; today you call the differentiable likelihood directly.**
+This is the emulator at the centre of the Lyman-α cosmology analysis. The document describes what
+it does, why it is built the way it is, and how to **use the deployed ensemble** and how to
+**rebuild it from scratch**.
 
-> **TL;DR usage** (standalone-runnable; builds the inputs from a cache row)
-> ```python
-> import hcd_analysis.emulator                        # enables JAX float64 on import
-> import jax.numpy as jnp
-> from hcd_analysis.emulator import train as T
-> from hcd_analysis.emulator.data import load_cache
-> from hcd_analysis.emulator.predict import predict_P_obs, predict_P_filt
->
-> model, meta, norm = T.load_checkpoint("checkpoints/final_fold0")
-> pf = norm["P_filt"]                                  # structured P_filt norm dict (mu/sig_marg, sig_cosmo)
->
-> d   = load_cache("hcd_analysis/_emulator_data/observables_tau0_lf.h5")
-> row = 0                                              # or construct your own inputs — see §4
-> theta9 = jnp.asarray(d["params_unit"][row])          # (9,) UNIT cube; else (θ_phys−lo)/(hi−lo)
-> z_unit = float(d["x"][row, 9])                       # = (z − 2.0)/3.4
-> tau0   = float(d["tau0"][row])                       # = −ln(target_F)
-> alpha  = jnp.asarray(d["w_c_cache"][row, 1:])        # (3,) per-class incidence (LLS,subDLA,DLA)
-> dla_core = jnp.asarray(d["delta"][row, 2])           # (K,) DLA-core add-back
->
-> P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf)                  # (4,K) clean,LLS,subDLA,DLA
-> P_obs  = predict_P_obs(model, theta9, z_unit, tau0, alpha, pf, dla_core)  # (K,)  total
-> ```
-> All emulator inputs are UNIT-CUBE. `predict_P_obs`/`predict_excess` are differentiable in
-> `(θ9, τ₀, α)`; `predict_P_filt` in `(θ9, τ₀)`.
+> **New here? Read the [Overview](#overview) first** (it says, in plain terms, what the emulator is
+> and why it exists), then come back for the provenance details below. The Stamp and the
+> deployed-object note are bookkeeping aimed at a returning expert, not a starting point; every term
+> in them is defined later in the README.
+
+> **Stamp.** Documents the emulator as of code commit **da9e237** (`HEAD` = **da9e237**;
+> walkthrough/figures). The **deployed** checkpoints (`checkpoints/final_prod_seed{0..4}`) were
+> trained at git_sha **5f51fc6** (stamped in each `.meta.json`). Dated **2026-06-21**.
+
+The **deployed production emulator** is the 5-member all-sims ensemble
+`checkpoints/final_prod_seed{0..4}`, the object the real fit and the production SBC actually load.
+It is **trained on every simulation** (no hold-out), so its pred-vs-true accuracy is an **in-sample
+fit-quality** statement, *not* a generalisation claim. The generalisation evidence is the **8-fold
+LOSO walkthrough** (`checkpoints/final_fold{0..7}`) and the `C_emu` error vector; see §5 and the
+[performance walkthrough](#section-perf) below. The single-model `final_fold0` used in older
+quick-starts is a closure-validation stand-in, **not** the deployed object.
+
+<a id="overview"></a>
+### Overview
+
+We measure cosmology from the Lyα forest, the absorption lines that intervening hydrogen imprints
+on the spectrum of a distant quasar. The absorbing hydrogen traces the underlying matter density
+field, whose statistics depend on the cosmological parameters, so measuring how the absorption
+fluctuates measures cosmology.
+
+Our summary statistic for those fluctuations is the P1D, the one-dimensional flux power spectrum of
+the transmitted flux along the line of sight. The cosmology is encoded in the shape of this
+spectrum.
+
+Not all of those absorption lines come from the diffuse forest we want. Some arise in dense gas
+systems, the HCDs (high-column-density absorbers), where so much hydrogen lies along the sightline
+that the line is broad and dark. We sort these into three classes by their neutral-hydrogen column
+density N_HI, the number of hydrogen atoms per unit area along the line of sight
+(`hcd_analysis/catalog.py`): Lyman-limit systems (LLS) at 10^17.2–10^19, subDLAs at 10^19–10^20.3,
+and damped Lyα systems (DLA) at N_HI ≥ 10^20.3 cm⁻². These dense systems contaminate the P1D and
+bias the cosmology if they are ignored. We therefore need a model of the P1D that separates the clean
+forest from the HCD contamination and lets us marginalise the HCDs away (average over our
+uncertainty about them so it inflates the cosmology error bars rather than skewing the answer).
+
+The sampler that fits cosmology to the data evaluates the model thousands of times, and a full
+hydrodynamic simulation is far too slow to run inside that loop. We therefore train a fast,
+differentiable emulator, a neural network that learns the simulation's P1D as a smooth function of
+its inputs and returns its gradients so a gradient-based sampler can step toward better-fitting
+parameters.
+
+This package is that emulator. It predicts the per-class P1D `P_filt(θ, z, τ₀)`, one spectrum each
+for the clean forest, LLS, subDLA and DLA, as a function of:
+- `θ`, the 9 cosmological and astrophysical parameters (the full list, with ranges, is in
+  [Inputs / conventions](#section-inputs) below),
+- `z`, the redshift,
+- `τ₀`, the mean-flux optical depth (how absorbed the forest is on average; defined below).
+
+It mirrors the PRIYA simulation suite (a set of cosmological hydrodynamic simulations of the Lyα
+forest; Bird, Fernandez, Ho et al. 2023, JCAP 10 037,
+[arXiv:2306.05471](https://arxiv.org/abs/2306.05471); extended box from Fernandez, Bird & Ho 2024,
+JCAP 07 029, [arXiv:2309.03943](https://arxiv.org/abs/2309.03943)), so that anyone familiar with
+PRIYA can drive it. Being end-to-end autodifferentiable (returning gradients all the way through),
+the likelihood (`inference.log_lik_multiz`) is ready to pass to a gradient sampler, in our case
+NUTS (the No-U-Turn Sampler, a Hamiltonian Monte Carlo variant). The specific sampler libraries
+(numpyro/blackjax, or a PRIYA-style Cobaya adapter) are wiring details covered in §8.
+
+Note that the sampler and Cobaya wrappers are still forthcoming (not yet shipped). For now the
+differentiable likelihood is called directly, which is sufficient for real inference.
+
+This README serves both as a reproduction, install and quickstart guide and as a tour of the
+validation evidence. The full validation verdicts (the held-out error, the coverage and the
+cosmology-bias gate) are kept in the private notes repository and linked from each demo below; the
+headline validation document is
+`hcd_priya_notes/docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md`.
+
+### Where to go
+
+To **use the deployed ensemble** (start here):
+- [Quick start: the deployed ensemble](#section-quickstart): load the 5 members, predict a P1D
+- [Inputs / conventions](#section-inputs): θ9 unit cube, `z_unit`, τ₀, α_hcd
+- [Gotchas](#section-gotchas): x64 ordering, per-member files, the in-sample caveat
+- [Reproduce the ensemble from scratch](#section-reproduce): `train_production_emulator.py`, the recipe, the cache
+- [Performance: walkthrough figures](#section-perf): accuracy, response, dN/dX
+
+Background and the rest of the pipeline:
+1. [Environment](#1-environment-mandatory): the environment string it must be run with
+2. [The τ₀ cache](#2-the-τ₀-cache): the training data, what it is and how to load it
+3. [Architecture](#3-architecture): the structure of the network and the reasons for it
+4. [Training (LOSO + production)](#4-training-loso--production): how to run it and what a healthy run looks like
+5. [Forward model / prediction](#5-forward-model--prediction): turning the network into a P1D
+6. [Quickstart (single-model, cache-row)](#6-quickstart-single-model-cache-row): the older single-net snippet
+7. [Conventions & gotchas](#7-conventions--gotchas): the points that commonly cause trouble
+8. [Likelihood & inference](#8-likelihood--inference): the differentiable log-likelihood and priors
+9. [Blinding the real-data fit](#9-blinding-the-real-data-fit-a_p-n_s): the parameter-blind on A_p, n_s and how to unblind
+10. [Module map](#10-module-map)
+
+---
+
+<a id="section-quickstart"></a>
+## Quick start: use the deployed ensemble
+
+This snippet loads the trained model and predicts a spectrum; for now you can run it as written, and
+the reasons behind the pieces follow later. (The `norm` dict is explained in §3 and §6, and why the
+import must come first, float64 versus float32, in §1; you do not need either to run this.)
+
+Load the 5 production members and predict the per-class clean P1D. **`import
+hcd_analysis.emulator` must precede any `jax` import**: it flips on float64 (double-precision
+arithmetic), and the emulator's exact internal identities break under the lower-precision float32
+default. Run everything with the [environment string](#1-environment-mandatory).
+
+```python
+import glob, numpy as np
+import hcd_analysis.emulator                      # x64 ON: MUST precede any jax import
+import jax.numpy as jnp
+from hcd_analysis.emulator.ensemble import load_ensemble
+from hcd_analysis.emulator.predict import predict_P_filt
+
+REPO = "/home/mfho/hcd_priya"
+paths = sorted(p[:-4] for p in glob.glob(f"{REPO}/checkpoints/final_prod_seed*.eqx"))
+ens, meta, norm = load_ensemble(paths)            # asserts all 5 members share the P_filt norm
+pf = {k: jnp.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
+
+theta9 = jnp.full(9, 0.5)                          # unit cube [0,1]^9 (box centre)
+z = 3.0; z_unit = (z - 2.0) / 3.4                  # z_unit = (z − 2)/3.4
+tau0 = 0.35                                        # = −ln⟨F⟩
+P_filt = predict_P_filt(ens, theta9, z_unit, tau0, pf)   # (4, K=172): clean, LLS, subDLA, DLA
+```
+
+`predict_P_filt(ens, …)` returns the **mean over the 5 members of the reconstructed (post-`exp`,
+linear) `P_filt`**: the network predicts a log-spectrum, so we average after the `exp` (all members
+share one norm). The forward duck-types on a `.members` list, so the *same* call works whether you
+pass a single model or the 5-member ensemble. The rows are the four HCD classes (clean, LLS, subDLA,
+DLA), `K = 172` angular k-bins.
+
+**Verified sanity output** (re-run 2026-06-21 with the env string, all 5 members present):
+
+```
+PATHS: ['final_prod_seed0', …, 'final_prod_seed4']     n_members: 5
+P_filt shape: (4, 172)  dtype: float64
+class row maxima (clean,LLS,subDLA,DLA): [40.27, 52.57, 58.11, 36.69]
+clean P_filt[0,:5]: [40.27 38.90 37.72 34.99 33.80]
+git_sha in meta: 5f51fc6
+```
+
+**Canonical inference entry.** *(Advanced; skip this if you only want to predict a spectrum. It
+matters once you are wiring the emulator into the likelihood.)* The likelihood and SBC
+(simulation-based calibration, the closure test of §Demo A) load the ensemble through
+`build_legb_ctx` (`closure_legb.py:369-373`), exactly how `run_real_fit.py` and
+`run_prod_sbc_shard.py` invoke it:
+
+```python
+from glob import glob
+from hcd_analysis.emulator.closure_legb import build_legb_ctx
+ens = sorted(glob("checkpoints/final_prod_seed*.eqx"))
+ctx = build_legb_ctx(..., ensemble_ckpts=ens)      # ensemble_ckpts is not None → load_ensemble path
+```
+
+With `ensemble_ckpts=None` the same builder loads the single-model path (`final_fold0`) instead. The
+ensemble branch threads the member-mean P_filt through the likelihood unchanged: `P_obs` is linear
+in `P_filt`, so the member-mean commutes with the forward and we average once, up front.
+
+---
+
+<a id="section-inputs"></a>
+## Inputs / conventions
+
+The emulator takes three forward arguments. We give all of them to the network on **bounded,
+rescaled coordinates** rather than in physical units: the raw parameters span nine orders of
+magnitude (the amplitude `Ap` ≈ 1e-9 against the tilt `ns` ≈ 0.9), so we map each into a fixed
+`[0,1]` range first (the unit cube, motivated again in §2 and §7).
+
+- **`theta9`**: the 9 PRIYA parameters on the **unit cube** `[0,1]^9`, in the order
+  `(ns, Ap, herei, heref, alphaq, hub, omegamh2, hireionz, bhfeedback)`. Map physical → unit
+  per-parameter linearly via `data.PARAM_LIMITS` (`θ9 = (θ_phys − lo)/(hi − lo)`, or use
+  `data.normalize_params`). The limits:
+
+  | param | physical range | unit→physical |
+  |---|---|---|
+  | `ns` | [0.80, 1.05] | `0.80 + 0.25·θ` |
+  | `Ap` | [1.2e-9, 2.6e-9] | forest-pivot amplitude (k = 0.78 Mpc⁻¹, **not** the CMB pivot) |
+  | `herei` | [3.5, 4.5] | He-II reion start |
+  | `heref` | [2.2, 3.2] | He-II reion end |
+  | `alphaq` | [1.3, 3.0] | quasar spectral slope |
+  | `hub` | [0.65, 0.75] | h |
+  | `omegamh2` | [0.14, 0.146] | Ω_m h² |
+  | `hireionz` | [6.5, 8.0] | H reion redshift |
+  | `bhfeedback` | [0.03, 0.07] | BH feedback |
+
+  A few of these parameters carry physics worth naming. `ns` and `Ap` set the primordial tilt and
+  amplitude, but `Ap` is quoted at the **forest pivot** `k = 0.78 Mpc⁻¹` rather than the CMB pivot
+  `0.05 Mpc⁻¹`, so `Ap` is **not** the CMB `A_s` (more in §7). `herei`/`heref` are the start and end
+  redshifts of **He-II reionization**, which sets the forest's small-scale thermal state. `alphaq`
+  (quasar spectral slope) and `bhfeedback` (black-hole feedback strength) are astrophysical
+  nuisances the analysis marginalises over.
+
+- **`z_unit`** = `(z − 2.0)/3.4`, a linear map over `data.Z_LIMITS = (2.0, 5.4)` (so 5.4 − 2.0 =
+  3.4; e.g. z = 3 → 0.2941). `x = [θ9, z_unit]` is the 10-vector the encoder consumes.
+- **`tau0`** = `−ln⟨F⟩`, the mean-flux optical depth (how absorbed the forest is on average); per-z.
+
+The **HCD incidence `alpha_hcd` `(3,)`** (LLS, subDLA, DLA) enters only `predict_P_obs` and
+`predict_excess`; it is the free per-class amplitude of the HCD contamination. It does **not** enter
+`predict_P_filt`, which returns the four per-class clean spectra before any contamination is applied.
+
+---
+
+<a id="section-gotchas"></a>
+## Gotchas
+
+- **x64 import ordering.** `import hcd_analysis.emulator` runs
+  `jax.config.update("jax_enable_x64", True)` and **must precede any `jax` import**. The structural
+  identities (`P_tier_p = Σ_c w_c·P_filt`, the telescoping `Σ w_c = 1`) hold at the bit level only in
+  float64.
+- **The env string is mandatory.** Always launch with
+  `PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3`
+  (CPU-pinned, deterministic; see §1).
+- **Per-member files.** Each ensemble member is a **four-file bundle**:
+  `final_prod_seed{S}.{eqx, meta.json, norm.pkl, hist.json}`. `load_ensemble` needs `.eqx` +
+  `.meta.json` + `.norm.pkl` for all 5; it **asserts** every member shares the same `P_filt` norm
+  (`mu_marg/sig_marg/sig_cosmo`); a differing norm signals a wiring error and aborts.
+- **The in-sample caveat (load-bearing).** The production ensemble **saw all 60 sims** in training,
+  so `final_prod_seed*` pred-vs-true is **in-sample fit quality, NOT generalisation**. The
+  generalisation evidence is the LOSO held-out walkthrough (`final_fold{0..7}`) and the `C_emu` error
+  vector. Never relabel an in-sample number as an accuracy/generalisation claim (see [Performance](#section-perf)).
+- **Head-A is in standardized-log space.** `predict_P_filt` returns linear P1D, but the Head-A
+  channels (`dndx`, `f_nhi`) are emitted in **standardized-log** space; invert the norm
+  (`apply_norm`/`safe_log` pair in `data.py`, keys `norm["dndx"]`, `norm["f_nhi"]`) to get physical
+  incidence/CDDF. The walkthrough's `predict_headA_ens` does this.
+- **`EnsembleEmulator` has no `__call__`.** It is a thin pytree holding `.members`; only the
+  `predict.py` Head-B functions (`predict_P_filt/excess/P_obs/P_tier_p`) duck-type on `.members` to
+  return the member-mean. Do not call the ensemble object directly.
+
+---
+
+<a id="section-reproduce"></a>
+## Reproduce the ensemble from scratch
+
+The deployed ensemble is built by `scripts/train_production_emulator.py` (**not**
+`run_loso_sweep.py`, which is the validation sweep). It trains on **all 60 LF sims + all 20 τ₀
+rungs with NO simulation hold-out**; only a fixed **10% row-val split** (`VAL_SEED = 12345`, shared
+across all members) is held out for restore-best early-stop. Run it once per seed (0..4); the 5
+checkpoints are the ensemble.
+
+The hyperparameters are the **`RECIPE` dict**, byte-for-byte the LOSO `FINAL_RECIPE`:
+
+```python
+RECIPE = dict(n_basis=24, p_resid_w=8.0, edge_gain=3.0, lowk_extra=2.0,   # low-rank + k-weighting
+              w_coh=80.0, weight_decay=3e-4, datarange=True,              # de-bias + soft data-range
+              epochs=180, patience=25, lr=1e-3, batch=512)                # AdamW + cosine decay
+# arch_cfg: in_dim=10, n_k=172, n_basis=24; encoder/baseline 3×256
+```
+
+Commands (with the [env string](#1-environment-mandatory), abbreviated `<env>`):
+
+```bash
+for S in 0 1 2 3 4; do <env> scripts/train_production_emulator.py --seed $S; done   # → final_prod_seed{S}.*
+<env> scripts/validate_production_ensemble.py                                       # fit-quality + ensemble-benefit gate
+```
+
+**Cache provenance.** Training reads
+`hcd_analysis/_emulator_data/observables_tau0_lf.h5`, the **v3.3 LF cache**: 21 440 rows × 172 k ×
+60 sims × 20 α-rungs, angular k 4e-4–6.9e-2 s/km, built by
+`scripts/build_emulator_cache_tau0.py` (env `emu-3.9`) + `merge_tau0_cache.py`, from the PRIYA LF
+runs (Bird, Fernandez, Ho et al. 2023, [arXiv:2306.05471](https://arxiv.org/abs/2306.05471)).
+
+**Multi-fidelity & error budget** (reused, not regenerated by retraining):
+- The MF layer (`multifidelity.py`, the ρ(k,z)-only `FixedMeanHead` default) wraps the **frozen LF
+  backbone** at inference and is built from the HR cache. It is attached by the likelihood
+  (`build_legb_ctx(with_mf=…)`), not by `train_production_emulator.py`.
+- `C_emu = checkpoints/error_vector.npz`, the **8-fold LOSO** error budget. The all-sims ensemble
+  reuses it (conservative: it is the held-out generalisation budget, applied to a model trained on
+  *more* data). Retraining the ensemble does **not** regenerate it.
+
+The checkpoint `git_sha` stamped in each `.meta.json` is **5f51fc6**.
+
+---
+
+<a id="section-perf"></a>
+## Performance: walkthrough figures
+
+The figures below are from the **deployed production ensemble** walkthrough (committed at
+**da9e237**); the full set, captions and the framing table live in
+[`figures/analysis/06_performance_walkthrough/README.md`](../../figures/analysis/06_performance_walkthrough/README.md),
+raw numbers in `06_performance_walkthrough/headline_numbers.json` (dual-keyed:
+`loso_held_out` = generalisation, `ensemble_in_sample` = the deployed all-sims fit).
+
+**Headline frac-P1D RMS** (in-range, per class clean / LLS / subDLA / DLA):
+- **Deployed ensemble (in-sample fit quality):** **0.5 / 0.6 / 0.7 / 1.6 %**
+- **LOSO held-out (the generalisation accuracy claim):** **1.1 / 1.2 / 1.3 / 2.5 %**
+
+![B1: predicted vs true P1D](../../figures/analysis/06_performance_walkthrough/B1_pred_vs_true_p1d.png)
+
+*B1: reconstructed linear P1D vs cache, per class (solid = true, dashed = LOSO **held-out**, dotted
+= **in-sample** ensemble). Both hug zero across the resolved band.*
+
+![B2: deployed fractional P1D error vs k](../../figures/analysis/06_performance_walkthrough/B2_deployed_frac_err_vs_k.png)
+
+*B2: `|pred/true − 1|` vs k over all folds' val rows: solid+IQR = LOSO **held-out** (the accuracy
+claim, 1.1/1.2/1.3/2.5%), dashed = **in-sample** ensemble (~2× lower, the deployed-fit reference),
+dotted = cosmic-variance floor.*
+
+![B3: deployed cosmology response](../../figures/analysis/06_performance_walkthrough/B3_cosmology_response.png)
+
+*B3: the differentiable cosmology response `∂lnP/∂θ` vs k that the HMC consumes, from the
+**production ensemble** (a deployed-object property, not an accuracy claim). `n_s` flips sign across
+k; `A_p`/`h` carry the largest coherent amplitudes.*
+
+![A1: dN/dX predicted vs true](../../figures/analysis/06_performance_walkthrough/A1_dndx_pred_vs_true.png)
+
+*A1: Head-A `dN/dX` accuracy vs z (solid/dashed = LOSO **held-out** median/p95 ≈ 1.3–1.7%; dotted =
+**in-sample** ensemble ≈ 0.5–0.6%). Error rises only at the count-limited off-DESI z extremes.*
+
+Companion accuracy figures: B5 (per-fold A_p/n_s Fisher bias, the inference gate; all 8 folds
+inside ±0.2σ) and A6/A7 (dN/dX and CDDF vs literature) are reproduced in Demos C–E below.
+
+
+
+To see that it works, the demos are:
+- [Demo A: Mock inference (closure / SBC)](#demo-a-does-the-inference-recover-the-truth-closure--sbc)
+- [Demo B: A corner plot, reproduced](#demo-b-a-posterior-corner-plot-and-how-to-make-one)
+- [Demo C: Does emulator error bias the cosmology?](#demo-c-does-emulator-error-bias-the-cosmology-the-loso-fisher-gate)
+- [Demo D: HCD statistics vs the literature](#demo-d-hcd-statistics-the-emulator-vs-the-literature)
+- [Demo E: How HCDs nudge the cosmology](#demo-e-how-hcds-nudge-the-cosmology-the-llsforest-degeneracy)
 
 ---
 
 ## 1. Environment (mandatory)
 
-The emulator is float64 and lives in a dedicated conda env. **Always** run with:
+The emulator runs in float64 (double precision) because several of its identities hold only
+exactly and break under the default float32. It therefore lives in a dedicated conda environment,
+and every script must be launched with the same environment string.
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3  <script>
 ```
 
-- `import hcd_analysis.emulator` calls `jax.config.update("jax_enable_x64", True)` — **x64 is
-  mandatory**: the structural identities (`P_tier_p = Σ_c w_c·P_filt`, telescoping `Σ w_c = 1`)
-  are bit-level and break under JAX's default float32.
-- `PYTHONNOUSERSITE=1` keeps stray user-site packages out; `JAX_PLATFORMS=cpu` for CPU runs.
-- JAX/Equinox-specific traps are logged in `docs/superpowers/jax-traps-log.md` (e.g. trap #29:
-  sanitize `jnp.interp` ydata *before* the call, not after).
+What each piece does:
+- `import hcd_analysis.emulator` runs `jax.config.update("jax_enable_x64", True)`; x64 is mandatory.
+  The structural identities (`P_tier_p = Σ_c w_c·P_filt`, the telescoping `Σ w_c = 1`) hold at the
+  bit level and break under float32.
+- `PYTHONNOUSERSITE=1` prevents stray packages in the home directory from leaking into the import
+  path.
+- `JAX_PLATFORMS=cpu` and `CUDA_VISIBLE_DEVICES=""` pin execution to the CPU, which is deterministic
+  and avoids GPU surprises.
+- The JAX/Equinox traps we have already encountered are logged in
+  `hcd_priya_notes/docs/superpowers/jax-traps-log.md` (for example trap #29: sanitise `jnp.interp` y-data before
+  the call, not after).
+
+This yields a working float64 JAX runtime that can `import` the package.
 
 ---
 
-## 2. Architecture
+## 2. The τ₀ cache
 
-`model.Emulator` (an `eqx.Module`) = **Encoder → {HeadA, BaselineHead, HeadB}**.
+The cache is the emulator's entire training set, held in a single HDF5 file. It is a table of P1D
+spectra measured from the PRIYA low-fidelity (LF, the cheaper, larger-volume simulation box) runs,
+augmented by the τ₀ ladder described next.
+
+τ₀ is the mean-flux optical depth, `τ₀ = −ln(target_F)`, where `target_F` is the average
+transmitted flux of the forest. It sets how absorbed the forest is on average, and its observed
+value drifts with redshift. Rather than rely on the simulation having landed on the correct mean
+flux, we resample each simulation's mean flux up and down a ladder of rungs (PRIYA's
+`mean_flux="per_z"` post-processing). The emulator then learns the τ₀ dependence directly and can
+be evaluated at whatever mean flux the data require.
+
+The ladder is anchored on the Kim et al. 2007 mean-flux fit `τ_eff(z) = 0.0023·(1+z)^3.65`
+(MNRAS 382, 1657, [arXiv:0711.1862](https://arxiv.org/abs/0711.1862)) and built wide enough to
+bracket the observed mean flux across the analysis redshift range.
+
+The figure below shows that the trained ladder (the shaded band) brackets every observed mean-flux
+measurement across z = 2.2–4.6, so the emulator never extrapolates in mean flux inside the
+analysis.
+
+![Trained τ₀ ladder bracketing observed mean flux](../../figures/analysis/04_emulator/tau0_ladder_vs_obs_meanflux.png)
+
+*The shaded band is the trained τ₀ ladder; the lines/points are observed-⟨F⟩ fits and data
+(Kim+2007, Becker+2013, Turner+2024, XQ-100). The ladder brackets the data across z = 2.2–4.6.*
+
+The cache file is `hcd_analysis/_emulator_data/observables_tau0_lf.h5`, the v3.3 LF cache: 21 440
+rows, n_k = 172 k-bins, angular k, a 20-rung τ₀ ladder, 60 LF sims and 4 HCD classes. It is built
+by `scripts/build_emulator_cache_tau0.py`.
+
+Load it with:
+
+```python
+from hcd_analysis.emulator.data import load_cache
+d = load_cache("hcd_analysis/_emulator_data/observables_tau0_lf.h5")
+```
+
+`load_cache` returns a dict; the keys you will reach for most:
+
+| key | shape | meaning |
+|---|---|---|
+| `params` / `params_unit` / `x` | `(R,9)` / `(R,9)` / `(R,10)` | physical / unit-cube params; `x` = `[θ9, z_unit]` |
+| `kfkms` | `(K,)` | angular k-grid in s/km (`K = n_k = 172`) |
+| `P_filt` | `(R,4,K)` | per-class P1D: clean, LLS, subDLA, DLA |
+| `delta` | `(R,3,K)` | per-class core add-back; `delta[:,2]` = `dla_core` |
+| `coarse_counts` / `w_c_cache` | n/a | per-class sightline counts / incidence weights `w_c` |
+| `target_F`, `tau0` | `(R,)` | global mean flux, `tau0 = −ln(target_F)` |
+| `z_grid` | `(R,)` | redshift per row |
+
+The four classes are absorber types, ordered by neutral-hydrogen content: clean (no HCD), LLS
+(Lyman-limit systems), subDLA and DLA (damped Lyα). PRIYA internally carries many fine tiers, which
+we collapse into these four coarse classes (`COARSE_SLICES = clean=tier0, LLS=1–7, subDLA=8–12,
+DLA=13–14`).
+
+The 9 input parameters span very different scales (the amplitude A_p ≈ 1e-9 against the tilt
+n_s ≈ 0.9), so we map everything to a unit cube before training (see §7).
+
+![Training-data parameter distributions](../../figures/analysis/04_emulator/data_params_hist.png)
+
+*The 9 PRIYA design parameters + redshift across the cache rows. The mismatched scales are exactly
+why `data.normalize_params` maps to the unit cube before training.*
+
+The loader returns a dict of arrays, the per-class P1D over `(θ, z, τ₀)` together with the
+structural weights, which constitutes the emulator's complete training set.
+
+---
+
+## 3. Architecture
+
+The design shares one feature extractor and then splits into three small heads, each responsible
+for one well-defined physical task: `model.Emulator` (an `eqx.Module`) is
+Encoder → {HeadA, BaselineHead, HeadB}.
+
+![Emulator architecture](../../figures/analysis/04_emulator/emulator_architecture.png)
+
+*The Encoder builds a shared latent; HeadA emits the τ₀-invariant CDDF/incidence; the BaselineHead
+emits a θ-blind P_filt baseline and HeadB the θ-dependent residual; the structured mean recombines
+them and the downstream block assembles `P_tier_p` / `P_obs` for the likelihood.*
 
 ```
 x = [θ9 (9), z_unit (1)]  ─► Encoder (MLP 256-128-64) ─► latent (64)
@@ -65,37 +438,103 @@ x = [θ9 (9), z_unit (1)]  ─► Encoder (MLP 256-128-64) ─► latent (64)
    HeadB(latent, τ₀)        ── θ-DEPENDENT   ─► r̂  : P_filt residual    (4×n_basis coeffs)
 ```
 
-**Kennedy–O'Hagan structured mean** (the core design): the per-class log-power is a θ-blind
-baseline plus a whitened cosmology residual,
+The reason for this split is the Kennedy–O'Hagan structured mean (Kennedy & O'Hagan 2001, JRSS-B
+63, 425), a θ-blind simulator term plus a learned discrepancy. Rather than predict the whole
+spectrum with a single black box, we predict a fixed baseline that does not depend on cosmology
+plus a small learned correction that carries all of the cosmology dependence, so that the cosmology
+signal is concentrated in a single term we can isolate and check. We write each per-class log-power
+as a θ-blind baseline plus a whitened cosmology residual:
 
 ```
 logP̂(θ,z,τ₀) = ( m̂·σ_marg + μ_marg )  +  σ_cosmo · r̂
 P_filt        = exp(logP̂)                         # (4,K) LINEAR: clean, LLS, subDLA, DLA
 ```
 
-- **θ enters ONLY through `r̂`** (the baseline is θ-blind), so `∂logP̂/∂θ = σ_cosmo·∂r̂/∂θ`.
-  This is what makes the cosmology response cleanly identifiable and is verified by the
-  gradient gate (`scripts/diag_grad_fidelity.py`).
-- `μ_marg, σ_marg, σ_cosmo` are per-`(class,k)` normalization stats fit on the **train split**
-  and stored in the checkpoint's `norm["P_filt"]` dict (see §4).
-- **Low-rank P_filt bottleneck** (`n_basis=24`): both heads emit `4×n_basis` coefficients that
-  decode through a trainable SVD-warm-started basis `(n_basis, n_k)` — fewer DOF, smoother
-  spectra, less over-fit than a dense `4×n_k` output.
-- `K = n_k = 172` k-bins (LF cache); ANGULAR k convention (see §5).
-- HeadB also carries a legacy dense `delta` head — **not used by the live forward model**
-  (the HCD excess is computed from `P_filt` instead, see §3). Dead weight, harmless.
+The advantages of this construction are:
+- The cosmology enters only through `r̂` (the baseline is θ-blind), so
+  `∂logP̂/∂θ = σ_cosmo·∂r̂/∂θ`. The entire cosmology response is concentrated in one isolatable
+  term, which is both easy to check (the gradient gate `scripts/diag_grad_fidelity.py`) and cleanly
+  identifiable.
+- `μ_marg, σ_marg, σ_cosmo` are per-`(class, k)` normalisation statistics fit on the train split and
+  stored in the checkpoint's `norm["P_filt"]` dict (see §4 and §6).
+- The low-rank P_filt bottleneck (`n_basis = 24`): rather than predict all 172 k-values directly,
+  both heads emit `4×n_basis` coefficients that decode through a trainable, SVD-warm-started basis
+  `(n_basis, n_k)`. Fewer free parameters give smoother spectra and less over-fitting than a dense
+  `4×n_k` output.
+- `K = n_k = 172` k-bins (LF cache), in the angular k convention (see §7).
+- HeadB also carries a legacy dense `delta` head, which the live forward model does not use (the
+  HCD excess is computed from `P_filt` instead, see §5). It is harmless dead weight.
 
-**Multi-fidelity** (`multifidelity.py`): the LF backbone above + a high-fidelity (HiRes /
-KODIAQ-SQUAD) `ρ(k,z)` correction layer. The default deployed HiRes correction is the
-ρ(k,z)-only `FixedMeanHead` — a mean-*correction* head (it returns `ḡ(z,k) − log ρ`), NOT a
-mean-flux head; mean flux is handled structurally via τ₀.
+The multi-fidelity layer (`multifidelity.py`) addresses the fact that the LF backbone above is
+LF-only and never sees the expensive high-resolution (HF / HiRes) box. A separate, frozen `ρ(k,z)`
+correction layer lifts each LF prediction to HR resolution. The default deployed correction is the
+ρ(k,z)-only `FixedMeanHead`, a mean-correction head (it returns `ḡ(z,k) − log ρ`) rather than a
+mean-flux head; the mean flux is handled structurally through τ₀. The quantitative importance of
+the LF→HR correction is shown in the notes validation document §3.
+
+The result is a differentiable per-class P1D predictor whose cosmology response lives in a single,
+isolatable residual term.
 
 ---
 
-## 3. The HCD forward model (`predict.py`)
+## 4. Training (LOSO + production)
 
-The corrected (2026-06-04 redesign) HCD-marginalization forward model is a **clean-forest
-baseline + free-amplitude per-class excess**:
+The **deployed** model is the all-sims production ensemble; its build recipe is in
+[Reproduce the ensemble from scratch](#section-reproduce) above. This section covers the **8-fold
+LOSO sweep**, which is the *validation* path (closure + `C_emu` calibration), not the deployed
+object.
+
+Validation training is driven by the eight-fold LOSO sweep `scripts/run_loso_sweep.py`. LOSO
+(leave-one-simulation-out) partitions the 60 simulations into eight groups; for each fold we hold
+out a whole group, train on the rest, and test on the held-out group, an honest test of
+generalisation rather than of memorisation. Each fold trains one emulator (`train.train_fold`),
+reuses the SVD warm-start, collects stratified fractional residuals, and writes `error_vector.npz`
+and figures into `figures/analysis/04_emulator/`.
+
+The frozen production recipe (`FINAL_RECIPE`):
+
+```python
+n_basis=24, p_resid_w=8.0, edge_gain=3.0, lowk_extra=2.0,    # low-rank + k-weighting
+w_coh=80.0, weight_decay=3e-4, datarange=True,               # de-bias + soft data-range
+epochs=180, patience=25, lr=1e-3, batch=512,                 # optax AdamW + cosine decay
+```
+
+Run it:
+
+```bash
+PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_loso_sweep.py \
+    --out checkpoints/final --histdir checkpoints     # (defaults == FINAL_RECIPE)
+```
+
+Add `--smoke` for a fast shape and finiteness check. A θ-blind baseline pre-fit
+(`train._prefit_baseline`) runs before the joint fit so that the baseline is structurally
+identifiable.
+
+In a healthy run the training loss and the validation loss fall together and flatten with no gap
+between them; a gap would indicate over-fitting, which the regularised residual head is designed to
+prevent.
+
+![Fold-0 train/val loss](../../figures/analysis/04_emulator/train_val_loss_fold0.png)
+
+*A clean joint-loss curve: train and val track each other and plateau, no over-fitting.*
+
+There is an important distinction between the folds and the deployed model. The eight LOSO folds
+exist for closure validation and for calibrating the emulator-error budget (`C_emu`); they are
+**not** ensembled at inference, and the fold-to-fold spread is captured as the σ budget in
+`error_vector.npz` (consumed through `C_emu`). The **deployed** model is the separate **all-sims
+production ensemble** `final_prod_seed{0..4}` (see [Reproduce](#section-reproduce)), *not*
+`final_fold0`, which is only a closure stand-in for the single-model path.
+
+This stage yields one checkpoint bundle per fold (see §6) together with the LOSO error vector.
+
+---
+
+## 5. Forward model / prediction
+
+The forward model turns the network's per-class spectra into the single contaminated P1D the data
+actually measure, while allowing the HCD contamination to be dialled up and down. In the
+2026-06-04 redesign it is a clean-forest baseline plus a free-amplitude per-class HCD excess:
 
 ```
 R_c   = P_c − P_clean          # (3,K) excess; FILTERED for LLS/subDLA, UNFILTERED for DLA
@@ -103,18 +542,49 @@ P_obs = P_clean + Σ_{c∈HCD} α_c · R_c
       ≡ P_clean · [ 1 + Σ_c α_c (P_c/P_clean − 1) ]      # additive ≡ multiplicative
 ```
 
-- `α_c` = effective **post-masking per-class incidence** (LLS, subDLA, DLA); `α_c = w_c`
-  reproduces the sim's contaminated `P_tier_p` (up to the DLA-core add-back). Prior-centered
-  on the **observed** dN/dX (not PRIYA's sim) — see `inference.hcd_incidence_prior`.
-- DLA uses the **unfiltered** template: `P_DLA^unf = P_filt[DLA] + dla_core`, where
-  `dla_core` (the DLA-core add-back, `= P_DLA^unf − P_DLA^filt`) is `cache["delta"][row, 2]`.
-- `∂P_obs/∂α_c = (P_c − P_clean) ≠ 0` for LLS now (fixes the old `Δ_LLS≡0` filter-residual bug).
-- This is the field-standard fixed-shape/free-amplitude HCD template (cf. Rogers&Bird 2018);
-  unlike Rogers it carries the θ,τ₀ sensitivity and preserves the global-⟨F⟩ normalization.
-  See `docs/superpowers/2026-06-04-phase-c-walkthrough.md` §6 and
-  `[[hcd-template-rogers-normalization]]` for the physics.
+Reading it:
+- `α_c` is the effective post-masking per-class incidence, how often each HCD type survives into the
+  data. Setting `α_c = w_c` reproduces the simulation's contaminated `P_tier_p` (up to the DLA-core
+  add-back). The prior on `α_c` is centred on the observed dN/dX rather than PRIYA's simulation
+  value, since the simulations and the data differ; see `inference.hcd_incidence_prior`.
+- DLA uses the **unfiltered** template: `P_DLA^unf = P_filt[DLA] + dla_core`, where `dla_core`
+  (`= P_DLA^unf − P_DLA^filt`) is `cache["delta"][row, 2]`.
+- `∂P_obs/∂α_c = (P_c − P_clean) ≠ 0` for LLS now (this fixes an old `Δ_LLS ≡ 0` filter-residual
+  bug).
+- This is the field-standard **fixed-shape / free-amplitude HCD template** (cf. Rogers, Bird,
+  Peiris et al. 2018, MNRAS 474, 3032, [arXiv:1706.08532](https://arxiv.org/abs/1706.08532); the
+  4-class form is also what PRIYA-on-KODIAQ-SQUAD uses,
+  [arXiv:2509.18271](https://arxiv.org/abs/2509.18271)). Unlike the fixed Rogers kernel, ours
+  carries the θ, τ₀ sensitivity and preserves the global-⟨F⟩ normalisation. See
+  `hcd_priya_notes/docs/superpowers/2026-06-04-phase-c-walkthrough.md` §6 and
+  `[[hcd-template-rogers-normalization]]`.
 
-Key functions (all JAX-pure, differentiable in `θ9, τ₀, α`):
+The figure below shows an example fold-0 prediction (dashed) over the cache truth (solid), per
+class. The top panels are the spectra and the bottom panels are the fractional residual
+`pred/cache − 1`, restricted to the band we actually use (a ±5% axis). The grey shading marks k
+above the LF Nyquist (k ≈ 0.069 s/km), where the network is neither used nor validated. The dotted
+and dashed vertical lines mark the two analysis k-cuts, DESI k ≤ 0.041 and KODIAQ-SQUAD (KS)
+k ≤ 0.06 s/km.
+
+![Per-class predicted vs cache P1D, fold 0, residual on the used band](../../figures/analysis/04_emulator/pred_vs_true_p1d_fold0_inrange.png)
+
+***(a) What the figure shows.*** A fold-0 example prediction (dashed) vs the cache (solid), per HCD
+class. Inside the analysis band the residual is ~1–2% (median ≈ 0.7%); the grey region (above the
+Nyquist) is not used. The rigorous all-folds error lives in the notes validation doc
+(`2026-06-14-validation-loso-emulator-lf-mf.md` §2), which resolves the held-out error per
+wavenumber k (the rigorous "where in k does the error live" answer). Demo C below shows the
+bottom line for cosmology: the per-fold A_p/n_s bias.
+
+***(b) Why an older plot looked ±20%.*** The previous version of this plot showed the
+residual over the full raw k-grid and reached ±20% at the k-extremes. That ±20% is entirely at
+the lowest, cosmic-variance-sparse modes (k < 0.005, where individual sims are noisy) and above
+the Nyquist (k > 0.069, where the LF emulator is not used, and is never in the analysis band). The
+plot above restricts to the band we actually use, which is why the residual is smaller.
+
+***(c) Reproduce.*** Diagnosis numbers and this figure are produced by
+`scripts/diag_pred_vs_true_honest.py`.*
+
+The functions you will call (all JAX-pure, differentiable in `θ9, τ₀, α`):
 
 | function | returns |
 |---|---|
@@ -123,131 +593,447 @@ Key functions (all JAX-pure, differentiable in `θ9, τ₀, α`):
 | `predict_P_obs(model, θ9, z_unit, τ₀, α_hcd, pf, dla_core)` | `(K,)` total P_obs |
 | `predict_P_tier_p(model, θ9, z_unit, τ₀, w_c, pf)` | `(K,)` structural Σ w_c·P_filt (clean-path diagnostics only) |
 
----
+`predict_P_obs` and `predict_excess` are differentiable in `(θ9, τ₀, α)`; `predict_P_filt` in
+`(θ9, τ₀)`. Here `pf = norm["P_filt"]` (the structured norm dict, see §6).
 
-## 4. Inputs, normalization, checkpoints
-
-**Parameters** (`data.PARAM_LIMITS`, identical order to PRIYA `coarse_grid`):
-
-```
-[ns, Ap, herei, heref, alphaq, hub, omegamh2, hireionz, bhfeedback]
-```
-
-- Feed the emulator **unit-cube** `θ9 ∈ [0,1]^9`. Map physical→unit with `PARAM_LIMITS`:
-  `θ9 = (θ_phys − lo) / (hi − lo)`. `data.normalize_params` / the `params_unit` cache field do this.
-- `z_unit = (z − 2.0)/(5.4 − 2.0)` — a linear map over `data.Z_LIMITS=(2.0, 5.4)` (e.g. z=3 →
-  0.2941); `τ₀ = −ln(target_F)` (the per-z mean-flux optical depth — PRIYA's
-  `mean_flux="per_z"`). `α_hcd` = `(3,)` per-class incidence (LLS, subDLA, DLA).
-
-**Checkpoints** (`checkpoints/`): each fold is a 4-file bundle
-`final_fold{0..7}.{eqx, meta.json, norm.pkl, hist.json}`:
-
-- `.eqx` — Equinox leaves; `.meta.json` — `arch_cfg` + `seed`; `.norm.pkl` — train-split norm
-  stats (the `P_filt` dict with `mu_marg/sig_marg/sig_cosmo`, + f_nhi/dndx/delta stats);
-  `.hist.json` — per-epoch loss history.
-- `T.load_checkpoint(path)` → `(model, meta, norm)`. Deployed production = 8-fold LOSO. Use a
-  **single** fold's model for the point prediction (`final_fold0` is the canonical default) —
-  do NOT ensemble the folds at inference; the fold-to-fold LOSO spread is already captured as
-  the σ budget in `error_vector.npz` and enters the likelihood through `C_emu`.
-
-**Error vector** (`checkpoints/error_vector.npz`) — the emulator-error budget for the
-likelihood: `sigma (4, K=172, Zb=3, Tb=4)` = per-(class, k, z-band, τ₀-band) RMS fractional
-LOSO residual, `tau0_band_centres (4,)`, `z_band_edges`, `dla_shot_flag (K,)`. Consumed by
-`likelihood.sigma_at_tau0` + the per-class `C_emu`.
+This yields the total contaminated P1D `P_obs(k)`, and its building blocks, differentiable in the
+cosmology, the mean flux and the HCD incidence, ready to feed the likelihood.
 
 ---
 
-## 5. Conventions & key facts (don't get burned)
+## 6. Quickstart (single-model, cache-row)
 
-- **k is ANGULAR** `k = 2π/λ_v` in s/km (community-wide: Croft/McDonald/Palanque-Delabrouille/
-  Rogers/PRIYA/DESI). `cache["kfkms"] = 2π·rfftfreq/dv`; pass it to Rogers templates DIRECTLY
-  (no /2π). See `[[hcd-template-rogers-normalization]]`.
-- **τ₀ ladder coordinate**: `α_factor = τ₀ / Kim2013(z)` is the z-INDEPENDENT ladder axis
-  (`data.tau0_ladder_factor`) — the natural axis for the smooth `σ(τ₀)` interpolation.
-- **Data range** (`data.DATA_RANGE`): z∈[2.2, 4.6], `k_min=1e-3`. The cache is wider
-  (z∈{2.0..5.4}, angular k∈[3.5e-4, 0.098]); out-of-range bins are SOFT down-weighted in
-  training and EXCLUDED from `C_emu`. Decision (2026-06-04): keep `k_min=1e-3`.
-- **Per-class power uses a single shared global ⟨F⟩** (`target_F`), not per-subset — so class
-  offsets are real physics, not a sightline-count artifact.
-
----
-
-## 6. Cache (`hcd_analysis/_emulator_data/observables_tau0_lf.h5`)
-
-v3.3 LF cache, 21440 rows, n_k=172, angular k, 20-point τ₀ ladder (uniform rescale). Built by
-`scripts/build_emulator_cache_tau0.py`. `data.load_cache(path)` returns a dict with (among
-others): `params`/`params_unit`/`x`, `kfkms`, `P_filt (R,4,K)` (count-collapsed coarse
-classes: clean / LLS / subDLA / DLA), `delta (R,3,K)` (the per-class core add-back; `[:,2]` =
-`dla_core`), `coarse_counts`/`w_c_cache`, `target_F`, `tau0 = −ln(target_F)`, `z_grid`.
-Coarse-class map: `COARSE_SLICES = (clean=tier0, LLS=1–7, subDLA=8–12, DLA=13–14)`.
-
----
-
-## 7. Training (`scripts/run_loso_sweep.py`)
-
-The 8-fold LOSO sweep driver — trains one emulator per fold (`train.train_fold`), reuses the
-SVD warm-start, collects stratified fractional residuals, and emits `error_vector.npz` + review
-figures (`figures/analysis/04_emulator/`). The frozen production recipe (`FINAL_RECIPE`):
+> For the **deployed ensemble**, use the [Quick start](#section-quickstart) at the top. The snippet
+> below is the older **single-model** flow (`final_fold0`, the closure stand-in), kept because it
+> builds the inputs from a cache row so the whole flow (`predict_P_obs` and the α/dla_core
+> plumbing) is visible at once.
 
 ```python
-n_basis=24, p_resid_w=8.0, edge_gain=3.0, lowk_extra=2.0,    # low-rank + k-weighting
-w_coh=80.0, weight_decay=3e-4, datarange=True,               # de-bias + soft data-range
-epochs=180, patience=25, lr=1e-3, batch=512,                 # optax AdamW + cosine decay
+import hcd_analysis.emulator                        # enables JAX float64 on import
+import jax.numpy as jnp
+from hcd_analysis.emulator import train as T
+from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.predict import predict_P_obs, predict_P_filt
+
+model, meta, norm = T.load_checkpoint("checkpoints/final_fold0")
+pf = norm["P_filt"]                                  # structured P_filt norm dict (mu/sig_marg, sig_cosmo)
+
+d   = load_cache("hcd_analysis/_emulator_data/observables_tau0_lf.h5")
+row = 0                                              # or construct your own inputs (see below)
+theta9 = jnp.asarray(d["params_unit"][row])          # (9,) UNIT cube; else (θ_phys−lo)/(hi−lo)
+z_unit = float(d["x"][row, 9])                       # = (z − 2.0)/3.4
+tau0   = float(d["tau0"][row])                       # = −ln(target_F)
+alpha  = jnp.asarray(d["w_c_cache"][row, 1:])        # (3,) per-class incidence (LLS,subDLA,DLA)
+dla_core = jnp.asarray(d["delta"][row, 2])           # (K,) DLA-core add-back
+
+P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf)                  # (4,K) clean,LLS,subDLA,DLA
+P_obs  = predict_P_obs(model, theta9, z_unit, tau0, alpha, pf, dla_core)  # (K,)  total
 ```
 
-```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
-  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_loso_sweep.py \
-    --out checkpoints/final --histdir checkpoints     # (defaults == FINAL_RECIPE)
-```
+All emulator inputs are on the unit cube.
 
-Add `--smoke` for a fast shape/finiteness check. A θ-blind baseline pre-fit
-(`train._prefit_baseline`) runs before the joint fit so the baseline is structurally
-identifiable.
+The checkpoints (`checkpoints/`) are four-file bundles per fold,
+`final_fold{0..7}.{eqx, meta.json, norm.pkl, hist.json}`:
 
-### 7a. Held-out LOSO error vs wavenumber
+- `.eqx`: Equinox leaves; `.meta.json`: `arch_cfg` + `seed`; `.norm.pkl`: train-split norm stats
+  (the `P_filt` dict with `mu_marg / sig_marg / sig_cosmo`, + f_nhi/dndx/delta stats);
+  `.hist.json`: per-epoch loss history.
+- `T.load_checkpoint(path)` → `(model, meta, norm)`.
 
-The 8-fold group-k LOSO certifies generalization on *held-out cosmologies*. The per-fold
-scalar val-RMS (clean 0.84–1.61 %, DLA worst 1.41–4.39 %, overall 1.0–2.4 %; A_p/n_s Fisher
-bias **0/8** over the gate) is summarized in the notes' validation Doc A. The figure below
-resolves that same held-out error **as a function of angular wavenumber k** (k = 2π/λ_v, fed
-direct — no /2π), per HCD class. It pools `P_emu/P_true − 1` over **all 18 224 held-out rows
-across all 8 folds**, each predicted by *that fold's own* held-out checkpoint
-(`final_fold{0..7}`) — the honest LOSO generalization error, **not** the in-sample production
-ensemble. (Rebuild with `scripts/diag_emu_loso_perk.py`; arrays in the sibling `.npz`.)
+**Error vector** (`checkpoints/error_vector.npz`): the emulator-error budget for the likelihood:
+`sigma (4, K=172, Zb=3, Tb=4)` = per-(class, k, z-band, τ₀-band) RMS fractional LOSO residual,
+plus `tau0_band_centres (4,)`, `z_band_edges`, `dla_shot_flag (K,)`. Consumed by
+`likelihood.sigma_at_tau0` + the per-class `C_emu`.
 
-![Per-k held-out LOSO prediction error](../../figures/analysis/04_emulator/loso_perk_pred_error.png)
+To build your own inputs instead of reading a cache row:
 
-Median `|P_emu/P_true − 1|` is a shallow **U in k**: highest at the lowest, cosmic-variance-
-sparse modes (~1.0–1.3 %), best near k≈0.02–0.04 s/km (**clean/LLS/subDLA 0.39–0.48 %, DLA
-0.74 %**), then rising back to **clean 0.99 %, LLS 1.01 %, subDLA 1.11 %, DLA 1.50 %** at the
-Nyquist k≈0.069 s/km (the n_k=172 grid top), with a thin above-Nyquist tail (some rows' physical
-k reaches ~0.086) climbing to ~1.3–1.6 %. The class ordering is monotone clean < LLS < subDLA <
-**DLA (worst at every k)**, matching the scalar table. The dotted line on each panel is the
-in-range LOSO median for that class.
+- Parameters (`data.PARAM_LIMITS`, in the same order as PRIYA's `coarse_grid`):
+  `[ns, Ap, herei, heref, alphaq, hub, omegamh2, hireionz, bhfeedback]`. Feed the emulator the
+  **unit-cube** `θ9 ∈ [0,1]^9`: `θ9 = (θ_phys − lo)/(hi − lo)` (or use `data.normalize_params`).
+- `z_unit = (z − 2.0)/(5.4 − 2.0)`, a linear map over `data.Z_LIMITS = (2.0, 5.4)` (e.g. z = 3 →
+  0.2941).
+- `τ₀ = −ln(target_F)` (the per-z mean-flux optical depth).
+- `α_hcd` = `(3,)` per-class incidence (LLS, subDLA, DLA).
 
 ---
 
-## 8. Likelihood & inference (`inference.py`, `likelihood.py`, `closure_diagnostics.py`)
+## 7. Conventions & gotchas
 
-- `inference.log_lik_single_z` / `log_lik_multiz` — the differentiable per-z / multi-z Gaussian
-  log-likelihood. Per-class `C_emu`: `emu_var = Σ_c coef_c²·σ_c(k,z,τ₀)²·P_c²`,
-  `coef = [1−Σα, α_LLS, α_subDLA, α_DLA]`; logdet-bearing (`likelihood.gaussian_loglik`, SPD
-  jitter + Cholesky); τ₀-aware σ via `likelihood.sigma_at_tau0`.
-- `inference.hcd_incidence_prior` — observed-centered, z-slope HCD incidence priors
-  (`HCD_LIT_OVER_SIM`, `HCD_PRIOR_FRAC_SIGMA`, …). Smooth bounded θ prior (no `-inf` wall, so
-  NUTS gets finite gradients).
-- `closure_diagnostics.py` — the SBC/closure machinery: `ecdf_pit_bands` (Säilynoja+2022
-  simultaneous bands — the primary calibration gate), `loglik_rank` (Modrak+2023),
-  `whitening_test`, `empirical_coverage`, `calibrate_cemu_inflate`. NUTS-free, fast.
+The following points have repeatedly cost time, and are worth reviewing before debugging.
 
-See `docs/superpowers/plans/2026-06-04-phase-c-t4-closure-plan.md` for the closure/SBC harness
-(Phase-C T4, in progress) and `docs/superpowers/2026-06-04-phase-c-checkpoint-review.md` for the
+- k is angular, `k = 2π/λ_v` in s/km, the community-wide convention (Croft et al., McDonald et al.,
+  Palanque-Delabrouille et al., Rogers et al., PRIYA, DESI). `cache["kfkms"] = 2π·rfftfreq/dv`; pass
+  it to the Rogers templates directly, with no extra `/2π`. See
+  `[[hcd-template-rogers-normalization]]`.
+- x64 is mandatory (see §1); the structural identities break under float32.
+- PRIYA's n_s and A_p are forest-pivot quantities, defined at `k = 0.78 Mpc⁻¹` rather than the CMB
+  pivot 0.05 Mpc⁻¹. Do not confuse `PARAM_LIMITS[ns/Ap]` with the CMB `n_s, A_s`.
+- The τ₀ ladder coordinate `α_factor = τ₀ / Kim2007(z)` is the z-independent ladder axis
+  (`data.tau0_ladder_factor`, with `Kim2007(z) = 0.0023·(1+z)^3.65`), the natural axis for the
+  smooth `σ(τ₀)` interpolation. The code uses a `Kim2013` symbol name for this curve, but the
+  underlying fit is Kim et al. 2007, [arXiv:0711.1862](https://arxiv.org/abs/0711.1862).
+- The data range (`data.DATA_RANGE`) is z ∈ [2.2, 4.6], `k_min = 1e-3`. The cache is wider
+  (z ∈ {2.0..5.4}, angular k ∈ [3.5e-4, 0.098]); out-of-range bins are softly down-weighted in
+  training and excluded from `C_emu`. The 2026-06-04 decision was to keep `k_min = 1e-3`.
+- The LF Nyquist is k ≈ 0.069 s/km. Above it the LF emulator is neither used nor validated. Both
+  analysis k-cuts sit safely below it: DESI k ≤ 0.041 and KS k ≤ 0.06.
+- The per-class power uses a single shared global ⟨F⟩ (`target_F`), not a per-subset mean, so the
+  class offsets are real physics rather than a sightline-count artefact.
+
+---
+
+## Demo A: Does the inference recover the truth? (closure / SBC)
+
+Before an inference pipeline can be trusted on real data, we run a closure test and its stricter
+counterpart, simulation-based calibration (SBC): we feed the pipeline mock data drawn from a known
+truth and check that it recovers that truth within the stated error bars. On held-out-sim mocks the
+pipeline recovers `n_s` in 8 of 8 cases within ±1σ, with no divergences (a divergence is the NUTS
+sampler's signal of a pathological posterior geometry). For `A_p`, 6 of 8 fall within ±1σ; the two
+outside are a
+high-n_s box-corner LOSO outlier and one +1.1σ mock, not a likelihood bug. The corner is the
+sparse-design n_s ≳ 0.98 ridge where the held-out emulator extrapolates, and the production
+interior cosmology sits away from it.
+
+These closures validate the architecture, the forward model, the covariance and the sampler, that
+the production all-sims N=5 ensemble inherits. The ensemble-level production SBC (rank-based
+simulation-based calibration on the production ensemble itself) is the final inference-calibration
+gate, and it remains pending before the real fit (notes
+`2026-06-14-validation-likelihood-production.md` §6).
+
+![Per-mock closure coverage detail](../../figures/analysis/06_validation_summary/coverage_summary.png)
+
+*The **per-mock closure-coverage detail** (distinct from the root README's Leg-B / closure coverage
+headline, despite the similar filename). Left: the HCD DESI-like mock closure bias `z = (θ̂ − θ_true)/σ`
+per mock; `n_s` is 8/8 inside ±1σ. Middle: the α_subDLA mean bias (a known subDLA↔DLA degeneracy
+that is harmless to cosmology and covered by the error model). Right: the eBOSS-like mock low-k recovery.
+0 divergences throughout.*
+
+To reproduce, the closure and SBC machinery is `hcd_analysis/emulator/closure_diagnostics.py`
+(PIT-ECDF bands, rank tests, coverage). The coverage figure is built by
+`hcd_priya_notes/figures/analysis/06_validation_summary/make_coverage_summary.py` from the
+closure-chain outputs (`checkpoints/stepA/`). The full writeup is in notes
+`hcd_priya_notes/docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md` (validation summary) and the
+closure plan `hcd_priya_notes/docs/superpowers/plans/2026-06-04-phase-c-t4-closure-plan.md`.
+
+---
+
+## Demo B: A posterior corner plot, and how to make one
+
+A corner plot inspects a posterior: each diagonal panel is the 1D marginal of one parameter and each
+off-diagonal panel is the 2D joint of a pair. The figure below is one of our eBOSS-like mock
+closure-certification posteriors; it uses mock data, so the dashed lines mark the known truth. It is
+a healthy result: every truth line lies inside its contour, and the cosmology (`n_s`, `A_p`) and the
+HCD incidences (`α_LLS`, `α_subDLA`, `α_DLA`) are recovered together.
+
+![eBOSS-like mock closure corner: cosmology + HCD](../../figures/analysis/04_emulator/eboss_corner_cosmo_E_f6.png)
+
+*The cosmo+HCD corner for the eBOSS-like E_f6 (Planck-`n_s`) closure mock. Dashed lines = truth. `n_s =
+0.958 ± 0.020` recovers the input; the HCD incidences are constrained and consistent with truth.*
+
+The exact steps to reproduce it are:
+
+```bash
+# 1. Run the eBOSS closure-cert chains (writes checkpoints/stepA/E_f6_c*.npz).
+#    (Concurrent-pool launcher; the fiducials E_f5/E_f6/E_f7 are defined in run_stepA.build_config.)
+PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya OMP_NUM_THREADS=1 \
+  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_eboss_cert.py --workers 10
+
+# 2. Make the corner from those chains (getdist env). FID defaults to E_f6.
+PYTHONPATH=/home/mfho/hcd_priya \
+  /home/mfho/.conda/envs/emu-3.9/bin/python3 scripts/plot_eboss_corners.py E_f6
+```
+
+`plot_eboss_corners.py` emits two corners per fiducial (cosmology plus HCD, and the IGM nuisances)
+with truth markers, into the notes `05_truth_validation/` directory. The full writeup is the
+eBOSS-certification section of the notes validation docs (`05_truth_validation/`).
+
+---
+
+## Demo C: Does emulator error bias the cosmology? (the LOSO Fisher gate)
+
+A small held-out RMS error is necessary but not sufficient. What an inference requires is that
+whatever residual error the emulator carries does not displace the recovered cosmology in a
+consistent direction: a biased-but-precise emulator is worse for inference than a noisy-but-unbiased
+one, because the bias propagates directly into the parameter estimate while the noise is absorbed by
+the error model. The cosmologically meaningful question is therefore not how large the spectral
+residual is but how much it shifts `A_p` and `n_s`, in units of the posterior width those parameters
+will have.
+
+We answer this with a per-fold acceptance gate. For each of the eight LOSO folds we take that fold's
+own held-out emulator and its held-out simulations, form the residual `ΔP = P_truth − P_forward`
+(forward at the simulation's exact mean flux and incidence, DLA-masked, so `ΔP` is pure emulator
+error), and project it onto the (`A_p`, `n_s`) Fisher directions the data actually constrain. The
+projection is the linearised maximum-likelihood displacement,
+`bias = [(F + Π)⁻¹ Jᵀ C⁻¹ ΔP] / σ`, where `J` is the forward Jacobian, `C` the data covariance,
+`F` the Fisher information, `Π` the prior precision, and `σ` the marginal posterior width; the
+result is a cosmology shift in σ. The acceptance requirement is `|bias_z| < 0.2σ` for every fold
+and both parameters. This per-fold object is what the deployed model inherits; it is the production
+gate, distinct from the per-simulation scatter discussed below.
+
+All eight folds sit well inside the ±0.2σ band on both parameters: 0 of 8 fail. The per-fold RMS
+bias is 0.067σ for `A_p` and 0.071σ for `n_s`, so the typical fold injects under a tenth of a
+posterior width. The emulator is thus validated as unbiased in the cosmology on held-out
+simulations, not merely as small-RMS. This is the held-out-sim cosmology gate, subject to the
+production-SBC caveat of Demo A: the per-fold LOSO result is what the production all-sims ensemble
+inherits, and the ensemble-level SBC is still pending before the real fit.
+
+![Per-fold A_p and n_s Fisher bias across the 8 LOSO folds, inside the ±0.2σ gate](../../figures/analysis/04_emulator/B5_fisher_bias_perfold.png)
+
+*Per-fold `A_p` (left) and `n_s` (right) Fisher bias, in σ, one bar per LOSO fold. The shaded band
+is the ±0.2σ acceptance gate and the dotted lines mark the per-fold RMS (0.067σ for `A_p`, 0.071σ
+for `n_s`). Every fold is inside the gate on both parameters (0/8 fail). This is the per-FOLD gate
+(the production object), not the per-simulation cloud.*
+
+There is a finer-grained view in which the same projection is computed for each of the 60
+held-out simulations individually rather than pooled per fold; that per-simulation scatter is wider
+(the box-corner simulations are noisier) and is recorded in the validation document. Pooled over all
+60 held-out simulations and pushed through the deployed multi-fidelity forward, the mean bias is
+`n_s +0.026σ` and `A_p +0.055σ`, consistent with no bias (bootstrap 95% intervals straddle zero).
+The per-fold gate above is the headline; the per-simulation pool is the supporting detail.
+
+To reproduce:
+
+```bash
+# per-fold A_p/n_s Fisher bias (the figure above), via the performance-walkthrough builder:
+PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_performance_walkthrough.py   # → B5_fisher_bias_perfold.png
+# per-simulation pool and the deployed multi-fidelity forward (the +0.026σ / +0.055σ pooled means):
+#   scripts/diag_emu_bias_allfolds.py
+#   scripts/diag_emu_bias_allfolds_mf.py   → figures/analysis/04_emulator/emu_bias_allfolds_mf.txt
+```
+
+The full writeup, with the acceptance gate, the per-fold numbers and the MF-forward G-gates, is in
+notes `hcd_priya_notes/docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md` §2b.
+
+---
+
+## Demo D: HCD statistics, the emulator vs the literature
+
+Besides the P1D, the emulator's HeadA predicts the HCD statistics themselves: the dN/dX (the
+incidence, how many absorbers of each class per unit absorption path) and the CDDF (the
+column-density distribution function, `f(N_HI)`, how absorbers are distributed in neutral-hydrogen
+column density). These are external, observable quantities and so provide a clean check: do the
+simulation's HCD populations match what surveys see? They should, because the HCD-incidence prior
+in the real fit is centred on these observed values; were the simulation badly off, the prior
+rather than the data would be doing the work.
+
+The per-class dN/dX tracks the observed literature across redshift (median ratios ≈ 0.98 for LLS,
+1.31 for subDLA and 0.70 for DLA, so the simulation is in the right range, which is precisely why
+the prior centre is the observed value rather than the simulation's), and the CDDF lies on top of
+the standard literature fits across five decades of column density.
+
+![PRIYA dN/dX vs observed literature, per class](../../figures/analysis/06_performance_walkthrough/A6_dndx_vs_literature.png)
+
+*Per-class dN/dX vs z against the observed literature (LLS: O'Meara+2013 / Fumagalli+2013 /
+Prochaska+2010; subDLA: Zafar+2013; DLA: Prochaska & Wolfe 2009), with the PRIYA/obs ratio below.
+The companion CDDF-vs-literature figure is `06_performance_walkthrough/A7_cddf_vs_literature.png`.*
+
+To reproduce:
+
+```bash
+PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_dndx_vs_literature.py
+PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_cddf_vs_literature.py
+```
+
+HeadA's own prediction-versus-truth accuracy is in
+`figures/analysis/04_emulator/head_a_dndx_pred_vs_true.png` and `head_a_fnhi_pred_vs_true.png`. The
+background on the dN/dX → w_c → α maps is in module `dndx_wc.py` and `[[phase2c-hcd-redesign]]`.
+
+---
+
+## Demo E: How HCDs nudge the cosmology (the LLS↔forest degeneracy)
+
+This is the underlying reason for the whole exercise. The HCD contamination is degenerate with the
+cosmology, and the cleanest way to read that off is the posterior correlation matrix below, which is
+the standard summary of a parameter degeneracy: each entry is the correlation between two parameters
+under the data Fisher information plus the HCD priors. The cell that matters is `corr(A_HCD, n_s) =
++0.83`: the HCD amplitude and the tilt move together. The same column shows `corr(A_HCD, A_p) =
+−0.84`, so `A_HCD` is strongly coupled to both forest-amplitude directions at once.
+
+![Posterior correlation matrix (A_p, n_s, A_HCD, B_HCD, r_sub)](../../figures/analysis/04_emulator/degeneracy_fisher_corr_matrix.png)
+
+*Posterior correlation matrix (data Fisher + HCD priors) over the two cosmology parameters (`A_p`,
+`n_s`), the HCD amplitude `A_HCD`, its z-tilt `B_HCD` and the subDLA-to-LLS ratio `r_sub`. The
+boxed cell is `corr(A_HCD, n_s) = +0.83`. The data-only correlation (no HCD prior) is ≈ 0: the
+coupling is prior-mediated. `A_HCD` is pinned by its external prior, and that pinned amplitude reads
+to the forest as a change in `A_p`/`n_s`. The z-tilt `B_HCD` is nearly orthogonal to `A_p`
+(`corr ≈ −0.27`) but is data-starved, so it cannot break the coupling (see below).*
+
+The mechanism is the damping wing. An HCD's low-k power excess, from its damping wing, looks over the
+DESI band almost exactly like a change in the forest amplitude, and that low-k confusion is the
+degeneracy: the data alone cannot fully separate "more LLS" from "more `A_p` or a different `n_s`."
+That is why the off-diagonal correlation is large, and why it is *prior*-mediated rather than
+intrinsic to the data. With no HCD prior the data place almost no constraint on `A_HCD`, so its
+correlation with the cosmology is ≈ 0; it is only once the external incidence prior pins `A_HCD` that
+the pinned amplitude propagates into the forest plane and the `+0.83` correlation appears. The
+practical consequence is that a ±1σ shift in where we centre the HCD-amplitude prior drags `n_s` by
+roughly 0.5σ. This factorises exactly as 0.5σ = corr(A_HCD, n_s) × prior-dominance ≈ 0.83 × 0.62, so
+it is a real and irreducible systematic: a tighter prior shrinks the prior-dominance factor but
+leaves the correlation untouched, and therefore cannot remove the coupling.
+
+The geometry behind the correlation is the projection of the LLS template into the forest plane,
+shown next. It quantifies the same degeneracy as an in-plane fraction: how much of the whitened LLS
+template lies inside the forest (`A_p`, `n_s`) directions the data constrain.
+
+![LLS template projected into the forest (A_p, n_s) plane](../../figures/analysis/04_emulator/degeneracy_lls_inplane_projection.png)
+
+*The pure-LLS amplitude template projected into the C_data-whitened forest (`A_p`, `n_s`) plane.
+Left (DESI leg): the template lies 93% inside the forest plane (`|cos(LLS, A_p)| = 0.84`; only ~7%
+orthogonal). Right: how much of the template the forest can absorb: 93% on DESI's (`A_p`, `n_s`),
+98% once the τ₀ nuisances are added, dropping to 65% on the high-k KS leg. These are the
+single-fiducial Fisher ref-script (DESI-leg) values; the joint DESI+KS panel headline is 91%
+in-plane on DESI / 64% on KS with `cos(LLS, A_p) = 0.81`, consistent to ~2% (the small offset is the
+single-fiducial-vs-joint method difference, not a disagreement).*
+
+The drop from 91% in-plane on DESI to 64% on the high-k KS leg is the degeneracy-breaker. It is not
+the damping wing in general but specifically its high-k Voigt deficit: that high-k shape is what KS
+sees and what separates LLS from a pure amplitude change (the cure), whereas the low-k excess is what
+mimics the amplitude in the first place (the confusion). The z-tilt of the HCD incidence (`B_HCD`) is
+genuinely orthogonal to `A_p`, but it carries far too little signal to help, which is why the
+correlation matrix above is unchanged when it is marginalised.
+
+To see this degeneracy in a full posterior rather than at the Fisher level, the eBOSS-like mock closure corner
+of Demo B above (`eboss_corner_cosmo_E_f6.png`) shows the `n_s`–`α` contours directly. The
+correlation matrix here is the primary summary; the corner is the worked example.
+
+Two points follow for the real fit. First, the accuracy of the external LLS-incidence prior centre
+matters, because a wrong centre is the 0.5σ-per-1σ systematic. Second, the genuine
+degeneracy-breaker is the high-k KS leg together with the damping-wing high-k Voigt deficit (the
+low-k excess is the confusion, the high-k deficit is the cure), not a tighter incidence prior. The
+full derivation, the correlation matrix and the factorisation 0.5σ = corr × prior-dominance are in
+notes `hcd_priya_notes/docs/superpowers/2026-06-14-hcd-cosmology-degeneracy.md`, with the related figures
+`degeneracy_prior_center_law.png` and `degeneracy_snr_amplitude_vs_ztilt.png` in the notes
+`04_emulator/`. All three correlation/projection figures are reproduced by
+`scripts/diag_hcd_cosmo_degeneracy_ref.py`.
+
+---
+
+## 8. Likelihood & inference
+
+This is the layer the demos above exercise: the differentiable Gaussian likelihood together with
+the priors, which is everything a sampler needs.
+
+- `inference.log_lik_single_z` / `log_lik_multiz`: the differentiable per-z / multi-z Gaussian
+  log-likelihood. The per-class **emulator covariance** is
+  `emu_var = Σ_c coef_c²·σ_c(k,z,τ₀)²·P_c²` with `coef = [1−Σα, α_LLS, α_subDLA, α_DLA]`;
+  it is logdet-bearing (`likelihood.gaussian_loglik`, SPD jitter + Cholesky) and τ₀-aware
+  (`likelihood.sigma_at_tau0`).
+- `inference.hcd_incidence_prior`: the observed-centred, z-slope HCD incidence priors
+  (`HCD_LIT_OVER_SIM`, `HCD_PRIOR_FRAC_SIGMA`, …). The θ prior is smooth and bounded (no `-inf`
+  wall, so NUTS always gets finite gradients).
+- `closure_diagnostics.py`: the SBC / closure machinery: `ecdf_pit_bands` (Säilynoja, Bürkner &
+  Vehtari 2022, Stat. Comput. 32, 32; simultaneous ECDF bands, our primary calibration gate),
+  `loglik_rank` (Modrák et al. 2023, Bayesian Analysis,
+  [arXiv:2211.02383](https://arxiv.org/abs/2211.02383)), `whitening_test`, `empirical_coverage`,
+  `calibrate_cemu_inflate`. All NUTS-free and fast.
+
+The closures these tools drive validate the architecture that the production all-sims N=5 ensemble
+inherits; the ensemble-level production SBC is the final inference-calibration gate and remains
+pending before the real fit (notes `2026-06-14-validation-likelihood-production.md` §6).
+
+See `hcd_priya_notes/docs/superpowers/plans/2026-06-04-phase-c-t4-closure-plan.md` for the closure/SBC harness
+(Phase-C T4, in progress) and `hcd_priya_notes/docs/superpowers/2026-06-04-phase-c-checkpoint-review.md` for the
 latest 4-agent review status.
 
 ---
 
-## 9. Module map
+## 9. Blinding the real-data fit (A_p, n_s)
+
+The real-data cosmology fit is run blind so that no analysis choice can be tuned, consciously or
+not, towards a preferred answer. The blind is implemented in `hcd_analysis/emulator/blinding.py`
+and driven by `scripts/run_real_fit.py`.
+
+### What is blinded, and why parameter-blind
+
+The fit is parameter-blind on exactly the two cosmology parameters the measurement reports: the
+spectral index `n_s` and the forest power amplitude `A_p`. No other parameter is blinded. The blind
+is a hidden additive offset on the inferred values,
+
+```
+θ_shown = θ_inferred + δ ,     δ_{A_p, n_s} ~ Uniform(−3σ_prior, +3σ_prior),
+```
+
+drawn once and fixed. We blind on the posterior rather than on the data because a data-side
+cosmology shift would be partly absorbed by the mean-flux and HCD nuisances (the τ₀/nuisance
+degeneracy) and so would not cleanly hide the cosmology. A constant additive offset on the final
+inferred `A_p`/`n_s` columns is an exactly invertible hide that the analysis cannot see through
+(every downstream summary is computed on `θ_shown`), yet it unblinds with a single subtraction.
+
+### The mechanism
+
+`σ_prior` is the standard deviation of the uniform NUTS prior over the sampling box
+(`data.SAMPLING_LIMITS`): `σ_prior = (hi − lo)/√12`. Numerically (from `blind.lock`),
+`σ(A_p) = 4.04e-10` and `σ(n_s) = 0.0722`. The ±3σ window is wider than the expected posterior
+(the data constrain `A_p`/`n_s` far better than the prior), so the blind genuinely hides the headline
+while remaining a fixed, reproducible transform.
+
+The offset is derived deterministically from a SHA256 seed string, salted per parameter so the two
+offsets are independent: `u = SHA256("{seed_str}|{param}")` read as a `[0,1)` fraction, then
+`δ = (2u − 1)·(3·σ_prior)`. The seed string is `seed_str = "{project_string}@{git_commit}"`. The
+frozen lock (`blind.lock` at the repo root) has `project_string = "hcd_priya_real_fit_v1"` and
+`git_commit = "aefaf51"`, so `seed_str = "hcd_priya_real_fit_v1@aefaf51"`.
+
+`blind.lock` stores the seed only: the project string, the commit, `seed_str`, `blind_params`,
+`σ_prior` and the ±3σ multiple. It deliberately does not store the offset values; the offset is
+recomputed from the seed at view time. `write_blind_lock` refuses to overwrite an existing lock, so
+the seed is frozen once written.
+
+The offset is applied at export time, not baked into the chains: only the `A_p` and `n_s` values
+move. Sampler health (R̂, divergences, ESS, E-BFMI) and all nuisance parameters (τ₀, dτ₀, α_HCD per
+class, the z-slope, a_SiIII) remain fully visible, so convergence and the nuisance posteriors can be
+judged while blind.
+
+### The protocol
+
+The locked order is: production SBC → freeze the analysis (config, emulator ensemble and priors all
+fixed) → blind → unblind once. Unblinding happens a single time, only after the analysis is frozen
+and the production-ensemble SBC gate passes. That production SBC is still pending.
+
+### Artifacts and where they live
+
+`scripts/run_real_fit.py` runs 4 dispersed NUTS chains per survey and writes GetDist/cobaya chains:
+`<root>.{c}.txt` + `<root>.paramnames` + `<root>.yaml` + `<root>.health.json`. Each `.txt` row is
+`weight  minusloglike  <θ9...>  <nuisances...>`; with `blind=True` (the default) the `A_p`/`n_s`
+columns of the θ9 block are shifted by `δ` at export (`export_getdist`), not in the in-memory chains.
+The `.health.json` carries the sampler diagnostics and is unblinded-safe; reading health does not
+reveal cosmology.
+
+DESI and eBOSS are fit separately, not jointly. The eBOSS and KS chains are public
+(`results/real_fit/`); the DESI chains are private and gitignored (`results_local/desi_production/`).
+The KS baseline is `z_lo = 2.4`; a `z_lo = 2.8` run is a diagnostic comparison.
+
+### How to unblind
+
+Unblinding is the exact inverse, `θ_inferred = θ_shown − δ`, applied to the `A_p`/`n_s` columns only.
+The public API:
+
+```python
+from hcd_analysis.emulator import blinding as BL
+offset = BL.offset_from_lock("blind.lock")              # recompute δ from the frozen seed
+unblinded = BL.unblind(samples, offset, columns=names)  # subtract δ on A_p / n_s only
+```
+
+where `samples` is the `(N, P)` GetDist sample matrix and `names` its column names (the
+`.paramnames` order). To re-run the fit unblinded from scratch, `run_real_fit.py` exposes
+`--no-blind`, documented in-code as the danger path to be used only after freeze and the authorized
+unblind.
+
+Per the project's privacy policy the actual unblinding is run by the PI. The eBOSS+KS unblinding
+notebook lives in the private notes repository, not here:
+`hcd_priya_notes/notebooks/2026-06-15-unblind_eboss_ks.ipynb`. DESI cosmology results are private,
+and no unblinded numbers are reproduced in this public README.
+
+To unblind (PI, once, post-freeze):
+1. confirm the production SBC passed and the analysis is frozen;
+2. confirm `blind.lock` is the intended frozen seed;
+3. open the private notebook (or call `BL.unblind`, or re-run with `--no-blind`);
+4. it is a one-time reveal; record the date.
+
+---
+
+## 10. Module map
 
 | file | role |
 |---|---|

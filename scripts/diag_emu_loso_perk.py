@@ -41,7 +41,8 @@ from hcd_analysis.emulator.predict import predict_P_filt
 from hcd_analysis.emulator.closure_legb import CACHE_PATH, held_out_sims
 
 REPO = "/home/mfho/hcd_priya"
-FIGDIR = f"{REPO}/figures/analysis/04_emulator"
+# validation figure → PRIVATE notes repo (the code README is reproduction/quickstart only)
+FIGDIR = "/home/mfho/hcd_priya_notes/figures/analysis/06_validation_summary"
 FIG = f"{FIGDIR}/loso_perk_pred_error.png"
 NPZ = f"{FIGDIR}/loso_perk_pred_error.npz"
 CLASSES = ["clean", "LLS", "subDLA", "DLA"]
