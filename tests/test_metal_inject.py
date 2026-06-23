@@ -23,7 +23,12 @@ def test_eboss_matches_mcdonald():
     f = 0.009
     out = C.metal_inject(P, K, FBAR, form="eboss", f_SiIII=f)
     aa = f / (1.0 - FBAR)
-    ref = P * (1.0 + aa ** 2 + 2.0 * aa * np.cos(2271.0 * K))
+    # McDonald SiIIIcorr form, evaluated at the code's OWN line constants:
+    # dv_SiIII = c*ln(lambda_Lya/lambda_SiIII) = 2269.96 km/s. The eboss branch was unified to
+    # this computed value (from the rounded literature 2271.0) on 2026-06-23 for internal
+    # consistency with the desi_full branch.
+    dv_SiIII = DL.C_KMS * np.log(DL.LAMBDA_LYA / DL.LAMBDA_SiIII)
+    ref = P * (1.0 + aa ** 2 + 2.0 * aa * np.cos(dv_SiIII * K))
     np.testing.assert_allclose(out, ref, rtol=1e-12, err_msg="eboss != McDonald SiIIIcorr")
 
 

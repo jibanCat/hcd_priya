@@ -173,7 +173,7 @@ _THETA_UNIT_LO, _THETA_UNIT_HI = sampling_unit_bounds()
 #     (1190.42/1193.28 Å, ratio r), both as sigmoid-decorrelated multiplicative cross-terms, PLUS
 #     an ADDITIVE same-ion SiII–SiII term (Gaussian-damped, intra-doublet frequency) — the piece a
 #     multiplicative (1+f) factor STRUCTURALLY cannot match (the bias probe).
-#   form="eboss" — the McDonald/eBOSS SiIIIcorr (lya_emulator_full): 1 + aa² + 2aa·cos(2271·k),
+#   form="eboss" — the McDonald/eBOSS SiIIIcorr (lya_emulator_full): 1 + aa² + 2aa·cos(Δv_SiIII·k),
 #     aa = f_SiIII/(1−⟨F⟩), NO decorrelation, SiIII only.
 # Amplitudes are f_X (the metal flux decrement); the effective oscillation amplitude is A_X =
 # f_X/(1−⟨F⟩). Defaults: f_SiIII≈0.009 (PRIYA-eBOSS), SiII/SiII-SiII sub-dominant.
@@ -186,7 +186,10 @@ def metal_inject(P, k, mean_flux, *, form="desi_full", f_SiIII=0.009, f_SiII=0.0
     one_minus_F = max(1.0 - float(mean_flux), 1e-3)
     A3 = f_SiIII / one_minus_F
     if form == "eboss":                                   # McDonald/eBOSS SiIIIcorr, no decorrelation
-        return P * (1.0 + A3 ** 2 + 2.0 * A3 * np.cos(2271.0 * k))
+        # dv_SiIII from the code's own line constants (= 2269.96 km/s), consistent with the
+        # desi_full branch below; previously a hardcoded 2271.0 (the rounded literature anchor).
+        dv_SiIII = DL.C_KMS * np.log(DL.LAMBDA_LYA / DL.LAMBDA_SiIII)
+        return P * (1.0 + A3 ** 2 + 2.0 * A3 * np.cos(dv_SiIII * k))
     # --- desi_full ---
     dvA = DL.C_KMS * np.log(DL.LAMBDA_LYA / DL.LAMBDA_SiIII)     # Lyα–SiIII
     dva = DL.C_KMS * np.log(DL.LAMBDA_LYA / DL.LAMBDA_SiII)      # Lyα–SiII line a (1190.42)

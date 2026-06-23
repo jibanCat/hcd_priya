@@ -49,8 +49,9 @@ C_KMS = 299792.458            # speed of light [km/s]
 LAMBDA_LYA = 1215.67          # Lyα rest wavelength [Å]
 LAMBDA_SiIII = 1206.50        # SiIII line [Å]
 LAMBDA_SiII = 1190.42         # SiII line [Å]  (1190/1193 doublet; use 1190.42 leading line)
-# McDonald (2006) metal-damping smoothing scale [s/km] (companion Eq. 4.3).
-# SiIII/SiII–Lyα decorrelation scale k_x (companion arXiv:2601.21432 Eq. 4.3): the cosine
+# SiIII/SiII–Lyα decorrelation scale k_x [s/km] (DESI DR1 companion arXiv:2601.21432 Eq. 4.3).
+# NOTE: this sigmoid damping is the companion's ADDITION, NOT in McDonald 2006 (whose SiIII
+# cross-term is undamped). The cosine
 # cross-term is multiplied by the SIGMOID D_x(k)=2−2/(1+exp(−k/k_x)); k_x is a FREE nuisance
 # the sampler fits. These are off-state defaults (irrelevant when a=0; metals default OFF).
 K_SiIII_DEFAULT = 0.05         # s/km, sigmoid decorrelation scale (free nuisance)
