@@ -1,52 +1,80 @@
-# Phase-2b emulator — performance walkthrough (both heads)
+# Phase-2b emulator performance walkthrough (both heads)
 
-Figure-by-figure accuracy and response of the Phase-2b emulator, both heads:
+The emulator is a fast stand-in for the simulation: given cosmological and nuisance
+parameters, it predicts the **P1D** (one-dimensional flux power spectrum of the **Lyman-α
+(Lyα) forest**) in milliseconds instead of millions of CPU-hours. We call the cosmological
+parameters **θ** and the mean-flux (optical-depth) nuisance parameter **τ₀**. This document
+walks through the accuracy and response of the Phase-2b emulator, figure by figure, for both
+of its two prediction channels (its two "heads"):
 
-- **Head B** — the Lyα **P1D / cosmology** channel: the θ-blind baseline `m̂(z,τ₀)` plus
-  the σ_cosmo-whitened cosmology residual `r̂(θ,z,τ₀)`, the **multi-fidelity** LF→HF high-k
-  correction, and the `R_c` HCD excess templates.
-- **Head A** — the τ₀-invariant **CDDF `f_NHI`** and **`dN/dX`** incidence channel, which
-  sets the structural class weights `w_c` (→ `P_tier_p`) and the `α_c` prior center.
+- **Head B**, the Lyα **P1D / cosmology** channel: it predicts the contaminated flux power
+  spectrum. We split that prediction into a θ-blind baseline `m̂(z,τ₀)` (the part that does
+  *not* depend on θ) plus the σ_cosmo-whitened cosmology residual `r̂(θ,z,τ₀)` (whitened =
+  rescaled to unit variance so the network learns a well-conditioned target). Head B also
+  carries the **multi-fidelity** (low-resolution → high-resolution, LF→HF) high-k correction
+  and the `R_c` HCD (high-column-density absorber) excess templates.
+- **Head A**, the τ₀-invariant incidence channel: it predicts how *often* absorbers of each
+  class appear. It outputs the **CDDF** (column-density distribution function) `f_NHI` and the
+  incidence rate **`dN/dX`** (absorbers per unit absorption path length). These set the
+  structural class weights `w_c` (→ `P_tier_p`) and the `α_c` prior center. A **class** is an
+  absorber type sorted by hydrogen column density (LLS, Lyman-limit systems; subDLA; and DLA,
+  damped Lyα systems) plus the "clean" forest.
 
-## Two emulator objects — the honest framing (`--emulator {loso,ensemble}`)
+## Two emulator objects (`--emulator {loso,ensemble}`)
 
-Two regimes, selected by `--emulator`:
+We keep two emulator objects in play and never confuse one for the other, since accuracy on
+the training sims says little about generalization. The two regimes are selected by
+`--emulator`:
 
-- **`loso` (default)** — every panel on the **8 finalized LOSO checkpoints**
-  `checkpoints/final_fold{0..7}.eqx` (the `FINAL_RECIPE`, via `train.load_checkpoint`),
-  evaluated on **each fold's held-out sims**. This is the honest **out-of-sample
-  generalization** accuracy. Byte-identical to the original LOSO walkthrough.
+- **`loso` (default)**: LOSO is **leave-one-simulation-out**, train on all sims but one then
+  test on the one left out. Every panel runs on the **8 finalized LOSO checkpoints**
+  `checkpoints/final_fold{0..7}.eqx` (the `FINAL_RECIPE`, via `train.load_checkpoint`), each
+  evaluated on **its own held-out sims**. This is the honest **out-of-sample generalization**
+  accuracy. Byte-identical to the original LOSO walkthrough.
 
-- **`ensemble`** — the **deployed production ensemble**
-  `checkpoints/final_prod_seed{0..4}.eqx`, 5 members trained on **all sims** (no holdout) —
-  the object the real fit uses. The deployed prediction is the **mean over members of the
-  reconstructed (post-exp) linear `P_filt`** (mean taken after `exp` because `P_filt` is
-  exp-nonlinear; all members share one norm), mirroring `predict.predict_P_filt` /
-  `ensemble.EnsembleEmulator` exactly as `run_prod_sbc_shard.py` /
-  `build_legb_ctx(ensemble_ckpts=…)` invoke it. For Head-A (`f_NHI`/`dN/dX`) the deployed
-  prediction is the **mean of the per-member physical outputs**.
+- **`ensemble`**: the **deployed production ensemble**, the object the real fit actually uses.
+  An **ensemble** is several independently-trained **members** whose predictions we average;
+  here `checkpoints/final_prod_seed{0..4}.eqx`, 5 members trained on **all sims** (no holdout).
+  The deployed prediction is the **mean over members of the reconstructed (post-exp) linear
+  `P_filt`**: we reconstruct each member's `P_filt` first and average afterward. We average
+  *after* the `exp` because `P_filt` is exp-nonlinear (all members share one norm). This
+  mirrors `predict.predict_P_filt` / `ensemble.EnsembleEmulator` exactly as
+  `run_prod_sbc_shard.py` / `build_legb_ctx(ensemble_ckpts=…)` invoke it. For Head-A
+  (`f_NHI`/`dN/dX`) the deployed prediction is instead the **mean of the per-member physical
+  outputs**.
 
-**The load-bearing point.** The production ensemble **saw every sim**, so its pred-vs-true
-is **in-sample** — a fit-quality / convergence check, **not generalization**. Each figure is
-classified and treated accordingly; in-sample accuracy is never relabelled as a
-generalization claim:
+**The load-bearing point.** The production ensemble **saw every sim**, so comparing its
+predictions to truth on those same sims is **in-sample**: a fit-quality / convergence check,
+**not generalization**. Each figure is classified and treated accordingly, and in-sample
+accuracy is never relabelled as a generalization claim. Each falls into one of three
+categories. A **deployed-object property** is a response or template the real fit literally
+uses, read straight off the production ensemble. An **accuracy / pred-vs-true** figure must
+carry the honest held-out curve. An **inherently-LOSO** figure measures a per-fold spread that
+only exists when you hold sims out, so it stays LOSO regardless of the `--emulator` flag.
 
 | class | figures | `ensemble` treatment |
 |---|---|---|
-| **Deployed-object PROPERTY** (responses/templates the real fit literally uses) | B3 cosmology_response · B4 theta_tracking · B6 mf_high_k · B7 delta_c_templates · A5 alpha_prior_sanity | Regenerated **from the production ensemble** — these legitimately *become* the deployed responses. Labelled "deployed production ensemble (all-sims)". |
+| **Deployed-object PROPERTY** (responses/templates the real fit literally uses) | B3 cosmology_response · B4 theta_tracking · B6 mf_high_k · B7 delta_c_templates · A5 alpha_prior_sanity | Regenerated **from the production ensemble**; these legitimately *become* the deployed responses. Labelled "deployed production ensemble (all-sims)". |
 | **ACCURACY / pred-vs-true** | B1 · B2 · A1 · A2 · A3 | **Overlay both**: solid/dashed = LOSO **held-out** (the real accuracy claim), dotted = **in-sample** ensemble on the **same rows** (the deployed-fit reference). The held-out curve is never dropped. |
-| **Inherently-LOSO generalization** | B5 fisher_bias_perfold · A4 head_a_error_heatmap | **Kept as LOSO held-out** (companion validation — the ensemble has no held-out by construction; we do not fake an ensemble version). |
+| **Inherently-LOSO generalization** | B5 fisher_bias_perfold · A4 head_a_error_heatmap | **Kept as LOSO held-out** (companion validation; the ensemble has no held-out by construction, so we do not fake an ensemble version). |
 | **Literature comparison** (emulator-object-independent) | A6 dndx_vs_literature · A7 cddf_vs_literature | Independent of the checkpoint; generated by sibling scripts (`plot_dndx_vs_literature.py`, `plot_cddf_vs_literature.py`). |
 
-`headline_numbers.json` is **dual-keyed**: `loso_held_out` (generalization accuracy) and,
-in ensemble mode, `ensemble_in_sample` (the deployed all-sims fit) — never conflated.
+`headline_numbers.json` is **dual-keyed** and never conflated: `loso_held_out` (generalization
+accuracy) and, in ensemble mode, `ensemble_in_sample` (the deployed all-sims fit).
 
-**Reconstruction.** `logP_filt = (m̂·σ_marg + μ_marg) + σ_cosmo·r̂`. For a single LOSO net
-`∂lnP/∂θ = σ_cosmo·∂r̂/∂θ`; for the ensemble the deployed response is `∂ln(mean_m P_filt)/∂θ`.
+**Reconstruction.** We assemble the prediction from the baseline plus the residual as
+`logP_filt = (m̂·σ_marg + μ_marg) + σ_cosmo·r̂`; splitting a θ-blind baseline `m̂` from a small
+cosmology-dependent residual `r̂` is easier for the network to learn than the full spectrum at
+once. The remaining symbols (`σ_marg`, `μ_marg`, `σ_cosmo`) are the normalization stats that
+rescale each piece back to physical units. The gradient-based likelihood needs the **response**
+`∂lnP/∂θ`, the derivative of the predicted spectrum with respect to each cosmological
+parameter. For a single LOSO net the only θ-dependence is through `r̂`, so
+`∂lnP/∂θ = σ_cosmo·∂r̂/∂θ`; for the ensemble the deployed response is taken through the averaged
+prediction, `∂ln(mean_m P_filt)/∂θ`.
 
 **Regenerate:**
 ```
-# DEPLOYED production ensemble (the object the real fit uses) — with retained LOSO overlays:
+# DEPLOYED production ensemble (the object the real fit uses), with retained LOSO overlays:
 PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
   /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_performance_walkthrough.py --emulator ensemble
 
@@ -58,32 +86,38 @@ PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBL
 
 ## Headline numbers (`--emulator ensemble`)
 
-In-sample is ≤ held-out — as it must be, since the ensemble saw these sims in training
-(the lone exception is B1-LLS, where 3 hand-picked fold-0 rows make the in-sample 0.44%
-vs held-out 0.38% a small-sample fluctuation; the robust full-population B2 has LLS
-in-sample 0.57% < held-out 1.16%). The **held-out** column is the accuracy claim; the
-**in-sample** column is the deployed all-sims fit (a convergence reference, not generalization).
+These tables collect the one-line accuracy figures from every panel below. Errors are mostly
+quoted as a fractional **RMS** (root-mean-square of `pred/true − 1`) or as a median and
+95th-percentile (p95). The **held-out** column is the honest accuracy claim; the **in-sample**
+column is the deployed all-sims fit (a convergence reference, not generalization).
+
+We find in-sample ≤ held-out, as it must be since the ensemble saw these sims in training. The
+lone exception is B1-LLS, where 3 hand-picked fold-0 rows make the in-sample 0.44% vs held-out
+0.38% a small-sample fluctuation; the robust full-population B2 has LLS in-sample 0.57% <
+held-out 1.16%.
 
 | head | metric (regime) | LOSO held-out | in-sample ensemble |
 |---|---|---|---|
-| **B** | deployed in-range frac-P1D RMS — clean / LLS / subDLA / DLA (B2) | **1.1 / 1.2 / 1.3 / 2.5 %** | **0.5 / 0.6 / 0.7 / 1.6 %** |
+| **B** | deployed in-range frac-P1D RMS, clean / LLS / subDLA / DLA (B2) | **1.1 / 1.2 / 1.3 / 2.5 %** | **0.5 / 0.6 / 0.7 / 1.6 %** |
 | **B** | honest within-cell θ-tracking corr / spread-ratio (B4) | 0.98 / 1.02 *(loso)* | **0.996 / 1.001** *(deployed)* |
-| **A** | `dN/dX` median \|frac err\| — LLS / subDLA / DLA (A1) | **1.6 / 1.6 / 1.3 %** | **0.5 / 0.5 / 0.6 %** |
+| **A** | `dN/dX` median \|frac err\|, LLS / subDLA / DLA (A1) | **1.6 / 1.6 / 1.3 %** | **0.5 / 0.5 / 0.6 %** |
 | **A** | CDDF `f_NHI` median / p95 \|frac err\| (A2) | **2.3 % / 34 %** | **1.1 % / 30 %** |
 | **A** | structural `P_tier_p` faithfulness median / p95 (A3) | **0.04 % / 0.22 %** | **0.01 % / 0.05 %** |
 
-Deployed-object properties (ensemble) — these *are* what the real fit uses:
+Deployed-object properties (ensemble), what the real fit uses:
 
 | metric | value |
 |---|---|
 | **B3** cosmology-response \|∂lnP/∂θ\|_rms: n_s / A_p / hub | 0.199 / 0.104 / 0.214 |
 | **B6** MF KODIAQ-band frac err: MF vs LF-extrapolated (clean) | **0.18 vs 0.77** (~4× cut) |
 
-LOSO companion (always the held-out folds, regardless of `--emulator`):
+LOSO companion (always the held-out folds, regardless of `--emulator`). The **Fisher-bias** is
+how far the emulator's residual would pull a recovered cosmological parameter, in units of σ
+(the posterior width). A bias of 0.067σ is well under a tenth of a posterior width:
 
 | metric | value |
 |---|---|
-| **B5** per-fold A_p Fisher-bias RMS / max | **0.067 / 0.131 σ** (gate \|bias\|<0.2σ — all 8 pass) |
+| **B5** per-fold A_p Fisher-bias RMS / max | **0.067 / 0.131 σ** (gate \|bias\|<0.2σ, all 8 pass) |
 | **B5** per-fold n_s Fisher-bias RMS / max | **0.071 / 0.131 σ** (all 8 pass) |
 
 Raw numbers: `headline_numbers.json` (dual-keyed). Source:
@@ -91,146 +125,175 @@ Raw numbers: `headline_numbers.json` (dual-keyed). Source:
 
 ---
 
-# HEAD B — P1D / cosmology
+# HEAD B: P1D / cosmology
 
-## B1 — Predicted vs true per-class P1D — *ACCURACY (overlay)*
+## B1. Predicted vs true per-class P1D (*accuracy, overlay*)
 
 ![](B1_pred_vs_true_p1d.png)
 
-Reconstructed **linear** P1D vs the cache for the 3 best-sampled fold-0 sims per class,
-log-log with a `pred/true − 1` subpanel. **solid = true · dashed = LOSO held-out
+An eyeball overlay of predicted P1D on truth. We plot the reconstructed **linear** P1D against
+the cache (the stored simulation truth) for the 3 best-sampled fold-0 sims per class, log-log,
+with a `pred/true − 1` subpanel underneath. **solid = true · dashed = LOSO held-out
 (out-of-sample) · dotted = in-sample ensemble (saw these sims)**; grey = below the DESI
 `k_min`. The held-out residual RMS is the accuracy claim; the in-sample ensemble RMS is the
-deployed-fit reference. Both hug zero across the resolved range and turn over only at the
-per-row Nyquist edge.
+deployed-fit reference. We find both hug zero across the resolved range and turn over only at
+the per-row Nyquist edge.
 
-## B2 — Deployed per-class fractional P1D error vs k — *ACCURACY (overlay)*
+## B2. Deployed per-class fractional P1D error vs k (*accuracy, overlay*)
 
 ![](B2_deployed_frac_err_vs_k.png)
 
-`|pred/true − 1|` over **all 8 folds'** val rows, in the DESI range. **solid + IQR = LOSO
-held-out (out-of-sample); dashed = in-sample ensemble on the same rows; dotted black =
-cosmic-variance floor.** Held-out in-range RMS: clean **1.1%** / LLS **1.2%** / subDLA
-**1.3%** / DLA **2.5%**; the in-sample ensemble sits ~2× lower (clean **0.5%** … DLA
-**1.6%**) — the expected in-sample gain, not a generalization improvement. Clean held-out
-error sits essentially at the CV floor.
+The robust population statistic: fractional error vs wavenumber `k`, aggregated over every
+fold. We plot `|pred/true − 1|` over **all 8 folds'** validation rows, in the DESI range.
+**solid + IQR = LOSO held-out (out-of-sample); dashed = in-sample ensemble on the same rows;
+dotted black = cosmic-variance floor** (the irreducible scatter from a finite simulation
+volume; IQR = inter-quartile range, the middle 50% of rows). We find the held-out in-range RMS
+is clean **1.1%** / LLS **1.2%** / subDLA **1.3%** / DLA **2.5%**; the in-sample ensemble sits
+~2× lower (clean **0.5%** … DLA **1.6%**), the expected in-sample gain rather than a
+generalization improvement. Notably, the clean held-out error sits essentially at the
+cosmic-variance (CV) floor.
 
-## B3 — Deployed cosmology response ∂lnP/∂θ vs k — *DEPLOYED-OBJECT PROPERTY*
+## B3. Deployed cosmology response ∂lnP/∂θ vs k (*deployed-object property*)
 
 ![](B3_cosmology_response.png)
 
-The differentiable readout the real fit's HMC consumes, from the **production ensemble** via
-`jax.jacfwd` of `ln(mean_m P_filt)`, per class, at a representative point; each panel title
-gives the in-range RMS response amplitude. `n_s` (tilt) flips sign across k; `A_p` and `h`
-carry the largest broadly-coherent amplitudes; the reionization and feedback params are
-small and smooth. Smooth, k-resolved sensitivities are what a gradient likelihood needs.
+The **response**: how strongly the predicted spectrum moves when we nudge each cosmological
+parameter, the differentiable readout the real fit's HMC (Hamiltonian Monte Carlo) consumes.
+Computed from the **production ensemble** via `jax.jacfwd` (forward-mode autodiff) of
+`ln(mean_m P_filt)`, per class, at a representative point; each panel title gives the in-range
+RMS response amplitude. We find `n_s` (the spectral tilt) flips sign across k; `A_p` and `h`
+carry the largest broadly-coherent amplitudes; and the reionization and feedback params are
+small and smooth, the smooth k-resolved sensitivities a gradient likelihood needs.
 
-## B4 — θ-tracking + honest (a)/(b) decomposition — *DEPLOYED-OBJECT PROPERTY*
+## B4. θ-tracking + honest (a)/(b) decomposition (*deployed-object property*)
 
 ![](B4_theta_tracking.png)
 
-**Left:** within-cell θ-tracking of the **deployed ensemble** (in-sample on fold-0 sims),
-predicted vs true log-P1D deviation referenced to the baseline `m̂`; corr **0.996**,
-spread-ratio **1.001**. **Right:** the deployed whitened cosmology-signal error split into
-**(a)** residual-head fit and **(b)** σ_cosmo-amplified baseline mis-fit. For the ensemble
-`m̂` is the mean-of-member baseline and the prediction is `log(mean post-exp P_filt)`, so the
-(a)/(b) algebra stays exact for the deployed object.
+Whether the emulator tracks the *right* cosmology signal, point for point. **Left:** within-cell
+θ-tracking of the **deployed ensemble** (in-sample on fold-0 sims), predicted vs true log-P1D
+deviation measured relative to the baseline `m̂` to isolate the cosmology-dependent part. A
+correlation of **0.996** and a spread-ratio of **1.001** mean the cosmology signal lines up
+almost perfectly with truth and has the right amplitude. **Right:** we split the deployed
+whitened cosmology-signal error into two sources, **(a)** how well the residual head `r̂` fits
+and **(b)** the σ_cosmo-amplified mis-fit of the baseline `m̂`. For the ensemble, `m̂` is the
+mean-of-member baseline and the prediction is `log(mean post-exp P_filt)`, so the (a)/(b)
+algebra stays exact for the deployed object.
 
-## B5 — Per-fold A_p & n_s Fisher-bias — *INHERENTLY-LOSO companion*
+## B5. Per-fold A_p & n_s Fisher-bias (*inherently-LOSO companion*)
 
 ![](B5_fisher_bias_perfold.png)
 
-The inference gate, on the **8 LOSO held-out folds** (the ensemble has no held-out by
-construction, so this stays LOSO regardless of `--emulator`). DESI-DR1-like diagonal
-per-mode covariance, fiducial z=3. **All 8 folds pass** both params: A_p RMS **0.067σ** (max
-0.131σ), n_s RMS **0.071σ** (max 0.131σ). A small, sign-mixed spread with no systematic
-offset.
+The inference gate: it converts the emulator's residual error into how much that error would
+bias a recovered cosmological parameter, and checks it stays small. We run it on the **8 LOSO
+held-out folds** (the ensemble has no held-out by construction, so this stays LOSO regardless
+of `--emulator`), using a DESI-DR1-like diagonal per-mode covariance at fiducial z=3. We find
+**all 8 folds pass** for both parameters: A_p RMS **0.067σ** (max 0.131σ), n_s RMS **0.071σ**
+(max 0.131σ). The spread is small and sign-mixed with no systematic offset, so the typical fold
+injects under a tenth of a posterior width.
 
-## B6 — Multi-fidelity high-k — *DEPLOYED-OBJECT PROPERTY*
+## B6. Multi-fidelity high-k (*deployed-object property*)
 
 ![](B6_mf_high_k.png)
 
-The multi-fidelity gain at high k (independent of the main-emulator checkpoint: LF backbone
-+ the `ρ(k,z)`-only `FixedMeanHead`, the production default). HF-LOSO RMS fractional error
-vs k for **MF** (blue) vs the **LF backbone extrapolated** (red dashed) and a
-**HF-standalone** 6-sim surrogate (green dotted); shaded = KODIAQ reach 0.07–0.2 s/km,
-dash-dot = LF Nyquist ~0.069. In the KODIAQ band MF ≈ **0.18** vs LF-extrapolated **0.77** —
-a ~4× reduction.
+The **multi-fidelity** (MF) correction stitches the many cheap low-fidelity (LF) runs together
+with the few expensive high-fidelity (HF) runs, so the emulator stays accurate at high k
+without paying for HF everywhere. It is independent of the main-emulator checkpoint (LF backbone
+plus the `ρ(k,z)`-only `FixedMeanHead`, the production default). We plot the HF-LOSO RMS
+fractional error vs k for **MF** (blue) against the **LF backbone extrapolated** (red dashed)
+and a **HF-standalone** 6-sim surrogate (green dotted); the shaded band marks the KODIAQ reach
+0.07–0.2 s/km, and the dash-dot line is the LF Nyquist ~0.069. We find that in the KODIAQ band
+MF ≈ **0.18** vs LF-extrapolated **0.77**, a ~4× reduction.
 
-## B7 — HCD class excess templates R_c — *DEPLOYED-OBJECT PROPERTY*
+## B7. HCD class excess templates R_c (*deployed-object property*)
 
 ![](B7_delta_c_templates.png)
 
-The per-HCD-class excess `R_c = P_c − P_clean` the forward model re-weights
-(`P_obs = P_clean + Σ_c α_c·R_c`), emulated **from the production ensemble** (predict_excess
-is ensemble-aware) over 4 z slices, symlog-y. LLS is now non-zero (the old `P_c^unf −
-P_c^filt` template gave Δ_LLS≡0); DLA overlays filtered (dotted) vs the unfiltered excess
-actually used. Smooth, z-ordered templates concentrated at low (out-of-range) k.
+The forward model accounts for HCD contamination by adding a fixed-shape, free-amplitude
+template `R_c` per class. `R_c = P_c − P_clean` is the extra power that class-c sightlines carry
+over the clean forest, added back as `P_obs = P_clean + Σ_c α_c·R_c` (`α_c` the free amplitude
+per class). We emulate them **from the production ensemble** (`predict_excess` is
+ensemble-aware) over 4 z slices, on a symlog y-axis. We find LLS is now non-zero (the old
+`P_c^unf − P_c^filt` template gave Δ_LLS≡0); for DLA we overlay the filtered version (dotted)
+against the unfiltered excess actually used. The templates are smooth, z-ordered, and
+concentrated at low (out-of-range) k.
 
 ---
 
-# HEAD A — dN/dX + CDDF
+# HEAD A: dN/dX + CDDF
 
-## A1 — dN/dX predicted vs true, per class vs z — *ACCURACY (overlay)*
+Head A predicts how often absorbers of each class occur. Its two outputs are the incidence rate
+`dN/dX` (absorbers per unit absorption path) and the CDDF `f_NHI` (the distribution of absorbers
+across hydrogen column density), checked below against the simulation truth with the same
+held-out vs in-sample framing as before.
+
+## A1. dN/dX predicted vs true, per class vs z (*accuracy, overlay*)
 
 ![](A1_dndx_pred_vs_true.png)
 
-Head-A `dN/dX` fractional accuracy vs z. **solid/dashed = LOSO held-out median/p95
-(out-of-sample); dotted = in-sample ensemble median**; 2.5% target marked. Held-out median
-≈ **1.3–1.7%** in-range; in-sample ensemble ≈ **0.5–0.6%**. Error rises only at the off-DESI
-z extremes (count-limited).
+Fractional accuracy of the incidence rate `dN/dX` vs redshift z, class by class. **solid/dashed
+= LOSO held-out median/p95 (out-of-sample); dotted = in-sample ensemble median**; the 2.5%
+target is marked. We find the held-out median is ≈ **1.3–1.7%** in-range and the in-sample
+ensemble ≈ **0.5–0.6%**. The error rises only at the off-DESI z extremes, where the simulations
+have too few absorbers to pin it down (count-limited).
 
-## A2 — f_NHI / CDDF predicted vs true vs logN_HI — *ACCURACY (overlay)*
+## A2. f_NHI / CDDF predicted vs true vs logN_HI (*accuracy, overlay*)
 
 ![](A2_cddf_pred_vs_true.png)
 
-Head-A `f_NHI` accuracy per log-N_HI bin. **solid/dashed = LOSO held-out median/p95; dotted
-= in-sample ensemble median**; class boundaries marked, shot-noise tail (≥21.5) shaded,
-valid-row fraction on the right axis. Held-out median **2.3%** (p95 **34%**, set entirely by
-the shaded tail); in-sample ensemble median **1.1%**.
+CDDF `f_NHI` accuracy in each log-N_HI bin (N_HI = the neutral-hydrogen column density of the
+absorber). **solid/dashed = LOSO held-out median/p95; dotted = in-sample ensemble median**;
+class boundaries are marked, the shot-noise tail (≥21.5) is shaded, and the valid-row fraction
+is on the right axis. We find the held-out median is **2.3%** (the p95 of **34%** is set
+entirely by the shaded shot-noise-limited tail), and the in-sample ensemble median is **1.1%**.
 
-## A3 — w_c → P_tier_p coupling + faithfulness — *ACCURACY (overlay)*
+## A3. w_c → P_tier_p coupling + faithfulness (*accuracy, overlay*)
 
 ![](A3_wc_ptierp_coupling.png)
 
-**Left/middle:** the `w_c` round-trip (emulated vs true `dN/dX`) and `|Δw_c|` per class,
-LOSO held-out. **Right:** structural `P_tier_p` faithfulness — filled = LOSO held-out,
-dotted outline = in-sample ensemble. Held-out median **0.04%** / p95 **0.22%** (~10× inside
-the ≤2.5% target); in-sample ensemble **0.01% / 0.05%**.
+Head A's incidence outputs feed the class weights `w_c`, which build the structural total
+spectrum `P_tier_p`; this checks the chain stays faithful end to end. **Left/middle:** the `w_c`
+round-trip (weights rebuilt from emulated vs true `dN/dX`) and the per-class weight error
+`|Δw_c|`, LOSO held-out. **Right:** structural `P_tier_p` faithfulness, filled = LOSO held-out,
+dotted outline = in-sample ensemble. We find the held-out median is **0.04%** / p95 **0.22%**
+(~10× inside the ≤2.5% target), and the in-sample ensemble is **0.01% / 0.05%**.
 
-## A4 — Head-A error heatmap: class × z × fold — *INHERENTLY-LOSO companion*
+## A4. Head-A error heatmap: class × z × fold (*inherently-LOSO companion*)
 
 ![](A4_head_a_error_heatmap.png)
 
-Per-(class, z, fold) `dN/dX` median \|frac err\| (%) — one panel per HCD class, fold on y,
-z on x. **LOSO held-out** (the per-fold held-out spread only exists for the LOSO nets;
-always LOSO regardless of `--emulator`). Mostly cool (~1–2%), with hot cells only at the
-off-DESI z extremes and a few count-limited low-z subDLA/DLA cells — no systematically bad
-fold.
+The per-fold breakdown of A1, to confirm no single fold or redshift is quietly carrying the
+error. We show the per-(class, z, fold) `dN/dX` median \|frac err\| (%) as a heatmap, one panel
+per HCD class, fold on the y-axis, z on the x-axis. This is **LOSO held-out** (the per-fold
+held-out spread only exists for the LOSO nets, so it stays LOSO regardless of `--emulator`). We
+find it is mostly cool (~1–2%), with hot cells only at the off-DESI z extremes and a few
+count-limited low-z subDLA/DLA cells, and no systematically bad fold.
 
-## A5 — dN/dX → α_c prior-center sanity — *DEPLOYED-OBJECT PROPERTY*
+## A5. dN/dX → α_c prior-center sanity (*deployed-object property*)
 
 ![](A5_alpha_prior_sanity.png)
 
-Is the emulated `dN/dX` (→ the deployed `α_c` **prior center** via `w_c_corrected`)
-sensible? In ensemble mode the emulated `w_c` is the **deployed production ensemble**'s,
-against the cache's empirical **CDDF-integral** `w_c` (a fixed, emulator-independent
-reference). The scatter tracks the diagonal; per-class deviations are well under 2.5% — the
-prior center is anchored to the data, not to the model's own bias.
+Head A's `dN/dX` sets the **prior center** for the contamination amplitudes `α_c` (the value the
+fit is pulled toward before the data speak), so we check the emulated `dN/dX` (→ the deployed
+`α_c` prior center via `w_c_corrected`) is sensible. In ensemble mode the emulated `w_c` is the
+**deployed production ensemble**'s, plotted against the cache's empirical **CDDF-integral** `w_c`
+(a fixed, emulator-independent reference). We find the scatter tracks the diagonal and per-class
+deviations stay well under 2.5%, so the prior center is anchored to the data, not to the model's
+own bias.
 
 ---
 
 # Literature comparison (emulator-object-independent)
 
-## A6 — dN/dX vs literature · A7 — CDDF vs literature
+## A6. dN/dX vs literature · A7. CDDF vs literature
 
 ![](A6_dndx_vs_literature.png)
 ![](A7_cddf_vs_literature.png)
 
-These compare the **PRIYA-sim** `dN/dX` / CDDF to published incidence measurements and do
-**not** depend on which emulator checkpoint is used. Generated by the sibling scripts
-`plot_dndx_vs_literature.py` and `plot_cddf_vs_literature.py` (not by this walkthrough
-script), and unchanged by `--emulator`.
+Whether the simulations themselves are realistic. These compare the **PRIYA-sim** `dN/dX` / CDDF
+(PRIYA = the simulation suite this analysis is built on) to published absorber-incidence
+measurements, and so do **not** depend on which emulator checkpoint is used. They are generated
+by the sibling scripts `plot_dndx_vs_literature.py` and `plot_cddf_vs_literature.py` (not by
+this walkthrough script), and are unchanged by `--emulator`.
 
 ---
 
@@ -242,15 +305,15 @@ script), and unchanged by `--emulator`.
 - **Head-A ensemble convention (judgment call):** the deployed likelihood only consumes
   `P_filt` through the ensemble, so Head-A (`f_NHI`/`dN/dX`) has no likelihood-fixed
   ensemble combination. For the in-sample accuracy figures we take the natural **mean of the
-  per-member physical Head-A outputs** — the same averaging spirit as the deployed `P_filt`
+  per-member physical Head-A outputs**, the same averaging spirit as the deployed `P_filt`
   mean. (Documented in `predict_headA_ens`.)
 - **B4 ensemble decomposition (judgment call):** the (a)/(b) split is a single-model concept;
   for the ensemble we define the deployed prediction as `log(mean post-exp P_filt)` and the
   baseline `m̂` as the mean-of-member baseline, keeping the algebra exact for the deployed
   object.
-- **B3/B5 covariance:** Fisher bias (B5) and the cosmology response (B3) assume a
-  DESI-DR1-like diagonal per-mode covariance (clean 3%, HCD 15%) — a deployment sanity gate,
-  not the final survey-covariance inference.
+- **B3/B5 covariance:** the Fisher bias (B5) and the cosmology response (B3) assume a
+  DESI-DR1-like diagonal per-mode covariance (clean 3%, HCD 15% per k-mode, no off-diagonal
+  correlations). This is a deployment sanity gate, not the final survey-covariance inference.
 - **Count-limited regions:** the Head-A high-N_HI tail (A2 ≥21.5) and the off-DESI z extremes
   (A1/A4) are flagged, not structural.
 - Source: `scripts/plot_performance_walkthrough.py`; raw numbers `headline_numbers.json`;
