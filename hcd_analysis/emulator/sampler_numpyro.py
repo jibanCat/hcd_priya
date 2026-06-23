@@ -64,6 +64,9 @@ def numpyro_model(ctx: Ctx):
         "alpha_lls", dist.Normal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]))
     a_sub = numpyro.sample(
         "alpha_subdla", dist.Normal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1]))
+    # latent SCALE hardcoded 1.0 (NOT alpha_hcd_sigma[2]) → broad one-sided α_DLA prior, σ/μ≈1.2;
+    # mirrored in closure_mocks.py + closure_legb._hcd_sites. Do not rescale alone (breaks SBC).
+    # Full note at closure_legb.py:_hcd_sites (the deployed legacy site).
     a_dla_raw = numpyro.sample(
         "alpha_dla_raw", dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
     a_dla = numpyro.deterministic("alpha_dla", jax.nn.softplus(a_dla_raw))

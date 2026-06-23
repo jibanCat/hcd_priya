@@ -198,3 +198,12 @@ def test_config_clash_nondefault_over_prestamp(runner, tmp_path):
     req = dict(_FULL_SELFDRAW, tau0_prior_sigma=0.05)        # informative τ₀ over an un-stamped uniform pkl
     with pytest.raises(RuntimeError, match="config CLASH"):
         runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
+
+
+def test_inject_spec_held_out_guard():
+    """inject_spec on a HELD-OUT (leg_a=False) run_legb call must FAIL LOUD — the held-out branch
+    ignores inject_spec, so honouring it would silently drop the injection. PR#12 review follow-up (b).
+    The guard is the first statement in run_legb, so it fires before any ctx use (ctx=d=None here)."""
+    with pytest.raises(ValueError, match="inject_spec is honoured only on the Leg-A"):
+        LB.run_legb(None, None, n_mocks=1, n_warmup=1, n_samples=1, seed=0,
+                    inject_spec={"metal_misspec": 1.0}, leg_a=False)

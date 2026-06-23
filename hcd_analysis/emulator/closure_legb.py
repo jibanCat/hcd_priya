@@ -1460,6 +1460,13 @@ def _hcd_sites(ctx):
                                dist.TruncatedNormal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0], low=0.0))
         a_sub = numpyro.sample("alpha_subdla",
                                dist.TruncatedNormal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1], low=0.0))
+        # NOTE (PR#12 e2e-review): the latent Normal SCALE is hardcoded 1.0 — NOT ctx.alpha_hcd_sigma[2].
+        # So α_DLA's encoded prior is a deliberately-BROAD one-sided softplus(Normal) with effective
+        # σ/μ ≈ 1.2 (right-skewed) — ~2.5× the named HCD_PRIOR_FRAC_SIGMA[2]=0.50 — and the z>3.5
+        # dla_inflate widening of σ_DLA is INERT here. This is the conservative direction (the DLA sector
+        # is un-certified by Leg B / needs arm A3). DO NOT rescale unilaterally: closure_mocks.py:56 and
+        # sampler_numpyro.py draw the mock TRUTH from this IDENTICAL dist, so any width change must be
+        # mirrored at all three sites or it breaks self-draw SBC rank-uniformity.
         a_dla_raw = numpyro.sample("alpha_dla_raw",
                                    dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
         a_dla = numpyro.deterministic("alpha_dla", jax.nn.softplus(a_dla_raw))
@@ -1990,6 +1997,14 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
 
     Returns ``_aggregate_legb`` (coverage 68/95% + per-param bias + the DIAGNOSTIC-ONLY rank
     ECDF), or the per-mock list if ``return_per_mock``."""
+    # inject_spec is a LEG-A-ONLY hook (the data-nuisance bias gate). The held-out branch below
+    # (make_legb_mock) does NOT thread it, so honouring it on a held-out run would SILENTLY drop the
+    # injection. Fail loud instead — PR#12 review follow-up (b); generalizes the run_prod_sbc_shard.py
+    # subdla_truth_boost assert to EVERY inject key (lls/subdla_truth_boost, metal_misspec, resolution).
+    if inject_spec and not leg_a:
+        raise ValueError(
+            "run_legb: inject_spec is honoured only on the Leg-A self-draw path (leg_a=True); the "
+            "held-out branch ignores it. Refusing to silently drop the injection on a held-out run.")
     if cemu_inflate is not None:
         ctx = ctx._replace(cemu_inflate=float(cemu_inflate))
     key0 = jax.random.PRNGKey(int(seed))
