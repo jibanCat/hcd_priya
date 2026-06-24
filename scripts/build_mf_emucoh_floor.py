@@ -30,9 +30,15 @@ import os, sys
 import numpy as np
 sys.path.insert(0, "/home/mfho/hcd_priya")
 
-POOL_NPZ = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_lfcoh_pool.npz"
-OUT_NPZ = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"
-NOTES_FIG = "/home/mfho/hcd_priya_notes/figures/analysis/05_multifidelity/mf_emucoh_modes.png"
+# LOW-K EXTENSION (2026-06-18): env-overridable I/O so the low-k pool (built with CEMU_K_LO=0.001)
+# can be re-keyed into a NEW emucoh table WITHOUT clobbering the deployed mf_cemu_emucoh.npz.
+# Defaults = the original paths (unchanged behavior).
+POOL_NPZ = os.environ.get(
+    "CEMU_POOL_NPZ", "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_lfcoh_pool.npz")
+OUT_NPZ = os.environ.get(
+    "CEMU_OUT_NPZ", "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz")
+NOTES_FIG = os.environ.get(
+    "CEMU_NOTES_FIG", "/home/mfho/hcd_priya_notes/figures/analysis/05_multifidelity/mf_emucoh_modes.png")
 N_MODES = 15                     # top-m truncation (full-z table, 13 z-bins: top-15 ≈ 96.8% of trace;
                                  # the per-z structure raises the rank vs the low-z-only view, where
                                  # top-5 sufficed. The discarded ~3% folds into the diagonal top-up.)

@@ -25,9 +25,17 @@ from scripts.build_xclass_error_vector import fold_rfrac
 
 REPO = "/home/mfho/hcd_priya"
 CKPT = f"{REPO}/checkpoints/final_fold"
-OUT_PNG = f"{REPO}/figures/analysis/04_emulator/lf_emu_kcoherence_caveats.png"
-POOL_NPZ = f"{REPO}/hcd_analysis/_emulator_data/mf_cemu_lfcoh_pool.npz"
-K_LO, K_HI = 0.01, 0.069
+OUT_PNG = os.environ.get(
+    "CEMU_OUT_PNG", f"{REPO}/figures/analysis/04_emulator/lf_emu_kcoherence_caveats.png")
+# LOW-K EXTENSION (2026-06-18): the deployed emucoh C_emu covers only k∈[0.01016,0.06892], leaving
+# the DESI/eBOSS low-k band [0.001,0.0102] UNMODELED — where the worst coherent held-out residual
+# lives (-14% @ k=0.00125, z=2.2). Lower CEMU_K_LO (env, default 0.01 = unchanged) down to the DATA
+# k_min (0.001) and write to a NEW pool npz (env CEMU_POOL_NPZ, default the original) so the existing
+# mf_cemu_lfcoh_pool.npz / mf_cemu_emucoh.npz are NOT clobbered (another agent is documenting them).
+POOL_NPZ = os.environ.get(
+    "CEMU_POOL_NPZ", f"{REPO}/hcd_analysis/_emulator_data/mf_cemu_lfcoh_pool.npz")
+K_LO = float(os.environ.get("CEMU_K_LO", "0.01"))
+K_HI = 0.069
 # Build the coherence over the FULL leg z-range (≤4.6), NOT just low-z — the emulator step-review
 # (2026-06-12) flagged that zeroing z>2.6 could make C_emu over-confident where DESI has most of
 # its leverage (He-II reion z≈3–4). We MEASURE the per-z within-z coherence across the full range
