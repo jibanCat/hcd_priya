@@ -52,7 +52,8 @@ import equinox as eqx
 from hcd_analysis.emulator.closure_legb import (
     build_legb_ctx, make_hr_truth_from_cache, make_legb_mock, _mock_core_per_leg,
     ZSLOPE_PRIOR_SIGMA, HCD_Z_PIVOT, HCD_INCIDENCE_SLOPE)
-from hcd_analysis.emulator.inference import HCD_LIT_OVER_SIM_SLOPE
+# (HCD_LIT_OVER_SIM_SLOPE deliberately NOT imported — the forward s_c center is HCD_INCIDENCE_SLOPE;
+#  the ratio slope is a z=3-pivot prior-center quantity only. See hcd-dndx-zslope-bug.)
 from hcd_analysis.emulator import data_likelihood as DL
 
 FOLD = 4
@@ -62,7 +63,8 @@ TARGET_NS = 0.9095          # the ns0.909 cert sim n_s (verified by the wrapper 
 #   [0:9]   theta9 (uniform; near truth the bounds are slack -> prior precision 0)
 #   [9]     tau0_amp (uniform)        [10] dtau0 (uniform)
 #   [11:14] alpha_lls/subdla/dla (pivot-z HCD incidence; Normal prior at ctx center/width)
-#   [14:17] s_lls/subdla/dla (HCD z-slope; Normal prior at HCD_LIT_OVER_SIM_SLOPE, ZSLOPE sigma)
+#   [14:17] s_lls/subdla/dla (HCD z-slope; Normal prior at HCD_INCIDENCE_SLOPE≈2.4, ZSLOPE sigma —
+#           the forward incidence-weight slope, NOT the lit/sim ratio; see hcd-dndx-zslope-bug)
 P_NS, P_TAU0, P_DTAU0 = 0, 9, 10
 P_AHCD = slice(11, 14)
 P_SLOPE = slice(14, 17)
