@@ -91,6 +91,35 @@ def paired_delta_bias(clean_per_mock, inj_per_mock, param):
     return np.array(deltas), np.array(clean_zs)
 
 
+def _bias_z_named(rec, name):
+    """bias_z for a column addressed by its NAME in rec['names'] — covers the appended blocks
+    PARAM_NAMES does not (tau0_z* mean-flux ladder, a_SiIII, alpha_*)."""
+    names = list(rec["names"])
+    if name not in names:
+        return None
+    col = names.index(name)
+    dc = np.asarray(rec["draws"])[:, col]
+    sd = float(dc.std())
+    if sd <= 0:
+        return None
+    return (float(dc.mean()) - float(rec["truth_vec"][col])) / sd
+
+
+def paired_delta_named(clean_per_mock, inj_per_mock, name):
+    """Per-mock paired Δbias_z = bias(inj) − bias(clean) for a NAMED column (positional pairing,
+    same convention as paired_delta_bias). Returns (deltas, clean_zs)."""
+    n = min(len(clean_per_mock), len(inj_per_mock))
+    deltas, clean_zs = [], []
+    for m in range(n):
+        zc = _bias_z_named(clean_per_mock[m], name)
+        zi = _bias_z_named(inj_per_mock[m], name)
+        if zc is None or zi is None:
+            continue
+        deltas.append(zi - zc)
+        clean_zs.append(zc)
+    return np.array(deltas), np.array(clean_zs)
+
+
 def load_shards(shard_dir, arm=None, survey=None):
     """Load + group shard pkls by (arm, survey), concatenating clean/injected per-mock lists.
     Filter by arm/survey if given. Returns {(arm,survey): (clean_per_mock, inj_per_mock, ndiv)}."""
@@ -160,6 +189,27 @@ def main():
           f"clean_z is the unpaired clean-arm bias (sanity ~0).")
     print("OVERALL:", "FAIL — at least one non-LLS arm exceeds the confidence-bound gate."
           if any_fail else "PASS — all non-LLS arms within the confidence-bound bias gate.")
+
+    # --- standing-rule mean-flux + metal-nuisance report (NOT gated): the model samples the per-z
+    # tau0_z ladder (no global tau0_amp/dtau0 sites), so we report the tau0_z Δbias averaged over z
+    # (mean-flux amplitude proxy) + its z-range, plus a_SiIII (the metal nuisance the fit floats). The
+    # mean flux is the suspected n_s channel — does a contaminant push it? ---
+    print()
+    print("MEAN-FLUX (tau0_z ladder, paired Δbias_z) + a_SiIII — report only, not gated:")
+    rh = (f"{'arm/survey':<22} {'tau0z mean':>10} {'tau0z[min,max]':>18} "
+          f"{'a_SiIII Δ':>10} {'a_SiIII clean':>13}")
+    print(rh)
+    print("-" * len(rh))
+    for (arm, survey), (clean_pm, inj_pm, nd) in sorted(groups.items()):
+        tau0_nms = [nm for nm in list(clean_pm[0]["names"]) if nm.startswith("tau0_z")]
+        tz = [float(d[0].mean()) for d in (paired_delta_named(clean_pm, inj_pm, nm)
+                                           for nm in tau0_nms) if d[0].size]
+        da, da_clean = paired_delta_named(clean_pm, inj_pm, "a_SiIII")
+        tz_mean = f"{np.mean(tz):>+10.3f}" if tz else f"{'n/a':>10}"
+        rng = f"[{min(tz):+.2f},{max(tz):+.2f}]" if tz else ""
+        a_s = f"{da.mean():>+10.3f}" if da.size else f"{'n/a':>10}"
+        a_c = f"{da_clean.mean():>+13.3f}" if da_clean.size else f"{'n/a':>13}"
+        print(f"{arm + '/' + survey:<22} {tz_mean} {rng:>18} {a_s} {a_c}")
 
 
 if __name__ == "__main__":
