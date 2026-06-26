@@ -266,6 +266,8 @@ class LegBCtx(NamedTuple):
     sample_metals: bool = False          # opt-in (2026-06-13): sample a SHARED a_SiIII metal nuisance
     a_siiii_max: float = 0.15            # and apply _metal_factor on metals_on legs (DESI/eBOSS). Off
                                          # by default → golden byte-exact (a_SiIII=0 ⇒ factor≡1).
+    sample_a_siii: bool = False          # Stage C opt-in: also float the SiII DOUBLET amplitude a_SiII
+                                         # (after a_SiIII). Off → a_SiII=0 ⇒ byte-exact.
     marginalize_zslope: bool = True      # DEFAULT (2026-06-10): sample the HCD per-class z-slope
                                          # s_c with the literature dN/dX slope±1σ prior — so the HCD
                                          # incidence evolves on a PHYSICAL amplitude(pivot α)+slope,

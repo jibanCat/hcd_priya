@@ -52,6 +52,9 @@ def main():
     ap.add_argument("--max-tree-depth", type=int, default=10)
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--smoke", action="store_true")
+    ap.add_argument("--float-a-siii", action="store_true",
+                    help="ALSO float a_SiII in the forward (Stage C NUTS-confirm: does the floated "
+                         "SiII doublet absorb the honest -0.69 metal bias?)")
     a = ap.parse_args()
     if a.smoke:
         a.n_mocks = 1
@@ -62,6 +65,9 @@ def main():
     print("[patch] draw_leg_a_leg_truth -> truth a_siiii=0 (de-double-count; on-disk unchanged)")
 
     ctx, d, inject_spec = build_arm_ctx("metal_misspec", "desi", True)
+    if a.float_a_siii:
+        ctx = ctx._replace(sample_a_siii=True)               # forward also floats the SiII doublet
+        print("[forward] sample_a_siii=True -> floating a_SiII (the doublet fix for the -0.69)")
     # self-check: the patched truth has a_siiii==0 (and the unpatched would not, generically)
     tp = CL.draw_leg_a_leg_truth(ctx, jax.random.PRNGKey(0))
     assert float(tp["a_siiii"]) == 0.0, f"patch failed: truth a_siiii={tp['a_siiii']}"
