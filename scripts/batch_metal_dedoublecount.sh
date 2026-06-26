@@ -31,6 +31,8 @@ OUTDIR=${OUTDIR:-/scratch/cavestru_root/cavestru1/mfho/metal_dedoublecount}
 NCPU=${SLURM_CPUS_PER_TASK:-4}
 SMOKE_FLAG=""
 [[ "${SMOKE:-0}" == "1" ]] && SMOKE_FLAG="--smoke"
+FLOAT_FLAG=""
+[[ "${FLOAT_A_SIII:-0}" == "1" ]] && FLOAT_FLAG="--float-a-siii"
 
 export OMP_NUM_THREADS=$NCPU OPENBLAS_NUM_THREADS=$NCPU MKL_NUM_THREADS=$NCPU NUMEXPR_NUM_THREADS=$NCPU
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=$NCPU"
@@ -45,5 +47,5 @@ fi
 echo "=== metal_dedbl shard ${TID}/${N_SHARDS} (n_mocks=${N_MOCKS} seed=${SEED} ${NCPU} cpu) start: $(date) ==="
 "$PY" -u scripts/run_dnuis_dedoublecount_shard.py \
     --shard "$TID" --n-shards "$N_SHARDS" --n-mocks "$N_MOCKS" --seed "$SEED" \
-    --n-warmup "$N_WARMUP" --n-samples "$N_SAMPLES" --out-dir "$OUTDIR" $SMOKE_FLAG
+    --n-warmup "$N_WARMUP" --n-samples "$N_SAMPLES" --out-dir "$OUTDIR" $SMOKE_FLAG $FLOAT_FLAG
 echo "=== done: $(date) ==="
