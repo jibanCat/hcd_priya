@@ -48,7 +48,9 @@ Z_PIVOT = 3.0
 C_KMS = 299792.458            # speed of light [km/s]
 LAMBDA_LYA = 1215.67          # Lyα rest wavelength [Å]
 LAMBDA_SiIII = 1206.50        # SiIII line [Å]
-LAMBDA_SiII = 1190.42         # SiII line [Å]  (1190/1193 doublet; use 1190.42 leading line)
+LAMBDA_SiII = 1190.42         # SiII line [Å]  (1190/1193 doublet; 1190.42 leading line)
+LAMBDA_SiIIb = 1193.28        # SiII line [Å]  (the SECOND doublet line; r_doublet weights it)
+R_SiII_DOUBLET = 0.5          # intra-doublet ratio (matches closure_legb.metal_inject r_doublet)
 # SiIII/SiII–Lyα decorrelation scale k_x [s/km] (DESI DR1 companion arXiv:2601.21432 Eq. 4.3).
 # NOTE: this sigmoid damping is the companion's ADDITION, NOT in McDonald 2006 (whose SiIII
 # cross-term is undamped). The cosine
@@ -407,14 +409,22 @@ def _metal_factor(k, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII
     multiplies ONLY the oscillatory cosine cross-term — NOT a Gaussian on the whole (1+f) (the
     earlier usage-doc one-liner `(1+f)·exp(−k²/2k_s²)` was wrong; Lyα-confirmed 2026-06-05).
     Δv_X = c·ln(λ_Lyα/λ_X).  a_SiIII=a_SiII=0 ⇒ factor ≡ 1.  Differentiable in
-    (a_SiIII, a_SiII, k_SiIII, k_SiII)."""
+    (a_SiIII, a_SiII, k_SiIII, k_SiII).
+
+    SiII is the true 1190.42+1193.28 DOUBLET (matches closure_legb.metal_inject, the gate injection):
+        C_LyαSiII = a_SiII²·(1+r²) + 2 a_SiII·(cos(k·Δv_b) + r·cos(k·Δv_a))·D_SiII,
+    r = R_SiII_DOUBLET (intra-doublet ratio), Δv_a = leading 1190.42, Δv_b = 1193.28. r=0 ⇒ the old
+    single-line form; a_SiII=0 ⇒ byte-exact identity (golden-safe)."""
     k = jnp.asarray(k)
     dv_SiIII = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiIII)
-    dv_SiII = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiII)
+    dv_SiIIa = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiII)        # leading doublet line 1190.42
+    dv_SiIIb = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiIIb)       # second doublet line 1193.28
+    r = R_SiII_DOUBLET
     D_SiIII = 2.0 - 2.0 / (1.0 + jnp.exp(-k / k_SiIII))      # sigmoid decorrelation, →1 low-k →0 high-k
     D_SiII = 2.0 - 2.0 / (1.0 + jnp.exp(-k / k_SiII))
     f = (a_SiIII ** 2 + 2.0 * a_SiIII * jnp.cos(k * dv_SiIII) * D_SiIII) \
-        + (a_SiII ** 2 + 2.0 * a_SiII * jnp.cos(k * dv_SiII) * D_SiII)
+        + (a_SiII ** 2 * (1.0 + r ** 2)
+           + 2.0 * a_SiII * (jnp.cos(k * dv_SiIIb) + r * jnp.cos(k * dv_SiIIa)) * D_SiII)
     return 1.0 + f
 
 
