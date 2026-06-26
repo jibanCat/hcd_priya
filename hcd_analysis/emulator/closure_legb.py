@@ -1276,7 +1276,7 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
 #  restriction (dropped-z mock rows are NaN and carry no info).
 # ============================================================================ #
 def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs,
-                         dla_core_per_leg, *, return_parts=False, a_siiii=0.0,
+                         dla_core_per_leg, *, return_parts=False, a_siiii=0.0, a_siii=0.0,
                          alpha_res=None, require_zresolved=False):
     """``data_loglik`` but with a PER-LEG-Z dla_core (the mock's sim core). ``data_loglik``
     takes ONE (K,) core; here each leg z uses its own, so we call ``predict_P_obs_on_leg``
@@ -1321,7 +1321,7 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
         P_model, C_total = DL.predict_P_obs_on_leg(
             ctx.model, theta9, tau0_vec, alpha_leg, pf_stats=ctx.pf_stats, dla_core=core,
             cache_k=ctx.cache_k, leg=leg, sigma_zb=szb, alpha_centres=ctx.alpha_centres,
-            a_SiIII=a_siiii,                                   # applied only on metals_on legs
+            a_SiIII=a_siiii, a_SiII=a_siii,                    # applied only on metals_on legs
             cemu_inflate=ctx.cemu_inflate, rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor,
             mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
             mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
@@ -1409,6 +1409,12 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     # a_SiIII = f_SiIII/(1−⟨F⟩) ≈ 0.045 sits well inside.
     a_siiii = (numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
                if getattr(ctx, "sample_metals", False) else 0.0)
+    # SiII DOUBLET amplitude (Stage C, opt-in ctx.sample_a_siii, default OFF → a_SiII=0 ⇒ byte-exact).
+    # _metal_factor's SiII is now the true 1190.42+1193.28 doublet, so a floated a_SiII absorbs the
+    # doublet the metal_misspec injection carries (the NUTS-settled −0.69 n_s driver). MUST be sampled
+    # RIGHT AFTER a_SiIII and BEFORE alpha_res so _legb_priors_only's mirror order matches (constrain_fn).
+    a_siii = (numpyro.sample("a_SiII", dist.Uniform(0.0, ctx.a_siiii_max))
+              if getattr(ctx, "sample_a_siii", False) else 0.0)
     # res_corr AMPLITUDE nuisance (Task 1.3): α(z)=α₀·((1+z)/(1+Z_PIVOT))^s, marginalized
     # FORWARD-ONLY (threaded into _data_loglik_legcore → predict_P_obs_on_leg → the MF
     # chokepoint; NOT into the truth → no closure cancellation). Two sites, amplitude THEN
@@ -1424,7 +1430,7 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
         alpha_res_slope = numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
     numpyro.factor("loglik", _data_loglik_legcore(
         ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg, a_siiii=a_siiii,
-        alpha_res=(alpha_res, alpha_res_slope),
+        a_siii=a_siii, alpha_res=(alpha_res, alpha_res_slope),
         require_zresolved=True))   # alpha_hcd here is the z-resolved alpha_hcd_z deterministic
 
 
@@ -1564,6 +1570,8 @@ def _legb_priors_only(ctx):
         _zslope_sites(ctx)                        # mirrors _legb_model (s_c when marginalize_zslope)
     if getattr(ctx, "sample_metals", False):     # MUST mirror _legb_model's site (same order)
         numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
+    if getattr(ctx, "sample_a_siii", False):     # mirror _legb_model's a_SiII site (AFTER a_SiIII)
+        numpyro.sample("a_SiII", dist.Uniform(0.0, ctx.a_siiii_max))
     # res_corr AMPLITUDE nuisance (Task 1.3) — MUST mirror _legb_model's two sites in the SAME
     # order (amplitude before slope), at the SAME relative position (last), or constrain_fn corrupts.
     # DIAGNOSTIC fix_alpha_res: when set, _legb_model does NOT sample these two sites, so the
@@ -1947,6 +1955,8 @@ def _draws_matrix(samples, kept_global):
             cols.append(np.asarray(samples[nm])[:, None])
     if "a_SiIII" in samples:                                 # opt-in metal nuisance (appended LAST)
         cols.append(np.asarray(samples["a_SiIII"])[:, None])
+    if "a_SiII" in samples:                                  # SiII doublet (appended AFTER a_SiIII)
+        cols.append(np.asarray(samples["a_SiII"])[:, None])
     return np.concatenate(cols, axis=1)
 
 
@@ -1981,6 +1991,8 @@ def _packed_names_for(samples, kept_global):
             names.append(nm)
     if "a_SiIII" in samples:
         names.append("a_SiIII")
+    if "a_SiII" in samples:
+        names.append("a_SiII")
     return names
 
 
