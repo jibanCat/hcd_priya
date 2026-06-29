@@ -28,6 +28,10 @@ SEED=${SEED:-20260615}
 N_WARMUP=${N_WARMUP:-250}
 N_SAMPLES=${N_SAMPLES:-300}
 OUTDIR=${OUTDIR:-/scratch/cavestru_root/cavestru1/mfho/metal_dedoublecount}
+SURVEY=${SURVEY:-desi}
+METAL_PRIOR=${METAL_PRIOR:-uniform}
+METAL_LOGF_LO=${METAL_LOGF_LO:--5.0}
+METAL_LOGF_HI=${METAL_LOGF_HI:--2.0}
 NCPU=${SLURM_CPUS_PER_TASK:-4}
 SMOKE_FLAG=""
 [[ "${SMOKE:-0}" == "1" ]] && SMOKE_FLAG="--smoke"
@@ -40,12 +44,14 @@ export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
 mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
 
-if [[ -f "$OUTDIR/metal_dedbl_desi_shard_$(printf %03d "$TID").pkl" ]]; then
-  echo "=== shard ${TID} pkl exists -- SKIP ==="; exit 0
+if [[ -f "$OUTDIR/metal_dedbl_${SURVEY}_shard_$(printf %03d "$TID").pkl" ]]; then
+  echo "=== shard ${TID} (${SURVEY}) pkl exists -- SKIP ==="; exit 0
 fi
 
-echo "=== metal_dedbl shard ${TID}/${N_SHARDS} (n_mocks=${N_MOCKS} seed=${SEED} ${NCPU} cpu) start: $(date) ==="
+echo "=== metal_dedbl ${SURVEY}/${METAL_PRIOR} shard ${TID}/${N_SHARDS} (n_mocks=${N_MOCKS} seed=${SEED} ${NCPU} cpu) start: $(date) ==="
 "$PY" -u scripts/run_dnuis_dedoublecount_shard.py \
     --shard "$TID" --n-shards "$N_SHARDS" --n-mocks "$N_MOCKS" --seed "$SEED" \
-    --n-warmup "$N_WARMUP" --n-samples "$N_SAMPLES" --out-dir "$OUTDIR" $SMOKE_FLAG $FLOAT_FLAG
+    --n-warmup "$N_WARMUP" --n-samples "$N_SAMPLES" --out-dir "$OUTDIR" \
+    --survey "$SURVEY" --metal-prior "$METAL_PRIOR" \
+    --metal-logf-lo "$METAL_LOGF_LO" --metal-logf-hi "$METAL_LOGF_HI" $SMOKE_FLAG $FLOAT_FLAG
 echo "=== done: $(date) ==="

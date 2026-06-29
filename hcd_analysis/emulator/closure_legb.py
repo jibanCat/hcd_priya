@@ -268,6 +268,23 @@ class LegBCtx(NamedTuple):
                                          # by default → golden byte-exact (a_SiIII=0 ⇒ factor≡1).
     sample_a_siii: bool = False          # Stage C opt-in: also float the SiII DOUBLET amplitude a_SiII
                                          # (after a_SiIII). Off → a_SiII=0 ⇒ byte-exact.
+    # OPT-IN FLAT-LOG metal-amplitude prior (Task A1, gate-b-data-nuisance). A STATIC python str
+    # selects the prior on the SHARED a_SiIII/a_SiII oscillation-amplitude sites (resolved at TRACE
+    # time → a legal python branch; NEVER trace this field):
+    #   "uniform" (DEFAULT, golden-safe): dist.Uniform(0, a_siiii_max) — BYTE-EXACT to the legacy code.
+    #   "flatlog": dist.LogUniform(a_lo, a_hi) on the SAME site names, with the flat-log10(f) prior on
+    #     the metal flux decrement f mapped to the amplitude a=f/(1−⟨F⟩_ref):
+    #       a_lo = 10**metal_logf_lo / (1−F_ref),  a_hi = 10**metal_logf_hi / (1−F_ref).
+    # The flat-log f de-weights the a² P-boost (the A_p leak) while leaving the linear 2a·cos
+    # oscillation (the n_s rail) likelihood-driven. Keeping the site NAMED a_SiIII/a_SiII preserves
+    # every by-name downstream read (_draws_matrix/_packed_names/the re-score loglik/constrain_fn).
+    metal_prior: str = "uniform"
+    metal_logf_lo: float = -11.0         # flat-log10(f) lower bound (f = metal flux decrement)
+    metal_logf_hi: float = -2.0          # flat-log10(f) upper bound
+    metal_one_minus_F_ref: float = None  # 1−F_ref: the ONE global scalar mapping f→a (a=f/(1−F_ref)).
+                                         # None → build_legb_ctx derives it from the fiducial mean flux
+                                         # exp(−Kim07(z)) on the union z-grid (a CONSTANT scale on a
+                                         # log-uniform → shape-neutral). Required for the flatlog branch.
     marginalize_zslope: bool = True      # DEFAULT (2026-06-10): sample the HCD per-class z-slope
                                          # s_c with the literature dN/dX slope±1σ prior — so the HCD
                                          # incidence evolves on a PHYSICAL amplitude(pivot α)+slope,
@@ -353,6 +370,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    mf_emucoh=False, mf_emucoh_infl=1.0,
                    mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
                    mf_emucoh_offdiag_only=False, sample_metals=False, a_siiii_max=0.15,
+                   metal_prior="uniform", metal_logf_lo=-11.0, metal_logf_hi=-2.0,
+                   metal_one_minus_F_ref=None,
                    hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0,
                    hcd_2d_tilt=False, ensemble_ckpts=None, survey=None):
     """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
@@ -542,6 +561,16 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         mf_emucoh_per_leg = {leg.name: DL.mf_shape_cov_for_leg(ec_tab, leg)
                              for leg in legs if leg.name in set(mf_emucoh_legs)}
 
+    # METAL FLAT-LOG f PRIOR (Task A1): the ONE global scalar 1−F_ref mapping f→amplitude a=f/(1−F_ref)
+    # for the opt-in flatlog metal prior. When None, derive it from the fiducial mean flux the forward
+    # uses at the prior center (tau0_amp=1, dtau0=0 ⇒ τ₀(z)=Kim07(z)): F_ref = mean_z exp(−Kim(z)) on
+    # the union z-grid. A CONSTANT scale on a log-uniform ⇒ shape-neutral (the prior stays flat-log f).
+    if metal_one_minus_F_ref is None:
+        _F_z = np.exp(-np.asarray(_kim(jnp.asarray(z_global))))   # exp(−Kim07(z)) at the fiducial
+        metal_one_minus_F_ref = float(1.0 - np.mean(_F_z))
+    else:
+        metal_one_minus_F_ref = float(metal_one_minus_F_ref)
+
     ctx = LegBCtx(
         model=model, pf_stats=pf, dla_core_leg=dla_core_leg, legs=legs, cache_k=cache_k,
         z_global=z_global, sigma_zb_per_leg=sigma_zb_per_leg,
@@ -553,6 +582,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         mf_emucoh_per_leg=mf_emucoh_per_leg, mf_emucoh_infl=float(mf_emucoh_infl),
         mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
         sample_metals=bool(sample_metals), a_siiii_max=float(a_siiii_max),
+        metal_prior=str(metal_prior), metal_logf_lo=float(metal_logf_lo),
+        metal_logf_hi=float(metal_logf_hi), metal_one_minus_F_ref=metal_one_minus_F_ref,
         hierarchical_hcd=bool(hierarchical_hcd), hcd_noncentered=bool(hcd_noncentered),
         hcd_ratio_mu=hcd_ratio_mu, hcd_ratio_sigma=hcd_ratio_sigma,
         hcd_ratio_infl=float(hcd_ratio_infl),
@@ -1359,6 +1390,40 @@ def _sample_tau0_sites(ctx):
     return tau0_amp, dtau0
 
 
+def _metal_amp_site(name, ctx, on):
+    """Sample a SHARED metal oscillation-amplitude site (``a_SiIII`` / ``a_SiII``), branching on the
+    STATIC ``ctx.metal_prior`` (resolved at trace time → a legal python branch). SHARED by
+    ``_legb_model`` and ``_legb_priors_only`` so their site construction (name, distribution class,
+    params) is BYTE-IDENTICAL — the constrain_fn mirror invariant.
+
+      "uniform" (DEFAULT, golden-safe): ``numpyro.sample(name, dist.Uniform(0, a_siiii_max))`` —
+        BYTE-EXACT to the legacy code (``a=0`` reachable ⇒ the golden identity).
+      "flatlog": ``numpyro.sample(name, dist.LogUniform(a_lo, a_hi))`` — the flat-log10(f) prior on
+        the metal flux decrement f mapped to the amplitude ``a=f/(1−F_ref)``:
+          ``a_lo = 10**metal_logf_lo / (1−F_ref)``, ``a_hi = 10**metal_logf_hi / (1−F_ref)``.
+        ``1−F_ref`` is the python-float scalar ``ctx.metal_one_minus_F_ref`` (build_legb_ctx derives
+        it from the union-z fiducial mean flux) — a plain float ⇒ a_lo/a_hi are python floats (no
+        tracing). The LIBRARY ``dist.LogUniform`` carries the tested biject_to/support; do NOT
+        hand-roll the transform and do NOT wrap a ``numpyro.deterministic`` (constrain_fn would drop it).
+
+    ``on`` (sample_metals / sample_a_siii) gates whether the site is sampled at all; ``off`` →
+    ``0.0`` (a=0 ⇒ _metal_factor≡1, the uniform golden identity)."""
+    if not on:
+        return 0.0
+    if getattr(ctx, "metal_prior", "uniform") == "flatlog":
+        omf = ctx.metal_one_minus_F_ref
+        if omf is None:
+            raise ValueError(
+                "metal_prior='flatlog' needs metal_one_minus_F_ref (1−F_ref); build_legb_ctx "
+                "derives it — construct the ctx via build_legb_ctx or pass it explicitly.")
+        omf = float(omf)
+        a_lo = 10.0 ** float(ctx.metal_logf_lo) / omf       # python floats (static, untraced)
+        a_hi = 10.0 ** float(ctx.metal_logf_hi) / omf
+        return numpyro.sample(name, dist.LogUniform(a_lo, a_hi))
+    # "uniform" (default) — BYTE-EXACT legacy site.
+    return numpyro.sample(name, dist.Uniform(0.0, ctx.a_siiii_max))
+
+
 def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     """The numpyro model: ``sampler_numpyro``'s priors (θ~Uniform^9 + auto-bijector; τ₀ in
     the α-ladder coord on the GLOBAL z grid; α_lls/subdla~Normal, α_dla~softplus(Normal)) with
@@ -1407,16 +1472,16 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** s_c
     alpha_hcd = numpyro.deterministic("alpha_hcd_z", alpha_pivot[None, :] * shape_zg)  # (n_zg,3)
     # SHARED SiIII metal amplitude (opt-in; eBOSS+DESI are metals_on, KS is not). OFF by default
-    # (a_SiIII=0 ⇒ _metal_factor≡1 ⇒ golden byte-exact). Uniform[0, a_siiii_max]; the physical
-    # a_SiIII = f_SiIII/(1−⟨F⟩) ≈ 0.045 sits well inside.
-    a_siiii = (numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
-               if getattr(ctx, "sample_metals", False) else 0.0)
+    # (a_SiIII=0 ⇒ _metal_factor≡1 ⇒ golden byte-exact). The prior on this site is selected by the
+    # STATIC ctx.metal_prior via _metal_amp_site: "uniform" (default, Uniform[0,a_siiii_max] — the
+    # physical a_SiIII=f_SiIII/(1−⟨F⟩)≈0.045 sits inside) or "flatlog" (LogUniform on a=f/(1−F_ref)).
+    a_siiii = _metal_amp_site("a_SiIII", ctx, getattr(ctx, "sample_metals", False))
     # SiII DOUBLET amplitude (Stage C, opt-in ctx.sample_a_siii, default OFF → a_SiII=0 ⇒ byte-exact).
     # _metal_factor's SiII is now the true 1190.42+1193.28 doublet, so a floated a_SiII absorbs the
     # doublet the metal_misspec injection carries (the NUTS-settled −0.69 n_s driver). MUST be sampled
     # RIGHT AFTER a_SiIII and BEFORE alpha_res so _legb_priors_only's mirror order matches (constrain_fn).
-    a_siii = (numpyro.sample("a_SiII", dist.Uniform(0.0, ctx.a_siiii_max))
-              if getattr(ctx, "sample_a_siii", False) else 0.0)
+    # SAME _metal_amp_site helper ⇒ SAME prior mode + byte-identical site construction as the mirror.
+    a_siii = _metal_amp_site("a_SiII", ctx, getattr(ctx, "sample_a_siii", False))
     # res_corr AMPLITUDE nuisance (Task 1.3): α(z)=α₀·((1+z)/(1+Z_PIVOT))^s, marginalized
     # FORWARD-ONLY (threaded into _data_loglik_legcore → predict_P_obs_on_leg → the MF
     # chokepoint; NOT into the truth → no closure cancellation). Two sites, amplitude THEN
@@ -1570,10 +1635,11 @@ def _legb_priors_only(ctx):
     # _legb_model: only call _zslope_sites when _hcd_sites did NOT supply the slopes (legacy/Option B).
     if _s_override is None:
         _zslope_sites(ctx)                        # mirrors _legb_model (s_c when marginalize_zslope)
-    if getattr(ctx, "sample_metals", False):     # MUST mirror _legb_model's site (same order)
-        numpyro.sample("a_SiIII", dist.Uniform(0.0, ctx.a_siiii_max))
-    if getattr(ctx, "sample_a_siii", False):     # mirror _legb_model's a_SiII site (AFTER a_SiIII)
-        numpyro.sample("a_SiII", dist.Uniform(0.0, ctx.a_siiii_max))
+    # MUST mirror _legb_model's metal sites EXACTLY (same name, order, distribution) — constrain_fn
+    # traces this. The SHARED _metal_amp_site helper guarantees byte-identical construction in BOTH
+    # prior modes (uniform / flatlog); a_SiIII before a_SiII before the res_corr block.
+    _metal_amp_site("a_SiIII", ctx, getattr(ctx, "sample_metals", False))
+    _metal_amp_site("a_SiII", ctx, getattr(ctx, "sample_a_siii", False))
     # res_corr AMPLITUDE nuisance (Task 1.3) — MUST mirror _legb_model's two sites in the SAME
     # order (amplitude before slope), at the SAME relative position (last), or constrain_fn corrupts.
     # DIAGNOSTIC fix_alpha_res: when set, _legb_model does NOT sample these two sites, so the
@@ -2114,11 +2180,12 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
         # loglik-rank. Both the leg-A self-draw (draw_leg_a_leg_truth) and the held-out path
         # (make_legb_mock) now carry alpha_hcd_z. require_zresolved=True fails loudly on a regression.
         _a_si_true = float(truth_pack.get("a_siiii", 0.0))
+        _a_si2_true = float(truth_pack.get("a_siii", 0.0))   # SiII doublet truth (Task A1; absent ⇒ 0)
         ll_true = float(_data_loglik_legcore(
             ctx, jnp.asarray(truth_pack["theta9"]),
             jnp.asarray(truth_pack["tau0_global"]),
             jnp.asarray(truth_pack["alpha_hcd_z"]), mock_legs, core_per_leg,
-            a_siiii=_a_si_true, require_zresolved=True))
+            a_siiii=_a_si_true, a_siii=_a_si2_true, require_zresolved=True))
         ll_draws = _loglik_of_draws(ctx, mock_legs, core_per_leg, samples, kept_global)
         # thin ll_draws by the SAME step.
         ll_draws_t = ll_draws[::step][:L]
@@ -2155,11 +2222,17 @@ def _loglik_of_draws(ctx, mock_legs, core_per_leg, samples, kept_global):
     a_z = jnp.asarray(np.asarray(samples["alpha_hcd_z"]))       # (L,nZg,3) Z-RESOLVED (the fix)
     a_si = (jnp.asarray(np.asarray(samples["a_SiIII"])) if "a_SiIII" in samples
             else jnp.zeros(theta.shape[0]))
+    # SiII DOUBLET amplitude (Stage C / Task A1): thread a_SiII into the re-score loglik too. The
+    # de-double-count cell FLOATS a_SiII, so the SBC loglik-rank (Modrak) must score it; omitting it
+    # (the pre-existing gap) ignored the sampled doublet nuisance → a wrong loglik rank. Absent key ⇒
+    # zeros ⇒ a_SiII=0 ⇒ byte-exact back-compat with the prior (a_SiIII-only) behaviour.
+    a_si2 = (jnp.asarray(np.asarray(samples["a_SiII"])) if "a_SiII" in samples
+             else jnp.zeros(theta.shape[0]))
 
-    def one(th, t0, al, asi):
+    def one(th, t0, al, asi, asi2):
         return _data_loglik_legcore(ctx, th, t0, al, mock_legs, core_per_leg,
-                                    a_siiii=asi, require_zresolved=True)
-    return np.asarray(jax.vmap(one)(theta, tau0, a_z, a_si))
+                                    a_siiii=asi, a_siii=asi2, require_zresolved=True)
+    return np.asarray(jax.vmap(one)(theta, tau0, a_z, a_si, a_si2))
 
 
 def _aggregate_legb(per_mock, *, q_levels):

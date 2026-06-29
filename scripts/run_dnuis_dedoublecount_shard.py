@@ -55,6 +55,15 @@ def main():
     ap.add_argument("--float-a-siii", action="store_true",
                     help="ALSO float a_SiII in the forward (Stage C NUTS-confirm: does the floated "
                          "SiII doublet absorb the honest -0.69 metal bias?)")
+    ap.add_argument("--survey", default="desi", choices=["desi", "eboss"],
+                    help="metals_on leg for the de-double-counted metal cell (KS is metals_off / skipped).")
+    ap.add_argument("--metal-prior", default="uniform", choices=["uniform", "flatlog"],
+                    help="metal amplitude prior: uniform (default, byte-exact) or flatlog "
+                         "(a=f/(1-<F>), f flat-log10 -> mass at small a, the A_p-leak fix).")
+    ap.add_argument("--metal-logf-lo", type=float, default=-5.0)
+    ap.add_argument("--metal-logf-hi", type=float, default=-2.0)
+    ap.add_argument("--dry-run", action="store_true",
+                    help="build ctx + self-checks + print config, then exit BEFORE NUTS (wiring check).")
     a = ap.parse_args()
     if a.smoke:
         a.n_mocks = 1
@@ -64,10 +73,15 @@ def main():
     CL.draw_leg_a_leg_truth = _draw_zero_asiiii                   # PROCESS-LOCAL monkeypatch
     print("[patch] draw_leg_a_leg_truth -> truth a_siiii=0 (de-double-count; on-disk unchanged)")
 
-    ctx, d, inject_spec = build_arm_ctx("metal_misspec", "desi", True)
+    ctx, d, inject_spec = build_arm_ctx("metal_misspec", a.survey, True)
     if a.float_a_siii:
         ctx = ctx._replace(sample_a_siii=True)               # forward also floats the SiII doublet
         print("[forward] sample_a_siii=True -> floating a_SiII (the doublet fix for the -0.69)")
+    if a.metal_prior == "flatlog":
+        ctx = ctx._replace(metal_prior="flatlog",
+                           metal_logf_lo=a.metal_logf_lo, metal_logf_hi=a.metal_logf_hi)
+        print(f"[forward] metal_prior=flatlog logf=[{a.metal_logf_lo},{a.metal_logf_hi}] "
+              f"(a=f/(1-<F>); mass at small a, the A_p-leak fix)")
     # self-check: the patched truth has a_siiii==0 (and the unpatched would not, generically)
     tp = CL.draw_leg_a_leg_truth(ctx, jax.random.PRNGKey(0))
     assert float(tp["a_siiii"]) == 0.0, f"patch failed: truth a_siiii={tp['a_siiii']}"
@@ -76,9 +90,17 @@ def main():
           f"unpatched draw would be a_siiii={float(tp0['a_siiii']):.4f}")
 
     idxs = [m for m in range(a.n_mocks) if m % a.n_shards == a.shard]
-    print(f"[dedbl metal_misspec/desi shard {a.shard}/{a.n_shards}] mocks={idxs} "
+    print(f"[dedbl metal_misspec/{a.survey} shard {a.shard}/{a.n_shards}] mocks={idxs} "
           f"inject_spec={inject_spec} PAIRED truth-a_siiii=0 "
           f"(warmup={a.n_warmup} samples={a.n_samples} seed={a.seed})")
+
+    if a.dry_run:
+        print(f"[dry-run] survey={a.survey} metal_prior={ctx.metal_prior} "
+              f"logf=[{getattr(ctx, 'metal_logf_lo', None)},{getattr(ctx, 'metal_logf_hi', None)}] "
+              f"1-F_ref={getattr(ctx, 'metal_one_minus_F_ref', None)} sample_a_siii={ctx.sample_a_siii} "
+              f"inject={inject_spec} legs={[l.name for l in ctx.legs]} mocks={idxs}")
+        print("[dry-run] OK: ctx builds, truth de-double-counted (a_siiii=0), flatlog wired. Exit before NUTS.")
+        return
 
     run_kw = dict(n_mocks=a.n_mocks, mock_indices=idxs, return_per_mock=True, leg_a=True,
                   n_warmup=a.n_warmup, n_samples=a.n_samples, seed=a.seed, dense_mass=True,
@@ -86,18 +108,18 @@ def main():
     t0 = time.time()
     print(f"[dedbl shard {a.shard}] CLEAN run ...")
     clean_per_mock = run_legb(ctx, d, inject_spec=None, **run_kw)
-    print(f"[dedbl shard {a.shard}] INJECTED run (de-double-counted desi_full) ...")
+    print(f"[dedbl shard {a.shard}] INJECTED run (de-double-counted {inject_spec['metal_misspec']['form']}) ...")
     inj_per_mock = run_legb(ctx, d, inject_spec=inject_spec, **run_kw)
     wall = time.time() - t0
     n_pairs = max(min(len(clean_per_mock), len(inj_per_mock)), 1)
 
     os.makedirs(a.out_dir, exist_ok=True)
-    out = os.path.join(a.out_dir, f"metal_dedbl_desi_shard_{a.shard:03d}.pkl")
+    out = os.path.join(a.out_dir, f"metal_dedbl_{a.survey}_shard_{a.shard:03d}.pkl")
     meta = dict(vars(a))
     meta.update(inject_spec=inject_spec, paired=True, truth_a_siiii=0.0,
                 legs=[l.name for l in ctx.legs], wall_s=wall, per_fit_wall_s=wall / (2.0 * n_pairs))
     with open(out, "wb") as f:
-        pickle.dump(dict(arm="metal_dedbl", survey="desi", idxs=idxs,
+        pickle.dump(dict(arm="metal_dedbl", survey=a.survey, idxs=idxs,
                          clean_per_mock=clean_per_mock, inj_per_mock=inj_per_mock, meta=meta), f)
     n_div = (sum(int(r.get("n_div", 0) > 0) for r in clean_per_mock)
              + sum(int(r.get("n_div", 0) > 0) for r in inj_per_mock))
