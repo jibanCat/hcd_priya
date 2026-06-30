@@ -185,11 +185,14 @@ def test_per_z_map_equals_metal_inject_and_forward_golden():
         f3_z = float(C._metal_f_of_z(float(leg.z[iz]), node_z, np.asarray(f3_nodes)))
         f2_z = float(C._metal_f_of_z(float(leg.z[iz]), node_z, np.asarray(f2_nodes)))
         Fbar = float(np.exp(-np.asarray(tau0_vec)[iz]))
+        # REGENERATED Model C+ golden: the forward now (a) includes the SiIII-SiII cross (cross=True)
+        # and (b) uses the scalar decorrelation k_SiIII=k_SiII=0.05 here (no k-nodes passed).
         expect[rows] = C.metal_inject(P_clean[rows], k[rows], Fbar, form="desi_full",
                                       f_SiIII=f3_z, f_SiII=f2_z, f_SiII_SiII=0.0,
-                                      k_decorr=DL.K_SiIII_DEFAULT, r_doublet=DL.R_SiII_DOUBLET)
+                                      k_decorr=DL.K_SiIII_DEFAULT, k_SiII=DL.K_SiII_DEFAULT,
+                                      r_doublet=DL.R_SiII_DOUBLET, cross=True)
     np.testing.assert_allclose(P_nodes, expect, rtol=1e-10, atol=0.0,
-                               err_msg="Model-C per-z f->a forward != metal_inject parity (the golden)")
+                               err_msg="Model C+ per-z f->a forward != metal_inject(cross=True) parity")
     # the metal factor is non-trivial (the nodes actually contaminate).
     assert not np.allclose(P_nodes, P_clean), "f-nodes did not contaminate P_model"
 
@@ -399,9 +402,11 @@ def test_arm_injection_de_double_count_and_desi_siII():
                 continue
             f3 = float(C._metal_f_of_z(float(leg.z[iz]), node_z, arm["f_SiIII_nodes"]))
             f2 = float(C._metal_f_of_z(float(leg.z[iz]), node_z, arm["f_SiII_nodes"]))
+            # Model C+ arm: in-class desi_full + cross=True, decorrelation = the arm's k_SiIII/k_SiII.
             exp_full[rows] = C.metal_inject(b[rows], k[rows], float(Fbar[iz]), form="desi_full",
                                             f_SiIII=f3, f_SiII=f2, f_SiII_SiII=0.0,
-                                            k_decorr=DL.K_SiIII_DEFAULT, r_doublet=DL.R_SiII_DOUBLET)
+                                            k_decorr=arm["k_SiIII"], k_SiII=arm["k_SiII"],
+                                            r_doublet=DL.R_SiII_DOUBLET, cross=True)
         # de-double-count: applied EXACTLY once (== metal_inject of the metal-free clean truth).
         np.testing.assert_allclose(j, exp_full, rtol=1e-9, atol=0.0,
                                    err_msg=f"{leg.name}: arm metal not applied exactly once")
@@ -409,8 +414,9 @@ def test_arm_injection_de_double_count_and_desi_siII():
 
 @pytest.mark.skipif(not _have_eboss, reason="real cache/ckpt/DESI/eBOSS not present")
 def test_arm_injection_eboss_is_siIII_only():
-    """On eBOSS (not in metal_siII_legs) the zevo arm injects the SiIII-only eboss form (no SiII
-    doublet), distinct from the DESI SiIII+SiII desi_full form."""
+    """4-lens fix (a): on eBOSS (not in metal_siII_legs) the zevo arm injects the SiIII-ONLY
+    contaminant IN-CLASS via desi_full+f_SiII=0 (no SiII doublet, no cross — they are ∝ a_SiII) with
+    the decorrelation matched to the forward, NOT the OLD undamped eboss form."""
     ctx, d = _ctx_2node(with_eboss=True, metals_on=True)
     core = _core(ctx, d)
     tp = C.draw_leg_a_leg_truth(ctx, jax.random.PRNGKey(7))
@@ -422,15 +428,19 @@ def test_arm_injection_eboss_is_siIII_only():
     b = np.asarray(base_info["truth_on_leg"][leg.name]); j = np.asarray(inj_info["truth_on_leg"][leg.name])
     Fbar = C._meanflux_on_leg(ctx, leg, tp)
     k = np.asarray(leg.k); z_idx = np.asarray(leg.z_idx); node_z = arm["node_z"]
-    exp_eboss = b.copy()
+    exp_inclass = b.copy(); exp_eboss = b.copy()
     for iz in range(leg.n_z):
         rows = np.where(z_idx == iz)[0]
         if rows.size == 0:
             continue
         f3 = float(C._metal_f_of_z(float(leg.z[iz]), node_z, arm["f_SiIII_nodes"]))
+        exp_inclass[rows] = C.metal_inject(b[rows], k[rows], float(Fbar[iz]), form="desi_full",
+                                           f_SiIII=f3, f_SiII=0.0, f_SiII_SiII=0.0,
+                                           k_decorr=arm["k_SiIII"], k_SiII=arm["k_SiII"], cross=True)
         exp_eboss[rows] = C.metal_inject(b[rows], k[rows], float(Fbar[iz]), form="eboss", f_SiIII=f3)
-    np.testing.assert_allclose(j, exp_eboss, rtol=1e-9, atol=0.0,
-                               err_msg="eBOSS arm != SiIII-only eboss form (SiII leaked in)")
+    np.testing.assert_allclose(j, exp_inclass, rtol=1e-9, atol=0.0,
+                               err_msg="eBOSS arm != in-class desi_full(f_SiII=0)")
+    assert not np.allclose(j, exp_eboss), "eBOSS arm still uses the OLD undamped eboss form"
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")

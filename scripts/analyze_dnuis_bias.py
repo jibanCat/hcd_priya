@@ -145,6 +145,31 @@ def load_shards(shard_dir, arm=None, survey=None):
     return groups
 
 
+def _bias_z_extra(rec, name):
+    """bias_z for a SITE stored in rec['sites_extra'] (tau0_amp/dtau0 — the 2 mean-flux sites the
+    packed draws-matrix does NOT carry, only the deterministic tau0_z ladder). None if absent."""
+    se = rec.get("sites_extra") or {}
+    if name not in se:
+        return None
+    dc = np.asarray(se[name]["draws"]); sd = float(dc.std())
+    if not np.isfinite(sd) or sd == 0:
+        return None
+    return (float(dc.mean()) - float(se[name]["truth"])) / sd
+
+
+def paired_delta_extra(clean_per_mock, inj_per_mock, name):
+    """Per-mock paired Δbias_z = bias(inj) − bias(clean) for a sites_extra SITE (tau0_amp/dtau0)."""
+    n = min(len(clean_per_mock), len(inj_per_mock))
+    deltas, cleans = [], []
+    for m in range(n):
+        zc = _bias_z_extra(clean_per_mock[m], name)
+        zi = _bias_z_extra(inj_per_mock[m], name)
+        if zc is None or zi is None:
+            continue
+        deltas.append(zi - zc); cleans.append(zc)
+    return np.array(deltas), np.array(cleans)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shard-dir", required=True)
@@ -210,6 +235,23 @@ def main():
         a_s = f"{da.mean():>+10.3f}" if da.size else f"{'n/a':>10}"
         a_c = f"{da_clean.mean():>+13.3f}" if da_clean.size else f"{'n/a':>13}"
         print(f"{arm + '/' + survey:<22} {tz_mean} {rng:>18} {a_s} {a_c}")
+
+    # --- the 2 mean-flux SITES (tau0_amp / dtau0) paired Δbias_z, reported JOINTLY with the n_s/A_p
+    # gate above (feedback-report-tau0-dtau0-bias: mean flux is the suspected n_s channel, so ALWAYS
+    # surface the τ₀ amplitude+slope bias next to n_s/A_p). Present only if the runner stored
+    # sites_extra (run_legb >= Model C+); silently skipped on older shards. ---
+    if any((clean_pm and (clean_pm[0].get("sites_extra")))
+           for clean_pm, _inj, _nd in groups.values()):
+        print()
+        print("MEAN-FLUX SITES (tau0_amp/dtau0 paired Δbias_z) — report only, not gated:")
+        rh2 = (f"{'arm/survey':<22} {'tau0_amp Δ':>11} {'tau0_amp clean':>15} "
+               f"{'dtau0 Δ':>10} {'dtau0 clean':>12}")
+        print(rh2); print("-" * len(rh2))
+        for (arm, survey), (clean_pm, inj_pm, nd) in sorted(groups.items()):
+            da, dac = paired_delta_extra(clean_pm, inj_pm, "tau0_amp")
+            dd, ddc = paired_delta_extra(clean_pm, inj_pm, "dtau0")
+            f = lambda v, w: (f"{v.mean():>+{w}.3f}" if v.size else f"{'n/a':>{w}}")
+            print(f"{arm + '/' + survey:<22} {f(da,11)} {f(dac,15)} {f(dd,10)} {f(ddc,12)}")
 
 
 if __name__ == "__main__":

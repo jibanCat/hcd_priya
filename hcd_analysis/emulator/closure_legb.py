@@ -180,8 +180,8 @@ _THETA_UNIT_LO, _THETA_UNIT_HI = sampling_unit_bounds()
 _LAMBDA_SiIIb = 1193.28      # second SiII doublet line [Å] (leading line DL.LAMBDA_SiII=1190.42)
 
 def metal_inject(P, k, mean_flux, *, form="desi_full", f_SiIII=0.009, f_SiII=0.004,
-                 f_SiII_SiII=0.002, r_doublet=0.5, k_damp=0.05, k_decorr=0.05,
-                 a_SiIII_direct=None, a_SiII_direct=None, damp="sigmoid", k_cross=None):
+                 f_SiII_SiII=0.002, r_doublet=0.5, k_damp=0.05, k_decorr=0.05, k_SiII=None,
+                 a_SiIII_direct=None, a_SiII_direct=None, damp="sigmoid", k_cross=None, cross=False):
     """Return the metal-contaminated mock P1D (numpy). ⟨F⟩=mean_flux (=exp(−τ_eff)); a=0 ⇒ P.
 
     ``a_SiIII_direct`` / ``a_SiII_direct`` (default None → the f/(1−⟨F⟩) map): when given, the
@@ -189,40 +189,61 @@ def metal_inject(P, k, mean_flux, *, form="desi_full", f_SiIII=0.009, f_SiII=0.0
     power-law amplitude, which is already an amplitude, not an f.
     ``damp`` (default ``"sigmoid"`` → BYTE-EXACT to the legacy code): ``"ma"`` REPLACES the SiIII
     cross-term decorrelation with the Ma+2025 damping ``exp(k/k_cross)`` (``k_cross<0`` ⇒ decays
-    with k). ``form="ma2025"`` is the SiIII-ONLY (Ma drops SiII) DIRECT-amplitude Ma branch
-    (Arm 3 of the metal_zevo gate). Defaults (None/None/"sigmoid"/None) reproduce the legacy output."""
+    with k); ``"gauss"`` REPLACES it with the GAUSS envelope ``exp(−(k/k_cross)²)`` (Arm 4: a damping
+    the sigmoid forward cannot reproduce). ``form="ma2025"`` is the SiIII-ONLY (Ma drops SiII)
+    DIRECT-amplitude branch (Arm 3 = ``damp="ma"``, Arm 4 = ``damp="gauss"``).
+
+    ``k_SiII`` (Model C+, default None → ``k_decorr``, byte-exact): a SEPARATE sigmoid decorrelation
+    scale for the SiII doublet (and the cross term) — matches the forward's distinct k_SiIII/k_SiII.
+    ``cross`` (Model C+, default False → byte-exact): ADD the SiIII–SiII metal-metal CROSS term
+    (cup1d ``Cmm``, UNDAMPED to match cup1d), 2 a_SiIII a_SiII (cos(k Δv_b) + r cos(k Δv_a)); ∝ a_SiII
+    ⇒ OFF when f_SiII/a_SiII=0 (eBOSS / back-compat). Defaults reproduce the legacy output."""
     k = np.asarray(k, float)
     one_minus_F = max(1.0 - float(mean_flux), 1e-3)
     A3 = (f_SiIII / one_minus_F) if a_SiIII_direct is None else float(a_SiIII_direct)
     dv_SiIII = DL.C_KMS * np.log(DL.LAMBDA_LYA / DL.LAMBDA_SiIII)
-    if form == "ma2025":                                  # Ma+2025 sim: SiIII-only, DIRECT a, Ma damp
-        # Out-of-class structural stress: the Ma damping exp(k/k_cross) REPLACES the forward's sigmoid
-        # D(k) (a genuine shape misspecification). k_cross<0 ⇒ the oscillation decays with k.
-        return P * (1.0 + A3 ** 2 + 2.0 * A3 * np.cos(dv_SiIII * k) * np.exp(k / k_cross))
+    if form == "ma2025":                                  # Ma+2025 sim: SiIII-only, DIRECT a, Ma/Gauss damp
+        # Out-of-class structural stress: the damping REPLACES the forward's sigmoid D(k) (a genuine
+        # shape misspecification). "ma" exp(k/k_cross) (k_cross<0 ⇒ decays); "gauss" exp(−(k/k_cross)²).
+        env = np.exp(-(k / k_cross) ** 2) if damp == "gauss" else np.exp(k / k_cross)
+        return P * (1.0 + A3 ** 2 + 2.0 * A3 * np.cos(dv_SiIII * k) * env)
     if form == "eboss":                                   # McDonald/eBOSS SiIIIcorr, no decorrelation
         # dv_SiIII from the code's own line constants (= 2269.96 km/s), consistent with the
         # desi_full branch below; previously a hardcoded 2271.0 (the rounded literature anchor).
-        cross = 2.0 * A3 * np.cos(dv_SiIII * k)
+        cross_t = 2.0 * A3 * np.cos(dv_SiIII * k)
         if damp == "ma":                                  # Ma damping in place of the (absent) D(k)
-            cross = cross * np.exp(k / k_cross)
-        return P * (1.0 + A3 ** 2 + cross)
+            cross_t = cross_t * np.exp(k / k_cross)
+        elif damp == "gauss":
+            cross_t = cross_t * np.exp(-(k / k_cross) ** 2)
+        return P * (1.0 + A3 ** 2 + cross_t)
     # --- desi_full ---
+    k2 = k_decorr if k_SiII is None else float(k_SiII)          # SiII (+cross) decorrelation scale
     dvA = dv_SiIII                                               # Lyα–SiIII
     dva = DL.C_KMS * np.log(DL.LAMBDA_LYA / DL.LAMBDA_SiII)      # Lyα–SiII line a (1190.42)
     dvb = DL.C_KMS * np.log(DL.LAMBDA_LYA / _LAMBDA_SiIIb)       # Lyα–SiII line b (1193.28)
     dvd = DL.C_KMS * np.log(_LAMBDA_SiIIb / DL.LAMBDA_SiII)      # SiII intra-doublet (~719 km/s)
     if damp == "ma":                                            # Ma damping in place of the sigmoid D
-        D = np.exp(k / k_cross)
-    else:
-        D = 2.0 - 2.0 / (1.0 + np.exp(-k / k_decorr))          # sigmoid decorrelation (DESI), default
+        D3 = D2 = np.exp(k / k_cross)
+    elif damp == "gauss":
+        D3 = D2 = np.exp(-(k / k_cross) ** 2)
+    else:                                                       # sigmoid decorrelation (DESI), default
+        D3 = 2.0 - 2.0 / (1.0 + np.exp(-k / k_decorr))          # SiIII scale (byte-exact when k2==k_decorr)
+        D2 = 2.0 - 2.0 / (1.0 + np.exp(-k / k2))                # SiII (+cross) scale
     A2 = (f_SiII / one_minus_F) if a_SiII_direct is None else float(a_SiII_direct)
-    C_LyaSiIII = A3 ** 2 + 2.0 * A3 * np.cos(dvA * k) * D
+    C_LyaSiIII = A3 ** 2 + 2.0 * A3 * np.cos(dvA * k) * D3
     C_LyaSiII = A2 ** 2 * (1.0 + r_doublet ** 2) \
-        + 2.0 * A2 * (np.cos(dvb * k) + r_doublet * np.cos(dva * k)) * D
+        + 2.0 * A2 * (np.cos(dvb * k) + r_doublet * np.cos(dva * k)) * D2
     # ADDITIVE same-ion SiII–SiII (Gaussian-damped) — unfittable by the multiplicative _metal_factor:
     C_SiII_SiII = f_SiII_SiII * (1.0 + r_doublet ** 2 + 2.0 * r_doublet * np.cos(dvd * k)) \
         * np.exp(-(k / k_damp) ** 2)
-    return P * (1.0 + C_LyaSiIII + C_LyaSiII + C_SiII_SiII)
+    # SiIII–SiII metal-metal CROSS (Model C+, cup1d Cmm; ∝ A3·A2 ⇒ OFF when A2=0). UNDAMPED (cup1d
+    # leaves Cmm undamped; the damped-vs-undamped choice is immaterial in band — see the forward).
+    C_cross = 0.0
+    if cross:
+        dvcb = DL.C_KMS * np.log(_LAMBDA_SiIIb / DL.LAMBDA_SiIII)   # SiIII–SiII line b
+        dvca = DL.C_KMS * np.log(DL.LAMBDA_SiII / DL.LAMBDA_SiIII)  # SiIII–SiII line a
+        C_cross = 2.0 * A3 * A2 * (np.cos(dvcb * k) + r_doublet * np.cos(dvca * k))
+    return P * (1.0 + C_LyaSiIII + C_LyaSiII + C_SiII_SiII + C_cross)
 
 
 def _metal_f_of_z(z, node_z, f_nodes):
@@ -241,17 +262,27 @@ def _metal_f_of_z(z, node_z, f_nodes):
 # self-draw truth FORCES the metal f-nodes to 0 (make_leg_a_legmock does not forward them ⇒ a_SiIII=0),
 # so the injected arm is the SOLE metal signal (de-double-count). node_z=(2.2,4.2). Arms 1/2 use the
 # per-z f→a map a(z)=f(z)/(1−⟨F⟩(z)) (the within-z convention); arm 3 is the Ma+2025 direct power-law.
-#   form="zevo"   : host loop interpolates f per z and calls metal_inject(form="desi_full" on legs in
-#                   metal_siII_legs (SiIII+SiII), else "eboss" (SiIII-only)) with f_SiII_SiII=0 ⇒
-#                   in-class (the Model-C forward can reproduce it exactly).
+#   form="zevo"   : host loop interpolates f per z and calls metal_inject(form="desi_full", cross=True)
+#                   on EVERY metals_on leg — SiIII+SiII on legs in metal_siII_legs, SiIII-only
+#                   (f_SiII=0 ⇒ cross auto-OFF) elsewhere (4-lens fix (a): eBOSS is now IN-CLASS via
+#                   desi_full+f_SiII=0+matched decorrelation, NOT the undamped "eboss"). f_SiII_SiII=0;
+#                   k_SiIII/k_SiII = the arm's decorrelation scale (inside the forward's float bracket
+#                   ⇒ the Model C+ forward can reproduce it exactly).
 #   form="ma2025" : host loop computes a_SiIII(z)=0.014·((1+z)/4)^0.79 + k_cross(z)=−1.58e-2·((1+z)/4)^1.15
 #                   s/km and calls metal_inject(form="ma2025", a_SiIII_direct, k_cross, damp="ma"); SiII OFF.
+#   form="ma2025_gauss" : ARM 4 (4-lens fix (b)) — a DECREASING-trend SiIII metal a(z)=a0·((1+z)/4)^p
+#                   (p<0) with a GAUSS damping exp(−(k/k_cross)²) the SIGMOID forward cannot reproduce
+#                   (genuinely OUT-of-class for the floated-decorrelation Model C+ forward). SiII OFF.
 METAL_ZEVO_ARMS = {
     "arm1_decreasing": dict(form="zevo", f_SiIII_nodes=(0.010, 0.010),
-                            f_SiII_nodes=(0.006, 0.006), node_z=(2.2, 4.2)),
+                            f_SiII_nodes=(0.006, 0.006), node_z=(2.2, 4.2),
+                            k_SiIII=0.05, k_SiII=0.05),
     "arm2_increasing": dict(form="zevo", f_SiIII_nodes=(0.004, 0.025),
-                            f_SiII_nodes=(0.004, 0.015), node_z=(2.2, 4.2)),
+                            f_SiII_nodes=(0.004, 0.015), node_z=(2.2, 4.2),
+                            k_SiIII=0.0074, k_SiII=0.0035),       # DESI Table-D2 best-fit decorrelation
     "arm3_ma2025": dict(form="ma2025", node_z=(2.2, 4.2)),
+    "arm4_decreasing_ooc": dict(form="ma2025_gauss", a0=0.012, p=-0.6, k_cross=0.02,
+                                damp="gauss", node_z=(2.2, 4.2)),
 }
 
 
@@ -411,6 +442,13 @@ class LegBCtx(NamedTuple):
     metal_fnode_lo: float = 0.003             # flat-log10 f per-node lower bracket
     metal_fnode_hi: float = 0.03              # upper bracket (spans eBOSS .006 / Ma .014 / DESI .016)
     metal_siII_legs: tuple = ("DESI",)        # legs that ALSO sample the SiII doublet f-nodes
+    # MODEL C+ — FLOAT the sigmoid decorrelation SCALE k_SiIII/k_SiII (cup1d s_Lya_SiIII/s_Lya_SiII;
+    # we sample the SCALE, not its inverse). Per metals_on leg, per ion, a 2-node LogUniform site (per
+    # z log-interp like f) ~ dist.LogUniform(metal_knode_lo, metal_knode_hi). Bracket [1e-3, 0.1] s/km
+    # spans the DESI Table-D2 best fit (k_SiIII~0.0074, k_SiII~0.0035) and the old fixed 0.05; in
+    # cup1d s units that is exp([2,7]) ≈ 1/[0.135, 0.0009] (input_pipeline.set_baseline s_Lya_*).
+    metal_knode_lo: float = 1e-3              # flat-log10 k (decorrelation scale, s/km) lower bracket
+    metal_knode_hi: float = 0.1               # upper bracket
 
 
 def _kim(z):
@@ -434,7 +472,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    metal_prior="uniform", metal_logf_lo=-11.0, metal_logf_hi=-2.0,
                    metal_one_minus_F_ref=None,
                    metal_node_z=(2.2, 4.2), metal_fnode_lo=0.003, metal_fnode_hi=0.03,
-                   metal_siII_legs=("DESI",),
+                   metal_siII_legs=("DESI",), metal_knode_lo=1e-3, metal_knode_hi=0.1,
                    hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0,
                    hcd_2d_tilt=False, ensemble_ckpts=None, survey=None):
     """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
@@ -649,6 +687,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         metal_logf_hi=float(metal_logf_hi), metal_one_minus_F_ref=metal_one_minus_F_ref,
         metal_node_z=tuple(metal_node_z), metal_fnode_lo=float(metal_fnode_lo),
         metal_fnode_hi=float(metal_fnode_hi), metal_siII_legs=tuple(metal_siII_legs),
+        metal_knode_lo=float(metal_knode_lo), metal_knode_hi=float(metal_knode_hi),
         hierarchical_hcd=bool(hierarchical_hcd), hcd_noncentered=bool(hcd_noncentered),
         hcd_ratio_mu=hcd_ratio_mu, hcd_ratio_sigma=hcd_ratio_sigma,
         hcd_ratio_infl=float(hcd_ratio_infl),
@@ -1218,6 +1257,9 @@ def draw_leg_a_leg_truth(ctx: LegBCtx, key):
         alpha_hcd=np.array([a_lls, a_sub, a_dla]),                   # (3,) pivot (rank truth-vec)
         alpha_hcd_z=np.asarray(rec["alpha_hcd_z"][0]),              # (nZg,3) z-resolved (forward)
         a_siiii=(float(raw["a_SiIII"]) if "a_SiIII" in raw else 0.0),
+        # the mean-flux SITES (tau0_amp/dtau0) for the τ₀-bias report (feedback-report-tau0-dtau0-bias).
+        tau0_amp=(float(raw["tau0_amp"]) if "tau0_amp" in raw else np.nan),
+        dtau0=(float(raw["dtau0"]) if "dtau0" in raw else np.nan),
         kept_global_z=np.ones(len(ctx.z_global), bool), raw=raw)
 
 
@@ -1338,22 +1380,25 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
                 if rows.size == 0:
                     continue
                 if _form == "zevo":
-                    # MODEL-C metal_zevo arm (Arms 1/2): interpolate f per z and inject the IN-CLASS
-                    # contaminant — desi_full (SiIII+SiII) on legs in metal_siII_legs, else SiIII-only
-                    # eboss. f_SiII_SiII=0 + k_decorr/r matched to the forward ⇒ the Model-C forward
-                    # reproduces it exactly. a(z)=f(z)/(1−⟨F⟩(z)) (within-z; decreasing or increasing
-                    # per the f-nodes). De-double-count: the clean truth carries no metal (a_siiii=0).
+                    # MODEL C+ metal_zevo arm (Arms 1/2): interpolate f per z and inject the IN-CLASS
+                    # contaminant via desi_full+cross on EVERY metals_on leg. legs in metal_siII_legs
+                    # carry the SiII doublet + the SiIII–SiII cross; other legs (eBOSS) set f_SiII=0 ⇒
+                    # SiIII-only with the SAME sigmoid decorrelation (4-lens fix (a): in-class, NOT the
+                    # undamped "eboss"). f_SiII_SiII=0; k_SiIII/k_SiII/r matched to the forward ⇒ the
+                    # Model C+ forward reproduces it exactly. a(z)=f(z)/(1−⟨F⟩(z)) (within-z; per the
+                    # f-nodes). De-double-count: the clean truth carries no metal (a_siiii=0).
                     node_z = metal_kw.get("node_z", (2.2, 4.2))
+                    k3 = metal_kw.get("k_SiIII", DL.K_SiIII_DEFAULT)
+                    k2 = metal_kw.get("k_SiII", DL.K_SiII_DEFAULT)
                     f3_z = float(_metal_f_of_z(float(leg.z[iz]), node_z, metal_kw["f_SiIII_nodes"]))
                     if leg.name in tuple(ctx.metal_siII_legs):
                         f2_z = float(_metal_f_of_z(float(leg.z[iz]), node_z, metal_kw["f_SiII_nodes"]))
-                        P_model[rows] = metal_inject(
-                            P_model[rows], k_leg[rows], float(Fbar[iz]), form="desi_full",
-                            f_SiIII=f3_z, f_SiII=f2_z, f_SiII_SiII=0.0,
-                            k_decorr=DL.K_SiIII_DEFAULT, r_doublet=DL.R_SiII_DOUBLET)
                     else:
-                        P_model[rows] = metal_inject(P_model[rows], k_leg[rows], float(Fbar[iz]),
-                                                     form="eboss", f_SiIII=f3_z)
+                        f2_z = 0.0                                 # SiIII-only legs (eBOSS): no doublet, no cross
+                    P_model[rows] = metal_inject(
+                        P_model[rows], k_leg[rows], float(Fbar[iz]), form="desi_full",
+                        f_SiIII=f3_z, f_SiII=f2_z, f_SiII_SiII=0.0,
+                        k_decorr=k3, k_SiII=k2, r_doublet=DL.R_SiII_DOUBLET, cross=True)
                 elif _form == "ma2025":
                     # Arm 3 (Ma+2025 sim, OUT-of-class): SiIII-only DIRECT amplitude + Ma damping, per z.
                     z = float(leg.z[iz])
@@ -1362,6 +1407,15 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
                     P_model[rows] = metal_inject(P_model[rows], k_leg[rows], float(Fbar[iz]),
                                                  form="ma2025", a_SiIII_direct=a_z, k_cross=kc_z,
                                                  damp="ma")
+                elif _form == "ma2025_gauss":
+                    # Arm 4 (OUT-of-class, 4-lens fix (b)): a survey-standard DECREASING-trend SiIII
+                    # metal a(z)=a0·((1+z)/4)^p (p<0) with a GAUSS damping exp(−(k/k_cross)²) the
+                    # sigmoid forward CANNOT reproduce. Direct amplitude, SiII OFF.
+                    z = float(leg.z[iz])
+                    a_z = float(metal_kw["a0"]) * ((1.0 + z) / 4.0) ** float(metal_kw["p"])
+                    P_model[rows] = metal_inject(P_model[rows], k_leg[rows], float(Fbar[iz]),
+                                                 form="ma2025", a_SiIII_direct=a_z,
+                                                 k_cross=float(metal_kw["k_cross"]), damp="gauss")
                 else:                                          # legacy forms (desi_full/eboss/…) — byte-exact
                     P_model[rows] = metal_inject(P_model[rows], k_leg[rows], float(Fbar[iz]),
                                                  **metal_kw)
@@ -1413,10 +1467,12 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
     is the z-MEAN of that leg's per-z cores (a documented MVP — the per-z core variation is
     tiny vs the P1D, and the DLA sector is un-certified by Leg B without arm A3 anyway).
 
-    ``metal_nodes`` (MODEL C, default None → the legacy scalar a_siiii/a_siii path): a dict
-    ``{leg.name: (f3_nodes (2,), f2_nodes (2,) or None)}`` of the per-leg metal f-nodes. Per leg
-    the matching nodes are forwarded into ``predict_P_obs_on_leg`` (per-z a(z)=f(z)/(1−⟨F⟩(z))).
-    None (and a leg absent from the dict) ⇒ the scalar a_siiii/a_siii path (byte-exact).
+    ``metal_nodes`` (MODEL C+, default None → the legacy scalar a_siiii/a_siii path): a dict
+    ``{leg.name: (f3_nodes (2,), f2_nodes (2,)|None, k3_nodes (2,), k2_nodes (2,)|None)}`` of the
+    per-leg metal f-nodes (amplitude) AND k-nodes (decorrelation scale). Per leg the matching nodes
+    are forwarded into ``predict_P_obs_on_leg`` (per-z a(z)=f(z)/(1−⟨F⟩(z)) + per-z k(z) + the
+    SiIII–SiII cross). None (and a leg absent from the dict) ⇒ the scalar a_siiii/a_siii path
+    (byte-exact).
 
     ``alpha_res`` (Task 1.3): the sampled res_corr-amplitude ``(alpha0, s)`` tuple, threaded
     FORWARD-ONLY into ``predict_P_obs_on_leg`` (it scales ``log res_corr`` by α(z) in the MF
@@ -1448,15 +1504,16 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
                if getattr(ctx, "mf_shape_per_leg", None) is not None else None)
         mec = (ctx.mf_emucoh_per_leg.get(leg.name)
                if getattr(ctx, "mf_emucoh_per_leg", None) is not None else None)
-        # MODEL C per-leg metal f-nodes (None → the scalar a_siiii/a_siii path, byte-exact).
-        f3_nodes = f2_nodes = None
+        # MODEL C+ per-leg metal nodes (None → the scalar a_siiii/a_siii path, byte-exact).
+        f3_nodes = f2_nodes = k3_nodes = k2_nodes = None
         if metal_nodes is not None:
-            f3_nodes, f2_nodes = metal_nodes.get(leg.name, (None, None))
+            f3_nodes, f2_nodes, k3_nodes, k2_nodes = metal_nodes.get(leg.name, (None, None, None, None))
         P_model, C_total = DL.predict_P_obs_on_leg(
             ctx.model, theta9, tau0_vec, alpha_leg, pf_stats=ctx.pf_stats, dla_core=core,
             cache_k=ctx.cache_k, leg=leg, sigma_zb=szb, alpha_centres=ctx.alpha_centres,
             a_SiIII=a_siiii, a_SiII=a_siii,                    # applied only on metals_on legs
-            f_SiIII_nodes=f3_nodes, f_SiII_nodes=f2_nodes,     # MODEL C per-z amplitude (None → scalar)
+            f_SiIII_nodes=f3_nodes, f_SiII_nodes=f2_nodes,     # MODEL C+ per-z amplitude (None → scalar)
+            k_SiIII_nodes=k3_nodes, k_SiII_nodes=k2_nodes,     # MODEL C+ per-z decorrelation scale
             metal_node_z=getattr(ctx, "metal_node_z", (2.2, 4.2)),
             cemu_inflate=ctx.cemu_inflate, rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor,
             mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
@@ -1528,33 +1585,45 @@ def _metal_amp_site(name, ctx, on):
 
 
 def _metal_2node_sites(ctx):
-    """MODEL C (``ctx.metal_prior=="flatlog2node"``): sample, PER metals_on leg IN ORDER, PER ion,
+    """MODEL C+ (``ctx.metal_prior=="flatlog2node"``): sample, PER metals_on leg IN ORDER, PER ion,
     the 2 node values of the metal flux decrement f at ``ctx.metal_node_z`` ~
-    ``dist.LogUniform(metal_fnode_lo, metal_fnode_hi)`` (flat in log10 f; the LIBRARY transform A1
-    already uses). SiII nodes ONLY on legs in ``ctx.metal_siII_legs``. Returns
-    ``{leg.name: (f3_nodes (2,), f2_nodes (2,) or None)}``.
+    ``dist.LogUniform(metal_fnode_lo, metal_fnode_hi)`` (flat in log10 f) AND the 2 node values of
+    the sigmoid decorrelation SCALE k ~ ``dist.LogUniform(metal_knode_lo, metal_knode_hi)`` (Model C+
+    floats k_SiIII/k_SiII; cup1d s_Lya_*). SiII (f AND k) nodes ONLY on legs in
+    ``ctx.metal_siII_legs``. Returns ``{leg.name: (f3 (2,), f2 (2,)|None, k3 (2,), k2 (2,)|None)}``.
 
     SHARED by ``_legb_model`` and ``_legb_priors_only`` — iterating ``ctx.legs`` in the SAME fixed
     order with the SAME site names guarantees byte-identical site construction in both twins (the
-    constrain_fn mirror invariant). Site order with_eboss=True:
-    f_SiIII_DESI_z0,_z1, f_SiII_DESI_z0,_z1, f_SiIII_eBOSS_z0,_z1 (KS metals_off → none)."""
+    constrain_fn mirror invariant). Per-leg site order: f_SiIII z0,z1, [f_SiII z0,z1], k_SiIII z0,z1,
+    [k_SiII z0,z1]. with_eboss=True full order: f_SiIII_DESI, f_SiII_DESI, k_SiIII_DESI, k_SiII_DESI,
+    f_SiIII_eBOSS, k_SiIII_eBOSS (KS metals_off → none)."""
     nodes = {}
     if not getattr(ctx, "sample_metals", False):
         return nodes
-    lo, hi = float(ctx.metal_fnode_lo), float(ctx.metal_fnode_hi)   # python floats (static, untraced)
+    flo, fhi = float(ctx.metal_fnode_lo), float(ctx.metal_fnode_hi)   # python floats (static, untraced)
+    klo, khi = float(getattr(ctx, "metal_knode_lo", 1e-3)), float(getattr(ctx, "metal_knode_hi", 0.1))
     siII_legs = tuple(ctx.metal_siII_legs)
     for leg in ctx.legs:                                            # FIXED order ⇒ identical both twins
         if not leg.metals_on:
             continue
         f3 = jnp.stack([
-            numpyro.sample(f"f_SiIII_{leg.name}_z0", dist.LogUniform(lo, hi)),
-            numpyro.sample(f"f_SiIII_{leg.name}_z1", dist.LogUniform(lo, hi))])
+            numpyro.sample(f"f_SiIII_{leg.name}_z0", dist.LogUniform(flo, fhi)),
+            numpyro.sample(f"f_SiIII_{leg.name}_z1", dist.LogUniform(flo, fhi))])
         f2 = None
         if leg.name in siII_legs:
             f2 = jnp.stack([
-                numpyro.sample(f"f_SiII_{leg.name}_z0", dist.LogUniform(lo, hi)),
-                numpyro.sample(f"f_SiII_{leg.name}_z1", dist.LogUniform(lo, hi))])
-        nodes[leg.name] = (f3, f2)
+                numpyro.sample(f"f_SiII_{leg.name}_z0", dist.LogUniform(flo, fhi)),
+                numpyro.sample(f"f_SiII_{leg.name}_z1", dist.LogUniform(flo, fhi))])
+        # Model C+: float the per-z sigmoid decorrelation scale (k), sampled like f (after the f-nodes).
+        k3 = jnp.stack([
+            numpyro.sample(f"k_SiIII_{leg.name}_z0", dist.LogUniform(klo, khi)),
+            numpyro.sample(f"k_SiIII_{leg.name}_z1", dist.LogUniform(klo, khi))])
+        k2 = None
+        if leg.name in siII_legs:
+            k2 = jnp.stack([
+                numpyro.sample(f"k_SiII_{leg.name}_z0", dist.LogUniform(klo, khi)),
+                numpyro.sample(f"k_SiII_{leg.name}_z1", dist.LogUniform(klo, khi))])
+        nodes[leg.name] = (f3, f2, k3, k2)
     return nodes
 
 
@@ -2316,7 +2385,11 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
             truth_vec = np.concatenate([truth_vec, _hcd_latent_truths_2d(truth_pack["alpha_hcd"], ctx)])
         elif getattr(ctx, "hierarchical_hcd", False):        # align with the appended A_hcd/r columns
             truth_vec = np.concatenate([truth_vec, _hcd_latent_truths(truth_pack["alpha_hcd"])])
-        if getattr(ctx, "sample_metals", False):             # align with _draws_matrix's LAST a_SiIII col
+        # Align with _draws_matrix's LAST a_SiIII col — ONLY when the SCALAR a_SiIII site exists
+        # (uniform/flatlog). Under MODEL C+ ("flatlog2node") there is NO scalar a_SiIII draw column
+        # (the per-leg f-/k-nodes are not packed), so appending a_siiii here would MISALIGN truth_vec
+        # vs draws. Keying off "a_SiIII" in samples mirrors _draws_matrix exactly.
+        if getattr(ctx, "sample_metals", False) and "a_SiIII" in samples:
             truth_vec = np.concatenate([truth_vec, [float(truth_pack.get("a_siiii", 0.0))]])
 
         # loglik of the truth + draws on the SAME mock data (Modrak rank).
@@ -2337,11 +2410,22 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
         # thin ll_draws by the SAME step.
         ll_draws_t = ll_draws[::step][:L]
 
+        # MEAN-FLUX SITES (feedback-report-tau0-dtau0-bias): the packed draws/truth carry only the
+        # DETERMINISTIC tau0_z ladder, not the 2 sampled sites (tau0_amp, dtau0). Store them SEPARATELY
+        # (thinned by the SAME step + the truth) so the gate can report the τ₀ amplitude/slope bias
+        # JOINTLY with n_s/A_p — mean flux is the suspected n_s channel. SEPARATE field ⇒ the packed
+        # draws-matrix tail layout (and the uniform/flatlog golden) is untouched.
+        sites_extra = {}
+        for nm in ("tau0_amp", "dtau0"):
+            if nm in samples:
+                dr = np.asarray(samples[nm])[::step][:L]
+                sites_extra[nm] = dict(draws=dr, truth=float(truth_pack.get(nm, np.nan)))
+
         per_mock.append(dict(sim=sim, truth_vec=truth_vec, draws=draws_t, L=L,
                              ll_true=ll_true, ll_draws=ll_draws_t,
                              names=_packed_names_for(samples, kept_global),
                              kept_global=kept_global, dropped=info["dropped"],
-                             n_div=n_div))
+                             sites_extra=sites_extra, n_div=n_div))
         if verbose:
             print(f"  [mock {m}] sim={sim[:24]}… L={L} (step {step}, ess {ess_min:.0f}) "
                   f"nKeptZ={int(kept_global.sum())} div={n_div}")

@@ -399,10 +399,11 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
 # ============================================================================ #
 #  Forward-model nuisances (differentiable; per-leg-configurable, default OFF)
 # ============================================================================ #
-def _metal_factor(k, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT):
+def _metal_factor(k, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT,
+                  cross=False):
     """Metal contamination multiplier — companion arXiv:2601.21432 Eq. 4.2–4.3:
 
-        P → P · (1 + C_LyαSiIII + C_LyαSiII),
+        P → P · (1 + C_LyαSiIII + C_LyαSiII [+ C_SiIIISiII]),
         C_LyαX = a_X²  +  2 a_X · cos(k·Δv_X) · D_X(k),   D_X(k) = 2 − 2/(1 + exp(−k/k_X)).
 
     The CONSTANT a_X² term is UNDAMPED; the SIGMOID decorrelation D_X (k_X a FREE nuisance)
@@ -414,7 +415,17 @@ def _metal_factor(k, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII
     SiII is the true 1190.42+1193.28 DOUBLET (matches closure_legb.metal_inject, the gate injection):
         C_LyαSiII = a_SiII²·(1+r²) + 2 a_SiII·(cos(k·Δv_b) + r·cos(k·Δv_a))·D_SiII,
     r = R_SiII_DOUBLET (intra-doublet ratio), Δv_a = leading 1190.42, Δv_b = 1193.28. r=0 ⇒ the old
-    single-line form; a_SiII=0 ⇒ byte-exact identity (golden-safe)."""
+    single-line form; a_SiII=0 ⇒ byte-exact identity (golden-safe).
+
+    ``cross`` (Model C+, default False → BYTE-EXACT legacy): when True ADD the SiIII–SiII metal-metal
+    CROSS term (cup1d si_mult.py ``Cmm``, paper Eq. 4.5), amplitude TIED to a_SiIII·a_SiII (NO new
+    DOF), UNDAMPED to match cup1d exactly:
+        C_SiIIISiII = 2 a_SiIII a_SiII · (cos(k·Δv_SiIII_SiIIb) + r·cos(k·Δv_SiIII_SiIIa)),
+    Δv_SiIII_SiIIX = c·ln(λ_SiIIX/λ_SiIII) (the SiIII–SiII line separations). cup1d leaves Cmm
+    UNDAMPED; the damped-vs-undamped choice was checked IMMATERIAL in band (worst-case in-prior
+    ΔP/P ≲ 0.41× the tightest DESI bin, a rapid oscillation not a broadband tilt — notes
+    2026-06-30-metal-cross-damping.md / diag_metal_cross_damping.py), so we match cup1d.
+    a_SiII=0 ⇒ cross ≡ 0 (eBOSS / back-compat byte-exact)."""
     k = jnp.asarray(k)
     dv_SiIII = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiIII)
     dv_SiIIa = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiII)        # leading doublet line 1190.42
@@ -425,6 +436,11 @@ def _metal_factor(k, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII
     f = (a_SiIII ** 2 + 2.0 * a_SiIII * jnp.cos(k * dv_SiIII) * D_SiIII) \
         + (a_SiII ** 2 * (1.0 + r ** 2)
            + 2.0 * a_SiII * (jnp.cos(k * dv_SiIIb) + r * jnp.cos(k * dv_SiIIa)) * D_SiII)
+    if cross:
+        dv_cross_b = C_KMS * jnp.log(LAMBDA_SiIIb / LAMBDA_SiIII)   # SiIII–SiII line b (1193.28)
+        dv_cross_a = C_KMS * jnp.log(LAMBDA_SiII / LAMBDA_SiIII)    # SiIII–SiII line a (1190.42)
+        f = f + 2.0 * a_SiIII * a_SiII * (jnp.cos(k * dv_cross_b)
+                                          + r * jnp.cos(k * dv_cross_a))   # UNDAMPED: cup1d Cmm
     return 1.0 + f
 
 
@@ -791,6 +807,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                          mf_emucoh_cov=None, mf_emucoh_infl=1.0,
                          mf_emucoh_offdiag_only=False, alpha_res=None,
                          f_SiIII_nodes=None, f_SiII_nodes=None, metal_node_z=(2.2, 4.2),
+                         k_SiIII_nodes=None, k_SiII_nodes=None,
                          require_zresolved=False):
     """Bind the emulator forward model to ONE leg's grid → flat (P_model (N,), C_total (N,N)).
 
@@ -858,6 +875,12 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     amplitude becomes per-z. ``f_SiII_nodes=None`` ⇒ a_SiII(z)=0. The metal factor is computed
     ONCE per z and reused by BOTH P_z and the C_emu variance transform. When
     ``f_SiIII_nodes is None`` the legacy scalar ``a_SiIII``/``a_SiII`` path runs (byte-exact).
+
+    ``k_SiIII_nodes`` / ``k_SiII_nodes`` (opt-in, MODEL C+, default None → the scalar
+    ``k_SiIII``/``k_SiII``=0.05): a (2,) array of the sigmoid decorrelation SCALE at ``metal_node_z``;
+    when given the per-z scale is ``10**interp(log10(1+z))`` (log10 k LINEAR in log10(1+z), like f).
+    On the f-node (Model C+) path the SiIII–SiII metal-metal CROSS term is ON (``cross=True``); it is
+    ∝ a_SiII so it auto-vanishes on SiIII-only legs.
 
     ``require_zresolved`` (opt-in, default False → byte-identical): when True, ASSERT
     ``alpha_hcd`` is z-RESOLVED (ndim==2, (n_z,3)) — a (3,) z-flat alpha raises. The DEPLOYED
@@ -939,16 +962,25 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
         mfac = None
         if leg.metals_on:
             if f_SiIII_nodes is not None:
-                # MODEL C: a(z)=f(z)/(1−⟨F⟩(z)), log10 f(z) LINEAR in log10(1+z) (power-law-exact);
+                # MODEL C+: a(z)=f(z)/(1−⟨F⟩(z)), log10 f(z) LINEAR in log10(1+z) (power-law-exact);
                 # ⟨F⟩(z)=exp(−tau0) the SAMPLED mean flux (a is differentiable in τ₀). jnp.interp
-                # default-CLAMPS f flat beyond [node_z[0],node_z[1]] (eBOSS z>4.2 → bounded a).
+                # default-CLAMPS f flat beyond [node_z[0],node_z[1]] (eBOSS z>4.2 → bounded a). The
+                # sigmoid decorrelation SCALE is ALSO per-z (k_SiIII_nodes/k_SiII_nodes, log-interp'd
+                # like f); when its nodes are None we fall back to the scalar k_SiIII/k_SiII (=0.05).
+                # The SiIII–SiII cross term is ON (cross=True); it is ∝ a_SiII so it auto-vanishes on
+                # SiIII-only legs (f_SiII_nodes None → a2_z=0).
                 _logz = jnp.log10(1.0 + z)
                 _xp = jnp.log10(1.0 + jnp.asarray(metal_node_z))
                 _omF = 1.0 - jnp.exp(-tau0)
                 a3_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiIII_nodes))) / _omF
                 a2_z = ((10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiII_nodes))) / _omF
                         if f_SiII_nodes is not None else 0.0)
-                mfac = _metal_factor(k_sub, a_SiIII=a3_z, a_SiII=a2_z, k_SiIII=k_SiIII, k_SiII=k_SiII)
+                k3_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(k_SiIII_nodes))
+                        if k_SiIII_nodes is not None else k_SiIII)
+                k2_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(k_SiII_nodes))
+                        if k_SiII_nodes is not None else k_SiII)
+                mfac = _metal_factor(k_sub, a_SiIII=a3_z, a_SiII=a2_z, k_SiIII=k3_z, k_SiII=k2_z,
+                                     cross=True)
             else:
                 mfac = _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII,
                                      k_SiIII=k_SiIII, k_SiII=k_SiII)
