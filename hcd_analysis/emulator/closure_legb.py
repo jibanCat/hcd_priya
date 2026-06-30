@@ -277,12 +277,13 @@ METAL_ZEVO_ARMS = {
     "arm1_decreasing": dict(form="zevo", f_SiIII_nodes=(0.010, 0.010),
                             f_SiII_nodes=(0.006, 0.006), node_z=(2.2, 4.2),
                             k_SiIII=0.05, k_SiII=0.05),
-    "arm2_increasing": dict(form="zevo", f_SiIII_nodes=(0.004, 0.016),
-                            f_SiII_nodes=(0.004, 0.010), node_z=(2.2, 4.2),
+    "arm2_increasing": dict(form="zevo", f_SiIII_nodes=(0.004, 0.020),
+                            f_SiII_nodes=(0.004, 0.013), node_z=(2.2, 4.2),
                             k_SiIII=0.012, k_SiII=0.006),         # GENERIC in-prior increasing arm:
     #   NOT the DESI Table-D2 best fit (0.0074/0.0035) -- blind-safe per the 4-lens review (do not
-    #   inject the published best-fit). f_SiIII_z1=0.016 is mid-bracket, OFF the 0.03 prior ceiling
-    #   (the old 0.025 railed it and could manufacture an A_p leak in the very gate it feeds).
+    #   inject the published best-fit). f_SiIII_z1=0.020 keeps a(z) INCREASING (a +8%: the f-rise
+    #   beats the 1/(1-<F>) fall; threshold f4>0.0186) yet sits 0.176 dex OFF the 0.03 prior ceiling
+    #   (2.2x the headroom of the old railed 0.025, which could manufacture an A_p leak in the gate).
     "arm3_ma2025": dict(form="ma2025", node_z=(2.2, 4.2)),
     "arm4_decreasing_ooc": dict(form="ma2025_gauss", a0=0.012, p=-0.6, k_cross=0.02,
                                 damp="gauss", node_z=(2.2, 4.2)),
