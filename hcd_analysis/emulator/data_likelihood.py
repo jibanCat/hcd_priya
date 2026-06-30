@@ -790,6 +790,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                          mf_shape_cov=None, mf_shape_infl=1.0,
                          mf_emucoh_cov=None, mf_emucoh_infl=1.0,
                          mf_emucoh_offdiag_only=False, alpha_res=None,
+                         f_SiIII_nodes=None, f_SiII_nodes=None, metal_node_z=(2.2, 4.2),
                          require_zresolved=False):
     """Bind the emulator forward model to ONE leg's grid → flat (P_model (N,), C_total (N,N)).
 
@@ -846,6 +847,17 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     ``_predict_P_obs_mf → _mf_corr_on_cache``. Affects P_model ONLY (the forward), not
     C_total. ``None`` (and ``(1.0, 0.0)``) ⇒ α≡1 ⇒ the MF golden is byte-exact. Only fires
     through the MF forward (``mf is not None``).
+
+    ``f_SiIII_nodes`` / ``f_SiII_nodes`` (opt-in, MODEL C, default None → byte-identical
+    scalar path): a (2,) array of the metal flux-decrement f at the two z-nodes
+    ``metal_node_z`` (ascending). When given, the per-z SiIII (and SiII) oscillation
+    amplitude is ``a(z) = f(z)/(1−⟨F⟩(z))`` with ``⟨F⟩(z)=exp(−τ₀_vec[iz])`` (the SAMPLED
+    mean flux, so a(z) is differentiable in τ₀) and ``log10 f(z)`` LINEAR in ``log10(1+z)``
+    between the nodes (power-law-exact; ``jnp.interp`` default-CLAMPS f flat beyond the nodes,
+    intended for eBOSS z>4.2). The metal FORM (``_metal_factor``) is UNCHANGED — only its
+    amplitude becomes per-z. ``f_SiII_nodes=None`` ⇒ a_SiII(z)=0. The metal factor is computed
+    ONCE per z and reused by BOTH P_z and the C_emu variance transform. When
+    ``f_SiIII_nodes is None`` the legacy scalar ``a_SiIII``/``a_SiII`` path runs (byte-exact).
 
     ``require_zresolved`` (opt-in, default False → byte-identical): when True, ASSERT
     ``alpha_hcd`` is z-RESOLVED (ndim==2, (n_z,3)) — a (3,) z-flat alpha raises. The DEPLOYED
@@ -921,10 +933,26 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                                         pf_stats, dla_core, alpha_res=alpha_res)
         # (3) interp to the leg's k (bin centres); model is smooth → linear interp.
         P_z = jnp.interp(k_sub, cache_k, P_cache)
-        # (2) forward-model nuisances (gated; default OFF → factor ≡ 1)
+        # (2) forward-model nuisances (gated; default OFF → factor ≡ 1). Compute the metal factor
+        # ONCE per iz (MODEL C per-z amplitude OR the legacy scalar) and REUSE it for BOTH P_z and the
+        # C_emu variance transform (ev_z·mfac²) so the two can never drift to a stale amplitude.
+        mfac = None
         if leg.metals_on:
-            P_z = P_z * _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII,
-                                      k_SiIII=k_SiIII, k_SiII=k_SiII)
+            if f_SiIII_nodes is not None:
+                # MODEL C: a(z)=f(z)/(1−⟨F⟩(z)), log10 f(z) LINEAR in log10(1+z) (power-law-exact);
+                # ⟨F⟩(z)=exp(−tau0) the SAMPLED mean flux (a is differentiable in τ₀). jnp.interp
+                # default-CLAMPS f flat beyond [node_z[0],node_z[1]] (eBOSS z>4.2 → bounded a).
+                _logz = jnp.log10(1.0 + z)
+                _xp = jnp.log10(1.0 + jnp.asarray(metal_node_z))
+                _omF = 1.0 - jnp.exp(-tau0)
+                a3_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiIII_nodes))) / _omF
+                a2_z = ((10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiII_nodes))) / _omF
+                        if f_SiII_nodes is not None else 0.0)
+                mfac = _metal_factor(k_sub, a_SiIII=a3_z, a_SiII=a2_z, k_SiIII=k_SiIII, k_SiII=k_SiII)
+            else:
+                mfac = _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII,
+                                     k_SiIII=k_SiIII, k_SiII=k_SiII)
+            P_z = P_z * mfac
         if leg.resolution_on:
             P_z = P_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res)
         P_model = P_model.at[jnp.asarray(rows)].set(P_z)
@@ -938,10 +966,10 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                 sigma_zb=sigma_zb_z, alpha_centres=alpha_centres, dla_core=dla_core,
                 cemu_inflate=cemu_inflate, rho_zb=rho_zb_z)
             ev_z = jnp.interp(k_sub, cache_k, ev_cache)
-            # emu var transforms by the SAME multiplicative nuisance factors² (variance units)
+            # emu var transforms by the SAME multiplicative nuisance factors² (variance units) —
+            # REUSE the per-iz mfac computed above for P_z (Model C per-z OR the legacy scalar).
             if leg.metals_on:
-                ev_z = ev_z * _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII,
-                                            k_SiIII=k_SiIII, k_SiII=k_SiII) ** 2
+                ev_z = ev_z * mfac ** 2
             if leg.resolution_on:
                 ev_z = ev_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res) ** 2
             emu_var_flat = emu_var_flat.at[jnp.asarray(rows)].set(ev_z)
