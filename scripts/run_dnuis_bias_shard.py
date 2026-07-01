@@ -73,7 +73,29 @@ LLS_TRUTH_BOOST = {
 }
 
 
-def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None):
+def arm_inject_spec(arm, survey, *, b_res=0.02):
+    """Map (arm, survey) -> the run_legb inject_spec (PURE; no ctx build, unit-testable). ``b_res``
+    sets the resolution injection strength (default 0.02 = the realistic DESI ~1-sigma level derived
+    from the data's own syst_e_resolution; the option-a certification brackets it +/-1 sigma over
+    {0.015, 0.02, 0.03})."""
+    if arm == "metal_misspec":
+        if survey == "ks":
+            raise SystemExit(
+                "metal_misspec is a NO-OP on KS (KS legs are metals_on=False — the injection neither "
+                "perturbs the mock nor is fittable, a meaningless PASS). Run metal_misspec on "
+                "desi/eboss only.")
+        form = "eboss" if survey == "eboss" else "desi_full"
+        return {"metal_misspec": {"form": form}}
+    if arm == "resolution":
+        return {"resolution": {"b_res": float(b_res)}}
+    if arm == "lls_excess":
+        return {"lls_truth_boost": LLS_TRUTH_BOOST[survey]}
+    if arm == "metal_matched":
+        return {}
+    raise SystemExit(f"unknown arm {arm!r}")
+
+
+def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02):
     """Build the single-survey production ctx for an arm. metals_on/sample_metals ON for
     DESI/eBOSS (False for KS). Returns (ctx, d, inject_spec). The arm runs on ONE survey's legs:
     we build a single-survey ctx by restricting the leg list AFTER build (keep it simple)."""
@@ -104,29 +126,10 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None):
         raise SystemExit(f"no leg named {LEG_NAME!r} in ctx (legs={[l.name for l in ctx.legs]})")
     ctx = ctx._replace(legs=legs)
 
-    # map arm -> inject_spec
-    if arm == "metal_misspec":
-        # GUARD: KS legs are metals_on=False, so the metal injection is a SILENT no-op (the forward
-        # cannot SEE it AND the mock is unchanged) → a meaningless PASS. Hard-fail the cell so it is
-        # never run. The metal-misspec arm is only meaningful on metals_on surveys (DESI/eBOSS).
-        if survey == "ks":
-            raise SystemExit(
-                "metal_misspec is a NO-OP on KS (KS legs are metals_on=False — the injection neither "
-                "perturbs the mock nor is fittable, a meaningless PASS). Run metal_misspec on "
-                "desi/eboss only.")
-        # REALISM: use the metal model AT EACH SURVEY'S SCALE — the full DESI-DR1 desi_full model
-        # (with the unfittable additive SiII–SiII term) for DESI, the McDonald/eBOSS SiIIIcorr form
-        # for eBOSS (the metal model the eBOSS data estimator actually uses).
-        form = "eboss" if survey == "eboss" else "desi_full"
-        inject_spec = {"metal_misspec": {"form": form}}
-    elif arm == "resolution":
-        inject_spec = {"resolution": {"b_res": 0.02}}
-    elif arm == "lls_excess":
-        inject_spec = {"lls_truth_boost": LLS_TRUTH_BOOST[survey]}
-    elif arm == "metal_matched":
-        inject_spec = {}                                # no post-hoc injection; a_SiIII free in fwd
-    else:
-        raise SystemExit(f"unknown arm {arm!r}")
+    # map arm -> inject_spec (pure helper; the resolution b_res is configurable for the +/-1 sigma
+    # option-a certification). metal_misspec REALISM: desi_full (with the unfittable additive SiII-SiII
+    # term) for DESI, McDonald/eBOSS SiIIIcorr for eBOSS; the KS metal no-op guard lives in the helper.
+    inject_spec = arm_inject_spec(arm, survey, b_res=b_res)
     return ctx, d, inject_spec
 
 
@@ -142,6 +145,10 @@ def main():
     ap.add_argument("--n-warmup", type=int, default=250)
     ap.add_argument("--n-samples", type=int, default=300)     # trimmed for budget (~13 CPU-h/fit)
     ap.add_argument("--max-tree-depth", type=int, default=10)
+    ap.add_argument("--b-res", type=float, default=0.02,
+                    help="resolution injection strength (arm=resolution). Default 0.02 = the realistic "
+                         "DESI ~1sigma level from syst_e_resolution; certification bracket +/-1sigma "
+                         "{0.015,0.02,0.03}. Ignored for non-resolution arms.")
     ap.add_argument("--no-mf", dest="with_mf", action="store_false")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--smoke", action="store_true",
@@ -154,7 +161,7 @@ def main():
         a.n_warmup = min(a.n_warmup, 20)
         a.n_samples = min(a.n_samples, 30)
 
-    ctx, d, inject_spec = build_arm_ctx(a.arm, a.survey, a.with_mf)
+    ctx, d, inject_spec = build_arm_ctx(a.arm, a.survey, a.with_mf, b_res=a.b_res)
     n_members = len(getattr(ctx.model, "members", [None]))
     idxs = [m for m in range(a.n_mocks) if m % a.n_shards == a.shard]
     print(f"[dnuis {a.arm}/{a.survey} shard {a.shard}/{a.n_shards}] mocks={idxs} "
