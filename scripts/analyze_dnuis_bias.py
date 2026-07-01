@@ -253,6 +253,23 @@ def main():
             f = lambda v, w: (f"{v.mean():>+{w}.3f}" if v.size else f"{'n/a':>{w}}")
             print(f"{arm + '/' + survey:<22} {f(da,11)} {f(dac,15)} {f(dd,10)} {f(ddc,12)}")
 
+    # --- IGM / thermal NUISANCES (theta9, paired Δbias_z) — report only, not gated. These live in
+    # theta9 (already packed), surfaced so the metal-injection pull on the IGM block is visible next
+    # to n_s/A_p: alphaq (quasar spectral hardness, correlated with small-scale power AND A_p),
+    # heref (z_HeII reion END ~z3, where the metals become important), herei (z_HeII START), hireionz
+    # (H reion z). alphaq on the low-lever legs (eBOSS) is the one to watch. ---
+    print()
+    print("IGM NUISANCES (theta9 paired Δbias_z) — report only, not gated:")
+    IGM = ("alphaq", "heref", "herei", "hireionz")
+    rh3 = f"{'arm/survey':<22} " + " ".join(f"{p:>9}" for p in IGM)
+    print(rh3); print("-" * len(rh3))
+    for (arm, survey), (clean_pm, inj_pm, nd) in sorted(groups.items()):
+        cells = []
+        for p in IGM:
+            dz, _cz = paired_delta_bias(clean_pm, inj_pm, p)
+            cells.append(f"{dz.mean():>+9.3f}" if dz.size else f"{'n/a':>9}")
+        print(f"{arm + '/' + survey:<22} " + " ".join(cells))
+
 
 if __name__ == "__main__":
     main()
