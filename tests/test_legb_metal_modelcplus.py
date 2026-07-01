@@ -505,6 +505,55 @@ def test_run_legb_records_tau0_amp_and_dtau0():
 
 
 # =========================================================================== #
+#  9b. run_legb ALSO records the Model C+ metal f/k node sites in sites_extra so the f_SiIII ceiling
+#      check is possible from the shard pkls. Fast unit test of the packer + slow e2e confirmation.
+# =========================================================================== #
+def test_metal_node_sites_extra_helper():
+    """_metal_node_sites_extra packs ONLY the f_/k_ metal-node sites (thinned by step, first L) with
+    the injected-arm truth for an in-class 'zevo' arm, ignores theta/tau0/a_SiIII keys, and is EMPTY
+    when no metal-node sites exist (golden-safe under uniform/flatlog/metals-off)."""
+    ctx, d = _ctx_2node(with_eboss=False, metals_on=True)
+    arm = dict(C.METAL_ZEVO_ARMS["arm1_decreasing"])   # f_SiIII=(.010,.010), f_SiII=(.006,.006), k=.05
+    samples = {"theta_unit": np.zeros((10, 9)), "tau0_amp": np.arange(10.0), "a_SiIII": np.arange(10.0),
+               "f_SiIII_DESI_z0": np.arange(10.0), "f_SiII_DESI_z1": np.arange(10.0),
+               "k_SiIII_DESI_z1": np.arange(10.0)}
+    out = C._metal_node_sites_extra(samples, step=2, L=3, inject_spec={"metal_misspec": arm},
+                                    ctx=ctx, leg_a=True)
+    assert set(out) == {"f_SiIII_DESI_z0", "f_SiII_DESI_z1", "k_SiIII_DESI_z1"}, (
+        "must pack ONLY the f_/k_ metal nodes (not theta/tau0/a_SiIII)")
+    np.testing.assert_array_equal(out["f_SiIII_DESI_z0"]["draws"], np.arange(10.0)[::2][:3])
+    assert np.isclose(out["f_SiIII_DESI_z0"]["truth"], 0.010, atol=1e-9)
+    assert np.isclose(out["f_SiII_DESI_z1"]["truth"], 0.006, atol=1e-9)
+    assert np.isclose(out["k_SiIII_DESI_z1"]["truth"], 0.05, atol=1e-9)
+    # golden-safe: no metal-node keys -> empty dict (uniform/flatlog/metals-off produce no f_/k_ sites)
+    assert C._metal_node_sites_extra({"theta_unit": np.zeros((10, 9)), "a_SiIII": np.arange(10.0)},
+                                     step=1, L=5, inject_spec=None, ctx=ctx, leg_a=True) == {}
+    # clean run (inject_spec=None): node draws still stored, truth is NaN (undefined for a self-draw)
+    clean = C._metal_node_sites_extra({"f_SiIII_DESI_z0": np.arange(10.0)}, step=1, L=5,
+                                      inject_spec=None, ctx=ctx, leg_a=True)
+    assert "f_SiIII_DESI_z0" in clean and np.isnan(clean["f_SiIII_DESI_z0"]["truth"])
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+def test_run_legb_records_metal_nodes_e2e():
+    """End-to-end: a real run_legb under flatlog2node records the metal f/k node sites in sites_extra
+    (draws len L, injected-arm truth) alongside tau0_amp/dtau0 — the ceiling-check instrumentation."""
+    ctx, d = _ctx_2node(with_eboss=False, metals_on=True)
+    arm = dict(C.METAL_ZEVO_ARMS["arm1_decreasing"])
+    per_mock = C.run_legb(ctx, d, n_mocks=1, mock_indices=[0], return_per_mock=True, leg_a=True,
+                          n_warmup=12, n_samples=12, seed=0, dense_mass=False, max_tree_depth=8,
+                          inject_spec={"metal_misspec": arm}, verbose=False)
+    se = per_mock[0]["sites_extra"]; L = per_mock[0]["L"]
+    for nm, truth in (("f_SiIII_DESI_z0", 0.010), ("f_SiII_DESI_z1", 0.006),
+                      ("k_SiIII_DESI_z0", 0.05), ("k_SiII_DESI_z1", 0.05)):
+        assert nm in se, f"{nm} not in sites_extra (metal-node instrumentation not wired)"
+        assert np.asarray(se[nm]["draws"]).shape[0] == L and np.all(np.isfinite(se[nm]["draws"]))
+        assert np.isclose(se[nm]["truth"], truth, atol=1e-9)
+    assert "tau0_amp" in se and "dtau0" in se, "tau0 sites regressed"
+
+
+# =========================================================================== #
 #  10. NUTS smoke (Model C+, with_eboss) — 0 div, all f+k node sites present + in support.
 # =========================================================================== #
 @pytest.mark.slow

@@ -2284,6 +2284,48 @@ def _packed_names_for(samples, kept_global):
     return names
 
 
+def _metal_node_truth(metal_misspec, ctx):
+    """Injected-arm TRUTH for the Model C+ metal node sites (``f_SiIII``/``f_SiII``/``k_SiIII``/
+    ``k_SiII``_<leg>_z0/z1), keyed by site name, for the sites_extra ceiling-check instrumentation.
+    Only the IN-CLASS ``form=="zevo"`` arms (arm1/arm2) have a defined node truth: f-node truth = the
+    injected f at the FIT node-z (== the injected node value when inject/fit node_z match); k-node
+    truth = the injected (flat-in-z) k. Clean (None) and out-of-class (ma2025/ma2025_gauss) → {} (the
+    draws are still stored, with NaN truth; the mandatory pile-up check is truth-free)."""
+    d = {}
+    if not metal_misspec or metal_misspec.get("form") != "zevo":
+        return d
+    nz_inj = metal_misspec.get("node_z", (2.2, 4.2))
+    fz = getattr(ctx, "metal_node_z", (2.2, 4.2))
+    siII = tuple(getattr(ctx, "metal_siII_legs", ("DESI",)))
+    for leg in ctx.legs:
+        if not getattr(leg, "metals_on", False):
+            continue
+        for i in (0, 1):
+            d[f"f_SiIII_{leg.name}_z{i}"] = float(_metal_f_of_z(fz[i], nz_inj, metal_misspec["f_SiIII_nodes"]))
+            d[f"k_SiIII_{leg.name}_z{i}"] = float(metal_misspec["k_SiIII"])
+            if leg.name in siII:
+                d[f"f_SiII_{leg.name}_z{i}"] = float(_metal_f_of_z(fz[i], nz_inj, metal_misspec["f_SiII_nodes"]))
+                d[f"k_SiII_{leg.name}_z{i}"] = float(metal_misspec["k_SiII"])
+    return d
+
+
+def _metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a):
+    """sites_extra entries for the Model C+ metal f/k node sites — sampled by ``_metal_2node_sites``
+    but NOT packed into ``_draws_matrix`` — so the mandatory "is f_SiIII_z1 railing the 0.03 ceiling"
+    check is possible from the shard pkls. Stores thinned draws (SAME step/L as tau0_amp/dtau0) + the
+    injected-arm truth (NaN when clean/out-of-class). EMPTY unless flatlog2node actually sampled
+    ``f_``/``k_`` nodes ⇒ additive-only, byte-identical golden under uniform/flatlog/metals-off. The
+    scalar ``a_SiIII``/``a_SiII`` and the ``s_*`` slopes are NOT caught (they lack the f_/k_ prefix)."""
+    mspec = (inject_spec or {}).get("metal_misspec") if (leg_a and inject_spec) else None
+    mz_truth = _metal_node_truth(mspec, ctx)
+    out = {}
+    for nm in samples:
+        if nm.startswith(("f_SiIII_", "f_SiII_", "k_SiIII_", "k_SiII_")):
+            dr = np.asarray(samples[nm])[::step][:L]
+            out[nm] = dict(draws=dr, truth=float(mz_truth.get(nm, np.nan)))
+    return out
+
+
 def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
              cemu_inflate=None, fold=0, q_levels=(0.68, 0.95), verbose=True,
              dense_mass=True, max_tree_depth=10, mock_indices=None,
@@ -2424,6 +2466,10 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
             if nm in samples:
                 dr = np.asarray(samples[nm])[::step][:L]
                 sites_extra[nm] = dict(draws=dr, truth=float(truth_pack.get(nm, np.nan)))
+        # MODEL C+ metal f/k node sites (ceiling-check instrumentation): sampled by _metal_2node_sites
+        # but NOT packed into _draws_matrix, so store them here (SAME thinning) with the injected-arm
+        # truth. Additive-only + empty under uniform/flatlog/metals-off ⇒ byte-identical golden.
+        sites_extra.update(_metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a))
 
         per_mock.append(dict(sim=sim, truth_vec=truth_vec, draws=draws_t, L=L,
                              ll_true=ll_true, ll_draws=ll_draws_t,
