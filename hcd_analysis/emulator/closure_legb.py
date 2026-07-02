@@ -544,11 +544,9 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     # flag defaults (metals_on=True SiIII / dla_forward_frac=0 / no MF floor — it's a LARGE-scale
     # leg, NOT in mf_shape_legs/mf_emucoh_legs below) apply unless overridden via eboss_kwargs.
     if with_eboss:
-        # NOTE: eBOSS option-b cov surgery is DEFERRED (its cov is corr⊙σσᵀ block-diagonal, so the per-z
-        # rank-1 removal that works for DESI is NOT SPD for eBOSS — the SPD assert caught it 2026-07-02;
-        # eBOSS needs a multiplicative σ-rescale removal, a follow-up). Pass resolution_float via
-        # eboss_kwargs explicitly once that mode is verified. sample_res wires DESI (the load-bearing leg).
-        legs.append(DL.load_eboss_leg(**(eboss_kwargs or {})))
+        # eBOSS option-b uses the "rescale" cov mode (its cov is corr⊙σσᵀ with resolution baked into σ, so
+        # rebuild σ'²=σ²−res²; reference-verified 2026-07-02, SPD +0.05). sample_res wires DESI (rank1) + eBOSS.
+        legs.append(DL.load_eboss_leg(resolution_float=sample_res, **(eboss_kwargs or {})))
 
     z_global = np.unique(np.round(np.concatenate([leg.z for leg in legs]), 6))
 

@@ -95,7 +95,7 @@ def arm_inject_spec(arm, survey, *, b_res=0.02):
     raise SystemExit(f"unknown arm {arm!r}")
 
 
-def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02):
+def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, float_res=False):
     """Build the single-survey production ctx for an arm. metals_on/sample_metals ON for
     DESI/eBOSS (False for KS). Returns (ctx, d, inject_spec). The arm runs on ONE survey's legs:
     we build a single-survey ctx by restricting the leg list AFTER build (keep it simple)."""
@@ -118,6 +118,7 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02):
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         with_eboss=(survey == "eboss"),
         metals_on=metals, sample_metals=metals,
+        sample_res=float_res,                              # option-b: float f_res + cov_b (DESI only)
         hierarchical_hcd=False, survey=PIN_KEY)
 
     # restrict to the chosen survey's legs (single-survey bias arm).
@@ -149,6 +150,10 @@ def main():
                     help="resolution injection strength (arm=resolution). Default 0.02 = the realistic "
                          "DESI ~1sigma level from syst_e_resolution; certification bracket +/-1sigma "
                          "{0.015,0.02,0.03}. Ignored for non-resolution arms.")
+    ap.add_argument("--float-res", dest="float_res", action="store_true",
+                    help="OPTION-B: float the 2-param f_res spectral-resolution nuisance + remove the "
+                         "resolution mode from the covariance (per-z rank-1 cov_b). DESI only (eBOSS cov "
+                         "mode is a follow-up). Default off = option-a (resolution stays in the cov).")
     ap.add_argument("--no-mf", dest="with_mf", action="store_false")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--smoke", action="store_true",
@@ -161,7 +166,7 @@ def main():
         a.n_warmup = min(a.n_warmup, 20)
         a.n_samples = min(a.n_samples, 30)
 
-    ctx, d, inject_spec = build_arm_ctx(a.arm, a.survey, a.with_mf, b_res=a.b_res)
+    ctx, d, inject_spec = build_arm_ctx(a.arm, a.survey, a.with_mf, b_res=a.b_res, float_res=a.float_res)
     n_members = len(getattr(ctx.model, "members", [None]))
     idxs = [m for m in range(a.n_mocks) if m % a.n_shards == a.shard]
     print(f"[dnuis {a.arm}/{a.survey} shard {a.shard}/{a.n_shards}] mocks={idxs} "

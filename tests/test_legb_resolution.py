@@ -20,6 +20,7 @@ from hcd_analysis.emulator import closure_legb as C
 _CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 _CKPT0 = "/home/mfho/hcd_priya/checkpoints/final_fold0.eqx"
 _DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
+_EBOSS_NPZ = "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz"
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
 
 
@@ -82,4 +83,21 @@ def test_cov_b_resolution_float_spd_and_golden():
     dA, dB = np.diag(Ca), np.diag(Cb)
     assert np.all(dB <= dA + 1e-9) and np.any(dB < dA - 1e-12), "resolution variance removed from diagonal"
     # golden: resolution_float=False is byte-identical to option-a
+    np.testing.assert_array_equal(np.asarray(leg_off.C_data, float), Ca)
+
+
+@pytest.mark.skipif(not os.path.exists(_EBOSS_NPZ), reason="eBOSS npz not present")
+def test_cov_b_eboss_rescale_spd_and_golden():
+    """eBOSS option-b uses the MULTIPLICATIVE sigma-rescale (cov=corr(x)sigma-sigma^T, resolution baked
+    into sigma): sigma'^2 = sigma^2 - res^2 -> cov' rescaled. Reference-verified SPD; the per-z rank-1
+    that works for DESI is NOT SPD here. Default (off) is byte-identical (golden)."""
+    from hcd_analysis.emulator.data_likelihood import load_eboss_leg
+    leg_a = load_eboss_leg()
+    leg_b = load_eboss_leg(resolution_float=True)            # rescale mode
+    leg_off = load_eboss_leg(resolution_float=False)
+    assert leg_a.resolution_on is False and leg_b.resolution_on is True
+    Ca, Cb = np.asarray(leg_a.C_data, float), np.asarray(leg_b.C_data, float)
+    np.linalg.cholesky(Cb)                                   # sigma-rescale is SPD
+    dA, dB = np.diag(Ca), np.diag(Cb)
+    assert np.all(dB <= dA + 1e-9) and np.any(dB < dA - 1e-12), "resolution variance removed from diagonal"
     np.testing.assert_array_equal(np.asarray(leg_off.C_data, float), Ca)

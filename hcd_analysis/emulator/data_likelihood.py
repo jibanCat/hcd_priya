@@ -354,7 +354,7 @@ def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
                          dla_forward_frac=dla_forward_frac,
                          resolution_e=np.asarray(d["syst_resolution"], float),
-                         resolution_float=resolution_float)
+                         resolution_float=resolution_float, resolution_mode="rescale")
 
 
 def _read_ks_p1d(path):
@@ -376,7 +376,7 @@ def _read_ks_p1d(path):
 
 def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
                   metals_on, resolution_on, mf_floor_on=False, dla_forward_frac=1.0,
-                  resolution_e=None, resolution_float=False):
+                  resolution_e=None, resolution_float=False, resolution_mode="rank1"):
     """Sub-select the kept (z,k) rows + their covariance block, build the z-major flat
     DataLeg.  The covariance is row/col-sliced by the SAME boolean mask as the data so the
     flat-row ordering matches C_data exactly (CS-REVIEW: ordering invariant)."""
@@ -394,18 +394,28 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
 
     n_per_z = np.array([int(np.sum(z_idx == i)) for i in range(len(z))])
     if resolution_float:
-        # option-b: REMOVE the per-z-block rank-1 spectral-resolution mode from the covariance
-        # (cov_b = C - sum_z outer(e_res|z-block)); the floated f_res models it in the forward instead.
-        # 4-lens-verified 2026-07-02: resolution is per-z-block CORRELATED (not diagonal), and this exact
-        # removal is SPD-safe (min eig +0.048 inflated / +0.007 raw); a diagonal subtraction breaks SPD.
+        # option-b: rebuild the covariance WITHOUT the spectral-resolution term (the floated f_res models
+        # it in the forward instead -> no double-count). Reference-verified 2026-07-02 (2 provenance agents):
+        # the resolution error is a SEPARABLE additive systematic (a diagonal error column), but each
+        # survey's cov CONSTRUCTION incorporates it differently, so the removal is per-survey:
+        #   "rank1"  (DESI): cov_syst is a sum of per-z-block rank-1 outer(e_i|z) modes; drop resolution's
+        #            mode -> cov_b = C - sum_z outer(e_res|z). == cup1d's additive build-without to 1e-13.
+        #   "rescale" (eBOSS): cov = corr(x)sigma-sigma^T with sigma^2 = sum_s e_s^2 (resolution baked into
+        #            sigma); rebuild sigma'^2 = sigma^2 - e_res^2 -> cov'[i,j] = C[i,j]*(sig'_i/sig_i)(sig'_j/sig_j).
+        # A wrong mode breaks positive-definiteness; the Cholesky assert is the tripwire.
         if resolution_e is None:
             raise ValueError(f"{name}: resolution_float=True needs resolution_e (syst_e_resolution)")
         e_res = np.asarray(resolution_e, float)[idx]
         C_data = np.array(C_data, float)
-        for i in range(len(z)):
-            rows = np.where(z_idx == i)[0]
-            if rows.size:
-                C_data[np.ix_(rows, rows)] -= np.outer(e_res[rows], e_res[rows])
+        if resolution_mode == "rescale":
+            sig2 = np.diag(C_data)                                   # eBOSS: diag(cov)=sigma^2 (corr diag 1)
+            ratio = np.sqrt(np.clip(1.0 - e_res ** 2 / sig2, 0.0, None))   # sigma'/sigma
+            C_data = C_data * np.outer(ratio, ratio)
+        else:                                                        # "rank1" (DESI): drop the per-z mode
+            for i in range(len(z)):
+                rows = np.where(z_idx == i)[0]
+                if rows.size:
+                    C_data[np.ix_(rows, rows)] -= np.outer(e_res[rows], e_res[rows])
         np.linalg.cholesky(C_data)                 # SPD assert (fails loudly if the mode is mis-specified)
         resolution_on = True                        # option-b floats f_res in the forward
     R_z = np.asarray(R_func(z))
