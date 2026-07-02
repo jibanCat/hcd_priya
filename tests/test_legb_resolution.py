@@ -220,3 +220,44 @@ def test_resolution_sites_extra_truth_and_presence():
     se4 = C._resolution_sites_extra({"ns": np.zeros(20)}, step=2, L=5,
                                     inject_spec={"resolution": {"b_res": 0.02}}, leg_a=True)
     assert se4 == {}
+
+
+def test_check_resolution_injectable_guards_unready_leg():
+    """Defense-in-depth (4-referee panel, CS + domain #10): the res_b injection must RAISE, not silently
+    skip, when a leg is not resolution_ready. KS reuses the DESI proxy R_z (~7-15x too large) so a b_res
+    injection there is a ~70% distortion the forward cannot fit (the -21sigma ESS collapse). Gate on the
+    R_z-valid flag, NOT resolution_on (option-a injects with resolution_on=False). res_b=None is a no-op."""
+    from types import SimpleNamespace
+    ready = SimpleNamespace(name="DESI", resolution_ready=True)
+    unready = SimpleNamespace(name="KS", resolution_ready=False)
+    C._check_resolution_injectable([ready], 0.02)                 # all-ready + res_b -> ok
+    C._check_resolution_injectable([ready, unready], None)        # res_b None -> no-op even with KS
+    with pytest.raises((ValueError, RuntimeError), match="[Kk][Ss]|resolution_ready"):
+        C._check_resolution_injectable([ready, unready], 0.02)    # stray KS + res_b -> RAISE
+
+
+def test_check_single_instrument_for_res_guards_multileg():
+    """sample_res floats ONE global f_res site, but resolution is a per-INSTRUMENT systematic (DESI and
+    eBOSS spectrographs are independent, unlike the globally-shared metals). Until per-instrument f_res
+    sites are built (4-referee panel #8), a MULTI-instrument ctx + sample_res must RAISE -- the per-leg
+    cert is single-instrument. No-op when sample_res is off (golden-safe)."""
+    from types import SimpleNamespace
+    desi = SimpleNamespace(name="DESI"); eboss = SimpleNamespace(name="eBOSS")
+    C._check_single_instrument_for_res([desi], True)              # single instrument -> ok
+    C._check_single_instrument_for_res([desi, eboss], False)      # sample_res off -> no-op
+    with pytest.raises((ValueError, RuntimeError), match="instrument|per-instrument|f_res"):
+        C._check_single_instrument_for_res([desi, eboss], True)   # multi-instrument + sample_res -> RAISE
+
+
+@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+def test_resolution_ready_flag_per_leg():
+    """The per-leg resolution_ready flag the injection guard reads (panel domain #10): DESI/eBOSS R_z is
+    trustworthy (True); KS reuses the DESI proxy (8-15x too large) -> False. Default DataLeg is True."""
+    from hcd_analysis.emulator.data_likelihood import load_desi_leg, load_eboss_leg, load_ks_leg
+    assert load_desi_leg(z_lo=2.2, z_hi=4.2).resolution_ready is True
+    if os.path.exists(_EBOSS_NPZ):
+        assert load_eboss_leg().resolution_ready is True
+    _KS = ("/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
+           "final-conservative-p1d-karacayli_etal2021.txt")
+    if os.path.exists(_KS):
+        assert load_ks_leg().resolution_ready is False, "KS proxy R_z is untrustworthy -> not resolution_ready"

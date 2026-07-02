@@ -180,6 +180,12 @@ class DataLeg(NamedTuple):
     resolution_on: bool
     mf_floor_on: bool = False
     dla_forward_frac: float = 1.0
+    # whether this leg's R_z is trustworthy for a spectral-resolution INJECTION (option-b / the Gate-B
+    # resolution arm). DESI/eBOSS: True (R_z exact / order-correct proxy). KS: False -- load_ks_leg reuses
+    # the DESI pixel proxy R_z, ~7-15x too large vs KS's echelle sigma~3.2 km/s, so a b_res injection is a
+    # ~70% distortion the forward cannot fit (the -21sigma ESS collapse). Gate the injection on THIS flag,
+    # NOT resolution_on (option-a injects with resolution_on=False). Default True (back-compatible).
+    resolution_ready: bool = True
 
 
 # PER-LEG DLA-forward fraction (§0c, PI-confirmed final intent 2026-06-09): the leg-specific
@@ -307,10 +313,13 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
     # KS has no resolution proxy in this file; reuse the DESI-style proxy as a placeholder
     # for the (default-OFF) resolution knob.  LYA-CONSULT: KS resolution is OFF by default
     # (conservative mode already deconvolves + inflates), so R_z is unused unless toggled on.
+    # resolution_ready=False: the DESI proxy R_z is ~7-15x too large for KS's echelle (sigma~3.2 km/s),
+    # so a resolution INJECTION here is un-fittable (the -21sigma collapse). The injection guard reads
+    # this flag; flip it to True when the KS echelle R_z is implemented.
     return _assemble_leg("KS", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-                         dla_forward_frac=KS_DLA_FORWARD_FRAC)
+                         dla_forward_frac=KS_DLA_FORWARD_FRAC, resolution_ready=False)
 
 
 def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
@@ -380,7 +389,8 @@ def _read_ks_p1d(path):
 
 def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
                   metals_on, resolution_on, mf_floor_on=False, dla_forward_frac=1.0,
-                  resolution_e=None, resolution_float=False, resolution_mode="rank1"):
+                  resolution_e=None, resolution_float=False, resolution_mode="rank1",
+                  resolution_ready=True):
     """Sub-select the kept (z,k) rows + their covariance block, build the z-major flat
     DataLeg.  The covariance is row/col-sliced by the SAME boolean mask as the data so the
     flat-row ordering matches C_data exactly (CS-REVIEW: ordering invariant)."""
@@ -427,7 +437,7 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
         name=name, z=z, z_unit=_z_unit(z), k=k, z_row=z_row, z_idx=z_idx,
         P_data=P_data, C_data=C_data, R_z=R_z, n_z=len(z), n_per_z=n_per_z,
         metals_on=metals_on, resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-        dla_forward_frac=dla_forward_frac)
+        dla_forward_frac=dla_forward_frac, resolution_ready=resolution_ready)
 
 
 # ============================================================================ #

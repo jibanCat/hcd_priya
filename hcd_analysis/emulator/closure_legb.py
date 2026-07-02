@@ -1345,6 +1345,45 @@ def _meanflux_on_leg(ctx, leg, truth_pack):
     return np.exp(-tau_eff)                                   # ⟨F⟩(z)
 
 
+def _check_resolution_injectable(legs, res_b):
+    """Defense-in-depth for the spectral-resolution injection (4-referee panel / domain #10): RAISE (do
+    NOT silently skip) if a resolution injection (``res_b``) targets a leg whose R_z is not trustworthy
+    (``leg.resolution_ready`` False -- e.g. KS, whose DESI-proxy R_z is ~7-15x too large vs its echelle
+    sigma~3.2 km/s). A silent skip would turn a KS resolution arm into a meaningless PASS; the CLI guard
+    in ``arm_inject_spec`` is the first line, this is the direct-call (run_legb/make_leg_a_legmock)
+    backstop. Gated on the R_z-valid flag, NOT ``resolution_on`` (option-a injects with it False).
+    ``res_b=None`` is a no-op (byte-identical clean path)."""
+    if res_b is None:
+        return
+    bad = [leg.name for leg in legs if not getattr(leg, "resolution_ready", True)]
+    if bad:
+        raise ValueError(
+            f"resolution injection (b_res={res_b}) requested on non-resolution_ready leg(s) {bad}: their "
+            "R_z proxy is untrustworthy (KS is echelle sigma~3.2 km/s; the DESI proxy R_z is ~7-15x too "
+            "large) so the injected distortion is un-fittable (the -21sigma ESS collapse). Implement the "
+            "leg's true R_z (and flip resolution_ready) first, or run the resolution arm on desi/eboss.")
+
+
+def _check_single_instrument_for_res(legs, sample_res):
+    """Guard for the option-b f_res site (4-referee panel #8 / Bayesian #4): ``_legb_model`` samples ONE
+    global ``f_res_amp``/``f_res_slope``, but spectral resolution is a per-INSTRUMENT systematic -- DESI
+    and eBOSS spectrographs are physically independent (unlike the globally-shared intergalactic metals).
+    A single shared f_res across instruments would be pulled to a wrong compromise (DESI wants ~0.022,
+    eBOSS ~0.044) -> a residual k^2 tilt on the under-corrected leg -> n_s bias on a JOINT fit. Until
+    per-instrument sites (``f_res_amp_desi``/``f_res_amp_eboss``) are built, a multi-instrument ctx with
+    ``sample_res`` must RAISE. The per-leg Gate-B cert is single-instrument, so this is a no-op there.
+    ``sample_res=False`` is a no-op (golden-safe)."""
+    if not sample_res:
+        return
+    instruments = sorted({leg.name for leg in legs})
+    if len(instruments) > 1:
+        raise ValueError(
+            f"sample_res=True (option-b f_res) with a MULTI-instrument ctx {instruments}: f_res is a single "
+            "GLOBAL site but spectral resolution is per-instrument (independent spectrographs). Run the "
+            "resolution cert per-leg (single instrument), or implement per-instrument f_res sites "
+            "(f_res_amp_desi/f_res_amp_eboss) before a joint fit.")
+
+
 def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
                        inject_metal_misspec=None, inject_resolution=None):
     """Leg-A self-draw on the leg grids: forward-model the prior-drawn truth on each leg with the
@@ -1369,6 +1408,7 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
         per-z resolution scale (``leg.R_z``)."""
     metal_kw = dict(inject_metal_misspec) if inject_metal_misspec else None
     res_b = float(inject_resolution["b_res"]) if inject_resolution else None
+    _check_resolution_injectable(ctx.legs, res_b)   # RAISE on a stray non-resolution_ready leg (e.g. KS)
     zg = np.asarray(ctx.z_global)
     theta9 = jnp.asarray(truth_pack["theta9"])
     tau0_global = jnp.asarray(truth_pack["tau0_global"])
@@ -2407,6 +2447,9 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
         raise ValueError(
             "run_legb: inject_spec is honoured only on the Leg-A self-draw path (leg_a=True); the "
             "held-out branch ignores it. Refusing to silently drop the injection on a held-out run.")
+    # option-b f_res is a single GLOBAL site -> forbid a multi-instrument ctx until per-instrument sites
+    # exist (4-referee panel #8). No-op when sample_res is off (golden-safe).
+    _check_single_instrument_for_res(ctx.legs, getattr(ctx, "sample_res", False))
     if cemu_inflate is not None:
         ctx = ctx._replace(cemu_inflate=float(cemu_inflate))
     key0 = jax.random.PRNGKey(int(seed))

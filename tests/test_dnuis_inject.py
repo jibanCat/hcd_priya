@@ -152,7 +152,19 @@ def test_meanflux_on_leg_is_exp_minus_tau0_global(ctx_d):
 
 
 def test_resolution_injection_is_exp_2b_k2_R2(ctx_d):
-    ctx, d = ctx_d
+    ctx0, d = ctx_d
+    # The resolution injection now RAISES on a non-resolution_ready leg (KS's proxy R_z is untrustworthy;
+    # 4-referee panel guard). The default ctx has [DESI, KS], so injecting on the FULL ctx must raise...
+    core0 = _core(ctx0, d)
+    tp0 = LB.draw_leg_a_leg_truth(ctx0, jax.random.PRNGKey(5))
+    if any(not l.resolution_ready for l in ctx0.legs):
+        import pytest
+        with pytest.raises(ValueError, match="resolution_ready|[Kk][Ss]"):
+            LB.make_leg_a_legmock(ctx0, core0, tp0, jax.random.PRNGKey(6),
+                                  inject_resolution={"b_res": 0.02})
+    # ...and the exp(2 b k^2 R^2) math is verified on the resolution_ready legs (DESI/eBOSS).
+    ctx = ctx0._replace(legs=[l for l in ctx0.legs if l.resolution_ready])
+    assert ctx.legs, "no resolution_ready leg to test the injection math on"
     core = _core(ctx, d)
     tp = LB.draw_leg_a_leg_truth(ctx, jax.random.PRNGKey(5))
     key = jax.random.PRNGKey(6)

@@ -87,6 +87,12 @@ def arm_inject_spec(arm, survey, *, b_res=0.02):
         form = "eboss" if survey == "eboss" else "desi_full"
         return {"metal_misspec": {"form": form}}
     if arm == "resolution":
+        if survey == "ks":
+            raise SystemExit(
+                "resolution injection is NOT valid on KS: load_ks_leg reuses the DESI pixel proxy R_z "
+                "(~7-15x too large -- KS is echelle, sigma~3.2 km/s), so a b_res injection is a ~70% "
+                "distortion the frozen forward cannot fit (the -21sigma ESS collapse). Implement the KS "
+                "echelle R_z + resolution_ready flag first. Run the resolution arm on desi/eboss only.")
         return {"resolution": {"b_res": float(b_res)}}
     if arm == "lls_excess":
         return {"lls_truth_boost": LLS_TRUTH_BOOST[survey]}
