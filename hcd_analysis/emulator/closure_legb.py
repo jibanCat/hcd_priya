@@ -90,6 +90,23 @@ ZSLOPE_PRIOR_SIGMA = (0.52, 0.53, 0.33)
 # Z_PIVOT (z=3) is owned by data_likelihood (DL.Z_PIVOT) — the α(z) pivot used at the chokepoint.
 SIGMA_A0 = 1.0
 SIGMA_S = 0.5
+# SPECTRAL-RESOLUTION nuisance (option-b, Gate B): b_res(z) = f_res_amp·((1+z)/(1+F_RES_PIVOT_Z))^f_res_slope,
+# threaded FORWARD-ONLY into _resolution_factor = exp(2·b_res·k²·R_z²) (data_likelihood). DISTINCT from
+# alpha_res (res_corr / Gate A). Prior TIGHT on physics (4-lens 2026-07-02): DESI is deconvolved to a ~few-%
+# residual (implied b_res~0.02 from syst_e_resolution) and a k² tilt is ~degenerate with the thermal cutoff, so
+# a WIDE prior (cup1d's [-0.5,0.5] code default) opens the NORC failure mode on the weak legs. amp centered 0
+# (0 = no distortion; additive-in-exponent no-op). Sampled iff ctx.sample_res (default False → golden).
+F_RES_PIVOT_Z = 3.0
+F_RES_AMP_SIGMA = 0.02         # Normal(0, .) on f_res_amp — TIGHT (physics), NOT cup1d's wide default
+F_RES_SLOPE_SIGMA = 0.5        # Normal(0, .) on f_res_slope — modest z-slope (4-lens: tighter than 1.0)
+
+
+def _bres_of_z(z, f_res_amp, f_res_slope, *, z_pivot=F_RES_PIVOT_Z):
+    """Per-z spectral-resolution amplitude b_res(z) = f_res_amp·((1+z)/(1+z_pivot))^f_res_slope (the
+    forward-only option-b nuisance; mirrors tau0_alpha_priya / the alpha_res α(z) power law). f_res_amp=0
+    ⇒ b_res≡0 for ANY slope ⇒ _resolution_factor=exp(0)=1 (the golden no-op). Differentiable in both."""
+    z = jnp.asarray(z)
+    return f_res_amp * ((1.0 + z) / (1.0 + z_pivot)) ** f_res_slope
 # FULL per-class HCD-incidence z-slope d ln w_c(z)/d ln(1+z), 60-sim-population median (measured
 # 2026-06-14, scripts/diag_hcd_zslope_nsbias.py). This is the slope the mock TRUTH actually carries
 # (the held-out sim's native w_c(z)) — the RIGHT center for the 2D B_HCD tilt. It is a DIFFERENT
@@ -453,6 +470,8 @@ class LegBCtx(NamedTuple):
     # cup1d s units that is exp([2,7]) ≈ 1/[0.135, 0.0009] (input_pipeline.set_baseline s_Lya_*).
     metal_knode_lo: float = 1e-3              # flat-log10 k (decorrelation scale, s/km) lower bracket
     metal_knode_hi: float = 0.1               # upper bracket
+    sample_res: bool = False                  # option-b: sample the 2-param spectral-resolution f_res
+    #                                           nuisance (b_res(z), forward-only). Default False → golden.
 
 
 def _kim(z):
@@ -472,7 +491,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    mf_shape_legs=("DESI", "KS"), mf_shape_npz=None,
                    mf_emucoh=False, mf_emucoh_infl=1.0,
                    mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
-                   mf_emucoh_offdiag_only=False, sample_metals=False, a_siiii_max=0.15,
+                   mf_emucoh_offdiag_only=False, sample_metals=False, sample_res=False, a_siiii_max=0.15,
                    metal_prior="uniform", metal_logf_lo=-11.0, metal_logf_hi=-2.0,
                    metal_one_minus_F_ref=None,
                    metal_node_z=(2.2, 4.2), metal_fnode_lo=0.003, metal_fnode_hi=0.03,
@@ -518,13 +537,17 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         assert np.allclose(np.asarray(evx["tau0_band_centres"]), np.asarray(alpha_centres)), \
             "xclass τ₀-band centres differ from the diagonal error vector"
 
-    desi = DL.load_desi_leg(metals_on=metals_on, **(desi_kwargs or {}))
+    desi = DL.load_desi_leg(metals_on=metals_on, resolution_float=sample_res, **(desi_kwargs or {}))
     ks = DL.load_ks_leg(**(ks_kwargs or {}))
     legs = [desi, ks]
     # eBOSS DR14 (Chabanier+2019) — opt-in third leg (the low-k production shakedown). Its own
     # flag defaults (metals_on=True SiIII / dla_forward_frac=0 / no MF floor — it's a LARGE-scale
     # leg, NOT in mf_shape_legs/mf_emucoh_legs below) apply unless overridden via eboss_kwargs.
     if with_eboss:
+        # NOTE: eBOSS option-b cov surgery is DEFERRED (its cov is corr⊙σσᵀ block-diagonal, so the per-z
+        # rank-1 removal that works for DESI is NOT SPD for eBOSS — the SPD assert caught it 2026-07-02;
+        # eBOSS needs a multiplicative σ-rescale removal, a follow-up). Pass resolution_float via
+        # eboss_kwargs explicitly once that mode is verified. sample_res wires DESI (the load-bearing leg).
         legs.append(DL.load_eboss_leg(**(eboss_kwargs or {})))
 
     z_global = np.unique(np.round(np.concatenate([leg.z for leg in legs]), 6))
@@ -686,7 +709,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         mf_shape_per_leg=mf_shape_per_leg, mf_shape_infl=float(mf_shape_infl),
         mf_emucoh_per_leg=mf_emucoh_per_leg, mf_emucoh_infl=float(mf_emucoh_infl),
         mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
-        sample_metals=bool(sample_metals), a_siiii_max=float(a_siiii_max),
+        sample_metals=bool(sample_metals), sample_res=bool(sample_res), a_siiii_max=float(a_siiii_max),
         metal_prior=str(metal_prior), metal_logf_lo=float(metal_logf_lo),
         metal_logf_hi=float(metal_logf_hi), metal_one_minus_F_ref=metal_one_minus_F_ref,
         metal_node_z=tuple(metal_node_z), metal_fnode_lo=float(metal_fnode_lo),
@@ -1460,7 +1483,7 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
 # ============================================================================ #
 def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs,
                          dla_core_per_leg, *, return_parts=False, a_siiii=0.0, a_siii=0.0,
-                         metal_nodes=None, alpha_res=None, require_zresolved=False):
+                         metal_nodes=None, alpha_res=None, b_res_global=None, require_zresolved=False):
     """``data_loglik`` but with a PER-LEG-Z dla_core (the mock's sim core). ``data_loglik``
     takes ONE (K,) core; here each leg z uses its own, so we call ``predict_P_obs_on_leg``
     per leg with that leg's core threaded through a per-z loop is overkill — instead we note
@@ -1494,6 +1517,8 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
     for leg in mock_legs:
         sel = np.array([int(np.argmin(np.abs(zg - zz))) for zz in leg.z])
         tau0_vec = tau0_global[jnp.asarray(sel)]
+        # option-b: slice the per-z b_res(z) onto this leg (like tau0_vec); None → scalar b_res=0 (golden).
+        b_res_leg = None if b_res_global is None else b_res_global[jnp.asarray(sel)]
         # per-z HCD incidence: alpha_hcd may be (3,) [broadcast] or (n_z_global,3) [z-resolved]
         alpha_leg = alpha_hcd if np.ndim(alpha_hcd) == 1 else alpha_hcd[jnp.asarray(sel)]
         core = dla_core_per_leg[leg.name]           # (K,) z-mean core for this leg
@@ -1524,6 +1549,7 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
             mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
             mf_emucoh_offdiag_only=getattr(ctx, "mf_emucoh_offdiag_only", False),
             alpha_res=alpha_res,                              # res_corr amplitude nuisance (fwd-only)
+            b_res_vec=b_res_leg,                              # option-b spectral-resolution f_res (fwd-only)
             require_zresolved=require_zresolved)              # guard: assert z-resolved alpha (opt-in)
         kr = jnp.asarray(np.where(keep)[0])
         r = jnp.asarray(P_data[keep]) - P_model[kr]
@@ -1711,10 +1737,20 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     else:
         alpha_res = numpyro.sample("alpha_res", dist.TruncatedNormal(1.0, SIGMA_A0, low=0.0))
         alpha_res_slope = numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
+    # SPECTRAL-RESOLUTION nuisance f_res (option-b, Gate B; sampled iff ctx.sample_res, default False →
+    # None → byte-identical golden). Forward-only b_res(z) on z_global, sliced per leg + threaded into
+    # _resolution_factor; the injected truth never carries it (no closure cancellation, like alpha_res).
+    # Sites appended AFTER alpha_res; _legb_priors_only mirrors this order (constrain_fn parity).
+    if getattr(ctx, "sample_res", False):
+        f_res_amp = numpyro.sample("f_res_amp", dist.Normal(0.0, F_RES_AMP_SIGMA))
+        f_res_slope = numpyro.sample("f_res_slope", dist.Normal(0.0, F_RES_SLOPE_SIGMA))
+        b_res_global = _bres_of_z(zg, f_res_amp, f_res_slope)
+    else:
+        b_res_global = None
     numpyro.factor("loglik", _data_loglik_legcore(
         ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg, a_siiii=a_siiii,
         a_siii=a_siii, metal_nodes=metal_nodes, alpha_res=(alpha_res, alpha_res_slope),
-        require_zresolved=True))   # alpha_hcd here is the z-resolved alpha_hcd_z deterministic
+        b_res_global=b_res_global, require_zresolved=True))   # alpha_hcd = z-resolved alpha_hcd_z
 
 
 def _hcd_sites(ctx):
@@ -1867,6 +1903,10 @@ def _legb_priors_only(ctx):
     if not getattr(ctx, "fix_alpha_res", False):
         numpyro.sample("alpha_res", dist.TruncatedNormal(1.0, SIGMA_A0, low=0.0))
         numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
+    # option-b f_res mirror (MUST match _legb_model's order: after alpha_res). constrain_fn parity.
+    if getattr(ctx, "sample_res", False):
+        numpyro.sample("f_res_amp", dist.Normal(0.0, F_RES_AMP_SIGMA))
+        numpyro.sample("f_res_slope", dist.Normal(0.0, F_RES_SLOPE_SIGMA))
 
 
 def _legb_reconstruct_deterministics(ctx, samples):

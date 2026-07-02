@@ -210,7 +210,7 @@ def desi_resolution_R(z):
 def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
                   *, z_lo=2.2, z_hi=4.2, k_min=DESI_KMIN, metals_on=True,
                   resolution_on=False, add_cov_diag_inflation=True, mf_floor_on=False,
-                  use_snr3=None, snr3_stat_inflate=None, add_cv_floor=None):
+                  use_snr3=None, snr3_stat_inflate=None, add_cv_floor=None, resolution_float=False):
     """Load DESI DR1 P1D → a post-cut ``DataLeg`` (usage doc §"Covariance + cuts").
 
     Cuts (z-major flat layout, ``row_is_zmajor=True``):
@@ -267,7 +267,9 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
     return _assemble_leg("DESI", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-                         dla_forward_frac=DESI_DLA_FORWARD_FRAC)
+                         dla_forward_frac=DESI_DLA_FORWARD_FRAC,
+                         resolution_e=np.asarray(d["syst_e_resolution"], float),
+                         resolution_float=resolution_float)
 
 
 def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
@@ -311,7 +313,7 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
 def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
                    *, z_lo=2.2, z_hi=4.6, k_min=0.0, k_max=CACHE_KMAX,
                    metals_on=True, resolution_on=False, mf_floor_on=False,
-                   dla_forward_frac=EBOSS_DLA_FORWARD_FRAC, add_cv_floor=None):
+                   dla_forward_frac=EBOSS_DLA_FORWARD_FRAC, add_cv_floor=None, resolution_float=False):
     """Load eBOSS DR14 P1D (Chabanier+2019, 1812.03554) → a post-cut ``DataLeg`` (block-diag cov).
 
     Format: the npz from ``scripts/convert_eboss_dr14_p1d.py`` (z, k, plya, sigma, cov, syst_*).
@@ -350,7 +352,9 @@ def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
     return _assemble_leg("eBOSS", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-                         dla_forward_frac=dla_forward_frac)
+                         dla_forward_frac=dla_forward_frac,
+                         resolution_e=np.asarray(d["syst_resolution"], float),
+                         resolution_float=resolution_float)
 
 
 def _read_ks_p1d(path):
@@ -371,7 +375,8 @@ def _read_ks_p1d(path):
 
 
 def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
-                  metals_on, resolution_on, mf_floor_on=False, dla_forward_frac=1.0):
+                  metals_on, resolution_on, mf_floor_on=False, dla_forward_frac=1.0,
+                  resolution_e=None, resolution_float=False):
     """Sub-select the kept (z,k) rows + their covariance block, build the z-major flat
     DataLeg.  The covariance is row/col-sliced by the SAME boolean mask as the data so the
     flat-row ordering matches C_data exactly (CS-REVIEW: ordering invariant)."""
@@ -388,6 +393,21 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
     z_idx = np.array([int(np.argmin(np.abs(z - zr))) for zr in z_row])
 
     n_per_z = np.array([int(np.sum(z_idx == i)) for i in range(len(z))])
+    if resolution_float:
+        # option-b: REMOVE the per-z-block rank-1 spectral-resolution mode from the covariance
+        # (cov_b = C - sum_z outer(e_res|z-block)); the floated f_res models it in the forward instead.
+        # 4-lens-verified 2026-07-02: resolution is per-z-block CORRELATED (not diagonal), and this exact
+        # removal is SPD-safe (min eig +0.048 inflated / +0.007 raw); a diagonal subtraction breaks SPD.
+        if resolution_e is None:
+            raise ValueError(f"{name}: resolution_float=True needs resolution_e (syst_e_resolution)")
+        e_res = np.asarray(resolution_e, float)[idx]
+        C_data = np.array(C_data, float)
+        for i in range(len(z)):
+            rows = np.where(z_idx == i)[0]
+            if rows.size:
+                C_data[np.ix_(rows, rows)] -= np.outer(e_res[rows], e_res[rows])
+        np.linalg.cholesky(C_data)                 # SPD assert (fails loudly if the mode is mis-specified)
+        resolution_on = True                        # option-b floats f_res in the forward
     R_z = np.asarray(R_func(z))
     return DataLeg(
         name=name, z=z, z_unit=_z_unit(z), k=k, z_row=z_row, z_idx=z_idx,
@@ -801,7 +821,7 @@ def _ns_phys_from_theta9(theta9):
 def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_core,
                          cache_k, leg, sigma_zb=None, alpha_centres=None,
                          cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
-                         k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
+                         k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0, b_res_vec=None,
                          rho_zb=None, mf=None, mf_floor=None,
                          mf_shape_cov=None, mf_shape_infl=1.0,
                          mf_emucoh_cov=None, mf_emucoh_infl=1.0,
@@ -986,7 +1006,10 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                                      k_SiIII=k_SiIII, k_SiII=k_SiII)
             P_z = P_z * mfac
         if leg.resolution_on:
-            P_z = P_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res)
+            # option-b: a per-z sampled b_res(z) (b_res_vec) overrides the scalar b_res (default None →
+            # scalar, byte-identical). f_res forward threading; the injected truth never sets it.
+            b_res_iz = b_res if b_res_vec is None else b_res_vec[iz]
+            P_z = P_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res_iz)
         P_model = P_model.at[jnp.asarray(rows)].set(P_z)
 
         # (4) C_emu: per-k emu variance interp'd onto the leg k
@@ -1003,7 +1026,8 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
             if leg.metals_on:
                 ev_z = ev_z * mfac ** 2
             if leg.resolution_on:
-                ev_z = ev_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res) ** 2
+                b_res_iz = b_res if b_res_vec is None else b_res_vec[iz]
+                ev_z = ev_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res_iz) ** 2
             emu_var_flat = emu_var_flat.at[jnp.asarray(rows)].set(ev_z)
 
         # MF C_emu floor: the LF→HR generalization term + the n_s-edge extrapolation budget,
