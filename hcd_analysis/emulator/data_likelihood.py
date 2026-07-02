@@ -264,11 +264,14 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
     k_hi_row = 0.5 * np.pi / R_row
     keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k > k_min) & (k < k_hi_row)
 
+    # read the per-bin resolution error ONLY on the option-b path (golden default must not depend on
+    # a key it never uses -- code-lens #7).
+    res_e = np.asarray(d["syst_e_resolution"], float) if resolution_float else None
     return _assemble_leg("DESI", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
                          dla_forward_frac=DESI_DLA_FORWARD_FRAC,
-                         resolution_e=np.asarray(d["syst_e_resolution"], float),
+                         resolution_e=res_e,
                          resolution_float=resolution_float)
 
 
@@ -349,11 +352,12 @@ def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
 
     # eBOSS has no resolution proxy in the table; reuse the DESI-style proxy as a placeholder for
     # the (default-OFF) resolution knob, exactly like load_ks_leg.
+    res_e = np.asarray(d["syst_resolution"], float) if resolution_float else None  # option-b only (code-lens #7)
     return _assemble_leg("eBOSS", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
                          dla_forward_frac=dla_forward_frac,
-                         resolution_e=np.asarray(d["syst_resolution"], float),
+                         resolution_e=res_e,
                          resolution_float=resolution_float, resolution_mode="rescale")
 
 

@@ -2364,6 +2364,25 @@ def _metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a):
     return out
 
 
+def _resolution_sites_extra(samples, step, L, inject_spec, leg_a):
+    """sites_extra entries for the option-b spectral-resolution f_res sites (``f_res_amp``/``f_res_slope``)
+    — sampled by ``_legb_model`` iff ``ctx.sample_res`` but NOT packed into ``_draws_matrix`` — so the
+    rail/coverage check (is ``f_res_amp`` railing the tight N(0,0.02) prior, or is the leg speaking?) is
+    possible from the shard pkls (step-review #4). Stores thinned draws (SAME step/L as tau0_amp/dtau0) +
+    the injected-arm TRUTH: a constant-b_res injection is reproduced EXACTLY by (amp=b*, slope=0) in the
+    2-param span, so truth = (injected b_res, 0.0); NaN on the clean / held-out / non-resolution arm (the
+    injection is a Leg-A-only hook). EMPTY unless sample_res actually sampled f_res ⇒ additive-only,
+    byte-identical golden under sample_res=False."""
+    res_inj = (inject_spec or {}).get("resolution") if (leg_a and inject_spec) else None
+    truth = {"f_res_amp": float(res_inj["b_res"]) if res_inj else np.nan,
+             "f_res_slope": 0.0 if res_inj else np.nan}
+    out = {}
+    for nm in ("f_res_amp", "f_res_slope"):
+        if nm in samples:
+            out[nm] = dict(draws=np.asarray(samples[nm])[::step][:L], truth=truth[nm])
+    return out
+
+
 def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
              cemu_inflate=None, fold=0, q_levels=(0.68, 0.95), verbose=True,
              dense_mass=True, max_tree_depth=10, mock_indices=None,
@@ -2508,6 +2527,9 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
         # but NOT packed into _draws_matrix, so store them here (SAME thinning) with the injected-arm
         # truth. Additive-only + empty under uniform/flatlog/metals-off ⇒ byte-identical golden.
         sites_extra.update(_metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a))
+        # OPTION-B f_res sites (rail/coverage instrumentation, step-review #4): same thinning; injected
+        # truth (b*, 0). EMPTY + additive-only unless sample_res sampled f_res ⇒ golden-safe.
+        sites_extra.update(_resolution_sites_extra(samples, step, L, inject_spec, leg_a))
 
         per_mock.append(dict(sim=sim, truth_vec=truth_vec, draws=draws_t, L=L,
                              ll_true=ll_true, ll_draws=ll_draws_t,

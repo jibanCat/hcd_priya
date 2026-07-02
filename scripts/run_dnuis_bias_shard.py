@@ -118,7 +118,7 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         with_eboss=(survey == "eboss"),
         metals_on=metals, sample_metals=metals,
-        sample_res=float_res,                              # option-b: float f_res + cov_b (DESI only)
+        sample_res=float_res,                              # option-b: float f_res + cov_b (DESI rank-1 / eBOSS rescale)
         hierarchical_hcd=False, survey=PIN_KEY)
 
     # restrict to the chosen survey's legs (single-survey bias arm).
@@ -152,8 +152,11 @@ def main():
                          "{0.015,0.02,0.03}. Ignored for non-resolution arms.")
     ap.add_argument("--float-res", dest="float_res", action="store_true",
                     help="OPTION-B: float the 2-param f_res spectral-resolution nuisance + remove the "
-                         "resolution mode from the covariance (per-z rank-1 cov_b). DESI only (eBOSS cov "
-                         "mode is a follow-up). Default off = option-a (resolution stays in the cov).")
+                         "resolution mode from the covariance. BOTH legs: DESI = per-z rank-1 cov_b; eBOSS = "
+                         "multiplicative sigma-rescale cov_b. Default off = option-a (resolution stays in the "
+                         "cov). NOTE: the tight amp prior N(0,0.02) is DESI-derived; eBOSS's own resolution "
+                         "is ~2x larger (b_res~0.044), so eBOSS option-b under-covers unless the prior is "
+                         "leg-matched (open PI decision -- see 2026-07-02-resolution-findings.md).")
     ap.add_argument("--no-mf", dest="with_mf", action="store_false")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--smoke", action="store_true",
