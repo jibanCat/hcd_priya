@@ -16,6 +16,21 @@ def test_other_arms_unaffected():
     assert arm_inject_spec("metal_matched", "desi") == {}
 
 
+def test_treatment_flags_bracket():
+    """The 4-arm resolution comparison bracket maps a treatment label -> the run flags: a=option-a (in cov,
+    no float); b=option-b tight (float, prior 0.02); c=option-b wide/cup1d-faithful (float, prior c_sigma);
+    d=arm-D (coherent cov, no float). Distinct treatments -> distinct output tags so they never collide."""
+    import pytest
+    from scripts.run_dnuis_bias_shard import treatment_flags
+    assert treatment_flags("a") == dict(float_res=False, coherent_res=False, f_res_amp_sigma=None)
+    assert treatment_flags("b") == dict(float_res=True, coherent_res=False, f_res_amp_sigma=None)
+    assert treatment_flags("c", c_prior_sigma=0.05) == dict(float_res=True, coherent_res=False,
+                                                            f_res_amp_sigma=0.05)
+    assert treatment_flags("d") == dict(float_res=False, coherent_res=True, f_res_amp_sigma=None)
+    with pytest.raises(SystemExit):
+        treatment_flags("x")
+
+
 def test_resolution_ks_raises():
     """KS's R_z is the DESI pixel proxy ~7-15x too large (KS is echelle, sigma~3.2 km/s), so a
     b_res injection is a ~70% distortion the forward cannot fit -> the old -21sigma ESS collapse

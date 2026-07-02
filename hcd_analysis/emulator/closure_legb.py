@@ -472,6 +472,9 @@ class LegBCtx(NamedTuple):
     metal_knode_hi: float = 0.1               # upper bracket
     sample_res: bool = False                  # option-b: sample the 2-param spectral-resolution f_res
     #                                           nuisance (b_res(z), forward-only). Default False → golden.
+    f_res_amp_sigma: float = None             # option-b prior width on f_res_amp; None → tight F_RES_AMP_SIGMA
+    #                                           (0.02). Set wider for arm-C (cup1d-faithful) or the eBOSS
+    #                                           leg-matched prior (~0.05). Golden-safe (None → unchanged).
 
 
 def _kim(z):
@@ -492,7 +495,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    mf_emucoh=False, mf_emucoh_infl=1.0,
                    mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
                    mf_emucoh_offdiag_only=False, sample_metals=False, sample_res=False,
-                   coherent_res=False, coh_amp=1.0, a_siiii_max=0.15,
+                   coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None, a_siiii_max=0.15,
                    metal_prior="uniform", metal_logf_lo=-11.0, metal_logf_hi=-2.0,
                    metal_one_minus_F_ref=None,
                    metal_node_z=(2.2, 4.2), metal_fnode_lo=0.003, metal_fnode_hi=0.03,
@@ -714,7 +717,9 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         mf_shape_per_leg=mf_shape_per_leg, mf_shape_infl=float(mf_shape_infl),
         mf_emucoh_per_leg=mf_emucoh_per_leg, mf_emucoh_infl=float(mf_emucoh_infl),
         mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
-        sample_metals=bool(sample_metals), sample_res=bool(sample_res), a_siiii_max=float(a_siiii_max),
+        sample_metals=bool(sample_metals), sample_res=bool(sample_res),
+        f_res_amp_sigma=(None if f_res_amp_sigma is None else float(f_res_amp_sigma)),
+        a_siiii_max=float(a_siiii_max),
         metal_prior=str(metal_prior), metal_logf_lo=float(metal_logf_lo),
         metal_logf_hi=float(metal_logf_hi), metal_one_minus_F_ref=metal_one_minus_F_ref,
         metal_node_z=tuple(metal_node_z), metal_fnode_lo=float(metal_fnode_lo),
@@ -1787,7 +1792,9 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     # _resolution_factor; the injected truth never carries it (no closure cancellation, like alpha_res).
     # Sites appended AFTER alpha_res; _legb_priors_only mirrors this order (constrain_fn parity).
     if getattr(ctx, "sample_res", False):
-        f_res_amp = numpyro.sample("f_res_amp", dist.Normal(0.0, F_RES_AMP_SIGMA))
+        _amp_sig = getattr(ctx, "f_res_amp_sigma", None)
+        _amp_sig = F_RES_AMP_SIGMA if _amp_sig is None else float(_amp_sig)   # arm-C wide / eBOSS leg-match
+        f_res_amp = numpyro.sample("f_res_amp", dist.Normal(0.0, _amp_sig))
         f_res_slope = numpyro.sample("f_res_slope", dist.Normal(0.0, F_RES_SLOPE_SIGMA))
         b_res_global = _bres_of_z(zg, f_res_amp, f_res_slope)
     else:
@@ -1948,9 +1955,11 @@ def _legb_priors_only(ctx):
     if not getattr(ctx, "fix_alpha_res", False):
         numpyro.sample("alpha_res", dist.TruncatedNormal(1.0, SIGMA_A0, low=0.0))
         numpyro.sample("alpha_res_slope", dist.Normal(0.0, SIGMA_S))
-    # option-b f_res mirror (MUST match _legb_model's order: after alpha_res). constrain_fn parity.
+    # option-b f_res mirror (MUST match _legb_model's order + WIDTH: after alpha_res). constrain_fn parity.
     if getattr(ctx, "sample_res", False):
-        numpyro.sample("f_res_amp", dist.Normal(0.0, F_RES_AMP_SIGMA))
+        _amp_sig = getattr(ctx, "f_res_amp_sigma", None)
+        _amp_sig = F_RES_AMP_SIGMA if _amp_sig is None else float(_amp_sig)
+        numpyro.sample("f_res_amp", dist.Normal(0.0, _amp_sig))
         numpyro.sample("f_res_slope", dist.Normal(0.0, F_RES_SLOPE_SIGMA))
 
 

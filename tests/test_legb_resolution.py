@@ -236,6 +236,28 @@ def test_check_resolution_injectable_guards_unready_leg():
         C._check_resolution_injectable([ready, unready], 0.02)    # stray KS + res_b -> RAISE
 
 
+@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+def test_f_res_prior_sigma_configurable():
+    """Arm-C (cup1d-faithful WIDE) + the eBOSS leg-matched prior need the f_res_amp prior width to be
+    ctx-configurable, not the module-constant tight 0.02. ctx.f_res_amp_sigma overrides it in BOTH twins
+    (constrain_fn parity); None -> the tight F_RES_AMP_SIGMA=0.02 (golden)."""
+    ctx, dd = C.build_legb_ctx(use_xclass=True, sample_res=True, desi_kwargs=dict(z_lo=0.0, z_hi=2.6))
+    ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "DESI"])
+    def _prior_scale(cx):
+        tr = handlers.trace(handlers.seed(lambda: C._legb_priors_only(cx), jax.random.PRNGKey(0))).get_trace()
+        return float(tr["f_res_amp"]["fn"].scale)
+    assert _prior_scale(ctx) == 0.02                                  # default -> tight F_RES_AMP_SIGMA
+    assert _prior_scale(ctx._replace(f_res_amp_sigma=0.05)) == 0.05   # leg-matched / arm-C wide
+    # _legb_model must use the SAME width (constrain_fn parity)
+    ctx_w = ctx._replace(f_res_amp_sigma=0.05)
+    sims, _ = C.held_out_sims(dd, fold=0); truth = C.make_truth_from_sim(dd, sims[0], fold=0)
+    mock_legs, _, _ = C.make_legb_mock(ctx_w, truth, jax.random.PRNGKey(0))
+    core = C._mock_core_per_leg(ctx_w, truth)
+    trm = handlers.trace(handlers.seed(lambda: C._legb_model(ctx_w, mock_legs, core),
+                                       jax.random.PRNGKey(1))).get_trace()
+    assert float(trm["f_res_amp"]["fn"].scale) == 0.05
+
+
 @pytest.mark.skipif(not os.path.exists(_EBOSS_NPZ), reason="eBOSS npz not present")
 def test_cov_arm_d_eboss_coherent_mode():
     """ARM-D (first-class bracket arm, esp. eBOSS): remove resolution the deployed way (sigma-rescale) then

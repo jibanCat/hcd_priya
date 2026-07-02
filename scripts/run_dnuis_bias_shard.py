@@ -101,8 +101,32 @@ def arm_inject_spec(arm, survey, *, b_res=0.02):
     raise SystemExit(f"unknown arm {arm!r}")
 
 
+# The 4-arm resolution comparison bracket: each treatment is a DISTINCT covariance/forward handling of the
+# spectral-resolution systematic, run side-by-side on the SAME injected mocks. Tagged into the output name so
+# the arms never collide + the analyzer compares them per leg (see 2026-07-02-coherent-cov-vs-float doc).
+TREATMENTS = ("a", "b", "c", "d")
+
+
+def treatment_flags(treatment, *, c_prior_sigma=0.05):
+    """Map a bracket treatment label -> the run_dnuis flags:
+      a = option-a  : resolution stays IN the covariance, NO float (the deployed baseline).
+      b = option-b  : float f_res, TIGHT prior N(0, 0.02) (ours).
+      c = option-b WIDE (cup1d-faithful / eBOSS leg-match): float f_res, prior N(0, c_prior_sigma).
+      d = arm-D     : coherent cross-z covariance mode, NO float (marginalize resolution in the cov)."""
+    t = str(treatment).lower()
+    if t == "a":
+        return dict(float_res=False, coherent_res=False, f_res_amp_sigma=None)
+    if t == "b":
+        return dict(float_res=True, coherent_res=False, f_res_amp_sigma=None)      # tight 0.02
+    if t == "c":
+        return dict(float_res=True, coherent_res=False, f_res_amp_sigma=float(c_prior_sigma))
+    if t == "d":
+        return dict(float_res=False, coherent_res=True, f_res_amp_sigma=None)
+    raise SystemExit(f"unknown treatment {treatment!r} (choose one of {TREATMENTS})")
+
+
 def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, float_res=False,
-                  coherent_res=False, coh_amp=1.0):
+                  coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None):
     """Build the single-survey production ctx for an arm. metals_on/sample_metals ON for
     DESI/eBOSS (False for KS). Returns (ctx, d, inject_spec). The arm runs on ONE survey's legs:
     we build a single-survey ctx by restricting the leg list AFTER build (keep it simple)."""
@@ -127,6 +151,7 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
         metals_on=metals, sample_metals=metals,
         sample_res=float_res,                              # option-b: float f_res + cov_b (DESI rank-1 / eBOSS rescale)
         coherent_res=coherent_res, coh_amp=coh_amp,        # arm-D: coherent cross-z cov mode, NO forward float
+        f_res_amp_sigma=f_res_amp_sigma,                   # arm-C wide / eBOSS leg-match prior (None -> tight 0.02)
         hierarchical_hcd=False, survey=PIN_KEY)
 
     # restrict to the chosen survey's legs (single-survey bias arm).
@@ -176,6 +201,14 @@ def main():
     ap.add_argument("--coh-amp", type=float, default=1.0,
                     help="ARM-D coherent-mode amplitude s (default 1.0 = the shipped 1-sigma resolution "
                          "uncertainty). cov gains s^2*outer(e,e). Ignored unless --coherent-res.")
+    ap.add_argument("--treatment", choices=TREATMENTS, default=None,
+                    help="4-arm resolution comparison bracket (sets the flags + the output tag; overrides "
+                         "--float-res/--coherent-res): a=option-a (in cov, no float); b=option-b tight "
+                         "(float, prior 0.02); c=option-b wide/cup1d-faithful (float, prior --c-prior-sigma); "
+                         "d=arm-D (coherent cov, no float). The driver varies this a/b/c/d per leg+injection.")
+    ap.add_argument("--c-prior-sigma", type=float, default=0.05,
+                    help="arm-C (treatment c) f_res_amp prior width (default 0.05 = eBOSS-leg-matched; use a "
+                         "wider value for cup1d's loose default). Ignored unless --treatment c.")
     ap.add_argument("--no-mf", dest="with_mf", action="store_false")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--smoke", action="store_true",
@@ -188,13 +221,26 @@ def main():
         a.n_warmup = min(a.n_warmup, 20)
         a.n_samples = min(a.n_samples, 30)
 
-    if a.float_res and a.coherent_res:
-        raise SystemExit("--float-res (option-b) and --coherent-res (arm-D) are mutually exclusive arms")
+    # resolve the comparison-bracket treatment (a/b/c/d) -> flags + the output TAG so the 4 arms never
+    # collide + the analyzer groups them per leg. --treatment overrides the low-level flags; without it,
+    # derive the tag from the flags (backward compat).
+    f_res_amp_sigma = None
+    if a.treatment:
+        fl = treatment_flags(a.treatment, c_prior_sigma=a.c_prior_sigma)
+        a.float_res, a.coherent_res, f_res_amp_sigma = fl["float_res"], fl["coherent_res"], fl["f_res_amp_sigma"]
+        treatment = a.treatment
+    else:
+        if a.float_res and a.coherent_res:
+            raise SystemExit("--float-res (option-b) and --coherent-res (arm-D) are mutually exclusive arms")
+        treatment = "d" if a.coherent_res else ("b" if a.float_res else "a")
     ctx, d, inject_spec = build_arm_ctx(a.arm, a.survey, a.with_mf, b_res=a.b_res, float_res=a.float_res,
-                                        coherent_res=a.coherent_res, coh_amp=a.coh_amp)
+                                        coherent_res=a.coherent_res, coh_amp=a.coh_amp,
+                                        f_res_amp_sigma=f_res_amp_sigma)
     n_members = len(getattr(ctx.model, "members", [None]))
     idxs = [m for m in range(a.n_mocks) if m % a.n_shards == a.shard]
-    print(f"[dnuis {a.arm}/{a.survey} shard {a.shard}/{a.n_shards}] mocks={idxs} "
+    print(f"[dnuis {a.arm}/{a.survey} treat={treatment}"
+          f"{'' if f_res_amp_sigma is None else f'(prior_sig={f_res_amp_sigma})'} "
+          f"shard {a.shard}/{a.n_shards}] mocks={idxs} "
           f"members={n_members} legs={[l.name for l in ctx.legs]} "
           f"inject_spec={inject_spec} mf={a.with_mf} PAIRED "
           f"(warmup={a.n_warmup} samples={a.n_samples} mtd={a.max_tree_depth})")
@@ -219,12 +265,14 @@ def main():
     per_mock_wall = wall / (2.0 * n_pairs)                  # cost of ONE fit (2 fits per paired mock)
 
     os.makedirs(a.out_dir, exist_ok=True)
-    out = os.path.join(a.out_dir, f"{a.arm}_{a.survey}_shard_{a.shard:03d}.pkl")
+    # tag the output with the TREATMENT so the 4 bracket arms (a/b/c/d) never overwrite each other.
+    out = os.path.join(a.out_dir, f"{a.arm}_{treatment}_{a.survey}_shard_{a.shard:03d}.pkl")
     meta = dict(vars(a))
-    meta.update(inject_spec=inject_spec, n_members=n_members, paired=True,
-                legs=[l.name for l in ctx.legs], wall_s=wall, per_fit_wall_s=per_mock_wall)
+    meta.update(inject_spec=inject_spec, n_members=n_members, paired=True, treatment=treatment,
+                f_res_amp_sigma=f_res_amp_sigma, legs=[l.name for l in ctx.legs],
+                wall_s=wall, per_fit_wall_s=per_mock_wall)
     with open(out, "wb") as f:
-        pickle.dump(dict(arm=a.arm, survey=a.survey, idxs=idxs,
+        pickle.dump(dict(arm=a.arm, treatment=treatment, survey=a.survey, idxs=idxs,
                          clean_per_mock=clean_per_mock, inj_per_mock=inj_per_mock,
                          meta=meta), f)
     n_div = (sum(int(r.get("n_div", 0) > 0) for r in clean_per_mock)
