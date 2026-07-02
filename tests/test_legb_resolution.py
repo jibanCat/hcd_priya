@@ -236,6 +236,52 @@ def test_check_resolution_injectable_guards_unready_leg():
         C._check_resolution_injectable([ready, unready], 0.02)    # stray KS + res_b -> RAISE
 
 
+@pytest.mark.skipif(not os.path.exists(_EBOSS_NPZ), reason="eBOSS npz not present")
+def test_cov_arm_d_eboss_coherent_mode():
+    """ARM-D (first-class bracket arm, esp. eBOSS): remove resolution the deployed way (sigma-rescale) then
+    RE-ADD it as ONE coherent cross-z mode s^2*outer(e,e) -- NO forward float. Invariants: SPD; PRESERVES the
+    total variance (diag == option-a, unlike option-b which reduces it); arm-D == option-b cov_b + a single
+    rank-1 PSD coherent mode; FILLS IN the cross-z correlations option-a (block-diagonal) lacks; resolution_on
+    stays False (no f_res in the forward), resolution_coherent_on True. Default off = byte-identical golden."""
+    from hcd_analysis.emulator.data_likelihood import load_eboss_leg
+    leg_a = load_eboss_leg()                                   # option-a: resolution IN cov (block-diagonal)
+    leg_b = load_eboss_leg(resolution_float=True)              # option-b: cov_b (sigma-rescale)
+    leg_d = load_eboss_leg(resolution_coherent=True)           # arm-D: cov_b + coherent mode
+    leg_off = load_eboss_leg(resolution_coherent=False)
+    assert leg_a.resolution_on is False and leg_a.resolution_coherent_on is False
+    assert leg_d.resolution_on is False, "arm-D must NOT float f_res in the forward"
+    assert leg_d.resolution_coherent_on is True
+    Ca, Cb, Cd = (np.asarray(x.C_data, float) for x in (leg_a, leg_b, leg_d))
+    np.linalg.cholesky(Cd)                                     # SPD
+    np.testing.assert_allclose(np.diag(Cd), np.diag(Ca), rtol=1e-9)   # variance PRESERVED (re-correlated)
+    # arm-D = cov_b + exactly one rank-1 PSD coherent mode
+    D = Cd - Cb
+    ev = np.linalg.eigvalsh(D)
+    assert ev.min() > -1e-9 * abs(ev).max(), "coherent add must be PSD"
+    assert int(np.sum(ev > 1e-9 * ev.max())) == 1, "coherent add must be rank-1 (one common Delta R/R)"
+    zr = np.asarray(leg_d.z_row); crossz = zr[:, None] != zr[None, :]
+    assert np.abs(Ca[crossz]).max() == 0.0, "eBOSS option-a is block-diagonal in z"
+    assert np.abs(Cd[crossz]).max() > 0.0, "arm-D fills in cross-z coherent correlations"
+    np.testing.assert_array_equal(np.asarray(leg_off.C_data, float), Ca)   # golden
+
+
+@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+def test_cov_arm_d_desi_coherent_and_amplitude():
+    """Arm-D on DESI (rank-1 removal + coherent add) + the amplitude knob: cov_D(s) - cov_b scales as s^2."""
+    from hcd_analysis.emulator.data_likelihood import load_desi_leg
+    kw = dict(z_lo=2.2, z_hi=4.2)
+    leg_a = load_desi_leg(**kw)
+    leg_b = load_desi_leg(resolution_float=True, **kw)
+    leg_d = load_desi_leg(resolution_coherent=True, **kw)
+    leg_d2 = load_desi_leg(resolution_coherent=True, resolution_coh_amp=2.0, **kw)
+    assert leg_d.resolution_on is False and leg_d.resolution_coherent_on is True
+    Ca, Cb, Cd, Cd2 = (np.asarray(x.C_data, float) for x in (leg_a, leg_b, leg_d, leg_d2))
+    np.linalg.cholesky(Cd); np.linalg.cholesky(Cd2)           # SPD at both amplitudes
+    np.testing.assert_allclose(np.diag(Cd), np.diag(Ca), rtol=1e-9)   # variance preserved
+    # coherent mode is rank-1 PSD and scales as amp^2: (Cd2 - Cb) == 4*(Cd - Cb)
+    np.testing.assert_allclose(Cd2 - Cb, 4.0 * (Cd - Cb), rtol=1e-9, atol=1e-12)
+
+
 def test_check_single_instrument_for_res_guards_multileg():
     """sample_res floats ONE global f_res site, but resolution is a per-INSTRUMENT systematic (DESI and
     eBOSS spectrographs are independent, unlike the globally-shared metals). Until per-instrument f_res

@@ -491,7 +491,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    mf_shape_legs=("DESI", "KS"), mf_shape_npz=None,
                    mf_emucoh=False, mf_emucoh_infl=1.0,
                    mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
-                   mf_emucoh_offdiag_only=False, sample_metals=False, sample_res=False, a_siiii_max=0.15,
+                   mf_emucoh_offdiag_only=False, sample_metals=False, sample_res=False,
+                   coherent_res=False, coh_amp=1.0, a_siiii_max=0.15,
                    metal_prior="uniform", metal_logf_lo=-11.0, metal_logf_hi=-2.0,
                    metal_one_minus_F_ref=None,
                    metal_node_z=(2.2, 4.2), metal_fnode_lo=0.003, metal_fnode_hi=0.03,
@@ -537,7 +538,12 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         assert np.allclose(np.asarray(evx["tau0_band_centres"]), np.asarray(alpha_centres)), \
             "xclass τ₀-band centres differ from the diagonal error vector"
 
-    desi = DL.load_desi_leg(metals_on=metals_on, resolution_float=sample_res, **(desi_kwargs or {}))
+    # ARM-D (coherent-cov, no forward float) is a DISTINCT covariance treatment from option-b (sample_res):
+    # it does NOT set ctx.sample_res (no f_res site), only the loader's resolution_coherent cov mode.
+    if coherent_res and sample_res:
+        raise ValueError("build_legb_ctx: sample_res (option-b) and coherent_res (arm-D) are mutually exclusive")
+    desi = DL.load_desi_leg(metals_on=metals_on, resolution_float=sample_res,
+                            resolution_coherent=coherent_res, resolution_coh_amp=coh_amp, **(desi_kwargs or {}))
     ks = DL.load_ks_leg(**(ks_kwargs or {}))
     legs = [desi, ks]
     # eBOSS DR14 (Chabanier+2019) — opt-in third leg (the low-k production shakedown). Its own
@@ -546,7 +552,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     if with_eboss:
         # eBOSS option-b uses the "rescale" cov mode (its cov is corr⊙σσᵀ with resolution baked into σ, so
         # rebuild σ'²=σ²−res²; reference-verified 2026-07-02, SPD +0.05). sample_res wires DESI (rank1) + eBOSS.
-        legs.append(DL.load_eboss_leg(resolution_float=sample_res, **(eboss_kwargs or {})))
+        legs.append(DL.load_eboss_leg(resolution_float=sample_res, resolution_coherent=coherent_res,
+                                      resolution_coh_amp=coh_amp, **(eboss_kwargs or {})))
 
     z_global = np.unique(np.round(np.concatenate([leg.z for leg in legs]), 6))
 

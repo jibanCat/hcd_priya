@@ -101,7 +101,8 @@ def arm_inject_spec(arm, survey, *, b_res=0.02):
     raise SystemExit(f"unknown arm {arm!r}")
 
 
-def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, float_res=False):
+def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, float_res=False,
+                  coherent_res=False, coh_amp=1.0):
     """Build the single-survey production ctx for an arm. metals_on/sample_metals ON for
     DESI/eBOSS (False for KS). Returns (ctx, d, inject_spec). The arm runs on ONE survey's legs:
     we build a single-survey ctx by restricting the leg list AFTER build (keep it simple)."""
@@ -125,6 +126,7 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
         with_eboss=(survey == "eboss"),
         metals_on=metals, sample_metals=metals,
         sample_res=float_res,                              # option-b: float f_res + cov_b (DESI rank-1 / eBOSS rescale)
+        coherent_res=coherent_res, coh_amp=coh_amp,        # arm-D: coherent cross-z cov mode, NO forward float
         hierarchical_hcd=False, survey=PIN_KEY)
 
     # restrict to the chosen survey's legs (single-survey bias arm).
@@ -163,6 +165,17 @@ def main():
                          "cov). NOTE: the tight amp prior N(0,0.02) is DESI-derived; eBOSS's own resolution "
                          "is ~2x larger (b_res~0.044), so eBOSS option-b under-covers unless the prior is "
                          "leg-matched (open PI decision -- see 2026-07-02-resolution-findings.md).")
+    ap.add_argument("--coherent-res", dest="coherent_res", action="store_true",
+                    help="ARM-D: remove resolution from the covariance (per-survey) and RE-ADD it as ONE "
+                         "coherent cross-z mode s^2*outer(e,e) -- NO forward f_res float. Marginalizes the "
+                         "coherent resolution error in the covariance (linear-Gaussian equivalent of floating "
+                         "one amplitude); s=coh_amp=1 IS the shipped 1-sigma resolution uncertainty (no prior "
+                         "to tune). PREFERRED for eBOSS (low-k, n_s<->resolution degenerate -> a float is "
+                         "prior-dominated + under-covers). Mutually exclusive with --float-res. See "
+                         "2026-07-02-coherent-cov-vs-float-resolution.md.")
+    ap.add_argument("--coh-amp", type=float, default=1.0,
+                    help="ARM-D coherent-mode amplitude s (default 1.0 = the shipped 1-sigma resolution "
+                         "uncertainty). cov gains s^2*outer(e,e). Ignored unless --coherent-res.")
     ap.add_argument("--no-mf", dest="with_mf", action="store_false")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--smoke", action="store_true",
@@ -175,7 +188,10 @@ def main():
         a.n_warmup = min(a.n_warmup, 20)
         a.n_samples = min(a.n_samples, 30)
 
-    ctx, d, inject_spec = build_arm_ctx(a.arm, a.survey, a.with_mf, b_res=a.b_res, float_res=a.float_res)
+    if a.float_res and a.coherent_res:
+        raise SystemExit("--float-res (option-b) and --coherent-res (arm-D) are mutually exclusive arms")
+    ctx, d, inject_spec = build_arm_ctx(a.arm, a.survey, a.with_mf, b_res=a.b_res, float_res=a.float_res,
+                                        coherent_res=a.coherent_res, coh_amp=a.coh_amp)
     n_members = len(getattr(ctx.model, "members", [None]))
     idxs = [m for m in range(a.n_mocks) if m % a.n_shards == a.shard]
     print(f"[dnuis {a.arm}/{a.survey} shard {a.shard}/{a.n_shards}] mocks={idxs} "

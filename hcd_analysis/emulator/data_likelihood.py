@@ -186,6 +186,10 @@ class DataLeg(NamedTuple):
     # ~70% distortion the forward cannot fit (the -21sigma ESS collapse). Gate the injection on THIS flag,
     # NOT resolution_on (option-a injects with resolution_on=False). Default True (back-compatible).
     resolution_ready: bool = True
+    # ARM-D bookkeeping: the covariance carries a COHERENT cross-z resolution mode (resolution removed the
+    # deployed way, then re-added as ONE rank-1 outer(e,e)) and there is NO forward f_res float. Distinguishes
+    # arm-D (resolution_on=False, resolution_coherent_on=True) from option-a (both False). Default False.
+    resolution_coherent_on: bool = False
 
 
 # PER-LEG DLA-forward fraction (§0c, PI-confirmed final intent 2026-06-09): the leg-specific
@@ -216,7 +220,8 @@ def desi_resolution_R(z):
 def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
                   *, z_lo=2.2, z_hi=4.2, k_min=DESI_KMIN, metals_on=True,
                   resolution_on=False, add_cov_diag_inflation=True, mf_floor_on=False,
-                  use_snr3=None, snr3_stat_inflate=None, add_cv_floor=None, resolution_float=False):
+                  use_snr3=None, snr3_stat_inflate=None, add_cv_floor=None, resolution_float=False,
+                  resolution_coherent=False, resolution_coh_amp=1.0):
     """Load DESI DR1 P1D → a post-cut ``DataLeg`` (usage doc §"Covariance + cuts").
 
     Cuts (z-major flat layout, ``row_is_zmajor=True``):
@@ -270,15 +275,16 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
     k_hi_row = 0.5 * np.pi / R_row
     keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k > k_min) & (k < k_hi_row)
 
-    # read the per-bin resolution error ONLY on the option-b path (golden default must not depend on
-    # a key it never uses -- code-lens #7).
-    res_e = np.asarray(d["syst_e_resolution"], float) if resolution_float else None
+    # read the per-bin resolution error ONLY on the option-b / arm-D paths (golden default must not depend
+    # on a key it never uses -- code-lens #7).
+    res_e = np.asarray(d["syst_e_resolution"], float) if (resolution_float or resolution_coherent) else None
     return _assemble_leg("DESI", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
                          dla_forward_frac=DESI_DLA_FORWARD_FRAC,
                          resolution_e=res_e,
-                         resolution_float=resolution_float)
+                         resolution_float=resolution_float,
+                         resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp)
 
 
 def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
@@ -325,7 +331,8 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
 def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
                    *, z_lo=2.2, z_hi=4.6, k_min=0.0, k_max=CACHE_KMAX,
                    metals_on=True, resolution_on=False, mf_floor_on=False,
-                   dla_forward_frac=EBOSS_DLA_FORWARD_FRAC, add_cv_floor=None, resolution_float=False):
+                   dla_forward_frac=EBOSS_DLA_FORWARD_FRAC, add_cv_floor=None, resolution_float=False,
+                   resolution_coherent=False, resolution_coh_amp=1.0):
     """Load eBOSS DR14 P1D (Chabanier+2019, 1812.03554) → a post-cut ``DataLeg`` (block-diag cov).
 
     Format: the npz from ``scripts/convert_eboss_dr14_p1d.py`` (z, k, plya, sigma, cov, syst_*).
@@ -361,13 +368,15 @@ def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
 
     # eBOSS has no resolution proxy in the table; reuse the DESI-style proxy as a placeholder for
     # the (default-OFF) resolution knob, exactly like load_ks_leg.
-    res_e = np.asarray(d["syst_resolution"], float) if resolution_float else None  # option-b only (code-lens #7)
+    res_e = (np.asarray(d["syst_resolution"], float)
+             if (resolution_float or resolution_coherent) else None)  # option-b / arm-D only (code-lens #7)
     return _assemble_leg("eBOSS", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
                          dla_forward_frac=dla_forward_frac,
                          resolution_e=res_e,
-                         resolution_float=resolution_float, resolution_mode="rescale")
+                         resolution_float=resolution_float, resolution_mode="rescale",
+                         resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp)
 
 
 def _read_ks_p1d(path):
@@ -390,7 +399,7 @@ def _read_ks_p1d(path):
 def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
                   metals_on, resolution_on, mf_floor_on=False, dla_forward_frac=1.0,
                   resolution_e=None, resolution_float=False, resolution_mode="rank1",
-                  resolution_ready=True):
+                  resolution_ready=True, resolution_coherent=False, resolution_coh_amp=1.0):
     """Sub-select the kept (z,k) rows + their covariance block, build the z-major flat
     DataLeg.  The covariance is row/col-sliced by the SAME boolean mask as the data so the
     flat-row ordering matches C_data exactly (CS-REVIEW: ordering invariant)."""
@@ -407,18 +416,24 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
     z_idx = np.array([int(np.argmin(np.abs(z - zr))) for zr in z_row])
 
     n_per_z = np.array([int(np.sum(z_idx == i)) for i in range(len(z))])
-    if resolution_float:
-        # option-b: rebuild the covariance WITHOUT the spectral-resolution term (the floated f_res models
-        # it in the forward instead -> no double-count). Reference-verified 2026-07-02 (2 provenance agents):
-        # the resolution error is a SEPARABLE additive systematic (a diagonal error column), but each
-        # survey's cov CONSTRUCTION incorporates it differently, so the removal is per-survey:
+    resolution_coherent_on = False
+    if resolution_float or resolution_coherent:
+        # Rebuild the covariance WITHOUT the spectral-resolution term (shared by option-b + arm-D). The
+        # resolution error is a SEPARABLE additive systematic (a diagonal error column), but each survey's
+        # cov CONSTRUCTION incorporates it differently, so the removal is per-survey:
         #   "rank1"  (DESI): cov_syst is a sum of per-z-block rank-1 outer(e_i|z) modes; drop resolution's
         #            mode -> cov_b = C - sum_z outer(e_res|z). == cup1d's additive build-without to 1e-13.
         #   "rescale" (eBOSS): cov = corr(x)sigma-sigma^T with sigma^2 = sum_s e_s^2 (resolution baked into
         #            sigma); rebuild sigma'^2 = sigma^2 - e_res^2 -> cov'[i,j] = C[i,j]*(sig'_i/sig_i)(sig'_j/sig_j).
+        # option-b then FLOATS f_res in the forward (models it); ARM-D instead re-adds resolution as ONE
+        # coherent cross-z mode s^2*outer(e_res,e_res) (marginalizes it in the cov, no forward param -- the
+        # linear-Gaussian equivalent of floating a single amplitude; 2026-07-02-coherent-cov-vs-float doc).
         # A wrong mode breaks positive-definiteness; the Cholesky assert is the tripwire.
+        if resolution_float and resolution_coherent:
+            raise ValueError(f"{name}: resolution_float (option-b) and resolution_coherent (arm-D) are "
+                             "mutually exclusive covariance treatments")
         if resolution_e is None:
-            raise ValueError(f"{name}: resolution_float=True needs resolution_e (syst_e_resolution)")
+            raise ValueError(f"{name}: resolution_float/resolution_coherent needs resolution_e")
         e_res = np.asarray(resolution_e, float)[idx]
         C_data = np.array(C_data, float)
         if resolution_mode == "rescale":
@@ -430,14 +445,22 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
                 rows = np.where(z_idx == i)[0]
                 if rows.size:
                     C_data[np.ix_(rows, rows)] -= np.outer(e_res[rows], e_res[rows])
+        if resolution_coherent:
+            # ARM-D: re-add the resolution error as ONE coherent (cross-z) rank-1 mode. Restores the total
+            # diagonal variance (diag == option-a) but re-correlates it coherently across z. resolution_on
+            # stays False (NO forward f_res). Amplitude s: s=1 == the shipped 1-sigma resolution uncertainty.
+            C_data = C_data + (float(resolution_coh_amp) ** 2) * np.outer(e_res, e_res)
+            resolution_coherent_on = True
+        else:
+            resolution_on = True                    # option-b floats f_res in the forward
         np.linalg.cholesky(C_data)                 # SPD assert (fails loudly if the mode is mis-specified)
-        resolution_on = True                        # option-b floats f_res in the forward
     R_z = np.asarray(R_func(z))
     return DataLeg(
         name=name, z=z, z_unit=_z_unit(z), k=k, z_row=z_row, z_idx=z_idx,
         P_data=P_data, C_data=C_data, R_z=R_z, n_z=len(z), n_per_z=n_per_z,
         metals_on=metals_on, resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-        dla_forward_frac=dla_forward_frac, resolution_ready=resolution_ready)
+        dla_forward_frac=dla_forward_frac, resolution_ready=resolution_ready,
+        resolution_coherent_on=resolution_coherent_on)
 
 
 # ============================================================================ #
