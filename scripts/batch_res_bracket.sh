@@ -73,6 +73,8 @@ if [ "$TREAT_IDX" -ge "$N_TREAT" ]; then
 fi
 T=${TREAT[$TREAT_IDX]}
 C_FLAG=""; [[ "$T" == "c" ]] && C_FLAG="--c-prior-sigma $C_PRIOR"
+# DIAGNOSTIC: PIN_HUB=1 pins hub (mechanism ablation for the eBOSS resolution leak) -> separate out-dir.
+PIN_FLAG=""; if [[ "${PIN_HUB:-0}" == "1" ]]; then PIN_FLAG="--pin-hub"; OUTDIR="${OUTDIR}_pinhub"; fi
 
 export OMP_NUM_THREADS=$NCPU OPENBLAS_NUM_THREADS=$NCPU MKL_NUM_THREADS=$NCPU NUMEXPR_NUM_THREADS=$NCPU
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=$NCPU"
@@ -83,9 +85,9 @@ mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
 if [[ -f "$OUTDIR/resolution_${T}_${SURVEY}_shard_$(printf %03d "$SHARD").pkl" ]]; then
   echo "=== treat=$T $SURVEY shard $SHARD pkl exists -- SKIP ==="; exit 0
 fi
-echo "=== res_bracket treat=$T ($SURVEY) b_res=$BRES ${C_FLAG} shard ${SHARD}/${N_SHARDS} (${NCPU} cpu) start: $(date) ==="
+echo "=== res_bracket treat=$T ($SURVEY) b_res=$BRES ${C_FLAG} ${PIN_FLAG} shard ${SHARD}/${N_SHARDS} (${NCPU} cpu) start: $(date) ==="
 "$PY" -u scripts/run_dnuis_bias_shard.py \
-    --arm resolution --survey "$SURVEY" --treatment "$T" $C_FLAG \
+    --arm resolution --survey "$SURVEY" --treatment "$T" $C_FLAG $PIN_FLAG \
     --shard "$SHARD" --n-shards "$N_SHARDS" --n-mocks "$N_MOCKS" \
     --n-warmup "$N_WARMUP" --n-samples "$N_SAMPLES" --b-res "$BRES" --out-dir "$OUTDIR" $SMOKE_FLAG
 echo "=== done: $(date) ==="

@@ -44,6 +44,8 @@ import os
 import pickle
 import time
 
+import numpy as np
+
 print = functools.partial(print, flush=True)
 
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
@@ -126,7 +128,7 @@ def treatment_flags(treatment, *, c_prior_sigma=0.05):
 
 
 def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, float_res=False,
-                  coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None):
+                  coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None, pin_hub=False):
     """Build the single-survey production ctx for an arm. metals_on/sample_metals ON for
     DESI/eBOSS (False for KS). Returns (ctx, d, inject_spec). The arm runs on ONE survey's legs:
     we build a single-survey ctx by restricting the leg list AFTER build (keep it simple)."""
@@ -159,6 +161,17 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     if not legs:
         raise SystemExit(f"no leg named {LEG_NAME!r} in ctx (legs={[l.name for l in ctx.legs]})")
     ctx = ctx._replace(legs=legs)
+
+    # DIAGNOSTIC (mechanism ablation): PIN hub (theta9[5]) to a tight window at its box centre in BOTH the
+    # truth-draw and the fit (draw_leg_a_leg_truth traces _legb_priors_only -> same theta_unit bounds). The
+    # empirical mediation analysis found hub is the release valve that absorbs the eBOSS resolution offset
+    # (shifts -0.78sigma) and drags n_s down (rho +0.50); pinning it tests that causally + the tighten-hub
+    # mitigation. Default off -> byte-identical.
+    if pin_hub:
+        from hcd_analysis.emulator import closure_legb as _CL
+        lo = np.asarray(_CL._THETA_UNIT_LO, float).copy(); hi = np.asarray(_CL._THETA_UNIT_HI, float).copy()
+        j = 5; mid = 0.5 * (lo[j] + hi[j]); lo[j], hi[j] = mid - 0.01, mid + 0.01   # hub pinned ~box centre
+        ctx = ctx._replace(theta_unit_lo=lo, theta_unit_hi=hi)
 
     # map arm -> inject_spec (pure helper; the resolution b_res is configurable for the +/-1 sigma
     # option-a certification). metal_misspec REALISM: desi_full (with the unfittable additive SiII-SiII
@@ -209,6 +222,11 @@ def main():
     ap.add_argument("--c-prior-sigma", type=float, default=0.05,
                     help="arm-C (treatment c) f_res_amp prior width (default 0.05 = eBOSS-leg-matched; use a "
                          "wider value for cup1d's loose default). Ignored unless --treatment c.")
+    ap.add_argument("--pin-hub", dest="pin_hub", action="store_true",
+                    help="DIAGNOSTIC (mechanism ablation): pin hub (theta9[5]) to a tight window at its box "
+                         "centre in BOTH the truth-draw and the fit. Tests whether hub is the release valve "
+                         "that mediates the eBOSS resolution->n_s leak (empirical mediation: hub shifts "
+                         "-0.78sigma, rho(n_s,hub)=+0.50). Default off = byte-identical.")
     ap.add_argument("--no-mf", dest="with_mf", action="store_false")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--smoke", action="store_true",
@@ -235,7 +253,7 @@ def main():
         treatment = "d" if a.coherent_res else ("b" if a.float_res else "a")
     ctx, d, inject_spec = build_arm_ctx(a.arm, a.survey, a.with_mf, b_res=a.b_res, float_res=a.float_res,
                                         coherent_res=a.coherent_res, coh_amp=a.coh_amp,
-                                        f_res_amp_sigma=f_res_amp_sigma)
+                                        f_res_amp_sigma=f_res_amp_sigma, pin_hub=a.pin_hub)
     n_members = len(getattr(ctx.model, "members", [None]))
     idxs = [m for m in range(a.n_mocks) if m % a.n_shards == a.shard]
     print(f"[dnuis {a.arm}/{a.survey} treat={treatment}"
