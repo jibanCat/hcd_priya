@@ -475,6 +475,10 @@ class LegBCtx(NamedTuple):
     f_res_amp_sigma: float = None             # option-b prior width on f_res_amp; None → tight F_RES_AMP_SIGMA
     #                                           (0.02). Set wider for arm-C (cup1d-faithful) or the eBOSS
     #                                           leg-matched prior (~0.05). Golden-safe (None → unchanged).
+    res_corr_on: bool = True                  # Gate-A NORC: default True = production (res_corr applied).
+    #                                           Mirrors ctx.mf.res_corr_on; False -> res_corr dropped +
+    #                                           (in build_legb_ctx) KS capped at 0.045. A CONFIG field, NOT
+    #                                           packed/sampled -> golden-safe (no _draws_matrix/truth_vec).
 
 
 def _kim(z):
@@ -490,6 +494,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    with_eboss=False, eboss_kwargs=None,
                    use_xclass=True, with_mf=False, mf_fold=0, mf_with_floor=True,
                    mf_exclude_held=False, mf_target_hr_sim=None, mf_anchor_mult=5.0,
+                   res_corr_on=True,
                    mf_shape=False, mf_shape_infl=1.0,
                    mf_shape_legs=("DESI", "KS"), mf_shape_npz=None,
                    mf_emucoh=False, mf_emucoh_infl=1.0,
@@ -547,7 +552,13 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         raise ValueError("build_legb_ctx: sample_res (option-b) and coherent_res (arm-D) are mutually exclusive")
     desi = DL.load_desi_leg(metals_on=metals_on, resolution_float=sample_res,
                             resolution_coherent=coherent_res, resolution_coh_amp=coh_amp, **(desi_kwargs or {}))
-    ks = DL.load_ks_leg(**(ks_kwargs or {}))
+    # Gate-A NORC: when res_corr is dropped, cap KS at k<=0.045 (the residual high-k
+    # particle-convergence uncertainty is then un-marginalized on KS; DESI/eBOSS sit below
+    # the res_corr anchor so are unaffected). Overridable via an explicit ks_kwargs k_max.
+    _ks_kw = dict(ks_kwargs or {})
+    if not res_corr_on and "k_max" not in _ks_kw:
+        _ks_kw["k_max"] = 0.045
+    ks = DL.load_ks_leg(**_ks_kw)
     legs = [desi, ks]
     # eBOSS DR14 (Chabanier+2019) — opt-in third leg (the low-k production shakedown). Its own
     # flag defaults (metals_on=True SiIII / dla_forward_frac=0 / no MF floor — it's a LARGE-scale
@@ -679,7 +690,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         # diagnostic to isolate the anchor's contribution to the coherent n_s bias.
         mf_obj, mf_floor_obj = build_mf_correction(
             fold=mf_fold, with_floor=mf_with_floor, exclude_held_hr=mf_exclude_held,
-            target_hr_sim=mf_target_hr_sim, anchor_mult=mf_anchor_mult)
+            target_hr_sim=mf_target_hr_sim, anchor_mult=mf_anchor_mult,
+            res_corr_on=res_corr_on)
 
     # SHAPE-AWARE MF floor (Phase-5a): the per-leg fractional LOSO-eps outer-product covariance
     # (precomputed once, θ-blind). Fired on the named legs (default DESI+KS) when with_mf+mf_shape.
@@ -732,13 +744,14 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         hcd_btilt_mu=hcd_btilt_mu, hcd_btilt_sigma=hcd_btilt_sigma,
         # REAL-FIT (survey != None) litWLS LLS forward z-slope center (2.127, sim_sub, sim_DLA);
         # survey=None (closure/SBC) → None → _zslope_sites centers on HCD_INCIDENCE_SLOPE (sim-truth).
-        zslope_mu=survey_zslope_mu)
+        zslope_mu=survey_zslope_mu,
+        res_corr_on=bool(res_corr_on))
     return ctx, d
 
 
 def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
                         with_floor=True, floor_npz=None, target_hr_sim=None,
-                        anchor_mult=5.0):
+                        anchor_mult=5.0, res_corr_on=True):
     """Build the production MF correction (resolved separable + rank-1 FixedMeanHead +
     fixed res_corr) on the LF native cache grid for a fold, REUSING the certified gate
     construction (scripts/diag_emu_bias_allfolds_mf.build_mf_for_fold). Returns
@@ -789,7 +802,7 @@ def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
         a_k=a_k, u_z=comp["u_z"], u_tau=comp["u_tau"])
     mf = MF.build_multifidelity(fold_model, fold_norm, lf_logk, head,
                                 eval_logk=eval_logk, log_rho=log_rho, delta_mode="none",
-                                anchor_mult=anchor_mult)
+                                anchor_mult=anchor_mult, res_corr_on=res_corr_on)
     mf_floor = None
     if with_floor:
         mf_floor = (DL.load_mf_floor(floor_npz) if floor_npz

@@ -20,13 +20,12 @@ is still written for back-compat with already-merged shards.
 FORWARD (2026-06-17): the CORRECTED HCD z-slope (re-centered on HCD_INCIDENCE_SLOPE ~2.4, commits
 3603522/6358742/bad8f15, with the runtime forward-exponent guard ACTIVE) + the 1D power-law
 incidence (NOT the 2D-tilt; hcd_2d_tilt defaults False) + the production MF correction. NOTE on
-res_corr: the ``res_corr_on=False`` (NORC) forward flag is NOT yet wired into build_legb_ctx /
-LegBCtx / data_likelihood (that is Group 1 of the SBC plan, a load-bearing forward change that
-needs the golden-test + 4-referee gate). Until it lands this runner uses the EXISTING default MF
-forward (res_corr anchored below 5× the box fundamental, alpha_res marginalized forward-only) — so
-``--no-res-corr-on`` is accepted but is currently a NO-OP placeholder that only records the intent
-in the meta. The mock TRUTH and the likelihood go through the SAME forward, so C_mock ≡ C_like and
-the rank-uniformity null is exact regardless.
+res_corr: the ``res_corr_on`` (NORC) forward flag IS NOW WIRED (2026-07-04, Gate-A) through
+build_legb_ctx -> build_mf_correction -> MultiFidelity.res_corr_on and, for NORC, this runner also
+pins fix_alpha_res=True + caps KS at k<=0.045. DEFAULT is NORC (res_corr_on=False); pass
+``--res-corr-on`` to restore the pre-NORC anchored+alpha forward. res_corr_on lives on the mf object
+(the single chokepoint), so the mock TRUTH and the likelihood SHARE it -> C_mock ≡ C_like and the
+rank-uniformity null is exact at either setting. (Gated by the 4-referee panel + freeze.)
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
@@ -82,7 +81,7 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
         existing = rec.get("run_cfg")
         # The DEFAULT (pre-2026-06-19) config every un-stamped pkl was written under.
         default_cfg = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="all", fold=0,
-                           tau0_prior_sigma=0.0, subdla_truth_boost=1.0)
+                           tau0_prior_sigma=0.0, subdla_truth_boost=1.0, res_corr_on=True)
         # A PRE-STAMP pkl (no run_cfg) is treated as the default config — so resuming a DEFAULT run
         # over old pkls still works, but a non-default (held-out / cemu-variant / width-check) run
         # over those same old pkls correctly CLASHES (it would otherwise silently load self-draws).
@@ -114,6 +113,13 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
             _req.pop("tau0_prior_sigma", None)
         if "subdla_truth_boost" not in eff_existing and float(_req.get("subdla_truth_boost", 1.0)) == 1.0:
             _req.pop("subdla_truth_boost", None)
+        # BACK-COMPAT (2026-07-04, NORC stamp): pre-stamp pkls lack res_corr_on and were ALL the pre-NORC
+        # (res_corr ON) forward. Don't CLASH on the missing key alone WHEN the current run is ALSO
+        # res_corr_on=True (a pre-NORC resume). A NORC run (res_corr_on=False) does NOT pop => it differs
+        # from the res_corr-ON existing => it correctly CLASHES: a NORC SBC certificate must never pool a
+        # pre-NORC anchored+alpha mock (ranks don't transfer across forwards).
+        if "res_corr_on" not in eff_existing and bool(_req.get("res_corr_on", True)) is True:
+            _req.pop("res_corr_on", None)
         if eff_existing != _req:
             raise RuntimeError(
                 f"[mock {m}] config CLASH at {path}: existing pkl run_cfg={existing} "
@@ -164,11 +170,11 @@ def main():
     ap.add_argument("--leg", choices=["all", "DESI", "KS", "eBOSS"], default="all",
                     help="restrict the SBC likelihood to one survey leg (per-leg = the deployed analysis)")
     ap.add_argument("--res-corr-on", dest="res_corr_on", action="store_true",
-                    help="(placeholder) keep res_corr ON; the NORC flag is not yet wired in the "
-                         "forward — see the module docstring. Recorded in meta only.")
+                    help="restore the pre-NORC forward: res_corr ON + alpha_res marginalized + "
+                         "KS k<=0.069 (the anchored+alpha baseline).")
     ap.add_argument("--no-res-corr-on", dest="res_corr_on", action="store_false",
-                    help="(placeholder) request NORC (res_corr OFF). NOT yet wired in the forward; "
-                         "records the intent in meta. Default.")
+                    help="NORC (DEFAULT): res_corr OFF + fix_alpha_res + KS k<=0.045 (Gate-A).")
+    # (res_corr_on default False is set in the ap.set_defaults(...) below with the other run defaults)
     ap.add_argument("--single-member", action="store_true",
                     help="run on final_prod_seed0 only (cheap de-risk; NOT the production object)")
     ap.add_argument("--no-shard-pkl", dest="write_shard_pkl", action="store_false",
@@ -283,11 +289,18 @@ def main():
     ctx, d = build_legb_ctx(
         use_xclass=True,
         with_mf=a.with_mf, mf_with_floor=a.with_mf,
+        res_corr_on=a.res_corr_on,                    # NORC default False (Gate-A): drop res_corr + cap KS
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         mf_emucoh_npz=_emucoh_npz,                    # None → default table; LOWK → the fix (MODE 1)
         mf_shape=_fixed,                              # MODE 2 (LF→HR resolution tilt) ON only when fixed
         with_eboss=_build_eboss, metals_on=_metals_on, sample_metals=_sample_metals,
         hierarchical_hcd=False, **_build_kw)
+    if not a.res_corr_on:
+        ctx = ctx._replace(fix_alpha_res=True)        # NORC also pins the 2 alpha_res sites (now inert)
+    assert ctx.res_corr_on == a.res_corr_on, "res_corr_on did not propagate to the ctx"
+    assert ctx.fix_alpha_res == (not a.res_corr_on), "fix_alpha_res inconsistent with NORC state"
+    print(f"[NORC] res_corr_on={ctx.res_corr_on} fix_alpha_res={ctx.fix_alpha_res} "
+          f"KS_kmax={'0.045' if not a.res_corr_on else '0.069'}")
     if a.leg != "all":
         _pre = [l.name for l in ctx.legs]
         ctx = ctx._replace(legs=[l for l in ctx.legs if l.name.upper().startswith(a.leg.upper())])
@@ -357,7 +370,7 @@ def main():
     print(f"[shard {a.shard}/{a.n_shards}] mocks={idxs}  members={n_members}  fold={_fold_s}  "
           f"legs={[l.name for l in ctx.legs]}  n_z={n_z}  mf={a.with_mf} eboss={a.with_eboss}  "
           f"cemu_variant={variant} leg_a={a.leg_a}(held_out={not a.leg_a})  "
-          f"res_corr_on={a.res_corr_on}(flag-not-wired; default-forward) "
+          f"res_corr_on={a.res_corr_on}(NORC={not a.res_corr_on}: res_corr off/fix_alpha_res/KS0.045) "
           f"(warmup={a.n_warmup} samples={a.n_samples} mtd={a.max_tree_depth})")
 
     # PER-MOCK loop: one mock at a time, checkpoint + skip after each (bounds RSS, ≤1 mock lost
@@ -375,9 +388,12 @@ def main():
                    tau0_prior_sigma=float(_tau0_prior_sig),   # informative-τ₀ discriminator (2026-06-21):
                                       # an informative-prior pkl must never load into a uniform run (or
                                       # vice versa) — distinct SBC population.
-                   subdla_truth_boost=float(_subdla_truth_boost))   # subDLA-displacement discriminator
+                   subdla_truth_boost=float(_subdla_truth_boost),   # subDLA-displacement discriminator
                                       # (2026-06-21): a displaced-truth pkl must never load into an
                                       # un-displaced run (different mock truth).
+                   res_corr_on=bool(a.res_corr_on))   # NORC discriminator (2026-07-04): a NORC pkl
+                                      # (res_corr OFF + fix_alpha_res + KS 0.045) must NEVER pool with a
+                                      # pre-NORC anchored+alpha pkl -- ranks don't transfer across forwards.
     records = []
     for m in idxs:
         rec = _run_mock(ctx, d, m, a.out_dir, n_mocks=a.n_mocks, n_warmup=a.n_warmup,

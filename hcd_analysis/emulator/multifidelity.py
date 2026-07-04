@@ -589,11 +589,12 @@ class MultiFidelity(eqx.Module):
     n_tail: int = eqx.field(static=True)
     delta_mode: str = eqx.field(static=True)
     anchor_mult: float = eqx.field(static=True)
+    res_corr_on: bool = eqx.field(static=True)   # NORC (Gate-A): False -> res_corr()==ones
     lf_norm: object = eqx.field(static=True)
 
     def __init__(self, lf_model, lf_norm, eval_logk, lf_logk, delta_head, basis,
                  log_rho, z_rc, logk_rc, rc_vals, n_tail=6, delta_mode="none",
-                 anchor_mult=5.0):
+                 anchor_mult=5.0, res_corr_on=True):
         self.lf_model = lf_model
         # lf_norm is a STATIC field: a fixed host-side constant (the LF backbone's
         # P_filt/channel norm dict), read via jnp.asarray in the forward and never
@@ -620,6 +621,11 @@ class MultiFidelity(eqx.Module):
         # res_corr low-k anchor multiple (anchor_mult * kbox(z)); 5.0 = production
         # default (byte-identical), 0.0 = NO anchor (raw clamped table — diagnostic).
         self.anchor_mult = float(anchor_mult)
+        # NORC (Gate-A): res_corr_on=False makes res_corr() return ones, dropping the
+        # particle-convergence correction ENTIRELY for BOTH the likelihood and the
+        # self-draw truth (they share the res_corr chokepoint, so the drop stays
+        # self-consistent). Default True = production (byte-identical). Static bool.
+        self.res_corr_on = bool(res_corr_on)
 
     # -- pieces -------------------------------------------------------------- #
     def lf_logP(self, x, tau0):
@@ -643,8 +649,14 @@ class MultiFidelity(eqx.Module):
 
         Uses ``self.anchor_mult`` (default 5.0 = production anchor; 0.0 = raw
         clamped table, the no-anchor diagnostic). The kwarg is a STATIC python
-        scalar so the anchor branch is traced-value-free / jittable."""
+        scalar so the anchor branch is traced-value-free / jittable.
+
+        NORC (Gate-A): ``self.res_corr_on=False`` returns ones (K_eval,) so the
+        correction is DROPPED entirely -- this is the single chokepoint BOTH the
+        likelihood and the self-draw truth reach, so the drop is self-consistent."""
         k_eval = jnp.power(10.0, self.eval_logk)
+        if not self.res_corr_on:
+            return jnp.ones_like(k_eval)
         return interp_res_corr(self.z_rc, self.logk_rc, self.rc_vals, z, k_eval,
                                anchor_mult=self.anchor_mult)
 
@@ -1300,7 +1312,7 @@ _HEAD_MODE = {"FixedMeanHead": "none", "GlobalLinearHead": "linear",
 
 def build_multifidelity(lf_model, lf_norm, lf_logk, delta_head, *, eval_logk,
                         log_rho=None, n_basis=4, res_dir=RES_CORR_DIR, n_tail=6,
-                        delta_mode=None, anchor_mult=5.0):
+                        delta_mode=None, anchor_mult=5.0, res_corr_on=True):
     """Assemble a ``MultiFidelity`` from a frozen LF backbone + a head.
 
     ``delta_head`` is one of ``FixedMeanHead`` (default 'none'), ``GlobalLinearHead``
@@ -1320,4 +1332,4 @@ def build_multifidelity(lf_model, lf_norm, lf_logk, delta_head, *, eval_logk,
         lf_model=lf_model, lf_norm=lf_norm, eval_logk=eval_logk, lf_logk=lf_logk,
         delta_head=delta_head, basis=basis, log_rho=log_rho,
         z_rc=z_rc, logk_rc=logk_rc, rc_vals=rc_vals, n_tail=n_tail,
-        delta_mode=delta_mode, anchor_mult=anchor_mult)
+        delta_mode=delta_mode, anchor_mult=anchor_mult, res_corr_on=res_corr_on)

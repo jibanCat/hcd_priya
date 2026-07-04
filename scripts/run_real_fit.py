@@ -103,6 +103,15 @@ def _packed_to_physical(draws, names):
     return out
 
 
+# Gate-A NORC (2026-07-04): the deployed production forward DROPS the res_corr particle-convergence
+# correction (res_corr_on=False), PINS alpha_res (fix_alpha_res=True), and caps KS at k<=0.045 (auto
+# in build_legb_ctx on the res_corr_on=False path). Rationale: the 2026-06-16 NUTS result showed the
+# anchored+alpha config AMPLIFIES the native n_s bias ~4x. This constant is the SINGLE reversal knob
+# for the 4-referee panel: flip to False to restore the pre-NORC forward. Gated by the panel + the
+# freeze + PI sign-off before any unblind.
+NORC = True
+
+
 def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=None):
     """The PRODUCTION ctx for a real-data fit, then RESTRICTED to the requested survey's leg.
 
@@ -127,6 +136,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     ctx, d = build_legb_ctx(
         ensemble_ckpts=ens, use_xclass=True,
         with_mf=True, mf_with_floor=True,
+        res_corr_on=(not NORC),           # NORC: drop res_corr (+ auto-cap KS k<=0.045 in build_legb_ctx)
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         with_eboss=(survey == "eboss"),
         ks_kwargs=ks_kw,                  # threads z_lo into load_ks_leg (default None → z_lo=2.4 baseline)
@@ -134,6 +144,12 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
         sample_metals=metals,             # samples the shared a_SiIII nuisance (Uniform[0, a_max])
         survey=info["leg"],               # PER-SURVEY LLS pin: DESI 1.0×/σ0.30, KS 2.5×/σ0.40 (eBOSS→cosmic-avg)
         hierarchical_hcd=False)           # the referee production baseline (per-class HCD)
+    if NORC:
+        ctx = ctx._replace(fix_alpha_res=True)   # NORC: also drop the 2 alpha_res sites (now inert)
+        assert ctx.res_corr_on is False and ctx.fix_alpha_res is True, "NORC ctx not applied"
+        _ksleg = [l for l in ctx.legs if l.name == "KS"]   # KS-cap parity assert (referee M2)
+        assert (not _ksleg) or float(np.asarray(_ksleg[0].k).max()) <= 0.045 + 1e-9, \
+            "NORC KS k_max cap (0.045) not applied"
 
     # RESTRICT to the requested survey's leg (the real measurement for THIS survey only). The
     # per-leg C_emu / MF-floor / emucoh dicts are keyed by leg name, so dropping other legs leaves
