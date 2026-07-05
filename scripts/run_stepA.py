@@ -539,6 +539,11 @@ def build_config(verbose=False):
         for _f, _ns in _RCINJ_POINTS:
             _base = dict(survey=_survey, mf=True, prior_center="truth",
                          sample_metals=(_survey in ("DESI", "eBOSS")), inject_a_siiii=0.0,
+                         # match the DEPLOYED production C_emu: the 60-sim LF-emu k-coherent (78% rank-1)
+                         # correlated term, off-diagonal only. Production fires it on DESI+KS (eBOSS sits
+                         # below the emucoh band k>=0.01), so keep eBOSS emucoh OFF as production does.
+                         mf_emucoh=(1.0 if _survey in ("DESI", "KS") else 0.0),
+                         mf_emucoh_offdiag_only=True,
                          res_corr_on=False, n_chains=_RCINJ_NCHAINS)
             _t = int(round(_ns * 1000))
             for _sd in _RCINJ_SEEDS:
