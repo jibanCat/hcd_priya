@@ -144,7 +144,7 @@ def build_config(verbose=False):
                      inject_a_siiii=0.0, inject_res_corr=None, subdla_center_shift=0.0,
                      hierarchical_hcd=False, hcd_ratio_infl=1.0, hcd_center_shift=0.0,
                      hcd_2d_tilt=False, z_slope_marginalized=False, zslope_realfit=False,
-                     res_corr_on=True, seed=0):
+                     res_corr_on=True, sample_res=False, f_res_amp_sigma=None, seed=0):
         # ``seed`` (default 0 = back-compat for every legacy battery) sets the PRNGKey root, hence the
         # MOCK-NOISE key k_mock = split(fold_in(PRNGKey(seed), mock_index)) in run_one_chain. Distinct
         # seeds at the SAME (survey, sim, fold) therefore give INDEPENDENT cosmic-noise realizations —
@@ -170,6 +170,7 @@ def build_config(verbose=False):
                 hierarchical_hcd=bool(hierarchical_hcd), hcd_ratio_infl=float(hcd_ratio_infl),
                 hcd_center_shift=float(hcd_center_shift), hcd_2d_tilt=bool(hcd_2d_tilt),
                 zslope_realfit=bool(zslope_realfit), res_corr_on=bool(res_corr_on),
+                sample_res=bool(sample_res), f_res_amp_sigma=f_res_amp_sigma,
                 chain_id=c, n_chains=n_chains, seed=int(seed)))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -535,10 +536,19 @@ def build_config(verbose=False):
     _RCINJ_SEEDS = tuple(range(8)); _RCINJ_NCHAINS = 2
     _rc_primary = dict(actual_res_corr=True)     # expanded to the per-leg log(res_corr) b-vector
     _RCINJ_POINTS = ((4, 0.92), (6, 0.966))      # interior sims, avoid the fold0 n_s wall
+    # OPTION-1 (RCINJ_FRES=1): FLOAT f_res (option-b) so the DEPLOYED resolution marginalization absorbs the
+    # injected res_corr. DESI/eBOSS ONLY (KS resolution_ready=False -- its proxy R_z is 7-15x too large; f_res
+    # stays OFF on KS until the echelle R_z lands). f_res arms get a distinct 'F' tag (no ckpt collision with
+    # the conservative no-f_res arms).
+    _RCINJ_FRES = os.environ.get("RCINJ_FRES", "0") == "1"
+    _FRES_SIGMA = {"DESI": 0.02, "eBOSS": 0.05}   # per-leg option-b prior width
     for _survey, _tag in (("DESI", "D"), ("KS", "K"), ("eBOSS", "E")):
+        _fres = _RCINJ_FRES and _survey in ("DESI", "eBOSS")
+        _tagf = _tag + ("F" if _fres else "")
         for _f, _ns in _RCINJ_POINTS:
             _base = dict(survey=_survey, mf=True, prior_center="truth",
                          sample_metals=(_survey in ("DESI", "eBOSS")), inject_a_siiii=0.0,
+                         sample_res=_fres, f_res_amp_sigma=(_FRES_SIGMA[_survey] if _fres else None),
                          # match the DEPLOYED production C_emu: the 60-sim LF-emu off-diagonal k-coherent
                          # term (mf_emucoh; top-15 ~96.8% of trace). NB the "78% rank-1" is the SEPARATE
                          # MFShape LF->HR resolution-residual term (mf_shape), OFF in the deployed "current"
@@ -550,8 +560,8 @@ def build_config(verbose=False):
             _t = int(round(_ns * 1000))
             for _sd in _RCINJ_SEEDS:
                 # clean & injected SHARE _sd (→ shared base truth + noise; differ only by exp(b)).
-                add_fiducial(f"RCINJ{_tag}_clean{_t}s{_sd}", _f, _ns, seed=_sd, **_base)
-                add_fiducial(f"RCINJ{_tag}_inj{_t}s{_sd}",   _f, _ns, seed=_sd,
+                add_fiducial(f"RCINJ{_tagf}_clean{_t}s{_sd}", _f, _ns, seed=_sd, **_base)
+                add_fiducial(f"RCINJ{_tagf}_inj{_t}s{_sd}",   _f, _ns, seed=_sd,
                              inject_res_corr=_rc_primary, **_base)
 
     # === Phase-5a SHAPE-FLOOR validation (2026-06-12): the genuine HF-LOSO worst cases re-run
@@ -794,6 +804,8 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         ckpt=chain["ckpt"], with_mf=bool(chain["mf"]),
         mf_fold=fold, mf_with_floor=bool(chain["mf"]),
         res_corr_on=bool(chain.get("res_corr_on", True)),      # NORC (Gate-A): False → drop res_corr + cap KS
+        sample_res=bool(chain.get("sample_res", False)),       # option-b f_res float (DESI/eBOSS; KS R_z-blocked)
+        f_res_amp_sigma=chain.get("f_res_amp_sigma", None),
         mf_exclude_held=bool(chain.get("hr_truth", False)),    # HF-LOSO: MF fit EXCLUDING this HR sim
         # TRUE leave-ONE-out (Task 1.5): drop EXACTLY this HR sim from the MF head fit, not the
         # whole LF fold group (two HR sims can share a group → leave-TWO-out → an inflated bias).

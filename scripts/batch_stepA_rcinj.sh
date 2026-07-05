@@ -27,7 +27,7 @@ set -euo pipefail
 REPO=/home/mfho/hcd_priya
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
 TAG=${TAG:-D}
-export STEPA_CKPT_DIR=$REPO/checkpoints/stepA_norc_rcinj
+export STEPA_CKPT_DIR=${STEPA_CKPT_DIR:-$REPO/checkpoints/stepA_norc_rcinj}
 mkdir -p "$STEPA_CKPT_DIR" "$REPO/logs"
 
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
