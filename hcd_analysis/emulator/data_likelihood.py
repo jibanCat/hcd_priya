@@ -795,13 +795,15 @@ class MFEmuCoh(NamedTuple):
     13 bins) — the within-z coherence persists 0.59–0.79 across all z (incl. He-II reion z≈3–4), so it
     is NOT restricted to low-z; top-m truncated (top-15 ≈ 96.8% of trace).
 
-    NOTE (conservative diagonal): its diagonal is the COHERENT part of the LF-emulator error, a SUBSET
-    of the existing ``emu_var`` (the cross-class ρ diagonal = the FULL per-cell second moment). The
-    assembly adds the emucoh term in full (diagonal + off-diagonal), so on a leg with no separate
-    diagonal floor (DESI, ``mf_floor_on=False``) the coherent diagonal is added ON TOP of ``emu_var``
-    — a small CONSERVATIVE over-count (over-widens ~×1.3 on the clean diagonal, never biases). The
-    n_s-relevant value is the OFF-diagonal. A per-term diagonal allocation (absorb the emucoh diagonal
-    into ``emu_var``, add only its off-diagonal) is a documented next-iteration refinement."""
+    NOTE (diagonal allocation, DEPLOYED): its diagonal is the COHERENT part of the LF-emulator error, a
+    SUBSET of the existing ``emu_var`` (the cross-class ρ diagonal = the FULL per-cell second moment).
+    PRODUCTION sets ``mf_emucoh_offdiag_only=True`` (run_real_fit / run_prod_sbc): the per-term diagonal
+    allocation absorbs this term's diagonal into ``emu_var`` via MAX (counted ONCE, never under-count)
+    and adds ONLY its off-diagonal — so there is NO diagonal double-count with the base ``emu_var``
+    (assembly at data_likelihood.py:1130-1138). The n_s-relevant value is the OFF-diagonal. Only with
+    ``offdiag_only=False`` (the class DEFAULT, NOT the deployed path) is the term added in full: the
+    coherent diagonal then lands ON TOP of ``emu_var`` — a small CONSERVATIVE over-count (over-widens
+    ~×1.3 on the clean diagonal, never biases)."""
     z: np.ndarray
     k: np.ndarray
     f_shape: np.ndarray
