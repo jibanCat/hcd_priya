@@ -539,8 +539,10 @@ def build_config(verbose=False):
         for _f, _ns in _RCINJ_POINTS:
             _base = dict(survey=_survey, mf=True, prior_center="truth",
                          sample_metals=(_survey in ("DESI", "eBOSS")), inject_a_siiii=0.0,
-                         # match the DEPLOYED production C_emu: the 60-sim LF-emu k-coherent (78% rank-1)
-                         # correlated term, off-diagonal only. Production fires it on DESI+KS (eBOSS sits
+                         # match the DEPLOYED production C_emu: the 60-sim LF-emu off-diagonal k-coherent
+                         # term (mf_emucoh; top-15 ~96.8% of trace). NB the "78% rank-1" is the SEPARATE
+                         # MFShape LF->HR resolution-residual term (mf_shape), OFF in the deployed "current"
+                         # variant -- do not conflate. Production fires mf_emucoh on DESI+KS (eBOSS sits
                          # below the emucoh band k>=0.01), so keep eBOSS emucoh OFF as production does.
                          mf_emucoh=(1.0 if _survey in ("DESI", "KS") else 0.0),
                          mf_emucoh_offdiag_only=True,
