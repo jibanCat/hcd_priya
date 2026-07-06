@@ -34,7 +34,8 @@ export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_TH
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=false --xla_force_host_platform_device_count=1"
 export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 NCPU=${SLURM_CPUS_PER_TASK:-16}
-WORKERS=$(( NCPU > 2 ? NCPU - 2 : 1 ))     # 2 cores headroom (Cholesky leaks ~1.5 during warmup)
+WORKERS=${WORKERS:-$(( NCPU > 2 ? NCPU - 2 : 1 ))}   # WORKERS env override (else NCPU-2). Cap concurrency to
+                                                     # avoid the DESI OOM: fewer workers => more GB/chain.
 
 echo "=== RCINJ leg TAG=$TAG  workers=$WORKERS  ckptdir=$STEPA_CKPT_DIR  start: $(date) ==="
 "$PY" scripts/run_stepA.py --run --only "RCINJ${TAG}" --workers "$WORKERS"

@@ -28,7 +28,9 @@ FIGDIR = "/home/mfho/hcd_priya/figures/analysis/05_likelihood"
 
 
 def _truth_alpha_zresolved_on_leg(truth, leg):
-    """The Z-RESOLVED truth incidence α(z) (n_z,3) on a leg's z-bins — the per-z sim w_c (rises
+    """THE SANCTIONED comparison-alpha builder (use THIS, or ``alpha_pivot[None,:]*shape_zg``, in ANY
+    forward-vs-truth comparison: C_emu sizing, residual, loglik. NEVER hand-build alpha from a z-median /
+    z-flat w_c). The Z-RESOLVED truth incidence α(z) (n_z,3) on a leg's z-bins, the per-z sim w_c (rises
     ~3.5× over z), NOT the z-flat z-median ``truth['w_c']`` the figure used to pass (which the
     binding silently broadcasts → a SPURIOUS z-ramp in P_emu vs the z-resolved P_truth). EXACTLY
     the "EXACT per-z w_c(z)" arm of scripts/diag_legb_zresolved_alpha_check.py (the reference that
@@ -60,7 +62,8 @@ def _emu_var_for_leg(ctx, leg, theta9, tau0_vec, alpha_hcd, core, *, use_xclass)
     _, C_total = DL.predict_P_obs_on_leg(
         ctx.model, theta9, tau0_vec, alpha_hcd, pf_stats=ctx.pf_stats, dla_core=core,
         cache_k=ctx.cache_k, leg=leg, sigma_zb=(None if rzb is not None else szb),
-        alpha_centres=ctx.alpha_centres, cemu_inflate=ctx.cemu_inflate, rho_zb=rzb)
+        alpha_centres=ctx.alpha_centres, cemu_inflate=ctx.cemu_inflate, rho_zb=rzb,
+        require_zresolved=True)   # C_emu sizing scores vs a z-RESOLVED truth: a z-flat alpha here is the bug
     return np.diag(np.asarray(C_total)) - np.diag(np.asarray(leg.C_data))
 
 
@@ -151,7 +154,8 @@ def fig_mock_example(ctx, d, figdir=FIGDIR, seed=0):
             ctx.model, jnp.asarray(truth["params_unit"]), tau0_vec,
             _truth_alpha_zresolved_on_leg(truth, leg),       # Z-RESOLVED truth α(z) (was z-flat w_c)
             pf_stats=ctx.pf_stats, dla_core=core[leg.name],
-            cache_k=ctx.cache_k, leg=leg, sigma_zb=None, alpha_centres=None)
+            cache_k=ctx.cache_k, leg=leg, sigma_zb=None, alpha_centres=None,
+            require_zresolved=True)                          # never a z-flat alpha vs the z-resolved truth
         P_emu = np.asarray(P_emu)
         P_truth = np.zeros(leg.k.shape[0])
         for iz in range(leg.n_z):

@@ -37,7 +37,7 @@ def main():
     truth = make_hr_truth_from_cache(sim972, ctx.cache_k, tau0_anchor="priya")
     mock_legs, tp, _ = make_legb_mock(ctx, truth, jax.random.PRNGKey(0))
     core = _mock_core_per_leg(ctx, truth)["DESI"]
-    th, t0g, al = tp["theta9"], tp["tau0_global"], tp["alpha_hcd"]
+    th, t0g, al = tp["theta9"], tp["tau0_global"], tp["alpha_hcd_z"]   # z-RESOLVED (was z-flat pivot)
     zg = np.asarray(ctx.z_global)
     sel = np.array([int(np.argmin(np.abs(zg - zz))) for zz in leg.z])
     tau0_vec = t0g[np.asarray(sel)]

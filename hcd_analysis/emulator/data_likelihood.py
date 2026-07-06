@@ -951,31 +951,42 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     On the f-node (Model C+) path the SiIII–SiII metal-metal CROSS term is ON (``cross=True``); it is
     ∝ a_SiII so it auto-vanishes on SiIII-only legs.
 
-    ``require_zresolved`` (opt-in, default False → byte-identical): when True, ASSERT
-    ``alpha_hcd`` is z-RESOLVED (ndim==2, (n_z,3)) — a (3,) z-flat alpha raises. The DEPLOYED
-    ``_legb_model`` + the SBC re-scoring (``_loglik_of_draws``/``ll_true``) set this so a future
-    z-flat regression on a load-bearing path fails LOUDLY instead of producing a quiet
-    z-structured residual (the recurring z-flat-alpha bug class). Default False keeps the legacy
-    (3,)-broadcast back-compat for the diagnostic/figure callers that pass it intentionally."""
+    ``alpha_hcd`` is ``(n_z,3)`` z-RESOLVED per-z incidence (the DEPLOYED forward) or a ``(3,)`` z-flat
+    triple broadcast to all z. A z-flat alpha on a MULTI-z leg, COMPARED to a z-resolved truth, fakes a
+    spurious z-ramp -- the recurring z-flat bug that once faked a +5.5 sigma n_s. So any COMPARISON path
+    (loglik / C_emu sizing / residual diagnostics) MUST build alpha via
+    ``closure_legb_figs._truth_alpha_zresolved_on_leg`` and pass ``require_zresolved=True``; the comparison
+    core ``_data_loglik_legcore`` DEFAULTS ``require_zresolved=True`` so the loglik / SBC re-scoring layer is
+    safe-by-default. The raw forward stays permissive so byte-identity uniform-alpha references pass."""
     cache_k = jnp.asarray(cache_k)
     k_leg = jnp.asarray(leg.k)
     z_idx = np.asarray(leg.z_idx)
     R_z = jnp.asarray(leg.R_z)
     tau0_vec = jnp.asarray(tau0_vec)
-    alpha_hcd = jnp.asarray(alpha_hcd)   # (3,) broadcast to all z, OR (n_z,3) per-z incidence
-    # GUARD (opt-in, default OFF → byte-identical back-compat): a (3,) z-FLAT alpha is silently
-    # broadcast to every z below (alpha_hcd.ndim==1 → the same incidence at all z). That is a
-    # recurring bug-class in the NON-deployed re-scoring paths (SBC loglik-rank, the walkthrough
-    # figure): the mock TRUTH is z-RESOLVED (per-z w_c rises ~3.5× over z) but a z-flat forward
-    # predicts a spurious z-ramp. The DEPLOYED _legb_model + real-fit pass the z-resolved
-    # alpha_hcd_z (n_z,3); they set require_zresolved=True so any future z-flat regression on the
-    # load-bearing paths fails LOUDLY here instead of producing quiet z-structured residuals.
-    if require_zresolved:
-        assert alpha_hcd.ndim == 2, (
-            f"predict_P_obs_on_leg(require_zresolved=True): alpha_hcd must be z-RESOLVED "
-            f"(n_z,3), got ndim={alpha_hcd.ndim} shape={tuple(alpha_hcd.shape)}. A (3,) z-flat "
-            f"alpha would be silently broadcast to all z and produce a spurious z-ramp vs the "
-            f"z-resolved truth (closure_legb._loglik_of_draws/ll_true regression).")
+    alpha_hcd = jnp.asarray(alpha_hcd)   # (n_z,3) z-RESOLVED per-z incidence (the DEPLOYED forward), OR
+    #                                      (3,) z-flat broadcast to all z (byte-identity references only).
+    # ===================== z-FLAT-ALPHA BUG CLASS (read before writing a diagnostic) =====================
+    # A (3,) z-FLAT alpha is SILENTLY broadcast to EVERY z (ndim==1 -> the same incidence at all z). On a
+    # MULTI-z leg, comparing that z-flat forward to a z-RESOLVED truth (per-z HCD incidence w_c rises ~3.5x
+    # over z) manufactures a spurious z-ramp -- it once faked a PHANTOM +5.5 sigma n_s (a z-flat C_emu /
+    # walkthrough DIAGNOSTIC vs the deployed z-resolved forward; the real bias was +0.6 sigma). The raw
+    # forward STAYS permissive (byte-identity uniform-alpha references legitimately pass a (3,) alpha). The
+    # RULE that keeps the bug dead lives one level up: EVERY code path that COMPARES this forward to a
+    # z-resolved truth (loglik / C_emu sizing / residual diagnostics) MUST
+    #   (a) build alpha via closure_legb_figs._truth_alpha_zresolved_on_leg  -- the ONLY sanctioned
+    #       comparison-alpha builder (never hand-build alpha from a z-median w_c), AND
+    #   (b) pass require_zresolved=True (the comparison core _data_loglik_legcore DEFAULTS it True, so the
+    #       loglik / SBC re-scoring layer is SAFE-BY-DEFAULT: a z-flat alpha there RAISES, not broadcasts).
+    # See [[feedback-diagnostic-deployment-consistency]].
+    if require_zresolved and alpha_hcd.ndim != 2:
+        # explicit raise (NOT assert): this guard is load-bearing now that the comparison core
+        # _data_loglik_legcore defaults require_zresolved=True, so it must survive `python -O`
+        # (which strips asserts and would silently reopen the z-flat broadcast on the loglik path).
+        raise ValueError(
+            f"predict_P_obs_on_leg(require_zresolved=True): alpha_hcd must be z-RESOLVED (n_z,3), got "
+            f"ndim={alpha_hcd.ndim} shape={tuple(alpha_hcd.shape)}. A (3,) z-flat alpha would be broadcast "
+            f"to every z and produce a spurious z-ramp vs the z-resolved truth (the recurring z-flat bug; "
+            f"once a phantom +5.5 sigma n_s). Build alpha via _truth_alpha_zresolved_on_leg.")
     # PER-LEG DLA-forward scaling (§0c): the sampled α_DLA's DLA-excess contribution is scaled by
     # leg.dla_forward_frac (DESI 1.0 → full residual; KS 0.0 → the forward DLA term is 0, matching
     # the 0% KS closure target). We fold the per-leg fraction into the DLA component of α so BOTH

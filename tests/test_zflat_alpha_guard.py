@@ -12,7 +12,10 @@ These tests are CACHE-FREE (a small random-init Emulator + a synthetic 2-z DataL
   1. a z-flat (3,) alpha gives a DIFFERENT P than the z-resolved (n_z,3) alpha whose per-z rows
      are NOT all equal — i.e. the silent broadcast is observable (so a regression is detectable);
   2. ``require_zresolved=True`` RAISES on a (3,) z-flat alpha and PASSES on a (n_z,3) alpha;
-  3. the same guard fires through ``_data_loglik_legcore(require_zresolved=True)``.
+  3. SAFE-BY-DEFAULT (2026-07-06): the forward-vs-truth COMPARISON core ``_data_loglik_legcore`` now
+     DEFAULTS ``require_zresolved=True`` (a z-flat alpha in a loglik-vs-mock RAISES with NO opt-in),
+     while the RAW forward stays permissive (byte-identity uniform-alpha references pass a (3,) alpha).
+     The bug recurred because the guard was OPT-IN; locking the comparison-core default closes that.
 """
 import re
 
@@ -103,7 +106,8 @@ def test_require_zresolved_raises_on_zflat():
     (so a future z-flat regression on a load-bearing path fails LOUDLY, not silently)."""
     model, pf, dla_core, cache_k, theta9 = _emu()
     leg = _synthetic_leg()
-    with pytest.raises(AssertionError, match=r"z-RESOLVED"):
+    # ValueError (not AssertionError): the guard is an explicit raise so it survives `python -O`.
+    with pytest.raises(ValueError, match=r"z-RESOLVED"):
         DL.predict_P_obs_on_leg(
             model, theta9, jnp.asarray([1.0, 1.0]), _alpha_flat(),
             pf_stats=pf, dla_core=dla_core, cache_k=cache_k, leg=leg,
@@ -125,12 +129,36 @@ def test_require_zresolved_passes_on_zresolved():
     np.testing.assert_array_equal(np.asarray(P_guard), np.asarray(P_noguard))
 
 
-def test_require_zresolved_default_false_is_back_compat():
-    """The default (require_zresolved unset) must accept a (3,) z-flat alpha (byte-identical
-    back-compat for the diagnostic/figure callers that pass it intentionally)."""
+def test_raw_forward_default_stays_permissive():
+    """The RAW forward's default (require_zresolved unset) must accept a (3,) z-flat alpha: byte-identity
+    uniform-alpha references (the MF golden, the emucoh/shape/metal cov tests) legitimately pass a (3,).
+    The lock-down lives on the COMPARISON core, not here (see test_loglik_core_defaults_to_zresolved_guard)."""
     model, pf, dla_core, cache_k, theta9 = _emu()
     leg = _synthetic_leg()
     P, _ = DL.predict_P_obs_on_leg(
         model, theta9, jnp.asarray([1.0, 1.0]), _alpha_flat(),
         pf_stats=pf, dla_core=dla_core, cache_k=cache_k, leg=leg)   # no require_zresolved
     assert np.isfinite(np.asarray(P)).all()
+
+
+# ----------------------------------------------------------------------------- #
+#  (5) SAFE-BY-DEFAULT: the COMPARISON core _data_loglik_legcore DEFAULTS require_zresolved=True
+#      (2026-07-06). This is the NON-OPTIONAL guard. The bug recurred precisely because the guard
+#      was OPT-IN: a new diagnostic that computed a loglik/MAP against a z-resolved mock forgot to
+#      opt in and got a silent z-flat broadcast. Locking the comparison-core default closes that.
+# ----------------------------------------------------------------------------- #
+def test_loglik_core_defaults_to_zresolved_guard():
+    """The forward-vs-truth COMPARISON core must DEFAULT to the z-resolved guard (require_zresolved is
+    True by default); the RAW forward stays permissive (default False). A future revert of EITHER default
+    silently reopens the z-flat bug, so pin BOTH. (A signature pin, not a full-ctx run: it directly guards
+    the design decision and is cache-free.)"""
+    import inspect
+    from hcd_analysis.emulator import closure_legb as C
+    core_def = inspect.signature(C._data_loglik_legcore).parameters["require_zresolved"].default
+    fwd_def = inspect.signature(DL.predict_P_obs_on_leg).parameters["require_zresolved"].default
+    assert core_def is True, (
+        "_data_loglik_legcore must DEFAULT require_zresolved=True (safe-by-default comparison core): got "
+        f"{core_def!r}. Reverting it to False reopens the z-flat-alpha bug for any new loglik diagnostic.")
+    assert fwd_def is False, (
+        "predict_P_obs_on_leg must stay permissive by default (byte-identity uniform-alpha references pass "
+        f"a (3,) alpha); got {fwd_def!r}. The lock-down belongs on the comparison core, not the raw forward.")

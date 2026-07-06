@@ -451,6 +451,25 @@ def test_2d_nuts_zero_divergences_and_finite():
         assert np.all(np.isfinite(np.asarray(samples[nm]))), f"{nm} not finite"
 
 
+def test_loglik_core_raises_on_zflat_by_default():
+    """BEHAVIORAL guard (closes the forwarding gap the signature-pin in test_zflat_alpha_guard cannot):
+    the forward-vs-truth COMPARISON core ``_data_loglik_legcore`` with a (3,) z-FLAT alpha and NO explicit
+    kwarg must RAISE -- its default ``require_zresolved=True`` must forward through to
+    ``predict_P_obs_on_leg``. A (n_zg,3) z-RESOLVED alpha must PASS. This catches a refactor that stops
+    forwarding the flag or hard-codes it off (the exact recurrence mode of the z-flat bug)."""
+    from hcd_analysis.emulator.meanflux_prior import becker13_tau0
+    ctx, d = _build_small()
+    mock_legs, core, _, tp = _mock(ctx, d)
+    tau0 = becker13_tau0(jnp.asarray(ctx.z_global))
+    th = jnp.full(9, 0.5)
+    alpha_flat = jnp.asarray(tp["alpha_hcd"])           # (3,) z-flat pivot
+    alpha_zres = jnp.asarray(tp["alpha_hcd_z"])         # (n_zg,3) z-resolved
+    with pytest.raises(ValueError, match=r"z-RESOLVED"):
+        C._data_loglik_legcore(ctx, th, tau0, alpha_flat, mock_legs, core)   # no kwarg -> default True -> RAISE
+    ll = C._data_loglik_legcore(ctx, th, tau0, alpha_zres, mock_legs, core)  # z-resolved -> passes
+    assert np.isfinite(float(ll))
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-q", "-m", "not slow"]))

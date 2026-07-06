@@ -1546,7 +1546,7 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
 # ============================================================================ #
 def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs,
                          dla_core_per_leg, *, return_parts=False, a_siiii=0.0, a_siii=0.0,
-                         metal_nodes=None, alpha_res=None, b_res_global=None, require_zresolved=False):
+                         metal_nodes=None, alpha_res=None, b_res_global=None, require_zresolved=True):
     """``data_loglik`` but with a PER-LEG-Z dla_core (the mock's sim core). ``data_loglik``
     takes ONE (K,) core; here each leg z uses its own, so we call ``predict_P_obs_on_leg``
     per leg with that leg's core threaded through a per-z loop is overkill — instead we note
@@ -1569,10 +1569,16 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
     forward). ``None`` (default) ⇒ α≡1 ⇒ byte-exact back-compat. The TRUTH path never sets it
     (α≡1 there) so the nuisance does NOT cancel in the closure.
 
-    ``require_zresolved`` (default False → back-compat) forwards to ``predict_P_obs_on_leg``'s
-    guard: when True ASSERT ``alpha_hcd`` is z-RESOLVED ((n_zg,3), so the per-leg slice is (n_z,3))
-    — a (3,) z-flat alpha raises. The DEPLOYED ``_legb_model`` + the SBC re-scoring paths
-    (``_loglik_of_draws``/``ll_true``) pass True so any future z-flat regression fails LOUDLY."""
+    ``require_zresolved`` (default **True** = SAFE-BY-DEFAULT, 2026-07-06): this comparison core scores
+    a loglik of the forward against the (z-RESOLVED) mock, so a (3,) z-FLAT alpha here is ALWAYS the
+    recurring z-flat bug (it broadcasts to every z and fakes a spurious z-ramp vs the z-resolved truth;
+    once a phantom +5.5 sigma n_s). It therefore ASSERTS ``alpha_hcd`` is z-RESOLVED ((n_zg,3)) BY
+    DEFAULT and RAISES on a z-flat (3,). Build alpha z-resolved (``alpha_pivot[None,:]*shape_zg``, or
+    ``closure_legb_figs._truth_alpha_zresolved_on_leg`` for a truth-pack). Pass ``require_zresolved=False``
+    ONLY for a genuine self-consistent z-flat use (the deployed forward + the re-scoring paths are all
+    z-resolved, so none needs it). Making this NON-OPTIONAL is the fix: the old opt-in default let the
+    bug recur (a new diagnostic forgot to opt in). The raw ``predict_P_obs_on_leg`` stays permissive so
+    byte-identity uniform-alpha references pass; it is only the COMPARISON core that is locked down."""
     total = 0.0
     parts = {}
     from .likelihood import gaussian_loglik
