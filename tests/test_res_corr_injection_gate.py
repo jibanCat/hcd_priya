@@ -197,6 +197,36 @@ def test_threshold_sense_strict_less_than():
     assert gate(clean2, inj2, sigma_ref)["passed"] is False
 
 
+# --------------------------------------------------------------------------------------------- #
+#  (f) F-TAG GLOB regression: the f_res (option-b) arms are named RCINJDF_/RCINJEF_ (run_stepA.py:547,
+#  the trailing 'F'). The committed bare-tag glob RCINJ{D,K,E}_* is anchored on the '_' so it CANNOT
+#  match 'DF'/'EF' -- before the fix, analyze --ckpt-dir <fres dir> returned 0 pairs and printed
+#  '(pending)' on completed f_res runs. Pin that the 'DF' tag override reads exactly the f_res arms
+#  and the bare tag reads exactly the non-f_res arms (disjoint, no cross-contamination in one dir).
+# --------------------------------------------------------------------------------------------- #
+def _load_module():
+    spec = importlib.util.spec_from_file_location("analyze_res_corr_injection", _SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_fres_ftag_glob_reads_f_arms_not_bare(tmp_path):
+    mod = _load_module()
+    d = str(tmp_path)
+    for stem in ("RCINJD_clean972", "RCINJD_inj972"):        # bare-D (no f_res) arm, 2 chains
+        for c in (0, 1):
+            open(os.path.join(d, f"{stem}_c{c}.npz"), "w").close()
+    for stem in ("RCINJDF_clean920", "RCINJDF_inj920"):      # f_res 'DF' arm, 2 chains
+        for c in (0, 1):
+            open(os.path.join(d, f"{stem}_c{c}.npz"), "w").close()
+    bare = mod._mock_ids_for_survey("DESI", d)               # default tag 'D' -> non-fres only
+    assert set(bare) == {"RCINJD_clean972", "RCINJD_inj972"}
+    fres = mod._mock_ids_for_survey("DESI", d, tag="DF")     # 'DF' -> f_res only (was {} before fix)
+    assert set(fres) == {"RCINJDF_clean920", "RCINJDF_inj920"}
+    assert not (set(bare) & set(fres))                       # disjoint globs, no cross-contamination
+
+
 if __name__ == "__main__":
     # Allow a quick `python tests/test_res_corr_injection_gate.py` smoke run.
     for fn in (test_clean_pairs_stat_zero_and_pass, test_biased_pairs_exceed_threshold_and_fail,

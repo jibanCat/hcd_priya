@@ -190,11 +190,16 @@ def _pool_mock(paths):
     return rec
 
 
-def _mock_ids_for_survey(survey, ckpt_dir):
+def _mock_ids_for_survey(survey, ckpt_dir, tag=None):
     """All RCINJ mock-id stems for a survey (clean + injected), grouped from the checkpoint dir.
     A mock-id = the filename stem minus the `_c<chain>` suffix; e.g. RCINJD_clean972_c0 -> the mock
-    RCINJD_clean972. Returns {mock_id: [chain_path, ...]} for this survey's tag."""
-    tag = SURVEY_TAG[survey]
+    RCINJD_clean972. Returns {mock_id: [chain_path, ...]} for this survey's tag.
+
+    `tag` overrides the survey->tag map. This is what reads the f_res (option-b) arms, which
+    run_stepA.py:547 names with a trailing 'F' (RCINJDF_/RCINJEF_): the glob RCINJ{tag}_* is
+    anchored on the '_' so a bare 'D'/'E' cannot match 'DF'/'EF'. Pass tag='DF' (via main --fres)."""
+    if tag is None:
+        tag = SURVEY_TAG[survey]
     out = {}
     for p in sorted(glob.glob(f"{ckpt_dir}/RCINJ{tag}_*.npz")):
         base = os.path.basename(p)[:-4]                       # strip .npz
@@ -205,13 +210,14 @@ def _mock_ids_for_survey(survey, ckpt_dir):
     return out
 
 
-def load_pairs(survey, ckpt_dir=CKPT):
+def load_pairs(survey, ckpt_dir=CKPT, tag=None):
     """Load + POSITIONALLY PAIR a survey's RCINJ clean/injected mocks by (sim, fold, seed).
 
     Returns (clean_means, inj_means) dicts keyed by param, plus diagnostics:
       {param: (clean_arr, inj_arr)}, n_pairs, n_div, clean_sd_by_param, unpaired_keys.
-    Each (clean_arr[i], inj_arr[i]) is one paired mock (the clean & injected arm sharing the seed)."""
-    by_id = _mock_ids_for_survey(survey, ckpt_dir)
+    Each (clean_arr[i], inj_arr[i]) is one paired mock (the clean & injected arm sharing the seed).
+    `tag` overrides the survey->tag map to read the f_res 'F'-suffixed arms (see _mock_ids_for_survey)."""
+    by_id = _mock_ids_for_survey(survey, ckpt_dir, tag=tag)
     clean_recs, inj_recs = {}, {}
     n_div = 0
     for mock_id, paths in by_id.items():
@@ -283,17 +289,29 @@ def main():
                     help="deflate the derived sigma_ref by this (NORC pins alpha_res -> default 1.0; "
                          "pass ~1.4 for a non-NORC alpha-free re-analysis)")
     ap.add_argument("--no-fig", action="store_true", help="skip writing the figure")
+    ap.add_argument("--fres", action="store_true",
+                    help="read the f_res (option-b) arms: survey tag gets a trailing 'F' "
+                         "(RCINJDF_/RCINJEF_, run_stepA.py:547). DESI/eBOSS only (KS has no f_res arm: "
+                         "R_z-blocked). Use with --ckpt-dir checkpoints/stepA_norc_rcinj_fres.")
     a = ap.parse_args()
     ckpt_dir = a.ckpt_dir
     explicit = _parse_explicit(a)
     alpha_inflation = float(a.alpha_inflation)
+    fres = bool(a.fres)
+    # f_res arms are DESI/eBOSS only (KS f_res is R_z-blocked, task #12); the 'F' tag suffix reads them.
+    surveys = ("DESI", "eBOSS") if fres else GATE_SURVEYS
 
     print("\n=== NORC res_corr INJECTION-RECOVERY gate — paired clean-vs-injected, per leg ===")
+    if fres:
+        print("    MODE: --fres (option-b f_res FLOATED). Reading the 'F'-tagged arms RCINJ{D,E}F_; DESI/eBOSS only.")
+        print("    NOTE: floating f_res inflates the CLEAN-arm post_sd -> the median(clean_sd) sigma_ref grows -> the")
+        print("    0.3*sigma_ref threshold LOOSENS. Prefer an explicit --sigma-ref-* (fixed f_res-off/Fisher yardstick);")
+        print("    the invariant is the absolute stat |mean Delta| + 2*SE.")
     print("    Delta_i = post_mean(inj_i) - post_mean(clean_i)   (paired -> shared noise cancels)")
     print(f"    GATE: |mean Delta| + 2*SE < {GATE_FRAC:.2f} * sigma_ref   (sigma_ref = reference yardstick)")
     print("    NORC: no alpha_res (pinned). Measures the paired Delta(n_s,A_p) bias from the self-")
     print("    consistent NORC self-draw being BLIND to the res_corr the real universe carries.")
-    print("    PASS on A_p AND n_s for ALL legs (DESI, KS, eBOSS) => the NORC drop is cosmology-safe.")
+    print(f"    PASS on A_p AND n_s for ALL legs ({', '.join(surveys)}) => the NORC drop is cosmology-safe.")
     print("    tau0_mean / tau0_tilt paired shifts are REPORTED (mean flux) but NOT gated.\n")
 
     hdr = (f"  {'survey':<6} {'param':<4} {'N':>3} {'div':>4} "
@@ -305,8 +323,9 @@ def main():
     any_fail = False
     any_present = False
     fig_rows = []                      # (survey, param, stat, thr, passed) for the figure
-    for survey in GATE_SURVEYS:
-        means, n_pairs, n_div, clean_sd, unpaired = load_pairs(survey, ckpt_dir)
+    for survey in surveys:
+        tag = SURVEY_TAG[survey] + ("F" if fres else "")
+        means, n_pairs, n_div, clean_sd, unpaired = load_pairs(survey, ckpt_dir, tag=tag)
         if n_pairs == 0:
             print(f"  {survey:<6} {'--':<4} {'(pending — no paired RCINJ checkpoints yet)'}")
             continue
@@ -348,7 +367,8 @@ def main():
         print("           ACTION: a z-resolved res_corr treatment (or a per-leg res_corr nuisance) is "
               "needed there; re-run the gate.")
     else:
-        print("\n  OVERALL: PASS — A_p & n_s within 0.3*sigma_ref on ALL legs (DESI, KS, eBOSS). The "
+        _legs = ", ".join(surveys)
+        print(f"\n  OVERALL: PASS — A_p & n_s within 0.3*sigma_ref on ALL run legs ({_legs}). The "
               "deployed NORC drop is cosmology-safe: dropping res_corr does not leak into n_s/A_p.")
 
     if not a.no_fig and fig_rows:
