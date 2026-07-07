@@ -214,6 +214,20 @@ def desi_resolution_R(z):
     return C_KMS * DESI_PIXEL_ANGSTROM / ((1.0 + z) * LAMBDA_LYA)
 
 
+# KODIAQ+SQUAD echelle spectral-resolution scale, PINNED to the Gaussian sigma_v of the LSF: for the
+# resolving powers R >= 36000 (KODIAQ) / 40000 (SQUAD), sigma_v = c / (R * 2.3548) ~ 3.2 km/s (FWHM=c/R).
+# This REPLACES the DESI pixel proxy (~49 km/s at z=3, ~15x too large) on the KS f_res path ONLY; the
+# default KS load keeps the proxy (R_z is unused when resolution_on=False). z-independent (echelle R is).
+KS_RESOLUTION_KMS = 3.2
+
+
+def ks_resolution_R(z):
+    """KS spectral-resolution scale R_z, pinned to the KODIAQ+SQUAD echelle sigma_v = 3.2 km/s
+    (z-independent). Used only on the KS f_res (option-b) path; see KS_RESOLUTION_KMS."""
+    z = np.asarray(z)
+    return np.full(np.shape(z), float(KS_RESOLUTION_KMS))
+
+
 # ============================================================================ #
 #  Loaders
 # ============================================================================ #
@@ -287,9 +301,39 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
                          resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp)
 
 
+def _read_ks_resolution_e(detail_path, z_grid, k_grid):
+    """The KS spectral-resolution 1-sigma column ``esyst_res_ks`` aligned to the FULL pre-cut
+    (z_grid, k_grid) that ``_read_ks_p1d`` returns (182 rows). Source = the pipe-delimited
+    ``detailed-p1d-results-karacayli_etal2021.txt`` (14 cols; ``esyst_res_ks`` = index 9). The detailed
+    table is a SUPERSET grid (315 rows: z=1.8 + extra high-k), so a positional read is WRONG -- we merge
+    by an EXACT (z,k) lookup and RAISE on any unmatched conservative row (the alignment tripwire; never a
+    silent mis-map). This is the resolution variance removed from the conservative cov diagonal (diag mode)."""
+    lut = {}
+    with open(detail_path) as f:
+        for ln in f.readlines()[1:]:                          # drop the header row
+            parts = [p.strip() for p in ln.strip().strip("|").split("|")]
+            if len(parts) < 14:
+                continue
+            try:
+                zz, kk, ee = float(parts[0]), float(parts[1]), float(parts[9])
+            except ValueError:
+                continue
+            if zz < 1.9:                                      # drop z=1.8 (not on the conservative grid)
+                continue
+            lut[(round(zz, 3), round(kk, 8))] = ee
+    e = np.empty(len(z_grid), float)
+    for i, (zz, kk) in enumerate(zip(np.asarray(z_grid), np.asarray(k_grid))):
+        key = (round(float(zz), 3), round(float(kk), 8))
+        val = lut.get(key)
+        if val is None or not np.isfinite(val):
+            raise KeyError(f"KS esyst_res_ks: no finite detailed-table row for (z={zz}, k={kk})")
+        e[i] = val
+    return e
+
+
 def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
                 *, z_lo=2.4, z_hi=4.6, k_max=CACHE_KMAX,
-                metals_on=False, resolution_on=False, mf_floor_on=True):
+                metals_on=False, resolution_on=False, mf_floor_on=True, resolution_float=False):
     """Load KODIAQ-SQUAD conservative-mode P1D → a post-cut ``DataLeg``.
 
     Format: pipe-separated ``final-conservative-p1d-karacayli_etal2021.txt`` (z|k|P|e) +
@@ -316,12 +360,22 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
 
     keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k <= k_max + 1e-9)
 
-    # KS has no resolution proxy in this file; reuse the DESI-style proxy as a placeholder
-    # for the (default-OFF) resolution knob.  LYA-CONSULT: KS resolution is OFF by default
-    # (conservative mode already deconvolves + inflates), so R_z is unused unless toggled on.
-    # resolution_ready=False: the DESI proxy R_z is ~7-15x too large for KS's echelle (sigma~3.2 km/s),
-    # so a resolution INJECTION here is un-fittable (the -21sigma collapse). The injection guard reads
-    # this flag; flip it to True when the KS echelle R_z is implemented.
+    # DEFAULT (resolution_float=False): KS has no echelle R_z in this file, so the DESI pixel proxy is a
+    # placeholder for the (OFF) resolution knob (R_z unused when resolution_on=False), and resolution_ready
+    # stays False -- a resolution INJECTION against the ~15x-too-large proxy is un-fittable (the -21sigma
+    # collapse); the injection guard reads this flag. BYTE-IDENTICAL to the historical KS leg.
+    #
+    # resolution_float=True (task #5 V1, option-b): give KS its OWN echelle R_z (ks_resolution_R = 3.2 km/s)
+    # and REMOVE its resolution systematic from the conservative cov via the "diag" mode (diag -= esyst_res_ks^2;
+    # KS adds systematics to the DIAGONAL only), then FLOAT f_res in the forward. resolution_ready -> True.
+    if resolution_float:
+        res_e = _read_ks_resolution_e(base.rstrip("/") + "/detailed-p1d-results-karacayli_etal2021.txt", z, k)
+        return _assemble_leg("KS", z, k, P, cov, keep,
+                             R_func=ks_resolution_R, metals_on=metals_on,
+                             resolution_on=resolution_on, mf_floor_on=mf_floor_on,
+                             dla_forward_frac=KS_DLA_FORWARD_FRAC,
+                             resolution_e=res_e, resolution_float=True, resolution_mode="diag",
+                             resolution_ready=True)
     return _assemble_leg("KS", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
@@ -440,6 +494,14 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
             sig2 = np.diag(C_data)                                   # eBOSS: diag(cov)=sigma^2 (corr diag 1)
             ratio = np.sqrt(np.clip(1.0 - e_res ** 2 / sig2, 0.0, None))   # sigma'/sigma
             C_data = C_data * np.outer(ratio, ratio)
+        elif resolution_mode == "diag":
+            # "diag" (KS): the conservative cov adds each systematic in QUADRATURE to the DIAGONAL only
+            # (Karacayli 2021 Sec 4.6), so REMOVE the resolution variance element-wise from the diagonal;
+            # the off-diagonal (statistical) carries no resolution term. NOT "rescale" (which also scales
+            # the off-diagonal): for KS diag != sum_s e_s^2 (min 0.53 / max 4.09), so a rescale is ill-posed.
+            # esyst_res_ks^2 is subdominant in-band (max ~0.17 of the diag) so C_data stays SPD (Cholesky guard).
+            _di = np.diag_indices_from(C_data)
+            C_data[_di] = C_data[_di] - e_res ** 2
         else:                                                        # "rank1" (DESI): drop the per-z mode
             for i in range(len(z)):
                 rows = np.where(z_idx == i)[0]
