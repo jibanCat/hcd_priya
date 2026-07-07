@@ -75,7 +75,7 @@ LLS_TRUTH_BOOST = {
 }
 
 
-def arm_inject_spec(arm, survey, *, b_res=0.02):
+def arm_inject_spec(arm, survey, *, b_res=0.02, ks_resolution_ready=False):
     """Map (arm, survey) -> the run_legb inject_spec (PURE; no ctx build, unit-testable). ``b_res``
     sets the resolution injection strength (default 0.02 = the realistic DESI ~1-sigma level derived
     from the data's own syst_e_resolution; the option-a certification brackets it +/-1 sigma over
@@ -89,12 +89,12 @@ def arm_inject_spec(arm, survey, *, b_res=0.02):
         form = "eboss" if survey == "eboss" else "desi_full"
         return {"metal_misspec": {"form": form}}
     if arm == "resolution":
-        if survey == "ks":
+        if survey == "ks" and not ks_resolution_ready:
             raise SystemExit(
-                "resolution injection is NOT valid on KS: load_ks_leg reuses the DESI pixel proxy R_z "
-                "(~7-15x too large -- KS is echelle, sigma~3.2 km/s), so a b_res injection is a ~70% "
-                "distortion the frozen forward cannot fit (the -21sigma ESS collapse). Implement the KS "
-                "echelle R_z + resolution_ready flag first. Run the resolution arm on desi/eboss only.")
+                "resolution injection on KS with the DESI pixel PROXY R_z is invalid (~7-15x too large -- KS is "
+                "echelle, sigma~3.2 km/s -> a ~70% distortion the forward cannot fit, the -21sigma ESS collapse). "
+                "Pass ks_resolution_ready=True only when the echelle R_z + diag surgery is wired (build_arm_ctx "
+                "resolution-float on KS, task #5). Then the b_res injection is on the physical echelle scale.")
         return {"resolution": {"b_res": float(b_res)}}
     if arm == "lls_excess":
         return {"lls_truth_boost": LLS_TRUTH_BOOST[survey]}
@@ -143,6 +143,10 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     LEG_NAME = {"desi": "DESI", "ks": "KS", "eboss": "eBOSS"}[survey]
     PIN_KEY = {"desi": "DESI", "ks": "KS", "eboss": "eBOSS"}[survey]
     metals = survey in ("desi", "eboss")               # KS conservative-mode subtracts metals
+    # KS instrument-f_res (task #5): use the ECHELLE R_z (3.2 km/s) + diagonal cov surgery via ks_kwargs so the
+    # b_res LSF injection is PHYSICAL, not the ~15x-too-large DESI pixel proxy (which made KS un-fittable, the
+    # -21sigma collapse). Only on the KS resolution-float path; None elsewhere -> byte-identical for DESI/eBOSS/KS-off.
+    _ks_kwargs = ({"resolution_float": True, "k_max": 0.065} if (survey == "ks" and (float_res or coherent_res)) else None)
     # build_legb_ctx assembles DESI+KS(+eBOSS); we then keep ONLY the chosen survey's leg(s) so the
     # arm fits a single-survey likelihood (the bias is per-survey).  survey= sets the LLS pin.
     ctx, d = build_legb_ctx(
@@ -151,9 +155,10 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         with_eboss=(survey == "eboss"),
         metals_on=metals, sample_metals=metals,
-        sample_res=float_res,                              # option-b: float f_res + cov_b (DESI rank-1 / eBOSS rescale)
+        sample_res=float_res,                              # option-b: float f_res + cov_b (DESI rank-1 / eBOSS rescale / KS diag)
         coherent_res=coherent_res, coh_amp=coh_amp,        # arm-D: coherent cross-z cov mode, NO forward float
-        f_res_amp_sigma=f_res_amp_sigma,                   # arm-C wide / eBOSS leg-match prior (None -> tight 0.02)
+        f_res_amp_sigma=f_res_amp_sigma,                   # arm-C wide / eBOSS + KS leg-match prior (None -> tight 0.02)
+        ks_kwargs=_ks_kwargs,                              # KS echelle R_z + diag surgery (task #5); None => proxy (DESI/eBOSS/off)
         hierarchical_hcd=False, survey=PIN_KEY)
 
     # restrict to the chosen survey's legs (single-survey bias arm).
@@ -176,7 +181,7 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     # map arm -> inject_spec (pure helper; the resolution b_res is configurable for the +/-1 sigma
     # option-a certification). metal_misspec REALISM: desi_full (with the unfittable additive SiII-SiII
     # term) for DESI, McDonald/eBOSS SiIIIcorr for eBOSS; the KS metal no-op guard lives in the helper.
-    inject_spec = arm_inject_spec(arm, survey, b_res=b_res)
+    inject_spec = arm_inject_spec(arm, survey, b_res=b_res, ks_resolution_ready=(_ks_kwargs is not None))
     return ctx, d, inject_spec
 
 
