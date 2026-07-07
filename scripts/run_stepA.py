@@ -144,7 +144,8 @@ def build_config(verbose=False):
                      inject_a_siiii=0.0, inject_res_corr=None, subdla_center_shift=0.0,
                      hierarchical_hcd=False, hcd_ratio_infl=1.0, hcd_center_shift=0.0,
                      hcd_2d_tilt=False, z_slope_marginalized=False, zslope_realfit=False,
-                     res_corr_on=True, sample_res=False, f_res_amp_sigma=None, seed=0):
+                     res_corr_on=True, sample_res=False, f_res_amp_sigma=None, seed=0,
+                     ks_resolution_float=False, ks_kmax=None):
         # ``seed`` (default 0 = back-compat for every legacy battery) sets the PRNGKey root, hence the
         # MOCK-NOISE key k_mock = split(fold_in(PRNGKey(seed), mock_index)) in run_one_chain. Distinct
         # seeds at the SAME (survey, sim, fold) therefore give INDEPENDENT cosmic-noise realizations —
@@ -171,6 +172,8 @@ def build_config(verbose=False):
                 hcd_center_shift=float(hcd_center_shift), hcd_2d_tilt=bool(hcd_2d_tilt),
                 zslope_realfit=bool(zslope_realfit), res_corr_on=bool(res_corr_on),
                 sample_res=bool(sample_res), f_res_amp_sigma=f_res_amp_sigma,
+                ks_resolution_float=bool(ks_resolution_float),
+                ks_kmax=(None if ks_kmax is None else float(ks_kmax)),
                 chain_id=c, n_chains=n_chains, seed=int(seed)))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -541,14 +544,21 @@ def build_config(verbose=False):
     # stays OFF on KS until the echelle R_z lands). f_res arms get a distinct 'F' tag (no ckpt collision with
     # the conservative no-f_res arms).
     _RCINJ_FRES = os.environ.get("RCINJ_FRES", "0") == "1"
-    _FRES_SIGMA = {"DESI": 0.02, "eBOSS": 0.05}   # per-leg option-b prior width
+    # KS f_res (task #5) is now UNBLOCKED (echelle R_z 3.2 + diag cov surgery landed). The KS width is
+    # env-driven so the sensitivity arm runs as two submissions to separate --out-dirs: the HONEST
+    # instrument width RCINJ_KS_FRES_SIGMA=0.15 (esyst_res_ks/P ~1.3-1.6% at k=0.065) and the combined
+    # 0.4 (the paper r_m; over-wide). KS floats f_res via ks_kwargs (resolution_float + k_max=0.065).
+    _KS_FRES_SIGMA = float(os.environ.get("RCINJ_KS_FRES_SIGMA", "0.4"))
+    _FRES_SIGMA = {"DESI": 0.02, "eBOSS": 0.05, "KS": _KS_FRES_SIGMA}   # per-leg option-b prior width
     for _survey, _tag in (("DESI", "D"), ("KS", "K"), ("eBOSS", "E")):
-        _fres = _RCINJ_FRES and _survey in ("DESI", "eBOSS")
+        _fres = _RCINJ_FRES and _survey in ("DESI", "eBOSS", "KS")
+        _ksf = _fres and _survey == "KS"                     # KS echelle R_z + diag surgery via ks_kwargs
         _tagf = _tag + ("F" if _fres else "")
         for _f, _ns in _RCINJ_POINTS:
             _base = dict(survey=_survey, mf=True, prior_center="truth",
                          sample_metals=(_survey in ("DESI", "eBOSS")), inject_a_siiii=0.0,
                          sample_res=_fres, f_res_amp_sigma=(_FRES_SIGMA[_survey] if _fres else None),
+                         ks_resolution_float=_ksf, ks_kmax=(0.065 if _ksf else None),
                          # match the DEPLOYED production C_emu: the 60-sim LF-emu off-diagonal k-coherent
                          # term (mf_emucoh; top-15 ~96.8% of trace). NB the "78% rank-1" is the SEPARATE
                          # MFShape LF->HR resolution-residual term (mf_shape), OFF in the deployed "current"
@@ -800,12 +810,20 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     _eoda = bool(chain.get("mf_emucoh_offdiag_only", False))   # per-term diagonal allocation
     _survey = chain.get("survey", "DESI")
     _desi_kw = {"mf_floor_on": True} if chain.get("desi_floor") else None
+    # KS f_res (task #5): opt in the KS echelle R_z + diag cov surgery via ks_kwargs (resolution_float
+    # + k_max=0.065, which also disables the NORC 0.045 auto-cap). Default None -> KS proxy R_z (golden).
+    _ks_kwargs = None
+    if bool(chain.get("ks_resolution_float", False)):
+        _ks_kwargs = {"resolution_float": True}
+        if chain.get("ks_kmax") is not None:
+            _ks_kwargs["k_max"] = float(chain["ks_kmax"])
     ctx, d = build_legb_ctx(
         ckpt=chain["ckpt"], with_mf=bool(chain["mf"]),
         mf_fold=fold, mf_with_floor=bool(chain["mf"]),
         res_corr_on=bool(chain.get("res_corr_on", True)),      # NORC (Gate-A): False → drop res_corr + cap KS
-        sample_res=bool(chain.get("sample_res", False)),       # option-b f_res float (DESI/eBOSS; KS R_z-blocked)
+        sample_res=bool(chain.get("sample_res", False)),       # option-b f_res float (DESI/eBOSS; KS via ks_kwargs)
         f_res_amp_sigma=chain.get("f_res_amp_sigma", None),
+        ks_kwargs=_ks_kwargs,                                  # KS echelle R_z + diag surgery (task #5); None=proxy
         mf_exclude_held=bool(chain.get("hr_truth", False)),    # HF-LOSO: MF fit EXCLUDING this HR sim
         # TRUE leave-ONE-out (Task 1.5): drop EXACTLY this HR sim from the MF head fit, not the
         # whole LF fold group (two HR sims can share a group → leave-TWO-out → an inflated bias).

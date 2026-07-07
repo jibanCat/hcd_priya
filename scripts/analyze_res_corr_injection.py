@@ -291,19 +291,21 @@ def main():
     ap.add_argument("--no-fig", action="store_true", help="skip writing the figure")
     ap.add_argument("--fres", action="store_true",
                     help="read the f_res (option-b) arms: survey tag gets a trailing 'F' "
-                         "(RCINJDF_/RCINJEF_, run_stepA.py:547). DESI/eBOSS only (KS has no f_res arm: "
-                         "R_z-blocked). Use with --ckpt-dir checkpoints/stepA_norc_rcinj_fres.")
+                         "(RCINJDF_/RCINJEF_/RCINJKF_, run_stepA.py). DESI + eBOSS + KS (KS unblocked by the "
+                         "echelle R_z, task #5). Use with --ckpt-dir the f_res checkpoint dir.")
     a = ap.parse_args()
     ckpt_dir = a.ckpt_dir
     explicit = _parse_explicit(a)
     alpha_inflation = float(a.alpha_inflation)
     fres = bool(a.fres)
-    # f_res arms are DESI/eBOSS only (KS f_res is R_z-blocked, task #12); the 'F' tag suffix reads them.
-    surveys = ("DESI", "eBOSS") if fres else GATE_SURVEYS
+    # f_res arms: DESI + eBOSS + KS (task #5 unblocked KS via the echelle R_z 3.2 + diag cov surgery).
+    # The 'F' tag suffix reads them (RCINJDF_/RCINJEF_/RCINJKF_). A single --ckpt-dir holds ONE KS width
+    # (the 0.15 / 0.4 sensitivity arms run to SEPARATE dirs), so a leg absent from a dir prints (pending).
+    surveys = ("DESI", "eBOSS", "KS") if fres else GATE_SURVEYS
 
     print("\n=== NORC res_corr INJECTION-RECOVERY gate — paired clean-vs-injected, per leg ===")
     if fres:
-        print("    MODE: --fres (option-b f_res FLOATED). Reading the 'F'-tagged arms RCINJ{D,E}F_; DESI/eBOSS only.")
+        print("    MODE: --fres (option-b f_res FLOATED). Reading the 'F'-tagged arms RCINJ{D,E,K}F_; DESI+eBOSS+KS.")
         print("    NOTE: floating f_res inflates the CLEAN-arm post_sd -> the median(clean_sd) sigma_ref grows -> the")
         print("    0.3*sigma_ref threshold LOOSENS. Prefer an explicit --sigma-ref-* (fixed f_res-off/Fisher yardstick);")
         print("    the invariant is the absolute stat |mean Delta| + 2*SE.")

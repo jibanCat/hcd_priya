@@ -119,3 +119,28 @@ def test_load_ks_leg_fres_on_flags_and_R32():
     C = np.asarray(leg.C_data)
     np.linalg.cholesky(C)                                       # SPD over the full kept band (incl. He-II z)
     assert np.linalg.eigvalsh(C).min() > 0
+
+
+# --------------------------------------------------------------------------------------------- #
+#  Stage B: the RCINJ KS f_res GATE config (RCINJ_FRES=1) -- KS gets the echelle R_z + diag surgery
+#  via ks_kwargs, at the env-driven width, NORC + metals-off; DESI/eBOSS arms unaffected.
+# --------------------------------------------------------------------------------------------- #
+def test_rcinj_ks_fres_gate_config_generates():
+    import os
+    from scripts.run_stepA import build_config
+    _saved = {k: os.environ.get(k) for k in ("RCINJ_FRES", "RCINJ_KS_FRES_SIGMA")}
+    os.environ["RCINJ_FRES"] = "1"
+    os.environ["RCINJ_KS_FRES_SIGMA"] = "0.15"
+    try:
+        cfg = build_config()
+    finally:
+        for k, v in _saved.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+    ksf = [c for c in cfg if c["id"].startswith("RCINJKF_")]
+    assert ksf, "no RCINJKF (KS f_res) chains generated under RCINJ_FRES=1"
+    c = ksf[0]
+    assert c["survey"] == "KS" and c["sample_res"] is True
+    assert c["f_res_amp_sigma"] == 0.15 and c["ks_resolution_float"] is True and c["ks_kmax"] == 0.065
+    assert c["res_corr_on"] is False and c["sample_metals"] is False    # NORC + KS metals-off
+    d = [c for c in cfg if c["id"].startswith("RCINJDF_")][0]           # DESI arm unaffected by the KS env
+    assert d["f_res_amp_sigma"] == 0.02 and d["ks_resolution_float"] is False
