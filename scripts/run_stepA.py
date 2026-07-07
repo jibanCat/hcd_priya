@@ -537,7 +537,9 @@ def build_config(verbose=False):
     #  * N=8 independent mock-noise SEEDS × 2 sims = 16 paired mocks/leg; clean & injected SHARE each
     #    seed so Δ_i cancels the shared noise; distinct seeds give independent realizations.
     _RCINJ_SEEDS = tuple(range(8)); _RCINJ_NCHAINS = 2
-    _rc_primary = dict(actual_res_corr=True)     # expanded to the per-leg log(res_corr) b-vector
+    # RCINJ_RC_STRENGTH scales the injected res_corr amplitude for the +/-1sigma SYSTEMATIC scan (treat the
+    # unvalidated small-box res_corr as a bounded systematic, not a fixed truth; the bias is ~linear in it).
+    _rc_primary = dict(actual_res_corr=True, strength=float(os.environ.get("RCINJ_RC_STRENGTH", "1.0")))
     _RCINJ_POINTS = ((4, 0.92), (6, 0.966))      # interior sims, avoid the fold0 n_s wall
     # OPTION-1 (RCINJ_FRES=1): FLOAT f_res (option-b) so the DEPLOYED resolution marginalization absorbs the
     # injected res_corr. DESI/eBOSS ONLY (KS resolution_ready=False -- its proxy R_z is 7-15x too large; f_res
@@ -1009,8 +1011,9 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     _rc_spec = chain.get("inject_res_corr", None)
     if isinstance(_rc_spec, dict) and _rc_spec.get("actual_res_corr"):
         _am = float(chain.get("mf_anchor_mult", 5.0))
+        _rcs = float(_rc_spec.get("strength", 1.0))   # amplitude scale for the +/-1sigma res_corr systematic scan
         _rc_inject = (None if ctx.mf is None
-                      else {leg.name: _actual_res_corr_bvec(leg, ctx.mf, _am) for leg in ctx.legs})
+                      else {leg.name: _rcs * _actual_res_corr_bvec(leg, ctx.mf, _am) for leg in ctx.legs})
     else:
         _rc_inject = _rc_spec
     mock_legs, truth_pack, info = make_legb_mock(
