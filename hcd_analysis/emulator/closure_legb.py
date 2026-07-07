@@ -486,6 +486,41 @@ def _kim(z):
 
 
 # ============================================================================ #
+#  The certified production data-nuisance forward config, PER LEG.
+# ============================================================================ #
+# SINGLE SOURCE OF TRUTH consumed by BOTH the real fit (run_real_fit.build_real_ctx) AND the
+# production SBC (run_prod_sbc_shard). The whole point of the pre-freeze wiring is that the real-fit
+# forward == the SBC self-draw forward == the gate-certified forward; a copy-pasted per-leg config in
+# two drivers is the exact drift risk this map removes. Per leg:
+#   sample_res       : float the option-b spectral-resolution f_res (DESI/eBOSS; the RCINJ-certified arm).
+#   f_res_amp_sigma  : that float's Normal(0, .) prior width -- DESI 0.02 / eBOSS 0.05 (leg-matched, the
+#                      certified option-b widths; None where f_res is OFF).
+#   metal_prior      : "flatlog2node" = the Gate-C Model C+ 2-node metals; "uniform" where metals are off.
+#   metals           : whether this leg bears the SiIII/SiII metal forward + samples the metal sites.
+# KS: no f_res (resolution_ready=False -- its loader reuses the DESI proxy R_z ~7-15x too large; the KS
+# echelle R_z + float is a separate build, task #5) and no metals (its conservative covariance already
+# subtracts+inflates metals/continuum/resolution). Flip KS to a float here only when task #5 lands.
+PROD_FORWARD_BY_LEG = {
+    "DESI":  dict(sample_res=True,  f_res_amp_sigma=0.02, metal_prior="flatlog2node", metals=True),
+    "eBOSS": dict(sample_res=True,  f_res_amp_sigma=0.05, metal_prior="flatlog2node", metals=True),
+    "KS":    dict(sample_res=False, f_res_amp_sigma=None, metal_prior="uniform",      metals=False),
+}
+
+
+def prod_forward_config(leg):
+    """The certified production data-nuisance forward config for one leg name ('DESI'/'eBOSS'/'KS').
+
+    Returns a fresh dict {sample_res, f_res_amp_sigma, metal_prior, metals} -- the SINGLE source
+    both build_real_ctx and run_prod_sbc_shard consume so the real-fit and SBC forwards are identical.
+    Raises KeyError on an unknown leg (fail loud rather than silently mis-configure the forward)."""
+    try:
+        return dict(PROD_FORWARD_BY_LEG[leg])
+    except KeyError:
+        raise KeyError(f"no production forward config for leg {leg!r}; "
+                       f"expected one of {list(PROD_FORWARD_BY_LEG)}")
+
+
+# ============================================================================ #
 #  Build the production Leg-B context from final_fold0 + the xclass error vector.
 # ============================================================================ #
 def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,

@@ -131,7 +131,10 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     ens = [members[0]] if single_member else members
 
     info = SURVEY[survey]
-    metals = bool(info["metals"])
+    fc = CL.prod_forward_config(info["leg"])   # certified per-leg data-nuisance forward (SINGLE source == SBC)
+    metals = bool(fc["metals"])
+    assert metals == bool(info["metals"]), \
+        f"SURVEY[{survey!r}].metals={info['metals']} disagrees with prod_forward_config({info['leg']!r})"
     ks_kw = {"z_lo": float(ks_zlo)} if ks_zlo is not None else None  # KS low-z cut override (diagnostic)
     ctx, d = build_legb_ctx(
         ensemble_ckpts=ens, use_xclass=True,
@@ -141,7 +144,10 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
         with_eboss=(survey == "eboss"),
         ks_kwargs=ks_kw,                  # threads z_lo into load_ks_leg (default None → z_lo=2.4 baseline)
         metals_on=metals,                 # applies the SiIII/SiII forward term on metals_on legs
-        sample_metals=metals,             # samples the shared a_SiIII nuisance (Uniform[0, a_max])
+        sample_metals=metals,             # samples the metal nuisance (flatlog2node nodes / uniform a_SiIII)
+        sample_res=fc["sample_res"],      # option-b f_res float (DESI/eBOSS; KS OFF until task #5)
+        f_res_amp_sigma=fc["f_res_amp_sigma"],  # its Normal(0,.) width (DESI 0.02 / eBOSS 0.05; None where off)
+        metal_prior=fc["metal_prior"],    # flatlog2node (Gate-C Model C+) on metal legs; uniform on KS
         survey=info["leg"],               # PER-SURVEY LLS pin: DESI 1.0×/σ0.30, KS 2.5×/σ0.40 (eBOSS→cosmic-avg)
         hierarchical_hcd=False)           # the referee production baseline (per-class HCD)
     if NORC:
@@ -160,6 +166,22 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
         raise SystemExit(f"survey {survey!r} expects leg {want!r} but ctx.legs="
                          f"{[l.name for l in ctx.legs]}")
     ctx = ctx._replace(legs=legs)
+
+    # SELF-CONSISTENCY (mirror the NORC block): the certified data-nuisance forward must be WIRED, not
+    # silently regressed to the build_legb_ctx defaults (sample_res=False / metal_prior='uniform'). Asserted
+    # on the single restricted leg so the real-fit forward provably == the SBC-certified forward.
+    L = ctx.legs[0]
+    assert bool(ctx.sample_res) == fc["sample_res"], "prod f_res float not wired into build_real_ctx"
+    assert ctx.f_res_amp_sigma == fc["f_res_amp_sigma"], "f_res prior width mismatch"
+    assert ctx.metal_prior == fc["metal_prior"], "prod metal model (flatlog2node) not wired"
+    assert tuple(ctx.metal_node_z) == (2.2, 4.2), "Gate-C metal_node_z drifted"
+    if fc["metals"]:
+        assert ctx.sample_metals is True and L.metals_on is True, "metal leg must sample+apply metals"
+    else:
+        assert not L.metals_on, "KS must be metals-off"
+    if ctx.sample_res:                             # f_res is per-INSTRUMENT: single-leg + resolution_ready
+        assert getattr(L, "resolution_ready", False), "f_res float on a resolution_ready=False leg"
+        assert len({l.name for l in ctx.legs}) == 1, "f_res float requires a single-instrument leg"
     return ctx, d, members
 
 
