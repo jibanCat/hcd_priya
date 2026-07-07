@@ -144,3 +144,23 @@ def test_rcinj_ks_fres_gate_config_generates():
     assert c["res_corr_on"] is False and c["sample_metals"] is False    # NORC + KS metals-off
     d = [c for c in cfg if c["id"].startswith("RCINJDF_")][0]           # DESI arm unaffected by the KS env
     assert d["f_res_amp_sigma"] == 0.02 and d["ks_resolution_float"] is False
+
+
+def test_rcinj_ks_control_band_config():
+    """RCINJ_KS_KMAX=0.065 (no RCINJ_FRES): the KS no-f_res CONTROL arm (RCINJK_) runs at k_max=0.065
+    (proxy R_z, no surgery, no f_res) -> the honest 0.065 fixed sigma_ref + the 0.065 no-f_res baseline."""
+    import os
+    from scripts.run_stepA import build_config
+    _saved = {k: os.environ.get(k) for k in ("RCINJ_FRES", "RCINJ_KS_KMAX")}
+    os.environ.pop("RCINJ_FRES", None)
+    os.environ["RCINJ_KS_KMAX"] = "0.065"
+    try:
+        cfg = build_config()
+    finally:
+        for k, v in _saved.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+    ksc = [c for c in cfg if c["id"].startswith("RCINJK_")]            # the no-F KS control arm (tag "K")
+    assert ksc, "no RCINJK (KS no-f_res control) chains"
+    c = ksc[0]
+    assert c["survey"] == "KS" and c["sample_res"] is False and c["ks_resolution_float"] is False
+    assert c["ks_kmax"] == 0.065 and c["res_corr_on"] is False

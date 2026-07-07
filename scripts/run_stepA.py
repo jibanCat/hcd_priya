@@ -549,16 +549,22 @@ def build_config(verbose=False):
     # instrument width RCINJ_KS_FRES_SIGMA=0.15 (esyst_res_ks/P ~1.3-1.6% at k=0.065) and the combined
     # 0.4 (the paper r_m; over-wide). KS floats f_res via ks_kwargs (resolution_float + k_max=0.065).
     _KS_FRES_SIGMA = float(os.environ.get("RCINJ_KS_FRES_SIGMA", "0.4"))
+    # RCINJ_KS_KMAX (e.g. 0.065): the KS no-f_res CONTROL band. Runs the non-f_res KS arm (RCINJK) at the
+    # f_res band so we get the HONEST fixed sigma_ref at 0.065 (not the 0.045-capped 0.1795) AND the 0.065
+    # no-f_res baseline leak (to decompose a f_res-arm fail). Unset -> the NORC 0.045 cap (the 0.385 baseline).
+    _KS_KMAX = os.environ.get("RCINJ_KS_KMAX")
     _FRES_SIGMA = {"DESI": 0.02, "eBOSS": 0.05, "KS": _KS_FRES_SIGMA}   # per-leg option-b prior width
     for _survey, _tag in (("DESI", "D"), ("KS", "K"), ("eBOSS", "E")):
         _fres = _RCINJ_FRES and _survey in ("DESI", "eBOSS", "KS")
         _ksf = _fres and _survey == "KS"                     # KS echelle R_z + diag surgery via ks_kwargs
+        # KS k_max: the f_res arm is always 0.065; the no-f_res KS control uses RCINJ_KS_KMAX (else NORC 0.045).
+        _ks_km = 0.065 if _ksf else ((float(_KS_KMAX) if _KS_KMAX else None) if _survey == "KS" else None)
         _tagf = _tag + ("F" if _fres else "")
         for _f, _ns in _RCINJ_POINTS:
             _base = dict(survey=_survey, mf=True, prior_center="truth",
                          sample_metals=(_survey in ("DESI", "eBOSS")), inject_a_siiii=0.0,
                          sample_res=_fres, f_res_amp_sigma=(_FRES_SIGMA[_survey] if _fres else None),
-                         ks_resolution_float=_ksf, ks_kmax=(0.065 if _ksf else None),
+                         ks_resolution_float=_ksf, ks_kmax=_ks_km,
                          # match the DEPLOYED production C_emu: the 60-sim LF-emu off-diagonal k-coherent
                          # term (mf_emucoh; top-15 ~96.8% of trace). NB the "78% rank-1" is the SEPARATE
                          # MFShape LF->HR resolution-residual term (mf_shape), OFF in the deployed "current"
@@ -813,10 +819,12 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     # KS f_res (task #5): opt in the KS echelle R_z + diag cov surgery via ks_kwargs (resolution_float
     # + k_max=0.065, which also disables the NORC 0.045 auto-cap). Default None -> KS proxy R_z (golden).
     _ks_kwargs = None
-    if bool(chain.get("ks_resolution_float", False)):
-        _ks_kwargs = {"resolution_float": True}
+    if bool(chain.get("ks_resolution_float", False)) or chain.get("ks_kmax") is not None:
+        _ks_kwargs = {}
+        if bool(chain.get("ks_resolution_float", False)):
+            _ks_kwargs["resolution_float"] = True            # KS echelle R_z + diag surgery
         if chain.get("ks_kmax") is not None:
-            _ks_kwargs["k_max"] = float(chain["ks_kmax"])
+            _ks_kwargs["k_max"] = float(chain["ks_kmax"])    # also the no-f_res 0.065 control band
     ctx, d = build_legb_ctx(
         ckpt=chain["ckpt"], with_mf=bool(chain["mf"]),
         mf_fold=fold, mf_with_floor=bool(chain["mf"]),
