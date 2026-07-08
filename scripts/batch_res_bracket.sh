@@ -16,8 +16,9 @@
 # at the LEG's OWN level in the PROXY frame the code uses (eBOSS 0.044, DESI ~0.022) and sets treatment-c's
 # prior to a leg-matched C_PRIOR (eBOSS 0.05). Do NOT inject the DESI level on eBOSS or mix frames.
 #
-# PER-LEG ORDER (weak-first): eBOSS -> KS -> DESI. KS is DEFERRED (its proxy R_z is 7-15x too large; the
-# resolution injection RAISES on KS until the echelle R_z lands). Start with SURVEY=eboss.
+# PER-LEG ORDER (weak-first): eBOSS -> KS -> DESI. KS is now LIVE (echelle R_z=3.2 km/s landed 2026-07-07,
+# commit 104aeb5 / resolution_ready flag): run it with SURVEY=ks BRES=0.15 C_PRIOR=0.15 (the deployed KS
+# f_res tuple). eBOSS + DESI already certified.
 #
 # Usage (NOT launched by default -- budget-gated: cavestru0 tight ~4000 + cavestru1 ~5000 CPU-h; SE-pilot
 # to size N before the full run):
@@ -51,7 +52,8 @@ if [[ -z "${BRES:-}" ]]; then
   case "$SURVEY" in
     eboss) BRES=0.044 ;;
     desi)  BRES=0.022 ;;
-    *)     echo "ERROR: set BRES for SURVEY=$SURVEY (ks is deferred/guarded)" >&2; exit 1 ;;
+    ks)    BRES=0.15  ;;   # echelle R_z=3.2 landed 2026-07-07 (104aeb5); pass C_PRIOR=0.15 for the wide arm
+    *)     echo "ERROR: set BRES for SURVEY=$SURVEY" >&2; exit 1 ;;
   esac
 fi
 C_PRIOR=${C_PRIOR:-0.05}                # treatment-c (wide) prior width (eBOSS leg-matched)
