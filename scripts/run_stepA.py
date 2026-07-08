@@ -116,6 +116,29 @@ def _actual_res_corr_bvec(leg, mf, anchor_mult=5.0):
     return b
 
 
+def _rcinj_primary_spec(repo=REPO, environ=None):
+    """Select the RCINJ TRUTH-injection spec (run_one_chain expands it in make_legb_mock).
+
+    Default: the ACTUAL small-box res_corr table ({"actual_res_corr": True}) -- the correction NORC
+    drops, expanded per-leg via ``_actual_res_corr_bvec``. The physical, in-situ misspecification.
+
+    RCINJ_OOS_MEMBER (e.g. "b1"): swap to the OUT-OF-SPAN basis member via the (path, member,
+    strength) form -- the adversarial worst-n_s direction from res_corr_injection_basis.npz that is
+    C^-1-orthogonal to the 2-param alpha_res span and localized to the He-II z>=2.8 window (already
+    scaled to the +-5% envelope, so strength=1.0 is the 1-sigma injection). This is the sharper
+    "did we miss a leak the in-span pass could not see" arm (the metals out-of-class precedent).
+    ``{leg}_worst_ns_member`` in the basis is 1 for all legs -> member="b1".
+
+    RCINJ_RC_STRENGTH scales EITHER form (the +-1sigma systematic scan; the bias is ~linear in it)."""
+    environ = os.environ if environ is None else environ
+    strength = float(environ.get("RCINJ_RC_STRENGTH", "1.0"))
+    member = environ.get("RCINJ_OOS_MEMBER")
+    if member:
+        basis = f"{repo}/hcd_analysis/_emulator_data/res_corr_injection_basis.npz"
+        return dict(path=basis, member=str(member), strength=strength)
+    return dict(actual_res_corr=True, strength=strength)
+
+
 def build_config(verbose=False):
     """Resolve the full 44-chain config (a list of dicts). Each chain dict:
       id, tier, fold, ckpt, sim, n_s, mf, z_slope_marginalized, hr_truth, tau0_extreme,
@@ -539,7 +562,7 @@ def build_config(verbose=False):
     _RCINJ_SEEDS = tuple(range(8)); _RCINJ_NCHAINS = 2
     # RCINJ_RC_STRENGTH scales the injected res_corr amplitude for the +/-1sigma SYSTEMATIC scan (treat the
     # unvalidated small-box res_corr as a bounded systematic, not a fixed truth; the bias is ~linear in it).
-    _rc_primary = dict(actual_res_corr=True, strength=float(os.environ.get("RCINJ_RC_STRENGTH", "1.0")))
+    _rc_primary = _rcinj_primary_spec()   # actual res_corr table by default; OUT-OF-SPAN basis if RCINJ_OOS_MEMBER set
     _RCINJ_POINTS = ((4, 0.92), (6, 0.966))      # interior sims, avoid the fold0 n_s wall
     # OPTION-1 (RCINJ_FRES=1): FLOAT f_res (option-b) so the DEPLOYED resolution marginalization absorbs the
     # injected res_corr. DESI/eBOSS ONLY (KS resolution_ready=False -- its proxy R_z is 7-15x too large; f_res
