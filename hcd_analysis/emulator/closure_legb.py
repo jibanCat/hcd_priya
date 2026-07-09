@@ -1175,6 +1175,46 @@ def _resolve_res_corr_inject(inject_res_corr, leg_name, n_rows):
     return b
 
 
+def _resolve_res_instr_inject(inject_resolution, leg):
+    """Resolve the ``inject_resolution`` spec into (res_b_scalar, b_res_vec) for THIS leg. The
+    b_res_vec is a PER-Z (shape (leg.n_z,)) instrument-resolution perturbation applied as
+    P *= exp(2*b_res(z)*k^2*R_z(z)^2) per z-block; res_b_scalar is the legacy single-value form.
+    Exactly one of the two is non-None when an injection applies; (None, None) is a byte-identical no-op.
+
+    Accepted spec forms:
+      * None                                   -> (None, None)          no-op (default)
+      * {"b_res": s}                            -> (float(s), None)     UNCHANGED scalar path
+      * {"b_res_vec": v}   (len leg.n_z)        -> (None, np.asarray(v, float))
+      * {"path": npz, "member": m, "strength": x}
+            -> (None, x * basis[f"{leg.name}_{m}"])   per-z (n_z,) OOS basis member
+    """
+    if inject_resolution is None:
+        return (None, None)
+    if not isinstance(inject_resolution, dict):
+        raise TypeError(f"inject_resolution must be None or a dict, got {type(inject_resolution).__name__}")
+    n_z = int(leg.n_z)
+    if "b_res" in inject_resolution:
+        return (float(inject_resolution["b_res"]), None)
+    if "path" in inject_resolution or "member" in inject_resolution:
+        path = inject_resolution["path"]
+        member = inject_resolution.get("member", "bres1")
+        strength = float(inject_resolution.get("strength", 1.0))
+        basis = np.load(path, allow_pickle=True)
+        key = f"{leg.name}_{member}"
+        if key not in basis.files:
+            raise KeyError(f"inject_resolution: {key!r} not in basis {path!r} (have {sorted(basis.files)})")
+        v = np.asarray(basis[key], dtype=float)
+        if v.shape != (n_z,):
+            raise ValueError(f"inject_resolution: basis {key} shape {v.shape} != leg n_z {(n_z,)}")
+        return (None, strength * v)
+    if "b_res_vec" in inject_resolution:
+        v = np.asarray(inject_resolution["b_res_vec"], dtype=float)
+        if v.shape != (n_z,):
+            raise ValueError(f"inject_resolution b_res_vec shape {v.shape} != leg n_z {(n_z,)}")
+        return (None, v)
+    raise KeyError(f"inject_resolution: unrecognized spec keys {sorted(inject_resolution)}")
+
+
 def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0, inject_res_corr=None):
     """Build a Leg-B mock from a sim-truth: interpolate the sim-truth P1D onto each leg's k,
     draw ε ~ N(0, C_data) (cosmic-ONLY) per leg, ``mock = truth_on_leg + ε``.
@@ -1409,23 +1449,20 @@ def _meanflux_on_leg(ctx, leg, truth_pack):
     return np.exp(-tau_eff)                                   # ⟨F⟩(z)
 
 
-def _check_resolution_injectable(legs, res_b):
-    """Defense-in-depth for the spectral-resolution injection (4-referee panel / domain #10): RAISE (do
-    NOT silently skip) if a resolution injection (``res_b``) targets a leg whose R_z is not trustworthy
-    (``leg.resolution_ready`` False -- e.g. KS, whose DESI-proxy R_z is ~7-15x too large vs its echelle
-    sigma~3.2 km/s). A silent skip would turn a KS resolution arm into a meaningless PASS; the CLI guard
-    in ``arm_inject_spec`` is the first line, this is the direct-call (run_legb/make_leg_a_legmock)
-    backstop. Gated on the R_z-valid flag, NOT ``resolution_on`` (option-a injects with it False).
-    ``res_b=None`` is a no-op (byte-identical clean path)."""
-    if res_b is None:
+def _check_resolution_injectable(legs, active):
+    """RAISE (do NOT silently skip) if a resolution injection is requested (``active=True``: a scalar
+    b_res OR a per-z b_res_vec / basis member) on a leg whose R_z is not trustworthy
+    (``leg.resolution_ready`` False -- e.g. a proxy-R_z KS). ``active=False`` is a byte-identical no-op.
+    Gated on the R_z-valid flag, NOT resolution_on."""
+    if not active:
         return
     bad = [leg.name for leg in legs if not getattr(leg, "resolution_ready", True)]
     if bad:
         raise ValueError(
-            f"resolution injection (b_res={res_b}) requested on non-resolution_ready leg(s) {bad}: their "
-            "R_z proxy is untrustworthy (KS is echelle sigma~3.2 km/s; the DESI proxy R_z is ~7-15x too "
-            "large) so the injected distortion is un-fittable (the -21sigma ESS collapse). Implement the "
-            "leg's true R_z (and flip resolution_ready) first, or run the resolution arm on desi/eboss.")
+            f"resolution injection requested on non-resolution_ready leg(s) {bad}: their R_z proxy is "
+            "untrustworthy (KS is echelle sigma~3.2 km/s; the DESI proxy R_z is ~7-15x too large) so the "
+            "injected distortion is un-fittable. Wire the leg's true R_z (flip resolution_ready) first, or "
+            "run the resolution arm on desi/eboss.")
 
 
 def _check_single_instrument_for_res(legs, sample_res):
@@ -1471,8 +1508,7 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
         resolution_on=False so it cannot fit this distortion — the probe). R_z is the leg's own
         per-z resolution scale (``leg.R_z``)."""
     metal_kw = dict(inject_metal_misspec) if inject_metal_misspec else None
-    res_b = float(inject_resolution["b_res"]) if inject_resolution else None
-    _check_resolution_injectable(ctx.legs, res_b)   # RAISE on a stray non-resolution_ready leg (e.g. KS)
+    _check_resolution_injectable(ctx.legs, active=(inject_resolution is not None))  # RAISE on a stray non-resolution_ready leg (e.g. KS)
     zg = np.asarray(ctx.z_global)
     theta9 = jnp.asarray(truth_pack["theta9"])
     tau0_global = jnp.asarray(truth_pack["tau0_global"])
@@ -1548,7 +1584,8 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
                 else:                                          # legacy forms (desi_full/eboss/…) — byte-exact
                     P_model[rows] = metal_inject(P_model[rows], k_leg[rows], float(Fbar[iz]),
                                                  **metal_kw)
-        if res_b is not None:
+        _res_b, _res_vec = _resolve_res_instr_inject(inject_resolution, leg)
+        if _res_b is not None or _res_vec is not None:
             k_leg = np.asarray(leg.k)
             z_idx = np.asarray(leg.z_idx)
             R_z = np.asarray(leg.R_z)
@@ -1556,8 +1593,9 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
                 rows = np.where(z_idx == iz)[0]
                 if rows.size == 0:
                     continue
+                b_res_iz = float(_res_vec[iz]) if _res_vec is not None else _res_b
                 fac = np.asarray(DL._resolution_factor(
-                    jnp.asarray(k_leg[rows]), float(R_z[iz]), b_res=res_b))
+                    jnp.asarray(k_leg[rows]), float(R_z[iz]), b_res=b_res_iz))
                 P_model[rows] = P_model[rows] * fac
         Lc = _chol_jitter(C_total)
         g = jax.random.normal(keys[li], (leg.k.shape[0],))

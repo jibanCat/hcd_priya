@@ -230,10 +230,10 @@ def test_check_resolution_injectable_guards_unready_leg():
     from types import SimpleNamespace
     ready = SimpleNamespace(name="DESI", resolution_ready=True)
     unready = SimpleNamespace(name="KS", resolution_ready=False)
-    C._check_resolution_injectable([ready], 0.02)                 # all-ready + res_b -> ok
-    C._check_resolution_injectable([ready, unready], None)        # res_b None -> no-op even with KS
+    C._check_resolution_injectable([ready], active=True)                 # all-ready + active -> ok
+    C._check_resolution_injectable([ready, unready], active=False)       # inactive -> no-op even with KS
     with pytest.raises((ValueError, RuntimeError), match="[Kk][Ss]|resolution_ready"):
-        C._check_resolution_injectable([ready, unready], 0.02)    # stray KS + res_b -> RAISE
+        C._check_resolution_injectable([ready, unready], active=True)    # stray KS + active -> RAISE
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
