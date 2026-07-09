@@ -159,8 +159,8 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
         ks_kwargs=ks_kw,                  # threads z_lo into load_ks_leg (default None → z_lo=2.4 baseline)
         metals_on=metals,                 # applies the SiIII/SiII forward term on metals_on legs
         sample_metals=metals,             # samples the metal nuisance (flatlog2node nodes / uniform a_SiIII)
-        sample_res=fc["sample_res"],      # option-b f_res float (DESI/eBOSS; KS OFF until task #5)
-        f_res_amp_sigma=fc["f_res_amp_sigma"],  # its Normal(0,.) width (DESI 0.02 / eBOSS 0.05; None where off)
+        sample_res=fc["sample_res"],      # option-b f_res float (DESI 0.02 / eBOSS 0.05 / KS 0.15; task #5 DONE)
+        f_res_amp_sigma=fc["f_res_amp_sigma"],  # its Normal(0,.) width (DESI 0.02 / eBOSS 0.05 / KS 0.15)
         metal_prior=fc["metal_prior"],    # flatlog2node (Gate-C Model C+) on metal legs; uniform on KS
         survey=info["leg"],               # PER-SURVEY LLS pin: DESI 1.0×/σ0.30, KS 2.5×/σ0.40 (eBOSS→cosmic-avg)
         hierarchical_hcd=False)           # the referee production baseline (per-class HCD)

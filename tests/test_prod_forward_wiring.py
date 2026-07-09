@@ -122,6 +122,22 @@ def test_build_real_ctx_desi_eboss_kskwargs_none(monkeypatch):
         assert kw["ks_kwargs"] is None            # KS leg stays proxy default (byte-identical)
 
 
+def test_build_real_ctx_ks_merges_zlo_with_kskwargs(monkeypatch):
+    # the diagnostic z_lo override must MERGE with the certified ks_kwargs, not clobber it (neither wins):
+    # the KS leg then floats echelle f_res (resolution_float/k_max) AND carries the z_lo cut.
+    rf = _load_script("run_real_fit")
+    captured = {}
+
+    def _spy(**kw):
+        captured.update(kw)
+        raise _StopBuild()
+
+    monkeypatch.setattr(rf, "build_legb_ctx", _spy)
+    with pytest.raises(_StopBuild):
+        rf.build_real_ctx("ks", ks_zlo=2.8)
+    assert captured["ks_kwargs"] == {"resolution_float": True, "k_max": 0.065, "z_lo": 2.8}
+
+
 # --------------------------------------------------------------------------------------------- #
 #  3. The SBC run_cfg population stamp discriminates the wired forward from a pre-wiring pkl.
 #     _run_mock, on the SKIP branch (pkl already exists), never runs NUTS -- it only checks cfg.

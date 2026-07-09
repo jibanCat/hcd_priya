@@ -327,7 +327,7 @@ def main():
         mf_emucoh_npz=_emucoh_npz,                    # None → default table; LOWK → the fix (MODE 1)
         mf_shape=_fixed,                              # MODE 2 (LF→HR resolution tilt) ON only when fixed
         with_eboss=_build_eboss, metals_on=_metals_on, sample_metals=_sample_metals,
-        sample_res=_sample_res,                       # option-b f_res float (DESI/eBOSS; OFF on KS + joint)
+        sample_res=_sample_res,                       # option-b f_res float (DESI 0.02/eBOSS 0.05/KS 0.15; OFF on joint only)
         f_res_amp_sigma=_f_res_sigma,                 # its Normal(0,.) width (DESI 0.02 / eBOSS 0.05; None off)
         metal_prior=_metal_prior,                     # flatlog2node (Gate-C) on metal legs; uniform on KS
         ks_kwargs=_ks_kw,                             # KS f_res echelle resolution_float+k_max (KS-only)
