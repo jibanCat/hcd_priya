@@ -18,7 +18,9 @@ Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_V
 import importlib.util
 import os
 import pickle
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 REPO = "/home/mfho/hcd_priya"
@@ -105,12 +107,19 @@ def test_build_real_ctx_eboss_width_005(monkeypatch):
     assert kw["metal_prior"] == "flatlog2node"
 
 
-def test_build_real_ctx_ks_no_fres_no_metals(monkeypatch):
+def test_build_real_ctx_ks_forwards_fres_and_kskwargs(monkeypatch):
     kw = _capture_build_real_ctx_kwargs("ks", monkeypatch)
-    assert kw["sample_res"] is False
-    assert kw["f_res_amp_sigma"] is None
+    assert kw["sample_res"] is True
+    assert kw["f_res_amp_sigma"] == 0.15
     assert kw["metal_prior"] == "uniform"
     assert kw["metals_on"] is False and kw["sample_metals"] is False
+    assert kw["ks_kwargs"] == {"resolution_float": True, "k_max": 0.065}
+
+
+def test_build_real_ctx_desi_eboss_kskwargs_none(monkeypatch):
+    for survey in ("desi", "eboss"):
+        kw = _capture_build_real_ctx_kwargs(survey, monkeypatch)
+        assert kw["ks_kwargs"] is None            # KS leg stays proxy default (byte-identical)
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -169,3 +178,19 @@ def test_default_run_loads_old_stamp_pkl_via_backcompat_pops(tmp_path):
     rec = sbc._run_mock(None, None, 0, str(tmp_path), n_mocks=1, n_warmup=1, n_samples=1,
                         max_tree_depth=1, seed=0, run_cfg=default_req)
     assert rec["n_div"] == 0                        # loaded via the back-compat pops, no clash
+
+
+# --------------------------------------------------------------------------------------------- #
+#  4. The gated NORC KS-cap parity assert: lifted ONLY for the echelle-floating KS leg.
+# --------------------------------------------------------------------------------------------- #
+def _fake_ctx(ks_kmax, resolution_ready):
+    ks = SimpleNamespace(name="KS", k=np.array([0.01, ks_kmax]), resolution_ready=resolution_ready)
+    return SimpleNamespace(legs=[ks])
+
+
+def test_norc_ks_cap_helper_lifts_only_for_floating_ks():
+    rf = _load_script("run_real_fit")
+    with pytest.raises(AssertionError):                      # proxy KS at 0.065 -> RAISE
+        rf._assert_norc_ks_cap(_fake_ctx(0.065, resolution_ready=False))
+    rf._assert_norc_ks_cap(_fake_ctx(0.065, resolution_ready=True))   # echelle-floating -> no raise
+    rf._assert_norc_ks_cap(_fake_ctx(0.045, resolution_ready=False))  # proxy at 0.045 -> fine

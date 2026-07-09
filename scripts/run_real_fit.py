@@ -112,6 +112,16 @@ def _packed_to_physical(draws, names):
 NORC = True
 
 
+def _assert_norc_ks_cap(ctx):
+    """Under NORC the KS leg is capped at k<=0.045, EXCEPT when it floats echelle f_res
+    (resolution_ready=True), which intentionally lifts the cap to the certified 0.065."""
+    _ksleg = [l for l in ctx.legs if l.name == "KS"]
+    if not _ksleg or getattr(_ksleg[0], "resolution_ready", False):
+        return
+    assert float(np.asarray(_ksleg[0].k).max()) <= 0.045 + 1e-9, \
+        "NORC KS k_max cap (0.045) not applied"
+
+
 def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=None):
     """The PRODUCTION ctx for a real-data fit, then RESTRICTED to the requested survey's leg.
 
@@ -135,7 +145,11 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     metals = bool(fc["metals"])
     assert metals == bool(info["metals"]), \
         f"SURVEY[{survey!r}].metals={info['metals']} disagrees with prod_forward_config({info['leg']!r})"
-    ks_kw = {"z_lo": float(ks_zlo)} if ks_zlo is not None else None  # KS low-z cut override (diagnostic)
+    # KS ks_kwargs: merge the certified forward's dict (resolution_float/k_max; None for DESI/eBOSS)
+    # with the diagnostic z_lo override -- neither must clobber the other. Empty dict -> None so
+    # DESI/eBOSS with no ks_zlo stay byte-identical (ks_kwargs=None, as before Task 1A/1B).
+    ks_kw = ({**(fc.get("ks_kwargs") or {}),
+              **({"z_lo": float(ks_zlo)} if ks_zlo is not None else {})}) or None
     ctx, d = build_legb_ctx(
         ensemble_ckpts=ens, use_xclass=True,
         with_mf=True, mf_with_floor=True,
@@ -153,9 +167,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     if NORC:
         ctx = ctx._replace(fix_alpha_res=True)   # NORC: also drop the 2 alpha_res sites (now inert)
         assert ctx.res_corr_on is False and ctx.fix_alpha_res is True, "NORC ctx not applied"
-        _ksleg = [l for l in ctx.legs if l.name == "KS"]   # KS-cap parity assert (referee M2)
-        assert (not _ksleg) or float(np.asarray(_ksleg[0].k).max()) <= 0.045 + 1e-9, \
-            "NORC KS k_max cap (0.045) not applied"
+        _assert_norc_ks_cap(ctx)   # KS-cap parity assert (referee M2), gated on resolution_ready
 
     # RESTRICT to the requested survey's leg (the real measurement for THIS survey only). The
     # per-leg C_emu / MF-floor / emucoh dicts are keyed by leg name, so dropping other legs leaves
