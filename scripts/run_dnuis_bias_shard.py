@@ -204,8 +204,10 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
 def _out_arm(arm, b_res_oos_member):
     """Write-time output arm tag (Task 2C): an OOS member selects the "resolution_oos" tag so its
     pkls never collide with the scalar in-span "resolution" arm's; member None -> unchanged (byte-
-    identical for every arm, including non-resolution ones)."""
-    return "resolution_oos" if b_res_oos_member else arm
+    identical for every arm, including non-resolution ones). The OOS member is ONLY meaningful for
+    arm=="resolution" (defensive: never retag a non-resolution arm, so a metals/lls pkl can't be
+    mislabeled resolution_oos and given the adversarial FLAG band -- main() also raises on that combo)."""
+    return "resolution_oos" if (arm == "resolution" and b_res_oos_member) else arm
 
 
 def main():
@@ -269,6 +271,12 @@ def main():
                     help="1 mock, tiny warmup/samples — pipeline + per-mock cost probe")
     ap.set_defaults(with_mf=True)
     a = ap.parse_args()
+
+    # OOS instrument-resolution member is a selector WITHIN the resolution arm; combining it with a
+    # non-resolution --arm is a user error (the injection would be ignored yet the pkl mislabeled
+    # resolution_oos + given the adversarial FLAG band). Fail loud (Task-2C review, reviewer A).
+    if a.b_res_oos_member and a.arm != "resolution":
+        raise SystemExit(f"--b-res-oos-member requires --arm resolution (got --arm {a.arm})")
 
     if a.smoke:
         a.n_mocks = 1

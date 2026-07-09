@@ -49,3 +49,23 @@ def test_out_arm_write_time_mapping():
     assert _out_arm("resolution", "bstar") == "resolution_oos"
     assert _out_arm("resolution", None) == "resolution"
     assert _out_arm("metal_misspec", None) == "metal_misspec"
+    # DEFENSIVE (Task-2C review, reviewer A): an OOS member with a NON-resolution arm must NOT retag the
+    # pkl as resolution_oos (else a metals/lls bias would get the adversarial FLAG band). main() also
+    # raises on this combo, but _out_arm stays safe on its own.
+    assert _out_arm("metal_misspec", "bstar") == "metal_misspec"
+    assert _out_arm("lls_excess", "bres1") == "lls_excess"
+
+
+def test_main_raises_on_oos_member_with_non_resolution_arm():
+    """--b-res-oos-member requires --arm resolution: the nonsensical combo fails loud, not silently mislabels."""
+    import sys
+    from scripts import run_dnuis_bias_shard as R
+    argv = ["run_dnuis_bias_shard.py", "--arm", "metal_misspec", "--survey", "desi",
+            "--shard", "0", "--n-shards", "1", "--out-dir", "/tmp/x", "--b-res-oos-member", "bstar"]
+    old = sys.argv
+    try:
+        sys.argv = argv
+        with pytest.raises(SystemExit):
+            R.main()
+    finally:
+        sys.argv = old
