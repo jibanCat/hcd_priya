@@ -181,6 +181,46 @@ def test_default_run_loads_old_stamp_pkl_via_backcompat_pops(tmp_path):
 
 
 # --------------------------------------------------------------------------------------------- #
+#  3b. ks_kmax stamp: a wired KS run must NEVER silently pool with a pre-flip or 0.045-fallback
+#      KS pkl (the KS f_res k_max anti-pooling guarantee).
+# --------------------------------------------------------------------------------------------- #
+def _wired_ks_cfg(k_max=0.065):
+    from hcd_analysis.emulator import closure_legb as CL
+    fc = CL.prod_forward_config("KS")
+    return dict(_old_stamp_cfg(), leg="KS", sample_res=fc["sample_res"],
+                f_res_amp_sigma=fc["f_res_amp_sigma"], metal_prior=fc["metal_prior"], ks_kmax=k_max)
+
+
+def test_wired_ks_clashes_with_preflip_pkl(tmp_path):
+    sbc = _load_script("run_prod_sbc_shard")
+    path = sbc._mock_path(str(tmp_path), 0)
+    _write_pkl(path, dict(_old_stamp_cfg(), leg="KS", sample_res=False))   # pre-flip KS pkl
+    with pytest.raises(RuntimeError):
+        sbc._run_mock(None, None, 0, str(tmp_path), n_mocks=1, n_warmup=1, n_samples=1,
+                      max_tree_depth=1, seed=0, run_cfg=_wired_ks_cfg(0.065))
+
+
+def test_wired_ks_0065_clashes_with_0045_fallback(tmp_path):
+    sbc = _load_script("run_prod_sbc_shard")
+    path = sbc._mock_path(str(tmp_path), 0)
+    _write_pkl(path, _wired_ks_cfg(0.045))
+    with pytest.raises(RuntimeError):
+        sbc._run_mock(None, None, 0, str(tmp_path), n_mocks=1, n_warmup=1, n_samples=1,
+                      max_tree_depth=1, seed=0, run_cfg=_wired_ks_cfg(0.065))
+
+
+def test_default_run_still_loads_old_stamp_pkl_with_kskmax_pop(tmp_path):
+    sbc = _load_script("run_prod_sbc_shard")
+    path = sbc._mock_path(str(tmp_path), 0)
+    _write_pkl(path, _old_stamp_cfg())
+    default_req = dict(_old_stamp_cfg(), sample_res=False, f_res_amp_sigma=None,
+                       metal_prior="uniform", ks_kmax=None)
+    rec = sbc._run_mock(None, None, 0, str(tmp_path), n_mocks=1, n_warmup=1, n_samples=1,
+                        max_tree_depth=1, seed=0, run_cfg=default_req)
+    assert rec["n_div"] == 0
+
+
+# --------------------------------------------------------------------------------------------- #
 #  4. The gated NORC KS-cap parity assert: lifted ONLY for the echelle-floating KS leg.
 # --------------------------------------------------------------------------------------------- #
 def _fake_ctx(ks_kmax, resolution_ready):

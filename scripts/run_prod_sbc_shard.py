@@ -133,6 +133,14 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
             _req.pop("f_res_amp_sigma", None)
         if "metal_prior" not in eff_existing and str(_req.get("metal_prior", "uniform")) == "uniform":
             _req.pop("metal_prior", None)
+        # BACK-COMPAT (2026-07-08, KS ks_kmax stamp): pre-stamp pkls lack ks_kmax and were ALL either
+        # non-KS (KS f_res not applicable) or a pre-flip KS run (no f_res float at all). Don't CLASH on
+        # the missing key alone WHEN the current run is ALSO at that default (ks_kmax=None: not a wired
+        # KS run). A wired-KS run (ks_kmax=0.065) does NOT pop => it differs from the missing-key existing
+        # => it correctly CLASHES: a wired KS SBC certificate must never pool a pre-flip or a 0.045-
+        # fallback KS pkl (ranks don't transfer across KS f_res forwards).
+        if "ks_kmax" not in eff_existing and _req.get("ks_kmax", None) is None:
+            _req.pop("ks_kmax", None)
         if eff_existing != _req:
             raise RuntimeError(
                 f"[mock {m}] config CLASH at {path}: existing pkl run_cfg={existing} "
@@ -292,6 +300,7 @@ def main():
         _fc = prod_forward_config(a.leg)
         _sample_res, _f_res_sigma, _metal_prior = (
             _fc["sample_res"], _fc["f_res_amp_sigma"], _fc["metal_prior"])
+    _ks_kw = (prod_forward_config("KS").get("ks_kwargs") if a.leg == "KS" else None)
     # FOLD ROUTING (2026-06-21): --fold k selects the TRUE-LOSO single net final_fold{k} (the
     # else-branch of build_legb_ctx, ensemble_ckpts=None) with mf_fold=k so the MF backbone matches
     # the fold-k LF net, and held_out_sims(fold=k) supplies that fold's EXCLUDED sims (run_legb fold,
@@ -321,13 +330,15 @@ def main():
         sample_res=_sample_res,                       # option-b f_res float (DESI/eBOSS; OFF on KS + joint)
         f_res_amp_sigma=_f_res_sigma,                 # its Normal(0,.) width (DESI 0.02 / eBOSS 0.05; None off)
         metal_prior=_metal_prior,                     # flatlog2node (Gate-C) on metal legs; uniform on KS
+        ks_kwargs=_ks_kw,                             # KS f_res echelle resolution_float+k_max (KS-only)
         hierarchical_hcd=False, **_build_kw)
     if not a.res_corr_on:
         ctx = ctx._replace(fix_alpha_res=True)        # NORC also pins the 2 alpha_res sites (now inert)
     assert ctx.res_corr_on == a.res_corr_on, "res_corr_on did not propagate to the ctx"
     assert ctx.fix_alpha_res == (not a.res_corr_on), "fix_alpha_res inconsistent with NORC state"
+    _ks_km = (_ks_kw or {}).get("k_max")
     print(f"[NORC] res_corr_on={ctx.res_corr_on} fix_alpha_res={ctx.fix_alpha_res} "
-          f"KS_kmax={'0.045' if not a.res_corr_on else '0.069'}")
+          f"KS_kmax={_ks_km if _ks_km is not None else ('0.045' if not a.res_corr_on else '0.069')}")
     if a.leg != "all":
         _pre = [l.name for l in ctx.legs]
         ctx = ctx._replace(legs=[l for l in ctx.legs if l.name.upper().startswith(a.leg.upper())])
@@ -435,8 +446,11 @@ def main():
                                       # pre-NORC anchored+alpha pkl -- ranks don't transfer across forwards.
                    sample_res=bool(_sample_res),      # DATA-NUISANCE forward discriminators (2026-07-07,
                    f_res_amp_sigma=_f_res_sigma,      # task #4): the f_res float + flat-log 2-node metals
-                   metal_prior=str(_metal_prior))     # change the SBC POPULATION, so a WIRED pkl must never
+                   metal_prior=str(_metal_prior),     # change the SBC POPULATION, so a WIRED pkl must never
                                       # pool with a pre-wiring (uniform / no-f_res) pkl -- distinct forward.
+                   ks_kmax=(_ks_kw or {}).get("k_max"))   # KS f_res k_max (None where KS not floating):
+                                      # a wired KS pkl (0.065) must never pool with a pre-flip or a
+                                      # 0.045-fallback KS pkl (Task 1C).
     records = []
     for m in idxs:
         rec = _run_mock(ctx, d, m, a.out_dir, n_mocks=a.n_mocks, n_warmup=a.n_warmup,
