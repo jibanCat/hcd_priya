@@ -6,10 +6,10 @@
 # eBOSS 0.025, all <0.1); this run CONFIRMS it via NUTS (metals precedent: verify out-of-span with NUTS).
 # Disposition: adversarial Tier-A -> FLAG in [0.30,0.50], not auto-fail (analyzer keys on member bstar).
 #
-# 16-task array: DESI (slow) 2 strengths x 4 shards; eBOSS + KS 2 strengths x 2 shards. Each cell's
+# 24-task array: DESI + eBOSS + KS each 2 strengths x 4 shards (2 mocks/shard -> 4 fits/task, ~6-7h < 14h wall). Each cell's
 # +/-1sigma strengths land in SEPARATE out-dirs so they never pool. Per-leg treatment = the DEPLOYED
 # f_res width (DESI tight 0.02 = treatment b; eBOSS 0.05 / KS 0.15 = treatment c --c-prior-sigma).
-#   sbatch --array=0-15 scripts/batch_res_oos.sh
+#   sbatch --array=0-23 scripts/batch_res_oos.sh
 # Analyze each cell on completion:
 #   for d in oos_desi_bstar_s-1.0 oos_desi_bstar_s1.0 oos_eboss_* oos_ks_*; do \
 #     python scripts/analyze_dnuis_bias.py --shard-dir $OUT/$d ; done
@@ -47,14 +47,22 @@ SPECS=(
   "desi  b 0.02  1.0 1 4"
   "desi  b 0.02  1.0 2 4"
   "desi  b 0.02  1.0 3 4"
-  "eboss c 0.05 -1.0 0 2"
-  "eboss c 0.05 -1.0 1 2"
-  "eboss c 0.05  1.0 0 2"
-  "eboss c 0.05  1.0 1 2"
-  "ks    c 0.15 -1.0 0 2"
-  "ks    c 0.15 -1.0 1 2"
-  "ks    c 0.15  1.0 0 2"
-  "ks    c 0.15  1.0 1 2"
+  "eboss c 0.05 -1.0 0 4"
+  "eboss c 0.05 -1.0 1 4"
+  "eboss c 0.05 -1.0 2 4"
+  "eboss c 0.05 -1.0 3 4"
+  "eboss c 0.05  1.0 0 4"
+  "eboss c 0.05  1.0 1 4"
+  "eboss c 0.05  1.0 2 4"
+  "eboss c 0.05  1.0 3 4"
+  "ks    c 0.15 -1.0 0 4"
+  "ks    c 0.15 -1.0 1 4"
+  "ks    c 0.15 -1.0 2 4"
+  "ks    c 0.15 -1.0 3 4"
+  "ks    c 0.15  1.0 0 4"
+  "ks    c 0.15  1.0 1 4"
+  "ks    c 0.15  1.0 2 4"
+  "ks    c 0.15  1.0 3 4"
 )
 read -r LEG TREAT CPRIOR STRENGTH SHARD NSHARDS <<< "${SPECS[$TID]}"
 CELL="$OUT/oos_${LEG}_bstar_s${STRENGTH}"    # +/-1sigma strengths in SEPARATE dirs -> never pool
