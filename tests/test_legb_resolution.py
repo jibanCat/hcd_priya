@@ -222,6 +222,29 @@ def test_resolution_sites_extra_truth_and_presence():
     assert se4 == {}
 
 
+def test_resolution_sites_extra_oos_vector_truth():
+    """A vector/basis OOS injection spec (Task 2C: --b-res-oos-member) has NO scalar 'b_res' key --
+    it is orthogonal to the (amp,slope) 2-param span BY CONSTRUCTION, so the correct in-span truth is
+    (0.0, 0.0), not a KeyError crash. Covers both injection shapes the resolver can hand back: the
+    {"path","member","strength"} spec (pre-resolve, as the runner writes it into inject_spec) and a
+    resolved {"b_res_vec": [...]} shape."""
+    samples = {"f_res_amp": np.arange(20.0), "f_res_slope": np.arange(20.0) + 100.0}
+    se = C._resolution_sites_extra(samples, step=2, L=5,
+                                    inject_spec={"resolution": {"path": "x", "member": "bstar", "strength": 1.0}},
+                                    leg_a=True)
+    assert set(se) == {"f_res_amp", "f_res_slope"}
+    assert se["f_res_amp"]["truth"] == 0.0 and se["f_res_slope"]["truth"] == 0.0
+    np.testing.assert_array_equal(se["f_res_amp"]["draws"], np.arange(20.0)[::2][:5])
+
+    se2 = C._resolution_sites_extra(samples, step=2, L=5,
+                                     inject_spec={"resolution": {"b_res_vec": [0.01, 0.02]}}, leg_a=True)
+    assert se2["f_res_amp"]["truth"] == 0.0 and se2["f_res_slope"]["truth"] == 0.0
+
+    # inject_spec=None still NaN (unchanged scalar/None path)
+    se3 = C._resolution_sites_extra(samples, step=2, L=5, inject_spec=None, leg_a=True)
+    assert np.isnan(se3["f_res_amp"]["truth"]) and np.isnan(se3["f_res_slope"]["truth"])
+
+
 def test_check_resolution_injectable_guards_unready_leg():
     """Defense-in-depth (4-referee panel, CS + domain #10): the res_b injection must RAISE, not silently
     skip, when a leg is not resolution_ready. KS reuses the DESI proxy R_z (~7-15x too large) so a b_res

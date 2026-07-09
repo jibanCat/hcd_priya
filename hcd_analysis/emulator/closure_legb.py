@@ -2522,12 +2522,18 @@ def _resolution_sites_extra(samples, step, L, inject_spec, leg_a):
     rail/coverage check (is ``f_res_amp`` railing the tight N(0,0.02) prior, or is the leg speaking?) is
     possible from the shard pkls (step-review #4). Stores thinned draws (SAME step/L as tau0_amp/dtau0) +
     the injected-arm TRUTH: a constant-b_res injection is reproduced EXACTLY by (amp=b*, slope=0) in the
-    2-param span, so truth = (injected b_res, 0.0); NaN on the clean / held-out / non-resolution arm (the
-    injection is a Leg-A-only hook). EMPTY unless sample_res actually sampled f_res ⇒ additive-only,
-    byte-identical golden under sample_res=False."""
+    2-param span, so truth = (injected b_res, 0.0); a vector/basis OUT-OF-SPAN injection (Task 2C:
+    --b-res-oos-member, no scalar "b_res" key) is orthogonal to the (amp,slope) span BY CONSTRUCTION, so
+    its in-span truth is (0.0, 0.0) -- no (amp,slope) pair reproduces it; NaN on the clean / held-out /
+    non-resolution arm (the injection is a Leg-A-only hook). EMPTY unless sample_res actually sampled
+    f_res ⇒ additive-only, byte-identical golden under sample_res=False."""
     res_inj = (inject_spec or {}).get("resolution") if (leg_a and inject_spec) else None
-    truth = {"f_res_amp": float(res_inj["b_res"]) if res_inj else np.nan,
-             "f_res_slope": 0.0 if res_inj else np.nan}
+    if res_inj is None:
+        truth = {"f_res_amp": np.nan, "f_res_slope": np.nan}
+    elif "b_res" in res_inj:                      # scalar in-span injection: reproduced by (amp=b_res, slope=0)
+        truth = {"f_res_amp": float(res_inj["b_res"]), "f_res_slope": 0.0}
+    else:                                          # vector/basis OUT-OF-SPAN injection: orthogonal to the span
+        truth = {"f_res_amp": 0.0, "f_res_slope": 0.0}   # no in-span (amp,slope) reproduces it
     out = {}
     for nm in ("f_res_amp", "f_res_slope"):
         if nm in samples:
