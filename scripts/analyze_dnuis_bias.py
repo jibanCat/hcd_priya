@@ -124,7 +124,10 @@ def load_shards(shard_dir, arm=None, survey=None, treatment=None):
     """Load + group shard pkls by (arm, TREATMENT, survey), concatenating clean/injected per-mock lists.
     ``treatment`` is the 4-arm resolution bracket label (a/b/c/d; old untagged pkls default to 'a') so arms
     A/B/C/D on the same (arm,survey) are compared, not merged. Filter by arm/survey/treatment if given.
-    Returns {(arm,treatment,survey): (clean_per_mock, inj_per_mock, ndiv)}."""
+    Returns {(arm,treatment,survey): (clean_per_mock, inj_per_mock, ndiv, oos_member)}. ``oos_member``
+    is a 1-elem list holding ``meta["b_res_oos_member"]`` off the FIRST pkl in the group (Task 2C:
+    the resolution_oos out-dir is member-suffixed, so every pkl in one group shares it; None for
+    every other arm)."""
     pat = os.path.join(shard_dir, "*_shard_*.pkl")
     groups = {}
     for p in sorted(glob.glob(pat)):
@@ -142,12 +145,31 @@ def load_shards(shard_dir, arm=None, survey=None, treatment=None):
             raise SystemExit(
                 f"{p}: not a PAIRED shard (missing clean_per_mock/inj_per_mock). Re-run the shard "
                 f"with the paired run_dnuis_bias_shard.py.")
-        cl, inj, nd = groups.setdefault((a, t, s), ([], [], [0]))
+        cl, inj, nd, om = groups.setdefault((a, t, s), ([], [], [0], [None]))
         cl.extend(d["clean_per_mock"])
         inj.extend(d["inj_per_mock"])
         nd[0] += (sum(int(r.get("n_div", 0) > 0) for r in d["clean_per_mock"])
                   + sum(int(r.get("n_div", 0) > 0) for r in d["inj_per_mock"]))
+        if om[0] is None:
+            om[0] = (d.get("meta") or {}).get("b_res_oos_member")
     return groups
+
+
+def _dnuis_verdict(arm, member, ub):
+    """Map (arm, oos_member, ub) -> the verdict string (PURE; Task 2C). The FLAG band [GATE,
+    LLS_BUDGET) applies to arm=='lls_excess' (the documented irreducible HCD->n_s budget) and to
+    arm=='resolution_oos' when ``member`` is an ADVERSARIAL basis member (bres1/bres2/bstar --
+    z-incoherent named threats + the analytic worst-n_s member); ``bres_real`` (the measured,
+    realistic residual -- Tier-R) and every other arm keep the HARD GATE."""
+    is_flag_arm = (arm == "lls_excess") or (arm == "resolution_oos" and member in ("bres1", "bres2", "bstar"))
+    thr = LLS_BUDGET if is_flag_arm else GATE
+    ok = ub < GATE
+    if is_flag_arm and not ok and ub < LLS_BUDGET:
+        _lab = "HCD→n_s" if arm == "lls_excess" else "OOS-res adversarial"
+        return f"FLAG (≤{LLS_BUDGET:.2f}σ {_lab} budget)"
+    if ub < thr:
+        return "PASS"
+    return "FAIL"
 
 
 def _bias_z_extra(rec, name):
@@ -202,7 +224,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shard-dir", required=True)
     ap.add_argument("--arm", default=None,
-                    choices=[None, "metal_misspec", "resolution", "lls_excess", "metal_matched"])
+                    choices=[None, "metal_misspec", "resolution", "resolution_oos", "lls_excess",
+                             "metal_matched"])
     ap.add_argument("--survey", default=None, choices=[None, "desi", "ks", "eboss"])
     ap.add_argument("--treatment", default=None, choices=[None, "a", "b", "c", "d"],
                     help="filter the 4-arm resolution bracket: a=option-a, b=option-b tight, "
@@ -218,8 +241,9 @@ def main():
     print(hdr)
     print("-" * len(hdr))
     any_fail = False
-    for (arm, treatment, survey), (clean_pm, inj_pm, nd) in sorted(groups.items()):
+    for (arm, treatment, survey), (clean_pm, inj_pm, nd, om) in sorted(groups.items()):
         n_div = nd[0]
+        member = om[0]
         for param in PARAMS:
             deltas, clean_zs = paired_delta_bias(clean_pm, inj_pm, param)
             n = deltas.size
@@ -228,20 +252,15 @@ def main():
                 float(abs(deltas[0])) if n == 1 else np.nan)
             ub = abs(mean) + 2.0 * se if n else np.nan       # the confidence-bound gate statistic
             clean_mean = float(clean_zs.mean()) if clean_zs.size else np.nan
-            thr = LLS_BUDGET if arm == "lls_excess" else GATE
-            ok = ub < GATE
-            if arm == "lls_excess" and not ok and ub < LLS_BUDGET:
-                verdict = f"FLAG (≤{LLS_BUDGET:.2f}σ HCD→n_s budget)"
-            elif ub < thr:
-                verdict = "PASS"
-            else:
-                verdict = "FAIL"
+            verdict = _dnuis_verdict(arm, member, ub)
+            if verdict == "FAIL":
                 any_fail = True
             print(f"{arm + '/' + treatment + '/' + survey:<22} {param:<4} {n:>4} {n_div:>4} "
                   f"{mean:>+9.3f} {se:>7.3f} {ub:>8.3f} {clean_mean:>+8.3f}  {verdict}")
     print("-" * len(hdr))
     print(f"GATE: |mean Δbias_z| + 2·SE < {GATE:.2f}σ for Ap & ns "
-          f"(lls_excess flagged up to {LLS_BUDGET:.2f}σ, not auto-failed). "
+          f"(lls_excess flagged up to {LLS_BUDGET:.2f}σ, not auto-failed; resolution_oos adversarial "
+          f"members bres1/bres2/bstar are flagged the SAME way, bres_real stays hard-gated). "
           f"clean_z is the unpaired clean-arm bias (sanity ~0).")
     print("OVERALL:", "FAIL — at least one non-LLS arm exceeds the confidence-bound gate."
           if any_fail else "PASS — all non-LLS arms within the confidence-bound bias gate.")
@@ -256,7 +275,7 @@ def main():
           f"{'a_SiIII Δ':>10} {'a_SiIII clean':>13}")
     print(rh)
     print("-" * len(rh))
-    for (arm, treatment, survey), (clean_pm, inj_pm, nd) in sorted(groups.items()):
+    for (arm, treatment, survey), (clean_pm, inj_pm, nd, _om) in sorted(groups.items()):
         tau0_nms = [nm for nm in list(clean_pm[0]["names"]) if nm.startswith("tau0_z")]
         tz = [float(d[0].mean()) for d in (paired_delta_named(clean_pm, inj_pm, nm)
                                            for nm in tau0_nms) if d[0].size]
@@ -272,13 +291,13 @@ def main():
     # surface the τ₀ amplitude+slope bias next to n_s/A_p). Present only if the runner stored
     # sites_extra (run_legb >= Model C+); silently skipped on older shards. ---
     if any((clean_pm and (clean_pm[0].get("sites_extra")))
-           for clean_pm, _inj, _nd in groups.values()):
+           for clean_pm, _inj, _nd, _om in groups.values()):
         print()
         print("MEAN-FLUX SITES (tau0_amp/dtau0 paired Δbias_z) — report only, not gated:")
         rh2 = (f"{'arm/treat/survey':<22} {'tau0_amp Δ':>11} {'tau0_amp clean':>15} "
                f"{'dtau0 Δ':>10} {'dtau0 clean':>12}")
         print(rh2); print("-" * len(rh2))
-        for (arm, treatment, survey), (clean_pm, inj_pm, nd) in sorted(groups.items()):
+        for (arm, treatment, survey), (clean_pm, inj_pm, nd, _om) in sorted(groups.items()):
             da, dac = paired_delta_extra(clean_pm, inj_pm, "tau0_amp")
             dd, ddc = paired_delta_extra(clean_pm, inj_pm, "dtau0")
             f = lambda v, w: (f"{v.mean():>+{w}.3f}" if v.size else f"{'n/a':>{w}}")
@@ -294,7 +313,7 @@ def main():
     IGM = ("alphaq", "heref", "herei", "hireionz")
     rh3 = f"{'arm/treat/survey':<22} " + " ".join(f"{p:>9}" for p in IGM)
     print(rh3); print("-" * len(rh3))
-    for (arm, treatment, survey), (clean_pm, inj_pm, nd) in sorted(groups.items()):
+    for (arm, treatment, survey), (clean_pm, inj_pm, nd, _om) in sorted(groups.items()):
         cells = []
         for p in IGM:
             dz, _cz = paired_delta_bias(clean_pm, inj_pm, p)
@@ -320,7 +339,7 @@ def main():
         for (arm, survey), treats in sorted(brackets.items()):
             rows = []
             for t in sorted(treats):
-                clean_pm, inj_pm, nd = treats[t]
+                clean_pm, inj_pm, nd, _om = treats[t]
                 dns, _ = paired_delta_bias(clean_pm, inj_pm, "ns")
                 dap, _ = paired_delta_bias(clean_pm, inj_pm, "Ap")
                 ub_ns, ub_ap = _ub(dns), _ub(dap)

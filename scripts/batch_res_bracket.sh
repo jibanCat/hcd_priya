@@ -29,6 +29,13 @@
 #   Full eBOSS bracket (4 treatments x N_SHARDS):
 #     SURVEY=eboss sbatch --account=cavestru0 --array=0-31 scripts/batch_res_bracket.sh
 #   Then DESI (its own level + bracket via BRES): SURVEY=desi BRES=0.022 ...
+#
+# OOS (Task 2C, out-of-span instrument-resolution ADVERSARIAL arm; Phase-2 will run this on cavestru0):
+# set OOS_MEMBER=(bres1|bres2|bres_real|bstar) to inject the Task-2A per-z basis member instead of the
+# scalar BRES -- e.g. OOS_MEMBER=bstar OOS_STRENGTH=1.0 SURVEY=desi sbatch ... . OUTDIR gets an
+# _oos_${OOS_MEMBER}_s${OOS_STRENGTH} suffix (member AND strength, so the +/-1sigma 3-point bracket
+# never pools) and the pkls are tagged resolution_oos_ (never collides with the scalar bracket's
+# resolution_ pkls). Default (OOS_MEMBER unset) is byte-identical to today.
 #SBATCH --job-name=res_bracket
 #SBATCH --account=cavestru0
 #SBATCH --partition=standard
@@ -67,6 +74,16 @@ TID=${SLURM_ARRAY_TASK_ID:-0}
 NCPU=${SLURM_CPUS_PER_TASK:-8}
 SMOKE_FLAG=""; [[ "${SMOKE:-0}" == "1" ]] && SMOKE_FLAG="--smoke"
 
+# OOS (Task 2C): OOS_MEMBER set -> inject the out-of-span basis member instead of the scalar BRES.
+# Default (unset) is byte-identical to today: OOS_FLAG empty, OUTDIR unsuffixed, ARM_TAG=resolution.
+OOS_FLAG=""; ARM_TAG="resolution"
+if [[ -n "${OOS_MEMBER:-}" ]]; then
+  OOS_STRENGTH=${OOS_STRENGTH:-1.0}
+  OOS_FLAG="--b-res-oos-member $OOS_MEMBER --b-res-oos-strength $OOS_STRENGTH"
+  OUTDIR="${OUTDIR}_oos_${OOS_MEMBER}_s${OOS_STRENGTH}"
+  ARM_TAG="resolution_oos"
+fi
+
 TREAT_IDX=$(( TID / N_SHARDS ))
 SHARD=$(( TID % N_SHARDS ))
 if [ "$TREAT_IDX" -ge "$N_TREAT" ]; then
@@ -84,12 +101,12 @@ export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
 mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
 
-if [[ -f "$OUTDIR/resolution_${T}_${SURVEY}_shard_$(printf %03d "$SHARD").pkl" ]]; then
+if [[ -f "$OUTDIR/${ARM_TAG}_${T}_${SURVEY}_shard_$(printf %03d "$SHARD").pkl" ]]; then
   echo "=== treat=$T $SURVEY shard $SHARD pkl exists -- SKIP ==="; exit 0
 fi
-echo "=== res_bracket treat=$T ($SURVEY) b_res=$BRES ${C_FLAG} ${PIN_FLAG} shard ${SHARD}/${N_SHARDS} (${NCPU} cpu) start: $(date) ==="
+echo "=== res_bracket treat=$T ($SURVEY) b_res=$BRES ${C_FLAG} ${PIN_FLAG} ${OOS_FLAG} shard ${SHARD}/${N_SHARDS} (${NCPU} cpu) start: $(date) ==="
 "$PY" -u scripts/run_dnuis_bias_shard.py \
-    --arm resolution --survey "$SURVEY" --treatment "$T" $C_FLAG $PIN_FLAG \
+    --arm resolution --survey "$SURVEY" --treatment "$T" $C_FLAG $PIN_FLAG $OOS_FLAG \
     --shard "$SHARD" --n-shards "$N_SHARDS" --n-mocks "$N_MOCKS" \
     --n-warmup "$N_WARMUP" --n-samples "$N_SAMPLES" --b-res "$BRES" --out-dir "$OUTDIR" $SMOKE_FLAG
 echo "=== done: $(date) ==="
