@@ -111,6 +111,78 @@ def _project_out(R, ortho_basis, Cinv):
     return out
 
 
+def analytic_worst_ns(r_ns_bres, ortho_span, M_sub, *, degenerate_tol=1e-8):
+    """THE ANALYTIC worst-n_s out-of-span direction b* (Task 2A-2).
+
+    The z-shape DICTIONARY members (bres1/bres2) only approximate the worst-n_s
+    out-of-span direction; the TRUE argmax has a closed form. Over the set of
+    M_sub-unit vectors b with cos_M(b, span{u1,u2}) == 0 (out-of-span), the
+    maximizer of cos_M(b, r_ns_bres) is the (M_sub-)normalized residual of the
+    M_sub-projection of r_ns_bres onto span:
+
+        b* = P_perp_span(r_ns_bres) / ||P_perp_span(r_ns_bres)||_M ,
+        P_perp_span(r) = r - sum_q <r, q>_M q   (q in ortho_span, M-orthonormal)
+
+    and the achieved cosine is exactly
+
+        f_perp = ||P_perp_span(r_ns_bres)||_M / ||r_ns_bres||_M
+
+    (the fraction of the n_s pullback response living OUT of the 2-param f_res
+    span). This is a Cauchy-Schwarz argmax: any out-of-span unit b decomposes
+    r_ns_bres . the b-component of r_ns_bres in the b* direction is bounded by
+    f_perp with equality iff b == +-b*.
+
+    Parameters
+    ----------
+    r_ns_bres  : (n_heII,)      M_sub-pullback n_s response (build_oos_bres output).
+    ortho_span : list of (n_heII,)  M_sub-orthonormal basis of span{u1,u2}.
+    M_sub      : (n_heII, n_heII)   SPD pullback metric.
+    degenerate_tol : guard -- if ||P_perp_span(r_ns_bres)||_M <= degenerate_tol *
+                     ||r_ns_bres||_M, the n_s response is (numerically) fully
+                     IN-SPAN: no out-of-span n_s direction exists to inject.
+
+    Returns
+    -------
+    (bstar_sub, f_perp, degenerate) :
+      bstar_sub  : (n_heII,) or None   M_sub-unit, M_sub-orthogonal to span
+                   (None iff degenerate -- caller substitutes a dict fallback).
+      f_perp     : float   achieved cos_M(bstar_sub, r_ns_bres); 0.0 if degenerate.
+      degenerate : bool
+    """
+    inner_M, norm_M, _ = _whitened_inner(M_sub)
+    r_ns_bres = np.asarray(r_ns_bres, float)
+    r_perp = _project_out(r_ns_bres, ortho_span, M_sub)
+    norm_rns = norm_M(r_ns_bres)
+    norm_perp = norm_M(r_perp)
+    if norm_rns <= 0.0 or norm_perp <= degenerate_tol * norm_rns:
+        return None, 0.0, True
+    bstar_sub = r_perp / norm_perp
+    f_perp = float(inner_M(bstar_sub, r_ns_bres) / norm_rns)   # == norm_perp/norm_rns, > 0
+    return bstar_sub, f_perp, False
+
+
+def _scale_to_envelope(bres, B, band, env_target):
+    """Scale a per-z b_res vector (n_z,) so max_z(band) |exp(B@bres)-1| ==
+    env_target, with the SIGN convention: the largest-|amp| cell in ``band`` is a
+    DEFICIT (negative log-perturbation), matching the bres1/bres2 convention.
+    Returns (bres_scaled, env_realized)."""
+    bres = np.asarray(bres, float)
+    band = np.asarray(band, bool)
+    p = B @ bres                                     # flat-P log-perturbation
+    peak = np.max(np.abs(p[band])) if band.any() else np.max(np.abs(p))
+    if peak <= 0:
+        return bres, 0.0
+    s = np.log1p(env_target) / peak                  # max|exp(p_scaled)-1| == env_target
+    bres_s = bres * s
+    p_s = p * s
+    imax = np.argmax(np.abs(np.where(band, p_s, 0.0)))
+    if p_s[imax] > 0:                                # largest |amp| cell -> a DEFICIT (negative)
+        bres_s = -bres_s
+        p_s = -p_s
+    env_realized = float(np.max(np.abs(np.expm1(p_s[band]))))
+    return bres_s, env_realized
+
+
 # ---------------------------------------------------------------------------- #
 #  THE LOAD-BEARING PURE HELPER (numpy-only; unit-tested independently of ctx)
 # ---------------------------------------------------------------------------- #
@@ -216,12 +288,30 @@ def build_oos_bres(B, C_data, u1, u2, hiZ_cells, hiZ_nodes, r_ns_P,
     cos_ns = np.array([cos_M(bres1_sub, r_ns_bres), cos_M(bres2_sub, r_ns_bres)])
     worst = 1 if abs(cos_ns[0]) >= abs(cos_ns[1]) else 2
 
+    # ---- ANALYTIC worst-n_s out-of-span member b* (Task 2A-2): the TRUE argmax,
+    # vs. the z-shape dictionary bres1/bres2 which only approximate it ----
+    bstar_raw, f_perp, bstar_degenerate = analytic_worst_ns(r_ns_bres, ortho_span, M_sub)
+    if bstar_degenerate:
+        # n_s response fully in-span -> no out-of-span direction to inject; fall
+        # back to the existing worst-n_s dict member (already out-of-span).
+        bstar_sub = bres1_sub if worst == 1 else bres2_sub
+        cos_bstar_ns = float(cos_ns[worst - 1])
+    else:
+        bstar_sub = bstar_raw
+        cos_bstar_ns = float(f_perp)
+    bstar_cos_span = _cos_to_span(bstar_sub)
+    assert bstar_cos_span < 1e-6, (
+        f"bstar not out-of-span: cos_M(bstar,span)={bstar_cos_span:.3e} !< 1e-6")
+    bstar = np.zeros(n_z); bstar[sub_nodes] = bstar_sub
+
     return dict(
         sub_nodes=sub_nodes, cell_idx=cell_idx, C_sub=C_sub, Cinv_sub=Cinv_sub,
         B_sub=B_sub, M_sub=M_sub, u1_sub=u1_sub, u2_sub=u2_sub, ortho_span=ortho_span,
         bres1_sub=bres1_sub, bres2_sub=bres2_sub, bres1=bres1, bres2=bres2,
         r_ns_bres=r_ns_bres, r_ns_P_sub=r_ns_P[cell_idx],
         cos_span=cos_span, cos_ns=cos_ns, worst_ns_member=int(worst),
+        bstar_sub=bstar_sub, bstar=bstar, cos_bstar_ns=cos_bstar_ns,
+        bstar_degenerate=bool(bstar_degenerate),
         S=S, rank=rank, cos_gate=float(cos_gate),
     )
 
@@ -376,6 +466,8 @@ def main():
         bres1, bres2 = res["bres1"], res["bres2"]
         cos_span, cos_ns = res["cos_span"], res["cos_ns"]
         worst, S = res["worst_ns_member"], res["S"]
+        bstar = res["bstar"]
+        cos_bstar_ns, bstar_degenerate = res["cos_bstar_ns"], res["bstar_degenerate"]
         if res["rank"] < 2:
             print(f"   [WARN] {name}: OOS residual rank={res['rank']} (<2); S={np.array2string(S, precision=2)}")
 
@@ -395,20 +487,14 @@ def main():
         # ---- scale each bres_j to that envelope (in the exp-multiplier sense) ----
         scaled, env_realized = [], []
         for bres in (bres1, bres2):
-            p = B @ bres                                 # flat-P log-perturbation
-            peak = np.max(np.abs(p[band])) if band.any() else np.max(np.abs(p))
-            if peak <= 0:
-                scaled.append(bres); env_realized.append(0.0); continue
-            s = np.log1p(env_target) / peak              # max|exp(p_scaled)-1| == env_target
-            bres_s = bres * s
-            p_s = p * s
-            imax = np.argmax(np.abs(np.where(band, p_s, 0.0)))
-            if p_s[imax] > 0:                            # largest |amp| cell -> a DEFICIT (negative)
-                bres_s = -bres_s; p_s = -p_s
-            scaled.append(bres_s)
-            env_realized.append(float(np.max(np.abs(np.expm1(p_s[band])))))
+            bres_s, er = _scale_to_envelope(bres, B, band, env_target)
+            scaled.append(bres_s); env_realized.append(er)
         bres1_s, bres2_s = scaled
         env_realized = np.array(env_realized)
+
+        # ---- scale b* (Task 2A-2) to the SAME envelope, same helper ----
+        bstar_s, env_realized_bstar = _scale_to_envelope(bstar, B, band, env_target)
+        gate_member = "bstar" if not bstar_degenerate else f"bres{worst}"
 
         # ---- k^2 R_z^2 at k_max (leg-triviality is empirical, blocker B3) ----
         imk = int(np.argmax(k_leg))
@@ -434,11 +520,16 @@ def main():
         print(f"   k^2 R_z^2 @kmax={k2Rz2_kmax:.4g} (max cell {k2Rz2_cellmax:.4g})  "
               f"Tier-R: isflag={bres_real_isflag} absent={bres_real_absent} "
               f"kshape_uncaptured={kshape_uncaptured:.3f}")
+        print(f"   [Task 2A-2] cos_M(bstar,n_s)={cos_bstar_ns:+.4f} (analytic ARGMAX, vs dict-"
+              f"captured max={max(abs(cos_ns[0]), abs(cos_ns[1])):.4f})  degenerate={bstar_degenerate}  "
+              f"realized bstar={env_realized_bstar*100:.3f}%  -> PRIMARY gate_member={gate_member}")
 
         rows.append(dict(name=name, cos_span=cos_span, cos_ns=cos_ns, worst=worst,
                          env_used=env_used, env_realized=env_realized, k2Rz2_kmax=k2Rz2_kmax,
                          isflag=bres_real_isflag, absent=bres_real_absent,
-                         kshape=kshape_uncaptured, n_heII=int(hiZ_nodes.sum())))
+                         kshape=kshape_uncaptured, n_heII=int(hiZ_nodes.sum()),
+                         cos_bstar_ns=cos_bstar_ns, bstar_degenerate=bstar_degenerate,
+                         gate_member=gate_member))
 
         out[f"{name}_bres1"] = bres1_s.astype(float)
         out[f"{name}_bres2"] = bres2_s.astype(float)
@@ -454,6 +545,13 @@ def main():
         out[f"{name}_k2Rz2_kmax"] = float(k2Rz2_kmax)
         out[f"{name}_env_used"] = env_used
         out[f"{name}_kshape_uncaptured_frac"] = float(kshape_uncaptured)
+        # Task 2A-2: the analytic worst-n_s out-of-span member b* + the PRIMARY
+        # gate-member selector the Phase-2 adversarial injection should consume.
+        out[f"{name}_bstar"] = bstar_s.astype(float)
+        out[f"{name}_cos_bstar_ns"] = float(cos_bstar_ns)
+        out[f"{name}_bstar_degenerate"] = bool(bstar_degenerate)
+        out[f"{name}_env_realized_bstar"] = float(env_realized_bstar)
+        out[f"{name}_gate_member"] = gate_member
         # extras (debug/figure)
         out[f"{name}_r_ns_bres"] = res["r_ns_bres"].astype(float)
         out[f"{name}_sub_nodes"] = res["sub_nodes"].astype(int)
@@ -502,7 +600,15 @@ def main():
         "M_sub=B_sub^T C_sub^-1 B_sub, localized to z>=2.8, scaled to the leg's 1-sigma "
         "resolution envelope. worst_ns_member (1/2) = the max-|cos_M(bres,n_s)| member. "
         "bres_real = Tier-R representative from the measured resolution error (isflag=True "
-        "when the error is a symmetric 1-sigma envelope, FLAG not hard-gate)."
+        "when the error is a symmetric 1-sigma envelope, FLAG not hard-gate). "
+        "(Task 2A-2) {leg}_bstar = the ANALYTIC worst-n_s out-of-span member (the TRUE "
+        "argmax of cos_M(b,n_s) over out-of-span b, closed form b*=normalize_M(P_perp_"
+        "span(r_ns_bres))), scaled to the same envelope; {leg}_cos_bstar_ns = the achieved "
+        "cosine f_perp = ||P_perp_span(r_ns_bres)||_M/||r_ns_bres||_M (>= either dict "
+        "member's |cos_ns|); {leg}_bstar_degenerate=True iff the n_s response is fully "
+        "in-span (no out-of-span n_s direction exists -> bstar falls back to the dict "
+        "worst member); {leg}_gate_member = the PRIMARY member (\"bstar\" unless "
+        "degenerate) the Phase-2 adversarial injection should use."
     )
     os.makedirs(os.path.dirname(OUT_NPZ), exist_ok=True)
     np.savez(OUT_NPZ, **out)
@@ -520,10 +626,14 @@ def main():
     allok = all(r["cos_span"][0] < COS_GATE and r["cos_span"][1] < COS_GATE for r in rows)
     print(f"\nASSERT cos_M(bres, span f_res) < {COS_GATE} for ALL members, ALL legs: "
           f"{'PASS' if allok else 'FAIL'}")
-    print("Pre-selected gate member (worst-n_s) per leg:")
+    print("Dictionary worst-n_s member (bres1/bres2) per leg:")
     for r in rows:
         wc = r["cos_ns"][r["worst"] - 1]
         print(f"   {r['name']:<7} -> bres{r['worst']}  (cos_M(bres{r['worst']},n_s)={wc:+.4f})")
+    print("\n(Task 2A-2) PRIMARY gate member (analytic worst-n_s b*, TRUE argmax) per leg:")
+    for r in rows:
+        print(f"   {r['name']:<7} -> {r['gate_member']}  "
+              f"(cos_M(bstar,n_s)={r['cos_bstar_ns']:+.4f}, degenerate={r['bstar_degenerate']})")
 
 
 def _tier_r_member(B, C_data, u1, u2, P_data, res_e, is_signed, n_z):

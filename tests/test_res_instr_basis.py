@@ -21,7 +21,9 @@ import pytest
 # module top-level is numpy-only, so this import is cheap (no jax/ctx pulled in)
 from scripts.build_res_instr_injection_basis import (
     build_oos_bres,
+    analytic_worst_ns,
     _whitened_inner,
+    _project_out,
     OUT_NPZ,
     COS_GATE,
     Z_HEII,
@@ -160,6 +162,95 @@ def test_rank_two_well_determined(res):
     assert S[1] > 1e-9 * S[0]
 
 
+# ---------------------------------------------------------------------------- #
+#  (1b) PURE / LOAD-BEARING tests -- Task 2A-2: analytic worst-n_s member b*
+# ---------------------------------------------------------------------------- #
+def test_analytic_worst_ns_out_of_span(res):
+    """b* = analytic_worst_ns(r_ns_bres, ortho_span, M_sub) is M_sub-orthogonal to
+    span{u1,u2} to 1e-8 (out-of-span BY CONSTRUCTION -- it is a P_perp)."""
+    M = res["M_sub"]
+    bstar, f_perp, degenerate = analytic_worst_ns(res["r_ns_bres"], res["ortho_span"], M)
+    assert not degenerate
+    _, _, cos_M = _whitened_inner(M)
+    for q in res["ortho_span"]:
+        assert abs(cos_M(bstar, q)) < 1e-8
+
+
+def test_analytic_worst_ns_shape(res, synth):
+    n_heII = int(synth["hiZ_nodes"].sum())
+    bstar, _, _ = analytic_worst_ns(res["r_ns_bres"], res["ortho_span"], res["M_sub"])
+    assert bstar.shape == (n_heII,)
+
+
+def test_analytic_worst_ns_is_the_argmax(res):
+    """THE load-bearing property: b* achieves cos_M(b*, r_ns_bres) == f_perp ==
+    ||P_perp_span(r_ns_bres)||_M / ||r_ns_bres||_M to 1e-8, and is the ARGMAX over
+    out-of-span unit directions -- a handful of random out-of-span directions must
+    have STRICTLY SMALLER |cos_M(., r_ns_bres)|."""
+    M = res["M_sub"]
+    r_ns_bres = res["r_ns_bres"]
+    ortho_span = res["ortho_span"]
+    _, norm_M, cos_M = _whitened_inner(M)
+    bstar, f_perp, degenerate = analytic_worst_ns(r_ns_bres, ortho_span, M)
+    assert not degenerate
+
+    expected = norm_M(_project_out(r_ns_bres, ortho_span, M)) / norm_M(r_ns_bres)
+    assert abs(f_perp - expected) < 1e-8
+    assert abs(cos_M(bstar, r_ns_bres) - f_perp) < 1e-8
+
+    rng = np.random.default_rng(7)
+    n = bstar.shape[0]
+    n_checked = 0
+    for _ in range(20):
+        v = _project_out(rng.standard_normal(n), ortho_span, M)
+        nv = norm_M(v)
+        if nv < 1e-8:                      # degenerate random draw (rare) -- skip
+            continue
+        v = v / nv
+        assert abs(cos_M(v, r_ns_bres)) <= f_perp + 1e-8
+        n_checked += 1
+    assert n_checked >= 5, "too few well-conditioned random out-of-span draws"
+
+
+def test_analytic_worst_ns_degenerate_case():
+    """When r_ns_bres lies FULLY in span{q1,q2}, degenerate=True, bstar is None,
+    f_perp==0.0 (no out-of-span n_s direction exists to inject)."""
+    M = np.eye(3)
+    q1 = np.array([1.0, 0.0, 0.0])
+    q2 = np.array([0.0, 1.0, 0.0])
+    r_ns_bres = np.array([2.0, -1.0, 0.0])          # fully in span{q1,q2}
+    bstar, f_perp, degenerate = analytic_worst_ns(r_ns_bres, [q1, q2], M)
+    assert degenerate
+    assert bstar is None
+    assert f_perp == 0.0
+
+
+def test_build_oos_bres_bstar_matches_helper(res):
+    """build_oos_bres's own bstar_sub/cos_bstar_ns must match calling the pure
+    analytic_worst_ns helper directly on its own (r_ns_bres, ortho_span, M_sub)."""
+    bstar_direct, f_perp, degenerate = analytic_worst_ns(
+        res["r_ns_bres"], res["ortho_span"], res["M_sub"])
+    assert res["bstar_degenerate"] == degenerate
+    assert not degenerate
+    assert np.allclose(res["bstar_sub"], bstar_direct, atol=1e-10)
+    assert abs(res["cos_bstar_ns"] - f_perp) < 1e-8
+
+
+def test_bstar_embedded_shape_and_localization(res, synth):
+    """bstar (n_z,) is zero OFF the He-II nodes, like bres1/bres2."""
+    n_z = synth["n_z"]
+    assert res["bstar"].shape == (n_z,)
+    off = ~synth["hiZ_nodes"]
+    assert np.allclose(res["bstar"][off], 0.0)
+
+
+def test_bstar_at_least_as_ns_aligned_as_dict(res):
+    """The whole point: b* is at least as n_s-aligned as either dict member
+    (bres1/bres2), since it is the TRUE argmax over the out-of-span subspace."""
+    cos_ns = np.abs(res["cos_ns"])
+    assert abs(res["cos_bstar_ns"]) >= np.max(cos_ns) - 1e-8
+
+
 def test_raises_when_too_few_heII_nodes():
     s = _synthetic(n_z=7)
     # force only 2 He-II nodes -> cannot form a rank-2 basis beyond the 2-D span
@@ -213,3 +304,37 @@ def test_artifact_env_used_recorded(basis):
     legs = [str(x) for x in np.atleast_1d(basis["_meta_legs"])]
     for name in legs:
         assert str(basis[f"{name}_env_used"]) in ("resolution_e", "fallback_5pct")
+
+
+# ---------------------------------------------------------------------------- #
+#  (2b) ARTIFACT tests -- Task 2A-2: analytic worst-n_s member b*
+#  NOTE: requires a npz REBUILT after the b* addition (the builder overwrites
+#  OUT_NPZ wholesale each run) -- against a pre-2A-2 npz these will fail on
+#  missing keys, which is expected until the sbatch rebuild lands.
+# ---------------------------------------------------------------------------- #
+@skip_if_no_npz
+def test_artifact_bstar_shape(basis):
+    legs = [str(x) for x in np.atleast_1d(basis["_meta_legs"])]
+    for name in legs:
+        n_z = basis[f"{name}_z"].shape[0]
+        assert basis[f"{name}_bstar"].shape == (n_z,), f"{name}_bstar"
+
+
+@skip_if_no_npz
+def test_artifact_bstar_at_least_as_ns_aligned_as_dict(basis):
+    """b* is at least as n_s-aligned as either dict member (bres1/bres2) -- the
+    whole point of adding the analytic member."""
+    legs = [str(x) for x in np.atleast_1d(basis["_meta_legs"])]
+    for name in legs:
+        cos_bstar_ns = abs(float(basis[f"{name}_cos_bstar_ns"]))
+        cos_ns_dict = np.abs(np.asarray(basis[f"{name}_cos_ns"], float))
+        assert cos_bstar_ns >= float(np.max(cos_ns_dict)) - 1e-6, (
+            f"{name}: cos_bstar_ns={cos_bstar_ns:.4f} < max dict cos_ns={np.max(cos_ns_dict):.4f}")
+
+
+@skip_if_no_npz
+def test_artifact_gate_member_valid(basis):
+    legs = [str(x) for x in np.atleast_1d(basis["_meta_legs"])]
+    for name in legs:
+        gm = str(basis[f"{name}_gate_member"])
+        assert gm in ("bstar", "bres1", "bres2"), f"{name}_gate_member={gm!r}"
