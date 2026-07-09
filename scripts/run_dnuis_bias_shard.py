@@ -55,6 +55,7 @@ from hcd_analysis.emulator.inference import (HCD_LIT_OVER_SIM, HCD_LLS_SURVEY_BO
 
 REPO = "/home/mfho/hcd_priya"
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
+RES_INSTR_BASIS = os.path.join(REPO, "hcd_analysis", "_emulator_data", "res_instr_injection_basis.npz")
 
 # Per-survey TRUTH LLS boost (lit/sim effective LLS the mock truth carries vs the forward pin).
 # The arm must put the TRUTH OFF the forward's per-survey pin center, else it is a near-null test.
@@ -75,11 +76,20 @@ LLS_TRUTH_BOOST = {
 }
 
 
-def arm_inject_spec(arm, survey, *, b_res=0.02, ks_resolution_ready=False):
+def _resinj_oos_spec(member, strength, path=RES_INSTR_BASIS):
+    """None (default: the scalar in-span arm) or the OOS basis spec dict the resolver
+    (``_resolve_res_instr_inject``) loads: ``{"path": npz, "member": m, "strength": x}``."""
+    if member is None:
+        return None
+    return {"path": path, "member": str(member), "strength": float(strength)}
+
+
+def arm_inject_spec(arm, survey, *, b_res=0.02, ks_resolution_ready=False, oos_member=None, oos_strength=1.0):
     """Map (arm, survey) -> the run_legb inject_spec (PURE; no ctx build, unit-testable). ``b_res``
     sets the resolution injection strength (default 0.02 = the realistic DESI ~1-sigma level derived
     from the data's own syst_e_resolution; the option-a certification brackets it +/-1 sigma over
-    {0.015, 0.02, 0.03})."""
+    {0.015, 0.02, 0.03}). ``oos_member`` (Task 2C) selects an OUT-OF-SPAN per-z basis member from
+    ``RES_INSTR_BASIS`` INSTEAD of the scalar ``b_res`` (default None = unchanged scalar arm)."""
     if arm == "metal_misspec":
         if survey == "ks":
             raise SystemExit(
@@ -95,7 +105,8 @@ def arm_inject_spec(arm, survey, *, b_res=0.02, ks_resolution_ready=False):
                 "echelle, sigma~3.2 km/s -> a ~70% distortion the forward cannot fit, the -21sigma ESS collapse). "
                 "Pass ks_resolution_ready=True only when the echelle R_z + diag surgery is wired (build_arm_ctx "
                 "resolution-float on KS, task #5). Then the b_res injection is on the physical echelle scale.")
-        return {"resolution": {"b_res": float(b_res)}}
+        oos_spec = _resinj_oos_spec(oos_member, oos_strength)
+        return {"resolution": oos_spec if oos_spec is not None else {"b_res": float(b_res)}}
     if arm == "lls_excess":
         return {"lls_truth_boost": LLS_TRUTH_BOOST[survey]}
     if arm == "metal_matched":
@@ -128,10 +139,13 @@ def treatment_flags(treatment, *, c_prior_sigma=0.05):
 
 
 def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, float_res=False,
-                  coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None, pin_hub=False):
+                  coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None, pin_hub=False,
+                  oos_member=None, oos_strength=1.0):
     """Build the single-survey production ctx for an arm. metals_on/sample_metals ON for
     DESI/eBOSS (False for KS). Returns (ctx, d, inject_spec). The arm runs on ONE survey's legs:
-    we build a single-survey ctx by restricting the leg list AFTER build (keep it simple)."""
+    we build a single-survey ctx by restricting the leg list AFTER build (keep it simple).
+    ``oos_member``/``oos_strength`` (Task 2C) select the OUT-OF-SPAN basis injection for the
+    resolution arm instead of the scalar ``b_res``; default None -> byte-identical scalar arm."""
     members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
     if not members:
         raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
@@ -181,8 +195,17 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     # map arm -> inject_spec (pure helper; the resolution b_res is configurable for the +/-1 sigma
     # option-a certification). metal_misspec REALISM: desi_full (with the unfittable additive SiII-SiII
     # term) for DESI, McDonald/eBOSS SiIIIcorr for eBOSS; the KS metal no-op guard lives in the helper.
-    inject_spec = arm_inject_spec(arm, survey, b_res=b_res, ks_resolution_ready=(_ks_kwargs is not None))
+    # oos_member (Task 2C): None -> unchanged scalar b_res resolution arm (byte-identical).
+    inject_spec = arm_inject_spec(arm, survey, b_res=b_res, ks_resolution_ready=(_ks_kwargs is not None),
+                                  oos_member=oos_member, oos_strength=oos_strength)
     return ctx, d, inject_spec
+
+
+def _out_arm(arm, b_res_oos_member):
+    """Write-time output arm tag (Task 2C): an OOS member selects the "resolution_oos" tag so its
+    pkls never collide with the scalar in-span "resolution" arm's; member None -> unchanged (byte-
+    identical for every arm, including non-resolution ones)."""
+    return "resolution_oos" if b_res_oos_member else arm
 
 
 def main():
@@ -201,6 +224,14 @@ def main():
                     help="resolution injection strength (arm=resolution). Default 0.02 = the realistic "
                          "DESI ~1sigma level from syst_e_resolution; certification bracket +/-1sigma "
                          "{0.015,0.02,0.03}. Ignored for non-resolution arms.")
+    ap.add_argument("--b-res-oos-member", choices=["bres1", "bres2", "bres_real", "bstar"], default=None,
+                    help="OUT-OF-SPAN instrument-resolution arm: inject the per-z basis MEMBER from "
+                         "res_instr_injection_basis.npz instead of the scalar --b-res. bstar=analytic worst-n_s "
+                         "(adversarial); bres1/bres2=z-incoherent named threats (adversarial); bres_real=measured "
+                         "residual (realistic). Requires --arm resolution. Default None = the scalar in-span arm.")
+    ap.add_argument("--b-res-oos-strength", type=float, default=1.0,
+                    help="strength scale on the OOS basis member (+/-1sigma 3-point bracket). Ignored unless "
+                         "--b-res-oos-member.")
     ap.add_argument("--float-res", dest="float_res", action="store_true",
                     help="OPTION-B: float the 2-param f_res spectral-resolution nuisance + remove the "
                          "resolution mode from the covariance. BOTH legs: DESI = per-z rank-1 cov_b; eBOSS = "
@@ -258,7 +289,8 @@ def main():
         treatment = "d" if a.coherent_res else ("b" if a.float_res else "a")
     ctx, d, inject_spec = build_arm_ctx(a.arm, a.survey, a.with_mf, b_res=a.b_res, float_res=a.float_res,
                                         coherent_res=a.coherent_res, coh_amp=a.coh_amp,
-                                        f_res_amp_sigma=f_res_amp_sigma, pin_hub=a.pin_hub)
+                                        f_res_amp_sigma=f_res_amp_sigma, pin_hub=a.pin_hub,
+                                        oos_member=a.b_res_oos_member, oos_strength=a.b_res_oos_strength)
     n_members = len(getattr(ctx.model, "members", [None]))
     idxs = [m for m in range(a.n_mocks) if m % a.n_shards == a.shard]
     print(f"[dnuis {a.arm}/{a.survey} treat={treatment}"
@@ -289,13 +321,16 @@ def main():
 
     os.makedirs(a.out_dir, exist_ok=True)
     # tag the output with the TREATMENT so the 4 bracket arms (a/b/c/d) never overwrite each other.
-    out = os.path.join(a.out_dir, f"{a.arm}_{treatment}_{a.survey}_shard_{a.shard:03d}.pkl")
+    # out_arm (Task 2C): an OOS member -> "resolution_oos" so it never collides with the scalar
+    # in-span "resolution" arm's pkls; member None -> unchanged (byte-identical).
+    out_arm = _out_arm(a.arm, a.b_res_oos_member)
+    out = os.path.join(a.out_dir, f"{out_arm}_{treatment}_{a.survey}_shard_{a.shard:03d}.pkl")
     meta = dict(vars(a))
     meta.update(inject_spec=inject_spec, n_members=n_members, paired=True, treatment=treatment,
                 f_res_amp_sigma=f_res_amp_sigma, legs=[l.name for l in ctx.legs],
                 wall_s=wall, per_fit_wall_s=per_mock_wall)
     with open(out, "wb") as f:
-        pickle.dump(dict(arm=a.arm, treatment=treatment, survey=a.survey, idxs=idxs,
+        pickle.dump(dict(arm=out_arm, treatment=treatment, survey=a.survey, idxs=idxs,
                          clean_per_mock=clean_per_mock, inj_per_mock=inj_per_mock,
                          meta=meta), f)
     n_div = (sum(int(r.get("n_div", 0) > 0) for r in clean_per_mock)
