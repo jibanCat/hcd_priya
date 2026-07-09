@@ -27,6 +27,7 @@ Env (MANDATORY):
 from __future__ import annotations
 
 import argparse
+import copy
 import functools
 from typing import NamedTuple
 
@@ -497,24 +498,27 @@ def _kim(z):
 #                      certified option-b widths; None where f_res is OFF).
 #   metal_prior      : "flatlog2node" = the Gate-C Model C+ 2-node metals; "uniform" where metals are off.
 #   metals           : whether this leg bears the SiIII/SiII metal forward + samples the metal sites.
-# KS: no f_res (resolution_ready=False -- its loader reuses the DESI proxy R_z ~7-15x too large; the KS
-# echelle R_z + float is a separate build, task #5) and no metals (its conservative covariance already
-# subtracts+inflates metals/continuum/resolution). Flip KS to a float here only when task #5 lands.
+# KS: f_res is ON via the certified KS echelle R_z instrument-f_res bracket (task #5, DONE) -- its own
+# ks_kwargs (resolution_float + k_max, distinct from the DESI/eBOSS proxy) rather than the DESI/eBOSS
+# f_res_amp_sigma widths; wide sigma=0.15 reflects the certified out-of-span/instrument-bracket study.
+# No metals (its conservative covariance already subtracts+inflates metals/continuum/resolution).
 PROD_FORWARD_BY_LEG = {
-    "DESI":  dict(sample_res=True,  f_res_amp_sigma=0.02, metal_prior="flatlog2node", metals=True),
-    "eBOSS": dict(sample_res=True,  f_res_amp_sigma=0.05, metal_prior="flatlog2node", metals=True),
-    "KS":    dict(sample_res=False, f_res_amp_sigma=None, metal_prior="uniform",      metals=False),
+    "DESI":  dict(sample_res=True,  f_res_amp_sigma=0.02, metal_prior="flatlog2node", metals=True,  ks_kwargs=None),
+    "eBOSS": dict(sample_res=True,  f_res_amp_sigma=0.05, metal_prior="flatlog2node", metals=True,  ks_kwargs=None),
+    "KS":    dict(sample_res=True,  f_res_amp_sigma=0.15, metal_prior="uniform",      metals=False,
+                  ks_kwargs=dict(resolution_float=True, k_max=0.065)),
 }
 
 
 def prod_forward_config(leg):
     """The certified production data-nuisance forward config for one leg name ('DESI'/'eBOSS'/'KS').
 
-    Returns a fresh dict {sample_res, f_res_amp_sigma, metal_prior, metals} -- the SINGLE source
-    both build_real_ctx and run_prod_sbc_shard consume so the real-fit and SBC forwards are identical.
+    Returns a fresh dict {sample_res, f_res_amp_sigma, metal_prior, metals, ks_kwargs} -- the SINGLE
+    source both build_real_ctx and run_prod_sbc_shard consume so the real-fit and SBC forwards are
+    identical. Deep-copied so nested mutation (e.g. ks_kwargs) cannot corrupt the module constant.
     Raises KeyError on an unknown leg (fail loud rather than silently mis-configure the forward)."""
     try:
-        return dict(PROD_FORWARD_BY_LEG[leg])
+        return copy.deepcopy(PROD_FORWARD_BY_LEG[leg])
     except KeyError:
         raise KeyError(f"no production forward config for leg {leg!r}; "
                        f"expected one of {list(PROD_FORWARD_BY_LEG)}")

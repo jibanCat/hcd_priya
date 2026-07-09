@@ -45,8 +45,12 @@ def test_prod_forward_config_certified_values():
     assert eboss["sample_res"] is True and eboss["f_res_amp_sigma"] == 0.05
     assert eboss["metal_prior"] == "flatlog2node" and eboss["metals"] is True
     ks = CL.prod_forward_config("KS")
-    assert ks["sample_res"] is False and ks["f_res_amp_sigma"] is None
+    assert ks["sample_res"] is True and ks["f_res_amp_sigma"] == 0.15
     assert ks["metal_prior"] == "uniform" and ks["metals"] is False
+    assert ks["ks_kwargs"] == {"resolution_float": True, "k_max": 0.065}
+    # DESI/eBOSS carry ks_kwargs=None (their KS leg stays the proxy default)
+    assert CL.prod_forward_config("DESI")["ks_kwargs"] is None
+    assert CL.prod_forward_config("eBOSS")["ks_kwargs"] is None
 
 
 def test_prod_forward_config_unknown_leg_raises():
@@ -59,7 +63,10 @@ def test_prod_forward_config_returns_a_copy():
     from hcd_analysis.emulator import closure_legb as CL
     a = CL.prod_forward_config("DESI")
     a["sample_res"] = "MUTATED"
-    assert CL.prod_forward_config("DESI")["sample_res"] is True   # not shared state
+    assert CL.prod_forward_config("DESI")["sample_res"] is True   # not shared (top-level)
+    ks = CL.prod_forward_config("KS")
+    ks["ks_kwargs"]["k_max"] = "MUTATED"                          # mutate the NESTED dict
+    assert CL.prod_forward_config("KS")["ks_kwargs"]["k_max"] == 0.065   # deepcopy protected
 
 
 # --------------------------------------------------------------------------------------------- #
