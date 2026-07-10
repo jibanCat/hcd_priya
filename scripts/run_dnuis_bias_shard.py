@@ -44,6 +44,8 @@ import os
 import pickle
 import time
 
+import numpy as np
+
 print = functools.partial(print, flush=True)
 
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
@@ -53,6 +55,7 @@ from hcd_analysis.emulator.inference import (HCD_LIT_OVER_SIM, HCD_LLS_SURVEY_BO
 
 REPO = "/home/mfho/hcd_priya"
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
+RES_INSTR_BASIS = os.path.join(REPO, "hcd_analysis", "_emulator_data", "res_instr_injection_basis.npz")
 
 # Per-survey TRUTH LLS boost (lit/sim effective LLS the mock truth carries vs the forward pin).
 # The arm must put the TRUTH OFF the forward's per-survey pin center, else it is a near-null test.
@@ -73,10 +76,76 @@ LLS_TRUTH_BOOST = {
 }
 
 
-def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None):
+def _resinj_oos_spec(member, strength, path=RES_INSTR_BASIS):
+    """None (default: the scalar in-span arm) or the OOS basis spec dict the resolver
+    (``_resolve_res_instr_inject``) loads: ``{"path": npz, "member": m, "strength": x}``."""
+    if member is None:
+        return None
+    return {"path": path, "member": str(member), "strength": float(strength)}
+
+
+def arm_inject_spec(arm, survey, *, b_res=0.02, ks_resolution_ready=False, oos_member=None, oos_strength=1.0):
+    """Map (arm, survey) -> the run_legb inject_spec (PURE; no ctx build, unit-testable). ``b_res``
+    sets the resolution injection strength (default 0.02 = the realistic DESI ~1-sigma level derived
+    from the data's own syst_e_resolution; the option-a certification brackets it +/-1 sigma over
+    {0.015, 0.02, 0.03}). ``oos_member`` (Task 2C) selects an OUT-OF-SPAN per-z basis member from
+    ``RES_INSTR_BASIS`` INSTEAD of the scalar ``b_res`` (default None = unchanged scalar arm)."""
+    if arm == "metal_misspec":
+        if survey == "ks":
+            raise SystemExit(
+                "metal_misspec is a NO-OP on KS (KS legs are metals_on=False — the injection neither "
+                "perturbs the mock nor is fittable, a meaningless PASS). Run metal_misspec on "
+                "desi/eboss only.")
+        form = "eboss" if survey == "eboss" else "desi_full"
+        return {"metal_misspec": {"form": form}}
+    if arm == "resolution":
+        if survey == "ks" and not ks_resolution_ready:
+            raise SystemExit(
+                "resolution injection on KS with the DESI pixel PROXY R_z is invalid (~7-15x too large -- KS is "
+                "echelle, sigma~3.2 km/s -> a ~70% distortion the forward cannot fit, the -21sigma ESS collapse). "
+                "Pass ks_resolution_ready=True only when the echelle R_z + diag surgery is wired (build_arm_ctx "
+                "resolution-float on KS, task #5). Then the b_res injection is on the physical echelle scale.")
+        oos_spec = _resinj_oos_spec(oos_member, oos_strength)
+        return {"resolution": oos_spec if oos_spec is not None else {"b_res": float(b_res)}}
+    if arm == "lls_excess":
+        return {"lls_truth_boost": LLS_TRUTH_BOOST[survey]}
+    if arm == "metal_matched":
+        return {}
+    raise SystemExit(f"unknown arm {arm!r}")
+
+
+# The 4-arm resolution comparison bracket: each treatment is a DISTINCT covariance/forward handling of the
+# spectral-resolution systematic, run side-by-side on the SAME injected mocks. Tagged into the output name so
+# the arms never collide + the analyzer compares them per leg (see 2026-07-02-coherent-cov-vs-float doc).
+TREATMENTS = ("a", "b", "c", "d")
+
+
+def treatment_flags(treatment, *, c_prior_sigma=0.05):
+    """Map a bracket treatment label -> the run_dnuis flags:
+      a = option-a  : resolution stays IN the covariance, NO float (the deployed baseline).
+      b = option-b  : float f_res, TIGHT prior N(0, 0.02) (ours).
+      c = option-b WIDE (cup1d-faithful / eBOSS leg-match): float f_res, prior N(0, c_prior_sigma).
+      d = arm-D     : coherent cross-z covariance mode, NO float (marginalize resolution in the cov)."""
+    t = str(treatment).lower()
+    if t == "a":
+        return dict(float_res=False, coherent_res=False, f_res_amp_sigma=None)
+    if t == "b":
+        return dict(float_res=True, coherent_res=False, f_res_amp_sigma=None)      # tight 0.02
+    if t == "c":
+        return dict(float_res=True, coherent_res=False, f_res_amp_sigma=float(c_prior_sigma))
+    if t == "d":
+        return dict(float_res=False, coherent_res=True, f_res_amp_sigma=None)
+    raise SystemExit(f"unknown treatment {treatment!r} (choose one of {TREATMENTS})")
+
+
+def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, float_res=False,
+                  coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None, pin_hub=False,
+                  oos_member=None, oos_strength=1.0):
     """Build the single-survey production ctx for an arm. metals_on/sample_metals ON for
     DESI/eBOSS (False for KS). Returns (ctx, d, inject_spec). The arm runs on ONE survey's legs:
-    we build a single-survey ctx by restricting the leg list AFTER build (keep it simple)."""
+    we build a single-survey ctx by restricting the leg list AFTER build (keep it simple).
+    ``oos_member``/``oos_strength`` (Task 2C) select the OUT-OF-SPAN basis injection for the
+    resolution arm instead of the scalar ``b_res``; default None -> byte-identical scalar arm."""
     members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
     if not members:
         raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
@@ -88,6 +157,10 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None):
     LEG_NAME = {"desi": "DESI", "ks": "KS", "eboss": "eBOSS"}[survey]
     PIN_KEY = {"desi": "DESI", "ks": "KS", "eboss": "eBOSS"}[survey]
     metals = survey in ("desi", "eboss")               # KS conservative-mode subtracts metals
+    # KS instrument-f_res (task #5): use the ECHELLE R_z (3.2 km/s) + diagonal cov surgery via ks_kwargs so the
+    # b_res LSF injection is PHYSICAL, not the ~15x-too-large DESI pixel proxy (which made KS un-fittable, the
+    # -21sigma collapse). Only on the KS resolution-float path; None elsewhere -> byte-identical for DESI/eBOSS/KS-off.
+    _ks_kwargs = ({"resolution_float": True, "k_max": 0.065} if (survey == "ks" and (float_res or coherent_res)) else None)
     # build_legb_ctx assembles DESI+KS(+eBOSS); we then keep ONLY the chosen survey's leg(s) so the
     # arm fits a single-survey likelihood (the bias is per-survey).  survey= sets the LLS pin.
     ctx, d = build_legb_ctx(
@@ -96,6 +169,10 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None):
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         with_eboss=(survey == "eboss"),
         metals_on=metals, sample_metals=metals,
+        sample_res=float_res,                              # option-b: float f_res + cov_b (DESI rank-1 / eBOSS rescale / KS diag)
+        coherent_res=coherent_res, coh_amp=coh_amp,        # arm-D: coherent cross-z cov mode, NO forward float
+        f_res_amp_sigma=f_res_amp_sigma,                   # arm-C wide / eBOSS + KS leg-match prior (None -> tight 0.02)
+        ks_kwargs=_ks_kwargs,                              # KS echelle R_z + diag surgery (task #5); None => proxy (DESI/eBOSS/off)
         hierarchical_hcd=False, survey=PIN_KEY)
 
     # restrict to the chosen survey's legs (single-survey bias arm).
@@ -104,30 +181,33 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None):
         raise SystemExit(f"no leg named {LEG_NAME!r} in ctx (legs={[l.name for l in ctx.legs]})")
     ctx = ctx._replace(legs=legs)
 
-    # map arm -> inject_spec
-    if arm == "metal_misspec":
-        # GUARD: KS legs are metals_on=False, so the metal injection is a SILENT no-op (the forward
-        # cannot SEE it AND the mock is unchanged) → a meaningless PASS. Hard-fail the cell so it is
-        # never run. The metal-misspec arm is only meaningful on metals_on surveys (DESI/eBOSS).
-        if survey == "ks":
-            raise SystemExit(
-                "metal_misspec is a NO-OP on KS (KS legs are metals_on=False — the injection neither "
-                "perturbs the mock nor is fittable, a meaningless PASS). Run metal_misspec on "
-                "desi/eboss only.")
-        # REALISM: use the metal model AT EACH SURVEY'S SCALE — the full DESI-DR1 desi_full model
-        # (with the unfittable additive SiII–SiII term) for DESI, the McDonald/eBOSS SiIIIcorr form
-        # for eBOSS (the metal model the eBOSS data estimator actually uses).
-        form = "eboss" if survey == "eboss" else "desi_full"
-        inject_spec = {"metal_misspec": {"form": form}}
-    elif arm == "resolution":
-        inject_spec = {"resolution": {"b_res": 0.02}}
-    elif arm == "lls_excess":
-        inject_spec = {"lls_truth_boost": LLS_TRUTH_BOOST[survey]}
-    elif arm == "metal_matched":
-        inject_spec = {}                                # no post-hoc injection; a_SiIII free in fwd
-    else:
-        raise SystemExit(f"unknown arm {arm!r}")
+    # DIAGNOSTIC (mechanism ablation): PIN hub (theta9[5]) to a tight window at its box centre in BOTH the
+    # truth-draw and the fit (draw_leg_a_leg_truth traces _legb_priors_only -> same theta_unit bounds). The
+    # empirical mediation analysis found hub is the release valve that absorbs the eBOSS resolution offset
+    # (shifts -0.78sigma) and drags n_s down (rho +0.50); pinning it tests that causally + the tighten-hub
+    # mitigation. Default off -> byte-identical.
+    if pin_hub:
+        from hcd_analysis.emulator import closure_legb as _CL
+        lo = np.asarray(_CL._THETA_UNIT_LO, float).copy(); hi = np.asarray(_CL._THETA_UNIT_HI, float).copy()
+        j = 5; mid = 0.5 * (lo[j] + hi[j]); lo[j], hi[j] = mid - 0.01, mid + 0.01   # hub pinned ~box centre
+        ctx = ctx._replace(theta_unit_lo=lo, theta_unit_hi=hi)
+
+    # map arm -> inject_spec (pure helper; the resolution b_res is configurable for the +/-1 sigma
+    # option-a certification). metal_misspec REALISM: desi_full (with the unfittable additive SiII-SiII
+    # term) for DESI, McDonald/eBOSS SiIIIcorr for eBOSS; the KS metal no-op guard lives in the helper.
+    # oos_member (Task 2C): None -> unchanged scalar b_res resolution arm (byte-identical).
+    inject_spec = arm_inject_spec(arm, survey, b_res=b_res, ks_resolution_ready=(_ks_kwargs is not None),
+                                  oos_member=oos_member, oos_strength=oos_strength)
     return ctx, d, inject_spec
+
+
+def _out_arm(arm, b_res_oos_member):
+    """Write-time output arm tag (Task 2C): an OOS member selects the "resolution_oos" tag so its
+    pkls never collide with the scalar in-span "resolution" arm's; member None -> unchanged (byte-
+    identical for every arm, including non-resolution ones). The OOS member is ONLY meaningful for
+    arm=="resolution" (defensive: never retag a non-resolution arm, so a metals/lls pkl can't be
+    mislabeled resolution_oos and given the adversarial FLAG band -- main() also raises on that combo)."""
+    return "resolution_oos" if (arm == "resolution" and b_res_oos_member) else arm
 
 
 def main():
@@ -142,6 +222,49 @@ def main():
     ap.add_argument("--n-warmup", type=int, default=250)
     ap.add_argument("--n-samples", type=int, default=300)     # trimmed for budget (~13 CPU-h/fit)
     ap.add_argument("--max-tree-depth", type=int, default=10)
+    ap.add_argument("--b-res", type=float, default=0.02,
+                    help="resolution injection strength (arm=resolution). Default 0.02 = the realistic "
+                         "DESI ~1sigma level from syst_e_resolution; certification bracket +/-1sigma "
+                         "{0.015,0.02,0.03}. Ignored for non-resolution arms.")
+    ap.add_argument("--b-res-oos-member", choices=["bres1", "bres2", "bres_real", "bstar"], default=None,
+                    help="OUT-OF-SPAN instrument-resolution arm: inject the per-z basis MEMBER from "
+                         "res_instr_injection_basis.npz instead of the scalar --b-res. bstar=analytic worst-n_s "
+                         "(adversarial); bres1/bres2=z-incoherent named threats (adversarial); bres_real=measured "
+                         "residual (realistic). Requires --arm resolution. Default None = the scalar in-span arm.")
+    ap.add_argument("--b-res-oos-strength", type=float, default=1.0,
+                    help="strength scale on the OOS basis member (+/-1sigma 3-point bracket). Ignored unless "
+                         "--b-res-oos-member.")
+    ap.add_argument("--float-res", dest="float_res", action="store_true",
+                    help="OPTION-B: float the 2-param f_res spectral-resolution nuisance + remove the "
+                         "resolution mode from the covariance. BOTH legs: DESI = per-z rank-1 cov_b; eBOSS = "
+                         "multiplicative sigma-rescale cov_b. Default off = option-a (resolution stays in the "
+                         "cov). NOTE: the tight amp prior N(0,0.02) is DESI-derived; eBOSS's own resolution "
+                         "is ~2x larger (b_res~0.044), so eBOSS option-b under-covers unless the prior is "
+                         "leg-matched (open PI decision -- see 2026-07-02-resolution-findings.md).")
+    ap.add_argument("--coherent-res", dest="coherent_res", action="store_true",
+                    help="ARM-D: remove resolution from the covariance (per-survey) and RE-ADD it as ONE "
+                         "coherent cross-z mode s^2*outer(e,e) -- NO forward f_res float. Marginalizes the "
+                         "coherent resolution error in the covariance (linear-Gaussian equivalent of floating "
+                         "one amplitude); s=coh_amp=1 IS the shipped 1-sigma resolution uncertainty (no prior "
+                         "to tune). PREFERRED for eBOSS (low-k, n_s<->resolution degenerate -> a float is "
+                         "prior-dominated + under-covers). Mutually exclusive with --float-res. See "
+                         "2026-07-02-coherent-cov-vs-float-resolution.md.")
+    ap.add_argument("--coh-amp", type=float, default=1.0,
+                    help="ARM-D coherent-mode amplitude s (default 1.0 = the shipped 1-sigma resolution "
+                         "uncertainty). cov gains s^2*outer(e,e). Ignored unless --coherent-res.")
+    ap.add_argument("--treatment", choices=TREATMENTS, default=None,
+                    help="4-arm resolution comparison bracket (sets the flags + the output tag; overrides "
+                         "--float-res/--coherent-res): a=option-a (in cov, no float); b=option-b tight "
+                         "(float, prior 0.02); c=option-b wide/cup1d-faithful (float, prior --c-prior-sigma); "
+                         "d=arm-D (coherent cov, no float). The driver varies this a/b/c/d per leg+injection.")
+    ap.add_argument("--c-prior-sigma", type=float, default=0.05,
+                    help="arm-C (treatment c) f_res_amp prior width (default 0.05 = eBOSS-leg-matched; use a "
+                         "wider value for cup1d's loose default). Ignored unless --treatment c.")
+    ap.add_argument("--pin-hub", dest="pin_hub", action="store_true",
+                    help="DIAGNOSTIC (mechanism ablation): pin hub (theta9[5]) to a tight window at its box "
+                         "centre in BOTH the truth-draw and the fit. Tests whether hub is the release valve "
+                         "that mediates the eBOSS resolution->n_s leak (empirical mediation: hub shifts "
+                         "-0.78sigma, rho(n_s,hub)=+0.50). Default off = byte-identical.")
     ap.add_argument("--no-mf", dest="with_mf", action="store_false")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--smoke", action="store_true",
@@ -149,15 +272,38 @@ def main():
     ap.set_defaults(with_mf=True)
     a = ap.parse_args()
 
+    # OOS instrument-resolution member is a selector WITHIN the resolution arm; combining it with a
+    # non-resolution --arm is a user error (the injection would be ignored yet the pkl mislabeled
+    # resolution_oos + given the adversarial FLAG band). Fail loud (Task-2C review, reviewer A).
+    if a.b_res_oos_member and a.arm != "resolution":
+        raise SystemExit(f"--b-res-oos-member requires --arm resolution (got --arm {a.arm})")
+
     if a.smoke:
         a.n_mocks = 1
         a.n_warmup = min(a.n_warmup, 20)
         a.n_samples = min(a.n_samples, 30)
 
-    ctx, d, inject_spec = build_arm_ctx(a.arm, a.survey, a.with_mf)
+    # resolve the comparison-bracket treatment (a/b/c/d) -> flags + the output TAG so the 4 arms never
+    # collide + the analyzer groups them per leg. --treatment overrides the low-level flags; without it,
+    # derive the tag from the flags (backward compat).
+    f_res_amp_sigma = None
+    if a.treatment:
+        fl = treatment_flags(a.treatment, c_prior_sigma=a.c_prior_sigma)
+        a.float_res, a.coherent_res, f_res_amp_sigma = fl["float_res"], fl["coherent_res"], fl["f_res_amp_sigma"]
+        treatment = a.treatment
+    else:
+        if a.float_res and a.coherent_res:
+            raise SystemExit("--float-res (option-b) and --coherent-res (arm-D) are mutually exclusive arms")
+        treatment = "d" if a.coherent_res else ("b" if a.float_res else "a")
+    ctx, d, inject_spec = build_arm_ctx(a.arm, a.survey, a.with_mf, b_res=a.b_res, float_res=a.float_res,
+                                        coherent_res=a.coherent_res, coh_amp=a.coh_amp,
+                                        f_res_amp_sigma=f_res_amp_sigma, pin_hub=a.pin_hub,
+                                        oos_member=a.b_res_oos_member, oos_strength=a.b_res_oos_strength)
     n_members = len(getattr(ctx.model, "members", [None]))
     idxs = [m for m in range(a.n_mocks) if m % a.n_shards == a.shard]
-    print(f"[dnuis {a.arm}/{a.survey} shard {a.shard}/{a.n_shards}] mocks={idxs} "
+    print(f"[dnuis {a.arm}/{a.survey} treat={treatment}"
+          f"{'' if f_res_amp_sigma is None else f'(prior_sig={f_res_amp_sigma})'} "
+          f"shard {a.shard}/{a.n_shards}] mocks={idxs} "
           f"members={n_members} legs={[l.name for l in ctx.legs]} "
           f"inject_spec={inject_spec} mf={a.with_mf} PAIRED "
           f"(warmup={a.n_warmup} samples={a.n_samples} mtd={a.max_tree_depth})")
@@ -182,12 +328,17 @@ def main():
     per_mock_wall = wall / (2.0 * n_pairs)                  # cost of ONE fit (2 fits per paired mock)
 
     os.makedirs(a.out_dir, exist_ok=True)
-    out = os.path.join(a.out_dir, f"{a.arm}_{a.survey}_shard_{a.shard:03d}.pkl")
+    # tag the output with the TREATMENT so the 4 bracket arms (a/b/c/d) never overwrite each other.
+    # out_arm (Task 2C): an OOS member -> "resolution_oos" so it never collides with the scalar
+    # in-span "resolution" arm's pkls; member None -> unchanged (byte-identical).
+    out_arm = _out_arm(a.arm, a.b_res_oos_member)
+    out = os.path.join(a.out_dir, f"{out_arm}_{treatment}_{a.survey}_shard_{a.shard:03d}.pkl")
     meta = dict(vars(a))
-    meta.update(inject_spec=inject_spec, n_members=n_members, paired=True,
-                legs=[l.name for l in ctx.legs], wall_s=wall, per_fit_wall_s=per_mock_wall)
+    meta.update(inject_spec=inject_spec, n_members=n_members, paired=True, treatment=treatment,
+                f_res_amp_sigma=f_res_amp_sigma, legs=[l.name for l in ctx.legs],
+                wall_s=wall, per_fit_wall_s=per_mock_wall)
     with open(out, "wb") as f:
-        pickle.dump(dict(arm=a.arm, survey=a.survey, idxs=idxs,
+        pickle.dump(dict(arm=out_arm, treatment=treatment, survey=a.survey, idxs=idxs,
                          clean_per_mock=clean_per_mock, inj_per_mock=inj_per_mock,
                          meta=meta), f)
     n_div = (sum(int(r.get("n_div", 0) > 0) for r in clean_per_mock)

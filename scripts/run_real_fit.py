@@ -103,6 +103,25 @@ def _packed_to_physical(draws, names):
     return out
 
 
+# Gate-A NORC (2026-07-04): the deployed production forward DROPS the res_corr particle-convergence
+# correction (res_corr_on=False), PINS alpha_res (fix_alpha_res=True), and caps KS at k<=0.045 (auto
+# in build_legb_ctx on the res_corr_on=False path). Rationale: the 2026-06-16 NUTS result showed the
+# anchored+alpha config AMPLIFIES the native n_s bias ~4x. This constant is the SINGLE reversal knob
+# for the 4-referee panel: flip to False to restore the pre-NORC forward. Gated by the panel + the
+# freeze + PI sign-off before any unblind.
+NORC = True
+
+
+def _assert_norc_ks_cap(ctx):
+    """Under NORC the KS leg is capped at k<=0.045, EXCEPT when it floats echelle f_res
+    (resolution_ready=True), which intentionally lifts the cap to the certified 0.065."""
+    _ksleg = [l for l in ctx.legs if l.name == "KS"]
+    if not _ksleg or getattr(_ksleg[0], "resolution_ready", False):
+        return
+    assert float(np.asarray(_ksleg[0].k).max()) <= 0.045 + 1e-9, \
+        "NORC KS k_max cap (0.045) not applied"
+
+
 def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=None):
     """The PRODUCTION ctx for a real-data fit, then RESTRICTED to the requested survey's leg.
 
@@ -122,18 +141,33 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     ens = [members[0]] if single_member else members
 
     info = SURVEY[survey]
-    metals = bool(info["metals"])
-    ks_kw = {"z_lo": float(ks_zlo)} if ks_zlo is not None else None  # KS low-z cut override (diagnostic)
+    fc = CL.prod_forward_config(info["leg"])   # certified per-leg data-nuisance forward (SINGLE source == SBC)
+    metals = bool(fc["metals"])
+    assert metals == bool(info["metals"]), \
+        f"SURVEY[{survey!r}].metals={info['metals']} disagrees with prod_forward_config({info['leg']!r})"
+    # KS ks_kwargs: merge the certified forward's dict (resolution_float/k_max; None for DESI/eBOSS)
+    # with the diagnostic z_lo override -- neither must clobber the other. Empty dict -> None so
+    # DESI/eBOSS with no ks_zlo stay byte-identical (ks_kwargs=None, as before Task 1A/1B).
+    ks_kw = ({**(fc.get("ks_kwargs") or {}),
+              **({"z_lo": float(ks_zlo)} if ks_zlo is not None else {})}) or None
     ctx, d = build_legb_ctx(
         ensemble_ckpts=ens, use_xclass=True,
         with_mf=True, mf_with_floor=True,
+        res_corr_on=(not NORC),           # NORC: drop res_corr (+ auto-cap KS k<=0.045 in build_legb_ctx)
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         with_eboss=(survey == "eboss"),
         ks_kwargs=ks_kw,                  # threads z_lo into load_ks_leg (default None → z_lo=2.4 baseline)
         metals_on=metals,                 # applies the SiIII/SiII forward term on metals_on legs
-        sample_metals=metals,             # samples the shared a_SiIII nuisance (Uniform[0, a_max])
+        sample_metals=metals,             # samples the metal nuisance (flatlog2node nodes / uniform a_SiIII)
+        sample_res=fc["sample_res"],      # option-b f_res float (DESI 0.02 / eBOSS 0.05 / KS 0.15; task #5 DONE)
+        f_res_amp_sigma=fc["f_res_amp_sigma"],  # its Normal(0,.) width (DESI 0.02 / eBOSS 0.05 / KS 0.15)
+        metal_prior=fc["metal_prior"],    # flatlog2node (Gate-C Model C+) on metal legs; uniform on KS
         survey=info["leg"],               # PER-SURVEY LLS pin: DESI 1.0×/σ0.30, KS 2.5×/σ0.40 (eBOSS→cosmic-avg)
         hierarchical_hcd=False)           # the referee production baseline (per-class HCD)
+    if NORC:
+        ctx = ctx._replace(fix_alpha_res=True)   # NORC: also drop the 2 alpha_res sites (now inert)
+        assert ctx.res_corr_on is False and ctx.fix_alpha_res is True, "NORC ctx not applied"
+        _assert_norc_ks_cap(ctx)   # KS-cap parity assert (referee M2), gated on resolution_ready
 
     # RESTRICT to the requested survey's leg (the real measurement for THIS survey only). The
     # per-leg C_emu / MF-floor / emucoh dicts are keyed by leg name, so dropping other legs leaves
@@ -144,6 +178,22 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
         raise SystemExit(f"survey {survey!r} expects leg {want!r} but ctx.legs="
                          f"{[l.name for l in ctx.legs]}")
     ctx = ctx._replace(legs=legs)
+
+    # SELF-CONSISTENCY (mirror the NORC block): the certified data-nuisance forward must be WIRED, not
+    # silently regressed to the build_legb_ctx defaults (sample_res=False / metal_prior='uniform'). Asserted
+    # on the single restricted leg so the real-fit forward provably == the SBC-certified forward.
+    L = ctx.legs[0]
+    assert bool(ctx.sample_res) == fc["sample_res"], "prod f_res float not wired into build_real_ctx"
+    assert ctx.f_res_amp_sigma == fc["f_res_amp_sigma"], "f_res prior width mismatch"
+    assert ctx.metal_prior == fc["metal_prior"], "prod metal model (flatlog2node) not wired"
+    assert tuple(ctx.metal_node_z) == (2.2, 4.2), "Gate-C metal_node_z drifted"
+    if fc["metals"]:
+        assert ctx.sample_metals is True and L.metals_on is True, "metal leg must sample+apply metals"
+    else:
+        assert not L.metals_on, "KS must be metals-off"
+    if ctx.sample_res:                             # f_res is per-INSTRUMENT: single-leg + resolution_ready
+        assert getattr(L, "resolution_ready", False), "f_res float on a resolution_ready=False leg"
+        assert len({l.name for l in ctx.legs}) == 1, "f_res float requires a single-instrument leg"
     return ctx, d, members
 
 
@@ -175,6 +225,7 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
     k_nuts = jax.random.fold_in(key0, hash(survey) & 0x7fffffff)
 
     packed_chains, energies, num_steps_all, per_chain_div, ll_chains = [], [], [], [], []
+    nuisance_chains = []                                        # Fix 2: raw f_res / metal-node draws
     names = None
     for cid in range(int(n_chains)):
         chain_key = jax.random.fold_in(k_nuts, int(cid))
@@ -182,6 +233,9 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
             ctx, ctx.legs, core_per_leg, n_warmup=n_warmup, n_samples=n_samples,
             seed=chain_key, target_accept=0.9, dense_mass=True,
             max_tree_depth=max_tree_depth, init_strategy=init_to_sample, return_extra=True)
+        # Fix 2: keep the UNBLINDED data-nuisance posteriors (f_res + Model C+ metal f/k nodes) so we
+        # can see if they RAIL at the real fit. These are NOT the blinded A_p/n_s (safe to export).
+        nuisance_chains.append({k: np.asarray(samples[k]) for k in _nuisance_export_keys(samples)})
         # all real-leg rows are kept (no dropped-z in a real fit): kept_global = z_global mask of
         # the leg's z. We use the leg's z directly via _draws_matrix's kept_global contract: the
         # tau0_vec is on z_global; keep the z this leg actually has data at.
@@ -202,26 +256,187 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
     battery = convergence_battery(
         packed, names, energy=np.stack(energies), num_steps=np.stack(num_steps_all),
         max_tree_depth=max_tree_depth, n_div=int(sum(per_chain_div)))
+    # Fix 2: the LogUniform node brackets (for the rail-fraction summary) come straight off the ctx
+    # (the SAME static values _metal_2node_sites samples within) so the artifact self-documents them.
+    nuisance_bounds = dict(f=(float(ctx.metal_fnode_lo), float(ctx.metal_fnode_hi)),
+                           k=(float(ctx.metal_knode_lo), float(ctx.metal_knode_hi)))
     return dict(packed=packed, names=names, battery=battery, per_chain_div=per_chain_div,
                 members=members, leg_name=leg.name, n_real_rows=n_real,
-                ll_chains=ll_chains, kept_global=kept_global)
+                ll_chains=ll_chains, kept_global=kept_global,
+                nuisance_chains=nuisance_chains, nuisance_bounds=nuisance_bounds)
+
+
+# Nuisance-site prefixes for the Model C+ per-leg, per-ion metal f/k nodes. Kept in sync with
+# closure_legb._metal_2node_sites / _legb_model (the deployed forward we MIRROR).
+_METAL_NODE_PREFIXES = ("f_SiIII_", "f_SiII_", "k_SiIII_", "k_SiII_")
+
+
+def _nuisance_export_keys(samples):
+    """The data-nuisance posterior sites to export (Fix 2): the option-b f_res sites + every Model C+
+    metal f/k node site present in ``samples``. NOT the blinded cosmology (theta_unit) nor the packed
+    alpha/tau0 columns -- just the floated data-nuisance latents whose railing we want to see at the
+    real fit. Empty when none were sampled (KS uniform) -> no artifact written."""
+    keys = [k for k in ("f_res_amp", "f_res_slope") if k in samples]
+    keys += [k for k in samples if k.startswith(_METAL_NODE_PREFIXES)]
+    return keys
+
+
+def _reconstruct_nuisance(ctx, draw):
+    """PURE reconstruction of ``(metal_nodes, b_res_global, alpha_res, a_siiii, a_siii)`` for ONE
+    draw -- the deployed data-nuisance forward terms ``_legb_model`` threads into
+    ``_data_loglik_legcore`` (closure_legb.py:1819-1859). ``draw`` is a dict {site_name: per-draw
+    value} (a vmap slice of ``samples``, or synthetic scalars in tests). MIRRORS the model's STATIC
+    branches EXACTLY so the re-scored export loglik == the true model loglik under the Stage-1 config
+    (flatlog2node + sample_res + fix_alpha_res). Under the uniform / no-f_res / not-fixed path it
+    yields ``(None, None, None, a_siiii, 0.0)`` -- the byte-identical pre-fix a_siiii-only call.
+
+      metals (closure_legb:1819-1830): metal_prior=='flatlog2node' -> metal_nodes =
+        ``{leg.name: (f3, f2, k3, k2)}`` per metals_on leg IN ctx.legs ORDER (f2/k2 = the SiII nodes
+        ONLY on ctx.metal_siII_legs), each node ``jnp.stack([z0, z1])`` of the sampled sites (byte-
+        identical to _metal_2node_sites' single-trace stack); a_siiii=a_siii=0. Else metal_nodes=None
+        and a_siiii/a_siii come from the scalar a_SiIII/a_SiII draws (0.0 if absent).
+      f_res (closure_legb:1848-1855): sample_res and 'f_res_amp' present -> b_res_global =
+        ``_bres_of_z(z_global, f_res_amp, f_res_slope)``; else None.
+      alpha_res (closure_legb:1839-1843): fix_alpha_res -> the pinned no-op ``(1.0, 0.0)``; elif the
+        'alpha_res' site is present -> ``(alpha_res, alpha_res_slope)``; else None (pre-alpha_res
+        golden, which is byte-identical to (1.0,0.0): _mf_corr_on_cache multiplies log_rc by 1.0)."""
+    import jax.numpy as jnp
+    if getattr(ctx, "metal_prior", "uniform") == "flatlog2node":
+        a_siiii = a_siii = 0.0                       # flatlog2node: scalar metals unused (mirror _legb_model)
+        metal_nodes = {}
+        # _metal_2node_sites emits {} (scalar path) when NOT sampling metals; mirror that guard so a
+        # flatlog2node + sample_metals=False ctx does not KeyError on the (absent) node sites. Defense-
+        # in-depth: production pairs flatlog2node with sample_metals=True (asserted in build_real_ctx).
+        if getattr(ctx, "sample_metals", False):
+            siII_legs = tuple(getattr(ctx, "metal_siII_legs", ("DESI",)))
+            for leg in ctx.legs:                    # FIXED order == _metal_2node_sites
+                if not getattr(leg, "metals_on", False):
+                    continue
+                f3 = jnp.stack([draw[f"f_SiIII_{leg.name}_z0"], draw[f"f_SiIII_{leg.name}_z1"]])
+                k3 = jnp.stack([draw[f"k_SiIII_{leg.name}_z0"], draw[f"k_SiIII_{leg.name}_z1"]])
+                f2 = k2 = None
+                if leg.name in siII_legs:
+                    f2 = jnp.stack([draw[f"f_SiII_{leg.name}_z0"], draw[f"f_SiII_{leg.name}_z1"]])
+                    k2 = jnp.stack([draw[f"k_SiII_{leg.name}_z0"], draw[f"k_SiII_{leg.name}_z1"]])
+                metal_nodes[leg.name] = (f3, f2, k3, k2)
+    else:
+        metal_nodes = None
+        a_siiii = draw["a_SiIII"] if "a_SiIII" in draw else 0.0
+        a_siii = draw["a_SiII"] if "a_SiII" in draw else 0.0
+    if getattr(ctx, "sample_res", False) and "f_res_amp" in draw:
+        b_res_global = CL._bres_of_z(jnp.asarray(ctx.z_global), draw["f_res_amp"], draw["f_res_slope"])
+    else:
+        b_res_global = None
+    if getattr(ctx, "fix_alpha_res", False):
+        alpha_res = (1.0, 0.0)                       # NORC pinned no-op (mirrors _legb_model)
+    elif "alpha_res" in draw:
+        alpha_res = (draw["alpha_res"], draw["alpha_res_slope"])
+    else:
+        alpha_res = None                             # pre-alpha_res golden (byte-identical)
+    return metal_nodes, b_res_global, alpha_res, a_siiii, a_siii
 
 
 def _loglik_chain(ctx, core_per_leg, samples, kept_global):
-    """Per-draw log-likelihood of the REAL data (for the minuslogpost column). Reuses the same
-    per-leg-core loglik the model uses; vmapped over draws."""
+    """Per-draw log-likelihood of the REAL data (for the minusloglike column; -lnL, data term, no
+    prior -- matches the export header). MIRRORS the deployed
+    ``_legb_model`` call (closure_legb.py:1856-1859) EXACTLY: reconstructs the data-nuisance forward
+    terms (metal_nodes / b_res / alpha_res / a_siiii / a_siii) per draw via ``_reconstruct_nuisance``,
+    then threads ALL of them into ``_data_loglik_legcore``. Under the Stage-1 config the metal power
+    lives in the per-leg 2-node metal sites and the f_res term in f_res_amp/slope, so the pre-fix
+    a_siiii-only re-score OMITTED them and was NOT the true model loglik. vmapped over draws; the
+    per-draw metal-node dict is rebuilt INSIDE the vmap from the per-draw scalar sites (byte-identical
+    to the model's single-trace ``jnp.stack``), so no python draw-loop and no perf cost."""
     from hcd_analysis.emulator.closure_legb import _data_loglik_legcore
     import jax.numpy as jnp
-    zg = np.asarray(ctx.z_global)
     theta = jnp.asarray(samples["theta_unit"])                 # (L,9)
     tau0 = jnp.asarray(samples["tau0_vec"])                    # (L, nZg)
-    a_z = jnp.asarray(samples["alpha_hcd_z"])                  # (L, nZg, 3)
-    a_si = (jnp.asarray(samples["a_SiIII"]) if "a_SiIII" in samples
-            else jnp.zeros(theta.shape[0]))
+    a_z = jnp.asarray(samples["alpha_hcd_z"])                  # (L, nZg, 3) z-resolved
+    # The per-draw nuisance sites present in `samples` (metal f/k nodes, f_res, scalar a_SiIII/a_SiII,
+    # and the sampled alpha_res if NOT pinned). Passed as a dict pytree so vmap slices each leaf to a
+    # per-draw scalar we reconstruct in `one`. Empty dict (KS uniform) is a no-op under vmap (the
+    # batch axis comes from theta/tau0/a_z).
+    nkeys = list(_nuisance_export_keys(samples))
+    if not getattr(ctx, "fix_alpha_res", False):
+        nkeys += [k for k in ("alpha_res", "alpha_res_slope") if k in samples]
+    nkeys += [k for k in ("a_SiIII", "a_SiII") if k in samples]
+    nuis = {k: jnp.asarray(samples[k]) for k in nkeys}
 
-    def one(th, t0, al, asi):
-        return _data_loglik_legcore(ctx, th, t0, al, ctx.legs, core_per_leg, a_siiii=asi)
-    return jax.vmap(one)(theta, tau0, a_z, a_si)
+    def one(th, t0, al, draw):
+        metal_nodes, b_res, alpha_res, a_siiii, a_siii = _reconstruct_nuisance(ctx, draw)
+        return _data_loglik_legcore(
+            ctx, th, t0, al, ctx.legs, core_per_leg, a_siiii=a_siiii, a_siii=a_siii,
+            metal_nodes=metal_nodes, alpha_res=alpha_res, b_res_global=b_res,
+            require_zresolved=True)
+    return jax.vmap(one)(theta, tau0, a_z, nuis)
+
+
+# --------------------------------------------------------------------------------------------- #
+#  Data-nuisance posterior export (Fix 2) -- UNBLINDED (these are NOT the A_p / n_s cosmology).
+# --------------------------------------------------------------------------------------------- #
+# A draw is "near" a LogUniform bound if it sits within this fraction of the log10(hi/lo) span of it
+# (a simple, prior-scale railing flag for the metal f/k nodes; 2% ~ the ceiling-check band).
+RAIL_LOG_FRAC = 0.02
+
+
+def _rail_fracs(vals, bounds):
+    """(frac_near_lo, frac_near_hi) of ``vals`` against a LogUniform ``(lo, hi)`` prior, measured in
+    log10 space; ``(None, None)`` when ``bounds`` is None (a non-LogUniform site, e.g. the Normal
+    f_res)."""
+    if bounds is None:
+        return None, None
+    lo, hi = float(bounds[0]), float(bounds[1])
+    v = np.clip(np.asarray(vals, float), lo, hi)
+    logv, logL, logH = np.log10(v), np.log10(lo), np.log10(hi)
+    span = logH - logL
+    near_lo = float(np.mean((logv - logL) <= RAIL_LOG_FRAC * span))
+    near_hi = float(np.mean((logH - logv) <= RAIL_LOG_FRAC * span))
+    return near_lo, near_hi
+
+
+def _bounds_for_site(name, nb):
+    """The LogUniform ``(lo, hi)`` bracket for a nuisance site name (f_-node -> f bracket, k_-node ->
+    k bracket); None for f_res_amp/slope (a Normal prior, no hard rail)."""
+    if name.startswith(("f_SiIII_", "f_SiII_")):
+        return nb["f"]
+    if name.startswith(("k_SiIII_", "k_SiII_")):
+        return nb["k"]
+    return None
+
+
+def _export_nuisance(out_dir, root, result, survey):
+    """Fix 2: write the data-nuisance posteriors (option-b f_res + Model C+ metal f/k nodes) NEXT TO
+    the chains so railing is visible at the real fit. These are NUISANCE latents, NOT the blinded
+    A_p / n_s, so they are exported UNBLINDED (like the health json). Writes:
+      ``<root>.nuisance.npz``  -- per-chain raw draws, one (C, N) array per site (round-trips exact);
+      ``<root>.nuisance.json`` -- per-site rail summary (mean/std/quantiles + frac_near_lo/hi vs the
+                                  LogUniform bounds; null rail for the Normal f_res).
+    No-op (nothing written, returns None) when no nuisance sites were sampled (KS uniform)."""
+    chains = result.get("nuisance_chains") or []
+    sites = sorted({k for ch in chains for k in ch})
+    if not sites:
+        return None
+    nb = result.get("nuisance_bounds", dict(f=(0.003, 0.03), k=(1e-3, 0.1)))
+    npz, summary = {}, {}
+    for name in sites:
+        per_chain = np.stack([np.asarray(ch[name], float) for ch in chains if name in ch])  # (C,N)
+        npz[name] = per_chain
+        flat = per_chain.reshape(-1)
+        bnds = _bounds_for_site(name, nb)
+        near_lo, near_hi = _rail_fracs(flat, bnds)
+        q05, q50, q95 = (float(x) for x in np.quantile(flat, [0.05, 0.5, 0.95]))
+        summary[name] = dict(
+            mean=float(np.mean(flat)), std=float(np.std(flat)), q05=q05, q50=q50, q95=q95,
+            n=int(flat.size), frac_near_lo=near_lo, frac_near_hi=near_hi,
+            bounds=(list(bnds) if bnds is not None else None))
+    np.savez(f"{out_dir}/{root}.nuisance.npz", **npz)
+    rec = dict(survey=survey, leg=result.get("leg_name"), root=root, n_chains=len(chains),
+               sites=summary, bounds=dict(f=list(nb["f"]), k=list(nb["k"])),
+               rail_log_frac=RAIL_LOG_FRAC,
+               note="UNBLINDED data-nuisance posteriors (f_res + Model C+ metal nodes); NOT A_p/n_s")
+    with open(f"{out_dir}/{root}.nuisance.json", "w") as f:
+        json.dump(rec, f, indent=2, sort_keys=True)
+        f.write("\n")
+    return rec
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -230,7 +445,7 @@ def _loglik_chain(ctx, core_per_leg, samples, kept_global):
 def export_getdist(result, out_dir, root, *, offset, blind=True, survey="", meta=None):
     """Write per-chain GetDist/cobaya chains: <root>.{c}.txt + <root>.paramnames + <root>.yaml.
 
-    Each row: ``weight  minuslogpost  <physical θ9...>  <τ₀...>  <α...>  [a_SiIII]``.
+    Each row: ``weight  minusloglike  <physical θ9...>  <τ₀...>  <α...>  [a_SiIII]``.
     The θ9 block is in PHYSICAL units; if ``blind`` the A_p / n_s columns are SHIFTED by the
     hidden offset (θ_shown = θ_phys + δ) so the default artifact is BLIND. Sampler-health YAML is
     written UNBLINDED (R̂/divergences/ESS are not the cosmology values)."""
@@ -286,6 +501,10 @@ def export_getdist(result, out_dir, root, *, offset, blind=True, survey="", meta
     with open(f"{out_dir}/{root}.health.json", "w") as f:
         json.dump(rec, f, indent=2, sort_keys=True)
         f.write("\n")
+    # Fix 2: the UNBLINDED data-nuisance posterior companion (f_res + metal nodes). Additive-only:
+    # it does NOT touch the GetDist chain columns / the A_p/n_s blinding above, and is a no-op when
+    # no nuisance sites were sampled (KS uniform).
+    _export_nuisance(out_dir, root, result, survey)
     return chain_files, rec
 
 

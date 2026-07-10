@@ -34,13 +34,13 @@ from scipy.ndimage import gaussian_filter
 from scipy.stats import gaussian_kde
 
 plt.rcParams.update({
-    "font.size": 11,
-    "axes.titlesize": 12,
-    "axes.labelsize": 12,
+    "font.size": 12,
+    "axes.titlesize": 13,
+    "axes.labelsize": 15,
     "axes.linewidth": 0.8,
-    "xtick.labelsize": 9,
-    "ytick.labelsize": 9,
-    "legend.fontsize": 10,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
+    "legend.fontsize": 15,
     "figure.facecolor": "white",
     "savefig.facecolor": "white",
 })
@@ -51,7 +51,31 @@ TRU_C = "#111111"  # truth markers (neutral, readable on both fills)
 COLS = ["ns", "Ap", "alpha_lls", "alpha_subdla", "alpha_dla"]
 LABS = {"ns": r"$n_s$", "Ap": r"$A_p$", "alpha_lls": r"$\alpha_{\rm LLS}$",
         "alpha_subdla": r"$\alpha_{\rm subDLA}$", "alpha_dla": r"$\alpha_{\rm DLA}$"}
+
+# Shared FIXED corner-axis limits, identical in plot_hcd_3rung_corner.py, so these
+# prior-sensitivity corners and the HCD 3-rung corners are directly comparable. Sized to
+# the UNION of both datasets' plotted 68/95% KDE-contour extents (the 95% contour balloons
+# ~30% past the raw draws via the widened bandwidth + grid pad) + ~7% margin, so NEITHER
+# doc's contours clip. The without-prior arm floats wide and sets the scale.
+LIMITS = {
+    "Ap":           (-0.35, 1.36),
+    "ns":           (-0.20, 0.97),
+    "alpha_lls":    (-0.37, 1.28),
+    "alpha_subdla": (-0.11, 0.36),
+    "alpha_dla":    (-0.020, 0.060),
+}
 CLASS_C = {"LLS": "#1f5fa6", "subDLA": "#2c8c4a", "DLA": "#e08214"}
+
+# ------------------------------------------------------------------ physical (proposal) units
+# The draws are in the emulator UNIT cube; PRIYA's PARAM_LIMITS (hcd_analysis data.py) map ns to
+# [0.8,1.05] and Ap to [1.2e-9,2.6e-9]. --physical maps ns/Ap back to physical for proposal figures
+# (Ap shown in units of 1e-9 so the ticks read 1.2..2.6), mirroring plot_hcd_3rung_corner.py. The
+# three alpha incidence amplitudes are ALREADY physical, so they are left unchanged.
+NS_PRIOR = (0.8, 1.05)
+AP_PRIOR_1E9 = (1.2, 2.6)                 # Ap / 1e-9
+PHYS_AXIS = {"Ap": (1.15, 2.65)}          # A_p on the FULL original prior range (1.2-2.6 e-9) + pad
+LABS_PHYS = {"ns": r"$n_s$", "Ap": r"$A_p\ [10^{-9}]$", "alpha_lls": r"$\alpha_{\rm LLS}$",
+             "alpha_subdla": r"$\alpha_{\rm subDLA}$", "alpha_dla": r"$\alpha_{\rm DLA}$"}
 
 # KDE on ~200 draws is blobby; widen the bandwidth and smooth the grid so contours
 # read cleanly without inventing structure. Bandwidth factor applied on top of Scott.
@@ -94,6 +118,45 @@ def _get_mock(recs, m):
     raise SystemExit(f"mock {m} not found")
 
 
+# --------------------------------------------------------------------- physical unit map
+def to_physical(data, truth):
+    """Map ns/Ap from the emulator unit cube to physical (ns via PARAM_LIMITS, Ap in 1e-9 units);
+    the alphas are already physical. data = {'on':{...}, 'off':{...}}. Returns NEW dicts (no mutate)."""
+    nlo, nhi = NS_PRIOR
+    alo, ahi = AP_PRIOR_1E9
+    d2 = {arm: dict(data[arm]) for arm in data}
+    for arm in d2:
+        d2[arm]["ns"] = nlo + np.asarray(d2[arm]["ns"], float) * (nhi - nlo)
+        d2[arm]["Ap"] = alo + np.asarray(d2[arm]["Ap"], float) * (ahi - alo)
+    t2 = dict(truth)
+    t2["ns"] = nlo + truth["ns"] * (nhi - nlo)
+    t2["Ap"] = alo + truth["Ap"] * (ahi - alo)
+    return d2, t2
+
+
+def get_limits(data, truth, physical):
+    """Per-param corner axis (lo, hi). Unit cube: the shared cross-doc LIMITS for every param.
+    Physical: Ap on the FULL original prior range (1e-9); ns zoomed to a readable range around the
+    posterior+truth when the truth sits at the 0.8 prior edge (else the full [0.8,1.05], readable
+    mid-box); the alphas keep the shared LIMITS (already physical)."""
+    if not physical:
+        return dict(LIMITS)
+    out = dict(LIMITS)
+    out["Ap"] = PHYS_AXIS["Ap"]
+    nlo, nhi = NS_PRIOR
+    # NS_EDGE = lower 20% of the prior; box-edge truths (fold-0, ns~0.80-0.82) sit here and would be
+    # buried against the left axis on the full [0.8,1.05], so we ZOOM to the posterior+truth. Mid-box
+    # truths (fold-4, ns~0.91) are readable on the full prior range and keep it (comparable panels).
+    if truth["ns"] <= nlo + 0.20 * (nhi - nlo):          # truth at the 0.8 edge -> zoom
+        xs = np.concatenate([np.asarray(data[arm]["ns"], float) for arm in data])
+        a = min(float(xs.min()), truth["ns"]); b = max(float(xs.max()), truth["ns"])
+        span = (b - a) or (nhi - nlo)
+        out["ns"] = (a - 0.12 * span, b + 0.12 * span)
+    else:
+        out["ns"] = (nlo, nhi)                            # mid-box -> full prior range is readable
+    return out
+
+
 # --------------------------------------------------------------------- KDE helpers
 def kde_1d(ax, x, color, lw=2.0, ls="-", fill=True, fill_alpha=0.16):
     """Smoothed 1-D KDE marginal. Widened bandwidth tames ~200-draw blobbiness."""
@@ -129,12 +192,19 @@ def kde_contour(ax, x, y, color, ls="-", fill=True, fill_alpha=0.20, lw=2.0):
 
 
 # --------------------------------------------------------------------- FIG 1: headline corner
-def fig_corner(on, off, mock, path):
+def fig_corner(on, off, mock, path, physical=False):
     ro = _get_mock(on, mock); rf = _get_mock(off, mock)
     data = {"on": {c: _col(ro, c) for c in COLS}, "off": {c: _col(rf, c) for c in COLS}}
     truth = {c: _truth(ro, c) for c in COLS}
+    if physical:
+        data, truth = to_physical(data, truth)
+    lims = get_limits(data, truth, physical)
+    labs = LABS_PHYS if physical else LABS
+    lab_fs = 18 if physical else 17     # proposal sizing (mirrors plot_hcd_3rung_corner.py)
+    leg_fs = 16 if physical else 15
+    tick_fs = 14 if physical else 13
     P = len(COLS)
-    fig, ax = plt.subplots(P, P, figsize=(2.85 * P, 2.85 * P))
+    fig, ax = plt.subplots(P, P, figsize=(3.05 * P, 3.05 * P))
     for r in range(P):
         for c in range(P):
             a = ax[r, c]
@@ -147,6 +217,7 @@ def fig_corner(on, off, mock, path):
                 kde_1d(a, data["on"][ci], ON_C, lw=2.3, fill_alpha=0.22)
                 a.axvline(truth[ci], color=TRU_C, ls=(0, (4, 2)), lw=1.5, zorder=4)
                 a.set_yticks([]); a.set_ylim(bottom=0)
+                a.set_xlim(*lims[ci])  # shared fixed limits (comparable across docs)
             else:
                 kde_contour(a, data["off"][cj], data["off"][ci], OFF_C,
                             fill_alpha=0.14, lw=1.8)
@@ -156,17 +227,18 @@ def fig_corner(on, off, mock, path):
                 a.axhline(truth[ci], color=TRU_C, ls=(0, (4, 2)), lw=1.0, zorder=4)
                 a.plot(truth[cj], truth[ci], marker="*", ms=11, color=TRU_C,
                        mec="white", mew=0.7, zorder=5)
-            a.tick_params(length=3)
+                a.set_xlim(*lims[cj]); a.set_ylim(*lims[ci])  # shared fixed limits
+            a.tick_params(length=3, labelsize=tick_fs)
             a.grid(True, color="0.9", lw=0.5, zorder=0)
             if r == P - 1:
-                a.set_xlabel(LABS[COLS[c]], fontsize=13)
+                a.set_xlabel(labs[COLS[c]], fontsize=lab_fs)
                 a.tick_params(axis="x", labelrotation=30)
                 for lbl in a.get_xticklabels():
                     lbl.set_ha("right")
             else:
                 a.set_xticklabels([])
             if c == 0 and r > 0:
-                a.set_ylabel(LABS[COLS[r]], fontsize=13)
+                a.set_ylabel(labs[COLS[r]], fontsize=lab_fs)
             elif r != c:
                 a.set_yticklabels([])
     handles = [
@@ -178,14 +250,24 @@ def fig_corner(on, off, mock, path):
                    ms=11, mec="white", mew=0.7, label="truth"),
     ]
     fig.legend(handles=handles, loc="upper right", bbox_to_anchor=(0.985, 0.97),
-               fontsize=14, frameon=True, framealpha=0.95, edgecolor="0.8",
+               fontsize=leg_fs, frameon=True, framealpha=0.95, edgecolor="0.8",
                borderpad=0.8, labelspacing=0.7)
-    fig.suptitle(
-        f"DESI leg — matched mock {mock} (identical data, only the HCD prior differs)\n"
-        r"removing the prior lets the HCD amplitudes float; the cosmology$\leftrightarrow$HCD "
-        r"contours open and tilt  (contours 68/95%)",
-        fontsize=15, y=0.995)
-    fig.tight_layout(rect=(0, 0, 1, 0.955))
+    if physical:
+        # In PHYSICAL units the axes (n_s ~0.8-1.05, A_p ~1.2-2.6e-9) can be misread as a REAL DESI
+        # measurement, so stamp an explicit closure banner on the figure (Lya-review fix). Keep it to
+        # two lines so it clears the upper-right legend; the caption carries the mechanism sentence.
+        fig.suptitle(
+            r"$\bf{DESI\ CLOSURE\ TEST}$ (simulation truth, not a real-data measurement)" + "\n"
+            f"DESI leg — matched mock {mock}: cosmology with vs without the HCD prior  (68/95%)",
+            fontsize=15, y=0.998)
+        fig.tight_layout(rect=(0, 0, 1, 0.955))
+    else:
+        fig.suptitle(
+            f"DESI leg — matched mock {mock} (identical data, only the HCD prior differs)\n"
+            r"removing the prior lets the HCD amplitudes float; the cosmology$\leftrightarrow$HCD "
+            r"contours open and tilt  (contours 68/95%)",
+            fontsize=15, y=0.995)
+        fig.tight_layout(rect=(0, 0, 1, 0.955))
     fig.savefig(path, dpi=140, bbox_inches="tight")
     plt.close(fig)
 
@@ -204,7 +286,7 @@ def fig_cosmo_shift(on, off, path, off_n):
         mo, so = s_on.mean(), s_on.std(ddof=1)
         mf, sf = s_off.mean(), s_off.std(ddof=1)
         out[par] = dict(on=(mo, so), off=(mf, sf), shift=(mf - mo) / so, ratio=sf / so)
-        ax.set_xlabel(LABS[par]); ax.set_ylabel("posterior density (KDE)")
+        ax.set_xlabel(LABS[par], fontsize=17); ax.set_ylabel("posterior density (KDE)", fontsize=15)
         ax.set_ylim(bottom=0)
         ax.grid(True, color="0.92", lw=0.5, zorder=0)
         ax.set_title(f"{LABS[par]}:  aggregate shift {(mf-mo)/so:+.2f}$\\sigma$,  "
@@ -218,7 +300,7 @@ def fig_cosmo_shift(on, off, path, off_n):
     axes[0].legend(handles=handles, loc="upper right", frameon=True,
                    framealpha=0.95, edgecolor="0.8")
     fig.suptitle(r"DESI leg — ($n_s$, $A_p$) aggregate marginals, with vs without the HCD "
-                 "incidence prior   [OFF arm PRELIMINARY]", fontsize=14)
+                 "incidence prior   [OFF arm PRELIMINARY]", fontsize=15)
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     fig.savefig(path, dpi=140, bbox_inches="tight")
     plt.close(fig)
@@ -249,11 +331,11 @@ def fig_dndx(on, off, path, mock, off_n):
         center = tr * (mu[ci] / apt[ci])
         ax.plot(z, center, color=TRU_C, ls=(0, (1, 1.5)), lw=1.8,
                 label="prior center (obs. dN/dX)", zorder=4)
-        ax.set_title(f"{cls}", color=CLASS_C[cls], fontsize=14, fontweight="bold")
-        ax.set_xlabel("redshift  $z$")
+        ax.set_title(f"{cls}", color=CLASS_C[cls], fontsize=15, fontweight="bold")
+        ax.set_xlabel("redshift  $z$", fontsize=16)
         ax.grid(True, color="0.92", lw=0.5, zorder=0)
         if ci == 0:
-            ax.set_ylabel("dN/dX  (recovered / truth-normalised)")
+            ax.set_ylabel("dN/dX  (recovered / truth-normalised)", fontsize=16)
         # cap y at a readable range so the WITHOUT-prior high-z z-slope runaway (DESI does not
         # constrain dN/dX there) does not flatten the comparison; annotate where the band clips.
         ymax = float(np.percentile(np.asarray(rf["dndx_draws"])[:, :, ci], 84, axis=0).max())
@@ -265,11 +347,11 @@ def fig_dndx(on, off, path, mock, off_n):
                         fontsize=9, color=OFF_C,
                         bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=OFF_C, lw=0.8,
                                   alpha=0.9))
-        ax.legend(fontsize=9.5, loc="upper left", frameon=True, framealpha=0.92,
+        ax.legend(fontsize=12, loc="upper left", frameon=True, framealpha=0.92,
                   edgecolor="0.8")
     fig.suptitle(f"DESI leg — recovered per-class dN/dX(z), matched mock {mock}   "
                  r"(WITH $\sigma$=0.15/0.40/0.50  vs  WITHOUT $\sigma{\approx}$5 flat);  16-84% band",
-                 fontsize=14)
+                 fontsize=15)
     fig.tight_layout(rect=(0, 0, 1, 0.94))
     fig.savefig(path, dpi=140, bbox_inches="tight")
     plt.close(fig)
@@ -289,12 +371,31 @@ def main():
     ap.add_argument("--tag", default="",
                     help="filename suffix for the corner + dN/dX (e.g. _mock3 for a per-mock gallery)")
     ap.add_argument("--no-aggregate", action="store_true", help="skip the (mock-independent) cosmo-shift fig")
+    ap.add_argument("--physical", action="store_true",
+                    help="map ns/Ap from the emulator unit cube to PHYSICAL prior-range axes "
+                         "(ns in [0.8,1.05], Ap in [1.2,2.6]e-9) for proposal figures; the corner "
+                         "filename gets _phys and only the corner is (re)made. dN/dX + the cosmo-shift "
+                         "are left untouched (dN/dX is already physical; the shift is a sigma metric). "
+                         "Mirrors plot_hcd_3rung_corner.py.")
     a = ap.parse_args()
     os.makedirs(a.fig_dir, exist_ok=True)
     on = load_arm(a.on_dir); off = load_arm(a.off_dir, limit=a.off_limit)
     off_n = len(off)
-    print(f"[plot] ON N={len(on)}  OFF N={off_n}  mock={a.mock} tag='{a.tag}'")
+    print(f"[plot] ON N={len(on)}  OFF N={off_n}  mock={a.mock} tag='{a.tag}'  physical={a.physical}")
     pre = "desi_hcd_prior"
+    if a.physical:
+        # PROPOSAL corner in physical cosmology units. New _phys filename (unit-cube originals kept).
+        p1 = os.path.join(a.fig_dir, f"{pre}_corner{a.tag}_phys.png")
+        fig_corner(on, off, a.mock, p1, physical=True)
+        ro = _get_mock(on, a.mock)
+        ns_u, ap_u = _truth(ro, "ns"), _truth(ro, "Ap")
+        ns_t = NS_PRIOR[0] + ns_u * (NS_PRIOR[1] - NS_PRIOR[0])
+        ap_t = AP_PRIOR_1E9[0] + ap_u * (AP_PRIOR_1E9[1] - AP_PRIOR_1E9[0])
+        print(f"[phys truth] mock={a.mock}: ns={ns_t:.4f}  Ap={ap_t:.4f}e-9   "
+              f"(unit-cube ns={ns_u:.4f} Ap={ap_u:.4f})")
+        print("[plot] physical corner only (dN/dX + cosmo-shift left untouched)")
+        print("[plot] wrote:\n ", p1)
+        return
     p1 = os.path.join(a.fig_dir, f"{pre}_corner{a.tag}.png")
     p2 = os.path.join(a.fig_dir, f"{pre}_cosmo_shift.png")
     p3 = os.path.join(a.fig_dir, f"{pre}_dndx{a.tag}.png")

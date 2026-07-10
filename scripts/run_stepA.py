@@ -98,6 +98,47 @@ def _closest_sim(sims_ns, target):
     return min(sims_ns, key=lambda t: abs(t[0] - target))
 
 
+def _actual_res_corr_bvec(leg, mf, anchor_mult=5.0):
+    """b = log(anchored res_corr) on this leg's flat (z-major) k-grid -- the correction NORC drops.
+    Read from the raw res_corr table (present even when mf.res_corr_on is False)."""
+    import numpy as _np, jax.numpy as _jnp
+    from hcd_analysis.emulator.multifidelity import interp_res_corr
+    k = _np.asarray(leg.k); zi = _np.asarray(leg.z_idx); zl = _np.asarray(leg.z)
+    b = _np.zeros(k.shape[0])
+    for iz in range(leg.n_z):
+        rsel = _np.where(zi == iz)[0]
+        if rsel.size == 0:
+            continue
+        rc = _np.asarray(interp_res_corr(mf.z_rc, mf.logk_rc, mf.rc_vals,
+                                         float(zl[iz]), _jnp.asarray(k[rsel]),
+                                         anchor_mult=float(anchor_mult)))
+        b[rsel] = _np.log(rc)
+    return b
+
+
+def _rcinj_primary_spec(repo=REPO, environ=None):
+    """Select the RCINJ TRUTH-injection spec (run_one_chain expands it in make_legb_mock).
+
+    Default: the ACTUAL small-box res_corr table ({"actual_res_corr": True}) -- the correction NORC
+    drops, expanded per-leg via ``_actual_res_corr_bvec``. The physical, in-situ misspecification.
+
+    RCINJ_OOS_MEMBER (e.g. "b1"): swap to the OUT-OF-SPAN basis member via the (path, member,
+    strength) form -- the adversarial worst-n_s direction from res_corr_injection_basis.npz that is
+    C^-1-orthogonal to the 2-param alpha_res span and localized to the He-II z>=2.8 window (already
+    scaled to the +-5% envelope, so strength=1.0 is the 1-sigma injection). This is the sharper
+    "did we miss a leak the in-span pass could not see" arm (the metals out-of-class precedent).
+    ``{leg}_worst_ns_member`` in the basis is 1 for all legs -> member="b1".
+
+    RCINJ_RC_STRENGTH scales EITHER form (the +-1sigma systematic scan; the bias is ~linear in it)."""
+    environ = os.environ if environ is None else environ
+    strength = float(environ.get("RCINJ_RC_STRENGTH", "1.0"))
+    member = environ.get("RCINJ_OOS_MEMBER")
+    if member:
+        basis = f"{repo}/hcd_analysis/_emulator_data/res_corr_injection_basis.npz"
+        return dict(path=basis, member=str(member), strength=strength)
+    return dict(actual_res_corr=True, strength=strength)
+
+
 def build_config(verbose=False):
     """Resolve the full 44-chain config (a list of dicts). Each chain dict:
       id, tier, fold, ckpt, sim, n_s, mf, z_slope_marginalized, hr_truth, tau0_extreme,
@@ -125,7 +166,9 @@ def build_config(verbose=False):
                      mf_emucoh=0.0, mf_emucoh_offdiag_only=False, sample_metals=False,
                      inject_a_siiii=0.0, inject_res_corr=None, subdla_center_shift=0.0,
                      hierarchical_hcd=False, hcd_ratio_infl=1.0, hcd_center_shift=0.0,
-                     hcd_2d_tilt=False, z_slope_marginalized=False, zslope_realfit=False, seed=0):
+                     hcd_2d_tilt=False, z_slope_marginalized=False, zslope_realfit=False,
+                     res_corr_on=True, sample_res=False, f_res_amp_sigma=None, seed=0,
+                     ks_resolution_float=False, ks_kmax=None):
         # ``seed`` (default 0 = back-compat for every legacy battery) sets the PRNGKey root, hence the
         # MOCK-NOISE key k_mock = split(fold_in(PRNGKey(seed), mock_index)) in run_one_chain. Distinct
         # seeds at the SAME (survey, sim, fold) therefore give INDEPENDENT cosmic-noise realizations —
@@ -150,7 +193,10 @@ def build_config(verbose=False):
                 subdla_center_shift=float(subdla_center_shift),
                 hierarchical_hcd=bool(hierarchical_hcd), hcd_ratio_infl=float(hcd_ratio_infl),
                 hcd_center_shift=float(hcd_center_shift), hcd_2d_tilt=bool(hcd_2d_tilt),
-                zslope_realfit=bool(zslope_realfit),
+                zslope_realfit=bool(zslope_realfit), res_corr_on=bool(res_corr_on),
+                sample_res=bool(sample_res), f_res_amp_sigma=f_res_amp_sigma,
+                ks_resolution_float=bool(ks_resolution_float),
+                ks_kmax=(None if ks_kmax is None else float(ks_kmax)),
                 chain_id=c, n_chains=n_chains, seed=int(seed)))
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
@@ -486,62 +532,78 @@ def build_config(verbose=False):
         add_fiducial(f"HFLOSO_KS{int(round(_ns * 1000))}", _f, survey="KS", sim=_hs,
                      mf=True, hr_truth=True, prior_center="truth")
 
-    # === Phase-2 res_corr INJECTION-RECOVERY gate (TASK-2.1, spec §4.2) — the DECISIVE n_s-safety
-    # gate for the anchor+marginalize design. The marginalized res_corr amplitude alpha_res(/_slope)
-    # is ALWAYS sampled in _legb_model (Task 1.3, no flag), so an HFLOSO-style cert with alpha free
-    # is the forward. This arm injects the worst-n_s-projecting, OUT-OF-SPAN, z>=2.8-localized
-    # log-res_corr basis member b1 (built by scripts/build_res_corr_injection_basis.py, provably
-    # C_data^-1-orthogonal to the alpha(z) span, cos<0.8) into the mock TRUTH ONLY (never the
-    # forward → it cannot cancel; it is the misspecification alpha_res must absorb). PAIRED design:
-    # a CLEAN control (no injection) + an INJECTED arm at the SAME (survey, sim, fold, SEED) so the
-    # two mocks share byte-identical base truth + cosmic noise and differ ONLY by exp(b1) on the
-    # z>=2.8 truth → the shared noise cancels in Δ_i = post_mean(inj) − post_mean(clean). The Phase-2
-    # gate (scripts/analyze_res_corr_injection.py, run-time, compute-gated) asserts the PAIRED
-    # |mean Δ|+2·SE < 0.3·σ_ref on A_p AND n_s, per survey, in FIXED-reference (α-fixed) units.
-    # Config-only here (no NUTS): the b1 member is loaded inside make_legb_mock from the spec dict.
+    # === Phase-2 NORC res_corr INJECTION-RECOVERY gate (TASK-2.1, spec §4.2) — the DECISIVE
+    # n_s-safety gate under the DEPLOYED Gate-A NORC forward. NORC drops the res_corr correction
+    # ENTIRELY (mf.res_corr(z)==ones) AND pins the alpha_res sites, so there is NO nuisance to
+    # absorb the misspecification. The gate here asks the sharper question: if the REAL universe
+    # carries the (anchored) res_corr the NORC forward is BLIND to, how much paired Δ(n_s, A_p)
+    # does that blindness leak per leg? We build the NORC ctx (res_corr_on=False → fix_alpha_res)
+    # and inject the ACTUAL anchored res_corr (b = log(anchored res_corr) on each leg's k-grid, the
+    # correction NORC drops — {"actual_res_corr": True} expanded via _actual_res_corr_bvec in
+    # run_one_chain) into the mock TRUTH ONLY (never the forward → it cannot cancel; it is the exact
+    # misspecification NORC introduces). PAIRED design: a CLEAN control (no injection) + an INJECTED
+    # arm at the SAME (survey, sim, fold, SEED) so the two mocks share byte-identical base truth +
+    # cosmic noise and differ ONLY by exp(b) → the shared noise cancels in Δ_i = post_mean(inj) −
+    # post_mean(clean). The gate (scripts/analyze_res_corr_injection.py, run-time, compute-gated)
+    # asserts the PAIRED |mean Δ|+2·SE < 0.3·σ_ref on A_p AND n_s, per survey. Config-only here (no
+    # NUTS): the b-vectors are built inside run_one_chain from ctx.mf's raw res_corr table.
     #
-    # 4-LENS PANEL FIXES (2026-06-15) baked in below:
-    #  (1) REALISTIC mock — sample_metals=True + inject_a_siiii (SiIII ripple) + tau0_extreme
-    #      (nonzero dτ₀≈0.20 z-slope) + the HR truth's own HCD excess (prior_center="truth"); ALL
-    #      nuisances free in the fit (alpha_res/_slope always sampled, a_SiIII via sample_metals,
-    #      tau0/dτ₀ + the 3 α_HCD always sampled). So the gate tests whether the misspecification
-    #      LEAKS into n_s VIA the high-k nuisance couplings (alpha_res↔a_SiIII↔n_s, alpha_res↔dτ₀),
-    #      not a bare arm. (The draft used sample_metals=False / no SiIII / dτ₀=0 — fixed.)
-    #  (2) N>=8 INDEPENDENT paired mocks per survey (>=16 for KS): 2 worst-tilt HF-LOSO sims
-    #      (ns0.972, ns0.979) × _RCINJ_SEEDS distinct mock-noise SEEDS = 2×len(seeds) pairs/survey;
-    #      the clean & injected arms SHARE each seed so Δ_i cancels the shared noise; distinct seeds
-    #      give independent realizations (the draft hardcoded seed=0 → only ~2 independent mocks).
-    #  (3) eBOSS EXCLUDED from the injection gate (documented): eBOSS k_max 0.0195 s/km sits
-    #      essentially inside the 5×k_box(z=3)≈0.019 res_corr anchor → res_corr has minimal high-k
-    #      leverage on the eBOSS band (and eBOSS has no HR cache → mf=False → no alpha leverage). The
-    #      eBOSS res_corr safety is covered by the SEPARATE eBOSS MF-anchored re-cert (spec §4.2
-    #      gate 4 / plan Task 2.3). So the gate surveys are DESI + KS only.
-    _RC_BASIS = f"{REPO}/hcd_analysis/_emulator_data/res_corr_injection_basis.npz"
-    _rc_spec = dict(path=_RC_BASIS, member="b1", strength=1.0)   # the pre-selected gate member
-    _RCINJ_SEEDS = tuple(range(8))          # 8 independent mock-noise seeds → 2 sims × 8 = 16 pairs/survey
-    _RCINJ_A_SIIII = 0.045                   # representative SiIII (a ±9% in-band ripple; the eBOSS-cert level)
-    _RCINJ_NCHAINS = 2                       # per-arm chains (post_mean pooled; 2 → R-hat with minimal cost)
-    for _survey, _tag in (("DESI", "D"), ("KS", "K")):   # eBOSS EXCLUDED by design (see fix #3 above)
-        for _hs in _hrn:
-            _f = _fold_of(_hs)
-            if _f is None:
-                continue
-            _ns = _ns_of_sim(d, _hs, PARAM_LIMITS)
-            if int(round(_ns * 1000)) not in (972, 979):     # the two worst-tilt HF-LOSO sims
-                continue
+    # DESIGN NOTES:
+    #  * CLEAN arm = a SELF-CONSISTENT NORC self-draw (mf=True + hr_truth=False): truth AND forward
+    #    both drop res_corr (make_truth_from_sim(mf=ctx.mf) hits the same res_corr()==ones chokepoint),
+    #    so the clean arm recovers with ~0 bias by construction. NOT hr_truth=True — the HR truth
+    #    already carries particle-convergence, which would double-count the injected Δ.
+    #  * PER-LEG SEPARATELY (spec constraint): DESI, KS, eBOSS each get their own arms/tag. eBOSS is
+    #    INCLUDED under NORC (its k_max sits near the anchor so the expected Δ is small, but we MEASURE
+    #    it rather than assume it away). a_SiIII is sampled on the DESI+eBOSS metal legs.
+    #  * Interior sims (fold4 n_s≈0.92, fold6 n_s≈0.966) — avoid the fold0 n_s wall.
+    #  * N=8 independent mock-noise SEEDS × 2 sims = 16 paired mocks/leg; clean & injected SHARE each
+    #    seed so Δ_i cancels the shared noise; distinct seeds give independent realizations.
+    _RCINJ_SEEDS = tuple(range(8)); _RCINJ_NCHAINS = 2
+    # RCINJ_RC_STRENGTH scales the injected res_corr amplitude for the +/-1sigma SYSTEMATIC scan (treat the
+    # unvalidated small-box res_corr as a bounded systematic, not a fixed truth; the bias is ~linear in it).
+    _rc_primary = _rcinj_primary_spec()   # actual res_corr table by default; OUT-OF-SPAN basis if RCINJ_OOS_MEMBER set
+    _RCINJ_POINTS = ((4, 0.92), (6, 0.966))      # interior sims, avoid the fold0 n_s wall
+    # OPTION-1 (RCINJ_FRES=1): FLOAT f_res (option-b) so the DEPLOYED resolution marginalization absorbs the
+    # injected res_corr. DESI/eBOSS ONLY (KS resolution_ready=False -- its proxy R_z is 7-15x too large; f_res
+    # stays OFF on KS until the echelle R_z lands). f_res arms get a distinct 'F' tag (no ckpt collision with
+    # the conservative no-f_res arms).
+    _RCINJ_FRES = os.environ.get("RCINJ_FRES", "0") == "1"
+    # KS f_res (task #5) is now UNBLOCKED (echelle R_z 3.2 + diag cov surgery landed). The KS width is
+    # env-driven so the sensitivity arm runs as two submissions to separate --out-dirs: the HONEST
+    # instrument width RCINJ_KS_FRES_SIGMA=0.15 (esyst_res_ks/P ~1.3-1.6% at k=0.065) and the combined
+    # 0.4 (the paper r_m; over-wide). KS floats f_res via ks_kwargs (resolution_float + k_max=0.065).
+    _KS_FRES_SIGMA = float(os.environ.get("RCINJ_KS_FRES_SIGMA", "0.4"))
+    # RCINJ_KS_KMAX (e.g. 0.065): the KS no-f_res CONTROL band. Runs the non-f_res KS arm (RCINJK) at the
+    # f_res band so we get the HONEST fixed sigma_ref at 0.065 (not the 0.045-capped 0.1795) AND the 0.065
+    # no-f_res baseline leak (to decompose a f_res-arm fail). Unset -> the NORC 0.045 cap (the 0.385 baseline).
+    _KS_KMAX = os.environ.get("RCINJ_KS_KMAX")
+    _FRES_SIGMA = {"DESI": 0.02, "eBOSS": 0.05, "KS": _KS_FRES_SIGMA}   # per-leg option-b prior width
+    for _survey, _tag in (("DESI", "D"), ("KS", "K"), ("eBOSS", "E")):
+        _fres = _RCINJ_FRES and _survey in ("DESI", "eBOSS", "KS")
+        _ksf = _fres and _survey == "KS"                     # KS echelle R_z + diag surgery via ks_kwargs
+        # KS k_max: the f_res arm is always 0.065; the no-f_res KS control uses RCINJ_KS_KMAX (else NORC 0.045).
+        _ks_km = 0.065 if _ksf else ((float(_KS_KMAX) if _KS_KMAX else None) if _survey == "KS" else None)
+        _tagf = _tag + ("F" if _fres else "")
+        for _f, _ns in _RCINJ_POINTS:
+            _base = dict(survey=_survey, mf=True, prior_center="truth",
+                         sample_metals=(_survey in ("DESI", "eBOSS")), inject_a_siiii=0.0,
+                         sample_res=_fres, f_res_amp_sigma=(_FRES_SIGMA[_survey] if _fres else None),
+                         ks_resolution_float=_ksf, ks_kmax=_ks_km,
+                         # match the DEPLOYED production C_emu: the 60-sim LF-emu off-diagonal k-coherent
+                         # term (mf_emucoh; top-15 ~96.8% of trace). NB the "78% rank-1" is the SEPARATE
+                         # MFShape LF->HR resolution-residual term (mf_shape), OFF in the deployed "current"
+                         # variant -- do not conflate. Production fires mf_emucoh on DESI+KS (eBOSS sits
+                         # below the emucoh band k>=0.01), so keep eBOSS emucoh OFF as production does.
+                         mf_emucoh=(1.0 if _survey in ("DESI", "KS") else 0.0),
+                         mf_emucoh_offdiag_only=True,
+                         res_corr_on=False, n_chains=_RCINJ_NCHAINS)
             _t = int(round(_ns * 1000))
-            # REALISTIC mock + all-nuisances-free fit (fix #1). hr_truth=True → truth = the HR sim's
-            # REAL measured P1D (carries its own HCD excess); mf=True → production MF forward; the MF
-            # correction is fit EXCLUDING this HR sim (mf_exclude_held via hr_truth). prior_center
-            # ="truth" isolates resolution from the LLS-center lever.
-            _base = dict(survey=_survey, sim=_hs, mf=True, hr_truth=True, prior_center="truth",
-                         sample_metals=True, inject_a_siiii=_RCINJ_A_SIIII, tau0_extreme=True,
-                         n_chains=_RCINJ_NCHAINS)
-            for _sd in _RCINJ_SEEDS:                          # N independent paired mocks (fix #2)
-                # clean & injected SHARE _sd (→ shared base truth + noise; differ only by exp(b1)).
-                add_fiducial(f"RCINJ{_tag}_clean{_t}s{_sd}", _f, seed=_sd, **_base)
-                add_fiducial(f"RCINJ{_tag}_inj{_t}s{_sd}",   _f, seed=_sd,
-                             inject_res_corr=_rc_spec, **_base)
+            for _sd in _RCINJ_SEEDS:
+                # clean & injected SHARE _sd (→ shared base truth + noise; differ only by exp(b)).
+                add_fiducial(f"RCINJ{_tagf}_clean{_t}s{_sd}", _f, _ns, seed=_sd, **_base)
+                add_fiducial(f"RCINJ{_tagf}_inj{_t}s{_sd}",   _f, _ns, seed=_sd,
+                             inject_res_corr=_rc_primary, **_base)
 
     # === Phase-5a SHAPE-FLOOR validation (2026-06-12): the genuine HF-LOSO worst cases re-run
     # with the shape-aware MF floor (fires on the DESI leg). Compares: the existing DIAGONAL floor
@@ -779,9 +841,22 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     _eoda = bool(chain.get("mf_emucoh_offdiag_only", False))   # per-term diagonal allocation
     _survey = chain.get("survey", "DESI")
     _desi_kw = {"mf_floor_on": True} if chain.get("desi_floor") else None
+    # KS f_res (task #5): opt in the KS echelle R_z + diag cov surgery via ks_kwargs (resolution_float
+    # + k_max=0.065, which also disables the NORC 0.045 auto-cap). Default None -> KS proxy R_z (golden).
+    _ks_kwargs = None
+    if bool(chain.get("ks_resolution_float", False)) or chain.get("ks_kmax") is not None:
+        _ks_kwargs = {}
+        if bool(chain.get("ks_resolution_float", False)):
+            _ks_kwargs["resolution_float"] = True            # KS echelle R_z + diag surgery
+        if chain.get("ks_kmax") is not None:
+            _ks_kwargs["k_max"] = float(chain["ks_kmax"])    # also the no-f_res 0.065 control band
     ctx, d = build_legb_ctx(
         ckpt=chain["ckpt"], with_mf=bool(chain["mf"]),
         mf_fold=fold, mf_with_floor=bool(chain["mf"]),
+        res_corr_on=bool(chain.get("res_corr_on", True)),      # NORC (Gate-A): False → drop res_corr + cap KS
+        sample_res=bool(chain.get("sample_res", False)),       # option-b f_res float (DESI/eBOSS; KS via ks_kwargs)
+        f_res_amp_sigma=chain.get("f_res_amp_sigma", None),
+        ks_kwargs=_ks_kwargs,                                  # KS echelle R_z + diag surgery (task #5); None=proxy
         mf_exclude_held=bool(chain.get("hr_truth", False)),    # HF-LOSO: MF fit EXCLUDING this HR sim
         # TRUE leave-ONE-out (Task 1.5): drop EXACTLY this HR sim from the MF head fit, not the
         # whole LF fold group (two HR sims can share a group → leave-TWO-out → an inflated bias).
@@ -805,6 +880,13 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         # per-class slope s_c = B_hcd + δs_c REPLACES the marginalize_zslope sampling. Requires
         # hierarchical_hcd; the closure δs_c / B_hcd center+width auto-derive from the forward slopes.
         hcd_2d_tilt=bool(chain.get("hcd_2d_tilt", False)))
+
+    # NORC (Gate-A, mirrors run_prod_sbc_shard.py): res_corr_on=False also PINS the (now inert)
+    # alpha_res sites (fix_alpha_res=True), so the NORC self-draw truth AND forward both drop the
+    # res_corr correction self-consistently. Applied BEFORE the diagnostic fix_alpha_res block below.
+    if not bool(chain.get("res_corr_on", True)):
+        ctx = ctx._replace(fix_alpha_res=True)
+        assert ctx.res_corr_on is False and ctx.fix_alpha_res is True, "NORC ctx not applied"
 
     # DIAGNOSTIC (decomp): FIX the res_corr-amplitude nuisance alpha_res to the no-op (alpha0=1,
     # s=0, NOT sampled) instead of marginalizing it. Default False = production (alpha SAMPLED,
@@ -945,9 +1027,21 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     # the leg-binned mock TRUTH ONLY (never the forward) so the paired clean-vs-injected gate can
     # test that marginalizing alpha_res protects n_s. The spec is the (path, member, strength) dict
     # the injection-arm config builds; None ⇒ no-op (the default for every non-injection chain).
+    # {"actual_res_corr": True} → expand to the per-leg log(anchored res_corr) b-vector the NORC
+    # forward drops (the actual res_corr the real universe carries), read from ctx.mf's raw table on
+    # THIS chain's (already leg-filtered) legs. Any other spec (a (path,member,strength) dict or an
+    # explicit {leg: b} dict) passes through unchanged; None ⇒ no-op (the non-injection default).
+    _rc_spec = chain.get("inject_res_corr", None)
+    if isinstance(_rc_spec, dict) and _rc_spec.get("actual_res_corr"):
+        _am = float(chain.get("mf_anchor_mult", 5.0))
+        _rcs = float(_rc_spec.get("strength", 1.0))   # amplitude scale for the +/-1sigma res_corr systematic scan
+        _rc_inject = (None if ctx.mf is None
+                      else {leg.name: _rcs * _actual_res_corr_bvec(leg, ctx.mf, _am) for leg in ctx.legs})
+    else:
+        _rc_inject = _rc_spec
     mock_legs, truth_pack, info = make_legb_mock(
         ctx, truth_sim, k_mock, inject_a_siiii=float(chain.get("inject_a_siiii", 0.0) or 0.0),
-        inject_res_corr=chain.get("inject_res_corr", None))
+        inject_res_corr=_rc_inject)
     core_per_leg = _mock_core_per_leg(ctx, truth_sim)
     kept_global = truth_pack["kept_global_z"]
 
@@ -1262,6 +1356,8 @@ def main():
                     help="SMOKE: 1 L1b single-chain + 1 fiducial's 2 chains @ ~40/40")
     ap.add_argument("--run-one", type=str, default=None,
                     help="(internal) run ONE chain by id + write its checkpoint")
+    ap.add_argument("--only", type=str, default=None,
+                    help="filter the cfg to chains whose id startswith PREFIX (e.g. --only RCINJ)")
     ap.add_argument("--workers", type=int, default=14, help="pool size (default 14; 2 cores headroom)")
     # NUTS knobs (the worker reads these; the pool forwards them).
     ap.add_argument("--n-warmup", type=int, default=PROD["n_warmup"])
@@ -1298,6 +1394,10 @@ def main():
 
     _force_single_thread_env()
     cfg = build_config(verbose=True)
+    if args.only:
+        cfg = [c for c in cfg if c["id"].startswith(args.only)]
+        print(f"[--only {args.only!r}] filtered to {len(cfg)} chains "
+              f"({len(set(c['mock_id'] for c in cfg))} mocks)")
 
     if args.print_table:
         print_table(cfg)

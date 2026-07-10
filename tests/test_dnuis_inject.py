@@ -152,7 +152,19 @@ def test_meanflux_on_leg_is_exp_minus_tau0_global(ctx_d):
 
 
 def test_resolution_injection_is_exp_2b_k2_R2(ctx_d):
-    ctx, d = ctx_d
+    ctx0, d = ctx_d
+    # The resolution injection now RAISES on a non-resolution_ready leg (KS's proxy R_z is untrustworthy;
+    # 4-referee panel guard). The default ctx has [DESI, KS], so injecting on the FULL ctx must raise...
+    core0 = _core(ctx0, d)
+    tp0 = LB.draw_leg_a_leg_truth(ctx0, jax.random.PRNGKey(5))
+    if any(not l.resolution_ready for l in ctx0.legs):
+        import pytest
+        with pytest.raises(ValueError, match="resolution_ready|[Kk][Ss]"):
+            LB.make_leg_a_legmock(ctx0, core0, tp0, jax.random.PRNGKey(6),
+                                  inject_resolution={"b_res": 0.02})
+    # ...and the exp(2 b k^2 R^2) math is verified on the resolution_ready legs (DESI/eBOSS).
+    ctx = ctx0._replace(legs=[l for l in ctx0.legs if l.resolution_ready])
+    assert ctx.legs, "no resolution_ready leg to test the injection math on"
     core = _core(ctx, d)
     tp = LB.draw_leg_a_leg_truth(ctx, jax.random.PRNGKey(5))
     key = jax.random.PRNGKey(6)
@@ -182,6 +194,51 @@ def test_resolution_injection_is_exp_2b_k2_R2(ctx_d):
             f_sorted = expect[rows][order]
             assert np.all(np.diff(f_sorted) >= -1e-12), \
                 f"{leg.name} z{iz}: resolution factor not monotone in k"
+
+
+def test_resolution_vector_injection_is_per_z_exp(ctx_d):
+    """{'b_res_vec': v} applies exp(2 v[iz] k^2 R_z[iz]^2) per z-block (TASK 2B: the OOS per-z
+    resolution resolver). Mirrors test_resolution_injection_is_exp_2b_k2_R2's math check, but on
+    a per-z vector instead of a scalar, verified against the recorded noiseless truth_on_leg
+    (deterministic; no eps/key involved)."""
+    ctx0, d = ctx_d
+    ctx = ctx0._replace(legs=[l for l in ctx0.legs if l.resolution_ready])
+    assert ctx.legs, "no resolution_ready leg to test the injection math on"
+    core = _core(ctx, d)
+    tp = LB.draw_leg_a_leg_truth(ctx, jax.random.PRNGKey(23))
+    key = jax.random.PRNGKey(24)
+    n_z = ctx.legs[0].n_z
+    v = np.linspace(-0.03, 0.03, n_z)                       # a NON-monotonic-safe per-z b_res(z)
+    base_legs, base_info = LB.make_leg_a_legmock(ctx, core, tp, key)
+    inj_legs, inj_info = LB.make_leg_a_legmock(ctx, core, tp, key,
+                                               inject_resolution={"b_res_vec": list(v)})
+    for leg in ctx.legs:
+        base_truth = np.asarray(base_info["truth_on_leg"][leg.name])
+        inj_truth = np.asarray(inj_info["truth_on_leg"][leg.name])
+        assert inj_truth.shape == base_truth.shape
+        assert np.all(np.isfinite(inj_truth))
+        R_z = np.asarray(leg.R_z)
+        z_idx = np.asarray(leg.z_idx)
+        k = np.asarray(leg.k)
+        expect = np.exp(2.0 * v[z_idx] * k ** 2 * R_z[z_idx] ** 2)
+        np.testing.assert_allclose(inj_truth, base_truth * expect, rtol=1e-8,
+                                   err_msg=f"{leg.name}: per-z resolution vector factor mismatch")
+
+
+def test_resolution_vector_on_unready_leg_raises(ctx_d):
+    """The B1 regression: a VECTOR (not scalar) injection on a non-resolution_ready leg RAISES
+    (the fixed guard fires on `active`, not on the scalar-only `res_b is not None`)."""
+    ctx0, d = ctx_d
+    unready = [l for l in ctx0.legs if not l.resolution_ready]
+    assert unready, "fixture ctx has no non-resolution_ready leg (e.g. KS) to test the guard on"
+    leg = unready[0]
+    ctx2 = ctx0._replace(legs=[leg])
+    core = _core(ctx2, d)
+    tp = LB.draw_leg_a_leg_truth(ctx2, jax.random.PRNGKey(25))
+    key = jax.random.PRNGKey(26)
+    n_z = leg.n_z
+    with pytest.raises(ValueError, match="resolution_ready|[Kk][Ss]"):
+        LB.make_leg_a_legmock(ctx2, core, tp, key, inject_resolution={"b_res_vec": [0.01] * n_z})
 
 
 # --------------------------------------------------------------------------------------------- #

@@ -20,13 +20,12 @@ is still written for back-compat with already-merged shards.
 FORWARD (2026-06-17): the CORRECTED HCD z-slope (re-centered on HCD_INCIDENCE_SLOPE ~2.4, commits
 3603522/6358742/bad8f15, with the runtime forward-exponent guard ACTIVE) + the 1D power-law
 incidence (NOT the 2D-tilt; hcd_2d_tilt defaults False) + the production MF correction. NOTE on
-res_corr: the ``res_corr_on=False`` (NORC) forward flag is NOT yet wired into build_legb_ctx /
-LegBCtx / data_likelihood (that is Group 1 of the SBC plan, a load-bearing forward change that
-needs the golden-test + 4-referee gate). Until it lands this runner uses the EXISTING default MF
-forward (res_corr anchored below 5× the box fundamental, alpha_res marginalized forward-only) — so
-``--no-res-corr-on`` is accepted but is currently a NO-OP placeholder that only records the intent
-in the meta. The mock TRUTH and the likelihood go through the SAME forward, so C_mock ≡ C_like and
-the rank-uniformity null is exact regardless.
+res_corr: the ``res_corr_on`` (NORC) forward flag IS NOW WIRED (2026-07-04, Gate-A) through
+build_legb_ctx -> build_mf_correction -> MultiFidelity.res_corr_on and, for NORC, this runner also
+pins fix_alpha_res=True + caps KS at k<=0.045. DEFAULT is NORC (res_corr_on=False); pass
+``--res-corr-on`` to restore the pre-NORC anchored+alpha forward. res_corr_on lives on the mf object
+(the single chokepoint), so the mock TRUTH and the likelihood SHARE it -> C_mock ≡ C_like and the
+rank-uniformity null is exact at either setting. (Gated by the 4-referee panel + freeze.)
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
@@ -39,7 +38,7 @@ import pickle
 print = functools.partial(print, flush=True)
 
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
-from hcd_analysis.emulator.closure_legb import build_legb_ctx, run_legb
+from hcd_analysis.emulator.closure_legb import build_legb_ctx, run_legb, prod_forward_config
 
 REPO = "/home/mfho/hcd_priya"
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
@@ -82,7 +81,8 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
         existing = rec.get("run_cfg")
         # The DEFAULT (pre-2026-06-19) config every un-stamped pkl was written under.
         default_cfg = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="all", fold=0,
-                           tau0_prior_sigma=0.0, subdla_truth_boost=1.0)
+                           tau0_prior_sigma=0.0, subdla_truth_boost=1.0, res_corr_on=True,
+                           sample_res=False, f_res_amp_sigma=None, metal_prior="uniform")
         # A PRE-STAMP pkl (no run_cfg) is treated as the default config — so resuming a DEFAULT run
         # over old pkls still works, but a non-default (held-out / cemu-variant / width-check) run
         # over those same old pkls correctly CLASHES (it would otherwise silently load self-draws).
@@ -114,6 +114,33 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
             _req.pop("tau0_prior_sigma", None)
         if "subdla_truth_boost" not in eff_existing and float(_req.get("subdla_truth_boost", 1.0)) == 1.0:
             _req.pop("subdla_truth_boost", None)
+        # BACK-COMPAT (2026-07-04, NORC stamp): pre-stamp pkls lack res_corr_on and were ALL the pre-NORC
+        # (res_corr ON) forward. Don't CLASH on the missing key alone WHEN the current run is ALSO
+        # res_corr_on=True (a pre-NORC resume). A NORC run (res_corr_on=False) does NOT pop => it differs
+        # from the res_corr-ON existing => it correctly CLASHES: a NORC SBC certificate must never pool a
+        # pre-NORC anchored+alpha mock (ranks don't transfer across forwards).
+        if "res_corr_on" not in eff_existing and bool(_req.get("res_corr_on", True)) is True:
+            _req.pop("res_corr_on", None)
+        # BACK-COMPAT (2026-07-07, data-nuisance forward stamps): pre-stamp pkls lack sample_res /
+        # f_res_amp_sigma / metal_prior and were ALL the pre-wiring forward (no f_res float, uniform
+        # scalar metals). Don't CLASH on a missing key alone WHEN the current run is ALSO at that
+        # pre-wiring default. A WIRED run (sample_res=True or metal_prior=flatlog2node) does NOT pop =>
+        # it differs from the pre-wiring existing => it correctly CLASHES: a wired SBC certificate must
+        # never pool a pre-wiring uniform/no-f_res mock (ranks don't transfer across forwards).
+        if "sample_res" not in eff_existing and bool(_req.get("sample_res", False)) is False:
+            _req.pop("sample_res", None)
+        if "f_res_amp_sigma" not in eff_existing and _req.get("f_res_amp_sigma", None) is None:
+            _req.pop("f_res_amp_sigma", None)
+        if "metal_prior" not in eff_existing and str(_req.get("metal_prior", "uniform")) == "uniform":
+            _req.pop("metal_prior", None)
+        # BACK-COMPAT (2026-07-08, KS ks_kmax stamp): pre-stamp pkls lack ks_kmax and were ALL either
+        # non-KS (KS f_res not applicable) or a pre-flip KS run (no f_res float at all). Don't CLASH on
+        # the missing key alone WHEN the current run is ALSO at that default (ks_kmax=None: not a wired
+        # KS run). A wired-KS run (ks_kmax=0.065) does NOT pop => it differs from the missing-key existing
+        # => it correctly CLASHES: a wired KS SBC certificate must never pool a pre-flip or a 0.045-
+        # fallback KS pkl (ranks don't transfer across KS f_res forwards).
+        if "ks_kmax" not in eff_existing and _req.get("ks_kmax", None) is None:
+            _req.pop("ks_kmax", None)
         if eff_existing != _req:
             raise RuntimeError(
                 f"[mock {m}] config CLASH at {path}: existing pkl run_cfg={existing} "
@@ -164,11 +191,11 @@ def main():
     ap.add_argument("--leg", choices=["all", "DESI", "KS", "eBOSS"], default="all",
                     help="restrict the SBC likelihood to one survey leg (per-leg = the deployed analysis)")
     ap.add_argument("--res-corr-on", dest="res_corr_on", action="store_true",
-                    help="(placeholder) keep res_corr ON; the NORC flag is not yet wired in the "
-                         "forward — see the module docstring. Recorded in meta only.")
+                    help="restore the pre-NORC forward: res_corr ON + alpha_res marginalized + "
+                         "KS k<=0.069 (the anchored+alpha baseline).")
     ap.add_argument("--no-res-corr-on", dest="res_corr_on", action="store_false",
-                    help="(placeholder) request NORC (res_corr OFF). NOT yet wired in the forward; "
-                         "records the intent in meta. Default.")
+                    help="NORC (DEFAULT): res_corr OFF + fix_alpha_res + KS k<=0.045 (Gate-A).")
+    # (res_corr_on default False is set in the ap.set_defaults(...) below with the other run defaults)
     ap.add_argument("--single-member", action="store_true",
                     help="run on final_prod_seed0 only (cheap de-risk; NOT the production object)")
     ap.add_argument("--no-shard-pkl", dest="write_shard_pkl", action="store_false",
@@ -254,14 +281,26 @@ def main():
     # the requested single leg is sliced out of ctx.legs after the build.
     if a.leg == "all":
         _metals_on, _sample_metals, _build_eboss = a.with_eboss, a.with_eboss, a.with_eboss
+        # VALIDATION-ONLY joint: f_res is a per-INSTRUMENT systematic (a shared global f_res across
+        # instruments RAISES in _check_single_instrument_for_res), so it is OFF here; metals follow the
+        # metal legs (flatlog2node when any metal leg is present, else uniform).
+        _sample_res, _f_res_sigma = False, None
+        _metal_prior = "flatlog2node" if a.with_eboss else "uniform"
     else:
         _build_eboss   = (a.leg == "eBOSS")
-        _metals_on     = (a.leg == "DESI")     # DESI DR1 metal model (PI: DESI needs metals per-leg)
+        _metals_on     = (a.leg == "DESI")     # metals_on param controls the DESI loader ONLY (eBOSS leg is
+                                               # metals-on by its own loader default; KS metals-off)
         # Fit a_SiIII ONLY where the forward actually applies a metal factor (metals_on legs): DESI
         # (its DR1 model) and eBOSS (DR14 not SiIII-subtracted). KS=KODIAQ-HR runs metals_on=False
         # (metals live in its covariance / conservative mode) and run_real_fit deploys KS metals=False,
         # so sampling a_SiIII for KS would be an INERT, deployment-mismatched extra dim (panel 2026-06-21).
         _sample_metals = (a.leg in ("DESI", "eBOSS"))
+        # The certified per-leg data-nuisance forward = the SINGLE source run_real_fit also consumes, so
+        # the SBC self-draw forward provably == the real-fit forward (f_res float + flat-log 2-node metals).
+        _fc = prod_forward_config(a.leg)
+        _sample_res, _f_res_sigma, _metal_prior = (
+            _fc["sample_res"], _fc["f_res_amp_sigma"], _fc["metal_prior"])
+    _ks_kw = (prod_forward_config("KS").get("ks_kwargs") if a.leg == "KS" else None)
     # FOLD ROUTING (2026-06-21): --fold k selects the TRUE-LOSO single net final_fold{k} (the
     # else-branch of build_legb_ctx, ensemble_ckpts=None) with mf_fold=k so the MF backbone matches
     # the fold-k LF net, and held_out_sims(fold=k) supplies that fold's EXCLUDED sims (run_legb fold,
@@ -283,17 +322,41 @@ def main():
     ctx, d = build_legb_ctx(
         use_xclass=True,
         with_mf=a.with_mf, mf_with_floor=a.with_mf,
+        res_corr_on=a.res_corr_on,                    # NORC default False (Gate-A): drop res_corr + cap KS
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         mf_emucoh_npz=_emucoh_npz,                    # None → default table; LOWK → the fix (MODE 1)
         mf_shape=_fixed,                              # MODE 2 (LF→HR resolution tilt) ON only when fixed
         with_eboss=_build_eboss, metals_on=_metals_on, sample_metals=_sample_metals,
+        sample_res=_sample_res,                       # option-b f_res float (DESI 0.02/eBOSS 0.05/KS 0.15; OFF on joint only)
+        f_res_amp_sigma=_f_res_sigma,                 # its Normal(0,.) width (DESI 0.02 / eBOSS 0.05; None off)
+        metal_prior=_metal_prior,                     # flatlog2node (Gate-C) on metal legs; uniform on KS
+        ks_kwargs=_ks_kw,                             # KS f_res echelle resolution_float+k_max (KS-only)
         hierarchical_hcd=False, **_build_kw)
+    if not a.res_corr_on:
+        ctx = ctx._replace(fix_alpha_res=True)        # NORC also pins the 2 alpha_res sites (now inert)
+    assert ctx.res_corr_on == a.res_corr_on, "res_corr_on did not propagate to the ctx"
+    assert ctx.fix_alpha_res == (not a.res_corr_on), "fix_alpha_res inconsistent with NORC state"
+    _ks_km = (_ks_kw or {}).get("k_max")
+    print(f"[NORC] res_corr_on={ctx.res_corr_on} fix_alpha_res={ctx.fix_alpha_res} "
+          f"KS_kmax={_ks_km if _ks_km is not None else ('0.045' if not a.res_corr_on else '0.069')}")
     if a.leg != "all":
         _pre = [l.name for l in ctx.legs]
         ctx = ctx._replace(legs=[l for l in ctx.legs if l.name.upper().startswith(a.leg.upper())])
         assert len(ctx.legs) == 1, f"--leg {a.leg}: expected 1 leg, got {[l.name for l in ctx.legs]} (pre={_pre})"
         print(f"[per-leg] restricted to {a.leg}: legs={[l.name for l in ctx.legs]}  "
               f"metals_on={_metals_on} sample_metals={_sample_metals}")
+    # SELF-CONSISTENCY (mirror the NORC + run_real_fit asserts): the certified data-nuisance forward must
+    # be WIRED so the SBC self-draw forward == the real-fit forward (not silently regressed to defaults).
+    assert ctx.metal_prior == _metal_prior, "SBC metal model (flatlog2node) not wired"
+    assert bool(ctx.sample_res) == bool(_sample_res), "SBC f_res float not wired"
+    assert ctx.f_res_amp_sigma == _f_res_sigma, "SBC f_res prior width mismatch"
+    assert tuple(ctx.metal_node_z) == (2.2, 4.2), "Gate-C metal_node_z drifted"
+    if ctx.sample_res:                             # f_res is per-INSTRUMENT: single-leg + resolution_ready
+        assert all(getattr(l, "resolution_ready", False) for l in ctx.legs), \
+            "f_res float on a resolution_ready=False leg"
+        assert len({l.name for l in ctx.legs}) == 1, "f_res float requires a single-instrument leg"
+    if a.leg == "all":
+        assert bool(ctx.sample_res) is False, "multi-instrument joint must not float f_res"
     # INFORMATIVE-τ₀ PRIOR ARM: when SBC_TAU0_PRIOR_SIGMA>0, swap the UNIFORM τ₀ sites for a
     # Kim-centered TruncatedNormal (center = the injected closure truth: amp 1.0, dτ₀ 0.0). Done
     # AFTER the per-leg filtering so it lands on the FINAL ctx, then ASSERTED so it can never
@@ -357,7 +420,7 @@ def main():
     print(f"[shard {a.shard}/{a.n_shards}] mocks={idxs}  members={n_members}  fold={_fold_s}  "
           f"legs={[l.name for l in ctx.legs]}  n_z={n_z}  mf={a.with_mf} eboss={a.with_eboss}  "
           f"cemu_variant={variant} leg_a={a.leg_a}(held_out={not a.leg_a})  "
-          f"res_corr_on={a.res_corr_on}(flag-not-wired; default-forward) "
+          f"res_corr_on={a.res_corr_on}(NORC={not a.res_corr_on}: res_corr off/fix_alpha_res/KS0.045) "
           f"(warmup={a.n_warmup} samples={a.n_samples} mtd={a.max_tree_depth})")
 
     # PER-MOCK loop: one mock at a time, checkpoint + skip after each (bounds RSS, ≤1 mock lost
@@ -375,9 +438,19 @@ def main():
                    tau0_prior_sigma=float(_tau0_prior_sig),   # informative-τ₀ discriminator (2026-06-21):
                                       # an informative-prior pkl must never load into a uniform run (or
                                       # vice versa) — distinct SBC population.
-                   subdla_truth_boost=float(_subdla_truth_boost))   # subDLA-displacement discriminator
+                   subdla_truth_boost=float(_subdla_truth_boost),   # subDLA-displacement discriminator
                                       # (2026-06-21): a displaced-truth pkl must never load into an
                                       # un-displaced run (different mock truth).
+                   res_corr_on=bool(a.res_corr_on),   # NORC discriminator (2026-07-04): a NORC pkl
+                                      # (res_corr OFF + fix_alpha_res + KS 0.045) must NEVER pool with a
+                                      # pre-NORC anchored+alpha pkl -- ranks don't transfer across forwards.
+                   sample_res=bool(_sample_res),      # DATA-NUISANCE forward discriminators (2026-07-07,
+                   f_res_amp_sigma=_f_res_sigma,      # task #4): the f_res float + flat-log 2-node metals
+                   metal_prior=str(_metal_prior),     # change the SBC POPULATION, so a WIRED pkl must never
+                                      # pool with a pre-wiring (uniform / no-f_res) pkl -- distinct forward.
+                   ks_kmax=(_ks_kw or {}).get("k_max"))   # KS f_res k_max (None where KS not floating):
+                                      # a wired KS pkl (0.065) must never pool with a pre-flip or a
+                                      # 0.045-fallback KS pkl (Task 1C).
     records = []
     for m in idxs:
         rec = _run_mock(ctx, d, m, a.out_dir, n_mocks=a.n_mocks, n_warmup=a.n_warmup,

@@ -48,9 +48,12 @@ Z_PIVOT = 3.0
 C_KMS = 299792.458            # speed of light [km/s]
 LAMBDA_LYA = 1215.67          # Lyα rest wavelength [Å]
 LAMBDA_SiIII = 1206.50        # SiIII line [Å]
-LAMBDA_SiII = 1190.42         # SiII line [Å]  (1190/1193 doublet; use 1190.42 leading line)
-# McDonald (2006) metal-damping smoothing scale [s/km] (companion Eq. 4.3).
-# SiIII/SiII–Lyα decorrelation scale k_x (companion arXiv:2601.21432 Eq. 4.3): the cosine
+LAMBDA_SiII = 1190.42         # SiII line [Å]  (1190/1193 doublet; 1190.42 leading line)
+LAMBDA_SiIIb = 1193.28        # SiII line [Å]  (the SECOND doublet line; r_doublet weights it)
+R_SiII_DOUBLET = 0.5          # intra-doublet ratio (matches closure_legb.metal_inject r_doublet)
+# SiIII/SiII–Lyα decorrelation scale k_x [s/km] (DESI DR1 companion arXiv:2601.21432 Eq. 4.3).
+# NOTE: this sigmoid damping is the companion's ADDITION, NOT in McDonald 2006 (whose SiIII
+# cross-term is undamped). The cosine
 # cross-term is multiplied by the SIGMOID D_x(k)=2−2/(1+exp(−k/k_x)); k_x is a FREE nuisance
 # the sampler fits. These are off-state defaults (irrelevant when a=0; metals default OFF).
 K_SiIII_DEFAULT = 0.05         # s/km, sigmoid decorrelation scale (free nuisance)
@@ -177,6 +180,16 @@ class DataLeg(NamedTuple):
     resolution_on: bool
     mf_floor_on: bool = False
     dla_forward_frac: float = 1.0
+    # whether this leg's R_z is trustworthy for a spectral-resolution INJECTION (option-b / the Gate-B
+    # resolution arm). DESI/eBOSS: True (R_z exact / order-correct proxy). KS: False -- load_ks_leg reuses
+    # the DESI pixel proxy R_z, ~7-15x too large vs KS's echelle sigma~3.2 km/s, so a b_res injection is a
+    # ~70% distortion the forward cannot fit (the -21sigma ESS collapse). Gate the injection on THIS flag,
+    # NOT resolution_on (option-a injects with resolution_on=False). Default True (back-compatible).
+    resolution_ready: bool = True
+    # ARM-D bookkeeping: the covariance carries a COHERENT cross-z resolution mode (resolution removed the
+    # deployed way, then re-added as ONE rank-1 outer(e,e)) and there is NO forward f_res float. Distinguishes
+    # arm-D (resolution_on=False, resolution_coherent_on=True) from option-a (both False). Default False.
+    resolution_coherent_on: bool = False
 
 
 # PER-LEG DLA-forward fraction (§0c, PI-confirmed final intent 2026-06-09): the leg-specific
@@ -196,9 +209,29 @@ def _z_unit(z):
 
 
 def desi_resolution_R(z):
-    """DESI resolution scale R_z = c·0.8Å / ((1+z)·1215.67Å)  [s/km] (usage doc Eq. 4.8)."""
+    """DESI resolution scale R_z = c·0.8Å / ((1+z)·1215.67Å)  [km/s] (usage doc Eq. 4.8; CORRECTED
+    2026-07-10, PR#14 panel FIX 6b -- an earlier version of this docstring mislabeled the units
+    [s/km], the units of k not R_z; C_KMS carries [km/s] and the Å/Å ratio is dimensionless, so R_z
+    is [km/s], consistent with ks_resolution_R's KS_RESOLUTION_KMS=3.2 km/s)."""
     z = np.asarray(z)
     return C_KMS * DESI_PIXEL_ANGSTROM / ((1.0 + z) * LAMBDA_LYA)
+
+
+# KODIAQ+SQUAD echelle spectral-resolution scale, PINNED to the Gaussian sigma_v of the LSF:
+# sigma_v = c / (R * 2.3548) (FWHM=c/R). NOTE (CORRECTED 2026-07-10, PR#14 panel FIX 6c): 3.2 km/s
+# is the SQUAD (higher-R=40000) floor; the KODIAQ end (R=36000) gives sigma_v ~3.54 km/s (LOWER
+# resolving power -> LARGER LSF). The deployed 3.2 km/s is therefore the OPTIMISTIC (narrowest-LSF)
+# end of the KODIAQ+SQUAD range, not a KODIAQ+SQUAD-average -- documented here, value UNCHANGED.
+# This REPLACES the DESI pixel proxy (~49 km/s at z=3, ~15x too large) on the KS f_res path ONLY; the
+# default KS load keeps the proxy (R_z is unused when resolution_on=False). z-independent (echelle R is).
+KS_RESOLUTION_KMS = 3.2
+
+
+def ks_resolution_R(z):
+    """KS spectral-resolution scale R_z, pinned to the KODIAQ+SQUAD echelle sigma_v = 3.2 km/s
+    (z-independent). Used only on the KS f_res (option-b) path; see KS_RESOLUTION_KMS."""
+    z = np.asarray(z)
+    return np.full(np.shape(z), float(KS_RESOLUTION_KMS))
 
 
 # ============================================================================ #
@@ -207,7 +240,8 @@ def desi_resolution_R(z):
 def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
                   *, z_lo=2.2, z_hi=4.2, k_min=DESI_KMIN, metals_on=True,
                   resolution_on=False, add_cov_diag_inflation=True, mf_floor_on=False,
-                  use_snr3=None, snr3_stat_inflate=None, add_cv_floor=None):
+                  use_snr3=None, snr3_stat_inflate=None, add_cv_floor=None, resolution_float=False,
+                  resolution_coherent=False, resolution_coh_amp=1.0):
     """Load DESI DR1 P1D → a post-cut ``DataLeg`` (usage doc §"Covariance + cuts").
 
     Cuts (z-major flat layout, ``row_is_zmajor=True``):
@@ -261,15 +295,51 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
     k_hi_row = 0.5 * np.pi / R_row
     keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k > k_min) & (k < k_hi_row)
 
+    # read the per-bin resolution error ONLY on the option-b / arm-D paths (golden default must not depend
+    # on a key it never uses -- code-lens #7).
+    res_e = np.asarray(d["syst_e_resolution"], float) if (resolution_float or resolution_coherent) else None
     return _assemble_leg("DESI", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-                         dla_forward_frac=DESI_DLA_FORWARD_FRAC)
+                         dla_forward_frac=DESI_DLA_FORWARD_FRAC,
+                         resolution_e=res_e,
+                         resolution_float=resolution_float,
+                         resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp)
+
+
+def _read_ks_resolution_e(detail_path, z_grid, k_grid):
+    """The KS spectral-resolution 1-sigma column ``esyst_res_ks`` aligned to the FULL pre-cut
+    (z_grid, k_grid) that ``_read_ks_p1d`` returns (182 rows). Source = the pipe-delimited
+    ``detailed-p1d-results-karacayli_etal2021.txt`` (14 cols; ``esyst_res_ks`` = index 9). The detailed
+    table is a SUPERSET grid (315 rows: z=1.8 + extra high-k), so a positional read is WRONG -- we merge
+    by an EXACT (z,k) lookup and RAISE on any unmatched conservative row (the alignment tripwire; never a
+    silent mis-map). This is the resolution variance removed from the conservative cov diagonal (diag mode)."""
+    lut = {}
+    with open(detail_path) as f:
+        for ln in f.readlines()[1:]:                          # drop the header row
+            parts = [p.strip() for p in ln.strip().strip("|").split("|")]
+            if len(parts) < 14:
+                continue
+            try:
+                zz, kk, ee = float(parts[0]), float(parts[1]), float(parts[9])
+            except ValueError:
+                continue
+            if zz < 1.9:                                      # drop z=1.8 (not on the conservative grid)
+                continue
+            lut[(round(zz, 3), round(kk, 8))] = ee
+    e = np.empty(len(z_grid), float)
+    for i, (zz, kk) in enumerate(zip(np.asarray(z_grid), np.asarray(k_grid))):
+        key = (round(float(zz), 3), round(float(kk), 8))
+        val = lut.get(key)
+        if val is None or not np.isfinite(val):
+            raise KeyError(f"KS esyst_res_ks: no finite detailed-table row for (z={zz}, k={kk})")
+        e[i] = val
+    return e
 
 
 def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
                 *, z_lo=2.4, z_hi=4.6, k_max=CACHE_KMAX,
-                metals_on=False, resolution_on=False, mf_floor_on=True):
+                metals_on=False, resolution_on=False, mf_floor_on=True, resolution_float=False):
     """Load KODIAQ-SQUAD conservative-mode P1D → a post-cut ``DataLeg``.
 
     Format: pipe-separated ``final-conservative-p1d-karacayli_etal2021.txt`` (z|k|P|e) +
@@ -296,19 +366,33 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
 
     keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k <= k_max + 1e-9)
 
-    # KS has no resolution proxy in this file; reuse the DESI-style proxy as a placeholder
-    # for the (default-OFF) resolution knob.  LYA-CONSULT: KS resolution is OFF by default
-    # (conservative mode already deconvolves + inflates), so R_z is unused unless toggled on.
+    # DEFAULT (resolution_float=False): KS has no echelle R_z in this file, so the DESI pixel proxy is a
+    # placeholder for the (OFF) resolution knob (R_z unused when resolution_on=False), and resolution_ready
+    # stays False -- a resolution INJECTION against the ~15x-too-large proxy is un-fittable (the -21sigma
+    # collapse); the injection guard reads this flag. BYTE-IDENTICAL to the historical KS leg.
+    #
+    # resolution_float=True (task #5 V1, option-b): give KS its OWN echelle R_z (ks_resolution_R = 3.2 km/s)
+    # and REMOVE its resolution systematic from the conservative cov via the "diag" mode (diag -= esyst_res_ks^2;
+    # KS adds systematics to the DIAGONAL only), then FLOAT f_res in the forward. resolution_ready -> True.
+    if resolution_float:
+        res_e = _read_ks_resolution_e(base.rstrip("/") + "/detailed-p1d-results-karacayli_etal2021.txt", z, k)
+        return _assemble_leg("KS", z, k, P, cov, keep,
+                             R_func=ks_resolution_R, metals_on=metals_on,
+                             resolution_on=resolution_on, mf_floor_on=mf_floor_on,
+                             dla_forward_frac=KS_DLA_FORWARD_FRAC,
+                             resolution_e=res_e, resolution_float=True, resolution_mode="diag",
+                             resolution_ready=True)
     return _assemble_leg("KS", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-                         dla_forward_frac=KS_DLA_FORWARD_FRAC)
+                         dla_forward_frac=KS_DLA_FORWARD_FRAC, resolution_ready=False)
 
 
 def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
                    *, z_lo=2.2, z_hi=4.6, k_min=0.0, k_max=CACHE_KMAX,
                    metals_on=True, resolution_on=False, mf_floor_on=False,
-                   dla_forward_frac=EBOSS_DLA_FORWARD_FRAC, add_cv_floor=None):
+                   dla_forward_frac=EBOSS_DLA_FORWARD_FRAC, add_cv_floor=None, resolution_float=False,
+                   resolution_coherent=False, resolution_coh_amp=1.0):
     """Load eBOSS DR14 P1D (Chabanier+2019, 1812.03554) → a post-cut ``DataLeg`` (block-diag cov).
 
     Format: the npz from ``scripts/convert_eboss_dr14_p1d.py`` (z, k, plya, sigma, cov, syst_*).
@@ -344,10 +428,15 @@ def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
 
     # eBOSS has no resolution proxy in the table; reuse the DESI-style proxy as a placeholder for
     # the (default-OFF) resolution knob, exactly like load_ks_leg.
+    res_e = (np.asarray(d["syst_resolution"], float)
+             if (resolution_float or resolution_coherent) else None)  # option-b / arm-D only (code-lens #7)
     return _assemble_leg("eBOSS", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-                         dla_forward_frac=dla_forward_frac)
+                         dla_forward_frac=dla_forward_frac,
+                         resolution_e=res_e,
+                         resolution_float=resolution_float, resolution_mode="rescale",
+                         resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp)
 
 
 def _read_ks_p1d(path):
@@ -368,7 +457,9 @@ def _read_ks_p1d(path):
 
 
 def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
-                  metals_on, resolution_on, mf_floor_on=False, dla_forward_frac=1.0):
+                  metals_on, resolution_on, mf_floor_on=False, dla_forward_frac=1.0,
+                  resolution_e=None, resolution_float=False, resolution_mode="rank1",
+                  resolution_ready=True, resolution_coherent=False, resolution_coh_amp=1.0):
     """Sub-select the kept (z,k) rows + their covariance block, build the z-major flat
     DataLeg.  The covariance is row/col-sliced by the SAME boolean mask as the data so the
     flat-row ordering matches C_data exactly (CS-REVIEW: ordering invariant)."""
@@ -385,35 +476,106 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
     z_idx = np.array([int(np.argmin(np.abs(z - zr))) for zr in z_row])
 
     n_per_z = np.array([int(np.sum(z_idx == i)) for i in range(len(z))])
+    resolution_coherent_on = False
+    if resolution_float or resolution_coherent:
+        # Rebuild the covariance WITHOUT the spectral-resolution term (shared by option-b + arm-D). The
+        # resolution error is a SEPARABLE additive systematic (a diagonal error column), but each survey's
+        # cov CONSTRUCTION incorporates it differently, so the removal is per-survey:
+        #   "rank1"  (DESI): cov_syst is a sum of per-z-block rank-1 outer(e_i|z) modes; drop resolution's
+        #            mode -> cov_b = C - sum_z outer(e_res|z). == cup1d's additive build-without to 1e-13.
+        #   "rescale" (eBOSS): cov = corr(x)sigma-sigma^T with sigma^2 = sum_s e_s^2 (resolution baked into
+        #            sigma); rebuild sigma'^2 = sigma^2 - e_res^2 -> cov'[i,j] = C[i,j]*(sig'_i/sig_i)(sig'_j/sig_j).
+        # option-b then FLOATS f_res in the forward (models it); ARM-D instead re-adds resolution as ONE
+        # coherent cross-z mode s^2*outer(e_res,e_res) (marginalizes it in the cov, no forward param -- the
+        # linear-Gaussian equivalent of floating a single amplitude; 2026-07-02-coherent-cov-vs-float doc).
+        # A wrong mode breaks positive-definiteness; the Cholesky assert is the tripwire.
+        if resolution_float and resolution_coherent:
+            raise ValueError(f"{name}: resolution_float (option-b) and resolution_coherent (arm-D) are "
+                             "mutually exclusive covariance treatments")
+        if resolution_e is None:
+            raise ValueError(f"{name}: resolution_float/resolution_coherent needs resolution_e")
+        e_res = np.asarray(resolution_e, float)[idx]
+        C_data = np.array(C_data, float)
+        if resolution_mode == "rescale":
+            sig2 = np.diag(C_data)                                   # eBOSS: diag(cov)=sigma^2 (corr diag 1)
+            ratio = np.sqrt(np.clip(1.0 - e_res ** 2 / sig2, 0.0, None))   # sigma'/sigma
+            C_data = C_data * np.outer(ratio, ratio)
+        elif resolution_mode == "diag":
+            # "diag" (KS): the conservative cov adds each systematic in QUADRATURE to the DIAGONAL only
+            # (Karacayli 2021 Sec 4.6), so REMOVE the resolution variance element-wise from the diagonal;
+            # the off-diagonal (statistical) carries no resolution term. NOT "rescale" (which also scales
+            # the off-diagonal): for KS diag != sum_s e_s^2 (min 0.53 / max 4.09), so a rescale is ill-posed.
+            # esyst_res_ks^2 is subdominant in-band (max ~0.17 of the diag) so C_data stays SPD (Cholesky guard).
+            _di = np.diag_indices_from(C_data)
+            C_data[_di] = C_data[_di] - e_res ** 2
+        else:                                                        # "rank1" (DESI): drop the per-z mode
+            for i in range(len(z)):
+                rows = np.where(z_idx == i)[0]
+                if rows.size:
+                    C_data[np.ix_(rows, rows)] -= np.outer(e_res[rows], e_res[rows])
+        if resolution_coherent:
+            # ARM-D: re-add the resolution error as ONE coherent (cross-z) rank-1 mode. Restores the total
+            # diagonal variance (diag == option-a) but re-correlates it coherently across z. resolution_on
+            # stays False (NO forward f_res). Amplitude s: s=1 == the shipped 1-sigma resolution uncertainty.
+            C_data = C_data + (float(resolution_coh_amp) ** 2) * np.outer(e_res, e_res)
+            resolution_coherent_on = True
+        else:
+            resolution_on = True                    # option-b floats f_res in the forward
+        np.linalg.cholesky(C_data)                 # SPD assert (fails loudly if the mode is mis-specified)
     R_z = np.asarray(R_func(z))
     return DataLeg(
         name=name, z=z, z_unit=_z_unit(z), k=k, z_row=z_row, z_idx=z_idx,
         P_data=P_data, C_data=C_data, R_z=R_z, n_z=len(z), n_per_z=n_per_z,
         metals_on=metals_on, resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-        dla_forward_frac=dla_forward_frac)
+        dla_forward_frac=dla_forward_frac, resolution_ready=resolution_ready,
+        resolution_coherent_on=resolution_coherent_on)
 
 
 # ============================================================================ #
 #  Forward-model nuisances (differentiable; per-leg-configurable, default OFF)
 # ============================================================================ #
-def _metal_factor(k, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT):
+def _metal_factor(k, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT,
+                  cross=False):
     """Metal contamination multiplier — companion arXiv:2601.21432 Eq. 4.2–4.3:
 
-        P → P · (1 + C_LyαSiIII + C_LyαSiII),
+        P → P · (1 + C_LyαSiIII + C_LyαSiII [+ C_SiIIISiII]),
         C_LyαX = a_X²  +  2 a_X · cos(k·Δv_X) · D_X(k),   D_X(k) = 2 − 2/(1 + exp(−k/k_X)).
 
     The CONSTANT a_X² term is UNDAMPED; the SIGMOID decorrelation D_X (k_X a FREE nuisance)
     multiplies ONLY the oscillatory cosine cross-term — NOT a Gaussian on the whole (1+f) (the
     earlier usage-doc one-liner `(1+f)·exp(−k²/2k_s²)` was wrong; Lyα-confirmed 2026-06-05).
     Δv_X = c·ln(λ_Lyα/λ_X).  a_SiIII=a_SiII=0 ⇒ factor ≡ 1.  Differentiable in
-    (a_SiIII, a_SiII, k_SiIII, k_SiII)."""
+    (a_SiIII, a_SiII, k_SiIII, k_SiII).
+
+    SiII is the true 1190.42+1193.28 DOUBLET (matches closure_legb.metal_inject, the gate injection):
+        C_LyαSiII = a_SiII²·(1+r²) + 2 a_SiII·(cos(k·Δv_b) + r·cos(k·Δv_a))·D_SiII,
+    r = R_SiII_DOUBLET (intra-doublet ratio), Δv_a = leading 1190.42, Δv_b = 1193.28. r=0 ⇒ the old
+    single-line form; a_SiII=0 ⇒ byte-exact identity (golden-safe).
+
+    ``cross`` (Model C+, default False → BYTE-EXACT legacy): when True ADD the SiIII–SiII metal-metal
+    CROSS term (cup1d si_mult.py ``Cmm``, paper Eq. 4.5), amplitude TIED to a_SiIII·a_SiII (NO new
+    DOF), UNDAMPED to match cup1d exactly:
+        C_SiIIISiII = 2 a_SiIII a_SiII · (cos(k·Δv_SiIII_SiIIb) + r·cos(k·Δv_SiIII_SiIIa)),
+    Δv_SiIII_SiIIX = c·ln(λ_SiIIX/λ_SiIII) (the SiIII–SiII line separations). cup1d leaves Cmm
+    UNDAMPED; the damped-vs-undamped choice was checked IMMATERIAL in band (worst-case in-prior
+    ΔP/P ≲ 0.41× the tightest DESI bin, a rapid oscillation not a broadband tilt — notes
+    2026-06-30-metal-cross-damping.md / diag_metal_cross_damping.py), so we match cup1d.
+    a_SiII=0 ⇒ cross ≡ 0 (eBOSS / back-compat byte-exact)."""
     k = jnp.asarray(k)
     dv_SiIII = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiIII)
-    dv_SiII = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiII)
+    dv_SiIIa = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiII)        # leading doublet line 1190.42
+    dv_SiIIb = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiIIb)       # second doublet line 1193.28
+    r = R_SiII_DOUBLET
     D_SiIII = 2.0 - 2.0 / (1.0 + jnp.exp(-k / k_SiIII))      # sigmoid decorrelation, →1 low-k →0 high-k
     D_SiII = 2.0 - 2.0 / (1.0 + jnp.exp(-k / k_SiII))
     f = (a_SiIII ** 2 + 2.0 * a_SiIII * jnp.cos(k * dv_SiIII) * D_SiIII) \
-        + (a_SiII ** 2 + 2.0 * a_SiII * jnp.cos(k * dv_SiII) * D_SiII)
+        + (a_SiII ** 2 * (1.0 + r ** 2)
+           + 2.0 * a_SiII * (jnp.cos(k * dv_SiIIb) + r * jnp.cos(k * dv_SiIIa)) * D_SiII)
+    if cross:
+        dv_cross_b = C_KMS * jnp.log(LAMBDA_SiIIb / LAMBDA_SiIII)   # SiIII–SiII line b (1193.28)
+        dv_cross_a = C_KMS * jnp.log(LAMBDA_SiII / LAMBDA_SiIII)    # SiIII–SiII line a (1190.42)
+        f = f + 2.0 * a_SiIII * a_SiII * (jnp.cos(k * dv_cross_b)
+                                          + r * jnp.cos(k * dv_cross_a))   # UNDAMPED: cup1d Cmm
     return 1.0 + f
 
 
@@ -701,13 +863,15 @@ class MFEmuCoh(NamedTuple):
     13 bins) — the within-z coherence persists 0.59–0.79 across all z (incl. He-II reion z≈3–4), so it
     is NOT restricted to low-z; top-m truncated (top-15 ≈ 96.8% of trace).
 
-    NOTE (conservative diagonal): its diagonal is the COHERENT part of the LF-emulator error, a SUBSET
-    of the existing ``emu_var`` (the cross-class ρ diagonal = the FULL per-cell second moment). The
-    assembly adds the emucoh term in full (diagonal + off-diagonal), so on a leg with no separate
-    diagonal floor (DESI, ``mf_floor_on=False``) the coherent diagonal is added ON TOP of ``emu_var``
-    — a small CONSERVATIVE over-count (over-widens ~×1.3 on the clean diagonal, never biases). The
-    n_s-relevant value is the OFF-diagonal. A per-term diagonal allocation (absorb the emucoh diagonal
-    into ``emu_var``, add only its off-diagonal) is a documented next-iteration refinement."""
+    NOTE (diagonal allocation, DEPLOYED): its diagonal is the COHERENT part of the LF-emulator error, a
+    SUBSET of the existing ``emu_var`` (the cross-class ρ diagonal = the FULL per-cell second moment).
+    PRODUCTION sets ``mf_emucoh_offdiag_only=True`` (run_real_fit / run_prod_sbc): the per-term diagonal
+    allocation absorbs this term's diagonal into ``emu_var`` via MAX (counted ONCE, never under-count)
+    and adds ONLY its off-diagonal — so there is NO diagonal double-count with the base ``emu_var``
+    (assembly at data_likelihood.py:1130-1138). The n_s-relevant value is the OFF-diagonal. Only with
+    ``offdiag_only=False`` (the class DEFAULT, NOT the deployed path) is the term added in full: the
+    coherent diagonal then lands ON TOP of ``emu_var`` — a small CONSERVATIVE over-count (over-widens
+    ~×1.3 on the clean diagonal, never biases)."""
     z: np.ndarray
     k: np.ndarray
     f_shape: np.ndarray
@@ -774,11 +938,13 @@ def _ns_phys_from_theta9(theta9):
 def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_core,
                          cache_k, leg, sigma_zb=None, alpha_centres=None,
                          cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
-                         k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
+                         k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0, b_res_vec=None,
                          rho_zb=None, mf=None, mf_floor=None,
                          mf_shape_cov=None, mf_shape_infl=1.0,
                          mf_emucoh_cov=None, mf_emucoh_infl=1.0,
                          mf_emucoh_offdiag_only=False, alpha_res=None,
+                         f_SiIII_nodes=None, f_SiII_nodes=None, metal_node_z=(2.2, 4.2),
+                         k_SiIII_nodes=None, k_SiII_nodes=None,
                          require_zresolved=False):
     """Bind the emulator forward model to ONE leg's grid → flat (P_model (N,), C_total (N,N)).
 
@@ -836,31 +1002,59 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     C_total. ``None`` (and ``(1.0, 0.0)``) ⇒ α≡1 ⇒ the MF golden is byte-exact. Only fires
     through the MF forward (``mf is not None``).
 
-    ``require_zresolved`` (opt-in, default False → byte-identical): when True, ASSERT
-    ``alpha_hcd`` is z-RESOLVED (ndim==2, (n_z,3)) — a (3,) z-flat alpha raises. The DEPLOYED
-    ``_legb_model`` + the SBC re-scoring (``_loglik_of_draws``/``ll_true``) set this so a future
-    z-flat regression on a load-bearing path fails LOUDLY instead of producing a quiet
-    z-structured residual (the recurring z-flat-alpha bug class). Default False keeps the legacy
-    (3,)-broadcast back-compat for the diagnostic/figure callers that pass it intentionally."""
+    ``f_SiIII_nodes`` / ``f_SiII_nodes`` (opt-in, MODEL C, default None → byte-identical
+    scalar path): a (2,) array of the metal flux-decrement f at the two z-nodes
+    ``metal_node_z`` (ascending). When given, the per-z SiIII (and SiII) oscillation
+    amplitude is ``a(z) = f(z)/(1−⟨F⟩(z))`` with ``⟨F⟩(z)=exp(−τ₀_vec[iz])`` (the SAMPLED
+    mean flux, so a(z) is differentiable in τ₀) and ``log10 f(z)`` LINEAR in ``log10(1+z)``
+    between the nodes (power-law-exact; ``jnp.interp`` default-CLAMPS f flat beyond the nodes,
+    intended for eBOSS z>4.2). The metal FORM (``_metal_factor``) is UNCHANGED — only its
+    amplitude becomes per-z. ``f_SiII_nodes=None`` ⇒ a_SiII(z)=0. The metal factor is computed
+    ONCE per z and reused by BOTH P_z and the C_emu variance transform. When
+    ``f_SiIII_nodes is None`` the legacy scalar ``a_SiIII``/``a_SiII`` path runs (byte-exact).
+
+    ``k_SiIII_nodes`` / ``k_SiII_nodes`` (opt-in, MODEL C+, default None → the scalar
+    ``k_SiIII``/``k_SiII``=0.05): a (2,) array of the sigmoid decorrelation SCALE at ``metal_node_z``;
+    when given the per-z scale is ``10**interp(log10(1+z))`` (log10 k LINEAR in log10(1+z), like f).
+    On the f-node (Model C+) path the SiIII–SiII metal-metal CROSS term is ON (``cross=True``); it is
+    ∝ a_SiII so it auto-vanishes on SiIII-only legs.
+
+    ``alpha_hcd`` is ``(n_z,3)`` z-RESOLVED per-z incidence (the DEPLOYED forward) or a ``(3,)`` z-flat
+    triple broadcast to all z. A z-flat alpha on a MULTI-z leg, COMPARED to a z-resolved truth, fakes a
+    spurious z-ramp -- the recurring z-flat bug that once faked a +5.5 sigma n_s. So any COMPARISON path
+    (loglik / C_emu sizing / residual diagnostics) MUST build alpha via
+    ``closure_legb_figs._truth_alpha_zresolved_on_leg`` and pass ``require_zresolved=True``; the comparison
+    core ``_data_loglik_legcore`` DEFAULTS ``require_zresolved=True`` so the loglik / SBC re-scoring layer is
+    safe-by-default. The raw forward stays permissive so byte-identity uniform-alpha references pass."""
     cache_k = jnp.asarray(cache_k)
     k_leg = jnp.asarray(leg.k)
     z_idx = np.asarray(leg.z_idx)
     R_z = jnp.asarray(leg.R_z)
     tau0_vec = jnp.asarray(tau0_vec)
-    alpha_hcd = jnp.asarray(alpha_hcd)   # (3,) broadcast to all z, OR (n_z,3) per-z incidence
-    # GUARD (opt-in, default OFF → byte-identical back-compat): a (3,) z-FLAT alpha is silently
-    # broadcast to every z below (alpha_hcd.ndim==1 → the same incidence at all z). That is a
-    # recurring bug-class in the NON-deployed re-scoring paths (SBC loglik-rank, the walkthrough
-    # figure): the mock TRUTH is z-RESOLVED (per-z w_c rises ~3.5× over z) but a z-flat forward
-    # predicts a spurious z-ramp. The DEPLOYED _legb_model + real-fit pass the z-resolved
-    # alpha_hcd_z (n_z,3); they set require_zresolved=True so any future z-flat regression on the
-    # load-bearing paths fails LOUDLY here instead of producing quiet z-structured residuals.
-    if require_zresolved:
-        assert alpha_hcd.ndim == 2, (
-            f"predict_P_obs_on_leg(require_zresolved=True): alpha_hcd must be z-RESOLVED "
-            f"(n_z,3), got ndim={alpha_hcd.ndim} shape={tuple(alpha_hcd.shape)}. A (3,) z-flat "
-            f"alpha would be silently broadcast to all z and produce a spurious z-ramp vs the "
-            f"z-resolved truth (closure_legb._loglik_of_draws/ll_true regression).")
+    alpha_hcd = jnp.asarray(alpha_hcd)   # (n_z,3) z-RESOLVED per-z incidence (the DEPLOYED forward), OR
+    #                                      (3,) z-flat broadcast to all z (byte-identity references only).
+    # ===================== z-FLAT-ALPHA BUG CLASS (read before writing a diagnostic) =====================
+    # A (3,) z-FLAT alpha is SILENTLY broadcast to EVERY z (ndim==1 -> the same incidence at all z). On a
+    # MULTI-z leg, comparing that z-flat forward to a z-RESOLVED truth (per-z HCD incidence w_c rises ~3.5x
+    # over z) manufactures a spurious z-ramp -- it once faked a PHANTOM +5.5 sigma n_s (a z-flat C_emu /
+    # walkthrough DIAGNOSTIC vs the deployed z-resolved forward; the real bias was +0.6 sigma). The raw
+    # forward STAYS permissive (byte-identity uniform-alpha references legitimately pass a (3,) alpha). The
+    # RULE that keeps the bug dead lives one level up: EVERY code path that COMPARES this forward to a
+    # z-resolved truth (loglik / C_emu sizing / residual diagnostics) MUST
+    #   (a) build alpha via closure_legb_figs._truth_alpha_zresolved_on_leg  -- the ONLY sanctioned
+    #       comparison-alpha builder (never hand-build alpha from a z-median w_c), AND
+    #   (b) pass require_zresolved=True (the comparison core _data_loglik_legcore DEFAULTS it True, so the
+    #       loglik / SBC re-scoring layer is SAFE-BY-DEFAULT: a z-flat alpha there RAISES, not broadcasts).
+    # See [[feedback-diagnostic-deployment-consistency]].
+    if require_zresolved and alpha_hcd.ndim != 2:
+        # explicit raise (NOT assert): this guard is load-bearing now that the comparison core
+        # _data_loglik_legcore defaults require_zresolved=True, so it must survive `python -O`
+        # (which strips asserts and would silently reopen the z-flat broadcast on the loglik path).
+        raise ValueError(
+            f"predict_P_obs_on_leg(require_zresolved=True): alpha_hcd must be z-RESOLVED (n_z,3), got "
+            f"ndim={alpha_hcd.ndim} shape={tuple(alpha_hcd.shape)}. A (3,) z-flat alpha would be broadcast "
+            f"to every z and produce a spurious z-ramp vs the z-resolved truth (the recurring z-flat bug; "
+            f"once a phantom +5.5 sigma n_s). Build alpha via _truth_alpha_zresolved_on_leg.")
     # PER-LEG DLA-forward scaling (§0c): the sampled α_DLA's DLA-excess contribution is scaled by
     # leg.dla_forward_frac (DESI 1.0 → full residual; KS 0.0 → the forward DLA term is 0, matching
     # the 0% KS closure target). We fold the per-leg fraction into the DLA component of α so BOTH
@@ -910,12 +1104,40 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                                         pf_stats, dla_core, alpha_res=alpha_res)
         # (3) interp to the leg's k (bin centres); model is smooth → linear interp.
         P_z = jnp.interp(k_sub, cache_k, P_cache)
-        # (2) forward-model nuisances (gated; default OFF → factor ≡ 1)
+        # (2) forward-model nuisances (gated; default OFF → factor ≡ 1). Compute the metal factor
+        # ONCE per iz (MODEL C per-z amplitude OR the legacy scalar) and REUSE it for BOTH P_z and the
+        # C_emu variance transform (ev_z·mfac²) so the two can never drift to a stale amplitude.
+        mfac = None
         if leg.metals_on:
-            P_z = P_z * _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII,
-                                      k_SiIII=k_SiIII, k_SiII=k_SiII)
+            if f_SiIII_nodes is not None:
+                # MODEL C+: a(z)=f(z)/(1−⟨F⟩(z)), log10 f(z) LINEAR in log10(1+z) (power-law-exact);
+                # ⟨F⟩(z)=exp(−tau0) the SAMPLED mean flux (a is differentiable in τ₀). jnp.interp
+                # default-CLAMPS f flat beyond [node_z[0],node_z[1]] (eBOSS z>4.2 → bounded a). The
+                # sigmoid decorrelation SCALE is ALSO per-z (k_SiIII_nodes/k_SiII_nodes, log-interp'd
+                # like f); when its nodes are None we fall back to the scalar k_SiIII/k_SiII (=0.05).
+                # The SiIII–SiII cross term is ON (cross=True); it is ∝ a_SiII so it auto-vanishes on
+                # SiIII-only legs (f_SiII_nodes None → a2_z=0).
+                _logz = jnp.log10(1.0 + z)
+                _xp = jnp.log10(1.0 + jnp.asarray(metal_node_z))
+                _omF = 1.0 - jnp.exp(-tau0)
+                a3_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiIII_nodes))) / _omF
+                a2_z = ((10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiII_nodes))) / _omF
+                        if f_SiII_nodes is not None else 0.0)
+                k3_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(k_SiIII_nodes))
+                        if k_SiIII_nodes is not None else k_SiIII)
+                k2_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(k_SiII_nodes))
+                        if k_SiII_nodes is not None else k_SiII)
+                mfac = _metal_factor(k_sub, a_SiIII=a3_z, a_SiII=a2_z, k_SiIII=k3_z, k_SiII=k2_z,
+                                     cross=True)
+            else:
+                mfac = _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII,
+                                     k_SiIII=k_SiIII, k_SiII=k_SiII)
+            P_z = P_z * mfac
         if leg.resolution_on:
-            P_z = P_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res)
+            # option-b: a per-z sampled b_res(z) (b_res_vec) overrides the scalar b_res (default None →
+            # scalar, byte-identical). f_res forward threading; the injected truth never sets it.
+            b_res_iz = b_res if b_res_vec is None else b_res_vec[iz]
+            P_z = P_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res_iz)
         P_model = P_model.at[jnp.asarray(rows)].set(P_z)
 
         # (4) C_emu: per-k emu variance interp'd onto the leg k
@@ -927,12 +1149,13 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
                 sigma_zb=sigma_zb_z, alpha_centres=alpha_centres, dla_core=dla_core,
                 cemu_inflate=cemu_inflate, rho_zb=rho_zb_z)
             ev_z = jnp.interp(k_sub, cache_k, ev_cache)
-            # emu var transforms by the SAME multiplicative nuisance factors² (variance units)
+            # emu var transforms by the SAME multiplicative nuisance factors² (variance units) —
+            # REUSE the per-iz mfac computed above for P_z (Model C per-z OR the legacy scalar).
             if leg.metals_on:
-                ev_z = ev_z * _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII,
-                                            k_SiIII=k_SiIII, k_SiII=k_SiII) ** 2
+                ev_z = ev_z * mfac ** 2
             if leg.resolution_on:
-                ev_z = ev_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res) ** 2
+                b_res_iz = b_res if b_res_vec is None else b_res_vec[iz]
+                ev_z = ev_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res_iz) ** 2
             emu_var_flat = emu_var_flat.at[jnp.asarray(rows)].set(ev_z)
 
         # MF C_emu floor: the LF→HR generalization term + the n_s-edge extrapolation budget,

@@ -18,7 +18,8 @@ def _fake_ctx():
         alpha_hcd_mu=jnp.array([0.29, 0.069, 0.003]),
         alpha_hcd_sigma=jnp.array([0.044, 0.028, 0.0015]),
         marginalize_zslope=False, zslope_mu=None, zslope_sigma=None,
-    )
+        metal_prior="uniform",   # build_legb_ctx default; else-branch = legacy a_SiIII/a_SiII sites
+    )                            #   (added after the flatlog2node branch at closure_legb.py:1965)
 
 
 def test_priors_only_has_priya_tau0_sites_not_alpha_ladder():
