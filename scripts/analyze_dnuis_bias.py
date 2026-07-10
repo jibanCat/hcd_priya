@@ -171,17 +171,18 @@ def load_shards(shard_dir, arm=None, survey=None, treatment=None):
                         f"paired gate.")
                 seen[ix] = p
 
-        # (2) single-forward-stamp guard: seed + the resolved OOS member/strength (the "resolution"
-        # block of meta["inject_spec"]) must match across every pkl pooled into this group.
+        # (2) single-forward-stamp guard: seed + the resolved injection (the "resolution" block of
+        # meta["inject_spec"]) must match across every pkl pooled into this group. Covers BOTH the OOS
+        # basis form (member/strength) AND the scalar in-span form (b_res) -- else two `resolution`
+        # FILL shards at different --b-res would stamp identically and pool silently (PR#14 robustness).
         res_spec = (meta.get("inject_spec") or {}).get("resolution")
-        stamp = (meta.get("seed"),
-                 res_spec.get("member") if isinstance(res_spec, dict) else None,
-                 res_spec.get("strength") if isinstance(res_spec, dict) else None)
+        _rs = res_spec if isinstance(res_spec, dict) else {}
+        stamp = (meta.get("seed"), _rs.get("member"), _rs.get("strength"), _rs.get("b_res"))
         prev = stamps.get(key)
         if prev is not None and prev[0] != stamp:
             raise SystemExit(
                 f"load_shards: mismatched forward stamp pooling into group {key}: {p!r} has "
-                f"(seed,member,strength)={stamp} but {prev[1]!r} has {prev[0]} -- two different "
+                f"(seed,member,strength,b_res)={stamp} but {prev[1]!r} has {prev[0]} -- two different "
                 f"forwards cannot be pooled into one gate cell.")
         stamps[key] = (stamp, p)
 

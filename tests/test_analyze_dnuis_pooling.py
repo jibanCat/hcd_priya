@@ -59,3 +59,35 @@ def test_load_shards_raises_on_mismatched_seed(tmp_path):
     _write_shard(tmp_path / "resolution_oos_b_desi_shard_001.pkl", idxs=[1], seed=1)
     with pytest.raises(SystemExit):
         load_shards(str(tmp_path))
+
+
+def _write_scalar_shard(path, *, idxs, seed=20260615, b_res=0.15,
+                        arm="resolution", treatment="b", survey="ks"):
+    """A minimal fake shard for the SCALAR in-span instrument-f_res arm: its resolution inject spec
+    is {"b_res": <scalar>} with NO member/strength (the OOS-basis fields). Before PR#14 the stamp
+    ignored b_res, so two such shards at different --b-res stamped identically and pooled silently."""
+    n = len(idxs)
+    rec = {"n_div": 0}
+    meta = dict(seed=seed, inject_spec={"resolution": {"b_res": b_res}})
+    with open(path, "wb") as f:
+        pickle.dump(dict(arm=arm, treatment=treatment, survey=survey, idxs=list(idxs),
+                         clean_per_mock=[rec] * n, inj_per_mock=[rec] * n, meta=meta), f)
+
+
+def test_load_shards_raises_on_mismatched_scalar_bres(tmp_path):
+    """Two SCALAR in-span `resolution` shards at a DIFFERENT --b-res are two different forwards and
+    must not pool -- the stamp now carries b_res so the guard fires (PR#14 robustness follow-up)."""
+    _write_scalar_shard(tmp_path / "resolution_b_ks_shard_000.pkl", idxs=[0], b_res=0.15)
+    _write_scalar_shard(tmp_path / "resolution_b_ks_shard_001.pkl", idxs=[1], b_res=0.075)
+    with pytest.raises(SystemExit, match="b_res"):
+        load_shards(str(tmp_path))
+
+
+def test_load_shards_pools_matching_scalar_bres_fine(tmp_path):
+    """Two SCALAR shards at the SAME --b-res and disjoint idxs pool cleanly (the guard is not
+    over-eager: identical scalar forwards are one cell)."""
+    _write_scalar_shard(tmp_path / "resolution_b_ks_shard_000.pkl", idxs=[0, 2], b_res=0.15)
+    _write_scalar_shard(tmp_path / "resolution_b_ks_shard_001.pkl", idxs=[1], b_res=0.15)
+    groups = load_shards(str(tmp_path))
+    cl, inj, nd, om = groups[("resolution", "b", "ks")]
+    assert len(cl) == 3 and len(inj) == 3
