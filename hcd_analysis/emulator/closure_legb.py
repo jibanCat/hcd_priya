@@ -592,8 +592,14 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     desi = DL.load_desi_leg(metals_on=metals_on, resolution_float=sample_res,
                             resolution_coherent=coherent_res, resolution_coh_amp=coh_amp, **(desi_kwargs or {}))
     # Gate-A NORC: when res_corr is dropped, cap KS at k<=0.045 (the residual high-k
-    # particle-convergence uncertainty is then un-marginalized on KS; DESI/eBOSS sit below
-    # the res_corr anchor so are unaffected). Overridable via an explicit ks_kwargs k_max.
+    # particle-convergence uncertainty is then un-marginalized on KS, whose k_max reaches
+    # furthest above the res_corr anchor 5*k_box(z) -- ~3.5x the typical anchor value, measured).
+    # CORRECTED 2026-07-10 (PR#14 panel FIX 6a): DESI's k_max ALSO sits ABOVE the anchor (~2.3x
+    # typical, not below it as an earlier version of this comment claimed) but was separately
+    # measured safe by the RCINJ res_corr injection-recovery gate (PASS on DESI/KS/eBOSS,
+    # scripts/analyze_res_corr_injection.py). eBOSS's k_max sits NEAR (barely above) the anchor,
+    # so it is the one leg genuinely little-affected by dropping res_corr. Overridable via an
+    # explicit ks_kwargs k_max.
     _ks_kw = dict(ks_kwargs or {})
     if not res_corr_on and "k_max" not in _ks_kw:
         _ks_kw["k_max"] = 0.045

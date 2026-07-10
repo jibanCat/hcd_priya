@@ -209,13 +209,19 @@ def _z_unit(z):
 
 
 def desi_resolution_R(z):
-    """DESI resolution scale R_z = c·0.8Å / ((1+z)·1215.67Å)  [s/km] (usage doc Eq. 4.8)."""
+    """DESI resolution scale R_z = c·0.8Å / ((1+z)·1215.67Å)  [km/s] (usage doc Eq. 4.8; CORRECTED
+    2026-07-10, PR#14 panel FIX 6b -- an earlier version of this docstring mislabeled the units
+    [s/km], the units of k not R_z; C_KMS carries [km/s] and the Å/Å ratio is dimensionless, so R_z
+    is [km/s], consistent with ks_resolution_R's KS_RESOLUTION_KMS=3.2 km/s)."""
     z = np.asarray(z)
     return C_KMS * DESI_PIXEL_ANGSTROM / ((1.0 + z) * LAMBDA_LYA)
 
 
-# KODIAQ+SQUAD echelle spectral-resolution scale, PINNED to the Gaussian sigma_v of the LSF: for the
-# resolving powers R >= 36000 (KODIAQ) / 40000 (SQUAD), sigma_v = c / (R * 2.3548) ~ 3.2 km/s (FWHM=c/R).
+# KODIAQ+SQUAD echelle spectral-resolution scale, PINNED to the Gaussian sigma_v of the LSF:
+# sigma_v = c / (R * 2.3548) (FWHM=c/R). NOTE (CORRECTED 2026-07-10, PR#14 panel FIX 6c): 3.2 km/s
+# is the SQUAD (higher-R=40000) floor; the KODIAQ end (R=36000) gives sigma_v ~3.54 km/s (LOWER
+# resolving power -> LARGER LSF). The deployed 3.2 km/s is therefore the OPTIMISTIC (narrowest-LSF)
+# end of the KODIAQ+SQUAD range, not a KODIAQ+SQUAD-average -- documented here, value UNCHANGED.
 # This REPLACES the DESI pixel proxy (~49 km/s at z=3, ~15x too large) on the KS f_res path ONLY; the
 # default KS load keeps the proxy (R_z is unused when resolution_on=False). z-independent (echelle R is).
 KS_RESOLUTION_KMS = 3.2

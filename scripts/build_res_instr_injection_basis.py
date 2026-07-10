@@ -17,18 +17,29 @@ in per-z ``b_res``-space, by
 
 The injection gate must inject a per-z resolution MISSPECIFICATION the 2-param
 f_res CANNOT represent (out-of-span) AND concentrated in the He-II window z>=2.8
-(else the gate passes vacuously). The natural inner product on ``b_res``-space is
-the DATA-metric PULLBACK
+(else the gate passes vacuously). The full-space data-metric pullback
 
     M = B^T C_data^-1 B ,   B[rows_iz, iz] = 2 * k[rows_iz]^2 * R_z(z_iz)^2
 
-(the map ``p = B @ b_res`` sends a per-z ``b_res`` to its flat-P log-perturbation).
-We build the top-2 out-of-span directions in the He-II sub-block metric ``M_sub``,
-scale to the leg's own 1-sigma resolution envelope, and store the per-z ``(n_z,)``
-vectors ``{leg}_bres1``/``bres2`` the Task-2B resolver consumes.
+(the map ``p = B @ b_res`` sends a per-z ``b_res`` to its flat-P log-perturbation)
+motivates the inner product, but we do NOT build the top-2 out-of-span directions in
+the He-II BLOCK of that full M. We restrict FIRST -- C_sub = C_data[HeII,HeII],
+Cinv_sub = C_sub^-1 -- and build M_sub = B_sub^T Cinv_sub B_sub. M_sub is therefore
+the MARGINAL He-II precision (the pullback metric of the He-II sub-covariance taken
+alone), NOT the He-II block of the full inverse M[HeII,HeII] (equivalently, not the
+conditional/Schur precision one gets by inverting C_data first and then restricting
+to He-II). The two differ by ~5.5% on the real DESI/KS covariance. The fully-rigorous
+choice is the conditional/Schur precision; using the marginal one instead is deferred
+because the ~5.5% only perturbs WHICH basis member is selected as worst-n_s (member
+selection), not the bias number itself (the Phase-2 NUTS injection measures the true
+bias under the full forward + full covariance regardless of which member was picked),
+so it does not change the fail-to-reject / documented-budget disposition. We scale
+each direction to the leg's own 1-sigma resolution envelope, and store the per-z
+``(n_z,)`` vectors ``{leg}_bres1``/``bres2`` the Task-2B resolver consumes.
 
-WHAT (per leg DESI/eBOSS/KS, in the M_sub = B_sub^T C_sub^-1 B_sub metric)
--------------------------------------------------------------------------
+WHAT (per leg DESI/eBOSS/KS, in the MARGINAL He-II metric M_sub = B_sub^T C_sub^-1 B_sub
+      with C_sub = C_data[HeII,HeII] -- see the marginal-vs-conditional note above)
+-------------------------------------------------------------------------------------------
 1. SPAN  {u1=ones, u2=logfac}  restricted to the He-II nodes -> M_sub-orthonormal.
 2. z-shape dictionary on the He-II nodes (z-incoherent / z-curvature / He-II ramp),
    each projected out of span{u1,u2} in M_sub, stacked + SVD in M_sub -> top-2
