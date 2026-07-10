@@ -127,9 +127,19 @@ def load_shards(shard_dir, arm=None, survey=None, treatment=None):
     Returns {(arm,treatment,survey): (clean_per_mock, inj_per_mock, ndiv, oos_member)}. ``oos_member``
     is a 1-elem list holding ``meta["b_res_oos_member"]`` off the FIRST pkl in the group (Task 2C:
     the resolution_oos out-dir is member-suffixed, so every pkl in one group shares it; None for
-    every other arm)."""
+    every other arm).
+
+    Two guards (PR#14 panel FIX 1) protect the pooling from a mis-specified FILL shard (e.g. an
+    n_shards=8 shard dropped into an n_shards=4 cell dir) silently double-counting a mock into the
+    paired gate: (1) the union of per-pkl ``idxs`` pooled into one group must be DISJOINT -- a repeat
+    idx raises, naming the duplicate + the two pkls (pkls without an ``idxs`` field, e.g. legacy runs,
+    are not checked). (2) pooled pkls must share a single forward STAMP (seed + OOS member/strength,
+    read off ``meta``) -- two different forwards cannot be pooled into one gate cell. Neither guard
+    changes the pooled clean/inj ORDERING (the positional clean<->injected pairing relies on it)."""
     pat = os.path.join(shard_dir, "*_shard_*.pkl")
     groups = {}
+    seen_idxs = {}    # (arm,t,s) -> {mock_idx: pkl_path} -- disjointness guard
+    stamps = {}       # (arm,t,s) -> (stamp_tuple, pkl_path) -- single-forward guard
     for p in sorted(glob.glob(pat)):
         with open(p, "rb") as f:
             d = pickle.load(f)
@@ -145,7 +155,37 @@ def load_shards(shard_dir, arm=None, survey=None, treatment=None):
             raise SystemExit(
                 f"{p}: not a PAIRED shard (missing clean_per_mock/inj_per_mock). Re-run the shard "
                 f"with the paired run_dnuis_bias_shard.py.")
-        cl, inj, nd, om = groups.setdefault((a, t, s), ([], [], [0], [None]))
+        key = (a, t, s)
+        meta = d.get("meta") or {}
+
+        # (1) disjoint-idxs guard.
+        idxs = d.get("idxs")
+        if idxs is not None:
+            seen = seen_idxs.setdefault(key, {})
+            for ix in idxs:
+                if ix in seen:
+                    raise SystemExit(
+                        f"load_shards: duplicate mock idx {ix} pooled into group {key} from both "
+                        f"{seen[ix]!r} and {p!r} -- a mis-specified FILL shard (check --n-shards on "
+                        f"these pkls) would otherwise silently double-count this mock into the "
+                        f"paired gate.")
+                seen[ix] = p
+
+        # (2) single-forward-stamp guard: seed + the resolved OOS member/strength (the "resolution"
+        # block of meta["inject_spec"]) must match across every pkl pooled into this group.
+        res_spec = (meta.get("inject_spec") or {}).get("resolution")
+        stamp = (meta.get("seed"),
+                 res_spec.get("member") if isinstance(res_spec, dict) else None,
+                 res_spec.get("strength") if isinstance(res_spec, dict) else None)
+        prev = stamps.get(key)
+        if prev is not None and prev[0] != stamp:
+            raise SystemExit(
+                f"load_shards: mismatched forward stamp pooling into group {key}: {p!r} has "
+                f"(seed,member,strength)={stamp} but {prev[1]!r} has {prev[0]} -- two different "
+                f"forwards cannot be pooled into one gate cell.")
+        stamps[key] = (stamp, p)
+
+        cl, inj, nd, om = groups.setdefault(key, ([], [], [0], [None]))
         cl.extend(d["clean_per_mock"])
         inj.extend(d["inj_per_mock"])
         nd[0] += (sum(int(r.get("n_div", 0) > 0) for r in d["clean_per_mock"])
@@ -155,13 +195,19 @@ def load_shards(shard_dir, arm=None, survey=None, treatment=None):
     return groups
 
 
-def _dnuis_verdict(arm, member, ub):
-    """Map (arm, oos_member, ub) -> the verdict string (PURE; Task 2C). The FLAG band [GATE,
-    LLS_BUDGET) applies to arm=='lls_excess' (the documented irreducible HCD->n_s budget) and to
-    arm=='resolution_oos' when ``member`` is an ADVERSARIAL basis member (bres1/bres2/bstar --
-    z-incoherent named threats + the analytic worst-n_s member); ``bres_real`` (the measured,
-    realistic residual -- Tier-R) and every other arm keep the HARD GATE."""
-    is_flag_arm = (arm == "lls_excess") or (arm == "resolution_oos" and member in ("bres1", "bres2", "bstar"))
+def _dnuis_verdict(arm, member, ub, param):
+    """Map (arm, oos_member, ub, param) -> the verdict string (PURE; Task 2C, PR#14 panel FIX 2).
+    The FLAG band [GATE, LLS_BUDGET) applies to arm=='lls_excess' (the documented irreducible
+    HCD->n_s budget) and to arm=='resolution_oos' when ``member`` is an ADVERSARIAL basis member
+    (bres1/bres2/bstar -- z-incoherent named threats + the analytic worst-n_s member); ``bres_real``
+    (the measured, realistic residual -- Tier-R) and every other arm keep the HARD GATE.
+
+    FIX 2: the FLAG band is n_s-ONLY (2026-07-07-gate-b-consolidated-review.md gate spec). A_p must
+    HARD-gate at GATE even for an lls_excess / resolution_oos-adversarial cell -- a breach there
+    needs a PI-signed waiver, not an auto-FLAG. So ``param`` gates whether the FLAG band is even in
+    play: for ``param != 'ns'`` (i.e. A_p) the threshold is always GATE, same as a non-flag arm."""
+    is_flag_arm = (param == "ns") and (
+        (arm == "lls_excess") or (arm == "resolution_oos" and member in ("bres1", "bres2", "bstar")))
     thr = LLS_BUDGET if is_flag_arm else GATE
     ok = ub < GATE
     if is_flag_arm and not ok and ub < LLS_BUDGET:
@@ -220,6 +266,21 @@ def _ub(d):
     return abs(float(d.mean())) + 2.0 * se
 
 
+def _overall_summary(any_fail, any_flag):
+    """PURE OVERALL-line string builder (PR#14 panel FIX 3). ``any_fail`` flips on a hard FAIL
+    (unchanged, still wins); ``any_flag`` flips when a NON-LLS arm (e.g. a resolution_oos
+    adversarial member) lands in the [GATE, LLS_BUDGET) FLAG band. Without this, a flagged
+    non-LLS arm left ``any_fail`` False and the old wording claimed "all non-LLS arms within the
+    confidence-bound bias gate" -- true only for a plain pass, not for a flagged-but-not-failed
+    cell. No gate decision changes here, only which STRING reports the outcome."""
+    if any_fail:
+        return "FAIL — at least one non-LLS arm exceeds the confidence-bound gate."
+    if any_flag:
+        return ("PASS (with FLAGS) — all non-LLS arms are within the confidence-bound gate or the "
+                "documented adversarial FLAG budget; see FLAG rows above.")
+    return "PASS — all non-LLS arms within the confidence-bound bias gate."
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shard-dir", required=True)
@@ -241,6 +302,7 @@ def main():
     print(hdr)
     print("-" * len(hdr))
     any_fail = False
+    any_flag = False                # FIX 3: tracks a FLAGGED (not failed) NON-LLS arm
     for (arm, treatment, survey), (clean_pm, inj_pm, nd, om) in sorted(groups.items()):
         n_div = nd[0]
         member = om[0]
@@ -252,9 +314,11 @@ def main():
                 float(abs(deltas[0])) if n == 1 else np.nan)
             ub = abs(mean) + 2.0 * se if n else np.nan       # the confidence-bound gate statistic
             clean_mean = float(clean_zs.mean()) if clean_zs.size else np.nan
-            verdict = _dnuis_verdict(arm, member, ub)
+            verdict = _dnuis_verdict(arm, member, ub, param)
             if verdict == "FAIL":
                 any_fail = True
+            elif verdict.startswith("FLAG") and arm != "lls_excess":
+                any_flag = True
             print(f"{arm + '/' + treatment + '/' + survey:<22} {param:<4} {n:>4} {n_div:>4} "
                   f"{mean:>+9.3f} {se:>7.3f} {ub:>8.3f} {clean_mean:>+8.3f}  {verdict}")
     print("-" * len(hdr))
@@ -262,8 +326,7 @@ def main():
           f"(lls_excess flagged up to {LLS_BUDGET:.2f}σ, not auto-failed; resolution_oos adversarial "
           f"members bres1/bres2/bstar are flagged the SAME way, bres_real stays hard-gated). "
           f"clean_z is the unpaired clean-arm bias (sanity ~0).")
-    print("OVERALL:", "FAIL — at least one non-LLS arm exceeds the confidence-bound gate."
-          if any_fail else "PASS — all non-LLS arms within the confidence-bound bias gate.")
+    print("OVERALL:", _overall_summary(any_fail, any_flag))
 
     # --- standing-rule mean-flux + metal-nuisance report (NOT gated): the model samples the per-z
     # tau0_z ladder (no global tau0_amp/dtau0 sites), so we report the tau0_z Δbias averaged over z
