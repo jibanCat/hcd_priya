@@ -147,10 +147,12 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     ``oos_member``/``oos_strength`` (Task 2C) select the OUT-OF-SPAN basis injection for the
     resolution arm instead of the scalar ``b_res``; default None -> byte-identical scalar arm.
     ``use_prod_forward=True`` (opt-in, default OFF) overrides {sample_res, f_res_amp_sigma,
-    metal_prior, metals, ks_kwargs} from the DEPLOYED ``prod_forward_config(PIN_KEY)`` -- the SINGLE
-    source ``build_real_ctx`` and the production SBC consume -- so this arm fits on EXACTLY the forward
+    metal_prior, metals, ks_kwargs} from the DEPLOYED ``prod_forward_config(PIN_KEY)`` AND drives NORC
+    (res_corr_on=False + a post-build fix_alpha_res=True, applied SEPARATELY exactly as build_real_ctx
+    does since prod_forward_config does NOT carry res_corr) -- so this arm fits on EXACTLY the forward
     we unblind on (deployment-consistency; used by the DLA-completeness DESI re-run). Default OFF is
-    BYTE-IDENTICAL for every existing arm/caller (metal_prior='uniform' == the build_legb_ctx default)."""
+    BYTE-IDENTICAL for every existing arm/caller (metal_prior='uniform' + res_corr_on=True ==
+    the build_legb_ctx defaults; fix_alpha_res untouched)."""
     members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
     if not members:
         raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
@@ -169,7 +171,9 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     # DEFAULT (use_prod_forward=False): the OLD thin-arm forward -> BYTE-IDENTICAL for every existing arm/
     # caller. _metal_prior='uniform' == the build_legb_ctx default (closure_legb.py), so passing it explicitly
     # is a no-op; sample_res=float_res, f_res_amp_sigma passthrough, metals/_ks_kwargs as computed above.
+    # _res_corr_on=True == the build_legb_ctx default (res_corr applied), so the explicit pass is a no-op off.
     _metal_prior = "uniform"
+    _res_corr_on = True
     if use_prod_forward:
         # OPT-IN: fit this arm on the DEPLOYED prod_forward_config(PIN_KEY) forward -- the SINGLE source
         # build_real_ctx (run_real_fit.py:144) + the production SBC consume -- so the clean+injected fit
@@ -180,11 +184,17 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
         fc = prod_forward_config(PIN_KEY)
         float_res, f_res_amp_sigma, _metal_prior = bool(fc["sample_res"]), fc["f_res_amp_sigma"], fc["metal_prior"]
         metals, _ks_kwargs = bool(fc["metals"]), fc["ks_kwargs"]
+        # NORC: prod_forward_config carries the 5 data-nuisance knobs but NOT res_corr -- the DEPLOYED forward
+        # ALSO drops res_corr (Gate-A rejected res_corr_on=True on the n_s-sensitive high-k axis). Mirror
+        # build_real_ctx (run_real_fit.py:156,167): build res_corr_on=False, then pin the 2 inert alpha_res
+        # sites via a POST-build ctx._replace(fix_alpha_res=True) (below).
+        _res_corr_on = False
     # build_legb_ctx assembles DESI+KS(+eBOSS); we then keep ONLY the chosen survey's leg(s) so the
     # arm fits a single-survey likelihood (the bias is per-survey).  survey= sets the LLS pin.
     ctx, d = build_legb_ctx(
         ensemble_ckpts=members, use_xclass=True,
         with_mf=with_mf, mf_with_floor=with_mf,
+        res_corr_on=_res_corr_on,                          # NORC: True (default) off; False under use_prod_forward (deployed)
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         with_eboss=(survey == "eboss"),
         metals_on=metals, sample_metals=metals,
@@ -194,6 +204,13 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
         metal_prior=_metal_prior,                          # NEW kwarg; default 'uniform' == build_legb_ctx default (byte-identical)
         ks_kwargs=_ks_kwargs,                              # KS echelle R_z + diag surgery (task #5); None => proxy (DESI/eBOSS/off)
         hierarchical_hcd=False, survey=PIN_KEY)
+
+    # NORC POST-build replace (mirror build_real_ctx, run_real_fit.py:167-170): res_corr_on=False was built
+    # above; also pin the 2 now-inert alpha_res sites (fix_alpha_res is a ctx-level field, not a build kwarg)
+    # so this arm fits EXACTLY the deployed NORC forward Gate-A certified. Default-off leaves both untouched.
+    if use_prod_forward:
+        ctx = ctx._replace(fix_alpha_res=True)
+        assert ctx.res_corr_on is False and ctx.fix_alpha_res is True, "use_prod_forward NORC not applied"
 
     # restrict to the chosen survey's legs (single-survey bias arm).
     legs = [l for l in ctx.legs if l.name == LEG_NAME]

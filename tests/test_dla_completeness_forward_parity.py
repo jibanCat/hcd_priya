@@ -62,6 +62,37 @@ def test_dla_desi_uses_deployed_forward(monkeypatch):
     assert captured["metal_prior"] == "flatlog2node" and captured["metal_prior"] == fc["metal_prior"]
     assert captured["metals_on"] is True and captured["sample_metals"] is True
     assert captured["ks_kwargs"] is None                      # DESI keeps the KS proxy default (byte-identical)
+    # NORC (4-lens panel M1): the DEPLOYED forward also drops res_corr (prod_forward_config carries the 5
+    # data-nuisance knobs but NOT res_corr -- it is applied SEPARATELY, mirror build_real_ctx). res_corr_on
+    # is a build_legb_ctx kwarg the spy captures; fix_alpha_res is a POST-build _replace (see the fake-seam
+    # test below). RED before the fix: res_corr_on is absent -> None -> not False.
+    assert captured.get("res_corr_on") is False              # NORC: DLA re-run builds res_corr_on=False
+
+
+# --------------------------------------------------------------------------------------------- #
+#  (a2) NORC POST-build replace: use_prod_forward pins fix_alpha_res=True (+ res_corr_on=False) on the
+#       RETURNED ctx. fix_alpha_res is a ctx._replace, NOT a build_legb_ctx kwarg, so the raise-spy in
+#       (a) cannot see it. FAKE-BUILD SEAM: the spy returns a minimal namedtuple ctx exposing
+#       _replace/res_corr_on/fix_alpha_res/legs so build_arm_ctx COMPLETES (still no ensemble/NUTS), and
+#       we assert the resolved ctx. RED before the fix: no post-build _replace -> fix_alpha_res stays
+#       False and res_corr_on defaults True.
+# --------------------------------------------------------------------------------------------- #
+def test_dla_desi_norc_pins_fix_alpha_res(monkeypatch):
+    from collections import namedtuple
+    from scripts import run_dnuis_bias_shard as R
+    FakeLeg = namedtuple("FakeLeg", ["name"])
+    FakeCtx = namedtuple("FakeCtx", ["res_corr_on", "fix_alpha_res", "legs"])
+
+    def _fake_build(**kw):
+        # mirror build_legb_ctx: res_corr_on defaults True; fix_alpha_res default False (pre-NORC).
+        return (FakeCtx(res_corr_on=bool(kw.get("res_corr_on", True)),
+                        fix_alpha_res=False,
+                        legs=[FakeLeg("DESI"), FakeLeg("KS")]), object())
+
+    monkeypatch.setattr(R, "build_legb_ctx", _fake_build)
+    ctx, d, inject_spec = R.build_arm_ctx("metal_misspec", "desi", True, use_prod_forward=True)
+    assert ctx.res_corr_on is False, "use_prod_forward must build res_corr_on=False (NORC)"
+    assert ctx.fix_alpha_res is True, "use_prod_forward must _replace fix_alpha_res=True (NORC)"
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -109,3 +140,7 @@ def test_default_arm_ctx_byte_identical(monkeypatch):
     assert captured.get("metal_prior", "uniform") == "uniform"
     assert captured["metals_on"] is True and captured["sample_metals"] is True   # desi was always metals-on
     assert captured["ks_kwargs"] is None
+    # NORC byte-identity: default-off keeps res_corr ON (res_corr_on default True). Before the fix it is
+    # absent (== build_legb_ctx default True); after the fix build_arm_ctx passes it explicitly as True.
+    # Either way the RESOLVED forward is res_corr_on=True. Passes before AND after (default-off unchanged).
+    assert captured.get("res_corr_on", True) is True
