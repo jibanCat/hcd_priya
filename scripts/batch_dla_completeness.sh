@@ -20,7 +20,7 @@
 set -euo pipefail
 TID=${SLURM_ARRAY_TASK_ID:-0}
 N_SHARDS=${N_SHARDS:-4}; N_MOCKS=${N_MOCKS:-8}; SEED=${SEED:-20260615}
-N_WARMUP=${N_WARMUP:-250}; N_SAMPLES=${N_SAMPLES:-300}
+N_WARMUP=${N_WARMUP:-250}; N_SAMPLES=${N_SAMPLES:-300}; STRENGTH=${STRENGTH:-1.0}   # STRENGTH=-1.0 => -1sigma arm
 OUTDIR=${OUTDIR:-/scratch/cavestru_root/cavestru1/mfho/dla_completeness}
 NCPU=${SLURM_CPUS_PER_TASK:-4}; SMOKE_FLAG=""; [[ "${SMOKE:-0}" == "1" ]] && SMOKE_FLAG="--smoke"
 export OMP_NUM_THREADS=$NCPU OPENBLAS_NUM_THREADS=$NCPU MKL_NUM_THREADS=$NCPU NUMEXPR_NUM_THREADS=$NCPU
@@ -31,5 +31,5 @@ mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
 [[ -f "$OUTDIR/dla_completeness_desi_shard_$(printf %03d "$TID").pkl" ]] && { echo "shard ${TID} exists -- SKIP"; exit 0; }
 echo "=== dla_compl shard ${TID}/${N_SHARDS} (N=${N_MOCKS} seed=${SEED}) start: $(date) ==="
 "$PY" -u scripts/run_dla_completeness_shard.py --shard "$TID" --n-shards "$N_SHARDS" --n-mocks "$N_MOCKS" \
-    --seed "$SEED" --n-warmup "$N_WARMUP" --n-samples "$N_SAMPLES" --out-dir "$OUTDIR" $SMOKE_FLAG
+    --seed "$SEED" --n-warmup "$N_WARMUP" --n-samples "$N_SAMPLES" --strength "$STRENGTH" --out-dir "$OUTDIR" $SMOKE_FLAG
 echo "=== done: $(date) ==="
