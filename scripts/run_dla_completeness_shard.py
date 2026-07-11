@@ -70,7 +70,23 @@ def main():
     if a.smoke:
         a.n_mocks = 1; a.n_warmup = min(a.n_warmup, 20); a.n_samples = min(a.n_samples, 30)
 
-    ctx, d, _ = build_arm_ctx("metal_misspec", "desi", True)      # DESI-only deployed ctx (metals on)
+    # The DLA re-run fits with the DEPLOYED DESI forward (sample_res=True / f_res_amp_sigma=0.02 / flatlog2node)
+    # pulled from prod_forward_config -- the SINGLE source build_real_ctx consumes (run_real_fit.py) -- for
+    # deployment-consistency: a diagnostic on a DIFFERENT forward than the deployed inference manufactures phantom
+    # systematics. The injection logic (make_leg_a_legmock monkeypatch) is unchanged; only the fit forward moves.
+    ctx, d, _ = build_arm_ctx("metal_misspec", "desi", True, use_prod_forward=True)
+    # Load-bearing runtime parity assert (mirror run_real_fit.py:186-193) on the real built ctx (single restricted
+    # DESI leg): fail LOUD so a future refactor cannot silently regress this re-run to the thin build_legb_ctx
+    # defaults (sample_res=False / metal_prior='uniform'). Fires at run start, BEFORE any NUTS.
+    fc = CL.prod_forward_config("DESI"); L = ctx.legs[0]
+    assert bool(ctx.sample_res) == fc["sample_res"], "prod f_res float not wired into the DLA re-run"
+    assert ctx.f_res_amp_sigma == fc["f_res_amp_sigma"], "f_res prior width mismatch vs deployed DESI"
+    assert ctx.metal_prior == fc["metal_prior"], "prod metal model (flatlog2node) not wired"
+    assert tuple(ctx.metal_node_z) == (2.2, 4.2), "Gate-C metal_node_z drifted"
+    assert ctx.sample_metals is True and L.metals_on is True, "DESI leg must sample+apply metals"
+    print(f"[forward] DEPLOYED DESI: sample_res={bool(ctx.sample_res)} f_res_amp_sigma={ctx.f_res_amp_sigma} "
+          f"metal_prior={ctx.metal_prior!r} sample_metals={ctx.sample_metals} metals_on={L.metals_on} "
+          f"(== prod_forward_config('DESI'))")
     _STATE["e"] = build_e_dla(ctx)
     CL.make_leg_a_legmock = _mock_with_dla
     edesi = _STATE["e"]["DESI"]

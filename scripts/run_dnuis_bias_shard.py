@@ -49,7 +49,7 @@ import numpy as np
 print = functools.partial(print, flush=True)
 
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
-from hcd_analysis.emulator.closure_legb import build_legb_ctx, run_legb
+from hcd_analysis.emulator.closure_legb import build_legb_ctx, run_legb, prod_forward_config
 from hcd_analysis.emulator.inference import (HCD_LIT_OVER_SIM, HCD_LLS_SURVEY_BOOST,
                                              HCD_LLS_SURVEY_FRAC_SIGMA)
 
@@ -140,12 +140,17 @@ def treatment_flags(treatment, *, c_prior_sigma=0.05):
 
 def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, float_res=False,
                   coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None, pin_hub=False,
-                  oos_member=None, oos_strength=1.0):
+                  oos_member=None, oos_strength=1.0, use_prod_forward=False):
     """Build the single-survey production ctx for an arm. metals_on/sample_metals ON for
     DESI/eBOSS (False for KS). Returns (ctx, d, inject_spec). The arm runs on ONE survey's legs:
     we build a single-survey ctx by restricting the leg list AFTER build (keep it simple).
     ``oos_member``/``oos_strength`` (Task 2C) select the OUT-OF-SPAN basis injection for the
-    resolution arm instead of the scalar ``b_res``; default None -> byte-identical scalar arm."""
+    resolution arm instead of the scalar ``b_res``; default None -> byte-identical scalar arm.
+    ``use_prod_forward=True`` (opt-in, default OFF) overrides {sample_res, f_res_amp_sigma,
+    metal_prior, metals, ks_kwargs} from the DEPLOYED ``prod_forward_config(PIN_KEY)`` -- the SINGLE
+    source ``build_real_ctx`` and the production SBC consume -- so this arm fits on EXACTLY the forward
+    we unblind on (deployment-consistency; used by the DLA-completeness DESI re-run). Default OFF is
+    BYTE-IDENTICAL for every existing arm/caller (metal_prior='uniform' == the build_legb_ctx default)."""
     members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
     if not members:
         raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
@@ -161,6 +166,20 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     # b_res LSF injection is PHYSICAL, not the ~15x-too-large DESI pixel proxy (which made KS un-fittable, the
     # -21sigma collapse). Only on the KS resolution-float path; None elsewhere -> byte-identical for DESI/eBOSS/KS-off.
     _ks_kwargs = ({"resolution_float": True, "k_max": 0.065} if (survey == "ks" and (float_res or coherent_res)) else None)
+    # DEFAULT (use_prod_forward=False): the OLD thin-arm forward -> BYTE-IDENTICAL for every existing arm/
+    # caller. _metal_prior='uniform' == the build_legb_ctx default (closure_legb.py), so passing it explicitly
+    # is a no-op; sample_res=float_res, f_res_amp_sigma passthrough, metals/_ks_kwargs as computed above.
+    _metal_prior = "uniform"
+    if use_prod_forward:
+        # OPT-IN: fit this arm on the DEPLOYED prod_forward_config(PIN_KEY) forward -- the SINGLE source
+        # build_real_ctx (run_real_fit.py:144) + the production SBC consume -- so the clean+injected fit
+        # matches production EXACTLY (deployment-consistency; used by the DLA-completeness DESI re-run). Pulls
+        # all 5 knobs from the one authority so a diagnostic can never drift onto a thinner-than-deployed forward.
+        assert not coherent_res, \
+            "use_prod_forward (prod sample_res float) is incompatible with the arm-D coherent_res cov mode"
+        fc = prod_forward_config(PIN_KEY)
+        float_res, f_res_amp_sigma, _metal_prior = bool(fc["sample_res"]), fc["f_res_amp_sigma"], fc["metal_prior"]
+        metals, _ks_kwargs = bool(fc["metals"]), fc["ks_kwargs"]
     # build_legb_ctx assembles DESI+KS(+eBOSS); we then keep ONLY the chosen survey's leg(s) so the
     # arm fits a single-survey likelihood (the bias is per-survey).  survey= sets the LLS pin.
     ctx, d = build_legb_ctx(
@@ -169,9 +188,10 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         with_eboss=(survey == "eboss"),
         metals_on=metals, sample_metals=metals,
-        sample_res=float_res,                              # option-b: float f_res + cov_b (DESI rank-1 / eBOSS rescale / KS diag)
+        sample_res=float_res,                              # option-b / prod: float f_res + cov_b (DESI rank-1 / eBOSS rescale / KS diag)
         coherent_res=coherent_res, coh_amp=coh_amp,        # arm-D: coherent cross-z cov mode, NO forward float
-        f_res_amp_sigma=f_res_amp_sigma,                   # arm-C wide / eBOSS + KS leg-match prior (None -> tight 0.02)
+        f_res_amp_sigma=f_res_amp_sigma,                   # arm-C wide / eBOSS + KS leg-match / prod width (None -> tight 0.02)
+        metal_prior=_metal_prior,                          # NEW kwarg; default 'uniform' == build_legb_ctx default (byte-identical)
         ks_kwargs=_ks_kwargs,                              # KS echelle R_z + diag surgery (task #5); None => proxy (DESI/eBOSS/off)
         hierarchical_hcd=False, survey=PIN_KEY)
 
