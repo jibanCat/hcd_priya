@@ -29,6 +29,8 @@ from __future__ import annotations
 import argparse
 import copy
 import functools
+import hashlib
+import json
 from typing import NamedTuple
 
 import numpy as np
@@ -522,6 +524,43 @@ def prod_forward_config(leg):
     except KeyError:
         raise KeyError(f"no production forward config for leg {leg!r}; "
                        f"expected one of {list(PROD_FORWARD_BY_LEG)}")
+
+
+# ============================================================================ #
+#  The GLOBAL sim-convergence forward decision (NORC), the ONE reversal knob.
+# ============================================================================ #
+# res_corr is a SIM-convergence correction (small-box particle count), NOT a per-instrument nuisance
+# -> it is a SINGLE global switch, not a per-leg PROD_FORWARD_BY_LEG entry (a per-leg field would make
+# a one-leg flip representable but physically meaningless and would desync the fix_alpha_res invariant).
+# Gate-A (2026-07-04) DEPLOYS NORC: drop res_corr (res_corr_on=False) + pin the 2 now-inert alpha_res
+# sites (fix_alpha_res=True) + (in build_legb_ctx) auto-cap KS at k<=0.045. This constant is THE reversal
+# knob for the 4-referee panel: flip to True to restore the pre-NORC anchored+alpha forward on EVERY
+# deployed path (real fit / SBC default / dnuis use_prod_forward) at once. Gated by the panel + freeze +
+# PI sign-off before any unblind.
+PROD_RES_CORR_ON = False
+
+
+def prod_norc_forward():
+    """The deployed GLOBAL sim-convergence (NORC) forward decision, as a fresh dict.
+
+    Returns ``{"res_corr_on": PROD_RES_CORR_ON, "fix_alpha_res": not PROD_RES_CORR_ON}``. The
+    ``fix_alpha_res == (not res_corr_on)`` invariant is encoded HERE, in ONE place, so no consumer can
+    desync it. GLOBAL (not per-leg): every deployed driver (real fit / SBC / dnuis use_prod_forward)
+    consumes this so the deployed forward's res_corr decision is defined exactly once. res_corr is a
+    sim-convergence correction, not a per-instrument nuisance -> deliberately NOT keyed by leg."""
+    return {"res_corr_on": bool(PROD_RES_CORR_ON), "fix_alpha_res": not bool(PROD_RES_CORR_ON)}
+
+
+def forward_signature():
+    """A stable sha256 hex digest over the WHOLE deployed forward decision set (freeze/audit artifact).
+
+    Canonical-JSON (sorted keys) over ``{PROD_FORWARD_BY_LEG, PROD_RES_CORR_ON}`` so the freeze task can
+    record the exact deployed forward in analysis.lock and audits can assert it. Consumed by NOTHING in
+    the deployed inference path (never a per-mock discriminator -> avoids universal-clash)."""
+    payload = json.dumps({"PROD_FORWARD_BY_LEG": PROD_FORWARD_BY_LEG,
+                          "PROD_RES_CORR_ON": bool(PROD_RES_CORR_ON)},
+                         sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 # ============================================================================ #
