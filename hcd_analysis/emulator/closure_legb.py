@@ -534,9 +534,12 @@ def prod_forward_config(leg):
 # a one-leg flip representable but physically meaningless and would desync the fix_alpha_res invariant).
 # Gate-A (2026-07-04) DEPLOYS NORC: drop res_corr (res_corr_on=False) + pin the 2 now-inert alpha_res
 # sites (fix_alpha_res=True) + (in build_legb_ctx) auto-cap KS at k<=0.045. This constant is THE reversal
-# knob for the 4-referee panel: flip to True to restore the pre-NORC anchored+alpha forward on EVERY
-# deployed path (real fit / SBC default / dnuis use_prod_forward) at once. Gated by the panel + freeze +
-# PI sign-off before any unblind.
+# knob for the 4-referee panel: flip to True to restore the res_corr/alpha_res AXIS on top of the CURRENT
+# deployed forward on EVERY deployed path (real fit / SBC default / dnuis use_prod_forward) at once --
+# a controlled A/B in which ONLY the res_corr treatment moves. It is NOT the literal 2026-06-16 pre-NORC
+# config: KS keeps the later-certified echelle f_res float + k_max 0.065 (PROD_FORWARD_BY_LEG), DESI/eBOSS
+# keep flatlog2node metals + their f_res floats; naive comparisons against the archived 2026-06-16 NUTS
+# result would be confounded. Gated by the panel + freeze + PI sign-off before any unblind.
 PROD_RES_CORR_ON = False
 
 
@@ -552,14 +555,18 @@ def prod_norc_forward():
 
 
 def forward_signature():
-    """A stable sha256 hex digest over the WHOLE deployed forward decision set (freeze/audit artifact).
+    """A stable sha256 hex digest over the MODULE-CONSTANT forward decision set (freeze/audit artifact).
 
     Canonical-JSON (sorted keys) over ``{PROD_FORWARD_BY_LEG, PROD_RES_CORR_ON}`` so the freeze task can
-    record the exact deployed forward in analysis.lock and audits can assert it. Consumed by NOTHING in
-    the deployed inference path (never a per-mock discriminator -> avoids universal-clash)."""
+    record the deployed decision set in analysis.lock and audits can assert it. NOT covered (the freeze
+    task must lock these separately, per the refactor handoff list): the KS k<=0.045 NORC auto-cap
+    literal, mf_anchor_mult=5.0, the SIGMA_A0/SIGMA_S restore-arm alpha_res prior widths, the ensemble
+    checkpoint set, and the prior constants. Consumed by NOTHING in the deployed inference path (never a
+    per-mock discriminator -> avoids universal-clash). Values must stay JSON-native: a non-JSON value in
+    PROD_FORWARD_BY_LEG raises TypeError (fail-loud) rather than being silently coerced."""
     payload = json.dumps({"PROD_FORWARD_BY_LEG": PROD_FORWARD_BY_LEG,
                           "PROD_RES_CORR_ON": bool(PROD_RES_CORR_ON)},
-                         sort_keys=True, default=str)
+                         sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

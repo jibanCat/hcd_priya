@@ -326,3 +326,76 @@ def test_restore_flip_does_not_trip_ks_cap(monkeypatch):
     monkeypatch.setattr(rf, "build_legb_ctx", _fake_build_rf)
     ctx, _d, _members = rf.build_real_ctx("desi")   # must NOT raise "NORC KS k_max cap not applied"
     assert ctx.res_corr_on is True and ctx.fix_alpha_res is False
+
+
+# =============================================================================================== #
+#  (11) FLIP-SIDE dnuis (panel FIX-5a): under the restore flip the use_prod_forward post-build
+#       _replace must NOT run -> ctx.fix_alpha_res stays False (alpha_res sites SAMPLED).
+# =============================================================================================== #
+def test_flip_side_dnuis_fix_alpha_res(monkeypatch):
+    from hcd_analysis.emulator import closure_legb as CL
+    from scripts import run_dnuis_bias_shard as R
+    monkeypatch.setattr(CL, "PROD_RES_CORR_ON", True, raising=False)
+
+    def _fake_build(**kw):
+        return (_FakeCtx(res_corr_on=bool(kw.get("res_corr_on", True)), fix_alpha_res=False,
+                         legs=[_FakeLeg("DESI"), _FakeLeg("KS")]), object())
+
+    monkeypatch.setattr(R, "build_legb_ctx", _fake_build)
+    ctx, _d, _spec = R.build_arm_ctx("metal_misspec", "desi", True, use_prod_forward=True)
+    assert ctx.res_corr_on is True and ctx.fix_alpha_res is False, \
+        "restore flip must leave the alpha_res sites SAMPLED on the dnuis use_prod_forward path"
+
+
+# =============================================================================================== #
+#  (12) SBC derive + stamp + run_cfg key-set at the _run_mock seam (panel FIX-5a/b): fake-build
+#       through main() and capture the FIRST _run_mock call -> the resolved ctx AND the
+#       actually-assembled run_cfg (not a test-local literal).
+# =============================================================================================== #
+def _capture_sbc_resolved(monkeypatch, tmp_path, extra_argv=()):
+    sbc = _load_script("run_prod_sbc_shard")
+    got = {}
+
+    def _fake_build(**kw):
+        return (_FakeCtx(
+            res_corr_on=bool(kw.get("res_corr_on", True)), fix_alpha_res=False,
+            legs=[_FakeLeg("DESI", metals_on=True, resolution_ready=True)],
+            z_global=[2.2, 2.4], sample_res=kw.get("sample_res", False),
+            f_res_amp_sigma=kw.get("f_res_amp_sigma"), metal_prior=kw.get("metal_prior", "uniform"),
+            metal_node_z=(2.2, 4.2), sample_metals=kw.get("sample_metals", False),
+            mf_emucoh_per_leg={"DESI": [[1.0]]},   # satisfies the emucoh propagation assert
+            mf_shape_per_leg=None,
+            model=object()), object())             # n_members probe: getattr(ctx.model, "members", ...)
+
+    def _spy_run_mock(ctx, d, m, out_dir, **kw):
+        got["ctx"] = ctx
+        got["run_cfg"] = kw["run_cfg"]
+        raise _StopBuild()
+
+    monkeypatch.setattr(sbc, "build_legb_ctx", _fake_build)
+    monkeypatch.setattr(sbc, "_run_mock", _spy_run_mock)
+    argv = ["run_prod_sbc_shard.py", "--shard", "0", "--n-shards", "1", "--leg", "DESI",
+            "--out-dir", str(tmp_path)] + list(extra_argv)
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(_StopBuild):
+        sbc.main()
+    return got
+
+
+def test_sbc_resolved_forward_and_runcfg_keyset(monkeypatch, tmp_path):
+    from hcd_analysis.emulator import closure_legb as CL
+    # (a) deployed default: NORC derive applied, stamp False, run_cfg key-set == the resume pin (test 7).
+    got = _capture_sbc_resolved(monkeypatch, tmp_path)
+    assert got["ctx"].res_corr_on is False and got["ctx"].fix_alpha_res is True
+    assert got["run_cfg"]["res_corr_on"] is False
+    assert set(got["run_cfg"]) == set(_old_stamp_cfg()), \
+        "run_cfg key-set drifted from the resume-compat pin (universal clash on existing scratch dirs)"
+    # (b) --res-corr-on restore arm: derive skipped (alpha_res SAMPLED), stamps the RESOLVED True.
+    got = _capture_sbc_resolved(monkeypatch, tmp_path, extra_argv=["--res-corr-on"])
+    assert got["ctx"].res_corr_on is True and got["ctx"].fix_alpha_res is False
+    assert got["run_cfg"]["res_corr_on"] is True, "restore arm must stamp the resolved True"
+    # (c) authority flipped, no flag: the SBC default tracks the flip end-to-end (derive skipped).
+    monkeypatch.setattr(CL, "PROD_RES_CORR_ON", True, raising=False)
+    got = _capture_sbc_resolved(monkeypatch, tmp_path)
+    assert got["ctx"].res_corr_on is True and got["ctx"].fix_alpha_res is False
+    assert got["run_cfg"]["res_corr_on"] is True

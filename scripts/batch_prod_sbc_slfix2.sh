@@ -12,11 +12,12 @@
 #
 # FORWARD: the CORRECTED HCD z-slope (re-centered on HCD_INCIDENCE_SLOPE ~2.4, commits
 # 3603522/6358742/bad8f15, forward-exponent guard ACTIVE) + 1D power-law incidence (NOT 2D-tilt)
-# + the production MF correction, N=5 ensemble, emucoh + cross-class C_emu, eBOSS metals. The
-# res_corr_on=False (NORC) flag is NOT yet wired in the forward (Group 1 of the plan, gated on the
-# golden-test + 4-referee review) — so --no-res-corr-on records the intent in meta but the forward
-# is the existing default (res_corr anchored below 5× box, alpha_res marginalized forward-only).
-# C_mock ≡ C_like regardless (same forward for mock truth + likelihood), so the SBC null is exact.
+# + the production MF correction, N=5 ensemble, emucoh + cross-class C_emu, eBOSS metals.
+# HISTORICAL NOTE (stale when written, corrected 2026-07-12): NORC has been WIRED since 2026-07-04
+# (Gate-A) and its single authority is now closure_legb.PROD_RES_CORR_ON (NORC-refactor panel). The
+# explicit --no-res-corr-on below is REDUNDANT with the authority-derived default (same value today);
+# it is kept only as a historical pin of this campaign's forward. New drivers should OMIT the flag
+# and inherit the authority. C_mock ≡ C_like regardless (same forward for mock truth + likelihood).
 #
 # 24h-WALL SAFETY: ONE mock per shard (m % N_SHARDS == shard, N_SHARDS == N_MOCKS) so each task
 # carries exactly one NUTS fit (the OOM job's per-mock wall was 3–6.8 h ≪ 24 h). The per-mock pkl

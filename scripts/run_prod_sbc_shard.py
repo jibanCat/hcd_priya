@@ -22,8 +22,10 @@ FORWARD (2026-06-17): the CORRECTED HCD z-slope (re-centered on HCD_INCIDENCE_SL
 incidence (NOT the 2D-tilt; hcd_2d_tilt defaults False) + the production MF correction. NOTE on
 res_corr: the ``res_corr_on`` (NORC) forward flag IS NOW WIRED (2026-07-04, Gate-A) through
 build_legb_ctx -> build_mf_correction -> MultiFidelity.res_corr_on and, for NORC, this runner also
-pins fix_alpha_res=True + caps KS at k<=0.045. DEFAULT is NORC (res_corr_on=False); pass
-``--res-corr-on`` to restore the pre-NORC anchored+alpha forward. res_corr_on lives on the mf object
+pins fix_alpha_res=True + caps KS at k<=0.045. The DEFAULT tracks the single NORC authority
+``closure_legb.PROD_RES_CORR_ON`` (NORC under the deployed forward); pass ``--res-corr-on`` to
+restore the res_corr/alpha_res axis (a controlled A/B on top of the current deployed data-nuisance
+forward, not the literal 2026-06-16 config). res_corr_on lives on the mf object
 (the single chokepoint), so the mock TRUTH and the likelihood SHARE it -> C_mock ≡ C_like and the
 rank-uniformity null is exact at either setting. (Gated by the 4-referee panel + freeze.)
 
@@ -192,8 +194,10 @@ def main():
     ap.add_argument("--leg", choices=["all", "DESI", "KS", "eBOSS"], default="all",
                     help="restrict the SBC likelihood to one survey leg (per-leg = the deployed analysis)")
     ap.add_argument("--res-corr-on", dest="res_corr_on", action="store_true",
-                    help="restore the pre-NORC forward: res_corr ON + alpha_res marginalized + "
-                         "KS k<=0.069 (the anchored+alpha baseline).")
+                    help="restore the res_corr/alpha_res axis: res_corr ON + alpha_res marginalized, "
+                         "on top of the CURRENT deployed forward (for --leg KS the prod ks_kwargs "
+                         "k_max=0.065 + echelle float apply regardless). A controlled A/B, not the "
+                         "literal 2026-06-16 pre-NORC config.")
     ap.add_argument("--no-res-corr-on", dest="res_corr_on", action="store_false",
                     help="NORC (DEFAULT): res_corr OFF + fix_alpha_res + KS k<=0.045 (Gate-A).")
     # (the res_corr_on default is DERIVED from closure_legb.prod_norc_forward() in the
