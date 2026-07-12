@@ -49,7 +49,8 @@ import numpy as np
 print = functools.partial(print, flush=True)
 
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
-from hcd_analysis.emulator.closure_legb import build_legb_ctx, run_legb, prod_forward_config
+from hcd_analysis.emulator.closure_legb import (build_legb_ctx, run_legb, prod_forward_config,
+                                                prod_norc_forward)
 from hcd_analysis.emulator.inference import (HCD_LIT_OVER_SIM, HCD_LLS_SURVEY_BOOST,
                                              HCD_LLS_SURVEY_FRAC_SIGMA)
 
@@ -174,6 +175,7 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     # _res_corr_on=True == the build_legb_ctx default (res_corr applied), so the explicit pass is a no-op off.
     _metal_prior = "uniform"
     _res_corr_on = True
+    norc = None
     if use_prod_forward:
         # OPT-IN: fit this arm on the DEPLOYED prod_forward_config(PIN_KEY) forward -- the SINGLE source
         # build_real_ctx (run_real_fit.py:144) + the production SBC consume -- so the clean+injected fit
@@ -185,10 +187,11 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
         float_res, f_res_amp_sigma, _metal_prior = bool(fc["sample_res"]), fc["f_res_amp_sigma"], fc["metal_prior"]
         metals, _ks_kwargs = bool(fc["metals"]), fc["ks_kwargs"]
         # NORC: prod_forward_config carries the 5 data-nuisance knobs but NOT res_corr -- the DEPLOYED forward
-        # ALSO drops res_corr (Gate-A rejected res_corr_on=True on the n_s-sensitive high-k axis). Mirror
-        # build_real_ctx (run_real_fit.py:156,167): build res_corr_on=False, then pin the 2 inert alpha_res
-        # sites via a POST-build ctx._replace(fix_alpha_res=True) (below).
-        _res_corr_on = False
+        # ALSO drops res_corr (Gate-A rejected res_corr_on=True on the n_s-sensitive high-k axis). Sourced from
+        # the SINGLE authority CL.prod_norc_forward() (same as build_real_ctx): build res_corr_on=False, then
+        # pin the 2 inert alpha_res sites via a POST-build ctx._replace(fix_alpha_res=True) (below).
+        norc = prod_norc_forward()
+        _res_corr_on = norc["res_corr_on"]
     # build_legb_ctx assembles DESI+KS(+eBOSS); we then keep ONLY the chosen survey's leg(s) so the
     # arm fits a single-survey likelihood (the bias is per-survey).  survey= sets the LLS pin.
     ctx, d = build_legb_ctx(
@@ -209,8 +212,10 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     # above; also pin the 2 now-inert alpha_res sites (fix_alpha_res is a ctx-level field, not a build kwarg)
     # so this arm fits EXACTLY the deployed NORC forward Gate-A certified. Default-off leaves both untouched.
     if use_prod_forward:
-        ctx = ctx._replace(fix_alpha_res=True)
-        assert ctx.res_corr_on is False and ctx.fix_alpha_res is True, "use_prod_forward NORC not applied"
+        if norc["fix_alpha_res"]:
+            ctx = ctx._replace(fix_alpha_res=True)
+        assert ctx.res_corr_on == norc["res_corr_on"] and ctx.fix_alpha_res == norc["fix_alpha_res"], \
+            "use_prod_forward NORC not applied"
 
     # restrict to the chosen survey's legs (single-survey bias arm).
     legs = [l for l in ctx.legs if l.name == LEG_NAME]

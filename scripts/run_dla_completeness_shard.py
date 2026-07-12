@@ -84,9 +84,9 @@ def main():
     # Load-bearing runtime parity assert (mirror run_real_fit.py:186-193) on the real built ctx (single restricted
     # DESI leg): fail LOUD so a future refactor cannot silently regress this re-run to the thin build_legb_ctx
     # defaults (sample_res=False / metal_prior='uniform'). Fires at run start, BEFORE any NUTS.
-    fc = CL.prod_forward_config("DESI"); L = ctx.legs[0]
-    assert bool(ctx.res_corr_on) is False, "DLA re-run must run NORC (res_corr dropped)"
-    assert bool(ctx.fix_alpha_res) is True, "DLA re-run must pin alpha_res (NORC)"
+    fc = CL.prod_forward_config("DESI"); norc = CL.prod_norc_forward(); L = ctx.legs[0]
+    assert bool(ctx.res_corr_on) == norc["res_corr_on"], "DLA re-run forward != deployed NORC res_corr"
+    assert bool(ctx.fix_alpha_res) == norc["fix_alpha_res"], "DLA re-run fix_alpha_res != deployed NORC"
     assert bool(ctx.sample_res) == fc["sample_res"], "prod f_res float not wired into the DLA re-run"
     assert ctx.f_res_amp_sigma == fc["f_res_amp_sigma"], "f_res prior width mismatch vs deployed DESI"
     assert ctx.metal_prior == fc["metal_prior"], "prod metal model (flatlog2node) not wired"

@@ -106,10 +106,10 @@ def _packed_to_physical(draws, names):
 # Gate-A NORC (2026-07-04): the deployed production forward DROPS the res_corr particle-convergence
 # correction (res_corr_on=False), PINS alpha_res (fix_alpha_res=True), and caps KS at k<=0.045 (auto
 # in build_legb_ctx on the res_corr_on=False path). Rationale: the 2026-06-16 NUTS result showed the
-# anchored+alpha config AMPLIFIES the native n_s bias ~4x. This constant is the SINGLE reversal knob
-# for the 4-referee panel: flip to False to restore the pre-NORC forward. Gated by the panel + the
-# freeze + PI sign-off before any unblind.
-NORC = True
+# anchored+alpha config AMPLIFIES the native n_s bias ~4x. The deployed NORC decision now lives in ONE
+# place -- closure_legb.PROD_RES_CORR_ON (the SINGLE reversal knob for the 4-referee panel: flip it to
+# True to restore the pre-NORC forward on EVERY deployed path at once). build_real_ctx consumes it via
+# CL.prod_norc_forward(). Gated by the panel + the freeze + PI sign-off before any unblind.
 
 
 def _assert_norc_ks_cap(ctx):
@@ -142,6 +142,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
 
     info = SURVEY[survey]
     fc = CL.prod_forward_config(info["leg"])   # certified per-leg data-nuisance forward (SINGLE source == SBC)
+    norc = CL.prod_norc_forward()              # the GLOBAL deployed sim-convergence (NORC) decision (SINGLE authority)
     metals = bool(fc["metals"])
     assert metals == bool(info["metals"]), \
         f"SURVEY[{survey!r}].metals={info['metals']} disagrees with prod_forward_config({info['leg']!r})"
@@ -153,7 +154,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     ctx, d = build_legb_ctx(
         ensemble_ckpts=ens, use_xclass=True,
         with_mf=True, mf_with_floor=True,
-        res_corr_on=(not NORC),           # NORC: drop res_corr (+ auto-cap KS k<=0.045 in build_legb_ctx)
+        res_corr_on=norc["res_corr_on"],  # NORC: drop res_corr (+ auto-cap KS k<=0.045 in build_legb_ctx)
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         with_eboss=(survey == "eboss"),
         ks_kwargs=ks_kw,                  # threads z_lo into load_ks_leg (default None → z_lo=2.4 baseline)
@@ -164,10 +165,11 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
         metal_prior=fc["metal_prior"],    # flatlog2node (Gate-C Model C+) on metal legs; uniform on KS
         survey=info["leg"],               # PER-SURVEY LLS pin: DESI 1.0×/σ0.30, KS 2.5×/σ0.40 (eBOSS→cosmic-avg)
         hierarchical_hcd=False)           # the referee production baseline (per-class HCD)
-    if NORC:
+    if norc["fix_alpha_res"]:
         ctx = ctx._replace(fix_alpha_res=True)   # NORC: also drop the 2 alpha_res sites (now inert)
-        assert ctx.res_corr_on is False and ctx.fix_alpha_res is True, "NORC ctx not applied"
-        _assert_norc_ks_cap(ctx)   # KS-cap parity assert (referee M2), gated on resolution_ready
+    assert ctx.res_corr_on == norc["res_corr_on"] and ctx.fix_alpha_res == norc["fix_alpha_res"], \
+        "prod NORC forward not applied"
+    _assert_norc_ks_cap(ctx)   # KS-cap parity assert (referee M2), gated on resolution_ready
 
     # RESTRICT to the requested survey's leg (the real measurement for THIS survey only). The
     # per-leg C_emu / MF-floor / emucoh dicts are keyed by leg name, so dropping other legs leaves

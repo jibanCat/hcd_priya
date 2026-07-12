@@ -38,7 +38,8 @@ import pickle
 print = functools.partial(print, flush=True)
 
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
-from hcd_analysis.emulator.closure_legb import build_legb_ctx, run_legb, prod_forward_config
+from hcd_analysis.emulator.closure_legb import (build_legb_ctx, run_legb, prod_forward_config,
+                                                prod_norc_forward)
 
 REPO = "/home/mfho/hcd_priya"
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
@@ -233,7 +234,9 @@ def main():
                          "the SAME fold-k sims + SAME mf_fold=k. Only the emulator differs vs --fold k, so "
                          "the pull-vs-n_s tilt isolates the LOSO out-of-sample (extrapolation) effect.")
     ap.add_argument("--out-dir", required=True)
-    ap.set_defaults(with_mf=True, with_eboss=True, res_corr_on=False, write_shard_pkl=True, leg_a=True)
+    ap.set_defaults(with_mf=True, with_eboss=True,
+                    res_corr_on=prod_norc_forward()["res_corr_on"],   # NORC default from the SINGLE authority
+                    write_shard_pkl=True, leg_a=True)                 # (--res-corr-on restore arm still wins)
     a = ap.parse_args()
 
     members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
