@@ -169,7 +169,11 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
         ctx = ctx._replace(fix_alpha_res=True)   # NORC: also drop the 2 alpha_res sites (now inert)
     assert ctx.res_corr_on == norc["res_corr_on"] and ctx.fix_alpha_res == norc["fix_alpha_res"], \
         "prod NORC forward not applied"
-    _assert_norc_ks_cap(ctx)   # KS-cap parity assert (referee M2), gated on resolution_ready
+    if not norc["res_corr_on"]:
+        # KS-cap parity assert (referee M2), gated on resolution_ready. NORC-only: on the restore
+        # flip (PROD_RES_CORR_ON=True) build_legb_ctx does not auto-cap KS, so the assert would
+        # spuriously fire on the always-built proxy KS leg (k_max 0.069) before the leg restriction.
+        _assert_norc_ks_cap(ctx)
 
     # RESTRICT to the requested survey's leg (the real measurement for THIS survey only). The
     # per-leg C_emu / MF-floor / emucoh dicts are keyed by leg name, so dropping other legs leaves

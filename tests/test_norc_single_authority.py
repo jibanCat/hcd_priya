@@ -120,19 +120,54 @@ def _capture_sbc_kwargs(monkeypatch, tmp_path, extra_argv=()):
 # =============================================================================================== #
 def test_one_leg_flip_guard(monkeypatch, tmp_path):
     from hcd_analysis.emulator import closure_legb as CL
-    # flip the SINGLE authority; prod_norc_forward() reads it at call time.
+    from scripts import run_dnuis_bias_shard as R
+    # HARDENING (consistency-review): load every driver module ONCE, BEFORE the patch, and capture
+    # with the SAME module objects before and after the flip. A driver holding a frozen
+    # `from closure_legb import PROD_RES_CORR_ON` would track the flip only if (re)imported after
+    # the patch -- loading-after-patch would make this guard vacuous for exactly that regression.
+    rf = _load_script("run_real_fit")
+    sbc = _load_script("run_prod_sbc_shard")
+
+    def _cap_rf(survey):
+        captured = {}
+        def _spy(**kw): captured.update(kw); raise _StopBuild()
+        monkeypatch.setattr(rf, "build_legb_ctx", _spy)
+        with pytest.raises(_StopBuild):
+            rf.build_real_ctx(survey)
+        return captured
+
+    def _cap_dn(survey):
+        captured = {}
+        def _spy(**kw): captured.update(kw); raise _StopBuild()
+        monkeypatch.setattr(R, "build_legb_ctx", _spy)
+        with pytest.raises(_StopBuild):
+            R.build_arm_ctx("metal_misspec", survey, True, use_prod_forward=True)
+        return captured
+
+    def _cap_sbc():
+        captured = {}
+        def _spy(**kw): captured.update(kw); raise _StopBuild()
+        monkeypatch.setattr(sbc, "build_legb_ctx", _spy)
+        argv = ["run_prod_sbc_shard.py", "--shard", "0", "--n-shards", "1",
+                "--out-dir", str(tmp_path)]
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(_StopBuild):
+            sbc.main()
+        return captured
+
+    # pre-flip: every consumer resolves the deployed NORC value (False) ...
+    assert _cap_rf("desi")["res_corr_on"] is False
+    assert _cap_dn("desi")["res_corr_on"] is False
+    assert bool(_cap_sbc()["res_corr_on"]) is False
+
+    # ... then flip the SINGLE authority; the SAME already-loaded modules must all move together.
     monkeypatch.setattr(CL, "PROD_RES_CORR_ON", True, raising=False)
     patched = True                                            # res_corr_on the authority now dictates
 
-    rf_desi = _capture_real_fit_kwargs("desi", monkeypatch)
-    rf_ks = _capture_real_fit_kwargs("ks", monkeypatch)
-    dn_desi = _capture_dnuis_prod_kwargs("desi", monkeypatch)
-    sbc_default = _capture_sbc_kwargs(monkeypatch, tmp_path)   # no --res-corr-on -> tracks the authority
-
-    assert rf_desi["res_corr_on"] is patched, "run_real_fit did not track the single authority"
-    assert rf_ks["res_corr_on"] is patched, "run_real_fit (KS) did not track the single authority"
-    assert dn_desi["res_corr_on"] is patched, "dnuis use_prod_forward did not track the single authority"
-    assert bool(sbc_default["res_corr_on"]) is patched, "SBC default did not track the single authority"
+    assert _cap_rf("desi")["res_corr_on"] is patched, "run_real_fit did not track the single authority"
+    assert _cap_rf("ks")["res_corr_on"] is patched, "run_real_fit (KS) did not track the single authority"
+    assert _cap_dn("desi")["res_corr_on"] is patched, "dnuis use_prod_forward did not track the single authority"
+    assert bool(_cap_sbc()["res_corr_on"]) is patched, "SBC default did not track the single authority"
 
 
 # =============================================================================================== #
@@ -262,3 +297,32 @@ def test_forward_signature_determinism_and_sensitivity(monkeypatch):
     assert CL.forward_signature() == s0, "forward_signature must be deterministic"
     monkeypatch.setattr(CL, "PROD_RES_CORR_ON", True, raising=False)
     assert CL.forward_signature() != s0, "forward_signature must change when the NORC authority flips"
+
+
+# =============================================================================================== #
+#  (10) RESTORE-ARM regression (consistency-review MAJOR): under the restore flip
+#       (PROD_RES_CORR_ON=True) build_real_ctx must NOT trip the NORC KS-cap assert on the
+#       always-built proxy KS leg (resolution_ready=False, k_max 0.069 -- build_legb_ctx only
+#       auto-caps KS to 0.045 on the res_corr_on=False path). The cap is a NORC-only invariant;
+#       the advertised single-knob restore must not spuriously crash the desi/eboss real fits.
+# =============================================================================================== #
+def test_restore_flip_does_not_trip_ks_cap(monkeypatch):
+    import numpy as np
+    from hcd_analysis.emulator import closure_legb as CL
+    monkeypatch.setattr(CL, "PROD_RES_CORR_ON", True, raising=False)
+    rf = _load_script("run_real_fit")
+
+    ks_leg = _FakeLeg("KS", metals_on=False, resolution_ready=False)
+    ks_leg.k = np.linspace(0.005, 0.069, 20)       # the un-capped proxy KS leg of the restore build
+
+    def _fake_build_rf(**kw):
+        return (_FakeCtx(
+            res_corr_on=bool(kw.get("res_corr_on", True)), fix_alpha_res=False,
+            legs=[_FakeLeg("DESI", metals_on=True, resolution_ready=True), ks_leg],
+            sample_res=kw["sample_res"], f_res_amp_sigma=kw["f_res_amp_sigma"],
+            metal_prior=kw["metal_prior"], metal_node_z=(2.2, 4.2),
+            sample_metals=kw["sample_metals"]), object())
+
+    monkeypatch.setattr(rf, "build_legb_ctx", _fake_build_rf)
+    ctx, _d, _members = rf.build_real_ctx("desi")   # must NOT raise "NORC KS k_max cap not applied"
+    assert ctx.res_corr_on is True and ctx.fix_alpha_res is False

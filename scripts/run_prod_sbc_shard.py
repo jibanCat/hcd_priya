@@ -196,7 +196,8 @@ def main():
                          "KS k<=0.069 (the anchored+alpha baseline).")
     ap.add_argument("--no-res-corr-on", dest="res_corr_on", action="store_false",
                     help="NORC (DEFAULT): res_corr OFF + fix_alpha_res + KS k<=0.045 (Gate-A).")
-    # (res_corr_on default False is set in the ap.set_defaults(...) below with the other run defaults)
+    # (the res_corr_on default is DERIVED from closure_legb.prod_norc_forward() in the
+    #  ap.set_defaults(...) below -- the single NORC authority; False under the deployed forward)
     ap.add_argument("--single-member", action="store_true",
                     help="run on final_prod_seed0 only (cheap de-risk; NOT the production object)")
     ap.add_argument("--no-shard-pkl", dest="write_shard_pkl", action="store_false",
