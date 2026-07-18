@@ -1,7 +1,8 @@
 """
 Rogers+2018 HCD contamination template for P1D (arXiv:1706.08532).
 
-Two forms from Rogers, Bird, Peiris, Pontzen (2018), *MNRAS* 476, 3716 (coeffs Table 2):
+Two forms from Rogers, Bird, Peiris, Pontzen (2018), *MNRAS* 474(3), 3032-3042
+(arXiv:1706.08532, the 1D template paper; NOT the 3D companion MNRAS 476, 3716) (coeffs Table 2):
 
   • `template_factor` — the MULTI-CLASS model (their Eq. 8) with FLOATING amplitudes:
 
@@ -43,7 +44,7 @@ from typing import Dict, Tuple
 
 import numpy as np
 
-# Rogers+2018 table 3 coefficients.
+# Rogers+2018 Table 2 coefficients (Table 1 is the N_HI class limits + alpha_i fractions).
 # Parameter order: [LLS, Sub-DLA, Small-DLA, Large-DLA]
 _A0 = np.array([2.2001, 1.5083, 1.1415, 0.8633])
 _A1 = np.array([0.0134, 0.0994, 0.0937, 0.2943])
