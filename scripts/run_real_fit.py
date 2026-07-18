@@ -175,6 +175,16 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
         # spuriously fire on the always-built proxy KS leg (k_max 0.069) before the leg restriction.
         _assert_norc_ks_cap(ctx)
 
+    # REDUCED-COV tripwire (PI disposition 2026-07-17; consistency-review MINOR-2): the DESI leg
+    # must carry the reduced covariance (syst_e_dla_completeness removed, cup1d "red") whenever the
+    # DESI_DLA_COV_REDUCE authority says so — a future desi_kwargs default threading
+    # dla_cov_reduce=False through a driver would otherwise run the FINAL fit un-reduced silently.
+    from hcd_analysis.emulator import data_likelihood as _DL
+    for _leg in ctx.legs:
+        if _leg.name == "DESI":
+            assert bool(_leg.dla_cov_reduced) == bool(_DL.DESI_DLA_COV_REDUCE), \
+                "DESI leg dla_cov_reduced disagrees with the DESI_DLA_COV_REDUCE authority"
+
     # RESTRICT to the requested survey's leg (the real measurement for THIS survey only). The
     # per-leg C_emu / MF-floor / emucoh dicts are keyed by leg name, so dropping other legs leaves
     # this leg's covariance pieces intact; the likelihood factor then sums over this leg ALONE.

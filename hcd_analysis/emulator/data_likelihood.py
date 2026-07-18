@@ -190,6 +190,11 @@ class DataLeg(NamedTuple):
     # deployed way, then re-added as ONE rank-1 outer(e,e)) and there is NO forward f_res float. Distinguishes
     # arm-D (resolution_on=False, resolution_coherent_on=True) from option-a (both False). Default False.
     resolution_coherent_on: bool = False
+    # Reduced-covariance stamp (PI disposition 2026-07-17): True iff the DLA-completeness systematic
+    # (syst_e_dla_completeness) was REMOVED from C_data because the alpha_DLA mean model floats on this
+    # leg (modeled-in-mean => removed-from-covariance, the cup1d "red" convention). DESI-only; audit +
+    # runner-assert hook so a driver can fail loud if it gets the un-reduced covariance.
+    dla_cov_reduced: bool = False
 
 
 # PER-LEG DLA-forward fraction (§0c, PI-confirmed final intent 2026-06-09): the leg-specific
@@ -201,6 +206,21 @@ KS_DLA_FORWARD_FRAC = 0.0
 # eBOSS DR14 (Chabanier+2019): DLAs are MASKED (the Pk1D_syst.dat carries DLAmask +
 # DLAcompleteness residual in C_data), so the forward DLA-excess term is ZERO (like KS, not DESI).
 EBOSS_DLA_FORWARD_FRAC = 0.0
+
+# THE SINGLE AUTHORITY for the DESI reduced-covariance decision (PI disposition 2026-07-17):
+# modeled-in-mean => removed-from-covariance, cup1d's type_analysis="red" convention (DESI DR1
+# cosmology paper 2601.21432 Sec 2.1: the residual-HCD and resolution cov_syst terms are OMITTED
+# "as both effects are explicitly marginalized over"). DESI floats the PRIYA alpha_DLA mean model
+# (DESI_DLA_FORWARD_FRAC=1.0 above), so keeping syst_e_dla_completeness in C_data double-prices
+# that named unknown on the variance side (~10% whitened overlap, conservative -- the 2026-07-17
+# cup1d cross-check). True => load_desi_leg removes it by default using the SHIPPED per-z-block
+# rank-1 convention (cov_syst is exactly z-block-diagonal): C -= sum_z outer(e_dla|z). Lives HERE
+# next to DESI_DLA_FORWARD_FRAC (not per-driver) so every DESI leg load -- real fit, SBC, dnuis
+# arms, diagnostics -- inherits the same decision with no threading (the NORC near-miss class);
+# folded into closure_legb.forward_signature() for the freeze. Opt out per-call with
+# dla_cov_reduce=False (archival reproduction of pre-2026-07-17 results ONLY). KS/eBOSS are
+# untouched: their forward DLA term is ZERO, so the modeled-in-mean licence does not apply.
+DESI_DLA_COV_REDUCE = True
 
 
 def _z_unit(z):
@@ -241,7 +261,7 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
                   *, z_lo=2.2, z_hi=4.2, k_min=DESI_KMIN, metals_on=True,
                   resolution_on=False, add_cov_diag_inflation=True, mf_floor_on=False,
                   use_snr3=None, snr3_stat_inflate=None, add_cv_floor=None, resolution_float=False,
-                  resolution_coherent=False, resolution_coh_amp=1.0):
+                  resolution_coherent=False, resolution_coh_amp=1.0, dla_cov_reduce=None):
     """Load DESI DR1 P1D → a post-cut ``DataLeg`` (usage doc §"Covariance + cuts").
 
     Cuts (z-major flat layout, ``row_is_zmajor=True``):
@@ -267,8 +287,15 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
         ``cov += (f²−1)·cov_stat``. Only applied when SNR>3 is active.
       * ``add_cv_floor``     (env ``HCD_CV_FLOOR``): add the Fernandez σ_CV ~2% finite-box
         floor to the low-k rows (``_add_cv_floor``). Diagonal unless ``HCD_CV_FLOOR_RANK1``.
+
+    ``dla_cov_reduce`` (default None → the ``DESI_DLA_COV_REDUCE`` authority constant, True):
+    REMOVE the DLA-completeness systematic (``syst_e_dla_completeness``) from C_data as per-z
+    rank-1 blocks — the cup1d "red" reduced covariance, licensed because DESI floats the PRIYA
+    alpha_DLA mean model. Stamped on the leg as ``dla_cov_reduced``. Pass False ONLY to reproduce
+    pre-2026-07-17 archival results.
     """
     use_snr3 = _env_flag("HCD_DESI_SNR3") if use_snr3 is None else bool(use_snr3)
+    dla_cov_reduce = DESI_DLA_COV_REDUCE if dla_cov_reduce is None else bool(dla_cov_reduce)
     add_cv_floor = _env_flag("HCD_CV_FLOOR") if add_cv_floor is None else bool(add_cv_floor)
     if use_snr3:
         # Fix 1: the cosmology-paper baseline (SNR>3 measurement + its own covariance).
@@ -298,13 +325,17 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
     # read the per-bin resolution error ONLY on the option-b / arm-D paths (golden default must not depend
     # on a key it never uses -- code-lens #7).
     res_e = np.asarray(d["syst_e_resolution"], float) if (resolution_float or resolution_coherent) else None
+    # reduced covariance (dla_cov_reduce): read the DLA-completeness column from the SAME npz that
+    # supplied cov (SNR>1 baseline or the SNR>3 file -- each ships its own systematics vectors).
+    dla_e = np.asarray(d["syst_e_dla_completeness"], float) if dla_cov_reduce else None
     return _assemble_leg("DESI", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
                          dla_forward_frac=DESI_DLA_FORWARD_FRAC,
                          resolution_e=res_e,
                          resolution_float=resolution_float,
-                         resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp)
+                         resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp,
+                         dla_e=dla_e)
 
 
 def _read_ks_resolution_e(detail_path, z_grid, k_grid):
@@ -456,13 +487,35 @@ def _read_ks_p1d(path):
     return np.array(z), np.array(k), np.array(P)
 
 
+def _subtract_perz_rank1(C, e, z_idx, n_zbins):
+    """``C -= sum_z outer(e|z)``: remove ONE correlated systematic in the SHIPPED DESI cov_syst
+    convention — each correlated term enters the covariance as a rank-1 ``outer(e|z)`` within
+    every z block, exactly zero cross-z (cov_syst is z-block-diagonal; verified 6.2e-18). The
+    per-z-block subtraction on the post-cut rows equals the sub-selection of the full-grid
+    removal exactly (a rank-1 block outer restricted to kept rows IS the outer of the restricted
+    vector). NOT one globally coherent outer product — that would assert a cross-z coherence the
+    shipped covariance never carried. Mutates and returns ``C``. Shared by the resolution
+    ("rank1" mode) and DLA-completeness removals so the surgery algebra exists ONCE."""
+    for i in range(n_zbins):
+        rows = np.where(z_idx == i)[0]
+        if rows.size:
+            C[np.ix_(rows, rows)] -= np.outer(e[rows], e[rows])
+    return C
+
+
 def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
                   metals_on, resolution_on, mf_floor_on=False, dla_forward_frac=1.0,
                   resolution_e=None, resolution_float=False, resolution_mode="rank1",
-                  resolution_ready=True, resolution_coherent=False, resolution_coh_amp=1.0):
+                  resolution_ready=True, resolution_coherent=False, resolution_coh_amp=1.0,
+                  dla_e=None):
     """Sub-select the kept (z,k) rows + their covariance block, build the z-major flat
     DataLeg.  The covariance is row/col-sliced by the SAME boolean mask as the data so the
-    flat-row ordering matches C_data exactly (CS-REVIEW: ordering invariant)."""
+    flat-row ordering matches C_data exactly (CS-REVIEW: ordering invariant).
+
+    ``dla_e`` (DESI only; PI disposition 2026-07-17): the full-grid ``syst_e_dla_completeness``
+    column. When given, its per-z rank-1 modes are REMOVED from C_data (the cup1d "red" reduced
+    covariance) — licensed ONLY because the alpha_DLA mean model floats on the leg
+    (``dla_forward_frac`` > 0; enforced, fail-loud). Stamped as ``dla_cov_reduced``."""
     idx = np.where(keep)[0]
     z_row = z_all[idx]
     k = k_all[idx]
@@ -509,10 +562,7 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
             _di = np.diag_indices_from(C_data)
             C_data[_di] = C_data[_di] - e_res ** 2
         else:                                                        # "rank1" (DESI): drop the per-z mode
-            for i in range(len(z)):
-                rows = np.where(z_idx == i)[0]
-                if rows.size:
-                    C_data[np.ix_(rows, rows)] -= np.outer(e_res[rows], e_res[rows])
+            C_data = _subtract_perz_rank1(C_data, e_res, z_idx, len(z))
         if resolution_coherent:
             # ARM-D: re-add the resolution error as ONE coherent (cross-z) rank-1 mode. Restores the total
             # diagonal variance (diag == option-a) but re-correlates it coherently across z. resolution_on
@@ -522,13 +572,27 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
         else:
             resolution_on = True                    # option-b floats f_res in the forward
         np.linalg.cholesky(C_data)                 # SPD assert (fails loudly if the mode is mis-specified)
+    dla_cov_reduced = False
+    if dla_e is not None:
+        # Reduced covariance (cup1d "red"): remove the DLA-completeness per-z rank-1 modes. The
+        # modeled-in-mean licence is MANDATORY — removing a variance term whose effect the forward
+        # does NOT model would silently under-cover, so a zero forward DLA term fails loud here.
+        if not float(dla_forward_frac) > 0.0:
+            raise ValueError(
+                f"{name}: dla_e (reduced covariance) requires the alpha_DLA mean model to be live "
+                f"on this leg (dla_forward_frac > 0, got {dla_forward_frac!r}); removing the "
+                "DLA-completeness variance without modeling it in the mean would under-cover")
+        C_data = _subtract_perz_rank1(np.array(C_data, float),
+                                      np.asarray(dla_e, float)[idx], z_idx, len(z))
+        np.linalg.cholesky(C_data)                 # SPD assert (mathematically stat + remaining syst)
+        dla_cov_reduced = True
     R_z = np.asarray(R_func(z))
     return DataLeg(
         name=name, z=z, z_unit=_z_unit(z), k=k, z_row=z_row, z_idx=z_idx,
         P_data=P_data, C_data=C_data, R_z=R_z, n_z=len(z), n_per_z=n_per_z,
         metals_on=metals_on, resolution_on=resolution_on, mf_floor_on=mf_floor_on,
         dla_forward_frac=dla_forward_frac, resolution_ready=resolution_ready,
-        resolution_coherent_on=resolution_coherent_on)
+        resolution_coherent_on=resolution_coherent_on, dla_cov_reduced=dla_cov_reduced)
 
 
 # ============================================================================ #

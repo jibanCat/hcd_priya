@@ -359,6 +359,13 @@ def main():
     assert bool(ctx.sample_res) == bool(_sample_res), "SBC f_res float not wired"
     assert ctx.f_res_amp_sigma == _f_res_sigma, "SBC f_res prior width mismatch"
     assert tuple(ctx.metal_node_z) == (2.2, 4.2), "Gate-C metal_node_z drifted"
+    # REDUCED-COV tripwire (PI disposition 2026-07-17; mirror of the run_real_fit assert): the SBC
+    # (the sole unblind certificate) must fit under the SAME reduced DESI covariance as the real fit.
+    from hcd_analysis.emulator import data_likelihood as _DL
+    for _leg in ctx.legs:
+        if _leg.name == "DESI":
+            assert bool(_leg.dla_cov_reduced) == bool(_DL.DESI_DLA_COV_REDUCE), \
+                "DESI leg dla_cov_reduced disagrees with the DESI_DLA_COV_REDUCE authority"
     if ctx.sample_res:                             # f_res is per-INSTRUMENT: single-leg + resolution_ready
         assert all(getattr(l, "resolution_ready", False) for l in ctx.legs), \
             "f_res float on a resolution_ready=False leg"

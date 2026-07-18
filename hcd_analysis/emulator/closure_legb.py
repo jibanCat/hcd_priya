@@ -557,15 +557,20 @@ def prod_norc_forward():
 def forward_signature():
     """A stable sha256 hex digest over the MODULE-CONSTANT forward decision set (freeze/audit artifact).
 
-    Canonical-JSON (sorted keys) over ``{PROD_FORWARD_BY_LEG, PROD_RES_CORR_ON}`` so the freeze task can
-    record the deployed decision set in analysis.lock and audits can assert it. NOT covered (the freeze
-    task must lock these separately, per the refactor handoff list): the KS k<=0.045 NORC auto-cap
-    literal, mf_anchor_mult=5.0, the SIGMA_A0/SIGMA_S restore-arm alpha_res prior widths, the ensemble
-    checkpoint set, and the prior constants. Consumed by NOTHING in the deployed inference path (never a
-    per-mock discriminator -> avoids universal-clash). Values must stay JSON-native: a non-JSON value in
+    Canonical-JSON (sorted keys) over ``{PROD_FORWARD_BY_LEG, PROD_RES_CORR_ON,
+    DESI_DLA_COV_REDUCE}`` so the freeze task can record the deployed decision set in analysis.lock
+    and audits can assert it. DESI_DLA_COV_REDUCE (data_likelihood; PI disposition 2026-07-17) is
+    the reduced-covariance authority — remove syst_e_dla_completeness from the DESI C_data because
+    alpha_DLA floats (cup1d "red") — and belongs in the signature because flipping it changes every
+    deployed DESI likelihood. NOT covered (the freeze task must lock these separately, per the
+    refactor handoff list): the KS k<=0.045 NORC auto-cap literal, mf_anchor_mult=5.0, the
+    SIGMA_A0/SIGMA_S restore-arm alpha_res prior widths, the ensemble checkpoint set, and the prior
+    constants. Consumed by NOTHING in the deployed inference path (never a per-mock discriminator
+    -> avoids universal-clash). Values must stay JSON-native: a non-JSON value in
     PROD_FORWARD_BY_LEG raises TypeError (fail-loud) rather than being silently coerced."""
     payload = json.dumps({"PROD_FORWARD_BY_LEG": PROD_FORWARD_BY_LEG,
-                          "PROD_RES_CORR_ON": bool(PROD_RES_CORR_ON)},
+                          "PROD_RES_CORR_ON": bool(PROD_RES_CORR_ON),
+                          "DESI_DLA_COV_REDUCE": bool(DL.DESI_DLA_COV_REDUCE)},
                          sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -1482,6 +1487,53 @@ def apply_subdla_truth_boost(truth_pack, boost):
         az[:, 1] = az[:, 1] * float(boost)
         out["alpha_hcd_z"] = az
     return out
+
+
+def apply_dla_truth_boost(truth_pack, boost):
+    """Return a COPY of ``truth_pack`` with the DLA incidence (pivot ``alpha_hcd[2]`` AND the
+    z-resolved ``alpha_hcd_z[:,2]`` column) multiplied by ``boost`` — the DLA SIBLING of the
+    LLS/subDLA boosts, for the displaced-truth PRIYA DLA-completeness closure arm (PI disposition
+    2026-07-17). The mock then carries ``boost``× the prior-drawn alpha_DLA on the SAME deployed
+    PRIYA R_DLA response the likelihood fits (same filtering, core add-back, normalization, z law,
+    dla_forward_frac — self-consistent by construction; NO e_dla mean template anywhere). At
+    boost=1.5 the truth-distribution median lands at 0.15×(lit/sim)×w_DLA — the intended ~15%
+    residual of the OBSERVED DLA incidence (prior center = 0.10). LLS (0), subDLA (1), θ9, τ₀ and
+    a_SiIII are untouched; the input is NOT mutated. ``boost=1`` is the identity."""
+    out = dict(truth_pack)                                    # shallow copy of the dict
+    a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
+    a[2] = a[2] * float(boost)
+    out["alpha_hcd"] = a
+    if truth_pack.get("alpha_hcd_z") is not None:
+        az = np.array(truth_pack["alpha_hcd_z"], float)       # fresh (nZg,3)
+        az[:, 2] = az[:, 2] * float(boost)
+        out["alpha_hcd_z"] = az
+    return out
+
+
+# the run_legb leg-a inject_spec contract: the three truth boosts (applied here) + the two
+# make_leg_a_legmock injections (threaded there). ANY other key is a typo -> fail loud (a silently
+# ignored key would no-op an injection arm and read as a spurious PASS).
+_TRUTH_BOOST_KEYS = ("lls_truth_boost", "subdla_truth_boost", "dla_truth_boost")
+_INJECT_SPEC_KEYS = frozenset(_TRUTH_BOOST_KEYS) | {"metal_misspec", "resolution"}
+
+
+def _apply_truth_boosts(truth_pack, inject_spec):
+    """Apply the ``*_truth_boost`` keys of ``inject_spec`` to ``truth_pack`` (in LLS, subDLA, DLA
+    order — independent columns, so order is cosmetic) and VALIDATE the full key set against
+    ``_INJECT_SPEC_KEYS`` (unknown key ⇒ ValueError, the fail-loud typo guard). ``None``/empty
+    spec returns the input unchanged (the byte-identical no-op guarantee)."""
+    if not inject_spec:
+        return truth_pack
+    unknown = set(inject_spec) - _INJECT_SPEC_KEYS
+    if unknown:
+        raise ValueError(f"unknown inject_spec key(s) {sorted(unknown)}; "
+                         f"allowed: {sorted(_INJECT_SPEC_KEYS)}")
+    for key, fn in (("lls_truth_boost", apply_lls_truth_boost),
+                    ("subdla_truth_boost", apply_subdla_truth_boost),
+                    ("dla_truth_boost", apply_dla_truth_boost)):
+        if inject_spec.get(key) is not None:
+            truth_pack = fn(truth_pack, float(inject_spec[key]))
+    return truth_pack
 
 
 def _meanflux_on_leg(ctx, leg, truth_pack):
@@ -2643,16 +2695,12 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
             k_truth, k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, m), 3)
             truth_pack = draw_leg_a_leg_truth(ctx, k_truth)
             # DATA-NUISANCE INJECTION (the bias gate; inject_spec=None ⇒ byte-identical to the
-            # clean self-draw — the no-op guarantee). "lls_truth_boost" offsets the TRUTH LLS from
-            # the per-survey pin BEFORE the forward; "metal_misspec"/"resolution" inject a mode the
-            # forward cannot fit into the noiseless mock.
+            # clean self-draw — the no-op guarantee). "lls/subdla/dla_truth_boost" offset the TRUTH
+            # incidence from the prior center BEFORE the forward (_apply_truth_boosts, which also
+            # fail-louds on unknown keys); "metal_misspec"/"resolution" inject a mode the forward
+            # cannot fit into the noiseless mock.
             if inject_spec:
-                if inject_spec.get("lls_truth_boost") is not None:
-                    truth_pack = apply_lls_truth_boost(
-                        truth_pack, float(inject_spec["lls_truth_boost"]))
-                if inject_spec.get("subdla_truth_boost") is not None:
-                    truth_pack = apply_subdla_truth_boost(
-                        truth_pack, float(inject_spec["subdla_truth_boost"]))
+                truth_pack = _apply_truth_boosts(truth_pack, inject_spec)
                 mock_legs, info = make_leg_a_legmock(
                     ctx, fid_core, truth_pack, k_mock,
                     inject_metal_misspec=inject_spec.get("metal_misspec"),
