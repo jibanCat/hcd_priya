@@ -70,7 +70,12 @@ RES_INSTR_BASIS = os.path.join(REPO, "hcd_analysis", "_emulator_data", "res_inst
 #   eboss = 1.30: no eBOSS per-survey pin (forward keeps the cosmic average 1.0×), so 1.30 is a
 #           deliberate STRESS offset (eBOSS is low-k/cosmic, otherwise carries no LLS excess).
 LLS_TRUTH_BOOST = {
-    "desi":  float(HCD_LIT_OVER_SIM[0]),                                    # 1.06 — ~0.2σ off DESI pin
+    # HISTORICAL PIN (2026-07-18 supersession): this arm was DESIGNED as the 1.06 offset when
+    # HCD_LIT_OVER_SIM[0] was 1.06; the corrected-law swap moved that constant to 0.995, and a
+    # live read would silently turn the offset arm into a ~null arm under an offset-arm label.
+    # The 1.06 literal preserves the arm's design; re-runs remain comparable to the recorded
+    # campaign. (Review meta finding 5.)
+    "desi":  1.06,                                                          # ~0.2σ off DESI pin
     "ks":    float(HCD_LLS_SURVEY_BOOST.get("KS", 2.5))
              * (1.0 + float(HCD_LLS_SURVEY_FRAC_SIGMA.get("KS", 0.40))),    # 3.50 — ~1σ ABOVE KS pin
     "eboss": 1.30,                                                          # 1.30 — deliberate stress

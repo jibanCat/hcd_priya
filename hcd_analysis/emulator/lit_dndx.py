@@ -642,9 +642,10 @@ def _fit_corrected_lls(comp, r_at, kernel_budget, err_mode="mean"):
     fit = gls_powerlaw_log(zb, v, sig, s_common=kb.get("s_r3", 0.0),
                            sigma_eta=kb.get("sigma_eta", 0.0))
     stats = law_vs_points_stats(fit["A"], fit["gamma"], zb, v, sig * v)
-    cons = law_consistency_vs_refit(fit["A"], fit["gamma"], fit, zb)
+    # kernel-CANDIDATE laws have no deployed referent at fit time; the adopted constrained
+    # law is gated deployed-vs-refit in derive_hcd_dndx_corrected.py + test case 1
     return dict(fit=fit, corrected_points=dict(z_bar=zb, lx=v, sig_log=sig, r=r),
-                stats=stats, consistency_vs_refit=cons,
+                stats=stats, consistency_vs_refit=None,
                 A=fit["A"], gamma=fit["gamma"])
 
 
@@ -671,7 +672,7 @@ def _telescoping_check(lls_fit, floor_factor, sub_law, dla_law, cum_fit, z_grid=
 
 def run_fit_ordering(floor_factor, r_k1=None, r_k1_smooth=None, kernel_budget=None,
                      journal_fix=False, omeara_variant="wmean", larger_side=False,
-                     drop_z180=False, include_sensitivity=True):
+                     drop_z180=False, include_sensitivity=True, reference_laws=None):
     """The pinned fit ORDERING (spec sec 4): (1) subDLA + DLA count laws (Poisson GLM,
     independent); (2) UNCORRECTED cumulative LLS compilation (diagonal GLS = WLS); (3) K3
     cap from (1)+(2) x the PRIYA floor factor -> corrected LLS points -> GLS with the
@@ -682,8 +683,18 @@ def run_fit_ordering(floor_factor, r_k1=None, r_k1_smooth=None, kernel_budget=No
       constant only in kernel-free test paths).
     r_k1 / r_k1_smooth: callables z -> b(z) (per-point K1a / smooth K1b), optional.
     kernel_budget: dict(s_r3, sigma_eta) — the common-mode kernel covariance blocks.
+    reference_laws: optional {class: (A, gamma)} of DEPLOYED laws; when given, each class's
+      ``consistency_vs_refit`` compares that REFERENCE against the fresh refit (the real
+      transplant-killer). Without a referent the field is None — never self-vs-self
+      (2026-07-18 review meta finding 6: the old self-compare was vacuous).
     """
     err_mode = "larger" if larger_side else "mean"
+
+    def _cons(cls, refit, z_eval):
+        if reference_laws and cls in reference_laws:
+            a_ref, g_ref = reference_laws[cls]
+            return law_consistency_vs_refit(a_ref, g_ref, refit, z_eval)
+        return None
 
     # (1a) subDLA: Poisson GLM on the verified Zafar counts
     az = ELL_X_SUBDLA_BINNED_19P0_20P3_ZAFAR13_T3
@@ -695,8 +706,7 @@ def run_fit_ordering(floor_factor, r_k1=None, r_k1_smooth=None, kernel_budget=No
     err_s = np.sqrt(np.asarray(n_s, float)) / np.asarray(dX_s, float)
     sub = dict(sub_glm, stats=law_vs_points_stats(sub_glm["A"], sub_glm["gamma"], z_s,
                                                   rate_s, err_s),
-               consistency_vs_refit=law_consistency_vs_refit(sub_glm["A"], sub_glm["gamma"],
-                                                             sub_glm, z_s),
+               consistency_vs_refit=_cons("subDLA", sub_glm, z_s),
                glm_vs_wls=dict(delta_A_frac=sub_cmp["delta_A_frac"],
                                delta_gamma=sub_cmp["delta_gamma"]),
                n_points=len(np.asarray(z_s)))
@@ -709,8 +719,7 @@ def run_fit_ordering(floor_factor, r_k1=None, r_k1_smooth=None, kernel_budget=No
     dla = dict(dla_glm,
                stats=law_vs_points_stats(dla_glm["A"], dla_glm["gamma"], ad["z_bar"],
                                          ad["lx"], np.asarray(ad["err_hi"], float)),
-               consistency_vs_refit=law_consistency_vs_refit(dla_glm["A"], dla_glm["gamma"],
-                                                             dla_glm, ad["z_bar"]),
+               consistency_vs_refit=_cons("DLA", dla_glm, ad["z_bar"]),
                wls_anchor=dict(A=float(dla_wls["A"]), gamma=float(dla_wls["gamma"]),
                                chi2_red=float(dla_wls["chi2_red"])),
                glm_vs_wls=dict(delta_A_frac=dla_cmp["delta_A_frac"],
@@ -723,8 +732,7 @@ def run_fit_ordering(floor_factor, r_k1=None, r_k1_smooth=None, kernel_budget=No
     cum = dict(cum_fit,
                stats=law_vs_points_stats(cum_fit["A"], cum_fit["gamma"], comp["z_bar"],
                                          comp["lx"], sig_cum * np.asarray(comp["lx"], float)),
-               consistency_vs_refit=law_consistency_vs_refit(cum_fit["A"], cum_fit["gamma"],
-                                                             cum_fit, comp["z_bar"]))
+               consistency_vs_refit=None)     # no deployed cumulative referent exists
 
     # (3) K3: fit-based cap (cannot go negative by gate) x PRIYA floor factor
     def r_k3(zz):

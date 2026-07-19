@@ -232,7 +232,13 @@ def _toy_floor_factor(z):
 
 
 def test_fit_ordering_runs_and_gates():
-    res = LD.run_fit_ordering(floor_factor=_toy_floor_factor)
+    # reference_laws = the DEPLOYED constants (mirrors inference.HCD_LIT_DNDX_LAW; the
+    # module-vs-JSON pin lives in test_lit_dndx_corrected case 8b) — the consistency field
+    # compares REFERENCE vs refit, never self-vs-self (review meta finding 6: the old
+    # self-compare made the derive script's "[GATES] ALL PASS" vacuous).
+    deployed = {"subDLA": (0.004832763139114936, 2.438007767664778),
+                "DLA": (0.0076, 1.592)}
+    res = LD.run_fit_ordering(floor_factor=_toy_floor_factor, reference_laws=deployed)
     for k in ("subDLA", "DLA", "cum_uncorrected", "K3"):
         assert k in res
     # internal-consistency gate: |weighted-mean fractional residual| < 5% per fitted class
@@ -240,12 +246,22 @@ def test_fit_ordering_runs_and_gates():
     # bias trips either this or the law-vs-refit gate)
     for cls in ("subDLA", "DLA", "cum_uncorrected"):
         assert abs(res[cls]["stats"]["wmean_frac_resid"]) < 0.05, cls
+    # deployed-vs-refit: NON-vacuous for the deployed classes, None where no referent exists
+    for cls in ("subDLA", "DLA"):
         assert res[cls]["consistency_vs_refit"]["max_frac_dev"] < 0.05, cls
+    assert res["cum_uncorrected"]["consistency_vs_refit"] is None
+    assert res["K3"]["law"]["consistency_vs_refit"] is None
     # the corrected K3 LLS law also passes vs its own (corrected) input points
     assert abs(res["K3"]["law"]["stats"]["wmean_frac_resid"]) < 0.05
-    assert res["K3"]["law"]["consistency_vs_refit"]["max_frac_dev"] < 0.05
     # DLA GLM-vs-WLS anchor agreement (PI flag otherwise)
     assert abs(res["DLA"]["glm_vs_wls"]["delta_gamma"]) < 0.1
+
+
+def test_fit_ordering_gate_trips_on_wrong_object_reference():
+    """The gate must actually FAIL when the reference is the tombstoned wrong-object law."""
+    res = LD.run_fit_ordering(floor_factor=_toy_floor_factor,
+                              reference_laws={"subDLA": (0.0211, 0.937)})
+    assert res["subDLA"]["consistency_vs_refit"]["max_frac_dev"] > 0.30
 
 
 def test_internal_consistency_gate_semantics():

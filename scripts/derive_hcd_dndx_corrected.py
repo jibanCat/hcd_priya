@@ -114,6 +114,19 @@ def deployed_alpha_fn():
     return alpha_for, xbar, tier
 
 
+def _deployed_laws():
+    """The DEPLOYED law tuples for the consistency-vs-refit gate: from inference.py when
+    importable, else from the committed derivation JSON's laws_deployed block."""
+    try:
+        from hcd_analysis.emulator import inference as INF
+        return {c: tuple(v) for c, v in INF.HCD_LIT_DNDX_LAW.items()}
+    except Exception:                                        # pragma: no cover
+        import json as _json
+        with open(LD.__file__.replace("lit_dndx.py", "hcd_lit_dndx_corrected.json")) as fh:
+            j = _json.load(fh)
+        return {c: tuple(v) for c, v in j["pi_adoption"]["laws_deployed"].items()}
+
+
 def main():
     print("=" * 100)
     print("CORRECTED LITERATURE dN/dX LAW RE-DERIVATION — decision table "
@@ -162,8 +175,12 @@ def main():
     kb = dict(s_r3=budget["s_r3"], sigma_eta=budget["sigma_eta"])
 
     # ---------------- final ordering with kernel covariance ----------------- #
+    # reference_laws = the DEPLOYED module constants, so consistency_vs_refit is the real
+    # deployed-vs-refit gate (review meta finding 6: never self-vs-self)
+    _dep = _deployed_laws()
     res = LD.run_fit_ordering(floor_factor, r_k1=r_k1, r_k1_smooth=k1b["r_at"],
-                              kernel_budget=kb)
+                              kernel_budget=kb,
+                              reference_laws={"subDLA": _dep["subDLA"], "DLA": _dep["DLA"]})
 
     # ---------------- count-class estimators (both, spec 4a) ---------------- #
     print("\n[COUNT CLASSES] Poisson GLM (ADOPTED) vs log-WLS, same points:")
@@ -250,15 +267,19 @@ def main():
           " ".join(f"{z:.2f}:{v:+.3f}" for z, v in zip(k3b["z_bar"], k3b["corrected_points"])))
 
     # ---------------- HARD GATES (spec sec 4/6: assert in script AND test) --- #
+    # weighted-mean bias: every fitted class vs its own points
     for cls in ("subDLA", "DLA", "cum_uncorrected"):
         blk = res[cls]
         assert abs(blk["stats"]["wmean_frac_resid"]) < 0.05, (cls, blk["stats"])
-        assert blk["consistency_vs_refit"]["max_frac_dev"] < 0.05, cls
-    for name, k in kernels.items():
-        assert res[name]["law"]["consistency_vs_refit"]["max_frac_dev"] < 0.05, name
+    # DEPLOYED-vs-refit (the transplant-killer; non-vacuous by construction — reference_laws
+    # threaded above; kernel-candidate laws have no deployed referent and carry None):
+    for cls in ("subDLA", "DLA"):
+        assert res[cls]["consistency_vs_refit"]["max_frac_dev"] < 0.05, (
+            cls, res[cls]["consistency_vs_refit"])
     assert np.all(np.abs(np.asarray(kernels["K3"]["telescoping"]["pull"])) < 1.0), (
         "K3 must be telescoping-consistent by construction")
-    print("\n[GATES] internal-consistency (<5% weighted-mean bias + <5% law-vs-refit) and "
+    print("\n[GATES] internal-consistency (<5% weighted-mean bias) + DEPLOYED-vs-refit "
+          "(<5%, subDLA/DLA; adopted LLS gated in the adoption block) and "
           "K3 telescoping: ALL PASS (weighted-rms values are REPORTED per class in stats; "
           "see the implementation report for why raw wrms cannot be a 5% gate on "
           "Poisson-scale points)")
@@ -316,6 +337,12 @@ def main():
                                   gamma_fixed=ADOPTED_GAMMA_LLS)
     assert abs(free_fit["gamma"] - ADOPTED_GAMMA_LLS) < 0.5 * free_fit["sigma_gamma"], (
         "constraint unjustified: free K1a gamma inconsistent with the deployed 2.127")
+    # adopted-LLS deployed-vs-refit gate (completes the non-vacuous gate set)
+    _dep_lls = _deployed_laws().get("LLS")
+    if _dep_lls is not None:
+        _dev = LD.law_consistency_vs_refit(_dep_lls[0], _dep_lls[1], con_fit,
+                                           k1a_pts["z_bar"])
+        assert _dev["max_frac_dev"] < 0.05, ("deployed LLS law vs constrained refit", _dev)
     laws_adopted = {"LLS": (con_fit["A"], con_fit["gamma"]),
                     "subDLA": law_tuple(s), "DLA": (0.0076, 1.592)}
     alpha_adopted = alpha_for(laws_adopted)
