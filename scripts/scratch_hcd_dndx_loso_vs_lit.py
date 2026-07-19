@@ -9,11 +9,11 @@ s_c is the FORWARD z-slope, read PER DRAW from the chain so each band reflects i
 z-evolution: 2D-tilt chains use s_c = B_hcd + δs_c (per-draw B_hcd column); marginalized chains use
 the sampled s_lls/s_subdla/s_dla (or the prior CENTER HCD_INCIDENCE_SLOPE when those columns aren't
 packed); fixed-slope chains use HCD_INCIDENCE_SLOPE = (2.465,2.758,2.366) (the SIM incidence-weight
-slope the mock truth carries; NOT the lit/sim RATIO slope HCD_LIT_OVER_SIM_SLOPE=(0.95,…)).
+slope the mock truth carries; NOT the lit/sim RATIO slope HCD_LIT_OVER_SIM_SLOPE=(0.764,…)).
 Xbar(z) = X_tot/N_sl from the LF cache (mean absorption path per sightline).
 
 Literature dN/dX (z,val,err,src) and the lit/sim ratio centres are the repo's own constants
-(scripts/plot_dndx_vs_literature.py LIT; inference.HCD_LIT_OVER_SIM(_SLOPE)).
+(lit_dndx.lit_points_for_display, corrected estimands; inference.HCD_LIT_OVER_SIM(_SLOPE)).
 
 Writes PNGs to the notes repo figures dir + a small JSON of the per-fold readouts.
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
@@ -44,21 +44,11 @@ OUTDIR.mkdir(parents=True, exist_ok=True)
 CLS = ["LLS", "subDLA", "DLA"]
 ZP = float(HCD_Z_PIVOT)
 
-# Literature dN/dX (z, value, ±err, source) — verbatim from scripts/plot_dndx_vs_literature.py
-LIT = {
-    "LLS":    ([2.4, 2.8, 3.35, 3.47, 3.58, 3.74, 3.97, 4.23],
-               [0.29, 0.33, 0.35, 0.57, 0.41, 0.52, 0.72, 0.78],
-               [0.05, 0.08, 0.14, 0.12, 0.07, 0.08, 0.15, 0.19],
-               "O'Meara13 / Fumagalli13 / Prochaska10 (tau>=2)"),
-    "subDLA": ([2.27, 2.73, 3.25, 3.77, 4.20],
-               [0.07, 0.06, 0.08, 0.10, 0.10],
-               [0.01, 0.01, 0.02, 0.02, 0.03],
-               "Zafar+2013 (Table 3)"),
-    "DLA":    ([2.31, 2.57, 2.86, 3.22, 3.70, 4.39],
-               [0.048, 0.055, 0.067, 0.084, 0.075, 0.106],
-               [0.006, 0.005, 0.006, 0.006, 0.009, 0.018],
-               "Prochaska & Wolfe 2009 (Table 1)"),
-}
+# Literature dN/dX (z, value, ±err, source) — the CORRECTED estimands (re-derivation
+# 2026-07-18), single source hcd_analysis/emulator/lit_dndx.lit_points_for_display
+# (old wrong-object arrays tombstoned there).
+from hcd_analysis.emulator.lit_dndx import lit_points_for_display
+LIT = lit_points_for_display()
 
 # Canonical per-survey LOSO mock sets (base names; EC1 = emucoh-ON infl=1 production config when present).
 SURVEY_MOCKS = {
@@ -189,7 +179,7 @@ def main():
     xbar_fn, d, zg_cache, dndx_cache = build_xbar()
     # FORWARD z-slope DEFAULT (truth + fixed-slope chains) = the SIM incidence-WEIGHT slope
     # HCD_INCIDENCE_SLOPE (~2.4, the slope the mock truth's w_c(z) carries → dN/dX(z) RISES with z),
-    # NOT the lit/sim RATIO slope HCD_LIT_OVER_SIM_SLOPE (~0.95, the wrong-object slope that made the
+    # NOT the lit/sim RATIO slope HCD_LIT_OVER_SIM_SLOPE (~0.76, the wrong-object slope that made the
     # bands FALL with z). Marginalized / 2D-tilt chains instead FLOAT s_c and the posterior bands
     # below use the PER-DRAW fitted slope (pool_posterior → p["slope"]); SLOPE is only the truth +
     # fixed-slope-chain default.

@@ -147,6 +147,49 @@ def test_alpha_to_dndx_edge_domain_and_clamp_grads():
     assert jnp.isfinite(g_in) and abs(float(g_in)) > 0.0
 
 
+# --- Corrected-law round-trip (spec sec 7, test-file addition a+b; PI 2026-07-18) ---
+def test_alpha_roundtrip_at_corrected_laws_remeasured_tolerance():
+    """alpha_from_dndx_law -> alpha_to_dndx round-trips the DEPLOYED corrected laws
+    (K1a-constrained LLS + Poisson-GLM subDLA + PW09 DLA) to the RE-MEASURED tolerance:
+    <0.2% at the z=3 pivot, <0.7% over z in [2.4, 4.2] (worst at z=4.2 where the renorm
+    caveat grows; measured 2026-07-18: 0.11% @z3, 0.58% worst). Guards BOTH that the
+    corrected laws are in place (subDLA gamma > 2 — the wrong-object 0.937 fails here)
+    and that the deployed w_c map still inverts them."""
+    from hcd_analysis.emulator.inference import HCD_LIT_DNDX_LAW
+    # the corrected laws are in place (RED on the old wrong-object constants)
+    assert HCD_LIT_DNDX_LAW["subDLA"][1] > 2.0, \
+        "subDLA slope must be the corrected Poisson-GLM law (~2.44), not the DLA-block 0.937"
+    assert HCD_LIT_DNDX_LAW["LLS"][0] < 0.020, \
+        "LLS amplitude must be the kernel-corrected law (<0.0201, the cumulative-bug value)"
+    A = jnp.asarray([HCD_LIT_DNDX_LAW[c][0] for c in ("LLS", "subDLA", "DLA")])
+    g = jnp.asarray([HCD_LIT_DNDX_LAW[c][1] for c in ("LLS", "subDLA", "DLA")])
+    for z, xb, tol in [(2.4, 0.454, 0.007), (3.0, 0.632, 0.002),
+                       (3.6, 0.839, 0.007), (4.2, 1.076, 0.007)]:
+        al = alpha_from_dndx_law(A, g, jnp.asarray(xb), jnp.asarray(z))
+        rt = np.asarray(alpha_to_dndx(al, jnp.asarray(xb), jnp.asarray(z)))
+        law = np.asarray(A) * (1.0 + z) ** np.asarray(g)
+        assert np.all(np.abs(rt / law - 1.0) < tol), (z, rt / law - 1.0)
+
+
+def test_wc_from_mu_inputs_are_disjoint_binned_classes():
+    """DOCSTRING-LEVEL PIN (spec sec 7b): ``w_c_from_mu``'s mu inputs are the DISJOINT
+    binned classes LLS [17.2,19.0), subDLA [19.0,20.3), DLA >=20.3 — NEVER cumulative
+    rates. The telescoping construction double-counts a cumulative input: feeding the
+    cumulative mu (LLS+sub+DLA in the LLS slot) produces a STRICTLY larger total covered
+    fraction than the disjoint input, which is the numerical signature this test pins
+    (the 2026-07-18 corrected-law re-derivation exists because the old deployed 'LLS' law
+    was the cumulative tau>=2 compilation mislabeled as the binned class)."""
+    mu_disjoint = jnp.array([0.12, 0.05, 0.03])          # (LLS, subDLA, DLA), disjoint
+    mu_cumulative_bug = jnp.array([0.12 + 0.05 + 0.03, 0.05, 0.03])   # cumulative in slot 0
+    w_ok = np.asarray(w_c_from_mu(mu_disjoint))
+    w_bug = np.asarray(w_c_from_mu(mu_cumulative_bug))
+    assert w_bug[1] > w_ok[1]                            # LLS share over-counted
+    assert w_bug[0] < w_ok[0]                            # clean fraction under-counted
+    # exact telescoping identity on disjoint classes: 1 - w_clean = P(any absorber)
+    total = 1.0 - np.exp(-(0.12 + 0.05 + 0.03))
+    assert abs((1.0 - w_ok[0]) - total) < 1e-12
+
+
 def test_alpha_from_dndx_law_grad_through_A_gamma():
     # The forward law feeds the likelihood; grad of alpha_c w.r.t. the free (A, gamma)
     # power-law params must be finite (and the end-to-end fwd->inverse chain too).

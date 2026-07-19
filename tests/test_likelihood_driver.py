@@ -170,20 +170,21 @@ def test_cemu_inflate_raises_emulator_variance_in_driver():
 
 def test_hcd_incidence_prior_centers_on_observed_not_sim():
     """The incidence prior centers on the OBSERVED incidence = (lit/sim)·w_c per class, with
-    lit/sim = HCD_LIT_OVER_SIM = (1.06, 1.00, 1.34). subDLA is centered ON the sim (1.00): PRIYA
-    makes subDLAs in-situ (Rahmati+2013), so the sim is the faithful prior and the old Zafar 0.76
-    leaked into n_s (corr≈+0.3; HCD referee 2026-06-11); the broad σ/μ=0.40 marginalizes the
-    residual subDLA-abundance uncertainty instead of imposing an offset center. α_DLA on the 10%
-    unmasked-DLA residual = 0.10·(lit/sim)·w_DLA, σ/μ=0.50 (the DLA finder misses ~10%; α_DLA is
-    MARGINALIZED over it — §0c, PI-confirmed final intent 2026-06-09)."""
+    lit/sim = HCD_LIT_OVER_SIM (corrected laws of record 2026-07-18: (0.995, 1.00, 1.34)).
+    subDLA is centered ON the sim (1.00): PRIYA makes subDLAs in-situ (Rahmati+2013), so the sim
+    is the faithful prior (PI decision 9 kept it under the corrected subDLA law; the old Zafar
+    0.76 center leaked into n_s, corr≈+0.3, HCD referee 2026-06-11); the broad σ/μ=0.40
+    marginalizes the residual subDLA-abundance uncertainty instead of imposing an offset center.
+    α_DLA on the 10% unmasked-DLA residual = 0.10·(lit/sim)·w_DLA, σ/μ=0.50 (the DLA finder
+    misses ~10%; α_DLA is MARGINALIZED over it — §0c, PI-confirmed final intent 2026-06-09)."""
     w = jnp.array([0.06, 0.02, 0.01])      # fiducial (LLS, subDLA, DLA) sim weights
     fr = I.HCD_DLA_RESIDUAL_FRAC           # 0.10 (the DESI unmasked-DLA residual center)
     fl, fs, fd = I.HCD_PRIOR_FRAC_SIGMA    # (0.15, 0.40, 0.50) — LLS/subDLA unchanged, DLA wide
     # with lit==sim the LLS/subDLA centers are the bare sim weight; DLA on the 10% residual.
     mu0, _ = I.hcd_incidence_prior(w, lit_over_sim=(1.0, 1.0, 1.0))
     assert np.allclose(np.asarray(mu0), [0.06, 0.02, fr * 0.01])
-    # the DEFAULT (lit/sim) offset shifts the LLS (×1.06) and DLA (×1.34) centers; subDLA stays
-    # ON the sim (×1.00, PRIYA in-situ faithful).
+    # the DEFAULT (lit/sim) offset shifts the LLS (×0.995, corrected) and DLA (×1.34) centers;
+    # subDLA stays ON the sim (×1.00, PRIYA in-situ faithful).
     r = I.HCD_LIT_OVER_SIM
     mu, sig = I.hcd_incidence_prior(w)   # z = pivot = 3.0 (≤3.5 → no DLA σ inflation)
     assert np.allclose(np.asarray(mu), [r[0] * 0.06, r[1] * 0.02, fr * r[2] * 0.01])

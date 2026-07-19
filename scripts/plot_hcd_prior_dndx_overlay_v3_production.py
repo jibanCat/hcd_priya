@@ -8,10 +8,11 @@ run_stepA now build it after the CENTER-construction fix:
   - the z=3 STRUCTURAL w_c from the cache (closure_legb.hcd_pivot_wc_and_xbar) — NOT the all-z median
     nanmedian(w_c_cache[:,1:]) (= z≈3.6; the dN/dX low-z overshoot bug that put α_LLS 1.45× too high);
   - the REAL-FIT LLS pivot from the lit dN/dX law DIRECTLY (inference.hcd_lls_realfit_alpha_center,
-    alt-(b) ≈0.194×boost, round-trips the lit dN/dX <0.34%);
+    alt-(b) ≈0.172×boost (corrected law of record 2026-07-18), round-trips the lit dN/dX <0.2%);
   - subDLA/DLA pivots from hcd_incidence_prior at the z=3 w_c (lit/sim 1.00/1.34, DLA 10% residual).
 The forward z-evolution + the σ_LLS 1×/2× envelopes are the production knobs (litWLS γ_LLS=2.127 for
-LLS, sim incidence slope for subDLA/DLA; σ_LLS 0.15/0.30 DESI, 0.40 KS). This is the v2 fix promoted
+LLS, sim incidence slope for subDLA/DLA; σ_LLS 0.287/0.574 DESI, 0.40 KS — corrected-law widths
+2026-07-18). This is the v2 fix promoted
 to the actual production functions (a future revert to the all-z median trips the pivot guard).
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
@@ -42,24 +43,17 @@ OUT = OUTDIR / "hcd_prior_dndx_overlay_measurements_v3_production.png"
 CLS = ["LLS", "subDLA", "DLA"]
 ZP = float(HCD_Z_PIVOT)
 
-LIT = {
-    "LLS":    ([2.4, 2.8, 3.35, 3.47, 3.58, 3.74, 3.97, 4.23],
-               [0.29, 0.33, 0.35, 0.57, 0.41, 0.52, 0.72, 0.78],
-               [0.05, 0.08, 0.14, 0.12, 0.07, 0.08, 0.15, 0.19],
-               "O'Meara13 / Fumagalli13 / Prochaska10"),
-    "subDLA": ([2.27, 2.73, 3.25, 3.77, 4.20],
-               [0.07, 0.06, 0.08, 0.10, 0.10],
-               [0.01, 0.01, 0.02, 0.02, 0.03], "Zafar+2013"),
-    "DLA":    ([2.31, 2.57, 2.86, 3.22, 3.70, 4.39],
-               [0.048, 0.055, 0.067, 0.084, 0.075, 0.106],
-               [0.006, 0.005, 0.006, 0.006, 0.009, 0.018], "Prochaska & Wolfe 2009"),
-}
+# Literature dN/dX — the CORRECTED estimands (re-derivation 2026-07-18), single source
+# lit_dndx.lit_points_for_display (old wrong-object arrays tombstoned there).
+from hcd_analysis.emulator.lit_dndx import lit_points_for_display
+LIT = lit_points_for_display()
 SURVEYS = ["DESI", "KS", "DESI+KS", "eBOSS"]
 SURVEY_Z = {"DESI": np.arange(2.2, 4.21, 0.1), "KS": np.arange(2.4, 4.61, 0.1),
             "DESI+KS": np.arange(2.4, 4.61, 0.1), "eBOSS": np.arange(2.2, 4.61, 0.1)}
 LOWZ_CUT = 2.7        # the PI low-z definition (the leak region the prior MUST bracket)
-# 2x cosmic-variance hedge widths (LLS DESI/eBOSS/DESI+KS 0.30, KS 0.40; subDLA/DLA same as 1x).
-SIG2_LLS = {"DESI": 0.30, "eBOSS": 0.30, "DESI+KS": 0.30, "KS": 0.40}
+# 1x/2x width dicts (deployed; LLS DESI-family 0.287/0.574, KS 0.40; subDLA/DLA same as 1x).
+from hcd_analysis.emulator.inference import HCD_LLS_SURVEY_FRAC_SIGMA as SIG1_LLS
+from hcd_analysis.emulator.inference import HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X as SIG2_LLS
 
 
 def production_pivot(survey, Xbar_z3, w_c_z3):
@@ -188,9 +182,10 @@ def main():
     fig.suptitle(
         "v3 PRODUCTION HCD prior dN/dX(z) band (CENTER built by the PRODUCTION path after the pivot fix) "
         "vs literature + sim/truth\n"
-        "LLS center = lit dN/dX law directly (alt-(b), hcd_lls_realfit_alpha_center ≈0.194×boost), z=3 "
+        "LLS center = corrected lit dN/dX law directly (alt-(b), hcd_lls_realfit_alpha_center ≈0.172×boost), z=3 "
         "STRUCTURAL w_c (NOT the all-z median = z≈3.6 bug); subDLA/DLA via hcd_incidence_prior(z=3 w_c).\n"
-        f"σ_LLS 1×=0.15/2×=0.30 (DESI/eBOSS/DK), KS 0.40; subDLA σ/μ={HCD_PRIOR_FRAC_SIGMA[1]}, "
+        f"σ_LLS 1×={SIG1_LLS['DESI']}/2×={SIG2_LLS['DESI']} (DESI/eBOSS/DK), KS {SIG1_LLS['KS']}; "
+        f"subDLA σ/μ={HCD_PRIOR_FRAC_SIGMA[1]}, "
         f"DLA σ/μ={HCD_PRIOR_FRAC_SIGMA[2]}; DLA on the 10% residual axis (lit ×0.10)",
         fontsize=15, y=1.06)
     fig.tight_layout(rect=[0, 0, 1, 0.96])

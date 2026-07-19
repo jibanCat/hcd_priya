@@ -1,0 +1,1076 @@
+{
+ "K3b_diagnostic": {
+  "corrected_points": [
+   0.22113632047147633,
+   0.20058426742380928,
+   0.14005354779688256,
+   0.4352450368573052,
+   0.1840979696494771,
+   0.3123639763980387,
+   0.5581930672336385,
+   0.592705266143535
+  ],
+  "n_nonpositive": 0,
+  "note": "per-point subtraction diagnostic; can go negative; NEVER a deployment candidate",
+  "z_bar": [
+   2.21,
+   2.8,
+   3.35,
+   3.47,
+   3.58,
+   3.74,
+   3.97,
+   4.23
+  ]
+ },
+ "adjudication": {
+  "attribution": {
+   "floor_subbin_treatment": {
+    "delta_r3_naive176_minus_pinned": 0.06881983829750227,
+    "delta_r3_pinned_minus_constf": 0.011266668053488638,
+    "note": "const-f vs power-law sub-bin = the ENTIRE sibling-vs-pinned gap; the 17.6 edge-snap = the A1 ~0.96 artifact"
+   },
+   "fnhi_vs_class_columns": {
+    "delta_r3": 0.0,
+    "note": "class columns are numerically IDENTICAL to the f_nhi bin integrals in this cache (same-file construction); zero contribution"
+   },
+   "mean_vs_median": {
+    "delta_r3": 0.00032538685138217005,
+    "note": "suite mean vs median: negligible"
+   }
+  },
+  "recipes": {
+   "naive_edge_17p4": {
+    "note": "17.5 snapped DOWN to 17.4 edge (under-removal; trap)",
+    "r": [
+     0.7866464445674756,
+     0.8221933335280885,
+     0.8463534794867005,
+     0.8789044488858604
+    ]
+   },
+   "naive_edge_17p6": {
+    "note": "17.5 snapped UP to 17.6 edge (over-removal; reproduces the impact-team A1 ~0.96 family)",
+    "r": [
+     0.9036507011131114,
+     0.957246039142591,
+     0.9907129810252586,
+     1.0391713408197032
+    ]
+   },
+   "no_floor_removal": {
+    "note": "den = l(>=17.2) (floor never removed; span reference only)",
+    "r": [
+     0.6786625510991919,
+     0.7008003348218692,
+     0.7146627829525398,
+     0.7326724265402949
+    ]
+   },
+   "pinned_k1": {
+    "note": "class columns + subbin powerlaw floor + suite median (THE pinned recipe)",
+    "r": [
+     0.8437852286849217,
+     0.8884262008450887,
+     0.9166751872055967,
+     0.9572801853084767
+    ]
+   },
+   "pinned_k1_constf_floor": {
+    "note": "pinned but const-f partial bin (sibling sub-bin treatment)",
+    "r": [
+     0.8343726737532774,
+     0.8771595327916001,
+     0.9044867809209909,
+     0.9432891889208801
+    ]
+   },
+   "pinned_k1_mean": {
+    "note": "pinned but suite MEAN",
+    "r": [
+     0.8453177647257906,
+     0.8887515876964709,
+     0.9178213401721519,
+     0.9616482100278829
+    ]
+   },
+   "sibling_lx_above": {
+    "note": "all-f_nhi integration, const-f partial (their 0.877@z3 family)",
+    "r": [
+     0.8343726737532773,
+     0.8771595327916001,
+     0.9044915290052086,
+     0.9432963460052315
+    ]
+   }
+  },
+  "z_eval": [
+   2.4,
+   3.0,
+   3.6,
+   4.2
+  ]
+ },
+ "adopted_band": {
+  "band": [
+   0.14,
+   0.21
+  ],
+  "contains_center": true,
+  "contains_sim_wc_02004": true,
+  "excludes_allz_02909": true,
+  "rel_margins": [
+   0.83,
+   1.21
+  ]
+ },
+ "adopted_law": {
+  "A": 0.01840091965972645,
+  "A_pivot": 0.3510921592522709,
+  "budget": {
+   "s_r3": 0.22730843192440198,
+   "sigma_eta": 0.492044447325102
+  },
+  "chi2_red": 0.7373372494389477,
+  "corrected_points": {
+   "lx": [
+    0.24013629521187252,
+    0.2881645800869214,
+    0.31588390691525786,
+    0.5176429243412909,
+    0.375305281667464,
+    0.4802166681710148,
+    0.6775577992885101,
+    0.749230754799633
+   ],
+   "r": [
+    0.8280561903857674,
+    0.8732260002633982,
+    0.9025254483293083,
+    0.9081454813005103,
+    0.9153787357743025,
+    0.9234935926365669,
+    0.9410524990118196,
+    0.9605522497431191
+   ],
+   "sig_log": [
+    0.17415334713410796,
+    0.24734812091805353,
+    0.3768859011881901,
+    0.20992692278013203,
+    0.1579264747092386,
+    0.1438410362258904,
+    0.20190449883438852,
+    0.22891654681274015
+   ],
+   "z_bar": [
+    2.21,
+    2.8,
+    3.35,
+    3.47,
+    3.58,
+    3.74,
+    3.97,
+    4.23
+   ]
+  },
+  "estimator": "gls_log_gamma_fixed",
+  "free_fit_evidence": {
+   "A": 0.01814097762603578,
+   "A_pivot": 0.3509473926987623,
+   "chi2_red": 0.8601897048321908,
+   "gamma": 2.1369653374822644,
+   "sigma_gamma": 0.6680521027531903
+  },
+  "gamma": 2.127,
+  "kernel": "K1a",
+  "laws_deployed": {
+   "DLA": [
+    0.0076,
+    1.592
+   ],
+   "LLS": [
+    0.01840091965972645,
+    2.127
+   ],
+   "subDLA": [
+    0.004832763139114936,
+    2.438007767664778
+   ]
+  },
+  "sigma_lnAp": 0.23940095875990422,
+  "stats": {
+   "chi2": 5.495086722167509,
+   "n": 8,
+   "wmean_frac_resid": 0.011939451420582966,
+   "wrms_frac_resid": 0.1613448498613369
+  },
+  "telescoping": {
+   "pull": [
+    0.8715039985101145,
+    1.7040028950536528,
+    2.3904044768194717,
+    2.104643308842051
+   ],
+   "ratio": [
+    1.1125682307477724,
+    1.1461473920236516,
+    1.1819368735768423,
+    1.211808582652664
+   ],
+   "z": [
+    2.5,
+    3.0,
+    3.5,
+    4.0
+   ]
+  }
+ },
+ "adopted_lit_over_sim": {
+  "DLA": {
+   "deploy_ratio_slope": 0.4,
+   "deploy_ratio_zp": 1.34,
+   "evidence_ratio_slope": 1.147499790187482,
+   "evidence_ratio_zp": 1.3779838433280631,
+   "note": "unchanged (re-verified; deliberately weak z-slope kept)"
+  },
+  "LLS": {
+   "deploy_ratio_slope": 0.764,
+   "deploy_ratio_zp": 0.995,
+   "ratio_slope": 0.7640186842007826,
+   "ratio_zp": 0.9945007563145737
+  },
+  "subDLA": {
+   "deploy_ratio_slope": 0.15,
+   "deploy_ratio_zp": 1.0,
+   "evidence_ratio_slope": 1.5515247996648125,
+   "evidence_ratio_zp": 1.4033166089109894,
+   "note": "STAYS sim-anchored (PI decision 9); corrected lit/sim recorded as evidence, inside the 0.40 width"
+  }
+ },
+ "adopted_width": {
+  "deployed_knob": 0.287,
+  "meas_only": 0.17446426222099545,
+  "rule": "PI decision 4 (2026-07-18): sigma_LLS adopts the measurement+kernel-common-mode K1a value, rounded to 3 decimals; 2x hedge = 2*knob; KS stays 0.40 broad",
+  "with_kernel": 0.2865430194861615
+ },
+ "alpha_lls_z3": {
+  "adopted": 0.17219479535427426,
+  "deployed": 0.19393,
+  "deployed_law_validation": 0.19392667095911492,
+  "path": "tier-b (deployed inference.hcd_lls_realfit_alpha_center with the PINNED Xbar(z=3)=0.632 \u2014 the test-pinned cache value; load_cache skipped on the login node; set DERIVE_ALPHA_FULL=1 for tier-a)",
+  "per_kernel": {
+   "K1a": 0.1721593679289494,
+   "K1b": 0.17304924373644898,
+   "K2": 0.0953902830189703,
+   "K3": 0.1335730267297567
+  },
+  "xbar_z3": 0.632
+ },
+ "band_proposals": {
+  "K1a": [
+   0.14,
+   0.21
+  ],
+  "K1b": [
+   0.14,
+   0.21
+  ],
+  "K2": [
+   0.08,
+   0.12
+  ],
+  "K3": [
+   0.11,
+   0.16
+  ]
+ },
+ "bracket": {
+  "alpha": {
+   "K1a": 0.1721593679289494,
+   "K1b": 0.17304924373644898,
+   "K2": 0.0953902830189703,
+   "K3": 0.1335730267297567
+  },
+  "center_kernel": "K1a (PI ADOPTED 2026-07-18; K3/K2 = the one-sided minus arms of the honest bracket)",
+  "mid_arm": "K3",
+  "minus_arm": "K2",
+  "plus_arm": "K1a"
+ },
+ "cache_provenance": {
+  "path": "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5",
+  "same_file_consistency": {
+   "flag": "same-file check only (hcd_summary_lf.h5 absent)",
+   "median_ratio": 1.0000011046883364,
+   "p16": 0.9999999999999999,
+   "p84": 1.0000066932322915
+  },
+  "sha256_f_nhi": "ca5eeda8eaad4ca5d75776b7675489a96faf4424c9ecfb2e2cd33ccd87332565",
+  "shapes": {
+   "log_nhi_edges": [
+    31
+   ],
+   "snap_dNdX_LLS": [
+    1072
+   ],
+   "snap_f_nhi": [
+    1072,
+    30
+   ]
+  }
+ },
+ "created": "2026-07-18T19:47:00",
+ "estimator_per_class": {
+  "DLA": "poisson_glm (WLS anchor printed)",
+  "LLS": "gls_log(corrected points, common-mode kernel cov)",
+  "subDLA": "poisson_glm"
+ },
+ "git_commit": "81f3aa3668bc69cb38dadc5d967c4d33ddea4108",
+ "hcd_lit_dndx_estimand": {
+  "DLA": "binned_ge20.3",
+  "LLS": "binned_17.2_19.0",
+  "subDLA": "binned_19.0_20.3"
+ },
+ "input_arrays": {
+  "ELL_X_CUMULATIVE_GE17P5_TAU2": {
+   "cite": "arXiv:1204.3093 / arXiv:1308.1101 / arXiv:0912.0292",
+   "err_hi": [
+    0.05,
+    0.08,
+    0.16,
+    0.13,
+    0.07,
+    0.08,
+    0.161245154965971,
+    0.2
+   ],
+   "err_lo": [
+    0.05,
+    0.08,
+    0.11,
+    0.11,
+    0.06,
+    0.07,
+    0.13152946437965907,
+    0.16
+   ],
+   "estimand": "cumulative l(X), tau912>=2 == N_HI>=10^17.5, includes subDLA+DLA (NOT the binned [17.2,19.0) LLS class rate \u2014 needs the kernel)",
+   "journal_fix": false,
+   "lx": [
+    0.29,
+    0.33,
+    0.35,
+    0.57,
+    0.41,
+    0.52,
+    0.72,
+    0.78
+   ],
+   "omeara_variant": "wmean",
+   "source": [
+    "OMeara13:wmean",
+    "Fumagalli13",
+    "POW10:z3.35",
+    "POW10:z3.47",
+    "POW10:z3.58",
+    "POW10:z3.74",
+    "POW10:z3.97",
+    "POW10:z4.23"
+   ],
+   "z_bar": [
+    2.21,
+    2.8,
+    3.35,
+    3.47,
+    3.58,
+    3.74,
+    3.97,
+    4.23
+   ]
+  },
+  "ELL_X_DLA_GE20P3_PW09_T1": {
+   "cite": "arXiv:0811.2003 (Prochaska & Wolfe 2009) Table 1",
+   "dX": [
+    1652.7,
+    2405.8,
+    2539.7,
+    2702.5,
+    1139.2,
+    432.8
+   ],
+   "dz": [
+    514.4,
+    717.5,
+    723.7,
+    732.2,
+    291.3,
+    103.6
+   ],
+   "err_hi": [
+    0.006,
+    0.005,
+    0.006,
+    0.006,
+    0.009,
+    0.018
+   ],
+   "err_lo": [
+    0.005,
+    0.005,
+    0.005,
+    0.006,
+    0.008,
+    0.016
+   ],
+   "estimand": "binned l(X), logN>=20.3 (DLA; the top disjoint class \u2014 cumulative == binned by construction)",
+   "lx": [
+    0.048,
+    0.055,
+    0.067,
+    0.084,
+    0.075,
+    0.106
+   ],
+   "m": [
+    79,
+    132,
+    169,
+    227,
+    86,
+    46
+   ],
+   "verified": "implementer ar5iv fetch 2026-07-18 (m, dX, lx) + Bayesian designer (errors)",
+   "z_bar": [
+    2.31,
+    2.57,
+    2.86,
+    3.22,
+    3.7,
+    4.39
+   ],
+   "z_hi": [
+    2.4,
+    2.7,
+    3.0,
+    3.5,
+    4.0,
+    5.5
+   ],
+   "z_lo": [
+    2.2,
+    2.4,
+    2.7,
+    3.0,
+    3.5,
+    4.0
+   ]
+  },
+  "ELL_X_SUBDLA_BINNED_19P0_20P3_ZAFAR13_T3": {
+   "cite": "arXiv:1307.0602 (Zafar+2013) Table 3",
+   "dX": [
+    87.3,
+    156.8,
+    162.8,
+    124.5,
+    91.7,
+    41.0
+   ],
+   "dla_block_n": [
+    19,
+    26,
+    18,
+    18,
+    19,
+    10
+   ],
+   "dla_block_z_bar": [
+    1.84,
+    2.27,
+    2.73,
+    3.25,
+    3.77,
+    4.2
+   ],
+   "dz": [
+    29.9,
+    49.2,
+    47.1,
+    33.7,
+    23.3,
+    9.9
+   ],
+   "estimand": "binned [19.0, 20.3) sub-DLA counts; the pure rate is n/dX with exact Poisson counts (the printed >=19.0 column is CUMULATIVE, never fit directly)",
+   "lx_gt19": [
+    0.12,
+    0.14,
+    0.21,
+    0.26,
+    0.3,
+    0.3
+   ],
+   "lx_gt19_err": [
+    0.04,
+    0.03,
+    0.04,
+    0.05,
+    0.06,
+    0.09
+   ],
+   "lx_gt203": [
+    0.08,
+    0.07,
+    0.06,
+    0.08,
+    0.1,
+    0.1
+   ],
+   "lx_gt203_err": [
+    0.02,
+    0.01,
+    0.01,
+    0.02,
+    0.02,
+    0.03
+   ],
+   "n": [
+    4,
+    11,
+    24,
+    23,
+    19,
+    8
+   ],
+   "verified": "implementer ar5iv fetch 2026-07-18 + both designers (verbatim, both blocks)",
+   "z_bar": [
+    1.8,
+    2.26,
+    2.76,
+    3.21,
+    3.72,
+    4.18
+   ],
+   "z_hi": [
+    2.0,
+    2.5,
+    3.0,
+    3.5,
+    4.0,
+    5.0
+   ],
+   "z_lo": [
+    1.51,
+    2.0,
+    2.5,
+    3.0,
+    3.5,
+    4.0
+   ]
+  }
+ },
+ "kernel_chosen": "K1a",
+ "kernel_table": {
+  "K1_r": [
+   0.827637658333048,
+   0.8272027509665769,
+   0.8437852286849217,
+   0.8572145174337742,
+   0.8732260002633982,
+   0.8884262008450887,
+   0.8996890282595982,
+   0.9034492261290342,
+   0.9166751872055967,
+   0.926354328332893,
+   0.9435940129740804,
+   0.9572801853084767,
+   0.9787465932256745,
+   0.9977903940451495,
+   1.0203740329454996,
+   1.042115343949379,
+   1.0575778437533798,
+   1.0732719587500923
+  ],
+  "K1_r16": [
+   0.8230479218781207,
+   0.8225315445016219,
+   0.8383014815405371,
+   0.8499369263762696,
+   0.8633944521289768,
+   0.8775525171586983,
+   0.8868512701524528,
+   0.8908536172503466,
+   0.9019763795597842,
+   0.9106018057711596,
+   0.9204002105725412,
+   0.9333013065456052,
+   0.9489231988773406,
+   0.9674260284743736,
+   0.9879142488485552,
+   1.008802583139898,
+   1.009406964792202,
+   0.9635947642689732
+  ],
+  "K1_r84": [
+   0.8322974829918709,
+   0.8380502708875825,
+   0.8517338999263249,
+   0.8679551593908444,
+   0.8880076924635846,
+   0.8968316581132956,
+   0.9107858678661162,
+   0.922122760043216,
+   0.9347531022593495,
+   0.9532040529751356,
+   0.971307761977535,
+   0.9941924632335091,
+   1.0189119355068756,
+   1.0442372076695319,
+   1.071918082860047,
+   1.0974000717077277,
+   1.120009936943215,
+   1.141155346139999
+  ],
+  "K1b_smooth": {
+   "eta": 0.2968321089038663,
+   "r_pivot": 0.8870529678959708
+  },
+  "budget": {
+   "eta_k1": 0.2968321089038663,
+   "eta_k2": 1.2809210035540703,
+   "model_half": 0.22704932757659252,
+   "r3_k1": 0.8884262008450887,
+   "r3_k2": 0.48499305783848046,
+   "s_r3": 0.22730843192440198,
+   "sigma_eta": 0.492044447325102,
+   "suite_half": 0.01085016455855228
+  },
+  "floor_factor": {
+   "F": [
+    1.394335161580287,
+    1.395909341166357,
+    1.4048765767831985,
+    1.4113823013979432,
+    1.4194916179430275,
+    1.4309754921297368,
+    1.4376594510209073,
+    1.4390059369872068,
+    1.445709170030908,
+    1.4518195066181123,
+    1.4621469849876823,
+    1.4717360624823428,
+    1.485448361096525,
+    1.497462962196575,
+    1.5095771819630766,
+    1.5233680334933806,
+    1.536010269582742,
+    1.5479357010535175
+   ],
+   "z_vals": [
+    2.0,
+    2.2,
+    2.4,
+    2.6,
+    2.8,
+    3.0,
+    3.2,
+    3.4,
+    3.6,
+    3.8,
+    4.0,
+    4.2,
+    4.4,
+    4.6,
+    4.8,
+    5.0,
+    5.2,
+    5.4
+   ]
+  },
+  "per_kernel_r_z_eval": {
+   "K1a": {
+    "2.4": 0.8437852286849217,
+    "3.0": 0.8884262008450887,
+    "3.6": 0.9166751872055967,
+    "4.2": 0.9572801853084767
+   },
+   "K1b": {
+    "2.4": 0.8452765565983574,
+    "3.0": 0.8870529678959708,
+    "3.6": 0.9246271067580106,
+    "4.2": 0.958896202829608
+   },
+   "K2": {
+    "2.4": 0.38066677696126366,
+    "3.0": 0.48499305783848046,
+    "3.6": 0.5642838847873154,
+    "4.2": 0.6344438831154661
+   },
+   "K3": {
+    "2.4": 0.6957782053138678,
+    "3.0": 0.6731914524488604,
+    "3.6": 0.6451010330367554,
+    "4.2": 0.6219661977433456
+   }
+  },
+  "z_vals": [
+   2.0,
+   2.2,
+   2.4,
+   2.6,
+   2.8,
+   3.0,
+   3.2,
+   3.4,
+   3.6,
+   3.8,
+   4.0,
+   4.2,
+   4.4,
+   4.6,
+   4.8,
+   5.0,
+   5.2,
+   5.4
+  ]
+ },
+ "laws": {
+  "DLA": {
+   "A": 0.007734487512019572,
+   "A_pivot": 0.06880698653680437,
+   "cov": [
+    [
+     0.0013552486154566658,
+     -0.00040757089984476527
+    ],
+    [
+     -0.00040757089984476506,
+     0.08030098809870799
+    ]
+   ],
+   "deviance_dof": 1.5135582934066498,
+   "gamma": 1.5765887270913024,
+   "glm_vs_wls": {
+    "delta_A_frac": 0.004013107575058461,
+    "delta_gamma": 0.017960059024210606
+   },
+   "wls_anchor": {
+    "A": 0.00761431170995,
+    "chi2_red": 1.2935547025114942,
+    "gamma": 1.592473555557462
+   }
+  },
+  "LLS_per_kernel": {
+   "K1a": {
+    "A": 0.01814097762603578,
+    "A_pivot": 0.3509473926987623,
+    "chi2_red": 0.8601897048321908,
+    "cov": [
+     [
+      0.05807720019350866,
+      -0.018469932841575186
+     ],
+     [
+      -0.018469932841575203,
+      0.44629361199295914
+     ]
+    ],
+    "gamma": 2.1369653374822644,
+    "sigma_gamma": 0.6680521027531903,
+    "sigma_lnAp": 0.24099211645510038
+   },
+   "K1b": {
+    "A": 0.01804967755623782,
+    "A_pivot": 0.35297358282089375,
+    "chi2_red": 0.8440737687066019,
+    "cov": [
+     [
+      0.05807720019350866,
+      -0.018469932841575186
+     ],
+     [
+      -0.018469932841575203,
+      0.44629361199295914
+     ]
+    ],
+    "gamma": 2.144757621917047,
+    "sigma_gamma": 0.6680521027531903,
+    "sigma_lnAp": 0.24099211645510038
+   },
+   "K2": {
+    "A": 0.002328293751028451,
+    "A_pivot": 0.18503822686312688,
+    "chi2_red": 0.7230030307760805,
+    "cov": [
+     [
+      0.05807720019350866,
+      -0.018469932841575186
+     ],
+     [
+      -0.018469932841575203,
+      0.44629361199295914
+     ]
+    ],
+    "gamma": 3.1562032238728226,
+    "sigma_gamma": 0.6680521027531903,
+    "sigma_lnAp": 0.24099211645510038
+   },
+   "K3": {
+    "A": 0.02898691694937832,
+    "A_pivot": 0.26543821188738154,
+    "chi2_red": 0.8257790608648469,
+    "cov": [
+     [
+      0.05807720019350866,
+      -0.018469932841575186
+     ],
+     [
+      -0.018469932841575203,
+      0.44629361199295914
+     ]
+    ],
+    "gamma": 1.59745113563394,
+    "sigma_gamma": 0.6680521027531903,
+    "sigma_lnAp": 0.24099211645510038
+   }
+  },
+  "cum_uncorrected": {
+   "A": 0.030706522218665492,
+   "A_pivot": 0.3979171431646556,
+   "chi2_red": 0.8440737687066012,
+   "cov": [
+    [
+     0.0064080769695781855,
+     -0.01846993284157522
+    ],
+    [
+     -0.018469932841575217,
+     0.20418587384949416
+    ]
+   ],
+   "gamma": 1.84792551301318
+  },
+  "subDLA": {
+   "A": 0.004832763139114936,
+   "A_pivot": 0.1419130864931034,
+   "cov": [
+    [
+     0.011309106014952223,
+     -0.005302597932584325
+    ],
+    [
+     -0.005302597932584325,
+     0.38437698297450745
+    ]
+   ],
+   "deviance_dof": 0.726080478941153,
+   "gamma": 2.438007767664778,
+   "glm_vs_wls": {
+    "delta_A_frac": 0.01661516994796486,
+    "delta_gamma": -0.011760007797747107
+   }
+  }
+ },
+ "lit_over_sim": {
+  "DLA": {
+   "deployed": {
+    "ratio_slope": 0.4,
+    "ratio_zp": 1.34
+   },
+   "gamma_sim": 0.42908893690382044,
+   "ratio_slope": 1.147499790187482,
+   "ratio_zp": 1.3779838433280631,
+   "sim_zp": 0.049933086566983184
+  },
+  "LLS": {
+   "deployed": {
+    "ratio_slope": 0.95,
+    "ratio_zp": 1.06
+   },
+   "gamma_sim": 1.3629813157992172,
+   "per_kernel": {
+    "K1a": {
+     "ratio_slope": 0.7739840216830471,
+     "ratio_zp": 0.9940906917683874
+    },
+    "K1b": {
+     "ratio_slope": 0.7817763061178298,
+     "ratio_zp": 0.9998300612068515
+    },
+    "K2": {
+     "ratio_slope": 1.7932219080736054,
+     "ratio_zp": 0.5241377561788916
+    },
+    "K3": {
+     "ratio_slope": 0.23446981983472281,
+     "ratio_zp": 0.7518780910373793
+    }
+   },
+   "sim_zp": 0.3530335769208966
+  },
+  "note": "subDLA prior slot STAYS sim-anchored 1.00 (PI decision 9; the corrected lit/sim ratio above is recorded as EVIDENCE, inside the 0.40 width). LLS ratio_slope must stay < 1.5 (the forward-zslope guard floor) or the guard goes to the PI.",
+  "subDLA": {
+   "deployed": {
+    "ratio_slope": 0.15,
+    "ratio_zp": 1.0
+   },
+   "gamma_sim": 0.8864829679999653,
+   "ratio_slope": 1.5515247996648125,
+   "ratio_zp": 1.4033166089109894,
+   "sim_zp": 0.10112692003498178
+  }
+ },
+ "pi_adoption": {
+  "date": "2026-07-18",
+  "kernel": "K1a",
+  "reasoning": "the simulations evolve the Lya forest, LLSs, subDLAs, and DLAs jointly under the same structure formation, so the relative decomposition across absorber classes is physically self-consistent; the observational decomposition may still contain unresolved Eddington-bias and classification issues and is not trusted at the 30-50% level over a physically consistent simulation; the absolute incidence stays anchored to observations. (PI, 2026-07-18)",
+  "telescoping_note": "K1 telescoping pulls +1.7..+2.4 sigma at z>=3 are EXPECTED by design (PRIYA-CDDF class shares vs the literature class decomposition tension); K3 closes by construction; PI-accepted.",
+  "zslope": "KEEP the deployed 2.127: the deployed LLS law is the K1a-corrected points refit with gamma CONSTRAINED to 2.127 (amplitude-only GLS, same covariance); the free-gamma fit is the recorded consistency evidence (PI decision 1c)."
+ },
+ "schema_version": "1.1",
+ "sensitivity": {
+  "drop_z180_subDLA": {
+   "A": 0.006991103805070455,
+   "deviance_dof": 0.8241120660979515,
+   "gamma": 2.1879946517490145
+  },
+  "journal_fix_K3": {
+   "A": 0.03146247562428046,
+   "gamma": 1.5343182288241235
+  },
+  "journal_fix_cum": {
+   "A": 0.03186864093839562,
+   "gamma": 1.819478581978059
+  },
+  "larger_side_cum": {
+   "A": 0.029674718207814876,
+   "gamma": 1.8700610145517196
+  }
+ },
+ "sources": {
+  "arxiv": {
+   "FUMAGALLI13": "1308.1101",
+   "OMEARA13": "1204.3093",
+   "POW10": "0912.0292",
+   "PW09": "0811.2003",
+   "ZAFAR13": "1307.0602"
+  },
+  "verified": {
+   "FUMAGALLI13": "implementer + both designers (verbatim)",
+   "OMEARA13_T5_row": "Bayesian designer ONLY (ar5iv truncates in-house)",
+   "OMEARA13_T9": "UNVERIFIED \u2014 EXCLUDED",
+   "OMEARA13_wmean": "implementer + both designers (verbatim)",
+   "POW10_T4": "implementer ar5iv 2026-07-18 + both designers (v1 only)",
+   "POW10_journal_fixes": "UNVERIFIED (IOP paywall) \u2014 delta-widened default arm",
+   "PW09_T1": "implementer ar5iv 2026-07-18 + Bayesian designer",
+   "ZAFAR13_T3": "implementer ar5iv 2026-07-18 + both designers (verbatim)"
+  }
+ },
+ "telescoping": {
+  "K1a": {
+   "pull": [
+    0.8637801572930922,
+    1.701231571509264,
+    2.3962285777091314,
+    2.1151638835461952
+   ],
+   "ratio": [
+    1.1115169179212554,
+    1.1458931523107476,
+    1.1824183314784953,
+    1.2129728759949758
+   ],
+   "z": [
+    2.5,
+    3.0,
+    3.5,
+    4.0
+   ]
+  },
+  "K1b": {
+   "pull": [
+    0.8846930240255351,
+    1.7399639275864696,
+    2.44737749103894,
+    2.1587966165268258
+   ],
+   "ratio": [
+    1.114365723712735,
+    1.1494515570834958,
+    1.186655065272356,
+    1.2178135856163985
+   ],
+   "z": [
+    2.5,
+    3.0,
+    3.5,
+    4.0
+   ]
+  },
+  "K2": {
+   "pull": [
+    -1.965141889901065,
+    -1.9639140332994809,
+    -1.1011392149498396,
+    -0.049996520955748705
+   ],
+   "ratio": [
+    0.7862102288813685,
+    0.8545226826279116,
+    0.9258901470437877,
+    0.9954466657108484
+   ],
+   "z": [
+    2.5,
+    3.0,
+    3.5,
+    4.0
+   ]
+  },
+  "K3": {
+   "pull": [
+    -0.01031480561376368,
+    -0.05356194286424114,
+    -0.0169365275544117,
+    0.011129476970404319
+   ],
+   "ratio": [
+    0.9987382765703084,
+    0.9957215204438896,
+    0.9988163755341506,
+    1.001016425967746
+   ],
+   "z": [
+    2.5,
+    3.0,
+    3.5,
+    4.0
+   ]
+  }
+ },
+ "widths": {
+  "K1a": {
+   "meas_only": 0.17446426222099545,
+   "norm_infl": 0.08005046514279718,
+   "scatter": 0.17446426222099545,
+   "with_kernel": 0.2865430194861615
+  },
+  "K1b": {
+   "meas_only": 0.173082730702949,
+   "norm_infl": 0.08005046514279718,
+   "scatter": 0.173082730702949,
+   "with_kernel": 0.2857039637308521
+  },
+  "K2": {
+   "meas_only": 0.1582733286690053,
+   "norm_infl": 0.08005046514279718,
+   "scatter": 0.1582733286690053,
+   "with_kernel": 0.27698297744066774
+  },
+  "K3": {
+   "meas_only": 0.17076414203669024,
+   "norm_infl": 0.08005046514279718,
+   "scatter": 0.17076414203669024,
+   "with_kernel": 0.28430532078991666
+  }
+ },
+ "xbar_z3": 0.632
+}

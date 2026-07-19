@@ -8,7 +8,9 @@ THE PRIOR BAND construction (matches the production forward exactly):
   center α_c(z) = α_pivot_c · ((1+z)/(1+z_p))^s_c,  α_pivot_c = the per-survey hcd_incidence_prior μ,
   s_c = the REAL-FIT forward z-slope (litWLS γ_LLS=2.127 for LLS; sim incidence slope for subDLA/DLA),
   → dN/dX_c(z) = alpha_to_dndx(α_c(z), Xbar(z), z)  (the dndx_wc telescoping inverse the forward uses).
-  The 1×/2× σ_LLS envelopes scale α_pivot_LLS by (1 ± σ/μ) at σ/μ ∈ {0.15, 0.30} (the PI WIDTH RULE
+  The 1×/2× σ_LLS envelopes scale α_pivot_LLS by (1 ± σ/μ) at the deployed per-survey widths
+(HCD_LLS_SURVEY_FRAC_SIGMA / _HEDGE2X; 0.287/0.574 DESI-family, 0.40 KS — corrected-law widths
+2026-07-18) (the PI WIDTH RULE
   1× lit measurement error, 2× cosmic-variance hedge). subDLA/DLA use their fixed σ/μ (0.40, 0.50).
   DLA is the 10%-residual center (HCD_DLA_RESIDUAL_FRAC), so the DLA literature points are SCALED by
   0.10 to overlay on the same residual axis.
@@ -39,21 +41,11 @@ OUT = OUTDIR / "hcd_prior_dndx_overlay_measurements.png"
 CLS = ["LLS", "subDLA", "DLA"]
 ZP = float(HCD_Z_PIVOT)
 
-# Literature dN/dX (z, value, ±err, source) — verbatim from scripts/plot_dndx_vs_literature.py.
-LIT = {
-    "LLS":    ([2.4, 2.8, 3.35, 3.47, 3.58, 3.74, 3.97, 4.23],
-               [0.29, 0.33, 0.35, 0.57, 0.41, 0.52, 0.72, 0.78],
-               [0.05, 0.08, 0.14, 0.12, 0.07, 0.08, 0.15, 0.19],
-               "O'Meara13 / Fumagalli13 / Prochaska10"),
-    "subDLA": ([2.27, 2.73, 3.25, 3.77, 4.20],
-               [0.07, 0.06, 0.08, 0.10, 0.10],
-               [0.01, 0.01, 0.02, 0.02, 0.03],
-               "Zafar+2013"),
-    "DLA":    ([2.31, 2.57, 2.86, 3.22, 3.70, 4.39],
-               [0.048, 0.055, 0.067, 0.084, 0.075, 0.106],
-               [0.006, 0.005, 0.006, 0.006, 0.009, 0.018],
-               "Prochaska & Wolfe 2009"),
-}
+# Literature dN/dX (z, value, ±err, source) — the CORRECTED estimands (re-derivation
+# 2026-07-18), single source hcd_analysis/emulator/lit_dndx.lit_points_for_display
+# (old wrong-object arrays tombstoned there).
+from hcd_analysis.emulator.lit_dndx import lit_points_for_display
+LIT = lit_points_for_display()
 
 # Per-survey z grids (match scratch_hcd_dndx_loso_vs_lit). Boost applied per survey (KS×2.5).
 SURVEYS = ["DESI", "KS", "DESI+KS", "eBOSS"]
@@ -155,9 +147,13 @@ def main():
             lo2 = band["lo2"][:, jc]; hi2 = band["hi2"][:, jc]
             # 2× envelope (wider, lighter) UNDER the 1× envelope (tighter, darker)
             ax.fill_between(zgrid, lo2, hi2, color="tab:orange", alpha=0.18,
-                            label=r"prior $2\times\sigma_{LLS}$ (0.30, hedge)" if (jc == 0 and js == 0) else None)
+                            label=(r"prior $2\times\sigma_{LLS}$ "
+                                   f"({HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X['DESI']}, hedge)")
+                            if (jc == 0 and js == 0) else None)
             ax.fill_between(zgrid, lo1, hi1, color="tab:blue", alpha=0.30,
-                            label=r"prior $1\times\sigma_{LLS}$ (0.15, primary)" if (jc == 0 and js == 0) else None)
+                            label=(r"prior $1\times\sigma_{LLS}$ "
+                                   f"({HCD_LLS_SURVEY_FRAC_SIGMA['DESI']}, primary)")
+                            if (jc == 0 and js == 0) else None)
             ax.plot(zgrid, c, "-", color="navy", lw=2.4,
                     label="prior center (litWLS)" if (jc == 0 and js == 0) else None)
             # sim/truth dN/dX(z)
@@ -205,8 +201,9 @@ def main():
                bbox_to_anchor=(0.5, 0.995))
     fig.suptitle(
         "HCD prior dN/dX(z) band under the NEW litWLS center vs literature measurements + sim/truth\n"
-        f"LLS forward z-slope γ_LLS={HCD_LLS_REALFIT_ZSLOPE} (litWLS); σ_LLS 1×=0.15 (primary, lit "
-        f"measurement error) / 2×=0.30 (cosmic-variance hedge); subDLA σ/μ={HCD_PRIOR_FRAC_SIGMA[1]}, "
+        f"LLS forward z-slope γ_LLS={HCD_LLS_REALFIT_ZSLOPE} (corrected lit law, constrained); σ_LLS "
+        f"1×={HCD_LLS_SURVEY_FRAC_SIGMA['DESI']} (meas+kernel common-mode) / "
+        f"2×={HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X['DESI']} (hedge); subDLA σ/μ={HCD_PRIOR_FRAC_SIGMA[1]}, "
         f"DLA σ/μ={HCD_PRIOR_FRAC_SIGMA[2]}; DLA on the 10%-unmasked residual axis (lit ×0.10)",
         fontsize=16, y=1.055)
     fig.tight_layout(rect=[0, 0, 1, 0.965])

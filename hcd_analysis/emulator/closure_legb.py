@@ -694,18 +694,21 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     # CENTER-CONSTRUCTION FIX (PI 2026-06-17): build the pivot from the z=3 STRUCTURAL w_c, NOT the
     # all-z median nanmedian(w_c_cache[:,1:]). Because w_c rises monotonically with z, the all-z median
     # (LLS 0.274) equals the z≈3.6 value → consumed as the z=3 pivot it over-stated the LLS center ~1.45×
-    # (α_pivot 0.291 vs the z=3-consistent ~0.194–0.200), overshooting the lit dN/dX 2.05× @z2.4 = the
-    # LLS→n_s leak. hcd_pivot_wc_and_xbar restricts the SAME cache to the z=3 pivot rows. See the dN/dX
-    # low-z overshoot bug. γ_LLS (forward z-slope) and σ_LLS (width) are UNCHANGED.
+    # (α_pivot 0.291 vs the z=3-consistent 0.17–0.20 class), overshooting the lit dN/dX worst at low z =
+    # the LLS→n_s leak. hcd_pivot_wc_and_xbar restricts the SAME cache to the z=3 pivot rows. See the
+    # dN/dX low-z overshoot bug. (2026-07-18: the lit-law numbers below are the CORRECTED laws of
+    # record — see the HCD_LIT_DNDX_LAW provenance block in inference.py.)
     w_c_med, Xbar_z3 = hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT)   # (3,) z=3 structural w_c, Xbar(z=3)
-    # survey=None (closure/SBC) → cosmic-average LLS pin (unchanged); survey="DESI"/"KS"/… (real fit)
-    # → the per-survey LLS center+width pin (DESI 1.0×/σ0.15, KS 2.5×/σ0.40; PI re-determination
-    # 2026-06-17). The PI WIDTH RULE 1× value is the lit measurement error (σ_LLS=0.15); the 2×
-    # cosmic-variance hedge is HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X (toggle here if a hedge ctx is needed).
+    # survey=None (closure/SBC) → cosmic-average LLS pin; survey="DESI"/"KS"/… (real fit)
+    # → the per-survey LLS center+width pin (DESI 1.0×/σ0.287, KS 2.5×/σ0.40; PI re-determination
+    # 2026-06-17, width re-derived 2026-07-18). The PI WIDTH RULE 1× value is the corrected lit
+    # measurement + kernel-common-mode error (σ_LLS=0.287); the 2× cosmic-variance hedge is
+    # HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X (toggle here if a hedge ctx is needed).
     alpha_mu, alpha_sd = hcd_incidence_prior(jnp.asarray(w_c_med), z=HCD_Z_PIVOT, survey=survey)
-    # REAL-FIT LLS center: prefer the lit dN/dX law DIRECTLY (alt-(b)) — α_LLS(z=3) from
-    # A=0.0201·(1+z)^2.127 through the EXACT w_c map (hcd_lls_realfit_alpha_center), round-tripping the
-    # lit dN/dX to <0.34% (≈0.194×boost). On the REAL FIT PRIYA≠data, so the LLS center must track the
+    # REAL-FIT LLS center: prefer the lit dN/dX law DIRECTLY (alt-(b)) — α_LLS(z=3) from the
+    # CORRECTED binned-LLS law A=0.0184·(1+z)^2.127 (K1a kernel, constrained slope; PI 2026-07-18)
+    # through the EXACT w_c map (hcd_lls_realfit_alpha_center), round-tripping the lit dN/dX to <0.2%
+    # at the pivot (≈0.172×boost). On the REAL FIT PRIYA≠data, so the LLS center must track the
     # literature dN/dX, not the sim's z=3 w_c·(lit/sim). The CLOSURE/SBC (survey=None) keeps the sim z=3
     # w_c center (its held-out-sim mocks carry the sim incidence). subDLA/DLA centers are unchanged.
     if survey is not None:
@@ -720,12 +723,14 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     assert_hcd_pivot_z3(float(np.asarray(alpha_mu)[0]), z=HCD_Z_PIVOT,
                         where=f"build_legb_ctx survey={survey}", boost=_guard_boost)
 
-    # REAL-FIT LLS forward z-slope (litWLS, PI re-determination 2026-06-17): when ``survey`` is given
-    # (a real-data fit), the LLS forward z-evolution must track the literature WLS slope γ_LLS=2.127
-    # (the lit dN/dX_LLS(z) power-law), NOT the sim incidence slope 2.465 (which over-predicts low-z
-    # LLS by +62–87% vs lit/truth → the LLS→n_s leak). subDLA/DLA keep the sim incidence slope. The
-    # CLOSURE/SBC path (survey=None, sim-truth mocks) keeps zslope_mu=None → _zslope_sites centers on
-    # HCD_INCIDENCE_SLOPE=(2.465,…) (the sim-truth slope the held-out-sim mock carries) — UNCHANGED.
+    # REAL-FIT LLS forward z-slope (PI re-determination 2026-06-17; KEPT under the 2026-07-18
+    # corrected-law re-derivation, PI decision 1c): when ``survey`` is given (a real-data fit), the
+    # LLS forward z-evolution must track the literature LLS-law slope γ_LLS=2.127 (= the deployed
+    # HCD_LIT_DNDX_LAW["LLS"][1] by the constrained-fit identity; the corrected free-gamma fit 2.137
+    # is consistent), NOT the sim incidence slope 2.465 (which over-predicts low-z LLS vs lit/truth →
+    # the LLS→n_s leak). subDLA/DLA keep the sim incidence slope. The CLOSURE/SBC path (survey=None,
+    # sim-truth mocks) keeps zslope_mu=None → _zslope_sites centers on HCD_INCIDENCE_SLOPE=(2.465,…)
+    # (the sim-truth slope the held-out-sim mock carries) — UNCHANGED.
     # γ=2.127 > the forward z-slope guard floor 1.5, so this passes _assert_forward_zslope_center.
     survey_zslope_mu = None
     if survey is not None:
