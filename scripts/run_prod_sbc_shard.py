@@ -22,8 +22,10 @@ FORWARD (2026-06-17): the CORRECTED HCD z-slope (re-centered on HCD_INCIDENCE_SL
 incidence (NOT the 2D-tilt; hcd_2d_tilt defaults False) + the production MF correction. NOTE on
 res_corr: the ``res_corr_on`` (NORC) forward flag IS NOW WIRED (2026-07-04, Gate-A) through
 build_legb_ctx -> build_mf_correction -> MultiFidelity.res_corr_on and, for NORC, this runner also
-pins fix_alpha_res=True + caps KS at k<=0.045. DEFAULT is NORC (res_corr_on=False); pass
-``--res-corr-on`` to restore the pre-NORC anchored+alpha forward. res_corr_on lives on the mf object
+pins fix_alpha_res=True + caps KS at k<=0.045. The DEFAULT tracks the single NORC authority
+``closure_legb.PROD_RES_CORR_ON`` (NORC under the deployed forward); pass ``--res-corr-on`` to
+restore the res_corr/alpha_res axis (a controlled A/B on top of the current deployed data-nuisance
+forward, not the literal 2026-06-16 config). res_corr_on lives on the mf object
 (the single chokepoint), so the mock TRUTH and the likelihood SHARE it -> C_mock ≡ C_like and the
 rank-uniformity null is exact at either setting. (Gated by the 4-referee panel + freeze.)
 
@@ -38,7 +40,8 @@ import pickle
 print = functools.partial(print, flush=True)
 
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
-from hcd_analysis.emulator.closure_legb import build_legb_ctx, run_legb, prod_forward_config
+from hcd_analysis.emulator.closure_legb import (build_legb_ctx, run_legb, prod_forward_config,
+                                                prod_norc_forward)
 
 REPO = "/home/mfho/hcd_priya"
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
@@ -191,11 +194,14 @@ def main():
     ap.add_argument("--leg", choices=["all", "DESI", "KS", "eBOSS"], default="all",
                     help="restrict the SBC likelihood to one survey leg (per-leg = the deployed analysis)")
     ap.add_argument("--res-corr-on", dest="res_corr_on", action="store_true",
-                    help="restore the pre-NORC forward: res_corr ON + alpha_res marginalized + "
-                         "KS k<=0.069 (the anchored+alpha baseline).")
+                    help="restore the res_corr/alpha_res axis: res_corr ON + alpha_res marginalized, "
+                         "on top of the CURRENT deployed forward (for --leg KS the prod ks_kwargs "
+                         "k_max=0.065 + echelle float apply regardless). A controlled A/B, not the "
+                         "literal 2026-06-16 pre-NORC config.")
     ap.add_argument("--no-res-corr-on", dest="res_corr_on", action="store_false",
                     help="NORC (DEFAULT): res_corr OFF + fix_alpha_res + KS k<=0.045 (Gate-A).")
-    # (res_corr_on default False is set in the ap.set_defaults(...) below with the other run defaults)
+    # (the res_corr_on default is DERIVED from closure_legb.prod_norc_forward() in the
+    #  ap.set_defaults(...) below -- the single NORC authority; False under the deployed forward)
     ap.add_argument("--single-member", action="store_true",
                     help="run on final_prod_seed0 only (cheap de-risk; NOT the production object)")
     ap.add_argument("--no-shard-pkl", dest="write_shard_pkl", action="store_false",
@@ -233,7 +239,9 @@ def main():
                          "the SAME fold-k sims + SAME mf_fold=k. Only the emulator differs vs --fold k, so "
                          "the pull-vs-n_s tilt isolates the LOSO out-of-sample (extrapolation) effect.")
     ap.add_argument("--out-dir", required=True)
-    ap.set_defaults(with_mf=True, with_eboss=True, res_corr_on=False, write_shard_pkl=True, leg_a=True)
+    ap.set_defaults(with_mf=True, with_eboss=True,
+                    res_corr_on=prod_norc_forward()["res_corr_on"],   # NORC default from the SINGLE authority
+                    write_shard_pkl=True, leg_a=True)                 # (--res-corr-on restore arm still wins)
     a = ap.parse_args()
 
     members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
@@ -351,6 +359,13 @@ def main():
     assert bool(ctx.sample_res) == bool(_sample_res), "SBC f_res float not wired"
     assert ctx.f_res_amp_sigma == _f_res_sigma, "SBC f_res prior width mismatch"
     assert tuple(ctx.metal_node_z) == (2.2, 4.2), "Gate-C metal_node_z drifted"
+    # REDUCED-COV tripwire (PI disposition 2026-07-17; mirror of the run_real_fit assert): the SBC
+    # (the sole unblind certificate) must fit under the SAME reduced DESI covariance as the real fit.
+    from hcd_analysis.emulator import data_likelihood as _DL
+    for _leg in ctx.legs:
+        if _leg.name == "DESI":
+            assert bool(_leg.dla_cov_reduced) == bool(_DL.DESI_DLA_COV_REDUCE), \
+                "DESI leg dla_cov_reduced disagrees with the DESI_DLA_COV_REDUCE authority"
     if ctx.sample_res:                             # f_res is per-INSTRUMENT: single-leg + resolution_ready
         assert all(getattr(l, "resolution_ready", False) for l in ctx.legs), \
             "f_res float on a resolution_ready=False leg"

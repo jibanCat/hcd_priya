@@ -29,6 +29,8 @@ from __future__ import annotations
 import argparse
 import copy
 import functools
+import hashlib
+import json
 from typing import NamedTuple
 
 import numpy as np
@@ -525,6 +527,55 @@ def prod_forward_config(leg):
 
 
 # ============================================================================ #
+#  The GLOBAL sim-convergence forward decision (NORC), the ONE reversal knob.
+# ============================================================================ #
+# res_corr is a SIM-convergence correction (small-box particle count), NOT a per-instrument nuisance
+# -> it is a SINGLE global switch, not a per-leg PROD_FORWARD_BY_LEG entry (a per-leg field would make
+# a one-leg flip representable but physically meaningless and would desync the fix_alpha_res invariant).
+# Gate-A (2026-07-04) DEPLOYS NORC: drop res_corr (res_corr_on=False) + pin the 2 now-inert alpha_res
+# sites (fix_alpha_res=True) + (in build_legb_ctx) auto-cap KS at k<=0.045. This constant is THE reversal
+# knob for the 4-referee panel: flip to True to restore the res_corr/alpha_res AXIS on top of the CURRENT
+# deployed forward on EVERY deployed path (real fit / SBC default / dnuis use_prod_forward) at once --
+# a controlled A/B in which ONLY the res_corr treatment moves. It is NOT the literal 2026-06-16 pre-NORC
+# config: KS keeps the later-certified echelle f_res float + k_max 0.065 (PROD_FORWARD_BY_LEG), DESI/eBOSS
+# keep flatlog2node metals + their f_res floats; naive comparisons against the archived 2026-06-16 NUTS
+# result would be confounded. Gated by the panel + freeze + PI sign-off before any unblind.
+PROD_RES_CORR_ON = False
+
+
+def prod_norc_forward():
+    """The deployed GLOBAL sim-convergence (NORC) forward decision, as a fresh dict.
+
+    Returns ``{"res_corr_on": PROD_RES_CORR_ON, "fix_alpha_res": not PROD_RES_CORR_ON}``. The
+    ``fix_alpha_res == (not res_corr_on)`` invariant is encoded HERE, in ONE place, so no consumer can
+    desync it. GLOBAL (not per-leg): every deployed driver (real fit / SBC / dnuis use_prod_forward)
+    consumes this so the deployed forward's res_corr decision is defined exactly once. res_corr is a
+    sim-convergence correction, not a per-instrument nuisance -> deliberately NOT keyed by leg."""
+    return {"res_corr_on": bool(PROD_RES_CORR_ON), "fix_alpha_res": not bool(PROD_RES_CORR_ON)}
+
+
+def forward_signature():
+    """A stable sha256 hex digest over the MODULE-CONSTANT forward decision set (freeze/audit artifact).
+
+    Canonical-JSON (sorted keys) over ``{PROD_FORWARD_BY_LEG, PROD_RES_CORR_ON,
+    DESI_DLA_COV_REDUCE}`` so the freeze task can record the deployed decision set in analysis.lock
+    and audits can assert it. DESI_DLA_COV_REDUCE (data_likelihood; PI disposition 2026-07-17) is
+    the reduced-covariance authority — remove syst_e_dla_completeness from the DESI C_data because
+    alpha_DLA floats (cup1d "red") — and belongs in the signature because flipping it changes every
+    deployed DESI likelihood. NOT covered (the freeze task must lock these separately, per the
+    refactor handoff list): the KS k<=0.045 NORC auto-cap literal, mf_anchor_mult=5.0, the
+    SIGMA_A0/SIGMA_S restore-arm alpha_res prior widths, the ensemble checkpoint set, and the prior
+    constants. Consumed by NOTHING in the deployed inference path (never a per-mock discriminator
+    -> avoids universal-clash). Values must stay JSON-native: a non-JSON value in
+    PROD_FORWARD_BY_LEG raises TypeError (fail-loud) rather than being silently coerced."""
+    payload = json.dumps({"PROD_FORWARD_BY_LEG": PROD_FORWARD_BY_LEG,
+                          "PROD_RES_CORR_ON": bool(PROD_RES_CORR_ON),
+                          "DESI_DLA_COV_REDUCE": bool(DL.DESI_DLA_COV_REDUCE)},
+                         sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+# ============================================================================ #
 #  Build the production Leg-B context from final_fold0 + the xclass error vector.
 # ============================================================================ #
 def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
@@ -643,18 +694,21 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     # CENTER-CONSTRUCTION FIX (PI 2026-06-17): build the pivot from the z=3 STRUCTURAL w_c, NOT the
     # all-z median nanmedian(w_c_cache[:,1:]). Because w_c rises monotonically with z, the all-z median
     # (LLS 0.274) equals the z≈3.6 value → consumed as the z=3 pivot it over-stated the LLS center ~1.45×
-    # (α_pivot 0.291 vs the z=3-consistent ~0.194–0.200), overshooting the lit dN/dX 2.05× @z2.4 = the
-    # LLS→n_s leak. hcd_pivot_wc_and_xbar restricts the SAME cache to the z=3 pivot rows. See the dN/dX
-    # low-z overshoot bug. γ_LLS (forward z-slope) and σ_LLS (width) are UNCHANGED.
+    # (α_pivot 0.291 vs the z=3-consistent 0.17–0.20 class), overshooting the lit dN/dX worst at low z =
+    # the LLS→n_s leak. hcd_pivot_wc_and_xbar restricts the SAME cache to the z=3 pivot rows. See the
+    # dN/dX low-z overshoot bug. (2026-07-18: the lit-law numbers below are the CORRECTED laws of
+    # record — see the HCD_LIT_DNDX_LAW provenance block in inference.py.)
     w_c_med, Xbar_z3 = hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT)   # (3,) z=3 structural w_c, Xbar(z=3)
-    # survey=None (closure/SBC) → cosmic-average LLS pin (unchanged); survey="DESI"/"KS"/… (real fit)
-    # → the per-survey LLS center+width pin (DESI 1.0×/σ0.15, KS 2.5×/σ0.40; PI re-determination
-    # 2026-06-17). The PI WIDTH RULE 1× value is the lit measurement error (σ_LLS=0.15); the 2×
-    # cosmic-variance hedge is HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X (toggle here if a hedge ctx is needed).
+    # survey=None (closure/SBC) → cosmic-average LLS pin; survey="DESI"/"KS"/… (real fit)
+    # → the per-survey LLS center+width pin (DESI 1.0×/σ0.287, KS 2.5×/σ0.40; PI re-determination
+    # 2026-06-17, width re-derived 2026-07-18). The PI WIDTH RULE 1× value is the corrected lit
+    # measurement + kernel-common-mode error (σ_LLS=0.287); the 2× cosmic-variance hedge is
+    # HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X (toggle here if a hedge ctx is needed).
     alpha_mu, alpha_sd = hcd_incidence_prior(jnp.asarray(w_c_med), z=HCD_Z_PIVOT, survey=survey)
-    # REAL-FIT LLS center: prefer the lit dN/dX law DIRECTLY (alt-(b)) — α_LLS(z=3) from
-    # A=0.0201·(1+z)^2.127 through the EXACT w_c map (hcd_lls_realfit_alpha_center), round-tripping the
-    # lit dN/dX to <0.34% (≈0.194×boost). On the REAL FIT PRIYA≠data, so the LLS center must track the
+    # REAL-FIT LLS center: prefer the lit dN/dX law DIRECTLY (alt-(b)) — α_LLS(z=3) from the
+    # CORRECTED binned-LLS law A=0.0184·(1+z)^2.127 (K1a kernel, constrained slope; PI 2026-07-18)
+    # through the EXACT w_c map (hcd_lls_realfit_alpha_center), round-tripping the lit dN/dX to <0.2%
+    # at the pivot (≈0.172×boost). On the REAL FIT PRIYA≠data, so the LLS center must track the
     # literature dN/dX, not the sim's z=3 w_c·(lit/sim). The CLOSURE/SBC (survey=None) keeps the sim z=3
     # w_c center (its held-out-sim mocks carry the sim incidence). subDLA/DLA centers are unchanged.
     if survey is not None:
@@ -669,12 +723,14 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     assert_hcd_pivot_z3(float(np.asarray(alpha_mu)[0]), z=HCD_Z_PIVOT,
                         where=f"build_legb_ctx survey={survey}", boost=_guard_boost)
 
-    # REAL-FIT LLS forward z-slope (litWLS, PI re-determination 2026-06-17): when ``survey`` is given
-    # (a real-data fit), the LLS forward z-evolution must track the literature WLS slope γ_LLS=2.127
-    # (the lit dN/dX_LLS(z) power-law), NOT the sim incidence slope 2.465 (which over-predicts low-z
-    # LLS by +62–87% vs lit/truth → the LLS→n_s leak). subDLA/DLA keep the sim incidence slope. The
-    # CLOSURE/SBC path (survey=None, sim-truth mocks) keeps zslope_mu=None → _zslope_sites centers on
-    # HCD_INCIDENCE_SLOPE=(2.465,…) (the sim-truth slope the held-out-sim mock carries) — UNCHANGED.
+    # REAL-FIT LLS forward z-slope (PI re-determination 2026-06-17; KEPT under the 2026-07-18
+    # corrected-law re-derivation, PI decision 1c): when ``survey`` is given (a real-data fit), the
+    # LLS forward z-evolution must track the literature LLS-law slope γ_LLS=2.127 (= the deployed
+    # HCD_LIT_DNDX_LAW["LLS"][1] by the constrained-fit identity; the corrected free-gamma fit 2.137
+    # is consistent), NOT the sim incidence slope 2.465 (which over-predicts low-z LLS vs lit/truth →
+    # the LLS→n_s leak). subDLA/DLA keep the sim incidence slope. The CLOSURE/SBC path (survey=None,
+    # sim-truth mocks) keeps zslope_mu=None → _zslope_sites centers on HCD_INCIDENCE_SLOPE=(2.465,…)
+    # (the sim-truth slope the held-out-sim mock carries) — UNCHANGED.
     # γ=2.127 > the forward z-slope guard floor 1.5, so this passes _assert_forward_zslope_center.
     survey_zslope_mu = None
     if survey is not None:
@@ -1436,6 +1492,53 @@ def apply_subdla_truth_boost(truth_pack, boost):
         az[:, 1] = az[:, 1] * float(boost)
         out["alpha_hcd_z"] = az
     return out
+
+
+def apply_dla_truth_boost(truth_pack, boost):
+    """Return a COPY of ``truth_pack`` with the DLA incidence (pivot ``alpha_hcd[2]`` AND the
+    z-resolved ``alpha_hcd_z[:,2]`` column) multiplied by ``boost`` — the DLA SIBLING of the
+    LLS/subDLA boosts, for the displaced-truth PRIYA DLA-completeness closure arm (PI disposition
+    2026-07-17). The mock then carries ``boost``× the prior-drawn alpha_DLA on the SAME deployed
+    PRIYA R_DLA response the likelihood fits (same filtering, core add-back, normalization, z law,
+    dla_forward_frac — self-consistent by construction; NO e_dla mean template anywhere). At
+    boost=1.5 the truth-distribution median lands at 0.15×(lit/sim)×w_DLA — the intended ~15%
+    residual of the OBSERVED DLA incidence (prior center = 0.10). LLS (0), subDLA (1), θ9, τ₀ and
+    a_SiIII are untouched; the input is NOT mutated. ``boost=1`` is the identity."""
+    out = dict(truth_pack)                                    # shallow copy of the dict
+    a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
+    a[2] = a[2] * float(boost)
+    out["alpha_hcd"] = a
+    if truth_pack.get("alpha_hcd_z") is not None:
+        az = np.array(truth_pack["alpha_hcd_z"], float)       # fresh (nZg,3)
+        az[:, 2] = az[:, 2] * float(boost)
+        out["alpha_hcd_z"] = az
+    return out
+
+
+# the run_legb leg-a inject_spec contract: the three truth boosts (applied here) + the two
+# make_leg_a_legmock injections (threaded there). ANY other key is a typo -> fail loud (a silently
+# ignored key would no-op an injection arm and read as a spurious PASS).
+_TRUTH_BOOST_KEYS = ("lls_truth_boost", "subdla_truth_boost", "dla_truth_boost")
+_INJECT_SPEC_KEYS = frozenset(_TRUTH_BOOST_KEYS) | {"metal_misspec", "resolution"}
+
+
+def _apply_truth_boosts(truth_pack, inject_spec):
+    """Apply the ``*_truth_boost`` keys of ``inject_spec`` to ``truth_pack`` (in LLS, subDLA, DLA
+    order — independent columns, so order is cosmetic) and VALIDATE the full key set against
+    ``_INJECT_SPEC_KEYS`` (unknown key ⇒ ValueError, the fail-loud typo guard). ``None``/empty
+    spec returns the input unchanged (the byte-identical no-op guarantee)."""
+    if not inject_spec:
+        return truth_pack
+    unknown = set(inject_spec) - _INJECT_SPEC_KEYS
+    if unknown:
+        raise ValueError(f"unknown inject_spec key(s) {sorted(unknown)}; "
+                         f"allowed: {sorted(_INJECT_SPEC_KEYS)}")
+    for key, fn in (("lls_truth_boost", apply_lls_truth_boost),
+                    ("subdla_truth_boost", apply_subdla_truth_boost),
+                    ("dla_truth_boost", apply_dla_truth_boost)):
+        if inject_spec.get(key) is not None:
+            truth_pack = fn(truth_pack, float(inject_spec[key]))
+    return truth_pack
 
 
 def _meanflux_on_leg(ctx, leg, truth_pack):
@@ -2597,16 +2700,12 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
             k_truth, k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, m), 3)
             truth_pack = draw_leg_a_leg_truth(ctx, k_truth)
             # DATA-NUISANCE INJECTION (the bias gate; inject_spec=None ⇒ byte-identical to the
-            # clean self-draw — the no-op guarantee). "lls_truth_boost" offsets the TRUTH LLS from
-            # the per-survey pin BEFORE the forward; "metal_misspec"/"resolution" inject a mode the
-            # forward cannot fit into the noiseless mock.
+            # clean self-draw — the no-op guarantee). "lls/subdla/dla_truth_boost" offset the TRUTH
+            # incidence from the prior center BEFORE the forward (_apply_truth_boosts, which also
+            # fail-louds on unknown keys); "metal_misspec"/"resolution" inject a mode the forward
+            # cannot fit into the noiseless mock.
             if inject_spec:
-                if inject_spec.get("lls_truth_boost") is not None:
-                    truth_pack = apply_lls_truth_boost(
-                        truth_pack, float(inject_spec["lls_truth_boost"]))
-                if inject_spec.get("subdla_truth_boost") is not None:
-                    truth_pack = apply_subdla_truth_boost(
-                        truth_pack, float(inject_spec["subdla_truth_boost"]))
+                truth_pack = _apply_truth_boosts(truth_pack, inject_spec)
                 mock_legs, info = make_leg_a_legmock(
                     ctx, fid_core, truth_pack, k_mock,
                     inject_metal_misspec=inject_spec.get("metal_misspec"),

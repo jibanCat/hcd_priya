@@ -7,10 +7,14 @@ offset (the data would otherwise pull α to absorb the sim-vs-data discrepancy).
 PRIYA's sim dN/dX(z) per class (mean±std over sims) against the literature, per class, +
 the PRIYA/literature ratio.
 
-Literature (2026-06-04 Lyα agent): DLA = Prochaska&Wolfe2009 (Table 1); subDLA = Zafar+2013
-(Table 3); LLS = O'Meara+2013 / Fumagalli+2013 / Prochaska+2010 (τ_LL≥2). CAVEAT: PRIYA's
-LLS class floor is log N_HI≥17.2 (τ≥1) while the literature LLS is τ≥2 (N≥17.5), so PRIYA's
-LLS is EXPECTED ~25–40% higher — a known definitional offset to calibrate, not a bug.
+Literature (CORRECTED estimands, re-derivation 2026-07-18): DLA = Prochaska&Wolfe2009
+(Table 1); subDLA = Zafar+2013 (Table 3) COUNTS n/dX, binned [19.0,20.3) (the old array
+here was the mislabeled Peroux DLA column); LLS = the kernel-corrected BINNED [17.2,19.0)
+points (POW10/O'Meara13/Fumagalli13 cumulative τ≥2 compilation × the adopted K1a PRIYA-CDDF
+kernel — definition-MATCHED to PRIYA's LLS class, so the old "PRIYA expected ~25–40% higher"
+definitional caveat DISSOLVES; served from the committed derivation JSON via
+lit_dndx.lit_points_for_display). Old wrong-object arrays: tombstoned in
+hcd_analysis/emulator/lit_dndx.py, never plotted as truth again.
 
 Env:
   PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
@@ -25,26 +29,22 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.lit_dndx import lit_points_for_display
+from hcd_analysis.emulator.inference import HCD_LIT_DNDX_ESTIMAND, assert_dndx_law_estimand
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = str(ROOT / "hcd_analysis/_emulator_data/observables_tau0_lf.h5")
 OUT = ROOT / "figures/analysis/06_performance_walkthrough/A6_dndx_vs_literature.png"
 
-# Observed dN/dX (z, value, ±err) per class
-LIT = {
-    "LLS": ([2.4, 2.8, 3.35, 3.47, 3.58, 3.74, 3.97, 4.23],
-            [0.29, 0.33, 0.35, 0.57, 0.41, 0.52, 0.72, 0.78],
-            [0.05, 0.08, 0.14, 0.12, 0.07, 0.08, 0.15, 0.19],
-            "O'Meara13 / Fumagalli13 / Prochaska10 (τ≥2)"),
-    "subDLA": ([2.27, 2.73, 3.25, 3.77, 4.20],
-               [0.07, 0.06, 0.08, 0.10, 0.10],
-               [0.01, 0.01, 0.02, 0.02, 0.03],
-               "Zafar+2013 (Table 3)"),
-    "DLA": ([2.31, 2.57, 2.86, 3.22, 3.70, 4.39],
-            [0.048, 0.055, 0.067, 0.084, 0.075, 0.106],
-            [0.006, 0.005, 0.006, 0.006, 0.009, 0.018],
-            "Prochaska & Wolfe 2009 (Table 1)"),
-}
+# Observed dN/dX (z, value, ±err, source) per class — the CORRECTED estimands, single
+# source lit_dndx.lit_points_for_display (estimand-asserted below).
+LIT = lit_points_for_display()
+# estimand assert (independent literals, NOT the dict's own values — a wrong-object
+# reinstatement in HCD_LIT_DNDX_ESTIMAND trips here):
+assert_dndx_law_estimand("LLS", "binned_17.2_19.0", "plot_dndx_vs_literature")
+assert_dndx_law_estimand("subDLA", "binned_19.0_20.3", "plot_dndx_vs_literature")
+assert_dndx_law_estimand("DLA", "binned_ge20.3", "plot_dndx_vs_literature")
+assert set(HCD_LIT_DNDX_ESTIMAND) == {"LLS", "subDLA", "DLA"}
 CLS = ["LLS", "subDLA", "DLA"]
 
 

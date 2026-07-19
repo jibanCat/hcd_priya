@@ -99,15 +99,21 @@ def test_marginalized_explicit_mu_is_respected():
 #  = 2.127 for the LLS forward z-slope; the CLOSURE (survey=None) stays 2.465.   #
 # --------------------------------------------------------------------------- #
 def test_realfit_litwls_lls_slope_constant_and_guard():
-    """The real-fit LLS forward z-slope is the literature WLS slope γ_LLS=2.127 (NOT the sim
-    incidence slope 2.465 the closure carries, NOR the lit/sim RATIO slope 0.95). It is ABOVE the
-    forward-z-slope guard floor (1.5) so _assert_forward_zslope_center PASSES it (the swap is
-    permitted, the 0.95-ratio-slope guard intent preserved)."""
+    """The real-fit LLS forward z-slope is the literature slope γ_LLS=2.127 — KEPT under the
+    corrected-law re-derivation (PI 2026-07-18 decision 1c: the corrected K1a free-gamma fit
+    2.137 is consistent, so the deployed LLS law is CONSTRAINED to 2.127 and the test-enforced
+    identity HCD_LLS_REALFIT_ZSLOPE == HCD_LIT_DNDX_LAW['LLS'][1] holds exactly). NOT the sim
+    incidence slope 2.465 the closure carries, NOR the lit/sim RATIO slope. ABOVE the
+    forward-z-slope guard floor (1.5) so _assert_forward_zslope_center PASSES it."""
+    from hcd_analysis.emulator import inference as INF
     assert HCD_LLS_REALFIT_ZSLOPE == pytest.approx(2.127, abs=1e-6), \
-        "the real-fit LLS forward z-slope must be the litWLS γ_LLS=2.127"
+        "the real-fit LLS forward z-slope must be the literature γ_LLS=2.127"
+    # test-enforced equality with the deployed corrected law's slope (spec sec 5.2)
+    assert HCD_LLS_REALFIT_ZSLOPE == INF.HCD_LIT_DNDX_LAW["LLS"][1], \
+        "HCD_LLS_REALFIT_ZSLOPE must equal HCD_LIT_DNDX_LAW['LLS'][1] (constrained-fit identity)"
     # distinct from the closure sim-truth slope AND the lit/sim ratio slope
     assert HCD_LLS_REALFIT_ZSLOPE != pytest.approx(float(CL.HCD_INCIDENCE_SLOPE[0]))   # != 2.465
-    assert HCD_LLS_REALFIT_ZSLOPE > float(HCD_LIT_OVER_SIM_SLOPE[0])                   # != 0.95
+    assert HCD_LLS_REALFIT_ZSLOPE > float(HCD_LIT_OVER_SIM_SLOPE[0])                   # != ratio slope
     # the litWLS LLS slope passes the guard (2.127 > 1.5)
     CL._assert_forward_zslope_center(HCD_LLS_REALFIT_ZSLOPE, "litWLS LLS slope")
     # and the full real-fit zslope_mu vector (litWLS LLS, sim subDLA/DLA) passes the LLS-slot guard

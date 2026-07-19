@@ -122,7 +122,12 @@ def test_cov_b_equals_cup1d_additive_build_without_resolution():
     cup1d_full = cov_stat + _compute_cov_cup1d(z_all, syst_vecs, corr_nores, _UCORR_FID)
 
     # our option-b cov_b (subtractive per-z rank-1 removal), no diag inflation for the compare.
-    leg_b = DL.load_desi_leg(resolution_float=True, add_cov_diag_inflation=False)
+    # dla_cov_reduce=False: THIS test pins the RESOLUTION-mode equality in isolation. Since
+    # 2026-07-17 the DESI default ALSO removes syst_e_dla_completeness (DESI_DLA_COV_REDUCE, the
+    # cup1d "red" convention); that full reduced build is pinned in tests/test_dla_cov_reduce.py
+    # (test_reduced_equals_cup1d_red_build + the opt-out back-compat pin).
+    leg_b = DL.load_desi_leg(resolution_float=True, add_cov_diag_inflation=False,
+                             dla_cov_reduce=False)
     our_cov_b = np.asarray(leg_b.C_data, float)
     assert leg_b.resolution_on is True, "resolution_float must flip resolution_on True (float f_res)"
 

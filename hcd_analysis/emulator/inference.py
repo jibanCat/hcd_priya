@@ -15,6 +15,10 @@ Everything is JAX-pure and differentiable in (θ_unit, tau0, alpha_hcd).
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+
 import jax
 import jax.numpy as jnp
 
@@ -51,12 +55,21 @@ def gaussian_logprior(value, mu, sigma):
     return -0.5 * (((jnp.asarray(value) - mu) / sigma) ** 2)
 
 
-# HCD incidence priors — literature-calibrated (2026-06-04 Lyα agent; sources: O'Meara+2013
-# / Prochaska+2010 / Fumagalli+2013 (LLS), Zafar+2013 (subDLA), Prochaska&Wolfe2009 /
-# Noterdaeme+2012 (DLA)). Fractional widths σ/μ per class; LLS TIGHT (cosmology-degenerate,
-# DESI DR1). DLA on the per-leg unmasked-DLA residual (PI-confirmed final intent 2026-06-09).
-HCD_PRIOR_FRAC_SIGMA = (0.15, 0.40, 0.50)   # σ/μ: LLS TIGHT (cosmology-degenerate); subDLA
-#   BROAD (poor measurement — the Zafar-vs-O'Meara factor-2); DLA WIDE 0.50 = the
+# HCD incidence priors — literature-calibrated (2026-06-04 Lyα agent, corrected-law
+# re-derivation 2026-07-18; sources: Prochaska/O'Meara/Worseck+2010 + O'Meara+2013 +
+# Fumagalli+2013 (LLS, kernel-corrected to the binned class), Zafar+2013 Table 3 counts
+# (subDLA), Prochaska&Wolfe2009 (DLA)). Fractional widths σ/μ per class; LLS TIGHT
+# (cosmology-degenerate, DESI DR1). DLA on the per-leg unmasked-DLA residual
+# (PI-confirmed final intent 2026-06-09).
+HCD_PRIOR_FRAC_SIGMA = (0.15, 0.40, 0.50)   # σ/μ (survey=None closure/SBC path): LLS TIGHT
+#   (cosmology-degenerate; the closure mock truth is the SIM itself, so the lit-kernel
+#   systematic width 0.287 of the survey path deliberately does NOT cascade here); subDLA
+#   BROAD 0.40 as a residual-abundance marginalization — the old rationale "poor
+#   measurement, Zafar-vs-O'Meara factor-2" DISSOLVED 2026-07-18: the apparent factor-2
+#   was the wrong-object bug (the deployed 'subDLA' points were Zafar Table 3's
+#   Peroux+2003b DLA column); the corrected Poisson-GLM subDLA law is HEALTHY
+#   (deviance/dof 0.73 vs the old chi2/dof 5.41) and the 0.40 width is kept as a
+#   deliberate marginalization hedge, not a measurement statement; DLA WIDE 0.50 = the
 #   masking-completeness uncertainty (the DLA-finder misses ~10% with a broad completeness
 #   width), widened further above z=3.5 (see HCD_DLA_Z_RELIABLE).
 # §0c DLA prior (PI-confirmed final intent 2026-06-09): the DLA-finder masking is INCOMPLETE —
@@ -75,22 +88,29 @@ HCD_DLA_RESIDUAL_FRAC = 0.10                 # DLA residual incidence = 0.10 × 
 HCD_DLA_Z_RELIABLE = 3.5                     # DLA dN/dX unreliable beyond this z → widen σ_DLA
 HCD_Z_PIVOT = 3.0
 # PRIYA-sim-vs-observed dN/dX offset (literature / PRIYA-sim) per class, as a POWER-LAW in
-# (1+z) — mirroring the τ₀ Kim-curve+slope model. PRIYA does NOT match the data: the
-# observed dN/dX evolves FASTER with z than the sim (γ_lit > γ_sim), so a single
-# z-independent ratio mis-centers the prior at the z edges. (lit/sim)@z_pivot + the slope
-# d ln(lit/sim)/d ln(1+z), fit by scripts/plot_dndx_vs_literature.py (PRIYA vs
-# Prochaska&Wolfe09 / Zafar13 / O'Meara13):
-HCD_LIT_OVER_SIM = (1.06, 1.00, 1.34)        # (LLS, subDLA, DLA): data/sim at z_pivot=3.0
-# subDLA centered on the SIM (1.00), NOT the old Zafar+2013 0.76: that literature value is
-# factor-2 uncertain (Zafar-vs-O'Meara; Berg+2019 XQ-100 revises it), and PRIYA produces subDLAs
-# IN-SITU (Rahmati+2013 self-shielding) so the sim is the faithful prior here. The old 0.76 sat
-# −0.8σ below the sim subDLA incidence → pulled α_subDLA low and leaked into n_s (corr≈+0.3; HCD
-# referee 2026-06-11). The broad σ/μ=0.40 (HCD_PRIOR_FRAC_SIGMA[1]) marginalizes the residual
-# subDLA-abundance uncertainty rather than imposing an offset center.
-# DLA slope deliberately WEAK (0.4, the conservative Ω_DLA∝(1+z)^0.4): the raw fit (+1.08,
-# or +1.90 on z≤3.5) is dominated by z>3.5 DLA dN/dX that the literature does not measure
-# reliably — so do not impose a strong DLA z-evolution; let the data set it (σ widened above).
-HCD_LIT_OVER_SIM_SLOPE = (0.95, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
+# (1+z) — mirroring the τ₀ Kim-curve+slope model. (lit/sim)@z_pivot + the slope
+# d ln(lit/sim)/d ln(1+z). LLS slots REFIT 2026-07-18 against the CORRECTED
+# definition-matched laws (the deployed K1a-constrained binned-LLS law vs the PRIYA LLS
+# class column, the plot_dndx_vs_literature.py construction executed inside
+# scripts/derive_hcd_dndx_corrected.py): the old 1.06 was cumulative-tau>=2-vs-binned-class
+# (wrong estimand pair); definition-matched, PRIYA's LLS incidence matches the corrected
+# literature at z=3 to 0.5% (ratio 0.995). subDLA/DLA slots unchanged (re-verified same run).
+HCD_LIT_OVER_SIM = (0.995, 1.00, 1.34)       # (LLS, subDLA, DLA): data/sim at z_pivot=3.0
+# subDLA centered on the SIM (1.00) — KEPT by PI decision 9 (2026-07-18): PRIYA produces
+# subDLAs IN-SITU (Rahmati+2013 self-shielding) so the sim is the faithful prior here, and
+# the correction VINDICATES the sim anchor: the corrected lit/sim subDLA ratio is 1.40
+# (recorded as EVIDENCE in hcd_lit_dndx_corrected.json), inside the broad σ/μ=0.40
+# (HCD_PRIOR_FRAC_SIGMA[1]) that marginalizes the residual subDLA-abundance uncertainty
+# rather than imposing an offset center. (The old "Zafar 0.76 / factor-2" story was the
+# wrong-object DLA-column bug; see the HCD_LIT_DNDX_LAW provenance block below.)
+# DLA slope deliberately WEAK (0.4, the conservative Ω_DLA∝(1+z)^0.4): the raw fit (+1.15
+# corrected, same class of number as the old +1.08) is dominated by z>3.5 DLA dN/dX that the
+# literature does not measure reliably — do not impose a strong DLA z-evolution; let the
+# data set it (σ widened above z=3.5).
+# LLS ratio SLOPE refit 2026-07-18: 0.764 = γ_LLS(corrected, constrained 2.127) − γ_sim
+# (1.363, PRIYA LLS class column fit) — replaces the old 0.95 (which paired the cumulative
+# compilation slope with the sim class slope). Under the 1.5 forward-zslope guard floor.
+HCD_LIT_OVER_SIM_SLOPE = (0.764, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
 # ============================ READ THIS BEFORE USING THIS CONSTANT ============================
 # This is the lit/sim RATIO slope — d ln[(literature dN/dX)/(PRIYA dN/dX)]/d ln(1+z). It is the
 # PRIOR CENTER at the z=3 PIVOT ONLY (where the slope CANCELS — zero production effect), consumed
@@ -98,9 +118,10 @@ HCD_LIT_OVER_SIM_SLOPE = (0.95, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
 #   ⇒ The FORWARD HCD incidence-weight z-slope s_c in α_c(z)=α_pivot·((1+z)/4)^s_c is a DISTINCT
 #     object: closure_legb.HCD_INCIDENCE_SLOPE=(2.465,2.758,2.366) (~2.4 — the SIM w_c(z) slope
 #     d ln w_c/d ln(1+z) the mock truth carries and the forward α_c(z) must track).
-# Using THIS (0.95) ratio slope as the forward exponent makes the predicted dN/dX(z) FALL with z
-# (truth + literature RISE) and puts the mock-truth slope 2.9–6σ off-center — the wrong-object bug
-# that has recurred 3+ times. See hcd-dndx-zslope-bug (notes) + tests/test_zslope_center.py.
+# Using THIS (0.764) ratio slope as the forward exponent makes the predicted dN/dX(z) FALL with z
+# (truth + literature RISE) and puts the mock-truth slope σ's off-center — the wrong-object bug
+# that has recurred 3+ times (at its old value 0.95, 2.9–6σ off). See hcd-dndx-zslope-bug (notes)
+# + tests/test_zslope_center.py.
 # =============================================================================================
 
 # --- PER-SURVEY effective LLS-abundance pin (real-fit prior; 2026-06-11 Lyα-agent + PI) --------
@@ -116,65 +137,145 @@ HCD_LIT_OVER_SIM_SLOPE = (0.95, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
 # A multiplier on the cosmic-average (lit/sim) LLS center, applied ONLY when ``survey`` is given
 # (the closure's sim-mean cert passes survey=None and is unaffected).
 HCD_LLS_SURVEY_BOOST = {"DESI": 1.0, "eBOSS": 1.0, "DESI+KS": 1.0, "KS": 2.5}
-# --- PI WIDTH RULE (2026-06-17 re-determination, PI-approved) ----------------------------------
+# --- PI WIDTH RULE (2026-06-17 re-determination; 1× value RE-DERIVED 2026-07-18) ---------------
 # per-survey LLS fractional width σ/μ (overrides HCD_PRIOR_FRAC_SIGMA[0] when survey given). The PI
 # rule: set σ_LLS to 1–2× the LITERATURE dN/dX MEASUREMENT error (1× ideal; 2× = cosmic-variance
-# hedge). The 1× value is DERIVED from the lit dN/dX measurement uncertainty for LLS (O'Meara13 /
-# Fumagalli13 / Prochaska10): the WLS-fit normalization error at z=3 (χ²-inflated) AND the per-point
-# scatter about the WLS power-law, taken as max → fractional σ/μ ≈ 0.16 → the clean 1× knob 0.15
-# (scripts/derive_hcd_lls_width.py prints the breakdown; 2× = 0.30, the cosmic-variance hedge arm).
-#   DESI / eBOSS / DESI+KS  — 1× = 0.15 (TIGHT, the litWLS-anchored real-fit primary; the
-#     litWLS CENTER's z-evolution — not the width — was the dominant low-z LLS→n_s leak, so a 0.15
-#     width at the lit-anchored center now sits ON the data-truth, zero prior-pull leak BY
-#     CONSTRUCTION; gated on the litWLS-σ0.15 closure NUTS reproducing the historical width isolator).
-#   KS — stays 0.40 (broad; selection-driven LLS excess, z<2.4 cut → corr(LLS,n_s)≈0.07, no leak).
+# hedge). The 1× value is DERIVED on the CORRECTED binned-LLS points (kernel-corrected POW10 +
+# O'Meara13 + Fumagalli13; PI decision 4, 2026-07-18): the measurement-only piece is
+# max(GLS norm err @z=3 χ²-inflated, per-point scatter) = 0.174, and the ADOPTED width adds the
+# K1a kernel COMMON-MODE systematic s_r3=0.227 in quadrature → σ/μ = 0.287 (the exact computed
+# value, 3 dp; scripts/derive_hcd_dndx_corrected.py prints the breakdown; the superseded
+# derive_hcd_lls_width.py 0.16→0.15 knob was measurement-only ON THE WRONG-OBJECT cumulative
+# points). 2× = 0.574, the cosmic-variance hedge arm.
+#   DESI / eBOSS / DESI+KS  — 1× = 0.287 (the lit-anchored real-fit primary; wider than the old
+#     0.15 because the estimand-correction kernel's common-mode uncertainty is now carried
+#     honestly in the width, not hidden).
+#   KS — stays 0.40 (broad; its width is the SELECTION-driven PI rule — archival absorber-rich
+#     sightlines — NOT the lit-error 1×/2× machinery; z<2.4 cut → corr(LLS,n_s)≈0.07, no leak).
+#     FLAGGED consequence: the 2× hedge (0.574) now EXCEEDS the KS 0.40 — the old "KS already
+#     broad" premise is weakened; KS deliberately keeps its own rule (PI cascade reading
+#     2026-07-18, see the implementation report).
 # The PRIMARY (1×) is HCD_LLS_SURVEY_FRAC_SIGMA; the 2× cosmic-variance HEDGE arm is the easily-
 # toggled HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X (use_lls_width_hedge2x=True in hcd_incidence_prior).
-HCD_LLS_SURVEY_FRAC_SIGMA = {"DESI": 0.15, "eBOSS": 0.15, "DESI+KS": 0.15, "KS": 0.40}
-# 2× cosmic-variance hedge (double the 1× lit measurement error); KS unchanged (already broad).
-HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X = {"DESI": 0.30, "eBOSS": 0.30, "DESI+KS": 0.30, "KS": 0.40}
+HCD_LLS_SURVEY_FRAC_SIGMA = {"DESI": 0.287, "eBOSS": 0.287, "DESI+KS": 0.287, "KS": 0.40}
+# 2× cosmic-variance hedge (double the 1× corrected lit width); KS unchanged (its own rule).
+HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X = {"DESI": 0.574, "eBOSS": 0.574, "DESI+KS": 0.574, "KS": 0.40}
 
-# --- REAL-FIT LLS forward z-slope (litWLS, 2026-06-17 PI re-determination) ----------------------
+# --- REAL-FIT LLS forward z-slope (2026-06-17 PI re-determination; RE-JUSTIFIED 2026-07-18) -----
 # The LLS prior CENTER's z-EVOLUTION is the dominant low-z LLS→n_s leak lever (NOT the width). On
 # the REAL FIT (data; PRIYA≠data, the forest follows the literature dN/dX) the LLS forward z-slope
-# must track the literature WLS power-law slope γ_LLS=+2.127 (lit dN/dX_LLS(z)=A·(1+z)^γ, A≈0.0201,
-# WLS over O'Meara13/Fumagalli13/Prochaska10), NOT the sim incidence slope 2.465 (which over-predicts
-# low-z LLS by +62–87% vs lit/truth). The CLOSURE/SBC path (survey=None, sim-truth mocks) STAYS on
-# closure_legb.HCD_INCIDENCE_SLOPE=2.465 (the slope the mock carries). subDLA/DLA keep the sim
-# incidence slope on BOTH paths (only LLS is lit-anchored on the real fit). γ=2.127 > the forward
-# z-slope guard floor 1.5, so the swap passes _assert_forward_zslope_center (the 0.95 ratio-slope
-# guard is preserved). See the spec 2026-06-17-hcd-prior-redetermination.
+# tracks the literature LLS law slope γ_LLS=2.127 — KEPT under the 2026-07-18 corrected-law
+# re-derivation (PI decision 1c): the corrected K1a binned-LLS FREE-gamma fit gives 2.137±0.67,
+# consistent with the deployed 2.127, so the deployed law is the corrected points refit with gamma
+# CONSTRAINED to 2.127 and this constant stays identically equal to HCD_LIT_DNDX_LAW["LLS"][1]
+# (test-enforced, tests/test_zslope_center.py). NOT the sim incidence slope 2.465 (which
+# over-predicts low-z LLS vs lit/truth; the sim-revert stays a PI physics-dialogue option). The
+# CLOSURE/SBC path (survey=None, sim-truth mocks) STAYS on closure_legb.HCD_INCIDENCE_SLOPE=2.465
+# (the slope the mock carries). subDLA/DLA keep the sim incidence slope on BOTH paths (only LLS is
+# lit-anchored on the real fit). γ=2.127 > the forward z-slope guard floor 1.5, so the swap passes
+# _assert_forward_zslope_center (the ratio-slope guard intent is preserved).
 HCD_LLS_REALFIT_ZSLOPE = 2.127
 
-# --- LITERATURE dN/dX power-laws (A, γ) per HCD class -------------------------------------------
-# dN/dX_c(z) = A_c·(1+z)^γ_c, the WLS over the literature points (derive_hcd_lls_width.py /
-# plot_dndx_vs_literature.py). The LLS law (O'Meara13/Fumagalli13/Prochaska10; A=0.0201, γ=2.127,
-# χ²/dof=0.72) is the REAL-FIT LLS prior CENTER anchor: hcd_lls_realfit_alpha_center builds α_LLS at
-# the z-pivot from this law DIRECTLY (alt-(b)), round-tripping the lit dN/dX to <0.34% — see the
-# HCD-pivot CENTER-construction fix (2026-06-17). subDLA/DLA laws are display/round-trip references.
-HCD_LIT_DNDX_LAW = {"LLS": (0.0201, 2.127), "subDLA": (0.0211, 0.937), "DLA": (0.0076, 1.592)}
+# === LITERATURE dN/dX power-laws (A, γ) per HCD class — CORRECTED LAWS OF RECORD ================
+# dN/dX_c(z) = A_c·(1+z)^γ_c. The LLS law is the REAL-FIT LLS prior CENTER anchor:
+# hcd_lls_realfit_alpha_center builds α_LLS at the z-pivot from this law DIRECTLY (alt-(b)),
+# round-tripping the lit dN/dX to <0.2% at the pivot (re-measured 2026-07-18); subDLA/DLA laws are
+# display/round-trip references. PROVENANCE (in-house corrected-law re-derivation, 2026-07-18):
+#
+# THE BUGS the 2026-07-18 re-derivation retired (both verified at source by two independent
+# designers + the implementer; tombstoned in hcd_analysis/emulator/lit_dndx.py):
+#   1. The old "LLS" law (0.0201, 2.127) was fit on the CUMULATIVE tau912>=2 compilation
+#      l(X)(N>=10^17.5) — which INCLUDES subDLAs and DLAs — while the consumer
+#      (dndx_wc.alpha_from_dndx_law -> w_c_from_mu, a telescoping Poisson over DISJOINT classes)
+#      requires the BINNED [17.2, 19.0) class rate: a cumulative rate fed to a disjoint-class
+#      telescoping consumer (double-counts the subDLA+DLA share; also the O'Meara abscissa was
+#      mis-stated, 2.4 = the f(N) pivot, not the measurement z ~2.21).
+#   2. The old "subDLA" law (0.0211, 0.937) was fit on rows of Zafar+2013 Table 3's logN>=20.3
+#      block = the Peroux+2003b DLA rates (a column mislabel): the wrong object entirely.
+# THE FIX: estimand-corrected source arrays (lit_dndx.py) + the PRIYA-CDDF estimand-correction
+# kernel (lit_dndx_kernel.py, pinned K1 recipe) + per-class estimators (Poisson GLM for counts,
+# GLS with the kernel-covariance blocks for the LLS compilation), derivation of record in
+# scripts/derive_hcd_dndx_corrected.py -> hcd_analysis/emulator/hcd_lit_dndx_corrected.json.
+# KERNEL CHOICE = K1a (PRIYA-CDDF cache kernel, per-point b(z_i); r(3)=0.8884). PI reasoning
+# (2026-07-18, verbatim): "the simulations evolve the Lya forest, LLSs, subDLAs, and DLAs jointly
+# under the same structure formation, so the relative decomposition across absorber classes is
+# physically self-consistent; the observational decomposition may still contain unresolved
+# Eddington-bias and classification issues and is not trusted at the 30-50% level over a
+# physically consistent simulation; the absolute incidence stays anchored to observations."
+# (PI, 2026-07-18). K3 (lit-anchored telescoping-consistent) and K2 (POW10-own-words) remain in
+# the JSON as the one-sided minus bracket arms; the K1a telescoping pulls (+1.7..+2.4σ at z>=3)
+# are EXPECTED by design (PRIYA-shape vs literature class-decomposition tension, PI-accepted).
+# DEPLOYED LAWS:
+#   LLS    = the K1a-corrected 8-point compilation refit with gamma CONSTRAINED to the deployed
+#            z-slope 2.127 (amplitude-only GLS under the same covariance; PI decision 1c — the
+#            free-gamma fit 2.137±0.67 is the consistency evidence, recorded in the JSON), at
+#            full precision so the reproduction test is bit-level.
+#   subDLA = the Poisson GLM on the verified Zafar+2013 Table 3 >=19.0-block counts
+#            (n=(4,11,24,23,19,8), sum 89; deviance/dof 0.73 — healthy where the old
+#            wrong-object law showed chi2/dof 5.41), full precision.
+#   DLA    = (0.0076, 1.592) KEPT: the shared-WLS refit of the PW09 Table 1 points reproduces it
+#            exactly at the deployed rounding (machinery anchor; refit documented in the JSON).
+# REFERENCES: Prochaska, O'Meara & Worseck 2010 (arXiv:0912.0292, Table 4); Zafar+2013
+# (arXiv:1307.0602, Table 3); Prochaska & Wolfe 2009 (arXiv:0811.2003, Table 1); O'Meara+2013
+# (arXiv:1204.3093); Fumagalli+2013 (arXiv:1308.1101). (Two arXiv IDs circulating in older
+# notes were WRONG: 0912.0562 is a graphene paper, 1306.0333 is not Zafar.)
+# ARTIFACT: hcd_analysis/emulator/hcd_lit_dndx_corrected.json (committed; sha256
+# 55249943310021091183a0f170625e672368875d866c8400b2e1d5748e699cca — also carried live in
+# hcd_prior_constants_payload()["derivation_json_sha256"]). Spec + decision record:
+# hcd_priya_notes/docs/superpowers/2026-07-18-corrected-law-spec.md (incl. ADDENDUM) and the
+# 2026-07-18 PI decision bundle. Tests: tests/test_lit_dndx_corrected.py (bit-level
+# reproduction, estimand regression, telescoping record), tests/test_lit_dndx{,_fits,_kernel}.py.
+HCD_LIT_DNDX_LAW = {"LLS": (0.01840091965972645, 2.127),
+                    "subDLA": (0.004832763139114936, 2.438007767664778),
+                    "DLA": (0.0076, 1.592)}
+# The estimand each deployed law is a law OF (disjoint binned classes — NEVER cumulative; the
+# consumer telescopes disjoint classes). Guarded at the consumption boundary by
+# assert_dndx_law_estimand; test-enforced equal to the JSON's hcd_lit_dndx_estimand.
+HCD_LIT_DNDX_ESTIMAND = {"LLS": "binned_17.2_19.0", "subDLA": "binned_19.0_20.3",
+                         "DLA": "binned_ge20.3"}
 
-# --- HCD prior PIVOT GUARD (PI 2026-06-17, the CENTER-construction bug) -------------------------
+
+def assert_dndx_law_estimand(cls, expected, where):
+    """ESTIMAND GUARD (2026-07-18 corrected-law re-derivation): assert the deployed law for
+    ``cls`` is a law of the ``expected`` estimand (a CONSTANT-dict check — trace-safe, mirrors
+    the _btilt_site guard pattern; never touches traced values). Fires if a future edit
+    reinstates a wrong-object law under a re-labeled estimand (the cumulative-vs-binned LLS bug
+    or the Zafar DLA-column subDLA bug)."""
+    got = HCD_LIT_DNDX_ESTIMAND.get(cls)
+    assert got == expected, (
+        f"HCD dN/dX law estimand mismatch [{where}]: HCD_LIT_DNDX_ESTIMAND[{cls!r}] = {got!r}, "
+        f"consumer requires {expected!r}. The consumer telescopes DISJOINT binned classes — a "
+        f"cumulative (or wrong-object) law here is the 2026-07-18 corrected-law bug recurring. "
+        f"See the HCD_LIT_DNDX_LAW provenance block.")
+
+# --- HCD prior PIVOT GUARD (PI 2026-06-17, the CENTER-construction bug; band re-derived
+# 2026-07-18 at the corrected laws) ---------------------------------------------------------------
 # THE BUG: the LLS/subDLA pivot AMPLITUDE was built from w_c_med = nanmedian(w_c_cache[:,1:], axis=0)
 # — the MEDIAN over ALL z-groups (z=2.0–5.4). Since w_c rises monotonically with z, that all-z median
 # (LLS 0.274) equals the z≈3.6 value, but it is consumed as the z=3 PIVOT → the LLS α-center came out
-# ~1.45× too high (0.291 instead of the z=3-consistent ~0.194–0.200), overshooting the lit dN/dX law
-# 2.05× at z=2.4 / 1.63× at z=3 (worst at low z) = the LLS→n_s leak. The FIX builds the pivot from the
-# z=3 STRUCTURAL w_c (closure/SBC) or the lit dN/dX law directly (real fit). These bands let a future
-# revert to nanmedian(...all z...) TRIP at runtime: the z=3-consistent LLS α-center is ≈0.19–0.21
-# (sim z=3 w_c·1.06 = 0.2004; lit-law alt-(b) = 0.1938), the all-z-median value is ≈0.29 (DESI boost).
-HCD_PIVOT_LLS_ALPHA_Z3_BAND = (0.16, 0.24)   # z=3-consistent LLS α-pivot (DESI/cosmic-avg boost 1.0)
+# ~1.45× too high (0.291 instead of the z=3-consistent value), overshooting the lit dN/dX law worst
+# at low z = the LLS→n_s leak. The FIX builds the pivot from the z=3 STRUCTURAL w_c (closure/SBC) or
+# the lit dN/dX law directly (real fit). These bands let a future revert to nanmedian(...all z...)
+# TRIP at runtime. BAND (2026-07-18): adopted corrected center × (0.83, 1.21) (the same relative
+# margins as before), 2-dp → (0.14, 0.21): contains the corrected lit-law center 0.172 (K1a,
+# constrained slope) AND the sim z=3 w_c center 0.2004 (closure-guard reuse), still EXCLUDES the
+# all-z-median 0.2909 (×boost). ALLZ_MEDIAN + GUARD_REL unchanged.
+HCD_PIVOT_LLS_ALPHA_Z3_BAND = (0.14, 0.21)   # z=3-consistent LLS α-pivot (DESI/cosmic-avg boost 1.0)
 HCD_PIVOT_LLS_ALLZ_MEDIAN = 0.2909           # the BUGGY all-z-median LLS α-pivot (z≈3.6) — must NOT recur
 HCD_PIVOT_GUARD_REL = 0.05                   # |α − all-z-median| must exceed this·all-z-median
 
 
 def hcd_lls_realfit_alpha_center(Xbar_z, z=HCD_Z_PIVOT, boost=1.0):
-    """REAL-FIT LLS α-pivot CENTER built from the literature dN/dX power-law DIRECTLY (the validated
-    alt-(b)): dN/dX_LLS(z) = A·(1+z)^γ (HCD_LIT_DNDX_LAW["LLS"]) → α_LLS(z) via the EXACT telescoping
-    w_c map (dndx_wc.alpha_from_dndx_law), round-tripping the lit dN/dX to <0.34%. ``Xbar_z`` = the
-    cache mean-absorption-path-per-sightline at ``z`` (the z=3 pivot value). Returns the scalar
-    α_LLS center (× ``boost`` for the per-survey selection excess). At z=3, Xbar≈0.632 → α_LLS≈0.194
-    — the z=3-consistent center, NOT the all-z-median ~0.291 (the CENTER-construction bug)."""
+    """REAL-FIT LLS α-pivot CENTER built from the CORRECTED literature dN/dX power-law DIRECTLY
+    (the validated alt-(b)): dN/dX_LLS(z) = A·(1+z)^γ (HCD_LIT_DNDX_LAW["LLS"], the K1a-corrected
+    binned [17.2,19.0) law constrained to γ=2.127; PI 2026-07-18) → α_LLS(z) via the EXACT
+    telescoping w_c map (dndx_wc.alpha_from_dndx_law), round-tripping the lit dN/dX to <0.2% at
+    the pivot (re-measured at the corrected laws). ``Xbar_z`` = the cache
+    mean-absorption-path-per-sightline at ``z`` (the z=3 pivot value). Returns the scalar α_LLS
+    center (× ``boost`` for the per-survey selection excess). At z=3, Xbar≈0.632 → α_LLS≈0.172 —
+    the z=3-consistent corrected center, NOT the all-z-median ~0.291 (the CENTER-construction
+    bug), and NOT the pre-correction 0.194 (the cumulative-estimand bug)."""
+    assert_dndx_law_estimand("LLS", "binned_17.2_19.0", "hcd_lls_realfit_alpha_center")
     from hcd_analysis.emulator.dndx_wc import alpha_from_dndx_law
     A = jnp.asarray([HCD_LIT_DNDX_LAW[c][0] for c in ("LLS", "subDLA", "DLA")])
     g = jnp.asarray([HCD_LIT_DNDX_LAW[c][1] for c in ("LLS", "subDLA", "DLA")])
@@ -201,8 +302,60 @@ def assert_hcd_pivot_z3(alpha_mu, z, where, *, boost=1.0):
         f"low-z overshoot bug (CENTER-construction fix 2026-06-17).")
     assert lo <= a <= hi, (
         f"HCD LLS α-PIVOT center [{where}] = {a:.4f} outside the z=3-consistent band [{lo:.4f},{hi:.4f}] "
-        f"(boost={boost}). Expected ≈0.194 (lit-law) / ≈0.200 (sim z=3 w_c·1.06). A center near the "
-        f"all-z-median {allz:.4f} (= z≈3.6) is the CENTER-construction bug. See the dN/dX low-z overshoot.")
+        f"(boost={boost}). Expected ≈0.172 (corrected lit-law, PI 2026-07-18) / ≈0.200 (sim z=3 w_c). "
+        f"A center near the all-z-median {allz:.4f} (= z≈3.6) is the CENTER-construction bug. See the "
+        f"dN/dX low-z overshoot + the HCD_LIT_DNDX_LAW provenance block.")
+
+
+# --- HCD prior-constants freeze payload + signature (2026-07-18; closes the tripwire gap
+# forward_signature's docstring flags: prior constants were NOT covered by any signature) -------
+_HCD_DERIVATION_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "hcd_lit_dndx_corrected.json")
+
+
+def hcd_prior_constants_payload():
+    """JSON-native dict of every deployed HCD prior constant + the corrected-law derivation
+    provenance (adopted kernel, r(3), the per-kernel alpha bracket endpoints, and the sha256 of
+    the committed derivation JSON). The freeze task MUST insert this as
+    analysis.lock["prior_constants"] alongside forward_signature() so a prior-constant change can
+    never again be invisible to the freeze artifact (spec 2026-07-18 sec 5.8; test-pinned by
+    tests/test_lit_dndx_corrected.py case 8). SCOPE: this payload covers the inference.py HCD
+    prior constants only — closure_legb.ZSLOPE_PRIOR_SIGMA and HCD_INCIDENCE_SLOPE (and any
+    other closure_legb-side prior constant) are covered by NO signature; the freeze checklist
+    must record them separately."""
+    with open(_HCD_DERIVATION_JSON, "rb") as fh:
+        raw = fh.read()
+    j = json.loads(raw)
+    return dict(
+        HCD_LIT_DNDX_LAW={c: list(v) for c, v in HCD_LIT_DNDX_LAW.items()},
+        HCD_LIT_DNDX_ESTIMAND=dict(HCD_LIT_DNDX_ESTIMAND),
+        HCD_LIT_OVER_SIM=list(HCD_LIT_OVER_SIM),
+        HCD_LIT_OVER_SIM_SLOPE=list(HCD_LIT_OVER_SIM_SLOPE),
+        HCD_LLS_REALFIT_ZSLOPE=float(HCD_LLS_REALFIT_ZSLOPE),
+        HCD_PIVOT_LLS_ALPHA_Z3_BAND=list(HCD_PIVOT_LLS_ALPHA_Z3_BAND),
+        HCD_PIVOT_LLS_ALLZ_MEDIAN=float(HCD_PIVOT_LLS_ALLZ_MEDIAN),
+        HCD_PIVOT_GUARD_REL=float(HCD_PIVOT_GUARD_REL),
+        HCD_PRIOR_FRAC_SIGMA=list(HCD_PRIOR_FRAC_SIGMA),
+        HCD_LLS_SURVEY_BOOST=dict(HCD_LLS_SURVEY_BOOST),
+        HCD_LLS_SURVEY_FRAC_SIGMA=dict(HCD_LLS_SURVEY_FRAC_SIGMA),
+        HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X=dict(HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X),
+        HCD_DLA_RESIDUAL_FRAC=float(HCD_DLA_RESIDUAL_FRAC),
+        HCD_DLA_Z_RELIABLE=float(HCD_DLA_Z_RELIABLE),
+        HCD_Z_PIVOT=float(HCD_Z_PIVOT),
+        adopted_kernel=j["kernel_chosen"],
+        adopted_kernel_r3=j["kernel_table"]["budget"]["r3_k1"],
+        adopted_alpha_lls_z3=j["alpha_lls_z3"]["adopted"],
+        bracket_alpha_lls_z3=j["alpha_lls_z3"]["per_kernel"],
+        derivation_json_sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def hcd_prior_signature():
+    """Stable sha256 hex digest over the canonical-JSON (sorted-keys) prior-constants payload —
+    the prior-constant analog of closure_legb.forward_signature (freeze/audit artifact; consumed
+    by NOTHING in the deployed inference path)."""
+    payload = json.dumps(hcd_prior_constants_payload(), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def lit_over_sim_at_z(z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SLOPE,

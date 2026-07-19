@@ -18,6 +18,7 @@ Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_hcd_pivot_center.py -q
 """
+import json
 import os
 import numpy as np
 import pytest
@@ -32,11 +33,27 @@ from hcd_analysis.emulator.data import load_cache
 _CACHE = CL.CACHE_PATH
 _HAS_CACHE = os.path.exists(_CACHE)
 
-# z=3-consistent LLS α-pivot (DESI/cosmic-avg boost 1.0): lit-law alt-(b) ≈ 0.194, sim z=3 w_c·1.06
-# ≈ 0.200. The BUGGY all-z-median value is ≈0.291 (z≈3.6). subDLA z=3 center ≈ 0.062, all-z ≈ 0.090.
-_LLS_Z3_LO, _LLS_Z3_HI = 0.18, 0.21
+
+def _adopted_json():
+    """Loader helper: band + adopted-center literals are pinned FROM the committed
+    derivation artifact (corrected-law re-derivation, PI adoption 2026-07-18), so the
+    test and the deployed constants share one source of numbers."""
+    p = "/home/mfho/hcd_priya/hcd_analysis/emulator/hcd_lit_dndx_corrected.json"
+    with open(p) as fh:
+        return json.load(fh)
+
+
+_J = _adopted_json()
+
+# z=3-consistent LLS α-pivot (DESI/cosmic-avg boost 1.0): corrected lit-law alt-(b)
+# ≈ 0.172 (K1a kernel, constrained slope 2.127; PI 2026-07-18), sim z=3 w_c center
+# 0.2004. The BUGGY all-z-median value is ≈0.291 (z≈3.6). Band from the committed JSON
+# (= HCD_PIVOT_LLS_ALPHA_Z3_BAND = adopted center × (0.83, 1.21), 2-dp).
+_LLS_Z3_LO, _LLS_Z3_HI = (float(b) for b in _J["adopted_band"]["band"])
+# ONE human-blessed hard literal kept as the tripwire (adopted center at 3 decimals):
+_LLS_CENTER_TRIPWIRE = 0.172
 _LLS_ALLZ = 0.2909
-_SUB_Z3 = 0.0622           # z=3 structural w_c subDLA × lit/sim 1.00
+_SUB_Z3 = 0.0622           # z=3 structural w_c subDLA × lit/sim 1.00 (slot unchanged)
 _SUB_ALLZ = 0.0902         # the all-z-median subDLA (the bug)
 
 
@@ -59,32 +76,44 @@ def test_pivot_helper_returns_z3_wc_not_allz_median():
 @pytest.mark.skipif(not _HAS_CACHE, reason="LF cache not present")
 def test_production_path_lls_pivot_is_z3_consistent_not_allz_median():
     """The PRODUCTION prior center (built via the z=3 structural w_c, the build_legb_ctx path) gives
-    α_pivot(LLS)≈0.200 (z=3-consistent), NOT ≈0.291 (the all-z-median bug). This FAILS on the OLD
-    all-z-median construction (RED) and PASSES on the fix. subDLA pinned the same way."""
+    a z=3-consistent α_pivot(LLS) (≈ lit/sim × w_LLS(z3) ≈ 0.188 with the corrected ratio 0.995),
+    NOT ≈0.291 (the all-z-median bug). This FAILS on the OLD all-z-median construction (RED) and
+    PASSES on the fix. subDLA pinned the same way (its lit/sim slot is unchanged at 1.00)."""
     d = load_cache(_CACHE)
     w_c_z3, _ = CL.hcd_pivot_wc_and_xbar(d)
     mu, _ = map(np.asarray, INF.hcd_incidence_prior(jnp.asarray(w_c_z3), z=3.0, survey="DESI"))
     # LLS pivot z=3-consistent, NOT the all-z median
     assert _LLS_Z3_LO <= mu[0] <= _LLS_Z3_HI, f"LLS α-pivot {mu[0]:.4f} not z=3-consistent"
+    assert mu[0] == pytest.approx(float(INF.HCD_LIT_OVER_SIM[0]) * w_c_z3[0], rel=1e-6)
     assert abs(mu[0] - _LLS_ALLZ) > 0.05, f"LLS α-pivot {mu[0]:.4f} ≈ the all-z-median {_LLS_ALLZ}"
     # subDLA pivot z=3-consistent, NOT the all-z median
     assert mu[1] == pytest.approx(_SUB_Z3, abs=0.005), f"subDLA α-pivot {mu[1]:.4f} != z=3 ~0.062"
     assert abs(mu[1] - _SUB_ALLZ) > 0.01, f"subDLA α-pivot {mu[1]:.4f} ≈ the all-z-median {_SUB_ALLZ}"
-    # and the OLD all-z-median construction would have given ≈0.291 (the bug we are fixing)
+    # and the OLD all-z-median construction (lit/sim × the all-z-median w_c ≈ 0.273) lands
+    # ABOVE the band — the guard band still catches the bug construction
     allz = np.nanmedian(np.asarray(d["w_c_cache"])[:, 1:], axis=0)
     mu_bug, _ = map(np.asarray, INF.hcd_incidence_prior(jnp.asarray(allz), z=3.0, survey="DESI"))
-    assert mu_bug[0] == pytest.approx(_LLS_ALLZ, abs=5e-3), "all-z-median LLS pivot must be ~0.291"
+    assert mu_bug[0] == pytest.approx(float(INF.HCD_LIT_OVER_SIM[0]) * allz[0], rel=1e-6)
+    assert mu_bug[0] > _LLS_Z3_HI, "the all-z-median construction must land above the band"
 
 
 @pytest.mark.skipif(not _HAS_CACHE, reason="LF cache not present")
-def test_realfit_litlaw_lls_center_is_0p194_and_roundtrips():
-    """The REAL-FIT LLS center built from the lit dN/dX law DIRECTLY (alt-(b),
-    hcd_lls_realfit_alpha_center) is ≈0.194 (z=3-consistent), round-tripping the lit dN/dX_LLS(z=3)
-    to <0.34%. Distinct from the all-z-median bug (~0.291)."""
+def test_realfit_litlaw_lls_center_is_adopted_and_roundtrips():
+    """The REAL-FIT LLS center built from the corrected lit dN/dX law DIRECTLY (alt-(b),
+    hcd_lls_realfit_alpha_center) equals the JSON-adopted center (≈0.172; K1a kernel,
+    constrained slope, PI 2026-07-18), computed THROUGH the deployed path from
+    INF.HCD_LIT_DNDX_LAW — plus the human-blessed 3-dp tripwire literal. Round-trips the
+    lit dN/dX_LLS(z=3) to <0.2% (re-measured at the corrected laws). Distinct from the
+    all-z-median bug (~0.291)."""
     d = load_cache(_CACHE)
     _, Xbar_z3 = CL.hcd_pivot_wc_and_xbar(d)
     a_lls = INF.hcd_lls_realfit_alpha_center(Xbar_z3, z=3.0, boost=1.0)
-    assert a_lls == pytest.approx(0.194, abs=0.01), f"lit-law LLS center {a_lls:.4f} != ~0.194"
+    # expected center from the DEPLOYED law dict through the deployed path (not a copy of
+    # the constant): the JSON-adopted value at the pinned Xbar 0.632, tolerance covering
+    # the small cache-Xbar vs pinned-Xbar difference
+    assert a_lls == pytest.approx(_J["alpha_lls_z3"]["adopted"], abs=0.004)
+    assert a_lls == pytest.approx(_LLS_CENTER_TRIPWIRE, abs=0.004), \
+        f"lit-law LLS center {a_lls:.4f} != the human-blessed tripwire {_LLS_CENTER_TRIPWIRE}"
     assert abs(a_lls - _LLS_ALLZ) > 0.05, "lit-law LLS center must NOT be the all-z-median bug"
     # round-trip: α_LLS → dN/dX vs the lit law A·(1+z)^γ
     from hcd_analysis.emulator.dndx_wc import alpha_to_dndx
@@ -97,19 +126,20 @@ def test_realfit_litlaw_lls_center_is_0p194_and_roundtrips():
     dndx_rt = np.asarray(alpha_to_dndx(jnp.asarray(alpha3[None, :]),
                                        jnp.asarray([Xbar_z3]), jnp.asarray([3.0])))[0]
     lit = A * (1.0 + 3.0) ** g
-    assert abs(dndx_rt[0] / lit - 1.0) < 0.0034, \
-        f"lit-law LLS round-trip err {100*(dndx_rt[0]/lit-1):.3f}% must be <0.34%"
+    assert abs(dndx_rt[0] / lit - 1.0) < 0.002, \
+        f"lit-law LLS round-trip err {100*(dndx_rt[0]/lit-1):.3f}% must be <0.2% (re-measured)"
 
 
 @pytest.mark.skipif(not _HAS_CACHE, reason="LF cache not present")
 def test_build_legb_ctx_real_fit_alpha_hcd_mu_is_lit_consistent():
     """The FULL production real-fit ctx (build_legb_ctx survey='DESI') carries alpha_hcd_mu[LLS]
-    z=3-consistent (~0.194, the lit-law center) — NOT the all-z-median ~0.291. This is the number
-    the real fit's TruncatedNormal(A_hcd) is centered on."""
+    z=3-consistent (~0.172, the corrected lit-law center; PI 2026-07-18) — NOT the all-z-median
+    ~0.291. This is the number the real fit's TruncatedNormal(A_hcd) is centered on."""
     ctx, _ = CL.build_legb_ctx(survey="DESI")
     a_lls = float(np.asarray(ctx.alpha_hcd_mu)[0])
     assert _LLS_Z3_LO <= a_lls <= _LLS_Z3_HI, \
-        f"production real-fit alpha_hcd_mu[LLS] {a_lls:.4f} not z=3-consistent (~0.194)"
+        f"production real-fit alpha_hcd_mu[LLS] {a_lls:.4f} not z=3-consistent (~0.172)"
+    assert a_lls == pytest.approx(_LLS_CENTER_TRIPWIRE, abs=0.004)
     assert abs(a_lls - _LLS_ALLZ) > 0.05, \
         f"production real-fit alpha_hcd_mu[LLS] {a_lls:.4f} ≈ the all-z-median bug {_LLS_ALLZ}"
 
@@ -140,8 +170,10 @@ def test_hier_ratios_rederived_at_pivot_z():
 #  CACHE-FREE: the runtime pivot GUARD + the lit-law center math               #
 # --------------------------------------------------------------------------- #
 def test_pivot_guard_passes_z3_consistent_center():
-    """assert_hcd_pivot_z3 PASSES the z=3-consistent LLS α-center (≈0.194/0.200) at the z=3 pivot."""
-    INF.assert_hcd_pivot_z3(0.194, z=3.0, where="test z=3 lit-law")
+    """assert_hcd_pivot_z3 PASSES the z=3-consistent LLS α-centers at the z=3 pivot: the
+    corrected lit-law center (≈0.172, PI 2026-07-18) AND the sim z=3 w_c center 0.2004
+    (the closure-guard reuse the band is REQUIRED to keep containing)."""
+    INF.assert_hcd_pivot_z3(_LLS_CENTER_TRIPWIRE, z=3.0, where="test z=3 lit-law corrected")
     INF.assert_hcd_pivot_z3(0.2004, z=3.0, where="test z=3 sim-wc")
 
 
@@ -175,7 +207,7 @@ def test_lit_law_center_scales_with_boost():
     a1 = INF.hcd_lls_realfit_alpha_center(0.632, z=3.0, boost=1.0)
     a25 = INF.hcd_lls_realfit_alpha_center(0.632, z=3.0, boost=2.5)
     assert a25 == pytest.approx(2.5 * a1, rel=1e-6)
-    assert a1 == pytest.approx(0.194, abs=0.01)
+    assert a1 == pytest.approx(_LLS_CENTER_TRIPWIRE, abs=5e-4)   # the 3-dp tripwire
 
 
 if __name__ == "__main__":

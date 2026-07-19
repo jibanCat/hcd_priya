@@ -1,4 +1,16 @@
-"""Derive the 1x and 2x HCD LLS (and subDLA/DLA) fractional dN/dX measurement uncertainty.
+"""[SUPERSEDED 2026-07-18 — kept as the historical WIDTH-RECORD script] Derive the 1x/2x
+HCD fractional dN/dX measurement widths ON THE OLD (WRONG-OBJECT) literature arrays.
+
+SUPERSESSION: the corrected-law re-derivation (PI adoption 2026-07-18, spec
+hcd_priya_notes/docs/superpowers/2026-07-18-corrected-law-spec.md) retired the arrays this
+script fits: its 'LLS' points are the CUMULATIVE tau>=2 compilation (not the binned class)
+and its 'subDLA' points are Zafar Table 3's Peroux DLA column (wrong object). They are now
+served from the TOMBSTONE constants in hcd_analysis/emulator/lit_dndx.py (greppable, never
+fit for deployment), so this script's printed numbers stay byte-identical as the
+historical record of where the old 0.15/0.30 knobs came from. THE DEPLOYED WIDTH OF RECORD
+is now derived by scripts/derive_hcd_dndx_corrected.py on the corrected K1a points:
+sigma_LLS 1x = 0.287 (measurement 0.174 + kernel common-mode s_r3=0.227 in quadrature,
+PI decision 4), 2x hedge = 0.574; see inference.HCD_LLS_SURVEY_FRAC_SIGMA(+HEDGE2X).
 
 The PI WIDTH RULE: set sigma_LLS to 1-2x the LITERATURE dN/dX MEASUREMENT error.
 1x = the fractional lit dN/dX measurement uncertainty for LLS (derived here), 2x = double.
@@ -10,72 +22,43 @@ We combine THREE contributions of the lit measurement error into ONE fractional 
       WLS), i.e. how well the lit fixes dN/dX at the prior pivot;
   (c) the per-point SCATTER about the WLS fit (excess scatter beyond the error bars, the
       heterogeneous-compilation hedge).
-The 1x sigma/mu = max(b_chi2-inflated, c) reported alongside the raw per-point (a); we report all
-three so the PI can see the breakdown, and take the LLS 1x as the load-bearing number.
+The 1x sigma/mu = max(b_chi2-inflated, c) reported alongside the raw per-point (a).
 
-RESULT (the derived prior knobs, PI re-determination 2026-06-17): LLS 1x sigma/mu = 0.16 (the WLS
-norm err 0.086 chi2-inflated, vs the per-point scatter 0.160 -> max 0.160) -> the clean 1x knob 0.15;
-2x = 0.30 (cosmic-variance hedge). WLS gamma_LLS = +2.127 (the real-fit forward z-slope), A = 0.0201.
-subDLA 1x = 0.10, DLA 1x = 0.09 (sub-dominant; the repo keeps subDLA sigma/mu=0.40, DLA=0.50 broad).
+RESULT (HISTORICAL record, superseded 2026-07-18; re-run verified identical): LLS 1x
+sigma/mu = 0.160 (WLS norm err 0.086 chi2-inflated vs per-point scatter 0.160 -> max
+0.160) -> the old clean 1x knob 0.15; 2x = 0.30. WLS gamma_LLS = +2.127, A = 0.0201 (the
+cumulative-estimand fit; the DEPLOYED corrected law is now (0.0184, 2.127) constrained).
+subDLA 1x = 0.102, DLA 1x = 0.094 (wrong-object subDLA; the repo keeps subDLA
+sigma/mu=0.40, DLA=0.50 broad). Deployed knobs of record: 0.287 / 0.574 (see above).
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/derive_hcd_lls_width.py
 """
 import numpy as np
 
-# Literature dN/dX (z, value, +-err) per class - verbatim from scripts/plot_dndx_vs_literature.py
+# The WLS implementation was refactored VERBATIM into the shared module (corrected-law
+# re-derivation, spec 2026-07-18 step 3) so old and new scripts share ONE implementation;
+# behavior here is byte-identical (regression-tested in tests/test_lit_dndx_fits.py).
+from hcd_analysis.emulator.lit_dndx import (  # noqa: E402
+    wls_powerlaw, LLS_TAU2_OLD_DEFECTS, ZAFAR13_T3_DLA_BLOCK_WRONG_SUBDLA_LABEL,
+    ELL_X_DLA_GE20P3_PW09_T1)
+
+# The OLD literature arrays, served from the estimand-named TOMBSTONES (LIT dict deleted;
+# the DLA points are the verified PW09 Table 1 values with upper errors, the deployed
+# convention — numerically identical to the old hard-code).
+_T_LLS = LLS_TAU2_OLD_DEFECTS
+_T_SUB = ZAFAR13_T3_DLA_BLOCK_WRONG_SUBDLA_LABEL
+_T_DLA = ELL_X_DLA_GE20P3_PW09_T1
 LIT = {
-    "LLS":    ([2.4, 2.8, 3.35, 3.47, 3.58, 3.74, 3.97, 4.23],
-               [0.29, 0.33, 0.35, 0.57, 0.41, 0.52, 0.72, 0.78],
-               [0.05, 0.08, 0.14, 0.12, 0.07, 0.08, 0.15, 0.19],
-               "O'Meara13 / Fumagalli13 / Prochaska10 (tau>=2)"),
-    "subDLA": ([2.27, 2.73, 3.25, 3.77, 4.20],
-               [0.07, 0.06, 0.08, 0.10, 0.10],
-               [0.01, 0.01, 0.02, 0.02, 0.03],
-               "Zafar+2013 (Table 3)"),
-    "DLA":    ([2.31, 2.57, 2.86, 3.22, 3.70, 4.39],
-               [0.048, 0.055, 0.067, 0.084, 0.075, 0.106],
-               [0.006, 0.005, 0.006, 0.006, 0.009, 0.018],
+    "LLS":    (list(_T_LLS["z"]), list(_T_LLS["lx"]), list(_T_LLS["err"]),
+               "O'Meara13 / Fumagalli13 / Prochaska10 (tau>=2) [TOMBSTONE: cumulative, "
+               "wrong estimand]"),
+    "subDLA": (list(_T_SUB["z"]), list(_T_SUB["lx"]), list(_T_SUB["err"]),
+               "Zafar+2013 (Table 3) [TOMBSTONE: Peroux DLA column, wrong object]"),
+    "DLA":    (list(_T_DLA["z_bar"]), list(_T_DLA["lx"]), list(_T_DLA["err_hi"]),
                "Prochaska & Wolfe 2009 (Table 1)"),
 }
 Z_PIVOT = 3.0
-
-
-def wls_powerlaw(z, v, e):
-    """WLS fit log(dN/dX) = log A + gamma*log(1+z), weighting by the lit errors in log space.
-    Returns (A, gamma, cov[2x2], sigma_logA, sigma_gamma, frac_norm_err_at_pivot, frac_scatter)."""
-    z = np.asarray(z, float); v = np.asarray(v, float); e = np.asarray(e, float)
-    x = np.log(1.0 + z)                       # regressor
-    y = np.log(v)                             # log dN/dX
-    sig_y = e / v                             # fractional error -> log-space error
-    w = 1.0 / sig_y**2                        # WLS weights
-    # design matrix [1, x] ; params [logA, gamma]
-    X = np.vstack([np.ones_like(x), x]).T
-    W = np.diag(w)
-    XtWX = X.T @ W @ X
-    XtWy = X.T @ W @ y
-    beta = np.linalg.solve(XtWX, XtWy)        # [logA, gamma]
-    cov = np.linalg.inv(XtWX)                 # parameter covariance (chi2-based, NOT rescaled)
-    logA, gamma = beta
-    # residuals + reduced chi2
-    resid = y - X @ beta
-    dof = max(len(z) - 2, 1)
-    chi2 = float(np.sum(w * resid**2))
-    chi2_red = chi2 / dof
-    # NORMALIZATION uncertainty AT THE PIVOT z=3 (the variance of the FIT at x_p = log(1+3)):
-    xp = np.array([1.0, np.log(1.0 + Z_PIVOT)])
-    var_logfit_pivot = float(xp @ cov @ xp)    # variance of log(dN/dX_fit) at pivot
-    frac_norm_err = np.sqrt(var_logfit_pivot)  # ~ fractional error of the fit at the pivot
-    # if chi2_red>1, the points scatter MORE than their error bars -> inflate by sqrt(chi2_red)
-    frac_norm_err_infl = frac_norm_err * np.sqrt(max(chi2_red, 1.0))
-    # per-point SCATTER about the fit (in fractional/log units) - the excess-dispersion hedge
-    frac_scatter_rms = float(np.sqrt(np.mean(resid**2)))    # rms of log-residuals = frac scatter
-    A = np.exp(logA)
-    return dict(A=A, gamma=gamma, cov=cov, logA=logA,
-                sigma_logA=np.sqrt(cov[0,0]), sigma_gamma=np.sqrt(cov[1,1]),
-                chi2_red=chi2_red,
-                frac_norm_err=frac_norm_err, frac_norm_err_infl=frac_norm_err_infl,
-                frac_scatter=frac_scatter_rms)
 
 
 def per_point_frac(z, v, e):

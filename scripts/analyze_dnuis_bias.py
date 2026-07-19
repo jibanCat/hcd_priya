@@ -175,9 +175,19 @@ def load_shards(shard_dir, arm=None, survey=None, treatment=None):
         # meta["inject_spec"]) must match across every pkl pooled into this group. Covers BOTH the OOS
         # basis form (member/strength) AND the scalar in-span form (b_res) -- else two `resolution`
         # FILL shards at different --b-res would stamp identically and pool silently (PR#14 robustness).
+        # Extended (NORC-panel FIX-1): also key on meta["forward"] (the resolved deployed-forward dict
+        # stamped by the DLA runner: res_corr_on/fix_alpha_res/sample_res/f_res_amp_sigma/metal_prior/
+        # metal_node_z) and meta["strength"] (the +/-1sigma DLA injection sign). DLA pkls carry
+        # inject_spec=None, so without these two a straggler resubmitted after a hypothetical
+        # PROD_RES_CORR_ON flip -- or a wrong-STRENGTH resubmit landing in the wrong out-dir -- would
+        # stamp (seed,None,None,None) and pool silently into the gate cell.
         res_spec = (meta.get("inject_spec") or {}).get("resolution")
         _rs = res_spec if isinstance(res_spec, dict) else {}
-        stamp = (meta.get("seed"), _rs.get("member"), _rs.get("strength"), _rs.get("b_res"))
+        _fw = meta.get("forward")
+        _fw_key = (frozenset((k, tuple(v) if isinstance(v, list) else v) for k, v in _fw.items())
+                   if isinstance(_fw, dict) else _fw)
+        stamp = (meta.get("seed"), _rs.get("member"), _rs.get("strength"), _rs.get("b_res"),
+                 _fw_key, meta.get("strength"))
         prev = stamps.get(key)
         if prev is not None and prev[0] != stamp:
             raise SystemExit(

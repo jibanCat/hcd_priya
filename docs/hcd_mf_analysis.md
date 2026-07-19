@@ -164,7 +164,10 @@ Observations:
 - DLA panels show HR reaching into the PW09/Ho21 obs band at z ≈ 3,
   while LF stays below.
 
-Suite-averaged view (60 LF + 4 HR, with all four Ω_HI literature overlays):
+Suite-averaged view (60 LF + 6 HR — the production suite; PRIYA's published release is 48 LF +
+3 HF, the deployed caches carry the extended suite. PI-confirmed 2026-07-18. The "4 HR" this
+line previously stated was wrong; this figure predates two HR additions. All four Ω_HI
+literature overlays):
 
 ![dN/dX HR vs LF vs obs](../figures/analysis/01_catalog_obs/dndx_hr_vs_lf_vs_obs_per_class.png)
 
