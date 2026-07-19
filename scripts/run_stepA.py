@@ -249,8 +249,9 @@ def build_config(verbose=False):
     # the center-OFFSET sensitivity. D_lls (boost 1.0) is 6% below the DESI 1.06× pin → the
     # center-sensitivity arm; D_lls_m (boost 1.06) sits ON the DESI pin center → the clean DESI case.
     add_fiducial("D_lls_m", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15)
-    # D_lls_m30: matched DESI at the MODERATE σ_LLS=0.30 (the new HCD_LLS_SURVEY_FRAC_SIGMA[DESI];
-    # PI 2026-06-11) — re-validates that DESI recovers A_p in-gate at the moderate width (D_lls_m at
+    # D_lls_m30: matched DESI at the MODERATE σ_LLS=0.30 (the then-deployed 2026-06-11
+    # HCD_LLS_SURVEY_FRAC_SIGMA[DESI]; SUPERSEDED — the deployed DESI width is 0.287 since
+    # 2026-07-18) — re-validated that DESI recovers A_p in-gate at the moderate width (D_lls_m at
     # the old σ0.15 gave +1.01σ). Uses the survey pin center (1.06×) with the explicit 0.30 width.
     add_fiducial("D_lls_m30", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
                  sigma_lls=0.30)
@@ -939,7 +940,8 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         else:
             # CLOSURE default: CENTER on the SIM incidence-weight slope HCD_INCIDENCE_SLOPE (~2.4, the
             # slope the held-out-sim mock truth's w_c(z) carries — dN/dX(z) RISES with z), NOT the
-            # lit/sim RATIO slope HCD_LIT_OVER_SIM_SLOPE (~0.95) NOR the litWLS real-fit slope 2.127.
+            # lit/sim RATIO slope HCD_LIT_OVER_SIM_SLOPE (0.764 dated 2026-07-18; 0.95 pre-swap)
+            # NOR the litWLS real-fit slope 2.127.
             # Matches the _zslope_sites None-default + the 2D-tilt anchor. Pinned marginalized or fixed.
             ctx = ctx._replace(zslope_mu=jnp.asarray(HCD_INCIDENCE_SLOPE))
             if chain["z_slope_marginalized"]:

@@ -321,6 +321,27 @@ def test_case8b_deploy_slots_pinned_to_json():
     assert list(INF.HCD_PIVOT_LLS_ALPHA_Z3_BAND) == list(J["adopted_band"]["band"])
 
 
+def test_case8_g3_tripwire_human_blessed_literal_pins():
+    """G3 TRIPWIRE (adversarial backfill F3, 2026-07-19): HUMAN-BLESSED literal pins of the
+    freeze-critical derivation numbers, independent of the live payload machinery (which would
+    track a silently regenerated JSON). The sha256 is the 2026-07-19 refreshed artifact
+    (regenerated with ZERO numeric drift; the only content change vs the 2026-07-18 original is
+    the lit_over_sim.LLS 'deployed'→'pre_swap' key rename + created/git_commit). Any future JSON
+    regeneration MUST re-bless these literals deliberately."""
+    # (1) the committed artifact bytes
+    with open(_JSON, "rb") as fh:
+        sha = hashlib.sha256(fh.read()).hexdigest()
+    assert sha == "d3f1406243d01c081fedee3382bd4871b00daa194e4b4fcf5524d481b8b2721c"
+    # (2) the live payload agrees with the literal (the live sha checks must agree)
+    p = INF.hcd_prior_constants_payload()
+    assert p["derivation_json_sha256"] == sha
+    # (3) the adopted kernel correction at the z=3 pivot (K1a r(3), bit-level)
+    assert p["adopted_kernel_r3"] == 0.8884262008450887
+    # (4) the K1a/K2 alpha_LLS(z3) bracket endpoints (adopted-center + far minus arm, bit-level)
+    assert p["bracket_alpha_lls_z3"]["K1a"] == 0.1721593679289494
+    assert p["bracket_alpha_lls_z3"]["K2"] == 0.0953902830189703
+
+
 def test_case8_signature_is_sha256_and_tracks_constants(monkeypatch):
     """hcd_prior_signature = sha256 over the canonical-JSON payload (forward_signature
     pattern, closure_legb.py); deterministic, and it MOVES when a prior constant moves —

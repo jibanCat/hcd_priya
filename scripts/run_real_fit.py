@@ -545,8 +545,20 @@ def main():
                          "2.8 = the KS-author published conservative DIAGNOSTIC. Routes a "
                          "non-baseline value to a distinct root (real_ks_z<NN>) so it never "
                          "clobbers the z2.4 baseline.")
+    ap.add_argument("--allow-env-data-flags", action="store_true",
+                    help="DANGER: permit the env data-selection flags (HCD_DESI_SNR3 / "
+                         "HCD_CV_FLOOR / HCD_CV_FLOOR_RANK1) to be set at driver entry — a "
+                         "deliberate non-baseline arm ONLY. Default: refuse to start (F2 "
+                         "tripwire; the resolved values are stamped on the DataLeg).")
     ap.set_defaults(blind=True)
     a = ap.parse_args()
+
+    # ENV DATA-FLAG TRIPWIRE (adversarial backfill F2, 2026-07-19; companion to the
+    # dla_cov_reduced authority assert in build_real_ctx): a stray exported HCD_DESI_SNR3 /
+    # HCD_CV_FLOOR(_RANK1) would silently swap the DESI measurement / inflate the covariance
+    # under the REAL fit. Refuse at entry unless the override is explicit.
+    from hcd_analysis.emulator import data_likelihood as _DLF
+    _DLF.assert_env_data_flags_unset("run_real_fit", allow=a.allow_env_data_flags)
 
     if a.blind and not os.path.exists(a.blind_lock):
         raise SystemExit(

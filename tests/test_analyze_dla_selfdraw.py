@@ -59,10 +59,11 @@ def _rec(names, truth, mean, sd, L=100, seed=0, n_div=0, tau0_truth=1.0, tau0_me
 NAMES = ["ns", "Ap", "tau0_z0", "alpha_lls", "alpha_subdla", "alpha_dla"]
 
 
-def _pkl(path, shard, clean, boost, sig=SIG, cov_reduced=True, boost_val=1.5, n_mocks=None):
+def _pkl(path, shard, clean, boost, sig=SIG, cov_reduced=True, boost_val=1.5, n_mocks=None,
+         survey="desi"):
     payload = {
         "arm": "dla_selfdraw",
-        "survey": "desi",
+        "survey": survey,
         "idxs": [shard],
         "clean_per_mock": clean,
         "boost_per_mock": boost,
@@ -173,6 +174,30 @@ def test_load_shards_rejects_none_signature(tmp_path):
     _pkl(tmp_path / "dla_selfdraw_desi_shard_000.pkl", 0, [rc], [rb], sig=None, n_mocks=1)
     with pytest.raises(AssertionError, match="signature"):
         load_shards(str(tmp_path))
+
+
+def test_load_shards_rejects_mixed_survey(tmp_path):
+    """(F6b, adversarial backfill 2026-07-19) shards from two different surveys must never pool
+    into one campaign — d['survey'] must be consistent across every pkl."""
+    rc, rb = _paired_records()
+    _pkl(tmp_path / "dla_selfdraw_desi_shard_000.pkl", 0, [rc], [rb], survey="desi")
+    rc2, rb2 = _paired_records(alpha_clean=0.006, seed=2)
+    _pkl(tmp_path / "dla_selfdraw_eboss_shard_001.pkl", 1, [rc2], [rb2], survey="eboss")
+    with pytest.raises(AssertionError, match="survey"):
+        load_shards(str(tmp_path))
+
+
+def test_load_shards_ignores_smoke_pkls(tmp_path):
+    """(F6a) a smoke-suffixed pkl in the campaign dir must never be pooled as a real shard."""
+    rc, rb = _paired_records()
+    _pkl(tmp_path / "dla_selfdraw_desi_shard_000.pkl", 0, [rc], [rb], n_mocks=1)
+    rc2, rb2 = _paired_records(alpha_clean=0.006, seed=2)
+    # a smoke pkl carrying a DUPLICATE mock idx: pooled, it would trip the duplicate guard;
+    # correctly ignored, the campaign is complete with the real shard alone
+    _pkl(tmp_path / "dla_selfdraw_desi_shard_000.smoke.pkl", 0, [rc2], [rb2], n_mocks=1)
+    clean, boost, meta = load_shards(str(tmp_path))
+    assert len(clean) == 1
+    assert clean[0]["truth_vec"][5] == pytest.approx(0.004)   # the REAL shard, not the smoke
 
 
 def test_load_shards_rejects_mixed_boost(tmp_path):

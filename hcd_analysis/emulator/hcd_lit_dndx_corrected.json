@@ -319,13 +319,13 @@
    ]
   }
  },
- "created": "2026-07-18T19:47:00",
+ "created": "2026-07-19T13:20:17",
  "estimator_per_class": {
   "DLA": "poisson_glm (WLS anchor printed)",
   "LLS": "gls_log(corrected points, common-mode kernel cov)",
   "subDLA": "poisson_glm"
  },
- "git_commit": "81f3aa3668bc69cb38dadc5d967c4d33ddea4108",
+ "git_commit": "6389cb273be59203d920181f4f51314ff83b8648",
  "hcd_lit_dndx_estimand": {
   "DLA": "binned_ge20.3",
   "LLS": "binned_17.2_19.0",
@@ -881,10 +881,6 @@
    "sim_zp": 0.049933086566983184
   },
   "LLS": {
-   "deployed": {
-    "ratio_slope": 0.95,
-    "ratio_zp": 1.06
-   },
    "gamma_sim": 1.3629813157992172,
    "per_kernel": {
     "K1a": {
@@ -903,6 +899,10 @@
      "ratio_slope": 0.23446981983472281,
      "ratio_zp": 0.7518780910373793
     }
+   },
+   "pre_swap": {
+    "ratio_slope": 0.95,
+    "ratio_zp": 1.06
    },
    "sim_zp": 0.3530335769208966
   },

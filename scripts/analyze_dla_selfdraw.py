@@ -20,9 +20,10 @@ metal-floor A_p baseline. PI report spec (2026-07-17 handoff) for clean and boos
   * divergences / retained draws L (L=17..150 across fits -> the L-weighted pooled mean is
     reported as a secondary line) / railing / corr(alpha_dla; tau0_amp, A_p, n_s)
 
-Ingest asserts (reject stale-cov pkls): meta.forward.dla_cov_reduced is True and forward_signature
-identical across shards; per-pair truth contract (boosted alpha_dla == boost x clean, all other
-truth entries bit-identical). Pure numpy on purpose — safe on the login node (no JAX import).
+Ingest asserts (reject stale-cov pkls): meta.forward.dla_cov_reduced is True, forward_signature
+AND d["survey"] identical across shards (F6b), smoke-suffixed pkls filtered out (F6a); per-pair
+truth contract (boosted alpha_dla == boost x clean, all other truth entries bit-identical).
+Pure numpy on purpose — safe on the login node (no JAX import).
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
      scripts/analyze_dla_selfdraw.py --shard-dir /scratch/cavestru_root/cavestru1/mfho/dla_selfdraw \
@@ -51,11 +52,20 @@ def load_shards(shard_dir):
     (clean_per_mock, boost_per_mock, meta) with the two lists index-aligned. Asserts the
     forward/pairing contract; any violation is a stale or corrupt campaign, not a soft skip."""
     paths = sorted(glob.glob(os.path.join(shard_dir, "dla_selfdraw_*_shard_*.pkl")))
+    # F6a (2026-07-19): never pool a smoke pkl as a real shard (the runner writes a .smoke
+    # suffix before .pkl, which the glob above still matches — filter it out explicitly).
+    paths = [p for p in paths if ".smoke" not in os.path.basename(p)]
     assert paths, f"no dla_selfdraw shard pkls under {shard_dir}"
-    clean, boost, meta0, sig0, idxs = [], [], None, None, []
+    clean, boost, meta0, sig0, idxs, survey0 = [], [], None, None, [], None
     for p in paths:
         with open(p, "rb") as f:
             d = pickle.load(f)
+        # F6b (2026-07-19): shards from two different surveys must never pool into one campaign.
+        sv = d.get("survey")
+        if survey0 is None:
+            survey0 = sv
+        assert sv == survey0, \
+            f"{p}: survey {sv!r} != {survey0!r} (mixed-survey campaign must not pool)"
         fwd = d["meta"]["forward"]
         assert fwd.get("dla_cov_reduced") is True, \
             f"{p}: dla_cov_reduced is not True (stale-cov pkl)"

@@ -96,6 +96,32 @@ def _env_flag(name):
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
+# The env-resolved DATA-SELECTION flags (adversarial backfill F2, 2026-07-19): each silently
+# changes WHICH measurement/covariance a leg loads (SNR>3 npz swap / CV floor / its rank-1 form)
+# on every load. They are now (a) STAMPED on the DataLeg (use_snr3 / cv_floor_on / cv_floor_rank1)
+# and threaded into meta["forward"] by closure_legb.forward_stamp, and (b) REFUSED at production
+# driver entry (assert_env_data_flags_unset below) unless --allow-env-data-flags is explicit.
+ENV_DATA_FLAGS = ("HCD_DESI_SNR3", "HCD_CV_FLOOR", "HCD_CV_FLOOR_RANK1")
+
+
+def assert_env_data_flags_unset(where, allow=False):
+    """DRIVER-ENTRY TRIPWIRE (F2): fail LOUD if any env data-selection flag is set (truthy)
+    at production driver entry. A stray exported flag would otherwise silently swap the DESI
+    measurement or inflate the covariance under the deployed likelihood — invisible to
+    forward_signature and every pre-F2 pkl stamp. ``allow=True`` (the driver's explicit
+    --allow-env-data-flags) is the only sanctioned override; falsy tokens ('0'/'false') are
+    UNSET per _env_flag and do not trip."""
+    if allow:
+        return
+    import os
+    lit = {n: os.environ.get(n) for n in ENV_DATA_FLAGS if _env_flag(n)}
+    assert not lit, (
+        f"env data-selection flag(s) set at driver entry [{where}]: {lit}. These flags swap the "
+        f"loaded measurement/covariance (SNR>3 npz / CV floor) silently under the production "
+        f"likelihood. Unset them, or pass --allow-env-data-flags to run a deliberate "
+        f"non-baseline arm (the resolved values are stamped on the DataLeg + meta['forward']).")
+
+
 # ----------------------------------------------------------------------------#
 #  Fix 2 — restore the ~2% finite-box cosmic-variance (σ_CV) floor at low k.
 #  Fernandez+2024 (eBOSS PRIYA, Eq 3.1) carries K = K_BOSS + σ_GP σ_GPᵀ + σ_CV σ_CVᵀ;
@@ -195,6 +221,14 @@ class DataLeg(NamedTuple):
     # leg (modeled-in-mean => removed-from-covariance, the cup1d "red" convention). DESI-only; audit +
     # runner-assert hook so a driver can fail loud if it gets the un-reduced covariance.
     dla_cov_reduced: bool = False
+    # ENV-FLAG DATA-SELECTION STAMPS (adversarial backfill F2, 2026-07-19; the dla_cov_reduced
+    # pattern): the RESOLVED values of the env-gated loaders' data-selection knobs, so a leg loaded
+    # under a stray HCD_DESI_SNR3 / HCD_CV_FLOOR (/RANK1) export is visible to audits and pkl
+    # stamps (closure_legb.forward_stamp threads them into meta["forward"]). cv_floor_rank1 records
+    # what was APPLIED (False whenever the floor itself is off, even if the RANK1 env var is set).
+    use_snr3: bool = False
+    cv_floor_on: bool = False
+    cv_floor_rank1: bool = False
 
 
 # PER-LEG DLA-forward fraction (§0c, PI-confirmed final intent 2026-06-09): the leg-specific
@@ -312,10 +346,11 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
         cov = cov + (f ** 2 - 1.0) * np.asarray(d["cov_stat"], float)
     if add_cov_diag_inflation:
         cov[np.diag_indices_from(cov)] += np.asarray(d["cov_diag_inflation"], float)
+    cv_floor_rank1 = _env_flag("HCD_CV_FLOOR_RANK1") if add_cv_floor else False
     if add_cv_floor:
         # Fix 2: the σ_CV ~2% finite-box floor on the low-k rows (full-grid; the k-taper
         # zeroes it above ~3e-3, and the post-cut sub-selection keeps only the kept rows).
-        cov = _add_cv_floor(cov, k, P, rank1=_env_flag("HCD_CV_FLOOR_RANK1"))
+        cov = _add_cv_floor(cov, k, P, rank1=cv_floor_rank1)
 
     # z-dependent k cut: k < 0.5π/R_z(z) with R_z from the DESI resolution proxy.
     R_row = desi_resolution_R(z)
@@ -335,7 +370,9 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
                          resolution_e=res_e,
                          resolution_float=resolution_float,
                          resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp,
-                         dla_e=dla_e)
+                         dla_e=dla_e,
+                         use_snr3=use_snr3, cv_floor_on=add_cv_floor,
+                         cv_floor_rank1=cv_floor_rank1)
 
 
 def _read_ks_resolution_e(detail_path, z_grid, k_grid):
@@ -450,10 +487,11 @@ def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
     k = np.asarray(d["k"], float)              # (455,) angular k
     P = np.asarray(d["plya"], float)
     cov = np.asarray(d["cov"], float).copy()   # (455,455) block-diag STAT+SYST
+    cv_floor_rank1 = _env_flag("HCD_CV_FLOOR_RANK1") if add_cv_floor else False
     if add_cv_floor:
         # Fix 2 (2026-06-18): the Fernandez+2024 σ_CV ~2% finite-box floor at k<2.5e-3 — this
         # is the eBOSS PRIYA analysis it was MEASURED for. ENV-gated/reversible (HCD_CV_FLOOR).
-        cov = _add_cv_floor(cov, k, P, rank1=_env_flag("HCD_CV_FLOOR_RANK1"))
+        cov = _add_cv_floor(cov, k, P, rank1=cv_floor_rank1)
 
     keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k > k_min) & (k <= k_max + 1e-9)
 
@@ -467,7 +505,8 @@ def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
                          dla_forward_frac=dla_forward_frac,
                          resolution_e=res_e,
                          resolution_float=resolution_float, resolution_mode="rescale",
-                         resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp)
+                         resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp,
+                         cv_floor_on=add_cv_floor, cv_floor_rank1=cv_floor_rank1)
 
 
 def _read_ks_p1d(path):
@@ -507,7 +546,7 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
                   metals_on, resolution_on, mf_floor_on=False, dla_forward_frac=1.0,
                   resolution_e=None, resolution_float=False, resolution_mode="rank1",
                   resolution_ready=True, resolution_coherent=False, resolution_coh_amp=1.0,
-                  dla_e=None):
+                  dla_e=None, use_snr3=False, cv_floor_on=False, cv_floor_rank1=False):
     """Sub-select the kept (z,k) rows + their covariance block, build the z-major flat
     DataLeg.  The covariance is row/col-sliced by the SAME boolean mask as the data so the
     flat-row ordering matches C_data exactly (CS-REVIEW: ordering invariant).
@@ -592,7 +631,9 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
         P_data=P_data, C_data=C_data, R_z=R_z, n_z=len(z), n_per_z=n_per_z,
         metals_on=metals_on, resolution_on=resolution_on, mf_floor_on=mf_floor_on,
         dla_forward_frac=dla_forward_frac, resolution_ready=resolution_ready,
-        resolution_coherent_on=resolution_coherent_on, dla_cov_reduced=dla_cov_reduced)
+        resolution_coherent_on=resolution_coherent_on, dla_cov_reduced=dla_cov_reduced,
+        use_snr3=bool(use_snr3), cv_floor_on=bool(cv_floor_on),
+        cv_floor_rank1=bool(cv_floor_rank1))
 
 
 # ============================================================================ #

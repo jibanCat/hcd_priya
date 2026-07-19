@@ -239,10 +239,22 @@ def main():
                          "the SAME fold-k sims + SAME mf_fold=k. Only the emulator differs vs --fold k, so "
                          "the pull-vs-n_s tilt isolates the LOSO out-of-sample (extrapolation) effect.")
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--allow-env-data-flags", action="store_true",
+                    help="DANGER: permit the env data-selection flags (HCD_DESI_SNR3 / "
+                         "HCD_CV_FLOOR / HCD_CV_FLOOR_RANK1) to be set at driver entry — a "
+                         "deliberate non-baseline arm ONLY. Default: refuse to start (F2 "
+                         "tripwire; the resolved values are stamped on the DataLeg).")
     ap.set_defaults(with_mf=True, with_eboss=True,
                     res_corr_on=prod_norc_forward()["res_corr_on"],   # NORC default from the SINGLE authority
                     write_shard_pkl=True, leg_a=True)                 # (--res-corr-on restore arm still wins)
     a = ap.parse_args()
+
+    # ENV DATA-FLAG TRIPWIRE (adversarial backfill F2, 2026-07-19; companion to the
+    # dla_cov_reduced authority assert below): the SBC is the sole unblind certificate — it must
+    # never silently fit a different measurement/covariance than the real fit because of a stray
+    # exported env flag. Refuse at entry unless the override is explicit.
+    from hcd_analysis.emulator import data_likelihood as _DLF
+    _DLF.assert_env_data_flags_unset("run_prod_sbc_shard", allow=a.allow_env_data_flags)
 
     members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
     if not members:

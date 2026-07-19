@@ -162,6 +162,21 @@ HCD_LLS_SURVEY_FRAC_SIGMA = {"DESI": 0.287, "eBOSS": 0.287, "DESI+KS": 0.287, "K
 # 2× cosmic-variance hedge (double the 1× corrected lit width); KS unchanged (its own rule).
 HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X = {"DESI": 0.574, "eBOSS": 0.574, "DESI+KS": 0.574, "KS": 0.40}
 
+
+def assert_known_survey(survey, where):
+    """FAIL-LOUD survey-key guard (adversarial backfill F1, 2026-07-19): every survey!=None
+    lookup into the per-survey LLS dicts must go through here (or direct [] indexing) — NEVER a
+    silent ``.get(survey, fallback)``. Post-width-swap, an unknown survey string (a typo like
+    'desi', or a future 'DESI_DR2') silently fell back to HCD_PRIOR_FRAC_SIGMA[0]=0.15 = 1.9×
+    TIGHTER than the deployed DESI width 0.287, on a REAL-DATA path, with no guard firing.
+    survey=None (closure/SBC constants) is the caller's branch, not this guard's."""
+    assert survey in HCD_LLS_SURVEY_BOOST, (
+        f"unknown survey key {survey!r} [{where}]: valid keys are "
+        f"{sorted(HCD_LLS_SURVEY_BOOST)}. A silent fallback here would hand this survey the "
+        f"closure width HCD_PRIOR_FRAC_SIGMA[0]={HCD_PRIOR_FRAC_SIGMA[0]} (1.9x tighter than "
+        f"the deployed DESI 0.287) on a real-data path. Pass survey=None for the closure/SBC "
+        f"constants; otherwise use one of the valid keys exactly (case-sensitive).")
+
 # --- REAL-FIT LLS forward z-slope (2026-06-17 PI re-determination; RE-JUSTIFIED 2026-07-18) -----
 # The LLS prior CENTER's z-EVOLUTION is the dominant low-z LLS→n_s leak lever (NOT the width). On
 # the REAL FIT (data; PRIYA≠data, the forest follows the literature dN/dX) the LLS forward z-slope
@@ -221,7 +236,9 @@ HCD_LLS_REALFIT_ZSLOPE = 2.127
 # (arXiv:1204.3093); Fumagalli+2013 (arXiv:1308.1101). (Two arXiv IDs circulating in older
 # notes were WRONG: 0912.0562 is a graphene paper, 1306.0333 is not Zafar.)
 # ARTIFACT: hcd_analysis/emulator/hcd_lit_dndx_corrected.json (committed; sha256
-# 55249943310021091183a0f170625e672368875d866c8400b2e1d5748e699cca — also carried live in
+# d3f1406243d01c081fedee3382bd4871b00daa194e4b4fcf5524d481b8b2721c — regenerated 2026-07-19
+# with ZERO numeric drift: the F3 refresh only renamed lit_over_sim.LLS.deployed →
+# ...pre_swap (the honest post-swap label) + fresh created/git_commit; also carried live in
 # hcd_prior_constants_payload()["derivation_json_sha256"]). Spec + decision record:
 # hcd_priya_notes/docs/superpowers/2026-07-18-corrected-law-spec.md (incl. ADDENDUM) and the
 # 2026-07-18 PI decision bundle. Tests: tests/test_lit_dndx_corrected.py (bit-level
@@ -393,10 +410,13 @@ def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None,
     # broad). subDLA/DLA are survey-agnostic here (DLA is masked; subDLA tracks the cosmic average).
     lls_boost = 1.0
     if survey is not None:
-        lls_boost = HCD_LLS_SURVEY_BOOST.get(survey, 1.0)
+        # FAIL-LOUD (F1): direct [] indexing after the membership guard — never .get(survey, ...)
+        # (the silent-fallback bug: an unknown key got width 0.15 on a real-data path).
+        assert_known_survey(survey, "hcd_incidence_prior")
+        lls_boost = HCD_LLS_SURVEY_BOOST[survey]
         # PI WIDTH RULE: 1× lit measurement error (primary) or the 2× cosmic-variance hedge.
         _fsig = HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X if use_lls_width_hedge2x else HCD_LLS_SURVEY_FRAC_SIGMA
-        fl = _fsig.get(survey, fl)
+        fl = _fsig[survey]
     mu = jnp.stack([lls_boost * r[0] * w[0], r[1] * w[1], HCD_DLA_RESIDUAL_FRAC * r[2] * w[2]])
     # DLA dN/dX is unreliable beyond z≈3.5 → widen σ_DLA above it (weak high-z prior) so the
     # data, not the prior, sets the high-z DLA incidence.

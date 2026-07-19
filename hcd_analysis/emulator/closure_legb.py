@@ -55,7 +55,8 @@ from .inference import (PARAM_NAMES, hcd_incidence_prior,
                         HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC,
                         HCD_LLS_REALFIT_ZSLOPE, HCD_LLS_SURVEY_BOOST,
                         HCD_LLS_SURVEY_FRAC_SIGMA, HCD_PRIOR_FRAC_SIGMA,
-                        hcd_lls_realfit_alpha_center, assert_hcd_pivot_z3)
+                        hcd_lls_realfit_alpha_center, assert_hcd_pivot_z3,
+                        assert_known_survey)
 from .sampler_numpyro import _dla_raw_mu
 from . import data_likelihood as DL
 from .closure_diagnostics import (
@@ -118,24 +119,27 @@ def _bres_of_z(z, f_res_amp, f_res_slope, *, z_pivot=F_RES_PIVOT_Z):
 HCD_INCIDENCE_SLOPE = (2.465, 2.758, 2.366)
 
 # Forward z-slope sanity threshold: the incidence slope is ~2.4 (LLS 2.465); the WRONG lit/sim
-# RATIO slope HCD_LIT_OVER_SIM_SLOPE is ~0.95. A center below this floor means someone reverted the
-# forward z-exponent to the ratio slope (the wrong-object bug). Kept comfortably below 2.465 and
-# above 0.95 so it catches a 0.95 reversion but never false-trips on the legitimate incidence center.
+# RATIO slope HCD_LIT_OVER_SIM_SLOPE is 0.764 (the corrected-law LLS slot, 2026-07-18; 0.95
+# pre-swap). A center below this floor means someone reverted the forward z-exponent to the ratio
+# slope (the wrong-object bug). Kept comfortably below 2.465 and above the ratio slope so it
+# catches a ratio-slope reversion (0.764 or the historical 0.95) but never false-trips on the
+# legitimate incidence center.
 _FWD_ZSLOPE_FLOOR = 1.5
 
 
 def _assert_forward_zslope_center(center, where):
     """GUARD the FORWARD HCD z-slope PRIOR CENTER (NOT individual sampled draws): the LLS-class
     center MUST be the incidence slope HCD_INCIDENCE_SLOPE (~2.4), never the lit/sim RATIO slope
-    HCD_LIT_OVER_SIM_SLOPE (~0.95). ``center`` is a CONCRETE (constant) array — HCD_INCIDENCE_SLOPE,
-    ctx.zslope_mu, or hcd_btilt_mu — so float() is trace-safe (it is never a traced NUTS sample).
-    Catches a 0.95 reversion of the forward exponent; see hcd-dndx-zslope-bug."""
+    HCD_LIT_OVER_SIM_SLOPE (0.764 since the 2026-07-18 corrected-law swap; 0.95 pre-swap).
+    ``center`` is a CONCRETE (constant) array — HCD_INCIDENCE_SLOPE, ctx.zslope_mu, or
+    hcd_btilt_mu — so float() is trace-safe (it is never a traced NUTS sample). Catches a
+    ratio-slope reversion of the forward exponent; see hcd-dndx-zslope-bug."""
     c0 = float(np.asarray(center).reshape(-1)[0])
     assert c0 > _FWD_ZSLOPE_FLOOR, (
         f"HCD forward z-slope center [{where}] = {c0:.4f} is below {_FWD_ZSLOPE_FLOOR} — it must be "
         f"HCD_INCIDENCE_SLOPE (~2.4, the SIM incidence-weight slope), NOT the lit/sim RATIO slope "
-        f"HCD_LIT_OVER_SIM_SLOPE (~0.95). The forward exponent was reverted to the wrong object. "
-        f"See hcd-dndx-zslope-bug.")
+        f"HCD_LIT_OVER_SIM_SLOPE (0.764 corrected 2026-07-18; 0.95 pre-swap). The forward exponent "
+        f"was reverted to the wrong object. See hcd-dndx-zslope-bug.")
 
 
 def hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT, z_tol=0.05):
@@ -575,6 +579,37 @@ def forward_signature():
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def forward_stamp(ctx, leg):
+    """The SINGLE-AUTHORITY ``meta["forward"]`` stamp for shard/driver pkls (adversarial
+    backfill F2/F5, 2026-07-19; supersedes the per-runner inline dicts). Carries:
+
+      * the resolved deployed-forward knobs (res_corr_on / fix_alpha_res / sample_res /
+        f_res_amp_sigma / metal_prior / metal_node_z) from the BUILT ctx;
+      * the per-leg data stamps: dla_cov_reduced / dla_forward_frac AND the env-resolved
+        data-selection flags use_snr3 / cv_floor_on / cv_floor_rank1 (F2 — a leg loaded under a
+        stray HCD_DESI_SNR3 / HCD_CV_FLOOR export is no longer invisible to pkl audits);
+      * BOTH freeze-audit signatures: forward_signature() (forward decision set) and
+        inference.hcd_prior_signature() (prior-constants payload; F5) — so an analyzer can
+        reject pkls from a drifted forward OR a drifted prior without re-deriving either.
+
+    ``leg`` is the (single, restricted) DataLeg the runner fits; getattr defaults keep the stamp
+    buildable on pre-F2 DataLeg pickles/stubs. Pure host-side dict (pkl-friendly)."""
+    from hcd_analysis.emulator import inference as INF   # lazy: keep module import-order neutral
+    return dict(res_corr_on=bool(ctx.res_corr_on), fix_alpha_res=bool(ctx.fix_alpha_res),
+                sample_res=bool(ctx.sample_res),
+                f_res_amp_sigma=(None if ctx.f_res_amp_sigma is None
+                                 else float(ctx.f_res_amp_sigma)),
+                metal_prior=str(ctx.metal_prior),
+                metal_node_z=tuple(float(z) for z in ctx.metal_node_z),
+                dla_cov_reduced=bool(getattr(leg, "dla_cov_reduced", False)),
+                dla_forward_frac=float(getattr(leg, "dla_forward_frac", 1.0)),
+                use_snr3=bool(getattr(leg, "use_snr3", False)),
+                cv_floor_on=bool(getattr(leg, "cv_floor_on", False)),
+                cv_floor_rank1=bool(getattr(leg, "cv_floor_rank1", False)),
+                forward_signature=forward_signature(),
+                hcd_prior_signature=INF.hcd_prior_signature())
+
+
 # ============================================================================ #
 #  Build the production Leg-B context from final_fold0 + the xclass error vector.
 # ============================================================================ #
@@ -712,14 +747,19 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     # literature dN/dX, not the sim's z=3 w_c·(lit/sim). The CLOSURE/SBC (survey=None) keeps the sim z=3
     # w_c center (its held-out-sim mocks carry the sim incidence). subDLA/DLA centers are unchanged.
     if survey is not None:
-        _boost = HCD_LLS_SURVEY_BOOST.get(survey, 1.0)
+        # FAIL-LOUD (adversarial backfill F1, 2026-07-19): direct [] indexing after the membership
+        # guard — the old .get(survey, fallback) silently handed an unknown survey string the
+        # closure width HCD_PRIOR_FRAC_SIGMA[0]=0.15 (1.9x tighter than the deployed DESI 0.287)
+        # on a real-data path. hcd_incidence_prior (line above) guards its own lookups too.
+        assert_known_survey(survey, "build_legb_ctx")
+        _boost = HCD_LLS_SURVEY_BOOST[survey]
         alpha_mu = alpha_mu.at[0].set(hcd_lls_realfit_alpha_center(Xbar_z3, z=HCD_Z_PIVOT, boost=_boost))
         # keep the σ/μ width invariant (PI WIDTH RULE: 1× lit measurement error) at the new center.
-        _fl = HCD_LLS_SURVEY_FRAC_SIGMA.get(survey, float(HCD_PRIOR_FRAC_SIGMA[0]))
+        _fl = HCD_LLS_SURVEY_FRAC_SIGMA[survey]
         alpha_sd = alpha_sd.at[0].set(_fl * alpha_mu[0])
     # PIVOT GUARD (PI's explicit ask): the LLS α-pivot center MUST be the z=3 value, NOT the all-z
     # median (z≈3.6). A future revert to nanmedian(w_c_cache[...all z...]) trips this at build time.
-    _guard_boost = HCD_LLS_SURVEY_BOOST.get(survey, 1.0) if survey is not None else 1.0
+    _guard_boost = HCD_LLS_SURVEY_BOOST[survey] if survey is not None else 1.0
     assert_hcd_pivot_z3(float(np.asarray(alpha_mu)[0]), z=HCD_Z_PIVOT,
                         where=f"build_legb_ctx survey={survey}", boost=_guard_boost)
 
@@ -758,15 +798,17 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     # 2D AMPLITUDE×TILT submanifold (hcd_2d_tilt): the GLOBAL HCD z-tilt B_HCD + FIXED class-
     # differential slopes δs_c. CLOSURE defaults use the FULL per-class incidence z-slope the mock
     # TRUTH actually carries — the 60-sim-population median of d ln w_c(z)/d ln(1+z) (HCD_INCIDENCE_SLOPE,
-    # measured 2026-06-14), NOT the lit/sim-RATIO slope HCD_LIT_OVER_SIM_SLOPE=(0.95,…) which is a
-    # DIFFERENT object (the mock w_c(z) evolves at LLS slope ~2.4, not 0.95; a B-center at 0.95 would
-    # put the truth at ~2.8σ and fight the data, re-leaking into n_s — the impl-review finding):
+    # measured 2026-06-14), NOT the lit/sim-RATIO slope HCD_LIT_OVER_SIM_SLOPE=(0.764,…) (corrected
+    # 2026-07-18; 0.95 pre-swap) which is a DIFFERENT object (the mock w_c(z) evolves at LLS slope
+    # ~2.4, not ~0.8; a B-center at the ratio slope would put the truth several σ off-center and
+    # fight the data, re-leaking into n_s — the impl-review finding):
     #   δs_c       = HCD_INCIDENCE_SLOPE − HCD_INCIDENCE_SLOPE[0] = (0.0, +0.29, −0.10)
     #   btilt_mu   = HCD_INCIDENCE_SLOPE[0] = 2.465  (so at B_HCD=btilt_mu, the forward z-evolution
     #                MATCHES the truth; the B_HCD coverage-truth = btilt_mu = the population LLS slope)
     #   btilt_sigma= ZSLOPE_PRIOR_SIGMA[0] = 0.52  (kept WIDE so B floats + the data constrain it)
     # REAL-FIT (later): swap HCD_INCIDENCE_SLOPE → the literature dN/dX slopes (HR/observed). The
-    # marginalize_zslope default forward (centered 0.95) is a SEPARATE, mostly-harmless mis-centering:
+    # marginalize_zslope default forward (centered at the ratio slope, 0.764 dated 2026-07-18;
+    # 0.95 pre-swap) is a SEPARATE, mostly-harmless mis-centering:
     # the data recover the slope ~2.5 and n_s is ⊥ slope (scripts/diag_hcd_zslope_nsbias.py).
     hcd_2d_tilt = bool(hcd_2d_tilt)
     hcd_dslope = hcd_btilt_mu = hcd_btilt_sigma = None
@@ -778,7 +820,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         hcd_dslope = jnp.asarray(_slope - _slope[0])             # (3,) δs_c, δs_LLS≡0
         hcd_btilt_mu = float(_slope[0])                          # B_HCD center = full LLS incidence slope
         hcd_btilt_sigma = float(ZSLOPE_PRIOR_SIGMA[0])           # B_HCD width (wide → B floats)
-        # GUARD: the 2D B_HCD center is the incidence slope (~2.4), never the lit/sim ratio (~0.95).
+        # GUARD: the 2D B_HCD center is the incidence slope (~2.4), never the lit/sim ratio
+        # (0.764 dated 2026-07-18; 0.95 pre-swap).
         _assert_forward_zslope_center(hcd_btilt_mu, "build_legb_ctx hcd_btilt_mu (2D-tilt)")
 
     mf_obj = mf_floor_obj = None
@@ -2094,7 +2137,8 @@ def _btilt_site(ctx):
     the slopes equal the full incidence slope HCD_INCIDENCE_SLOPE (~2.4 — the closure anchor that
     MATCHES the mock truth's native w_c(z) evolution)."""
     # GUARD the 2D-tilt forward exponent center (Gap-1, hcd-dndx-zslope-bug): ctx.hcd_btilt_mu is
-    # the CONCRETE prior center (trace-safe), NOT the sampled B_hcd — catches a 0.95 reversion that
+    # the CONCRETE prior center (trace-safe), NOT the sampled B_hcd — catches a ratio-slope
+    # (0.764 dated 2026-07-18; 0.95 pre-swap) reversion that
     # a future ctx._replace(hcd_btilt_mu=...) / new builder could otherwise slip past the build guard.
     _assert_forward_zslope_center(ctx.hcd_btilt_mu, "_btilt_site")
     B_hcd = numpyro.sample("B_hcd", dist.Normal(ctx.hcd_btilt_mu, ctx.hcd_btilt_sigma))
@@ -2109,9 +2153,10 @@ def _zslope_sites(ctx):
 
     CENTER = HCD_INCIDENCE_SLOPE (~2.4) — the SIM incidence-WEIGHT slope d ln w_c(z)/d ln(1+z)
     the held-out-sim mock TRUTH actually carries, so the forward dN/dX(z) RISES with z (matching
-    the truth + literature). DISTINCT from inference.HCD_LIT_OVER_SIM_SLOPE (~0.95, the lit/sim
-    RATIO slope — a z=3-pivot prior-center quantity): centering s_c on the ratio slope made the
-    predicted dN/dX(z) FALL with z and put the mock truth 2.9–6σ off-center (the wrong-object bug).
+    the truth + literature). DISTINCT from inference.HCD_LIT_OVER_SIM_SLOPE (0.764, the lit/sim
+    RATIO slope, corrected 2026-07-18 — 0.95 pre-swap; a z=3-pivot prior-center quantity):
+    centering s_c on the ratio slope made the predicted dN/dX(z) FALL with z and put the mock
+    truth 2.9–6σ off-center (the wrong-object bug, measured at the old 0.95 value).
     Matches the already-correct 2D-tilt anchor (_btilt_site / build_legb_ctx → HCD_INCIDENCE_SLOPE)."""
     if not getattr(ctx, "marginalize_zslope", False):
         _assert_forward_zslope_center(HCD_INCIDENCE_SLOPE, "_zslope_sites fixed")
@@ -2233,7 +2278,7 @@ def _legb_reconstruct_deterministics(ctx, samples):
     else:
         # fixed-slope fallback (non-2D, non-marginalized readout) — byte-consistent with the
         # _zslope_sites FIXED branch: the SIM incidence slope HCD_INCIDENCE_SLOPE (~2.4), NOT the
-        # lit/sim ratio HCD_LIT_OVER_SIM_SLOPE (the wrong-object slope).
+        # lit/sim ratio HCD_LIT_OVER_SIM_SLOPE (0.764 dated 2026-07-18; the wrong-object slope).
         shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** jnp.asarray(HCD_INCIDENCE_SLOPE)
         alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg[None, :, :]      # (L, nZg, 3)
     out["tau0_vec"] = tau0_vec

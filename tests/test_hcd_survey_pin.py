@@ -90,10 +90,63 @@ def test_lls_truth_boost_propagates_to_mock_and_truth():
     assert not np.allclose(np.asarray(t2["P_obs_true"]), np.asarray(t1["P_obs_true"]))
 
 
+# --------------------------------------------------------------------------------------------- #
+#  F1 (adversarial backfill 2026-07-19): the survey-key silent .get() fallback is FAIL-LOUD.
+#  Post-width-swap, an unknown survey string silently got width HCD_PRIOR_FRAC_SIGMA[0]=0.15 =
+#  1.9x TIGHTER than the deployed DESI 0.287, on a real-data path, with no guard firing.
+# --------------------------------------------------------------------------------------------- #
+def test_unknown_survey_key_fails_loud():
+    """hcd_incidence_prior(survey=<unknown>) must RAISE (never a silent fallback width/boost);
+    the message lists the valid keys. 'DESI_DR2' (a plausible future key) and 'desi' (the
+    case-typo class: run_real_fit CLI names are lowercase, dict keys are not)."""
+    for bad in ("DESI_DR2", "desi"):
+        with pytest.raises(AssertionError, match="valid"):
+            INF.hcd_incidence_prior(W, z=3.0, survey=bad)
+        with pytest.raises(AssertionError, match="valid"):
+            INF.hcd_incidence_prior(W, z=3.0, survey=bad, use_lls_width_hedge2x=True)
+
+
+def test_survey_none_keeps_closure_constants():
+    """survey=None (closure/SBC) stays on HCD_PRIOR_FRAC_SIGMA[0] with boost 1.0 — the
+    correct path F1 must NOT touch."""
+    mu, sd = map(np.asarray, INF.hcd_incidence_prior(W, z=3.0, survey=None))
+    assert sd[0] / mu[0] == pytest.approx(INF.HCD_PRIOR_FRAC_SIGMA[0])
+
+
+def test_survey_dict_keysets_congruent():
+    """The three per-survey dicts must key the SAME survey set — a key added to one but not
+    the others is exactly the state the silent .get() fallback used to paper over."""
+    assert set(INF.HCD_LLS_SURVEY_BOOST) == set(INF.HCD_LLS_SURVEY_FRAC_SIGMA) \
+        == set(INF.HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X)
+
+
+def test_every_run_real_fit_leg_is_a_known_survey_key():
+    """Every leg name the run_real_fit SURVEY table passes as build_legb_ctx(survey=...) must be
+    a key of the per-survey dicts (else the real-data driver dies at ctx build — fail-loud is
+    correct, but the table and the dicts must never drift apart silently)."""
+    from scripts.run_real_fit import SURVEY
+    for sv, info in SURVEY.items():
+        assert info["leg"] in INF.HCD_LLS_SURVEY_BOOST, (sv, info["leg"])
+        assert info["leg"] in INF.HCD_LLS_SURVEY_FRAC_SIGMA, (sv, info["leg"])
+
+
+def test_closure_legb_rebind_identity_tripwire():
+    """closure_legb's from-import must alias the SAME dict objects as inference — a partial
+    rebind (e.g. a module-level override in one module only) would make the build_legb_ctx
+    lookups and the hcd_incidence_prior lookups disagree silently."""
+    assert C.HCD_LLS_SURVEY_BOOST is INF.HCD_LLS_SURVEY_BOOST
+    assert C.HCD_LLS_SURVEY_FRAC_SIGMA is INF.HCD_LLS_SURVEY_FRAC_SIGMA
+    assert C.HCD_PRIOR_FRAC_SIGMA is INF.HCD_PRIOR_FRAC_SIGMA
+
+
 if __name__ == "__main__":
     test_survey_pin_center_and_width()
     test_eboss_and_dk_survey_pins()
     test_lls_width_hedge_2x_toggle()
+    test_unknown_survey_key_fails_loud()
+    test_survey_none_keeps_closure_constants()
+    test_survey_dict_keysets_congruent()
+    test_closure_legb_rebind_identity_tripwire()
     if os.path.exists(_CACHE):
         test_lls_truth_boost_propagates_to_mock_and_truth()
     print("[hcd-survey-pin] per-survey center/width (1x=0.287) + 2x hedge + lls_truth_boost OK.")
