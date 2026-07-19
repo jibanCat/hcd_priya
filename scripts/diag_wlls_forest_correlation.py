@@ -37,8 +37,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-FIG = ("/home/mfho/hcd_priya/figures/analysis/01_catalog_obs/"
-       "diag_wlls_forest_correlation.png")
+FIG = ("/home/mfho/hcd_priya_notes/docs/superpowers/corrected-dndx-artifacts/"
+       "diag_wlls_forest_correlation.png")   # working diagnostic -> NOTES repo (PI convention)
 
 Z_TARGETS = (3.0, 2.4, 4.2)
 Z_MAIN = 3.0

@@ -163,7 +163,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
         sample_res=fc["sample_res"],      # option-b f_res float (DESI 0.02 / eBOSS 0.05 / KS 0.15; task #5 DONE)
         f_res_amp_sigma=fc["f_res_amp_sigma"],  # its Normal(0,.) width (DESI 0.02 / eBOSS 0.05 / KS 0.15)
         metal_prior=fc["metal_prior"],    # flatlog2node (Gate-C Model C+) on metal legs; uniform on KS
-        survey=info["leg"],               # PER-SURVEY LLS pin: DESI 1.0×/σ0.30, KS 2.5×/σ0.40 (eBOSS→cosmic-avg)
+        survey=info["leg"],               # PER-SURVEY LLS pin: DESI 1.0×/σ0.287 (2026-07-18 width), KS 2.5×/σ0.40 (eBOSS→cosmic-avg)
         hierarchical_hcd=False)           # the referee production baseline (per-class HCD)
     if norc["fix_alpha_res"]:
         ctx = ctx._replace(fix_alpha_res=True)   # NORC: also drop the 2 alpha_res sites (now inert)

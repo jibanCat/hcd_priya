@@ -979,7 +979,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     if pc == "lit":
         # REAL-FIT prior: per-survey effective-LLS pin (DESI cosmic-avg/tight; KS boosted ~2.5×/broad,
         # arXiv:2509.18271 §4.3.3). subDLA/DLA survey-agnostic. The LLS center is built from the lit
-        # dN/dX law DIRECTLY (alt-(b), hcd_lls_realfit_alpha_center ≈0.194×boost) — the same construction
+        # dN/dX law DIRECTLY (alt-(b), hcd_lls_realfit_alpha_center ≈0.172×boost since the 2026-07-18 K1a correction; was 0.194) — the same construction
         # build_legb_ctx(survey=…) uses — NOT the sim z=3 w_c·(lit/sim). subDLA/DLA from the z=3 w_c.
         amu, asd = hcd_incidence_prior(jnp.asarray(wc_z3), z=HCD_Z_PIVOT, survey=survey)
         _boost = HCD_LLS_SURVEY_BOOST.get(survey, 1.0)

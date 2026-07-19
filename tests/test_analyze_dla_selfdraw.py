@@ -153,6 +153,28 @@ def test_load_shards_rejects_incomplete_campaign(tmp_path):
         load_shards(str(tmp_path))
 
 
+def test_load_shards_rejects_duplicate_shard_idxs(tmp_path):
+    """A duplicated mock index must not silently double-count through the gate (closing-panel
+    fix 2; the set-only completeness check regressed the PR#14 disjointness mandate)."""
+    rc, rb = _paired_records()
+    _pkl(tmp_path / "dla_selfdraw_desi_shard_000.pkl", 0, [rc], [rb], n_mocks=1)
+    rc2, rb2 = _paired_records(alpha_clean=0.006, seed=2)
+    # second FILE carrying the SAME mock idx 0: the set-only check sees a complete {0} while
+    # the gate would silently pool 2 mocks (the true escape case)
+    _pkl(tmp_path / "dla_selfdraw_desi_shard_001.pkl", 0, [rc2], [rb2], n_mocks=1)
+    with pytest.raises(AssertionError, match="duplicate"):
+        load_shards(str(tmp_path))
+
+
+def test_load_shards_rejects_none_signature(tmp_path):
+    """An all-None forward_signature must not pass the consistency check vacuously
+    (closing-panel fix 5)."""
+    rc, rb = _paired_records()
+    _pkl(tmp_path / "dla_selfdraw_desi_shard_000.pkl", 0, [rc], [rb], sig=None, n_mocks=1)
+    with pytest.raises(AssertionError, match="signature"):
+        load_shards(str(tmp_path))
+
+
 def test_load_shards_rejects_mixed_boost(tmp_path):
     rc, rb = _paired_records()
     _pkl(tmp_path / "dla_selfdraw_desi_shard_000.pkl", 0, [rc], [rb], boost_val=1.5)
@@ -200,7 +222,10 @@ def test_paired_delta_and_pooling_zero_shift():
     deltas = [paired_delta_named(rc, rb, "ns") for rc, rb in pairs]
     pooled = pool_deltas(deltas)
     assert abs(pooled["mean"]) < 0.15
-    assert pooled["ub"] == pytest.approx(abs(pooled["mean"]) + 2 * pooled["se"])
+    # ub uses the exact small-n Student-t 97.5% quantile, not the fixed 2 (closing-panel
+    # fix 7): t_{3,0.975} = 3.1824
+    assert pooled["ub"] == pytest.approx(abs(pooled["mean"]) + 3.1824 * pooled["se"],
+                                         rel=1e-3)
     assert verdict(pooled["ub"]) == "PASS"
 
 

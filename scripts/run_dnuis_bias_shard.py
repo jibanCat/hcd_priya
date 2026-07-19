@@ -27,7 +27,7 @@ Arms (→ inject_spec):
 PER-SURVEY lls_truth_boost (the effective LLS the mock TRUTH carries vs the forward's per-survey pin
 center). The forward pin is HCD_LLS_SURVEY_BOOST×lit_over_sim (DESI 1.0×, KS 2.5×; inference.py). The
 truth boost must sit OFF the pin center to be a real test:
-  desi  = 1.06  (HCD_LIT_OVER_SIM[0] at z_pivot — the cosmic-average lit/sim LLS; ~0.2σ off the DESI
+  desi  = 1.06  (HISTORICAL PIN: the pre-2026-07-18 HCD_LIT_OVER_SIM[0]; deployed slot is now 0.995 — a live read would null the arm; ~0.2σ off the DESI
                  pin, σ/μ=0.30)
   ks    = 3.50  (= 2.5×1.4: the KS pin CENTER is 2.5×, so a boost of EXACTLY 2.5 would be a near-null
                  test; we put the truth ~1σ ABOVE the pin (KS σ/μ=0.40 ⇒ ×1.4) — a wrong-pin-center
@@ -51,7 +51,7 @@ print = functools.partial(print, flush=True)
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
 from hcd_analysis.emulator.closure_legb import (build_legb_ctx, run_legb, prod_forward_config,
                                                 prod_norc_forward)
-from hcd_analysis.emulator.inference import (HCD_LIT_OVER_SIM, HCD_LLS_SURVEY_BOOST,
+from hcd_analysis.emulator.inference import (HCD_LLS_SURVEY_BOOST,
                                              HCD_LLS_SURVEY_FRAC_SIGMA)
 
 REPO = "/home/mfho/hcd_priya"
@@ -60,7 +60,7 @@ RES_INSTR_BASIS = os.path.join(REPO, "hcd_analysis", "_emulator_data", "res_inst
 
 # Per-survey TRUTH LLS boost (lit/sim effective LLS the mock truth carries vs the forward pin).
 # The arm must put the TRUTH OFF the forward's per-survey pin center, else it is a near-null test.
-#   desi  = 1.06 (HCD_LIT_OVER_SIM[0]): the cosmic-average lit/sim LLS dN/dX ratio; the DESI pin
+#   desi  = 1.06 (HISTORICAL PIN, pre-2026-07-18 lit/sim ratio; deployed HCD_LIT_OVER_SIM[0]=0.995): the DESI pin
 #           center is 1.0× cosmic (HCD_LLS_SURVEY_BOOST["DESI"]=1.0), so 1.06 sits ~0.2σ above the
 #           DESI pin (σ/μ=0.30) — a mild realistic mis-center.
 #   ks    = 2.5×1.4 = 3.50: the KS pin CENTER is 2.5× cosmic. A truth boost of EXACTLY 2.5 would

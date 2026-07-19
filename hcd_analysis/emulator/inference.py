@@ -98,8 +98,8 @@ HCD_Z_PIVOT = 3.0
 HCD_LIT_OVER_SIM = (0.995, 1.00, 1.34)       # (LLS, subDLA, DLA): data/sim at z_pivot=3.0
 # subDLA centered on the SIM (1.00) — KEPT by PI decision 9 (2026-07-18): PRIYA produces
 # subDLAs IN-SITU (Rahmati+2013 self-shielding) so the sim is the faithful prior here, and
-# the correction VINDICATES the sim anchor: the corrected lit/sim subDLA ratio is 1.40
-# (recorded as EVIDENCE in hcd_lit_dndx_corrected.json), inside the broad σ/μ=0.40
+# the correction is CONSISTENT with the sim anchor at ~1.0σ (marginally: the corrected lit/sim subDLA ratio is 1.40 = +1.008σ at width 0.40
+# , recorded as EVIDENCE in hcd_lit_dndx_corrected.json), just inside the broad σ/μ=0.40
 # (HCD_PRIOR_FRAC_SIGMA[1]) that marginalizes the residual subDLA-abundance uncertainty
 # rather than imposing an offset center. (The old "Zafar 0.76 / factor-2" story was the
 # wrong-object DLA-column bug; see the HCD_LIT_DNDX_LAW provenance block below.)
@@ -128,7 +128,8 @@ HCD_LIT_OVER_SIM_SLOPE = (0.764, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
 # The LLS prior CENTER is the dominant DESI-A_p risk (a tight prior at an offset center moves A_p
 # ~1σ; see the Phase-4b headline). The effective LLS incidence is SURVEY-SPECIFIC:
 #   DESI DR1 — large, homogeneous, magnitude/redshift-selected forest sample → the cosmic-average
-#     literature dN/dX is appropriate (boost 1.0), and TIGHT (cosmology-degenerate).
+#     literature dN/dX is appropriate (boost 1.0); since 2026-07-18 the width is σ/μ=0.287
+#     (kernel common-mode included) — no longer the old "tight 0.15" calibration language.
 #   KODIAQ-SQUAD — archival high-res echelle, deliberately includes DLA/absorber-rich sightlines →
 #     the data prefer ~2–3× the PRIYA LLS (arXiv:2509.18271 §4.3.3: α_LLS≈2 ⇒ "triple the LLS in
 #     PRIYA"; ≈2.5× the cosmic average). The excess is SELECTION, not cosmic — and ↑α_LLS mimics

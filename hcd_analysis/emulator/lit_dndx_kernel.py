@@ -165,7 +165,10 @@ def k1_per_group(inputs, floor_method="subbin_powerlaw"):
 
 def k1_table(inputs, floor_method="subbin_powerlaw", aggregate="median"):
     """The pinned K1 kernel table: per-sim ratio then suite MEDIAN at fixed z, with the
-    16-84% suite scatter (the kernel-budget statistical part)."""
+    16-84% suite scatter (the kernel-budget statistical part). NOTE: the suite median
+    crosses r > 1 above z ~ 4.6 (binned exceeding cumulative there is a floor-share
+    artifact of PRIYA's high-z CDDF, outside the literature fit range z <= 4.23) — the
+    kernel is only ever EVALUATED at the lit z_bar, so the saturation is cosmetic."""
     r = k1_per_group(inputs, floor_method=floor_method)
     z_vals, agg, p16, p84, n = _per_z(inputs["zg"], r, aggregate=aggregate)
     return dict(z_vals=z_vals, r=agg, r16=p16, r84=p84, n=n,

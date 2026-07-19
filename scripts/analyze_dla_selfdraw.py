@@ -60,6 +60,7 @@ def load_shards(shard_dir):
         assert fwd.get("dla_cov_reduced") is True, \
             f"{p}: dla_cov_reduced is not True (stale-cov pkl)"
         sig = fwd.get("forward_signature")
+        assert sig, f"{p}: forward_signature is missing/None (vacuous consistency check)"
         if sig0 is None:
             sig0, meta0 = sig, d["meta"]
         assert sig == sig0, \
@@ -73,7 +74,7 @@ def load_shards(shard_dir):
         for rc, rb in zip(d["clean_per_mock"], d["boost_per_mock"]):
             j = list(rc["names"]).index(ALPHA)
             tc, tb = np.asarray(rc["truth_vec"]), np.asarray(rb["truth_vec"])
-            assert np.isclose(tb[j], b * tc[j], rtol=1e-12), \
+            assert np.isclose(tb[j], b * tc[j], rtol=1e-12, atol=0), \
                 f"{p}: boosted alpha_dla truth {tb[j]} != boost {b} x clean {tc[j]}"
             keep = np.ones(len(tc), dtype=bool)
             keep[j] = False
@@ -82,9 +83,13 @@ def load_shards(shard_dir):
             clean.append(rc)
             boost.append(rb)
     want = set(range(int(meta0["n_mocks"])))
+    assert len(idxs) == len(set(idxs)), \
+        (f"duplicate mock idxs {sorted(i for i in set(idxs) if idxs.count(i) > 1)}: a "
+         f"double-counted mock must not pool through the gate")
     assert set(idxs) == want, \
         (f"campaign incomplete: missing mock idxs {sorted(want - set(idxs))} "
          f"(got {len(idxs)}/{len(want)}); a partial campaign must not gate silently")
+    assert len(clean) == len(idxs) == int(meta0["n_mocks"]), (len(clean), len(idxs))
     return clean, boost, meta0
 
 
@@ -151,19 +156,24 @@ def paired_delta_named(rec_clean, rec_boost, name):
 
 
 def pool_deltas(deltas, weights=None):
-    """Pool per-mock deltas: mean, SE (ddof=1), median, the confidence bound ub=|mean|+2SE, and
-    an optional weighted mean (secondary line for the unequal retained-draw counts L). A None
-    delta (degenerate posterior sd) drops its OWN weight, keeping the alignment."""
+    """Pool per-mock deltas: mean, SE (ddof=1), median, the confidence bound
+    ub = |mean| + t_{n-1,0.975} * SE (the exact small-n Student-t quantile, NOT a fixed 2 —
+    closing-panel fix 7; t_{15,0.975} = 2.131 at the campaign N=16), and an optional weighted
+    mean (secondary line for the unequal retained-draw counts L). A None delta (degenerate
+    posterior sd) drops its OWN weight, keeping the alignment."""
+    from scipy.stats import t as _t
     keep = [i for i, x in enumerate(deltas) if x is not None]
     d = np.asarray([deltas[i] for i in keep], dtype=float)
     n = d.size
     se = float(d.std(ddof=1) / np.sqrt(n)) if n > 1 else float("nan")
+    tq = float(_t.ppf(0.975, n - 1)) if n > 1 else float("nan")
     out = {
         "n": n,
         "mean": float(d.mean()),
         "se": se,
         "median": float(np.median(d)),
-        "ub": abs(float(d.mean())) + 2 * se,
+        "t975": tq,
+        "ub": abs(float(d.mean())) + tq * se,
     }
     if weights is not None:
         w = np.asarray([list(weights)[i] for i in keep], dtype=float)
@@ -267,7 +277,8 @@ def main():
 
     # -- alpha_dla recovery, both arms
     for arm, recs in (("clean", clean), ("boost", boost)):
-        bz = np.asarray([bias_z_named(r, ALPHA) for r in recs], dtype=float)
+        bz = np.asarray([x for x in (bias_z_named(r, ALPHA) for r in recs)
+                         if x is not None], dtype=float)   # None-guard (closing-panel fix 8)
         us = [rank_u(r, ALPHA) for r in recs]
         cov = central_coverage(us)
         pm = np.asarray([float(_col_draws_truth(r, ALPHA)[0].mean()) for r in recs])

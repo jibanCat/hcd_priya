@@ -113,7 +113,7 @@ def _bres_of_z(z, f_res_amp, f_res_slope, *, z_pivot=F_RES_PIVOT_Z):
 # FULL per-class HCD-incidence z-slope d ln w_c(z)/d ln(1+z), 60-sim-population median (measured
 # 2026-06-14, scripts/diag_hcd_zslope_nsbias.py). This is the slope the mock TRUTH actually carries
 # (the held-out sim's native w_c(z)) — the RIGHT center for the 2D B_HCD tilt. It is a DIFFERENT
-# object from inference.HCD_LIT_OVER_SIM_SLOPE=(0.95,0.15,0.40) (the lit/sim-RATIO slope). per-sim
+# object from inference.HCD_LIT_OVER_SIM_SLOPE=(0.764,0.15,0.40) (the lit/sim-RATIO slope; LLS slot corrected 2026-07-18). per-sim
 # LLS scatter ≈0.07; subDLA/DLA differentials δs=(0,+0.29,−0.10).
 HCD_INCIDENCE_SLOPE = (2.465, 2.758, 2.366)
 
