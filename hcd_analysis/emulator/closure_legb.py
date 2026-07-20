@@ -1501,14 +1501,117 @@ def draw_leg_a_leg_truth(ctx: LegBCtx, key):
 #  Data-nuisance injection hooks (the BIAS gate). On the Leg-A self-draw the cosmology bias is
 #  ZERO by construction; these inject a nuisance the production forward CANNOT fit (or a truth
 #  offset from the per-survey LLS pin) so the recovered A_p/n_s shift isolates that nuisance.
+#
+#  Z-PROFILE EXTENSION (KS selection-function mock challenge, spec 2026-07-18 Sec 4 + A2.7): the
+#  three ``*_truth_boost`` inject_spec VALUES are scalar-OR-dict. A dict is a z-profile spec —
+#  exactly one of two key-sets, validated fail-loud by ``eval_boost_profile``:
+#    {"b_pivot", "eta1", "eta2"}  the canonical log-quadratic family (Amendment 1/2):
+#                                 B(z) = b_pivot·exp(η₁x + η₂x²), x = ln((1+z)/(1+HCD_Z_PIVOT));
+#    {"z", "boost", "interp"}     tabulated, interp="loglog" (log-linear in ln(1+z) of ln B), NO
+#                                 silent extrapolation (the table must COVER the eval grid).
+#  PIVOT CONVENTION B: the pivot slot alpha_hcd[c] is scaled by the profile EVALUATED AT exactly
+#  z = HCD_Z_PIVOT (= b_pivot for any (η₁,η₂) since x(3)=0), NEVER a nearest grid row; the rows
+#  alpha_hcd_z[:,c] are scaled row-wise by B(z_grid). z is threaded explicitly (run_legb passes
+#  ctx.z_global) — NEVER inferred from array length; a profile without z, or against a pivot-only
+#  truth (alpha_hcd_z=None), is a HARD ValueError (a silent pivot-only fallback would
+#  misrepresent a z-profile as a scalar). The scalar path is byte-identical to the pre-extension
+#  implementation (regression-tested, tests/test_ks_selboost_hooks.py) — SBC-neutral: production
+#  SBC never passes inject_spec, and no prior/forward/sample-site code is touched here.
 # --------------------------------------------------------------------------------------------- #
-def apply_lls_truth_boost(truth_pack, boost):
+_BOOST_PROFILE_QUAD_KEYS = frozenset({"b_pivot", "eta1", "eta2"})
+_BOOST_PROFILE_TABLE_KEYS = frozenset({"z", "boost", "interp"})
+
+
+def eval_boost_profile(profile, z):
+    """Evaluate a z-profile truth-boost spec at ``z`` (scalar or 1-D array) → positive B (same
+    shape class as ``z``: scalar in, float out). The pivot is HARD-CODED to
+    ``inference.HCD_Z_PIVOT`` (3.0), not a spec field — a per-arm pivot would silently decouple
+    the pivot entry from the rows. All validation failures are ValueError (fail-loud; see the
+    block comment above for the two allowed key-sets)."""
+    if not isinstance(profile, dict):
+        raise ValueError(f"boost profile must be a dict, got {type(profile).__name__}")
+    z_arr = np.atleast_1d(np.asarray(z, float))
+    if not np.all(np.isfinite(z_arr)):
+        raise ValueError("boost profile evaluation grid contains non-finite z")
+    keys = frozenset(profile)
+    if keys == _BOOST_PROFILE_QUAD_KEYS:
+        b0 = float(profile["b_pivot"]); e1 = float(profile["eta1"]); e2 = float(profile["eta2"])
+        if not np.isfinite(b0) or b0 <= 0:
+            raise ValueError(f"boost profile b_pivot must be finite and > 0, got {b0}")
+        if not (np.isfinite(e1) and np.isfinite(e2)):
+            raise ValueError(f"boost profile eta1/eta2 must be finite, got ({e1}, {e2})")
+        x = np.log((1.0 + z_arr) / (1.0 + float(HCD_Z_PIVOT)))
+        with np.errstate(over="ignore"):
+            B = b0 * np.exp(e1 * x + e2 * x * x)
+    elif keys == _BOOST_PROFILE_TABLE_KEYS:
+        if profile["interp"] != "loglog":
+            raise ValueError(f"boost profile interp must be 'loglog', got {profile['interp']!r}")
+        zt = np.asarray(profile["z"], float)
+        bt = np.asarray(profile["boost"], float)
+        if zt.ndim != 1 or bt.shape != zt.shape or zt.size < 2:
+            raise ValueError("tabulated boost profile needs matching 1-D z/boost with >= 2 rows")
+        if not np.all(np.isfinite(zt)) or not np.all(np.diff(zt) > 0):
+            raise ValueError("tabulated boost profile z must be finite and strictly increasing")
+        if not np.all(np.isfinite(bt)) or np.any(bt <= 0):
+            raise ValueError("tabulated boost profile boost values must be finite and > 0")
+        if z_arr.min() < zt[0] or z_arr.max() > zt[-1]:
+            raise ValueError(
+                f"tabulated boost profile [{zt[0]}, {zt[-1]}] does not cover the evaluation "
+                f"grid [{z_arr.min()}, {z_arr.max()}] — NO silent extrapolation (clamping must "
+                f"be explicit rows in the stored table)")
+        B = np.exp(np.interp(np.log1p(z_arr), np.log1p(zt), np.log(bt)))
+    else:
+        raise ValueError(
+            f"boost profile keys {sorted(keys)} are not one of the two allowed key-sets "
+            f"{sorted(_BOOST_PROFILE_QUAD_KEYS)} (log-quadratic) or "
+            f"{sorted(_BOOST_PROFILE_TABLE_KEYS)} (tabulated)")
+    if not np.all(np.isfinite(B)) or np.any(B <= 0):
+        raise ValueError("evaluated boost profile B(z) is non-finite or non-positive")
+    return B if np.ndim(z) else float(B[0])
+
+
+def apply_class_truth_boost_profile(truth_pack, cls_idx, profile, z):
+    """Generic z-profile applier for one HCD class column ``cls_idx`` (0=LLS, 1=subDLA, 2=DLA):
+    returns a COPY of ``truth_pack`` with the pivot ``alpha_hcd[cls_idx]`` scaled by the profile
+    at exactly z=HCD_Z_PIVOT and the rows ``alpha_hcd_z[:,cls_idx]`` scaled row-wise by B(``z``).
+    ``z`` is REQUIRED (run_legb threads ctx.z_global) and must match the row count — never
+    inferred from array length. Input never mutated (fresh arrays)."""
+    if truth_pack.get("alpha_hcd_z") is None:
+        raise ValueError(
+            "z-profile truth boost against a pivot-only truth_pack (alpha_hcd_z=None) is "
+            "meaningless — refusing the silent pivot-only fallback")
+    if z is None:
+        raise ValueError(
+            "z-profile truth boost requires the evaluation z grid (thread ctx.z_global); "
+            "it is NEVER inferred from array length")
+    z_arr = np.asarray(z, float)
+    az = np.array(truth_pack["alpha_hcd_z"], float)           # fresh (nZg,3)
+    if z_arr.ndim != 1 or z_arr.size != az.shape[0]:
+        raise ValueError(
+            f"z grid length mismatch: {z_arr.shape} vs alpha_hcd_z rows {az.shape[0]}")
+    B_pivot = eval_boost_profile(profile, float(HCD_Z_PIVOT))  # exactly z_pivot, never a row
+    B_z = eval_boost_profile(profile, z_arr)
+    out = dict(truth_pack)                                    # shallow copy of the dict
+    a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
+    a[cls_idx] = a[cls_idx] * B_pivot
+    out["alpha_hcd"] = a
+    az[:, cls_idx] = az[:, cls_idx] * B_z
+    out["alpha_hcd_z"] = az
+    return out
+
+
+def apply_lls_truth_boost(truth_pack, boost, z=None):
     """Return a COPY of ``truth_pack`` with the LLS incidence (pivot ``alpha_hcd[0]`` AND the
     z-resolved ``alpha_hcd_z[:,0]`` column) multiplied by ``boost`` (>1 ⇒ the mock carries a
-    survey-level LLS excess relative to the prior pin center). subDLA/DLA, θ9, τ₀ and a_SiIII are
-    untouched; the input is NOT mutated (deep-copies the two LLS-bearing arrays). ``boost=1`` is
-    the identity. The LLS-excess arm of the data-nuisance bias gate uses this to put the truth at
-    the per-survey lit/sim LLS center while the forward keeps the (cosmic-average / DESI) pin."""
+    survey-level LLS excess relative to the prior pin center). ``boost`` is scalar-or-dict: a
+    dict is a z-profile spec delegated to ``apply_class_truth_boost_profile`` (``z`` required);
+    a scalar keeps the pre-extension path byte-identical (``z`` ignored). subDLA/DLA, θ9, τ₀ and
+    a_SiIII are untouched; the input is NOT mutated (deep-copies the two LLS-bearing arrays).
+    ``boost=1`` is the identity. The LLS-excess arm of the data-nuisance bias gate uses this to
+    put the truth at the per-survey lit/sim LLS center while the forward keeps the
+    (cosmic-average / DESI) pin."""
+    if isinstance(boost, dict):
+        return apply_class_truth_boost_profile(truth_pack, 0, boost, z)
     out = dict(truth_pack)                                    # shallow copy of the dict
     a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
     a[0] = a[0] * float(boost)
@@ -1520,12 +1623,16 @@ def apply_lls_truth_boost(truth_pack, boost):
     return out
 
 
-def apply_subdla_truth_boost(truth_pack, boost):
+def apply_subdla_truth_boost(truth_pack, boost, z=None):
     """Return a COPY of ``truth_pack`` with the subDLA incidence (pivot ``alpha_hcd[1]`` AND the
     z-resolved ``alpha_hcd_z[:,1]`` column) multiplied by ``boost`` — the SIBLING of
-    ``apply_lls_truth_boost`` for the subDLA-displacement arm of the data-nuisance bias gate. LLS
-    (index 0), DLA (index 2), θ9, τ₀ and a_SiIII are untouched; the input is NOT mutated
-    (deep-copies the two subDLA-bearing arrays). ``boost=1`` is the identity."""
+    ``apply_lls_truth_boost`` for the subDLA-displacement arm of the data-nuisance bias gate.
+    ``boost`` is scalar-or-dict (dict ⇒ z-profile, ``z`` required; scalar path byte-identical to
+    the pre-extension implementation). LLS (index 0), DLA (index 2), θ9, τ₀ and a_SiIII are
+    untouched; the input is NOT mutated (deep-copies the two subDLA-bearing arrays). ``boost=1``
+    is the identity."""
+    if isinstance(boost, dict):
+        return apply_class_truth_boost_profile(truth_pack, 1, boost, z)
     out = dict(truth_pack)                                    # shallow copy of the dict
     a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
     a[1] = a[1] * float(boost)
@@ -1537,16 +1644,20 @@ def apply_subdla_truth_boost(truth_pack, boost):
     return out
 
 
-def apply_dla_truth_boost(truth_pack, boost):
+def apply_dla_truth_boost(truth_pack, boost, z=None):
     """Return a COPY of ``truth_pack`` with the DLA incidence (pivot ``alpha_hcd[2]`` AND the
     z-resolved ``alpha_hcd_z[:,2]`` column) multiplied by ``boost`` — the DLA SIBLING of the
     LLS/subDLA boosts, for the displaced-truth PRIYA DLA-completeness closure arm (PI disposition
-    2026-07-17). The mock then carries ``boost``× the prior-drawn alpha_DLA on the SAME deployed
-    PRIYA R_DLA response the likelihood fits (same filtering, core add-back, normalization, z law,
-    dla_forward_frac — self-consistent by construction; NO e_dla mean template anywhere). At
-    boost=1.5 the truth-distribution median lands at 0.15×(lit/sim)×w_DLA — the intended ~15%
-    residual of the OBSERVED DLA incidence (prior center = 0.10). LLS (0), subDLA (1), θ9, τ₀ and
-    a_SiIII are untouched; the input is NOT mutated. ``boost=1`` is the identity."""
+    2026-07-17). ``boost`` is scalar-or-dict (dict ⇒ z-profile, ``z`` required; scalar path
+    byte-identical to the pre-extension implementation). The mock then carries ``boost``× the
+    prior-drawn alpha_DLA on the SAME deployed PRIYA R_DLA response the likelihood fits (same
+    filtering, core add-back, normalization, z law, dla_forward_frac — self-consistent by
+    construction; NO e_dla mean template anywhere). At boost=1.5 the truth-distribution median
+    lands at 0.15×(lit/sim)×w_DLA — the intended ~15% residual of the OBSERVED DLA incidence
+    (prior center = 0.10). LLS (0), subDLA (1), θ9, τ₀ and a_SiIII are untouched; the input is
+    NOT mutated. ``boost=1`` is the identity."""
+    if isinstance(boost, dict):
+        return apply_class_truth_boost_profile(truth_pack, 2, boost, z)
     out = dict(truth_pack)                                    # shallow copy of the dict
     a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
     a[2] = a[2] * float(boost)
@@ -1565,11 +1676,14 @@ _TRUTH_BOOST_KEYS = ("lls_truth_boost", "subdla_truth_boost", "dla_truth_boost")
 _INJECT_SPEC_KEYS = frozenset(_TRUTH_BOOST_KEYS) | {"metal_misspec", "resolution"}
 
 
-def _apply_truth_boosts(truth_pack, inject_spec):
+def _apply_truth_boosts(truth_pack, inject_spec, z=None):
     """Apply the ``*_truth_boost`` keys of ``inject_spec`` to ``truth_pack`` (in LLS, subDLA, DLA
     order — independent columns, so order is cosmetic) and VALIDATE the full key set against
     ``_INJECT_SPEC_KEYS`` (unknown key ⇒ ValueError, the fail-loud typo guard). ``None``/empty
-    spec returns the input unchanged (the byte-identical no-op guarantee)."""
+    spec returns the input unchanged (the byte-identical no-op guarantee). Values are
+    scalar-or-dict: a dict is a z-profile spec routed with the ``z`` grid (run_legb threads
+    ctx.z_global; the appliers fail loud on z=None) — the scalar path is byte-identical to the
+    pre-extension implementation."""
     if not inject_spec:
         return truth_pack
     unknown = set(inject_spec) - _INJECT_SPEC_KEYS
@@ -1579,8 +1693,12 @@ def _apply_truth_boosts(truth_pack, inject_spec):
     for key, fn in (("lls_truth_boost", apply_lls_truth_boost),
                     ("subdla_truth_boost", apply_subdla_truth_boost),
                     ("dla_truth_boost", apply_dla_truth_boost)):
-        if inject_spec.get(key) is not None:
-            truth_pack = fn(truth_pack, float(inject_spec[key]))
+        val = inject_spec.get(key)
+        if val is not None:
+            if isinstance(val, dict):
+                truth_pack = fn(truth_pack, val, z=z)
+            else:
+                truth_pack = fn(truth_pack, float(val))
     return truth_pack
 
 
@@ -2747,10 +2865,12 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
             # DATA-NUISANCE INJECTION (the bias gate; inject_spec=None ⇒ byte-identical to the
             # clean self-draw — the no-op guarantee). "lls/subdla/dla_truth_boost" offset the TRUTH
             # incidence from the prior center BEFORE the forward (_apply_truth_boosts, which also
-            # fail-louds on unknown keys); "metal_misspec"/"resolution" inject a mode the forward
-            # cannot fit into the noiseless mock.
+            # fail-louds on unknown keys); scalar-or-dict values — a dict is a z-PROFILE boost
+            # B(z) needing the z grid, threaded HERE from ctx.z_global (never inferred from array
+            # length; KS selboost spec Sec 4). "metal_misspec"/"resolution" inject a mode the
+            # forward cannot fit into the noiseless mock.
             if inject_spec:
-                truth_pack = _apply_truth_boosts(truth_pack, inject_spec)
+                truth_pack = _apply_truth_boosts(truth_pack, inject_spec, z=np.asarray(ctx.z_global, float))
                 mock_legs, info = make_leg_a_legmock(
                     ctx, fid_core, truth_pack, k_mock,
                     inject_metal_misspec=inject_spec.get("metal_misspec"),
@@ -2830,10 +2950,19 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
         # JOINTLY with n_s/A_p — mean flux is the suspected n_s channel. SEPARATE field ⇒ the packed
         # draws-matrix tail layout (and the uniform/flatlog golden) is untouched.
         sites_extra = {}
-        for nm in ("tau0_amp", "dtau0"):
+        # s_lls/s_subdla/s_dla (the marginalized HCD z-slope sites, _zslope_sites): sampled but
+        # NOT packed into _draws_matrix — stored here (SAME thinning) so the KS-selboost
+        # profile-resolved recovery panel (spec Sec 6 output 5: posterior alpha_LLS(z) =
+        # pivot x sampled slope per draw, overlaid on the truth B(z) x center) is reconstructable
+        # from shard pkls. Truth: the leg-A prior draw's own slope site (truth_pack["raw"]),
+        # NaN on the held-out path (its z-resolved truth lives in truth_alpha_hcd_z rows).
+        # Additive-only keys; absent when marginalize_zslope is off.
+        _truth_raw = truth_pack.get("raw") or {}
+        for nm in ("tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla"):
             if nm in samples:
                 dr = np.asarray(samples[nm])[::step][:L]
-                sites_extra[nm] = dict(draws=dr, truth=float(truth_pack.get(nm, np.nan)))
+                sites_extra[nm] = dict(
+                    draws=dr, truth=float(truth_pack.get(nm, _truth_raw.get(nm, np.nan))))
         # MODEL C+ metal f/k node sites (ceiling-check instrumentation): sampled by _metal_2node_sites
         # but NOT packed into _draws_matrix, so store them here (SAME thinning) with the injected-arm
         # truth. Additive-only + empty under uniform/flatlog/metals-off ⇒ byte-identical golden.
@@ -2846,7 +2975,12 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
                              ll_true=ll_true, ll_draws=ll_draws_t,
                              names=_packed_names_for(samples, kept_global),
                              kept_global=kept_global, dropped=info["dropped"],
-                             sites_extra=sites_extra, n_div=n_div))
+                             sites_extra=sites_extra, n_div=n_div,
+                             # RECORD EXTENSION (KS selboost spec Sec 4): the (nZg,3) z-resolved
+                             # truth alpha rows, so the analyzer can verify the row-level boost
+                             # contract rows == B(z_global) × clean rows, not just the pivot.
+                             # Additive-only key ⇒ every existing pkl consumer is untouched.
+                             truth_alpha_hcd_z=np.array(truth_pack["alpha_hcd_z"], float)))
         if verbose:
             print(f"  [mock {m}] sim={sim[:24]}… L={L} (step {step}, ess {ess_min:.0f}) "
                   f"nKeptZ={int(kept_global.sum())} div={n_div}")
