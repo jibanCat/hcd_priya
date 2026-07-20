@@ -368,30 +368,49 @@ def summarize_campaign(shard_dir, w=None):
         part1[a] = {p: dict(pooled[a][p], verdict=verdict(pooled[a][p]["ub"]))
                     for p in GATE_PARAMS}
 
-    # PART 2: S = max over ALL mis-centered arms of (|mean| + 2 SE)/D
+    # PART 2: S = max over the BINDING mis-centered arms of (|mean| + 2 SE)/D. FLAG A
+    # RESOLUTION (spec launch log, PI-signed A2.8-c): the null-bound arm K5 is EXCLUDED from
+    # the binding max (registry part2_binding=False) — at D~0.13 its N=8 noise floor 2SE/D~1.3
+    # makes it mechanically un-failable/un-passable on noise alone; it reports a SEPARATE
+    # null-bound consistency line. This lands the signed decision in code (the earlier "loud
+    # flag / PI disposition" wording is superseded; readout 2026-07-20).
+    def _is_binding(a):
+        return bool(AR.ARMS[a].get("part2_binding", True)) if a in AR.ARMS else True
+
     per_arm2, S, argmax = {}, 0.0, None
+    null_bound = {}
     for a in arms:
         D = coords[a]["D"]
-        entry = dict(D=D, flagged_out_of_envelope=(not coords[a]["in_envelope"]))
+        binding = _is_binding(a)
+        entry = dict(D=D, flagged_out_of_envelope=(not coords[a]["in_envelope"]),
+                     part2_binding=binding)
         for p in GATE_PARAMS:
             pl = pooled[a][p]
             term = (abs(pl["mean"]) + 2.0 * pl["se"]) / D if D > 0 else float("nan")
             entry[p] = term
-            if np.isfinite(term) and term > S:
+            if binding and np.isfinite(term) and term > S:
                 S, argmax = term, (a, p)
-        # NOISE-FLOOR FLAG (consistency-review FLAG A, 2026-07-19): the Part-2 term of a
-        # small-displacement arm can exceed the threshold on its 2 SE/D noise term ALONE
-        # (K5 at the measured truth: D ~ 0.13, so 2 SE/D ~ 1.3 at N=8 >> 0.50) — a
-        # spec-internal inconsistency between A2.5.1 (K5 reclassified null-bound) and A2.6
-        # (K5 left in the binding max). Surfaced, not silently resolved: the criterion is
-        # pre-registered and its amendment is a PI disposition, not an analyzer decision.
         entry["noise_floor_2se_over_D"] = max(
             (2.0 * pooled[a][p]["se"] / D if D > 0 else float("nan")) for p in GATE_PARAMS)
         entry["noise_dominated"] = bool(np.isfinite(entry["noise_floor_2se_over_D"])
                                         and entry["noise_floor_2se_over_D"] >= S_THRESHOLD)
         per_arm2[a] = entry
+        if not binding:
+            # null-bound consistency line (reported, NOT gated): raw mean +/- 2SE per param
+            null_bound[a] = {p: dict(mean=float(pooled[a][p]["mean"]),
+                                     se=float(pooled[a][p]["se"]),
+                                     within_2se_of_zero=bool(abs(pooled[a][p]["mean"])
+                                                             <= 2.0 * pooled[a][p]["se"]))
+                             for p in GATE_PARAMS}
+    # raw all-arms max (transparency only; NOT the criterion) so the ill-conditioned K5 term
+    # is visible but never the headline.
+    _raw_terms = [(per_arm2[a][p], a, p) for a in arms for p in GATE_PARAMS
+                  if np.isfinite(per_arm2[a][p])]
+    S_raw, argmax_raw = max(((t, (a, p)) for t, a, p in _raw_terms), default=(0.0, None))
     part2 = dict(S=float(S), argmax=argmax, threshold=S_THRESHOLD, per_arm=per_arm2,
                  verdict=("PASS" if S < S_THRESHOLD else "FAIL"),
+                 S_raw_allarms=float(S_raw), argmax_raw=argmax_raw,
+                 null_bound_line=null_bound,
                  noise_dominated_arms=[a for a, e in per_arm2.items() if e["noise_dominated"]])
 
     # pooled 3-vector response surface (surface_fit arms only: K5 excluded — its subDLA
@@ -543,18 +562,30 @@ def main_report(shard_dir, npz_out=None, fig_dir=None, w=None):
               f"dtau0 {g2['mean']:+.3f}+/-{g2['se']:.3f}")
 
     p2 = res["part2"]
-    print(f"\n-- PART 2 (binding): S = max (|mean|+2SE)/D over mis-centered arms = "
+    print(f"\n-- PART 2 (binding): S = max (|mean|+2SE)/D over the BINDING mis-centered arms "
+          f"(null-bound K5 EXCLUDED per the PI-signed FLAG A resolution) = "
           f"{p2['S']:.3f} at {p2['argmax']} (threshold {p2['threshold']}) {p2['verdict']}")
+    print(f"   (raw all-arms max including the ill-conditioned K5 term = {p2['S_raw_allarms']:.3f} "
+          f"at {p2['argmax_raw']} — reported for transparency, NOT the criterion)")
     for a in sorted(p2["per_arm"]):
         e = p2["per_arm"][a]
         flag = "  [OUT-OF-ENVELOPE, flagged separately]" if e["flagged_out_of_envelope"] else ""
-        if e["noise_dominated"]:
-            flag += (f"  [WARNING: noise-dominated — 2SE/D = "
-                     f"{e['noise_floor_2se_over_D']:.2f} >= {p2['threshold']} with ZERO true "
-                     f"response; the binding max cannot be met by this arm at its N. "
-                     f"Pre-registered criterion inconsistency (A2.5.1 vs A2.6) — PI "
-                     f"disposition required, do not read as a physics FAIL]")
+        if not e["part2_binding"]:
+            flag += ("  [NULL-BOUND arm — EXCLUDED from the binding max (FLAG A, signed); "
+                     "sensitivity reported on the null-bound line below]")
+        elif e["noise_dominated"]:
+            flag += (f"  [noise-floor note: 2SE/D = {e['noise_floor_2se_over_D']:.2f}]")
         print(f"   {a:>15}: D {e['D']:.3f}  ns {e['ns']:.3f}  Ap {e['Ap']:.3f}{flag}")
+    if p2["null_bound_line"]:
+        for a, nb in p2["null_bound_line"].items():
+            bits = "  ".join(f"{p} {nb[p]['mean']:+.3f}+/-{nb[p]['se']:.3f}"
+                             f"{'(<2SE of 0)' if nb[p]['within_2se_of_zero'] else '(>2SE!)'}"
+                             for p in GATE_PARAMS)
+            print(f"   NULL-BOUND consistency line [{a}]: {bits}  "
+                  f"(reported, not gated; near-null displacement D~{p2['per_arm'][a]['D']:.2f})")
+    print("   [DISCLOSURE] weights = uniform INDICATIVE (spec FLAG B: the Fisher-weight "
+          "generator is not built; D_a/S/surface are indicative. Part 1 is weight-independent, "
+          "so the FAIL does not depend on this.)")
 
     print("\n-- response surface (through-origin WLS; jackknife-over-mocks SE) + collapse")
     for p in GATE_PARAMS:
@@ -608,7 +639,12 @@ def main_report(shard_dir, npz_out=None, fig_dir=None, w=None):
                for p in PAIRED_PARAMS},
             **{f"ub_{p}": np.asarray([res["pooled"][a][p]["ub"] for a in arms_sorted])
                for p in PAIRED_PARAMS},
-            S=p2["S"],
+            S=p2["S"],                         # the BINDING S (null-bound K5 excluded, signed)
+            S_argmax=np.asarray(str(p2["argmax"])),
+            S_raw_allarms=p2["S_raw_allarms"],  # transparency: includes the ill-conditioned K5
+            part2_binding=np.asarray([res["part2"]["per_arm"][a]["part2_binding"]
+                                      for a in arms_sorted]),
+            weights_mode=np.asarray("uniform_INDICATIVE_flagB"),
         )
         print(f"npz written: {npz_out}")
 

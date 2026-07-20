@@ -277,6 +277,28 @@ def test_part2_noise_floor_flag(tmp_path):
     assert "noise_dominated_arms" in res["part2"]
 
 
+def test_part2_excludes_null_bound_k5_from_binding_max(tmp_path):
+    """FLAG A resolution (PI-signed A2.8-c), landed in code 2026-07-20: the null-bound arm
+    K5 (registry part2_binding=False) is EXCLUDED from the binding Part-2 max and reported
+    on a separate null-bound consistency line; the raw all-arms max is kept for transparency
+    only. Guards against the binding S silently reverting to the ill-conditioned K5 term."""
+    _write_campaign(tmp_path)
+    res = AN.summarize_campaign(str(tmp_path))
+    p2 = res["part2"]
+    # K5 is marked non-binding and never the argmax of the binding S
+    assert p2["per_arm"]["K5_joint_meas"]["part2_binding"] is False
+    assert p2["argmax"] is None or p2["argmax"][0] != "K5_joint_meas"
+    # null-bound line carries K5's raw sensitivity (reported, not gated)
+    assert "K5_joint_meas" in p2["null_bound_line"]
+    for par in ("ns", "Ap"):
+        assert par in p2["null_bound_line"]["K5_joint_meas"]
+    # transparency field exists and is >= the binding S (raw includes K5)
+    assert p2["S_raw_allarms"] >= p2["S"] - 1e-12
+    # every binding arm's registry flag is honored
+    for a, e in p2["per_arm"].items():
+        assert e["part2_binding"] == bool(AR.ARMS[a].get("part2_binding", True))
+
+
 def test_ingest_rejects_stamped_B_mismatch(tmp_path):
     # the stamped evaluated vector must match the profile re-evaluated at ingest
     def mutate(payload, name):

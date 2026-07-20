@@ -95,7 +95,10 @@ ARMS = {
                 "arm by the approved second ask (A2.8-b); two-sides eta1; Part-1 gate arm"),
     "K5_joint_meas": dict(
         quad="measured", n_mocks=8, envelope="in", default_run=True, part1="if_in_envelope",
-        surface_fit=False,
+        surface_fit=False, part2_binding=False,   # FLAG A RESOLUTION (spec launch log,
+        # PI-signed A2.8-c): the null-bound arm is EXCLUDED from the binding Part-2 max — at
+        # its measured displacement D~0.13 the N=8 noise floor 2SE/D~1.3 makes it mechanically
+        # unfailable-or-unpassable on noise alone; it reports a separate null-bound line.
         purpose="D3 joint-class NULL-BOUND arm at the measured DLA-conditional incidence "
                 "(B_LLS ~1.12->1.03, B_subDLA ~1.29->1.08); detects gross non-additivity only "
                 "(linear prediction ~0.05-0.07 sigma_post); OUT of the LLS surface fit"),
