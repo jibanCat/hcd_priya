@@ -137,6 +137,11 @@ HCD_LIT_OVER_SIM_SLOPE = (0.764, 0.15, 0.40)  # d ln(lit/sim) / d ln(1+z)
 #     informative window rather than the prior imposing a possibly-wrong tight number.
 # A multiplier on the cosmic-average (lit/sim) LLS center, applied ONLY when ``survey`` is given
 # (the closure's sim-mean cert passes survey=None and is unaffected).
+# NOTE (2026-07-20, comment-only — the dict VALUES are frozen in the hcd_prior_signature
+# payload): the "DESI+KS" rows below are SUPERSEDED FOR JOINT USE — a joint fit now goes
+# through closure_legb.build_legb_joint_ctx(survey_by_leg=...) with PER-LEG survey keys
+# (each leg its own single-leg prior), never a single blended "DESI+KS" prior. The rows are
+# KEPT verbatim for payload stability (removing them would move the signature).
 HCD_LLS_SURVEY_BOOST = {"DESI": 1.0, "eBOSS": 1.0, "DESI+KS": 1.0, "KS": 2.5}
 # --- PI WIDTH RULE (2026-06-17 re-determination; 1× value RE-DERIVED 2026-07-18) ---------------
 # per-survey LLS fractional width σ/μ (overrides HCD_PRIOR_FRAC_SIGMA[0] when survey given). The PI
