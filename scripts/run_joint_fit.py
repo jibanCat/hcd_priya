@@ -43,6 +43,7 @@ from numpyro.infer import init_to_sample
 
 from hcd_analysis.emulator import closure_legb as CL
 from hcd_analysis.emulator import blinding as BL
+from hcd_analysis.emulator.seeding import nuts_fold_int
 from hcd_analysis.emulator.closure_legb import (
     build_legb_joint_ctx, joint_stamp, _run_nuts_legb, _draws_matrix, _packed_names_for,
     convergence_battery, _ebfmi1)
@@ -146,7 +147,10 @@ def run_joint_fit(leg_names, *, n_chains=4, n_warmup=250, n_samples=600, max_tre
     # processes/machines; the derivation is recorded in the export meta. (The hash() idiom
     # at run_real_fit.py remains as a PI-flagged pre-existing follow-up: changing it there
     # would alter future single-leg chain streams.)
-    k_nuts = jax.random.fold_in(key0, zlib.crc32("+".join(leg_names).encode()) & 0x7fffffff)
+    # P0 2026-07-21: routed through the SHARED helper (hcd_analysis.emulator.seeding) so the two
+    # drivers cannot drift. Byte-identical to the previous inline crc32 for every label, so the
+    # joint driver's chain stream is UNCHANGED (pinned by tests/test_seed_determinism.py).
+    k_nuts = jax.random.fold_in(key0, nuts_fold_int("+".join(leg_names)))
     packed_chains, energies, num_steps_all, per_chain_div, ll_chains = [], [], [], [], []
     nuisance_chains, names = [], None
     for cid in range(int(n_chains)):

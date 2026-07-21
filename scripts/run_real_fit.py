@@ -55,6 +55,7 @@ from hcd_analysis.emulator.closure_legb import (
     build_legb_ctx, _run_nuts_legb, _draws_matrix, _packed_names_for,
     convergence_battery, _ebfmi1)
 from hcd_analysis.emulator.inference import PARAM_NAMES
+from hcd_analysis.emulator.seeding import SEED_DERIVATION, nuts_fold_int
 from hcd_analysis.emulator import blinding as BL
 from hcd_analysis.emulator.data import PARAM_LIMITS
 from numpyro.infer import init_to_sample
@@ -238,7 +239,12 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
     core_per_leg = {leg.name: core_k}
 
     key0 = jax.random.PRNGKey(int(seed))
-    k_nuts = jax.random.fold_in(key0, hash(survey) & 0x7fffffff)
+    # P0 (plan-to-unblind 3A): python hash() is SipHash-salted per process, so the recorded seed
+    # would NOT reproduce the chain. nuts_fold_int is crc32, stable across processes/machines;
+    # the derivation is recorded in the export meta. Shared with run_joint_fit so the two drivers
+    # cannot drift. NOTE: this changes the chain stream vs the June eBOSS chains, which are
+    # already marked chain_of_record: NO / superseded-forward.
+    k_nuts = jax.random.fold_in(key0, nuts_fold_int(survey))
 
     packed_chains, energies, num_steps_all, per_chain_div, ll_chains = [], [], [], [], []
     nuisance_chains = []                                        # Fix 2: raw f_res / metal-node draws
@@ -601,7 +607,13 @@ def main():
     chain_files, rec = export_getdist(
         result, out_dir, root, offset=offset, blind=a.blind, survey=a.survey,
         meta=dict(blind_lock=os.path.abspath(a.blind_lock) if a.blind else None,
-                  seed=a.seed, ks_zlo=(a.ks_zlo if a.survey == "ks" else None)))
+                  seed=a.seed, ks_zlo=(a.ks_zlo if a.survey == "ks" else None),
+                  # P0: record the DERIVATION alongside the seed, and the resolved integer, so a
+                  # reader can re-derive the chain stream from the export alone (mirrors
+                  # run_joint_fit). A seed without its derivation is ambiguous.
+                  seed_derivation=SEED_DERIVATION,
+                  seed_fold_label=a.survey,
+                  seed_fold_int=int(nuts_fold_int(a.survey))))
     print(f"=== wrote {len(chain_files)} chains -> {out_dir}/{root}.*.txt "
           f"(+ .paramnames .yaml .health.json) | A_p/n_s BLINDED={a.blind} ===")
     if info["private"]:
