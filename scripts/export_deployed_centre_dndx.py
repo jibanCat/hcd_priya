@@ -351,7 +351,27 @@ def main():
         "answers_request": "request_to_code_agent_2026-07-21_deployed_centre.md",
         "commit": git("rev-parse", "HEAD"),
         "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+        # PROVENANCE MUST BE SELF-VERIFYING (adversarial-panel process fix 3, 2026-07-21).
+        # A bare dirty=true boolean is what made the previous export unusable to the paper: it
+        # could not tell "the producer was edited" from "unrelated files are untracked". Worse,
+        # the previous sidecar recorded commit ee685a9, at which THE PRODUCER DOES NOT EXIST --
+        # unreproducible by construction, not merely dirty. So record the literal porcelain, and
+        # PROVE the recorded commit actually contains this producer, unmodified.
         "dirty": bool(git("status", "--porcelain")),
+        "git_status_porcelain": git("status", "--porcelain"),
+        "dirty_tracked_files": bool(git("status", "--porcelain", "--untracked-files=no")),
+        "producer": str(Path(__file__).relative_to(ROOT)),
+        "producer_present_at_commit": subprocess.run(
+            ["git", "-C", str(ROOT), "cat-file", "-e",
+             f"HEAD:{Path(__file__).relative_to(ROOT)}"]).returncode == 0,
+        "producer_unmodified_vs_commit": subprocess.run(
+            ["git", "-C", str(ROOT), "diff", "--quiet", "HEAD", "--",
+             str(Path(__file__).relative_to(ROOT))]).returncode == 0,
+        "code_sha256": {
+            str(Path(__file__).relative_to(ROOT)): sha256(Path(__file__)),
+            **{f"hcd_analysis/emulator/{m}.py": sha256(ROOT / "hcd_analysis" / "emulator" / f"{m}.py")
+               for m in ("inference", "dndx_wc", "closure_legb", "sampler_numpyro")},
+        },
         "run_command": RUN_CMD,
         "inputs_sha256": {str(f3p): sha256(f3p)},
         "outputs_sha256": {npz.name: sha256(npz)},
