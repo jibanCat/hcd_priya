@@ -8,6 +8,16 @@ Row-2 = the with/without-prior NUTS posteriors (closure-mock, truth = held-out s
 Row-1 = the corrected 68% prior band (prior68_corrected_*), recomputed from the
 corrected closure prior so it matches the reran arms at the source.
 
+V2 RE-ISSUE (W7 2026-07-22, one-time re-issue under the corrected model): the campaign
+pkls on scratch PREDATE the exact-inverse migration of the campaign runner -- their
+stored `dndx_draws` were computed with the APPROXIMATE `alpha_to_dndx`, which silently
+SATURATED out-of-simplex draws at dN/dX = 27.631021/Xbar (808 entries in the off_hi
+arm; readout defect B). The v1 export (money_campaign_corrected_2026-07-20) passed
+those arrays through verbatim into `money_row2_arms.npz`. v2 IGNORES the pkls' stored
+dndx arrays and RE-DERIVES the row-2 per-draw dN/dX(z) (and dndx_truth) from
+`alpha_pivot_draws` through `alpha_to_dndx_exact` in mask mode -- out-of-simplex draws
+become NaN (excluded, counted per arm in PROVENANCE), never a silent clamp value.
+
 Blind status: BLIND-SAFE. 100% closure mocks (truth = held-out PRIYA sim, known); no
 real-data n_s/A_p anywhere, including metadata.
 
@@ -26,7 +36,8 @@ SC = Path("/scratch/cavestru_root/cavestru1/mfho")
 ARMS = {"on": SC/"desi_hcd_prior_on_corr", "off": SC/"desi_hcd_prior_off_corr",
         "on_hi": SC/"desi_hcd_prior_on_hi_corr", "off_hi": SC/"desi_hcd_prior_off_hi_corr"}
 N_PAIRS = 6
-DEFAULT_OUT = Path("/home/mfho/hcd_priya_notes/artifacts/paper_exports/money_campaign_corrected_2026-07-20")
+DEFAULT_OUT = Path("/home/mfho/hcd_priya_notes/artifacts/paper_exports/money_campaign_corrected_2026-07-22")
+SATURATION_MU = 27.631021    # -log(1e-12): the retired approximate-inverse clamp fingerprint
 CORRECTED_LLS_CENTER = 0.18811862702546295   # survey=None closure, post-528ba89 (export of record)
 RUN_CMD = ("cd /home/mfho/hcd_priya && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu "
            "/home/mfho/.conda/envs/emu-jax/bin/python3 scripts/export_money_campaign_corrected.py")
@@ -52,6 +63,46 @@ def load_arm(d, mocks):
             raise SystemExit(f"MISSING {p} — campaign not complete; do not export yet.")
         out.append((p, pickle.load(open(p, "rb"))))
     return out
+
+
+def rederive_dndx_draws(rec, tag):
+    """Re-derive per-draw dN/dX(z) (L,nZ,3) from the pkl's alpha_pivot_draws through the EXACT
+    occupancy-map inverse in mask mode (readout defect B / v2 re-issue, 2026-07-22).
+
+    The pkls on scratch predate the campaign runner's exact-inverse migration: their STORED
+    `dndx_draws` were computed with the APPROXIMATE alpha_to_dndx, which silently saturated
+    out-of-simplex draws at 27.631021/Xbar -- those stored arrays are IGNORED and superseded.
+    Same construction as desi_hcd_prior_sensitivity._dndx_from_pivot_draws (closure z-slope
+    HCD_INCIDENCE_SLOPE, pivot HCD_Z_PIVOT), on the pkl's own dndx_z / dndx_Xbar grid.
+
+    Returns (dndx_draws, n_invalid, n_total). Out-of-simplex (draw, z) entries are NaN."""
+    from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
+    from hcd_analysis.emulator.closure_legb import HCD_INCIDENCE_SLOPE
+    from hcd_analysis.emulator.inference import HCD_Z_PIVOT
+    a = np.asarray(rec["alpha_pivot_draws"], float)             # (L,3)
+    zg = np.asarray(rec["dndx_z"], float)                       # (nZ,)
+    Xb = np.asarray(rec["dndx_Xbar"], float)                    # (nZ,)
+    s_c = np.asarray(HCD_INCIDENCE_SLOPE, float)                # (3,) closure/SBC slope
+    shape = ((1.0 + zg)[:, None] / (1.0 + float(HCD_Z_PIVOT))) ** s_c[None, :]   # (nZ,3)
+    out = np.empty((a.shape[0], len(zg), 3))
+    n_invalid = 0
+    for j in range(len(zg)):
+        out[:, j, :], ok = alpha_to_dndx_exact(a * shape[j][None, :], float(Xb[j]),
+                                               float(zg[j]), mode="mask")
+        n_invalid += int(np.size(ok) - np.count_nonzero(ok))
+    n_total = int(a.shape[0] * len(zg))
+    # no silent clamp value may survive the re-derivation (the v1 artifact fingerprint)
+    assert not np.any(np.isclose(out, (SATURATION_MU / Xb)[None, :, None], rtol=1e-5)), (
+        f"{tag}: re-derived dndx draws contain the 27.631021/Xbar saturation fingerprint -- "
+        f"the exact-inverse path is broken")
+    stored = np.asarray(rec["dndx_draws"], float)
+    both = np.isfinite(out) & ~np.isclose(stored, (SATURATION_MU / Xb)[None, :, None], rtol=1e-5)
+    rel = np.abs(out[both] / stored[both] - 1.0) if both.any() else np.zeros(1)
+    print(f"[row2 {tag}] re-derived dndx draws: {n_invalid}/{n_total} out-of-domain -> NaN "
+          f"(pkl stored these silently saturated at 27.631021/Xbar); exact-vs-stored rel diff "
+          f"on mutually-valid entries: median {np.median(rel):.3e} max {np.max(rel):.3e} "
+          f"(renorm-level typical; near-edge tails expected)")
+    return out, n_invalid, n_total
 
 
 def main():
@@ -116,6 +167,21 @@ def main():
     ns_off_hi, ap_off_hi = phys(off_hi["ns_draws"], off_hi["Ap_draws"])
     ns_tr_hi, ap_tr_hi = phys(on_hi["ns_truth"], on_hi["Ap_truth"])
 
+    # v2: RE-DERIVE the hi-arm per-draw dN/dX(z) + truth through the EXACT inverse (mask mode);
+    # the pkls' stored dndx arrays predate the migration and carry silent saturation (v1 defect).
+    import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
+    from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
+    dndx_on_hi, ninv_on, ntot_on = rederive_dndx_draws(on_hi, "on_hi")
+    dndx_off_hi, ninv_off, ntot_off = rederive_dndx_draws(off_hi, "off_hi")
+    # the truth alpha triple is in-domain by construction: exact inverse in RAISE mode.
+    from hcd_analysis.emulator.closure_legb import HCD_INCIDENCE_SLOPE as _S_C
+    from hcd_analysis.emulator.inference import HCD_Z_PIVOT as _ZP
+    _zg_t = np.asarray(on_hi["dndx_z"], float); _xb_t = np.asarray(on_hi["dndx_Xbar"], float)
+    _shape_t = ((1.0 + _zg_t)[:, None] / (1.0 + float(_ZP))) ** np.asarray(_S_C, float)[None, :]
+    dndx_truth_exact = np.stack(
+        [alpha_to_dndx_exact(np.asarray(on_hi["alpha_pivot_truth"], float)[None, :] * _shape_t[j],
+                             float(_xb_t[j]), float(_zg_t[j]))[0] for j in range(len(_zg_t))])
+
     np.savez(out/"money_row2_arms.npz",
              class_order=np.array(CLS), n_pairs=N_PAIRS,
              lls_center_corrected=np.float64(CORRECTED_LLS_CENTER),
@@ -128,9 +194,10 @@ def main():
              sub_off_hi=np.asarray(off_hi["alpha_pivot_draws"])[:, 1],
              lls_truth=np.float64(on_hi["alpha_pivot_truth"][0]),
              sub_truth=np.float64(on_hi["alpha_pivot_truth"][1]),
-             dndx_truth=np.asarray(on_hi["dndx_truth"], float),
+             dndx_truth=dndx_truth_exact,
              dndx_z=np.asarray(on_hi["dndx_z"], float), dndx_Xbar=np.asarray(on_hi["dndx_Xbar"], float),
-             dndx_draws_on_hi=np.asarray(on_hi["dndx_draws"]), dndx_draws_off_hi=np.asarray(off_hi["dndx_draws"]),
+             dndx_draws_on_hi=dndx_on_hi, dndx_draws_off_hi=dndx_off_hi,
+             dndx_invalid_on_hi=np.int64(ninv_on), dndx_invalid_off_hi=np.int64(ninv_off),
              # matched-pair shift inset (N=6)
              pair_d_ns=d_ns, pair_d_Ap=d_ap,
              pair_ns_shift=np.float64(d_ns.mean()), pair_ns_sem=np.float64(d_ns.std(ddof=1)/np.sqrt(N_PAIRS)),
@@ -139,7 +206,11 @@ def main():
              alpha_hcd_sigma=np.asarray(on_hi["alpha_hcd_sigma"], float),
              PARAM_LIMITS_ns_Ap=np.array([[lo_ns, hi_ns], [lo_ap, hi_ap]]),
              note=np.array("closure-mock posteriors (truth=held-out PRIYA sim); with(on)/without(off) HCD prior; "
-                           "matched-pair identical data; corrected closure center 0.18812; pre-NORC forward (option a)"))
+                           "matched-pair identical data; corrected closure center 0.18812; pre-NORC forward (option a). "
+                           "v2: dndx_draws_*/dndx_truth RE-DERIVED from alpha_pivot_draws through alpha_to_dndx_exact "
+                           "(mask mode; out-of-simplex draws NaN, counted in dndx_invalid_*) -- the campaign pkls' "
+                           "stored dndx arrays predate the exact-inverse migration and silently saturated at "
+                           "27.631021/Xbar (v1 shipped 808 such entries in dndx_draws_off_hi)"))
 
     # ---- ROW 1: corrected 68% prior band (recomputed from the corrected prior) ---------------
     import hcd_analysis.emulator  # noqa  (x64 before jax)
@@ -187,14 +258,42 @@ def main():
     outputs = {n: {"sha256": sha256(out/n), "bytes": (out/n).stat().st_size}
                for n in ("money_row2_arms.npz", "money_row1_layers.npz")}
     prov = {
-        "schema": "money_campaign_corrected_v1",
+        "schema": "money_campaign_corrected_v2",
         "purpose": "corrected-prior money-figure campaign (paper request 2026-07-20); supersedes the "
                    "pre-correction row-2 arms so row-1 band and row-2 posteriors are consistent at the source",
+        "supersedes": [
+            "money_campaign_corrected_2026-07-20 (v1: money_row2_arms.npz passed the campaign pkls' "
+            "stored dndx arrays through verbatim -- 808 silently saturated dndx_draws_off_hi entries "
+            "at 27.631021/Xbar from the pre-migration approximate alpha_to_dndx; superseded, do not "
+            "read its dndx_draws_* / dndx_truth)"],
+        "schema_changes_vs_v1": [
+            "dndx_draws_on_hi / dndx_draws_off_hi / dndx_truth: RE-DERIVED from the pkls' "
+            "alpha_pivot_draws (truth: alpha_pivot_truth) through alpha_to_dndx_exact -- draws in "
+            "mask mode (out-of-simplex -> NaN, never a clamp value), truth in raise mode; the pkls' "
+            "stored dndx arrays (approximate inverse, silent saturation) are IGNORED",
+            "ADDED npz keys dndx_invalid_on_hi / dndx_invalid_off_hi (per-arm out-of-domain draw-z "
+            "entry counts) + the row2_dndx_invalid_draws provenance block",
+            "renorm-level differences vs v1 expected in every dndx_* array and in the row-1 "
+            "percentile layers (the row-1 band was already mask-mode exact in the v1 producer)"],
         "forward_decision": "OPTION A: corrected closure prior (LLS center 0.18812) + PRE-NORC forward "
                             "(res_corr_on=True default; NOT the deployed NORC forward). Money-figure banner stays PRE-NORC.",
         "commit": git("rev-parse", "HEAD"), "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
-        "dirty": bool(git("status", "--porcelain", "scripts/desi_hcd_prior_sensitivity.py",
-                          "scripts/export_money_campaign_corrected.py", "hcd_analysis/")),
+        "dirty": bool(git("status", "--porcelain")),
+        "git_status_porcelain": git("status", "--porcelain"),
+        "dirty_tracked_files": bool(git("status", "--porcelain", "--untracked-files=no")),
+        "producer": "scripts/export_money_campaign_corrected.py",
+        "producer_present_at_commit": subprocess.run(
+            ["git", "-C", str(ROOT), "cat-file", "-e",
+             "HEAD:scripts/export_money_campaign_corrected.py"]).returncode == 0,
+        "producer_unmodified_vs_commit": subprocess.run(
+            ["git", "-C", str(ROOT), "diff", "--quiet", "HEAD", "--",
+             "scripts/export_money_campaign_corrected.py"]).returncode == 0,
+        "code_sha256": {
+            "scripts/export_money_campaign_corrected.py": sha256(Path(__file__)),
+            "hcd_analysis/emulator/dndx_wc.py": sha256(ROOT / "hcd_analysis/emulator/dndx_wc.py"),
+            "hcd_analysis/emulator/closure_legb.py": sha256(ROOT / "hcd_analysis/emulator/closure_legb.py"),
+            "hcd_analysis/emulator/inference.py": sha256(ROOT / "hcd_analysis/emulator/inference.py"),
+        },
         "run_command": RUN_CMD,
         "campaign_launch": {"seed": 20260621, "fold": 0, "n_mocks_fold": 8, "n_pairs": N_PAIRS,
                             "base_depth": "warmup 250 / samples 600", "hi_depth": "warmup 400 / samples 2000",
@@ -212,6 +311,14 @@ def main():
             "policy": ("out-of-simplex draws (sum(alpha)>=1 after z-scaling) are EXCLUDED "
                        "from the band percentiles (NaN) and counted here, instead of the old "
                        "silent saturation")},
+        "row2_dndx_invalid_draws": {
+            "on_hi": {"n_invalid": ninv_on, "n_total": ntot_on},
+            "off_hi": {"n_invalid": ninv_off, "n_total": ntot_off},
+            "policy": ("per-arm out-of-simplex (draw, z) entries in the re-derived "
+                       "dndx_draws_{on,off}_hi are NaN (masked, alpha_to_dndx_exact "
+                       "mode='mask') and counted here; the campaign pkls' STORED dndx_draws "
+                       "(approximate inverse, silent saturation at 27.631021/Xbar) are "
+                       "ignored -- v1 shipped 808 saturated off_hi entries")},
         "PARAM_LIMITS_ns_Ap": [[lo_ns, hi_ns], [lo_ap, hi_ap]],
         "blind_status": "BLIND-SAFE: 100% closure mocks (truth = held-out PRIYA sim, known); no real-data n_s/A_p "
                         "in any array or field",
@@ -227,6 +334,8 @@ def main():
     print(f"  commit={prov['commit'][:12]} dirty={prov['dirty']}  matched-pair n_s "
           f"{prov['matched_pair_delta']['n_s'][0]:+.2f}+/-{prov['matched_pair_delta']['n_s'][1]:.2f}  "
           f"A_p {prov['matched_pair_delta']['A_p'][0]:+.2f}+/-{prov['matched_pair_delta']['A_p'][1]:.2f}")
+    print(f"  row2 out-of-domain (NaN-masked, was silent saturation): on_hi {ninv_on}/{ntot_on}  "
+          f"off_hi {ninv_off}/{ntot_off}")
 
 
 if __name__ == "__main__":
