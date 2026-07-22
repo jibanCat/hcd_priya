@@ -71,7 +71,12 @@ def load_manifest(manifest_path=None):
             f"production ensemble manifest not found at {manifest_path} -- the pinned member "
             f"list is REQUIRED (generate it with scripts/gen_ensemble_manifest.py)")
     with open(manifest_path) as f:
-        return json.load(f)
+        manifest = json.load(f)
+    if not isinstance(manifest, dict):
+        raise ProductionEnsembleError(
+            f"production ensemble manifest {manifest_path} is not a JSON object "
+            f"(got {type(manifest).__name__}) -- corrupted or hand-edited")
+    return manifest
 
 
 def _expect(cond, msg):
@@ -100,6 +105,11 @@ def verify_manifest(checkpoints_dir=None, manifest_path=None):
     if checkpoints_dir is None:
         checkpoints_dir = os.path.dirname(os.path.abspath(manifest_path))
 
+    sv = manifest.get("schema_version")
+    _expect(sv == MANIFEST_SCHEMA_VERSION,
+            f"manifest {manifest_path} carries schema_version={sv!r}, this loader verifies "
+            f"schema_version={MANIFEST_SCHEMA_VERSION} -- a schema bump must land together "
+            f"with the loader change, never verify silently under old rules")
     members = manifest.get("members")
     _expect(isinstance(members, list),
             f"manifest {manifest_path} has no 'members' list (hand-edited or truncated?)")

@@ -110,15 +110,16 @@ arithmetic), and the emulator's exact internal identities break under the lower-
 default. Run everything with the [environment string](#1-environment-mandatory).
 
 ```python
-import glob, numpy as np
+import numpy as np
 import hcd_analysis.emulator                      # x64 ON: MUST precede any jax import
 import jax.numpy as jnp
 from hcd_analysis.emulator.ensemble import load_ensemble
 from hcd_analysis.emulator.predict import predict_P_filt
 
-REPO = "/home/mfho/hcd_priya"
-paths = sorted(p[:-4] for p in glob.glob(f"{REPO}/checkpoints/final_prod_seed*.eqx"))
-ens, meta, norm = load_ensemble(paths)            # asserts all 5 members share the P_filt norm
+from hcd_analysis.emulator.prod_ensemble import load_production_ensemble
+ens, meta, norm, manifest = load_production_ensemble()   # manifest-pinned: sha256 + pairing +
+                                                         # count verified at load (2026-07-22);
+                                                         # never build the member list by glob
 pf = {k: jnp.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
 
 theta9 = jnp.full(9, 0.5)                          # unit cube [0,1]^9 (box centre)
@@ -150,9 +151,9 @@ matters once you are wiring the emulator into the likelihood.)* The likelihood a
 `run_prod_sbc_shard.py` invoke it:
 
 ```python
-from glob import glob
 from hcd_analysis.emulator.closure_legb import build_legb_ctx
-ens = sorted(glob("checkpoints/final_prod_seed*.eqx"))
+from hcd_analysis.emulator.prod_ensemble import production_member_paths
+ens = production_member_paths()                    # manifest-pinned member list (sha256-verified)
 ctx = build_legb_ctx(..., ensemble_ckpts=ens)      # ensemble_ckpts is not None → load_ensemble path
 ```
 
