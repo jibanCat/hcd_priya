@@ -50,7 +50,7 @@ from hcd_analysis.emulator.data import (
 )
 from hcd_analysis.emulator import train as T
 from hcd_analysis.emulator.dndx_wc import (
-    w_c_from_mu, mu_from_dndx, w_c_corrected, alpha_to_dndx,
+    w_c_from_mu, mu_from_dndx, w_c_corrected,
 )
 from hcd_analysis.emulator.model import structural_tier_p
 

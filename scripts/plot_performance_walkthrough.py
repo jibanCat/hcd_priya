@@ -121,7 +121,7 @@ from hcd_analysis.emulator.data import (
     COARSE_NAMES, DATA_RANGE,
 )
 from hcd_analysis.emulator import train as T
-from hcd_analysis.emulator.dndx_wc import w_c_corrected, alpha_to_dndx
+from hcd_analysis.emulator.dndx_wc import w_c_corrected
 from hcd_analysis.emulator.model import structural_tier_p
 from hcd_analysis.emulator.ensemble import load_ensemble, EnsembleEmulator
 from hcd_analysis.emulator.predict import predict_P_filt as _predict_P_filt_jax

@@ -469,6 +469,49 @@ def _assert_leg_signatures_live(leg_summaries, allow_stale=False):
 # ---------------------------------------------------------------------------------------------
 # lock assembly
 # ---------------------------------------------------------------------------------------------
+def collect_input_identity():
+    """Data/cache INPUT IDENTITY (Stage-C freeze-lens MAJOR, 2026-07-22): the deployed forward
+    depends on raw input files that neither signature covers -- the LF tau0 cache (feeds the
+    w_c pivot, Xbar(z), DLA cores AND the KS mapped dN/dX reference via hcd_xbar_polyfit), the
+    C_emu error vectors, the MF backbone checkpoint triple, and the survey data files. Pin
+    them all by sha256 so a silent regeneration/substitution of any of them is visible to the
+    lock-vs-live check. The LF cache is ~955 MB (~2-3 s to hash); acceptable at lock time.
+    KS data: the loader default dir's karacayli txt files are pinned individually."""
+    import hcd_analysis.emulator.closure_legb as CL
+    from hcd_analysis.emulator import data_likelihood as DL
+    import inspect
+
+    def _pin(path):
+        if not os.path.exists(path):
+            return {"path": path, "sha256": None, "size": None,
+                    "MISSING_AT_GENERATION": True}
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for b in iter(lambda: fh.read(1 << 22), b""):
+                h.update(b)
+        return {"path": path, "sha256": h.hexdigest(), "size": os.path.getsize(path)}
+
+    desi_npz = inspect.signature(DL.load_desi_leg).parameters["npz_path"].default
+    eboss_npz = inspect.signature(DL.load_eboss_leg).parameters["npz_path"].default
+    ks_base = inspect.signature(DL.load_ks_leg).parameters["base"].default
+    ks_files = sorted(fn for fn in os.listdir(ks_base)
+                      if fn.endswith(".txt")) if os.path.isdir(ks_base) else []
+    return {
+        "lf_tau0_cache": _pin(CL.CACHE_PATH),
+        "error_vector": _pin(CL.ERROR_VECTOR),
+        "xclass_error_vector": _pin(CL.XCLASS_ERROR_VECTOR),
+        "mf_backbone": {ext: _pin(CL.CKPT + ext)
+                        for ext in (".eqx", ".norm.pkl", ".meta.json")},
+        "data_desi": _pin(desi_npz),
+        "data_eboss": _pin(eboss_npz),
+        "data_ks": {"base": ks_base,
+                    "files": {fn: _pin(os.path.join(ks_base, fn)) for fn in ks_files}},
+        "note": ("sha256 identity of every raw input the deployed forward reads; covered by "
+                 "NO signature -- the lock is the sole pin. The production ensemble "
+                 "checkpoints are pinned separately in the emulator block."),
+    }
+
+
 def generate_lock(leg_summaries, allow_stale_legs=False):
     """Assemble the full lock dict from live sources + the given leg summaries."""
     import hcd_analysis.emulator.closure_legb as CL
@@ -750,10 +793,19 @@ def generate_lock(leg_summaries, allow_stale_legs=False):
         "prior_constants": prior_constants,
         "priors": priors,
         "provenance": provenance,
+        "inputs": collect_input_identity(),
         "signatures": signatures,
         "surveys": surveys,
         "uncovered_constants": collect_uncovered_constants(),
     }
+    if allow_stale_legs:
+        # Stage-C NOTE (2026-07-22): a review copy generated over a stale legs cache is
+        # internally mixed-signature (legs.*.forward carries the cache's signatures while the
+        # top-level signatures block is live). Mark it so it can never be mistaken for
+        # freeze-grade output; the freeze step refuses caches entirely.
+        lock["REVIEW_COPY_STALE_LEGS_CACHE"] = (
+            "machinery-testing output: leg summaries came from a cache whose signatures do "
+            "not match live; NOT freeze-grade")
     lock = _jn(lock, "lock")
     assert_not_poisoned(lock)
     return lock

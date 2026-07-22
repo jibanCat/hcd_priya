@@ -20,7 +20,8 @@
       "f_res_amp_sigma": 0.02,
       "fix_alpha_res": true,
       "forward_signature": "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b",
-      "hcd_prior_signature": "bba3da8868fa498e50bc69f3ff85c192be1fae45058af8ad1211cc28a53102ae",
+      "hcd_parameterization": "alpha_pivot_powerlaw_v1",
+      "hcd_prior_signature": "50befc941edfc4c789286d2054d0107f1eb19a5672bcb86131426fb101eea216",
       "metal_node_z": [
         2.2,
         4.2
@@ -77,10 +78,12 @@
         0.02487326388888889,
         0.0022048350694444446
       ],
+      "alpha_vector_semantics": "deployed prior",
       "dtau0_range": [
         -0.4,
         0.25
       ],
+      "hcd_parameterization": "alpha_pivot_powerlaw_v1",
       "marginalize_zslope": true,
       "tau0_amp_range": [
         0.75,
@@ -137,7 +140,8 @@
       "f_res_amp_sigma": 0.05,
       "fix_alpha_res": true,
       "forward_signature": "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b",
-      "hcd_prior_signature": "bba3da8868fa498e50bc69f3ff85c192be1fae45058af8ad1211cc28a53102ae",
+      "hcd_parameterization": "alpha_pivot_powerlaw_v1",
+      "hcd_prior_signature": "50befc941edfc4c789286d2054d0107f1eb19a5672bcb86131426fb101eea216",
       "metal_node_z": [
         2.2,
         4.2
@@ -196,10 +200,12 @@
         0.02487326388888889,
         0.0022048350694444446
       ],
+      "alpha_vector_semantics": "deployed prior",
       "dtau0_range": [
         -0.4,
         0.25
       ],
+      "hcd_parameterization": "alpha_pivot_powerlaw_v1",
       "marginalize_zslope": true,
       "tau0_amp_range": [
         0.75,
@@ -258,7 +264,8 @@
       "f_res_amp_sigma": 0.15,
       "fix_alpha_res": true,
       "forward_signature": "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b",
-      "hcd_prior_signature": "bba3da8868fa498e50bc69f3ff85c192be1fae45058af8ad1211cc28a53102ae",
+      "hcd_parameterization": "dndx_mapped_v2",
+      "hcd_prior_signature": "50befc941edfc4c789286d2054d0107f1eb19a5672bcb86131426fb101eea216",
       "metal_node_z": [
         2.2,
         4.2
@@ -316,10 +323,12 @@
         0.02487326388888889,
         0.0022048350694444446
       ],
+      "alpha_vector_semantics": "LEGACY-AUDIT-ONLY (dormant; deployed prior = the mapped dN/dX construction in prior_constants)",
       "dtau0_range": [
         -0.4,
         0.25
       ],
+      "hcd_parameterization": "dndx_mapped_v2",
       "marginalize_zslope": true,
       "tau0_amp_range": [
         0.75,

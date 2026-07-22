@@ -21,7 +21,7 @@ SCOPE / STANDING DECISIONS:
 
 Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-    /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_joint_fit.py --legs DESI,KS
+    /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_joint_fit.py --legs DESI,eBOSS
 """
 from __future__ import annotations
 
@@ -198,7 +198,10 @@ def run_joint_fit(leg_names, *, n_chains=4, n_warmup=250, n_samples=600, max_tre
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--legs", default="DESI,KS",
+    # default migrated off KS (Stage-C 2026-07-22): a joint including KS is REFUSED at build (RF1;
+    # the deployed KS prior is the single-leg dN/dX-mapped parameterization). Explicit --legs
+    # including KS fails loudly with the guard's message.
+    ap.add_argument("--legs", default="DESI,eBOSS",
                     help="comma-separated joint legs (DESI,KS[,eBOSS]); survey key == leg name")
     ap.add_argument("--n-chains", type=int, default=4)
     ap.add_argument("--n-warmup", type=int, default=250)

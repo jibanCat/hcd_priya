@@ -193,6 +193,23 @@ def main():
         f"built KS LLS width sigma/mu {alpha_sd0/alpha_mu0} != {prior_stamp['lls_frac_sigma_ks']}"
     prior_stamp["alpha_lls_center_built"] = alpha_mu0
     prior_stamp["alpha_lls_sigma_built"] = alpha_sd0
+    # MAPPED-ERA HONESTY (Stage-C 2026-07-22): post-W2 the KS ctx deploys the dN/dX-mapped
+    # parameterization; ctx.alpha_hcd_mu/sigma above are the DORMANT LEGACY vectors (kept for
+    # the R6 override and audits). Stamp the parameterization + the MAPPED pivot centre so a
+    # rerun's pkls are era-distinguishable; the analyzer's alpha_lls_center_built==0.4302804
+    # provenance pin (analyze_ks_selboost) will fail-loud against mapped-era pkls until it is
+    # made era-aware -- INTENDED (the old campaign's stamps stay valid for the old pkls).
+    prior_stamp["hcd_parameterization"] = ("dndx_mapped_v2"
+                                           if getattr(ctx, "ks_dndx_mapped", False)
+                                           else "alpha_pivot_powerlaw_v1")
+    if getattr(ctx, "ks_dndx_mapped", False):
+        from hcd_analysis.emulator.dndx_wc import w_c_corrected as _wcc
+        import jax.numpy as _jnp
+        prior_stamp["alpha_lls_center_built_semantics"] = "LEGACY-AUDIT-ONLY (dormant vector)"
+        prior_stamp["alpha_lls_mapped_pivot_center"] = float(np.asarray(
+            _wcc(_jnp.asarray(ctx.ks_dndx_ref_pivot),
+                 _jnp.asarray(float(ctx.ks_xbar_pivot)),
+                 _jnp.asarray(3.0)))[1])
 
     inject_spec = AR.arm_inject_spec(a.arm_id)
     z_global = np.asarray(ctx.z_global, float)
