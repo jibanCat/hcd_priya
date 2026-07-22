@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 
 import jax
@@ -166,6 +167,99 @@ HCD_LLS_SURVEY_BOOST = {"DESI": 1.0, "eBOSS": 1.0, "DESI+KS": 1.0, "KS": 2.5}
 HCD_LLS_SURVEY_FRAC_SIGMA = {"DESI": 0.287, "eBOSS": 0.287, "DESI+KS": 0.287, "KS": 0.40}
 # 2× cosmic-variance hedge (double the 1× corrected lit width); KS unchanged (its own rule).
 HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X = {"DESI": 0.574, "eBOSS": 0.574, "DESI+KS": 0.574, "KS": 0.40}
+
+# === KS dN/dX-MAPPED LLS PRIOR (V-A, KS-ONLY; W2 2026-07-22, signed PI decision 1) =============
+# The deployed KS alpha-space prior (pivot TruncatedNormals × power-law z-shape, LLS boost 2.5
+# applied POST-map) put ~55% of its mass OUTSIDE the occupancy simplex (sum alpha > 1 ⇒ a
+# NEGATIVE clean-sightline coefficient at predict_P_obs_and_cov_single_z's coef[0]) and its
+# CENTRE itself crossed sum(alpha)=1 at z≈4.49. The V-A construction moves the KS 2.5× to
+# dN/dX space PRE-map: sample log-amplitude/exponent deviations around a deterministic dN/dX
+# reference and push them through the exact occupancy map w_c_corrected — every draw is then
+# STRUCTURALLY inside the simplex (sum alpha < 1, alpha >= 0). KS single-leg builds ONLY;
+# DESI/eBOSS/DESI+KS/survey=None keep the alpha-space parameterization byte-unchanged.
+# Which parameterization each survey key deploys (single-leg builds; recorded in forward_stamp
+# as "hcd_parameterization" resolved from the BUILT ctx):
+HCD_ALPHA_PARAMETERIZATION = {"DESI": "alpha_pivot_powerlaw_v1", "eBOSS": "alpha_pivot_powerlaw_v1",
+                              "DESI+KS": "alpha_pivot_powerlaw_v1", "KS": "dndx_mapped_v2"}
+# WHERE the per-survey LLS boost acts. alpha_postmap = multiply the alpha-space prior centre
+# AFTER the dN/dX→alpha map (the legacy construction; inert at boost 1.0 for DESI/eBOSS/DESI+KS).
+# dndx_premap = the KS 2.5× multiplies the LITERATURE dN/dX law BEFORE the occupancy map
+# (dndx_ref_LLS(z) = 2.5·A_LLS·(1+z)^γ_LLS), so the map's saturation geometry bounds the result.
+HCD_LLS_BOOST_SPACE = {"DESI": "alpha_postmap(inert at 1.0)", "eBOSS": "alpha_postmap(inert at 1.0)",
+                       "DESI+KS": "alpha_postmap(inert at 1.0)", "KS": "dndx_premap"}
+# KS mapped-branch prior widths (PINNED literals; derived twice independently and
+# orchestrator-verified 2026-07-22). Width-space CONVENTION per site is in
+# KS_DNDX_WIDTH_CONVENTION below (carried in the freeze payload).
+KS_DNDX_SIGMA_EPS = 0.5310    # eps_lls ~ N(0, .): log dN/dX_LLS amplitude deviation.
+#   = 0.40 / g_LLS with g_LLS = 0.75336 = d ln alpha_LLS / d ln A at the V-A KS reference pivot —
+#   the "full-map local-linear width translation" of the PI's alpha-space 0.40 fractional-width
+#   rule (the KS selection-driven width) into dN/dX log-amplitude space. Alternatives considered
+#   (PI confirm-or-swap): 0.5315 (hypot) / 0.543 (central-68% match).
+KS_DNDX_SIGMA_KAPPA = 0.6681  # kappa_lls ~ N(0, .): dN/dX_LLS exponent deviation.
+#   = the lit GLS sigma_gamma of the corrected LLS law (hcd_lit_dndx_corrected.json K1a
+#   free-gamma fit: gamma = 2.137 +/- 0.6681; the deployed law is the same points CONSTRAINED
+#   to 2.127, so the free-fit sigma is the honest exponent width).
+KS_DNDX_SIGMA_MSUB = 0.4130   # m_sub ~ N(0, .): log dN/dX_subDLA amplitude deviation.
+#   = 0.40 / g_sub, g_sub = 0.96842 (same full-map local-linear translation convention as
+#   KS_DNDX_SIGMA_EPS; the subDLA alpha-space fractional width 0.40 = HCD_PRIOR_FRAC_SIGMA[1]).
+KS_DNDX_WIDTH_CONVENTION = {
+    "eps_lls": ("full-map local-linear width translation: 0.40/g_LLS, g_LLS=0.75336 = "
+                "dln(alpha_LLS)/dln(A) at the V-A KS reference pivot; alternatives 0.5315 "
+                "(hypot) / 0.543 (central-68%) listed as PI confirm-or-swap"),
+    "kappa_lls": ("lit GLS sigma_gamma of the corrected LLS law: hcd_lit_dndx_corrected.json "
+                  "K1a free-gamma fit 2.137 +/- 0.6681"),
+    "m_sub": ("full-map local-linear width translation: 0.40/g_sub, g_sub=0.96842 "
+              "(same convention as eps_lls)"),
+    "t_sub": "ZSLOPE_PRIOR_SIGMA[1]=0.53 (deployed subDLA exponent width, unchanged)",
+    "dla_raw": ("deployed latent geometry: dla_amp = softplus(dla_raw)/softplus(raw_mu0), "
+                "dla_raw ~ Normal(raw_mu0=KS_DNDX_DLA_RAW_MU0, 1.0) — the broad one-sided "
+                "softplus(Normal) of the deployed DLA site, centred at amplitude 1"),
+    "t_dla": "ZSLOPE_PRIOR_SIGMA[2]=0.33 (deployed DLA exponent width, unchanged)",
+}
+# WHERE the mapped reference's sub/DLA dN/dX components come from (the LLS component is the
+# boosted lit law directly): the exact occupancy-map inverse (dndx_wc.alpha_to_dndx_exact) of
+# the BOOST-1.0 deployed real-fit centre triple alpha_ref_b1(z) = mu_piv·((1+z)/4)^s with
+# mu_piv = [hcd_lls_realfit_alpha_center(Xbar_z3, boost=1.0), alpha_mu[1], alpha_mu[2]] and
+# s = (HCD_LLS_REALFIT_ZSLOPE, HCD_INCIDENCE_SLOPE[1], HCD_INCIDENCE_SLOPE[2]). The boost-1.0
+# triple inverts EVERYWHERE on the deployed z grid (max sum(alpha)=0.519 at z=4.6); the
+# deployed BOOSTED (2.5×) triple is NOT invertible above z≈4.49 — pinned inversion source.
+KS_HEADROOM_SOURCE = "exact-inverse of the boost-1.0 deployed real-fit centre triple"
+# DLA latent centre: raw_mu0 = softplus^{-1}(1.0) = log(expm1(1.0)) — the log(expm1(x)) idiom of
+# sampler_numpyro._dla_raw_mu at the natural amplitude x=1.0, so dla_amp = softplus(dla_raw)/
+# softplus(raw_mu0) is centred at EXACTLY 1 (the KS DLA site is PRIOR-ONLY, dla_forward_frac=0;
+# geometry fidelity to the deployed broad softplus is what matters, g_DLA=0.998).
+KS_DNDX_DLA_RAW_MU0 = math.log(math.expm1(1.0))     # = 0.5413248546129181
+# Mapped-branch KS LLS pivot-centre guard band. The assert_hcd_pivot_z3 band scales
+# (0.14, 0.21)×boost, which assumes POST-map linearity — wrong for the mapped construction
+# (the map saturates). Derivation: same relative margins as the deployed band —
+# (0.14, 0.21) = adopted centre 0.172 × (0.83, 1.21) (2-dp) — applied to the MAPPED KS centre
+# 0.393236 ⇒ (0.326, 0.476) (3-dp). See assert_ks_mapped_pivot.
+KS_DNDX_MAPPED_PIVOT_BAND = (0.326, 0.476)
+
+
+def assert_ks_mapped_pivot(alpha_lls_mapped, where):
+    """PIVOT GUARD for the KS dN/dX-MAPPED branch (V-A): the MAPPED LLS pivot centre (the z=3
+    LLS occupancy weight of the mapped reference, sites at 0) must sit inside
+    KS_DNDX_MAPPED_PIVOT_BAND = (0.326, 0.476) — the deployed band's relative margins
+    (0.83, 1.21) around the mapped centre 0.393236.
+
+    DIVISION OF LABOUR with assert_hcd_pivot_z3 (the all-z-median tripwire): the original
+    guard's semantics are PRE-map — it fires when the alpha-space pivot INPUT is built from
+    the buggy all-z-median cache w_c (0.2909·boost) instead of the z=3 value. On the mapped
+    branch that guard is applied UNCHANGED to the boost-1.0 UNMAPPED pivot input
+    (hcd_lls_realfit_alpha_center at boost=1.0, band (0.14, 0.21)) — the map INPUT is exactly
+    the object whose construction the guard polices, so its original semantics are preserved.
+    THIS band then polices the map OUTPUT: it catches a wrong boost space (e.g. re-applying
+    the 2.5× in alpha space POST-map, or double-boosting the dN/dX reference — the buggy
+    0.2909-based centre maps to a ≈0.727 pre-map-equivalent, far above the band)."""
+    a = float(alpha_lls_mapped)
+    lo, hi = KS_DNDX_MAPPED_PIVOT_BAND
+    assert lo <= a <= hi, (
+        f"KS MAPPED LLS pivot centre [{where}] = {a:.4f} outside the mapped band "
+        f"[{lo}, {hi}]. Expected ≈0.393236 (the dN/dX-premap 2.5× lit-law centre through the "
+        f"exact occupancy map). A centre near 0.43 is the legacy alpha-postmap boost; a centre "
+        f"far above the band indicates a boost-space or double-boost bug. See "
+        f"HCD_LLS_BOOST_SPACE / KS_HEADROOM_SOURCE (W2, 2026-07-22).")
 
 
 def assert_known_survey(survey, where):
@@ -365,6 +459,17 @@ def hcd_prior_constants_payload():
         HCD_DLA_RESIDUAL_FRAC=float(HCD_DLA_RESIDUAL_FRAC),
         HCD_DLA_Z_RELIABLE=float(HCD_DLA_Z_RELIABLE),
         HCD_Z_PIVOT=float(HCD_Z_PIVOT),
+        # KS dN/dX-mapped reparameterization constants (V-A, W2 2026-07-22): adding these MOVES
+        # hcd_prior_signature — intended (old/new hex recorded in the landing commit message).
+        HCD_ALPHA_PARAMETERIZATION=dict(HCD_ALPHA_PARAMETERIZATION),
+        HCD_LLS_BOOST_SPACE=dict(HCD_LLS_BOOST_SPACE),
+        KS_DNDX_SIGMA_EPS=float(KS_DNDX_SIGMA_EPS),
+        KS_DNDX_SIGMA_KAPPA=float(KS_DNDX_SIGMA_KAPPA),
+        KS_DNDX_SIGMA_MSUB=float(KS_DNDX_SIGMA_MSUB),
+        KS_DNDX_WIDTH_CONVENTION=dict(KS_DNDX_WIDTH_CONVENTION),
+        KS_HEADROOM_SOURCE=str(KS_HEADROOM_SOURCE),
+        KS_DNDX_DLA_RAW_MU0=float(KS_DNDX_DLA_RAW_MU0),
+        KS_DNDX_MAPPED_PIVOT_BAND=list(KS_DNDX_MAPPED_PIVOT_BAND),
         adopted_kernel=j["kernel_chosen"],
         adopted_kernel_r3=j["kernel_table"]["budget"]["r3_k1"],
         adopted_alpha_lls_z3=j["alpha_lls_z3"]["adopted"],

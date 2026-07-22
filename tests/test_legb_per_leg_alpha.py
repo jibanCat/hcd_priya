@@ -56,22 +56,30 @@ NUTS_GOLDEN = os.path.join(_GOLDEN_DIR, "legb_shortnuts_golden.npz")
 #  T8 (written FIRST, choreography step 1): both freeze-audit signature literals
 #  are PINNED EXACTLY. This build must not touch either payload — any drift in
 #  PROD_FORWARD_BY_LEG / PROD_RES_CORR_ON / DESI_DLA_COV_REDUCE or in the HCD
-#  prior-constants payload flips a hex and fails here. Literals read from the
-#  UNTOUCHED tree at HEAD 54db658 (2026-07-20).
+#  prior-constants payload flips a hex and fails here. Forward literal read from
+#  the UNTOUCHED tree at HEAD 54db658 (2026-07-20). The HCD prior literal was
+#  re-pinned by W2 (KS dN/dX-mapped reparam, 2026-07-22): the payload additions
+#  (HCD_ALPHA_PARAMETERIZATION / HCD_LLS_BOOST_SPACE / KS_DNDX_*) INTENTIONALLY
+#  moved hcd_prior_signature. Old value (recorded in the W2 commit message +
+#  tests/test_ks_dndx_reparam.OLD_HCD_PRIOR_SIGNATURE):
+#  bba3da8868fa498e50bc69f3ff85c192be1fae45058af8ad1211cc28a53102ae
 # --------------------------------------------------------------------------- #
 FORWARD_SIGNATURE_PIN = "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b"
-HCD_PRIOR_SIGNATURE_PIN = "bba3da8868fa498e50bc69f3ff85c192be1fae45058af8ad1211cc28a53102ae"
+HCD_PRIOR_SIGNATURE_PIN = "50befc941edfc4c789286d2054d0107f1eb19a5672bcb86131426fb101eea216"
 
 
 def test_signatures_unmoved():
-    """forward_signature() and hcd_prior_signature() equal the pinned pre-feature literals
-    (the per-leg alpha build extends STAMPS only, never either signature payload)."""
+    """forward_signature() and hcd_prior_signature() equal the pinned literals (the per-leg
+    alpha build extended STAMPS only; the ONE sanctioned hcd_prior move since is the W2 KS
+    reparam re-pin above — any further drift fails here)."""
     assert C.forward_signature() == FORWARD_SIGNATURE_PIN, (
-        "forward_signature moved — the per-leg alpha build must not edit the forward "
-        "decision payload (PROD_FORWARD_BY_LEG / PROD_RES_CORR_ON / DESI_DLA_COV_REDUCE)")
+        "forward_signature moved — neither the per-leg alpha build nor the W2 KS reparam "
+        "may edit the forward decision payload (PROD_FORWARD_BY_LEG / PROD_RES_CORR_ON / "
+        "DESI_DLA_COV_REDUCE)")
     assert INF.hcd_prior_signature() == HCD_PRIOR_SIGNATURE_PIN, (
-        "hcd_prior_signature moved — the per-leg alpha build must not edit any HCD prior "
-        "constant (ZERO new prior constants is a hard constraint)")
+        "hcd_prior_signature moved off the W2-pinned literal — an HCD prior constant "
+        "changed without a sanctioned re-pin (record old->new in the commit message and "
+        "update this pin only with a signed decision)")
 
 
 # --------------------------------------------------------------------------- #

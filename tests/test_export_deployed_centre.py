@@ -189,7 +189,16 @@ def test_alpha_pivot_keys_say_deployed_or_closure(npz):
     for k in ("closure_alpha_pivot_mu", "closure_alpha_pivot_sigma"):
         assert k in npz.files, f"closure pivot geometry {k!r} not shipped for a like-for-like read"
     np.testing.assert_allclose(np.asarray(npz["closure_alpha_pivot_mu"]), MU_CLOSURE)
-    # the deployed LLS centre is the corrected lit law x boost, NOT closure x boost
+    # the deployed LLS centre is the corrected lit law x boost, NOT closure x boost.
+    # KS SEMANTICS CHANGE (W2, 2026-07-22): the deployed KS prior is now the dN/dX-MAPPED
+    # parameterization (HCD_ALPHA_PARAMETERIZATION['KS'] = 'dndx_mapped_v2'; boost acts
+    # dndx_premap; mapped LLS pivot centre 0.393236) — 'lit-law-centre x 2.5' is NO LONGER
+    # the deployed KS centre. The exporter still writes the LEGACY alpha-postmap KS surface
+    # (updating it is the separate KS re-export work item), so the KS row is pinned HERE as
+    # the explicitly-LEGACY value and asserted to DIFFER from the new mapped centre — a
+    # reader must not take the npz KS row for the deployed mapped prior.
+    from hcd_analysis.emulator.inference import HCD_ALPHA_PARAMETERIZATION
+    KS_MAPPED_PIVOT_CENTRE = 0.393236     # inference.KS_DNDX_MAPPED_PIVOT_BAND centre (W2)
     for sv in sur:
         mu = np.asarray(npz[f"deployed_alpha_pivot_mu_{sv}"])
         b = float(HCD_LLS_SURVEY_BOOST[sv])
@@ -198,6 +207,12 @@ def test_alpha_pivot_keys_say_deployed_or_closure(npz):
             f"{sv} deployed LLS centre equals closure x boost -- that is the construction the "
             f"script's warning (1) exists to prevent")
         np.testing.assert_array_equal(mu[1:], MU_CLOSURE[1:])
+        if sv == "KS":
+            assert HCD_ALPHA_PARAMETERIZATION["KS"] == "dndx_mapped_v2"
+            assert abs(mu[0] - KS_MAPPED_PIVOT_CENTRE) > 0.03, (
+                "the exporter's KS row unexpectedly equals the MAPPED centre — the KS "
+                "re-export work item landed; retire this legacy-surface pin and pin the "
+                "mapped export instead")
 
 
 # ------------------------------------------------------------------ the sidecar, same class of ambiguity

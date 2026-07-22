@@ -56,7 +56,11 @@ from .inference import (PARAM_NAMES, hcd_incidence_prior,
                         HCD_LLS_REALFIT_ZSLOPE, HCD_LLS_SURVEY_BOOST,
                         HCD_LLS_SURVEY_FRAC_SIGMA, HCD_PRIOR_FRAC_SIGMA,
                         hcd_lls_realfit_alpha_center, assert_hcd_pivot_z3,
-                        assert_known_survey)
+                        assert_known_survey,
+                        # KS dN/dX-mapped LLS reparameterization (V-A, W2 2026-07-22)
+                        HCD_LIT_DNDX_LAW, KS_DNDX_SIGMA_EPS, KS_DNDX_SIGMA_KAPPA,
+                        KS_DNDX_SIGMA_MSUB, KS_DNDX_DLA_RAW_MU0, assert_ks_mapped_pivot)
+from .dndx_wc import alpha_to_dndx_exact, w_c_corrected
 from .sampler_numpyro import _dla_raw_mu
 from . import data_likelihood as DL
 from .closure_diagnostics import (
@@ -161,8 +165,20 @@ def hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT, z_tol=0.05):
     assert sel.sum() > 0, f"no cache rows within {z_tol} of z_pivot={z_pivot}"
     w_c_z3 = np.nanmedian(wc[sel, 1:], axis=0)           # (3,) z=3 structural w_c
 
-    # Xbar(z) deg-2 fit (same construction as plot_hcd_prior_dndx_overlay.build_xbar): per-group
-    # Xbar = X_tot / N_sl, N_sl from the telescoping clean-fraction, fit in z, evaluated at z=3.
+    cf = hcd_xbar_polyfit(d)
+    Xbar_z3 = float(np.polyval(cf, float(z_pivot)))
+    return w_c_z3, Xbar_z3
+
+
+def hcd_xbar_polyfit(d):
+    """The cache's Xbar(z) deg-2 polyfit coefficients (np.polyval order) — the mean-absorption-
+    path-per-sightline fit ``hcd_pivot_wc_and_xbar`` evaluates at the z=3 pivot, EXTRACTED
+    verbatim (W2, 2026-07-22) so the KS dN/dX-mapped reference (``_ks_dndx_reference``) reuses
+    the IDENTICAL Xbar(z) object the deployed pivot path uses (numerically bit-equal: same
+    numpy ops in the same order; same construction as plot_hcd_prior_dndx_overlay.build_xbar):
+    per-group Xbar = X_tot / N_sl, N_sl from the telescoping clean-fraction, deg-2 fit in z."""
+    wc = np.asarray(d["w_c_cache"])                      # (R,4) clean,LLS,subDLA,DLA
+    zrow = np.asarray(d["z_grid"])
     gid = np.asarray(d["snap_group_idx"]); Xtot = np.asarray(d["snap_total_path_dX"])
     dndx = np.asarray(d["snap_dNdX"]); Ng = dndx.shape[0]
     zg = np.array([zrow[gid == g][0] for g in range(Ng)])
@@ -171,9 +187,7 @@ def hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT, z_tol=0.05):
     Nsl = np.where(mu_sum > 0, dndx.sum(axis=1) * Xtot / mu_sum, np.nan)
     Xbar = Xtot / Nsl
     ok = np.isfinite(Xbar) & (zg >= 2.1) & (zg <= 4.7)
-    cf = np.polyfit(zg[ok], Xbar[ok], 2)
-    Xbar_z3 = float(np.polyval(cf, float(z_pivot)))
-    return w_c_z3, Xbar_z3
+    return np.polyfit(zg[ok], Xbar[ok], 2)
 
 
 # PER-LEG DLA-residual fraction in the closure TARGET MOCK (§0c, PI-confirmed final intent
@@ -505,6 +519,22 @@ class LegBCtx(NamedTuple):
     # for the joint fit) is DEFERRED to the joint-fit campaign design (KS-challenge S
     # readout); both switch positions trace correctly (tests). Requires per_leg_alpha.
     per_leg_zslope: bool = False              # per-leg HCD z-slope sites (plumbing; v1 OFF)
+    # KS dN/dX-MAPPED LLS PRIOR (V-A, KS-ONLY; W2 2026-07-22, signed PI decision 1). DORMANT
+    # static branch: default False -> every deployed non-KS path executes the textually
+    # untouched legacy statements. Set ONLY by build_legb_ctx for survey == "KS" single-leg
+    # builds (ks_legacy_alpha_param=False, the new default); when True, _hcd_sites dispatches
+    # to _ks_dndx_sites: 6 sites (eps_lls, kappa_lls, m_sub, t_sub, dla_raw, t_dla) around the
+    # deterministic dN/dX reference below, pushed through the exact occupancy map
+    # w_c_corrected -> alpha_hcd_z is STRUCTURALLY inside the simplex. Fields APPENDED after
+    # per_leg_zslope so positional construction does NOT shift. NOTE: on the mapped branch
+    # alpha_hcd_mu/alpha_hcd_sigma retain the LEGACY alpha-space KS prior (consumed only by
+    # the ks_legacy_alpha_param override arm and by-name audit readers) — the mapped sites
+    # never read them.
+    ks_dndx_mapped: bool = False              # KS mapped parameterization ("dndx_mapped_v2")
+    ks_dndx_ref: object = None                # (n_zg,3) reference dN/dX(z) on z_global
+    ks_xbar_z: object = None                  # (n_zg,) cache Xbar(z) deg-2 fit on z_global
+    ks_dndx_ref_pivot: object = None          # (3,) reference dN/dX at z=HCD_Z_PIVOT
+    ks_xbar_pivot: object = None              # scalar Xbar(z=HCD_Z_PIVOT)
 
 
 def _kim(z):
@@ -629,6 +659,16 @@ def forward_stamp(ctx, leg):
                 # stamp buildable on pre-feature ctx pickles/stubs; "shared" = the legacy
                 # single-alpha-block model, "per_leg" = suffixed per-leg alpha sites.
                 alpha_mode=("per_leg" if getattr(ctx, "per_leg_alpha", False) else "shared"),
+                # HCD alpha parameterization (W2, 2026-07-22): resolved from the BUILT ctx —
+                # "dndx_mapped_v2" on the KS mapped branch (ctx.ks_dndx_mapped), else the legacy
+                # "alpha_pivot_powerlaw_v1" (getattr default keeps pre-feature stubs buildable).
+                # NOTE (freeze-handoff rule): analyze_dnuis_bias.py pools shards by a frozenset
+                # over this WHOLE forward dict, so adding this key makes pre-land shards
+                # fail-loud against post-land ones — INTENDED: regenerate the shard group,
+                # never drop the key.
+                hcd_parameterization=(INF.HCD_ALPHA_PARAMETERIZATION["KS"]
+                                      if getattr(ctx, "ks_dndx_mapped", False)
+                                      else INF.HCD_ALPHA_PARAMETERIZATION["DESI"]),
                 forward_signature=forward_signature(),
                 hcd_prior_signature=INF.hcd_prior_signature())
 
@@ -760,6 +800,64 @@ def _survey_alpha_prior(w_c_med, Xbar_z3, survey):
     return alpha_mu, alpha_sd, survey_zslope_mu
 
 
+def _ks_dndx_reference(alpha_mu, xbar_cf, z_global):
+    """The deterministic KS dN/dX-mapped prior REFERENCE (V-A, W2 2026-07-22) — built once at
+    ctx build, host-side numpy. Returns ``(dndx_ref (n_zg,3), xbar_z (n_zg,), dndx_ref_pivot
+    (3,), xbar_pivot scalar)``.
+
+    Construction (the signed PI decision; constants in inference.py):
+      1. BOOST-1.0 deployed centre triple: alpha_ref_b1(z) = mu_piv·((1+z)/4)^s with
+         mu_piv = [hcd_lls_realfit_alpha_center(Xbar_z3, boost=1.0), alpha_mu[1], alpha_mu[2]]
+         (= [0.17211216, 0.06218316, 0.00440967]) and s = (HCD_LLS_REALFIT_ZSLOPE,
+         HCD_INCIDENCE_SLOPE[1], HCD_INCIDENCE_SLOPE[2]). THIS TRIPLE IS THE PINNED INVERSION
+         SOURCE (KS_HEADROOM_SOURCE): the deployed KS BOOSTED (2.5×) triple is NOT invertible
+         above z≈4.49; the boost-1.0 triple inverts everywhere (max sum(alpha) 0.519).
+      2. dndx_ref(z) = alpha_to_dndx_exact(alpha_ref_b1(z), Xbar(z), z) — keep the sub and DLA
+         components; REPLACE the LLS component with the BOOSTED lit law
+         dndx_ref_LLS(z) = HCD_LLS_SURVEY_BOOST["KS"]·A_LLS·(1+z)^γ_LLS
+         (HCD_LIT_DNDX_LAW["LLS"]) — the KS 2.5× acts in dN/dX space PRE-map
+         (HCD_LLS_BOOST_SPACE["KS"] = "dndx_premap").
+      3. Xbar(z) = np.polyval(xbar_cf, z), the EXACT deg-2 cache fit object the deployed pivot
+         path uses (``hcd_xbar_polyfit`` — extracted verbatim from hcd_pivot_wc_and_xbar).
+
+    GUARDS (fired per build): assert_hcd_pivot_z3 on the boost-1.0 UNMAPPED pivot input at
+    boost=1.0 (the all-z-median construction tripwire keeps its ORIGINAL pre-map semantics —
+    see assert_ks_mapped_pivot's docstring for the division of labour) and
+    assert_ks_mapped_pivot on the MAPPED pivot centre (band (0.326, 0.476)).
+
+    ``alpha_mu`` is the (3,) deployed KS alpha-space prior centre (its subDLA/DLA slots are the
+    survey-agnostic centres the boost-1.0 triple reuses); ``xbar_cf`` from hcd_xbar_polyfit."""
+    zg = np.asarray(z_global, float)
+    xbar_z = np.polyval(xbar_cf, zg)                                # (n_zg,)
+    xbar_piv = float(np.polyval(xbar_cf, float(HCD_Z_PIVOT)))
+    lls_b1 = float(hcd_lls_realfit_alpha_center(xbar_piv, z=HCD_Z_PIVOT, boost=1.0))
+    # ORIGINAL-semantics pivot guard on the boost-1.0 UNMAPPED map input (band (0.14, 0.21) at
+    # boost=1.0; trips if mu_piv[0]'s construction ever reverts to the all-z-median cache w_c).
+    assert_hcd_pivot_z3(lls_b1, z=HCD_Z_PIVOT, where="_ks_dndx_reference boost-1.0 input",
+                        boost=1.0)
+    mu_piv = np.array([lls_b1, float(alpha_mu[1]), float(alpha_mu[2])])
+    s = np.array([float(HCD_LLS_REALFIT_ZSLOPE),
+                  float(HCD_INCIDENCE_SLOPE[1]), float(HCD_INCIDENCE_SLOPE[2])])
+    # evaluate on z_global + the pivot row (appended last, then split off) so the pivot
+    # reference goes through the IDENTICAL construction as the curve rows.
+    z_eval = np.concatenate([zg, [float(HCD_Z_PIVOT)]])
+    xb_eval = np.concatenate([xbar_z, [xbar_piv]])
+    alpha_ref_b1 = mu_piv[None, :] * ((1.0 + z_eval[:, None]) / (1.0 + HCD_Z_PIVOT)) ** s[None, :]
+    # exact occupancy-map inverse (raises outside the simplex — the boost-1.0 triple is the
+    # pinned invertible source; a raise here means the source triple drifted).
+    dndx_ref = alpha_to_dndx_exact(alpha_ref_b1, xb_eval, z_eval)   # (n_zg+1, 3)
+    A_lls, g_lls = HCD_LIT_DNDX_LAW["LLS"]
+    boost = float(HCD_LLS_SURVEY_BOOST["KS"])
+    dndx_ref[:, 0] = boost * float(A_lls) * (1.0 + z_eval) ** float(g_lls)   # dndx_premap 2.5×
+    dndx_piv = dndx_ref[-1]
+    dndx_ref = dndx_ref[:-1]
+    # MAPPED pivot-centre guard (the map OUTPUT band; assert_ks_mapped_pivot docstring).
+    a_piv = np.asarray(w_c_corrected(jnp.asarray(dndx_piv), jnp.asarray(xbar_piv),
+                                     jnp.asarray(float(HCD_Z_PIVOT))))[..., 1:]
+    assert_ks_mapped_pivot(float(a_piv[0]), "_ks_dndx_reference mapped pivot")
+    return dndx_ref, xbar_z, dndx_piv, xbar_piv
+
+
 def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    xclass_error_vector=XCLASS_ERROR_VECTOR, cemu_inflate=1.0,
                    metals_on=False, desi_kwargs=None, ks_kwargs=None,
@@ -778,7 +876,8 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    metal_node_z=(2.2, 4.2), metal_fnode_lo=0.003, metal_fnode_hi=0.03,
                    metal_siII_legs=("DESI",), metal_knode_lo=1e-3, metal_knode_hi=0.1,
                    hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0,
-                   hcd_2d_tilt=False, ensemble_ckpts=None, survey=None):
+                   hcd_2d_tilt=False, ensemble_ckpts=None, survey=None,
+                   ks_legacy_alpha_param=False):
     """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
     z-bins. The cross-class ρ (``use_xclass=True``, the default; the matched
     ``error_vector_xclass.npz`` pair) is the production C_emu — the diagonal σ is carried too
@@ -794,6 +893,13 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     ``MFFloor`` (the LF→HR + n_s-edge C_emu floor on the small-scale leg). The MF backbone for
     ``mf_fold=0`` is byte-identical to the ``final_fold0`` ``ctx.model``, so the bare-model
     P_filt and the frozen ``mf.lf_model`` agree (the gate faithfulness invariant).
+
+    ``ks_legacy_alpha_param`` (default False; W2 2026-07-22): survey="KS" builds deploy the
+    dN/dX-MAPPED LLS prior (V-A, ``ctx.ks_dndx_mapped=True`` → ``_ks_dndx_sites``; the KS 2.5×
+    boost acts in dN/dX space PRE-map). ``ks_legacy_alpha_param=True`` keeps the OLD KS
+    alpha-space parameterization (pivot TruncatedNormals × power-law z-shape, boost post-map)
+    invokable — for the MANDATED matched old-vs-new paired comparison arm (R6) ONLY, never a
+    production/blind fit. A no-op for every survey != "KS".
     """
     if ensemble_ckpts is not None:
         # production SBC: the N-seed ensemble forward (mean of P_filt over members). The
@@ -891,6 +997,21 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     # build_legb_joint_ctx deploys the IDENTICAL per-leg code path; bitwise congruence is
     # test-asserted, tests/test_legb_per_leg_alpha.py T6 + the T1/T2 goldens).
     alpha_mu, alpha_sd, survey_zslope_mu = _survey_alpha_prior(w_c_med, Xbar_z3, survey)
+
+    # KS dN/dX-MAPPED LLS prior (V-A, W2 2026-07-22): survey == "KS" single-leg builds deploy
+    # the mapped parameterization (the deployed default); ks_legacy_alpha_param=True keeps the
+    # OLD alpha-space KS prior for the mandated matched paired arm (R6). Every other survey
+    # (and survey=None closure/SBC) is BYTE-UNCHANGED (ks_* fields stay None/False).
+    ks_dndx_mapped = (survey == "KS") and not bool(ks_legacy_alpha_param)
+    ks_ref = ks_xbar = ks_ref_piv = ks_xbar_piv = None
+    if ks_dndx_mapped:
+        if hierarchical_hcd or hcd_2d_tilt:
+            raise ValueError(
+                "the KS dN/dX-mapped parameterization is incompatible with hierarchical_hcd / "
+                "hcd_2d_tilt (forbidden combination, W2 2026-07-22; use "
+                "ks_legacy_alpha_param=True only for the matched legacy-comparison arm)")
+        ks_ref, ks_xbar, ks_ref_piv, ks_xbar_piv = _ks_dndx_reference(
+            np.asarray(alpha_mu), hcd_xbar_polyfit(d), z_global)
 
     # HIERARCHICAL HCD ratio-prior centers/widths (must-fix #1, the LOAD-BEARING fix). The ratio
     # centers are derived from the z=3 PIVOT sim w_c (``w_c_med`` is now the z=3 structural weight —
@@ -1003,7 +1124,14 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         # REAL-FIT (survey != None) litWLS LLS forward z-slope center (2.127, sim_sub, sim_DLA);
         # survey=None (closure/SBC) → None → _zslope_sites centers on HCD_INCIDENCE_SLOPE (sim-truth).
         zslope_mu=survey_zslope_mu,
-        res_corr_on=bool(res_corr_on))
+        res_corr_on=bool(res_corr_on),
+        # KS dN/dX-mapped prior (V-A): the deterministic reference (None/False on every
+        # non-mapped build — byte-safety by the dormant static branch).
+        ks_dndx_mapped=bool(ks_dndx_mapped),
+        ks_dndx_ref=(None if ks_ref is None else jnp.asarray(ks_ref)),
+        ks_xbar_z=(None if ks_xbar is None else jnp.asarray(ks_xbar)),
+        ks_dndx_ref_pivot=(None if ks_ref_piv is None else jnp.asarray(ks_ref_piv)),
+        ks_xbar_pivot=(None if ks_xbar_piv is None else float(ks_xbar_piv)))
     return ctx, d
 
 
@@ -2409,7 +2537,13 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     # alpha_dla_raw Normal→softplus; default — byte-exact) OR, when ctx.hierarchical_hcd, the
     # reparam A_hcd · r → α (re-emitted as deterministics under the SAME names alpha_lls/subdla/dla).
     alpha_pivot, s_override = _hcd_sites(ctx)  # (3,) pivot-z amplitudes (+ optional s_c override)
-    if getattr(ctx, "per_leg_alpha", False):
+    if s_override is _KS_DNDX_MAPPED:
+        # KS dN/dX-MAPPED branch (V-A, W2 2026-07-22): _ks_dndx_sites already sampled the mapped
+        # sites, pushed them through the exact occupancy map, and emitted the alpha_hcd_z
+        # deterministic — the first return value IS the full (n_zg,3) curve (structurally inside
+        # the simplex), so it bypasses _zslope_sites/shape_zg entirely.
+        alpha_hcd = alpha_pivot
+    elif getattr(ctx, "per_leg_alpha", False):
         # PER-LEG (joint) branch (2026-07-20; dormant default OFF → the else is the textually
         # untouched legacy code). alpha_pivot is {leg.name: (3,)} from _hcd_sites_per_leg;
         # s_override is always None here (hierarchical/2D are forbidden with per_leg_alpha).
@@ -2487,6 +2621,99 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
         b_res_global=b_res_global, require_zresolved=True))   # alpha_hcd = z-resolved alpha_hcd_z
 
 
+# Sentinel returned by _hcd_sites in the s_override slot on the KS dN/dX-mapped branch (V-A,
+# W2 2026-07-22): tells _legb_model that the first return value is the FULL (n_zg,3)
+# alpha_hcd_z curve (already emitted as the deterministic) — not a (3,) pivot — and, being
+# not-None, makes the priors-only twin skip _zslope_sites with ZERO edits to the mirror.
+_KS_DNDX_MAPPED = object()
+
+
+def _simplex_tie_norm(alpha):
+    """FLOAT-TIE hardening of the mapped occupancy weights (W2, 2026-07-22): the renormalised
+    ``w_c_corrected`` rows sum to 1 only up to IEEE rounding, so at DEEPLY saturated draws
+    (clean fraction ~1e-17, ±8σ corners) the 3-class float sum can land 1 ulp ABOVE 1.0 —
+    making the downstream clean coefficient ``1 − sum(alpha)`` negative at the −2e-16 level.
+    Divide by ``max(1, sum)``: BITWISE-INERT whenever sum <= 1 (IEEE division by exactly 1.0
+    is the identity) and gradient-safe (the denominator is >= 1 on both where-branches — no
+    0/0 in the unselected branch, so no where-NaN gradient trap). Measured at the 64
+    jointly-extreme corners: post-norm sum <= 1.0 everywhere (ties land at exactly 1.0,
+    clean coef exactly 0.0 — the acceptable float tie)."""
+    s = jnp.sum(alpha, axis=-1, keepdims=True)
+    return alpha / jnp.where(s > 1.0, s, 1.0)
+
+
+def _ks_dndx_sites(ctx):
+    """The KS dN/dX-MAPPED HCD prior sites (V-A, KS-ONLY; W2 2026-07-22). Samples 6 sites
+    (order FIXED — the priors-only twin mirrors it via the shared _hcd_sites dispatch):
+
+      eps_lls   ~ Normal(0, KS_DNDX_SIGMA_EPS)     log dN/dX_LLS amplitude deviation
+      kappa_lls ~ Normal(0, KS_DNDX_SIGMA_KAPPA)   dN/dX_LLS exponent deviation
+      m_sub     ~ Normal(0, KS_DNDX_SIGMA_MSUB)    log dN/dX_subDLA amplitude deviation
+      t_sub     ~ Normal(0, ZSLOPE_PRIOR_SIGMA[1]) subDLA exponent deviation
+      dla_raw   ~ Normal(KS_DNDX_DLA_RAW_MU0, 1.0) deployed DLA latent geometry
+      t_dla     ~ Normal(0, ZSLOPE_PRIOR_SIGMA[2]) DLA exponent deviation
+
+    Deterministic forward (ratio = (1+z)/(1+HCD_Z_PIVOT)):
+      dndx(z)   = ctx.ks_dndx_ref · [exp(eps_lls)·ratio^kappa_lls,
+                                     exp(m_sub)·ratio^t_sub,
+                                     dla_amp·ratio^t_dla],
+                  dla_amp = softplus(dla_raw)/softplus(KS_DNDX_DLA_RAW_MU0) (centred at 1;
+                  the KS DLA site is PRIOR-ONLY, dla_forward_frac=0 — geometry fidelity to the
+                  deployed broad softplus is what matters);
+      alpha_hcd_z = w_c_corrected(dndx(z), ctx.ks_xbar_z, z)[..., 1:]   (n_zg,3),
+
+    which is STRUCTURALLY inside the occupancy simplex (sum alpha < 1, alpha >= 0) for EVERY
+    draw — the point of the reparameterization (the legacy KS prior put ~55% of its mass at
+    sum alpha > 1 ⇒ a negative clean-sightline coefficient).
+
+    Re-emits numpyro.deterministic under the EXISTING names so the 40+ name-keyed readers keep
+    working: alpha_lls/alpha_subdla/alpha_dla = the mapped PIVOT (z=3) values (built through
+    the identical map at the exact pivot), and alpha_hcd_z = the full curve (the same
+    deterministic name the legacy _legb_model branch emits — emitted HERE so both twins share
+    the code path). Does NOT emit s_lls/s_subdla/s_dla: readers of those fail loudly with
+    KeyError on a mapped-KS samples dict (intended; censused in the W2 report).
+
+    Returns ``(alpha_hcd_z (n_zg,3), _KS_DNDX_MAPPED)``."""
+    if getattr(ctx, "per_leg_alpha", False) or getattr(ctx, "hierarchical_hcd", False) \
+            or getattr(ctx, "hcd_2d_tilt", False):
+        raise ValueError(
+            "the KS dN/dX-mapped parameterization is incompatible with per_leg_alpha / "
+            "hierarchical_hcd / hcd_2d_tilt (forbidden combination, W2 2026-07-22; KS joint "
+            "is not deployed)")
+    if getattr(ctx, "ks_dndx_ref", None) is None or getattr(ctx, "ks_xbar_z", None) is None \
+            or getattr(ctx, "ks_dndx_ref_pivot", None) is None \
+            or getattr(ctx, "ks_xbar_pivot", None) is None:
+        raise ValueError("ks_dndx_mapped=True but the ks_* reference fields are unset — "
+                         "build the ctx via build_legb_ctx(survey='KS')")
+    zg = jnp.asarray(ctx.z_global)
+    ratio = (1.0 + zg) / (1.0 + HCD_Z_PIVOT)                       # (n_zg,)
+    eps_lls = numpyro.sample("eps_lls", dist.Normal(0.0, KS_DNDX_SIGMA_EPS))
+    kappa_lls = numpyro.sample("kappa_lls", dist.Normal(0.0, KS_DNDX_SIGMA_KAPPA))
+    m_sub = numpyro.sample("m_sub", dist.Normal(0.0, KS_DNDX_SIGMA_MSUB))
+    t_sub = numpyro.sample("t_sub", dist.Normal(0.0, ZSLOPE_PRIOR_SIGMA[1]))
+    dla_raw = numpyro.sample("dla_raw", dist.Normal(KS_DNDX_DLA_RAW_MU0, 1.0))
+    t_dla = numpyro.sample("t_dla", dist.Normal(0.0, ZSLOPE_PRIOR_SIGMA[2]))
+    dla_amp = jax.nn.softplus(dla_raw) / jax.nn.softplus(KS_DNDX_DLA_RAW_MU0)
+    fac = jnp.stack([jnp.exp(eps_lls) * ratio ** kappa_lls,
+                     jnp.exp(m_sub) * ratio ** t_sub,
+                     dla_amp * ratio ** t_dla], axis=-1)           # (n_zg,3)
+    dndx_z = jnp.asarray(ctx.ks_dndx_ref) * fac
+    alpha_z = _simplex_tie_norm(
+        w_c_corrected(dndx_z, jnp.asarray(ctx.ks_xbar_z), zg)[..., 1:])        # (n_zg,3)
+    # PIVOT (z=3) deterministics through the IDENTICAL map at the exact pivot (ratio(z=3)=1, so
+    # the exponent sites drop out): dndx_piv = ref_piv · [exp(eps_lls), exp(m_sub), dla_amp].
+    fac_piv = jnp.stack([jnp.exp(eps_lls), jnp.exp(m_sub), dla_amp])
+    dndx_piv = jnp.asarray(ctx.ks_dndx_ref_pivot) * fac_piv
+    a_piv = _simplex_tie_norm(
+        w_c_corrected(dndx_piv, jnp.asarray(float(ctx.ks_xbar_pivot)),
+                      jnp.asarray(float(HCD_Z_PIVOT)))[..., 1:])               # (3,)
+    numpyro.deterministic("alpha_lls", a_piv[0])
+    numpyro.deterministic("alpha_subdla", a_piv[1])
+    numpyro.deterministic("alpha_dla", a_piv[2])
+    alpha_hcd = numpyro.deterministic("alpha_hcd_z", alpha_z)
+    return alpha_hcd, _KS_DNDX_MAPPED
+
+
 def _hcd_sites(ctx):
     """The HCD pivot-z (z=3) incidence amplitudes α_pivot (3,) [LLS, subDLA, DLA] AND an optional
     per-class z-slope override. Returns ``(alpha_pivot (3,), s_override)`` — ``s_override`` is
@@ -2495,6 +2722,12 @@ def _hcd_sites(ctx):
     BYPASSES ``_zslope_sites`` / ``marginalize_zslope``). SHARED by ``_legb_model`` (with the
     factor) and ``_legb_priors_only`` (the transform-only postprocess) so the sample sites stay
     ORDER-IDENTICAL across both — the fast-postprocess constrain_fn relies on it.
+
+    KS dN/dX-MAPPED branch (``ctx.ks_dndx_mapped``, V-A W2 2026-07-22; DISPATCHED FIRST, like
+    the per-leg dispatch, so BOTH twins pick it up with zero edits to the mirror): returns
+    ``(alpha_hcd_z (n_zg,3), _KS_DNDX_MAPPED)`` from ``_ks_dndx_sites`` — the first value is
+    the FULL mapped curve (already emitted as the deterministic) and the sentinel makes both
+    twins bypass ``_zslope_sites`` entirely.
 
     LEGACY branch (default, ``ctx.hierarchical_hcd`` False → BYTE-EXACT): the 3 independent sites
       alpha_lls/alpha_subdla ~ TruncatedNormal(μ_c, σ_c, low=0); alpha_dla_raw ~ Normal →
@@ -2523,6 +2756,8 @@ def _hcd_sites(ctx):
       sites ``alpha_{lls,subdla,dla_raw}_{leg.name}`` at that leg's deployed single-leg survey
       prior. The dispatch lives HERE (inside the shared helper) so BOTH twins (``_legb_model``
       and ``_legb_priors_only``) pick it up with ZERO edits to the priors-only mirror."""
+    if getattr(ctx, "ks_dndx_mapped", False):
+        return _ks_dndx_sites(ctx)               # (alpha_hcd_z (n_zg,3), _KS_DNDX_MAPPED)
     if getattr(ctx, "per_leg_alpha", False):
         return _hcd_sites_per_leg(ctx), None
     if not getattr(ctx, "hierarchical_hcd", False):
@@ -2766,6 +3001,42 @@ def _legb_reconstruct_deterministics(ctx, samples):
     dtau0 = jnp.asarray(samples["dtau0"])                            # (L,)
     alpha_z = tau0_amp[:, None] * ((1.0 + zg)[None, :] / (1.0 + ctx.tau0_pivot_z)) ** dtau0[:, None]
     tau0_vec = alpha_z * kim[None, :]                                # (L, nZg)
+    if getattr(ctx, "ks_dndx_mapped", False):
+        # KS dN/dX-MAPPED branch (V-A, W2 2026-07-22; dispatched FIRST, mirroring _hcd_sites):
+        # rebuild alpha_lls/alpha_subdla/alpha_dla (the mapped PIVOT values) and alpha_hcd_z
+        # (the full mapped curve) from the raw mapped sites, with the SAME elementwise ops as
+        # _ks_dndx_sites. MEASURED vs the full-model deterministic replay (5+5 NUTS, fixed
+        # seed): the pivot deterministics are BIT-equal; alpha_hcd_z agrees to <= 2 ulp
+        # (max rel 3.3e-16 — XLA broadcast-(L,nZg) vs per-draw-scalar pow fusion), the same
+        # ulp class as the accepted per-leg goldens baseline. constrain_fn(
+        # return_deterministic=False) drops the deterministics; _draws_matrix /
+        # _loglik_of_draws read them BY NAME.
+        out["tau0_vec"] = tau0_vec
+        ratio = (1.0 + zg)[None, :] / (1.0 + HCD_Z_PIVOT)            # (1, nZg)
+        eps = jnp.asarray(samples["eps_lls"])[:, None]               # (L, 1)
+        kap = jnp.asarray(samples["kappa_lls"])[:, None]
+        msub = jnp.asarray(samples["m_sub"])[:, None]
+        tsub = jnp.asarray(samples["t_sub"])[:, None]
+        dla_amp = (jax.nn.softplus(jnp.asarray(samples["dla_raw"]))
+                   / jax.nn.softplus(KS_DNDX_DLA_RAW_MU0))[:, None]  # (L, 1)
+        tdla = jnp.asarray(samples["t_dla"])[:, None]
+        fac = jnp.stack([jnp.exp(eps) * ratio ** kap,
+                         jnp.exp(msub) * ratio ** tsub,
+                         dla_amp * ratio ** tdla], axis=-1)          # (L, nZg, 3)
+        dndx_z = jnp.asarray(ctx.ks_dndx_ref)[None, :, :] * fac
+        out["alpha_hcd_z"] = _simplex_tie_norm(
+            w_c_corrected(dndx_z, jnp.asarray(ctx.ks_xbar_z)[None, :],
+                          zg[None, :])[..., 1:])                     # (L, nZg, 3)
+        fac_piv = jnp.stack([jnp.exp(eps[:, 0]), jnp.exp(msub[:, 0]),
+                             dla_amp[:, 0]], axis=-1)                # (L, 3)
+        dndx_piv = jnp.asarray(ctx.ks_dndx_ref_pivot)[None, :] * fac_piv
+        a_piv = _simplex_tie_norm(
+            w_c_corrected(dndx_piv, jnp.asarray(float(ctx.ks_xbar_pivot)),
+                          jnp.asarray(float(HCD_Z_PIVOT)))[..., 1:])      # (L, 3)
+        out["alpha_lls"] = a_piv[:, 0]
+        out["alpha_subdla"] = a_piv[:, 1]
+        out["alpha_dla"] = a_piv[:, 2]
+        return out
     if getattr(ctx, "per_leg_alpha", False):
         # PER-LEG (joint) branch (2026-07-20): rebuild + re-insert the SUFFIXED deterministics
         # (alpha_dla_{name}, alpha_hcd_z_{name}) per leg in ctx.legs LIST order, from the
@@ -2892,7 +3163,9 @@ def _run_nuts_legb(ctx, mock_legs, dla_core_per_leg, *, n_warmup, n_samples, see
     ``fast_postprocess=True`` (default) we instead pass a TRANSFORM-ONLY postprocess that
     constrains via the cheap PRIORS-ONLY model (no loglik factor) and reconstruct ``tau0_vec`` /
     ``alpha_dla`` / ``alpha_hcd_z`` host-side. The returned samples dict is byte-identical to the
-    default (verified rtol=0). Set ``fast_postprocess=False`` to restore the legacy replay."""
+    default (verified rtol=0) on the legacy branches; on the KS dN/dX-mapped branch (W2,
+    2026-07-22) ``alpha_hcd_z`` agrees to <= 2 ulp (XLA broadcast-vs-scalar fusion; the pivot
+    deterministics are bit-equal). Set ``fast_postprocess=False`` to restore the legacy replay."""
     strat = init_to_median if init_strategy is None else init_strategy
     kernel = NUTS(lambda: _legb_model(ctx, mock_legs, dla_core_per_leg),
                   dense_mass=bool(dense_mass), target_accept_prob=float(target_accept),
@@ -3458,7 +3731,10 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
         # NaN on the held-out path (its z-resolved truth lives in truth_alpha_hcd_z rows).
         # Additive-only keys; absent when marginalize_zslope is off.
         _truth_raw = truth_pack.get("raw") or {}
-        for nm in ("tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla"):
+        # (+ the KS dN/dX-mapped raw sites, W2 2026-07-22 — presence-keyed, so absent on every
+        # non-mapped config; the mapped branch samples eps/kappa/m/t/dla_raw instead of s_*.)
+        for nm in ("tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla",
+                   "eps_lls", "kappa_lls", "m_sub", "t_sub", "dla_raw", "t_dla"):
             if nm in samples:
                 dr = np.asarray(samples[nm])[::step][:L]
                 sites_extra[nm] = dict(
