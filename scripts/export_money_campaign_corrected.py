@@ -58,7 +58,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out-dir", default=str(DEFAULT_OUT))
     a = ap.parse_args()
-    out = Path(a.out_dir); out.mkdir(parents=True, exist_ok=True)
+    out = Path(a.out_dir)
+    # IMMUTABLE-ARTIFACT REFUSE GUARD (ported from export_deployed_centre_dndx.py, W1 review
+    # required fix 2026-07-22): the default out-dir IS the delivered frozen artifact of record
+    # (money_campaign_corrected_2026-07-20, sha-pinned by the paper). Post-exact-inverse a
+    # default re-run would silently overwrite it with mask-mode-different arrays under the same
+    # schema id. Enforce the sidecar's "regenerate to a NEW dated directory, never edit in place".
+    if (out / "PROVENANCE.json").exists():
+        raise SystemExit(
+            f"REFUSING to write into {out}: it already contains a PROVENANCE.json, i.e. it is a "
+            f"delivered immutable artifact that a downstream consumer may pin by sha256. "
+            f"Regenerate to a NEW dated directory (--out-dir) instead of editing in place.")
+    out.mkdir(parents=True, exist_ok=True)
 
     from hcd_analysis.emulator.data import PARAM_LIMITS
     PL = np.asarray(PARAM_LIMITS)
