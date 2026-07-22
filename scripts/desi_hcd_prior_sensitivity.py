@@ -43,8 +43,7 @@ from hcd_analysis.emulator.closure_legb import (
     build_legb_ctx, run_legb, load_cache, CACHE_PATH, hcd_pivot_wc_and_xbar,
     HCD_INCIDENCE_SLOPE, HCD_Z_PIVOT)
 from hcd_analysis.emulator.inference import PARAM_NAMES
-from hcd_analysis.emulator.dndx_wc import alpha_to_dndx
-import jax.numpy as jnp
+from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
 
 REPO = "/home/mfho/hcd_priya"
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
@@ -81,18 +80,28 @@ def _dndx_from_pivot_draws(alpha_pivot_draws, z_global, xbar_fn):
     CLOSURE path (survey=None): the forward z-slope is the SIM incidence slope HCD_INCIDENCE_SLOPE
     (~2.4 -- the slope the held-out-sim mock truth carries; the _zslope_sites FIXED branch / the
     _legb_reconstruct_deterministics fixed-slope fallback). alpha_c(z) = alpha_pivot * ((1+z)/(1+z_p))^s_c,
-    then dN/dX_c(z) = alpha_to_dndx(alpha_c(z), Xbar(z), z). Same construction as
-    plot_hcd_prior_dndx_overlay_v3_production.to_dndx_curve."""
+    then dN/dX_c(z) = alpha_to_dndx_exact(alpha_c(z), Xbar(z), z). Same construction as
+    plot_hcd_prior_dndx_overlay_v3_production.to_dndx_curve.
+
+    EXACT inverse in mode="mask" (readout defect B, 2026-07-22): posterior draws from the
+    pre-2026-07-22 unbounded alpha prior (esp. the wide 'off' arm) can legitimately leave
+    the occupancy simplex after z-scaling; such entries come back NaN (counted + printed)
+    instead of the old silent saturation at dN/dX = 27.631021/Xbar."""
     a = np.asarray(alpha_pivot_draws)                       # (L,3)
     zg = np.asarray(z_global, float)                        # (nZ,)
     s_c = np.asarray(HCD_INCIDENCE_SLOPE, float)            # (3,) closure/SBC slope
     Xb = np.asarray(xbar_fn(zg), float)                     # (nZ,)
     shape = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** s_c[None, :]   # (nZ,3)
     out = np.empty((a.shape[0], len(zg), 3))
+    n_invalid = 0
     for j in range(len(zg)):
         az = a * shape[j][None, :]                          # (L,3) alpha_c at z_j
-        out[:, j, :] = np.asarray(alpha_to_dndx(
-            jnp.asarray(az), jnp.asarray(float(Xb[j])), jnp.asarray(float(zg[j]))))
+        out[:, j, :], ok = alpha_to_dndx_exact(az, float(Xb[j]), float(zg[j]), mode="mask")
+        n_invalid += int(np.size(ok) - np.count_nonzero(ok))
+    if n_invalid:
+        print(f"[dndx-readout] {n_invalid}/{a.shape[0] * len(zg)} draw-z entries outside the "
+              f"exact-inverse domain (negative alpha or sum(alpha) >= 1) -> NaN "
+              f"(pre-2026-07-22 code silently saturated these at 27.631021/Xbar)")
     return out, zg, Xb
 
 

@@ -58,7 +58,7 @@ import hcd_analysis.emulator.inference as _I
 from hcd_analysis.emulator.closure_legb import (
     build_legb_ctx, run_legb, HCD_INCIDENCE_SLOPE, HCD_Z_PIVOT)
 from hcd_analysis.emulator.sampler_numpyro import _dla_raw_mu
-from hcd_analysis.emulator.dndx_wc import alpha_to_dndx
+from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
 import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
@@ -193,16 +193,25 @@ def _build_xbar_fn(d):
 
 
 def _dndx_from_pivot_draws(alpha_pivot_draws, z_global, xbar_fn):
+    # EXACT inverse in mode="mask" (readout defect B, 2026-07-22): posterior draws from the
+    # pre-2026-07-22 unbounded alpha prior can legitimately leave the occupancy simplex after
+    # z-scaling; such entries come back NaN (counted + printed) instead of the old silent
+    # saturation at dN/dX = 27.631021/Xbar.
     a = np.asarray(alpha_pivot_draws)
     zg = np.asarray(z_global, float)
     s_c = np.asarray(HCD_INCIDENCE_SLOPE, float)
     Xb = np.asarray(xbar_fn(zg), float)
     shape = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** s_c[None, :]
     out = np.empty((a.shape[0], len(zg), 3))
+    n_invalid = 0
     for j in range(len(zg)):
         az = a * shape[j][None, :]
-        out[:, j, :] = np.asarray(alpha_to_dndx(
-            jnp.asarray(az), jnp.asarray(float(Xb[j])), jnp.asarray(float(zg[j]))))
+        out[:, j, :], ok = alpha_to_dndx_exact(az, float(Xb[j]), float(zg[j]), mode="mask")
+        n_invalid += int(np.size(ok) - np.count_nonzero(ok))
+    if n_invalid:
+        print(f"[dndx-readout] {n_invalid}/{a.shape[0] * len(zg)} draw-z entries outside the "
+              f"exact-inverse domain (negative alpha or sum(alpha) >= 1) -> NaN "
+              f"(pre-2026-07-22 code silently saturated these at 27.631021/Xbar)")
     return out, zg, Xb
 
 

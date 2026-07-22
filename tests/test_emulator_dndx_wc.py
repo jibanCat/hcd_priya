@@ -126,9 +126,16 @@ def test_delta_c_resid_std_shape():
 
 
 def test_alpha_to_dndx_edge_domain_and_clamp_grads():
-    # Edge alpha_c that imply infeasible w (DLA fraction >= 1, or w_sub > 1-w_DLA):
-    # the _LOG_FLOOR clip must keep value AND grad finite (not NaN) so HMC proposals
-    # in the infeasible region degrade gracefully instead of poisoning the trajectory.
+    """FROZEN-ARTIFACT REPRODUCTION pin of the OLD (deprecated) clamp behavior.
+
+    The old rationale here ("HMC proposals ... degrade gracefully") was vestigial:
+    alpha_to_dndx has ZERO consumers in the deployed inference path (census
+    2026-07-22, readout defect B) -- it was only ever a readout. The honest reason
+    this clamp test stays is that pre-2026-07-22 frozen paper artifacts were built
+    with exactly this silently-saturating map, so alpha_to_dndx must keep returning
+    finite (saturated) values and finite grads at infeasible alpha, byte-identical
+    to what built those artifacts. All NEW readouts use alpha_to_dndx_exact, which
+    fails loud on these same inputs (see tests/test_dndx_exact_inverse.py)."""
     Xbar = jnp.array(0.642); z = jnp.array(3.0)
     edges = [jnp.array([0.0, 0.0, 1.5]),    # w_DLA > 1
              jnp.array([0.1, 0.8, 0.5]),    # w_sub > 1 - w_DLA  (negative telescoping arg)

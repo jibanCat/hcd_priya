@@ -131,9 +131,8 @@ def main():
                            "matched-pair identical data; corrected closure center 0.18812; pre-NORC forward (option a)"))
 
     # ---- ROW 1: corrected 68% prior band (recomputed from the corrected prior) ---------------
-    import hcd_analysis.emulator  # noqa
-    import jax, jax.numpy as jnp
-    from hcd_analysis.emulator.dndx_wc import alpha_to_dndx
+    import hcd_analysis.emulator  # noqa  (x64 before jax)
+    from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
     from hcd_analysis.emulator.closure_legb import HCD_INCIDENCE_SLOPE
     from hcd_analysis.emulator.inference import HCD_Z_PIVOT
     from hcd_analysis.emulator.sampler_numpyro import _dla_raw_mu
@@ -150,9 +149,16 @@ def main():
     smp[:, 2] = np.log1p(np.exp(np.minimum(rmu + rng.standard_normal(20000), 30.0)))
     shape = ((1.0+zg)[:, None]/(1.0+zp))**s_c[None, :]
     lo = np.empty((len(zg), 3)); hi = np.empty((len(zg), 3))
+    # EXACT inverse in mask mode (readout defect B, 2026-07-22): z-scaled draws can leave the
+    # occupancy simplex at high z; such draws are EXCLUDED from the percentiles (NaN) and
+    # counted into PROVENANCE, instead of the old silent saturation at 27.631021/Xbar.
+    band_ninv = 0
     for j, z in enumerate(zg):
-        dd = np.asarray(alpha_to_dndx(jnp.asarray(smp*shape[j][None, :]), jnp.asarray(float(Xb[j])), jnp.asarray(float(z))))
-        lo[j], hi[j] = np.percentile(dd, [16, 84], axis=0)
+        dd, ok = alpha_to_dndx_exact(smp*shape[j][None, :], float(Xb[j]), float(z), mode="mask")
+        band_ninv += int(np.size(ok) - np.count_nonzero(ok))
+        lo[j], hi[j] = np.nanpercentile(dd, [16, 84], axis=0)
+    band_ntot = int(len(zg) * smp.shape[0])
+    print(f"[row1 band] out-of-domain draws excluded (not saturated): {band_ninv}/{band_ntot}")
     np.savez(out/"money_row1_layers.npz",
              class_order=np.array(CLS), zg=zg, xbar=Xb,
              prior68_corrected_lo=lo, prior68_corrected_hi=hi,
@@ -186,6 +192,15 @@ def main():
         "environment": {"python": sys.version.split()[0], "numpy": np.__version__, "jax": _jax.__version__,
                         "hostname": platform.node(), "conda_env": "emu-jax", "platform": platform.platform()},
         "inputs_sha256": inputs, "outputs_sha256": outputs,
+        "inverse_map": ("alpha_to_dndx_exact, mode='mask' (EXACT inverse incl. the 4-class "
+                        "renormalisation; readout defect B, 2026-07-22). Pre-2026-07-22 runs "
+                        "used the approximate alpha_to_dndx, which silently saturated "
+                        "out-of-domain draws at 27.631021/Xbar."),
+        "row1_band_invalid_draws": {
+            "n_invalid": band_ninv, "n_total": band_ntot,
+            "policy": ("out-of-simplex draws (sum(alpha)>=1 after z-scaling) are EXCLUDED "
+                       "from the band percentiles (NaN) and counted here, instead of the old "
+                       "silent saturation")},
         "PARAM_LIMITS_ns_Ap": [[lo_ns, hi_ns], [lo_ap, hi_ap]],
         "blind_status": "BLIND-SAFE: 100% closure mocks (truth = held-out PRIYA sim, known); no real-data n_s/A_p "
                         "in any array or field",

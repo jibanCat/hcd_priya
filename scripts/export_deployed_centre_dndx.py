@@ -4,24 +4,38 @@ Answers ~/Latex/HCDEmulatorPaper/request_to_code_agent_2026-07-21_deployed_centr
 (PI-authorized 2026-07-21). F3 draws the closure/cosmic-average band (survey=None); the PI
 asked for the DEPLOYED SURVEY prior centre alongside it. The frozen export gives those
 centres in ALPHA space only, and mapping alpha -> dN/dX needs the exact inverse
-(`dndx_wc.alpha_to_dndx` with Xbar(z) and the telescoping/(1+delta_c) step), which the paper
-side is forbidden to reconstruct locally. So the map is done HERE and shipped as an array.
+(`dndx_wc.alpha_to_dndx_exact` with Xbar(z), the renorm undo, and the telescoping/(1+delta_c)
+step), which the paper side is forbidden to reconstruct locally. So the map is done HERE and
+shipped as an array.
 
 Delivery option (a) of the request: a small NEW dated export dir. The artifact of record
 `dndx_repin_2026-07-20/` is READ ONLY and is never touched -- F3 and the money figure both
 assert against its hashes at build time.
 
-CONSTRUCTION IS IDENTICAL to the frozen F3 layer (`scripts/export_dndx_paper_layer.py`),
-with `survey=None` swapped for the deployed survey key:
-    alpha_c(z) = mu_c * ((1+z)/(1+z_pivot))**zslope_c        then alpha_to_dndx(alpha, Xbar, z)
+CONSTRUCTION mirrors the frozen F3 layer (`scripts/export_dndx_paper_layer.py`), with
+`survey=None` swapped for the deployed survey key:
+    alpha_c(z) = mu_c * ((1+z)/(1+z_pivot))**zslope_c   then alpha_to_dndx_exact(alpha, Xbar, z)
 z grid and Xbar(z) are READ FROM the frozen `f3_layers.npz` rather than recomputed, so the
 paper can overlay these curves on the existing layer without an interpolation step.
 
-SELF-CHECK (fail-loud, the whole point): before writing anything, this script re-derives the
-survey=None layer through its OWN code path and asserts it reproduces the frozen
-`prior_center_dndx` / `prior_lo1_dndx` / `prior_hi1_dndx` to within 1e-12. If that assert
-passes, the deployed-survey curves below were built by the identical map. If it fails, the
+V3 INVERSE-MAP MIGRATION (readout defect B, 2026-07-22): pre-v3 layers -- INCLUDING the
+frozen `dndx_repin_2026-07-20/f3_layers.npz` -- were built with the APPROXIMATE
+`alpha_to_dndx` (renorm ignored, median rel err ~2e-3, silent saturation at 27.631021/Xbar
+outside its domain). v3 uses `alpha_to_dndx_exact` (mode="raise"), so byte-level reproduction
+of the frozen approximate layers is NO LONGER asserted; the renorm-level difference is
+computed and printed instead, and the SELF-CHECK below is exact-vs-exact.
+
+SELF-CHECK (fail-loud): before writing anything, this script re-derives the survey=None
+closure layer TWO ways -- through `band_curve` (the code path every deployed curve uses) and
+directly through `alpha_to_dndx_exact` on the explicitly-constructed z-resolved alpha -- and
+asserts they agree to within 1e-12 on the frozen zgrid/Xbar/pivot inputs. If it fails, the
 export refuses to write rather than shipping a curve the paper would overlay wrongly.
+
+KS REFUSAL (expected, fail-loud, DO NOT work around): at the CURRENT deployed KS prior the
+KS centre leaves the occupancy simplex (sum(alpha) >= 1) at z >= ~4.45 on the frozen grid, so
+`alpha_to_dndx_exact` -- correctly -- refuses and this export DOES NOT SHIP until the pending
+KS prior reparameterization lands. The approximate map used to paper over exactly this by
+silently saturating the LLS class at 27.631021/Xbar.
 
 KEY DISCIPLINE (defect fix 2026-07-21): every array is either a CLOSURE or a DEPLOYED quantity and
 the two differ in BOTH centre and z-shape, so no key may leave its layer to the reader's guess. The
@@ -47,10 +61,9 @@ sys.path.insert(0, str(ROOT))
 
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
 import jax
-import jax.numpy as jnp
 
 from hcd_analysis.emulator.closure_legb import HCD_INCIDENCE_SLOPE
-from hcd_analysis.emulator.dndx_wc import alpha_to_dndx
+from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
 from hcd_analysis.emulator.sampler_numpyro import _dla_raw_mu
 from hcd_analysis.emulator.inference import (
     HCD_LLS_REALFIT_ZSLOPE,
@@ -83,10 +96,12 @@ def git(*a):
 
 
 def band_curve(alpha_pivot_vec, zgrid, Xb, zp, slope):
-    """The frozen F3 map, verbatim: pivot alpha -> z-resolved alpha -> dN/dX."""
+    """The F3 construction: pivot alpha -> z-resolved alpha -> dN/dX, through the EXACT
+    inverse (v3; the frozen F3 layer used the approximate `alpha_to_dndx`). mode="raise":
+    an out-of-simplex centre/edge refuses loudly instead of silently saturating."""
     az = (np.asarray(alpha_pivot_vec)[None, :]
           * ((1.0 + np.asarray(zgrid, float))[:, None] / (1.0 + zp)) ** np.asarray(slope)[None, :])
-    return np.array(alpha_to_dndx(jnp.asarray(az), jnp.asarray(Xb), jnp.asarray(zgrid)))
+    return np.asarray(alpha_to_dndx_exact(az, np.asarray(Xb, float), np.asarray(zgrid, float)))
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -165,15 +180,20 @@ def verify_npz_payload(payload, surveys=SURVEYS):
 
 
 NOTE = (
-    "DEPLOYED-SURVEY prior centre in dN/dX on the frozen f3_layers zgrid. Same alpha->dN/dX map as "
-    "the frozen F3 layer (self-checked to <1e-12). Arrays are (n_z, n_class) with class_order. "
-    "CLOSURE vs DEPLOYED differ in BOTH centre and z-shape: the deployed LLS centre is the "
-    "K1a-corrected literature dN/dX law (0.172112 x boost), NOT the closure centre (0.188119) x "
-    "boost; and the deployed LLS forward z-slope is zslope_deployed[0]=2.127 (the litWLS slope), "
-    "NOT the sim zslope_closure[0]=2.465 the closure band uses. subDLA/DLA centres and slopes are "
-    "survey-agnostic, so their dN/dX columns are BIT-identical to closure_center_dndx. The "
-    "survey=None closure layer is included as closure_center_dndx for a like-for-like overlay. "
-    "Prior geometry only: no data, no posterior, no cosmology.")
+    "DEPLOYED-SURVEY prior centre in dN/dX on the frozen f3_layers zgrid, built with the EXACT "
+    "alpha->dN/dX inverse alpha_to_dndx_exact (v3, readout defect B 2026-07-22; pre-v3 layers "
+    "including the frozen f3_layers.npz used the APPROXIMATE alpha_to_dndx and differ at the "
+    "renorm level). Arrays are (n_z, n_class) with class_order. CLOSURE vs DEPLOYED differ in "
+    "BOTH centre and z-shape: the deployed LLS centre is the K1a-corrected literature dN/dX law "
+    "(0.172112 x boost), NOT the closure centre (0.188119) x boost; and the deployed LLS forward "
+    "z-slope is zslope_deployed[0]=2.127 (the litWLS slope), NOT the sim zslope_closure[0]=2.465 "
+    "the closure band uses. subDLA/DLA alpha centres and slopes are survey-agnostic, but their "
+    "dN/dX columns are NOT bit-identical to closure_center_dndx under the exact inverse: the "
+    "renorm undo couples every class to the LLS alpha (renorm-level, ~3e-4 eBOSS/DESI / ~4e-3 KS "
+    "relative, asserted <1e-2 at export). The survey=None closure layer re-derived through the "
+    "SAME exact map is included as "
+    "closure_center_dndx for a like-for-like overlay. Prior geometry only: no data, no posterior, "
+    "no cosmology.")
 
 
 def build_npz_payload(zgrid, xbar_grid, mu_closure, sd_closure, z_pivot, closure_center_dndx,
@@ -214,21 +234,34 @@ def build_npz_payload(zgrid, xbar_grid, mu_closure, sd_closure, z_pivot, closure
         sd = sd0.copy()
         sd[0] = mu[0] * frac                        # width rule: sigma/mu held at the new centre
         assert_hcd_pivot_z3(float(mu[0]), z=zp, where=f"deployed-centre export {sv}", boost=boost)
-        rows[f"deployed_center_dndx_{sv}"] = band_curve(mu, zgrid, Xb, zp, slope_deployed)
-        lo1 = band_curve(np.clip(mu - sd, 1e-8, None), zgrid, Xb, zp, slope_deployed)
-        hi1 = band_curve(mu + sd, zgrid, Xb, zp, slope_deployed)
-        # DLA EDGE CONVENTION (adversarial-panel blocker 3, 2026-07-21). The deployed DLA site is
-        # softplus(Normal), NOT Gaussian on alpha (sampler_numpyro; closure_legb.py:2541-2543), so
-        # mu +/- sd is the WRONG edge for column 2: it came out 1.81x too narrow above and 1.36x
-        # too wide below, against the frozen dla_eff_sd_over_mean = 1.2785. Overwrite column 2 with
-        # the softplus quantiles, exactly as the frozen F3 builder does
-        # (export_dndx_paper_layer.py:198-211), so every column of these edges is the DEPLOYED
-        # prior geometry rather than two conventions silently mixed in one array.
-        raw_mu = float(_dla_raw_mu(mu[2]))
-        for arr, nsig in ((lo1, -1.0), (hi1, +1.0)):
-            v = mu.copy()
-            v[2] = float(jax.nn.softplus(raw_mu + nsig))
-            arr[:, 2] = band_curve(v, zgrid, Xb, zp, slope_deployed)[:, 2]
+        try:
+            rows[f"deployed_center_dndx_{sv}"] = band_curve(mu, zgrid, Xb, zp, slope_deployed)
+            lo1 = band_curve(np.clip(mu - sd, 1e-8, None), zgrid, Xb, zp, slope_deployed)
+            hi1 = band_curve(mu + sd, zgrid, Xb, zp, slope_deployed)
+            # DLA EDGE CONVENTION (adversarial-panel blocker 3, 2026-07-21). The deployed DLA site
+            # is softplus(Normal), NOT Gaussian on alpha (sampler_numpyro; closure_legb.py:2541-
+            # 2543), so mu +/- sd is the WRONG edge for column 2: it came out 1.81x too narrow
+            # above and 1.36x too wide below, against the frozen dla_eff_sd_over_mean = 1.2785.
+            # Overwrite column 2 with the softplus quantiles, exactly as the frozen F3 builder
+            # does (export_dndx_paper_layer.py), so every column of these edges is the DEPLOYED
+            # prior geometry rather than two conventions silently mixed in one array.
+            raw_mu = float(_dla_raw_mu(mu[2]))
+            for arr, nsig in ((lo1, -1.0), (hi1, +1.0)):
+                v = mu.copy()
+                v[2] = float(jax.nn.softplus(raw_mu + nsig))
+                arr[:, 2] = band_curve(v, zgrid, Xb, zp, slope_deployed)[:, 2]
+        except ValueError as e:
+            # EXPECTED fail-loud refusal (do NOT work around): at the current deployed KS prior
+            # (LLS boost 2.5) the KS centre leaves the occupancy simplex at z >= ~4.45, so the
+            # exact inverse refuses where the pre-v3 approximate map silently saturated the LLS
+            # class at 27.631021/Xbar. Nothing ships until the whole payload builds.
+            raise ValueError(
+                f"deployed-centre export REFUSED for survey={sv}: the prior centre/edge alpha "
+                f"leaves the exact-inverse domain on this z grid (z in [{zgrid.min():g}, "
+                f"{zgrid.max():g}]). At the CURRENT deployed KS prior this is EXPECTED at "
+                f"z >= ~4.45 and is the desired fail-loud behavior (the pre-v3 approximate map "
+                f"silently saturated instead); it will be resolved by the pending KS prior "
+                f"reparameterization. Underlying domain violation: {e}") from e
         rows[f"deployed_lo1_dndx_{sv}"] = lo1
         rows[f"deployed_hi1_dndx_{sv}"] = hi1
         rows[f"deployed_dla_softplus_quantiles_{sv}"] = np.array(
@@ -285,27 +318,37 @@ def main():
     sd0 = np.asarray(f3["alpha_pivot_sigma"], float)
     assert_hcd_pivot_z3(float(mu0[0]), z=zp, where="deployed-centre export", boost=1.0)
 
-    # --- SELF-CHECK: reproduce the frozen closure layer through THIS code path.
+    # --- SELF-CHECK (v3, exact-vs-exact): the closure layer derived through band_curve (the
+    # code path every deployed curve uses) must equal a DIRECT alpha_to_dndx_exact evaluation
+    # of the explicitly-constructed z-resolved alpha to <1e-12 on the frozen zgrid/Xbar/pivot
+    # inputs. The pre-v3 check asserted byte-level reproduction of the FROZEN f3 arrays, which
+    # were built with the APPROXIMATE alpha_to_dndx; that identity is intentionally broken by
+    # the exact-inverse migration (readout defect B), so the frozen-vs-exact renorm-level
+    # difference is printed for the record, not asserted.
     chk_c = band_curve(mu0, zgrid, Xb, zp, slope)
     chk_lo = band_curve(np.clip(mu0 - sd0, 1e-8, None), zgrid, Xb, zp, slope)
     chk_hi = band_curve(mu0 + sd0, zgrid, Xb, zp, slope)
-    for name, got, want in (("prior_center_dndx", chk_c, f3["prior_center_dndx"]),
-                            ("prior_lo1_dndx", chk_lo, f3["prior_lo1_dndx"]),
-                            ("prior_hi1_dndx", chk_hi, f3["prior_hi1_dndx"])):
-        # DLA column uses softplus quantiles in the frozen builder, not mu -/+ sd; compare the
-        # two classes whose edges are plain Gaussian, and the CENTRE on all three.
-        cols = slice(0, 3) if name == "prior_center_dndx" else slice(0, 2)
-        d = np.max(np.abs(np.asarray(got)[:, cols] - np.asarray(want)[:, cols]))
+    for name, got, piv in (("closure centre", chk_c, mu0),
+                           ("closure lo1", chk_lo, np.clip(mu0 - sd0, 1e-8, None)),
+                           ("closure hi1", chk_hi, mu0 + sd0)):
+        az = piv[None, :] * ((1.0 + zgrid)[:, None] / (1.0 + zp)) ** slope[None, :]
+        want = np.asarray(alpha_to_dndx_exact(az, Xb, zgrid))
+        d = np.max(np.abs(np.asarray(got) - want))
         assert d < 1e-12, (
-            f"SELF-CHECK FAILED: re-derived {name} differs from the frozen artifact by {d:.3e}. "
-            f"The alpha->dN/dX map here is NOT the one that built F3; refusing to write an "
-            f"overlay the paper would draw on the wrong grid.")
-    print(f"[self-check] re-derived closure layer matches {f3p.name} to <1e-12  OK")
+            f"SELF-CHECK FAILED: band_curve({name}) differs from the direct exact-inverse "
+            f"evaluation by {d:.3e}; the deployed curves below would be built by a different "
+            f"map. Refusing to write an overlay the paper would draw on the wrong values.")
+    rel_frozen = float(np.max(np.abs(chk_c / np.asarray(f3["prior_center_dndx"]) - 1.0)))
+    print("[self-check] band_curve == direct alpha_to_dndx_exact to <1e-12  OK")
+    print(f"[self-check] exact vs FROZEN (pre-v3, approximate-inverse) closure centre: "
+          f"max rel diff {rel_frozen:.3e} (expected renorm-level; NOT asserted -- the frozen "
+          f"f3_layers.npz was built with the approximate alpha_to_dndx)")
 
     # --- deployed-survey geometry, per survey (construction + the closure-vs-deployed key
     # discipline live in build_npz_payload; see its docstring for the two differences).
-    payload, table = build_npz_payload(zgrid, Xb, mu0, sd0, zp,
-                                       np.asarray(f3["prior_center_dndx"]))
+    # closure_center_dndx ships the EXACT-map re-derivation (chk_c) -- the like-for-like
+    # overlay layer under v3 -- NOT the verbatim frozen (approximate) prior_center_dndx.
+    payload, table = build_npz_payload(zgrid, Xb, mu0, sd0, zp, chk_c)
 
     # Acceptance targets quoted by the paper agent from the frozen prior_geometry_table.
     TARGET = {"eBOSS": 0.17211216067355312, "KS": 0.43028040168388280}
@@ -318,16 +361,23 @@ def main():
         print(f"  {sv:6s} boost {table[sv]['boost']:.2f}  frac_sigma {table[sv]['lls_frac_sigma']:.3f}"
               f"  alpha_LLS {got:.9f}  "
               f"dN/dX_LLS(z=3) {table[sv]['dndx_lls_center_z3_deployed']:.4f}")
-    # subDLA/DLA are survey-agnostic in BOTH centre and slope, so the LLS-only overlay the paper
-    # draws requires their dN/dX columns to be BIT-identical to the closure layer. Assert it.
+    # subDLA/DLA are survey-agnostic in BOTH centre and slope, but under the EXACT inverse
+    # their dN/dX columns are NO LONGER bit-identical to the closure layer: the renorm undo
+    # Z couples every class to the LLS alpha, which differs between closure and deployed.
+    # The coupling scales with the LLS-alpha offset times the delta_c spread (measured ~3e-4
+    # for eBOSS/DESI, ~4e-3 for the KS boost-2.5 layer); assert it stays below 1e-2, which
+    # still catches a genuine centre/slope mislabel (those are >=10% effects).
     for sv in SURVEYS:
         for j, cname in ((1, "subDLA"), (2, "DLA")):
             a = payload[f"deployed_center_dndx_{sv}"][:, j]
-            b = np.asarray(f3["prior_center_dndx"])[:, j]
-            assert np.array_equal(a, b), (
-                f"{sv} {cname} centre is not bit-identical to the closure layer "
-                f"(max|diff|={np.max(np.abs(a - b)):.3e}); the paper's LLS-only overlay assumes it")
-    print(f"[check] deployed subDLA/DLA centres bit-identical to closure for {list(SURVEYS)}  OK")
+            b = np.asarray(payload["closure_center_dndx"])[:, j]
+            rel = float(np.max(np.abs(a / b - 1.0)))
+            assert rel < 1e-2, (
+                f"{sv} {cname} centre differs from the closure layer by {rel:.3e} relative -- "
+                f"far above the exact-inverse renorm coupling (~3e-4 eBOSS/DESI, ~4e-3 KS); a "
+                f"centre/slope mislabel, not the expected class coupling")
+    print(f"[check] deployed subDLA/DLA centres within the renorm coupling (<1e-2 rel) of the "
+          f"closure layer for {list(SURVEYS)}  OK")
     print(f"[check] zslope_closure={payload['zslope_closure'].tolist()}  "
           f"zslope_deployed={payload['zslope_deployed'].tolist()}  (both shipped, no bare 'zslope')")
 
@@ -345,9 +395,16 @@ def main():
     np.savez(npz, **payload)
     verify_npz_payload(dict(np.load(npz, allow_pickle=True)))   # re-read what was actually written
     sidecar = {
-        "schema": "deployed_centre_v2",
+        "schema": "deployed_centre_v3",
         "purpose": ("deployed-survey prior centre in dN/dX for paper F3 (PI 2026-07-21); "
                     "alpha->dN/dX mapped here because the paper side may not reconstruct it"),
+        "inverse_map": ("alpha_to_dndx_exact (EXACT inverse of the w_c_corrected forward incl. "
+                        "the 4-class renormalisation; no clip floor; fail-loud outside the "
+                        "occupancy simplex). Pre-v3 layers -- including the frozen "
+                        "dndx_repin_2026-07-20/f3_layers.npz this export reads its grid from -- "
+                        "were built with the APPROXIMATE alpha_to_dndx (renorm ignored, median "
+                        "rel err ~2e-3, silent saturation at 27.631021/Xbar outside its domain) "
+                        "and differ from v3 arrays at the renorm level."),
         "answers_request": "request_to_code_agent_2026-07-21_deployed_centre.md",
         "commit": git("rev-parse", "HEAD"),
         "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
@@ -386,21 +443,37 @@ def main():
                                 "inference.HCD_LLS_REALFIT_ZSLOPE = 2.127 in the LLS slot "
                                 "(survey-INDEPENDENT, the litWLS slope); subDLA/DLA keep the sim "
                                 "slope. The slope every deployed_*_dndx_<survey> array uses"),
-            "closure_center_dndx": ("verbatim copy of the frozen f3_layers prior_center_dndx "
-                                    "(survey=None), for a like-for-like overlay"),
+            "closure_center_dndx": ("survey=None closure centre RE-DERIVED through the v3 exact "
+                                    "inverse from the frozen f3_layers pivot/zgrid/Xbar inputs, "
+                                    "for a like-for-like overlay. NOT byte-identical to the "
+                                    "frozen prior_center_dndx (pre-v3, approximate inverse; "
+                                    "renorm-level difference, printed at export)"),
             "closure_alpha_pivot_mu": "frozen f3_layers alpha_pivot_mu (survey=None), (LLS,subDLA,DLA)",
             "deployed_alpha_pivot_mu_<survey>": ("deployed pivot centre; LLS = the K1a-corrected "
                                                  "lit dN/dX law 0.172112 x boost, NOT the closure "
                                                  "0.188119 x boost. subDLA/DLA = closure values"),
             "boost_by_survey": "ordered by survey_order (NOT class_order)",
             "lls_frac_sigma_by_survey": "ordered by survey_order (NOT class_order)",
-            "subDLA_DLA_identity": ("deployed_center_dndx_<survey>[:, 1:] is BIT-identical to "
-                                    "closure_center_dndx[:, 1:] for every survey (asserted at "
-                                    "export): only the LLS class is re-centred/re-sloped. The DLA "
-                                    "lo1/hi1 EDGES are not comparable to the frozen prior_lo1/hi1 "
-                                    "DLA column, which the frozen builder makes from softplus "
-                                    "quantiles rather than mu-/+sd"),
+            "subDLA_DLA_identity": ("deployed_center_dndx_<survey>[:, 1:] agrees with "
+                                    "closure_center_dndx[:, 1:] to <1e-2 relative (measured "
+                                    "~3e-4 eBOSS/DESI, ~4e-3 KS) for every "
+                                    "survey (asserted at export) but is NOT bit-identical under "
+                                    "the v3 exact inverse: the renorm undo couples every class "
+                                    "to the LLS alpha, which is the only re-centred/re-sloped "
+                                    "class. The DLA lo1/hi1 EDGES are not comparable to the "
+                                    "frozen prior_lo1/hi1 DLA column, which the frozen builder "
+                                    "makes from softplus quantiles rather than mu-/+sd"),
         },
+        "schema_changes_vs_v2": [
+            "INVERSE MAP: alpha->dN/dX now alpha_to_dndx_exact (exact incl. 4-class renorm, "
+            "fail-loud domain) instead of the approximate/saturating alpha_to_dndx",
+            "closure_center_dndx: re-derived through the exact map (was: verbatim frozen "
+            "prior_center_dndx copy)",
+            "deployed_center_dndx_<survey>[:, 1:] no longer bit-identical to the closure "
+            "columns (exact-inverse renorm coupling, <1e-2 rel; asserted)",
+            "self-check: exact-vs-exact (band_curve vs direct alpha_to_dndx_exact, <1e-12); "
+            "frozen-layer byte reproduction no longer asserted (pre-v3 = approximate inverse)",
+        ],
         "schema_changes_vs_v1": [
             "REMOVED bare 'zslope' (it was the CLOSURE slope inside a deployed-layer file)",
             "ADDED 'zslope_closure' (2.465,...) and 'zslope_deployed' (2.127,...)",
@@ -411,13 +484,17 @@ def main():
             "'alpha_pivot_{mu,sigma}' -> '..._deployed' (+ '..._closure'), "
             "'dndx_center_z3' -> 'dndx_lls_center_z3_deployed'",
         ],
-        "self_check": ("(a) re-derived the survey=None closure layer through this script's own "
-                       "alpha->dN/dX path and asserted equality with the frozen "
-                       "dndx_repin_2026-07-20/f3_layers.npz to <1e-12 before writing; "
-                       "(b) asserted the deployed subDLA/DLA dN/dX centres are BIT-identical to "
-                       "the closure ones for every survey; (c) re-read the written npz and "
-                       "re-audited its key set with verify_npz_payload (no closure-vs-deployed "
-                       "ambiguous key can ship). Test-pinned by tests/test_export_deployed_centre.py"),
+        "self_check": ("(a) derived the survey=None closure layer through band_curve (the code "
+                       "path every deployed curve uses) AND directly through alpha_to_dndx_exact "
+                       "on the explicitly-constructed z-resolved alpha, asserted agreement to "
+                       "<1e-12 before writing (exact-vs-exact; the pre-v3 byte-reproduction of "
+                       "the frozen approximate-inverse f3 arrays is intentionally retired, the "
+                       "renorm-level difference is printed); (b) asserted the deployed "
+                       "subDLA/DLA dN/dX centres agree with the closure ones to <1e-2 relative "
+                       "for every survey (exact-inverse renorm coupling only); (c) re-read the "
+                       "written npz and re-audited its key set with verify_npz_payload (no "
+                       "closure-vs-deployed ambiguous key can ship). Test-pinned by "
+                       "tests/test_export_deployed_centre.py"),
         "artifact_of_record_untouched": str(FROZEN),
         "blind_status": ("BLIND-SAFE: prior geometry only; no data, no posterior, no real-data "
                          "n_s/A_p in any array or field"),

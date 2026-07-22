@@ -7,7 +7,8 @@ measurements at 1× vs 2×.
 THE PRIOR BAND construction (matches the production forward exactly):
   center α_c(z) = α_pivot_c · ((1+z)/(1+z_p))^s_c,  α_pivot_c = the per-survey hcd_incidence_prior μ,
   s_c = the REAL-FIT forward z-slope (litWLS γ_LLS=2.127 for LLS; sim incidence slope for subDLA/DLA),
-  → dN/dX_c(z) = alpha_to_dndx(α_c(z), Xbar(z), z)  (the dndx_wc telescoping inverse the forward uses).
+  → dN/dX_c(z) = alpha_to_dndx_exact(α_c(z), Xbar(z), z)  (the dndx_wc EXACT inverse, renorm included;
+    fail-loud outside the occupancy simplex — 2026-07-22 readout defect B).
   The 1×/2× σ_LLS envelopes scale α_pivot_LLS by (1 ± σ/μ) at the deployed per-survey widths
 (HCD_LLS_SURVEY_FRAC_SIGMA / _HEDGE2X; 0.287/0.574 DESI-family, 0.40 KS — corrected-law widths
 2026-07-18) (the PI WIDTH RULE
@@ -28,7 +29,7 @@ import matplotlib.pyplot as plt
 import hcd_analysis.emulator  # x64 before jax
 import jax.numpy as jnp
 from hcd_analysis.emulator.data import load_cache
-from hcd_analysis.emulator.dndx_wc import alpha_to_dndx
+from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
 from hcd_analysis.emulator.inference import (
     hcd_incidence_prior, HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC, HCD_PRIOR_FRAC_SIGMA,
     HCD_LLS_SURVEY_FRAC_SIGMA, HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X, HCD_LLS_REALFIT_ZSLOPE)
@@ -90,11 +91,12 @@ def dndx_band_for_survey(survey, zgrid, w_c_med, xbar_fn):
     Xb = np.asarray(xbar_fn(zgrid))
 
     def to_dndx(alpha_pivot):
+        # EXACT inverse, mode="raise" (prior centres/edges): out-of-simplex refuses loudly
+        # (expected for the current KS prior at z >= ~4.45) instead of silently saturating.
         az = alpha_pivot[None, :] * shape                            # (nz,3)
         out = np.empty((nz, 3))
         for j in range(nz):
-            out[j] = np.asarray(alpha_to_dndx(jnp.asarray(az[j]), jnp.asarray(float(Xb[j])),
-                                              jnp.asarray(float(zgrid[j]))))
+            out[j] = alpha_to_dndx_exact(az[j], float(Xb[j]), float(zgrid[j]))
         return out
 
     center = to_dndx(mu1)

@@ -109,7 +109,7 @@ def main():
     import jax
     import jax.numpy as jnp
     from hcd_analysis.emulator.data import load_cache
-    from hcd_analysis.emulator.dndx_wc import alpha_to_dndx
+    from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
     from hcd_analysis.emulator import lit_dndx
     from hcd_analysis.emulator.lit_dndx import (
         lit_points_for_display, assert_display_labels, ESTIMAND_ID, ESTIMAND_LABEL)
@@ -189,10 +189,12 @@ def main():
     Xb_f3 = np.asarray(xbar_fn(F3_Z))
 
     def band_curve(alpha_pivot_vec, zgrid, Xb):
+        # EXACT inverse (readout defect B, 2026-07-22), mode="raise": a prior centre/edge
+        # outside the occupancy simplex refuses loudly instead of silently saturating.
         az = (np.asarray(alpha_pivot_vec)[None, :]
               * ((1.0 + zgrid)[:, None] / (1.0 + zp)) ** s_c[None, :])
-        return np.array(alpha_to_dndx(jnp.asarray(az), jnp.asarray(Xb),
-                                      jnp.asarray(zgrid)))
+        return np.asarray(alpha_to_dndx_exact(az, np.asarray(Xb, float),
+                                              np.asarray(zgrid, float)))
 
     raw_mu = float(_dla_raw_mu(mu[2]))
     q = lambda nsig: float(jax.nn.softplus(raw_mu + nsig))
@@ -242,7 +244,10 @@ def main():
                                "hcd_incidence_prior(w_c_z3, z=3, survey=None); z-slope "
                                "HCD_INCIDENCE_SLOPE; TruncatedNormal(low=0) LLS/subDLA, "
                                "DLA softplus(Normal(softplus^-1(mu),1.0)); "
-                               "alpha_to_dndx exact inverse"))
+                               "alpha_to_dndx_exact EXACT inverse of the w_c_corrected "
+                               "forward incl. the 4-class renormalisation (2026-07-22; "
+                               "pre-2026-07-22 layers used the APPROXIMATE alpha_to_dndx "
+                               "apply_delta=True map, misdescribed here as 'exact inverse')"))
 
     # ---------------- money row 1 layers ------------------------------------------
     zg_r1 = np.asarray(ON["dndx_z"], float)
@@ -253,7 +258,14 @@ def main():
     def sampler_band(mu_v, sd_v, truncated):
         """Propagated band. truncated=False reproduces the June campaign sampler
         (sampler_numpyro: plain Normal LLS/subDLA); truncated=True is the deployed
-        closure_legb geometry (TruncatedNormal low=0). DLA always softplus latent 1.0."""
+        closure_legb geometry (TruncatedNormal low=0). DLA always softplus latent 1.0.
+
+        Draws map through alpha_to_dndx_exact in mode="mask": plain-Normal campaign
+        draws can be negative and z-scaled draws can leave the occupancy simplex at
+        high z -- both legitimate under the pre-2026-07-22 unbounded prior geometry.
+        Such draws are EXCLUDED from the percentiles (NaN) and COUNTED (returned +
+        recorded in PROVENANCE), instead of the old silent saturation at
+        27.631021/Xbar which biased the band edges."""
         rng = np.random.default_rng(ROW1_BAND_SEED)
         smp = rng.normal(mu_v, sd_v, size=(ROW1_BAND_N, 3))
         if truncated:  # resample the <0 mass (softplus DLA slot overwritten below)
@@ -268,15 +280,19 @@ def main():
         shape = ((1.0 + zg_r1)[:, None] / (1.0 + zp)) ** s_c[None, :]
         lo = np.empty((len(zg_r1), 3))
         hi = np.empty((len(zg_r1), 3))
+        n_invalid = 0
         for jj, z in enumerate(zg_r1):
-            dd = np.asarray(alpha_to_dndx(jnp.asarray(smp * shape[jj][None, :]),
-                                          jnp.asarray(float(Xb_r1[jj])),
-                                          jnp.asarray(float(z))))
-            lo[jj], hi[jj] = np.percentile(dd, ROW1_BAND_PCTS, axis=0)
-        return lo, hi
+            dd, ok = alpha_to_dndx_exact(smp * shape[jj][None, :], float(Xb_r1[jj]),
+                                         float(z), mode="mask")
+            n_invalid += int(np.size(ok) - np.count_nonzero(ok))
+            lo[jj], hi[jj] = np.nanpercentile(dd, ROW1_BAND_PCTS, axis=0)
+        return lo, hi, n_invalid, int(len(zg_r1) * ROW1_BAND_N)
 
-    r1_lo_camp, r1_hi_camp = sampler_band(mu_camp, sd_camp, truncated=False)
-    r1_lo_corr, r1_hi_corr = sampler_band(mu, sd, truncated=True)
+    r1_lo_camp, r1_hi_camp, r1_ninv_camp, r1_ntot = sampler_band(mu_camp, sd_camp,
+                                                                 truncated=False)
+    r1_lo_corr, r1_hi_corr, r1_ninv_corr, _ = sampler_band(mu, sd, truncated=True)
+    print(f"[row1 band] out-of-domain draws excluded (not saturated): "
+          f"campaign {r1_ninv_camp}/{r1_ntot}, corrected {r1_ninv_corr}/{r1_ntot}")
 
     np.savez(out / "money_row1_layers.npz",
              class_order=np.array(CLS), zfine=ROW1_ZFINE, zg=zg_r1, xbar=Xb_r1,
@@ -432,6 +448,19 @@ def main():
         },
         "inputs_sha256": inputs,
         "outputs_sha256": outputs,
+        "inverse_map": ("alpha_to_dndx_exact (EXACT inverse of the w_c_corrected forward "
+                        "incl. the 4-class renormalisation; fail-loud raise mode for prior "
+                        "centres/edges, mask mode for sampled bands; readout defect B, "
+                        "2026-07-22). Pre-2026-07-22 runs of this exporter -- including the "
+                        "frozen dndx_repin_2026-07-20 artifact of record -- used the "
+                        "APPROXIMATE alpha_to_dndx (renorm ignored, silent saturation at "
+                        "27.631021/Xbar) and differ at the renorm level."),
+        "row1_band_invalid_draws": {
+            "campaign": [r1_ninv_camp, r1_ntot], "corrected": [r1_ninv_corr, r1_ntot],
+            "policy": ("out-of-domain draws (negative alpha or sum(alpha)>=1 after z-scaling; "
+                       "legitimate under the pre-2026-07-22 unbounded prior geometry) are "
+                       "EXCLUDED from the band percentiles and counted here, instead of the "
+                       "old silent saturation at 27.631021/Xbar")},
         "blind_status": "BLIND-SAFE: no real-data cosmology values (literature, prior "
                         "constants, and closure-mock truth quantities only)",
         "chain_of_record_status": "ARTIFACT OF RECORD for the paper dN/dX re-pin "

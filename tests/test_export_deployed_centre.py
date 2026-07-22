@@ -35,12 +35,16 @@ from hcd_analysis.emulator.inference import (
 
 REPO = "/home/mfho/hcd_priya"
 
-# --- tiny synthetic inputs: 5 z nodes, real Xbar(z) magnitudes (the z=3 node carries the true
+# --- tiny synthetic inputs: 4 z nodes, real Xbar(z) magnitudes (the z=3 node carries the true
 # pivot Xbar so the deployed LLS centre lands on the deployed 0.172112 and the pivot guard fires
 # on a genuine value). Prior geometry only -- no data, no posterior, no cosmology.
-Z_TINY = np.array([2.2, 2.6, 3.0, 3.4, 3.8], float)
+# The grid stops at z=3.4: under the v3 EXACT inverse (readout defect B, 2026-07-22) the
+# current deployed KS prior's hi1 edge leaves the occupancy simplex around z~3.8 (and the KS
+# CENTRE at z>=~4.45), at which the exporter now correctly REFUSES instead of silently
+# saturating -- that refusal is pinned separately by test_ks_refusal_at_high_z_is_fail_loud.
+Z_TINY = np.array([2.2, 2.6, 3.0, 3.4], float)
 XB_TINY = np.array([0.4020049401674796, 0.5101543263532812, 0.6316034425658955,
-                    0.7663522888053229, 0.9144008650715629], float)
+                    0.7663522888053229], float)
 MU_CLOSURE = np.array([0.18811862664368107, 0.06218315972222222, 0.004409670138888889], float)
 SD_CLOSURE = np.array([0.028217793996552160, 0.02487326388888889, 0.0022048350694444446], float)
 
@@ -135,17 +139,28 @@ def test_deployed_lls_curve_was_built_with_the_deployed_slope(npz):
 
 
 # ------------------------------------------------- the paper agent's load-bearing overlay claim
-def test_subdla_dla_dndx_bit_identical_to_closure(npz):
-    """LLS-only overlay: the deployed layer must leave subDLA/DLA dN/dX BIT-identical to the
-    closure layer for every survey (the alpha->dN/dX telescoping inverse makes columns 1,2
-    independent of the LLS weight, and their centres/slopes are survey-agnostic)."""
+def test_subdla_dla_dndx_renorm_coupled_to_closure(npz):
+    """LLS-only overlay, v3 exact-inverse form. Pre-2026-07-22 this pinned BIT-identity of the
+    deployed subDLA/DLA dN/dX columns to the closure layer -- true for the old approximate
+    inverse, whose telescoping made columns 1,2 independent of the LLS weight. Under
+    `alpha_to_dndx_exact` (readout defect B migration) the renorm undo Z couples EVERY class
+    to the LLS alpha, which is the only re-centred/re-sloped class, so the honest pin is:
+    the sub/DLA columns agree to renorm-coupling level (<1e-2 relative; measured ~4.3e-3
+    worst case for the KS boost-2.5 layer at z=3.4, ~3e-4 for eBOSS/DESI -- a genuine
+    centre/slope mislabel is a >=10% effect and still fails this) and are NOT
+    bit-identical (the coupling is real and nonzero)."""
     clo = np.asarray(npz["closure_center_dndx"])
     for sv in [str(s) for s in npz["survey_order"]]:
         got = np.asarray(npz[f"deployed_center_dndx_{sv}"])
         for j, cname in ((1, "subDLA"), (2, "DLA")):
-            assert np.array_equal(got[:, j], clo[:, j]), (
-                f"{sv} {cname} centre is not bit-identical to closure: "
-                f"max|diff|={np.max(np.abs(got[:, j] - clo[:, j])):.3e}")
+            rel = np.max(np.abs(got[:, j] / clo[:, j] - 1.0))
+            assert rel < 1e-2, (
+                f"{sv} {cname} centre differs from closure by {rel:.3e} relative -- far above "
+                f"the exact-inverse renorm coupling; centre/slope mislabel suspected")
+            assert not np.array_equal(got[:, j], clo[:, j]), (
+                f"{sv} {cname} column is bit-identical to closure -- under the exact inverse "
+                f"the renorm coupling to the (re-centred) LLS alpha must be nonzero; was this "
+                f"array built with the deprecated approximate alpha_to_dndx?")
         assert not np.array_equal(got[:, 0], clo[:, 0]), f"{sv} LLS centre should differ"
 
 
@@ -232,3 +247,22 @@ def test_verify_npz_payload_accepts_the_real_payload(built, tmp_path):
     p = tmp_path / "x.npz"
     np.savez(p, **payload)
     MOD.verify_npz_payload(dict(np.load(p, allow_pickle=True)))   # survives the round trip
+
+
+# ----------------------------------------- the v3 exact-inverse fail-loud refusal (KS, high z)
+def test_ks_refusal_at_high_z_is_fail_loud():
+    """At the CURRENT deployed KS prior the KS centre leaves the occupancy simplex at
+    z >= ~4.45 (sum(alpha) ~ 1.047 at z=4.6). The v3 exporter must REFUSE, naming the survey
+    and the pending KS prior reparameterization -- NOT silently saturate the LLS class at
+    27.631021/Xbar as the pre-v3 approximate inverse did (which is what corrupted shipped
+    artifacts). Do NOT 'fix' this by clipping/masking in the exporter: the refusal is the
+    contract until the KS prior reparameterization lands."""
+    z_hi = np.array([2.2, 3.0, 4.6], float)
+    xb_hi = np.array([0.4020049401674796, 0.6316034425658955, 1.253], float)
+    closure_center = MOD.band_curve(MU_CLOSURE, z_hi, xb_hi, float(HCD_Z_PIVOT),
+                                    np.asarray(HCD_INCIDENCE_SLOPE, float))
+    with pytest.raises(ValueError, match="REFUSED for survey=KS") as ei:
+        MOD.build_npz_payload(z_hi, xb_hi, MU_CLOSURE, SD_CLOSURE, float(HCD_Z_PIVOT),
+                              closure_center)
+    assert "reparameterization" in str(ei.value)
+    assert "occupancy simplex" in str(ei.value)
