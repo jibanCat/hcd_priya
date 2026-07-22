@@ -1,0 +1,359 @@
+{
+  "desi": {
+    "ctx_cov": {
+      "cemu_inflate": 1.0,
+      "dla_cov_reduced": true,
+      "emucoh_offdiag_only": true,
+      "emucoh_on": true,
+      "mf_floor_attached": true,
+      "mf_on": true,
+      "mf_shape_on": false,
+      "use_xclass": true
+    },
+    "dla_forward_frac": 1.0,
+    "forward": {
+      "alpha_mode": "shared",
+      "cv_floor_on": false,
+      "cv_floor_rank1": false,
+      "dla_cov_reduced": true,
+      "dla_forward_frac": 1.0,
+      "f_res_amp_sigma": 0.02,
+      "fix_alpha_res": true,
+      "forward_signature": "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b",
+      "hcd_prior_signature": "bba3da8868fa498e50bc69f3ff85c192be1fae45058af8ad1211cc28a53102ae",
+      "metal_node_z": [
+        2.2,
+        4.2
+      ],
+      "metal_prior": "flatlog2node",
+      "res_corr_on": false,
+      "sample_res": true,
+      "use_snr3": false
+    },
+    "k_max": 0.04094021,
+    "k_min": 0.00125,
+    "metals": {
+      "a_siiii_max": 0.15,
+      "metal_fnode_hi": 0.03,
+      "metal_fnode_lo": 0.003,
+      "metal_node_z": [
+        2.2,
+        4.2
+      ],
+      "metal_one_minus_F_ref": 0.4127513487602582,
+      "metal_prior": "flatlog2node",
+      "metal_siII_legs": [
+        "DESI"
+      ],
+      "sample_metals": true
+    },
+    "metals_on": true,
+    "mf_floor_on": false,
+    "n_ensemble_members": 5,
+    "n_per_z": [
+      49,
+      52,
+      55,
+      58,
+      61,
+      63,
+      65,
+      67,
+      69,
+      70,
+      72
+    ],
+    "n_rows": 681,
+    "n_z": 11,
+    "name": "DESI",
+    "prior": {
+      "alpha_hcd_mu": [
+        0.17211216067355312,
+        0.06218315972222222,
+        0.004409670138888889
+      ],
+      "alpha_hcd_sigma": [
+        0.04939619011330974,
+        0.02487326388888889,
+        0.0022048350694444446
+      ],
+      "dtau0_range": [
+        -0.4,
+        0.25
+      ],
+      "marginalize_zslope": true,
+      "tau0_amp_range": [
+        0.75,
+        1.25
+      ],
+      "tau0_pivot_z": 3.0,
+      "zslope_mu": [
+        2.127,
+        2.758,
+        2.366
+      ],
+      "zslope_sigma": [
+        0.52,
+        0.53,
+        0.33
+      ]
+    },
+    "resolution_coherent_on": false,
+    "resolution_on": true,
+    "resolution_ready": true,
+    "survey": "desi",
+    "z": [
+      2.2,
+      2.4,
+      2.6,
+      2.8,
+      3.0,
+      3.2,
+      3.4,
+      3.6,
+      3.8,
+      4.0,
+      4.2
+    ]
+  },
+  "eboss": {
+    "ctx_cov": {
+      "cemu_inflate": 1.0,
+      "dla_cov_reduced": false,
+      "emucoh_offdiag_only": true,
+      "emucoh_on": true,
+      "mf_floor_attached": true,
+      "mf_on": true,
+      "mf_shape_on": false,
+      "use_xclass": true
+    },
+    "dla_forward_frac": 0.0,
+    "forward": {
+      "alpha_mode": "shared",
+      "cv_floor_on": false,
+      "cv_floor_rank1": false,
+      "dla_cov_reduced": false,
+      "dla_forward_frac": 0.0,
+      "f_res_amp_sigma": 0.05,
+      "fix_alpha_res": true,
+      "forward_signature": "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b",
+      "hcd_prior_signature": "bba3da8868fa498e50bc69f3ff85c192be1fae45058af8ad1211cc28a53102ae",
+      "metal_node_z": [
+        2.2,
+        4.2
+      ],
+      "metal_prior": "flatlog2node",
+      "res_corr_on": false,
+      "sample_res": true,
+      "use_snr3": false
+    },
+    "k_max": 0.019512,
+    "k_min": 0.001084,
+    "metals": {
+      "a_siiii_max": 0.15,
+      "metal_fnode_hi": 0.03,
+      "metal_fnode_lo": 0.003,
+      "metal_node_z": [
+        2.2,
+        4.2
+      ],
+      "metal_one_minus_F_ref": 0.4127513487602582,
+      "metal_prior": "flatlog2node",
+      "metal_siII_legs": [
+        "DESI"
+      ],
+      "sample_metals": true
+    },
+    "metals_on": true,
+    "mf_floor_on": false,
+    "n_ensemble_members": 5,
+    "n_per_z": [
+      35,
+      35,
+      35,
+      35,
+      35,
+      35,
+      35,
+      35,
+      35,
+      35,
+      35,
+      35,
+      35
+    ],
+    "n_rows": 455,
+    "n_z": 13,
+    "name": "eBOSS",
+    "prior": {
+      "alpha_hcd_mu": [
+        0.17211216067355312,
+        0.06218315972222222,
+        0.004409670138888889
+      ],
+      "alpha_hcd_sigma": [
+        0.04939619011330974,
+        0.02487326388888889,
+        0.0022048350694444446
+      ],
+      "dtau0_range": [
+        -0.4,
+        0.25
+      ],
+      "marginalize_zslope": true,
+      "tau0_amp_range": [
+        0.75,
+        1.25
+      ],
+      "tau0_pivot_z": 3.0,
+      "zslope_mu": [
+        2.127,
+        2.758,
+        2.366
+      ],
+      "zslope_sigma": [
+        0.52,
+        0.53,
+        0.33
+      ]
+    },
+    "resolution_coherent_on": false,
+    "resolution_on": true,
+    "resolution_ready": true,
+    "survey": "eboss",
+    "z": [
+      2.2,
+      2.4,
+      2.6,
+      2.8,
+      3.0,
+      3.2,
+      3.4,
+      3.6,
+      3.8,
+      4.0,
+      4.2,
+      4.4,
+      4.6
+    ]
+  },
+  "ks": {
+    "ctx_cov": {
+      "cemu_inflate": 1.0,
+      "dla_cov_reduced": false,
+      "emucoh_offdiag_only": true,
+      "emucoh_on": true,
+      "mf_floor_attached": true,
+      "mf_on": true,
+      "mf_shape_on": false,
+      "use_xclass": true
+    },
+    "dla_forward_frac": 0.0,
+    "forward": {
+      "alpha_mode": "shared",
+      "cv_floor_on": false,
+      "cv_floor_rank1": false,
+      "dla_cov_reduced": false,
+      "dla_forward_frac": 0.0,
+      "f_res_amp_sigma": 0.15,
+      "fix_alpha_res": true,
+      "forward_signature": "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b",
+      "hcd_prior_signature": "bba3da8868fa498e50bc69f3ff85c192be1fae45058af8ad1211cc28a53102ae",
+      "metal_node_z": [
+        2.2,
+        4.2
+      ],
+      "metal_prior": "uniform",
+      "res_corr_on": false,
+      "sample_res": true,
+      "use_snr3": false
+    },
+    "k_max": 0.0627126,
+    "k_min": 0.0055,
+    "metals": {
+      "a_siiii_max": 0.15,
+      "metal_fnode_hi": 0.03,
+      "metal_fnode_lo": 0.003,
+      "metal_node_z": [
+        2.2,
+        4.2
+      ],
+      "metal_one_minus_F_ref": 0.4127513487602582,
+      "metal_prior": "uniform",
+      "metal_siII_legs": [
+        "DESI"
+      ],
+      "sample_metals": false
+    },
+    "metals_on": false,
+    "mf_floor_on": true,
+    "n_ensemble_members": 5,
+    "n_per_z": [
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11
+    ],
+    "n_rows": 132,
+    "n_z": 12,
+    "name": "KS",
+    "prior": {
+      "alpha_hcd_mu": [
+        0.4302804016838828,
+        0.06218315972222222,
+        0.004409670138888889
+      ],
+      "alpha_hcd_sigma": [
+        0.17211216067355314,
+        0.02487326388888889,
+        0.0022048350694444446
+      ],
+      "dtau0_range": [
+        -0.4,
+        0.25
+      ],
+      "marginalize_zslope": true,
+      "tau0_amp_range": [
+        0.75,
+        1.25
+      ],
+      "tau0_pivot_z": 3.0,
+      "zslope_mu": [
+        2.127,
+        2.758,
+        2.366
+      ],
+      "zslope_sigma": [
+        0.52,
+        0.53,
+        0.33
+      ]
+    },
+    "resolution_coherent_on": false,
+    "resolution_on": true,
+    "resolution_ready": true,
+    "survey": "ks",
+    "z": [
+      2.4,
+      2.6,
+      2.8,
+      3.0,
+      3.2,
+      3.4,
+      3.6,
+      3.8,
+      4.0,
+      4.2,
+      4.4,
+      4.6
+    ]
+  }
+}
