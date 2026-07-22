@@ -827,7 +827,7 @@ def check_lock(leg_summaries, allow_stale_legs=False, committed_path=None):
 # ---------------------------------------------------------------------------------------------
 def _refuse_reserved_basename(path, what):
     """Auxiliary writes (legs cache / leg summaries) must never target a lock file."""
-    if path and os.path.basename(os.path.abspath(path)) in ("blind.lock", "analysis.lock"):
+    if path and os.path.basename(os.path.realpath(path)) in ("blind.lock", "analysis.lock"):
         raise SystemExit(f"REFUSED: {what}={path} targets a reserved lock filename; "
                          f"auxiliary outputs must never be named blind.lock/analysis.lock.")
     return path
@@ -837,7 +837,8 @@ def _guard_out_path(out_path, i_am_the_freeze_step):
     """REFUSE dangerous targets. blind.lock: always (no override). The tree's analysis.lock
     (this tree's, or the main tree's): only with --i-am-the-freeze-step, and then only for
     THIS generator's own tree (a worktree run must never write the main tree's lock)."""
-    ap = os.path.abspath(out_path)
+    ap = os.path.realpath(out_path)   # realpath, not abspath: a pre-planted symlink must
+    #                                   not tunnel a write onto a protected lock (W4 review D2)
     if os.path.basename(ap) == "blind.lock":
         raise SystemExit("REFUSED: blind.lock is out of scope for this generator and must "
                          "never be written by ANYONE (no override exists).")
@@ -894,6 +895,22 @@ def main(argv=None):
     _refuse_reserved_basename(a.save_legs_cache, "--save-legs-cache")
     _refuse_reserved_basename(a.leg_out, "--leg-out")
 
+    # Guard the output target FIRST (W4 review): the blind.lock / analysis.lock refusals are the
+    # hard boundary and must fire before any other diagnostic and before any expensive leg build.
+    out = None
+    if not a.check and not a.emit_leg_summary:
+        out = _guard_out_path(a.out or _default_out(), a.i_am_the_freeze_step)
+
+    # W4 review REQUIRED FIX (D1): the freeze step must be mechanical, not protocol. A freeze-step
+    # write must derive EVERYTHING live: refuse any legs-cache shortcut (cache fields like
+    # n_rows/k/z are covered by NO signature and would ride into the lock of record unverified),
+    # and a fortiori refuse the stale-cache override.
+    if a.i_am_the_freeze_step and (a.legs_cache or a.allow_stale_legs_cache):
+        raise SystemExit(
+            "REFUSED: --i-am-the-freeze-step is incompatible with --legs-cache / "
+            "--allow-stale-legs-cache. The lock of record must be generated from FRESH live leg "
+            "builds in the tree being frozen; caches are for review iterations only.")
+
     if a.emit_leg_summary:
         if not a.leg_out:
             raise SystemExit("--emit-leg-summary requires --leg-out")
@@ -913,7 +930,7 @@ def main(argv=None):
         print("\n".join(lines))
         return rc
 
-    out = _guard_out_path(a.out or _default_out(), a.i_am_the_freeze_step)
+    assert out is not None
     lock = generate_lock(leg_summaries, allow_stale_legs=a.allow_stale_legs_cache)
     payload = canonical_dumps(lock)
     with open(out, "w") as f:

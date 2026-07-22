@@ -357,5 +357,12 @@ def test_real_leg_build_matches_fixture_schema(GEN, leg_summaries):
     # freeze step runs).
     for sv in ("desi", "eboss", "ks"):
         assert set(live[sv]) == set(leg_summaries[sv]), f"leg summary schema drift on {sv}"
+        # W4 review fix (D3): value equality, not just schema -- the summaries carry no
+        # volatile fields, so at the same tree state a real rebuild must be IDENTICAL to the
+        # committed fixture (this is the fixture-refresh contract the freeze step relies on).
+        assert live[sv] == leg_summaries[sv], (
+            f"leg summary VALUE drift on {sv}: the committed fixture no longer matches a live "
+            f"rebuild at this tree state -- regenerate tests/golden/analysis_lock_legs_fixture.json "
+            f"via --save-legs-cache and review the diff")
     lock = GEN.generate_lock(live, allow_stale_legs=False)   # strict: signatures must be live
     GEN.assert_not_poisoned(lock)
