@@ -345,6 +345,19 @@ def build_leg_summary(survey):
         # flags + BOTH freeze signatures) -- everything forward_stamp carries, verbatim:
         "forward": stamp,
         "prior": {
+            # W2 design review RF2 (2026-07-22): on a dN/dX-MAPPED leg (forward stamp
+            # hcd_parameterization == "dndx_mapped_v2", today: KS) the alpha/zslope vectors
+            # below are the DORMANT LEGACY values kept on the ctx for the R6 override and
+            # by-name audits -- they do NOT describe the deployed prior. The deployed mapped
+            # prior lives in prior_constants (KS_DNDX_* widths + KS_HEADROOM_SOURCE +
+            # HCD_ALPHA_PARAMETERIZATION) and in this leg's forward stamp. The
+            # "alpha_vector_semantics" field below makes the reading machine-checkable.
+            "hcd_parameterization": stamp.get("hcd_parameterization",
+                                              "alpha_pivot_powerlaw_v1"),
+            "alpha_vector_semantics": (
+                "LEGACY-AUDIT-ONLY (dormant; deployed prior = the mapped dN/dX construction "
+                "in prior_constants)" if stamp.get("hcd_parameterization")
+                == "dndx_mapped_v2" else "deployed prior"),
             "alpha_hcd_mu": ctx.alpha_hcd_mu,
             "alpha_hcd_sigma": ctx.alpha_hcd_sigma,
             "marginalize_zslope": bool(ctx.marginalize_zslope),
@@ -558,6 +571,10 @@ def generate_lock(leg_summaries, allow_stale_legs=False):
                 for n, (lo, hi) in zip(param_names, ED.SAMPLING_LIMITS)}
     by_survey = {sv: {
         "leg": leg_summaries[sv]["name"],
+        "hcd_parameterization": leg_summaries[sv]["prior"].get(
+            "hcd_parameterization", "alpha_pivot_powerlaw_v1"),
+        "alpha_vector_semantics": leg_summaries[sv]["prior"].get(
+            "alpha_vector_semantics", "deployed prior"),
         "alpha_hcd_mu": leg_summaries[sv]["prior"]["alpha_hcd_mu"],
         "alpha_hcd_sigma": leg_summaries[sv]["prior"]["alpha_hcd_sigma"],
         "zslope_mu": leg_summaries[sv]["prior"]["zslope_mu"],

@@ -57,9 +57,13 @@ from .inference import (PARAM_NAMES, hcd_incidence_prior,
                         HCD_LLS_SURVEY_FRAC_SIGMA, HCD_PRIOR_FRAC_SIGMA,
                         hcd_lls_realfit_alpha_center, assert_hcd_pivot_z3,
                         assert_known_survey,
-                        # KS dN/dX-mapped LLS reparameterization (V-A, W2 2026-07-22)
-                        HCD_LIT_DNDX_LAW, KS_DNDX_SIGMA_EPS, KS_DNDX_SIGMA_KAPPA,
-                        KS_DNDX_SIGMA_MSUB, KS_DNDX_DLA_RAW_MU0, assert_ks_mapped_pivot)
+                        # KS dN/dX-mapped LLS reparameterization (V-A, W2 2026-07-22).
+                        # The KS_DNDX_* float constants are deliberately NOT from-imported:
+                        # the sampled sites and the freeze signature must read the SAME
+                        # binding (inference's), or a runtime override desyncs the effective
+                        # prior from hcd_prior_signature (JAX-specialist review 2026-07-22;
+                        # the HCD_LLS_SURVEY_BOOST rebinding trap, immutable-float variant).
+                        HCD_LIT_DNDX_LAW, assert_ks_mapped_pivot)
 from .dndx_wc import alpha_to_dndx_exact, w_c_corrected
 from .sampler_numpyro import _dla_raw_mu
 from . import data_likelihood as DL
@@ -1185,6 +1189,15 @@ def build_legb_joint_ctx(survey_by_leg, *, per_leg_zslope=False, allow_cross_sur
         raise ValueError("build_legb_joint_ctx: the shared `survey` kwarg is FORBIDDEN in "
                          "joint mode — per-leg surveys come ONLY from survey_by_leg (the "
                          "shared alpha prior is poisoned to None)")
+    if any(v == "KS" for v in survey_by_leg.values()):
+        raise ValueError(
+            "build_legb_joint_ctx: a joint build including the KS survey is FORBIDDEN "
+            "(W2 design review RF1, 2026-07-22): the deployed KS prior is the dN/dX-MAPPED "
+            "parameterization (dndx_mapped_v2, single-leg builds only), and the per-leg joint "
+            "path has NO mapped construction -- it would silently deploy the RETIRED legacy "
+            "alpha-space KS prior (~55% of its mass outside the occupancy simplex). Fit KS "
+            "as a single leg via build_legb_ctx(survey='KS'), or implement a mapped per-leg "
+            "construction first (new lock era).")
     if build_kwargs.get("hierarchical_hcd"):
         raise ValueError("per_leg_alpha is incompatible with hierarchical_hcd "
                          "(forbidden combination; spec Sec 1 item 10)")
@@ -2642,6 +2655,13 @@ def _simplex_tie_norm(alpha):
     return alpha / jnp.where(s > 1.0, s, 1.0)
 
 
+def _INF_mod():
+    """Module accessor for inference's OVERRIDABLE KS_DNDX_* constants (never from-import
+    them: the freeze signature reads inference's namespace; see _ks_dndx_sites)."""
+    from hcd_analysis.emulator import inference as INF
+    return INF
+
+
 def _ks_dndx_sites(ctx):
     """The KS dN/dX-MAPPED HCD prior sites (V-A, KS-ONLY; W2 2026-07-22). Samples 6 sites
     (order FIXED — the priors-only twin mirrors it via the shared _hcd_sites dispatch):
@@ -2685,15 +2705,22 @@ def _ks_dndx_sites(ctx):
             or getattr(ctx, "ks_xbar_pivot", None) is None:
         raise ValueError("ks_dndx_mapped=True but the ks_* reference fields are unset — "
                          "build the ctx via build_legb_ctx(survey='KS')")
+    # MODULE-ATTRIBUTE ACCESS, not from-import (JAX-specialist review 2026-07-22): the freeze
+    # payload/signature reads inference's bindings, so the sites MUST read the same namespace --
+    # a from-imported copy here would make an inference-side override move the signature without
+    # moving the effective prior (and vice versa). Same trap class as HCD_LLS_SURVEY_BOOST
+    # (closure_legb.py _survey_alpha_prior docstring), but the floats have no mutate-in-place
+    # escape, so the namespace discipline is the ONLY correct idiom.
+    from hcd_analysis.emulator import inference as INF   # lazy: import-order neutral
     zg = jnp.asarray(ctx.z_global)
     ratio = (1.0 + zg) / (1.0 + HCD_Z_PIVOT)                       # (n_zg,)
-    eps_lls = numpyro.sample("eps_lls", dist.Normal(0.0, KS_DNDX_SIGMA_EPS))
-    kappa_lls = numpyro.sample("kappa_lls", dist.Normal(0.0, KS_DNDX_SIGMA_KAPPA))
-    m_sub = numpyro.sample("m_sub", dist.Normal(0.0, KS_DNDX_SIGMA_MSUB))
+    eps_lls = numpyro.sample("eps_lls", dist.Normal(0.0, INF.KS_DNDX_SIGMA_EPS))
+    kappa_lls = numpyro.sample("kappa_lls", dist.Normal(0.0, INF.KS_DNDX_SIGMA_KAPPA))
+    m_sub = numpyro.sample("m_sub", dist.Normal(0.0, INF.KS_DNDX_SIGMA_MSUB))
     t_sub = numpyro.sample("t_sub", dist.Normal(0.0, ZSLOPE_PRIOR_SIGMA[1]))
-    dla_raw = numpyro.sample("dla_raw", dist.Normal(KS_DNDX_DLA_RAW_MU0, 1.0))
+    dla_raw = numpyro.sample("dla_raw", dist.Normal(INF.KS_DNDX_DLA_RAW_MU0, 1.0))
     t_dla = numpyro.sample("t_dla", dist.Normal(0.0, ZSLOPE_PRIOR_SIGMA[2]))
-    dla_amp = jax.nn.softplus(dla_raw) / jax.nn.softplus(KS_DNDX_DLA_RAW_MU0)
+    dla_amp = jax.nn.softplus(dla_raw) / jax.nn.softplus(INF.KS_DNDX_DLA_RAW_MU0)
     fac = jnp.stack([jnp.exp(eps_lls) * ratio ** kappa_lls,
                      jnp.exp(m_sub) * ratio ** t_sub,
                      dla_amp * ratio ** t_dla], axis=-1)           # (n_zg,3)
@@ -2942,7 +2969,9 @@ def _zslope_sites_per_leg(ctx):
 
 def _legb_priors_only(ctx):
     """The SAME prior sample sites as ``_legb_model`` but with NO ``numpyro.factor`` loglik and
-    NO deterministic sites — used only as the model passed to ``constrain_fn`` in the cheap
+    NO deterministic sites on the LEGACY branches (the KS dN/dX-mapped branch emits its
+    deterministics inside the shared _ks_dndx_sites helper — constrain_fn(return_deterministic
+    =False) drops them; W2 2026-07-22) — used only as the model passed to ``constrain_fn`` in the cheap
     transform-only postprocess (below). Tracing this is cheap (priors, no 681×681 Cholesky)."""
     _lo_u = jnp.asarray(_THETA_UNIT_LO if getattr(ctx, "theta_unit_lo", None) is None else ctx.theta_unit_lo)
     _hi_u = jnp.asarray(_THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi)
@@ -3018,7 +3047,7 @@ def _legb_reconstruct_deterministics(ctx, samples):
         msub = jnp.asarray(samples["m_sub"])[:, None]
         tsub = jnp.asarray(samples["t_sub"])[:, None]
         dla_amp = (jax.nn.softplus(jnp.asarray(samples["dla_raw"]))
-                   / jax.nn.softplus(KS_DNDX_DLA_RAW_MU0))[:, None]  # (L, 1)
+                   / jax.nn.softplus(_INF_mod().KS_DNDX_DLA_RAW_MU0))[:, None]  # (L, 1)
         tdla = jnp.asarray(samples["t_dla"])[:, None]
         fac = jnp.stack([jnp.exp(eps) * ratio ** kap,
                          jnp.exp(msub) * ratio ** tsub,

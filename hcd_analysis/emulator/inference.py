@@ -177,6 +177,15 @@ HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X = {"DESI": 0.574, "eBOSS": 0.574, "DESI+KS": 0
 # reference and push them through the exact occupancy map w_c_corrected — every draw is then
 # STRUCTURALLY inside the simplex (sum alpha < 1, alpha >= 0). KS single-leg builds ONLY;
 # DESI/eBOSS/DESI+KS/survey=None keep the alpha-space parameterization byte-unchanged.
+# FROM-IMPORT REBINDING TRAP (JAX-specialist review 2026-07-22; same class as the documented
+# HCD_LLS_SURVEY_BOOST trap, immutable-float variant with NO mutate-in-place escape): the
+# KS_DNDX_* floats below are read by the SAMPLED SITES (closure_legb._ks_dndx_sites) via
+# MODULE-ATTRIBUTE access on THIS module, and by hcd_prior_constants_payload()/
+# hcd_prior_signature() likewise -- so an override that rebinds inference.KS_DNDX_* moves BOTH
+# the effective prior AND the signature, coherently. NEVER from-import these constants into a
+# consumer: a from-imported copy desyncs the effective prior from the freeze signature in
+# whichever direction the override misses. (KS_DNDX_SIGMA_EPS is an explicit PI
+# confirm-or-swap knob, so an override WILL happen; the namespace discipline is load-bearing.)
 # Which parameterization each survey key deploys (single-leg builds; recorded in forward_stamp
 # as "hcd_parameterization" resolved from the BUILT ctx):
 HCD_ALPHA_PARAMETERIZATION = {"DESI": "alpha_pivot_powerlaw_v1", "eBOSS": "alpha_pivot_powerlaw_v1",
@@ -257,7 +266,7 @@ def assert_ks_mapped_pivot(alpha_lls_mapped, where):
     assert lo <= a <= hi, (
         f"KS MAPPED LLS pivot centre [{where}] = {a:.4f} outside the mapped band "
         f"[{lo}, {hi}]. Expected ≈0.393236 (the dN/dX-premap 2.5× lit-law centre through the "
-        f"exact occupancy map). A centre near 0.43 is the legacy alpha-postmap boost; a centre "
+        f"exact occupancy map). NOTE the band (0.326,0.476) CONTAINS the legacy alpha-postmap centre 0.4303, so this guard alone does NOT detect a legacy-value reversion -- that drift is caught by the hcd_prior_signature pin (T8) and by assert_hcd_pivot_z3 on the unmapped boost-1.0 input; a centre "
         f"far above the band indicates a boost-space or double-boost bug. See "
         f"HCD_LLS_BOOST_SPACE / KS_HEADROOM_SOURCE (W2, 2026-07-22).")
 
