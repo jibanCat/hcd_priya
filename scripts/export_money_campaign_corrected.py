@@ -274,7 +274,10 @@ def main():
             "ADDED npz keys dndx_invalid_on_hi / dndx_invalid_off_hi (per-arm out-of-domain draw-z "
             "entry counts) + the row2_dndx_invalid_draws provenance block",
             "renorm-level differences vs v1 expected in every dndx_* array and in the row-1 "
-            "percentile layers (the row-1 band was already mask-mode exact in the v1 producer)"],
+            "percentile layers: the v1 ARTIFACT was produced at commit 3033ec4, BEFORE the "
+            "exact-inverse migration (a9c4d44/W1) -- its row-1 band was approximate-map plain "
+            "percentiles (no mask, no invalid counts) and its sidecar carries no inverse_map/"
+            "row1_band_invalid_draws fields"],
         "forward_decision": "OPTION A: corrected closure prior (LLS center 0.18812) + PRE-NORC forward "
                             "(res_corr_on=True default; NOT the deployed NORC forward). Money-figure banner stays PRE-NORC.",
         "commit": git("rev-parse", "HEAD"), "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
