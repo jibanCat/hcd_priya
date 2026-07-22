@@ -44,8 +44,16 @@ _CKPT0 = "/home/mfho/hcd_priya/checkpoints/final_fold0.eqx"
 _DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 _KS = ("/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
        "final-conservative-p1d-karacayli_etal2021.txt")
+# eBOSS DR14 P1D (load_eboss_leg's default npz_path, hcd_analysis/emulator/data_likelihood.py).
+_EBOSS_NPZ = "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz"
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
 _have_ks = os.path.exists(_KS)
+_have_eboss = os.path.exists(_EBOSS_NPZ)
+# Joint fixtures were migrated off KS to DESI+eBOSS (W2 RF1, 2026-07-22: joint builds
+# including the KS SURVEY are FORBIDDEN — the deployed KS prior is dN/dX-mapped,
+# single-leg only). The KS FILE is still required: build_legb_ctx assembles the KS leg
+# unconditionally before build_legb_joint_ctx restricts to the requested legs.
+_have_joint = _have and _have_ks and _have_eboss
 
 _GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "golden")
 SITES_GOLDEN = os.path.join(_GOLDEN_DIR, "legb_sites_golden.npz")
@@ -163,8 +171,12 @@ _NARROW = dict(z_lo=0.0, z_hi=2.6)
 
 @pytest.fixture(scope="session")
 def joint2_setup():
-    """DESI+KS joint ctx (default flags: no metals, no f_res) + a deterministic mock."""
-    ctx, d = C.build_legb_joint_ctx({"DESI": "DESI", "KS": "KS"},
+    """DESI+eBOSS joint ctx (default flags: no metals, no f_res) + a deterministic mock.
+
+    MIGRATED off DESI+KS (W2 RF1, 2026-07-22): a joint build including the KS survey now
+    REFUSES (see test_guard_joint_including_ks_forbidden). eBOSS shares dla_forward_frac=0
+    with KS, so every prior-only-DLA semantics assertion carries over unchanged."""
+    ctx, d = C.build_legb_joint_ctx({"DESI": "DESI", "eBOSS": "eBOSS"},
                                     desi_kwargs=dict(_NARROW), use_xclass=True)
     mock_legs, core = G.mock_for(ctx, d)
     return ctx, d, mock_legs, core
@@ -184,9 +196,10 @@ def joint1_setup():
 
 
 @pytest.fixture(scope="session")
-def ks_single_setup():
-    """A single-leg survey='KS' build (prior reference for T6; ctx only)."""
-    ctx, d = C.build_legb_ctx(desi_kwargs=dict(_NARROW), use_xclass=True, survey="KS")
+def eboss_single_setup():
+    """A single-leg survey='eBOSS' build (prior reference for T6; ctx only)."""
+    ctx, d = C.build_legb_ctx(desi_kwargs=dict(_NARROW), use_xclass=True,
+                              with_eboss=True, survey="eBOSS")
     return ctx, d
 
 
@@ -215,17 +228,17 @@ def test_ctx_fields_default_off():
     assert d["survey_by_leg"] is None
 
 
-@pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.skipif(not _have_joint, reason="real cache/ckpt/DESI/KS/eBOSS not present")
 def test_joint_builder_fields_and_poison(joint2_setup):
     """build_legb_joint_ctx sets the per-leg fields, POISONS the shared alpha_hcd_mu/sigma
     to None (any legacy consumer fails loud), and restricts legs in build order."""
     ctx, d, _, _ = joint2_setup
     assert ctx.per_leg_alpha is True and ctx.per_leg_zslope is False
     assert ctx.alpha_hcd_mu is None and ctx.alpha_hcd_sigma is None      # POISON
-    assert [l.name for l in ctx.legs] == ["DESI", "KS"]                  # build (list) order
-    assert ctx.survey_by_leg == {"DESI": "DESI", "KS": "KS"}
-    assert set(ctx.alpha_hcd_mu_by_leg) == {"DESI", "KS"}
-    assert set(ctx.alpha_hcd_sigma_by_leg) == {"DESI", "KS"}
+    assert [l.name for l in ctx.legs] == ["DESI", "eBOSS"]               # build (list) order
+    assert ctx.survey_by_leg == {"DESI": "DESI", "eBOSS": "eBOSS"}
+    assert set(ctx.alpha_hcd_mu_by_leg) == {"DESI", "eBOSS"}
+    assert set(ctx.alpha_hcd_sigma_by_leg) == {"DESI", "eBOSS"}
     # zslope center = the litWLS real-fit vector (survey-independent across legs).
     zmu = np.asarray(ctx.zslope_mu)
     assert zmu[0] == pytest.approx(INF.HCD_LLS_REALFIT_ZSLOPE)
@@ -236,16 +249,16 @@ def test_joint_builder_fields_and_poison(joint2_setup):
 #  T6 — per-leg prior dicts bitwise == each build_legb_ctx(survey=L) prior
 #  (the _survey_alpha_prior extraction-drift tripwire).
 # --------------------------------------------------------------------------- #
-@pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.skipif(not _have_joint, reason="real cache/ckpt/DESI/KS/eBOSS not present")
 def test_per_leg_priors_bitwise_match_single_leg_builds(joint2_setup, nuts_setup,
-                                                        ks_single_setup):
+                                                        eboss_single_setup):
     """Each leg's joint prior (mu, sigma) is BITWISE the prior that leg's single-leg
     build_legb_ctx(survey=L) deploys (coherence property: per-leg blind posteriors and
     the joint fit are prior-commensurable). Also the zslope center matches."""
     ctx_j, _, _, _ = joint2_setup
     ctx_desi = nuts_setup[0]                     # survey="DESI" single build
-    ctx_ks = ks_single_setup[0]                  # survey="KS" single build
-    for name, ref in (("DESI", ctx_desi), ("KS", ctx_ks)):
+    ctx_eboss = eboss_single_setup[0]            # survey="eBOSS" single build
+    for name, ref in (("DESI", ctx_desi), ("eBOSS", ctx_eboss)):
         np.testing.assert_array_equal(
             np.asarray(ctx_j.alpha_hcd_mu_by_leg[name]), np.asarray(ref.alpha_hcd_mu),
             err_msg=f"{name} joint prior CENTER != single-leg build (bitwise)")
@@ -259,13 +272,13 @@ def test_per_leg_priors_bitwise_match_single_leg_builds(joint2_setup, nuts_setup
 # --------------------------------------------------------------------------- #
 #  T4 — joint trace: exactly the suffixed names in ctx.legs order, NO unsuffixed.
 # --------------------------------------------------------------------------- #
-@pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.skipif(not _have_joint, reason="real cache/ckpt/DESI/KS/eBOSS not present")
 def test_joint_trace_site_names_and_order(joint2_setup):
     ctx, d, mock_legs, core = joint2_setup
     s = _sites(C._legb_model, ctx, mock_legs, core)
     assert s == ["theta_unit", "tau0_amp", "dtau0",
                  "alpha_lls_DESI", "alpha_subdla_DESI", "alpha_dla_raw_DESI",
-                 "alpha_lls_KS", "alpha_subdla_KS", "alpha_dla_raw_KS",
+                 "alpha_lls_eBOSS", "alpha_subdla_eBOSS", "alpha_dla_raw_eBOSS",
                  "s_lls", "s_subdla", "s_dla",
                  "alpha_res", "alpha_res_slope"]
     tr = _trace(C._legb_model, ctx, mock_legs, core)
@@ -274,14 +287,14 @@ def test_joint_trace_site_names_and_order(joint2_setup):
     # reader must fail loudly with KeyError instead of silently reading one leg.
     for nm in ("alpha_lls", "alpha_subdla", "alpha_dla_raw", "alpha_dla", "alpha_hcd_z"):
         assert nm not in all_names, f"joint trace leaked the unsuffixed site {nm!r}"
-    for nm in ("alpha_dla_DESI", "alpha_dla_KS", "alpha_hcd_z_DESI", "alpha_hcd_z_KS"):
+    for nm in ("alpha_dla_DESI", "alpha_dla_eBOSS", "alpha_hcd_z_DESI", "alpha_hcd_z_eBOSS"):
         assert nm in all_names and tr[nm]["type"] == "deterministic"
     # per-z deterministic shape: (n_zg, 3) per leg.
     nzg = int(np.asarray(ctx.z_global).shape[0])
     assert np.asarray(tr["alpha_hcd_z_DESI"]["value"]).shape == (nzg, 3)
 
 
-@pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.skipif(not _have_joint, reason="real cache/ckpt/DESI/KS/eBOSS not present")
 def test_joint_trace_per_leg_zslope_switch(joint2_setup):
     """C1 plumbing: per_leg_zslope=True traces per-leg slope sites (legs order, classes
     within), with the SAME prior constants per leg; default False stays shared."""
@@ -290,23 +303,23 @@ def test_joint_trace_per_leg_zslope_switch(joint2_setup):
     s = _sites(C._legb_model, ctx_z, mock_legs, core)
     assert s == ["theta_unit", "tau0_amp", "dtau0",
                  "alpha_lls_DESI", "alpha_subdla_DESI", "alpha_dla_raw_DESI",
-                 "alpha_lls_KS", "alpha_subdla_KS", "alpha_dla_raw_KS",
+                 "alpha_lls_eBOSS", "alpha_subdla_eBOSS", "alpha_dla_raw_eBOSS",
                  "s_lls_DESI", "s_subdla_DESI", "s_dla_DESI",
-                 "s_lls_KS", "s_subdla_KS", "s_dla_KS",
+                 "s_lls_eBOSS", "s_subdla_eBOSS", "s_dla_eBOSS",
                  "alpha_res", "alpha_res_slope"]
     for nm in ("s_lls", "s_subdla", "s_dla"):
         assert nm not in s, f"per_leg_zslope leaked the SHARED slope site {nm!r}"
     # identical per-leg slope priors (same constants; spec Sec 2).
     tr = _trace(C._legb_model, ctx_z, mock_legs, core)
-    fD, fK = tr["s_lls_DESI"]["fn"], tr["s_lls_KS"]["fn"]
-    assert float(fD.loc) == float(fK.loc) and float(fD.scale) == float(fK.scale)
+    fD, fE = tr["s_lls_DESI"]["fn"], tr["s_lls_eBOSS"]["fn"]
+    assert float(fD.loc) == float(fE.loc) and float(fD.scale) == float(fE.scale)
 
 
 # --------------------------------------------------------------------------- #
 #  T3 — priors-only mirror parity under per_leg_alpha=True (ZERO edits to the
 #  priors-only twin: the dispatch inside _hcd_sites/_zslope_sites covers both).
 # --------------------------------------------------------------------------- #
-@pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.skipif(not _have_joint, reason="real cache/ckpt/DESI/KS/eBOSS not present")
 @pytest.mark.parametrize("per_leg_zslope", [False, True])
 def test_mirror_parity_per_leg(joint2_setup, per_leg_zslope):
     ctx, d, mock_legs, core = joint2_setup
@@ -320,7 +333,7 @@ def test_mirror_parity_per_leg(joint2_setup, per_leg_zslope):
 #  T12 — dict-loglik == sum of per-leg-array logliks (threading cross-check)
 #  + the key-set assertion fires both ways.
 # --------------------------------------------------------------------------- #
-@pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.skipif(not _have_joint, reason="real cache/ckpt/DESI/KS/eBOSS not present")
 def test_dict_loglik_equals_per_leg_sum(joint2_setup):
     ctx, d, mock_legs, core = joint2_setup
     zg = jnp.asarray(ctx.z_global)
@@ -330,7 +343,7 @@ def test_dict_loglik_equals_per_leg_sum(joint2_setup):
     tau0 = becker13_tau0(zg)
     shape_zg = ((1.0 + zg)[:, None] / (1.0 + C.HCD_Z_PIVOT)) ** jnp.asarray(C.HCD_INCIDENCE_SLOPE)
     a_dict = {"DESI": jnp.asarray([0.20, 0.07, 0.015])[None, :] * shape_zg,
-              "KS": jnp.asarray([0.45, 0.09, 0.012])[None, :] * shape_zg}
+              "eBOSS": jnp.asarray([0.45, 0.09, 0.012])[None, :] * shape_zg}
     ll_dict = C._data_loglik_legcore(ctx, th, tau0, a_dict, mock_legs, core)
     ll_sum = 0.0
     for leg in mock_legs:
@@ -341,7 +354,7 @@ def test_dict_loglik_equals_per_leg_sum(joint2_setup):
     # key set != leg set must FAIL LOUD, both directions.
     with pytest.raises(AssertionError, match="missing"):
         C._data_loglik_legcore(ctx, th, tau0, {"DESI": a_dict["DESI"]}, mock_legs, core)
-    extra = dict(a_dict); extra["eBOSS"] = a_dict["DESI"]
+    extra = dict(a_dict); extra["KS"] = a_dict["DESI"]
     with pytest.raises(AssertionError, match="extra"):
         C._data_loglik_legcore(ctx, th, tau0, extra, mock_legs, core)
     # a z-FLAT (3,) per-leg entry is the recurring z-flat bug: refused UNCONDITIONALLY in
@@ -361,7 +374,7 @@ def test_dict_loglik_equals_per_leg_sum(joint2_setup):
 #  T10 — joint deterministic reconstruction == full-model replay (fast vs slow
 #  postprocess on a short joint NUTS run).
 # --------------------------------------------------------------------------- #
-@pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.skipif(not _have_joint, reason="real cache/ckpt/DESI/KS/eBOSS not present")
 @pytest.mark.parametrize("per_leg_zslope", [False, True])
 def test_joint_reconstruction_matches_replay(joint2_setup, per_leg_zslope):
     ctx, d, mock_legs, core = joint2_setup
@@ -369,8 +382,8 @@ def test_joint_reconstruction_matches_replay(joint2_setup, per_leg_zslope):
     kw = dict(n_warmup=5, n_samples=5, seed=13, max_tree_depth=5, dense_mass=False)
     s_fast, _ = C._run_nuts_legb(ctx, mock_legs, core, fast_postprocess=True, **kw)
     s_slow, _ = C._run_nuts_legb(ctx, mock_legs, core, fast_postprocess=False, **kw)
-    for nm in ("tau0_vec", "alpha_dla_DESI", "alpha_dla_KS",
-               "alpha_hcd_z_DESI", "alpha_hcd_z_KS"):
+    for nm in ("tau0_vec", "alpha_dla_DESI", "alpha_dla_eBOSS",
+               "alpha_hcd_z_DESI", "alpha_hcd_z_eBOSS"):
         assert nm in s_fast, f"fast postprocess must reconstruct {nm!r}"
         assert nm in s_slow, f"slow replay must yield {nm!r}"
         np.testing.assert_array_equal(
@@ -380,10 +393,10 @@ def test_joint_reconstruction_matches_replay(joint2_setup, per_leg_zslope):
         assert nm not in s_fast and nm not in s_slow, \
             f"joint samples leaked the unsuffixed key {nm!r}"
     if per_leg_zslope:
-        assert "s_lls_DESI" in s_fast and "s_lls_KS" in s_fast
+        assert "s_lls_DESI" in s_fast and "s_lls_eBOSS" in s_fast
 
 
-@pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.skipif(not _have_joint, reason="real cache/ckpt/DESI/KS/eBOSS not present")
 def test_reconstruct_rejects_shared_samples_on_per_leg_zslope_ctx(joint2_setup):
     """Consistency-audit finding H5: a per_leg_zslope=True ctx fed a SHARED-slope samples
     dict must raise (KeyError with the pairing diagnosis), never silently reconstruct
@@ -402,7 +415,7 @@ def test_reconstruct_rejects_shared_samples_on_per_leg_zslope_ctx(joint2_setup):
     out = C._legb_reconstruct_deterministics(ctx_fix, s_noslope)
     zg = np.asarray(ctx.z_global)
     shape_fix = ((1.0 + zg)[:, None] / 4.0) ** np.asarray(C.HCD_INCIDENCE_SLOPE)
-    for nm in ("DESI", "KS"):
+    for nm in ("DESI", "eBOSS"):
         piv = np.stack([np.asarray(s_noslope[f"alpha_lls_{nm}"]),
                         np.asarray(s_noslope[f"alpha_subdla_{nm}"]),
                         np.asarray(out[f"alpha_dla_{nm}"])], axis=-1)
@@ -480,8 +493,21 @@ def test_guard_2d_tilt_forbidden():
 
 
 def test_guard_none_survey_value_forbidden():
+    # no KS value here: the RF1 KS-joint refusal fires BEFORE the None guard, so a KS
+    # entry would shadow the guard under test.
     with pytest.raises(ValueError, match="None"):
-        C.build_legb_joint_ctx({"DESI": None, "KS": "KS"})
+        C.build_legb_joint_ctx({"DESI": None})
+
+
+def test_guard_joint_including_ks_forbidden():
+    """W2 design review RF1 (2026-07-22, f3e5b28): ANY survey_by_leg containing the KS
+    SURVEY refuses statically (pre-build, no data load) — the deployed KS prior is the
+    dN/dX-MAPPED parameterization (single-leg builds only); the per-leg joint path has no
+    mapped construction and would silently deploy the RETIRED legacy alpha-space KS prior."""
+    with pytest.raises(ValueError, match="KS survey is FORBIDDEN"):
+        C.build_legb_joint_ctx({"DESI": "DESI", "KS": "KS"})
+    with pytest.raises(ValueError, match="KS survey is FORBIDDEN"):
+        C.build_legb_joint_ctx({"KS": "KS"})
 
 
 def test_guard_empty_survey_by_leg_forbidden():
@@ -496,7 +522,9 @@ def test_guard_unknown_survey_key_fails_loud():
 
 def test_guard_cross_survey_assignment_forbidden():
     """Panel required-fix 4: survey<->leg cross-assignment and the blended legacy key are
-    rejected statically (pre-build, no data load)."""
+    rejected statically (pre-build, no data load). NOTE: the RF1 KS-joint refusal checks
+    survey VALUES only, so 'KS' as a LEG NAME with a non-KS survey value still reaches
+    (and exercises) the cross-assignment guard — verified at HEAD."""
     with pytest.raises(ValueError, match="cross-assignment"):
         C.build_legb_joint_ctx({"KS": "DESI"})
     with pytest.raises(ValueError, match="DESI\\+KS"):
@@ -513,10 +541,10 @@ def test_guard_unknown_leg_name_fails_loud():
 
 def test_guard_multi_leg_sample_res_not_built():
     """PI C4: per-leg f_res is NOT built — >1 resolution-floated leg with sample_res
-    raises NotImplementedError naming the follow-up."""
+    raises NotImplementedError naming the follow-up. (DESI+eBOSS: the static pre-build
+    count treats both as resolution-floated under sample_res; no ks_kwargs needed.)"""
     with pytest.raises(NotImplementedError, match="per-leg f_res"):
-        C.build_legb_joint_ctx({"DESI": "DESI", "KS": "KS"}, sample_res=True,
-                               ks_kwargs=dict(resolution_float=True, k_max=0.065))
+        C.build_legb_joint_ctx({"DESI": "DESI", "eBOSS": "eBOSS"}, sample_res=True)
 
 
 @pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
@@ -531,14 +559,14 @@ def test_guard_per_leg_zslope_requires_per_leg_alpha(nuts_setup):
 #  T9 — joint_stamp contents, DLA prior-only label (PI C3), mixed-signature
 #  rejection; forward_stamp alpha_mode.
 # --------------------------------------------------------------------------- #
-@pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.skipif(not _have_joint, reason="real cache/ckpt/DESI/KS/eBOSS not present")
 def test_joint_stamp_contents(joint2_setup):
     ctx, d, _, _ = joint2_setup
     st = C.joint_stamp(ctx)
     assert st["alpha_mode"] == "per_leg"
-    assert st["legs"] == ["DESI", "KS"]
+    assert st["legs"] == ["DESI", "eBOSS"]
     assert st["per_leg_zslope"] is False
-    for name in ("DESI", "KS"):
+    for name in ("DESI", "eBOSS"):
         p = st["per_leg"][name]
         assert p["survey"] == name
         assert p["lls_boost"] == pytest.approx(INF.HCD_LLS_SURVEY_BOOST[name])
@@ -556,28 +584,27 @@ def test_joint_stamp_contents(joint2_setup):
         assert p["dla_raw_latent_scale"] == 1.0
         assert "1.0" in p["dla_width_note"]
     # PI C3: dla_forward_frac=0 legs are LABELED prior-only (not data-constrained).
-    assert st["per_leg"]["KS"]["dla_site_prior_only"] is True
+    # eBOSS shares dla_forward_frac=0 with KS (EBOSS_DLA_FORWARD_FRAC=0.0: DLAs masked,
+    # residual in C_data), so the prior-only-DLA semantics carry over from the KS fixture.
+    assert st["per_leg"]["eBOSS"]["dla_site_prior_only"] is True
     assert st["per_leg"]["DESI"]["dla_site_prior_only"] is False
-    assert "PRIOR-ONLY" in st["per_leg"]["KS"]["dla_width_note"]
-    # panel required-fix 1b: per-leg data-cut honesty in the stamp. The joint KS leg
-    # without an R_z float sits under the NORC 0.045 cap, NOT the certified 0.065 band.
-    for name in ("DESI", "KS"):
+    assert "PRIOR-ONLY" in st["per_leg"]["eBOSS"]["dla_width_note"]
+    # panel required-fix 1b: per-leg data-cut honesty in the stamp.
+    for name in ("DESI", "eBOSS"):
         p = st["per_leg"][name]
         leg = next(l for l in ctx.legs if l.name == name)
         assert p["k_max_effective"] == pytest.approx(float(np.asarray(leg.k).max()))
         assert p["resolution_float"] == bool(getattr(leg, "resolution_ready", False))
-    # the NORC 0.045 KS cap binds only on the NORC forward with no R_z float (the v1
-    # driver config); this fixture is not NORC, so only assert the conditional form.
-    if (not ctx.res_corr_on) and (not st["per_leg"]["KS"]["resolution_float"]):
-        assert st["per_leg"]["KS"]["k_max_effective"] <= 0.045 + 1e-9
+    # (the NORC 0.045 k-cap conditional was KS-specific; no analogous cap exists for the
+    # eBOSS leg — its k_max 0.0195 sits far below the res_corr anchor regime.)
 
 
-@pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.skipif(not _have_joint, reason="real cache/ckpt/DESI/KS/eBOSS not present")
 def test_joint_stamp_rejects_mixed_signatures(joint2_setup):
     ctx, d, _, _ = joint2_setup
     st = C.joint_stamp(ctx)
     doctored = {n: dict(p["forward"]) for n, p in st["per_leg"].items()}
-    doctored["KS"]["forward_signature"] = "deadbeef" * 8
+    doctored["eBOSS"]["forward_signature"] = "deadbeef" * 8
     with pytest.raises(ValueError, match="mixed"):
         C._assert_joint_signatures_uniform(doctored)
     doctored2 = {n: dict(p["forward"]) for n, p in st["per_leg"].items()}
