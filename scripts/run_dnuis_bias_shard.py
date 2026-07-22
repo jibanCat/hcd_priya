@@ -49,6 +49,7 @@ import numpy as np
 print = functools.partial(print, flush=True)
 
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
+from hcd_analysis.emulator.prod_ensemble import production_member_paths
 from hcd_analysis.emulator.closure_legb import (build_legb_ctx, run_legb, prod_forward_config,
                                                 prod_norc_forward)
 from hcd_analysis.emulator.inference import (HCD_LLS_SURVEY_BOOST,
@@ -159,9 +160,9 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     we unblind on (deployment-consistency; used by the DLA-completeness DESI re-run). Default OFF is
     BYTE-IDENTICAL for every existing arm/caller (metal_prior='uniform' + res_corr_on=True ==
     the build_legb_ctx defaults; fix_alpha_res untouched)."""
-    members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
-    if not members:
-        raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
+    # PINNED members (freeze decision 6): manifest-verified (sha256 + exact pairing + count +
+    # stray-member tripwire) via checkpoints/production_ensemble_manifest.json, NOT a glob.
+    members = production_member_paths(checkpoints_dir=os.path.dirname(PROD_PREFIX))
 
     # The leg NAME (load_*_leg) and the survey PIN key (HCD_LLS_SURVEY_BOOST/FRAC_SIGMA) per arg.
     # eBOSS's leg name is 'eBOSS' (not 'EBOSS') and it has NO per-survey LLS pin (the boost map only

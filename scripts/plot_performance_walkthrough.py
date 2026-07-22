@@ -179,8 +179,12 @@ def load_production_ensemble():
     The production ensemble saw EVERY sim, so anything evaluated through it is IN-SAMPLE
     (a fit-quality check), NOT out-of-sample generalization — callers must label it so.
     """
-    paths = [PROD_CKPT.format(k=k) for k in range(N_PROD)]
-    ens, meta, norm = load_ensemble(paths)
+    # PINNED members (freeze decision 6): the manifest loader verifies sha256 + exact pairing +
+    # count + the stray-member tripwire before loading (checkpoints/production_ensemble_manifest.json).
+    from hcd_analysis.emulator.prod_ensemble import load_production_ensemble as _load_pinned
+    ens, meta, norm, _manifest = _load_pinned(
+        checkpoints_dir=os.path.dirname(PROD_CKPT.format(k=0)))
+    assert len(ens.members) == N_PROD
     return ens, norm
 
 

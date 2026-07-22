@@ -18,7 +18,9 @@ PRODUCTION BASELINE (the locked decisions; mirrors scripts/run_prod_sbc_shard.py
   - emucoh (off-diagonal-only) + cross-class C_emu;
   - MF P1D correction + the LF→HR / n_s-edge C_emu floor;
   - eBOSS+DESI metals: a SHARED a_SiIII nuisance (sample_metals=True when the survey is metal-bearing);
-  - the N=5 production ensemble forward (ensemble_ckpts = final_prod_seed*).
+  - the N=5 production ensemble forward, MANIFEST-PINNED (freeze decision 6): members come from
+    checkpoints/production_ensemble_manifest.json via prod_ensemble.production_member_paths
+    (sha256 + pairing + count verified, stray-member tripwire), NOT a permissive glob.
 
 SURVEYS (one --survey per invocation; the survey selects WHICH leg(s) carry the real data):
   eboss : eBOSS DR14 ONLY (low-k; metals_on + a_SiIII; committable).
@@ -55,6 +57,7 @@ from hcd_analysis.emulator.closure_legb import (
     build_legb_ctx, _run_nuts_legb, _draws_matrix, _packed_names_for,
     convergence_battery, _ebfmi1)
 from hcd_analysis.emulator.inference import PARAM_NAMES
+from hcd_analysis.emulator.prod_ensemble import production_member_paths
 from hcd_analysis.emulator.seeding import SEED_DERIVATION, nuts_fold_int
 from hcd_analysis.emulator import blinding as BL
 from hcd_analysis.emulator.data import PARAM_LIMITS
@@ -135,10 +138,21 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     leg's low-z cut via ks_kwargs={"z_lo": ks_zlo}. The PI's z2.4=baseline / z2.8=diagnostic
     comparison (KS-author published cut is the more-conservative z<2.8; see load_ks_leg docstring).
     """
-    import glob as _glob
-    members = sorted(p[:-4] for p in _glob.glob((ensemble_glob or (PROD_PREFIX + "*")) + ".eqx"))
-    if not members:
-        raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
+    if ensemble_glob is None:
+        # PINNED path (freeze decision 6): the committed manifest verifies sha256 + exact
+        # pairing + count/order and fail-louds on any stray final_prod_seed*.eqx BEFORE the
+        # members can join the deployed forward (no permissive glob).
+        members = production_member_paths(checkpoints_dir=os.path.dirname(PROD_PREFIX))
+    else:
+        # DIAGNOSTIC override (explicit --ensemble-glob ONLY): NOT the pinned production
+        # ensemble. main() stamps the export meta ensemble_pinned=False + the glob used.
+        import glob as _glob
+        members = sorted(p[:-4] for p in _glob.glob(ensemble_glob + ".eqx"))
+        if not members:
+            raise SystemExit(f"no ensemble checkpoints match --ensemble-glob {ensemble_glob}*.eqx")
+        print(f"!!! WARNING: --ensemble-glob override in effect -- this run does NOT use the "
+              f"manifest-pinned production ensemble (glob={ensemble_glob}*.eqx -> "
+              f"{len(members)} member(s)); meta is stamped ensemble_pinned=False !!!")
     ens = [members[0]] if single_member else members
 
     info = SURVEY[survey]
@@ -211,11 +225,12 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     if ctx.sample_res:                             # f_res is per-INSTRUMENT: single-leg + resolution_ready
         assert getattr(L, "resolution_ready", False), "f_res float on a resolution_ready=False leg"
         assert len({l.name for l in ctx.legs}) == 1, "f_res float requires a single-instrument leg"
-    return ctx, d, members
+    return ctx, d, ens
 
 
 def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_depth=10,
-                 seed=20260614, single_member=False, ks_zlo=None, verbose=True):
+                 seed=20260614, single_member=False, ensemble_glob=None, ks_zlo=None,
+                 verbose=True):
     """Multi-chain dispersed NUTS on the REAL leg.P_data (NO mock). Returns
     ``dict(packed_chains, names, battery, per_chain_div, members, leg_name, n_real_rows)``.
 
@@ -223,7 +238,8 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
     diagnostic — IDENTICAL to run_legb_convergence's chain seeding (the validated path), but the
     LIKELIHOOD points at the real data (ctx.legs already carry leg.P_data = the measurement; we
     do NOT overwrite it with a mock)."""
-    ctx, d, members = build_real_ctx(survey, single_member=single_member, ks_zlo=ks_zlo)
+    ctx, d, members = build_real_ctx(survey, single_member=single_member,
+                                     ensemble_glob=ensemble_glob, ks_zlo=ks_zlo)
     leg = ctx.legs[0]
     n_real = int(np.isfinite(np.asarray(leg.P_data)).sum())
 
@@ -546,6 +562,12 @@ def main():
                     help="DANGER: export UNBLINDED. Only after freeze + the authorized unblind.")
     ap.add_argument("--single-member", action="store_true",
                     help="final_prod_seed0 only (cheap de-risk; NOT the production ensemble)")
+    ap.add_argument("--ensemble-glob", default=None,
+                    help="DANGER (diagnostic ONLY): override the manifest-pinned production "
+                         "ensemble with a checkpoint-prefix glob (member paths = <glob>*.eqx "
+                         "minus the extension). The run prints a prominent warning and its "
+                         "meta is stamped ensemble_pinned=False + the glob used; NEVER for "
+                         "the blind/production fit.")
     ap.add_argument("--ks-zlo", type=float, default=2.4,
                     help="KS leg low-z cut (only for --survey ks). 2.4 = PI BASELINE (default); "
                          "2.8 = the KS-author published conservative DIAGNOSTIC. Routes a "
@@ -592,7 +614,7 @@ def main():
     result = run_real_fit(
         a.survey, n_chains=a.n_chains, n_warmup=a.n_warmup, n_samples=a.n_samples,
         max_tree_depth=a.max_tree_depth, seed=a.seed, single_member=a.single_member,
-        ks_zlo=ks_zlo)
+        ensemble_glob=a.ensemble_glob, ks_zlo=ks_zlo)
 
     bat = result["battery"]
     print(f"--- sampler health (UNBLINDED) survey={a.survey} ---")
@@ -608,6 +630,11 @@ def main():
         result, out_dir, root, offset=offset, blind=a.blind, survey=a.survey,
         meta=dict(blind_lock=os.path.abspath(a.blind_lock) if a.blind else None,
                   seed=a.seed, ks_zlo=(a.ks_zlo if a.survey == "ks" else None),
+                  # freeze decision 6: the artifact self-declares whether it ran on the
+                  # manifest-pinned production ensemble. --ensemble-glob (diagnostic) and
+                  # --single-member (de-risk) are both NOT the pinned production object.
+                  ensemble_pinned=(a.ensemble_glob is None and not a.single_member),
+                  ensemble_glob=a.ensemble_glob,
                   # P0: record the DERIVATION alongside the seed, and the resolved integer, so a
                   # reader can re-derive the chain stream from the export alone (mirrors
                   # run_joint_fit). A seed without its derivation is ambiguous.

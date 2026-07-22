@@ -40,6 +40,7 @@ import pickle
 print = functools.partial(print, flush=True)
 
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
+from hcd_analysis.emulator.prod_ensemble import production_member_paths
 from hcd_analysis.emulator.closure_legb import (build_legb_ctx, run_legb, prod_forward_config,
                                                 prod_norc_forward)
 
@@ -256,9 +257,9 @@ def main():
     from hcd_analysis.emulator import data_likelihood as _DLF
     _DLF.assert_env_data_flags_unset("run_prod_sbc_shard", allow=a.allow_env_data_flags)
 
-    members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
-    if not members:
-        raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
+    # PINNED members (freeze decision 6): manifest-verified (sha256 + exact pairing + count +
+    # stray-member tripwire) via checkpoints/production_ensemble_manifest.json, NOT a glob.
+    members = production_member_paths(checkpoints_dir=os.path.dirname(PROD_PREFIX))
     ens = [members[0]] if a.single_member else members
     # WIDTH-CHECK override (env SBC_SUBDLA_AMP_SIGMA>0): set the subDLA AMPLITUDE prior sigma/mu for the
     # referee-mandated 0.40-vs-0.20 over-dispersion pre-check. Default 0 => unchanged production prior.
