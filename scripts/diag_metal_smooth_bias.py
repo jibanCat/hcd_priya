@@ -80,8 +80,10 @@ MK = dict(form="desi_full", f_SiIII=0.009, f_SiII=0.004, f_SiII_SiII=0.002,
 #  BUILD the deployed DESI-leg ctx (mirror diag_perleg_fisher_ns.py exactly).
 # ---------------------------------------------------------------------------- #
 def build_ctx():
-    members = sorted(p[:-4] for p in glob.glob(f"{REPO}/checkpoints/final_prod_seed*.eqx"))
-    assert members, "no final_prod_seed*.eqx ensemble members found"
+    # PINNED members (freeze decision 6): manifest-verified (sha256 + exact pairing + count +
+    # stray-member tripwire) via checkpoints/production_ensemble_manifest.json, NOT a glob.
+    from hcd_analysis.emulator.prod_ensemble import production_member_paths
+    members = production_member_paths(checkpoints_dir=f"{REPO}/checkpoints")
     print(f"ensemble members ({len(members)}):", [os.path.basename(m) for m in members])
     ctx, d = build_legb_ctx(
         ensemble_ckpts=members, use_xclass=True, with_mf=True, mf_with_floor=True,

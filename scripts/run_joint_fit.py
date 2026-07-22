@@ -43,6 +43,7 @@ from numpyro.infer import init_to_sample
 
 from hcd_analysis.emulator import closure_legb as CL
 from hcd_analysis.emulator import blinding as BL
+from hcd_analysis.emulator.prod_ensemble import production_member_paths
 from hcd_analysis.emulator.seeding import nuts_fold_int
 from hcd_analysis.emulator.closure_legb import (
     build_legb_joint_ctx, joint_stamp, _run_nuts_legb, _draws_matrix, _packed_names_for,
@@ -73,9 +74,19 @@ def build_joint_ctx(leg_names, *, per_leg_zslope=False, single_member=False,
         comparisons are therefore at DIFFERENT k_max until per-leg f_res lands (carried in
         the joint-campaign design notes).
     Everything else mirrors run_real_fit.build_real_ctx knob-for-knob."""
-    members = sorted(p[:-4] for p in glob.glob((ensemble_glob or (PROD_PREFIX + "*")) + ".eqx"))
-    if not members:
-        raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
+    if ensemble_glob is None:
+        # PINNED path (freeze decision 6): committed-manifest members (sha256 + pairing +
+        # count/order verified, stray-member tripwire), NOT a permissive glob.
+        members = production_member_paths(checkpoints_dir=os.path.dirname(PROD_PREFIX))
+    else:
+        # DIAGNOSTIC override (explicit --ensemble-glob ONLY): NOT the pinned production
+        # ensemble. main() stamps the export meta ensemble_pinned=False + the glob used.
+        members = sorted(p[:-4] for p in glob.glob(ensemble_glob + ".eqx"))
+        if not members:
+            raise SystemExit(f"no ensemble checkpoints match --ensemble-glob {ensemble_glob}*.eqx")
+        print(f"!!! WARNING: --ensemble-glob override in effect -- this run does NOT use the "
+              f"manifest-pinned production ensemble (glob={ensemble_glob}*.eqx -> "
+              f"{len(members)} member(s)); meta is stamped ensemble_pinned=False !!!")
     ens = [members[0]] if single_member else members
     norc = CL.prod_norc_forward()
     metals = any(CL.prod_forward_config(n)["metals"] for n in leg_names)
@@ -100,7 +111,7 @@ def build_joint_ctx(leg_names, *, per_leg_zslope=False, single_member=False,
         if _leg.name == "DESI":
             assert bool(_leg.dla_cov_reduced) == bool(_DL.DESI_DLA_COV_REDUCE), \
                 "DESI leg dla_cov_reduced disagrees with the DESI_DLA_COV_REDUCE authority"
-    return ctx, d, members
+    return ctx, d, ens
 
 
 def _joint_loglik_chain(ctx, core_per_leg, samples):
@@ -125,10 +136,11 @@ def _joint_loglik_chain(ctx, core_per_leg, samples):
 
 
 def run_joint_fit(leg_names, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_depth=10,
-                  seed=20260720, per_leg_zslope=False, single_member=False, verbose=True):
+                  seed=20260720, per_leg_zslope=False, single_member=False, ensemble_glob=None,
+                  verbose=True):
     """Multi-chain dispersed NUTS on the REAL multi-leg data (NO mock anywhere)."""
     ctx, d, members = build_joint_ctx(leg_names, per_leg_zslope=per_leg_zslope,
-                                      single_member=single_member)
+                                      single_member=single_member, ensemble_glob=ensemble_glob)
     stamp = joint_stamp(ctx)                                   # also rejects mixed signatures
     n_real = int(sum(np.isfinite(np.asarray(leg.P_data)).sum() for leg in ctx.legs))
     # fiducial (mean held-out) z-mean DLA core per leg — the real-fit convention.
@@ -201,6 +213,10 @@ def main():
                          "S-criterion machinery.")
     ap.add_argument("--single-member", action="store_true",
                     help="final_prod_seed0 only (cheap de-risk; NOT the production ensemble)")
+    ap.add_argument("--ensemble-glob", default=None,
+                    help="DANGER (diagnostic ONLY): override the manifest-pinned production "
+                         "ensemble with a checkpoint-prefix glob. Prominent warning + meta "
+                         "stamped ensemble_pinned=False; NEVER for a production fit.")
     ap.add_argument("--blind-lock", default=f"{REPO}/blind.lock")
     ap.add_argument("--out-dir", default=None)
     ap.add_argument("--no-blind", dest="blind", action="store_false",
@@ -232,7 +248,7 @@ def main():
     result = run_joint_fit(
         leg_names, n_chains=a.n_chains, n_warmup=a.n_warmup, n_samples=a.n_samples,
         max_tree_depth=a.max_tree_depth, seed=a.seed, per_leg_zslope=a.per_leg_zslope,
-        single_member=a.single_member)
+        single_member=a.single_member, ensemble_glob=a.ensemble_glob)
 
     bat = result["battery"]
     print(f"--- sampler health (UNBLINDED) legs={'+'.join(leg_names)} ---")
@@ -243,6 +259,9 @@ def main():
         result, out_dir, root, offset=offset, blind=a.blind, survey="+".join(leg_names),
         meta=dict(blind_lock=os.path.abspath(a.blind_lock) if a.blind else None,
                   seed=a.seed, joint_legs=leg_names, per_leg_zslope=a.per_leg_zslope,
+                  # freeze decision 6: pinned-ensemble self-declaration (see run_real_fit).
+                  ensemble_pinned=(a.ensemble_glob is None and not a.single_member),
+                  ensemble_glob=a.ensemble_glob,
                   seed_derivation="fold_in(PRNGKey(seed), crc32('+'.join(legs)) & 0x7fffffff)"
                                   " then fold_in(chain_id)",
                   alpha_mode="per_leg"))

@@ -57,6 +57,7 @@ import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
 import hcd_analysis.emulator.inference as _I
 from hcd_analysis.emulator.closure_legb import (
     build_legb_ctx, run_legb, HCD_INCIDENCE_SLOPE, HCD_Z_PIVOT)
+from hcd_analysis.emulator.prod_ensemble import production_member_paths
 from hcd_analysis.emulator.sampler_numpyro import _dla_raw_mu
 from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
 import jax
@@ -268,9 +269,9 @@ def main():
         print(f"=== rung {a.rung} mock {a.mock} pkl exists at {path} -- SKIP ===")
         return
 
-    members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
-    if not members:
-        raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
+    # PINNED members (freeze decision 6): manifest-verified (sha256 + exact pairing + count +
+    # stray-member tripwire) via checkpoints/production_ensemble_manifest.json, NOT a glob.
+    members = production_member_paths(checkpoints_dir=os.path.dirname(PROD_PREFIX))
     ens = [members[0]] if a.single_member else members
     print(f"[ensemble] {len(ens)} member(s): {[os.path.basename(m) for m in ens]}")
 

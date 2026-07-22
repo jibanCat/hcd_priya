@@ -44,6 +44,7 @@ from hcd_analysis.emulator.closure_legb import (
     HCD_INCIDENCE_SLOPE, HCD_Z_PIVOT)
 from hcd_analysis.emulator.inference import PARAM_NAMES
 from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
+from hcd_analysis.emulator.prod_ensemble import production_member_paths
 
 REPO = "/home/mfho/hcd_priya"
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
@@ -153,9 +154,9 @@ def main():
     _I.HCD_PRIOR_FRAC_SIGMA = tuple(float(w) for w in widths)
     print(f"[prior-{a.prior}] HCD_PRIOR_FRAC_SIGMA {_pf_before} -> {_I.HCD_PRIOR_FRAC_SIGMA}")
 
-    members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
-    if not members:
-        raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
+    # PINNED members (freeze decision 6): manifest-verified (sha256 + exact pairing + count +
+    # stray-member tripwire) via checkpoints/production_ensemble_manifest.json, NOT a glob.
+    members = production_member_paths(checkpoints_dir=os.path.dirname(PROD_PREFIX))
     ens = [members[0]] if a.single_member else members
     print(f"[ensemble] {len(ens)} member(s): {[os.path.basename(m) for m in ens]}")
 
