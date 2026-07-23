@@ -640,8 +640,12 @@ def main():
     npz = out / "deployed_centre_layers.npz"
     np.savez(npz, **payload)
     verify_npz_payload(dict(np.load(npz, allow_pickle=True)))   # re-read what was actually written
+    from hcd_analysis.emulator import inference as _INF_SIG
     sidecar = {
         "schema": "deployed_centre_v4",
+        # prior-geometry pin (2026-07-23, paper-agent Q4): proves which prior era produced this
+        # export, independently of the commit. Module-attribute read (rebinding-trap safe).
+        "hcd_prior_signature": _INF_SIG.hcd_prior_signature(),
         "purpose": ("deployed-survey prior centre in dN/dX for paper F3 (PI 2026-07-21); "
                     "alpha->dN/dX mapped here because the paper side may not reconstruct it; "
                     "v4 = the ONE-TIME re-issue under the corrected model (exact inverse for "

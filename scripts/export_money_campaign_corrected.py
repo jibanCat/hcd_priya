@@ -257,8 +257,12 @@ def main():
             inputs[str(p)] = {"sha256": sha256(p), "bytes": p.stat().st_size}
     outputs = {n: {"sha256": sha256(out/n), "bytes": (out/n).stat().st_size}
                for n in ("money_row2_arms.npz", "money_row1_layers.npz")}
+    from hcd_analysis.emulator import inference as _INF_SIG
     prov = {
         "schema": "money_campaign_corrected_v2",
+        # prior-geometry pin (2026-07-23, paper-agent Q4): proves which prior era produced this
+        # export, independently of the commit. Module-attribute read (rebinding-trap safe).
+        "hcd_prior_signature": _INF_SIG.hcd_prior_signature(),
         "purpose": "corrected-prior money-figure campaign (paper request 2026-07-20); supersedes the "
                    "pre-correction row-2 arms so row-1 band and row-2 posteriors are consistent at the source",
         "supersedes": [

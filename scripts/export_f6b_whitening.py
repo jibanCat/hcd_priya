@@ -53,6 +53,12 @@ def sha256(p):
     return h.hexdigest()
 
 
+def _prior_sig():
+    """The live hcd_prior_signature via module-attribute access (rebinding-trap safe)."""
+    from hcd_analysis.emulator import inference as INF
+    return INF.hcd_prior_signature()
+
+
 def git(*a):
     return subprocess.run(["git", "-C", str(ROOT), *a],
                           capture_output=True, text=True).stdout.strip()
@@ -245,12 +251,17 @@ def main():
         "commit": git("rev-parse", "HEAD"),
         "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
         "dirty": bool(git("status", "--porcelain")),
-        "dirty_warning": (
+        # conditional (2026-07-23, paper-agent Q1): a CLEAN export must not carry a warning
+        # claiming the tree was dirty.
+        "dirty_warning": (None if not bool(git("status", "--porcelain")) else (
             "TREE WAS DIRTY AT EXPORT TIME. The untracked scripts present in the working tree "
             "are NOT on the import path of this run (the recipe imports only tracked modules: "
             "scripts/diag_cemu_validation.py, hcd_analysis.emulator.*), so the numbers are "
             "believed unaffected. The orchestrator MUST re-stamp this export from a CLEAN tree "
-            "before it is cited as a frozen artifact of record."),
+            "before it is cited as a frozen artifact of record.")),
+        # prior-geometry pin (2026-07-23, paper-agent Q4): lets a figure sidecar prove which
+        # prior era produced it, independently of the commit. MODULE-ATTRIBUTE read.
+        "hcd_prior_signature": _prior_sig(),
         "run_command": RUN_CMD,
         "run_command_note": (
             "RUN_CMD is the canonical tracked entry point and was executed in full; its stdout "
