@@ -69,6 +69,7 @@ PI_DECISION_RECORDS = (
     "docs/superpowers/2026-07-21-PI-DECISIONS-OF-RECORD.md",
     "docs/superpowers/2026-07-21-PI-DECISIONS-02-LLS-REPARAM.md",
     "docs/superpowers/2026-07-22-PI-DECISIONS-03-TAKEOVER.md",
+    "docs/superpowers/2026-07-23-PI-DECISIONS-04-SIGNATURES.md",
 )
 
 # ---------------------------------------------------------------------------------------------
