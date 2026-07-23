@@ -152,6 +152,25 @@ def analyze_leg(label, src):
         print(f"[{label}] all landed pkls are partial — re-run shortly")
         return None
 
+    # RUN-CFG POOLING HOMOGENEITY (2026-07-23, CS design review Q2): the _run_mock CLASH guard
+    # only fires on resume-over-existing; two runs with DISJOINT mock indices into one dir never
+    # met it, and this analyzer used to pool with zero verification. Every pooled pkl's
+    # default-completed run_cfg must be identical — a closure pkl and an ARM-P (deployed-prior)
+    # pkl differ on survey/hcd_prior_signature and REFUSE here.
+    from scripts.run_prod_sbc_shard import effective_run_cfg
+    _effs = [effective_run_cfg(m.get("run_cfg")) for m in mocks]
+    _ref = _effs[0]
+    for f, e in zip(files, _effs):
+        assert e == _ref, (f"[{label}] run_cfg POOLING MISMATCH at {os.path.basename(f)}: "
+                           f"{e} != {_ref} — mixed SBC populations in one dir; separate them "
+                           f"before analyzing")
+    # ARM-P leg identity: a deployed-prior population must be THIS leg's survey.
+    if _ref["survey"] is not None:
+        assert _ref["survey"] == label, (f"[{label}] deployed-prior pkls stamped survey="
+                                         f"{_ref['survey']!r} pooled under the {label} leg")
+        assert _ref["hcd_prior_signature"], \
+            f"[{label}] deployed-prior population lacks the hcd_prior_signature pin"
+
     P = len(names)
     j_ns, j_ap = names.index("ns"), names.index("Ap")
     TAU0_IDX = [names.index(f"tau0_z{z}") for z in range(13)]
@@ -226,6 +245,9 @@ def analyze_leg(label, src):
         "pulls": {k: np.asarray(v, float) for k, v in pulls.items()},
         "contraction": {k: contraction(k) for k in SCALAR + ["tau0amp", "dtau0"]},
         "var_prior": var_prior,
+        # the homogeneity-verified effective config (2026-07-23): the certificate's per-leg
+        # prior identity (signed PI item 5: the certificate must NAME the parameterization).
+        "run_cfg_effective": _ref,
     }
     return res
 
@@ -362,6 +384,15 @@ for label in ("DESI", "KS", "eBOSS"):
                         for k, v in r["contraction"].items()},
         "var_prior": {k: (float(v) if np.isfinite(v) else None)
                       for k, v in r["var_prior"].items()},
+        # PER-LEG PRIOR IDENTITY (signed PI item 5, 2026-07-23): the certificate names the
+        # parameterization this leg's SBC population fit under. deployed_prior_certificate=False
+        # marks a closure-prior (survey=None) population — NOT a deployed-prior certification.
+        "prior": {
+            "survey": r["run_cfg_effective"]["survey"],
+            "hcd_parameterization": r["run_cfg_effective"]["hcd_parameterization"],
+            "hcd_prior_signature": r["run_cfg_effective"]["hcd_prior_signature"],
+            "deployed_prior_certificate": r["run_cfg_effective"]["survey"] is not None,
+        },
     }
     jdump["legs"][label] = leg
 json.dump(jdump, open(out_json, "w"), indent=2)

@@ -394,3 +394,64 @@ def test_report_runs_and_mentions_tau0(tmp_path, capsys):
     assert "tau0_amp" in out and "dtau0" in out          # mandatory tau0/dtau0 reporting
     assert "PART 1" in out and "PART 2" in out and "PART 3" in out
     assert "alpha_lls" in out
+
+
+# --------------------------------------------------------------------------------------------- #
+#  ERA-AWARENESS (2026-07-23): value-based era rule, mixed-era refusal, mapped-era companion
+#  D_exact + reachability, legacy invariance of the gate normalization.
+# --------------------------------------------------------------------------------------------- #
+_MAPPED_GEOM = dict(
+    hcd_parameterization="dndx_mapped_v2",
+    alpha_lls_center_built_semantics="LEGACY-AUDIT-ONLY (dormant vector)",
+    alpha_lls_mapped_pivot_center=0.3932,
+    ks_dndx_ref_z=[[0.013, 0.004, 0.001]] * len(ZG),
+    ks_xbar_z=[30.0] * len(ZG),
+    ks_dndx_sigma_eps=0.5310, ks_dndx_sigma_kappa=0.6681,
+)
+
+
+def _mapped_mutate(payload, name):
+    payload["meta"]["prior_constants"].update(_MAPPED_GEOM)
+
+
+def test_mapped_era_detected_with_companion_dexact(tmp_path):
+    _write_campaign(tmp_path, mutate=_mapped_mutate)
+    res = AN.summarize_campaign(str(tmp_path))
+    assert res["era"] == "mapped"
+    assert "sigma_eps" in res["width_convention"] or "0.5310" in res["width_convention"]
+    for a, c in res["coords"].items():
+        assert c["era"] == "mapped"
+        assert c["D_exact"] is not None and np.isfinite(c["D_exact"]) and c["D_exact"] > 0
+        assert isinstance(c["unreachable_z"], list)
+        # the legacy-D gate normalization is UNCHANGED by the era (cross-era comparability)
+    D = abs(np.log(1.667)) / 0.40
+    assert res["part2"]["per_arm"]["K2_flat_hi"]["D"] == pytest.approx(D, rel=1e-6)
+    assert res["part2"]["S_exact"] is not None
+    assert isinstance(res["part2"]["verdict_flip_needs_pi"], bool)
+
+
+def test_legacy_era_has_no_dexact_and_unchanged_keys(tmp_path):
+    _write_campaign(tmp_path)
+    res = AN.summarize_campaign(str(tmp_path))
+    assert res["era"] == "legacy"
+    for c in res["coords"].values():
+        assert c["era"] == "legacy" and c["D_exact"] is None and c["unreachable_z"] is None
+    assert res["part2"]["S_exact"] is None
+    assert res["part2"]["verdict_flip_needs_pi"] is False
+
+
+def test_mixed_era_campaign_refused(tmp_path):
+    def _mutate_one_arm(payload, name):
+        if payload["arm"] == "K2_flat_hi":
+            _mapped_mutate(payload, name)
+    _write_campaign(tmp_path, mutate=_mutate_one_arm)
+    with pytest.raises(AssertionError, match="ERA mismatch|prior_constants|hcd_prior"):
+        AN.load_campaign(str(tmp_path))
+
+
+def test_mapped_era_report_prints_era_and_reachability_lines(tmp_path, capsys):
+    _write_campaign(tmp_path, mutate=_mapped_mutate)
+    AN.main_report(str(tmp_path))
+    out = capsys.readouterr().out
+    assert "ERA: MAPPED" in out
+    assert "S_exact" in out

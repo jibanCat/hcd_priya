@@ -133,12 +133,17 @@ def arm_run_mode(arm_id):
     return "clean" if AR.ARMS[arm_id]["quad"] is None else "boost"
 
 
-def shard_pkl_name(arm_id, shard, *, smoke):
+def shard_pkl_name(arm_id, shard, *, smoke, r6_arm=None):
     """pkl naming (spec 5): ks_selboost_clean_shard_{i:03d}.pkl for K0, else
     ks_selboost_{arm_id}_shard_{i:03d}.pkl; SMOKE inserts .smoke before .pkl (F6a: the
-    analyzer glob filters *.smoke.* so a smoke run can never pool as a real shard)."""
-    tag = "clean" if arm_id == "K0_clean" else arm_id
+    analyzer glob filters *.smoke.* so a smoke run can never pool as a real shard).
+    R6 (2026-07-23): a DISTINCT prefix ks_r6_{legacy|mapped}_... so the campaign analyzer's
+    ks_selboost_* glob never even sees an R6 pkl (defense in depth on top of the r6_override
+    stamp refusal) — R6 pkls are consumed ONLY by analyze_r6_pairs.py."""
     suffix = ".smoke" if smoke else ""
+    if r6_arm is not None:
+        return f"ks_r6_{r6_arm}_shard_{shard:03d}{suffix}.pkl"
+    tag = "clean" if arm_id == "K0_clean" else arm_id
     return f"ks_selboost_{tag}_shard_{shard:03d}{suffix}.pkl"
 
 
@@ -161,7 +166,28 @@ def main():
     ap.add_argument("--expect-lls-frac-sigma", type=float, required=True)
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--smoke", action="store_true")
+    # R6 matched old-vs-new comparison (2026-07-23, disposition row 6): each pair = ONE mock
+    # fit twice, once under the retired legacy alpha-space KS prior (--r6-arm legacy, the
+    # ks_legacy_alpha_param build override) and once under the deployed mapped prior
+    # (--r6-arm mapped). Pair identity comes from a SHARED truth source + shared fold_in(seed,m)
+    # noise key: the mock data is a pure fn of (truth_pack, k_mock), so drawing the truth from
+    # ONE stamped source in BOTH arms makes the pair's data vectors identical (run_legb truth_fn).
+    ap.add_argument("--r6-arm", choices=["legacy", "mapped"], default=None,
+                    help="R6 paired arm: which KS prior parameterization this run FITS under")
+    ap.add_argument("--r6-truth-source", choices=["mapped-selfdraw", "mapped-fixed-draw"],
+                    default=None,
+                    help="R6 truth source (REQUIRED with --r6-arm, stamped + pool-keyed): "
+                         "mapped-selfdraw = per-mock draws from the DEPLOYED mapped prior "
+                         "(recommended default, PI checkpoint pending); mapped-fixed-draw = the "
+                         "single mock-0 mapped draw shared by every pair (variance-free anchor)")
     a = ap.parse_args()
+    if a.r6_arm is not None:
+        assert a.arm_id == "K0_clean", \
+            "--r6-arm is the CLEAN paired comparison; use --arm-id K0_clean (no injection)"
+        assert a.r6_truth_source is not None, \
+            "--r6-arm requires an EXPLICIT --r6-truth-source (stamped; never a silent default)"
+    else:
+        assert a.r6_truth_source is None, "--r6-truth-source is only meaningful with --r6-arm"
     if a.n_mocks is None:
         a.n_mocks = int(AR.ARMS[a.arm_id]["n_mocks"])
     if a.smoke:
@@ -178,7 +204,14 @@ def main():
     # use_prod_forward; arm tag "lls_excess" only routes the UNUSED third return — the KS
     # metal_misspec tag would fail loud in arm_inject_spec, and this runner takes its
     # inject_spec from the REGISTRY, never from build_arm_ctx).
-    ctx, d, _ = build_arm_ctx("lls_excess", "ks", True, use_prod_forward=True)
+    # R6: the legacy arm builds with the stamped ks_legacy_alpha_param override (constants and
+    # forward identical; ONLY the prior parameterization dispatch flips). Non-R6 = byte-identical
+    # default build.
+    ctx, d, _ = build_arm_ctx("lls_excess", "ks", True, use_prod_forward=True,
+                              ks_legacy_alpha_param=(a.r6_arm == "legacy"))
+    if a.r6_arm is not None:
+        assert bool(getattr(ctx, "ks_dndx_mapped", False)) is (a.r6_arm == "mapped"), \
+            f"R6 {a.r6_arm} arm: ctx.ks_dndx_mapped={getattr(ctx, 'ks_dndx_mapped', None)}"
     assert len(ctx.legs) == 1, f"expected the single restricted KS leg, got {len(ctx.legs)}"
     L = ctx.legs[0]
     assert_ks_forward(ctx, L)
@@ -193,12 +226,13 @@ def main():
         f"built KS LLS width sigma/mu {alpha_sd0/alpha_mu0} != {prior_stamp['lls_frac_sigma_ks']}"
     prior_stamp["alpha_lls_center_built"] = alpha_mu0
     prior_stamp["alpha_lls_sigma_built"] = alpha_sd0
-    # MAPPED-ERA HONESTY (Stage-C 2026-07-22): post-W2 the KS ctx deploys the dN/dX-mapped
-    # parameterization; ctx.alpha_hcd_mu/sigma above are the DORMANT LEGACY vectors (kept for
-    # the R6 override and audits). Stamp the parameterization + the MAPPED pivot centre so a
-    # rerun's pkls are era-distinguishable; the analyzer's alpha_lls_center_built==0.4302804
-    # provenance pin (analyze_ks_selboost) will fail-loud against mapped-era pkls until it is
-    # made era-aware -- INTENDED (the old campaign's stamps stay valid for the old pkls).
+    # MAPPED-ERA HONESTY (Stage-C 2026-07-22; analyzer made era-aware 2026-07-23): post-W2 the
+    # KS ctx deploys the dN/dX-mapped parameterization; ctx.alpha_hcd_mu/sigma above are the
+    # DORMANT LEGACY vectors (kept for the R6 override and audits). Stamp the parameterization +
+    # the MAPPED pivot centre so a rerun's pkls are era-distinguishable. (The 2026-07-22 note
+    # here claimed an analyzer "alpha_lls_center_built==0.4302804 provenance pin" would fail-loud
+    # on these pkls — the CS design review found NO such pin exists; the analyzer now derives the
+    # era from THIS value stamp and labels/normalizes accordingly.)
     prior_stamp["hcd_parameterization"] = ("dndx_mapped_v2"
                                            if getattr(ctx, "ks_dndx_mapped", False)
                                            else "alpha_pivot_powerlaw_v1")
@@ -210,8 +244,46 @@ def main():
             _wcc(_jnp.asarray(ctx.ks_dndx_ref_pivot),
                  _jnp.asarray(float(ctx.ks_xbar_pivot)),
                  _jnp.asarray(3.0)))[1])
+        # MAPPED-GEOMETRY STAMPS for the era-aware analyzer (2026-07-23): the reference dN/dX
+        # curves + Xbar(z) on the GLOBAL z grid and the mapped widths, so the analyzer can
+        # compute the companion exact displacement D_exact and the truth-reachability check from
+        # STAMPS (history-proof) without a cache load. Plain lists (the analyzer's stamp
+        # homogeneity compares by ==). Module-attribute reads (rebinding trap).
+        prior_stamp["ks_dndx_ref_z"] = np.asarray(ctx.ks_dndx_ref, float).tolist()
+        prior_stamp["ks_xbar_z"] = np.asarray(ctx.ks_xbar_z, float).tolist()
+        prior_stamp["ks_dndx_sigma_eps"] = float(INF.KS_DNDX_SIGMA_EPS)
+        prior_stamp["ks_dndx_sigma_kappa"] = float(INF.KS_DNDX_SIGMA_KAPPA)
+
+    # R6 STAMPS + SHARED TRUTH SOURCE (2026-07-23). r6_override lands on BOTH arms (Bayesian
+    # design review Q4 hole 1: the mapped half would otherwise be stamp-indistinguishable from a
+    # genuine ARM-P/campaign pkl and could pool). The stamps live in prior_constants, which
+    # participates in every analyzer homogeneity/refusal check.
+    truth_fn = None
+    if a.r6_arm is not None:
+        prior_stamp["r6_override"] = True
+        prior_stamp["r6_arm"] = a.r6_arm
+        prior_stamp["r6_truth_source"] = a.r6_truth_source
+        import jax as _jax
+        # the truth source is the MAPPED ctx for BOTH arms: the legacy arm needs an explicit
+        # mapped build; the mapped arm reuses its own ctx (same deterministic construction).
+        ctx_mapped = (ctx if a.r6_arm == "mapped"
+                      else build_arm_ctx("lls_excess", "ks", True, use_prod_forward=True)[0])
+        assert bool(getattr(ctx_mapped, "ks_dndx_mapped", False)) is True
+        if a.r6_truth_source == "mapped-selfdraw":
+            # per-mock mapped-prior truths; run_legb passes k_truth = split(fold_in(seed,m))[0],
+            # identical in both arms => identical truth => identical data vector per pair.
+            truth_fn = (lambda k: CL.draw_leg_a_leg_truth(ctx_mapped, k))
+        else:   # mapped-fixed-draw: ONE shared truth (mock-0's k_truth) for every pair
+            _k_fix = _jax.random.split(
+                _jax.random.fold_in(_jax.random.PRNGKey(int(a.seed)), 0), 3)[0]
+            _fixed_truth = CL.draw_leg_a_leg_truth(ctx_mapped, _k_fix)
+            truth_fn = (lambda k: _fixed_truth)
+        print(f"[r6] arm={a.r6_arm} truth_source={a.r6_truth_source} "
+              f"(fit parameterization {prior_stamp['hcd_parameterization']})")
 
     inject_spec = AR.arm_inject_spec(a.arm_id)
+    if a.r6_arm is not None:
+        assert inject_spec is None, "R6 arms are clean (K0_clean); inject_spec must be None"
     z_global = np.asarray(ctx.z_global, float)
     B_z = AR.arm_boost_B(a.arm_id, z_global)                  # {class: B(z_global)}
     B_pivot = {cls: AR.eval_profile(prof, AR.Z_PIVOT)
@@ -232,7 +304,7 @@ def main():
                   max_tree_depth=a.max_tree_depth, verbose=True)
     t0 = time.time()
     print(f"[ks selboost {a.arm_id} shard {a.shard}] {mode.upper()} run ...")
-    per_mock = run_legb(ctx, d, inject_spec=inject_spec, **run_kw)
+    per_mock = run_legb(ctx, d, inject_spec=inject_spec, truth_fn=truth_fn, **run_kw)
     wall = time.time() - t0
 
     # EMULATOR-SPAN LOGGING (risk 12; readout caveat, not a hard failure): max boosted truth
@@ -249,7 +321,8 @@ def main():
               f"{oos_class} (truth_max {truth_max} vs cache_max {cache_max}) — readout caveat")
 
     os.makedirs(a.out_dir, exist_ok=True)
-    out = os.path.join(a.out_dir, shard_pkl_name(a.arm_id, a.shard, smoke=a.smoke))
+    out = os.path.join(a.out_dir, shard_pkl_name(a.arm_id, a.shard, smoke=a.smoke,
+                                                 r6_arm=a.r6_arm))
     meta = dict(vars(a), mode=mode, paired=False, wall_s=wall,
                 per_fit_wall_s=wall / max(len(per_mock), 1), run_kw=run_kw)
     # F5 convention: the closure_legb.forward_stamp SINGLE AUTHORITY (forward + prior-freeze

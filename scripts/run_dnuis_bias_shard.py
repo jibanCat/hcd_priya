@@ -147,7 +147,8 @@ def treatment_flags(treatment, *, c_prior_sigma=0.05):
 
 def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, float_res=False,
                   coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None, pin_hub=False,
-                  oos_member=None, oos_strength=1.0, use_prod_forward=False):
+                  oos_member=None, oos_strength=1.0, use_prod_forward=False,
+                  ks_legacy_alpha_param=False):
     """Build the single-survey production ctx for an arm. metals_on/sample_metals ON for
     DESI/eBOSS (False for KS). Returns (ctx, d, inject_spec). The arm runs on ONE survey's legs:
     we build a single-survey ctx by restricting the leg list AFTER build (keep it simple).
@@ -212,7 +213,10 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
         f_res_amp_sigma=f_res_amp_sigma,                   # arm-C wide / eBOSS + KS leg-match / prod width (None -> tight 0.02)
         metal_prior=_metal_prior,                          # NEW kwarg; default 'uniform' == build_legb_ctx default (byte-identical)
         ks_kwargs=_ks_kwargs,                              # KS echelle R_z + diag surgery (task #5); None => proxy (DESI/eBOSS/off)
-        hierarchical_hcd=False, survey=PIN_KEY)
+        hierarchical_hcd=False, survey=PIN_KEY,
+        # R6 legacy-comparison override (2026-07-23): default False == the build_legb_ctx default
+        # (byte-identical for every existing caller); True only via the stamped --r6-arm legacy path.
+        ks_legacy_alpha_param=ks_legacy_alpha_param)
 
     # NORC POST-build replace (mirror build_real_ctx, run_real_fit.py:167-170): res_corr_on=False was built
     # above; also pin the 2 now-inert alpha_res sites (fix_alpha_res is a ctx-level field, not a build kwarg)

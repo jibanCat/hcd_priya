@@ -61,13 +61,33 @@ _RUN_KW_CORE = ("n_warmup", "n_samples", "seed", "max_tree_depth", "dense_mass")
 # ---------------------------------------------------------------- ingest
 
 def _stamp_tuple(meta):
-    """The homogeneity-checked stamp of one pkl: (forward sig, prior sig, prior constants,
-    registry sig, core run_kw)."""
+    """The homogeneity-checked stamp of one pkl: (era, forward sig, prior sig, prior constants,
+    registry sig, core run_kw). The era leads the tuple (2026-07-23) so a mixed-era pool is
+    diagnosable as such (the full prior_constants equality below would catch it anyway)."""
     fwd = meta["forward"]
-    return (fwd.get("forward_signature"), fwd.get("hcd_prior_signature"),
-            tuple(sorted((k, v) for k, v in meta["prior_constants"].items())),
+    return (stamp_era(meta["prior_constants"]),
+            fwd.get("forward_signature"), fwd.get("hcd_prior_signature"),
+            tuple(sorted((k, _hashable(v)) for k, v in meta["prior_constants"].items())),
             meta["arm_stamp"]["registry_signature"],
             tuple((k, meta["run_kw"].get(k)) for k in _RUN_KW_CORE))
+
+
+def _hashable(v):
+    """prior_constants values as comparable tuples (the mapped-era geometry stamps are lists)."""
+    if isinstance(v, list):
+        return tuple(_hashable(x) for x in v)
+    return v
+
+
+def stamp_era(prior_constants):
+    """The campaign era from the STAMPED parameterization VALUE (2026-07-23, CS design review:
+    key-PRESENCE would misclassify an R6 legacy-override pkl, which stamps
+    'alpha_pivot_powerlaw_v1' explicitly). Key absent = the pre-stamp 108-fit history =
+    legacy."""
+    p = (prior_constants or {}).get("hcd_parameterization", "alpha_pivot_powerlaw_v1")
+    era = {"dndx_mapped_v2": "mapped", "alpha_pivot_powerlaw_v1": "legacy"}.get(p)
+    assert era is not None, f"unknown stamped hcd_parameterization {p!r}"
+    return era
 
 
 def load_campaign(shard_dir):
@@ -83,27 +103,36 @@ def load_campaign(shard_dir):
             d = pickle.load(f)
         assert d.get("survey") == "ks", f"{p}: survey {d.get('survey')!r} != 'ks'"
         meta = d["meta"]
+        # R6 REFUSAL (2026-07-23): R6 paired-comparison pkls (both arms stamp r6_override=True)
+        # are consumed ONLY by analyze_r6_pairs.py — they are matched old-vs-new evidence, not
+        # campaign members. Their ks_r6_* prefix keeps them out of the glob above; this stamp
+        # check catches a mis-named/moved file loudly rather than silently pooling it.
+        assert not (meta.get("prior_constants") or {}).get("r6_override"), \
+            f"{p}: r6_override pkl in a campaign dir — R6 pkls go to analyze_r6_pairs.py"
         st = _stamp_tuple(meta)
         if ref is None:
             ref = st
-        assert st[0] and st[0] == ref[0], \
-            f"{p}: forward_signature mismatch (mixed-forward campaign must not pool)"
+        assert st[0] == ref[0], \
+            f"{p}: ERA mismatch ({st[0]} vs {ref[0]}) — a mixed-era campaign must not pool " \
+            f"(legacy alpha-space and mapped dN/dX pkls are different prior geometries)"
         assert st[1] and st[1] == ref[1], \
+            f"{p}: forward_signature mismatch (mixed-forward campaign must not pool)"
+        assert st[2] and st[2] == ref[2], \
             f"{p}: hcd_prior_signature mismatch (drifted prior constants)"
-        assert st[2] == ref[2], \
+        assert st[3] == ref[3], \
             f"{p}: prior_constants stamp mismatch (stale-prior pkl must not pool)"
-        assert st[3] and st[3] == ref[3], \
+        assert st[4] and st[4] == ref[4], \
             f"{p}: registry_signature mismatch (mixed-registry campaign must not pool)"
         # the CURRENT registry must equal the stamped one: gate membership (part1/surface_fit)
         # is read from the live registry, so a post-campaign registry edit silently changing
         # gate membership must fail loud here (reviewer-2 hardening; the profiles themselves
         # are additionally protected by the stamped-B re-check below).
-        assert st[3] == AR.registry_signature(), \
+        assert st[4] == AR.registry_signature(), \
             f"{p}: stamped registry_signature != the CURRENT scripts/ks_selboost_arms.py " \
             f"registry (the registry drifted after the campaign ran; gate membership would " \
             f"silently change — reconcile deliberately before analyzing)"
-        assert st[4] == ref[4], \
-            f"{p}: core run_kw mismatch {st[4]} != {ref[4]} (cross-pkl pairing requires " \
+        assert st[5] == ref[5], \
+            f"{p}: core run_kw mismatch {st[5]} != {ref[5]} (cross-pkl pairing requires " \
             f"identical sampler settings + seed)"
         arm = d["arm"]
         assert len(d["per_mock"]) == len(d["idxs"]), f"{p}: per_mock/idxs length mismatch"
@@ -214,25 +243,74 @@ def _ks_band_rows(z):
     return (np.asarray(z, float) >= lo - 1e-9) & (np.asarray(z, float) <= hi + 1e-9)
 
 
+def _mapped_lls_geometry(pc, zg, sel):
+    """MAPPED-era LLS geometry from the STAMPED reference (2026-07-23, Bayesian design review
+    Q2/Q5.1): per kept-z-row (sigma_lnalpha, alpha_centre, alpha_ceiling), all in alpha space.
+    sigma_lnalpha(z) = g(z) * sqrt(sigma_eps^2 + x^2 sigma_kappa^2) with g(z) the finite-
+    difference d ln alpha_LLS / d ln A through the exact occupancy map at the stamped reference
+    (x = ln((1+z)/(1+3))); the ceiling is the map's saturation alpha at amplitude e^12."""
+    import jax.numpy as jnp
+    from hcd_analysis.emulator.dndx_wc import w_c_corrected
+    ref = np.asarray(pc["ks_dndx_ref_z"], float)[sel]        # (n,3)
+    xbar = np.asarray(pc["ks_xbar_z"], float)[sel]           # (n,)
+    z = np.asarray(zg, float)[sel]
+    s_eps = float(pc["ks_dndx_sigma_eps"])
+    s_kap = float(pc["ks_dndx_sigma_kappa"])
+
+    def _alpha_lls(amp_factor):
+        d = ref * np.array([amp_factor, 1.0, 1.0])
+        out = w_c_corrected(jnp.asarray(d), jnp.asarray(xbar), jnp.asarray(z))
+        return np.asarray(out, float)[:, 1]
+    h = 0.05
+    centre = _alpha_lls(1.0)
+    g = (np.log(_alpha_lls(np.exp(h))) - np.log(_alpha_lls(np.exp(-h)))) / (2.0 * h)
+    x = np.log((1.0 + z) / 4.0)
+    sigma_ln = g * np.sqrt(s_eps ** 2 + (x * s_kap) ** 2)
+    ceiling = _alpha_lls(np.exp(12.0))
+    return sigma_ln, centre, ceiling
+
+
 def arm_coordinates(meta_arm, w=None):
     """Design coordinates + displacement of one arm from its STAMPS: the LLS boost vector on
     the kept KS z rows (z_global restricted to [2.4, 4.6]) and the stamped deployed fractional
-    width. Returns dict(n_z, dA, de1, de2, r, D, z, lnB, in_envelope)."""
+    width. Returns dict(n_z, dA, de1, de2, r, D, z, lnB, in_envelope, era, D_exact,
+    unreachable_z).
+
+    D SEMANTICS BY ERA (2026-07-23, design pair): D = |lnB|_rms / lls_frac_sigma_ks (0.40) in
+    BOTH eras — the truth boosts are alpha-space multiplicative in both, and in the mapped era
+    0.40 = g_LLS(z=3) x sigma_eps(0.5310) EXACTLY (the sigma_eps width-translation
+    construction), so 0.40 is the correct pivot-linearized alpha-space width there too. The
+    gate statistic keeps this D for cross-era comparability with the 108-fit history. The
+    mapped era ADDS the companion D_exact (per-z sigma_lnalpha(z): tilt width + map-saturation
+    g(z) both included) and the truth-REACHABILITY flag (a boosted centre beyond the occupancy
+    ceiling is a structural unreachability, not a sensitivity statement); a gate verdict that
+    flips between D and D_exact normalization is a NEEDS-PI readout item, not an analyzer
+    default. Legacy era: D_exact=None, unreachable_z=None (additive keys only)."""
     stamp = meta_arm["arm_stamp"]
     zg = np.asarray(stamp["z_global"], float)
     sel = _ks_band_rows(zg)
     z = zg[sel]
     B = np.asarray(stamp["B_z_global"]["lls_truth_boost"], float)[sel]
     lnB = np.log(B)
-    sigma_frac = float(meta_arm["prior_constants"]["lls_frac_sigma_ks"])
+    pc = meta_arm["prior_constants"]
+    sigma_frac = float(pc["lls_frac_sigma_ks"])
     dA, de1, de2, r = design_coords(lnB, z, w)
     lo, hi = AR.ENVELOPE_REL
     in_env = True
     for cls, Bv in stamp["B_z_global"].items():
         Bv = np.asarray(Bv, float)[sel]
         in_env &= bool(np.all(Bv >= lo - 1e-9) and np.all(Bv <= hi + 1e-9))
+    era = stamp_era(pc)
+    D_exact, unreachable_z = None, None
+    if era == "mapped":
+        sigma_ln, centre, ceiling = _mapped_lls_geometry(pc, zg, sel)
+        wv = np.ones_like(lnB) if w is None else np.asarray(w, float)
+        D_exact = float(np.sqrt((wv * (lnB / sigma_ln) ** 2).sum() / wv.sum()))
+        unreachable_z = [float(zz) for zz, bc, ce in zip(z, B * centre, ceiling)
+                         if bc > ce * (1.0 - 1e-9)]
     return dict(n_z=int(sel.sum()), dA=dA, de1=de1, de2=de2, r=r,
-                D=displacement_D(lnB, sigma_frac, w), z=z, lnB=lnB, in_envelope=in_env)
+                D=displacement_D(lnB, sigma_frac, w), z=z, lnB=lnB, in_envelope=in_env,
+                era=era, D_exact=D_exact, unreachable_z=unreachable_z)
 
 
 def _part1_member(arm, coords):
@@ -407,10 +485,28 @@ def summarize_campaign(shard_dir, w=None):
     _raw_terms = [(per_arm2[a][p], a, p) for a in arms for p in GATE_PARAMS
                   if np.isfinite(per_arm2[a][p])]
     S_raw, argmax_raw = max(((t, (a, p)) for t, a, p in _raw_terms), default=(0.0, None))
+    # COMPANION S under D_exact (mapped era only; REPORTED, never the gate — design pair
+    # 2026-07-23): same max, D_exact normalization. A verdict flip between S and S_exact
+    # across the 0.50 threshold is a NEEDS-PI readout item.
+    S_exact, argmax_exact = None, None
+    if any(coords[a].get("D_exact") is not None for a in arms):
+        S_exact = 0.0
+        for a in arms:
+            De = coords[a].get("D_exact")
+            if De is None or not _is_binding(a):
+                continue
+            for p in GATE_PARAMS:
+                pl = pooled[a][p]
+                t = (abs(pl["mean"]) + 2.0 * pl["se"]) / De if De > 0 else float("nan")
+                if np.isfinite(t) and t > S_exact:
+                    S_exact, argmax_exact = float(t), (a, p)
     part2 = dict(S=float(S), argmax=argmax, threshold=S_THRESHOLD, per_arm=per_arm2,
                  verdict=("PASS" if S < S_THRESHOLD else "FAIL"),
                  S_raw_allarms=float(S_raw), argmax_raw=argmax_raw,
                  null_bound_line=null_bound,
+                 S_exact=S_exact, argmax_exact=argmax_exact,
+                 verdict_flip_needs_pi=bool(S_exact is not None
+                                            and (S < S_THRESHOLD) != (S_exact < S_THRESHOLD)),
                  noise_dominated_arms=[a for a, e in per_arm2.items() if e["noise_dominated"]])
 
     # pooled 3-vector response surface (surface_fit arms only: K5 excluded — its subDLA
@@ -470,9 +566,15 @@ def summarize_campaign(shard_dir, w=None):
                         De2_max_at_De1_0=(float(room / abs(sf["S_eta2"]))
                                           if sf["S_eta2"] not in (0.0,) else float("nan")))
 
+    era = stamp_era(meta[next(iter(meta))]["prior_constants"])
+    width_convention = (
+        "alpha-space sigma/mu = 0.40 (stamped lls_frac_sigma_ks)" if era == "legacy" else
+        "pivot-linearized alpha-space 0.40 = g_LLS(3) x sigma_eps(0.5310); exponent width "
+        "kappa=0.6681 NOT in D (see D_exact companion)")
     return dict(clean=clean, arms=arms, meta=meta, coords=coords, sigma_frac=sigma_frac,
                 deltas=deltas, pooled=pooled, part1=part1, part2=part2, part3=part3,
-                surface=surface, collapse=collapse)
+                surface=surface, collapse=collapse,
+                era=era, width_convention=width_convention)
 
 
 # ---------------------------------------------------------------- report
@@ -525,8 +627,21 @@ def main_report(shard_dir, npz_out=None, fig_dir=None, w=None):
           f"{sum(len(r) for r in arms.values())} boosted fits over {len(arms)} arms; "
           f"forward_signature "
           f"{meta[next(iter(meta))]['forward']['forward_signature'][:16]}... ==")
+    print(f"ERA: {res['era'].upper()}  (width convention: {res['width_convention']})")
     print(f"stamped deployed LLS width sigma/mu = {res['sigma_frac']} (all D_a in these units); "
           f"z-weights: {'uniform (INDICATIVE, A2.2)' if w is None else 'Fisher-supplied'}")
+    if res["era"] == "mapped":
+        _p2 = res["part2"]
+        print(f"   mapped-era companion: S_exact={_p2['S_exact']} (argmax {_p2['argmax_exact']}) "
+              f"vs gate S={_p2['S']:.3f}"
+              + ("  ** VERDICT FLIP vs D_exact -> NEEDS-PI **" if _p2["verdict_flip_needs_pi"]
+                 else ""))
+        for a in sorted(res["coords"]):
+            uz = res["coords"][a].get("unreachable_z")
+            if uz:
+                print(f"   [reachability] arm {a}: boosted truth centre BEYOND the occupancy "
+                      f"ceiling at z={uz} — a FAIL here is structural unreachability, not "
+                      f"sensitivity")
     for ln in _diag_lines(clean, arms):
         print("   " + ln)
 

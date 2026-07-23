@@ -78,6 +78,18 @@ def main():
         assert dd["n_z"] == n_z, f"shard {fn} n_z={dd['n_z']} != {n_z}"
         for rec, mi in zip(dd["per_mock"], dd["idxs"]):
             by_mock.setdefault(int(mi), rec)   # per-mock pkl (if any) already set → it WINS
+
+    # RUN-CFG POOLING HOMOGENEITY (2026-07-23, CS design review Q2 — companion to the
+    # analyze_sbc_perleg assert): every merged record's default-completed run_cfg must be
+    # identical; a closure pkl must never merge with an ARM-P (deployed-prior) pkl.
+    from scripts.run_prod_sbc_shard import effective_run_cfg
+    _effs = {mi: effective_run_cfg(rec.get("run_cfg")) for mi, rec in by_mock.items()}
+    if _effs:
+        _mi0 = min(_effs)
+        for mi, e in sorted(_effs.items()):
+            assert e == _effs[_mi0], (
+                f"run_cfg POOLING MISMATCH at mock {mi}: {e} != mock {_mi0}'s {_effs[_mi0]} — "
+                f"mixed SBC populations in {a.shard_dir}; separate them before merging")
     if n_z is None:
         # only per-mock pkls present → infer n_z from a record's kept_global length.
         for rec in by_mock.values():

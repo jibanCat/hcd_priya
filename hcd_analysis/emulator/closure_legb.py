@@ -3618,7 +3618,7 @@ def _resolution_sites_extra(samples, step, L, inject_spec, leg_a):
 def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
              cemu_inflate=None, fold=0, q_levels=(0.68, 0.95), verbose=True,
              dense_mass=True, max_tree_depth=10, mock_indices=None,
-             return_per_mock=False, leg_a=False, inject_spec=None):
+             return_per_mock=False, leg_a=False, inject_spec=None, truth_fn=None):
     """Leg-B coverage over ``n_mocks`` held-out-sim mocks. Per mock: make_legb_mock → NUTS
     against the real-cov multi-leg likelihood → thin → rank the truth θ per param + the
     loglik rank → per-param empirical coverage at ``q_levels`` + bias.
@@ -3639,6 +3639,14 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
         raise ValueError(
             "run_legb: inject_spec is honoured only on the Leg-A self-draw path (leg_a=True); the "
             "held-out branch ignores it. Refusing to silently drop the injection on a held-out run.")
+    # truth_fn (R6 paired protocol, 2026-07-23): host-side callable ``key -> truth_pack`` replacing
+    # draw_leg_a_leg_truth on the SELF-DRAW branch only. The R6 legacy arm passes a closure over the
+    # MAPPED ctx so both arms of a pair share one truth (mock data is a pure fn of (truth_pack,
+    # k_mock) — the fit ctx's prior enters the mock nowhere else), which is what makes the pair's
+    # data vectors identical. Default None => draw_leg_a_leg_truth(ctx, .), byte-identical.
+    if truth_fn is not None and not leg_a:
+        raise ValueError("run_legb: truth_fn is a self-draw (leg_a=True) hook; the held-out branch "
+                         "takes its truth from the held-out sim. Refusing to silently ignore it.")
     # option-b f_res is a single GLOBAL site -> forbid a multi-instrument ctx until per-instrument sites
     # exist (4-referee panel #8). No-op when sample_res is off (golden-safe).
     _check_single_instrument_for_res(ctx.legs, getattr(ctx, "sample_res", False))
@@ -3663,7 +3671,8 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
         if leg_a:
             # Leg-A self-draw: truth ~ prior, matched-C mock; a PURE fn of (seed,m) → shardable.
             k_truth, k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, m), 3)
-            truth_pack = draw_leg_a_leg_truth(ctx, k_truth)
+            truth_pack = (draw_leg_a_leg_truth(ctx, k_truth) if truth_fn is None
+                          else truth_fn(k_truth))
             # DATA-NUISANCE INJECTION (the bias gate; inject_spec=None ⇒ byte-identical to the
             # clean self-draw — the no-op guarantee). "lls/subdla/dla_truth_boost" offset the TRUTH
             # incidence from the prior center BEFORE the forward (_apply_truth_boosts, which also

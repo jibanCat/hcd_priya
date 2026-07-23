@@ -52,6 +52,30 @@ def _mock_path(out_dir, m):
     return os.path.join(out_dir, f"mock_{int(m):04d}.pkl")
 
 
+# The historical default for every run_cfg key (the config every pre-stamp pkl was written
+# under, extended as stamps were added; see the dated back-compat pops in _run_mock — the two
+# mechanisms must stay consistent, test-enforced). Consumers (analyze_sbc_perleg,
+# merge_prod_sbc_shards) use effective_run_cfg for POOLING HOMOGENEITY: two pkls may pool iff
+# their completed configs are equal — this closes the disjoint-mock-indices hole (the _run_mock
+# CLASH guard only fires on resume-over-existing; two runs with disjoint indices into one dir
+# never met it, and the consumers globbed with zero verification; CS design review Q2).
+RUN_CFG_DEFAULTS = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="all", fold=0,
+                        tau0_prior_sigma=0.0, subdla_truth_boost=1.0, res_corr_on=True,
+                        sample_res=False, f_res_amp_sigma=None, metal_prior="uniform",
+                        ks_kmax=None,
+                        survey=None, hcd_parameterization="alpha_pivot_powerlaw_v1",
+                        hcd_prior_signature=None, single_member=False)
+
+
+def effective_run_cfg(cfg):
+    """A pkl's run_cfg completed with the historical defaults for every missing key (a
+    pre-stamp pkl IS the default config). Unknown extra keys are kept (two vintages then
+    compare unequal — fail-loud, never silently pooled)."""
+    eff = dict(RUN_CFG_DEFAULTS)
+    eff.update(cfg or {})
+    return eff
+
+
 def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_depth, seed,
               dense_mass=True, verbose=True, leg_a=True, run_cfg=None, fold=0, inject_spec=None):
     """Run (or load) ONE mock and persist it to ``{out_dir}/mock_{m:04d}.pkl``.
@@ -145,6 +169,22 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
         # fallback KS pkl (ranks don't transfer across KS f_res forwards).
         if "ks_kmax" not in eff_existing and _req.get("ks_kmax", None) is None:
             _req.pop("ks_kmax", None)
+        # BACK-COMPAT (2026-07-23, ARM-P stamps): pre-stamp pkls lack survey / hcd_parameterization /
+        # hcd_prior_signature / single_member and were ALL closure-prior (survey=None), legacy-
+        # parameterization, un-pinned-signature, ensemble runs. Don't CLASH on a missing key alone
+        # WHEN the current run is ALSO at that default. An ARM-P run (--deployed-prior) carries
+        # survey=<leg> + a non-None signature => it does NOT pop => it correctly CLASHES against any
+        # closure pkl: the certificate population must never pool a closure-prior mock (different
+        # prior => ranks don't transfer). Same one-way logic for single_member (default False).
+        if "survey" not in eff_existing and _req.get("survey", None) is None:
+            _req.pop("survey", None)
+        if "hcd_parameterization" not in eff_existing and \
+                str(_req.get("hcd_parameterization", "alpha_pivot_powerlaw_v1")) == "alpha_pivot_powerlaw_v1":
+            _req.pop("hcd_parameterization", None)
+        if "hcd_prior_signature" not in eff_existing and _req.get("hcd_prior_signature", None) is None:
+            _req.pop("hcd_prior_signature", None)
+        if "single_member" not in eff_existing and bool(_req.get("single_member", False)) is False:
+            _req.pop("single_member", None)
         if eff_existing != _req:
             raise RuntimeError(
                 f"[mock {m}] config CLASH at {path}: existing pkl run_cfg={existing} "
@@ -164,6 +204,26 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
                        inject_spec=inject_spec)
     assert len(records) == 1, f"expected 1 record for mock {m}, got {len(records)}"
     rec = records[0]
+    # ARM-P TRUTH-SOURCE CERTIFICATION (2026-07-23): on a mapped-parameterization run the truth
+    # must have come from the mapped model sites (self-draw traces _ks_dndx_sites); run_legb
+    # records those raw sites (draws + truth) in sites_extra — assert their presence so a
+    # mapped-stamped pkl can never carry a legacy-sited truth. Skip-loaded pkls were asserted at
+    # their own write time (their run_cfg matched above).
+    if cfg.get("hcd_parameterization") == "dndx_mapped_v2":
+        _missing = {"eps_lls", "kappa_lls", "m_sub"} - set(rec.get("sites_extra", {}))
+        assert not _missing, (f"[mock {m}] mapped-parameterization run missing mapped raw sites "
+                              f"{sorted(_missing)} in sites_extra — truth did not come from the "
+                              f"mapped model code")
+    # TRUTH-SITE SEMANTICS (Bayesian design review Q1): the self-draw is exact-model in the
+    # cosmology/tau0/HCD sector, but the metal f/k nodes and f_res sites are TRUTH-AT-CENTER
+    # (the mock forwards a_SiIII scalar only / no f_res), not self-draw — the certificate must not
+    # claim blanket exactness. Record the split explicitly (additive key; pooling-neutral).
+    _SELF_DRAW = {"tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla",
+                  "eps_lls", "kappa_lls", "m_sub", "t_sub", "dla_raw", "t_dla"}
+    _present = set(rec.get("sites_extra", {}))
+    rec["truth_site_semantics"] = dict(
+        self_draw=sorted(_present & _SELF_DRAW),
+        center_pinned=sorted(_present - _SELF_DRAW))
     rec["run_cfg"] = cfg            # STAMP the config so a later skip can verify it (the guard above)
     tmp = path + f".tmp.{os.getpid()}"
     with open(tmp, "wb") as f:
@@ -240,6 +300,15 @@ def main():
                          "the SAME fold-k sims + SAME mf_fold=k. Only the emulator differs vs --fold k, so "
                          "the pull-vs-n_s tilt isolates the LOSO out-of-sample (extrapolation) effect.")
     ap.add_argument("--out-dir", required=True)
+    # ARM-P (deployed-prior SBC certification, 2026-07-23; disposition row 5 "THE certificate"):
+    # pass survey=<leg> into build_legb_ctx so the fit prior IS the deployed per-survey geometry
+    # (KS => the dN/dX-mapped parameterization; truths come from the same model code because the
+    # self-draw traces the fit ctx's own prior sites). Per-leg by decision (refuse --leg all);
+    # self-draw only; production ensemble only; incompatible with the prior-mutating env arms.
+    ap.add_argument("--deployed-prior", action="store_true",
+                    help="ARM-P: build the DEPLOYED per-survey prior (requires --leg DESI/eBOSS/KS; "
+                         "refuses --held-out/--fold/--prod-emu/--single-member and the "
+                         "SBC_SUBDLA_AMP_SIGMA / SBC_TAU0_PRIOR_SIGMA prior-mutating env arms)")
     ap.add_argument("--allow-env-data-flags", action="store_true",
                     help="DANGER: permit the env data-selection flags (HCD_DESI_SNR3 / "
                          "HCD_CV_FLOOR / HCD_CV_FLOOR_RANK1) to be set at driver entry — a "
@@ -256,6 +325,26 @@ def main():
     # exported env flag. Refuse at entry unless the override is explicit.
     from hcd_analysis.emulator import data_likelihood as _DLF
     _DLF.assert_env_data_flags_unset("run_prod_sbc_shard", allow=a.allow_env_data_flags)
+
+    # ARM-P ENTRY REFUSALS (2026-07-23; design-pair reviewed). Each names the exact conflict:
+    if a.deployed_prior:
+        assert a.leg in ("DESI", "KS", "eBOSS"), \
+            "--deployed-prior is PER-LEG by decision (feedback-per-leg-metals-first); refuse --leg all"
+        assert a.leg_a, ("--deployed-prior is the self-draw certificate; --held-out is a different "
+                         "instrument (contains emulator error) and must not carry the ARM-P stamp")
+        assert a.fold is None and not a.prod_emu, \
+            "--deployed-prior certifies the PRODUCTION ensemble; --fold/--prod-emu are LOSO diagnostics"
+        assert not a.single_member, \
+            "--deployed-prior certifies the production ensemble, not the single-member de-risk object"
+        # PRIOR-MUTATING env arms: SBC_SUBDLA_AMP_SIGMA rebinds HCD_PRIOR_FRAC_SIGMA, whose
+        # verification assert reads ctx.alpha_hcd_sigma — on the mapped KS ctx those are the DORMANT
+        # legacy vectors (effective width = the pinned KS_DNDX_SIGMA_MSUB), so the override would
+        # SILENTLY NO-OP while its assert PASSES. SBC_TAU0_PRIOR_SIGMA would mutate the certified
+        # deployed tau0 prior. Both are width-check arms, not the certificate — refuse.
+        assert float(os.environ.get("SBC_SUBDLA_AMP_SIGMA", "0")) == 0.0, \
+            "--deployed-prior refuses SBC_SUBDLA_AMP_SIGMA (silent no-op on the mapped KS ctx)"
+        assert float(os.environ.get("SBC_TAU0_PRIOR_SIGMA", "0")) == 0.0, \
+            "--deployed-prior refuses SBC_TAU0_PRIOR_SIGMA (mutates the certified deployed prior)"
 
     # PINNED members (freeze decision 6): manifest-verified (sha256 + exact pairing + count +
     # stray-member tripwire) via checkpoints/production_ensemble_manifest.json, NOT a glob.
@@ -352,6 +441,9 @@ def main():
         f_res_amp_sigma=_f_res_sigma,                 # its Normal(0,.) width (DESI 0.02 / eBOSS 0.05; None off)
         metal_prior=_metal_prior,                     # flatlog2node (Gate-C) on metal legs; uniform on KS
         ks_kwargs=_ks_kw,                             # KS f_res echelle resolution_float+k_max (KS-only)
+        # ARM-P (2026-07-23): the deployed per-survey prior. None (default) == the survey=None
+        # closure prior — byte-identical to every pre-flag run (regression-guarded).
+        survey=(a.leg if a.deployed_prior else None),
         hierarchical_hcd=False, **_build_kw)
     if not a.res_corr_on:
         ctx = ctx._replace(fix_alpha_res=True)        # NORC also pins the 2 alpha_res sites (now inert)
@@ -366,6 +458,45 @@ def main():
         assert len(ctx.legs) == 1, f"--leg {a.leg}: expected 1 leg, got {[l.name for l in ctx.legs]} (pre={_pre})"
         print(f"[per-leg] restricted to {a.leg}: legs={[l.name for l in ctx.legs]}  "
               f"metals_on={_metals_on} sample_metals={_sample_metals}")
+    # ARM-P POST-BUILD FAIL-LOUDS (2026-07-23; design-pair reviewed). MODULE-ATTRIBUTE access only
+    # (the inference.py FROM-IMPORT REBINDING TRAP): the parameterization/pivot reads must see any
+    # runtime override coherently with the freeze signature.
+    _armp_param = None
+    _armp_prior_sig = None
+    if a.deployed_prior:
+        from hcd_analysis.emulator import inference as _INF
+        import numpy as _np_armp
+        _want = _INF.HCD_ALPHA_PARAMETERIZATION[a.leg]
+        _armp_param = ("dndx_mapped_v2" if getattr(ctx, "ks_dndx_mapped", False)
+                       else "alpha_pivot_powerlaw_v1")
+        assert _armp_param == _want, \
+            f"ARM-P parameterization {_armp_param} != deployed HCD_ALPHA_PARAMETERIZATION[{a.leg}] {_want}"
+        # leg-identity: a --leg X + survey=Y mispairing would pass every other assert while fitting
+        # X's data under Y's prior (Bayesian design-review Q5.3). The build got survey=a.leg above;
+        # re-assert the single retained leg IS that survey's leg by name.
+        assert len(ctx.legs) == 1 and ctx.legs[0].name == a.leg, \
+            f"ARM-P leg identity: legs={[l.name for l in ctx.legs]} != survey {a.leg}"
+        if a.leg == "KS":
+            assert ctx.ks_dndx_mapped is True, "ARM-P KS: ks_dndx_mapped not set on the built ctx"
+            # mapped pivot recompute (belt-and-braces on the build-time guard): the MAPPED LLS
+            # pivot centre from the ctx's own reference must sit in the mapped band.
+            from hcd_analysis.emulator.dndx_wc import w_c_corrected as _wcc
+            import jax.numpy as _jnp_armp
+            _mapped_piv = float(_np_armp.asarray(_wcc(
+                _jnp_armp.asarray(ctx.ks_dndx_ref_pivot),
+                _jnp_armp.asarray(float(ctx.ks_xbar_pivot)),
+                _jnp_armp.asarray(3.0)))[1])
+            _INF.assert_ks_mapped_pivot(_mapped_piv, "run_prod_sbc_shard ARM-P")
+            print(f"[arm-p] KS mapped pivot centre {_mapped_piv:.4f} (band-verified)")
+        else:
+            assert getattr(ctx, "ks_dndx_mapped", False) is False, \
+                f"ARM-P {a.leg}: unexpected mapped-KS ctx"
+            _INF.assert_hcd_pivot_z3(float(_np_armp.asarray(ctx.alpha_hcd_mu)[0]),
+                                     z=_INF.HCD_Z_PIVOT, where="run_prod_sbc_shard ARM-P",
+                                     boost=float(_INF.HCD_LLS_SURVEY_BOOST[a.leg]))
+        _armp_prior_sig = _INF.hcd_prior_signature()
+        print(f"[arm-p] DEPLOYED prior: survey={a.leg} parameterization={_armp_param} "
+              f"hcd_prior_signature={_armp_prior_sig[:12]}...")
     # SELF-CONSISTENCY (mirror the NORC + run_real_fit asserts): the certified data-nuisance forward must
     # be WIRED so the SBC self-draw forward == the real-fit forward (not silently regressed to defaults).
     assert ctx.metal_prior == _metal_prior, "SBC metal model (flatlog2node) not wired"
@@ -476,9 +607,22 @@ def main():
                    f_res_amp_sigma=_f_res_sigma,      # task #4): the f_res float + flat-log 2-node metals
                    metal_prior=str(_metal_prior),     # change the SBC POPULATION, so a WIRED pkl must never
                                       # pool with a pre-wiring (uniform / no-f_res) pkl -- distinct forward.
-                   ks_kmax=(_ks_kw or {}).get("k_max"))   # KS f_res k_max (None where KS not floating):
+                   ks_kmax=(_ks_kw or {}).get("k_max"),   # KS f_res k_max (None where KS not floating):
                                       # a wired KS pkl (0.065) must never pool with a pre-flip or a
                                       # 0.045-fallback KS pkl (Task 1C).
+                   # ARM-P discriminators (2026-07-23): survey=None outside ARM-P (== the old-pkl-
+                   # implied default, so closure resumes still work), the leg's survey key under
+                   # --deployed-prior. hcd_parameterization resolved from the BUILT ctx (mirrors
+                   # forward_stamp). hcd_prior_signature pinned ONLY on ARM-P pkls (the certificate
+                   # population, where prior-constant drift between shard submissions must clash);
+                   # None elsewhere so it never blocks legitimate closure resumes.
+                   survey=(str(a.leg) if a.deployed_prior else None),
+                   hcd_parameterization=(_armp_param if a.deployed_prior
+                                         else "alpha_pivot_powerlaw_v1"),
+                   hcd_prior_signature=_armp_prior_sig,
+                   # single-member discriminator (pre-existing hole, CS design review Q2): a
+                   # single-member de-risk pkl must never pool with an ensemble pkl.
+                   single_member=bool(a.single_member))
     records = []
     for m in idxs:
         rec = _run_mock(ctx, d, m, a.out_dir, n_mocks=a.n_mocks, n_warmup=a.n_warmup,
