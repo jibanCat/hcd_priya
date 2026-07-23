@@ -3573,6 +3573,15 @@ def _metal_node_truth(metal_misspec, ctx):
     return d
 
 
+# The sites_extra entries whose TRUTH comes from the self-draw prior trace (truth_pack /
+# truth_pack["raw"]) — the SINGLE AUTHORITY consumed by run_legb's recording loop below AND by
+# run_prod_sbc_shard's truth_site_semantics stamp (module-attribute read). Everything else in
+# sites_extra (metal f/k nodes, f_res sites) is NOT self-drawn: its mock truth is pinned
+# (f_res at the prior center 0) or sits at/below the flat-log support edge (metal nodes).
+SELF_DRAWN_EXTRA_SITES = ("tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla",
+                          "eps_lls", "kappa_lls", "m_sub", "t_sub", "dla_raw", "t_dla")
+
+
 def _metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a):
     """sites_extra entries for the Model C+ metal f/k node sites — sampled by ``_metal_2node_sites``
     but NOT packed into ``_draws_matrix`` — so the mandatory "is f_SiIII_z1 railing the 0.03 ceiling"
@@ -3771,8 +3780,7 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
         _truth_raw = truth_pack.get("raw") or {}
         # (+ the KS dN/dX-mapped raw sites, W2 2026-07-22 — presence-keyed, so absent on every
         # non-mapped config; the mapped branch samples eps/kappa/m/t/dla_raw instead of s_*.)
-        for nm in ("tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla",
-                   "eps_lls", "kappa_lls", "m_sub", "t_sub", "dla_raw", "t_dla"):
+        for nm in SELF_DRAWN_EXTRA_SITES:
             if nm in samples:
                 dr = np.asarray(samples[nm])[::step][:L]
                 sites_extra[nm] = dict(

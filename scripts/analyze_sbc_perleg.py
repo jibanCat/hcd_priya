@@ -137,7 +137,7 @@ def analyze_leg(label, src):
         print(f"[{label}] no pkls yet in {src}")
         return None
 
-    mocks, names = [], None
+    mocks, kept_files, names = [], [], None
     for f in files:
         try:
             d = pickle.load(open(f, "rb"))
@@ -147,6 +147,7 @@ def analyze_leg(label, src):
         if names is None:
             names = list(d["names"])
         mocks.append(d)
+        kept_files.append(f)         # parallel to mocks (files includes skipped pkls)
     M = len(mocks)
     if M == 0:
         print(f"[{label}] all landed pkls are partial — re-run shortly")
@@ -160,7 +161,7 @@ def analyze_leg(label, src):
     from scripts.run_prod_sbc_shard import effective_run_cfg
     _effs = [effective_run_cfg(m.get("run_cfg")) for m in mocks]
     _ref = _effs[0]
-    for f, e in zip(files, _effs):
+    for f, e in zip(kept_files, _effs):
         assert e == _ref, (f"[{label}] run_cfg POOLING MISMATCH at {os.path.basename(f)}: "
                            f"{e} != {_ref} — mixed SBC populations in one dir; separate them "
                            f"before analyzing")

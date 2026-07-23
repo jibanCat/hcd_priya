@@ -114,17 +114,31 @@ def pair_report(shard_dir, npz_out=None):
           f"forward {meta['mapped']['forward']['forward_signature'][:12]}...; "
           f"prior sig {meta['mapped']['forward']['hcd_prior_signature'][:12]}...")
     print("delta = bias_mapped - bias_legacy per pair (posterior-mean bias vs the SHARED truth);")
-    print("mean +/- paired SE over pairs. SUPPORTING EVIDENCE, no gate; cannot adjudicate")
+    print("mean +/- paired SE over pairs. ns/Ap are in theta_unit (unit-cube) coordinates, the")
+    print("campaign-analyzer convention. SUPPORTING EVIDENCE, no gate; cannot adjudicate")
     print("count-vs-occupancy (needs external absorber counts).")
+    # per-arm divergence accounting (domain review 2026-07-23: a divergence in one arm of a
+    # pair biases that pair's delta — the reader must see it).
+    for arm in ("legacy", "mapped"):
+        nd = {m: int(by_arm[arm][m].get("n_div", 0)) for m in common}
+        bad = {m: n for m, n in nd.items() if n > 0}
+        print(f"  [{arm}] divergences: total {sum(nd.values())}, "
+              f"divergent fits {len(bad)}/{len(common)}"
+              + (f" (mocks {sorted(bad)})" if bad else ""))
 
     out = dict(mocks=np.asarray(common), truth_source=ts)
     for p in PAIR_PARAMS:
-        try:
-            dl = np.array([_bias(by_arm["mapped"][m], p) - _bias(by_arm["legacy"][m], p)
-                           for m in common])
-        except KeyError:
-            print(f"  {p:>13}: site absent in one arm (parameterization-specific) — skipped")
-            continue
+        # every PAIR_PARAM exists in BOTH eras (alpha pivots are re-emitted deterministics on
+        # the mapped branch; tau0 sites in sites_extra on both) — absence means a broken/stale
+        # pkl, never a parameterization difference. HARD refusal (domain review 2026-07-23).
+        for arm in ("legacy", "mapped"):
+            for m in common:
+                rec = by_arm[arm][m]
+                assert p in rec["names"] or p in rec.get("sites_extra", {}), \
+                    f"param {p!r} absent in the {arm} arm, mock {m} — broken/stale pkl " \
+                    f"(every PAIR_PARAM exists in both parameterizations)"
+        dl = np.array([_bias(by_arm["mapped"][m], p) - _bias(by_arm["legacy"][m], p)
+                       for m in common])
         se = dl.std(ddof=1) / np.sqrt(len(dl)) if len(dl) > 1 else float("nan")
         print(f"  {p:>13}: mean {dl.mean():+.4f} +/- {se:.4f}   per-pair "
               f"{np.array2string(dl, precision=3)}")

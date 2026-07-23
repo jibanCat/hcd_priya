@@ -59,6 +59,13 @@ def _mock_path(out_dir, m):
 # their completed configs are equal — this closes the disjoint-mock-indices hole (the _run_mock
 # CLASH guard only fires on resume-over-existing; two runs with disjoint indices into one dir
 # never met it, and the consumers globbed with zero verification; CS design review Q2).
+# ONE INTENTIONAL DIVERGENCE (consistency review 2026-07-23, test-pinned): the `leg` key. The
+# _run_mock pop for `leg` is an UNCONDITIONAL wildcard (2026-06-21: a leg-less pkl in a per-leg
+# --out-dir IS that leg — per-leg runs are dir-separated, so the runner may resume pre-stamp
+# per-leg stragglers), while effective_run_cfg completes a missing `leg` to "all" — so the
+# CONSUMERS refuse to pool a pre-stamp leg-less pkl into a per-leg analysis. That refusal is
+# deliberate and fail-loud: the certificate consumers must not trust a directory-location
+# convention the pkl itself cannot attest; separate or re-run stragglers before analyzing.
 RUN_CFG_DEFAULTS = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="all", fold=0,
                         tau0_prior_sigma=0.0, subdla_truth_boost=1.0, res_corr_on=True,
                         sample_res=False, f_res_amp_sigma=None, metal_prior="uniform",
@@ -214,16 +221,19 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
         assert not _missing, (f"[mock {m}] mapped-parameterization run missing mapped raw sites "
                               f"{sorted(_missing)} in sites_extra — truth did not come from the "
                               f"mapped model code")
-    # TRUTH-SITE SEMANTICS (Bayesian design review Q1): the self-draw is exact-model in the
-    # cosmology/tau0/HCD sector, but the metal f/k nodes and f_res sites are TRUTH-AT-CENTER
-    # (the mock forwards a_SiIII scalar only / no f_res), not self-draw — the certificate must not
-    # claim blanket exactness. Record the split explicitly (additive key; pooling-neutral).
-    _SELF_DRAW = {"tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla",
-                  "eps_lls", "kappa_lls", "m_sub", "t_sub", "dla_raw", "t_dla"}
+    # TRUTH-SITE SEMANTICS (Bayesian design review Q1; bucket renamed per domain review 2026-07-23):
+    # the self-draw is exact-model in the cosmology/tau0/HCD sector, but the metal f/k nodes and
+    # f_res sites are NOT self-drawn (f_res truth pinned at the prior center 0; metal-node truth
+    # sits at/below the FLAT-LOG SUPPORT EDGE — a flat-log prior has no center, so "center_pinned"
+    # would overclaim). The certificate must not claim blanket exactness. Single authority for the
+    # self-drawn set: closure_legb.SELF_DRAWN_EXTRA_SITES (module-attribute read, test-enforced).
+    from hcd_analysis.emulator import closure_legb as _CL
     _present = set(rec.get("sites_extra", {}))
     rec["truth_site_semantics"] = dict(
-        self_draw=sorted(_present & _SELF_DRAW),
-        center_pinned=sorted(_present - _SELF_DRAW))
+        self_draw=sorted(_present & set(_CL.SELF_DRAWN_EXTRA_SITES)),
+        not_self_drawn=sorted(_present - set(_CL.SELF_DRAWN_EXTRA_SITES)),
+        note="not_self_drawn: f_res truth = prior center 0; metal f/k node truth at/below the "
+             "flat-log support edge (no center exists)")
     rec["run_cfg"] = cfg            # STAMP the config so a later skip can verify it (the guard above)
     tmp = path + f".tmp.{os.getpid()}"
     with open(tmp, "wb") as f:
@@ -617,7 +627,11 @@ def main():
                    # population, where prior-constant drift between shard submissions must clash);
                    # None elsewhere so it never blocks legitimate closure resumes.
                    survey=(str(a.leg) if a.deployed_prior else None),
-                   hcd_parameterization=(_armp_param if a.deployed_prior
+                   # ctx-RESOLVED in every branch (consistency review 2026-07-23): a future
+                   # dispatch change can then never make the stamp lie or silently skip the
+                   # mapped truth-sites certification (keyed on this value in _run_mock).
+                   hcd_parameterization=("dndx_mapped_v2"
+                                         if getattr(ctx, "ks_dndx_mapped", False)
                                          else "alpha_pivot_powerlaw_v1"),
                    hcd_prior_signature=_armp_prior_sig,
                    # single-member discriminator (pre-existing hole, CS design review Q2): a

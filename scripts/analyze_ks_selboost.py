@@ -27,8 +27,10 @@ truth_alpha_hcd_z boosted-class columns == B_arm(z_global) x clean columns; ever
 truth entry bit-identical; per-arm mock completeness; stamped B vectors re-verified against the
 profiles; smoke pkls filtered. Any violation is a stale or corrupt campaign, not a soft skip.
 
-Pure numpy on purpose — login-node safe (no JAX import; profile evaluation via the numpy
-registry twin scripts/ks_selboost_arms.eval_profile, hook-agreement test-enforced).
+Pure numpy on LEGACY-era campaigns — login-node safe (profile evaluation via the numpy
+registry twin scripts/ks_selboost_arms.eval_profile, hook-agreement test-enforced). A
+MAPPED-era campaign lazily imports jax.numpy + dndx_wc inside _mapped_lls_geometry (the
+D_exact/reachability companion; x64 is set by the hcd_analysis.emulator package import).
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
      scripts/analyze_ks_selboost.py --shard-dir /scratch/cavestru_root/cavestru1/mfho/ks_selboost \
@@ -278,8 +280,9 @@ def arm_coordinates(meta_arm, w=None):
 
     D SEMANTICS BY ERA (2026-07-23, design pair): D = |lnB|_rms / lls_frac_sigma_ks (0.40) in
     BOTH eras — the truth boosts are alpha-space multiplicative in both, and in the mapped era
-    0.40 = g_LLS(z=3) x sigma_eps(0.5310) EXACTLY (the sigma_eps width-translation
-    construction), so 0.40 is the correct pivot-linearized alpha-space width there too. The
+    0.40 = g_LLS(z=3) x sigma_eps(0.5310) to <1e-4 relative (pinned-literal quantization of
+    the sigma_eps width-translation construction; domain-review-measured 0.399993), so 0.40
+    is the correct pivot-linearized alpha-space width there too. The
     gate statistic keeps this D for cross-era comparability with the 108-fit history. The
     mapped era ADDS the companion D_exact (per-z sigma_lnalpha(z): tilt width + map-saturation
     g(z) both included) and the truth-REACHABILITY flag (a boosted centre beyond the occupancy
@@ -567,10 +570,12 @@ def summarize_campaign(shard_dir, w=None):
                                           if sf["S_eta2"] not in (0.0,) else float("nan")))
 
     era = stamp_era(meta[next(iter(meta))]["prior_constants"])
+    _pc0 = meta[next(iter(meta))]["prior_constants"]
     width_convention = (
-        "alpha-space sigma/mu = 0.40 (stamped lls_frac_sigma_ks)" if era == "legacy" else
-        "pivot-linearized alpha-space 0.40 = g_LLS(3) x sigma_eps(0.5310); exponent width "
-        "kappa=0.6681 NOT in D (see D_exact companion)")
+        f"alpha-space sigma/mu = {sigma_frac} (stamped lls_frac_sigma_ks)" if era == "legacy"
+        else f"pivot-linearized alpha-space {sigma_frac} = g_LLS(3) x sigma_eps"
+             f"({_pc0.get('ks_dndx_sigma_eps')}) to <1e-4; exponent width kappa="
+             f"{_pc0.get('ks_dndx_sigma_kappa')} NOT in D (see D_exact companion)")
     return dict(clean=clean, arms=arms, meta=meta, coords=coords, sigma_frac=sigma_frac,
                 deltas=deltas, pooled=pooled, part1=part1, part2=part2, part3=part3,
                 surface=surface, collapse=collapse,
@@ -628,7 +633,11 @@ def main_report(shard_dir, npz_out=None, fig_dir=None, w=None):
           f"forward_signature "
           f"{meta[next(iter(meta))]['forward']['forward_signature'][:16]}... ==")
     print(f"ERA: {res['era'].upper()}  (width convention: {res['width_convention']})")
-    print(f"stamped deployed LLS width sigma/mu = {res['sigma_frac']} (all D_a in these units); "
+    _wline = (f"stamped deployed LLS width sigma/mu = {res['sigma_frac']}"
+              if res["era"] == "legacy" else
+              f"D normalization {res['sigma_frac']} (= g_LLS(3) x sigma_eps; the DEPLOYED "
+              f"mapped width is sigma_eps in log-dN/dX)")
+    print(f"{_wline} (all D_a in these units); "
           f"z-weights: {'uniform (INDICATIVE, A2.2)' if w is None else 'Fisher-supplied'}")
     if res["era"] == "mapped":
         _p2 = res["part2"]
@@ -640,8 +649,8 @@ def main_report(shard_dir, npz_out=None, fig_dir=None, w=None):
             uz = res["coords"][a].get("unreachable_z")
             if uz:
                 print(f"   [reachability] arm {a}: boosted truth centre BEYOND the occupancy "
-                      f"ceiling at z={uz} — a FAIL here is structural unreachability, not "
-                      f"sensitivity")
+                      f"ceiling (at reference sub/DLA occupancy) at z={uz} — a FAIL here is "
+                      f"structural unreachability, not sensitivity")
     for ln in _diag_lines(clean, arms):
         print("   " + ln)
 

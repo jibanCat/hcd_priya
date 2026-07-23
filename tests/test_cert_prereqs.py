@@ -223,3 +223,40 @@ def test_campaign_analyzer_refuses_r6_pkl(tmp_path):
     os.rename(src, dst)
     with pytest.raises(AssertionError, match="r6_override"):
         AKS.load_campaign(str(tmp_path))
+
+
+def test_leg_key_intentional_divergence_runner_vs_consumer(tmp_path):
+    """The DOCUMENTED divergence (consistency review 2026-07-23): a pre-2026-06-21 pkl (run_cfg
+    present, no `leg` key) under a per-leg otherwise-matching request — the RUNNER pools (the
+    unconditional leg pop: dir-separation implies the leg) while the CONSUMER refuses
+    (effective_run_cfg completes missing leg to "all"). Both behaviors are deliberate; this
+    test pins the divergence so any change to either side is loud."""
+    ex = {k: v for k, v in _CLOSURE.items()
+          if k not in ("leg", "survey", "hcd_parameterization", "hcd_prior_signature",
+                       "single_member", "ks_kmax", "sample_res", "f_res_amp_sigma",
+                       "metal_prior", "res_corr_on")}
+    req = dict(ex, leg="KS")
+    # runner: pools (every differing key is excused by its back-compat pop at the default)
+    out = str(tmp_path / "leg_div")
+    _write_stub(out, 0, ex, marker="straggler")
+    req_full = dict(req, res_corr_on=True, sample_res=False, f_res_amp_sigma=None,
+                    metal_prior="uniform", ks_kmax=None, survey=None,
+                    hcd_parameterization="alpha_pivot_powerlaw_v1",
+                    hcd_prior_signature=None, single_member=False)
+    rec = runner._run_mock(None, None, 0, out, run_cfg=req_full, **_DUMMY)
+    assert rec["_marker"] == "straggler"
+    # consumer: refuses (missing leg completes to "all" != "KS")
+    assert runner.effective_run_cfg(ex) != runner.effective_run_cfg(req_full)
+
+
+def test_self_drawn_sites_single_authority():
+    """run_prod_sbc_shard's truth_site_semantics reads closure_legb.SELF_DRAWN_EXTRA_SITES —
+    the same tuple run_legb's recording loop iterates. Pin its contents + the exclusions."""
+    from hcd_analysis.emulator import closure_legb as CL
+    assert CL.SELF_DRAWN_EXTRA_SITES == ("tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla",
+                                         "eps_lls", "kappa_lls", "m_sub", "t_sub", "dla_raw",
+                                         "t_dla")
+    for nm in ("f_res_amp", "f_res_slope"):
+        assert nm not in CL.SELF_DRAWN_EXTRA_SITES
+    assert not any(nm.startswith(("f_", "k_")) for nm in CL.SELF_DRAWN_EXTRA_SITES
+                   if nm not in ("f_res_amp",))
