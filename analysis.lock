@@ -1,6 +1,9 @@
 {
   "analysis": "hcd_priya real-data blind P1D cosmology fit",
   "blinding": {
+    "blind_lock_git_commit": "aefaf51",
+    "blind_lock_sha256": "14fe4274b276480aa7164356f7082ef05e57933771e96ff5870a8a3d95f052cb",
+    "note": "COPIED VERBATIM from blind.lock (read-only; the generator never writes or recomputes it). prior_sigma desync between the two locks = blinding bug.",
     "offset_sigma_multiple": 3.0,
     "params": [
       "ns",
@@ -10,24 +13,53 @@
       "Ap": 4.0414518843273807e-10,
       "ns": 0.07216878364870323
     },
-    "seed_ref": "blind.lock (seed_str = project_string@git_commit); offset applied at VIEW time"
+    "seed_ref": "blind.lock (seed_str = project_string@git_commit); offset applied at VIEW time. REFERENCE ONLY -- the seed_str itself is deliberately not duplicated here."
   },
   "covariance": {
     "cemu_inflate": 1.0,
+    "desi_dla_cov_reduce": true,
     "emucoh": "ON (off-diagonal-only)",
     "mf": "ON",
     "mf_floor": "ON",
+    "mf_shape": "OFF",
     "use_xclass": true
   },
-  "created_utc": "2026-06-15T01:06:57.251715+00:00",
+  "created_utc": "2026-07-23T15:23:12.043974+00:00",
   "decisions": {
+    "desi_dla_cov_reduce": {
+      "note": "PI disposition 2026-07-17: drop syst_e_dla_completeness from the DESI C_data while alpha_DLA floats (cup1d 'red'); e_dla stays an out-of-model stress test, NOT a mean template",
+      "value": true
+    },
     "ks_zlo": {
       "baseline": 2.4,
       "diagnostic": 2.8,
-      "note": "PI 2026-06-14: KS z_lo=2.4 is the BASELINE real fit (root real_ks; the minimal closure-clean cut, PI decision 2026-06-08). KS z_lo=2.8 is a DIAGNOSTIC comparison (the KS-author published more-conservative cut; drops the z=2.4/2.6 bins, 132->110 rows) run via scripts/batch_real_fit_ks_z28.sh -> distinct root real_ks_z28, same blind.lock. Wired through run_real_fit --ks-zlo -> build_real_ctx(ks_zlo=) -> build_legb_ctx(ks_kwargs={z_lo}). Does NOT change the baseline."
-    }
+      "note": "baseline = the live load_ks_leg z_lo default (the PI 2026-06-08/14 minimal closure-clean cut); diagnostic = the KS-author more-conservative cut run via scripts/batch_real_fit_ks_z28.sh -> distinct root, same blind.lock; does NOT change the baseline"
+    },
+    "norc": {
+      "note": "Gate-A NORC deployed forward: res_corr dropped + alpha_res pinned + KS auto-capped (see uncovered_constants KS_NORC_KMAX_CAP); the single reversal knob is closure_legb.PROD_RES_CORR_ON",
+      "prod_res_corr_on": false
+    },
+    "pi_decision_records": [
+      {
+        "path": "/home/mfho/hcd_priya_notes/docs/superpowers/2026-07-21-PI-DECISIONS-OF-RECORD.md",
+        "sha256": "be376d39e6b8a179ea8d4b11f87cf45ea8ed929e313fcd51629bc375d1e677b8"
+      },
+      {
+        "path": "/home/mfho/hcd_priya_notes/docs/superpowers/2026-07-21-PI-DECISIONS-02-LLS-REPARAM.md",
+        "sha256": "f4419a08022eee04cfe9e7ff3c8c2bded523c5e7fc134a71e7ad30517cc9fb65"
+      },
+      {
+        "path": "/home/mfho/hcd_priya_notes/docs/superpowers/2026-07-22-PI-DECISIONS-03-TAKEOVER.md",
+        "sha256": "50df88c42dba63b7c2ee9ce229066458a29131dd67825c3212c873584d8c21b3"
+      },
+      {
+        "path": "/home/mfho/hcd_priya_notes/docs/superpowers/2026-07-23-PI-DECISIONS-04-SIGNATURES.md",
+        "sha256": "56c072939c9de58f354ec06f4675771bb400e78620864b9dbacb6536e9443e54"
+      }
+    ]
   },
   "emulator": {
+    "checkpoints_dir": "/home/mfho/hcd_priya/checkpoints",
     "ensemble_members": [
       "final_prod_seed0",
       "final_prod_seed1",
@@ -36,19 +68,258 @@
       "final_prod_seed4"
     ],
     "forward": "ensemble-mean over members",
-    "n_members": 5
+    "manifest_path": "checkpoints/production_ensemble_manifest.json",
+    "manifest_schema_version": 1,
+    "manifest_sha256": "55330978dafb98574be3cb4ddbfeae7c038e072ee96d38351fdfdedad30ffcac",
+    "members": [
+      {
+        "eqx": "final_prod_seed0.eqx",
+        "eqx_sha256": "718bd9306f9864e907d766f1765ed802e3581c39a53c7679151960fceb018057",
+        "hist": "final_prod_seed0.hist.json",
+        "index": 0,
+        "meta": "final_prod_seed0.meta.json",
+        "meta_sha256": "61d15e7659f316f2125880e8ec7a278ea76b10e36af7a134bef0df35dd71d4e3",
+        "name": "final_prod_seed0",
+        "norm": "final_prod_seed0.norm.pkl",
+        "norm_sha256": "b9d224fc9ca52558169660d195424ed75d1e3096881fb1ac49f151035b7a0454"
+      },
+      {
+        "eqx": "final_prod_seed1.eqx",
+        "eqx_sha256": "d1097fff6880cde3616979014977bfd8107383c05579cb6334f411efc6908047",
+        "hist": "final_prod_seed1.hist.json",
+        "index": 1,
+        "meta": "final_prod_seed1.meta.json",
+        "meta_sha256": "7d598fc91990b91d03b9c86dda23d2c2df88dc1b0cb9cf5f3ac58ea92bb3be9c",
+        "name": "final_prod_seed1",
+        "norm": "final_prod_seed1.norm.pkl",
+        "norm_sha256": "b9d224fc9ca52558169660d195424ed75d1e3096881fb1ac49f151035b7a0454"
+      },
+      {
+        "eqx": "final_prod_seed2.eqx",
+        "eqx_sha256": "c99b59eb45298810ef3011121333147a7206f32c6957fac825899bd3d00a6a46",
+        "hist": "final_prod_seed2.hist.json",
+        "index": 2,
+        "meta": "final_prod_seed2.meta.json",
+        "meta_sha256": "62a5c215253bbc7cbbbb6c1d1bb38f708d6a3b51f7d8e6ad01a670aed6d04387",
+        "name": "final_prod_seed2",
+        "norm": "final_prod_seed2.norm.pkl",
+        "norm_sha256": "b9d224fc9ca52558169660d195424ed75d1e3096881fb1ac49f151035b7a0454"
+      },
+      {
+        "eqx": "final_prod_seed3.eqx",
+        "eqx_sha256": "3a811ccb63e5bf90d3215122b3fe91a8a9c737668d1cb5c2d01b73ba4b1bbdf3",
+        "hist": "final_prod_seed3.hist.json",
+        "index": 3,
+        "meta": "final_prod_seed3.meta.json",
+        "meta_sha256": "56dd59efc905a9d3a75fbafcfa95ca30b4943fcfc89aec6875a6718ca1cb0df2",
+        "name": "final_prod_seed3",
+        "norm": "final_prod_seed3.norm.pkl",
+        "norm_sha256": "b9d224fc9ca52558169660d195424ed75d1e3096881fb1ac49f151035b7a0454"
+      },
+      {
+        "eqx": "final_prod_seed4.eqx",
+        "eqx_sha256": "b4100eb26928f2cb3f68e7292e06e9f6533de7100c05c5fb57bccfa8685f924d",
+        "hist": "final_prod_seed4.hist.json",
+        "index": 4,
+        "meta": "final_prod_seed4.meta.json",
+        "meta_sha256": "5fae44cac6327a33a17cd8b4c1f70cb5f2f8ab0b8f71908a23baeb1510a1d752",
+        "name": "final_prod_seed4",
+        "norm": "final_prod_seed4.norm.pkl",
+        "norm_sha256": "b9d224fc9ca52558169660d195424ed75d1e3096881fb1ac49f151035b7a0454"
+      }
+    ],
+    "n_members": 5,
+    "normalizers_byte_identical": true,
+    "verified": "verify_manifest PASS at generation (sha256 digests + structural pairing + count + order + stray-member tripwire)"
   },
-  "git_commit": "e66de70",
+  "git_commit": "8e0c799",
+  "inputs": {
+    "data_desi": {
+      "path": "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
+      "sha256": "8d5153d861f21d2ac0a1894f99dd2a9d633a39cc07fa564aac1cba78429c9296",
+      "size": 16675393
+    },
+    "data_eboss": {
+      "path": "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
+      "sha256": "843f8f246a9fb3fb3d3a3c180ab58c19b0b2f823aa738222e514eb351e886e96",
+      "size": 223046
+    },
+    "data_ks": {
+      "base": "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
+      "files": {
+        "detailed-p1d-results-karacayli_etal2021.txt": {
+          "path": "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/detailed-p1d-results-karacayli_etal2021.txt",
+          "sha256": "f443a491eead6730f65e9e19a96a247d92947aed307323c95cf7304879975517",
+          "size": 60988
+        },
+        "final-conservative-covariance-karacayli_etal2021.txt": {
+          "path": "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/final-conservative-covariance-karacayli_etal2021.txt",
+          "sha256": "a3f317d812c9afa2557837e25fdf06e2afdc268df438cd4a412203623f603d98",
+          "size": 844526
+        },
+        "final-conservative-p1d-karacayli_etal2021.txt": {
+          "path": "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt",
+          "sha256": "299b11cbb394848a04787498ba64fd1ba958db598c0fbadc082724347c1e9dbf",
+          "size": 9150
+        },
+        "ks-lya-stat-covariance-karacayli_etal_2021.txt": {
+          "path": "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/ks-lya-stat-covariance-karacayli_etal_2021.txt",
+          "sha256": "90d6f7c95a9716745ebeafda3a3a445eb12d3e9ef8077ba38dc9bfdcdba75786",
+          "size": 2529901
+        },
+        "ks-si4-stat-covariance-karacayli_etal2021.txt": {
+          "path": "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/ks-si4-stat-covariance-karacayli_etal2021.txt",
+          "sha256": "a224ed0061395f6a88b2de52b73bd311b02b9c5b0dc6e4b6eec2a68c139f09dc",
+          "size": 2530261
+        },
+        "xq100-stat-covariance-karacayli_etal2021.txt": {
+          "path": "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/xq100-stat-covariance-karacayli_etal2021.txt",
+          "sha256": "9e6df4afd79b4f4c04e6011d6a7411bde8b2ec078978ef327e3766c64ea7a6ef",
+          "size": 550988
+        }
+      }
+    },
+    "error_vector": {
+      "path": "/home/mfho/hcd_priya/checkpoints/error_vector.npz",
+      "sha256": "bcb3e0737627de911b6212c280432e69af6560fb701e8937a2e0833099298e64",
+      "size": 69296
+    },
+    "lf_tau0_cache": {
+      "path": "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5",
+      "sha256": "780cde018212bd514c06ecfdeea9b7c6ea328974cea981d3d391f4c9d3691b3d",
+      "size": 955563416
+    },
+    "mf_backbone": {
+      ".eqx": {
+        "path": "/home/mfho/hcd_priya/checkpoints/final_fold0.eqx",
+        "sha256": "4ae9db519ff8e542cf1f95f5376d0d2d675b2115b69bd65aff43c598afbd968d",
+        "size": 3121192
+      },
+      ".meta.json": {
+        "path": "/home/mfho/hcd_priya/checkpoints/final_fold0.meta.json",
+        "sha256": "0a81f405fe6cb09f5025e778717340933f24dae9aefb4ca6638eaad910282c2c",
+        "size": 3876
+      },
+      ".norm.pkl": {
+        "path": "/home/mfho/hcd_priya/checkpoints/final_fold0.norm.pkl",
+        "sha256": "9bb14b426de0cfe8490d0b4ebb85e24c18d0823bf11a731a0d4e16a51c81d94d",
+        "size": 1721680
+      }
+    },
+    "note": "sha256 identity of every raw input the deployed forward reads; covered by NO signature -- the lock is the sole pin. The production ensemble checkpoints are pinned separately in the emulator block.",
+    "xclass_error_vector": {
+      "path": "/home/mfho/hcd_priya/checkpoints/error_vector_xclass.npz",
+      "sha256": "ca60f291990da782bc81a082db76bd0e6b57d4ea9986158e3e1c717713f75253",
+      "size": 334252
+    }
+  },
   "legs": {
     "DESI": {
+      "ctx_cov": {
+        "cemu_inflate": 1.0,
+        "dla_cov_reduced": true,
+        "emucoh_offdiag_only": true,
+        "emucoh_on": true,
+        "mf_floor_attached": true,
+        "mf_on": true,
+        "mf_shape_on": false,
+        "use_xclass": true
+      },
       "dla_forward_frac": 1.0,
+      "forward": {
+        "alpha_mode": "shared",
+        "cv_floor_on": false,
+        "cv_floor_rank1": false,
+        "dla_cov_reduced": true,
+        "dla_forward_frac": 1.0,
+        "f_res_amp_sigma": 0.02,
+        "fix_alpha_res": true,
+        "forward_signature": "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b",
+        "hcd_parameterization": "alpha_pivot_powerlaw_v1",
+        "hcd_prior_signature": "50befc941edfc4c789286d2054d0107f1eb19a5672bcb86131426fb101eea216",
+        "metal_node_z": [
+          2.2,
+          4.2
+        ],
+        "metal_prior": "flatlog2node",
+        "res_corr_on": false,
+        "sample_res": true,
+        "use_snr3": false
+      },
       "k_max": 0.04094021,
       "k_min": 0.00125,
+      "metals": {
+        "a_siiii_max": 0.15,
+        "metal_fnode_hi": 0.03,
+        "metal_fnode_lo": 0.003,
+        "metal_node_z": [
+          2.2,
+          4.2
+        ],
+        "metal_one_minus_F_ref": 0.4127513487602582,
+        "metal_prior": "flatlog2node",
+        "metal_siII_legs": [
+          "DESI"
+        ],
+        "sample_metals": true
+      },
       "metals_on": true,
       "mf_floor_on": false,
+      "n_ensemble_members": 5,
+      "n_per_z": [
+        49,
+        52,
+        55,
+        58,
+        61,
+        63,
+        65,
+        67,
+        69,
+        70,
+        72
+      ],
       "n_rows": 681,
       "n_z": 11,
       "name": "DESI",
+      "prior": {
+        "alpha_hcd_mu": [
+          0.17211216067355312,
+          0.06218315972222222,
+          0.004409670138888889
+        ],
+        "alpha_hcd_sigma": [
+          0.04939619011330974,
+          0.02487326388888889,
+          0.0022048350694444446
+        ],
+        "alpha_vector_semantics": "deployed prior",
+        "dtau0_range": [
+          -0.4,
+          0.25
+        ],
+        "hcd_parameterization": "alpha_pivot_powerlaw_v1",
+        "marginalize_zslope": true,
+        "tau0_amp_range": [
+          0.75,
+          1.25
+        ],
+        "tau0_pivot_z": 3.0,
+        "zslope_mu": [
+          2.127,
+          2.758,
+          2.366
+        ],
+        "zslope_sigma": [
+          0.52,
+          0.53,
+          0.33
+        ]
+      },
+      "resolution_coherent_on": false,
+      "resolution_on": true,
+      "resolution_ready": true,
+      "survey": "desi",
       "z": [
         2.2,
         2.4,
@@ -64,14 +335,112 @@
       ]
     },
     "KS": {
+      "ctx_cov": {
+        "cemu_inflate": 1.0,
+        "dla_cov_reduced": false,
+        "emucoh_offdiag_only": true,
+        "emucoh_on": true,
+        "mf_floor_attached": true,
+        "mf_on": true,
+        "mf_shape_on": false,
+        "use_xclass": true
+      },
       "dla_forward_frac": 0.0,
+      "forward": {
+        "alpha_mode": "shared",
+        "cv_floor_on": false,
+        "cv_floor_rank1": false,
+        "dla_cov_reduced": false,
+        "dla_forward_frac": 0.0,
+        "f_res_amp_sigma": 0.15,
+        "fix_alpha_res": true,
+        "forward_signature": "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b",
+        "hcd_parameterization": "dndx_mapped_v2",
+        "hcd_prior_signature": "50befc941edfc4c789286d2054d0107f1eb19a5672bcb86131426fb101eea216",
+        "metal_node_z": [
+          2.2,
+          4.2
+        ],
+        "metal_prior": "uniform",
+        "res_corr_on": false,
+        "sample_res": true,
+        "use_snr3": false
+      },
       "k_max": 0.0627126,
       "k_min": 0.0055,
+      "metals": {
+        "a_siiii_max": 0.15,
+        "metal_fnode_hi": 0.03,
+        "metal_fnode_lo": 0.003,
+        "metal_node_z": [
+          2.2,
+          4.2
+        ],
+        "metal_one_minus_F_ref": 0.4127513487602582,
+        "metal_prior": "uniform",
+        "metal_siII_legs": [
+          "DESI"
+        ],
+        "sample_metals": false
+      },
       "metals_on": false,
       "mf_floor_on": true,
+      "n_ensemble_members": 5,
+      "n_per_z": [
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11
+      ],
       "n_rows": 132,
       "n_z": 12,
       "name": "KS",
+      "prior": {
+        "alpha_hcd_mu": [
+          0.4302804016838828,
+          0.06218315972222222,
+          0.004409670138888889
+        ],
+        "alpha_hcd_sigma": [
+          0.17211216067355314,
+          0.02487326388888889,
+          0.0022048350694444446
+        ],
+        "alpha_vector_semantics": "LEGACY-AUDIT-ONLY (dormant; deployed prior = the mapped dN/dX construction in prior_constants)",
+        "dtau0_range": [
+          -0.4,
+          0.25
+        ],
+        "hcd_parameterization": "dndx_mapped_v2",
+        "marginalize_zslope": true,
+        "tau0_amp_range": [
+          0.75,
+          1.25
+        ],
+        "tau0_pivot_z": 3.0,
+        "zslope_mu": [
+          2.127,
+          2.758,
+          2.366
+        ],
+        "zslope_sigma": [
+          0.52,
+          0.53,
+          0.33
+        ]
+      },
+      "resolution_coherent_on": false,
+      "resolution_on": true,
+      "resolution_ready": true,
+      "survey": "ks",
       "z": [
         2.4,
         2.6,
@@ -88,14 +457,113 @@
       ]
     },
     "eBOSS": {
+      "ctx_cov": {
+        "cemu_inflate": 1.0,
+        "dla_cov_reduced": false,
+        "emucoh_offdiag_only": true,
+        "emucoh_on": true,
+        "mf_floor_attached": true,
+        "mf_on": true,
+        "mf_shape_on": false,
+        "use_xclass": true
+      },
       "dla_forward_frac": 0.0,
+      "forward": {
+        "alpha_mode": "shared",
+        "cv_floor_on": false,
+        "cv_floor_rank1": false,
+        "dla_cov_reduced": false,
+        "dla_forward_frac": 0.0,
+        "f_res_amp_sigma": 0.05,
+        "fix_alpha_res": true,
+        "forward_signature": "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b",
+        "hcd_parameterization": "alpha_pivot_powerlaw_v1",
+        "hcd_prior_signature": "50befc941edfc4c789286d2054d0107f1eb19a5672bcb86131426fb101eea216",
+        "metal_node_z": [
+          2.2,
+          4.2
+        ],
+        "metal_prior": "flatlog2node",
+        "res_corr_on": false,
+        "sample_res": true,
+        "use_snr3": false
+      },
       "k_max": 0.019512,
       "k_min": 0.001084,
+      "metals": {
+        "a_siiii_max": 0.15,
+        "metal_fnode_hi": 0.03,
+        "metal_fnode_lo": 0.003,
+        "metal_node_z": [
+          2.2,
+          4.2
+        ],
+        "metal_one_minus_F_ref": 0.4127513487602582,
+        "metal_prior": "flatlog2node",
+        "metal_siII_legs": [
+          "DESI"
+        ],
+        "sample_metals": true
+      },
       "metals_on": true,
       "mf_floor_on": false,
+      "n_ensemble_members": 5,
+      "n_per_z": [
+        35,
+        35,
+        35,
+        35,
+        35,
+        35,
+        35,
+        35,
+        35,
+        35,
+        35,
+        35,
+        35
+      ],
       "n_rows": 455,
       "n_z": 13,
       "name": "eBOSS",
+      "prior": {
+        "alpha_hcd_mu": [
+          0.17211216067355312,
+          0.06218315972222222,
+          0.004409670138888889
+        ],
+        "alpha_hcd_sigma": [
+          0.04939619011330974,
+          0.02487326388888889,
+          0.0022048350694444446
+        ],
+        "alpha_vector_semantics": "deployed prior",
+        "dtau0_range": [
+          -0.4,
+          0.25
+        ],
+        "hcd_parameterization": "alpha_pivot_powerlaw_v1",
+        "marginalize_zslope": true,
+        "tau0_amp_range": [
+          0.75,
+          1.25
+        ],
+        "tau0_pivot_z": 3.0,
+        "zslope_mu": [
+          2.127,
+          2.758,
+          2.366
+        ],
+        "zslope_sigma": [
+          0.52,
+          0.53,
+          0.33
+        ]
+      },
+      "resolution_coherent_on": false,
+      "resolution_on": true,
+      "resolution_ready": true,
+      "survey": "eboss",
       "z": [
         2.2,
         2.4,
@@ -120,12 +588,117 @@
     "n_chains": 4,
     "n_samples": 600,
     "n_warmup": 250,
+    "seed_default": 20260614,
+    "seed_derivation": "fold_in(PRNGKey(seed), crc32(label) & 0x7fffffff) then fold_in(chain_id); label = survey name (single-leg) or '+'.join(leg_names) (joint)",
     "target_accept": 0.9
   },
   "outputs": {
     "format": "GetDist/cobaya (.txt + .paramnames + .yaml + .health.json)",
-    "private": "results_local/desi_production/ (DESI; gitignored)",
-    "public": "results/real_fit/ (eBOSS, KS)"
+    "private": "/home/mfho/hcd_priya/results_local/desi_production (DESI; gitignored)",
+    "public": "/home/mfho/hcd_priya/results/real_fit"
+  },
+  "prior_constants": {
+    "HCD_ALPHA_PARAMETERIZATION": {
+      "DESI": "alpha_pivot_powerlaw_v1",
+      "DESI+KS": "alpha_pivot_powerlaw_v1",
+      "KS": "dndx_mapped_v2",
+      "eBOSS": "alpha_pivot_powerlaw_v1"
+    },
+    "HCD_DLA_RESIDUAL_FRAC": 0.1,
+    "HCD_DLA_Z_RELIABLE": 3.5,
+    "HCD_LIT_DNDX_ESTIMAND": {
+      "DLA": "binned_ge20.3",
+      "LLS": "binned_17.2_19.0",
+      "subDLA": "binned_19.0_20.3"
+    },
+    "HCD_LIT_DNDX_LAW": {
+      "DLA": [
+        0.0076,
+        1.592
+      ],
+      "LLS": [
+        0.01840091965972645,
+        2.127
+      ],
+      "subDLA": [
+        0.004832763139114936,
+        2.438007767664778
+      ]
+    },
+    "HCD_LIT_OVER_SIM": [
+      0.995,
+      1.0,
+      1.34
+    ],
+    "HCD_LIT_OVER_SIM_SLOPE": [
+      0.764,
+      0.15,
+      0.4
+    ],
+    "HCD_LLS_BOOST_SPACE": {
+      "DESI": "alpha_postmap(inert at 1.0)",
+      "DESI+KS": "alpha_postmap(inert at 1.0)",
+      "KS": "dndx_premap",
+      "eBOSS": "alpha_postmap(inert at 1.0)"
+    },
+    "HCD_LLS_REALFIT_ZSLOPE": 2.127,
+    "HCD_LLS_SURVEY_BOOST": {
+      "DESI": 1.0,
+      "DESI+KS": 1.0,
+      "KS": 2.5,
+      "eBOSS": 1.0
+    },
+    "HCD_LLS_SURVEY_FRAC_SIGMA": {
+      "DESI": 0.287,
+      "DESI+KS": 0.287,
+      "KS": 0.4,
+      "eBOSS": 0.287
+    },
+    "HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X": {
+      "DESI": 0.574,
+      "DESI+KS": 0.574,
+      "KS": 0.4,
+      "eBOSS": 0.574
+    },
+    "HCD_PIVOT_GUARD_REL": 0.05,
+    "HCD_PIVOT_LLS_ALLZ_MEDIAN": 0.2909,
+    "HCD_PIVOT_LLS_ALPHA_Z3_BAND": [
+      0.14,
+      0.21
+    ],
+    "HCD_PRIOR_FRAC_SIGMA": [
+      0.15,
+      0.4,
+      0.5
+    ],
+    "HCD_Z_PIVOT": 3.0,
+    "KS_DNDX_DLA_RAW_MU0": 0.541324854612918,
+    "KS_DNDX_MAPPED_PIVOT_BAND": [
+      0.326,
+      0.476
+    ],
+    "KS_DNDX_SIGMA_EPS": 0.531,
+    "KS_DNDX_SIGMA_KAPPA": 0.6681,
+    "KS_DNDX_SIGMA_MSUB": 0.413,
+    "KS_DNDX_WIDTH_CONVENTION": {
+      "dla_raw": "deployed latent geometry: dla_amp = softplus(dla_raw)/softplus(raw_mu0), dla_raw ~ Normal(raw_mu0=KS_DNDX_DLA_RAW_MU0, 1.0) \u2014 the broad one-sided softplus(Normal) of the deployed DLA site, centred at amplitude 1",
+      "eps_lls": "full-map local-linear width translation: 0.40/g_LLS, g_LLS=0.75336 = dln(alpha_LLS)/dln(A) at the V-A KS reference pivot; alternatives 0.5315 (hypot) / 0.543 (central-68%) listed as PI confirm-or-swap",
+      "kappa_lls": "lit GLS sigma_gamma of the corrected LLS law: hcd_lit_dndx_corrected.json K1a free-gamma fit 2.137 +/- 0.6681",
+      "m_sub": "full-map local-linear width translation: 0.40/g_sub, g_sub=0.96842 (same convention as eps_lls)",
+      "t_dla": "ZSLOPE_PRIOR_SIGMA[2]=0.33 (deployed DLA exponent width, unchanged)",
+      "t_sub": "ZSLOPE_PRIOR_SIGMA[1]=0.53 (deployed subDLA exponent width, unchanged)"
+    },
+    "KS_HEADROOM_SOURCE": "exact-inverse of the boost-1.0 deployed real-fit centre triple",
+    "adopted_alpha_lls_z3": 0.17219479535427426,
+    "adopted_kernel": "K1a",
+    "adopted_kernel_r3": 0.8884262008450887,
+    "bracket_alpha_lls_z3": {
+      "K1a": 0.1721593679289494,
+      "K1b": 0.17304924373644898,
+      "K2": 0.0953902830189703,
+      "K3": 0.1335730267297567
+    },
+    "derivation_json_sha256": "d3f1406243d01c081fedee3382bd4871b00daa194e4b4fcf5524d481b8b2721c"
   },
   "priors": {
     "emulator_norm_box": {
@@ -167,35 +740,108 @@
       ]
     },
     "hcd": {
-      "alpha_hcd_mu": [
-        0.2908612702546296,
-        0.09020109953703703,
-        0.005710024594907408
-      ],
-      "alpha_hcd_sigma": [
-        0.04362919053819444,
-        0.03608043981481481,
-        0.002855012297453704
-      ],
+      "by_survey": {
+        "desi": {
+          "alpha_hcd_mu": [
+            0.17211216067355312,
+            0.06218315972222222,
+            0.004409670138888889
+          ],
+          "alpha_hcd_sigma": [
+            0.04939619011330974,
+            0.02487326388888889,
+            0.0022048350694444446
+          ],
+          "alpha_vector_semantics": "deployed prior",
+          "hcd_parameterization": "alpha_pivot_powerlaw_v1",
+          "leg": "DESI",
+          "zslope_mu": [
+            2.127,
+            2.758,
+            2.366
+          ],
+          "zslope_sigma": [
+            0.52,
+            0.53,
+            0.33
+          ]
+        },
+        "eboss": {
+          "alpha_hcd_mu": [
+            0.17211216067355312,
+            0.06218315972222222,
+            0.004409670138888889
+          ],
+          "alpha_hcd_sigma": [
+            0.04939619011330974,
+            0.02487326388888889,
+            0.0022048350694444446
+          ],
+          "alpha_vector_semantics": "deployed prior",
+          "hcd_parameterization": "alpha_pivot_powerlaw_v1",
+          "leg": "eBOSS",
+          "zslope_mu": [
+            2.127,
+            2.758,
+            2.366
+          ],
+          "zslope_sigma": [
+            0.52,
+            0.53,
+            0.33
+          ]
+        },
+        "ks": {
+          "alpha_hcd_mu": [
+            0.4302804016838828,
+            0.06218315972222222,
+            0.004409670138888889
+          ],
+          "alpha_hcd_sigma": [
+            0.17211216067355314,
+            0.02487326388888889,
+            0.0022048350694444446
+          ],
+          "alpha_vector_semantics": "LEGACY-AUDIT-ONLY (dormant; deployed prior = the mapped dN/dX construction in prior_constants)",
+          "hcd_parameterization": "dndx_mapped_v2",
+          "leg": "KS",
+          "zslope_mu": [
+            2.127,
+            2.758,
+            2.366
+          ],
+          "zslope_sigma": [
+            0.52,
+            0.53,
+            0.33
+          ]
+        }
+      },
       "dla_residual_frac": 0.1,
-      "frac_sigma": [
-        0.15,
-        0.4,
-        0.5
-      ],
-      "hierarchical": false,
       "lit_over_sim": [
-        1.06,
+        0.995,
         1.0,
         1.34
       ],
       "lit_over_sim_slope": [
-        0.95,
+        0.764,
         0.15,
         0.4
       ],
+      "lls_survey_boost": {
+        "DESI": 1.0,
+        "DESI+KS": 1.0,
+        "KS": 2.5,
+        "eBOSS": 1.0
+      },
+      "lls_survey_frac_sigma": {
+        "DESI": 0.287,
+        "DESI+KS": 0.287,
+        "KS": 0.4,
+        "eBOSS": 0.287
+      },
       "marginalize_zslope": true,
-      "note": "PER-SURVEY LLS pin for the real fit (survey=): DESI 1.0x/sig0.30, KS 2.5x/sig0.40, eBOSS cosmic 1.0x/sig0.15; survey=None stays cosmic-average for the closure/SBC",
+      "note": "full HCD prior-constant payload + derivation provenance lives in the top-level prior_constants block (hcd_prior_constants_payload)",
       "z_pivot": 3.0
     },
     "metals": {
@@ -204,7 +850,36 @@
         "DESI",
         "eBOSS"
       ],
-      "sample_a_SiIII": true
+      "metal_fnode_hi": 0.03,
+      "metal_fnode_lo": 0.003,
+      "metal_node_z": [
+        2.2,
+        4.2
+      ],
+      "metal_prior_by_leg": {
+        "DESI": "flatlog2node",
+        "KS": "uniform",
+        "eBOSS": "flatlog2node"
+      },
+      "metal_siII_legs": [
+        "DESI"
+      ],
+      "note": "flatlog2node = Gate-C Model C+ 2-node LogUniform flux-decrement nodes on the metal legs; per-leg metal_one_minus_F_ref is recorded in legs.<leg>.metals"
+    },
+    "resolution": {
+      "alpha_res_restore_arm": {
+        "note": "inert under deployed NORC (PROD_RES_CORR_ON=False, fix_alpha_res=True)",
+        "sigma_a0": 1.0,
+        "sigma_s": 0.5
+      },
+      "f_res_amp_sigma_by_leg": {
+        "DESI": 0.02,
+        "KS": 0.15,
+        "eBOSS": 0.05
+      },
+      "f_res_amp_sigma_default": 0.02,
+      "f_res_slope_sigma": 0.5,
+      "pivot_z": 3.0
     },
     "tau0": {
       "amp_range": [
@@ -215,7 +890,7 @@
         -0.4,
         0.25
       ],
-      "model": "PRIYA amp x slope",
+      "model": "PRIYA amp x slope (uniform; Kim07 center)",
       "pivot_z": 3.0
     },
     "theta_sampling_box": {
@@ -258,10 +933,11 @@
     },
     "zslope": {
       "mu": [
-        0.95,
-        0.15,
-        0.4
+        2.465,
+        2.758,
+        2.366
       ],
+      "realfit_lls_mu": 2.127,
       "sigma": [
         0.52,
         0.53,
@@ -269,18 +945,149 @@
       ]
     }
   },
+  "provenance": {
+    "contract": "Generated ONLY by scripts/gen_analysis_lock.py. Hand-edits prohibited. Regeneration of the committed lock happens ONLY at the freeze cut, after the independent review panel, on the merged tree.",
+    "generation_inputs": {
+      "blind_lock": "blind.lock (READ-ONLY verbatim copy; NEVER written)",
+      "checkpoints_dir": "/home/mfho/hcd_priya/checkpoints",
+      "ensemble_manifest": "checkpoints/production_ensemble_manifest.json"
+    },
+    "generator": {
+      "path": "scripts/gen_analysis_lock.py",
+      "sha256": "7dac8592380010107839f8ab374707057b1b37a1eeae139e728f748102916c62"
+    },
+    "git_commit": "8e0c7996715b109430410db409e95ec920892481",
+    "notes_repo": "/home/mfho/hcd_priya_notes (READ-ONLY)",
+    "pi_decision_records": [
+      {
+        "path": "/home/mfho/hcd_priya_notes/docs/superpowers/2026-07-21-PI-DECISIONS-OF-RECORD.md",
+        "sha256": "be376d39e6b8a179ea8d4b11f87cf45ea8ed929e313fcd51629bc375d1e677b8"
+      },
+      {
+        "path": "/home/mfho/hcd_priya_notes/docs/superpowers/2026-07-21-PI-DECISIONS-02-LLS-REPARAM.md",
+        "sha256": "f4419a08022eee04cfe9e7ff3c8c2bded523c5e7fc134a71e7ad30517cc9fb65"
+      },
+      {
+        "path": "/home/mfho/hcd_priya_notes/docs/superpowers/2026-07-22-PI-DECISIONS-03-TAKEOVER.md",
+        "sha256": "50df88c42dba63b7c2ee9ce229066458a29131dd67825c3212c873584d8c21b3"
+      },
+      {
+        "path": "/home/mfho/hcd_priya_notes/docs/superpowers/2026-07-23-PI-DECISIONS-04-SIGNATURES.md",
+        "sha256": "56c072939c9de58f354ec06f4675771bb400e78620864b9dbacb6536e9443e54"
+      }
+    ]
+  },
+  "signatures": {
+    "forward_signature": "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b",
+    "hcd_prior_signature": "50befc941edfc4c789286d2054d0107f1eb19a5672bcb86131426fb101eea216",
+    "note": "forward_signature = sha256 over {PROD_FORWARD_BY_LEG, PROD_RES_CORR_ON, DESI_DLA_COV_REDUCE}; hcd_prior_signature = sha256 over hcd_prior_constants_payload(). Constants covered by NEITHER live in uncovered_constants."
+  },
   "surveys": {
     "desi": {
       "leg": "DESI",
+      "metals": true,
       "private": true
     },
     "eboss": {
       "leg": "eBOSS",
+      "metals": true,
       "private": false
     },
     "ks": {
       "leg": "KS",
+      "metals": false,
       "private": false
+    }
+  },
+  "uncovered_constants": {
+    "missing_at_generation": [],
+    "registry_note": "ONE registry: UNCOVERED_CONSTANT_REGISTRY at the top of scripts/gen_analysis_lock.py. These constants are covered by NO signature (forward_signature 'NOT covered' list + the hcd_prior_constants_payload SCOPE note). THE FREEZE STEP RE-AUDITS THIS LIST against the then-current docstrings and any in-flight additions before regenerating the lock.",
+    "values": {
+      "closure_legb.F_RES_AMP_SIGMA": {
+        "note": "option-b f_res_amp default prior width (tight physics width, not cup1d's)",
+        "value": 0.02
+      },
+      "closure_legb.F_RES_PIVOT_Z": {
+        "note": "option-b spectral-resolution b_res(z) pivot",
+        "value": 3.0
+      },
+      "closure_legb.F_RES_SLOPE_SIGMA": {
+        "note": "option-b f_res_slope prior width",
+        "value": 0.5
+      },
+      "closure_legb.HCD_INCIDENCE_SLOPE": {
+        "note": "per-class incidence z-slope d ln w_c/d ln(1+z), 60-sim median; the closure z-slope prior center (NOT the lit/sim ratio slope)",
+        "value": [
+          2.465,
+          2.758,
+          2.366
+        ]
+      },
+      "closure_legb.PROD_FORWARD_BY_LEG": {
+        "note": "certified per-leg data-nuisance forward (single source for real fit AND SBC); pulled WHOLE so new per-leg keys ride in automatically",
+        "value": {
+          "DESI": {
+            "f_res_amp_sigma": 0.02,
+            "ks_kwargs": null,
+            "metal_prior": "flatlog2node",
+            "metals": true,
+            "sample_res": true
+          },
+          "KS": {
+            "f_res_amp_sigma": 0.15,
+            "ks_kwargs": {
+              "k_max": 0.065,
+              "resolution_float": true
+            },
+            "metal_prior": "uniform",
+            "metals": false,
+            "sample_res": true
+          },
+          "eBOSS": {
+            "f_res_amp_sigma": 0.05,
+            "ks_kwargs": null,
+            "metal_prior": "flatlog2node",
+            "metals": true,
+            "sample_res": true
+          }
+        }
+      },
+      "closure_legb.PROD_RES_CORR_ON": {
+        "note": "the GLOBAL NORC reversal knob (False = deployed NORC forward)",
+        "value": false
+      },
+      "closure_legb.SIGMA_A0": {
+        "note": "alpha_res restore-arm amplitude prior width (TruncatedNormal scale); inert under NORC",
+        "value": 1.0
+      },
+      "closure_legb.SIGMA_S": {
+        "note": "alpha_res restore-arm z-slope prior width; inert under NORC",
+        "value": 0.5
+      },
+      "closure_legb.ZSLOPE_PRIOR_SIGMA": {
+        "note": "HCD z-slope prior width (lit WLS 1-sigma), class order LLS/sub/DLA",
+        "value": [
+          0.52,
+          0.53,
+          0.33
+        ]
+      },
+      "closure_legb.build_legb_ctx.KS_NORC_KMAX_CAP": {
+        "note": "the KS k_max auto-cap literal applied when res_corr_on=False (Gate-A NORC); parsed from the build_legb_ctx source (no named constant)",
+        "value": 0.045
+      },
+      "closure_legb.build_legb_ctx.mf_anchor_mult_default": {
+        "note": "MF res_corr low-k anchor multiplier default (5.0 = production anchor; 0.0 disables, diagnostic only)",
+        "value": 5.0
+      },
+      "data_likelihood.DESI_DLA_COV_REDUCE": {
+        "note": "reduced-DESI-covariance authority (drop syst_e_dla_completeness while alpha_DLA floats; PI disposition 2026-07-17)",
+        "value": true
+      },
+      "seeding.SEED_DERIVATION": {
+        "note": "the deterministic NUTS seed derivation (crc32, P0-A fix); changing it is a new lock era",
+        "value": "fold_in(PRNGKey(seed), crc32(label) & 0x7fffffff) then fold_in(chain_id); label = survey name (single-leg) or '+'.join(leg_names) (joint)"
+      }
     }
   }
 }
