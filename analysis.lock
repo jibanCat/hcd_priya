@@ -24,7 +24,7 @@
     "mf_shape": "OFF",
     "use_xclass": true
   },
-  "created_utc": "2026-07-23T15:23:12.043974+00:00",
+  "created_utc": "2026-07-23T16:52:39.918401+00:00",
   "decisions": {
     "desi_dla_cov_reduce": {
       "note": "PI disposition 2026-07-17: drop syst_e_dla_completeness from the DESI C_data while alpha_DLA floats (cup1d 'red'); e_dla stays an out-of-model stress test, NOT a mean template",
@@ -132,7 +132,7 @@
     "normalizers_byte_identical": true,
     "verified": "verify_manifest PASS at generation (sha256 digests + structural pairing + count + order + stray-member tripwire)"
   },
-  "git_commit": "8e0c799",
+  "git_commit": "4e76ff3",
   "inputs": {
     "data_desi": {
       "path": "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
@@ -956,7 +956,7 @@
       "path": "scripts/gen_analysis_lock.py",
       "sha256": "7dac8592380010107839f8ab374707057b1b37a1eeae139e728f748102916c62"
     },
-    "git_commit": "8e0c7996715b109430410db409e95ec920892481",
+    "git_commit": "4e76ff3a1ab880f6bcfc9ba13d3f1e94a6b987ce",
     "notes_repo": "/home/mfho/hcd_priya_notes (READ-ONLY)",
     "pi_decision_records": [
       {
