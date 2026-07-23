@@ -41,12 +41,15 @@ from hcd_analysis.emulator import lit_dndx as LD            # noqa: E402
 from hcd_analysis.emulator import lit_dndx_kernel as LK     # noqa: E402
 
 OUT_JSON = f"{REPO}/hcd_analysis/emulator/hcd_lit_dndx_corrected.json"
-DEPLOYED_LAW = {"LLS": (0.0201, 2.127), "subDLA": (0.0211, 0.937), "DLA": (0.0076, 1.592)}
+# the PRE-2026-07-18 laws (validation baseline / wrong-object references ONLY; the deployed
+# laws now live in inference.HCD_LIT_DNDX_LAW — closing-panel fix 4)
+PRE_SWAP_LAW = {"LLS": (0.0201, 2.127), "subDLA": (0.0211, 0.937), "DLA": (0.0076, 1.592)}
 # PI adoption (2026-07-18): K1a kernel; deployed LLS = constrained-slope refit at 2.127.
 ADOPTED_KERNEL = "K1a"
 ADOPTED_GAMMA_LLS = 2.127          # keep the deployed z-slope (PI decision 1c/2)
 BAND_REL = (0.83, 1.21)            # today's relative band margins (PI decision 5/7)
-DEPLOYED_ALPHA_Z3 = 0.19393       # the deployed LLS alpha center (lit-law alt-(b), boost 1.0)
+PRE_SWAP_ALPHA_Z3 = 0.19393       # the PRE-2026-07-18 deployed center (validation baseline ONLY;
+                                  # the deployed center is now 0.1722 — closing-panel fix 4)
 XBAR_Z3_PINNED = 0.632            # tests pin hcd_pivot_wc_and_xbar Xbar(z=3) ~ 0.632 +/- 0.03
 Z_EVAL = (2.4, 3.0, 3.6, 4.2)
 
@@ -124,7 +127,8 @@ def _deployed_laws():
         import json as _json
         with open(LD.__file__.replace("lit_dndx.py", "hcd_lit_dndx_corrected.json")) as fh:
             j = _json.load(fh)
-        return {c: tuple(v) for c, v in j["pi_adoption"]["laws_deployed"].items()}
+        # closing-panel fix 3: laws_deployed lives under adopted_law, not pi_adoption
+        return {c: tuple(v) for c, v in j["adopted_law"]["laws_deployed"].items()}
 
 
 def main():
@@ -209,13 +213,13 @@ def main():
 
         def alpha_for(laws):
             ratio = (laws["LLS"][0] * 4.0 ** laws["LLS"][1]) / \
-                    (DEPLOYED_LAW["LLS"][0] * 4.0 ** DEPLOYED_LAW["LLS"][1])
-            return ratio * DEPLOYED_ALPHA_Z3
+                    (PRE_SWAP_LAW["LLS"][0] * 4.0 ** PRE_SWAP_LAW["LLS"][1])
+            return ratio * PRE_SWAP_ALPHA_Z3
         xbar_used = None
     print(f"\n[ALPHA PATH] {tier}")
-    alpha_deployed_check = alpha_for({k: v for k, v in DEPLOYED_LAW.items()})
+    alpha_deployed_check = alpha_for({k: v for k, v in PRE_SWAP_LAW.items()})
     print(f"  validation: alpha at the DEPLOYED laws = {alpha_deployed_check:.5f} "
-          f"(expected ~{DEPLOYED_ALPHA_Z3})")
+          f"(expected ~{PRE_SWAP_ALPHA_Z3})")
 
     # the ACTUAL kernel callables (b(z) columns computed from the definitions, not
     # re-interpolated through the 8 lit z_bars)
@@ -258,8 +262,8 @@ def main():
               f"{k['law']['A']:8.5f} {k['law']['gamma']:7.4f} {k['law']['A_pivot']:8.4f} "
               f"{k['law']['sigma_lnAp']:7.4f} {k['law']['sigma_gamma']:6.3f} "
               f"{k['law']['chi2_red']:8.3f} {k['alpha_lls_z3']:9.5f} "
-              f"{k['alpha_lls_z3']/DEPLOYED_ALPHA_Z3-1:+8.1%} {tp:>20s}")
-    print(f"  (deployed alpha = {DEPLOYED_ALPHA_Z3}; deployed LLS law (0.0201, 2.127); "
+              f"{k['alpha_lls_z3']/PRE_SWAP_ALPHA_Z3-1:+8.1%} {tp:>20s}")
+    print(f"  (PRE-SWAP baseline alpha = {PRE_SWAP_ALPHA_Z3}, pre-swap LLS law (0.0201, 2.127); "
           f"K3b per-point diagnostic: {res['K3b_diagnostic']['n_nonpositive']} non-positive "
           f"corrected points of 8)")
     k3b = res["K3b_diagnostic"]
@@ -295,7 +299,7 @@ def main():
     # ---------------- LIT_OVER_SIM refit (spec 5.5) ------------------------- #
     lit_over_sim = lit_over_sim_refit(inputs, kernels, s, d, cum_law)
     print("\n[LIT_OVER_SIM REFIT] (plot_dndx_vs_literature.py:95-108 construction, "
-          "corrected laws; deployed (1.06, 1.00, 1.34) / slopes (0.95, 0.15, 0.40)):")
+          "corrected laws; PRE-SWAP (1.06, 1.00, 1.34) / slopes (0.95, 0.15, 0.40); deployed now (0.995, 1.00, 1.34)/(0.764, 0.15, 0.40)):")
     for cls, v in lit_over_sim.items():
         if cls == "note":
             continue
@@ -499,7 +503,7 @@ def main():
             budget=budget),
         adjudication=adj,
         alpha_lls_z3=dict(per_kernel={n: k["alpha_lls_z3"] for n, k in kernels.items()},
-                          deployed=DEPLOYED_ALPHA_Z3, adopted=alpha_adopted,
+                          deployed=PRE_SWAP_ALPHA_Z3, adopted=alpha_adopted,
                           path=tier, xbar_z3=xbar_used,
                           deployed_law_validation=alpha_deployed_check),
         bracket=bracket,
@@ -523,10 +527,16 @@ def main():
                               same_file_consistency=sfc),
         xbar_z3=xbar_used,
     )
-    with open(OUT_JSON, "w") as fh:
-        json.dump(to_jsonable(payload), fh, indent=1, sort_keys=True)
-    print(f"\nwrote {OUT_JSON} (kernel_chosen={ADOPTED_KERNEL}; PI-adopted 2026-07-18, "
-          f"spec step 10/12)")
+    if os.environ.get("DERIVE_WRITE_JSON", "0") == "1":
+        # closing-panel fix 4: never silently overwrite the committed artifact of record —
+        # a casual re-run would re-stamp created/git_commit and drift the sha pin
+        with open(OUT_JSON, "w") as fh:
+            json.dump(to_jsonable(payload), fh, indent=1, sort_keys=True)
+        print(f"\nwrote {OUT_JSON} (kernel_chosen={ADOPTED_KERNEL}; PI-adopted 2026-07-18, "
+              f"spec step 10/12)")
+    else:
+        print(f"\nJSON NOT written (committed artifact preserved); set DERIVE_WRITE_JSON=1 "
+              f"to regenerate {OUT_JSON}")
 
 
 def one_x_widths(law_block, kb):
@@ -556,7 +566,7 @@ def lit_over_sim_refit(inputs, kernels, sub_law, dla_law, cum_law):
                 per_kernel[n] = dict(ratio_zp=float(lit_zp / sim_zp),
                                      ratio_slope=float(k["law"]["gamma"] - gs[0]))
             out[cls] = dict(gamma_sim=float(gs[0]), sim_zp=sim_zp, per_kernel=per_kernel,
-                            deployed=dict(ratio_zp=1.06, ratio_slope=0.95))
+                            pre_swap=dict(ratio_zp=1.06, ratio_slope=0.95))
         else:
             A_l, g_l = lit_laws[cls]
             lit_zp = A_l * (1 + z_p) ** g_l

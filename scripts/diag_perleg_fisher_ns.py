@@ -41,8 +41,10 @@ SD_PRIOR_NS = 1.0/np.sqrt(12.0)   # Uniform(0,1) sd on the unit cube = 0.288675
 # joint sanity targets (from _cov_fisher_table.json, key sigma.full)
 TARGET_NS, TARGET_AP = 0.0952766253544456, 0.3584244082946373
 
-members = sorted(p[:-4] for p in glob.glob(f"{REPO}/checkpoints/final_prod_seed*.eqx"))
-assert members, "no final_prod_seed*.eqx ensemble members found"
+# PINNED members (freeze decision 6): manifest-verified (sha256 + exact pairing + count +
+# stray-member tripwire) via checkpoints/production_ensemble_manifest.json, NOT a glob.
+from hcd_analysis.emulator.prod_ensemble import production_member_paths
+members = production_member_paths(checkpoints_dir=f"{REPO}/checkpoints")
 print(f"ensemble members ({len(members)}):", [os.path.basename(m) for m in members])
 
 ctx, d = build_legb_ctx(

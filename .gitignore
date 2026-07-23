@@ -238,7 +238,13 @@ checkpoints/*.npz
 checkpoints/**/*.npz
 checkpoints/**/*.out
 checkpoints/stepA/*.json
+# Checkpoint run SUBDIRECTORIES (stepA_*, retrain, ...) are regenerable run artifacts —
+# ignored wholesale (2026-07-20 hygiene; no subdir hist.json existed to preserve).
+checkpoints/*/
 *.npy
+
+# Claude Code superpowers tool state
+.superpowers/
 
 # Superpowers working notes + working/closure diagnostic figures live in the PRIVATE notes repo
 # /home/mfho/hcd_priya_notes (github.com/jibanCat/hcd_priya_notes) — NOT here. Ignored so future

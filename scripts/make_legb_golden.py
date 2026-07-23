@@ -68,14 +68,22 @@ if USE_MF:
                      "cov: the bare anchored-res_corr forward, which is what the upcoming "
                      "alpha-res nuisance scales). Pinned at rtol 1e-10 by "
                      "tests/test_legb_golden.py::test_legb_mf_golden. Regenerate ONLY with an "
-                     "explicit reason (e.g. a deliberate res_corr/MF change).")
+                     "explicit reason (e.g. a deliberate res_corr/MF change). "
+                     "REGENERATED 2026-07-23, cause: 56d8db2 (2026-07-17) DESI_DLA_COV_REDUCE "
+                     "(cup1d 'red': per-z rank-1 removal of syst_e_dla_completeness from the "
+                     "DESI covariance) changed DESI C_total; expected delta = DESI C only "
+                     "(P and both KS arrays byte-identical), verified at regeneration.")
 else:
     meta = dict(note="legacy (3,)-alpha broadcast forward; build_legb_ctx production config; "
                      "theta=0.5 unit, tau0=becker13(z_leg), alpha=median w_c_cache. "
                      "INCLUDES the per-leg DLA-forward axis (§0c, 2026-06-09): "
                      "DataLeg.dla_forward_frac DESI=1.0 (full DLA forward, byte-identical to the "
                      "pre-§0c golden) / KS=0.0 (KS forward DLA term zeroed -> KS P/C drop the DLA "
-                     "channel, ~2% on P). Regenerated 2026-06-09 for the §0c per-leg DLA residual.")
+                     "channel, ~2% on P). Regenerated 2026-06-09 for the §0c per-leg DLA residual. "
+                     "REGENERATED 2026-07-23, cause: 56d8db2 (2026-07-17) DESI_DLA_COV_REDUCE "
+                     "(cup1d 'red': per-z rank-1 removal of syst_e_dla_completeness from the "
+                     "DESI covariance) changed DESI C_total; expected delta = DESI C only "
+                     "(P and both KS arrays byte-identical), verified at regeneration.")
 for leg in ctx.legs:
     tau0_vec = MF.becker13_tau0(jnp.asarray(leg.z))
     szb = ctx.sigma_zb_per_leg.get(leg.name)

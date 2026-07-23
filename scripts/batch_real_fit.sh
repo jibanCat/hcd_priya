@@ -53,6 +53,7 @@ SCRATCH=${SCRATCH:-/scratch/cavestru_root/cavestru1/mfho/real_fit}
 # thread-pinning (Great Lakes bills max(cores, mem/7)*wall; cap threads to the allocation).
 export OMP_NUM_THREADS=$NCPU OPENBLAS_NUM_THREADS=$NCPU MKL_NUM_THREADS=$NCPU
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=$NCPU"
+export PYTHONHASHSEED=0            # P0: reproducibility belt-and-braces (seed fold is crc32; this pins any residual hash-order effect)
 export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
 mkdir -p "$SCRATCH" /home/mfho/hcd_priya/logs

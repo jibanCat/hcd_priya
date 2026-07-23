@@ -1,7 +1,8 @@
 """Does the HCD z-slope mis-specification bias n_s? — a NUTS-free (n_s, slope) loglik profile.
 
 The forward evolves the HCD incidence as α_c(z)=α_pivot·((1+z)/(1+z_p))^(B+δs_c) with the z-slope
-B centered at HCD_LIT_OVER_SIM_SLOPE[0]=0.95 (the lit/sim-RATIO slope). But the mock truth's native
+B centered at the lit/sim-RATIO slope HCD_LIT_OVER_SIM_SLOPE[0] (0.95 when this diagnostic was
+run, 2026-06-14; 0.764 since the 2026-07-18 corrected-law swap). But the mock truth's native
 w_c(z) evolves at ~2.4 (the FULL incidence slope). This profiles the data-loglik at the NOISELESS
 mock truth over (n_s, B) on the JOINT DESI+KS leg to answer:
   (1) what slope B do the data prefer? (argmax_B at n_s=truth)

@@ -15,6 +15,7 @@ import jax, jax.numpy as jnp
 from hcd_analysis.emulator import train as T
 from hcd_analysis.emulator.data import load_cache, datarange_mask
 from hcd_analysis.emulator.predict import predict_P_filt
+from hcd_analysis.emulator.prod_ensemble import production_member_paths
 from hcd_analysis.emulator.closure_legb import CACHE_PATH
 
 VAL_SEED, VAL_FRAC = 12345, 0.10
@@ -40,7 +41,9 @@ def main():
     mask_k = d["mask"][val_idx]; inr = datarange_mask(d)[val_idx]   # (Nval,K)
     keep = mask_k & inr                                            # in-range finite
 
-    members = sorted(glob.glob(f"{CKPT}*.eqx"))
+    # PINNED members (freeze decision 6): manifest-verified (sha256 + exact pairing + count +
+    # stray-member tripwire) via checkpoints/production_ensemble_manifest.json, NOT a glob.
+    members = [p + ".eqx" for p in production_member_paths(checkpoints_dir=os.path.dirname(CKPT))]
     print(f"members: {len(members)}  | val rows: {len(val_idx)}")
     preds = []
     for p in members:

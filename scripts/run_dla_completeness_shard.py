@@ -123,10 +123,11 @@ def main():
     # pre-fix thin-forward pkl (res_corr_on=True / metal_prior='uniform') is rejectable. strength is already
     # in vars(a) (the +/-1sigma bracket tag).
     meta = dict(vars(a), paired=True, wall_s=wall, per_fit_wall_s=wall / (2 * np_))
-    meta["forward"] = dict(res_corr_on=bool(ctx.res_corr_on), fix_alpha_res=bool(ctx.fix_alpha_res),
-                           sample_res=bool(ctx.sample_res), f_res_amp_sigma=float(ctx.f_res_amp_sigma),
-                           metal_prior=str(ctx.metal_prior),
-                           metal_node_z=tuple(float(z) for z in ctx.metal_node_z))
+    # F2 (2026-07-19): the closure_legb.forward_stamp SINGLE AUTHORITY — a superset of the old
+    # inline dict (adds dla_cov_reduced/dla_forward_frac, the env data-selection stamps, and both
+    # freeze signatures). The analyzer's forward-stamp pooling key therefore separates post-F2
+    # pkls from the archived campaign's (intended: different stamp coverage != poolable).
+    meta["forward"] = CL.forward_stamp(ctx, L)
     pickle.dump(dict(arm="dla_completeness", survey="desi", idxs=idxs, clean_per_mock=clean,
                      inj_per_mock=inj, meta=meta), open(out, "wb"))
     nd = sum(int(r.get("n_div", 0) > 0) for r in clean) + sum(int(r.get("n_div", 0) > 0) for r in inj)

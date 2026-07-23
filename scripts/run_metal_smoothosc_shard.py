@@ -34,6 +34,7 @@ import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
 import hcd_analysis.emulator.closure_legb as CL
 import hcd_analysis.emulator.data_likelihood as DL
 from hcd_analysis.emulator.closure_legb import build_legb_ctx, run_legb, _LAMBDA_SiIIb
+from hcd_analysis.emulator.prod_ensemble import production_member_paths
 
 REPO = "/home/mfho/hcd_priya"
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
@@ -87,9 +88,9 @@ def _selfcheck_full_matches_original():
 
 
 def build_desi_ctx():
-    members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
-    if not members:
-        raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
+    # PINNED members (freeze decision 6): manifest-verified (sha256 + exact pairing + count +
+    # stray-member tripwire) via checkpoints/production_ensemble_manifest.json, NOT a glob.
+    members = production_member_paths(checkpoints_dir=os.path.dirname(PROD_PREFIX))
     ctx, d = build_legb_ctx(
         ensemble_ckpts=members, use_xclass=True, with_mf=True, mf_with_floor=True,
         mf_emucoh=True, mf_emucoh_offdiag_only=True, with_eboss=False,

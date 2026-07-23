@@ -3,8 +3,8 @@
 THE BUG: the LLS/subDLA α-PIVOT center was built from
     w_c_med = nanmedian(w_c_cache[:, 1:], axis=0)        # the MEDIAN over ALL z-groups (z=2.0–5.4)
 and consumed as the z=3 PIVOT amplitude. Because w_c rises monotonically with z, the all-z median
-(LLS 0.274) equals the z≈3.6 value → the LLS α-center came out ~1.45× too high (0.291 vs the
-z=3-consistent ~0.194–0.200), overshooting the lit dN/dX law 2.05× at z=2.4 / 1.63× at z=3 (worst
+(LLS 0.274) equals the z≈3.6 value → the LLS α-center came out too high (0.291 vs the
+z=3-consistent value, 0.172 since the 2026-07-18 K1a correction; 0.194–0.200 pre-correction), overshooting the lit dN/dX law 2.05× at z=2.4 / 1.63× at z=3 (worst
 at low z) = the LLS→n_s leak.
 
 THE FIX: build the pivot from the z=3 STRUCTURAL w_c (closure/SBC, survey=None) or the lit dN/dX law

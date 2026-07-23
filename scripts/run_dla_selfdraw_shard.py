@@ -21,6 +21,13 @@ Both arms fit under the REDUCED DESI covariance (DESI_DLA_COV_REDUCE: syst_e_dla
 removed per-z because alpha_DLA floats — the cup1d "red" convention; asserted below), i.e. the
 final production likelihood, NOT the stale pre-2026-07-17 covariance.
 
+STAMP PROVENANCE (adversarial backfill F5, 2026-07-19): meta["forward"] now comes from the
+closure_legb.forward_stamp single authority, which adds hcd_prior_signature (the prior-constants
+freeze hash) + the env data-selection stamps. Pre-2026-07-19 campaign pkls (the 53851306 array)
+LACK the hcd_prior_signature stamp; they were certified against the deployed prior by
+latent reconstruction (the adversarial review record) — do not treat the missing key in
+those pkls as a drifted prior.
+
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import argparse, functools, os, pickle, time
@@ -87,15 +94,14 @@ def main():
     wall = time.time() - t0
     np_ = max(min(len(clean), len(boosted)), 1)
     os.makedirs(a.out_dir, exist_ok=True)
-    out = os.path.join(a.out_dir, f"dla_selfdraw_desi_shard_{a.shard:03d}.pkl")
+    # F6a: smoke writes a SUFFIXED pkl (width-study mirror) so it can never be pooled as a real
+    # shard (the analyzer additionally filters *.smoke.* basenames at ingest, belt-and-braces).
+    suffix = ".smoke" if a.smoke else ""
+    out = os.path.join(a.out_dir, f"dla_selfdraw_desi_shard_{a.shard:03d}{suffix}.pkl")
     meta = dict(vars(a), paired=True, wall_s=wall, per_fit_wall_s=wall / (2 * np_))
-    meta["forward"] = dict(res_corr_on=bool(ctx.res_corr_on), fix_alpha_res=bool(ctx.fix_alpha_res),
-                           sample_res=bool(ctx.sample_res), f_res_amp_sigma=float(ctx.f_res_amp_sigma),
-                           metal_prior=str(ctx.metal_prior),
-                           metal_node_z=tuple(float(z) for z in ctx.metal_node_z),
-                           dla_cov_reduced=bool(L.dla_cov_reduced),
-                           dla_forward_frac=float(L.dla_forward_frac),
-                           forward_signature=CL.forward_signature())
+    # F5: the closure_legb.forward_stamp SINGLE AUTHORITY (adds hcd_prior_signature + the env
+    # data-selection stamps on top of the old inline dict — see the docstring provenance note).
+    meta["forward"] = CL.forward_stamp(ctx, L)
     pickle.dump(dict(arm="dla_selfdraw", survey="desi", idxs=idxs, clean_per_mock=clean,
                      boost_per_mock=boosted, meta=meta), open(out, "wb"))
     nd = sum(int(r.get("n_div", 0) > 0) for r in clean) + sum(int(r.get("n_div", 0) > 0) for r in boosted)

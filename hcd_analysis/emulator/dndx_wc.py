@@ -6,6 +6,7 @@ Class order throughout: (clean, LLS, subDLA, DLA); mu/dN-dX inputs are the 3 HCD
 classes in order (LLS, subDLA, DLA).
 """
 from __future__ import annotations
+import numpy as np
 import jax.numpy as jnp
 
 
@@ -87,7 +88,21 @@ def alpha_from_dndx_law(A, gamma, Xbar, z):
 
 
 def alpha_to_dndx(alpha_hcd, Xbar, z, apply_delta=True):
-    """Analytic M0-inverse (the readout): effective dN/dX_c(z) from per-class alpha_c.
+    """DEPRECATED approximate M0-inverse. RETAINED SOLELY TO REPRODUCE PRE-2026-07-22
+    FROZEN ARTIFACTS (paper exports built with this approximate inverse). ALL NEW
+    CODE MUST USE ``alpha_to_dndx_exact`` instead (readout defect B, 2026-07-22).
+
+    Two measured defects (2026-07-22, on in-range deployed-prior draws):
+      1. RENORM ERROR. With apply_delta=True this divides out the per-class
+         (1+delta_c) factor but NOT the global 4-class renormalisation of
+         ``w_c_corrected``, so it is NOT the inverse of the deployed forward. The
+         median relative dN/dX error is ~2e-3 (the "typically sub-percent" claim
+         formerly here was FALSE), with catastrophic tails near the simplex edge.
+      2. SILENT SATURATION. Outside the valid domain (sum(alpha) >= 1, or infeasible
+         telescoping args) the _LOG_FLOOR clip silently SATURATES the affected class
+         at mu = -log(1e-12) = 27.631021, i.e. dN/dX = 27.631021/Xbar, instead of
+         failing. 0.07-0.5% of in-range deployed-prior draws hit this
+         (ensemble-dependent). This corrupted shipped paper artifacts.
 
     alpha_hcd: (...,3) per-class effective incidence weights for (LLS,subDLA,DLA).
     Xbar: (...); z: scalar or (...). Returns (...,3) dN/dX_c for (LLS,subDLA,DLA).
@@ -95,13 +110,12 @@ def alpha_to_dndx(alpha_hcd, Xbar, z, apply_delta=True):
     Steps:
       1. If apply_delta, divide out the delta_c correction on the HCD slice:
              w = alpha_hcd / (1 + delta_c(z)[...,1:]).
-         RENORM CAVEAT: w_c_corrected renormalises across ALL 4 classes (clean+3 HCD),
-         so this division inverts the *correction factor* but not the global renorm.
-         In the small-HCD-fraction regime the renorm factor ~= 1, so the inverse is
-         exact up to that (typically sub-percent) factor. With apply_delta=False this
-         step is skipped and the telescoping inverse below is the EXACT inverse of
-         w_c_from_mu on the HCD classes.
-      2. Invert the telescoping-Poisson (exact, top-down DLA->subDLA->LLS).
+         (Defect 1 above: the 4-class renorm of w_c_corrected is NOT undone here.)
+         With apply_delta=False this step is skipped and the telescoping inverse
+         below is the EXACT inverse of w_c_from_mu on the HCD classes -- except for
+         the clip floor (defect 2).
+      2. Invert the telescoping-Poisson (top-down DLA->subDLA->LLS), with the
+         _LOG_FLOOR clip (defect 2).
       3. dN/dX_c = mu_c / Xbar.
     """
     w = jnp.asarray(alpha_hcd)
@@ -119,3 +133,93 @@ def alpha_to_dndx(alpha_hcd, Xbar, z, apply_delta=True):
 
     mu = jnp.stack([mu_LLS, mu_sub, mu_DLA], axis=-1)   # (...,3)
     return mu / jnp.asarray(Xbar)[..., None]
+
+
+def alpha_to_dndx_exact(alpha_hcd, Xbar, z, *, mode="raise"):
+    """EXACT inverse of the ``w_c_corrected`` forward on the HCD classes (the readout).
+
+    SUPERSEDES ``alpha_to_dndx`` for ALL new readouts/exports/plots (readout defect B,
+    2026-07-22): that map ignores the 4-class renormalisation (median relative error
+    ~2e-3 on in-range deployed-prior draws, catastrophic tails) and silently saturates
+    at mu = -log(1e-12) = 27.631021 outside its domain. This function inverts the full
+    forward exactly, with NO clip floor, and fails loud (or masks) outside the domain.
+    Host-side numpy readout: NOT jit/vmap/grad-safe; do not call it from traced code.
+
+    Derivation (one line): the forward is alpha_j = w0_j*(1+d_j)/S with
+    S = sum_j w0_j*(1+d_j) and sum_j w0_j = 1 (j over clean + 3 HCD classes,
+    d = delta_c(z)); imposing sum_j w0_j = 1 on w0_j = alpha_j*S/(1+d_j) gives
+        Z = S = 1 / [ (1 - sum_c a_c)/(1 + d_clean) + sum_c a_c/(1 + d_c) ]
+    (sums over the 3 HCD classes), then w0_c = a_c * Z / (1 + d_c), followed by the
+    exact top-down telescoping inverse (log1p form, no clip):
+        mu_DLA = -log1p(-w0_DLA)
+        mu_sub = -log1p(-w0_sub / (1 - w0_DLA))
+        mu_LLS = -log1p(-w0_LLS / ((1 - w0_DLA) - w0_sub))
+    and dN/dX_c = mu_c / Xbar.
+
+    Domain: all(alpha_hcd >= 0) AND (1 - sum(alpha_hcd)) > 0 strictly (the occupancy
+    simplex with a strictly positive clean fraction). Inside it every log1p argument
+    is strictly inside (-1, 0], so the result is finite with no floor needed.
+
+    Conditioning: the round-trip error grows like 1/w0_clean near the simplex edge.
+    Measured: at 1 - sum(alpha) ~ 1e-12 a 1-ulp input perturbation moves mu_LLS by
+    ~3e-6 relative (~2.7e-4 at 1e-14; unbounded at 1e-16). Inputs with
+    1 - sum(alpha) < ~1e-12 are therefore domain-VALID but numerically UNRELIABLE.
+
+    alpha_hcd: (...,3) per-class effective incidence weights for (LLS,subDLA,DLA);
+    Xbar: (...); z: scalar or (...). numpy or jax arrays accepted (materialised via
+    np.asarray; the computation is plain numpy).
+
+    mode="raise" (default): host-side domain check; raises ValueError naming the
+      violation class(es) if any element is outside the domain. NOTE: draws from the
+      pre-2026-07-22 UNBOUNDED alpha prior can legitimately violate the domain --
+      use mode="mask" to read such historical draws.
+    mode="mask": returns (dndx, valid) with valid = all(alpha >= 0, axis=-1)
+      & (1 - sum(alpha) > 0); invalid entries are NaN in dndx, no exception.
+
+    Returns: (...,3) dN/dX_c for (LLS,subDLA,DLA) [mode="raise"], or the tuple
+    (dndx, valid) [mode="mask"].
+    """
+    if mode not in ("raise", "mask"):
+        raise ValueError(f"alpha_to_dndx_exact: unknown mode {mode!r} (use 'raise' or 'mask')")
+    a = np.asarray(alpha_hcd, dtype=np.float64)
+    Xb = np.asarray(Xbar, dtype=np.float64)
+    s = a.sum(axis=-1)
+    a_clean = 1.0 - s
+    nonneg = np.all(a >= 0.0, axis=-1)
+    valid = nonneg & (a_clean > 0.0)
+
+    if mode == "raise" and not np.all(valid):
+        n_bad = int(np.size(valid) - np.count_nonzero(valid))
+        worst_sum = float(np.max(np.atleast_1d(s)[~np.atleast_1d(valid)]))
+        kinds = []
+        n_neg = int(np.count_nonzero(~np.atleast_1d(nonneg)))
+        if n_neg:
+            kinds.append(f"negative alpha in {n_neg} row(s)")
+        n_over = int(np.count_nonzero(np.atleast_1d(nonneg & ~(a_clean > 0.0))))
+        if n_over:
+            kinds.append(f"sum(alpha) >= 1 (outside the occupancy simplex) in {n_over} row(s)")
+        raise ValueError(
+            f"alpha_to_dndx_exact: {n_bad} input row(s) outside the valid domain "
+            f"[all(alpha) >= 0 and 1 - sum(alpha) > 0]: " + "; ".join(kinds) +
+            f". Worst sum(alpha) = {worst_sum!r}. Draws from the pre-2026-07-22 "
+            f"unbounded alpha prior can legitimately violate this domain; use "
+            f"mode='mask' to read such historical draws (invalid entries -> NaN).")
+
+    # Mask invalid rows to NaN BEFORE the logs (NaN propagates silently -- no
+    # log-of-negative warnings). In raise mode everything is valid at this point.
+    a = np.where(valid[..., None], a, np.nan)
+    a_clean = np.where(valid, a_clean, np.nan)
+
+    d = np.asarray(delta_c(z), dtype=np.float64)                      # (...,4)
+    Z = 1.0 / (a_clean / (1.0 + d[..., 0])
+               + np.sum(a / (1.0 + d[..., 1:]), axis=-1))
+    w0 = a * Z[..., None] / (1.0 + d[..., 1:])                        # (...,3)
+    w_LLS, w_sub, w_DLA = w0[..., 0], w0[..., 1], w0[..., 2]
+
+    mu_DLA = -np.log1p(-w_DLA)
+    mu_sub = -np.log1p(-(w_sub / (1.0 - w_DLA)))
+    mu_LLS = -np.log1p(-(w_LLS / ((1.0 - w_DLA) - w_sub)))
+    dndx = np.stack([mu_LLS, mu_sub, mu_DLA], axis=-1) / Xb[..., None]
+    if mode == "mask":
+        return dndx, np.broadcast_to(valid, dndx.shape[:-1]).copy()
+    return dndx

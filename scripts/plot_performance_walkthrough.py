@@ -121,7 +121,7 @@ from hcd_analysis.emulator.data import (
     COARSE_NAMES, DATA_RANGE,
 )
 from hcd_analysis.emulator import train as T
-from hcd_analysis.emulator.dndx_wc import w_c_corrected, alpha_to_dndx
+from hcd_analysis.emulator.dndx_wc import w_c_corrected
 from hcd_analysis.emulator.model import structural_tier_p
 from hcd_analysis.emulator.ensemble import load_ensemble, EnsembleEmulator
 from hcd_analysis.emulator.predict import predict_P_filt as _predict_P_filt_jax
@@ -179,8 +179,12 @@ def load_production_ensemble():
     The production ensemble saw EVERY sim, so anything evaluated through it is IN-SAMPLE
     (a fit-quality check), NOT out-of-sample generalization — callers must label it so.
     """
-    paths = [PROD_CKPT.format(k=k) for k in range(N_PROD)]
-    ens, meta, norm = load_ensemble(paths)
+    # PINNED members (freeze decision 6): the manifest loader verifies sha256 + exact pairing +
+    # count + the stray-member tripwire before loading (checkpoints/production_ensemble_manifest.json).
+    from hcd_analysis.emulator.prod_ensemble import load_production_ensemble as _load_pinned
+    ens, meta, norm, _manifest = _load_pinned(
+        checkpoints_dir=os.path.dirname(PROD_CKPT.format(k=0)))
+    assert len(ens.members) == N_PROD
     return ens, norm
 
 

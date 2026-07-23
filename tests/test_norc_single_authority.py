@@ -175,10 +175,16 @@ def test_one_leg_flip_guard(monkeypatch, tmp_path):
 #      for build_real_ctx AND dnuis use_prod_forward. Fake-build seam (no ensemble / NUTS).
 # =============================================================================================== #
 class _FakeLeg:
-    def __init__(self, name, metals_on=True, resolution_ready=True):
+    def __init__(self, name, metals_on=True, resolution_ready=True, dla_cov_reduced=None):
         self.name = name
         self.metals_on = metals_on
         self.resolution_ready = resolution_ready
+        # mirror the 56d8db2 DataLeg stamp so the drivers' reduced-cov tripwires
+        # (run_real_fit.py:185, run_prod_sbc_shard.py:367) see the deployed default
+        # (closing-panel fix 1: the tripwires postdate this fake; file was never re-run)
+        from hcd_analysis.emulator import data_likelihood as _DL
+        self.dla_cov_reduced = (_DL.DESI_DLA_COV_REDUCE if dla_cov_reduced is None
+                                else dla_cov_reduced)
 
 
 class _FakeCtx:

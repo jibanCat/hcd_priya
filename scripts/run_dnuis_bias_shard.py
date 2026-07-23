@@ -27,7 +27,7 @@ Arms (→ inject_spec):
 PER-SURVEY lls_truth_boost (the effective LLS the mock TRUTH carries vs the forward's per-survey pin
 center). The forward pin is HCD_LLS_SURVEY_BOOST×lit_over_sim (DESI 1.0×, KS 2.5×; inference.py). The
 truth boost must sit OFF the pin center to be a real test:
-  desi  = 1.06  (HCD_LIT_OVER_SIM[0] at z_pivot — the cosmic-average lit/sim LLS; ~0.2σ off the DESI
+  desi  = 1.06  (HISTORICAL PIN: the pre-2026-07-18 HCD_LIT_OVER_SIM[0]; deployed slot is now 0.995 — a live read would null the arm; ~0.2σ off the DESI
                  pin, σ/μ=0.30)
   ks    = 3.50  (= 2.5×1.4: the KS pin CENTER is 2.5×, so a boost of EXACTLY 2.5 would be a near-null
                  test; we put the truth ~1σ ABOVE the pin (KS σ/μ=0.40 ⇒ ×1.4) — a wrong-pin-center
@@ -49,9 +49,10 @@ import numpy as np
 print = functools.partial(print, flush=True)
 
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
+from hcd_analysis.emulator.prod_ensemble import production_member_paths
 from hcd_analysis.emulator.closure_legb import (build_legb_ctx, run_legb, prod_forward_config,
                                                 prod_norc_forward)
-from hcd_analysis.emulator.inference import (HCD_LIT_OVER_SIM, HCD_LLS_SURVEY_BOOST,
+from hcd_analysis.emulator.inference import (HCD_LLS_SURVEY_BOOST,
                                              HCD_LLS_SURVEY_FRAC_SIGMA)
 
 REPO = "/home/mfho/hcd_priya"
@@ -60,7 +61,7 @@ RES_INSTR_BASIS = os.path.join(REPO, "hcd_analysis", "_emulator_data", "res_inst
 
 # Per-survey TRUTH LLS boost (lit/sim effective LLS the mock truth carries vs the forward pin).
 # The arm must put the TRUTH OFF the forward's per-survey pin center, else it is a near-null test.
-#   desi  = 1.06 (HCD_LIT_OVER_SIM[0]): the cosmic-average lit/sim LLS dN/dX ratio; the DESI pin
+#   desi  = 1.06 (HISTORICAL PIN, pre-2026-07-18 lit/sim ratio; deployed HCD_LIT_OVER_SIM[0]=0.995): the DESI pin
 #           center is 1.0× cosmic (HCD_LLS_SURVEY_BOOST["DESI"]=1.0), so 1.06 sits ~0.2σ above the
 #           DESI pin (σ/μ=0.30) — a mild realistic mis-center.
 #   ks    = 2.5×1.4 = 3.50: the KS pin CENTER is 2.5× cosmic. A truth boost of EXACTLY 2.5 would
@@ -146,7 +147,8 @@ def treatment_flags(treatment, *, c_prior_sigma=0.05):
 
 def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, float_res=False,
                   coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None, pin_hub=False,
-                  oos_member=None, oos_strength=1.0, use_prod_forward=False):
+                  oos_member=None, oos_strength=1.0, use_prod_forward=False,
+                  ks_legacy_alpha_param=False):
     """Build the single-survey production ctx for an arm. metals_on/sample_metals ON for
     DESI/eBOSS (False for KS). Returns (ctx, d, inject_spec). The arm runs on ONE survey's legs:
     we build a single-survey ctx by restricting the leg list AFTER build (keep it simple).
@@ -159,9 +161,9 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     we unblind on (deployment-consistency; used by the DLA-completeness DESI re-run). Default OFF is
     BYTE-IDENTICAL for every existing arm/caller (metal_prior='uniform' + res_corr_on=True ==
     the build_legb_ctx defaults; fix_alpha_res untouched)."""
-    members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
-    if not members:
-        raise SystemExit(f"no production ensemble checkpoints at {PROD_PREFIX}*.eqx")
+    # PINNED members (freeze decision 6): manifest-verified (sha256 + exact pairing + count +
+    # stray-member tripwire) via checkpoints/production_ensemble_manifest.json, NOT a glob.
+    members = production_member_paths(checkpoints_dir=os.path.dirname(PROD_PREFIX))
 
     # The leg NAME (load_*_leg) and the survey PIN key (HCD_LLS_SURVEY_BOOST/FRAC_SIGMA) per arg.
     # eBOSS's leg name is 'eBOSS' (not 'EBOSS') and it has NO per-survey LLS pin (the boost map only
@@ -211,7 +213,10 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
         f_res_amp_sigma=f_res_amp_sigma,                   # arm-C wide / eBOSS + KS leg-match / prod width (None -> tight 0.02)
         metal_prior=_metal_prior,                          # NEW kwarg; default 'uniform' == build_legb_ctx default (byte-identical)
         ks_kwargs=_ks_kwargs,                              # KS echelle R_z + diag surgery (task #5); None => proxy (DESI/eBOSS/off)
-        hierarchical_hcd=False, survey=PIN_KEY)
+        hierarchical_hcd=False, survey=PIN_KEY,
+        # R6 legacy-comparison override (2026-07-23): default False == the build_legb_ctx default
+        # (byte-identical for every existing caller); True only via the stamped --r6-arm legacy path.
+        ks_legacy_alpha_param=ks_legacy_alpha_param)
 
     # NORC POST-build replace (mirror build_real_ctx, run_real_fit.py:167-170): res_corr_on=False was built
     # above; also pin the 2 now-inert alpha_res sites (fix_alpha_res is a ctx-level field, not a build kwarg)

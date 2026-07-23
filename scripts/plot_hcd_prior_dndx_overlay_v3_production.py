@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 import hcd_analysis.emulator  # x64 before jax
 import jax.numpy as jnp
 from hcd_analysis.emulator.data import load_cache
-from hcd_analysis.emulator.dndx_wc import alpha_to_dndx
+from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
 from hcd_analysis.emulator.inference import (
     hcd_incidence_prior, hcd_lls_realfit_alpha_center, assert_hcd_pivot_z3,
     HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC, HCD_PRIOR_FRAC_SIGMA,
@@ -73,12 +73,10 @@ def production_pivot(survey, Xbar_z3, w_c_z3):
 
 
 def to_dndx_curve(alpha_pivot, zgrid, Xb, s_c):
+    # EXACT inverse, mode="raise" (prior centres/edges): out-of-simplex refuses loudly
+    # (expected for the current KS prior at z >= ~4.45) instead of silently saturating.
     az = alpha_pivot[None, :] * (((1.0 + zgrid)[:, None] / (1.0 + ZP)) ** s_c[None, :])  # (nz,3)
-    out = np.empty((len(zgrid), 3))
-    for j in range(len(zgrid)):
-        out[j] = np.asarray(alpha_to_dndx(jnp.asarray(az[j]), jnp.asarray(float(Xb[j])),
-                                          jnp.asarray(float(zgrid[j]))))
-    return out
+    return np.asarray(alpha_to_dndx_exact(az, np.asarray(Xb, float), np.asarray(zgrid, float)))
 
 
 def build_xbar_fn_and_sim(d):

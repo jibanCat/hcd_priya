@@ -108,3 +108,62 @@ def test_apply_truth_boosts_unknown_key_raises():
     tp = _toy_truth_pack()
     with pytest.raises(ValueError, match="unknown inject_spec key"):
         LB._apply_truth_boosts(tp, {"dla_truthboost": 1.5})     # the typo class, fail loud
+
+
+# --------------------------------------------------------------------------------------------- #
+#  (c) forward_stamp single authority (F2/F5, adversarial backfill 2026-07-19): the
+#      meta["forward"] dict for shard pkls is built ONCE in closure_legb, carries BOTH freeze
+#      signatures (forward + prior constants) AND the env-resolved data-selection stamps.
+# --------------------------------------------------------------------------------------------- #
+from types import SimpleNamespace  # noqa: E402
+
+
+def _stub_ctx(f_res_amp_sigma=0.02):
+    return SimpleNamespace(res_corr_on=False, fix_alpha_res=True, sample_res=True,
+                           f_res_amp_sigma=f_res_amp_sigma, metal_prior="flatlog2node",
+                           metal_node_z=(2.2, 4.2))
+
+
+def _stub_leg(**kw):
+    base = dict(dla_cov_reduced=True, dla_forward_frac=1.0,
+                use_snr3=False, cv_floor_on=False, cv_floor_rank1=False)
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_forward_stamp_authority_keys_and_signatures():
+    from hcd_analysis.emulator import inference as INF
+    st = LB.forward_stamp(_stub_ctx(), _stub_leg())
+    for k in ("res_corr_on", "fix_alpha_res", "sample_res", "f_res_amp_sigma", "metal_prior",
+              "metal_node_z", "dla_cov_reduced", "dla_forward_frac",
+              "use_snr3", "cv_floor_on", "cv_floor_rank1",
+              "forward_signature", "hcd_prior_signature"):
+        assert k in st, k
+    assert st["forward_signature"] == LB.forward_signature()
+    assert st["hcd_prior_signature"] == INF.hcd_prior_signature()   # F5: the prior stamp
+    assert st["sample_res"] is True and st["metal_prior"] == "flatlog2node"
+    assert st["dla_cov_reduced"] is True and st["dla_forward_frac"] == 1.0
+    assert st["use_snr3"] is False and st["cv_floor_on"] is False
+
+
+def test_forward_stamp_threads_env_data_flags():
+    st = LB.forward_stamp(_stub_ctx(), _stub_leg(use_snr3=True, cv_floor_on=True,
+                                                 cv_floor_rank1=True))
+    assert st["use_snr3"] is True and st["cv_floor_on"] is True and st["cv_floor_rank1"] is True
+
+
+def test_forward_stamp_none_f_res_sigma_survives():
+    st = LB.forward_stamp(_stub_ctx(f_res_amp_sigma=None), _stub_leg())
+    assert st["f_res_amp_sigma"] is None
+
+
+def test_selfdraw_runner_uses_stamp_authority_and_smoke_suffix():
+    """(F5) the selfdraw runner's meta['forward'] comes from the single authority (so it now
+    carries hcd_prior_signature), the pre-2026-07-19 stamp gap is documented; (F6a) smoke mode
+    writes a .smoke-suffixed filename that the analyzer glob can never pool as a real shard."""
+    with open("/home/mfho/hcd_priya/scripts/run_dla_selfdraw_shard.py") as fh:
+        src = fh.read()
+    assert "forward_stamp(" in src, "meta['forward'] must come from closure_legb.forward_stamp"
+    assert "latent reconstruction" in src, \
+        "the pre-2026-07-19 hcd_prior_signature stamp gap must be documented in the docstring"
+    assert '".smoke"' in src, "smoke mode must write a .smoke-suffixed pkl (width-study mirror)"

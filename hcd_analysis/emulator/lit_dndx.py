@@ -388,7 +388,89 @@ def lit_points_for_display():
         "estimand": {"LLS": "binned [17.2,19.0) (kernel-corrected)",
                      "subDLA": "binned [19.0,20.3) counts n/dX",
                      "DLA": "binned >=20.3"},
+        "estimand_id": dict(ESTIMAND_ID),
+        "estimand_label": dict(ESTIMAND_LABEL),
     }
+
+
+# =========================================================================== #
+#  DISPLAY-PATH ESTIMAND GUARD (paper-agent request 2026-07-20).              #
+#  The LAW boundary is guarded by inference.assert_dndx_law_estimand; this    #
+#  block guards the DISPLAY boundary: the retired tau_LL>=2 LLS object fails  #
+#  loudly if requested by name, and consumer legends can be asserted against  #
+#  the deployed estimand wording (the silent-substitution hazard: corrected   #
+#  points rendering under old hard-coded tau>=2 labels with no error).       #
+# =========================================================================== #
+# Machine ids, kept test-equal to inference.HCD_LIT_DNDX_ESTIMAND (the law ids).
+ESTIMAND_ID = {"LLS": "binned_17.2_19.0", "subDLA": "binned_19.0_20.3",
+               "DLA": "binned_ge20.3"}
+# The exact caption/legend wording of record. Paper consumers must use these
+# VERBATIM (PI directive 2026-07-20 baseline item 2: no paraphrase).
+ESTIMAND_LABEL = {
+    "LLS": ("kernel-corrected (K1a) binned LLS incidence, "
+            "17.2 <= log10 N_HI < 19.0"),
+    "subDLA": ("binned sub-DLA incidence from raw counts n/dX, "
+               "19.0 <= log10 N_HI < 20.3"),
+    "DLA": "binned DLA incidence, log10 N_HI >= 20.3",
+}
+# Tokens whose appearance in a display label/source string means the retired
+# cumulative tau_LL>=2 object leaked back into a legend.
+RETIRED_DISPLAY_TOKENS = ("tau_LL", "\\tau_{\\rm LL}", "τ_LL", "tau912",
+                          "tau>=2", "tau >= 2", "τ≥2", "τ ≥ 2")
+# Required per-class tokens: a label that lost its binned column-density range
+# is no longer stating the estimand.
+_REQUIRED_LABEL_TOKENS = {"LLS": ("17.2", "19.0"), "subDLA": ("19.0", "20.3"),
+                          "DLA": ("20.3",)}
+_RETIRED_ESTIMAND_IDS = {
+    "cumulative_tau2_ge17.5": ("the cumulative tau912>=2 l(X) display object was RETIRED "
+                               "2026-07-18 (wrong kernel for the binned LLS class)"),
+}
+# Names under which the retired tau>=2 display object might plausibly be requested.
+_RETIRED_NAMES = {
+    "LIT_TAU2", "LLS_TAU2_COMPILATION", "LLS_TAU2_DISPLAY", "lit_points_tau2",
+    "lls_tau2_points_for_display", "LIT_OLD", "LLS_CUMULATIVE_DISPLAY",
+}
+
+
+def __getattr__(name):
+    """Module-level tombstone: requesting the retired tau_LL>=2 display object by any
+    of its plausible names fails loudly with the corrected pointer instead of an
+    ordinary AttributeError a caller might silently except."""
+    if name in _RETIRED_NAMES:
+        raise AttributeError(
+            f"lit_dndx.{name}: RETIRED. The cumulative tau_LL>=2 LLS display object was "
+            f"retired 2026-07-18 (wrong-object/kernel bugs; see LLS_TAU2_OLD_DEFECTS). "
+            f"Use lit_points_for_display() (estimand ids {ESTIMAND_ID}) and the "
+            f"ESTIMAND_LABEL wording verbatim.")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def assert_display_estimand(cls, estimand_id, where):
+    """Fail loudly if a display consumer requests a retired estimand or mislabels the
+    deployed one. Mirrors inference.assert_dndx_law_estimand at the display boundary."""
+    if estimand_id in _RETIRED_ESTIMAND_IDS:
+        raise AssertionError(
+            f"[{where}] display estimand {estimand_id!r} for class {cls!r} is RETIRED: "
+            f"{_RETIRED_ESTIMAND_IDS[estimand_id]}. Deployed id: {ESTIMAND_ID[cls]!r}.")
+    if estimand_id != ESTIMAND_ID[cls]:
+        raise AssertionError(
+            f"[{where}] display estimand mismatch for class {cls!r}: requested "
+            f"{estimand_id!r}, deployed {ESTIMAND_ID[cls]!r}.")
+
+
+def assert_display_labels(labels_by_class, where):
+    """Assert consumer legend/caption strings: no retired token anywhere, and each
+    class label still carries its binned column-density range tokens."""
+    for c, lab in labels_by_class.items():
+        for tok in RETIRED_DISPLAY_TOKENS:
+            if tok in lab:
+                raise AssertionError(
+                    f"[{where}] class {c!r} label contains RETIRED token {tok!r}: {lab!r}")
+        for tok in _REQUIRED_LABEL_TOKENS.get(c, ()):
+            if tok not in lab:
+                raise AssertionError(
+                    f"[{where}] class {c!r} label is missing the required estimand token "
+                    f"{tok!r}: {lab!r}")
 
 
 # =========================================================================== #

@@ -165,7 +165,8 @@ def test_2d_btilt_center_is_incidence_slope_lls():
 #      bug: with the 0.95 ratio slope it FALLS).                                 #
 # --------------------------------------------------------------------------- #
 def _dndx_z_at_slope(slope, z, xbar):
-    """Forward dN/dX_c(z) = alpha_to_dndx(α_pivot·((1+z)/(1+z_p))^s_c, Xbar(z), z) — the EXACT map
+    """Forward dN/dX_c(z) = alpha_to_dndx(α_pivot·((1+z)/(1+z_p))^s_c, Xbar(z), z) — the (APPROXIMATE,
+    renorm-ignoring; fine for this sign test) map
     scripts/scratch_hcd_dndx_loso_vs_lit.py uses. ``xbar`` is Xbar(z) (mean absorption path per
     sightline), which RISES with z in PRIYA (the cache fit goes ~0.45→1.08 over z 2.4→4.2). That
     rising denominator is what makes the SIGN of d ln dN/dX/d ln(1+z) discriminating: at the
