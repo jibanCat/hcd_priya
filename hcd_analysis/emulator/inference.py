@@ -177,6 +177,13 @@ HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X = {"DESI": 0.574, "eBOSS": 0.574, "DESI+KS": 0
 # reference and push them through the exact occupancy map w_c_corrected — every draw is then
 # STRUCTURALLY inside the simplex (sum alpha < 1, alpha >= 0). KS single-leg builds ONLY;
 # DESI/eBOSS/DESI+KS/survey=None keep the alpha-space parameterization byte-unchanged.
+# PHYSICAL MOTIVATION (PI, 2026-07-23): the occupancy constraint is physics, not just simplex
+# regularization. alpha_HCD marginalizes over sample selection (clean-forest vs HCD-selected vs
+# DLA-selected), but the RELATIVE LLS/subDLA/DLA abundances remain tied to the simulation CDDF
+# and structure formation: absorber classes arise from the same halo/density field, so even a
+# DLA-selected sample cannot imply arbitrarily large HCD populations as if absorbers were
+# manually injected. Every sightline decomposes into clean + absorber-class fractions summing
+# to 1; the out-of-simplex legacy-KS mass asserted MORE than that physical budget.
 # FROM-IMPORT REBINDING TRAP (JAX-specialist review 2026-07-22; same class as the documented
 # HCD_LLS_SURVEY_BOOST trap, immutable-float variant with NO mutate-in-place escape): the
 # KS_DNDX_* floats below are read by the SAMPLED SITES (closure_legb._ks_dndx_sites) via
