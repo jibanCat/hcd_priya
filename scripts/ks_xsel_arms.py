@@ -279,7 +279,10 @@ XSEL_TRUTH_TABLE_PATH = ("/home/mfho/hcd_priya_notes/docs/superpowers/xsel-truth
 # delegated review (record #7); then the sha256 hex of the file bytes is set here
 # DELIBERATELY. Every loader call before that fails loud. NEVER default this to a computed
 # value: the pin is the provenance statement.
-XSEL_TRUTH_TABLE_SHA256 = None
+# Pinned 2026-07-25 after the PI-delegated stage-V review (PI decision #7 execution
+# annex): full LF (1071 members; ns0.907...0347 z2.8 cell denylisted, label audit) +
+# HR (103) suites, readout sha bf3f809a..., figures reviewed sane, consumer-validated.
+XSEL_TRUTH_TABLE_SHA256 = "ca8ac6ee5d39b9b43905bb0ab0cc74f5c6810101f1688744e036f7218b4f7e77"
 
 REQUIRED_CONVENTION = {
     "frame": "deployed",
