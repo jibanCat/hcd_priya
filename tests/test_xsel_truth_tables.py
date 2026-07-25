@@ -273,6 +273,16 @@ def test_interp_bounds_fail_loud():
         interp_to_grid(k, P, np.array([0.2]))
 
 
+def test_cell_denylist_pinned():
+    # the one verified bad deployed pairing (2026-07-25 label audit) stays pinned;
+    # an accidental clear of the denylist would resurrect the tripwire failure
+    from scripts.build_xsel_truth_tables import XSEL_CELL_DENYLIST
+    assert ("ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662omegamh20.144"
+            "hireionz7.47bhfeedback0.0347", 17) in XSEL_CELL_DENYLIST
+    assert all(isinstance(s, str) and isinstance(n, int)
+               for s, n in XSEL_CELL_DENYLIST)
+
+
 def test_ks_project_z_window_gate():
     # regression for job 54771172: at z=5.4 (outside the KS window) some sims'
     # native Nyquist falls below the last KS bin centre -- NaN, not a refusal

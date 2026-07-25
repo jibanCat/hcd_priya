@@ -92,6 +92,20 @@ KS_Z_LO, KS_Z_HI, KS_KMAX = 2.4, 4.6, 0.069   # deployed load_ks_leg cuts (data_
 # priya_p1d.FINE_NHI_EDGES; asserted against it at runtime in process_snap).
 CLASS_RANGES = {"clean": (0, 1), "LLS": (1, 8), "subDLA": (8, 13), "DLA": (13, 15)}
 COARSE = ("clean", "LLS", "subDLA", "DLA")
+
+# Known-bad deployed catalog<->spectra pairings, EXCLUDED from the truth tables
+# (verified 2026-07-25, notes 2026-07-25-xsel-label-audit): this sim's hcd_outputs
+# z-stamps are offset around snap 17 -- catalog snap_017 was built from the z=3.0
+# spectra (its meta nbins=1397 matches SPECTRA_017, header z=3.0) but stamped z=2.8,
+# so the deployed discovery pairs z=3.0 labels with the z=2.8 spectra (SPECTRA_018,
+# header z=2.8, nbins 1365). The clean-label tripwire catches it deterministically
+# (21504 phantom clean triggers; the true z=2.8 catalog, snap_018 stamped 2.674 and
+# off-grid-skipped, gives 0). The deployed-cache impact is a recorded defect
+# disclosure, NOT repaired here (PI decision #7 rule 3).
+XSEL_CELL_DENYLIST = {
+    ("ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662omegamh20.144"
+     "hireionz7.47bhfeedback0.0347", 17),
+}
 N_FINE = 15
 
 _HCD_OUTPUTS = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
@@ -966,6 +980,12 @@ def run_sims(args):
             raise SystemExit(f"--snaps {args.snaps} matches nothing for {sim}")
     print(f"[{args.fidelity}] {sim}: {len(todo)} snaps", flush=True)
     for _, snap, snap_dir, raw in todo:
+        if (sim, snap) in XSEL_CELL_DENYLIST:
+            print(f"[DENYLIST] {sim} snap {snap}: known-bad deployed catalog<->spectra "
+                  "pairing (z3.0 labels on z2.8 spectra) -- cell EXCLUDED from the "
+                  "truth tables, defect recorded (2026-07-25-xsel-label-audit)",
+                  flush=True)
+            continue
         process_snap(sim, snap, snap_dir, raw, args.fidelity,
                      alpha_idx=args.alpha_idx, outdir=args.outdir, seed=args.seed,
                      batch_rows=args.batch_rows, n_skewers=args.n_skewers,
