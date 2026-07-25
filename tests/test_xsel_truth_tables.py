@@ -19,7 +19,7 @@ import pytest
 from scripts.build_xsel_truth_tables import (
     CLASS_RANGES, CURVE_KEYS, SCALAR_KEYS, SEG_KEYS, N_FINE,
     atleast_one_combine, bin_weighted, build_convention, coarse_merge,
-    combine_unfiltered, dflux_rows, edges_from_centers_geom, interp_to_grid,
+    combine_unfiltered, dflux_rows, edges_from_centers_geom, interp_to_grid, ks_project,
     ks_leg_kgrid, mask_to_segments, native_kgrid, p1d_rows, powerspectrum_rows,
     segment_power_samples, sha256_file, snap_rng, stamp_sidecar, transplant_apply,
     trig_counts_by_fine_bin, verify_sidecar,
@@ -271,6 +271,29 @@ def test_interp_bounds_fail_loud():
     np.testing.assert_allclose(interp_to_grid(k, P, np.array([0.01, 0.05])), 1.0)
     with pytest.raises(ValueError):
         interp_to_grid(k, P, np.array([0.2]))
+
+
+def test_ks_project_z_window_gate():
+    # regression for job 54771172: at z=5.4 (outside the KS window) some sims'
+    # native Nyquist falls below the last KS bin centre -- NaN, not a refusal
+    k_ks = np.array([0.0055, 0.03, 0.0627126])
+    k_short = np.linspace(0.00036, 0.0618, 40)   # under-covers the last KS bin
+    k_full = np.linspace(0.0003, 0.08, 40)
+    P = np.ones(40)
+    # out-of-window + under-coverage -> all-NaN row, no raise
+    out = ks_project(k_short, P, k_ks, z_grid=5.4)
+    assert out.shape == k_ks.shape and np.isnan(out).all()
+    # out-of-window below the window behaves the same
+    assert np.isnan(ks_project(k_short, P, k_ks, z_grid=2.2)).all()
+    # in-window + full coverage -> interp passthrough
+    np.testing.assert_allclose(ks_project(k_full, P, k_ks, z_grid=3.0), 1.0)
+    # in-window + under-coverage -> still fail-loud (would corrupt the tables)
+    with pytest.raises(ValueError):
+        ks_project(k_short, P, k_ks, z_grid=4.6)
+    # in-window + non-finite curve -> NaN (pre-existing behavior preserved)
+    Pbad = P.copy()
+    Pbad[3] = np.nan
+    assert np.isnan(ks_project(k_full, Pbad, k_ks, z_grid=3.0)).all()
 
 
 def test_dflux_and_powerspectrum_conventions():

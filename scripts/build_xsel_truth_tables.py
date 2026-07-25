@@ -337,6 +337,23 @@ def interp_to_grid(k_native, P, k_target):
     return np.interp(k_target, k_native, np.asarray(P, float))
 
 
+def ks_project(k_native, P, k_ks, z_grid):
+    """Project a native curve onto the KS leg k grid, or NaN if unprojectable.
+
+    Snaps outside the deployed KS z window [KS_Z_LO, KS_Z_HI] are never consumed
+    on the KS grid (the analyzer masks to the leg's z bins), and at z > KS_Z_HI
+    the native velocity-grid Nyquist in s/km shrinks with z and cosmology and can
+    fall below the last KS bin centre for some sims -- so those rows are NaN, not
+    a refusal. Inside the window the interp_to_grid bounds check stays fail-loud
+    (an in-window coverage failure would corrupt the truth tables and must stop
+    the run)."""
+    if not (KS_Z_LO - 1e-6 <= z_grid <= KS_Z_HI + 1e-6):
+        return np.full(np.asarray(k_ks).size, np.nan)
+    if not np.isfinite(np.asarray(P, float)).all():
+        return np.full(np.asarray(k_ks).size, np.nan)
+    return interp_to_grid(k_native, P, k_ks)
+
+
 def ks_leg_kgrid(base=KS_BASE_DEFAULT, z_lo=KS_Z_LO, z_hi=KS_Z_HI, k_max=KS_KMAX):
     """The KS leg's unique post-cut k grid, parsed directly from the conservative P1D
     table with the deployed load_ks_leg cuts. The analyzer re-verifies this against
@@ -855,8 +872,7 @@ def process_snap(sim_name, snap, snap_dir, raw_path, fidelity, *, alpha_idx, out
             raise RuntimeError(f"curve {key}: shape {cur.shape} != full native spectrum")
         cur = cur[1:n_k + 1]
         out[key] = cur
-        out[key + "_ks"] = (interp_to_grid(kf, cur, k_ks)
-                            if np.isfinite(cur).all() else np.full(k_ks.size, np.nan))
+        out[key + "_ks"] = ks_project(kf, cur, k_ks, z_grid)
     out["X1_seg_dla_ks"] = seg_dla
     out["X1_seg_ctrl_ks"] = seg_ctrl
     scalars = dict(
