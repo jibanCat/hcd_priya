@@ -52,7 +52,14 @@ case "$LEG" in
   *) echo "[r6x] unknown LEG=$LEG" >&2; exit 1 ;;
 esac
 
-if (( TID < 8 )); then ARM=deployed; MOCK=$TID; else ARM=dispprior; MOCK=$((TID - 8)); fi
+# ids 0-15 = the base campaign (mocks 0-7); ids 16-23 = the pre-registered
+# either-channel EXTENSION block (mocks 8-11, both arms) -- submit --array=16-23
+# ONLY for a leg whose readout fired the extension rule.
+if   (( TID < 8 ));  then ARM=deployed;  MOCK=$TID
+elif (( TID < 16 )); then ARM=dispprior; MOCK=$((TID - 8))
+elif (( TID < 20 )); then ARM=deployed;  MOCK=$((TID - 8))
+elif (( TID < 24 )); then ARM=dispprior; MOCK=$((TID - 12))
+else echo "[r6x] task id $TID out of range" >&2; exit 1; fi
 LEG_LC=$(echo "$LEG" | tr '[:upper:]' '[:lower:]')
 PKL=$(printf "r6x_%s_%s_shard_%03d%s.pkl" "$LEG_LC" "$ARM" "$MOCK" "$SUFFIX")
 
