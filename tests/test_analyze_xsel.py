@@ -90,6 +90,13 @@ def _meta(arm, reg_sig, sha, table_path):
     return dict(n_mocks=(XA.K0_N_MOCKS if arm == XA.K0_ARM_ID else e["n_mocks"]),
                 run_kw=dict(RUN_KW), forward=dict(FORWARD),
                 prior_constants=copy.deepcopy(PC),
+                span=dict(cache_alpha_max=[0.5252, 0.5488, 0.1490],
+                          truth_alpha_max=([1.0, 0.0, 0.0]
+                                           if e.get("kind") == "mixture_corner"
+                                           else [0.3, 0.06, 0.01]),
+                          out_of_span_classes=(["lls"] if e.get("kind") == "mixture_corner"
+                                               and e.get("cls") == 0 else []),
+                          ),
                 arm_stamp=dict(
                     arm_id=arm, kind=e.get("kind"), campaign=XA.CAMPAIGN,
                     registry_signature=reg_sig,
@@ -358,3 +365,62 @@ def test_driver_truth_builders_copy_semantics():
     assert np.allclose(out4["alpha_hcd_z"][:, 0], XA.f_sel(Z_GLOBAL))
     assert out4["alpha_hcd"][0] == XA.f_sel(3.0) and out4["alpha_hcd"][1:].sum() == 0
     assert np.all(tp["alpha_hcd_z"] == 0.05)
+
+
+# ------------------------------------------- pre-registered disclosures (2026-07-26 memo)
+
+def _rec_with_alpha(vals, cls=0):
+    """Minimal record whose alpha_<cls> draws are ``vals`` (span-occupancy unit)."""
+    names = ["ns", "Ap", "alpha_lls", "alpha_subdla", "alpha_dla"]
+    n = len(vals)
+    draws = np.zeros((n, len(names)))
+    draws[:, 2 + cls] = np.asarray(vals, float)
+    return dict(names=names, draws=draws, truth_vec=np.zeros(len(names)), L=n,
+                sites_extra={}, n_div=0)
+
+
+SPAN = dict(cache_alpha_max=[0.50, 0.55, 0.15], truth_alpha_max=[1.0, 0.0, 0.0],
+            out_of_span_classes=["lls"])
+
+
+def test_span_occupancy_separates_edge_pileup_from_scatter():
+    pinned = AX.span_occupancy(_rec_with_alpha([0.48, 0.49, 0.50, 0.499]), SPAN, 0)
+    assert pinned["frac_at_edge"] == 1.0          # every draw above 0.9 x 0.50
+    assert pinned["frac_above_span"] == 0.0       # but none ABOVE the span
+    assert pinned["cls"] == "lls" and pinned["cache_alpha_max"] == 0.50
+    scattered = AX.span_occupancy(_rec_with_alpha([0.10, 0.20, 0.25, 0.30]), SPAN, 0)
+    assert scattered["frac_at_edge"] == 0.0
+    over = AX.span_occupancy(_rec_with_alpha([0.60, 0.10]), SPAN, 0)
+    assert over["frac_above_span"] == 0.5
+
+
+def test_arm_span_occupancy_aggregates_and_carries_out_of_span():
+    recs = {0: _rec_with_alpha([0.48, 0.49]), 1: _rec_with_alpha([0.10, 0.20])}
+    spans = {0: SPAN, 1: dict(SPAN, out_of_span_classes=[])}
+    agg = AX.arm_span_occupancy(recs, spans, 0)
+    assert agg["mean_frac_at_edge"] == 0.5 and agg["max_frac_at_edge"] == 1.0
+    assert agg["truth_out_of_span_classes"] == ["lls"]      # union over the arm's fits
+    assert agg["per_fit_frac_at_edge"] == [1.0, 0.0]
+
+
+def test_pilot_excluded_sensitivity_only_for_piloted_arms(tmp_path):
+    shard_dir, k0_dir, tp, sha = build_battery(tmp_path)
+    res = AX.summarize(shard_dir, k0_dir, tp, sha)
+    for a in ("X1_dla100", "X2_sub100", "X4_prof"):
+        gs = res["nopilot"][a]["ns"]
+        assert gs is not None and gs["n"] == XA.ARMS[a]["n_mocks"] - len(AX.PILOT_MOCKS)
+    # K8 was never piloted: no exclusion is owed, and its mocks 0-3 must NOT be dropped.
+    assert res["nopilot"]["K8a_eps_hi"]["ns"] is None
+    assert res["stats"]["K8a_eps_hi"]["ns"]["n"] == XA.ARMS["K8a_eps_hi"]["n_mocks"]
+
+
+def test_span_occupancy_reaches_the_arm_outputs(tmp_path):
+    shard_dir, k0_dir, tp, sha = build_battery(tmp_path)
+    res = AX.summarize(shard_dir, k0_dir, tp, sha)
+    out = tmp_path / "readout"
+    AX._write_arm_outputs(res, "X2_sub100", str(out))
+    z = np.load(out / "xsel_X2_sub100.npz", allow_pickle=False)
+    assert str(z["span_class"]) == "subdla"
+    assert 0.0 <= float(z["span_mean_frac_at_edge"]) <= 1.0
+    txt = (out / "xsel_X2_sub100.txt").read_text()
+    assert "span occupancy" in txt and "PILOT-EXCLUDED SENSITIVITY" in txt

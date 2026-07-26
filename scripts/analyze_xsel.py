@@ -75,6 +75,15 @@ PAIRED_PARAMS = ("ns", "Ap", "tau0_amp", "dtau0")
 _RUN_KW_CORE = ("n_warmup", "n_samples", "seed", "max_tree_depth", "dense_mass")
 _K8_SITES = ("eps_lls", "kappa_lls", "m_sub", "t_sub", "dla_raw", "t_dla")
 _P_FAIL_NULL_FLAG = 0.05
+_CLASSES = ("lls", "subdla", "dla")
+# The pilot cells (job 54963191): mocks 0-3 of the four X arms ONLY -- K8 was never piloted.
+# They measured sigma_pair and are REUSED in the final n=16 (gate-revision memo header), so the
+# pre-registration owes a disclosure-only sensitivity verdict recomputed WITHOUT them.
+PILOT_MOCKS = (0, 1, 2, 3)
+PILOT_ARMS = ("X1_dla100", "X2_sub100", "X3_lls100", "X4_prof")
+# Fraction of the reachable cache span above which a draw counts as sitting at the edge
+# (Lya SF-3 span-occupancy: separates boundary censoring from genuine posterior scatter).
+_EDGE_FRAC = 0.9
 
 
 # ---------------------------------------------------------------- small stats (testable)
@@ -147,6 +156,40 @@ def part2_disclosure(gs, gp):
 def rank_u(rec, name):
     d, t = _col_draws_truth(rec, name)
     return float((np.asarray(d) < t).mean())
+
+
+def span_occupancy(rec, span, cls):
+    """PRE-REGISTERED disclosure (Lya SF-3, gate-revision memo): where the posterior for the
+    arm's OWN HCD class sits relative to the emulator training-cache span.
+
+    Returns, for one fit: the fraction of posterior draws ABOVE the cache span max
+    (extrapolation territory), the fraction within the top ``_EDGE_FRAC`` of the reachable
+    range (pile-up AT the reachable edge = boundary censoring), the posterior mean, and the
+    span max itself. Read together with ``truth_out_of_span``, this distinguishes an
+    UNDER-RESOLVED verdict driven by boundary censoring from one driven by scatter."""
+    name = f"alpha_{_CLASSES[int(cls)]}"
+    d = np.asarray(_col_draws_truth(rec, name)[0], float).ravel()
+    cap = float(np.asarray(span["cache_alpha_max"], float)[int(cls)])
+    return dict(cls=_CLASSES[int(cls)], cache_alpha_max=cap,
+                frac_above_span=float((d > cap).mean()),
+                frac_at_edge=float((d > _EDGE_FRAC * cap).mean()),
+                post_mean=float(d.mean()))
+
+
+def arm_span_occupancy(recs, spans, cls):
+    """Per-arm aggregate of :func:`span_occupancy` (mean over fits) + the pre-registered
+    out-of-span truth classes, which fire BY DESIGN at the corners. ``spans`` maps mock ->
+    the shard's ``meta['span']`` block."""
+    mocks = sorted(recs)
+    per_fit = [span_occupancy(recs[m], spans[m], cls) for m in mocks]
+    oos = sorted({c for m in mocks for c in spans[m]["out_of_span_classes"]})
+    return dict(cls=_CLASSES[int(cls)],
+                cache_alpha_max=per_fit[0]["cache_alpha_max"],
+                mean_frac_above_span=float(np.mean([f["frac_above_span"] for f in per_fit])),
+                mean_frac_at_edge=float(np.mean([f["frac_at_edge"] for f in per_fit])),
+                max_frac_at_edge=float(np.max([f["frac_at_edge"] for f in per_fit])),
+                truth_out_of_span_classes=oos,
+                per_fit_frac_at_edge=[f["frac_at_edge"] for f in per_fit])
 
 
 # ---------------------------------------------------------------- pair-identity checks
@@ -277,7 +320,7 @@ def load_battery(shard_dir, k0_dir, table_path=None, expect_sha=None):
     paths = sorted(glob.glob(os.path.join(shard_dir, "ks_xsel_*_shard_*.pkl")))
     paths = [p for p in paths if ".smoke" not in os.path.basename(p)]
     assert paths, f"no ks_xsel shard pkls under {shard_dir}"
-    arms, meta_by_arm, ref = {}, {}, None
+    arms, meta_by_arm, span_by_arm, ref = {}, {}, {}, None
     for p in paths:
         with open(p, "rb") as f:
             d = pickle.load(f)
@@ -306,6 +349,9 @@ def load_battery(shard_dir, k0_dir, table_path=None, expect_sha=None):
         for m, rec in zip(d["idxs"], d["per_mock"]):
             assert int(m) not in tgt, f"{p}: duplicate mock idx {m} for arm {arm}"
             tgt[int(m)] = rec
+            # span is per SHARD (one fit per task), so keep it per mock: the pre-registered
+            # span-occupancy disclosure needs the shard's own cache/truth maxima.
+            span_by_arm.setdefault(arm, {})[int(m)] = meta["span"]
         meta_by_arm[arm] = meta
     for arm, meta in meta_by_arm.items():
         want = set(range(int(XA.ARMS[arm]["n_mocks"])))
@@ -314,6 +360,7 @@ def load_battery(shard_dir, k0_dir, table_path=None, expect_sha=None):
         got = set(arms[arm])
         assert got == want, (f"campaign incomplete for {arm}: missing mocks "
                              f"{sorted(want - got)} (got {len(got)}/{len(want)})")
+        meta["span_by_mock"] = span_by_arm[arm]
 
     # K0 (reused, cross-signature allowance)
     k0_paths = sorted(glob.glob(os.path.join(k0_dir, "ks_selboost_clean_shard_*.pkl")))
@@ -364,11 +411,12 @@ def summarize(shard_dir, k0_dir, table_path=None, expect_sha=None):
     k0, arms, meta, k0_meta, tt, reg_sig = load_battery(shard_dir, k0_dir, table_path,
                                                         expect_sha)
     sigma_post = {p: sigma_post_pooled(k0, p) for p in PAIRED_PARAMS}
-    deltas, stats, part2 = {}, {}, {}
+    deltas, stats, part2, nopilot, span_occ = {}, {}, {}, {}, {}
     for a, recs in arms.items():
         deltas[a] = {}
         stats[a] = {}
         part2[a] = {}
+        nopilot[a] = {}
         for p in PAIRED_PARAMS:
             dl = {m: (bias_raw(recs[m], p) - bias_raw(k0[m], p)) / sigma_post[p]
                   for m in sorted(recs)}
@@ -376,6 +424,15 @@ def summarize(shard_dir, k0_dir, table_path=None, expect_sha=None):
             gs = gate_stats(list(dl.values()))
             stats[a][p] = gs
             part2[a][p] = part2_disclosure(gs, tt["gate_power"][a])
+            # PRE-REGISTERED disclosure-only sensitivity: the same verdict recomputed with
+            # the 4 reused pilot mocks dropped (gate-revision memo, Bayesian SF-3). Only
+            # defined where the arm actually contains the pilot set.
+            rest = ([v for m, v in dl.items() if m not in PILOT_MOCKS]
+                    if a in PILOT_ARMS else [])
+            nopilot[a][p] = (gate_stats(rest) if len(rest) >= 2 and len(rest) < len(dl)
+                             else None)
+        span_occ[a] = arm_span_occupancy(recs, meta[a]["span_by_mock"],
+                                         XA.ARMS[a]["cls"])
     binding = {a: {p: stats[a][p] for p in GATE_PARAMS}
                for a in arms if XA.ARMS[a]["part1"]}
     # revised pre-registration (2026-07-26 memo): UNPROTECTED is the detected-above-
@@ -391,7 +448,8 @@ def summarize(shard_dir, k0_dir, table_path=None, expect_sha=None):
     return dict(k0=k0, arms=arms, meta=meta, k0_meta=k0_meta, tt=tt, reg_sig=reg_sig,
                 sigma_post=sigma_post, deltas=deltas, stats=stats, part2=part2,
                 binding=binding, any_binding_fail=any_binding_fail,
-                any_under_resolved=any_under_resolved, ranks=ranks)
+                any_under_resolved=any_under_resolved, ranks=ranks,
+                nopilot=nopilot, span_occ=span_occ)
 
 
 def _write_arm_outputs(res, a, out_dir):
@@ -429,6 +487,36 @@ def _write_arm_outputs(res, a, out_dir):
             f"(noise floor 2SE/D = {p2['noise_floor_2se_over_D']:.3f}; pre-registered "
             f"P(fail|null) = {p2['p_part1_fail_null']:.3f}, expected sigma_pair = "
             f"{p2['sigma_pair_expected']:.3f})")
+    # PRE-REGISTERED disclosure-only: verdict recomputed without the 4 reused pilot mocks.
+    for p in GATE_PARAMS:
+        gs = res["nopilot"][a][p]
+        if gs is None:
+            continue
+        npz[f"nopilot_verdict_{p}"] = np.asarray(gs["verdict"])
+        for k in ("n", "mean", "se", "ub_t", "lb_t"):
+            npz[f"nopilot_{k}_{p}"] = gs[k]
+        lines.append(
+            f"{'':>9}  PILOT-EXCLUDED SENSITIVITY (n={gs['n']}, disclosure only): {p} mean "
+            f"{gs['mean']:+.4f} +/- {gs['se']:.4f} [t-lb {gs['lb_t']:.4f}, t-ub "
+            f"{gs['ub_t']:.4f}] -> {gs['verdict']}"
+            + ("  (SAME as the n=16 verdict)" if gs["verdict"] == res["stats"][a][p]["verdict"]
+               else f"  (DIFFERS from the n=16 verdict {res['stats'][a][p]['verdict']})"))
+    # PRE-REGISTERED disclosure (Lya SF-3): span occupancy of the arm's own HCD class.
+    so = res["span_occ"][a]
+    for k in ("cache_alpha_max", "mean_frac_above_span", "mean_frac_at_edge",
+              "max_frac_at_edge"):
+        npz[f"span_{k}"] = so[k]
+    npz["span_class"] = np.asarray(so["cls"])
+    npz["span_truth_out_of_span_classes"] = np.asarray(so["truth_out_of_span_classes"])
+    npz["span_per_fit_frac_at_edge"] = np.asarray(so["per_fit_frac_at_edge"])
+    lines.append(
+        f"span occupancy (alpha_{so['cls']}, the arm's own class; cache span max "
+        f"{so['cache_alpha_max']:.4f}): mean draw fraction AT the reachable edge (>"
+        f"{_EDGE_FRAC:g}x span) {so['mean_frac_at_edge']:.3f} (max over fits "
+        f"{so['max_frac_at_edge']:.3f}); above span {so['mean_frac_above_span']:.3f}; "
+        f"truth out-of-span classes {so['truth_out_of_span_classes'] or 'none'} "
+        f"(out-of-span fires BY DESIGN at the corners). High edge occupancy = boundary "
+        f"censoring, NOT scatter, in any UNDER-RESOLVED verdict.")
     for p in GATE_PARAMS:
         u = res["ranks"][a][p]
         lines.append(f"rank u ({p}): mean {np.mean(u):.3f} over {len(u)} mocks "

@@ -146,9 +146,18 @@ def test_truth_admissible():
 
 # ---------------------------------------------------------------- truth-table loader
 
-def test_loader_unpinned_fails_loud(table):
+def test_loader_unpinned_fails_loud(table, monkeypatch):
+    """Stage V PINNED the table (commit 1778ce0), so the module-level sha is now a live
+    64-hex pin; the unpinned fail-loud path must still fire when the pin is absent."""
     path, _sha = table
-    assert XA.XSEL_TRUTH_TABLE_SHA256 is None    # ships UNPINNED until stage V lands
+    assert isinstance(XA.XSEL_TRUTH_TABLE_SHA256, str)
+    assert len(XA.XSEL_TRUTH_TABLE_SHA256) == 64
+    # with the pin LIVE, a foreign table + expect_sha=None must never be silently accepted:
+    # it falls back to the pin and fails on the mismatch.
+    with pytest.raises(AssertionError, match="sha256"):
+        XA.load_truth_tables(path, expect_sha=None)
+    # and with the pin removed, the NOT-PINNED refusal is still the contract.
+    monkeypatch.setattr(XA, "XSEL_TRUTH_TABLE_SHA256", None)
     with pytest.raises(RuntimeError, match="NOT PINNED"):
         XA.load_truth_tables(path, expect_sha=None)
 
@@ -216,8 +225,9 @@ def test_registry_signature_pins_table_sha(tmp_path):
     json.dumps(XA._registry_payload(p1, expect_sha=s1), sort_keys=True)
 
 
-def test_registry_signature_refuses_unpinned(tmp_path):
+def test_registry_signature_refuses_unpinned(tmp_path, monkeypatch):
     p, _s = make_synth_table(tmp_path / "t.npz")
+    monkeypatch.setattr(XA, "XSEL_TRUTH_TABLE_SHA256", None)   # pin live since 1778ce0
     with pytest.raises(RuntimeError, match="NOT PINNED"):
         XA.registry_signature(p, expect_sha=None)
 
