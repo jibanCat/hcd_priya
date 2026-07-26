@@ -456,8 +456,13 @@ def main():
         x1_fork=("dilution_corrected" if e["kind"] == "data_swap" else None),
         z_global=z_global.tolist())
     meta["span"] = span
-    pickle.dump(dict(arm=a.arm_id, survey="ks", mode=mode, idxs=idxs, per_mock=per_mock,
-                     meta=meta), open(out, "wb"))
+    # atomic write: the batch skip-guard is existence-only, so a preempted task must
+    # never leave a truncated pkl that "skips as done" (gate-revision memo, CS lens)
+    tmp = str(out) + ".tmp"
+    with open(tmp, "wb") as fh:
+        pickle.dump(dict(arm=a.arm_id, survey="ks", mode=mode, idxs=idxs,
+                         per_mock=per_mock, meta=meta), fh)
+    os.replace(tmp, out)
     nd = sum(int(r.get("n_div", 0) > 0) for r in per_mock)
     print(f"[ks xsel {a.arm_id} shard {a.shard}] wrote {len(per_mock)} {mode} mock(s) "
           f"({nd} div) -> {out} wall={wall:.1f}s")

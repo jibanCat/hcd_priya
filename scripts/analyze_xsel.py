@@ -2,17 +2,28 @@
 annex, 2026-07-24). Paired readout of the X/K8 arms against the REUSED R4/R5 corrected-
 geometry K0 shards (annex OQ5).
 
-GATES (panel gate reform, pre-registered):
-  PART 1 (BINDING, X1/X2/X3 only): |mean paired delta| + 2 SE < 0.30 * sigma_post per
-    parameter (ns AND Ap), n = 16 pairs. Deltas are RAW-units paired biases
-    (bias_X(m) - bias_K0(m)) normalized by sigma_post = the K0-POOLED posterior sd per
-    parameter (round-2 revision 4a; sigma_post is pre-registered as this object and nothing
-    else). The exact-t upper bound is printed as a secondary line.
-  PART 2 (DISCLOSURE-ONLY, never binding): S = (|mean| + 2 SE)/D per arm/param, D from the
-    sha-pinned stage-V truth table's gate-power block, printed WITH the pre-registered
-    P(Part-1 fail | zero bias) and the noise floor 2SE/D. A p_fail_null > 0.05 on a binding
-    arm is flagged as a pre-registration violation (revision 4b: n or gate form should have
-    been revised BEFORE launch).
+GATES (REVISED pre-registration 2026-07-26, the one-shot gate-form revision under the
+stage-V fallback; memo `2026-07-26-xsel-pilot-sigmapair-and-gate-revision`, 4-lens
+panel ADOPTED -- the 4-pair pilot measured sigma_pair/sigma_post = 0.21-2.03 against
+the r < 0.25 calibration requirement, so the original binary equivalence gate was
+uncalibratable and was replaced BEFORE the full-battery launch):
+  PART 1 (X1/X2/X3; ns AND Ap; n = 16 pairs): THREE-OUTCOME interval verdict per
+    arm x channel with t* = t(0.975, n-1):
+      PROTECTED       |mean| + t* SE < 0.30 sigma_post  (budget met, a fortiori)
+      UNPROTECTED     |mean| - t* SE > 0.30 sigma_post  (bias detected above budget
+                      -> corner-failure protocol, PI decision 8)
+      UNDER-RESOLVED  otherwise (two-sided bound quoted; threshold study carries it;
+                      PROTECTED is UNREACHABLE for X1/X2 at the measured sigma_pair,
+                      stated pre-launch)
+    Deltas are RAW-units paired biases (bias_X(m) - bias_K0(m)) normalized by
+    sigma_post = the K0-POOLED posterior sd per parameter (round-2 revision 4a,
+    unchanged). Paired t + Wilcoxon signed-rank and the measured sigma_pair are
+    reported per channel; the legacy ub2 key is kept for continuity.
+  PART 2 (DISCLOSURE-ONLY, never binding): S = (|mean| + 2 SE)/D per arm/param, D from
+    the sha-pinned stage-V truth table's gate-power block, printed WITH the stage-V
+    proxy P(binary-fail | zero bias) and the noise floor 2SE/D; proxy exceedances are
+    printed as a 4b DISCLOSURE (resolved by the pre-launch revision), with
+    expected-vs-measured sigma_pair.
   X4 and K8a/b/c: same lines, reported NON-BINDING (annex OQ4; K6-redesign Sec 7).
   tau0_amp + dtau0 ALWAYS reported alongside (standing convention). UNSIGNED n_s
   expectation notes printed per arm (round-2 revision 8). Rank lines are non-binding with
@@ -82,18 +93,47 @@ def sigma_post_pooled(k0_recs, name):
 
 
 def gate_stats(deltas, gate=XA.GATE):
-    """Part-1 arithmetic on paired deltas (already in sigma_post units): mean, SE, the
-    binding ub2 = |mean| + 2 SE, the secondary exact-t ub, verdict vs ``gate``."""
+    """Part-1 arithmetic on paired deltas (already in sigma_post units).
+
+    REVISED PRE-REGISTRATION (2026-07-26 memo `2026-07-26-xsel-pilot-sigmapair-and-
+    gate-revision`, 4-lens panel ADOPTED; the one-shot gate-form revision under the
+    stage-V fallback -- the pilot measured sigma_pair r = 0.21-2.03 vs the r < 0.25
+    calibration requirement, so the binary equivalence verdict is uncalibratable):
+    THREE-OUTCOME interval verdict with t(0.975, n-1) quantiles (sigma_pair is
+    estimated from the same deltas):
+      PROTECTED       |mean| + t* SE < gate   (original 0.30 budget met, a fortiori)
+      UNPROTECTED     |mean| - t* SE > gate   (bias detected above budget)
+      UNDER-RESOLVED  otherwise               (two-sided bound quoted; PI decision-8)
+    The legacy ub2 = |mean| + 2 SE key is kept for continuity/npz compatibility.
+    Also reports the measured sigma_pair, the paired t and Wilcoxon signed-rank
+    statistics (robustness companion)."""
     d = np.asarray([x for x in deltas if x is not None], float)
     n = d.size
     assert n >= 2, f"gate_stats needs >= 2 paired deltas, got {n}"
-    from scipy.stats import t as _t
-    se = float(d.std(ddof=1) / np.sqrt(n))
+    from scipy.stats import t as _t, wilcoxon as _wilcoxon
+    sigma_pair = float(d.std(ddof=1))
+    se = float(sigma_pair / np.sqrt(n))
     tq = float(_t.ppf(0.975, n - 1))
-    ub2 = abs(float(d.mean())) + 2.0 * se
-    return dict(n=n, mean=float(d.mean()), se=se, median=float(np.median(d)),
-                ub2=ub2, ub_t=abs(float(d.mean())) + tq * se, t975=tq,
-                verdict=("PASS" if ub2 < gate else "FAIL"))
+    mean = float(d.mean())
+    ub_t = abs(mean) + tq * se
+    lb_t = abs(mean) - tq * se
+    if ub_t < gate:
+        verdict = "PROTECTED"
+    elif lb_t > gate:
+        verdict = "UNPROTECTED"
+    else:
+        verdict = "UNDER-RESOLVED"
+    t_stat = mean / se if se > 0 else float("inf")
+    p_t = float(2.0 * _t.sf(abs(t_stat), n - 1)) if np.isfinite(t_stat) else 0.0
+    try:
+        w_p = float(_wilcoxon(d, zero_method="wilcox", mode="approx").pvalue)
+    except ValueError:
+        w_p = float("nan")
+    return dict(n=n, mean=mean, se=se, median=float(np.median(d)),
+                sigma_pair=sigma_pair,
+                ub2=abs(mean) + 2.0 * se, ub_t=ub_t, lb_t=lb_t, t975=tq,
+                t_stat=float(t_stat), p_t=p_t, p_wilcoxon=w_p,
+                verdict=verdict)
 
 
 def part2_disclosure(gs, gp):
@@ -338,14 +378,20 @@ def summarize(shard_dir, k0_dir, table_path=None, expect_sha=None):
             part2[a][p] = part2_disclosure(gs, tt["gate_power"][a])
     binding = {a: {p: stats[a][p] for p in GATE_PARAMS}
                for a in arms if XA.ARMS[a]["part1"]}
-    any_binding_fail = any(binding[a][p]["verdict"] == "FAIL"
+    # revised pre-registration (2026-07-26 memo): UNPROTECTED is the detected-above-
+    # budget outcome that feeds the PI decision-8 protocol; UNDER-RESOLVED is quoted
+    # as a bound. The legacy any_binding_fail name is kept for npz/test continuity.
+    any_binding_fail = any(binding[a][p]["verdict"] == "UNPROTECTED"
                            for a in binding for p in GATE_PARAMS)
+    any_under_resolved = any(binding[a][p]["verdict"] == "UNDER-RESOLVED"
+                             for a in binding for p in GATE_PARAMS)
     ranks = {a: {p: [rank_u(arms[a][m], p) for m in sorted(arms[a])] for p in GATE_PARAMS}
              for a in arms}
     ranks["K0_clean"] = {p: [rank_u(k0[m], p) for m in sorted(k0)] for p in GATE_PARAMS}
     return dict(k0=k0, arms=arms, meta=meta, k0_meta=k0_meta, tt=tt, reg_sig=reg_sig,
                 sigma_post=sigma_post, deltas=deltas, stats=stats, part2=part2,
-                binding=binding, any_binding_fail=any_binding_fail, ranks=ranks)
+                binding=binding, any_binding_fail=any_binding_fail,
+                any_under_resolved=any_under_resolved, ranks=ranks)
 
 
 def _write_arm_outputs(res, a, out_dir):
@@ -365,15 +411,19 @@ def _write_arm_outputs(res, a, out_dir):
     for p in PAIRED_PARAMS:
         gs, p2 = res["stats"][a][p], res["part2"][a][p]
         npz[f"delta_{p}"] = np.asarray([res["deltas"][a][p][m] for m in mocks])
-        for k in ("mean", "se", "ub2", "ub_t"):
+        for k in ("mean", "se", "ub2", "ub_t", "lb_t", "sigma_pair", "t_stat",
+                  "p_t", "p_wilcoxon"):
             npz[f"{k}_{p}"] = gs[k]
+        npz[f"verdict_{p}"] = np.asarray(gs["verdict"])
         npz[f"D_{p}"] = p2["D"]
         npz[f"S_{p}"] = p2["S"]
         gate_tag = (f"  Part-1 {gs['verdict']}" if (e["part1"] and p in GATE_PARAMS)
                     else "  (reported, not gated)")
         lines.append(
             f"{p:>9}: mean {gs['mean']:+.4f} +/- {gs['se']:.4f} sigma_post  "
-            f"ub2 {gs['ub2']:.4f} (t-ub {gs['ub_t']:.4f}; gate {XA.GATE}){gate_tag}")
+            f"[t-lb {gs['lb_t']:.4f}, t-ub {gs['ub_t']:.4f}] vs gate {XA.GATE}; "
+            f"sigma_pair {gs['sigma_pair']:.4f}; t {gs['t_stat']:+.2f} "
+            f"(p {gs['p_t']:.3g}, Wilcoxon p {gs['p_wilcoxon']:.3g}){gate_tag}")
         lines.append(
             f"{'':>9}  Part-2 DISCLOSURE: S = {p2['S']:.3f} at D = {p2['D']:.3f} "
             f"(noise floor 2SE/D = {p2['noise_floor_2se_over_D']:.3f}; pre-registered "
@@ -490,14 +540,22 @@ def main_report(shard_dir, k0_dir, out_dir, table_path=None, expect_sha=None):
           f"{gp['p_part1_fail_null']:.3f}. The diluted fork is the exact cache byte object "
           f"and the masking-pipeline-mismatch stress; the CORRECTED fork is the primary "
           f"(KS QMLE excludes masked pixels, annex OQ1).")
-    # pre-registration hygiene flag (revision 4b)
+    # pre-registration hygiene disclosure (revision 4b, RESOLVED by the one-shot
+    # gate-form revision of 2026-07-26: the pilot measured sigma_pair r = 0.21-2.03
+    # vs the r < 0.25 calibration requirement, so the binary equivalence gate was
+    # replaced pre-launch by the three-outcome interval verdict; memo
+    # `2026-07-26-xsel-pilot-sigmapair-and-gate-revision`, 4-lens panel ADOPTED).
     for a in arms:
         if XA.ARMS[a]["part1"]:
             pf = res["tt"]["gate_power"][a]["p_part1_fail_null"]
             if pf > _P_FAIL_NULL_FLAG:
-                print(f"** PRE-REGISTRATION FLAG: {a} has P(Part-1 fail | null) = {pf:.3f} "
-                      f"> {_P_FAIL_NULL_FLAG}; revision 4b required revising n or the gate "
-                      f"form BEFORE launch. This readout cannot repair that post hoc. **")
+                sp_meas = {p: res["stats"][a][p]["sigma_pair"] for p in GATE_PARAMS}
+                print(f"[4b disclosure] {a}: stage-V proxy P(binary-fail | null) = "
+                      f"{pf:.3f} > {_P_FAIL_NULL_FLAG}; the pre-registered fallback "
+                      f"fired and the gate form was revised BEFORE the full-battery "
+                      f"launch (2026-07-26 memo). Expected-vs-measured sigma_pair: "
+                      f"proxy {res['tt']['gate_power'][a]['sigma_pair_expected']:.3f} "
+                      f"vs measured ns {sp_meas['ns']:.3f} / Ap {sp_meas['Ap']:.3f}.")
     print("\n" + XA.CORNER_FAILURE_PROTOCOL)
     nb = [a for a in arms if not XA.ARMS[a]["part1"]]
     missing_binding = [a for a in XA.part1_arm_ids() if a not in arms]
@@ -505,12 +563,23 @@ def main_report(shard_dir, k0_dir, out_dir, table_path=None, expect_sha=None):
         print(f"\n** PARTIAL BATTERY: binding arm(s) {missing_binding} absent from this "
               f"pool. The verdict below covers ONLY the present binding arms and is NOT a "
               f"certification readout. **")
-    print(f"\n== PART-1 BINDING VERDICT (X1/X2/X3; ns AND Ap; gate {XA.GATE} sigma_post): "
-          + ("FAIL -- at least one binding arm exceeded the budget; apply the corner-failure "
-               "protocol above (claims limited + threshold study; NOT an automatic "
-               "unblinding block, PI decision 8)."
-             if res["any_binding_fail"] else
-             "PASS -- every binding arm is bounded within the 0.30 sigma_post budget."))
+    verdict_tbl = {a: {p: res["binding"][a][p]["verdict"] for p in GATE_PARAMS}
+                   for a in res["binding"]}
+    print(f"\n== PART-1 VERDICTS (three-outcome revised pre-registration, 2026-07-26; "
+          f"budget {XA.GATE} sigma_post, t(0.975, n-1) intervals) ==")
+    for a in sorted(verdict_tbl):
+        print(f"   {a}: " + "  ".join(f"{p}={verdict_tbl[a][p]}" for p in GATE_PARAMS))
+    if res["any_binding_fail"]:
+        print("   >>> at least one UNPROTECTED (bias detected above budget): apply the "
+              "corner-failure protocol (claims limited + threshold study; NOT an "
+              "automatic unblinding block, PI decision 8).")
+    elif res["any_under_resolved"]:
+        print("   >>> no UNPROTECTED, but UNDER-RESOLVED verdicts present: quote the "
+              "two-sided bounds; the threshold study carries those corners (PROTECTED "
+              "is unreachable for X1/X2 at n=16 at the measured sigma_pair, "
+              "pre-registered).")
+    else:
+        print("   >>> every binding arm PROTECTED within the 0.30 sigma_post budget.")
     print(f"   non-binding diagnostics reported alongside: {nb}")
     return res
 

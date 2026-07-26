@@ -144,12 +144,22 @@ def _tamper_one(shard_dir, fname, fn):
 # ---------------------------------------------------------------- gate arithmetic units
 
 def test_gate_stats_arithmetic():
+    # three-outcome revised pre-registration (2026-07-26 memo): t-quantile intervals
     gs = AX.gate_stats([0.1, 0.2, 0.3, 0.2])
     assert abs(gs["mean"] - 0.2) < 1e-12
     assert abs(gs["se"] - np.std([0.1, 0.2, 0.3, 0.2], ddof=1) / 2.0) < 1e-12
-    assert abs(gs["ub2"] - (0.2 + 2 * gs["se"])) < 1e-12
-    assert gs["verdict"] == "PASS" and gs["ub_t"] > gs["ub2"]      # t975(3) = 3.182 > 2
-    assert AX.gate_stats([0.5, 0.5, 0.5, 0.5])["verdict"] == "FAIL"
+    assert abs(gs["ub2"] - (0.2 + 2 * gs["se"])) < 1e-12            # legacy key kept
+    assert abs(gs["sigma_pair"] - np.std([0.1, 0.2, 0.3, 0.2], ddof=1)) < 1e-12
+    assert abs(gs["ub_t"] - (0.2 + gs["t975"] * gs["se"])) < 1e-12
+    assert abs(gs["lb_t"] - (0.2 - gs["t975"] * gs["se"])) < 1e-12
+    # ub_t 0.33 > 0.30 and lb_t 0.07 < 0.30 -> the t-interval straddles the budget
+    # (under the OLD z=2 gate this case was a PASS: the t-quantile fix is visible)
+    assert gs["verdict"] == "UNDER-RESOLVED" and gs["ub_t"] > gs["ub2"]
+    # tight case: interval inside the budget -> PROTECTED
+    assert AX.gate_stats([0.05, 0.06, 0.04, 0.05])["verdict"] == "PROTECTED"
+    # zero-scatter above budget -> UNPROTECTED (se = 0, inf t handled)
+    gs0 = AX.gate_stats([0.5, 0.5, 0.5, 0.5])
+    assert gs0["verdict"] == "UNPROTECTED" and gs0["p_t"] == 0.0
     assert AX.gate_stats([-0.2, -0.4, -0.3])["ub2"] > 0.3          # sign-symmetric
     with pytest.raises(AssertionError):
         AX.gate_stats([0.1])
@@ -182,8 +192,9 @@ def test_summarize_round_trip_pass(tmp_path):
     assert set(res["binding"]) == {"X1_dla100", "X2_sub100"}       # X4/K8a non-binding
     for a in res["binding"]:
         for p in AX.GATE_PARAMS:
-            # shared draws => deltas identically (mean_x - mean_k0)/sigma; shift 0 => PASS
-            assert res["binding"][a][p]["verdict"] == "PASS", (a, p)
+            # shared draws => deltas identically (mean_x - mean_k0)/sigma; shift 0
+            # => zero-width interval inside the budget => PROTECTED
+            assert res["binding"][a][p]["verdict"] == "PROTECTED", (a, p)
     for p in AX.PAIRED_PARAMS:
         assert res["sigma_post"][p] > 0
     # Part-2 disclosure carries the stage-V gate-power inputs
@@ -193,11 +204,12 @@ def test_summarize_round_trip_pass(tmp_path):
 
 
 def test_summarize_detects_binding_fail(tmp_path):
-    # a large raw-units shift on ns/Ap in every arm rec => FAIL on the binding arms
+    # a large raw-units shift on ns/Ap in every arm rec => bias detected above budget
+    # => UNPROTECTED on the binding arms (feeds the corner-failure protocol)
     shard_dir, k0_dir, tpath, sha = build_battery(tmp_path, delta_shift=0.5)
     res = AX.summarize(shard_dir, k0_dir, tpath, expect_sha=sha)
     assert res["any_binding_fail"]
-    assert res["binding"]["X2_sub100"]["ns"]["verdict"] == "FAIL"
+    assert res["binding"]["X2_sub100"]["ns"]["verdict"] == "UNPROTECTED"
 
 
 # ---------------------------------------------------------------- ingest refusals
