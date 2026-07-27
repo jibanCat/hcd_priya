@@ -185,6 +185,19 @@ def analyze_leg(label, src):
     postvar_tau = {"tau0amp": [], "dtau0": []}
     truths = {k: [] for k in SCALAR}
     ll_rank_frac, ndiv_all, L_all = [], [], []
+    # SBC RANKS (2026-07-26): the EXACT calibration statistic, and a PRE-REGISTERED gate
+    # criterion ("rank-uniformity: KS p>0.05 AND ECDF inside the Beta(k,N+1-k) band") that
+    # this analyzer did not previously compute. The pull mean is NOT exact -- it can be
+    # nonzero for a skewed posterior under perfect calibration -- so a pull FAIL with
+    # uniform ranks and a pull FAIL with non-uniform ranks are different findings.
+    ranks = {k: [] for k in SCALAR + ["tau0amp", "dtau0"]}
+    # METAL-FLOOR baseline (2026-07-26): the criteria PRE-DECLARE that a flat-log metal
+    # prior reappears as an A_p baseline on metal-free mocks and is "NOT emulator bias".
+    # The prior is LogUniform on a positive decrement, so it has no mass at zero and settles
+    # at a near-CONSTANT floor. That constancy is exactly why a within-leg correlation of
+    # the A_p pull against the metal amplitude has NO power against it; report the floor's
+    # size and its across-mock constancy instead.
+    metal_nodes = {}
 
     for d in mocks:
         dr = np.asarray(d["draws"]); t = np.asarray(d["truth_vec"])
@@ -199,8 +212,22 @@ def analyze_leg(label, src):
                    (col.var(ddof=1) if L > 1 else np.nan)
 
         for k in SCALAR:
-            p, v = pull(names.index(k))
-            pulls[k].append(p); postvar[k].append(v); truths[k].append(t[names.index(k)])
+            j = names.index(k)
+            p, v = pull(j)
+            pulls[k].append(p); postvar[k].append(v); truths[k].append(t[j])
+            ranks[k].append(float(np.mean(dr[:, j] < t[j])) if L > 1 else np.nan)
+
+        # metal-node floor bookkeeping (present only on the metal-floated legs)
+        for nm_site, rec_site in (d.get("sites_extra") or {}).items():
+            if not (nm_site.startswith("f_Si") or nm_site.startswith("k_Si")):
+                continue
+            x = np.asarray(rec_site.get("draws"), float)
+            if x.size == 0:
+                continue
+            metal_nodes.setdefault(nm_site, {"post_mean": [], "post_sd": [], "truth": []})
+            metal_nodes[nm_site]["post_mean"].append(float(x.mean()))
+            metal_nodes[nm_site]["post_sd"].append(float(x.std(ddof=1)) if x.size > 1 else np.nan)
+            metal_nodes[nm_site]["truth"].append(float(rec_site.get("truth", np.nan)))
 
         # tau0 amp/dtau0: regress each draw's ladder + the truth ladder
         amps = np.empty(L); slopes = np.empty(L)
@@ -211,6 +238,8 @@ def analyze_leg(label, src):
         ss = slopes.std(ddof=1) if L > 1 else np.nan
         pulls["tau0amp"].append((amps.mean() - amp_t) / sa if (np.isfinite(sa) and sa > 0) else np.nan)
         pulls["dtau0"].append((slopes.mean() - slope_t) / ss if (np.isfinite(ss) and ss > 0) else np.nan)
+        ranks["tau0amp"].append(float(np.mean(amps < amp_t)) if L > 1 else np.nan)
+        ranks["dtau0"].append(float(np.mean(slopes < slope_t)) if L > 1 else np.nan)
         postvar_tau["tau0amp"].append(amps.var(ddof=1) if L > 1 else np.nan)
         postvar_tau["dtau0"].append(slopes.var(ddof=1) if L > 1 else np.nan)
 
@@ -244,6 +273,9 @@ def analyze_leg(label, src):
         "L_median": int(np.median(L_all)), "L_range": [int(min(L_all)), int(max(L_all))],
         "ll_rank_frac_mean": float(np.mean(ll_rank_frac)) if ll_rank_frac else None,
         "pulls": {k: np.asarray(v, float) for k, v in pulls.items()},
+        "ranks": {k: np.asarray(v, float) for k, v in ranks.items()},
+        "rank_uniformity": {k: rank_uniformity(v) for k, v in ranks.items()},
+        "metal_floor": metal_floor_summary(metal_nodes),
         "contraction": {k: contraction(k) for k in SCALAR + ["tau0amp", "dtau0"]},
         "var_prior": var_prior,
         # the homogeneity-verified effective config (2026-07-23): the certificate's per-leg
@@ -261,6 +293,62 @@ def pull_stats(arr):
     s = float(a.std(ddof=1)) if len(a) > 1 else np.nan    # N=1 -> nan guard
     sem = s / np.sqrt(len(a)) if (len(a) > 1) else np.nan
     return dict(mean=m, std=s, sem=sem, n=int(len(a)))
+
+
+def rank_uniformity(rank_fracs, n_grid=None):
+    """PRE-REGISTERED rank criterion: KS p>0.05 against Uniform(0,1) AND the rank ECDF
+    inside the analytic Beta(k, N+1-k) pointwise band.
+
+    Returns mean rank, the KS p-value, the count of order statistics outside the pointwise
+    95% band, and the verdict. The ECDF points are strongly correlated, so the band count is
+    reported as CORROBORATION of a systematic shift, never as an independent test: one
+    offset pushes many points out at once. The KS p is the criterion."""
+    u = np.asarray([x for x in rank_fracs if np.isfinite(x)], float)
+    n = u.size
+    if n < 4:
+        return dict(n=n, mean=np.nan, ks_p=np.nan, n_outside_band=None,
+                    verdict="underpowered(N<4)")
+    try:
+        from scipy import stats as _st
+        ks_p = float(_st.kstest(u, "uniform").pvalue)
+        us = np.sort(u)
+        out = int(sum(not (_st.beta.ppf(0.025, k, n + 1 - k) <= us[k - 1]
+                           <= _st.beta.ppf(0.975, k, n + 1 - k)) for k in range(1, n + 1)))
+    except Exception:                                     # keep the read-out usable bare
+        return dict(n=n, mean=float(u.mean()), ks_p=np.nan, n_outside_band=None,
+                    verdict="scipy-unavailable")
+    return dict(n=n, mean=float(u.mean()), ks_p=ks_p, n_outside_band=out,
+                verdict=("UNIFORM" if ks_p > 0.05 else "NON-UNIFORM"))
+
+
+def metal_floor_summary(metal_nodes):
+    """PRE-DECLARED metal-floor baseline. On metal-free mocks the LogUniform node prior has
+    no mass at zero, so the nodes settle at a near-constant floor that biases A_p WITHOUT
+    producing any across-mock correlation. Reports the floor size and its constancy
+    (across-mock spread over the mean within-mock posterior sd): a ratio well below 1 means
+    the floor is effectively the same in every mock, and therefore that any within-leg
+    correlation test against it is UNINFORMATIVE rather than exculpatory."""
+    if not metal_nodes:
+        return None
+    out = {"nodes": {}, "mocks_carry_metal_truth": None}
+    truth_finite = []
+    for nm, rec in sorted(metal_nodes.items()):
+        pm = np.asarray(rec["post_mean"], float)
+        ps = np.asarray(rec["post_sd"], float)
+        tr = np.asarray(rec["truth"], float)
+        within = float(np.nanmean(ps)) if np.isfinite(ps).any() else np.nan
+        across = float(pm.std(ddof=1)) if pm.size > 1 else np.nan
+        truth_finite.append(bool(np.isfinite(tr).any()))
+        out["nodes"][nm] = dict(
+            post_mean=float(pm.mean()), within_mock_sd=within, across_mock_sd=across,
+            constancy_ratio=(across / within if (np.isfinite(within) and within > 0) else np.nan),
+            truth_present=bool(np.isfinite(tr).any()))
+    out["mocks_carry_metal_truth"] = bool(any(truth_finite))
+    ratios = [v["constancy_ratio"] for v in out["nodes"].values()
+              if np.isfinite(v["constancy_ratio"])]
+    out["max_constancy_ratio"] = float(max(ratios)) if ratios else np.nan
+    out["floor_active"] = bool((not out["mocks_carry_metal_truth"]) and out["nodes"])
+    return out
 
 
 def gate_cosmo(st, gate_mean=0.3, gate_std=1.1):
@@ -312,6 +400,30 @@ for label, src in LEG_DIRS.items():
         print(f"  {k:13s} mean={st['mean']:+.3f} std={st['std'] if np.isfinite(st['std']) else float('nan'):.3f}"
               f" sem={st['sem'] if np.isfinite(st['sem']) else float('nan'):.3f} N={st['n']}"
               f"{ctag(r['contraction'][k])}{gate}")
+    # PRE-REGISTERED rank-uniformity criterion (the EXACT statistic; the pull mean is not
+    # exact for a skewed posterior, so these two lines must be read together)
+    print("  -- rank uniformity (PRE-REGISTERED: KS p>0.05; Beta-band count is corroboration) --")
+    for k in ("ns", "Ap", "tau0amp", "dtau0"):
+        ru = r["rank_uniformity"].get(k, {})
+        if not ru or not np.isfinite(ru.get("ks_p", np.nan)):
+            continue
+        band = ("" if ru["n_outside_band"] is None
+                else f"  outside Beta band {ru['n_outside_band']}/{ru['n']}")
+        print(f"  {k:13s} mean rank={ru['mean']:.3f} (ideal 0.5)  KS p={ru['ks_p']:.4f}  "
+              f"{ru['verdict']}{band}")
+    mf = r.get("metal_floor")
+    if mf:
+        print("  -- metal-node floor (PRE-DECLARED A_p baseline on metal-free mocks) --")
+        print(f"  mocks carry metal truth: {mf['mocks_carry_metal_truth']}   "
+              f"floor active: {mf['floor_active']}   max constancy ratio "
+              f"{mf['max_constancy_ratio']:.3f}")
+        for nm, v in mf["nodes"].items():
+            print(f"    {nm:22s} post={v['post_mean']:.5f}  within-mock sd={v['within_mock_sd']:.5f}"
+                  f"  across-mock sd={v['across_mock_sd']:.5f}  ratio={v['constancy_ratio']:.3f}")
+        if mf["floor_active"]:
+            print("    NOTE: the floor is near-CONSTANT across mocks, so a within-leg correlation of"
+                  "\n    the A_p pull against the metal amplitude has NO POWER against it. Testing it"
+                  "\n    requires a metals-off refit, not a correlation.")
     if r["ll_rank_frac_mean"] is not None:
         print(f"  loglik-rank   mean={r['ll_rank_frac_mean']:.3f} (ideal 0.5)")
     print(f"  run health    div_total={r['div_total']}  L median={r['L_median']} "
@@ -381,6 +493,13 @@ for label in ("DESI", "KS", "eBOSS"):
         "gate_ns": gate_cosmo(pull_stats(r["pulls"]["ns"])),
         "gate_Ap": gate_cosmo(pull_stats(r["pulls"]["Ap"])),
         "pulls": {k: jpull(r["pulls"][k]) for k in r["pulls"]},
+        # PRE-REGISTERED criteria added 2026-07-26 (previously absent from this certificate)
+        "rank_uniformity": {k: {kk: (None if (isinstance(vv, float) and not np.isfinite(vv))
+                                     else vv) for kk, vv in v.items()}
+                            for k, v in r["rank_uniformity"].items()},
+        "gate_rank_ns": r["rank_uniformity"]["ns"]["verdict"],
+        "gate_rank_Ap": r["rank_uniformity"]["Ap"]["verdict"],
+        "metal_floor": r.get("metal_floor"),
         "contraction": {k: (float(v) if np.isfinite(v) else None)
                         for k, v in r["contraction"].items()},
         "var_prior": {k: (float(v) if np.isfinite(v) else None)
