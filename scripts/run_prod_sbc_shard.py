@@ -192,6 +192,16 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
             _req.pop("hcd_prior_signature", None)
         if "single_member" not in eff_existing and bool(_req.get("single_member", False)) is False:
             _req.pop("single_member", None)
+        # BACK-COMPAT (2026-07-27, diag_no_sample_metals stamp): every pkl written before this
+        # DIAGNOSTIC switch existed was a metals-SAMPLED run, i.e. the default False. Don't CLASH
+        # on the missing key alone WHEN the current run is also at the default -- otherwise the
+        # 96 landed ARM-P certification pkls would stop skipping and a resume would re-fit them.
+        # A --diag-no-sample-metals run carries True, which then differs from the popped
+        # (==False-equivalent) existing => it correctly CLASHES, so the metals-off A/B can never
+        # silently load or pool with certification pkls. One-way, exactly like the keys above.
+        if "diag_no_sample_metals" not in eff_existing \
+                and bool(_req.get("diag_no_sample_metals", False)) is False:
+            _req.pop("diag_no_sample_metals", None)
         if eff_existing != _req:
             raise RuntimeError(
                 f"[mock {m}] config CLASH at {path}: existing pkl run_cfg={existing} "
@@ -319,6 +329,17 @@ def main():
                     help="ARM-P: build the DEPLOYED per-survey prior (requires --leg DESI/eBOSS/KS; "
                          "refuses --held-out/--fold/--prod-emu/--single-member and the "
                          "SBC_SUBDLA_AMP_SIGMA / SBC_TAU0_PRIOR_SIGMA prior-mutating env arms)")
+    ap.add_argument("--diag-no-sample-metals", action="store_true",
+                    help="DIAGNOSTIC A/B ONLY (2026-07-27, ARM-P tau0 investigation): do NOT "
+                         "sample the metal nodes on a metal-floated leg. The metal node prior is "
+                         "LogUniform on a positive decrement, so on metal-FREE mocks it has no "
+                         "mass at zero and settles at a near-constant FLOOR, which the criteria "
+                         "PRE-DECLARE as an A_p baseline. This switch turns that floor off so the "
+                         "tau0/A_p offset can be attributed or exonerated. It is NOT a deployed "
+                         "configuration: the default leaves the deployed path byte-identical, and "
+                         "the flag is stamped into run_cfg so a metals-off pkl can NEVER pool "
+                         "with a certification pkl. Use a SEPARATE --out-dir and treat the output "
+                         "as DIAGNOSTIC (never promoted, never cited in a certificate).")
     ap.add_argument("--allow-env-data-flags", action="store_true",
                     help="DANGER: permit the env data-selection flags (HCD_DESI_SNR3 / "
                          "HCD_CV_FLOOR / HCD_CV_FLOOR_RANK1) to be set at driver entry — a "
@@ -415,6 +436,15 @@ def main():
         # (metals live in its covariance / conservative mode) and run_real_fit deploys KS metals=False,
         # so sampling a_SiIII for KS would be an INERT, deployment-mismatched extra dim (panel 2026-06-21).
         _sample_metals = (a.leg in ("DESI", "eBOSS"))
+        if a.diag_no_sample_metals:            # DIAGNOSTIC A/B only; default path untouched
+            assert _sample_metals, (
+                f"--diag-no-sample-metals is only meaningful on a metal-floated leg "
+                f"(DESI/eBOSS); leg {a.leg} does not sample metals anyway")
+            _sample_metals = False
+            print("[diag] --diag-no-sample-metals: metal nodes NOT sampled. This is a "
+                  "DIAGNOSTIC arm, NOT a deployed configuration; its pkls carry "
+                  "diag_no_sample_metals=True in run_cfg and can never pool with certification "
+                  "pkls. Never promote or cite this output.")
         # The certified per-leg data-nuisance forward = the SINGLE source run_real_fit also consumes, so
         # the SBC self-draw forward provably == the real-fit forward (f_res float + flat-log 2-node metals).
         _fc = prod_forward_config(a.leg)
@@ -617,6 +647,10 @@ def main():
                    f_res_amp_sigma=_f_res_sigma,      # task #4): the f_res float + flat-log 2-node metals
                    metal_prior=str(_metal_prior),     # change the SBC POPULATION, so a WIRED pkl must never
                                       # pool with a pre-wiring (uniform / no-f_res) pkl -- distinct forward.
+                   diag_no_sample_metals=bool(a.diag_no_sample_metals),   # DIAGNOSTIC discriminator
+                                      # (2026-07-27): a metals-off A/B pkl must NEVER pool with a
+                                      # certification pkl -- different forward, different population.
+                                      # Stamped so the clash guard enforces it mechanically.
                    ks_kmax=(_ks_kw or {}).get("k_max"),   # KS f_res k_max (None where KS not floating):
                                       # a wired KS pkl (0.065) must never pool with a pre-flip or a
                                       # 0.045-fallback KS pkl (Task 1C).
