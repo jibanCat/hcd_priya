@@ -95,6 +95,36 @@ def test_single_member_discriminator(tmp_path):
                          **_DUMMY)
 
 
+def test_diag_no_sample_metals_is_in_run_cfg_defaults():
+    """REGRESSION (2026-07-27): commit 24cfdc1 added the --diag-no-sample-metals stamp to the
+    written run_cfg but NOT to RUN_CFG_DEFAULTS, so the 96 landed ARM-P eBOSS certification
+    pkls (written before the key existed) would refuse to pool with any DEFAULT-arm pkl
+    written after it — silently breaking the resumability/extension the commit claimed to
+    preserve. The key must default to False so a missing key and an explicit False agree."""
+    assert runner.RUN_CFG_DEFAULTS.get("diag_no_sample_metals") is False
+
+
+def test_prestamp_cert_pkl_pools_with_a_post_flag_default_run():
+    """The load-bearing consequence: an existing certification pkl (no diag key) and a fresh
+    DEFAULT run (diag_no_sample_metals=False) are the SAME population and must pool, while a
+    metals-off pkl must still be refused."""
+    cert = {k: v for k, v in _ARMP_KS.items()}            # pre-flag vintage: key absent
+    default_now = dict(_ARMP_KS, diag_no_sample_metals=False)
+    metals_off = dict(_ARMP_KS, diag_no_sample_metals=True)
+    assert runner.effective_run_cfg(cert) == runner.effective_run_cfg(default_now)
+    assert runner.effective_run_cfg(cert) != runner.effective_run_cfg(metals_off)
+    assert runner.effective_run_cfg(default_now) != runner.effective_run_cfg(metals_off)
+
+
+def test_metals_off_pkl_still_clashes_with_a_default_request(tmp_path):
+    """The diagnostic arm must remain un-poolable from the runner side too (both directions)."""
+    out = str(tmp_path / "metals_off")
+    _write_stub(out, 0, dict(_ARMP_KS, diag_no_sample_metals=True))
+    with pytest.raises(RuntimeError, match="config CLASH"):
+        runner._run_mock(None, None, 0, out,
+                         run_cfg=dict(_ARMP_KS, diag_no_sample_metals=False), **_DUMMY)
+
+
 def test_effective_run_cfg_agrees_with_run_mock_pops(tmp_path):
     """The consumer-side default-completion (effective_run_cfg) and the _run_mock directional
     pops must give the SAME pool/clash answer on representative vintage pairs."""

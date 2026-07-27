@@ -69,7 +69,7 @@ def _mock_path(out_dir, m):
 RUN_CFG_DEFAULTS = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="all", fold=0,
                         tau0_prior_sigma=0.0, subdla_truth_boost=1.0, res_corr_on=True,
                         sample_res=False, f_res_amp_sigma=None, metal_prior="uniform",
-                        ks_kmax=None,
+                        ks_kmax=None, diag_no_sample_metals=False,
                         survey=None, hcd_parameterization="alpha_pivot_powerlaw_v1",
                         hcd_prior_signature=None, single_member=False)
 
