@@ -69,7 +69,7 @@ def _mock_path(out_dir, m):
 RUN_CFG_DEFAULTS = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="all", fold=0,
                         tau0_prior_sigma=0.0, subdla_truth_boost=1.0, res_corr_on=True,
                         sample_res=False, f_res_amp_sigma=None, metal_prior="uniform",
-                        ks_kmax=None, diag_no_sample_metals=False,
+                        ks_kmax=None, diag_no_sample_metals=False, metal_selfdraw=False,
                         survey=None, hcd_parameterization="alpha_pivot_powerlaw_v1",
                         hcd_prior_signature=None, single_member=False)
 
@@ -202,6 +202,13 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
         if "diag_no_sample_metals" not in eff_existing \
                 and bool(_req.get("diag_no_sample_metals", False)) is False:
             _req.pop("diag_no_sample_metals", None)
+        # Same one-way back-compat for the OPTION A stamp (2026-07-27, PI #9): a corrected-arm run
+        # carries metal_selfdraw=True, which differs from the popped (==False-equivalent) existing
+        # key, so A1c can never silently load or pool with the INVALIDATED A1 pkls. A1 is preserved
+        # on disk untouched (PI #9 decision 2); this guard is what keeps it that way mechanically.
+        if "metal_selfdraw" not in eff_existing \
+                and bool(_req.get("metal_selfdraw", False)) is False:
+            _req.pop("metal_selfdraw", None)
         if eff_existing != _req:
             raise RuntimeError(
                 f"[mock {m}] config CLASH at {path}: existing pkl run_cfg={existing} "
@@ -340,6 +347,20 @@ def main():
                          "the flag is stamped into run_cfg so a metals-off pkl can NEVER pool "
                          "with a certification pkl. Use a SEPARATE --out-dir and treat the output "
                          "as DIAGNOSTIC (never promoted, never cited in a certificate).")
+    ap.add_argument("--metal-selfdraw", action="store_true",
+                    help="OPTION A (PI decisions #9, 2026-07-27): draw the metal f/k node TRUTHS "
+                         "from the SAME deployed priors used in fitting and PROPAGATE them "
+                         "through the mock forward, making the prior-predictive SBC correctly "
+                         "specified in the metal sector. Without this, the Leg-A mock forwards NO "
+                         "metal nodes, so the truth for four fitted sites is identically zero "
+                         "against a LogUniform prior with no mass at zero -- the defect that "
+                         "invalidated the ARM-P eBOSS N=96 arm as a certification result. This is "
+                         "a MOCK-PROTOCOL change only: the prior, the forward model, the lock, "
+                         "the signatures and the gate definitions are untouched, and the default "
+                         "leaves the historical path byte-identical. Stamped into run_cfg so a "
+                         "corrected pkl can NEVER pool with the invalidated arm (which is "
+                         "PRESERVED on disk) or with the metals-off diagnostic. Use a SEPARATE "
+                         "--out-dir.")
     ap.add_argument("--allow-env-data-flags", action="store_true",
                     help="DANGER: permit the env data-selection flags (HCD_DESI_SNR3 / "
                          "HCD_CV_FLOOR / HCD_CV_FLOOR_RANK1) to be set at driver entry — a "
@@ -489,6 +510,24 @@ def main():
         ctx = ctx._replace(fix_alpha_res=True)        # NORC also pins the 2 alpha_res sites (now inert)
     assert ctx.res_corr_on == a.res_corr_on, "res_corr_on did not propagate to the ctx"
     assert ctx.fix_alpha_res == (not a.res_corr_on), "fix_alpha_res inconsistent with NORC state"
+    if a.metal_selfdraw:
+        # OPTION A (PI #9). Set on the BUILT ctx (like fix_alpha_res above) so build_legb_ctx is
+        # textually untouched. Refuse loudly where it would be a no-op: a silent no-op here would
+        # produce a pkl STAMPED as corrected whose mock was in fact the defective one.
+        assert _sample_metals and _metal_prior == "flatlog2node", (
+            f"--metal-selfdraw needs a MODEL C+ metals-floated leg (metal_prior=flatlog2node, "
+            f"sample_metals=True); leg {a.leg} has metal_prior={_metal_prior!r} "
+            f"sample_metals={_sample_metals} -> there are no metal node truths to draw")
+        assert not a.diag_no_sample_metals, (
+            "--metal-selfdraw and --diag-no-sample-metals are mutually exclusive: one draws the "
+            "metal truths and fits them, the other removes the metal sector entirely")
+        ctx = ctx._replace(selfdraw_metal_truth=True)
+        assert ctx.selfdraw_metal_truth, "selfdraw_metal_truth did not propagate to the ctx"
+        print("[option-A] --metal-selfdraw: metal f/k node TRUTHS are drawn from the deployed "
+              "fitting priors and PROPAGATED into the mock forward. This is the CORRECTED "
+              "prior-predictive certification arm (PI decisions #9). Mock protocol only: prior, "
+              "forward model, lock, signatures and gate definitions are unchanged. Its pkls carry "
+              "metal_selfdraw=True and can never pool with the invalidated N=96 arm.")
     _ks_km = (_ks_kw or {}).get("k_max")
     print(f"[NORC] res_corr_on={ctx.res_corr_on} fix_alpha_res={ctx.fix_alpha_res} "
           f"KS_kmax={_ks_km if _ks_km is not None else ('0.045' if not a.res_corr_on else '0.069')}")
@@ -647,6 +686,12 @@ def main():
                    f_res_amp_sigma=_f_res_sigma,      # task #4): the f_res float + flat-log 2-node metals
                    metal_prior=str(_metal_prior),     # change the SBC POPULATION, so a WIRED pkl must never
                                       # pool with a pre-wiring (uniform / no-f_res) pkl -- distinct forward.
+                   metal_selfdraw=bool(a.metal_selfdraw),   # OPTION A discriminator (2026-07-27,
+                                      # PI #9): a CORRECTED prior-predictive pkl (metal truths drawn
+                                      # from the fit's own priors and forwarded into the mock) must
+                                      # NEVER pool with the INVALIDATED-but-preserved A1 pkls, whose
+                                      # metal-sector truth was identically zero. Different mock
+                                      # population; the ranks do not transfer.
                    diag_no_sample_metals=bool(a.diag_no_sample_metals),   # DIAGNOSTIC discriminator
                                       # (2026-07-27): a metals-off A/B pkl must NEVER pool with a
                                       # certification pkl -- different forward, different population.

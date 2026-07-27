@@ -539,6 +539,14 @@ class LegBCtx(NamedTuple):
     ks_xbar_z: object = None                  # (n_zg,) cache Xbar(z) deg-2 fit on z_global
     ks_dndx_ref_pivot: object = None          # (3,) reference dN/dX at z=HCD_Z_PIVOT
     ks_xbar_pivot: object = None              # scalar Xbar(z=HCD_Z_PIVOT)
+    # OPTION A (PI decisions #9, 2026-07-27): forward the SELF-DRAWN metal f/k node truths into
+    # the Leg-A mock, making the prior-predictive SBC correctly specified in the metal sector.
+    # OFF (default) → make_leg_a_legmock forwards no metal nodes, i.e. the historical path, so
+    # every landed pkl stays reproducible byte-for-byte. Affects the MOCK PROTOCOL only: no prior,
+    # no forward-model code, no gate definition and no signature depends on it (hcd_prior_signature
+    # is a digest over the prior-constants payload, not over this ctx). APPENDED last so positional
+    # construction does not shift.
+    selfdraw_metal_truth: bool = False
 
 
 def _kim(z):
@@ -1900,6 +1908,9 @@ def draw_leg_a_leg_truth(ctx: LegBCtx, key):
         alpha_hcd=np.array([a_lls, a_sub, a_dla]),                   # (3,) pivot (rank truth-vec)
         alpha_hcd_z=np.asarray(rec["alpha_hcd_z"][0]),              # (nZg,3) z-resolved (forward)
         a_siiii=(float(raw["a_SiIII"]) if "a_SiIII" in raw else 0.0),
+        # OPTION A (PI #9): the MODEL C+ metal node truths, drawn by _legb_priors_only from the
+        # SAME deployed priors the fit uses. None unless ctx.selfdraw_metal_truth ⇒ byte-identical.
+        metal_nodes=_selfdraw_metal_nodes(raw, ctx),
         # the mean-flux SITES (tau0_amp/dtau0) for the τ₀-bias report (feedback-report-tau0-dtau0-bias).
         tau0_amp=(float(raw["tau0_amp"]) if "tau0_amp" in raw else np.nan),
         dtau0=(float(raw["dtau0"]) if "dtau0" in raw else np.nan),
@@ -2193,6 +2204,11 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
     tau0_global = jnp.asarray(truth_pack["tau0_global"])
     alpha_hcd_z = jnp.asarray(truth_pack["alpha_hcd_z"])
     a_siiii = float(truth_pack.get("a_siiii", 0.0))
+    # OPTION A (PI #9 decision 3, condition 2): the self-drawn metal node truths, forwarded into
+    # the mock through the SAME predict_P_obs_on_leg kwargs the fit uses in _data_loglik_legcore,
+    # so mock and likelihood apply metals via one code path. None (default) ⇒ no metal kwargs are
+    # passed at all, i.e. the historical call, byte-identical.
+    metal_truth_nodes = truth_pack.get("metal_nodes")
     keys = jax.random.split(key, len(ctx.legs))
     mock_legs, chol_out, truth_on_leg_out = [], {}, {}
     for li, leg in enumerate(ctx.legs):
@@ -2203,10 +2219,21 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
                if getattr(ctx, "mf_shape_per_leg", None) is not None else None)
         mec = (ctx.mf_emucoh_per_leg.get(leg.name)
                if getattr(ctx, "mf_emucoh_per_leg", None) is not None else None)
+        # OPTION A: per-leg metal node kwargs, EMPTY unless the self-draw truth carries nodes, so
+        # the default call site is textually the historical one (byte-identical). A leg absent
+        # from the dict (e.g. metals-off KS) yields all-None, the scalar path, exactly as the fit's
+        # `metal_nodes.get(leg.name, (None, None, None, None))` does.
+        _mkw = {}
+        if metal_truth_nodes is not None:
+            _f3, _f2, _k3, _k2 = metal_truth_nodes.get(leg.name, (None, None, None, None))
+            _mkw = dict(f_SiIII_nodes=_f3, f_SiII_nodes=_f2,
+                        k_SiIII_nodes=_k3, k_SiII_nodes=_k2,
+                        metal_node_z=getattr(ctx, "metal_node_z", (2.2, 4.2)))
         P_model, C_total = DL.predict_P_obs_on_leg(
             ctx.model, theta9, tau0_global[sel], alpha_hcd_z[sel], pf_stats=ctx.pf_stats,
             dla_core=dla_core_per_leg[leg.name], cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
             alpha_centres=ctx.alpha_centres, a_SiIII=a_siiii, cemu_inflate=ctx.cemu_inflate,
+            **_mkw,
             rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor,
             mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
             mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
@@ -2468,6 +2495,45 @@ def _metal_amp_site(name, ctx, on):
         return numpyro.sample(name, dist.LogUniform(a_lo, a_hi))
     # "uniform" (default) — BYTE-EXACT legacy site.
     return numpyro.sample(name, dist.Uniform(0.0, ctx.a_siiii_max))
+
+
+def _selfdraw_metal_nodes(raw, ctx):
+    """OPTION A (PI decisions #9, 2026-07-27): the Leg-A self-draw metal TRUTHS, read out of the
+    prior trace ``raw`` in EXACTLY the structure ``_metal_2node_sites`` returns —
+    ``{leg.name: (f3 (2,), f2 (2,)|None, k3 (2,), k2 (2,)|None)}`` — so ``make_leg_a_legmock``
+    can forward them into ``predict_P_obs_on_leg`` through the SAME kwargs the fit uses.
+
+    WHY THIS EXISTS. ``draw_leg_a_leg_truth`` traces ``_legb_priors_only``, which ALREADY samples
+    ``_metal_2node_sites``; the drawn node values were sitting in ``raw`` and being DISCARDED,
+    while ``make_leg_a_legmock`` forwarded no metal nodes at all. The mock truth for those four
+    fitted sites was therefore identically zero against a LogUniform prior with no mass at zero:
+    the SBC null violated by construction in the metal sector (ARM-P eBOSS N=96, metal-node
+    ``truth=nan``, tau0 ranks 95/96 outside the Beta band). Reading the EXISTING draw is what
+    makes the corrected arm genuinely prior-predictive: the truths are the deployed priors' own
+    draws, not a re-draw and not a centre (PI #9 decision 3, condition 1).
+
+    Returns None (⇒ the historical path, byte-identical) unless the OPT-IN
+    ``ctx.selfdraw_metal_truth`` is set AND this is a MODEL C+ (``flatlog2node``) metals-sampling
+    build. Mirrors ``_metal_2node_sites``'s leg loop, SiII gating and site names exactly; a
+    missing site RAISES rather than defaulting, since a silent default would reintroduce the very
+    zero-truth defect this fixes."""
+    if not getattr(ctx, "selfdraw_metal_truth", False):
+        return None
+    if ctx.metal_prior != "flatlog2node" or not getattr(ctx, "sample_metals", False):
+        return None
+    siII_legs = tuple(ctx.metal_siII_legs)
+    nodes = {}
+    for leg in ctx.legs:                                     # SAME fixed order as the sampler
+        if not getattr(leg, "metals_on", False):
+            continue
+        def _pair(prefix):                                   # KeyError on a missing site: fail loud
+            return np.array([float(raw[f"{prefix}_z0"]), float(raw[f"{prefix}_z1"])])
+        f3 = _pair(f"f_SiIII_{leg.name}")
+        k3 = _pair(f"k_SiIII_{leg.name}")
+        f2 = _pair(f"f_SiII_{leg.name}") if leg.name in siII_legs else None
+        k2 = _pair(f"k_SiII_{leg.name}") if leg.name in siII_legs else None
+        nodes[leg.name] = (f3, f2, k3, k2)
+    return nodes
 
 
 def _metal_2node_sites(ctx):
@@ -3582,7 +3648,7 @@ SELF_DRAWN_EXTRA_SITES = ("tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla",
                           "eps_lls", "kappa_lls", "m_sub", "t_sub", "dla_raw", "t_dla")
 
 
-def _metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a):
+def _metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a, truth_pack=None):
     """sites_extra entries for the Model C+ metal f/k node sites — sampled by ``_metal_2node_sites``
     but NOT packed into ``_draws_matrix`` — so the mandatory "is f_SiIII_z1 railing the 0.03 ceiling"
     check is possible from the shard pkls. Stores thinned draws (SAME step/L as tau0_amp/dtau0) + the
@@ -3591,11 +3657,25 @@ def _metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a):
     scalar ``a_SiIII``/``a_SiII`` and the ``s_*`` slopes are NOT caught (they lack the f_/k_ prefix)."""
     mspec = (inject_spec or {}).get("metal_misspec") if (leg_a and inject_spec) else None
     mz_truth = _metal_node_truth(mspec, ctx)
+    # OPTION A (PI #9): on a corrected self-draw the node TRUTH is the drawn value that was
+    # forwarded into the mock, so the metal sector gets a real pull instead of a NaN. Takes
+    # precedence over the injected-arm truth (the two are mutually exclusive by construction:
+    # the injection arms force the self-draw nodes to zero). Absent ⇒ NaN, as before.
+    sd_truth = {}
+    if leg_a and truth_pack is not None and truth_pack.get("metal_nodes") is not None:
+        for _leg, (_f3, _f2, _k3, _k2) in truth_pack["metal_nodes"].items():
+            for _pre, _v in (("f_SiIII", _f3), ("f_SiII", _f2),
+                             ("k_SiIII", _k3), ("k_SiII", _k2)):
+                if _v is None:
+                    continue
+                sd_truth[f"{_pre}_{_leg}_z0"] = float(_v[0])
+                sd_truth[f"{_pre}_{_leg}_z1"] = float(_v[1])
     out = {}
     for nm in samples:
         if nm.startswith(("f_SiIII_", "f_SiII_", "k_SiIII_", "k_SiII_")):
             dr = np.asarray(samples[nm])[::step][:L]
-            out[nm] = dict(draws=dr, truth=float(mz_truth.get(nm, np.nan)))
+            out[nm] = dict(draws=dr,
+                           truth=float(sd_truth.get(nm, mz_truth.get(nm, np.nan))))
     return out
 
 
@@ -3788,7 +3868,8 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
         # MODEL C+ metal f/k node sites (ceiling-check instrumentation): sampled by _metal_2node_sites
         # but NOT packed into _draws_matrix, so store them here (SAME thinning) with the injected-arm
         # truth. Additive-only + empty under uniform/flatlog/metals-off ⇒ byte-identical golden.
-        sites_extra.update(_metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a))
+        sites_extra.update(_metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a,
+                                                   truth_pack=(truth_pack if leg_a else None)))
         # OPTION-B f_res sites (rail/coverage instrumentation, step-review #4): same thinning; injected
         # truth (b*, 0). EMPTY + additive-only unless sample_res sampled f_res ⇒ golden-safe.
         sites_extra.update(_resolution_sites_extra(samples, step, L, inject_spec, leg_a))
