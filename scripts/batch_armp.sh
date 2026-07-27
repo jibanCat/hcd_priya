@@ -19,7 +19,11 @@
 # Usage:
 #   LEG=eBOSS N=48 sbatch --array=0-47 scripts/batch_armp.sh
 #   LEG=DESI  N=48 sbatch --array=0-3  scripts/batch_armp.sh      # pilot = first 4 mocks of the 48
-#   # readout: scripts/analyze_sbc_perleg.py --shard-dir $OUTDIR   (gate json = certificate input)
+#   # readout: analyze_sbc_perleg.py takes a POSITIONAL root (there is no --shard-dir) whose
+#   # prod_sbc_leg_<leg> entry points at $OUTDIR, plus a DISTINCT out-prefix so the committed
+#   # sbc_perleg_gate artifact is not overwritten:
+#   #   mkdir -p $ROOT && ln -sfn $OUTDIR $ROOT/prod_sbc_leg_eboss
+#   #   scripts/analyze_sbc_perleg.py $ROOT <prefix>       (gate json = certificate input)
 #
 #SBATCH --job-name=armp
 #SBATCH --account=cavestru0
@@ -50,6 +54,20 @@ export PYTHONHASHSEED=0
 export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
 mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
+
+# VARIANT-ARM GUARD (2026-07-27, pre-launch review of A1c). The skip below is a SHELL-level
+# existence test that runs BEFORE python, so it never reaches run_prod_sbc_shard's run_cfg clash
+# guard. With a variant flag set (--metal-selfdraw / --diag-no-sample-metals) and OUTDIR left at
+# its default, every task would find the BASELINE arm's pkl, "SKIP", and exit 0 -- the array would
+# report success having produced nothing, and a later readout would quote the baseline arm's
+# numbers as the variant's. Refuse that combination outright.
+if [[ -n "${EXTRA_ARGS:-}" && "$OUTDIR" == "/scratch/cavestru_root/cavestru1/mfho/cert_2026-07/armp_${LEG}" ]]; then
+  echo "REFUSING: EXTRA_ARGS='${EXTRA_ARGS}' is set but OUTDIR is the BASELINE arm directory" >&2
+  echo "  ($OUTDIR). A variant arm must write to its OWN directory, or the shell-level" >&2
+  echo "  skip-if-exists would silently no-op every task against the baseline pkls." >&2
+  echo "  Set OUTDIR explicitly, e.g. .../cert_2026-07/armp_${LEG}_corrected" >&2
+  exit 2
+fi
 
 MPKL="$OUTDIR/mock_$(printf %04d "$TID").pkl"
 if [[ -f "$MPKL" ]]; then

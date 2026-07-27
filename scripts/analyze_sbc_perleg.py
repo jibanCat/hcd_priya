@@ -60,7 +60,28 @@ except Exception as e:                                   # keep the read-out usa
     TAU0_AMP_RANGE, DTAU0_RANGE, TAU0_PIVOT_Z = (0.75, 1.25), (-0.4, 0.25), 3.0
     HCD_PRIOR_FRAC_SIGMA = (0.15, 0.40, 0.50)
 
-ROOT = sys.argv[1] if len(sys.argv) > 1 else "/scratch/cavestru_root/cavestru1/mfho"
+# ROOT IS MANDATORY (2026-07-27, pre-launch review of A1c). It used to default to
+# /scratch/cavestru_root/cavestru1/mfho, where stale top-level prod_sbc_leg_* dirs still hold the
+# JUNE pre-campaign closure populations. That default was a live footgun on BOTH counts:
+#   (1) it silently reads the WRONG population, and the decoy is near-perfect -- the stale eBOSS
+#       leg is also N=48, also named prod_sbc_leg_eboss, and reports a plausible A_p of -0.264;
+#   (2) the ARM-P survey/hcd_prior_signature assertions below do NOT catch it, because a
+#       HOMOGENEOUS stale population completes to survey=None and the whole assertion block is
+#       guarded by `if survey is not None`. An earlier memo claimed those assertions were the
+#       protection here; that claim was WRONG and is withdrawn.
+# It also silently overwrote the committed artifact of record sbc_perleg_gate.json (PREFIX
+# default). Both are now impossible: pass the root explicitly, every time.
+if len(sys.argv) < 2:
+    raise SystemExit(
+        "usage: analyze_sbc_perleg.py ROOT [OUT_PREFIX]\n"
+        "  ROOT is MANDATORY (no default). It must contain prod_sbc_leg_<leg> dirs/symlinks for\n"
+        "  the population you intend to read. The old default root holds STALE June closure\n"
+        "  populations that are NOT caught by the ARM-P assertions (they complete to\n"
+        "  survey=None, which skips the whole check), so an accidental default read returns a\n"
+        "  plausible-looking but WRONG number and overwrites sbc_perleg_gate.json.\n"
+        "  Pass a distinct OUT_PREFIX too whenever you are not deliberately regenerating the\n"
+        "  committed sbc_perleg_gate artifact.")
+ROOT = sys.argv[1]
 PREFIX = sys.argv[2] if len(sys.argv) > 2 else "sbc_perleg"
 OUT = "/home/mfho/hcd_priya_notes/figures/analysis/05_likelihood"
 os.makedirs(OUT, exist_ok=True)
@@ -171,6 +192,17 @@ def analyze_leg(label, src):
                                          f"{_ref['survey']!r} pooled under the {label} leg")
         assert _ref["hcd_prior_signature"], \
             f"[{label}] deployed-prior population lacks the hcd_prior_signature pin"
+
+    # POPULATION BANNER (2026-07-27, pre-launch review of A1c). The pooling assertions above
+    # prove the population is HOMOGENEOUS; they do NOT prove it is the population you meant to
+    # read (a homogeneous stale closure population passes them all, because survey=None skips
+    # the ARM-P block). Print the identifying fields unconditionally so a wrong-population read
+    # is visible on the first line of output instead of being inferred from the numbers.
+    print(f"  [population] N={M}  survey={_ref['survey']!r}  "
+          f"metal_selfdraw={_ref.get('metal_selfdraw')!r}  "
+          f"diag_no_sample_metals={_ref.get('diag_no_sample_metals')!r}  "
+          f"metal_prior={_ref.get('metal_prior')!r}  n_params={len(names)}  "
+          f"prior_sig={(_ref.get('hcd_prior_signature') or 'None')[:8]}")
 
     P = len(names)
     j_ns, j_ap = names.index("ns"), names.index("Ap")
