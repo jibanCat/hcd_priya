@@ -52,6 +52,32 @@ for suite in tests/test_legb_metal_modelcplus.py \
 done
 
 echo ""
+echo "########## POST-SUITE CLEAN-TREE CHECK ##########"
+# FAIL-LOUD (2026-07-28, PI-directed). A test suite must not mutate committed artifacts. This
+# repo has been bitten three times: prod_sbc_pilot.png silently rewritten by
+# test_prod_sbc_checkpoint (fixed by passing --figdir), analyze_sbc_perleg's default prefix
+# overwriting the committed gate JSON, and emu_bias_allfolds_mf.txt truncated to empty TWICE.
+# Manual restore-after-the-fact is not a control: it depends on someone noticing. This turns a
+# dirty tree into a test failure, so it cannot be missed.
+#
+# Scope: tracked files only. Untracked scratch is not a mutation of the record. Deliberate source
+# edits are not in scope either -- the suite is run on a committed tree, so ANY tracked-file diff
+# here was produced by the tests themselves.
+DIRTY="$(git -C /home/mfho/hcd_priya status --porcelain --untracked-files=no)"
+if [[ -n "$DIRTY" ]]; then
+  echo "CLEAN-TREE CHECK: FAIL -- the test suite MUTATED tracked files:" >&2
+  echo "$DIRTY" >&2
+  echo "" >&2
+  echo "Per-file diffstat:" >&2
+  git -C /home/mfho/hcd_priya diff --stat >&2
+  echo "" >&2
+  echo "Fix the test that writes into the repo (point it at tmp_path), do NOT just restore." >&2
+  rc=1
+else
+  echo "CLEAN-TREE CHECK: PASS (no tracked file modified by the suite)"
+fi
+
+echo ""
 echo "=== OVERALL: $([ $rc -eq 0 ] && echo ALL-PASS || echo SOME-FAILED) ==="
 echo "=== done $(date) ==="
 exit $rc

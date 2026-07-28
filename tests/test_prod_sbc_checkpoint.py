@@ -94,9 +94,20 @@ def test_merge_globs_mock_pkls(merger, runner, ctx_d, tmp_path):
                      seed=7, verbose=False)
     assert os.path.exists(runner._mock_path(out, 0))
     # the merge loader path: glob mock_*.pkl, parse the index from the filename, aggregate.
+    #
+    # --figdir IS REQUIRED HERE (2026-07-28). Without it the merge script falls back to its
+    # production default, /home/mfho/hcd_priya/figures/analysis/06_validation_summary, and this
+    # test silently REWRITES the committed artifact prod_sbc_pilot.png on every run -- caught by a
+    # dirty git tree during the A1c pre-launch work. Redirecting the test's own output changes no
+    # artifact semantics and does not touch the frozen analysis path: the script's default is
+    # unchanged, only this test stops writing into the repo. Same lesson as the analyze_sbc_perleg
+    # default-prefix footgun (pre-registration 5c) and the twice-truncated emu_bias txt.
     import sys
+    figdir = str(tmp_path / "figs")
+    os.makedirs(figdir, exist_ok=True)
     argv = sys.argv
-    sys.argv = ["merge_prod_sbc_shards.py", "--shard-dir", out, "--prob", "0.95"]
+    sys.argv = ["merge_prod_sbc_shards.py", "--shard-dir", out, "--prob", "0.95",
+                "--figdir", figdir]
     try:
         merger.main()      # raises if the glob/aggregate path is broken
     finally:
