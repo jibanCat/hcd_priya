@@ -127,6 +127,62 @@ def test_extractor_raises_on_a_missing_site_rather_than_defaulting():
 
 # ------------------------------- pooling / provenance -------------------------------
 
+# ------------------------- f_res self-draw (PI #9 Q1 answer, scope expansion (b)) -------------
+
+def _fres_ctx(sample_res=True, selfdraw=True, amp_sigma=0.05):
+    return SimpleNamespace(sample_res=sample_res, fres_selfdraw_truth=selfdraw,
+                           f_res_amp_sigma=amp_sigma,
+                           z_global=np.array([2.2 + 0.2 * i for i in range(13)]))
+
+
+def _fres_raw(amp=0.013, slope=0.42):
+    return {"f_res_amp": amp, "f_res_slope": slope}
+
+
+def test_fres_extractor_returns_none_when_flag_off():
+    """DEFAULT OFF preserves the historical mock (no resolution distortion at all)."""
+    assert CL._selfdraw_fres_bres(_fres_raw(), _fres_ctx(selfdraw=False)) is None
+
+
+def test_fres_extractor_returns_none_when_res_not_sampled():
+    """If the fit does not float f_res there is no truth to draw and nothing to propagate."""
+    assert CL._selfdraw_fres_bres(_fres_raw(), _fres_ctx(sample_res=False)) is None
+
+
+def test_fres_extractor_matches_the_deployed_bres_curve_exactly():
+    """CONDITION: the mock's b_res(z) must be the SAME function of the SAME drawn sites that the
+    fit builds in _legb_model, else the correction introduces a new misspecification."""
+    raw, ctx = _fres_raw(), _fres_ctx()
+    got = CL._selfdraw_fres_bres(raw, ctx)
+    want = CL._bres_of_z(ctx.z_global, raw["f_res_amp"], raw["f_res_slope"])
+    assert np.allclose(got, want, rtol=0, atol=0), "b_res(z) must be bit-identical to the fit's"
+    assert np.asarray(got).shape == (13,), "b_res is defined on z_global, sliced per leg later"
+
+
+def test_fres_extractor_raises_on_a_missing_site_rather_than_defaulting():
+    """FAIL-LOUD: defaulting to 0 would silently reinstate the pinned-truth defect."""
+    with pytest.raises(KeyError):
+        CL._selfdraw_fres_bres({"f_res_amp": 0.01}, _fres_ctx())
+
+
+def test_fres_selfdraw_is_in_run_cfg_defaults():
+    assert runner.RUN_CFG_DEFAULTS.get("fres_selfdraw") is False
+
+
+def test_revised_arm_cannot_pool_with_A1_Ad_OR_the_metals_only_A1c_build():
+    """PI #9 Q1: the revised arm must be a distinct population from ALL THREE predecessors --
+    including the metals-only A1c build whose smoke pkl is already on disk."""
+    base = dict(runner.RUN_CFG_DEFAULTS, survey="eBOSS", hcd_prior_signature="s" * 64)
+    a1 = dict(base)                                                    # invalidated, preserved
+    ad = dict(base, diag_no_sample_metals=True)                        # metals-off diagnostic
+    a1c_metals_only = dict(base, metal_selfdraw=True)                  # superseded build
+    a1c_revised = dict(base, metal_selfdraw=True, fres_selfdraw=True)  # the arm of record
+    eff = runner.effective_run_cfg
+    for name, other in (("A1", a1), ("Ad", ad), ("A1c-metals-only", a1c_metals_only)):
+        assert eff(a1c_revised) != eff(other), f"revised arm must not pool with {name}"
+        assert eff(other) != eff(a1c_revised), f"{name} must not pool with the revised arm"
+
+
 def test_metal_selfdraw_is_in_run_cfg_defaults():
     """Same lesson as the 2026-07-27 diag_no_sample_metals regression: a stamped key absent from
     the defaults makes pre-key pkls refuse to pool with post-key ones."""

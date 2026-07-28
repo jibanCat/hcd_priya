@@ -539,6 +539,11 @@ class LegBCtx(NamedTuple):
     ks_xbar_z: object = None                  # (n_zg,) cache Xbar(z) deg-2 fit on z_global
     ks_dndx_ref_pivot: object = None          # (3,) reference dN/dX at z=HCD_Z_PIVOT
     ks_xbar_pivot: object = None              # scalar Xbar(z=HCD_Z_PIVOT)
+    # OPTION A SCOPE EXPANSION (PI #9 Q1 answer): also self-draw the f_res spectral-resolution
+    # truth and propagate it into the Leg-A mock. Same rationale and same guarantees as
+    # selfdraw_metal_truth below; OFF (default) → the mock carries no resolution distortion, the
+    # historical path. Mock protocol only.
+    fres_selfdraw_truth: bool = False
     # OPTION A (PI decisions #9, 2026-07-27): forward the SELF-DRAWN metal f/k node truths into
     # the Leg-A mock, making the prior-predictive SBC correctly specified in the metal sector.
     # OFF (default) → make_leg_a_legmock forwards no metal nodes, i.e. the historical path, so
@@ -1911,6 +1916,9 @@ def draw_leg_a_leg_truth(ctx: LegBCtx, key):
         # OPTION A (PI #9): the MODEL C+ metal node truths, drawn by _legb_priors_only from the
         # SAME deployed priors the fit uses. None unless ctx.selfdraw_metal_truth ⇒ byte-identical.
         metal_nodes=_selfdraw_metal_nodes(raw, ctx),
+        # OPTION A scope expansion (PI #9): the drawn b_res(z) on z_global, sliced per leg by
+        # make_leg_a_legmock. None unless ctx.fres_selfdraw_truth ⇒ byte-identical.
+        b_res_global=_selfdraw_fres_bres(raw, ctx),
         # the mean-flux SITES (tau0_amp/dtau0) for the τ₀-bias report (feedback-report-tau0-dtau0-bias).
         tau0_amp=(float(raw["tau0_amp"]) if "tau0_amp" in raw else np.nan),
         dtau0=(float(raw["dtau0"]) if "dtau0" in raw else np.nan),
@@ -2209,6 +2217,10 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
     # so mock and likelihood apply metals via one code path. None (default) ⇒ no metal kwargs are
     # passed at all, i.e. the historical call, byte-identical.
     metal_truth_nodes = truth_pack.get("metal_nodes")
+    # OPTION A scope expansion (PI #9): the self-drawn b_res(z) truth on z_global. Sliced per leg
+    # with the SAME nearest-z `sel` the fit uses in _data_loglik_legcore, then passed through the
+    # SAME b_res_vec kwarg. None (default) ⇒ no b_res kwarg at all, i.e. the historical call.
+    b_res_truth_global = truth_pack.get("b_res_global")
     keys = jax.random.split(key, len(ctx.legs))
     mock_legs, chol_out, truth_on_leg_out = [], {}, {}
     for li, leg in enumerate(ctx.legs):
@@ -2229,6 +2241,8 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
             _mkw = dict(f_SiIII_nodes=_f3, f_SiII_nodes=_f2,
                         k_SiIII_nodes=_k3, k_SiII_nodes=_k2,
                         metal_node_z=getattr(ctx, "metal_node_z", (2.2, 4.2)))
+        if b_res_truth_global is not None:
+            _mkw["b_res_vec"] = np.asarray(b_res_truth_global, float)[np.asarray(sel)]
         P_model, C_total = DL.predict_P_obs_on_leg(
             ctx.model, theta9, tau0_global[sel], alpha_hcd_z[sel], pf_stats=ctx.pf_stats,
             dla_core=dla_core_per_leg[leg.name], cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
@@ -2495,6 +2509,35 @@ def _metal_amp_site(name, ctx, on):
         return numpyro.sample(name, dist.LogUniform(a_lo, a_hi))
     # "uniform" (default) — BYTE-EXACT legacy site.
     return numpyro.sample(name, dist.Uniform(0.0, ctx.a_siiii_max))
+
+
+def _selfdraw_fres_bres(raw, ctx):
+    """OPTION A SCOPE EXPANSION (PI decisions #9 Q1 answer, 2026-07-27): the Leg-A self-draw
+    SPECTRAL-RESOLUTION truth, as the per-z ``b_res(z)`` curve on ``ctx.z_global``, so
+    ``make_leg_a_legmock`` can propagate it into the mock through the same ``b_res_vec`` kwarg
+    the fit uses.
+
+    WHY. Exactly the metal-sector story, one sector over. ``_legb_priors_only`` already samples
+    ``f_res_amp ~ Normal(0, f_res_amp_sigma)`` and ``f_res_slope ~ Normal(0, F_RES_SLOPE_SIGMA)``,
+    so the truths sit in ``raw`` and were being DISCARDED while the mock carried no resolution
+    distortion at all. The fitted truth was therefore PINNED at the prior centre 0 rather than
+    drawn. Measured on the invalidated N=96 arm this was benign for the GATED channels (f_res is
+    data-dominated, shrinkage 0.229, and 0 is the prior MODE so nothing is forced) but the sector
+    itself was grossly mis-calibrated: the across-mock scatter of the posterior mean was 0.0117
+    against 0.0487 expected under a correct draw, a 4.16x deficit. The PI's ruling is that the
+    certification arm of record must have this sector genuinely prior-predictive too.
+
+    Returns None (⇒ the historical path, byte-identical) unless the OPT-IN
+    ``ctx.fres_selfdraw_truth`` is set AND the fit actually floats f_res. Uses the DEPLOYED
+    ``_bres_of_z`` so the mock's curve is the fit's curve by construction; a missing site RAISES
+    rather than defaulting, since defaulting to 0 is precisely the pinned-truth defect."""
+    if not getattr(ctx, "fres_selfdraw_truth", False):
+        return None
+    if not getattr(ctx, "sample_res", False):
+        return None
+    amp = float(raw["f_res_amp"])                    # KeyError on a missing site: fail loud
+    slope = float(raw["f_res_slope"])
+    return np.asarray(_bres_of_z(np.asarray(ctx.z_global, float), amp, slope), float)
 
 
 def _selfdraw_metal_nodes(raw, ctx):
@@ -3679,7 +3722,7 @@ def _metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a, truth_pac
     return out
 
 
-def _resolution_sites_extra(samples, step, L, inject_spec, leg_a):
+def _resolution_sites_extra(samples, step, L, inject_spec, leg_a, truth_pack=None):
     """sites_extra entries for the option-b spectral-resolution f_res sites (``f_res_amp``/``f_res_slope``)
     — sampled by ``_legb_model`` iff ``ctx.sample_res`` but NOT packed into ``_draws_matrix`` — so the
     rail/coverage check (is ``f_res_amp`` railing the tight N(0,0.02) prior, or is the leg speaking?) is
@@ -3697,6 +3740,14 @@ def _resolution_sites_extra(samples, step, L, inject_spec, leg_a):
         truth = {"f_res_amp": float(res_inj["b_res"]), "f_res_slope": 0.0}
     else:                                          # vector/basis OUT-OF-SPAN injection: orthogonal to the span
         truth = {"f_res_amp": 0.0, "f_res_slope": 0.0}   # no in-span (amp,slope) reproduces it
+    # OPTION A scope expansion (PI #9): on a corrected self-draw the f_res truth is the DRAWN
+    # value that was propagated into the mock, so the sector gets a real pull instead of the
+    # pinned/NaN placeholder. Takes precedence over the injected-arm truth (mutually exclusive by
+    # construction: the injection arms do not self-draw f_res).
+    if leg_a and truth_pack is not None and truth_pack.get("b_res_global") is not None:
+        _r = truth_pack.get("raw") or {}
+        if "f_res_amp" in _r and "f_res_slope" in _r:
+            truth = {"f_res_amp": float(_r["f_res_amp"]), "f_res_slope": float(_r["f_res_slope"])}
     out = {}
     for nm in ("f_res_amp", "f_res_slope"):
         if nm in samples:
@@ -3872,7 +3923,8 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
                                                    truth_pack=(truth_pack if leg_a else None)))
         # OPTION-B f_res sites (rail/coverage instrumentation, step-review #4): same thinning; injected
         # truth (b*, 0). EMPTY + additive-only unless sample_res sampled f_res ⇒ golden-safe.
-        sites_extra.update(_resolution_sites_extra(samples, step, L, inject_spec, leg_a))
+        sites_extra.update(_resolution_sites_extra(samples, step, L, inject_spec, leg_a,
+                                                   truth_pack=(truth_pack if leg_a else None)))
 
         per_mock.append(dict(sim=sim, truth_vec=truth_vec, draws=draws_t, L=L,
                              ll_true=ll_true, ll_draws=ll_draws_t,

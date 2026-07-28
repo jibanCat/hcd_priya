@@ -70,6 +70,7 @@ RUN_CFG_DEFAULTS = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="
                         tau0_prior_sigma=0.0, subdla_truth_boost=1.0, res_corr_on=True,
                         sample_res=False, f_res_amp_sigma=None, metal_prior="uniform",
                         ks_kmax=None, diag_no_sample_metals=False, metal_selfdraw=False,
+                        fres_selfdraw=False,
                         survey=None, hcd_parameterization="alpha_pivot_powerlaw_v1",
                         hcd_prior_signature=None, single_member=False)
 
@@ -209,6 +210,12 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
         if "metal_selfdraw" not in eff_existing \
                 and bool(_req.get("metal_selfdraw", False)) is False:
             _req.pop("metal_selfdraw", None)
+        # Same one-way back-compat for the f_res self-draw stamp (2026-07-27, PI #9 Q1). The
+        # REVISED arm carries fres_selfdraw=True and therefore clashes with A1, with Ad, AND with
+        # the superseded metals-only A1c build, none of which carry the key.
+        if "fres_selfdraw" not in eff_existing \
+                and bool(_req.get("fres_selfdraw", False)) is False:
+            _req.pop("fres_selfdraw", None)
         if eff_existing != _req:
             raise RuntimeError(
                 f"[mock {m}] config CLASH at {path}: existing pkl run_cfg={existing} "
@@ -361,6 +368,18 @@ def main():
                          "corrected pkl can NEVER pool with the invalidated arm (which is "
                          "PRESERVED on disk) or with the metals-off diagnostic. Use a SEPARATE "
                          "--out-dir.")
+    ap.add_argument("--fres-selfdraw", action="store_true",
+                    help="OPTION A SCOPE EXPANSION (PI decisions #9 Q1 answer, 2026-07-27): also "
+                         "draw the spectral-resolution truth (f_res_amp/f_res_slope) from the "
+                         "deployed fitting priors and PROPAGATE the resulting b_res(z) into the "
+                         "mock forward. Without it the Leg-A mock carries NO resolution "
+                         "distortion, so the truth for two fitted sites is PINNED at the prior "
+                         "centre 0 rather than drawn: benign for the gated channels on eBOSS (the "
+                         "sector is data-dominated and 0 is the prior mode) but the sector itself "
+                         "is badly mis-calibrated (across-mock posterior-mean scatter 0.0117 vs "
+                         "0.0487 expected, a 4.16x deficit). Intended to be used TOGETHER with "
+                         "--metal-selfdraw for the certification arm of record. Mock protocol "
+                         "only; stamped into run_cfg as a distinct population.")
     ap.add_argument("--allow-env-data-flags", action="store_true",
                     help="DANGER: permit the env data-selection flags (HCD_DESI_SNR3 / "
                          "HCD_CV_FLOOR / HCD_CV_FLOOR_RANK1) to be set at driver entry — a "
@@ -528,6 +547,22 @@ def main():
               "prior-predictive certification arm (PI decisions #9). Mock protocol only: prior, "
               "forward model, lock, signatures and gate definitions are unchanged. Its pkls carry "
               "metal_selfdraw=True and can never pool with the invalidated N=96 arm.")
+    if a.fres_selfdraw:
+        # OPTION A SCOPE EXPANSION (PI #9 Q1). Same _replace pattern; refuse loudly where it
+        # would be a no-op, since a pkl STAMPED as f_res-corrected whose mock carried no
+        # resolution distortion would be the worst possible artifact.
+        assert _sample_res, (
+            f"--fres-selfdraw needs a leg whose deployed forward FLOATS f_res "
+            f"(sample_res=True); leg {a.leg} has sample_res={_sample_res} -> there is no "
+            f"resolution truth to draw")
+        ctx = ctx._replace(fres_selfdraw_truth=True)
+        assert ctx.fres_selfdraw_truth, "fres_selfdraw_truth did not propagate to the ctx"
+        print("[option-A] --fres-selfdraw: the spectral-resolution TRUTH (f_res_amp/f_res_slope) "
+              "is drawn from the deployed fitting priors and its b_res(z) PROPAGATED into the "
+              "mock forward, making that nuisance sector genuinely prior-predictive too "
+              "(PI decisions #9 Q1). Mock protocol only. Its pkls carry fres_selfdraw=True and "
+              "can never pool with A1, with the metals-off diagnostic, or with the superseded "
+              "metals-only A1c build.")
     _ks_km = (_ks_kw or {}).get("k_max")
     print(f"[NORC] res_corr_on={ctx.res_corr_on} fix_alpha_res={ctx.fix_alpha_res} "
           f"KS_kmax={_ks_km if _ks_km is not None else ('0.045' if not a.res_corr_on else '0.069')}")
@@ -686,6 +721,10 @@ def main():
                    f_res_amp_sigma=_f_res_sigma,      # task #4): the f_res float + flat-log 2-node metals
                    metal_prior=str(_metal_prior),     # change the SBC POPULATION, so a WIRED pkl must never
                                       # pool with a pre-wiring (uniform / no-f_res) pkl -- distinct forward.
+                   fres_selfdraw=bool(a.fres_selfdraw),   # OPTION A SCOPE-EXPANSION discriminator
+                                      # (2026-07-27, PI #9 Q1): the revised certification arm also
+                                      # self-draws the f_res truth, so it is a THIRD distinct mock
+                                      # population and must not pool with the metals-only build.
                    metal_selfdraw=bool(a.metal_selfdraw),   # OPTION A discriminator (2026-07-27,
                                       # PI #9): a CORRECTED prior-predictive pkl (metal truths drawn
                                       # from the fit's own priors and forwarded into the mock) must
