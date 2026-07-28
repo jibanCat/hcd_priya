@@ -84,6 +84,52 @@ def effective_run_cfg(cfg):
     return eff
 
 
+def _truth_site_semantics(sites_extra, cfg):
+    """TRUTH-SITE SEMANTICS (Bayesian design review Q1; bucket renamed per domain review
+    2026-07-23; made FLAG-AWARE 2026-07-28 after the A1c pre-launch panel).
+
+    The self-draw is exact-model in the cosmology/tau0/HCD sector. Historically the metal f/k
+    nodes and the f_res sites were NOT self-drawn -- f_res truth pinned at the prior center 0;
+    metal-node truth sitting at/below the FLAT-LOG SUPPORT EDGE (a flat-log prior has no center,
+    so "center_pinned" would overclaim) -- and the certificate must not claim blanket exactness.
+
+    THE 2026-07-28 DEFECT. Option A (PI decisions #9) repairs exactly those two sectors, but this
+    stamp was derived from the STATIC tuple ``closure_legb.SELF_DRAWN_EXTRA_SITES`` alone, so an
+    A1c pkl carrying six finite, drawn, in-bracket truths still recorded all six as
+    ``not_self_drawn`` with a note asserting the very defect the arm repairs -- BYTE-IDENTICAL to
+    A1's own stamp. The two arms were indistinguishable on their own provenance while their
+    ``sites_extra`` truths differ (nan vs drawn), and the pre-registration quotes this exact block
+    as its evidence of the defect, so a later auditor had precedent for reading it literally.
+
+    THE FIX widens the self-drawn set HERE, from ``run_cfg``, and leaves the module tuple alone:
+    mutating that tuple would also mis-stamp default-path pkls and break the byte-identity on
+    which the preservation and resumability of the 96 A1 pkls rests. With both flags off this
+    function reproduces the historical stamp character-for-character, note string included.
+    """
+    from hcd_analysis.emulator import closure_legb as _CL
+    present = set(sites_extra or {})
+    drawn = set(_CL.SELF_DRAWN_EXTRA_SITES)          # the floor: single authority, never mutated
+    cfg = cfg or {}
+    pinned, repaired = [], []
+    # ORDER MATTERS: f_res before metal reproduces the historical note byte-for-byte.
+    if cfg.get("fres_selfdraw"):
+        drawn |= {"f_res_amp", "f_res_slope"}
+        repaired.append("f_res truth DRAWN from the deployed fitting prior and propagated")
+    else:
+        pinned.append("f_res truth = prior center 0")
+    if cfg.get("metal_selfdraw"):
+        drawn |= {s for s in present if s.startswith(("f_Si", "k_Si"))}
+        repaired.append("metal f/k node truth DRAWN from the deployed fitting prior and propagated")
+    else:
+        pinned.append("metal f/k node truth at/below the flat-log support edge (no center exists)")
+    note = "not_self_drawn: " + "; ".join(pinned) if pinned else ""
+    if repaired:
+        note = (note + "  " if note else "") + "self_draw: " + "; ".join(repaired)
+    return dict(self_draw=sorted(present & drawn),
+                not_self_drawn=sorted(present - drawn),
+                note=note)
+
+
 def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_depth, seed,
               dense_mass=True, verbose=True, leg_a=True, run_cfg=None, fold=0, inject_spec=None):
     """Run (or load) ONE mock and persist it to ``{out_dir}/mock_{m:04d}.pkl``.
@@ -245,19 +291,7 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
         assert not _missing, (f"[mock {m}] mapped-parameterization run missing mapped raw sites "
                               f"{sorted(_missing)} in sites_extra — truth did not come from the "
                               f"mapped model code")
-    # TRUTH-SITE SEMANTICS (Bayesian design review Q1; bucket renamed per domain review 2026-07-23):
-    # the self-draw is exact-model in the cosmology/tau0/HCD sector, but the metal f/k nodes and
-    # f_res sites are NOT self-drawn (f_res truth pinned at the prior center 0; metal-node truth
-    # sits at/below the FLAT-LOG SUPPORT EDGE — a flat-log prior has no center, so "center_pinned"
-    # would overclaim). The certificate must not claim blanket exactness. Single authority for the
-    # self-drawn set: closure_legb.SELF_DRAWN_EXTRA_SITES (module-attribute read, test-enforced).
-    from hcd_analysis.emulator import closure_legb as _CL
-    _present = set(rec.get("sites_extra", {}))
-    rec["truth_site_semantics"] = dict(
-        self_draw=sorted(_present & set(_CL.SELF_DRAWN_EXTRA_SITES)),
-        not_self_drawn=sorted(_present - set(_CL.SELF_DRAWN_EXTRA_SITES)),
-        note="not_self_drawn: f_res truth = prior center 0; metal f/k node truth at/below the "
-             "flat-log support edge (no center exists)")
+    rec["truth_site_semantics"] = _truth_site_semantics(rec.get("sites_extra", {}), cfg)
     rec["run_cfg"] = cfg            # STAMP the config so a later skip can verify it (the guard above)
     tmp = path + f".tmp.{os.getpid()}"
     with open(tmp, "wb") as f:

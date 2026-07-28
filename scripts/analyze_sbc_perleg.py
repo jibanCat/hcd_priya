@@ -198,8 +198,13 @@ def analyze_leg(label, src):
     # read (a homogeneous stale closure population passes them all, because survey=None skips
     # the ARM-P block). Print the identifying fields unconditionally so a wrong-population read
     # is visible on the first line of output instead of being inferred from the numbers.
+    # fres_selfdraw ADDED 2026-07-28: the A1c pre-launch panel found the pre-registration's
+    # MANDATORY pre-readout check (section 5c) unperformable without it, and it is the single
+    # field distinguishing the arm of record from the SUPERSEDED metals-only A1c build -- which
+    # otherwise printed an identical banner.
     print(f"  [population] N={M}  survey={_ref['survey']!r}  "
           f"metal_selfdraw={_ref.get('metal_selfdraw')!r}  "
+          f"fres_selfdraw={_ref.get('fres_selfdraw')!r}  "
           f"diag_no_sample_metals={_ref.get('diag_no_sample_metals')!r}  "
           f"metal_prior={_ref.get('metal_prior')!r}  n_params={len(names)}  "
           f"prior_sig={(_ref.get('hcd_prior_signature') or 'None')[:8]}")
@@ -230,6 +235,7 @@ def analyze_leg(label, src):
     # the A_p pull against the metal amplitude has NO power against it; report the floor's
     # size and its across-mock constancy instead.
     metal_nodes = {}
+    repaired_sites = {}
 
     for d in mocks:
         dr = np.asarray(d["draws"]); t = np.asarray(d["truth_vec"])
@@ -248,6 +254,11 @@ def analyze_leg(label, src):
             p, v = pull(j)
             pulls[k].append(p); postvar[k].append(v); truths[k].append(t[j])
             ranks[k].append(float(np.mean(dr[:, j] < t[j])) if L > 1 else np.nan)
+
+        # repaired-sector pull/rank (Option A: metal nodes AND f_res) -- pre-registered
+        # 2026-07-28, NOT gated. Kept separate from the floor bookkeeping below, which answers a
+        # different question (is a spurious floor active on metal-FREE mocks).
+        _accumulate_repaired_sites(repaired_sites, d.get("sites_extra"))
 
         # metal-node floor bookkeeping (present only on the metal-floated legs)
         for nm_site, rec_site in (d.get("sites_extra") or {}).items():
@@ -308,6 +319,7 @@ def analyze_leg(label, src):
         "ranks": {k: np.asarray(v, float) for k, v in ranks.items()},
         "rank_uniformity": {k: rank_uniformity(v) for k, v in ranks.items()},
         "metal_floor": metal_floor_summary(metal_nodes),
+        "repaired_sectors": repaired_sector_summary(repaired_sites),
         "contraction": {k: contraction(k) for k in SCALAR + ["tau0amp", "dtau0"]},
         "var_prior": var_prior,
         # the homogeneity-verified effective config (2026-07-23): the certificate's per-leg
@@ -351,6 +363,80 @@ def rank_uniformity(rank_fracs, n_grid=None):
                     verdict="scipy-unavailable")
     return dict(n=n, mean=float(u.mean()), ks_p=ks_p, n_outside_band=out,
                 verdict=("UNIFORM" if ks_p > 0.05 else "NON-UNIFORM"))
+
+
+REPAIRED_SITE_PREFIXES = ("f_Si", "k_Si")
+REPAIRED_SITE_NAMES = ("f_res_amp", "f_res_slope")
+
+
+def _is_repaired_site(nm):
+    """The sites Option A made prior-predictive: the metal f/k nodes AND the two f_res sites.
+    The pre-2026-07-28 readout filtered on the f_Si/k_Si prefixes ALONE, so f_res -- half the
+    repair, and the sector with the measured 4.16x scatter deficit -- was excluded outright."""
+    return nm.startswith(REPAIRED_SITE_PREFIXES) or nm in REPAIRED_SITE_NAMES
+
+
+def _accumulate_repaired_sites(acc, sites_extra):
+    """Collect per-mock pull and rank for every repaired site. Pull is
+    (post_mean - truth)/post_sd and rank is mean(draws < truth), the SAME definitions the gated
+    channels use, so the numbers are read on the familiar scale."""
+    for nm, rec in (sites_extra or {}).items():
+        if not _is_repaired_site(nm):
+            continue
+        x = np.asarray(rec.get("draws"), float)
+        x = x[np.isfinite(x)]
+        if x.size == 0:
+            continue
+        t = float(rec.get("truth", np.nan))
+        a = acc.setdefault(nm, {"pull": [], "rank": [], "truth": [],
+                                "post_mean": [], "post_sd": []})
+        sd = float(x.std(ddof=1)) if x.size > 1 else np.nan
+        a["post_mean"].append(float(x.mean()))
+        a["post_sd"].append(sd)
+        a["truth"].append(t)
+        ok = np.isfinite(t) and np.isfinite(sd) and sd > 0
+        a["pull"].append((float(x.mean()) - t) / sd if ok else np.nan)
+        a["rank"].append(float(np.mean(x < t)) if (np.isfinite(t) and x.size > 1) else np.nan)
+
+
+def repaired_sector_summary(acc):
+    """PRE-REGISTERED (2026-07-28) and explicitly NOT GATED.
+
+    Pre-registration section 5 states as binding that the metal-sector and f_res pulls "will be
+    reported as new evidence that the correction worked", but the pinned readout computed
+    neither -- so the statistic demonstrating the repair would have been chosen AFTER the gate
+    result was known. This reports it on a rule fixed in advance.
+
+    NO pass/fail verdict is emitted for these sites: the frozen gate covers n_s and A_p only,
+    and adding a gate here would be a gate-definition change, which PI #9 forbids. The falsifiable
+    prediction on record is that tau0_amp's pull collapses from +0.5988 (t = 5.656) toward zero.
+
+    On a flags-off arm the truths are nan; those sites are reported truth_present=False with
+    non-finite pulls rather than as measurements."""
+    if not acc:
+        return None
+    out = {"sites": {}, "gated": False,
+           "note": "NOT a gate (PI #9: the frozen gate covers n_s and A_p only). "
+                   "Reported as pre-registered evidence on the repaired sectors."}
+    for nm, a in sorted(acc.items()):
+        pull = np.asarray(a["pull"], float)
+        rank = np.asarray(a["rank"], float)
+        tr = np.asarray(a["truth"], float)
+        fin = pull[np.isfinite(pull)]
+        ru = rank_uniformity(rank) if np.isfinite(rank).sum() >= 4 else None
+        out["sites"][nm] = dict(
+            n=int(len(a["pull"])),
+            truth_present=bool(np.isfinite(tr).any()),
+            pull_mean=float(fin.mean()) if fin.size else np.nan,
+            pull_sd=float(fin.std(ddof=1)) if fin.size > 1 else np.nan,
+            pull_sem=float(fin.std(ddof=1) / np.sqrt(fin.size)) if fin.size > 1 else np.nan,
+            rank_mean=float(np.nanmean(rank)) if np.isfinite(rank).any() else np.nan,
+            rank_ks_p=(ru["ks_p"] if ru else np.nan),
+            rank_verdict=(ru["verdict"] if ru else "underpowered(N<4)"),
+            post_mean=float(np.nanmean(a["post_mean"])),
+            across_mock_sd=(float(np.nanstd(a["post_mean"], ddof=1))
+                            if len(a["post_mean"]) > 1 else np.nan))
+    return out
 
 
 def metal_floor_summary(metal_nodes):

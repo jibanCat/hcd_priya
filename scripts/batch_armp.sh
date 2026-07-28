@@ -61,7 +61,14 @@ mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
 # its default, every task would find the BASELINE arm's pkl, "SKIP", and exit 0 -- the array would
 # report success having produced nothing, and a later readout would quote the baseline arm's
 # numbers as the variant's. Refuse that combination outright.
-if [[ -n "${EXTRA_ARGS:-}" && "$OUTDIR" == "/scratch/cavestru_root/cavestru1/mfho/cert_2026-07/armp_${LEG}" ]]; then
+# NORMALIZE BEFORE COMPARING (2026-07-28): the guard compared OUTDIR by exact string, so a
+# trailing slash -- ".../armp_eBOSS/" -- slipped past it and re-opened the silent-no-op footgun.
+# Strip trailing slashes and resolve to a physical path so no spelling of the baseline directory
+# can evade the refusal.
+_OUTDIR_N="$(cd "$OUTDIR" 2>/dev/null && pwd -P || echo "${OUTDIR%"${OUTDIR##*[!/]}"}")"
+_BASELINE_N="/scratch/cavestru_root/cavestru1/mfho/cert_2026-07/armp_${LEG}"
+_BASELINE_N="$(cd "$_BASELINE_N" 2>/dev/null && pwd -P || echo "$_BASELINE_N")"
+if [[ -n "${EXTRA_ARGS:-}" && "$_OUTDIR_N" == "$_BASELINE_N" ]]; then
   echo "REFUSING: EXTRA_ARGS='${EXTRA_ARGS}' is set but OUTDIR is the BASELINE arm directory" >&2
   echo "  ($OUTDIR). A variant arm must write to its OWN directory, or the shell-level" >&2
   echo "  skip-if-exists would silently no-op every task against the baseline pkls." >&2
