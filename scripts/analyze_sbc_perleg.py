@@ -82,8 +82,26 @@ if len(sys.argv) < 2:
         "  Pass a distinct OUT_PREFIX too whenever you are not deliberately regenerating the\n"
         "  committed sbc_perleg_gate artifact.")
 ROOT = sys.argv[1]
-PREFIX = sys.argv[2] if len(sys.argv) > 2 else "sbc_perleg"
-OUT = "/home/mfho/hcd_priya_notes/figures/analysis/05_likelihood"
+# OUT_PREFIX IS ALSO MANDATORY (2026-07-29, round-3 panel). ROOT was made mandatory above, but
+# PREFIX was left defaulting to "sbc_perleg" -- which names the COMMITTED artifact of record
+# figures/analysis/05_likelihood/sbc_perleg_gate.{json,png}. A forgotten second positional
+# therefore still silently overwrote it, and it lives in the NOTES repo, which the post-suite
+# clean-tree check (batch_tests_heavy.sh) does not cover. This was not hypothetical: writing the
+# round-3 regression test fired it, overwriting the committed gate JSON with synthetic data
+# (restored from git). Naming the artifact you intend to write is now explicit, every time.
+if len(sys.argv) < 3:
+    raise SystemExit(
+        "usage: analyze_sbc_perleg.py ROOT OUT_PREFIX\n"
+        "  OUT_PREFIX is MANDATORY (no default). The old default 'sbc_perleg' is the COMMITTED\n"
+        "  artifact of record sbc_perleg_gate.json/.png in the notes repo, so omitting the\n"
+        "  prefix overwrote the certificate input with whatever population you just read.\n"
+        "  Use a DISTINCT prefix (e.g. armp_eboss_corrected) unless you are deliberately\n"
+        "  regenerating the committed artifact.")
+PREFIX = sys.argv[2]
+# Artifact directory. Defaults to the notes repo exactly as before (production behaviour is
+# unchanged); the override exists so tests and throwaway diagnostics cannot write into the record.
+OUT = os.environ.get("SBC_PERLEG_OUTDIR",
+                     "/home/mfho/hcd_priya_notes/figures/analysis/05_likelihood")
 os.makedirs(OUT, exist_ok=True)
 
 # The 3 deployed legs (label -> dir). DESI may be empty (0 pkls) -> handled gracefully.
@@ -399,6 +417,23 @@ def _accumulate_repaired_sites(acc, sites_extra):
         a["rank"].append(float(np.mean(x < t)) if (np.isfinite(t) and x.size > 1) else np.nan)
 
 
+def _jsonable(o):
+    """Recursively make a summary dict strict-JSON safe: numpy scalars -> python, non-finite
+    floats -> None (the convention this certificate already uses for contraction and ranks, so a
+    reader never has to distinguish `NaN` from a missing measurement)."""
+    if isinstance(o, dict):
+        return {k: _jsonable(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_jsonable(v) for v in o]
+    if isinstance(o, (np.floating, float)):
+        return float(o) if np.isfinite(o) else None
+    if isinstance(o, (np.integer,)):
+        return int(o)
+    if isinstance(o, (np.bool_,)):
+        return bool(o)
+    return o
+
+
 def repaired_sector_summary(acc):
     """PRE-REGISTERED (2026-07-28) and explicitly NOT GATED.
 
@@ -542,8 +577,36 @@ for label, src in LEG_DIRS.items():
             print("    NOTE: the floor is near-CONSTANT across mocks, so a within-leg correlation of"
                   "\n    the A_p pull against the metal amplitude has NO POWER against it. Testing it"
                   "\n    requires a metals-off refit, not a correlation.")
+    # REPAIRED SECTORS (pre-registration 5c-bis, BINDING; NOT a gate). Emitted here because the
+    # round-3 panel found this summary was computed into the result dict and then DISCARDED --
+    # printed nowhere, absent from the gate JSON -- so the pinned readout produced none of the
+    # evidence 5c-bis makes binding, and the statistic demonstrating the repair would have been
+    # extracted only AFTER the gate verdict was on screen. No verdict is printed for these sites.
+    rs = r.get("repaired_sectors")
+    if rs:
+        print("  -- repaired sectors (PRE-REGISTERED 5c-bis, NOT GATED: evidence, not a verdict) --")
+        for nm, v in rs["sites"].items():
+            if not v["truth_present"]:
+                print(f"    {nm:22s} truth NOT DRAWN on this arm (pinned) -> not scoreable")
+                continue
+            print(f"    {nm:22s} pull={v['pull_mean']:+.3f}+/-{v['pull_sd']:.3f} "
+                  f"(sem {v['pull_sem']:.3f}, n={v['n']})  rank mean={v['rank_mean']:.3f} "
+                  f"KS p={v['rank_ks_p']:.4f} {v['rank_verdict']}  "
+                  f"across-mock sd(post mean)={v['across_mock_sd']:.5f}")
+        print("    Expectation fixed in advance: metal-node and f_res pulls ~N(0,1)-ish and ranks"
+              "\n    approximately UNIFORM on a corrected arm. A mis-calibrated repaired sector is a"
+              "\n    REPORTABLE finding and a PI question -- not a gate failure, and not a reason to"
+              "\n    withhold the gated verdict.")
     if r["ll_rank_frac_mean"] is not None:
-        print(f"  loglik-rank   mean={r['ll_rank_frac_mean']:.3f} (ideal 0.5)")
+        # PI #9 Q3: on a self-draw arm the mock carries a metal/f_res distortion that
+        # _data_loglik_legcore does NOT score (no metal_nodes/b_res kwargs), so this statistic is
+        # structurally blind to the very sectors being repaired. Validity holds (truth and draws
+        # share the statistic, so the rank stays uniform under the null); INTERPRETATION does not.
+        _sd = (r["run_cfg_effective"].get("metal_selfdraw")
+               or r["run_cfg_effective"].get("fres_selfdraw"))
+        tag = ("   [UNINTERPRETABLE on a self-draw arm (PI #9 Q3): excluded from all gates and "
+               "from interpretation; NOT comparable to A1's 0.847]" if _sd else "")
+        print(f"  loglik-rank   mean={r['ll_rank_frac_mean']:.3f} (ideal 0.5){tag}")
     print(f"  run health    div_total={r['div_total']}  L median={r['L_median']} "
           f"range={r['L_range']}  params={r['n_params']}{'  (+a_SiIII)' if r['has_siiii'] else ''}")
 
@@ -618,6 +681,10 @@ for label in ("DESI", "KS", "eBOSS"):
         "gate_rank_ns": r["rank_uniformity"]["ns"]["verdict"],
         "gate_rank_Ap": r["rank_uniformity"]["Ap"]["verdict"],
         "metal_floor": r.get("metal_floor"),
+        # PRE-REGISTERED 5c-bis, NOT GATED (round-3 panel: this was computed and discarded, so
+        # the certificate carried no record of whether the repaired sectors are themselves
+        # calibrated). Non-finite -> None so the certificate stays strict JSON.
+        "repaired_sectors": _jsonable(r.get("repaired_sectors")),
         "contraction": {k: (float(v) if np.isfinite(v) else None)
                         for k, v in r["contraction"].items()},
         "var_prior": {k: (float(v) if np.isfinite(v) else None)

@@ -302,3 +302,112 @@ def test_mock_and_fit_slice_bres_with_the_SAME_nearest_z_map():
         f"nearest-z maps diverged:\n  mock: {mock_sel[0].strip()}\n  fit : {fit_sel[0].strip()}")
     # and the fit must slice the global curve with exactly that map
     assert "b_res_global[jnp.asarray(sel)]" in re.sub(r"\s+", "", fit_src)
+
+
+# ===================================================================== ROUND 3 (2026-07-29)
+# The round-3 panel (implementation / Bayesian-SBC / cosmology) returned NO-GO on the
+# as-committed build. The one CODE defect it found:
+#
+#   `repaired_sectors` was COMPUTED into the result dict (analyze_sbc_perleg.py:322) and then
+#   DISCARDED -- printed nowhere in the readout, absent from the leg gate JSON. Its sibling
+#   `metal_floor` is emitted in both. So the pinned section-5c readout command produced NONE of
+#   the section-5c-bis evidence, and extracting it would have meant writing code AFTER the gate
+#   verdict was on screen: exactly the post-hoc statistic selection amendment 3 exists to stop.
+#
+# Verified end-to-end (a real run of the script over synthetic pkls), not by source scan, because
+# the defect was precisely that a correct pure function was never wired into the output.
+
+def _synthetic_leg(dirpath, n_mocks=8, seed=0, *, metal_selfdraw=True, fres_selfdraw=True):
+    """A minimal but STRUCTURALLY REAL eBOSS ARM-P population: the 25 deployed names, a tau0
+    ladder, and the six repaired sites carrying finite drawn truths."""
+    import os
+    import pickle as _pkl
+    rng = np.random.default_rng(seed)
+    names = (["ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2", "hireionz", "bhfeedback"]
+             + [f"tau0_z{i}" for i in range(13)]
+             + ["alpha_lls", "alpha_subdla", "alpha_dla"])
+    P, L = len(names), 40
+    os.makedirs(dirpath, exist_ok=True)
+    cfg = dict(runner.RUN_CFG_DEFAULTS, survey="eBOSS", leg="eBOSS", metal_prior="flatlog2node",
+               hcd_prior_signature="50befc941edfc4c7" + "0" * 48,
+               metal_selfdraw=metal_selfdraw, fres_selfdraw=fres_selfdraw)
+    six = dict.fromkeys(METAL, 0.01)
+    six.update({"f_res_amp": 0.005, "f_res_slope": 0.3})
+    for m in range(n_mocks):
+        truth = np.concatenate([rng.uniform(0.2, 0.8, 9),
+                                np.linspace(0.2, 1.2, 13),
+                                rng.uniform(0.3, 0.6, 3)])
+        draws = truth[None, :] + rng.normal(0, 0.05, (L, P))
+        d = dict(sim=f"s{m}", names=names, truth_vec=truth, draws=draws, L=L, n_div=0,
+                 ll_true=-1931.7, ll_draws=rng.normal(-1930, 5, L), run_cfg=cfg,
+                 sites_extra=_sites_extra(six, n_draws=L, seed=100 + m))
+        _pkl.dump(d, open(os.path.join(dirpath, f"mock_{m:04d}.pkl"), "wb"))
+    return names
+
+
+def _run_analyzer(root, prefix, outdir):
+    """Run the analyzer as the pinned command does: a real subprocess, explicit ROOT and PREFIX,
+    with its artifact directory redirected OUT of the notes repo."""
+    import os
+    import subprocess
+    env = dict(os.environ, PYTHONPATH="/home/mfho/hcd_priya", SBC_PERLEG_OUTDIR=outdir,
+               MPLBACKEND="Agg")
+    return subprocess.run(
+        ["/home/mfho/.conda/envs/emu-jax/bin/python3",
+         "/home/mfho/hcd_priya/scripts/analyze_sbc_perleg.py", root, prefix],
+        capture_output=True, text=True, env=env, cwd="/home/mfho/hcd_priya", timeout=900)
+
+
+def test_readout_emits_repaired_sectors_to_stdout_and_to_the_gate_json(tmp_path):
+    """THE ROUND-3 BLOCKER. The pinned readout must SHOW the repaired-sector statistics and
+    PERSIST them in the certificate JSON. Computing them into a dict nobody reads is what let the
+    demonstrating statistic be chosen after the verdict."""
+    root = tmp_path / "root"
+    _synthetic_leg(str(root / "prod_sbc_leg_eboss"))
+    outdir = tmp_path / "figs"
+    r = _run_analyzer(str(root), "t_round3", str(outdir))
+    assert r.returncode == 0, f"analyzer failed:\n{r.stdout[-3000:]}\n{r.stderr[-3000:]}"
+
+    assert "repaired sector" in r.stdout.lower(), \
+        "the readout must PRINT the repaired-sector block (section 5c-bis is binding)"
+    for nm in METAL + FRES:
+        assert nm in r.stdout, f"{nm} must appear in the printed repaired-sector block"
+
+    import json as _json
+    j = _json.load(open(outdir / "t_round3_gate.json"))
+    leg = j["legs"]["eBOSS"]
+    assert "repaired_sectors" in leg, "the gate JSON must carry repaired_sectors"
+    sites = leg["repaired_sectors"]["sites"]
+    assert set(sites) == set(METAL + FRES)
+    for nm in METAL + FRES:
+        assert sites[nm]["pull_mean"] is not None
+        assert sites[nm]["rank_ks_p"] is not None
+    assert leg["repaired_sectors"]["gated"] is False, "must never become a gate (PI #9)"
+
+
+def test_readout_repaired_sector_block_carries_no_verdict(tmp_path):
+    """PI #9 forbids a gate-definition change. The printed block must not label these sites
+    PASS or FAIL, however tempting a near-uniform rank looks."""
+    root = tmp_path / "root"
+    _synthetic_leg(str(root / "prod_sbc_leg_eboss"))
+    r = _run_analyzer(str(root), "t_round3b", str(tmp_path / "figs"))
+    assert r.returncode == 0, r.stderr[-2000:]
+    block = r.stdout.lower().split("repaired sector", 1)[1].split("-- ", 1)[0]
+    assert "gate:" not in block and " pass" not in block and " fail" not in block
+
+
+def test_out_prefix_is_mandatory(tmp_path):
+    """ROOT was made mandatory 2026-07-27; OUT_PREFIX was not, so a forgotten second positional
+    still overwrote the committed artifact of record sbc_perleg_gate.json -- and it lives in the
+    NOTES repo, which the post-suite clean-tree check does not cover."""
+    import os
+    import subprocess
+    root = tmp_path / "root"
+    _synthetic_leg(str(root / "prod_sbc_leg_eboss"), n_mocks=4)
+    env = dict(os.environ, PYTHONPATH="/home/mfho/hcd_priya",
+               SBC_PERLEG_OUTDIR=str(tmp_path / "figs"))
+    r = subprocess.run(["/home/mfho/.conda/envs/emu-jax/bin/python3",
+                        "/home/mfho/hcd_priya/scripts/analyze_sbc_perleg.py", str(root)],
+                       capture_output=True, text=True, env=env, timeout=300)
+    assert r.returncode != 0, "running without OUT_PREFIX must REFUSE, not default"
+    assert "OUT_PREFIX" in (r.stdout + r.stderr)

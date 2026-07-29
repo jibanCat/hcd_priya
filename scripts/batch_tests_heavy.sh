@@ -40,7 +40,8 @@ for suite in tests/test_legb_metal_modelcplus.py \
              tests/test_legb_leg_a.py \
              tests/test_metal_selfdraw.py \
              tests/test_cert_prereqs.py \
-             tests/test_a1c_prelaunch_fixes.py; do
+             tests/test_a1c_prelaunch_fixes.py \
+             tests/test_a1c_paired.py; do
   echo ""
   echo "########## $suite ##########"
   if timeout 3600 "$PY" -m pytest "$suite" -q --no-header -p no:cacheprovider; then
@@ -63,19 +64,29 @@ echo "########## POST-SUITE CLEAN-TREE CHECK ##########"
 # Scope: tracked files only. Untracked scratch is not a mutation of the record. Deliberate source
 # edits are not in scope either -- the suite is run on a committed tree, so ANY tracked-file diff
 # here was produced by the tests themselves.
-DIRTY="$(git -C /home/mfho/hcd_priya status --porcelain --untracked-files=no)"
-if [[ -n "$DIRTY" ]]; then
-  echo "CLEAN-TREE CHECK: FAIL -- the test suite MUTATED tracked files:" >&2
-  echo "$DIRTY" >&2
-  echo "" >&2
-  echo "Per-file diffstat:" >&2
-  git -C /home/mfho/hcd_priya diff --stat >&2
-  echo "" >&2
-  echo "Fix the test that writes into the repo (point it at tmp_path), do NOT just restore." >&2
-  rc=1
-else
-  echo "CLEAN-TREE CHECK: PASS (no tracked file modified by the suite)"
-fi
+#
+# BOTH REPOS (2026-07-29, round 3). The check originally covered only hcd_priya, but
+# analyze_sbc_perleg writes its artifacts into the NOTES repo -- and writing the round-3
+# regression test fired exactly that: a default OUT_PREFIX overwrote the committed
+# sbc_perleg_gate.json with synthetic data. A control that watches the wrong repo is not a
+# control. OUT_PREFIX is now mandatory and SBC_PERLEG_OUTDIR redirects the artifact dir, but the
+# check is what proves it.
+for REPO in /home/mfho/hcd_priya /home/mfho/hcd_priya_notes; do
+  DIRTY="$(git -C "$REPO" status --porcelain --untracked-files=no)"
+  if [[ -n "$DIRTY" ]]; then
+    echo "CLEAN-TREE CHECK: FAIL -- the test suite MUTATED tracked files in $REPO:" >&2
+    echo "$DIRTY" >&2
+    echo "" >&2
+    echo "Per-file diffstat:" >&2
+    git -C "$REPO" diff --stat >&2
+    echo "" >&2
+    echo "Fix the test that writes into the repo (point it at tmp_path / SBC_PERLEG_OUTDIR)," >&2
+    echo "do NOT just restore." >&2
+    rc=1
+  else
+    echo "CLEAN-TREE CHECK: PASS ($REPO -- no tracked file modified by the suite)"
+  fi
+done
 
 echo ""
 echo "=== OVERALL: $([ $rc -eq 0 ] && echo ALL-PASS || echo SOME-FAILED) ==="
