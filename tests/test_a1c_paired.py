@@ -304,3 +304,52 @@ def test_paired_report_verifies_by_DEFAULT():
     noop = {i: _mock(i, corrected=False, seed=1) for i in range(12)}
     with pytest.raises(paired.PairingError):
         paired.paired_report(noop, a1, expect_n=12)
+
+
+def _arms_with_tau0_pull(a1_pull, a1c_pull, n=48):
+    """Genuinely paired arms (all six conjuncts pass) whose tau0_amp pulls are driven to
+    prescribed means by offsetting each arm's tau0 draws away from the SHARED truth ladder."""
+    a1c, a1 = _arms(n=n)
+    tau0 = [NAMES.index(f"tau0_z{i}") for i in range(13)]
+    for arm, want in ((a1, a1_pull), (a1c, a1c_pull)):
+        for m, d in arm.items():
+            dr = np.array(d["draws"])
+            sd = dr[:, tau0].std(ddof=1)
+            dr[:, tau0] += want * sd
+            d["draws"] = dr
+    return a1c, a1
+
+
+def test_escalation_is_computed_from_A1c_OWN_pull_not_the_paired_delta():
+    """CALL-SITE test (round 4). The bare-function tests passed `pull_mean=` literals directly, so
+    they could not catch `paired_report` handing clause 1 the PAIRED DELTA instead of A1c's own
+    residual pull. 4c(b) clause 1 is `|A1c tau0_amp pull mean| > 0.30` -- "the same magnitude the
+    frozen gate applies to the gated channels" -- a property of A1c ALONE.
+
+    THE DISCRIMINATING CASE IS A PERFECT REPAIR: A1 carries the defect (+0.49), A1c does not
+    (~0), so the DELTA is ~-0.49 (> 0.30 in magnitude, escalates) while the correct quantity,
+    A1c's own pull, is ~0 (does not). Fed the delta, the rule escalated on a perfect repair."""
+    a1c, a1 = _arms_with_tau0_pull(a1_pull=+0.4916, a1c_pull=0.0, n=16)
+    ch = paired.paired_report(a1c, a1, expect_n=16)["channels"]["tau0amp"]
+    assert abs(ch["a1c_mean"]) < 0.30 < abs(ch["delta_mean"]), (
+        f"fixture must separate the two: a1c={ch['a1c_mean']:.3f} delta={ch['delta_mean']:.3f}")
+    assert ch["escalates_4c_b"] == paired.tau0_escalates(
+        ch["a1c_mean"], ch["ci95_lo"], ch["ci95_hi"])
+    assert ch["escalates_4c_b"] is not paired.tau0_escalates(
+        ch["delta_mean"], ch["ci95_lo"], ch["ci95_hi"]), (
+        "a perfect repair must NOT escalate on clause 1; feeding the delta makes it escalate")
+
+
+def test_clause_1_fires_on_an_A1c_pull_larger_than_A1s_own():
+    """The other half of the same defect: an A1c tau0 pull LARGER than A1's (+0.75 vs +0.4916)
+    has a SMALL delta, so a delta-fed clause 1 goes silent on a defect that got WORSE."""
+    a1c, a1 = _arms_with_tau0_pull(a1_pull=+0.4916, a1c_pull=+0.75, n=16)
+    ch = paired.paired_report(a1c, a1, expect_n=16)["channels"]["tau0amp"]
+    assert abs(ch["a1c_mean"]) > 0.30, f"fixture: a1c pull {ch['a1c_mean']:.3f}"
+    assert ch["escalates_4c_b"] is True, "a residual pull worse than A1's must escalate"
+
+
+def test_clause_1_thresholds_on_the_bare_function():
+    assert paired.tau0_escalates(0.70, -0.30, +0.30) is True     # big residual pull
+    assert paired.tau0_escalates(0.70, +0.05, +0.30) is True     # even with a clean CI
+    assert paired.tau0_escalates(0.02, +0.05, +0.30) is False    # small pull + CI excludes 0

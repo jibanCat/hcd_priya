@@ -308,9 +308,15 @@ def paired_report(a1c, a1, verify=True, expect_n=48):
             ci_excludes_full_removal=ci_excludes_full_removal(lo, hi, rem),
         )
         if k == "tau0amp":
-            # section 4c limb (b). Recorded here so the escalation is read off a committed rule
+            # Section 4c limb (b). Recorded here so the escalation is read off a committed rule
             # rather than reconstructed by eye once the numbers are on screen.
-            rec["escalates_4c_b"] = tau0_escalates(mean, lo, hi)
+            # CLAUSE 1 TAKES A1c's OWN RESIDUAL PULL (`x.mean()`), NOT the paired delta. 4c(b)
+            # says "|pull mean| > 0.30, the same magnitude the frozen gate applies to the gated
+            # channels" -- a property of A1c ALONE. Fed the delta (the round-4 defect), the rule
+            # escalated under a PERFECT REPAIR (delta ~ -0.49) and went silent on an A1c pull
+            # LARGER than A1's own (+0.75 -> delta ~ +0.26): the branch PI ruling 2 exists to
+            # close, reopened at the call site. Pinned by a CALL-SITE test, not a bare-function one.
+            rec["escalates_4c_b"] = tau0_escalates(float(x.mean()), lo, hi)
         chans[k] = rec
 
     return {
