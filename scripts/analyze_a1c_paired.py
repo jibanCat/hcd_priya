@@ -38,25 +38,37 @@ import sys
 import numpy as np
 
 # The six sites Option A made prior-predictive, with the DEPLOYED prior support used for the
-# in-bracket conjunct. The two f_res sites have Normal priors, which have no bracket: amendment 3
-# left "strictly inside their prior brackets" undefined for them, so they are checked as
-# FINITE and NON-ZERO instead (a pinned f_res truth is exactly 0, the prior centre), which is the
-# discriminating property. `kind` records which test applies.
+# in-bracket conjunct. The metal brackets are the deployed LogUniform support exactly
+# (closure_legb `metal_fnode_lo/hi` = 0.003/0.03, `metal_knode_lo/hi` = 1e-3/0.1) -- do not widen
+# them, or a truth the deployed prior cannot produce passes the conjunct. The two f_res sites have
+# Normal priors and so have no bracket: amendment 3 left "strictly inside their prior brackets"
+# undefined for them, so they are checked as FINITE and NON-ZERO (a pinned f_res truth is exactly
+# 0, the prior centre), which is the discriminating property. `kind` records which test applies.
 PRIOR_BRACKETS = {
-    "f_SiIII_eBOSS_z0": (1e-3, 3e-2, "bracket"),
-    "f_SiIII_eBOSS_z1": (1e-3, 3e-2, "bracket"),
+    "f_SiIII_eBOSS_z0": (0.003, 0.03, "bracket"),
+    "f_SiIII_eBOSS_z1": (0.003, 0.03, "bracket"),
     "k_SiIII_eBOSS_z0": (1e-3, 1e-1, "bracket"),
     "k_SiIII_eBOSS_z1": (1e-3, 1e-1, "bracket"),
     "f_res_amp":        (-np.inf, np.inf, "finite_nonzero"),
     "f_res_slope":      (-np.inf, np.inf, "finite_nonzero"),
 }
 
-# The defective arm's effect size on the MATCHED subset (A1 mocks 0-47), never a full-96 constant:
-# testing against the full-96 mean is the matched-control error the metals-off readout identified
-# as its single most important methodological point. n_s is None BY DESIGN — A1's n_s passed, so
-# there is no "defect magnitude" to test against; per PI ruling 1 it is still REPORTED, with its
-# delta and CI, as mechanism evidence.
-REFERENCE_DELTA = {"ns": None, "Ap": 0.4046, "tau0amp": 0.4916}
+# A1's own pull on the MATCHED subset (mocks 0-47), never a full-96 constant: testing against the
+# full-96 mean is the matched-control error the metals-off readout identified as its single most
+# important methodological point (full-96 would be Ap -0.4053, tau0amp +0.5988).
+A1_MATCHED_PULL = {"ns": -0.2532, "Ap": -0.4046, "tau0amp": +0.4916}
+
+# THE TWO HYPOTHESES THE CI IS READ AGAINST. `delta = A1c - A1`, so:
+#   FULL SURVIVAL of the defect  =>  A1c reproduces A1  =>  delta = 0
+#   FULL REMOVAL of the defect   =>  A1c pull is 0      =>  delta = -(A1's own pull)
+# Hence the full-removal delta is +0.4046 for A_p (whose pull was NEGATIVE) but **-0.4916** for
+# tau0_amp. The first cut of this module stored both as positive and called exclusion of that
+# value "excludes full survival"; for tau0_amp that flag was then True under EVERY hypothesis,
+# including exact full survival, so section 4c's pull limb could never fire -- the precise branch
+# PI ruling 2 was added to close. n_s is None BY DESIGN: the PI ruled that no hypothesis test is
+# run on n_s. That is NOT because no such quantity exists -- A1's matched n_s pull is -0.2532, a
+# perfectly well-defined magnitude -- and that value is context, never a test threshold.
+FULL_REMOVAL_DELTA = {"ns": None, "Ap": +0.4046, "tau0amp": -0.4916}
 
 CHANNELS = ("ns", "Ap", "tau0amp")
 
@@ -66,8 +78,48 @@ CHANNELS = ("ns", "Ap", "tau0amp")
 LL_TRUE_MIN_GAP = 100.0
 
 
+TAU0_PULL_ESCALATION = 0.30          # section 4c limb (b) clause 1, the frozen gate's magnitude
+
+
 class PairingError(RuntimeError):
     """The two arms are not the populations they claim to be. No number may be read."""
+
+
+# ------------------------------------------------------- the two CI comparisons, named for what
+# ------------------------------------------------------- they actually test
+
+def ci_excludes_full_survival(lo, hi):
+    """Does the paired 95% CI exclude `delta = 0`? Excluding 0 means the arms differ, i.e. **the
+    defect did NOT fully survive**. This is the comparison the disposition needs; a bare p-value
+    is not (amendment 3)."""
+    if not (np.isfinite(lo) and np.isfinite(hi)):
+        return False
+    return bool(lo > 0.0 or hi < 0.0)
+
+
+def ci_excludes_full_removal(lo, hi, full_removal_delta):
+    """Does the CI exclude the delta implied by COMPLETE removal of the defect? Excluding it means
+    full removal is not established. Reported alongside, never instead."""
+    if full_removal_delta is None or not (np.isfinite(lo) and np.isfinite(hi)):
+        return None
+    return bool(lo > full_removal_delta or hi < full_removal_delta)
+
+
+def tau0_escalates(pull_mean, ci_lo, ci_hi):
+    """PRE-REGISTRATION SECTION 4c LIMB (b), as code. The ARM escalates to at least row 3 if the
+    `tau0_amp` residual pull is materially non-zero:
+
+      clause 1: |pull mean| > 0.30 (the magnitude the frozen gate applies to the gated channels);
+      clause 2: the paired 95% CI FAILS TO EXCLUDE delta = 0, i.e. full survival of the defect is
+                not ruled out.
+
+    Both are conservative and can only ESCALATE. This is a CALIBRATION WARNING: `tau0_amp` is not
+    a gated channel, so it can produce neither a PASS nor a FAIL, it is not by itself a
+    cosmology-bias claim, and it licenses NO extension. Escalation means return to the PI.
+    """
+    if np.isfinite(pull_mean) and abs(float(pull_mean)) > TAU0_PULL_ESCALATION:
+        return True
+    return not ci_excludes_full_survival(ci_lo, ci_hi)
 
 
 # ------------------------------------------------------------------ loading
@@ -168,8 +220,11 @@ def verify_pairing(a1c, a1, expect_n=48):
 # ------------------------------------------------------------------ pulls
 
 def _tau0_amp(ladder, lx_c):
+    """amp = exp(intercept at zbar), the SAME convention as analyze_sbc_perleg.tau0_amp_slope --
+    verified bitwise identical on all 96 real A1 pkls. `lx_c` is unused here because the centred
+    regression makes the intercept exactly the mean of log(tau0); it is kept in the signature so
+    the two call sites read alike."""
     y = np.log(np.clip(np.asarray(ladder, float), 1e-8, None))
-    slope = float(np.sum(lx_c * (y - y.mean())) / np.sum(lx_c ** 2))
     return float(np.exp(y.mean()))
 
 
@@ -198,7 +253,7 @@ def channel_pulls(rec):
 
 # ------------------------------------------------------------------ the paired report
 
-def paired_report(a1c, a1, verify=False, expect_n=48):
+def paired_report(a1c, a1, verify=True, expect_n=48):
     """Paired delta (A1c - A1) per channel, with the 95% CI, the realized arm-to-arm correlation,
     and a distribution-free backup. Emits NO verdict.
 
@@ -238,20 +293,25 @@ def paired_report(a1c, a1, verify=False, expect_n=48):
         except ValueError:                      # all-zero differences
             wp = np.nan
         rho = float(np.corrcoef(x, y)[0, 1]) if n > 2 else np.nan
-        ref = REFERENCE_DELTA[k]
-        chans[k] = dict(
+        rem = FULL_REMOVAL_DELTA[k]
+        rec = dict(
             n=n, delta_mean=mean, delta_sd=sd, sem=float(sem) if n > 1 else np.nan,
             ci95_lo=float(lo), ci95_hi=float(hi), t=float(tstat), p=float(p),
             wilcoxon_p=wp, rho=rho,
             a1c_mean=float(x.mean()) if n else np.nan,
             a1_mean=float(y.mean()) if n else np.nan,
-            reference_delta=ref,
-            # "the arms differ"
-            ci_excludes_zero=bool(n > 1 and (lo > 0 or hi < 0)),
-            # "the defect did NOT fully survive" -- the comparison the disposition actually needs
-            ci_excludes_full_survival=(bool(n > 1 and (lo > ref or hi < ref))
-                                       if ref is not None else None),
+            a1_matched_pull=A1_MATCHED_PULL[k],
+            full_removal_delta=rem,
+            # delta = 0 excluded => the arms differ => the defect did NOT fully survive
+            ci_excludes_full_survival=ci_excludes_full_survival(lo, hi),
+            # the full-removal delta excluded => full removal is NOT established
+            ci_excludes_full_removal=ci_excludes_full_removal(lo, hi, rem),
         )
+        if k == "tau0amp":
+            # section 4c limb (b). Recorded here so the escalation is read off a committed rule
+            # rather than reconstructed by eye once the numbers are on screen.
+            rec["escalates_4c_b"] = tau0_escalates(mean, lo, hi)
+        chans[k] = rec
 
     return {
         "channels": chans,
@@ -272,16 +332,22 @@ def _fmt(rep):
          "A1c PAIRED REPAIR COMPARISON (A1c - A1) -- pre-registered 3d, NOT GATED",
          "=" * 92]
     for k, c in rep["channels"].items():
-        ref = "n/a (A1 passed; reported as mechanism evidence per PI ruling)" \
-            if c["reference_delta"] is None else f"{c['reference_delta']:+.4f}"
+        rem = ("n/a -- PI ruled NO hypothesis test on n_s; A1's matched pull "
+               f"{c['a1_matched_pull']:+.4f} is CONTEXT, never a threshold"
+               if c["full_removal_delta"] is None else f"{c['full_removal_delta']:+.4f}")
         L.append(f"  {k:8s} n={c['n']:3d}  delta={c['delta_mean']:+.4f} +/- {c['delta_sd']:.4f} "
                  f"(sem {c['sem']:.4f})  95% CI [{c['ci95_lo']:+.4f}, {c['ci95_hi']:+.4f}]")
         L.append(f"           t={c['t']:+.3f} p={c['p']:.4g}  Wilcoxon p={c['wilcoxon_p']:.4g}  "
                  f"realized rho={c['rho']:+.3f}")
         L.append(f"           A1c mean={c['a1c_mean']:+.4f}  A1 mean={c['a1_mean']:+.4f}  "
-                 f"reference delta={ref}")
-        L.append(f"           CI excludes 0 (arms differ): {c['ci_excludes_zero']}   "
-                 f"CI excludes full survival: {c['ci_excludes_full_survival']}")
+                 f"delta under FULL REMOVAL={rem}")
+        L.append(f"           CI excludes FULL SURVIVAL (delta=0, i.e. the arms differ): "
+                 f"{c['ci_excludes_full_survival']}")
+        L.append(f"           CI excludes FULL REMOVAL (full removal not established): "
+                 f"{c['ci_excludes_full_removal']}")
+        if "escalates_4c_b" in c:
+            L.append(f"           >>> section 4c limb (b) ESCALATES: {c['escalates_4c_b']}"
+                     "  (calibration warning; NOT a cosmology-bias claim; licenses NO extension)")
     L.append("")
     L.append("  " + rep["note"])
     return "\n".join(L)
@@ -296,7 +362,8 @@ if __name__ == "__main__":
     _v = verify_pairing(_a1c, _a1, expect_n=_n)
     print("\n-- NEGATIVE CONTROL (pre-registration 3d, amendment 3) --")
     for _k, _d in _v["conjuncts"].items():
-        print(f"  {'OK  ' if _d['ok'] else 'FAIL'}  {_k:20s} {_d['detail']}")
+        # detail strings describe the FAILURE mode, so only print them when the conjunct failed
+        print(f"  {'OK  ' if _d['ok'] else 'FAIL'}  {_k:20s} {'' if _d['ok'] else _d['detail']}")
     if not _v["ok"]:
         raise SystemExit("\nNEGATIVE CONTROL FAILED -- STOP, do not read a number.")
     print(_fmt(paired_report(_a1c, _a1, verify=True, expect_n=_n)))

@@ -39,10 +39,17 @@ prior-dominated; KS/DESI n_s should show real contraction.
 
 Usage:
   PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
-    scripts/analyze_sbc_perleg.py [ROOT] [OUT_PREFIX]
+    scripts/analyze_sbc_perleg.py ROOT OUT_PREFIX
 
-  ROOT        default /scratch/cavestru_root/cavestru1/mfho   (leg dirs prod_sbc_leg_<leg>)
-  OUT_PREFIX  default sbc_perleg     (figure -> notes 05_likelihood/<prefix>_gate.png)
+  ROOT        MANDATORY. Dir holding prod_sbc_leg_<leg> dirs/symlinks for the population you
+              intend to read. There is NO default: the old one pointed at stale June closure
+              populations that the ARM-P assertions do not catch.
+  OUT_PREFIX  MANDATORY. There is NO default: the old default 'sbc_perleg' names the COMMITTED
+              artifact of record sbc_perleg_gate.{json,png} in the notes repo, so omitting it
+              overwrote the certificate input. Use a distinct prefix unless you are deliberately
+              regenerating that artifact.
+  SBC_PERLEG_OUTDIR (env, optional)  redirects the artifact directory out of the notes repo.
+              Unset = the historical notes path, i.e. production behaviour is unchanged.
 You can also override individual leg dirs with LEG_DIRS below (constant) or env.
 """
 import pickle, glob, json, os, sys

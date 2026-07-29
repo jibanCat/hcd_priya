@@ -141,13 +141,13 @@ def test_pairing_requires_the_provenance_stamp_to_be_clear():
 def test_paired_report_covers_ns_Ap_AND_tau0amp():
     """PI ruling 1: n_s is IN. A1's n_s gate pass is not evidence the defect left n_s alone."""
     a1c, a1 = _arms(n=16)
-    rep = paired.paired_report(a1c, a1)
+    rep = paired.paired_report(a1c, a1, expect_n=16)
     assert set(rep["channels"]) == {"ns", "Ap", "tau0amp"}
 
 
 def test_paired_report_gives_delta_ci_rho_and_a_distribution_free_backup():
     a1c, a1 = _arms(n=16)
-    ch = paired.paired_report(a1c, a1)["channels"]["ns"]
+    ch = paired.paired_report(a1c, a1, expect_n=16)["channels"]["ns"]
     for k in ("delta_mean", "ci95_lo", "ci95_hi", "t", "p", "wilcoxon_p", "rho", "n"):
         assert k in ch, f"missing {k}"
     assert ch["n"] == 16
@@ -159,9 +159,9 @@ def test_paired_report_compares_the_CI_against_the_defect_magnitude_not_a_bare_p
     """Amendment 3: rejecting H0: delta=0 licenses 'the arms differ', NOT 'the failure does not
     reproduce'. The report must carry both comparisons explicitly."""
     a1c, a1 = _arms(n=16)
-    ch = paired.paired_report(a1c, a1)["channels"]["Ap"]
-    assert "reference_delta" in ch
-    assert "ci_excludes_zero" in ch and "ci_excludes_full_survival" in ch
+    ch = paired.paired_report(a1c, a1, expect_n=16)["channels"]["Ap"]
+    assert "full_removal_delta" in ch
+    assert "ci_excludes_full_survival" in ch and "ci_excludes_full_removal" in ch
 
 
 def test_paired_report_REFUSES_when_the_negative_control_fails():
@@ -170,15 +170,19 @@ def test_paired_report_REFUSES_when_the_negative_control_fails():
     a1 = {i: _mock(i, corrected=False, seed=1) for i in range(12)}
     noop = {i: _mock(i, corrected=False, seed=1) for i in range(12)}
     with pytest.raises(paired.PairingError):
-        paired.paired_report(noop, a1, verify=True, expect_n=12)
+        paired.paired_report(noop, a1, expect_n=12)
 
 
 def test_reference_deltas_are_the_MATCHED_subset_never_a_full_96_constant():
     """The campaign's single most important methodological point, re-checked here: A1c runs mocks
-    0-47, so the reference must be A1's own mocks-0-47 value."""
-    assert paired.REFERENCE_DELTA["Ap"] == pytest.approx(0.4046, abs=1e-4)
-    assert paired.REFERENCE_DELTA["tau0amp"] == pytest.approx(0.4916, abs=1e-4)
-    assert paired.REFERENCE_DELTA["ns"] is None, "n_s has no defective-arm reference; report only"
+    0-47, so the reference must be A1's own mocks-0-47 pull, NOT the full-96 value
+    (Ap -0.4053, tau0amp +0.5988)."""
+    assert paired.A1_MATCHED_PULL["Ap"] == pytest.approx(-0.4046, abs=1e-4)
+    assert paired.A1_MATCHED_PULL["tau0amp"] == pytest.approx(+0.4916, abs=1e-4)
+    assert paired.A1_MATCHED_PULL["ns"] == pytest.approx(-0.2532, abs=1e-4), (
+        "n_s DOES have a matched value; the PI ruled no hypothesis test, which is not the same "
+        "as the quantity not existing")
+    assert paired.FULL_REMOVAL_DELTA["ns"] is None, "no hypothesis test on n_s (PI ruling)"
 
 
 def test_paired_report_is_not_a_gate():
@@ -186,9 +190,117 @@ def test_paired_report_is_not_a_gate():
     report must declare itself ungated. (The prose note is exempt: it necessarily discusses A1's
     *gate pass*, which is the very thing PI ruling 1 says is not evidence of an unaffected n_s.)"""
     a1c, a1 = _arms(n=16)
-    rep = paired.paired_report(a1c, a1)
+    rep = paired.paired_report(a1c, a1, expect_n=16)
     assert rep["gated"] is False
     for k, c in rep["channels"].items():
         assert "verdict" not in c and "gate" not in c, f"{k} must carry no verdict"
         blob = " ".join(str(v) for v in c.values()).lower()
         assert "pass" not in blob and "fail" not in blob
+
+
+# ============================================ the CI semantics (re-review, 2026-07-29)
+# The first cut stored REFERENCE_DELTA["tau0amp"] = +0.4916 and called exclusion of it
+# "ci_excludes_full_survival". Both are wrong, and the error is direction-dependent:
+#
+#   delta = A1c - A1.  FULL SURVIVAL => delta = 0.  FULL REMOVAL => delta = -(A1 mean).
+#
+# A1's matched mocks-0-47 pulls are Ap -0.4046 and tau0amp +0.4916, so the full-REMOVAL delta is
+# +0.4046 for Ap but -0.4916 for tau0amp. Storing both as positive made the tau0amp flag True
+# under EVERY hypothesis, including exact full survival -- so section 4c's pull limb, the branch
+# PI ruling 2 was added to close, could never fire. Pin the BEHAVIOUR, not the constants.
+
+def _arm_with_pulls(vals, base, seed):
+    """An arm whose ns/Ap/tau0amp pulls are driven to prescribed means by shifting the truth."""
+    out = {}
+    rng = np.random.default_rng(seed)
+    for i, _ in enumerate(base):
+        d = base[i]
+        out[i] = d
+    return out
+
+
+def _synth_delta(a1_mean, target_delta, n=48, seed=0):
+    """Paired pull arrays (a1c, a1) with A1 mean `a1_mean` and paired delta `target_delta`."""
+    rng = np.random.default_rng(seed)
+    a1 = a1_mean + rng.normal(0, 0.95, n)
+    a1c = a1 + target_delta + rng.normal(0, 0.30, n)
+    return a1c, a1
+
+
+def _ci(a1c_v, a1_v):
+    from scipy import stats as st
+    d = np.asarray(a1c_v) - np.asarray(a1_v)
+    n = d.size
+    sem = d.std(ddof=1) / np.sqrt(n)
+    t = st.t.ppf(0.975, n - 1)
+    return float(d.mean() - t * sem), float(d.mean() + t * sem)
+
+
+def test_full_removal_delta_has_the_sign_of_MINUS_the_defect():
+    """The arithmetic the first cut got wrong. Under full removal A1c -> 0, so the paired delta is
+    minus A1's own pull: +0.4046 for A_p (whose pull was negative) and -0.4916 for tau0_amp."""
+    assert paired.FULL_REMOVAL_DELTA["Ap"] == pytest.approx(+0.4046, abs=1e-4)
+    assert paired.FULL_REMOVAL_DELTA["tau0amp"] == pytest.approx(-0.4916, abs=1e-4)
+    assert paired.FULL_REMOVAL_DELTA["ns"] is None
+
+
+def test_full_survival_is_flagged_NOT_excluded_on_both_channels():
+    """THE BRANCH 4c(b) EXISTS TO CATCH. If the defect fully survives the paired delta is ~0, so
+    the CI must NOT exclude full survival -- on tau0_amp as well as A_p. The first cut reported
+    'excluded' here for tau0_amp, i.e. false reassurance on the arm's highest-power statistic."""
+    for ch, a1_mean in (("Ap", -0.4046), ("tau0amp", +0.4916)):
+        lo, hi = _ci(*_synth_delta(a1_mean, 0.0, seed=7))
+        assert paired.ci_excludes_full_survival(lo, hi) is False, ch
+
+
+def test_full_removal_is_flagged_excluded_from_zero_on_both_channels():
+    """Under a working repair the delta is -(A1 mean), so the CI must EXCLUDE zero (the arms
+    differ / the defect did not fully survive) on both channels."""
+    for ch in ("Ap", "tau0amp"):
+        lo, hi = _ci(*_synth_delta(-paired.FULL_REMOVAL_DELTA[ch],
+                                   paired.FULL_REMOVAL_DELTA[ch], seed=11))
+        assert paired.ci_excludes_full_survival(lo, hi) is True, ch
+        assert paired.ci_excludes_full_removal(lo, hi, paired.FULL_REMOVAL_DELTA[ch]) is False, ch
+
+
+def test_report_carries_both_comparisons_with_unambiguous_names():
+    a1c, a1 = _arms(n=16)
+    ch = paired.paired_report(a1c, a1, expect_n=16)["channels"]["tau0amp"]
+    assert "ci_excludes_full_survival" in ch and "ci_excludes_full_removal" in ch
+    assert "full_removal_delta" in ch
+    assert ch["full_removal_delta"] == pytest.approx(-0.4916, abs=1e-4)
+
+
+def test_escalation_flag_fires_when_full_survival_is_not_excluded():
+    """Section 4c limb (b) clause 2, as code: escalate when the CI fails to exclude delta = 0."""
+    lo, hi = _ci(*_synth_delta(+0.4916, 0.0, seed=3))          # tau0 defect fully survives
+    assert paired.tau0_escalates(pull_mean=0.10, ci_lo=lo, ci_hi=hi) is True
+    lo, hi = _ci(*_synth_delta(+0.4916, -0.4916, seed=3))      # tau0 defect removed
+    assert paired.tau0_escalates(pull_mean=0.02, ci_lo=lo, ci_hi=hi) is False
+
+
+def test_escalation_flag_fires_on_a_materially_nonzero_pull_alone():
+    """Limb (b) clause 1 is independent: |pull mean| > 0.30 escalates even if the CI is clean."""
+    lo, hi = _ci(*_synth_delta(+0.4916, -0.4916, seed=5))
+    assert paired.tau0_escalates(pull_mean=0.45, ci_lo=lo, ci_hi=hi) is True
+    assert paired.tau0_escalates(pull_mean=-0.45, ci_lo=lo, ci_hi=hi) is True
+
+
+def test_metal_fnode_bracket_matches_the_DEPLOYED_prior():
+    """closure_legb metal_fnode_lo/hi are 0.003/0.03. The first cut used 1e-3, so a truth of
+    0.002 -- which the deployed LogUniform cannot produce -- passed the in-support conjunct."""
+    import importlib
+    CL = importlib.import_module("hcd_analysis.emulator.closure_legb")
+    d = CL.prod_norc_forward() if hasattr(CL, "prod_norc_forward") else None
+    lo, hi, kind = paired.PRIOR_BRACKETS["f_SiIII_eBOSS_z0"]
+    assert (lo, hi) == (0.003, 0.03) and kind == "bracket"
+    assert paired.PRIOR_BRACKETS["k_SiIII_eBOSS_z0"][:2] == (1e-3, 0.1)
+
+
+def test_paired_report_verifies_by_DEFAULT():
+    """'Refusal must not depend on the reader's discipline' -- so it must not depend on remembering
+    to pass verify=True either."""
+    a1 = {i: _mock(i, corrected=False, seed=1) for i in range(12)}
+    noop = {i: _mock(i, corrected=False, seed=1) for i in range(12)}
+    with pytest.raises(paired.PairingError):
+        paired.paired_report(noop, a1, expect_n=12)

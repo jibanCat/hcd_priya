@@ -29,6 +29,14 @@ cd /home/mfho/hcd_priya
 echo "=== A1c heavy test suites: start $(date) on $(hostname) ==="
 echo "=== HEAD: $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)) ==="
 
+# PRE-SUITE BASELINE for the clean-tree check below. The check compares the END state against
+# THIS, so it fires only on mutations the SUITE caused. Needed because hcd_priya_notes is a live
+# working-document repo that is legitimately dirty while records are being written -- without a
+# baseline the check would fail the job on edits no test made.
+BASE_CODE="$(git -C /home/mfho/hcd_priya status --porcelain --untracked-files=no || true)"
+BASE_NOTES="$(git -C /home/mfho/hcd_priya_notes status --porcelain --untracked-files=no || true)"
+[[ -n "$BASE_NOTES" ]] && echo "=== NOTE: notes repo already dirty at start ($(echo "$BASE_NOTES" | wc -l) files); the clean-tree check compares against this baseline ==="
+
 # NOTE on OMP_NUM_THREADS: test_legb_per_leg_alpha carries two KNOWN bitwise baselines that FAIL
 # under OMP_NUM_THREADS=1 and pass under default threads (documented env-sensitivity, not a
 # regression -- see the 2026-07-23 session record). It is deliberately NOT in this list.
@@ -72,19 +80,22 @@ echo "########## POST-SUITE CLEAN-TREE CHECK ##########"
 # control. OUT_PREFIX is now mandatory and SBC_PERLEG_OUTDIR redirects the artifact dir, but the
 # check is what proves it.
 for REPO in /home/mfho/hcd_priya /home/mfho/hcd_priya_notes; do
-  DIRTY="$(git -C "$REPO" status --porcelain --untracked-files=no)"
-  if [[ -n "$DIRTY" ]]; then
+  if [[ "$REPO" == *_notes ]]; then BASE="$BASE_NOTES"; else BASE="$BASE_CODE"; fi
+  NOW="$(git -C "$REPO" status --porcelain --untracked-files=no || true)"
+  # Only paths dirty NOW that were not dirty BEFORE are attributable to the suite.
+  NEW="$(comm -13 <(printf '%s\n' "$BASE" | sort) <(printf '%s\n' "$NOW" | sort) | sed '/^$/d')"
+  if [[ -n "$NEW" ]]; then
     echo "CLEAN-TREE CHECK: FAIL -- the test suite MUTATED tracked files in $REPO:" >&2
-    echo "$DIRTY" >&2
+    echo "$NEW" >&2
     echo "" >&2
-    echo "Per-file diffstat:" >&2
+    echo "Per-file diffstat (whole tree, baseline included for context):" >&2
     git -C "$REPO" diff --stat >&2
     echo "" >&2
     echo "Fix the test that writes into the repo (point it at tmp_path / SBC_PERLEG_OUTDIR)," >&2
     echo "do NOT just restore." >&2
     rc=1
   else
-    echo "CLEAN-TREE CHECK: PASS ($REPO -- no tracked file modified by the suite)"
+    echo "CLEAN-TREE CHECK: PASS ($REPO -- no tracked file modified BY THE SUITE)"
   fi
 done
 
