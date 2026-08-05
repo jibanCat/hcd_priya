@@ -81,14 +81,17 @@ def test_null_sd_refuses_L_at_or_below_3():
 def test_healthy_context_reproduces_the_recorded_probabilities():
     """Closed form (normal mean x chi-square sd, independent under normality). The 2026-07-29
     record quoted 0.8155/0.7814 from simulation; the exact values are 0.8147/0.7818 -- the
-    ~0.001 differences are that simulation's noise, re-verified 2026-08-05."""
+    ~0.001 differences are that simulation's noise. Tail values are at the EXACT decisive
+    threshold sd* = 1.033166 (0.3489/0.3952), not the rounded 1.0332 (0.3488/0.3951): the
+    round-6 panel caught the correction-of-record block quoting the rounded-threshold digits
+    while the code evaluates at sd*. Anchors here are the code's own convention, tight."""
     an = _analyzer()
     c1 = an.healthy_arm_context(48, 1.0)
-    assert c1["p_joint_gate_bias0"] == pytest.approx(0.8147, abs=5e-4)
-    assert c1["p_sd_gt_decisive"] == pytest.approx(0.3488, abs=5e-4)
+    assert c1["p_joint_gate_bias0"] == pytest.approx(0.81474, abs=2e-4)
+    assert c1["p_sd_gt_decisive"] == pytest.approx(0.34891, abs=2e-4)
     c2 = an.healthy_arm_context(48, 1.0125)
-    assert c2["p_joint_gate_bias0"] == pytest.approx(0.7818, abs=5e-4)
-    assert c2["p_sd_gt_decisive"] == pytest.approx(0.3951, abs=5e-4)
+    assert c2["p_joint_gate_bias0"] == pytest.approx(0.78177, abs=2e-4)
+    assert c2["p_sd_gt_decisive"] == pytest.approx(0.39519, abs=2e-4)
 
 
 def test_healthy_context_carries_the_decisive_sd_threshold():

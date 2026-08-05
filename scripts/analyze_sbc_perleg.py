@@ -426,13 +426,16 @@ def finite_L_null_sd(L_list):
 def healthy_arm_context(n_mocks, sigma_null):
     """Healthy-arm pass probabilities under the corrected null -- INTERPRETATION CONTEXT ONLY,
     never a gate criterion. Closed form: the arm mean is normal(0, sigma^2/N) and
-    (N-1)S^2/sigma^2 is chi-square(N-1), independent under normality; verified against the
-    exact t-based null to <0.01 (test_finite_l_null). At N=48: sigma 1.0 -> joint 0.8147 /
-    P(S>1.0332) 0.3488; sigma 1.0125 -> 0.7818 / 0.3951 (the 2026-07-29 record's
-    0.8155/0.7814 were the same quantities with ~0.001 simulation noise).
+    (N-1)S^2/sigma^2 is chi-square(N-1), independent under normality. Verified against the
+    exact t-based null twice: the in-suite pin (test_finite_l_null, homogeneous L=150, 20k
+    arms, abs tol 0.015) and the round-6 panel's independent 400k-arm simulation on A1's REAL
+    heterogeneous L profile (agreement <= 0.003 on every quantity). At N=48: sigma 1.0 ->
+    joint 0.8147 / P(S > sd*) 0.3489; sigma 1.0125 -> 0.7818 / 0.3952, all evaluated at the
+    EXACT sd* below, not the rounded 1.0332 (the 2026-07-29 record's 0.8155/0.7814/0.348/0.395
+    were the same quantities with ~0.001 simulation noise).
 
     sd_decisive_max = 0.30*sqrt(N)/t(0.975,N-1): above it a decisive pass is arithmetically
-    impossible (1.0332 at N=48)."""
+    impossible (1.033166 at N=48)."""
     from scipy import stats as st
     n = int(n_mocks)
     if n < 2 or not (np.isfinite(sigma_null) and sigma_null > 0):

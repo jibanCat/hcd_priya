@@ -56,7 +56,8 @@ ROW_MEANING = {
     3: "a pathology survives the correction: escalate; do not treat as a pass",
     4: "the correction did not fix it (the PI-#9-decision-4 reopening condition)",
     5: "FAIL per the frozen gate, resolution stated; PI decision required",
-    6: "DISPERSION-ONLY FAIL (PI Q2): verbatim record; NOT evidence of mean bias",
+    6: "DISPERSION-ONLY FAIL (PI Q2): verbatim record; NOT evidence of mean bias; "
+       "returned for PI disposition, no post-hoc threshold reinterpretation",
     7: "decisive pass: surprising (sec 2); double-check for an sd anomaly first",
 }
 
@@ -175,10 +176,12 @@ def dispose(leg, paired, expect_n=48, allow_partial=False):
         rows[ch] = channel_row(pull_mean=mean, pull_sd=sd, rank_ks_p=ks_p,
                                qual=quals[ch], no_repeat=no_rep)
 
-    # section 4c, both limbs: (a) A1c's OWN tau0_amp ranks; (b) the paired-report pull limb
+    # section 4c, both limbs: (a) A1c's OWN tau0_amp ranks; (b) the paired-report pull limb.
+    # HARD INDEX, not .get (round-6 panel): this limb has carried a defect three rounds running,
+    # and a schema drift that renames the key must be a KeyError here, never a quiet False.
     tau_ks = leg["rank_uniformity"]["tau0amp"]["ks_p"]
     limb_a = float(tau_ks) <= RANK_ALPHA
-    limb_b = bool(paired["channels"]["tau0amp"].get("escalates_4c_b"))
+    limb_b = bool(paired["channels"]["tau0amp"]["escalates_4c_b"])
     tau0 = {"limb_a_ranks": limb_a, "limb_b_pull": limb_b, "ks_p": float(tau_ks)}
 
     arm = arm_rollup(rows, uni, limb_a or limb_b)

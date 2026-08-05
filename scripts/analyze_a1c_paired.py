@@ -86,12 +86,48 @@ FROZEN_RUN_CFG = {
     "leg": "eBOSS",
     "sample_res": True,
     "f_res_amp_sigma": 0.05,
+    # FORWARD DISCRIMINATORS (round-6 panel, 2026-08-05). The runner's entry refusals do NOT
+    # block --res-corr-on or --cemu-variant fixed, and either changes the A1c forward/covariance
+    # while leaving truth_vec bit-identical -- a silently mixed-forward comparison that every
+    # other conjunct passes. All ten keys verified present with exactly these values on ALL 96
+    # real A1 pkls (2026-08-05); an ABSENT key fails via the sentinel below, so `ks_kmax: None`
+    # is a real pin, not a vacuous get()-default. (`diag_no_sample_metals` and the selfdraw
+    # flags are deliberately NOT here: the runner POPS default-False keys for pooling
+    # compatibility, so A1 pkls lack them; conjunct 4 covers A1c's selfdraw flags.)
+    "res_corr_on": False,
+    "cemu_variant": "current",
+    "leg_a": True,
+    "fold": 0,
+    "tau0_prior_sigma": 0.0,
+    "subdla_truth_boost": 1.0,
+    "single_member": False,
+    "hcd_parameterization": "alpha_pivot_powerlaw_v1",
+    "ks_kmax": None,
+    "amp_sigma": 0.0,
 }
 
-# Quantified in advance (amendment 3 left "materially different" undefined). The observed gap on
-# mock 0 is |-1931.72 - (-349.93)| = 1581.8, so 100 sits far below the real signal and far above
-# any numerical wobble.
-LL_TRUE_MIN_GAP = 100.0
+_ABSENT = object()                   # sentinel: an absent pinned run_cfg key FAILS, never passes
+
+# RECALIBRATED BY AMENDMENT 6 (2026-08-05, round-6 panel MUST-FIX). The original 100.0 was
+# anchored on ONE draw (smoke mock 0: gap 1581.8 at f_SiIII_z0 = 0.0260, the 94th prior
+# percentile). The gap tracks the metal amplitude roughly as ~f^2 (measured log-log slope
+# 0.8-0.9, r 0.55, material f_res contribution) while the truth law is flat-log over a factor
+# 10 in f, so the healthy-arm gap population spans two orders of magnitude. Measured EXACTLY
+# before launch (the 48 truth draws are seed-determined; the real runner re-run with tiny
+# sampling, ll_true being computed BEFORE NUTS, validated by reproducing A1's stored ll_true
+# BITWISE flags-off): healthy minimum 38.3 (mock 45), median 245.0, SIX mocks below the old
+# 100 (5/9/14/40/45/46: 95.4/54.9/83.5/60.6/38.3/45.9) -- at 100 the control STOPs this exact
+# arm with CERTAINTY. RETENTION RULE, fixed at the 40-of-48 interim BEFORE the final numbers:
+# 10.0 iff the final minimum exceeds 30, else minimum/3; the final minimum 38.3 > 30, so 10.0
+# stands by the pre-fixed rule (~3.8x margin), anchored to the MEASURED minimum, never the
+# scaling. A TRUE silent no-op recomputes the same ll_true on bit-identical data (gap exactly
+# 0.0), so full power against the defect class this conjunct exists to catch is retained.
+# SCOPE (narrowed, honestly): this catches the TOTAL silent no-op only. A PARTIAL propagation
+# defect (e.g. metals recorded-but-unpropagated) is not separable by any per-mock gap
+# threshold, is NOT caught by conjunct 3 (which checks the RECORDED truth) nor by the
+# flag-derived conjunct-6 stamp; the genuine cover is the BINDING 5c-bis repaired-sector
+# pull/rank statistics plus the paired deltas.
+LL_TRUE_MIN_GAP = 10.0
 
 
 TAU0_PULL_ESCALATION = 0.30          # section 4c limb (b) clause 1, the frozen gate's magnitude
@@ -102,10 +138,14 @@ FRES_PRIOR_SIGMA = {"f_res_amp": 0.05, "f_res_slope": 0.5}
 
 # Across-mock KS threshold (PI 3d.4, closing handoff 3b item 3). This is a GROSS-DEFECT
 # TRIPWIRE, not a calibration test: it exists to catch an arm whose truths were not drawn from
-# the deployed laws at all (reused, pinned, or a wrong distribution), for which the KS p is
-# astronomically small. 0.001 per site keeps the family false-STOP over the six sites at ~0.6%
-# while retaining essentially unit power against the defect class. The calibration EVIDENCE for
-# the repaired sectors is 5c-bis (pull/rank statistics), never this conjunct.
+# the deployed laws at all. 0.001 per site keeps the family false-STOP over the six sites at
+# ~0.6% (measured 0.52%). POWER, measured at n=48 (round-6 panel): ~1.0 against reuse, pinning,
+# edge-clustering and gross wrong-law; PARTIAL against subtle same-support wrong laws --
+# linear-uniform on the f bracket 0.76 per site (a flat-vs-flatlog code defect hits all four
+# bracket sites at once, combined ~1.0), a wrong f_res WIDTH only ~0.20 -- and that is the
+# 2x-width case; at 1.5x it is ~0.03 and at 1.25x ~0.006 (also surfaced by conjunct 9's stamp
+# and by the 5c-bis pull/rank statistics, which remain the calibration evidence). Never quote
+# this conjunct as unit-power against everything.
 KS_PRIOR_ALPHA = 1e-3
 
 
@@ -238,11 +278,16 @@ def verify_pairing(a1c, a1, expect_n=48):
     c["a1c_flags"] = {"ok": not flag_bad,
                       "detail": f"metal_selfdraw/fres_selfdraw not both True on {flag_bad[:5]}"}
 
-    ll_bad = [m for m in common
-              if not abs(float(a1c[m]["ll_true"]) - float(a1[m]["ll_true"])) > LL_TRUE_MIN_GAP]
+    gaps = {m: abs(float(a1c[m]["ll_true"]) - float(a1[m]["ll_true"])) for m in common}
+    ll_bad = [m for m in common if not gaps[m] > LL_TRUE_MIN_GAP]
+    garr = np.array([gaps[m] for m in common]) if common else np.array([np.nan])
     c["ll_true_moved"] = {"ok": not ll_bad,
                           "detail": f"|dll_true| <= {LL_TRUE_MIN_GAP} on {ll_bad[:5]} "
-                                    "-- truth recorded but seemingly not PROPAGATED"}
+                                    "-- truth recorded but seemingly not PROPAGATED",
+                          # the realized margin, recorded so the readout shows how far the
+                          # weakest mock sits above the recalibrated threshold (amendment 6)
+                          "min_gap": float(np.nanmin(garr)),
+                          "median_gap": float(np.nanmedian(garr))}
 
     stamp_bad = [m for m in a1c
                  if (a1c[m].get("truth_site_semantics") or {}).get("not_self_drawn") != []]
@@ -298,8 +343,10 @@ def verify_pairing(a1c, a1, expect_n=48):
         for m in arm:
             rc = arm[m].get("run_cfg") or {}
             for key, want in FROZEN_RUN_CFG.items():
-                if rc.get(key) != want:
-                    cfg_bad.append((arm_name, m, key, rc.get(key)))
+                got = rc.get(key, _ABSENT)
+                if got is _ABSENT or got != want:
+                    cfg_bad.append((arm_name, m, key,
+                                    "<ABSENT>" if got is _ABSENT else got))
     c["run_cfg_frozen"] = {
         "ok": not cfg_bad,
         "detail": f"{len(cfg_bad)} frozen-constant mismatches, e.g. {cfg_bad[:4]} -- one or "
@@ -457,10 +504,17 @@ if __name__ == "__main__":
     _a1 = load_arm(sys.argv[2])
     _n = int(sys.argv[3]) if len(sys.argv) > 3 else 48
     _v = verify_pairing(_a1c, _a1, expect_n=_n)
-    print("\n-- NEGATIVE CONTROL (pre-registration 3d, amendment 3) --")
+    print("\n-- NEGATIVE CONTROL (pre-registration 3d, amendments 3+5+6) --")
     for _k, _d in _v["conjuncts"].items():
         # detail strings describe the FAILURE mode, so only print them when the conjunct failed
         print(f"  {'OK  ' if _d['ok'] else 'FAIL'}  {_k:20s} {'' if _d['ok'] else _d['detail']}")
+        if _k == "ll_true_moved" and "min_gap" in _d:
+            # the realized margin over the amendment-6 threshold, ALWAYS printed (round-6
+            # verification: recording it without surfacing it repeats the computed-then-
+            # discarded defect class)
+            print(f"        realized |dll_true|: min={_d['min_gap']:.1f} "
+                  f"median={_d['median_gap']:.1f} vs threshold {LL_TRUE_MIN_GAP} "
+                  f"(measured healthy min 38.3)")
     if not _v["ok"]:
         raise SystemExit("\nNEGATIVE CONTROL FAILED -- STOP, do not read a number.")
     print(_fmt(paired_report(_a1c, _a1, verify=True, expect_n=_n)))

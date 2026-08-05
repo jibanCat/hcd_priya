@@ -74,9 +74,11 @@ def _mock(idx, *, corrected, seed=0, truth_shift=None, L=40, reuse_truths=False,
                   "truth": float(np.nan) if not corrected else float(drawn)}
     cfg = dict(runner.RUN_CFG_DEFAULTS, survey="eBOSS", leg="eBOSS",
                metal_prior="flatlog2node", metal_selfdraw=corrected, fres_selfdraw=corrected,
-               # the frozen constants conjunct 9 (PI 3d.4 / handoff 3b item 4) checks on BOTH arms
+               # the frozen constants conjunct 9 (PI 3d.4 / handoff 3b item 4) checks on BOTH
+               # arms; res_corr_on defaults True in RUN_CFG_DEFAULTS but both real arms stamp
+               # the NORC value False (verified on all 96 A1 pkls, 2026-08-05)
                hcd_prior_signature=paired.FROZEN_RUN_CFG["hcd_prior_signature"],
-               sample_res=True, f_res_amp_sigma=0.05)
+               sample_res=True, f_res_amp_sigma=0.05, res_corr_on=False)
     return dict(names=list(NAMES), truth_vec=truth, draws=draws, L=L, n_div=0,
                 sim=f"s{idx}", run_cfg=cfg, sites_extra=se,
                 ll_true=(-1931.7 if corrected else -349.9),
@@ -146,6 +148,27 @@ def test_pairing_requires_materially_different_ll_true():
         d["ll_true"] = -349.9                          # truth recorded but never propagated
     v = paired.verify_pairing(a1c, a1, expect_n=12)
     assert v["ok"] is False and v["conjuncts"]["ll_true_moved"]["ok"] is False
+
+
+def test_ll_gap_threshold_admits_the_MEASURED_weakest_healthy_mock():
+    """ROUND-6 PANEL MUST-FIX. The old threshold (100, calibrated on ONE near-ceiling draw)
+    STOPs the actual seed-determined arm with CERTAINTY: the exact 48-mock healthy gap
+    population has minimum 38.3 (mock 45), with SIX mocks (5/9/14/40/45/46) below 100. A gap
+    at the measured weakest-healthy scale must PASS; a tiny gap (partial/no propagation) and
+    the exact-zero no-op must still FAIL."""
+    a1c, a1 = _arms(n=12)
+    for d in a1c.values():
+        d["ll_true"] = -349.9 - 38.3                   # the measured weakest-healthy scale
+    v = paired.verify_pairing(a1c, a1, expect_n=12)
+    assert v["conjuncts"]["ll_true_moved"]["ok"] is True, \
+        "a healthy low-f mock must not STOP the arm"
+    assert v["conjuncts"]["ll_true_moved"]["min_gap"] == pytest.approx(38.3)
+
+    a1c, a1 = _arms(n=12)
+    for d in a1c.values():
+        d["ll_true"] = -349.9 - 5.0                    # below threshold: not a healthy signal
+    v = paired.verify_pairing(a1c, a1, expect_n=12)
+    assert v["conjuncts"]["ll_true_moved"]["ok"] is False
 
 
 def test_pairing_requires_the_provenance_stamp_to_be_clear():
@@ -378,14 +401,63 @@ def test_escalation_flag_fires_on_a_materially_nonzero_pull_alone():
 
 
 def test_metal_fnode_bracket_matches_the_DEPLOYED_prior():
-    """closure_legb metal_fnode_lo/hi are 0.003/0.03. The first cut used 1e-3, so a truth of
-    0.002 -- which the deployed LogUniform cannot produce -- passed the in-support conjunct."""
+    """The module's brackets and prior widths must be pinned to the DEPLOYED source, not to
+    literals that agree today (round-6 panel: the first cut of this test compared literal to
+    literal through a dead variable, so a closure_legb drift -- F_RES_SLOPE_SIGMA is covered by
+    NO signature and NO run_cfg stamp -- would silently make the KS conjunct test a law the
+    truths were not drawn from)."""
     import importlib
     CL = importlib.import_module("hcd_analysis.emulator.closure_legb")
-    d = CL.prod_norc_forward() if hasattr(CL, "prod_norc_forward") else None
+    fd = CL.LegBCtx._field_defaults
     lo, hi, kind = paired.PRIOR_BRACKETS["f_SiIII_eBOSS_z0"]
-    assert (lo, hi) == (0.003, 0.03) and kind == "bracket"
-    assert paired.PRIOR_BRACKETS["k_SiIII_eBOSS_z0"][:2] == (1e-3, 0.1)
+    assert kind == "bracket"
+    assert (lo, hi) == (fd["metal_fnode_lo"], fd["metal_fnode_hi"]) == (0.003, 0.03)
+    assert paired.PRIOR_BRACKETS["k_SiIII_eBOSS_z0"][:2] \
+        == (fd["metal_knode_lo"], fd["metal_knode_hi"]) == (1e-3, 0.1)
+    # the f_res laws: slope width from the module constant, amp width from the eBOSS deployed
+    # forward config AND the frozen run-cfg pin -- all three must be one value
+    assert paired.FRES_PRIOR_SIGMA["f_res_slope"] == CL.F_RES_SLOPE_SIGMA == 0.5
+    assert paired.FRES_PRIOR_SIGMA["f_res_amp"] \
+        == CL.prod_forward_config("eBOSS")["f_res_amp_sigma"] \
+        == paired.FROZEN_RUN_CFG["f_res_amp_sigma"] == 0.05
+
+
+def test_run_cfg_frozen_pins_the_forward_discriminators():
+    """Round-6 panel (Lya lens): the runner's entry refusals do NOT block --res-corr-on or
+    --cemu-variant fixed, and either changes the A1c forward/covariance while leaving truth_vec
+    bit-identical -- a silently mixed-forward comparison that every other conjunct passes. The
+    stamped keys must be pinned, on BOTH arms, and an ABSENT pinned key must fail (a popped or
+    renamed stamp is a schema drift, not a pass)."""
+    a1c, a1 = _arms(n=12)
+    for d in a1.values():
+        d["run_cfg"] = dict(d["run_cfg"], res_corr_on=True)
+    v = paired.verify_pairing(a1c, a1, expect_n=12)
+    assert v["ok"] is False and v["conjuncts"]["run_cfg_frozen"]["ok"] is False
+
+    a1c, a1 = _arms(n=12)
+    for d in a1c.values():
+        d["run_cfg"] = dict(d["run_cfg"], cemu_variant="fixed")
+    v = paired.verify_pairing(a1c, a1, expect_n=12)
+    assert v["ok"] is False and v["conjuncts"]["run_cfg_frozen"]["ok"] is False
+
+    a1c, a1 = _arms(n=12)
+    for d in a1c.values():
+        rc = dict(d["run_cfg"]); rc.pop("res_corr_on")
+        d["run_cfg"] = rc
+    v = paired.verify_pairing(a1c, a1, expect_n=12)
+    assert v["conjuncts"]["run_cfg_frozen"]["ok"] is False, \
+        "an absent pinned key must FAIL, not read as None-equals-nothing"
+
+    # THE load-bearing sentinel case (round-6 verification): ks_kmax is pinned to None, so a
+    # bare rc.get(key) != want reads an ABSENT ks_kmax as None == None and passes -- reverting
+    # the sentinel to .get() makes exactly this pin vacuous, and only this case catches it
+    a1c, a1 = _arms(n=12)
+    for d in a1c.values():
+        rc = dict(d["run_cfg"]); rc.pop("ks_kmax")
+        d["run_cfg"] = rc
+    v = paired.verify_pairing(a1c, a1, expect_n=12)
+    assert v["conjuncts"]["run_cfg_frozen"]["ok"] is False, \
+        "an absent None-pinned key must FAIL: get()-default None must not satisfy the pin"
 
 
 def test_paired_report_verifies_by_DEFAULT():

@@ -72,6 +72,11 @@ def test_row1_requires_survival_excluded_AND_removal_not_excluded():
     assert disp.channel_row(**base, no_repeat=NR(False, True)) == 2
     assert disp.channel_row(**base, no_repeat=NR(True, None)) == 2, \
         "an unreadable full-removal CI must not be treated as 'not excluded'"
+    # round-6 panel: the SURVIVAL flag's None cases were untested, so `is True` could mutate to
+    # `is not False` (an unreadable CI read as satisfied -> row 1) without any test failing
+    assert disp.channel_row(**base, no_repeat=NR(None, False)) == 2, \
+        "an unreadable full-survival CI must not count as excluded"
+    assert disp.channel_row(**base, no_repeat=NR(None, True)) == 2
 
 
 def test_ns_with_no_hypothesis_test_takes_row1_on_pass_uniform_boundary():
@@ -284,6 +289,32 @@ def test_dispose_REFUSES_on_gate_string_inconsistency():
     leg["gate_ns"] = "FAIL"                        # contradicts pulls (-0.10, 1.00)
     with pytest.raises(ValueError):
         disp.dispose(leg, _paired(), expect_n=48)
+
+
+def test_dispose_fails_LOUD_on_a_missing_escalation_key():
+    """Round-6 panel: `.get("escalates_4c_b")` defaulted a missing key to quiet (False) on
+    exactly the thrice-defective escalation limb; schema drift in the paired report would then
+    silently disable limb (b). Absence must be a KeyError, not a non-escalation."""
+    p = _paired()
+    del p["channels"]["tau0amp"]["escalates_4c_b"]
+    with pytest.raises(KeyError):
+        disp.dispose(_leg(), p, expect_n=48)
+
+
+def test_frozen_thresholds_match_the_analyzer_single_authority():
+    """Round-6 panel: the frozen gate constants now exist in two copies (this module and
+    analyze_sbc_perleg.gate_cosmo's defaults). The cross-check in dispose() only catches a
+    divergence for pulls that straddle the two values; pin the copies equal outright."""
+    import ast
+    path = "/home/mfho/hcd_priya/scripts/analyze_sbc_perleg.py"
+    src = open(path).read()
+    tree = ast.parse(src, filename=path)
+    keep = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom, ast.FunctionDef))]
+    ns = {"__name__": "analyze_sbc_perleg_defs"}
+    exec(compile(ast.Module(body=keep, type_ignores=[]), path, "exec"), ns)
+    gate_mean, gate_std = ns["gate_cosmo"].__defaults__
+    assert (disp.GATE_MEAN, disp.GATE_SD) == (gate_mean, gate_std) == (0.3, 1.1)
+    assert "ks_p > 0.05" in src and disp.RANK_ALPHA == 0.05
 
 
 def test_dispose_never_emits_extension_or_promotion_language():
