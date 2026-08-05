@@ -35,7 +35,27 @@ NAMES = (["ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2", "hireionz",
 BRACKETS = paired.PRIOR_BRACKETS
 
 
-def _mock(idx, *, corrected, seed=0, truth_shift=None, L=40):
+def _draw_site_truth(nm, rng, *, reuse=False, wrong_prior=False):
+    """A per-mock site truth from the DEPLOYED law (LogUniform for the metal nodes, Normal(0,
+    0.05/0.5) for f_res_amp/slope). `reuse` reproduces the pre-2026-08 fixture -- one value per
+    site reused across every mock, which the 3b-item-3 defect showed passed all six conjuncts.
+    `wrong_prior` draws DISTINCT values strictly inside the brackets but from a plainly wrong
+    law, so ONLY the distributional conjunct can catch it."""
+    lo, hi, kind = BRACKETS[nm]
+    if reuse:
+        return (lo + hi) / 2.0 if kind == "bracket" else 0.0049
+    if kind == "bracket":
+        if wrong_prior:
+            return float(rng.uniform(0.97 * hi, 0.999 * hi))     # in-bracket, wrong law
+        return float(np.exp(rng.uniform(np.log(lo), np.log(hi))))
+    sig = 0.05 if nm == "f_res_amp" else 0.5
+    if wrong_prior:
+        return float(rng.normal(0.98 * sig, 1e-4 * sig))          # in-support, wrong law
+    return float(rng.normal(0.0, sig))
+
+
+def _mock(idx, *, corrected, seed=0, truth_shift=None, L=40, reuse_truths=False,
+          wrong_prior=False):
     """One pkl-shaped record. `corrected` decides whether the six repaired truths are DRAWN
     (A1c) or `nan` (A1 -- and also exactly what a silent no-op produces)."""
     rng = np.random.default_rng(1000 + idx)
@@ -49,14 +69,14 @@ def _mock(idx, *, corrected, seed=0, truth_shift=None, L=40):
     draws = truth[None, :] + dr.normal(0, 0.05, (L, len(NAMES)))
     se = {}
     for nm in SIX:
-        lo, hi, kind = BRACKETS[nm]
-        # a DRAWN truth: mid-support for the bracketed metal nodes, a finite NON-ZERO value for
-        # the two Normal-prior f_res sites (whose pinned value is exactly the prior centre 0)
-        drawn = (lo + hi) / 2.0 if kind == "bracket" else 0.0049
+        drawn = _draw_site_truth(nm, dr, reuse=reuse_truths, wrong_prior=wrong_prior)
         se[nm] = {"draws": dr.normal(0.01, 0.002, L),
                   "truth": float(np.nan) if not corrected else float(drawn)}
     cfg = dict(runner.RUN_CFG_DEFAULTS, survey="eBOSS", leg="eBOSS",
-               metal_prior="flatlog2node", metal_selfdraw=corrected, fres_selfdraw=corrected)
+               metal_prior="flatlog2node", metal_selfdraw=corrected, fres_selfdraw=corrected,
+               # the frozen constants conjunct 9 (PI 3d.4 / handoff 3b item 4) checks on BOTH arms
+               hcd_prior_signature=paired.FROZEN_RUN_CFG["hcd_prior_signature"],
+               sample_res=True, f_res_amp_sigma=0.05)
     return dict(names=list(NAMES), truth_vec=truth, draws=draws, L=L, n_div=0,
                 sim=f"s{idx}", run_cfg=cfg, sites_extra=se,
                 ll_true=(-1931.7 if corrected else -349.9),
@@ -171,6 +191,77 @@ def test_paired_report_REFUSES_when_the_negative_control_fails():
     noop = {i: _mock(i, corrected=False, seed=1) for i in range(12)}
     with pytest.raises(paired.PairingError):
         paired.paired_report(noop, a1, expect_n=12)
+
+
+# ------------------------------------------- the across-mock distributional control (PI 3d.4,
+# ------------------------------------------- closing handoff 3b items 3 and 4)
+
+def test_THE_DEFECT_reused_truths_are_REJECTED_across_mocks():
+    """THE 3b-ITEM-3 SCENARIO. An arm that drew each of the six truths ONCE and reused it on
+    every mock passed all six per-mock conjuncts -- demonstrated by this module's own
+    pre-2026-08 fixture, which did exactly that. Reuse is not a prior-predictive draw; the
+    distinctness conjunct must fire."""
+    a1 = {i: _mock(i, corrected=False, seed=1) for i in range(12)}
+    a1c = {i: _mock(i, corrected=True, seed=2, reuse_truths=True) for i in range(12)}
+    v = paired.verify_pairing(a1c, a1, expect_n=12)
+    assert "truths_distinct" in v["conjuncts"], "the distinctness conjunct must exist"
+    assert v["ok"] is False
+    assert v["conjuncts"]["truths_distinct"]["ok"] is False
+
+
+def test_wrong_prior_draws_are_REJECTED_by_the_KS_conjunct():
+    """Distinct, finite, strictly in-bracket -- but from a plainly wrong law. Only an
+    across-mock distributional test can catch this; the per-mock conjuncts all pass."""
+    a1 = {i: _mock(i, corrected=False, seed=1) for i in range(12)}
+    a1c = {i: _mock(i, corrected=True, seed=2, wrong_prior=True) for i in range(12)}
+    v = paired.verify_pairing(a1c, a1, expect_n=12)
+    assert "truths_match_prior" in v["conjuncts"], "the KS conjunct must exist"
+    assert v["conjuncts"]["truths_distinct"]["ok"] is True, "distinctness alone cannot catch it"
+    assert v["ok"] is False
+    assert v["conjuncts"]["truths_match_prior"]["ok"] is False
+
+
+def test_healthy_arms_drawn_from_the_deployed_laws_pass_both_new_conjuncts():
+    a1c, a1 = _arms(n=12)
+    v = paired.verify_pairing(a1c, a1, expect_n=12)
+    assert v["ok"] is True, v
+    assert v["conjuncts"]["truths_distinct"]["ok"] is True
+    assert v["conjuncts"]["truths_match_prior"]["ok"] is True
+
+
+def test_run_cfg_frozen_constants_are_checked_on_BOTH_arms():
+    """THE 3b-ITEM-4 SCENARIO. Every paired delta is measured AGAINST A1, and section 5c
+    documents a near-perfect N=48 decoy population -- yet only A1c's run_cfg was validated. A1
+    with a wrong prior signature must now refuse."""
+    a1c, a1 = _arms(n=12)
+    for d in a1.values():
+        d["run_cfg"] = dict(d["run_cfg"], hcd_prior_signature="deadbeef" + "0" * 56)
+    v = paired.verify_pairing(a1c, a1, expect_n=12)
+    assert "run_cfg_frozen" in v["conjuncts"], "the frozen-constants conjunct must exist"
+    assert v["ok"] is False
+    assert v["conjuncts"]["run_cfg_frozen"]["ok"] is False
+
+
+def test_run_cfg_frozen_catches_a_mismatched_f_res_sigma_on_a1c():
+    """The DESI width (0.02) on an eBOSS arm is a different fitting prior, not a variant."""
+    a1c, a1 = _arms(n=12)
+    for d in a1c.values():
+        d["run_cfg"] = dict(d["run_cfg"], f_res_amp_sigma=0.02)
+    v = paired.verify_pairing(a1c, a1, expect_n=12)
+    assert v["ok"] is False
+    assert v["conjuncts"]["run_cfg_frozen"]["ok"] is False
+
+
+def test_frozen_signature_matches_the_freeze_artifact():
+    """FROZEN_RUN_CFG is only trustworthy if it is pinned to the artifact of record: the
+    hcd_prior_signature it asserts must be the one the committed analysis.lock carries (the
+    freeze cut c7eb371), and the lock must carry exactly ONE such prior signature."""
+    import re as _re
+    lock = open("/home/mfho/hcd_priya/analysis.lock").read()
+    sigs = set(_re.findall(r"\b50befc94[0-9a-f]{56}\b", lock))
+    assert len(sigs) == 1, f"expected one frozen prior signature in the lock, got {sigs}"
+    assert paired.FROZEN_RUN_CFG["hcd_prior_signature"] == sigs.pop()
+
 
 
 def test_reference_deltas_are_the_MATCHED_subset_never_a_full_96_constant():

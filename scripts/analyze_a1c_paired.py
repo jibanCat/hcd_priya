@@ -72,6 +72,22 @@ FULL_REMOVAL_DELTA = {"ns": None, "Ap": +0.4046, "tau0amp": -0.4916}
 
 CHANNELS = ("ns", "Ap", "tau0amp")
 
+# THE FROZEN RUN-CFG CONSTANTS (PI ruling 3d.4, closing handoff 3b item 4). Every paired delta
+# is measured AGAINST A1, and section 5c documents a near-perfect N=48 decoy population, yet
+# only A1c's run_cfg was validated -- A1's was never checked at all. Both arms must carry these
+# EXACT values: the full frozen hcd_prior_signature (analysis.lock, freeze cut c7eb371; pinned
+# by test_frozen_signature_matches_the_freeze_artifact) and the eBOSS deployed fitting-prior
+# identity fields. A mismatch on EITHER arm means a wrong or mixed population: STOP.
+FROZEN_RUN_CFG = {
+    "hcd_prior_signature":
+        "50befc941edfc4c789286d2054d0107f1eb19a5672bcb86131426fb101eea216",
+    "metal_prior": "flatlog2node",
+    "survey": "eBOSS",
+    "leg": "eBOSS",
+    "sample_res": True,
+    "f_res_amp_sigma": 0.05,
+}
+
 # Quantified in advance (amendment 3 left "materially different" undefined). The observed gap on
 # mock 0 is |-1931.72 - (-349.93)| = 1581.8, so 100 sits far below the real signal and far above
 # any numerical wobble.
@@ -79,6 +95,18 @@ LL_TRUE_MIN_GAP = 100.0
 
 
 TAU0_PULL_ESCALATION = 0.30          # section 4c limb (b) clause 1, the frozen gate's magnitude
+
+# The eBOSS deployed f_res prior widths (closure_legb: F_RES_AMP_SIGMA leg-matched 0.05 for
+# eBOSS, F_RES_SLOPE_SIGMA 0.5), used by the across-mock distributional conjunct below.
+FRES_PRIOR_SIGMA = {"f_res_amp": 0.05, "f_res_slope": 0.5}
+
+# Across-mock KS threshold (PI 3d.4, closing handoff 3b item 3). This is a GROSS-DEFECT
+# TRIPWIRE, not a calibration test: it exists to catch an arm whose truths were not drawn from
+# the deployed laws at all (reused, pinned, or a wrong distribution), for which the KS p is
+# astronomically small. 0.001 per site keeps the family false-STOP over the six sites at ~0.6%
+# while retaining essentially unit power against the defect class. The calibration EVIDENCE for
+# the repaired sectors is 5c-bis (pull/rank statistics), never this conjunct.
+KS_PRIOR_ALPHA = 1e-3
 
 
 class PairingError(RuntimeError):
@@ -149,12 +177,20 @@ def _truth_ok(nm, t):
 
 
 def verify_pairing(a1c, a1, expect_n=48):
-    """The six conjuncts of amendment 3, ALL of which must hold across ALL mocks.
+    """The six conjuncts of amendment 3 PLUS the three of amendment 5 (PI ruling 3d.4), ALL of
+    which must hold across ALL mocks.
 
     Conjunct 3 is the load-bearing one: `truth_vec` equality (conjunct 1) is ALSO exactly what a
     silent no-op produces, so conjunct 1 alone is passed most easily by the accident it exists to
     exclude. Conjunct 6 is NOT independent evidence — an absent site yields `not_self_drawn: []`
     vacuously — so it corroborates conjunct 3 rather than replacing it.
+
+    The amendment-5 conjuncts close two review-found holes: (7)+(8) the per-mock conjuncts are
+    all PER-MOCK, so an arm that drew each of the six truths ONCE and reused it on every mock
+    passed all of them (demonstrated by this module's own pre-2026-08 test fixture) — the 48
+    truths per site must be pairwise DISTINCT and KS-consistent with the deployed law; (9) every
+    paired delta is measured AGAINST A1, yet only A1c's `run_cfg` was validated — BOTH arms must
+    carry the frozen constants (FROZEN_RUN_CFG), or the comparison is against a decoy population.
     """
     c = {}
     common = sorted(set(a1c) & set(a1))
@@ -213,6 +249,61 @@ def verify_pairing(a1c, a1, expect_n=48):
     c["stamp_clear"] = {"ok": not stamp_bad,
                         "detail": f"not_self_drawn non-empty on {stamp_bad[:5]} (corroborates "
                                   "conjunct 3; vacuous when sites are absent)"}
+
+    # ---- conjuncts 7+8: the ACROSS-MOCK distributional control (amendment 5, PI 3d.4) ----
+    # Everything above is per-mock, so an arm that drew each truth ONCE and reused it passes
+    # them all. (7) prior-predictive draws are pairwise distinct almost surely, so ANY exact
+    # repeat means reuse; (8) distinct-but-wrong-law draws (e.g. clustered at a bracket edge)
+    # only an across-mock KS against the DEPLOYED law can catch.
+    site_vals = {nm: np.array([float(((a1c[m].get("sites_extra") or {}).get(nm) or {})
+                                     .get("truth", np.nan)) for m in sorted(a1c)])
+                 for nm in PRIOR_BRACKETS}
+    dup = [nm for nm, v in site_vals.items()
+           if (lambda f: np.unique(f).size != f.size)(v[np.isfinite(v)])]
+    c["truths_distinct"] = {
+        "ok": not dup,
+        "detail": f"repeated truth values across mocks on {dup} -- a value drawn once and "
+                  "REUSED is not a prior-predictive draw"}
+
+    ks_bad = []
+    try:
+        from scipy import stats as st
+        for nm, v in site_vals.items():
+            fin = v[np.isfinite(v)]
+            if fin.size < 5:
+                continue                    # conjunct a1c_truths_drawn already fails hard here
+            lo, hi, kind = PRIOR_BRACKETS[nm]
+            if kind == "bracket":           # deployed LogUniform: uniform in log space
+                u = (np.log(fin) - np.log(lo)) / (np.log(hi) - np.log(lo))
+                p = float(st.kstest(u, "uniform").pvalue)
+            else:                           # deployed Normal(0, sigma), eBOSS leg-matched
+                p = float(st.kstest(fin, "norm", args=(0.0, FRES_PRIOR_SIGMA[nm])).pvalue)
+            if p <= KS_PRIOR_ALPHA:
+                ks_bad.append((nm, p))
+        c["truths_match_prior"] = {
+            "ok": not ks_bad,
+            "detail": f"across-mock KS vs the deployed law at alpha {KS_PRIOR_ALPHA}: "
+                      f"{[(nm, f'{p:.2e}') for nm, p in ks_bad]} -- the truths were not drawn "
+                      "from the deployed fitting priors"}
+    except ImportError:                     # scipy is present everywhere this runs; fail loud
+        c["truths_match_prior"] = {"ok": False, "detail": "scipy unavailable -- cannot verify "
+                                                          "the distributional conjunct"}
+
+    # ---- conjunct 9: the FROZEN RUN-CFG constants, on BOTH arms (handoff 3b item 4) ----
+    # Every delta is measured against A1, and section 5c documents a near-perfect N=48 decoy
+    # population; a stale/mixed A1 passes every conjunct above (its six truths are nan either
+    # way). Three lines of assertion close it.
+    cfg_bad = []
+    for arm_name, arm in (("A1c", a1c), ("A1", a1)):
+        for m in arm:
+            rc = arm[m].get("run_cfg") or {}
+            for key, want in FROZEN_RUN_CFG.items():
+                if rc.get(key) != want:
+                    cfg_bad.append((arm_name, m, key, rc.get(key)))
+    c["run_cfg_frozen"] = {
+        "ok": not cfg_bad,
+        "detail": f"{len(cfg_bad)} frozen-constant mismatches, e.g. {cfg_bad[:4]} -- one or "
+                  "both arms are not the frozen-eBOSS population the pairing claims"}
 
     return {"ok": all(v["ok"] for v in c.values()), "conjuncts": c, "n_common": len(common)}
 

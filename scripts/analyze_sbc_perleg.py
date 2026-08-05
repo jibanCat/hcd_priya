@@ -335,10 +335,23 @@ def analyze_leg(label, src):
             return np.nan
         return 1.0 - float(np.mean(pv)) / vp
 
+    # THE FINITE-L CORRECTED NULL (PI 3d.1): computed from THIS arm's landed L, persisted and
+    # printed so the interpretation reference exists the moment the gate verdict does --
+    # an interpretation reference nobody can compute post-hoc is the round-3 defect class
+    # (computed-then-discarded) all over again.
+    try:
+        _fl_sd = finite_L_null_sd(L_all)
+        finite_l = dict(sd=_fl_sd, **healthy_arm_context(M, _fl_sd),
+                        gated=False, note=FINITE_L_NOTE)
+    except ValueError as _e:
+        finite_l = dict(sd=None, error=str(_e), gated=False, note=FINITE_L_NOTE)
+
     res = {
         "label": label, "src": src, "n_mocks": M, "n_params": P, "has_siiii": has_siiii,
         "div_total": int(sum(max(0, x) for x in ndiv_all)),
         "L_median": int(np.median(L_all)), "L_range": [int(min(L_all)), int(max(L_all))],
+        "L_all": [int(x) for x in L_all],
+        "finite_L_null": finite_l,
         "ll_rank_frac_mean": float(np.mean(ll_rank_frac)) if ll_rank_frac else None,
         "pulls": {k: np.asarray(v, float) for k, v in pulls.items()},
         "ranks": {k: np.asarray(v, float) for k, v in ranks.items()},
@@ -388,6 +401,56 @@ def rank_uniformity(rank_fracs, n_grid=None):
                     verdict="scipy-unavailable")
     return dict(n=n, mean=float(u.mean()), ks_p=ks_p, n_outside_band=out,
                 verdict=("UNIFORM" if ks_p > 0.05 else "NON-UNIFORM"))
+
+
+def finite_L_null_sd(L_list):
+    """THE FINITE-L CORRECTED NULL (PI ruling 3d.1, 2026-08-05): the healthy-arm null pull sd
+    is NOT 1. The pull divides by the SAMPLE sd of L ESS-thinned draws, so under an exact null
+    the pull is sqrt(1 + 1/L) times Student-t(L-1) and its population sd is
+    sqrt[(1 + 1/L)(L-1)/(L-3)]  (L=300/150/99/32 -> 1.0050/1.0101/1.0155/1.0499, verified
+    against simulation). Arm level: root-mean-VARIANCE over the landed mocks' own L -- never
+    inherited from another arm (A1's realized profile gives 1.0125).
+
+    Refuses L <= 3 (variance undefined; every real arm has L >= 32, so such a mock is itself a
+    pathology and must fail loud rather than average quietly)."""
+    L = np.asarray(list(L_list), float)
+    if L.size == 0:
+        raise ValueError("finite_L_null_sd: no mocks")
+    if np.any(L <= 3):
+        raise ValueError(f"finite_L_null_sd: L <= 3 present (min {L.min():.0f}); the null "
+                         "variance is undefined there and such a mock is itself a pathology")
+    var = (1.0 + 1.0 / L) * (L - 1.0) / (L - 3.0)
+    return float(np.sqrt(var.mean()))
+
+
+def healthy_arm_context(n_mocks, sigma_null):
+    """Healthy-arm pass probabilities under the corrected null -- INTERPRETATION CONTEXT ONLY,
+    never a gate criterion. Closed form: the arm mean is normal(0, sigma^2/N) and
+    (N-1)S^2/sigma^2 is chi-square(N-1), independent under normality; verified against the
+    exact t-based null to <0.01 (test_finite_l_null). At N=48: sigma 1.0 -> joint 0.8147 /
+    P(S>1.0332) 0.3488; sigma 1.0125 -> 0.7818 / 0.3951 (the 2026-07-29 record's
+    0.8155/0.7814 were the same quantities with ~0.001 simulation noise).
+
+    sd_decisive_max = 0.30*sqrt(N)/t(0.975,N-1): above it a decisive pass is arithmetically
+    impossible (1.0332 at N=48)."""
+    from scipy import stats as st
+    n = int(n_mocks)
+    if n < 2 or not (np.isfinite(sigma_null) and sigma_null > 0):
+        raise ValueError(f"healthy_arm_context: n={n} sigma_null={sigma_null}")
+    p_mean = 2.0 * st.norm.cdf(0.30 / (sigma_null / np.sqrt(n))) - 1.0
+    p_sd = st.chi2.cdf((n - 1) * (1.1 / sigma_null) ** 2, n - 1)
+    sd_star = 0.30 * np.sqrt(n) / float(st.t.ppf(0.975, n - 1))
+    p_gt = st.chi2.sf((n - 1) * (sd_star / sigma_null) ** 2, n - 1)
+    return {"p_joint_gate_bias0": float(p_mean * p_sd),
+            "p_sd_gt_decisive": float(p_gt),
+            "sd_decisive_max": float(sd_star)}
+
+
+FINITE_L_NOTE = (
+    "INTERPRETATION REFERENCE (PI ruling 3d.1, 2026-08-05), evaluated on THIS arm's landed L "
+    "distribution -- never inherited from another arm. NOT a gate criterion: the frozen gate "
+    "is unchanged, and this ~+1-1.5% correction must NOT be used to excuse or downgrade a "
+    "genuine sd > 1.1 failure.")
 
 
 REPAIRED_SITE_PREFIXES = ("f_Si", "k_Si")
@@ -616,6 +679,16 @@ for label, src in LEG_DIRS.items():
         print(f"  loglik-rank   mean={r['ll_rank_frac_mean']:.3f} (ideal 0.5){tag}")
     print(f"  run health    div_total={r['div_total']}  L median={r['L_median']} "
           f"range={r['L_range']}  params={r['n_params']}{'  (+a_SiIII)' if r['has_siiii'] else ''}")
+    fl = r.get("finite_L_null") or {}
+    if fl.get("sd") is not None:
+        print(f"  -- finite-L null (PI 3d.1: interpretation reference, NOT a gate) --")
+        print(f"  null pull sd = {fl['sd']:.4f} on this arm's own L "
+              f"(healthy joint-gate pass P={fl['p_joint_gate_bias0']:.3f}; "
+              f"P(realized sd > {fl['sd_decisive_max']:.4f}) = {fl['p_sd_gt_decisive']:.3f})")
+        print("     The frozen gate is UNCHANGED, and this ~1% correction must NOT be used to"
+              "\n     excuse or downgrade a genuine sd > 1.1 failure (PI 3d.1 guard).")
+    elif fl:
+        print(f"  -- finite-L null UNAVAILABLE: {fl.get('error')} --")
 
 if not results:
     print("\n[perleg] no leg has usable pkls yet — nothing to tabulate. Re-run as mocks land.")
@@ -678,6 +751,9 @@ for label in ("DESI", "KS", "eBOSS"):
         "has_siiii": r["has_siiii"], "div_total": r["div_total"],
         "L_median": r["L_median"], "L_range": r["L_range"],
         "ll_rank_frac_mean": r["ll_rank_frac_mean"],
+        # PI 3d.1: the finite-L corrected null, from THIS leg's landed L (never inherited)
+        "L_all": r["L_all"],
+        "finite_L_null": r["finite_L_null"],
         "gate_ns": gate_cosmo(pull_stats(r["pulls"]["ns"])),
         "gate_Ap": gate_cosmo(pull_stats(r["pulls"]["Ap"])),
         "pulls": {k: jpull(r["pulls"][k]) for k in r["pulls"]},
