@@ -195,6 +195,69 @@ def test_D_sha_inventory_wrong_names(BR, tmp_path, intact, tmp_path_factory):
     assert out["branch"] == "D"
 
 
+def test_D_sha_inventory_absent(BR, tmp_path, intact):
+    outdir, _ = intact
+    out = _classify(BR, tmp_path, _gate_leg(), _sd_json(),
+                    (outdir, str(tmp_path / "no_such.sha256")))
+    assert out["branch"] == "D"
+    assert any("cannot read" in r for r in out["reasons"])
+
+
+def test_D_sha_inventory_malformed_line(BR, tmp_path, intact, tmp_path_factory):
+    outdir, _ = intact
+    bad = tmp_path_factory.mktemp("sha_m") / "bad.sha256"
+    bad.write_text("not-a-sha-line\n")
+    out = _classify(BR, tmp_path, _gate_leg(), _sd_json(), (outdir, str(bad)))
+    assert out["branch"] == "D"
+    assert any("malformed" in r for r in out["reasons"])
+
+
+def test_D_sha_inventory_duplicate_entry(BR, tmp_path, intact, tmp_path_factory):
+    outdir, sha = intact
+    dup = tmp_path_factory.mktemp("sha_d") / "dup.sha256"
+    dup.write_text(open(sha).read() + open(sha).readline())
+    out = _classify(BR, tmp_path, _gate_leg(), _sd_json(), (outdir, str(dup)))
+    assert out["branch"] == "D"
+    assert any("duplicate" in r for r in out["reasons"])
+
+
+def test_D_wrong_survey(BR, tmp_path, intact):
+    out = _classify(BR, tmp_path, _gate_leg(survey="DESI"), _sd_json(survey="DESI"), intact)
+    assert out["branch"] == "D"
+    assert any("wrong adjudication population" in r for r in out["reasons"])
+
+
+def test_D_missing_n_div_total(BR, tmp_path, intact):
+    sd = _sd_json()
+    del sd["n_div_total"]
+    out = _classify(BR, tmp_path, _gate_leg(), sd, intact)
+    assert out["branch"] == "D"
+    assert any("n_div_total" in r for r in out["reasons"])
+
+
+def test_D_null_n_div_total(BR, tmp_path, intact):
+    sd = _sd_json()
+    sd["n_div_total"] = None
+    out = _classify(BR, tmp_path, _gate_leg(), sd, intact)
+    assert out["branch"] == "D"
+
+
+def test_D_missing_gate_json_is_orderly(BR, tmp_path, intact):
+    outdir, sha = intact
+    s = tmp_path / "sd.json"
+    s.write_text(json.dumps(_sd_json()))
+    out = BR.run(str(tmp_path / "no_gate.json"), str(s), sha, outdir)
+    assert out["branch"] == "D"
+    assert any("unreadable" in r or "refusal" in r for r in out["reasons"])
+
+
+def test_D_unrecognized_row_refuses(BR):
+    branch, reason = BR.classify_row(5, [], "hypothetical")
+    assert branch == "D" and "unrecognized" in reason
+    assert BR.classify_row(1, [], "x")[0] == "A"
+    assert BR.classify_row(7, ["ns"], "x")[0] == "D"
+
+
 # ------------------------- the 512-combo independent-oracle sweep ---------------------
 
 def _oracle(ns_mean_ok, ns_sd_ok, ap_mean_ok, ap_sd_ok, ns_rank_ok, ap_rank_ok,

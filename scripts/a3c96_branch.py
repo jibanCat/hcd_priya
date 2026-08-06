@@ -91,12 +91,18 @@ def check_integrity(outdir, sha_file):
     recorded = {}
     try:
         with open(sha_file) as f:
-            for line in f:
+            for lineno, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
-                digest, name = line.split(None, 1)
-                recorded[os.path.basename(name.strip().lstrip("*"))] = digest
+                try:
+                    digest, name = line.split(None, 1)
+                except ValueError:
+                    return fails + [f"malformed sha256 inventory line {lineno}: {line!r}"]
+                base = os.path.basename(name.strip().lstrip("*"))
+                if base in recorded:
+                    return fails + [f"duplicate sha256 inventory entry for {base}"]
+                recorded[base] = digest
     except OSError as e:
         return fails + [f"cannot read tranche-1 sha256 inventory: {e}"]
     expect_t1 = {f"mock_{m:04d}.pkl" for m in range(N_T1)}
@@ -116,6 +122,22 @@ def check_integrity(outdir, sha_file):
     return fails
 
 
+def classify_row(row, sd_only, why):
+    """The pure row -> branch mapping of prereg section 10 (PI #10 3.4). An unrecognized
+    row is a branch-D refusal, never a silent certificate-proceeds classification."""
+    if row in (2, 3, 4):
+        return "C", f"disposition row {row}: {why}"
+    if row == 6:
+        if sd_only == ["ns"]:
+            return "B", f"row 6 with sd-only set exactly ['ns']: {why}"
+        return "C", (f"row 6 with sd-only set {sd_only} != ['ns'] -- a failure mode "
+                     f"absent at N=48 (other substantive failure)")
+    if row == 1:
+        return "A", f"disposition row 1: {why}"
+    return "D", (f"unrecognized disposition row {row!r} -- refusing to classify (the "
+                 f"branch table covers rows 1/2/3/4/6 only)")
+
+
 def run(gate_json, selfdraw_json, sha_file, outdir):
     """Classify; returns dict(branch, reasons, disposition, integrity_fails, n_div_total)."""
     reasons = []
@@ -127,39 +149,33 @@ def run(gate_json, selfdraw_json, sha_file, outdir):
     dp = _load_disposition()
     try:
         out = dp.run(gate_json, selfdraw_json)
+        with open(selfdraw_json) as f:
+            sd = json.load(f)
     except dp.DispositionError as e:
         return dict(branch="D", reasons=[f"disposition refusal: {e}"], disposition=None,
                     integrity_fails=[], n_div_total=None)
-    with open(selfdraw_json) as f:
-        sd = json.load(f)
-    n_div = int(sd.get("n_div_total", -1))
+    except (OSError, json.JSONDecodeError) as e:
+        return dict(branch="D", reasons=[f"unreadable/malformed readout input: {e}"],
+                    disposition=None, integrity_fails=[], n_div_total=None)
     if out["n"] != N_TOTAL or out["survey"] != SURVEY:
         return dict(branch="D",
                     reasons=[f"wrong adjudication population: survey {out['survey']!r} "
                              f"n {out['n']} (expected {SURVEY!r} n {N_TOTAL}) -- is this "
                              f"the committed N=48 readout?"],
-                    disposition=out, integrity_fails=[], n_div_total=n_div)
-    if n_div < 0:
-        return dict(branch="D", reasons=["selfdraw JSON carries no n_div_total"],
+                    disposition=out, integrity_fails=[], n_div_total=None)
+    n_div = sd.get("n_div_total")
+    if not isinstance(n_div, int) or n_div < 0:
+        return dict(branch="D",
+                    reasons=[f"selfdraw JSON carries no usable n_div_total "
+                             f"(got {n_div!r})"],
                     disposition=out, integrity_fails=[], n_div_total=None)
 
     row = out["row"]
     sd_only = [ch for ch in ("ns", "Ap")
                if out["crit"][ch]["mean_ok"] and not out["crit"][ch]["sd_ok"]]
-    if row in (2, 3, 4):
-        branch = "C"
-        reasons.append(f"disposition row {row}: {out['why']}")
-    elif row == 6:
-        if sd_only == ["ns"]:
-            branch, r = "B", f"row 6 with sd-only set exactly ['ns']: {out['why']}"
-        else:
-            branch, r = "C", (f"row 6 with sd-only set {sd_only} != ['ns'] -- a failure "
-                              f"mode absent at N=48 (other substantive failure)")
-        reasons.append(r)
-    else:
-        branch = "A"
-        reasons.append(f"disposition row 1: {out['why']}")
-    if n_div > 0:
+    branch, reason = classify_row(row, sd_only, out["why"])
+    reasons.append(reason)
+    if branch != "D" and n_div > 0:
         reasons.append(f"cumulative n_div_total = {n_div} > 0 (pipeline norm is 0 across "
                        f"all landed production fits): potentially material anomaly")
         if branch in ("A", "B"):
