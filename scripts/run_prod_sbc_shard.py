@@ -72,7 +72,13 @@ RUN_CFG_DEFAULTS = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="
                         ks_kmax=None, diag_no_sample_metals=False, metal_selfdraw=False,
                         fres_selfdraw=False,
                         survey=None, hcd_parameterization="alpha_pivot_powerlaw_v1",
-                        hcd_prior_signature=None, single_member=False)
+                        hcd_prior_signature=None, single_member=False,
+                        # SAMPLER-POPULATION stamps (2026-08-05; A3d P3 review finding 3): the
+                        # historical defaults every pre-stamp pkl was written at, mirrored here
+                        # so effective_run_cfg agrees with _run_mock's one-way pops -- a landed
+                        # arm (A1/Ad/A1c) resumed for ONE straggler under the new code must
+                        # still pool with its own un-stamped siblings at readout.
+                        seed=20260614, n_warmup=250, n_samples=600, max_tree_depth=10)
 
 
 def effective_run_cfg(cfg):
@@ -262,6 +268,22 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
         if "fres_selfdraw" not in eff_existing \
                 and bool(_req.get("fres_selfdraw", False)) is False:
             _req.pop("fres_selfdraw", None)
+        # SAMPLER-POPULATION stamps (2026-08-05, PI #9 3f.5 strict population separation): the A3d
+        # KS pin-vs-draw diagnostic runs at the r6x seed 20260724 with r6x-matched NUTS (250/300),
+        # while a future A3c certification arm runs at the ARM-P defaults (20260614, 250/600). Both
+        # would otherwise carry IDENTICAL run_cfg (survey='KS', fres_selfdraw=True), so directory
+        # separation would be the only barrier -- below the campaign's stamp-discipline standard.
+        # Every LANDED-ARM pkl written before these stamps existed was at the historical
+        # defaults (seed 20260614, 250/600/10; A1/Ad/A1c verified), so the one-way pop excuses
+        # a missing key ONLY at those defaults; any other request over an un-stamped pkl
+        # CLASHES. (One known un-stamped non-default pkl predated this change -- the 2026-08-05
+        # flags-off pairing probe -- and is QUARANTINED under a non-mock filename; P3 review
+        # finding 4.) STAMPED tiny-NUTS probe pkls (n_warmup=2) can never be skip-loaded by a
+        # production resume at the same OUTDIR.
+        for _k, _dflt in (("seed", 20260614), ("n_warmup", 250),
+                          ("n_samples", 600), ("max_tree_depth", 10)):
+            if _k not in eff_existing and int(_req.get(_k, _dflt)) == _dflt:
+                _req.pop(_k, None)
         if eff_existing != _req:
             raise RuntimeError(
                 f"[mock {m}] config CLASH at {path}: existing pkl run_cfg={existing} "
@@ -788,7 +810,13 @@ def main():
                    hcd_prior_signature=_armp_prior_sig,
                    # single-member discriminator (pre-existing hole, CS design review Q2): a
                    # single-member de-risk pkl must never pool with an ensemble pkl.
-                   single_member=bool(a.single_member))
+                   single_member=bool(a.single_member),
+                   # SAMPLER-POPULATION discriminators (2026-08-05, PI #9 3f.5): seed and NUTS
+                   # settings define the mock/chain population. A3d (seed 20260724, 250/300) must
+                   # never pool with A3c (20260614, 250/600) even though every other key matches.
+                   # One-way back-compat pops in _run_mock keep default-config resumes free.
+                   seed=int(a.seed), n_warmup=int(a.n_warmup),
+                   n_samples=int(a.n_samples), max_tree_depth=int(a.max_tree_depth))
     records = []
     for m in idxs:
         rec = _run_mock(ctx, d, m, a.out_dir, n_mocks=a.n_mocks, n_warmup=a.n_warmup,

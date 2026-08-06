@@ -211,6 +211,69 @@ def test_config_clash_nondefault_over_prestamp(runner, tmp_path):
         runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
 
 
+"""SAMPLER-POPULATION stamps (2026-08-05, PI #9 3f.5). The A3d KS diagnostic runs at the r6x
+seed (20260724) with r6x-matched NUTS (250/300); a future A3c certification arm runs at the
+ARM-P defaults (20260614, 250/600). Directory separation alone is not the campaign standard:
+the stamp discipline must refuse the pooling MECHANICALLY, so seed / n_warmup / n_samples /
+max_tree_depth join run_cfg with the same one-way back-compat as every earlier stamp (a
+missing key on an old pkl is excused ONLY when the request is at that key's historical
+default: seed 20260614, 250/600/10)."""
+
+_SAMPLER_DEFAULTS = dict(seed=20260614, n_warmup=250, n_samples=600, max_tree_depth=10)
+_A3D_SAMPLER = dict(seed=20260724, n_warmup=250, n_samples=300, max_tree_depth=10)
+
+
+def test_sampler_stamp_backcompat_default_resume(runner, tmp_path):
+    """A pre-sampler-stamp pkl (e.g. a landed A1c mock) resumed under the HISTORICAL DEFAULT
+    sampler config must LOAD -- the back-compat pops excuse the four missing keys."""
+    out = str(tmp_path / "sampler_backcompat")
+    _write_stub_mock(runner, out, 0, _FULL_SELFDRAW, marker="resumed")
+    req = dict(_FULL_SELFDRAW, **_SAMPLER_DEFAULTS)
+    rec = runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
+    assert rec["_marker"] == "resumed", "default-sampler resume over a pre-stamp pkl must load"
+
+
+def test_sampler_stamp_clash_nondefault_over_prestamp(runner, tmp_path):
+    """An A3d-config request (seed 20260724, 250/300) over a pre-sampler-stamp pkl must CLASH:
+    the old pkl was a default-sampler population and the ranks do not transfer."""
+    out = str(tmp_path / "sampler_clash_prestamp")
+    _write_stub_mock(runner, out, 0, _FULL_SELFDRAW)
+    req = dict(_FULL_SELFDRAW, **_A3D_SAMPLER)
+    with pytest.raises(RuntimeError, match="config CLASH"):
+        runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
+
+
+def test_sampler_stamp_clash_a3d_vs_a3c(runner, tmp_path):
+    """BOTH stamped, different seed (the A3d-vs-A3c case the PI's strict-separation ruling is
+    about): must CLASH even though every other key matches."""
+    out = str(tmp_path / "sampler_clash_seed")
+    _write_stub_mock(runner, out, 0, dict(_FULL_SELFDRAW, **_A3D_SAMPLER))
+    req = dict(_FULL_SELFDRAW, **_SAMPLER_DEFAULTS)
+    with pytest.raises(RuntimeError, match="config CLASH"):
+        runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
+
+
+def test_sampler_stamp_exact_match_loads(runner, tmp_path):
+    """Both stamped and equal (an A3d resubmit) -> SKIP-load, resumes stay free."""
+    out = str(tmp_path / "sampler_match")
+    stamped = dict(_FULL_SELFDRAW, **_A3D_SAMPLER)
+    _write_stub_mock(runner, out, 0, stamped, marker="loaded-me")
+    rec = runner._run_mock(None, None, 0, out, run_cfg=dict(stamped), **_DUMMY)
+    assert rec["_marker"] == "loaded-me"
+
+
+def test_sampler_stamp_wired_into_main_cfg(runner):
+    """The four sampler keys must be wired from the CLI args into main()'s run_cfg dict -- guard
+    against the stamp existing in the clash logic but never being written. Static check on the
+    source: the run_cfg construction must reference a.seed / a.n_warmup / a.n_samples /
+    a.max_tree_depth."""
+    import inspect
+    src = inspect.getsource(runner.main)
+    for frag in ("seed=int(a.seed)", "n_warmup=int(a.n_warmup)",
+                 "n_samples=int(a.n_samples)", "max_tree_depth=int(a.max_tree_depth)"):
+        assert frag in src, f"main() run_cfg must stamp {frag}"
+
+
 def test_inject_spec_held_out_guard():
     """inject_spec on a HELD-OUT (leg_a=False) run_legb call must FAIL LOUD — the held-out branch
     ignores inject_spec, so honouring it would silently drop the injection. PR#12 review follow-up (b).
