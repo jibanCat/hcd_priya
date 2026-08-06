@@ -52,7 +52,8 @@ for suite in tests/test_legb_metal_modelcplus.py \
              tests/test_a1c_paired.py \
              tests/test_a1c_disposition.py \
              tests/test_finite_l_null.py \
-             tests/test_ksfd_paired.py; do
+             tests/test_ksfd_paired.py \
+             tests/test_firstarm_readout.py; do
   echo ""
   echo "########## $suite ##########"
   if timeout 3600 "$PY" -m pytest "$suite" -q --no-header -p no:cacheprovider; then
