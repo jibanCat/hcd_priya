@@ -41,7 +41,7 @@ TOP_K = (1, 2, 3, 5)
 QUANTS = (0.025, 0.05, 0.16, 0.50, 0.84, 0.95, 0.975)
 NORMREF_SEED, NORMREF_NSIM = 20260808, 200_000
 BOOT_B, BOOT_SEED = 10_000, 20260807
-A2C_NULL_SEED, B_NULL = 20260810, 2000
+A2C_NULL_SEED, B_NULL = 20260810, 50_000
 HOLM_ALPHA = 0.05
 
 # tau0 ladder z-grid, COPIED VERBATIM from analyze_sbc_perleg.py so numbers match
@@ -604,3 +604,514 @@ def r_scale_bootstrap(pulls, Ls, B=BOOT_B, seed=BOOT_SEED):
     return dict(point=point, B=int(v.size), seed=seed,
                 ci68=[float(np.quantile(v, 0.16)), float(np.quantile(v, 0.84))],
                 ci95=[float(np.quantile(v, 0.025)), float(np.quantile(v, 0.975))])
+
+
+# =====================================================================================
+# v2 AMENDMENT MACHINERY (prereg v2; all referee MUST-FIX)
+# =====================================================================================
+
+def exact_rank_null(Ls, B, seed):
+    """EXACT discrete rank null (prereg v2 B.2). Under the SBC null the deployed rank
+    k/L has k ~ Uniform{0..L}; only the L CENSUS enters, not the realized posteriors.
+    This is a draw from the exact null, not an approximation."""
+    rng = np.random.default_rng(seed)
+    L = np.asarray(list(Ls), int)
+    return np.stack([rng.integers(0, Lm + 1, size=B) / Lm for Lm in L], axis=1)
+
+
+def check_ties(recs, cols=("ns", "Ap", "tau0amp")):
+    """Prereg v2 B.4: duplicate draw rows break the LOO bijection and bias the strict
+    rank downward. The deployed statistic is immune (truth is never a draw); the null is
+    not. Refuse-on-fail."""
+    for r in recs:
+        M = np.column_stack([np.asarray(r[c], float) for c in cols])
+        if np.unique(M, axis=0).shape[0] != M.shape[0]:
+            raise DiagRefusal(f"mock {r['m']}: duplicate draw rows in {cols} -- the LOO "
+                              f"bijection is broken (prereg v2 B.4)")
+    return True
+
+
+def check_sites_alignment(recs, keys):
+    """Prereg v2 B.5: every sites_extra array must have exactly L rows so the shared
+    pseudo-truth index j is applicable. Refuse-on-fail."""
+    for r in recs:
+        for k in keys:
+            se = r["sites_extra"].get(k)
+            if se is None:
+                raise DiagRefusal(f"mock {r['m']}: sites_extra['{k}'] absent")
+            d = np.asarray(se["draws"], float)
+            if d.shape != (r["L"],):
+                raise DiagRefusal(f"mock {r['m']}: sites_extra['{k}'] has {d.shape} rows, "
+                                  f"expected ({r['L']},) -- row misalignment")
+            if not np.all(np.isfinite(d)) or not np.isfinite(float(se["truth"])):
+                raise DiagRefusal(f"mock {r['m']}: sites_extra['{k}'] non-finite")
+    return True
+
+
+def site_pull_rank(recs, key):
+    """Deployed pull/rank for a sites_extra channel (sampled coordinates)."""
+    p, rk = [], []
+    for r in recs:
+        d = np.asarray(r["sites_extra"][key]["draws"], float)
+        t = float(r["sites_extra"][key]["truth"])
+        p.append(pull_of(d, t))
+        rk.append(rank_of(d, t))
+    return np.asarray(p), np.asarray(rk)
+
+
+def identity_check(recs, rtol=1e-9):
+    """Prereg v2 P1-I (refuse-on-fail). The deployed ladder-regressed amp/slope MUST equal
+    the closed forms in the SAMPLED coordinates. A mismatch IS the derived-summary artefact."""
+    co = tau_eff_rung_coefficients()
+    zbar, z = co["zbar"], np.asarray(co["z"])
+    worst_a = worst_s = 0.0
+    for r in recs:
+        amp = np.asarray(r["sites_extra"]["tau0_amp"]["draws"], float)
+        dt = np.asarray(r["sites_extra"]["dtau0"]["draws"], float)
+        want_a = amp * ((1 + zbar) / 4.0) ** dt * 0.0023 * (1 + zbar) ** 3.65
+        got_a = np.asarray(r["tau0amp"], float)
+        y = np.log(np.clip(np.asarray(r["draws"], float)[:, [r["names"].index(f"tau0_z{i}")
+                                                             for i in range(13)]], 1e-8, None))
+        lxc = np.log(1 + z) - np.log(1 + z).mean()
+        got_s = (y - y.mean(axis=1, keepdims=True)) @ lxc / np.sum(lxc ** 2)
+        worst_a = max(worst_a, float(np.max(np.abs(got_a / want_a - 1.0))))
+        worst_s = max(worst_s, float(np.max(np.abs(got_s - (dt + 3.65)))))
+    ok = (worst_a < rtol) and (worst_s < 1e-7)
+    return dict(max_rel_err_amp=worst_a, max_abs_err_slope=worst_s, rtol=rtol,
+                identity_holds=bool(ok), zbar=zbar, c_bar=co["c_bar"],
+                note="amp_reg == tau0_amp*((1+zbar)/4)^dtau0*2.3e-3*(1+zbar)^3.65 and "
+                     "slope_reg == dtau0 + 3.65. Holding EXCLUDES the derived-summary "
+                     "curvature/projection artefact class a priori.")
+
+
+def per_rung_scan(recs, z_hi_desi=4.2):
+    """Prereg v2 P1-R: rank-KS p, mean rank and S1/S2 per tau_eff(z) rung. rank of
+    tau_eff(z_i) is the rank of ln(amp) + c_i*dtau0, so the scan reads WHICH DIRECTION in
+    the mean-flux plane is miscalibrated, in the physically interpretable coordinate."""
+    co = tau_eff_rung_coefficients()
+    z, c = np.asarray(co["z"]), np.asarray(co["c"])
+    rows = []
+    for i in range(13):
+        col = f"tau0_z{i}"
+        ranks = np.array([rank_of(np.asarray(r["draws"], float)[:, r["names"].index(col)],
+                                  float(np.asarray(r["truth"], float)[r["names"].index(col)]))
+                          for r in recs])
+        pulls = np.array([pull_of(np.asarray(r["draws"], float)[:, r["names"].index(col)],
+                                  float(np.asarray(r["truth"], float)[r["names"].index(col)]))
+                          for r in recs])
+        sh = shape_stats(ranks)
+        rows.append(dict(rung=i, z=float(z[i]), c=float(c[i]),
+                         desi_constrained=bool(z[i] <= z_hi_desi),
+                         rank_ks_p=rank_ks_p(ranks), mean_rank=float(ranks.mean()),
+                         pull_mean=float(pulls.mean()), pull_sd=float(pulls.std(ddof=1)),
+                         S1=sh["S1_mean_minus_half"], S2=sh["S2_var_minus_uniform"]))
+    return dict(rungs=rows, zbar=co["zbar"], c_bar=co["c_bar"],
+                n_desi_constrained=int(sum(r["desi_constrained"] for r in rows)),
+                note="DESCRIPTIVE SCAN, not 13 confirmatory tests. Pre-declared readings: "
+                     "HCD-mediated degrades toward HIGH z; metal-mediated toward LOW z; "
+                     "z-flat is amplitude-like and should have shown in A_p.")
+
+
+def null_relative_material(obs, null_samples, thresh=0.30, k_sd=2.0):
+    """Prereg v2 D.2: materiality as a deviation from the NULL, not from zero. v1's
+    |rho|>=0.30 fired on 92.1% of PERFECTLY HEALTHY arms because the healthy null is
+    centred near -0.47, not 0."""
+    s = np.asarray(null_samples, float)
+    med, sd = float(np.median(s)), float(np.std(s, ddof=1))
+    dev = float(obs) - med
+    return dict(observed=float(obs), null_median=med, null_sd=sd, deviation=dev,
+                material=bool(abs(dev) >= thresh and abs(dev) >= k_sd * sd),
+                thresh=thresh, k_sd=k_sd)
+
+
+def mc_se(p, B):
+    return float(np.sqrt(max(p * (1.0 - p), 1e-12) / B))
+
+
+def partial_corr(x, y, z):
+    """Partial Spearman of x,y controlling z (prereg v2 D.3: the frozen test of the PI's
+    own premise, since the committed record reports partial corr(n_s, tau0 | A_p) = -0.047)."""
+    from scipy.stats import spearmanr, norm
+    rx = np.argsort(np.argsort(np.asarray(x, float))).astype(float)
+    ry = np.argsort(np.argsort(np.asarray(y, float))).astype(float)
+    rz = np.argsort(np.argsort(np.asarray(z, float))).astype(float)
+    def resid(a, b):
+        b1 = np.column_stack([np.ones_like(b), b])
+        return a - b1 @ np.linalg.lstsq(b1, a, rcond=None)[0]
+    return float(spearmanr(resid(rx, rz), resid(ry, rz)).statistic)
+
+
+def autocorr_lag1(x):
+    a = np.asarray(x, float)
+    a = a - a.mean()
+    d = float(np.dot(a, a))
+    return float(np.dot(a[:-1], a[1:]) / d) if d > 0 else 0.0
+
+
+# =====================================================================================
+# ANALYSIS DRIVER
+# =====================================================================================
+
+TIER3_COSMO = ["herei", "heref", "alphaq", "hub", "omegamh2", "hireionz", "bhfeedback"]
+TIER3_SITES = ["f_res_slope", "s_lls", "s_subdla", "s_dla"]
+METAL_NODES = ["f_SiIII_DESI_z0", "f_SiIII_DESI_z1", "f_SiII_DESI_z0", "f_SiII_DESI_z1",
+               "k_SiIII_DESI_z0", "k_SiIII_DESI_z1", "k_SiII_DESI_z0", "k_SiII_DESI_z1"]
+ALPHAS = ["alpha_lls", "alpha_subdla", "alpha_dla"]
+
+
+def _spear(a, b):
+    from scipy.stats import spearmanr
+    return float(spearmanr(a, b).statistic)
+
+
+def _pc1(mat):
+    """Leading principal component score of a (n, k) pull block (prereg v2 F.1/F.3)."""
+    X = np.asarray(mat, float)
+    X = X - X.mean(axis=0, keepdims=True)
+    U, S, Vt = np.linalg.svd(X, full_matrices=False)
+    return X @ Vt[0], float(S[0] ** 2 / np.sum(S ** 2))
+
+
+def run_analysis(recs, B_null=50_000, seed=A2C_NULL_SEED):
+    from scipy.stats import norm, skew
+    out = {}
+    Ls = [r["L"] for r in recs]
+    n = len(recs)
+
+    # --- integrity additions (refuse-on-fail) ---
+    check_ties(recs)
+    check_sites_alignment(recs, ["tau0_amp", "dtau0", "f_res_amp"] + METAL_NODES)
+    out["identity_check"] = identity_check(recs)
+    if not out["identity_check"]["identity_holds"]:
+        raise DiagRefusal("P1-I identity FAILED: the deployed tau0_amp is not the closed "
+                          "form in sampled coordinates -- THIS IS the derived-summary "
+                          f"artefact ({out['identity_check']})")
+
+    # --- deployed channels ---
+    ns_p, ns_r = _chan(recs, "ns")
+    ap_p, ap_r = _chan(recs, "Ap")
+    t0_p, t0_r = _chan(recs, "tau0amp")
+
+    # --- LOO tables (truth-involving null) ---
+    tabs_nt = [loo_tables(r["ns"], r["tau0amp"]) for r in recs]
+    tabs_na = [loo_tables(r["ns"], r["Ap"]) for r in recs]
+    tabs_at = [loo_tables(r["Ap"], r["tau0amp"]) for r in recs]
+    rep = null_replicates(tabs_nt, B=B_null, seed=seed)
+    rep_na = null_replicates(tabs_na, B=B_null, seed=seed + 1)
+    rep_at = null_replicates(tabs_at, B=B_null, seed=seed + 2)
+
+    # --- exact discrete rank null (rank-only statistics) ---
+    rnull = exact_rank_null(Ls, B_null, seed + 10)
+
+    # =============================== P1 ===============================
+    p1 = dict(deployed_rank_ks_p=rank_ks_p(t0_r),
+              influence=ks_influence(t0_r),
+              tails=tail_occupancy(t0_r),
+              shape=shape_stats(t0_r))
+    shp_null = {k: np.array([shape_stats(rnull[b])[k] for b in range(B_null)])
+                for k in p1["shape"]}
+    p1["shape_calibrated"] = {}
+    for k, v in p1["shape"].items():
+        cp = calibrated_p(v, shp_null[k])
+        cp["mc_se"] = mc_se(cp["p"], len(shp_null[k]))
+        p1["shape_calibrated"][k] = cp
+    keys4 = list(p1["shape"].keys())
+    p1["holm_within_P1"] = dict(zip(keys4,
+                                    holm([p1["shape_calibrated"][k]["p"] for k in keys4])))
+    # fragility calibration (prereg v2 C.3)
+    # DISCLOSED CAP: ks_influence is O(n^2) per replicate (48 LOO KS tests), so the
+    # fragility null runs at 400 replicates, not B_null. Reported with the result.
+    mo_null = []
+    for b in range(min(B_null, 400)):
+        mo_null.append(ks_influence(rnull[b])["min_omission_greedy"])
+    p1["fragility_null"] = dict(
+        min_omission_null_median=float(np.median([x for x in mo_null if x is not None])
+                                       if any(x is not None for x in mo_null) else np.nan),
+        frac_null_needing_ge1=float(np.mean([(x or 0) >= 1 for x in mo_null])),
+        n_null=len(mo_null),
+        note="At a BOUNDARY-level KS p the min-omission count is ~1 BY DEFINITION; this "
+             "calibration shows how often a HEALTHY arm needs the same omission.")
+    # sampled-site control + per-rung scan + L confounder
+    amp_p, amp_r = site_pull_rank(recs, "tau0_amp")
+    dt_p, dt_r = site_pull_rank(recs, "dtau0")
+    p1["sampled_sites"] = {
+        "tau0_amp_sampled": dict(pull_mean=float(amp_p.mean()), pull_sd=float(amp_p.std(ddof=1)),
+                                 rank_ks_p=rank_ks_p(amp_r), mean_rank=float(amp_r.mean()),
+                                 **shape_stats(amp_r)),
+        "dtau0_sampled": dict(pull_mean=float(dt_p.mean()), pull_sd=float(dt_p.std(ddof=1)),
+                              rank_ks_p=rank_ks_p(dt_r), mean_rank=float(dt_r.mean()),
+                              **shape_stats(dt_r)),
+        "deployed_tau0amp": dict(pull_mean=float(t0_p.mean()), pull_sd=float(t0_p.std(ddof=1)),
+                                 rank_ks_p=rank_ks_p(t0_r), mean_rank=float(t0_r.mean())),
+    }
+    p1["per_rung"] = per_rung_scan(recs)
+    p1["ln_coordinate_pull"] = dict(
+        mean=float(np.mean([(np.log(r["tau0amp"]).mean() - np.log(r["tau0amp_truth"]))
+                            / np.log(r["tau0amp"]).std(ddof=1) for r in recs])),
+        note="Jensen check: pull in ln coordinates (ranks unaffected, exp monotone).")
+    p1["L_confounder"] = dict(
+        spearman_rankextreme_vs_L=_spear(2 * np.abs(t0_r - 0.5), Ls),
+        spearman_abs_pull_ns_vs_L=_spear(np.abs(ns_p), Ls),
+        L_floor_note="closure_sbc.L_FLOOR = 99; realizations below it: "
+                     f"{int(np.sum(np.asarray(Ls) < 99))}")
+    out["P1"] = p1
+
+    # =============================== P2 ===============================
+    p2 = dict(scales=scales_and_tail(ns_p, n=n, k=WINSOR_K),
+              coverage=coverage(ns_r, Ls=Ls),
+              r_scale=r_scale_bootstrap(ns_p, Ls),
+              finite_L_null=finite_L_null_sd(Ls))
+    p2["rank_implied_z"] = rank_implied_z_scale(ns_r, Ls)
+    p2["summary_artefact_contrast"] = dict(
+        gaussian_pull_sd=float(ns_p.std(ddof=1)),
+        rank_implied_z_sd=p2["rank_implied_z"]["z_sd"],
+        ratio=float(ns_p.std(ddof=1) / p2["rank_implied_z"]["z_sd"]),
+        note="rank-implied z-sd ~1 with a Gaussian pull sd >> 1 indicates a NON-GAUSSIAN "
+             "SUMMARY artefact rather than posterior over-concentration.")
+    sd_null = rep["pull_x"].std(axis=1, ddof=1)
+    cp = calibrated_p(float(ns_p.std(ddof=1)), sd_null, two_sided=False)
+    cp["mc_se"] = mc_se(cp["p"], sd_null.size)
+    p2["headline_sd_calibrated_p"] = cp
+    p2["posterior_skew"] = dict(
+        ns_median_skew=float(np.median([skew(r["ns"]) for r in recs])),
+        Ap_median_skew=float(np.median([skew(r["Ap"]) for r in recs])),
+        tau0_median_skew=float(np.median([skew(r["tau0amp"]) for r in recs])))
+    # KS five-variable family restored (V1..V5)
+    postsd = np.array([float(np.std(r["ns"], ddof=1)) for r in recs])
+    nullint = np.sqrt((1 + 1 / np.asarray(Ls, float)) * (np.asarray(Ls, float) - 1)
+                      / (np.asarray(Ls, float) - 3))
+    fres_t = np.array([abs(float(r["sites_extra"]["f_res_amp"]["truth"])) for r in recs])
+    V = [("V1 truth_ns", _spear(np.array([r["ns_truth"] for r in recs]), np.abs(ns_p))),
+         ("V2 post_sd_ns", _spear(postsd, np.abs(ns_p))),
+         ("V3 L", _spear(np.asarray(Ls, float), np.abs(ns_p) / nullint)),
+         ("V4 |f_res truth|", _spear(fres_t, np.abs(ns_p))),
+         ("V5 |tau0amp pull|", _spear(np.abs(t0_p), np.abs(ns_p)))]
+    pv = []
+    for (lab, rho), src in zip(V, [np.array([r["ns_truth"] for r in recs]), postsd,
+                                   np.asarray(Ls, float), fres_t, np.abs(t0_p)]):
+        tgt = np.abs(ns_p) / nullint if lab.startswith("V3") else np.abs(ns_p)
+        pn = permutation_null(src, tgt, _spear, B=B_null, seed=seed + 20)
+        pn["mc_se"] = mc_se(pn["p"], B_null)
+        pv.append(dict(variable=lab, rho=rho, **{k: pn[k] for k in
+                                                 ("p", "null_mean", "null_sd", "mc_se")}))
+    flags = holm([r["p"] for r in pv])
+    for r_, f_ in zip(pv, flags):
+        r_["holm_flagged"] = bool(f_)
+    p2["KS_five_variable_family"] = pv
+    out["P2"] = p2
+
+    # =============================== P3 ===============================
+    # observed geometry with the REAL truths
+    def real_geom(xkey, ykey, xt, yt):
+        dpar, dperp, D2, rho_m, area, iso = [], [], [], [], [], []
+        for r in recs:
+            x = np.asarray(r[xkey], float); y = np.asarray(r[ykey], float)
+            C = np.cov(np.vstack([x, y]), ddof=1)
+            d = np.array([x.mean() - r[xt], y.mean() - r[yt]])
+            w, Vv = np.linalg.eigh(C)
+            order = np.argsort(-w); w = w[order]; Vv = Vv[:, order]
+            dpar.append(float(d @ Vv[:, 0] / np.sqrt(max(w[0], 1e-300))))
+            dperp.append(float(d @ Vv[:, 1] / np.sqrt(max(w[1], 1e-300))))
+            D2.append(dpar[-1] ** 2 + dperp[-1] ** 2)
+            rho_m.append(float(C[0, 1] / np.sqrt(C[0, 0] * C[1, 1])))
+            area.append(float(np.pi * np.sqrt(max(np.linalg.det(C), 1e-300))))
+            iso.append(bool(abs(rho_m[-1]) < 2 / np.sqrt(max(r["L"] - 3, 1))))
+        return (np.array(dpar), np.array(dperp), np.array(D2), np.array(rho_m),
+                np.array(area), np.array(iso))
+
+    def p3_for(name, tabs, replic, xp, yp, yr, xkey, ykey, xt, yt):
+        dpar, dperp, D2, rho_m, area, iso = real_geom(xkey, ykey, xt, yt)
+        e = 2 * np.abs(yr - 0.5)
+        J1o = _spear(np.abs(xp), e)
+        J2o = _spear(xp, yp)
+        J3o = float(np.log(np.mean(dperp ** 2) / np.mean(dpar ** 2)))
+        J1n = np.array([_spear(np.abs(replic["pull_x"][b]), 2 * np.abs(replic["rank_y"][b] - 0.5))
+                        for b in range(B_null)])
+        J2n = np.array([_spear(replic["pull_x"][b], replic["pull_y"][b])
+                        for b in range(B_null)])
+        J3n = np.array([float(np.log(np.mean(replic["d_perp"][b] ** 2)
+                                     / np.mean(replic["d_par"][b] ** 2)))
+                        for b in range(B_null)])
+        blk = {}
+        for lab, o, nl in (("J1_overlap", J1o, J1n), ("J2_association", J2o, J2n),
+                           ("J3p_log_anisotropy", J3o, J3n)):
+            cp = calibrated_p(o, nl); cp["mc_se"] = mc_se(cp["p"], nl.size)
+            blk[lab] = dict(**cp, materiality=null_relative_material(o, nl))
+        blk["mean_D2"] = dict(observed=float(np.mean(D2)),
+                              null_mean=float(np.mean(replic["D2"])),
+                              note="SCALE limb, largely determined by the disclosed marginals.")
+        blk["anisotropy_contrast"] = anisotropy_contrast(dpar, dperp)
+        blk["rho_m"] = dict(mean=float(rho_m.mean()), median=float(np.median(rho_m)),
+                            sd=float(rho_m.std(ddof=1)),
+                            n_sign_unresolved=int(iso.sum()),
+                            deconvolved_spread=float(
+                                np.var(np.arctanh(np.clip(rho_m, -0.999, 0.999)), ddof=1)
+                                - np.mean(1.0 / np.maximum(np.asarray(Ls, float) - 3, 1))),
+                            note="DRAWS-ONLY: no calibrated reference (prereg v2 A.3). "
+                                 "Spread is Fisher-z noise-deconvolved.")
+        blk["area"] = dict(mean=float(area.mean()),
+                           note="DRAWS-ONLY: descriptive only, no calibrated reference.")
+        return blk
+
+    P3 = {"ns_tau0": p3_for("ns_tau0", tabs_nt, rep, ns_p, t0_p, t0_r,
+                            "ns", "tau0amp", "ns_truth", "tau0amp_truth"),
+          "ns_Ap_control": p3_for("ns_Ap", tabs_na, rep_na, ns_p, ap_p, ap_r,
+                                  "ns", "Ap", "ns_truth", "Ap_truth"),
+          "Ap_tau0_control": p3_for("Ap_tau0", tabs_at, rep_at, ap_p, t0_p, t0_r,
+                                    "Ap", "tau0amp", "Ap_truth", "tau0amp_truth")}
+    # frozen premise test: partial corr(n_s, tau0 | A_p)
+    pc_o = partial_corr(ns_p, t0_p, ap_p)
+    pc_n = np.array([partial_corr(rep["pull_x"][b], rep["pull_y"][b], rep_na["pull_y"][b])
+                     for b in range(B_null)])
+    cp = calibrated_p(pc_o, pc_n); cp["mc_se"] = mc_se(cp["p"], pc_n.size)
+    P3["premise_partial_corr_ns_tau0_given_Ap"] = dict(
+        **cp, materiality=null_relative_material(pc_o, pc_n),
+        marginal_spearman=_spear(ns_p, t0_p),
+        committed_record_partial="-0.047 (sbc-ns-subdla-coupling; marginal -0.81)",
+        note="FROZEN TEST OF THE PI'S OWN PREMISE (prereg v2 A.1/D.3).")
+    out["P3"] = P3
+
+    # =============================== M-block ===============================
+    from scipy import stats as _st
+    ns_t = np.array([r["ns_truth"] for r in recs])
+    ap_t = np.array([r["Ap_truth"] for r in recs])
+    M = {}
+    M["M1_truth_law"] = dict(
+        ns_truth_uniform_ks_p=float(_st.kstest(ns_t, "uniform").pvalue),
+        Ap_truth_uniform_ks_p=float(_st.kstest(ap_t, "uniform").pvalue),
+        ns_truth_range=[float(ns_t.min()), float(ns_t.max())],
+        Ap_truth_range=[float(ap_t.min()), float(ap_t.max())],
+        note="var_prior = 1/12 confirms Uniform unit priors, so this KS test is EXACT. "
+             "The health block certifies only the TEN self-drawn sites; ns/Ap were "
+             "unverified. A break here is a generator-vs-likelihood mismatch.")
+    ac = {k: [autocorr_lag1(r[k]) for r in recs] for k in ("ns", "Ap", "tau0amp")}
+    M["M2_sampler"] = dict(
+        lag1_median={k: float(np.median(v)) for k, v in ac.items()},
+        lag1_max={k: float(np.max(v)) for k, v in ac.items()},
+        thin_step_median=float(np.median([600.0 / r["L"] for r in recs])),
+        null_sd_shift_note="Residual autocorrelation at the observed L shifts the null pull "
+                           "sd only ~1.010 -> ~1.014, so this class can be EXCLUDED, not "
+                           "confirmed. The rank null ABSORBS autocorrelation by construction.")
+    m3 = permutation_null(ns_t, np.abs(ns_p), _spear, B=B_null, seed=seed + 30)
+    m3["mc_se"] = mc_se(m3["p"], B_null)
+    M["M3_prior_edge"] = dict(
+        spearman_abs_pull_vs_truth_ns=_spear(ns_t, np.abs(ns_p)), **m3,
+        spearman_postsd_vs_truth_ns=_spear(ns_t, postsd),
+        committed_prediction="the 2026-06 record states the n_s bias was NOT a prior-edge "
+                             "artefact (pull-vs-truth flat) -- this re-tests it",
+        note="Proxy for the named 'stop_gradient n_s-edge MF-floor term that n_s-dependently "
+             "widens C'. This is the restored KS variable V1.")
+    M["loglik_rank_NOT_RUN"] = (
+        "ll_true/ll_draws are stored and the Modrak loglik rank is the one omnibus statistic "
+        "sensitive to a C_mock != C_like break, but PI #9 Q3 ruled ll_rank_frac_mean "
+        "UNINTERPRETABLE on a self-draw arm. NOT RUN; returned as a section-19 question.")
+    out["M_mechanism_class"] = M
+
+    # =============================== Tier-2 ===============================
+    def pulls_for_sites(keys):
+        return np.column_stack([site_pull_rank(recs, k)[0] for k in keys])
+    alpha_block = np.column_stack([
+        np.array([pull_of(np.asarray(r["draws"], float)[:, r["names"].index(a)],
+                          float(np.asarray(r["truth"], float)[r["names"].index(a)]))
+                  for r in recs]) for a in ALPHAS])
+    hcd_pc1, hcd_var = _pc1(alpha_block)
+    metal_pc1, metal_var = _pc1(pulls_for_sites(METAL_NODES))
+    fres_p, _ = site_pull_rank(recs, "f_res_amp")
+    t2 = {}
+    cands = [("dtau0", dt_p), ("HCD_PC1", hcd_pc1), ("metal_PC1", metal_pc1),
+             ("f_res_amp", fres_p)]
+    t2_tests = []
+    for name, v in cands:
+        for tgt_name, tgt in (("pull_ns", ns_p), ("pull_tau0amp", t0_p)):
+            pn = permutation_null(v, tgt, _spear, B=B_null, seed=seed + 40)
+            pn["mc_se"] = mc_se(pn["p"], B_null)
+            t2_tests.append(dict(candidate=name, target=tgt_name, rho=_spear(v, tgt), **pn))
+    fl = holm([t["p"] for t in t2_tests])
+    for t_, f_ in zip(t2_tests, fl):
+        t_["holm_flagged"] = bool(f_)
+        t_["materiality"] = dict(note="null-relative; see null_mean/null_sd",
+                                 deviation=t_["rho"] - t_["null_mean"],
+                                 material=bool(abs(t_["rho"] - t_["null_mean"]) >= 0.30
+                                               and abs(t_["rho"] - t_["null_mean"])
+                                               >= 2 * t_["null_sd"]))
+    t2["tests"] = t2_tests
+    t2["holm_family_size"] = len(t2_tests)
+    t2["hcd_pc1_var_explained"] = hcd_var
+    t2["metal_pc1_var_explained"] = metal_var
+    t2["frozen_directional_predictions"] = dict(
+        subdla_expected=0.73, lls_expected=0.25, ordering="subDLA > LLS",
+        observed_subdla=_spear(alpha_block[:, 1], ns_p),
+        observed_lls=_spear(alpha_block[:, 0], ns_p),
+        observed_dla=_spear(alpha_block[:, 2], ns_p),
+        note="Signed ordered replication predictions from the committed record. "
+             "+0.73 is above the n=48 MDE ~0.40; +0.25 is NOT.")
+    # joint mean-flux 2-D calibration in SAMPLED coordinates
+    mf_tabs = [loo_tables(np.asarray(r["sites_extra"]["tau0_amp"]["draws"], float),
+                          np.asarray(r["sites_extra"]["dtau0"]["draws"], float))
+               for r in recs]
+    mf_rep = null_replicates(mf_tabs, B=B_null, seed=seed + 50)
+    mfD2 = []
+    for r in recs:
+        x = np.asarray(r["sites_extra"]["tau0_amp"]["draws"], float)
+        y = np.asarray(r["sites_extra"]["dtau0"]["draws"], float)
+        C = np.cov(np.vstack([x, y]), ddof=1)
+        d = np.array([x.mean() - float(r["sites_extra"]["tau0_amp"]["truth"]),
+                      y.mean() - float(r["sites_extra"]["dtau0"]["truth"])])
+        mfD2.append(float(d @ np.linalg.inv(C) @ d))
+    cp = calibrated_p(float(np.mean(mfD2)), mf_rep["D2"].mean(axis=1), two_sided=False)
+    cp["mc_se"] = mc_se(cp["p"], mf_rep["D2"].shape[0])
+    t2["meanflux_joint_2d"] = dict(**cp,
+                                   note="Mahalanobis D2 in the SAMPLED (tau0_amp, dtau0) "
+                                        "coordinates: a rotation in the mean-flux plane need "
+                                        "not show in either marginal.")
+    out["Tier2"] = t2
+
+    # =============================== Tier-3 ===============================
+    t3 = {}
+    for nm in TIER3_COSMO:
+        j = recs[0]["names"].index(nm)
+        p = np.array([pull_of(np.asarray(r["draws"], float)[:, j],
+                              float(np.asarray(r["truth"], float)[j])) for r in recs])
+        rk = np.array([rank_of(np.asarray(r["draws"], float)[:, j],
+                               float(np.asarray(r["truth"], float)[j])) for r in recs])
+        t3[nm] = dict(pull_mean=float(p.mean()), pull_sd=float(p.std(ddof=1)),
+                      rank_ks_p=rank_ks_p(rk),
+                      spearman_vs_pull_ns=_spear(p, ns_p),
+                      spearman_vs_pull_tau0=_spear(p, t0_p),
+                      flagged=bool(abs(p.mean()) > 0.5 or p.std(ddof=1) > 1.5
+                                   or p.std(ddof=1) < 0.6 or rank_ks_p(rk) < 1e-3))
+    for nm in TIER3_SITES + METAL_NODES:
+        if nm not in recs[0]["sites_extra"]:
+            continue
+        p, rk = site_pull_rank(recs, nm)
+        t3[nm] = dict(pull_mean=float(p.mean()), pull_sd=float(p.std(ddof=1)),
+                      rank_ks_p=rank_ks_p(rk),
+                      spearman_vs_pull_ns=_spear(p, ns_p),
+                      spearman_vs_pull_tau0=_spear(p, t0_p),
+                      flagged=bool(abs(p.mean()) > 0.5 or p.std(ddof=1) > 1.5
+                                   or p.std(ddof=1) < 0.6 or rank_ks_p(rk) < 1e-3))
+    out["Tier3"] = dict(channels=t3, n_flagged=int(sum(v["flagged"] for v in t3.values())),
+                        power_disclosure="At n=48 sd has sampling sd ~0.10, so sd>1.5 is "
+                                         "+4.9 sigma and |mean|>0.5 is 3.5 sigma; expected "
+                                         "false flags across ~19 channels ~0.03. A CLEAN "
+                                         "SWEEP IS UNINFORMATIVE; 'everything else is "
+                                         "healthy' is BARRED.")
+
+    # =============================== primary Holm family ===============================
+    prim = [("S1", p1["shape_calibrated"]["S1_mean_minus_half"]["p"]),
+            ("S2", p1["shape_calibrated"]["S2_var_minus_uniform"]["p"]),
+            ("S3", p1["shape_calibrated"]["S3_tail_asymmetry"]["p"]),
+            ("S4", p1["shape_calibrated"]["S4_both_tail_occupancy"]["p"]),
+            ("J1", P3["ns_tau0"]["J1_overlap"]["p"]),
+            ("J2", P3["ns_tau0"]["J2_association"]["p"]),
+            ("J3p", P3["ns_tau0"]["J3p_log_anisotropy"]["p"]),
+            ("premise_partial", P3["premise_partial_corr_ns_tau0_given_Ap"]["p"])]
+    fl = holm([p for _, p in prim])
+    out["primary_holm_family"] = dict(
+        m=len(prim), alpha=HOLM_ALPHA,
+        tests={k: dict(p=p, holm_significant=bool(f)) for (k, p), f in zip(prim, fl)},
+        realized_fwer_note="ONE family (v1's three families gave FWER 14.3%).")
+    out["meta"] = dict(n=n, B_null=B_null, seed=seed, L_median=float(np.median(Ls)),
+                       L_range=[int(min(Ls)), int(max(Ls))],
+                       winsor_k=WINSOR_K, prereg="v2 amendment 2026-08-07")
+    return out

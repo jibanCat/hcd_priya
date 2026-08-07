@@ -677,3 +677,98 @@ def test_ladder_is_exactly_log_linear_no_projection_artefact(ED):
     y = np.log(ladder)
     slope = np.sum(lxc * (y - y.mean())) / np.sum(lxc ** 2)
     assert np.max(np.abs(y - (y.mean() + slope * lxc))) < 1e-12
+
+
+# --- v2 amendment machinery -------------------------------------------------------------
+
+def test_exact_rank_null_is_uniform_on_the_deployed_lattice(ED):
+    from scipy import stats as st
+    r = ED.exact_rank_null([75, 150, 300], 4000, 1)
+    assert r.shape == (4000, 3)
+    assert st.kstest(r.ravel(), "uniform").pvalue > 0.01
+    assert set(np.unique(r[:, 0])) <= set(np.arange(76) / 75)
+
+
+def test_check_ties_refuses_duplicate_draw_rows(ED):
+    rng = np.random.default_rng(61)
+    good = [dict(m=0, ns=rng.normal(size=50), Ap=rng.normal(size=50),
+                 tau0amp=rng.normal(size=50))]
+    assert ED.check_ties(good) is True
+    bad = dict(m=1, ns=np.r_[np.ones(2), rng.normal(size=48)],
+               Ap=np.r_[np.ones(2), rng.normal(size=48)],
+               tau0amp=np.r_[np.ones(2), rng.normal(size=48)])
+    with pytest.raises(ED.DiagRefusal, match="duplicate draw rows"):
+        ED.check_ties([bad])
+
+
+def test_sites_alignment_refuses_row_misalignment(ED):
+    rec = dict(m=0, L=50, sites_extra={"a": {"draws": np.zeros(49), "truth": 0.1}})
+    with pytest.raises(ED.DiagRefusal, match="row misalignment"):
+        ED.check_sites_alignment([rec], ["a"])
+    rec2 = dict(m=0, L=50, sites_extra={})
+    with pytest.raises(ED.DiagRefusal, match="absent"):
+        ED.check_sites_alignment([rec2], ["a"])
+
+
+def test_null_relative_material_fixes_the_v1_defect(ED):
+    """v1's |rho|>=0.30-from-zero fired on ~92% of healthy arms because the healthy null
+    sits near -0.47. The null-relative rule must NOT fire when obs sits AT the null."""
+    null = np.random.default_rng(62).normal(-0.47, 0.11, 4000)
+    at_null = ED.null_relative_material(-0.47, null)
+    assert at_null["material"] is False
+    far = ED.null_relative_material(-0.47 + 0.45, null)
+    assert far["material"] is True
+
+
+def test_partial_corr_recovers_a_known_collapse(ED):
+    """Mirrors the committed record: a strong marginal routed through a third variable
+    collapses under conditioning."""
+    rng = np.random.default_rng(63)
+    a = rng.normal(size=400)
+    x = a + 0.15 * rng.normal(size=400)
+    y = -a + 0.15 * rng.normal(size=400)
+    marginal = abs(ED._spear(x, y))
+    partial = abs(ED.partial_corr(x, y, a))
+    assert marginal > 0.8 and partial < 0.3
+
+
+def test_mc_se_and_calibrated_p_resolution(ED):
+    assert ED.mc_se(0.0125, 50000) < 0.0006
+    assert ED.mc_se(0.0125, 2000) > 0.002
+
+
+def test_autocorr_lag1_detects_correlation(ED):
+    rng = np.random.default_rng(64)
+    iid = rng.normal(size=500)
+    ar = np.zeros(500); 
+    for i in range(1, 500):
+        ar[i] = 0.8 * ar[i-1] + rng.normal()
+    assert abs(ED.autocorr_lag1(iid)) < 0.15
+    assert ED.autocorr_lag1(ar) > 0.6
+
+
+def test_identity_check_flags_a_broken_ladder(ED):
+    """If the ladder were NOT the deployed closed form, P1-I must catch it."""
+    co = ED.tau_eff_rung_coefficients()
+    z = np.asarray(co["z"]); zbar = co["zbar"]
+    rng = np.random.default_rng(65)
+    L = 60
+    amp = rng.uniform(0.8, 1.2, L); dt = rng.uniform(-0.3, 0.2, L)
+    ladder = amp[:, None] * ((1 + z) / 4.0) ** dt[:, None] * 0.0023 * (1 + z) ** 3.65
+    names = [f"tau0_z{i}" for i in range(13)]
+    good = dict(m=0, L=L, names=names, draws=ladder, truth=np.zeros(13),
+                tau0amp=ED.tau0_amp_vec(ladder),
+                sites_extra={"tau0_amp": {"draws": amp, "truth": 1.0},
+                             "dtau0": {"draws": dt, "truth": 0.0}})
+    assert ED.identity_check([good])["identity_holds"] is True
+    bad = dict(good); bad["tau0amp"] = good["tau0amp"] * 1.01
+    assert ED.identity_check([bad])["identity_holds"] is False
+
+
+def test_pc1_captures_a_common_mode(ED):
+    rng = np.random.default_rng(66)
+    common = rng.normal(size=48)
+    X = np.column_stack([common + 0.1 * rng.normal(size=48) for _ in range(3)])
+    sc, var = ED._pc1(X)
+    assert var > 0.9
+    assert abs(ED._spear(sc, common)) > 0.9
