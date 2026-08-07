@@ -229,3 +229,112 @@ def check_consistency(recs, gate_json, selfdraw_json, leg=LEG, n_total=N_TOTAL):
         raise DiagRefusal("divergence total != committed gate JSON")
 
     return {label: got for label, got, _ in checks}
+
+
+# --- P2 core: scale / tail / coverage (VERBATIM reuse of the frozen KS suite) ---------
+
+def discrete_null_coverage(Ls, lo, hi):
+    """Exact null occupancy of the INCLUSIVE band for the discrete rank r = k/L
+    (k uniform on 0..L), averaged over the arm's own L census. Uses only fit metadata."""
+    vals = []
+    for L in Ls:
+        k = np.arange(0, int(L) + 1)
+        vals.append(np.mean((k / L >= lo) & (k / L <= hi)))
+    return float(np.mean(vals))
+
+
+def coverage(ranks, Ls=None):
+    from scipy.stats import binomtest
+    out = {}
+    r = np.asarray(ranks, float)
+    for q in LEVELS:
+        lo, hi = BAND_EDGES[q]
+        k = int(np.sum((r >= lo) & (r <= hi)))
+        ci = binomtest(k, len(r)).proportion_ci(confidence_level=0.95, method="exact")
+        row = dict(covered=k, n=len(r), fraction=k / len(r), nominal=q,
+                   diff=k / len(r) - q, ci95=[float(ci.low), float(ci.high)])
+        if Ls is not None:
+            row["discrete_null_expectation"] = discrete_null_coverage(Ls, lo, hi)
+        out[f"{q:.2f}"] = row
+    return out
+
+
+def winsorized_sd(x, k=WINSOR_K):
+    """Explicit symmetric winsorization, k per tail (k = ceil(0.05 n))."""
+    s = np.sort(np.asarray(x, float))
+    w = s.copy()
+    w[:k] = s[k]
+    w[-k:] = s[-(k + 1)]
+    return float(np.std(w, ddof=1))
+
+
+def normal_references(n=N_TOTAL, k=WINSOR_K, seed=NORMREF_SEED, nsim=NORMREF_NSIM):
+    """Seeded finite-sample NORMAL references for the scale/tail ratios, regenerated at
+    THIS arm's (n, k). E[winsorized/sd] is NOT 1 -- winsorizing shrinks a normal sample's
+    sd by construction -- and the n=96/k=5 constant 0.907 must never be carried over.
+    Synthetic only: no real-data contact."""
+    from scipy.stats import median_abs_deviation
+    rng = np.random.default_rng(seed)
+    x = rng.standard_normal((nsim, n))
+    sd = x.std(ddof=1, axis=1)
+    s = np.sort(x, axis=1)
+    w = s.copy()
+    w[:, :k] = s[:, [k]]
+    w[:, -k:] = s[:, [-(k + 1)]]
+    wins = w.std(ddof=1, axis=1)
+    mad = median_abs_deviation(x, scale="normal", axis=1)
+    xc = x - x.mean(axis=1, keepdims=True)
+    sq = np.sort(xc ** 2, axis=1)[:, ::-1]
+    ss = sq.sum(axis=1)
+    return dict(winsorized_over_sd=float(np.mean(wins / sd)),
+                sd_over_mad=float(np.mean(sd / mad)),
+                variance_contrib_topk={str(kk): float(np.mean(sq[:, :kk].sum(axis=1) / ss))
+                                       for kk in TOP_K},
+                n=n, k=k, seed=seed, nsim=nsim)
+
+
+def scales_and_tail(pulls, n=N_TOTAL, k=WINSOR_K, normref_nsim=NORMREF_NSIM):
+    from scipy.stats import median_abs_deviation
+    x = np.asarray(pulls, float)
+    nn = len(x)
+    sd = float(np.std(x, ddof=1))
+    xc = x - x.mean()
+    ss = float(np.sum(xc ** 2))
+    order = np.argsort(-np.abs(xc))
+    contrib = {str(kk): float(np.sum(xc[order[:kk]] ** 2) / ss) for kk in TOP_K}
+    loo = np.array([np.std(np.delete(x, i), ddof=1) for i in range(nn)])
+    top5 = [dict(i=int(i), pull=float(x[i])) for i in np.argsort(-np.abs(x))[:5]]
+    mad = float(median_abs_deviation(x, scale="normal"))
+    wins = winsorized_sd(x, k=k)
+    return dict(
+        sd=sd, mean=float(x.mean()), median=float(np.median(x)), mad_scale=mad,
+        winsorized_sd=wins, winsor_k=k,
+        quantiles={f"{q:g}": float(np.quantile(x, q)) for q in QUANTS},
+        top5_abs_pulls=top5, variance_contrib_topk=contrib,
+        loo_sd_min=float(loo.min()), loo_sd_max=float(loo.max()),
+        loo_sd_max_abs_change=float(np.max(np.abs(loo - sd))),
+        loo_sd_all=[float(v) for v in loo],
+        sd_over_mad=sd / mad, winsorized_over_sd=wins / sd,
+        normal_references=normal_references(n=n, k=k, nsim=normref_nsim))
+
+
+def r_scale_bootstrap(pulls, Ls, B=BOOT_B, seed=BOOT_SEED):
+    """Finite-L-adjusted scale ratio with a PAIRED bootstrap over (pull, L) pairs, so the
+    numerator and the finite-L denominator are resampled together (the frozen KS form)."""
+    x = np.asarray(pulls, float)
+    L = np.asarray(Ls, float)
+    if x.size != L.size:
+        raise DiagRefusal("r_scale_bootstrap: pull/L length mismatch")
+    point = float(np.std(x, ddof=1) / finite_L_null_sd(L))
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, x.size, size=(B, x.size))
+    vals = []
+    for row in idx:
+        xb, Lb = x[row], L[row]
+        if np.any(Lb <= 3):
+            continue
+        vals.append(np.std(xb, ddof=1) / finite_L_null_sd(Lb))
+    v = np.sort(np.asarray(vals, float))
+    return dict(point=point, B=int(v.size), seed=seed,
+                ci68=[float(np.quantile(v, 0.16)), float(np.quantile(v, 0.84))],
+                ci95=[float(np.quantile(v, 0.025)), float(np.quantile(v, 0.975))])

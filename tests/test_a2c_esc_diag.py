@@ -294,3 +294,91 @@ def test_no_output_leaks_on_refusal(tmp_path, ED):
     json.dump(j, open(gate, "w"))
     with pytest.raises(ED.DiagRefusal):
         ED.check_consistency(recs, gate, sdj)
+
+
+# --- P2 core (verbatim reuse of the frozen KS suite) ------------------------------------
+
+def test_winsorized_sd_shrinks_and_matches_manual(ED):
+    x = np.array([-9.0, -2, -1, -0.5, 0, 0.5, 1, 2, 9.0])
+    w = ED.winsorized_sd(x, k=2)
+    s = np.sort(x)
+    man = s.copy()
+    man[:2] = s[2]
+    man[-2:] = s[-3]
+    assert np.isclose(w, float(np.std(man, ddof=1)))
+    assert w < float(np.std(x, ddof=1))
+
+
+def test_normal_reference_winsor_ratio_is_not_one_and_is_n_specific(ED):
+    """The n=96/k=5 constant 0.907 must NOT be reused at n=48/k=3."""
+    r48 = ED.normal_references(n=48, k=3, nsim=20000)
+    r96 = ED.normal_references(n=96, k=5, nsim=20000)
+    assert 0.5 < r48["winsorized_over_sd"] < 1.0
+    assert not np.isclose(r48["winsorized_over_sd"], r96["winsorized_over_sd"], atol=1e-3)
+    assert r48["n"] == 48 and r48["k"] == 3
+
+
+def test_normal_reference_is_seeded_and_reproducible(ED):
+    a = ED.normal_references(n=48, k=3, nsim=5000)
+    b = ED.normal_references(n=48, k=3, nsim=5000)
+    assert a == b
+
+
+def test_discrete_null_coverage_matches_brute_force(ED):
+    lo, hi = ED.BAND_EDGES[0.95]
+    got = ED.discrete_null_coverage([10], lo, hi)
+    k = np.arange(0, 11)
+    want = float(np.mean((k / 10 >= lo) & (k / 10 <= hi)))
+    assert np.isclose(got, want)
+
+
+def test_discrete_null_coverage_is_below_nominal_at_small_L(ED):
+    """Discreteness makes the inclusive-band null occupancy differ from the nominal."""
+    lo, hi = ED.BAND_EDGES[0.95]
+    assert ED.discrete_null_coverage([75, 100, 150], lo, hi) != 0.95
+
+
+def test_coverage_counts_boundary_rank_as_inside(ED):
+    ranks = [0.025, 0.975, 0.5, 0.001]
+    cov = ED.coverage(ranks)
+    assert cov["0.95"]["covered"] == 3
+
+
+def test_coverage_exact_binomial_ci_brackets_fraction(ED):
+    cov = ED.coverage([0.5] * 30 + [0.001] * 18)
+    row = cov["0.95"]
+    assert row["ci95"][0] <= row["fraction"] <= row["ci95"][1]
+
+
+def test_scales_and_tail_variance_shares_monotone_and_bounded(ED):
+    rng = np.random.default_rng(5)
+    x = rng.standard_normal(48)
+    s = ED.scales_and_tail(x, normref_nsim=3000)
+    c = s["variance_contrib_topk"]
+    assert 0 < c["1"] <= c["2"] <= c["3"] <= c["5"] <= 1.0
+    assert len(s["loo_sd_all"]) == 48
+
+
+def test_scales_and_tail_detects_a_single_outlier(ED):
+    rng = np.random.default_rng(6)
+    x = rng.standard_normal(48)
+    x[0] = 8.0
+    s = ED.scales_and_tail(x, normref_nsim=3000)
+    assert s["variance_contrib_topk"]["1"] > 0.3
+    assert s["loo_sd_min"] < s["sd"]
+    assert s["top5_abs_pulls"][0]["i"] == 0
+
+
+def test_r_scale_bootstrap_point_and_ci(ED):
+    rng = np.random.default_rng(9)
+    x = rng.standard_normal(48) * 1.27
+    Ls = rng.choice([75, 150, 300], size=48)
+    out = ED.r_scale_bootstrap(x, Ls, B=500)
+    assert np.isclose(out["point"], float(np.std(x, ddof=1) / ED.finite_L_null_sd(Ls)))
+    assert out["ci68"][0] <= out["point"] <= out["ci68"][1]
+    assert out["ci95"][0] <= out["ci68"][0] and out["ci68"][1] <= out["ci95"][1]
+
+
+def test_r_scale_bootstrap_length_mismatch_refuses(ED):
+    with pytest.raises(ED.DiagRefusal, match="length mismatch"):
+        ED.r_scale_bootstrap([1.0, 2.0], [100], B=10)
