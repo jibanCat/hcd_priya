@@ -29,6 +29,14 @@ import numpy as np
 N_TOTAL = 96
 RTOL = 1e-9
 LEVELS = (0.68, 0.95)
+# DG2 SHOULD-FIX 8: literal band edges (the float expression (1-0.95)/2 lands ABOVE the
+# double for 0.025 and would exclude an exactly-boundary rank, violating the frozen
+# inclusive-endpoint rule).
+BAND_EDGES = {0.68: (0.16, 0.84), 0.95: (0.025, 0.975)}
+# DG2 MUST-FIX 3/5: frozen seeds for the committed synthetic reference calibrations
+# (normal-sample references for the scale/tail ratios; the V5 healthy-degeneracy band).
+NORMREF_SEED, NORMREF_NSIM = 20260808, 200_000
+V5_SEED, V5_NSIM, V5_RHO = 20260809, 4000, -0.5
 WINSOR_K = 5                     # ceil(0.05 * 96), prereg section 5
 TOP_K = (1, 2, 3, 5)
 QUANTS = (0.025, 0.05, 0.16, 0.50, 0.84, 0.95, 0.975)
@@ -96,12 +104,18 @@ def load_population(outdir, sha_file):
         raise DiagRefusal(f"census != mock_0000..%04d (got {len(names_files)} files)" % (N_TOTAL - 1))
     recorded = {}
     with open(sha_file) as f:
-        for line in f:
+        for lineno, line in enumerate(f, 1):
             line = line.strip()
             if not line:
                 continue
-            digest, name = line.split(None, 1)
-            recorded[os.path.basename(name.strip().lstrip("*"))] = digest
+            try:
+                digest, name = line.split(None, 1)
+            except ValueError:
+                raise DiagRefusal(f"malformed sha inventory line {lineno}: {line!r}")
+            base = os.path.basename(name.strip().lstrip("*"))
+            if base in recorded:
+                raise DiagRefusal(f"duplicate sha inventory entry: {base}")
+            recorded[base] = digest
     if set(recorded) != set(expect):
         raise DiagRefusal("sha inventory names != 96-mock census")
     frozen = _frozen_cfg()
@@ -156,22 +170,43 @@ def check_consistency(recs, gate_json, selfdraw_json):
         if not np.isclose(got, want, rtol=RTOL, atol=0.0):
             raise DiagRefusal(f"deployment-consistency FAIL on {label}: recomputed {got!r} "
                               f"vs committed {want!r} (rtol {RTOL})")
+    # DG2 MUST-FIX 2: the anchor must be the n=96 KS selfdraw record, not its committed
+    # n=48 near-namesake; refuse anything else.
+    if int(sd.get("n", -1)) != N_TOTAL or sd.get("survey") != "KS" \
+            or sd.get("conjuncts_ok") is not True:
+        raise DiagRefusal(f"selfdraw anchor is not the passed n=96 KS record "
+                          f"(n {sd.get('n')!r}, survey {sd.get('survey')!r}, "
+                          f"conjuncts_ok {sd.get('conjuncts_ok')!r})")
     if float(np.median(Ls)) != float(sd["L_median"]) or \
             [min(Ls), max(Ls)] != [int(x) for x in sd["L_range"]]:
         raise DiagRefusal("L census != selfdraw JSON median/range")
     return {label: got for label, got, _ in checks}
 
 
-def coverage(ranks):
+def discrete_null_coverage(Ls, lo, hi):
+    """DG2 SHOULD-FIX 7: the exact null expectation of the inclusive band on the discrete
+    rank r = k/L (k uniform on 0..L under the null), averaged over the arm's own L census.
+    Uses only fit metadata (L), never a diagnostic outcome."""
+    vals = []
+    for L in Ls:
+        k = np.arange(0, L + 1)
+        vals.append(np.mean((k / L >= lo) & (k / L <= hi)))
+    return float(np.mean(vals))
+
+
+def coverage(ranks, Ls=None):
     from scipy.stats import binomtest
     out = {}
     r = np.asarray(ranks, float)
     for q in LEVELS:
-        lo, hi = (1.0 - q) / 2.0, (1.0 + q) / 2.0
+        lo, hi = BAND_EDGES[q]
         k = int(np.sum((r >= lo) & (r <= hi)))
         ci = binomtest(k, len(r)).proportion_ci(confidence_level=0.95, method="exact")
-        out[f"{q:.2f}"] = dict(covered=k, n=len(r), fraction=k / len(r), nominal=q,
-                               diff=k / len(r) - q, ci95=[float(ci.low), float(ci.high)])
+        row = dict(covered=k, n=len(r), fraction=k / len(r), nominal=q,
+                   diff=k / len(r) - q, ci95=[float(ci.low), float(ci.high)])
+        if Ls is not None:
+            row["discrete_null_expectation"] = discrete_null_coverage(Ls, lo, hi)
+        out[f"{q:.2f}"] = row
     return out
 
 
@@ -184,7 +219,33 @@ def winsorized_sd(x, k=WINSOR_K):
     return float(np.std(w, ddof=1))
 
 
-def scales_and_tail(pulls):
+def normal_references(n=N_TOTAL, k=WINSOR_K, seed=NORMREF_SEED, nsim=NORMREF_NSIM):
+    """DG2 MUST-FIX 3: seeded finite-sample NORMAL references for the scale/tail ratios.
+    E[winsorized/sd] is ~0.907 at n=96/k=5 (NOT 1: winsorizing shrinks a normal sample's
+    sd by construction); E[sd/MAD-scale] ~1.015; E[c_k] are the normal top-k variance
+    shares. Synthetic only -- no real-data contact."""
+    from scipy.stats import median_abs_deviation
+    rng = np.random.default_rng(seed)
+    x = rng.standard_normal((nsim, n))
+    sd = x.std(ddof=1, axis=1)
+    s = np.sort(x, axis=1)
+    w = s.copy()
+    w[:, :k] = s[:, [k]]
+    w[:, -k:] = s[:, [-(k + 1)]]
+    wins = w.std(ddof=1, axis=1)
+    mad = median_abs_deviation(x, scale="normal", axis=1)
+    xc = x - x.mean(axis=1, keepdims=True)
+    sq = np.sort(xc ** 2, axis=1)[:, ::-1]
+    ss = sq.sum(axis=1)
+    refs = dict(winsorized_over_sd=float(np.mean(wins / sd)),
+                sd_over_mad=float(np.mean(sd / mad)),
+                variance_contrib_topk={str(kk): float(np.mean(sq[:, :kk].sum(axis=1) / ss))
+                                       for kk in TOP_K},
+                n=n, k=k, seed=seed, nsim=nsim)
+    return refs
+
+
+def scales_and_tail(pulls, normref_nsim=NORMREF_NSIM):
     from scipy.stats import median_abs_deviation
     x = np.asarray(pulls, float)
     n = len(x)
@@ -206,7 +267,8 @@ def scales_and_tail(pulls):
         loo_sd_min=float(loo.min()), loo_sd_max=float(loo.max()),
         loo_sd_max_abs_change=float(np.max(np.abs(loo - sd))),
         loo_sd_all=[float(v) for v in loo],
-        sd_over_mad=sd / mad, winsorized_over_sd=wins / sd)
+        sd_over_mad=sd / mad, winsorized_over_sd=wins / sd,
+        normal_references=normal_references(nsim=normref_nsim))
 
 
 def holm(pvals, alpha=HOLM_ALPHA):
@@ -222,27 +284,59 @@ def holm(pvals, alpha=HOLM_ALPHA):
     return sig
 
 
-def metadata_dependence(recs):
+def v5_healthy_band(rho=V5_RHO, n=N_TOTAL, seed=V5_SEED, nsim=V5_NSIM):
+    """DG2 MUST-FIX 5: the healthy-degeneracy reference for V5. Under perfect calibration
+    the within-fit n_s-tau0amp correlation (~-0.5, committed) reappears across
+    realizations, so |pull| vs |pull| dependence is EXPECTED under health (measured mean
+    Spearman rho ~ +0.17, P(p < 0.05) ~ 0.38). A V5 flag at the frozen threshold
+    therefore carries no excess-co-loading evidence by itself; 'co-loading in excess of
+    the healthy degeneracy' language requires rho ABOVE this band. Synthetic only."""
+    from scipy.stats import spearmanr
+    rng = np.random.default_rng(seed)
+    c = np.linalg.cholesky(np.array([[1.0, rho], [rho, 1.0]]))
+    rhos, small_p = [], 0
+    for _ in range(nsim):
+        z = rng.standard_normal((2, n))
+        x, y = c @ z
+        r, p = spearmanr(np.abs(x), np.abs(y))
+        rhos.append(r)
+        small_p += (p < 0.05)
+    rhos = np.asarray(rhos)
+    return dict(within_fit_rho=rho, mean_rho=float(rhos.mean()),
+                band_2p5=float(np.percentile(rhos, 2.5)),
+                band_97p5=float(np.percentile(rhos, 97.5)),
+                p_flag_under_health=small_p / nsim, seed=seed, nsim=nsim)
+
+
+def metadata_dependence(recs, v5_nsim=V5_NSIM):
     from scipy.stats import spearmanr
     pulls = np.array([r["pull"] for r in recs])
     ab = np.abs(pulls)
     Ls = np.array([r["L"] for r in recs], float)
     null_i = np.sqrt((1.0 + 1.0 / Ls) * (Ls - 1.0) / (Ls - 3.0))
+    # DG2 SHOULD-FIX 9: carry the full frozen T4 descriptor columns.
     variables = [
-        ("V1 truth_ns", np.array([r["truth_ns"] for r in recs]), ab),
-        ("V2 post_sd_ns", np.array([r["post_sd"] for r in recs]), ab),
-        ("V3 L (target |pull|/null_L)", Ls, ab / null_i),
-        ("V4 |f_res_amp truth|", np.array([r["fres_abs"] for r in recs]), ab),
-        ("V5 |tau0amp pull|", np.abs(np.array([r["tau0_pull"] for r in recs])), ab),
+        ("V1 truth_ns", "truth_vec[names.index('ns')]", "none", "|pull|",
+         np.array([r["truth_ns"] for r in recs]), ab),
+        ("V2 post_sd_ns", "std(draws[:, ns], ddof=1)", "none", "|pull|",
+         np.array([r["post_sd"] for r in recs]), ab),
+        ("V3 L", "pkl L", "none", "|pull|/sqrt[(1+1/L)(L-1)/(L-3)]",
+         Ls, ab / null_i),
+        ("V4 |f_res_amp truth|", "sites_extra['f_res_amp'].truth", "abs", "|pull|",
+         np.array([r["fres_abs"] for r in recs]), ab),
+        ("V5 |tau0amp pull|", "deployed tau0 ladder-regression pull", "abs", "|pull|",
+         np.abs(np.array([r["tau0_pull"] for r in recs])), ab),
     ]
     rows = []
-    for label, v, target in variables:
+    for label, field, transform, target_desc, v, target in variables:
         rho, p = spearmanr(v, target)
-        rows.append(dict(variable=label, rho=float(rho), p=float(p)))
+        rows.append(dict(variable=label, field=field, transform=transform,
+                         target=target_desc, rho=float(rho), p=float(p)))
     flags = holm([r["p"] for r in rows])
     for r, f in zip(rows, flags):
         r["holm_flagged"] = bool(f)
-    return rows, variables
+    rows[4]["healthy_band"] = v5_healthy_band(nsim=v5_nsim)
+    return rows, [(v[0], v[4], v[5]) for v in variables]
 
 
 def rscale_bootstrap(pulls, Ls, B=BOOT_B, seed=BOOT_SEED):
@@ -276,15 +370,24 @@ def rscale_bootstrap(pulls, Ls, B=BOOT_B, seed=BOOT_SEED):
         r_basic68=basic(r_star, s_obs / s_ref, 16, 84),
         r_basic95=basic(r_star, s_obs / s_ref, 2.5, 97.5),
     )
-    # material sensitivity: basic-vs-percentile discrepancy > 10% of interval width
-    def sens(a, b):
+    # DG2 MUST-FIX 4: the 10% basic-vs-percentile criterion fires generically at the 68%
+    # level on HEALTHY populations (measured 63% firing rate; median healthy shift/width
+    # 0.110 at 68% vs 0.052 at 95%), so the MATERIAL-sensitivity boolean applies at the
+    # 95% level ONLY; the shift/width fractions are reported numerically at both levels
+    # with the healthy-null references alongside.
+    def shift_frac(a, b):
         w = b[1] - b[0]
-        return bool(max(abs(a[0] - b[0]), abs(a[1] - b[1])) > 0.10 * w) if w > 0 else False
-    out["sensitivity_material"] = dict(
-        s68=sens(out["s_obs_basic68"], out["s_obs_ci68"]),
-        s95=sens(out["s_obs_basic95"], out["s_obs_ci95"]),
-        r68=sens(out["r_basic68"], out["r_ci68"]),
-        r95=sens(out["r_basic95"], out["r_ci95"]))
+        return float(max(abs(a[0] - b[0]), abs(a[1] - b[1])) / w) if w > 0 else float("nan")
+    fr = dict(s68=shift_frac(out["s_obs_basic68"], out["s_obs_ci68"]),
+              s95=shift_frac(out["s_obs_basic95"], out["s_obs_ci95"]),
+              r68=shift_frac(out["r_basic68"], out["r_ci68"]),
+              r95=shift_frac(out["r_basic95"], out["r_ci95"]))
+    out["sensitivity_shift_over_width"] = fr
+    out["sensitivity_healthy_reference"] = dict(
+        median_68=0.110, median_95=0.052, p_fire_68=0.63, p_fire_95=0.03,
+        source="DG2 review calibration, 400 healthy N=96 populations, B=2000")
+    out["sensitivity_material"] = dict(s95=bool(fr["s95"] > 0.10),
+                                       r95=bool(fr["r95"] > 0.10))
     return out
 
 
@@ -325,15 +428,16 @@ def make_figures(recs, scales, variables, prefix):
     fig.tight_layout(); fig.savefig(prefix + "_f4_ranks.png", dpi=130); plt.close(fig)
 
 
-def run(outdir, gate_json, selfdraw_json, sha_file):
+def run(outdir, gate_json, selfdraw_json, sha_file, *,
+        normref_nsim=NORMREF_NSIM, v5_nsim=V5_NSIM, boot_B=BOOT_B):
     recs = load_population(outdir, sha_file)
     consistency = check_consistency(recs, gate_json, selfdraw_json)
     pulls = [r["pull"] for r in recs]
     Ls = [r["L"] for r in recs]
-    cov = coverage([r["rank"] for r in recs])
-    sc = scales_and_tail(pulls)
-    meta_rows, variables = metadata_dependence(recs)
-    rs = rscale_bootstrap(pulls, Ls)
+    cov = coverage([r["rank"] for r in recs], Ls=Ls)
+    sc = scales_and_tail(pulls, normref_nsim=normref_nsim)
+    meta_rows, variables = metadata_dependence(recs, v5_nsim=v5_nsim)
+    rs = rscale_bootstrap(pulls, Ls, B=boot_B)
     return dict(consistency=consistency, coverage=cov, scales=sc,
                 metadata=meta_rows, rscale=rs,
                 per_mock=[{k: r[k] for k in ("m", "pull", "rank", "L")} for r in recs]), \
@@ -348,30 +452,51 @@ def main(argv):
     ap.add_argument("--fig-prefix", required=True)
     a = ap.parse_args(argv[1:])
     out, recs, sc, variables = run(a.outdir, a.gate_json, a.selfdraw_json, a.sha96_file)
-    make_figures(recs, sc, variables, a.fig_prefix)
+    # DG2 SHOULD-FIX 6: persist the machine output FIRST; a figure failure must not
+    # strand the single authorized invocation.
     with open(a.out_json, "w") as f:
         json.dump(out, f, indent=1)
+    try:
+        make_figures(recs, sc, variables, a.fig_prefix)
+    except Exception:
+        import traceback
+        print("FIGURE GENERATION FAILED (JSON already persisted):")
+        traceback.print_exc()
     print("=== A3c N=96 BOUNDED DIAGNOSTIC (descriptive only; Branch B unchanged) ===")
     print("deployment-consistency conjuncts: ALL PASS (gate-JSON equality at rtol 1e-9)")
     print("\nT1 COVERAGE (equal-tailed empirical band on the deployed rank statistic):")
     for q, c in out["coverage"].items():
+        dn = c.get("discrete_null_expectation")
         print(f"  {float(q):.0%}: {c['covered']}/96 = {c['fraction']:.4f} "
               f"(nominal {c['nominal']:.2f}, diff {c['diff']:+.4f}, "
-              f"exact CI95 [{c['ci95'][0]:.4f}, {c['ci95'][1]:.4f}])")
-    print("\nT2 SCALE/TAIL:")
+              f"exact CI95 [{c['ci95'][0]:.4f}, {c['ci95'][1]:.4f}]"
+              + (f", discrete-null expectation {dn:.4f}" if dn is not None else "") + ")")
+    nr = sc["normal_references"]
+    print("\nT2 SCALE/TAIL (normal finite-sample references in [brackets], seeded synthetic):")
     print(f"  sd {sc['sd']:.4f} | median {sc['median']:+.4f} | MAD-scale {sc['mad_scale']:.4f} "
           f"| winsorized(k=5) {sc['winsorized_sd']:.4f}")
-    print(f"  sd/MAD {sc['sd_over_mad']:.4f} | winsorized/sd {sc['winsorized_over_sd']:.4f}")
+    print(f"  sd/MAD {sc['sd_over_mad']:.4f} [normal {nr['sd_over_mad']:.4f}] | "
+          f"winsorized/sd {sc['winsorized_over_sd']:.4f} [normal {nr['winsorized_over_sd']:.4f}]")
     print(f"  quantiles: " + "  ".join(f"{k}:{v:+.3f}" for k, v in sc["quantiles"].items()))
     print(f"  top-5 |pulls|: " + ", ".join(f"m{t['m']}:{t['pull']:+.3f}" for t in sc["top5_abs_pulls"]))
-    print(f"  variance contrib top-k: " + ", ".join(f"k={k}:{v:.3f}"
+    print(f"  variance contrib top-k: " + ", ".join(
+          f"k={k}:{v:.3f} [normal {nr['variance_contrib_topk'][k]:.3f}]"
           for k, v in sc["variance_contrib_topk"].items()))
     print(f"\nT3 LOO sd: min {sc['loo_sd_min']:.4f} | max {sc['loo_sd_max']:.4f} | "
           f"max |change| {sc['loo_sd_max_abs_change']:.4f}")
     print("\nT4 METADATA (Spearman vs preregistered target; Holm alpha 0.05):")
     for r in out["metadata"]:
-        print(f"  {r['variable']:32s} rho {r['rho']:+.4f}  p {r['p']:.4f}  "
-              f"{'FLAGGED' if r['holm_flagged'] else 'not flagged'}")
+        print(f"  {r['variable']:24s} field={r['field']}  transform={r['transform']}  "
+              f"target={r['target']}")
+        line = (f"    rho {r['rho']:+.4f}  p {r['p']:.4f}  "
+                f"{'FLAGGED' if r['holm_flagged'] else 'not flagged'}")
+        if "healthy_band" in r:
+            hb = r["healthy_band"]
+            line += (f"  [healthy-degeneracy band: mean rho {hb['mean_rho']:+.3f}, "
+                     f"2.5-97.5% [{hb['band_2p5']:+.3f}, {hb['band_97p5']:+.3f}], "
+                     f"P(flag|health) {hb['p_flag_under_health']:.2f} -- a flag inside "
+                     f"the band is NOT excess co-loading]")
+        print(line)
     rs = out["rscale"]
     print(f"\nT5 r_scale: s_obs {rs['s_obs']:.4f} / s_ref {rs['s_ref']:.4f} = "
           f"{rs['r_scale']:.4f}")
@@ -380,7 +505,10 @@ def main(argv):
     print(f"  r     CI68 [{rs['r_ci68'][0]:.4f}, {rs['r_ci68'][1]:.4f}] "
           f"CI95 [{rs['r_ci95'][0]:.4f}, {rs['r_ci95'][1]:.4f}]  "
           f"(percentile, B={rs['B']}, seed {rs['seed']}; paired finite-L denominator)")
-    print(f"  basic-interval material sensitivity: {rs['sensitivity_material']}")
+    print(f"  basic-vs-percentile shift/width: " + ", ".join(
+          f"{k}={v:.3f}" for k, v in rs["sensitivity_shift_over_width"].items())
+          + f"  [healthy medians 68%: 0.110, 95%: 0.052]")
+    print(f"  material sensitivity (95%-level criterion only): {rs['sensitivity_material']}")
     print(f"\njson -> {a.out_json}")
 
 

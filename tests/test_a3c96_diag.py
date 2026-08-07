@@ -72,25 +72,59 @@ def _mk_pop(tmpdir, DG, seed=7, hetero_L=True, sd_scale=1.0):
         finite_L_null=dict(sd=DG.finite_L_null_sd(Ls)))})
     gpath = os.path.join(tmpdir, "gate.json")
     json.dump(gate, open(gpath, "w"))
-    sdj = dict(L_median=float(np.median(Ls)), L_range=[int(min(Ls)), int(max(Ls))])
+    sdj = dict(L_median=float(np.median(Ls)), L_range=[int(min(Ls)), int(max(Ls))],
+               n=96, survey="KS", conjuncts_ok=True)
     spath = os.path.join(tmpdir, "sd.json")
     json.dump(sdj, open(spath, "w"))
     return tmpdir, sha, gpath, spath, np.asarray(pulls), np.asarray(ranks)
 
 
+FAST = dict(normref_nsim=2000, v5_nsim=120, boot_B=500)
+
+
 def test_happy_path_and_consistency(DG, tmp_path):
     outdir, sha, g, s, pulls, ranks = _mk_pop(str(tmp_path / "pop"), DG)
-    out, recs, sc, variables = DG.run(outdir, g, s, sha)
+    out, recs, sc, variables = DG.run(outdir, g, s, sha, **FAST)
     assert len(recs) == 96 and len(out["metadata"]) == 5
     assert np.isclose(sc["sd"], np.std(pulls, ddof=1), rtol=1e-12)
-    # coverage equals a direct computation on the same ranks
-    for q in (0.68, 0.95):
-        lo, hi = (1 - q) / 2, (1 + q) / 2
+    # coverage equals a direct computation on the same ranks (literal frozen edges)
+    for q, (lo, hi) in DG.BAND_EDGES.items():
         k = int(np.sum((ranks >= lo) & (ranks <= hi)))
-        assert out["coverage"][f"{q:.2f}"]["covered"] == k
+        c = out["coverage"][f"{q:.2f}"]
+        assert c["covered"] == k
+        # SHOULD-FIX 7: the discrete null expectation sits at or below nominal
+        assert c["discrete_null_expectation"] <= q + 0.02
     assert 0 <= out["coverage"]["0.68"]["ci95"][0] <= out["coverage"]["0.68"]["ci95"][1] <= 1
     rs = out["rscale"]
     assert np.isclose(rs["r_scale"], rs["s_obs"] / rs["s_ref"], rtol=1e-12)
+    # MUST-FIX 4: the material-sensitivity boolean exists at the 95% level only
+    assert set(rs["sensitivity_material"]) == {"s95", "r95"}
+    assert set(rs["sensitivity_shift_over_width"]) == {"s68", "s95", "r68", "r95"}
+    # SHOULD-FIX 9: T4 descriptor columns present
+    for r in out["metadata"]:
+        assert {"field", "transform", "target"} <= set(r)
+    # MUST-FIX 5: V5 carries its healthy-degeneracy band
+    hb = out["metadata"][4]["healthy_band"]
+    assert hb["mean_rho"] > 0.05 and hb["band_97p5"] > hb["band_2p5"]
+    # JSON round-trips (plain python types)
+    json.dumps(out)
+
+
+def test_refuses_wrong_selfdraw_anchor(DG, tmp_path):
+    outdir, sha, g, s, _, _ = _mk_pop(str(tmp_path / "pop"), DG)
+    sd = json.load(open(s))
+    sd["n"] = 48                              # the committed n=48 near-namesake hazard
+    json.dump(sd, open(s, "w"))
+    with pytest.raises(DG.DiagRefusal, match="selfdraw anchor"):
+        DG.run(outdir, g, s, sha, **FAST)
+
+
+def test_normal_references_sane(DG):
+    nr = DG.normal_references(nsim=4000)
+    assert 0.88 < nr["winsorized_over_sd"] < 0.93       # NOT 1 (MUST-FIX 3)
+    assert 0.98 < nr["sd_over_mad"] < 1.06
+    c = nr["variance_contrib_topk"]
+    assert 0.05 < c["1"] < 0.11 < c["5"] < 0.35
 
 
 def test_refuses_sha_mismatch(DG, tmp_path):
@@ -168,3 +202,12 @@ def test_coverage_boundary_inclusive(DG):
     out = DG.coverage(ranks)
     # inclusive band [0.16, 0.84] at 68%: the two boundary points count, the two outside do not
     assert out["0.68"]["covered"] == 94
+
+
+def test_coverage_95_boundary_literal_edges(DG):
+    # SHOULD-FIX 8: rank exactly 1/40 = 0.025 must be COVERED at the 95% level; the float
+    # expression (1-0.95)/2 sits above the double for 0.025 and would exclude it.
+    ranks = np.array([1.0 / 40.0, 39.0 / 40.0, 0.0249, 0.9751] + [0.5] * 92)
+    out = DG.coverage(ranks)
+    assert out["0.95"]["covered"] == 94
+    assert DG.BAND_EDGES[0.95] == (0.025, 0.975)
