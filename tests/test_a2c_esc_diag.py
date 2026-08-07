@@ -457,3 +457,101 @@ def test_loo_tables_refuse_mismatched_or_tiny(ED):
         ED.loo_tables(np.zeros(10), np.zeros(9))
     with pytest.raises(ED.DiagRefusal, match="too small"):
         ED.loo_tables(np.zeros(4), np.zeros(4))
+
+
+# --- P1 influence / shape / null-replicate machinery -------------------------------------
+
+def test_ks_influence_matches_scipy_and_loo(ED):
+    from scipy import stats as st
+    rng = np.random.default_rng(41)
+    r = rng.uniform(size=48)
+    out = ED.ks_influence(r)
+    assert np.isclose(out["ks_stat"], st.kstest(r, "uniform").statistic)
+    assert np.isclose(out["ks_p"], st.kstest(r, "uniform").pvalue)
+    assert np.isclose(out["loo_ks_p"][3], st.kstest(np.delete(r, 3), "uniform").pvalue)
+    assert len(out["empirical_cdf"]) == 48
+
+
+def test_ks_per_realization_contrib_max_equals_ks_stat(ED):
+    rng = np.random.default_rng(42)
+    r = rng.uniform(size=48)
+    out = ED.ks_influence(r)
+    assert np.isclose(max(out["per_realization_contrib"]), out["ks_stat"])
+
+
+def test_ks_influence_flags_a_planted_outlier_as_most_influential(ED):
+    rng = np.random.default_rng(43)
+    r = np.concatenate([rng.uniform(0.3, 0.7, 47), [0.999]])
+    out = ED.ks_influence(r)
+    assert out["loo_p_max"] >= out["ks_p"]
+
+
+def test_min_omission_is_none_when_already_uniform(ED):
+    r = (np.arange(48) + 0.5) / 48.0
+    out = ED.ks_influence(r)
+    assert out["ks_p"] > 0.05
+    assert out["min_omission_greedy"] == 0
+    assert out["min_omission_is_greedy_upper_bound"] is True
+
+
+def test_min_omission_reduces_a_non_uniform_sample(ED):
+    rng = np.random.default_rng(44)
+    r = np.clip(rng.uniform(size=48) * 0.6, 0, 1)   # strongly non-uniform
+    out = ED.ks_influence(r)
+    assert out["ks_p"] <= 0.05
+    assert out["min_omission_greedy"] is None or out["min_omission_greedy"] >= 1
+
+
+def test_tail_occupancy_counts_and_asymmetry(ED):
+    r = np.array([0.01, 0.02, 0.5, 0.5, 0.99])
+    t = ED.tail_occupancy(r)
+    assert t["lower"] == 2 and t["upper"] == 1 and t["both"] == 3
+    assert np.isclose(t["asymmetry"], (2 - 1) / 5)
+
+
+def test_shape_stats_signs(ED):
+    """S2 positive = U-shaped (mass at both ends); negative = central concentration."""
+    u = ED.shape_stats(np.concatenate([np.zeros(24) + 0.01, np.zeros(24) + 0.99]))
+    c = ED.shape_stats(np.full(48, 0.5))
+    assert u["S2_var_minus_uniform"] > 0
+    assert c["S2_var_minus_uniform"] < 0
+    assert np.isclose(ED.shape_stats(np.full(48, 0.9))["S1_mean_minus_half"], 0.4)
+
+
+def test_null_replicates_shape_seeded_and_uses_own_L(ED):
+    rng = np.random.default_rng(45)
+    tabs = [ED.loo_tables(rng.normal(size=L), rng.normal(size=L))
+            for L in (75, 150, 300)]
+    a = ED.null_replicates(tabs, B=50)
+    b = ED.null_replicates(tabs, B=50)
+    assert a["pull_x"].shape == (50, 3)
+    assert np.allclose(a["pull_x"], b["pull_x"])
+    assert set(np.unique(a["rank_x"][:, 0])) <= set(np.asarray(tabs[0]["rank_x"]))
+
+
+def test_null_replicate_rank_distribution_is_uniform(ED):
+    """End-to-end property of the primary reference: pooled null ranks are ~U(0,1)."""
+    from scipy import stats as st
+    rng = np.random.default_rng(46)
+    tabs = [ED.loo_tables(rng.normal(size=150), rng.normal(size=150)) for _ in range(48)]
+    rep = ED.null_replicates(tabs, B=200)
+    assert st.kstest(rep["rank_x"].ravel(), "uniform").pvalue > 0.01
+
+
+def test_null_pull_sd_is_near_the_finite_L_expectation(ED):
+    """The null's pull sd must reproduce the deployed finite-L reference, not 1.0."""
+    rng = np.random.default_rng(47)
+    L = 75
+    tabs = [ED.loo_tables(rng.normal(size=L), rng.normal(size=L)) for _ in range(48)]
+    rep = ED.null_replicates(tabs, B=400)
+    sds = rep["pull_x"].std(axis=1, ddof=1)
+    assert abs(float(sds.mean()) - ED.finite_L_null_sd([L - 1] * 48)) < 0.06
+
+
+def test_calibrated_p_never_zero_and_reports_resolution(ED):
+    null = np.random.default_rng(48).normal(size=2000)
+    out = ED.calibrated_p(99.0, null)
+    assert out["p"] == pytest.approx(1.0 / 2001.0)
+    assert out["resolution"] == pytest.approx(1.0 / 2001.0)
+    mid = ED.calibrated_p(0.0, null)
+    assert 0.5 < mid["p"] <= 1.0

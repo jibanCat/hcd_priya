@@ -384,6 +384,123 @@ def loo_tables(x, y):
                 v1x=v1x, v1y=v1y, isotropic=iso, L=L)
 
 
+def ks_influence(ranks, alpha=0.05):
+    """P1 influence block (prereg section 8 / PI #13 section 10).
+
+    INTERPRETATION BOUNDARY (binding): the leave-one-out p-values here are INFLUENCE
+    DIAGNOSTICS ONLY. They are not n separate hypothesis tests, must not be counted as
+    such, and must never be used to label a realization invalid. No realization may be
+    removed, down-weighted or excluded from the formal result. `min_omission_greedy` is a
+    DESCRIPTIVE fragility statement about the KS statistic, never a proposal.
+    """
+    from scipy import stats as _st
+    r = np.asarray(ranks, float)
+    n = r.size
+    ks = _st.kstest(r, "uniform")
+    s = np.sort(r)
+    i = np.arange(1, n + 1)
+    d_plus = i / n - s
+    d_minus = s - (i - 1) / n
+    per = np.maximum(d_plus, d_minus)                 # per-order-statistic contribution
+    order = np.argsort(r)
+    contrib = np.empty(n)
+    contrib[order] = per                              # back to realization order
+
+    loo_stat, loo_p = np.empty(n), np.empty(n)
+    for j in range(n):
+        k = _st.kstest(np.delete(r, j), "uniform")
+        loo_stat[j], loo_p[j] = k.statistic, k.pvalue
+
+    # Greedy (NOT exhaustive) minimum-omission count; an UPPER BOUND, descriptive only.
+    keep = list(range(n))
+    removed, cur_p = 0, float(ks.pvalue)
+    while cur_p <= alpha and len(keep) > 5:
+        best_j, best_p = None, cur_p
+        for j in list(keep):
+            p = _st.kstest(np.delete(r[keep], keep.index(j)), "uniform").pvalue
+            if p > best_p:
+                best_p, best_j = p, j
+        if best_j is None:
+            break
+        keep.remove(best_j)
+        removed += 1
+        cur_p = best_p
+
+    return dict(
+        ks_stat=float(ks.statistic), ks_p=float(ks.pvalue), n=int(n),
+        mean_rank=float(r.mean()), median_rank=float(np.median(r)),
+        empirical_cdf=[[float(v), float((k + 1) / n)] for k, v in enumerate(s)],
+        per_realization_contrib=[float(v) for v in contrib],
+        loo_ks_stat=[float(v) for v in loo_stat],
+        loo_ks_p=[float(v) for v in loo_p],
+        loo_p_max=float(loo_p.max()), loo_p_min=float(loo_p.min()),
+        most_influential=int(np.argmax(loo_p)),
+        min_omission_greedy=int(removed) if cur_p > alpha else None,
+        min_omission_is_greedy_upper_bound=True,
+        min_omission_reached_p=float(cur_p),
+        interpretation="LOO p-values are influence diagnostics ONLY -- not n tests, never "
+                       "grounds to exclude a realization; min_omission is descriptive.")
+
+
+def tail_occupancy(ranks, edge=0.1):
+    r = np.asarray(ranks, float)
+    n = r.size
+    lo = int(np.sum(r < edge))
+    hi = int(np.sum(r > 1.0 - edge))
+    at0 = int(np.sum(r <= 0.0))
+    at1 = int(np.sum(r >= 1.0))
+    return dict(edge=edge, n=int(n), lower=lo, upper=hi, both=lo + hi,
+                lower_frac=lo / n, upper_frac=hi / n, both_frac=(lo + hi) / n,
+                asymmetry=(lo - hi) / n, at_boundary_0=at0, at_boundary_1=at1)
+
+
+def shape_stats(ranks):
+    """The frozen P1 shape family S1-S4 (prereg section 8). Values only; significance is
+    assigned against the section-5 null by the caller, with Holm inside the P1 family."""
+    r = np.asarray(ranks, float)
+    n = r.size
+    lo = float(np.sum(r < 0.1))
+    hi = float(np.sum(r > 0.9))
+    return dict(
+        S1_mean_minus_half=float(r.mean() - 0.5),
+        S2_var_minus_uniform=float(r.var(ddof=1) - 1.0 / 12.0),
+        S3_tail_asymmetry=float((lo - hi) / n),
+        S4_both_tail_occupancy=float(lo + hi))
+
+
+def null_replicates(tables, B=B_NULL, seed=A2C_NULL_SEED):
+    """Section 5 primary reference: B population-level replicates. Each replicate picks ONE
+    draw index per realization (the same index for ns and tau0_amp, preserving the realized
+    joint geometry) and gathers the per-realization LOO statistics into a synthetic
+    population of the same size and the same L census as the real arm."""
+    rng = np.random.default_rng(seed)
+    keys = ("pull_x", "pull_y", "rank_x", "rank_y", "corr", "area",
+            "d_par", "d_perp", "D2", "sdx", "sdy")
+    n = len(tables)
+    out = {k: np.empty((B, n)) for k in keys}
+    for i, t in enumerate(tables):
+        idx = rng.integers(0, t["L"], size=B)
+        for k in keys:
+            out[k][:, i] = np.asarray(t[k])[idx]
+    return out
+
+
+def calibrated_p(observed, null_samples, two_sided=True):
+    """Calibrated p-value from the section-5 null with the standard (r+1)/(B+1) estimator,
+    so a p-value is never reported as exactly zero."""
+    s = np.asarray(null_samples, float)
+    B = s.size
+    if two_sided:
+        c = float(np.sum(np.abs(s - s.mean()) >= abs(observed - s.mean())))
+    else:
+        c = float(np.sum(s >= observed))
+    return dict(p=(c + 1.0) / (B + 1.0), B=int(B),
+                null_mean=float(s.mean()), null_sd=float(s.std(ddof=1)),
+                null_q025=float(np.quantile(s, 0.025)),
+                null_q975=float(np.quantile(s, 0.975)),
+                observed=float(observed), resolution=1.0 / (B + 1.0))
+
+
 def r_scale_bootstrap(pulls, Ls, B=BOOT_B, seed=BOOT_SEED):
     """Finite-L-adjusted scale ratio with a PAIRED bootstrap over (pull, L) pairs, so the
     numerator and the finite-L denominator are resampled together (the frozen KS form)."""
