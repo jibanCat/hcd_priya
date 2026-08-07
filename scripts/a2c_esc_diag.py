@@ -501,6 +501,89 @@ def calibrated_p(observed, null_samples, two_sided=True):
                 observed=float(observed), resolution=1.0 / (B + 1.0))
 
 
+def rank_implied_z_scale(ranks, L_list):
+    """The rank-implied z-score scale (physics review SHOULD-FIX 3): sd of Phi^-1(rank).
+
+    DECISIVE for separating a CALIBRATION defect from a SUMMARY artefact. The Gaussian pull
+    (mean - truth)/sd is only a calibrated z-score when the posterior is Gaussian. If the
+    posterior is skewed or truncated (n_s is sampled under a HARD BOX on theta_unit, so
+    prior-drawn truths land near the boundary a fixed fraction of the time), the pull sd can
+    exceed 1 while the RANKS stay uniform. sd[Phi^-1(rank)] ~ 1 alongside pull sd >> 1 is
+    the signature of a summary artefact, not of an over-concentrated posterior.
+
+    Ranks are continuity-corrected to (k + 0.5)/(L + 1) so the transform stays finite at the
+    empirical extremes; the correction uses only fit metadata (L).
+    """
+    from scipy.stats import norm
+    r = np.asarray(ranks, float)
+    L = np.asarray(list(L_list), float)
+    if r.size != L.size:
+        raise DiagRefusal("rank_implied_z_scale: rank/L length mismatch")
+    k = np.rint(r * L)
+    rr = (k + 0.5) / (L + 1.0)
+    z = norm.ppf(rr)
+    return dict(z_sd=float(np.std(z, ddof=1)), z_mean=float(np.mean(z)),
+                z_median=float(np.median(z)), n=int(r.size),
+                continuity="(k + 0.5)/(L + 1)",
+                note="sd[Phi^-1(rank)] ~ 1 with a Gaussian pull sd >> 1 indicates a "
+                     "NON-GAUSSIAN POSTERIOR SUMMARY artefact, not over-concentration.")
+
+
+def anisotropy_contrast(d_par, d_perp):
+    """Physics review SHOULD-FIX 7. mean|d_perp| alone cannot separate 'narrow across the
+    degeneracy' from 'narrow overall', because both components are Mahalanobis-normalised by
+    the same covariance. This contrast is scale-free in the overall width and isolates
+    ONE-DIRECTIONAL over-concentration (PI #13 section 16)."""
+    a = np.asarray(d_par, float) ** 2
+    b = np.asarray(d_perp, float) ** 2
+    den = a + b
+    good = den > 0
+    c = np.zeros_like(den)
+    c[good] = (b[good] - a[good]) / den[good]
+    return dict(mean=float(c[good].mean()), median=float(np.median(c[good])),
+                n=int(good.sum()),
+                note="+1 = displacement entirely PERPENDICULAR to the degeneracy axis; "
+                     "-1 = entirely PARALLEL; 0 = isotropic. Invariant to overall width.")
+
+
+def permutation_null(a, b, stat, B=B_NULL, seed=A2C_NULL_SEED):
+    """Permutation null over realizations for associations between TWO DRAWS-ONLY
+    quantities (physics review MUST-FIX 4).
+
+    The section-5 LOO null is DEGENERATE for statistics that do not involve the truth: it
+    resamples the pseudo-truth but leaves the draw matrix essentially unchanged, so a
+    draws-only statistic has a null that is a point mass at the observed value. Associations
+    such as (candidate posterior mean) vs (posterior correlation / ellipse area) must
+    therefore be calibrated by permuting the pairing ACROSS realizations instead.
+    """
+    x = np.asarray(a, float)
+    y = np.asarray(b, float)
+    if x.size != y.size:
+        raise DiagRefusal("permutation_null: length mismatch")
+    rng = np.random.default_rng(seed)
+    obs = float(stat(x, y))
+    null = np.array([float(stat(x, rng.permutation(y))) for _ in range(B)])
+    return dict(observed=obs, **{k: v for k, v in calibrated_p(obs, null).items()
+                                 if k != "observed"})
+
+
+def tau_eff_rung_coefficients(z_grid=Z_TAU0, pivot=4.0):
+    """c_i = ln((1+z_i)/pivot): the EXACT dtau0 admixture in ln tau_eff(z_i).
+
+    Because the deployed ladder is tau0(z) = amp * ((1+z)/4)^dtau0 * Kim(z), ln tau_eff(z_i)
+    = ln(amp) + c_i*dtau0 + const EXACTLY (verified to machine precision). The deployed
+    'tau0_amp' summary is therefore ln(amp) + c_bar*dtau0 with c_bar = ln((1+zbar)/4) at the
+    log-mean redshift of the 13-rung UNION grid -- a rotated coordinate in the mean-flux
+    plane, not the sampled amplitude.
+    """
+    z = np.asarray(z_grid, float)
+    lx = np.log(1.0 + z)
+    zbar = float(np.exp(lx.mean()) - 1.0)
+    return dict(z=[float(v) for v in z],
+                c=[float(v) for v in np.log((1.0 + z) / pivot)],
+                zbar=zbar, c_bar=float(np.log((1.0 + zbar) / pivot)), pivot=pivot)
+
+
 def r_scale_bootstrap(pulls, Ls, B=BOOT_B, seed=BOOT_SEED):
     """Finite-L-adjusted scale ratio with a PAIRED bootstrap over (pull, L) pairs, so the
     numerator and the finite-L denominator are resampled together (the frozen KS form)."""

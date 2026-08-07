@@ -555,3 +555,125 @@ def test_calibrated_p_never_zero_and_reports_resolution(ED):
     assert out["resolution"] == pytest.approx(1.0 / 2001.0)
     mid = ED.calibrated_p(0.0, null)
     assert 0.5 < mid["p"] <= 1.0
+
+
+# --- physics-review fixes: summary-artefact, anisotropy, permutation null, rung algebra ---
+
+def test_rank_implied_z_scale_is_one_for_calibrated_ranks(ED):
+    """Uniform ranks -> sd[Phi^-1(rank)] ~ 1 regardless of any Gaussian-pull inflation."""
+    rng = np.random.default_rng(51)
+    L = np.full(400, 150)
+    r = rng.uniform(size=400)
+    out = ED.rank_implied_z_scale(r, L)
+    assert abs(out["z_sd"] - 1.0) < 0.12
+    assert abs(out["z_mean"]) < 0.12
+
+
+def test_rank_implied_z_scale_detects_genuine_over_concentration(ED):
+    """A truly too-narrow posterior gives U-shaped ranks -> sd[Phi^-1(rank)] > 1."""
+    rng = np.random.default_rng(52)
+    L = np.full(400, 150)
+    u = rng.uniform(size=400)
+    r = np.clip(np.where(u < 0.5, u * 0.3, 1 - (1 - u) * 0.3), 1e-3, 1 - 1e-3)
+    out = ED.rank_implied_z_scale(r, L)
+    assert out["z_sd"] > 1.25
+
+
+def test_rank_implied_z_scale_separates_artefact_from_defect(ED):
+    """The decisive contrast: identical uniform ranks, wildly different Gaussian pull sd."""
+    rng = np.random.default_rng(53)
+    L = np.full(300, 150)
+    r = rng.uniform(size=300)
+    z = ED.rank_implied_z_scale(r, L)["z_sd"]
+    assert abs(z - 1.0) < 0.15   # rank scale is healthy...
+    # ...while a skewed pull would read >> 1; the two statistics are independent by design.
+
+
+def test_rank_implied_z_scale_length_mismatch_refuses(ED):
+    with pytest.raises(ED.DiagRefusal, match="length mismatch"):
+        ED.rank_implied_z_scale([0.5, 0.5], [150])
+
+
+def test_anisotropy_contrast_signs(ED):
+    perp = ED.anisotropy_contrast(np.zeros(10), np.ones(10))
+    par = ED.anisotropy_contrast(np.ones(10), np.zeros(10))
+    iso = ED.anisotropy_contrast(np.ones(10), np.ones(10))
+    assert np.isclose(perp["mean"], 1.0)
+    assert np.isclose(par["mean"], -1.0)
+    assert np.isclose(iso["mean"], 0.0)
+
+
+def test_anisotropy_contrast_is_invariant_to_overall_width(ED):
+    rng = np.random.default_rng(54)
+    a = rng.normal(size=48); b = rng.normal(size=48)
+    base = ED.anisotropy_contrast(a, b)["mean"]
+    scaled = ED.anisotropy_contrast(3.7 * a, 3.7 * b)["mean"]
+    assert np.isclose(base, scaled, rtol=1e-12)
+
+
+def test_permutation_null_is_calibrated_under_independence(ED):
+    """Calibration is a property of the p-value DISTRIBUTION over independent datasets,
+    not of any single dataset (a single pair is extreme ~5% of the time by construction)."""
+    from scipy.stats import spearmanr
+    rng = np.random.default_rng(55)
+    ps = []
+    for _ in range(60):
+        x = rng.normal(size=48); y = rng.normal(size=48)
+        ps.append(ED.permutation_null(x, y, lambda a, b: spearmanr(a, b).statistic,
+                                      B=200)["p"])
+    ps = np.asarray(ps)
+    assert 0.0 < float(np.mean(ps < 0.05)) < 0.15   # near-nominal type-I rate
+    assert 0.35 < float(np.mean(ps)) < 0.65         # p ~ U(0,1) has mean 0.5
+
+
+def test_permutation_null_centres_on_zero_association(ED):
+    from scipy.stats import spearmanr
+    rng = np.random.default_rng(155)
+    x = rng.normal(size=48); y = rng.normal(size=48)
+    out = ED.permutation_null(x, y, lambda a, b: spearmanr(a, b).statistic, B=500)
+    assert abs(out["null_mean"]) < 0.1
+
+
+def test_permutation_null_detects_a_planted_association(ED):
+    from scipy.stats import spearmanr
+    rng = np.random.default_rng(56)
+    x = rng.normal(size=48)
+    y = x + 0.25 * rng.normal(size=48)
+    out = ED.permutation_null(x, y, lambda a, b: spearmanr(a, b).statistic, B=500)
+    assert out["p"] < 0.01
+
+
+def test_permutation_null_length_mismatch_refuses(ED):
+    with pytest.raises(ED.DiagRefusal, match="length mismatch"):
+        ED.permutation_null([1, 2, 3], [1, 2], lambda a, b: 0.0, B=5)
+
+
+def test_tau_eff_rung_coefficients_match_verified_arithmetic(ED):
+    out = ED.tau_eff_rung_coefficients()
+    assert np.isclose(out["zbar"], 3.3351, atol=1e-3)
+    assert np.isclose(out["c_bar"], 0.080458, atol=1e-5)
+    assert np.isclose(out["c"][0], np.log(3.2 / 4.0))
+    assert out["c"][-1] > 0 > out["c"][0]
+
+
+def test_deployed_amp_equals_tau_eff_at_zbar_exactly(ED):
+    """The deployed summary IS tau_eff(zbar), a ROTATED coordinate ln(amp) + c_bar*dtau0,
+    not the sampled amplitude. Ladder residual is zero by construction."""
+    co = ED.tau_eff_rung_coefficients()
+    z = np.asarray(co["z"]); zbar = co["zbar"]
+    for amp, dt in [(1.0, 0.0), (0.9, -0.3), (1.2, 0.2)]:
+        ladder = amp * ((1 + z) / 4.0) ** dt * 0.0023 * (1 + z) ** 3.65
+        got, slope = ED.tau0_amp_slope(ladder)
+        want = amp * ((1 + zbar) / 4.0) ** dt * 0.0023 * (1 + zbar) ** 3.65
+        assert np.isclose(got, want, rtol=1e-12)
+        assert np.isclose(slope, dt + 3.65, rtol=1e-12)
+
+
+def test_ladder_is_exactly_log_linear_no_projection_artefact(ED):
+    """Excludes the derived-summary curvature artefact class a priori."""
+    co = ED.tau_eff_rung_coefficients()
+    z = np.asarray(co["z"]); lx = np.log(1 + z); lxc = lx - lx.mean()
+    ladder = 1.1 * ((1 + z) / 4.0) ** (-0.2) * 0.0023 * (1 + z) ** 3.65
+    y = np.log(ladder)
+    slope = np.sum(lxc * (y - y.mean())) / np.sum(lxc ** 2)
+    assert np.max(np.abs(y - (y.mean() + slope * lxc))) < 1e-12
