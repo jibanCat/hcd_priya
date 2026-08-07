@@ -318,6 +318,72 @@ def scales_and_tail(pulls, n=N_TOTAL, k=WINSOR_K, normref_nsim=NORMREF_NSIM):
         normal_references=normal_references(n=n, k=k, nsim=normref_nsim))
 
 
+def loo_tables(x, y):
+    """EXACT leave-one-out tables for a realization's paired draws (x=ns, y=tau0_amp).
+
+    For every draw index j, treats draw j as the pseudo-truth and the remaining L-1 draws
+    as the reference set, and returns the deployed statistics computed on that LOO set.
+    Closed-form updates (no O(L^2) loop) make the whole null cheap and arithmetically
+    identical to deleting the row.
+
+    Under the SBC null the pseudo-truth IS a posterior draw, so these arrays ARE the exact
+    finite-L null for this realization; a null replicate is one uniformly chosen j.
+    """
+    x = np.asarray(x, float)
+    y = np.asarray(y, float)
+    L = x.size
+    if y.size != L:
+        raise DiagRefusal("loo_tables: paired length mismatch")
+    if L < 5:
+        raise DiagRefusal(f"loo_tables: L={L} too small for a LOO covariance")
+    n = L - 1.0
+
+    Sx, Sy = x.sum(), y.sum()
+    Sxx, Syy, Sxy = (x * x).sum(), (y * y).sum(), (x * y).sum()
+
+    mx = (Sx - x) / n
+    my = (Sy - y) / n
+    cxx = (Sxx - x * x - n * mx * mx) / (n - 1.0)
+    cyy = (Syy - y * y - n * my * my) / (n - 1.0)
+    cxy = (Sxy - x * y - n * mx * my) / (n - 1.0)
+    cxx = np.clip(cxx, 1e-300, None)
+    cyy = np.clip(cyy, 1e-300, None)
+
+    sdx, sdy = np.sqrt(cxx), np.sqrt(cyy)
+    pull_x = (mx - x) / sdx
+    pull_y = (my - y) / sdy
+
+    # LOO rank of draw j among the other L-1 draws (exactly uniform on {0..L-2}/(L-1)
+    # under the null when there are no ties).
+    rank_x = (np.argsort(np.argsort(x, kind="stable"), kind="stable")).astype(float) / n
+    rank_y = (np.argsort(np.argsort(y, kind="stable"), kind="stable")).astype(float) / n
+
+    corr = np.clip(cxy / (sdx * sdy), -1.0, 1.0)
+    det = np.clip(cxx * cyy - cxy * cxy, 1e-300, None)
+
+    # Eigen-decomposition of the 2x2 LOO covariance, closed form.
+    tr = cxx + cyy
+    disc = np.sqrt(np.clip(tr * tr - 4.0 * det, 0.0, None))
+    lam1 = 0.5 * (tr + disc)          # major
+    lam2 = np.clip(0.5 * (tr - disc), 1e-300, None)   # minor
+    # Major-axis eigenvector (cxy, lam1 - cxx), normalized; falls back to (1,0) if isotropic.
+    v1x, v1y = cxy, lam1 - cxx
+    nrm = np.sqrt(v1x * v1x + v1y * v1y)
+    iso = nrm < 1e-12 * np.sqrt(np.abs(lam1) + 1e-300)
+    v1x = np.where(iso, 1.0, v1x / np.where(nrm > 0, nrm, 1.0))
+    v1y = np.where(iso, 0.0, v1y / np.where(nrm > 0, nrm, 1.0))
+
+    dx, dy = mx - x, my - y                     # truth displacement (mean - truth)
+    d_par = (dx * v1x + dy * v1y) / np.sqrt(lam1)
+    d_perp = (-dx * v1y + dy * v1x) / np.sqrt(lam2)
+    D2 = d_par ** 2 + d_perp ** 2
+
+    return dict(pull_x=pull_x, pull_y=pull_y, rank_x=rank_x, rank_y=rank_y,
+                corr=corr, area=np.pi * np.sqrt(det), lam1=lam1, lam2=lam2,
+                sdx=sdx, sdy=sdy, d_par=d_par, d_perp=d_perp, D2=D2,
+                v1x=v1x, v1y=v1y, isotropic=iso, L=L)
+
+
 def r_scale_bootstrap(pulls, Ls, B=BOOT_B, seed=BOOT_SEED):
     """Finite-L-adjusted scale ratio with a PAIRED bootstrap over (pull, L) pairs, so the
     numerator and the finite-L denominator are resampled together (the frozen KS form)."""

@@ -382,3 +382,78 @@ def test_r_scale_bootstrap_point_and_ci(ED):
 def test_r_scale_bootstrap_length_mismatch_refuses(ED):
     with pytest.raises(ED.DiagRefusal, match="length mismatch"):
         ED.r_scale_bootstrap([1.0, 2.0], [100], B=10)
+
+
+# --- LOO exchangeability tables (the primary healthy reference machinery) ---------------
+
+def _brute_loo(x, y, j):
+    xs = np.delete(x, j); ys = np.delete(y, j)
+    mx, my = xs.mean(), ys.mean()
+    sdx, sdy = xs.std(ddof=1), ys.std(ddof=1)
+    C = np.cov(np.vstack([xs, ys]), ddof=1)
+    return mx, my, sdx, sdy, C
+
+
+def test_loo_tables_match_brute_force_deletion(ED):
+    rng = np.random.default_rng(21)
+    x = rng.normal(size=120); y = 0.5 * x + rng.normal(size=120)
+    t = ED.loo_tables(x, y)
+    for j in (0, 7, 61, 119):
+        mx, my, sdx, sdy, C = _brute_loo(x, y, j)
+        assert np.isclose(t["pull_x"][j], (mx - x[j]) / sdx, rtol=1e-11)
+        assert np.isclose(t["pull_y"][j], (my - y[j]) / sdy, rtol=1e-11)
+        assert np.isclose(t["sdx"][j], sdx, rtol=1e-11)
+        assert np.isclose(t["corr"][j], C[0, 1] / np.sqrt(C[0, 0] * C[1, 1]), rtol=1e-11)
+        assert np.isclose(t["area"][j], np.pi * np.sqrt(np.linalg.det(C)), rtol=1e-11)
+
+
+def test_loo_rank_is_fraction_of_others_below(ED):
+    x = np.array([5.0, 1.0, 3.0, 2.0, 4.0])
+    t = ED.loo_tables(x, x.copy())
+    for j in range(5):
+        want = float(np.sum(np.delete(x, j) < x[j])) / 4.0
+        assert np.isclose(t["rank_x"][j], want)
+
+
+def test_loo_rank_null_is_exactly_uniform(ED):
+    """The defining property of the primary reference: over j, ranks are exactly the
+    uniform grid {0, 1/(L-1), ..., 1} -- no asymptotics."""
+    rng = np.random.default_rng(4)
+    x = rng.normal(size=60)
+    t = ED.loo_tables(x, rng.normal(size=60))
+    assert np.allclose(np.sort(t["rank_x"]), np.arange(60) / 59.0)
+
+
+def test_loo_D2_equals_mahalanobis(ED):
+    rng = np.random.default_rng(31)
+    x = rng.normal(size=90); y = -0.7 * x + 0.4 * rng.normal(size=90)
+    t = ED.loo_tables(x, y)
+    for j in (2, 40, 88):
+        mx, my, _, _, C = _brute_loo(x, y, j)
+        d = np.array([mx - x[j], my - y[j]])
+        assert np.isclose(t["D2"][j], float(d @ np.linalg.inv(C) @ d), rtol=1e-9)
+
+
+def test_loo_par_perp_decomposition_is_orthogonal_and_complete(ED):
+    rng = np.random.default_rng(32)
+    x = rng.normal(size=80); y = 0.9 * x + 0.2 * rng.normal(size=80)
+    t = ED.loo_tables(x, y)
+    assert np.allclose(t["d_par"] ** 2 + t["d_perp"] ** 2, t["D2"], rtol=1e-9)
+    assert np.all(t["lam1"] >= t["lam2"])
+
+
+def test_loo_isotropic_case_is_flagged_not_crashed(ED):
+    """Nearly-isotropic posteriors leave the eigenbasis nearly unidentified; the code must
+    stay finite and flag it rather than emit a spurious orientation."""
+    rng = np.random.default_rng(33)
+    x = rng.normal(size=60); y = rng.normal(size=60)
+    t = ED.loo_tables(x, y)
+    assert np.all(np.isfinite(t["d_par"])) and np.all(np.isfinite(t["d_perp"]))
+    assert np.all(np.isfinite(t["D2"]))
+
+
+def test_loo_tables_refuse_mismatched_or_tiny(ED):
+    with pytest.raises(ED.DiagRefusal, match="length mismatch"):
+        ED.loo_tables(np.zeros(10), np.zeros(9))
+    with pytest.raises(ED.DiagRefusal, match="too small"):
+        ED.loo_tables(np.zeros(4), np.zeros(4))
