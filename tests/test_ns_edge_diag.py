@@ -214,7 +214,9 @@ def test_two_sided_is_not_smaller_than_one_sided_when_effect_is_upper():
 def _write_fake_arm(tmpdir, arm, n, rng, shared_u=None):
     d, _ = D.ARMS[arm]
     os.makedirs(os.path.join(tmpdir, d), exist_ok=True)
-    names = ["ns", "Ap"] + [f"x{i}" for i in range(23)]
+    names = (["ns", "Ap"] + [f"x{i}" for i in range(7)]
+             + [f"tau0_z{i}" for i in range(13)]
+             + ["alpha_lls", "alpha_subdla", "alpha_dla"])
     for m in range(n):
         u = shared_u[m] if (shared_u is not None and m < len(shared_u)) else rng.random()
         truth = np.concatenate([[u, rng.random()], rng.random(23)])
@@ -240,12 +242,28 @@ def test_loader_extracts_ns_by_name_not_position(tmp_path):
 
 
 def test_run_refuses_when_truths_are_not_shared(tmp_path):
-    """The joint-permutation null is only valid if the shared block really is shared."""
+    """Step-0 validity gate: the joint-permutation null is only valid if the shared block
+    really is shared. On failure the run must return Case C and compute NOTHING else."""
     rng = np.random.default_rng(4)
     for arm, n in (("A1c_eBOSS", 48), ("A2c_DESI", 48), ("A3c_KS", 96)):
         _write_fake_arm(str(tmp_path), arm, n, rng)     # independent truths -> NOT shared
-    with pytest.raises(SystemExit, match="REFUSE"):
-        D.run(root=str(tmp_path), B=200)
+    res = D.run(root=str(tmp_path), B=200)
+    assert res["step0_validity_gate"]["passed"] is False
+    assert res["step0_validity_gate"]["shared_truths_identical_across_arms"] is False
+    assert res["CASE"] == "C"
+    for k in ("primary", "S8_tail_edge_score", "S4_KS_kink", "case_rule"):
+        assert k not in res, f"{k} was computed after a FAILED validity gate"
+
+
+def test_validity_gate_passes_on_clean_synthetic(tmp_path):
+    rng = np.random.default_rng(41)
+    shared = rng.random(48)
+    for arm, n in (("A1c_eBOSS", 48), ("A2c_DESI", 48), ("A3c_KS", 96)):
+        _write_fake_arm(str(tmp_path), arm, n, rng, shared_u=shared)
+    g = D.run(root=str(tmp_path), B=200)["step0_validity_gate"]
+    assert g["passed"] and g["all_in_unit_interval"]
+    assert g["shared_truths_identical_across_arms"]
+    assert g["n_distinct_truths"] == 96
 
 
 def test_run_end_to_end_on_shared_synthetic(tmp_path):
@@ -254,17 +272,23 @@ def test_run_end_to_end_on_shared_synthetic(tmp_path):
     for arm, n in (("A1c_eBOSS", 48), ("A2c_DESI", 48), ("A3c_KS", 96)):
         _write_fake_arm(str(tmp_path), arm, n, rng, shared_u=shared)
     res = D.run(root=str(tmp_path), B=500)
-    assert res["_meta"]["shared_truth_verified"] is True
+    assert res["step0_validity_gate"]["shared_truths_identical_across_arms"] is True
     assert res["_meta"]["all_final_n_div_zero"] is True
-    for key in ("primary", "S1_per_arm", "S2_control_family", "S2b_arm_specific_extra",
-                "S3_two_sided", "S4_KS_kink", "S5_calibration", "S6_boundary",
-                "S7_concordance", "per_unit", "init_strategy"):
+    for key in ("primary", "S1_per_arm", "S2_control_family", "S3_nearer_boundary",
+                "S4_KS_kink", "S5_calibration", "S6_boundary", "S7_concordance",
+                "S8_tail_edge_score", "S_HULL_design_hull", "S_MEANFLUX", "S_HCDFUNNEL",
+                "S9_execution_environment", "S10_attempt0_ndiv_weighted",
+                "A2c_influence_bound", "case_rule", "CASE", "per_unit", "init_strategy",
+                "step0_validity_gate"):
         assert key in res
+    assert res["CASE"] in ("A", "B")
+    assert len(res["case_rule"]["family"]) == 7
+    assert res["case_rule"]["family"][0] == "primary"
+    # the 13 tau0 rungs must NOT be in the S2 family (PI #17 sec-3.2: rank-2 coordinate)
+    assert not any(k.startswith("tau0_z") for k in res["S2_control_family"])
+    assert len(res["S2_membership"]["dropped_tau0_rungs"]) == 13
     # S2 pools only the sites common to ALL arms; arm-specific ones go to S2b
-    assert res["S2_common_extra_sites"] == ["dtau0", "f_res_amp", "f_res_slope", "tau0_amp"]
-    assert len(res["S2_control_family"]) == 25 + 4
-    for a in D.ARMS:
-        assert list(res["S2b_arm_specific_extra"][a]) == [f"own_{a}"]
+    assert len(res["S2_control_family"]) == 12 + 4   # 25 packed - 13 rungs, + 4 common extra
     assert 0 < res["primary"]["p"] <= 1
     assert len(res["per_unit"]["A3c_KS"]) == 96
     assert sum(r["retried"] for r in res["per_unit"]["A1c_eBOSS"]) == 8
@@ -297,10 +321,10 @@ def test_init_cannot_reach_the_upper_region():
     a = D.init_dist_analysis()
     # design hull: astronomically unlikely over the whole campaign
     assert a["tail_prob"]["u_0.9583_design_hull_top"] < 1e-6
-    assert a["expected_count_over_campaign"]["u_0.9583_design_hull_top"] < 1e-3
+    assert a["expected_count"]["u_0.9583_design_hull_top"] < 1e-3
     # and the monotone ordering of the tail probabilities must hold
     tp = a["tail_prob"]
-    assert (tp["u_0.7200_ns_0.98_KS_ns_box_top"] > tp["u_0.7800_ns_0.995_REJECTED_comment_value"]
+    assert (tp["u_0.7200_ns_0.98_KS_ns_box_UPPER"] > tp["u_0.7800_ns_0.995_REJECTED_comment_value"]
             > tp["u_0.8000_ns_1.00"] > tp["u_0.9583_design_hull_top"]
             > tp["u_0.9900_ns_1.0475"])
 
