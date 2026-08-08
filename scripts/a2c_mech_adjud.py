@@ -197,3 +197,196 @@ def absorber_projection(x_amp, x_dtau, absorber_block, coeffs):
 def project_to_tau_eff(d_amp, d_dtau, c):
     """Exact Jacobian row [1, c_i]: displacement in ln tau_eff(z_i)."""
     return float(d_amp) + np.asarray(c, float) * float(d_dtau)
+
+
+# =====================================================================================
+# ANALYSIS DRIVER (single invocation; frozen scope)
+# =====================================================================================
+
+ABSORBERS = ["alpha_lls", "alpha_subdla", "alpha_dla"]
+
+
+def run_adjudication(recs, design_unit, param_limits, lowk_npz=None,
+                     B=PERM_B, seed=PERM_SEED):
+    """Assemble Layer-O status, H1, H2-exposure and H3 into one result dict.
+
+    Layer O and H2 Condition A are NOT computed -- they are recorded as frozen scope
+    determinations with their refusal reasons, per the prereg.
+    """
+    from scipy.stats import spearmanr
+    out = {}
+    n = len(recs)
+    co = tau_eff_coefficients()
+    lo, hi = np.asarray(param_limits)[:, 0], np.asarray(param_limits)[:, 1]
+
+    # --- frozen scope determinations (recorded, never computed) ---
+    try:
+        layer_o_refuse()
+    except AdjudRefusal as e:
+        out["LayerO"] = dict(status="INADMISSIBLE", computed=False, reason=str(e))
+    try:
+        h2_condition_a_refuse()
+    except AdjudRefusal as e:
+        h2_cond_a = dict(status="NON_ADJUDICABLE", computed=False, reason=str(e))
+    out["H1_H2_interaction"] = dict(
+        status="NOT_TESTABLE",
+        reason="PI #14 section 12 condition 2 requires low-k information mismatch to be "
+               "INDEPENDENTLY PRESENT; H2 Condition A is non-adjudicable, so the "
+               "interaction cannot be tested. No interaction model is fitted.")
+
+    # --- deployed n_s pull/rank (recomputed with the frozen arithmetic) ---
+    ns_pull, ns_rank, theta0, tru_unit = [], [], [], []
+    for r in recs:
+        j = r["names"].index("ns")
+        col = np.asarray(r["draws"], float)[:, j]
+        t = float(np.asarray(r["truth"], float)[j])
+        ns_pull.append((float(col.mean()) - t) / float(col.std(ddof=1)))
+        ns_rank.append(float(np.mean(col < t)))
+        theta0.append(t)
+        tru_unit.append(np.asarray(r["truth"], float)[:9])
+    ns_pull = np.asarray(ns_pull); ns_rank = np.asarray(ns_rank)
+    theta0 = np.asarray(theta0); TU = np.asarray(tru_unit)
+    ns_phys = physical_ns(theta0)
+
+    # ================================ H1 ================================
+    S_k, S_1 = local_support(TU, design_unit, k=KNN_K)
+    h1 = dict(metric=f"{KNN_K}rd-NN distance in the frozen 9-D unit cube",
+              n=int(n), design_n=int(np.asarray(design_unit).shape[0]))
+    for lab, thr in (("primary_1.00", NS_SPLIT_PRIMARY),
+                     ("secondary_0.995", NS_SPLIT_SECONDARY)):
+        hi_m = ns_phys > thr
+        grp = {}
+        for gname, m in (("above", hi_m), ("below", ~hi_m)):
+            if m.sum() == 0:
+                grp[gname] = dict(n=0); continue
+            grp[gname] = dict(
+                n=int(m.sum()),
+                pull_mean=float(ns_pull[m].mean()),
+                pull_sd=float(ns_pull[m].std(ddof=1)) if m.sum() > 1 else None,
+                rank_mean=float(ns_rank[m].mean()),
+                support_median=float(np.median(S_k[m])),
+                support_range=[float(S_k[m].min()), float(S_k[m].max())])
+        h1[lab] = grp
+    # collinearity guard (frozen abort rule)
+    rho_S_ns = float(spearmanr(S_k, ns_phys).statistic)
+    h1["collinearity"] = dict(spearman_support_vs_truth_ns=rho_S_ns,
+                              abort_threshold=0.8,
+                              identified=bool(abs(rho_S_ns) <= 0.8))
+    h1["marginal"] = permutation_p(lambda a, b: spearmanr(a, b).statistic,
+                                   S_k, np.abs(ns_pull), B=B, seed=seed)
+    if h1["collinearity"]["identified"]:
+        pp = permutation_p(lambda a, b: spearman_partial(a, b, ns_phys),
+                           S_k, np.abs(ns_pull), B=B, seed=seed + 1)
+        pp["material"] = bool(abs(pp["observed"]) >= MDE_RHO)
+        h1["partial_controlling_truth_ns"] = pp
+        h1["status"] = "ADJUDICATED"
+    else:
+        h1["partial_controlling_truth_ns"] = dict(
+            computed=False,
+            reason=f"support and truth n_s are collinear (|rho| {abs(rho_S_ns):.3f} > 0.8); "
+                   "the partial correlation is uninformative")
+        h1["status"] = "NON_IDENTIFIED"
+    # within-group stratified check (removes the group contrast by construction)
+    strat = {}
+    for gname, m in (("above_1.00", ns_phys > NS_SPLIT_PRIMARY),
+                     ("below_1.00", ns_phys <= NS_SPLIT_PRIMARY)):
+        if m.sum() >= 8:
+            strat[gname] = dict(n=int(m.sum()),
+                                rho=float(spearmanr(S_k[m], np.abs(ns_pull[m])).statistic))
+        else:
+            strat[gname] = dict(n=int(m.sum()), rho=None,
+                                note="fewer than 8 realizations: not evaluable")
+    h1["stratified"] = strat
+    h1["extrapolation"] = dict(
+        max_truth_ns=float(ns_phys.max()),
+        n_truths_above_max_design=int(np.sum(ns_phys > float(
+            (np.asarray(design_unit)[:, 0] * (hi[0] - lo[0]) + lo[0]).max()))),
+        max_design_ns=float((np.asarray(design_unit)[:, 0] * (hi[0] - lo[0]) + lo[0]).max()))
+    out["H1"] = h1
+
+    # ================================ H2 ================================
+    h2 = dict(condition_A=h2_cond_a)
+    if lowk_npz is not None:
+        d = np.load(lowk_npz, allow_pickle=True)
+        h2["condition_B_exposure"] = f_lowk_exposure(d["DESI_k"], d["DESI_u"])
+    h2["status"] = "UNRESOLVED_EXPOSURE_ONLY"
+    h2["establishment"] = ("PI #14 section 11.4 requires BOTH Condition A and Condition B. "
+                           "A is non-adjudicable, so H2 can be neither established nor "
+                           "excluded under this authorization.")
+    out["H2"] = h2
+
+    # ================================ H3 ================================
+    tau_r = []
+    for r in recs:
+        tidx = [r["names"].index(f"tau0_z{i}") for i in range(13)]
+        D = np.asarray(r["draws"], float)[:, tidx]
+        amp = np.exp(np.log(np.clip(D, 1e-8, None)).mean(axis=1))
+        T = np.asarray(r["truth"], float)[tidx]
+        amp_t = float(np.exp(np.log(np.clip(T, 1e-8, None)).mean()))
+        tau_r.append(float(np.mean(amp < amp_t)))
+    tau_r = np.asarray(tau_r)
+
+    proj, compat, r2a, r2d = [], [], [], []
+    for r in recs:
+        se = r["sites_extra"]
+        amp_d = np.asarray(se["tau0_amp"]["draws"], float)
+        dt_d = np.asarray(se["dtau0"]["draws"], float)
+        A = np.column_stack([np.asarray(r["draws"], float)[:, r["names"].index(a)]
+                             for a in ABSORBERS])
+        pr = absorber_projection(amp_d, dt_d, A, co)
+        # absorber-associated displacement of the posterior mean, contracted with the
+        # absorber block's own mean offset (local first-order approximation)
+        a_off = A.mean(0) - np.asarray(r["truth"], float)[
+            [r["names"].index(a) for a in ABSORBERS]]
+        d_amp = float(pr["dln_amp_dabs"] @ a_off)
+        d_dt = float(pr["ddtau_dabs"] @ a_off)
+        pred = project_to_tau_eff(d_amp, d_dt, co["c"])
+        obs_bar = (float(np.log(np.asarray(se["tau0_amp"]["draws"], float)).mean())
+                   - float(np.log(max(float(se["tau0_amp"]["truth"]), 1e-300)))
+                   + co["c_bar"] * (float(dt_d.mean()) - float(se["dtau0"]["truth"])))
+        pred_bar = d_amp + co["c_bar"] * d_dt
+        proj.append(pred)
+        compat.append(pred_bar / obs_bar if abs(obs_bar) > 1e-12 else np.nan)
+        r2a.append(pr["r2_amp"]); r2d.append(pr["r2_dtau"])
+    proj = np.asarray(proj); compat = np.asarray(compat, float)
+    fin = np.isfinite(compat)
+    h3 = dict(
+        coefficients=dict(zbar=co["zbar"], c_bar=co["c_bar"], c_bar_desi=co["c_bar_desi"],
+                          admixture_ratio=co["admixture_ratio"],
+                          n_desi_constrained=int(co["desi_mask"].sum())),
+        regression_quality=dict(median_r2_ln_amp=float(np.median(r2a)),
+                                median_r2_dtau=float(np.median(r2d))),
+        compatibility=dict(median=float(np.median(compat[fin])) if fin.any() else None,
+                           mean=float(np.mean(compat[fin])) if fin.any() else None,
+                           n_finite=int(fin.sum()),
+                           floor=H3_COMPAT_FLOOR,
+                           material=bool(fin.any() and
+                                         abs(float(np.median(compat[fin]))) >= H3_COMPAT_FLOOR)),
+        projected_by_rung=[dict(z=float(co["z"][i]), c=float(co["c"][i]),
+                                desi_constrained=bool(co["desi_mask"][i]),
+                                median_projected=float(np.median(proj[:, i])))
+                           for i in range(13)],
+        rank_extremeness_assoc=permutation_p(
+            lambda a, b: spearmanr(a, b).statistic,
+            np.abs(compat[fin]) if fin.any() else np.zeros(n),
+            2 * np.abs(tau_r[fin] - 0.5) if fin.any() else np.zeros(n),
+            B=min(B, 20000), seed=seed + 2),
+        caveat="LOCAL PROJECTED APPROXIMATION, NOT AN INTERVENTION. The compatibility "
+               "fraction is GEOMETRIC, never causal. No absorber prior was removed, "
+               "weakened or changed.")
+    out["H3"] = h3
+
+    # ---- primary Holm family (m = 2: H1, H3) ----
+    prim = []
+    if h1["status"] == "ADJUDICATED":
+        prim.append(("H1", h1["partial_controlling_truth_ns"]["p"]))
+    if h3["rank_extremeness_assoc"] is not None:
+        prim.append(("H3", h3["rank_extremeness_assoc"]["p"]))
+    if prim:
+        fl = holm([p for _, p in prim])
+        out["primary_holm_family"] = dict(
+            m=len(prim),
+            tests={k: dict(p=p, holm_significant=bool(f)) for (k, p), f in zip(prim, fl)})
+    out["meta"] = dict(n=n, B=B, seed=seed, prereg="2026-08-07 mechanism adjudication",
+                       mde_rho=MDE_RHO, compat_floor=H3_COMPAT_FLOOR)
+    return out
