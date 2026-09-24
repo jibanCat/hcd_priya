@@ -264,6 +264,7 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
 
     packed_chains, energies, num_steps_all, per_chain_div, ll_chains = [], [], [], [], []
     nuisance_chains = []                                        # Fix 2: raw f_res / metal-node draws
+    diverging_chains = []                                       # PI #26: per-draw NUTS divergence flags (diagnostic only)
     names = None
     for cid in range(int(n_chains)):
         chain_key = jax.random.fold_in(k_nuts, int(cid))
@@ -285,6 +286,7 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
             names = _packed_names_for(samples, kept_global)
         energies.append(extra["energy"]); num_steps_all.append(extra["num_steps"])
         per_chain_div.append(int(n_div))
+        diverging_chains.append(np.asarray(extra["diverging"], bool))   # aligned with `draws` rows
         ll_chains.append(np.asarray(_loglik_chain(ctx, core_per_leg, samples, kept_global)))
         if verbose:
             print(f"  [chain {cid}] survey={survey} draws={draws.shape[0]} div={n_div} "
@@ -301,7 +303,8 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
     return dict(packed=packed, names=names, battery=battery, per_chain_div=per_chain_div,
                 members=members, leg_name=leg.name, n_real_rows=n_real,
                 ll_chains=ll_chains, kept_global=kept_global,
-                nuisance_chains=nuisance_chains, nuisance_bounds=nuisance_bounds)
+                nuisance_chains=nuisance_chains, nuisance_bounds=nuisance_bounds,
+                diverging_chains=diverging_chains)
 
 
 # Nuisance-site prefixes for the Model C+ per-leg, per-ion metal f/k nodes. Kept in sync with
@@ -480,6 +483,37 @@ def _export_nuisance(out_dir, root, result, survey):
 # --------------------------------------------------------------------------------------------- #
 #  GetDist / cobaya export (BLINDED on A_p / n_s by default).
 # --------------------------------------------------------------------------------------------- #
+def _export_divergences(out_dir, root, result):
+    """PI DECISIONS #26 (2026-09-24): DIAGNOSTIC-ONLY persistence of the per-draw NUTS divergence
+    flags numpyro already collects (``extra_fields=("diverging", ...)`` in ``_run_nuts_legb``), so a
+    divergent transition can be LOCALIZED after the fact instead of being reduced to a count.
+    Writes ``<root>.divergences.npz`` with
+      ``diverging``      -- (C, N) bool; row i of chain c is row i (0-based, after the header) of
+                            ``<root>.{c+1}.txt`` (the same draw order as the exported chains);
+      ``per_chain_div``  -- (C,) int, the counts the health record reports;
+      ``chain_files``    -- (C,) str, the chain file each row of ``diverging`` refers to.
+    Touches NOTHING else: not the samples, not the chain columns, not the blinding, not the health
+    record. No-op (nothing written, returns None) when the result carries no ``diverging_chains``
+    (older callers / synthetic results). Refuses on an internal inconsistency between the flags and
+    ``per_chain_div`` (the health record and the flags must tell the same story)."""
+    chains = result.get("diverging_chains")
+    if chains is None:
+        return None
+    C = int(result["packed"].shape[0])
+    N = int(result["packed"].shape[1])
+    assert len(chains) == C, f"diverging_chains has {len(chains)} chains, packed has {C}"
+    flags = np.stack([np.asarray(ch, bool).reshape(-1) for ch in chains])       # (C, N)
+    assert flags.shape == (C, N), f"divergence flags shape {flags.shape} != (C, N) = {(C, N)}"
+    counts = flags.sum(axis=1).astype(int)
+    per_chain = np.asarray(result["per_chain_div"], int)
+    assert np.array_equal(counts, per_chain), \
+        f"divergence flag sums {counts.tolist()} != per_chain_div {per_chain.tolist()}"
+    path = f"{out_dir}/{root}.divergences.npz"
+    np.savez(path, diverging=flags, per_chain_div=per_chain,
+             chain_files=np.array([f"{root}.{c + 1}.txt" for c in range(C)]))
+    return path
+
+
 def export_getdist(result, out_dir, root, *, offset, blind=True, survey="", meta=None):
     """Write per-chain GetDist/cobaya chains: <root>.{c}.txt + <root>.paramnames + <root>.yaml.
 
@@ -543,6 +577,8 @@ def export_getdist(result, out_dir, root, *, offset, blind=True, survey="", meta
     # it does NOT touch the GetDist chain columns / the A_p/n_s blinding above, and is a no-op when
     # no nuisance sites were sampled (KS uniform).
     _export_nuisance(out_dir, root, result, survey)
+    # PI #26: the per-draw divergence flags (diagnostic only; no-op when absent). Additive-only.
+    _export_divergences(out_dir, root, result)
     return chain_files, rec
 
 
@@ -642,7 +678,7 @@ def main():
                   seed_fold_label=a.survey,
                   seed_fold_int=int(nuts_fold_int(a.survey))))
     print(f"=== wrote {len(chain_files)} chains -> {out_dir}/{root}.*.txt "
-          f"(+ .paramnames .yaml .health.json) | A_p/n_s BLINDED={a.blind} ===")
+          f"(+ .paramnames .yaml .health.json .divergences.npz) | A_p/n_s BLINDED={a.blind} ===")
     if info["private"]:
         print("    NOTE: DESI cosmology is PRIVATE — results_local/ is gitignored. Do NOT commit.")
 

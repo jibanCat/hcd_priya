@@ -249,3 +249,62 @@ def test_export_without_nuisance_is_noop(tmp_path):
     assert not os.path.exists(os.path.join(out_dir, "real_ks.nuisance.json"))
     # the normal chain export is untouched
     assert os.path.exists(os.path.join(out_dir, "real_ks.1.txt"))
+
+
+# --------------------------------------------------------------------------------------------- #
+#  PI #26 (2026-09-24) -- DIAGNOSTIC-ONLY persistence of the per-draw NUTS divergence flags.
+#  export_getdist writes <root>.divergences.npz when the result carries ``diverging_chains``;
+#  nothing else in the export (chain columns, blinding, health) changes; absent key -> no file.
+# --------------------------------------------------------------------------------------------- #
+def test_export_writes_divergence_flags_when_present(tmp_path):
+    """<root>.divergences.npz holds the (C, N) bool flags aligned with the chain rows, plus the
+    per-chain counts; the counts must equal per_chain_div and the health n_divergent."""
+    N = 5
+    ch0 = {"f_res_amp": np.array([0.001, -0.002, 0.0, 0.003, 0.0015])}
+    ch1 = {"f_res_amp": np.array([0.002, 0.0, -0.001, 0.0, 0.001])}
+    result = _minimal_result([ch0, ch1], {"f": (0.003, 0.03), "k": (1e-3, 0.1)})
+    flags = [np.array([False, False, True, False, False]), np.array([False, False, False, False, True])]
+    result["diverging_chains"] = flags
+    result["per_chain_div"] = [1, 1]
+    result["battery"]["n_divergent"] = 2
+
+    out_dir = str(tmp_path)
+    RF.export_getdist(result, out_dir, "real_eboss", offset={"ns": 0.0, "Ap": 0.0},
+                      blind=True, survey="eboss")
+    p = os.path.join(out_dir, "real_eboss.divergences.npz")
+    assert os.path.exists(p)
+    z = np.load(p)
+    assert set(z.files) >= {"diverging", "per_chain_div", "chain_files"}
+    d = z["diverging"]
+    assert d.shape == (2, N) and d.dtype == np.bool_
+    assert np.array_equal(d[0], flags[0]) and np.array_equal(d[1], flags[1])
+    assert list(z["per_chain_div"]) == [1, 1]
+    assert list(z["chain_files"]) == ["real_eboss.1.txt", "real_eboss.2.txt"]
+    # the flags are aligned with the chain rows: same N as the exported chain files
+    rows = np.loadtxt(os.path.join(out_dir, "real_eboss.1.txt"))
+    assert rows.shape[0] == N
+    # the health record is unchanged in content (still the battery count)
+    with open(os.path.join(out_dir, "real_eboss.health.json")) as f:
+        h = json.load(f)
+    assert h["n_divergent"] == 2 and h["per_chain_div"] == [1, 1]
+
+
+def test_export_divergences_noop_when_absent(tmp_path):
+    """A result dict without ``diverging_chains`` (older callers, synthetic results) writes no file."""
+    result = _minimal_result([{"f_res_amp": np.zeros(5)}], {"f": (0.003, 0.03), "k": (1e-3, 0.1)})
+    assert "diverging_chains" not in result
+    out_dir = str(tmp_path)
+    RF.export_getdist(result, out_dir, "real_desi", offset={"ns": 0.0, "Ap": 0.0},
+                      blind=False, survey="desi")
+    assert not os.path.exists(os.path.join(out_dir, "real_desi.divergences.npz"))
+
+
+def test_export_divergences_refuses_count_mismatch(tmp_path):
+    """Flags whose per-chain sums disagree with per_chain_div are an internal inconsistency:
+    refuse (the health record and the flags must tell the same story)."""
+    result = _minimal_result([{"f_res_amp": np.zeros(5)}], {"f": (0.003, 0.03), "k": (1e-3, 0.1)})
+    result["diverging_chains"] = [np.array([True, False, False, False, False])]
+    result["per_chain_div"] = [0]
+    with pytest.raises(AssertionError):
+        RF.export_getdist(result, str(tmp_path), "real_desi", offset={"ns": 0.0, "Ap": 0.0},
+                          blind=False, survey="desi")
