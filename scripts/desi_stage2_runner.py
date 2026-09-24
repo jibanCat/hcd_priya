@@ -42,6 +42,8 @@ A2C_ARGV_TEMPLATE = ["--shard", "{m}", "--n-shards", "48", "--n-mocks", "48", "-
                      "--no-shard-pkl", "--out-dir", "{scratch}", "--metal-selfdraw", "--fres-selfdraw"]
 STRONG = dict(n_chains=4, n_warmup=1000, n_samples=600, max_tree_depth=10, target_accept=0.9, dense_mass=True)
 STORED = dict(n_warmup=250, n_samples=600, max_tree_depth=10, seed=20260614)
+C4_SITES = ("tau0_amp", "dtau0", "k_SiIII_DESI_z1")
+EXTRA_SITES = ("tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla", "f_res_amp", "f_res_slope", "f_SiIII_DESI_z0", "f_SiIII_DESI_z1", "f_SiII_DESI_z0", "f_SiII_DESI_z1", "k_SiIII_DESI_z0", "k_SiIII_DESI_z1", "k_SiII_DESI_z0", "k_SiII_DESI_z1")
 
 
 class Stage2Refusal(RuntimeError):
@@ -92,20 +94,72 @@ def compare_replica(stored_draws, replica_draws_thinned, L_stored):
                 bit_identical=bool(same_shape and maxabs == 0.0), close_1e_8=bool(same_shape and maxabs is not None and maxabs < 1e-8))
 
 
-def pilot_gate(battery, per_chain_div, thresholds=dict(rhat=1.01, ess_bulk=400, ess_tail=400, ebfmi=0.3, treedepth=0.02)):
-    """Preregistered pilot gate: every packed parameter within the GREEN thresholds, zero divergences."""
-    rh = float(np.nanmax(battery["rhat"])); eb = float(np.nanmin(battery["ess_bulk"])); et = float(np.nanmin(battery["ess_tail"]))
-    bf = float(np.nanmin(battery["ebfmi"])) if np.asarray(battery.get("ebfmi", [])).size else float("nan")
-    td = float(battery.get("treedepth_sat_frac", np.nan)); nd = int(sum(per_chain_div))
-    conds = dict(rhat=rh < thresholds["rhat"], ess_bulk=eb >= thresholds["ess_bulk"], ess_tail=et >= thresholds["ess_tail"],
-                 divergences=nd == 0, ebfmi=bf >= thresholds["ebfmi"], treedepth=td < thresholds["treedepth"])
-    return dict(passed=bool(all(conds.values())), conds=conds, rhat_max=rh, ess_bulk_min=eb, ess_tail_min=et, ebfmi_min=bf,
-                treedepth_sat_frac=td, n_divergent=nd, thresholds=thresholds)
+def _vals(x):
+    return np.asarray(list(x.values()) if isinstance(x, dict) else x, float)
+
+
+def pilot_gate(battery, per_chain_div, n_chains=4, thresholds=dict(rhat=1.01, ess_bulk=400, ess_tail=400, ebfmi=0.3, treedepth=0.02),
+               cpu_h=None, cost_cap_cpu_h=150.0, identity_ok=True, extra_sites=None):
+    """Preregistered pilot gate (prereg v1.1 section 3). ``battery`` is CL.convergence_battery output (rhat / ess_bulk / ess_tail
+    are DICTS keyed by parameter; ebfmi is a per-chain array). Every packed parameter must be finite and within the GREEN
+    thresholds; zero divergences over all chains; E-BFMI per chain (count == n_chains). ``extra_sites`` (dict name -> dict(rhat, ess))
+    adds the non-packed C4 sites (tau0_amp, dtau0, k_SiIII_DESI_z1) to the R-hat / ESS-bulk conditions (v1.1)."""
+    rh, eb, et = (_vals(battery[k]) for k in ("rhat", "ess_bulk", "ess_tail"))
+    bf = _vals(battery.get("ebfmi", []))
+    td = float(battery.get("treedepth_sat_frac", np.nan)); nd = int(sum(int(x) for x in per_chain_div))
+    finite = bool(rh.size and np.isfinite(rh).all() and np.isfinite(eb).all() and np.isfinite(et).all() and bf.size == n_chains and np.isfinite(bf).all() and np.isfinite(td))
+    ex_rh = np.array([float(v["rhat"]) for v in (extra_sites or {}).values()], float); ex_es = np.array([float(v["ess"]) for v in (extra_sites or {}).values()], float)
+    ex_ok = bool(np.isfinite(ex_rh).all() and np.isfinite(ex_es).all()) if ex_rh.size else True
+    conds = dict(finite=finite, rhat=bool(finite and rh.max() < thresholds["rhat"]), ess_bulk=bool(finite and eb.min() >= thresholds["ess_bulk"]),
+                 ess_tail=bool(finite and et.min() >= thresholds["ess_tail"]), divergences=(nd == 0), ebfmi=bool(finite and bf.min() >= thresholds["ebfmi"]),
+                 treedepth=bool(finite and td < thresholds["treedepth"]),
+                 c4_sites_rhat=bool(ex_ok and (ex_rh.max() < thresholds["rhat"] if ex_rh.size else True)),
+                 c4_sites_ess=bool(ex_ok and (ex_es.min() >= thresholds["ess_bulk"] if ex_es.size else True)))
+    sampler_ok = bool(all(conds.values()))
+    cost_ok = (None if cpu_h is None else bool(cpu_h <= cost_cap_cpu_h))
+    passed = bool(sampler_ok and bool(identity_ok) and (cost_ok is not False))
+    return dict(passed_sampler_criteria=sampler_ok, cost_ok=cost_ok, cpu_h=cpu_h, cost_cap_cpu_h=cost_cap_cpu_h, identity_ok=bool(identity_ok),
+                pilot_gate_passed=passed, conds=conds, rhat_max=(float(rh.max()) if rh.size else None), ess_bulk_min=(float(eb.min()) if eb.size else None),
+                ess_tail_min=(float(et.min()) if et.size else None), ebfmi_min=(float(bf.min()) if bf.size else None), ebfmi_count=int(bf.size),
+                treedepth_sat_frac=td, n_divergent=nd, thresholds=thresholds, n_chains=n_chains,
+                c4_sites={k: dict(rhat=float(v["rhat"]), ess=float(v["ess"])) for k, v in (extra_sites or {}).items()})
+
+
+def site_diagnostics(chains, names_extra):
+    """Split-R-hat / ESS (numpyro.diagnostics, raw draws) for non-packed sampled sites across the strong chains."""
+    import numpyro.diagnostics as npd
+    out = {}
+    for nm in names_extra:
+        if all(nm in c["samples"] for c in chains):
+            x = np.stack([np.asarray(c["samples"][nm], float).reshape(len(c["samples"][nm]), -1)[:, 0] for c in chains])
+            out[nm] = dict(rhat=float(npd.split_gelman_rubin(x)), ess=float(npd.effective_sample_size(x)))
+    return out
 
 
 # --------------------------------------------------------------------------------------------- #
 #  the per-mock replacement (runs inside the frozen driver's main())
 # --------------------------------------------------------------------------------------------- #
+def _partial(out_dir, m, tag, obj):
+    """Atomic per-chain checkpoint (S1): a wall-time or OOM kill loses at most one chain."""
+    d = os.path.join(out_dir, f"stage2_mock_{int(m):04d}.partial"); os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, f"{tag}.pkl")
+    with open(p + ".tmp", "wb") as f:
+        pickle.dump(obj, f, protocol=4)
+    os.replace(p + ".tmp", p)
+
+
+def _jsonable(o):
+    if isinstance(o, dict):
+        return {str(k): _jsonable(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_jsonable(v) for v in o]
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    if isinstance(o, (np.floating, np.integer, np.bool_)):
+        return o.item()
+    return o
+
+
 def make_stage2_mock(stored_pkl, out_dir, strong, do_replica=True, do_strong=True, dry_run=False, n_threads=None):
     import jax
     import jax.numpy as jnp
@@ -145,6 +199,13 @@ def make_stage2_mock(stored_pkl, out_dir, strong, do_replica=True, do_strong=Tru
         _truth_raw = truth_pack.get("raw") or {}
         site_truths = {nm: float(truth_pack.get(nm, _truth_raw.get(nm, np.nan))) for nm in stored["sites_extra"]}
         ident = identity_checks(stored, run_cfg, truth_vec, site_truths, np.array(truth_pack["alpha_hcd_z"], float), kept_global, info["dropped"], ll_true)
+        fp = {}
+        for leg in mock_legs:
+            for attr in ("P_data", "C_data", "cov", "k", "z"):
+                v = getattr(leg, attr, None)
+                if v is not None:
+                    fp[f"{getattr(leg, 'name', 'leg')}.{attr}"] = hashlib.sha256(np.ascontiguousarray(np.asarray(v, float)).tobytes()).hexdigest()
+        ident["mock_arrays_sha256"] = fp
         summary = dict(mock=int(m), identity=ident, stored=dict(L=int(stored["L"]), n_div=int(stored["n_div"]), run_cfg=stored["run_cfg"]),
                        settings=dict(stored=STORED, strong=strong), timing={}, host=platform.node(), threads=n_threads,
                        utc_start=datetime.fromtimestamp(t0, timezone.utc).isoformat())
@@ -168,33 +229,37 @@ def make_stage2_mock(stored_pkl, out_dir, strong, do_replica=True, do_strong=Tru
             draws_t, step, ess_min = thin_to_ess(draws)
             raw["replica"] = dict(samples={k: np.asarray(v) for k, v in samples.items()}, draws=draws, draws_thinned=draws_t, step=int(step),
                                   ess_min=float(ess_min), n_div=int(n_div), attempts=attempts, base_seed=base_seed)
+            _partial(out_dir, m, "replica", raw["replica"])
             raw["names"] = CL._packed_names_for(samples, kept_global)
             summary["replica"] = dict(compare=compare_replica(stored["draws"], draws_t, stored["L"]), n_div=int(n_div), attempts=attempts,
-                                      step=int(step), ess_min=float(ess_min), names_equal=(list(raw["names"]) == list(stored["names"])))
+                                      step=int(step), ess_min=float(ess_min), names_equal=(list(raw["names"]) == list(stored["names"])), base_seed=int(base_seed))
             summary["timing"]["replica_s"] = time.time() - tr
         # ---- (S) strong run ----
         if do_strong:
             ts = time.time()
-            chains = []; energies = []; steps = []; divs = []; packed = []
+            chains = []; energies = []; steps = []; divs = []; packed = []; init_vals = []; chain_keys = []
             for cid in range(int(strong["n_chains"])):
-                chain_key = jax.random.fold_in(k_nuts, int(cid))
+                chain_key = jax.random.fold_in(k_nuts, int(cid)); chain_keys.append(np.asarray(chain_key).tolist())
                 samples, n_div, extra = CL._run_nuts_legb(ctx, mock_legs, core_per_leg, n_warmup=int(strong["n_warmup"]), n_samples=int(strong["n_samples"]),
                                                           seed=chain_key, target_accept=float(strong["target_accept"]), dense_mass=bool(strong["dense_mass"]),
                                                           max_tree_depth=int(strong["max_tree_depth"]), init_strategy=init_to_sample, return_extra=True)
                 dr = CL._draws_matrix(samples, kept_global)
-                chains.append(dict(chain=cid, samples={k: np.asarray(v) for k, v in samples.items()}, energy=np.asarray(extra["energy"]),
-                                   num_steps=np.asarray(extra["num_steps"]), n_div=int(n_div), diverging=np.asarray(extra.get("diverging", [])), draws=dr))
-                energies.append(np.asarray(extra["energy"])); steps.append(np.asarray(extra["num_steps"])); divs.append(int(n_div)); packed.append(dr)
+                rec_c = dict(chain=cid, samples={k: np.asarray(v) for k, v in samples.items()}, energy=np.asarray(extra["energy"]),
+                             num_steps=np.asarray(extra["num_steps"]), n_div=int(n_div), diverging=np.asarray(extra.get("diverging", [])), draws=dr, chain_key=chain_keys[-1])
+                chains.append(rec_c); _partial(out_dir, m, f"chain_{cid}", rec_c)
+                energies.append(np.asarray(extra["energy"])); steps.append(np.asarray(extra["num_steps"])); divs.append(int(n_div)); packed.append(dr); init_vals.append(dr[0])
                 if verbose:
                     print(f"  [stage2 mock {m} chain {cid}] draws={dr.shape[0]} div={n_div}", flush=True)
             packed = np.stack(packed, axis=0)
             names = CL._packed_names_for(samples, kept_global)
             battery = CL.convergence_battery(packed, names, energy=np.stack(energies), num_steps=np.stack(steps), max_tree_depth=int(strong["max_tree_depth"]), n_div=int(sum(divs)))
-            raw["strong"] = dict(chains=chains, packed=packed, names=names, battery=battery, per_chain_div=divs)
+            init_arr = np.stack(init_vals); post_sd = packed.reshape(-1, packed.shape[-1]).std(axis=0)
+            battery["init_spread"] = init_arr.std(axis=0); battery["post_sd"] = post_sd
+            battery["init_spread_over_postsd"] = np.where(post_sd > 0, init_arr.std(axis=0) / post_sd, np.nan)
+            raw["strong"] = dict(chains=chains, packed=packed, names=names, battery=battery, per_chain_div=divs, chain_keys=chain_keys)
             if raw["names"] is None:
                 raw["names"] = names
-            bat_summary = {k: (np.asarray(v).tolist() if isinstance(v, np.ndarray) else v) for k, v in battery.items()}
-            summary["strong"] = dict(names=list(names), battery=bat_summary, per_chain_div=divs, gate=pilot_gate(battery, divs), n_chains=int(strong["n_chains"]))
+            summary["strong"] = dict(names=list(names), per_chain_div=divs, n_chains=int(strong["n_chains"]), chain_keys=chain_keys)
             summary["timing"]["strong_s"] = time.time() - ts
         summary["timing"]["total_s"] = time.time() - t0; summary["utc_end"] = datetime.now(timezone.utc).isoformat()
         return dict(summary=summary, raw=raw)
@@ -243,10 +308,24 @@ def run_one(mock, stored_dir, sha_file, out_dir, do_replica=True, do_strong=True
         pickle.dump(res["raw"], f, protocol=4)
     os.replace(out_pkl + ".tmp", out_pkl)
     summ["output_pkl_sha256"] = sha256(out_pkl)
+    # derived summaries AFTER the raw chains are safely on disk (M2): any post-processing failure cannot discard them
+    try:
+        if res["raw"] is not None and "strong" in res["raw"]:
+            st = res["raw"]["strong"]; bat = st["battery"]
+            summ["strong"]["battery"] = _jsonable({k: (v if not isinstance(v, np.ndarray) else v) for k, v in bat.items()})
+            extra = site_diagnostics(st["chains"], EXTRA_SITES)
+            summ["strong"]["site_diagnostics_non_packed"] = extra
+            cpus = float(os.environ.get("SLURM_CPUS_PER_TASK", "0") or 0)
+            cpu_h = (summ["timing"].get("total_s", 0.0) * cpus / 3600.0) if cpus > 0 else None
+            summ["strong"]["gate"] = pilot_gate(bat, st["per_chain_div"], n_chains=int(STRONG["n_chains"]), cpu_h=cpu_h,
+                                                identity_ok=all(v for k, v in summ["identity"].items() if isinstance(v, bool)),
+                                                extra_sites={k: extra[k] for k in C4_SITES if k in extra})
+    except Exception as e:  # noqa: BLE001
+        summ["strong"] = dict(summ.get("strong", {}), gate=dict(pilot_gate_passed=False, passed_sampler_criteria=False, error=repr(e)))
     with open(out_json + ".tmp", "w") as f:
-        json.dump(summ, f, indent=1, sort_keys=True, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o)); f.write("\n")
+        json.dump(_jsonable(summ), f, indent=1, sort_keys=True, default=str); f.write("\n")
     os.replace(out_json + ".tmp", out_json)
-    print(f"stage2 mock {mock}: identity OK; replica {summ.get('replica', {}).get('compare')}; gate {summ.get('strong', {}).get('gate', {}).get('passed')}")
+    print(f"stage2 mock {mock}: identity OK; replica {summ.get('replica', {}).get('compare')}; gate {summ.get('strong', {}).get('gate', {}).get('pilot_gate_passed')}")
     return summ
 
 
