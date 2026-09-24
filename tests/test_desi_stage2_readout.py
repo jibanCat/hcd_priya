@@ -15,7 +15,7 @@ def _ar1(rng, n, corr, shift=0.0, phi=0.6):
     return MU + shift * SD * np.array([1, 0, 0, 0]) + z @ R.T
 
 
-def _mock(tmp, m, rng, corr_stored=-0.2, corr_strong=-0.2, shift=0.0, step=5, sampler_ok=True, phi=0.6):
+def _mock(tmp, m, rng, corr_stored=-0.2, corr_strong=-0.2, shift=0.0, step=5, sampler_ok=True, phi=0.6, nan_battery=False):
     L = int(np.ceil(600 / step))
     Xs = _ar1(rng, 600, corr_stored, 0.0, phi)[::step]
     dr = rng.uniform(0.2, 0.8, size=(L, 25)); dr[:, 0] = Xs[:, 0]
@@ -28,9 +28,12 @@ def _mock(tmp, m, rng, corr_stored=-0.2, corr_strong=-0.2, shift=0.0, step=5, sa
         chains.append(dict(chain=c, draws=d, samples=dict(tau0_amp=X[:, 1], dtau0=X[:, 2], k_SiIII_DESI_z1=10 ** X[:, 3]), n_div=0))
     raw = dict(mock=m, names=NAMES, strong=dict(chains=chains, names=NAMES, per_chain_div=[0, 0, 0, 0]))
     os.makedirs(tmp / "s2", exist_ok=True); pickle.dump(raw, open(tmp / "s2" / f"stage2_mock_{m:04d}.pkl", "wb"))
+    import hashlib
+    sh = lambda q: hashlib.sha256(open(q, "rb").read()).hexdigest()
     json.dump(dict(mock=m, replica=dict(step=step, compare=dict(bit_identical=False)),
-                   strong=dict(battery=dict(rhat_max=1.003, ess_bulk_min=900, ess_tail_min=800, ebfmi_min=0.9, treedepth_sat_frac=0.0, n_divergent=0),
-                               gate=dict(pilot_gate_passed=sampler_ok, passed_sampler_criteria=sampler_ok)), identity=dict(truth_vec_equal=True, ll_true_equal=True)),
+                   strong=dict(battery=dict(rhat_max=(float("nan") if not sampler_ok and nan_battery else 1.003), ess_bulk_min=900, ess_tail_min=800, ebfmi_min=0.9, treedepth_sat_frac=0.0, n_divergent=0),
+                               gate=dict(pilot_gate_passed=sampler_ok, passed_sampler_criteria=sampler_ok)), identity=dict(truth_vec_equal=True, ll_true_equal=True),
+                   stored_pkl=dict(sha256=sh(tmp / "stored" / f"mock_{m:04d}.pkl")), output_pkl_sha256=sh(tmp / "s2" / f"stage2_mock_{m:04d}.pkl")),
               open(tmp / "s2" / f"stage2_mock_{m:04d}.json", "w"))
 
 
@@ -66,24 +69,38 @@ def test_decision_rule_on_planted_scenarios(tmp_path, scenario, expect):
 def test_failed_sampler_gate_makes_incomplete_and_empty_set_is_incomplete(tmp_path):
     rng = np.random.default_rng(2); M.B_FINITE_L = 200
     for m in list(M.TAIL) + list(M.CONTROL):
-        _mock(tmp_path, m, rng, sampler_ok=(m != 9))
+        _mock(tmp_path, m, rng, sampler_ok=(m != 9), nan_battery=True)      # the failed mock carries a NaN battery value (M1 of review H)
     out = tmp_path / "r"
     M.main(["--stored-dir", str(tmp_path / "stored"), "--stage2-dir", str(tmp_path / "s2"), "--out", str(out)])
     d = json.load(open(str(out) + ".json"))["decision"]; assert d["label"] == "INCOMPLETE" and d["excluded_failed_sampler_gate"] == [9]
     out2 = tmp_path / "r2"
     M.main(["--stored-dir", str(tmp_path / "stored"), "--stage2-dir", str(tmp_path / "empty"), "--out", str(out2)])
     assert json.load(open(str(out2) + ".json"))["decision"]["label"] == "INCOMPLETE"
+    assert not (tmp_path / "r.json.tmp").exists() and (tmp_path / "r.md").exists()
+    assert "provenance" in json.load(open(str(out) + ".json")) and "inputs_sha256" in json.load(open(str(out) + ".json"))["provenance"]
+
+
+def test_sha_mismatch_and_missing_fields_refuse(tmp_path):
+    rng = np.random.default_rng(3); M.B_FINITE_L = 100
+    _mock(tmp_path, 45, rng)
+    j = json.load(open(tmp_path / "s2" / "stage2_mock_0045.json")); j["output_pkl_sha256"] = "0" * 64; json.dump(j, open(tmp_path / "s2" / "stage2_mock_0045.json", "w"))
+    with pytest.raises(SystemExit):
+        M.analyze_mock(str(tmp_path / "stored" / "mock_0045.pkl"), str(tmp_path / "s2" / "stage2_mock_0045.pkl"), str(tmp_path / "s2" / "stage2_mock_0045.json"))
+    j.pop("output_pkl_sha256"); json.dump(j, open(tmp_path / "s2" / "stage2_mock_0045.json", "w"))
+    with pytest.raises(SystemExit):
+        M.analyze_mock(str(tmp_path / "stored" / "mock_0045.pkl"), str(tmp_path / "s2" / "stage2_mock_0045.pkl"), str(tmp_path / "s2" / "stage2_mock_0045.json"))
 
 
 def test_null_calibration_of_the_corr_band_with_autocorrelated_chains(tmp_path):
     """Same posterior on both sides (AR(1) chains): the stored corr should fall outside the block-bootstrap 95 percent band
     about 5 percent of the time (accept up to 0.12 at this sample size)."""
-    M.B_FINITE_L = 300; out = 0; n = 0
-    for pop in range(40):
-        for step in (2, 5):
+    M.B_FINITE_L = 300
+    for step in (2, 5):
+        out = 0; n = 0
+        for pop in range(40):
             rng = np.random.default_rng(1000 + pop * 10 + step)
             d = tmp_path / f"p{pop}_{step}"; _mock(d, 45, rng, corr_stored=-0.2, corr_strong=-0.2, step=step)
-            res = M.analyze_mock(str(d / "stored" / "mock_0045.pkl"), str(d / "s2" / "stage2_mock_0045.pkl"), str(d / "s2" / "stage2_mock_0045.json"), 7)
+            res = M.analyze_mock(str(d / "stored" / "mock_0045.pkl"), str(d / "s2" / "stage2_mock_0045.pkl"), str(d / "s2" / "stage2_mock_0045.json"))
             out += int(not res["corr_inside_band"]); n += 1
-    rate = out / n
-    assert rate <= 0.12, rate
+        rate = out / n
+        assert 0.0 <= rate <= 0.15, (step, rate)          # 40 populations: the 95 percent envelope of a 0.05 to 0.08 rate

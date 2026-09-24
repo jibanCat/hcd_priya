@@ -93,7 +93,7 @@ def finite_L_bands(X_chains, L, step, rng, B=None, block=BLOCK):
         Y = np.concatenate([blocks[i] for i in rng.integers(0, len(blocks), size=nb)], axis=0)[:L]
         st = stats(Y, pooled)
         corr[b] = st["corr_ns_dtau0_stored"]          # the L-draw estimate versus the pooled reference
-        dn[b] = st["delta_c4_norm"]; dn3[b] = st["delta_p3_norm"]; sdr[b] = 1.0 / np.asarray(st["sd_ratio"])
+        dn[b] = st["delta_c4_norm"]; dn3[b] = st["delta_p3_norm"]; sdr[b] = np.asarray(st["sd_ratio"])
     return dict(corr_ns_dtau0_band95=[float(np.quantile(corr, 0.025)), float(np.quantile(corr, 0.975))], corr_median=float(np.median(corr)),
                 delta_norm_q95=float(np.quantile(dn, 0.95)), delta_p3_norm_q95=float(np.quantile(dn3, 0.95)),
                 sd_ratio_band95=[[float(np.quantile(sdr[:, c], 0.025)), float(np.quantile(sdr[:, c], 0.975))] for c in range(sdr.shape[1])],
@@ -109,15 +109,19 @@ def _sha256(p):
     return h.hexdigest()
 
 
-def analyze_mock(stored_pkl, stage2_pkl, stage2_json, seed):
+def analyze_mock(stored_pkl, stage2_pkl, stage2_json, seed=None):
     z = pickle.load(open(stored_pkl, "rb")); r = pickle.load(open(stage2_pkl, "rb")); j = json.load(open(stage2_json))
-    if j.get("stored_pkl", {}).get("sha256") and j["stored_pkl"]["sha256"] != _sha256(stored_pkl):
+    want_s = j.get("stored_pkl", {}).get("sha256"); want_o = j.get("output_pkl_sha256")
+    if not want_s or not want_o:
+        raise SystemExit(f"REFUSE: runner record lacks the sha256 fields ({stage2_json})")
+    if want_s != _sha256(stored_pkl):
         raise SystemExit(f"REFUSE: stored pkl sha256 differs from the runner record ({stored_pkl})")
-    if j.get("output_pkl_sha256") and j["output_pkl_sha256"] != _sha256(stage2_pkl):
+    if want_o != _sha256(stage2_pkl):
         raise SystemExit(f"REFUSE: stage2 pkl sha256 differs from the runner record ({stage2_pkl})")
     ident = j.get("identity", {})
-    if not all(v for k, v in ident.items() if isinstance(v, bool)):
-        raise SystemExit(f"REFUSE: identity checks not all true in {stage2_json}")
+    flags = [v for k, v in ident.items() if isinstance(v, bool)]
+    if not flags or not all(flags):
+        raise SystemExit(f"REFUSE: identity checks missing or not all true in {stage2_json}")
     names = list(r["strong"]["names"])
     Xs, t = _c4_from_stored(z)
     Xc = [_c4_from_chain(c, names) for c in r["strong"]["chains"]]
@@ -129,7 +133,7 @@ def analyze_mock(stored_pkl, stage2_pkl, stage2_json, seed):
     step = stored_step(int(z["L"]))
     rng = np.random.default_rng([SEED, int(r["mock"])])
     bands = finite_L_bands(Xc, int(z["L"]), step, rng)
-    vals = [st["corr_ns_dtau0_stored"], st["delta_c4_norm"]] + bands["corr_ns_dtau0_band95"] + [bands["delta_norm_q95"]]
+    vals = [st["corr_ns_dtau0_stored"], st["corr_ns_dtau0_strong"], st["delta_c4_norm"]] + bands["corr_ns_dtau0_band95"] + [bands["delta_norm_q95"]]
     if not np.all(np.isfinite(vals)):
         raise SystemExit(f"REFUSE: non-finite decision inputs for mock {r['mock']}")
     corr_inside = bool(bands["corr_ns_dtau0_band95"][0] <= st["corr_ns_dtau0_stored"] <= bands["corr_ns_dtau0_band95"][1])
@@ -143,6 +147,7 @@ def analyze_mock(stored_pkl, stage2_pkl, stage2_json, seed):
                 battery=dict(rhat_max=bat.get("rhat_max"), ess_bulk_min=bat.get("ess_bulk_min"), ess_tail_min=bat.get("ess_tail_min"), ebfmi_min=bat.get("ebfmi_min"),
                              treedepth_sat_frac=bat.get("treedepth_sat_frac"), n_divergent=bat.get("n_divergent")),
                 replica=j.get("replica", {}).get("compare"), identity=ident, truth_c4=t.tolist(),
+                inputs_sha256=dict(stored_pkl=want_s, stage2_pkl=want_o, stage2_json=_sha256(stage2_json)),
                 whitened_truth_displacement_stored=(_sym_inv_sqrt(np.cov(Xs.T, ddof=1)) @ (Xs.mean(axis=0) - t)).tolist(),
                 whitened_truth_displacement_strong=(_sym_inv_sqrt(np.cov(Xn.T, ddof=1)) @ (Xn.mean(axis=0) - t)).tolist())
 
@@ -171,32 +176,63 @@ def decide(per_mock):
                 tail=list(TAIL), control=list(CONTROL), delta_definition="C4 norm")
 
 
+def _sanitize(o):
+    """Non-finite floats -> None so the strict JSON dump cannot fail after the decision is formed."""
+    if isinstance(o, dict):
+        return {k: _sanitize(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_sanitize(v) for v in o]
+    if isinstance(o, np.ndarray):
+        return _sanitize(o.tolist())
+    if isinstance(o, (np.floating, float)):
+        return None if not np.isfinite(o) else float(o)
+    if isinstance(o, (np.integer,)):
+        return int(o)
+    if isinstance(o, np.bool_):
+        return bool(o)
+    return o
+
+
+def _git_head():
+    import subprocess
+    try:
+        return subprocess.check_output(["git", "-C", os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rev-parse", "HEAD"]).decode().strip()
+    except Exception:  # noqa: BLE001
+        return "unavailable"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--stored-dir", required=True); ap.add_argument("--stage2-dir", required=True); ap.add_argument("--out", required=True)
     ap.add_argument("--mocks", type=int, nargs="*", default=list(TAIL) + list(CONTROL))
     a = ap.parse_args(argv)
-    if os.path.exists(a.out + ".json") or os.path.exists(a.out + ".md") or os.path.exists(a.out + ".json.tmp"):
-        raise SystemExit(f"REFUSE: output exists: {a.out}.json/.md")
+    for ext in (".json", ".md", ".json.tmp", ".md.tmp"):
+        if os.path.exists(a.out + ext):
+            raise SystemExit(f"REFUSE: output exists: {a.out}{ext}")
     per = []
     for m in a.mocks:
         sp = os.path.join(a.stored_dir, f"mock_{m:04d}.pkl"); p2 = os.path.join(a.stage2_dir, f"stage2_mock_{m:04d}.pkl"); j2 = os.path.join(a.stage2_dir, f"stage2_mock_{m:04d}.json")
         if not (os.path.exists(p2) and os.path.exists(j2)):
             continue
-        per.append(analyze_mock(sp, p2, j2, SEED))
+        per.append(analyze_mock(sp, p2, j2))
     dec = decide(per)
-    out = dict(schema="desi_stage2_readout.v2", prereg="2026-09-24-DESI-STAGE2-PREREGISTRATION-v1.2", seed=SEED, block=BLOCK, B=B_FINITE_L, per_mock=per, decision=dec, coords=list(C4))
-    with open(a.out + ".json.tmp", "w") as f:
-        json.dump(out, f, indent=1, sort_keys=True, allow_nan=False, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o)); f.write("\n")
-    os.replace(a.out + ".json.tmp", a.out + ".json")
+    out = _sanitize(dict(schema="desi_stage2_readout.v2", prereg="2026-09-24-DESI-STAGE2-PREREGISTRATION-v1.2", seed=SEED, block=BLOCK, B=B_FINITE_L, per_mock=per, decision=dec, coords=list(C4),
+                         provenance=dict(script_sha256=_sha256(os.path.abspath(__file__)), code_head=_git_head(), stored_dir=os.path.abspath(a.stored_dir), stage2_dir=os.path.abspath(a.stage2_dir),
+                                         inputs_sha256={str(m["mock"]): m["inputs_sha256"] for m in per}, mocks_requested=list(a.mocks))))
+    js = json.dumps(out, indent=1, sort_keys=True, allow_nan=False) + "\n"        # built fully BEFORE any file is opened
     L = [f"# DESI Stage 2 readout ({len(per)} mocks analysed; {len(dec['excluded_failed_sampler_gate'])} excluded by the sampler gate): **{dec['label']}**", "",
-         "| mock | set | L | step | sampler ok | corr(ns,dtau0) stored | strong | band95 | inside | delta_C4 norm | q95(finite-L) | sd ratios | pilot gate |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
-    for m in per:
+         "| mock | set | L | step | sampler ok | corr(ns,dtau0) stored | strong | band95 | inside | delta_C4 norm | q95(finite-L, descriptive) | sd ratios strong/stored | pilot gate |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for m in out["per_mock"]:
         s_ = m["stats"]; b = m["finite_L"]; tag = "TAIL" if m["mock"] in TAIL else ("CONTROL" if m["mock"] in CONTROL else "-")
-        L.append(f"| {m['mock']} | {tag} | {m['L_stored']} | {m['step']} | {m['sampler_ok']} | {s_['corr_ns_dtau0_stored']:+.3f} | {s_['corr_ns_dtau0_strong']:+.3f} | [{b['corr_ns_dtau0_band95'][0]:+.3f}, {b['corr_ns_dtau0_band95'][1]:+.3f}] | {m['corr_inside_band']} | {s_['delta_c4_norm']:.2f} | {b['delta_norm_q95']:.2f} | {[round(x, 2) for x in s_['sd_ratio']]} | {m['pilot_gate_passed']} |")
+        fmt = lambda x, f: ("nan" if x is None else format(x, f))
+        L.append(f"| {m['mock']} | {tag} | {m['L_stored']} | {m['step']} | {m['sampler_ok']} | {fmt(s_['corr_ns_dtau0_stored'], '+.3f')} | {fmt(s_['corr_ns_dtau0_strong'], '+.3f')} | [{fmt(b['corr_ns_dtau0_band95'][0], '+.3f')}, {fmt(b['corr_ns_dtau0_band95'][1], '+.3f')}] | {m['corr_inside_band']} | {fmt(s_['delta_c4_norm'], '.2f')} | {fmt(b['delta_norm_q95'], '.2f')} | {[None if x is None else round(x, 2) for x in s_['sd_ratio']]} | {m['pilot_gate_passed']} |")
     L += ["", f"decision counts: {json.dumps({k: v for k, v in dec.items() if k not in ('tail', 'control')})}"]
+    md = "\n".join(L) + "\n"
+    with open(a.out + ".json.tmp", "w") as f:
+        f.write(js)
+    os.replace(a.out + ".json.tmp", a.out + ".json")
     with open(a.out + ".md.tmp", "w") as f:
-        f.write("\n".join(L) + "\n")
+        f.write(md)
     os.replace(a.out + ".md.tmp", a.out + ".md")
     print(f"wrote {a.out}.json/.md: {dec['label']}")
     return 0
