@@ -118,7 +118,7 @@ def test_d2_fires_on_orientation_error_and_is_quiet_when_calibrated_even_with_sk
     X3, t3 = map(list, zip(*[M.coord_matrix(r, M.P3) for r in recs]))
     d2 = M.d2_orientation(X3, t3, EX._shared_index(recs, np.random.default_rng(9), 1500))
     assert d2["ns_dtau0"]["fires"] and d2["ns_dtau0"]["D_orient"] < -0.25
-    # calibrated but with a skewed distribution of posterior correlations (rotations): must not fire systematically
+    # calibrated with a WIDE (symmetric) spread of posterior correlations from random rotations: must not fire systematically
     fires = 0
     for s in range(12):
         recs0 = _recs(np.random.default_rng(100 + s), post_corr_nd=0.6, err_corr_nd=None, coherent=False)
@@ -174,10 +174,13 @@ def _d4(f): return {"fires": f}
     (False, False, "MEDIATED", False, "k-SUFFICIENT (MEDIATED BY THE k-NODE)"),
     (True, False, "JOINT, NOT SEPARABLE", False, "JOINT DIRECTION SPANNING ns, dtau0 AND k; NOT SEPARABLE"),
     (True, True, "UNRESOLVED", False, "ORIENTATION PATTERN SHARED BY THE eBOSS CONTROL (not DESI-specific)"),
-    (True, False, "PROJECTION", False, "ORIENTATION ERROR, NO RAIL, NO MEDIATION"),
+    (True, False, "PROJECTION", False, "ORIENTATION ERROR WITH THE k-NODE ASSOCIATION PROJECTED ONTO THE MEAN-FLUX STRUCTURE"),
     (True, False, "UNRESOLVED", False, "ORIENTATION ERROR, NO RAIL, NO MEDIATION"),
+    (True, False, "INDEPENDENT", False, "ORIENTATION ERROR, NO RAIL, NO MEDIATION"),
     (False, False, "UNRESOLVED", False, "NOT FURTHER LOCALIZABLE WITH STORED DRAWS"),
     (False, False, "PROJECTION", False, "NOT FURTHER LOCALIZABLE WITH STORED DRAWS"),
+    (False, False, "JOINT, NOT SEPARABLE", True, "RAIL-ASSOCIATED TAILS"),
+    (True, True, "MEDIATED", False, "k-SUFFICIENT (MEDIATED BY THE k-NODE)"),
 ])
 def test_decide_routes_every_combination(desi, eboss, lab, rail, expect):
     dec = M.decide(_d2(desi), _d2(eboss), _d3(lab), _d4(rail))

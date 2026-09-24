@@ -151,7 +151,7 @@ def d1_coherence(Xs, v_max, v_min, rng, axes=("ns", "tau0_amp", "dtau0")):
     out["reference"] = dict(n_dirs=B_DIRS, q05=q05, q50=q50, q95=q95, q99=float(np.quantile(ref, 0.99)), spread_q95_q05=q95 - q05)
     out["v_max_percentile"] = pct
     if q95 - q05 < D1_DEGENERATE_SPREAD:
-        out["label"] = "DEGENERATE: all posteriors share one orientation; coherence uninformative"
+        out["label"] = "DEGENERATE: every direction equally coherent (shared orientation or near-isotropic posteriors); percentile uninformative"
     elif pct >= 95.0:
         out["label"] = "coherent physical direction"
     else:
@@ -316,9 +316,12 @@ def decide(d2_desi, d2_eboss, d3, d4_desi):
     if fires_desi and fires_eboss:
         return dict(outcome="ORIENTATION PATTERN SHARED BY THE eBOSS CONTROL (not DESI-specific)", mechanism_class="machinery-generic feature or chance; not a DESI mechanism",
                     stage2="NOT RECOMMENDED", next_="checkpoint; PI decision")
-    if fires_desi and lab in ("PROJECTION", "UNRESOLVED", "INDEPENDENT"):
+    if fires_desi and lab == "PROJECTION":
+        return dict(outcome="ORIENTATION ERROR WITH THE k-NODE ASSOCIATION PROJECTED ONTO THE MEAN-FLUX STRUCTURE", mechanism_class="M-D context; M-A versus M-B-orientation fork recorded",
+                    stage2="NOT RECOMMENDED (three-lanes 4.2 as adopted in PI #24)", next_="checkpoint; PI decision on the M-A versus M-B fork")
+    if fires_desi and lab in ("UNRESOLVED", "INDEPENDENT"):
         return dict(outcome="ORIENTATION ERROR, NO RAIL, NO MEDIATION", mechanism_class="M-A versus M-B-orientation (live)",
-                    stage2="TRIGGERED (preregister Stage 2; 1-mock pilot first)", next_="Stage 2 preregistration")
+                    stage2="TRIGGERED: preregister Stage 2 (1-mock pilot first); LAUNCHING it needs a new PI decision (PI #24 item 4)", next_="Stage 2 preregistration, then PI decision")
     return dict(outcome="NOT FURTHER LOCALIZABLE WITH STORED DRAWS", mechanism_class="unresolved among M-A/M-B/M-D/M-E", stage2="NOT RECOMMENDED", next_="checkpoint; PI decision")
 
 
@@ -344,8 +347,9 @@ def analyze(recs_d, recs_e, wsa, rngs, B_null=None):
                        frozen_proj=wsa["eBOSS"]["descriptive"]["proj_vmax"])
     dec = decide(d2, d2e, d3, d4)
     frozen = dict(note="frozen WS-A values for reference; NOT the D3 statistics (those use one 4-D whitening with k in log10)",
-                  wsa_S3_corr_ns_dtau0=float(np.asarray(wsa["DESI"]["S3"])[0, 2] / np.sqrt(np.asarray(wsa["DESI"]["S3"])[0, 0] * np.asarray(wsa["DESI"]["S3"])[2, 2])),
-                  ext_N_plane_ns_k_c=0.502, ext_N_plane_note="EXT-1 Level B, 2-D plane whitening with linear k (a2c_joint_calib_ext_result.json)")
+                  wsa_S3_corr_ns_dtau0_3D=float(np.asarray(wsa["DESI"]["S3"])[0, 2] / np.sqrt(np.asarray(wsa["DESI"]["S3"])[0, 0] * np.asarray(wsa["DESI"]["S3"])[2, 2])),
+                  ext_plane_ns_dtau0_c_2D=0.3752, ext_plane_ns_dtau0_note="EXT-1 Level B (ns, dtau0) plane, 2-D whitening, p 0.0084, not counted (P3-internal)",
+                  ext_N_plane_ns_k_c_2D=0.502, ext_N_plane_note="EXT-1 Level B, 2-D plane whitening with linear k (a2c_joint_calib_ext_result.json)")
     return dict(D1=d1, D2_DESI=d2, D2_eBOSS_control=d2e, D3=d3, D4_DESI=d4, D4_eBOSS_control=d4e, decision=dec, frozen_reference=frozen,
                 B_null=B, B_boot=B_BOOT, B_dirs=B_DIRS, B_perm=B_PERM, alpha=ALPHA, N_DESI=len(recs_d), N_eBOSS=len(recs_e),
                 mock_ids_DESI=[int(r["m"]) for r in recs_d], mock_ids_eBOSS=[int(r["m"]) for r in recs_e],
