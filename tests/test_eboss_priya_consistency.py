@@ -23,7 +23,7 @@ def _ref(tmp_path):
     ref = dict(reference="test", primary_chain="chain3", chains=dict(
         chain3=dict(n_P=dict(median=0.898, err_plus=0.012, err_minus=0.013), tau0=dict(median=1.221, err_plus=0.021, err_minus=0.012),
                     dtau0=dict(median=-0.270, err_plus=0.029, err_minus=0.029), alpha_q=dict(lower68=2.85),
-                    v_scale_h=dict(median=0.695), A_P_1e_9=dict(upper68=1.33)),
+                    v_scale_h=dict(median=0.695), **{"A_P_1e-9": dict(upper68=1.33, upper95=1.44)}),
         **{"chain1_fiducial_z2.6_4.6": dict(n_P=dict(median=1.009), A_P_1e9=dict(median=1.69), **{"A_P_1e-9": dict(median=1.69)},
                                             tau0=dict(median=1.082), dtau0=dict(median=-0.013))}))
     p = tmp_path / "ref.json"; p.write_text(json.dumps(ref)); return p
@@ -42,7 +42,7 @@ def _chains(tmp_path, ns=0.898, Ap=1.25e-9, tau0_amp=1.22, dtau0=-0.27, n=400, n
         X[:, 0] = ns + sig_ns * rng.standard_normal(n)
         X[:, 1] = np.clip(Ap + 0.05e-9 * rng.standard_normal(n), 1.2e-9, None)
         X[:, 2] = 3.8; X[:, 3] = 2.9; X[:, 4] = alphaq + 0.02 * rng.standard_normal(n); X[:, 5] = 0.70; X[:, 6] = 0.143; X[:, 7] = 7.2; X[:, 8] = 0.05
-        amp = tau0_amp + 0.01 * rng.standard_normal(n); dt = dtau0 + 0.02 * rng.standard_normal(n)
+        amp = np.clip(tau0_amp + 0.01 * rng.standard_normal(n), 0.75, 1.25); dt = np.clip(dtau0 + 0.02 * rng.standard_normal(n), -0.4, 0.25)
         X[:, 9:22] = amp[:, None] * ((1 + z)[None, :] / 4.0) ** dt[:, None] * m.kim_tau0(z)[None, :]
         X[:, 22] = 0.17; X[:, 23] = 0.06; X[:, 24] = 0.004
         table = np.column_stack([np.ones(n), np.zeros(n), X])
@@ -50,6 +50,10 @@ def _chains(tmp_path, ns=0.898, Ap=1.25e-9, tau0_amp=1.22, dtau0=-0.27, n=400, n
     (d / "real_eboss.unblinded.paramnames").write_text("".join(f"{n}\t{n}\n" for n in NAMES))
     (d / "real_eboss.health.json").write_text(json.dumps(dict(rhat_max=1.003, ess_bulk_min=900, ess_tail_min=700, ebfmi_min=0.9, n_divergent=0,
                                                               treedepth_sat_frac=0.0, n_chains=n_chains, n_draws=n, seed=1)))
+    sites = {k: 0.01 * (1 + 0.05 * rng.standard_normal((n_chains, n))) for k in ("f_SiIII_eBOSS_z0", "f_SiIII_eBOSS_z1", "k_SiIII_eBOSS_z0", "k_SiIII_eBOSS_z1")}
+    sites["f_res_amp"] = 0.01 * rng.standard_normal((n_chains, n)); sites["f_res_slope"] = 0.1 * rng.standard_normal((n_chains, n))
+    np.savez(d / "real_eboss.nuisance.npz", **sites)
+    (d / "real_eboss.nuisance.json").write_text(json.dumps(dict(sites={k: dict(frac_near_lo=0.0, frac_near_hi=0.0) for k in sites})))
     return d
 
 
@@ -84,13 +88,34 @@ def test_Ap_one_sided_rule(tmp_path, Ap, expect):
 
 
 def test_secondary_labels_and_outputs(tmp_path):
-    m = _mod(); d = _chains(tmp_path, tau0_amp=1.10, dtau0=-0.10)
+    m = _mod(); d = _chains(tmp_path, tau0_amp=1.10, dtau0=-0.20)
     out = tmp_path / "out"
     m.main(["--chain-dir", str(d), "--reference", str(_ref(tmp_path)), "--analysis-lock", str(_lock(tmp_path)), "--out", str(out)])
     r = json.load(open(str(out) + ".json"))
     assert r["tests"]["tau0_amp"]["label"] == "DISCREPANT"      # |delta| 0.12 > 0.10
-    assert r["tests"]["dtau0"]["label"] == "SHIFTED"            # |delta| 0.17: > max(1s, 0.06), <= 0.20
+    assert r["tests"]["dtau0"]["label"] == "SHIFTED"            # |delta| 0.07: > max(1 s, 0.06), <= 0.20 and <= 3 s
+    assert r["health_gate"]["label"] == "GREEN" and r["green"]["treedepth"] and r["green"]["nuisance_rails"]
+    assert set(r["mc_error_of_median"]) == {"ns", "Ap", "tau0_amp", "dtau0"}
+    assert r["tests"]["ns"]["ref_central_kind"].startswith("GetDist")
+    assert 0 <= r["tests"]["Ap"]["p_ours_below_upper95"] <= 1
     assert abs(r["summaries"]["tau0_amp"]["median"] - 1.10) < 0.01
     md = open(str(out) + ".md").read()
     assert "Preregistered tests" in md and "attribution" in md.lower()
-    assert set(r["green"]) == {"rhat", "ess_bulk", "ess_tail", "divergences", "ebfmi"} and all(r["green"].values())
+    assert set(r["green"]) == {"rhat", "ess_bulk", "ess_tail", "divergences", "ebfmi", "treedepth", "nuisance_rails"} and all(r["green"].values())
+
+
+def test_three_s_clause_restored_and_reversed_ladder_refused(tmp_path):
+    m = _mod()
+    # tau0 shift -0.08 with s about 0.024 (> 3 s) must be DISCREPANT under the restored PI-adopted clause
+    d = _chains(tmp_path, tau0_amp=1.141)
+    out = tmp_path / "out"
+    m.main(["--chain-dir", str(d), "--reference", str(_ref(tmp_path)), "--analysis-lock", str(_lock(tmp_path)), "--out", str(out)])
+    r = json.load(open(str(out) + ".json"))
+    assert r["tests"]["tau0_amp"]["label"] == "DISCREPANT" and abs(r["tests"]["tau0_amp"]["delta_over_s"]) > 3
+    # a ladder that is not an exact tau0_amp/dtau0 curve (reversed z order) must refuse, not silently mislabel
+    for c in (1, 2):
+        p = d / f"real_eboss.unblinded.{c}.txt"; t = np.loadtxt(p, ndmin=2); t[:, 2 + 9:2 + 22] = t[:, 2 + 9:2 + 22][:, ::-1]
+        np.savetxt(p, t, fmt=["%.10g"] * t.shape[1], header="weight  minusloglike  " + "  ".join(NAMES))
+    with pytest.raises(SystemExit) as e:
+        m.main(["--chain-dir", str(d), "--reference", str(_ref(tmp_path)), "--analysis-lock", str(_lock(tmp_path)), "--out", str(tmp_path / "out2")])
+    assert e.value.code == 3

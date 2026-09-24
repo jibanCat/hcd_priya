@@ -3,7 +3,7 @@
 previous PRIYA eBOSS analysis (Fernandez, Bird & Ho 2024, Table 3, full-range chain = primary reference).
 
 Preregistration: hcd_priya_notes/docs/superpowers/eboss-realdata-2026-09/2026-09-24-EBOSS-REALDATA-PREREGISTRATION-v1.md
-(section 3 rules, section 4 attribution list). This script implements those rules verbatim and nothing else.
+(section 5 rules and attribution list). This script implements those rules verbatim and nothing else.
 
 Inputs: ``<chain-dir>/<root>.unblinded.<c>.txt`` (+ ``.unblinded.paramnames``), ``<root>.health.json``,
 optional ``<root>.nuisance.npz`` / ``.nuisance.json`` (f_res + metal nodes, unblinded by design), the frozen
@@ -28,12 +28,14 @@ TAU0_PIVOT_Z = 3.0
 PRIMARY = ("ns", "Ap")
 SECONDARY = ("tau0_amp", "dtau0")
 # Section 3 rules (frozen): scaled thresholds and absolute bands per parameter.
-# CONSISTENT if |delta| <= max(k_consistent * s, consistent_abs); DISCREPANT if |delta| > discrepant_abs (absolute
-# only: both analyses fit the same data, so s is not a noise scale for the difference); SHIFTED otherwise.
+# Preregistration v1.1 section 5 (the rules the PI adopted in the three-lanes response Part 2.3):
+#   DISCREPANT (evaluated FIRST) if |delta| > discrepant_abs OR |delta| > k_discrepant * s;
+#   else CONSISTENT if |delta| <= max(k_consistent * s, consistent_abs); else SHIFTED.
+# s = sqrt(sigma_ours^2 + sigma_ref^2) is a combined-width unit, NOT a tension statistic (both fits share the data).
 RULES = {
-    "ns":       dict(consistent_abs=0.015, discrepant_abs=0.05, k_consistent=1.0),
-    "tau0_amp": dict(consistent_abs=0.03,  discrepant_abs=0.10, k_consistent=1.0),
-    "dtau0":    dict(consistent_abs=0.06,  discrepant_abs=0.20, k_consistent=1.0),
+    "ns":       dict(consistent_abs=0.015, discrepant_abs=0.05, k_consistent=1.0, k_discrepant=3.0),
+    "tau0_amp": dict(consistent_abs=0.03,  discrepant_abs=0.10, k_consistent=1.0, k_discrepant=3.0),
+    "dtau0":    dict(consistent_abs=0.06,  discrepant_abs=0.20, k_consistent=1.0, k_discrepant=3.0),
 }
 AP_RULE = dict(upper68=1.33e-9, upper95=1.44e-9, chain1_median=1.69e-9)
 RAIL_FRAC = 0.02       # "near a prior bound" = within 2 percent of the prior range of that bound
@@ -78,17 +80,20 @@ def classify_scaled(name, ours, ref_median, ref_sig):
     delta = ours["median"] - ref_median
     s = float(np.sqrt(ours["sigma"] ** 2 + ref_sig ** 2))
     ad = abs(delta)
-    if ad > r["discrepant_abs"]:
+    if ad > r["discrepant_abs"] or ad > r["k_discrepant"] * s:
         label = "DISCREPANT"
     elif ad <= max(r["k_consistent"] * s, r["consistent_abs"]):
         label = "CONSISTENT"
     else:
         label = "SHIFTED"
-    return dict(parameter=name, ours_median=ours["median"], ours_sigma=ours["sigma"], ref_median=ref_median,
-                ref_sigma=ref_sig, delta=float(delta), s=s, delta_over_s=float(delta / s), label=label, rule=r)
+    return dict(parameter=name, ours_median=ours["median"], ours_mean=ours["mean"], ours_sigma=ours["sigma"],
+                ref_central=ref_median, ref_central_kind="GetDist posterior mean (Table 3)", ref_sigma=ref_sig,
+                delta=float(delta), delta_mean_based=float(ours["mean"] - ref_median), s=s,
+                delta_over_s=float(delta / s), delta_over_s_note="combined-width units; not a tension statistic",
+                label=label, rule=r)
 
 
-def classify_Ap(ours):
+def classify_Ap(ours, x):
     q16, med, q025 = ours["q16"], ours["median"], ours["q025"]
     if q16 <= AP_RULE["upper68"] or med <= AP_RULE["upper95"]:
         label = "CONSISTENT"
@@ -98,6 +103,8 @@ def classify_Ap(ours):
         label = "SHIFTED"
     return dict(parameter="Ap", ours_median=med, ours_q16=q16, ours_q025=q025, ref_upper68=AP_RULE["upper68"],
                 ref_upper95=AP_RULE["upper95"], chain1_median=AP_RULE["chain1_median"], label=label, rule=AP_RULE,
+                p_ours_below_upper68=float(np.mean(x <= AP_RULE["upper68"])), p_ours_below_upper95=float(np.mean(x <= AP_RULE["upper95"])),
+                consistent_via_q16_only=bool(label == "CONSISTENT" and med > AP_RULE["upper95"]),
                 note="one-sided: the reference full-range chain reports A_P as an upper limit at its prior floor")
 
 
@@ -154,6 +161,9 @@ def main(argv=None):
 
     ref = json.load(open(a.reference))
     prim = ref["chains"][ref["primary_chain"]]
+    apr = prim.get("A_P_1e-9", {})
+    if apr and (abs(apr.get("upper68", 1.33) * 1e-9 - AP_RULE["upper68"]) > 1e-15 or abs(apr.get("upper95", 1.44) * 1e-9 - AP_RULE["upper95"]) > 1e-15):
+        refuse("A_P thresholds in the script disagree with the reference JSON")
     fid = ref["chains"].get("chain1_fiducial_z2.6_4.6", {})
     lock = json.load(open(a.analysis_lock))
     z = np.asarray(lock["legs"][a.leg]["z"], float)
@@ -164,7 +174,17 @@ def main(argv=None):
     tau_idx = [i for i, n in enumerate(names) if n.startswith("tau0_z")]
     if len(tau_idx) != z.size:
         refuse(f"{len(tau_idx)} tau0 columns vs {z.size} leg z values")
-    amp, dt = recover_tau0_amp_dtau0(allrows[:, tau_idx], z)
+    zp = float(lock["legs"][a.leg].get("prior", {}).get("tau0_pivot_z", TAU0_PIVOT_Z))
+    tau_names = [names[i] for i in tau_idx]
+    if tau_names != [f"tau0_z{i}" for i in range(len(tau_idx))] or np.any(np.diff(z) <= 0):
+        refuse("tau0 columns are not tau0_z0..z{n-1} in ascending z order")
+    amp, dt = recover_tau0_amp_dtau0(allrows[:, tau_idx], z, z_pivot=zp)
+    recon = amp[:, None] * ((1.0 + z)[None, :] / (1.0 + zp)) ** dt[:, None] * kim_tau0(z)[None, :]
+    resid = float(np.max(np.abs(recon / allrows[:, tau_idx] - 1.0)))
+    if resid > 1e-6:
+        refuse(f"tau0 ladder is not an exact tau0_amp/dtau0 curve (max rel residual {resid:.2e})")
+    if amp.min() < BOX["tau0_amp"][0] - 1e-9 or amp.max() > BOX["tau0_amp"][1] + 1e-9 or dt.min() < BOX["dtau0"][0] - 1e-9 or dt.max() > BOX["dtau0"][1] + 1e-9:
+        refuse("recovered tau0_amp / dtau0 leave the prior box")
     cols = {n: allrows[:, i] for i, n in enumerate(names)}
     cols["tau0_amp"], cols["dtau0"] = amp, dt
     nuis = load_nuisance(a.chain_dir, a.root)
@@ -173,10 +193,19 @@ def main(argv=None):
 
     summaries = {k: summarize(v) for k, v in cols.items()}
     health = json.load(open(os.path.join(a.chain_dir, f"{a.root}.health.json")))
+    gate = None
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("ubo", os.path.join(os.path.dirname(os.path.abspath(__file__)), "eboss_unblind_once.py"))
+        ubo = importlib.util.module_from_spec(spec); spec.loader.exec_module(ubo)
+        nuis_diag, _ = ubo.nuisance_diagnostics(a.chain_dir, a.root)
+        gate = ubo.classify_health(health, nuis_diag)
+    except Exception as e:  # noqa: BLE001
+        gate = dict(label="UNAVAILABLE", error=f"{type(e).__name__}: {e}")
 
     tests = {}
     tests["ns"] = classify_scaled("ns", summaries["ns"], prim["n_P"]["median"], ref_sigma(prim["n_P"]))
-    tests["Ap"] = classify_Ap(summaries["Ap"])
+    tests["Ap"] = classify_Ap(summaries["Ap"], cols["Ap"])
     tests["tau0_amp"] = classify_scaled("tau0_amp", summaries["tau0_amp"], prim["tau0"]["median"], ref_sigma(prim["tau0"]))
     tests["dtau0"] = classify_scaled("dtau0", summaries["dtau0"], prim["dtau0"]["median"], ref_sigma(prim["dtau0"]))
     headline = tests["ns"]["label"]
@@ -187,17 +216,22 @@ def main(argv=None):
         descriptive["tau0_vs_fiducial"] = dict(delta=float(summaries["tau0_amp"]["median"] - fid["tau0"]["median"]))
         descriptive["dtau0_vs_fiducial"] = dict(delta=float(summaries["dtau0"]["median"] - fid["dtau0"]["median"]))
     rails = {k: rail_fraction(cols[k], b) for k, b in BOX.items() if k in cols}
+    for k in ("alpha_lls", "alpha_subdla", "alpha_dla"):
+        if k in cols:
+            x = cols[k]; rails[k] = dict(near_lo=float(np.mean(x <= RAIL_FRAC * float(np.quantile(x, 0.5)))), near_hi=None, note="lower bound 0; near_lo = within 2 percent of the median above zero")
+    nuis_json = os.path.join(a.chain_dir, f"{a.root}.nuisance.json")
+    nuisance_rails = {k: dict(near_lo=v.get("frac_near_lo"), near_hi=v.get("frac_near_hi")) for k, v in json.load(open(nuis_json)).get("sites", {}).items()} if os.path.exists(nuis_json) else {}
+    mc_err = {k: float(summaries[k]["sigma"] * np.sqrt(np.pi / 2.0) / np.sqrt(max(float(health.get("ess_bulk_min", 1)), 1.0))) for k in ("ns", "Ap", "tau0_amp", "dtau0")}
+    boundary_flag = {k: bool(rails[k]["near_lo"] > 0.05 or rails[k]["near_hi"] > 0.05) for k in ("ns", "Ap", "tau0_amp", "dtau0")}
 
     attribution = None
     if any(tests[k]["label"] != "CONSISTENT" for k in ("ns", "Ap", "tau0_amp", "dtau0")):
         keys = [k for k in ("ns", "Ap", "tau0_amp", "dtau0", "alphaq", "hub", "herei", "heref", "omegamh2", "hireionz",
                             "bhfeedback", "alpha_lls", "alpha_subdla", "alpha_dla") if k in cols]
         keys += [k for k in cols if k.startswith("nuis:")]
-        M = np.column_stack([cols[k] for k in keys])
         # nuisance draws are aligned with the chain rows only if their count matches; otherwise drop them
-        if any(cols[k].size != allrows.shape[0] for k in keys):
-            keys = [k for k in keys if cols[k].size == allrows.shape[0]]
-            M = np.column_stack([cols[k] for k in keys])
+        keys = [k for k in keys if cols[k].size == allrows.shape[0]]
+        M = np.column_stack([cols[k] for k in keys])
         C = np.corrcoef(M, rowvar=False)
         cov = np.cov(M, rowvar=False)
         ins = keys.index("ns")
@@ -210,8 +244,10 @@ def main(argv=None):
                 beta = cov[ins, j] / cov[j, j]
                 linresp[k] = dict(beta_ns_per_unit=float(beta), ours_median=float(np.median(cols[k])), ref_point=float(rv),
                                   ns_shift_associated=float(beta * (np.median(cols[k]) - rv)),
-                                  note="INDICATIVE linear response on our posterior; not a refit; the alphaq reference point is a 68 percent lower limit")
-        attribution = dict(note="single preregistered attribution step (section 4): posterior correlations, rail fractions, indicative linear response",
+                                  note=("INDICATIVE one-at-a-time linear response on our posterior; not a refit; NOT additive across x (correlated regressors). "
+                                        "alphaq: the reference point 2.85 is the reference's one-sided 68 percent lower limit at its prior cap 3.0; our prior ends at 2.5, "
+                                        "so this entry extrapolates a slope fitted on [1.3, 2.5]: sign informative, magnitude a lower bound. hub: the reference h is sample-variance driven."))
+        attribution = dict(note="single preregistered attribution step (section 5): posterior correlations, rail fractions, indicative linear response; entries are not additive",
                            keys=keys, corr_with_ns={k: float(C[ins, j]) for j, k in enumerate(keys)},
                            corr_matrix=C.tolist(), linear_response=linresp, rails=rails)
 
@@ -221,26 +257,29 @@ def main(argv=None):
                                                    "treedepth_sat_frac", "n_chains", "n_draws", "created_utc", "seed")},
                green=dict(rhat=bool(health.get("rhat_max", 9) < 1.01), ess_bulk=bool(health.get("ess_bulk_min", 0) >= 400),
                           ess_tail=bool(health.get("ess_tail_min", 0) >= 400), divergences=bool(health.get("n_divergent", 1) == 0),
-                          ebfmi=bool(health.get("ebfmi_min", 0) >= 0.3)),
+                          ebfmi=bool(health.get("ebfmi_min", 0) >= 0.3), treedepth=bool(health.get("treedepth_sat_frac", 1) < 0.02),
+                          nuisance_rails=bool(all((v.get("near_lo") or 0) < 0.05 and (v.get("near_hi") or 0) < 0.05 for v in nuisance_rails.values()))),
+               health_gate=gate, mc_error_of_median=mc_err, boundary_proximity_flag=boundary_flag, nuisance_rails=nuisance_rails,
                z_grid=z.tolist(), summaries=summaries, tests=tests, headline_label=headline, descriptive_vs_fiducial=descriptive,
                rails=rails, attribution=attribution)
     with open(a.out + ".json", "w") as f:
         json.dump(out, f, indent=1, sort_keys=True); f.write("\n")
     # ---- markdown ----
     L = [f"# eBOSS real-data readout vs PRIYA (Fernandez+2024 Table 3, {ref['primary_chain']})", "",
-         f"chains {len(tabs)} x {int(allrows.shape[0] / len(tabs))} draws; health: R-hat {health.get('rhat_max')}, ESS bulk {health.get('ess_bulk_min')}, ESS tail {health.get('ess_tail_min')}, E-BFMI {health.get('ebfmi_min')}, divergences {health.get('n_divergent')}; GREEN flags {out['green']}", "",
-         "## Preregistered tests", "", "| parameter | ours median [16,84] | reference | delta | s | delta/s | label |", "|---|---|---|---|---|---|---|"]
+         f"chains {len(tabs)} x {int(allrows.shape[0] / len(tabs))} draws; health: R-hat {health.get('rhat_max')}, ESS bulk {health.get('ess_bulk_min')}, ESS tail {health.get('ess_tail_min')}, E-BFMI {health.get('ebfmi_min')}, divergences {health.get('n_divergent')}, tree-depth sat {health.get('treedepth_sat_frac')}; GREEN flags {out['green']}; health gate {gate.get('label') if gate else None}", "",
+         "## Preregistered tests (reference central values are GetDist posterior means; delta/s in combined-width units, not a tension statistic)", "",
+         "| parameter | ours median [16,84] (MC err) | reference | delta (median) | delta (mean) | s | delta/s | label | boundary flag |", "|---|---|---|---|---|---|---|---|---|"]
     for k in ("ns", "tau0_amp", "dtau0"):
         t = tests[k]; s = summaries[k]
-        L.append(f"| {k} | {s['median']:.4f} [{s['q16']:.4f}, {s['q84']:.4f}] | {t['ref_median']:.4f} +/- {t['ref_sigma']:.4f} | {t['delta']:+.4f} | {t['s']:.4f} | {t['delta_over_s']:+.2f} | **{t['label']}** |")
+        L.append(f"| {k} | {s['median']:.4f} [{s['q16']:.4f}, {s['q84']:.4f}] ({mc_err[k]:.4f}) | {t['ref_central']:.4f} +/- {t['ref_sigma']:.4f} | {t['delta']:+.4f} | {t['delta_mean_based']:+.4f} | {t['s']:.4f} | {t['delta_over_s']:+.2f} | **{t['label']}** | {boundary_flag[k]} |")
     t = tests["Ap"]; s = summaries["Ap"]
-    L.append(f"| Ap (1e-9) | {s['median']*1e9:.3f} [{s['q16']*1e9:.3f}, {s['q84']*1e9:.3f}] | < 1.33 (68), < 1.44 (95) | one-sided | | | **{t['label']}** |")
+    L.append(f"| Ap (1e-9) | {s['median']*1e9:.3f} [{s['q16']*1e9:.3f}, {s['q84']*1e9:.3f}] | < 1.33 (68), < 1.44 (95) | P(<1.33e-9) {t['p_ours_below_upper68']:.3f}; P(<1.44e-9) {t['p_ours_below_upper95']:.3f} | | | one-sided | **{t['label']}**{' (via q16 only)' if t['consistent_via_q16_only'] else ''} | {boundary_flag['Ap']} |")
     L += ["", f"**Headline (n_P): {headline}.**", "", "## Posterior summaries (all columns)", "", "| column | median | 16 | 84 | 2.5 | 97.5 | sd |", "|---|---|---|---|---|---|---|"]
     for k, s in summaries.items():
         L.append(f"| {k} | {s['median']:.6g} | {s['q16']:.6g} | {s['q84']:.6g} | {s['q025']:.6g} | {s['q975']:.6g} | {s['sd']:.3g} |")
     L += ["", "## Rail fractions (within 2 percent of a prior bound)", "", "| parameter | near lo | near hi |", "|---|---|---|"]
-    for k, r in rails.items():
-        L.append(f"| {k} | {r['near_lo']:.3f} | {r['near_hi']:.3f} |")
+    for k, r in list(rails.items()) + list(nuisance_rails.items()):
+        L.append(f"| {k} | {r.get('near_lo')} | {r.get('near_hi')} |")
     if descriptive:
         L += ["", "## Descriptive only: versus the authors' fiducial (z >= 2.6) chain", ""] + [f"- {k}: {v}" for k, v in descriptive.items()]
     if attribution:
