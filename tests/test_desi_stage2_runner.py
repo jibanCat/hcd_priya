@@ -49,7 +49,7 @@ def test_a2c_argv_template_is_the_frozen_invocation():
     argv = [x.format(m=45, scratch="/tmp/x") for x in M.A2C_ARGV_TEMPLATE]
     for tok in ("--deployed-prior", "--leg", "DESI", "--no-shard-pkl", "--metal-selfdraw", "--fres-selfdraw", "--n-shards", "48", "--n-mocks", "48"):
         assert tok in argv
-    assert M.STRONG == dict(n_chains=4, n_warmup=1000, n_samples=600, max_tree_depth=10, target_accept=0.9, dense_mass=True)
+    assert M.STRONG == dict(n_chains=4, n_warmup=1000, n_samples=1500, max_tree_depth=10, target_accept=0.9, dense_mass=True)   # PI #27
     assert M.STORED == dict(n_warmup=250, n_samples=600, max_tree_depth=10, seed=20260614)
 
 

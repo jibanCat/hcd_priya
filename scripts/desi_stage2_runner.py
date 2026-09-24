@@ -15,7 +15,7 @@ any mismatch. Then:
   (R) REPLICA: the original single chain (init_to_median, base_seed from k_nuts, the divergence retry ladder,
       n_warmup 250, n_samples 600) is re-run and its thinned draws compared to the stored ones (reproduction test).
   (S) STRONG: n_chains dispersed chains (init_to_sample, chain_key = fold_in(k_nuts, chain_id) as in
-      run_legb_convergence), n_warmup 1000 (4x), n_samples 600, dense mass, target_accept 0.9, max_tree_depth 10,
+      run_legb_convergence), n_warmup 1000 (4x), n_samples 1500 (PI #27; was 600 for the first pilot), dense mass, target_accept 0.9, max_tree_depth 10,
       RAW per-chain samples retained (every site, unthinned) with energy, num_steps and divergences; the convergence
       battery (rank R-hat, bulk and tail ESS, E-BFMI, tree-depth saturation) on the packed draws.
 Outputs (atomic; refuses if present): <out>/stage2_mock_XXXX.pkl (raw), <out>/stage2_mock_XXXX.json (summary).
@@ -40,7 +40,7 @@ REPO = "/home/mfho/hcd_priya"
 sys.path.insert(0, REPO)
 A2C_ARGV_TEMPLATE = ["--shard", "{m}", "--n-shards", "48", "--n-mocks", "48", "--deployed-prior", "--leg", "DESI",
                      "--no-shard-pkl", "--out-dir", "{scratch}", "--metal-selfdraw", "--fres-selfdraw"]
-STRONG = dict(n_chains=4, n_warmup=1000, n_samples=600, max_tree_depth=10, target_accept=0.9, dense_mass=True)
+STRONG = dict(n_chains=4, n_warmup=1000, n_samples=1500, max_tree_depth=10, target_accept=0.9, dense_mass=True)   # PI #27: n_samples 600 -> 1500 (the ONLY change)
 STORED = dict(n_warmup=250, n_samples=600, max_tree_depth=10, seed=20260614)
 C4_SITES = ("tau0_amp", "dtau0", "k_SiIII_DESI_z1")
 EXTRA_SITES = ("tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla", "f_res_amp", "f_res_slope", "f_SiIII_DESI_z0", "f_SiIII_DESI_z1", "f_SiII_DESI_z0", "f_SiII_DESI_z1", "k_SiIII_DESI_z0", "k_SiIII_DESI_z1", "k_SiII_DESI_z0", "k_SiII_DESI_z1")

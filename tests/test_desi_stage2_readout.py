@@ -15,7 +15,7 @@ def _ar1(rng, n, corr, shift=0.0, phi=0.6):
     return MU + shift * SD * np.array([1, 0, 0, 0]) + z @ R.T
 
 
-def _mock(tmp, m, rng, corr_stored=-0.2, corr_strong=-0.2, shift=0.0, step=5, sampler_ok=True, phi=0.6, nan_battery=False):
+def _mock(tmp, m, rng, corr_stored=-0.2, corr_strong=-0.2, shift=0.0, step=5, sampler_ok=True, phi=0.6, nan_battery=False, n_strong=600):
     L = int(np.ceil(600 / step))
     Xs = _ar1(rng, 600, corr_stored, 0.0, phi)[::step]
     dr = rng.uniform(0.2, 0.8, size=(L, 25)); dr[:, 0] = Xs[:, 0]
@@ -24,7 +24,7 @@ def _mock(tmp, m, rng, corr_stored=-0.2, corr_strong=-0.2, shift=0.0, step=5, sa
     os.makedirs(tmp / "stored", exist_ok=True); pickle.dump(stored, open(tmp / "stored" / f"mock_{m:04d}.pkl", "wb"))
     chains = []
     for c in range(4):
-        X = _ar1(rng, 600, corr_strong, shift, phi); d = rng.uniform(0.2, 0.8, size=(600, 25)); d[:, 0] = X[:, 0]
+        X = _ar1(rng, n_strong, corr_strong, shift, phi); d = rng.uniform(0.2, 0.8, size=(n_strong, 25)); d[:, 0] = X[:, 0]
         chains.append(dict(chain=c, draws=d, samples=dict(tau0_amp=X[:, 1], dtau0=X[:, 2], k_SiIII_DESI_z1=10 ** X[:, 3]), n_div=0))
     raw = dict(mock=m, names=NAMES, strong=dict(chains=chains, names=NAMES, per_chain_div=[0, 0, 0, 0]))
     os.makedirs(tmp / "s2", exist_ok=True); pickle.dump(raw, open(tmp / "s2" / f"stage2_mock_{m:04d}.pkl", "wb"))
@@ -104,3 +104,18 @@ def test_null_calibration_of_the_corr_band_with_autocorrelated_chains(tmp_path):
             out += int(not res["corr_inside_band"]); n += 1
         rate = out / n
         assert 0.0 <= rate <= 0.15, (step, rate)          # 40 populations: the 95 percent envelope of a 0.05 to 0.08 rate
+
+
+
+def test_routes_with_1500_sample_strong_chains(tmp_path):
+    """PI #27: the strong chains carry 1500 samples per chain (the stored raw length stays 600, so the stored step and the
+    finite-L construction are unchanged); a planted M-A (correlation) scenario still routes on the longer chains."""
+    rng = np.random.default_rng(27); M.B_FINITE_L = 300
+    for m in list(M.TAIL) + list(M.CONTROL):
+        tail = m in M.TAIL
+        _mock(tmp_path, m, rng, corr_stored=(-0.7 if tail else -0.3), corr_strong=(0.3 if tail else -0.3), n_strong=1500)
+    out = tmp_path / "readout1500"
+    M.main(["--stored-dir", str(tmp_path / "stored"), "--stage2-dir", str(tmp_path / "s2"), "--out", str(out)])
+    r = json.load(open(str(out) + ".json"))
+    assert r["decision"]["label"].startswith("M-A"), r["decision"]
+    assert len(r["per_mock"]) == 8 and all("finite_L" in pm and "sd_ratio_band95" in pm["finite_L"] for pm in r["per_mock"])
