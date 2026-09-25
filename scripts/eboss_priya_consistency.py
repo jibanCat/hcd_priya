@@ -35,6 +35,10 @@ SECONDARY = ("tau0_amp", "dtau0")
 RULES = {
     "ns":       dict(consistent_abs=0.015, discrepant_abs=0.05, k_consistent=1.0, k_discrepant=3.0),
     "tau0_amp": dict(consistent_abs=0.03,  discrepant_abs=0.10, k_consistent=1.0, k_discrepant=3.0),
+    # PI #28 (z >= 2.6 product vs the canonical chain, whose A_P is two-sided 1.69 +0.14 -0.15 in 1e-9): c = 0.15e-9
+    # (about 1 sigma_ref), d = 0.50e-9 (about 3.4 sigma_ref), mirroring the n_P ratios; used ONLY when the primary
+    # reference chain carries a two-sided A_P (a 'median' entry); the one-sided rule below stays for upper limits.
+    "Ap":       dict(consistent_abs=0.15e-9, discrepant_abs=0.50e-9, k_consistent=1.0, k_discrepant=3.0),
     "dtau0":    dict(consistent_abs=0.06,  discrepant_abs=0.20, k_consistent=1.0, k_discrepant=3.0),
 }
 AP_RULE = dict(upper68=1.33e-9, upper95=1.44e-9, chain1_median=1.69e-9)
@@ -114,8 +118,18 @@ def rail_fraction(x, bounds):
     return dict(near_lo=float(np.mean(x <= lo + w)), near_hi=float(np.mean(x >= hi - w)))
 
 
-def load_chains(chain_dir, root):
-    files = sorted(glob.glob(os.path.join(chain_dir, f"{root}.unblinded.*.txt")))
+def load_chains(chain_dir, root, mode="unblinded"):
+    """mode 'unblinded': the governed unblind's <root>.unblinded.<c>.txt; mode 'plain' (PI #28, a product exported
+    unblinded from the start): <root>.<c>.txt, refusing if any <root>.unblinded.* file exists (no mixing)."""
+    if mode == "plain":
+        if glob.glob(os.path.join(chain_dir, f"{root}.unblinded.*")):
+            refuse(f"plain mode but {root}.unblinded.* files exist in {chain_dir}")
+        files = sorted(p for p in glob.glob(os.path.join(chain_dir, f"{root}.*.txt"))
+                       if os.path.basename(p)[len(root) + 1:-4].isdigit())
+        if not files:
+            refuse(f"no {root}.<c>.txt in {chain_dir}")
+    else:
+        files = sorted(glob.glob(os.path.join(chain_dir, f"{root}.unblinded.*.txt")))
     if not files:
         refuse(f"no {root}.unblinded.*.txt in {chain_dir}")
     names = None
@@ -149,7 +163,15 @@ def main(argv=None):
     ap.add_argument("--analysis-lock", required=True)
     ap.add_argument("--leg", default="eBOSS")
     ap.add_argument("--out", required=True, help="output prefix (writes <out>.json and <out>.md)")
+    ap.add_argument("--chain-files", choices=("unblinded", "plain"), default="unblinded",
+                    help="'unblinded' = the governed unblind's <root>.unblinded.<c>.txt (default); 'plain' = a product "
+                         "exported unblinded from the start (<root>.<c>.txt; health.blinded must be false) (PI #28)")
+    ap.add_argument("--require-gate", action="store_true",
+                    help="refuse (exit 3, nothing written) unless the health gate is GREEN or AMBER (PI #28: enforced for "
+                         "products that pass through no unblind script)")
     a = ap.parse_args(argv)
+    if os.path.exists(a.out + ".json") or os.path.exists(a.out + ".md"):
+        refuse(f"output exists: {a.out}.json/.md (the readout runs once)")
 
     try:
         sys.path.insert(0, "/home/mfho/hcd_priya")
@@ -162,13 +184,27 @@ def main(argv=None):
     ref = json.load(open(a.reference))
     prim = ref["chains"][ref["primary_chain"]]
     apr = prim.get("A_P_1e-9", {})
-    if apr and (abs(apr.get("upper68", 1.33) * 1e-9 - AP_RULE["upper68"]) > 1e-15 or abs(apr.get("upper95", 1.44) * 1e-9 - AP_RULE["upper95"]) > 1e-15):
+    ap_two_sided = bool(apr) and ("median" in apr)
+    if apr and not ap_two_sided and (abs(apr.get("upper68", 1.33) * 1e-9 - AP_RULE["upper68"]) > 1e-15 or abs(apr.get("upper95", 1.44) * 1e-9 - AP_RULE["upper95"]) > 1e-15):
         refuse("A_P thresholds in the script disagree with the reference JSON")
-    fid = ref["chains"].get("chain1_fiducial_z2.6_4.6", {})
+    desc_key = ref.get("descriptive_chain", "chain1_fiducial_z2.6_4.6")
+    fid = ref["chains"].get(desc_key, {}) if desc_key != ref["primary_chain"] else {}
     lock = json.load(open(a.analysis_lock))
-    z = np.asarray(lock["legs"][a.leg]["z"], float)
+    z_lock = np.asarray(lock["legs"][a.leg]["z"], float)
+    health = json.load(open(os.path.join(a.chain_dir, f"{a.root}.health.json")))
+    if a.chain_files == "plain":
+        if health.get("blinded") is not False:
+            refuse("plain chain files but health.json does not say blinded: false")
+    elif health.get("blinded") is False:
+        refuse("unblinded mode but health.json says blinded: false (use --chain-files plain for a product exported unblinded)")
+    if health.get("z_kept"):
+        z = np.asarray(health["z_kept"], float); z_source = "health.z_kept"
+        if not all(np.any(np.isclose(zz, z_lock, atol=1e-6)) for zz in z):
+            refuse("health.z_kept is not a subset of the lock's leg z grid")
+    else:
+        z = z_lock; z_source = "analysis.lock legs z"
 
-    names, tabs = load_chains(a.chain_dir, a.root)
+    names, tabs = load_chains(a.chain_dir, a.root, mode=a.chain_files)
     per_chain = [t[:, 2:] for t in tabs]
     allrows = np.concatenate(per_chain, axis=0)
     tau_idx = [i for i, n in enumerate(names) if n.startswith("tau0_z")]
@@ -192,7 +228,6 @@ def main(argv=None):
         cols[f"nuis:{k}"] = v.reshape(-1)
 
     summaries = {k: summarize(v) for k, v in cols.items()}
-    health = json.load(open(os.path.join(a.chain_dir, f"{a.root}.health.json")))
     gate = None
     try:
         import importlib.util
@@ -202,19 +237,30 @@ def main(argv=None):
         gate = ubo.classify_health(health, nuis_diag)
     except Exception as e:  # noqa: BLE001
         gate = dict(label="UNAVAILABLE", error=f"{type(e).__name__}: {e}")
+    if a.require_gate and (gate or {}).get("label") not in ("GREEN", "AMBER"):
+        refuse(f"health gate {(gate or {}).get('label')} (--require-gate): no readout")
 
     tests = {}
     tests["ns"] = classify_scaled("ns", summaries["ns"], prim["n_P"]["median"], ref_sigma(prim["n_P"]))
-    tests["Ap"] = classify_Ap(summaries["Ap"], cols["Ap"])
+    if ap_two_sided:
+        tests["Ap"] = classify_scaled("Ap", summaries["Ap"], apr["median"] * 1e-9, ref_sigma(apr) * 1e-9)
+        tests["Ap"]["rule_note"] = "two-sided (the primary reference chain reports A_P as median with 68 percent errors); thresholds RULES['Ap']"
+    else:
+        tests["Ap"] = classify_Ap(summaries["Ap"], cols["Ap"])
     tests["tau0_amp"] = classify_scaled("tau0_amp", summaries["tau0_amp"], prim["tau0"]["median"], ref_sigma(prim["tau0"]))
     tests["dtau0"] = classify_scaled("dtau0", summaries["dtau0"], prim["dtau0"]["median"], ref_sigma(prim["dtau0"]))
     headline = tests["ns"]["label"]
     descriptive = {}
     if fid:
-        descriptive["ns_vs_fiducial_1.009"] = dict(delta=float(summaries["ns"]["median"] - fid["n_P"]["median"]))
-        descriptive["Ap_vs_fiducial_1.69e-9"] = {"delta_1e-9": float(summaries["Ap"]["median"] * 1e9 - fid["A_P_1e-9"]["median"])}
-        descriptive["tau0_vs_fiducial"] = dict(delta=float(summaries["tau0_amp"]["median"] - fid["tau0"]["median"]))
-        descriptive["dtau0_vs_fiducial"] = dict(delta=float(summaries["dtau0"]["median"] - fid["dtau0"]["median"]))
+        tag = "fiducial" if desc_key == "chain1_fiducial_z2.6_4.6" else desc_key
+        descriptive[f"ns_vs_{tag}" + ("_1.009" if tag == "fiducial" else "")] = dict(delta=float(summaries["ns"]["median"] - fid["n_P"]["median"]))
+        fap = fid.get("A_P_1e-9", {})
+        if "median" in fap:
+            descriptive[f"Ap_vs_{tag}" + ("_1.69e-9" if tag == "fiducial" else "")] = {"delta_1e-9": float(summaries["Ap"]["median"] * 1e9 - fap["median"])}
+        elif "upper68" in fap:
+            descriptive[f"Ap_vs_{tag}_upper68"] = {"delta_1e-9": float(summaries["Ap"]["median"] * 1e9 - fap["upper68"]), "note": "median minus the reference 68 percent upper limit"}
+        descriptive[f"tau0_vs_{tag}"] = dict(delta=float(summaries["tau0_amp"]["median"] - fid["tau0"]["median"]))
+        descriptive[f"dtau0_vs_{tag}"] = dict(delta=float(summaries["dtau0"]["median"] - fid["dtau0"]["median"]))
     rails = {k: rail_fraction(cols[k], b) for k, b in BOX.items() if k in cols}
     for k in ("alpha_lls", "alpha_subdla", "alpha_dla"):
         if k in cols:
@@ -260,7 +306,8 @@ def main(argv=None):
                           ebfmi=bool(health.get("ebfmi_min", 0) >= 0.3), treedepth=bool(health.get("treedepth_sat_frac", 1) < 0.02),
                           nuisance_rails=bool(all((v.get("near_lo") or 0) < 0.05 and (v.get("near_hi") or 0) < 0.05 for v in nuisance_rails.values()))),
                health_gate=gate, mc_error_of_median=mc_err, boundary_proximity_flag=boundary_flag, nuisance_rails=nuisance_rails,
-               z_grid=z.tolist(), summaries=summaries, tests=tests, headline_label=headline, descriptive_vs_fiducial=descriptive,
+               z_grid=z.tolist(), z_source=z_source, chain_files_mode=a.chain_files, descriptive_chain=(desc_key if fid else None),
+               summaries=summaries, tests=tests, headline_label=headline, descriptive_vs_fiducial=descriptive,
                rails=rails, attribution=attribution)
     with open(a.out + ".json", "w") as f:
         json.dump(out, f, indent=1, sort_keys=True); f.write("\n")
@@ -273,7 +320,10 @@ def main(argv=None):
         t = tests[k]; s = summaries[k]
         L.append(f"| {k} | {s['median']:.4f} [{s['q16']:.4f}, {s['q84']:.4f}] ({mc_err[k]:.4f}) | {t['ref_central']:.4f} +/- {t['ref_sigma']:.4f} | {t['delta']:+.4f} | {t['delta_mean_based']:+.4f} | {t['s']:.4f} | {t['delta_over_s']:+.2f} | **{t['label']}** | {boundary_flag[k]} |")
     t = tests["Ap"]; s = summaries["Ap"]
-    L.append(f"| Ap (1e-9) | {s['median']*1e9:.3f} [{s['q16']*1e9:.3f}, {s['q84']*1e9:.3f}] | < 1.33 (68), < 1.44 (95) | P(<1.33e-9) {t['p_ours_below_upper68']:.3f}; P(<1.44e-9) {t['p_ours_below_upper95']:.3f} | | | one-sided | **{t['label']}**{' (via q16 only)' if t['consistent_via_q16_only'] else ''} | {boundary_flag['Ap']} |")
+    if ap_two_sided:
+        L.append(f"| Ap (1e-9) | {s['median']*1e9:.3f} [{s['q16']*1e9:.3f}, {s['q84']*1e9:.3f}] ({mc_err['Ap']*1e9:.3f}) | {t['ref_central']*1e9:.3f} +/- {t['ref_sigma']*1e9:.3f} | {t['delta']*1e9:+.3f} | {t['delta_mean_based']*1e9:+.3f} | {t['s']*1e9:.3f} | {t['delta_over_s']:+.2f} | **{t['label']}** (two-sided) | {boundary_flag['Ap']} |")
+    else:
+        L.append(f"| Ap (1e-9) | {s['median']*1e9:.3f} [{s['q16']*1e9:.3f}, {s['q84']*1e9:.3f}] | < 1.33 (68), < 1.44 (95) | P(<1.33e-9) {t['p_ours_below_upper68']:.3f}; P(<1.44e-9) {t['p_ours_below_upper95']:.3f} | | | one-sided | **{t['label']}**{' (via q16 only)' if t['consistent_via_q16_only'] else ''} | {boundary_flag['Ap']} |")
     L += ["", f"**Headline (n_P): {headline}.**", "", "## Posterior summaries (all columns)", "", "| column | median | 16 | 84 | 2.5 | 97.5 | sd |", "|---|---|---|---|---|---|---|"]
     for k, s in summaries.items():
         L.append(f"| {k} | {s['median']:.6g} | {s['q16']:.6g} | {s['q84']:.6g} | {s['q025']:.6g} | {s['q975']:.6g} | {s['sd']:.3g} |")
@@ -281,7 +331,7 @@ def main(argv=None):
     for k, r in list(rails.items()) + list(nuisance_rails.items()):
         L.append(f"| {k} | {r.get('near_lo')} | {r.get('near_hi')} |")
     if descriptive:
-        L += ["", "## Descriptive only: versus the authors' fiducial (z >= 2.6) chain", ""] + [f"- {k}: {v}" for k, v in descriptive.items()]
+        L += ["", f"## Descriptive only: versus the reference chain {desc_key}", ""] + [f"- {k}: {v}" for k, v in descriptive.items()]
     if attribution:
         L += ["", "## Single preregistered attribution step (INDICATIVE)", "", "| x | corr(ns, x) |", "|---|---|"]
         for k, c in attribution["corr_with_ns"].items():

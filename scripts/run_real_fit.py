@@ -98,6 +98,14 @@ def _denorm_theta(theta_unit):
     return np.asarray(theta_unit) * (hi - lo) + lo
 
 
+def _eboss_root(eboss_zlo):
+    """Root for an eBOSS product with a low-z restriction (PI #28): None -> 'real_eboss' (all 13 bins);
+    2.6 -> 'real_eboss_z26'. Distinct roots so a restricted product never clobbers the full-range one."""
+    if eboss_zlo is None:
+        return "real_eboss"
+    return f"real_eboss_z{int(round(float(eboss_zlo) * 10)):02d}"
+
+
 def _packed_to_physical(draws, names):
     """Map the θ9 block of a packed (L,P) draw matrix from unit cube to PHYSICAL θ; leave τ₀ /
     α / a_SiIII columns unchanged. Returns a COPY with the same column order/names."""
@@ -126,7 +134,7 @@ def _assert_norc_ks_cap(ctx):
         "NORC KS k_max cap (0.045) not applied"
 
 
-def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=None):
+def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=None, eboss_zlo=None):
     """The PRODUCTION ctx for a real-data fit, then RESTRICTED to the requested survey's leg.
 
     Baseline flags mirror run_prod_sbc_shard.build (use_xclass, MF + floor, emucoh off-diag-only,
@@ -137,6 +145,11 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     ``ks_zlo`` (default None → the loader's authoritative z_lo=2.4 baseline) overrides ONLY the KS
     leg's low-z cut via ks_kwargs={"z_lo": ks_zlo}. The PI's z2.4=baseline / z2.8=diagnostic
     comparison (KS-author published cut is the more-conservative z<2.8; see load_ks_leg docstring).
+
+    ``eboss_zlo`` (default None -> the loader's z_lo=2.2 baseline, all 13 bins) restricts ONLY the
+    eBOSS leg's low-z cut via eboss_kwargs={"z_lo": eboss_zlo} (PI DECISIONS #28, 2026-09-25: the
+    z >= 2.6 product that matches the canonical Fernandez, Bird & Ho 2024 range). No model, prior,
+    covariance or forward change: the loader drops whole z blocks (block-diagonal covariance).
     """
     if ensemble_glob is None:
         # PINNED path (freeze decision 6): the committed manifest verifies sha256 + exact
@@ -166,6 +179,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     # DESI/eBOSS with no ks_zlo stay byte-identical (ks_kwargs=None, as before Task 1A/1B).
     ks_kw = ({**(fc.get("ks_kwargs") or {}),
               **({"z_lo": float(ks_zlo)} if ks_zlo is not None else {})}) or None
+    eb_kw = ({"z_lo": float(eboss_zlo)} if eboss_zlo is not None else None)   # PI #28: eBOSS z_lo restriction
     ctx, d = build_legb_ctx(
         ensemble_ckpts=ens, use_xclass=True,
         with_mf=True, mf_with_floor=True,
@@ -173,6 +187,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
         mf_emucoh=True, mf_emucoh_offdiag_only=True,
         with_eboss=(survey == "eboss"),
         ks_kwargs=ks_kw,                  # threads z_lo into load_ks_leg (default None → z_lo=2.4 baseline)
+        eboss_kwargs=eb_kw,               # PI #28: threads z_lo into load_eboss_leg (None -> all 13 bins, byte-identical)
         metals_on=metals,                 # applies the SiIII/SiII forward term on metals_on legs
         sample_metals=metals,             # samples the metal nuisance (flatlog2node nodes / uniform a_SiIII)
         sample_res=fc["sample_res"],      # option-b f_res float (DESI 0.02 / eBOSS 0.05 / KS 0.15; task #5 DONE)
@@ -230,7 +245,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
 
 def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_depth=10,
                  seed=20260614, single_member=False, ensemble_glob=None, ks_zlo=None,
-                 verbose=True):
+                 eboss_zlo=None, verbose=True):
     """Multi-chain dispersed NUTS on the REAL leg.P_data (NO mock). Returns
     ``dict(packed_chains, names, battery, per_chain_div, members, leg_name, n_real_rows)``.
 
@@ -239,7 +254,7 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
     LIKELIHOOD points at the real data (ctx.legs already carry leg.P_data = the measurement; we
     do NOT overwrite it with a mock)."""
     ctx, d, members = build_real_ctx(survey, single_member=single_member,
-                                     ensemble_glob=ensemble_glob, ks_zlo=ks_zlo)
+                                     ensemble_glob=ensemble_glob, ks_zlo=ks_zlo, eboss_zlo=eboss_zlo)
     leg = ctx.legs[0]
     n_real = int(np.isfinite(np.asarray(leg.P_data)).sum())
 
@@ -304,7 +319,8 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
                 members=members, leg_name=leg.name, n_real_rows=n_real,
                 ll_chains=ll_chains, kept_global=kept_global,
                 nuisance_chains=nuisance_chains, nuisance_bounds=nuisance_bounds,
-                diverging_chains=diverging_chains)
+                diverging_chains=diverging_chains,
+                z_kept=[float(x) for x in np.asarray(ctx.z_global)[kept_global]])   # the leg's z grid (PI #28: 11 bins when z_lo=2.6)
 
 
 # Nuisance-site prefixes for the Model C+ per-leg, per-ion metal f/k nodes. Kept in sync with
@@ -609,6 +625,10 @@ def main():
                          "2.8 = the KS-author published conservative DIAGNOSTIC. Routes a "
                          "non-baseline value to a distinct root (real_ks_z<NN>) so it never "
                          "clobbers the z2.4 baseline.")
+    ap.add_argument("--eboss-zlo", type=float, default=None,
+                    help="eBOSS leg low-z cut (only for --survey eboss; PI #28). None = all 13 bins (the "
+                         "2.2 to 4.6 product). A value routes to a distinct root (real_eboss_z26 for 2.6) "
+                         "so it never clobbers the full-range product. No model or prior change.")
     ap.add_argument("--allow-env-data-flags", action="store_true",
                     help="DANGER: permit the env data-selection flags (HCD_DESI_SNR3 / "
                          "HCD_CV_FLOOR / HCD_CV_FLOOR_RANK1) to be set at driver entry — a "
@@ -640,17 +660,21 @@ def main():
     ks_zlo = a.ks_zlo if a.survey == "ks" else None
     if a.survey == "ks" and abs(a.ks_zlo - 2.4) > 1e-6:
         root = f"real_ks_z{int(round(a.ks_zlo * 10)):02d}"   # e.g. z_lo=2.8 -> real_ks_z28
+    eboss_zlo = a.eboss_zlo if a.survey == "eboss" else None
+    if eboss_zlo is not None:
+        root = _eboss_root(eboss_zlo)                        # PI #28: e.g. z_lo=2.6 -> real_eboss_z26
 
     print(f"=== REAL-DATA fit  survey={a.survey}  leg={info['leg']}  "
           f"blind={a.blind}  private={info['private']}  out={out_dir}"
-          f"{f'  KS z_lo={a.ks_zlo}  root={root}' if a.survey == 'ks' else ''} ===")
+          f"{f'  KS z_lo={a.ks_zlo}  root={root}' if a.survey == 'ks' else ''}"
+          f"{f'  eBOSS z_lo={eboss_zlo}  root={root}' if eboss_zlo is not None else ''} ===")
     print(f"    NUTS: chains={a.n_chains} warmup={a.n_warmup} samples={a.n_samples} "
           f"mtd={a.max_tree_depth} dense-mass=True  (ensemble{'=single' if a.single_member else '=N'})")
 
     result = run_real_fit(
         a.survey, n_chains=a.n_chains, n_warmup=a.n_warmup, n_samples=a.n_samples,
         max_tree_depth=a.max_tree_depth, seed=a.seed, single_member=a.single_member,
-        ensemble_glob=a.ensemble_glob, ks_zlo=ks_zlo)
+        ensemble_glob=a.ensemble_glob, ks_zlo=ks_zlo, eboss_zlo=eboss_zlo)
 
     bat = result["battery"]
     print(f"--- sampler health (UNBLINDED) survey={a.survey} ---")
@@ -666,6 +690,7 @@ def main():
         result, out_dir, root, offset=offset, blind=a.blind, survey=a.survey,
         meta=dict(blind_lock=os.path.abspath(a.blind_lock) if a.blind else None,
                   seed=a.seed, ks_zlo=(a.ks_zlo if a.survey == "ks" else None),
+                  eboss_zlo=eboss_zlo, z_kept=result.get("z_kept"),   # PI #28: the leg's z grid travels with the health record
                   # freeze decision 6: the artifact self-declares whether it ran on the
                   # manifest-pinned production ensemble. --ensemble-glob (diagnostic) and
                   # --single-member (de-risk) are both NOT the pinned production object.

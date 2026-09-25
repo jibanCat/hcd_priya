@@ -308,3 +308,47 @@ def test_export_divergences_refuses_count_mismatch(tmp_path):
     with pytest.raises(AssertionError):
         RF.export_getdist(result, str(tmp_path), "real_desi", offset={"ns": 0.0, "Ap": 0.0},
                           blind=False, survey="desi")
+
+
+# --------------------------------------------------------------------------------------------- #
+#  PI #28 (2026-09-25) -- eBOSS low-z restriction (--eboss-zlo): routing, loader kwargs, z_kept meta.
+# --------------------------------------------------------------------------------------------- #
+def test_eboss_root_routing():
+    assert RF._eboss_root(None) == "real_eboss"
+    assert RF._eboss_root(2.6) == "real_eboss_z26"
+    assert RF._eboss_root(2.8) == "real_eboss_z28"
+
+
+def test_build_real_ctx_threads_eboss_zlo_into_loader_kwargs(monkeypatch):
+    """build_real_ctx passes eboss_kwargs={'z_lo': 2.6} to build_legb_ctx when eboss_zlo=2.6 and None otherwise
+    (byte-identical default path). The heavy context build is stubbed; only the argument plumbing is tested."""
+    captured = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_build(**kw):
+        captured.update(kw); raise _Stop()
+
+    monkeypatch.setattr(RF, "build_legb_ctx", fake_build)
+    monkeypatch.setattr(RF, "production_member_paths", lambda **kw: ["/fake/final_prod_seed0"])
+    with pytest.raises(_Stop):
+        RF.build_real_ctx("eboss", eboss_zlo=2.6)
+    assert captured["eboss_kwargs"] == {"z_lo": 2.6} and captured["with_eboss"] is True and captured["ks_kwargs"] is None
+    captured.clear()
+    with pytest.raises(_Stop):
+        RF.build_real_ctx("eboss")
+    assert captured["eboss_kwargs"] is None
+    captured.clear()
+    with pytest.raises(_Stop):
+        RF.build_real_ctx("desi", eboss_zlo=2.6)     # the argument is ignored for other surveys? No: it is passed but the eBOSS leg is not assembled
+    assert captured["with_eboss"] is False
+
+
+def test_export_carries_z_kept_and_eboss_zlo_meta(tmp_path):
+    result = _minimal_result([{"f_res_amp": np.zeros(5)}], {"f": (0.003, 0.03), "k": (1e-3, 0.1)})
+    RF.export_getdist(result, str(tmp_path), "real_eboss_z26", offset={"ns": 0.0, "Ap": 0.0}, blind=False, survey="eboss",
+                      meta=dict(eboss_zlo=2.6, z_kept=[2.6, 2.8, 3.0]))
+    with open(os.path.join(str(tmp_path), "real_eboss_z26.health.json")) as f:
+        h = json.load(f)
+    assert h["eboss_zlo"] == 2.6 and h["z_kept"] == [2.6, 2.8, 3.0] and h["blinded"] is False
