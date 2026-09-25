@@ -152,7 +152,14 @@ def main(argv=None):
     cons = _load("eboss_priya_consistency")
     lock = json.load(open(a.analysis_lock))
     leg = lock["legs"][a.leg]
-    z = np.asarray(leg["z"] if "z" in leg else lock["surveys"][a.leg.lower()]["z"], float)
+    z_lock = np.asarray(leg["z"] if "z" in leg else lock["surveys"][a.leg.lower()]["z"], float)
+    health0 = json.load(open(os.path.join(a.chain_dir, f"{a.root}.health.json")))
+    if health0.get("z_kept"):                       # a restricted product (PI #28): its own grid, a subset of the lock grid
+        z = np.asarray(health0["z_kept"], float)
+        if not all(np.any(np.isclose(zz, z_lock, atol=1e-6)) for zz in z):
+            refuse("health.z_kept is not a subset of the lock's leg z grid")
+    else:
+        z = z_lock
     zp = float(leg.get("prior", {}).get("tau0_pivot_z", cons.TAU0_PIVOT_Z))
     res = analyze(a.chain_dir, a.root, lock, cons.BOX, cons.recover_tau0_amp_dtau0, z, zp)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)) or ".", exist_ok=True)

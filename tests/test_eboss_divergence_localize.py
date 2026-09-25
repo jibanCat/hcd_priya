@@ -133,3 +133,28 @@ def test_refuses_flag_health_mismatch(tmp_path):
     with pytest.raises(SystemExit) as e:
         DL.main(["--chain-dir", d, "--analysis-lock", _lock(tmp_path), "--out", os.path.join(d, "x")])
     assert e.value.code == 3
+
+
+
+def test_restricted_product_uses_its_kept_grid(tmp_path):
+    """PI #28 products carry 11 tau0 columns and health.z_kept; the localization must use that grid, not the 13-bin lock grid."""
+    n = 40
+    f0 = np.zeros(n, bool); f0[[7, 8]] = True
+    sub = tmp_path / "z26"; sub.mkdir()
+    d = str(sub)
+    rng = np.random.default_rng(4); root = "real_eboss_z26"; Z11 = Z[2:]
+    names = ["ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2", "hireionz", "bhfeedback"] + [f"tau0_z{i}" for i in range(11)] + ["alpha_lls", "alpha_subdla", "alpha_dla"]
+    for c in range(2):
+        amp = rng.uniform(0.9, 1.1, n); dt = rng.uniform(-0.2, 0.1, n)
+        ladder = amp[:, None] * ((1 + Z11[None, :]) / 4.0) ** dt[:, None] * CONS.kim_tau0(Z11)[None, :]
+        theta = np.column_stack([rng.uniform(0.85, 1.0, n), rng.uniform(1.4e-9, 2.2e-9, n), rng.uniform(3.6, 4.0, n), rng.uniform(2.7, 3.1, n), rng.uniform(1.5, 2.3, n),
+                                 rng.uniform(0.66, 0.74, n), rng.uniform(0.141, 0.145, n), rng.uniform(6.6, 7.9, n), rng.uniform(0.035, 0.065, n)])
+        tab = np.column_stack([np.ones(n), rng.uniform(500, 600, n), theta, ladder, rng.normal(0.1, 0.02, (n, 3))])
+        np.savetxt(os.path.join(d, f"{root}.{c + 1}.txt"), tab, header="weight  minusloglike  " + "  ".join(names))
+    np.savez(os.path.join(d, f"{root}.divergences.npz"), diverging=np.asarray([f0, np.zeros(n, bool)]), per_chain_div=np.array([2, 0]), chain_files=np.array([f"{root}.1.txt", f"{root}.2.txt"]))
+    json.dump(dict(leg="eBOSS", n_chains=2, n_draws=n, n_divergent=2, per_chain_div=[2, 0], blinded=False, z_kept=Z11.tolist(), eboss_zlo=2.6), open(os.path.join(d, f"{root}.health.json"), "w"))
+    out = os.path.join(str(tmp_path), "loc26")
+    assert DL.main(["--chain-dir", d, "--root", root, "--analysis-lock", _lock(tmp_path), "--out", out]) == 0
+    r = json.load(open(out + ".json"))
+    assert r["n_divergent"] == 2 and [x["row"] for x in r["draws"]] == [7, 8] and r["draws"][1]["consecutive_with_previous"] is True
+    assert "tau0_amp" in r["draws"][0]["quantiles"] and "alphaq" in r["draws"][0]["edge_distance"]
