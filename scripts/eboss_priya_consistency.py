@@ -382,7 +382,7 @@ def main(argv=None):
     with open(a.out + ".json", "w") as f:
         json.dump(out, f, indent=1, sort_keys=True); f.write("\n")
     # ---- markdown ----
-    L = [f"# eBOSS real-data readout vs PRIYA (Fernandez+2024 Table 3, {ref['primary_chain']})", "",
+    L = [f"# eBOSS real-data readout vs Fernandez, Bird & Ho 2024 (reference entry {ref['primary_chain']}; {ref.get('reference', '')[:120]})", "",
          f"chains {len(tabs)} x {int(allrows.shape[0] / len(tabs))} draws; health: R-hat {health.get('rhat_max')}, ESS bulk {health.get('ess_bulk_min')}, ESS tail {health.get('ess_tail_min')}, E-BFMI {health.get('ebfmi_min')}, divergences {health.get('n_divergent')}, tree-depth sat {health.get('treedepth_sat_frac')}; GREEN flags {out['green']}; health gate {gate.get('label') if gate else None}", "",
          "## Preregistered tests (PRIMARY: our posterior MEAN with 68 percent highest-density limits versus the reference GetDist mean with its quoted limits, PI #29; delta/s in combined-width units, not a tension statistic; median [16,84] descriptive)", "",
          "| parameter | ours mean (+err/-err) (MC err of mean) | ours median [16,84] | reference mean (+/-) | delta (mean) | delta (median, descriptive) | s | delta/s | label | boundary flag |", "|---|---|---|---|---|---|---|---|---|---|"]
@@ -393,7 +393,7 @@ def main(argv=None):
     if ap_two_sided:
         L.append(f"| Ap (1e-9) | {s['mean']*1e9:.3f} (+{s['err_plus_68']*1e9:.3f}/-{s['err_minus_68']*1e9:.3f}) ({mc_err['Ap']*1e9:.3f}) | {s['median']*1e9:.3f} [{s['q16']*1e9:.3f}, {s['q84']*1e9:.3f}] | {t['ref_central']*1e9:.3f} +/- {t['ref_sigma']*1e9:.3f} | {t['delta']*1e9:+.3f} | {t['delta_median_based']*1e9:+.3f} | {t['s']*1e9:.3f} | {t['delta_over_s']:+.2f} | **{t['label_qualified']}** (two-sided) | {boundary_flag['Ap']} |")
     else:
-        L.append(f"| Ap (1e-9) | {s['mean']*1e9:.3f} (+{s['err_plus_68']*1e9:.3f}/-{s['err_minus_68']*1e9:.3f}) | {s['median']*1e9:.3f} [{s['q16']*1e9:.3f}, {s['q84']*1e9:.3f}] | < 1.33 (68), < 1.44 (95) | P(<1.33e-9) {t['p_ours_below_upper68']:.3f}; P(<1.44e-9) {t['p_ours_below_upper95']:.3f} | | | one-sided | **{t['label_qualified']}**{' (via HDI lower bound only)' if t['consistent_via_q16_only'] else ''} | {boundary_flag['Ap']} |")
+        L.append(f"| Ap (1e-9) | {s['mean']*1e9:.3f} (+{s['err_plus_68']*1e9:.3f}/-{s['err_minus_68']*1e9:.3f}) | {s['median']*1e9:.3f} [{s['q16']*1e9:.3f}, {s['q84']*1e9:.3f}] | < {AP_RULE['upper68']*1e9:.3f} (68), < {AP_RULE['upper95']*1e9:.3f} (95) | P(<{AP_RULE['upper68']*1e9:.3f}e-9) {t['p_ours_below_upper68']:.3f}; P(<{AP_RULE['upper95']*1e9:.3f}e-9) {t['p_ours_below_upper95']:.3f} | | | one-sided | **{t['label_qualified']}**{' (via HDI lower bound only)' if t['consistent_via_q16_only'] else ''} | {boundary_flag['Ap']} |")
     L += ["", f"**Headline (n_P): {headline}.**", "", "## Posterior summaries (all columns)", "", "| column | mean | HDI68 lo | HDI68 hi | median | 16 | 84 | 2.5 | 97.5 | sd |", "|---|---|---|---|---|---|---|---|---|---|"]
     for k, s in summaries.items():
         L.append(f"| {k} | {s['mean']:.6g} | {s['hdi68_lo']:.6g} | {s['hdi68_hi']:.6g} | {s['median']:.6g} | {s['q16']:.6g} | {s['q84']:.6g} | {s['q025']:.6g} | {s['q975']:.6g} | {s['sd']:.3g} |")

@@ -99,7 +99,11 @@ def to_md(res):
          "|---|---|---|---|---|---|---|---|---|---|"]
     def f(x): return "" if x is None else f"{x:.4g}"
     def rails(rr):
-        return "" if rr is None else "(%.3f, %.3f)" % (rr["near_lo"], rr["near_hi"])
+        if rr is None:
+            return ""
+        def g(v):
+            return "n/a" if v is None else "%.3f" % v
+        return "(%s, %s)" % (g(rr.get("near_lo")), g(rr.get("near_hi")))
     for k, r in res["comparison"].items():
         rf = r.get("rails", {}).get("full"); rs = r.get("rails", {}).get("sub")
         fu, su = r["full"], r["sub"]

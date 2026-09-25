@@ -47,8 +47,9 @@ def _product(d, root, z, *, blinded, ns=0.898, Ap=1.25e-9, tau0_amp=1.22, dtau0=
         h["z_kept"] = z.tolist(); h["eboss_zlo"] = float(z[0]) if z.size < 13 else None
     (d / f"{root}.health.json").write_text(json.dumps(h))
     sites = {k: 0.01 * (1 + 0.05 * rng.standard_normal((n_chains, n))) for k in ("f_SiIII_eBOSS_z0", "k_SiIII_eBOSS_z1")}
+    sites["f_res_amp"] = -0.04 + 0.006 * rng.standard_normal((n_chains, n)); sites["f_res_slope"] = 0.5 + 0.3 * rng.standard_normal((n_chains, n))   # Normal-prior sites: null rails (K2 M1)
     np.savez(d / f"{root}.nuisance.npz", **sites)
-    (d / f"{root}.nuisance.json").write_text(json.dumps(dict(sites={k: dict(frac_near_lo=0.0, frac_near_hi=0.0) for k in sites})))
+    (d / f"{root}.nuisance.json").write_text(json.dumps(dict(sites={k: (dict(frac_near_lo=None, frac_near_hi=None) if k.startswith("f_res") else dict(frac_near_lo=0.0, frac_near_hi=0.0)) for k in sites})))
     return d
 
 
