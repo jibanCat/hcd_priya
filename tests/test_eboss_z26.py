@@ -126,3 +126,118 @@ def test_zrange_compare_reports_shifts_rails_and_shared_rungs(tmp_path):
     md = open(str(out) + ".md").read(); assert "sub minus full" in md and "tau0(z=3.0)" in md
     with pytest.raises(SystemExit):
         ZR.main(["--full-dir", str(full), "--sub-dir", str(sub), "--analysis-lock", lock, "--out", str(out)])   # runs once
+
+
+# --------------------------------------------------------------------------------------------- #
+#  Reviewer K (S3) and PI #29: the REAL pinned reference files, the attribution path, exactly-once, gate implied in plain mode.
+# --------------------------------------------------------------------------------------------- #
+NOTES_LANE = "/home/mfho/hcd_priya_notes/docs/superpowers/eboss-realdata-2026-09"
+REF_RELEASED = os.path.join(NOTES_LANE, "reference_fernandez2024_released_chains.json")
+REF_RELEASED_FULL = os.path.join(NOTES_LANE, "reference_fernandez2024_released_chains_fullrange_primary.json")
+REF_TABLE3 = os.path.join(NOTES_LANE, "reference_fernandez2024_table3.json")
+
+
+@pytest.mark.skipif(not os.path.exists(REF_RELEASED), reason="notes lane not available")
+def test_real_released_reference_z26_shifted_case_runs_attribution(tmp_path):
+    """Plain-mode readout of a synthetic z >= 2.6 product against the REAL released-chains reference (primary = the released
+    canonical z = 2.6 to 4.6 chain): a planted tau0_amp shift makes the attribution step run; the primary shift is mean-based."""
+    d = _product(tmp_path / "z26", "real_eboss_z26", Z13[2:], blinded=False, ns=1.005, Ap=1.65e-9, tau0_amp=1.16, dtau0=-0.02, seed=5)
+    out = tmp_path / "ro"
+    CONS.main(["--chain-dir", str(d), "--root", "real_eboss_z26", "--reference", REF_RELEASED, "--analysis-lock", _lock(tmp_path), "--out", str(out), "--chain-files", "plain"])
+    r = json.load(open(str(out) + ".json"))
+    assert r["primary_chain"] == "chain1_released_z2.6_4.6" and r["descriptive_chain"] == "chain3_released_z2.2_4.6"
+    t = r["tests"]
+    assert t["tau0_amp"]["label"] in ("SHIFTED", "DISCREPANT") and t["tau0_amp"]["delta_basis"].startswith("mean minus mean")
+    assert abs(t["tau0_amp"]["delta"] - (r["summaries"]["tau0_amp"]["mean"] - 1.0818806311217888)) < 1e-9
+    assert abs(t["ns"]["ref_central"] - 1.0087378615010567) < 1e-12 and t["Ap"]["rule_note"].startswith("two-sided")
+    assert r["attribution"] is not None and "hub" in r["attribution"]["linear_response"] and "alphaq" in r["attribution"]["linear_response"]
+    assert "Ap_vs_chain3_released_z2.2_4.6" in r["descriptive_vs_fiducial"] and "Ap_vs_chain3_released_z2.2_4.6_upper68" in r["descriptive_vs_fiducial"]
+    assert r["tests"]["tau0_amp"]["label_qualified"].startswith(r["tests"]["tau0_amp"]["label"]) and r["require_gate"] is True
+    # exactly once
+    with pytest.raises(SystemExit) as e:
+        CONS.main(["--chain-dir", str(d), "--root", "real_eboss_z26", "--reference", REF_RELEASED, "--analysis-lock", _lock(tmp_path), "--out", str(out), "--chain-files", "plain"])
+    assert e.value.code == 3
+
+
+@pytest.mark.skipif(not os.path.exists(REF_RELEASED_FULL), reason="notes lane not available")
+def test_real_released_reference_fullrange_primary_unblinded_mode(tmp_path):
+    """Unblinded-mode readout of a synthetic full-range product against the released full-range chain as primary (the re-report
+    reference): the one-sided A_P rule applies (upper limits) and the primary chain passes the schema check."""
+    d = _product(tmp_path / "full", "real_eboss", Z13, blinded=True, ns=0.897, Ap=1.21e-9, tau0_amp=1.24, dtau0=-0.26, unblinded_files=True, z_kept=False, seed=7)
+    out = tmp_path / "ro_full"
+    CONS.main(["--chain-dir", str(d), "--root", "real_eboss", "--reference", REF_RELEASED_FULL, "--analysis-lock", _lock(tmp_path), "--out", str(out), "--chain-files", "unblinded"])
+    r = json.load(open(str(out) + ".json"))
+    assert r["primary_chain"] == "chain3_released_z2.2_4.6" and r["tests"]["Ap"]["note"].startswith("one-sided")
+    assert r["tests"]["ns"]["label"] == "CONSISTENT" and abs(r["tests"]["ns"]["ref_central"] - 0.898) < 5e-4
+
+
+@pytest.mark.skipif(not os.path.exists(REF_TABLE3), reason="notes lane not available")
+def test_real_table3_reference_still_loads(tmp_path):
+    d = _product(tmp_path / "full", "real_eboss", Z13, blinded=True, unblinded_files=True, z_kept=False, seed=9)
+    out = tmp_path / "ro_t3"
+    CONS.main(["--chain-dir", str(d), "--root", "real_eboss", "--reference", REF_TABLE3, "--analysis-lock", _lock(tmp_path), "--out", str(out)])
+    r = json.load(open(str(out) + ".json"))
+    assert r["primary_chain"] == "chain3_full_z2.2_4.6" and "ns_vs_fiducial_1.009" in r["descriptive_vs_fiducial"]
+
+
+def test_plain_mode_implies_gate_and_schema_check_refuses(tmp_path):
+    lock = _lock(tmp_path); ref = _ref_z26(tmp_path)
+    d = _product(tmp_path / "red", "real_eboss_z26", Z13[2:], blinded=False, n_div=3)
+    with pytest.raises(SystemExit) as e:                   # RED, no --require-gate typed: still refused in plain mode
+        CONS.main(["--chain-dir", str(d), "--root", "real_eboss_z26", "--reference", ref, "--analysis-lock", lock, "--out", str(tmp_path / "x"), "--chain-files", "plain"])
+    assert e.value.code == 3 and not os.path.exists(str(tmp_path / "x.json"))
+    bad = json.load(open(ref)); del bad["chains"]["chain1"]["v_scale_h"]
+    p = tmp_path / "bad.json"; p.write_text(json.dumps(bad))
+    d2 = _product(tmp_path / "ok", "real_eboss_z26", Z13[2:], blinded=False)
+    with pytest.raises(SystemExit) as e2:                  # schema check before any computation
+        CONS.main(["--chain-dir", str(d2), "--root", "real_eboss_z26", "--reference", str(p), "--analysis-lock", lock, "--out", str(tmp_path / "y"), "--chain-files", "plain"])
+    assert e2.value.code == 3 and not os.path.exists(str(tmp_path / "y.json"))
+
+
+def test_zrange_compare_refuses_non_subset_and_carries_metal_rails(tmp_path):
+    lock = _lock(tmp_path)
+    full = _product(tmp_path / "full", "real_eboss", Z13[2:], blinded=True, unblinded_files=True)          # a full product with only 11 z
+    sub = _product(tmp_path / "sub", "real_eboss_z26", Z13, blinded=False)                                  # a sub product with 13 z: not a subset
+    with pytest.raises(SystemExit):
+        ZR.main(["--full-dir", str(full), "--sub-dir", str(sub), "--analysis-lock", lock, "--out", str(tmp_path / "c")])
+    full2 = _product(tmp_path / "full2", "real_eboss", Z13, blinded=True, unblinded_files=True, z_kept=False)
+    sub2 = _product(tmp_path / "sub2", "real_eboss_z26", Z13[2:], blinded=False, seed=3)
+    ZR.main(["--full-dir", str(full2), "--sub-dir", str(sub2), "--analysis-lock", lock, "--out", str(tmp_path / "c2")])
+    r = json.load(open(str(tmp_path / "c2.json")))
+    assert "rails" in r["comparison"]["nuis:f_SiIII_eBOSS_z0"] and r["comparison"]["ns"]["delta_over_full_sd"] is not None
+    assert "delta_mean_sub_minus_full" in r["comparison"]["ns"]
+
+
+
+def test_execution_record_integrity_and_box_limited_qualifier(tmp_path):
+    """Reviewer L S1/M3: the readout refuses when its own sha256 or the reference's sha256 disagree with the execution record;
+    a floor-piled A_P carries the BOX-LIMITED qualifier while the rule label stands."""
+    import hashlib
+    lock = _lock(tmp_path); ref = _ref_z26(tmp_path)
+    me = hashlib.sha256(open(os.path.join(REPO, "scripts", "eboss_priya_consistency.py"), "rb").read()).hexdigest()
+    rsha = hashlib.sha256(open(ref, "rb").read()).hexdigest()
+    good = tmp_path / "rec_ok.json"; good.write_text(json.dumps(dict(records_sha256=dict(readout_script=me, reference_json_z26=rsha))))
+    bad = tmp_path / "rec_bad.json"; bad.write_text(json.dumps(dict(records_sha256=dict(readout_script="0" * 64, reference_json_z26=rsha))))
+    d = _product(tmp_path / "floor", "real_eboss_z26", Z13[2:], blinded=False, Ap=1.15e-9, ns=1.0, tau0_amp=1.09, dtau0=-0.02)   # clipped at the floor
+    with pytest.raises(SystemExit):
+        CONS.main(["--chain-dir", str(d), "--root", "real_eboss_z26", "--reference", ref, "--analysis-lock", lock, "--out", str(tmp_path / "x"), "--chain-files", "plain", "--execution-record", str(bad)])
+    assert not os.path.exists(str(tmp_path / "x.json"))
+    CONS.main(["--chain-dir", str(d), "--root", "real_eboss_z26", "--reference", ref, "--analysis-lock", lock, "--out", str(tmp_path / "y"), "--chain-files", "plain", "--execution-record", str(good)])
+    r = json.load(open(str(tmp_path / "y.json")))
+    assert r["integrity"]["reference_record_key"] == "reference_json_z26" and r["boundary_proximity_flag"]["Ap"] is True
+    assert r["tests"]["Ap"]["box_limited"] is True and r["tests"]["Ap"]["label_qualified"].endswith("(BOX-LIMITED)")
+    assert r["tests"]["Ap"]["label"] in ("SHIFTED", "DISCREPANT")
+
+
+def test_zrange_compare_requires_readout_gate_and_reports_nested_scatter(tmp_path):
+    lock = _lock(tmp_path)
+    full = _product(tmp_path / "full", "real_eboss", Z13, blinded=True, unblinded_files=True, z_kept=False, seed=11)
+    sub = _product(tmp_path / "sub", "real_eboss_z26", Z13[2:], blinded=False, seed=12, ns=0.92)
+    red = tmp_path / "ro_red.json"; red.write_text(json.dumps(dict(health_gate=dict(label="RED"))))
+    with pytest.raises(SystemExit):
+        ZR.main(["--full-dir", str(full), "--sub-dir", str(sub), "--analysis-lock", lock, "--out", str(tmp_path / "c"), "--readout-json", str(red)])
+    assert not os.path.exists(str(tmp_path / "c.json"))
+    green = tmp_path / "ro_green.json"; green.write_text(json.dumps(dict(health_gate=dict(label="GREEN"))))
+    ZR.main(["--full-dir", str(full), "--sub-dir", str(sub), "--analysis-lock", lock, "--out", str(tmp_path / "c2"), "--readout-json", str(green)])
+    r = json.load(open(str(tmp_path / "c2.json")))
+    assert r["readout_gate"] == "GREEN" and "delta_over_nested_scatter" in r["comparison"]["ns"] and "units" in r

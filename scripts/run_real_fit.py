@@ -290,9 +290,10 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
         # Fix 2: keep the UNBLINDED data-nuisance posteriors (f_res + Model C+ metal f/k nodes) so we
         # can see if they RAIL at the real fit. These are NOT the blinded A_p/n_s (safe to export).
         nuisance_chains.append({k: np.asarray(samples[k]) for k in _nuisance_export_keys(samples)})
-        # all real-leg rows are kept (no dropped-z in a real fit): kept_global = z_global mask of
-        # the leg's z. We use the leg's z directly via _draws_matrix's kept_global contract: the
-        # tau0_vec is on z_global; keep the z this leg actually has data at.
+        # kept_global = z_global mask of the leg's z. All 13 z are kept for the full-range product; the
+        # PI #28 restricted product (--eboss-zlo 2.6) keeps 11 (the closure's dropped-z machinery applies).
+        # We use the leg's z directly via _draws_matrix's kept_global contract: the tau0_vec is on
+        # z_global; keep the z this leg actually has data at.
         zg = np.asarray(ctx.z_global)
         kept_global = np.array([np.any(np.isclose(leg.z, zz, atol=1e-3)) for zz in zg])
         draws = _draws_matrix(samples, kept_global)            # (L, P)

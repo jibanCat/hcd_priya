@@ -16,6 +16,7 @@ least one primary/secondary label is SHIFTED or DISCREPANT (section 4 rule) and 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import glob
 import json
 import os
@@ -67,10 +68,24 @@ def recover_tau0_amp_dtau0(tau0_ladder, z, z_pivot=TAU0_PIVOT_Z):
     return np.exp(intercept), slope
 
 
+def hdi(x, mass=0.6827):
+    """Shortest interval containing `mass` of the draws (the sample analogue of GetDist's two-tail density limits)."""
+    xs = np.sort(np.asarray(x, float)); n = xs.size; k = max(int(np.ceil(mass * n)), 2)
+    if k >= n:
+        return float(xs[0]), float(xs[-1])
+    widths = xs[k - 1:] - xs[:n - k + 1]; i = int(np.argmin(widths))
+    return float(xs[i]), float(xs[i + k - 1])
+
+
 def summarize(x):
-    q = np.quantile(x, [0.025, 0.16, 0.5, 0.84, 0.975])
+    """Posterior summary. PRIMARY (PI #29, like-for-like with GetDist tables): `mean`, the 68 percent highest-density
+    limits about the mean (`hdi68_lo/hi`, `err_minus_68/err_plus_68`) and `sigma_mean` = max(err_plus, err_minus)
+    (the same symmetrisation `ref_sigma` applies to the reference). DESCRIPTIVE: median, 16/84, 2.5/97.5, sd, and
+    `sigma` = half the 16 to 84 width (the pre PI #29 half-width, kept for the record)."""
+    q = np.quantile(x, [0.025, 0.16, 0.5, 0.84, 0.975]); lo, hi = hdi(x); m = float(np.mean(x))
     return dict(median=float(q[2]), q16=float(q[1]), q84=float(q[3]), q025=float(q[0]), q975=float(q[4]),
-                mean=float(np.mean(x)), sd=float(np.std(x, ddof=1)), sigma=float((q[3] - q[1]) / 2.0), n=int(x.size))
+                mean=m, sd=float(np.std(x, ddof=1)), sigma=float((q[3] - q[1]) / 2.0), n=int(x.size),
+                hdi68_lo=lo, hdi68_hi=hi, err_minus_68=float(m - lo), err_plus_68=float(hi - m), sigma_mean=float(max(m - lo, hi - m)))
 
 
 def ref_sigma(entry):
@@ -79,10 +94,18 @@ def ref_sigma(entry):
     return float(max(entry.get("err_plus", 0.0), entry.get("err_minus", 0.0)))
 
 
+def ref_central(entry):
+    """The reference central value: the GetDist posterior MEAN (`mean` if present; older files store it under `median`)."""
+    return float(entry["mean"] if "mean" in entry else entry["median"])
+
+
 def classify_scaled(name, ours, ref_median, ref_sig):
+    """PRIMARY shift (PI #29): our posterior MEAN minus the reference GetDist mean, with s = sqrt(sigma_mean^2 + sigma_ref^2)
+    where sigma_mean is our symmetrised 68 percent highest-density half-width (like-for-like with the reference's quoted
+    interval). The median-based shift is reported alongside as descriptive."""
     r = RULES[name]
-    delta = ours["median"] - ref_median
-    s = float(np.sqrt(ours["sigma"] ** 2 + ref_sig ** 2))
+    delta = ours["mean"] - ref_median
+    s = float(np.sqrt(ours["sigma_mean"] ** 2 + ref_sig ** 2))
     ad = abs(delta)
     if ad > r["discrepant_abs"] or ad > r["k_discrepant"] * s:
         label = "DISCREPANT"
@@ -90,22 +113,25 @@ def classify_scaled(name, ours, ref_median, ref_sig):
         label = "CONSISTENT"
     else:
         label = "SHIFTED"
-    return dict(parameter=name, ours_median=ours["median"], ours_mean=ours["mean"], ours_sigma=ours["sigma"],
-                ref_central=ref_median, ref_central_kind="GetDist posterior mean (Table 3)", ref_sigma=ref_sig,
-                delta=float(delta), delta_mean_based=float(ours["mean"] - ref_median), s=s,
+    return dict(parameter=name, ours_mean=ours["mean"], ours_err_minus_68=ours["err_minus_68"], ours_err_plus_68=ours["err_plus_68"],
+                ours_sigma_mean=ours["sigma_mean"], ours_median=ours["median"], ours_sigma_1684=ours["sigma"],
+                ref_central=ref_median, ref_central_kind="GetDist posterior mean", ref_sigma=ref_sig,
+                delta=float(delta), delta_basis="mean minus mean (PI #29)", delta_median_based=float(ours["median"] - ref_median), s=s,
                 delta_over_s=float(delta / s), delta_over_s_note="combined-width units; not a tension statistic",
                 label=label, rule=r)
 
 
 def classify_Ap(ours, x):
-    q16, med, q025 = ours["q16"], ours["median"], ours["q025"]
+    """One-sided rule (reference reports A_P as upper limits). PI #29: the central value is our MEAN and the 68 percent bound
+    is the highest-density lower limit (like-for-like with GetDist limits); the median-based reading is kept descriptively."""
+    q16, med, q025 = ours["hdi68_lo"], ours["mean"], ours["q025"]
     if q16 <= AP_RULE["upper68"] or med <= AP_RULE["upper95"]:
         label = "CONSISTENT"
     elif q025 > AP_RULE["chain1_median"]:
         label = "DISCREPANT"
     else:
         label = "SHIFTED"
-    return dict(parameter="Ap", ours_median=med, ours_q16=q16, ours_q025=q025, ref_upper68=AP_RULE["upper68"],
+    return dict(parameter="Ap", ours_mean=med, ours_hdi68_lo=q16, ours_median=ours["median"], ours_q16=ours["q16"], ours_q025=q025, ref_upper68=AP_RULE["upper68"],
                 ref_upper95=AP_RULE["upper95"], chain1_median=AP_RULE["chain1_median"], label=label, rule=AP_RULE,
                 p_ours_below_upper68=float(np.mean(x <= AP_RULE["upper68"])), p_ours_below_upper95=float(np.mean(x <= AP_RULE["upper95"])),
                 consistent_via_q16_only=bool(label == "CONSISTENT" and med > AP_RULE["upper95"]),
@@ -166,10 +192,26 @@ def main(argv=None):
     ap.add_argument("--chain-files", choices=("unblinded", "plain"), default="unblinded",
                     help="'unblinded' = the governed unblind's <root>.unblinded.<c>.txt (default); 'plain' = a product "
                          "exported unblinded from the start (<root>.<c>.txt; health.blinded must be false) (PI #28)")
+    ap.add_argument("--execution-record", default=None,
+                    help="the wrapper's EXECUTION_RECORD.json of the product (Reviewer L S1): refuse unless sha256(this script) equals "
+                         "records_sha256.readout_script and sha256(--reference) equals a records_sha256 reference entry")
     ap.add_argument("--require-gate", action="store_true",
                     help="refuse (exit 3, nothing written) unless the health gate is GREEN or AMBER (PI #28: enforced for "
                          "products that pass through no unblind script)")
     a = ap.parse_args(argv)
+    if a.chain_files == "plain":
+        a.require_gate = True          # Reviewer K S2: a product that passes through no unblind script is gated HERE, unconditionally
+    integrity = None
+    if a.execution_record:
+        rec = json.load(open(a.execution_record)); rs = rec.get("records_sha256", {})
+        me = hashlib.sha256(open(os.path.abspath(__file__), "rb").read()).hexdigest()
+        if rs.get("readout_script") != me:
+            refuse("this readout script's sha256 differs from records_sha256.readout_script in the execution record (post-run edit?)")
+        rsha = hashlib.sha256(open(a.reference, "rb").read()).hexdigest()
+        matched = [k for k, v in rs.items() if v == rsha and k.startswith("reference_json")]
+        if not matched:
+            refuse("the reference JSON's sha256 matches no reference_json* entry of the execution record")
+        integrity = dict(execution_record=os.path.abspath(a.execution_record), readout_script_sha256=me, reference_sha256=rsha, reference_record_key=matched[0])
     if os.path.exists(a.out + ".json") or os.path.exists(a.out + ".md"):
         refuse(f"output exists: {a.out}.json/.md (the readout runs once)")
 
@@ -183,10 +225,28 @@ def main(argv=None):
 
     ref = json.load(open(a.reference))
     prim = ref["chains"][ref["primary_chain"]]
+    # Reviewer K M1: every field the readout and the attribution step will touch must exist BEFORE any computation
+    for key in ("n_P", "A_P_1e-9", "tau0", "dtau0", "alpha_q", "v_scale_h"):
+        if key not in prim:
+            refuse(f"primary reference chain {ref['primary_chain']!r} lacks {key!r} (schema check)")
+    for key in ("n_P", "tau0", "dtau0", "v_scale_h"):
+        if not (("mean" in prim[key]) or ("median" in prim[key])):
+            refuse(f"primary reference {key!r} has no central value")
+    if "lower68" not in prim["alpha_q"]:
+        refuse("primary reference alpha_q lacks lower68")
+    apx = prim["A_P_1e-9"]
+    if not ((("mean" in apx) or ("median" in apx)) or (("upper68" in apx) and ("upper95" in apx))):
+        refuse("primary reference A_P_1e-9 has neither a central value nor upper limits")
     apr = prim.get("A_P_1e-9", {})
-    ap_two_sided = bool(apr) and ("median" in apr)
-    if apr and not ap_two_sided and (abs(apr.get("upper68", 1.33) * 1e-9 - AP_RULE["upper68"]) > 1e-15 or abs(apr.get("upper95", 1.44) * 1e-9 - AP_RULE["upper95"]) > 1e-15):
-        refuse("A_P thresholds in the script disagree with the reference JSON")
+    ap_two_sided = bool(apr) and (("mean" in apr) or ("median" in apr)) and not bool(apr.get("onetail_upper", False))
+    if apr and not ap_two_sided and ("upper68" in apr) and ("upper95" in apr):
+        # the one-sided thresholds come from the reference file itself (released-chain limits or the Table 3 transcription)
+        AP_RULE.update(upper68=float(apr["upper68"]) * 1e-9, upper95=float(apr["upper95"]) * 1e-9)
+        dk = ref.get("descriptive_chain"); dap = (ref["chains"].get(dk, {}) if dk else {}).get("A_P_1e-9", {})
+        if ("mean" in dap) or ("median" in dap):
+            AP_RULE.update(chain1_median=ref_central(dap) * 1e-9)
+    if apr and not ap_two_sided and not (("upper68" in apr) and ("upper95" in apr)):
+        refuse("one-sided A_P reference lacks upper68 / upper95")
     desc_key = ref.get("descriptive_chain", "chain1_fiducial_z2.6_4.6")
     fid = ref["chains"].get(desc_key, {}) if desc_key != ref["primary_chain"] else {}
     lock = json.load(open(a.analysis_lock))
@@ -241,35 +301,42 @@ def main(argv=None):
         refuse(f"health gate {(gate or {}).get('label')} (--require-gate): no readout")
 
     tests = {}
-    tests["ns"] = classify_scaled("ns", summaries["ns"], prim["n_P"]["median"], ref_sigma(prim["n_P"]))
+    tests["ns"] = classify_scaled("ns", summaries["ns"], ref_central(prim["n_P"]), ref_sigma(prim["n_P"]))
     if ap_two_sided:
-        tests["Ap"] = classify_scaled("Ap", summaries["Ap"], apr["median"] * 1e-9, ref_sigma(apr) * 1e-9)
+        tests["Ap"] = classify_scaled("Ap", summaries["Ap"], ref_central(apr) * 1e-9, ref_sigma(apr) * 1e-9)
         tests["Ap"]["rule_note"] = "two-sided (the primary reference chain reports A_P as median with 68 percent errors); thresholds RULES['Ap']"
     else:
         tests["Ap"] = classify_Ap(summaries["Ap"], cols["Ap"])
-    tests["tau0_amp"] = classify_scaled("tau0_amp", summaries["tau0_amp"], prim["tau0"]["median"], ref_sigma(prim["tau0"]))
-    tests["dtau0"] = classify_scaled("dtau0", summaries["dtau0"], prim["dtau0"]["median"], ref_sigma(prim["dtau0"]))
+    tests["tau0_amp"] = classify_scaled("tau0_amp", summaries["tau0_amp"], ref_central(prim["tau0"]), ref_sigma(prim["tau0"]))
+    tests["dtau0"] = classify_scaled("dtau0", summaries["dtau0"], ref_central(prim["dtau0"]), ref_sigma(prim["dtau0"]))
     headline = tests["ns"]["label"]
     descriptive = {}
     if fid:
         tag = "fiducial" if desc_key == "chain1_fiducial_z2.6_4.6" else desc_key
-        descriptive[f"ns_vs_{tag}" + ("_1.009" if tag == "fiducial" else "")] = dict(delta=float(summaries["ns"]["median"] - fid["n_P"]["median"]))
+        descriptive[f"ns_vs_{tag}" + ("_1.009" if tag == "fiducial" else "")] = dict(delta=float(summaries["ns"]["mean"] - ref_central(fid["n_P"])), basis="mean minus mean")
         fap = fid.get("A_P_1e-9", {})
-        if "median" in fap:
-            descriptive[f"Ap_vs_{tag}" + ("_1.69e-9" if tag == "fiducial" else "")] = {"delta_1e-9": float(summaries["Ap"]["median"] * 1e9 - fap["median"])}
-        elif "upper68" in fap:
-            descriptive[f"Ap_vs_{tag}_upper68"] = {"delta_1e-9": float(summaries["Ap"]["median"] * 1e9 - fap["upper68"]), "note": "median minus the reference 68 percent upper limit"}
-        descriptive[f"tau0_vs_{tag}"] = dict(delta=float(summaries["tau0_amp"]["median"] - fid["tau0"]["median"]))
-        descriptive[f"dtau0_vs_{tag}"] = dict(delta=float(summaries["dtau0"]["median"] - fid["dtau0"]["median"]))
+        if ("mean" in fap) or ("median" in fap):
+            descriptive[f"Ap_vs_{tag}" + ("_1.69e-9" if tag == "fiducial" else "")] = {"delta_1e-9": float(summaries["Ap"]["mean"] * 1e9 - ref_central(fap)), "basis": "mean minus mean"}
+        if "upper68" in fap:
+            descriptive[f"Ap_vs_{tag}_upper68"] = {"delta_1e-9": float(summaries["Ap"]["mean"] * 1e9 - fap["upper68"]), "note": "mean minus the reference 68 percent upper limit"}
+        descriptive[f"tau0_vs_{tag}"] = dict(delta=float(summaries["tau0_amp"]["mean"] - ref_central(fid["tau0"])), basis="mean minus mean")
+        descriptive[f"dtau0_vs_{tag}"] = dict(delta=float(summaries["dtau0"]["mean"] - ref_central(fid["dtau0"])), basis="mean minus mean")
     rails = {k: rail_fraction(cols[k], b) for k, b in BOX.items() if k in cols}
     for k in ("alpha_lls", "alpha_subdla", "alpha_dla"):
         if k in cols:
             x = cols[k]; rails[k] = dict(near_lo=float(np.mean(x <= RAIL_FRAC * float(np.quantile(x, 0.5)))), near_hi=None, note="lower bound 0; near_lo = within 2 percent of the median above zero")
     nuis_json = os.path.join(a.chain_dir, f"{a.root}.nuisance.json")
     nuisance_rails = {k: dict(near_lo=v.get("frac_near_lo"), near_hi=v.get("frac_near_hi")) for k, v in json.load(open(nuis_json)).get("sites", {}).items()} if os.path.exists(nuis_json) else {}
-    mc_err = {k: float(summaries[k]["sigma"] * np.sqrt(np.pi / 2.0) / np.sqrt(max(float(health.get("ess_bulk_min", 1)), 1.0))) for k in ("ns", "Ap", "tau0_amp", "dtau0")}
+    mc_err = {k: float(summaries[k]["sd"] / np.sqrt(max(float(health.get("ess_bulk_min", 1)), 1.0))) for k in ("ns", "Ap", "tau0_amp", "dtau0")}   # MC error of the MEAN (PI #29)
+    mc_err_median = {k: float(summaries[k]["sigma"] * np.sqrt(np.pi / 2.0) / np.sqrt(max(float(health.get("ess_bulk_min", 1)), 1.0))) for k in ("ns", "Ap", "tau0_amp", "dtau0")}   # descriptive (pre PI #29)
     boundary_flag = {k: bool(rails[k]["near_lo"] > 0.05 or rails[k]["near_hi"] > 0.05) for k in ("ns", "Ap", "tau0_amp", "dtau0")}
 
+    for k in ("ns", "Ap", "tau0_amp", "dtau0"):
+        tests[k]["box_limited"] = bool(boundary_flag[k])
+        tests[k]["label_qualified"] = tests[k]["label"] + (" (BOX-LIMITED)" if boundary_flag[k] else "")
+        if boundary_flag[k]:
+            tests[k]["box_limited_note"] = ("rail fraction > 0.05 at a prior bound: the rule label stands, delta is a lower bound in magnitude and delta/s is not "
+                                            "interpretable; the quantities of record are the rail fractions (ours and the reference chain's on the shared bound)")
     attribution = None
     if any(tests[k]["label"] != "CONSISTENT" for k in ("ns", "Ap", "tau0_amp", "dtau0")):
         keys = [k for k in ("ns", "Ap", "tau0_amp", "dtau0", "alphaq", "hub", "herei", "heref", "omegamh2", "hireionz",
@@ -281,8 +348,10 @@ def main(argv=None):
         C = np.corrcoef(M, rowvar=False)
         cov = np.cov(M, rowvar=False)
         ins = keys.index("ns")
-        refpoints = {"alphaq": prim["alpha_q"]["lower68"], "tau0_amp": prim["tau0"]["median"], "dtau0": prim["dtau0"]["median"],
-                     "hub": prim["v_scale_h"]["median"]}
+        refpoints = {"alphaq": prim["alpha_q"].get("lower68"), "tau0_amp": ref_central(prim["tau0"]), "dtau0": ref_central(prim["dtau0"]),
+                     "hub": (ref_central(prim["v_scale_h"]) if "v_scale_h" in prim else None)}
+        skipped_refpoints = [k for k, v in refpoints.items() if v is None]
+        refpoints = {k: v for k, v in refpoints.items() if v is not None}
         linresp = {}
         for k, rv in refpoints.items():
             if k in keys:
@@ -291,13 +360,14 @@ def main(argv=None):
                 linresp[k] = dict(beta_ns_per_unit=float(beta), ours_median=float(np.median(cols[k])), ref_point=float(rv),
                                   ns_shift_associated=float(beta * (np.median(cols[k]) - rv)),
                                   note=("INDICATIVE one-at-a-time linear response on our posterior; not a refit; NOT additive across x (correlated regressors). "
-                                        "alphaq: the reference point 2.85 is the reference's one-sided 68 percent lower limit at its prior cap 3.0; our prior ends at 2.5, "
+                                        f"alphaq: the reference point {refpoints.get('alphaq')} is the reference's one-sided 68 percent lower limit at its prior cap 3.0; our prior ends at 2.5, "
                                         "so this entry extrapolates a slope fitted on [1.3, 2.5]: sign informative, magnitude a lower bound. hub: the reference h is sample-variance driven."))
         attribution = dict(note="single preregistered attribution step (section 5): posterior correlations, rail fractions, indicative linear response; entries are not additive",
+                           skipped_reference_points=skipped_refpoints,
                            keys=keys, corr_with_ns={k: float(C[ins, j]) for j, k in enumerate(keys)},
                            corr_matrix=C.tolist(), linear_response=linresp, rails=rails)
 
-    out = dict(schema="eboss_priya_consistency.v1", reference=ref["reference"], primary_chain=ref["primary_chain"],
+    out = dict(schema="eboss_priya_consistency.v2_means", reference=ref["reference"], primary_chain=ref["primary_chain"],
                chain_dir=os.path.abspath(a.chain_dir), root=a.root, n_chains=len(tabs), n_draws_total=int(allrows.shape[0]),
                health={k: health.get(k) for k in ("rhat_max", "ess_bulk_min", "ess_tail_min", "ebfmi_min", "n_divergent",
                                                    "treedepth_sat_frac", "n_chains", "n_draws", "created_utc", "seed")},
@@ -305,7 +375,7 @@ def main(argv=None):
                           ess_tail=bool(health.get("ess_tail_min", 0) >= 400), divergences=bool(health.get("n_divergent", 1) == 0),
                           ebfmi=bool(health.get("ebfmi_min", 0) >= 0.3), treedepth=bool(health.get("treedepth_sat_frac", 1) < 0.02),
                           nuisance_rails=bool(all((v.get("near_lo") or 0) < 0.05 and (v.get("near_hi") or 0) < 0.05 for v in nuisance_rails.values()))),
-               health_gate=gate, mc_error_of_median=mc_err, boundary_proximity_flag=boundary_flag, nuisance_rails=nuisance_rails,
+               health_gate=gate, require_gate=bool(a.require_gate), integrity=integrity, mc_error_of_mean=mc_err, mc_error_of_median=mc_err_median, boundary_proximity_flag=boundary_flag, nuisance_rails=nuisance_rails,
                z_grid=z.tolist(), z_source=z_source, chain_files_mode=a.chain_files, descriptive_chain=(desc_key if fid else None),
                summaries=summaries, tests=tests, headline_label=headline, descriptive_vs_fiducial=descriptive,
                rails=rails, attribution=attribution)
@@ -314,22 +384,29 @@ def main(argv=None):
     # ---- markdown ----
     L = [f"# eBOSS real-data readout vs PRIYA (Fernandez+2024 Table 3, {ref['primary_chain']})", "",
          f"chains {len(tabs)} x {int(allrows.shape[0] / len(tabs))} draws; health: R-hat {health.get('rhat_max')}, ESS bulk {health.get('ess_bulk_min')}, ESS tail {health.get('ess_tail_min')}, E-BFMI {health.get('ebfmi_min')}, divergences {health.get('n_divergent')}, tree-depth sat {health.get('treedepth_sat_frac')}; GREEN flags {out['green']}; health gate {gate.get('label') if gate else None}", "",
-         "## Preregistered tests (reference central values are GetDist posterior means; delta/s in combined-width units, not a tension statistic)", "",
-         "| parameter | ours median [16,84] (MC err) | reference | delta (median) | delta (mean) | s | delta/s | label | boundary flag |", "|---|---|---|---|---|---|---|---|---|"]
+         "## Preregistered tests (PRIMARY: our posterior MEAN with 68 percent highest-density limits versus the reference GetDist mean with its quoted limits, PI #29; delta/s in combined-width units, not a tension statistic; median [16,84] descriptive)", "",
+         "| parameter | ours mean (+err/-err) (MC err of mean) | ours median [16,84] | reference mean (+/-) | delta (mean) | delta (median, descriptive) | s | delta/s | label | boundary flag |", "|---|---|---|---|---|---|---|---|---|---|"]
     for k in ("ns", "tau0_amp", "dtau0"):
         t = tests[k]; s = summaries[k]
-        L.append(f"| {k} | {s['median']:.4f} [{s['q16']:.4f}, {s['q84']:.4f}] ({mc_err[k]:.4f}) | {t['ref_central']:.4f} +/- {t['ref_sigma']:.4f} | {t['delta']:+.4f} | {t['delta_mean_based']:+.4f} | {t['s']:.4f} | {t['delta_over_s']:+.2f} | **{t['label']}** | {boundary_flag[k]} |")
+        L.append(f"| {k} | {s['mean']:.4f} (+{s['err_plus_68']:.4f}/-{s['err_minus_68']:.4f}) ({mc_err[k]:.4f}) | {s['median']:.4f} [{s['q16']:.4f}, {s['q84']:.4f}] | {t['ref_central']:.4f} +/- {t['ref_sigma']:.4f} | {t['delta']:+.4f} | {t['delta_median_based']:+.4f} | {t['s']:.4f} | {t['delta_over_s']:+.2f} | **{t['label_qualified']}** | {boundary_flag[k]} |")
     t = tests["Ap"]; s = summaries["Ap"]
     if ap_two_sided:
-        L.append(f"| Ap (1e-9) | {s['median']*1e9:.3f} [{s['q16']*1e9:.3f}, {s['q84']*1e9:.3f}] ({mc_err['Ap']*1e9:.3f}) | {t['ref_central']*1e9:.3f} +/- {t['ref_sigma']*1e9:.3f} | {t['delta']*1e9:+.3f} | {t['delta_mean_based']*1e9:+.3f} | {t['s']*1e9:.3f} | {t['delta_over_s']:+.2f} | **{t['label']}** (two-sided) | {boundary_flag['Ap']} |")
+        L.append(f"| Ap (1e-9) | {s['mean']*1e9:.3f} (+{s['err_plus_68']*1e9:.3f}/-{s['err_minus_68']*1e9:.3f}) ({mc_err['Ap']*1e9:.3f}) | {s['median']*1e9:.3f} [{s['q16']*1e9:.3f}, {s['q84']*1e9:.3f}] | {t['ref_central']*1e9:.3f} +/- {t['ref_sigma']*1e9:.3f} | {t['delta']*1e9:+.3f} | {t['delta_median_based']*1e9:+.3f} | {t['s']*1e9:.3f} | {t['delta_over_s']:+.2f} | **{t['label_qualified']}** (two-sided) | {boundary_flag['Ap']} |")
     else:
-        L.append(f"| Ap (1e-9) | {s['median']*1e9:.3f} [{s['q16']*1e9:.3f}, {s['q84']*1e9:.3f}] | < 1.33 (68), < 1.44 (95) | P(<1.33e-9) {t['p_ours_below_upper68']:.3f}; P(<1.44e-9) {t['p_ours_below_upper95']:.3f} | | | one-sided | **{t['label']}**{' (via q16 only)' if t['consistent_via_q16_only'] else ''} | {boundary_flag['Ap']} |")
-    L += ["", f"**Headline (n_P): {headline}.**", "", "## Posterior summaries (all columns)", "", "| column | median | 16 | 84 | 2.5 | 97.5 | sd |", "|---|---|---|---|---|---|---|"]
+        L.append(f"| Ap (1e-9) | {s['mean']*1e9:.3f} (+{s['err_plus_68']*1e9:.3f}/-{s['err_minus_68']*1e9:.3f}) | {s['median']*1e9:.3f} [{s['q16']*1e9:.3f}, {s['q84']*1e9:.3f}] | < 1.33 (68), < 1.44 (95) | P(<1.33e-9) {t['p_ours_below_upper68']:.3f}; P(<1.44e-9) {t['p_ours_below_upper95']:.3f} | | | one-sided | **{t['label_qualified']}**{' (via HDI lower bound only)' if t['consistent_via_q16_only'] else ''} | {boundary_flag['Ap']} |")
+    L += ["", f"**Headline (n_P): {headline}.**", "", "## Posterior summaries (all columns)", "", "| column | mean | HDI68 lo | HDI68 hi | median | 16 | 84 | 2.5 | 97.5 | sd |", "|---|---|---|---|---|---|---|---|---|---|"]
     for k, s in summaries.items():
-        L.append(f"| {k} | {s['median']:.6g} | {s['q16']:.6g} | {s['q84']:.6g} | {s['q025']:.6g} | {s['q975']:.6g} | {s['sd']:.3g} |")
-    L += ["", "## Rail fractions (within 2 percent of a prior bound)", "", "| parameter | near lo | near hi |", "|---|---|---|"]
+        L.append(f"| {k} | {s['mean']:.6g} | {s['hdi68_lo']:.6g} | {s['hdi68_hi']:.6g} | {s['median']:.6g} | {s['q16']:.6g} | {s['q84']:.6g} | {s['q025']:.6g} | {s['q975']:.6g} | {s['sd']:.3g} |")
+    EDGE = {"ns": "emulator training box", "Ap": "emulator training box", "herei": "emulator training box (herei <= 4.1 sampling cap)", "heref": "emulator training box (heref >= 2.6 sampling cap)",
+            "alphaq": "emulator training box (alpha_q <= 2.5 sampling cap; reference cap 3.0)", "hub": "emulator training box", "omegamh2": "emulator training box", "hireionz": "emulator training box",
+            "bhfeedback": "emulator training box", "tau0_amp": "mean-flux prior box (shared with the reference)", "dtau0": "mean-flux prior box (shared with the reference)",
+            "alpha_lls": "HCD amplitude, lower bound 0", "alpha_subdla": "HCD amplitude, lower bound 0", "alpha_dla": "HCD amplitude, lower bound 0"}
+    ref_rails = prim.get("rails", {})
+    L += ["", "## Rail fractions (within 2 percent of a prior bound; edge class; the reference chain's rail on the shared bound where available)", "",
+          "| parameter | near lo | near hi | edge | reference near lo | reference near hi |", "|---|---|---|---|---|---|"]
     for k, r in list(rails.items()) + list(nuisance_rails.items()):
-        L.append(f"| {k} | {r.get('near_lo')} | {r.get('near_hi')} |")
+        rr = ref_rails.get({"ns": "ns", "Ap": "Ap", "tau0_amp": "tau0", "dtau0": "dtau0", "alphaq": "alphaq", "hub": "hub", "omegamh2": "omegamh2", "herei": "herei", "heref": "heref", "hireionz": "hireionz", "bhfeedback": "bhfeedback"}.get(k, k), {})
+        L.append(f"| {k} | {r.get('near_lo')} | {r.get('near_hi')} | {EDGE.get(k, 'LogUniform metal-node bracket' if k.startswith(('f_Si', 'k_Si')) else '')} | {rr.get('near_lo', '')} | {rr.get('near_hi', '')} |")
     if descriptive:
         L += ["", f"## Descriptive only: versus the reference chain {desc_key}", ""] + [f"- {k}: {v}" for k, v in descriptive.items()]
     if attribution:
