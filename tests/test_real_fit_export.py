@@ -352,3 +352,51 @@ def test_export_carries_z_kept_and_eboss_zlo_meta(tmp_path):
     with open(os.path.join(str(tmp_path), "real_eboss_z26.health.json")) as f:
         h = json.load(f)
     assert h["eboss_zlo"] == 2.6 and h["z_kept"] == [2.6, 2.8, 3.0] and h["blinded"] is False
+
+
+# --------------------------------------------------------------------------------------------- #
+#  PI #30 (2026-09-25) -- target acceptance exposed; default 0.9 keeps every path byte-identical; recorded in the health file.
+# --------------------------------------------------------------------------------------------- #
+def test_target_accept_default_and_record(tmp_path):
+    import inspect
+    sig = inspect.signature(RF.run_real_fit)
+    assert sig.parameters["target_accept"].default == 0.9
+    result = _minimal_result([{"f_res_amp": np.zeros(5)}], {"f": (0.003, 0.03), "k": (1e-3, 0.1)})
+    RF.export_getdist(result, str(tmp_path), "real_x", offset={"ns": 0.0, "Ap": 0.0}, blind=False, survey="eboss")
+    with open(os.path.join(str(tmp_path), "real_x.health.json")) as f:
+        h = json.load(f)
+    assert h["target_accept"] == 0.9 and h["dense_mass"] is True
+    assert "target_accept: 0.9" in open(os.path.join(str(tmp_path), "real_x.yaml")).read()
+    result["target_accept"] = 0.95
+    RF.export_getdist(result, str(tmp_path), "real_y", offset={"ns": 0.0, "Ap": 0.0}, blind=False, survey="eboss")
+    with open(os.path.join(str(tmp_path), "real_y.health.json")) as f:
+        h2 = json.load(f)
+    assert h2["target_accept"] == 0.95 and "target_accept: 0.95" in open(os.path.join(str(tmp_path), "real_y.yaml")).read()
+
+
+def test_target_accept_threads_into_nuts(monkeypatch):
+    """run_real_fit passes its target_accept to _run_nuts_legb (the heavy context build is stubbed)."""
+    captured = {}
+
+    class _Stop(Exception):
+        pass
+
+    class _Leg:
+        name = "eBOSS"; P_data = np.ones(3); z = np.array([2.6, 2.8, 3.0])
+
+    class _Ctx:
+        legs = [_Leg()]; dla_core_leg = {"eBOSS": np.ones((3, 4))}; z_global = np.array([2.2, 2.4, 2.6, 2.8, 3.0])
+
+    monkeypatch.setattr(RF, "build_real_ctx", lambda *a, **k: (_Ctx(), None, ["m0"]))
+
+    def fake_nuts(*a, **kw):
+        captured.update(kw); raise _Stop()
+
+    monkeypatch.setattr(RF, "_run_nuts_legb", fake_nuts)
+    with pytest.raises(_Stop):
+        RF.run_real_fit("eboss", target_accept=0.95, verbose=False)
+    assert captured["target_accept"] == 0.95 and captured["dense_mass"] is True
+    captured.clear()
+    with pytest.raises(_Stop):
+        RF.run_real_fit("eboss", verbose=False)
+    assert captured["target_accept"] == 0.9

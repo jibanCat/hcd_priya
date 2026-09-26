@@ -245,7 +245,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
 
 def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_depth=10,
                  seed=20260614, single_member=False, ensemble_glob=None, ks_zlo=None,
-                 eboss_zlo=None, verbose=True):
+                 eboss_zlo=None, target_accept=0.9, verbose=True):
     """Multi-chain dispersed NUTS on the REAL leg.P_data (NO mock). Returns
     ``dict(packed_chains, names, battery, per_chain_div, members, leg_name, n_real_rows)``.
 
@@ -285,7 +285,7 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
         chain_key = jax.random.fold_in(k_nuts, int(cid))
         samples, n_div, extra = _run_nuts_legb(
             ctx, ctx.legs, core_per_leg, n_warmup=n_warmup, n_samples=n_samples,
-            seed=chain_key, target_accept=0.9, dense_mass=True,
+            seed=chain_key, target_accept=float(target_accept), dense_mass=True,   # PI #30: exposed (default 0.9 = the frozen kernel setting)
             max_tree_depth=max_tree_depth, init_strategy=init_to_sample, return_extra=True)
         # Fix 2: keep the UNBLINDED data-nuisance posteriors (f_res + Model C+ metal f/k nodes) so we
         # can see if they RAIL at the real fit. These are NOT the blinded A_p/n_s (safe to export).
@@ -321,7 +321,8 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
                 ll_chains=ll_chains, kept_global=kept_global,
                 nuisance_chains=nuisance_chains, nuisance_bounds=nuisance_bounds,
                 diverging_chains=diverging_chains,
-                z_kept=[float(x) for x in np.asarray(ctx.z_global)[kept_global]])   # the leg's z grid (PI #28: 11 bins when z_lo=2.6)
+                z_kept=[float(x) for x in np.asarray(ctx.z_global)[kept_global]],   # the leg's z grid (PI #28: 11 bins when z_lo=2.6)
+                target_accept=float(target_accept))
 
 
 # Nuisance-site prefixes for the Model C+ per-leg, per-ion metal f/k nodes. Kept in sync with
@@ -572,6 +573,7 @@ def export_getdist(result, out_dir, root, *, offset, blind=True, survey="", meta
         ess_tail_min=float(bat["ess_tail_min"]), ebfmi_min=float(bat["ebfmi_min"]),
         n_divergent=int(bat["n_divergent"]), per_chain_div=list(result["per_chain_div"]),
         treedepth_sat_frac=float(bat["treedepth_sat_frac"]),
+        target_accept=float(result.get("target_accept", 0.9)), dense_mass=True,   # PI #30: the NUTS adaptation target travels with the record
         created_utc=datetime.now(timezone.utc).isoformat(),
     )
     if meta:
@@ -579,7 +581,7 @@ def export_getdist(result, out_dir, root, *, offset, blind=True, survey="", meta
     with open(f"{out_dir}/{root}.yaml", "w") as f:
         f.write("# cobaya/GetDist metadata for a REAL-DATA blind NUTS fit\n")
         f.write(f"# survey: {survey}   leg: {result['leg_name']}   BLINDED(A_p,n_s): {blind}\n")
-        f.write("sampler:\n  numpyro_nuts: {dense_mass: true, target_accept: 0.9}\n")
+        f.write(f"sampler:\n  numpyro_nuts: {{dense_mass: true, target_accept: {float(result.get('target_accept', 0.9))}}}\n")
         f.write("params:\n")
         for n, lab in zip(names, labels):
             f.write(f"  {n}: {{latex: '{lab}'}}\n")
@@ -630,6 +632,9 @@ def main():
                     help="eBOSS leg low-z cut (only for --survey eboss; PI #28). None = all 13 bins (the "
                          "2.2 to 4.6 product). A value routes to a distinct root (real_eboss_z26 for 2.6) "
                          "so it never clobbers the full-range product. No model or prior change.")
+    ap.add_argument("--target-accept", type=float, default=0.9,
+                    help="NUTS target acceptance probability (step-size adaptation target). 0.9 = the frozen "
+                         "production setting; any other value is a preregistered, PI-authorized deviation (PI #30).")
     ap.add_argument("--allow-env-data-flags", action="store_true",
                     help="DANGER: permit the env data-selection flags (HCD_DESI_SNR3 / "
                          "HCD_CV_FLOOR / HCD_CV_FLOOR_RANK1) to be set at driver entry — a "
@@ -670,12 +675,12 @@ def main():
           f"{f'  KS z_lo={a.ks_zlo}  root={root}' if a.survey == 'ks' else ''}"
           f"{f'  eBOSS z_lo={eboss_zlo}  root={root}' if eboss_zlo is not None else ''} ===")
     print(f"    NUTS: chains={a.n_chains} warmup={a.n_warmup} samples={a.n_samples} "
-          f"mtd={a.max_tree_depth} dense-mass=True  (ensemble{'=single' if a.single_member else '=N'})")
+          f"mtd={a.max_tree_depth} dense-mass=True target_accept={a.target_accept}  (ensemble{'=single' if a.single_member else '=N'})")
 
     result = run_real_fit(
         a.survey, n_chains=a.n_chains, n_warmup=a.n_warmup, n_samples=a.n_samples,
         max_tree_depth=a.max_tree_depth, seed=a.seed, single_member=a.single_member,
-        ensemble_glob=a.ensemble_glob, ks_zlo=ks_zlo, eboss_zlo=eboss_zlo)
+        ensemble_glob=a.ensemble_glob, ks_zlo=ks_zlo, eboss_zlo=eboss_zlo, target_accept=a.target_accept)
 
     bat = result["battery"]
     print(f"--- sampler health (UNBLINDED) survey={a.survey} ---")
