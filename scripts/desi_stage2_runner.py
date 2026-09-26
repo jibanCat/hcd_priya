@@ -18,6 +18,8 @@ any mismatch. Then:
       run_legb_convergence), n_warmup 1000 (4x), n_samples 1500 (PI #27; was 600 for the first pilot), dense mass, target_accept 0.9, max_tree_depth 10,
       RAW per-chain samples retained (every site, unthinned) with energy, num_steps and divergences; the convergence
       battery (rank R-hat, bulk and tail ESS, E-BFMI, tree-depth saturation) on the packed draws.
+  --target-accept X (PI #32 rescue run): overrides STRONG["target_accept"] for the strong run ONLY (the replica keeps the stored
+      settings); recorded in the summary's settings.strong. Omitted = STRONG unchanged (every existing path byte-identical).
 Outputs (atomic; refuses if present): <out>/stage2_mock_XXXX.pkl (raw), <out>/stage2_mock_XXXX.json (summary).
 Frozen inputs are never written. Forward, priors, covariance, likelihood and the lock are untouched.
 """
@@ -42,6 +44,16 @@ A2C_ARGV_TEMPLATE = ["--shard", "{m}", "--n-shards", "48", "--n-mocks", "48", "-
                      "--no-shard-pkl", "--out-dir", "{scratch}", "--metal-selfdraw", "--fres-selfdraw"]
 STRONG = dict(n_chains=4, n_warmup=1000, n_samples=1500, max_tree_depth=10, target_accept=0.9, dense_mass=True)   # PI #27: n_samples 600 -> 1500 (the ONLY change)
 STORED = dict(n_warmup=250, n_samples=600, max_tree_depth=10, seed=20260614)
+
+
+def strong_settings(target_accept=None):
+    """STRONG with an optional target-acceptance override (PI #32 rescue: 0.95 for mocks 11, 28, 1). None = STRONG itself."""
+    if target_accept is None:
+        return dict(STRONG)
+    ta = float(target_accept)
+    if not (0.0 < ta < 1.0):
+        raise Stage2Refusal(f"target_accept must lie in (0, 1): {ta}")
+    return dict(STRONG, target_accept=ta)
 C4_SITES = ("tau0_amp", "dtau0", "k_SiIII_DESI_z1")
 EXTRA_SITES = ("tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla", "f_res_amp", "f_res_slope", "f_SiIII_DESI_z0", "f_SiIII_DESI_z1", "f_SiII_DESI_z0", "f_SiII_DESI_z1", "k_SiIII_DESI_z0", "k_SiIII_DESI_z1", "k_SiII_DESI_z0", "k_SiII_DESI_z1")
 
@@ -267,7 +279,8 @@ def make_stage2_mock(stored_pkl, out_dir, strong, do_replica=True, do_strong=Tru
     return _stage2_mock
 
 
-def run_one(mock, stored_dir, sha_file, out_dir, do_replica=True, do_strong=True, dry_run=False):
+def run_one(mock, stored_dir, sha_file, out_dir, do_replica=True, do_strong=True, dry_run=False, target_accept=None):
+    strong = strong_settings(target_accept)
     stored_pkl = os.path.join(stored_dir, f"mock_{int(mock):04d}.pkl")
     if not os.path.exists(stored_pkl):
         raise Stage2Refusal(f"stored pkl missing: {stored_pkl}")
@@ -286,7 +299,7 @@ def run_one(mock, stored_dir, sha_file, out_dir, do_replica=True, do_strong=True
     scratch = os.path.join(out_dir, "_driver_scratch"); os.makedirs(scratch, exist_ok=True)
     mod = _load_shard_module()
     holder = {}
-    fn = make_stage2_mock(stored_pkl, out_dir, STRONG, do_replica=do_replica, do_strong=do_strong, dry_run=dry_run,
+    fn = make_stage2_mock(stored_pkl, out_dir, strong, do_replica=do_replica, do_strong=do_strong, dry_run=dry_run,
                           n_threads=os.environ.get("XLA_FLAGS"))
     def _capture(*a, **kw):
         res = fn(*a, **kw); holder["res"] = res
@@ -317,7 +330,7 @@ def run_one(mock, stored_dir, sha_file, out_dir, do_replica=True, do_strong=True
             summ["strong"]["site_diagnostics_non_packed"] = extra
             cpus = float(os.environ.get("SLURM_CPUS_PER_TASK", "0") or 0)
             cpu_h = (summ["timing"].get("total_s", 0.0) * cpus / 3600.0) if cpus > 0 else None
-            summ["strong"]["gate"] = pilot_gate(bat, st["per_chain_div"], n_chains=int(STRONG["n_chains"]), cpu_h=cpu_h,
+            summ["strong"]["gate"] = pilot_gate(bat, st["per_chain_div"], n_chains=int(strong["n_chains"]), cpu_h=cpu_h,
                                                 identity_ok=all(v for k, v in summ["identity"].items() if isinstance(v, bool)),
                                                 extra_sites={k: extra[k] for k in C4_SITES if k in extra})
     except Exception as e:  # noqa: BLE001
@@ -338,8 +351,9 @@ def main(argv=None):
     ap.add_argument("--no-replica", dest="replica", action="store_false")
     ap.add_argument("--no-strong", dest="strong", action="store_false")
     ap.add_argument("--dry-run", action="store_true", help="context build + mock regeneration + identity checks only (no sampling, no output)")
+    ap.add_argument("--target-accept", type=float, default=None, help="strong-run NUTS target acceptance override (PI #32 rescue: 0.95); omitted = STRONG unchanged")
     a = ap.parse_args(argv)
-    run_one(a.mock, a.stored_dir, a.sha_file, a.out_dir, do_replica=a.replica, do_strong=a.strong, dry_run=a.dry_run)
+    run_one(a.mock, a.stored_dir, a.sha_file, a.out_dir, do_replica=a.replica, do_strong=a.strong, dry_run=a.dry_run, target_accept=a.target_accept)
     return 0
 
 

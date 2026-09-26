@@ -53,6 +53,20 @@ def test_a2c_argv_template_is_the_frozen_invocation():
     assert M.STORED == dict(n_warmup=250, n_samples=600, max_tree_depth=10, seed=20260614)
 
 
+def test_strong_settings_override_is_strong_run_only_and_default_identical():
+    """PI #32: --target-accept overrides STRONG['target_accept'] only; omitted = STRONG byte-identical; the STORED (replica) settings untouched."""
+    assert M.strong_settings() == M.STRONG and M.strong_settings() is not M.STRONG
+    s95 = M.strong_settings(0.95)
+    assert s95["target_accept"] == 0.95 and {k: v for k, v in s95.items() if k != "target_accept"} == {k: v for k, v in M.STRONG.items() if k != "target_accept"}
+    assert M.STRONG["target_accept"] == 0.9 and M.STORED == dict(n_warmup=250, n_samples=600, max_tree_depth=10, seed=20260614)
+    import pytest
+    with pytest.raises(M.Stage2Refusal):
+        M.strong_settings(1.0)
+    import argparse
+    ap = argparse.ArgumentParser(); ap.add_argument("--target-accept", type=float, default=None)
+    assert ap.parse_args([]).target_accept is None and ap.parse_args(["--target-accept", "0.95"]).target_accept == 0.95
+
+
 def test_pilot_gate_on_real_battery_output():
     """M1 (Reviewer F): the gate must accept CL.convergence_battery's dict-valued diagnostics."""
     import hcd_analysis.emulator  # noqa: F401
