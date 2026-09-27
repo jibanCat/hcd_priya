@@ -243,9 +243,43 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     return ctx, d, ens
 
 
+DIAG_KEYS = ("hcd_prior_scale", "tau0_amp_max", "resolution_off", "mf_curvature_sigma")
+
+
+def apply_diagnostic_overrides(ctx, diag):
+    """PI #33 (2026-09-27) DIAGNOSTIC overrides for the eBOSS refit matrix (H-1, MF-1, R-1, MF-3). Applied AFTER
+    ``build_real_ctx`` has built and asserted the certified forward, so with ``diag`` None or empty the certified
+    path is byte-identical. Returns ``(ctx, applied)``; ``applied`` (what actually changed) is recorded in the
+    health file and yaml. The products of such runs are DIAGNOSTICS, never products of record (root suffix
+    ``_diag_<tag>``, separate --out-dir).
+      hcd_prior_scale S   : multiply the LLS and subDLA TruncatedNormal prior widths by S (the DLA raw-latent
+                            scale is hardcoded 1.0 in the model and is NOT touched).
+      tau0_amp_max X      : raise the upper edge of the uniform tau0_amp box to X (lower edge unchanged).
+      resolution_off      : do not sample the spectral-resolution nuisance (sample_res False; b_res = 0).
+      mf_curvature_sigma C: add the third mean-flux mode ctau0 ~ Normal(0, C) (closure_legb._sample_tau0_curv)."""
+    if not diag or not any(diag.get(k) for k in DIAG_KEYS):
+        return ctx, {}
+    applied = {}
+    if diag.get("hcd_prior_scale") is not None:
+        import jax.numpy as _jnp
+        s = float(diag["hcd_prior_scale"]); sg = np.asarray(ctx.alpha_hcd_sigma, float).copy(); sg[:2] *= s
+        applied["alpha_hcd_sigma_before"] = [float(x) for x in np.asarray(ctx.alpha_hcd_sigma, float)]; applied["alpha_hcd_mu"] = [float(x) for x in np.asarray(ctx.alpha_hcd_mu, float)]
+        ctx = ctx._replace(alpha_hcd_sigma=_jnp.asarray(sg)); applied["hcd_prior_scale"] = s; applied["alpha_hcd_sigma"] = [float(x) for x in sg]
+    if diag.get("tau0_amp_max") is not None:
+        lo, hi = ctx.tau0_amp_range; hi_new = float(diag["tau0_amp_max"])
+        if hi_new <= float(lo):
+            raise SystemExit(f"--tau0-amp-max must exceed the lower edge {lo}")
+        ctx = ctx._replace(tau0_amp_range=(float(lo), hi_new)); applied["tau0_amp_range"] = [float(lo), hi_new]; applied["tau0_amp_range_before"] = [float(lo), float(hi)]
+    if diag.get("resolution_off"):
+        ctx = ctx._replace(sample_res=False); applied["resolution_off"] = True
+    if diag.get("mf_curvature_sigma") is not None:
+        ctx = ctx._replace(tau0_curv_sigma=float(diag["mf_curvature_sigma"])); applied["mf_curvature_sigma"] = float(diag["mf_curvature_sigma"])
+    return ctx, applied
+
+
 def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_depth=10,
                  seed=20260614, single_member=False, ensemble_glob=None, ks_zlo=None,
-                 eboss_zlo=None, target_accept=0.9, verbose=True):
+                 eboss_zlo=None, target_accept=0.9, verbose=True, diag=None):
     """Multi-chain dispersed NUTS on the REAL leg.P_data (NO mock). Returns
     ``dict(packed_chains, names, battery, per_chain_div, members, leg_name, n_real_rows)``.
 
@@ -255,6 +289,7 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
     do NOT overwrite it with a mock)."""
     ctx, d, members = build_real_ctx(survey, single_member=single_member,
                                      ensemble_glob=ensemble_glob, ks_zlo=ks_zlo, eboss_zlo=eboss_zlo)
+    ctx, diag_applied = apply_diagnostic_overrides(ctx, diag)      # PI #33: {} on every certified path
     leg = ctx.legs[0]
     n_real = int(np.isfinite(np.asarray(leg.P_data)).sum())
 
@@ -316,7 +351,7 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
     # (the SAME static values _metal_2node_sites samples within) so the artifact self-documents them.
     nuisance_bounds = dict(f=(float(ctx.metal_fnode_lo), float(ctx.metal_fnode_hi)),
                            k=(float(ctx.metal_knode_lo), float(ctx.metal_knode_hi)))
-    return dict(packed=packed, names=names, battery=battery, per_chain_div=per_chain_div,
+    return dict(packed=packed, names=names, battery=battery, per_chain_div=per_chain_div, diagnostic=diag_applied,
                 members=members, leg_name=leg.name, n_real_rows=n_real,
                 ll_chains=ll_chains, kept_global=kept_global,
                 nuisance_chains=nuisance_chains, nuisance_bounds=nuisance_bounds,
@@ -335,7 +370,7 @@ def _nuisance_export_keys(samples):
     metal f/k node site present in ``samples``. NOT the blinded cosmology (theta_unit) nor the packed
     alpha/tau0 columns -- just the floated data-nuisance latents whose railing we want to see at the
     real fit. Empty when none were sampled (KS uniform) -> no artifact written."""
-    keys = [k for k in ("f_res_amp", "f_res_slope") if k in samples]
+    keys = [k for k in ("f_res_amp", "f_res_slope", "ctau0") if k in samples]     # ctau0: PI #33 MF-3 third mean-flux mode
     keys += [k for k in samples if k.startswith(_METAL_NODE_PREFIXES)]
     return keys
 
@@ -463,7 +498,7 @@ def _bounds_for_site(name, nb):
 
 
 def _export_nuisance(out_dir, root, result, survey):
-    """Fix 2: write the data-nuisance posteriors (option-b f_res + Model C+ metal f/k nodes) NEXT TO
+    """Fix 2: write the data-nuisance posteriors (option-b f_res + Model C+ metal f/k nodes + the optional PI #33 ctau0) NEXT TO
     the chains so railing is visible at the real fit. These are NUISANCE latents, NOT the blinded
     A_p / n_s, so they are exported UNBLINDED (like the health json). Writes:
       ``<root>.nuisance.npz``  -- per-chain raw draws, one (C, N) array per site (round-trips exact);
@@ -483,15 +518,23 @@ def _export_nuisance(out_dir, root, result, survey):
         bnds = _bounds_for_site(name, nb)
         near_lo, near_hi = _rail_fracs(flat, bnds)
         q05, q50, q95 = (float(x) for x in np.quantile(flat, [0.05, 0.5, 0.95]))
+        # PI #33 (JAX review S1): per-site convergence statistics, so a nuisance site that is not a packed column
+        # (f_res, metal nodes, the optional ctau0) still carries a split R-hat and a bulk ESS in the artifact.
+        try:
+            from numpyro.diagnostics import split_gelman_rubin as _sgr, effective_sample_size as _ess
+            rhat = float(_sgr(per_chain)) if per_chain.shape[0] > 1 else None
+            ess = float(_ess(per_chain))
+        except Exception:  # noqa: BLE001
+            rhat, ess = None, None
         summary[name] = dict(
             mean=float(np.mean(flat)), std=float(np.std(flat)), q05=q05, q50=q50, q95=q95,
             n=int(flat.size), frac_near_lo=near_lo, frac_near_hi=near_hi,
-            bounds=(list(bnds) if bnds is not None else None))
+            bounds=(list(bnds) if bnds is not None else None), split_rhat=rhat, ess_bulk=ess)
     np.savez(f"{out_dir}/{root}.nuisance.npz", **npz)
     rec = dict(survey=survey, leg=result.get("leg_name"), root=root, n_chains=len(chains),
                sites=summary, bounds=dict(f=list(nb["f"]), k=list(nb["k"])),
                rail_log_frac=RAIL_LOG_FRAC,
-               note="UNBLINDED data-nuisance posteriors (f_res + Model C+ metal nodes); NOT A_p/n_s")
+               note="UNBLINDED data-nuisance posteriors (f_res + Model C+ metal nodes + the optional ctau0 mean-flux mode); NOT A_p/n_s")
     with open(f"{out_dir}/{root}.nuisance.json", "w") as f:
         json.dump(rec, f, indent=2, sort_keys=True)
         f.write("\n")
@@ -601,6 +644,23 @@ def export_getdist(result, out_dir, root, *, offset, blind=True, survey="", meta
     return chain_files, rec
 
 
+def diag_from_args(a):
+    """PI #33: the requested diagnostic overrides from parsed args ({} when none). Refuses an override without
+    --diag-tag, a --diag-tag without an override, and a diagnostic without an explicit --out-dir."""
+    diag = {k: v for k, v in dict(hcd_prior_scale=a.hcd_prior_scale, tau0_amp_max=a.tau0_amp_max,
+                                  resolution_off=(True if a.resolution_off else None),
+                                  mf_curvature_sigma=a.mf_curvature_sigma).items() if v is not None}
+    if diag and not a.diag_tag:
+        raise SystemExit("diagnostic overrides require --diag-tag <tag>")
+    if a.diag_tag and not diag:
+        raise SystemExit("--diag-tag given without any diagnostic override")
+    if diag and not a.out_dir:
+        raise SystemExit("diagnostic runs require an explicit --out-dir (never the default product directories)")
+    if a.diag_tag and not a.diag_tag.replace("_", "").isalnum():
+        raise SystemExit("--diag-tag must be alphanumeric (underscores allowed)")
+    return diag
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--survey", required=True, choices=("eboss", "ks", "desi"))
@@ -635,6 +695,13 @@ def main():
     ap.add_argument("--target-accept", type=float, default=0.9,
                     help="NUTS target acceptance probability (step-size adaptation target). 0.9 = the frozen "
                          "production setting; any other value is a preregistered, PI-authorized deviation (PI #30).")
+    # PI #33 (2026-09-27) DIAGNOSTIC overrides (eBOSS refit matrix H-1, MF-1, R-1, MF-3). Any of them REQUIRES --diag-tag and an
+    # explicit --out-dir; the root gains the suffix _diag_<tag>; the applied overrides are recorded in the health file and yaml.
+    ap.add_argument("--diag-tag", default=None, help="diagnostic run tag (required with any override; root suffix _diag_<tag>)")
+    ap.add_argument("--hcd-prior-scale", type=float, default=None, help="multiply the LLS and subDLA HCD prior widths (H-1: 4)")
+    ap.add_argument("--tau0-amp-max", type=float, default=None, help="upper edge of the uniform tau0_amp box (MF-1: 1.5)")
+    ap.add_argument("--resolution-off", action="store_true", help="do not sample the spectral-resolution nuisance (R-1)")
+    ap.add_argument("--mf-curvature-sigma", type=float, default=None, help="third mean-flux mode ctau0 ~ Normal(0, sigma) (MF-3: 2.0)")
     ap.add_argument("--allow-env-data-flags", action="store_true",
                     help="DANGER: permit the env data-selection flags (HCD_DESI_SNR3 / "
                          "HCD_CV_FLOOR / HCD_CV_FLOOR_RANK1) to be set at driver entry — a "
@@ -669,6 +736,9 @@ def main():
     eboss_zlo = a.eboss_zlo if a.survey == "eboss" else None
     if eboss_zlo is not None:
         root = _eboss_root(eboss_zlo)                        # PI #28: e.g. z_lo=2.6 -> real_eboss_z26
+    diag = diag_from_args(a)                                 # PI #33: {} unless a diagnostic override is requested
+    if diag:
+        root = f"{root}_diag_{a.diag_tag}"
 
     print(f"=== REAL-DATA fit  survey={a.survey}  leg={info['leg']}  "
           f"blind={a.blind}  private={info['private']}  out={out_dir}"
@@ -677,10 +747,12 @@ def main():
     print(f"    NUTS: chains={a.n_chains} warmup={a.n_warmup} samples={a.n_samples} "
           f"mtd={a.max_tree_depth} dense-mass=True target_accept={a.target_accept}  (ensemble{'=single' if a.single_member else '=N'})")
 
+    if diag:
+        print(f"!!! DIAGNOSTIC run (PI #33) tag={a.diag_tag}: overrides {diag}; root={root}; NOT a product of record !!!")
     result = run_real_fit(
         a.survey, n_chains=a.n_chains, n_warmup=a.n_warmup, n_samples=a.n_samples,
         max_tree_depth=a.max_tree_depth, seed=a.seed, single_member=a.single_member,
-        ensemble_glob=a.ensemble_glob, ks_zlo=ks_zlo, eboss_zlo=eboss_zlo, target_accept=a.target_accept)
+        ensemble_glob=a.ensemble_glob, ks_zlo=ks_zlo, eboss_zlo=eboss_zlo, target_accept=a.target_accept, diag=diag)
 
     bat = result["battery"]
     print(f"--- sampler health (UNBLINDED) survey={a.survey} ---")
@@ -707,7 +779,9 @@ def main():
                   # run_joint_fit). A seed without its derivation is ambiguous.
                   seed_derivation=SEED_DERIVATION,
                   seed_fold_label=a.survey,
-                  seed_fold_int=int(nuts_fold_int(a.survey))))
+                  seed_fold_int=int(nuts_fold_int(a.survey)),
+                  # PI #33: the diagnostic tag and the overrides ACTUALLY applied (None / {} on every product of record)
+                  diagnostic=(dict(tag=a.diag_tag, requested=diag, applied=result.get("diagnostic", {})) if diag else None)))
     print(f"=== wrote {len(chain_files)} chains -> {out_dir}/{root}.*.txt "
           f"(+ .paramnames .yaml .health.json .divergences.npz) | A_p/n_s BLINDED={a.blind} ===")
     if info["private"]:

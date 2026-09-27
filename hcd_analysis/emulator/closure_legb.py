@@ -552,6 +552,8 @@ class LegBCtx(NamedTuple):
     # is a digest over the prior-constants payload, not over this ctx). APPENDED last so positional
     # construction does not shift.
     selfdraw_metal_truth: bool = False
+    tau0_curv_sigma: float = None             # PI #33 (2026-09-27) MF-3 DIAGNOSTIC: Normal(0, sigma) prior on the optional THIRD mean-flux
+                                              # mode "ctau0" (log-quadratic curvature of alpha(z) about the pivot). None = OFF: byte-identical.
 
 
 def _kim(z):
@@ -2477,6 +2479,31 @@ def _sample_tau0_sites(ctx):
     return tau0_amp, dtau0
 
 
+def _sample_tau0_curv(ctx):
+    """PI #33 (2026-09-27) MF-3 DIAGNOSTIC: the optional THIRD mean-flux mode. When ``ctx.tau0_curv_sigma`` is
+    set, samples ``ctau0 ~ Normal(0, sigma)``, the log-quadratic curvature of alpha(z) about the pivot
+    (``alpha(z) *= exp(ctau0 * x^2)``, x = log((1+z)/(1+z_pivot))). Returns None (no site) when OFF, so every
+    existing path is byte-identical. Called in BOTH model twins right after ``_sample_tau0_sites`` (site order)."""
+    sig = getattr(ctx, "tau0_curv_sigma", None)
+    if sig is None:
+        return None
+    return numpyro.sample("ctau0", dist.Normal(0.0, float(sig)))
+
+
+def _apply_tau0_curv(alpha_z, z, ctau0, *, z_pivot):
+    """Multiply the mean-flux ladder alpha(z) by ``exp(ctau0 * x^2)``, x = log((1+z)/(1+z_pivot)). Identity when
+    ``ctau0`` is None. Broadcasts a per-draw vector ``ctau0`` (L,) against ``alpha_z`` (L, nZ) for the
+    deterministic reconstruction."""
+    if ctau0 is None:
+        return alpha_z
+    x2 = jnp.log((1.0 + jnp.asarray(z)) / (1.0 + z_pivot)) ** 2
+    c = jnp.asarray(ctau0)
+    if c.ndim == 1:                                   # per-draw vector (L,) against a (L, nZ) ladder (deterministic reconstruction)
+        assert jnp.ndim(alpha_z) == 2, "per-draw ctau0 needs a (L, nZ) ladder"
+        c = c[:, None]
+    return alpha_z * jnp.exp(c * x2)
+
+
 def _metal_amp_site(name, ctx, on):
     """Sample a SHARED metal oscillation-amplitude site (``a_SiIII`` / ``a_SiII``), branching on the
     STATIC ``ctx.metal_prior`` (resolved at trace time → a legal python branch). SHARED by
@@ -2653,6 +2680,7 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     # 13 free per-z rungs, so τ₀ cannot absorb emulator residual into per-z wiggle that biases A_p.
     tau0_amp, dtau0 = _sample_tau0_sites(ctx)
     alpha_z = tau0_alpha_priya(zg, tau0_amp, dtau0, z_pivot=ctx.tau0_pivot_z)
+    alpha_z = _apply_tau0_curv(alpha_z, zg, _sample_tau0_curv(ctx), z_pivot=ctx.tau0_pivot_z)   # PI #33 MF-3: identity when OFF
     tau0_global = numpyro.deterministic("tau0_vec", alpha_z * kim)
     # The HCD pivot-z (z=3) amplitudes (3,) [LLS, subDLA, DLA]. The shared ``_hcd_sites`` helper
     # samples EITHER the legacy 3 independent α sites (alpha_lls/subdla TruncatedNormal(low=0),
@@ -3086,6 +3114,7 @@ def _legb_priors_only(ctx):
     _hi_u = jnp.asarray(_THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi)
     numpyro.sample("theta_unit", dist.Uniform(_lo_u, _hi_u).to_event(1))
     _sample_tau0_sites(ctx)
+    _sample_tau0_curv(ctx)                       # PI #33 MF-3: same optional site, same order as _legb_model
     # the HCD pivot α sites — SHARED with _legb_model via _hcd_sites so the sample-site order is
     # IDENTICAL in both branches (legacy 3-site vs hierarchical A_hcd/r_subdla/r_dla, vs 2D
     # A_hcd/B_hcd/r_subdla/r_dla). The deterministics it emits are dropped by
@@ -3138,6 +3167,8 @@ def _legb_reconstruct_deterministics(ctx, samples):
     tau0_amp = jnp.asarray(samples["tau0_amp"])                      # (L,)
     dtau0 = jnp.asarray(samples["dtau0"])                            # (L,)
     alpha_z = tau0_amp[:, None] * ((1.0 + zg)[None, :] / (1.0 + ctx.tau0_pivot_z)) ** dtau0[:, None]
+    if "ctau0" in samples:                                           # PI #33 MF-3: the optional third mode
+        alpha_z = _apply_tau0_curv(alpha_z, zg, jnp.asarray(samples["ctau0"]), z_pivot=ctx.tau0_pivot_z)
     tau0_vec = alpha_z * kim[None, :]                                # (L, nZg)
     if getattr(ctx, "ks_dndx_mapped", False):
         # KS dN/dX-MAPPED branch (V-A, W2 2026-07-22; dispatched FIRST, mirroring _hcd_sites):
