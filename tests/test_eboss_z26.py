@@ -59,6 +59,10 @@ def _lock(tmp):
     return str(p)
 
 
+# PUBLISHED-REFERENCE FIXTURE (PI decision 2026-09-26): the numbers below are the PUBLISHED values of Fernandez, Bird & Ho 2024,
+# JCAP 07 (2024) 029 (arXiv:2309.03943v2), Table 3 chains 1 (z 2.6 to 4.6) and 3 (z 2.2 to 4.6), as transcribed and pinned in the
+# private notes repo (reference_fernandez2024_table3.json). They are public literature values, not results of this project; no
+# unpublished science value of this project appears in this public repository.
 def _ref_z26(tmp):
     ref = dict(reference="test", primary_chain="chain1", descriptive_chain="chain3", chains=dict(
         chain1={"n_P": dict(median=1.009, err_plus=0.027, err_minus=0.018), "A_P_1e-9": dict(median=1.69, err_plus=0.14, err_minus=0.15),
@@ -149,6 +153,9 @@ def test_real_released_reference_z26_shifted_case_runs_attribution(tmp_path):
     assert r["primary_chain"] == "chain1_released_z2.6_4.6" and r["descriptive_chain"] == "chain3_released_z2.2_4.6"
     t = r["tests"]
     assert t["tau0_amp"]["label"] in ("SHIFTED", "DISCREPANT") and t["tau0_amp"]["delta_basis"].startswith("mean minus mean")
+    # PUBLISHED-REFERENCE VALUES: GetDist posterior means of the RELEASED Fernandez, Bird & Ho 2024 chain
+    # Chains/fps-only/mf-48-z2.6-4.6 (public repository mafern/InferenceLyaData, commit 11c0258; paper Table 3 chain 1:
+    # tau0 1.082, n_P 1.009), pinned privately in reference_fernandez2024_released_chains.json. Public literature values, not ours.
     assert abs(t["tau0_amp"]["delta"] - (r["summaries"]["tau0_amp"]["mean"] - 1.0818806311217888)) < 1e-9
     assert abs(t["ns"]["ref_central"] - 1.0087378615010567) < 1e-12 and t["Ap"]["rule_note"].startswith("two-sided")
     assert r["attribution"] is not None and "hub" in r["attribution"]["linear_response"] and "alphaq" in r["attribution"]["linear_response"]
