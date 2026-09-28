@@ -60,7 +60,8 @@ def test_compare_synthetic(tmp_path):
     assert R["rails"]["diag"]["tau0_amp"]["box"] == [0.75, 1.5] and R["rails"]["baseline"]["tau0_amp"]["box"] == [0.75, 1.25]
     assert R["rails"]["diag_against_baseline_box"]["tau0_amp"]["box"] == [0.75, 1.25] and R["rails"]["diag_against_baseline_box"]["tau0_amp"]["near_hi"] > 0.9   # M4a: amp 1.3 draws sit above the baseline cap
     assert len(R["teff"]["z"]) == 11 and R["teff"]["diag"]["mean"][4] > R["teff"]["baseline"]["mean"][4]   # pivot: amp 1.3 vs 1.2
-    assert R["emulator_band"]["diag"]["frac_any_z_outside"] > 0.5 and R["emulator_band"]["baseline"]["frac_any_z_outside"] < 0.6   # amp 1.3 with curvature leaves [0.75, 1.25]; amp 1.2 mostly inside
+    assert R["emulator_band"]["diag"]["lo"] == M.LADDER_LO and R["emulator_band"]["diag"]["hi"] == 1.33124652
+    assert R["emulator_band"]["diag"]["frac_any_z_outside"] > 0.3 and R["emulator_band"]["baseline"]["frac_any_z_outside"] < 0.05   # amp 1.3 with curvature 0.5 exceeds 1.3312 at the ends; amp 1.2 stays inside the ladder
     out = tmp_path / "cmp" / "T"
     assert M.main(["--diag-dir", str(D), "--baseline-dir", str(B), "--out", str(out)]) == 0
     assert (tmp_path / "cmp" / "T.json").exists() and "Shifts" in open(str(out) + ".md").read()

@@ -9,7 +9,8 @@ exported ``ctau0`` when present), and writes ``<out>.json`` and ``<out>.md`` wit
   * rail fractions of every bounded parameter (each product against its OWN box, taken from its health/yaml when recorded);
   * correlations of ns with tau0_amp, A_P, hub, alpha_subdla, alpha_lls, f_res_amp in both products;
   * the tau_eff(z) posterior-mean curves of both products from their exported ladders on the shared z grid;
-  * the fraction of draws whose ladder leaves the emulator tau0 band [0.75, 1.25] at any z (preregistration v1.5 interpretation limit).
+  * the fraction of draws whose ladder leaves the emulator TRAINING LADDER [0.6556, 1.3312] in alpha at any z (preregistration v1.5
+    interpretation limit; the amendment's text wrote the prior-box edge 1.25 by mistake, corrected 2026-09-28).
 When the product exported the third mode ``ctau0``, the sampled amplitude and slope are the 3-parameter fit values (the
 2-parameter ones are kept as ``tau0_amp_2par`` / ``dtau0_2par``).
 It contains no science values, makes no verdict, and never touches the input directories. The preregistered predictions are read
@@ -24,6 +25,10 @@ import sys
 import numpy as np
 
 KIM_AMP, KIM_SLOPE, TAU0_PIVOT_Z = 2.3e-3, 3.65, 3.0
+# The emulator's TRAINING LADDER in the alpha = tau0 / tau_Kim coordinate (cache attrs alpha_range, 20 rungs at every z incl. 2.2 and
+# 2.4; the C_emu tau0-band centres span the same range and clamp flat beyond it). NOT the prior box [0.75, 1.25] on tau0_amp, which
+# is the amplitude at the z = 3 pivot only (mean-flux support audit, 2026-09-28).
+LADDER_LO, LADDER_HI = 0.65555638, 1.33124652
 Z13 = np.array([2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6])
 GATE = dict(rhat=1.01, ess=400.0, ebfmi=0.3, treedepth=0.02)
 COSMO_BOX = {"ns": (0.8, 1.05), "Ap": (1.2e-9, 2.6e-9), "herei": (3.5, 4.1), "heref": (2.6, 3.2), "alphaq": (1.3, 2.5), "hub": (0.65, 0.75),
@@ -86,8 +91,8 @@ def load_product(d):
     if applied.get("tau0_amp_range"):
         box["tau0_amp"] = tuple(float(v) for v in applied["tau0_amp_range"])
     alpha = L / kim(z)[None, :]                                    # the ladder in the emulator's alpha = tau0/Kim coordinate
-    band = dict(lo=0.75, hi=1.25, frac_any_z_outside=float(np.mean(np.any((alpha < 0.75) | (alpha > 1.25), axis=1))),
-                frac_outside_by_z={float(zz): float(np.mean((alpha[:, i] < 0.75) | (alpha[:, i] > 1.25))) for i, zz in enumerate(z)})
+    band = dict(lo=LADDER_LO, hi=LADDER_HI, frac_any_z_outside=float(np.mean(np.any((alpha < LADDER_LO) | (alpha > LADDER_HI), axis=1))),
+                frac_outside_by_z={float(zz): float(np.mean((alpha[:, i] < LADDER_LO) | (alpha[:, i] > LADDER_HI))) for i, zz in enumerate(z)})
     return dict(dir=d, root=root, names=names, cols=cols, n=rows.shape[0], z=z, ladder=L, health=health, diagnostic=diag, box=box,
                 ladder_fit=dict(resid_2par=resid2, resid_3par=resid3, has_ctau0_site=("ctau0" in cols)), emulator_band=band)
 
@@ -151,7 +156,7 @@ def compare(D, B):
                 diagnostic=D["diagnostic"], gate_diag=gate(D["health"]), gate_baseline=gate(B["health"]), shifts=shifts, only_in_diag=only_diag, only_in_baseline=only_base,
                 rails=dict(diag=rails(D), baseline=rails(B), diag_against_baseline_box=rails(D_on_Bbox)), corr_ns=cors, ladder_fit=dict(diag=D["ladder_fit"], baseline=B["ladder_fit"]),
                 teff=dict(z=z.tolist(), diag=teff_curve(D, z), baseline=teff_curve(B, z)),
-                emulator_band=dict(diag=D["emulator_band"], baseline=B["emulator_band"], note="fraction of draws whose ladder alpha(z) = tau0_z / tau_Kim lies outside the emulator tau0 band [0.75, 1.25] at any z (preregistration v1.5: > 0.10 marks the run EXTRAPOLATED)"))
+                emulator_band=dict(diag=D["emulator_band"], baseline=B["emulator_band"], note="fraction of draws whose ladder alpha(z) = tau0_z / tau_Kim lies outside the emulator TRAINING LADDER [0.6556, 1.3312] at any z (corrected 2026-09-28; the v1.5 amendment text wrote the prior box 1.25 by mistake; > 0.10 marks the run EXTRAPOLATED)"))
 
 
 def markdown(R):
@@ -180,7 +185,7 @@ def markdown(R):
     for i, z in enumerate(R["teff"]["z"]):
         b = R["teff"]["baseline"]["mean"][i]; d = R["teff"]["diag"]["mean"][i]
         L.append(f"| {z:.1f} | {b:.4f} | {d:.4f} | {100*(d/b-1):+.2f} |")
-    L += ["", f"emulator tau0 band [0.75, 1.25]: fraction of draws outside at any z, baseline {R['emulator_band']['baseline']['frac_any_z_outside']:.3f}, diagnostic {R['emulator_band']['diag']['frac_any_z_outside']:.3f} (> 0.10 marks the diagnostic EXTRAPOLATED)"]
+    L += ["", f"emulator training ladder [{LADDER_LO:.4f}, {LADDER_HI:.4f}] in alpha: fraction of draws outside at any z, baseline {R['emulator_band']['baseline']['frac_any_z_outside']:.3f}, diagnostic {R['emulator_band']['diag']['frac_any_z_outside']:.3f} (> 0.10 marks the diagnostic EXTRAPOLATED)"]
     L += ["", f"ladder fits: baseline 2-par residual {R['ladder_fit']['baseline']['resid_2par']:.2e}, diagnostic 2-par residual {R['ladder_fit']['diag']['resid_2par']:.2e}, 3-par residual {R['ladder_fit']['diag']['resid_3par']:.2e}, ctau0 site exported: {R['ladder_fit']['diag']['has_ctau0_site']}"]
     return "\n".join(L)
 
