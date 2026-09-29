@@ -59,10 +59,13 @@ def test_apply_diagnostic_overrides_default_is_identity_and_each_knob_applies():
     assert c2.tau0_amp_range == (0.75, 1.5) and ap2["tau0_amp_range_before"] == [0.75, 1.25] and np.allclose(np.asarray(c2.alpha_hcd_sigma), np.asarray(ctx.alpha_hcd_sigma))
     with pytest.raises(SystemExit):
         M.apply_diagnostic_overrides(ctx, dict(tau0_amp_max=0.5))
-    c3, ap3 = M.apply_diagnostic_overrides(ctx, dict(resolution_off=True)); assert c3.sample_res is False and ap3 == dict(resolution_off=True)
+    with pytest.raises(AssertionError):                                          # R1 fix: the leg must have been built without f_res
+        M.apply_diagnostic_overrides(ctx, dict(resolution_off=True))
+    ctx_off = ctx._replace(sample_res=False, legs=[SimpleNamespace(resolution_on=False)])
+    c3, ap3 = M.apply_diagnostic_overrides(ctx_off, dict(resolution_off=True)); assert c3.sample_res is False and ap3 == dict(resolution_off=True, resolution_term_in_covariance=True)
     c4, ap4 = M.apply_diagnostic_overrides(ctx, dict(mf_curvature_sigma=2.0)); assert c4.tau0_curv_sigma == 2.0 and ctx.tau0_curv_sigma is None
-    c5, ap5 = M.apply_diagnostic_overrides(ctx, dict(hcd_prior_scale=4.0, tau0_amp_max=1.5, resolution_off=True, mf_curvature_sigma=2.0))
-    assert set(ap5) == {"hcd_prior_scale", "alpha_hcd_sigma", "alpha_hcd_sigma_before", "alpha_hcd_mu", "tau0_amp_range", "tau0_amp_range_before", "resolution_off", "mf_curvature_sigma"}
+    c5, ap5 = M.apply_diagnostic_overrides(ctx_off, dict(hcd_prior_scale=4.0, tau0_amp_max=1.5, resolution_off=True, mf_curvature_sigma=2.0))
+    assert set(ap5) == {"hcd_prior_scale", "alpha_hcd_sigma", "alpha_hcd_sigma_before", "alpha_hcd_mu", "tau0_amp_range", "tau0_amp_range_before", "resolution_off", "resolution_term_in_covariance", "mf_curvature_sigma"}
     assert np.allclose(ap5["alpha_hcd_sigma_before"], [0.05, 0.025, 0.002]) and np.allclose(ap5["alpha_hcd_mu"], [0.17, 0.062, 0.0044])
 
 
@@ -114,3 +117,11 @@ def test_trace_site_order_and_batched_reconstruction_equals_vmap():
     assert np.array_equal(np.asarray(batched), np.asarray(scalar))
     with pytest.raises(AssertionError):
         CL._apply_tau0_curv(jnp.array([1.0, 1.0, 1.0]), z, jnp.array([0.1, 0.2, 0.3]), z_pivot=3.0)   # (L,) against a 1-D ladder is refused
+
+
+def test_build_real_ctx_signature_has_sample_res_override():
+    """R1 fix: the option-a control is decided at build time (leg loaded with resolution_float=False), not after."""
+    import inspect
+    M = _load_driver(); sig = inspect.signature(M.build_real_ctx)
+    assert "sample_res_override" in sig.parameters and sig.parameters["sample_res_override"].default is None
+    src = inspect.getsource(M.run_real_fit); assert "sample_res_override=(False if (diag or {}).get(\"resolution_off\") else None)" in src

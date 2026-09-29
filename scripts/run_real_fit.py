@@ -134,7 +134,7 @@ def _assert_norc_ks_cap(ctx):
         "NORC KS k_max cap (0.045) not applied"
 
 
-def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=None, eboss_zlo=None):
+def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=None, eboss_zlo=None, sample_res_override=None):
     """The PRODUCTION ctx for a real-data fit, then RESTRICTED to the requested survey's leg.
 
     Baseline flags mirror run_prod_sbc_shard.build (use_xclass, MF + floor, emucoh off-diag-only,
@@ -180,6 +180,11 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     ks_kw = ({**(fc.get("ks_kwargs") or {}),
               **({"z_lo": float(ks_zlo)} if ks_zlo is not None else {})}) or None
     eb_kw = ({"z_lo": float(eboss_zlo)} if eboss_zlo is not None else None)   # PI #28: eBOSS z_lo restriction
+    # PI #33 diagnostic R1 bookkeeping fix (2026-09-28, resolution audit): a TRUE option-a control must load the leg with
+    # resolution_float=False, so the survey's resolution term stays IN the data covariance (build_legb_ctx threads
+    # sample_res into load_*_leg(resolution_float=...)). Switching sample_res off AFTER the build (the first R1) left the
+    # covariance stripped and the nuisance off: under-covered. None -> the certified path, byte-identical.
+    sample_res_eff = fc["sample_res"] if sample_res_override is None else bool(sample_res_override)
     ctx, d = build_legb_ctx(
         ensemble_ckpts=ens, use_xclass=True,
         with_mf=True, mf_with_floor=True,
@@ -190,7 +195,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
         eboss_kwargs=eb_kw,               # PI #28: threads z_lo into load_eboss_leg (None -> all 13 bins, byte-identical)
         metals_on=metals,                 # applies the SiIII/SiII forward term on metals_on legs
         sample_metals=metals,             # samples the metal nuisance (flatlog2node nodes / uniform a_SiIII)
-        sample_res=fc["sample_res"],      # option-b f_res float (DESI 0.02 / eBOSS 0.05 / KS 0.15; task #5 DONE)
+        sample_res=sample_res_eff,        # option-b f_res float (DESI 0.02 / eBOSS 0.05 / KS 0.15; task #5 DONE); False only under the R1 override
         f_res_amp_sigma=fc["f_res_amp_sigma"],  # its Normal(0,.) width (DESI 0.02 / eBOSS 0.05 / KS 0.15)
         metal_prior=fc["metal_prior"],    # flatlog2node (Gate-C Model C+) on metal legs; uniform on KS
         survey=info["leg"],               # PER-SURVEY LLS pin: DESI 1.0×/σ0.287 (2026-07-18 width), KS 2.5×/σ0.40 (eBOSS→cosmic-avg)
@@ -229,7 +234,10 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     # silently regressed to the build_legb_ctx defaults (sample_res=False / metal_prior='uniform'). Asserted
     # on the single restricted leg so the real-fit forward provably == the SBC-certified forward.
     L = ctx.legs[0]
-    assert bool(ctx.sample_res) == fc["sample_res"], "prod f_res float not wired into build_real_ctx"
+    assert bool(ctx.sample_res) == sample_res_eff, "prod f_res float not wired into build_real_ctx"
+    if sample_res_override is False:
+        for _leg in ctx.legs:
+            assert not getattr(_leg, "resolution_on", False), "R1 override: the leg must keep its resolution term in the covariance (resolution_float=False)"
     assert ctx.f_res_amp_sigma == fc["f_res_amp_sigma"], "f_res prior width mismatch"
     assert ctx.metal_prior == fc["metal_prior"], "prod metal model (flatlog2node) not wired"
     assert tuple(ctx.metal_node_z) == (2.2, 4.2), "Gate-C metal_node_z drifted"
@@ -271,7 +279,9 @@ def apply_diagnostic_overrides(ctx, diag):
             raise SystemExit(f"--tau0-amp-max must exceed the lower edge {lo}")
         ctx = ctx._replace(tau0_amp_range=(float(lo), hi_new)); applied["tau0_amp_range"] = [float(lo), hi_new]; applied["tau0_amp_range_before"] = [float(lo), float(hi)]
     if diag.get("resolution_off"):
-        ctx = ctx._replace(sample_res=False); applied["resolution_off"] = True
+        # the leg was ALREADY built with resolution_float=False by build_real_ctx(sample_res_override=False) (R1 fix); record it
+        assert not bool(ctx.sample_res), "resolution_off requested but the context still samples f_res (build_real_ctx must receive sample_res_override=False)"
+        applied["resolution_off"] = True; applied["resolution_term_in_covariance"] = all(not getattr(l, "resolution_on", False) for l in ctx.legs)
     if diag.get("mf_curvature_sigma") is not None:
         ctx = ctx._replace(tau0_curv_sigma=float(diag["mf_curvature_sigma"])); applied["mf_curvature_sigma"] = float(diag["mf_curvature_sigma"])
     return ctx, applied
@@ -288,7 +298,8 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
     LIKELIHOOD points at the real data (ctx.legs already carry leg.P_data = the measurement; we
     do NOT overwrite it with a mock)."""
     ctx, d, members = build_real_ctx(survey, single_member=single_member,
-                                     ensemble_glob=ensemble_glob, ks_zlo=ks_zlo, eboss_zlo=eboss_zlo)
+                                     ensemble_glob=ensemble_glob, ks_zlo=ks_zlo, eboss_zlo=eboss_zlo,
+                                     sample_res_override=(False if (diag or {}).get("resolution_off") else None))   # R1 fix: option-a at build time
     ctx, diag_applied = apply_diagnostic_overrides(ctx, diag)      # PI #33: {} on every certified path
     leg = ctx.legs[0]
     n_real = int(np.isfinite(np.asarray(leg.P_data)).sum())
