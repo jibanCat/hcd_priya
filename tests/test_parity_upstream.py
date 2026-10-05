@@ -269,6 +269,24 @@ def test_row08_parameter_order_limits_and_sampling_tightening_match_upstream():
     assert sl[2, 1] == 4.1 and sl[3, 0] == 2.6
 
 
+def test_row08b_unit_cube_map_equals_upstream_and_round_trips_through_kcoord():
+    """Input normalisation: upstream map_to_unit_cube_list(params, param_limits) (latin_hypercube.py) on the 60 PRIYA-LF
+    simulations equals our data.normalize_params; kcoord's inverse recovers the physical hub and omegamh2."""
+    with h5py.File(UP_LF, "r") as f:
+        p9 = np.unique(f["params"][:, 1:], axis=0)                     # the 60 simulations (each has 10 rungs)
+    up = np.array(run_upstream(f"""
+import json, numpy as np
+from lyaemu.latin_hypercube import map_to_unit_cube_list
+lim = np.array(json.load(open("{UPSTREAM_PRODUCT}/emulator_params.json"))["param_limits"])
+print(json.dumps(map_to_unit_cube_list(np.array({p9.tolist()!r}), lim).tolist()))
+"""))
+    ours = D.normalize_params(p9)
+    assert up.shape == ours.shape == (60, 9) and np.allclose(ours, up, rtol=0, atol=1e-12)
+    for i in range(60):
+        hub, omh2 = KC.hub_omegamh2_from_theta9(ours[i])
+        assert abs(float(hub) / p9[i, 5] - 1) < 1e-12 and abs(float(omh2) / p9[i, 6] - 1) < 1e-12
+
+
 # ------------------------------------------------------------------------------------- row 9: A_p pivot
 def test_row09_ap_pivot_ratio_matches_upstream_definition():
     """Upstream coarse_grid.py:360: A_s = (0.05/(2 pi/8))^(ns-1) Ap, i.e. Ap = A_s (k_p/0.05)^(ns-1) with
