@@ -117,13 +117,17 @@ def test_row03_parameters_and_rungs_match_upstream_training_set(lf_matched):
 
 def test_row04_per_row_velocity_grids_equal_upstream(lf_matched):
     ours, up, pairs = lf_matched
-    worst = 0.0
+    worst, f8 = 0.0, []
     for ur, zi, r in pairs:
         dk = float(np.max(np.abs(ours["kfkms"][r] / up["kfkms"][ur, zi] - 1.0)))
         if _is(ours, r, SIM_UPSTREAM_DEFECT, 2.2, up["zout"][zi]):
-            continue                                     # established upstream defect, checked below
+            continue                                     # established upstream defect F1, checked below
+        if _is(ours, r, SIM_OUR_GAP, 2.8, up["zout"][zi]):
+            f8.append(dk)                                # our defect F8 (pixel width of the z = 3.0 file), row 4d
+            continue
         worst = max(worst, dk)
-    assert worst < 2e-4, worst
+    assert worst < 1e-12, worst
+    assert len(f8) == 10 and all(9.0e-5 < d < 9.3e-5 for d in f8), f8
 
 
 def test_row04b_upstream_defect_entry_is_the_z2p39_snapshot():
@@ -369,10 +373,11 @@ from lyaemu.lyman_data import BOSSData
 b = BOSSData()
 zs = b.get_redshifts(); kf = b.get_kf()
 out = {"z": zs.tolist(), "k": kf.tolist(), "pf": [b.get_pf(zbin=z).tolist() for z in zs],
-       "diag": [np.diag(b.get_covar(zbin=z)).tolist() for z in zs]}
+       "cov": [b.get_covar(zbin=z).tolist() for z in zs]}
 print(json.dumps(out))
 """)
     zs, kf = np.array(up["z"]), np.array(up["k"])
+    C = np.asarray(leg.C_data)
     n_cmp = 0
     for i, z in enumerate(zs):
         m = np.isclose(leg.z_row, z)
@@ -381,7 +386,9 @@ print(json.dumps(out))
         sel = [int(np.argmin(np.abs(kf - kk))) for kk in ks]
         assert np.allclose(ks, kf[sel], rtol=1e-6)
         assert np.allclose(np.asarray(leg.P_data)[m], np.asarray(up["pf"][i])[sel], rtol=1e-6)
-        assert np.allclose(np.diag(np.asarray(leg.C_data))[m], np.asarray(up["diag"][i])[sel], rtol=1e-6)
+        idx = np.where(m)[0]
+        assert np.allclose(C[np.ix_(idx, idx)], np.asarray(up["cov"][i])[np.ix_(sel, sel)], rtol=1e-10, atol=0)
+        assert not np.any(C[np.ix_(idx, np.where(~m)[0])]), "eBOSS covariance has cross-z terms (upstream has none)"
         n_cmp += int(m.sum())
     assert n_cmp == 13 * 35, n_cmp
 
@@ -443,3 +450,268 @@ print(json.dumps({"z": zs.tolist(), "k": kf.tolist(), "pf": [d.get_pf(zbin=z).to
     dP = np.concatenate(dP)
     assert dP.size == np.asarray(leg.k).size
     assert 0.1 < np.sqrt(np.mean(dP ** 2)) < 2.0, np.sqrt(np.mean(dP ** 2))
+
+
+# ===================================================================================== gate B review blocking tests
+# (reviews/gate_B/gate_B_review.md section 10: BT-B1 .. BT-B5)
+HR_RAW = "/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2"
+HCD_OUT = "/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"
+UP_HR6 = ("/nfs/turbo/umor-yueyingn/mfho/birdgroup/lya_xq100/kodiaq_2_2_4_6-48-48_20260414_newhires/hires/"
+          "mf_emulator_flux_vectors_tau1000000.hdf5")
+# F8 (found at gate B while root-causing the 9.2e-5 offset): our LF rows for SIM_OUR_GAP at z = 2.8 (Phase-1 snap 17)
+# take tau from SPECTRA_018 (header z = 2.8) but the snap_017 absorber catalogue and its dv_kms were built on SPECTRA_017
+# (header z = 3.0). The only group of either cache whose catalogue and tau come from different spectra files.
+F8_GROUP = (SIM_OUR_GAP, 17)
+
+
+def _require_paths(*paths):
+    missing = [p for p in paths if not os.path.exists(p)]
+    if missing:
+        if os.environ.get("HCD_GATE_RUN") == "1":
+            pytest.fail(f"inputs absent: {missing}")
+        pytest.skip(f"inputs absent: {missing}")
+
+
+def _raw_headers(raw_root, sim):
+    """Header facts of every raw grid_480 savefile of one simulation; vmax exactly as fake_spectra (spectra.py:208-215)."""
+    import glob
+    out = []
+    for d in sorted(glob.glob(f"{raw_root}/{sim}/output/SPECTRA_*")):
+        p = f"{d}/lya_forest_spectra_grid_480.hdf5"
+        if not os.path.exists(p):
+            continue
+        with h5py.File(p, "r") as f:
+            a = f["Header"].attrs
+            z, h = float(a["redshift"]), float(a["hubble"])
+            at = 1.0 / (1.0 + z)
+            hz = float(a["Hz"]) if "Hz" in a else 100.0 * h * np.sqrt(float(a["omegam"]) / at ** 3 + float(a["omegal"]))
+            vmax = float(a["box"]) * (3.085678e21 * at / h) * hz / 3.085678e24
+            out.append(dict(spec=int(d.rsplit("_", 1)[1]), z=z, vmax=vmax, nbins=int(a["nbins"])))
+    return out
+
+
+@pytest.mark.parametrize("fid", ["lf", "hr"])
+def test_row04d_every_cache_row_matches_its_raw_header(fid):
+    """BT-B4. For every (simulation, snapshot) group of our caches: the snapshot used is THE raw file at the grid z (the
+    nearest header z is within 1e-9 of z_grid; no other file within 1e-3), every row's k equals 2 pi n / vmax_header to
+    1e-12, nbins_native equals the header nbins, z_meta is within 2e-5 of the header z, and the Phase-1 absorber
+    catalogue was built on the same spectra file (its meta nbins and dv_kms equal the header's). The only exception is
+    the enumerated F8 group, whose defect is pinned exactly."""
+    from collections import defaultdict
+    path = LF if fid == "lf" else HR
+    raw_root = RAW if fid == "lf" else HR_RAW
+    hcd = HCD_OUT if fid == "lf" else f"{HCD_OUT}/hires"
+    require_real_cache(path)
+    _require_paths(raw_root, hcd)
+    with h5py.File(path, "r") as f:
+        sim = f["sim_name"].asstr()[...]
+        snap = f["snap"][...]
+        zg, zm = f["z_grid"][...], f["z_meta"][...]
+        kf, nb = f["kfkms"][...], f["nbins_native"][...]
+    groups = defaultdict(list)
+    for r in range(sim.size):
+        groups[(str(sim[r]), int(snap[r]))].append(r)
+    hdr, seen_f8 = {}, False
+    worst = dict(k=0.0, dz_grid=0.0, dz_meta=0.0)
+    for (s, sn), rows in groups.items():
+        r0 = rows[0]
+        h = hdr.setdefault(s, _raw_headers(raw_root, s))
+        assert h, f"no raw headers for {s}"
+        zs = np.array([e["z"] for e in h])
+        order = np.argsort(np.abs(zs - zg[r0]))
+        e = h[int(order[0])]
+        assert all(zg[r] == zg[r0] and zm[r] == zm[r0] and nb[r] == nb[r0] for r in rows), (s, sn)
+        worst["dz_grid"] = max(worst["dz_grid"], abs(e["z"] - zg[r0]))
+        assert abs(e["z"] - zg[r0]) < 1e-9, (s, sn, e["z"], zg[r0])
+        assert order.size == 1 or abs(zs[order[1]] - zg[r0]) > 1e-3, (s, sn, "second raw file at the grid z")
+        assert int(nb[r0]) == e["nbins"], (s, sn, int(nb[r0]), e["nbins"])
+        worst["dz_meta"] = max(worst["dz_meta"], abs(zm[r0] - e["z"]))
+        assert abs(zm[r0] - e["z"]) <= 2e-5, (s, sn, zm[r0], e["z"])
+        n = np.arange(1, kf.shape[1] + 1)
+        fin = np.isfinite(kf[r0])
+        meta = json.load(open(f"{hcd}/{s}/snap_{sn:03d}/meta.json"))
+        if fid == "lf" and (s, sn) == F8_GROUP:
+            seen_f8 = True
+            e30 = h[int(np.argmin(np.abs(zs - 3.0)))]                              # SPECTRA_017, header z = 3.0
+            assert e["spec"] == 18 and e30["spec"] == 17 and abs(e30["z"] - 3.0) < 1e-6
+            assert int(meta["nbins"]) == e30["nbins"] == 1397                        # catalogue built on z = 3.0 spectra
+            assert abs(float(meta["dv_kms"]) / (e30["vmax"] / e30["nbins"]) - 1) < 1e-12
+            for r in rows:                                                          # k from the z = 3.0 file's pixel width
+                assert np.allclose(kf[r][fin], 2 * np.pi * n[fin] / (nb[r] * float(meta["dv_kms"])), rtol=1e-12, atol=0)
+                off = float(np.max(np.abs(kf[r][fin] / (2 * np.pi * n[fin] / e["vmax"]) - 1)))
+                assert 9.0e-5 < off < 9.3e-5, off
+            m18 = json.load(open(f"{hcd}/{s}/snap_018/meta.json"))                  # the correct catalogue exists,
+            assert int(m18["nbins"]) == e["nbins"] == 1365                          # filed under snap_018 (meta z 2.67)
+            assert abs(float(m18["dv_kms"]) / (e["vmax"] / e["nbins"]) - 1) < 1e-12
+            continue
+        assert int(meta["nbins"]) == e["nbins"], (s, sn, "catalogue built on another spectra file")
+        assert abs(float(meta["dv_kms"]) / (e["vmax"] / e["nbins"]) - 1) < 1e-12, (s, sn)
+        kexp = 2 * np.pi * n / e["vmax"]
+        for r in rows:
+            fr = np.isfinite(kf[r])
+            rel = float(np.max(np.abs(kf[r][fr] / kexp[fr] - 1)))
+            worst["k"] = max(worst["k"], rel)
+            assert rel < 1e-12, (s, sn, r, rel)
+    assert seen_f8 == (fid == "lf")
+    print(f"{fid}: {len(groups)} groups; worst k rel {worst['k']:.2e}; worst |z_header - z_grid| {worst['dz_grid']:.2e}; "
+          f"worst |z_meta - z_header| {worst['dz_meta']:.2e}")
+
+
+def _implied_z(velfac, om):
+    """Redshift at which 100 E(z) / (1+z) equals velfac (monotone for z > 1)."""
+    from scipy.optimize import brentq
+    return brentq(lambda z: 100.0 * np.sqrt(om * (1 + z) ** 3 + 1 - om) / (1 + z) - velfac, 1.0, 7.0, xtol=1e-12)
+
+
+def test_row23b_priya_hr6_slot_labels_audited():
+    """BT-B1 (upstream DEFECT, finding F7). In PRIYA-HR6 exactly 120 of the 1020 (row, z-slot) entries hold a velocity
+    grid that is not the slot label's: all slots z <= 3.8 of sim ns0.885 and z <= 2.6 of sim ns0.972 (10 rungs each).
+    Each holds the neighbouring snapshot, the same positional mechanism as F1 (row 4c): the implied redshift is the
+    next-higher grid z, except the first shifted slot of each simulation, which holds an off-grid snapshot (z = 3.9936
+    and 2.7936). Our HR rows for these simulations carry the label-z snapshot."""
+    require_real_cache(HR)
+    _require_paths(UP_HR6)
+    with h5py.File(UP_HR6, "r") as f:
+        params, zout, kfkms, kfmpc = f["params"][...], f["zout"][...], f["kfkms"][...], f["kfmpc"][...]
+    bad = {}
+    for r in range(params.shape[0]):
+        hub, omh2 = float(params[r, 6]), float(params[r, 7])
+        for zi, z in enumerate(zout):
+            kexp = np.asarray(KC.k_skm_from_kcom(kfmpc, float(z), hub, omh2))
+            if float(np.max(np.abs(kfkms[r, zi] / kexp - 1))) > 1e-6:
+                bad[(r, round(float(z), 1))] = _implied_z(kfmpc[0] / kfkms[r, zi, 0], omh2 / hub ** 2)
+    ns = np.round(params[:, 1], 3)
+    expect = {(r, z) for r in np.where(ns == 0.885)[0] for z in (3.8, 3.6, 3.4, 3.2, 3.0, 2.8, 2.6, 2.4, 2.2)}
+    expect |= {(r, z) for r in np.where(ns == 0.972)[0] for z in (2.6, 2.4, 2.2)}
+    assert len(expect) == 120 and set(bad) == expect, sorted(set(bad) ^ expect)[:10]
+    for (r, z), zi in bad.items():
+        first = (ns[r] == 0.885 and z == 3.8) or (ns[r] == 0.972 and z == 2.6)
+        assert abs(zi - (3.9936 if ns[r] == 0.885 else 2.7936)) < 2e-3 if first else abs(zi - (z + 0.2)) < 1e-4, (r, z, zi)
+    ours = D.load_cache(HR)
+    for s in ("ns0.885", "ns0.972"):
+        rows = np.where(np.char.startswith(ours["sim_name"].astype(str), s))[0]
+        assert rows.size > 0
+        for r in rows:
+            fin = np.isfinite(ours["kfkms"][r])
+            kexp = np.asarray(KC.k_skm_from_kcom(ours["k_com_hmpc"], float(ours["z_grid"][r]),
+                                                 float(ours["params"][r, 5]), float(ours["params"][r, 6])))
+            assert float(np.max(np.abs(ours["kfkms"][r][fin] / kexp[fin] - 1))) < 2e-5, (s, float(ours["z_grid"][r]))
+
+
+def test_row19b_eboss_production_covariance_vs_upstream():
+    """BT-B2. Production eBOSS (prod_forward_config: sample_res) removes the resolution systematic from sigma and floats
+    f_res in the forward: per z, C_prod = C_up * outer(r, r) with r = sqrt(1 - e_res^2 / diag C_up), C_up from upstream
+    BOSSData.get_covar(z) and e_res the resolution column of the same Pk1D_syst.dat upstream sums; no cross-z terms.
+    Pins the size of the change (largest variance reduction 0.80) that the parity table records as DIFFERENT."""
+    from hcd_analysis.emulator import closure_legb as CL
+    from hcd_analysis.emulator import data_likelihood as DL
+    cfg = CL.prod_forward_config("eBOSS")
+    assert cfg["sample_res"] is True
+    leg = DL.load_eboss_leg(resolution_float=cfg["sample_res"])          # the call build_legb_ctx makes for eBOSS
+    assert leg.resolution_on is True                                     # f_res is sampled in the forward
+    up = run_upstream("""
+import json, os, numpy as np
+from lyaemu import lyman_data
+b = lyman_data.BOSSData()
+zs = b.get_redshifts(); kf = b.get_kf()
+fn = os.path.join(os.path.dirname(lyman_data.__file__), "data/boss_dr14_data/Pk1D_syst.dat")
+syst = np.loadtxt(fn)
+ires = open(fn).readline().lstrip("#").split().index("resolution")
+rows = [np.where(np.abs(b.redshifts - z) < 0.01)[0] for z in zs]          # the data file's rows of each z
+print(json.dumps({"z": zs.tolist(), "k": kf.tolist(), "cov": [b.get_covar(zbin=z).tolist() for z in zs],
+                  "e_res": [syst[r, ires].tolist() for r in rows], "k_rows": [b.kf[r].tolist() for r in rows]}))
+""")
+    zs, kf = np.array(up["z"]), np.array(up["k"])
+    C = np.asarray(leg.C_data)
+    red = []
+    for i, z in enumerate(zs):
+        m = np.isclose(leg.z_row, z)
+        idx = np.where(m)[0]
+        sel = [int(np.argmin(np.abs(kf - kk))) for kk in np.asarray(leg.k)[m]]
+        Cu = np.asarray(up["cov"][i])[np.ix_(sel, sel)]
+        assert np.allclose(np.asarray(up["k_rows"][i])[sel], np.asarray(leg.k)[m], rtol=1e-9)
+        e = np.asarray(up["e_res"][i])[sel]
+        r = np.sqrt(1.0 - e ** 2 / np.diag(Cu))
+        assert np.allclose(C[np.ix_(idx, idx)], Cu * np.outer(r, r), rtol=1e-10, atol=0)
+        assert not np.any(C[np.ix_(idx, np.where(~m)[0])])
+        red.append(1.0 - r ** 2)
+    red = np.concatenate(red)
+    assert red.size == 455 and 0.80 < red.max() < 0.81, red.max()
+    print(f"eBOSS production covariance: largest variance reduction {red.max():.4f}, median {np.median(red):.4f}")
+
+
+def test_row20b_ks_production_covariance_and_cross_z():
+    """BT-B3. Production KS (prod_forward_config ks_kwargs: resolution_float, k_max 0.065) = the published conservative
+    covariance (FULL, cross-z blocks included) restricted to the kept bins, minus esyst_res_ks^2 on the diagonal only
+    ("diag" mode), with f_res floated. Upstream's own likelihood evaluates chi2 per z block (cross-z dropped). Pins the
+    retained cross-z correlation (largest |rho| about 0.61)."""
+    from hcd_analysis.emulator import closure_legb as CL
+    from hcd_analysis.emulator import data_likelihood as DL
+    cfg = CL.prod_forward_config("KS")
+    leg = DL.load_ks_leg(**cfg["ks_kwargs"])
+    assert cfg["ks_kwargs"]["resolution_float"] is True and leg.resolution_on is True
+    up = run_upstream("""
+import json, os, numpy as np, pandas
+from lyaemu import lyman_data
+c = lyman_data.KSData(conservative=True)
+d = os.path.join(os.path.dirname(lyman_data.__file__), "data/kodiaq_squad/detailed-p1d-results-karacayli_etal2021.txt")
+a = pandas.read_csv(d, sep="|", header=0)
+cols = {c.strip(): c for c in a.columns}
+print(json.dumps({"z": c.redshifts.tolist(), "k": c.kf.tolist(), "cov": c.covar.tolist(),
+                  "det_z": a[cols["z"]].values.tolist(), "det_k": a[cols["k"]].values.tolist(),
+                  "det_eres": a[cols["esyst_res_ks"]].values.tolist(),
+                  "blk_shape": list(np.shape(c.get_covar(zbin=c.get_redshifts()[3])))}))
+""")
+    uz, uk, Cu = np.array(up["z"]), np.array(up["k"]), np.array(up["cov"])
+    eres = {(round(z, 3), round(k, 8)): e for z, k, e in zip(up["det_z"], up["det_k"], up["det_eres"])}
+    zr, kk = np.asarray(leg.z_row), np.asarray(leg.k)
+    idx = np.array([int(np.where(np.isclose(uz, z) & np.isclose(uk, k, rtol=1e-9))[0][0]) for z, k in zip(zr, kk)])
+    e = np.array([eres[(round(float(z), 3), round(float(k), 8))] for z, k in zip(zr, kk)])
+    expect = Cu[np.ix_(idx, idx)].copy()
+    expect[np.diag_indices_from(expect)] -= e ** 2
+    C = np.asarray(leg.C_data)
+    assert np.allclose(C, expect, rtol=1e-10, atol=0)
+    sd = np.sqrt(np.diag(C))
+    rho = C / np.outer(sd, sd)
+    cross = ~np.isclose(zr[:, None], zr[None, :])
+    assert 0.55 < np.max(np.abs(rho[cross])) < 0.65, np.max(np.abs(rho[cross]))
+    assert up["blk_shape"][0] == up["blk_shape"][1] < len(uz)                     # upstream hands out per-z blocks
+    src = open(f"{UPSTREAM}/lyaemu/likelihood.py").read()
+    assert "chi2 += self.chi2_zbin(" in src and "covar_bin = self.sdss.get_covar(sdssz[zbin])" in src
+    red = e ** 2 / np.diag(Cu[np.ix_(idx, idx)])
+    print(f"KS production covariance: {kk.size} bins, cross-z max |rho| {np.max(np.abs(rho[cross])):.3f}, "
+          f"largest diagonal variance removed {red.max():.3f}")
+
+
+def test_row10c_parameter_and_tau0_out_of_box_handling():
+    """BT-B5 (gate E hand-off). Upstream refuses out-of-box parameters (map_to_unit_cube asserts; the likelihood
+    returns -inf at or beyond the box); our unit-cube map extrapolates silently. The production mean-flux box
+    (tau0 x dtau0) reaches alpha(z) above the top training rung at low z: pinned here, handed to gates C/E."""
+    from hcd_analysis.emulator import meanflux_prior as MP
+    src = open(f"{UPSTREAM}/lyaemu/likelihood.py").read()
+    assert "if np.any(params >= self.param_limits[:, 1]) or np.any(" in src
+    lim = np.asarray(D.PARAM_LIMITS, float)
+    x = lim[:, 0] + 0.5 * (lim[:, 1] - lim[:, 0])
+    x[0] = lim[0, 1] + 0.1 * (lim[0, 1] - lim[0, 0])                      # ns 10 percent of its range above the box
+    up = run_upstream(f"""
+import json, numpy as np
+from lyaemu.latin_hypercube import map_to_unit_cube
+try:
+    map_to_unit_cube(np.array({x.tolist()!r}), np.array({lim.tolist()!r})); out = "accepted"
+except AssertionError:
+    out = "refused"
+print(json.dumps(out))
+""")
+    assert up == "refused"
+    u = D.normalize_params(x)
+    assert abs(u[0] - 1.1) < 1e-12                                            # ours: 1.1, no refusal
+    with h5py.File(LF, "r") as f:
+        rungs = np.unique(f["alpha_slope"][...])
+    zs = np.round(np.arange(2.2, 4.61, 0.2), 1)
+    corners = [(a, d) for a in MP.TAU0_AMP_RANGE for d in MP.DTAU0_RANGE]
+    alpha = np.array([[float(MP.tau0_alpha_priya(z, a, d)) for a, d in corners] for z in zs])
+    top, bot = float(rungs.max()), float(rungs.min())
+    assert abs(top - 1.3312) < 1e-3 and abs(bot - 0.6556) < 1e-3
+    assert abs(alpha.max() - 1.3667) < 1e-3 and zs[np.argmax(alpha.max(1))] == 2.2
+    print(f"alpha box range {alpha.min():.4f}..{alpha.max():.4f} vs training rungs {bot:.4f}..{top:.4f}; "
+          f"excess above the top rung {alpha.max() / top - 1:.3%} at z = 2.2")
