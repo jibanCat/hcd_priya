@@ -1060,6 +1060,8 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
          ``leg.metals_on`` / ``leg.resolution_on`` (default OFF);
       3. ``jnp.interp`` P_obs from ``cache_k`` onto this z's leg-k subset (differentiable; the
          emulator P_obs(k) is smooth → linear interp to bin-CENTRE; see CS-REVIEW);
+         PRE-2026-10 INTERFACE: a single ``cache_k`` for every (z, theta) is the defect of the incident note
+         2026-10-05-INCIDENT-kgrid-representation-regression; replaced at gate E by kcoord.KGrid / EmulatorPrediction.
       4. interp the per-k emu variance (``_emu_var_on_cache``) onto the leg k → diag(C_emu).
 
     Returns the FLAT (z-major) (P_model, C_total) with C_total = C_data + diag(C_emu).

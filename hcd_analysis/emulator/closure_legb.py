@@ -341,7 +341,8 @@ class LegBCtx(NamedTuple):
     The numpyro model closes over this; jit traces only over the sampled params.
       model, pf_stats, dla_core_leg : the production forward model + per-leg DLA core.
       legs                          : list[DataLeg] (the mock overwrites P_data per mock).
-      cache_k                       : (Kc,) the emulator cache angular-k grid.
+      cache_k                       : (Kc,) PRE-2026-10 single velocity grid (the defect of incident note
+                                      2026-10-05-INCIDENT-kgrid-representation-regression); replaced at gate E.
       z_global                      : (nZ,) ascending union of leg z (the τ₀ ladder grid).
       sigma_zb_per_leg / rho_zb_per_leg : the diagonal / cross-class C_emu error vector
                                           ALREADY sliced to each leg's z-bins.

@@ -41,8 +41,8 @@ def main():
     d = load_cache(CACHE_PATH)
     kf = np.asarray(d["kfkms"])           # (N,K) per-row k (s/km)
     z = np.asarray(d["z_grid"])
-    # representative k-grid (rows share the cache angular-k binning up to cosmology rescale);
-    # use the median per-column k for labeling + band masks.
+    # Historical diagnostic: the per-column median is a LABEL only. Rows do NOT share a k grid (they differ by up to
+    # 41 percent with z and Omega_m); see incident note 2026-10-05-INCIDENT-kgrid-representation-regression.
     kcol = np.nanmedian(kf, axis=0)       # (K,)
     kband = (kcol >= K_LO) & (kcol <= K_HI)
     print(f"k cols in [{K_LO},{K_HI}]: {kband.sum()} of {kcol.size}")

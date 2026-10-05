@@ -394,7 +394,8 @@ d = load_cache("hcd_analysis/_emulator_data/observables_tau0_lf.h5")
 | key | shape | meaning |
 |---|---|---|
 | `params` / `params_unit` / `x` | `(R,9)` / `(R,9)` / `(R,10)` | physical / unit-cube params; `x` = `[θ9, z_unit]` |
-| `kfkms` | `(K,)` | angular k-grid in s/km (`K = n_k = 172`) |
+| `kfkms` | `(R,K)` | PER_ROW: each row's own angular grid in s/km, `2π n / v_box(z, Ω_m)`; rows differ by up to 41 percent |
+| `k_com_hmpc` | `(K,)` | GLOBAL_STATIC comoving box modes `2π n / 120` h/Mpc (`K = n_k = 172`), validated across all rows (`schema.py`); the physical k of a prediction is `k_skm = k_com (1+z) / (100 E(z; θ))` (`kcoord.py`) |
 | `P_filt` | `(R,4,K)` | per-class P1D: clean, LLS, subDLA, DLA |
 | `delta` | `(R,3,K)` | per-class core add-back; `delta[:,2]` = `dla_core` |
 | `coarse_counts` / `w_c_cache` | n/a | per-class sightline counts / incidence weights `w_c` |
@@ -563,7 +564,7 @@ Reading it:
 The figure below shows an example fold-0 prediction (dashed) over the cache truth (solid), per
 class. The top panels are the spectra and the bottom panels are the fractional residual
 `pred/cache − 1`, restricted to the band we actually use (a ±5% axis). The grey shading marks k
-above the LF Nyquist (k ≈ 0.069 s/km), where the network is neither used nor validated. The dotted
+above the LF top stored mode (drawn at 0.069 s/km, its z = 5.4 value; it moves with z, see §7), where the network is neither used nor validated. The dotted
 and dashed vertical lines mark the two analysis k-cuts, DESI k ≤ 0.041 and KODIAQ-SQUAD (KS)
 k ≤ 0.06 s/km.
 
@@ -571,7 +572,7 @@ k ≤ 0.06 s/km.
 
 ***(a) What the figure shows.*** A fold-0 example prediction (dashed) vs the cache (solid), per HCD
 class. Inside the analysis band the residual is ~1–2% (median ≈ 0.7%); the grey region (above the
-Nyquist) is not used. The rigorous all-folds error lives in the notes validation doc
+top stored mode) is not used. The rigorous all-folds error lives in the notes validation doc
 (`2026-06-14-validation-loso-emulator-lf-mf.md` §2), which resolves the held-out error per
 wavenumber k (the rigorous "where in k does the error live" answer). Demo C below shows the
 bottom line for cosmology: the per-fold A_p/n_s bias.
@@ -579,7 +580,7 @@ bottom line for cosmology: the per-fold A_p/n_s bias.
 ***(b) Why an older plot looked ±20%.*** The previous version of this plot showed the
 residual over the full raw k-grid and reached ±20% at the k-extremes. That ±20% is entirely at
 the lowest, cosmic-variance-sparse modes (k < 0.005, where individual sims are noisy) and above
-the Nyquist (k > 0.069, where the LF emulator is not used, and is never in the analysis band). The
+the top stored mode (where the LF emulator is not used, and is never in the analysis band). The
 plot above restricts to the band we actually use, which is why the residual is smaller.
 
 ***(c) Reproduce.*** Diagnosis numbers and this figure are produced by
@@ -676,8 +677,12 @@ The following points have repeatedly cost time, and are worth reviewing before d
 - The data range (`data.DATA_RANGE`) is z ∈ [2.2, 4.6], `k_min = 1e-3`. The cache is wider
   (z ∈ {2.0..5.4}, angular k ∈ [3.5e-4, 0.098]); out-of-range bins are softly down-weighted in
   training and excluded from `C_emu`. The 2026-06-04 decision was to keep `k_min = 1e-3`.
-- The LF Nyquist is k ≈ 0.069 s/km. Above it the LF emulator is neither used nor validated. Both
-  analysis k-cuts sit safely below it: DESI k ≤ 0.041 and KS k ≤ 0.06.
+- The LF emulator's top stored mode is mode 172, k_com = 9.0 h/Mpc (a storage band limit, not the pixel
+  Nyquist). In s/km it moves with z and Ω_m: 0.061 to 0.070 at z = 5.4, 0.065 to 0.075 at z = 4.6, 0.084 to
+  0.096 at z = 2.2. Above it the LF emulator is neither used nor validated. The earlier statement "LF
+  Nyquist ≈ 0.069 s/km" was the z = 5.4 value of one simulation (incident note
+  2026-10-05-INCIDENT-kgrid-representation-regression). DESI k ≤ 0.041 and KS k ≤ 0.06 sit below it at
+  every z.
 - The per-class power uses a single shared global ⟨F⟩ (`target_F`), not a per-subset mean, so the
   class offsets are real physics rather than a sightline-count artefact.
 
