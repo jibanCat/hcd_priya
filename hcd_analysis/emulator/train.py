@@ -650,14 +650,25 @@ def _arch_cfg_from_model(model):
     }
 
 
-def save_checkpoint(path, model, arch_cfg, norm_stats, seed,
-                    kfkms=None, cache_path=None, recipe=None):
-    """Serialise eqx leaves + JSON meta + pickled norm_stats.
+def _sha256_or_none(path):
+    import hashlib
+    import os
+    if path is None or not os.path.isfile(str(path)):
+        return None
+    h = hashlib.sha256()
+    with open(str(path), "rb") as f:
+        for b in iter(lambda: f.read(1 << 24), b""):
+            h.update(b)
+    return h.hexdigest()
 
-    M4: the meta now records the k-grid identity so a checkpoint is self-
-    describing — ``kfkms`` (the cache's k-grid, list of floats; ``n_k`` derived
-    from it) and ``cache_path`` (the cache the model was trained on). Either may
-    be omitted (back-compat), in which case the corresponding key is null.
+
+def save_checkpoint(path, model, arch_cfg, norm_stats, seed, *, cache, cache_path=None, recipe=None):
+    """Serialise eqx leaves + JSON meta + pickled norm_stats under checkpoint schema 2.0.
+
+    ``cache`` is the loaded cache dict the model was trained on. The meta records the VALIDATED comoving modes
+    ``k_com_hmpc`` (GLOBAL_STATIC, schema.py) and the coordinate convention; it never stores a velocity grid,
+    because the bins' s/km values depend on (z, theta) and are derived at prediction time (kcoord.py; incident
+    note 2026-10-05-INCIDENT-kgrid-representation-regression).
 
     REPRODUCIBILITY (Phase-2b PR-prep): the stored ``arch_cfg`` is COMPLETED from the
     model's own static fields (``_arch_cfg_from_model`` — adds baseline_n_layers/
@@ -671,19 +682,19 @@ def save_checkpoint(path, model, arch_cfg, norm_stats, seed,
     # keys win on conflict, but the model is the source of truth for the arch).
     full_arch = _arch_cfg_from_model(model)
     full_arch.update(arch_cfg or {})
-    meta = {"arch_cfg": full_arch, "seed": int(seed),
+    from .schema import (CHECKPOINT_SCHEMA_VERSION, K_CONVENTION, L_BOX_HMPC, k_com_hmpc_from_cache,
+                         validate_cache_schema)
+    validate_cache_schema(cache)                                  # refuses a collapsed or inconsistent cache
+    k_com = np.asarray(k_com_hmpc_from_cache(cache), float)       # GLOBAL_STATIC, validated across ALL rows
+    if int(full_arch.get("n_k", k_com.shape[0])) != int(k_com.shape[0]):
+        raise ValueError(f"model n_k {full_arch.get('n_k')} != cache modes {k_com.shape[0]}")
+    meta = {"schema_version": CHECKPOINT_SCHEMA_VERSION, "arch_cfg": full_arch, "seed": int(seed),
             "git_sha": _git_sha(),
             "recipe": (dict(recipe) if recipe is not None else None),
-            "cache_path": (str(cache_path) if cache_path is not None else None)}
-    if kfkms is not None:
-        # cache kfkms is (R, n_k) (per-row, shared grid); store the single k-grid.
-        kf = np.asarray(kfkms)
-        kgrid = kf[0] if kf.ndim == 2 else np.atleast_1d(kf).ravel()
-        meta["kfkms"] = kgrid.astype(float).tolist()
-        meta["n_k"] = int(kgrid.shape[0])
-    else:
-        meta["kfkms"] = None
-        meta["n_k"] = full_arch.get("n_k")
+            "cache_path": (str(cache_path) if cache_path is not None else None),
+            "cache_sha256": _sha256_or_none(cache_path),
+            "k_com_hmpc": k_com.tolist(), "n_k": int(k_com.shape[0]),
+            "L_box_hmpc": float(L_BOX_HMPC), "k_convention": K_CONVENTION}
     with open(str(path) + ".meta.json", "w") as f:
         json.dump(meta, f)
     with open(str(path) + ".norm.pkl", "wb") as f:
@@ -691,9 +702,15 @@ def save_checkpoint(path, model, arch_cfg, norm_stats, seed,
 
 
 def load_checkpoint(path):
-    """Inverse of ``save_checkpoint``. Returns (model, meta, norm_stats)."""
+    """Inverse of ``save_checkpoint``. Returns (model, meta, norm_stats). Only schema-2.0 checkpoints load."""
     with open(str(path) + ".meta.json") as f:
         meta = json.load(f)
+    from .schema import CHECKPOINT_SCHEMA_VERSION, SchemaCollapseError
+    if meta.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+        raise SchemaCollapseError(
+            f"checkpoint {path} has schema {meta.get('schema_version')!r}, expected {CHECKPOINT_SCHEMA_VERSION}: "
+            "pre-2026-10 checkpoints carry a single velocity grid (kfkms) and are not loadable; see "
+            "docs/superpowers/emulator-paper-history/2026-10-05-INCIDENT-kgrid-representation-regression.md")
     skeleton = Emulator(**meta["arch_cfg"], key=jax.random.PRNGKey(meta["seed"]))
     model = eqx.tree_deserialise_leaves(str(path) + ".eqx", skeleton)
     with open(str(path) + ".norm.pkl", "rb") as f:

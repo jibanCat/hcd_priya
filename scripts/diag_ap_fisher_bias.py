@@ -87,7 +87,7 @@ def train_or_load(d, *, fold=0, n_basis=24, epochs=180, lr=1e-3, batch=512, seed
         early_stop_metric=early_stop_metric, weight_decay=weight_decay)
     arch = {"in_dim": 10, "n_k": n_k, "n_basis": n_basis}
     T.save_checkpoint(CKPT, model, arch, norm, seed=seed,
-                      kfkms=d["kfkms"], cache_path=CACHE)
+                      cache=d, cache_path=CACHE)
     n_ep = len(history["train_loss"])
     argmin = int(np.argmin(history["val_resid_loss"]))
     print(f"[train] {n_ep} epochs (val_resid min @ ep {argmin+1}); -> {CKPT}")

@@ -421,7 +421,7 @@ def main():
         arch_cfg = {"in_dim": 10, "n_k": n_k, "n_basis": args.n_basis}
         ckpt = f"{args.out}_fold{fold}"
         T.save_checkpoint(ckpt, model, arch_cfg, norm_stats, seed=args.seed,
-                          kfkms=d["kfkms"], cache_path=args.cache, recipe=recipe)
+                          cache=d, cache_path=args.cache, recipe=recipe)
         print(f"  checkpoint -> {ckpt}.eqx / .meta.json / .norm.pkl")
 
         # SAVE per-fold per-epoch history (+ per-term metrics) to disk for the

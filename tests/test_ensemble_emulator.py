@@ -29,8 +29,8 @@ from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator.predict import predict_P_filt, predict_P_obs
 from hcd_analysis.emulator.ensemble import EnsembleEmulator, load_ensemble
 
-REPO = "/home/mfho/hcd_priya"
-PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
+# The pre-2026-10 production checkpoints live only in the eBOSS checkout (historical artifact, schema v1).
+HISTORICAL_PROD_PREFIX = "/home/mfho/hcd_priya/checkpoints/final_prod_seed"  # historical-artifact path
 
 
 def _members(n=3, n_k=10, n_basis=6):
@@ -86,14 +86,31 @@ def test_ensemble_predict_P_obs_differentiable():
     assert float(jnp.max(jnp.abs(g))) > 0.0, "ensemble forward has zero θ-gradient"
 
 
-_have_prod = len(glob.glob(PROD_PREFIX + "*.eqx")) >= 2
-prod_gate = pytest.mark.skipif(not _have_prod, reason="production ensemble checkpoints absent")
 
 
-@prod_gate
-def test_load_ensemble_shared_norm_and_members():
-    paths = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
+def _schema2_members(tmp_path, n=3, n_k=12):
+    """n synthetic schema-2.0 checkpoints sharing one cache and one norm (only the init key differs).
+    The pre-2026-10 production checkpoints are schema v1 and are refused by load_checkpoint by design
+    (incident note 2026-10-05-INCIDENT-kgrid-representation-regression)."""
+    from tests.emulator._fixture import write_synthetic_cache
+    from hcd_analysis.emulator.data import load_cache, fit_target_norm
+    from hcd_analysis.emulator.train import save_checkpoint
+    write_synthetic_cache(tmp_path / "obs.h5", n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=n_k)
+    d = load_cache(tmp_path / "obs.h5")
+    norm = fit_target_norm(d, np.arange(d["P_filt"].shape[0]))
+    paths = []
+    for s in range(n):
+        m = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(s))
+        p = str(tmp_path / f"m{s}")
+        save_checkpoint(p, m, {"in_dim": 10, "n_k": n_k, "n_basis": 4}, norm, seed=s, cache=d)
+        paths.append(p)
+    return paths
+
+
+def test_load_ensemble_shared_norm_and_members(tmp_path):
+    paths = _schema2_members(tmp_path)
     ens, meta, norm = load_ensemble(paths)
+    assert meta["schema_version"] == "2.0" and len(meta["k_com_hmpc"]) == 12
     assert isinstance(ens, EnsembleEmulator)
     assert len(ens.members) == len(paths) >= 2
     # the returned norm is usable as pf_stats (the SBC reads these three keys)
@@ -108,19 +125,11 @@ def test_load_ensemble_shared_norm_and_members():
     assert np.allclose(got, per.mean(axis=0), rtol=0, atol=1e-10)
 
 
-@prod_gate
 def test_load_ensemble_rejects_mismatched_norm(tmp_path):
     """load_ensemble must assert the members share a norm (same training data) — a member
     with a different norm is a wiring error that would silently corrupt the mean."""
     import pickle
-    paths = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))[:2]
-    # copy the 2-member set, then perturb the SECOND member's norm and point at the copy
-    import shutil
-    local = []
-    for i, p in enumerate(paths):
-        for ext in (".eqx", ".meta.json", ".norm.pkl"):
-            shutil.copy(p + ext, tmp_path / f"m{i}{ext}")
-        local.append(str(tmp_path / f"m{i}"))
+    local = _schema2_members(tmp_path, n=2)
     with open(local[1] + ".norm.pkl", "rb") as fh:
         nrm = pickle.load(fh)
     nrm["P_filt"]["mu_marg"] = np.asarray(nrm["P_filt"]["mu_marg"]) + 1.0  # perturb
@@ -128,3 +137,26 @@ def test_load_ensemble_rejects_mismatched_norm(tmp_path):
         pickle.dump(nrm, fh)
     with pytest.raises(AssertionError):
         load_ensemble(local)
+
+
+def test_load_ensemble_rejects_mismatched_k_com(tmp_path):
+    """Members must share the comoving modes; a member whose k_com differs is refused."""
+    import json
+    local = _schema2_members(tmp_path, n=2)
+    with open(local[1] + ".meta.json") as fh:
+        meta = json.load(fh)
+    meta["k_com_hmpc"] = [1.01 * v for v in meta["k_com_hmpc"]]
+    with open(local[1] + ".meta.json", "w") as fh:
+        json.dump(meta, fh)
+    with pytest.raises(AssertionError, match="k_com"):
+        load_ensemble(local)
+
+
+def test_load_ensemble_refuses_pre_2026_10_production_checkpoints():
+    """The historical production checkpoints (schema v1) are not loadable after gate A."""
+    from hcd_analysis.emulator.schema import SchemaCollapseError
+    paths = sorted(p[:-4] for p in glob.glob(HISTORICAL_PROD_PREFIX + "*.eqx"))
+    if not paths:
+        pytest.skip("historical production checkpoints not present")
+    with pytest.raises(SchemaCollapseError):
+        load_ensemble(paths[:1])

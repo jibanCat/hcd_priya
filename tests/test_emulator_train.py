@@ -12,6 +12,7 @@ Run (env mandatory):
 import numpy as np
 import jax
 import jax.numpy as jnp
+import pytest
 import equinox as eqx
 
 from tests.emulator._fixture import write_synthetic_cache
@@ -129,7 +130,7 @@ def test_checkpoint_roundtrip(tmp_path):
     pred0 = jax.vmap(model)(jnp.asarray(x), jnp.asarray(tau0))
 
     prefix = str(tmp_path / "ckpt")
-    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=2)
+    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=2, cache=d)
     model2, meta, norm2 = load_checkpoint(prefix)
 
     pred1 = jax.vmap(model2)(jnp.asarray(x), jnp.asarray(tau0))
@@ -351,31 +352,66 @@ def test_train_fold_joint_earlystop_backcompat(tmp_path):
     assert abs(float(evaluate(model, val_batch)) - best_val) <= 1e-6
 
 
-def test_checkpoint_meta_has_kgrid(tmp_path):
-    """M4: saved .meta.json records the k-grid (kfkms + n_k) and the cache id, and
-    load reconstructs. n_k matches len(kfkms)."""
+def test_checkpoint_schema_v2_stores_k_com_not_a_velocity_grid(tmp_path):
+    """Schema 2.0 (incident 2026-10-05): the meta carries the validated comoving modes and the convention
+    string; it never carries a velocity grid (the old row-0 'kfkms')."""
     import json
+    from hcd_analysis.emulator import schema as S
     d = _small_cache(tmp_path)
     folds = kfold_loso(d["sim_name"], n_folds=4)
     tr, va = folds[0]
-    arch_cfg = {"in_dim": 10, "n_k": N_K, "n_basis": None}
     model, norm_stats, _ = train_fold(
         d, tr, va, n_basis=None, lr=1e-3, epochs=3, batch_size=8,
         seed=0, key=jax.random.PRNGKey(0),
     )
-    prefix = str(tmp_path / "ckpt_kg")
+    prefix = str(tmp_path / "ckpt_v2")
     cache_path = str(tmp_path / "obs.h5")
-    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=0,
-                    kfkms=d["kfkms"], cache_path=cache_path)
+    save_checkpoint(prefix, model, {"in_dim": 10, "n_k": N_K, "n_basis": None}, norm_stats, seed=0,
+                    cache=d, cache_path=cache_path)
     with open(prefix + ".meta.json") as f:
         meta = json.load(f)
-    assert meta["n_k"] == N_K
-    assert len(meta["kfkms"]) == N_K
-    assert np.allclose(meta["kfkms"], d["kfkms"][0])
-    assert meta["cache_path"] == cache_path
-    # load_checkpoint still round-trips with the enriched meta
+    assert meta["schema_version"] == S.CHECKPOINT_SCHEMA_VERSION
+    assert "kfkms" not in meta
+    assert np.allclose(meta["k_com_hmpc"], S.k_com_hmpc_from_cache(d)) and meta["n_k"] == N_K
+    assert meta["k_convention"] == S.K_CONVENTION and meta["L_box_hmpc"] == S.L_BOX_HMPC
+    assert meta["cache_path"] == cache_path and len(meta["cache_sha256"]) == 64
     model2, meta2, norm2 = load_checkpoint(prefix)
-    assert meta2["n_k"] == N_K and meta2["cache_path"] == cache_path
+    assert meta2["schema_version"] == "2.0" and meta2["n_k"] == N_K
+
+
+def test_save_checkpoint_refuses_old_kfkms_keyword(tmp_path):
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+    model, norm_stats, _ = train_fold(
+        d, tr, va, n_basis=None, lr=1e-3, epochs=1, batch_size=8,
+        seed=0, key=jax.random.PRNGKey(0),
+    )
+    with pytest.raises(TypeError):
+        save_checkpoint(str(tmp_path / "x"), model, {"in_dim": 10, "n_k": N_K, "n_basis": None}, norm_stats,
+                        seed=0, kfkms=d["kfkms"])
+
+
+def test_load_checkpoint_refuses_schema_v1(tmp_path):
+    import json
+    from hcd_analysis.emulator import schema as S
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+    model, norm_stats, _ = train_fold(
+        d, tr, va, n_basis=None, lr=1e-3, epochs=1, batch_size=8,
+        seed=0, key=jax.random.PRNGKey(0),
+    )
+    prefix = str(tmp_path / "v1")
+    save_checkpoint(prefix, model, {"in_dim": 10, "n_k": N_K, "n_basis": None}, norm_stats, seed=0, cache=d)
+    with open(prefix + ".meta.json") as f:
+        meta = json.load(f)
+    del meta["schema_version"]
+    meta["kfkms"] = [float(v) for v in d["kfkms"][0]]           # the pre-2026-10 layout
+    with open(prefix + ".meta.json", "w") as f:
+        json.dump(meta, f)
+    with pytest.raises(S.SchemaCollapseError, match="2026-10-05-INCIDENT"):
+        load_checkpoint(prefix)
 
 
 def test_checkpoint_roundtrip_nondefault_baseline_depth(tmp_path):
@@ -403,7 +439,7 @@ def test_checkpoint_roundtrip_nondefault_baseline_depth(tmp_path):
     recipe = {"w_coh": 80.0, "edge_gain": 3.0, "lowk_extra": 2.0, "datarange": True,
               "term_w": {"f_nhi": 1.0, "p_resid": 8.0}}
     prefix = str(tmp_path / "ckpt_deep")
-    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=7, recipe=recipe)
+    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=7, recipe=recipe, cache=d)
 
     with open(prefix + ".meta.json") as f:
         meta = json.load(f)

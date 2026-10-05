@@ -74,7 +74,7 @@ def main():
                   n_train=int(len(train_idx)), n_val=int(len(val_idx)))
     ckpt = f"{args.out}_seed{args.seed}"
     T.save_checkpoint(ckpt, model, arch_cfg, norm_stats, seed=args.seed,
-                      kfkms=d["kfkms"], cache_path=args.cache, recipe=recipe)
+                      cache=d, cache_path=args.cache, recipe=recipe)
     hist_json = {k: np.asarray(v).astype(float).tolist() for k, v in history.items()}
     hist_json["recipe"] = recipe
     Path(f"{ckpt}.hist.json").write_text(json.dumps(hist_json, indent=2))

@@ -179,7 +179,7 @@ def main():
 
     arch_cfg = {"in_dim": 10, "n_k": n_k, "n_basis": args.n_basis}
     T.save_checkpoint(args.out, model, arch_cfg, norm_stats, seed=args.seed,
-                      kfkms=d["kfkms"], cache_path=args.cache)
+                      cache=d, cache_path=args.cache)
     print(f"checkpoint -> {args.out}.eqx / .meta.json / .norm.pkl")
 
     # figures + history

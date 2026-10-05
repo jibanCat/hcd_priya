@@ -96,7 +96,7 @@ def train_or_load(d, *, fold=0, n_basis=24, epochs=180, lr=1e-3, batch=512,
         weight_decay=RESID_TUNE["weight_decay"])
     arch_cfg = {"in_dim": 10, "n_k": n_k, "n_basis": n_basis}
     T.save_checkpoint(CKPT, model, arch_cfg, norm, seed=seed,
-                      kfkms=d["kfkms"], cache_path=CACHE)
+                      cache=d, cache_path=CACHE)
     with open(CKPT + ".hist.json", "w") as f:
         json.dump({k: np.asarray(v).tolist() for k, v in history.items()}, f)
     print(f"[train] {len(history['train_loss'])} epochs; checkpoint -> {CKPT}")
