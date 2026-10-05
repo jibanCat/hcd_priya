@@ -55,13 +55,14 @@ class KGrid(NamedTuple):
     """The canonical coordinate object: every physical array of a prediction is defined on ``k_skm``."""
     k_skm: jnp.ndarray
     z: float
-    hub: float
-    omegamh2: float
+    hub: jnp.ndarray
+    omegamh2: jnp.ndarray
     k_com_hmpc: jnp.ndarray
     schema_version: str
 
 
 def kgrid(k_com_hmpc, z, theta9_unit):
     hub, omh2 = hub_omegamh2_from_theta9(theta9_unit)
-    return KGrid(k_skm_from_kcom(k_com_hmpc, z, hub, omh2), float(z), float(hub), float(omh2),
+    # hub/omegamh2 stay JAX scalars (differentiable in theta); z is a fixed physical redshift per leg.
+    return KGrid(k_skm_from_kcom(k_com_hmpc, z, hub, omh2), float(z), hub, omh2,
                  jnp.asarray(k_com_hmpc), CHECKPOINT_SCHEMA_VERSION)
