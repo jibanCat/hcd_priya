@@ -243,11 +243,11 @@ def fig_perfold_convergence(histories, figdir,
     return str(p)
 
 
-def fig_error_vs_k(sigma, kfkms, z_band_edges, figdir):
+def fig_error_vs_k(sigma, k_com_hmpc, z_band_edges, figdir):
     """σ error vector vs k, one line per class, one panel per z-band, log-log."""
     plt = _plt()
     n_cls, K, Zb = sigma.shape
-    k = np.asarray(kfkms)
+    k = np.asarray(k_com_hmpc)
     fig, axes = plt.subplots(1, Zb, figsize=(4.2 * Zb, 4.2), sharey=True,
                              squeeze=False)
     axes = axes[0]
@@ -259,7 +259,7 @@ def fig_error_vs_k(sigma, kfkms, z_band_edges, figdir):
             ok = np.isfinite(s) & (s > 0)
             if ok.any():
                 ax.loglog(k[ok], s[ok], "-o", ms=2.5, color=f"C{ci}", label=cname)
-        ax.set_xlabel("k [s/km]")
+        ax.set_xlabel("comoving k [h/Mpc] (box mode; s/km depends on z, theta)")
         ax.set_title(f"z-band {zb}  [{lo:.2f}, {hi:.2f})")
         ax.grid(alpha=0.3, which="both")
         if zb == 0:
@@ -271,9 +271,9 @@ def fig_error_vs_k(sigma, kfkms, z_band_edges, figdir):
     return str(p)
 
 
-def fig_dla_shotflag(dla_shot_flag, kfkms, figdir):
+def fig_dla_shotflag(dla_shot_flag, k_com_hmpc, figdir):
     plt = _plt()
-    k = np.asarray(kfkms)
+    k = np.asarray(k_com_hmpc)
     flag = np.asarray(dla_shot_flag).astype(int)
     fig, ax = plt.subplots(figsize=(8, 3.2))
     ax.bar(np.arange(len(k)), flag, width=1.0, color="C3", alpha=0.85)
@@ -346,12 +346,7 @@ def main():
     t0 = time.time()
     d = load_cache(args.cache)
     n_k = d["P_tier_p"].shape[1]
-    # Representative k-grid for labelling the error vector + figures. kfkms is NOT
-    # identical across rows (per-snap vmax differs; max dev ~3% LF / ~9% HR at high
-    # k). Training/residuals use each row's OWN grid per-index; only this saved label
-    # is row-0's grid, so downstream likelihood must treat error_vector["kfkms"] as a
-    # representative grid, not exact per-mode k. (Review I2.)
-    kgrid = d["kfkms"][0]                                  # representative k-grid (n_k,)
+    k_com = d["k_com_hmpc"]                 # validated comoving modes (schema.py); never a row's velocity grid
     print(f"loaded cache {args.cache}: {d['P_tier_p'].shape[0]} rows, n_k={n_k}, "
           f"{len(set(d['sim_name']))} sims ({time.time()-t0:.1f}s)")
 
@@ -360,7 +355,7 @@ def main():
     from hcd_analysis.emulator.data import edge_emphasis_k_weight
     k_weight = None
     if args.edge_gain != 0.0 or args.lowk_extra != 0.0:
-        k_weight = edge_emphasis_k_weight(kgrid, edge_gain=args.edge_gain,
+        k_weight = edge_emphasis_k_weight(k_com, edge_gain=args.edge_gain,
                                           lowk_extra=args.lowk_extra)
     print(f"recipe: n_basis={args.n_basis} p_resid_w={args.p_resid_w} "
           f"edge_gain={args.edge_gain} lowk_extra={args.lowk_extra} "
@@ -466,22 +461,23 @@ def main():
     sigma_zonly = np.sqrt(np.nanmean(sigma ** 2, axis=3))   # (4,K,Zb) τ₀-marginalized
 
     out_npz = Path(args.out).parent / "error_vector.npz"
-    np.savez(
+    from hcd_analysis.emulator.error_vector_io import save_error_vector
+    save_error_vector(
         out_npz,
         sigma=sigma,                          # (4,K,Zb,Tb) — the τ₀-aware vector
         dla_shot_flag=dla_shot_flag,
         z_band_edges=z_band_edges,
         tau0_band_centres=tau0_band_centres,  # (Tb,) α=τ₀/Kim(z) band centres
         class_names=np.array(COARSE_NAMES),
-        kfkms=kgrid,
+        k_com_hmpc=k_com,
     )
     print(f"\nerror vector -> {out_npz}  (sigma shape {sigma.shape})")
 
     # --- figures --------------------------------------------------------------
     fp_loss = fig_loss_curves(histories, args.figdir)
     fp_conv = fig_perfold_convergence(histories, args.figdir)
-    fp_evk = fig_error_vs_k(sigma_zonly, kgrid, z_band_edges, args.figdir)
-    fp_flag = fig_dla_shotflag(dla_shot_flag, kgrid, args.figdir)
+    fp_evk = fig_error_vs_k(sigma_zonly, k_com, z_band_edges, args.figdir)
+    fp_flag = fig_dla_shotflag(dla_shot_flag, k_com, args.figdir)
     print("figures:")
     for p in (fp_loss, fp_conv, fp_evk, fp_flag):
         print("  ", p)
@@ -500,7 +496,7 @@ def main():
         med = float(np.nanmedian(sigma[ci]))
         print(f"  {cname}: median σ = {med:.4g}")
     n_flag = int(np.asarray(dla_shot_flag).sum())
-    print(f"DLA shot-flagged k-bins: {n_flag}/{len(kgrid)}")
+    print(f"DLA shot-flagged k-bins: {n_flag}/{len(k_com)}")
     print(f"total wall: {total_wall:.1f}s "
           f"({total_wall/max(args.n_folds,1):.1f}s/fold)")
 

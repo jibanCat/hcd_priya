@@ -44,7 +44,7 @@ def main():
     args = ap.parse_args()
 
     d = load_cache(args.cache)
-    kgrid = d["kfkms"][0]
+    k_com = d["k_com_hmpc"]                 # validated comoving modes (schema.py)
     z_band_of_row, z_band_edges = make_z_bands(d["z_grid"], args.z_bands)
     tau0_band_of_row, tau0_band_centres = make_tau0_bands(
         d["tau0"], d["z_grid"], args.tau0_bands)
@@ -68,14 +68,15 @@ def main():
 
     ev = T.aggregate_error_vector(resid_folds, neff_folds)
     sigma = ev["sigma"]                                  # (4,K,Zb,Tb)
-    np.savez(
+    from hcd_analysis.emulator.error_vector_io import save_error_vector
+    save_error_vector(
         args.out,
         sigma=sigma,
         dla_shot_flag=ev["dla_shot_flag"],
         z_band_edges=z_band_edges,
         tau0_band_centres=tau0_band_centres,
         class_names=np.array(COARSE_NAMES),
-        kfkms=kgrid,
+        k_com_hmpc=k_com,
     )
     print(f"\nwrote {args.out}  sigma shape {sigma.shape}")
     # per (class, τ₀-band) median σ — does it grow toward the ladder extremes?

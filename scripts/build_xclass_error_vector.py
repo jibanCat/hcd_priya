@@ -156,13 +156,14 @@ def main():
 
     # carry the band scheme + sigma from the existing diagonal vector (so the cross-class
     # block is on the IDENTICAL (Zb,Tb) grid the diagonal C_emu uses).
-    ev = np.load(args.error_vector, allow_pickle=True)
+    from hcd_analysis.emulator.error_vector_io import load_error_vector, save_error_vector
+    ev = load_error_vector(args.error_vector)               # schema 2.0 only (k_com label)
     sigma_old = ev["sigma"]                                # (4,K,Zb,Tb) diagonal RMS-over-folds
     n_cls, K_ev, Zb_ev, Tb_ev = sigma_old.shape
     tau0_band_centres = ev["tau0_band_centres"]
     z_band_edges_ev = ev["z_band_edges"]
     dla_shot_flag = ev["dla_shot_flag"]
-    kfkms = ev["kfkms"]
+    k_com = ev["k_com_hmpc"]
     print(f"loaded diagonal error vector {args.error_vector}: sigma {sigma_old.shape}")
 
     # load the cache from fold-0's meta (the matched v3.3 build) unless overridden.
@@ -278,7 +279,7 @@ def main():
 
     # --- save -----------------------------------------------------------------
     out = Path(args.out)
-    np.savez(
+    save_error_vector(
         out,
         rho=rho,                                  # (4,4,K,Zb,Tb) cross-class block
         sigma=sigma_old,                          # (4,K,Zb,Tb) carried diagonal (back-compat)
@@ -286,7 +287,7 @@ def main():
         z_band_edges=z_band_edges,
         tau0_band_centres=tau0_centres,
         class_names=np.array(COARSE_NAMES),
-        kfkms=kfkms,
+        k_com_hmpc=k_com,
         diag_match_median=med_ratio,
         n_pool=Npool,
     )
