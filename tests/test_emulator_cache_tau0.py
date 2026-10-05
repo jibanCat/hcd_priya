@@ -364,7 +364,19 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
             cand = (sim, snap, sd, raw); break
     assert cand, "no HR z=3.0 pair"
     sim, snap, sd, raw = cand
-    my_params = bt0._read_priya_params(raw)            # 9 cosmo in bec.PARAM_ORDER
+    # The scratch copy of the HR runs has lost its SimulationICs.json (scratch purge; spectra re-copied 2026-08-18).
+    # An HR run re-simulates an LF design point with the same cosmology, so the parameters come from the LF run's ICs
+    # when the HR file is absent; the PRIYA-HR6 parameter match below checks that they are the right ones.
+    read_params = bt0._read_priya_params
+    if not (Path(raw).resolve().parents[2] / "SimulationICs.json").exists():
+        lf_ics = _EMU_LF / sim / "SimulationICs.json"
+        if not lf_ics.exists():
+            _unavailable(f"HR bit-identity: no SimulationICs.json for {sim} (HR or LF)")
+        lf_like = _EMU_LF / sim / "output" / "SPECTRA_000" / "unused.hdf5"   # only parents[2] is used
+
+        def read_params(_raw_tau_path, _f=bt0._read_priya_params, _p=lf_like):
+            return _f(_p)
+    my_params = read_params(raw)                       # 9 cosmo in bec.PARAM_ORDER
     with h5py.File(HR_REF, "r") as f:
         params = f["params"][...]; fv = f["flux_vectors"][...]
         zout = f["zout"][...]
@@ -376,8 +388,13 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
         zidx = int(np.argmin(np.abs(zout - 3.0)))
         P_priya = fv[row, zidx*NK:(zidx+1)*NK].astype(np.float64)
         kp = f["kfkms"][row, zidx, :].astype(np.float64)
-    rows, _ = bt0.build_tau0_rows(sim, snap, sd, raw,
-                                  alpha_slope_grid=np.array([alpha]), n_k=NK)
+    orig = bt0._read_priya_params
+    bt0._read_priya_params = read_params               # build_tau0_rows reads the parameters through the same helper
+    try:
+        rows, _ = bt0.build_tau0_rows(sim, snap, sd, raw,
+                                      alpha_slope_grid=np.array([alpha]), n_k=NK)
+    finally:
+        bt0._read_priya_params = orig
     r = rows[0]
     assert r["kfkms"].shape == (NK,), f"expected {NK} k-bins, got {r['kfkms'].shape}"
     assert np.max(np.abs(r["kfkms"] / kp - 1)) < 1e-10, "HR native k-grid mismatch"
