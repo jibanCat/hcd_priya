@@ -5,9 +5,18 @@ import numpy as np
 from .schema import CHECKPOINT_SCHEMA_VERSION, SchemaCollapseError
 
 
+_VELOCITY_KEYS = ("kfkms", "k_skm", "k_kms", "kgrid")
+
+
 def save_error_vector(path, *, sigma, k_com_hmpc, z_band_edges, tau0_band_centres, class_names, **extra):
-    if "kfkms" in extra:
-        raise SchemaCollapseError("error vectors are labelled by k_com_hmpc, not by a velocity grid (kfkms)")
+    bad = [k for k in extra if k in _VELOCITY_KEYS]
+    if bad:
+        raise SchemaCollapseError(f"error vectors are labelled by k_com_hmpc, not by a velocity grid ({bad})")
+    K = int(np.asarray(k_com_hmpc).shape[0])
+    if np.asarray(sigma).shape[1] != K:
+        raise SchemaCollapseError(f"sigma has {np.asarray(sigma).shape[1]} modes on axis 1, k_com_hmpc has {K}")
+    if "rho" in extra and np.asarray(extra["rho"]).shape[2] != K:
+        raise SchemaCollapseError(f"rho has {np.asarray(extra['rho']).shape[2]} modes on axis 2, k_com_hmpc has {K}")
     np.savez(path, sigma=sigma, k_com_hmpc=np.asarray(k_com_hmpc, float), z_band_edges=z_band_edges,
              tau0_band_centres=tau0_band_centres, class_names=class_names,
              schema_version=np.array(CHECKPOINT_SCHEMA_VERSION), **extra)

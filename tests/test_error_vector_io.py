@@ -32,3 +32,14 @@ def test_old_kfkms_labelled_file_is_refused(tmp_path):
 def test_writing_a_velocity_label_is_refused(tmp_path):
     with pytest.raises(S.SchemaCollapseError):
         EV.save_error_vector(tmp_path / "x.npz", **_arrays(), kfkms=_arrays()["k_com_hmpc"])
+    with pytest.raises(S.SchemaCollapseError):
+        EV.save_error_vector(tmp_path / "x.npz", **_arrays(), k_skm=_arrays()["k_com_hmpc"])
+
+
+def test_sigma_and_rho_mode_axis_must_match_k_com(tmp_path):
+    a = _arrays()
+    a["sigma"] = np.ones((4, 5, 3, 4))                     # 5 modes vs 4 in k_com
+    with pytest.raises(S.SchemaCollapseError, match="modes"):
+        EV.save_error_vector(tmp_path / "x.npz", **a)
+    with pytest.raises(S.SchemaCollapseError, match="modes"):
+        EV.save_error_vector(tmp_path / "y.npz", **_arrays(), rho=np.ones((4, 4, 5, 3, 4)))
