@@ -18,6 +18,8 @@ run builds (forward Jacobian), so this reads the joint (n_s,τ₀) geometry dire
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_mf_gate_aliasing_probes.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 
 import hcd_analysis.emulator
@@ -33,9 +35,9 @@ from hcd_analysis.emulator.data import Z_LIMITS
 
 # reuse the wired forward from the gate script
 import importlib.util as _ilu
-_spec = _ilu.spec_from_file_location("mfgate", "/home/mfho/hcd_priya/scripts/diag_emu_bias_allfolds_mf.py")
+_spec = _ilu.spec_from_file_location("mfgate", f"{_REPO_ROOT}/scripts/diag_emu_bias_allfolds_mf.py")
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 FIGDIR = f"{REPO}/figures/analysis/04_emulator"
 RESULTS = f"{FIGDIR}/emu_bias_allfolds_mf_aliasing.txt"
 HOLD0 = f"{REPO}/checkpoints/error_vector_xclass_holdout0.npz"

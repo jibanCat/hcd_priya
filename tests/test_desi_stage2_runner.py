@@ -1,4 +1,6 @@
 """Tests for the pure helpers of scripts/desi_stage2_runner.py (no context build, no sampling, no real pkl)."""
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import json
 import os
@@ -6,7 +8,7 @@ import os
 import numpy as np
 import pytest
 
-S = importlib.util.spec_from_file_location("s2", os.path.join("/home/mfho/hcd_priya", "scripts", "desi_stage2_runner.py"))
+S = importlib.util.spec_from_file_location("s2", os.path.join(_REPO_ROOT, "scripts", "desi_stage2_runner.py"))
 M = importlib.util.module_from_spec(S); S.loader.exec_module(M)
 
 

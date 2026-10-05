@@ -12,6 +12,8 @@ REWRITTEN for the W2 KS dN/dX-mapped semantics (2026-07-22).
     each survey deploys), HCD_LLS_BOOST_SPACE (where the LLS boost acts), and the KS mapped
     width constants KS_DNDX_SIGMA_{EPS,KAPPA,MSUB} + KS_DNDX_DLA_RAW_MU0.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import numpy as np
 import pytest
@@ -163,7 +165,7 @@ def test_ks_mapped_width_constants():
         "eps_lls", "kappa_lls", "m_sub", "t_sub", "dla_raw", "t_dla"}
     # kappa width == the corrected-law free-gamma GLS sigma (4 dp) from the derivation JSON
     import json
-    with open("/home/mfho/hcd_priya/hcd_analysis/emulator/hcd_lit_dndx_corrected.json") as fh:
+    with open(f"{_REPO_ROOT}/hcd_analysis/emulator/hcd_lit_dndx_corrected.json") as fh:
         j = json.load(fh)
     assert INF.KS_DNDX_SIGMA_KAPPA == pytest.approx(
         j["adopted_law"]["free_fit_evidence"]["sigma_gamma"], abs=5e-5)

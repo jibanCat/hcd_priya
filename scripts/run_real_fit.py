@@ -38,6 +38,8 @@ Env (MANDATORY):
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_real_fit.py --survey {eboss,ks,desi}
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import functools
@@ -63,7 +65,7 @@ from hcd_analysis.emulator import blinding as BL
 from hcd_analysis.emulator.data import PARAM_LIMITS
 from numpyro.infer import init_to_sample
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
 
 # GetDist LaTeX labels (extends scripts/legb_chains_to_cobaya.LABELS with the nuisance latents).

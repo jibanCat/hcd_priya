@@ -19,6 +19,8 @@ Steps:
  2. PER-LEG Fisher: F_leg = J_leg^T C_leg^-1 J_leg + Lambda, sigma = sqrt(diag(F_leg^-1)).
  3. ratio r = sigma_like(n_s|leg) / 0.28868 ; r >= 1 => prior-dominated.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os, glob, json
 import numpy as np
 import hcd_analysis.emulator  # x64
@@ -32,7 +34,7 @@ import hcd_analysis.emulator.data_likelihood as DL
 from hcd_analysis.emulator.meanflux_prior import tau0_alpha_priya, KIM_AMP, KIM_SLOPE, TAU0_PIVOT_Z
 
 FIG = "/home/mfho/hcd_priya_notes/figures/analysis/05_likelihood"
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 PARAM_NAMES = ["ns","Ap","herei","heref","alphaq","hub","omegamh2","hireionz","bhfeedback",
                "tau0_amp","dtau0","alpha_lls","alpha_subdla","alpha_dla"]
 NPAR = 14

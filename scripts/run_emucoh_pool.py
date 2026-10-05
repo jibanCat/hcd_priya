@@ -10,10 +10,12 @@ health.json. Production NUTS knobs (PROD). Usage:
   PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     OMP_NUM_THREADS=1 python3 scripts/run_emucoh_pool.py --workers 20
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse
 import sys
 
-sys.path.insert(0, "/home/mfho/hcd_priya/scripts")
+sys.path.insert(0, f"{_REPO_ROOT}/scripts")
 import run_stepA as R
 
 

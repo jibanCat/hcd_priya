@@ -28,6 +28,8 @@ then commit the new npz together with the reason; the generating commit + jax/nu
 versions are stamped inside the npz for the audit trail.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import os
 import subprocess
@@ -42,7 +44,7 @@ from numpyro import handlers
 
 from hcd_analysis.emulator import closure_legb as CL
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 GOLDEN_DIR = f"{REPO}/tests/golden"
 TRACE_SEED = 7
 NUTS_SEED = 20260720

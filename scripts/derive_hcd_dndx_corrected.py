@@ -25,6 +25,8 @@ Env:
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/derive_hcd_dndx_corrected.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import datetime
 import json
@@ -34,7 +36,7 @@ import sys
 
 import numpy as np
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 sys.path.insert(0, REPO)
 
 from hcd_analysis.emulator import lit_dndx as LD            # noqa: E402

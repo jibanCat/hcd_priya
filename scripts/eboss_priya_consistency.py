@@ -14,6 +14,8 @@ Outputs: ``<out>.json`` (everything) and ``<out>.md`` (tables). The single attri
 least one primary/secondary label is SHIFTED or DISCREPANT (section 4 rule) and is labelled INDICATIVE.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import hashlib
@@ -216,7 +218,7 @@ def main(argv=None):
         refuse(f"output exists: {a.out}.json/.md (the readout runs once)")
 
     try:
-        sys.path.insert(0, "/home/mfho/hcd_priya")
+        sys.path.insert(0, _REPO_ROOT)
         from hcd_analysis.emulator.data import KIM_AMP as KA, KIM_SLOPE as KS  # noqa
         if abs(KA - KIM_AMP) > 1e-15 or abs(KS - KIM_SLOPE) > 1e-12:
             refuse("Kim constants drifted from the frozen values used here")

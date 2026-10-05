@@ -12,6 +12,8 @@ Emits:
   figures/analysis/05_likelihood/stepA_priors.txt
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import functools
 import numpy as np
@@ -34,7 +36,7 @@ from hcd_analysis.emulator.inference import (
     HCD_LIT_OVER_SIM, HCD_LIT_OVER_SIM_SLOPE)
 from hcd_analysis.emulator.closure_legb import ZSLOPE_PRIOR_SIGMA
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 CACHE = f"{REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 OUT_PNG = f"{REPO}/figures/analysis/05_likelihood/stepA_priors.png"
 OUT_TXT = f"{REPO}/figures/analysis/05_likelihood/stepA_priors.txt"

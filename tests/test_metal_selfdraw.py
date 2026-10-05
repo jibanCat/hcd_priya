@@ -22,6 +22,8 @@ pooling separation.
 
 Run: /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_metal_selfdraw.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib
 import sys
 from types import SimpleNamespace
@@ -29,7 +31,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 
 CL = importlib.import_module("hcd_analysis.emulator.closure_legb")
 runner = importlib.import_module("scripts.run_prod_sbc_shard")

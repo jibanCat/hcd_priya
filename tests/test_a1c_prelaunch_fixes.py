@@ -26,13 +26,15 @@ resumability argument for the 96 A1 pkls rests on it.
 
 Run: /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_a1c_prelaunch_fixes.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib
 import sys
 
 import numpy as np
 import pytest
 
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 
 CL = importlib.import_module("hcd_analysis.emulator.closure_legb")
 runner = importlib.import_module("scripts.run_prod_sbc_shard")
@@ -119,7 +121,7 @@ def test_a_selfdraw_run_can_never_stamp_the_defect_it_repairs():
 def test_population_banner_prints_fres_selfdraw():
     """Pre-registration 5c makes confirming fres_selfdraw=True a BINDING pre-readout check.
     It cannot be satisfied if the analyzer never prints it."""
-    src = open("/home/mfho/hcd_priya/scripts/analyze_sbc_perleg.py").read()
+    src = open(f"{_REPO_ROOT}/scripts/analyze_sbc_perleg.py").read()
     banner = src.split("[population]", 1)[1].split("\n\n", 1)[0]
     for field in ("metal_selfdraw", "fres_selfdraw", "diag_no_sample_metals",
                   "metal_prior", "prior_sig"):
@@ -152,7 +154,7 @@ def _analyzer():
     if _ANALYZER_NS is not None:
         return _ANALYZER_NS
     import ast
-    path = "/home/mfho/hcd_priya/scripts/analyze_sbc_perleg.py"
+    path = f"{_REPO_ROOT}/scripts/analyze_sbc_perleg.py"
     tree = ast.parse(open(path).read(), filename=path)
     keep = []
     for node in tree.body:
@@ -350,12 +352,12 @@ def _run_analyzer(root, prefix, outdir):
     with its artifact directory redirected OUT of the notes repo."""
     import os
     import subprocess
-    env = dict(os.environ, PYTHONPATH="/home/mfho/hcd_priya", SBC_PERLEG_OUTDIR=outdir,
+    env = dict(os.environ, PYTHONPATH=_REPO_ROOT, SBC_PERLEG_OUTDIR=outdir,
                MPLBACKEND="Agg")
     return subprocess.run(
         ["/home/mfho/.conda/envs/emu-jax/bin/python3",
-         "/home/mfho/hcd_priya/scripts/analyze_sbc_perleg.py", root, prefix],
-        capture_output=True, text=True, env=env, cwd="/home/mfho/hcd_priya", timeout=900)
+         f"{_REPO_ROOT}/scripts/analyze_sbc_perleg.py", root, prefix],
+        capture_output=True, text=True, env=env, cwd=_REPO_ROOT, timeout=900)
 
 
 def test_readout_emits_repaired_sectors_to_stdout_and_to_the_gate_json(tmp_path):
@@ -404,10 +406,10 @@ def test_out_prefix_is_mandatory(tmp_path):
     import subprocess
     root = tmp_path / "root"
     _synthetic_leg(str(root / "prod_sbc_leg_eboss"), n_mocks=4)
-    env = dict(os.environ, PYTHONPATH="/home/mfho/hcd_priya",
+    env = dict(os.environ, PYTHONPATH=_REPO_ROOT,
                SBC_PERLEG_OUTDIR=str(tmp_path / "figs"))
     r = subprocess.run(["/home/mfho/.conda/envs/emu-jax/bin/python3",
-                        "/home/mfho/hcd_priya/scripts/analyze_sbc_perleg.py", str(root)],
+                        f"{_REPO_ROOT}/scripts/analyze_sbc_perleg.py", str(root)],
                        capture_output=True, text=True, env=env, timeout=300)
     assert r.returncode != 0, "running without OUT_PREFIX must REFUSE, not default"
     assert "OUT_PREFIX" in (r.stdout + r.stderr)

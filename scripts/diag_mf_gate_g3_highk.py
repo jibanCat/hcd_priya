@@ -14,13 +14,15 @@ EXCLUDING that sim (HF-LOSO) so the residual is the honest LF->HR generalization
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_mf_gate_g3_highk.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 import hcd_analysis.emulator
 import jax.numpy as jnp
 from hcd_analysis.emulator import multifidelity as MF
 from hcd_analysis.emulator.data import Z_LIMITS
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 RESULTS = f"{REPO}/figures/analysis/04_emulator/emu_bias_allfolds_mf_g3.txt"
 K_HIGH = 0.0442   # s/km, the G3 high-k floor
 Z_LO, Z_HI = 2.8, 3.4

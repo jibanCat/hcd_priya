@@ -28,6 +28,8 @@ hcd_analysis/emulator/data.reconstruct_P_filt:
 
 No model import needed; this is pure matplotlib drawing.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import matplotlib
 matplotlib.use("Agg")
@@ -380,7 +382,7 @@ fig.suptitle("Phase-2b emulator "
              "(as-built, 2026-06-02; baseline+residual $P_{\\mathrm{filt}}$)",
              fontsize=18, fontweight="bold", y=0.985)
 
-out_dir = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
+out_dir = f"{_REPO_ROOT}/figures/analysis/04_emulator"
 os.makedirs(out_dir, exist_ok=True)
 out_path = os.path.join(out_dir, "emulator_architecture.png")
 fig.savefig(out_path, dpi=170, bbox_inches="tight", facecolor="white")

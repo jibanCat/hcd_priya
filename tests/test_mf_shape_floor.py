@@ -8,6 +8,8 @@ Covers:
     mf_shape_cov=None is byte-identical (back-compat); C_shape scales as infl²; the loglik
     is finite + differentiable in θ through the shape covariance (the JAX-safety check).
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import hcd_analysis.emulator  # noqa: F401  enables jax_enable_x64
 import jax
@@ -19,7 +21,7 @@ from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator import data_likelihood as DL
 from hcd_analysis.emulator.likelihood import gaussian_loglik
 
-SHAPE_NPZ = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_shape.npz"
+SHAPE_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/mf_cemu_shape.npz"
 DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 _have_shape = os.path.exists(SHAPE_NPZ)
 _have_desi = os.path.exists(DESI_NPZ)

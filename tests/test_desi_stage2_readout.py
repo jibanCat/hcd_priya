@@ -1,8 +1,10 @@
 """Synthetic tests for scripts/desi_stage2_readout.py v2: runner-format pkls/JSONs built from known posteriors with AR(1)
 autocorrelated chains (the stored draws are an independent 600-draw chain thinned by the stored step, as in production)."""
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util, json, os, pickle
 import numpy as np, pytest
-S = importlib.util.spec_from_file_location("s2r", "/home/mfho/hcd_priya/scripts/desi_stage2_readout.py"); M = importlib.util.module_from_spec(S); S.loader.exec_module(M)
+S = importlib.util.spec_from_file_location("s2r", f"{_REPO_ROOT}/scripts/desi_stage2_readout.py"); M = importlib.util.module_from_spec(S); S.loader.exec_module(M)
 NAMES = ["ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2", "hireionz", "bhfeedback"] + [f"tau0_z{i}" for i in range(13)] + ["alpha_lls", "alpha_subdla", "alpha_dla"]
 SD = np.array([0.05, 0.03, 0.06, 0.25]); MU = np.array([0.4, 0.95, -0.1, -1.6])
 

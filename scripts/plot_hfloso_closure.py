@@ -9,13 +9,15 @@ figures/analysis/04_emulator/mf_rescorr_loso.txt. Writes to the NOTES repo figur
 Sign convention here: bias = (posterior_mean - truth)/sigma  [positive => posterior OVERestimates].
 (The run health log prints (truth - post)/sigma; this script recomputes from the draws.)
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os, glob
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 NOTES_FIG = "/home/mfho/hcd_priya_notes/figures/analysis/05_truth_validation"
 CKPT = f"{REPO}/checkpoints/stepA"
 os.makedirs(NOTES_FIG, exist_ok=True)

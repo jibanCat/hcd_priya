@@ -29,7 +29,9 @@ import hashlib
 import numpy as np
 import h5py
 
-CACHE_PATH = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+from ..paths import REPO_ROOT_STR as _REPO
+
+CACHE_PATH = f"{_REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 
 _KERNEL_DATASETS = ("snap_dNdX_LLS", "snap_dNdX_subDLA", "snap_dNdX_DLA",
                     "snap_f_nhi", "snap_total_path_dX", "log_nhi_edges")

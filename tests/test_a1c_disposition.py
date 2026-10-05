@@ -17,6 +17,8 @@ result exists. The table below is the frozen section-4 table; nothing here chang
 
 Run: /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_a1c_disposition.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib
 import itertools
 import sys
@@ -24,7 +26,7 @@ import sys
 import numpy as np
 import pytest
 
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 
 disp = importlib.import_module("scripts.a1c_disposition")
 
@@ -306,7 +308,7 @@ def test_frozen_thresholds_match_the_analyzer_single_authority():
     analyze_sbc_perleg.gate_cosmo's defaults). The cross-check in dispose() only catches a
     divergence for pulls that straddle the two values; pin the copies equal outright."""
     import ast
-    path = "/home/mfho/hcd_priya/scripts/analyze_sbc_perleg.py"
+    path = f"{_REPO_ROOT}/scripts/analyze_sbc_perleg.py"
     src = open(path).read()
     tree = ast.parse(src, filename=path)
     keep = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom, ast.FunctionDef))]

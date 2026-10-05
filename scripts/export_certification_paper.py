@@ -11,6 +11,8 @@ Blind status: BLIND-SAFE. Every number is a self-draw SBC product on PRIYA mocks
 Inputs are the frozen pkls (sha256-verified against the committed manifests); nothing inside the code repo is written.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import hashlib
@@ -24,7 +26,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 NOTES = "/home/mfho/hcd_priya_notes"
 SCALAR = ["ns", "Ap", "alpha_subdla", "alpha_lls", "alpha_dla"]
 Z_TAU0 = np.array([2.2 + 0.2 * i for i in range(13)])

@@ -40,6 +40,8 @@ ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<tree> JAX_PLATFORMS=cpu OMP_NUM_THREADS=1 \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/gen_analysis_lock.py [--check]
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import hashlib
@@ -61,7 +63,7 @@ from datetime import datetime, timezone
 # run_real_fit.PROD_PREFIX).
 # ---------------------------------------------------------------------------------------------
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MAIN_CHECKPOINTS_DIR = "/home/mfho/hcd_priya/checkpoints"
+MAIN_CHECKPOINTS_DIR = f"{_REPO_ROOT}/checkpoints"
 NOTES_REPO = "/home/mfho/hcd_priya_notes"
 
 # PI decision records of record (freeze provenance; READ-ONLY -- we record path + sha256 only).
@@ -913,7 +915,7 @@ def _guard_out_path(out_path, i_am_the_freeze_step):
         raise SystemExit("REFUSED: blind.lock is out of scope for this generator and must "
                          "never be written by ANYONE (no override exists).")
     protected = {os.path.join(_REPO_ROOT, "analysis.lock"),
-                 "/home/mfho/hcd_priya/analysis.lock"}
+                 f"{_REPO_ROOT}/analysis.lock"}
     if ap in protected:
         if not i_am_the_freeze_step:
             raise SystemExit(

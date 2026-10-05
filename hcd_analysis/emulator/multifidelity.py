@@ -83,8 +83,9 @@ from . import train as T
 # ---------------------------------------------------------------------------- #
 # Paths / constants
 # ---------------------------------------------------------------------------- #
-HR_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
-LF_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+from ..paths import REPO_ROOT_STR as _REPO
+HR_CACHE = f"{_REPO}/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
+LF_CACHE = f"{_REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 RES_CORR_DIR = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/res_corr"
 N_CLASSES = 4
 

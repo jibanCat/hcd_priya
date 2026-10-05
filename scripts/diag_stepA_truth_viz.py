@@ -24,6 +24,8 @@ Env (MANDATORY):
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_stepA_truth_viz.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import numpy as np
 import h5py
@@ -40,8 +42,8 @@ from hcd_analysis.emulator.closure_legb import (
 from hcd_analysis.emulator.meanflux_prior import becker13_tau0
 from hcd_analysis.emulator import multifidelity as MF
 
-OUT = "/home/mfho/hcd_priya/figures/analysis/05_likelihood"
-HR_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
+OUT = f"{_REPO_ROOT}/figures/analysis/05_likelihood"
+HR_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
 
 # Fiducial targets: (label, fold, target n_s). M4 is the HR truth (n_s ~= 0.979).
 FIDUCIALS = [

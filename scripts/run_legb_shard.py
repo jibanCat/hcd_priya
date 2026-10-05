@@ -6,6 +6,8 @@ merge_legb_shards.py. Uses the DE-CIRCULARISED rho (folds 1-7) by default.
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse
 import functools
 import os
@@ -17,7 +19,7 @@ import hcd_analysis.emulator  # noqa: F401  (x64 before jax)
 import jax  # noqa: F401
 from hcd_analysis.emulator.closure_legb import build_legb_ctx, run_legb
 
-HOLDOUT0_EV = "/home/mfho/hcd_priya/checkpoints/error_vector_xclass_holdout0.npz"
+HOLDOUT0_EV = f"{_REPO_ROOT}/checkpoints/error_vector_xclass_holdout0.npz"
 
 
 def main():

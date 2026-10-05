@@ -2,6 +2,8 @@
 MF-3 third mean-flux mode). Generic machinery only; no science values.
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_pi33_diagnostics.py -q -p no:cacheprovider
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse
 import importlib.util
 from types import SimpleNamespace
@@ -17,7 +19,7 @@ from hcd_analysis.emulator import closure_legb as CL
 
 
 def _load_driver():
-    sp = importlib.util.spec_from_file_location("run_real_fit", "/home/mfho/hcd_priya/scripts/run_real_fit.py")
+    sp = importlib.util.spec_from_file_location("run_real_fit", f"{_REPO_ROOT}/scripts/run_real_fit.py")
     m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m); return m
 
 

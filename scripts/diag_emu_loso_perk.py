@@ -29,6 +29,8 @@ Forward-only; no NUTS, no training. Runs in ~minutes on CPU.
 ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_loso_perk.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 from pathlib import Path
 
@@ -40,7 +42,7 @@ from hcd_analysis.emulator.data import load_cache, datarange_mask
 from hcd_analysis.emulator.predict import predict_P_filt
 from hcd_analysis.emulator.closure_legb import CACHE_PATH, held_out_sims
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 # validation figure → PRIVATE notes repo (the code README is reproduction/quickstart only)
 FIGDIR = "/home/mfho/hcd_priya_notes/figures/analysis/06_validation_summary"
 FIG = f"{FIGDIR}/loso_perk_pred_error.png"

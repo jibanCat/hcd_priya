@@ -1,6 +1,8 @@
 """PI #33: eboss_diag_compare.py on synthetic products (no science values). Checks root detection (unblinded export preferred),
 the 2- and 3-parameter ladder inversions (exact on synthetic ladders), the ctau0 handling, shifts in baseline sd, the gate,
 rails against each product's own box, and the exactly-once output refusal."""
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import json
 import os
@@ -12,7 +14,7 @@ KIM = lambda z: 2.3e-3 * (1 + np.asarray(z)) ** 3.65
 
 
 def _load():
-    sp = importlib.util.spec_from_file_location("edc", "/home/mfho/hcd_priya/scripts/eboss_diag_compare.py")
+    sp = importlib.util.spec_from_file_location("edc", f"{_REPO_ROOT}/scripts/eboss_diag_compare.py")
     m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m); return m
 
 

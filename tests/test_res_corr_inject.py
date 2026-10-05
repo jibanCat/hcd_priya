@@ -57,6 +57,8 @@ Env (MANDATORY):
     -m pytest tests/test_res_corr_inject.py -v
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import numpy as np
 import pytest
@@ -71,7 +73,7 @@ from hcd_analysis.emulator.closure_legb import (
 )
 import hcd_analysis.emulator.multifidelity as MF
 
-BASIS_NPZ = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/res_corr_injection_basis.npz"
+BASIS_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/res_corr_injection_basis.npz"
 SEED = 0
 # the spec/basis pre-selected gate member: b1 = the worst-n_s-projecting, out-of-span,
 # z>=2.8-localized direction ({leg}_worst_ns_member == 1 for all legs).

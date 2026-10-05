@@ -6,6 +6,8 @@
   * full pkl-layout populations (48 + 48 files with sha manifests, the frozen 25-name list and the inventory
     sites_extra) so preflight() and run() exercise the FROZEN loaders end to end.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import hashlib
 import importlib.util
 import json
@@ -15,7 +17,7 @@ import pickle
 import numpy as np
 import pytest
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 S = importlib.util.spec_from_file_location("ds", os.path.join(REPO, "scripts", "desi_stage1.py"))
 M = importlib.util.module_from_spec(S); S.loader.exec_module(M)
 EX = M.EX

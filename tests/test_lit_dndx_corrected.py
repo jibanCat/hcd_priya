@@ -24,6 +24,8 @@ Env:
   PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_lit_dndx_corrected.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import copy
 import hashlib
 import json
@@ -36,8 +38,8 @@ import hcd_analysis.emulator  # noqa: F401  x64 before jax
 from hcd_analysis.emulator import lit_dndx as LD
 from hcd_analysis.emulator import inference as INF
 
-_JSON = "/home/mfho/hcd_priya/hcd_analysis/emulator/hcd_lit_dndx_corrected.json"
-_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+_JSON = f"{_REPO_ROOT}/hcd_analysis/emulator/hcd_lit_dndx_corrected.json"
+_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 _HAS_CACHE = os.path.exists(_CACHE)
 
 

@@ -8,6 +8,8 @@ inherited via the C_emu). This is the fit-quality + ensemble-benefit gate.
 ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/validate_production_ensemble.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import glob, os
 import numpy as np
 import hcd_analysis.emulator  # noqa: F401  x64
@@ -19,7 +21,7 @@ from hcd_analysis.emulator.prod_ensemble import production_member_paths
 from hcd_analysis.emulator.closure_legb import CACHE_PATH
 
 VAL_SEED, VAL_FRAC = 12345, 0.10
-CKPT = "/home/mfho/hcd_priya/checkpoints/final_prod_seed"
+CKPT = f"{_REPO_ROOT}/checkpoints/final_prod_seed"
 CLASSES = ["clean", "LLS", "subDLA", "DLA"]
 
 

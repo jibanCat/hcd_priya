@@ -23,13 +23,15 @@ to the NOTES figure tree.
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
        /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/analyze_mf_nscert_dk.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os, glob
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 CKPT = f"{REPO}/checkpoints/stepA"
 NOTES_FIG = "/home/mfho/hcd_priya_notes/figures/analysis/05_truth_validation"
 

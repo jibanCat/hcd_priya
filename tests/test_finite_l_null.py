@@ -16,6 +16,8 @@ aggregation rule (root-mean-VARIANCE, not mean of sds), and the analyzer wiring 
 
 Run: /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_finite_l_null.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import ast
 import importlib
 import json
@@ -26,7 +28,7 @@ import sys
 import numpy as np
 import pytest
 
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 
 runner = importlib.import_module("scripts.run_prod_sbc_shard")
 
@@ -38,7 +40,7 @@ def _analyzer():
     global _ANALYZER_NS
     if _ANALYZER_NS is not None:
         return _ANALYZER_NS
-    path = "/home/mfho/hcd_priya/scripts/analyze_sbc_perleg.py"
+    path = f"{_REPO_ROOT}/scripts/analyze_sbc_perleg.py"
     tree = ast.parse(open(path).read(), filename=path)
     keep = [n for n in tree.body
             if isinstance(n, (ast.Import, ast.ImportFrom, ast.FunctionDef))]
@@ -162,12 +164,12 @@ def test_readout_prints_and_persists_the_finite_L_null(tmp_path):
     root = tmp_path / "root"
     L_list = [40, 60, 80, 120, 40, 60, 80, 120]
     _synthetic_leg_hetL(str(root / "prod_sbc_leg_eboss"), L_list)
-    env = dict(os.environ, PYTHONPATH="/home/mfho/hcd_priya",
+    env = dict(os.environ, PYTHONPATH=_REPO_ROOT,
                SBC_PERLEG_OUTDIR=str(tmp_path / "figs"), MPLBACKEND="Agg")
     r = subprocess.run(
         ["/home/mfho/.conda/envs/emu-jax/bin/python3",
-         "/home/mfho/hcd_priya/scripts/analyze_sbc_perleg.py", str(root), "t_finL"],
-        capture_output=True, text=True, env=env, cwd="/home/mfho/hcd_priya", timeout=900)
+         f"{_REPO_ROOT}/scripts/analyze_sbc_perleg.py", str(root), "t_finL"],
+        capture_output=True, text=True, env=env, cwd=_REPO_ROOT, timeout=900)
     assert r.returncode == 0, f"analyzer failed:\n{r.stdout[-3000:]}\n{r.stderr[-3000:]}"
 
     assert "finite-L null" in r.stdout, "the corrected null must be PRINTED at readout"

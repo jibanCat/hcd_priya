@@ -14,6 +14,8 @@ Uses the REAL final_fold0 checkpoint + error_vector.npz; env-gated/skipped if ab
   PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_closure_sbc.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 
 import hcd_analysis.emulator  # noqa: F401  enables x64
@@ -33,7 +35,7 @@ from hcd_analysis.emulator import sampler_numpyro as S
 from hcd_analysis.emulator.sampler_numpyro import numpyro_model, _dla_raw_mu, run_nuts
 from hcd_analysis.emulator import closure_mocks as M
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 CKPT = f"{REPO}/checkpoints/final_fold0"
 ERROR_VECTOR = f"{REPO}/checkpoints/error_vector.npz"
 

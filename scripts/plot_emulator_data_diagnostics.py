@@ -11,6 +11,8 @@ Run:
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_emulator_data_diagnostics.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import glob, os
 import numpy as np
 import matplotlib
@@ -22,7 +24,7 @@ from hcd_analysis.emulator.data import load_cache, signed_log, COARSE_NAMES
 
 SHARD_GLOB = "/scratch/cavestru_root/cavestru0/mfho/tau0_shards/observables_tau0_lf.shard*.h5"
 N_SHARDS = 10
-OUTDIR = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
+OUTDIR = f"{_REPO_ROOT}/figures/analysis/04_emulator"
 
 PARAM_NAMES = ["ns", "Ap", "herei", "heref", "alphaq",
                "hub", "omegamh2", "hireionz", "bhfeedback"]

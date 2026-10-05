@@ -24,6 +24,8 @@ Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ks_dndx_reparam.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import itertools
 import os
 import time
@@ -40,12 +42,12 @@ from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator import inference as INF
 from hcd_analysis.emulator.dndx_wc import w_c_corrected
 
-_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-_CKPT0 = "/home/mfho/hcd_priya/checkpoints/final_fold0.eqx"
+_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+_CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 _KS = ("/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
        "final-conservative-p1d-karacayli_etal2021.txt")
-_MANIFEST = "/home/mfho/hcd_priya/checkpoints/production_ensemble_manifest.json"
+_MANIFEST = f"{_REPO_ROOT}/checkpoints/production_ensemble_manifest.json"
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ, _KS))
 _have_prod = _have and os.path.exists(_MANIFEST)
 

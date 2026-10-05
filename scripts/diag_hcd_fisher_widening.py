@@ -32,9 +32,11 @@ ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_V
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_hcd_fisher_widening.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import sys
 import numpy as np
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 import hcd_analysis.emulator  # noqa: F401  x64 before jax
 import jax
 import jax.numpy as jnp

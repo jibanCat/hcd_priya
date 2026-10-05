@@ -19,6 +19,8 @@ test_dla_selfdraw_arm.py forward_stamp-stub convention):
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ks_selboost_runner.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 from types import SimpleNamespace
 
 import numpy as np
@@ -29,8 +31,8 @@ import hcd_analysis.emulator.inference as INF
 import scripts.ks_selboost_arms as AR
 import scripts.run_ks_selboost_shard as R
 
-RUNNER = "/home/mfho/hcd_priya/scripts/run_ks_selboost_shard.py"
-BATCH = "/home/mfho/hcd_priya/scripts/batch_ks_selboost.sh"
+RUNNER = f"{_REPO_ROOT}/scripts/run_ks_selboost_shard.py"
+BATCH = f"{_REPO_ROOT}/scripts/batch_ks_selboost.sh"
 
 
 # --------------------------------------------------------------------------------------------- #

@@ -37,6 +37,8 @@ truth boost must sit OFF the pin center to be a real test:
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse
 import functools
 import glob
@@ -55,7 +57,7 @@ from hcd_analysis.emulator.closure_legb import (build_legb_ctx, run_legb, prod_f
 from hcd_analysis.emulator.inference import (HCD_LLS_SURVEY_BOOST,
                                              HCD_LLS_SURVEY_FRAC_SIGMA)
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
 RES_INSTR_BASIS = os.path.join(REPO, "hcd_analysis", "_emulator_data", "res_instr_injection_basis.npz")
 

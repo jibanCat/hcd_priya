@@ -42,6 +42,8 @@ Env (MANDATORY):
     scripts/diag_cemu_validation.py [--max-rows N]
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import functools
@@ -63,7 +65,7 @@ from hcd_analysis.emulator.data import (
 from hcd_analysis.emulator.predict import predict_P_filt
 from hcd_analysis.emulator.inference import predict_P_obs_and_cov_single_z
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 CKPT = f"{REPO}/checkpoints/final_fold0"
 ERROR_VECTOR = f"{REPO}/checkpoints/error_vector.npz"
 FIGDIR = f"{REPO}/figures/analysis/05_likelihood"

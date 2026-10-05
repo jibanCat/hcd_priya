@@ -136,9 +136,12 @@ def unblind(samples, offset, columns=PARAM_NAMES):
 # --------------------------------------------------------------------------------------------- #
 #  blind.lock  —  the committed SEED (project-string + git-commit). The OFFSET is NOT stored.
 # --------------------------------------------------------------------------------------------- #
-def git_commit(repo="/home/mfho/hcd_priya"):
+def git_commit(repo=None):
     """The current git commit (short SHA) — part of the blind seed string so the offset is
-    pinned to a frozen analysis state. Falls back to ``"nogit"`` if git is unavailable."""
+    pinned to a frozen analysis state. Falls back to ``"nogit"`` if git is unavailable.
+    ``repo=None`` is this checkout's root (emulator-debug 2026-10; formerly an absolute literal)."""
+    if repo is None:
+        from ..paths import REPO_ROOT_STR as repo
     try:
         return subprocess.check_output(
             ["git", "-C", repo, "rev-parse", "--short", "HEAD"],
@@ -147,14 +150,14 @@ def git_commit(repo="/home/mfho/hcd_priya"):
         return "nogit"
 
 
-def make_seed_str(project_string, commit=None, repo="/home/mfho/hcd_priya"):
+def make_seed_str(project_string, commit=None, repo=None):
     """The canonical blind seed string = ``"{project_string}@{git-commit}"``. ``commit=None``
     resolves the live HEAD; pass an explicit commit to reproduce a past blind."""
     c = commit if commit is not None else git_commit(repo)
     return f"{project_string}@{c}"
 
 
-def write_blind_lock(path, project_string, commit=None, repo="/home/mfho/hcd_priya",
+def write_blind_lock(path, project_string, commit=None, repo=None,
                      extra=None):
     """Write ``blind.lock`` (JSON): the project string + git commit + the derived SEED STRING,
     plus metadata. The OFFSET VALUES are DELIBERATELY NOT WRITTEN (the lock is committable; the

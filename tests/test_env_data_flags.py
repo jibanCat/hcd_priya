@@ -16,6 +16,8 @@ or add the CV floor under a production driver, invisible to every audit artifact
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_env_data_flags.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 
 import hcd_analysis.emulator  # noqa: F401  enables jax_enable_x64
@@ -29,7 +31,7 @@ EBOSS_NPZ = "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz"
 _have_desi = os.path.exists(DESI_NPZ) and os.path.exists(DL.DESI_SNR3_NPZ)
 _have_eboss = os.path.exists(EBOSS_NPZ)
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 @pytest.fixture(autouse=True)

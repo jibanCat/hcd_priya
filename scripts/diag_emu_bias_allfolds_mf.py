@@ -30,6 +30,8 @@ overwrite emu_bias_allfolds.txt (z_lo=2.0 LF) or _zlo24.txt (z_lo=2.4 LF shipped
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_bias_allfolds_mf.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 from pathlib import Path
 
@@ -46,7 +48,7 @@ from hcd_analysis.emulator.predict import reconstruct_P_filt_jax, _excess_from_P
 from hcd_analysis.emulator.inference import PARAM_NAMES, HCD_Z_PIVOT
 from hcd_analysis.emulator.data import Z_LIMITS
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 FIGDIR = f"{REPO}/figures/analysis/04_emulator"
 RESULTS = f"{FIGDIR}/emu_bias_allfolds_mf.txt"
 NPZ = f"{FIGDIR}/emu_bias_allfolds_mf.npz"

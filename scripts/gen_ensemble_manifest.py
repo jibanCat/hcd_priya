@@ -17,6 +17,8 @@ ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/gen_ensemble_manifest.py [--check]
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import glob
@@ -28,7 +30,7 @@ from datetime import datetime, timezone
 from hcd_analysis.emulator import prod_ensemble as PE
 
 # The binaries live ONLY in the main tree (gitignored); the manifest is committed with the code.
-DEFAULT_CHECKPOINTS_DIR = "/home/mfho/hcd_priya/checkpoints"
+DEFAULT_CHECKPOINTS_DIR = f"{_REPO_ROOT}/checkpoints"
 
 DESCRIPTION = (
     "The deployed N=5 production emulator ensemble (final_prod_seed0..4): all-sims-trained "
@@ -43,7 +45,7 @@ NORM_NOTE = (
 )
 PROVENANCE_NOTE = (
     "The .eqx/.norm.pkl/.meta.json binaries are gitignored (they live only at "
-    "/home/mfho/hcd_priya/checkpoints/) and are pinned here by SHA256. Per-member training "
+    f"{_REPO_ROOT}/checkpoints/) and are pinned here by SHA256. Per-member training "
     "config/history: final_prod_seed<i>.meta.json (digest-pinned here) and the git-tracked "
     "final_prod_seed<i>.hist.json."
 )

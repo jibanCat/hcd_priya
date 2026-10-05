@@ -25,6 +25,8 @@ Env (MANDATORY):
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_emulator_walkthrough.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import json
@@ -46,9 +48,9 @@ from hcd_analysis.emulator.data import (
 )
 from hcd_analysis.emulator import train as T
 
-CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-OUTDIR = "/home/mfho/hcd_priya/figures/analysis/04_emulator/walkthrough"
-CKPT = "/home/mfho/hcd_priya/checkpoints/walkthrough_fold0"
+CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+OUTDIR = f"{_REPO_ROOT}/figures/analysis/04_emulator/walkthrough"
+CKPT = f"{_REPO_ROOT}/checkpoints/walkthrough_fold0"
 CLS = COARSE_NAMES
 PARAM_NAMES = ["ns", "Ap", "herei", "heref", "alphaq",
                "hub", "omegamh2", "hireionz", "bhfeedback"]
@@ -425,7 +427,7 @@ def _theta_tracking(model, d, va, norm):
 def fig08_theta_tracking(model, d, va, norm):
     """Within-cell θ-tracking (AFTER, this model) next to the saved BEFORE figure."""
     dev_t, dev_p, corr, ratio = _theta_tracking(model, d, va, norm)
-    before = "/home/mfho/hcd_priya/figures/analysis/04_emulator/fold0_cosmology_tracking.png"
+    before = f"{_REPO_ROOT}/figures/analysis/04_emulator/fold0_cosmology_tracking.png"
 
     fig = plt.figure(figsize=(12.5, 5.6))
     ax1 = fig.add_subplot(1, 2, 2)

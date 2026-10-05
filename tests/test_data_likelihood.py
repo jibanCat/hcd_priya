@@ -14,6 +14,8 @@ Pins (per the task spec):
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_data_likelihood.py -v
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 
 import hcd_analysis.emulator  # noqa: F401  enables jax_enable_x64
@@ -491,7 +493,7 @@ from hcd_analysis.emulator import multifidelity as MFI  # noqa: E402
 _LF_CACHE = MFI.LF_CACHE
 _HR_CACHE = MFI.HR_CACHE
 _have_mf_caches = os.path.exists(_LF_CACHE) and os.path.exists(_HR_CACHE)
-_have_fold0 = os.path.exists("/home/mfho/hcd_priya/checkpoints/final_fold0.eqx")
+_have_fold0 = os.path.exists(f"{_REPO_ROOT}/checkpoints/final_fold0.eqx")
 _have_rescorr = os.path.exists(
     MFI.RES_CORR_DIR + "/resolution_correction.txt")
 
@@ -676,7 +678,7 @@ def test_mf_path_matches_gate_script_to_tight_tol():
     # function defs (everything before the first driver emit) into a sandbox namespace and
     # pull predict_P_obs_on_leg_mf — the certified through-MF forward.
     ns = {}
-    src = open("/home/mfho/hcd_priya/scripts/diag_emu_bias_allfolds_mf.py").read()
+    src = open(f"{_REPO_ROOT}/scripts/diag_emu_bias_allfolds_mf.py").read()
     cut = src.index('emit("# T3 GATE')
     exec(compile(src[:cut], "gate_mf_defs", "exec"), ns)
     P_gate = ns["predict_P_obs_on_leg_mf"](

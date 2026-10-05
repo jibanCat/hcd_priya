@@ -26,17 +26,19 @@ FACE-VALUE amplitude (no empirical infl — 60 sims pin it), top-5 truncation.
 OUTPUT: hcd_analysis/_emulator_data/mf_cemu_emucoh.npz (+ a diagnostic figure, NOTES repo).
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os, sys
 import numpy as np
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 
 # LOW-K EXTENSION (2026-06-18): env-overridable I/O so the low-k pool (built with CEMU_K_LO=0.001)
 # can be re-keyed into a NEW emucoh table WITHOUT clobbering the deployed mf_cemu_emucoh.npz.
 # Defaults = the original paths (unchanged behavior).
 POOL_NPZ = os.environ.get(
-    "CEMU_POOL_NPZ", "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_lfcoh_pool.npz")
+    "CEMU_POOL_NPZ", f"{_REPO_ROOT}/hcd_analysis/_emulator_data/mf_cemu_lfcoh_pool.npz")
 OUT_NPZ = os.environ.get(
-    "CEMU_OUT_NPZ", "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz")
+    "CEMU_OUT_NPZ", f"{_REPO_ROOT}/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz")
 NOTES_FIG = os.environ.get(
     "CEMU_NOTES_FIG", "/home/mfho/hcd_priya_notes/figures/analysis/05_multifidelity/mf_emucoh_modes.png")
 N_MODES = 15                     # top-m truncation (full-z table, 13 z-bins: top-15 ≈ 96.8% of trace;

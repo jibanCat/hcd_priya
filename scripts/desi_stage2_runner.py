@@ -24,6 +24,8 @@ Outputs (atomic; refuses if present): <out>/stage2_mock_XXXX.pkl (raw), <out>/st
 Frozen inputs are never written. Forward, priors, covariance, likelihood and the lock are untouched.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import hashlib
@@ -38,7 +40,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 sys.path.insert(0, REPO)
 A2C_ARGV_TEMPLATE = ["--shard", "{m}", "--n-shards", "48", "--n-mocks", "48", "--deployed-prior", "--leg", "DESI",
                      "--no-shard-pkl", "--out-dir", "{scratch}", "--metal-selfdraw", "--fres-selfdraw"]

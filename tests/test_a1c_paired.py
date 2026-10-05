@@ -16,13 +16,15 @@ Two PI rulings bind this module:
 
 Run: /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_a1c_paired.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib
 import sys
 
 import numpy as np
 import pytest
 
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 
 paired = importlib.import_module("scripts.analyze_a1c_paired")
 runner = importlib.import_module("scripts.run_prod_sbc_shard")
@@ -280,7 +282,7 @@ def test_frozen_signature_matches_the_freeze_artifact():
     hcd_prior_signature it asserts must be the one the committed analysis.lock carries (the
     freeze cut c7eb371), and the lock must carry exactly ONE such prior signature."""
     import re as _re
-    lock = open("/home/mfho/hcd_priya/analysis.lock").read()
+    lock = open(f"{_REPO_ROOT}/analysis.lock").read()
     sigs = set(_re.findall(r"\b50befc94[0-9a-f]{56}\b", lock))
     assert len(sigs) == 1, f"expected one frozen prior signature in the lock, got {sigs}"
     assert paired.FROZEN_RUN_CFG["hcd_prior_signature"] == sigs.pop()

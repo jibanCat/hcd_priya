@@ -12,6 +12,8 @@ Env (MANDATORY):
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/train_emulator.py [args]
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import os
@@ -28,7 +30,7 @@ from hcd_analysis.emulator.data import (
 )
 from hcd_analysis.emulator import train as T
 
-DEFAULT_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+DEFAULT_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 
 
 def _peak_mem_mb():

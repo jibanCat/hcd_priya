@@ -20,6 +20,8 @@ Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_V
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/scratch_hcd_dndx_loso_vs_lit.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import glob, json, re
 from pathlib import Path
 import numpy as np
@@ -35,7 +37,7 @@ from hcd_analysis.emulator.inference import (HCD_LIT_OVER_SIM, HCD_LIT_OVER_SIM_
                                              HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC, lit_over_sim_at_z)
 from hcd_analysis.emulator.closure_legb import HCD_INCIDENCE_SLOPE
 
-REPO = Path("/home/mfho/hcd_priya")
+REPO = Path(_REPO_ROOT)
 CACHE = str(REPO / "hcd_analysis/_emulator_data/observables_tau0_lf.h5")
 STEPA = REPO / "checkpoints/stepA"
 OUTDIR = Path("/home/mfho/hcd_priya_notes/figures/analysis/03_templates_and_p1d")

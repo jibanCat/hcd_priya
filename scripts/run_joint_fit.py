@@ -24,6 +24,8 @@ Env (MANDATORY):
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_joint_fit.py --legs DESI,eBOSS
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import functools
@@ -53,7 +55,7 @@ from scripts.run_real_fit import (_assert_norc_ks_cap,
                                   export_getdist, _nuisance_export_keys, _reconstruct_nuisance,
                                   PUBLIC_DIR, PRIVATE_DIR, PROD_PREFIX)
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 def build_joint_ctx(leg_names, *, per_leg_zslope=False, single_member=False,

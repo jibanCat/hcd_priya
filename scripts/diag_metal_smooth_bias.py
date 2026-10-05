@@ -38,6 +38,8 @@ Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_V
 READ-ONLY on all modules (a NEW script). Outputs to the NOTES repo 05_likelihood/.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os, glob, json, functools
 print = functools.partial(print, flush=True)
 
@@ -55,7 +57,7 @@ from hcd_analysis.emulator.closure_legb import (
 import hcd_analysis.emulator.data_likelihood as DL
 
 FIG = "/home/mfho/hcd_priya_notes/figures/analysis/05_likelihood"
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 os.makedirs(FIG, exist_ok=True)
 
 # fitted param pack (16):

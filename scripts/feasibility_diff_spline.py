@@ -30,6 +30,8 @@ Writes figures to figures/analysis/04_emulator/feas_diff_spline_*.png and prints
 verdict block. NaN-safe; x64 on.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os, sys, time
 
 import numpy as np
@@ -38,7 +40,7 @@ jax.config.update("jax_enable_x64", True)          # MANDATORY: P1D needs float6
 import jax.numpy as jnp
 from scipy.interpolate import CubicSpline
 
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 from hcd_analysis.emulator.data import load_cache, safe_log
 from hcd_analysis.emulator.model import svd_basis_init
 
@@ -46,9 +48,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-FIGDIR = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
-LF_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-HR_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
+FIGDIR = f"{_REPO_ROOT}/figures/analysis/04_emulator"
+LF_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+HR_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
 CLASSES = ("clean", "LLS", "subDLA", "DLA")
 N_BASIS = 12
 os.makedirs(FIGDIR, exist_ok=True)

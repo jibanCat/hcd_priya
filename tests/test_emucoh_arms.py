@@ -10,12 +10,14 @@ It also pins that the validation mocks ISOLATE emucoh: no MF resolution floor (m
 no shape floor (mf_shape=0), no diagonal-floor-on-DESI (desi_floor=False) — so the ON arm adds
 ONLY the 60-sim emucoh term.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import sys
 from pathlib import Path
 
 import pytest
 
-ROOT = Path("/home/mfho/hcd_priya")
+ROOT = Path(_REPO_ROOT)
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import run_stepA  # noqa: E402

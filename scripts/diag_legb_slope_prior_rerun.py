@@ -30,6 +30,8 @@ the same way, now with the n_s bias and the exact ΔP.
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_legb_slope_prior_rerun.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 from pathlib import Path
 
@@ -45,9 +47,9 @@ from hcd_analysis.emulator import data_likelihood as DL
 from hcd_analysis.emulator.inference import PARAM_NAMES, HCD_Z_PIVOT
 from hcd_analysis.emulator.dndx_wc import w_c_from_mu
 
-FIGDIR = "/home/mfho/hcd_priya/figures/analysis/05_likelihood"
+FIGDIR = f"{_REPO_ROOT}/figures/analysis/05_likelihood"
 RESULTS = f"{FIGDIR}/legb_slope_prior_rerun.txt"
-HOLD0 = "/home/mfho/hcd_priya/checkpoints/error_vector_xclass_holdout0.npz"
+HOLD0 = f"{_REPO_ROOT}/checkpoints/error_vector_xclass_holdout0.npz"
 N_SIGHTLINES = 691200   # verified constant (diag_head_a.py:62, calibrate_delta_c.py); Xbar = path/N
 
 # Literature dN/dX (same data as plot_dndx_vs_literature.py LIT dict): z, value, err per class.

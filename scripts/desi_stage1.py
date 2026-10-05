@@ -9,6 +9,8 @@ replicate (WS-A section 6), B = 20000; p = (r+1)/(B+1). Seeds: SeedSequence(2026
 ("null","DESI"), ("null","eBOSS"), ("boot"), ("dirs"), ("perm","DESI"), ("perm","eBOSS").
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import importlib.util
 import json
@@ -16,7 +18,7 @@ import os
 
 import numpy as np
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 SEED_ROOT = 20260925
 B_NULL = 20000
 B_BOOT = 2000

@@ -12,6 +12,8 @@ FAST: one jitted per-row function (theta,z_u,t0)->(logP_clean, u_ns) reused acro
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
      CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_lya_ns_tau0_split.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 import hcd_analysis.emulator  # x64 before jax
 import jax, jax.numpy as jnp
@@ -22,7 +24,7 @@ from hcd_analysis.emulator import predict as P
 from hcd_analysis.emulator.data import safe_log
 from hcd_analysis.emulator.inference import PARAM_NAMES
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 NS_I = int(np.where(np.array(PARAM_NAMES) == "ns")[0][0])
 HOLD0 = f"{REPO}/checkpoints/error_vector_xclass_holdout0.npz"
 KLO, KHI = 1e-3, 0.06

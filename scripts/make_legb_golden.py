@@ -29,6 +29,8 @@ Run (LF golden): PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORM
      CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/make_legb_golden.py
 Run (MF golden): ... scripts/make_legb_golden.py --mf
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import sys
 import numpy as np
 from pathlib import Path
@@ -41,7 +43,7 @@ from hcd_analysis.emulator import data_likelihood as DL
 from hcd_analysis.emulator import meanflux_prior as MF
 
 USE_MF = "--mf" in sys.argv[1:]
-OUT = Path("/home/mfho/hcd_priya/tests/golden/"
+OUT = Path(f"{_REPO_ROOT}/tests/golden/"
            + ("legb_mf_golden.npz" if USE_MF else "legb_lf_golden.npz"))
 
 # Production ctx with the cross-class C_emu (the config the closure runs). --mf attaches

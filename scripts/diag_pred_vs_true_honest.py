@@ -23,6 +23,8 @@ and its figure figures/analysis/06_validation_summary/loso_perk_pred_error.png.
 ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_pred_vs_true_honest.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 from pathlib import Path
 
@@ -35,9 +37,9 @@ from hcd_analysis.emulator.data import (
     load_cache, make_splits, untransform_prediction, COARSE_NAMES,
 )
 
-CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-CKPT = "/home/mfho/hcd_priya/checkpoints/final_fold0"
-FIGDIR = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
+CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+CKPT = f"{_REPO_ROOT}/checkpoints/final_fold0"
+FIGDIR = f"{_REPO_ROOT}/figures/analysis/04_emulator"
 FIG = f"{FIGDIR}/pred_vs_true_p1d_fold0_inrange.png"
 
 # analysis-band / Nyquist k landmarks (angular s/km)

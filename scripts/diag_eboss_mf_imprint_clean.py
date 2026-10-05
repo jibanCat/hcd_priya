@@ -8,10 +8,12 @@ reports the correction OVER THE eBOSS k-band [0.0011,0.0195] s/km, per z, + the 
 
 Run (emu-jax): PYTHONPATH=/home/mfho/hcd_priya python3 scripts/diag_eboss_mf_imprint_clean.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import sys
 import numpy as np
 
-sys.path.insert(0, "/home/mfho/hcd_priya/scripts")
+sys.path.insert(0, f"{_REPO_ROOT}/scripts")
 import hcd_analysis.emulator  # noqa: F401
 import diag_lf_vs_hr_highk as D   # reuse load/match/_norm (importing does NOT run main)
 

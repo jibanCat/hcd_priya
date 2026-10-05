@@ -5,17 +5,19 @@ covariance ctx.mf_emucoh_per_leg["DESI"] (= S·f·Sᵀ, then ×P_data⊗P_data c
 that BOUND-ON-LEG matrix at top-5 vs top-15 via the PRODUCTION binding path (build_legb_ctx) — no
 NUTS needed. Agreement to within MC noise ⇒ the production result does not depend on the truncation.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import sys
 import tempfile
 import numpy as np
 
-sys.path.insert(0, "/home/mfho/hcd_priya/scripts")
+sys.path.insert(0, f"{_REPO_ROOT}/scripts")
 import hcd_analysis.emulator  # noqa: F401  x64
 from hcd_analysis.emulator.closure_legb import build_legb_ctx
 
-POOL = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_lfcoh_pool.npz"
-TOP15_NPZ = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"   # production (top-15)
+POOL = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/mf_cemu_lfcoh_pool.npz"
+TOP15_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"   # production (top-15)
 
 
 def trunc(f_full, m):
@@ -30,7 +32,7 @@ def trunc(f_full, m):
 
 
 def leg_cov(npz_path):
-    ctx, _ = build_legb_ctx(ckpt="/home/mfho/hcd_priya/checkpoints/final_fold6", with_mf=False,
+    ctx, _ = build_legb_ctx(ckpt=f"{_REPO_ROOT}/checkpoints/final_fold6", with_mf=False,
                             mf_fold=6, mf_emucoh=True, mf_emucoh_legs=("DESI",), mf_emucoh_npz=npz_path)
     return np.asarray(ctx.mf_emucoh_per_leg["DESI"])
 

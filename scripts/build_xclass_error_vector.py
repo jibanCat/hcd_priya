@@ -33,6 +33,8 @@ Env (MANDATORY):
     scripts/build_xclass_error_vector.py [args]
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import functools
@@ -54,7 +56,7 @@ from hcd_analysis.emulator.data import (
 )
 from scripts.run_loso_sweep import make_z_bands
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 DEFAULT_CKPT = f"{REPO}/checkpoints/final_fold"        # +{f}
 DEFAULT_EV = f"{REPO}/checkpoints/error_vector.npz"
 DEFAULT_OUT = f"{REPO}/checkpoints/error_vector_xclass.npz"

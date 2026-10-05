@@ -18,6 +18,8 @@ Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_hcd_pivot_center.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import json
 import os
 import numpy as np
@@ -38,7 +40,7 @@ def _adopted_json():
     """Loader helper: band + adopted-center literals are pinned FROM the committed
     derivation artifact (corrected-law re-derivation, PI adoption 2026-07-18), so the
     test and the deployed constants share one source of numbers."""
-    p = "/home/mfho/hcd_priya/hcd_analysis/emulator/hcd_lit_dndx_corrected.json"
+    p = f"{_REPO_ROOT}/hcd_analysis/emulator/hcd_lit_dndx_corrected.json"
     with open(p) as fh:
         return json.load(fh)
 

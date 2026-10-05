@@ -15,6 +15,8 @@ Env-gated like the other closure tests. Run:
   PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_sbc.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import glob
 import os
 
@@ -26,7 +28,7 @@ import pytest
 from hcd_analysis.emulator import closure_sbc as S
 from hcd_analysis.emulator.ensemble import EnsembleEmulator
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 PROD = f"{REPO}/checkpoints/final_prod_seed"
 CKPT = f"{REPO}/checkpoints/final_fold0"
 EV = f"{REPO}/checkpoints/error_vector.npz"

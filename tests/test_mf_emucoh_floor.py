@@ -6,6 +6,8 @@ the shape floor stays byte-identical because its z grid covers all leg z); the o
 a PD off-diagonal; θ-independence (∂C/∂θ ≡ 0); back-compat byte-exact when off; and the
 SHAPE+EMUCOH COEXISTENCE (both PSD terms summed, conservative top-up over both, PD).
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import hcd_analysis.emulator  # noqa: F401  x64
 import jax
@@ -17,8 +19,8 @@ from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator import data_likelihood as DL
 from hcd_analysis.emulator.likelihood import gaussian_loglik
 
-EMUCOH_NPZ = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"
-SHAPE_NPZ = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_shape.npz"
+EMUCOH_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"
+SHAPE_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/mf_cemu_shape.npz"
 DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 KS_BASE = "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
 _have_e = os.path.exists(EMUCOH_NPZ)

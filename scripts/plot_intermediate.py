@@ -31,6 +31,8 @@ Usage:
 """
 
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import json
@@ -48,7 +50,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 OUTPUT_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
-OUT_DIR = Path("/home/mfho/hcd_priya/figures/intermediate")
+OUT_DIR = Path(f"{_REPO_ROOT}/figures/intermediate")
 
 # NHI class boundaries (log10 cm^-2)
 LOG_NHI_LLS    = 17.2

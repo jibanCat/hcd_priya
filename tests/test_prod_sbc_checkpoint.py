@@ -10,6 +10,8 @@ winning a conflict.
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_sbc_checkpoint.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import os
 import pickle
@@ -20,7 +22,7 @@ import pytest
 
 from hcd_analysis.emulator import closure_legb as LB
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 def _load_script(name):

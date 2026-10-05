@@ -14,6 +14,8 @@ Two modules, one authority per input:
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_firstarm_readout.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import json
 import os
@@ -22,7 +24,7 @@ import pickle
 import numpy as np
 import pytest
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 def _load_script(name):

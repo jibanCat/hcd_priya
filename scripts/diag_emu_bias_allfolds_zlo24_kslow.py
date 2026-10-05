@@ -23,6 +23,8 @@ GATE: |n_s| and |A_p| <= 0.2sigma (in-gate).
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_bias_allfolds_zlo24_kslow.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 from pathlib import Path
 
@@ -35,7 +37,7 @@ from hcd_analysis.emulator.closure_legb import (
 from hcd_analysis.emulator import data_likelihood as DL
 from hcd_analysis.emulator.inference import PARAM_NAMES, HCD_Z_PIVOT
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 FIGDIR = f"{REPO}/figures/analysis/04_emulator"
 RESULTS = f"{FIGDIR}/emu_bias_allfolds_zlo24_kslow.txt"   # NEW file — does NOT overwrite old-KS-klow ref
 HOLD0 = f"{REPO}/checkpoints/error_vector_xclass_holdout0.npz"

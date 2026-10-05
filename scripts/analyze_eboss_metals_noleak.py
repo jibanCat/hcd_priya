@@ -13,6 +13,8 @@ posterior σ (the ripple is absorbed by a_SiIII, not by tilting/rescaling cosmol
 ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/analyze_eboss_metals_noleak.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import glob
 import os
 
@@ -21,7 +23,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-CKPT = "/home/mfho/hcd_priya/checkpoints/stepA"
+CKPT = f"{_REPO_ROOT}/checkpoints/stepA"
 OUTDIR = "/home/mfho/hcd_priya_notes/figures/analysis/05_truth_validation"
 os.makedirs(OUTDIR, exist_ok=True)
 

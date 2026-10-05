@@ -22,6 +22,8 @@ Checks (ALL must pass; any failure REFUSES with exit 3 and writes nothing):
 Formal mode writes each output to ``*.tmp`` then renames, writes ``UNBLINDED.stamp`` LAST, appends one events-log line.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import hashlib
@@ -255,7 +257,7 @@ def main(argv=None):
     ap.add_argument("--events-log", required=True)
     ap.add_argument("--confirm", required=True)
     ap.add_argument("--operator", default=os.environ.get("USER", "unknown"))
-    ap.add_argument("--code-repo", default="/home/mfho/hcd_priya")
+    ap.add_argument("--code-repo", default=_REPO_ROOT)
     ap.add_argument("--notes-repo", default="/home/mfho/hcd_priya_notes")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)

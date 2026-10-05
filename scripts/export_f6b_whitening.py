@@ -15,12 +15,14 @@ Blind status: BLIND-SAFE. Every array is an emulator-error diagnostic on HELD-OU
 SIMULATIONS (LOSO folds). No observed P1D, no posterior, no real-data n_s/A_p.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse, hashlib, json, platform, subprocess, sys
 from pathlib import Path
 
 import numpy as np
 
-ROOT = Path("/home/mfho/hcd_priya")
+ROOT = Path(_REPO_ROOT)
 sys.path.insert(0, str(ROOT))
 
 import hcd_analysis.emulator  # noqa: F401  (x64 before jax)

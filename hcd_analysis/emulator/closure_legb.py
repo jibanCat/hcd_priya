@@ -75,7 +75,7 @@ from .closure_diagnostics import (
 assert jax.config.read("jax_enable_x64"), \
     "x64 must be on (import hcd_analysis.emulator before jax)"
 
-REPO = "/home/mfho/hcd_priya"
+from ..paths import REPO_ROOT_STR as REPO   # this checkout (emulator-debug 2026-10; never an absolute literal)
 # The ONE production model + its matched cross-class error vector (plan §5).
 CKPT = f"{REPO}/checkpoints/final_fold0"
 ERROR_VECTOR = f"{REPO}/checkpoints/error_vector.npz"

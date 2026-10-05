@@ -48,6 +48,8 @@ Env:
     scripts/build_res_corr_injection_basis.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import functools
 print = functools.partial(print, flush=True)
 
@@ -64,7 +66,7 @@ from hcd_analysis.emulator.data_likelihood import _predict_P_obs_mf
 from hcd_analysis.emulator.multifidelity import interp_res_corr
 from hcd_analysis.emulator.data import SAMPLING_LIMITS, normalize_params
 
-OUT_NPZ = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/res_corr_injection_basis.npz"
+OUT_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/res_corr_injection_basis.npz"
 FIG = "/home/mfho/hcd_priya_notes/figures/analysis/04_emulator/res_corr_injection_basis.png"
 
 # --- k_box anchor (L15 box fundamental in s/km) -- same as the Fisher pre-check & interp_res_corr

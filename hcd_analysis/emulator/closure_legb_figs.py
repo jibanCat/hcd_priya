@@ -24,7 +24,9 @@ from .closure_legb import (
     make_truth_from_sim, make_legb_mock, held_out_sims, _mock_core_per_leg, _kim,
 )
 
-FIGDIR = "/home/mfho/hcd_priya/figures/analysis/05_likelihood"
+from ..paths import REPO_ROOT_STR as _REPO
+
+FIGDIR = f"{_REPO}/figures/analysis/05_likelihood"
 
 
 def _truth_alpha_zresolved_on_leg(truth, leg):

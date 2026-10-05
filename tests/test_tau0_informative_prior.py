@@ -15,6 +15,8 @@ Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_tau0_informative_prior.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 from collections import namedtuple
 
@@ -37,8 +39,8 @@ def _is_truncnorm(d):
 
 from hcd_analysis.emulator import closure_legb as C
 
-_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-_CKPT0 = "/home/mfho/hcd_priya/checkpoints/final_fold0.eqx"
+_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+_CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
 

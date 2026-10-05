@@ -5,9 +5,11 @@ Prereg 2026-08-08-FORWARD-GEOMETRY-SCAN-PREREG.md v5. Surfaces are the UNION of 
 MF ladder (family F, forward mean) and its nested 4-knot C_emu subset (family K), which are
 EXACTLY rungs {0,5,14,19} of the same ladder -- so 20 knots per (leg,z), not 24.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import json, pickle, sys
 import numpy as np
-sys.path.insert(0, "/home/mfho/hcd_priya/scripts")
+sys.path.insert(0, f"{_REPO_ROOT}/scripts")
 import fwd_geom_core as G
 
 R = "/scratch/cavestru_root/cavestru1/mfho/cert_2026-07"

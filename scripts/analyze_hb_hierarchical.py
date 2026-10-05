@@ -16,6 +16,8 @@ impl-review must-fix #3):
 
 ENV: PYTHONNOUSERSITE=1 /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/analyze_hb_hierarchical.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import glob
 import os
 
@@ -24,7 +26,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-CKPT = "/home/mfho/hcd_priya/checkpoints/stepA"
+CKPT = f"{_REPO_ROOT}/checkpoints/stepA"
 OUTDIR = "/home/mfho/hcd_priya_notes/figures/analysis/05_truth_validation"
 os.makedirs(OUTDIR, exist_ok=True)
 LIMS = {"ns": (0.8, 1.05), "Ap": (1.2e-9, 2.6e-9)}

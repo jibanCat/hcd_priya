@@ -13,6 +13,8 @@ Covers the two pure pieces the new arm adds (mirroring tests/test_dnuis_inject.p
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_dla_selfdraw_arm.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 import pytest
 
@@ -161,7 +163,7 @@ def test_selfdraw_runner_uses_stamp_authority_and_smoke_suffix():
     """(F5) the selfdraw runner's meta['forward'] comes from the single authority (so it now
     carries hcd_prior_signature), the pre-2026-07-19 stamp gap is documented; (F6a) smoke mode
     writes a .smoke-suffixed filename that the analyzer glob can never pool as a real shard."""
-    with open("/home/mfho/hcd_priya/scripts/run_dla_selfdraw_shard.py") as fh:
+    with open(f"{_REPO_ROOT}/scripts/run_dla_selfdraw_shard.py") as fh:
         src = fh.read()
     assert "forward_stamp(" in src, "meta['forward'] must come from closure_legb.forward_stamp"
     assert "latent reconstruction" in src, \

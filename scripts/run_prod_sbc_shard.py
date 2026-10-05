@@ -31,6 +31,8 @@ rank-uniformity null is exact at either setting. (Gated by the 4-referee panel +
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse
 import functools
 import glob
@@ -44,7 +46,7 @@ from hcd_analysis.emulator.prod_ensemble import production_member_paths
 from hcd_analysis.emulator.closure_legb import (build_legb_ctx, run_legb, prod_forward_config,
                                                 prod_norc_forward)
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
 
 

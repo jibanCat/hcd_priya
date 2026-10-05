@@ -6,12 +6,14 @@ recovery vs truth (physical units, point ± 68% from the pooled draws) + the bia
 the notes repo. Run (emu-jax):
   PYTHONPATH=/home/mfho/hcd_priya python3 scripts/plot_eboss_cert.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import sys
 
 import numpy as np
 
-sys.path.insert(0, "/home/mfho/hcd_priya/scripts")
+sys.path.insert(0, f"{_REPO_ROOT}/scripts")
 import run_stepA as R
 from hcd_analysis.emulator.data import PARAM_LIMITS  # unit-cube -> physical bounds
 

@@ -5,6 +5,8 @@ L_eff ≥ L_FLOOR, per quantity (A_p, n_s primary). This is the §6 inference-ca
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse
 import functools
 import glob
@@ -53,7 +55,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shard-dir", required=True)
     ap.add_argument("--prob", type=float, default=0.95)
-    ap.add_argument("--figdir", default="/home/mfho/hcd_priya/figures/analysis/06_validation_summary")
+    ap.add_argument("--figdir", default=f"{_REPO_ROOT}/figures/analysis/06_validation_summary")
     a = ap.parse_args()
 
     # PER-MOCK pkls WIN over shard pkls on a mock-index conflict (the per-mock checkpoint is the

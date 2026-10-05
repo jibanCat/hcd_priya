@@ -20,6 +20,8 @@ deployed ensemble. This suite pins the replacement contract
 Fake fixtures use tiny files: every red path fires in ``verify_manifest`` BEFORE any
 equinox/jax deserialization, so no real checkpoints are needed for the red battery.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import json
 import os
 from pathlib import Path
@@ -33,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COMMITTED_MANIFEST = ROOT / "checkpoints" / PE.MANIFEST_BASENAME
 README = ROOT / "checkpoints" / "README_production_ensemble.md"
 ANALYSIS_LOCK = ROOT / "analysis.lock"
-REAL_CKPT_DIR = Path("/home/mfho/hcd_priya/checkpoints")
+REAL_CKPT_DIR = Path(f"{_REPO_ROOT}/checkpoints")
 
 
 # --------------------------------------------------------------------------------------------- #

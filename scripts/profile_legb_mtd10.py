@@ -16,6 +16,8 @@ Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_V
        --n-warmup 120 --n-samples 120 --max-tree-depth 10
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import functools
@@ -38,7 +40,7 @@ from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator.inference import PARAM_NAMES
 from hcd_analysis.emulator.data import PARAM_LIMITS
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 OUTDIR = Path(f"{REPO}/figures/analysis/05_likelihood")
 OUTDIR.mkdir(parents=True, exist_ok=True)
 NS_I = int(np.where(np.array(PARAM_NAMES) == "ns")[0][0])

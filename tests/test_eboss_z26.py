@@ -3,6 +3,8 @@ two-sided A_P rule against the canonical chain, gate enforcement; and the 2.2 ve
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
   /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_eboss_z26.py -q -p no:cacheprovider
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import json
 import os
@@ -10,7 +12,7 @@ import os
 import numpy as np
 import pytest
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 Z13 = [2.2, 2.4, 2.6, 2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6]
 THETA = ["ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2", "hireionz", "bhfeedback"]
 ALPHA = ["alpha_lls", "alpha_subdla", "alpha_dla"]

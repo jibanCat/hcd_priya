@@ -24,6 +24,8 @@ PART D: leakage probe — does the per-sim low-k residual CORRELATE with the hig
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_lowk_investigation.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 from pathlib import Path
 
@@ -37,9 +39,9 @@ from hcd_analysis.emulator import data_likelihood as DL
 from hcd_analysis.emulator.predict import predict_P_filt
 from hcd_analysis.emulator.inference import PARAM_NAMES, HCD_Z_PIVOT
 
-FIGDIR = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
+FIGDIR = f"{_REPO_ROOT}/figures/analysis/04_emulator"
 RESULTS = f"{FIGDIR}/emu_lowk_investigation.txt"
-HOLD0 = "/home/mfho/hcd_priya/checkpoints/error_vector_xclass_holdout0.npz"
+HOLD0 = f"{_REPO_ROOT}/checkpoints/error_vector_xclass_holdout0.npz"
 CLASSES = ["clean", "LLS", "subDLA", "DLA"]
 BANDS = [("low  k<5e-3", 0.0, 5e-3), ("mid  5e-3-0.02", 5e-3, 0.02), ("high 0.02-0.069", 0.02, 1.0)]
 

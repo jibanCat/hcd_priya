@@ -16,6 +16,8 @@ Emits ONE figure (notes repo, 05_truth_validation):
 ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_eboss_metals_mock.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import sys
 
@@ -26,7 +28,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, "/home/mfho/hcd_priya/scripts")
+sys.path.insert(0, f"{_REPO_ROOT}/scripts")
 import run_stepA  # noqa: E402  (config source of truth for the E_f6_si arm)
 from hcd_analysis.emulator import closure_legb as C  # noqa: E402
 from hcd_analysis.emulator import data_likelihood as DL  # noqa: E402

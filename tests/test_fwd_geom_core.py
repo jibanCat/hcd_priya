@@ -6,6 +6,8 @@ certification posterior, so this file runs safely before the scan is unblinded.
 The load-bearing one is test_alpha_identity_against_deployed_code: the entire scan rests on
 the jnp.interp abscissa being exactly alpha_z, which makes the surfaces straight lines.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import sys
 
@@ -58,9 +60,9 @@ def test_surface_counts_match_the_frozen_z_grids():
 
 def test_knots_are_the_frozen_artifact_values():
     import numpy as _np
-    ev = _np.load("/home/mfho/hcd_priya/checkpoints/error_vector.npz", allow_pickle=True)
+    ev = _np.load(f"{_REPO_ROOT}/checkpoints/error_vector.npz", allow_pickle=True)
     assert _np.allclose(_np.asarray(ev["tau0_band_centres"]), G.ALPHA_CENTRES)
-    evx = _np.load("/home/mfho/hcd_priya/checkpoints/error_vector_xclass.npz", allow_pickle=True)
+    evx = _np.load(f"{_REPO_ROOT}/checkpoints/error_vector_xclass.npz", allow_pickle=True)
     assert _np.allclose(_np.asarray(evx["tau0_band_centres"]), G.ALPHA_CENTRES)
 
 

@@ -11,6 +11,8 @@ Env:
   PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_lit_dndx.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 import pytest
 
@@ -268,7 +270,7 @@ def test_lit_points_for_display_corrected_estimands():
         z, v, e, src = pts[cls]
         assert len(z) == len(v) == len(e) and len(src) > 5, cls
         assert np.all(np.asarray(e) > 0), cls
-    with open("/home/mfho/hcd_priya/hcd_analysis/emulator/hcd_lit_dndx_corrected.json") as fh:
+    with open(f"{_REPO_ROOT}/hcd_analysis/emulator/hcd_lit_dndx_corrected.json") as fh:
         j = json.load(fh)
     np.testing.assert_allclose(pts["LLS"][1], j["adopted_law"]["corrected_points"]["lx"],
                                rtol=0, atol=0)

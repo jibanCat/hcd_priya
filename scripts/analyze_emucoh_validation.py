@@ -27,6 +27,8 @@ Usage (emu-3.9 has matplotlib; emu-jax also fine for the numbers):
 Robust to partial completion: a mock with <4 chains on either arm is skipped with a note.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import json
 import os
@@ -34,7 +36,7 @@ import sys
 
 import numpy as np
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 CKPT = f"{REPO}/checkpoints/stepA"
 NOTES_FIG = "/home/mfho/hcd_priya_notes/figures/analysis/05_multifidelity"
 OUT_JSON = f"{CKPT}/emucoh_validation.json"

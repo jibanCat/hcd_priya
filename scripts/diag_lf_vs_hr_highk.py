@@ -33,6 +33,8 @@ Env (MANDATORY): h5py + numpy suffice (pure cache read, no jax/emulator import).
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_lf_vs_hr_highk.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import numpy as np
 import h5py
@@ -40,9 +42,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-LF_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-HR_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
-OUT = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
+LF_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+HR_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
+OUT = f"{_REPO_ROOT}/figures/analysis/04_emulator"
 
 # clean coarse-class collapse: first fine bin is the clean forest (data.py COARSE_SLICES[0]).
 CLEAN_SLICE = slice(0, 1)

@@ -7,6 +7,8 @@ a known OFF-DIAGONAL golden, cov[0,1] = σ0·σ1·corr[0,1] with corr[0,1]=0.198
 raw Pk1D_cor.dat line-4 col-2). This file pins exactly that, plus the structure/PD/cross-z checks.
 The loader (load_eboss_leg) tests are added once the PI confirms the science flags.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 
 import numpy as np
@@ -174,7 +176,7 @@ def test_legb_model_priors_only_site_order_match(marg_zslope, hierarchical_hcd):
     import numpyro
     from numpyro import handlers
     from hcd_analysis.emulator import closure_legb as C
-    ctx, _ = C.build_legb_ctx(ckpt="/home/mfho/hcd_priya/checkpoints/final_fold6",
+    ctx, _ = C.build_legb_ctx(ckpt=f"{_REPO_ROOT}/checkpoints/final_fold6",
                               with_eboss=True, sample_metals=True,
                               hierarchical_hcd=hierarchical_hcd)
     ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "eBOSS"],
@@ -203,7 +205,7 @@ def test_legb_model_priors_only_site_order_match(marg_zslope, hierarchical_hcd):
 
 def test_eboss_si_cert_arms_inject_and_sample():
     import sys as _sys
-    _sys.path.insert(0, "/home/mfho/hcd_priya/scripts")
+    _sys.path.insert(0, f"{_REPO_ROOT}/scripts")
     import run_stepA  # noqa
     cfg = run_stepA.build_config()
     for base in ("E_f5_si", "E_f6_si", "E_f7_si"):

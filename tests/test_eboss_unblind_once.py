@@ -4,6 +4,8 @@ Builds a fake WRAPPER-PRODUCED blinded chain directory inside a throw-away git r
 run_real_fit.export_getdist layout, SHA256SUMS, EXECUTION_RECORD.json (schema v1, exit 0, consumed), health.json, a
 nuisance npz/json pair, a fake blind.lock (frozen writer, fixed commit), a fake analysis.lock and authorization record.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import hashlib
 import json
 import os
@@ -17,7 +19,7 @@ import hcd_analysis.emulator  # noqa: F401  x64 BEFORE jax
 from hcd_analysis.emulator import blinding as BL
 from hcd_analysis.emulator.inference import PARAM_NAMES
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 SCRIPT = os.path.join(REPO, "scripts", "eboss_unblind_once.py")
 NAMES = list(PARAM_NAMES) + [f"tau0_z{i}" for i in range(13)] + ["alpha_lls", "alpha_subdla", "alpha_dla"]
 GREEN = dict(rhat_max=1.004, ess_bulk_min=900.0, ess_tail_min=700.0, ebfmi_min=0.9, n_divergent=0, treedepth_sat_frac=0.0)

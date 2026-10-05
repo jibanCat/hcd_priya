@@ -25,6 +25,8 @@ Run (x64 MUST be on — import hcd_analysis.emulator BEFORE jax):
   PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_ns_slope_attenuation.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 from pathlib import Path
 
@@ -40,7 +42,7 @@ from hcd_analysis.emulator.data import load_cache, make_splits, safe_log
 from hcd_analysis.emulator.predict import predict_P_filt
 from hcd_analysis.emulator.inference import PARAM_NAMES
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 FIGDIR = f"{REPO}/figures/analysis/04_emulator"
 NPZ = f"{FIGDIR}/ns_slope_attenuation.npz"
 PNG = f"{FIGDIR}/ns_slope_attenuation.png"

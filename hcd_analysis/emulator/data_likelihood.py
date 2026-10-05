@@ -34,6 +34,7 @@ import jax
 import jax.numpy as jnp
 
 from .data import KIM_AMP, KIM_SLOPE, Z_LIMITS
+from ..paths import REPO_ROOT_STR as _REPO
 from .predict import predict_P_obs, predict_P_filt, _excess_from_P_filt
 from .likelihood import sigma_at_tau0, rho_at_tau0, gaussian_loglik
 
@@ -816,7 +817,7 @@ class MFFloor(NamedTuple):
 MF_FLOOR_K_BAND_SPLIT = 0.07
 
 
-def load_mf_floor(npz_path="/home/mfho/hcd_priya/figures/analysis/04_emulator/mf_cemu_floor.npz",
+def load_mf_floor(npz_path=f"{_REPO}/figures/analysis/04_emulator/mf_cemu_floor.npz",
                   *, k_band_split=MF_FLOOR_K_BAND_SPLIT, edge_slope_mult=2.0):
     """Load the certified MF C_emu floor table → an ``MFFloor`` (spec §2/§4).
 
@@ -912,7 +913,7 @@ class MFShape(NamedTuple):
     n_sim: int
 
 
-def load_mf_shape(npz_path="/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_shape.npz"):
+def load_mf_shape(npz_path=f"{_REPO}/hcd_analysis/_emulator_data/mf_cemu_shape.npz"):
     """Load the shape-aware MF floor table → an ``MFShape`` (scripts/build_mf_shape_floor.py)."""
     d = np.load(npz_path, allow_pickle=True)
     return MFShape(z=np.asarray(d["z"], float), k=np.asarray(d["k"], float),
@@ -983,7 +984,7 @@ class MFEmuCoh(NamedTuple):
     n_sim: int
 
 
-def load_mf_emucoh(npz_path="/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"):
+def load_mf_emucoh(npz_path=f"{_REPO}/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"):
     """Load the 60-sim LF-emulator-coherence table → an ``MFEmuCoh`` (scripts/build_mf_emucoh_floor.py)."""
     d = np.load(npz_path, allow_pickle=True)
     return MFEmuCoh(z=np.asarray(d["z"], float), k=np.asarray(d["k"], float),

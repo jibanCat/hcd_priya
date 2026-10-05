@@ -26,6 +26,8 @@ READ-ONLY on production. Writes figures to figures/analysis/04_emulator/ and a J
 summary. Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya emu-jax python3.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import json
 import os
@@ -54,9 +56,9 @@ from hcd_analysis.emulator.dndx_wc import (
 )
 from hcd_analysis.emulator.model import structural_tier_p
 
-CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-CKPT = "/home/mfho/hcd_priya/checkpoints/final_fold{f}"
-FIGDIR = Path("/home/mfho/hcd_priya/figures/analysis/04_emulator")
+CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+CKPT = _os_rr.path.join(_REPO_ROOT, "checkpoints/final_fold{f}")
+FIGDIR = Path(f"{_REPO_ROOT}/figures/analysis/04_emulator")
 N_FOLDS = 8
 HCD = ("LLS", "subDLA", "DLA")
 N_SIGHTLINES = 691200  # constant per row (verified); Xbar = total_path / N_sightlines
