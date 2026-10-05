@@ -7,7 +7,7 @@ centers on (lit/sim)*w_c with w_c from PRIYA's sim dN/dX, so this checks the emu
 reproduces that sim incidence (top row), and shows where PRIYA's sim sits vs the literature the
 per-survey pin is anchored to (bottom row).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_dndx_pred_vs_truth.py
 """
 import os

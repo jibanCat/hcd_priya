@@ -23,7 +23,7 @@ NB: r_ns/r_dtau/r_aHCD are taken d/d(unit or natural param); the constant param-
 cancels in BOTH the cosine and the inflation factor (only the DIRECTION of each response matters).
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/scratch_res_corr_ns_fisher.py
 """

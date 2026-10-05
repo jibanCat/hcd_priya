@@ -9,7 +9,7 @@ materially more negative than HIGH-tau0 c -> #1 supported.
 FAST: one jitted per-row function (theta,z_u,t0)->(logP_clean, u_ns) reused across rows
 (no per-row recompile); subsample sims/fold; probe z in {2.4,3.0,3.6,4.2}.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_lya_ns_tau0_split.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

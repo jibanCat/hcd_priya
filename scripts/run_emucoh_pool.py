@@ -7,7 +7,7 @@ run_stepA pool on a different node without (a) re-running that pool's in-flight 
 checkpoint files are disjoint from every other mock id, and dispatch skips-done — or (b) racing on
 health.json. Production NUTS knobs (PROD). Usage:
 
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     OMP_NUM_THREADS=1 python3 scripts/run_emucoh_pool.py --workers 20
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

@@ -10,7 +10,7 @@ metals) — unlike the cache-grid Leg-A in closure_sbc. Pins:
       the likelihood's C_total(truth) — the Leg-A self-draw property, per leg;
   (c) build_legb_ctx(ensemble_ckpts=...) carries the EnsembleEmulator.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_leg_a.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

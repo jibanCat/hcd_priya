@@ -10,7 +10,7 @@ DESI proxy R_z ~15x too large) and cannot float f_res. V1 gives KS its OWN echel
 Default load_ks_leg (resolution_float=False) stays byte-identical (proxy R_z unused, no surgery).
 
 These are pure-numpy loader tests (no emulator / NUTS). Run:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_ks_resolution.py -q
 """
 import os

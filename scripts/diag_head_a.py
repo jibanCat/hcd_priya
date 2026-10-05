@@ -23,7 +23,7 @@ PHYSICAL space (untransform_prediction). We report:
              under-trained relative to p_resid (term_w[p_resid]=8)?
 
 READ-ONLY on production. Writes figures to figures/analysis/04_emulator/ and a JSON
-summary. Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya emu-jax python3.
+summary. Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> emu-jax python3.
 """
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

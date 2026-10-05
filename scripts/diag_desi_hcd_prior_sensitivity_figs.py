@@ -18,7 +18,7 @@ READ-ONLY on the pkls. Writes only into the figure dir. The OFF arm is PARTIAL -
 cross-mock aggregate (FIG 2) is PRELIMINARY and pinned to the doc's N=2 snapshot via
 --off-limit; the matched mock-0 corner (FIG 1) and the WITH-prior aggregate are solid.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3
 """
 import argparse

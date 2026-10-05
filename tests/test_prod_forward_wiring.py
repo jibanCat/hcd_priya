@@ -12,7 +12,7 @@ gate certified. These tests pin:
   3. The SBC run_cfg population stamp gains sample_res/f_res_amp_sigma/metal_prior so a wired pkl can
      never silently pool with a pre-wiring (uniform/no-f_res) pkl, while a default resume still loads.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_forward_wiring.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

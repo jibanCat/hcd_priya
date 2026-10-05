@@ -22,7 +22,7 @@ EMU n_s response (autodiff): per held-out sim row (z,τ₀), jacrev of log predi
 wrt theta9, take the n_s column. Matched to the truth cell by (z-bin, τ₀-rung).
 
 Run (x64 MUST be on — import hcd_analysis.emulator BEFORE jax):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_ns_slope_attenuation.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

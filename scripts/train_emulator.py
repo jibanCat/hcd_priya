@@ -8,7 +8,7 @@ vs-cache per-class P1D). ``--profile`` runs a single short fold and prints devic
 timing so the budget can be sized before the full k-fold sweep (cavestru0 is tight).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/train_emulator.py [args]
 """
 from __future__ import annotations

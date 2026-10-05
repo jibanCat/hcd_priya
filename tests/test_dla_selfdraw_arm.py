@@ -10,7 +10,7 @@ Covers the two pure pieces the new arm adds (mirroring tests/test_dnuis_inject.p
       any of the three *_truth_boost keys, and FAILS LOUD on an unknown inject_spec key (so a typo
       like "dla_truthboost" can never silently no-op an injection arm).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_dla_selfdraw_arm.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

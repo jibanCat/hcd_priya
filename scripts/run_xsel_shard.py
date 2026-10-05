@@ -50,7 +50,7 @@ the UNDERLYING CLEAN DRAW's sites (the corner alpha is not the map image of any 
 At the X1 corner the mock covariance keeps clean-composition C_emu weights (disclosed, not
 repaired). The gate is n_s/A_p bias, never alpha recovery.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import argparse
 import functools

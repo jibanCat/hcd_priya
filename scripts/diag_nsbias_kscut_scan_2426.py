@@ -19,7 +19,7 @@ What this run produces:
   - combined readout appended to nsbias_kscut_scan.txt
   - regenerated nsbias_kscut_scan.png / .npz with the full z series {2.0,2.1,2.3,2.4,2.6,2.8}
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_nsbias_kscut_scan_2426.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

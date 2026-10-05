@@ -9,7 +9,7 @@ The analyzer's contract, pre-registered in `2026-08-05-A3d-PREREGISTRATION.md`:
   * the pin arm is the PRESERVED r6x deployed KS population (r6x pkl schema, meta-identified,
     smoke pkls excluded); the draw arm is the run_prod_sbc_shard schema with the frozen cfg.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ksfd_paired.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

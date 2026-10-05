@@ -1,6 +1,6 @@
 """Blind-safe divergence localization readout (eBOSS prereg v1.2 amendment section 4): synthetic chain
 directory tests. Run:
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
   /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_eboss_divergence_localize.py -q -p no:cacheprovider
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

@@ -13,7 +13,7 @@ Top row  = the rank histogram (the intuitive view).
 Bottom row = ECDF − diagonal with the SIMULTANEOUS 95% band (the actual pass/fail test).
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_ecdf_sbc_illustration.py
 """
 from __future__ import annotations

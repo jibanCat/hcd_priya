@@ -9,7 +9,7 @@ TWO tiers:
   (2) ARTIFACT: load the written npz (skip if absent) and assert per-leg shapes,
       the cos_span<0.8 certificate, and worst_ns_member in (1,2).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
      -m pytest tests/test_res_instr_basis.py -q
 """

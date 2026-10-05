@@ -8,7 +8,9 @@ import pytest
 from hcd_analysis.emulator import schema as S
 
 R, K = 3, 8
-LF = "hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+from tests.gate_helpers import real_cache_path, require_real_cache
+
+LF = real_cache_path("lf")   # inside this checkout; gate runs fail (not skip) when absent
 
 
 def _synthetic_cache(n_rows=R, n_k=K, break_kcom=False):
@@ -91,9 +93,10 @@ def test_validator_ignores_nan_padded_bins():
     assert np.all(np.isfinite(rep["derived"]["k_com_hmpc"]))
 
 
-@pytest.mark.skipif(not os.path.exists(LF), reason="real cache absent")
 def test_real_caches_satisfy_schema():
     """The validator on the RAW products (every stored dataset, read with h5py; independent of load_cache)."""
+    require_real_cache(LF)
+    require_real_cache(LF.replace("_lf", "_hr"))
     import h5py
     for p in (LF, LF.replace("_lf", "_hr")):
         with h5py.File(p, "r") as h:
@@ -105,8 +108,9 @@ def test_real_caches_satisfy_schema():
         assert np.allclose(rep["derived"]["k_com_hmpc"], 2 * np.pi * np.arange(1, len(rep["derived"]["k_com_hmpc"]) + 1) / S.L_BOX_HMPC, rtol=1e-9)
 
 
-@pytest.mark.skipif(not os.path.exists(LF), reason="real cache absent")
 def test_load_cache_exposes_k_com_and_report():
+    require_real_cache(LF)
+    require_real_cache(LF.replace("_lf", "_hr"))
     from hcd_analysis.emulator.data import load_cache
     d = load_cache(LF)
     assert d["k_com_hmpc"].shape == (172,) and d["schema_report"]["n_rows"] == 21440

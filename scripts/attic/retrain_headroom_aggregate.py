@@ -11,9 +11,11 @@ any) materially DROPS the held-out per-class error vs baseline, by how much.
 Figure -> notes repo figures/analysis/04_emulator/retrain_headroom_<tag>.png
 NPZ    -> same dir, retrain_headroom_<tag>.npz
 
-ENV: PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3
+ENV: PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 import argparse, json, glob
 from pathlib import Path
 import numpy as np
@@ -35,7 +37,7 @@ def load_all(tag, indir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="pilot")
-    ap.add_argument("--indir", default="/home/mfho/hcd_priya/checkpoints/retrain")
+    ap.add_argument("--indir", default=f"{_REPO_ROOT}/checkpoints/retrain")
     args = ap.parse_args()
     recs = load_all(args.tag, args.indir)
     if not recs:

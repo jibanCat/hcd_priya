@@ -30,7 +30,7 @@ NOT COMBINABLE ACROSS LEGS: the JOINT run and a per-leg (DESI/KS/eBOSS) run are
 different likelihoods; analyze one --leg set at a time.
 
 Usage:
-  PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+  PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/analyze_sbc_allfolds.py [--leg LEG] [--root ROOT] [--pattern PAT] \
                                     [--prefix PREFIX]
 

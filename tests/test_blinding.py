@@ -11,7 +11,7 @@ Pins the locked blinding-strategy contract:
   7. SAFETY:        apply/unblind on a matrix MISSING a blinded column raises (no silent no-op).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_blinding.py -q
 """
 import json

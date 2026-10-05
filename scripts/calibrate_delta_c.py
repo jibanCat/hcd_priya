@@ -17,7 +17,7 @@ STD as the w_c prior width -- the residual is the irreducible cosmology dependen
 fixed z (a z-only polynomial cannot remove it; carried as a prior width per the
 2026-05-29 w_c<->dN/dX coupling note).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/calibrate_delta_c.py [--shards GLOB] [--deg 2]
 Outputs: docs/superpowers/2026-06-01-delta_c-coeffs.md  and  .../delta_c-coeffs.npz
 """

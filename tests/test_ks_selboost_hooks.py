@@ -20,7 +20,7 @@ z is NEVER inferred from array length -- _apply_truth_boosts gains a z kwarg thr
 run_legb (ctx.z_global); a profile without z, or against a pivot-only truth (alpha_hcd_z=None),
 is a HARD ValueError, not a degraded scalar fallback.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ks_selboost_hooks.py -q
 """
 import math

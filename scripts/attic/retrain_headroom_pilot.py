@@ -24,12 +24,14 @@ in (k,z). Reported: per-class in-range RMS, k<0.06 RMS, worst-(k,z) cell, and a
 per-parameter Fisher-sensitivity proxy (gradient of logP wrt each of the 9 params,
 held-out-row-averaged) so we can see which params the variant resolves better.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/retrain_headroom_pilot.py \
         --fold 0 --variant baseline --tag pilot
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 import argparse, json, time, os
 from pathlib import Path
 import numpy as np
@@ -45,7 +47,7 @@ from hcd_analysis.emulator.data import (
 )
 from hcd_analysis.emulator.predict import predict_P_filt
 
-REPO = "/home/mfho/hcd_priya"
+REPO = f"{_REPO_ROOT}"
 CACHE = f"{REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 CLASSES = ["clean", "LLS", "subDLA", "DLA"]
 PARAMS = ["ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2", "hireionz", "bhfeedback"]

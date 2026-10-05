@@ -27,7 +27,7 @@ scores each on the fold-0 coherent-vs-CV split + A_p/ns Fisher-bias + deployed
 medians, then MULTI-FOLD validates the winner. Reuses the diag scoring from
 scripts/diag_ap_fisher_bias.py and diag_theta_tracking_honest.py.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/push_residual_refine.py [opts]
 """
 from __future__ import annotations

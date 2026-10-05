@@ -17,7 +17,7 @@ with the expected (a_lo,a_hi); the a=f/(1-F_ref) map; constrain_fn mirror parity
 the draws/packed-name columns; the a_SiII re-score threading fix; and a short flatlog NUTS smoke.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_metal_flatlog.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

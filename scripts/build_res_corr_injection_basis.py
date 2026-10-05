@@ -43,7 +43,7 @@ scripts/scratch_res_corr_ns_fisher.py (anchor_taper, _whitened_cos, the
 PRODUCTION MF n_s response, the Z_HEII=2.8 window).
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/build_res_corr_injection_basis.py
 """

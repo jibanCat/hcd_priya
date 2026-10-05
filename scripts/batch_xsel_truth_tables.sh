@@ -25,11 +25,13 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=10g
 #SBATCH --time=06:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/xsel_truth_%A_%a.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/xsel_truth_%A_%a.err
+#SBATCH --output=logs/xsel_truth_%A_%a.out
+#SBATCH --error=logs/xsel_truth_%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 
 # emu-3.9 + gsl, exactly like the deployed cache builder (batch_tau0_production.sh)
@@ -41,7 +43,7 @@ FIDELITY=${FIDELITY:-lf}
 TID=${SLURM_ARRAY_TASK_ID:-0}
 SEED=${SEED:-20260724}
 OUTDIR=${OUTDIR:-/scratch/cavestru_root/cavestru0/mfho/cert_2026-07/xsel_truth}
-mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
+mkdir -p "$OUTDIR" $REPO/logs
 
 echo "=== xsel_truth ${FIDELITY} sim-index ${TID} -> ${OUTDIR} start: $(date) ==="
 "$PY" scripts/build_xsel_truth_tables.py \

@@ -22,10 +22,12 @@ Blind status: BLIND-SAFE. 100% closure mocks (truth = held-out PRIYA sim, known)
 real-data n_s/A_p anywhere, including metadata.
 
 Run (login node, after all 14 pkls land):
-  cd /home/mfho/hcd_priya && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu \
+  cd <repo> && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/export_money_campaign_corrected.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse, hashlib, json, pickle, platform, subprocess, sys
 from pathlib import Path
 import numpy as np
@@ -39,7 +41,7 @@ N_PAIRS = 6
 DEFAULT_OUT = Path("/home/mfho/hcd_priya_notes/artifacts/paper_exports/money_campaign_corrected_2026-07-22")
 SATURATION_MU = 27.631021    # -log(1e-12): the retired approximate-inverse clamp fingerprint
 CORRECTED_LLS_CENTER = 0.18811862702546295   # survey=None closure, post-528ba89 (export of record)
-RUN_CMD = ("cd /home/mfho/hcd_priya && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu "
+RUN_CMD = (f"cd {_REPO_ROOT} && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu "
            "/home/mfho/.conda/envs/emu-jax/bin/python3 scripts/export_money_campaign_corrected.py")
 
 

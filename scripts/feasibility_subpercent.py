@@ -22,7 +22,7 @@ Five experiments on the fold-0 LOSO split of ``observables_tau0_lf.h5``:
   5. Within-data-k-range check — DESI (~1e-3..2e-2 s/km) and KODIAQ (~3e-3..0.1)
      k-windows, excluding k<data-k_min where the known low-k spike lives.
 
-Env (MANDATORY): PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+Env (MANDATORY): PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/feasibility_subpercent.py
 Writes figures to figures/analysis/04_emulator/ and a JSON summary.
 """

@@ -10,7 +10,7 @@ A single multi-panel figure for the checkpoint review:
       (the field-standard "is the emulator error sub-dominant" check).
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_checkpoint_forward.py
 """
 from __future__ import annotations

@@ -7,7 +7,7 @@ lost the WHOLE shard. ``run_prod_sbc_shard._run_mock`` now runs ONE mock, writes
 globs ``mock_*.pkl`` (mock index from the FILENAME) alongside ``shard_*.pkl``, per-mock files
 winning a conflict.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_sbc_checkpoint.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

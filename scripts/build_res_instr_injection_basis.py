@@ -59,7 +59,7 @@ with C_data^-1; (2) the span is {ones, logfac}; (3) the perturbation is B@b_res;
 (4) store per-z (n_z,) vectors.
 
 Env (HEAVY -- run via SLURM on cavestru0, NOT the interactive node):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/build_res_instr_injection_basis.py
 """

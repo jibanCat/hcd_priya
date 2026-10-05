@@ -26,7 +26,7 @@ x-axis = k in s/km, ANGULAR (k = 2π/λ_v); kfkms is fed directly, NO /(2π).
 
 Forward-only; no NUTS, no training. Runs in ~minutes on CPU.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_loso_perk.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

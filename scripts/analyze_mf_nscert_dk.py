@@ -20,7 +20,7 @@ whose checkpoints don't exist yet prints "(pending)" and does NOT crash.
 Emits a per-survey figure (DESI-only vs KS-only headline panels; joint DESI+KS overlaid as context)
 to the NOTES figure tree.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
        /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/analyze_mf_nscert_dk.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

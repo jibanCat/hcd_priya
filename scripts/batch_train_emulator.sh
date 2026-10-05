@@ -12,18 +12,20 @@
 #SBATCH --mem=32G
 #SBATCH --time=2:00:00
 #SBATCH --job-name=emu_train
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/%x_%j.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/%x_%j.err
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 
 # emu-jax bundles its own CUDA wheels (self-contained); set LD_LIBRARY_PATH only
 # if a runtime CUDA-lib load failure appears in the logs.
 # export LD_LIBRARY_PATH=/home/mfho/.conda/envs/emu-jax/lib:${LD_LIBRARY_PATH:-}
 export PYTHONNOUSERSITE=1
-export PYTHONPATH=/home/mfho/hcd_priya
+export PYTHONPATH=$REPO
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
 
 # Confirm the GPU is visible to JAX (first line of the body, as required).

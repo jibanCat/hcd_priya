@@ -48,7 +48,7 @@ READOUT PLAN (run when jobs finish; per width w in {0.416, 0.574}, per mock m in
   hedge-form decision matters for cosmology at all.
 
 Budget: 2 widths x 2 mocks = 4 clean fits, ~15 ks/fit on 4 CPUs => ~70 CPU-h (cavestru1).
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import argparse, functools, os, pickle, time
 import numpy as np

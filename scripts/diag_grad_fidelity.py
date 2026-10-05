@@ -11,7 +11,7 @@ sweep over the unit cube.
 GATE: median rel-err < 1e-4 at every τ₀ position; zero non-finite P_obs/gradient.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_grad_fidelity.py [--ckpt ...]
 Writes figures/analysis/05_likelihood/grad_fidelity.png + grad_fidelity.json.
 """

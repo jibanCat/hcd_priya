@@ -23,7 +23,7 @@ the run_stepA battery / health.json print the OPPOSITE sign (truth − post). Sc
 magnitude-based, so the sign only affects the per-mock signed columns (labelled).
 
 Usage (emu-3.9 has matplotlib; emu-jax also fine for the numbers):
-  PYTHONPATH=/home/mfho/hcd_priya python3 scripts/analyze_emucoh_validation.py [--no-fig]
+  PYTHONPATH=<repo> python3 scripts/analyze_emucoh_validation.py [--no-fig]
 Robust to partial completion: a mock with <4 chains on either arm is skipped with a note.
 """
 from __future__ import annotations

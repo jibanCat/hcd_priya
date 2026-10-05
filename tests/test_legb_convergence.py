@@ -14,7 +14,7 @@ Also unit-tests the pure battery estimators (``convergence_battery``) on a synth
 multi-chain array where the truth (R-hat≈1, large ESS for iid chains) is known, so the
 estimators are verified independently of the (slow) NUTS path.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_convergence.py -q
 """
 import os

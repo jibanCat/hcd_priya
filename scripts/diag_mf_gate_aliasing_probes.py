@@ -15,7 +15,7 @@ and LF. Report σ_τ0(ON)/σ_τ0(OFF) (PASS ≤1.05) and |r(τ₀,n_s)(ON) − r
 worst (max |Δr|) over the τ₀ z-bins. C_post = (F+P)^{-1}; F is the SAME Fisher the bias
 run builds (forward Jacobian), so this reads the joint (n_s,τ₀) geometry directly.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_mf_gate_aliasing_probes.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

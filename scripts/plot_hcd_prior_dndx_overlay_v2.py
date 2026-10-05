@@ -26,7 +26,7 @@ for a like-for-like, round-trip-exact display; DLA on the 10%-residual axis (x0.
 (0.287/0.574 DESI-family, 0.40/0.40 KS; corrected-law widths 2026-07-18). Laws + points + widths
 all come from the deployed module constants / lit_dndx (no hard-codes).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_hcd_prior_dndx_overlay_v2.py
 """
 from __future__ import annotations

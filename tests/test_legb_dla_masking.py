@@ -29,7 +29,7 @@ THE MODEL (this is what these tests pin):
   α_DLA = 0.10·(lit/sim)·w_DLA on DESI / forward DLA term = 0 on KS, the forward reproduces the
   per-leg target (DESI carries the 10% DLA, KS carries none) to tight rtol.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_dla_masking.py -v
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

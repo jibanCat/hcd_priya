@@ -14,7 +14,7 @@ Attribution math (linear-in-rows decomposition of the Fisher MAP shift):
   bias_z = (Cpost @ g_z)[ns] / sqrt(Cpost[ns,ns])
   GATE: sum_z bias_z == total bias per sim (1e-6 rel); sum_z <bias_z> ~ -0.65 sigma.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_nsbias_z_attribution.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

@@ -15,7 +15,7 @@ correct: autodiff==finite-diff to ~1e-7). This asks whether they are PHYSICALLY 
   Q5  emulator Fisher CORRELATION vs PRIYA's published posterior covmat correlation.
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_grad_physics.py
 Writes figures/analysis/05_likelihood/grad_physics.png + grad_physics.json.
 """

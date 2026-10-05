@@ -24,11 +24,13 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64g
 #SBATCH --time=8:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/ks_xsel_%A_%a.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/ks_xsel_%A_%a.err
+#SBATCH --output=logs/ks_xsel_%A_%a.out
+#SBATCH --error=logs/ks_xsel_%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 TID=${SLURM_ARRAY_TASK_ID:-0}
 SEED=${SEED:-20260615}                       # PAIR_SEED: K0-reuse pairing (annex OQ5)
@@ -41,9 +43,9 @@ NCPU=${SLURM_CPUS_PER_TASK:-4}; SMOKE_FLAG=""; [[ "${SMOKE:-0}" == "1" ]] && SMO
 TT_FLAG=(); [[ -n "$TRUTH_TABLE" ]] && TT_FLAG=(--truth-table "$TRUTH_TABLE")
 export OMP_NUM_THREADS=$NCPU OPENBLAS_NUM_THREADS=$NCPU MKL_NUM_THREADS=$NCPU NUMEXPR_NUM_THREADS=$NCPU
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=$NCPU"
-export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
-mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
+mkdir -p "$OUTDIR" $REPO/logs
 
 # resolve (arm, mock, n_arm, pkl) through the numpy-light registry (single source with the
 # runner; no arm/offset table duplicated in bash; batch_cells needs NO truth table).

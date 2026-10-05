@@ -6,7 +6,7 @@ residual via ``fold_resid_neff`` with the τ₀-band axis, aggregates over folds
 writes ``error_vector.npz`` with sigma (4,K,Zb,Tb) + the τ₀-band α-centres (Phase-C T2).
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/build_error_vector.py \
       [--prefix checkpoints/decomp_nb24] [--z-bands 3] [--tau0-bands 4]
 """

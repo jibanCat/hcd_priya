@@ -68,18 +68,20 @@ OUT: hcd_analysis/_emulator_data/res_corr_shape_cov.npz
   _meta_sigma_res, _meta_legs, _meta_doc
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/build_res_corr_shape_cov.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 import functools
 print = functools.partial(print, flush=True)
 
 import numpy as np
 
-BASIS = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/res_corr_injection_basis.npz"
-OUT = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/res_corr_shape_cov.npz"
+BASIS = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/res_corr_injection_basis.npz"
+OUT = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/res_corr_shape_cov.npz"
 SIGMA_RES = 1.0          # MATCH the marginalization's implied cov (alpha ~ N(1,1) => 1.0 dhat dhat^T)
 LEGS = ("DESI", "KS")
 

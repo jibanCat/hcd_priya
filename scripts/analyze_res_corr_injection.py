@@ -43,7 +43,7 @@ under NORC (its k_max sits near the 5x k_box anchor so the expected Delta is sma
 per leg rather than assume it away). tau0_mean / tau0_tilt paired shifts are also REPORTED (mean flux
 is the suspected n_s driver) but are NOT gated.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/analyze_res_corr_injection.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

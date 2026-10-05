@@ -30,7 +30,7 @@ disposition. In every row: NO autonomous extension to N=96, NO promotion out of 
 both are PI acts.
 
 Usage:
-  PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+  PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/a1c_disposition.py GATE_JSON A1C_DIR A1_DIR [EXPECT_N]
 """
 import json

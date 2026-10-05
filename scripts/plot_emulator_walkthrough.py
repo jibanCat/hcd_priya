@@ -21,7 +21,7 @@ axis-labeled. A trained checkpoint is cached under checkpoints/walkthrough_fold0
 re-runs of the plotting alone are fast (--reuse).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_emulator_walkthrough.py
 """
 from __future__ import annotations

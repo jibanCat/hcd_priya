@@ -53,7 +53,7 @@ stamped, never silent.
 
 Pure numpy on purpose -- safe on the login node (no JAX import).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
      scripts/analyze_lls_dispcenter.py \
      --shard-dir /scratch/cavestru_root/cavestru1/mfho/lls_dispcenter --allow-incomplete \
      [--npz-out out.npz] [--fig-out fig.png]

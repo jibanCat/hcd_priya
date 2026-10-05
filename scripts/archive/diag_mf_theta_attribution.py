@@ -60,7 +60,7 @@ Figures -> figures/analysis/05_multifidelity/:
                                    |n_s|/|A_p| Fisher bias (mean + worst sim).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_mf_theta_attribution.py [args]
 """
 from __future__ import annotations

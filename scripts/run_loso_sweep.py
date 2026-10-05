@@ -11,7 +11,7 @@ three review figures.
 Does NOT modify any ``hcd_analysis/emulator/*.py`` (other work reads them).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_loso_sweep.py [args]
 """
 from __future__ import annotations

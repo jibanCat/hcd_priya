@@ -75,10 +75,12 @@ Figure: figures/analysis/04_emulator/convergence_same_loss.png
   marked and the train/val ratio at the val-min is annotated.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_convergence_same_loss.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 
 import argparse
 import time
@@ -104,8 +106,8 @@ from hcd_analysis.emulator.model import p_resid_loss, coherent_resid_loss
 # Reuse the FINALIZED recipe verbatim (single source of truth).
 from scripts.run_loso_sweep import FINAL_RECIPE
 
-CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-FIGDIR = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
+CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+FIGDIR = f"{_REPO_ROOT}/figures/analysis/04_emulator"
 DEFAULT_FOLDS = (0, 3, 5)
 
 # Term-selecting uniform weights. The eval batch carries NO k_weight / datarange
@@ -410,7 +412,7 @@ def main():
     ap.add_argument("--train-eval-subsample", type=int, default=2000,
                     help="fixed #train rows for the uniform train eval (same every epoch)")
     ap.add_argument("--figpath", default=str(Path(FIGDIR) / "convergence_same_loss.png"))
-    ap.add_argument("--histdir", default="/home/mfho/hcd_priya/checkpoints",
+    ap.add_argument("--histdir", default=f"{_REPO_ROOT}/checkpoints",
                     help="dir for per-fold per-epoch uniform-loss history JSON")
     ap.add_argument("--smoke", action="store_true",
                     help="2 folds, few epochs — quick end-to-end check")

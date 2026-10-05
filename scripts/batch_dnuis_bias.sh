@@ -25,11 +25,13 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=24g
 #SBATCH --time=24:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/dnuis_bias_%A_%a.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/dnuis_bias_%A_%a.err
+#SBATCH --output=logs/dnuis_bias_%A_%a.out
+#SBATCH --error=logs/dnuis_bias_%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 
 # The 8 cells (arm:survey). metal_misspec KS is intentionally ABSENT (no-op no-test).
@@ -65,9 +67,9 @@ SURVEY=${CELLS[$CELL_IDX]##*:}
 # cap threads to the allocation (Great Lakes bills max(cores, mem/7)*wall).
 export OMP_NUM_THREADS=$NCPU OPENBLAS_NUM_THREADS=$NCPU MKL_NUM_THREADS=$NCPU
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=$NCPU"
-export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
-mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
+mkdir -p "$OUTDIR" $REPO/logs
 
 echo "=== dnuis-bias PAIRED ${ARM}/${SURVEY} shard ${SHARD}/${N_SHARDS} (cell ${CELL_IDX}/${N_CELLS}, N_MOCKS=${N_MOCKS}, ${NCPU} cpu) start: $(date) ==="
 "$PY" -u scripts/run_dnuis_bias_shard.py \

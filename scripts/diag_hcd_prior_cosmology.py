@@ -13,7 +13,7 @@ Reports:
   (3) the α–θ Fisher correlation (which params each α_c is degenerate with).
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_hcd_prior_cosmology.py
 Writes figures/analysis/05_likelihood/hcd_prior_cosmology.png + .json.
 """

@@ -25,7 +25,7 @@ MF-PATH ARM (Task 1.2, res_corr anchor + alpha-nuisance guard):
     leg=DESI+KS, theta9=0.5, tau0=becker13(z_leg), alpha3=median structural w_c,
     pinned arrays = per-leg P_model (load-bearing) AND C_total, rtol 1e-10 / atol 0.
 
-Run (LF golden): PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Run (LF golden): PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/make_legb_golden.py
 Run (MF golden): ... scripts/make_legb_golden.py --mf
 """

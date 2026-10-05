@@ -27,7 +27,7 @@ slope CENTER is 0 under the production g_fixed (the lit shape is in g_fixed; Q2)
 the locked finding (×1.04, framing-robust). The width-vs-bias scan + the σ(A_p),σ(n_s) curve are emitted
 the same way, now with the n_s bias and the exact ΔP.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_legb_slope_prior_rerun.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

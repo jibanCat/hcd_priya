@@ -34,7 +34,7 @@ likelihood factor sums over that leg ONLY (its real P_data), with that leg's own
 floor, DLA-forward fraction, and metal flag — byte-consistent with how the closure exercises a leg.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_real_fit.py --survey {eboss,ks,desi}
 """
 from __future__ import annotations

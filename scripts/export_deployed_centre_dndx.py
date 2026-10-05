@@ -61,10 +61,12 @@ object exists in the deployed mapped prior (its widths are the dN/dX-space KS_DN
 Blind status: BLIND-SAFE. Prior geometry only -- no data, no posterior, no cosmology.
 
 Run (login node):
-  cd /home/mfho/hcd_priya && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu \
+  cd <repo> && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/export_deployed_centre_dndx.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse, hashlib, json, platform, subprocess, sys
 from pathlib import Path
 
@@ -99,7 +101,7 @@ CLS = ("LLS", "subDLA", "DLA")
 FROZEN = Path("/home/mfho/hcd_priya_notes/artifacts/paper_exports/dndx_repin_2026-07-20")
 DEFAULT_OUT = Path("/home/mfho/hcd_priya_notes/artifacts/paper_exports/deployed_centre_2026-07-22_v4")
 SURVEYS = ("eBOSS", "KS", "DESI")
-RUN_CMD = ("cd /home/mfho/hcd_priya && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu "
+RUN_CMD = (f"cd {_REPO_ROOT} && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu "
            "/home/mfho/.conda/envs/emu-jax/bin/python3 scripts/export_deployed_centre_dndx.py")
 
 # The W2-pinned MAPPED KS alpha-space LLS pivot centre (the z=3 LLS occupancy weight of the

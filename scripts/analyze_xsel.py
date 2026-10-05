@@ -52,7 +52,7 @@ threshold study; it is NOT a hard unblinding block.
 Pure numpy at import (login-node safe); the K8 row recompute lazily imports jax + the frozen
 dndx_wc map (selboost-analyzer precedent).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
      scripts/analyze_xsel.py --shard-dir <xsel dir> [--k0-dir <ks_rerun dir>] \
      [--out-dir <readout dir>]
 """

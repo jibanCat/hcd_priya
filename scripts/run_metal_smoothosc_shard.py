@@ -17,7 +17,7 @@ SAME SEED (20260615) and fold_in(seed, m) as the Gate B metal_misspec:desi cell,
 the IDENTICAL truths+noise → the smooth/osc cells are directly comparable to the full cell, and the
 smooth/osc Δbias should add to the full Δbias per mock.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

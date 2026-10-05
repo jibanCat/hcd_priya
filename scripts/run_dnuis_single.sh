@@ -4,7 +4,7 @@
 # same script serves smoke (SMOKE=1) and the full single-mock Phase-0 profile (SMOKE=0).
 # Submit, e.g.:
 #   sbatch --time=1:00:00 --job-name=dnuis_smoke_mm \
-#     --output=/home/mfho/hcd_priya/logs/dnuis_smoke_mm.out \
+#     --output=$REPO/logs/dnuis_smoke_mm.out \
 #     --export=ALL,ARM=metal_matched,SURVEY=desi,SMOKE=1,OUTDIR=$SCR/dnuis_smoke \
 #     scripts/run_dnuis_single.sh
 #SBATCH --account=cavestru1
@@ -13,9 +13,11 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=24g
-#SBATCH --chdir=/home/mfho/hcd_priya
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 
 ARM=${ARM:?set ARM}
@@ -29,9 +31,9 @@ NCPU=${SLURM_CPUS_PER_TASK:-8}
 
 export OMP_NUM_THREADS=$NCPU OPENBLAS_NUM_THREADS=$NCPU MKL_NUM_THREADS=$NCPU
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=$NCPU"
-export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
-mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
+mkdir -p "$OUTDIR" $REPO/logs
 
 SMOKEFLAG=""
 [ "$SMOKE" = "1" ] && SMOKEFLAG="--smoke"

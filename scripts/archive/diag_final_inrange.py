@@ -16,10 +16,12 @@ Reports per fold + mean±scatter, and confirms vs the pre-finalization numbers
 median <1%). READ-ONLY on production code.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_final_inrange.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 
 import argparse
 import json
@@ -43,9 +45,9 @@ from scripts.archive.diag_datarange_mask import (
     CLS, PARAMS, Z_DATA, K_DATA_MIN, LOWK, MIDK, HIGHK,
 )
 
-CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-OUT = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
-CKPT = "/home/mfho/hcd_priya/checkpoints/final_fold{}"
+CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+OUT = f"{_REPO_ROOT}/figures/analysis/04_emulator"
+CKPT = (_REPO_ROOT + "/checkpoints/final_fold{}")
 Z_FID = 3.0
 
 

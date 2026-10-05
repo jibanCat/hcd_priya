@@ -39,11 +39,13 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24g
 #SBATCH --time=24:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/prod_sbc_slfix2_%A_%a.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/prod_sbc_slfix2_%A_%a.err
+#SBATCH --output=logs/prod_sbc_slfix2_%A_%a.out
+#SBATCH --error=logs/prod_sbc_slfix2_%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 
 N_MOCKS=${N:-${N_MOCKS:-48}}
@@ -57,9 +59,9 @@ NCPU=${SLURM_CPUS_PER_TASK:-4}
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=$NCPU"
 export PYTHONHASHSEED=0            # P0: reproducibility belt-and-braces (seed fold is crc32; this pins any residual hash-order effect)
-export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
-mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
+mkdir -p "$OUTDIR" $REPO/logs
 
 # This shard's single mock is m == TID (since N_SHARDS == N_MOCKS). Fast-path skip if its
 # per-mock pkl already exists (run_prod_sbc_shard also skips internally — this saves the import).

@@ -58,9 +58,11 @@ The DEPLOYED C_total is built with the EXACT production-SBC flags from run_prod_
 plus an OPTIONAL --fixed arm that ALSO turns on mf_shape=True and points emucoh at a LOW-k npz
 (the post-fix C) so the SAME projection can be re-run after the fix.
 
-Env: PYTHONPATH=/home/mfho/hcd_priya, import hcd_analysis.emulator FIRST (x64).
+Env: PYTHONPATH=<repo>, import hcd_analysis.emulator FIRST (x64).
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 import argparse, os
 import numpy as np
 
@@ -71,7 +73,7 @@ from hcd_analysis.emulator import closure_legb as CL
 from hcd_analysis.emulator.closure_legb_figs import _truth_alpha_zresolved_on_leg
 from hcd_analysis.emulator import data_likelihood as DL
 
-REPO = "/home/mfho/hcd_priya"
+REPO = f"{_REPO_ROOT}"
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
 HOLE_K = 0.0102        # the emucoh floor's low-k edge (covers [0.01016, 0.06892])
 

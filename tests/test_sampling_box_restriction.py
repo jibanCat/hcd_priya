@@ -7,7 +7,7 @@ original PRIYA ranges on herei/heref/alphaq while KEEPING n_s extended. This pin
   (1) the unit-cube bounds are right (IGM sub-intervals, n_s/Ap/etc full);
   (2) the model actually SAMPLES inside the original PRIYA IGM box (prior-predictive).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_sampling_box_restriction.py -q
 """
 import os

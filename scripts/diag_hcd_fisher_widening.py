@@ -28,7 +28,7 @@ the prior closure had |bias_z(subDLA)| ≈ 1–3σ (RMS ~2). If the diagonal mod
 the observed miscoverage (≳1.5–2×); a token widening (f≈1.05) would mean the term is real but
 NOT the dominant cause → escalate.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_hcd_fisher_widening.py
 """
 from __future__ import annotations

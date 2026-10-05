@@ -12,7 +12,7 @@ C_post = (F+P)^{-1} the gate built) under three forwards — LF, MF-OFF (pure se
 MF-ON (separable+rank-1) — and reports the ABSOLUTE marginal widths + the r(τ₀,n_s),
 per fold, that the aliasing txt did not print. Forward-only Fisher; no NUTS; no commit.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_mf_tau0ns_rotation.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

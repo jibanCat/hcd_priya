@@ -1,6 +1,6 @@
 """PI #28 (2026-09-25): the z >= 2.6 eBOSS product. Readout in plain mode (exported unblinded), z grid from health.z_kept,
 two-sided A_P rule against the canonical chain, gate enforcement; and the 2.2 versus 2.6 descriptive comparison script.
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
   /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_eboss_z26.py -q -p no:cacheprovider
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

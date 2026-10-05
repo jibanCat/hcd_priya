@@ -5,7 +5,7 @@ the alpha_res forward-only pattern. Default OFF (ctx.sample_res=False) -> byte-i
 4-lens-verified design (2026-07-02): keep EXP; TIGHT prior on physics grounds (amp ~ Normal(0,0.02));
 per-z-block rank-1 cov surgery for option-b; forward-only (not in truth -> no closure cancellation).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_resolution.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

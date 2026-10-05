@@ -28,7 +28,7 @@ ASSERTS the new diagonal ≈ the old per-class variance and reports the ratio.
 Does NOT modify any committed library module.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/build_xclass_error_vector.py [args]
 """

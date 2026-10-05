@@ -5,7 +5,7 @@ suppresses. Compares to the LOSO folds' in-range val RMS (1.0-2.4% overall, clea
 NOT a generalization test (all sims are in training — generalization is certified by the LOSO closure +
 inherited via the C_emu). This is the fit-quality + ensemble-benefit gate.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/validate_production_ensemble.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

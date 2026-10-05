@@ -11,7 +11,7 @@ This is NOT a coverage verdict (n=1) and NOT the gated production run. It SKIPS 
 the per-mock NUTS cost). Timing is forced SYNCHRONOUS with jax.block_until_ready so the JAX
 async dispatch does not under-count the sampling wall.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/profile_legb_mtd10.py \
        --n-warmup 120 --n-samples 120 --max-tree-depth 10
 """

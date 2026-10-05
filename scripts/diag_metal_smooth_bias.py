@@ -32,7 +32,7 @@ RESIDUAL: the metal_misspec arm injects metal_inject(P_clean, k, <F>, form="desi
 FIDUCIAL TRUTH: theta9 = unit-cube CENTRE (0.5); tau0_amp=1.0, dtau0=0.0 (Kim/PRIYA prior mean);
   alpha at the HCD-prior MEAN (ctx.alpha_hcd_mu). a_SiIII=a_SiII=0 for P_clean.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
   OMP_NUM_THREADS=4 /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_metal_smooth_bias.py
 
 READ-ONLY on all modules (a NEW script). Outputs to the NOTES repo 05_likelihood/.

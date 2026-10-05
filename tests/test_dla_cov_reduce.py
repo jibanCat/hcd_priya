@@ -22,7 +22,7 @@ Tests (PI requirements, verbatim list):
      term is OFF (dla_forward_frac == 0) raises;
   6. opt-out (dla_cov_reduce=False) is byte-identical to the pre-change behavior.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_dla_cov_reduce.py -q
 """
 import os

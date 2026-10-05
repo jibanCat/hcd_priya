@@ -13,6 +13,8 @@ Analyze (scripts/analyze_subdla_norm_vs_tilt.py over the per-task npz):
   - corr(ns, s_subdla)      -- TILT channel (referee: confirm WEAK on the 3-leg path, not DESI-only)
   - sd(s_subdla)/prior      -- does the DATA constrain the tilt (shrink<<1) or prior-dominated (~1)?
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 import os, glob
 import numpy as np
 import hcd_analysis.emulator  # x64 before jax
@@ -21,7 +23,7 @@ from hcd_analysis.emulator.closure_legb import (
     build_legb_ctx, held_out_sims, make_truth_from_sim, make_legb_mock,
     _mock_core_per_leg, _run_nuts_legb, ZSLOPE_PRIOR_SIGMA, HCD_INCIDENCE_SLOPE)
 
-REPO = "/home/mfho/hcd_priya"
+REPO = f"{_REPO_ROOT}"
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
 OUTDIR = os.environ.get("DIAG_OUTDIR", f"{REPO}/checkpoints/diag_normtilt")
 MOCK = int(os.environ.get("DIAG_MOCK", "0"))

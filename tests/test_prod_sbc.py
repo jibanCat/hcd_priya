@@ -12,7 +12,7 @@ Pins the contract for the production-SBC gate plumbing:
       for the merge, and the selected index draws the fold_in(seed, m) mock.
 
 Env-gated like the other closure tests. Run:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_sbc.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

@@ -37,7 +37,7 @@ Conventions (matched to inference.py / run_loso_sweep.py):
 Does NOT modify any committed library module. Proposes (does not edit) the DATA_RANGE k_max.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/diag_cemu_validation.py [--max-rows N]
 """

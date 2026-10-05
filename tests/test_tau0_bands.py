@@ -1,6 +1,6 @@
 """Phase-C T2 — τ₀-band error vector: make_tau0_bands + aggregate_error_vector (4D).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_tau0_bands.py -v
 """
 import sys

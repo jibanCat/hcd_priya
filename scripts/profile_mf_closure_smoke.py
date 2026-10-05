@@ -12,7 +12,7 @@ Emits to figures/analysis/05_likelihood/:
   mf_closure_smoke_posterior.png, mf_closure_cemu_on_leg.png, mf_closure_whitened_resid.png,
   mf_closure_smoke.txt
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/profile_mf_closure_smoke.py \
        --n-warmup 150 --n-samples 150 --max-tree-depth 8
 """

@@ -35,7 +35,7 @@ truth boost must sit OFF the pin center to be a real test:
   eboss = 1.30  (no per-survey pin → forward keeps the cosmic average; 1.30 is a deliberate STRESS
                  offset since eBOSS is low-k/cosmic and otherwise carries no LLS excess)
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

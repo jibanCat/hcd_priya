@@ -20,7 +20,7 @@ the becker13-anchored tau0 rung per z — EXACTLY closure_legb.make_truth_from_s
 interpolated onto a common canonical LF k-grid before averaging.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_stepA_truth_viz.py
 """
 from __future__ import annotations

@@ -28,7 +28,7 @@ LACK the hcd_prior_signature stamp; they were certified against the deployed pri
 latent reconstruction (the adversarial review record) — do not treat the missing key in
 those pkls as a drifted prior.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import argparse, functools, os, pickle, time
 import numpy as np

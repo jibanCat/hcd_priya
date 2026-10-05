@@ -29,7 +29,7 @@ Outputs:
   figures/analysis/04_emulator/lf_vs_hr_highk.txt
 
 Env (MANDATORY): h5py + numpy suffice (pure cache read, no jax/emulator import).
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_lf_vs_hr_highk.py
 """
 from __future__ import annotations

@@ -18,11 +18,13 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=24g
 #SBATCH --time=04:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/real_ks_z28_%j.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/real_ks_z28_%j.err
+#SBATCH --output=logs/real_ks_z28_%j.out
+#SBATCH --error=logs/real_ks_z28_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 
 NCPU=${SLURM_CPUS_PER_TASK:-8}
@@ -32,14 +34,14 @@ N_SAMPLES=${N_SAMPLES:-600}
 MAX_TREE_DEPTH=${MAX_TREE_DEPTH:-10}
 SEED=${SEED:-20260614}
 KS_ZLO=${KS_ZLO:-2.8}
-BLIND_LOCK=${BLIND_LOCK:-/home/mfho/hcd_priya/blind.lock}
+BLIND_LOCK=${BLIND_LOCK:-$REPO/blind.lock}
 
 export OMP_NUM_THREADS=$NCPU OPENBLAS_NUM_THREADS=$NCPU MKL_NUM_THREADS=$NCPU
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=$NCPU"
 export PYTHONHASHSEED=0            # P0: reproducibility belt-and-braces (seed fold is crc32; this pins any residual hash-order effect)
-export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
-mkdir -p /home/mfho/hcd_priya/logs
+mkdir -p $REPO/logs
 
 echo "=== KS z_lo=${KS_ZLO} DIAGNOSTIC blind fit  ${NCPU} cpu  start: $(date) ==="
 echo "    chains=${N_CHAINS} warmup=${N_WARMUP} samples=${N_SAMPLES} mtd=${MAX_TREE_DEPTH} blind_lock=${BLIND_LOCK}"

@@ -57,7 +57,7 @@ alongside. The MF figure (B6) trains the small rho(k,z)-only fixed-mean head per
 fold (fast); everything else is pure evaluation of the frozen finalized models.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_performance_walkthrough.py
 """
 from __future__ import annotations

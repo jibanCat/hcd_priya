@@ -14,7 +14,7 @@ refuses with NO diagnostic output. Population integrity: census 48/48, sha256 in
 match, frozen 23-key run_cfg equality, selfdraw anchor identity, L census identity.
 
 Usage:
-  PYTHONPATH=/home/mfho/hcd_priya python3 scripts/a2c_esc_diag.py \\
+  PYTHONPATH=<repo> python3 scripts/a2c_esc_diag.py \\
       OUTDIR GATE_JSON SELFDRAW_JSON SHA_FILE --out-json OUT.json --fig-prefix FIGPREFIX
 """
 import argparse

@@ -10,7 +10,9 @@ import pytest
 from hcd_analysis.emulator import kcoord as KC, schema as S
 from hcd_analysis.emulator.data import PARAM_LIMITS, normalize_params
 
-LF = "hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+from tests.gate_helpers import real_cache_path, require_real_cache
+
+LF = real_cache_path("lf")   # inside this checkout; gate runs fail (not skip) when absent
 
 
 def _theta_unit(hub, omegamh2):
@@ -65,8 +67,8 @@ def test_kgrid_object_carries_the_contract():
     assert np.allclose(np.asarray(kg.k_skm), np.asarray(KC.k_skm_from_kcom(kcom, 2.6, 0.70, 0.14)))
 
 
-@pytest.mark.skipif(not os.path.exists(LF), reason="real cache absent")
 def test_real_rows_reproduced_from_theta_within_tolerance():
+    require_real_cache(LF)
     import h5py
     with h5py.File(LF, "r") as h:
         kf = h["kfkms"][...]

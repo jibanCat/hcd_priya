@@ -19,7 +19,7 @@ NEGATIVE Δns. The decomposition splits ΔlogP into the θ-blind baseline-head t
 cosmology residual-head term so the carrier is visible.
 
 Run (import hcd_analysis.emulator BEFORE jax; x64):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_ns_faithfulness_figs.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24g
 #SBATCH --time=6:00:00
-#SBATCH --output=/home/mfho/hcd_priya/logs/a1c_tests_%A.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/a1c_tests_%A.err
+#SBATCH --output=logs/a1c_tests_%A.out
+#SBATCH --error=logs/a1c_tests_%A.err
 #
 # The REAL-CONTEXT test suites, run on a compute node.
 #
@@ -17,15 +17,18 @@
 # interactive node: it sits at load average ~39 on 8 CPUs, so every suite that builds a real
 # ensemble context thrashes and times out. They were honestly recorded as NOT-RUN rather than
 # as passing. Per the standing rule that heavy JAX work goes through sbatch, they run here.
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=${SLURM_CPUS_PER_TASK:-4}"
 export PYTHONHASHSEED=0
-export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
 
-cd /home/mfho/hcd_priya
+cd $REPO
 echo "=== A1c heavy test suites: start $(date) on $(hostname) ==="
 echo "=== HEAD: $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)) ==="
 
@@ -33,7 +36,7 @@ echo "=== HEAD: $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD
 # THIS, so it fires only on mutations the SUITE caused. Needed because hcd_priya_notes is a live
 # working-document repo that is legitimately dirty while records are being written -- without a
 # baseline the check would fail the job on edits no test made.
-BASE_CODE="$(git -C /home/mfho/hcd_priya status --porcelain --untracked-files=no || true)"
+BASE_CODE="$(git -C $REPO status --porcelain --untracked-files=no || true)"
 BASE_NOTES="$(git -C /home/mfho/hcd_priya_notes status --porcelain --untracked-files=no || true)"
 [[ -n "$BASE_NOTES" ]] && echo "=== NOTE: notes repo already dirty at start ($(echo "$BASE_NOTES" | wc -l) files); the clean-tree check compares against this baseline ==="
 
@@ -85,7 +88,7 @@ echo "########## POST-SUITE CLEAN-TREE CHECK ##########"
 # sbc_perleg_gate.json with synthetic data. A control that watches the wrong repo is not a
 # control. OUT_PREFIX is now mandatory and SBC_PERLEG_OUTDIR redirects the artifact dir, but the
 # check is what proves it.
-for REPO in /home/mfho/hcd_priya /home/mfho/hcd_priya_notes; do
+for REPO in $REPO /home/mfho/hcd_priya_notes; do
   if [[ "$REPO" == *_notes ]]; then BASE="$BASE_NOTES"; else BASE="$BASE_CODE"; fi
   NOW="$(git -C "$REPO" status --porcelain --untracked-files=no || true)"
   # Only paths dirty NOW that were not dirty BEFORE are attributable to the suite.

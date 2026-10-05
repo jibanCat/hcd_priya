@@ -38,7 +38,7 @@ prior-dominated; KS/DESI n_s should show real contraction.
               ns/Ap contraction is exact.
 
 Usage:
-  PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+  PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/analyze_sbc_perleg.py ROOT OUT_PREFIX
 
   ROOT        MANDATORY. Dir holding prod_sbc_leg_<leg> dirs/symlinks for the population you

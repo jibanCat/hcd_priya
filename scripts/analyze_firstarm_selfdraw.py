@@ -19,7 +19,7 @@ the 2026-08-05/06 pre-registrations:
     healthy=False and feeds the disposition's row 2; the arm still reads out.
 
 Usage:
-  PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+  PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/analyze_firstarm_selfdraw.py OUTDIR N --leg KS|DESI [--json OUT.json]
 """
 import argparse

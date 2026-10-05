@@ -21,7 +21,7 @@ free-gamma K1a fit (~2.137) is recorded as the consistency evidence justifying t
 constraint. The full decision table (all kernels) stays in the JSON for the record.
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/derive_hcd_dndx_corrected.py
 """
 from __future__ import annotations

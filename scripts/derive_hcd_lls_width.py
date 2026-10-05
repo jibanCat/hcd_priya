@@ -31,7 +31,7 @@ cumulative-estimand fit; the DEPLOYED corrected law is now (0.0184, 2.127) const
 subDLA 1x = 0.102, DLA 1x = 0.094 (wrong-object subDLA; the repo keeps subDLA
 sigma/mu=0.40, DLA=0.50 broad). Deployed knobs of record: 0.287 / 0.574 (see above).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/derive_hcd_lls_width.py
 """
 import numpy as np

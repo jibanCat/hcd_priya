@@ -14,7 +14,7 @@ EMU bias per sim, per leg: bias(param) = [(F+P)^{-1} Jᵀ C^{-1} ΔP_emu]_param 
 Pure Fisher MAP-shift, forward-only, no NUTS. Same machinery as diag_legb_slope_prior_rerun.py /
 diag_emu_lowk_investigation.py PART B, looped over folds.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_bias_allfolds.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

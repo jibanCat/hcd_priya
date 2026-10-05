@@ -13,7 +13,7 @@ Emits ONE figure (notes repo, 05_truth_validation):
                   the ANALYTIC _metal_factor−1 (line). k-independent z → one panel; annotates Δv,
                   the in-band period count, and the sigmoid-decorrelation damping at the band top.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_eboss_metals_mock.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

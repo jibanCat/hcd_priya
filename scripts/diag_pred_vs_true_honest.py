@@ -20,7 +20,7 @@ lives in the notes validation doc:
   hcd_priya_notes/docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md  (§2)
 and its figure figures/analysis/06_validation_summary/loso_perk_pred_error.png.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_pred_vs_true_honest.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

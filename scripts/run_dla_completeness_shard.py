@@ -9,7 +9,7 @@ same noise, so the noise cancels in the paired Delta).
 SBC-SAFE: process-local monkeypatch of make_leg_a_legmock (on-disk closure_legb unchanged; running jobs
 in other processes untouched). The deployed forward is NOT modified.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import argparse, functools, os, pickle, time
 import numpy as np

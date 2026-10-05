@@ -16,7 +16,7 @@ Literature dN/dX (z,val,err,src) and the lit/sim ratio centres are the repo's ow
 (lit_dndx.lit_points_for_display, corrected estimands; inference.HCD_LIT_OVER_SIM(_SLOPE)).
 
 Writes PNGs to the notes repo figures dir + a small JSON of the per-fold readouts.
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/scratch_hcd_dndx_loso_vs_lit.py
 """
 from __future__ import annotations

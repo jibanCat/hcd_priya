@@ -6,7 +6,7 @@ path MUST stay byte-for-byte identical. This test pins (P_model, C_total) on bot
 committed reference tests/golden/legb_lf_golden.npz (regenerate ONLY with explicit reason via
 scripts/make_legb_golden.py). rtol=1e-12 (bit-level intent; absolute tol 0).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_golden.py -q
 """
 import os

@@ -24,7 +24,7 @@ DEFECT LINEAGE:
 Everything here is built in tmp_path from a tiny synthetic z grid + the (blind-safe) prior-geometry
 constants, so the suite passes on a clean checkout with no notes-repo artifact present.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_export_deployed_centre.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

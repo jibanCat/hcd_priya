@@ -6,7 +6,7 @@ concurrently with another run_stepA pool.
 The Option-B validation gate (joint DESI+KS): HB0=legacy OFF / HB1=hierarchical ON / HBp,HBm =
 ON with the A_HCD prior center ±1σ. Production NUTS knobs. Usage:
 
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     OMP_NUM_THREADS=1 python3 scripts/run_hb_pool.py --workers 16
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

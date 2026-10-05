@@ -32,7 +32,7 @@ registry twin scripts/ks_selboost_arms.eval_profile, hook-agreement test-enforce
 MAPPED-era campaign lazily imports jax.numpy + dndx_wc inside _mapped_lls_geometry (the
 D_exact/reachability companion; x64 is set by the hcd_analysis.emulator package import).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
      scripts/analyze_ks_selboost.py --shard-dir /scratch/cavestru_root/cavestru1/mfho/ks_selboost \
      [--npz-out out.npz] [--fig-dir figures/analysis/07_ks_selection]
 """

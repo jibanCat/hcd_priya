@@ -7,7 +7,7 @@ transforms, per-class structure / sample-variance weights, and the
 Nyquist mask coverage. See the Phase-2b spec (sec.4, 7, 9, 10).
 
 Run:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_emulator_data_diagnostics.py
 """
 from __future__ import annotations

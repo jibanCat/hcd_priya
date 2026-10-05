@@ -10,7 +10,7 @@ all members share the SAME row-val split (VAL_SEED fixed) so the ensemble isolat
 optimisation/init scatter. C_emu = the existing 8-fold error_vector.npz (the LOSO generalisation budget,
 conservative for an all-sims model trained on MORE data).
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/train_production_emulator.py --seed 0
 """
 from __future__ import annotations

@@ -11,7 +11,7 @@ This is the through-MF analog of mf_rescorr_loso (the worst-per-sim coherent res
 sizes the T4 floor), restricted to the G3 target band. Per HR sim, the correction is fit
 EXCLUDING that sim (HF-LOSO) so the residual is the honest LF->HR generalization.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_mf_gate_g3_highk.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

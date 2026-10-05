@@ -26,7 +26,7 @@ they claim to be, and the module raises `PairingError` rather than returning a n
 enforcement is the point: "STOP, do not read a number" must not depend on the reader's discipline.
 
 Usage:
-  PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+  PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/analyze_a1c_paired.py A1C_DIR A1_DIR [EXPECT_N]
 """
 import glob

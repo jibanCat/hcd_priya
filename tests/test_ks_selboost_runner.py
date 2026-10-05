@@ -16,7 +16,7 @@ test_dla_selfdraw_arm.py forward_stamp-stub convention):
   * arm_run_modes: K0 is clean-only, boosted arms boost-only (cross-pkl pairing).
   * pkl naming + .smoke suffix convention; batch array->(arm, mock) mapping totals 108.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ks_selboost_runner.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

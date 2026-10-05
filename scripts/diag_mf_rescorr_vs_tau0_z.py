@@ -28,7 +28,7 @@ OUTPUTS (figures/analysis/04_emulator/):
     of z-dependence vs tau0-dependence strength.
 
 ENV:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/diag_mf_rescorr_vs_tau0_z.py
 """

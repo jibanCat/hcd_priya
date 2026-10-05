@@ -37,10 +37,10 @@ XCLASS = ROOT / "checkpoints/error_vector_xclass.npz"
 CKPT_PREFIX = str(ROOT / "checkpoints/final_fold")
 DEFAULT_OUT = Path("/home/mfho/hcd_priya_notes/artifacts/paper_exports/f6b_whitening_2026-07-21")
 RUN_CMD = (
-    "cd /home/mfho/hcd_priya && PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya "
+    f"cd {_REPO_ROOT} && PYTHONNOUSERSITE=1 PYTHONPATH={_REPO_ROOT} "
     "JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES= "
     "/home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_cemu_validation.py "
-    "--xclass /home/mfho/hcd_priya/checkpoints/error_vector_xclass.npz --n-folds 8"
+    f"--xclass {_REPO_ROOT}/checkpoints/error_vector_xclass.npz --n-folds 8"
 )
 
 # KS 95% simultaneous critical coefficient: sup|F_n - F| > c/sqrt(n) w.p. 0.05, c = 1.35810.

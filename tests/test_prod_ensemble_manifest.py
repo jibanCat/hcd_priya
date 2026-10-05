@@ -306,7 +306,7 @@ def _real_files_present():
 
 needs_real = pytest.mark.skipif(
     not _real_files_present(),
-    reason="real production checkpoints not present at /home/mfho/hcd_priya/checkpoints "
+    reason=f"real production checkpoints not present at {_REPO_ROOT}/checkpoints "
            "(gitignored binaries live only in the main tree); the red battery above still "
            "pins the contract")
 

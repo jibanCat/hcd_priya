@@ -1,6 +1,6 @@
 """PI #33 (2026-09-27): the eBOSS diagnostic refit machinery (H-1 HCD prior scale, MF-1 tau0 box, R-1 resolution off,
 MF-3 third mean-flux mode). Generic machinery only; no science values.
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_pi33_diagnostics.py -q -p no:cacheprovider
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_pi33_diagnostics.py -q -p no:cacheprovider
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

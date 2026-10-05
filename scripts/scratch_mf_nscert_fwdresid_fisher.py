@@ -36,7 +36,7 @@ CONFIGS (all DESI-only, ns0.909 HR-LOSO truth, theta*=truth, alpha==1 forward):
   g_ident_rc: g==0 but KEEP raw res_corr — isolates g from res_corr.
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/scratch_mf_nscert_fwdresid_fisher.py
 """
 from __future__ import annotations

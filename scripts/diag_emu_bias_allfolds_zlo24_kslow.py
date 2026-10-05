@@ -20,7 +20,7 @@ Anchors:
   * z_lo=2.0 reference, 60-sim: n_s = -0.646sigma (figures/analysis/04_emulator/emu_bias_allfolds.txt)
 GATE: |n_s| and |A_p| <= 0.2sigma (in-gate).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_bias_allfolds_zlo24_kslow.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

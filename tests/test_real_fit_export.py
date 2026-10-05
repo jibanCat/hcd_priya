@@ -14,7 +14,7 @@ summaries) and it round-trips.
 These are NUISANCE posteriors, NOT the blinded A_p/n_s -- exported UNBLINDED (like the health
 json). Tests are LIGHT: pure helpers on synthetic numpy dicts + a synthetic result dict.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_real_fit_export.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

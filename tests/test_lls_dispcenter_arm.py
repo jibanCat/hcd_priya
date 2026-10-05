@@ -17,7 +17,7 @@ part (b)), so the new pieces under test here are the runner's pure helpers:
   (c) re-assert the lls_truth_boost threading contract in this campaign's own file (pivot
       alpha_hcd[0] AND alpha_hcd_z[:,0] scaled; subDLA/DLA/theta9/tau0/a_SiIII untouched).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_lls_dispcenter_arm.py -q
 """
 import numpy as np

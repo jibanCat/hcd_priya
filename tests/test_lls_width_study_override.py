@@ -14,7 +14,7 @@ The full-ctx propagation (ctx.alpha_hcd_sigma/mu == width) is additionally asser
 inside the runner itself before any NUTS (fail-loud in-job; a full build_legb_ctx needs the
 production ensemble + cache and is too heavy for a login-node unit test).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      python -m pytest tests/test_lls_width_study_override.py -q
 """
 import copy

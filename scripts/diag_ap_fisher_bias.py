@@ -25,7 +25,7 @@ Pieces (LF fold-0):
      fixable coherent bias vs the irreducible CV/sampling scatter.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_ap_fisher_bias.py [--reuse]
 Writes figures + a JSON summary to figures/analysis/04_emulator/.
 """

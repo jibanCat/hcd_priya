@@ -10,7 +10,7 @@ fiducial sims. Three asks per fiducial:
 A clean pass = a_SiIII recovers ≈0.045, and |Δn_s|, |ΔA_p| between the two arms are ≪ their
 posterior σ (the ripple is absorbed by a_SiIII, not by tilting/rescaling cosmology).
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/analyze_eboss_metals_noleak.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

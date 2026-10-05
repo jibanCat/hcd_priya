@@ -29,7 +29,7 @@ the pin directory is EXCLUDED by name and refused by meta (the 2026-08-05 erratu
 the r6x eBOSS table was contaminated by exactly such a file).
 
 Usage:
-  PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+  PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/analyze_ksfd_paired.py DRAW_DIR R6X_KS_DIR [EXPECT_N]
 """
 import glob

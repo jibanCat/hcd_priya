@@ -16,7 +16,7 @@ Contract under test:
     consistency certificate for the analyzer's login-node numpy path);
   * registry_signature is a stable sha256 covering profiles + Ns + envelope labels.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ks_selboost_arms.py -q
 """
 import numpy as np

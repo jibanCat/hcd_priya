@@ -12,7 +12,7 @@ monkeypatch build_legb_ctx with a stub that captures kwargs and raises, so NO en
 members) and NO NUTS ever run. The single lever is monkeypatch CL.PROD_RES_CORR_ON, which
 prod_norc_forward() reads at call time -> ALL three consumers move together.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_norc_single_authority.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

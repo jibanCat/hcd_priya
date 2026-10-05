@@ -3,9 +3,12 @@
 # retrain wave launcher; not the deployed emulator.
 # Run a sequence of retrain_headroom_pilot variants on a fold, one at a time (controls core use).
 # Usage: _retrain_runwave.sh <fold> <tag> <variant1> <variant2> ...
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -e
-cd /home/mfho/hcd_priya
-export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+cd $REPO
+export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 # cap XLA intra-op threads so we don't saturate the shared 24-core node
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=3"

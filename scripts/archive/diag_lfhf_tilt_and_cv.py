@@ -30,7 +30,7 @@ MEASUREMENT 2 -- cosmic variance from the pair-fixed run
   emulator residual-head generalization floor.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_lfhf_tilt_and_cv.py
 """
 from __future__ import annotations

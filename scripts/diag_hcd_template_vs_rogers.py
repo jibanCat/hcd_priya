@@ -29,7 +29,7 @@ Two questions this answers:
      large DLA -> a real sub-1 high-k suppression; Rogers is NOT pure-boost once c is included).
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_hcd_template_vs_rogers.py
 """
 from __future__ import annotations

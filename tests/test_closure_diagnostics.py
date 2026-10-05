@@ -1,7 +1,7 @@
 """Phase-C T4 — the SBC statistical machinery (closure_diagnostics), ported + verified by
 the Bayesian/PPL co-design agent (2026-06-04). NUTS-free, fast.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_closure_diagnostics.py -v
 """
 import numpy as np

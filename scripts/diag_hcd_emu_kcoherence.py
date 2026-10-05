@@ -22,7 +22,7 @@ and measure:
 VERDICT printed + a figure (notes repo). PASS (build) iff subDLA shows cross-k |corr|≳0.4 AND a
 dominant mode; FAIL (escalate to a prior/identifiability fix) otherwise.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_hcd_emu_kcoherence.py
 """
 from __future__ import annotations

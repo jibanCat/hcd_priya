@@ -4,7 +4,7 @@ Per-mock RNG is fold_in(seed, m), so shards are disjoint + reproducible and the 
 equals a single full run. Writes the raw per-mock list to {out_dir}/shard_{shard}.pkl for
 merge_legb_shards.py. Uses the DE-CIRCULARISED rho (folds 1-7) by default.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

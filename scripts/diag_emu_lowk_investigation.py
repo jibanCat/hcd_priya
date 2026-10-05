@@ -21,7 +21,7 @@ PART C: SVD rank-n_basis TRUNCATION FLOOR vs emulator error, per band — the de
 PART D: leakage probe — does the per-sim low-k residual CORRELATE with the high-k residual across sims
         (shared-basis coupling)? + the structural MF (Q2) argument by residual k-location.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_lowk_investigation.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

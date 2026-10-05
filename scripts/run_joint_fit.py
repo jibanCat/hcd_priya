@@ -20,7 +20,7 @@ SCOPE / STANDING DECISIONS:
   * DESI results privacy: any joint fit including DESI routes to results_local/ (gitignored).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_joint_fit.py --legs DESI,eBOSS
 """
 from __future__ import annotations

@@ -27,7 +27,7 @@ Two passes (spec §3.1, the primary aliasing probe): the rank-1 interaction term
 Output: figures/analysis/04_emulator/emu_bias_allfolds_mf.txt (+ _mf.npz). Does NOT
 overwrite emu_bias_allfolds.txt (z_lo=2.0 LF) or _zlo24.txt (z_lo=2.4 LF shipped).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_bias_allfolds_mf.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

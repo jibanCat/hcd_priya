@@ -6,7 +6,7 @@ SEPARATE health file (health_xs.json) so it can run concurrently with another ru
 The #9 referee panel must-do: verify a ±1σ subDLA prior-center mis-specification does NOT drag
 n_s/A_p (the residual risk behind corr(subDLA,n_s)=+0.82). Production NUTS knobs (PROD). Usage:
 
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     OMP_NUM_THREADS=1 python3 scripts/run_xs_pool.py --workers 16
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

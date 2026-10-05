@@ -8,7 +8,9 @@ import pytest
 from hcd_analysis.emulator import kcoord as KC
 from hcd_analysis.emulator import schema as S
 
-LF = "hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+from tests.gate_helpers import real_cache_path, require_real_cache
+
+LF = real_cache_path("lf")   # inside this checkout; gate runs fail (not skip) when absent
 
 
 def _old_save_checkpoint_grid(kfkms):
@@ -38,8 +40,8 @@ def test_new_schema_refuses_the_collapsed_cache():
         S.validate_cache_schema(d, n_rows=2)
 
 
-@pytest.mark.skipif(not os.path.exists(LF), reason="real cache absent")
 def test_anti_row_zero_on_the_real_cache():
+    require_real_cache(LF)
     from hcd_analysis.emulator.data import load_cache
     d = load_cache(LF)
     kcom = d["k_com_hmpc"]

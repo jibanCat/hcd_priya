@@ -29,7 +29,7 @@ forward, not the literal 2026-06-16 config). res_corr_on lives on the mf object
 (the single chokepoint), so the mock TRUTH and the likelihood SHARE it -> C_mock ≡ C_like and the
 rank-uniformity null is exact at either setting. (Gated by the 4-referee panel + freeze.)
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

@@ -17,7 +17,7 @@ lit_dndx.lit_points_for_display). Old wrong-object arrays: tombstoned in
 hcd_analysis/emulator/lit_dndx.py, never plotted as truth again.
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_dndx_vs_literature.py
 """
 from __future__ import annotations

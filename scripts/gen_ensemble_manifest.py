@@ -13,7 +13,7 @@ the same battery every deployed driver runs at load time
 (hcd_analysis.emulator.prod_ensemble.verify_manifest); diagnostic scripts that keep their own
 member plumbing can call ``gen_ensemble_manifest.verify(...)`` (subprocess-free) instead.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/gen_ensemble_manifest.py [--check]
 """
 from __future__ import annotations

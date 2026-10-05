@@ -19,7 +19,7 @@ Identical to scripts/diag_emu_bias_allfolds.py except:
 Everything load-bearing (Fisher MAP-shift, DLA mask, per-leg C_emu, bootstrap) is byte-for-byte the
 same so the number anchors cleanly against the committed z_lo=2.0 (−0.646σ) and z_lo=2.6 (+0.038σ).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_bias_allfolds_zlo24.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
