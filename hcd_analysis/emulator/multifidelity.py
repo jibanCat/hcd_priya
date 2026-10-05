@@ -1297,11 +1297,17 @@ def cddf_res_factor(tab, z):
 # ---------------------------------------------------------------------------- #
 # Convenience: load the frozen LF backbone + build a MultiFidelity
 # ---------------------------------------------------------------------------- #
-def load_lf_backbone(fold=0, ckpt_dir="checkpoints"):
-    """Load a finalized LF fold checkpoint -> (model, meta, norm, lf_logk).
+def load_lf_backbone(fold=0, ckpt_dir=None):
+    """PRE-2026-10 INTERFACE (labels the LF output with the checkpoint's single velocity grid meta["kfkms"]; the
+    multi-fidelity mapping is rebuilt at equal physical k at gate D). ``ckpt_dir=None`` is this checkout's
+    checkpoints/ directory.
+
+    Load a finalized LF fold checkpoint -> (model, meta, norm, lf_logk).
 
     ``lf_logk`` = log10 of the LF native k-grid (from meta).  The model + norm are
     the frozen backbone for the MF layer."""
+    if ckpt_dir is None:
+        ckpt_dir = f"{_REPO}/checkpoints"
     model, meta, norm = T.load_checkpoint(f"{ckpt_dir}/final_fold{fold}")
     lf_logk = np.log10(np.asarray(meta["kfkms"]))
     return model, meta, norm, lf_logk

@@ -6,7 +6,7 @@ EXCESS TEMPLATE shape e_LLS(k) ≡ (P_filt,LLS − P_clean)/P_clean is INCIDENCE
 i.e. it does not change as the LLS sightline fraction w_LLS rises. If sims with low vs high
 w_LLS share the same e_LLS(k) shape, the linear ×2.5 extrapolation is faithful.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_lls_template_linearity.py
 """
 import numpy as np
@@ -18,7 +18,7 @@ from hcd_analysis.emulator.data import load_cache, DATA_RANGE
 d = load_cache("hcd_analysis/_emulator_data/observables_tau0_lf.h5")
 Pf = np.asarray(d["P_filt"])              # (R,4,K) [clean,LLS,subDLA,DLA] filtered
 wc = np.asarray(d["w_c_cache"])[:, 1:]    # (R,3) LLS,subDLA,DLA sightline fraction
-z  = np.asarray(d["z_grid"]); k = np.asarray(d["kfkms"])[0]   # angular k grid (same across rows)
+z  = np.asarray(d["z_grid"]); k = np.asarray(d["kfkms"])[0]   # row-0 velocity grid used as a LABEL only: rows differ with z and Omega_m (incident note 2026-10-05)
 inband = (k >= DATA_RANGE["k_min"]) & (k <= 0.06)
 # z≈3 slice, finite clean+LLS
 zsel = np.isclose(z, 3.0, atol=0.25)

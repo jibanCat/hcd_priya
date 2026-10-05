@@ -58,7 +58,9 @@ def _plt():
 # C_emu vs C_data on the leg grids (the sub-dominance figure).
 # ----------------------------------------------------------------------------
 def _emu_var_for_leg(ctx, leg, theta9, tau0_vec, alpha_hcd, core, *, use_xclass):
-    """diag(C_emu) on a leg = diag(C_total − C_data) at (θ,τ₀,α) (cross-class OR diagonal)."""
+    """PRE-2026-10 INTERFACE (uses ctx.cache_k; replaced at gate E).
+
+    diag(C_emu) on a leg = diag(C_total − C_data) at (θ,τ₀,α) (cross-class OR diagonal)."""
     szb = ctx.sigma_zb_per_leg.get(leg.name)
     rzb = ctx.rho_zb_per_leg.get(leg.name) if (use_xclass and ctx.rho_zb_per_leg) else None
     _, C_total = DL.predict_P_obs_on_leg(
@@ -127,7 +129,9 @@ def truth_tau0_on_leg(truth, leg):
 # One-mock example (truth-on-leg, noisy mock, emulator prediction at truth θ).
 # ----------------------------------------------------------------------------
 def fig_mock_example(ctx, d, figdir=FIGDIR, seed=0):
-    """One Leg-B mock per leg, COLORED BY z (the prior render overplotted every z-bin in one
+    """PRE-2026-10 INTERFACE (mocks bound with ctx.cache_k; replaced at gate F).
+
+    One Leg-B mock per leg, COLORED BY z (the prior render overplotted every z-bin in one
     colour → unreadable spaghetti). Two rows per leg:
       top   — k·P1D/π: sim-truth (line) + emulator-at-truth-θ (dashed) + noisy mock (points,
               thin ±σ_data bars), all coloured by z. The emu dashed should sit on the truth.

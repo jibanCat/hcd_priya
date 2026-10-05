@@ -20,7 +20,7 @@ Differences from Leg A (``closure_sbc`` / ``closure_mocks``):
 and prints per-param coverage + #divergences + L + the cross-class-C_emu-on-leg check.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     -m hcd_analysis.emulator.closure_legb --smoke
 """
@@ -898,7 +898,10 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
                    hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0,
                    hcd_2d_tilt=False, ensemble_ckpts=None, survey=None,
                    ks_legacy_alpha_param=False):
-    """Assemble the real DESI+KS legs + slice the production error vector onto each leg's
+    """PRE-2026-10 INTERFACE (reads the checkpoint's single velocity grid meta["kfkms"] into ctx.cache_k; replaced
+    at gate E by the canonical kcoord/EmulatorPrediction coordinate).
+
+    Assemble the real DESI+KS legs + slice the production error vector onto each leg's
     z-bins. The cross-class ρ (``use_xclass=True``, the default; the matched
     ``error_vector_xclass.npz`` pair) is the production C_emu — the diagonal σ is carried too
     (for the diagonal/cross-class comparison figure). Returns ``(LegBCtx, dla_core_global)``.
@@ -1380,7 +1383,9 @@ def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
 
 
 def _fiducial_dla_core_per_leg(d, legs, cache_k):
-    """Mean held-out DLA core (cache ``delta[,2]``) per leg z, interpolated onto the leg-z
+    """PRE-2026-10 INTERFACE (labels the core with the single cache_k grid; replaced at gate E).
+
+    Mean held-out DLA core (cache ``delta[,2]``) per leg z, interpolated onto the leg-z
     cache rows. Used only as a FALLBACK; the per-mock truth supplies its own sim's core."""
     cache_k = np.asarray(cache_k)
     z_grid = d["z_grid"]
@@ -1746,7 +1751,10 @@ def _resolve_res_instr_inject(inject_resolution, leg):
 
 
 def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0, inject_res_corr=None):
-    """Build a Leg-B mock from a sim-truth: interpolate the sim-truth P1D onto each leg's k,
+    """PRE-2026-10 INTERFACE (binds the truth with the same single ctx.cache_k grid as the forward, so the mock
+    shares the forward's coordinate; replaced at gate F by truth on each simulation's own stored grid).
+
+    Build a Leg-B mock from a sim-truth: interpolate the sim-truth P1D onto each leg's k,
     draw ε ~ N(0, C_data) (cosmic-ONLY) per leg, ``mock = truth_on_leg + ε``.
 
     ``inject_a_siiii`` > 0 multiplies the truth-on-leg by the SiIII metal factor (the SAME
@@ -2188,7 +2196,9 @@ def _check_single_instrument_for_res(legs, sample_res):
 
 def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
                        inject_metal_misspec=None, inject_resolution=None):
-    """Leg-A self-draw on the leg grids: forward-model the prior-drawn truth on each leg with the
+    """PRE-2026-10 INTERFACE (forward-models the truth with ctx.cache_k; replaced at gate F).
+
+    Leg-A self-draw on the leg grids: forward-model the prior-drawn truth on each leg with the
     SAME ``predict_P_obs_on_leg`` the likelihood uses, then add ε ~ N(0, C_total(truth)) over ALL
     rows. C_mock ≡ C_like AND the noiseless mock == P_model(truth) → the rank-uniformity null is
     EXACT (Talts+2018). Returns ``(mock_legs, info)``; ``info['chol'][leg]`` /
@@ -2347,7 +2357,9 @@ def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
 def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs,
                          dla_core_per_leg, *, return_parts=False, a_siiii=0.0, a_siii=0.0,
                          metal_nodes=None, alpha_res=None, b_res_global=None, require_zresolved=True):
-    """``data_loglik`` but with a PER-LEG-Z dla_core (the mock's sim core). ``data_loglik``
+    """PRE-2026-10 INTERFACE (passes ctx.cache_k to the leg forward; replaced at gate E).
+
+    ``data_loglik`` but with a PER-LEG-Z dla_core (the mock's sim core). ``data_loglik``
     takes ONE (K,) core; here each leg z uses its own, so we call ``predict_P_obs_on_leg``
     per leg with that leg's core threaded through a per-z loop is overkill — instead we note
     the core is z-binned inside the binding via ``leg.z_idx`` and the SAME core value is used
@@ -3791,7 +3803,9 @@ def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
              cemu_inflate=None, fold=0, q_levels=(0.68, 0.95), verbose=True,
              dense_mass=True, max_tree_depth=10, mock_indices=None,
              return_per_mock=False, leg_a=False, inject_spec=None, truth_fn=None):
-    """Leg-B coverage over ``n_mocks`` held-out-sim mocks. Per mock: make_legb_mock → NUTS
+    """PRE-2026-10 INTERFACE (mocks and forward share ctx.cache_k; replaced at gate F).
+
+    Leg-B coverage over ``n_mocks`` held-out-sim mocks. Per mock: make_legb_mock → NUTS
     against the real-cov multi-leg likelihood → thin → rank the truth θ per param + the
     loglik rank → per-param empirical coverage at ``q_levels`` + bias.
 

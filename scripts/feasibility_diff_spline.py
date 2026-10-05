@@ -23,7 +23,7 @@ derivatives and the per-interval Hermite blend are both linear maps of the value
 the whole evaluation is a single dense matrix ``W`` of shape (n_data, n_sim).
 
 RUN
-    PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+    PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
         /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/feasibility_diff_spline.py
 
 Writes figures to figures/analysis/04_emulator/feas_diff_spline_*.png and prints a
@@ -219,7 +219,8 @@ def test1_differentiable_spline():
 # Helpers for real-cache accuracy
 # ===========================================================================
 def canonical_grid_and_logP(cache_path):
-    """Return (k_sim canonical row-0 grid, logP_filt (R,4,K)) for a cache.
+    """Return (k_sim row-0 grid used as a label, logP_filt (R,4,K)) for a cache (rows differ by a z- and
+    cosmology-dependent scale; incident note 2026-10-05).
 
     The cache's per-row k-grids are EXACT scalar multiples of the row-0 grid
     (per-row std of the ratio ~5e-16 — verified), i.e. a z-dependent rescale of a

@@ -1339,7 +1339,9 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
                 mf_floor=None, mf_shape_per_leg=None, mf_shape_infl=1.0,
                 mf_emucoh_per_leg=None, mf_emucoh_infl=1.0,
                 mf_emucoh_offdiag_only=False):
-    """Multi-leg Gaussian log-likelihood against the REAL data.
+    """PRE-2026-10 INTERFACE (single cache_k grid for every leg and z; replaced at gate E).
+
+    Multi-leg Gaussian log-likelihood against the REAL data.
 
     The legs are INDEPENDENT surveys (DESI & KS share z-VALUES but are different
     instruments → no cross-covariance) ⇒ the joint covariance is BLOCK-DIAGONAL ⇒
