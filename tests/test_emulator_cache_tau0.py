@@ -5,6 +5,7 @@ Real-data tests need the emu-3.9 + GSL env:
     /home/mfho/.conda/envs/emu-3.9/bin/python3 tests/test_emulator_cache_tau0.py
 The synthetic write_cache_tau0 round-trip runs under plain python3.
 """
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -22,6 +23,15 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 # which has no fake_spectra dependency.)
 import pytest
 pytest.importorskip("fake_spectra")
+
+
+def _unavailable(msg):
+    """Real-data test cannot run here: skip normally, FAIL in gate mode (HCD_GATE_RUN=1). pytest is imported lazily so
+    the module still runs directly under emu-3.9's python (no pytest there) when the data are present."""
+    import pytest
+    if os.environ.get("HCD_GATE_RUN") == "1":
+        pytest.fail(msg + " (HCD_GATE_RUN=1)")
+    pytest.skip(msg)
 
 import build_emulator_cache_tau0 as bt0
 from hcd_analysis import priya_p1d as bt0_pp
@@ -115,8 +125,7 @@ def test_read_priya_params_matches_priya_array():
     for sim_idx, folder in cases:
         raw = _EMU_ROOT / folder / "output" / "SPECTRA_008" / "lya_forest_spectra_grid_480.hdf5"
         if not raw.exists():
-            print(f"SKIP _read_priya_params for sim {sim_idx} (no raw tau)")
-            continue
+            _unavailable(f"_read_priya_params: no raw tau for sim {sim_idx}")
         ours = bt0._read_priya_params(raw)
         theirs = priya_params[sim_idx, 1:].astype(np.float64)  # col 0 is alpha
         rel = np.max(np.abs(ours / theirs - 1.0))
@@ -209,7 +218,7 @@ def test_build_tau0_rows_tier_p_matches_priya():
     snap_dir = Path(f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}")
     raw = Path(f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
     if not (snap_dir.exists() and raw.exists()):
-        print("SKIP test_build_tau0_rows_tier_p_matches_priya (data unavailable)"); return
+        _unavailable("test_build_tau0_rows_tier_p_matches_priya: data unavailable")
     priya = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/mf_emulator_flux_vectors_tau1000000.hdf5"
     with h5py.File(priya, "r") as f:
         alpha = float(f["params"][ROW, 0])
@@ -303,7 +312,7 @@ def test_filtered_tier_c_reconstructs_priya():
     sd = Path(f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}")
     raw = Path(f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
     if not (sd.exists() and raw.exists()):
-        print("SKIP filtered_tier_c (data unavailable)"); return
+        _unavailable("filtered_tier_c: data unavailable")
     rows, _ = bt0.build_tau0_rows(SIM, SNAP, sd, raw, np.array([1.0]), n_k=NK)
     r = rows[0]
     assert r["P_tier_c_filtered"].shape == (bt0_pp.N_TIER_C_BINS, NK)
@@ -344,10 +353,10 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
     EMU_HR = "/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2"
     HCD_BASE = "/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"   # discover appends /hires
     if not Path(HR_REF).exists():
-        print("SKIP HR bit-identity (6-sim ref unavailable)"); return
+        _unavailable("HR bit-identity: 6-sim reference unavailable")
     pairs = bt0.discover_tau0_pairs(HCD_BASE, EMU_HR, fidelity="hr")
     if not pairs:
-        print("SKIP HR bit-identity (no HR Phase-1 catalogs)"); return
+        _unavailable("HR bit-identity: no HR Phase-1 catalogs")
     cand = None
     for sim, snap, sd, raw in pairs:
         z = bt0._snap_z_to_priya_grid(json.load(open(sd / "meta.json"))["z"])

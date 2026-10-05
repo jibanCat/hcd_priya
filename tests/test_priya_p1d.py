@@ -27,6 +27,15 @@ except ImportError as e:
                 allow_module_level=True)
 
 
+def _unavailable(msg):
+    """Real-data test cannot run here: skip normally, FAIL in gate mode (HCD_GATE_RUN=1). pytest is imported lazily so
+    the module still runs directly under emu-3.9's python (no pytest there) when the data are present."""
+    import pytest
+    if os.environ.get("HCD_GATE_RUN") == "1":
+        pytest.fail(msg + " (HCD_GATE_RUN=1)")
+    pytest.skip(msg)
+
+
 PRIYA_FILE = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/mf_emulator_flux_vectors_tau1000000.hdf5"
 SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
 SNAP = 17
@@ -126,7 +135,7 @@ def test_tier_c_nonDLA_reproduces_priya_filtered():
     meta_p=f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/meta.json"
     priya="/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/mf_emulator_flux_vectors_tau1000000.hdf5"
     if not all(os.path.exists(p) for p in (tau_p,cat_p,meta_p,priya)):
-        print("SKIP tier_c_nonDLA (data unavailable)"); return
+        _unavailable("tier_c_nonDLA: data unavailable")
     with open(meta_p) as fh: m=json.load(fh)
     vmax=int(m["nbins"])*float(m["dv_kms"]); z=round(float(m["z"])/0.2)*0.2  # PRIYA grid z
     with h5py.File(tau_p,"r") as fh: tau=fh["tau/H/1/1215"][...].astype(np.float64)
@@ -188,8 +197,7 @@ def test_priya_p1d_bit_identical_multipoint():
     For the parallel sbatch fan-out, see scripts/consistency_checks/sbatch_multipoint.sh.
     """
     if not os.environ.get("SLOW_TESTS"):
-        print("SKIP test_priya_p1d_bit_identical_multipoint (set SLOW_TESTS=1 to run)")
-        return
+        _unavailable("test_priya_p1d_bit_identical_multipoint: set SLOW_TESTS=1 to run")
 
     HCD = "/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"
     EMU = "/nfs/turbo/umor-yueyingn/mfho/emu_full"
