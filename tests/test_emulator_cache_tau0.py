@@ -337,7 +337,10 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
     N_K is READ from the ref (525), not hardcoded — confirms Tier P (tau_thresh=1e6)
     is bit-identical to PRIYA's hires flux vectors."""
     import json
-    HR_REF = "/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2/mf_emulator_flux_vectors_tau1000000.hdf5"
+    # The 6-simulation PRIYA HR product (60 rows = 6 sims x 10 rungs, 17 z, 525 modes); its scratch copy beside the
+    # raw spectra is gone, the Turbo copy is the reference (gate B, 2026-10).
+    HR_REF = ("/nfs/turbo/umor-yueyingn/mfho/birdgroup/lya_xq100/kodiaq_2_2_4_6-48-48_20260414_newhires/hires/"
+              "mf_emulator_flux_vectors_tau1000000.hdf5")
     EMU_HR = "/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2"
     HCD_BASE = "/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"   # discover appends /hires
     if not Path(HR_REF).exists():

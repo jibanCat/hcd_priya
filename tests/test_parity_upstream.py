@@ -157,6 +157,43 @@ def test_row04b_upstream_defect_entry_is_the_z2p39_snapshot():
     assert abs(d["kfkms"][r, 0] / k22 - 1) < 2e-4                     # ours = the z = 2.2 snapshot
 
 
+def test_row04c_upstream_snapshot_selection_rule_fills_the_z2p2_slot_with_the_z2p39_snapshot():
+    """Mechanism of the upstream defect: MySpectra.get_snapshot_list (flux_power.py) walks SPECTRA_000..029 in order,
+    keeps every snapshot whose redshift is within 0.01 of ANY zout (_check_redshift), assigns them to the zout slots by
+    POSITION and stops once it has len(zout) of them. SIM_UPSTREAM_DEFECT has two snapshots within 0.01 of z = 2.4, so
+    the 13th accepted snapshot (the z = 2.2 slot) is SPECTRA_021, z = 2.3936. Upstream's own predicate is applied to the
+    raw header redshifts."""
+    import glob
+    require_real_cache(LF)
+    paths = sorted(glob.glob(f"{RAW}/{SIM_UPSTREAM_DEFECT}/output/SPECTRA_0[0-2][0-9]/lya_forest_spectra_grid_480.hdf5"))
+    if not paths:
+        if os.environ.get("HCD_GATE_RUN") == "1":
+            pytest.fail("raw spectra absent")
+        pytest.skip("raw spectra absent")
+    snaps = []
+    for p in paths:
+        with h5py.File(p, "r") as f:
+            snaps.append((int(p.split("SPECTRA_")[1][:3]), float(f["Header"].attrs["redshift"])))
+    up = run_upstream(f"""
+import json
+from lyaemu.flux_power import MySpectra
+ms = MySpectra(max_z=4.6, min_z=2.2)
+kept = []
+for snap, red in {snaps!r}:
+    if len(kept) == ms.zout.size:
+        break
+    if ms._check_redshift(red):
+        kept.append(snap)
+print(json.dumps({{"kept": kept, "zout": ms.zout.tolist()}}))
+""")
+    kept, zout = up["kept"], up["zout"]
+    assert len(kept) == len(zout) == 13 and abs(zout[-1] - 2.2) < 1e-9
+    zmap = dict(snaps)
+    assert kept[-1] == 21 and abs(zmap[21] - 2.3936) < 1e-3          # z = 2.2 slot holds the z = 2.39 snapshot
+    assert sum(abs(zmap[s] - 2.4) < 0.01 for s in kept) == 2          # two accepted snapshots near z = 2.4
+    assert 22 in zmap and abs(zmap[22] - 2.2) < 1e-4 and 22 not in kept
+
+
 def test_row05_training_p1d_equals_upstream_flux_vectors(lf_matched):
     """The cache's filtered total P1D (Tier P) equals upstream's flux_vectors at the same (simulation, z, rung) to 1e-5,
     except the established entries: the upstream defect (different snapshot) and SIM_OUR_GAP z = 2.8 (2e-4 level)."""
@@ -318,14 +355,17 @@ out = {"z": zs.tolist(), "k": kf.tolist(), "pf": [b.get_pf(zbin=z).tolist() for 
 print(json.dumps(out))
 """)
     zs, kf = np.array(up["z"]), np.array(up["k"])
+    n_cmp = 0
     for i, z in enumerate(zs):
         m = np.isclose(leg.z_row, z)
-        if not m.any():
-            continue
+        assert m.any(), f"upstream eBOSS z = {z} has no rows in our leg"
         ks = np.asarray(leg.k)[m]
         sel = [int(np.argmin(np.abs(kf - kk))) for kk in ks]
         assert np.allclose(ks, kf[sel], rtol=1e-6)
         assert np.allclose(np.asarray(leg.P_data)[m], np.asarray(up["pf"][i])[sel], rtol=1e-6)
+        assert np.allclose(np.diag(np.asarray(leg.C_data))[m], np.asarray(up["diag"][i])[sel], rtol=1e-6)
+        n_cmp += int(m.sum())
+    assert n_cmp == 13 * 35, n_cmp
 
 
 def test_row16_ks_conservative_data_equal_upstream_loader():
@@ -349,4 +389,39 @@ print(json.dumps({"z": zs.tolist(), "k": kf.tolist(), "pf": [d.get_pf(zbin=z).to
         assert np.allclose(ks, kf[sel], rtol=1e-6)
         assert np.allclose(np.asarray(leg.P_data)[m], np.asarray(up["pf"][i])[sel], rtol=1e-6)
         n_cmp += int(m.sum())
-    assert n_cmp > 0
+    assert n_cmp == 182, n_cmp                         # the full conservative table (13 z x 14 k)
+
+
+def test_row16b_ks_differs_from_upstream_production_path_by_documented_choice():
+    """Upstream PRODUCTION (sdss_name "kodiaq_squad_only") loads KSData(conservative=False): the detailed Karacayli+21
+    table with upstream's own P_metal subtraction and covariance assembly. Ours uses the published CONSERVATIVE product
+    (decision record 2026-06-14 knobs-and-reasons: it already subtracts metals). Pin both facts so the parity table
+    cannot go stale silently: upstream production really is the detailed path, and our data vector really differs
+    from it (order 1 sigma scatter)."""
+    from hcd_analysis.emulator import data_likelihood as DL
+    src = open(f"{UPSTREAM}/lyaemu/likelihood.py").read()
+    blk = src[src.index('elif sdss_name == "kodiaq_squad_only"'):]
+    blk = blk[:blk.index("self._kf_old")]
+    assert "lyman_data.KSData(" in blk and "conservative=False" in blk
+    leg = DL.load_ks_leg()
+    up = run_upstream("""
+import json
+from lyaemu.lyman_data import KSData
+d = KSData(conservative=False)
+zs = d.get_redshifts(); kf = d.get_kf()
+print(json.dumps({"z": zs.tolist(), "k": kf.tolist(), "pf": [d.get_pf(zbin=z).tolist() for z in zs]}))
+""")
+    zs, kf = np.array(up["z"]), np.array(up["k"])
+    sig = np.sqrt(np.diag(np.asarray(leg.C_data)))
+    dP = []
+    for i, z in enumerate(zs):
+        m = np.isclose(leg.z_row, z)
+        if not m.any():
+            continue
+        ks = np.asarray(leg.k)[m]
+        sel = [int(np.argmin(np.abs(kf - kk))) for kk in ks]
+        assert np.allclose(ks, kf[sel], rtol=1e-6)
+        dP.append((np.asarray(leg.P_data)[m] - np.asarray(up["pf"][i])[sel]) / sig[m])
+    dP = np.concatenate(dP)
+    assert dP.size == np.asarray(leg.k).size
+    assert 0.1 < np.sqrt(np.mean(dP ** 2)) < 2.0, np.sqrt(np.mean(dP ** 2))
