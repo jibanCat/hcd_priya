@@ -554,7 +554,7 @@ def run_recipe(d, fold, n_k, *, n_basis, term_w, edge_gain, lowk_extra,
     tr, va, ho = make_splits(d, fold, n_folds=8, holdout_frac=0.15)
     k_w_resid = None
     if edge_gain != 0.0 or lowk_extra != 0.0:
-        k_w_resid = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=edge_gain,
+        k_w_resid = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=edge_gain,
                                            lowk_extra=lowk_extra)
     k_w_coh = None
     if w_coh > 0 and coh_flat:
@@ -564,7 +564,7 @@ def run_recipe(d, fold, n_k, *, n_basis, term_w, edge_gain, lowk_extra,
         # it as flat anyway; an explicit ones array keeps the intent legible.
         k_w_coh = jnp.ones(n_k)[None, None, :]
     elif w_coh > 0 and (coh_edge_gain != 0.0 or coh_lowk_extra != 0.0):
-        kwc = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=coh_edge_gain,
+        kwc = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=coh_edge_gain,
                                      lowk_extra=coh_lowk_extra)
         k_w_coh = jnp.asarray(kwc)[None, None, :]
     t0 = time.time()

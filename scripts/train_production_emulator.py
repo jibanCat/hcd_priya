@@ -57,7 +57,7 @@ def main():
 
     # FINAL_RECIPE weighting (identical to run_loso_sweep)
     term_w = {"f_nhi": 1.0, "dndx": 1.0, "p_base": 1.0, "p_resid": RECIPE["p_resid_w"], "delta": 1.0}
-    k_weight = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=RECIPE["edge_gain"],
+    k_weight = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=RECIPE["edge_gain"],
                                       lowk_extra=RECIPE["lowk_extra"])
 
     tf = time.time()

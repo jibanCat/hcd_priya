@@ -86,7 +86,7 @@ def train_or_load(d, *, fold=0, n_basis=24, epochs=180, lr=1e-3, batch=512,
         return model, norm, history, (tr, va, ho)
     print(f"[train] fold={fold} epochs={epochs} n_basis={n_basis} "
           f"train={len(tr)} val={len(va)} holdout={len(ho)}  (tuned residual recipe)")
-    k_weight = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=RESID_TUNE["edge_gain"],
+    k_weight = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=RESID_TUNE["edge_gain"],
                                       lowk_extra=RESID_TUNE["lowk_extra"])
     model, norm, history = T.train_fold(
         d, tr, va, n_basis=n_basis, lr=lr, epochs=epochs, batch_size=batch,

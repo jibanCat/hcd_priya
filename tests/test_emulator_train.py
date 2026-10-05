@@ -318,7 +318,7 @@ def test_train_fold_kweight_term_w_resid_earlystop(tmp_path):
     d = _small_cache(tmp_path)
     folds = kfold_loso(d["sim_name"], n_folds=4)
     tr, va = folds[0]
-    kw = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=3.0, lowk_extra=2.0)
+    kw = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=3.0, lowk_extra=2.0)
     term_w = {"f_nhi": 1., "dndx": 1., "p_base": 1., "p_resid": 4., "delta": 1.}
     # short pre-fit so the baseline is frozen (auto -> residual early-stop), long-ish
     # joint loop + small patience so the residual rises after its min and we stop.
@@ -579,7 +579,7 @@ def test_train_fold_finalized_recipe_runs_with_debias_and_datarange(tmp_path):
     d = _small_cache(tmp_path)
     folds = kfold_loso(d["sim_name"], n_folds=4)
     tr, va = folds[0]
-    kw = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=3.0, lowk_extra=2.0)
+    kw = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=3.0, lowk_extra=2.0)
     term_w = {"f_nhi": 1., "dndx": 1., "p_base": 1., "p_resid": 8., "delta": 1.}
     model, norm, hist = train_fold(
         d, tr, va, n_basis=N_K, lr=1e-2, epochs=40, batch_size=8, seed=0,

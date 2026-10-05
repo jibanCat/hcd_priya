@@ -423,7 +423,7 @@ def fit_target_norm(d, train_idx):
     return stats
 
 
-def edge_emphasis_k_weight(kfkms, edge_gain=3.0, lowk_extra=1.0, mid_frac=0.5):
+def edge_emphasis_k_weight(k_com_hmpc, edge_gain=3.0, lowk_extra=1.0):
     """Per-k RESIDUAL loss weight (K,): a U-shaped low/high-k EDGE emphasis.
 
     The deployed residual head is flat mid-band but biased at the band EDGES — low-k
@@ -436,17 +436,17 @@ def edge_emphasis_k_weight(kfkms, edge_gain=3.0, lowk_extra=1.0, mid_frac=0.5):
     finite k-range. The weight is ``1 + edge_gain·g(u)`` where g(u) is a symmetric
     parabola ``(2u−1)²`` (0 at mid, 1 at both edges), PLUS an extra low-k ramp
     ``lowk_extra·(1−u)`` so the A_p-relevant low-k edge gets additional pull (A_p is
-    the priority param). ``mid_frac`` is unused historically; kept for signature
-    stability. The weight is normalized to mean 1 over finite bins so the overall
+    the priority param). The input is the GLOBAL_STATIC comoving mode grid (schema.py); the profile depends
+    only on log-k position, so it is the same for every row's velocity grid. The weight is normalized to mean 1 over finite bins so the overall
     p_resid term scale (hence its balance against term_w) is unchanged — only the
     RELATIVE per-k attention shifts. Non-finite/zero k bins get weight 1.
 
     Returns a float64 (K,) array. With edge_gain=0 and lowk_extra=0 it is all-ones
     (the uniform/back-compat case).
     """
-    k = np.asarray(kfkms, dtype=np.float64)
-    if k.ndim == 2:
-        k = k[0]
+    k = np.asarray(k_com_hmpc, dtype=np.float64)
+    if k.ndim != 1:
+        raise ValueError("per-row grid passed; pass the validated k_com_hmpc (GLOBAL_STATIC), see schema.py")
     w = np.ones_like(k)
     good = np.isfinite(k) & (k > 0)
     if good.sum() < 2 or (edge_gain == 0.0 and lowk_extra == 0.0):
