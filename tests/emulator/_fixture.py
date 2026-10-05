@@ -11,10 +11,22 @@ def write_synthetic_cache(path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8, see
     P_tier_c_unfilt = np.empty((R, 15, n_k))
     counts = np.empty((R, 15), dtype=np.int64)
     P_tier_p = np.empty((R, n_k))
-    kf = np.tile(np.linspace(1e-3, 0.1, n_k), (R, 1))
+    # Per-row native grids, physically consistent with the schema (schema.py): v_box = L 100 E(z)/(1+z),
+    # kfkms = 2 pi n / v_box, nbins * dv = v_box exactly. Rows therefore DIFFER in kfkms (as in the real
+    # product) while k_com = kfkms * v_box / L is identical on every row.
+    kf = np.empty((R, n_k))
     params = np.empty((R, 9)); alpha_slope = np.empty(R); alpha_idx = np.empty(R, np.int32)
     target_F = np.empty(R); scale = np.empty(R); z_meta = np.empty(R); z_grid = np.empty(R)
-    dv_kms = np.full(R, 7.0); nbins_native = np.empty(R, np.int32); group_idx = np.empty(R, np.int32)
+    dv_kms = np.empty(R); nbins_native = np.empty(R, np.int32); group_idx = np.empty(R, np.int32)
+    L_BOX = 120.0
+    # A small fixture keeps only n_k of the box's 172 LF modes, log-spaced so the synthetic grid still spans the
+    # data band (k up to about 0.07 s/km at z = 2.6) while every row's k_com = 2 pi n / L stays a true box mode.
+    mode_n = []
+    prev = 0
+    for c in np.round(np.geomspace(1, 172, n_k)).astype(int):
+        prev = max(int(c), prev + 1)
+        mode_n.append(prev)
+    mode_n = np.array(mode_n, dtype=float)
     sim_name = np.empty(R, object)
     snap_f_nhi = np.empty((G, 30)); snap_n_abs = np.empty((G, 30), np.int64)
     snap_path = np.empty(G); snap_sim = np.empty(G, object); snap_snap = np.empty(G, np.int32)
@@ -26,12 +38,16 @@ def write_synthetic_cache(path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8, see
         for j in range(snaps_per_sim):
             g = s * snaps_per_sim + j
             z = 2.0 + 0.4 * j
-            cnt15 = np.array([700, 60,40,30,20,15,10,8, 12,9,7,5,4, 3,2], np.int64)
+            cnt15 = np.array([700, 60,40,30,20,15,10,8, 12,9,7,5,4, 3,2], np.int64) + g   # per-snapshot counts differ, as in the product
             snap_f_nhi[g] = rng.uniform(1e-22, 1e-20, 30)
             snap_n_abs[g] = rng.integers(0, 50, 30)
             snap_path[g] = 1000.0; snap_sim[g] = f"sim{s}"; snap_snap[g] = j
             for c in snap_dndx: snap_dndx[c][g] = rng.uniform(0.01, 0.4)
             nyq = n_k - (g % 2)
+            zg = round(z / 0.2) * 0.2
+            om = p[6] / p[5] ** 2
+            vbox = L_BOX * 100.0 * np.sqrt(om * (1 + zg) ** 3 + 1 - om) / (1 + zg)
+            nb = int(round(vbox / 7.0))
             for a in range(n_alpha):
                 base = rng.uniform(0.5, 2.0, (15, n_k))
                 P_tier_c_filt[r] = base
@@ -45,9 +61,10 @@ def write_synthetic_cache(path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8, see
                     P_tier_c_unfilt[r, :, nyq:] = np.nan
                 P_tier_p[r] = Pp
                 params[r] = p; alpha_slope[r] = alpha_grid[a]; alpha_idx[r] = a
-                z_meta[r] = z; z_grid[r] = round(z/0.2)*0.2; nbins_native[r] = 100 + g
+                z_meta[r] = z; z_grid[r] = zg; nbins_native[r] = nb; dv_kms[r] = vbox / nb
+                kf[r] = 2 * np.pi * mode_n / vbox
                 target_F[r] = np.exp(-alpha_grid[a] * 2.3e-3 * (1+z)**3.65)
-                scale[r] = 1.0; group_idx[r] = g; sim_name[r] = f"sim{s}"
+                scale[r] = 1.0 + 0.05 * a + 0.01 * g; group_idx[r] = g; sim_name[r] = f"sim{s}"   # per-row, as in the product
                 r += 1
     with h5py.File(path, "w") as h:
         h.attrs.update(cache_version="3.3", n_k=n_k, n_rows=R, n_snaps=G,

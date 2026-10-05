@@ -133,7 +133,9 @@ def _collapse_p1d(p15, counts15):
         out[:, ci, :] = summ
     return out
 
-def load_cache(path):
+def load_cache(path, *, validate=True):
+    """Load a v3.3 cache. ``kfkms`` is PER_ROW (each row's own velocity grid); the validated GLOBAL_STATIC
+    comoving modes are exposed as ``k_com_hmpc`` (schema.py; incident note 2026-10-05-INCIDENT-kgrid-representation-regression)."""
     with h5py.File(path, "r") as h:
         assert h.attrs["cache_version"] == "3.3", h.attrs.get("cache_version")
         g = lambda k: h[k][:]
@@ -142,6 +144,8 @@ def load_cache(path):
         out = dict(
             params=g("params").astype(np.float64),
             kfkms=g("kfkms").astype(np.float64),
+            nbins_native=g("nbins_native").astype(np.int64),
+            dv_kms=g("dv_kms").astype(np.float64),
             P_tier_p=g("P_tier_p").astype(np.float64),
             target_F=g("target_F").astype(np.float64),
             scale=g("scale").astype(np.float64),
@@ -182,6 +186,12 @@ def load_cache(path):
     if n_oob:
         print(f"WARN load_cache: {n_oob}/{len(out['in_domain'])} rows "
               f"out of PRIYA param domain (params_unit outside [0,1])")
+    # schema guard (incident 2026-10-05): every key classified; k_com validated across ALL rows, never row 0.
+    if validate:
+        from .schema import validate_cache_schema
+        rep = validate_cache_schema(out)
+        out["k_com_hmpc"] = np.asarray(rep["derived"]["k_com_hmpc"], np.float64)
+        out["schema_report"] = rep
     return out
 
 

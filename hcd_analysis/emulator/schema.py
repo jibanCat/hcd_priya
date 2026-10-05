@@ -34,6 +34,7 @@ class KeySpec:
     cls: KeyClass
     tol: float | None
     doc: str
+    may_be_constant: bool = False   # PER_ROW keys whose VALUES may legitimately coincide on every row (shape stays per-row)
 
 
 _PR = KeyClass.PER_ROW
@@ -64,12 +65,12 @@ CACHE_SCHEMA_V33: dict[str, KeySpec] = {
     "delta": KeySpec(_PR, None, "HCD add-back (derived)"),
     "coarse_counts": KeySpec(_PR, None, "4-class counts (derived)"),
     "tau0": KeySpec(_PR, None, "-ln target_F (derived)"),
-    "mask": KeySpec(_PR, None, "finite P_tier_p bins (derived)"),
+    "mask": KeySpec(_PR, None, "finite P_tier_p bins (derived; all-finite on every LF row)", may_be_constant=True),
     "w_c_cache": KeySpec(_PR, None, "class fractions (derived)"),
     "inv_nc": KeySpec(_PR, None, "inverse counts (derived)"),
     "params_unit": KeySpec(_PR, None, "unit-cube parameters (derived)"),
     "x": KeySpec(_PR, None, "encoder input (derived)"),
-    "in_domain": KeySpec(_PR, None, "in-box flag (derived)"),
+    "in_domain": KeySpec(_PR, None, "in-box flag (derived; True on every row of a clean product)", may_be_constant=True),
     # per-snapshot tables
     "snap_dNdX": KeySpec(_PS, None, "dN/dX per class"),
     "snap_f_nhi": KeySpec(_PS, None, "column-density distribution"),
@@ -133,7 +134,7 @@ def validate_cache_schema(d, *, n_rows=None):
             if arr.ndim == 0 or arr.shape[0] != R:
                 raise SchemaCollapseError(
                     f"PER_ROW key {k!r} has shape {arr.shape}, expected leading dimension {R}: it was collapsed")
-            if R > 1 and arr.dtype.kind in "fiub":
+            if R > 1 and arr.dtype.kind in "fiub" and not spec.may_be_constant:
                 flat = arr.reshape(R, -1)
                 if np.all(np.isclose(flat, flat[0:1], rtol=1e-12, atol=0, equal_nan=True)):
                     raise SchemaCollapseError(

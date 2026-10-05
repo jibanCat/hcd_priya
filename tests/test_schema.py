@@ -74,6 +74,15 @@ def test_validator_refuses_unregistered_row_indexed_key():
         S.validate_cache_schema(d)
 
 
+def test_derived_boolean_keys_may_be_constant_but_must_stay_per_row():
+    d = _synthetic_cache()
+    d["mask"] = np.ones((R, K), bool)                         # every row all-finite: legitimate constancy
+    S.validate_cache_schema(d)
+    d["mask"] = np.ones(K, bool)                              # collapsed shape: still refused
+    with pytest.raises(S.SchemaCollapseError, match="collapsed"):
+        S.validate_cache_schema(d)
+
+
 def test_validator_ignores_nan_padded_bins():
     d = _synthetic_cache()
     d["kfkms"][2, -2:] = np.nan
