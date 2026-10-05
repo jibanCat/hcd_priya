@@ -14,7 +14,9 @@ def _tiny():
     K = 12
     model = Emulator(in_dim=10, n_k=K, n_basis=None, key=jax.random.PRNGKey(0))
     pf = {k: np.ones((4, K)) * v for k, v in (("mu_marg", 0.0), ("sig_marg", 1.0), ("sig_cosmo", 1.0))}
-    meta = {"schema_version": "2.0", "k_com_hmpc": (2 * np.pi * np.arange(1, K + 1) / S.L_BOX_HMPC).tolist()}
+    from hcd_analysis.emulator.data import PARAM_LIMITS
+    meta = {"schema_version": "2.0", "k_com_hmpc": (2 * np.pi * np.arange(1, K + 1) / S.L_BOX_HMPC).tolist(),
+            "param_limits": np.asarray(PARAM_LIMITS).tolist()}
     return model, pf, meta, K
 
 

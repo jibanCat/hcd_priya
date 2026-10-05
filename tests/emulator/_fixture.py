@@ -19,14 +19,7 @@ def write_synthetic_cache(path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8, see
     target_F = np.empty(R); scale = np.empty(R); z_meta = np.empty(R); z_grid = np.empty(R)
     dv_kms = np.empty(R); nbins_native = np.empty(R, np.int32); group_idx = np.empty(R, np.int32)
     L_BOX = 120.0
-    # A small fixture keeps only n_k of the box's 172 LF modes, log-spaced so the synthetic grid still spans the
-    # data band (k up to about 0.07 s/km at z = 2.6) while every row's k_com = 2 pi n / L stays a true box mode.
-    mode_n = []
-    prev = 0
-    for c in np.round(np.geomspace(1, 172, n_k)).astype(int):
-        prev = max(int(c), prev + 1)
-        mode_n.append(prev)
-    mode_n = np.array(mode_n, dtype=float)
+    mode_n = np.arange(1, n_k + 1, dtype=float)    # the first n_k box modes, as in the real product (schema.py)
     sim_name = np.empty(R, object)
     snap_f_nhi = np.empty((G, 30)); snap_n_abs = np.empty((G, 30), np.int64)
     snap_path = np.empty(G); snap_sim = np.empty(G, object); snap_snap = np.empty(G, np.int32)

@@ -13,7 +13,7 @@ pins the contract:
   (d) load_ensemble loads the N=5 production checkpoints, asserts a SHARED norm across
       members, and returns a (model, meta, norm) triple like load_checkpoint.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ensemble_emulator.py -q
 """
 import glob
@@ -28,6 +28,7 @@ import pytest
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator.predict import predict_P_filt, predict_P_obs
 from hcd_analysis.emulator.ensemble import EnsembleEmulator, load_ensemble
+from hcd_analysis.emulator.schema import SchemaCollapseError
 
 # The pre-2026-10 production checkpoints live only in the eBOSS checkout (historical artifact, schema v1).
 HISTORICAL_PROD_PREFIX = "/home/mfho/hcd_priya/checkpoints/final_prod_seed"  # historical-artifact path
@@ -102,7 +103,8 @@ def _schema2_members(tmp_path, n=3, n_k=12):
     for s in range(n):
         m = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(s))
         p = str(tmp_path / f"m{s}")
-        save_checkpoint(p, m, {"in_dim": 10, "n_k": n_k, "n_basis": 4}, norm, seed=s, cache=d)
+        save_checkpoint(p, m, {"in_dim": 10, "n_k": n_k, "n_basis": 4}, norm, seed=s, cache=d,
+                        cache_path=str(tmp_path / "obs.h5"))
         paths.append(p)
     return paths
 
@@ -135,7 +137,7 @@ def test_load_ensemble_rejects_mismatched_norm(tmp_path):
     nrm["P_filt"]["mu_marg"] = np.asarray(nrm["P_filt"]["mu_marg"]) + 1.0  # perturb
     with open(local[1] + ".norm.pkl", "wb") as fh:
         pickle.dump(nrm, fh)
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="norm"):
         load_ensemble(local)
 
 
@@ -148,7 +150,7 @@ def test_load_ensemble_rejects_mismatched_k_com(tmp_path):
     meta["k_com_hmpc"] = [1.01 * v for v in meta["k_com_hmpc"]]
     with open(local[1] + ".meta.json", "w") as fh:
         json.dump(meta, fh)
-    with pytest.raises(AssertionError, match="k_com"):
+    with pytest.raises(SchemaCollapseError, match="k_com"):
         load_ensemble(local)
 
 

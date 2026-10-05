@@ -50,16 +50,17 @@ def load_ensemble(paths):
         members.append(model)
         metas.append(meta)
         norms.append(norm)
+    from .schema import SchemaCollapseError
     ref = norms[0]["P_filt"]
     for j in range(1, len(norms)):
         for k in _NORM_KEYS:
-            assert np.allclose(np.asarray(norms[j]["P_filt"][k]), np.asarray(ref[k]),
-                               rtol=0, atol=1e-12), (
-                f"member {paths[j]} P_filt['{k}'] differs from member 0 — ensemble "
-                "members must share a norm (same training data / recipe)")
+            if not np.allclose(np.asarray(norms[j]["P_filt"][k]), np.asarray(ref[k]), rtol=0, atol=1e-12):
+                raise ValueError(f"member {paths[j]} P_filt['{k}'] norm differs from member 0: ensemble "
+                                 "members must share a norm (same training data / recipe)")
     for j in range(1, len(metas)):
-        assert metas[j]["schema_version"] == metas[0]["schema_version"], (
-            f"member {paths[j]} schema {metas[j]['schema_version']} differs from member 0")
-        assert np.allclose(metas[j]["k_com_hmpc"], metas[0]["k_com_hmpc"], rtol=1e-12, atol=0), (
-            f"member {paths[j]} k_com_hmpc differs from member 0 — members must share the comoving modes")
+        if metas[j]["schema_version"] != metas[0]["schema_version"]:
+            raise SchemaCollapseError(f"member {paths[j]} schema {metas[j]['schema_version']} differs from member 0")
+        if not np.allclose(metas[j]["k_com_hmpc"], metas[0]["k_com_hmpc"], rtol=1e-12, atol=0):
+            raise SchemaCollapseError(f"member {paths[j]} k_com_hmpc differs from member 0: members must share "
+                                      "the comoving modes")
     return EnsembleEmulator(members), metas[0], norms[0]

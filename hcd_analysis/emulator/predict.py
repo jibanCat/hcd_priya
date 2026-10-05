@@ -135,14 +135,22 @@ class EmulatorPrediction(NamedTuple):
 def predict_on_physical_grid(model, meta, theta9_unit, z, tau0, alpha_hcd, pf_stats, dla_core):
     """Bin-indexed emulator output placed on its physical k_skm(z, theta). ``z`` is the PHYSICAL redshift;
     ``meta`` is a schema-2.0 checkpoint meta carrying ``k_com_hmpc``. Differentiable in theta9, tau0, alpha."""
-    from .data import Z_LIMITS
+    import numpy as _np
+    from .data import PARAM_LIMITS, Z_LIMITS
     from .kcoord import kgrid
     from .schema import CHECKPOINT_SCHEMA_VERSION, SchemaCollapseError
     if meta.get("schema_version") != CHECKPOINT_SCHEMA_VERSION or "k_com_hmpc" not in meta:
         raise SchemaCollapseError("predict_on_physical_grid needs a schema-2.0 meta with k_com_hmpc (see kcoord.py)")
+    if "param_limits" not in meta or not _np.allclose(_np.asarray(meta["param_limits"], float),
+                                                      _np.asarray(PARAM_LIMITS, float), rtol=0, atol=0):
+        raise SchemaCollapseError("checkpoint param_limits differ from data.PARAM_LIMITS: theta would be "
+                                  "denormalised with the wrong box")
     kg = kgrid(jnp.asarray(meta["k_com_hmpc"]), float(z), theta9_unit)
     z_unit = (float(z) - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
     P_filt = predict_P_filt(model, theta9_unit, z_unit, tau0, pf_stats)
+    if P_filt.shape[-1] != kg.k_skm.shape[-1]:
+        raise SchemaCollapseError(f"meta k_com_hmpc length {kg.k_skm.shape[-1]} != model output length "
+                                  f"{P_filt.shape[-1]}: meta and model do not belong together")
     P_obs = P_filt[0] + jnp.einsum("c,ck->k", jnp.asarray(alpha_hcd), _excess_from_P_filt(P_filt, dla_core))
     return EmulatorPrediction(kg.k_skm, P_filt, P_obs, float(z), jnp.asarray(theta9_unit), kg.hub, kg.omegamh2,
                               kg.k_com_hmpc, kg.schema_version)

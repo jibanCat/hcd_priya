@@ -101,17 +101,39 @@ def _vbox_analytic(z, params):
     return L_BOX_HMPC * 100.0 * E / (1 + z)
 
 
+def _require_finite_rows(name, values):
+    bad = np.where(~np.isfinite(np.asarray(values, float)))[0]
+    if bad.size:
+        raise SchemaCollapseError(f"non-finite {name} on rows {bad[:10].tolist()} (of {bad.size}); "
+                                  "every row must carry a finite velocity width, redshift and cosmology")
+
+
 def k_com_hmpc_from_cache(d):
-    """GLOBAL_STATIC comoving modes, validated across ALL rows (never row 0 alone)."""
+    """GLOBAL_STATIC comoving modes, validated across ALL rows (never row 0 alone). Each row's non-finite kfkms
+    entries may only be top-of-band padding (a contiguous block at high k); the result must equal 2 pi n / L_box,
+    n = 1..K (angular, DC mode dropped)."""
     kf = np.asarray(d["kfkms"], float)
     vbox = np.asarray(d["nbins_native"], float) * np.asarray(d["dv_kms"], float)
+    _require_finite_rows("velocity width nbins_native*dv_kms", vbox)
+    fin = np.isfinite(kf)
+    empty = np.where(~fin.any(axis=1))[0]
+    if empty.size:
+        raise SchemaCollapseError(f"rows {empty[:10].tolist()} have no finite kfkms modes")
+    holes = np.where(np.any(~fin[:, :-1] & fin[:, 1:], axis=1))[0]
+    if holes.size:
+        raise SchemaCollapseError(f"rows {holes[:10].tolist()}: non-finite kfkms entries are not a contiguous "
+                                  "block at the top of the band (only top-of-band padding is allowed)")
     kcom_rows = kf * vbox[:, None] / L_BOX_HMPC                      # (R, K)
-    fin = np.isfinite(kcom_rows)
     ref = np.nanmedian(np.where(fin, kcom_rows, np.nan), axis=0)       # (K,)
     dev = np.nanmax(np.abs(np.where(fin, kcom_rows, ref) / ref - 1.0))
     if not np.isfinite(dev) or dev > KCOM_RTOL:
         raise SchemaCollapseError(
             f"k_com_hmpc is declared GLOBAL_STATIC but varies across rows by {dev:.3e} > {KCOM_RTOL}")
+    expect = 2.0 * np.pi * np.arange(1, ref.shape[0] + 1) / L_BOX_HMPC
+    dev_box = float(np.max(np.abs(ref / expect - 1.0)))
+    if not np.isfinite(dev_box) or dev_box > KCOM_RTOL:
+        raise SchemaCollapseError(f"k_com_hmpc differs from 2 pi n / L_box (n = 1..K, angular) by {dev_box:.3e}: "
+                                  "cyclic convention, off-by-one mode index or wrong box size")
     return ref
 
 
@@ -140,9 +162,13 @@ def validate_cache_schema(d, *, n_rows=None):
                     raise SchemaCollapseError(
                         f"PER_ROW key {k!r} is identical on every row: a collapsed copy of row 0 was stored")
             checked.append(k)
+    params = np.asarray(d["params"], float)
+    _require_finite_rows("z_grid", d["z_grid"])
+    _require_finite_rows("hub", params[:, 5])
+    _require_finite_rows("omegamh2", params[:, 6])
     derived = {"k_com_hmpc": k_com_hmpc_from_cache(d)}
     vb = np.asarray(d["nbins_native"], float) * np.asarray(d["dv_kms"], float)
-    ratio = vb / _vbox_analytic(np.asarray(d["z_grid"], float), np.asarray(d["params"], float))
+    ratio = vb / _vbox_analytic(np.asarray(d["z_grid"], float), params)
     dev = float(np.max(np.abs(ratio - 1.0)))
     if dev > VBOX_RTOL:
         raise SchemaCollapseError(

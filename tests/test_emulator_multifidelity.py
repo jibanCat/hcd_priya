@@ -597,8 +597,9 @@ def test_match_and_measure_and_train(tmp_path):
     stream aligns and every HR row matches an LF row exactly on the (params, z,
     alpha) key) -- the real HR cache likewise hits exact LF design points."""
     lfp = tmp_path / "lf.h5"; hrp = tmp_path / "hr.h5"
-    write_synthetic_cache(lfp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
-    write_synthetic_cache(hrp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
+    # 172 true box modes so the synthetic band reaches the 0.05 s/km eval grid (the fixture keeps the first n_k modes).
+    write_synthetic_cache(lfp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=172, seed=7)
+    write_synthetic_cache(hrp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=172, seed=7)
     lf = _sanitize_unit_cube(load_cache(lfp))
     hr = _sanitize_unit_cube(load_cache(hrp))
     pairs = MF.match_hr_to_lf(lf, hr)
@@ -607,7 +608,7 @@ def test_match_and_measure_and_train(tmp_path):
     norm = fit_target_norm(lf, np.arange(len(lf["z_grid"])))
     model = Emulator(in_dim=10, n_k=lf["P_tier_p"].shape[1], n_basis=4,
                      key=jax.random.PRNGKey(0))
-    lf_logk = np.log10(lf["kfkms"][0])
+    lf_logk = np.log10(lf["kfkms"][0])   # PRE-2026-10 INTERFACE (row-0 label of the MF mapping); rebuilt at gate D
     # eval grid stays within the synthetic LF k-support (no extrap needed here).
     k_eval, eval_logk = MF.build_eval_grid(hr, k_max=0.05, n_k=16)
     tg = MF.measure_delta_targets(lf, hr, model, norm, lf_logk, eval_logk, pairs)

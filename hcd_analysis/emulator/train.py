@@ -8,7 +8,7 @@ bundle (eqx leaves + JSON arch/seed meta + pickled train-split norm stats).
 Also hosts ``aggregate_error_vector`` (plan Task-14 stub): RMS-over-folds error
 vector + DLA high-k shot-noise flag, feeding the likelihood covariance.
 
-Env (MANDATORY): PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya, emu-jax python.
+Env (MANDATORY): PYTHONNOUSERSITE=1 PYTHONPATH=<repo>, emu-jax python.
 """
 from __future__ import annotations
 
@@ -662,6 +662,24 @@ def _sha256_or_none(path):
     return h.hexdigest()
 
 
+def _velocity_key_paths(obj, prefix=""):
+    """Paths of every dict key named ``kfkms`` (a per-row velocity grid) at any depth of ``obj``."""
+    hits = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            p = f"{prefix}.{k}" if prefix else str(k)
+            if str(k) == "kfkms":
+                hits.append(p)
+            hits += _velocity_key_paths(v, p)
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            hits += _velocity_key_paths(v, f"{prefix}[{i}]")
+    return hits
+
+
+_SCHEMA2_REQUIRED = ("k_com_hmpc", "L_box_hmpc", "k_convention", "cache_sha256", "param_limits")
+
+
 def save_checkpoint(path, model, arch_cfg, norm_stats, seed, *, cache, cache_path=None, recipe=None):
     """Serialise eqx leaves + JSON meta + pickled norm_stats under checkpoint schema 2.0.
 
@@ -682,8 +700,16 @@ def save_checkpoint(path, model, arch_cfg, norm_stats, seed, *, cache, cache_pat
     # keys win on conflict, but the model is the source of truth for the arch).
     full_arch = _arch_cfg_from_model(model)
     full_arch.update(arch_cfg or {})
-    from .schema import (CHECKPOINT_SCHEMA_VERSION, K_CONVENTION, L_BOX_HMPC, k_com_hmpc_from_cache,
-                         validate_cache_schema)
+    from .data import PARAM_LIMITS
+    from .schema import (CHECKPOINT_SCHEMA_VERSION, K_CONVENTION, L_BOX_HMPC, SchemaCollapseError,
+                         k_com_hmpc_from_cache, validate_cache_schema)
+    import os as _os
+    if cache_path is None or not _os.path.isfile(str(cache_path)):
+        raise SchemaCollapseError(f"cache_path must name the cache file the model was trained on (got {cache_path!r}); "
+                                  "its sha256 is part of every schema-2.0 checkpoint")
+    if recipe is not None and _velocity_key_paths(recipe):
+        raise SchemaCollapseError(f"recipe carries a velocity grid key {_velocity_key_paths(recipe)}; kfkms never "
+                                  "enters a checkpoint (k is derived per request, kcoord.py)")
     validate_cache_schema(cache)                                  # refuses a collapsed or inconsistent cache
     k_com = np.asarray(k_com_hmpc_from_cache(cache), float)       # GLOBAL_STATIC, validated across ALL rows
     if int(full_arch.get("n_k", k_com.shape[0])) != int(k_com.shape[0]):
@@ -694,7 +720,8 @@ def save_checkpoint(path, model, arch_cfg, norm_stats, seed, *, cache, cache_pat
             "cache_path": (str(cache_path) if cache_path is not None else None),
             "cache_sha256": _sha256_or_none(cache_path),
             "k_com_hmpc": k_com.tolist(), "n_k": int(k_com.shape[0]),
-            "L_box_hmpc": float(L_BOX_HMPC), "k_convention": K_CONVENTION}
+            "L_box_hmpc": float(L_BOX_HMPC), "k_convention": K_CONVENTION,
+            "param_limits": np.asarray(PARAM_LIMITS, float).tolist()}
     with open(str(path) + ".meta.json", "w") as f:
         json.dump(meta, f)
     with open(str(path) + ".norm.pkl", "wb") as f:
@@ -711,6 +738,13 @@ def load_checkpoint(path):
             f"checkpoint {path} has schema {meta.get('schema_version')!r}, expected {CHECKPOINT_SCHEMA_VERSION}: "
             "pre-2026-10 checkpoints carry a single velocity grid (kfkms) and are not loadable; see "
             "docs/superpowers/emulator-paper-history/2026-10-05-INCIDENT-kgrid-representation-regression.md")
+    missing = [k for k in _SCHEMA2_REQUIRED if meta.get(k) is None]
+    if missing:
+        raise SchemaCollapseError(f"checkpoint {path}: schema-2.0 meta lacks {missing}")
+    if not (isinstance(meta["cache_sha256"], str) and len(meta["cache_sha256"]) == 64):
+        raise SchemaCollapseError(f"checkpoint {path}: cache_sha256 is not a 64-hex digest")
+    if _velocity_key_paths(meta):
+        raise SchemaCollapseError(f"checkpoint {path}: meta carries a velocity grid key {_velocity_key_paths(meta)}")
     skeleton = Emulator(**meta["arch_cfg"], key=jax.random.PRNGKey(meta["seed"]))
     model = eqx.tree_deserialise_leaves(str(path) + ".eqx", skeleton)
     with open(str(path) + ".norm.pkl", "rb") as f:

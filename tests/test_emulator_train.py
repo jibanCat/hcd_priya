@@ -6,7 +6,7 @@ trips predictions bit-for-bit; grad_norm is finite; and the Task-14 error-vector
 aggregator's shape + DLA high-k shot flag.
 
 Run (env mandatory):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_emulator_train.py -v
 """
 import numpy as np
@@ -130,7 +130,7 @@ def test_checkpoint_roundtrip(tmp_path):
     pred0 = jax.vmap(model)(jnp.asarray(x), jnp.asarray(tau0))
 
     prefix = str(tmp_path / "ckpt")
-    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=2, cache=d)
+    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=2, cache=d, cache_path=str(tmp_path / "obs.h5"))
     model2, meta, norm2 = load_checkpoint(prefix)
 
     pred1 = jax.vmap(model2)(jnp.asarray(x), jnp.asarray(tau0))
@@ -403,7 +403,8 @@ def test_load_checkpoint_refuses_schema_v1(tmp_path):
         seed=0, key=jax.random.PRNGKey(0),
     )
     prefix = str(tmp_path / "v1")
-    save_checkpoint(prefix, model, {"in_dim": 10, "n_k": N_K, "n_basis": None}, norm_stats, seed=0, cache=d)
+    save_checkpoint(prefix, model, {"in_dim": 10, "n_k": N_K, "n_basis": None}, norm_stats, seed=0, cache=d,
+                    cache_path=str(tmp_path / "obs.h5"))
     with open(prefix + ".meta.json") as f:
         meta = json.load(f)
     del meta["schema_version"]
@@ -439,7 +440,8 @@ def test_checkpoint_roundtrip_nondefault_baseline_depth(tmp_path):
     recipe = {"w_coh": 80.0, "edge_gain": 3.0, "lowk_extra": 2.0, "datarange": True,
               "term_w": {"f_nhi": 1.0, "p_resid": 8.0}}
     prefix = str(tmp_path / "ckpt_deep")
-    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=7, recipe=recipe, cache=d)
+    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=7, recipe=recipe, cache=d,
+                    cache_path=str(tmp_path / "obs.h5"))
 
     with open(prefix + ".meta.json") as f:
         meta = json.load(f)

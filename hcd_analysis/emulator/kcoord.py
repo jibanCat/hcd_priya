@@ -35,9 +35,11 @@ def k_skm_from_kcom(k_com_hmpc, z, hub, omegamh2):
 
 def hub_omegamh2_from_theta9(theta9_unit):
     """Physical (hub, omegamh2) from the unit-cube 9-vector via data.PARAM_LIMITS (the emulator's own map)."""
+    if tuple(jnp.shape(theta9_unit)) != (9,):                  # static shape: checked under tracing too
+        raise ValueError(f"theta9 must have shape (9,), got {tuple(jnp.shape(theta9_unit))}; vmap over batches")
     if not isinstance(theta9_unit, jax.core.Tracer):          # concrete input: refuse physical values loudly
         arr = np.asarray(theta9_unit, float)
-        if arr.ndim == 1 and (np.any(arr < -1e-9) or np.any(arr > 1 + 1e-9)):
+        if np.any(arr < -1e-9) or np.any(arr > 1 + 1e-9):
             raise ValueError("theta9 must be in the unit cube (sampling coordinates), not physical values")
     lim = np.asarray(PARAM_LIMITS, float)
     lo = jnp.asarray(lim[:, 0])
