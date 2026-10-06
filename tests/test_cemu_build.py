@@ -184,3 +184,72 @@ def test_guard_acts_on_the_whole_z_cell_with_the_largest_h_within_one_se_of_raw(
     s[:, 1, 1, 2] = s[:, 0, 1, 2] + 5e-4            # h index 1 slightly better than raw there: within 1 SE
     h_of_z = CB.guard(s, selected=3, n_boot=500, seed=0)
     assert list(h_of_z) == [3, 1]                    # z cell 0 untouched; z cell 1 takes h index 1 for ALL bands
+
+
+# --------------------------------------------------------------------------------------------- #
+#  T1 cross-validation procedure on synthetic residuals (behaviour, not numbers)
+# --------------------------------------------------------------------------------------------- #
+def _synthetic_t1(seed=0, n_sim=20, Ksyn=40, spike=None, tau0_dep=False):
+    rng = np.random.default_rng(seed)
+    z_cells = np.array([2.4, 3.0])
+    alphas = np.array([0.7, 0.9, 1.1, 1.3])
+    n = np.arange(1, Ksyn + 1)
+    sig = 0.01 * (1 + 0.5 * np.log(n) / np.log(Ksyn))          # smooth in ln(mode)
+    if spike is not None:
+        sig = sig.copy()
+        sig[spike] *= 5.0                                       # a real narrow feature, in every simulation
+    L = np.linalg.cholesky(0.5 * np.eye(4) + 0.5 * np.ones((4, 4)))
+    rows = []
+    for s in range(n_sim):
+        for iz in range(2):
+            for a in alphas:
+                amp = (a if tau0_dep else 1.0)
+                eps = rng.normal(0, 1, (Ksyn, 4)) @ L.T
+                rows.append((f"sim{s:02d}", iz, a, (eps * sig[:, None] * amp).T))
+    sim = np.array([r[0] for r in rows])
+    zc = np.array([r[1] for r in rows])
+    alpha = np.array([r[2] for r in rows])
+    r = np.stack([r[3] for r in rows])
+    band = np.searchsorted(alphas, alpha)
+    T = CB.T1Data(r=r, P=np.ones_like(r), coef=CB.class_coef(np.tile([0.7, 0.1, 0.15, 0.05], (len(rows), 1)), masked=True),
+                  alpha=alpha, band=band, centres=alphas.copy(), zc=zc, sim=sim, z_cells=z_cells,
+                  mask=np.ones((2, Ksyn), bool), kband=np.tile(np.repeat([0, 1, 2, 3], Ksyn // 4), (2, 1)))
+    return T
+
+
+CANDS_SYN = [(h, sz, pooled) for pooled in (True, False) for h in (0.0, 0.05, 0.2, 0.5) for sz in (0.0, 0.2)]
+
+
+def test_t1_cv_prefers_smoothing_for_a_smooth_noisy_truth_and_pools_tau0():
+    T = _synthetic_t1(seed=1)
+    cv = CB.t1_cv(T, CANDS_SYN, n_folds=5)
+    assert cv["main"].shape == (20, len(CANDS_SYN))
+    sel = CB.t1_select(cv, CANDS_SYN, n_boot=500, seed=0)
+    h, sz, pooled = CANDS_SYN[sel["chosen"]]
+    assert h > 0 and pooled and sel["tau0"] == "pooled"
+
+
+def test_t1_cv_flags_a_real_tau0_dependence():
+    T = _synthetic_t1(seed=2, tau0_dep=True)
+    sel = CB.t1_select(CB.t1_cv(T, CANDS_SYN, n_folds=5), CANDS_SYN, n_boot=500, seed=0)
+    assert sel["tau0"] == "banded"                  # the caller STOPS for the PI on this (amendment A1 rev 1)
+
+
+def test_t1_final_product_keeps_a_real_narrow_feature():
+    T = _synthetic_t1(seed=3, spike=17)
+    cv = CB.t1_cv(T, CANDS_SYN, n_folds=5)
+    sel = CB.t1_select(cv, CANDS_SYN, n_boot=500, seed=0)
+    rho = CB.t1_build(T, np.arange(len(T.sim)), CANDS_SYN, sel)            # (n_z, B, 4, 4, K)
+    raw = CB.t1_build(T, np.arange(len(T.sim)), CANDS_SYN, dict(sel, chosen=CANDS_SYN.index((0.0, 0.0, True)),
+                                                                h_of_z=[0.0, 0.0]))
+    for iz in range(2):
+        peak = rho[iz, 0, 0, 0, 17] / np.median(rho[iz, 0, 0, 0])
+        assert peak > 0.5 * raw[iz, 0, 0, 0, 17] / np.median(raw[iz, 0, 0, 0])
+
+
+def test_t1_cv_cell_split_sums_to_the_simulation_total():
+    T = _synthetic_t1(seed=4, n_sim=10)
+    cands = [(0.0, 0.0, True), (0.2, 0.0, False)]
+    cv = CB.t1_cv(T, cands, n_folds=5)
+    np.testing.assert_allclose(cv["cell"].sum(axis=(2, 3)), cv["main"], rtol=1e-12)
+    assert cv["sims"] == sorted(set(T.sim))
