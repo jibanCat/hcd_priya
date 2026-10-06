@@ -28,5 +28,8 @@ def load_error_vector(path):
     if "kfkms" in d or str(d.get("schema_version", "")) != CHECKPOINT_SCHEMA_VERSION:
         raise SchemaCollapseError(
             f"{path}: pre-2026-10 error vector (kfkms label or no schema_version); rebuild it under schema 2.0")
+    if "provenance" not in d:
+        raise SchemaCollapseError(f"{path}: error vector without provenance (gate C review, QUEUES E4); "
+                                  "only run-specific, provenance-carrying error vectors may be used")
     d["schema_version"] = str(d["schema_version"])
     return d

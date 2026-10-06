@@ -16,7 +16,8 @@ def _arrays():
 
 def test_roundtrip_carries_k_com_and_schema(tmp_path):
     p = tmp_path / "ev.npz"
-    EV.save_error_vector(p, **_arrays(), dla_shot_flag=np.zeros(4, bool))
+    # provenance is required since gate E (QUEUES E4; refusal tested in test_products_io_v2.py)
+    EV.save_error_vector(p, **_arrays(), dla_shot_flag=np.zeros(4, bool), provenance=np.array('{"seed": 0}'))
     ev = EV.load_error_vector(p)
     assert ev["schema_version"] == S.CHECKPOINT_SCHEMA_VERSION
     assert np.allclose(ev["k_com_hmpc"], _arrays()["k_com_hmpc"]) and "kfkms" not in ev
