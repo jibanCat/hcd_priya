@@ -110,7 +110,10 @@ def predict_leg(model, theta9, tau0_vec, alpha_hcd, *, leg, k_com, pf_stats, dla
 def t2_var(sigma_floor, slope, P, ns, ns_box=NS_BOX, edge_mult=EDGE_SLOPE_MULT):
     """The MF floor variance at one z: (sigma_floor P)^2 + (sigma_edge P)^2, sigma_edge = max(edge_mult |slope| d_ns,
     0.5 sigma_floor d_ns / 0.03), d_ns = the distance of the physical n_s outside ``ns_box`` (floor spec sections
-    2-4). ``ns`` is passed stop-gradient (the term widens the posterior, it does not pull it)."""
+    2-4). ``ns`` is passed stop-gradient by ``predict_leg``: that removes the edge term's n_s force from jax.grad ONLY;
+    its value stays in the density, so it can move the posterior and any MAP (the sampler's target is unchanged, a
+    jax.grad-based Fisher or MAP omits the force). Audited by finite differences of the value (gate E amendment A1
+    section 5 (vi))."""
     d_ns = jnp.maximum(jnp.maximum(ns - ns_box[1], ns_box[0] - ns), 0.0)
     sig_edge = jnp.maximum(edge_mult * jnp.abs(slope) * d_ns, 0.5 * sigma_floor * (d_ns / 0.03))
     P = jnp.asarray(P)
