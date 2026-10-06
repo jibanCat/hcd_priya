@@ -365,6 +365,9 @@ def test_readme_digest_table_matches_manifest():
             f"README digest table drifted: {mem['name']} meta sha absent"
 
 
+@pytest.mark.xfail(strict=True, reason="gate E (amendment A1 rev 1 section 8, step 7): the lock of record still names the "
+                   "pre-2026-10 final_prod_seed members until analysis.lock is regenerated with the final product "
+                   "digests; strict, so the marker must be removed when the lock is regenerated")
 def test_analysis_lock_member_list_agrees_with_manifest():
     """The lock of record must agree with the manifest on the ensemble identity. The current
     lock predates digest pinning (it carries names + count); the freeze regeneration inherits

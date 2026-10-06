@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """(Re)build or --check the pinned production-ensemble manifest (freeze decision 6).
 
-GENERATE (default): scan a checkpoints dir for the five ``final_prod_seed{0..4}`` members,
+GENERATE (default): scan a checkpoints dir for the five ``prod_repaired_seed{0..4}`` members (PE.PROD_BASENAME),
 compute SHA256 for every .eqx/.norm.pkl/.meta.json, and write the machine-readable manifest
 (``checkpoints/production_ensemble_manifest.json``). The manifest is NEVER hand-edited: any
 intentional replacement of the production ensemble regenerates it HERE, then goes through PI
@@ -46,10 +46,11 @@ NORM_NOTE = (
     "(basename per index), not by digest."
 )
 PROVENANCE_NOTE = (
-    "The .eqx/.norm.pkl/.meta.json binaries are gitignored (they live only at "
-    f"{_REPO_ROOT}/checkpoints/) and are pinned here by SHA256. Per-member training "
-    "config/history: final_prod_seed<i>.meta.json (digest-pinned here) and the git-tracked "
-    "final_prod_seed<i>.hist.json."
+    "The .eqx/.norm.pkl/.meta.json/.hist.json files live in checkpoints_dir (not in git) and are pinned here by "
+    "SHA256 and cross-checked against that directory's SHA256SUMS. Per-member training config: "
+    f"{PE.PROD_BASENAME}<i>.meta.json (digest-pinned here; schema 2.0, cache_sha256, k_com_hmpc); history: "
+    f"{PE.PROD_BASENAME}<i>.hist.json beside it. Trained by gate C (PU-0056/PU-0057) from a git-archive export of "
+    "commit 01ad2ff by the notes batch gateC/batch_gateC_train_01ad2ff.sbatch (metas carry git_sha null; see checkpoints_dir/MANIFEST_README.txt)."
 )
 REPLACEMENT_PROCEDURE = (
     "Intentional replacement ONLY: retrain via scripts/train_production_emulator.py (once per "
@@ -135,7 +136,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--checkpoints-dir", default=DEFAULT_CHECKPOINTS_DIR,
-                    help="dir holding the final_prod_seed{0..4} binaries "
+                    help="dir holding the prod_repaired_seed{0..4} binaries "
                          f"(default {DEFAULT_CHECKPOINTS_DIR})")
     ap.add_argument("--manifest", default=PE.DEFAULT_MANIFEST_PATH,
                     help=f"manifest path (default {PE.DEFAULT_MANIFEST_PATH})")
