@@ -94,7 +94,10 @@ SHARDS = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/caches/s4_build_shards"
 # Built with 2 threads, as the historical production build (PU-0044): fake_spectra's mean-flux scale solve is
 # thread-count dependent at ~1e-9 (the first, 4-thread shards shard_03f03b8_task{2..5}.h5 differ by that much in scale
 # and the keys computed with it; kept as the recorded evidence).
-REPRO = {4: ("ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056", 17),
+# Tasks 2, 3 (ns0.907 snaps 16, 19, neighbours of the repaired snaps) were rebuilt at 2 threads in the gate C review fix
+# pass (PU-0057; the review found the criterion shown for 2 of the 4 pre-specified groups).
+REPRO = {2: (NS0907, 16), 3: (NS0907, 19),
+         4: ("ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056", 17),
          5: ("ns0.959Ap2.34e-09herei3.81heref2.99alphaq1.77hub0.725omegamh20.144hireionz6.83bhfeedback0.0467", 20)}
 
 
