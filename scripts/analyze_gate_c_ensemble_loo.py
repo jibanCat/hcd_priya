@@ -23,7 +23,6 @@ sys.path.insert(0, _REPO_ROOT)
 from hcd_analysis.emulator import gate_c as G  # noqa: E402
 
 UP_LOO = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/loo_fps.hdf5"
-F1_SIM = "ns0.959Ap2.34e-09herei3.81heref2.99alphaq1.77hub0.725omegamh20.144hireionz6.83bhfeedback0.0467"
 CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 
 
@@ -45,27 +44,21 @@ def main():
     with h5py.File(UP_LOO, "r") as f:
         up = {k: f[k][...] for k in ("flux_predict", "flux_true", "params", "zout")}
     members, ens, upe, zs = [[] for _ in range(5)], [], [], []
-    kks = None
-    for n in range(60):
-        files = [f"{a.eval_dir}/eval_loo60_s{n:02d}.npz"] + [f"{a.eval_dir}/loo60_ensemble/eval_loo60_s{n:02d}_seed{s}.npz"
-                                                               for s in range(1, 5)]
-        ev = [np.load(p, allow_pickle=True) for p in files]
-        for e in ev[1:]:
-            if not (np.array_equal(e["rows"], ev[0]["rows"]) and np.array_equal(e["k_ks"], ev[0]["k_ks"])):
-                raise ValueError(f"members of simulation {n} disagree on rows or k bins")
-        e0 = ev[0]
-        kks = e0["k_ks"]
-        res = np.stack([e["res_ks"] for e in ev])                              # (5, rows, 11)
-        ent = [dict(params=sim_params[str(e0["sim_name"][i])], alpha=float(e0["alpha"][i]), z=float(e0["z"][i]), key=i)
-               for i in range(e0["rows"].size) if np.isfinite(res[:, i]).all()]
-        for i, (ur, zi) in G.match_upstream_loo(ent, up["params"], up["zout"]).items():
-            if str(e0["sim_name"][i]) == F1_SIM and abs(float(e0["z"][i]) - 2.2) < 1e-6:
-                continue
-            for m in range(5):
-                members[m].append(res[m, i])
-            ens.append(G.ensemble_residual(list(res[:, i])))
-            upe.append(up["flux_predict"][ur, zi] / up["flux_true"][ur, zi] - 1.0)
-            zs.append(float(e0["z"][i]))
+
+    def member_evals():
+        for n in range(60):
+            files = [f"{a.eval_dir}/eval_loo60_s{n:02d}.npz"] + [
+                f"{a.eval_dir}/loo60_ensemble/eval_loo60_s{n:02d}_seed{s}.npz" for s in range(1, 5)]
+            yield [dict(np.load(p, allow_pickle=True)) for p in files]
+    entries, res, kks = G.c4_collect(member_evals(), sim_params)              # res[key]: (5, 11)
+    z_of = {e["key"]: e["z"] for e in entries}
+    # checked comparison set (BT-C1): every upstream entry outside F1 matched once, all members finite, 7790 entries
+    for key, (ur, zi) in G.c4_matched_set(entries, res, up["params"], up["zout"]):
+        for m in range(5):
+            members[m].append(res[key][m])
+        ens.append(G.ensemble_residual(list(res[key])))
+        upe.append(up["flux_predict"][ur, zi] / up["flux_true"][ur, zi] - 1.0)
+        zs.append(z_of[key])
     ens, upe, zs = np.array(ens), np.array(upe), np.array(zs)
     out = dict(n_entries=int(ens.shape[0]), ensemble=stats(ens), upstream=stats(upe),
                members=[stats(np.array(m)) for m in members])

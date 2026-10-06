@@ -13,6 +13,7 @@ Env (MANDATORY): PYTHONNOUSERSITE=1 PYTHONPATH=<repo>, emu-jax python.
 from __future__ import annotations
 
 import json
+import os
 import pickle
 import subprocess
 from pathlib import Path
@@ -620,15 +621,18 @@ def _git_sha():
 
     Records exactly which code trained the frozen LF backbone so the MF / likelihood
     that load it are fully reproducible. Never raises — a checkpoint must still save
-    outside a git tree (returns None instead)."""
+    outside a git tree. A git-archive export (batch runs) has no .git: the batch then
+    exports the archived commit as HCD_CODE_COMMIT, used here as the fallback."""
     repo = Path(__file__).resolve().parents[2]            # .../hcd_priya
     try:
         out = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=5)
-        return out.stdout.strip() if out.returncode == 0 else None
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
     except Exception:
-        return None
+        pass
+    return os.environ.get("HCD_CODE_COMMIT") or None
 
 
 def _arch_cfg_from_model(model):

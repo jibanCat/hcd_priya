@@ -5,7 +5,8 @@ Runs the full LOSO cross-validation sweep over the merged v3.3 cache, training o
 emulator per fold (REUSING ``hcd_analysis.emulator.train.train_fold``), collecting
 per-fold fractional P1D residuals stratified into (class, k, z-band) cells, then
 aggregates them into the σ error vector + DLA high-k shot-noise flag that feeds the
-likelihood covariance (``aggregate_error_vector``). Emits ``error_vector.npz`` and
+likelihood covariance (``aggregate_error_vector``). Emits ``<out>.error_vector.npz`` (with provenance;
+refuses to overwrite) and
 three review figures.
 
 Does NOT modify any ``hcd_analysis/emulator/*.py`` (other work reads them).
@@ -43,6 +44,12 @@ FINAL_RECIPE = dict(
     w_coh=80.0, weight_decay=3e-4, datarange=True,
     epochs=180, patience=25, lr=1e-3, batch=512,
 )
+
+
+def error_vector_path(out):
+    """This sweep's error vector, next to its checkpoints (``<out>_fold{f}``): ``<out>.error_vector.npz``. Never a
+    shared ``<out parent>/error_vector.npz`` (gate C: four sweeps overwrote one such file, PU-0056)."""
+    return Path(f"{out}.error_vector.npz")
 
 
 # --- z-band scheme ------------------------------------------------------------
@@ -335,6 +342,10 @@ def main():
         print(f"[SMOKE] n_folds={args.n_folds} epochs={args.epochs} "
               f"batch={args.batch} n_basis={args.n_basis} z_bands={args.z_bands}")
 
+    out_npz = error_vector_path(args.out)
+    if out_npz.exists():
+        raise SystemExit(f"refusing to overwrite the error vector {out_npz} (another sweep's product); choose a new --out")
+
     datarange = not args.no_datarange
     term_w = None
     if args.p_resid_w != 1.0:
@@ -462,8 +473,13 @@ def main():
     dla_shot_flag = ev["dla_shot_flag"]       # (K,)
     sigma_zonly = np.sqrt(np.nanmean(sigma ** 2, axis=3))   # (4,K,Zb) τ₀-marginalized
 
-    out_npz = Path(args.out).parent / "error_vector.npz"
+    import json as _json
     from hcd_analysis.emulator.error_vector_io import save_error_vector
+    provenance = _json.dumps(dict(
+        ckpt_prefix=str(args.out), seed=args.seed, n_folds=args.n_folds, cache_path=str(args.cache),
+        cache_sha256=T._sha256_or_none(args.cache), code_commit=T._git_sha()))
+    if out_npz.exists():                       # appeared while this sweep was training
+        raise SystemExit(f"refusing to overwrite the error vector {out_npz}")
     save_error_vector(
         out_npz,
         sigma=sigma,                          # (4,K,Zb,Tb) — the τ₀-aware vector
@@ -472,6 +488,7 @@ def main():
         tau0_band_centres=tau0_band_centres,  # (Tb,) α=τ₀/Kim(z) band centres
         class_names=np.array(COARSE_NAMES),
         k_com_hmpc=k_com,
+        provenance=np.array(provenance),      # JSON: checkpoint prefix, seed, folds, cache sha256, code commit
     )
     print(f"\nerror vector -> {out_npz}  (sigma shape {sigma.shape})")
 

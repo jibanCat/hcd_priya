@@ -27,7 +27,6 @@ CLS = ("clean", "LLS", "subDLA", "DLA")
 HIST_C2 = {"clean": 0.01048, "LLS": 0.01081, "subDLA": 0.01288, "DLA": 0.01878}     # GATE_C_SPEC C2
 HIST_C5 = {"clean": 0.0054, "LLS": 0.0059, "subDLA": 0.0079, "DLA": 0.0206}         # GATE_C_SPEC C5
 UP_LOO = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/loo_fps.hdf5"
-F1_SIM = "ns0.959Ap2.34e-09herei3.81heref2.99alphaq1.77hub0.725omegamh20.144hireionz6.83bhfeedback0.0467"
 CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 
 
@@ -105,21 +104,13 @@ def main():
     sim_params = {s: prm[i] for i, s in enumerate(sims)}
     with h5py.File(UP_LOO, "r") as f:
         up = {k: f[k][...] for k in ("flux_predict", "flux_true", "params", "zout")}
-    ours_e, ups_e, zs_e, entries = [], [], [], []
-    for p in sorted(glob.glob(f"{a.eval_dir}/eval_loo60_s*.npz")):
-        e = load(p)
-        for i in range(e["rows"].size):
-            if not np.isfinite(e["res_ks"][i]).all():
-                continue
-            entries.append(dict(params=sim_params[str(e["sim_name"][i])], alpha=float(e["alpha"][i]), z=float(e["z"][i]),
-                                key=(p, i)))
-    match = G.match_upstream_loo(entries, up["params"], up["zout"])
-    cache_ev = {}
-    for (p, i), (ur, zi) in match.items():
-        e = cache_ev.setdefault(p, load(p))
-        if str(e["sim_name"][i]) == F1_SIM and abs(float(e["z"][i]) - 2.2) < 1e-6:
-            continue
-        ours_e.append(e["res_ks"][i]); zs_e.append(float(e["z"][i]))
+    ours_e, ups_e, zs_e = [], [], []
+    files = sorted(glob.glob(f"{a.eval_dir}/eval_loo60_s*.npz"))
+    entries, res, _ = G.c4_collect(([load(p)] for p in files), sim_params)
+    z_of = {e["key"]: e["z"] for e in entries}
+    # checked comparison set (BT-C1): every upstream entry outside F1 matched once, all residuals finite, 7790 entries
+    for key, (ur, zi) in G.c4_matched_set(entries, res, up["params"], up["zout"]):
+        ours_e.append(res[key][0]); zs_e.append(z_of[key])
         ups_e.append(up["flux_predict"][ur, zi] / up["flux_true"][ur, zi] - 1.0)
     ours_e, ups_e, zs_e = np.array(ours_e), np.array(ups_e), np.array(zs_e)
     o_med, o_rms = float(np.median(np.abs(ours_e))), float(np.sqrt(np.mean(ours_e ** 2)))
