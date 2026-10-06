@@ -67,6 +67,8 @@ from .inference import (PARAM_NAMES, hcd_incidence_prior,
 from .dndx_wc import alpha_to_dndx_exact, w_c_corrected
 from .sampler_numpyro import _dla_raw_mu
 from . import data_likelihood as DL
+from . import forward as FW
+from . import kcoord as KC
 from .closure_diagnostics import (
     thin_to_ess, central_interval, empirical_coverage, sbc_rank,
     ecdf_pit_bands, loglik_rank,
@@ -76,10 +78,8 @@ assert jax.config.read("jax_enable_x64"), \
     "x64 must be on (import hcd_analysis.emulator before jax)"
 
 from ..paths import REPO_ROOT_STR as REPO   # this checkout (emulator-debug 2026-10; never an absolute literal)
-# The ONE production model + its matched cross-class error vector (plan §5).
-CKPT = f"{REPO}/checkpoints/final_fold0"
-ERROR_VECTOR = f"{REPO}/checkpoints/error_vector.npz"
-XCLASS_ERROR_VECTOR = f"{REPO}/checkpoints/error_vector_xclass.npz"
+# Products are passed explicitly and identity-checked (gate E, products.py); the pre-2026-10 default paths
+# (final_fold0, error_vector*.npz) are retired.
 CACHE_PATH = f"{REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 
 # The ECDF simultaneous-band gate is only correctly sized for L≳99 thinned draws (the
@@ -341,32 +341,25 @@ class LegBCtx(NamedTuple):
     The numpyro model closes over this; jit traces only over the sampled params.
       model, pf_stats, dla_core_leg : the production forward model + per-leg DLA core.
       legs                          : list[DataLeg] (the mock overwrites P_data per mock).
-      cache_k                       : (Kc,) PRE-2026-10 single velocity grid (the defect of incident note
-                                      2026-10-05-INCIDENT-kgrid-representation-regression); replaced at gate E.
+      k_com_hmpc                    : (K,) the box modes 2 pi n / L (never a velocity grid); the forward places
+                                      every mode quantity at data k with one per-(leg, z) binding of the query theta.
       z_global                      : (nZ,) ascending union of leg z (the τ₀ ladder grid).
-      sigma_zb_per_leg / rho_zb_per_leg : the diagonal / cross-class C_emu error vector
-                                          ALREADY sliced to each leg's z-bins.
+      rho_zb_per_leg                : {leg: (n_z, 4, 4, K, Tb)} the T1 cross-class block per leg z (or None).
       alpha_centres                 : (Tb,) τ₀-band centres (α units).
       tau0_mu / tau0_sigma          : (nZ,) the mean-flux prior on the GLOBAL z grid.
       alpha_hcd_mu / alpha_hcd_sigma: (3,) HCD incidence prior (LLS,subDLA,DLA).
       cemu_inflate                  : the conservative C_emu inflation scalar.
-      mf                            : a ``MultiFidelity`` (eval grid == cache grid) OR None.
-                                      When set, the Leg-B forward routes P_obs through the
-                                      certified through-MF correction (LF P_filt × exp(g +
-                                      log res_corr)); the mock TRUTH is built at the SAME MF
-                                      resolution (the gate invariant — applied to BOTH forward
-                                      and truth so it cancels in ΔP). None → the LF path.
-      mf_floor                      : an ``MFFloor`` (the LF→HR generalization + n_s-edge
-                                      C_emu floor) OR None. Added on the small-scale leg(s)
-                                      (leg.mf_floor_on) when ``mf`` is set; None → no floor.
+      mf                            : a ``mf_modes.ModeMF`` (the gate D mode-axis correction, bound to the
+                                      ensemble and cache by products.load_mf_product) OR None (LF path).
+      t2_per_leg / t3_per_leg       : {leg: (sigma_floor (n_z,), slope (n_z,))} MF floor and n_s-edge term;
+                                      {leg: (U (N, m), w (m,))} k-coherence factor. None -> off.
     """
     model: object
     pf_stats: dict
     dla_core_leg: dict          # {leg.name: (n_z_leg, Kc)} per-leg DLA core (cache delta[,2])
     legs: list
-    cache_k: jnp.ndarray
+    k_com_hmpc: jnp.ndarray
     z_global: np.ndarray
-    sigma_zb_per_leg: dict
     rho_zb_per_leg: dict
     alpha_centres: jnp.ndarray
     tau0_mu: jnp.ndarray
@@ -375,21 +368,8 @@ class LegBCtx(NamedTuple):
     alpha_hcd_sigma: jnp.ndarray
     cemu_inflate: float
     mf: object = None
-    mf_floor: object = None
-    # SHAPE-AWARE MF floor (Phase-5a, 2026-06-12): the low-rank LOSO-eps outer-product C_emu
-    # covariance (mf_shape_per_leg = {leg.name: (N,N) fractional}, mf_shape_infl the inflation).
-    # Fired on a leg when an entry is present — captures the coherent k-tilt the diagonal floor
-    # cannot. None → off (back-compat). See data_likelihood.MFShape / mf_shape_cov_for_leg.
-    mf_shape_per_leg: object = None
-    mf_shape_infl: float = 1.0
-    # 60-sim LF-EMULATOR-COHERENCE C_emu term (Phase-5a, 2026-06-12): the k-coherent emulator
-    # generalization gap (8-fold/60-sim LOSO), a SECOND off-diagonal C_emu term distinct from the
-    # 6-HR resolution shape floor. Built/bound the same way (fixed-P_data amplitude). None → off.
-    # NOT gated on `with_mf` — it is an LF-emulator residual (applies on the LF path too).
-    mf_emucoh_per_leg: object = None
-    mf_emucoh_infl: float = 1.0
-    mf_emucoh_offdiag_only: bool = False   # per-term diagonal allocation: absorb emucoh's diagonal
-                                           # into emu_var (max), add only its off-diagonal (2026-06-12)
+    t2_per_leg: object = None             # MF floor + n_s-edge term per leg (gate E T2; None -> off)
+    t3_per_leg: object = None             # k-coherence factor (U, w) per leg (gate E T3; None -> off)
     sample_metals: bool = False          # opt-in (2026-06-13): sample a SHARED a_SiIII metal nuisance
     a_siiii_max: float = 0.15            # and apply _metal_factor on metals_on legs (DESI/eBOSS). Off
                                          # by default → golden byte-exact (a_SiIII=0 ⇒ factor≡1).
@@ -878,74 +858,46 @@ def _ks_dndx_reference(alpha_mu, xbar_cf, z_global):
     return dndx_ref, xbar_z, dndx_piv, xbar_piv
 
 
-def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
-                   xclass_error_vector=XCLASS_ERROR_VECTOR, cemu_inflate=1.0,
+def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
                    metals_on=False, desi_kwargs=None, ks_kwargs=None,
                    with_eboss=False, eboss_kwargs=None,
-                   use_xclass=True, with_mf=False, mf_fold=0, mf_with_floor=True,
-                   mf_exclude_held=False, mf_target_hr_sim=None, mf_anchor_mult=5.0,
-                   res_corr_on=True,
-                   mf_shape=False, mf_shape_infl=1.0,
-                   mf_shape_legs=("DESI", "KS"), mf_shape_npz=None,
-                   mf_emucoh=False, mf_emucoh_infl=1.0,
-                   mf_emucoh_legs=("DESI", "KS"), mf_emucoh_npz=None,
-                   mf_emucoh_offdiag_only=False, sample_metals=False, sample_res=False,
+                   mf_product=None, t1_product=None, t2_product=None, t3_product=None,
+                   res_corr_on=False, sample_metals=False, sample_res=False,
                    coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None, a_siiii_max=0.15,
                    metal_prior="uniform", metal_logf_lo=-11.0, metal_logf_hi=-2.0,
                    metal_one_minus_F_ref=None,
                    metal_node_z=(2.2, 4.2), metal_fnode_lo=0.003, metal_fnode_hi=0.03,
                    metal_siII_legs=("DESI",), metal_knode_lo=1e-3, metal_knode_hi=0.1,
                    hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0,
-                   hcd_2d_tilt=False, ensemble_ckpts=None, survey=None,
-                   ks_legacy_alpha_param=False):
-    """PRE-2026-10 INTERFACE (reads the checkpoint's single velocity grid meta["kfkms"] into ctx.cache_k; replaced
-    at gate E by the canonical kcoord/EmulatorPrediction coordinate).
+                   hcd_2d_tilt=False, survey=None, ks_legacy_alpha_param=False,
+                   theta_unit_lo=None, theta_unit_hi=None):
+    """The gate E production context (GATE_E_SPEC v1 section 2). Returns ``(LegBCtx, cache dict)``.
 
-    Assemble the real DESI+KS legs + slice the production error vector onto each leg's
-    z-bins. The cross-class ρ (``use_xclass=True``, the default; the matched
-    ``error_vector_xclass.npz`` pair) is the production C_emu — the diagonal σ is carried too
-    (for the diagonal/cross-class comparison figure). Returns ``(LegBCtx, dla_core_global)``.
+    The DESI + KS (+ eBOSS) legs; the LF ensemble ``ensemble_ckpts`` (schema-2.0 checkpoint prefixes; a single model is
+    a one-member list); the mode-axis MF product ``mf_product`` (refused unless fitted against exactly this ensemble
+    and the production cache); the box modes ``k_com_hmpc`` (identical across checkpoints, cache and MF); the
+    mode-indexed DLA core per leg z; the priors (unchanged). Every kept data bin is checked against the simulated
+    modes over the whole sampling box. ``desi_kwargs`` / ``ks_kwargs`` / ``eboss_kwargs`` override the loader cuts; the
+    KS k_max must be explicit (production 0.065).
 
-    Metals default OFF for the closure (the SiIII model term is exercised separately; the
-    sim truth carries no metals, so adding the metal MODEL term would be a misspecification
-    arm, not the interior-τ₀ gate). ``desi_kwargs``/``ks_kwargs`` override the loader cuts.
-
-    ``with_mf=True`` (default False → LF path): build + attach the production MF correction
-    (``build_mf_correction(mf_fold)``) so the Leg-B forward AND the mock truth go through the
-    certified through-MF path (the gate invariant). ``mf_with_floor=True`` also attaches the
-    ``MFFloor`` (the LF→HR + n_s-edge C_emu floor on the small-scale leg). The MF backbone for
-    ``mf_fold=0`` is byte-identical to the ``final_fold0`` ``ctx.model``, so the bare-model
-    P_filt and the frozen ``mf.lf_model`` agree (the gate faithfulness invariant).
-
-    ``ks_legacy_alpha_param`` (default False; W2 2026-07-22): survey="KS" builds deploy the
-    dN/dX-MAPPED LLS prior (V-A, ``ctx.ks_dndx_mapped=True`` → ``_ks_dndx_sites``; the KS 2.5×
-    boost acts in dN/dX space PRE-map). ``ks_legacy_alpha_param=True`` keeps the OLD KS
-    alpha-space parameterization (pivot TruncatedNormals × power-law z-shape, boost post-map)
-    invokable — for the MANDATED matched old-vs-new paired comparison arm (R6) ONLY, never a
-    production/blind fit. A no-op for every survey != "KS".
-    """
-    if ensemble_ckpts is not None:
-        # production SBC: the N-seed ensemble forward (mean of P_filt over members). The
-        # single-ckpt path (ensemble_ckpts=None) is UNCHANGED.
-        from hcd_analysis.emulator.ensemble import load_ensemble
-        model, meta, norm = load_ensemble(list(ensemble_ckpts))
-    else:
-        model, meta, norm = T.load_checkpoint(ckpt)
+    Retired with the single-grid forward: ``ckpt``, the pre-2026-10 error vectors, ``with_mf`` / ``mf_fold`` (the
+    runtime MF rebuild), ``mf_shape``, the old k-coherence table and res_corr (``res_corr_on`` must be False; the
+    alpha_res sites stay pinned). ``t1/t2/t3_product`` are wired by the amendment that registers their definitions
+    (S10-S12)."""
+    from .ensemble import load_ensemble
+    from . import products as PR
+    if res_corr_on:
+        raise ValueError("res_corr is retired in the gate E forward (NORC): res_corr_on must be False")
+    if any(p is not None for p in (t1_product, t2_product, t3_product)):
+        raise NotImplementedError("emulator-error products wait for the S10-S12 rulings and the gate E amendment")
+    _ks_kw = dict(ks_kwargs or {})
+    if "k_max" not in _ks_kw:
+        raise ValueError("the KS k_max must be explicit (CACHE_KMAX and the NORC auto-cap are retired; production 0.065)")
+    if not ensemble_ckpts:
+        raise ValueError("ensemble_ckpts: the schema-2.0 LF checkpoint prefixes (one or more)")
+    model, meta, norm = load_ensemble(list(ensemble_ckpts))
     pf = {k: jnp.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
-
-    ev = np.load(error_vector, allow_pickle=True)
-    sigma = ev["sigma"]                            # (4,K,Zb,Tb)
-    C4, K, Zb, Tb = sigma.shape
-    alpha_centres = jnp.asarray(ev["tau0_band_centres"])
-    z_band_edges = ev["z_band_edges"]              # (Zb+1,)
-    rho = None
-    if use_xclass:
-        evx = np.load(xclass_error_vector, allow_pickle=True)
-        rho = evx["rho"]                           # (4,4,K,Zb,Tb)
-        assert rho.shape[2:] == (K, Zb, Tb), \
-            f"xclass rho {rho.shape} incompatible with (K,Zb,Tb)=({K},{Zb},{Tb})"
-        assert np.allclose(np.asarray(evx["tau0_band_centres"]), np.asarray(alpha_centres)), \
-            "xclass τ₀-band centres differ from the diagonal error vector"
+    alpha_centres = None
 
     # ARM-D (coherent-cov, no forward float) is a DISTINCT covariance treatment from option-b (sample_res):
     # it does NOT set ctx.sample_res (no f_res site), only the loader's resolution_coherent cov mode.
@@ -953,7 +905,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         raise ValueError("build_legb_ctx: sample_res (option-b) and coherent_res (arm-D) are mutually exclusive")
     desi = DL.load_desi_leg(metals_on=metals_on, resolution_float=sample_res,
                             resolution_coherent=coherent_res, resolution_coh_amp=coh_amp, **(desi_kwargs or {}))
-    # Gate-A NORC: when res_corr is dropped, cap KS at k<=0.045 (the residual high-k
+    # (historical) Gate-A NORC: when res_corr was dropped, KS was capped at k<=0.045 (the residual high-k
     # particle-convergence uncertainty is then un-marginalized on KS, whose k_max reaches
     # furthest above the res_corr anchor 5*k_box(z) -- ~3.5x the typical anchor value, measured).
     # CORRECTED 2026-07-10 (PR#14 panel FIX 6a): DESI's k_max ALSO sits ABOVE the anchor (~2.3x
@@ -962,9 +914,6 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
     # scripts/analyze_res_corr_injection.py). eBOSS's k_max sits NEAR (barely above) the anchor,
     # so it is the one leg genuinely little-affected by dropping res_corr. Overridable via an
     # explicit ks_kwargs k_max.
-    _ks_kw = dict(ks_kwargs or {})
-    if not res_corr_on and "k_max" not in _ks_kw:
-        _ks_kw["k_max"] = 0.045
     ks = DL.load_ks_leg(**_ks_kw)
     legs = [desi, ks]
     # eBOSS DR14 (Chabanier+2019) — opt-in third leg (the low-k production shakedown). Its own
@@ -978,26 +927,23 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
 
     z_global = np.unique(np.round(np.concatenate([leg.z for leg in legs]), 6))
 
-    # slice the error vector onto each leg's z-bins (digitize into the z-band edges).
-    sigma_zb_per_leg, rho_zb_per_leg = {}, {}
-    for leg in legs:
-        zb_of_z = np.clip(np.digitize(np.asarray(leg.z), z_band_edges[1:-1]), 0, Zb - 1)
-        sigma_zb_per_leg[leg.name] = jnp.asarray(
-            np.stack([sigma[:, :, zb_of_z[i], :] for i in range(leg.n_z)]))   # (n_z,4,K,Tb)
-        if rho is not None:
-            rho_zb_per_leg[leg.name] = jnp.asarray(
-                np.stack([rho[:, :, :, zb_of_z[i], :] for i in range(leg.n_z)]))  # (n_z,4,4,K,Tb)
-
-    # per-leg DLA core (cache delta[,2]) on each leg z. The cache DLA core is the SAME for
-    # all sims at a (z,τ₀) cell up to a small per-row spread; we take a representative core
-    # from the held-out pool below (closure_legb assembles it per-mock at the sim's rows).
-    # Here we set a fiducial (mean held-out) core per leg z; the mock overrides with the
-    # actual sim's core when it builds the truth (so the FORWARD core and the TRUTH core are
-    # the SAME sim's — they cancel in the emulator-error sizing).
     d = load_cache(CACHE_PATH)
-    dla_core_leg = _fiducial_dla_core_per_leg(d, legs, cache_k=meta["kfkms"])
-
-    cache_k = jnp.asarray(meta["kfkms"])
+    k_com = np.asarray(meta["k_com_hmpc"], float)
+    if not np.array_equal(k_com, np.asarray(d["k_com_hmpc"], float)):
+        raise ValueError("the checkpoints' k_com_hmpc differ from the production cache's box modes")
+    lo_u = _THETA_UNIT_LO if theta_unit_lo is None else np.asarray(theta_unit_lo, float)
+    hi_u = _THETA_UNIT_HI if theta_unit_hi is None else np.asarray(theta_unit_hi, float)
+    _assert_bins_inside_modes(legs, k_com, np.asarray(lo_u), np.asarray(hi_u))
+    mf_obj = None
+    if mf_product is not None:
+        mf_obj, mf_k, _ = PR.load_mf_product(
+            mf_product, lf_ckpt_sha256=[T._sha256_or_none(p + ".eqx") for p in ensemble_ckpts],
+            lf_cache_sha256=T._sha256_or_none(CACHE_PATH))
+        if not np.allclose(mf_k, k_com, rtol=1e-14, atol=0):
+            raise ValueError("the MF product's k_com_hmpc differ from the checkpoints'")
+    # per-leg DLA core (cache delta[:, 2]) per leg z on the mode axis (production definition); the forward places it
+    # at data k with the query binding.
+    dla_core_leg = _fiducial_dla_core_per_leg(d, legs)
 
     # priors on the GLOBAL z grid: Becker+2013 τ₀ (production anchor) + HCD incidence.
     tau0_mu, tau0_sigma = meanflux_tau0_prior(jnp.asarray(z_global), center="becker13")
@@ -1082,35 +1028,6 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         # (0.764 dated 2026-07-18; 0.95 pre-swap).
         _assert_forward_zslope_center(hcd_btilt_mu, "build_legb_ctx hcd_btilt_mu (2D-tilt)")
 
-    mf_obj = mf_floor_obj = None
-    if with_mf:
-        # mf_target_hr_sim (Task 1.5): with mf_exclude_held, drop EXACTLY this one HR sim from
-        # the MF head fit (genuine leave-ONE-out) instead of the whole LF fold group. None →
-        # whole-group held (back-compat); a NO-OP when mf_exclude_held=False.
-        # mf_anchor_mult (DIAGNOSTIC, default 5.0 = production anchor / byte-identical):
-        # 0.0 DISABLES the res_corr low-k anchor (raw clamped table) — used by the decomp
-        # diagnostic to isolate the anchor's contribution to the coherent n_s bias.
-        mf_obj, mf_floor_obj = build_mf_correction(
-            fold=mf_fold, with_floor=mf_with_floor, exclude_held_hr=mf_exclude_held,
-            target_hr_sim=mf_target_hr_sim, anchor_mult=mf_anchor_mult,
-            res_corr_on=res_corr_on)
-
-    # SHAPE-AWARE MF floor (Phase-5a): the per-leg fractional LOSO-eps outer-product covariance
-    # (precomputed once, θ-blind). Fired on the named legs (default DESI+KS) when with_mf+mf_shape.
-    mf_shape_per_leg = None
-    if with_mf and mf_shape:
-        shape_tab = DL.load_mf_shape(mf_shape_npz) if mf_shape_npz else DL.load_mf_shape()
-        mf_shape_per_leg = {leg.name: DL.mf_shape_cov_for_leg(shape_tab, leg)
-                            for leg in legs if leg.name in set(mf_shape_legs)}
-
-    # 60-sim LF-emulator-coherence term — NOT gated on with_mf (it is an LF-emulator residual,
-    # measured from the 8-fold/60-sim LOSO, valid on the LF reference path too).
-    mf_emucoh_per_leg = None
-    if mf_emucoh:
-        ec_tab = DL.load_mf_emucoh(mf_emucoh_npz) if mf_emucoh_npz else DL.load_mf_emucoh()
-        mf_emucoh_per_leg = {leg.name: DL.mf_shape_cov_for_leg(ec_tab, leg)
-                             for leg in legs if leg.name in set(mf_emucoh_legs)}
-
     # METAL FLAT-LOG f PRIOR (Task A1): the ONE global scalar 1−F_ref mapping f→amplitude a=f/(1−F_ref)
     # for the opt-in flatlog metal prior. When None, derive it from the fiducial mean flux the forward
     # uses at the prior center (tau0_amp=1, dtau0=0 ⇒ τ₀(z)=Kim07(z)): F_ref = mean_z exp(−Kim(z)) on
@@ -1122,15 +1039,12 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         metal_one_minus_F_ref = float(metal_one_minus_F_ref)
 
     ctx = LegBCtx(
-        model=model, pf_stats=pf, dla_core_leg=dla_core_leg, legs=legs, cache_k=cache_k,
-        z_global=z_global, sigma_zb_per_leg=sigma_zb_per_leg,
-        rho_zb_per_leg=(rho_zb_per_leg if rho is not None else None),
+        model=model, pf_stats=pf, dla_core_leg=dla_core_leg, legs=legs, k_com_hmpc=jnp.asarray(k_com),
+        z_global=z_global, rho_zb_per_leg=None,
         alpha_centres=alpha_centres, tau0_mu=tau0_mu, tau0_sigma=tau0_sigma,
         alpha_hcd_mu=jnp.asarray(alpha_mu), alpha_hcd_sigma=jnp.asarray(alpha_sd),
-        cemu_inflate=float(cemu_inflate), mf=mf_obj, mf_floor=mf_floor_obj,
-        mf_shape_per_leg=mf_shape_per_leg, mf_shape_infl=float(mf_shape_infl),
-        mf_emucoh_per_leg=mf_emucoh_per_leg, mf_emucoh_infl=float(mf_emucoh_infl),
-        mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
+        cemu_inflate=float(cemu_inflate), mf=mf_obj, t2_per_leg=None, t3_per_leg=None,
+        theta_unit_lo=theta_unit_lo, theta_unit_hi=theta_unit_hi,
         sample_metals=bool(sample_metals), sample_res=bool(sample_res),
         f_res_amp_sigma=(None if f_res_amp_sigma is None else float(f_res_amp_sigma)),
         a_siiii_max=float(a_siiii_max),
@@ -1147,7 +1061,7 @@ def build_legb_ctx(*, ckpt=CKPT, error_vector=ERROR_VECTOR,
         # REAL-FIT (survey != None) litWLS LLS forward z-slope center (2.127, sim_sub, sim_DLA);
         # survey=None (closure/SBC) → None → _zslope_sites centers on HCD_INCIDENCE_SLOPE (sim-truth).
         zslope_mu=survey_zslope_mu,
-        res_corr_on=bool(res_corr_on),
+        res_corr_on=False, fix_alpha_res=True,
         # KS dN/dX-mapped prior (V-A): the deterministic reference (None/False on every
         # non-mapped build — byte-safety by the dormant static branch).
         ks_dndx_mapped=bool(ks_dndx_mapped),
@@ -1321,78 +1235,14 @@ def build_legb_joint_ctx(survey_by_leg, *, per_leg_zslope=False, allow_cross_sur
     return ctx, d
 
 
-def build_mf_correction(fold=0, *, rank1=True, exclude_held_hr=False,
-                        with_floor=True, floor_npz=None, target_hr_sim=None,
-                        anchor_mult=5.0, res_corr_on=True):
-    """Build the production MF correction (resolved separable + rank-1 FixedMeanHead +
-    fixed res_corr) on the LF native cache grid for a fold, REUSING the certified gate
-    construction (scripts/diag_emu_bias_allfolds_mf.build_mf_for_fold). Returns
-    ``(mf, mf_floor)`` ready to thread into ``LegBCtx`` / ``predict_P_obs_on_leg``.
-
-    ``mf.eval_logk == lf_logk`` (the cache grid) so the correction == the gate's measured
-    forward. ``exclude_held_hr=True`` does HF-LOSO (the head is fit EXCLUDING the fold's
-    held-out HR sims) — the honest generalization arm; the default (False) fits the head on
-    ALL HR sims (the PRODUCTION correction, which is what the closure forward should use:
-    the closure tests the emulator-as-likelihood with the production MF, not the LOSO floor).
-    ``with_floor=True`` also loads the certified ``MFFloor`` (the LF→HR + n_s-edge C_emu
-    floor) from ``mf_cemu_floor.npz``.
-
-    ``target_hr_sim`` (Task 1.5, default None → whole-group back-compat): when set together
-    with ``exclude_held_hr=True``, the head is fit EXCLUDING ONLY this one HR sim (genuine
-    leave-ONE-out), independent of the LF fold group. Two HR sims can share an LF fold group
-    (fold 2 → {ns0.859, ns0.885}; fold 6 → {ns0.972, ns0.979}); the whole-group held set then
-    silently does leave-TWO-out → the head is fit on 4 HR sims → a worse correction → an
-    inflated apparent bias. ``target_hr_sim`` pins the held set to EXACTLY {target_hr_sim} so
-    the fold-mate is retained (5 HR sims, not 4). ``target_hr_sim=None`` keeps the whole-group
-    held set (bit-identical back-compat); it is a NO-OP when ``exclude_held_hr=False``."""
-    from hcd_analysis.emulator import multifidelity as MF
-    lf_cache = MF.load_cache(MF.LF_CACHE)
-    hr_cache = MF.load_cache(MF.HR_CACHE)
-    pairs = MF.match_hr_to_lf(lf_cache, hr_cache)
-    fold_model, _fold_meta, fold_norm, lf_logk = MF.load_lf_backbone(fold)
-    eval_logk = np.asarray(lf_logk)
-
-    # HF-LOSO row mask (optional): exclude the held-out HR sim(s) from the head fit. The held
-    # set is whole-group (target_hr_sim=None, back-compat) or EXACTLY {target_hr_sim} (true LOO).
-    train_rows = None
-    if exclude_held_hr:
-        from .data import load_cache as _lc
-        d = _lc(CACHE_PATH)
-        held = held_hr_set(d, hr_cache["sim_name"], fold=fold, target_hr_sim=target_hr_sim)
-        hr_row_sim = np.array([s.decode() if isinstance(s, bytes) else s
-                               for s in hr_cache["sim_name"][[h for h, _ in pairs]]])
-        train_rows = np.where(~np.isin(hr_row_sim, list(held)))[0] if held else None
-
-    tg = MF.measure_delta_targets(lf_cache, hr_cache, fold_model, fold_norm, lf_logk,
-                                  eval_logk, pairs)
-    log_rho = np.nan_to_num(MF.mean_log_ratio_rho(tg, eval_logk), nan=0.0)
-    comp = MF.fixed_mean_table_resolved(tg, log_rho, train_mask_rows=train_rows)
-    a_k = comp["a_k"] if rank1 else np.zeros_like(comp["a_k"])
-    head = MF.FixedMeanHead(
-        comp["gbar_z_tab"], comp["z_tab"], resolved=True,
-        gtau_tab=comp["gtau_tab"], tau_tab=comp["tau_tab"], tau_by_z=comp["tau_by_z"],
-        a_k=a_k, u_z=comp["u_z"], u_tau=comp["u_tau"])
-    mf = MF.build_multifidelity(fold_model, fold_norm, lf_logk, head,
-                                eval_logk=eval_logk, log_rho=log_rho, delta_mode="none",
-                                anchor_mult=anchor_mult, res_corr_on=res_corr_on)
-    mf_floor = None
-    if with_floor:
-        mf_floor = (DL.load_mf_floor(floor_npz) if floor_npz
-                    else DL.load_mf_floor())
-    return mf, mf_floor
-
-
-def _fiducial_dla_core_per_leg(d, legs, cache_k):
-    """PRE-2026-10 INTERFACE (labels the core with the single cache_k grid; replaced at gate E).
-
-    Mean held-out DLA core (cache ``delta[,2]``) per leg z, interpolated onto the leg-z
-    cache rows. Used only as a FALLBACK; the per-mock truth supplies its own sim's core."""
-    cache_k = np.asarray(cache_k)
+def _fiducial_dla_core_per_leg(d, legs):
+    """Mean DLA core (cache ``delta[:, 2]``, mode-indexed) over the cache rows at each leg z (|z - z_leg| < 0.05, else
+    the nearest z): {leg.name: (n_z, K)} on the mode axis. The forward places it at data k with the query binding."""
     z_grid = d["z_grid"]
-    delta = d["delta"]                              # (R,3,K)
+    delta = d["delta"]                              # (R, 3, K)
     out = {}
     for leg in legs:
-        core_z = np.zeros((leg.n_z, len(cache_k)))
+        core_z = np.zeros((leg.n_z, delta.shape[-1]))
         for iz, zz in enumerate(leg.z):
             sel = np.where(np.isclose(z_grid, zz, atol=0.05))[0]
             if sel.size == 0:
@@ -1402,9 +1252,23 @@ def _fiducial_dla_core_per_leg(d, legs, cache_k):
     return out
 
 
-# ============================================================================ #
-#  Mock-truth construction:  held-out-sim P1D → leg grids.
-# ============================================================================ #
+def _assert_bins_inside_modes(legs, k_com_hmpc, theta_unit_lo, theta_unit_hi):
+    """Build-time refusal: every KEPT bin (finite P_data) of every leg must lie inside [k_skm,1, k_skm,K](z) for EVERY
+    theta in the sampling box [lo, hi] (worst case at the box's Omega_m corners; kcoord.kbounds_over_box)."""
+    for leg in legs:
+        keep = np.isfinite(np.asarray(leg.P_data))
+        for iz, zz in enumerate(leg.z):
+            rows = np.where((np.asarray(leg.z_idx) == iz) & keep)[0]
+            if rows.size == 0:
+                continue
+            k1_max, kK_min = KC.kbounds_over_box(k_com_hmpc, float(zz), theta_unit_lo, theta_unit_hi)
+            k = np.asarray(leg.k)[rows]
+            if k.min() < k1_max or k.max() > kK_min:
+                raise ValueError(f"leg {leg.name} z={float(zz):.2f}: kept bins [{k.min():.4g}, {k.max():.4g}] s/km fall "
+                                 f"outside the simulated modes [{k1_max:.4g}, {kK_min:.4g}] for some theta in the "
+                                 "sampling box (the forward never extrapolates)")
+
+
 def held_out_sims(d, fold=0):
     """The fold-0 held-out validation SIMS (the production model final_fold0 never saw).
     Returns the sorted unique sim names in the val split."""
@@ -1453,202 +1317,16 @@ def held_hr_set(d, hr_sim_names, fold=0, target_hr_sim=None):
     return set(s for s in decoded_sims if s in hr_sims)
 
 
-def make_truth_from_sim(d, sim_name, fold=0, tau0_anchor="priya", mf=None, lls_truth_boost=1.0):
-    """Assemble a multi-z SIM-TRUTH from one held-out sim's cache rows.
-
-    The truth P1D per z is the cache's MEASURED contaminated power at α=w_c (the sim's own
-    contamination): ``P_obs_true = Σ_c coef_c·P_cls_c`` with coef=[1−Σw, w_LLS, w_sub, w_DLA],
-    P_cls = cache P_filt (+ the per-row DLA core on the DLA class) — EXACTLY the held-out
-    residual construction in scripts/diag_cemu_validation.py (NOT an emulator prediction).
-
-    ``mf`` (opt-in, default None → LF-resolution truth): a ``MultiFidelity`` (eval grid ==
-    cache grid). When set, the SAME fixed per-class MF correction ``exp(g + log res_corr)``
-    the FORWARD applies is applied to the truth P_filt at each row's (θ, z, τ₀) BEFORE the
-    clean+excess combination — the GATE INVARIANT (scripts/diag_emu_bias_allfolds_mf.py
-    §emu_bias_one_sim): a θ-blind correction applied to BOTH forward and truth cancels in ΔP
-    up to its (zero) θ-dependence, so the closure n_s/A_p bias is unchanged by construction.
-    The mock is then an MF-resolution draw, matching "re-run the closure through the MF
-    forward" — NOT a forward-vs-truth resolution mismatch.
-
-    The LF cache stores MULTIPLE τ₀-ladder (mean-flux rescale) rows per (sim, z). For one
-    mock we need ONE (P1D, τ₀) per z; we select, per z, the single ladder row whose τ₀ is
-    CLOSEST to the production observational anchor (``tau0_anchor="becker13"`` ⟨τ_eff⟩(z) —
-    the interior-τ₀ regime the data actually visits, plan A1 PRIMARY). This makes the mock a
-    realistic interior-regime draw, not a ladder extreme. ``tau0_anchor=None`` keeps the
-    central (median-τ₀) ladder row instead. ``tau0_anchor="extreme_hi"`` /``"extreme_lo"``
-    select the most-/least-absorption ladder RUNG (max/min τ₀) — the STEP-A M2 probe of the
-    ladder extreme where the τ₀×cosmology interaction (and the emulator residual) is hardest.
-
-    Pools the sim's rows over z (data range z∈[2.2,4.6], finite P_filt). Returns dict:
-      z          (nZs,)         the sim's available redshifts (ascending, one per z);
-      P_obs_true (nZs, K)       per-z DLA-MASKED baseline P1D on the cache grid: the
-                                contaminated Tier-P with the DLA class held at the CLEAN level
-                                (the τ=1e6-filtered + LLS/subDLA-contaminated forest, no DLA
-                                excess). The per-leg DLA residual is ADDED in make_legb_mock;
-      dla_excess_true (nZs, K)  the per-z FULL DLA excess add-back w_DLA·(P_DLA^unf − P_clean),
-                                P_DLA^unf = cache P_filt[DLA] + the DLA core. make_legb_mock adds
-                                TRUTH_DLA_FRAC[leg]·this to the baseline (DESI 0.10 / KS 0.0) —
-                                the §0c per-leg unmasked-DLA residual in the TARGET MOCK;
-      params_unit (9,)          the truth θ (unit-cube; same for all the sim's rows);
-      tau0       (nZs,)         the truth τ₀(z) (cache tau0 = −ln⟨F⟩, the selected ladder row);
-      dla_core   (nZs, K)       the per-z DLA core (cache delta[,2]); used by the FORWARD's DLA
-                                excess template (and the dla_excess_true add-back above);
-      w_c        (3,)           the sim's structural α=w_c (its own contamination, z-mean).
-    """
-    sim_name = str(sim_name)
-    _tr, va, _ho = make_splits(d, fold)
-    names = np.asarray(d["sim_name"])
-    rows = va[names[va] == sim_name]
-    z_grid = d["z_grid"]
-    P_filt = d["P_filt"]                            # (R,4,K)
-    delta = d["delta"]                              # (R,3,K)
-    w_c = d["w_c_cache"]                            # (R,4)
-    tau0_all = d["tau0"]
-    params_unit = d["params_unit"]
-
-    # in-range, finite rows of this sim.
-    cand = [int(r) for r in rows
-            if (2.2 - 1e-6 <= z_grid[r] <= 4.6 + 1e-6) and np.isfinite(P_filt[r]).all()]
-    if not cand:
-        raise ValueError(f"sim {sim_name!r} has no in-range finite rows")
-
-    # per z, select ONE ladder row: the τ₀ closest to the production anchor (interior regime).
-    cand = np.array(cand)
-    z_of = np.round(z_grid[cand], 4)
-    keep_rows = []
-    for zz in np.unique(z_of):
-        sub = cand[z_of == zz]
-        if isinstance(tau0_anchor, (tuple, list)):   # PRIYA-curve anchor (tau0_amp, dτ₀)
-            amp_t, dt_t = float(tau0_anchor[0]), float(tau0_anchor[1])
-            target = float(tau0_alpha_priya(jnp.asarray(float(zz)), amp_t, dt_t)
-                           * _kim(jnp.asarray(float(zz))))
-            pick = sub[int(np.argmin(np.abs(tau0_all[sub] - target)))]
-        elif tau0_anchor == "priya":                 # PRIYA central curve τ₀=1,dτ₀=0 (=Kim) — the
-            target = float(_kim(jnp.asarray(float(zz))))   # default for the PRIYA 2-param model
-            pick = sub[int(np.argmin(np.abs(tau0_all[sub] - target)))]
-        elif tau0_anchor == "becker13":
-            target = float(becker13_tau0(jnp.asarray(float(zz))))
-            pick = sub[int(np.argmin(np.abs(tau0_all[sub] - target)))]
-        elif tau0_anchor == "extreme_hi":            # most-absorption ladder rung (max τ₀)
-            pick = sub[int(np.argmax(tau0_all[sub]))]
-        elif tau0_anchor == "extreme_lo":            # least-absorption ladder rung (min τ₀)
-            pick = sub[int(np.argmin(tau0_all[sub]))]
-        else:                                        # central (median-τ₀) ladder row
-            pick = sub[int(np.argmin(np.abs(tau0_all[sub] - np.median(tau0_all[sub]))))]
-        keep_rows.append(int(pick))
-    keep_rows = np.array(sorted(keep_rows, key=lambda r: z_grid[r]))
-
-    z = z_grid[keep_rows]
-    K = P_filt.shape[-1]
-    P_obs = np.zeros((len(keep_rows), K))
-    dla_excess = np.zeros((len(keep_rows), K))
-    dla_core = np.zeros((len(keep_rows), K))
-    th_truth = jnp.asarray(params_unit[keep_rows[0]])
-    z_unit_rows = (z_grid[keep_rows] - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
-    for i, r in enumerate(keep_rows):
-        a = np.asarray(w_c[r, 1:], dtype=float).copy()  # (3,) [LLS,sub,DLA] the sim's contamination
-        a[0] = a[0] * lls_truth_boost                # inject a survey-level LLS excess into the MOCK
-        coef = np.concatenate([[1.0 - a.sum()], a])  # (4,) clean fraction drops as LLS rises
-        core_r = delta[r, 2]                         # (K,) DLA core (forward template + excess add-back)
-        if mf is None:
-            corr = np.ones((4, K))                    # LF-resolution truth (no correction)
-        else:
-            # GATE INVARIANT: the SAME fixed per-class MF factor exp(g + log res_corr) the
-            # forward applies, at this row's (θ, z, τ₀). The per-class P_filt correction
-            # mirrors _excess_from_P_filt / _predict_P_obs_mf so the truth is reproduced when
-            # θ→truth in the MF forward.
-            corr = np.asarray(jnp.exp(DL._mf_corr_on_cache(
-                mf, th_truth, jnp.asarray(float(z_unit_rows[i])),
-                jnp.asarray(float(tau0_all[r])))))    # (4, K)
-        # §0c DLA handling (PI-confirmed final intent 2026-06-09): the DLA-finder masking is
-        # INCOMPLETE (misses ~10%). The closure TARGET MOCK carries the unmasked-DLA residual.
-        # We build TWO pieces here: (1) the DLA-MASKED baseline (the DLA class held at the CLEAN
-        # level — the τ=1e6-filtered + LLS/subDLA-contaminated forest, NO DLA excess), and (2)
-        # the FULL DLA excess add-back w_DLA·(P_DLA^unf − P_clean), P_DLA^unf = P_filt[DLA]+core.
-        # make_legb_mock then adds TRUTH_DLA_FRAC[leg]·excess to the baseline per leg (DESI 0.10,
-        # KS 0.0) — i.e. DESI's target retains 10% of the full DLA systems the finder misses,
-        # KS's target none. The forward marginalizes α_DLA over this (the closure asks: does
-        # HCD-marginalization recover cosmology DESPITE the DLA residual?).
-        P_clean_corr = P_filt[r, 0] * corr[0]
-        P_cls = np.stack([P_clean_corr, P_filt[r, 1] * corr[1],
-                          P_filt[r, 2] * corr[2], P_clean_corr])   # DLA class → clean (masked baseline)
-        P_obs[i] = np.einsum("c,ck->k", coef, P_cls)
-        # full DLA excess: w_DLA·(P_DLA^unf − P_clean), P_DLA^unf = P_filt[DLA]·corr + core.
-        P_dla_unf = P_filt[r, 3] * corr[3] + core_r
-        dla_excess[i] = a[2] * (P_dla_unf - P_clean_corr)
-        dla_core[i] = core_r
-    # the truth PRIYA (amp, dτ₀): best-fit of the selected per-z τ₀(z) in the α=τ₀/Kim coord —
-    # the closure bias-z for the mean flux is computed against these (the forward samples
-    # tau0_amp/dtau0; for a "priya"/tuple anchor these recover the requested curve to the
-    # ladder-discretization floor, the self-consistency the 13-rung→2-param swap requires).
-    _alpha_sel = tau0_all[keep_rows] / np.asarray(_kim(jnp.asarray(z)))
-    tau0_amp_true, dtau0_true = fit_tau0_alpha_priya(np.asarray(z), _alpha_sel)
-    # PER-Z structural w_c (nZs,3) [LLS,sub,DLA] — the Z-RESOLVED truth incidence the z-flat ``w_c``
-    # (z-median, below) drops. Used to build the z-resolved truth alpha for the SBC loglik-rank
-    # re-scoring (make_legb_mock → truth_pack['alpha_hcd_z']); the LLS column carries the same
-    # lls_truth_boost the z-median does (matches make_truth_from_sim's per-row a[0] boost above).
-    w_c_z = np.asarray(w_c[keep_rows, 1:], float).copy()
-    w_c_z[:, 0] = w_c_z[:, 0] * lls_truth_boost
-    return dict(
-        z=z, P_obs_true=P_obs, dla_excess_true=dla_excess,
-        params_unit=params_unit[keep_rows[0]],
-        tau0=tau0_all[keep_rows], dla_core=dla_core,
-        tau0_amp=tau0_amp_true, dtau0=dtau0_true,
-        w_c=np.median(w_c[keep_rows, 1:], axis=0) * np.array([lls_truth_boost, 1.0, 1.0]),
-        w_c_z=w_c_z, rows=keep_rows)
+def make_truth_from_sim(*args, **kwargs):
+    """The pre-2026-10 held-out truth builder. Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
+    own stored grid (GATE_E_SPEC v1 section 2)."""
+    raise NotImplementedError("make_truth_from_sim: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
 
 
-def make_hr_truth_from_cache(sim_name, target_k, *, tau0_anchor="priya"):
-    """Genuine HF-LOSO truth: a held-out HR sim's REAL measured P1D (HR resolution, NO MF
-    correction), built like ``make_truth_from_sim`` but read DIRECTLY from the HR cache and
-    interpolated onto ``target_k`` (= the LF cache grid the forward evaluates on). The forward
-    (LF emulator × the MF correction fit EXCLUDING this sim) is then compared to this real HR truth
-    — the integrated (in-the-inference) version of the forward-only MF-LOSO. Same dict contract as
-    ``make_truth_from_sim`` so ``make_legb_mock`` consumes it unchanged."""
-    from hcd_analysis.emulator import multifidelity as MF
-    d = MF.load_cache(MF.HR_CACHE)
-    sim_name = str(sim_name)
-    names = np.array([s.decode() if isinstance(s, bytes) else s for s in d["sim_name"]])
-    z_grid = d["z_grid"]; P_filt = d["P_filt"]; delta = d["delta"]; w_c = d["w_c_cache"]
-    tau0_all = d["tau0"]; params_unit = d["params_unit"]; kf = d["kfkms"]
-    rows = np.where(names == sim_name)[0]
-    cand = np.array([int(r) for r in rows
-                     if (2.2 - 1e-6 <= z_grid[r] <= 4.6 + 1e-6) and np.isfinite(P_filt[r]).all()])
-    if cand.size == 0:
-        raise ValueError(f"HR sim {sim_name!r} has no in-range finite rows in the HR cache")
-    z_of = np.round(z_grid[cand], 4)
-    keep_rows = []
-    for zz in np.unique(z_of):                       # one ladder row per z (the τ₀-anchor)
-        sub = cand[z_of == zz]
-        if isinstance(tau0_anchor, (tuple, list)):
-            amp_t, dt_t = float(tau0_anchor[0]), float(tau0_anchor[1])
-            target = float(tau0_alpha_priya(jnp.asarray(float(zz)), amp_t, dt_t) * _kim(jnp.asarray(float(zz))))
-        elif tau0_anchor == "becker13":
-            target = float(becker13_tau0(jnp.asarray(float(zz))))
-        else:                                         # "priya" (Kim central) default
-            target = float(_kim(jnp.asarray(float(zz))))
-        keep_rows.append(int(sub[int(np.argmin(np.abs(tau0_all[sub] - target)))]))
-    keep_rows = np.array(sorted(keep_rows, key=lambda r: z_grid[r]))
-    z = z_grid[keep_rows]; tk = np.asarray(target_k, dtype=float)
-    P_obs = np.zeros((len(keep_rows), tk.size)); dla_excess = np.zeros_like(P_obs); dla_core = np.zeros_like(P_obs)
-    for i, r in enumerate(keep_rows):
-        a = np.asarray(w_c[r, 1:], dtype=float)       # HR sim's own contamination (no boost)
-        coef = np.concatenate([[1.0 - a.sum()], a])
-        Pc = P_filt[r, 0]                             # REAL HR clean (corr = 1; this IS the truth)
-        P_cls = np.stack([Pc, P_filt[r, 1], P_filt[r, 2], Pc])     # DLA-masked baseline
-        P_obs_hr = np.einsum("c,ck->k", coef, P_cls)
-        dexc_hr = a[2] * ((P_filt[r, 3] + delta[r, 2]) - Pc)       # full DLA excess
-        kr = np.asarray(kf[r]); ok = np.isfinite(P_obs_hr) & (kr > 0)
-        P_obs[i] = np.interp(tk, kr[ok], P_obs_hr[ok])            # HR grid (525) -> LF forward grid
-        dla_excess[i] = np.interp(tk, kr[ok], dexc_hr[ok])
-        dla_core[i] = np.interp(tk, kr[ok], np.asarray(delta[r, 2])[ok])
-    _alpha_sel = tau0_all[keep_rows] / np.asarray(_kim(jnp.asarray(z)))
-    tau0_amp_true, dtau0_true = fit_tau0_alpha_priya(np.asarray(z), _alpha_sel)
-    return dict(
-        z=z, P_obs_true=P_obs, dla_excess_true=dla_excess,
-        params_unit=params_unit[keep_rows[0]], tau0=tau0_all[keep_rows], dla_core=dla_core,
-        tau0_amp=tau0_amp_true, dtau0=dtau0_true,
-        w_c=np.median(w_c[keep_rows, 1:], axis=0), rows=keep_rows)
+def make_hr_truth_from_cache(*args, **kwargs):
+    """The pre-2026-10 HR truth builder (target_k = one grid). Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
+    own stored grid (GATE_E_SPEC v1 section 2)."""
+    raise NotImplementedError("make_hr_truth_from_cache: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
 
 
 def _chol_jitter(C, jitter=1e-10):
@@ -1750,157 +1428,12 @@ def _resolve_res_instr_inject(inject_resolution, leg):
     raise KeyError(f"inject_resolution: unrecognized spec keys {sorted(inject_resolution)}")
 
 
-def make_legb_mock(ctx: LegBCtx, truth_sim, key, *, inject_a_siiii=0.0, inject_res_corr=None):
-    """PRE-2026-10 INTERFACE (binds the truth with the same single ctx.cache_k grid as the forward, so the mock
-    shares the forward's coordinate; replaced at gate F by truth on each simulation's own stored grid).
-
-    Build a Leg-B mock from a sim-truth: interpolate the sim-truth P1D onto each leg's k,
-    draw ε ~ N(0, C_data) (cosmic-ONLY) per leg, ``mock = truth_on_leg + ε``.
-
-    ``inject_a_siiii`` > 0 multiplies the truth-on-leg by the SiIII metal factor (the SAME
-    ``_metal_factor`` the forward uses) on metals_on legs BEFORE noise — the SiIII-injection cert
-    arm (a forward with ``sample_metals`` should then absorb it into a_SiIII with no n_s/A_p leak).
-
-    ``inject_res_corr`` (default ``None`` ⇒ byte-identical no-op) injects an OUT-OF-SPAN res_corr
-    misspecification into the leg-binned TRUTH ONLY (TASK-1.6, spec §4.2): a per-leg log-res_corr
-    perturbation ``b`` (on the leg k-grid) applied as ``P_truth_on_leg *= exp(b)`` at the SAME point
-    ``inject_a_siiii`` multiplies (AFTER SiIII, BEFORE the cosmic-noise draw). It is the
-    misspecification the marginalized ``alpha_res`` must absorb; it has a SEPARATE injection
-    strength from the sampled ``alpha_res`` and NEVER touches the forward (so it does not cancel in
-    a closure). See ``_resolve_res_corr_inject`` for the accepted spec forms.
-
-    MOCK-TRUTH → LEG mapping (documented choice): the sim has one z per cache row. For each
-    leg z-bin we NEAREST-Z map to the sim's available z (the cache z grid is Δz=0.2, and the
-    survey z-bins fall within ~0.1 of a cache z) and interpolate that z's sim-truth P1D from
-    the cache k onto the leg's k (jnp.interp, the SAME binding the model uses). If a leg z is
-    farther than ``z_tol`` from any sim z, that z's rows are DROPPED for this mock (set NaN →
-    excluded from the likelihood via the data being absent). The truth θ-vector is the sim's
-    params_unit + the per-leg-z τ₀ (nearest-z mapped onto the GLOBAL z grid) + the sim's w_c.
-
-    Returns ``(mock_legs, truth_pack, info)``:
-      mock_legs  — copies of ctx.legs with P_data := the noisy mock (kept-z rows only);
-      truth_pack — dict(theta9, tau0_global (on z_global), alpha_hcd, kept_global_z (bool));
-      info       — dict(key, per-leg dropped-z, the sim z used, the noiseless truth_on_leg).
-
-    PER-LEG DLA RESIDUAL (§0c, PI-confirmed final intent 2026-06-09): the truth-on-leg is the
-    DLA-MASKED baseline ``P_obs_true`` PLUS ``TRUTH_DLA_FRAC[leg.name]``·``dla_excess_true`` (the
-    full DLA excess). DESI carries 0.10·excess (the ~10% the DLA finder misses → full systems
-    remain); KS carries 0% (KS fully masks DLAs). The forward marginalizes α_DLA over this
-    residual (DataLeg.dla_forward_frac scales the forward DLA term per leg: DESI 1.0 / KS 0.0).
-    """
-    z_sim = np.asarray(truth_sim["z"])
-    P_sim = np.asarray(truth_sim["P_obs_true"])         # (nZs, K) masked baseline
-    dla_excess_sim = np.asarray(truth_sim["dla_excess_true"])  # (nZs, K) full DLA excess
-    tau0_sim = np.asarray(truth_sim["tau0"])
-    cache_k = np.asarray(ctx.cache_k)
-    z_tol = 0.15                                    # nearest-z map tolerance (cache Δz=0.2)
-
-    keys = jax.random.split(key, len(ctx.legs))
-    mock_legs = []
-    dropped = {}
-    truth_on_leg_out = {}
-    for li, leg in enumerate(ctx.legs):
-        N = leg.k.shape[0]
-        P_mock = np.array(leg.P_data, float).copy()
-        keep_row = np.zeros(N, bool)
-        drop_z = []
-        # the per-leg DLA-residual fraction for the TARGET MOCK (DESI 0.10 / KS 0.0); default 0.0
-        # for any unrecognised leg (no DLA residual added unless explicitly DESI).
-        truth_frac = float(TRUTH_DLA_FRAC.get(leg.name, 0.0))
-        # build the truth-on-leg per z = masked baseline + truth_frac·(full DLA excess), then add
-        # cosmic noise over the kept rows.
-        P_truth_on_leg = np.full(N, np.nan)
-        for iz in range(leg.n_z):
-            zz = float(leg.z[iz])
-            j = int(np.argmin(np.abs(z_sim - zz)))
-            if abs(z_sim[j] - zz) > z_tol:
-                drop_z.append(zz)
-                continue
-            rows = np.where(np.asarray(leg.z_idx) == iz)[0]
-            k_sub = np.asarray(leg.k)[rows]
-            # per-leg target P1D on the cache grid: masked baseline + the leg's DLA residual.
-            P_target_cache = P_sim[j] + truth_frac * dla_excess_sim[j]
-            P_truth_on_leg[rows] = np.asarray(
-                jnp.interp(jnp.asarray(k_sub), jnp.asarray(cache_k), jnp.asarray(P_target_cache)))
-            keep_row[rows] = True
-        # SiIII injection (cert arm): multiply the truth by the McDonald SiIII factor on metals_on
-        # legs, with the SAME _metal_factor the forward uses (so a_SiIII can absorb it exactly).
-        if inject_a_siiii > 0 and leg.metals_on:
-            mfac = np.asarray(DL._metal_factor(jnp.asarray(leg.k), a_SiIII=float(inject_a_siiii)))
-            P_truth_on_leg = np.where(np.isfinite(P_truth_on_leg), P_truth_on_leg * mfac, P_truth_on_leg)
-        # res_corr injection (TASK-1.6 cert arm): multiply the leg-binned truth by exp(b_leg), the
-        # OUT-OF-SPAN log-res_corr misspecification on the leg k-grid (same flat z-major order as
-        # leg.k). TRUTH-ONLY — the forward never sees it, so it cannot cancel in a closure. Applied
-        # AFTER the SiIII inject, BEFORE the noise draw, on the finite (kept) rows only.
-        b_inj = _resolve_res_corr_inject(inject_res_corr, leg.name, N)
-        if b_inj is not None:
-            efac = np.exp(b_inj)
-            P_truth_on_leg = np.where(np.isfinite(P_truth_on_leg), P_truth_on_leg * efac, P_truth_on_leg)
-        dropped[leg.name] = drop_z
-        truth_on_leg_out[leg.name] = P_truth_on_leg.copy()
-
-        # ε ~ N(0, C_data) over the KEPT rows (cosmic-only; jittered Cholesky).
-        if keep_row.any():
-            kr = np.where(keep_row)[0]
-            Cd = jnp.asarray(leg.C_data[np.ix_(kr, kr)])
-            L = _chol_jitter(Cd)
-            g = jax.random.normal(keys[li], (kr.size,))
-            eps = np.asarray(jnp.einsum("ij,j->i", L, g))
-            P_mock[kr] = P_truth_on_leg[kr] + eps
-        # dropped-z rows → NaN (the likelihood NaN-sanitises; here we keep the data value but
-        # the driver restricts to the kept rows when building the per-mock legs below).
-        P_mock[~keep_row] = np.nan
-
-        mock_legs.append(leg._replace(P_data=P_mock))
-
-    # truth on the GLOBAL z grid: nearest-z map the sim τ₀ onto z_global (drop z with no sim).
-    zg = np.asarray(ctx.z_global)
-    tau0_global = np.zeros(len(zg))
-    kept_global = np.zeros(len(zg), bool)
-    for i, zz in enumerate(zg):
-        j = int(np.argmin(np.abs(z_sim - zz)))
-        if abs(z_sim[j] - zz) <= z_tol:
-            tau0_global[i] = tau0_sim[j]
-            kept_global[i] = True
-        else:
-            tau0_global[i] = float(becker13_tau0(jnp.asarray(zz)))  # placeholder (unused: no data there)
-    # truth α: LLS/subDLA = the sim's structural w_c (the real residual the closure marginalizes).
-    # DLA = TRUTH_DLA_FRAC["DESI"]·w_DLA = 0.10·w_DLA — the §0c per-leg DLA residual the forward
-    # marginalizes over (PI-confirmed final intent 2026-06-09). The DESI target carries 0.10·(full
-    # DLA excess) and the DESI forward DLA term is live (dla_forward_frac=1.0), so at θ→truth the
-    # consistency point is α_DLA = 0.10·w_DLA. (On KS the target carries 0% AND the forward DLA
-    # term is 0, so the KS leg is α_DLA-blind — consistent for any α_DLA.) The α_DLA prior is
-    # centered on this 10% residual (HCD_DLA_RESIDUAL_FRAC=0.10) and is MARGINALIZED (sampled).
-    alpha_truth = np.asarray(truth_sim["w_c"]).copy()             # (3,) [LLS,sub,DLA] z-MEDIAN pivot
-    alpha_truth[2] = TRUTH_DLA_FRAC["DESI"] * alpha_truth[2]      # 0.10·w_DLA (the DESI residual)
-    # Z-RESOLVED truth alpha (nZg,3) for the SBC loglik-rank re-scoring (ll_true): the mock
-    # truth-on-leg uses the per-z sim P1D (z-resolved contamination), so re-scoring with a z-FLAT
-    # alpha produces a spurious z-ramp. Map the per-z sim w_c (``truth_sim['w_c_z']``, nearest-z onto
-    # z_global) and apply the SAME §0c DLA 10% residual scaling to the DLA column as the z-flat
-    # pivot above. Dropped-z rows (no sim z within z_tol) fall back to the z-median pivot (they carry
-    # NO data so they never affect the likelihood). Matches scripts/diag_legb_zresolved_alpha_check.
-    if truth_sim.get("w_c_z") is not None:
-        w_c_z = np.asarray(truth_sim["w_c_z"], float)            # (nZs,3) per-z structural w_c
-        alpha_hcd_z = np.tile(alpha_truth, (len(zg), 1))        # (nZg,3) default = z-median pivot
-        for i, zz in enumerate(zg):
-            j = int(np.argmin(np.abs(z_sim - zz)))
-            if abs(z_sim[j] - zz) <= z_tol:
-                az = w_c_z[j].copy()
-                az[2] = TRUTH_DLA_FRAC["DESI"] * az[2]           # 0.10·w_DLA(z) (the per-z residual)
-                alpha_hcd_z[i] = az
-    else:
-        alpha_hcd_z = np.tile(alpha_truth, (len(zg), 1))
-    truth_pack = dict(
-        theta9=np.asarray(truth_sim["params_unit"]),
-        tau0_global=tau0_global, alpha_hcd=alpha_truth, alpha_hcd_z=alpha_hcd_z,
-        kept_global_z=kept_global)
-    info = dict(key=key, dropped=dropped, z_sim=z_sim, truth_on_leg=truth_on_leg_out)
-    return mock_legs, truth_pack, info
+def make_legb_mock(*args, **kwargs):
+    """The pre-2026-10 held-out-simulation mock builder. Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
+    own stored grid (GATE_E_SPEC v1 section 2)."""
+    raise NotImplementedError("make_legb_mock: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
 
 
-# ============================================================================ #
-#  Leg-A (rank-uniformity SBC) on the leg grids — draw truth from the PRIOR, matched-C self-draw.
-# ============================================================================ #
 def draw_leg_a_leg_truth(ctx: LegBCtx, key):
     """Draw a Leg-A truth from the legb PRIORS for a rank-uniformity SBC on the leg grids.
 
@@ -2194,278 +1727,73 @@ def _check_single_instrument_for_res(legs, sample_res):
             "(f_res_amp_desi/f_res_amp_eboss) before a joint fit.")
 
 
-def make_leg_a_legmock(ctx: LegBCtx, dla_core_per_leg, truth_pack, key, *,
-                       inject_metal_misspec=None, inject_resolution=None):
-    """PRE-2026-10 INTERFACE (forward-models the truth with ctx.cache_k; replaced at gate F).
-
-    Leg-A self-draw on the leg grids: forward-model the prior-drawn truth on each leg with the
-    SAME ``predict_P_obs_on_leg`` the likelihood uses, then add ε ~ N(0, C_total(truth)) over ALL
-    rows. C_mock ≡ C_like AND the noiseless mock == P_model(truth) → the rank-uniformity null is
-    EXACT (Talts+2018). Returns ``(mock_legs, info)``; ``info['chol'][leg]`` /
-    ``info['truth_on_leg'][leg]`` per leg.
-
-    DATA-NUISANCE INJECTION (the bias gate; default None ⇒ byte-identical to the clean self-draw):
-    when set, the contaminant multiplies the NOISELESS ``P_model`` BEFORE the ε draw (mirroring
-    make_legb_mock's SiIII inject at line 772), so the recorded ``truth_on_leg`` and the mock both
-    carry it but the FORWARD likelihood (which the gate keeps clean of the unfittable mode) cannot.
-
-      ``inject_metal_misspec``: dict, e.g. {"form":"desi_full","f_SiIII":0.009,"f_SiII":0.004,
-        "f_SiII_SiII":0.002,...} forwarded as kwargs to ``metal_inject``. Applied ONLY on legs with
-        ``leg.metals_on`` (DESI/eBOSS), PER z-block: ⟨F⟩(z) from the truth τ₀ (``_meanflux_on_leg``)
-        feeds metal_inject on that z's rows. The desi_full form carries an ADDITIVE SiII–SiII term
-        the multiplicative forward _metal_factor STRUCTURALLY cannot fit (the bias probe).
-      ``inject_resolution``: dict, e.g. {"b_res":0.02} → multiply P_model by
-        ``_resolution_factor(k, R_z, b_res)`` per z-block on ALL legs (the production forward has
-        resolution_on=False so it cannot fit this distortion — the probe). R_z is the leg's own
-        per-z resolution scale (``leg.R_z``)."""
-    metal_kw = dict(inject_metal_misspec) if inject_metal_misspec else None
-    _check_resolution_injectable(ctx.legs, active=(inject_resolution is not None))  # RAISE on a stray non-resolution_ready leg (e.g. KS)
-    zg = np.asarray(ctx.z_global)
-    theta9 = jnp.asarray(truth_pack["theta9"])
-    tau0_global = jnp.asarray(truth_pack["tau0_global"])
-    alpha_hcd_z = jnp.asarray(truth_pack["alpha_hcd_z"])
-    a_siiii = float(truth_pack.get("a_siiii", 0.0))
-    # OPTION A (PI #9 decision 3, condition 2): the self-drawn metal node truths, forwarded into
-    # the mock through the SAME predict_P_obs_on_leg kwargs the fit uses in _data_loglik_legcore,
-    # so mock and likelihood apply metals via one code path. None (default) ⇒ no metal kwargs are
-    # passed at all, i.e. the historical call, byte-identical.
-    metal_truth_nodes = truth_pack.get("metal_nodes")
-    # OPTION A scope expansion (PI #9): the self-drawn b_res(z) truth on z_global. Sliced per leg
-    # with the SAME nearest-z `sel` the fit uses in _data_loglik_legcore, then passed through the
-    # SAME b_res_vec kwarg. None (default) ⇒ no b_res kwarg at all, i.e. the historical call.
-    b_res_truth_global = truth_pack.get("b_res_global")
-    keys = jax.random.split(key, len(ctx.legs))
-    mock_legs, chol_out, truth_on_leg_out = [], {}, {}
-    for li, leg in enumerate(ctx.legs):
-        sel = jnp.asarray([int(np.argmin(np.abs(zg - zz))) for zz in leg.z])
-        szb = ctx.sigma_zb_per_leg.get(leg.name) if ctx.sigma_zb_per_leg else None
-        rzb = ctx.rho_zb_per_leg.get(leg.name) if ctx.rho_zb_per_leg else None
-        msc = (ctx.mf_shape_per_leg.get(leg.name)
-               if getattr(ctx, "mf_shape_per_leg", None) is not None else None)
-        mec = (ctx.mf_emucoh_per_leg.get(leg.name)
-               if getattr(ctx, "mf_emucoh_per_leg", None) is not None else None)
-        # OPTION A: per-leg metal node kwargs, EMPTY unless the self-draw truth carries nodes, so
-        # the default call site is textually the historical one (byte-identical). A leg absent
-        # from the dict (e.g. metals-off KS) yields all-None, the scalar path, exactly as the fit's
-        # `metal_nodes.get(leg.name, (None, None, None, None))` does.
-        _mkw = {}
-        if metal_truth_nodes is not None:
-            _f3, _f2, _k3, _k2 = metal_truth_nodes.get(leg.name, (None, None, None, None))
-            _mkw = dict(f_SiIII_nodes=_f3, f_SiII_nodes=_f2,
-                        k_SiIII_nodes=_k3, k_SiII_nodes=_k2,
-                        metal_node_z=getattr(ctx, "metal_node_z", (2.2, 4.2)))
-        if b_res_truth_global is not None:
-            _mkw["b_res_vec"] = np.asarray(b_res_truth_global, float)[np.asarray(sel)]
-        P_model, C_total = DL.predict_P_obs_on_leg(
-            ctx.model, theta9, tau0_global[sel], alpha_hcd_z[sel], pf_stats=ctx.pf_stats,
-            dla_core=dla_core_per_leg[leg.name], cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
-            alpha_centres=ctx.alpha_centres, a_SiIII=a_siiii, cemu_inflate=ctx.cemu_inflate,
-            **_mkw,
-            rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor,
-            mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
-            mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
-            mf_emucoh_offdiag_only=getattr(ctx, "mf_emucoh_offdiag_only", False))
-        P_model = np.array(P_model, float)                     # host (writable): nuisance injection
-        # DATA-NUISANCE INJECTION (default OFF). Multiply the noiseless P_model by the host
-        # contaminant BEFORE the ε draw, per z-block (mirrors make_legb_mock's per-z loop).
-        if metal_kw is not None and leg.metals_on:
-            Fbar = _meanflux_on_leg(ctx, leg, truth_pack)     # (n_z,) ⟨F⟩(z) from the truth τ₀
-            k_leg = np.asarray(leg.k)
-            z_idx = np.asarray(leg.z_idx)
-            _form = metal_kw.get("form")
-            for iz in range(leg.n_z):
-                rows = np.where(z_idx == iz)[0]
-                if rows.size == 0:
-                    continue
-                if _form == "zevo":
-                    # MODEL C+ metal_zevo arm (Arms 1/2): interpolate f per z and inject the IN-CLASS
-                    # contaminant via desi_full+cross on EVERY metals_on leg. legs in metal_siII_legs
-                    # carry the SiII doublet + the SiIII–SiII cross; other legs (eBOSS) set f_SiII=0 ⇒
-                    # SiIII-only with the SAME sigmoid decorrelation (4-lens fix (a): in-class, NOT the
-                    # undamped "eboss"). f_SiII_SiII=0; k_SiIII/k_SiII/r matched to the forward ⇒ the
-                    # Model C+ forward reproduces it exactly. a(z)=f(z)/(1−⟨F⟩(z)) (within-z; per the
-                    # f-nodes). De-double-count: the clean truth carries no metal (a_siiii=0).
-                    node_z = metal_kw.get("node_z", (2.2, 4.2))
-                    k3 = metal_kw.get("k_SiIII", DL.K_SiIII_DEFAULT)
-                    k2 = metal_kw.get("k_SiII", DL.K_SiII_DEFAULT)
-                    f3_z = float(_metal_f_of_z(float(leg.z[iz]), node_z, metal_kw["f_SiIII_nodes"]))
-                    if leg.name in tuple(ctx.metal_siII_legs):
-                        f2_z = float(_metal_f_of_z(float(leg.z[iz]), node_z, metal_kw["f_SiII_nodes"]))
-                    else:
-                        f2_z = 0.0                                 # SiIII-only legs (eBOSS): no doublet, no cross
-                    P_model[rows] = metal_inject(
-                        P_model[rows], k_leg[rows], float(Fbar[iz]), form="desi_full",
-                        f_SiIII=f3_z, f_SiII=f2_z, f_SiII_SiII=0.0,
-                        k_decorr=k3, k_SiII=k2, r_doublet=DL.R_SiII_DOUBLET, cross=True)
-                elif _form == "ma2025":
-                    # Arm 3 (Ma+2025 sim, OUT-of-class): SiIII-only DIRECT amplitude + Ma damping, per z.
-                    z = float(leg.z[iz])
-                    a_z = 0.014 * ((1.0 + z) / 4.0) ** 0.79
-                    kc_z = -1.58e-2 * ((1.0 + z) / 4.0) ** 1.15
-                    P_model[rows] = metal_inject(P_model[rows], k_leg[rows], float(Fbar[iz]),
-                                                 form="ma2025", a_SiIII_direct=a_z, k_cross=kc_z,
-                                                 damp="ma")
-                elif _form == "ma2025_gauss":
-                    # Arm 4 (OUT-of-class, 4-lens fix (b)): a survey-standard DECREASING-trend SiIII
-                    # metal a(z)=a0·((1+z)/4)^p (p<0) with a GAUSS damping exp(−(k/k_cross)²) the
-                    # sigmoid forward CANNOT reproduce. Direct amplitude, SiII OFF.
-                    z = float(leg.z[iz])
-                    a_z = float(metal_kw["a0"]) * ((1.0 + z) / 4.0) ** float(metal_kw["p"])
-                    P_model[rows] = metal_inject(P_model[rows], k_leg[rows], float(Fbar[iz]),
-                                                 form="ma2025", a_SiIII_direct=a_z,
-                                                 k_cross=float(metal_kw["k_cross"]), damp="gauss")
-                else:                                          # legacy forms (desi_full/eboss/…) — byte-exact
-                    P_model[rows] = metal_inject(P_model[rows], k_leg[rows], float(Fbar[iz]),
-                                                 **metal_kw)
-        _res_b, _res_vec = _resolve_res_instr_inject(inject_resolution, leg)
-        if _res_b is not None or _res_vec is not None:
-            k_leg = np.asarray(leg.k)
-            z_idx = np.asarray(leg.z_idx)
-            R_z = np.asarray(leg.R_z)
-            for iz in range(leg.n_z):
-                rows = np.where(z_idx == iz)[0]
-                if rows.size == 0:
-                    continue
-                b_res_iz = float(_res_vec[iz]) if _res_vec is not None else _res_b
-                fac = np.asarray(DL._resolution_factor(
-                    jnp.asarray(k_leg[rows]), float(R_z[iz]), b_res=b_res_iz))
-                P_model[rows] = P_model[rows] * fac
-        Lc = _chol_jitter(C_total)
-        g = jax.random.normal(keys[li], (leg.k.shape[0],))
-        eps = np.asarray(jnp.einsum("ij,j->i", Lc, g))
-        mock_legs.append(leg._replace(P_data=P_model + eps))
-        chol_out[leg.name] = np.asarray(Lc)
-        truth_on_leg_out[leg.name] = P_model.copy()
-    # 'dropped' (empty per leg — Leg-A keeps every z) matches make_legb_mock's info contract,
-    # which run_legb reads when building the per-mock record.
-    return mock_legs, dict(key=key, chol=chol_out, truth_on_leg=truth_on_leg_out,
-                           dropped={leg.name: [] for leg in ctx.legs})
+def make_leg_a_legmock(*args, **kwargs):
+    """The pre-2026-10 Leg-A self-draw mock builder. Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
+    own stored grid (GATE_E_SPEC v1 section 2)."""
+    raise NotImplementedError("make_leg_a_legmock: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
 
 
 # ============================================================================ #
-#  numpyro adapter: the same priors as sampler_numpyro, factor = a multi-leg loglik.
-#
-#  ``data_likelihood.data_loglik`` takes ONE (K,) ``dla_core`` shared across legs/z. The
-#  Leg-B truth core is per-leg-z (the held-out sim's own DLA delta), so we use a thin
-#  per-leg wrapper (``_data_loglik_legcore``) that calls ``predict_P_obs_on_leg`` per leg
-#  with that leg's own core. The PRIORS are identical to ``sampler_numpyro.numpyro_model``
-#  (θ~Uniform^9 + auto-bijector; τ₀ in the α-ladder coord on the GLOBAL z grid;
-#  α_lls/subdla~Normal, α_dla~softplus(Normal)). The public ``data_loglik`` signature is
-#  untouched (back-compat); this wrapper only differs by the per-leg core + the kept-row
-#  restriction (dropped-z mock rows are NaN and carry no info).
+#  numpyro adapter: the same priors as sampler_numpyro, factor = the multi-leg log-likelihood on the gate E
+#  forward (forward.predict_leg per leg with that leg's own DLA core; kept rows only; bins outside the
+#  simulated modes refused).
 # ============================================================================ #
 def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs,
                          dla_core_per_leg, *, return_parts=False, a_siiii=0.0, a_siii=0.0,
-                         metal_nodes=None, alpha_res=None, b_res_global=None, require_zresolved=True):
-    """PRE-2026-10 INTERFACE (passes ctx.cache_k to the leg forward; replaced at gate E).
+                         metal_nodes=None, alpha_res=None, b_res_global=None, require_zresolved=True,
+                         return_aux=False):
+    """The log-likelihood of ``mock_legs`` under the gate E forward (``forward.predict_leg``): per leg, the model and
+    its total covariance on the canonical coordinate, the Gaussian on the kept (finite P_data) rows, summed over legs.
+    Any KEPT bin outside the simulated modes makes the result -inf (refusal; finite gradients because the binding
+    clamps); ``return_aux`` adds {"n_out": number of such kept bins}.
 
-    ``data_loglik`` but with a PER-LEG-Z dla_core (the mock's sim core). ``data_loglik``
-    takes ONE (K,) core; here each leg z uses its own, so we call ``predict_P_obs_on_leg``
-    per leg with that leg's core threaded through a per-z loop is overkill — instead we note
-    the core is z-binned inside the binding via ``leg.z_idx`` and the SAME core value is used
-    for every row of a z. ``data_loglik`` already loops z internally with a single core; to
-    keep the core matched (forward core == truth core, so it cancels in the emu-error sizing
-    and the truth P_obs is reproduced when θ→truth), we pass each leg its OWN (K,) core that
-    is the z-MEAN of that leg's per-z cores (a documented MVP — the per-z core variation is
-    tiny vs the P1D, and the DLA sector is un-certified by Leg B without arm A3 anyway).
-
-    ``alpha_hcd`` is dict-OR-array (2026-07-20 joint mode): the legacy (3,) z-flat broadcast /
-    (n_zg,3) z-resolved ARRAY (shared across legs), or a PER-LEG DICT ``{leg.name: (n_zg,3)}``
-    (per-leg alpha sites; keys asserted == the leg set both ways; each entry must be z-resolved
-    under ``require_zresolved``). The dict branch tests isinstance BEFORE any np.ndim call
-    (np.ndim(dict)==0 would silently mistreat it).
-
-    ``metal_nodes`` (MODEL C+, default None → the legacy scalar a_siiii/a_siii path): a dict
-    ``{leg.name: (f3_nodes (2,), f2_nodes (2,)|None, k3_nodes (2,), k2_nodes (2,)|None)}`` of the
-    per-leg metal f-nodes (amplitude) AND k-nodes (decorrelation scale). Per leg the matching nodes
-    are forwarded into ``predict_P_obs_on_leg`` (per-z a(z)=f(z)/(1−⟨F⟩(z)) + per-z k(z) + the
-    SiIII–SiII cross). None (and a leg absent from the dict) ⇒ the scalar a_siiii/a_siii path
-    (byte-exact).
-
-    ``alpha_res`` (Task 1.3): the sampled res_corr-amplitude ``(alpha0, s)`` tuple, threaded
-    FORWARD-ONLY into ``predict_P_obs_on_leg`` (it scales ``log res_corr`` by α(z) in the MF
-    forward). ``None`` (default) ⇒ α≡1 ⇒ byte-exact back-compat. The TRUTH path never sets it
-    (α≡1 there) so the nuisance does NOT cancel in the closure.
-
-    ``require_zresolved`` (default **True** = SAFE-BY-DEFAULT, 2026-07-06): this comparison core scores
-    a loglik of the forward against the (z-RESOLVED) mock, so a (3,) z-FLAT alpha here is ALWAYS the
-    recurring z-flat bug (it broadcasts to every z and fakes a spurious z-ramp vs the z-resolved truth;
-    once a phantom +5.5 sigma n_s). It therefore ASSERTS ``alpha_hcd`` is z-RESOLVED ((n_zg,3)) BY
-    DEFAULT and RAISES on a z-flat (3,). Build alpha z-resolved (``alpha_pivot[None,:]*shape_zg``, or
-    ``closure_legb_figs._truth_alpha_zresolved_on_leg`` for a truth-pack). Pass ``require_zresolved=False``
-    ONLY for a genuine self-consistent z-flat use (the deployed forward + the re-scoring paths are all
-    z-resolved, so none needs it). Making this NON-OPTIONAL is the fix: the old opt-in default let the
-    bug recur (a new diagnostic forgot to opt in). The raw ``predict_P_obs_on_leg`` stays permissive so
-    byte-identity uniform-alpha references pass; it is only the COMPARISON core that is locked down."""
-    total = 0.0
-    parts = {}
+    ``alpha_hcd``: (n_zg, 3) z-resolved per-z incidence shared by the legs, a per-leg dict {leg.name: (n_zg, 3)}
+    (joint mode), or a (3,) z-flat triple only with ``require_zresolved=False`` (the z-flat bug class). ``metal_nodes``:
+    {leg.name: (f3, f2, k3, k2)} Model C+ nodes (None: the scalar a_siiii / a_siii path). ``b_res_global``: per-z
+    resolution nuisance on the global z grid. ``alpha_res``: res_corr is retired; only the no-op (1, 0) is accepted."""
     from .likelihood import gaussian_loglik
+    if alpha_res is not None and not (isinstance(alpha_res[0], float) and isinstance(alpha_res[1], float)
+                                      and alpha_res[0] == 1.0 and alpha_res[1] == 0.0):
+        raise ValueError("res_corr is retired in the gate E forward: alpha_res must be the fixed no-op (1.0, 0.0)")
+    total = 0.0
+    n_out = jnp.asarray(0)
+    parts = {}
     zg = np.asarray(ctx.z_global)
-    # PER-LEG alpha threading (joint mode, 2026-07-20): ``alpha_hcd`` may be a DICT
-    # {leg.name: (n_zg,3)}. The isinstance(dict) branch MUST precede the np.ndim(alpha_hcd)
-    # line inside the loop — np.ndim(dict) returns 0 via the object-array fallback, so the
-    # array branch would silently mistreat a dict as a z-flat broadcast. Key set is asserted
-    # equal to the leg set BOTH directions up front (fail-loud on a missing OR extra leg).
     if isinstance(alpha_hcd, dict):
         _leg_names = {leg.name for leg in mock_legs}
         assert set(alpha_hcd) == _leg_names, (
-            f"per-leg alpha_hcd keys {sorted(alpha_hcd)} != mock legs {sorted(_leg_names)} "
-            f"(missing: {sorted(_leg_names - set(alpha_hcd))}, "
-            f"extra: {sorted(set(alpha_hcd) - _leg_names)})")
+            f"per-leg alpha_hcd keys {sorted(alpha_hcd)} != mock legs {sorted(_leg_names)}")
     for leg in mock_legs:
-        sel = np.array([int(np.argmin(np.abs(zg - zz))) for zz in leg.z])
-        tau0_vec = tau0_global[jnp.asarray(sel)]
-        # option-b: slice the per-z b_res(z) onto this leg (like tau0_vec); None → scalar b_res=0 (golden).
-        b_res_leg = None if b_res_global is None else b_res_global[jnp.asarray(sel)]
-        if isinstance(alpha_hcd, dict):
-            # joint mode: this leg's OWN z-resolved alpha (KeyError = fail-loud on a missing
-            # leg; unreachable after the set assert above, kept as defense-in-depth).
-            alpha_full = alpha_hcd[leg.name]
-            # UNCONDITIONAL (not gated on require_zresolved): a (3,) dict entry has no
-            # legitimate meaning here — jnp fancy-indexing a (3,) with z-bin indices CLIPS
-            # out-of-bounds silently and returns a finite wrong loglik (consistency-audit
-            # finding 2026-07-20, demonstrated -742.79 vs -776.79).
-            assert np.ndim(alpha_full) == 2, (
-                f"per-leg alpha_hcd[{leg.name!r}] must be z-RESOLVED (n_zg,3); got "
-                f"ndim={np.ndim(alpha_full)} — a z-flat (3,) here is the recurring "
-                f"z-flat bug (see require_zresolved in the docstring)")
-            alpha_leg = alpha_full[jnp.asarray(sel)]
-        else:
-            # per-z HCD incidence: alpha_hcd may be (3,) [broadcast] or (n_z_global,3) [z-resolved]
-            alpha_leg = alpha_hcd if np.ndim(alpha_hcd) == 1 else alpha_hcd[jnp.asarray(sel)]
-        core = dla_core_per_leg[leg.name]           # (K,) z-mean core for this leg
-        szb = ctx.sigma_zb_per_leg.get(leg.name) if ctx.sigma_zb_per_leg else None
-        rzb = ctx.rho_zb_per_leg.get(leg.name) if ctx.rho_zb_per_leg else None
-        # restrict to the kept (non-NaN) rows so dropped-z rows carry no info.
         P_data = np.asarray(leg.P_data)
         keep = np.isfinite(P_data)
         if not keep.any():
             continue
-        msc = (ctx.mf_shape_per_leg.get(leg.name)
-               if getattr(ctx, "mf_shape_per_leg", None) is not None else None)
-        mec = (ctx.mf_emucoh_per_leg.get(leg.name)
-               if getattr(ctx, "mf_emucoh_per_leg", None) is not None else None)
-        # MODEL C+ per-leg metal nodes (None → the scalar a_siiii/a_siii path, byte-exact).
-        f3_nodes = f2_nodes = k3_nodes = k2_nodes = None
-        if metal_nodes is not None:
-            f3_nodes, f2_nodes, k3_nodes, k2_nodes = metal_nodes.get(leg.name, (None, None, None, None))
-        P_model, C_total = DL.predict_P_obs_on_leg(
-            ctx.model, theta9, tau0_vec, alpha_leg, pf_stats=ctx.pf_stats, dla_core=core,
-            cache_k=ctx.cache_k, leg=leg, sigma_zb=szb, alpha_centres=ctx.alpha_centres,
-            a_SiIII=a_siiii, a_SiII=a_siii,                    # applied only on metals_on legs
-            f_SiIII_nodes=f3_nodes, f_SiII_nodes=f2_nodes,     # MODEL C+ per-z amplitude (None → scalar)
-            k_SiIII_nodes=k3_nodes, k_SiII_nodes=k2_nodes,     # MODEL C+ per-z decorrelation scale
-            metal_node_z=getattr(ctx, "metal_node_z", (2.2, 4.2)),
-            cemu_inflate=ctx.cemu_inflate, rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor,
-            mf_shape_cov=msc, mf_shape_infl=getattr(ctx, "mf_shape_infl", 1.0),
-            mf_emucoh_cov=mec, mf_emucoh_infl=getattr(ctx, "mf_emucoh_infl", 1.0),
-            mf_emucoh_offdiag_only=getattr(ctx, "mf_emucoh_offdiag_only", False),
-            alpha_res=alpha_res,                              # res_corr amplitude nuisance (fwd-only)
-            b_res_vec=b_res_leg,                              # option-b spectral-resolution f_res (fwd-only)
-            require_zresolved=require_zresolved)              # guard: assert z-resolved alpha (opt-in)
+        sel = jnp.asarray(np.array([int(np.argmin(np.abs(zg - zz))) for zz in leg.z]))
+        tau0_vec = tau0_global[sel]
+        if isinstance(alpha_hcd, dict):
+            alpha_full = alpha_hcd[leg.name]
+            assert np.ndim(alpha_full) == 2, f"per-leg alpha_hcd[{leg.name!r}] must be z-RESOLVED (n_zg, 3)"
+            alpha_leg = alpha_full[sel]
+        else:
+            alpha_leg = alpha_hcd if np.ndim(alpha_hcd) == 1 else alpha_hcd[sel]
+        nuis = {"a_SiIII": a_siiii, "a_SiII": a_siii, "metal_node_z": getattr(ctx, "metal_node_z", (2.2, 4.2))}
+        if metal_nodes is not None and leg.name in metal_nodes:
+            f3, f2, k3, k2 = metal_nodes[leg.name]
+            nuis.update(f_SiIII_nodes=f3, f_SiII_nodes=f2, k_SiIII_nodes=k3, k_SiII_nodes=k2)
+        if b_res_global is not None:
+            nuis["b_res_vec"] = b_res_global[sel]
+        t1 = ((ctx.rho_zb_per_leg[leg.name], ctx.alpha_centres)
+              if ctx.rho_zb_per_leg and leg.name in ctx.rho_zb_per_leg else None)
+        t2 = ctx.t2_per_leg.get(leg.name) if ctx.t2_per_leg else None
+        t3 = ctx.t3_per_leg.get(leg.name) if ctx.t3_per_leg else None
+        out = FW.predict_leg(ctx.model, theta9, tau0_vec, alpha_leg, leg=leg, k_com=ctx.k_com_hmpc,
+                             pf_stats=ctx.pf_stats, dla_core=dla_core_per_leg[leg.name], mf=ctx.mf, nuis=nuis,
+                             t1=t1, t2=t2, t3=t3, cemu_inflate=ctx.cemu_inflate,
+                             require_zresolved=require_zresolved)
         kr = jnp.asarray(np.where(keep)[0])
-        r = jnp.asarray(P_data[keep]) - P_model[kr]
-        C_sub = C_total[jnp.ix_(kr, kr)]
+        n_out = n_out + jnp.sum(out.outside[kr])
+        r = jnp.asarray(P_data[keep]) - out.P_model[kr]
+        C_sub = out.C_total[jnp.ix_(kr, kr)]
         ll = gaussian_loglik(r, C_sub)
         total = total + ll
         if return_parts:
@@ -2474,8 +1802,13 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
             Lc = jnp.linalg.cholesky(Cj)
             sol = jax.scipy.linalg.cho_solve((Lc, True), r)
             parts[leg.name] = (float(ll), float(r @ sol), Kk)
+    total = jnp.where(n_out == 0, total, -jnp.inf)
+    if return_parts and return_aux:
+        return total, parts, {"n_out": n_out}
     if return_parts:
         return total, parts
+    if return_aux:
+        return total, {"n_out": n_out}
     return total
 
 
@@ -3799,196 +3132,10 @@ def _resolution_sites_extra(samples, step, L, inject_spec, leg_a, truth_pack=Non
     return out
 
 
-def run_legb(ctx: LegBCtx, d, *, n_mocks, n_warmup, n_samples, seed,
-             cemu_inflate=None, fold=0, q_levels=(0.68, 0.95), verbose=True,
-             dense_mass=True, max_tree_depth=10, mock_indices=None,
-             return_per_mock=False, leg_a=False, inject_spec=None, truth_fn=None):
-    """PRE-2026-10 INTERFACE (mocks and forward share ctx.cache_k; replaced at gate F).
-
-    Leg-B coverage over ``n_mocks`` held-out-sim mocks. Per mock: make_legb_mock → NUTS
-    against the real-cov multi-leg likelihood → thin → rank the truth θ per param + the
-    loglik rank → per-param empirical coverage at ``q_levels`` + bias.
-
-    SHARDING: each mock ``m`` is seeded independently via ``jax.random.fold_in(seed, m)`` so a
-    subset (``mock_indices``) reproduces exactly the same mocks a single full run would — i.e.
-    a SLURM array can split ``range(n_mocks)`` across tasks and the merged set is identical.
-    ``return_per_mock=True`` returns the raw per-mock list (for the cross-shard merge) instead
-    of the aggregate.
-
-    Returns ``_aggregate_legb`` (coverage 68/95% + per-param bias + the DIAGNOSTIC-ONLY rank
-    ECDF), or the per-mock list if ``return_per_mock``."""
-    # inject_spec is a LEG-A-ONLY hook (the data-nuisance bias gate). The held-out branch below
-    # (make_legb_mock) does NOT thread it, so honouring it on a held-out run would SILENTLY drop the
-    # injection. Fail loud instead — PR#12 review follow-up (b); generalizes the run_prod_sbc_shard.py
-    # subdla_truth_boost assert to EVERY inject key (lls/subdla_truth_boost, metal_misspec, resolution).
-    if inject_spec and not leg_a:
-        raise ValueError(
-            "run_legb: inject_spec is honoured only on the Leg-A self-draw path (leg_a=True); the "
-            "held-out branch ignores it. Refusing to silently drop the injection on a held-out run.")
-    # truth_fn (R6 paired protocol, 2026-07-23): host-side callable ``key -> truth_pack`` replacing
-    # draw_leg_a_leg_truth on the SELF-DRAW branch only. The R6 legacy arm passes a closure over the
-    # MAPPED ctx so both arms of a pair share one truth (mock data is a pure fn of (truth_pack,
-    # k_mock) — the fit ctx's prior enters the mock nowhere else), which is what makes the pair's
-    # data vectors identical. Default None => draw_leg_a_leg_truth(ctx, .), byte-identical.
-    if truth_fn is not None and not leg_a:
-        raise ValueError("run_legb: truth_fn is a self-draw (leg_a=True) hook; the held-out branch "
-                         "takes its truth from the held-out sim. Refusing to silently ignore it.")
-    # option-b f_res is a single GLOBAL site -> forbid a multi-instrument ctx until per-instrument sites
-    # exist (4-referee panel #8). No-op when sample_res is off (golden-safe).
-    _check_single_instrument_for_res(ctx.legs, getattr(ctx, "sample_res", False))
-    if cemu_inflate is not None:
-        ctx = ctx._replace(cemu_inflate=float(cemu_inflate))
-    key0 = jax.random.PRNGKey(int(seed))
-    idxs = list(range(int(n_mocks))) if mock_indices is None else list(mock_indices)
-    if leg_a:
-        # Leg-A rank-uniformity SBC: truths drawn from the PRIOR; the fiducial DLA core is the
-        # MATCHED core used by both the mock forward and the likelihood (so C_mock ≡ C_like).
-        # z-mean the (n_z,K) fiducial → the (K,) per-leg core predict_P_obs_on_leg expects.
-        fid_core = {name: jnp.asarray(np.nanmean(np.asarray(v), axis=0))
-                    for name, v in _fiducial_dla_core_per_leg(d, ctx.legs, ctx.cache_k).items()}
-    else:
-        sims, _va = held_out_sims(d, fold=fold)
-
-    # cycle through the held-out sims (n_mocks may exceed the #sims → reuse with fresh noise).
-    per_mock = []
-    n_div_total = 0
-    n_divergent = 0
-    for m in idxs:
-        if leg_a:
-            # Leg-A self-draw: truth ~ prior, matched-C mock; a PURE fn of (seed,m) → shardable.
-            k_truth, k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, m), 3)
-            truth_pack = (draw_leg_a_leg_truth(ctx, k_truth) if truth_fn is None
-                          else truth_fn(k_truth))
-            # DATA-NUISANCE INJECTION (the bias gate; inject_spec=None ⇒ byte-identical to the
-            # clean self-draw — the no-op guarantee). "lls/subdla/dla_truth_boost" offset the TRUTH
-            # incidence from the prior center BEFORE the forward (_apply_truth_boosts, which also
-            # fail-louds on unknown keys); scalar-or-dict values — a dict is a z-PROFILE boost
-            # B(z) needing the z grid, threaded HERE from ctx.z_global (never inferred from array
-            # length; KS selboost spec Sec 4). "metal_misspec"/"resolution" inject a mode the
-            # forward cannot fit into the noiseless mock.
-            if inject_spec:
-                truth_pack = _apply_truth_boosts(truth_pack, inject_spec, z=np.asarray(ctx.z_global, float))
-                mock_legs, info = make_leg_a_legmock(
-                    ctx, fid_core, truth_pack, k_mock,
-                    inject_metal_misspec=inject_spec.get("metal_misspec"),
-                    inject_resolution=inject_spec.get("resolution"))
-            else:
-                mock_legs, info = make_leg_a_legmock(ctx, fid_core, truth_pack, k_mock)
-            core_per_leg = fid_core
-            sim = "leg_a_prior"
-        else:
-            sim = sims[m % len(sims)]
-            # the mock TRUTH is built at the SAME resolution as the forward: if ctx.mf is set, the
-            # gate invariant applies the MF correction to BOTH (it cancels in the closure ΔP).
-            truth_sim = make_truth_from_sim(d, sim, fold=fold, mf=ctx.mf)
-            k_mock, k_nuts = jax.random.split(jax.random.fold_in(key0, m), 2)
-            mock_legs, truth_pack, info = make_legb_mock(ctx, truth_sim, k_mock)
-            core_per_leg = _mock_core_per_leg(ctx, truth_sim)
-
-        base_seed = int(jax.random.randint(k_nuts, (), 0, 2**31 - 1))
-        ta_sched = (0.9,) + tuple(DIVERGENCE_RETRY_TARGET_ACCEPT)
-        samples = n_div = None
-        for attempt, ta in enumerate(ta_sched):
-            samples, n_div = _run_nuts_legb(
-                ctx, mock_legs, core_per_leg, n_warmup=n_warmup, n_samples=n_samples,
-                seed=base_seed + attempt, target_accept=ta, dense_mass=dense_mass,
-                max_tree_depth=max_tree_depth)
-            if n_div == 0:
-                break
-            if verbose:
-                print(f"  [mock {m}] sim={sim[:20]}… {n_div} divergence(s) at ta={ta}"
-                      + (" -> retry" if attempt < len(ta_sched) - 1 else ""))
-        n_div_total += n_div
-        if n_div > 0:
-            n_divergent += 1
-
-        kept_global = truth_pack["kept_global_z"]
-        draws = _draws_matrix(samples, kept_global)             # (Lraw, P)
-        draws_t, step, ess_min = thin_to_ess(draws)
-        L = draws_t.shape[0]
-
-        # truth vector in the packed order (kept global z only).
-        truth_vec = np.concatenate([
-            truth_pack["theta9"],
-            truth_pack["tau0_global"][kept_global],
-            truth_pack["alpha_hcd"]])
-        if getattr(ctx, "hcd_2d_tilt", False):               # align with A_hcd/B_hcd/r_subdla/r_dla
-            truth_vec = np.concatenate([truth_vec, _hcd_latent_truths_2d(truth_pack["alpha_hcd"], ctx)])
-        elif getattr(ctx, "hierarchical_hcd", False):        # align with the appended A_hcd/r columns
-            truth_vec = np.concatenate([truth_vec, _hcd_latent_truths(truth_pack["alpha_hcd"])])
-        # Align with _draws_matrix's LAST a_SiIII col — ONLY when the SCALAR a_SiIII site exists
-        # (uniform/flatlog). Under MODEL C+ ("flatlog2node") there is NO scalar a_SiIII draw column
-        # (the per-leg f-/k-nodes are not packed), so appending a_siiii here would MISALIGN truth_vec
-        # vs draws. Keying off "a_SiIII" in samples mirrors _draws_matrix exactly.
-        if getattr(ctx, "sample_metals", False) and "a_SiIII" in samples:
-            truth_vec = np.concatenate([truth_vec, [float(truth_pack.get("a_siiii", 0.0))]])
-
-        # loglik of the truth + draws on the SAME mock data (Modrak rank).
-        # Z-RESOLVED-ALPHA FIX (2026-06-19): use the z-RESOLVED truth alpha (truth_pack
-        # ['alpha_hcd_z'], (nZg,3)) — NOT the z-FLAT pivot truth_pack['alpha_hcd'] (3,). The mock
-        # truth-on-leg is z-resolved (per-z sim P1D / per-z prior draw), so re-scoring the truth
-        # loglik with a z-flat alpha mismatched the data and shifted ll_true → a spurious
-        # loglik-rank. Both the leg-A self-draw (draw_leg_a_leg_truth) and the held-out path
-        # (make_legb_mock) now carry alpha_hcd_z. require_zresolved=True fails loudly on a regression.
-        _a_si_true = float(truth_pack.get("a_siiii", 0.0))
-        _a_si2_true = float(truth_pack.get("a_siii", 0.0))   # SiII doublet truth (Task A1; absent ⇒ 0)
-        ll_true = float(_data_loglik_legcore(
-            ctx, jnp.asarray(truth_pack["theta9"]),
-            jnp.asarray(truth_pack["tau0_global"]),
-            jnp.asarray(truth_pack["alpha_hcd_z"]), mock_legs, core_per_leg,
-            a_siiii=_a_si_true, a_siii=_a_si2_true, require_zresolved=True))
-        ll_draws = _loglik_of_draws(ctx, mock_legs, core_per_leg, samples, kept_global)
-        # thin ll_draws by the SAME step.
-        ll_draws_t = ll_draws[::step][:L]
-
-        # MEAN-FLUX SITES (feedback-report-tau0-dtau0-bias): the packed draws/truth carry only the
-        # DETERMINISTIC tau0_z ladder, not the 2 sampled sites (tau0_amp, dtau0). Store them SEPARATELY
-        # (thinned by the SAME step + the truth) so the gate can report the τ₀ amplitude/slope bias
-        # JOINTLY with n_s/A_p — mean flux is the suspected n_s channel. SEPARATE field ⇒ the packed
-        # draws-matrix tail layout (and the uniform/flatlog golden) is untouched.
-        sites_extra = {}
-        # s_lls/s_subdla/s_dla (the marginalized HCD z-slope sites, _zslope_sites): sampled but
-        # NOT packed into _draws_matrix — stored here (SAME thinning) so the KS-selboost
-        # profile-resolved recovery panel (spec Sec 6 output 5: posterior alpha_LLS(z) =
-        # pivot x sampled slope per draw, overlaid on the truth B(z) x center) is reconstructable
-        # from shard pkls. Truth: the leg-A prior draw's own slope site (truth_pack["raw"]),
-        # NaN on the held-out path (its z-resolved truth lives in truth_alpha_hcd_z rows).
-        # Additive-only keys; absent when marginalize_zslope is off.
-        _truth_raw = truth_pack.get("raw") or {}
-        # (+ the KS dN/dX-mapped raw sites, W2 2026-07-22 — presence-keyed, so absent on every
-        # non-mapped config; the mapped branch samples eps/kappa/m/t/dla_raw instead of s_*.)
-        for nm in SELF_DRAWN_EXTRA_SITES:
-            if nm in samples:
-                dr = np.asarray(samples[nm])[::step][:L]
-                sites_extra[nm] = dict(
-                    draws=dr, truth=float(truth_pack.get(nm, _truth_raw.get(nm, np.nan))))
-        # MODEL C+ metal f/k node sites (ceiling-check instrumentation): sampled by _metal_2node_sites
-        # but NOT packed into _draws_matrix, so store them here (SAME thinning) with the injected-arm
-        # truth. Additive-only + empty under uniform/flatlog/metals-off ⇒ byte-identical golden.
-        sites_extra.update(_metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a,
-                                                   truth_pack=(truth_pack if leg_a else None)))
-        # OPTION-B f_res sites (rail/coverage instrumentation, step-review #4): same thinning; injected
-        # truth (b*, 0). EMPTY + additive-only unless sample_res sampled f_res ⇒ golden-safe.
-        sites_extra.update(_resolution_sites_extra(samples, step, L, inject_spec, leg_a,
-                                                   truth_pack=(truth_pack if leg_a else None)))
-
-        per_mock.append(dict(sim=sim, truth_vec=truth_vec, draws=draws_t, L=L,
-                             ll_true=ll_true, ll_draws=ll_draws_t,
-                             names=_packed_names_for(samples, kept_global),
-                             kept_global=kept_global, dropped=info["dropped"],
-                             sites_extra=sites_extra, n_div=n_div,
-                             # RECORD EXTENSION (KS selboost spec Sec 4): the (nZg,3) z-resolved
-                             # truth alpha rows, so the analyzer can verify the row-level boost
-                             # contract rows == B(z_global) × clean rows, not just the pivot.
-                             # Additive-only key ⇒ every existing pkl consumer is untouched.
-                             truth_alpha_hcd_z=np.array(truth_pack["alpha_hcd_z"], float)))
-        if verbose:
-            print(f"  [mock {m}] sim={sim[:24]}… L={L} (step {step}, ess {ess_min:.0f}) "
-                  f"nKeptZ={int(kept_global.sum())} div={n_div}")
-
-    if return_per_mock:
-        return per_mock
-    return _aggregate_legb(per_mock, q_levels=q_levels)
+def run_legb(*args, **kwargs):
+    """The pre-2026-10 Leg-B closure driver (mocks bound on the single grid). Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
+    own stored grid (GATE_E_SPEC v1 section 2)."""
+    raise NotImplementedError("run_legb: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
 
 
 def _loglik_of_draws(ctx, mock_legs, core_per_leg, samples, kept_global):
@@ -4109,87 +3256,13 @@ def _aggregate_legb(per_mock, *, q_levels):
 #  CLI / smoke.
 # ============================================================================ #
 def _smoke(args):
-    print(f"[legb-smoke] building ctx from {CKPT} (+ xclass C_emu)")
-    # SMOKE: optionally narrow the z-range (fewer τ₀ params + a cheaper per-step likelihood)
-    # so the FULL real-grid path runs in minutes. The production run uses the full z-range.
-    desi_kw = dict(z_lo=args.z_lo, z_hi=args.z_hi) if args.z_lo or args.z_hi < 4.2 else None
-    ks_kw = None
-    legs_arg = dict(desi_kwargs=desi_kw, ks_kwargs=ks_kw)
-    if args.desi_only:
-        # build with both, then drop KS (the loader path is the same; just slice the list).
-        pass
-    ctx, d = build_legb_ctx(cemu_inflate=args.cemu_inflate, use_xclass=not args.diag_cemu,
-                            with_mf=args.mf, mf_with_floor=not args.no_floor, **legs_arg)
-    if args.mf:
-        print(f"[legb-smoke] MF forward ON (production correction, fold 0); "
-              f"floor={'ON (LF→HR + ns-edge)' if ctx.mf_floor is not None else 'OFF'}")
-    if args.desi_only:
-        ctx = ctx._replace(legs=[leg for leg in ctx.legs if leg.name == "DESI"])
-    print(f"[legb-smoke] legs: " + ", ".join(
-        f"{leg.name}(n_z={leg.n_z}, N={leg.k.shape[0]})" for leg in ctx.legs))
-    sims, _ = held_out_sims(d, fold=0)
-    print(f"[legb-smoke] {len(sims)} held-out sims (fold 0); C_emu="
-          f"{'cross-class' if ctx.rho_zb_per_leg is not None else 'diagonal'}")
-
-    res = run_legb(ctx, d, n_mocks=args.n_mocks, n_warmup=args.n_warmup,
-                   n_samples=args.n_samples, seed=args.seed,
-                   dense_mass=not args.diag_mass, max_tree_depth=args.max_tree_depth)
-    print("\n========== Leg-B smoke summary ==========")
-    print(f"mocks={res['n_mocks']}  divergent={res['n_divergent']}  "
-          f"L(thinned)={res['L']}  gate_valid(L≥{L_FLOOR})={res['gate_valid']}")
-    for q in res["q_levels"]:
-        print(f"\nper-param empirical coverage @ {int(q*100)}% CR (target ≥{q:.2f}):")
-        for nm in res["names"]:
-            cov = res["coverage"][q][nm]
-            print(f"  {nm:14s}: {cov['coverage']:.2f}  "
-                  f"[{cov['ci_low']:.2f},{cov['ci_high']:.2f}]  (k={cov['k']}/{cov['n']})")
-    print("\nper-param normalized bias (truth−mean)/std, mean over mocks (≈0 = unbiased):")
-    for nm in res["names"]:
-        b = res["bias"][nm]
-        print(f"  {nm:14s}: {b['mean']:+.2f} ± {b['se']:.2f}σ  (n={b['n']})")
-    if res["ll_ecdf_in_band"] is not None:
-        print(f"\nloglik-rank ECDF: {'in-band' if res['ll_ecdf_in_band'] else 'OUT-of-band'} "
-              f"— DIAGNOSTIC ONLY (NOT a Leg-B gate; Leg-B's null is not rank-uniform).")
-    print("\n[verdict basis] Leg-B = coverage ≥ nominal + bias≈0 ONLY (NOT the rank ECDF).")
-    print("[caveat] smoke N is tiny → coverage is a PATH check, not a calibration verdict.")
-    return ctx, d, res
+    """The pre-2026-10 Leg-B smoke (old products and mocks). Rebuilt at gate F."""
+    raise NotImplementedError("_smoke: the pre-2026-10 closure smoke is retired; rebuilt at gate F")
 
 
 def _smoke_convergence(args):
-    """STEP-A convergence-MODE smoke: ONE mock, ≥2 dispersed-init chains, the full battery."""
-    print(f"[legb-conv] building ctx from {CKPT} (+ xclass C_emu)")
-    desi_kw = dict(z_lo=args.z_lo, z_hi=args.z_hi) if args.z_lo or args.z_hi < 4.2 else None
-    ctx, d = build_legb_ctx(cemu_inflate=args.cemu_inflate, use_xclass=not args.diag_cemu,
-                            with_mf=args.mf, mf_with_floor=not args.no_floor,
-                            desi_kwargs=desi_kw)
-    if args.desi_only:
-        ctx = ctx._replace(legs=[leg for leg in ctx.legs if leg.name == "DESI"])
-    print(f"[legb-conv] legs: " + ", ".join(
-        f"{leg.name}(n_z={leg.n_z}, N={leg.k.shape[0]})" for leg in ctx.legs))
-    print(f"[legb-conv] {args.chains} chains × {args.n_samples} samples (warmup {args.n_warmup}) "
-          f"dispersed init_to_sample, dense_mass={not args.diag_mass}, mtd={args.max_tree_depth}")
-
-    res = run_legb_convergence(
-        ctx, d, mock_index=args.mock_index, n_chains=args.chains, n_warmup=args.n_warmup,
-        n_samples=args.n_samples, seed=args.seed, dense_mass=not args.diag_mass,
-        max_tree_depth=args.max_tree_depth)
-    b = res["battery"]
-    print("\n========== STEP-A convergence battery ==========")
-    print(f"sim={res['sim'][:40]}  chains={b['n_chains']}  draws/chain={b['n_draws']}  "
-          f"divergent={b['n_divergent']}")
-    print(f"rank-split-R-hat max = {b['rhat_max']:.4f}  (gate <1.01)")
-    print(f"bulk-ESS min = {b['ess_bulk_min']:.0f}   tail-ESS min = {b['ess_tail_min']:.0f}  "
-          f"(gate ≥400)")
-    print(f"E-BFMI min = {b['ebfmi_min']:.3f} (gate >0.3)   "
-          f"tree-depth saturation = {b['treedepth_sat_frac']:.3f} (gate <~0.02)")
-    print(f"\n  {'param':12s} {'R-hat':>7s} {'ESSbulk':>8s} {'ESStail':>8s} "
-          f"{'init/postsd':>11s}")
-    for i, nm in enumerate(res["names"]):
-        print(f"  {nm:12s} {b['rhat'][nm]:7.3f} {b['ess_bulk'][nm]:8.0f} "
-              f"{b['ess_tail'][nm]:8.0f} {b['init_spread_over_postsd'][i]:11.2f}")
-    print(f"\nper-chain divergences: {res['per_chain_div']}")
-    print("[caveat] smoke depth → R-hat is finite/computed, NOT necessarily <1.01.")
-    return ctx, d, res
+    """The pre-2026-10 Leg-B convergence smoke (mocks on the single grid). Rebuilt at gate F."""
+    raise NotImplementedError("_smoke_convergence: the pre-2026-10 closure smoke is retired; rebuilt at gate F")
 
 
 def main():

@@ -30,6 +30,7 @@ class LegPrediction(NamedTuple):
     P_model: jnp.ndarray          # (N,) flat, z-major (the leg's row order)
     n_out: jnp.ndarray            # number of the leg's bins outside the simulated modes (all z)
     C_total: jnp.ndarray          # (N, N) data covariance + the emulator-error terms supplied
+    outside: jnp.ndarray          # (N,) bool: the bin lies outside the simulated modes (the caller counts kept rows)
 
 
 def predict_leg(model, theta9, tau0_vec, alpha_hcd, *, leg, k_com, pf_stats, dla_core, mf=None, nuis=None,
@@ -66,6 +67,7 @@ def predict_leg(model, theta9, tau0_vec, alpha_hcd, *, leg, k_com, pf_stats, dla
     floor_var = jnp.zeros(k_leg.shape[0])
     ns_sg = jax.lax.stop_gradient(DL._ns_phys_from_theta9(theta9)) if t2 is not None else None
     n_out = jnp.asarray(0)
+    outside = jnp.zeros(k_leg.shape[0], dtype=bool)
     for iz in range(leg.n_z):
         rows = np.where(z_idx == iz)[0]
         if rows.size == 0:
@@ -99,9 +101,10 @@ def predict_leg(model, theta9, tau0_vec, alpha_hcd, *, leg, k_com, pf_stats, dla
         if t2 is not None:
             floor_var = floor_var.at[jnp.asarray(rows)].set(t2_var(t2[0][iz], t2[1][iz], P_z * fac, ns_sg))
         n_out = n_out + b.n_out
+        outside = outside.at[jnp.asarray(rows)].set((b.u < 1.0) | (b.u > kg.k_skm.shape[-1]))
     C_total = assemble_cov(jnp.asarray(leg.C_data), emu_var, floor_var, t3=t3,
                            P_fid=jnp.nan_to_num(jnp.asarray(leg.P_data)))
-    return LegPrediction(P_model, n_out, C_total)
+    return LegPrediction(P_model, n_out, C_total, outside)
 
 
 def t2_var(sigma_floor, slope, P, ns, ns_box=NS_BOX, edge_mult=EDGE_SLOPE_MULT):
