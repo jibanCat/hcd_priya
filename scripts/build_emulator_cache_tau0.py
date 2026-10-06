@@ -67,26 +67,67 @@ def _assert_class_edges() -> None:
                 "Tier-C partition would disagree -> silent power misattribution.")
 
 
-# ns0.907 has an anomalous raw SPECTRA ladder (gaps at snap 15/18; see
-# hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER_2026_05_22.md). Its Phase-1 snap_17 is the z=2.8
-# snapshot, but the z=2.8 grid_480 raw tau lives in raw dir SPECTRA_018 --
-# SPECTRA_017 holds a z=3.0 grid_480. Every other sim maps Phase-1 snap ->
-# raw SPECTRA_<snap> 1:1. Without this override the build's z_raw-vs-z_meta
-# assert (build_tau0_rows) trips on this single (sim, z) pair. Keyed by a
-# substring of the sim name so it matches the full param-suffixed folder.
-_RAW_SPECTRA_DIR_OVERRIDE = {
-    ("ns0.907", 17): 18,
+# Every Phase-1 catalogue directory snap_NNN was built on raw SPECTRA_NNN (same index; verified for every LF and HR
+# directory), so the builder pairs them by that identity. Two directories carry a WRONG meta redshift (taken from an
+# offset particle-snapshot list): ns0.907 snap_017 holds the z = 3.0 file's catalogue (meta says 2.799998) and snap_018
+# the z = 2.8 file's (meta says 2.673742). Their label is corrected here and verified against the raw header at use.
+# History: a 2026-06-01 fix re-pointed only the TAU of snap 17 to SPECTRA_018, leaving the z = 3.0 catalogue on z = 2.8
+# rows (finding F8, emulator-debug campaign 2026-10; spec gateB/S4_REPAIR_SPEC.md in the notes repository).
+_PHASE1_Z_OVERRIDE = {
+    ("ns0.907", 17): 3.0,
+    ("ns0.907", 18): 2.8,
 }
+_Z_LABEL_TOL = 2e-5          # largest |meta z - header z| of a correctly labelled directory is 1.3e-5
 
 
-def _raw_spectra_index(sim_name: str, snap: int) -> int:
-    """Map a Phase-1 snap index to its raw SPECTRA_<NNN> dir index.
+def vmax_from_header(hdr):
+    """Box velocity width [km/s] exactly as fake_spectra (spectra.py:208-215): box * (a / h) * H(z) in kpc units."""
+    a = 1.0 / (1.0 + float(hdr.redshift))
+    return float(hdr.box) * (3.085678e21 * a / float(hdr.hubble)) * float(hdr.Hz) / 3.085678e24
 
-    Identity for all sims except the documented ns0.907 ladder offset."""
-    for (tag, s), raw_s in _RAW_SPECTRA_DIR_OVERRIDE.items():
+
+def raw_header_z(raw_tau_path):
+    """Header redshift of a raw spectra file (attributes only; no tau read)."""
+    with h5py.File(raw_tau_path, "r") as f:
+        return float(f["Header"].attrs["redshift"])
+
+
+def catalogue_z_label(sim_name, snap, meta_z, raw_z):
+    """Redshift label of a Phase-1 catalogue directory: its meta z, except for the enumerated mislabelled directories,
+    whose corrected label must equal the paired raw file's header z (|delta| < 1e-6). An entry whose meta z already
+    agrees with the header is stale and refused."""
+    for (tag, s), z in _PHASE1_Z_OVERRIDE.items():
         if s == snap and tag in sim_name:
-            return raw_s
-    return snap
+            if abs(float(meta_z) - float(raw_z)) <= _Z_LABEL_TOL:
+                raise ValueError(f"stale _PHASE1_Z_OVERRIDE entry {(tag, s)}: meta z {meta_z} already equals the header")
+            if abs(z - float(raw_z)) >= 1e-6:
+                raise ValueError(f"_PHASE1_Z_OVERRIDE {(tag, s)} = {z} disagrees with the raw header z {raw_z}")
+            return float(z)
+    return float(meta_z)
+
+
+def assert_label_matches_header(z_label, raw_z):
+    if abs(float(z_label) - float(raw_z)) > _Z_LABEL_TOL:
+        raise ValueError(f"redshift label {z_label} is not the paired raw file's header redshift {raw_z}")
+
+
+def _catalogue_pix_max(snap_dir):
+    """Largest absorber start pixel in a Phase-1 catalogue (-1 if it holds no absorbers)."""
+    with np.load(Path(snap_dir) / "catalog.npz") as c:
+        return int(c["pix_start"].max()) if c["pix_start"].size else -1
+
+
+def assert_catalogue_built_on(meta, catalogue_pix_max, hdr):
+    """Refuse a catalogue that was not built on the raw file it is paired with: its meta nbins and dv_kms must be the
+    file's, and no catalogued absorber may start beyond the file's last pixel."""
+    nb = int(hdr.nbins)
+    if int(meta["nbins"]) != nb:
+        raise ValueError(f"catalogue nbins {meta['nbins']} != paired raw file nbins {nb}")
+    dv = vmax_from_header(hdr) / nb
+    if abs(float(meta["dv_kms"]) / dv - 1.0) > 1e-12:
+        raise ValueError(f"catalogue dv_kms {meta['dv_kms']} != paired raw file {dv}")
+    if int(catalogue_pix_max) >= nb:
+        raise ValueError(f"catalogue pixel index {catalogue_pix_max} beyond the paired raw file ({nb} pixels)")
 
 
 def locate_raw_tau_file(emu_root, sim_name: str, snap: int):
@@ -97,10 +138,9 @@ def locate_raw_tau_file(emu_root, sim_name: str, snap: int):
 
     Only the 691200-skewer grid_480 file is accepted.  The low-res 32k
     lya_forest_spectra.hdf5 is never used (it cannot match PRIYA bit-identity).
-    The raw SPECTRA dir index is `snap` for every sim except the documented
-    ns0.907 ladder offset (see _RAW_SPECTRA_DIR_OVERRIDE).
+    The raw SPECTRA dir index is always `snap`: the catalogue in snap_NNN was built on SPECTRA_NNN.
     """
-    raw_snap = _raw_spectra_index(sim_name, snap)
+    raw_snap = int(snap)
     found = _grid_in_dir(Path(emu_root) / sim_name / "output" / f"SPECTRA_{raw_snap:03d}")
     if found is not None:
         return found
@@ -182,7 +222,7 @@ def discover_tau0_pairs(hcd_root, emu_root, fidelity="lf", max_off_grid=0.05):
 
     best = {}   # (sim, round(z_grid,4)) -> (off_grid_distance, pair)
     for sim, snap, snap_dir, raw in out:
-        z_meta = float(json.load(open(snap_dir / "meta.json"))["z"])
+        z_meta = catalogue_z_label(sim, snap, float(json.load(open(snap_dir / "meta.json"))["z"]), raw_header_z(raw))
         z_grid = _snap_z_to_priya_grid(z_meta)
         off = abs(z_meta - z_grid)
         key = (sim, round(z_grid, 4))
@@ -291,15 +331,14 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
     hdr = read_header(raw_tau_path)
     nbins = int(hdr.nbins)
     z_raw = float(hdr.redshift)
+    # Hard pairing invariant: the catalogue (and its dv_kms, CDDF) must have been built on THIS raw file.
+    assert_catalogue_built_on(meta, _catalogue_pix_max(snap_dir), hdr)
     dv_kms = float(meta["dv_kms"])
     vmax = nbins * dv_kms
 
-    z_meta = float(meta["z"])
+    z_meta = catalogue_z_label(sim_name, snap, float(meta["z"]), z_raw)
+    assert_label_matches_header(z_meta, z_raw)
     z_grid = _snap_z_to_priya_grid(z_meta)
-    # Defensive: raw header z must agree with Phase-1 meta z (catches mis-pairing
-    # across the cross-sim SPECTRA-numbering differences).
-    assert abs(z_raw - z_meta) < 1e-2, \
-        f"z mismatch raw={z_raw} meta={z_meta} for {sim_name} snap {snap}"
 
     tau_unfilt = _read_tau(raw_tau_path, n_skewers=n_skewers)
     rows = []

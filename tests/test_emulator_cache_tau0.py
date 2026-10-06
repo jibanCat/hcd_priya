@@ -63,27 +63,9 @@ _NS0907 = ("ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662"
            "omegamh20.144hireionz7.47bhfeedback0.0347")
 
 
-def test_raw_spectra_index_ns0907_ladder_offset():
-    # ns0.907 has a raw SPECTRA ladder gap (snap 15/18): its Phase-1 snap_17 is
-    # the z=2.8 snapshot, whose grid_480 tau lives in raw SPECTRA_018 (SPECTRA_017
-    # is a z=3.0 grid). All other (sim, snap) map 1:1. Without this the build's
-    # z_raw-vs-z_meta assert trips on this single pair (production shard 44).
-    assert bt0._raw_spectra_index(_NS0907, 17) == 18
-    assert bt0._raw_spectra_index(_NS0907, 16) == 16
-    assert bt0._raw_spectra_index(_NS0907, 18) == 18
-    assert bt0._raw_spectra_index("ns0.803Ap2e-09herei4", 17) == 17  # other sims unaffected
-
-
-def test_locate_raw_tau_file_ns0907_snap17_maps_to_spectra018():
-    with tempfile.TemporaryDirectory() as tmp:
-        emu_root = Path(tmp)
-        # Lay down BOTH SPECTRA_017 and SPECTRA_018 grid files; snap 17 must pick 018.
-        for s in (17, 18):
-            d = emu_root / _NS0907 / "output" / f"SPECTRA_{s:03d}"
-            d.mkdir(parents=True)
-            (d / "lya_forest_spectra_grid_480.hdf5").write_bytes(b"")
-        got = bt0.locate_raw_tau_file(emu_root, _NS0907, 17)
-        assert got == emu_root / _NS0907 / "output" / "SPECTRA_018" / "lya_forest_spectra_grid_480.hdf5"
+# The two legacy tests that pinned the 2026-06-01 tau re-pointing (ns0.907 snap 17 -> SPECTRA_018) were removed in the
+# S4/F8 repair: that re-pointing paired z = 2.8 tau with the z = 3.0 catalogue. Pairing is now by file identity and the
+# mislabelled redshifts are corrected; see tests/test_cache_pairing_invariants.py.
 
 
 def test_snap_z_to_priya_grid():
@@ -196,19 +178,21 @@ def test_discover_dedups_one_snap_per_grid_z():
     # no duplicate (sim, z_grid)
     seen = {}
     import json as _json
+    def label(sim, snap, sd, raw):     # the builder's redshift label (meta z, corrected for the two mislabelled dirs)
+        return bt0.catalogue_z_label(sim, snap, float(_json.load(open(sd / "meta.json"))["z"]), bt0.raw_header_z(raw))
     for sim, snap, sd, raw in pairs:
-        zg = bt0._snap_z_to_priya_grid(float(_json.load(open(sd / "meta.json"))["z"]))
+        zg = bt0._snap_z_to_priya_grid(label(sim, snap, sd, raw))
         key = (sim, round(zg, 4))
         assert key not in seen, f"duplicate (sim,z_grid) {key}: snaps {seen[key]} and {snap}"
         seen[key] = snap
     # every kept snap is within 0.05 of its grid z
     for sim, snap, sd, raw in pairs:
-        z = float(_json.load(open(sd / "meta.json"))["z"])
+        z = label(sim, snap, sd, raw)
         assert abs(z - bt0._snap_z_to_priya_grid(z)) <= 0.05, f"{sim} {snap} too far off-grid"
-    # ns0.907: the on-grid snaps survive, the off-grid extras (snap_015 z3.27, snap_018 z2.67) are gone
-    n907 = [snap for sim, snap, sd, raw in pairs if "ns0.907Ap1.5e-09" in sim]
-    assert 16 in n907 and 15 not in n907, "ns0.907 should keep snap_016 (z3.2), drop snap_015 (z3.27)"
-    assert 19 in n907 and 18 not in n907, "ns0.907 should keep snap_019 (z2.6), drop snap_018 (z2.67)"
+    # ns0.907: snaps 16..19 hold z 3.2, 3.0, 2.8, 2.6 (17 and 18 relabelled from their raw headers, S4/F8 repair);
+    # snap_015 has no grid_480 raw file and is not discovered
+    n907 = sorted(snap for sim, snap, sd, raw in pairs if "ns0.907Ap1.5e-09" in sim)
+    assert {16, 17, 18, 19} <= set(n907) and 15 not in n907, n907
     print(f"OK discovery dedup: {len(pairs)} LF pairs, one per (sim,z_grid)")
 
 
@@ -416,8 +400,6 @@ if __name__ == "__main__":
     test_dndx_class_edges_match_fine_nhi_edges()
     test_locate_raw_tau_file_finds_grid_file()
     test_locate_raw_tau_file_returns_none_when_missing()
-    test_raw_spectra_index_ns0907_ladder_offset()
-    test_locate_raw_tau_file_ns0907_snap17_maps_to_spectra018()
     test_snap_z_to_priya_grid()
     test_grid_in_dir_requires_grid_480()
     test_discover_lf_pairs_sorted_no_hires()
