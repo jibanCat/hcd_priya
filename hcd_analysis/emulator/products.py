@@ -98,3 +98,14 @@ def load_mf_product(path, *, lf_ckpt_sha256, lf_cache_sha256):
     if prov.get("res_corr") != "off (NORC)":
         raise ProductRefused(f"{path}: res_corr is retired in the gate E forward (provenance {prov.get('res_corr')!r})")
     return ModeMF.from_tables(tables), k_com, prov
+
+
+def dla_core_at(k_data, k_grid, core_grid):
+    """The DLA core (a fixed function of physical k on its grid) at data k: linear interpolation in ln k over the finite
+    grid points; refuses k outside the finite part (gate E amendment A1 rev 1 section 4)."""
+    g, c = np.asarray(k_grid, float), np.asarray(core_grid, float)
+    fin = np.isfinite(c)
+    kd = np.asarray(k_data, float)
+    if np.any(kd < g[fin][0]) or np.any(kd > g[fin][-1]) or not np.all(fin[(g >= kd.min()) & (g <= kd.max())]):
+        raise ValueError("data k outside the finite DLA-core grid")
+    return np.interp(np.log(kd), np.log(g[fin]), c[fin])

@@ -14,7 +14,7 @@ import jax.numpy as jnp
 
 from hcd_analysis.emulator import forward as FW
 from hcd_analysis.emulator.data import PARAM_LIMITS
-from tests.test_gateE_e1_e4 import GATEC, MF, _inputs, _need, _theta_set, prod_ctx  # noqa: F401
+from tests.test_gateE_e1_e4 import DLA_CORE, GATEC, MF, _inputs, _need, _theta_set, prod_ctx  # noqa: F401
 
 RECON = Path(__file__).with_name("gate_e_reconstruction.py")
 ALLOWED = {"json", "pickle", "numpy", "jax", "equinox", "h5py", "hcd_analysis.emulator.model"}
@@ -41,6 +41,8 @@ def test_e2_forward_equals_independent_reconstruction(prod_ctx):
     members = [R.load_member(f"{GATEC}/prod_repaired_seed{i}") for i in range(5)]
     tables, _, _ = load_mode_mf(MF)          # the product's arrays only; evaluated by R.mf_g
     tau0, alpha, cores = _inputs(prod_ctx)
+    with np.load(DLA_CORE) as f:              # the product's arrays only; read by R.core_at
+        core_grid = {l.name: (np.asarray(f["k_grid"]), np.asarray(f[f"core_{l.name}"])) for l in prod_ctx.legs}
     zg = np.asarray(prod_ctx.z_global)
     worst = 0.0
     for th in _theta_set():
@@ -54,7 +56,7 @@ def test_e2_forward_equals_independent_reconstruction(prod_ctx):
                         dla_forward_frac=float(getattr(leg, "dla_forward_frac", 1.0)))
             nuis = {k: (np.asarray(v) if not isinstance(v, (tuple, float)) else v) for k, v in NUIS.items()}
             P_rc = R.reconstruct_leg(members, tables, legd, np.asarray(th), np.asarray(tau0)[sel],
-                                     np.asarray(alpha)[sel], np.asarray(cores[leg.name]), PARAM_LIMITS, nuis)
+                                     np.asarray(alpha)[sel], core_grid[leg.name], PARAM_LIMITS, nuis)
             keep = np.isfinite(np.asarray(leg.P_data))
             worst = max(worst, float(np.max(np.abs(P_fw[keep] / P_rc[keep] - 1))))
     assert worst <= 1e-10, worst

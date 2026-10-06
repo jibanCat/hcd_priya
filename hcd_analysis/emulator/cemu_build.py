@@ -10,6 +10,7 @@ from typing import NamedTuple
 import numpy as np
 
 from .kcoord import kbounds_over_box
+from .products import dla_core_at  # noqa: F401  (the reader; builders and tests use it from here too)
 
 
 def load_loo_ensemble_residuals(eval_dir, d, sims=None, n_members=5):
@@ -347,16 +348,6 @@ def dla_core_z(kfkms, core, z_rows, z, k_grid=DLA_CORE_GRID):
 def dla_core_leg(kfkms, core, z_rows, leg_z, k_grid=DLA_CORE_GRID):
     """One core per leg: the mean over the leg's z of ``dla_core_z`` (NaN where any z is uncovered)."""
     return np.mean([dla_core_z(kfkms, core, z_rows, float(z), k_grid) for z in leg_z], axis=0)
-
-
-def dla_core_at(k_data, k_grid, core_grid):
-    """The core at data k: linear interpolation in ln k on the fixed grid; refuses k outside the finite part."""
-    g, c = np.asarray(k_grid, float), np.asarray(core_grid, float)
-    fin = np.isfinite(c)
-    kd = np.asarray(k_data, float)
-    if np.any(kd < g[fin][0]) or np.any(kd > g[fin][-1]) or not np.all(fin[(g >= kd.min()) & (g <= kd.max())]):
-        raise ValueError("data k outside the finite DLA-core grid")
-    return np.interp(np.log(kd), np.log(g[fin]), c[fin])
 
 
 def bracket_modes(k_com_hmpc, z, k_lo, k_hi, lo_unit, hi_unit):

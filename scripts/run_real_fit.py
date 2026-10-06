@@ -306,16 +306,9 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
     leg = ctx.legs[0]
     n_real = int(np.isfinite(np.asarray(leg.P_data)).sum())
 
-    # the per-leg DLA core for the REAL forward = the fiducial (mean held-out) core build_legb_ctx
-    # already assembled (ctx.dla_core_leg, shape (n_z, K)). For a real fit there is NO sim-truth
-    # core; the fiducial cache DLA core is the production DLA-excess template the closure validated
-    # against. _data_loglik_legcore wants ONE (K,) core per leg (z-mean — the documented MVP the
-    # closure's _mock_core_per_leg also uses: the per-z core variation is tiny vs the P1D, and on
-    # KS/eBOSS the forward DLA term is 0 anyway via dla_forward_frac).
-    import jax.numpy as jnp
-    fid = np.asarray(ctx.dla_core_leg[leg.name])               # (n_z, K) or (K,)
-    core_k = jnp.asarray(fid.mean(axis=0) if fid.ndim == 2 else fid)
-    core_per_leg = {leg.name: core_k}
+    # the per-leg DLA core for the REAL forward: the physical-k z-mean core of the dla_core product at the leg's bins
+    # (gate E amendment A1 rev 1 section 4), as build_legb_ctx placed it (ctx.dla_core_leg, shape (N,)).
+    core_per_leg = {leg.name: ctx.dla_core_leg[leg.name]}
 
     key0 = jax.random.PRNGKey(int(seed))
     # P0 (plan-to-unblind 3A): python hash() is SipHash-salted per process, so the recorded seed

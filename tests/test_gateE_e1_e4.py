@@ -20,6 +20,7 @@ from hcd_analysis.emulator.data import PARAM_LIMITS, sampling_unit_bounds
 ROOT = Path(__file__).resolve().parents[1]
 GATEC = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC"
 MF = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/mf/gateD/mf_modes_all6.npz"
+DLA_CORE = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/gateE/products/dla_core_gateE.npz"   # A1 rev 1 s4 (PU-0071)
 L_BOX = 120.0
 
 
@@ -33,8 +34,9 @@ def _need(*paths):
 
 @pytest.fixture(scope="module")
 def prod_ctx():
-    _need(f"{GATEC}/prod_repaired_seed0.eqx", MF)
+    _need(f"{GATEC}/prod_repaired_seed0.eqx", MF, DLA_CORE)
     ctx, d = CL.build_legb_ctx(ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
+                               dla_core_product=DLA_CORE,
                                ks_kwargs=dict(resolution_float=True, k_max=0.065), with_eboss=True, metals_on=True,
                                sample_res=True)
     return ctx
@@ -70,7 +72,7 @@ def _inputs(ctx):
     zg = np.asarray(ctx.z_global)
     tau0 = jnp.asarray(ctx.tau0_mu)
     alpha = jnp.tile(jnp.asarray(ctx.alpha_hcd_mu)[None, :], (zg.size, 1))
-    cores = {l.name: jnp.asarray(np.asarray(ctx.dla_core_leg[l.name]).mean(0)) for l in ctx.legs}
+    cores = {l.name: ctx.dla_core_leg[l.name] for l in ctx.legs}            # the data-bin core (A1 rev 1 s4)
     return tau0, alpha, cores
 
 
@@ -224,7 +226,7 @@ def test_e1c_static_scan_of_the_production_import_graph():
 
 # ---------------------------------------------------------------------------------------------------------- E1 (d)
 def test_e1d_dynamic_call_graph_touches_no_retired_code():
-    _need(f"{GATEC}/prod_repaired_seed0.eqx", MF)
+    _need(f"{GATEC}/prod_repaired_seed0.eqx", MF, DLA_CORE)
     deny_files = ("multifidelity.py", "legacy_forward_pre2026_10.py", "closure_legb_figs.py")
     deny_names = {"predict_P_obs_on_leg", "build_mf_correction", "load_lf_backbone", "_predict_P_obs_mf",
                   "_emu_var_on_cache", "data_loglik", "load_mf_floor", "load_mf_emucoh", "load_mf_shape"}
@@ -237,6 +239,7 @@ def test_e1d_dynamic_call_graph_touches_no_retired_code():
     sys.setprofile(prof)
     try:
         ctx, _ = CL.build_legb_ctx(ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
+                                   dla_core_product=DLA_CORE,
                                    ks_kwargs=dict(resolution_float=True, k_max=0.065), with_eboss=True,
                                    metals_on=True, sample_res=True)
         tau0, alpha, cores = _inputs(ctx)

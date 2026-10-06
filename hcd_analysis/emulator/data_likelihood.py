@@ -767,6 +767,17 @@ def emu_var_modes(P_filt, z, tau0, alpha_hcd, *, dla_core, alpha_centres, sigma_
     return emu_var * cemu_inflate
 
 
+def emu_var_at_data(A, core, rho_d, alpha_hcd, cemu_inflate=1.0):
+    """The T1 cross-class emulator variance at data bins (gate E amendment A1 rev 1 section 1): sum_cc' coef_c coef_c'
+    rho_cc' A_c A_c' with A (4, n) the LF per-class P_filt bound to the bins, the DLA core (n,) added to the DLA
+    amplitude, rho_d (4, 4, n) the tau0-interpolated block bound to the bins, coef = (1 - sum alpha, alpha)."""
+    A = jnp.asarray(A)
+    A = A.at[3].add(jnp.asarray(core))
+    a = jnp.asarray(alpha_hcd)
+    coef = jnp.concatenate([jnp.atleast_1d(1.0 - jnp.sum(a)), a])
+    return jnp.einsum("c,d,cdn,cn,dn->n", coef, coef, jnp.nan_to_num(jnp.asarray(rho_d)), A, A) * cemu_inflate
+
+
 # ns is theta9[0] on the unit cube; PRIYA's design box maps it to physical ns.
 # (data.PARAM_LIMITS[0] = [0.8, 1.05]; the floor's ns_box is in PHYSICAL ns.)
 _NS_CUBE_LO, _NS_CUBE_HI = 0.8, 1.05

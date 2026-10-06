@@ -357,7 +357,7 @@ class LegBCtx(NamedTuple):
     """
     model: object
     pf_stats: dict
-    dla_core_leg: dict          # {leg.name: (n_z_leg, Kc)} per-leg DLA core (cache delta[,2])
+    dla_core_leg: dict          # {leg.name: (N,)} the physical-k DLA core at the leg's bins (A1 rev 1 section 4)
     legs: list
     k_com_hmpc: jnp.ndarray
     z_global: np.ndarray
@@ -875,7 +875,7 @@ def _ks_dndx_reference(alpha_mu, xbar_cf, z_global):
 def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
                    metals_on=False, desi_kwargs=None, ks_kwargs=None,
                    with_eboss=False, eboss_kwargs=None,
-                   mf_product=None, t1_product=None, t2_product=None, t3_product=None,
+                   mf_product=None, t1_product=None, t2_product=None, t3_product=None, dla_core_product=None,
                    res_corr_on=False, sample_metals=False, sample_res=False,
                    coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None, a_siiii_max=0.15,
                    metal_prior="uniform", metal_logf_lo=-11.0, metal_logf_hi=-2.0,
@@ -889,21 +889,21 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
 
     The DESI + KS (+ eBOSS) legs; the LF ensemble ``ensemble_ckpts`` (schema-2.0 checkpoint prefixes; a single model is
     a one-member list); the mode-axis MF product ``mf_product`` (refused unless fitted against exactly this ensemble
-    and the production cache); the box modes ``k_com_hmpc`` (identical across checkpoints, cache and MF); the
-    mode-indexed DLA core per leg z; the priors (unchanged). Every kept data bin is checked against the simulated
+    and the production cache); the box modes ``k_com_hmpc`` (identical across checkpoints, cache and MF); the DLA core
+    at each leg's bins (``dla_core_product``, required when a leg forwards the DLA class; amendment A1 rev 1 section 4); the T1 and T3 products (``t1_product``, ``t3_product``; sections 1 and 3); the priors
+    (unchanged). Every kept data bin is checked against the simulated
     modes over the whole sampling box. ``desi_kwargs`` / ``ks_kwargs`` / ``eboss_kwargs`` override the loader cuts; the
     KS k_max must be explicit (production 0.065).
 
     Retired with the single-grid forward: ``ckpt``, the pre-2026-10 error vectors, ``with_mf`` / ``mf_fold`` (the
     runtime MF rebuild), ``mf_shape``, the old k-coherence table and res_corr (``res_corr_on`` must be False; the
-    alpha_res sites stay pinned). ``t1/t2/t3_product`` are wired by the amendment that registers their definitions
-    (S10-S12)."""
+    alpha_res sites stay pinned). ``t2_product`` is held for PI ruling S14 (amendment A1 rev 1 section 2)."""
     from .ensemble import load_ensemble
     from . import products as PR
     if res_corr_on:
         raise ValueError("res_corr is retired in the gate E forward (NORC): res_corr_on must be False")
-    if any(p is not None for p in (t1_product, t2_product, t3_product)):
-        raise NotImplementedError("emulator-error products wait for the S10-S12 rulings and the gate E amendment")
+    if t2_product is not None:
+        raise NotImplementedError("T2 is held for PI ruling S14 (gate E amendment A1 rev 1 section 2)")
     _ks_kw = dict(ks_kwargs or {})
     if "k_max" not in _ks_kw:
         raise ValueError("the KS k_max must be explicit (CACHE_KMAX and the NORC auto-cap are retired; production 0.065)")
@@ -955,13 +955,18 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
             lf_cache_sha256=T._sha256_or_none(CACHE_PATH))
         if not np.allclose(mf_k, k_com, rtol=1e-14, atol=0):
             raise ValueError("the MF product's k_com_hmpc differ from the checkpoints'")
-    # per-leg DLA core (cache delta[:, 2]) per leg z on the mode axis (production definition); the forward places it
-    # at data k with the query binding.
-    dla_core_leg = _fiducial_dla_core_per_leg(d, legs)
+    # the DLA core at each leg's bins: a fixed function of physical k (amendment A1 rev 1 section 4).
+    cache_sha = T._sha256_or_none(CACHE_PATH)
+    dla_core_leg, dla_digest = _dla_core_data_per_leg(legs, dla_core_product, cache_sha)
+    rho_zb_per_leg = t1_digest = t3_per_leg = t3_digest = None
+    if t1_product is not None:
+        rho_zb_per_leg, alpha_centres, t1_digest = _t1_per_leg(t1_product, legs, k_com, cache_sha)
+    if t3_product is not None:
+        t3_per_leg, t3_digest = _t3_per_leg(t3_product, legs, cache_sha)
     product_digests = {"lf_ensemble_eqx_sha256": [T._sha256_or_none(p + ".eqx") for p in ensemble_ckpts],
                        "mf_product_sha256": None if mf_product is None else T._sha256_or_none(mf_product),
-                       "cache_sha256": T._sha256_or_none(CACHE_PATH),
-                       "t1_product_sha256": None, "t2_product_sha256": None, "t3_product_sha256": None}
+                       "cache_sha256": cache_sha, "dla_core_product_sha256": dla_digest,
+                       "t1_product_sha256": t1_digest, "t2_product_sha256": None, "t3_product_sha256": t3_digest}
 
     # priors on the GLOBAL z grid: Becker+2013 τ₀ (production anchor) + HCD incidence.
     tau0_mu, tau0_sigma = meanflux_tau0_prior(jnp.asarray(z_global), center="becker13")
@@ -1058,10 +1063,10 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
 
     ctx = LegBCtx(
         model=model, pf_stats=pf, dla_core_leg=dla_core_leg, legs=legs, k_com_hmpc=jnp.asarray(k_com),
-        z_global=z_global, rho_zb_per_leg=None,
+        z_global=z_global, rho_zb_per_leg=rho_zb_per_leg,
         alpha_centres=alpha_centres, tau0_mu=tau0_mu, tau0_sigma=tau0_sigma,
         alpha_hcd_mu=jnp.asarray(alpha_mu), alpha_hcd_sigma=jnp.asarray(alpha_sd),
-        cemu_inflate=float(cemu_inflate), mf=mf_obj, t2_per_leg=None, t3_per_leg=None,
+        cemu_inflate=float(cemu_inflate), mf=mf_obj, t2_per_leg=None, t3_per_leg=t3_per_leg,
         theta_unit_lo=theta_unit_lo, theta_unit_hi=theta_unit_hi, product_digests=product_digests,
         sample_metals=bool(sample_metals), sample_res=bool(sample_res),
         f_res_amp_sigma=(None if f_res_amp_sigma is None else float(f_res_amp_sigma)),
@@ -1268,6 +1273,74 @@ def _fiducial_dla_core_per_leg(d, legs):
             core_z[iz] = np.nanmean(delta[sel, 2], axis=0)
         out[leg.name] = jnp.asarray(np.nan_to_num(core_z))
     return out
+
+
+def _dla_core_data_per_leg(legs, product, cache_sha256):
+    """({leg.name: (N,) the physical-k DLA core at the leg's bins}, digest) from the ``dla_core`` product (built from
+    this cache, for this leg's z; amendment A1 rev 1 section 4). The product is required whenever a leg forwards the DLA
+    class (``dla_forward_frac`` > 0); without one, legs that do not forward it get an exact zero core (the term is
+    multiplied by 0). Kept bins must lie inside the core's finite grid; bins that are not kept get the clamped edge
+    value (finite, never used)."""
+    from . import products as PR
+    if product is None:
+        need = [leg.name for leg in legs if float(getattr(leg, "dla_forward_frac", 1.0)) > 0.0]
+        if need:
+            raise ValueError(f"the DLA-core product is required: {need} forward the DLA class (A1 rev 1 section 4)")
+        return ({leg.name: jnp.zeros(np.asarray(leg.k).shape) for leg in legs},
+                "not used (no leg forwards the DLA class)")
+    arr, _, prov = PR.load_product(product, "dla_core", cache_sha256=cache_sha256)
+    grid = np.asarray(arr["k_grid"], float)
+    out = {}
+    for leg in legs:
+        want = [float(z) for z in np.asarray(leg.z)]
+        got = prov.get("leg_z", {}).get(leg.name)
+        if got is None or len(got) != len(want) or not np.allclose(got, want, atol=1e-6):
+            raise ValueError(f"the DLA-core product's z-mean for {leg.name} is over z {got}, the leg has z {want}")
+        c = np.asarray(arr[f"core_{leg.name}"], float)
+        fin = np.isfinite(c)
+        k = np.asarray(leg.k, float)
+        keep = np.isfinite(np.asarray(leg.P_data))
+        PR.dla_core_at(k[keep], grid, c)                               # refuses kept bins outside the finite grid
+        out[leg.name] = jnp.asarray(np.interp(np.log(k), np.log(grid[fin]), c[fin]))
+    return out, T._sha256_or_none(product)
+
+
+def _t1_per_leg(product, legs, k_com, cache_sha256):
+    """({leg.name: (n_z, 4, 4, K, B)}, tau0 centres (B,), digest) from the ``cemu_t1`` product: each leg z takes the
+    product's z cell within 0.05 (amendment A1 rev 1 section 1)."""
+    from . import products as PR
+    arr, k_p, _ = PR.load_product(product, "cemu_t1", cache_sha256=cache_sha256)
+    if not np.allclose(np.asarray(k_p), np.asarray(k_com), rtol=1e-14, atol=0):
+        raise ValueError("the T1 product's k_com_hmpc differ from the checkpoints'")
+    rho, zc = np.asarray(arr["rho"], float), np.asarray(arr["z_cells"], float)
+    out = {}
+    for leg in legs:
+        idx = []
+        for z in np.asarray(leg.z, float):
+            j = np.where(np.abs(zc - z) < 0.05)[0]
+            if j.size != 1:
+                raise ValueError(f"{leg.name} z {z} has no T1 z cell")
+            idx.append(int(j[0]))
+        out[leg.name] = jnp.asarray(np.moveaxis(rho[idx], 1, -1))
+    return out, jnp.asarray(np.asarray(arr["alpha_centres"], float)), T._sha256_or_none(product)
+
+
+def _t3_per_leg(product, legs, cache_sha256):
+    """({leg.name: (U (N, m), w (m,))}, digest) from the ``cemu_t3`` product (fixed-physical-k representation P, on the
+    leg's exact bins; a leg absent from the product carries no T3)."""
+    from . import products as PR
+    arr, _, prov = PR.load_product(product, "cemu_t3", cache_sha256=cache_sha256)
+    if prov.get("representation") != "P":
+        raise NotImplementedError(f"T3 representation {prov.get('representation')!r}: only P is wired")
+    out = {}
+    for leg in legs:
+        if f"U_{leg.name}" not in arr:
+            continue
+        if not (np.allclose(arr[f"k_{leg.name}"], np.asarray(leg.k), rtol=1e-12, atol=0)
+                and np.allclose(arr[f"z_{leg.name}"], np.asarray(leg.z_row), atol=1e-9)):
+            raise ValueError(f"the T3 product's {leg.name} bins differ from the leg's bins")
+        out[leg.name] = (jnp.asarray(arr[f"U_{leg.name}"]), jnp.asarray(arr[f"w_{leg.name}"]))
+    return out, T._sha256_or_none(product)
 
 
 def _assert_bins_inside_modes(legs, k_com_hmpc, theta_unit_lo, theta_unit_hi):

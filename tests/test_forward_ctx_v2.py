@@ -11,7 +11,7 @@ import pytest
 from hcd_analysis.emulator import closure_legb as CL
 from hcd_analysis.emulator import forward as FW
 from hcd_analysis.emulator.likelihood import gaussian_loglik
-from tests.test_forward_v2 import KCOM, _emu, _leg, _t1
+from tests.test_forward_v2 import KCOM, _core_data, _emu, _leg, _t1
 
 
 def _ctx(model, pf, legs, z_global, rho_per_leg=None, ac=None):
@@ -40,12 +40,12 @@ def test_loglik_core_is_predict_leg_plus_the_gaussian_on_kept_rows():
     ctx = _ctx(model, pf, [a, b], zg, {"DESI": rho_a, "KS": rho_b}, ac)
     th = jnp.asarray(np.full(9, 0.45)); tau0 = jnp.asarray([0.25, 0.4, 0.6])
     alpha = jnp.asarray([[0.05, 0.02, 0.004], [0.06, 0.025, 0.005], [0.08, 0.03, 0.006]])
-    cores = {"DESI": core, "KS": core}
+    cores = {"DESI": _core_data(a, th, core), "KS": _core_data(b, th, core)}
     got = CL._data_loglik_legcore(ctx, th, tau0, alpha, [a, b], cores)
     expect = 0.0
     for leg, rho, sel in ((a, rho_a, [0, 1]), (b, rho_b, [1, 2])):
         out = FW.predict_leg(model, th, tau0[jnp.asarray(sel)], alpha[jnp.asarray(sel)], leg=leg, k_com=KCOM,
-                             pf_stats=pf, dla_core=core, t1=(rho, ac))
+                             pf_stats=pf, dla_core=cores[leg.name], t1=(rho, ac))
         keep = np.where(np.isfinite(np.asarray(leg.P_data)))[0]
         expect += gaussian_loglik(jnp.asarray(np.asarray(leg.P_data)[keep]) - out.P_model[keep],
                                   out.C_total[jnp.ix_(keep, keep)])
@@ -57,7 +57,7 @@ def test_kept_bins_outside_the_modes_give_minus_inf_with_finite_gradients():
     leg = _leg([3.0], k_lo=1.2e-3, k_hi=0.12, n_per_z=10)
     ctx = _ctx(model, pf, [leg], [3.0])
     th = jnp.asarray(np.full(9, 0.5))
-    args = (jnp.asarray([0.3]), jnp.asarray([[0.05, 0.02, 0.004]]), [leg], {"DESI": core})
+    args = (jnp.asarray([0.3]), jnp.asarray([[0.05, 0.02, 0.004]]), [leg], {"DESI": jnp.zeros(leg.k.size)})
     ll, aux = CL._data_loglik_legcore(ctx, th, *args, return_aux=True)
     assert float(ll) == -np.inf and int(aux["n_out"]) > 0
     g = jax.grad(lambda t: CL._data_loglik_legcore(ctx, t, *args))(th)
@@ -72,7 +72,8 @@ def test_out_of_range_bins_that_are_not_kept_are_not_refused():
     leg = leg._replace(P_data=Pd)
     ctx = _ctx(model, pf, [leg], [3.0])
     ll, aux = CL._data_loglik_legcore(ctx, jnp.asarray(np.full(9, 0.5)), jnp.asarray([0.3]),
-                                      jnp.asarray([[0.05, 0.02, 0.004]]), [leg], {"DESI": core}, return_aux=True)
+                                      jnp.asarray([[0.05, 0.02, 0.004]]), [leg], {"DESI": jnp.zeros(leg.k.size)},
+                                      return_aux=True)
     assert np.isfinite(float(ll)) and int(aux["n_out"]) == 0
 
 
@@ -86,10 +87,72 @@ def test_build_time_box_check():
     CL._assert_bins_inside_modes([bad._replace(P_data=Pd)], KCOM, np.zeros(9), np.ones(9))   # only kept bins
 
 
-def test_fiducial_dla_core_needs_no_velocity_grid():
-    d = {"z_grid": np.array([3.0, 3.0, 3.2]), "delta": np.random.default_rng(0).uniform(0, 1, (3, 3, 172))}
-    out = CL._fiducial_dla_core_per_leg(d, [_leg([3.0])])
-    np.testing.assert_allclose(np.asarray(out["DESI"])[0], d["delta"][:2, 2].mean(0))
+def _cache_rows(zs=(3.0, 3.0, 3.2), seed=0):
+    rng = np.random.default_rng(seed)
+    kf = np.stack([np.linspace(4.0e-4, 0.095, 172) * s for s in (1.0, 1.05, 0.97)])
+    return {"z_grid": np.asarray(zs), "delta": rng.uniform(0, 1, (3, 3, 172)), "kfkms": kf}
+
+
+def test_dla_core_product_is_required_when_a_leg_forwards_the_dla_class():
+    with pytest.raises(ValueError, match="DLA-core product"):
+        CL._dla_core_data_per_leg([_leg([3.0])], None, "cache")                    # DESI-like: dla_forward_frac 1
+    out, digest = CL._dla_core_data_per_leg([_leg([3.0], name="KS", dff=0.0)], None, "cache")
+    assert np.all(np.asarray(out["KS"]) == 0.0) and out["KS"].shape == (9,) and digest.startswith("not used")
+
+
+def test_dla_core_product_is_provenance_checked_and_matches_the_legs_z(tmp_path):
+    from hcd_analysis.emulator import cemu_build as CB
+    from hcd_analysis.emulator import products as PRD
+    from hcd_analysis.emulator.products import save_product
+    d = _cache_rows()
+    leg = _leg([3.0])
+    c = CB.dla_core_leg(d["kfkms"], d["delta"][:, 2], d["z_grid"], [3.0], CB.DLA_CORE_GRID)
+    prov = dict(code_commit="x", cache_sha256="cache", inputs={}, row_rule="A1 s4", leg_z={"DESI": [3.0]})
+    path = str(tmp_path / "core.npz")
+    save_product(path, "dla_core", k_com_hmpc=KCOM, provenance=prov, k_grid=CB.DLA_CORE_GRID, core_DESI=c)
+    out, digest = CL._dla_core_data_per_leg([leg], path, "cache")
+    np.testing.assert_allclose(np.asarray(out["DESI"]), PRD.dla_core_at(leg.k, CB.DLA_CORE_GRID, c), rtol=1e-13)
+    assert len(digest) == 64
+    with pytest.raises(ValueError, match="z"):
+        CL._dla_core_data_per_leg([_leg([3.0, 3.2])], path, "cache")      # the product's z-mean is another leg's
+    with pytest.raises(Exception):
+        CL._dla_core_data_per_leg([leg], path, "another-cache")
+
+
+def test_t1_product_maps_leg_z_to_its_cells(tmp_path):
+    from hcd_analysis.emulator.products import save_product
+    rng = np.random.default_rng(3)
+    zc = np.round(np.arange(2.2, 4.61, 0.2), 1)
+    rho = rng.uniform(0, 1e-4, (zc.size, 1, 4, 4, 172))
+    prov = dict(code_commit="x", cache_sha256="cache", inputs={}, row_rule="A1 s1")
+    path = str(tmp_path / "t1.npz")
+    save_product(path, "cemu_t1", k_com_hmpc=KCOM, provenance=prov, rho=rho, z_cells=zc, alpha_centres=np.array([1.0]))
+    per_leg, ac, digest = CL._t1_per_leg(path, [_leg([2.4, 3.8])], KCOM, "cache")
+    assert per_leg["DESI"].shape == (2, 4, 4, 172, 1) and np.asarray(ac).tolist() == [1.0]
+    np.testing.assert_array_equal(np.asarray(per_leg["DESI"])[1, ..., 0], rho[8, 0])
+    with pytest.raises(ValueError, match="cell"):
+        CL._t1_per_leg(path, [_leg([5.0])], KCOM, "cache")
+
+
+def test_t3_product_is_bound_to_the_legs_exact_bins(tmp_path):
+    from hcd_analysis.emulator.products import save_product
+    leg = _leg([2.6, 3.4])
+    rng = np.random.default_rng(4)
+    U, w = rng.normal(0, 0.01, (leg.k.size, 3)), rng.uniform(0.5, 1, 3)
+    prov = dict(code_commit="x", cache_sha256="cache", inputs={}, row_rule="A1 s3", representation="P")
+    path = str(tmp_path / "t3.npz")
+    save_product(path, "cemu_t3", k_com_hmpc=KCOM, provenance=prov, U_DESI=U, w_DESI=w, k_DESI=leg.k, z_DESI=leg.z_row)
+    per_leg, digest = CL._t3_per_leg(path, [leg, _leg([3.0], name="eBOSS")], "cache")
+    np.testing.assert_array_equal(np.asarray(per_leg["DESI"][0]), U)
+    assert "eBOSS" not in per_leg                                       # production: no T3 on eBOSS
+    moved = leg._replace(k=leg.k * 1.001)
+    with pytest.raises(ValueError, match="bins"):
+        CL._t3_per_leg(path, [moved], "cache")
+
+
+def test_t2_product_is_held_for_the_pi_ruling():
+    with pytest.raises(NotImplementedError, match="S14"):
+        CL.build_legb_ctx(ensemble_ckpts=["x"], t2_product="t2.npz", ks_kwargs={"k_max": 0.065})
 
 
 def test_retired_paths_are_gone_and_mock_builders_wait_for_gate_f():
@@ -110,12 +173,12 @@ def test_chain_rescore_refuses_draws_with_bins_outside_the_modes():
                "alpha_hcd_z": np.tile(np.array([0.05, 0.02, 0.004]), (2, 1, 1))}
     ok = _leg([3.0], k_lo=1.2e-3, k_hi=0.05)
     ctx = _ctx(model, pf, [ok], [3.0])._replace(fix_alpha_res=True, metal_prior="uniform")
-    ll = RF._loglik_chain(ctx, {"DESI": core}, samples, None)
+    ll = RF._loglik_chain(ctx, {"DESI": jnp.zeros(ok.k.size)}, samples, None)
     assert np.asarray(ll).shape == (2,) and np.all(np.isfinite(np.asarray(ll)))
     bad = _leg([3.0], k_lo=1.2e-3, k_hi=0.12)
     ctx_bad = _ctx(model, pf, [bad], [3.0])._replace(fix_alpha_res=True, metal_prior="uniform")
     with pytest.raises(ValueError, match="outside the simulated modes"):
-        RF._loglik_chain(ctx_bad, {"DESI": core}, samples, None)
+        RF._loglik_chain(ctx_bad, {"DESI": jnp.zeros(bad.k.size)}, samples, None)
 
 
 def test_forward_signature_and_stamp_carry_the_coordinate_and_the_product_digests():

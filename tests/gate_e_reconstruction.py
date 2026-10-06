@@ -87,10 +87,16 @@ def metal_model_cplus(k, z, tau0, nodes_z, f3, f2, kk3, kk2):
     return metal(k, li(f3) / omF, li(f2) / omF, li(kk3), li(kk2))
 
 
+def core_at(kd, grid, core):
+    """The DLA core (a fixed function of physical k on its grid) at k: linear in ln k over the finite grid points."""
+    fin = np.isfinite(core)
+    return np.interp(np.log(kd), np.log(np.asarray(grid)[fin]), np.asarray(core)[fin])
+
+
 def reconstruct_leg(members, tables, leg, theta_unit, tau0_leg, alpha_leg, core, param_limits, nuis):
-    """Model P1D on every bin of ``leg`` (dict of arrays: z, k, z_idx, R_z, metals_on, resolution_on, dla_forward_frac)."""
+    """Model P1D on every bin of ``leg`` (dict of arrays: z, k, z_idx, R_z, metals_on, resolution_on, dla_forward_frac);
+    ``core`` = (k_grid, core on the grid), the physical-k DLA core product's arrays."""
     out = np.zeros(len(leg["k"]))
-    K = np.asarray(core).shape[-1]
     alpha_leg = np.asarray(alpha_leg, float) * np.array([1.0, 1.0, float(leg["dla_forward_frac"])])[None, :]
     for iz, z in enumerate(leg["z"]):
         rows = np.where(np.asarray(leg["z_idx"]) == iz)[0]
@@ -100,9 +106,9 @@ def reconstruct_leg(members, tables, leg, theta_unit, tau0_leg, alpha_leg, core,
         P = ensemble_P_filt(members, theta_unit, float(z), float(tau0_leg[iz]))
         if tables is not None:
             P = P * np.exp(mf_g(tables, float(z), float(tau0_leg[iz])))
-        kn = k_modes(float(z), theta_unit, param_limits, K)
+        kn = k_modes(float(z), theta_unit, param_limits, P.shape[-1])
         Pc = np.stack([np.interp(kd, kn, P[c]) for c in range(4)])
-        cr = np.interp(kd, kn, np.asarray(core))
+        cr = core_at(kd, core[0], core[1])
         a = alpha_leg[iz]
         Pz = Pc[0] + a[0] * (Pc[1] - Pc[0]) + a[1] * (Pc[2] - Pc[0]) + a[2] * (Pc[3] + cr - Pc[0])
         if leg["metals_on"]:

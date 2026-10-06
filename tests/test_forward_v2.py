@@ -2,7 +2,9 @@
 
 Reference: on a single-z leg, the pre-2026-10 forward fed ``cache_k`` = that z's own physical grid for the query theta
 is the correct forward (the incident was feeding ONE grid to every z and theta). The new forward must equal it there,
-and must place every z on its own grid on a multi-z leg. Cache-free (random-init Emulator, synthetic legs)."""
+and must place every z on its own grid on a multi-z leg. Amendment A1 rev 1: the DLA core enters at the data bins (a
+fixed function of physical k; here the legacy mode core bound at the query theta, so the mean stays comparable) and
+T1 is the product of bound factors at the data bins. Cache-free (random-init Emulator, synthetic legs)."""
 import hcd_analysis.emulator  # noqa: F401  x64 before jax
 import jax
 import jax.numpy as jnp
@@ -40,6 +42,16 @@ def _leg(zs, n_per_z=9, k_lo=1.2e-3, k_hi=0.05, metals=False, resolution=False, 
                       dla_forward_frac=dff)
 
 
+def _core_data(leg, th, core_modes):
+    """The leg's data-bin DLA core: the legacy mode-indexed core bound at ``th`` per z (a fixed vector for the forward)."""
+    out = np.zeros(leg.k.size)
+    for iz, z in enumerate(leg.z):
+        rows = np.where(leg.z_idx == iz)[0]
+        b = KC.bind(KC.kgrid(KCOM, float(z), jnp.asarray(th)), jnp.asarray(leg.k[rows]))
+        out[rows] = np.asarray(KC.at_data(b, core_modes))
+    return jnp.asarray(out)
+
+
 NUIS = dict(f_SiIII_nodes=jnp.asarray([0.006, 0.012]), f_SiII_nodes=jnp.asarray([0.002, 0.003]),
             k_SiIII_nodes=jnp.asarray([0.05, 0.04]), k_SiII_nodes=jnp.asarray([0.05, 0.05]), b_res=0.05)
 
@@ -56,7 +68,8 @@ def test_single_z_leg_equals_the_old_forward_on_that_z_grid(z, on):
     grid = np.asarray(KC.kgrid(KCOM, z, th).k_skm)
     P_old, _ = LEG.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=core, cache_k=grid, leg=leg,
                                        require_zresolved=True, **nuis)
-    out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=core, nuis=nuis)
+    out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=_core_data(leg, th, core),
+                         nuis=nuis)
     assert int(out.n_out) == 0
     np.testing.assert_allclose(np.asarray(out.P_model), np.asarray(P_old), rtol=1e-12)
 
@@ -67,7 +80,7 @@ def test_every_z_of_a_leg_is_placed_on_its_own_grid():
     zs = [2.4, 3.2, 4.0]
     leg = _leg(zs)
     tau0 = jnp.asarray([0.2, 0.35, 0.6]); alpha = jnp.asarray([[0.05, 0.02, 0.004]] * 3)
-    out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=core)
+    out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=_core_data(leg, th, core))
     for iz, z in enumerate(zs):
         sub = _leg([z])
         P1, _ = LEG.predict_P_obs_on_leg(model, th, tau0[iz:iz + 1], alpha[iz:iz + 1], pf_stats=pf, dla_core=core,
@@ -84,7 +97,7 @@ def test_bins_outside_the_modes_are_counted():
     th = jnp.asarray(np.full(9, 0.5))
     leg = _leg([3.0], k_lo=2e-4, k_hi=0.12, n_per_z=12)
     out = FW.predict_leg(model, th, jnp.asarray([0.3]), jnp.asarray([[0.05, 0.02, 0.004]]), leg=leg, k_com=KCOM,
-                         pf_stats=pf, dla_core=core)
+                         pf_stats=pf, dla_core=jnp.zeros(leg.k.size))
     kg = KC.kgrid(KCOM, 3.0, th)
     expect = int(np.sum((leg.k < float(kg.k_skm[0])) | (leg.k > float(kg.k_skm[-1]))))
     assert expect > 0 and int(out.n_out) == expect
@@ -98,7 +111,8 @@ def test_mode_axis_mf_multiplies_each_class_before_binding():
     mf = ModeMF.from_tables(t)
     th = jnp.asarray(np.full(9, 0.4)); z = 3.0
     leg = _leg([z]); tau0 = jnp.asarray([0.5]); alpha = jnp.asarray([[0.05, 0.02, 0.004]])
-    out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=core, mf=mf)
+    out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=_core_data(leg, th, core),
+                         mf=mf)
     from hcd_analysis.emulator.predict import predict_P_filt
     x = jnp.concatenate([th, jnp.asarray([(z - 2.0) / 3.4])])
     Pf = predict_P_filt(model, th, (z - 2.0) / 3.4, tau0[0], pf) * jnp.exp(mf(x, tau0[0]))
@@ -114,7 +128,7 @@ def test_z_flat_alpha_is_refused_by_default():
     leg = _leg([2.4, 3.6])
     with pytest.raises(ValueError, match="z-RESOLVED"):
         FW.predict_leg(model, jnp.full(9, 0.5), jnp.asarray([0.2, 0.4]), jnp.asarray([0.05, 0.02, 0.004]), leg=leg,
-                       k_com=KCOM, pf_stats=pf, dla_core=core)
+                       k_com=KCOM, pf_stats=pf, dla_core=jnp.zeros(leg.k.size))
 
 
 def test_metal_factor_at_z_model_cplus_equals_the_formula():
@@ -139,7 +153,10 @@ def _t1(n_z, seed=7, Tb=4):
 
 
 @pytest.mark.parametrize("on", [False, True], ids=["bare", "metals_resolution"])
-def test_t1_variance_equals_the_old_path_on_each_z_grid(on):
+def test_t1_variance_is_the_a1_data_bin_algebra(on):
+    """A1 rev 1 section 1: T1 = fac^2 sum coef coef bind(rho(tau0)) A_c A_c', A_c = bind(P_lf,c), A_DLA += core(k)."""
+    from hcd_analysis.emulator.likelihood import rho_at_tau0
+    from hcd_analysis.emulator.predict import predict_P_filt
     model, pf, core = _emu(5)
     th = jnp.asarray(np.random.default_rng(9).uniform(0.05, 0.95, 9))
     zs = [2.6, 3.4]
@@ -147,23 +164,40 @@ def test_t1_variance_equals_the_old_path_on_each_z_grid(on):
     tau0 = jnp.asarray([0.3, 0.5]); alpha = jnp.asarray([[0.05, 0.02, 0.004], [0.07, 0.03, 0.006]])
     rho, ac = _t1(len(zs))
     nuis = NUIS if on else {}
-    out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=core, nuis=nuis,
+    cd = _core_data(leg, th, core)
+    out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=cd, nuis=nuis,
                          t1=(rho, ac))
     for iz, z in enumerate(zs):
-        sub = _leg([z], metals=on, resolution=on)
-        sub = sub._replace(R_z=np.asarray(leg.R_z)[iz:iz + 1])
-        _, C_old = LEG.predict_P_obs_on_leg(model, th, tau0[iz:iz + 1], alpha[iz:iz + 1], pf_stats=pf, dla_core=core,
-                                           cache_k=np.asarray(KC.kgrid(KCOM, z, th).k_skm), leg=sub,
-                                           rho_zb=rho[iz:iz + 1], alpha_centres=ac, **nuis)
         rows = np.where(leg.z_idx == iz)[0]
-        np.testing.assert_allclose(np.diag(np.asarray(out.C_total))[rows], np.diag(np.asarray(C_old)), rtol=1e-11)
+        kd = jnp.asarray(leg.k[rows])
+        b = KC.bind(KC.kgrid(KCOM, z, th), kd)
+        P_lf = predict_P_filt(model, th, (z - 2.0) / 3.4, tau0[iz], pf)
+        A = np.array(KC.at_data(b, P_lf)); A[3] = A[3] + np.asarray(cd)[rows]
+        rd = np.asarray(KC.at_data(b, rho_at_tau0(rho[iz], ac, z, tau0[iz])))
+        a = np.asarray(alpha[iz]); coef = np.concatenate([[1 - a.sum()], a])
+        fac = np.ones(rows.size)
+        if on:
+            fac = fac * np.asarray(DL.metal_factor_at_z(kd, z, tau0[iz], **{k: v for k, v in NUIS.items() if k != "b_res"}))
+            fac = fac * np.asarray(DL._resolution_factor(kd, leg.R_z[iz], b_res=NUIS["b_res"]))
+        expect = np.einsum("c,d,cdn,cn,dn->n", coef, coef, rd, A, A) * fac ** 2
+        np.testing.assert_allclose(np.diag(np.asarray(out.C_total))[rows] - np.diag(leg.C_data)[rows], expect,
+                                   rtol=1e-11)
+
+
+def test_dla_core_must_be_the_legs_data_bin_vector():
+    model, pf, core = _emu(14)
+    leg = _leg([2.4, 3.6])
+    for bad in (core, jnp.tile(core[None], (2, 1))):                # mode-indexed (K,) or (n_z, K): refused
+        with pytest.raises(ValueError, match="data-bin"):
+            FW.predict_leg(model, jnp.full(9, 0.5), jnp.asarray([0.2, 0.4]), jnp.asarray([[0.05, 0.02, 0.004]] * 2),
+                           leg=leg, k_com=KCOM, pf_stats=pf, dla_core=bad)
 
 
 def test_without_t1_the_covariance_is_the_data_covariance():
     model, pf, core = _emu(6)
     leg = _leg([3.0])
     out = FW.predict_leg(model, jnp.full(9, 0.5), jnp.asarray([0.3]), jnp.asarray([[0.05, 0.02, 0.004]]), leg=leg,
-                         k_com=KCOM, pf_stats=pf, dla_core=core)
+                         k_com=KCOM, pf_stats=pf, dla_core=jnp.zeros(leg.k.size))
     assert np.array_equal(np.asarray(out.C_total), np.asarray(leg.C_data))
 
 
@@ -209,6 +243,13 @@ def test_t3_offdiagonal_term_equals_the_old_dense_path_on_a_z_grid():
     _, C_old = LEG.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=core,
                                        cache_k=np.asarray(KC.kgrid(KCOM, z, th).k_skm), leg=leg, rho_zb=rho,
                                        alpha_centres=ac, mf_emucoh_cov=F, mf_emucoh_offdiag_only=True)
-    out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=core, t1=(rho, ac),
+    cd = _core_data(leg, th, core)
+    out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=cd, t1=(rho, ac),
                          t3=(jnp.asarray(U), jnp.asarray(w)))
-    np.testing.assert_allclose(np.asarray(out.C_total), np.asarray(C_old), rtol=1e-11, atol=1e-22)
+    t1_only = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=cd, t1=(rho, ac))
+    C, C1 = np.asarray(out.C_total), np.asarray(t1_only.C_total)
+    off = ~np.eye(12, dtype=bool)
+    np.testing.assert_allclose(C[off], np.asarray(C_old)[off], rtol=1e-11, atol=1e-22)
+    td = np.diag(F * np.outer(leg.P_data, leg.P_data))
+    np.testing.assert_allclose(np.diag(C), np.diag(leg.C_data) + np.maximum(np.diag(C1) - np.diag(leg.C_data), td),
+                               rtol=1e-12)
