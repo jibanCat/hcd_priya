@@ -72,9 +72,13 @@ def main():
     R = {"criteria": {}, "reports": {}}
 
     # ---------------- C1 coordinate agreement over every evaluated row of every protocol
-    allf = sorted(glob.glob(f"{a.eval_dir}/eval_*.npz"))
+    # C1 is defined on the gate C models of the repaired cache; the historical-cache comparison runs are reported apart
+    # (their F8 rows carry the z = 3.0 file's pixel width by construction).
+    allf = sorted(p for p in glob.glob(f"{a.eval_dir}/eval_*.npz") if "_hist_" not in p)
     c1 = max(float(np.nanmax(load(p)["coord"])) for p in allf)
-    R["criteria"]["C1"] = dict(max_rel=c1, threshold=1e-12, pass_=c1 <= 1e-12, n_files=len(allf))
+    hist_c1 = {p.rsplit("/", 1)[1]: float(np.nanmax(load(p)["coord"])) for p in glob.glob(f"{a.eval_dir}/eval_*_hist_*.npz")}
+    R["criteria"]["C1"] = dict(max_rel=c1, threshold=1e-12, pass_=c1 <= 1e-12, n_files=len(allf),
+                               historical_cache_runs_max=hist_c1)
 
     # ---------------- C2 8-fold historical protocol, repaired cache (and the same code on the historical cache)
     for tag in ("repaired", "hist"):
