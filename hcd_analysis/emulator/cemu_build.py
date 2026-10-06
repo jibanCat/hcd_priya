@@ -10,6 +10,29 @@ import numpy as np
 from .kcoord import kbounds_over_box
 
 
+def load_loo_ensemble_residuals(eval_dir, d, sims=None, n_members=5):
+    """The 60-fold leave-one-simulation-out ENSEMBLE residuals (gate C): for each held-out simulation index, the mean over
+    its n_members evaluations (seed 0 ``eval_loo60_s{NN}.npz``, seeds 1.. ``loo60_ensemble/eval_loo60_s{NN}_seed{S}.npz``)
+    of the per-class fractional residuals at every mode of every one of its cache rows (common truth, so the member
+    mean is the residual of the mean prediction). Returns rows (cache indices), sim, z, alpha_idx, tau0 and r (rows, 4, K)."""
+    sims = range(60) if sims is None else sims
+    out = {k: [] for k in ("rows", "r")}
+    for n in sims:
+        files = [f"{eval_dir}/eval_loo60_s{n:02d}.npz"] + [f"{eval_dir}/loo60_ensemble/eval_loo60_s{n:02d}_seed{s}.npz"
+                                                            for s in range(1, n_members)]
+        ev = [np.load(p, allow_pickle=True) for p in files]
+        rows = np.asarray(ev[0]["rows"])
+        for e in ev[1:]:
+            if not np.array_equal(np.asarray(e["rows"]), rows):
+                raise ValueError(f"members of held-out simulation {n} disagree on rows")
+        out["rows"].append(rows)
+        out["r"].append(np.mean([np.asarray(e["res_cls"], float) for e in ev], axis=0))
+    rows = np.concatenate(out["rows"])
+    return dict(rows=rows, r=np.concatenate(out["r"]), sim=np.asarray(d["sim_name"]).astype(str)[rows],
+                z=np.asarray(d["z_grid"], float)[rows], alpha_idx=np.asarray(d["alpha_idx"])[rows],
+                tau0=np.asarray(d["tau0"], float)[rows])
+
+
 def cv_folds(sim_names, n_folds=10):
     """{simulation name: fold} with the simulations sorted by name and fold = index mod n_folds."""
     names = sorted(set(np.asarray(sim_names).astype(str)))

@@ -70,3 +70,25 @@ def test_bracketing_modes_cover_every_bin_over_the_box():
             k = np.asarray(k_skm_from_kcom(KCOM, 3.0, hub, om))
             u_lo, u_hi = k_lo / k[0], k_hi / k[0]
             assert lo <= int(np.floor(u_lo)) and int(np.ceil(u_hi)) <= hi
+
+
+EVAL = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/gateC_eval"
+
+
+def test_loo_ensemble_residuals_are_member_means_on_the_held_out_rows():
+    import os
+    from tests.gate_helpers import real_cache_path
+    from hcd_analysis.emulator.data import load_cache
+    if not os.path.exists(f"{EVAL}/eval_loo60_s00.npz"):
+        if os.environ.get("HCD_GATE_RUN") == "1":
+            pytest.fail("gate C evaluations absent")
+        pytest.skip("gate C evaluations absent")
+    d = load_cache(real_cache_path("lf"))
+    R = CB.load_loo_ensemble_residuals(EVAL, d, sims=[0, 7])
+    assert R["r"].shape == (720, 4, K) and np.all(np.isfinite(R["r"]))
+    m = [np.load(f"{EVAL}/eval_loo60_s07.npz", allow_pickle=True)["res_cls"]]
+    m += [np.load(f"{EVAL}/loo60_ensemble/eval_loo60_s07_seed{s}.npz", allow_pickle=True)["res_cls"] for s in range(1, 5)]
+    np.testing.assert_allclose(R["r"][360:], np.mean(m, axis=0), rtol=1e-14)
+    names = np.asarray(d["sim_name"]).astype(str)
+    assert len(set(names[R["rows"][:360]])) == 1 and len(set(names[R["rows"][360:]])) == 1
+    assert set(R["sim"][:360]) == {names[R["rows"][0]]}
