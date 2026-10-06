@@ -681,6 +681,24 @@ def kfold_loso(sim_name, n_folds=8):
         folds.append((all_idx[~is_val], all_idx[is_val]))
     return folds
 
+def production_row_split(sim_name, *, val_seed=12345, val_frac=0.10, holdout_sim=None):
+    """The production split: a fixed random row-val fraction (early stopping only) over every row, optionally after
+    removing ONE held-out simulation entirely (the upstream-matched leave-one-simulation-out protocol of gate C).
+    Returns (train_idx, val_idx, held_idx). Without ``holdout_sim`` it is exactly the historical inline split of
+    scripts/train_production_emulator.py."""
+    sim_name = np.asarray(sim_name)
+    if holdout_sim is None:
+        avail, held = np.arange(sim_name.size), np.array([], dtype=int)
+    else:
+        held = np.where(sim_name == holdout_sim)[0]
+        if held.size == 0:
+            raise ValueError(f"holdout simulation {holdout_sim!r} is not in the cache")
+        avail = np.where(sim_name != holdout_sim)[0]
+    perm = np.random.default_rng(val_seed).permutation(avail.size)
+    n_val = int(val_frac * avail.size)
+    return np.sort(avail[perm[n_val:]]), np.sort(avail[perm[:n_val]]), held
+
+
 def tau0_edge_holdout(tau0, frac=0.15):
     """Hold out the low+high tau0 tails (the extrapolation probe in tau0-space)."""
     order = np.argsort(tau0)

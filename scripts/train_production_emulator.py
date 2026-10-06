@@ -42,6 +42,8 @@ def main():
     ap.add_argument("--seed", type=int, required=True, help="ensemble-member seed (→ final_prod_seed{S})")
     ap.add_argument("--cache", default=CACHE)
     ap.add_argument("--out", default=OUT)
+    ap.add_argument("--holdout-sim", default=None,
+                    help="leave this simulation out entirely (gate C upstream-matched leave-one-simulation-out)")
     args = ap.parse_args()
 
     t0 = time.time()
@@ -50,12 +52,12 @@ def main():
     n_sims = len(set(d["sim_name"]))
     # ALL-SIMS split: fixed random row-val (same for every member), train on the rest. ALL τ₀ rungs
     # included (NO τ₀-edge holdout — the production model should be accurate everywhere it's evaluated).
-    perm = np.random.default_rng(VAL_SEED).permutation(n_rows)
-    n_val = int(VAL_FRAC * n_rows)
-    val_idx = np.sort(perm[:n_val]); train_idx = np.sort(perm[n_val:])
+    from hcd_analysis.emulator.data import production_row_split
+    train_idx, val_idx, held_idx = production_row_split(d["sim_name"], val_seed=VAL_SEED, val_frac=VAL_FRAC,
+                                                        holdout_sim=args.holdout_sim)
     print(f"[prod] cache {args.cache}: {n_rows} rows, n_k={n_k}, {n_sims} sims  ({time.time()-t0:.1f}s)")
-    print(f"[prod] ALL-SIMS split: train={len(train_idx)} val={len(val_idx)} (row-val frac {VAL_FRAC}, "
-          f"VAL_SEED={VAL_SEED}); member seed={args.seed}")
+    print(f"[prod] split: train={len(train_idx)} val={len(val_idx)} held-out sim rows={len(held_idx)} "
+          f"(row-val frac {VAL_FRAC}, VAL_SEED={VAL_SEED}, holdout_sim={args.holdout_sim}); member seed={args.seed}")
 
     # FINAL_RECIPE weighting (identical to run_loso_sweep)
     term_w = {"f_nhi": 1.0, "dndx": 1.0, "p_base": 1.0, "p_resid": RECIPE["p_resid_w"], "delta": 1.0}
@@ -72,7 +74,8 @@ def main():
     print(f"[prod] seed {args.seed}: {n_ep} epochs in {time.time()-tf:.0f}s; best_val={best_val:.6g}")
 
     arch_cfg = {"in_dim": 10, "n_k": n_k, "n_basis": RECIPE["n_basis"]}
-    recipe = dict(RECIPE, all_sims=True, val_frac=VAL_FRAC, val_seed=VAL_SEED,
+    recipe = dict(RECIPE, all_sims=args.holdout_sim is None, holdout_sim=args.holdout_sim,
+                  val_frac=VAL_FRAC, val_seed=VAL_SEED,
                   n_train=int(len(train_idx)), n_val=int(len(val_idx)))
     ckpt = f"{args.out}_seed{args.seed}"
     T.save_checkpoint(ckpt, model, arch_cfg, norm_stats, seed=args.seed,
