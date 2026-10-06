@@ -113,7 +113,7 @@ def test_load_cache_exposes_k_com_and_report():
     require_real_cache(LF.replace("_lf", "_hr"))
     from hcd_analysis.emulator.data import load_cache
     d = load_cache(LF)
-    assert d["k_com_hmpc"].shape == (172,) and d["schema_report"]["n_rows"] == 21440
+    assert d["k_com_hmpc"].shape == (172,) and d["schema_report"]["n_rows"] == 21460   # S4-repaired production cache
     hr = load_cache(LF.replace("_lf", "_hr"))
     assert hr["k_com_hmpc"].shape == (525,)
     assert np.allclose(hr["k_com_hmpc"][:172], d["k_com_hmpc"], rtol=1e-9)   # same box modes, longer grid

@@ -90,44 +90,56 @@ def lf_matched():
 
 
 # Discrepancies established in the gate B audit (2026-10-06) from the raw spectra headers; every OTHER entry must match.
-#  - SIM_UPSTREAM_DEFECT at z = 2.2: upstream's entry carries the z = 2.3936 snapshot (SPECTRA_021, a second
+#  - SIM_UPSTREAM_DEFECT at z = 2.2 (F1): upstream's entry carries the z = 2.3936 snapshot (SPECTRA_021, a second
 #    snapshot within 0.01 of the z = 2.4 grid point); ours carries the z = 2.2 snapshot (SPECTRA_022).
-#  - SIM_OUR_GAP at z = 3.0: no cache row (no per-snapshot absorber catalog exists for that snapshot); upstream has it.
-#  - SIM_OUR_GAP at z = 2.8: our stored velocity width differs from the spectra header by 9.2e-5 (k and P scale with it).
+#  - SIM_OUR_GAP (ns0.907), F8: in the HISTORICAL cache the z = 2.8 rows carried the z = 3.0 file's catalogue and pixel
+#    width (9.2e-5 in k and P) and the z = 3.0 rows were absent (F2, reinterpreted by F8). The production cache
+#    (observables_tau0_lf.h5) is the S4-repaired one; the historical facts are pinned by the *_hist tests.
 SIM_UPSTREAM_DEFECT = "ns0.959Ap2.34e-09herei3.81heref2.99alphaq1.77hub0.725omegamh20.144hireionz6.83bhfeedback0.0467"
 SIM_OUR_GAP = "ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662omegamh20.144hireionz7.47bhfeedback0.0347"
 RAW = "/nfs/turbo/umor-yueyingn/mfho/emu_full"
+LF_HIST = real_cache_path("lf_hist")
 
 
 def _is(ours, r, sim, z, up_zout):
     return str(ours["sim_name"][r]) == sim and abs(float(up_zout) - z) < 1e-6
 
 
+def _missing(ours, up):
+    matched = {(ur, zi) for ur, zi, _ in _match_rows(ours, up["params"], up["zout"])}
+    return [(ur, zi) for ur in range(up["params"].shape[0]) for zi in range(len(up["zout"])) if (ur, zi) not in matched]
+
+
 def test_row03_parameters_and_rungs_match_upstream_training_set(lf_matched):
-    """Every upstream (t0, simulation, z) entry exists in our cache with identical parameters and rung (our Ap from
-    SimulationICs with the 5 pi pivot ratio, upstream's from its own ICs path), except the 10 rungs of SIM_OUR_GAP at
-    z = 3.0, which our cache lacks."""
+    """Every upstream (t0, simulation, z) entry exists in our (repaired) cache with identical parameters and rung (our
+    Ap from SimulationICs with the 5 pi pivot ratio, upstream's from its own ICs path): all 7800."""
     ours, up, pairs = lf_matched
-    matched = {(ur, zi) for ur, zi, _ in pairs}
-    missing = [(ur, zi) for ur in range(up["params"].shape[0]) for zi in range(len(up["zout"])) if (ur, zi) not in matched]
+    assert len(pairs) == 7800 and _missing(ours, up) == []
+
+
+def test_row03_hist_historical_cache_lacked_the_ns0907_z3_rows():
+    """Provenance (F2, reinterpreted by F8): the historical cache lacked exactly the 10 upstream rungs of ns0.907 at
+    z = 3.0."""
+    require_real_cache(LF_HIST)
+    ours = D.load_cache(LF_HIST)
+    with h5py.File(LF_HIST, "r") as f:
+        ours["alpha_slope"] = f["alpha_slope"][...]
+    with h5py.File(UP_LF, "r") as f:
+        up = {k: f[k][...] for k in ("params", "zout")}
+    missing = _missing(ours, up)
     assert len(missing) == 10 and {float(up["zout"][zi]) for _, zi in missing} == {3.0}
-    ns_gap = float(SIM_OUR_GAP[2:7])
-    assert all(abs(up["params"][ur, 1] - ns_gap) < 5e-4 for ur, _ in missing)
+    assert all(abs(up["params"][ur, 1] - float(SIM_OUR_GAP[2:7])) < 5e-4 for ur, _ in missing)
 
 
 def test_row04_per_row_velocity_grids_equal_upstream(lf_matched):
     ours, up, pairs = lf_matched
-    worst, f8 = 0.0, []
+    worst = 0.0
     for ur, zi, r in pairs:
         dk = float(np.max(np.abs(ours["kfkms"][r] / up["kfkms"][ur, zi] - 1.0)))
         if _is(ours, r, SIM_UPSTREAM_DEFECT, 2.2, up["zout"][zi]):
             continue                                     # established upstream defect F1, checked below
-        if _is(ours, r, SIM_OUR_GAP, 2.8, up["zout"][zi]):
-            f8.append(dk)                                # our defect F8 (pixel width of the z = 3.0 file), row 4d
-            continue
         worst = max(worst, dk)
     assert worst < 1e-12, worst
-    assert len(f8) == 10 and all(9.0e-5 < d < 9.3e-5 for d in f8), f8
 
 
 def test_row04b_upstream_defect_entry_is_the_z2p39_snapshot():
@@ -199,11 +211,12 @@ print(json.dumps({{"kept": kept, "zout": ms.zout.tolist()}}))
 
 
 def test_row05_training_p1d_equals_upstream_flux_vectors(lf_matched):
-    """The cache's filtered total P1D (Tier P) equals upstream's flux_vectors at the same (simulation, z, rung) to 1e-5,
-    except the established entries: the upstream defect (different snapshot) and SIM_OUR_GAP z = 2.8 (2e-4 level)."""
+    """The (repaired) cache's filtered total P1D (Tier P) equals upstream's flux_vectors at the same (simulation, z,
+    rung) to 1e-5 on every entry except the upstream defect F1 (different snapshot); this includes the rebuilt ns0.907
+    z = 2.8 and the restored z = 3.0 entries (independent check of the S4 repair)."""
     ours, up, pairs = lf_matched
     K = 172
-    rel, small = [], []
+    rel, f8 = [], []
     for ur, zi, r in pairs:
         p_up = up["flux_vectors"][ur, zi * K:(zi + 1) * K]
         p_ours = ours["P_tier_p"][r]
@@ -211,9 +224,11 @@ def test_row05_training_p1d_equals_upstream_flux_vectors(lf_matched):
         d = float(np.max(np.abs(p_ours[ok] / p_up[ok] - 1.0)))
         if _is(ours, r, SIM_UPSTREAM_DEFECT, 2.2, up["zout"][zi]):
             continue
-        (small if _is(ours, r, SIM_OUR_GAP, 2.8, up["zout"][zi]) else rel).append(d)
-    assert max(rel) < 1e-5, f"max relative P1D difference {max(rel):.3e} (median {np.median(rel):.3e})"
-    assert len(small) == 10 and max(small) < 2e-4, small
+        rel.append(d)
+        if str(ours["sim_name"][r]) == SIM_OUR_GAP and abs(float(up["zout"][zi]) - 2.9) < 0.15:
+            f8.append(d)
+    assert len(rel) == 7790 and max(rel) < 1e-5, f"max relative P1D difference {max(rel):.3e} (median {np.median(rel):.3e})"
+    assert len(f8) == 20 and max(f8) < 1e-5, f8
 
 
 def test_row05b_hr_training_p1d_equals_upstream_hires_flux_vectors():
@@ -490,17 +505,18 @@ def _raw_headers(raw_root, sim):
     return out
 
 
-@pytest.mark.parametrize("fid", ["lf", "hr"])
+@pytest.mark.parametrize("fid", ["lf", "hr", "lf_hist"])
 def test_row04d_every_cache_row_matches_its_raw_header(fid):
-    """BT-B4. For every (simulation, snapshot) group of our caches: the snapshot used is THE raw file at the grid z (the
-    nearest header z is within 1e-9 of z_grid; no other file within 1e-3), every row's k equals 2 pi n / vmax_header to
-    1e-12, nbins_native equals the header nbins, z_meta is within 2e-5 of the header z, and the Phase-1 absorber
-    catalogue was built on the same spectra file (its meta nbins and dv_kms equal the header's). The only exception is
-    the enumerated F8 group, whose defect is pinned exactly."""
+    """BT-B4 and the S4 hard invariant. For every (simulation, snapshot) group of our caches: the snapshot used is THE
+    raw file at the grid z (the nearest header z is within 1e-9 of z_grid; no other file within 1e-3), every row's k
+    equals 2 pi n / vmax_header to 1e-12, nbins_native equals the header nbins, z_meta is within 2e-5 of the header z,
+    and the Phase-1 absorber catalogue directory used was built on that same spectra file (its meta nbins and dv_kms
+    equal the header's). No exception in the production caches; in the historical LF cache exactly the F8 group, whose
+    defect is pinned exactly (provenance)."""
     from collections import defaultdict
-    path = LF if fid == "lf" else HR
-    raw_root = RAW if fid == "lf" else HR_RAW
-    hcd = HCD_OUT if fid == "lf" else f"{HCD_OUT}/hires"
+    path = {"lf": LF, "hr": HR, "lf_hist": LF_HIST}[fid]
+    raw_root = HR_RAW if fid == "hr" else RAW
+    hcd = f"{HCD_OUT}/hires" if fid == "hr" else HCD_OUT
     require_real_cache(path)
     _require_paths(raw_root, hcd)
     with h5py.File(path, "r") as f:
@@ -530,7 +546,7 @@ def test_row04d_every_cache_row_matches_its_raw_header(fid):
         n = np.arange(1, kf.shape[1] + 1)
         fin = np.isfinite(kf[r0])
         meta = json.load(open(f"{hcd}/{s}/snap_{sn:03d}/meta.json"))
-        if fid == "lf" and (s, sn) == F8_GROUP:
+        if fid == "lf_hist" and (s, sn) == F8_GROUP:
             seen_f8 = True
             e30 = h[int(np.argmin(np.abs(zs - 3.0)))]                              # SPECTRA_017, header z = 3.0
             assert e["spec"] == 18 and e30["spec"] == 17 and abs(e30["z"] - 3.0) < 1e-6
@@ -552,7 +568,8 @@ def test_row04d_every_cache_row_matches_its_raw_header(fid):
             rel = float(np.max(np.abs(kf[r][fr] / kexp[fr] - 1)))
             worst["k"] = max(worst["k"], rel)
             assert rel < 1e-12, (s, sn, r, rel)
-    assert seen_f8 == (fid == "lf")
+    assert seen_f8 == (fid == "lf_hist")
+    assert len(groups) == {"lf": 1073, "hr": 103, "lf_hist": 1072}[fid]
     print(f"{fid}: {len(groups)} groups; worst k rel {worst['k']:.2e}; worst |z_header - z_grid| {worst['dz_grid']:.2e}; "
           f"worst |z_meta - z_header| {worst['dz_meta']:.2e}")
 
