@@ -74,7 +74,11 @@ NUTS_GOLDEN = os.path.join(_GOLDEN_DIR, "legb_shortnuts_golden.npz")
 #  tests/test_ks_dndx_reparam.OLD_HCD_PRIOR_SIGNATURE):
 #  bba3da8868fa498e50bc69f3ff85c192be1fae45058af8ad1211cc28a53102ae
 # --------------------------------------------------------------------------- #
-FORWARD_SIGNATURE_PIN = "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b"
+# The forward literal was re-pinned at gate E (emulator-debug campaign 2026-10; GATE_E_SPEC v1 section 2, registered
+# PU-0061): forward_signature now includes the canonical coordinate (FORWARD_COORDINATE), so the pre-2026-10
+# single-grid forward's signature can never recur. Old value (pre-2026-10 forward):
+#  68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b
+FORWARD_SIGNATURE_PIN = "df05e8a6a55f937c9cac6ce14b6be444906637e7fa130bd5820e7e61761e1e9f"
 HCD_PRIOR_SIGNATURE_PIN = "50befc941edfc4c789286d2054d0107f1eb19a5672bcb86131426fb101eea216"
 
 
