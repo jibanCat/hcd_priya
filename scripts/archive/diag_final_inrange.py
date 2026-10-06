@@ -74,9 +74,12 @@ def deployed_median_inrange(model, d, va, norm):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--folds", type=int, default=8)
+    ap.add_argument("--ckpt-pattern", default=CKPT, help="checkpoint prefix with {} for the fold (gate C port)")
+    ap.add_argument("--outdir", default=OUT, help="where final_inrange_metrics.json is written (gate C port)")
+    ap.add_argument("--cache", default=CACHE)
     args = ap.parse_args()
 
-    d = load_cache(CACHE)
+    d = load_cache(args.cache)
     n_k = d["P_tier_p"].shape[1]
     kf = np.nanmedian(np.where(np.isfinite(d["kfkms"]), d["kfkms"], np.nan), 0)
     cv = load_cv_band()
@@ -85,7 +88,7 @@ def main():
     perfold = {}
     coh0 = None
     for fold in range(args.folds):
-        ckpt = CKPT.format(fold)
+        ckpt = args.ckpt_pattern.format(fold)
         if not Path(ckpt + ".eqx").exists():
             print(f"  [skip] fold {fold}: no checkpoint {ckpt}.eqx")
             continue
@@ -172,7 +175,7 @@ def main():
         },
         "coherent_lowk_tilt_fold0": tilt,
     }
-    jpath = f"{OUT}/final_inrange_metrics.json"
+    jpath = f"{args.outdir}/final_inrange_metrics.json"
     with open(jpath, "w") as f:
         json.dump(out, f, indent=2)
     print(f"\nwrote {jpath}")
