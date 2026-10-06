@@ -104,9 +104,23 @@ def test_floor_factor_range(inputs):
 
 @needs_cache
 def test_cache_provenance(inputs):
+    import h5py
     assert len(inputs["sha256_f_nhi"]) == 64
-    assert inputs["shapes"]["snap_f_nhi"] == (1072, 30)
+    with h5py.File(_CACHE, "r") as f:                    # one CDDF block per (sim, snap) group of THIS cache
+        n_snaps = int(f.attrs["n_snaps"])
+    assert inputs["shapes"]["snap_f_nhi"] == (n_snaps, 30)
     assert inputs["path"].endswith("observables_tau0_lf.h5")
+
+
+def test_committed_json_was_derived_from_the_historical_cache():
+    """Provenance of the committed kernel product: derived (2026-07-19) from the historical LF cache (1072 snapshot
+    blocks). The S4/F8-repaired cache (1073 blocks) changes its kernel table by <= 1e-4 (z = 3.0 only; gate C record),
+    inside the 1e-3 reproducibility tolerance below; the product is not re-derived without a ruling."""
+    import json
+    if not os.path.exists(_JSON):
+        pytest.skip("emitted JSON not present")
+    prov = json.load(open(_JSON))["cache_provenance"]
+    assert prov["shapes"]["snap_f_nhi"] == [1072, 30]
 
 
 @needs_cache
