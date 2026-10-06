@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import equinox as eqx
+import jax
 import jax.numpy as jnp
 
 from .multifidelity import FixedMeanHead, fixed_mean_table_resolved, make_cond, match_hr_to_lf
@@ -81,11 +83,30 @@ def _head(tables):
                          u_z=tables["u_z"], u_tau=tables["u_tau"])
 
 
+class ModeMF(eqx.Module):
+    """The MF correction g (4, n_modes) on the mode axis, JAX-pure: log_rho + the resolved FixedMeanHead. It reads
+    only z_unit (x[9]) and tau0, so dg / d theta_i == 0 exactly for every cosmology parameter."""
+    log_rho: jax.Array
+    head: FixedMeanHead
+
+    @classmethod
+    def from_tables(cls, tables):
+        bad = [k for k in TABLE_KEYS if not np.all(np.isfinite(np.asarray(tables[k], float)))]
+        if bad:
+            raise ValueError(f"MF tables must be finite: {bad}")
+        return cls(jnp.asarray(tables["log_rho"]), _head(tables))
+
+    def __call__(self, x, tau0):
+        return self.log_rho[None, :] + self.head(make_cond(jnp.asarray(x), jnp.asarray(tau0)), None)
+
+    def rank1_off(self):
+        """The same correction with the rank-1 (z x tau0) interaction removed (a_k = 0; aliasing probe E6)."""
+        return eqx.tree_at(lambda m: m.head.a_k, self, jnp.zeros_like(self.head.a_k))
+
+
 def apply_mode_mf(tables, x, tau0):
-    """The correction g (4, n_modes) at one LF encoder input ``x`` (10,) and mean-flux input ``tau0``."""
-    head = _head(tables)
-    g = jnp.asarray(tables["log_rho"])[None, :] + head(make_cond(jnp.asarray(x), jnp.asarray(tau0)), None)
-    return np.asarray(g)
+    """The correction g (4, n_modes) at one LF encoder input ``x`` (10,) and mean-flux input ``tau0`` (numpy)."""
+    return np.asarray(ModeMF.from_tables(tables)(x, tau0))
 
 
 def save_mode_mf(path, tables, *, k_com_hmpc, provenance):
