@@ -473,8 +473,13 @@ def _loglik_chain(ctx, core_per_leg, samples, kept_global):
         return _data_loglik_legcore(
             ctx, th, t0, al, ctx.legs, core_per_leg, a_siiii=a_siiii, a_siii=a_siii,
             metal_nodes=metal_nodes, alpha_res=alpha_res, b_res_global=b_res,
-            require_zresolved=True)
-    return jax.vmap(one)(theta, tau0, a_z, nuis)
+            require_zresolved=True, return_aux=True)
+    ll, aux = jax.vmap(one)(theta, tau0, a_z, nuis)
+    n_out = np.asarray(aux["n_out"])
+    if np.any(n_out != 0):          # gate E refusal: no re-scored draw may use a kept bin outside the simulated modes
+        raise ValueError(f"{int(np.sum(n_out != 0))} draws place kept data bins outside the simulated modes "
+                         f"(max {int(n_out.max())} bins); the forward never extrapolates")
+    return ll
 
 
 # --------------------------------------------------------------------------------------------- #

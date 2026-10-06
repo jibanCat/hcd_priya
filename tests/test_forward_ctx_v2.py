@@ -99,6 +99,25 @@ def test_retired_paths_are_gone_and_mock_builders_wait_for_gate_f():
             getattr(CL, name)()
 
 
+def test_chain_rescore_refuses_draws_with_bins_outside_the_modes():
+    import importlib
+    import sys
+    from hcd_analysis.paths import REPO_ROOT
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    RF = importlib.import_module("run_real_fit")
+    model, pf, core = _emu(24)
+    samples = {"theta_unit": np.full((2, 9), 0.5), "tau0_vec": np.full((2, 1), 0.3),
+               "alpha_hcd_z": np.tile(np.array([0.05, 0.02, 0.004]), (2, 1, 1))}
+    ok = _leg([3.0], k_lo=1.2e-3, k_hi=0.05)
+    ctx = _ctx(model, pf, [ok], [3.0])._replace(fix_alpha_res=True, metal_prior="uniform")
+    ll = RF._loglik_chain(ctx, {"DESI": core}, samples, None)
+    assert np.asarray(ll).shape == (2,) and np.all(np.isfinite(np.asarray(ll)))
+    bad = _leg([3.0], k_lo=1.2e-3, k_hi=0.12)
+    ctx_bad = _ctx(model, pf, [bad], [3.0])._replace(fix_alpha_res=True, metal_prior="uniform")
+    with pytest.raises(ValueError, match="outside the simulated modes"):
+        RF._loglik_chain(ctx_bad, {"DESI": core}, samples, None)
+
+
 def test_forward_signature_and_stamp_carry_the_coordinate_and_the_product_digests():
     import hashlib
     import json

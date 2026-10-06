@@ -3183,8 +3183,11 @@ def _loglik_of_draws(ctx, mock_legs, core_per_leg, samples, kept_global):
 
     def one(th, t0, al, asi, asi2):
         return _data_loglik_legcore(ctx, th, t0, al, mock_legs, core_per_leg,
-                                    a_siiii=asi, a_siii=asi2, require_zresolved=True)
-    return np.asarray(jax.vmap(one)(theta, tau0, a_z, a_si, a_si2))
+                                    a_siiii=asi, a_siii=asi2, require_zresolved=True, return_aux=True)
+    ll, aux = jax.vmap(one)(theta, tau0, a_z, a_si, a_si2)
+    if np.any(np.asarray(aux["n_out"]) != 0):
+        raise ValueError("re-scored draws place kept data bins outside the simulated modes")
+    return np.asarray(ll)
 
 
 def _aggregate_legb(per_mock, *, q_levels):
