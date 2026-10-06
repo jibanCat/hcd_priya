@@ -93,6 +93,94 @@ def gaussian_score(r, cov, jitter=1e-10):
     return float(np.sum(-0.5 * (quad + logdet + C * np.log(2 * np.pi))))
 
 
+def rho_interp_alpha(rho_zb, alpha_centres, alpha):
+    """Rows-batched numpy mirror of the deployed ``likelihood.rho_at_tau0``: rho_zb (C, C, K, B) at the tau0-ladder factors
+    ``alpha`` (R,) -> (R, C, C, K), linear in alpha between the band centres, clamped flat outside them, NaN cells 0.
+    B = 1 (pooled over tau0) returns the single block for every row."""
+    rho = np.nan_to_num(np.asarray(rho_zb, float))
+    c = np.asarray(alpha_centres, float)
+    a = np.atleast_1d(np.asarray(alpha, float))
+    if c.size == 1:
+        return np.broadcast_to(rho[..., 0], (a.size,) + rho.shape[:-1]).copy()
+    a = np.clip(a, c[0], c[-1])
+    j = np.clip(np.searchsorted(c, a, side="right") - 1, 0, c.size - 2)
+    t = (a - c[j]) / (c[j + 1] - c[j])
+    lo = np.moveaxis(rho[..., j], -1, 0)
+    hi = np.moveaxis(rho[..., j + 1], -1, 0)
+    return lo * (1.0 - t)[:, None, None, None] + hi * t[:, None, None, None]
+
+
+def class_coef(w_c, masked):
+    """Production class coefficients (1 - sum a, a) from per-row class weights w_c (R, 4) (a = w_c[:, 1:]); the DLA mask
+    (the main arm, ``dla_forward_frac = 0``) sets a_DLA = 0 as ``forward.predict_leg`` does."""
+    a = np.array(np.asarray(w_c, float)[:, 1:], copy=True)
+    if masked:
+        a[:, 2] = 0.0
+    return np.concatenate([1.0 - a.sum(axis=1, keepdims=True), a], axis=1)
+
+
+def combined_variance(P, coef, rho):
+    """Fractional variance of the production-combined spectrum P_obs = sum_c coef_c P_c under the cross-class second
+    moment rho: (sum_cc' coef_c coef_c' rho_cc' P_c P_c') / P_obs^2 (the ``emu_var_modes`` algebra), and P_obs.
+    Shapes: P (..., C, K), coef (..., C), rho (..., C, C, K)."""
+    P_obs = np.einsum("...c,...ck->...k", coef, P)
+    var = np.einsum("...c,...d,...cdk,...ck,...dk->...k", coef, coef, rho, P, P)
+    return var / P_obs ** 2, P_obs
+
+
+def combined_logpdf(r, P, coef, rho, mask):
+    """Gaussian log density of the production-combined fractional residual e = sum_c coef_c P_c r_c / P_obs under its
+    predicted fractional variance, summed over the modes in ``mask`` (K,) or (..., K). r, P (..., C, K)."""
+    var, P_obs = combined_variance(P, coef, rho)
+    e = np.einsum("...c,...ck,...ck->...k", coef, P, r) / P_obs
+    lp = -0.5 * (e ** 2 / var + np.log(2.0 * np.pi * var))
+    return np.sum(np.where(mask, lp, 0.0), axis=-1)
+
+
+def paired_se(a, b, n_boot=1000, seed=0):
+    """Simulation-bootstrap SE of mean(a - b) over paired per-simulation values (resampling simulations)."""
+    d = np.asarray(a, float) - np.asarray(b, float)
+    idx = np.random.default_rng(seed).integers(0, d.size, (n_boot, d.size))
+    return float(np.std(d[idx].mean(axis=1), ddof=1))
+
+
+def select_argmax(mean_scores, smooth_rank, tol=1e-6):
+    """Index of the largest mean CV score; candidates within ``tol`` (relative) of the best go to the most smoothing
+    (largest ``smooth_rank``)."""
+    m = np.asarray(mean_scores, float)
+    best = m.max()
+    cand = np.where(m >= best - tol * abs(best))[0]
+    return int(cand[np.argmax(np.asarray(smooth_rank)[cand])])
+
+
+def choose_tau0(banded, pooled, n_boot=1000, seed=0):
+    """'banded' if the banded T1 beats the pooled one by more than 2 paired simulation-bootstrap SE in mean CV score,
+    else 'pooled' (amendment A1 rev 1 section 1: a banded win STOPS for the PI; the caller acts on it)."""
+    gain = float(np.mean(np.asarray(banded) - np.asarray(pooled)))
+    return "banded" if gain > 2.0 * paired_se(banded, pooled, n_boot, seed) else "pooled"
+
+
+def guard(scores, selected, n_boot=1000, seed=0, k_trigger=3.0, k_ok=1.0):
+    """Hidden-feature guard. ``scores`` (n_sim, n_h, n_z, n_band): per-simulation CV scores per smoothing (index 0 = raw,
+    increasing smoothing with index) per z cell and k band. A (z, band) cell triggers if raw beats ``selected`` by more
+    than ``k_trigger`` paired SE; a triggered z cell (ALL its modes) takes the largest smoothing whose score is within
+    ``k_ok`` paired SE of raw in every triggering band (raw if none). Returns the smoothing index per z cell."""
+    s = np.asarray(scores, float)
+    n_h, n_z, n_band = s.shape[1:]
+    out = np.full(n_z, int(selected))
+    for z in range(n_z):
+        trig = [b for b in range(n_band)
+                if np.mean(s[:, 0, z, b] - s[:, selected, z, b])
+                > k_trigger * paired_se(s[:, 0, z, b], s[:, selected, z, b], n_boot, seed)]
+        if not trig:
+            continue
+        ok = [h for h in range(n_h)
+              if all(np.mean(s[:, 0, z, b] - s[:, h, z, b]) <= k_ok * paired_se(s[:, 0, z, b], s[:, h, z, b], n_boot, seed)
+                     for b in trig)]
+        out[z] = max(ok) if ok else 0
+    return out
+
+
 def bracket_modes(k_com_hmpc, z, k_lo, k_hi, lo_unit, hi_unit):
     """(first, last) 1-based mode indices that bracket every k in [k_lo, k_hi] at z for every theta in the sampling box
     [lo_unit, hi_unit]: k_skm,n = n k_skm,1 and k_skm,1 spans [kK_min / K, k1_max] over the box."""

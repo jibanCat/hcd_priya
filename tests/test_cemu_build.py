@@ -92,3 +92,95 @@ def test_loo_ensemble_residuals_are_member_means_on_the_held_out_rows():
     names = np.asarray(d["sim_name"]).astype(str)
     assert len(set(names[R["rows"][:360]])) == 1 and len(set(names[R["rows"][360:]])) == 1
     assert set(R["sim"][:360]) == {names[R["rows"][0]]}
+
+
+# --------------------------------------------------------------------------------------------- #
+#  T1 selection (amendment A1 rev 1 section 1): deployed tau0 interpolation, production class
+#  coefficients, the production-combined score, paired simulation-bootstrap SE, the rules
+# --------------------------------------------------------------------------------------------- #
+def test_rho_interp_matches_the_deployed_rho_at_tau0():
+    from hcd_analysis.emulator.likelihood import rho_at_tau0
+    from hcd_analysis.emulator.data import KIM_AMP, KIM_SLOPE
+    rng = np.random.default_rng(3)
+    rho = rng.normal(0, 1e-4, (4, 4, 9, 4))
+    centres = np.array([0.6, 0.9, 1.1, 1.5])
+    z = 3.2
+    for alpha in (0.4, 0.6, 0.75, 1.0, 1.49, 2.0):
+        tau0 = alpha * KIM_AMP * (1 + z) ** KIM_SLOPE
+        np.testing.assert_allclose(CB.rho_interp_alpha(rho, centres, np.array([alpha]))[0],
+                                   np.asarray(rho_at_tau0(rho, centres, z, tau0)), rtol=1e-12, atol=1e-20)
+
+
+def test_class_coefficients_are_production_with_and_without_the_dla_mask():
+    w = np.array([[0.70, 0.10, 0.15, 0.05]])
+    np.testing.assert_allclose(CB.class_coef(w, masked=False), [[0.70, 0.10, 0.15, 0.05]], rtol=1e-14)
+    np.testing.assert_allclose(CB.class_coef(w, masked=True), [[0.75, 0.10, 0.15, 0.0]], rtol=1e-14)
+
+
+def test_combined_variance_is_the_deployed_emu_var_algebra():
+    from hcd_analysis.emulator import data_likelihood as DL
+    rng = np.random.default_rng(4)
+    Kc = 7
+    A = rng.normal(0, 1e-2, (4, 4, Kc))
+    rho = np.einsum("cek,dek->cdk", A, A)
+    P = rng.uniform(0.5, 2.0, (4, Kc))
+    a = np.array([0.1, 0.15, 0.05])
+    coef = CB.class_coef(np.concatenate([[1 - a.sum()], a])[None], masked=False)[0]
+    var_frac, P_obs = CB.combined_variance(P, coef, rho)
+    ev = np.asarray(DL.emu_var_modes(P, 3.0, 1.0, a, dla_core=np.zeros(Kc), alpha_centres=np.array([1.0]),
+                                     rho_zb=rho[..., None]))
+    np.testing.assert_allclose(var_frac * P_obs ** 2, ev, rtol=1e-12)
+
+
+def test_combined_score_is_the_1d_gaussian_of_the_combined_fractional_residual():
+    from scipy.stats import norm
+    rng = np.random.default_rng(5)
+    Kc = 6
+    A = rng.normal(0, 1e-2, (4, 4, Kc))
+    rho = np.einsum("cek,dek->cdk", A, A)
+    P = rng.uniform(0.5, 2.0, (4, Kc))
+    r = rng.normal(0, 1e-2, (4, Kc))
+    coef = np.array([0.7, 0.1, 0.15, 0.05])
+    mask = np.array([True, True, False, True, True, False])
+    got = CB.combined_logpdf(r, P, coef, rho, mask)
+    P_obs = coef @ P
+    e = (coef[:, None] * P * r).sum(0) / P_obs
+    var = np.einsum("c,d,cdk,ck,dk->k", coef, coef, rho, P, P) / P_obs ** 2
+    np.testing.assert_allclose(got, norm(0, np.sqrt(var[mask])).logpdf(e[mask]).sum(), rtol=1e-12)
+
+
+def test_paired_bootstrap_se_resamples_simulations():
+    rng = np.random.default_rng(6)
+    a = rng.normal(0, 1, 60)
+    b = a + rng.normal(0.1, 0.05, 60)              # strongly paired: unpaired SE would be ~20x larger
+    se = CB.paired_se(a, b, n_boot=2000, seed=0)
+    assert abs(se / (np.std(a - b, ddof=1) / np.sqrt(60)) - 1) < 0.1
+    assert se == CB.paired_se(a, b, n_boot=2000, seed=0)          # deterministic
+
+
+def test_selection_is_argmax_with_ties_to_more_smoothing():
+    means = np.array([-10.0, -9.0, -9.0 * (1 + 1e-8), -9.5])
+    smooth_rank = np.array([0, 1, 2, 3])             # larger = more smoothing
+    assert CB.select_argmax(means, smooth_rank) == 2
+    assert CB.select_argmax(np.array([-3.0, -1.0, -2.0]), np.array([0, 1, 2])) == 1
+
+
+def test_tau0_pooling_preferred_unless_banded_wins_by_two_paired_se():
+    rng = np.random.default_rng(7)
+    pooled = rng.normal(0, 1, 60)
+    noise = rng.normal(0, 1, 60)
+    assert CB.choose_tau0(pooled + noise - noise.mean() + 0.001, pooled, seed=0) == "pooled"   # tiny gain, SE ~ 0.13
+    assert CB.choose_tau0(pooled + 1.0 + rng.normal(0, 0.01, 60), pooled, seed=0) == "banded"
+    assert CB.choose_tau0(pooled - 1.0, pooled, seed=0) == "pooled"
+
+
+def test_guard_acts_on_the_whole_z_cell_with_the_largest_h_within_one_se_of_raw():
+    rng = np.random.default_rng(8)
+    n_sim, n_h, n_z, n_band = 60, 4, 2, 3
+    base = rng.normal(0, 1, (n_sim, 1, 1, 1))
+    s = np.broadcast_to(base, (n_sim, n_h, n_z, n_band)).copy() + rng.normal(0, 1e-3, (n_sim, n_h, n_z, n_band))
+    # z cell 1, band 2: raw (h index 0) beats everything else strongly; h index 1 within noise of raw
+    s[:, 2:, 1, 2] -= 1.0
+    s[:, 1, 1, 2] = s[:, 0, 1, 2] + 5e-4            # h index 1 slightly better than raw there: within 1 SE
+    h_of_z = CB.guard(s, selected=3, n_boot=500, seed=0)
+    assert list(h_of_z) == [3, 1]                    # z cell 0 untouched; z cell 1 takes h index 1 for ALL bands
