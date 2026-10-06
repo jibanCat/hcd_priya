@@ -27,6 +27,19 @@ def interp_to_grid(k_target, k, P):
     return np.interp(k_target, k[m], P[m])
 
 
+def class_rms(res_cls, keep):
+    """Per-class RMS of fractional residuals res_cls (rows, 4, K) over the kept (rows, K) finite modes: the historical
+    LOSO/ensemble metric (run_loso_sweep.py, validate_production_ensemble.py)."""
+    r = np.where(np.asarray(keep, bool)[:, None, :] & np.isfinite(res_cls), res_cls, np.nan)
+    return np.sqrt(np.nanmean(r ** 2, axis=(0, 2)))
+
+
+def ensemble_residual(member_residuals):
+    """Residual of the ensemble MEAN prediction from members' fractional residuals against the same truth
+    (mean of P_pred / P_true - 1 = mean of the residuals, because the truth is common)."""
+    return np.mean(np.stack([np.asarray(r, float) for r in member_residuals]), axis=0)
+
+
 def match_upstream_loo(entries, up_params, up_zout, *, rtol=1e-6, rung_atol=2e-6, z_atol=1e-6):
     """Pair our held-out entries with upstream LOO rows. ``entries``: dicts with ``params`` (the simulation parameters,
     upstream's order), ``alpha`` (mean-flux rung), ``z`` and ``key``; ``up_params[:, 0]`` is upstream's rung and the

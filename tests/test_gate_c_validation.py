@@ -50,6 +50,25 @@ def test_interp_to_grid_matches_linear_and_refuses_extrapolation():
         G.interp_to_grid(np.array([0.5]), k, P)
 
 
+def test_class_rms_uses_only_kept_finite_modes():
+    res = np.zeros((2, 4, 3))
+    res[0, 1, 0] = 0.03
+    res[1, 1, 2] = np.nan
+    keep = np.ones((2, 3), bool)
+    keep[0, 2] = False
+    res[0, 1, 2] = 9.0                                      # excluded by keep
+    rms = G.class_rms(res, keep)
+    assert rms.shape == (4,) and rms[0] == 0.0
+    assert abs(rms[1] - np.sqrt(0.03 ** 2 / 4)) < 1e-15    # 4 kept finite modes in class 1 (one NaN, one masked)
+
+
+def test_ensemble_residual_is_the_residual_of_the_member_mean():
+    P_true = np.array([2.0, 4.0])
+    members = [np.array([2.2, 3.6]), np.array([1.8, 4.4]), np.array([2.0, 4.2])]
+    res = [m / P_true - 1 for m in members]
+    assert np.allclose(G.ensemble_residual(res), np.mean(members, 0) / P_true - 1, rtol=0, atol=1e-15)
+
+
 def test_match_upstream_loo_pairs_entries_by_parameters_rung_and_redshift():
     up_params = np.array([[0.7, 0.90, 1.5e-9], [0.8, 0.90, 1.5e-9], [0.7, 0.95, 2.0e-9]])
     up_zout = np.array([3.0, 2.8])
