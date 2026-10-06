@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -21,6 +22,8 @@ from .predict import predict_P_filt
 _METAL_KEYS = ("a_SiIII", "a_SiII", "k_SiIII", "k_SiII", "f_SiIII_nodes", "f_SiII_nodes", "metal_node_z",
                "k_SiIII_nodes", "k_SiII_nodes")
 _NUIS_KEYS = _METAL_KEYS + ("b_res", "b_res_vec")
+NS_BOX = (0.86, 0.98)          # the HR n_s cluster box of the MF n_s-edge term (floor spec section 4)
+EDGE_SLOPE_MULT = 2.0          # 2 x the 6-simulation edge slope (floor spec section 4.1)
 
 
 class LegPrediction(NamedTuple):
@@ -30,12 +33,15 @@ class LegPrediction(NamedTuple):
 
 
 def predict_leg(model, theta9, tau0_vec, alpha_hcd, *, leg, k_com, pf_stats, dla_core, mf=None, nuis=None,
-                t1=None, cemu_inflate=1.0, require_zresolved=True):
+                t1=None, t2=None, t3=None, cemu_inflate=1.0, require_zresolved=True):
     """The model P1D on every bin of ``leg`` and its total covariance. ``alpha_hcd`` is (n_z, 3) per-z incidence (LLS,
     subDLA, DLA); a z-flat (3,) alpha is refused unless ``require_zresolved=False`` (the z-flat broadcast bug class).
     ``dla_core`` is the mode-indexed core, (K,) or (n_z, K). ``nuis``: metal and resolution parameters (keys
     ``_NUIS_KEYS``). ``t1`` = (rho per leg z (n_z, 4, 4, K, Tb), tau0-band centres (Tb,)): the cross-class emulator
-    variance on the modes from the LF P_filt, bound at the data bins and scaled by the squared nuisance factors."""
+    variance on the modes from the LF P_filt, bound at the data bins and scaled by the squared nuisance factors.
+    ``t2`` = (sigma_floor per leg z (n_z,), slope per leg z (n_z,)): the MF floor and n_s-edge term on the
+    post-nuisance model (``t2_var``). ``t3`` = (U (N, m), w (m,)): the fractional k-coherence factor on the leg's bins,
+    amplitude from P_data, off-diagonal only (``assemble_cov``)."""
     nuis = dict(nuis or {})
     unknown = set(nuis) - set(_NUIS_KEYS)
     if unknown:
@@ -57,6 +63,8 @@ def predict_leg(model, theta9, tau0_vec, alpha_hcd, *, leg, k_com, pf_stats, dla
     R_z = jnp.asarray(leg.R_z)
     P_model = jnp.zeros(k_leg.shape[0])
     emu_var = jnp.zeros(k_leg.shape[0])
+    floor_var = jnp.zeros(k_leg.shape[0])
+    ns_sg = jax.lax.stop_gradient(DL._ns_phys_from_theta9(theta9)) if t2 is not None else None
     n_out = jnp.asarray(0)
     for iz in range(leg.n_z):
         rows = np.where(z_idx == iz)[0]
@@ -88,6 +96,34 @@ def predict_leg(model, theta9, tau0_vec, alpha_hcd, *, leg, k_com, pf_stats, dla
             ev = DL.emu_var_modes(P_lf, kg.z, tau0, a, dla_core=core_modes, alpha_centres=alpha_centres,
                                   rho_zb=rho_leg[iz], cemu_inflate=cemu_inflate)              # (K,) on the modes
             emu_var = emu_var.at[jnp.asarray(rows)].set(KC.at_data(b, ev) * fac ** 2)
+        if t2 is not None:
+            floor_var = floor_var.at[jnp.asarray(rows)].set(t2_var(t2[0][iz], t2[1][iz], P_z * fac, ns_sg))
         n_out = n_out + b.n_out
-    C_total = jnp.asarray(leg.C_data) + jnp.diag(emu_var) if t1 is not None else jnp.asarray(leg.C_data)
+    C_total = assemble_cov(jnp.asarray(leg.C_data), emu_var, floor_var, t3=t3,
+                           P_fid=jnp.nan_to_num(jnp.asarray(leg.P_data)))
     return LegPrediction(P_model, n_out, C_total)
+
+
+def t2_var(sigma_floor, slope, P, ns, ns_box=NS_BOX, edge_mult=EDGE_SLOPE_MULT):
+    """The MF floor variance at one z: (sigma_floor P)^2 + (sigma_edge P)^2, sigma_edge = max(edge_mult |slope| d_ns,
+    0.5 sigma_floor d_ns / 0.03), d_ns = the distance of the physical n_s outside ``ns_box`` (floor spec sections
+    2-4). ``ns`` is passed stop-gradient (the term widens the posterior, it does not pull it)."""
+    d_ns = jnp.maximum(jnp.maximum(ns - ns_box[1], ns_box[0] - ns), 0.0)
+    sig_edge = jnp.maximum(edge_mult * jnp.abs(slope) * d_ns, 0.5 * sigma_floor * (d_ns / 0.03))
+    P = jnp.asarray(P)
+    return (sigma_floor * P) ** 2 + (sig_edge * P) ** 2
+
+
+def assemble_cov(C_data, t1_var, t2_var, t3=None, P_fid=None):
+    """C_total with the production algebra (``data_likelihood.py`` 1286-1327 at 80bbc5d): without T3, C_data +
+    diag(T1 + T2); with T3 = (U, w), the fractional k-coherence term B B^T, B = P_fid U sqrt(w), enters off-diagonal
+    only, its diagonal absorbed into T1 by max (never under-counted), T2 topped up on the remaining diagonal.
+    PD: C_data PD + diag(>= 0) + (B B^T - diag) with the subtracted diagonal restored inside max(T1, diag)."""
+    if t3 is None:
+        return C_data + jnp.diag(t1_var + t2_var)
+    U, w = t3
+    B = jnp.asarray(P_fid)[:, None] * jnp.asarray(U) * jnp.sqrt(jnp.asarray(w))[None, :]
+    td = jnp.sum(B ** 2, axis=1)
+    C_shape = B @ B.T - jnp.diag(td)
+    topup = jnp.maximum(0.0, t2_var - jnp.diag(C_shape))
+    return C_data + jnp.diag(jnp.maximum(t1_var, td) + topup) + C_shape

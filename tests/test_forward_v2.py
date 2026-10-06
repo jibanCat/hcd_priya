@@ -164,3 +164,50 @@ def test_without_t1_the_covariance_is_the_data_covariance():
     out = FW.predict_leg(model, jnp.full(9, 0.5), jnp.asarray([0.3]), jnp.asarray([[0.05, 0.02, 0.004]]), leg=leg,
                          k_com=KCOM, pf_stats=pf, dla_core=core)
     assert np.array_equal(np.asarray(out.C_total), np.asarray(leg.C_data))
+
+
+def test_t2_floor_variance_equals_the_old_single_band_floor():
+    rng = np.random.default_rng(11)
+    zg = np.array([2.2, 3.0, 3.8, 4.6]); sig = rng.uniform(0.005, 0.02, 4); slp = rng.uniform(0, 0.2, 4)
+    old = DL.MFFloor(z_grid=zg, sigma_floor=np.stack([sig, sig], 1), slope=np.stack([slp, slp], 1),
+                     k_band_split=0.07, ns_box=np.array([0.86, 0.98]), floor_min=0.0, edge_slope_mult=2.0)
+    k = jnp.geomspace(1e-3, 0.065, 15); P = jnp.asarray(rng.uniform(0.05, 0.2, 15))
+    for z in (2.6, 3.0, 4.4):
+        for ns in (0.9, 1.01, 0.83):
+            s_z, l_z = np.interp(z, zg, sig), np.interp(z, zg, slp)
+            np.testing.assert_allclose(np.asarray(FW.t2_var(s_z, l_z, P, ns)),
+                                       np.asarray(DL._mf_floor_var_on_k(old, z, k, P, ns)), rtol=1e-13)
+
+
+def test_covariance_assembly_equals_the_production_algebra():
+    rng = np.random.default_rng(12)
+    N, m = 20, 4
+    C_data = np.eye(N) * 1e-4; t1 = rng.uniform(1e-6, 1e-5, N); t2 = rng.uniform(1e-7, 1e-6, N)
+    U = rng.normal(0, 0.01, (N, m)); w = rng.uniform(0.5, 2, m); P_fid = rng.uniform(0.05, 0.2, N)
+    got = np.asarray(FW.assemble_cov(jnp.asarray(C_data), jnp.asarray(t1), jnp.asarray(t2),
+                                     t3=(jnp.asarray(U), jnp.asarray(w)), P_fid=jnp.asarray(P_fid)))
+    term = (U * w) @ U.T * np.outer(P_fid, P_fid)                 # the dense production term (infl 1)
+    td = np.diag(term).copy()
+    emu = np.maximum(t1, td); Cs = term - np.diag(td)
+    expect = C_data + np.diag(emu + np.maximum(0.0, t2 - np.diag(Cs))) + Cs
+    np.testing.assert_allclose(got, expect, rtol=1e-13, atol=1e-20)
+    assert np.all(np.linalg.eigvalsh(got) > 0)
+    np.testing.assert_allclose(np.asarray(FW.assemble_cov(jnp.asarray(C_data), jnp.asarray(t1), jnp.asarray(t2))),
+                               C_data + np.diag(t1 + t2), rtol=1e-15)
+
+
+def test_t3_offdiagonal_term_equals_the_old_dense_path_on_a_z_grid():
+    model, pf, core = _emu(8)
+    th = jnp.asarray(np.full(9, 0.45)); z = 3.2
+    leg = _leg([z], n_per_z=12)
+    tau0 = jnp.asarray([0.4]); alpha = jnp.asarray([[0.05, 0.02, 0.004]])
+    rho, ac = _t1(1)
+    rng = np.random.default_rng(13)
+    U = rng.normal(0, 0.01, (12, 3)); w = rng.uniform(0.5, 2, 3)
+    F = (U * w) @ U.T
+    _, C_old = DL.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=core,
+                                       cache_k=np.asarray(KC.kgrid(KCOM, z, th).k_skm), leg=leg, rho_zb=rho,
+                                       alpha_centres=ac, mf_emucoh_cov=F, mf_emucoh_offdiag_only=True)
+    out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=core, t1=(rho, ac),
+                         t3=(jnp.asarray(U), jnp.asarray(w)))
+    np.testing.assert_allclose(np.asarray(out.C_total), np.asarray(C_old), rtol=1e-11, atol=1e-22)
