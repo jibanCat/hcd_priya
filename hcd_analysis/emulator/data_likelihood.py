@@ -1036,6 +1036,15 @@ def _emu_var_on_cache(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     Differentiable in (θ9, τ₀, α)."""
     from .predict import predict_P_filt
     P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)        # (4,Kc)
+    return emu_var_modes(P_filt, z, tau0, alpha_hcd, dla_core=dla_core, sigma_zb=sigma_zb,
+                         alpha_centres=alpha_centres, cemu_inflate=cemu_inflate, rho_zb=rho_zb)
+
+
+def emu_var_modes(P_filt, z, tau0, alpha_hcd, *, dla_core, alpha_centres, sigma_zb=None, rho_zb=None,
+                  cemu_inflate=1.0):
+    """The per-mode emulator variance at one z from the LF per-class ``P_filt`` (4, K) (the production C_emu uses the
+    LF, not the MF-corrected, P_filt), the cross-class block ``rho_zb`` (4, 4, K, Tb) or the diagonal ``sigma_zb``
+    (4, K, Tb), tau0-interpolated over ``alpha_centres``. See ``_emu_var_on_cache``."""
     P_clean = P_filt[0]
     P_dla_unf = P_filt[3] + jnp.asarray(dla_core)
     P_cls = jnp.stack([P_clean, P_filt[1], P_filt[2], P_dla_unf])         # (4,Kc)

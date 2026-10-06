@@ -126,3 +126,41 @@ def test_metal_factor_at_z_model_cplus_equals_the_formula():
     got = DL.metal_factor_at_z(k, z, tau0, f_SiIII_nodes=jnp.asarray(f3), f_SiII_nodes=jnp.asarray(f2),
                                k_SiIII_nodes=jnp.asarray(k3), k_SiII_nodes=jnp.asarray(k2))
     np.testing.assert_allclose(np.asarray(got), np.asarray(expect), rtol=1e-13)
+
+
+def _t1(n_z, seed=7, Tb=4):
+    """A synthetic cross-class block per leg z: (n_z, 4, 4, K, Tb), SPD per (k, band), NaN cells at mode 1."""
+    rng = np.random.default_rng(seed)
+    A = rng.normal(0, 0.01, (n_z, 4, 4, K, Tb))
+    rho = np.einsum("zcekt,zdekt->zcdkt", A, A)
+    rho[:, :, :, 0, :] = np.nan
+    return jnp.asarray(rho), jnp.asarray([0.656, 0.833, 1.153, 1.331])
+
+
+@pytest.mark.parametrize("on", [False, True], ids=["bare", "metals_resolution"])
+def test_t1_variance_equals_the_old_path_on_each_z_grid(on):
+    model, pf, core = _emu(5)
+    th = jnp.asarray(np.random.default_rng(9).uniform(0.05, 0.95, 9))
+    zs = [2.6, 3.4]
+    leg = _leg(zs, metals=on, resolution=on)
+    tau0 = jnp.asarray([0.3, 0.5]); alpha = jnp.asarray([[0.05, 0.02, 0.004], [0.07, 0.03, 0.006]])
+    rho, ac = _t1(len(zs))
+    nuis = NUIS if on else {}
+    out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=core, nuis=nuis,
+                         t1=(rho, ac))
+    for iz, z in enumerate(zs):
+        sub = _leg([z], metals=on, resolution=on)
+        sub = sub._replace(R_z=np.asarray(leg.R_z)[iz:iz + 1])
+        _, C_old = DL.predict_P_obs_on_leg(model, th, tau0[iz:iz + 1], alpha[iz:iz + 1], pf_stats=pf, dla_core=core,
+                                           cache_k=np.asarray(KC.kgrid(KCOM, z, th).k_skm), leg=sub,
+                                           rho_zb=rho[iz:iz + 1], alpha_centres=ac, **nuis)
+        rows = np.where(leg.z_idx == iz)[0]
+        np.testing.assert_allclose(np.diag(np.asarray(out.C_total))[rows], np.diag(np.asarray(C_old)), rtol=1e-11)
+
+
+def test_without_t1_the_covariance_is_the_data_covariance():
+    model, pf, core = _emu(6)
+    leg = _leg([3.0])
+    out = FW.predict_leg(model, jnp.full(9, 0.5), jnp.asarray([0.3]), jnp.asarray([[0.05, 0.02, 0.004]]), leg=leg,
+                         k_com=KCOM, pf_stats=pf, dla_core=core)
+    assert np.array_equal(np.asarray(out.C_total), np.asarray(leg.C_data))
