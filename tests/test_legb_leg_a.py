@@ -25,6 +25,7 @@ import pytest
 
 from hcd_analysis.emulator import closure_legb as LB
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator.ensemble import EnsembleEmulator
 
 REPO = _REPO_ROOT
@@ -47,7 +48,7 @@ def _predict_leg_at_truth(ctx, leg, tp, core):
     alpha_leg = jnp.asarray(tp["alpha_hcd_z"])[sel]
     szb = ctx.sigma_zb_per_leg.get(leg.name) if ctx.sigma_zb_per_leg else None
     rzb = ctx.rho_zb_per_leg.get(leg.name) if ctx.rho_zb_per_leg else None
-    return DL.predict_P_obs_on_leg(
+    return LEG.predict_P_obs_on_leg(
         ctx.model, jnp.asarray(tp["theta9"]), tau0_vec, alpha_leg, pf_stats=ctx.pf_stats,
         dla_core=core[leg.name], cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
         alpha_centres=ctx.alpha_centres, a_SiIII=float(tp.get("a_siiii", 0.0)),

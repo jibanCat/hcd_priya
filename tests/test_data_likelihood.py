@@ -26,6 +26,7 @@ import pytest
 
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import meanflux_prior as MF
 
 DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
@@ -120,12 +121,12 @@ def test_ks_loader_always_keeps_full_klow():
     # KS ALWAYS keeps the FULL native k-range from klow≈0.0055 s/km (PI/KS-author decision,
     # reaffirmed repeatedly: the Fig-11 "first-4-bins" caution is MISLEADING). There is no
     # low-k drop knob — the klow≈0.0055 bins must never be dropped.
-    leg = DL.load_ks_leg()
+    leg = DL.load_ks_leg(k_max=0.069)
     assert leg.name == "KS"
     assert np.isclose(leg.k.min(), 0.0055, atol=1e-4), \
         f"KS must keep klow≈0.0055, got kmin={leg.k.min()}"
     # cap at the cache Nyquist 0.069 (the 0.079/0.099 native bins are dropped)
-    assert leg.k.max() <= DL.CACHE_KMAX + 1e-9
+    assert leg.k.max() <= LEG.CACHE_KMAX + 1e-9
     # z range default 2.4–4.6
     assert leg.z.min() >= 2.0 - 1e-6 and leg.z.max() <= 4.6 + 1e-6
     # the drop knob is gone: passing drop_first4 must raise (cannot silently drop low-k)
@@ -136,7 +137,7 @@ def test_ks_loader_always_keeps_full_klow():
 
 @pytest.mark.skipif(not _have_ks, reason="KS data not present")
 def test_ks_cdata_symmetric_spd_and_matches_file():
-    leg = DL.load_ks_leg()
+    leg = DL.load_ks_leg(k_max=0.069)
     C = leg.C_data
     assert np.allclose(C, C.T, atol=1e-10)
     w = np.linalg.eigvalsh(C)
@@ -145,14 +146,14 @@ def test_ks_cdata_symmetric_spd_and_matches_file():
     z, k, P = DL._read_ks_p1d(KS_BASE + "final-conservative-p1d-karacayli_etal2021.txt")
     # z_lo default is 2.4 (low-z KS dropped: DLA incompleteness + the n_s closure-bias fix); match it.
     # drop_first4=False is now the default → NO low-k drop; keep z≥2.4 + k≤cache_kmax only.
-    keep = (z >= 2.4 - 1e-6) & (z <= 4.6 + 1e-6) & (k <= DL.CACHE_KMAX + 1e-9)
+    keep = (z >= 2.4 - 1e-6) & (z <= 4.6 + 1e-6) & (k <= LEG.CACHE_KMAX + 1e-9)
     assert np.allclose(leg.P_data, P[keep])
     assert np.allclose(leg.k, k[keep])
 
 
 @pytest.mark.skipif(not _have_ks, reason="KS data not present")
 def test_ks_metals_resolution_off_by_default():
-    leg = DL.load_ks_leg()
+    leg = DL.load_ks_leg(k_max=0.069)
     assert leg.metals_on is False and leg.resolution_on is False
 
 
@@ -163,11 +164,11 @@ def test_ks_metals_resolution_off_by_default():
 def test_binding_finite_and_spd_each_leg():
     c = _emu_ctx()
     desi = DL.load_desi_leg()
-    ks = DL.load_ks_leg()
+    ks = DL.load_ks_leg(k_max=0.069)
     for leg in (desi, ks):
         szb = _sigma_zb_for_leg(leg, c["n_k"], c["n_tb"], c["rng"])
         tau0_vec = MF.becker13_tau0(jnp.asarray(leg.z))
-        P_model, C_total = DL.predict_P_obs_on_leg(
+        P_model, C_total = LEG.predict_P_obs_on_leg(
             c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
             dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=szb,
             alpha_centres=c["alpha_centres"])
@@ -224,7 +225,7 @@ def test_resolution_factor_identity_and_grad():
 def test_data_loglik_finite_and_grads_on_real_cov():
     c = _emu_ctx()
     desi = DL.load_desi_leg(metals_on=True, resolution_on=True)
-    ks = DL.load_ks_leg()
+    ks = DL.load_ks_leg(k_max=0.069)
     legs = [desi, ks]
     # global z ladder = the union of leg z (ascending)
     z_global = np.unique(np.round(np.concatenate([desi.z, ks.z]), 6))
@@ -232,7 +233,7 @@ def test_data_loglik_finite_and_grads_on_real_cov():
     szb = {leg.name: _sigma_zb_for_leg(leg, c["n_k"], c["n_tb"], c["rng"]) for leg in legs}
 
     def f(theta9, tau0, alpha, a_SiIII, b_res):
-        return DL.data_loglik(
+        return LEG.data_loglik(
             c["model"], theta9, tau0, alpha, legs, pf_stats=c["pf"], dla_core=c["dla_core"],
             cache_k=c["cache_k"], z_global=z_global, sigma_zb_per_leg=szb,
             alpha_centres=c["alpha_centres"], a_SiIII=a_SiIII, b_res=b_res)
@@ -253,11 +254,11 @@ def test_data_loglik_block_diagonal_equals_sum_of_legs():
     """The joint logL must equal the sum of the per-leg gaussian_logliks (block-diagonal)."""
     from hcd_analysis.emulator.likelihood import gaussian_loglik
     c = _emu_ctx()
-    legs = [DL.load_desi_leg(), DL.load_ks_leg()]
+    legs = [DL.load_desi_leg(), DL.load_ks_leg(k_max=0.069)]
     z_global = np.unique(np.round(np.concatenate([legs[0].z, legs[1].z]), 6))
     tau0_global = jnp.asarray(MF.becker13_tau0(jnp.asarray(z_global)))
     szb = {leg.name: _sigma_zb_for_leg(leg, c["n_k"], c["n_tb"], c["rng"]) for leg in legs}
-    total, parts = DL.data_loglik(
+    total, parts = LEG.data_loglik(
         c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs, pf_stats=c["pf"],
         dla_core=c["dla_core"], cache_k=c["cache_k"], z_global=z_global,
         sigma_zb_per_leg=szb, alpha_centres=c["alpha_centres"], return_parts=True)
@@ -266,7 +267,7 @@ def test_data_loglik_block_diagonal_equals_sum_of_legs():
     for leg in legs:
         sel = np.array([int(np.argmin(np.abs(z_global - zz))) for zz in leg.z])
         tau0_vec = tau0_global[jnp.asarray(sel)]
-        Pm, Ct = DL.predict_P_obs_on_leg(
+        Pm, Ct = LEG.predict_P_obs_on_leg(
             c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
             dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
             sigma_zb=szb[leg.name], alpha_centres=c["alpha_centres"])
@@ -281,18 +282,18 @@ def test_data_loglik_three_legs_with_eboss_block_diagonal():
     independent per-leg gaussian_logliks, finite gradients (step-review gap, 2026-06-13)."""
     from hcd_analysis.emulator.likelihood import gaussian_loglik
     c = _emu_ctx()
-    legs = [DL.load_desi_leg(), DL.load_ks_leg(), DL.load_eboss_leg()]
+    legs = [DL.load_desi_leg(), DL.load_ks_leg(k_max=0.069), DL.load_eboss_leg()]
     z_global = np.unique(np.round(np.concatenate([l.z for l in legs]), 6))
     tau0_global = jnp.asarray(MF.becker13_tau0(jnp.asarray(z_global)))
     szb = {leg.name: _sigma_zb_for_leg(leg, c["n_k"], c["n_tb"], c["rng"]) for leg in legs}
     kw = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], z_global=z_global,
               sigma_zb_per_leg=szb, alpha_centres=c["alpha_centres"])
-    total, parts = DL.data_loglik(c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs,
+    total, parts = LEG.data_loglik(c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs,
                                   return_parts=True, **kw)
     man = 0.0
     for leg in legs:
         sel = np.array([int(np.argmin(np.abs(z_global - zz))) for zz in leg.z])
-        Pm, Ct = DL.predict_P_obs_on_leg(
+        Pm, Ct = LEG.predict_P_obs_on_leg(
             c["model"], c["theta9"], tau0_global[jnp.asarray(sel)], c["alpha_hcd"],
             pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
             sigma_zb=szb[leg.name], alpha_centres=c["alpha_centres"])
@@ -300,7 +301,7 @@ def test_data_loglik_three_legs_with_eboss_block_diagonal():
     assert np.isclose(float(total), man, rtol=1e-10), f"joint {total} vs sum {man}"
     assert set(parts) == {"DESI", "KS", "eBOSS"}
     # finite gradient through the 3-leg joint logL (θ9)
-    g = jax.grad(lambda th: DL.data_loglik(c["model"], th, tau0_global, c["alpha_hcd"], legs,
+    g = jax.grad(lambda th: LEG.data_loglik(c["model"], th, tau0_global, c["alpha_hcd"], legs,
                                            **kw))(c["theta9"])
     assert np.all(np.isfinite(np.asarray(g)))
 
@@ -366,7 +367,7 @@ def _build_leg_for_xclass():
 def _emu_var_on_leg(c, leg, *, sigma_zb=None, rho_zb=None, tau0):
     """diag(C_total − C_data) on the leg = the emu_var the binding placed on the diagonal."""
     tau0_vec = jnp.asarray([tau0])
-    _, C_total = DL.predict_P_obs_on_leg(
+    _, C_total = LEG.predict_P_obs_on_leg(
         c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
         dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
         alpha_centres=c["alpha_centres"], rho_zb=rho_zb)
@@ -416,7 +417,7 @@ def test_leg_xclass_differentiable_in_tau0_and_alpha():
     rho = base.at[0, 1, 2].set(coup).at[0, 2, 1].set(coup)
 
     def total_emu(t0, a):
-        _, C = DL.predict_P_obs_on_leg(
+        _, C = LEG.predict_P_obs_on_leg(
             c["model"], c["theta9"], jnp.asarray([t0]), a, pf_stats=c["pf"],
             dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
             alpha_centres=c["alpha_centres"], rho_zb=rho)
@@ -434,7 +435,7 @@ def test_data_loglik_rho_per_leg_threads_and_increases_emu_var():
     the per-leg χ² floor (larger C_emu ⇒ the same residual whitens to a smaller χ²) relative to
     the diagonal-equivalent ρ=diag(σ²), and the joint logL stays finite + differentiable."""
     c = _emu_ctx()
-    legs = [DL.load_desi_leg(), DL.load_ks_leg()]
+    legs = [DL.load_desi_leg(), DL.load_ks_leg(k_max=0.069)]
     z_global = np.unique(np.round(np.concatenate([legs[0].z, legs[1].z]), 6))
     tau0_global = jnp.asarray(MF.becker13_tau0(jnp.asarray(z_global)))
     szb = {leg.name: _sigma_zb_for_leg(leg, c["n_k"], c["n_tb"], c["rng"]) for leg in legs}
@@ -449,7 +450,7 @@ def test_data_loglik_rho_per_leg_threads_and_increases_emu_var():
         rho_coup[leg.name] = b
 
     def chi2(rho_per_leg):
-        _, parts = DL.data_loglik(
+        _, parts = LEG.data_loglik(
             c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs, pf_stats=c["pf"],
             dla_core=c["dla_core"], cache_k=c["cache_k"], z_global=z_global,
             sigma_zb_per_leg=szb, alpha_centres=c["alpha_centres"],
@@ -468,7 +469,7 @@ def test_data_loglik_rho_per_leg_threads_and_increases_emu_var():
 
     # finite + differentiable joint logL on the cross-class path
     def f(theta9, tau0, alpha):
-        return DL.data_loglik(
+        return LEG.data_loglik(
             c["model"], theta9, tau0, alpha, legs, pf_stats=c["pf"], dla_core=c["dla_core"],
             cache_k=c["cache_k"], z_global=z_global, sigma_zb_per_leg=szb,
             alpha_centres=c["alpha_centres"], rho_zb_per_leg=rho_coup)
@@ -539,11 +540,11 @@ def test_mf_false_is_byte_identical_to_lf_path():
     leg = _build_leg_for_xclass()
     sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
     tau0_vec = jnp.asarray([0.8])
-    P0, C0 = DL.predict_P_obs_on_leg(
+    P0, C0 = LEG.predict_P_obs_on_leg(
         c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
         dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
         alpha_centres=c["alpha_centres"])
-    P1, C1 = DL.predict_P_obs_on_leg(
+    P1, C1 = LEG.predict_P_obs_on_leg(
         c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
         dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
         alpha_centres=c["alpha_centres"], mf=None)
@@ -559,11 +560,11 @@ def test_mf_path_changes_p_model_but_not_ctotal():
     sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
     tau0_vec = jnp.asarray([0.8])
     mf = _synthetic_mf(c, resolved=True)
-    P_lf, C_lf = DL.predict_P_obs_on_leg(
+    P_lf, C_lf = LEG.predict_P_obs_on_leg(
         c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
         dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
         alpha_centres=c["alpha_centres"])
-    P_mf, C_mf = DL.predict_P_obs_on_leg(
+    P_mf, C_mf = LEG.predict_P_obs_on_leg(
         c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
         dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
         alpha_centres=c["alpha_centres"], mf=mf)
@@ -582,7 +583,7 @@ def test_mf_path_differentiable_in_theta_tau0_alpha_jacfwd_jacrev():
     mf = _synthetic_mf(c, resolved=True)
 
     def fwd(theta9, tau0_vec, alpha):
-        P, _ = DL.predict_P_obs_on_leg(
+        P, _ = LEG.predict_P_obs_on_leg(
             c["model"], theta9, tau0_vec, alpha, pf_stats=c["pf"],
             dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf)
         return P
@@ -609,7 +610,7 @@ def test_mf_path_freezes_lf_backbone_no_grad_to_lf_weights():
     def loss(model):
         # build an MF that closes over THIS (differentiated) model as its LF backbone
         mf_m = eqx.tree_at(lambda m: m.lf_model, mf, model)
-        P, _ = DL.predict_P_obs_on_leg(
+        P, _ = LEG.predict_P_obs_on_leg(
             model, c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
             dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf_m)
         return jnp.sum(P ** 2)
@@ -670,7 +671,7 @@ def test_mf_path_matches_gate_script_to_tight_tol():
     tau0_vec = jnp.asarray([0.85])
 
     # production mf= path
-    P_prod, _ = DL.predict_P_obs_on_leg(
+    P_prod, _ = LEG.predict_P_obs_on_leg(
         fold_model, theta9, tau0_vec, alpha, pf_stats=pf_stats, dla_core=dla_core,
         cache_k=cache_k, leg=leg, mf=mf)
 
@@ -714,15 +715,15 @@ def _floor_leg(z=3.0, ns_box_z=True, mf_floor_on=True):
 def test_mf_floor_loads_and_interp_clamps_to_leg_z():
     """load_mf_floor returns the spec'd table; the per-z interp matches the .txt (z=3.0:
     LFres 1.23%, extrap 3.94%) and end-clamps (NaN slope cells nan_to_num'd)."""
-    fl = DL.load_mf_floor()
+    fl = LEG.load_mf_floor()
     assert fl.sigma_floor.shape == (18, 2) and fl.ns_box.tolist() == [0.86, 0.98]
     assert np.isclose(fl.floor_min, 0.0123) and np.isclose(fl.k_band_split, 0.07)
-    sig, slp = DL._mf_floor_sigma_at_z(fl, 3.0)
+    sig, slp = LEG._mf_floor_sigma_at_z(fl, 3.0)
     assert np.isclose(sig[0], 0.0123, atol=1e-4), f"z=3.0 LFres floor {sig[0]}"
     assert np.isclose(sig[1], 0.0394, atol=1e-3), f"z=3.0 extrap floor {sig[1]}"
     assert np.isfinite(slp).all(), "slope must be NaN-free after the interp clamp"
     # z=2.0 LFres slope is NaN in the table → must clamp to a finite value
-    sig20, slp20 = DL._mf_floor_sigma_at_z(fl, 2.0)
+    sig20, slp20 = LEG._mf_floor_sigma_at_z(fl, 2.0)
     assert np.isfinite(slp20).all()
 
 
@@ -732,17 +733,17 @@ def test_mf_floor_raises_leg_cemu_by_spec_amount():
     c = _emu_ctx()
     leg = _floor_leg(z=3.0)
     mf = _synthetic_mf(c, resolved=True)
-    fl = DL.load_mf_floor()
+    fl = LEG.load_mf_floor()
     tau0_vec = jnp.asarray([0.85])
     theta9 = jnp.full(9, 0.5)                          # ns_phys=0.925, inside [0.86,0.98] → edge=0
-    Pm, C_no = DL.predict_P_obs_on_leg(
+    Pm, C_no = LEG.predict_P_obs_on_leg(
         c["model"], theta9, tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
         dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf, mf_floor=None)
-    _, C_fl = DL.predict_P_obs_on_leg(
+    _, C_fl = LEG.predict_P_obs_on_leg(
         c["model"], theta9, tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
         dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf, mf_floor=fl)
     added = np.diag(np.asarray(C_fl)) - np.diag(np.asarray(C_no))
-    sig_lfres = DL._mf_floor_sigma_at_z(fl, 3.0)[0][0]   # LFres σ at z=3.0 = 1.23%
+    sig_lfres = LEG._mf_floor_sigma_at_z(fl, 3.0)[0][0]   # LFres σ at z=3.0 = 1.23%
     expect = (sig_lfres * np.asarray(Pm)) ** 2           # all leg k < 0.069 → LFres band
     assert np.allclose(added, expect, rtol=1e-10, atol=1e-18), \
         f"floor diagonal mismatch: added {added} vs expect {expect}"
@@ -755,14 +756,14 @@ def test_mf_floor_edge_term_fires_outside_ns_box():
     c = _emu_ctx()
     leg = _floor_leg(z=3.4)                              # z=3.4 has a sizeable slope
     mf = _synthetic_mf(c, resolved=True)
-    fl = DL.load_mf_floor()
+    fl = LEG.load_mf_floor()
     tau0_vec = jnp.asarray([0.85])
     th_in = jnp.full(9, 0.5)                             # ns=0.925 inside box
     th_edge = jnp.array([0.836] + [0.5] * 8)            # ns≈1.009 outside box
-    Pm, C_in = DL.predict_P_obs_on_leg(
+    Pm, C_in = LEG.predict_P_obs_on_leg(
         c["model"], th_in, tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
         dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf, mf_floor=fl)
-    Pm2, C_edge = DL.predict_P_obs_on_leg(
+    Pm2, C_edge = LEG.predict_P_obs_on_leg(
         c["model"], th_edge, tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
         dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf, mf_floor=fl)
     add_in = np.diag(np.asarray(C_in)) - 1e-3
@@ -780,9 +781,9 @@ def test_mf_floor_ctotal_stays_spd():
     c = _emu_ctx()
     leg = _floor_leg(z=4.6)
     mf = _synthetic_mf(c, resolved=True)
-    fl = DL.load_mf_floor()
+    fl = LEG.load_mf_floor()
     sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
-    _, C = DL.predict_P_obs_on_leg(
+    _, C = LEG.predict_P_obs_on_leg(
         c["model"], jnp.array([0.836] + [0.5] * 8), jnp.asarray([0.85]), c["alpha_hcd"],
         pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
         sigma_zb=sigma_zb, alpha_centres=c["alpha_centres"], mf=mf, mf_floor=fl)
@@ -798,33 +799,33 @@ def test_mf_floor_off_is_byte_identical_to_lf_and_to_mf_no_floor():
        (ii) mf=None, mf_floor=fl    ==  LF path (floor is a no-op without the MF forward);
        (iii) the floor on a leg with mf_floor_on=False is a no-op (DESI-like leg)."""
     c = _emu_ctx()
-    fl = DL.load_mf_floor()
+    fl = LEG.load_mf_floor()
     leg_small = _floor_leg(z=3.0, mf_floor_on=True)
     leg_big = _floor_leg(z=3.0, mf_floor_on=False)      # DESI-like: floor must NOT apply
     sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
     tau0_vec = jnp.asarray([0.8])
     args = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"],
                 sigma_zb=sigma_zb, alpha_centres=c["alpha_centres"])
-    P_ref, C_ref = DL.predict_P_obs_on_leg(
+    P_ref, C_ref = LEG.predict_P_obs_on_leg(
         c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_small, **args)
     # (i) explicit floor-off
-    P0, C0 = DL.predict_P_obs_on_leg(
+    P0, C0 = LEG.predict_P_obs_on_leg(
         c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_small,
         mf=None, mf_floor=None, **args)
     assert np.array_equal(np.asarray(P0), np.asarray(P_ref))
     assert np.array_equal(np.asarray(C0), np.asarray(C_ref))
     # (ii) floor passed but mf=None → no-op (the floor only fires through the MF forward)
-    P1, C1 = DL.predict_P_obs_on_leg(
+    P1, C1 = LEG.predict_P_obs_on_leg(
         c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_small,
         mf=None, mf_floor=fl, **args)
     assert np.array_equal(np.asarray(C1), np.asarray(C_ref)), "floor must be a no-op when mf=None"
     # (iii) mf on, floor on, but leg.mf_floor_on=False → the MF P_model differs but C_emu has
     # NO floor (compare the floor-on leg's C_emu minus the floor-off leg's at the SAME P_obs).
     mf = _synthetic_mf(c, resolved=True)
-    _, C_big = DL.predict_P_obs_on_leg(
+    _, C_big = LEG.predict_P_obs_on_leg(
         c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_big,
         mf=mf, mf_floor=fl, **args)
-    _, C_big_nofloor = DL.predict_P_obs_on_leg(
+    _, C_big_nofloor = LEG.predict_P_obs_on_leg(
         c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_big,
         mf=mf, mf_floor=None, **args)
     assert np.array_equal(np.asarray(C_big), np.asarray(C_big_nofloor)), \
@@ -838,11 +839,11 @@ def test_mf_floor_differentiable_and_nuts_safe():
     c = _emu_ctx()
     leg = _floor_leg(z=3.4)
     mf = _synthetic_mf(c, resolved=True)
-    fl = DL.load_mf_floor()
+    fl = LEG.load_mf_floor()
     sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
 
     def total_var(theta9, tau0_vec, alpha):
-        _, C = DL.predict_P_obs_on_leg(
+        _, C = LEG.predict_P_obs_on_leg(
             c["model"], theta9, tau0_vec, alpha, pf_stats=c["pf"], dla_core=c["dla_core"],
             cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
             alpha_centres=c["alpha_centres"], mf=mf, mf_floor=fl)
@@ -864,7 +865,7 @@ def test_mf_floor_differentiable_and_nuts_safe():
         ns = DL._ns_phys_from_theta9(theta9)
         # mirror _mf_floor_var_on_k's edge term at z=3.4, LFres band, P=1 (so var≡edge²).
         ns_sg = jax.lax.stop_gradient(ns)
-        return jnp.sum(DL._mf_floor_var_on_k(fl, 3.4, jnp.array([0.02]),
+        return jnp.sum(LEG._mf_floor_var_on_k(fl, 3.4, jnp.array([0.02]),
                                              jnp.array([1.0]), ns_sg))
     g_ns = jax.grad(floor_only_var_via_edge)(th)
     assert np.allclose(np.asarray(g_ns), 0.0, atol=1e-12), \
@@ -877,16 +878,16 @@ def test_mf_floor_never_indexes_z_above_4p6():
     z≤4.2) pass; a synthetic z=5.0 leg with the floor on must raise."""
     c = _emu_ctx()
     mf = _synthetic_mf(c, resolved=True)
-    fl = DL.load_mf_floor()
+    fl = LEG.load_mf_floor()
     bad = _floor_leg(z=5.0, mf_floor_on=True)
     with pytest.raises(AssertionError, match="z max"):
-        DL.predict_P_obs_on_leg(
+        LEG.predict_P_obs_on_leg(
             c["model"], c["theta9"], jnp.asarray([0.85]), c["alpha_hcd"],
             pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=bad,
             mf=mf, mf_floor=fl)
     # a z=4.6 leg (KS max) must be fine
     ok = _floor_leg(z=4.6, mf_floor_on=True)
-    _, C = DL.predict_P_obs_on_leg(
+    _, C = LEG.predict_P_obs_on_leg(
         c["model"], c["theta9"], jnp.asarray([0.85]), c["alpha_hcd"],
         pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=ok,
         mf=mf, mf_floor=fl)
@@ -900,17 +901,17 @@ def test_mf_floor_threads_through_data_loglik_real_cov():
     unchanged. logL stays finite + differentiable."""
     c = _emu_ctx()
     desi = DL.load_desi_leg()                            # mf_floor_on=False by default
-    ks = DL.load_ks_leg()                                # mf_floor_on=True by default
+    ks = DL.load_ks_leg(k_max=0.069)                                # mf_floor_on=True by default
     assert ks.mf_floor_on is True and desi.mf_floor_on is False
     legs = [desi, ks]
     mf = _synthetic_mf(c, resolved=True)
-    fl = DL.load_mf_floor()
+    fl = LEG.load_mf_floor()
     z_global = np.unique(np.round(np.concatenate([desi.z, ks.z]), 6))
     tau0_global = jnp.asarray(MF.becker13_tau0(jnp.asarray(z_global)))
     szb = {leg.name: _sigma_zb_for_leg(leg, c["n_k"], c["n_tb"], c["rng"]) for leg in legs}
 
     def chi2(mf_floor):
-        _, parts = DL.data_loglik(
+        _, parts = LEG.data_loglik(
             c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs, pf_stats=c["pf"],
             dla_core=c["dla_core"], cache_k=c["cache_k"], z_global=z_global,
             sigma_zb_per_leg=szb, alpha_centres=c["alpha_centres"], mf=mf,
@@ -924,7 +925,7 @@ def test_mf_floor_threads_through_data_loglik_real_cov():
         "DESI (mf_floor_on=False) χ² must be unchanged by the floor"
 
     def f(theta9, tau0, alpha):
-        return DL.data_loglik(
+        return LEG.data_loglik(
             c["model"], theta9, tau0, alpha, legs, pf_stats=c["pf"], dla_core=c["dla_core"],
             cache_k=c["cache_k"], z_global=z_global, sigma_zb_per_leg=szb,
             alpha_centres=c["alpha_centres"], mf=mf, mf_floor=fl)

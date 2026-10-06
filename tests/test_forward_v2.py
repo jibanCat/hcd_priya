@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import forward as FW
 from hcd_analysis.emulator import kcoord as KC
 from hcd_analysis.emulator.model import Emulator
@@ -53,7 +54,7 @@ def test_single_z_leg_equals_the_old_forward_on_that_z_grid(z, on):
     alpha = jnp.asarray([[0.05, 0.02, 0.004]])
     nuis = NUIS if on else {}
     grid = np.asarray(KC.kgrid(KCOM, z, th).k_skm)
-    P_old, _ = DL.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=core, cache_k=grid, leg=leg,
+    P_old, _ = LEG.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=core, cache_k=grid, leg=leg,
                                        require_zresolved=True, **nuis)
     out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=core, nuis=nuis)
     assert int(out.n_out) == 0
@@ -69,11 +70,11 @@ def test_every_z_of_a_leg_is_placed_on_its_own_grid():
     out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=core)
     for iz, z in enumerate(zs):
         sub = _leg([z])
-        P1, _ = DL.predict_P_obs_on_leg(model, th, tau0[iz:iz + 1], alpha[iz:iz + 1], pf_stats=pf, dla_core=core,
+        P1, _ = LEG.predict_P_obs_on_leg(model, th, tau0[iz:iz + 1], alpha[iz:iz + 1], pf_stats=pf, dla_core=core,
                                         cache_k=np.asarray(KC.kgrid(KCOM, z, th).k_skm), leg=sub)
         np.testing.assert_allclose(np.asarray(out.P_model)[leg.z_idx == iz], np.asarray(P1), rtol=1e-12)
     # the incident: one fixed grid for every z differs
-    P_row0, _ = DL.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=core,
+    P_row0, _ = LEG.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=core,
                                         cache_k=np.asarray(KC.kgrid(KCOM, zs[0], th).k_skm), leg=leg)
     assert np.max(np.abs(np.asarray(P_row0) / np.asarray(out.P_model) - 1)) > 1e-3
 
@@ -151,7 +152,7 @@ def test_t1_variance_equals_the_old_path_on_each_z_grid(on):
     for iz, z in enumerate(zs):
         sub = _leg([z], metals=on, resolution=on)
         sub = sub._replace(R_z=np.asarray(leg.R_z)[iz:iz + 1])
-        _, C_old = DL.predict_P_obs_on_leg(model, th, tau0[iz:iz + 1], alpha[iz:iz + 1], pf_stats=pf, dla_core=core,
+        _, C_old = LEG.predict_P_obs_on_leg(model, th, tau0[iz:iz + 1], alpha[iz:iz + 1], pf_stats=pf, dla_core=core,
                                            cache_k=np.asarray(KC.kgrid(KCOM, z, th).k_skm), leg=sub,
                                            rho_zb=rho[iz:iz + 1], alpha_centres=ac, **nuis)
         rows = np.where(leg.z_idx == iz)[0]
@@ -169,14 +170,14 @@ def test_without_t1_the_covariance_is_the_data_covariance():
 def test_t2_floor_variance_equals_the_old_single_band_floor():
     rng = np.random.default_rng(11)
     zg = np.array([2.2, 3.0, 3.8, 4.6]); sig = rng.uniform(0.005, 0.02, 4); slp = rng.uniform(0, 0.2, 4)
-    old = DL.MFFloor(z_grid=zg, sigma_floor=np.stack([sig, sig], 1), slope=np.stack([slp, slp], 1),
+    old = LEG.MFFloor(z_grid=zg, sigma_floor=np.stack([sig, sig], 1), slope=np.stack([slp, slp], 1),
                      k_band_split=0.07, ns_box=np.array([0.86, 0.98]), floor_min=0.0, edge_slope_mult=2.0)
     k = jnp.geomspace(1e-3, 0.065, 15); P = jnp.asarray(rng.uniform(0.05, 0.2, 15))
     for z in (2.6, 3.0, 4.4):
         for ns in (0.9, 1.01, 0.83):
             s_z, l_z = np.interp(z, zg, sig), np.interp(z, zg, slp)
             np.testing.assert_allclose(np.asarray(FW.t2_var(s_z, l_z, P, ns)),
-                                       np.asarray(DL._mf_floor_var_on_k(old, z, k, P, ns)), rtol=1e-13)
+                                       np.asarray(LEG._mf_floor_var_on_k(old, z, k, P, ns)), rtol=1e-13)
 
 
 def test_covariance_assembly_equals_the_production_algebra():
@@ -205,7 +206,7 @@ def test_t3_offdiagonal_term_equals_the_old_dense_path_on_a_z_grid():
     rng = np.random.default_rng(13)
     U = rng.normal(0, 0.01, (12, 3)); w = rng.uniform(0.5, 2, 3)
     F = (U * w) @ U.T
-    _, C_old = DL.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=core,
+    _, C_old = LEG.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=core,
                                        cache_k=np.asarray(KC.kgrid(KCOM, z, th).k_skm), leg=leg, rho_zb=rho,
                                        alpha_centres=ac, mf_emucoh_cov=F, mf_emucoh_offdiag_only=True)
     out = FW.predict_leg(model, th, tau0, alpha, leg=leg, k_com=KCOM, pf_stats=pf, dla_core=core, t1=(rho, ac),

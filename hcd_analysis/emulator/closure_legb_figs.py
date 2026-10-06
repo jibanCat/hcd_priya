@@ -58,17 +58,9 @@ def _plt():
 # C_emu vs C_data on the leg grids (the sub-dominance figure).
 # ----------------------------------------------------------------------------
 def _emu_var_for_leg(ctx, leg, theta9, tau0_vec, alpha_hcd, core, *, use_xclass):
-    """PRE-2026-10 INTERFACE (uses ctx.cache_k; replaced at gate E).
-
-    diag(C_emu) on a leg = diag(C_total − C_data) at (θ,τ₀,α) (cross-class OR diagonal)."""
-    szb = ctx.sigma_zb_per_leg.get(leg.name)
-    rzb = ctx.rho_zb_per_leg.get(leg.name) if (use_xclass and ctx.rho_zb_per_leg) else None
-    _, C_total = DL.predict_P_obs_on_leg(
-        ctx.model, theta9, tau0_vec, alpha_hcd, pf_stats=ctx.pf_stats, dla_core=core,
-        cache_k=ctx.cache_k, leg=leg, sigma_zb=(None if rzb is not None else szb),
-        alpha_centres=ctx.alpha_centres, cemu_inflate=ctx.cemu_inflate, rho_zb=rzb,
-        require_zresolved=True)   # C_emu sizing scores vs a z-RESOLVED truth: a z-flat alpha here is the bug
-    return np.diag(np.asarray(C_total)) - np.diag(np.asarray(leg.C_data))
+    """The pre-2026-10 closure figure helper (bound on the single grid ``ctx.cache_k``). Retired at gate E;
+    rebuilt at gate F with the closure machinery."""
+    raise NotImplementedError("_emu_var_for_leg: retired with the single-grid forward; rebuilt at gate F")
 
 
 def fig_cemu_on_leg(ctx, d, figdir=FIGDIR):
@@ -129,84 +121,9 @@ def truth_tau0_on_leg(truth, leg):
 # One-mock example (truth-on-leg, noisy mock, emulator prediction at truth θ).
 # ----------------------------------------------------------------------------
 def fig_mock_example(ctx, d, figdir=FIGDIR, seed=0):
-    """PRE-2026-10 INTERFACE (mocks bound with ctx.cache_k; replaced at gate F).
-
-    One Leg-B mock per leg, COLORED BY z (the prior render overplotted every z-bin in one
-    colour → unreadable spaghetti). Two rows per leg:
-      top   — k·P1D/π: sim-truth (line) + emulator-at-truth-θ (dashed) + noisy mock (points,
-              thin ±σ_data bars), all coloured by z. The emu dashed should sit on the truth.
-      bottom— the BINDING residual P_emu/P_truth−1 (%) vs k, coloured by z, with the grey
-              ±σ_data/P_truth envelope: shows the emulator tracks truth WELL INSIDE the data
-              error (the real sanity — emu error is sub-dominant to the noise it lives under).
-    """
-    plt = _plt()
-    from matplotlib.cm import ScalarMappable
-    from matplotlib.colors import Normalize
-    sims, _ = held_out_sims(d, 0)
-    truth = make_truth_from_sim(d, sims[0], 0)
-    mock_legs, tp, info = make_legb_mock(ctx, truth, jax.random.PRNGKey(seed))
-    core = _mock_core_per_leg(ctx, truth)
-    cache_k = np.asarray(ctx.cache_k)
-    z_sim = np.asarray(truth["z"]); P_sim = np.asarray(truth["P_obs_true"])
-
-    nL = len(ctx.legs)
-    fig, axes = plt.subplots(2, nL, figsize=(7.0 * nL, 8.4), squeeze=False,
-                             gridspec_kw=dict(height_ratios=[2.0, 1.0]))
-    cmap = plt.get_cmap("viridis")
-    for li, (leg, mleg) in enumerate(zip(ctx.legs, mock_legs)):
-        axA, axR = axes[0][li], axes[1][li]
-        tau0_vec = jnp.asarray(truth_tau0_on_leg(truth, leg))
-        P_emu, _ = DL.predict_P_obs_on_leg(
-            ctx.model, jnp.asarray(truth["params_unit"]), tau0_vec,
-            _truth_alpha_zresolved_on_leg(truth, leg),       # Z-RESOLVED truth α(z) (was z-flat w_c)
-            pf_stats=ctx.pf_stats, dla_core=core[leg.name],
-            cache_k=ctx.cache_k, leg=leg, sigma_zb=None, alpha_centres=None,
-            require_zresolved=True)                          # never a z-flat alpha vs the z-resolved truth
-        P_emu = np.asarray(P_emu)
-        P_truth = np.zeros(leg.k.shape[0])
-        for iz in range(leg.n_z):
-            rows = np.where(np.asarray(leg.z_idx) == iz)[0]
-            j = int(np.argmin(np.abs(z_sim - float(leg.z[iz]))))
-            P_truth[rows] = np.asarray(jnp.interp(
-                jnp.asarray(leg.k[rows]), jnp.asarray(cache_k), jnp.asarray(P_sim[j])))
-        P_mock = np.asarray(mleg.P_data)
-        sig_d = np.sqrt(np.diag(np.asarray(leg.C_data)))
-        k = np.asarray(leg.k); zr = np.asarray(leg.z_row)
-        kept = np.isfinite(P_mock) & (P_truth > 0)
-        zlev = np.unique(zr[kept]); norm = Normalize(zlev.min(), zlev.max())
-        fac = k / np.pi
-        for zz in zlev:
-            m = kept & (zr == zz)
-            o = np.argsort(k[m]); c = cmap(norm(zz))
-            axA.plot(k[m][o], (fac * P_truth)[m][o], "-", color=c, lw=1.3)
-            axA.plot(k[m][o], (fac * P_emu)[m][o], "--", color=c, lw=1.1, alpha=0.9)
-            axA.errorbar(k[m], (fac * P_mock)[m], yerr=(fac * sig_d)[m], fmt=".", ms=4,
-                         color=c, alpha=0.55, elinewidth=0.6, capsize=0)
-            axR.plot(k[m][o], (100.0 * (P_emu / P_truth - 1.0))[m][o], "-", color=c, lw=1.1)
-        # grey ±σ_data/P_truth envelope (the per-row data 1σ the emu residual lives inside)
-        ok = np.argsort(k[kept]); env = 100.0 * (sig_d / P_truth)[kept][ok]
-        axR.fill_between(k[kept][ok], -env, env, color="0.8", alpha=0.6,
-                         label=r"$\pm\sigma_{\rm data}/P_{\rm truth}$ (data 1σ)")
-        axA.plot([], [], "k-", label="sim-truth"); axA.plot([], [], "k--", label="emu @ truth θ")
-        axA.plot([], [], "k.", label=r"noisy mock $\pm\sigma_{\rm data}$")
-        axA.set_xscale("log"); axA.set_yscale("log")
-        axA.set_ylabel(r"$k\,P_{\rm 1D}/\pi$")
-        med = float(np.median(np.abs(P_emu / P_truth - 1.0)[kept]))
-        axA.set_title(f"{leg.name}  ({int(kept.sum())} rows, {zlev.size} z-bins; "
-                      f"|emu/truth−1| med {100*med:.2f}%)")
-        axA.legend(fontsize=8, loc="best"); axA.grid(alpha=0.3, which="both")
-        axR.set_xscale("log"); axR.axhline(0, color="k", lw=0.8)
-        axR.set_xlabel("k [s/km] (angular)")
-        axR.set_ylabel("emu/truth − 1 [%]")
-        axR.set_ylim(-20, 20); axR.legend(fontsize=8, loc="upper left")
-        axR.grid(alpha=0.3, which="both")
-        sm = ScalarMappable(norm=norm, cmap=cmap); sm.set_array([])
-        fig.colorbar(sm, ax=[axA, axR], label="z", pad=0.01)
-    fig.suptitle(f"Leg-B mock example (sim={sims[0][:22]}…) — truth · emulator-at-truth · "
-                 "noisy mock, coloured by z")
-    p = Path(figdir) / "legb_mock_example.png"
-    fig.savefig(p, dpi=150, bbox_inches="tight"); plt.close(fig)
-    return str(p)
+    """The pre-2026-10 closure figure helper (bound on the single grid ``ctx.cache_k``). Retired at gate E;
+    rebuilt at gate F with the closure machinery."""
+    raise NotImplementedError("fig_mock_example: retired with the single-grid forward; rebuilt at gate F")
 
 
 # ----------------------------------------------------------------------------

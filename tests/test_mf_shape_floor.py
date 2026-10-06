@@ -19,6 +19,7 @@ import pytest
 
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator.likelihood import gaussian_loglik
 
 SHAPE_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/mf_cemu_shape.npz"
@@ -42,7 +43,7 @@ def _emu_ctx(n_k=172, n_basis=12, seed=0):
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have_shape, reason="mf_cemu_shape.npz not built")
 def test_load_mf_shape_symmetric_psd():
-    sh = DL.load_mf_shape(SHAPE_NPZ)
+    sh = LEG.load_mf_shape(SHAPE_NPZ)
     F = sh.f_shape
     assert F.shape == (len(sh.z) * len(sh.k),) * 2
     assert np.allclose(F, F.T, atol=1e-12)
@@ -54,21 +55,21 @@ def test_load_mf_shape_symmetric_psd():
 def test_logk_interp_weights_partition_and_support():
     kc = np.power(10.0, np.linspace(np.log10(0.01), np.log10(0.069), 40))
     # in-band midpoint: weights sum to 1, two nonzero entries that bracket it
-    w = DL._logk_interp_weights(0.03, kc)
+    w = LEG._logk_interp_weights(0.03, kc)
     assert abs(w.sum() - 1.0) < 1e-12
     assert np.count_nonzero(w) == 2
     recon = 10 ** (w @ np.log10(kc))
     assert abs(recon - 0.03) / 0.03 < 1e-9
     # out of band → all zero (no extrapolation)
-    assert np.all(DL._logk_interp_weights(0.20, kc) == 0)
-    assert np.all(DL._logk_interp_weights(0.001, kc) == 0)
+    assert np.all(LEG._logk_interp_weights(0.20, kc) == 0)
+    assert np.all(LEG._logk_interp_weights(0.001, kc) == 0)
 
 
 @pytest.mark.skipif(not (_have_shape and _have_desi), reason="shape npz / DESI data missing")
 def test_mf_shape_cov_for_leg_psd_and_diagonal():
-    sh = DL.load_mf_shape(SHAPE_NPZ)
+    sh = LEG.load_mf_shape(SHAPE_NPZ)
     leg = DL.load_desi_leg()
-    C = DL.mf_shape_cov_for_leg(sh, leg)
+    C = LEG.mf_shape_cov_for_leg(sh, leg)
     N = leg.k.shape[0]
     assert C.shape == (N, N)
     assert np.allclose(C, C.T, atol=1e-12)
@@ -79,7 +80,7 @@ def test_mf_shape_cov_for_leg_psd_and_diagonal():
     z_row = np.asarray(leg.z)[np.asarray(leg.z_idx)]
     for i in (0, N // 2, N - 1):
         zi = int(np.argmin(np.abs(sh.z - z_row[i])))
-        w = DL._logk_interp_weights(leg.k[i], sh.k)
+        w = LEG._logk_interp_weights(leg.k[i], sh.k)
         # diag(S F Sᵀ)_ii = wᵀ F[zi,zi-block] w  (the within-z k-block)
         blk = sh.f_shape[zi * Nk:(zi + 1) * Nk, zi * Nk:(zi + 1) * Nk]
         assert abs(C[i, i] - w @ blk @ w) < 1e-12
@@ -88,13 +89,13 @@ def test_mf_shape_cov_for_leg_psd_and_diagonal():
 @pytest.mark.skipif(not (_have_shape and _have_desi), reason="shape npz / DESI data missing")
 def test_predict_with_shape_offdiag_pd_and_backcompat():
     c = _emu_ctx()
-    sh = DL.load_mf_shape(SHAPE_NPZ)
+    sh = LEG.load_mf_shape(SHAPE_NPZ)
     leg = DL.load_desi_leg()
-    Cfrac = DL.mf_shape_cov_for_leg(sh, leg)
+    Cfrac = LEG.mf_shape_cov_for_leg(sh, leg)
     tau0 = jnp.full(leg.n_z, 0.9)
     kw = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg)
-    P0, C0 = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **kw)
-    P1, C1 = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+    P0, C0 = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **kw)
+    P1, C1 = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
                                      mf_shape_cov=Cfrac, mf_shape_infl=1.0, **kw)
     # back-compat: no shape cov → identical
     assert np.allclose(np.asarray(P0), np.asarray(P1))
@@ -111,15 +112,15 @@ def test_predict_with_shape_offdiag_pd_and_backcompat():
 @pytest.mark.skipif(not (_have_shape and _have_desi), reason="shape npz / DESI data missing")
 def test_shape_offdiag_scales_as_infl_squared():
     c = _emu_ctx()
-    sh = DL.load_mf_shape(SHAPE_NPZ)
+    sh = LEG.load_mf_shape(SHAPE_NPZ)
     leg = DL.load_desi_leg()
-    Cfrac = DL.mf_shape_cov_for_leg(sh, leg)
+    Cfrac = LEG.mf_shape_cov_for_leg(sh, leg)
     tau0 = jnp.full(leg.n_z, 0.9)
     base_kw = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg)
-    _, C_no = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **base_kw)
-    _, Ca = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+    _, C_no = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **base_kw)
+    _, Ca = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
                                     mf_shape_cov=Cfrac, mf_shape_infl=1.0, **base_kw)
-    _, Cb = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+    _, Cb = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
                                     mf_shape_cov=Cfrac, mf_shape_infl=2.0, **base_kw)
     # the SHAPE CONTRIBUTION (C_total − baseline) scales as infl² everywhere (diag + off-diag).
     da = np.asarray(Ca) - np.asarray(C_no)
@@ -131,14 +132,14 @@ def test_shape_offdiag_scales_as_infl_squared():
 @pytest.mark.skipif(not (_have_shape and _have_desi), reason="shape npz / DESI data missing")
 def test_loglik_finite_and_differentiable_through_shape():
     c = _emu_ctx()
-    sh = DL.load_mf_shape(SHAPE_NPZ)
+    sh = LEG.load_mf_shape(SHAPE_NPZ)
     leg = DL.load_desi_leg()
-    Cfrac = jnp.asarray(DL.mf_shape_cov_for_leg(sh, leg))
+    Cfrac = jnp.asarray(LEG.mf_shape_cov_for_leg(sh, leg))
     tau0 = jnp.full(leg.n_z, 0.9)
     P_data = jnp.asarray(leg.P_data)
 
     def f(theta9):
-        P, C = DL.predict_P_obs_on_leg(
+        P, C = LEG.predict_P_obs_on_leg(
             c["model"], theta9, tau0, c["alpha_hcd"], pf_stats=c["pf"],
             dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
             mf_shape_cov=Cfrac, mf_shape_infl=1.5)

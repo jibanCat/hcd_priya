@@ -63,6 +63,7 @@ def test_eboss_offdiagonal_golden_proves_block_pairing():
 # ----------------------------------------------------------------------------- #
 import hcd_analysis.emulator  # noqa: E402  x64
 from hcd_analysis.emulator import data_likelihood as DL  # noqa: E402
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 
 
 @pytest.mark.skipif(not _have, reason="eBOSS npz not built")
@@ -135,10 +136,10 @@ def test_eboss_binding_finite_and_spd():
     alpha = jnp.asarray([0.06, 0.02, 0.003])
 
     def ll(th):
-        P, C = DL.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=dla_core,
+        P, C = LEG.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=dla_core,
                                        cache_k=cache_k, leg=leg)
         return jnp.sum(P) + jnp.trace(C)
-    P, C = DL.predict_P_obs_on_leg(model, theta9, tau0, alpha, pf_stats=pf, dla_core=dla_core,
+    P, C = LEG.predict_P_obs_on_leg(model, theta9, tau0, alpha, pf_stats=pf, dla_core=dla_core,
                                    cache_k=cache_k, leg=leg)
     Pn, Cn = np.asarray(P), np.asarray(C)
     assert Pn.shape == (NZ * NK,) and Cn.shape == (NZ * NK, NZ * NK)

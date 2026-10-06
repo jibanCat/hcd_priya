@@ -20,6 +20,7 @@ from numpyro import handlers
 from numpyro.infer.util import constrain_fn
 from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 
 _CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 _CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
@@ -141,7 +142,7 @@ def test_bres_vec_forward_response_per_z_indexed():
     core = jnp.mean(jnp.asarray(ctx.dla_core_leg[leg.name]), axis=0)
 
     def _fwd(**kw):
-        P, _ = DL.predict_P_obs_on_leg(
+        P, _ = LEG.predict_P_obs_on_leg(
             ctx.model, theta9, tau0_vec, alpha3, pf_stats=ctx.pf_stats, dla_core=core,
             cache_k=ctx.cache_k, leg=leg, sigma_zb=szb, alpha_centres=ctx.alpha_centres,
             cemu_inflate=ctx.cemu_inflate, rho_zb=rzb, mf=ctx.mf, **kw)
@@ -353,4 +354,4 @@ def test_resolution_ready_flag_per_leg():
     _KS = ("/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
            "final-conservative-p1d-karacayli_etal2021.txt")
     if os.path.exists(_KS):
-        assert load_ks_leg().resolution_ready is False, "KS proxy R_z is untrustworthy -> not resolution_ready"
+        assert load_ks_leg(k_max=0.069).resolution_ready is False, "KS proxy R_z is untrustworthy -> not resolution_ready"

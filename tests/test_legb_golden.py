@@ -18,6 +18,7 @@ import jax.numpy as jnp
 
 from hcd_analysis.emulator.closure_legb import build_legb_ctx
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import meanflux_prior as MF
 
 GOLDEN = os.path.join(os.path.dirname(__file__), "golden", "legb_lf_golden.npz")
@@ -38,7 +39,7 @@ def test_legb_legacy_forward_matches_golden():
         szb = ctx.sigma_zb_per_leg.get(leg.name)
         rzb = ctx.rho_zb_per_leg.get(leg.name) if ctx.rho_zb_per_leg is not None else None
         core = jnp.mean(jnp.asarray(ctx.dla_core_leg[leg.name]), axis=0)
-        P_model, C_total = DL.predict_P_obs_on_leg(
+        P_model, C_total = LEG.predict_P_obs_on_leg(
             ctx.model, theta9, tau0_vec, alpha3, pf_stats=ctx.pf_stats,
             dla_core=core, cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
             alpha_centres=ctx.alpha_centres, cemu_inflate=ctx.cemu_inflate, rho_zb=rzb)
@@ -106,7 +107,7 @@ def test_legb_mf_golden():
         rzb = ctx.rho_zb_per_leg.get(leg.name) if ctx.rho_zb_per_leg is not None else None
         core = jnp.mean(jnp.asarray(ctx.dla_core_leg[leg.name]), axis=0)
         # mf=ctx.mf routes step (1) through _predict_P_obs_mf -> the ANCHORED res_corr.
-        P_model, C_total = DL.predict_P_obs_on_leg(
+        P_model, C_total = LEG.predict_P_obs_on_leg(
             ctx.model, theta9, tau0_vec, alpha3, pf_stats=ctx.pf_stats,
             dla_core=core, cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
             alpha_centres=ctx.alpha_centres, cemu_inflate=ctx.cemu_inflate, rho_zb=rzb,

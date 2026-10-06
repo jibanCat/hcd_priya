@@ -27,6 +27,7 @@ import pytest
 
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 
 
 # ----------------------------------------------------------------------------- #
@@ -82,10 +83,10 @@ def test_zflat_vs_zresolved_predict_differ():
     a fingerprint). The first z-row (where both alphas agree) must MATCH; the second must DIFFER."""
     model, pf, dla_core, cache_k, theta9 = _emu()
     leg = _synthetic_leg()
-    P_flat, _ = DL.predict_P_obs_on_leg(
+    P_flat, _ = LEG.predict_P_obs_on_leg(
         model, theta9, jnp.asarray([1.0, 1.0]), _alpha_flat(),
         pf_stats=pf, dla_core=dla_core, cache_k=cache_k, leg=leg)
-    P_zr, _ = DL.predict_P_obs_on_leg(
+    P_zr, _ = LEG.predict_P_obs_on_leg(
         model, theta9, jnp.asarray([1.0, 1.0]), _alpha_zresolved(),
         pf_stats=pf, dla_core=dla_core, cache_k=cache_k, leg=leg)
     P_flat = np.asarray(P_flat); P_zr = np.asarray(P_zr)
@@ -108,7 +109,7 @@ def test_require_zresolved_raises_on_zflat():
     leg = _synthetic_leg()
     # ValueError (not AssertionError): the guard is an explicit raise so it survives `python -O`.
     with pytest.raises(ValueError, match=r"z-RESOLVED"):
-        DL.predict_P_obs_on_leg(
+        LEG.predict_P_obs_on_leg(
             model, theta9, jnp.asarray([1.0, 1.0]), _alpha_flat(),
             pf_stats=pf, dla_core=dla_core, cache_k=cache_k, leg=leg,
             require_zresolved=True)
@@ -119,10 +120,10 @@ def test_require_zresolved_passes_on_zresolved():
     FINITE P identical to the default (the guard only checks the shape, it does not alter math)."""
     model, pf, dla_core, cache_k, theta9 = _emu()
     leg = _synthetic_leg()
-    P_guard, _ = DL.predict_P_obs_on_leg(
+    P_guard, _ = LEG.predict_P_obs_on_leg(
         model, theta9, jnp.asarray([1.0, 1.0]), _alpha_zresolved(),
         pf_stats=pf, dla_core=dla_core, cache_k=cache_k, leg=leg, require_zresolved=True)
-    P_noguard, _ = DL.predict_P_obs_on_leg(
+    P_noguard, _ = LEG.predict_P_obs_on_leg(
         model, theta9, jnp.asarray([1.0, 1.0]), _alpha_zresolved(),
         pf_stats=pf, dla_core=dla_core, cache_k=cache_k, leg=leg)
     assert np.isfinite(np.asarray(P_guard)).all()
@@ -135,7 +136,7 @@ def test_raw_forward_default_stays_permissive():
     The lock-down lives on the COMPARISON core, not here (see test_loglik_core_defaults_to_zresolved_guard)."""
     model, pf, dla_core, cache_k, theta9 = _emu()
     leg = _synthetic_leg()
-    P, _ = DL.predict_P_obs_on_leg(
+    P, _ = LEG.predict_P_obs_on_leg(
         model, theta9, jnp.asarray([1.0, 1.0]), _alpha_flat(),
         pf_stats=pf, dla_core=dla_core, cache_k=cache_k, leg=leg)   # no require_zresolved
     assert np.isfinite(np.asarray(P)).all()
@@ -155,7 +156,7 @@ def test_loglik_core_defaults_to_zresolved_guard():
     import inspect
     from hcd_analysis.emulator import closure_legb as C
     core_def = inspect.signature(C._data_loglik_legcore).parameters["require_zresolved"].default
-    fwd_def = inspect.signature(DL.predict_P_obs_on_leg).parameters["require_zresolved"].default
+    fwd_def = inspect.signature(LEG.predict_P_obs_on_leg).parameters["require_zresolved"].default
     assert core_def is True, (
         "_data_loglik_legcore must DEFAULT require_zresolved=True (safe-by-default comparison core): got "
         f"{core_def!r}. Reverting it to False reopens the z-flat-alpha bug for any new loglik diagnostic.")

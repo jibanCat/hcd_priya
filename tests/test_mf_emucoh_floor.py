@@ -17,6 +17,7 @@ import pytest
 
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator.likelihood import gaussian_loglik
 
 EMUCOH_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"
@@ -42,7 +43,7 @@ def _emu_ctx(n_k=172, seed=0):
 
 @pytest.mark.skipif(not _have_e, reason="mf_cemu_emucoh.npz not built")
 def test_load_mf_emucoh_symmetric_psd():
-    e = DL.load_mf_emucoh(EMUCOH_NPZ)
+    e = LEG.load_mf_emucoh(EMUCOH_NPZ)
     F = e.f_shape
     assert F.shape == (len(e.z) * len(e.k),) * 2
     assert np.allclose(F, F.T, atol=1e-12)
@@ -55,9 +56,9 @@ def test_load_mf_emucoh_symmetric_psd():
 def test_emucoh_binder_zeros_outside_z_support_and_psd():
     # KS spans z up to 4.6; the emucoh table reaches z≈4.4, so KS's z=4.6 bin exercises the
     # z-support guard (the table now covers all DESI z, so DESI no longer has out-of-support rows).
-    e = DL.load_mf_emucoh(EMUCOH_NPZ)
-    leg = DL.load_ks_leg()
-    C = DL.mf_shape_cov_for_leg(e, leg)
+    e = LEG.load_mf_emucoh(EMUCOH_NPZ)
+    leg = DL.load_ks_leg(k_max=0.069)
+    C = LEG.mf_shape_cov_for_leg(e, leg)
     N = leg.k.shape[0]
     assert C.shape == (N, N) and np.allclose(C, C.T, atol=1e-12)
     assert np.linalg.eigvalsh(C).min() > -1e-10
@@ -76,12 +77,12 @@ def test_shape_floor_binder_unchanged_by_z_guard():
     # the resolution shape floor (z≤4.6) covers all DESI leg z (≤4.2) → the z_tol=0.1 guard
     # must be a NO-OP for it (byte-identical to no guard). (Out-of-k-band rows legitimately have
     # a zero diagonal — that's the pre-existing k-band behavior, unrelated to the z-guard.)
-    s = DL.load_mf_shape(SHAPE_NPZ)
+    s = LEG.load_mf_shape(SHAPE_NPZ)
     leg = DL.load_desi_leg()
     z_row = np.asarray(leg.z)[np.asarray(leg.z_idx)]
     assert np.all(z_row <= float(s.z.max()) + 0.1)
-    C_guard = DL.mf_shape_cov_for_leg(s, leg, z_tol=0.1)
-    C_noguard = DL.mf_shape_cov_for_leg(s, leg, z_tol=1e9)
+    C_guard = LEG.mf_shape_cov_for_leg(s, leg, z_tol=0.1)
+    C_noguard = LEG.mf_shape_cov_for_leg(s, leg, z_tol=1e9)
     assert np.array_equal(C_guard, C_noguard)   # z-guard changes nothing for the shape floor
     assert np.all(np.isfinite(C_guard))
 
@@ -89,13 +90,13 @@ def test_shape_floor_binder_unchanged_by_z_guard():
 @pytest.mark.skipif(not (_have_e and _have_desi), reason="emucoh npz / DESI data missing")
 def test_emucoh_offdiag_pd_and_backcompat():
     c = _emu_ctx()
-    e = DL.load_mf_emucoh(EMUCOH_NPZ)
+    e = LEG.load_mf_emucoh(EMUCOH_NPZ)
     leg = DL.load_desi_leg()
-    Cf = DL.mf_shape_cov_for_leg(e, leg)
+    Cf = LEG.mf_shape_cov_for_leg(e, leg)
     tau0 = jnp.full(leg.n_z, 0.9)
     kw = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg)
-    P0, C0 = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **kw)
-    P1, C1 = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+    P0, C0 = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **kw)
+    P1, C1 = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
                                      mf_emucoh_cov=Cf, mf_emucoh_infl=1.0, **kw)
     assert np.allclose(np.asarray(P0), np.asarray(P1))                 # covariance-only change
     D = np.asarray(C1) - np.asarray(C0)
@@ -111,9 +112,9 @@ def test_emucoh_offdiag_only_per_term_diagonal_allocation():
     coherent structure is preserved, the diagonal is NOT added on top (less conservative), and PD holds.
     Default (False) is byte-identical to the on-top behavior."""
     c = _emu_ctx()
-    e = DL.load_mf_emucoh(EMUCOH_NPZ)
+    e = LEG.load_mf_emucoh(EMUCOH_NPZ)
     leg = DL.load_desi_leg()
-    Cf = DL.mf_shape_cov_for_leg(e, leg)
+    Cf = LEG.mf_shape_cov_for_leg(e, leg)
     tau0 = jnp.full(leg.n_z, 0.9)
     # a nonzero diagonal C_emu (emu_var>0) is required for the per-term allocation to have any effect
     # (with emu_var=0, max(0, emucoh_diag)=emucoh_diag = the on-top value — correctly no reduction).
@@ -123,10 +124,10 @@ def test_emucoh_offdiag_only_per_term_diagonal_allocation():
     ac = jnp.asarray([0.66, 0.83, 1.15, 1.33])
     kw = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
               sigma_zb=sig, alpha_centres=ac, mf_emucoh_cov=Cf, mf_emucoh_infl=1.0)
-    _, C_full = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **kw)
-    _, C_oda = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+    _, C_full = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **kw)
+    _, C_oda = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
                                        mf_emucoh_offdiag_only=True, **kw)
-    _, C_def = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+    _, C_def = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
                                        mf_emucoh_offdiag_only=False, **kw)
     Cfull, Coda, Cdef = np.asarray(C_full), np.asarray(C_oda), np.asarray(C_def)
     # explicit False == default (byte-identical)
@@ -145,16 +146,16 @@ def test_emucoh_offdiag_only_per_term_diagonal_allocation():
 @pytest.mark.skipif(not (_have_e and _have_desi), reason="emucoh npz / DESI data missing")
 def test_emucoh_cov_theta_independent():
     c = _emu_ctx()
-    e = DL.load_mf_emucoh(EMUCOH_NPZ)
+    e = LEG.load_mf_emucoh(EMUCOH_NPZ)
     leg = DL.load_desi_leg()
-    Cf = jnp.asarray(DL.mf_shape_cov_for_leg(e, leg))
+    Cf = jnp.asarray(LEG.mf_shape_cov_for_leg(e, leg))
     tau0 = jnp.full(leg.n_z, 0.9)
 
     def trace_emucoh(th):
-        _, C = DL.predict_P_obs_on_leg(c["model"], th, tau0, c["alpha_hcd"], pf_stats=c["pf"],
+        _, C = LEG.predict_P_obs_on_leg(c["model"], th, tau0, c["alpha_hcd"], pf_stats=c["pf"],
                                        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
                                        mf_emucoh_cov=Cf, mf_emucoh_infl=1.5)
-        _, C0 = DL.predict_P_obs_on_leg(c["model"], th, tau0, c["alpha_hcd"], pf_stats=c["pf"],
+        _, C0 = LEG.predict_P_obs_on_leg(c["model"], th, tau0, c["alpha_hcd"], pf_stats=c["pf"],
                                         dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg)
         return jnp.trace(C - C0)
     g = jax.grad(trace_emucoh)(c["theta9"])
@@ -166,19 +167,19 @@ def test_shape_and_emucoh_coexist_pd_and_topup():
     """The key coexistence test (closes the shape-floor §6 open gap): both PSD terms summed,
     conservative top-up over both, PD, both off-diagonals present, grad finite."""
     c = _emu_ctx()
-    s = DL.load_mf_shape(SHAPE_NPZ); e = DL.load_mf_emucoh(EMUCOH_NPZ)
+    s = LEG.load_mf_shape(SHAPE_NPZ); e = LEG.load_mf_emucoh(EMUCOH_NPZ)
     leg = DL.load_desi_leg()
-    Cs = jnp.asarray(DL.mf_shape_cov_for_leg(s, leg))
-    Ce = jnp.asarray(DL.mf_shape_cov_for_leg(e, leg))
+    Cs = jnp.asarray(LEG.mf_shape_cov_for_leg(s, leg))
+    Ce = jnp.asarray(LEG.mf_shape_cov_for_leg(e, leg))
     tau0 = jnp.full(leg.n_z, 0.9)
     P_data = jnp.asarray(leg.P_data)
     base = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg)
-    _, C_no = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **base)
-    _, C_s = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+    _, C_no = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **base)
+    _, C_s = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
                                      mf_shape_cov=Cs, **base)
-    _, C_e = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+    _, C_e = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
                                      mf_emucoh_cov=Ce, **base)
-    _, C_both = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+    _, C_both = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
                                         mf_shape_cov=Cs, mf_emucoh_cov=Ce, **base)
     Cb = np.asarray(C_both)
     assert np.linalg.eigvalsh(Cb).min() > 0                            # PD with both on
@@ -192,7 +193,7 @@ def test_shape_and_emucoh_coexist_pd_and_topup():
     assert np.all(diag_both >= np.diag(np.asarray(C_e)) - 1e-9)
     # loglik finite + differentiable through both terms
     def f(th):
-        P, C = DL.predict_P_obs_on_leg(c["model"], th, tau0, c["alpha_hcd"],
+        P, C = LEG.predict_P_obs_on_leg(c["model"], th, tau0, c["alpha_hcd"],
                                        mf_shape_cov=Cs, mf_emucoh_cov=Ce, **base)
         return gaussian_loglik(P_data - P, C)
     assert np.isfinite(float(f(c["theta9"])))
@@ -206,17 +207,17 @@ def test_coexist_with_populated_cemu_diagonal():
     top-up are both live, not the C_emu=0 path the other coexistence tests use."""
     c = _emu_ctx()
     rng = np.random.default_rng(1)
-    s = DL.load_mf_shape(SHAPE_NPZ); e = DL.load_mf_emucoh(EMUCOH_NPZ)
+    s = LEG.load_mf_shape(SHAPE_NPZ); e = LEG.load_mf_emucoh(EMUCOH_NPZ)
     leg = DL.load_desi_leg()
-    Cs = jnp.asarray(DL.mf_shape_cov_for_leg(s, leg))
-    Ce = jnp.asarray(DL.mf_shape_cov_for_leg(e, leg))
+    Cs = jnp.asarray(LEG.mf_shape_cov_for_leg(s, leg))
+    Ce = jnp.asarray(LEG.mf_shape_cov_for_leg(e, leg))
     tau0 = jnp.full(leg.n_z, 0.9)
     sigma_zb = jnp.asarray(rng.uniform(0.01, 0.05, (leg.n_z, 4, c["cache_k"].shape[0], 4)))
     alpha_centres = jnp.asarray([0.66, 0.83, 1.15, 1.33])
     base = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
                 sigma_zb=sigma_zb, alpha_centres=alpha_centres)
-    _, C_no = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **base)
-    _, C_both = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+    _, C_no = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **base)
+    _, C_both = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
                                         mf_shape_cov=Cs, mf_emucoh_cov=Ce, **base)
     Cb = np.asarray(C_both)
     assert np.linalg.eigvalsh(Cb).min() > 0                       # PD with nonzero C_emu + both terms
@@ -224,7 +225,7 @@ def test_coexist_with_populated_cemu_diagonal():
     assert np.all(np.diag(Cb) >= np.diag(np.asarray(C_no)) - 1e-12)
     # finite + differentiable through the full production assembly
     def f(th):
-        P, C = DL.predict_P_obs_on_leg(c["model"], th, tau0, c["alpha_hcd"],
+        P, C = LEG.predict_P_obs_on_leg(c["model"], th, tau0, c["alpha_hcd"],
                                        mf_shape_cov=Cs, mf_emucoh_cov=Ce, **base)
         return gaussian_loglik(jnp.asarray(leg.P_data) - P, C)
     assert np.isfinite(float(f(c["theta9"])))
@@ -237,7 +238,7 @@ def test_emucoh_off_is_byte_identical():
     leg = DL.load_desi_leg()
     tau0 = jnp.full(leg.n_z, 0.9)
     base = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg)
-    _, C0 = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **base)
-    _, C1 = DL.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
+    _, C0 = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **base)
+    _, C1 = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
                                     mf_emucoh_cov=None, mf_emucoh_infl=1.0, **base)
     assert np.array_equal(np.asarray(C0), np.asarray(C1))   # byte-identical when off

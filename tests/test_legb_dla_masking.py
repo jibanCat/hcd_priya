@@ -44,6 +44,7 @@ import pytest
 
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import inference as I
 from hcd_analysis.emulator.predict import predict_P_filt, predict_P_obs
 from hcd_analysis.emulator.sampler_numpyro import _dla_raw_mu
@@ -157,10 +158,10 @@ def test_forward_ks_dla_term_is_zero_desi_keeps_it():
     a = jnp.array([0.06, 0.02, 0.05])
     a0 = jnp.array([0.06, 0.02, 0.0])
     kw = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"])
-    P_desi_a, _ = DLm.predict_P_obs_on_leg(c["model"], th, tau0, a, leg=leg_desi, **kw)
-    P_desi_0, _ = DLm.predict_P_obs_on_leg(c["model"], th, tau0, a0, leg=leg_desi, **kw)
-    P_ks_a, _ = DLm.predict_P_obs_on_leg(c["model"], th, tau0, a, leg=leg_ks, **kw)
-    P_ks_0, _ = DLm.predict_P_obs_on_leg(c["model"], th, tau0, a0, leg=leg_ks, **kw)
+    P_desi_a, _ = LEG.predict_P_obs_on_leg(c["model"], th, tau0, a, leg=leg_desi, **kw)
+    P_desi_0, _ = LEG.predict_P_obs_on_leg(c["model"], th, tau0, a0, leg=leg_desi, **kw)
+    P_ks_a, _ = LEG.predict_P_obs_on_leg(c["model"], th, tau0, a, leg=leg_ks, **kw)
+    P_ks_0, _ = LEG.predict_P_obs_on_leg(c["model"], th, tau0, a0, leg=leg_ks, **kw)
     # DESI: α_DLA moves the forward (the DLA-excess term is live).
     assert not np.allclose(np.asarray(P_desi_a), np.asarray(P_desi_0)), \
         "DESI forward (frac 1.0) must carry the DLA-excess term"

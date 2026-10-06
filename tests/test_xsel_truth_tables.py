@@ -411,7 +411,7 @@ def test_ks_kgrid_matches_deployed_loader():
     assert ku.shape == (11,)
     assert ku[0] == pytest.approx(0.0055) and ku[-1] <= 0.069
     from hcd_analysis.emulator import data_likelihood as DL
-    leg = DL.load_ks_leg()
+    leg = DL.load_ks_leg(k_max=0.069)
     np.testing.assert_array_equal(ku, np.unique(np.asarray(leg.k, float)))
 
 

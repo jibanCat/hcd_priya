@@ -339,7 +339,7 @@ def test_row11_production_legs_inside_the_simulated_modes_for_every_theta_in_the
     k1, kN = 2 * np.pi / S.L_BOX_HMPC, 2 * np.pi * 172 / S.L_BOX_HMPC
     lim = np.asarray(D.PARAM_LIMITS)
     corners = [(h, w) for h in lim[5] for w in lim[6]]
-    for leg in (DL.load_eboss_leg(), DL.load_desi_leg(), DL.load_ks_leg()):
+    for leg in (DL.load_eboss_leg(), DL.load_desi_leg(), DL.load_ks_leg(k_max=0.069)):
         k, zr = np.asarray(leg.k), np.asarray(leg.z_row)
         for z in np.unique(zr):
             kk = k[np.isclose(zr, z)]
@@ -443,7 +443,7 @@ def test_row16b_ks_differs_from_upstream_production_path_by_documented_choice():
     blk = src[src.index('elif sdss_name == "kodiaq_squad_only"'):]
     blk = blk[:blk.index("self._kf_old")]
     assert "lyman_data.KSData(" in blk and "conservative=False" in blk
-    leg = DL.load_ks_leg()
+    leg = DL.load_ks_leg(k_max=0.069)
     up = run_upstream("""
 import json
 from lyaemu.lyman_data import KSData

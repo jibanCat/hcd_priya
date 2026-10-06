@@ -30,6 +30,7 @@ import jax.numpy as jnp
 
 from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import meanflux_prior as MF
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "golden")
@@ -54,7 +55,7 @@ def _fwd(ctx, leg, theta9, alpha3, **kw):
     szb = ctx.sigma_zb_per_leg.get(leg.name)
     rzb = ctx.rho_zb_per_leg.get(leg.name) if ctx.rho_zb_per_leg is not None else None
     core = jnp.mean(jnp.asarray(ctx.dla_core_leg[leg.name]), axis=0)
-    P_model, _ = DL.predict_P_obs_on_leg(
+    P_model, _ = LEG.predict_P_obs_on_leg(
         ctx.model, theta9, tau0_vec, alpha3, pf_stats=ctx.pf_stats,
         dla_core=core, cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
         alpha_centres=ctx.alpha_centres, cemu_inflate=ctx.cemu_inflate, rho_zb=rzb,
@@ -150,7 +151,7 @@ def test_norc_forward_drops_log_rc():
 def test_norc_ks_kmax_cap():
     # loader-level: the cut exists and is strictly tighter than the 0.069 default
     ks045 = DL.load_ks_leg(k_max=0.045)
-    ks069 = DL.load_ks_leg()  # default CACHE_KMAX=0.069
+    ks069 = DL.load_ks_leg(k_max=0.069)  # default CACHE_KMAX=0.069
     assert np.asarray(ks045.k).max() <= 0.045 + 1e-9
     assert np.asarray(ks045.k).size < np.asarray(ks069.k).size
 

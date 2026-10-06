@@ -108,7 +108,7 @@ def test_explicit_kwarg_overrides_env(monkeypatch):
     "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"),
     reason="KS data not present")
 def test_ks_leg_stamps_default_false():
-    leg = DL.load_ks_leg()
+    leg = DL.load_ks_leg(k_max=0.069)
     assert leg.use_snr3 is False and leg.cv_floor_on is False and leg.cv_floor_rank1 is False
 
 

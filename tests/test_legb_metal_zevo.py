@@ -34,6 +34,7 @@ from numpyro.infer.util import constrain_fn, initialize_model
 
 from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import meanflux_prior as MF
 
 _CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
@@ -171,11 +172,11 @@ def test_per_z_map_equals_metal_inject_and_forward_golden():
     common = dict(pf_stats=ctx.pf_stats, dla_core=jnp.mean(jnp.asarray(ctx.dla_core_leg[leg.name]), 0),
                   cache_k=ctx.cache_k, leg=leg, sigma_zb=None, alpha_centres=None)
     # Model-C forward with the f-nodes.
-    P_nodes, _ = DL.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
+    P_nodes, _ = LEG.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
                                          f_SiIII_nodes=f3_nodes, f_SiII_nodes=f2_nodes,
                                          metal_node_z=node_z, **common)
     # the CLEAN forward (no metal).
-    P_clean, _ = DL.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
+    P_clean, _ = LEG.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
                                          a_SiIII=0.0, a_SiII=0.0, **common)
     P_nodes = np.asarray(P_nodes); P_clean = np.asarray(P_clean)
     k = np.asarray(leg.k); z_idx = np.asarray(leg.z_idx)
@@ -215,10 +216,10 @@ def test_predict_nodes_none_is_scalar_path_byte_exact():
                   cache_k=ctx.cache_k, leg=leg, sigma_zb=szb, alpha_centres=ctx.alpha_centres,
                   cemu_inflate=ctx.cemu_inflate, rho_zb=rzb)
     # scalar metal forward (a_SiIII != 0) with nodes=None (default).
-    P0, C0 = DL.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
+    P0, C0 = LEG.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
                                      a_SiIII=0.03, a_SiII=0.01, **common)
     # passing metal_node_z explicitly but nodes=None must NOT change anything (the branch is gated).
-    P1, C1 = DL.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
+    P1, C1 = LEG.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
                                      a_SiIII=0.03, a_SiII=0.01, f_SiIII_nodes=None,
                                      metal_node_z=(2.2, 4.2), **common)
     np.testing.assert_array_equal(np.asarray(P0), np.asarray(P1))
@@ -242,10 +243,10 @@ def test_cemu_variance_transform_uses_same_per_z_mfac():
                   cache_k=ctx.cache_k, leg=leg, sigma_zb=szb, alpha_centres=ctx.alpha_centres,
                   cemu_inflate=ctx.cemu_inflate, rho_zb=rzb)
     f3_nodes = jnp.asarray([0.013, 0.007]); f2_nodes = jnp.asarray([0.008, 0.004])
-    P_m, C_m = DL.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
+    P_m, C_m = LEG.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
                                        f_SiIII_nodes=f3_nodes, f_SiII_nodes=f2_nodes,
                                        metal_node_z=(2.2, 4.2), **common)
-    P_c, C_c = DL.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
+    P_c, C_c = LEG.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
                                        a_SiIII=0.0, a_SiII=0.0, **common)
     Cd = np.asarray(leg.C_data)
     emu_m = np.diag(np.asarray(C_m)) - np.diag(Cd)        # C_total = C_data + diag(emu_var)
@@ -267,7 +268,7 @@ def test_eboss_high_z_clamp_forward_finite():
     assert float(np.max(leg.z)) > 4.2, "expected an eBOSS z-bin above the z=4.2 node"
     tau0_vec = MF.becker13_tau0(jnp.asarray(leg.z))
     alpha3 = jnp.asarray([0.20, 0.08, 0.015])
-    P, Ctot = DL.predict_P_obs_on_leg(
+    P, Ctot = LEG.predict_P_obs_on_leg(
         ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
         f_SiIII_nodes=jnp.asarray([0.01, 0.01]), f_SiII_nodes=None, metal_node_z=(2.2, 4.2),
         pf_stats=ctx.pf_stats, dla_core=jnp.mean(jnp.asarray(ctx.dla_core_leg[leg.name]), 0),
