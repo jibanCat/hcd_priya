@@ -97,3 +97,21 @@ def test_retired_paths_are_gone_and_mock_builders_wait_for_gate_f():
     for name in ("make_legb_mock", "make_leg_a_legmock", "make_hr_truth_from_cache", "make_truth_from_sim"):
         with pytest.raises(NotImplementedError, match="gate F"):
             getattr(CL, name)()
+
+
+def test_forward_signature_and_stamp_carry_the_coordinate_and_the_product_digests():
+    import hashlib
+    import json
+    from hcd_analysis.emulator import data_likelihood as DL
+    old = hashlib.sha256(json.dumps({"PROD_FORWARD_BY_LEG": CL.PROD_FORWARD_BY_LEG, "PROD_RES_CORR_ON": False,
+                                     "DESI_DLA_COV_REDUCE": bool(DL.DESI_DLA_COV_REDUCE)},
+                                    sort_keys=True).encode()).hexdigest()
+    assert CL.forward_signature() != old                      # the pre-2026-10 forward's signature cannot recur
+    model, pf, core = _emu(23)
+    leg = _leg([3.0])
+    digests = {"lf_ensemble_eqx_sha256": ["aa" * 32], "mf_product_sha256": "bb" * 32, "cache_sha256": "cc" * 32}
+    ctx = _ctx(model, pf, [leg], [3.0])._replace(product_digests=digests, res_corr_on=False, fix_alpha_res=True,
+                                                   sample_res=False, metal_prior="uniform", metal_node_z=(2.2, 4.2))
+    st = CL.forward_stamp(ctx, leg)
+    assert st["products"] == digests and st["coordinate"].startswith("k_skm")
+    assert st["hcd_prior_centres"] == [0.17, 0.062, 0.0044]

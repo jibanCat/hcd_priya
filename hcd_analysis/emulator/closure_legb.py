@@ -69,6 +69,7 @@ from .sampler_numpyro import _dla_raw_mu
 from . import data_likelihood as DL
 from . import forward as FW
 from . import kcoord as KC
+from .schema import K_CONVENTION
 from .closure_diagnostics import (
     thin_to_ess, central_interval, empirical_coverage, sbc_rank,
     ecdf_pit_bands, loglik_rank,
@@ -533,6 +534,7 @@ class LegBCtx(NamedTuple):
     # is a digest over the prior-constants payload, not over this ctx). APPENDED last so positional
     # construction does not shift.
     selfdraw_metal_truth: bool = False
+    product_digests: object = None            # gate E: sha256 of every product the forward loaded (forward_stamp)
     tau0_curv_sigma: float = None             # PI #33 (2026-09-27) MF-3 DIAGNOSTIC: Normal(0, sigma) prior on the optional THIRD mean-flux
                                               # mode "ctau0" (log-quadratic curvature of alpha(z) about the pivot). None = OFF: byte-identical.
 
@@ -607,6 +609,11 @@ def prod_norc_forward():
     return {"res_corr_on": bool(PROD_RES_CORR_ON), "fix_alpha_res": not bool(PROD_RES_CORR_ON)}
 
 
+# The gate E forward's coordinate (GATE_E_SPEC v1): part of forward_signature, so a pre-2026-10 single-grid forward's
+# signature can never recur.
+FORWARD_COORDINATE = "k_skm(z, theta) per (leg, z) via kcoord.bind (gate E v1); " + K_CONVENTION
+
+
 def forward_signature():
     """A stable sha256 hex digest over the MODULE-CONSTANT forward decision set (freeze/audit artifact).
 
@@ -623,7 +630,8 @@ def forward_signature():
     PROD_FORWARD_BY_LEG raises TypeError (fail-loud) rather than being silently coerced."""
     payload = json.dumps({"PROD_FORWARD_BY_LEG": PROD_FORWARD_BY_LEG,
                           "PROD_RES_CORR_ON": bool(PROD_RES_CORR_ON),
-                          "DESI_DLA_COV_REDUCE": bool(DL.DESI_DLA_COV_REDUCE)},
+                          "DESI_DLA_COV_REDUCE": bool(DL.DESI_DLA_COV_REDUCE),
+                          "COORDINATE": FORWARD_COORDINATE},
                          sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -670,7 +678,13 @@ def forward_stamp(ctx, leg):
                                       if getattr(ctx, "ks_dndx_mapped", False)
                                       else INF.HCD_ALPHA_PARAMETERIZATION["DESI"]),
                 forward_signature=forward_signature(),
-                hcd_prior_signature=INF.hcd_prior_signature())
+                hcd_prior_signature=INF.hcd_prior_signature(),
+                # gate E: the coordinate, the digests of every product the forward loaded (LF ensemble checkpoints,
+                # MF product, cache, emulator-error products) and the cache-derived HCD prior centres
+                coordinate=FORWARD_COORDINATE,
+                products=getattr(ctx, "product_digests", None),
+                hcd_prior_centres=(None if getattr(ctx, "alpha_hcd_mu", None) is None
+                                   else [float(v) for v in np.asarray(ctx.alpha_hcd_mu)]))
 
 
 def _assert_joint_signatures_uniform(per_leg_stamps):
@@ -944,6 +958,10 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     # per-leg DLA core (cache delta[:, 2]) per leg z on the mode axis (production definition); the forward places it
     # at data k with the query binding.
     dla_core_leg = _fiducial_dla_core_per_leg(d, legs)
+    product_digests = {"lf_ensemble_eqx_sha256": [T._sha256_or_none(p + ".eqx") for p in ensemble_ckpts],
+                       "mf_product_sha256": None if mf_product is None else T._sha256_or_none(mf_product),
+                       "cache_sha256": T._sha256_or_none(CACHE_PATH),
+                       "t1_product_sha256": None, "t2_product_sha256": None, "t3_product_sha256": None}
 
     # priors on the GLOBAL z grid: Becker+2013 τ₀ (production anchor) + HCD incidence.
     tau0_mu, tau0_sigma = meanflux_tau0_prior(jnp.asarray(z_global), center="becker13")
@@ -1044,7 +1062,7 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
         alpha_centres=alpha_centres, tau0_mu=tau0_mu, tau0_sigma=tau0_sigma,
         alpha_hcd_mu=jnp.asarray(alpha_mu), alpha_hcd_sigma=jnp.asarray(alpha_sd),
         cemu_inflate=float(cemu_inflate), mf=mf_obj, t2_per_leg=None, t3_per_leg=None,
-        theta_unit_lo=theta_unit_lo, theta_unit_hi=theta_unit_hi,
+        theta_unit_lo=theta_unit_lo, theta_unit_hi=theta_unit_hi, product_digests=product_digests,
         sample_metals=bool(sample_metals), sample_res=bool(sample_res),
         f_res_amp_sigma=(None if f_res_amp_sigma is None else float(f_res_amp_sigma)),
         a_siiii_max=float(a_siiii_max),
