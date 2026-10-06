@@ -118,3 +118,60 @@ def reconstruct_leg(members, tables, leg, theta_unit, tau0_leg, alpha_leg, core,
             Pz = Pz * np.exp(2.0 * nuis["b_res"] * kd ** 2 * float(leg["R_z"][iz]) ** 2)
         out[rows] = Pz
     return out
+
+
+KIM_AMP, KIM_SLOPE = 2.3e-3, 3.65          # the tau0 ladder anchor (Kim et al. 2007 central curve)
+
+
+def rho_tau0(rho_zb, centres, z, tau0):
+    """The cross-class block (4, 4, K) at tau0: linear in the ladder factor tau0 / (KIM_AMP (1+z)^KIM_SLOPE) between the
+    band centres, flat outside, NaN cells 0."""
+    a = tau0 / (KIM_AMP * (1.0 + z) ** KIM_SLOPE)
+    rho = np.nan_to_num(np.asarray(rho_zb, float))
+    c = np.asarray(centres, float)
+    if c.size == 1:
+        return rho[..., 0]
+    out = np.empty(rho.shape[:-1])
+    for idx in np.ndindex(*rho.shape[:-1]):
+        out[idx] = np.interp(a, c, rho[idx])
+    return out
+
+
+def reconstruct_cov_leg(members, leg, theta_unit, tau0_leg, alpha_leg, core, rho_leg, centres, t3, param_limits, nuis):
+    """C_total on every bin of ``leg`` (dict as reconstruct_leg plus C_data, P_data): C_data + diag(max(T1, td)) + the
+    off-diagonal of the fractional T3 term B B^T (B = P_data U sqrt(w)), T1 at the data bins = fac^2 sum_cc' coef_c
+    coef_c' rho_cc'(k) A_c A_c' with rho and the LF per-class P_filt interpolated linearly in k at the bins and the DLA
+    core added to A_DLA (amendment A1 rev 1 sections 1 and 3). ``rho_leg`` (n_z, 4, 4, K, B); ``t3`` (U, w) or None."""
+    N = len(leg["k"])
+    t1 = np.zeros(N)
+    alpha_leg = np.asarray(alpha_leg, float) * np.array([1.0, 1.0, float(leg["dla_forward_frac"])])[None, :]
+    for iz, z in enumerate(leg["z"]):
+        rows = np.where(np.asarray(leg["z_idx"]) == iz)[0]
+        if rows.size == 0:
+            continue
+        kd = np.asarray(leg["k"])[rows]
+        P = ensemble_P_filt(members, theta_unit, float(z), float(tau0_leg[iz]))
+        kn = k_modes(float(z), theta_unit, param_limits, P.shape[-1])
+        A = np.stack([np.interp(kd, kn, P[c]) for c in range(4)])
+        A[3] = A[3] + core_at(kd, core[0], core[1])
+        r = rho_tau0(rho_leg[iz], centres, float(z), float(tau0_leg[iz]))
+        rd = np.array([[np.interp(kd, kn, r[c, e]) for e in range(4)] for c in range(4)])
+        a = alpha_leg[iz]
+        coef = np.concatenate([[1.0 - a.sum()], a])
+        v = np.einsum("c,e,cen,cn,en->n", coef, coef, rd, A, A)
+        fac = np.ones(rows.size)
+        if leg["metals_on"]:
+            fac = fac * metal_model_cplus(kd, float(z), float(tau0_leg[iz]), nuis["metal_node_z"], nuis["f_SiIII_nodes"],
+                                          nuis["f_SiII_nodes"], nuis["k_SiIII_nodes"], nuis["k_SiII_nodes"])
+        if leg["resolution_on"]:
+            fac = fac * np.exp(2.0 * nuis["b_res"] * kd ** 2 * float(leg["R_z"][iz]) ** 2)
+        t1[rows] = v * fac ** 2
+    C = np.array(leg["C_data"], float)
+    if t3 is None:
+        return C + np.diag(t1)
+    U, w = np.asarray(t3[0], float), np.asarray(t3[1], float)
+    Pd = np.nan_to_num(np.asarray(leg["P_data"], float))
+    B = Pd[:, None] * U * np.sqrt(w)[None, :]
+    full = B @ B.T
+    td = np.diag(full).copy()
+    return C + np.diag(np.maximum(t1, td)) + (full - np.diag(td))
