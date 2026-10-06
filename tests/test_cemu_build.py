@@ -253,3 +253,9 @@ def test_t1_cv_cell_split_sums_to_the_simulation_total():
     cv = CB.t1_cv(T, cands, n_folds=5)
     np.testing.assert_allclose(cv["cell"].sum(axis=(2, 3)), cv["main"], rtol=1e-12)
     assert cv["sims"] == sorted(set(T.sim))
+
+
+def test_t1_cv_tolerates_folds_without_held_out_simulations():
+    T = _synthetic_t1(seed=5, n_sim=4)
+    cv = CB.t1_cv(T, [(0.0, 0.0, True)], n_folds=5)                 # fold 4 holds no simulation
+    assert cv["main"].shape == (4, 1) and np.all(np.isfinite(cv["main"]))

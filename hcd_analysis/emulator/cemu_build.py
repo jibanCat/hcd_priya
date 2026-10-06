@@ -271,7 +271,9 @@ def t1_cv(T, cands, n_folds=10):
     fold_of_row = np.array([folds[s] for s in np.asarray(T.sim)])
     for f in range(n_folds):
         tr, te = np.where(fold_of_row != f)[0], np.where(fold_of_row == f)[0]
-        si = np.array([sim_idx[s] for s in np.asarray(T.sim)[te]])
+        if te.size == 0:
+            continue
+        si = np.array([sim_idx[s] for s in np.asarray(T.sim)[te]], dtype=int)
         raws = {p: t1_raw_cells(T, tr, p) for p in {c[2] for c in cands}}
         mask = T.mask[np.asarray(T.zc)[te]]
         kb = T.kband[np.asarray(T.zc)[te]]
