@@ -17,7 +17,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from .multifidelity import FixedMeanHead, fixed_mean_table_resolved, make_cond, match_hr_to_lf
+from .mf_family import FixedMeanHead, fixed_mean_table_resolved, make_cond, match_hr_to_lf
 from .schema import CHECKPOINT_SCHEMA_VERSION, L_BOX_HMPC
 
 TABLE_KEYS = ("log_rho", "gbar_z_tab", "gtau_tab", "a_k", "u_z", "u_tau", "z_tab", "tau_tab", "tau_by_z")
