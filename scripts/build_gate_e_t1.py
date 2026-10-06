@@ -55,11 +55,12 @@ def main(argv=None):
     ap.add_argument("--cache", required=True)
     ap.add_argument("--selection", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--out-raw", required=True, help="the raw (h = 0, s_z = 0) T1, the A4 texture reference; not for production")
     ap.add_argument("--report-json", required=True)
     ap.add_argument("--report-fig", required=True)
     ap.add_argument("--n-boot", type=int, default=200)
     a = ap.parse_args(argv)
-    for p in (a.out, a.report_json, a.report_fig):
+    for p in (a.out, a.out_raw, a.report_json, a.report_fig):
         if os.path.exists(p):
             raise SystemExit(f"refusing to overwrite {p}")
     sel_rec = json.load(open(a.selection))
@@ -102,9 +103,13 @@ def main(argv=None):
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     save_product(a.out, "cemu_t1", k_com_hmpc=k_com, provenance=prov, rho=rho, z_cells=T.z_cells,
                  alpha_centres=(np.array([1.0]) if pooled else T.centres))
+    prov_raw = dict(prov, role="A4 texture reference only (h = 0, s_z = 0); NOT a production product")
+    save_product(a.out_raw, "cemu_t1", k_com_hmpc=k_com, provenance=prov_raw, rho=raw, z_cells=T.z_cells,
+                 alpha_centres=(np.array([1.0]) if pooled else T.centres))
     diag_raw = np.einsum("zbccn->zcn", raw[:, :1])
     diag_sel = np.einsum("zbccn->zcn", rho[:, :1])
-    rep = dict(product=a.out, product_sha256=_sha(a.out), selection=sel_rec["chosen"], lag_correlation=lagc,
+    rep = dict(product=a.out, product_sha256=_sha(a.out), raw_reference=a.out_raw, raw_reference_sha256=_sha(a.out_raw),
+               selection=sel_rec["chosen"], lag_correlation=lagc,
                z_cells=T.z_cells.tolist(),
                sel_over_raw_median_per_z={f"{z:.1f}": float(np.median(diag_sel[i, 0, mask[i]] / diag_raw[i, 0, mask[i]]))
                                           for i, z in enumerate(T.z_cells)},
