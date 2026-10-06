@@ -34,10 +34,11 @@ import os
 # The production member basename prefix. This is the ONLY prefix the loader accepts; there is
 # deliberately NO glob/prefix argument (an "alternate ensemble" cannot be swapped in by pointing
 # a glob elsewhere -- replacement means regenerating the manifest, see the README).
-PROD_BASENAME = "final_prod_seed"
+PROD_BASENAME = "prod_repaired_seed"          # gate E (PU-0067): the repaired-cache gate C members
 N_PROD_MEMBERS = 5
 MANIFEST_BASENAME = "production_ensemble_manifest.json"
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2                    # v2: schema-2.0 members of one training cache, directory named
+MEMBER_SCHEMA_VERSION = "2.0"
 
 # Repo root = two levels above this file's package dir; the committed manifest travels with
 # the CODE tree (worktrees verify against the same pinned digests as the deployed tree).
@@ -103,13 +104,14 @@ def verify_manifest(checkpoints_dir=None, manifest_path=None):
     manifest_path = manifest_path or DEFAULT_MANIFEST_PATH
     manifest = load_manifest(manifest_path)
     if checkpoints_dir is None:
-        checkpoints_dir = os.path.dirname(os.path.abspath(manifest_path))
+        checkpoints_dir = manifest.get("checkpoints_dir") or os.path.dirname(os.path.abspath(manifest_path))
 
     sv = manifest.get("schema_version")
     _expect(sv == MANIFEST_SCHEMA_VERSION,
             f"manifest {manifest_path} carries schema_version={sv!r}, this loader verifies "
             f"schema_version={MANIFEST_SCHEMA_VERSION} -- a schema bump must land together "
-            f"with the loader change, never verify silently under old rules")
+            f"with the loader change, never verify silently under old rules (schema 1 = the "
+            f"pre-2026-10 single-grid production ensemble, superseded at gate E)")
     members = manifest.get("members")
     _expect(isinstance(members, list),
             f"manifest {manifest_path} has no 'members' list (hand-edited or truncated?)")
@@ -164,6 +166,32 @@ def verify_manifest(checkpoints_dir=None, manifest_path=None):
         _expect(len(norm_shas) == 1,
                 f"manifest claims normalizers_byte_identical=true but pins "
                 f"{len(norm_shas)} distinct norm_sha256 values")
+
+    # schema v2: every member is a schema-2.0 checkpoint of the manifest's training cache, and all share the box modes
+    k_ref = None
+    for mem in members:
+        meta = json.load(open(os.path.join(checkpoints_dir, mem["meta"])))
+        _expect(meta.get("schema_version") == MEMBER_SCHEMA_VERSION,
+                f"member {mem['name']} has checkpoint schema {meta.get('schema_version')!r}, expected "
+                f"{MEMBER_SCHEMA_VERSION}")
+        _expect(meta.get("cache_sha256") == manifest.get("cache_sha256"),
+                f"member {mem['name']} was trained on cache {str(meta.get('cache_sha256'))[:12]}, the manifest "
+                f"pins {str(manifest.get('cache_sha256'))[:12]}")
+        k = meta.get("k_com_hmpc")
+        k_ref = k if k_ref is None else k_ref
+        _expect(k == k_ref, f"member {mem['name']} k_com_hmpc differs from member 0")
+    sums = os.path.join(checkpoints_dir, "SHA256SUMS")
+    if os.path.exists(sums):
+        listed = {}
+        for line in open(sums):
+            parts = line.split()
+            if len(parts) == 2:
+                listed[os.path.basename(parts[1])] = parts[0]
+        for mem in members:
+            for key, sha_key in _DIGEST_KEYS:
+                if mem[key] in listed:
+                    _expect(listed[mem[key]] == mem[sha_key],
+                            f"SHA256SUMS in {checkpoints_dir} disagrees with the manifest for {mem[key]}")
 
     # FAIL-LOUD EXTRA-MEMBER TRIPWIRE: any on-disk file matching the production prefix that is
     # not in the manifest must be detected, never ignored (the permissive-glob failure mode this

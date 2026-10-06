@@ -29,11 +29,13 @@ from datetime import datetime, timezone
 
 from hcd_analysis.emulator import prod_ensemble as PE
 
-# The binaries live ONLY in the main tree (gitignored); the manifest is committed with the code.
-DEFAULT_CHECKPOINTS_DIR = f"{_REPO_ROOT}/checkpoints"
+# Gate E (PU-0067): the production members are the repaired-cache gate C checkpoints on Turbo; the manifest (committed with
+# the code) names that directory. The pre-2026-10 schema-1 manifest is kept as checkpoints/production_ensemble_manifest_v1_pre2026-10.json.
+DEFAULT_CHECKPOINTS_DIR = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC"
 
 DESCRIPTION = (
-    "The deployed N=5 production emulator ensemble (final_prod_seed0..4): all-sims-trained "
+    "The deployed N=5 production emulator ensemble (prod_repaired_seed0..4, gate C, S4-repaired cache, schema 2.0): "
+    "all-sims-trained "
     "Equinox checkpoints + paired normalizers, pinned by SHA256. The deployed forward is the "
     "ensemble MEAN over members of the reconstructed post-exp P_filt (ensemble.load_ensemble)."
 )
@@ -86,10 +88,30 @@ def build_manifest(checkpoints_dir, n_members=PE.N_PROD_MEMBERS):
             f"{checkpoints_dir} beyond the {n_members} pinned members -- remove them (or "
             f"deliberately change the member count) before regenerating")
     norm_identical = len({m["norm_sha256"] for m in members}) == 1
+    caches, k_ref = set(), None
+    for m in members:
+        meta = json.load(open(os.path.join(checkpoints_dir, m["meta"])))
+        if meta.get("schema_version") != PE.MEMBER_SCHEMA_VERSION:
+            raise PE.ProductionEnsembleError(f"cannot build manifest: {m['name']} has checkpoint schema "
+                                             f"{meta.get('schema_version')!r}, expected {PE.MEMBER_SCHEMA_VERSION}")
+        caches.add(meta.get("cache_sha256"))
+        k_ref = meta.get("k_com_hmpc") if k_ref is None else k_ref
+        if meta.get("k_com_hmpc") != k_ref:
+            raise PE.ProductionEnsembleError(f"cannot build manifest: {m['name']} k_com_hmpc differs from member 0")
+        m["schema_version"] = meta.get("schema_version")
+        m["cache_sha256"] = meta.get("cache_sha256")
+    if len(caches) != 1:
+        raise PE.ProductionEnsembleError(f"cannot build manifest: members were trained on different caches {sorted(caches)}")
+    sums = os.path.join(checkpoints_dir, "SHA256SUMS")
     return {
         "schema_version": PE.MANIFEST_SCHEMA_VERSION,
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "description": DESCRIPTION,
+        "checkpoints_dir": os.path.abspath(checkpoints_dir),
+        "basename": PE.PROD_BASENAME,
+        "member_schema_version": PE.MEMBER_SCHEMA_VERSION,
+        "cache_sha256": caches.pop(),
+        "sha256sums_sha256": PE.sha256_file(sums) if os.path.exists(sums) else None,
         "n_members": int(n_members),
         "normalizers_byte_identical": bool(norm_identical),
         "normalizers_byte_identical_note": NORM_NOTE,
