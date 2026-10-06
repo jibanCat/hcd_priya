@@ -276,6 +276,7 @@ def test_sampler_stamp_wired_into_main_cfg(runner):
         assert frag in src, f"main() run_cfg must stamp {frag}"
 
 
+@pytest.mark.xfail(strict=True, reason="GATE E: the pre-2026-10 mock/truth builders are retired (single-grid); rebuilt at gate F (GATE_E_SPEC v1 section 2)")
 def test_inject_spec_held_out_guard():
     """inject_spec on a HELD-OUT (leg_a=False) run_legb call must FAIL LOUD — the held-out branch
     ignores inject_spec, so honouring it would silently drop the injection. PR#12 review follow-up (b).

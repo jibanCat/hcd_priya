@@ -58,7 +58,7 @@ def _plt():
 # C_emu vs C_data on the leg grids (the sub-dominance figure).
 # ----------------------------------------------------------------------------
 def _emu_var_for_leg(ctx, leg, theta9, tau0_vec, alpha_hcd, core, *, use_xclass):
-    """The pre-2026-10 closure figure helper (bound on the single grid ``ctx.cache_k``). Retired at gate E;
+    """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 closure figure helper (bound on the single grid ``ctx.cache_k``). Retired at gate E;
     rebuilt at gate F with the closure machinery."""
     raise NotImplementedError("_emu_var_for_leg: retired with the single-grid forward; rebuilt at gate F")
 
@@ -121,7 +121,7 @@ def truth_tau0_on_leg(truth, leg):
 # One-mock example (truth-on-leg, noisy mock, emulator prediction at truth θ).
 # ----------------------------------------------------------------------------
 def fig_mock_example(ctx, d, figdir=FIGDIR, seed=0):
-    """The pre-2026-10 closure figure helper (bound on the single grid ``ctx.cache_k``). Retired at gate E;
+    """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 closure figure helper (bound on the single grid ``ctx.cache_k``). Retired at gate E;
     rebuilt at gate F with the closure machinery."""
     raise NotImplementedError("fig_mock_example: retired with the single-grid forward; rebuilt at gate F")
 

@@ -1336,13 +1336,13 @@ def held_hr_set(d, hr_sim_names, fold=0, target_hr_sim=None):
 
 
 def make_truth_from_sim(*args, **kwargs):
-    """The pre-2026-10 held-out truth builder. Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
+    """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 held-out truth builder. Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
     own stored grid (GATE_E_SPEC v1 section 2)."""
     raise NotImplementedError("make_truth_from_sim: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
 
 
 def make_hr_truth_from_cache(*args, **kwargs):
-    """The pre-2026-10 HR truth builder (target_k = one grid). Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
+    """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 HR truth builder (target_k = one grid). Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
     own stored grid (GATE_E_SPEC v1 section 2)."""
     raise NotImplementedError("make_hr_truth_from_cache: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
 
@@ -1447,7 +1447,7 @@ def _resolve_res_instr_inject(inject_resolution, leg):
 
 
 def make_legb_mock(*args, **kwargs):
-    """The pre-2026-10 held-out-simulation mock builder. Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
+    """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 held-out-simulation mock builder. Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
     own stored grid (GATE_E_SPEC v1 section 2)."""
     raise NotImplementedError("make_legb_mock: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
 
@@ -1746,7 +1746,7 @@ def _check_single_instrument_for_res(legs, sample_res):
 
 
 def make_leg_a_legmock(*args, **kwargs):
-    """The pre-2026-10 Leg-A self-draw mock builder. Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
+    """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 Leg-A self-draw mock builder. Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
     own stored grid (GATE_E_SPEC v1 section 2)."""
     raise NotImplementedError("make_leg_a_legmock: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
 
@@ -3151,7 +3151,7 @@ def _resolution_sites_extra(samples, step, L, inject_spec, leg_a, truth_pack=Non
 
 
 def run_legb(*args, **kwargs):
-    """The pre-2026-10 Leg-B closure driver (mocks bound on the single grid). Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
+    """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 Leg-B closure driver (mocks bound on the single grid). Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
     own stored grid (GATE_E_SPEC v1 section 2)."""
     raise NotImplementedError("run_legb: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
 
@@ -3277,12 +3277,12 @@ def _aggregate_legb(per_mock, *, q_levels):
 #  CLI / smoke.
 # ============================================================================ #
 def _smoke(args):
-    """The pre-2026-10 Leg-B smoke (old products and mocks). Rebuilt at gate F."""
+    """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 Leg-B smoke (old products and mocks). Rebuilt at gate F."""
     raise NotImplementedError("_smoke: the pre-2026-10 closure smoke is retired; rebuilt at gate F")
 
 
 def _smoke_convergence(args):
-    """The pre-2026-10 Leg-B convergence smoke (mocks on the single grid). Rebuilt at gate F."""
+    """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 Leg-B convergence smoke (mocks on the single grid). Rebuilt at gate F."""
     raise NotImplementedError("_smoke_convergence: the pre-2026-10 closure smoke is retired; rebuilt at gate F")
 
 

@@ -65,6 +65,7 @@ def test_none_and_empty_spec_are_identity():
     assert LB._apply_truth_boosts(tp, None, z=ZG) is tp
 
 
+@pytest.mark.xfail(strict=True, reason="GATE E: the pre-2026-10 mock/truth builders are retired (single-grid); rebuilt at gate F (GATE_E_SPEC v1 section 2)")
 def test_run_legb_threads_z_global_into_truth_boosts():
     import inspect
     src = inspect.getsource(LB.run_legb)
@@ -72,6 +73,7 @@ def test_run_legb_threads_z_global_into_truth_boosts():
         "run_legb must thread ctx.z_global into _apply_truth_boosts (never infer z from length)"
 
 
+@pytest.mark.xfail(strict=True, reason="GATE E: the pre-2026-10 mock/truth builders are retired (single-grid); rebuilt at gate F (GATE_E_SPEC v1 section 2)")
 def test_run_legb_records_truth_alpha_hcd_z():
     import inspect
     src = inspect.getsource(LB.run_legb)

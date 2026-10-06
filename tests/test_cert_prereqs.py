@@ -153,6 +153,7 @@ def test_effective_run_cfg_agrees_with_run_mock_pops(tmp_path):
 
 # ------------------------------- run_legb truth_fn guard -------------------------------------
 
+@pytest.mark.xfail(strict=True, reason="GATE E: the pre-2026-10 mock/truth builders are retired (single-grid); rebuilt at gate F (GATE_E_SPEC v1 section 2)")
 def test_truth_fn_held_out_guard():
     from hcd_analysis.emulator.closure_legb import run_legb
     with pytest.raises(ValueError, match="truth_fn"):

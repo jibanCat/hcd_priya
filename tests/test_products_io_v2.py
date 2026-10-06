@@ -18,10 +18,11 @@ CACHE = "d9c3783892872f8739f6c1a4039ee84cae5ab84803235a61d7d06ac119336cf2"
 PROV = dict(code_commit="abc1234", cache_sha256=CACHE, inputs={"eval_a": "11" * 32}, row_rule="validation rows")
 
 GATEC_NOT_FOR_USE = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC/error_vector.npz"
-HIST = ["/home/mfho/hcd_priya/checkpoints/error_vector.npz",
-        "/home/mfho/hcd_priya/checkpoints/error_vector_xclass.npz",
-        "/home/mfho/hcd_priya_emudebug/figures/analysis/04_emulator/mf_cemu_floor.npz",
-        "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"]
+from hcd_analysis.paths import REPO_ROOT_STR  # noqa: E402
+HIST = ["/home/mfho/hcd_priya/checkpoints/error_vector.npz",  # historical-artifact path
+        "/home/mfho/hcd_priya/checkpoints/error_vector_xclass.npz",  # historical-artifact path
+        f"{REPO_ROOT_STR}/figures/analysis/04_emulator/mf_cemu_floor.npz",
+        "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"]  # historical-artifact path
 MF_PRODUCT = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/mf/gateD/mf_modes_all6.npz"
 GATEC = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC"
 

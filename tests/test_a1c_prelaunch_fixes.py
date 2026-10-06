@@ -278,6 +278,7 @@ def test_fres_selfdraw_is_off_by_default():
     assert CL._selfdraw_fres_bres({"f_res_amp": 0.01, "f_res_slope": 0.4}, off) is None
 
 
+@pytest.mark.xfail(strict=True, reason="GATE E: the pre-2026-10 mock/truth builders are retired (single-grid); rebuilt at gate F (GATE_E_SPEC v1 section 2)")
 def test_mock_and_fit_slice_bres_with_the_SAME_nearest_z_map():
     """The mock (make_leg_a_legmock) and the fit (_data_loglik_legcore) each slice the global
     b_res curve down to a leg's z grid. If those two nearest-z maps ever diverge, the mock would
