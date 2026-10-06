@@ -320,6 +320,45 @@ def t1_build(T, rows, cands, sel):
     return t1_smooth(t1_raw_cells(T, rows, pooled), sel["h_of_z"], s_z, T.z_cells)
 
 
+DLA_CORE_GRID = np.geomspace(4e-4, 0.1, 400)                  # s/km, amendment A1 rev 1 section 4
+
+
+def dla_core_z(kfkms, core, z_rows, z, k_grid=DLA_CORE_GRID):
+    """Mean over the cache rows with |z_row - z| < 0.05 of each row's DLA core interpolated linearly in k at the fixed
+    physical ``k_grid`` from the row's OWN stored grid (finite modes only). A row not covering a grid point is excluded
+    there; a point covered by no row is NaN."""
+    sel = np.where(np.abs(np.asarray(z_rows, float) - z) < 0.05)[0]
+    if sel.size == 0:
+        raise ValueError(f"no cache row at z {z}")
+    g = np.asarray(k_grid, float)
+    vals = np.full((sel.size, g.size), np.nan)
+    for i, r in enumerate(sel):
+        kr, cr = np.asarray(kfkms[r], float), np.asarray(core[r], float)
+        fin = np.isfinite(kr) & np.isfinite(cr)
+        kr, cr = kr[fin], cr[fin]
+        inside = (g >= kr[0]) & (g <= kr[-1])
+        vals[i, inside] = np.interp(g[inside], kr, cr)
+    with np.errstate(invalid="ignore"):
+        cnt = np.sum(np.isfinite(vals), axis=0)
+        out = np.nansum(vals, axis=0) / np.where(cnt > 0, cnt, 1)
+    return np.where(cnt > 0, out, np.nan)
+
+
+def dla_core_leg(kfkms, core, z_rows, leg_z, k_grid=DLA_CORE_GRID):
+    """One core per leg: the mean over the leg's z of ``dla_core_z`` (NaN where any z is uncovered)."""
+    return np.mean([dla_core_z(kfkms, core, z_rows, float(z), k_grid) for z in leg_z], axis=0)
+
+
+def dla_core_at(k_data, k_grid, core_grid):
+    """The core at data k: linear interpolation in ln k on the fixed grid; refuses k outside the finite part."""
+    g, c = np.asarray(k_grid, float), np.asarray(core_grid, float)
+    fin = np.isfinite(c)
+    kd = np.asarray(k_data, float)
+    if np.any(kd < g[fin][0]) or np.any(kd > g[fin][-1]) or not np.all(fin[(g >= kd.min()) & (g <= kd.max())]):
+        raise ValueError("data k outside the finite DLA-core grid")
+    return np.interp(np.log(kd), np.log(g[fin]), c[fin])
+
+
 def bracket_modes(k_com_hmpc, z, k_lo, k_hi, lo_unit, hi_unit):
     """(first, last) 1-based mode indices that bracket every k in [k_lo, k_hi] at z for every theta in the sampling box
     [lo_unit, hi_unit]: k_skm,n = n k_skm,1 and k_skm,1 spans [kK_min / K, k1_max] over the box."""

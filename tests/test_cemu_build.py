@@ -259,3 +259,40 @@ def test_t1_cv_tolerates_folds_without_held_out_simulations():
     T = _synthetic_t1(seed=5, n_sim=4)
     cv = CB.t1_cv(T, [(0.0, 0.0, True)], n_folds=5)                 # fold 4 holds no simulation
     assert cv["main"].shape == (4, 1) and np.all(np.isfinite(cv["main"]))
+
+
+# --------------------------------------------------------------------------------------------- #
+#  DLA core (amendment A1 rev 1 section 4): a fixed function of physical k, z-mean per leg
+# --------------------------------------------------------------------------------------------- #
+def test_dla_core_is_a_fixed_function_of_physical_k_whatever_each_rows_mode_grid():
+    grid = CB.DLA_CORE_GRID
+    f = lambda k: 3.0 - 20.0 * k                                 # linear in k: interpolation is exact
+    rows_k = [np.linspace(5e-4, 0.09, 172) * s for s in (0.9, 1.0, 1.1)]
+    core = np.array([f(k) for k in rows_k])
+    got = CB.dla_core_z(np.array(rows_k), core, np.array([3.0, 3.0, 3.0]), 3.0, grid)
+    covered = (grid >= rows_k[0][0]) & (grid <= rows_k[2][-1])
+    np.testing.assert_allclose(got[covered], f(grid[covered]), rtol=1e-12)
+    assert np.all(np.isnan(got[~covered]))
+
+
+def test_dla_core_excludes_rows_not_covering_a_point_and_selects_z_within_005():
+    grid = np.array([1e-3, 5e-2, 9.5e-2])
+    k_a, k_b = np.linspace(5e-4, 0.09, 50), np.linspace(5e-4, 0.1, 50)
+    core = np.array([np.full(50, 1.0), np.full(50, 3.0), np.full(50, 100.0)])
+    z = np.array([3.0, 3.04, 3.2])                               # the third row is another z cell
+    got = CB.dla_core_z(np.array([k_a, k_b, k_b]), core, z, 3.0, grid)
+    np.testing.assert_allclose(got, [2.0, 2.0, 3.0])            # 0.095 only covered by row b
+
+
+def test_dla_core_leg_is_the_mean_over_the_legs_z_and_is_read_in_ln_k():
+    grid = CB.DLA_CORE_GRID
+    k = np.linspace(4e-4, 0.1, 172)
+    rows_k = np.array([k, k])
+    core = np.array([np.full(172, 1.0), np.full(172, 5.0)])
+    leg = CB.dla_core_leg(rows_k, core, np.array([2.2, 2.4]), [2.2, 2.4], grid)
+    np.testing.assert_allclose(leg, 3.0)
+    g = np.log(grid) ** 2                                         # linear in ln k -> exact at any k inside
+    kd = np.array([1e-3, 2.345e-2, 0.07])
+    np.testing.assert_allclose(CB.dla_core_at(kd, grid, np.log(grid)), np.log(kd), rtol=1e-12)
+    with pytest.raises(ValueError):
+        CB.dla_core_at(np.array([0.2]), grid, g)
