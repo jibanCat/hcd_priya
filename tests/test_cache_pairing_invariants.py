@@ -112,6 +112,18 @@ def test_vmax_from_header_matches_fake_spectra_formula():
     assert abs(bt0.vmax_from_header(h) / expect - 1) < 1e-15
 
 
+# ------------------------------------------------------------------------------- group selection (targeted builds)
+def test_select_pairs_keeps_exactly_the_named_groups_and_refuses_unmatched_selectors():
+    pairs = [("ns0.803Ap2.2e-09x", 17, Path("a"), Path("ra")), (NS0907, 16, Path("b"), Path("rb")),
+             (NS0907, 17, Path("c"), Path("rc")), ("ns0.959Ap2.34e-09x", 20, Path("d"), Path("rd"))]
+    got = bt0.select_pairs(pairs, ["ns0.907:17", "ns0.959:20"])
+    assert [(p[0][:7], p[1]) for p in got] == [("ns0.907", 17), ("ns0.959", 20)]
+    with pytest.raises(ValueError, match="matches no"):
+        bt0.select_pairs(pairs, ["ns0.907:18"])
+    with pytest.raises(ValueError, match="more than one"):
+        bt0.select_pairs(pairs + [("ns0.907other", 17, Path("e"), Path("re"))], ["ns0.907:17"])
+
+
 # ------------------------------------------------------------------------------- real data
 def test_override_entries_match_the_raw_headers_and_meta():
     for (tag, snap), z in bt0._PHASE1_Z_OVERRIDE.items():

@@ -238,6 +238,21 @@ def discover_tau0_pairs(hcd_root, emu_root, fidelity="lf", max_off_grid=0.05):
     return sorted(deduped, key=lambda p: (p[0], p[1]))
 
 
+def select_pairs(pairs, selectors):
+    """Keep only the (sim, snap) groups named by selectors "SIM_SUBSTRING:SNAP" (targeted rebuilds). Each selector
+    must match exactly one discovered pair; the discovered order is kept."""
+    keep = set()
+    for sel in selectors:
+        tag, snap = sel.rsplit(":", 1)
+        hits = [i for i, p in enumerate(pairs) if tag in p[0] and p[1] == int(snap)]
+        if not hits:
+            raise ValueError(f"selector {sel!r} matches no discovered pair")
+        if len(hits) > 1:
+            raise ValueError(f"selector {sel!r} matches more than one pair: {[pairs[i][0] for i in hits]}")
+        keep.add(hits[0])
+    return [p for i, p in enumerate(pairs) if i in keep]
+
+
 # PRIYA's zout grid runs 2.0..5.4 in steps of 0.2; snapshot redshifts can land
 # slightly off (e.g. 4.600013). For bit-compatibility with PRIYA's training
 # data the mean-flux model must use the GRID z, not the snapshot's exact z
@@ -523,6 +538,8 @@ def main() -> None:
                         help="Skip the first M pairs (for sharded array jobs).")
     parser.add_argument("--n-skewers", type=int, default=None,
                         help="Limit skewers per snap (dry runs only).")
+    parser.add_argument("--select", action="append", default=None, metavar="SIM_SUBSTRING:SNAP",
+                        help="Build only these (sim, snap) groups (repeatable; each must match one discovered pair).")
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--spot-check", action="store_true",
                         help="After writing, verify row 0 P_tier_p is finite.")
@@ -539,6 +556,9 @@ def main() -> None:
 
     pairs = discover_tau0_pairs(hcd_root, emu_root, fidelity=fid)
     print(f"[{fid}] Found {len(pairs)} tau0-buildable (sim, snap) pairs (n_k={n_k})")
+    if args.select:
+        pairs = select_pairs(pairs, args.select)
+        print(f"[{fid}] --select kept {len(pairs)} pairs: {[(p[0][:24], p[1]) for p in pairs]}")
     pairs = pairs[args.offset:]
     if args.limit is not None:
         pairs = pairs[: args.limit]
