@@ -685,6 +685,28 @@ def _metal_factor(k, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII
     return 1.0 + f
 
 
+def metal_factor_at_z(k_sub, z, tau0, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT,
+                      f_SiIII_nodes=None, f_SiII_nodes=None, metal_node_z=(2.2, 4.2), k_SiIII_nodes=None,
+                      k_SiII_nodes=None):
+    """The metal factor at one leg z (data k only). MODEL C+ when ``f_SiIII_nodes`` is given: a(z) = f(z)/(1 - <F>(z))
+    with <F>(z) = exp(-tau0) the SAMPLED mean flux (differentiable in tau0), log10 f(z) and log10 k-scale(z) LINEAR in
+    log10(1+z) between ``metal_node_z`` (jnp.interp clamps beyond the nodes, eBOSS z > 4.2), SiIII-SiII cross term on
+    (it is proportional to a_SiII, so it vanishes on SiIII-only legs); otherwise the legacy scalar amplitudes."""
+    if f_SiIII_nodes is None:
+        return _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII, k_SiIII=k_SiIII, k_SiII=k_SiII)
+    _logz = jnp.log10(1.0 + z)
+    _xp = jnp.log10(1.0 + jnp.asarray(metal_node_z))
+    _omF = 1.0 - jnp.exp(-tau0)
+    a3_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiIII_nodes))) / _omF
+    a2_z = ((10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiII_nodes))) / _omF
+            if f_SiII_nodes is not None else 0.0)
+    k3_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(k_SiIII_nodes))
+            if k_SiIII_nodes is not None else k_SiIII)
+    k2_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(k_SiII_nodes))
+            if k_SiII_nodes is not None else k_SiII)
+    return _metal_factor(k_sub, a_SiIII=a3_z, a_SiII=a2_z, k_SiIII=k3_z, k_SiII=k2_z, cross=True)
+
+
 def _resolution_factor(k, R_z, *, b_res=0.0):
     """Resolution-template multiplier P → P·exp(2 b_res k² R_z²) (usage doc Eq. 4.8, option
     (b)). b_res=0 ⇒ factor ≡ 1.  Differentiable in b_res.  Default OFF (the residual
@@ -1217,29 +1239,10 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
         # C_emu variance transform (ev_z·mfac²) so the two can never drift to a stale amplitude.
         mfac = None
         if leg.metals_on:
-            if f_SiIII_nodes is not None:
-                # MODEL C+: a(z)=f(z)/(1−⟨F⟩(z)), log10 f(z) LINEAR in log10(1+z) (power-law-exact);
-                # ⟨F⟩(z)=exp(−tau0) the SAMPLED mean flux (a is differentiable in τ₀). jnp.interp
-                # default-CLAMPS f flat beyond [node_z[0],node_z[1]] (eBOSS z>4.2 → bounded a). The
-                # sigmoid decorrelation SCALE is ALSO per-z (k_SiIII_nodes/k_SiII_nodes, log-interp'd
-                # like f); when its nodes are None we fall back to the scalar k_SiIII/k_SiII (=0.05).
-                # The SiIII–SiII cross term is ON (cross=True); it is ∝ a_SiII so it auto-vanishes on
-                # SiIII-only legs (f_SiII_nodes None → a2_z=0).
-                _logz = jnp.log10(1.0 + z)
-                _xp = jnp.log10(1.0 + jnp.asarray(metal_node_z))
-                _omF = 1.0 - jnp.exp(-tau0)
-                a3_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiIII_nodes))) / _omF
-                a2_z = ((10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiII_nodes))) / _omF
-                        if f_SiII_nodes is not None else 0.0)
-                k3_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(k_SiIII_nodes))
-                        if k_SiIII_nodes is not None else k_SiIII)
-                k2_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(k_SiII_nodes))
-                        if k_SiII_nodes is not None else k_SiII)
-                mfac = _metal_factor(k_sub, a_SiIII=a3_z, a_SiII=a2_z, k_SiIII=k3_z, k_SiII=k2_z,
-                                     cross=True)
-            else:
-                mfac = _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII,
-                                     k_SiIII=k_SiIII, k_SiII=k_SiII)
+            mfac = metal_factor_at_z(k_sub, z, tau0, a_SiIII=a_SiIII, a_SiII=a_SiII, k_SiIII=k_SiIII,
+                                     k_SiII=k_SiII, f_SiIII_nodes=f_SiIII_nodes, f_SiII_nodes=f_SiII_nodes,
+                                     metal_node_z=metal_node_z, k_SiIII_nodes=k_SiIII_nodes,
+                                     k_SiII_nodes=k_SiII_nodes)
             P_z = P_z * mfac
         if leg.resolution_on:
             # option-b: a per-z sampled b_res(z) (b_res_vec) overrides the scalar b_res (default None →
