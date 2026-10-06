@@ -4,9 +4,10 @@ spec GATE_D_SPEC.md in the notes repository; incident note 2026-10-05-INCIDENT-k
 LF and HR runs of one design point share box, cosmology and snapshot redshifts, so the n-th comoving mode is the same
 physical k in both. The correction g = log P_HR - log P_LF is measured per mode (no interpolation of either side) and
 placed on k_skm(z, theta) only at prediction. Model family unchanged from the certified historical form
-(``multifidelity.fixed_mean_table_resolved``: log_rho + gbar_z + gbar_tau + rank-1, theta-independent), with one
-correctness fix: log_rho is fitted on the TRAINING rows only (historically it used every matched row, so a held-out HR
-simulation leaked into its own correction)."""
+(``multifidelity.fixed_mean_table_resolved``: log_rho + gbar_z + gbar_tau + rank-1, theta-independent). log_rho is
+fitted on the training rows for hygiene; it cancels identically in the FixedMeanHead (gbar_z is stored minus log_rho),
+so no held-out prediction, historical or new, depended on it (gate D review, PU-0063; an earlier version of this
+docstring and commit a42bd5f called it a leak fix)."""
 from __future__ import annotations
 
 import json

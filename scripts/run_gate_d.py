@@ -27,6 +27,7 @@ import jax.numpy as jnp
 sys.path.insert(0, _REPO_ROOT)
 import hcd_analysis.emulator  # noqa: F401,E402
 from hcd_analysis.emulator import data as D  # noqa: E402
+from hcd_analysis.emulator import gate_d as GD  # noqa: E402
 from hcd_analysis.emulator import mf_modes as MM  # noqa: E402
 from hcd_analysis.emulator import train as T  # noqa: E402
 from hcd_analysis.emulator.predict import predict_P_filt  # noqa: E402
@@ -107,6 +108,9 @@ def main():
     mean_band = lambda lg: [float(np.nanmean(np.where(band[:, c], lg[:, c], np.nan))) for c in range(4)]
     R["D3"] = dict(mean_log_mf=dict(zip(CLS, mean_band(l_mf))), mean_log_lf=dict(zip(CLS, mean_band(l_lf))))
     R["D3"]["pass_"] = bool(all(abs(R["D3"]["mean_log_mf"][c]) < abs(R["D3"]["mean_log_lf"][c]) for c in CLS))
+    # gate D review (PU-0063): the pooled D3 of a leave-one-out mean correction is fixed by construction; read the
+    # high-k band per held-out simulation and on a common mode-index band (gate_d.d3_per_simulation)
+    R["D3_per_simulation"] = GD.d3_per_simulation(l_mf, l_lf, t["sim"], z, k_hr, keep)
 
     # R-D2a stratification of the held-out MF residual
     def strat(r, sel_fn):
