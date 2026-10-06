@@ -50,6 +50,11 @@ I_HUB, I_OMH2 = 5, 6
 THRESH = dict(kink=0.05, net_mean=0.1, net_rms=0.2, net_max=0.5, logdet=0.3)     # A2/A3 (registered, analyst choice)
 
 
+def _stage(msg):
+    """Time-stamped progress on stderr (diagnostic only; the outputs do not depend on it)."""
+    print(f"[{datetime.now(timezone.utc).isoformat(timespec='seconds')}] {msg}", file=sys.stderr, flush=True)
+
+
 def _sha(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -128,6 +133,7 @@ def main(argv=None):
     for p in (a.out_json, a.out_npz):
         if os.path.exists(p):
             raise SystemExit(f"refusing to overwrite {p}")
+    _stage(f"start leg {a.leg}")
     members = production_member_paths()
     ctx, d, leg = build(a.leg, members, a.mf, a.dla_core, a.t1, a.t3)
     ctx_raw, _, _ = build(a.leg, members, a.mf, a.dla_core, a.t1_raw, a.t3)
@@ -150,6 +156,7 @@ def main(argv=None):
     def proj(F, g):
         return FK.projected(F, np.asarray(g))[list(IDX)]
     out = dict(leg=a.leg, n_kept=int(FK.kept(leg).size), param_names=list(FK.param_names(ctx)))
+    _stage("contexts built; A1 grid")
     # A1 grid and A3 a
     n = a.grid
     hubs = lo[I_HUB] + (hi[I_HUB] - lo[I_HUB]) * np.linspace(0, 1, n)
@@ -160,6 +167,7 @@ def main(argv=None):
             p = p_c.copy(); p[I_HUB], p[I_OMH2] = h, o
             f_grid[i, j] = float(f_ld(jnp.asarray(p)))
             pull_grid[i, j] = proj(fisher_at(p), g_ld(jnp.asarray(p)))
+    _stage("A1 paths")
     # A1 paths along every parameter
     ranges = {}
     for ax in range(len(p_c)):
@@ -178,6 +186,7 @@ def main(argv=None):
             p = p_c.copy(); p[ax] = x
             vals.append(proj(fisher_at(p), g_ld(jnp.asarray(p))))
         path_pull[out["param_names"][ax]] = np.abs(np.array(vals)).max(axis=0).tolist()
+    _stage("leg residuals")
     # simulations' leg vectors (A2 S_bar, A3 b, c)
     R = CB.load_loo_ensemble_residuals(a.eval_dir, d)
     vecs, sims = leg_residuals(R, d, leg, ctx)
@@ -187,6 +196,7 @@ def main(argv=None):
     theta_of = {s: pu[np.asarray(R["rows"])[np.asarray(R["sim"]).astype(str) == s][0]] for s in sims}
     Ck = np.asarray(leg.C_data, float)[np.ix_(FK.kept(leg), FK.kept(leg))]
     S_bar = Ck + np.mean([np.outer(v[1], v[1]) for s in sims for v in vecs[s].values()], axis=0)
+    _stage("A2 kinks")
     # A2 kinks along hub and omegamh2 through the centre
     kept = FK.kept(leg)
     kb, zb = np.asarray(leg.k)[kept], np.asarray(leg.z_row, float)[kept]
@@ -214,6 +224,7 @@ def main(argv=None):
             vec[I_HUB], vec[I_OMH2] = w[I_HUB] / w[ax], w[I_OMH2] / w[ax]
             kinks.append(np.r_[np.abs(proj(Fc, jl * vec)), np.abs(proj(Fc, jn * vec))])
     kinks = np.array(kinks) if kinks else np.zeros((0, 6))
+    _stage(f"A3 b-d ({len(kinks)} crossings done)")
     # A3 b (all rungs), c and d (central rung)
     net_sim, newton, info = [], [], []
     for s in sims:
@@ -240,6 +251,7 @@ def main(argv=None):
         d_nl = CA.newton_shift(lambda dd: LC(jnp.asarray(p) + dd, S), F, d_lin, sig, metric=I_C)
         newton.append(np.r_[(d_lin / sig)[list(IDX)], (d_nl / sig)[list(IDX)]])
     net_sim, newton, info = np.array(net_sim), np.array(newton), np.array(info)
+    _stage("A4 texture")
     # A4 texture: T1 selected over raw at the data bins along the hub and omegamh2 paths (diagonal of C - C_data)
     tex = {}
     for ax in (I_HUB, I_OMH2):
@@ -252,6 +264,7 @@ def main(argv=None):
         ratios = np.array(ratios)
         tex[out["param_names"][ax]] = dict(median=float(np.median(ratios)), p05=float(np.percentile(ratios, 5)),
                                            p95=float(np.percentile(ratios, 95)))
+    _stage("FD agreement")
     # finite-difference agreement on a subset (the registered primary derivative; jax used for T1/T3)
     rng = np.random.default_rng(0)
     fd_rel = []
