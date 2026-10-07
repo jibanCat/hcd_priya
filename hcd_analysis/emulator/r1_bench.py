@@ -85,14 +85,16 @@ def truth_on_leg(d, rows, leg, mf, alpha_leg, core_data):
     return out
 
 
-FACTORIAL = dict(P=("P", "P"), M=("M", "M"), T1=("T1", "T1"), MQ=("M", "P"), MD=("P", "M"), P15=("P15", "P15"))
+FACTORIAL = dict(P=("P", "P"), P15=("P15", "P15"), M=("M", "M"), M10=("M10", "M10"), MF=("MF", "MF"), T1=("T1", "T1"),
+                 MQ=("M", "MF"), MD=("MF", "M"))      # R1 T3 prereg rev 1 section 4: (quadratic term, log-det term)
 
 
 def leg_parts(ctx, leg, spec):
     """(p, args, which) -> (model P on the leg's kept bins, C_total on them) for T3 representation ``which`` in
-    {'P', 'P15', 'M', 'T1'} with the production algebra (T3 off-diagonal, diagonal max with T1, amplitude args['Pamp']).
-    ``args``: model, pf (normalizer stats), rho (T1 per leg z, pooled), UP/wP (P factor on the leg's bins), UP15/wP15,
-    UM/wM (M factor on the mode set), Pamp (T3 amplitude vector), d (the mock). ``spec``: the M binding (z_cells, iz,
+    {'P', 'P15', 'M', 'M10', 'MF', 'T1'} with the production algebra (T3 off-diagonal, diagonal max with T1, amplitude
+    args['Pamp']). ``args``: model, pf (normalizer stats), rho (T1 per leg z, pooled), UP/wP (P factor on the leg's bins),
+    UP15/wP15, UM/wM (M factor on the mode set, rank 15), UM10/wM10, UMF (M rank 15 bound at theta_ref, on the leg's
+    bins: only the T3 binding frozen), Pamp (T3 amplitude vector), d (the mock). ``spec``: the M binding (z_cells, iz,
     k_bins, Mi, rows, n_leg) on the leg's T3 bins."""
     from . import fisher_kit as FK
     from . import forward as FW
@@ -111,9 +113,12 @@ def leg_parts(ctx, leg, spec):
         if which == "T1":
             C = Cd + jnp.diag(t1v)
         else:
-            if which == "M":
+            if which in ("M", "M10"):
+                um, wm = (a["UM"], a["wM"]) if which == "M" else (a["UM10"], a["wM10"])
                 U, w = mode_aligned_factor(th, ctx.k_com_hmpc, spec["z_cells"], spec["iz"], spec["k_bins"], spec["Mi"],
-                                           a["UM"], spec["rows"], spec["n_leg"]), a["wM"]
+                                           um, spec["rows"], spec["n_leg"]), wm
+            elif which == "MF":
+                U, w = a["UMF"], a["wM"]
             elif which == "P15":
                 U, w = a["UP15"], a["wP15"]
             else:
@@ -228,3 +233,64 @@ def paired_ci(a, b, groups, n_boot=2000, seed=0, stat=np.mean):
     rng = np.random.default_rng(seed)
     vals = [stat(d[np.concatenate([idx[i] for i in rng.integers(0, ug.size, ug.size)])]) for _ in range(n_boot)]
     return tuple(np.percentile(vals, [2.5, 97.5]))
+
+
+
+def trunc_pit(truth, mean, sigma, lo, hi):
+    """(u, pull): the CDF at the truth of a Gaussian (mean, sigma) truncated to [lo, hi], and pull = Phi^-1(u) (defined at
+    prior bounds; the R1 coverage rule uses u)."""
+    from scipy.stats import norm
+    a, b = norm.cdf((lo - mean) / sigma), norm.cdf((hi - mean) / sigma)
+    u = (norm.cdf((truth - mean) / sigma) - a) / max(b - a, 1e-300)
+    u = float(np.clip(u, 1e-12, 1 - 1e-12))
+    return u, float(norm.ppf(u))
+
+
+def covered(u):
+    """(68%, 95%) central-interval coverage indicators from PIT values."""
+    u = np.asarray(u, float)
+    return np.abs(u - 0.5) <= 0.341345, np.abs(u - 0.5) <= 0.475
+
+
+def _gpd_fit(x):
+    """Zhang & Stephens (2009) estimate of the generalized Pareto shape k and scale for exceedances x > 0 (as in
+    Vehtari et al. PSIS), with the weakly informative prior on k."""
+    x = np.sort(np.asarray(x, float))
+    n = x.size
+    m = 30 + int(np.sqrt(n))
+    b = 1.0 - np.sqrt(m / (np.arange(1, m + 1) - 0.5))
+    b = b / (3.0 * x[int(n / 4 + 0.5) - 1]) + 1.0 / x[-1]
+    k = np.mean(np.log1p(-b[:, None] * x[None, :]), axis=1)
+    L = n * (np.log(-b / k) - k - 1.0)
+    w = 1.0 / np.sum(np.exp(L[None, :] - L[:, None]), axis=1)
+    bh = np.sum(b * w)
+    kh = np.mean(np.log1p(-bh * x))
+    sig = -kh / bh
+    kh = (n * kh + 10 * 0.5) / (n + 10)                       # the PSIS weakly informative prior toward 0.5
+    return kh, sig
+
+
+def psis(logw):
+    """Pareto-smoothed importance weights (normalized) and the Pareto k-hat diagnostic (Vehtari et al. 2015/2022)."""
+    lw = np.asarray(logw, float) - np.max(logw)
+    S = lw.size
+    M = int(min(0.2 * S, 3 * np.sqrt(S)))
+    order = np.argsort(lw)
+    cut = lw[order[S - M - 1]]
+    tail = order[S - M:]
+    x = np.exp(lw[tail]) - np.exp(cut)
+    k, sig = _gpd_fit(x)
+    if np.isfinite(k) and sig > 0:
+        q = (np.arange(1, M + 1) - 0.5) / M
+        sm = np.exp(cut) + (sig / k) * ((1 - q) ** (-k) - 1) if abs(k) > 1e-12 else np.exp(cut) - sig * np.log(1 - q)
+        lw = lw.copy()
+        lw[tail] = np.log(np.minimum(sm, 1.0))                 # sorted tail replaced by GPD quantiles, truncated at max
+    w = np.exp(lw - np.max(lw))
+    return w / w.sum(), float(k)
+
+
+def phase_stat(u, weights):
+    """Weighted mean of cos(2 pi u) over bins with fractional mode index u: 1 when every bin sits on a mode (where the
+    mode-locked bindings kink), -1 halfway between modes."""
+    w = np.asarray(weights, float)
+    return float(np.sum(w * np.cos(2.0 * np.pi * np.asarray(u, float))) / np.sum(w))

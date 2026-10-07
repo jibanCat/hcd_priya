@@ -152,20 +152,30 @@ def _bench_setup():
 
 
 def test_variant_losses_are_gaussians_with_their_own_covariance_and_factorial_mixes():
+    """Rev 1: M-F freezes only the T3 binding (T1 still varies); M-Q / M-D take the quadratic / log-det from M and the
+    other term from M-F; P15 and M10 are the rank controls."""
     from hcd_analysis.emulator import fisher_kit as FK
     ctx, leg, spec, args = _bench_setup()
     p = jnp.asarray(FK.p_centre(ctx, np.full(9, 0.45)))
+    th_ref = jnp.asarray(np.full(9, 0.6))
+    args = dict(args, UMF=RB.mode_aligned_factor(th_ref, KCOM, spec["z_cells"], spec["iz"], spec["k_bins"], spec["Mi"],
+                                                 args["UM"], spec["rows"], spec["n_leg"]),
+                UP15=args["UP"][:, :2], wP15=args["wP"][:2], UM10=args["UM"][:, :2], wM10=args["wM"][:2])
     parts = RB.leg_parts(ctx, leg, spec)
     mu, C = {}, {}
-    for v in ("P", "M", "T1"):
+    for v in ("P", "P15", "M", "M10", "MF", "T1"):
         mu[v], C[v] = parts(p, args, v)
     r = args["d"][jnp.asarray(FK.kept(leg))] - mu["P"]
     lp = RB.log_prior(ctx)(p)
-    for v, (cq, cd) in dict(P=("P", "P"), M=("M", "M"), T1=("T1", "T1"), MQ=("M", "P"), MD=("P", "M")).items():
+    for v, (cq, cd) in dict(P=("P", "P"), P15=("P15", "P15"), M=("M", "M"), M10=("M10", "M10"), MF=("MF", "MF"),
+                            T1=("T1", "T1"), MQ=("M", "MF"), MD=("MF", "M")).items():
         f = RB.make_nlp(ctx, leg, spec, v)
         expect = -RB.factorial_loglik(r, C[cq], C[cd]) - lp
         np.testing.assert_allclose(float(f(p, args)), float(expect), rtol=1e-12)
     assert not np.allclose(np.asarray(C["P"]), np.asarray(C["M"]))
+    # at theta_ref the frozen binding equals the live one: M-F and M coincide there (T1 identical in both)
+    p_ref = jnp.asarray(FK.p_centre(ctx, np.full(9, 0.6)))
+    np.testing.assert_allclose(np.asarray(parts(p_ref, args, "MF")[1]), np.asarray(parts(p_ref, args, "M")[1]), rtol=1e-12)
 
 
 def test_force_decomposition_sums_to_the_log_likelihood_gradient():
@@ -177,3 +187,35 @@ def test_force_decomposition_sums_to_the_log_likelihood_gradient():
     total = jax.grad(lambda q: -RB.make_nlp(ctx, leg, spec, "M")(q, args) - RB.log_prior(ctx)(q))(p)
     np.testing.assert_allclose(np.asarray(g["mean"] + g["cov_quad"] + g["logdet"]), np.asarray(total), rtol=1e-8,
                                atol=1e-10 * float(np.max(np.abs(np.asarray(total)))))
+
+
+
+def test_truncated_gaussian_pit_and_pull():
+    from scipy.stats import norm, truncnorm
+    u, pull = RB.trunc_pit(truth=0.3, mean=0.1, sigma=0.2, lo=-np.inf, hi=np.inf)
+    np.testing.assert_allclose(u, norm.cdf(1.0)); np.testing.assert_allclose(pull, 1.0)
+    u, pull = RB.trunc_pit(truth=0.9, mean=1.0, sigma=0.2, lo=0.0, hi=1.0)                 # MAP on the upper bound
+    a, b = (0.0 - 1.0) / 0.2, 0.0
+    np.testing.assert_allclose(u, truncnorm(a, b, loc=1.0, scale=0.2).cdf(0.9), rtol=1e-12)
+    assert np.isfinite(pull)
+    cov68, cov95 = RB.covered(np.array([0.5, 0.8, 0.99, 0.2]))
+    assert list(cov68) == [True, True, False, True] and list(cov95) == [True, True, False, True]
+
+
+def test_psis_khat_and_weights_on_a_known_target():
+    rng = np.random.default_rng(10)
+    x = rng.standard_t(5, 4000)                        # proposal t5, target N(0,1): light-tailed target, khat < 0.5
+    from scipy.stats import t as tdist, norm
+    logw = norm.logpdf(x) - tdist.logpdf(x, 5)
+    w, khat = RB.psis(logw)
+    assert khat < 0.5 and abs(np.sum(w) - 1) < 1e-12
+    np.testing.assert_allclose(np.sum(w * x ** 2), 1.0, atol=0.08)
+    y = rng.normal(0, 1, 4000)                         # proposal N(0,1), target t2: heavy-tailed target, khat > 0.7
+    _, khat_bad = RB.psis(tdist.logpdf(y, 2) - norm.logpdf(y))
+    assert khat_bad > 0.7
+
+
+def test_phase_statistic_is_one_on_modes_and_minus_one_halfway():
+    w = np.ones(5)
+    np.testing.assert_allclose(RB.phase_stat(np.array([1.0, 2.0, 7.0, 30.0, 51.0]), w), 1.0)
+    np.testing.assert_allclose(RB.phase_stat(np.array([1.5, 2.5, 7.5, 30.5, 51.5]), w), -1.0, atol=1e-12)
