@@ -77,3 +77,50 @@ def test_paired_difference_resamples_whole_truths():
     groups = np.repeat(np.arange(48), 2)
     lo, hi = RB.paired_ci(a, b, groups, n_boot=500, seed=0)
     np.testing.assert_allclose([lo, hi], [0.3, 0.3], atol=1e-12)            # paired b - a: a constant shift has no spread
+
+
+
+# --------------------------------------------------------------------------------------------- #
+#  truth (mock) builder: the forward at the truth's parameters with the truth's own spectra in place of the emulator
+#  reproduces the mock to round-off (coordinate, MF, HCD and DLA-core algebra identical). Real cache (gate mode).
+# --------------------------------------------------------------------------------------------- #
+GATEC = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC"
+MF = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/mf/gateD/mf_modes_all6.npz"
+DLA_CORE = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/gateE/products/dla_core_gateE.npz"
+
+
+def test_truth_equals_the_forward_with_an_oracle_emulator(monkeypatch):
+    import os
+    from tests.gate_helpers import real_cache_path
+    if not all(os.path.exists(x) for x in (MF, DLA_CORE, f"{GATEC}/prod_repaired_seed0.eqx")):
+        if os.environ.get("HCD_GATE_RUN") == "1":
+            pytest.fail("inputs absent")
+        pytest.skip("inputs absent")
+    from hcd_analysis.emulator import closure_legb as CL, fisher_kit as FK, forward as FW
+    from hcd_analysis.emulator.data import load_cache, tau0_ladder_factor
+    ctx, _ = CL.build_legb_ctx(ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
+                               dla_core_product=DLA_CORE, ks_kwargs=dict(k_max=0.065), survey="DESI")
+    leg = next(l for l in ctx.legs if l.name == "DESI")
+    d = load_cache(real_cache_path("lf"))
+    names = np.asarray(d["sim_name"]).astype(str)
+    sim = sorted(set(names))[7]
+    rows = RB.truth_rows(d, sim, 1.0112, np.asarray(leg.z))
+    th = np.asarray(d["params_unit"], float)[rows[0]]
+    alpha_exact = float(np.mean(tau0_ladder_factor(np.asarray(d["tau0"], float)[rows], np.asarray(leg.z))))
+    p = FK.p_centre(ctx, th); p[9] = alpha_exact                   # the rung's exact ladder factor
+    _, tau0_g, alpha_g = FK.forward_inputs(ctx, jnp.asarray(p))
+    zg = np.asarray(ctx.z_global)
+    sel = np.array([int(np.argmin(np.abs(zg - z))) for z in leg.z])
+    truth = RB.truth_on_leg(d, rows, leg, ctx.mf, np.asarray(alpha_g)[sel], np.asarray(ctx.dla_core_leg["DESI"]))
+    zrow = {float(np.round(z, 6)): r for z, r in zip(leg.z, rows)}
+
+    def oracle(model, theta9, z_unit, tau0, pf_stats):
+        z = float(np.round(2.0 + 3.4 * float(z_unit), 6))
+        return jnp.asarray(np.asarray(d["P_filt"], float)[zrow[z]])
+    monkeypatch.setattr(FW, "predict_P_filt", oracle)
+    out = FW.predict_leg(ctx.model, jnp.asarray(th), tau0_g[sel], alpha_g[sel], leg=leg, k_com=ctx.k_com_hmpc,
+                         pf_stats=ctx.pf_stats, dla_core=ctx.dla_core_leg["DESI"], mf=ctx.mf)
+    keep = np.isfinite(np.asarray(leg.P_data))
+    np.testing.assert_allclose(np.asarray(out.P_model)[keep], truth[keep], rtol=1e-9)
+    assert np.allclose(np.asarray(tau0_g)[sel], np.asarray(d["tau0"], float)[rows], rtol=1e-10)
+    assert np.allclose(tau0_ladder_factor(np.asarray(d["tau0"], float)[rows], np.asarray(leg.z)), 1.0112, atol=1e-4)

@@ -40,6 +40,51 @@ def mode_aligned_factor(theta9, k_com, z_cells, iz, k_bins, Mi, U_modes, rows, n
     return out
 
 
+def truth_rows(d, sim, alpha_rung, leg_z, tol=1e-3):
+    """Cache rows of simulation ``sim`` at mean-flux ladder factor ``alpha_rung`` for each z in ``leg_z`` (one each)."""
+    from .data import tau0_ladder_factor
+    names = np.asarray(d["sim_name"]).astype(str)
+    zg = np.asarray(d["z_grid"], float)
+    a = tau0_ladder_factor(np.asarray(d["tau0"], float), zg)
+    rows = []
+    for z in np.asarray(leg_z, float):
+        idx = np.where((names == sim) & (np.abs(zg - z) < 0.05) & (np.abs(a - alpha_rung) < tol))[0]
+        if idx.size != 1:
+            raise ValueError(f"{sim}: {idx.size} rows at z {z}, rung {alpha_rung}")
+        rows.append(int(idx[0]))
+    return np.asarray(rows)
+
+
+def truth_on_leg(d, rows, leg, mf, alpha_leg, core_data):
+    """The truth model P1D on every bin of ``leg`` (R1 T3 benchmark): per z, the truth row's per-class P_filt on its own
+    stored grid times the MF factor at the truth's (theta, z, tau0), interpolated linearly in k onto the data k (truth
+    side, independent of kcoord), combined with the production HCD algebra at ``alpha_leg`` (n_z, 3) and the DLA forward
+    fraction, the physical-k DLA core ``core_data`` (N,) in the DLA amplitude. ``rows``: one cache row per leg z."""
+    from .data import Z_LIMITS
+    k = np.asarray(leg.k, float)
+    z_idx = np.asarray(leg.z_idx)
+    out = np.zeros(k.size)
+    dff = float(getattr(leg, "dla_forward_frac", 1.0))
+    scale = np.array([1.0, 1.0, dff])
+    for iz, z in enumerate(np.asarray(leg.z, float)):
+        sel = np.where(z_idx == iz)[0]
+        if sel.size == 0:
+            continue
+        row = rows[iz]
+        P = np.asarray(d["P_filt"], float)[row]
+        if mf is not None:
+            th = np.asarray(d["params_unit"], float)[row]
+            z_unit = (z - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
+            x = jnp.concatenate([jnp.asarray(th), jnp.asarray([z_unit])])
+            P = P * np.exp(np.asarray(mf(x, float(np.asarray(d["tau0"], float)[row]))))
+        kr = np.asarray(d["kfkms"], float)[row]
+        Pc = np.stack([np.interp(k[sel], kr, P[c]) for c in range(4)])
+        a = np.asarray(alpha_leg, float)[iz] * scale
+        out[sel] = (Pc[0] + a[0] * (Pc[1] - Pc[0]) + a[1] * (Pc[2] - Pc[0])
+                    + a[2] * (Pc[3] + np.asarray(core_data, float)[sel] - Pc[0]))
+    return out
+
+
 def map_laplace(neg_log_post, p0, bounds, starts=(), maxiter=2000, ftol=1e-12, gtol=1e-8):
     """Bounded MAP (L-BFGS-B, jax value and gradient) from ``p0`` and any extra ``starts`` (the best optimum kept), the
     Laplace widths sqrt(diag H^-1) from the jax Hessian at the MAP, and flags: converged, at_bound per parameter, and the
