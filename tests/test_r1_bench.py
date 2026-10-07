@@ -124,3 +124,56 @@ def test_truth_equals_the_forward_with_an_oracle_emulator(monkeypatch):
     np.testing.assert_allclose(np.asarray(out.P_model)[keep], truth[keep], rtol=1e-9)
     assert np.allclose(np.asarray(tau0_g)[sel], np.asarray(d["tau0"], float)[rows], rtol=1e-10)
     assert np.allclose(tau0_ladder_factor(np.asarray(d["tau0"], float)[rows], np.asarray(leg.z)), 1.0112, atol=1e-4)
+
+
+
+# --------------------------------------------------------------------------------------------- #
+#  per-variant negative log posterior (synthetic context): P/M/T1 are Gaussian with their own covariance; the factorial
+#  diagnostics take the quadratic from one and the log-det from the other; the force decomposition sums to the gradient
+# --------------------------------------------------------------------------------------------- #
+def _bench_setup():
+    from tests.test_fisher_kit import _synthetic
+    from tests.test_forward_v2 import _t1
+    ctx = _synthetic()
+    leg = ctx.legs[0]
+    rho, ac = _t1(leg.n_z, Tb=1)
+    ctx = ctx._replace(alpha_centres=jnp.asarray([1.0]))
+    rng = np.random.default_rng(9)
+    N = leg.k.size
+    zs = np.round(np.arange(2.0, 4.41, 0.2), 1)
+    iz = np.array([int(np.argmin(np.abs(zs - z))) for z in np.asarray(leg.z_row)])
+    Mi = T3.mode_set(KCOM, zs, iz, np.asarray(leg.k), np.zeros(9), np.ones(9))
+    spec = dict(z_cells=zs, iz=iz, k_bins=np.asarray(leg.k), Mi=Mi, rows=np.arange(N), n_leg=N)
+    args = dict(model=ctx.model, pf=ctx.pf_stats, d=jnp.asarray(np.asarray(leg.P_data) * 1.01), rho=rho,
+                UP=jnp.asarray(rng.normal(0, 0.02, (N, 3))), wP=jnp.asarray([1.0, 0.5, 0.2]),
+                UM=jnp.asarray(rng.normal(0, 0.02, (Mi.size, 3))), wM=jnp.asarray([1.0, 0.5, 0.2]),
+                Pamp=jnp.asarray(np.asarray(leg.P_data)))
+    return ctx, leg, spec, args
+
+
+def test_variant_losses_are_gaussians_with_their_own_covariance_and_factorial_mixes():
+    from hcd_analysis.emulator import fisher_kit as FK
+    ctx, leg, spec, args = _bench_setup()
+    p = jnp.asarray(FK.p_centre(ctx, np.full(9, 0.45)))
+    parts = RB.leg_parts(ctx, leg, spec)
+    mu, C = {}, {}
+    for v in ("P", "M", "T1"):
+        mu[v], C[v] = parts(p, args, v)
+    r = args["d"][jnp.asarray(FK.kept(leg))] - mu["P"]
+    lp = RB.log_prior(ctx)(p)
+    for v, (cq, cd) in dict(P=("P", "P"), M=("M", "M"), T1=("T1", "T1"), MQ=("M", "P"), MD=("P", "M")).items():
+        f = RB.make_nlp(ctx, leg, spec, v)
+        expect = -RB.factorial_loglik(r, C[cq], C[cd]) - lp
+        np.testing.assert_allclose(float(f(p, args)), float(expect), rtol=1e-12)
+    assert not np.allclose(np.asarray(C["P"]), np.asarray(C["M"]))
+
+
+def test_force_decomposition_sums_to_the_log_likelihood_gradient():
+    from hcd_analysis.emulator import fisher_kit as FK
+    ctx, leg, spec, args = _bench_setup()
+    p = jnp.asarray(FK.p_centre(ctx, np.full(9, 0.45)))
+    g = RB.force_terms(ctx, leg, spec, "M", p, args)
+    import jax
+    total = jax.grad(lambda q: -RB.make_nlp(ctx, leg, spec, "M")(q, args) - RB.log_prior(ctx)(q))(p)
+    np.testing.assert_allclose(np.asarray(g["mean"] + g["cov_quad"] + g["logdet"]), np.asarray(total), rtol=1e-8,
+                               atol=1e-10 * float(np.max(np.abs(np.asarray(total)))))

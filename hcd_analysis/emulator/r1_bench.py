@@ -85,6 +85,95 @@ def truth_on_leg(d, rows, leg, mf, alpha_leg, core_data):
     return out
 
 
+FACTORIAL = dict(P=("P", "P"), M=("M", "M"), T1=("T1", "T1"), MQ=("M", "P"), MD=("P", "M"), P15=("P15", "P15"))
+
+
+def leg_parts(ctx, leg, spec):
+    """(p, args, which) -> (model P on the leg's kept bins, C_total on them) for T3 representation ``which`` in
+    {'P', 'P15', 'M', 'T1'} with the production algebra (T3 off-diagonal, diagonal max with T1, amplitude args['Pamp']).
+    ``args``: model, pf (normalizer stats), rho (T1 per leg z, pooled), UP/wP (P factor on the leg's bins), UP15/wP15,
+    UM/wM (M factor on the mode set), Pamp (T3 amplitude vector), d (the mock). ``spec``: the M binding (z_cells, iz,
+    k_bins, Mi, rows, n_leg) on the leg's T3 bins."""
+    from . import fisher_kit as FK
+    from . import forward as FW
+    zg = np.asarray(ctx.z_global)
+    sel = jnp.asarray(np.array([int(np.argmin(np.abs(zg - z))) for z in np.asarray(leg.z)]))
+    kr = jnp.asarray(FK.kept(leg))
+    Cd = jnp.asarray(leg.C_data)
+    core = ctx.dla_core_leg[leg.name]
+    centres = ctx.alpha_centres
+
+    def parts(p, a, which):
+        th, tau0, alpha = FK.forward_inputs(ctx, p)
+        out = FW.predict_leg(a["model"], th, tau0[sel], alpha[sel], leg=leg, k_com=ctx.k_com_hmpc, pf_stats=a["pf"],
+                             dla_core=core, mf=ctx.mf, t1=(a["rho"], centres), cemu_inflate=ctx.cemu_inflate)
+        t1v = jnp.diag(out.C_total) - jnp.diag(Cd)
+        if which == "T1":
+            C = Cd + jnp.diag(t1v)
+        else:
+            if which == "M":
+                U, w = mode_aligned_factor(th, ctx.k_com_hmpc, spec["z_cells"], spec["iz"], spec["k_bins"], spec["Mi"],
+                                           a["UM"], spec["rows"], spec["n_leg"]), a["wM"]
+            elif which == "P15":
+                U, w = a["UP15"], a["wP15"]
+            else:
+                U, w = a["UP"], a["wP"]
+            C = FW.assemble_cov(Cd, t1v, jnp.zeros_like(t1v), t3=(U, w), P_fid=jnp.nan_to_num(a["Pamp"]))
+        return out.P_model[kr], C[jnp.ix_(kr, kr)]
+    return parts
+
+
+def log_prior(ctx):
+    """The production prior's log density up to a constant on the HCD sites (theta9, tau0_amp, dtau0 are uniform:
+    handled by the MAP bounds): Gaussian at the production centres and widths (TruncatedNormal on alpha_lls/subdla,
+    whose truncation at 0 is a bound)."""
+    from . import fisher_kit as FK
+    P = FK.prior_precision(ctx)
+    p0 = FK.p_centre(ctx, np.full(9, 0.5))
+    m = np.zeros(len(p0), bool); m[11:] = True
+    Pm, c = jnp.asarray(np.diag(P)[m]), jnp.asarray(p0[m])
+    idx = jnp.asarray(np.where(m)[0])
+    return lambda p: -0.5 * jnp.sum(Pm * (p[idx] - c) ** 2)
+
+
+def make_nlp(ctx, leg, spec, variant):
+    """(p, args) -> the negative log posterior of the mock args['d'] under ``variant`` (FACTORIAL: quadratic term from
+    the first representation, log-determinant from the second)."""
+    from . import fisher_kit as FK
+    parts = leg_parts(ctx, leg, spec)
+    lp = log_prior(ctx)
+    kr = jnp.asarray(FK.kept(leg))
+    cq, cd = FACTORIAL[variant]
+
+    def nlp(p, a):
+        mu, Cq = parts(p, a, cq)
+        Cl = Cq if cd == cq else parts(p, a, cd)[1]
+        return -factorial_loglik(a["d"][kr] - mu, Cq, Cl) - lp(p)
+    return nlp
+
+
+def force_terms(ctx, leg, spec, variant, p, args):
+    """The log-likelihood gradient at ``p`` split into the mean term J^T C^-1 r, the covariance-quadratic term
+    1/2 r^T C^-1 dC C^-1 r and the log-determinant term -1/2 tr(C^-1 dC) (variant's factorial covariances)."""
+    from . import fisher_kit as FK
+    parts = leg_parts(ctx, leg, spec)
+    kr = jnp.asarray(FK.kept(leg))
+    cq, cd = FACTORIAL[variant]
+    d = args["d"][kr]
+
+    def quad(pm, pc):
+        mu = parts(pm, args, cq)[0]
+        C = parts(pc, args, cq)[1]
+        r = d - mu
+        return -0.5 * r @ jnp.linalg.solve(C, r)
+
+    def logdet(pc):
+        return -0.5 * jnp.linalg.slogdet(parts(pc, args, cd)[1])[1]
+    p = jnp.asarray(p)
+    return dict(mean=jax.grad(quad, argnums=0)(p, p), cov_quad=jax.grad(quad, argnums=1)(p, p),
+                logdet=jax.grad(logdet)(p))
+
+
 def map_laplace(neg_log_post, p0, bounds, starts=(), maxiter=2000, ftol=1e-12, gtol=1e-8):
     """Bounded MAP (L-BFGS-B, jax value and gradient) from ``p0`` and any extra ``starts`` (the best optimum kept), the
     Laplace widths sqrt(diag H^-1) from the jax Hessian at the MAP, and flags: converged, at_bound per parameter, and the
