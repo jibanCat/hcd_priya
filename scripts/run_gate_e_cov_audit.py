@@ -195,7 +195,8 @@ def main(argv=None):
     pu = np.asarray(d["params_unit"], float)
     theta_of = {s: pu[np.asarray(R["rows"])[np.asarray(R["sim"]).astype(str) == s][0]] for s in sims}
     Ck = np.asarray(leg.C_data, float)[np.ix_(FK.kept(leg), FK.kept(leg))]
-    S_bar = Ck + np.mean([np.outer(v[1], v[1]) for s in sims for v in vecs[s].values()], axis=0)
+    Rv = np.array([v[1] for s in sims for v in vecs[s].values()])          # (n leg vectors, N kept), small
+    S_bar = Ck + Rv.T @ Rv / Rv.shape[0]                                     # the mean of r r^T without a list of N x N
     _stage("A2 kinks")
     # A2 kinks along hub and omegamh2 through the centre
     kept = FK.kept(leg)
