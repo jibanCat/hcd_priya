@@ -11,10 +11,12 @@ Contract:
 
   per leg ``DataLeg``:  z (Nz,), k (Nz*Nk flat or (Nz,Nk)), P_data (N,), C_data (N,N),
                         R_z (Nz,) resolution, plus systematic-model flags.
-  binding:  for each z, predict P_obs on the CACHE k-grid (``predict.predict_P_obs``),
-            ``jnp.interp`` onto the leg's k (differentiable; the model is smooth), then
-            ×(metal) ×(resolution) nuisances (per-leg-configurable, default OFF), assemble
-            C_emu on the leg grid (interp the per-k emu variance), C_total = C_data + C_emu.
+  binding:  the leg forward is ``forward.predict_leg``: per z, the emulator output on its native
+            modes is placed at the leg's k by ``kcoord.bind`` (per (z, theta)), then
+            ×(metal) ×(resolution) nuisances (per-leg-configurable, default OFF), C_emu on the leg
+            grid from the per-mode emulator variance (``emu_var_modes``), C_total = C_data + C_emu.
+            (The pre-2026-10 binding on one shared cache grid is retired; see
+            docs/kgrid_incident_2026-10.md.)
   likelihood:  the two legs are INDEPENDENT surveys ⇒ block-diagonal ⇒
             logL = Σ_leg gaussian_loglik(P_data_leg − P_model_leg, C_total_leg).
 
@@ -746,7 +748,7 @@ def emu_var_modes(P_filt, z, tau0, alpha_hcd, *, dla_core, alpha_centres, sigma_
                   cemu_inflate=1.0):
     """The per-mode emulator variance at one z from the LF per-class ``P_filt`` (4, K) (the production C_emu uses the
     LF, not the MF-corrected, P_filt), the cross-class block ``rho_zb`` (4, 4, K, Tb) or the diagonal ``sigma_zb``
-    (4, K, Tb), tau0-interpolated over ``alpha_centres``. See ``_emu_var_on_cache``."""
+    (4, K, Tb), tau0-interpolated over ``alpha_centres``."""
     P_clean = P_filt[0]
     P_dla_unf = P_filt[3] + jnp.asarray(dla_core)
     P_cls = jnp.stack([P_clean, P_filt[1], P_filt[2], P_dla_unf])         # (4,Kc)
