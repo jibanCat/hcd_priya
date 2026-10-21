@@ -7,13 +7,15 @@ Panel D: coverage ledger -- which knobs are in-sample vs out-of-sample, and the 
 
 All numbers loaded from committed artifacts + reproduced from the HR/LF caches (no retrain).
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-FIG = "/home/mfho/hcd_priya/figures/analysis/review/2026-06-08-review2-bayesian.png"
-EMU = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
+FIG = f"{_REPO_ROOT}/figures/analysis/review/2026-06-08-review2-bayesian.png"
+EMU = f"{_REPO_ROOT}/figures/analysis/04_emulator"
 
 # ---- load the z-attribution npz (the decomposition under review) ---------------- #
 d = np.load(f"{EMU}/nsbias_z_attribution.npz", allow_pickle=True)

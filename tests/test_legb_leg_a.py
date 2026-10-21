@@ -10,9 +10,11 @@ metals) — unlike the cache-grid Leg-A in closure_sbc. Pins:
       the likelihood's C_total(truth) — the Leg-A self-draw property, per leg;
   (c) build_legb_ctx(ensemble_ckpts=...) carries the EnsembleEmulator.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_leg_a.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import glob
 
 import hcd_analysis.emulator  # noqa: F401  enables x64
@@ -23,9 +25,10 @@ import pytest
 
 from hcd_analysis.emulator import closure_legb as LB
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator.ensemble import EnsembleEmulator
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 PROD = f"{REPO}/checkpoints/final_prod_seed"
 
 
@@ -45,7 +48,7 @@ def _predict_leg_at_truth(ctx, leg, tp, core):
     alpha_leg = jnp.asarray(tp["alpha_hcd_z"])[sel]
     szb = ctx.sigma_zb_per_leg.get(leg.name) if ctx.sigma_zb_per_leg else None
     rzb = ctx.rho_zb_per_leg.get(leg.name) if ctx.rho_zb_per_leg else None
-    return DL.predict_P_obs_on_leg(
+    return LEG.predict_P_obs_on_leg(
         ctx.model, jnp.asarray(tp["theta9"]), tau0_vec, alpha_leg, pf_stats=ctx.pf_stats,
         dla_core=core[leg.name], cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
         alpha_centres=ctx.alpha_centres, a_SiIII=float(tp.get("a_siiii", 0.0)),

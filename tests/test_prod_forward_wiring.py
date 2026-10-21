@@ -12,9 +12,11 @@ gate certified. These tests pin:
   3. The SBC run_cfg population stamp gains sample_res/f_res_amp_sigma/metal_prior so a wired pkl can
      never silently pool with a pre-wiring (uniform/no-f_res) pkl, while a default resume still loads.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_forward_wiring.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import os
 import pickle
@@ -23,7 +25,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 def _load_script(name):

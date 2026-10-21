@@ -25,8 +25,10 @@ SBC SAFETY: this is a NEW standalone runner. It edits NOTHING. It imports build_
 (read-only) and patches the module attribute in its OWN process only. The production SBC arms run in
 separate processes with their own module state and are unaffected.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse
 import functools
 import glob
@@ -46,7 +48,7 @@ from hcd_analysis.emulator.inference import PARAM_NAMES
 from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
 from hcd_analysis.emulator.prod_ensemble import production_member_paths
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
 
 # The two prior arms. WITH = the deployed cosmic-average widths; WITHOUT = ~flat (sigma ~= 5*mu),

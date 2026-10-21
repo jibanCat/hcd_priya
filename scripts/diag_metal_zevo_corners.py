@@ -10,7 +10,7 @@ bias the analyzer certifies. tau0_amp/dtau0 are the ACTUAL sampled sites (rec['s
 the tau0_z ladder proxy. a_SiIII is absent under flatlog2node (metal nodes not packed), so it is not
 an axis. KDE 68/95% contours, reusing the dnuis-corner style.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_metal_zevo_corners.py
 """
 import argparse, glob, os, pickle

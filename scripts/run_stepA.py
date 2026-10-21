@@ -30,10 +30,12 @@ Usage:
   ... run_stepA.py --run-one <chain_id>
 
 Env (MANDATORY for every process):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     OMP_NUM_THREADS=1 /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_stepA.py ...
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import json
@@ -45,7 +47,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 PY = "/home/mfho/.conda/envs/emu-jax/bin/python3"
 # CKPT_DIR is env-overridable (STEPA_CKPT_DIR) so a re-run on a CORRECTED forward can write to a
 # SEPARATE dir (e.g. checkpoints/stepA_slfix/) without overwriting the existing baseline checkpoints

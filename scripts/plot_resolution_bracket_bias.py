@@ -8,7 +8,7 @@ brackets (verified 2026-07-04):
 Gate = |mean Delta_bias_z| + 2 SE < 0.30 sigma_post on BOTH n_s and A_p.
 The panel winner is eBOSS treatment c (option-b WIDE, N(0,0.05)), the only gate-passer.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu ... python3 this.py
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu ... python3 this.py
 """
 import os
 import numpy as np

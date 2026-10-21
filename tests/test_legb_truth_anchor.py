@@ -11,6 +11,7 @@ from hcd_analysis.emulator.meanflux_prior import tau0_alpha_priya, kim_tau0
 CACHE = "hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 
 
+@pytest.mark.xfail(strict=True, reason="GATE E: the pre-2026-10 mock/truth builders are retired (single-grid); rebuilt at gate F (GATE_E_SPEC v1 section 2)")
 @pytest.mark.parametrize("amp_t,dt_t", [(1.0, 0.0), (1.1, 0.15), (0.85, -0.25)])
 def test_priya_anchored_truth_recovers_requested_curve(amp_t, dt_t):
     d = load_cache(CACHE)
@@ -28,6 +29,7 @@ def test_priya_anchored_truth_recovers_requested_curve(amp_t, dt_t):
     assert np.max(np.abs(rec / np.asarray(t["tau0"]) - 1)) < 0.08
 
 
+@pytest.mark.xfail(strict=True, reason="GATE E: the pre-2026-10 mock/truth builders are retired (single-grid); rebuilt at gate F (GATE_E_SPEC v1 section 2)")
 def test_default_anchor_is_priya_central():
     d = load_cache(CACHE)
     sims, _ = CL.held_out_sims(d, fold=0)

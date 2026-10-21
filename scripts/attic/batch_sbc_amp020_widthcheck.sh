@@ -21,11 +21,13 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16g
 #SBATCH --time=24:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/sbc_amp020_%A_%a.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/sbc_amp020_%A_%a.err
+#SBATCH --output=logs/sbc_amp020_%A_%a.out
+#SBATCH --error=logs/sbc_amp020_%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 
 N_MOCKS=48                          # MATCH the full SBC so per-mock RNG aligns (mocks 0..7 used)
@@ -37,9 +39,9 @@ NCPU=${SLURM_CPUS_PER_TASK:-4}
 export SBC_SUBDLA_AMP_SIGMA=0.20    # <-- the pre-check lever (subDLA amplitude width)
 export OMP_NUM_THREADS=$NCPU OPENBLAS_NUM_THREADS=$NCPU MKL_NUM_THREADS=$NCPU NUMEXPR_NUM_THREADS=$NCPU
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=$NCPU"
-export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
-mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
+mkdir -p "$OUTDIR" $REPO/logs
 
 if [[ -f "$OUTDIR/mock_$(printf %04d "$TID").pkl" ]]; then
   echo "=== mock ${TID} pkl exists — SKIP ==="; exit 0

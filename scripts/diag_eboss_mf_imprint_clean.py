@@ -6,12 +6,14 @@ check gave a spurious +32% (artifact). This reuses diag_lf_vs_hr_highk's exact H
 reports the correction OVER THE eBOSS k-band [0.0011,0.0195] s/km, per z, + the implied Delta n_s
 (a multiplicative tilt in the ratio aliases into the spectral tilt: Dn_s ~ d ln(P_HR/P_LF)/d ln k).
 
-Run (emu-jax): PYTHONPATH=/home/mfho/hcd_priya python3 scripts/diag_eboss_mf_imprint_clean.py
+Run (emu-jax): PYTHONPATH=<repo> python3 scripts/diag_eboss_mf_imprint_clean.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import sys
 import numpy as np
 
-sys.path.insert(0, "/home/mfho/hcd_priya/scripts")
+sys.path.insert(0, f"{_REPO_ROOT}/scripts")
 import hcd_analysis.emulator  # noqa: F401
 import diag_lf_vs_hr_highk as D   # reuse load/match/_norm (importing does NOT run main)
 

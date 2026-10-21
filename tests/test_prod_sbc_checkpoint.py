@@ -7,9 +7,11 @@ lost the WHOLE shard. ``run_prod_sbc_shard._run_mock`` now runs ONE mock, writes
 globs ``mock_*.pkl`` (mock index from the FILENAME) alongside ``shard_*.pkl``, per-mock files
 winning a conflict.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_sbc_checkpoint.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import os
 import pickle
@@ -20,7 +22,7 @@ import pytest
 
 from hcd_analysis.emulator import closure_legb as LB
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 def _load_script(name):
@@ -200,6 +202,7 @@ def test_config_clash_nondefault_over_prestamp(runner, tmp_path):
         runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
 
 
+@pytest.mark.xfail(strict=True, reason="GATE E: the pre-2026-10 mock/truth builders are retired (single-grid); rebuilt at gate F (GATE_E_SPEC v1 section 2)")
 def test_inject_spec_held_out_guard():
     """inject_spec on a HELD-OUT (leg_a=False) run_legb call must FAIL LOUD — the held-out branch
     ignores inject_spec, so honouring it would silently drop the injection. PR#12 review follow-up (b).

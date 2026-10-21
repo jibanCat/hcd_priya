@@ -24,9 +24,11 @@ default); every deployed single-leg path must stay BYTE-IDENTICAL. This file car
   T12 dict-loglik == sum of per-leg-array logliks (threading cross-check).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_per_leg_alpha.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import numpy as np
 import pytest
@@ -39,8 +41,8 @@ from numpyro import handlers
 from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator import inference as INF
 
-_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-_CKPT0 = "/home/mfho/hcd_priya/checkpoints/final_fold0.eqx"
+_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+_CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 _KS = ("/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
        "final-conservative-p1d-karacayli_etal2021.txt")
@@ -72,7 +74,11 @@ NUTS_GOLDEN = os.path.join(_GOLDEN_DIR, "legb_shortnuts_golden.npz")
 #  tests/test_ks_dndx_reparam.OLD_HCD_PRIOR_SIGNATURE):
 #  bba3da8868fa498e50bc69f3ff85c192be1fae45058af8ad1211cc28a53102ae
 # --------------------------------------------------------------------------- #
-FORWARD_SIGNATURE_PIN = "68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b"
+# The forward literal was re-pinned at gate E (emulator-debug campaign 2026-10; GATE_E_SPEC v1 section 2, registered
+# PU-0061): forward_signature now includes the canonical coordinate (FORWARD_COORDINATE), so the pre-2026-10
+# single-grid forward's signature can never recur. Old value (pre-2026-10 forward):
+#  68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b
+FORWARD_SIGNATURE_PIN = "df05e8a6a55f937c9cac6ce14b6be444906637e7fa130bd5820e7e61761e1e9f"
 HCD_PRIOR_SIGNATURE_PIN = "50befc941edfc4c789286d2054d0107f1eb19a5672bcb86131426fb101eea216"
 
 

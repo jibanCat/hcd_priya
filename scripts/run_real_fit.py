@@ -34,10 +34,12 @@ likelihood factor sums over that leg ONLY (its real P_data), with that leg's own
 floor, DLA-forward fraction, and metal flag — byte-consistent with how the closure exercises a leg.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_real_fit.py --survey {eboss,ks,desi}
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import functools
@@ -63,7 +65,7 @@ from hcd_analysis.emulator import blinding as BL
 from hcd_analysis.emulator.data import PARAM_LIMITS
 from numpyro.infer import init_to_sample
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
 
 # GetDist LaTeX labels (extends scripts/legb_chains_to_cobaya.LABELS with the nuisance latents).
@@ -243,16 +245,9 @@ def run_real_fit(survey, *, n_chains=4, n_warmup=250, n_samples=600, max_tree_de
     leg = ctx.legs[0]
     n_real = int(np.isfinite(np.asarray(leg.P_data)).sum())
 
-    # the per-leg DLA core for the REAL forward = the fiducial (mean held-out) core build_legb_ctx
-    # already assembled (ctx.dla_core_leg, shape (n_z, K)). For a real fit there is NO sim-truth
-    # core; the fiducial cache DLA core is the production DLA-excess template the closure validated
-    # against. _data_loglik_legcore wants ONE (K,) core per leg (z-mean — the documented MVP the
-    # closure's _mock_core_per_leg also uses: the per-z core variation is tiny vs the P1D, and on
-    # KS/eBOSS the forward DLA term is 0 anyway via dla_forward_frac).
-    import jax.numpy as jnp
-    fid = np.asarray(ctx.dla_core_leg[leg.name])               # (n_z, K) or (K,)
-    core_k = jnp.asarray(fid.mean(axis=0) if fid.ndim == 2 else fid)
-    core_per_leg = {leg.name: core_k}
+    # the per-leg DLA core for the REAL forward: the physical-k z-mean core of the dla_core product at the leg's bins
+    # (gate E amendment A1 rev 1 section 4), as build_legb_ctx placed it (ctx.dla_core_leg, shape (N,)).
+    core_per_leg = {leg.name: ctx.dla_core_leg[leg.name]}
 
     key0 = jax.random.PRNGKey(int(seed))
     # P0 (plan-to-unblind 3A): python hash() is SipHash-salted per process, so the recorded seed
@@ -404,8 +399,13 @@ def _loglik_chain(ctx, core_per_leg, samples, kept_global):
         return _data_loglik_legcore(
             ctx, th, t0, al, ctx.legs, core_per_leg, a_siiii=a_siiii, a_siii=a_siii,
             metal_nodes=metal_nodes, alpha_res=alpha_res, b_res_global=b_res,
-            require_zresolved=True)
-    return jax.vmap(one)(theta, tau0, a_z, nuis)
+            require_zresolved=True, return_aux=True)
+    ll, aux = jax.vmap(one)(theta, tau0, a_z, nuis)
+    n_out = np.asarray(aux["n_out"])
+    if np.any(n_out != 0):          # gate E refusal: no re-scored draw may use a kept bin outside the simulated modes
+        raise ValueError(f"{int(np.sum(n_out != 0))} draws place kept data bins outside the simulated modes "
+                         f"(max {int(n_out.max())} bins); the forward never extrapolates")
+    return ll
 
 
 # --------------------------------------------------------------------------------------------- #

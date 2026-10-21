@@ -9,7 +9,7 @@ unbiased, the pull is not a worry (PI's logic).
 
 Reads both arms; reports per-class truth vs recovered (absolute + fractional + sigma-pull),
 pull coherence, the cosmology pulls, and a partial PAIRED ns decomposition on shared mocks.
-Usage: PYTHONPATH=/home/mfho/hcd_priya python3 scripts/diag_heldout_dndx_consistency.py
+Usage: PYTHONPATH=<repo> python3 scripts/diag_heldout_dndx_consistency.py
 """
 import pickle, glob, os, numpy as np
 

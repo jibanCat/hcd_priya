@@ -14,7 +14,7 @@ the softplus α_DLA link, or the HCD z-slope ``alpha_pivot · g(z)``) that is NO
 coverage run — surfacing as a coverage/recovery ANOMALY, never a crash. This guard turns that
 into a hard test failure at the seam.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_postprocess_golden.py -q
 """
 import os

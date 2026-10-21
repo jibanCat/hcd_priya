@@ -35,11 +35,13 @@ OUTPUT:
   figures/analysis/04_emulator/mf_rescorr_per_class.txt
 
 ENV (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
       scripts/diag_mf_rescorr_per_class.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import warnings
 import numpy as np
 import h5py
@@ -48,13 +50,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import sys
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 from hcd_analysis.emulator.data import (  # noqa: E402
     COARSE_SLICES, COARSE_NAMES, normalize_params)
 
-LF_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-HR_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
-OUT = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
+LF_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+HR_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
+OUT = f"{_REPO_ROOT}/figures/analysis/04_emulator"
 OUT_PNG = f"{OUT}/mf_rescorr_per_class.png"
 OUT_TXT = f"{OUT}/mf_rescorr_per_class.txt"
 

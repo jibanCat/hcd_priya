@@ -5,9 +5,11 @@ the alpha_res forward-only pattern. Default OFF (ctx.sample_res=False) -> byte-i
 4-lens-verified design (2026-07-02): keep EXP; TIGHT prior on physics grounds (amp ~ Normal(0,0.02));
 per-z-block rank-1 cov surgery for option-b; forward-only (not in truth -> no closure cancellation).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_resolution.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import numpy as np
 import pytest
@@ -18,9 +20,10 @@ from numpyro import handlers
 from numpyro.infer.util import constrain_fn
 from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 
-_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-_CKPT0 = "/home/mfho/hcd_priya/checkpoints/final_fold0.eqx"
+_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+_CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 _EBOSS_NPZ = "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz"
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
@@ -139,7 +142,7 @@ def test_bres_vec_forward_response_per_z_indexed():
     core = jnp.mean(jnp.asarray(ctx.dla_core_leg[leg.name]), axis=0)
 
     def _fwd(**kw):
-        P, _ = DL.predict_P_obs_on_leg(
+        P, _ = LEG.predict_P_obs_on_leg(
             ctx.model, theta9, tau0_vec, alpha3, pf_stats=ctx.pf_stats, dla_core=core,
             cache_k=ctx.cache_k, leg=leg, sigma_zb=szb, alpha_centres=ctx.alpha_centres,
             cemu_inflate=ctx.cemu_inflate, rho_zb=rzb, mf=ctx.mf, **kw)
@@ -351,4 +354,4 @@ def test_resolution_ready_flag_per_leg():
     _KS = ("/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
            "final-conservative-p1d-karacayli_etal2021.txt")
     if os.path.exists(_KS):
-        assert load_ks_leg().resolution_ready is False, "KS proxy R_z is untrustworthy -> not resolution_ready"
+        assert load_ks_leg(k_max=0.069).resolution_ready is False, "KS proxy R_z is untrustworthy -> not resolution_ready"

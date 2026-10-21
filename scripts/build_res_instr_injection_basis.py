@@ -59,17 +59,19 @@ with C_data^-1; (2) the span is {ones, logfac}; (3) the perturbation is B@b_res;
 (4) store per-z (n_z,) vectors.
 
 Env (HEAVY -- run via SLURM on cavestru0, NOT the interactive node):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/build_res_instr_injection_basis.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import functools
 print = functools.partial(print, flush=True)
 
 import numpy as np  # module top-level is numpy-ONLY so the pure helper imports cheap
 
-OUT_NPZ = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/res_instr_injection_basis.npz"
+OUT_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/res_instr_injection_basis.npz"
 FIG = "/home/mfho/hcd_priya_notes/figures/analysis/08_resolution/res_instr_oos_basis.png"
 
 # DESI/eBOSS raw-data sources for the (un-stored) 1-sigma resolution error re-read.

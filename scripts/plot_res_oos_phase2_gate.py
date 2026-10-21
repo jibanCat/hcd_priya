@@ -8,7 +8,7 @@ the full per-cell table, mean-flux co-report, and ops notes). Blind-safe: every 
 is a paired |Delta_bias_z|+2SE or Delta_bias_z in sigma_ref units, never an absolute A_p or n_s.
 
 Pure numpy/matplotlib, no NUTS/GPU, run inline:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
       scripts/plot_res_oos_phase2_gate.py
 """
 import numpy as np

@@ -28,11 +28,13 @@ Blind status: BLIND-SAFE. Contains NO real-data cosmology values (literature +
 prior-constant + closure-mock-truth quantities only).
 
 Run (login node, ~1 min):
-  cd /home/mfho/hcd_priya && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu \
+  cd <repo> && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/export_dndx_paper_layer.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import hashlib
@@ -48,7 +50,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-RUN_CMD = ("cd /home/mfho/hcd_priya && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu "
+RUN_CMD = (f"cd {_REPO_ROOT} && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu "
            "CUDA_VISIBLE_DEVICES=\"\" /home/mfho/.conda/envs/emu-jax/bin/python3 "
            "scripts/export_dndx_paper_layer.py")
 DEFAULT_OUT = Path("/home/mfho/hcd_priya_notes/artifacts/paper_exports/dndx_repin_2026-07-20")

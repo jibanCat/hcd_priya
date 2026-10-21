@@ -21,9 +21,11 @@ forward golden in test_legb_metal_zevo.py IS regenerated (the forward legitimate
 term + the floated decorrelation) — documented there.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_metal_modelcplus.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import numpy as np
 import pytest
@@ -37,10 +39,11 @@ from numpyro.infer.util import constrain_fn, initialize_model
 
 from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import meanflux_prior as MF
 
-_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-_CKPT0 = "/home/mfho/hcd_priya/checkpoints/final_fold0.eqx"
+_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+_CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 _EBOSS_NPZ = "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz"
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
@@ -311,11 +314,11 @@ def test_per_z_decorrelation_interp_and_forward_golden():
     k3_nodes = jnp.asarray([0.012, 0.06]);  k2_nodes = jnp.asarray([0.008, 0.04])
     common = dict(pf_stats=ctx.pf_stats, dla_core=jnp.mean(jnp.asarray(ctx.dla_core_leg[leg.name]), 0),
                   cache_k=ctx.cache_k, leg=leg, sigma_zb=None, alpha_centres=None)
-    P_nodes, _ = DL.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
+    P_nodes, _ = LEG.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
                                          f_SiIII_nodes=f3_nodes, f_SiII_nodes=f2_nodes,
                                          k_SiIII_nodes=k3_nodes, k_SiII_nodes=k2_nodes,
                                          metal_node_z=node_z, **common)
-    P_clean, _ = DL.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
+    P_clean, _ = LEG.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
                                          a_SiIII=0.0, a_SiII=0.0, **common)
     P_nodes = np.asarray(P_nodes); P_clean = np.asarray(P_clean)
     k = np.asarray(leg.k); z_idx = np.asarray(leg.z_idx)
@@ -336,7 +339,7 @@ def test_per_z_decorrelation_interp_and_forward_golden():
     np.testing.assert_allclose(P_nodes, expect, rtol=1e-9, atol=0.0,
                                err_msg="Model C+ per-z f/k forward != metal_inject(cross=True) parity")
     # the per-z k genuinely matters: a CONSTANT k-node pair gives a different forward.
-    P_const, _ = DL.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
+    P_const, _ = LEG.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
                                          f_SiIII_nodes=f3_nodes, f_SiII_nodes=f2_nodes,
                                          k_SiIII_nodes=jnp.asarray([0.05, 0.05]),
                                          k_SiII_nodes=jnp.asarray([0.05, 0.05]),
@@ -355,10 +358,10 @@ def test_knodes_none_uses_scalar_decorr_default():
     common = dict(pf_stats=ctx.pf_stats, dla_core=jnp.mean(jnp.asarray(ctx.dla_core_leg[leg.name]), 0),
                   cache_k=ctx.cache_k, leg=leg, sigma_zb=None, alpha_centres=None)
     f3_nodes = jnp.asarray([0.012, 0.006]); f2_nodes = jnp.asarray([0.007, 0.004])
-    P_noknodes, _ = DL.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
+    P_noknodes, _ = LEG.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
                                             f_SiIII_nodes=f3_nodes, f_SiII_nodes=f2_nodes,
                                             metal_node_z=(2.2, 4.2), **common)
-    P_const05, _ = DL.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
+    P_const05, _ = LEG.predict_P_obs_on_leg(ctx.model, jnp.asarray(MF_THETA), tau0_vec, alpha3,
                                            f_SiIII_nodes=f3_nodes, f_SiII_nodes=f2_nodes,
                                            k_SiIII_nodes=jnp.asarray([0.05, 0.05]),
                                            k_SiII_nodes=jnp.asarray([0.05, 0.05]),

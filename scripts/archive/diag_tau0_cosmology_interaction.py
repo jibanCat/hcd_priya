@@ -36,7 +36,7 @@ We measure four things and emit figures to figures/analysis/04_emulator/:
    with τ₀; we compare its τ₀-dependence (max/min over α of ‖∂lnP̂/∂θ‖) to the
    empirical σ_cosmo(k|z,α) τ₀-dependence from step 1, per class.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_tau0_cosmology_interaction.py
 """
 from __future__ import annotations

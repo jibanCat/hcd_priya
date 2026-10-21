@@ -35,7 +35,7 @@ but in FIXED-reference units instead of the per-record bias_z):
      Test (d) pins that the paired SE is much smaller than the naive unpaired SE on data where the
      two arms share a large common noise component.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_res_corr_injection_gate.py -q
 """
 import importlib.util

@@ -8,7 +8,7 @@ and the legacy-override ctx yields bit-identical data vectors. If this ever brea
 while the DATA silently differed (truth identity is necessary, data identity is the theorem
 proved here).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_r6_pairing.py -q
 """
 import numpy as np

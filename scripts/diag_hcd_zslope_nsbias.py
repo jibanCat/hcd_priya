@@ -11,12 +11,14 @@ mock truth over (n_s, B) on the JOINT DESI+KS leg to answer:
 Noiseless → the loglik peak IS the truth (no noise confound); any n_s shift with B is pure
 slope→n_s leakage. Uses the 2D ctx's δs_c; bypasses NUTS (a 2D grid of the closure loglik).
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_hcd_zslope_nsbias.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import sys
 import numpy as np
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 import hcd_analysis.emulator  # noqa: F401  x64
 import jax, jax.numpy as jnp
 from hcd_analysis.emulator import closure_legb as C

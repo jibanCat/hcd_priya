@@ -40,7 +40,7 @@ from hcd_analysis.emulator.closure_diagnostics import (
     sbc_ranks_multiparam, loglik_rank, thin_to_ess, ecdf_pit_bands,
 )
 
-REPO = "/home/mfho/hcd_priya"
+from hcd_analysis.paths import REPO_ROOT_STR as REPO   # this checkout (emulator-debug 2026-10)
 # The ONE production model: the C_emu LOSO error vector was built from the final_fold*
 # recipe, so final_fold0 is the matched pair (plan §5).
 CKPT = f"{REPO}/checkpoints/final_fold0"

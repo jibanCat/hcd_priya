@@ -16,7 +16,7 @@ This is the deployed-model check that complements diag_theta_tracking_honest.py
 few-sim suites) is reported alongside (abs unit-cube shift + Fisher cond number).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/verify_production_recipe.py
 """
 from __future__ import annotations

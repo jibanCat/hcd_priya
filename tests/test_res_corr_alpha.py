@@ -44,9 +44,11 @@ nuisance cancels in the closure and is unconstrained).
 =============================================================================================
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_res_corr_alpha.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import numpy as np
 import pytest
@@ -59,13 +61,14 @@ from numpyro import handlers
 
 from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import meanflux_prior as MF
 from hcd_analysis.emulator.data import Z_LIMITS
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "golden")
 MF_GOLDEN = os.path.join(GOLDEN_DIR, "legb_mf_golden.npz")
-_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-_CKPT0 = "/home/mfho/hcd_priya/checkpoints/final_fold0.eqx"
+_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+_CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 _KS = ("/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
        "final-conservative-p1d-karacayli_etal2021.txt")
@@ -99,7 +102,7 @@ def _fwd(ctx, leg, theta9, alpha3, **kw):
     szb = ctx.sigma_zb_per_leg.get(leg.name)
     rzb = ctx.rho_zb_per_leg.get(leg.name) if ctx.rho_zb_per_leg is not None else None
     core = jnp.mean(jnp.asarray(ctx.dla_core_leg[leg.name]), axis=0)
-    P_model, _ = DL.predict_P_obs_on_leg(
+    P_model, _ = LEG.predict_P_obs_on_leg(
         ctx.model, theta9, tau0_vec, alpha3, pf_stats=ctx.pf_stats,
         dla_core=core, cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
         alpha_centres=ctx.alpha_centres, cemu_inflate=ctx.cemu_inflate, rho_zb=rzb,
@@ -169,7 +172,7 @@ def test_alpha_response_forward_only():
         core = jnp.mean(jnp.asarray(ctx.dla_core_leg[leg.name]), axis=0)
 
         def logP_sum_per_row(a0):
-            P, _ = DL.predict_P_obs_on_leg(
+            P, _ = LEG.predict_P_obs_on_leg(
                 ctx.model, theta9, tau0_vec, alpha3, pf_stats=ctx.pf_stats,
                 dla_core=core, cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
                 alpha_centres=ctx.alpha_centres, cemu_inflate=ctx.cemu_inflate, rho_zb=rzb,

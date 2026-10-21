@@ -19,7 +19,7 @@ Two permanent guards documenting "our DESI implementation is numerically identic
      asserts the in-band fractional gap is <= 1% at b_res=0.02 (after the half-Nyquist
      k < 0.5 pi/R_z cut), and that our R_z proxy equals cup1d's get_Rz_Naim exactly.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_resolution_cup1d_consistency.py -q
 """
 import os

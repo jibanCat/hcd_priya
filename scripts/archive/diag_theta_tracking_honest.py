@@ -22,7 +22,7 @@ Reports, per class and overall:
   * MEDIAN per-cell corr (pure within-cell ranking, pooling-independent)
   * whitened RMS of (a), (b), total; and deployed |P̂/P−1| frac-RMS.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_theta_tracking_honest.py
 """
 from __future__ import annotations
