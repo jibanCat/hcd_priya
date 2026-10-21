@@ -21,7 +21,8 @@ class FixedMeanHead(eqx.Module):
     LF->HF correction is dominated by the fixed resolution tilt with a small theta-
     departure, and the learned MLP delta-head OVER-FITS that departure on 6 HF sims (a
     large n_s Fisher bias in mock tests).  The rho(k,z)-ONLY model (this head + log_rho)
-    cures it (much smaller n_s and A_p Fisher biases in the same tests).
+    cures it (a much smaller n_s Fisher bias in the same tests, and the best A_p result of the heads
+    tested).
 
     ``MultiFidelity.g`` returns ``log_rho[None,:] + head(cond, basis)``.  This head
     returns ``g(z,tau0,k) - log_rho`` (the fixed mean MINUS the per-k global mean),

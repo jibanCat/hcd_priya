@@ -136,7 +136,7 @@ class MFFloor(NamedTuple):
       slope        : (Nz_floor, 2) |d coherent/d ns| per (z, band) for the edge budget.
       k_band_split : float         the LFres/extrap band edge in angular k (0.07 s/km).
       ns_box       : (2,)          the HR ns cluster box [0.86, 0.98] for d_ns(ns).
-      floor_min    : float         the FLOOR_MIN lower bound on σ_floor (1.23%).
+      floor_min    : float         the FLOOR_MIN lower bound on σ_floor.
       edge_slope_mult : float      the 2× on the (noisy 6-sim) edge slope (spec §4.1).
     """
     z_grid: np.ndarray
@@ -221,7 +221,7 @@ def _mf_floor_var_on_k(floor: MFFloor, z, k_sub, P_obs_sub, ns):
 # ----------------------------------------------------------------------------#
 #  The diagonal floor above (_mf_floor_var_on_k) inflates each (z,k) cell
 #  INDEPENDENTLY. Phase-5a Test B (the genuine HF-LOSO closure) showed the LF→HR
-#  resolution residual is a COHERENT k-tilt (78% rank-1, coherent across z) that
+#  resolution residual is a COHERENT k-tilt (mostly rank-1, coherent across z) that
 #  biases n_s — a CORRELATED structure a diagonal floor cannot absorb
 #  without grossly over-inflating every cell. The shape floor adds the measured
 #  per-held-out-sim LOSO-eps OUTER-PRODUCT as a (low-rank) covariance:
@@ -302,8 +302,8 @@ class MFEmuCoh(NamedTuple):
     f_shape on the (z,k) flat grid) so it binds via ``mf_shape_cov_for_leg`` verbatim — but it is
     a DIFFERENT residual: the LF emulator's held-out (8-fold, 60-sim LOSO) k-coherent generalization
     gap (clean class), NOT the LF→HR resolution residual. Built over the FULL leg-z range (z∈[2.0,4.4],
-    13 bins) — the within-z coherence persists 0.59–0.79 across all z (incl. He-II reion z≈3–4), so it
-    is NOT restricted to low-z; top-m truncated (top-15 ≈ 96.8% of trace).
+    13 bins) — the within-z coherence persists across all z (incl. He-II reion z≈3–4), so it
+    is NOT restricted to low-z; top-m truncated (the top modes carry most of the trace).
 
     NOTE (diagonal allocation, DEPLOYED): its diagonal is the COHERENT part of the LF-emulator error, a
     SUBSET of the existing ``emu_var`` (the cross-class ρ diagonal = the FULL per-cell second moment).
@@ -313,7 +313,7 @@ class MFEmuCoh(NamedTuple):
     (assembly at data_likelihood.py:1130-1138). The n_s-relevant value is the OFF-diagonal. Only with
     ``offdiag_only=False`` (the class DEFAULT, NOT the deployed path) is the term added in full: the
     coherent diagonal then lands ON TOP of ``emu_var`` — a small CONSERVATIVE over-count (over-widens
-    ~×1.3 on the clean diagonal, never biases)."""
+    the clean diagonal, never biases)."""
     z: np.ndarray
     k: np.ndarray
     f_shape: np.ndarray
@@ -575,7 +575,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     # each term: (fractional cov, infl, offdiag_only). offdiag_only=True (the per-term diagonal
     # allocation, cosmology referee 2026-06-12) absorbs that term's diagonal into emu_var via max
     # (never under-count) and adds ONLY its off-diagonal — appropriate for emucoh, whose diagonal is
-    # a SUBSET of the existing emu_var (so the default on-top add ×1.3 over-widens the clean diagonal).
+    # a SUBSET of the existing emu_var (so the default on-top add over-widens the clean diagonal).
     # The 6-HR resolution floor is a SEPARATE error source (not in emu_var) → always full-matrix.
     shape_terms = []
     if mf_shape_cov is not None:

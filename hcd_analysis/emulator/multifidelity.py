@@ -412,7 +412,8 @@ class MultiFidelity(eqx.Module):
     This is the rho(k,z)-ONLY model -- the learned MLP delta-head is REMOVED from the
     default path because it OVER-FITS the theta-gradient on 6 HF sims (a large n_s
     Fisher bias; the LF->HF correction is dominated by the fixed resolution tilt, with a
-    small theta-departure).  rho(k,z)-only cures it (much smaller n_s and A_p Fisher biases).
+    small theta-departure).  rho(k,z)-only cures it (a much smaller n_s Fisher bias; the best A_p
+    result of the heads tested).
 
     The trainable submodule is held in ``delta_head`` and selected by
     ``delta_mode`` (carried as a STATIC field, informational):
