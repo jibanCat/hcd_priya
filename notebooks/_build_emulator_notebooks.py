@@ -20,6 +20,26 @@ NB_DIR = Path(__file__).resolve().parent
 KERNEL = {"name": "emu-jax", "display_name": "emu-jax", "language": "python"}
 
 
+HISTORICAL_BANNER_TRAINING = (
+    '> **Historical tutorial (pre-2026-10 emulator interfaces).** This notebook predates the 2026 k-grid fix',
+    '> (`docs/kgrid_incident_2026-10.md`) and is kept as a record, not as a supported workflow. Its stored outputs',
+    '> come from the pre-2026-10 emulator.',
+    '> It uses `multifidelity.load_lf_backbone` (retired: it cannot load schema-2.0 checkpoints) and logic ported from',
+    '> `scripts/plot_performance_walkthrough.py` and `scripts/diag_ap_fisher_bias.py`, which label emulator output with',
+    '> a single velocity grid (row 0, or a median over rows). The coordinate-correct prediction path is',
+    '> `hcd_analysis.emulator.predict.predict_on_physical_grid` and `hcd_analysis.emulator.forward.predict_leg`.',
+)
+
+HISTORICAL_BANNER_PLOTTING = (
+    '> **Historical tutorial (pre-2026-10 emulator interfaces).** This notebook predates the 2026 k-grid fix',
+    '> (`docs/kgrid_incident_2026-10.md`) and is kept as a record, not as a supported workflow. Its stored outputs',
+    '> come from the pre-2026-10 emulator.',
+    '> It imports `scripts/plot_performance_walkthrough.py`, which labels emulator output with a single velocity grid',
+    '> (row 0). The coordinate-correct prediction path is `hcd_analysis.emulator.predict.predict_on_physical_grid`',
+    '> and `hcd_analysis.emulator.forward.predict_leg`.',
+)
+
+
 def md(*lines):
     return new_markdown_cell("\n".join(lines))
 
@@ -38,7 +58,7 @@ def finalize(nb):
 # NOTEBOOK 1 — TRAINING
 # ============================================================================ #
 def build_training_nb():
-    cells = []
+    cells = [md(*HISTORICAL_BANNER_TRAINING)]
 
     cells.append(md(
         "# Phase-2b Lyα P1D emulator — Notebook 1: how to train",
@@ -430,7 +450,7 @@ def build_training_nb():
 # NOTEBOOK 2 — PLOTTING / PERFORMANCE WALKTHROUGH
 # ============================================================================ #
 def build_plotting_nb():
-    cells = []
+    cells = [md(*HISTORICAL_BANNER_PLOTTING)]
 
     cells.append(md(
         "# Phase-2b Lyα P1D emulator — Notebook 2: performance walkthrough",

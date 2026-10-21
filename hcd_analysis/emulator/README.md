@@ -4,6 +4,15 @@ This is the emulator at the centre of the Lyman-α cosmology analysis. The docum
 it does, why it is built the way it is, and how to **use the deployed ensemble** and how to
 **rebuild it from scratch**.
 
+> **Status, 2026-10 (read first).** Most of this document predates the 2026 k-grid fix
+> (`docs/kgrid_incident_2026-10.md`). The coordinate contract (sections on `kfkms`, `k_com_hmpc` and the top
+> stored mode) is current. The descriptions of the multi-fidelity layer `multifidelity.py` (`FixedMeanHead`),
+> `build_legb_ctx(with_mf=...)`, `checkpoints/error_vector.npz` and `scripts/plot_performance_walkthrough.py`,
+> and the numbers and figures produced with them, document the pre-2026-10 emulator and are kept as a record,
+> not as supported workflows. The coordinate-correct path is `kcoord.py`, `predict.predict_on_physical_grid`,
+> `mf_modes.py` (the mode-by-mode MF correction) and `forward.predict_leg`; the production members are pinned by
+> `checkpoints/production_ensemble_manifest.json`.
+
 > **New here? Read the [Overview](#overview) first** (it says, in plain terms, what the emulator is
 > and why it exists), then come back for the provenance details below. The Stamp and the
 > deployed-object note are bookkeeping aimed at a returning expert, not a starting point; every term
