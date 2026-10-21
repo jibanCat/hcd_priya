@@ -27,10 +27,12 @@ scores each on the fold-0 coherent-vs-CV split + A_p/ns Fisher-bias + deployed
 medians, then MULTI-FOLD validates the winner. Reuses the diag scoring from
 scripts/diag_ap_fisher_bias.py and diag_theta_tracking_honest.py.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/push_residual_refine.py [opts]
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import json
@@ -56,9 +58,9 @@ from hcd_analysis.emulator.model import (
 )
 from hcd_analysis.emulator import train as T
 
-CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-OUT = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
-CKPT_DIR = "/home/mfho/hcd_priya/checkpoints"
+CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+OUT = f"{_REPO_ROOT}/figures/analysis/04_emulator"
+CKPT_DIR = f"{_REPO_ROOT}/checkpoints"
 CV_JSON = f"{OUT}/diag_lfhf_tilt_and_cv.json"
 CLS = ("clean", "LLS", "subDLA", "DLA")
 PARAMS = ("ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2",
@@ -554,7 +556,7 @@ def run_recipe(d, fold, n_k, *, n_basis, term_w, edge_gain, lowk_extra,
     tr, va, ho = make_splits(d, fold, n_folds=8, holdout_frac=0.15)
     k_w_resid = None
     if edge_gain != 0.0 or lowk_extra != 0.0:
-        k_w_resid = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=edge_gain,
+        k_w_resid = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=edge_gain,
                                            lowk_extra=lowk_extra)
     k_w_coh = None
     if w_coh > 0 and coh_flat:
@@ -564,7 +566,7 @@ def run_recipe(d, fold, n_k, *, n_basis, term_w, edge_gain, lowk_extra,
         # it as flat anyway; an explicit ones array keeps the intent legible.
         k_w_coh = jnp.ones(n_k)[None, None, :]
     elif w_coh > 0 and (coh_edge_gain != 0.0 or coh_lowk_extra != 0.0):
-        kwc = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=coh_edge_gain,
+        kwc = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=coh_edge_gain,
                                      lowk_extra=coh_lowk_extra)
         k_w_coh = jnp.asarray(kwc)[None, None, :]
     t0 = time.time()
