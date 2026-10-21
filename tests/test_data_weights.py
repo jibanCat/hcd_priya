@@ -1,5 +1,5 @@
 """Gate A, task 5: the training edge-emphasis weight is a function of the comoving modes only.
-Incident: hcd_priya_notes docs/superpowers/emulator-paper-history/2026-10-05-INCIDENT-kgrid-representation-regression.md"""
+Incident: docs/kgrid_incident_2026-10.md"""
 import numpy as np
 import pytest
 

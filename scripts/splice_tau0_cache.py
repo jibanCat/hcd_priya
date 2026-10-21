@@ -1,7 +1,6 @@
 """Splice rebuilt (sim, snap) groups into a tau0 cache, and audit two caches group by group.
 
-Used for the S4/F8 repair (emulator-debug campaign 2026-10; spec hcd_priya_notes
-docs/superpowers/emulator-debug-2026-10/gateB/S4_REPAIR_SPEC.md): the historical cache is never modified; a NEW file is
+Used for the S4/F8 repair (emulator-debug campaign 2026-10; internal spec S4_REPAIR_SPEC): the historical cache is never modified; a NEW file is
 written in which named groups are removed and the groups of freshly built shards are inserted, in the canonical
 (sim, snap) order the builder produces, with snap_group_idx recomputed. `cache_delta` compares two caches by identity
 (row = (sim, z_grid, alpha_idx); snapshot block = (sim, snap)) so position shifts are not mistaken for changes.

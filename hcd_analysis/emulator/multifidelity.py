@@ -26,8 +26,8 @@ where
                      This is critical in the few-6-HF-sim regime: with rho==1 the
                      delta head must learn the whole coherent high-k tilt AND its
                      theta-dependence from 5 LOSO sims and over-attributes it to n_s
-                     (n_s Fisher bias ~14 sigma); with rho = mean log-ratio the n_s
-                     bias drops to ~2 sigma (see scripts/build_mf_delta.py). rho==1
+                     (a large n_s Fisher bias); with rho = mean log-ratio the n_s
+                     bias drops strongly (see scripts/build_mf_delta.py). rho==1
                      (delta carries everything) is available via ``--no-rho``.
   * ``res_corr``  -- a FIXED, parameter-independent particle-convergence factor
                      (L15n512 / L15n384), 15z x 59k, applied MULTIPLICATIVELY on the
@@ -410,10 +410,9 @@ class MultiFidelity(eqx.Module):
     where ``rho(k,z) = log_rho(k) + gbar(z,k)-correction`` is the FIXED per-(k,z)
     mean LF->HF log-ratio (THETA-INDEPENDENT: ALL theta-dependence lives in f_LF).
     This is the rho(k,z)-ONLY model -- the learned MLP delta-head is REMOVED from the
-    default path because it OVER-FITS the theta-gradient on 6 HF sims (n_s Fisher
-    bias 4 sigma; the LF->HF correction is 94-95% fixed resolution tilt, only ~5%
-    theta-departure).  rho(k,z)-only cures it (worst |n_s|~2 sigma, |A_p|~1.4 sigma --
-    best for A_p, the priority param).
+    default path because it OVER-FITS the theta-gradient on 6 HF sims (a large n_s
+    Fisher bias; the LF->HF correction is dominated by the fixed resolution tilt, with a
+    small theta-departure).  rho(k,z)-only cures it (much smaller n_s and A_p Fisher biases).
 
     The trainable submodule is held in ``delta_head`` and selected by
     ``delta_mode`` (carried as a STATIC field, informational):
@@ -423,7 +422,7 @@ class MultiFidelity(eqx.Module):
                         theta-correction, for users wanting a weak theta term WITH an
                         A_p-direction prior; sweep variant (b)).
       * ``'mlp'``    -- ``DeltaHead``: the over-fit learned MLP (kept for diagnostics
-                        / ablation ONLY -- NOT recommended; n_s Fisher bias 4 sigma).
+                        / ablation ONLY -- NOT recommended: large n_s Fisher bias).
     All three share the ``(cond, basis) -> (n_classes, K)`` head interface so the
     forward (``g``) is identical; only the head's functional form differs.
 

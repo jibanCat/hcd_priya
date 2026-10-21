@@ -92,7 +92,7 @@ def test_ensemble_predict_P_obs_differentiable():
 def _schema2_members(tmp_path, n=3, n_k=12):
     """n synthetic schema-2.0 checkpoints sharing one cache and one norm (only the init key differs).
     The pre-2026-10 production checkpoints are schema v1 and are refused by load_checkpoint by design
-    (incident note 2026-10-05-INCIDENT-kgrid-representation-regression)."""
+    (docs/kgrid_incident_2026-10.md)."""
     from tests.emulator._fixture import write_synthetic_cache
     from hcd_analysis.emulator.data import load_cache, fit_target_norm
     from hcd_analysis.emulator.train import save_checkpoint

@@ -1,6 +1,6 @@
 """HISTORICAL FIXTURE (test-only): the pre-2026-10 single-grid forward, moved verbatim from
-hcd_analysis/emulator/data_likelihood.py at gate E (emulator-debug campaign 2026-10; spec GATE_E_SPEC.md v1 and the
-incident note 2026-10-05-INCIDENT-kgrid-representation-regression in the notes repository).
+hcd_analysis/emulator/data_likelihood.py at gate E (emulator-debug campaign 2026-10; see
+docs/kgrid_incident_2026-10.md).
 
 These functions place every emulator mode on ONE velocity grid ``cache_k`` for every (z, theta); that is the defect
 of the incident. They are kept only as (a) the equivalence reference of the gate E forward (fed each z's own grid,
@@ -108,7 +108,7 @@ def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_
 # ============================================================================ #
 #  MF C_emu floor (LF→HR generalization + n_s-edge extrapolation), T4/T5b.
 #
-#  The spec (hcd_priya_notes/docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md) sizes a
+#  The (internal) MF C_emu floor spec sizes a
 #  z-resolved, per-band ADDITIVE diagonal variance term that inflates C_emu on the
 #  SMALL-SCALE leg(s) to cover the residual the FIXED θ-blind MF correction leaves
 #  AFTER it is applied (the LF→HR generalization error), plus a SEPARATE n_s-edge
@@ -222,7 +222,7 @@ def _mf_floor_var_on_k(floor: MFFloor, z, k_sub, P_obs_sub, ns):
 #  The diagonal floor above (_mf_floor_var_on_k) inflates each (z,k) cell
 #  INDEPENDENTLY. Phase-5a Test B (the genuine HF-LOSO closure) showed the LF→HR
 #  resolution residual is a COHERENT k-tilt (78% rank-1, coherent across z) that
-#  biases n_s up to +2.8σ — a CORRELATED structure a diagonal floor cannot absorb
+#  biases n_s — a CORRELATED structure a diagonal floor cannot absorb
 #  without grossly over-inflating every cell. The shape floor adds the measured
 #  per-held-out-sim LOSO-eps OUTER-PRODUCT as a (low-rank) covariance:
 #
@@ -374,8 +374,8 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
          ``leg.metals_on`` / ``leg.resolution_on`` (default OFF);
       3. ``jnp.interp`` P_obs from ``cache_k`` onto this z's leg-k subset (differentiable; the
          emulator P_obs(k) is smooth → linear interp to bin-CENTRE; see CS-REVIEW);
-         PRE-2026-10 INTERFACE: a single ``cache_k`` for every (z, theta) is the defect of the incident note
-         2026-10-05-INCIDENT-kgrid-representation-regression; replaced at gate E by kcoord.KGrid / EmulatorPrediction.
+         PRE-2026-10 INTERFACE: a single ``cache_k`` for every (z, theta) is the defect described in
+         docs/kgrid_incident_2026-10.md; replaced at gate E by kcoord.KGrid / EmulatorPrediction.
       4. interp the per-k emu variance (``_emu_var_on_cache``) onto the leg k → diag(C_emu).
 
     Returns the FLAT (z-major) (P_model, C_total) with C_total = C_data + diag(C_emu).
@@ -407,7 +407,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     or a high-k DESI row above the LF Nyquist), the LF→HR generalization floor + the
     n_s-edge extrapolation budget are ADDED to the C_emu diagonal in variance units:
     ``emu_var(k,z) += (σ_floor(z,band(k))·P_obs)² + (σ_edge(z,band(k);ns)·P_obs)²``
-    (spec hcd_priya_notes/docs/superpowers/onboarding/2026-06-08-mf-cemu-floor-spec.md §2.3/§4.2). The
+    (internal MF C_emu floor spec, sections 2.3 and 4.2). The
     floor is a FIXED θ-blind data-side table; the edge term's ns-dependence is
     stop_gradient'd → it widens the posterior, it cannot bias the MAP. The floor is applied
     on the leg z's via 1-D interp/clamp of σ_floor(z,·); the legs only reach z≤4.6 so the
@@ -442,7 +442,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
 
     ``alpha_hcd`` is ``(n_z,3)`` z-RESOLVED per-z incidence (the DEPLOYED forward) or a ``(3,)`` z-flat
     triple broadcast to all z. A z-flat alpha on a MULTI-z leg, COMPARED to a z-resolved truth, fakes a
-    spurious z-ramp -- the recurring z-flat bug that once faked a +5.5 sigma n_s. So any COMPARISON path
+    spurious z-ramp -- the recurring z-flat bug that once faked a large n_s shift. So any COMPARISON path
     (loglik / C_emu sizing / residual diagnostics) MUST build alpha via
     ``closure_legb_figs._truth_alpha_zresolved_on_leg`` and pass ``require_zresolved=True``; the comparison
     core ``_data_loglik_legcore`` DEFAULTS ``require_zresolved=True`` so the loglik / SBC re-scoring layer is
@@ -457,8 +457,8 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     # ===================== z-FLAT-ALPHA BUG CLASS (read before writing a diagnostic) =====================
     # A (3,) z-FLAT alpha is SILENTLY broadcast to EVERY z (ndim==1 -> the same incidence at all z). On a
     # MULTI-z leg, comparing that z-flat forward to a z-RESOLVED truth (per-z HCD incidence w_c rises ~3.5x
-    # over z) manufactures a spurious z-ramp -- it once faked a PHANTOM +5.5 sigma n_s (a z-flat C_emu /
-    # walkthrough DIAGNOSTIC vs the deployed z-resolved forward; the real bias was +0.6 sigma). The raw
+    # over z) manufactures a spurious z-ramp -- it once faked a PHANTOM n_s shift (a z-flat C_emu /
+    # walkthrough DIAGNOSTIC vs the deployed z-resolved forward; the real bias was much smaller). The raw
     # forward STAYS permissive (byte-identity uniform-alpha references legitimately pass a (3,) alpha). The
     # RULE that keeps the bug dead lives one level up: EVERY code path that COMPARES this forward to a
     # z-resolved truth (loglik / C_emu sizing / residual diagnostics) MUST
@@ -475,7 +475,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
             f"predict_P_obs_on_leg(require_zresolved=True): alpha_hcd must be z-RESOLVED (n_z,3), got "
             f"ndim={alpha_hcd.ndim} shape={tuple(alpha_hcd.shape)}. A (3,) z-flat alpha would be broadcast "
             f"to every z and produce a spurious z-ramp vs the z-resolved truth (the recurring z-flat bug; "
-            f"once a phantom +5.5 sigma n_s). Build alpha via _truth_alpha_zresolved_on_leg.")
+            f"once a phantom n_s shift). Build alpha via _truth_alpha_zresolved_on_leg.")
     # PER-LEG DLA-forward scaling (§0c): the sampled α_DLA's DLA-excess contribution is scaled by
     # leg.dla_forward_frac (DESI 1.0 → full residual; KS 0.0 → the forward DLA term is 0, matching
     # the 0% KS closure target). We fold the per-leg fraction into the DLA component of α so BOTH
@@ -597,7 +597,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
         # (∝ P_model²) lets the fit inflate its own error in the coherent-tilt direction by
         # moving a parameter — a θ-dependent-covariance pathology that, for a rank-1 off-diagonal
         # mode, made the n_s posterior SHRINK and the MAP drift AWAY from truth (validation:
-        # live-P infl1.0/1.5/2.0 → ns +3.2/+3.5/+3.7σ, worse than the +2.8σ baseline, σ shrinking
+        # live-P inflation made the n_s bias grow with the inflation, worse than the baseline, σ shrinking
         # — impossible for a fixed PSD add, hence diagnostic of the θ-dependence). A fixed fiducial
         # makes each term a CONSTANT matrix ⇒ adding it can only WIDEN the marginal (PSD
         # monotonicity) and the MAP de-biases per the linear GLS analysis.

@@ -1,6 +1,5 @@
 """Cache and checkpoint SCHEMA: every key carries a class; collapsing a per-row key is an error.
-Boundary of the 2026 k-grid representation regression; see hcd_priya_notes
-docs/superpowers/emulator-paper-history/2026-10-05-INCIDENT-kgrid-representation-regression.md."""
+Boundary of the 2026 k-grid representation regression; see docs/kgrid_incident_2026-10.md."""
 from __future__ import annotations
 
 from dataclasses import dataclass

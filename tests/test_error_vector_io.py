@@ -1,5 +1,5 @@
 """Gate A, task 6: error-vector products are labelled by the comoving modes and carry a schema version.
-Incident: hcd_priya_notes docs/superpowers/emulator-paper-history/2026-10-05-INCIDENT-kgrid-representation-regression.md"""
+Incident: docs/kgrid_incident_2026-10.md"""
 import numpy as np
 import pytest
 

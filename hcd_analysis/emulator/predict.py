@@ -120,7 +120,7 @@ def predict_P_obs(model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_core):
 
 class EmulatorPrediction(NamedTuple):
     """The ONE object downstream physics consumes: every array is defined on the same k_skm (angular s/km),
-    derived for this request's (z, theta) by kcoord.py (incident note 2026-10-05-INCIDENT-kgrid-representation-regression)."""
+    derived for this request's (z, theta) by kcoord.py (docs/kgrid_incident_2026-10.md)."""
     k_skm: jnp.ndarray
     P_filt: jnp.ndarray
     P_obs: jnp.ndarray

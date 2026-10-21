@@ -8,7 +8,7 @@ hcd_analysis.priya_p1d) at each of N alpha-slope values to produce both:
            Tier P's mean-flux normalisation (scale + target_F).
 The CDDF / dN/dX are tau0-invariant and stored once per (sim, snap).
 
-See hcd_priya_notes/docs/superpowers/specs/2026-05-17-phase2-hcd-emulator-design.md.
+Design: the internal phase-2 HCD emulator design spec.
 
 Usage:
     python3 scripts/build_emulator_cache_tau0.py \
@@ -72,7 +72,7 @@ def _assert_class_edges() -> None:
 # offset particle-snapshot list): ns0.907 snap_017 holds the z = 3.0 file's catalogue (meta says 2.799998) and snap_018
 # the z = 2.8 file's (meta says 2.673742). Their label is corrected here and verified against the raw header at use.
 # History: a 2026-06-01 fix re-pointed only the TAU of snap 17 to SPECTRA_018, leaving the z = 3.0 catalogue on z = 2.8
-# rows (finding F8, emulator-debug campaign 2026-10; spec gateB/S4_REPAIR_SPEC.md in the notes repository).
+# rows (finding F8, emulator-debug campaign 2026-10; internal spec S4_REPAIR_SPEC).
 _PHASE1_Z_OVERRIDE = {
     ("ns0.907", 17): 3.0,
     ("ns0.907", 18): 2.8,
@@ -257,7 +257,7 @@ def select_pairs(pairs, selectors):
 # slightly off (e.g. 4.600013). For bit-compatibility with PRIYA's training
 # data the mean-flux model must use the GRID z, not the snapshot's exact z
 # (obs_mean_tau ∝ (1+z)^3.65; an off-grid z gives a ~1e-5 P1D bias — see
-# hcd_priya_notes/docs/superpowers/2026-05-20-priya-p1d-consistency-check.md §6c).
+# the internal PRIYA P1D consistency check, section 6c).
 def _snap_z_to_priya_grid(z):
     """Round a snapshot redshift to PRIYA's zout grid (nearest multiple of 0.2)."""
     return round(float(z) / 0.2) * 0.2
@@ -277,7 +277,7 @@ def _read_tau(raw_tau_path, n_skewers=None):
 # /Mpc. They are the same amplitude at different pivots:
 #   Ap = As * (k_p / k_0)^(ns - 1),  with k_p/k_0 = (pi/4)/0.05 = 5*pi.
 # Verified to machine precision against PRIYA's params array across the LF
-# grid (sim 0/29/44). See hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER_2026_05_20.md.
+# grid (sim 0/29/44).
 _AP_PIVOT_RATIO = 5.0 * np.pi  # k_p/k_0
 
 

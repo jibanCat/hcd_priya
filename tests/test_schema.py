@@ -1,5 +1,5 @@
 """Gate A, task 1 and 3: cache schema registry, collapse guard, validated GLOBAL_STATIC k_com.
-Incident: hcd_priya_notes docs/superpowers/emulator-paper-history/2026-10-05-INCIDENT-kgrid-representation-regression.md"""
+Incident: docs/kgrid_incident_2026-10.md"""
 import os
 
 import numpy as np

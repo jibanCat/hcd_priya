@@ -7,7 +7,7 @@ on the cache's own 172 angular-k grid (the sim/closure path); THIS module binds 
 emulator forward model to the OBSERVED survey grids (DESI 85 angular-k × 12 z, KS 13
 angular-k × 14 z), applying the published cuts + covariances.
 
-Contract (per ``hcd_priya_notes/docs/superpowers/2026-06-05-desi-dr1-p1d-usage.md``):
+Contract:
 
   per leg ``DataLeg``:  z (Nz,), k (Nz*Nk flat or (Nz,Nk)), P_data (N,), C_data (N,N),
                         R_z (Nz,) resolution, plus systematic-model flags.
@@ -73,10 +73,8 @@ DESI_KMIN = 1e-3
 #  Both WIDEN the low-k covariance to match the published DESI DR1 cosmology
 #  analysis (Chaves-Montero arXiv:2601.21432) + the eBOSS PRIYA analysis
 #  (Fernandez+2024 arXiv:2309.03943). Neither de-biases the forward; they soften
-#  the +5.5σ low-k n_s pull computed against the currently-deployed covariance.
+#  the low-k n_s pull found against the currently-deployed covariance.
 #  Both are ENV-GATED and REVERSIBLE (unset → byte-identical to the deployed path).
-#  See hcd_priya_notes/docs/superpowers/2026-06-18-{desi-p1d-lowk-data-reliability,
-#  cosmic-variance-floor-lowk}.md (notes repo).
 # ----------------------------------------------------------------------------#
 #  Fix 1 — DESI SNR>3 measurement + covariance (the cosmology-paper baseline).
 #  The Chaves-Montero DR1 cosmology fit uses the SNR>3 subsample (62,807 QSO) with
@@ -207,7 +205,7 @@ class DataLeg(NamedTuple):
     # whether this leg's R_z is trustworthy for a spectral-resolution INJECTION (option-b / the Gate-B
     # resolution arm). DESI/eBOSS: True (R_z exact / order-correct proxy). KS: False -- load_ks_leg reuses
     # the DESI pixel proxy R_z, ~7-15x too large vs KS's echelle sigma~3.2 km/s, so a b_res injection is a
-    # ~70% distortion the forward cannot fit (the -21sigma ESS collapse). Gate the injection on THIS flag,
+    # large distortion the forward cannot fit (an ESS collapse). Gate the injection on THIS flag,
     # NOT resolution_on (option-a injects with resolution_on=False). Default True (back-compatible).
     resolution_ready: bool = True
     # ARM-D bookkeeping: the covariance carries a COHERENT cross-z resolution mode (resolution removed the
@@ -415,12 +413,11 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
     "first-4-bins error underestimate" caution is MISLEADING — those low-k bins are ALWAYS kept,
     there is NO low-k KS drop) + cut k ≤ k_max, which must be given explicitly (production 0.065; the single-grid
     default 0.069 was retired at gate E: the forward refuses any bin outside the simulated modes).
-    ``z_lo`` defaults to **2.4** (drops the z=2.0+2.2 KS bins, which carried ~86% of a −0.65σ
-    coherent n_s closure bias; dropping z<2.4 removes it → +0.04σ). z=2.4 is the MINIMAL
+    ``z_lo`` defaults to **2.4** (drops the z=2.0+2.2 KS bins, which carried most of a coherent
+    n_s closure bias in mock closure tests; dropping z<2.4 removes it). z=2.4 is the MINIMAL
     closure-clean cut; low-z KS P1D is compromised by DLA-finder incompleteness, and the
     published KODIAQ-SQUAD analysis uses the more conservative z<2.8 — set ``z_lo=2.8`` for that
     (opt-in). PI decision 2026-06-08 = 2.4 default.
-    See hcd_priya_notes/docs/superpowers/plans/2026-06-08-ns-bias-rootcause-diagnostics-plan.md.
 
     metals_on=False / resolution_on=False by default: KS conservative mode already SUBTRACTS
     metals/continuum/resolution + inflates its covariance, so re-applying the SiIII/resolution
@@ -437,7 +434,7 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
 
     # DEFAULT (resolution_float=False): KS has no echelle R_z in this file, so the DESI pixel proxy is a
     # placeholder for the (OFF) resolution knob (R_z unused when resolution_on=False), and resolution_ready
-    # stays False -- a resolution INJECTION against the ~15x-too-large proxy is un-fittable (the -21sigma
+    # stays False -- a resolution INJECTION against the ~15x-too-large proxy is un-fittable (an ESS
     # collapse); the injection guard reads this flag. BYTE-IDENTICAL to the historical KS leg.
     #
     # resolution_float=True (task #5 V1, option-b): give KS its OWN echelle R_z (ks_resolution_R = 3.2 km/s)

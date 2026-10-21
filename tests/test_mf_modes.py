@@ -1,5 +1,5 @@
-"""Gate D: the LF->HF correction measured mode by mode at equal physical k (spec hcd_priya_notes
-docs/superpowers/emulator-debug-2026-10/GATE_D_SPEC.md). Synthetic inputs; no caches."""
+"""Gate D: the LF->HF correction measured mode by mode at equal physical k (internal spec
+GATE_D_SPEC). Synthetic inputs; no caches."""
 import numpy as np
 import pytest
 

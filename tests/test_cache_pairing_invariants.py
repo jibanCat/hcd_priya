@@ -1,5 +1,5 @@
 """Cache-builder pairing invariants (S4 / F8 repair, emulator-debug campaign 2026-10; spec
-hcd_priya_notes docs/superpowers/emulator-debug-2026-10/gateB/S4_REPAIR_SPEC.md).
+internal spec S4_REPAIR_SPEC).
 
 Every Phase-1 catalogue directory snap_NNN was built on raw SPECTRA_NNN (same index). The builder pairs them by that
 identity, takes the redshift label from the catalogue meta except for an enumerated table of mislabelled directories

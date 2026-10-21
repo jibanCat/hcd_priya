@@ -33,9 +33,9 @@ index order 0..4), not by digest: a digest cannot distinguish a norm mis-pair.
 
 ## How it was produced
 
-Gate C of the emulator-debug campaign (PU-0056/PU-0057): `scripts/train_production_emulator.py --seed S` for
+Gate C of the emulator-debug campaign: `scripts/train_production_emulator.py --seed S` for
 S = 0..4 (all-simulations training, no leave-one-out holdout; the leave-one-out runs are validation and emulator-error
-sources only), run by the notes batch `gateC/batch_gateC_train_01ad2ff.sbatch` from a git-archive export of commit
+sources only), run by a batch script from a git-archive export of commit
 01ad2ff (so each meta carries `git_sha` null; the gate C reviewer verified the export; see the directory's
 `MANIFEST_README.txt`). The training config per member is in `prod_repaired_seed<i>.meta.json` (digest-pinned in the
 manifest; schema 2.0, cache sha256, k_com) and the history in `prod_repaired_seed<i>.hist.json` beside it.

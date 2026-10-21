@@ -34,7 +34,7 @@ import os
 # The production member basename prefix. This is the ONLY prefix the loader accepts; there is
 # deliberately NO glob/prefix argument (an "alternate ensemble" cannot be swapped in by pointing
 # a glob elsewhere -- replacement means regenerating the manifest, see the README).
-PROD_BASENAME = "prod_repaired_seed"          # gate E (PU-0067): the repaired-cache gate C members
+PROD_BASENAME = "prod_repaired_seed"          # gate E: the repaired-cache gate C members
 N_PROD_MEMBERS = 5
 MANIFEST_BASENAME = "production_ensemble_manifest.json"
 MANIFEST_SCHEMA_VERSION = 2                    # v2: schema-2.0 members of one training cache, directory named

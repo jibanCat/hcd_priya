@@ -1,5 +1,5 @@
-"""Gate A blocking tests BT1-BT6 requested by the gate A blind review (notes: docs/superpowers/emulator-debug-2026-10/
-reviews/gate_A/gate_A_review.md, section 11). Each failed against c99ce88."""
+"""Gate A blocking tests BT1-BT6 requested by the gate A blind review (internal gate A
+review record, section 11). Each failed against c99ce88."""
 import json
 
 import jax

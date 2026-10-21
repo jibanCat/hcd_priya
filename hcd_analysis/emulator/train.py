@@ -321,8 +321,8 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
       flat_w80; default 0 OFF, set ~80 for production). Adds
       ``w_coh·coherent_debias_term`` to the joint loss — penalizes the per-(z,τ₀)-cell
       θ-mean of the residual fit error (UNIFORM in k), flattening the coherent low-k
-      tilt the per-sim MSE leaves free. Drives gate failures 3/8→1/8, ns RMS
-      0.182→0.133σ (jax-traps #24). When >0 the early-stop metric folds it in
+      tilt the per-sim MSE leaves free (it reduced the coherent n_s error in the
+      internal gate tests). When >0 the early-stop metric folds it in
       (resid + coh) so the stop tracks both.
     - ``datarange`` (bool): SOFT down-weight out-of-range (z∉[2.2,4.6] OR k<1e-3) bins
       by ~0.2 in the P_filt-channel loss terms (keeps z>4.6's regularizing signal but
@@ -689,8 +689,8 @@ def save_checkpoint(path, model, arch_cfg, norm_stats, seed, *, cache, cache_pat
 
     ``cache`` is the loaded cache dict the model was trained on. The meta records the VALIDATED comoving modes
     ``k_com_hmpc`` (GLOBAL_STATIC, schema.py) and the coordinate convention; it never stores a velocity grid,
-    because the bins' s/km values depend on (z, theta) and are derived at prediction time (kcoord.py; incident
-    note 2026-10-05-INCIDENT-kgrid-representation-regression).
+    because the bins' s/km values depend on (z, theta) and are derived at prediction time (kcoord.py;
+    docs/kgrid_incident_2026-10.md).
 
     REPRODUCIBILITY (Phase-2b PR-prep): the stored ``arch_cfg`` is COMPLETED from the
     model's own static fields (``_arch_cfg_from_model`` — adds baseline_n_layers/
@@ -741,7 +741,7 @@ def load_checkpoint(path):
         raise SchemaCollapseError(
             f"checkpoint {path} has schema {meta.get('schema_version')!r}, expected {CHECKPOINT_SCHEMA_VERSION}: "
             "pre-2026-10 checkpoints carry a single velocity grid (kfkms) and are not loadable; see "
-            "docs/superpowers/emulator-paper-history/2026-10-05-INCIDENT-kgrid-representation-regression.md")
+            "docs/kgrid_incident_2026-10.md")
     missing = [k for k in _SCHEMA2_REQUIRED if meta.get(k) is None]
     if missing:
         raise SchemaCollapseError(f"checkpoint {path}: schema-2.0 meta lacks {missing}")

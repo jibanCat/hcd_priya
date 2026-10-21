@@ -411,7 +411,7 @@ def test_load_checkpoint_refuses_schema_v1(tmp_path):
     meta["kfkms"] = [float(v) for v in d["kfkms"][0]]           # the pre-2026-10 layout
     with open(prefix + ".meta.json", "w") as f:
         json.dump(meta, f)
-    with pytest.raises(S.SchemaCollapseError, match="2026-10-05-INCIDENT"):
+    with pytest.raises(S.SchemaCollapseError, match=r"docs/kgrid_incident_2026-10\.md"):
         load_checkpoint(prefix)
 
 

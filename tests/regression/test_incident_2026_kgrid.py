@@ -1,5 +1,5 @@
 """Isolated reproduction of the 2026 k-grid representation regression (NOT used by production code).
-History: hcd_priya_notes docs/superpowers/emulator-paper-history/2026-10-05-INCIDENT-kgrid-representation-regression.md"""
+History: docs/kgrid_incident_2026-10.md"""
 import os
 
 import numpy as np

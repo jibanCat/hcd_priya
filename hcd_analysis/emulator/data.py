@@ -45,8 +45,8 @@ PARAM_LIMITS = np.array([
 # sparse in the widened corners: the Bird+2023 LHS densely sampled only the ORIGINAL coarse_grid.py
 # box, and the widening (ns_hi 0.995->1.05, herei_hi 4.1->4.5, heref_lo 2.6->2.2, alphaq_hi
 # 2.5->3.0) added only a few design points. The held-out emulator EXTRAPOLATES badly there —
-# Phase-4b closure: a mock at alphaq=2.98 recovered A_p +3.7sigma, at herei=4.46 +2.0sigma (both
-# OUTSIDE the original box), and the bias equalled the standalone emulator-LOSO Fisher bias (pure
+# Phase-4b closure: mocks at alphaq and herei values OUTSIDE the original box recovered strongly
+# biased A_p, and the bias equalled the standalone emulator-LOSO Fisher bias (pure
 # emulator edge error, not a likelihood/HCD effect). So NUTS samples the IGM params (herei, heref,
 # alphaq) only over their ORIGINAL PRIYA ranges — NO retrain (the emulator box is unchanged; we
 # just do not FIT at its corners). n_s is KEPT extended to 1.05 (PI 2026-06-08: the real n_s may
@@ -135,7 +135,7 @@ def _collapse_p1d(p15, counts15):
 
 def load_cache(path, *, validate=True):
     """Load a v3.3 cache. ``kfkms`` is PER_ROW (each row's own velocity grid); the validated GLOBAL_STATIC
-    comoving modes are exposed as ``k_com_hmpc`` (schema.py; incident note 2026-10-05-INCIDENT-kgrid-representation-regression)."""
+    comoving modes are exposed as ``k_com_hmpc`` (schema.py; docs/kgrid_incident_2026-10.md)."""
     with h5py.File(path, "r") as h:
         assert h.attrs["cache_version"] == "3.3", h.attrs.get("cache_version")
         g = lambda k: h[k][:]

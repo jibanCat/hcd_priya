@@ -1,5 +1,5 @@
 """Error-vector (C_emu sigma / rho) product I/O under checkpoint schema 2.0: labelled by comoving modes, never by
-a velocity grid. See hcd_priya_notes docs/superpowers/emulator-paper-history/2026-10-05-INCIDENT-kgrid-representation-regression.md."""
+a velocity grid. See docs/kgrid_incident_2026-10.md."""
 import numpy as np
 
 from .schema import CHECKPOINT_SCHEMA_VERSION, SchemaCollapseError

@@ -1,5 +1,5 @@
-"""S4/F8 repair: historical vs repaired LF cache, the PRE-SPECIFIED expected delta (hcd_priya_notes
-docs/superpowers/emulator-debug-2026-10/gateB/S4_REPAIR_SPEC.md section 4, recorded in PU-0041 before any build).
+"""S4/F8 repair: historical vs repaired LF cache, the PRE-SPECIFIED expected delta (internal spec
+S4_REPAIR_SPEC section 4, recorded in PU-0041 before any build).
 
 observables_tau0_lf_hist.h5 = the historical cache (hashed campaign input, untouched); observables_tau0_lf.h5 = the
 repaired cache (the production LF cache from the repair on). Any difference outside the footprint fails here."""

@@ -1,6 +1,5 @@
 """THE canonical physical k coordinate of the emulator: k_skm(z, theta). Nothing downstream may invent another.
-Boundary of the 2026 k-grid representation regression; see hcd_priya_notes
-docs/superpowers/emulator-paper-history/2026-10-05-INCIDENT-kgrid-representation-regression.md."""
+Boundary of the 2026 k-grid representation regression; see docs/kgrid_incident_2026-10.md."""
 from __future__ import annotations
 
 from typing import NamedTuple

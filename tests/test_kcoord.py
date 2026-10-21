@@ -1,5 +1,5 @@
 """Gate A, task 2: the canonical physical k coordinate k_skm(z, theta).
-Incident: hcd_priya_notes docs/superpowers/emulator-paper-history/2026-10-05-INCIDENT-kgrid-representation-regression.md"""
+Incident: docs/kgrid_incident_2026-10.md"""
 import os
 
 import jax

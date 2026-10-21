@@ -1,5 +1,5 @@
-"""Cache splicing and the historical-vs-repaired delta audit (S4/F8 repair; spec hcd_priya_notes
-docs/superpowers/emulator-debug-2026-10/gateB/S4_REPAIR_SPEC.md sections 3-4). Synthetic caches with the production key
+"""Cache splicing and the historical-vs-repaired delta audit (S4/F8 repair; internal spec
+S4_REPAIR_SPEC sections 3-4). Synthetic caches with the production key
 layout (the merge script's key lists); no fake_spectra."""
 import json
 import sys

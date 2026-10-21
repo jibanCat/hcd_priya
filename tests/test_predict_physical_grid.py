@@ -1,5 +1,5 @@
 """Gate A, task 7: one prediction object on the canonical coordinate.
-Incident: hcd_priya_notes docs/superpowers/emulator-paper-history/2026-10-05-INCIDENT-kgrid-representation-regression.md"""
+Incident: docs/kgrid_incident_2026-10.md"""
 import jax
 import numpy as np
 import pytest

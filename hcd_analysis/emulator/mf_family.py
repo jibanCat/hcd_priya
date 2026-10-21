@@ -1,5 +1,5 @@
 """The certified LF -> HF multi-fidelity model family (moved verbatim from multifidelity.py at gate E, emulator-debug
-campaign 2026-10; spec GATE_E_SPEC.md v1 in the notes repository): the theta-independent resolved FixedMeanHead
+campaign 2026-10): the theta-independent resolved FixedMeanHead
 (log_rho + gbar_z + gbar_tau + rank-1), its conditioning vector, its table construction and the exact HR/LF row
 matching. The gate E forward reaches the MF correction only through this module and mf_modes; the pre-2026-10
 single-grid machinery stays in multifidelity.py (historical), which re-imports these names."""
@@ -18,10 +18,10 @@ class FixedMeanHead(eqx.Module):
     optionally, tau0-)resolved mean correction on top of the per-k ``log_rho``.
 
     The validated MF default (commit d93fadc / scripts/diag_mf_complexity.py): the
-    LF->HF correction is ~94-95% the fixed resolution tilt and only ~5% theta-
-    departure, and the learned MLP delta-head OVER-FITS that 5% on 6 HF sims (n_s
-    Fisher bias 4 sigma).  The rho(k,z)-ONLY model (this head + log_rho) cures it
-    (worst |n_s|~2 sigma, |A_p|~1.4 sigma -- best for A_p, the priority param).
+    LF->HF correction is dominated by the fixed resolution tilt with a small theta-
+    departure, and the learned MLP delta-head OVER-FITS that departure on 6 HF sims (a
+    large n_s Fisher bias in mock tests).  The rho(k,z)-ONLY model (this head + log_rho)
+    cures it (much smaller n_s and A_p Fisher biases in the same tests).
 
     ``MultiFidelity.g`` returns ``log_rho[None,:] + head(cond, basis)``.  This head
     returns ``g(z,tau0,k) - log_rho`` (the fixed mean MINUS the per-k global mean),
@@ -40,7 +40,7 @@ class FixedMeanHead(eqx.Module):
       SEPARABLE in (z) and (tau0) PLUS ONE rank-1 (z x tau0) interaction.  This
       captures the documented (z,tau0) sign-flip (cosmology lens) with too few DOF to
       alias the n_s tilt into the tau0 axis (the failure mode of a free 2-D table over
-      only 6 clustered HR sims, which got delta_mode='mlp' retired at 4 sigma).  The
+      only 6 clustered HR sims, which got delta_mode='mlp' retired).  The
       ``gbar_z_tab`` (Nz,C,K) term is the table MINUS log_rho (so log_rho cancels and
       the combined g recovers the fixed mean); the tau0-marginal ``gtau_tab``
       (Ntau,C,K) and the rank-1 term ``a_k``(C,K)*``u_z``(Nz)*``u_tau``(Ntau) carry NO
@@ -172,7 +172,7 @@ def fixed_mean_table_resolved(targets, log_rho, *, train_mask_rows=None):
     the review-LOCKED form: a SINGLE rank-1 interaction captures the documented
     (z,tau0) sign-flip with too few DOF to alias the n_s tilt into the tau0 axis (a
     free 2-D table over 6 clustered HR sims does the opposite -- the reason the learned
-    mlp-head was retired at a 4 sigma n_s Fisher bias).
+    mlp-head was retired for its n_s Fisher bias).
 
     WHY RUNG, NOT RAW tau0:  tau0 = -log(target_F) is a DETERMINISTIC, bit-identical
     function of (rung, z) -- at fixed (rung,z) all 6 sims share the same tau0, and tau0

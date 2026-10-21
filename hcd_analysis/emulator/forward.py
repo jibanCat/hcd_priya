@@ -1,5 +1,5 @@
-"""The production forward on the canonical coordinate (gate E, emulator-debug campaign 2026-10; spec GATE_E_SPEC.md v1
-in the notes repository; incident 2026-10-05-INCIDENT-kgrid-representation-regression).
+"""The production forward on the canonical coordinate (gate E, emulator-debug campaign 2026-10;
+see docs/kgrid_incident_2026-10.md).
 
 Everything the emulator produces stays on the mode axis n = 1..K: the ensemble's per-class P_filt, the MF correction
 (``mf_modes.ModeMF``, theta-independent) and the T1 cross-class block. For each (leg, z) ONE binding from the query
