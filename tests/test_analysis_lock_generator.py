@@ -38,11 +38,35 @@ BLIND_LOCK = os.path.join(REPO, "blind.lock")
 COMMITTED_LOCK = os.path.join(REPO, "analysis.lock")
 MANIFEST = os.path.join(REPO, "checkpoints", "production_ensemble_manifest.json")
 
-# Gate E (amendment A1 rev 1 section 8, step 7): scripts/gen_analysis_lock.py is reworked when analysis.lock is
-# regenerated with the final product digests (it still verifies the ensemble against the in-repo checkpoints dir of
-# the schema-1 manifest and reads retired closure_legb constants). Strict: each marker must be removed by that step.
-LOCK_REWORK = pytest.mark.xfail(strict=True, reason="gate E step 7: gen_analysis_lock.py rework pending (schema-2 "
-                                "manifest on Turbo, final product digests)")
+# DEFERRED (gate E amendment A1 rev 1 section 8, step 7; PI ruling 2026-10-21, D2 = a): scripts/gen_analysis_lock.py
+# is reworked only when analysis.lock is regenerated, which needs PI authorization. Until then the generator verifies
+# the production ensemble against <repo>/checkpoints (the schema-1 layout), which does not hold the schema-2 members
+# (they live in the manifest's checkpoints_dir), so generation stops with ProductionEnsembleError "MISSING pinned
+# production ensemble file". The marker is narrowed to exactly that cause: _generate_lock / _run_generation raise
+# LockGeneratorDeferred only for it, and any other failure fails the test. Strict: remove each marker at that step.
+
+
+class LockGeneratorDeferred(Exception):
+    """The one known, deferred lock-generator failure (see LOCK_REWORK)."""
+
+
+_DEFERRED_MSG = "MISSING pinned production ensemble file: " + os.path.join(REPO, "checkpoints", "")
+
+LOCK_REWORK = pytest.mark.xfail(strict=True, raises=LockGeneratorDeferred,
+                                reason="deferred lock-generator rework (gate E step 7, PI-authorized lock "
+                                       "regeneration): the generator verifies the ensemble against <repo>/checkpoints, "
+                                       "which does not hold the schema-2 members")
+
+
+def _generate_lock(GEN, *args, **kwargs):
+    """GEN.generate_lock, with the deferred cause converted to LockGeneratorDeferred (anything else propagates)."""
+    from hcd_analysis.emulator.prod_ensemble import ProductionEnsembleError
+    try:
+        return GEN.generate_lock(*args, **kwargs)
+    except ProductionEnsembleError as e:
+        if _DEFERRED_MSG in str(e):
+            raise LockGeneratorDeferred(str(e)) from e
+        raise
 
 
 REQUIRED_SECTIONS = (
@@ -77,7 +101,7 @@ def leg_summaries():
 @pytest.fixture(scope="module")
 def lock(GEN, leg_summaries):
     """One generated lock shared by the read-only assertions below."""
-    return GEN.generate_lock(leg_summaries, allow_stale_legs=True)
+    return _generate_lock(GEN, leg_summaries, allow_stale_legs=True)
 
 
 def _run_script(args, timeout=900):
@@ -88,6 +112,14 @@ def _run_script(args, timeout=900):
     env["PYTHONPATH"] = REPO
     return subprocess.run([sys.executable, GEN_PATH] + args, capture_output=True,
                           text=True, timeout=timeout, env=env, cwd=REPO)
+
+
+def _run_generation(args, timeout=900):
+    """_run_script for the LOCK_REWORK tests only: the deferred cause becomes LockGeneratorDeferred."""
+    r = _run_script(args, timeout=timeout)
+    if r.returncode != 0 and _DEFERRED_MSG in r.stderr:
+        raise LockGeneratorDeferred(r.stderr[-600:])
+    return r
 
 
 def _sha(path):
@@ -151,8 +183,8 @@ def test_required_sections_present(lock):
 # ------------------------------------------------------------------------------------------- #
 @LOCK_REWORK
 def test_two_generations_identical_modulo_created_utc(GEN, leg_summaries, tmp_path):
-    a = GEN.generate_lock(leg_summaries, allow_stale_legs=True)
-    b = GEN.generate_lock(leg_summaries, allow_stale_legs=True)
+    a = _generate_lock(GEN, leg_summaries, allow_stale_legs=True)
+    b = _generate_lock(GEN, leg_summaries, allow_stale_legs=True)
     a2, b2 = copy.deepcopy(a), copy.deepcopy(b)
     a2.pop("created_utc"), b2.pop("created_utc")
     assert GEN.canonical_dumps(a2) == GEN.canonical_dumps(b2), \
@@ -170,7 +202,7 @@ def test_two_generations_identical_modulo_created_utc(GEN, leg_summaries, tmp_pa
 def test_blinding_verbatim_and_blind_lock_untouched(GEN, leg_summaries):
     before_sha = _sha(BLIND_LOCK)
     before_mtime = os.stat(BLIND_LOCK).st_mtime_ns
-    lock = GEN.generate_lock(leg_summaries, allow_stale_legs=True)
+    lock = _generate_lock(GEN, leg_summaries, allow_stale_legs=True)
     assert _sha(BLIND_LOCK) == before_sha, "generation MODIFIED blind.lock (forbidden)"
     assert os.stat(BLIND_LOCK).st_mtime_ns == before_mtime, \
         "generation touched blind.lock's mtime (forbidden -- read-only input)"
@@ -266,7 +298,7 @@ def test_check_is_self_consistent_against_fresh_lock(GEN, leg_summaries, tmp_pat
     stale lock stays untouched."""
     fresh = tmp_path / "analysis.lock.fresh.json"
     fresh.write_text(GEN.canonical_dumps(
-        GEN.generate_lock(leg_summaries, allow_stale_legs=True)))
+        _generate_lock(GEN, leg_summaries, allow_stale_legs=True)))
     rc, lines = GEN.check_lock(leg_summaries, allow_stale_legs=True,
                                committed_path=str(fresh))
     assert rc == 0, "check_lock is not self-consistent against a fresh generation:\n" + \
@@ -284,7 +316,7 @@ def test_check_mode_reports_stale_committed_lock():
     fields, including the known poisoned rows. EVENTUAL-GREEN EXPECTATION: at the freeze cut,
     after --i-am-the-freeze-step regenerates the lock on the merged tree, this same command
     exits 0 and the skipped test below flips to enforced."""
-    r = _run_script(["--check", "--legs-cache", FIXTURE, "--allow-stale-legs-cache"])
+    r = _run_generation(["--check", "--legs-cache", FIXTURE, "--allow-stale-legs-cache"])
     assert r.returncode == 1, (
         f"--check must exit 1 against the stale June lock (got {r.returncode}); "
         f"stdout tail: {r.stdout[-800:]} stderr tail: {r.stderr[-400:]}")
@@ -339,7 +371,7 @@ def test_writes_normal_out_path_and_is_deterministic(GEN, tmp_path):
     out1 = tmp_path / "lock1.json"
     out2 = tmp_path / "lock2.json"
     for out in (out1, out2):
-        r = _run_script(["--legs-cache", FIXTURE, "--allow-stale-legs-cache",
+        r = _run_generation(["--legs-cache", FIXTURE, "--allow-stale-legs-cache",
                          "--out", str(out)])
         assert r.returncode == 0, f"generation failed: {r.stdout[-500:]} {r.stderr[-500:]}"
         assert out.exists()

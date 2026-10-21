@@ -202,7 +202,7 @@ def test_config_clash_nondefault_over_prestamp(runner, tmp_path):
         runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
 
 
-@pytest.mark.xfail(strict=True, reason="GATE E: the pre-2026-10 mock/truth builders are retired (single-grid); rebuilt at gate F (GATE_E_SPEC v1 section 2)")
+@pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="GATE E: the pre-2026-10 mock/truth builders are retired (single-grid; the stub raises NotImplementedError); rebuilt at gate F (GATE_E_SPEC v1 section 2)")
 def test_inject_spec_held_out_guard():
     """inject_spec on a HELD-OUT (leg_a=False) run_legb call must FAIL LOUD — the held-out branch
     ignores inject_spec, so honouring it would silently drop the injection. PR#12 review follow-up (b).

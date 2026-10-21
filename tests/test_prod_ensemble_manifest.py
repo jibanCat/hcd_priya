@@ -22,6 +22,7 @@ equinox/jax deserialization, so no real checkpoints are needed for the red batte
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -365,24 +366,42 @@ def test_readme_digest_table_matches_manifest():
             f"README digest table drifted: {mem['name']} meta sha absent"
 
 
-@pytest.mark.xfail(strict=True, reason="gate E (amendment A1 rev 1 section 8, step 7): the lock of record still names the "
-                   "pre-2026-10 final_prod_seed members until analysis.lock is regenerated with the final product "
-                   "digests; strict, so the marker must be removed when the lock is regenerated")
-def test_analysis_lock_member_list_agrees_with_manifest():
-    """The lock of record must agree with the manifest on the ensemble identity. The current
-    lock predates digest pinning (it carries names + count); the freeze regeneration inherits
-    this agreement requirement."""
-    if not ANALYSIS_LOCK.exists():
-        pytest.skip("analysis.lock not present")
-    lock = json.loads(ANALYSIS_LOCK.read_text())
-    emu = lock.get("emulator", {})
-    if not emu:
-        pytest.skip("analysis.lock has no emulator section (pre-freeze)")
-    manifest = json.loads(COMMITTED_MANIFEST.read_text())
-    names = [m["name"] for m in manifest["members"]]
-    assert emu.get("ensemble_members") == names, \
-        "analysis.lock ensemble_members disagrees with the pinned manifest"
-    assert emu.get("n_members") == manifest["n_members"]
+# PI ruling 2026-10-21 (D2 = a): the schema-2 manifest is canonical; the July analysis.lock and the schema-1 manifest
+# (byte-preserved as production_ensemble_manifest_v1_pre2026-10.json) are historical records. The lock certifies the
+# historical ensemble only, and current code must refuse what it pins. When analysis.lock is regenerated (PI
+# authorization required) these three tests are replaced by the agreement check of the new lock.
+V1_MANIFEST = ROOT / "checkpoints" / "production_ensemble_manifest_v1_pre2026-10.json"
+
+
+def _july_lock_emulator():
+    return json.loads(ANALYSIS_LOCK.read_text())["emulator"]
+
+
+def test_july_lock_is_the_historical_v1_record():
+    """analysis.lock pins the byte-preserved schema-1 manifest (by sha256) and names its five members."""
+    emu = _july_lock_emulator()
+    v1 = json.loads(V1_MANIFEST.read_text())
+    assert emu["manifest_schema_version"] == 1 == v1["schema_version"]
+    assert emu["manifest_sha256"] == hashlib.sha256(V1_MANIFEST.read_bytes()).hexdigest()
+    assert emu["ensemble_members"] == [m["name"] for m in v1["members"]]
+    assert emu["n_members"] == v1["n_members"]
+
+
+def test_july_lock_does_not_certify_the_current_manifest():
+    """The lock names neither the canonical manifest's bytes nor any of its members: it says nothing about the
+    current model."""
+    emu = _july_lock_emulator()
+    current = json.loads(COMMITTED_MANIFEST.read_text())
+    assert current["schema_version"] == PE.MANIFEST_SCHEMA_VERSION == 2
+    assert emu["manifest_schema_version"] != current["schema_version"]
+    assert emu["manifest_sha256"] != hashlib.sha256(COMMITTED_MANIFEST.read_bytes()).hexdigest()
+    assert not set(emu["ensemble_members"]) & {m["name"] for m in current["members"]}
+
+
+def test_current_loader_refuses_the_manifest_the_july_lock_pins():
+    """Current code rejects the artifact the July lock certifies, loudly and before touching any file."""
+    with pytest.raises(PE.ProductionEnsembleError, match=r"schema_version=1, .*superseded at gate E"):
+        PE.verify_manifest(manifest_path=str(V1_MANIFEST))
 
 
 # --------------------------------------------------------------------------------------------- #
