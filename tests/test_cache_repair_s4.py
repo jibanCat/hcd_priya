@@ -31,6 +31,7 @@ def delta():
 
 
 def _rows(path, sim, zg):
+    require_real_cache(path)                              # skip (or fail under HCD_GATE_RUN=1) when absent
     with h5py.File(path, "r") as f:
         s, z, a = f["sim_name"].asstr()[...], f["z_grid"][...], f["alpha_idx"][...]
         idx = np.where((s == sim) & np.isclose(z, zg, atol=1e-9))[0]
