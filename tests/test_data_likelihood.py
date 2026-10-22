@@ -682,7 +682,11 @@ def test_mf_path_matches_gate_script_to_tight_tol():
     ns = {}
     src = open(f"{_REPO_ROOT}/scripts/diag_emu_bias_allfolds_mf.py").read()
     cut = src.index('emit("# T3 GATE')
-    exec(compile(src[:cut], "gate_mf_defs", "exec"), ns)
+    head = src[:cut]
+    # the script's prefix opens its tracked results file for writing: redirect it, never truncate a tracked file
+    assert head.count('_rf = open(RESULTS, "w")') == 1
+    head = head.replace('_rf = open(RESULTS, "w")', '_rf = open(__import__("os").devnull, "w")')
+    exec(compile(head, "gate_mf_defs", "exec"), ns)
     P_gate = ns["predict_P_obs_on_leg_mf"](
         mf, fold_model, theta9, tau0_vec, alpha, pf_stats=pf_stats,
         dla_core=dla_core, cache_k=cache_k, leg=leg)

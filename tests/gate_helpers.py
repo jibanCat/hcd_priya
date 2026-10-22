@@ -28,6 +28,9 @@ DEFERRED_CAUSES = {
     "RETIRED_BUILDER": (
         r"\w+: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F",
         "the pre-2026-10 mock/truth builder is retired at gate E (NotImplementedError stub)"),
+    "RETIRED_STUB_SOURCE": (
+        r"(?s)def run_legb\(\*args, \*\*kwargs\):.{0,40}PRE-2026-10 INTERFACE \(retired at gate E; rebuilt at gate F\)",
+        "a source inspection of run_legb, which gate E retired to a NotImplementedError stub"),
 }
 
 

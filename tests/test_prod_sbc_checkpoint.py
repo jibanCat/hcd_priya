@@ -102,7 +102,8 @@ def test_merge_globs_mock_pkls(merger, runner, ctx_d, tmp_path):
     # the merge loader path: glob mock_*.pkl, parse the index from the filename, aggregate.
     import sys
     argv = sys.argv
-    sys.argv = ["merge_prod_sbc_shards.py", "--shard-dir", out, "--prob", "0.95"]
+    sys.argv = ["merge_prod_sbc_shards.py", "--shard-dir", out, "--prob", "0.95",
+                "--figdir", str(tmp_path)]          # never rewrite the tracked figure
     try:
         merger.main()      # raises if the glob/aggregate path is broken
     finally:
@@ -206,7 +207,7 @@ def test_config_clash_nondefault_over_prestamp(runner, tmp_path):
         runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="GATE E: the pre-2026-10 mock/truth builders are retired (single-grid; the stub raises NotImplementedError); rebuilt at gate F (GATE_E_SPEC v1 section 2)")
+@pytest.mark.deferred_legacy("RETIRED_BUILDER")
 def test_inject_spec_held_out_guard():
     """inject_spec on a HELD-OUT (leg_a=False) run_legb call must FAIL LOUD — the held-out branch
     ignores inject_spec, so honouring it would silently drop the injection. PR#12 review follow-up (b).

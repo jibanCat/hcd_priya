@@ -1,16 +1,39 @@
-# Deferred tests of the pre-2026-10 inference and closure stack
+# Deferred tests of the pre-2026-10 inference and closure interfaces
 
-150 functions (168 test nodes, measured on the real data links) in 30 files.
+157 functions (177 test nodes in the reference run with the real data links) in 34 files.
 
 Gate E (the 2026 k-grid fix, `docs/kgrid_incident_2026-10.md`) retired the pre-2026-10 closure and inference
-interfaces. The tests below exercise those interfaces. Each carries `@pytest.mark.deferred_legacy(CAUSE)`:
-`tests/conftest.py` treats it as an expected failure only when the error matches the cause's exact pattern
-(`DEFERRED_CAUSES`). Any other failure fails the test, and a pass fails it too (strict). These tests cover the
-retired stack only; they are not coverage of the current forward model. Rebuilding them against the current
-interfaces is follow-up work.
+interfaces: the single-checkpoint `build_legb_ctx` signature, the mock and truth builders, schema-1 checkpoints, and
+the schema-1 checkpoint layout that `scripts/run_real_fit.build_real_ctx` still assumes. The tests below stop at one
+of those points. Each carries `@pytest.mark.deferred_legacy(CAUSE)`. `tests/conftest.py` grants an expected failure
+only when the error matches the cause's exact pattern (`DEFERRED_CAUSES` in `tests/gate_helpers.py`); any other
+failure fails the test, and a pass fails it too (strict). Skip guards that catch context-build errors re-raise a
+deferred cause (`raise_if_deferred`), so a retired interface cannot pass as absent data.
 
-The 7 strict `xfail` markers (9 test nodes) of the retired mock/truth builders and the 9 lock-generator tests
-(`LockGeneratorDeferred`) are separate and documented at their definitions.
+## What these tests cover, and what they do not
+
+- They stop at a retired interface, usually in a fixture. Their subject is often live, reachable code: for example
+  the numpyro model-site order, the constrain-function parity and the comparison core `_data_loglik_legcore`. That
+  code is not covered by these tests until they are rebuilt against the gate E context. The gate E context itself is
+  covered by `tests/test_forward_ctx_v2.py` and `tests/test_gateE_e1_e4.py`.
+- Some stop inside shipped scripts that are broken at this commit, and there is no runnable inference driver:
+  `scripts/run_real_fit.py` (`build_real_ctx` assumes the schema-1 checkpoint layout, and its `build_legb_ctx` call
+  passes retired arguments), `scripts/run_prod_sbc_shard.py` and `scripts/make_legb_sites_golden.py` (retired
+  `build_legb_ctx` arguments).
+- Rebuilding or deleting them is follow-up work and needs scientific review: expected site lists and goldens change
+  under gate E.
+
+## Known latent failures behind a deferral
+
+- `tests/test_norc_single_authority.py::test_sbc_resolved_forward_and_runcfg_keyset` failed on main with a different
+  error (a run_cfg key-set drift); it is not reached now.
+- `scripts/gen_analysis_lock.py` also reads `closure_legb` constants that gate E removed (`ERROR_VECTOR`,
+  `XCLASS_ERROR_VECTOR`, `CKPT`); that error sits behind the `LockGeneratorDeferred` failure
+  (`tests/test_analysis_lock_generator.py`).
+- `tests/test_legb_2d_tilt.py` skips two variants as "covered separately"; the covering test
+  (`test_2d_requires_hierarchical`) is deferred.
+
+The 9 lock-generator tests (`LockGeneratorDeferred`) are a separate, documented deferral at their definition.
 
 ## CTX_SIGNATURE (120 functions, 138 test nodes)
 
@@ -207,9 +230,26 @@ the test loads a pre-2026-10 (schema-1) checkpoint, which `train.load_checkpoint
   - `test_mock_for_index_deterministic_and_shard_invariant`
   - `test_run_leg_a_sbc_return_per_mock_shards`
 
-## RETIRED_BUILDER (1 functions, 1 test nodes)
+## RETIRED_BUILDER (6 functions, 8 test nodes)
 
 the pre-2026-10 mock/truth builder is retired at gate E (a `NotImplementedError` stub).
 
+- `tests/test_cert_prereqs.py`:
+  - `test_truth_fn_held_out_guard`
+- `tests/test_hcd_survey_pin.py`:
+  - `test_lls_truth_boost_propagates_to_mock_and_truth`
 - `tests/test_legb_dla_masking.py`:
   - `test_make_truth_stores_masked_baseline_and_full_dla_excess`
+- `tests/test_legb_truth_anchor.py`:
+  - `test_default_anchor_is_priya_central`
+  - `test_priya_anchored_truth_recovers_requested_curve` (3 parametrized nodes)
+- `tests/test_prod_sbc_checkpoint.py`:
+  - `test_inject_spec_held_out_guard`
+
+## RETIRED_STUB_SOURCE (2 functions, 2 test nodes)
+
+a source inspection of `run_legb`, which gate E retired to a `NotImplementedError` stub.
+
+- `tests/test_ks_selboost_hooks.py`:
+  - `test_run_legb_records_truth_alpha_hcd_z`
+  - `test_run_legb_threads_z_global_into_truth_boosts`

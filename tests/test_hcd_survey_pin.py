@@ -85,7 +85,7 @@ def test_lls_width_hedge_2x_toggle():
     np.testing.assert_allclose(sdK1, sdK2, rtol=1e-6)
 
 
-@pytest.mark.xfail(strict=True, raises=NotImplementedError, reason="GATE E: the pre-2026-10 mock/truth builders are retired (single-grid; the stub raises NotImplementedError); rebuilt at gate F (GATE_E_SPEC v1 section 2)")
+@pytest.mark.deferred_legacy("RETIRED_BUILDER")
 @pytest.mark.skipif(not os.path.exists(_CACHE), reason="LF cache not present")
 def test_lls_truth_boost_propagates_to_mock_and_truth():
     d = load_cache(_CACHE)

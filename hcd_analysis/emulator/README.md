@@ -11,7 +11,12 @@ it does, why it is built the way it is, and how to **use the deployed ensemble**
 > and the numbers and figures produced with them, document the pre-2026-10 emulator and are kept as a record,
 > not as supported workflows. The coordinate-correct path is `kcoord.py`, `predict.predict_on_physical_grid`,
 > `mf_modes.py` (the mode-by-mode MF correction) and `forward.predict_leg`; the production members are pinned by
-> `checkpoints/production_ensemble_manifest.json`.
+> `checkpoints/production_ensemble_manifest.json` (schema-2.0 `prod_repaired_seed` members; the members and the MF,
+> DLA-core and T1/T3 products live outside the repository). The Stamp, the deployed-object note
+> (`final_prod_seed{0..4}`) and the instructions on how `scripts/run_real_fit.py` and the SBC drivers invoke the
+> emulator are historical: those drivers still pass retired `build_legb_ctx` arguments, so there is no runnable
+> inference driver at this commit. Without the T1 product the leg covariance carries no emulator-error term, and a
+> T2 term is held for a PI ruling.
 
 > **New here? Read the [Overview](#overview) first** (it says, in plain terms, what the emulator is
 > and why it exists), then come back for the provenance details below. The Stamp and the
@@ -687,11 +692,12 @@ The following points have repeatedly cost time, and are worth reviewing before d
   (z ∈ {2.0..5.4}, angular k ∈ [3.5e-4, 0.098]); out-of-range bins are softly down-weighted in
   training and excluded from `C_emu`. The 2026-06-04 decision was to keep `k_min = 1e-3`.
 - The LF emulator's top stored mode is mode 172, k_com = 9.0 h/Mpc (a storage band limit, not the pixel
-  Nyquist). In s/km it moves with z and Ω_m: 0.061 to 0.070 at z = 5.4, 0.065 to 0.075 at z = 4.6, 0.084 to
-  0.096 at z = 2.2. Above it the LF emulator is neither used nor validated. The earlier statement "LF
+  Nyquist). In s/km it moves with z and Ω_m: over the emulator's parameter box it spans 0.060 to 0.071 at
+  z = 5.4, 0.064 to 0.076 at z = 4.6 and 0.083 to 0.097 at z = 2.2. Above it the LF emulator is neither used nor validated. The earlier statement "LF
   Nyquist ≈ 0.069 s/km" was the z = 5.4 value of one simulation (see
-  `docs/kgrid_incident_2026-10.md`). DESI k ≤ 0.041 and KS k ≤ 0.06 sit below it at
-  every z.
+  `docs/kgrid_incident_2026-10.md`). The analysis cuts sit below it at every z of their legs: DESI
+  k ≤ 0.041, and KS with k_max = 0.065 (top kept bin 0.0627 s/km for z ≤ 4.6, against 0.0644 at z = 4.6). The
+  context build refuses any kept bin outside the modes (`closure_legb._assert_bins_inside_modes`).
 - The per-class power uses a single shared global ⟨F⟩ (`target_F`), not a per-subset mean, so the
   class offsets are real physics rather than a sightline-count artefact.
 

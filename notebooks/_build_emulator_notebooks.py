@@ -27,7 +27,8 @@ HISTORICAL_BANNER_TRAINING = (
     '> It uses `multifidelity.load_lf_backbone` (retired: it cannot load schema-2.0 checkpoints) and logic ported from',
     '> `scripts/plot_performance_walkthrough.py` and `scripts/diag_ap_fisher_bias.py`, which label emulator output with',
     '> a single velocity grid (row 0, or a median over rows). The coordinate-correct prediction path is',
-    '> `hcd_analysis.emulator.predict.predict_on_physical_grid` and `hcd_analysis.emulator.forward.predict_leg`.',
+    '> `hcd_analysis.emulator.predict.predict_on_physical_grid` and `hcd_analysis.emulator.forward.predict_leg`, with the mode-by-mode MF',
+    '> correction in `hcd_analysis.emulator.mf_modes`; the production members and products live outside the repository.',
 )
 
 HISTORICAL_BANNER_PLOTTING = (
@@ -36,7 +37,8 @@ HISTORICAL_BANNER_PLOTTING = (
     '> come from the pre-2026-10 emulator.',
     '> It imports `scripts/plot_performance_walkthrough.py`, which labels emulator output with a single velocity grid',
     '> (row 0). The coordinate-correct prediction path is `hcd_analysis.emulator.predict.predict_on_physical_grid`',
-    '> and `hcd_analysis.emulator.forward.predict_leg`.',
+    '> and `hcd_analysis.emulator.forward.predict_leg`, with the mode-by-mode MF',
+    '> correction in `hcd_analysis.emulator.mf_modes`; the production members and products live outside the repository.',
 )
 
 
