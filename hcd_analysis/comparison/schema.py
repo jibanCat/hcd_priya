@@ -1,0 +1,210 @@
+"""The ``hcd_priya.compare/1`` prediction record, its validator, and record-vs-record comparison (numpy only).
+
+A record is a JSON object written by one adapter for one comparator:
+
+  schema       "hcd_priya.compare/1"
+  comparator   identity: id, name, repo, commit, implementation, artifacts [{path, sha256}], fidelity (LF/HF/MF),
+               training (free text: sims, lineage), env
+  observable   an id from OBSERVABLES (what P means: estimator, filtering, units)
+  L_box_hmpc, modes   the native k nodes: k_com = 2 pi n / L_box for each integer mode n
+  cases        [{case_id, family, state: {params: {9 named}, mean_flux: {tau0_amp, dtau0, z_pivot}}, z: [...],
+                 support: {status, reason}, P: [n_z][n_k] (km/s), k_skm: [n_z][n_k], native: {...}}]
+
+``native`` keeps the comparator's own outputs and inputs (per-class arrays, GP standard deviations, the exact input
+vector) beside the harmonized ``P``. ``validate_record`` refuses a record whose k_skm does not follow from its modes
+and state (catches h/Mpc labelled as s/km, a missing 2 pi, a wrong cosmology), any parameter that is not one of the
+nine named ones (``tau0`` is not a cosmological parameter here), NaN or non-positive power, and shape mismatches.
+``compare_records`` refuses records whose observables, nodes or case states differ instead of intersecting them."""
+from __future__ import annotations
+
+import json
+import math
+
+import numpy as np
+
+from . import conventions as C
+from . import metrics as M
+
+SCHEMA = "hcd_priya.compare/1"
+OUTCOMES = ("PASS", "FAIL", "NOT COMPARABLE", "BLOCKED", "NOT RUN")
+SUPPORT = ("COMPARABLE", "NOT COMPARABLE", "BLOCKED")
+FIDELITIES = ("LF", "HF", "MF")
+OBSERVABLES = {
+    "O1": {"description": "1D flux power of F/<F>-1 over all sightlines after the tau>1e6 trough fill "
+                          "(fake_spectra _filter_single_tau_complex, thresh2 0.25), <F> the global target "
+                          "exp(-alpha(z) 0.0023 (1+z)^3.65), no window, no resolution correction",
+           "P_unit": "km/s", "k_unit": "s/km (angular)", "native_k": "comoving box mode n, k = 2 pi n / L_box h/Mpc"},
+}
+K_REL_TOL = 1e-12
+STATE_REL_TOL = 1e-12
+
+
+class ComparisonSchemaError(ValueError):
+    """A record or a pair of records that the harness refuses to compare."""
+
+
+def _is_num(x):
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+def _identity_problems(c):
+    out = []
+    if not isinstance(c, dict):
+        return ["comparator is not an object"]
+    for k in ("id", "name", "repo", "commit", "implementation", "artifacts", "fidelity", "training", "env"):
+        if k not in c:
+            out.append(f"comparator.{k} missing")
+    if c.get("fidelity") not in FIDELITIES:
+        out.append(f"comparator.fidelity {c.get('fidelity')!r} not in {FIDELITIES}")
+    if not isinstance(c.get("commit"), str) or not c.get("commit"):
+        out.append("comparator.commit must be a non-empty string")
+    for a in c.get("artifacts") or []:
+        h = a.get("sha256") if isinstance(a, dict) else None
+        if not (isinstance(h, str) and len(h) == 64 and all(ch in "0123456789abcdef" for ch in h)):
+            out.append(f"artifact {a!r} lacks a 64-hex sha256")
+    return out
+
+
+def validate_record(rec):
+    """Raise ComparisonSchemaError listing every problem; return the record unchanged when valid."""
+    p = []
+    if not isinstance(rec, dict):
+        raise ComparisonSchemaError("record is not an object")
+    if rec.get("schema") != SCHEMA:
+        p.append(f"schema {rec.get('schema')!r}, expected {SCHEMA}")
+    p += _identity_problems(rec.get("comparator"))
+    if rec.get("observable") not in OBSERVABLES:
+        p.append(f"observable {rec.get('observable')!r} not in {sorted(OBSERVABLES)}")
+    L = rec.get("L_box_hmpc")
+    modes = rec.get("modes")
+    if not _is_num(L) or L <= 0:
+        p.append("L_box_hmpc must be a positive number")
+    if (not isinstance(modes, list) or not modes or not all(isinstance(n, int) and not isinstance(n, bool) and n >= 1
+                                                             for n in modes) or modes != sorted(set(modes))):
+        p.append("modes must be a non-empty strictly increasing list of positive ints")
+        modes = None
+    cases = rec.get("cases")
+    if not isinstance(cases, list) or not cases:
+        p.append("cases must be a non-empty list")
+        cases = []
+    seen = set()
+    for c in cases:
+        cid = c.get("case_id") if isinstance(c, dict) else None
+        if not isinstance(cid, str) or not cid:
+            p.append(f"case without a case_id: {c!r:.80}")
+            continue
+        if cid in seen:
+            p.append(f"duplicate case_id {cid}")
+        seen.add(cid)
+        p += [f"{cid}: {m}" for m in _case_problems(c, L, modes)]
+    if p:
+        raise ComparisonSchemaError("; ".join(p))
+    return rec
+
+
+def _case_problems(c, L, modes):
+    p = []
+    st = c.get("state") or {}
+    try:
+        C.check_params(st.get("params"))
+        C.check_mean_flux(st.get("mean_flux"))
+    except C.ConventionError as e:
+        p.append(str(e))
+    z = c.get("z")
+    if not isinstance(z, list) or not z or not all(_is_num(v) for v in z) or len(set(z)) != len(z):
+        p.append("z must be a non-empty list of distinct finite numbers")
+        z = None
+    sup = c.get("support") or {}
+    if sup.get("status") not in SUPPORT:
+        p.append(f"support.status {sup.get('status')!r} not in {SUPPORT}")
+    elif sup["status"] != "COMPARABLE":
+        if not isinstance(sup.get("reason"), str) or not sup["reason"].strip():
+            p.append(f"support {sup['status']} needs a reason")
+        return p
+    if p or z is None or modes is None or not _is_num(L):
+        return p + (["COMPARABLE case lacks valid z, modes or L_box"] if not p else [])
+    P = np.asarray(c.get("P"), dtype=float) if c.get("P") is not None else None
+    K = np.asarray(c.get("k_skm"), dtype=float) if c.get("k_skm") is not None else None
+    want = (len(z), len(modes))
+    if P is None or P.shape != want:
+        p.append(f"P shape {None if P is None else P.shape}, expected {want}")
+    elif not np.all(np.isfinite(P)) or not np.all(P > 0):
+        p.append("P has non-finite or non-positive values (masking is not allowed; declare the case instead)")
+    if K is None or K.shape != want:
+        p.append(f"k_skm shape {None if K is None else K.shape}, expected {want}")
+    else:
+        prm = st["params"]
+        kc = C.k_com_modes(np.asarray(modes), L)
+        for i, zi in enumerate(z):
+            ref = C.k_skm_from_kcom(kc, zi, prm["hub"], prm["omegamh2"])
+            if not np.allclose(K[i], ref, rtol=K_REL_TOL, atol=0):
+                p.append(f"k_skm at z={zi} does not follow from the modes and (hub, omegamh2): wrong unit, "
+                         f"missing 2 pi or wrong cosmology (max rel {np.max(np.abs(K[i] / ref - 1)):.3g})")
+                break
+    if not isinstance(c.get("native", {}), dict):
+        p.append("native must be an object")
+    return p
+
+
+def dumps(rec):
+    """JSON text of a validated record (floats round-trip exactly through repr)."""
+    return json.dumps(validate_record(rec), sort_keys=True)
+
+
+def loads(text):
+    return validate_record(json.loads(text))
+
+
+def _same_state(a, b):
+    pa, pb = a["params"], b["params"]
+    if any(not math.isclose(pa[n], pb[n], rel_tol=STATE_REL_TOL, abs_tol=0) for n in C.PARAM_NAMES):
+        return False
+    return a["mean_flux"] == b["mean_flux"]
+
+
+def compare_records(test, ref, threshold):
+    """Compare two validated records case by case.
+
+    Returns ``{"verdict", "max_abs", "cases": {case_id: outcome}, "points": n, "summary": {...}, "r": {case_id: r}}``
+    (``r`` has the shape of ``P``: n_z by n_modes).
+    A case missing from either side is NOT RUN; a case either side marks NOT COMPARABLE or BLOCKED takes that status
+    (BLOCKED first) and contributes no points. The level verdict is PASS or FAIL over the comparable points only, and
+    NOT RUN / BLOCKED / NOT COMPARABLE when there are none (never PASS)."""
+    validate_record(test)
+    validate_record(ref)
+    if test["observable"] != ref["observable"]:
+        raise ComparisonSchemaError(f"observables differ: {test['observable']} vs {ref['observable']}")
+    if test["modes"] != ref["modes"] or test["L_box_hmpc"] != ref["L_box_hmpc"]:
+        raise ComparisonSchemaError("native k nodes differ (modes or L_box): refusing to intersect or interpolate")
+    tc = {c["case_id"]: c for c in test["cases"]}
+    rc = {c["case_id"]: c for c in ref["cases"]}
+    outcomes, rs = {}, {}
+    for cid in sorted(set(tc) | set(rc)):
+        a, b = tc.get(cid), rc.get(cid)
+        if a is None or b is None:
+            outcomes[cid] = "NOT RUN"
+            continue
+        if not _same_state(a["state"], b["state"]) or a["z"] != b["z"] or a.get("family") != b.get("family"):
+            raise ComparisonSchemaError(f"{cid}: the two records describe different physical states or redshifts")
+        sa, sb = a["support"]["status"], b["support"]["status"]
+        if "BLOCKED" in (sa, sb):
+            outcomes[cid] = "BLOCKED"
+            continue
+        if "NOT COMPARABLE" in (sa, sb):
+            outcomes[cid] = "NOT COMPARABLE"
+            continue
+        r = M.ratio_residual(a["P"], b["P"])
+        rs[cid] = r
+        outcomes[cid] = M.verdict(r, threshold)
+    all_r = np.concatenate([r.ravel() for r in rs.values()]) if rs else np.array([])
+    if rs:
+        level = M.verdict(all_r, threshold)
+    elif any(v == "BLOCKED" for v in outcomes.values()):
+        level = "BLOCKED"
+    elif any(v == "NOT COMPARABLE" for v in outcomes.values()):
+        level = "NOT COMPARABLE"
+    else:
+        level = "NOT RUN"
+    return {"verdict": level, "threshold": threshold, "points": int(all_r.size),
+            "max_abs": float(np.max(np.abs(all_r))) if all_r.size else None, "cases": outcomes,
+            "summary": M.summarize(all_r, threshold), "r": rs}
