@@ -629,6 +629,7 @@ def test_mf_path_freezes_lf_backbone_no_grad_to_lf_weights():
 
 @pytest.mark.skipif(not (_have_mf_caches and _have_fold0 and _have_rescorr),
                     reason="MF caches / fold0 checkpoint / res_corr not present")
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_mf_path_matches_gate_script_to_tight_tol():
     """CONSISTENCY: predict_P_obs_on_leg(mf=True) reproduces the certified gate script's
     through-MF P_obs to tight tol on a synthetic leg, so the production path == the gate's

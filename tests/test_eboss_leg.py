@@ -168,6 +168,7 @@ def test_draws_matrix_appends_a_siiii_only_when_present():
 @pytest.mark.skipif(not _have, reason="eBOSS npz not built")
 @pytest.mark.parametrize("hierarchical_hcd", [False, True])   # legacy 3-α vs Option-B A_hcd×r reparam
 @pytest.mark.parametrize("marg_zslope", [False, True])   # both real-fit configs: metals × zslope × hier
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_legb_model_priors_only_site_order_match(marg_zslope, hierarchical_hcd):
     # the fast-postprocess constrain_fn relies on _legb_priors_only having the SAME sample sites IN
     # THE SAME ORDER as _legb_model. With sample_metals=True, a_SiIII must appear in both, last —

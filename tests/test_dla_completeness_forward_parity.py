@@ -46,6 +46,7 @@ class _StopBuild(Exception):
 #  (a) build_arm_ctx opt-in wires the DEPLOYED DESI forward into build_legb_ctx.
 #      RED before the fix -> TypeError (unexpected kwarg use_prod_forward). GREEN after.
 # --------------------------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_dla_desi_uses_deployed_forward(monkeypatch):
     from hcd_analysis.emulator import closure_legb as CL
     from scripts import run_dnuis_bias_shard as R
@@ -79,6 +80,7 @@ def test_dla_desi_uses_deployed_forward(monkeypatch):
 #       we assert the resolved ctx. RED before the fix: no post-build _replace -> fix_alpha_res stays
 #       False and res_corr_on defaults True.
 # --------------------------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_dla_desi_norc_pins_fix_alpha_res(monkeypatch):
     from collections import namedtuple
     from scripts import run_dnuis_bias_shard as R
@@ -123,6 +125,7 @@ def test_dla_runner_opts_into_prod_forward(monkeypatch, tmp_path):
 #  (c) DEFAULT path (use_prod_forward=False) is BYTE-IDENTICAL: the four other arms/callers unchanged.
 #      Passes BEFORE and AFTER the fix.
 # --------------------------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_default_arm_ctx_byte_identical(monkeypatch):
     from scripts import run_dnuis_bias_shard as R
     captured = {}

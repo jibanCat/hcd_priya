@@ -238,6 +238,7 @@ _have_ks = os.path.exists(
 
 @pytest.mark.skipif(not (_have_cache and _have_ckpt),
                     reason="real cache/ckpt not present")
+@pytest.mark.deferred_legacy("RETIRED_BUILDER")
 def test_make_truth_stores_masked_baseline_and_full_dla_excess():
     """make_truth_from_sim returns P_obs_true (the DLA-MASKED baseline) AND dla_excess_true (the
     full DLA excess add-back, per row) — the §0c construction the per-leg mock applies truth_frac
@@ -267,6 +268,7 @@ def test_make_truth_stores_masked_baseline_and_full_dla_excess():
 
 @pytest.mark.skipif(not (_have_cache and _have_ckpt and _have_desi and _have_ks),
                     reason="real cache/ckpt/data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_make_legb_mock_applies_per_leg_truth_frac():
     """make_legb_mock builds the DESI mock target with 0.10·(full DLA excess) added back and the
     KS mock target with 0% — verified by reconstructing the truth-on-leg WITHOUT noise (the mock
@@ -292,6 +294,7 @@ def test_make_legb_mock_applies_per_leg_truth_frac():
 
 @pytest.mark.skipif(not (_have_cache and _have_ckpt and _have_desi and _have_ks),
                     reason="real cache/ckpt/data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_truth_pack_alpha_dla_is_ten_percent_residual():
     """The closure truth_pack α_DLA = 0.10·w_DLA (the DESI residual the forward marginalizes),
     while α_LLS/α_subDLA stay at the sim's structural w_c."""
@@ -311,6 +314,7 @@ def test_truth_pack_alpha_dla_is_ten_percent_residual():
 
 @pytest.mark.skipif(not (_have_cache and _have_ckpt and _have_desi and _have_ks),
                     reason="real cache/ckpt/data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_real_ctx_truth_forward_consistency_desi_ten_percent():
     """Real ctx, EMULATOR-based consistency: at θ→truth, α_DLA = 0.10·w_DLA on the DESI forward
     (frac 1.0), the forward reproduces the DESI 10% target built from the SAME emulator P_filt

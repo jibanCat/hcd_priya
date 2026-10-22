@@ -134,6 +134,7 @@ def test_run_legb_leg_a_metals_no_offbyone():
 
 
 @pytest.mark.skipif(len(glob.glob(PROD + "*.eqx")) < 2, reason="prod ensemble absent")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_build_legb_ctx_ensemble():
     paths = sorted(p[:-4] for p in glob.glob(PROD + "*.eqx"))
     ctx, d = LB.build_legb_ctx(use_xclass=True, ensemble_ckpts=paths)

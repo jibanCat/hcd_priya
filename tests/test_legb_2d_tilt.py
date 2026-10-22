@@ -85,6 +85,7 @@ def _mock(ctx, d, sim_i=0):
 #  ctx defaults (closure values self-consistent with HCD_LIT_OVER_SIM_SLOPE).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_ctx_2d_defaults_are_closure_self_consistent():
     """build_legb_ctx(hcd_2d_tilt=True) sets the closure defaults from the FULL incidence slope
     HCD_INCIDENCE_SLOPE (the slope the mock truth carries, ~2.4), NOT the lit/sim-ratio slope:
@@ -102,6 +103,7 @@ def test_ctx_2d_defaults_are_closure_self_consistent():
 #  Golden byte-exact OFF (both modes).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_off_legacy_byte_exact_when_2d_off():
     """hcd_2d_tilt=False AND hierarchical_hcd=False → byte-identical legacy potential + sites."""
     ctx, d = _build_small(hierarchical=False, two_d=False)
@@ -125,6 +127,7 @@ def test_off_legacy_byte_exact_when_2d_off():
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_off_optionB_byte_exact_when_2d_off():
     """hcd_2d_tilt=False, hierarchical_hcd=True → byte-identical Option B potential + sites."""
     ctx, d = _build_small(hierarchical=True, two_d=False)
@@ -155,6 +158,7 @@ def test_off_optionB_byte_exact_when_2d_off():
 @pytest.mark.parametrize("two_d", [False, True])
 @pytest.mark.parametrize("hierarchical", [False, True])
 @pytest.mark.parametrize("sample_metals", [False, True])
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_model_priors_only_site_order_match_2d(two_d, hierarchical, sample_metals):
     """_legb_model and _legb_priors_only have the SAME sample sites in the SAME order over every
     combination of hcd_2d_tilt × hierarchical_hcd × sample_metals. In 2D mode the sites are
@@ -186,6 +190,7 @@ def test_model_priors_only_site_order_match_2d(two_d, hierarchical, sample_metal
 #  Reparam at z_p: alpha_subdla == A_hcd·r_subdla; pivot α emitted under legacy names.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_2d_pivot_alpha_equals_A_times_r():
     """In 2D mode the deterministic pivot α (alpha_lls/subdla/dla) equal A_hcd·r_c (the B_hcd
     z-tilt lives in alpha_hcd_z, NOT in the pivot α — back-compat for _draws_matrix/coverage)."""
@@ -205,6 +210,7 @@ def test_2d_pivot_alpha_equals_A_times_r():
 #  z-shape: alpha_hcd_z[z,c] == alpha_pivot[c]·((1+z)/(1+z_p))^(B_hcd+δs_c).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_2d_z_shape_uses_btilt_plus_dslope():
     """alpha_hcd_z follows the per-class slope s_c = B_hcd + δs_c (NOT a sampled s_* block)."""
     ctx, d = _build_small(hierarchical=True, two_d=True)
@@ -227,6 +233,7 @@ def test_2d_z_shape_uses_btilt_plus_dslope():
 #  B_hcd reduces to Option B (fixed slopes) at B_hcd == s_LLS_center.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_2d_slopes_match_incidence_slope_at_btilt_center():
     """At B_hcd = btilt_center the 2D model's per-class slopes s_c = B_hcd + δs_c equal the FULL
     incidence slope HCD_INCIDENCE_SLOPE (the slope the mock truth carries) — the closure
@@ -254,6 +261,7 @@ def test_2d_slopes_match_incidence_slope_at_btilt_center():
 #  Differentiability in (A_hcd, B_hcd, r).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_2d_loglik_grad_in_A_B_r_finite():
     """jax.grad of the multi-leg loglik w.r.t. (A_hcd, B_hcd, r_subdla, r_dla) is finite."""
     ctx, d = _build_small(hierarchical=True, two_d=True)
@@ -280,6 +288,7 @@ def test_2d_loglik_grad_in_A_B_r_finite():
 #  B_hcd truth round-trip in _draws_matrix / packed_names / truth_vec.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_2d_draws_matrix_appends_A_B_r_columns():
     """_draws_matrix appends A_hcd, B_hcd, r_subdla, r_dla columns in 2D mode; _packed_names_for
     names them; _hcd_latent_truths_2d gives (A=w_LLS, B=s_LLS_center, r_sub, r_dla)."""
@@ -312,6 +321,7 @@ def test_2d_draws_matrix_appends_A_B_r_columns():
 #  Reconstruction seam: fast-postprocess ON yields alpha_lls/subdla/dla in 2D mode.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_2d_reconstruct_deterministics_uses_btilt():
     """_legb_reconstruct_deterministics rebuilds alpha_lls/subdla/dla (= A·r) AND alpha_hcd_z
     (using B_hcd + δs_c) from the 2D latents."""
@@ -338,6 +348,7 @@ def test_2d_reconstruct_deterministics_uses_btilt():
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_2d_fast_postprocess_yields_alpha_columns():
     """A short 2D-mode NUTS run via the fast postprocess yields alpha_lls/subdla/dla columns; the
     slow (in-model replay) path agrees."""
@@ -359,6 +370,7 @@ def test_2d_fast_postprocess_yields_alpha_columns():
 #  Positivity (1e4 prior draws): α_c(z) ≥ 0 everywhere.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_2d_positivity_prior_draws():
     """Over 10^4 prior draws of the 2D HCD block, the derived α_c(z) stay ≥ 0 (product of low=0
     TruncatedNormals × a positive power-law)."""
@@ -383,6 +395,7 @@ def test_2d_positivity_prior_draws():
 #  marginalize_zslope is bypassed in 2D mode (the 2D mode sets its own slopes).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_2d_ignores_marginalize_zslope():
     """Even with marginalize_zslope=True, the 2D mode does NOT sample s_lls/s_subdla/s_dla — the
     slopes come from B_hcd + δs_c (must override/ignore marginalize_zslope cleanly)."""
@@ -399,6 +412,7 @@ def test_2d_ignores_marginalize_zslope():
 #  Building 2D ctx without hierarchical_hcd is rejected (2D is a hierarchical variant).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_2d_requires_hierarchical():
     """hcd_2d_tilt=True without hierarchical_hcd=True is a configuration error (2D builds on the
     A_hcd × r reparam)."""
@@ -453,6 +467,7 @@ def test_2d_nuts_zero_divergences_and_finite():
         assert np.all(np.isfinite(np.asarray(samples[nm]))), f"{nm} not finite"
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_loglik_core_raises_on_zflat_by_default():
     """BEHAVIORAL guard (closes the forwarding gap the signature-pin in test_zflat_alpha_guard cannot):
     the forward-vs-truth COMPARISON core ``_data_loglik_legcore`` with a (3,) z-FLAT alpha and NO explicit

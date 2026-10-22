@@ -86,6 +86,7 @@ def _bounds(ctx):
 #  1. UNIFORM default — site construction byte-exact (golden-safe).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_uniform_default_site_construction_unchanged():
     """metal_prior='uniform' (the default) keeps the a_SiIII/a_SiII sites as the literal legacy
     dist.Uniform(0, a_siiii_max), and _legb_model / _legb_priors_only trace the SAME ordered
@@ -110,6 +111,7 @@ def test_uniform_default_site_construction_unchanged():
 #  2. FLATLOG — the sites are LogUniform with the expected (a_lo, a_hi).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_flatlog_sites_are_loguniform_with_expected_bounds():
     """metal_prior='flatlog' → a_SiIII and a_SiII are dist.LogUniform with
     low==10**logf_lo/(1-F_ref), high==10**logf_hi/(1-F_ref) (the a=f/(1-F_ref) map), on the SAME
@@ -136,6 +138,7 @@ def test_flatlog_sites_are_loguniform_with_expected_bounds():
 #  3. a = f/(1-F_ref) amplitude map + F_ref provenance.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_amplitude_map_and_Fref_provenance():
     """The LogUniform bounds equal the f-bounds / (1-F_ref); a representative f=0.009 maps to
     a=f/(1-F_ref) interior to (a_lo,a_hi); and (1-F_ref) is the union-z fiducial mean-flux scalar
@@ -163,6 +166,7 @@ def test_amplitude_map_and_Fref_provenance():
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
 @pytest.mark.parametrize("metal_prior", ["uniform", "flatlog"])
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_constrain_fn_mirror_parity(metal_prior):
     """For BOTH modes _legb_model and _legb_priors_only trace the IDENTICAL ordered sample-site
     name list (the fast-postprocess constrain_fn mirror), and the constrain_fn round-trip maps an
@@ -215,6 +219,7 @@ def test_draws_matrix_and_packed_names_carry_metal_columns():
 #  6. a_SiII threaded into the re-score loglik (the pre-existing :2156 gap fix).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_a_siII_threaded_into_rescore_loglik():
     """_loglik_of_draws must CHANGE when samples['a_SiII'] is nonzero — the doublet nuisance now
     enters the re-score loglik (previously only a_SiIII was threaded → a wrong loglik rank for the

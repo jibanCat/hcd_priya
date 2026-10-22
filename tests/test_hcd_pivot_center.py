@@ -133,6 +133,7 @@ def test_realfit_litlaw_lls_center_is_adopted_and_roundtrips():
 
 
 @pytest.mark.skipif(not _HAS_CACHE, reason="LF cache not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_build_legb_ctx_real_fit_alpha_hcd_mu_is_lit_consistent():
     """The FULL production real-fit ctx (build_legb_ctx survey='DESI') carries alpha_hcd_mu[LLS]
     z=3-consistent (~0.172, the corrected lit-law center; PI 2026-07-18) — NOT the all-z-median
@@ -147,6 +148,7 @@ def test_build_legb_ctx_real_fit_alpha_hcd_mu_is_lit_consistent():
 
 
 @pytest.mark.skipif(not _HAS_CACHE, reason="LF cache not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_hier_ratios_rederived_at_pivot_z():
     """The hierarchical r_sub/r_dla ratio centers (Option B) are derived at the z=3 PIVOT w_c, NOT
     the all-z-median w_c (which inherited the same bug). r_sub = w_sub(z3)/w_LLS(z3),

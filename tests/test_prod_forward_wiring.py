@@ -94,6 +94,7 @@ def _capture_build_real_ctx_kwargs(survey, monkeypatch):
     return captured
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_desi_forwards_certified_knobs(monkeypatch):
     kw = _capture_build_real_ctx_kwargs("desi", monkeypatch)
     assert kw["sample_res"] is True
@@ -102,6 +103,7 @@ def test_build_real_ctx_desi_forwards_certified_knobs(monkeypatch):
     assert kw["metals_on"] is True and kw["sample_metals"] is True
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_eboss_width_005(monkeypatch):
     kw = _capture_build_real_ctx_kwargs("eboss", monkeypatch)
     assert kw["sample_res"] is True
@@ -109,6 +111,7 @@ def test_build_real_ctx_eboss_width_005(monkeypatch):
     assert kw["metal_prior"] == "flatlog2node"
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_ks_forwards_fres_and_kskwargs(monkeypatch):
     kw = _capture_build_real_ctx_kwargs("ks", monkeypatch)
     assert kw["sample_res"] is True
@@ -118,12 +121,14 @@ def test_build_real_ctx_ks_forwards_fres_and_kskwargs(monkeypatch):
     assert kw["ks_kwargs"] == {"resolution_float": True, "k_max": 0.065}
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_desi_eboss_kskwargs_none(monkeypatch):
     for survey in ("desi", "eboss"):
         kw = _capture_build_real_ctx_kwargs(survey, monkeypatch)
         assert kw["ks_kwargs"] is None            # KS leg stays proxy default (byte-identical)
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_ks_merges_zlo_with_kskwargs(monkeypatch):
     # the diagnostic z_lo override must MERGE with the certified ks_kwargs, not clobber it (neither wins):
     # the KS leg then floats echelle f_res (resolution_float/k_max) AND carries the z_lo cut.

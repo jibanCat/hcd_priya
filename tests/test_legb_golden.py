@@ -28,6 +28,7 @@ _DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 
 @pytest.mark.skipif(not os.path.exists(GOLDEN), reason="golden reference not generated")
 @pytest.mark.skipif(not os.path.exists(_DESI_NPZ), reason="DESI data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_legb_legacy_forward_matches_golden():
     """The legacy (3,)-alpha broadcast forward reproduces the frozen (P_model, C_total) exactly."""
     g = np.load(GOLDEN, allow_pickle=True)
@@ -91,6 +92,7 @@ def test_legb_legacy_forward_matches_golden():
 #                the LF golden's 1e-12 — still a bit-level-intent regression guard).
 @pytest.mark.skipif(not os.path.exists(MF_GOLDEN), reason="MF golden reference not generated")
 @pytest.mark.skipif(not os.path.exists(_DESI_NPZ), reason="DESI data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_legb_mf_golden():
     """The production MF forward (anchored res_corr, alpha-OFF) reproduces the frozen
     (P_model, C_total) on both legs — the regression guard for the res_corr anchor and

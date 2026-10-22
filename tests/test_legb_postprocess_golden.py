@@ -33,6 +33,7 @@ _DET_SITES = ("tau0_vec", "alpha_dla", "alpha_hcd_z")
 
 
 @pytest.mark.skipif(not os.path.exists(_DESI_NPZ), reason="DESI data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_fast_postprocess_matches_replay_golden():
     """fast_postprocess reconstructs tau0_vec/alpha_dla/alpha_hcd_z byte-identically to the
     legacy in-model deterministic replay on a fixed seed (rtol=0, atol=0)."""

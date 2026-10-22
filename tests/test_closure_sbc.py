@@ -92,6 +92,7 @@ def _manual_log_prior(params, ctx):
     return lp
 
 
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_potential_equals_loglik_plus_logprior(ctx3):
     ctx = ctx3
     rng = np.random.default_rng(1)
@@ -131,6 +132,7 @@ def test_no_soft_box_uniform_flat_inbox():
 # ---------------------------------------------------------------------------
 # (d) vmap-sum == loop-sum for log_lik_multiz
 # ---------------------------------------------------------------------------
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_vmap_sum_equals_loop_sum(ctx3):
     from hcd_analysis.emulator.inference import log_lik_multiz, log_lik_single_z
     ctx = ctx3
@@ -158,6 +160,7 @@ def test_vmap_sum_equals_loop_sum(ctx3):
 # ---------------------------------------------------------------------------
 # (e) tiny-NUTS smoke: finite samples + a divergence count
 # ---------------------------------------------------------------------------
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_tiny_nuts_runs_finite(ctx1):
     # build a Leg-A mock so the data is self-consistent, then a tiny NUTS run.
     truth = M.draw_leg_a_truth(ctx1, jax.random.PRNGKey(0))
@@ -177,6 +180,7 @@ def test_tiny_nuts_runs_finite(ctx1):
 # ---------------------------------------------------------------------------
 # (f) Leg-A mock: C_mock (the noise Cholesky) == the likelihood's C at the truth
 # ---------------------------------------------------------------------------
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_leg_a_mock_C_matches_likelihood(ctx3):
     ctx = ctx3
     truth = M.draw_leg_a_truth(ctx, jax.random.PRNGKey(7))

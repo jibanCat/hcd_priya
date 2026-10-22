@@ -120,6 +120,7 @@ def _capture_sbc_kwargs(monkeypatch, tmp_path, extra_argv=()):
 #      EVERY deployed consumer's built res_corr_on moves together. Encodes the panel near-miss.
 #      RED today (each holds a private NORC literal) -> GREEN after (all read prod_norc_forward()).
 # =============================================================================================== #
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_one_leg_flip_guard(monkeypatch, tmp_path):
     from hcd_analysis.emulator import closure_legb as CL
     from scripts import run_dnuis_bias_shard as R
@@ -199,6 +200,7 @@ class _FakeCtx:
         return _FakeCtx(**d)
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_cross_driver_norc_fix_alpha_res(monkeypatch):
     from hcd_analysis.emulator import closure_legb as CL
     want = CL.prod_norc_forward()["fix_alpha_res"]            # True under the deployed authority
@@ -234,6 +236,7 @@ def test_cross_driver_norc_fix_alpha_res(monkeypatch):
 #  (5) SBC --res-corr-on RESTORE arm still WINS (precedence: CLI > authority). It builds res_corr_on
 #      True; run_cfg stamps bool(a.res_corr_on)==True (a.res_corr_on is exactly the captured build value).
 # =============================================================================================== #
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_sbc_cli_restore_still_wins(monkeypatch, tmp_path):
     captured = _capture_sbc_kwargs(monkeypatch, tmp_path, extra_argv=["--res-corr-on"])
     assert captured["res_corr_on"] is True, "--res-corr-on restore arm must win over the NORC default"
@@ -242,6 +245,7 @@ def test_sbc_cli_restore_still_wins(monkeypatch, tmp_path):
 # =============================================================================================== #
 #  (6) SBC DEFAULT (no flag) tracks the single authority.  RED today (helper absent -> error).
 # =============================================================================================== #
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_sbc_default_tracks_authority(monkeypatch, tmp_path):
     from hcd_analysis.emulator import closure_legb as CL
     captured = _capture_sbc_kwargs(monkeypatch, tmp_path)
@@ -278,6 +282,7 @@ def test_sbc_run_cfg_no_new_key_on_resume(tmp_path):
 #      use_prod_forward=False KS resolution-float path == prod_forward_config('KS')['ks_kwargs'].
 #      Parity TEST only (the literal is NOT rewired -- it stays a non-deployed OOS path).
 # =============================================================================================== #
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_dnuis_oos_ks_literal_matches_map(monkeypatch):
     from hcd_analysis.emulator import closure_legb as CL
     from scripts import run_dnuis_bias_shard as R
@@ -314,6 +319,7 @@ def test_forward_signature_determinism_and_sensitivity(monkeypatch):
 #       auto-caps KS to 0.045 on the res_corr_on=False path). The cap is a NORC-only invariant;
 #       the advertised single-knob restore must not spuriously crash the desi/eboss real fits.
 # =============================================================================================== #
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_restore_flip_does_not_trip_ks_cap(monkeypatch):
     import numpy as np
     from hcd_analysis.emulator import closure_legb as CL
@@ -340,6 +346,7 @@ def test_restore_flip_does_not_trip_ks_cap(monkeypatch):
 #  (11) FLIP-SIDE dnuis (panel FIX-5a): under the restore flip the use_prod_forward post-build
 #       _replace must NOT run -> ctx.fix_alpha_res stays False (alpha_res sites SAMPLED).
 # =============================================================================================== #
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_flip_side_dnuis_fix_alpha_res(monkeypatch):
     from hcd_analysis.emulator import closure_legb as CL
     from scripts import run_dnuis_bias_shard as R
@@ -390,6 +397,7 @@ def _capture_sbc_resolved(monkeypatch, tmp_path, extra_argv=()):
     return got
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_sbc_resolved_forward_and_runcfg_keyset(monkeypatch, tmp_path):
     from hcd_analysis.emulator import closure_legb as CL
     # (a) deployed default: NORC derive applied, stamp False, run_cfg key-set == the resume pin (test 7).

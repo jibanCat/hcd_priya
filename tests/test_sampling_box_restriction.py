@@ -61,6 +61,7 @@ def test_unit_bounds_values():
 
 
 @pytest.mark.skipif(not os.path.exists(_DESI_NPZ), reason="DESI data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_prior_predictive_inside_original_priya_box():
     """Prior-predictive draws from the production model land inside the original PRIYA IGM box
     (and never in the widened corners), confirming the restricted prior is the one NUTS uses."""

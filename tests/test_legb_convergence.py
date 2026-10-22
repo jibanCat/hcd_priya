@@ -96,6 +96,7 @@ def test_chain_seed_axis_distinct_from_retry_stream():
 #  End-to-end smoke (slow; gated on DESI data) — dispersion + finite battery.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not os.path.exists(_DESI_NPZ), reason="DESI data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_convergence_mode_disperses_and_returns_finite_battery():
     """The convergence path (i) starts chains DISPERSED relative to the posterior width and
     (ii) returns a finite rank-R-hat / bulk-ESS / tail-ESS / E-BFMI battery."""

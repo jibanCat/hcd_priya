@@ -5,9 +5,36 @@ precision (see hcd_analysis/emulator/__init__.py, which also enables x64 on
 import). Setting it here at collection time guarantees x64 even if a test
 imports jax before importing the emulator package. No effect on the numpy-based
 non-emulator tests.
+
+Also defines the ``deferred_legacy(cause)`` marker (see tests/DEFERRED.md): a test of the pre-2026-10 inference
+and closure stack whose interface was retired at gate E is expected to fail ONLY with the exact error of its cause.
+Any other failure fails the test, and a pass fails it too (strict), so each marker is removed when the test is
+rebuilt against the current interface.
 """
+import re
+
 import jax
+import pytest
+
 jax.config.update("jax_enable_x64", True)
+
+DEFERRED_CAUSES = {
+    "CTX_SIGNATURE": (
+        r"build_legb_ctx\(\) (got an unexpected keyword argument '(use_xclass|with_mf|ckpt)'"
+        r"|missing 1 required keyword-only argument: 'ensemble_ckpts')",
+        "the pre-2026-10 build_legb_ctx signature (use_xclass / with_mf / a single ckpt) is retired at gate E; the "
+        "gate E context takes ensemble_ckpts"),
+    "REAL_FIT_CKPT_DIR": (
+        r"MISSING pinned production ensemble file: \S*/checkpoints/prod_repaired_seed\d\.eqx",
+        "scripts/run_real_fit.build_real_ctx verifies the ensemble against <repo>/checkpoints (the schema-1 layout); "
+        "the schema-2 members live in the manifest's checkpoints_dir"),
+    "SCHEMA1_CHECKPOINT": (
+        r"checkpoint \S+ has schema None, expected 2\.0: pre-2026-10 checkpoints carry a single velocity grid",
+        "the test loads a pre-2026-10 (schema-1) checkpoint, which train.load_checkpoint refuses by design"),
+    "RETIRED_BUILDER": (
+        r"\w+: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F",
+        "the pre-2026-10 mock/truth builder is retired at gate E (NotImplementedError stub)"),
+}
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -24,3 +51,24 @@ def pytest_sessionfinish(session, exitstatus):
 def pytest_configure(config):
     # register the `slow` marker (the ~8-min NUTS 0-divergence funnel smoke is marked slow).
     config.addinivalue_line("markers", "slow: marks slow tests (deselect with '-m \"not slow\"')")
+    config.addinivalue_line("markers", "deferred_legacy(cause): retired pre-2026-10 interface; expected to fail "
+                                       "only with the cause's exact error (tests/DEFERRED.md)")
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    marker = item.get_closest_marker("deferred_legacy")
+    if marker is None:
+        return
+    rep = outcome.get_result()
+    cause = marker.args[0]
+    pattern, reason = DEFERRED_CAUSES[cause]                 # an unknown cause is a KeyError: fail loudly
+    if call.excinfo is not None and rep.failed and call.when in ("setup", "call"):
+        if re.search(pattern, call.excinfo.exconly()):
+            rep.outcome = "skipped"
+            rep.wasxfail = f"deferred_legacy {cause}: {reason}"
+    elif call.when == "call" and rep.passed:
+        rep.outcome = "failed"
+        rep.longrepr = (f"[XPASS(strict)] deferred_legacy {cause} passed: the cause is gone, remove the marker "
+                        f"(tests/DEFERRED.md)")

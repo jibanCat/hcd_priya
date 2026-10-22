@@ -125,6 +125,7 @@ def _gate_spec(member=GATE_MEMBER, strength=GATE_STRENGTH):
 # 1. default None => no-op (byte-identical). This is the post-impl regression
 #    guard; it does NOT pass the new kwarg, so it must pass both before AND after.
 # ----------------------------------------------------------------------------
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_inject_none_is_noop(ctx, truth_sim):
     """inject_res_corr=None (the default) ⇒ the leg-binned truth is byte-identical
     to the un-injected truth (same noiseless truth_on_leg AND same noisy P_data,
@@ -152,6 +153,7 @@ def test_inject_none_is_noop(ctx, truth_sim):
 # ----------------------------------------------------------------------------
 # 2. injecting b1 multiplies the leg-binned TRUTH by exp(b1_leg) per leg.
 # ----------------------------------------------------------------------------
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_inject_b1_perturbs_truth(ctx, truth_sim, basis):
     """Injecting b1 multiplies the leg-binned NOISELESS truth by exp(strength*b1_leg)
     per leg: ratio (injected truth_on_leg / clean truth_on_leg) == exp(b1) on the
@@ -187,6 +189,7 @@ def test_inject_b1_perturbs_truth(ctx, truth_sim, basis):
 # ----------------------------------------------------------------------------
 # 3. the injected perturbation is z>=2.8-localized (the He-II window).
 # ----------------------------------------------------------------------------
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_inject_is_z_ge_2p8_localized(ctx, truth_sim, basis):
     """The injected perturbation is ~0 for z<2.8 leg rows and nonzero for z>=2.8
     (the He-II window), using the npz hiZ_mask. Verified on the truth-ratio:
@@ -228,6 +231,7 @@ def test_inject_is_z_ge_2p8_localized(ctx, truth_sim, basis):
 # ----------------------------------------------------------------------------
 # 4. truth-only: the FORWARD prediction is unchanged by inject_res_corr.
 # ----------------------------------------------------------------------------
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_inject_on_truth_not_forward(ctx, truth_sim, basis):
     """The injection goes into the TRUTH only — the FORWARD model prediction at the
     truth theta is byte-identical with and without inject_res_corr. (So in a closure

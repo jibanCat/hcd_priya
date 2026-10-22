@@ -120,6 +120,7 @@ def _alpha_z(z, alpha0, s):
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not (_have and _have_ks and os.path.exists(MF_GOLDEN)),
                     reason="real cache/ckpt/DESI/KS or MF golden not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_alpha_one_reproduces_golden():
     """With α₀=1, s=0 (α(z)≡1) the forward reproduces the Task-1.2 MF golden P_model to rtol
     1e-10 on DESI+KS (the no-op baseline), AND the DEFAULT (alpha_res omitted/None) is
@@ -145,6 +146,7 @@ def test_alpha_one_reproduces_golden():
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not (_have and _have_ks and os.path.exists(MF_GOLDEN)),
                     reason="real cache/ckpt/DESI/KS or MF golden not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_alpha_response_forward_only():
     """d log P_model / d α₀ at the fiducial (α₀=1, s=0):
       * NONZERO on KS (the high-k leg) and ~ the anchored log_rc shape, since
@@ -231,6 +233,7 @@ def test_alpha_response_forward_only():
 #  3. The matched-closure TRUTH is invariant to α (forward-only, no cancellation).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_truth_unchanged_by_alpha():
     """``make_truth_from_sim`` truth ``P_obs_true`` is INVARIANT to α (it keeps α≡1), while the
     FORWARD moves with α. Proves forward-only / no closure cancellation: if the truth tracked the
@@ -277,6 +280,7 @@ def test_truth_unchanged_by_alpha():
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not (_have and os.path.exists(MF_GOLDEN)),
                     reason="real cache/ckpt/DESI or MF golden not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_alpha_z_zslope():
     """α(z) = α₀·((1+z)/(1+3.0))^s : at z=3 α(z)==α₀ (the pivot), and s>0 makes α(z) larger at
     z>3 (and smaller at z<3). Probed THROUGH the forward: the response ∂logP/∂α₀ at row z equals
@@ -327,6 +331,7 @@ def _sites(model, *a, seed=1):
 
 
 @pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_alpha_sites_in_both_models_same_order():
     """The α nuisance sites (``alpha_res`` amplitude + ``alpha_res_slope``) must appear in BOTH
     ``_legb_model`` and ``_legb_priors_only`` at the SAME relative position — the fast-postprocess

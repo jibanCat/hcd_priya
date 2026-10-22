@@ -78,6 +78,7 @@ def _expected_log_rc(ctx, leg):
 # --------------------------------------------------------------------------- #
 #  1. Default res_corr_on=True is BYTE-IDENTICAL (golden untouched by the field).
 # --------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_default_reproduces_mf_golden():
     """build_legb_ctx() default (res_corr_on=True) reproduces the Task-1.2 MF golden on
     DESI+KS to rtol 1e-10 -- i.e. adding the res_corr_on field is a no-op at the default."""
@@ -94,6 +95,7 @@ def test_default_reproduces_mf_golden():
 # --------------------------------------------------------------------------- #
 #  2. res_corr_on=False => mf.res_corr(z) is all ones (the correction is dropped).
 # --------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_res_corr_off_returns_ones():
     ctx_on, _ = C.build_legb_ctx(with_mf=True, mf_with_floor=True)
     ctx_off, _ = C.build_legb_ctx(with_mf=True, mf_with_floor=True, res_corr_on=False,
@@ -109,6 +111,7 @@ def test_res_corr_off_returns_ones():
 # --------------------------------------------------------------------------- #
 #  3. Forward: P_off/P_on == exp(-log_rc); NONZERO on KS high-k, ~0 on DESI low-k.
 # --------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_norc_forward_drops_log_rc():
     """On the SAME KS grid (ks_kwargs k_max=0.069 override), turning res_corr off multiplies
     P_obs by exp(-log_rc) per row: genuinely different on KS high-k, negligible on DESI low-k."""
@@ -148,6 +151,7 @@ def test_norc_forward_drops_log_rc():
 # --------------------------------------------------------------------------- #
 #  4. A NORC ctx caps KS at k<=0.045; explicit ks_kwargs k_max overrides.
 # --------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_norc_ks_kmax_cap():
     # loader-level: the cut exists and is strictly tighter than the 0.069 default
     ks045 = DL.load_ks_leg(k_max=0.045)

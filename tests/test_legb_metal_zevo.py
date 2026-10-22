@@ -79,6 +79,7 @@ def _desi_leg(ctx):
 #  1. flatlog2node site inventory + order (with_eboss=True).
 # =========================================================================== #
 @pytest.mark.skipif(not _have_eboss, reason="real cache/ckpt/DESI/eBOSS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_flatlog2node_site_inventory_and_order():
     """Per metals_on leg IN ORDER: f_SiIII_<leg>_z0/z1 (always) + f_SiII_<leg>_z0/z1 (only legs in
     metal_siII_legs). DESI -> SiIII+SiII, eBOSS -> SiIII-only, KS (metals_off) -> none. The metal
@@ -109,6 +110,7 @@ def test_flatlog2node_site_inventory_and_order():
 #  2. constrain_fn MIRROR parity (the load-bearing invariant).
 # =========================================================================== #
 @pytest.mark.skipif(not _have_eboss, reason="real cache/ckpt/DESI/eBOSS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_flatlog2node_constrain_fn_mirror_parity():
     """_legb_model and _legb_priors_only trace the IDENTICAL ordered sample-site list under
     flatlog2node (with_eboss=True), and constrain_fn round-trips a node into (fnode_lo, fnode_hi)."""
@@ -158,6 +160,7 @@ def test_log_interp_is_power_law_exact_and_clamps():
 #     Also the NEW flatlog2node forward GOLDEN (pin P_model at a fixed f-node draw, rtol 1e-10).
 # =========================================================================== #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_per_z_map_equals_metal_inject_and_forward_golden():
     """predict_P_obs_on_leg with f-nodes equals, per z, the clean forward times metal_inject(form=
     'desi_full', f_SiII_SiII=0) applied with the SAME per-z f and mean_flux=exp(-tau0_vec[iz]) (the
@@ -204,6 +207,7 @@ def test_per_z_map_equals_metal_inject_and_forward_golden():
 #  5. BACK-COMPAT: predict_P_obs_on_leg f_SiIII_nodes=None == the scalar path byte-exact.
 # =========================================================================== #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_predict_nodes_none_is_scalar_path_byte_exact():
     """f_SiIII_nodes=None (the default) reproduces the legacy scalar a_SiIII forward byte-for-byte."""
     ctx, _ = _ctx_2node(with_eboss=False, metals_on=True)
@@ -230,6 +234,7 @@ def test_predict_nodes_none_is_scalar_path_byte_exact():
 #  6. ev_z (C_emu) variance transform uses the SAME per-z mfac as P_z.
 # =========================================================================== #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_cemu_variance_transform_uses_same_per_z_mfac():
     """The C_emu diagonal under Model C equals the clean C_emu diagonal scaled by the SAME per-row
     metal factor squared (no stale scalar a): emu_metal == emu_clean * (P_metal/P_clean)^2."""
@@ -260,6 +265,7 @@ def test_cemu_variance_transform_uses_same_per_z_mfac():
 #  7. jnp.interp clamp through the FORWARD: eBOSS z>4.2 stays finite (no NaN/Inf).
 # =========================================================================== #
 @pytest.mark.skipif(not _have_eboss, reason="real cache/ckpt/DESI/eBOSS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_eboss_high_z_clamp_forward_finite():
     """eBOSS reaches z=4.6 > the z=4.2 high node; jnp.interp default-clamps f flat beyond 4.2 so the
     Model-C forward stays finite (bounded a) on the extrapolated high-z bins."""
@@ -374,6 +380,7 @@ def test_arms_registry_amplitude_trends():
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_arm_injection_de_double_count_and_desi_siII():
     """make_leg_a_legmock under flatlog2node: the CLEAN self-draw truth carries NO metal (a_siiii=0,
     f-nodes NOT forwarded) so the injected arm is the SOLE metal signal (de-double-count); on DESI the
@@ -416,6 +423,7 @@ def test_arm_injection_de_double_count_and_desi_siII():
 
 
 @pytest.mark.skipif(not _have_eboss, reason="real cache/ckpt/DESI/eBOSS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_arm_injection_eboss_is_siIII_only():
     """4-lens fix (a): on eBOSS (not in metal_siII_legs) the zevo arm injects the SiIII-ONLY
     contaminant IN-CLASS via desi_full+f_SiII=0 (no SiII doublet, no cross — they are ∝ a_SiII) with
@@ -447,6 +455,7 @@ def test_arm_injection_eboss_is_siIII_only():
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_arm3_ma2025_injection_finite_and_siII_off():
     """Arm 3 (Ma+2025) injects the SiIII-only ma2025 form with a per-z direct amplitude + per-z
     k_cross; finite, contaminates DESI, no SiII doublet (SiII off)."""

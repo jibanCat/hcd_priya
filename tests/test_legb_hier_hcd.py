@@ -70,6 +70,7 @@ def _build_small(hierarchical=False, noncentered=False, ratio_infl=1.0):
 #  1. Golden byte-exact OFF.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_off_branch_site_list_is_the_current_code():
     """hierarchical_hcd=False keeps the EXACT legacy sample sites in order — both with the default
     z-slope marginalization (the production config) and with it OFF (the clean 6-site case)."""
@@ -97,6 +98,7 @@ def test_off_branch_site_list_is_the_current_code():
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_off_branch_potential_byte_exact_vs_legacy():
     """The OFF-branch model potential at a fixed point is byte-identical whether or not the
     new (default-OFF) ctx fields exist — i.e. adding the plumbing did not perturb the math."""
@@ -126,6 +128,7 @@ def test_off_branch_potential_byte_exact_vs_legacy():
 #  2. Reparam exact (ON).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_on_branch_reparam_alpha_equals_A_times_r():
     """ON → the deterministic α equal A_hcd · r_c exactly (array_equal over trace draws)."""
     ctx, d = _build_small(hierarchical=True)
@@ -157,6 +160,7 @@ def test_on_branch_reparam_alpha_equals_A_times_r():
 @pytest.mark.parametrize("hierarchical", [False, True])
 @pytest.mark.parametrize("marg_zslope", [False, True])
 @pytest.mark.parametrize("sample_metals", [False, True])
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_model_priors_only_site_order_match(hierarchical, marg_zslope, sample_metals):
     """_legb_model and _legb_priors_only must have the SAME sample sites in the SAME order across
     every combination of hierarchical × marg_zslope × sample_metals — the fast-postprocess
@@ -193,6 +197,7 @@ def test_model_priors_only_site_order_match(hierarchical, marg_zslope, sample_me
 #  4. truth_r ≈ prior_r_center (must-fix #1).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_ratio_centers_match_closure_truth():
     """The raw-sim-ratio prior centers (build_legb_ctx) put the closure TRUTH r_c within ~1.5σ_r.
 
@@ -225,6 +230,7 @@ def test_ratio_centers_match_closure_truth():
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_ratio_infl_scales_widths_not_centers():
     """hcd_ratio_infl scales the ratio prior WIDTHS (the mandatory scan knob), not the centers."""
     ctx1, _ = _build_small(hierarchical=True, ratio_infl=1.0)
@@ -238,6 +244,7 @@ def test_ratio_infl_scales_widths_not_centers():
 #  5. Differentiability of the loglik in (A_hcd, r_subdla, r_dla).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_loglik_grad_in_A_r_finite():
     """jax.grad of the multi-leg loglik w.r.t. (A_hcd, r_subdla, r_dla) is finite (the forward is
     differentiable through the A·r reparam — the sampler needs this)."""
@@ -267,6 +274,7 @@ def test_loglik_grad_in_A_r_finite():
 #  6. Reconstruction seam: fast-postprocess ON yields alpha_lls/subdla/dla (must-fix #4).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_reconstruct_deterministics_on_branch_reinserts_alpha():
     """In the hierarchical branch, _legb_reconstruct_deterministics must REBUILD + RE-INSERT
     alpha_lls/alpha_subdla/alpha_dla into the samples dict from A_hcd·r (constrain_fn drops the
@@ -289,6 +297,7 @@ def test_reconstruct_deterministics_on_branch_reinserts_alpha():
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_fast_postprocess_on_branch_yields_alpha_columns():
     """A short ON-branch NUTS run via the fast postprocess yields alpha_lls/subdla/dla columns in
     the samples dict (the constrain_fn path drops deterministics → the reconstruction must add

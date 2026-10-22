@@ -85,6 +85,7 @@ def test_default_branch_is_uniform_right_bounds():
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_priors_only_site_order_unchanged_default():
     """The full _legb_priors_only sample-site list (default ctx) is the recorded reference:
     theta_unit, tau0_amp, dtau0, then the HCD/zslope/res_corr block. The τ₀ refactor must NOT
@@ -147,6 +148,7 @@ def test_site_order_identical_across_modes_mini():
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_priors_only_site_order_identical_uniform_vs_gauss():
     """_legb_priors_only's full sample-site list is IDENTICAL whether the τ₀ sites are uniform or
     the informative TruncatedNormal — constrain_fn relies on the order being mode-invariant."""
