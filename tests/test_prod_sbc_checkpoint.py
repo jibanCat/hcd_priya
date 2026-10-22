@@ -21,6 +21,7 @@ import numpy as np
 import pytest
 
 from hcd_analysis.emulator import closure_legb as LB
+from tests.gate_helpers import raise_if_deferred  # noqa: E402
 
 REPO = _REPO_ROOT
 
@@ -49,6 +50,7 @@ def ctx_d():
     try:
         return LB.build_legb_ctx(use_xclass=True)        # light baseline (xclass ρ; no MF/eBOSS)
     except Exception as e:                               # data/checkpoint absent in this env
+        raise_if_deferred(e)                             # a retired interface is deferred, not absent
         pytest.skip(f"build_legb_ctx unavailable: {e}")
 
 
@@ -61,6 +63,7 @@ def _rec_close(a, b):
     assert np.allclose(float(a["ll_true"]), float(b["ll_true"]), rtol=0, atol=1e-8)
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_run_one_mock_writes_skips_and_reproduces(runner, ctx_d, tmp_path):
     ctx, d = ctx_d
     out = str(tmp_path / "armB")
@@ -88,6 +91,7 @@ def test_run_one_mock_writes_skips_and_reproduces(runner, ctx_d, tmp_path):
     _rec_close(rec, ref)
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_merge_globs_mock_pkls(merger, runner, ctx_d, tmp_path):
     """merge_prod_sbc_shards reads bare mock_*.pkl (no shard pkl needed) and aggregates."""
     ctx, d = ctx_d

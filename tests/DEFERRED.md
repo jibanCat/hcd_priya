@@ -1,6 +1,6 @@
 # Deferred tests of the pre-2026-10 inference and closure stack
 
-136 functions (154 test nodes, measured on the real data links) in 28 files.
+150 functions (168 test nodes, measured on the real data links) in 30 files.
 
 Gate E (the 2026 k-grid fix, `docs/kgrid_incident_2026-10.md`) retired the pre-2026-10 closure and inference
 interfaces. The tests below exercise those interfaces. Each carries `@pytest.mark.deferred_legacy(CAUSE)`:
@@ -12,10 +12,19 @@ interfaces is follow-up work.
 The 7 strict `xfail` markers (9 test nodes) of the retired mock/truth builders and the 9 lock-generator tests
 (`LockGeneratorDeferred`) are separate and documented at their definitions.
 
-## CTX_SIGNATURE (106 functions, 124 test nodes)
+## CTX_SIGNATURE (120 functions, 138 test nodes)
 
 the pre-2026-10 `build_legb_ctx` signature (`use_xclass`, `with_mf`, a single `ckpt`) is retired at gate E; the gate E context takes `ensemble_ckpts`.
 
+- `tests/test_dnuis_inject.py`:
+  - `test_inject_spec_none_is_noop`
+  - `test_meanflux_on_leg_is_exp_minus_tau0_global`
+  - `test_metal_misspec_changes_metals_leg_not_clean_leg`
+  - `test_resolution_injection_is_exp_2b_k2_R2`
+  - `test_resolution_vector_injection_is_per_z_exp`
+  - `test_resolution_vector_on_unready_leg_raises`
+  - `test_run_legb_inject_spec_none_matches_default_mock`
+  - `test_run_legb_with_lls_excess_runs_and_offsets_truth`
 - `tests/test_eboss_leg.py`:
   - `test_legb_model_priors_only_site_order_match` (4 parametrized nodes)
 - `tests/test_hcd_pivot_center.py`:
@@ -70,6 +79,10 @@ the pre-2026-10 `build_legb_ctx` signature (`use_xclass`, `with_mf`, a single `c
   - `test_reconstruct_deterministics_on_branch_reinserts_alpha`
 - `tests/test_legb_leg_a.py`:
   - `test_build_legb_ctx_ensemble`
+  - `test_draw_leg_a_leg_truth`
+  - `test_leg_a_legmock_is_a_matched_self_draw`
+  - `test_run_legb_leg_a_end_to_end`
+  - `test_run_legb_leg_a_metals_no_offbyone`
 - `tests/test_legb_metal_flatlog.py`:
   - `test_a_siII_threaded_into_rescore_loglik`
   - `test_amplitude_map_and_Fref_provenance`
@@ -122,6 +135,9 @@ the pre-2026-10 `build_legb_ctx` signature (`use_xclass`, `with_mf`, a single `c
   - `test_norc_forward_drops_log_rc`
   - `test_norc_ks_kmax_cap`
   - `test_res_corr_off_returns_ones`
+- `tests/test_prod_sbc_checkpoint.py`:
+  - `test_merge_globs_mock_pkls`
+  - `test_run_one_mock_writes_skips_and_reproduces`
 - `tests/test_res_corr_alpha.py`:
   - `test_alpha_one_reproduces_golden`
   - `test_alpha_response_forward_only`

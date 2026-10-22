@@ -18,23 +18,7 @@ import pytest
 
 jax.config.update("jax_enable_x64", True)
 
-DEFERRED_CAUSES = {
-    "CTX_SIGNATURE": (
-        r"build_legb_ctx\(\) (got an unexpected keyword argument '(use_xclass|with_mf|ckpt)'"
-        r"|missing 1 required keyword-only argument: 'ensemble_ckpts')",
-        "the pre-2026-10 build_legb_ctx signature (use_xclass / with_mf / a single ckpt) is retired at gate E; the "
-        "gate E context takes ensemble_ckpts"),
-    "REAL_FIT_CKPT_DIR": (
-        r"MISSING pinned production ensemble file: \S*/checkpoints/prod_repaired_seed\d\.eqx",
-        "scripts/run_real_fit.build_real_ctx verifies the ensemble against <repo>/checkpoints (the schema-1 layout); "
-        "the schema-2 members live in the manifest's checkpoints_dir"),
-    "SCHEMA1_CHECKPOINT": (
-        r"checkpoint \S+ has schema None, expected 2\.0: pre-2026-10 checkpoints carry a single velocity grid",
-        "the test loads a pre-2026-10 (schema-1) checkpoint, which train.load_checkpoint refuses by design"),
-    "RETIRED_BUILDER": (
-        r"\w+: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F",
-        "the pre-2026-10 mock/truth builder is retired at gate E (NotImplementedError stub)"),
-}
+from tests.gate_helpers import DEFERRED_CAUSES  # noqa: E402  (the patterns live with the guards)
 
 
 def pytest_sessionfinish(session, exitstatus):

@@ -27,6 +27,7 @@ from hcd_analysis.emulator import closure_legb as LB
 from hcd_analysis.emulator import data_likelihood as DL
 from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator.ensemble import EnsembleEmulator
+from tests.gate_helpers import raise_if_deferred  # noqa: E402
 
 REPO = _REPO_ROOT
 PROD = f"{REPO}/checkpoints/final_prod_seed"
@@ -37,6 +38,7 @@ def ctx_d():
     try:
         return LB.build_legb_ctx(use_xclass=True)        # light baseline (xclass ρ; no MF/eBOSS)
     except Exception as e:                               # data/checkpoint absent in this env
+        raise_if_deferred(e)                             # a retired interface is deferred, not absent
         pytest.skip(f"build_legb_ctx unavailable: {e}")
 
 
@@ -55,6 +57,7 @@ def _predict_leg_at_truth(ctx, leg, tp, core):
         cemu_inflate=ctx.cemu_inflate, rho_zb=rzb, mf=ctx.mf, mf_floor=ctx.mf_floor)
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_draw_leg_a_leg_truth(ctx_d):
     ctx, d = ctx_d
     nZg = len(ctx.z_global)
@@ -77,6 +80,7 @@ def test_draw_leg_a_leg_truth(ctx_d):
                               np.asarray(LB.draw_leg_a_leg_truth(ctx, jax.random.PRNGKey(1))["theta9"]))
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_leg_a_legmock_is_a_matched_self_draw(ctx_d):
     """The Leg-A self-draw property: noiseless mock == P_model(truth) and the noise Cholesky
     == chol(C_total(truth)) — both from the SAME predict_P_obs_on_leg the likelihood calls."""
@@ -101,6 +105,7 @@ def test_leg_a_legmock_is_a_matched_self_draw(ctx_d):
                                np.asarray(P_ref))
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_run_legb_leg_a_end_to_end(ctx_d):
     """run_legb(leg_a=True) produces per-mock records compatible with aggregate_leg_a (the
     shard→merge path the pilot uses). One tiny NUTS on the single-model leg ctx."""
@@ -115,6 +120,7 @@ def test_run_legb_leg_a_end_to_end(ctx_d):
     assert "ranks" in res and "names" in res and "L" in res
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_run_legb_leg_a_metals_no_offbyone():
     """Pilot-blocker guard: with sample_metals (the pilot baseline), run_legb(leg_a) must produce
     truth_vec/draws/names that ALIGN (the a_SiIII column), and aggregate_leg_a must not crash."""
@@ -122,6 +128,7 @@ def test_run_legb_leg_a_metals_no_offbyone():
     try:
         ctx, d = LB.build_legb_ctx(use_xclass=True, sample_metals=True)
     except Exception as e:
+        raise_if_deferred(e)
         pytest.skip(f"metals ctx unavailable: {e}")
     recs = LB.run_legb(ctx, d, n_mocks=1, mock_indices=[0], return_per_mock=True, leg_a=True,
                        n_warmup=8, n_samples=8, seed=0, verbose=False)
