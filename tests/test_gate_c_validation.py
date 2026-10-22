@@ -1,4 +1,4 @@
-"""Gate C building blocks (spec hcd_priya_notes docs/superpowers/emulator-debug-2026-10/GATE_C_SPEC.md): the production
+"""Gate C building blocks (internal spec GATE_C_SPEC): the production
 row split with an optional held-out simulation (upstream-matched 60-fold protocol), the coordinate-agreement check (C1),
 interpolation onto a fixed physical grid that refuses extrapolation, and matching of our held-out predictions to the
 upstream leave-one-out product (C4)."""

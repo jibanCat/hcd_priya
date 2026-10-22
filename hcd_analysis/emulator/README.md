@@ -15,8 +15,8 @@ it does, why it is built the way it is, and how to **use the deployed ensemble**
 > DLA-core and T1/T3 products live outside the repository). The Stamp, the deployed-object note
 > (`final_prod_seed{0..4}`) and the instructions on how `scripts/run_real_fit.py` and the SBC drivers invoke the
 > emulator are historical: those drivers still pass retired `build_legb_ctx` arguments, so there is no runnable
-> inference driver at this commit. Without the T1 product the leg covariance carries no emulator-error term, and a
-> T2 term is held for a PI ruling.
+> inference driver at this commit. Without the T1 and T3 products the leg covariance carries no emulator-error
+> term, and a T2 term is held for a PI ruling.
 
 > **New here? Read the [Overview](#overview) first** (it says, in plain terms, what the emulator is
 > and why it exists), then come back for the provenance details below. The Stamp and the

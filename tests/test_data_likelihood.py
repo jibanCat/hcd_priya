@@ -679,7 +679,7 @@ def test_mf_path_matches_gate_script_to_tight_tol():
     # gate reference path: the gate script runs a driver at import, so exec ONLY its
     # function defs (everything before the first driver emit) into a sandbox namespace and
     # pull predict_P_obs_on_leg_mf — the certified through-MF forward.
-    ns = {}
+    ns = {"__file__": f"{_REPO_ROOT}/scripts/diag_emu_bias_allfolds_mf.py"}   # the prefix reads __file__
     src = open(f"{_REPO_ROOT}/scripts/diag_emu_bias_allfolds_mf.py").read()
     cut = src.index('emit("# T3 GATE')
     head = src[:cut]

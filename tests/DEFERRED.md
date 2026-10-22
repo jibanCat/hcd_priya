@@ -16,10 +16,11 @@ deferred cause (`raise_if_deferred`), so a retired interface cannot pass as abse
   the numpyro model-site order, the constrain-function parity and the comparison core `_data_loglik_legcore`. That
   code is not covered by these tests until they are rebuilt against the gate E context. The gate E context itself is
   covered by `tests/test_forward_ctx_v2.py` and `tests/test_gateE_e1_e4.py`.
-- Some stop inside shipped scripts that are broken at this commit, and there is no runnable inference driver:
-  `scripts/run_real_fit.py` (`build_real_ctx` assumes the schema-1 checkpoint layout, and its `build_legb_ctx` call
-  passes retired arguments), `scripts/run_prod_sbc_shard.py` and `scripts/make_legb_sites_golden.py` (retired
-  `build_legb_ctx` arguments).
+- Some stop inside shipped scripts that are broken at this commit, and there is no runnable inference driver.
+  For example: `scripts/run_real_fit.py` (`build_real_ctx` assumes the schema-1 checkpoint layout, and its
+  `build_legb_ctx` call passes retired arguments); `scripts/run_prod_sbc_shard.py`, `make_legb_sites_golden.py`,
+  `make_legb_golden.py`, `run_legb_shard.py`, `run_dnuis_bias_shard.py`, `run_metal_smoothosc_shard.py` and
+  `run_stepA.py` (retired `build_legb_ctx` arguments).
 - Rebuilding or deleting them is follow-up work and needs scientific review: expected site lists and goldens change
   under gate E.
 
@@ -30,6 +31,8 @@ deferred cause (`raise_if_deferred`), so a retired interface cannot pass as abse
 - `scripts/gen_analysis_lock.py` also reads `closure_legb` constants that gate E removed (`ERROR_VECTOR`,
   `XCLASS_ERROR_VECTOR`, `CKPT`); that error sits behind the `LockGeneratorDeferred` failure
   (`tests/test_analysis_lock_generator.py`).
+- `tests/test_analysis_lock_generator.py::test_check_mode_reports_stale_committed_lock` failed on main with an
+  assertion on the diff text; that failure now also sits behind `LockGeneratorDeferred`.
 - `tests/test_legb_2d_tilt.py` skips two variants as "covered separately"; the covering test
   (`test_2d_requires_hierarchical`) is deferred.
 
