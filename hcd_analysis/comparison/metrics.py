@@ -33,5 +33,9 @@ def verdict(r, threshold):
 
 
 def band_index(k, edges):
-    """Index of the band [edges[i], edges[i+1]) holding each k; the last band is open-ended."""
-    return np.searchsorted(np.asarray(edges, float), np.asarray(k, float), side="right") - 1
+    """Index of the band [edges[i], edges[i+1]) holding each k; the last band is open-ended. A k below the first edge
+    is refused rather than silently dropped."""
+    b = np.searchsorted(np.asarray(edges, float), np.asarray(k, float), side="right") - 1
+    if np.any(b < 0):
+        raise ValueError("k below the first band edge")
+    return b

@@ -78,7 +78,11 @@ def test_reference_vector_is_built_by_name_not_position():
 # --------------------------------------------------------------------------------------------- schema
 def test_valid_record_round_trips_exactly():
     rec = _rec()
-    assert S.loads(S.dumps(rec)) == json.loads(json.dumps(rec))
+    assert S.loads(S.dumps(rec)) == rec
+    bad = _rec()
+    bad["cases"][0]["native"] = {"std": [float("nan")]}
+    with pytest.raises(ValueError):                                          # no non-standard JSON (NaN) is written
+        S.dumps(bad)
 
 
 @pytest.mark.parametrize("mutate,match", [
@@ -175,17 +179,47 @@ def test_mismatched_nodes_or_observables_are_refused_not_intersected():
         S.OBSERVABLES.pop("O_test")
 
 
-def test_outcome_accounting_never_turns_missing_into_pass():
-    nc = _case("c2")
-    nc["support"] = {"status": "NOT COMPARABLE", "reason": "outside the rungs"}
-    out = S.compare_records(_rec([_case("c1"), nc, _case("c3")]), _rec([_case("c1"), _case("c2")]), 0.02)
-    assert out["cases"] == {"c1": "PASS", "c2": "NOT COMPARABLE", "c3": "NOT RUN"}
-    assert out["verdict"] == "PASS" and out["points"] == len(Z) * len(MODES)    # only the comparable case counts
+def _nc(cid):
+    c = _case(cid)
+    c["support"] = {"status": "NOT COMPARABLE", "reason": "outside the rungs"}
+    return c
+
+
+def test_outcome_accounting_never_turns_missing_or_blocked_into_pass():
+    # a case declared NOT COMPARABLE on both sides is excluded; the rest passes
+    out = S.compare_records(_rec([_case("c1"), _nc("c2")]), _rec([_case("c1"), _nc("c2")]), 0.02)
+    assert out["cases"] == {"c1": "PASS", "c2": "NOT COMPARABLE"} and out["verdict"] == "PASS" and out["complete"]
+    assert out["points"] == len(Z) * len(MODES)                                  # only the comparable case counts
+    # a case missing from one side makes the level NOT RUN, even when everything present passes
+    out = S.compare_records(_rec([_case("c1"), _case("c3")]), _rec([_case("c1")]), 0.02)
+    assert out["cases"]["c3"] == "NOT RUN" and out["verdict"] == "NOT RUN" and not out["complete"]
+    # ... but a real failure is never hidden by incompleteness
+    bad = _rec([_case("c1", scale=1.05), _case("c3")])
+    assert S.compare_records(bad, _rec([_case("c1")]), 0.02)["verdict"] == "FAIL"
     only_missing = S.compare_records(_rec([_case("c9")]), _rec([_case("c1")]), 0.02)
     assert only_missing["verdict"] == "NOT RUN" and only_missing["max_abs"] is None
-    blocked = lace.blocked_record([_case("c1")], pins={"name": "LaCE", "repo": "r", "commit": "c", "reason": "pickle"},
-                                  n_modes=len(MODES), L_box_hmpc=L)
-    assert S.compare_records(_rec(), blocked, 0.05)["verdict"] == "BLOCKED"
+    # BLOCKED on either side blocks the level
+    rb = _rec([_case("c1"), _case("c2")])
+    rb["cases"][1]["support"] = {"status": "BLOCKED", "reason": "asset missing"}
+    out = S.compare_records(_rec([_case("c1"), _case("c2")]), rb, 0.02)
+    assert out["cases"]["c2"] == "BLOCKED" and out["verdict"] == "BLOCKED"
+
+
+def test_one_sided_exclusion_is_refused():
+    with pytest.raises(S.ComparisonSchemaError, match="support differs"):
+        S.compare_records(_rec([_case("c1")]), _rec([_nc("c1")]), 0.02)
+
+
+def test_lace_stub_is_blocked_with_an_undefined_observable():
+    pins = {"name": "LaCE", "repo": "r", "commit": "c", "reason": "pickle"}
+    blocked = lace.blocked_record([_case("c1")], pins=pins, n_modes=len(MODES), L_box_hmpc=L)
+    assert blocked["observable"] == S.UNDEFINED and "HCD" in blocked["cases"][0]["support"]["reason"]
+    out = S.compare_records(_rec(), blocked, 0.05)
+    assert out["verdict"] == "BLOCKED" and out["cases"] == {"c1": "BLOCKED"} and out["points"] == 0
+    claimed = _rec()
+    claimed["observable"] = S.UNDEFINED                                     # an UNDEFINED record cannot carry data
+    with pytest.raises(S.ComparisonSchemaError, match="UNDEFINED"):
+        S.validate_record(claimed)
 
 
 def test_metrics_on_known_values():
@@ -196,6 +230,8 @@ def test_metrics_on_known_values():
     assert s["rms"] == pytest.approx(np.sqrt((1 + 4 + 9) / 4) * 0.01)
     assert M.verdict(r, 0.02) == "FAIL" and M.verdict(r[:2], 0.02) == "PASS" and M.verdict([], 0.02) == "NOT RUN"
     assert list(M.band_index([0.0, 0.002, 0.003, 0.04, 0.2], [0.0, 0.003, 0.01, 0.02, 0.05])) == [0, 0, 1, 3, 4]
+    with pytest.raises(ValueError):
+        M.band_index([-1e-3], [0.0, 0.003])
     with pytest.raises(ValueError):
         M.ratio_residual([1.0], [0.0])
 
@@ -221,3 +257,64 @@ def test_domain_check_declares_out_of_rung_states():
     case["state"]["mean_flux"] = dict(MF)
     case["state"]["params"]["ns"] = 20.0
     assert CS.domain_support(case, cfg, lim)["status"] == "NOT COMPARABLE"
+
+
+# --------------------------------------------------------------------------------------------- case matrix builders
+def test_family_D_reads_the_reference_design_by_name():
+    cfg = CS.load_config("phase0_v1")
+    rng = np.random.default_rng(5)
+    design = rng.uniform(1.0, 2.0, size=(50, 9))
+    shuffled = dict(zip(C.PARAM_NAMES, [4, 2, 0, 8, 6, 1, 3, 5, 7]))
+    rungs = np.linspace(0.6, 1.3, 10)
+    cases = CS.family_D(cfg, design, shuffled, rungs)
+    assert len(cases) == 9 and {c["inputs"]["ks_lf_index"] for c in cases} == {24, 34, 42}
+    c = next(c for c in cases if c["inputs"]["ks_lf_index"] == 34 and c["inputs"]["rung_index"] == 5)
+    for n, col in shuffled.items():
+        assert c["state"]["params"][n] == design[34, col]
+    assert c["state"]["mean_flux"] == {"tau0_amp": rungs[5], "dtau0": 0.0, "z_pivot": 3.0}
+
+
+def test_family_I_points_are_deterministic_and_inside_the_mapped_box():
+    cfg = CS.load_config("phase0_v1")
+    lim = {n: (float(i), float(i) + 2.0) for i, n in enumerate(C.PARAM_NAMES)}
+    a, b = CS.family_I(cfg, lim), CS.family_I(cfg, lim)
+    assert a == b and len(a) == 15
+    i2 = next(c for c in a if c["case_id"] == "I2-M1")["state"]["params"]
+    assert all(i2[n] == lim[n][0] + 1.0 for n in C.PARAM_NAMES)                 # the box centre
+    for c in a:
+        if c["case_id"][:2] in ("I3", "I4", "I5"):
+            u = [(c["state"]["params"][n] - lim[n][0]) / 2.0 for n in C.PARAM_NAMES]
+            assert all(0.15 - 1e-12 <= x <= 0.85 + 1e-12 for x in u)
+    assert C.params_from_vector([lim[n][0] for n in C.PARAM_NAMES]) == {n: lim[n][0] for n in C.PARAM_NAMES}
+
+
+def test_domain_check_refuses_off_grid_redshifts():
+    cfg = CS.load_config("phase0_v1")
+    lim = {n: (0.0, 10.0) for n in C.PARAM_NAMES}
+    case = {"z": cfg["z_grid"] + [2.3], "state": {"params": dict(PARAMS), "mean_flux": dict(MF)}}
+    assert CS.domain_support(case, cfg, lim) == {"status": "NOT COMPARABLE", "reason": "z not on the reference grid"}
+
+
+# --------------------------------------------------------------------------------------------- reference assembly
+class _StubGP:
+    """Mimics lyaemu SingleBinAR1.predict: a mean that encodes (redshift slot, column 0, fidelity)."""
+    def __init__(self, i, nk=4):
+        self.i, self.nk, self.zbin = i, nk, None
+
+    def predict(self, zp, res=1):
+        return np.full((1, self.nk), 100.0 * self.i + zp[0][0] + 10.0 * res), np.full((1, self.nk), 0.5)
+
+
+def test_reference_assembly_and_z_order_from_descending_zout():
+    from hcd_analysis.comparison.adapters import lyaemu_priya as A
+    zout = np.linspace(4.6, 2.2, 13)
+    gp = type("G", (), {})()
+    gp.gpemu = type("E", (), {"gps": [_StubGP(i) for i in range(13)]})()
+    fac = ((1 + zout) / 4.0) ** 0.2
+    mean, std = A.assemble(gp, np.array([1.1, 0.9, 2.0]), fac, res=0)
+    assert np.allclose(mean[:, 0], 100.0 * np.arange(13) + 1.1 * fac, rtol=0, atol=1e-12)    # column 0 x factor
+    assert np.allclose(A.assemble(gp, np.array([1.1]), fac, res=1)[0] - mean, 10.0)
+    order = A.z_order(zout, [2.2, 3.0, 4.6])
+    assert order == [12, 8, 0] and np.allclose(zout[order], [2.2, 3.0, 4.6])
+    with pytest.raises(A.ReferenceRefused, match="not on the reference grid"):
+        A.z_order(zout, [2.3])

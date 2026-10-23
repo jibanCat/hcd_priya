@@ -26,6 +26,9 @@ def read_cache_weights(path):
     from hcd_analysis.emulator.data import _collapse_counts
     with h5py.File(path, "r") as h:
         d = {k: h[k][...] for k in _CACHE_KEYS}
+        names = [x.decode() if isinstance(x, bytes) else x for x in h["param_names"][...]]
+    if names != list(C.PARAM_NAMES):
+        raise RuntimeError(f"cache param_names {names} are not {C.PARAM_NAMES}")
     d["sim_name"] = np.array([s.decode() if isinstance(s, bytes) else s for s in d["sim_name"]])
     cc = _collapse_counts(d["tier_c_counts"])
     N = cc.sum(1, keepdims=True)
@@ -42,8 +45,10 @@ def _cache_row(d, params_vec, z, rung_index, rung):
     return int(rows[0])
 
 
-def predict(cases, *, cache_path, manifest_path=None, commit=None):
-    """A validated record for ``cases`` (each carrying ``support`` from the runner's domain check)."""
+def predict(cases, *, cache_path, manifest_path=None, commit=None, pins=None):
+    """A validated record for ``cases`` (each carrying ``support`` from the runner's domain check). ``pins`` (the
+    comparison config's C1 entry) are enforced: the manifest file's and the cache's sha256. Every case also records
+    the Head-A weights in ``native`` (context for the design points, where the cache weights are used)."""
     import jax
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
@@ -58,9 +63,16 @@ def predict(cases, *, cache_path, manifest_path=None, commit=None):
     from hcd_analysis.emulator.predict import predict_P_filt
     from hcd_analysis.emulator.safe_io import sha256_file
 
+    if pins is not None and sha256_file(manifest_path or PE.DEFAULT_MANIFEST_PATH) != pins["manifest_sha256"]:
+        raise RuntimeError("the production manifest does not match the pinned sha256")
     ens, meta0, norm0, manifest = PE.load_production_ensemble(manifest_path=manifest_path)
-    if sha256_file(cache_path) != meta0["cache_sha256"]:
-        raise RuntimeError(f"{cache_path} is not the cache the production members were trained on")
+    cache_sha = sha256_file(cache_path)
+    if cache_sha != meta0["cache_sha256"] or (pins is not None and cache_sha != pins["cache_sha256"]):
+        raise RuntimeError(f"{cache_path} is not the pinned cache the production members were trained on")
+    if not np.array_equal(np.asarray(meta0["param_limits"], float), np.asarray(PARAM_LIMITS, float)):
+        raise RuntimeError("checkpoint param_limits differ from data.PARAM_LIMITS")
+    if len({m["norm_sha256"] for m in manifest["members"]}) != 1:
+        raise RuntimeError("members do not share one normalizer: member 0's cannot untransform the others")
     k_com = np.asarray(meta0["k_com_hmpc"], float)
     modes = list(range(1, k_com.size + 1))
     if not np.allclose(k_com, C.k_com_modes(np.asarray(modes), meta0["L_box_hmpc"]), rtol=1e-12, atol=0):
@@ -81,25 +93,27 @@ def predict(cases, *, cache_path, manifest_path=None, commit=None):
         if np.any(th < 0) or np.any(th > 1):
             raise RuntimeError(f"{case['case_id']}: outside the unit cube after the domain check")
         mf = st["mean_flux"]
-        P, K, PF, W, T0 = [], [], [], [], []
+        P, K, PF, W, T0, WH = [], [], [], [], [], []
         for z in case["z"]:
             zu = (z - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
             t0 = float(tau0_alpha_priya(z, mf["tau0_amp"], mf["dtau0"], z_pivot=mf["z_pivot"]) * kim_tau0(z))
             Pf = predict_P_filt(ens, jnp.asarray(th), zu, t0, pf)
+            x = jnp.concatenate([jnp.asarray(th), jnp.asarray([zu])])
+            dn = np.mean([untransform_prediction({"dndx": np.asarray(m(x, t0)["dndx"])[None]}, norm0)["dndx"][0]
+                          for m in ens.members], axis=0)
+            w_head_a = w_c_corrected(jnp.asarray(dn), jnp.asarray(np.polyval(xcf, z)), jnp.asarray(z))
             if case["family"] == "D":
                 row = _cache_row(d, pv, z, case["inputs"]["rung_index"], case["inputs"]["rung"])
                 w = jnp.asarray(d["w_c_cache"][row])
             else:
-                x = jnp.concatenate([jnp.asarray(th), jnp.asarray([zu])])
-                dn = np.mean([untransform_prediction({"dndx": np.asarray(m(x, t0)["dndx"])[None]}, norm0)["dndx"][0]
-                              for m in ens.members], axis=0)
-                w = w_c_corrected(jnp.asarray(dn), jnp.asarray(np.polyval(xcf, z)), jnp.asarray(z))
+                w = w_head_a
+            WH.append(np.asarray(w_head_a))
             P.append(np.asarray(structural_tier_p(w, Pf)))
             K.append(np.asarray(k_skm_from_kcom(k_com, z, st["params"]["hub"], st["params"]["omegamh2"])))
             PF.append(np.asarray(Pf)); W.append(np.asarray(w)); T0.append(t0)
         rec.update(P=np.asarray(P).tolist(), k_skm=np.asarray(K).tolist(),
                    native={"P_filt_by_class": np.asarray(PF).tolist(), "w_c": np.asarray(W).tolist(),
-                           "tau0_input": T0, "theta9_unit": th.tolist(),
+                           "tau0_input": T0, "theta9_unit": th.tolist(), "w_c_head_a": np.asarray(WH).tolist(),
                            "weights_source": "cache" if case["family"] == "D" else "head_a",
                            "class_order": ["clean", "LLS", "subDLA", "DLA"]})
         out_cases.append(rec)

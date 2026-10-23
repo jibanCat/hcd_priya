@@ -56,6 +56,42 @@ def tree_sha256(root):
     return hashlib.sha256("".join(sorted(lines)).encode()).hexdigest()
 
 
+def refuse_symlinks(root):
+    """A reference tree read through a symlink could point anywhere: refuse any symlink under ``root``."""
+    for dp, ds, fs in os.walk(root):
+        for x in ds + fs:
+            if os.path.islink(os.path.join(dp, x)):
+                raise ReferenceRefused(f"symlink in a reference tree: {os.path.join(dp, x)}")
+
+
+def package_sha256(root):
+    """sha256 over (relative path, length, content) of every file of a package tree: unlike the md5 convention below,
+    code moved between files or added in subpackages changes it."""
+    h = hashlib.sha256()
+    for dp, ds, fs in sorted(os.walk(root)):
+        ds.sort()
+        for f in sorted(fs):
+            p = os.path.join(dp, f)
+            if "__pycache__" in p.split(os.sep):
+                continue
+            with open(p, "rb") as fh:
+                data = fh.read()
+            rel = os.path.relpath(p, root).encode()
+            h.update(len(rel).to_bytes(8, "little") + rel + len(data).to_bytes(8, "little") + data)
+    return h.hexdigest()
+
+
+def z_order(zout, z):
+    """Positions in the reference's zout of the requested redshifts; refuses one that is not on the grid."""
+    out = []
+    for zz in z:
+        j = int(np.argmin(np.abs(np.asarray(zout) - zz)))
+        if abs(zout[j] - zz) > 1e-9:
+            raise ReferenceRefused(f"z = {zz} is not on the reference grid")
+        out.append(j)
+    return out
+
+
 def lyaemu_md5(pkgdir):
     """The kodiaq-squad-gp verify_basedir convention: md5 over the sorted top-level .py files."""
     h = hashlib.md5()
@@ -87,6 +123,8 @@ def check_pins(basedir, lyaemu_pkg, pins):
     if lyaemu_md5(lyaemu_pkg) != pins["implementation"]["lyaemu_code_md5"]:
         raise ReferenceRefused("lyaemu code md5 does not match its pin")
     check_class_strings(os.path.join(basedir, "trained_mf"))
+    refuse_symlinks(basedir)
+    refuse_symlinks(lyaemu_pkg)
 
 
 def check_class_strings(trained_dir):
@@ -152,6 +190,9 @@ def run(args):
     check_pins(args.basedir, lyaemu_pkg, pins)
     before = tree_sha256(args.basedir)
     install_refit_refusal()
+    import lyaemu
+    if os.path.realpath(os.path.dirname(lyaemu.__file__)) != os.path.realpath(lyaemu_pkg):
+        raise ReferenceRefused(f"imported lyaemu {lyaemu.__file__} is not the pinned copy {lyaemu_pkg}")
     import lyaemu.mean_flux as mflux
     from lyaemu.utilities import rebin_power_to_kms
     gp = load_reference(args.basedir, len(cfg["z_grid"]))
@@ -159,8 +200,12 @@ def run(args):
     if sorted(np.round(zout, 9).tolist()) != sorted(cfg["z_grid"]):
         raise ReferenceRefused(f"reference zout {zout.tolist()} differs from the config grid")
     ii = int(np.argmin(np.abs(zout - 3.0)))
-    if zout[ii] != cfg["z_pivot"] or abs(mflux.mean_flux_slope_to_factor(zout, 0.3)[ii] - 1.0) > 1e-15:
-        raise ReferenceRefused("the reference mean-flux pivot is not z = 3.0")
+    probe = ((1.0 + zout) / (1.0 + cfg["z_pivot"])) ** 0.3
+    if zout[ii] != cfg["z_pivot"] or not np.allclose(mflux.mean_flux_slope_to_factor(zout, 0.3), probe,
+                                                     rtol=1e-13, atol=0):
+        raise ReferenceRefused("the reference mean-flux slope factor is not ((1+z)/(1+z_pivot))^dtau0 at z_pivot 3")
+    if [float(g.zbin) for g in gp.gpemu.gps] != [round(float(z), 1) for z in zout]:
+        raise ReferenceRefused("the reference GPs are not in zout order")
     k_com = np.asarray(gp.gpemu.kf, float)
     modes = list(range(1, k_com.size + 1))
     if not np.allclose(k_com, C.k_com_modes(np.asarray(modes), cfg["L_box_hmpc"]), rtol=1e-12, atol=0):
@@ -178,6 +223,8 @@ def run(args):
             continue
         st = case["state"]
         mf = st["mean_flux"]
+        if mf["z_pivot"] != zout[ii]:
+            raise ReferenceRefused(f"{case['case_id']}: z_pivot {mf['z_pivot']} differs from the reference's {zout[ii]}")
         nparams = np.concatenate([[mf["tau0_amp"]], C.vector_from_names(st["params"], gp.param_names)])
         tau0_fac = np.asarray(mflux.mean_flux_slope_to_factor(zout, mf["dtau0"]), float)
         mean, std = assemble(gp, nparams, tau0_fac, res)
@@ -193,12 +240,13 @@ def run(args):
                 checks["kconv_max_rel"] = max(checks["kconv_max_rel"],
                                               float(np.max(np.abs(np.asarray(pk)[0] / m1[i][1:-1] - 1))))
             checks["n_checked_cases"] += 1
-        order = [int(np.argmin(np.abs(zout - z))) for z in case["z"]]
+        order = z_order(zout, case["z"])
         rec["P"] = mean[order].tolist()
         rec["k_skm"] = [C.k_skm_from_kcom(k_com, zout[j], st["params"]["hub"], st["params"]["omegamh2"]).tolist()
                         for j in order]
         rec["native"] = {"res": res, "std": std[order].tolist(), "gp_input_vector": nparams.tolist(),
-                         "tau0_factor": tau0_fac[order].tolist(), "param_index": dict(gp.param_names)}
+                         "tau0_factor": tau0_fac[order].tolist(), "param_index": dict(gp.param_names),
+                         "z_ref": zout[order].tolist()}
         cases.append(rec)
     if tree_sha256(args.basedir) != before:
         raise ReferenceRefused("the reference basedir changed during the run")
@@ -206,7 +254,8 @@ def run(args):
     record = {
         "schema": SCHEMA, "observable": "O1", "L_box_hmpc": float(cfg["L_box_hmpc"]), "modes": modes,
         "comparator": {"id": req["comparator_id"], "name": pins["name"], "repo": pins["repo"], "commit": pins["commit"],
-                       "implementation": dict(pins["implementation"], output=f"SingleBinAR1.predict res={res}"),
+                       "implementation": dict(pins["implementation"], output=f"SingleBinAR1.predict res={res}",
+                                              lyaemu_package_sha256=package_sha256(lyaemu_pkg)),
                        "artifacts": [{"path": k, "sha256": v} for k, v in pins["artifacts_sha256"].items()],
                        "fidelity": "LF" if res == 0 else "HF",
                        "training": "60 PRIYA LF sims x 10 rungs (600) + 3 HF sims x 10 rungs (30), 13 z 2.2-4.6",

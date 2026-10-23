@@ -12,8 +12,10 @@ A record is a JSON object written by one adapter for one comparator:
 
 ``native`` keeps the comparator's own outputs and inputs (per-class arrays, GP standard deviations, the exact input
 vector) beside the harmonized ``P``. ``validate_record`` refuses a record whose k_skm does not follow from its modes
-and state (catches h/Mpc labelled as s/km, a missing 2 pi, a wrong cosmology), any parameter that is not one of the
-nine named ones (``tau0`` is not a cosmological parameter here), NaN or non-positive power, and shape mismatches.
+and state (catches h/Mpc labelled as s/km, a missing 2 pi, a wrong cosmology in an adapter that reports k), any
+parameter that is not one of the nine named ones (``tau0`` is not a cosmological parameter here), NaN or non-positive
+power, and shape mismatches. It cannot see a comparator's internal k: each adapter checks its own native nodes
+against the box modes.
 ``compare_records`` refuses records whose observables, nodes or case states differ instead of intersecting them."""
 from __future__ import annotations
 
@@ -35,6 +37,10 @@ OBSERVABLES = {
                           "exp(-alpha(z) 0.0023 (1+z)^3.65), no window, no resolution correction",
            "P_unit": "km/s", "k_unit": "s/km (angular)", "native_k": "comoving box mode n, k = 2 pi n / L_box h/Mpc"},
 }
+UNDEFINED = "UNDEFINED"
+OBSERVABLES[UNDEFINED] = {"description": "no matched observable is defined yet for this comparator (a blocker): a "
+                                         "record with it has every case BLOCKED", "P_unit": "", "k_unit": "",
+                          "native_k": ""}
 K_REL_TOL = 1e-12
 STATE_REL_TOL = 1e-12
 
@@ -87,6 +93,9 @@ def validate_record(rec):
     if not isinstance(cases, list) or not cases:
         p.append("cases must be a non-empty list")
         cases = []
+    if rec.get("observable") == UNDEFINED and any(isinstance(c, dict) and (c.get("support") or {}).get("status")
+                                                  != "BLOCKED" for c in cases):
+        p.append("a record with an UNDEFINED observable must have every case BLOCKED")
     seen = set()
     for c in cases:
         cid = c.get("case_id") if isinstance(c, dict) else None
@@ -148,7 +157,7 @@ def _case_problems(c, L, modes):
 
 def dumps(rec):
     """JSON text of a validated record (floats round-trip exactly through repr)."""
-    return json.dumps(validate_record(rec), sort_keys=True)
+    return json.dumps(validate_record(rec), sort_keys=True, allow_nan=False)
 
 
 def loads(text):
@@ -165,14 +174,21 @@ def _same_state(a, b):
 def compare_records(test, ref, threshold):
     """Compare two validated records case by case.
 
-    Returns ``{"verdict", "max_abs", "cases": {case_id: outcome}, "points": n, "summary": {...}, "r": {case_id: r}}``
-    (``r`` has the shape of ``P``: n_z by n_modes).
-    A case missing from either side is NOT RUN; a case either side marks NOT COMPARABLE or BLOCKED takes that status
-    (BLOCKED first) and contributes no points. The level verdict is PASS or FAIL over the comparable points only, and
-    NOT RUN / BLOCKED / NOT COMPARABLE when there are none (never PASS)."""
+    Returns ``{"verdict", "complete", "max_abs", "cases": {case_id: outcome}, "points": n, "summary": {...},
+    "r": {case_id: r}}`` (``r`` has the shape of ``P``: n_z by n_modes).
+
+    Case outcomes: missing from either side NOT RUN; BLOCKED on either side BLOCKED; NOT COMPARABLE on BOTH sides NOT
+    COMPARABLE (contributes no points); COMPARABLE on both PASS or FAIL. Support is declared by the runner for both
+    sides, so one side calling a case NOT COMPARABLE that the other calls COMPARABLE is refused: an adapter cannot turn
+    its own failure into an exclusion. A record whose observable is UNDEFINED makes every case BLOCKED.
+
+    Level verdict: FAIL if any comparable point exceeds the threshold; otherwise NOT RUN if any case is missing
+    (incomplete), BLOCKED if any case is blocked, PASS if every remaining case passed, NOT COMPARABLE if none was
+    comparable. PASS therefore requires every declared case to be present and comparable cases to pass."""
     validate_record(test)
     validate_record(ref)
-    if test["observable"] != ref["observable"]:
+    undefined = UNDEFINED in (test["observable"], ref["observable"])
+    if not undefined and test["observable"] != ref["observable"]:
         raise ComparisonSchemaError(f"observables differ: {test['observable']} vs {ref['observable']}")
     if test["modes"] != ref["modes"] or test["L_box_hmpc"] != ref["L_box_hmpc"]:
         raise ComparisonSchemaError("native k nodes differ (modes or L_box): refusing to intersect or interpolate")
@@ -187,24 +203,30 @@ def compare_records(test, ref, threshold):
         if not _same_state(a["state"], b["state"]) or a["z"] != b["z"] or a.get("family") != b.get("family"):
             raise ComparisonSchemaError(f"{cid}: the two records describe different physical states or redshifts")
         sa, sb = a["support"]["status"], b["support"]["status"]
-        if "BLOCKED" in (sa, sb):
+        if undefined or "BLOCKED" in (sa, sb):
             outcomes[cid] = "BLOCKED"
             continue
-        if "NOT COMPARABLE" in (sa, sb):
+        if sa != sb:
+            raise ComparisonSchemaError(f"{cid}: support differs between the records ({sa} vs {sb}); support is "
+                                        "declared once by the runner, never by one adapter")
+        if sa == "NOT COMPARABLE":
             outcomes[cid] = "NOT COMPARABLE"
             continue
         r = M.ratio_residual(a["P"], b["P"])
         rs[cid] = r
         outcomes[cid] = M.verdict(r, threshold)
     all_r = np.concatenate([r.ravel() for r in rs.values()]) if rs else np.array([])
-    if rs:
-        level = M.verdict(all_r, threshold)
-    elif any(v == "BLOCKED" for v in outcomes.values()):
-        level = "BLOCKED"
-    elif any(v == "NOT COMPARABLE" for v in outcomes.values()):
-        level = "NOT COMPARABLE"
-    else:
+    vals = set(outcomes.values())
+    if "FAIL" in vals:
+        level = "FAIL"
+    elif "NOT RUN" in vals:
         level = "NOT RUN"
-    return {"verdict": level, "threshold": threshold, "points": int(all_r.size),
-            "max_abs": float(np.max(np.abs(all_r))) if all_r.size else None, "cases": outcomes,
-            "summary": M.summarize(all_r, threshold), "r": rs}
+    elif "BLOCKED" in vals:
+        level = "BLOCKED"
+    elif "PASS" in vals:
+        level = "PASS"
+    else:
+        level = "NOT COMPARABLE"
+    return {"verdict": level, "complete": "NOT RUN" not in vals and "BLOCKED" not in vals, "threshold": threshold,
+            "points": int(all_r.size), "max_abs": float(np.max(np.abs(all_r))) if all_r.size else None,
+            "cases": outcomes, "summary": M.summarize(all_r, threshold), "r": rs}

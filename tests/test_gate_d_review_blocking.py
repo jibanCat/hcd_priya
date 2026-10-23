@@ -92,7 +92,7 @@ def test_d3_per_simulation_and_common_mode_band_helpers():
 
 def test_d3_on_the_frozen_product_is_reported_per_simulation():
     _need(f"{GATED}/gate_d_arrays.npz", f"{GATED}/gate_d_results.json")
-    a = np.load(f"{GATED}/gate_d_arrays.npz", allow_pickle=True)
+    a = np.load(f"{GATED}/gate_d_arrays.npz")
     R = json.load(open(f"{GATED}/gate_d_results.json"))
     l_mf, l_lf = np.log1p(a["r_mf"]), np.log1p(a["r_lf"])
     keep = a["in_range"][:, None, :] & np.isfinite(a["r_mf"]) & np.isfinite(a["r_lf"])
@@ -112,7 +112,7 @@ def _real_targets():
     _need(LF, HR, f"{GATED}/gate_d_arrays.npz")
     lf, hr = load_cache(LF), load_cache(HR)
     pairs = MM.match_pairs(lf, hr)
-    a = np.load(f"{GATED}/gate_d_arrays.npz", allow_pickle=True)
+    a = np.load(f"{GATED}/gate_d_arrays.npz")
     l_rows = np.array([p[1] for p in pairs])
     assert np.allclose(np.asarray(lf["z_grid"])[l_rows], a["z"])        # the product's pair order
     return dict(x=np.asarray(lf["x"])[l_rows], tau0=np.asarray(lf["tau0"])[l_rows],

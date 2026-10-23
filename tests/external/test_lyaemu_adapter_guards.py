@@ -46,11 +46,44 @@ def test_class_strings_outside_the_allowlist_are_refused(copy_basedir):
         A.check_class_strings(td)
 
 
-def test_pin_mismatch_is_refused(copy_basedir):
-    pins = {"artifacts_sha256": {"emulator_params.json": "0" * 64}, "trained_mf_tree_sha256": "",
-            "implementation": {"lyaemu_code_md5": ""}}
-    with pytest.raises(A.ReferenceRefused, match="sha256"):
-        A.check_pins(copy_basedir, os.path.join(LYA, "lyaemu"), pins)
+def test_nested_class_strings_are_checked(copy_basedir):
+    td = os.path.join(copy_basedir, "trained_mf")
+    f = os.path.join(td, "zbin3.0.json")
+    with open(f) as fh:
+        d = json.load(fh)
+    d["kernel"] = {"parts": [{"class": "os.system", "x": 1}]}
+    with open(f, "w") as fh:
+        json.dump(d, fh)
+    with pytest.raises(A.ReferenceRefused, match="allowlist"):
+        A.check_class_strings(td)
+
+
+def _true_pins(basedir):
+    arts = ("emulator_params.json", "mf_emulator_flux_vectors_tau1000000.hdf5")
+    return {"artifacts_sha256": {a: A.sha256_file(os.path.join(basedir, a)) for a in arts},
+            "trained_mf_tree_sha256": A.tree_sha256(os.path.join(basedir, "trained_mf")),
+            "implementation": {"lyaemu_code_md5": A.lyaemu_md5(os.path.join(LYA, "lyaemu"))}}
+
+
+def test_pin_mismatches_are_refused(copy_basedir):
+    pkg = os.path.join(LYA, "lyaemu")
+    pins = _true_pins(copy_basedir)
+    A.check_pins(copy_basedir, pkg, pins)                                   # the true pins pass
+    for key, bad, match in (("artifacts_sha256", {"emulator_params.json": "0" * 64}, "sha256"),
+                            ("trained_mf_tree_sha256", "0" * 64, "trained_mf"),
+                            ("implementation", {"lyaemu_code_md5": "0" * 32}, "md5")):
+        with pytest.raises(A.ReferenceRefused, match=match):
+            A.check_pins(copy_basedir, pkg, dict(pins, **{key: bad}))
+    with open(os.path.join(copy_basedir, "trained_mf", "zbin3.0.json"), "a") as fh:
+        fh.write(" ")
+    with pytest.raises(A.ReferenceRefused, match="trained_mf"):
+        A.check_pins(copy_basedir, pkg, pins)
+
+
+def test_symlinks_in_a_reference_tree_are_refused(copy_basedir, tmp_path):
+    os.symlink(str(tmp_path), os.path.join(copy_basedir, "link"))
+    with pytest.raises(A.ReferenceRefused, match="symlink"):
+        A.refuse_symlinks(copy_basedir)
 
 
 def test_a_missing_trained_file_is_refused_never_refit(copy_basedir):
