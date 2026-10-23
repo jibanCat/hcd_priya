@@ -132,10 +132,13 @@ def check_pins(basedir, lyaemu_pkg, pins):
 
 
 def refuse_compiled(pkg):
-    """Python would execute a cached .pyc that matches its source's size and mtime; the pinned copy must carry none."""
+    """Python would execute a cached .pyc that matches its source's size and mtime, or an extension module beside a
+    .py of the same name; the pinned copy must carry neither."""
+    import importlib.machinery
+    ext = tuple(importlib.machinery.EXTENSION_SUFFIXES) + (".pyc", ".pyo")
     for dp, ds, fs in os.walk(pkg):
-        if "__pycache__" in ds or any(f.endswith((".pyc", ".pyo")) for f in fs):
-            raise ReferenceRefused(f"compiled bytecode in the reference package: {dp}")
+        if "__pycache__" in ds or any(f.endswith(ext) for f in fs):
+            raise ReferenceRefused(f"compiled bytecode or an extension module in the reference package: {dp}")
 
 
 def check_class_strings(trained_dir):
@@ -189,16 +192,15 @@ def assemble(gp, nparams, tau0_fac, res):
 
 
 def run(args):
-    sys.path.insert(0, args.repo)
-    sys.path.insert(0, args.lyaemu_parent)
-    from hcd_analysis.comparison import conventions as C
-    from hcd_analysis.comparison.schema import SCHEMA, validate_record
-
     with open(args.request) as f:
         req = json.load(f)
     pins, res, cfg = req["pins"], int(req["res"]), req["config"]
     lyaemu_pkg = os.path.join(args.lyaemu_parent, "lyaemu")
-    check_pins(args.basedir, lyaemu_pkg, pins)
+    check_pins(args.basedir, lyaemu_pkg, pins)              # before the reference directory is on sys.path
+    sys.path.insert(0, args.repo)
+    from hcd_analysis.comparison import conventions as C
+    from hcd_analysis.comparison.schema import SCHEMA, validate_record
+    sys.path.insert(0, args.lyaemu_parent)
     before = tree_sha256(args.basedir)
     install_refit_refusal()
     import lyaemu

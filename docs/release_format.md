@@ -49,11 +49,12 @@ required; `None` explicitly loads an unanchored bundle, for development only):
 5. The normalizer must have the production structure (`f_nhi`, `dndx`, `P_filt` with `mu_marg`, `sig_marg`, `sig_cosmo`
    and integer-keyed `cell_mean`, `delta`), with shapes set by the network and every array float64.
 6. No pickle is read or written anywhere on this path, including inside metadata or HDF5 attributes. The HDF5 reader
-   refuses nested names, soft and external links, external or virtual storage, variable-length data and non-scalar
-   or non-UTF-8 attributes.
+   refuses nested or dot names, soft and external links, external or virtual storage, variable-length data and
+   non-scalar or non-UTF-8 attributes (including surrogate-escaped strings).
 
-Writes never overwrite: every file (tensors, sidecars, manifest and HDF5 tables) is written to a temporary name and
-published with a hard link that fails if the target exists. Converting a legacy checkpoint (`scripts/export_safe_bundle.py`) reads its `.norm.pkl` through
+Writes never overwrite: every file (tensors, sidecars, manifest and HDF5 tables) is written to a temporary name,
+fsynced, given the umask-derived mode, and published with a hard link that fails if the target exists (a symlink at
+the target is refused, never followed). Converting a legacy checkpoint (`scripts/export_safe_bundle.py`) reads its `.norm.pkl` through
 `train.load_checkpoint`, so it is done only for this project's own checkpoints, after the production manifest matches a
 digest given on the command line and the members' digests are verified (`prod_ensemble.verify_manifest`), into a new
 directory.

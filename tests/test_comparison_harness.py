@@ -345,3 +345,24 @@ def test_group_verdicts_use_the_level_precedence():
     assert g["N"]["verdict"] == "NOT COMPARABLE" and g["N"]["complete"]
     assert g["X"]["verdict"] == "NOT RUN"                                        # declared but absent from outcomes
     assert S.level_verdict([]) == "NOT COMPARABLE"
+
+
+
+def test_runner_family_verdicts_use_the_declared_case_list():
+    import importlib.util
+    import os as _os
+    spec = importlib.util.spec_from_file_location(
+        "compare_emulators", _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                                           "scripts", "compare_emulators.py"))
+    R = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(R)
+    cases = [dict(_case("d1", family="D")), dict(_case("d2", family="D")), dict(_case("i1"))]
+    declared = {c["case_id"]: c["support"]["status"] for c in cases}
+    test = _rec([_case("d1", family="D"), _case("i1")])                     # the test side dropped d2
+    ref = _rec([_case("d1", family="D"), _case("d2", family="D"), _case("i1")])
+    cmp = S.compare_records(test, ref, 0.02, declared=declared)
+    fam = R.family_verdicts(cmp, cases)
+    assert cmp["verdict"] == "NOT RUN" and fam["D"]["verdict"] == "NOT RUN" and not fam["D"]["complete"]
+    assert fam["I"]["verdict"] == "PASS"
+    gone = S.compare_records(_rec([_case("i1")]), _rec([_case("i1")]), 0.02, declared=declared)
+    assert R.family_verdicts(gone, cases)["D"]["verdict"] == "NOT RUN"         # a dropped family is reported

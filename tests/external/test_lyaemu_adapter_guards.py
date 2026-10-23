@@ -110,3 +110,15 @@ def test_compiled_bytecode_in_the_reference_package_is_refused(tmp_path):
     (pkg / "__pycache__" / "gp_wrap.cpython-311.pyc").write_bytes(b"\0")
     with pytest.raises(A.ReferenceRefused, match="bytecode"):
         A.refuse_compiled(str(pkg))
+
+
+
+def test_extension_modules_in_the_reference_package_are_refused(tmp_path):
+    import importlib.machinery
+    pkg = tmp_path / "parent2" / "lyaemu"
+    shutil.copytree(os.path.join(LYA, "lyaemu"), pkg, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    for dp, ds, fs in os.walk(pkg):
+        os.chmod(dp, 0o755)
+    (pkg / ("gp_wrap" + importlib.machinery.EXTENSION_SUFFIXES[0])).write_bytes(b"\0")
+    with pytest.raises(A.ReferenceRefused, match="extension module"):
+        A.refuse_compiled(str(pkg))

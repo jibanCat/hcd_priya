@@ -92,6 +92,9 @@ def level_L1b(a, cfg, cases, res_out):
     rec = H.predict(fam_i, cache_path=a.cache, manifest_path=a.manifest, pins=cfg["comparators"]["C1"])
     with open(os.path.join(a.out, "record_C1_familyI.json"), "x") as f:
         f.write(S.dumps(rec))
+    if {c["case_id"] for c in rec["cases"]} != {c["case_id"] for c in fam_i}:
+        res_out.update(verdict="NOT RUN", reason="the hcd_priya record does not hold every declared family-I case")
+        return
     checks = {"json_round_trip_exact": S.loads(S.dumps(rec)) == rec}
     kmax, rt = 0.0, 0.0
     kc = C.k_com_modes(np.asarray(rec["modes"]), rec["L_box_hmpc"])
@@ -171,7 +174,12 @@ def level_L1c(a, cfg, ks, res_out):
                                        "kfkms_max_rel": max((q[3] for q in rest), default=None)})
 
 
-def _strata(rec_test, rec_ref, cmp, cfg):
+def family_verdicts(cmp, cases):
+    """Per-family verdicts over the DECLARED case list (a family the adapters dropped is reported, never lost)."""
+    return S.group_verdicts(cmp["cases"], {c["case_id"]: c["family"] for c in cases})
+
+
+def _strata(rec_test, rec_ref, cmp, cfg, cases):
     th = cfg["thresholds"]["L2_priya"]
     tc = {c["case_id"]: c for c in rec_test["cases"]}
     rc = {c["case_id"]: c for c in rec_ref["cases"]}
@@ -207,7 +215,7 @@ def _strata(rec_test, rec_ref, cmp, cfg):
         lo = edges[int(j)]
         hi = edges[int(j) + 1] if int(j) + 1 < len(edges) else None
         out["by_k_band"][f"[{lo}, {hi if hi is not None else 'inf'})"] = M.summarize(np.concatenate(v), th)
-    groups = S.group_verdicts(cmp["cases"], {c["case_id"]: c["family"] for c in rec_test["cases"]})
+    groups = family_verdicts(cmp, cases)
     for f, g in groups.items():                                  # every family, with the level precedence
         allr = np.concatenate(acc["fam"][f]) if f in acc["fam"] else np.array([])
         out["by_family"][f] = dict(M.summarize(allr, th), **g)
@@ -270,15 +278,16 @@ def level_L2LF(a, cfg, cases, res_out):
     comps = cfg["comparators"]
     statuses = {"R1-LFshipped": "NOT COMPARABLE" if "lf_shipped_path" in comps["R1"] else "NOT RUN",
                 "R2": comps["R2"]["status"], "R3": comps["R3"]["status"], "L2-MF": "NOT RUN"}
+    declared = {c["case_id"]: c["support"]["status"] for c in cases}
     lace_cmp = S.compare_records(rec, lace.blocked_record(cases, pins=cfg["comparators"]["R3"],
                                                           n_modes=cfg["n_modes"], L_box_hmpc=cfg["L_box_hmpc"]),
-                                 cfg["thresholds"]["L3_lace"])
+                                 cfg["thresholds"]["L3_lace"], declared=declared)
     statuses["R3_compare_records"] = lace_cmp["verdict"]
     if ref is None:
         res_out.update(verdict="BLOCKED", reason=err, other=statuses)
         return
-    cmp = S.compare_records(rec, ref["record"], th, declared={c["case_id"]: c["support"]["status"] for c in cases})
-    strata = _strata(rec, ref["record"], cmp, cfg)
+    cmp = S.compare_records(rec, ref["record"], th, declared=declared)
+    strata = _strata(rec, ref["record"], cmp, cfg, cases)
     np.savez(os.path.join(a.out, "L2LF_residuals.npz"), **{k: v for k, v in cmp["r"].items()})
     res_out.update(verdict=cmp["verdict"], complete=cmp["complete"], max_abs=cmp["max_abs"], points=cmp["points"],
                    case_outcomes=cmp["cases"],

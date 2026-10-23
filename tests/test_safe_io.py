@@ -170,6 +170,8 @@ def test_refuses_corrupt_files(tmp_path):
     lambda h: {**h, "a": {**h["a"], "shape": [1] * 9 + [4]}},                             # too many dims
     lambda h: {**h, "a": {**h["a"], "shape": [2 ** 62, 0], "data_offsets": [32, 32]},
                "b": {**h["b"], "data_offsets": [0, 32]}},                                 # huge zero-size dims
+    lambda h: {**h, "a": {**h["a"], "shape": [2 ** 39, 2 ** 39, 0], "data_offsets": [32, 32]},
+               "b": {**h["b"], "data_offsets": [0, 32]}},                                 # reshape refused in pass 2
     lambda h: {**h, "__metadata__": {"x": 1}},                                            # non-string metadata
     lambda h: {**h, "": h["a"]},                                                          # empty name
 ])
@@ -190,7 +192,7 @@ def test_refuses_a_true_gap_and_odd_headers(tmp_path):
     with pytest.raises(S.SafeFormatError, match="start"):
         S.read_safetensors(_raw_file(tmp_path, b' {"a":1}', b""))
     deep = b'{"a":' + b"[" * 200000 + b"]" * 200000 + b"}"
-    with pytest.raises(S.SafeFormatError, match="RecursionError|unreadable"):
+    with pytest.raises(S.SafeFormatError, match="RecursionError"):
         S.read_safetensors(_raw_file(tmp_path, deep + b" " * (-len(deep) % 8)))
     dup = b'{"a":{"dtype":"F64","shape":[1],"data_offsets":[0,8]},"a":{"dtype":"F64","shape":[1],"data_offsets":[0,8]}}'
     dup += b" " * (-len(dup) % 8)
@@ -459,4 +461,51 @@ def test_table_reader_refuses_links_vlen_and_array_attributes(tmp_path):
     with h5py.File(p, "a") as f:
         f.attrs["arr"] = np.arange(3)
     with pytest.raises(S.SafeFormatError, match="attribute"):
+        S.read_table_h5(p, {"a": ("float64", (3,))})
+
+
+
+def test_publish_refuses_symlink_targets_and_accepts_only_our_own_inode(tmp_path, monkeypatch):
+    target = tmp_path / "t.safetensors"
+    os.symlink(str(tmp_path / "nowhere"), target)                             # a dangling symlink at the target
+    with pytest.raises(S.SafeFormatError, match="never overwritten"):
+        S.write_safetensors(str(target), {"a": np.zeros(1)})
+    assert os.path.islink(target) and not os.path.exists(tmp_path / "nowhere")
+    real_link = os.link
+
+    def link_then_eexist(src, dst):                                          # an NFS retransmit: done, then EEXIST
+        real_link(src, dst)
+        raise FileExistsError(dst)
+    monkeypatch.setattr(os, "link", link_then_eexist)
+    p = str(tmp_path / "ok.safetensors")
+    S.write_safetensors(p, {"a": np.arange(3.0)})
+    assert np.array_equal(S.read_safetensors(p)[0]["a"], np.arange(3.0))
+    assert not [f for f in os.listdir(tmp_path) if f.startswith(".tmp_")]
+
+
+def test_published_files_get_the_umask_mode(tmp_path):
+    old = os.umask(0o022)
+    try:
+        S.write_safetensors(str(tmp_path / "a.safetensors"), {"a": np.zeros(1)})
+        S.write_table_h5(str(tmp_path / "a.h5"), {"x": np.zeros(2)}, {})
+    finally:
+        os.umask(old)
+    for f in ("a.safetensors", "a.h5"):
+        assert os.stat(tmp_path / f).st_mode & 0o777 == 0o644
+
+
+def test_normalizer_keys_beyond_int64_digits_are_refused_at_write():
+    with pytest.raises(S.SafeFormatError, match="18 digits"):
+        S.norm_tensors({"a": {10 ** 18: np.zeros(1)}})
+
+
+def test_table_reader_refuses_invalid_utf8_string_attributes_and_dot_names(tmp_path):
+    import h5py
+    p = str(tmp_path / "u.h5")
+    S.write_table_h5(p, {"a": np.arange(3.0)}, {})
+    with pytest.raises(S.SafeFormatError, match="plain top-level"):
+        S.read_table_h5(p, {".": ("float64", (3,))})
+    with h5py.File(p, "a") as f:
+        f.attrs.create("bad", b"\xff\xfe", dtype=h5py.string_dtype("utf-8"))
+    with pytest.raises(S.SafeFormatError, match="UTF-8"):
         S.read_table_h5(p, {"a": ("float64", (3,))})

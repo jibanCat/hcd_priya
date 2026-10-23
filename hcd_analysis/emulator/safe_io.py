@@ -24,6 +24,7 @@ import json
 import math
 import os
 import re
+import stat
 import struct
 import tempfile
 
@@ -77,28 +78,46 @@ def _code(dtype):
 
 
 def _publish(tmp, path):
-    """Move ``tmp`` to ``path`` only if ``path`` does not exist (a hard link fails atomically on an existing target)."""
+    """Move ``tmp`` to ``path`` only if ``path`` does not exist (a hard link fails atomically on an existing target).
+    An EEXIST is accepted only when ``path`` is the very same inode as ``tmp`` and not a symlink (an NFS retransmit can
+    report EEXIST for our own new link); every other failure is a SafeFormatError."""
     try:
-        os.link(tmp, path)
-    except FileExistsError:
-        if not os.path.samefile(tmp, path):          # an NFS retransmit can report EEXIST for our own new link
-            raise SafeFormatError(f"{path} exists: never overwritten") from None
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            st_p, st_t = os.lstat(path), os.lstat(tmp)
+            if stat.S_ISLNK(st_p.st_mode) or (st_p.st_dev, st_p.st_ino) != (st_t.st_dev, st_t.st_ino):
+                raise SafeFormatError(f"{path} exists: never overwritten") from None
+        except OSError as e:
+            raise SafeFormatError(f"{path} cannot be published ({e})") from None
     finally:
         os.remove(tmp)
 
 
+def _finalize_tmp(tmp):
+    """fsync and give the umask-derived mode (mkstemp creates 0600) before publishing."""
+    with open(tmp, "rb+") as f:
+        os.fsync(f.fileno())
+    umask = os.umask(0)
+    os.umask(umask)
+    os.chmod(tmp, 0o666 & ~umask)
+
+
+def _new_tmp(path, suffix=""):
+    try:
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".tmp_", suffix=suffix)
+    except OSError as e:
+        raise SafeFormatError(f"{path} cannot be created ({e})") from None
+    return fd, tmp
+
+
 def _write_exclusive(path, chunks):
-    d = os.path.dirname(os.path.abspath(path))
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp_")
+    fd, tmp = _new_tmp(path)
     try:
         with os.fdopen(fd, "wb") as f:
             for c in chunks:
                 f.write(c)
-            f.flush()
-            os.fsync(f.fileno())
-        umask = os.umask(0)
-        os.umask(umask)
-        os.chmod(tmp, 0o666 & ~umask)
+        _finalize_tmp(tmp)
     except BaseException:
         os.remove(tmp)
         raise
@@ -221,6 +240,8 @@ def _norm_flatten(d, prefix, out):
             raise SafeFormatError(f"normalizer key {k!r} under {prefix!r} is neither str nor int")
         if isinstance(k, str) and (not k or "/" in k or k.startswith("#")):
             raise SafeFormatError(f"normalizer key {k!r} under {prefix!r} cannot be encoded")
+        if isinstance(k, int) and not -10 ** 18 < k < 10 ** 18:
+            raise SafeFormatError(f"normalizer key {k!r} under {prefix!r} has more than 18 digits")
         name = f"{prefix}/{'#%d' % k if isinstance(k, int) else k}"
         if isinstance(v, dict):
             _norm_flatten(v, name, out)
@@ -520,7 +541,7 @@ def write_table_h5(path, arrays, attrs):
             raise SafeFormatError(f"dataset {k!r}: dtype {a.dtype} is not numeric or the name is not plain")
     if os.path.lexists(path):
         raise SafeFormatError(f"{path} exists: never overwritten")
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".tmp_", suffix=".h5")
+    fd, tmp = _new_tmp(path, ".h5")
     os.close(fd)
     try:
         with h5py.File(tmp, "w") as f:                 # our own new temporary file
@@ -529,6 +550,7 @@ def write_table_h5(path, arrays, attrs):
                 f.attrs[k] = v
             for k, v in arrays.items():
                 f.create_dataset(k, data=np.asarray(v))
+        _finalize_tmp(tmp)
     except BaseException:
         os.remove(tmp)
         raise
@@ -544,18 +566,20 @@ def read_table_h5(path, required):
     with h5py.File(path, "r") as f:
         for k in f.attrs:
             v = f.attrs[k]
-            if isinstance(v, bytes):
-                try:
+            try:
+                if isinstance(v, bytes):
                     v = v.decode("utf-8", errors="strict")
-                except UnicodeDecodeError:
-                    raise SafeFormatError(f"{path}: attribute {k!r} is not UTF-8") from None
+                elif isinstance(v, str):
+                    v.encode("utf-8", errors="strict")        # h5py surrogate-escapes invalid bytes
+            except UnicodeError:
+                raise SafeFormatError(f"{path}: attribute {k!r} is not UTF-8") from None
             if not isinstance(v, (str, np.integer, np.floating, np.bool_, int, float, bool)):
                 raise SafeFormatError(f"{path}: attribute {k!r} is not a str or numeric scalar")
             attrs[k] = v
         if attrs.get("format") != FORMAT:
             raise SafeFormatError(f"{path}: format {attrs.get('format')!r}, expected {FORMAT}")
         for name, (dt, shape) in required.items():
-            if not isinstance(name, str) or not name or "/" in name:
+            if not isinstance(name, str) or not _PLAIN_NAME.match(name):
                 raise SafeFormatError(f"{path}: dataset name {name!r} must be a plain top-level name")
             link = f.get(name, getlink=True)
             if link is None:
