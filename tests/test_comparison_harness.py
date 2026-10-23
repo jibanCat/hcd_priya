@@ -366,3 +366,34 @@ def test_runner_family_verdicts_use_the_declared_case_list():
     assert fam["I"]["verdict"] == "PASS"
     gone = S.compare_records(_rec([_case("i1")]), _rec([_case("i1")]), 0.02, declared=declared)
     assert R.family_verdicts(gone, cases)["D"]["verdict"] == "NOT RUN"         # a dropped family is reported
+
+
+
+def test_reference_parent_is_checked_before_it_is_importable(tmp_path):
+    """The reference adapter must refuse a parent directory holding anything besides lyaemu/ BEFORE that directory is
+    on sys.path: a shadowing hcd_analysis/ there must never execute (run in this interpreter, no GPy needed)."""
+    import json as _json
+    import os as _os
+    import subprocess as _sp
+    import sys as _sys
+    from hcd_analysis.comparison.adapters import lyaemu_priya as A
+    repo = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    parent = tmp_path / "parent"
+    (parent / "lyaemu").mkdir(parents=True)
+    (parent / "lyaemu" / "__init__.py").write_text("")
+    marker = tmp_path / "SHADOW_EXECUTED"
+    (parent / "hcd_analysis").mkdir()
+    (parent / "hcd_analysis" / "__init__.py").write_text(f"open({str(marker)!r}, 'w').write('x')\n")
+    basedir = tmp_path / "basedir"
+    (basedir / "trained_mf").mkdir(parents=True)
+    (basedir / "emulator_params.json").write_text("{}")
+    pins = {"artifacts_sha256": {"emulator_params.json": A.sha256_file(str(basedir / "emulator_params.json"))},
+            "trained_mf_tree_sha256": A.tree_sha256(str(basedir / "trained_mf")),
+            "implementation": {"lyaemu_code_md5": A.lyaemu_md5(str(parent / "lyaemu"))}}
+    req = tmp_path / "request.json"
+    req.write_text(_json.dumps({"pins": pins, "res": 0, "config": {}, "comparator_id": "R1", "cases": []}))
+    r = _sp.run([_sys.executable, "-I", "-B", _os.path.join(repo, "hcd_analysis/comparison/adapters/lyaemu_priya.py"),
+                 "--repo", repo, "--lyaemu-parent", str(parent), "--basedir", str(basedir), "--request", str(req),
+                 "--out", str(tmp_path / "out.json")], capture_output=True, text=True, cwd=str(tmp_path))
+    assert r.returncode != 0 and "must hold only lyaemu" in r.stderr
+    assert not marker.exists() and not (tmp_path / "out.json").exists()

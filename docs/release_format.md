@@ -52,9 +52,11 @@ required; `None` explicitly loads an unanchored bundle, for development only):
    refuses nested or dot names, soft and external links, external or virtual storage, variable-length data and
    non-scalar or non-UTF-8 attributes (including surrogate-escaped strings).
 
-Writes never overwrite: every file (tensors, sidecars, manifest and HDF5 tables) is written to a temporary name,
-fsynced, given the umask-derived mode, and published with a hard link that fails if the target exists (a symlink at
-the target is refused, never followed). Converting a legacy checkpoint (`scripts/export_safe_bundle.py`) reads its `.norm.pkl` through
+Writes never overwrite: every file (tensors, sidecars, manifest and HDF5 tables) is written to a new temporary name
+(created exclusively, never through a symlink, with the mode any new file gets under the umask and the directory's
+default ACLs), fsynced, and published with a hard link that fails if the target exists (a symlink at the target is
+refused, never followed). HDF5 dataset names must be plain names (letters, digits, `_`, `.`, `-`; not starting with
+`.` or `-`), the same rule on write and on read. Converting a legacy checkpoint (`scripts/export_safe_bundle.py`) reads its `.norm.pkl` through
 `train.load_checkpoint`, so it is done only for this project's own checkpoints, after the production manifest matches a
 digest given on the command line and the members' digests are verified (`prod_ensemble.verify_manifest`), into a new
 directory.

@@ -24,9 +24,9 @@ import json
 import math
 import os
 import re
+import secrets
 import stat
 import struct
-import tempfile
 
 import numpy as np
 
@@ -85,7 +85,10 @@ def _publish(tmp, path):
         try:
             os.link(tmp, path)
         except FileExistsError:
-            st_p, st_t = os.lstat(path), os.lstat(tmp)
+            try:
+                st_p, st_t = os.lstat(path), os.lstat(tmp)
+            except OSError as e:
+                raise SafeFormatError(f"{path} cannot be published ({e})") from None
             if stat.S_ISLNK(st_p.st_mode) or (st_p.st_dev, st_p.st_ino) != (st_t.st_dev, st_t.st_ino):
                 raise SafeFormatError(f"{path} exists: never overwritten") from None
         except OSError as e:
@@ -95,20 +98,25 @@ def _publish(tmp, path):
 
 
 def _finalize_tmp(tmp):
-    """fsync and give the umask-derived mode (mkstemp creates 0600) before publishing."""
+    """fsync before publishing. The mode is the one any new file gets (0o666 under the umask and the directory's
+    default ACLs): nothing is chmodded, so no permission or ACL entry wider than the directory's policy is added."""
     with open(tmp, "rb+") as f:
         os.fsync(f.fileno())
-    umask = os.umask(0)
-    os.umask(umask)
-    os.chmod(tmp, 0o666 & ~umask)
 
 
 def _new_tmp(path, suffix=""):
-    try:
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".tmp_", suffix=suffix)
-    except OSError as e:
-        raise SafeFormatError(f"{path} cannot be created ({e})") from None
-    return fd, tmp
+    """A new temporary file next to ``path``, created exclusively and never through a symlink."""
+    d = os.path.dirname(os.path.abspath(path))
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    for _ in range(100):
+        tmp = os.path.join(d, f".tmp_{secrets.token_hex(8)}{suffix}")
+        try:
+            return os.open(tmp, flags, 0o666), tmp
+        except FileExistsError:
+            continue
+        except OSError as e:
+            raise SafeFormatError(f"{path} cannot be created ({e})") from None
+    raise SafeFormatError(f"{path}: no free temporary name")
 
 
 def _write_exclusive(path, chunks):
@@ -537,7 +545,7 @@ def write_table_h5(path, arrays, attrs):
             raise SafeFormatError(f"attribute {k!r} must be a str, int, float or bool")
     for k, v in arrays.items():
         a = np.asarray(v)
-        if "/" in k or a.dtype == object or a.dtype.kind not in "fiub":
+        if not isinstance(k, str) or not _PLAIN_NAME.match(k) or a.dtype == object or a.dtype.kind not in "fiub":
             raise SafeFormatError(f"dataset {k!r}: dtype {a.dtype} is not numeric or the name is not plain")
     if os.path.lexists(path):
         raise SafeFormatError(f"{path} exists: never overwritten")

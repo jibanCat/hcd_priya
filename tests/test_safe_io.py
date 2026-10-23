@@ -509,3 +509,12 @@ def test_table_reader_refuses_invalid_utf8_string_attributes_and_dot_names(tmp_p
         f.attrs.create("bad", b"\xff\xfe", dtype=h5py.string_dtype("utf-8"))
     with pytest.raises(S.SafeFormatError, match="UTF-8"):
         S.read_table_h5(p, {"a": ("float64", (3,))})
+
+
+
+def test_table_writer_refuses_names_the_reader_refuses(tmp_path):
+    for bad in ("-a", "a b", ".hidden", "k(1)", "g/a"):
+        with pytest.raises(S.SafeFormatError, match="not plain"):
+            S.write_table_h5(str(tmp_path / f"n{abs(hash(bad))}.h5"), {bad: np.zeros(1)}, {})
+    S.write_table_h5(str(tmp_path / "ok.h5"), {"a.b": np.zeros(1)}, {})
+    assert S.read_table_h5(str(tmp_path / "ok.h5"), {"a.b": ("float64", (1,))})[0]["a.b"].shape == (1,)
