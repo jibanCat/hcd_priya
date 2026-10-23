@@ -171,7 +171,28 @@ def _same_state(a, b):
     return a["mean_flux"] == b["mean_flux"]
 
 
-def compare_records(test, ref, threshold):
+def level_verdict(outcomes):
+    """The one precedence for any set of case outcomes: FAIL, then NOT RUN, then BLOCKED, then PASS, else NOT
+    COMPARABLE (also for an empty set). Used for the level and for every group (family) of cases."""
+    vals = set(outcomes)
+    for v in ("FAIL", "NOT RUN", "BLOCKED", "PASS"):
+        if v in vals:
+            return v
+    return "NOT COMPARABLE"
+
+
+def group_verdicts(case_outcomes, group_of):
+    """``{group: {"verdict", "complete", "outcomes": {outcome: count}}}`` over the cases of each group, with the level
+    precedence: a group with a missing or blocked case can never PASS, and a group whose cases are all blocked is
+    reported (BLOCKED), not dropped."""
+    out = {}
+    for cid, g in group_of.items():
+        out.setdefault(g, []).append(case_outcomes.get(cid, "NOT RUN"))
+    return {g: {"verdict": level_verdict(v), "complete": "NOT RUN" not in v and "BLOCKED" not in v,
+                "outcomes": {o: v.count(o) for o in sorted(set(v))}} for g, v in out.items()}
+
+
+def compare_records(test, ref, threshold, *, declared=None):
     """Compare two validated records case by case.
 
     Returns ``{"verdict", "complete", "max_abs", "cases": {case_id: outcome}, "points": n, "summary": {...},
@@ -184,7 +205,11 @@ def compare_records(test, ref, threshold):
 
     Level verdict: FAIL if any comparable point exceeds the threshold; otherwise NOT RUN if any case is missing
     (incomplete), BLOCKED if any case is blocked, PASS if every remaining case passed, NOT COMPARABLE if none was
-    comparable. PASS therefore requires every declared case to be present and comparable cases to pass."""
+    comparable.
+
+    ``declared`` ({case_id: support status}, the runner's case list) binds the comparison to it: a declared case absent
+    from both records is NOT RUN, a record case that was not declared or whose support differs from the declared one
+    is refused. With ``declared``, PASS requires every declared case to be present and every comparable case to pass."""
     validate_record(test)
     validate_record(ref)
     undefined = UNDEFINED in (test["observable"], ref["observable"])
@@ -194,8 +219,19 @@ def compare_records(test, ref, threshold):
         raise ComparisonSchemaError("native k nodes differ (modes or L_box): refusing to intersect or interpolate")
     tc = {c["case_id"]: c for c in test["cases"]}
     rc = {c["case_id"]: c for c in ref["cases"]}
+    ids = set(tc) | set(rc)
+    if declared is not None:
+        stray = ids - set(declared)
+        if stray:
+            raise ComparisonSchemaError(f"cases not declared by the runner: {sorted(stray)[:5]}")
+        for side in (tc, rc):
+            for cid, c in side.items():
+                if c["support"]["status"] != declared[cid] and not undefined:
+                    raise ComparisonSchemaError(f"{cid}: record support {c['support']['status']} differs from the "
+                                                f"declared {declared[cid]}")
+        ids |= set(declared)
     outcomes, rs = {}, {}
-    for cid in sorted(set(tc) | set(rc)):
+    for cid in sorted(ids):
         a, b = tc.get(cid), rc.get(cid)
         if a is None or b is None:
             outcomes[cid] = "NOT RUN"
@@ -217,16 +253,7 @@ def compare_records(test, ref, threshold):
         outcomes[cid] = M.verdict(r, threshold)
     all_r = np.concatenate([r.ravel() for r in rs.values()]) if rs else np.array([])
     vals = set(outcomes.values())
-    if "FAIL" in vals:
-        level = "FAIL"
-    elif "NOT RUN" in vals:
-        level = "NOT RUN"
-    elif "BLOCKED" in vals:
-        level = "BLOCKED"
-    elif "PASS" in vals:
-        level = "PASS"
-    else:
-        level = "NOT COMPARABLE"
+    level = level_verdict(vals)
     return {"verdict": level, "complete": "NOT RUN" not in vals and "BLOCKED" not in vals, "threshold": threshold,
             "points": int(all_r.size), "max_abs": float(np.max(np.abs(all_r))) if all_r.size else None,
             "cases": outcomes, "summary": M.summarize(all_r, threshold), "r": rs}

@@ -30,7 +30,8 @@ little-endian buffer. `hcd_analysis/emulator/safe_io.py` reads and writes it wit
 
 ## Loading contract
 
-`safe_io.load_bundle(bundle_dir, expected_manifest_sha256=...)` is the release entry point:
+`safe_io.load_bundle(bundle_dir, expected_manifest_sha256=...)` is the release entry point (the digest keyword is
+required; `None` explicitly loads an unanchored bundle, for development only):
 
 1. The manifest (whose own sha256 the caller supplies) must list exactly the two files of each member under plain
    names (no directories, no symlinks), with matching sizes and sha256, and the directory must hold no other file.
@@ -38,8 +39,9 @@ little-endian buffer. `hcd_analysis/emulator/safe_io.py` reads and writes it wit
    name this format, `safetensors_file` must be the member's own file, and the meta must pass the schema-2.0 checks of
    `train.load_checkpoint`; `arch_cfg` must have exactly the `Emulator` constructor keys, with integers in a bounded
    range, and the seed must be a 32-bit unsigned integer.
-3. The header is parsed strictly: UTF-8 JSON object, no duplicate keys, known dtype codes, at most 8 dimensions,
-   offsets consistent with shape and dtype (computed with unbounded integers), and no gap, overlap or trailing byte.
+3. The header is parsed strictly: UTF-8 JSON object, no duplicate keys, known dtype codes, at most 8 dimensions of
+   bounded size, offsets consistent with shape and dtype (computed with unbounded integers), and no gap, overlap or
+   trailing byte; the whole header is validated before any tensor is copied out of the file.
 4. The network's tensor names, shapes and dtypes are derived from the code in this repository
    (`model.Emulator(**arch_cfg)` under `equinox.filter_eval_shape`, so nothing is allocated from file-controlled sizes);
    a missing, extra or mismatched tensor, or any tensor outside `model`/`norm/`, refuses the load. float64 stays
@@ -47,10 +49,11 @@ little-endian buffer. `hcd_analysis/emulator/safe_io.py` reads and writes it wit
 5. The normalizer must have the production structure (`f_nhi`, `dndx`, `P_filt` with `mu_marg`, `sig_marg`, `sig_cosmo`
    and integer-keyed `cell_mean`, `delta`), with shapes set by the network and every array float64.
 6. No pickle is read or written anywhere on this path, including inside metadata or HDF5 attributes. The HDF5 reader
-   refuses soft and external links, external or virtual storage, variable-length data and non-scalar attributes.
+   refuses nested names, soft and external links, external or virtual storage, variable-length data and non-scalar
+   or non-UTF-8 attributes.
 
-Writes never overwrite: every file is written to a temporary name and published with a hard link that fails if the
-target exists. Converting a legacy checkpoint (`scripts/export_safe_bundle.py`) reads its `.norm.pkl` through
+Writes never overwrite: every file (tensors, sidecars, manifest and HDF5 tables) is written to a temporary name and
+published with a hard link that fails if the target exists. Converting a legacy checkpoint (`scripts/export_safe_bundle.py`) reads its `.norm.pkl` through
 `train.load_checkpoint`, so it is done only for this project's own checkpoints, after the production manifest matches a
 digest given on the command line and the members' digests are verified (`prod_ensemble.verify_manifest`), into a new
 directory.

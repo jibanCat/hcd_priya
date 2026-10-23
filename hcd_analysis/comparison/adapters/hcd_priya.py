@@ -45,7 +45,7 @@ def _cache_row(d, params_vec, z, rung_index, rung):
     return int(rows[0])
 
 
-def predict(cases, *, cache_path, manifest_path=None, commit=None, pins=None):
+def predict(cases, *, cache_path, pins, manifest_path=None, commit=None):
     """A validated record for ``cases`` (each carrying ``support`` from the runner's domain check). ``pins`` (the
     comparison config's C1 entry) are enforced: the manifest file's and the cache's sha256. Every case also records
     the Head-A weights in ``native`` (context for the design points, where the cache weights are used)."""
@@ -63,11 +63,11 @@ def predict(cases, *, cache_path, manifest_path=None, commit=None, pins=None):
     from hcd_analysis.emulator.predict import predict_P_filt
     from hcd_analysis.emulator.safe_io import sha256_file
 
-    if pins is not None and sha256_file(manifest_path or PE.DEFAULT_MANIFEST_PATH) != pins["manifest_sha256"]:
+    if sha256_file(manifest_path or PE.DEFAULT_MANIFEST_PATH) != pins["manifest_sha256"]:
         raise RuntimeError("the production manifest does not match the pinned sha256")
     ens, meta0, norm0, manifest = PE.load_production_ensemble(manifest_path=manifest_path)
     cache_sha = sha256_file(cache_path)
-    if cache_sha != meta0["cache_sha256"] or (pins is not None and cache_sha != pins["cache_sha256"]):
+    if cache_sha != meta0["cache_sha256"] or cache_sha != pins["cache_sha256"]:
         raise RuntimeError(f"{cache_path} is not the pinned cache the production members were trained on")
     if not np.array_equal(np.asarray(meta0["param_limits"], float), np.asarray(PARAM_LIMITS, float)):
         raise RuntimeError("checkpoint param_limits differ from data.PARAM_LIMITS")

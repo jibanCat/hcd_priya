@@ -168,6 +168,8 @@ def test_refuses_corrupt_files(tmp_path):
     lambda h: {**h, "a": {**h["a"], "shape": [2 ** 62 + 1, 4]}},                          # int64 wrap
     lambda h: {**h, "a": {**h["a"], "shape": [2 ** 70]}},                                 # beyond int64
     lambda h: {**h, "a": {**h["a"], "shape": [1] * 9 + [4]}},                             # too many dims
+    lambda h: {**h, "a": {**h["a"], "shape": [2 ** 62, 0], "data_offsets": [32, 32]},
+               "b": {**h["b"], "data_offsets": [0, 32]}},                                 # huge zero-size dims
     lambda h: {**h, "__metadata__": {"x": 1}},                                            # non-string metadata
     lambda h: {**h, "": h["a"]},                                                          # empty name
 ])
@@ -187,8 +189,9 @@ def test_refuses_a_true_gap_and_odd_headers(tmp_path):
         S.read_safetensors(_raw_file(tmp_path, gap, b"\0" * 24))
     with pytest.raises(S.SafeFormatError, match="start"):
         S.read_safetensors(_raw_file(tmp_path, b' {"a":1}', b""))
-    with pytest.raises(S.SafeFormatError):
-        S.read_safetensors(_raw_file(tmp_path, b"[" * 200000 + b"]" * 200000))
+    deep = b'{"a":' + b"[" * 200000 + b"]" * 200000 + b"}"
+    with pytest.raises(S.SafeFormatError, match="RecursionError|unreadable"):
+        S.read_safetensors(_raw_file(tmp_path, deep + b" " * (-len(deep) % 8)))
     dup = b'{"a":{"dtype":"F64","shape":[1],"data_offsets":[0,8]},"a":{"dtype":"F64","shape":[1],"data_offsets":[0,8]}}'
     dup += b" " * (-len(dup) % 8)
     with pytest.raises(S.SafeFormatError, match="duplicate"):
@@ -230,6 +233,7 @@ def test_writes_never_overwrite(member, tmp_path):
     ({"norm/a/# 1": 1}, "canonical"),
     ({"norm/a/#1_0": 1}, "canonical"),
     ({"norm/a/#abc": 1}, "canonical"),
+    ({"norm/a/#" + "1" * 25: 1}, "canonical"),
     ({"norm/a//b": 1}, "empty segment"),
     ({"norm/a": 1, "norm/a/b": 2}, "nests under a leaf|collides"),
 ])
@@ -336,6 +340,8 @@ def test_bundle_round_trip_and_manifest_digest(bundle):
     assert S.verify_manifest(bd) == pres
     sha = S.sha256_file(os.path.join(bd, "manifest.json"))
     loaded = S.load_bundle(bd, expected_manifest_sha256=sha)
+    with pytest.raises(TypeError):
+        S.load_bundle(bd)                                                    # the anchor must be passed explicitly
     assert [m["seed"] for _, m, _ in loaded] == [0, 1]
     with pytest.raises(S.SafeFormatError, match="expected digest"):
         S.verify_manifest(bd, expected_sha256="0" * 64)
@@ -371,7 +377,7 @@ def test_manifest_refuses_tampering_extras_and_symlinks(bundle, tmp_path):
     with pytest.raises(S.SafeFormatError, match="does not match the manifest"):
         S.verify_manifest(bd)
     with pytest.raises(S.SafeFormatError, match="does not match the manifest"):
-        S.load_bundle(bd)
+        S.load_bundle(bd, expected_manifest_sha256=None)
     os.remove(pres[1] + ".safetensors")
     os.symlink(str(tmp_path / "elsewhere"), pres[1] + ".safetensors")
     with pytest.raises(S.SafeFormatError):
@@ -385,9 +391,10 @@ def test_clean_process_load(bundle, tmp_path):
     out = str(tmp_path / "clean.npy")
     code = ("import sys, numpy as np, jax; jax.config.update('jax_enable_x64', True); sys.path.insert(0, sys.argv[1]);"
             "from hcd_analysis.emulator import safe_io as S;"
-            "(m, _, _), _ = S.load_bundle(sys.argv[2]); import jax.numpy as jnp;"
+            "(m, _, _), _ = S.load_bundle(sys.argv[2], expected_manifest_sha256=sys.argv[4]); import jax.numpy as jnp;"
             "o = m(jnp.linspace(0.1, 0.9, 10), 0.4); np.save(sys.argv[3], np.asarray(o['P_filt_resid']))")
-    subprocess.run([sys.executable, "-I", "-B", "-c", code, REPO, bd, out], check=True, cwd=str(tmp_path))
+    sha = S.sha256_file(os.path.join(bd, "manifest.json"))
+    subprocess.run([sys.executable, "-I", "-B", "-c", code, REPO, bd, out, sha], check=True, cwd=str(tmp_path))
     ref = np.asarray(Emulator(**ARCH, key=jax.random.PRNGKey(0))(jnp.linspace(0.1, 0.9, 10), 0.4)["P_filt_resid"])
     assert np.load(out).tobytes() == ref.tobytes()
 
@@ -430,6 +437,9 @@ def test_table_round_trip_and_refusals(tmp_path):
         S.write_table_h5(str(tmp_path / "t.h5"), {}, {"bad": [1, 2]})
     with pytest.raises(S.SafeFormatError, match="reserved"):
         S.write_table_h5(str(tmp_path / "u.h5"), {}, {"format": "other"})
+    assert not [f for f in os.listdir(tmp_path) if f.startswith(".tmp_")]
+    with pytest.raises(S.SafeFormatError, match="plain top-level"):
+        S.read_table_h5(p, {"g/ratio": ("float64", (3, 13, 8))})
 
 
 def test_table_reader_refuses_links_vlen_and_array_attributes(tmp_path):

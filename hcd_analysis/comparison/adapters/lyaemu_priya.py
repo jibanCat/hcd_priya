@@ -1,7 +1,7 @@
 """PRIYA lyaemu adapter: observable O1 from a trained lyaemu multi-fidelity GP (SingleBinAR1), in the reference's OWN
 interpreter (it needs GPy/emukit), as a subprocess:
 
-  <ref-venv>/bin/python -I hcd_analysis/comparison/adapters/lyaemu_priya.py --repo <hcd_priya> --lyaemu-parent <dir>
+  <ref-venv>/bin/python -I -B hcd_analysis/comparison/adapters/lyaemu_priya.py --repo <hcd_priya> --lyaemu-parent <dir>
       --basedir <read-only copy> --request <request.json> --out <new record.json>
 
 Guards (a reference is never refit or modified):
@@ -125,6 +125,17 @@ def check_pins(basedir, lyaemu_pkg, pins):
     check_class_strings(os.path.join(basedir, "trained_mf"))
     refuse_symlinks(basedir)
     refuse_symlinks(lyaemu_pkg)
+    refuse_compiled(lyaemu_pkg)
+    parent = os.path.dirname(os.path.abspath(lyaemu_pkg))
+    if sorted(os.listdir(parent)) != ["lyaemu"]:
+        raise ReferenceRefused(f"{parent} must hold only lyaemu/ (anything else there could shadow imports)")
+
+
+def refuse_compiled(pkg):
+    """Python would execute a cached .pyc that matches its source's size and mtime; the pinned copy must carry none."""
+    for dp, ds, fs in os.walk(pkg):
+        if "__pycache__" in ds or any(f.endswith((".pyc", ".pyo")) for f in fs):
+            raise ReferenceRefused(f"compiled bytecode in the reference package: {dp}")
 
 
 def check_class_strings(trained_dir):
@@ -195,6 +206,14 @@ def run(args):
         raise ReferenceRefused(f"imported lyaemu {lyaemu.__file__} is not the pinned copy {lyaemu_pkg}")
     import lyaemu.mean_flux as mflux
     from lyaemu.utilities import rebin_power_to_kms
+    import GPy
+    import hcd_analysis
+    import paramz
+    for mod in (GPy, paramz):
+        if os.path.realpath(mod.__file__).startswith(os.path.realpath(args.lyaemu_parent) + os.sep):
+            raise ReferenceRefused(f"{mod.__name__} was imported from the reference directory")
+    if not os.path.realpath(hcd_analysis.__file__).startswith(os.path.realpath(args.repo) + os.sep):
+        raise ReferenceRefused("hcd_analysis was not imported from the repository under test")
     gp = load_reference(args.basedir, len(cfg["z_grid"]))
     zout = np.asarray(gp.zout, float)
     if sorted(np.round(zout, 9).tolist()) != sorted(cfg["z_grid"]):
@@ -227,6 +246,8 @@ def run(args):
             raise ReferenceRefused(f"{case['case_id']}: z_pivot {mf['z_pivot']} differs from the reference's {zout[ii]}")
         nparams = np.concatenate([[mf["tau0_amp"]], C.vector_from_names(st["params"], gp.param_names)])
         tau0_fac = np.asarray(mflux.mean_flux_slope_to_factor(zout, mf["dtau0"]), float)
+        if not np.allclose(tau0_fac, ((1.0 + zout) / (1.0 + mf["z_pivot"])) ** mf["dtau0"], rtol=1e-13, atol=0):
+            raise ReferenceRefused(f"{case['case_id']}: the reference slope factor is not the stated convention")
         mean, std = assemble(gp, nparams, tau0_fac, res)
         if args.checks:
             m1, _ = (mean, None) if res == 1 else assemble(gp, nparams, tau0_fac, 1)
@@ -250,7 +271,6 @@ def run(args):
         cases.append(rec)
     if tree_sha256(args.basedir) != before:
         raise ReferenceRefused("the reference basedir changed during the run")
-    import GPy
     record = {
         "schema": SCHEMA, "observable": "O1", "L_box_hmpc": float(cfg["L_box_hmpc"]), "modes": modes,
         "comparator": {"id": req["comparator_id"], "name": pins["name"], "repo": pins["repo"], "commit": pins["commit"],

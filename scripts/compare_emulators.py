@@ -111,12 +111,15 @@ def level_L1b(a, cfg, cases, res_out):
         res_out.update(verdict="BLOCKED", reason=err, checks=checks)
         return
     checks.update({f"R1_{k}": v for k, v in ref["checks"].items()})
+    n_comparable = sum(c["support"]["status"] == "COMPARABLE" for c in fam_i)
+    if n_comparable == 0:                                       # nothing checked is never a pass
+        res_out.update(verdict="NOT RUN", reason="no comparable family-I case", checks=checks)
+        return
     passes = {"json_round_trip_exact": checks["json_round_trip_exact"],
               "C1_kskm": kmax <= th["L1b_kround"], "k_round_trip": rt <= th["L1b_kround"],
               "R1_glue_res1": ref["checks"]["glue_res1_max_rel"] <= th["L1b_glue"],
               "R1_kconv": ref["checks"]["kconv_max_rel"] <= th["L1b_kconv"],
-              "R1_checked_all_cases": ref["checks"]["n_checked_cases"] == sum(
-                  c["support"]["status"] == "COMPARABLE" for c in fam_i)}
+              "R1_checked_all_cases": ref["checks"]["n_checked_cases"] == n_comparable}
     res_out.update(verdict="PASS" if all(passes.values()) else "FAIL", checks=checks, passes=passes)
 
 
@@ -163,8 +166,8 @@ def level_L1c(a, cfg, ks, res_out):
         summary_all=M.summarize(both, th["L1c_lineage"]),
         summary_unrepaired=M.summarize(r_all, th["L1c_lineage"]),
         summary_s4_added=M.summarize(r_added, th["L1c_lineage"]),
-        failing_sim_z=[list(x) for x in bad_sz],
-        context_outside_failing_sim_z={"n_pairs": len(rest), "max_abs_r": max((q[2] for q in rest), default=None),
+        post_hoc_failing_sim_z=[list(x) for x in bad_sz],
+        post_hoc_outside_failing_sim_z={"n_pairs": len(rest), "max_abs_r": max((q[2] for q in rest), default=None),
                                        "kfkms_max_rel": max((q[3] for q in rest), default=None)})
 
 
@@ -174,7 +177,7 @@ def _strata(rec_test, rec_ref, cmp, cfg):
     rc = {c["case_id"]: c for c in rec_ref["cases"]}
     edges = cfg["k_bands_skm"]
     out = {"by_case": {}, "by_z": {}, "by_k_band": {}, "by_family": {}, "data_range": None, "within_2sigma_ref": None,
-           "context": {}}
+           "post_hoc_context": {}}
     acc = {"z": {}, "band": {}, "fam": {}, "dr": [], "sig": [], "sigfam": {}, "argmax": {}, "famband": {}}
     for cid, r in cmp["r"].items():
         out["by_case"][cid] = M.summarize(r, th)
@@ -204,17 +207,20 @@ def _strata(rec_test, rec_ref, cmp, cfg):
         lo = edges[int(j)]
         hi = edges[int(j) + 1] if int(j) + 1 < len(edges) else None
         out["by_k_band"][f"[{lo}, {hi if hi is not None else 'inf'})"] = M.summarize(np.concatenate(v), th)
-    for f, v in acc["fam"].items():
-        allr = np.concatenate(v)
-        out["by_family"][f] = dict(M.summarize(allr, th), verdict=M.verdict(allr, th))
+    groups = S.group_verdicts(cmp["cases"], {c["case_id"]: c["family"] for c in rec_test["cases"]})
+    for f, g in groups.items():                                  # every family, with the level precedence
+        allr = np.concatenate(acc["fam"][f]) if f in acc["fam"] else np.array([])
+        out["by_family"][f] = dict(M.summarize(allr, th), **g)
     if acc["dr"]:
         out["data_range"] = M.summarize(np.concatenate(acc["dr"]), th)
         out["within_2sigma_ref"] = float(np.mean(np.concatenate(acc["sig"])))
     # context only (never verdict-changing): per family, where the largest residual sits, family x band
-    out["context"]["within_2sigma_ref_by_family"] = {f: float(np.mean(np.concatenate(v))) for f, v in acc["sigfam"].items()}
-    out["context"]["argmax_by_family"] = acc["argmax"]
-    out["context"]["family_by_k_band"] = {k: M.summarize(np.concatenate(v), th) for k, v in acc["famband"].items()}
-    out["context"].update(_weights_and_support_context(rec_test, rec_ref, cmp, cfg))
+    pc = out["post_hoc_context"]
+    pc["note"] = "post hoc (decided after the phase0_v1 results); never verdict-changing"
+    pc["within_2sigma_ref_by_family"] = {f: float(np.mean(np.concatenate(v))) for f, v in acc["sigfam"].items()}
+    pc["argmax_by_family"] = acc["argmax"]
+    pc["family_by_k_band"] = {k: M.summarize(np.concatenate(v), th) for k, v in acc["famband"].items()}
+    pc.update(_weights_and_support_context(rec_test, rec_ref, cmp, cfg))
     return out
 
 
@@ -262,7 +268,7 @@ def level_L2LF(a, cfg, cases, res_out):
         f.write(S.dumps(rec))
     ref, err = run_reference(a, cfg, cases, 0, False, os.path.join(a.out, "record_R1_res0.json"))
     comps = cfg["comparators"]
-    statuses = {"R1-LFshipped": "NOT COMPARABLE" if "lf_shipped_path" in comps["R1"] else "?",
+    statuses = {"R1-LFshipped": "NOT COMPARABLE" if "lf_shipped_path" in comps["R1"] else "NOT RUN",
                 "R2": comps["R2"]["status"], "R3": comps["R3"]["status"], "L2-MF": "NOT RUN"}
     lace_cmp = S.compare_records(rec, lace.blocked_record(cases, pins=cfg["comparators"]["R3"],
                                                           n_modes=cfg["n_modes"], L_box_hmpc=cfg["L_box_hmpc"]),
@@ -271,7 +277,7 @@ def level_L2LF(a, cfg, cases, res_out):
     if ref is None:
         res_out.update(verdict="BLOCKED", reason=err, other=statuses)
         return
-    cmp = S.compare_records(rec, ref["record"], th)
+    cmp = S.compare_records(rec, ref["record"], th, declared={c["case_id"]: c["support"]["status"] for c in cases})
     strata = _strata(rec, ref["record"], cmp, cfg)
     np.savez(os.path.join(a.out, "L2LF_residuals.npz"), **{k: v for k, v in cmp["r"].items()})
     res_out.update(verdict=cmp["verdict"], complete=cmp["complete"], max_abs=cmp["max_abs"], points=cmp["points"],

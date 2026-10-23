@@ -3,7 +3,7 @@
 Needs the reference's own interpreter (GPy, emukit, lyaemu) and two paths:
   HCD_KS_BASEDIR=<basedir>  HCD_LYAEMU_PARENT=<directory holding lyaemu/>
 Run it there without the suite's jax conftest:
-  <ref-venv>/bin/python -m pytest --noconftest -p no:cacheprovider tests/external/test_lyaemu_adapter_guards.py
+  <ref-venv>/bin/python -B -m pytest --noconftest -p no:cacheprovider tests/external/test_lyaemu_adapter_guards.py
 Skipped otherwise (a skip is not a pass). The masters are never touched: every test works on a tmp copy."""
 import json
 import os
@@ -11,6 +11,8 @@ import shutil
 import sys
 
 import pytest
+
+sys.dont_write_bytecode = True                  # never write bytecode into the reference package
 
 BASEDIR = os.environ.get("HCD_KS_BASEDIR")
 LYA = os.environ.get("HCD_LYAEMU_PARENT")
@@ -96,3 +98,15 @@ def test_a_missing_trained_file_is_refused_never_refit(copy_basedir):
     with pytest.raises(A.ReferenceRefused, match="fit or save"):
         A.load_reference(copy_basedir, 13)
     assert sorted(os.listdir(td)) == before
+
+
+def test_compiled_bytecode_in_the_reference_package_is_refused(tmp_path):
+    pkg = tmp_path / "parent" / "lyaemu"
+    shutil.copytree(os.path.join(LYA, "lyaemu"), pkg, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    for dp, ds, fs in os.walk(pkg):                         # the tmp copy must be writable (the source is read-only)
+        os.chmod(dp, 0o755)
+    A.refuse_compiled(str(pkg))
+    (pkg / "__pycache__").mkdir()
+    (pkg / "__pycache__" / "gp_wrap.cpython-311.pyc").write_bytes(b"\0")
+    with pytest.raises(A.ReferenceRefused, match="bytecode"):
+        A.refuse_compiled(str(pkg))

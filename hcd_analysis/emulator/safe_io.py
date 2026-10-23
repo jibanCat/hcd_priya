@@ -11,10 +11,12 @@ Layout of one LF member ``<prefix>``:
 A bundle directory holds the members and ``manifest.json`` (format, member order, every file's sha256 and size,
 provenance) and nothing else. Tables (MF corrections, grids) go to HDF5 with numeric datasets and scalar attributes only.
 
-Loading never imports or calls anything named in a file: the network shape is derived from reviewed code
-(``model.Emulator`` under ``equinox.filter_eval_shape``, nothing allocated) and an architecture config checked against
-an allowlist; every leaf is matched by name, shape and dtype before any array is built, and the normalizer must have
-the production structure, all float64. No pickle is read or written on this path."""
+Loading never imports or calls anything named in a file: the whole safetensors header is validated (entries,
+contiguous non-overlapping spans, no trailing bytes) before any tensor is copied out of the file's bytes; the network
+shape is derived from reviewed code (``model.Emulator`` under ``equinox.filter_eval_shape``, nothing allocated) and an
+architecture config checked against an allowlist; every leaf is matched by name, shape and dtype before the network is
+assembled, and the normalizer must have the production structure, all float64. No pickle is read or written on this
+path."""
 from __future__ import annotations
 
 import hashlib
@@ -36,7 +38,8 @@ _MAX_HEADER = 100_000_000                    # the official reader's limit
 _MAX_NDIM = 8
 ARCH_KEYS = ("in_dim", "n_k", "n_basis", "baseline_n_layers", "baseline_width")   # Emulator(**arch_cfg)
 _ARCH_MAX = 1 << 16
-_INT_SEGMENT = re.compile(r"#(0|-?[1-9][0-9]*)\Z")
+_INT_SEGMENT = re.compile(r"#(0|-?[1-9][0-9]{0,17})\Z")        # canonical, fits int64
+_MAX_DIM = 1 << 40
 _PLAIN_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*\Z")
 MANIFEST = "manifest.json"
 
@@ -78,7 +81,8 @@ def _publish(tmp, path):
     try:
         os.link(tmp, path)
     except FileExistsError:
-        raise SafeFormatError(f"{path} exists: never overwritten") from None
+        if not os.path.samefile(tmp, path):          # an NFS retransmit can report EEXIST for our own new link
+            raise SafeFormatError(f"{path} exists: never overwritten") from None
     finally:
         os.remove(tmp)
 
@@ -142,8 +146,8 @@ def parse_safetensors(raw, where="<bytes>"):
     if not isinstance(meta, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in meta.items()):
         raise SafeFormatError(f"{where}: __metadata__ must map str to str")
     buf = memoryview(raw)[8 + n:]
-    spans, out = [], {}
-    for name, e in header.items():
+    spans, plan = [], []
+    for name, e in header.items():                     # pass 1: validate every entry; nothing is copied yet
         if not name:
             raise SafeFormatError(f"{where}: empty tensor name")
         if not isinstance(e, dict) or set(e) != {"dtype", "shape", "data_offsets"}:
@@ -151,7 +155,8 @@ def parse_safetensors(raw, where="<bytes>"):
         if not isinstance(e["dtype"], str) or e["dtype"] not in _DTYPES:
             raise SafeFormatError(f"{where}: tensor {name!r} has unsupported dtype {e['dtype']!r}")
         shape, off = e["shape"], e["data_offsets"]
-        if (not isinstance(shape, list) or len(shape) > _MAX_NDIM or not all(_is_int(s) and s >= 0 for s in shape)
+        if (not isinstance(shape, list) or len(shape) > _MAX_NDIM
+                or not all(_is_int(s) and 0 <= s < _MAX_DIM for s in shape)
                 or not isinstance(off, list) or len(off) != 2 or not all(_is_int(o) for o in off)):
             raise SafeFormatError(f"{where}: tensor {name!r} has a malformed shape or offsets")
         a, b = off
@@ -160,7 +165,7 @@ def parse_safetensors(raw, where="<bytes>"):
         if not 0 <= a <= b <= len(buf) or b - a != size:
             raise SafeFormatError(f"{where}: tensor {name!r} offsets {off} do not match its shape/dtype or the file")
         spans.append((a, b, name))
-        out[name] = np.frombuffer(buf[a:b], dtype=dt).reshape(shape).copy()
+        plan.append((name, a, b, dt, shape))
     spans.sort()
     pos = 0
     for a, b, name in spans:
@@ -169,6 +174,12 @@ def parse_safetensors(raw, where="<bytes>"):
         pos = b
     if pos != len(buf):
         raise SafeFormatError(f"{where}: {len(buf) - pos} trailing bytes not owned by any tensor")
+    out = {}
+    for name, a, b, dt, shape in plan:                 # pass 2: the spans tile the buffer exactly; copy each once
+        try:
+            out[name] = np.frombuffer(buf[a:b], dtype=dt).reshape(shape).copy()
+        except ValueError as e:
+            raise SafeFormatError(f"{where}: tensor {name!r} cannot take shape {shape} ({e})") from None
     return out, meta
 
 
@@ -485,15 +496,18 @@ def verify_manifest(bundle_dir, *, expected_sha256=None, allow_extra=False):
     return [p for p, _, _ in _manifest_entries(bundle_dir, expected_sha256, allow_extra)]
 
 
-def load_bundle(bundle_dir, *, expected_manifest_sha256=None):
-    """Verify the manifest, then load every member with the manifest's digests. Returns ``[(model, meta, norm)]``."""
+def load_bundle(bundle_dir, *, expected_manifest_sha256):
+    """Verify the manifest, then load every member with the manifest's digests. Returns ``[(model, meta, norm)]``.
+    ``expected_manifest_sha256`` is required: the release anchor. Passing ``None`` explicitly loads an unanchored
+    bundle (development only)."""
     return [load_member(p, expected_sha256=s, expected_json_sha256=j)
             for p, s, j in _manifest_entries(bundle_dir, expected_manifest_sha256)]
 
 
 # --------------------------------------------------------------------------------------------- HDF5 tables
 def write_table_h5(path, arrays, attrs):
-    """Numeric datasets plus str/int/float/bool scalar attributes in a NEW file (``format`` is reserved)."""
+    """Numeric datasets plus str/int/float/bool scalar attributes in a NEW file (``format`` is reserved), written to a
+    temporary name and published by hard link like every other file of the format."""
     import h5py
     if "format" in attrs:
         raise SafeFormatError("attribute 'format' is reserved")
@@ -504,16 +518,21 @@ def write_table_h5(path, arrays, attrs):
         a = np.asarray(v)
         if "/" in k or a.dtype == object or a.dtype.kind not in "fiub":
             raise SafeFormatError(f"dataset {k!r}: dtype {a.dtype} is not numeric or the name is not plain")
+    if os.path.lexists(path):
+        raise SafeFormatError(f"{path} exists: never overwritten")
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".tmp_", suffix=".h5")
+    os.close(fd)
     try:
-        f = h5py.File(path, "w-")
-    except (FileExistsError, OSError) as e:
-        raise SafeFormatError(f"{path} exists or cannot be created: never overwritten ({e})") from None
-    with f:
-        f.attrs["format"] = FORMAT
-        for k, v in attrs.items():
-            f.attrs[k] = v
-        for k, v in arrays.items():
-            f.create_dataset(k, data=np.asarray(v))
+        with h5py.File(tmp, "w") as f:                 # our own new temporary file
+            f.attrs["format"] = FORMAT
+            for k, v in attrs.items():
+                f.attrs[k] = v
+            for k, v in arrays.items():
+                f.create_dataset(k, data=np.asarray(v))
+    except BaseException:
+        os.remove(tmp)
+        raise
+    _publish(tmp, path)
 
 
 def read_table_h5(path, required):
@@ -526,13 +545,18 @@ def read_table_h5(path, required):
         for k in f.attrs:
             v = f.attrs[k]
             if isinstance(v, bytes):
-                v = v.decode("utf-8", errors="strict")
+                try:
+                    v = v.decode("utf-8", errors="strict")
+                except UnicodeDecodeError:
+                    raise SafeFormatError(f"{path}: attribute {k!r} is not UTF-8") from None
             if not isinstance(v, (str, np.integer, np.floating, np.bool_, int, float, bool)):
                 raise SafeFormatError(f"{path}: attribute {k!r} is not a str or numeric scalar")
             attrs[k] = v
         if attrs.get("format") != FORMAT:
             raise SafeFormatError(f"{path}: format {attrs.get('format')!r}, expected {FORMAT}")
         for name, (dt, shape) in required.items():
+            if not isinstance(name, str) or not name or "/" in name:
+                raise SafeFormatError(f"{path}: dataset name {name!r} must be a plain top-level name")
             link = f.get(name, getlink=True)
             if link is None:
                 raise SafeFormatError(f"{path}: dataset {name!r} missing")

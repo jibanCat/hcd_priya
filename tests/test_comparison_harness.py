@@ -318,3 +318,30 @@ def test_reference_assembly_and_z_order_from_descending_zout():
     assert order == [12, 8, 0] and np.allclose(zout[order], [2.2, 3.0, 4.6])
     with pytest.raises(A.ReferenceRefused, match="not on the reference grid"):
         A.z_order(zout, [2.3])
+
+
+# --------------------------------------------------------------------------------------------- declared cases, groups
+def test_declared_case_list_binds_the_comparison():
+    declared = {"c1": "COMPARABLE", "c2": "COMPARABLE"}
+    out = S.compare_records(_rec([_case("c1")]), _rec([_case("c1")]), 0.02, declared=declared)
+    assert out["cases"]["c2"] == "NOT RUN" and out["verdict"] == "NOT RUN"     # dropped by both adapters
+    with pytest.raises(S.ComparisonSchemaError, match="not declared"):
+        S.compare_records(_rec([_case("c1"), _case("c9")]), _rec([_case("c1")]), 0.02, declared=declared)
+    with pytest.raises(S.ComparisonSchemaError, match="differs from the declared"):
+        S.compare_records(_rec([_nc("c1")]), _rec([_nc("c1")]), 0.02, declared={"c1": "COMPARABLE"})
+    both = S.compare_records(_rec([_case("c1"), _case("c2")]), _rec([_case("c1"), _case("c2")]), 0.02,
+                             declared=declared)
+    assert both["verdict"] == "PASS" and both["complete"]
+
+
+def test_group_verdicts_use_the_level_precedence():
+    outcomes = {"d1": "PASS", "d2": "NOT RUN", "i1": "PASS", "i2": "FAIL", "b1": "BLOCKED", "b2": "BLOCKED",
+                "n1": "NOT COMPARABLE"}
+    group_of = {"d1": "D", "d2": "D", "i1": "I", "i2": "I", "b1": "B", "b2": "B", "n1": "N", "x1": "X"}
+    g = S.group_verdicts(outcomes, group_of)
+    assert g["D"]["verdict"] == "NOT RUN" and not g["D"]["complete"]           # a missing case never passes
+    assert g["I"]["verdict"] == "FAIL"
+    assert g["B"] == {"verdict": "BLOCKED", "complete": False, "outcomes": {"BLOCKED": 2}}   # reported, not dropped
+    assert g["N"]["verdict"] == "NOT COMPARABLE" and g["N"]["complete"]
+    assert g["X"]["verdict"] == "NOT RUN"                                        # declared but absent from outcomes
+    assert S.level_verdict([]) == "NOT COMPARABLE"
