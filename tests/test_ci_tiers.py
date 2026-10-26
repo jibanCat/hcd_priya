@@ -1,8 +1,9 @@
 """tests/ci_tiers.toml classifies every test file exactly once, so no file can drop out of CI unnoticed.
 
 CI (.github/workflows/tests.yml, tools/ci/run_test_tier.py) runs the "wheel" and "source" tiers and refuses any skip
-there except of a test named in its file's asset_tests, which is reported as not run; every other tier is reported as
-not run too, with the reason recorded here."""
+there except of a test named in its file's asset_tests or skipped_by_design, which is reported as not run, and any
+expected failure except a deferred_legacy deferral or one whose exact message is in the file's deferred_xfails; every
+other tier is reported as not run too, with the reason recorded here."""
 import ast
 import glob
 import os

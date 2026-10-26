@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Build the sdist and the wheel (timestamps from the commit; the wheel is byte-reproducible, the sdist is not)
+      - name: Build the sdist and the wheel (SOURCE_DATE_EPOCH set to the commit time)
         run: |
           python -m pip install build
           SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --outdir dist .
@@ -64,10 +64,10 @@ jobs:
         run: >-
           "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier source
           --out "$RUNNER_TEMP/results/source"
-      - name: Report the tests this workflow does not run
+      - name: List the test files outside the CI tiers (never run by this workflow)
         if: ${{ !cancelled() }}
         run: python tools/ci/run_test_tier.py --list-not-run
-      - name: Keep the results (junit reports, summaries and the environment of synthetic tests only)
+      - name: Keep the results (junit reports, tier summaries and the pip freeze)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:

@@ -107,7 +107,7 @@ def test_check_sdist_refuses_links_missing_and_edited_files(tmp_path):
 
 def test_committed_files_cover_the_packages_and_nothing_else():
     package, top = CD.committed_files()
-    assert {"hcd_analysis/__init__.py", "hcd_analysis/emulator/safe_io.py", "cli/run.py"} <= set(package)
+    assert {"hcd_analysis/__init__.py", "hcd_analysis/paths.py", "cli/run.py"} <= set(package)
     assert set(CD.PACKAGE_DATA) <= set(package) and set(top) == set(CD.SDIST_COMMITTED)
     assert all(p.split("/")[0] in CD.PACKAGES and (p.endswith(".py") or p in CD.PACKAGE_DATA) for p in package)
 
