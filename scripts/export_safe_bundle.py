@@ -13,7 +13,10 @@ identical on fixed inputs; a clean subprocess that only sees the bundle (``load_
 reproduces the ensemble P_filt; the bundle verifies with no unlisted file; the originals are unchanged. Evidence
 (inputs, predictions, ``pilot_summary.json``) goes to ``<out>/evidence``.
 
-  python scripts/export_safe_bundle.py --out NEW_DIR --manifest-sha256 HEX [--manifest PATH]
+  python scripts/export_safe_bundle.py --out NEW_DIR --manifest-sha256 HEX [--manifest PATH] [--container h5]
+
+``--container`` picks the member container: ``safetensors`` (``safe_io``, ``hcd_priya.safe/1``, the default) or ``h5``
+(``safe_h5``, ``hcd_priya.h5/1``); the clean subprocess loads the bundle with the same module.
 """
 import argparse
 import datetime
@@ -34,6 +37,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp  # noqa: E402
 
 from hcd_analysis.emulator import prod_ensemble as PE  # noqa: E402
+from hcd_analysis.emulator import safe_h5 as H  # noqa: E402
 from hcd_analysis.emulator import safe_io as S  # noqa: E402
 from hcd_analysis.emulator import train as T  # noqa: E402
 from hcd_analysis.emulator.data import Z_LIMITS  # noqa: E402
@@ -41,13 +45,15 @@ from hcd_analysis.emulator.ensemble import EnsembleEmulator  # noqa: E402
 from hcd_analysis.emulator.predict import predict_P_filt  # noqa: E402
 
 N_INPUTS, SEED = 16, 20261022
+CONTAINERS = {"safetensors": S, "h5": H}
 EXTS = (".eqx", ".norm.pkl", ".meta.json")
 
 CHILD = """
 import sys, numpy as np, jax
 jax.config.update('jax_enable_x64', True)
 sys.path.insert(0, sys.argv[1])
-from hcd_analysis.emulator import safe_io as S
+import importlib
+S = importlib.import_module('hcd_analysis.emulator.' + sys.argv[6])
 from hcd_analysis.emulator.ensemble import EnsembleEmulator
 from hcd_analysis.emulator.predict import predict_P_filt
 loaded = S.load_bundle(sys.argv[2], expected_manifest_sha256=sys.argv[3])
@@ -94,7 +100,9 @@ def main():
     ap.add_argument("--out", required=True, help="NEW directory (refused if it exists)")
     ap.add_argument("--manifest", default=None, help="production manifest (default: the pinned one)")
     ap.add_argument("--manifest-sha256", required=True, help="expected sha256 of the production manifest")
+    ap.add_argument("--container", choices=sorted(CONTAINERS), default="safetensors", help="member container")
     a = ap.parse_args()
+    F = CONTAINERS[a.container]
     if os.path.exists(a.out):
         sys.exit(f"refusing: {a.out} exists (the export never writes into an existing directory)")
     man_src = a.manifest or PE.DEFAULT_MANIFEST_PATH
@@ -113,10 +121,10 @@ def main():
     out_prefixes = []
     for p, (model, meta, norm) in zip(prefixes, legacy):
         q = os.path.join(bundle, os.path.basename(p))
-        S.export_member(q, model, meta, norm)
+        F.export_member(q, model, meta, norm)
         out_prefixes.append(q)
     import equinox
-    man_path = S.write_manifest(bundle, out_prefixes, {
+    man_path = F.write_manifest(bundle, out_prefixes, {
         "source_manifest": os.path.basename(man_src), "source_manifest_sha256": src_sha,
         "source_files_sha256": {os.path.basename(k): v for k, v in before.items()},
         "code_commit": _git("rev-parse", "HEAD"), "code_dirty": bool(_git("status", "--porcelain")),
@@ -126,7 +134,7 @@ def main():
         "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()})
     bundle_sha = S.sha256_file(man_path)
 
-    loaded = S.load_bundle(bundle, expected_manifest_sha256=bundle_sha)       # no unlisted file, digests bound
+    loaded = F.load_bundle(bundle, expected_manifest_sha256=bundle_sha)       # no unlisted file, digests bound
     checks["bundle_verifies"] = True
     x, tau0 = _inputs()
     for i, ((m0, meta0, n0), (m1, meta1, n1)) in enumerate(zip(legacy, loaded)):
@@ -166,7 +174,8 @@ def main():
     np.savez(inp, x=x, tau0=tau0)
     np.save(os.path.join(evidence, "pilot_P_filt_legacy.npy"), P0)
     child_out = os.path.join(evidence, "pilot_P_filt_clean_process.npy")
-    r = subprocess.run([sys.executable, "-I", "-B", "-c", CHILD, REPO, bundle, bundle_sha, inp, child_out],
+    r = subprocess.run([sys.executable, "-I", "-B", "-c", CHILD, REPO, bundle, bundle_sha, inp, child_out,
+                        F.__name__.rsplit(".", 1)[1]],
                        capture_output=True, text=True, cwd=evidence)
     checks["clean_process_ran"] = r.returncode == 0
     checks["clean_process_P_filt"] = r.returncode == 0 and _same(np.load(child_out), P0)
@@ -178,7 +187,7 @@ def main():
     checks["source_manifest_verifies_after"] = True
 
     ok = all(checks.values())
-    summary = {"format": S.FORMAT, "verdict": "PASS" if ok else "FAIL", "checks": checks, "max_abs_diff": dmax,
+    summary = {"format": F.FORMAT, "container": a.container, "verdict": "PASS" if ok else "FAIL", "checks": checks, "max_abs_diff": dmax,
                "n_members": len(prefixes), "n_inputs": N_INPUTS, "seed": SEED, "bundle_manifest_sha256": bundle_sha,
                "child_stderr_tail": r.stderr[-2000:] if r.returncode else ""}
     with open(os.path.join(evidence, "pilot_summary.json"), "x") as fh:

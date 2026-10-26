@@ -456,9 +456,9 @@ def _plain(name, what):
     return name
 
 
-def write_manifest(bundle_dir, member_prefixes, provenance):
+def write_manifest(bundle_dir, member_prefixes, provenance, *, data_ext=".safetensors", fmt=FORMAT):
     """``manifest.json`` tying every file of the bundle together (sha256, size), in member order. Members must sit
-    directly in ``bundle_dir`` under plain names."""
+    directly in ``bundle_dir`` under plain names. ``data_ext``/``fmt`` select the container (safe_h5 uses ``.h5``)."""
     bd = os.path.abspath(bundle_dir)
     names, files = [], []
     for pre in member_prefixes:
@@ -466,18 +466,18 @@ def write_manifest(bundle_dir, member_prefixes, provenance):
             raise SafeFormatError(f"member {pre!r} is not directly inside {bundle_dir}")
         m = _plain(os.path.basename(pre), "member")
         names.append(m)
-        for ext in (".safetensors", ".json"):
+        for ext in (data_ext, ".json"):
             p = os.path.join(bd, m + ext)
             files.append({"path": m + ext, "sha256": sha256_file(p), "bytes": os.path.getsize(p)})
     if len(set(names)) != len(names):
         raise SafeFormatError("duplicate member names")
-    man = {"format": FORMAT, "members": names, "files": files, "provenance": provenance}
+    man = {"format": fmt, "members": names, "files": files, "provenance": provenance}
     path = os.path.join(bd, MANIFEST)
     _write_exclusive(path, [json.dumps(man, indent=1, sort_keys=True, allow_nan=False).encode("utf-8")])
     return path
 
 
-def _manifest_entries(bundle_dir, expected_sha256=None, allow_extra=False):
+def _manifest_entries(bundle_dir, expected_sha256=None, allow_extra=False, *, data_ext=".safetensors", fmt=FORMAT):
     bd = os.path.abspath(bundle_dir)
     mp = os.path.join(bd, MANIFEST)
     if os.path.islink(mp):
@@ -487,9 +487,9 @@ def _manifest_entries(bundle_dir, expected_sha256=None, allow_extra=False):
     if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
         raise SafeFormatError(f"{mp}: sha256 does not match the expected digest")
     man = _json_loads(raw, mp)
-    if not isinstance(man, dict) or man.get("format") != FORMAT:
+    if not isinstance(man, dict) or man.get("format") != fmt:
         raise SafeFormatError(f"manifest format {man.get('format') if isinstance(man, dict) else None!r}, "
-                              f"expected {FORMAT}")
+                              f"expected {fmt}")
     members, files = man.get("members"), man.get("files")
     if not isinstance(members, list) or not members or not isinstance(files, list):
         raise SafeFormatError("manifest needs a non-empty members list and a files list")
@@ -504,7 +504,7 @@ def _manifest_entries(bundle_dir, expected_sha256=None, allow_extra=False):
         if p in listed:
             raise SafeFormatError(f"manifest lists {p} twice")
         listed[p] = e
-    want = {m + ext for m in members for ext in (".safetensors", ".json")}
+    want = {m + ext for m in members for ext in (data_ext, ".json")}
     if set(listed) != want:
         raise SafeFormatError(f"manifest files {sorted(set(listed) ^ want)[:6]} do not match its members")
     for p, e in listed.items():
@@ -516,7 +516,7 @@ def _manifest_entries(bundle_dir, expected_sha256=None, allow_extra=False):
     extra = sorted(set(os.listdir(bd)) - want - {MANIFEST})
     if extra and not allow_extra:
         raise SafeFormatError(f"bundle directory holds files the manifest does not list: {extra[:6]}")
-    return [(os.path.join(bd, m), listed[m + ".safetensors"]["sha256"], listed[m + ".json"]["sha256"])
+    return [(os.path.join(bd, m), listed[m + data_ext]["sha256"], listed[m + ".json"]["sha256"])
             for m in members]
 
 
