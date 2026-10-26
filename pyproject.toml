@@ -1,31 +1,66 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "hcd_analysis"
-version = "0.2.0"
+dynamic = ["version"]
 description = "HCD (High-Column-Density) absorber analysis pipeline for fake_spectra emulator outputs"
-requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: POSIX :: Linux",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+# Every third-party package the installed modules import, except fake_spectra (simulation side; install it
+# separately, see docs/fake_spectra_integration.md) and the reference-emulator adapters' own packages, which run in
+# the reference's environment (hcd_analysis/comparison/adapters).
+# Lower bounds: jax, equinox, optax, numpyro, numpy, scipy, h5py and matplotlib are the versions of the
+# development environment in which the full test suite runs; jax 0.10.1 needs Python 3.11 or later.
+# pandas 2.2.2 is the first pandas release built against numpy 2. The others are carried over unchanged.
 dependencies = [
-    "numpy>=1.24",
-    "scipy>=1.10",
-    "h5py>=3.8",
-    "pandas>=2.0",
+    "numpy>=2.4",
+    "scipy>=1.17",
+    "h5py>=3.16",
+    "jax>=0.10.1",
+    "equinox>=0.13.8",
+    "optax>=0.2.8",
+    "numpyro>=0.21",
+    "pandas>=2.2.2",
     "pyyaml>=6.0",
     "click>=8.1",
-    "matplotlib>=3.7",
+    "matplotlib>=3.10",
     "joblib>=1.3",
-    "tqdm>=4.65",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-cov", "ipython"]
+test = ["pytest>=9.0"]
+dev = ["hcd_analysis[test]", "build", "pytest-cov", "ipython"]
 tutorials = ["jupyter>=1.0", "nbformat>=5.9"]
+
+[project.urls]
+Repository = "https://github.com/jibanCat/hcd_priya"
 
 [project.scripts]
 hcd = "cli.run:cli"
 
+[tool.setuptools]
+# Only the files named below ship besides the code: never caches, checkpoints or anything linked into the tree.
+include-package-data = false
+
+[tool.setuptools.dynamic]
+version = {attr = "hcd_analysis.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["hcd_analysis*", "cli*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"hcd_analysis.comparison" = ["phase0_v1.json"]
+"hcd_analysis.emulator" = ["hcd_lit_dndx_corrected.json"]
