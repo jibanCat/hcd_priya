@@ -20,9 +20,10 @@ classifiers = [
 # Every third-party package the installed modules import, except fake_spectra (simulation side; install it
 # separately, see docs/fake_spectra_integration.md) and the reference-emulator adapters' own packages, which run in
 # the reference's environment (hcd_analysis/comparison/adapters).
-# Lower bounds: jax, equinox, optax, numpyro, numpy, scipy, h5py and matplotlib are the versions of the
-# development environment in which the full test suite runs; jax 0.10.1 needs Python 3.11 or later.
-# pandas 2.2.2 is the first pandas release built against numpy 2. The others are carried over unchanged.
+# Lower bounds: jax, equinox, optax, numpyro, numpy, scipy, h5py and matplotlib are the release series of the
+# development environment in which the full test suite runs (pinned in tools/ci/constraints-devenv.txt, which a CI
+# job installs exactly); jax 0.10.1 needs Python 3.11 or later. pandas 2.2.2 is the first pandas release built
+# against numpy 2. The others are carried over unchanged.
 dependencies = [
     "numpy>=2.4",
     "scipy>=1.17",
@@ -64,3 +65,7 @@ namespaces = false
 [tool.setuptools.package-data]
 "hcd_analysis.comparison" = ["phase0_v1.json"]
 "hcd_analysis.emulator" = ["hcd_lit_dndx_corrected.json"]
+
+[tool.pytest.ini_options]
+# Pins the rootdir to this checkout, so pytest never reads a configuration file above it.
+testpaths = ["tests"]

@@ -1,0 +1,15 @@
+# The direct dependencies at the exact versions of the development environment in which the full test suite runs
+# (the emu-jax conda environment, Python 3.11). Each lower bound in pyproject.toml is the release series of the pin
+# here (jax, equinox and optax exactly; numpy 2.4, scipy 1.17, h5py 3.16, numpyro 0.21, matplotlib 3.10, pytest 9.0).
+# The CI job "development-environment" installs exactly these versions; pandas, pyyaml, click and joblib are absent
+# from that environment and float to their newest versions.
+jax==0.10.1
+jaxlib==0.10.1
+equinox==0.13.8
+optax==0.2.8
+numpyro==0.21.0
+numpy==2.4.6
+scipy==1.17.1
+h5py==3.16.0
+matplotlib==3.10.9
+pytest==9.0.3

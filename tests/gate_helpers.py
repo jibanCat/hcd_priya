@@ -4,12 +4,15 @@ Set HCD_GATE_RUN=1 in a gate run: a test that needs the real caches then FAILS w
 skipping, so a gate can never pass by silently not running its load-bearing tests."""
 import os
 import re
+import sysconfig
 
 import pytest
 
 from hcd_analysis.paths import REPO_ROOT
 
 PROJECT_TOP = ("hcd_analysis", "scripts", "tests", "cli", "config")
+PACKAGE_TOP = ("hcd_analysis", "cli")      # the top-level packages the wheel installs (pyproject.toml)
+TESTS_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))   # the tree these tests belong to
 
 # deferred_legacy causes (tests/conftest.py, tests/DEFERRED.md): cause -> (exact error pattern, reason).
 DEFERRED_CAUSES = {
@@ -73,14 +76,29 @@ def require_real_cache(path):
     pytest.skip(msg)
 
 
+def installed_root():
+    """This interpreter's site-packages directory when hcd_analysis was imported from it (an installed wheel), else
+    None (hcd_analysis was imported from a checkout)."""
+    root = os.path.realpath(str(REPO_ROOT))
+    site = {os.path.realpath(sysconfig.get_paths()[k]) for k in ("purelib", "platlib")}
+    return root if root in site else None
+
+
 def foreign_project_modules(modules):
-    """Project modules (top-level package in PROJECT_TOP) whose file lies outside this checkout."""
-    root = str(REPO_ROOT)
+    """Project modules (top-level package in PROJECT_TOP) whose file lies outside the code under test.
+
+    From a checkout, every project module must come from the tree these tests belong to. Against an installed wheel
+    (hcd_analysis imported from this interpreter's site-packages), the installed packages (PACKAGE_TOP) must come from
+    that site-packages and the repository modules (tests, scripts, config) from the tests' tree. Both sides of each
+    comparison are resolved, so a symlinked path (a venv's lib64, a linked checkout) is neither foreign nor hidden."""
+    site = installed_root()
     foreign = []
     for name, mod in list(modules.items()):
-        if name.split(".")[0] not in PROJECT_TOP:
+        top = name.split(".")[0]
+        if top not in PROJECT_TOP:
             continue
         f = getattr(mod, "__file__", None)
-        if f and not os.path.abspath(f).startswith(root + os.sep):
+        root = site if site is not None and top in PACKAGE_TOP else TESTS_ROOT
+        if f and not os.path.realpath(f).startswith(root + os.sep):
             foreign.append(f"{name}: {f}")
     return foreign

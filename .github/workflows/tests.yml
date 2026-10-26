@@ -1,0 +1,64 @@
+# Fixture and synthetic tests of the built package. No job here has, or needs, a real cache, a trained model or
+# observational data: the tests that need them are listed in tests/ci_tiers.toml with their reasons and are reported
+# as NOT RUN, never as passed. tests/external (optional reference-environment tests) is not run here either.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fixture-tests:
+    name: wheel and source tiers (Python ${{ matrix.python }}, ${{ matrix.deps }} dependencies)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.11"
+            deps: development-environment
+          - python: "3.11"
+            deps: newest
+          - python: "3.12"
+            deps: newest
+    env:
+      JAX_PLATFORMS: cpu
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Build the sdist and the wheel
+        run: |
+          python -m pip install build
+          python -m build --outdir dist .
+      - name: Check the distribution contents
+        run: python tools/ci/check_dist.py dist
+      - name: Install the wheel into a fresh virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          constraints=()
+          if [ "${{ matrix.deps }}" = development-environment ]; then
+            constraints=(-c tools/ci/constraints-devenv.txt)
+          fi
+          "$RUNNER_TEMP/venv/bin/python" -m pip install "${constraints[@]}" "$(ls dist/*.whl)[test]"
+          "$RUNNER_TEMP/venv/bin/python" -m pip check
+          "$RUNNER_TEMP/venv/bin/python" -m pip freeze
+      - name: Wheel tier (the installed package, tests copied outside the checkout)
+        run: >-
+          "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier wheel
+          --workdir "$RUNNER_TEMP/wheeltest" --out "$RUNNER_TEMP/results/wheel"
+      - name: Source tier (tests that also read repository files, from the checkout)
+        if: ${{ !cancelled() }}
+        run: >-
+          "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier source
+          --out "$RUNNER_TEMP/results/source"
+      - name: Report the tests this workflow does not run
+        if: ${{ !cancelled() }}
+        run: python tools/ci/run_test_tier.py --list-not-run
