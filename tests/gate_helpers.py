@@ -2,9 +2,9 @@
 
 Set HCD_GATE_RUN=1 in a gate run: a test that needs the real caches then FAILS when they are absent instead of
 skipping, so a gate can never pass by silently not running its load-bearing tests."""
+import importlib.metadata as md
 import os
 import re
-import sysconfig
 
 import pytest
 
@@ -77,11 +77,24 @@ def require_real_cache(path):
 
 
 def installed_root():
-    """This interpreter's site-packages directory when hcd_analysis was imported from it (an installed wheel), else
-    None (hcd_analysis was imported from a checkout)."""
+    """The directory hcd_analysis was imported from when an installed wheel put it there, else None (hcd_analysis was
+    imported from a checkout). Installed means: the hcd_analysis distribution found on sys.path has a RECORD (only a
+    pip-installed .dist-info has one), the RECORD lists hcd_analysis/paths.py, and the distribution lives in the
+    directory paths.py was imported from (a venv, a user site, a --target directory). A checkout carrying a legacy
+    hcd_analysis.egg-info (no RECORD) and an editable install (its RECORD lists no package module) stay checkouts, so
+    the cross-checkout guard below keeps its full strength there. Tests that sit in a checkout (their tree holds the
+    package) are never in installed mode, so a stale installed copy cannot excuse a checkout's mixed origins."""
+    if os.path.isfile(os.path.join(TESTS_ROOT, "hcd_analysis", "__init__.py")):
+        return None
+    try:
+        dist = md.distribution("hcd_analysis")
+    except md.PackageNotFoundError:
+        return None
+    record = dist.read_text("RECORD") or ""
+    if not any(line.split(",")[0] == "hcd_analysis/paths.py" for line in record.splitlines()):
+        return None
     root = os.path.realpath(str(REPO_ROOT))
-    site = {os.path.realpath(sysconfig.get_paths()[k]) for k in ("purelib", "platlib")}
-    return root if root in site else None
+    return root if os.path.realpath(str(dist.locate_file(""))) == root else None
 
 
 def foreign_project_modules(modules):

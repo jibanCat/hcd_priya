@@ -90,3 +90,45 @@ def test_installed_root_matches_where_hcd_analysis_was_imported():
         assert G.installed_root() is None
     else:
         assert G.installed_root() == pkg_parent
+
+
+class _Dist:
+    def __init__(self, location, record):
+        self._location, self._record = location, record
+
+    def read_text(self, name):
+        return self._record if name == "RECORD" else None
+
+    def locate_file(self, path):
+        return os.path.join(self._location, path)
+
+
+@pytest.mark.parametrize("record, at_root, installed", [
+    ("hcd_analysis/paths.py,sha256=x,1\nhcd_analysis/__init__.py,sha256=y,2\n", True, True),   # wheel install
+    (None, True, False),                       # a checkout with a legacy egg-info: no RECORD (PU-0241's tree)
+    ("__editable__.hcd_analysis-0.1.0.pth,sha256=x,1\n", True, False),                            # editable install
+    ("hcd_analysis/paths.py,sha256=x,1\n", False, False),                # installed elsewhere, imported from here
+])
+def test_installed_root_requires_a_wheel_record_where_the_package_was_imported(monkeypatch, tmp_path, record,
+                                                                                at_root, installed):
+    root = tmp_path.resolve() / "site"
+    root.mkdir()
+    location = root if at_root else tmp_path.resolve() / "elsewhere"
+    monkeypatch.setattr(G, "REPO_ROOT", root)
+    monkeypatch.setattr(G, "TESTS_ROOT", str(tmp_path.resolve() / "testsdir"))       # tests outside any checkout
+    monkeypatch.setattr(G.md, "distribution", lambda name: _Dist(str(location), record))
+    assert G.installed_root() == (str(root) if installed else None)
+
+
+def test_tests_inside_a_checkout_are_never_in_installed_mode(monkeypatch, tmp_path):
+    """A stale `pip install .` in the venv must not excuse hcd_analysis resolving there while the tests come from a
+    checkout: the tests' tree holds the package, so the checkout rule applies and the mix is flagged."""
+    site = tmp_path.resolve() / "site"
+    checkout = tmp_path.resolve() / "checkout"
+    (checkout / "hcd_analysis").mkdir(parents=True)
+    (checkout / "hcd_analysis" / "__init__.py").write_text("")
+    monkeypatch.setattr(G, "REPO_ROOT", site)
+    monkeypatch.setattr(G, "TESTS_ROOT", str(checkout))
+    monkeypatch.setattr(G.md, "distribution", lambda name: _Dist(str(site), "hcd_analysis/paths.py,sha256=x,1\n"))
+    assert G.installed_root() is None
+    assert G.foreign_project_modules({"hcd_analysis.paths": _Mod(str(site / "hcd_analysis" / "paths.py"))})

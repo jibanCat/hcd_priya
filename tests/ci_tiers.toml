@@ -1,14 +1,18 @@
 # Test tiers (B.2). Every tests/test_*.py, tests/regression/test_*.py and tests/external/test_*.py file appears
 # here exactly once (tests/test_ci_tiers.py checks this). CI (.github/workflows/tests.yml) runs the wheel and
-# source tiers with tools/ci/run_test_tier.py, which fails a file on any failure, error or undeclared skip.
-# asset_tests and skipped_by_design name the only tests allowed to skip there; they are reported as NOT RUN,
-# never as passed, and must skip (a declared test that runs fails its file). reason says why, for every test or
-# file that CI does not run. Classified from run r1 of B_CHECKPOINT_01 (no data links; private trees hidden).
+# source tiers with tools/ci/run_test_tier.py, which fails a file on any failure, error, undeclared skip or
+# undeclared expected failure, or when no test passes. asset_tests and skipped_by_design name the only tests
+# allowed to skip there; they are reported as NOT RUN, never as passed, and must skip (a declared test that runs
+# fails its file). Expected failures are allowed only as exact deferrals: the deferred_legacy causes of
+# tests/gate_helpers.py, or the messages a file lists in deferred_xfails. reason says why, for every test or file
+# that CI does not run; tests marked slow are deselected and listed by the runner. Classified from run r1 of
+# B_CHECKPOINT_01 (no data links; private trees hidden) and corrected after its AI-assisted review.
 
 [tiers]
 wheel = "fixture and synthetic tests of the installed package; CI runs them from a directory holding only tests/"
 source = "fixture and synthetic tests that also need repository files (scripts/, docs/, a git checkout); CI runs them from the checkout"
-assets = "every test needs a real asset (a cache, trained members, observational data, raw simulation outputs, the private notes, or fake_spectra) that CI does not have; not run in CI"
+assets = "the file cannot run in CI: its tests need a real asset that CI does not have (a cache, trained members, observational data, raw simulation outputs, the private notes, or fake_spectra), and without it some fail rather than skip, or none passes; tests in it that need no asset are not run in CI either"
+deferred = "no test of the file passes in CI: each is an explicit deferral (tests/DEFERRED.md) or needs a real asset; not run in CI"
 external = "tests/external: optional tests in a reference environment of their own; not run in CI"
 no_tests = "a file named test_*.py from which pytest collects no test; not run in CI"
 
@@ -70,10 +74,8 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_prod_forward_wiring.py" = { tier = "source" }
 "tests/test_prod_sbc_checkpoint.py" = { tier = "source" }
 "tests/test_product_manifest.py" = { tier = "wheel" }
-"tests/test_r6_pairing.py" = { tier = "source" }
 "tests/test_rcinj_oos_spec.py" = { tier = "source" }
 "tests/test_real_fit_export.py" = { tier = "source" }
-"tests/test_res_corr_inject.py" = { tier = "wheel" }
 "tests/test_res_corr_injection_gate.py" = { tier = "source" }
 "tests/test_resinj_instr.py" = { tier = "wheel" }
 "tests/test_resinj_oos_spec.py" = { tier = "source" }
@@ -111,7 +113,10 @@ asset_tests = [
 skipped_by_design = [
     "test_committed_lock_matches_live_AT_FREEZE",
 ]
-reason = "test_real_leg_build_matches_fixture_schema needs the real production legs (opt-in, HCD_LOCK_REAL_LEGS=1); test_committed_lock_matches_live_AT_FREEZE is skipped until the freeze step"
+deferred_xfails = [
+    "deferred lock-generator rework (gate E step 7, PI-authorized lock regeneration): the generator verifies the ensemble against <repo>/checkpoints, which does not hold the schema-2 members",
+]
+reason = "test_real_leg_build_matches_fixture_schema needs the real production legs (opt-in, HCD_LOCK_REAL_LEGS=1); test_committed_lock_matches_live_AT_FREEZE is skipped until the freeze step; the 9 LOCK_REWORK tests are a strict exact-exception deferral (tests/DEFERRED.md)"
 
 [files."tests/test_analyze_ks_selboost.py"]
 tier = "assets"
@@ -329,25 +334,8 @@ tier = "assets"
 reason = "needs a table from the private notes repository (scripts/ks_selboost_arms.py); without it tests fail rather than skip; a public-exposure item"
 
 [files."tests/test_legb_2d_tilt.py"]
-tier = "wheel"
-asset_tests = [
-    "test_2d_draws_matrix_appends_A_B_r_columns",
-    "test_2d_fast_postprocess_yields_alpha_columns",
-    "test_2d_ignores_marginalize_zslope",
-    "test_2d_loglik_grad_in_A_B_r_finite",
-    "test_2d_pivot_alpha_equals_A_times_r",
-    "test_2d_positivity_prior_draws",
-    "test_2d_reconstruct_deterministics_uses_btilt",
-    "test_2d_requires_hierarchical",
-    "test_2d_slopes_match_incidence_slope_at_btilt_center",
-    "test_2d_z_shape_uses_btilt_plus_dslope",
-    "test_ctx_2d_defaults_are_closure_self_consistent",
-    "test_model_priors_only_site_order_match_2d",
-    "test_off_legacy_byte_exact_when_2d_off",
-    "test_off_optionB_byte_exact_when_2d_off",
-    "test_stepA_HT_arms_present_and_2d",
-]
-reason = "the declared tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, the real LF training cache, trained emulator members, absent in CI"
+tier = "assets"
+reason = "every test needs the real LF training cache, trained emulator members and DESI DR1 or KODIAQ-SQUAD P1D data, except one deferred_legacy CTX_SIGNATURE deferral and one slow test; no test passes without them"
 
 [files."tests/test_legb_convergence.py"]
 tier = "wheel"
@@ -390,11 +378,8 @@ tier = "assets"
 reason = "needs KODIAQ-SQUAD P1D data"
 
 [files."tests/test_legb_leg_a.py"]
-tier = "wheel"
-asset_tests = [
-    "test_build_legb_ctx_ensemble",
-]
-reason = "the declared tests need trained emulator members, absent in CI"
+tier = "deferred"
+reason = "4 tests are deferred_legacy CTX_SIGNATURE deferrals and the other needs trained emulator members"
 
 [files."tests/test_legb_metal_flatlog.py"]
 tier = "wheel"
@@ -578,9 +563,17 @@ asset_tests = [
 ]
 reason = "the declared tests need emucoh products, emulator error-vector products, gate D MF products, trained emulator members, absent in CI"
 
+[files."tests/test_r6_pairing.py"]
+tier = "deferred"
+reason = "all 3 tests are deferred_legacy REAL_FIT_CKPT_DIR deferrals"
+
 [files."tests/test_res_corr_alpha.py"]
 tier = "assets"
 reason = "needs DESI DR1 P1D data, KODIAQ-SQUAD P1D data, an MF golden file, the real LF training cache, trained emulator members"
+
+[files."tests/test_res_corr_inject.py"]
+tier = "deferred"
+reason = "all 4 tests are deferred_legacy CTX_SIGNATURE deferrals"
 
 [files."tests/test_res_corr_norc_injection.py"]
 tier = "assets"

@@ -1,15 +1,35 @@
-# The direct dependencies at the exact versions of the development environment in which the full test suite runs
-# (the emu-jax conda environment, Python 3.11). Each lower bound in pyproject.toml is the release series of the pin
-# here (jax, equinox and optax exactly; numpy 2.4, scipy 1.17, h5py 3.16, numpyro 0.21, matplotlib 3.10, pytest 9.0).
-# The CI job "development-environment" installs exactly these versions; pandas, pyyaml, click and joblib are absent
-# from that environment and float to their newest versions.
+# The development environment, emu-jax (conda-forge, Python 3.11), in which PR-0's test suite ran: every package of
+# this project's install closure (with the test extra) that emu-jax holds, at emu-jax's version. Each lower bound in
+# pyproject.toml for jax, equinox, optax, numpyro, numpy, scipy, h5py, matplotlib and pytest is the release series
+# of its pin here. The CI job "development-environment" installs exactly these versions from PyPI (PyPI builds, not
+# the conda-forge ones). Absent from emu-jax, so floating: click, joblib, pandas, pyyaml, cloudpickle, tzdata.
+absl-py==2.4.0
+contourpy==1.3.3
+cycler==0.12.1
+equinox==0.13.8
+fonttools==4.63.0
+h5py==3.16.0
+iniconfig==2.3.0
 jax==0.10.1
 jaxlib==0.10.1
-equinox==0.13.8
-optax==0.2.8
-numpyro==0.21.0
-numpy==2.4.6
-scipy==1.17.1
-h5py==3.16.0
+jaxtyping==0.3.10
+kiwisolver==1.5.0
 matplotlib==3.10.9
+ml_dtypes==0.5.4
+multipledispatch==1.0.0
+numpy==2.4.6
+numpyro==0.21.0
+opt_einsum==3.4.0
+optax==0.2.8
+packaging==26.2
+pillow==12.2.0
+pluggy==1.6.0
+Pygments==2.20.0
+pyparsing==3.3.2
 pytest==9.0.3
+python-dateutil==2.9.0.post0
+scipy==1.17.1
+six==1.17.0
+tqdm==4.67.3
+typing_extensions==4.15.0
+wadler_lindig==0.1.7

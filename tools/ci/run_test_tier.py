@@ -1,30 +1,35 @@
-"""Run one CI test tier of tests/ci_tiers.toml, one pytest process per file, and refuse any skip.
+"""Run one CI test tier of tests/ci_tiers.toml, one pytest process per file, and refuse any undeclared skip.
 
 usage:
-  python tools/ci/run_test_tier.py --tier wheel  --workdir NEW_DIR --out DIR
-  python tools/ci/run_test_tier.py --tier source --out DIR
+  python tools/ci/run_test_tier.py --tier wheel  --workdir NEW_DIR --out NEW_DIR [--wheel WHEEL]
+  python tools/ci/run_test_tier.py --tier source --out NEW_DIR
   python tools/ci/run_test_tier.py --list-not-run
 
 Run it with the interpreter under test (CI: the fresh venv holding the installed wheel).
 
-- wheel tier: tests/ is copied into NEW_DIR (which must not exist), and pytest runs from there, so hcd_analysis can
-  only come from the interpreter's site-packages; the runner checks that before running anything.
+- wheel tier: tests/ is copied into NEW_DIR, and pytest runs from there, so hcd_analysis can only come from the
+  interpreter's site-packages; the runner checks that before running anything, and with --wheel also that the
+  installed files are exactly that wheel's (the RECORD entries of its package files).
 - source tier: pytest runs from the repository checkout this script belongs to, so hcd_analysis comes from it.
 
-A file passes only if pytest exits 0 and its junit report has no failure, no error and no skip, and at least one test
-ran. Two outcomes are allowed besides a pass, and both are counted and listed, never as passes:
-- an expected failure of an existing deferred_legacy deferral (tests/DEFERRED.md, the exact-cause marker of
-  tests/conftest.py); any other expected failure fails the file;
-- a skip of a test that tests/ci_tiers.toml names in the file's asset_tests: it needs a real asset (a cache, a trained
-  member, observational data, or the separately installed fake_spectra) that CI does not have, or that the file's
-  skipped_by_design names (a test skipped unconditionally until a later step), and is reported as NOT RUN. Such a test
-  must skip here: if it passes or fails instead, the file fails, so the lists stay exact.
-Every file runs (-m "not slow"), and the exit status is 1 if any file did not pass. The summary also lists the files
-of the tiers that CI does not run, with their reasons.
+A file passes only if pytest exits 0 and its junit report has no failure, no error and no undeclared skip, and at least
+one test passed. Besides passes, only these outcomes are allowed; each is counted and listed, never as a pass:
+- an expected failure whose message is exactly that of an explicit deferral: a deferred_legacy cause of
+  tests/gate_helpers.py DEFERRED_CAUSES (the exact-cause marker of tests/conftest.py, tests/DEFERRED.md), or a reason
+  that tests/ci_tiers.toml lists in the file's deferred_xfails (a strict, exact-exception xfail);
+- a skip of a test that tests/ci_tiers.toml names in the file's asset_tests (it needs a real asset that CI does not
+  have) or skipped_by_design (skipped unconditionally until a later step). Such a test must skip here: if it passes
+  or fails instead, the file fails, so the lists stay exact.
+Tests marked slow are deselected (-m "not slow") and listed as NOT RUN. The exit status is 1 if any file did not
+pass. The summary also lists the files of the tiers that CI does not run, with their reasons.
 """
 from __future__ import annotations
 
 import argparse
+import ast
+import base64
+import hashlib
+import importlib.metadata as md
 import json
 import os
 import shutil
@@ -34,11 +39,14 @@ import sysconfig
 import time
 import tomllib
 import xml.etree.ElementTree as ET
+import zipfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 TIERS_FILE = os.path.join(REPO, "tests", "ci_tiers.toml")
 CI_TIERS = ("wheel", "source")
 FILE_TIMEOUT_S = 1800
+COUNT_KEYS = ("tests", "passed", "failures", "errors", "skipped", "xfailed", "bad_xfail", "asset_skipped",
+              "asset_ran")
 
 
 def load_tiers(path=TIERS_FILE):
@@ -51,29 +59,37 @@ def files_of(files, tier):
     return sorted(p for p, entry in files.items() if entry["tier"] == tier)
 
 
-def junit_counts(xml_path, asset_tests=()):
-    """Outcome counts of a pytest junit report (see the module docstring). asset_tests are the file's declared skips
-    (its asset_tests and skipped_by_design together); a test matches one by its full name (with parameters, e.g.
-    "test_x[a]") or by its function name (all parameters)."""
-    asset = set(asset_tests)
-    counts = dict(tests=0, passed=0, failures=0, errors=0, skipped=0, xfailed=0, bad_xfail=0, asset_skipped=0,
-                  asset_ran=0)
+def deferred_legacy_messages(path=os.path.join(REPO, "tests", "gate_helpers.py")):
+    """The exact junit messages of the deferred_legacy causes, as tests/conftest.py writes them, read from the
+    DEFERRED_CAUSES literal without importing the tests."""
+    for node in ast.parse(open(path, encoding="utf-8").read()).body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "DEFERRED_CAUSES" for t in node.targets):
+            return {f"deferred_legacy {cause}: {reason}" for cause, (_, reason) in ast.literal_eval(node.value).items()}
+    raise SystemExit(f"no DEFERRED_CAUSES in {path}")
+
+
+def junit_counts(xml_path, declared_skips=(), deferrals=()):
+    """Outcome counts of a pytest junit report (see the module docstring). declared_skips are the file's asset_tests
+    and skipped_by_design together; a test matches one by its full name (with parameters, e.g. "test_x[a]") or by
+    its function name (all parameters). deferrals are the exact expected-failure messages allowed."""
+    declared, allowed = set(declared_skips), set(deferrals)
+    counts = dict.fromkeys(COUNT_KEYS, 0)
     for case in ET.parse(xml_path).getroot().iter("testcase"):
         counts["tests"] += 1
         name = case.get("name", "")
-        is_asset = name in asset or name.split("[")[0] in asset
+        is_declared = name in declared or name.split("[")[0] in declared
         sk = case.find("skipped")
         if case.find("failure") is not None:
             counts["failures"] += 1
         elif case.find("error") is not None:
             counts["errors"] += 1
         elif sk is not None and sk.get("type") == "pytest.xfail":
-            counts["xfailed" if (sk.get("message") or "").startswith("deferred_legacy ") else "bad_xfail"] += 1
+            counts["xfailed" if sk.get("message") in allowed else "bad_xfail"] += 1
         elif sk is not None:
-            counts["asset_skipped" if is_asset else "skipped"] += 1
+            counts["asset_skipped" if is_declared else "skipped"] += 1
         else:
             counts["passed"] += 1
-        if is_asset and sk is None:
+        if is_declared and sk is None:
             counts["asset_ran"] += 1
     return counts
 
@@ -83,14 +99,14 @@ def file_verdict(returncode, counts):
     if returncode is None:
         return False, f"timeout after {FILE_TIMEOUT_S} s"
     if counts is None:
-        return False, f"no junit report (exit {returncode})"
+        return False, f"no readable junit report (exit {returncode})"
     for key, what in (("failures", "failed"), ("errors", "errors"), ("skipped", "undeclared skips"),
-                      ("bad_xfail", "expected failures that are not deferred_legacy deferrals"),
-                      ("asset_ran", "declared asset tests that did not skip")):
+                      ("bad_xfail", "expected failures that are not declared deferrals"),
+                      ("asset_ran", "declared skips that did not skip")):
         if counts[key]:
             return False, f"{counts[key]} {what}"
-    if counts["tests"] - counts["asset_skipped"] == 0:
-        return False, "no test ran"
+    if counts["passed"] == 0:
+        return False, "no test passed"
     if returncode != 0:
         return False, f"pytest exit {returncode}"
     return True, "ok"
@@ -112,7 +128,34 @@ def check_origin(tier, origin):
         sys.exit(f"source tier: hcd_analysis imports from {origin}, not from the checkout {REPO}")
 
 
-def run_tier(tier, out, workdir=None):
+def check_installed_is(wheel):
+    """Every package file the wheel's RECORD lists is installed with the same sha256 (read back from disk)."""
+    with zipfile.ZipFile(wheel) as zf:
+        (rec,) = [n for n in zf.namelist() if n.endswith(".dist-info/RECORD")]
+        want = {line.rsplit(",", 2)[0]: line.rsplit(",", 2)[1] for line in zf.read(rec).decode().splitlines()
+                if line.split("/")[0] in ("hcd_analysis", "cli")}
+    dist = md.distribution("hcd_analysis")
+    bad = []
+    for path, digest in sorted(want.items()):
+        data = open(dist.locate_file(path), "rb").read()
+        got = "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+        if got != digest:
+            bad.append(path)
+    if bad or not want:
+        sys.exit(f"the installed hcd_analysis is not {wheel}: {bad[:10] or 'empty RECORD'}")
+    return len(want)
+
+
+def slow_tests(cmd_base, cwd, env, todo):
+    """The tests marked slow in the tier's files (deselected by the runs), from one collection-only pass."""
+    proc = subprocess.run(cmd_base + ["--collect-only", "-q", "-m", "slow", *todo], cwd=cwd, env=env,
+                          capture_output=True, text=True, timeout=FILE_TIMEOUT_S)
+    if proc.returncode not in (0, 5):                 # 5: nothing selected (no slow test in the tier)
+        return None, proc.stdout + proc.stderr
+    return sorted(line.strip() for line in proc.stdout.splitlines() if "::" in line), ""
+
+
+def run_tier(tier, out, workdir=None, wheel=None):
     tiers, files = load_tiers()
     todo = files_of(files, tier)
     if not todo:
@@ -129,44 +172,59 @@ def run_tier(tier, out, workdir=None):
     os.makedirs(out, exist_ok=False)
     origin = package_origin(sys.executable, cwd)
     check_origin(tier, origin)
-    env = dict(os.environ)
-    env.pop("PYTHONPATH", None)
+    n_checked = check_installed_is(wheel) if wheel else None
+    deferrals = deferred_legacy_messages()
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTEST_ADDOPTS", "PYTEST_PLUGINS")}
+    env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    cmd_base = [sys.executable, "-m", "pytest", "-c", os.path.join(REPO, "pyproject.toml"), "--rootdir", cwd,
+                "--confcutdir", cwd, "-p", "no:cacheprovider"]
+    slow, slow_error = slow_tests(cmd_base, cwd, env, todo)
     results = []
     for rel in todo:
         slug = rel.replace("/", "__")
         xml = os.path.join(out, slug + ".xml")
-        cmd = [sys.executable, "-m", "pytest", "-c", os.path.join(REPO, "pyproject.toml"), "--rootdir", cwd,
-               "--confcutdir", cwd, "-p", "no:cacheprovider", "-m", "not slow", "-q", "-rA", f"--junitxml={xml}", rel]
         t0 = time.time()
         try:
-            proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=FILE_TIMEOUT_S)
+            proc = subprocess.run(cmd_base + ["-m", "not slow", "-q", "-rA", f"--junitxml={xml}", rel], cwd=cwd,
+                                  env=env, capture_output=True, text=True, timeout=FILE_TIMEOUT_S)
             rc, log = proc.returncode, proc.stdout + proc.stderr
-        except subprocess.TimeoutExpired:
-            rc, log = None, f"timeout after {FILE_TIMEOUT_S} s\n"
+        except subprocess.TimeoutExpired as exc:
+            partial = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+            rc, log = None, f"timeout after {FILE_TIMEOUT_S} s; output so far:\n{partial}"
         with open(os.path.join(out, slug + ".log"), "w") as f:
             f.write(log)
-        asset_tests = files[rel].get("asset_tests", []) + files[rel].get("skipped_by_design", [])
-        counts = junit_counts(xml, asset_tests) if rc is not None and os.path.exists(xml) else None
+        declared = files[rel].get("asset_tests", []) + files[rel].get("skipped_by_design", [])
+        counts = None
+        if rc is not None and os.path.exists(xml):
+            try:
+                counts = junit_counts(xml, declared, deferrals | set(files[rel].get("deferred_xfails", [])))
+            except ET.ParseError:
+                counts = None
         ok, why = file_verdict(rc, counts)
         results.append(dict(file=rel, ok=ok, reason=why, exit=rc, seconds=round(time.time() - t0, 1),
-                            asset_tests=asset_tests, **(counts or {})))
+                            declared_skips=declared, **(counts or {})))
         print(f"{'PASS' if ok else 'FAIL'} {rel} ({why}; {results[-1]['seconds']} s)", flush=True)
-    keys = ("tests", "passed", "failures", "errors", "skipped", "xfailed", "bad_xfail", "asset_skipped", "asset_ran")
-    totals = {k: sum(r.get(k, 0) for r in results) for k in keys}
-    summary = dict(tier=tier, python=sys.version.split()[0], hcd_analysis=origin, cwd=cwd, files=results,
-                   totals=totals, failed_files=[r["file"] for r in results if not r["ok"]],
-                   not_run=not_run(files))
+    totals = {k: sum(r.get(k, 0) for r in results) for k in COUNT_KEYS}
+    failed = [r["file"] for r in results if not r["ok"]]
+    summary = dict(tier=tier, python=sys.version.split()[0], hcd_analysis=origin, wheel=wheel,
+                   wheel_files_checked=n_checked, cwd=cwd, files=results, totals=totals, failed_files=failed,
+                   slow_not_run=slow, slow_listing_error=slow_error, not_run=not_run(files))
     with open(os.path.join(out, "summary.json"), "w") as f:
         json.dump(summary, f, indent=1)
-    print(f"\n{tier} tier: {len(results)} files, {len(summary['failed_files'])} failed; {totals['tests']} tests: "
+    print(f"\n{tier} tier: {len(results)} files, {len(failed)} failed; {totals['tests']} tests: "
           f"{totals['passed']} passed, {totals['failures']} failed, {totals['errors']} errors, "
-          f"{totals['skipped']} undeclared skips, {totals['xfailed']} expected failures (deferred_legacy), "
+          f"{totals['skipped']} undeclared skips, {totals['bad_xfail']} undeclared expected failures; "
+          f"{totals['xfailed']} declared deferrals (expected failures), "
           f"{totals['asset_skipped']} declared skips NOT RUN (an asset absent here, or skipped by design)")
     for r in results:
         if r.get("asset_skipped"):
-            print(f"  NOT RUN here (tests/ci_tiers.toml says why): {r['file']}: {', '.join(r['asset_tests'])}")
+            print(f"  NOT RUN here (tests/ci_tiers.toml says why): {r['file']}: {', '.join(r['declared_skips'])}")
+    if slow is None:
+        print(f"  could not list the slow tests:\n{slow_error[-2000:]}")
+    else:
+        print(f"  NOT RUN here, marked slow ({len(slow)}): {', '.join(slow) or 'none'}")
     print_not_run(summary["not_run"])
-    return 1 if summary["failed_files"] else 0
+    return 1 if failed or slow is None else 0
 
 
 def not_run(files):
@@ -190,6 +248,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--tier", choices=CI_TIERS)
     ap.add_argument("--workdir")
+    ap.add_argument("--wheel", help="wheel tier: check that the installed package is this wheel")
     ap.add_argument("--out")
     ap.add_argument("--list-not-run", action="store_true")
     args = ap.parse_args(argv)
@@ -198,7 +257,9 @@ def main(argv=None):
         return 0
     if args.tier is None or args.out is None:
         ap.error("--tier and --out are required")
-    return run_tier(args.tier, os.path.realpath(args.out), args.workdir)
+    if args.wheel and args.tier != "wheel":
+        ap.error("--wheel goes with --tier wheel")
+    return run_tier(args.tier, os.path.realpath(args.out), args.workdir, args.wheel)
 
 
 if __name__ == "__main__":

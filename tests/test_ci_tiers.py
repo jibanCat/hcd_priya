@@ -9,7 +9,7 @@ import os
 import tomllib
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-TIERS = {"wheel", "source", "assets", "external", "no_tests"}
+TIERS = {"wheel", "source", "assets", "deferred", "external", "no_tests"}
 CI_TIERS = {"wheel", "source"}
 
 
@@ -38,7 +38,7 @@ def test_every_test_file_is_classified_exactly_once():
 
 def test_each_entry_has_a_known_tier_and_out_of_ci_entries_say_why():
     for path, entry in _doc()["files"].items():
-        assert set(entry) <= {"tier", "reason", "asset_tests", "skipped_by_design"}, path
+        assert set(entry) <= {"tier", "reason", "asset_tests", "skipped_by_design", "deferred_xfails"}, path
         assert entry["tier"] in TIERS, path
         if entry["tier"] not in CI_TIERS or set(entry) & {"asset_tests", "skipped_by_design"}:
             assert entry.get("reason", "").strip(), f"{path}: a file or test outside CI needs its reason"
@@ -58,6 +58,15 @@ def test_declared_skips_are_test_functions_of_their_file():
             defined = {n.name for n in ast.walk(ast.parse(f.read())) if isinstance(n, ast.FunctionDef)}
         bases = {n.split("[")[0] for n in names}
         assert bases <= defined, f"{path}: not test functions here: {sorted(bases - defined)}"
+
+
+def test_declared_deferrals_are_exact_messages_in_a_ci_tier():
+    """deferred_xfails lists full expected-failure messages (exact matches, never prefixes) of a CI-tier file."""
+    for path, entry in _doc()["files"].items():
+        if "deferred_xfails" in entry:
+            assert entry["tier"] in CI_TIERS and entry.get("reason", "").strip(), path
+            msgs = entry["deferred_xfails"]
+            assert msgs and all(isinstance(m, str) and len(m) > 40 for m in msgs), path
 
 
 def test_external_tier_is_exactly_tests_external():

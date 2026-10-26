@@ -21,29 +21,33 @@ def _load(name):
 
 CD = _load("check_dist")
 RT = _load("run_test_tier")
-MODULES = {"hcd_analysis/__init__.py", "hcd_analysis/emulator/__init__.py", "cli/__init__.py", "cli/run.py"}
+X = CD.git_blob_id(b"x")
+PACKAGE = {n: X for n in ("hcd_analysis/__init__.py", "hcd_analysis/emulator/__init__.py", "cli/__init__.py",
+                          "cli/run.py", *CD.PACKAGE_DATA)}
+TOP = {n: X for n in CD.SDIST_COMMITTED}
 DIST_INFO = ["METADATA", "WHEEL", "RECORD", "entry_points.txt", "licenses/LICENSE"]
 
 
-def _wheel(tmp_path, extra=(), drop=(), top="cli\nhcd_analysis\n"):
+def _wheel(tmp_path, extra=(), drop=(), top="cli\nhcd_analysis\n", content=None):
     path = tmp_path / "hcd_analysis-0.0.0-py3-none-any.whl"
     with zipfile.ZipFile(path, "w") as zf:
-        for name in sorted((MODULES | set(CD.PACKAGE_DATA) | set(extra)) - set(drop)):
-            zf.writestr(name, "x")
+        for name in sorted((set(PACKAGE) | set(extra)) - set(drop)):
+            zf.writestr(name, (content or {}).get(name, "x"))
         for name in DIST_INFO:
             zf.writestr(f"hcd_analysis-0.0.0.dist-info/{name}", "x")
         zf.writestr("hcd_analysis-0.0.0.dist-info/top_level.txt", top)
     return str(path)
 
 
-def _sdist(tmp_path, extra=(), drop=(), link=None):
+def _sdist(tmp_path, extra=(), drop=(), link=None, content=None):
     path = tmp_path / "hcd_analysis-0.0.0.tar.gz"
-    names = (MODULES | set(CD.PACKAGE_DATA) | {"pyproject.toml", "LICENSE", "PKG-INFO", "setup.cfg"} | set(extra))
+    names = set(PACKAGE) | set(TOP) | {"PKG-INFO", "setup.cfg", "hcd_analysis.egg-info/SOURCES.txt"} | set(extra)
     with tarfile.open(path, "w:gz") as tf:
         for name in sorted(names - set(drop)):
+            data = (content or {}).get(name, "x").encode()
             info = tarfile.TarInfo(f"hcd_analysis-0.0.0/{name}")
-            info.size = 1
-            tf.addfile(info, io.BytesIO(b"x"))
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
         if link:
             info = tarfile.TarInfo(f"hcd_analysis-0.0.0/{link}")
             info.type = tarfile.SYMTYPE
@@ -52,46 +56,60 @@ def _sdist(tmp_path, extra=(), drop=(), link=None):
     return str(path)
 
 
-def test_check_wheel_accepts_exactly_the_package(tmp_path):
-    assert CD.check_wheel(_wheel(tmp_path), MODULES) == []
+def test_git_blob_id_is_gits():
+    assert CD.git_blob_id(b"") == "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"   # git hash-object /dev/null
+
+
+def test_check_wheel_accepts_exactly_the_committed_package(tmp_path):
+    assert CD.check_wheel(_wheel(tmp_path), PACKAGE) == []
 
 
 @pytest.mark.parametrize("extra", ["hcd_analysis/_emulator_data/observables_tau0_lf.h5",
                                    "hcd_analysis/emulator/member.norm.pkl", "tests/test_x.py",
-                                   "hcd_analysis/emulator/README.md", "hcd_analysis-0.0.0.dist-info/extra.txt"])
+                                   "hcd_analysis/scratch.py", "hcd_analysis/emulator/README.md",
+                                   "hcd_analysis-0.0.0.dist-info/extra.txt"])
 def test_check_wheel_refuses_any_other_file(tmp_path, extra):
-    assert any(extra in p for p in CD.check_wheel(_wheel(tmp_path, extra=[extra]), MODULES))
+    """Data, pickles, tests, an uncommitted module, docs or extra metadata never pass."""
+    assert any(extra in p for p in CD.check_wheel(_wheel(tmp_path, extra=[extra]), PACKAGE))
 
 
 @pytest.mark.parametrize("drop", ["cli/run.py", "hcd_analysis/comparison/phase0_v1.json"])
 def test_check_wheel_refuses_a_missing_file(tmp_path, drop):
-    assert any(f"missing {drop}" in p for p in CD.check_wheel(_wheel(tmp_path, drop=[drop]), MODULES))
+    assert any(f"missing {drop}" in p for p in CD.check_wheel(_wheel(tmp_path, drop=[drop]), PACKAGE))
+
+
+def test_check_wheel_refuses_a_file_that_differs_from_head(tmp_path):
+    """An uncommitted edit (or a stale build/ directory) ships different bytes under the right name."""
+    problems = CD.check_wheel(_wheel(tmp_path, content={"cli/run.py": "edited"}), PACKAGE)
+    assert problems == ["wheel: cli/run.py differs from HEAD"]
 
 
 def test_check_wheel_refuses_another_top_level_package(tmp_path):
-    assert any("top_level" in p for p in CD.check_wheel(_wheel(tmp_path, top="cli\nhcd_analysis\ntests\n"), MODULES))
+    assert any("top_level" in p for p in CD.check_wheel(_wheel(tmp_path, top="cli\nhcd_analysis\ntests\n"), PACKAGE))
 
 
-def test_check_sdist_accepts_exactly_the_package(tmp_path):
-    assert CD.check_sdist(_sdist(tmp_path), MODULES) == []
+def test_check_sdist_accepts_exactly_the_committed_package(tmp_path):
+    assert CD.check_sdist(_sdist(tmp_path), PACKAGE, TOP) == []
 
 
 @pytest.mark.parametrize("extra", ["tests/test_x.py", "checkpoints/manifest.json", "scripts/run.py",
-                                   "hcd_analysis/_emulator_data/observables_tau0_lf.h5"])
+                                   "hcd_analysis/_emulator_data/observables_tau0_lf.h5", "hcd_analysis/scratch.py"])
 def test_check_sdist_refuses_any_other_file(tmp_path, extra):
-    assert any(extra in p for p in CD.check_sdist(_sdist(tmp_path, extra=[extra]), MODULES))
+    assert any(extra in p for p in CD.check_sdist(_sdist(tmp_path, extra=[extra]), PACKAGE, TOP))
 
 
-def test_check_sdist_refuses_links_and_missing_files(tmp_path):
-    problems = CD.check_sdist(_sdist(tmp_path, drop=["pyproject.toml"], link="hcd_analysis/x.py"), MODULES)
+def test_check_sdist_refuses_links_missing_and_edited_files(tmp_path):
+    problems = CD.check_sdist(_sdist(tmp_path, drop=["pyproject.toml"], link="hcd_analysis/x.py",
+                                     content={"MANIFEST.in": "graft tests"}), PACKAGE, TOP)
     assert any("link" in p for p in problems) and any("missing pyproject.toml" in p for p in problems)
+    assert "sdist: MANIFEST.in differs from HEAD" in problems
 
 
-def test_source_modules_cover_the_packages_and_nothing_else():
-    mods = CD.source_modules()
-    assert {"hcd_analysis/__init__.py", "hcd_analysis/emulator/safe_io.py", "cli/run.py"} <= mods
-    assert all(m.split("/")[0] in CD.PACKAGES and m.endswith(".py") for m in mods)
-    assert not any("_emulator_data" in m for m in mods)
+def test_committed_files_cover_the_packages_and_nothing_else():
+    package, top = CD.committed_files()
+    assert {"hcd_analysis/__init__.py", "hcd_analysis/emulator/safe_io.py", "cli/run.py"} <= set(package)
+    assert set(CD.PACKAGE_DATA) <= set(package) and set(top) == set(CD.SDIST_COMMITTED)
+    assert all(p.split("/")[0] in CD.PACKAGES and (p.endswith(".py") or p in CD.PACKAGE_DATA) for p in package)
 
 
 _JUNIT = """<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest">
@@ -105,43 +123,55 @@ _JUNIT = """<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="p
 
 
 def _c(**kw):
-    out = dict(tests=3, passed=3, failures=0, errors=0, skipped=0, xfailed=0, bad_xfail=0, asset_skipped=0,
-               asset_ran=0)
+    out = dict.fromkeys(RT.COUNT_KEYS, 0)
+    out.update(tests=3, passed=3)
     out.update(kw)
     return out
+
+
+DEFERRAL = {"deferred_legacy X: y"}
 
 
 def test_junit_counts_separate_skips_deferrals_and_other_expected_failures(tmp_path):
     p = tmp_path / "r.xml"
     p.write_text(_JUNIT)
-    assert RT.junit_counts(str(p)) == _c(tests=6, passed=1, failures=1, errors=1, skipped=1, xfailed=1, bad_xfail=1)
+    assert RT.junit_counts(str(p), deferrals=DEFERRAL) == _c(tests=6, passed=1, failures=1, errors=1, skipped=1,
+                                                             xfailed=1, bad_xfail=1)
+    assert RT.junit_counts(str(p))["bad_xfail"] == 2        # only exactly declared deferral messages count
 
 
-def test_junit_counts_declared_asset_tests(tmp_path):
-    """A declared asset test that skips is NOT RUN, not a skip; one that runs anyway is flagged."""
+def test_junit_counts_declared_skips(tmp_path):
+    """A declared skip that skips is NOT RUN, not a skip; a declared test that runs anyway is flagged."""
     p = tmp_path / "r.xml"
     p.write_text(_JUNIT)
-    c = RT.junit_counts(str(p), asset_tests=["d", "a"])
+    c = RT.junit_counts(str(p), declared_skips=["d", "a"])
     assert (c["skipped"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 1)
-    c = RT.junit_counts(str(p), asset_tests=["d[p1]"])          # one parameter case, named exactly
+    c = RT.junit_counts(str(p), declared_skips=["d[p1]"])          # one parameter case, named exactly
     assert (c["skipped"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0)
-    c = RT.junit_counts(str(p), asset_tests=["d[p2]"])          # another case: the skip of d[p1] stays undeclared
+    c = RT.junit_counts(str(p), declared_skips=["d[p2]"])          # another case: the skip of d[p1] stays undeclared
     assert (c["skipped"], c["asset_skipped"]) == (1, 0)
+
+
+def test_deferred_legacy_messages_are_exactly_what_conftest_writes():
+    from tests.gate_helpers import DEFERRED_CAUSES
+    assert RT.deferred_legacy_messages() == {f"deferred_legacy {cause}: {reason}"
+                                             for cause, (_, reason) in DEFERRED_CAUSES.items()}
 
 
 @pytest.mark.parametrize("rc, counts, ok", [
     (0, _c(), True),
-    (0, _c(xfailed=2), True),
+    (0, _c(tests=5, xfailed=2), True),
     (0, _c(tests=4, asset_skipped=1), True),
     (0, _c(skipped=1), False),                      # a skip is never a pass
-    (0, _c(bad_xfail=1), False),                    # only deferred_legacy deferrals may be expected failures
-    (0, _c(asset_ran=1), False),                    # a declared asset test must skip without its asset
+    (0, _c(bad_xfail=1), False),                    # only declared deferrals may be expected failures
+    (0, _c(asset_ran=1), False),                    # a declared skip must skip without its asset
     (0, _c(tests=0, passed=0), False),              # nothing ran
+    (0, _c(tests=2, passed=0, xfailed=2), False),   # deferrals only: nothing passed
     (0, _c(tests=2, passed=0, asset_skipped=2), False),
     (1, _c(), False),                               # e.g. the session-end origin check
     (1, _c(failures=1), False),
     (None, None, False),                            # timeout
-    (4, None, False),                               # no junit report
+    (4, None, False),                               # no readable junit report
 ])
 def test_file_verdict(rc, counts, ok):
     assert RT.file_verdict(rc, counts)[0] is ok

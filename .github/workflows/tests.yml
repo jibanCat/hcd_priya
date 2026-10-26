@@ -31,16 +31,20 @@ jobs:
       MPLBACKEND: Agg
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Build the sdist and the wheel
+      - name: Build the sdist and the wheel (timestamps from the commit, so the build is reproducible)
         run: |
           python -m pip install build
-          python -m build --outdir dist .
-      - name: Check the distribution contents
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --outdir dist .
+          sha256sum dist/*
+      - name: Check the distribution contents against the commit
         run: python tools/ci/check_dist.py dist
       - name: Install the wheel into a fresh virtual environment
+        id: install
         run: |
           python -m venv "$RUNNER_TEMP/venv"
           constraints=()
@@ -49,16 +53,24 @@ jobs:
           fi
           "$RUNNER_TEMP/venv/bin/python" -m pip install "${constraints[@]}" "$(ls dist/*.whl)[test]"
           "$RUNNER_TEMP/venv/bin/python" -m pip check
-          "$RUNNER_TEMP/venv/bin/python" -m pip freeze
+          mkdir -p "$RUNNER_TEMP/results"
+          "$RUNNER_TEMP/venv/bin/python" -m pip freeze | tee "$RUNNER_TEMP/results/pip-freeze.txt"
       - name: Wheel tier (the installed package, tests copied outside the checkout)
         run: >-
-          "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier wheel
+          "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier wheel --wheel "$(ls dist/*.whl)"
           --workdir "$RUNNER_TEMP/wheeltest" --out "$RUNNER_TEMP/results/wheel"
       - name: Source tier (tests that also read repository files, from the checkout)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: >-
           "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier source
           --out "$RUNNER_TEMP/results/source"
       - name: Report the tests this workflow does not run
         if: ${{ !cancelled() }}
         run: python tools/ci/run_test_tier.py --list-not-run
+      - name: Keep the results (junit reports, summaries and the environment of synthetic tests only)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-py${{ matrix.python }}-${{ matrix.deps }}
+          path: ${{ runner.temp }}/results
+          retention-days: 14
