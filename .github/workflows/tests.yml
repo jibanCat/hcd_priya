@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Build the sdist and the wheel (timestamps from the commit, so the build is reproducible)
+      - name: Build the sdist and the wheel (timestamps from the commit; the wheel is byte-reproducible, the sdist is not)
         run: |
           python -m pip install build
           SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --outdir dist .
