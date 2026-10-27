@@ -29,6 +29,9 @@ Failure handling
 ----------------
 Failures are caught per (sim, snap), logged, and written to
 <output_dir>/<sim>/<snap>/error.txt. The pipeline continues.
+One exception: when a snapshot marked done has a cached catalogue that
+load_validated_catalog refuses (built before the box-edge fix, or damaged),
+CatalogIntegrityError is raised, nothing is written, and the run stops.
 """
 
 from __future__ import annotations
@@ -138,6 +141,8 @@ def run_one_snap(
     Run the full analysis pipeline for one (sim, snap) pair.
 
     Returns SnapResult on success, None on failure (error is logged and written).
+    Raises CatalogIntegrityError, writing nothing, when the snapshot is marked done
+    and its cached catalogue is refused.
     """
     sim_name = sim_snapshot.sim.name
     snap = entry.snap

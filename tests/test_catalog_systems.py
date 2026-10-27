@@ -9,8 +9,10 @@ once as its own head [s', pix_end - n]. The guards make that class of error impo
     written (reconcile_counts, used by the pipeline).
 Synthetic optical depths only."""
 import json
+import shutil
 import sys
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -194,9 +196,18 @@ def test_non_finite_column_densities_are_refused_with_a_clear_message(bad):
         C.check_catalog_values(cat)
 
 
-def test_label_value_mismatch_is_refused_before_saving():
+def test_label_value_mismatch_is_refused():
     with pytest.raises(C.CatalogIntegrityError, match="labels"):
         C.check_catalog_values(_cat([17.5, 19.4], ["DLA", "subDLA"]))
+
+
+def test_a_cached_catalogue_with_valid_spans_and_a_non_finite_column_density_is_refused(tmp_path):
+    cat = _cat([17.5, 19.4])
+    cat.absorbers[1].skewer_idx, cat.absorbers[1].pix_start, cat.absorbers[1].pix_end = 1, 30, 40
+    cat.absorbers[1].NHI = float("nan")
+    cat.save_npz(tmp_path / "nan.npz")
+    with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused .*non-finite N_HI"):
+        C.load_validated_catalog(tmp_path / "nan.npz", N)
 
 
 def test_a_cached_pre_fix_catalogue_is_refused_on_reuse(tmp_path):
@@ -216,11 +227,18 @@ def test_a_cached_pre_fix_catalogue_is_refused_on_reuse(tmp_path):
 # ----------------------------------------------------------------------------- the pipeline's resume paths
 def _pipeline(monkeypatch):
     """hcd_analysis.pipeline, importable without PyYAML: the config module imports it at load time, but the snapshot
-    path exercised here never calls it, so a stub stands in when it is absent."""
+    path exercised here never calls it, so a stub stands in when it is absent. The stub is removed from sys.modules at
+    teardown, but hcd_analysis.config stays cached with it bound; any use of it raises ImportError, as a missing
+    PyYAML would."""
     try:
         import yaml  # noqa: F401
     except ImportError:
-        monkeypatch.setitem(sys.modules, "yaml", types.ModuleType("yaml"))
+        stub = types.ModuleType("yaml")
+
+        def _absent(name):
+            raise ImportError(f"PyYAML is not installed (yaml.{name} requested; stub from tests/test_catalog_systems.py)")
+        stub.__getattr__ = _absent
+        monkeypatch.setitem(sys.modules, "yaml", stub)
     from hcd_analysis import pipeline as PL
     return PL
 
@@ -228,6 +246,7 @@ def _pipeline(monkeypatch):
 def _synthetic_snapshot(root, nb=64, n_sk=4, z=3.0):
     """A tiny tau file: skewer 0 holds a system straddling the box edge, skewer 1 a system in the middle."""
     import h5py
+    root.mkdir(parents=True, exist_ok=True)
     p = root / "s.hdf5"
     tau = np.random.default_rng(0).uniform(0.0, 0.3, size=(n_sk, nb)).astype(np.float32)
     tau[0, nb - 5:] = 1e5
@@ -260,26 +279,42 @@ def test_pipeline_resume_refuses_a_cached_pre_fix_catalogue_done_or_not(tmp_path
     hdr = read_header(h5)
     nb = int(hdr.nbins)
     entry = SnapEntry(snap=1, a=0.25, z=3.0, path=h5)
-    ss = SimSnapshot(sim=SimInfo(name="synthsim", path=tmp_path / "simroot", params={}), entries=[entry])
+    entry2 = SnapEntry(snap=2, a=1 / 4.1, z=3.1, path=_synthetic_snapshot(tmp_path / "second", z=3.1))
+    sim = SimInfo(name="synthsim", path=tmp_path / "simroot", params={})
+    ss, ss2 = SimSnapshot(sim=sim, entries=[entry]), SimSnapshot(sim=sim, entries=[entry, entry2])
 
     def cfg(name):
         c = PipelineConfig(output_root=str(tmp_path / name), resume=True, n_workers=1)
         c.p1d.nhi_excl_thresholds = []
         return c
 
+    def files(d):
+        return sorted((p.name, p.stat().st_mtime_ns) for p in d.iterdir())
+
     # a fresh build lists the straddling system once and completes
     c0 = cfg("fresh")
+    d0 = PL.snap_output_dir(c0, "synthsim", 1)
     res = PL.run_one_snap(ss, entry, c0)
-    assert res is not None and sum(json.load(open(PL.snap_output_dir(c0, "synthsim", 1) / "meta.json"))
-                                   ["n_absorbers"].values()) == 2
-    # not done, with a cached pre-fix catalogue: refused (the snapshot fails; no meta.json, not marked done)
-    c1 = cfg("cached")
-    d1 = PL.snap_output_dir(c1, "synthsim", 1)
-    _pre_fix_catalogue(PL, hdr, nb).save_npz(d1 / "catalog.npz")
-    assert PL.run_one_snap(ss, entry, c1) is None
-    assert not (d1 / "meta.json").exists() and not PL.is_done(c1, "synthsim", 1)
-    assert "cached catalogue refused" in "".join(p.read_text() for p in d1.rglob("error*.txt"))
-    # done, with a pre-fix catalogue: refused loudly, never reused, and nothing is written
+    assert res is not None and sum(json.load(open(d0 / "meta.json"))["n_absorbers"].values()) == 2
+    # done and valid: reused (validated with the snapshot's own nbins), nothing rewritten
+    before = files(d0)
+    again = PL.run_one_snap(ss, entry, c0)
+    assert again is not None and len(again.catalog.absorbers) == 2 and files(d0) == before
+    # the refused catalogues: the pre-fix one, and a valid one damaged to hold a non-finite N_HI
+    nan_cat = C.AbsorberCatalog.load_npz(d0 / "catalog.npz")
+    nan_cat.absorbers[1].NHI = float("nan")
+    # not done, with a cached refused catalogue: the snapshot fails before anything else is written (no per-class
+    # P1D, no meta.json, not marked done)
+    for name, bad in (("cached", _pre_fix_catalogue(PL, hdr, nb)), ("cached_nan", nan_cat)):
+        c1 = cfg(name)
+        d1 = PL.snap_output_dir(c1, "synthsim", 1)
+        bad.save_npz(d1 / "catalog.npz")
+        assert PL.run_one_snap(ss, entry, c1) is None
+        assert sorted(p.name for p in d1.iterdir()) == ["catalog.npz", "error.txt"]
+        assert not PL.is_done(c1, "synthsim", 1)
+        assert "cached catalogue refused" in (d1 / "error.txt").read_text()
+    # done, with a refused catalogue: refused loudly, never reused, nothing written, and the simulation's other
+    # snapshot (which on its own is stacked: control below) is not stacked without it
     c2 = cfg("done")
     d2 = PL.snap_output_dir(c2, "synthsim", 1)
     bad = _pre_fix_catalogue(PL, hdr, nb)
@@ -287,10 +322,39 @@ def test_pipeline_resume_refuses_a_cached_pre_fix_catalogue_done_or_not(tmp_path
     PL._save_snap_outputs(d2, bad, {}, {}, PL.measure_cddf(bad, hdr), None, None, {}, {}, hdr, "synthsim", 1, 3.0,
                           PL.pixel_dv_kms(hdr))
     PL.mark_done(c2, "synthsim", 1)
-    before = sorted((p.name, p.stat().st_mtime_ns) for p in d2.iterdir())
-    with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
-        PL.run_one_snap(ss, entry, c2)
-    with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
-        PL.run_sim_all_z(ss, c2)
-    assert sorted((p.name, p.stat().st_mtime_ns) for p in d2.iterdir()) == before
-    assert not (tmp_path / "done" / "synthsim" / "cddf_stacked.npz").exists()
+    c3 = cfg("done_nan")
+    d3 = PL.snap_output_dir(c3, "synthsim", 1)
+    shutil.copytree(d0, d3, dirs_exist_ok=True)                    # a completed snapshot ...
+    nan_cat.save_npz(d3 / "catalog.npz")                           # ... whose catalogue was then damaged
+    for c, d in ((c2, d2), (c3, d3)):
+        before = files(d)
+        with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
+            PL.run_one_snap(ss, entry, c)
+        with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
+            PL.run_sim_all_z(ss2, c)
+        assert files(d) == before
+        assert not (Path(c.output_root) / "synthsim" / "cddf_stacked.npz").exists()
+    c4 = cfg("control")
+    PL.run_sim_all_z(SimSnapshot(sim=sim, entries=[entry2]), c4)
+    assert (Path(c4.output_root) / "synthsim" / "cddf_stacked.npz").exists()
+
+
+def test_a_fresh_build_refuses_a_non_finite_column_density_before_saving_the_catalogue(tmp_path, monkeypatch):
+    PL = _pipeline(monkeypatch)
+    from hcd_analysis.config import PipelineConfig
+    from hcd_analysis.io import SimInfo
+    from hcd_analysis.snapshot_map import SimSnapshot, SnapEntry
+    entry = SnapEntry(snap=1, a=0.25, z=3.0, path=_synthetic_snapshot(tmp_path))
+    ss = SimSnapshot(sim=SimInfo(name="synthsim", path=tmp_path / "simroot", params={}), entries=[entry])
+    measure = C.measure_nhi_for_system
+
+    def nan_for_the_middle_system(tau_row, pix_start, *args):
+        nhi, b, ok = measure(tau_row, pix_start, *args)
+        return (float("nan") if pix_start == 20 else nhi), b, ok
+    monkeypatch.setattr(C, "measure_nhi_for_system", nan_for_the_middle_system)
+    c = PipelineConfig(output_root=str(tmp_path / "out"), resume=True, n_workers=1)
+    c.p1d.nhi_excl_thresholds = []
+    d = PL.snap_output_dir(c, "synthsim", 1)
+    assert PL.run_one_snap(ss, entry, c) is None
+    assert sorted(p.name for p in d.iterdir()) == ["error.txt"]       # no catalog.npz: refused inside build_catalog
+    assert "non-finite N_HI" in (d / "error.txt").read_text()

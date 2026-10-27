@@ -359,8 +359,8 @@ def find_wrap_duplicates(skewer_idx, pix_start, pix_end, n: int) -> np.ndarray:
 
 def load_validated_catalog(path, n: int) -> "AbsorberCatalog":
     """Load a cached catalogue for reuse and refuse it unless its entries are distinct systems
-    (``validate_catalog_entries`` with the skewer length ``n``). A catalogue built by the pre-fix finder is refused,
-    never re-used silently; rebuilding it is a separate decision."""
+    (``validate_catalog_entries`` with the skewer length ``n``) and its N_HI values pass ``check_catalog_values``. A
+    catalogue built by the pre-fix finder is refused, never re-used silently; rebuilding it is a separate decision."""
     cat = AbsorberCatalog.load_npz(path)
     if cat.absorbers:
         try:
@@ -392,8 +392,10 @@ def _class_counts(catalog: "AbsorberCatalog"):
 
 
 def check_catalog_values(catalog: "AbsorberCatalog") -> None:
-    """Refuse non-finite N_HI and stored class labels that disagree with the classes of the stored N_HI. Run before a
-    catalogue is saved (``build_catalog``) and when a cached one is loaded (``load_validated_catalog``)."""
+    """Refuse non-finite N_HI, and class labels that disagree with the classes of N_HI. Run before a catalogue is saved
+    (``build_catalog``) and when a cached one is loaded (``load_validated_catalog``). ``catalog.npz`` stores no labels
+    (``load_npz`` recomputes them from N_HI), so on a cached catalogue only the N_HI check can fail; the label check
+    guards in-memory catalogues against drift between ``classify_system`` and the class thresholds."""
     _class_counts(catalog)
 
 
