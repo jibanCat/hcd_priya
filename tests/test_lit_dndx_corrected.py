@@ -5,9 +5,10 @@ CI consumes ONLY the committed JSON (hcd_analysis/emulator/hcd_lit_dndx_correcte
 cache-dependent cases sit behind the _HAS_CACHE skipif pattern.
 
 Case list (spec sec 7):
-  1. Reproduction: refit the JSON's input points with the estimator RECORDED per class,
-     bit-level equality with HCD_LIT_DNDX_LAW (anti-hand-tuning; incl. the CONSTRAINED
-     LLS estimator as recorded).
+  1. Reproduction: refit the JSON's input points with the estimator RECORDED per class
+     and compare with HCD_LIT_DNDX_LAW (anti-hand-tuning; incl. the CONSTRAINED LLS
+     estimator as recorded): bit-level, except the constrained LLS amplitude, which agrees
+     to 16 eps relative (its slope and the JSON-versus-deployed constants stay bit-level).
   2. Estimand-regression vs the tombstoned wrong-object arrays (subDLA > 3 combined
      sigma; LLS — see the documented K1a deviation in the test).
   3. Poisson-consistency: deployed subDLA deviance/dof < 2; internal consistency < 5%.
@@ -149,7 +150,7 @@ def test_case2_lls_law_distinct_from_tombstoned_cumulative_wls():
     written for the K3 (-31%) candidate and is unachievable for K1a. The regression guard
     here is therefore (a) the amplitude moved by the full kernel correction (>5%,
     measured -8.3%), (b) exact distinctness from the tombstone WLS at reproduction
-    precision, and (c) the bit-level case-1 pin, which a silent revert to 0.0201 trips
+    precision, and (c) the case-1 pin (16 eps relative), which a silent revert to 0.0201 trips
     immediately. subDLA carries the 3-sigma criterion (where it is meaningful)."""
     t = LD.LLS_TAU2_OLD_DEFECTS
     wrong = LD.wls_powerlaw(t["z"], t["lx"], t["err"])
