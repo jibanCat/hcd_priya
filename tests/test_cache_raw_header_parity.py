@@ -1,11 +1,12 @@
-"""Cache and raw-header parity rows extracted VERBATIM from 863df63 tests/test_parity_upstream.py (gate B): the rows that
-execute no upstream code and read no upstream emulator product (row 10: the class decomposition reconstructs the total;
+"""Cache and raw-header parity rows extracted from 863df63 tests/test_parity_upstream.py (gate B; test code verbatim):
+the rows that execute no upstream code and read no upstream emulator product (row 10: the class decomposition
+reconstructs the total;
 row 11: the production legs lie inside the simulated modes; row 04d: every cache row matches its raw snapshot header,
 the S4 invariant; row 23b: the PRIYA-HR6 slot-label audit, F7). Row 11 loads the data legs through the carried
 data_likelihood loaders, whose KS default reads the KODIAQ-SQUAD measurement files from the local upstream checkout's
 data directory, as every carried KS-leg test does. The other rows of that module run lya_emulator_full or read its
 emulator products from the local upstream checkout and stay excluded.
-Module constants are copied verbatim (one renamed: SIM_F1); docstrings are worded neutrally; _raw_headers comes from
+Module constants are copied verbatim except one unused name, dropped; docstrings are reworded; _raw_headers comes from
 tests/raw_headers.py (itself verbatim)."""
 import json
 import os
@@ -22,7 +23,6 @@ from tests.raw_headers import _raw_headers
 
 LF = real_cache_path("lf")
 HR = real_cache_path("hr")
-SIM_F1 = "ns0.959Ap2.34e-09herei3.81heref2.99alphaq1.77hub0.725omegamh20.144hireionz6.83bhfeedback0.0467"
 SIM_OUR_GAP = "ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662omegamh20.144hireionz7.47bhfeedback0.0347"
 RAW = "/nfs/turbo/umor-yueyingn/mfho/emu_full"
 LF_HIST = real_cache_path("lf_hist")

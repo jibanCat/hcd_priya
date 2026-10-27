@@ -9,6 +9,7 @@ once as its own head [s', pix_end - n]. The guards make that class of error impo
     written (reconcile_counts, used by the pipeline).
 Synthetic optical depths only."""
 import json
+import sys
 import types
 
 import numpy as np
@@ -150,9 +151,8 @@ def test_counts_reconcile_three_ways_or_refuse():
         C.reconcile_counts(_cat(logn), counts + np.eye(30, dtype=int)[3], edges)
 
 
-def test_pipeline_writes_reconciled_counts_and_refuses_a_mismatch(tmp_path):
-    pytest.importorskip("yaml")                                  # the pipeline's config module needs PyYAML
-    from hcd_analysis import pipeline as PL
+def test_pipeline_writes_reconciled_counts_and_refuses_a_mismatch(tmp_path, monkeypatch):
+    PL = _pipeline(monkeypatch)
     logn = [17.5, 19.4, 20.5]
     edges = np.linspace(17.0, 23.0, 31)
     cddf = {"log_nhi_edges": edges, "n_absorbers": np.histogram(logn, bins=edges)[0], "f_nhi": np.zeros(30)}
@@ -179,16 +179,24 @@ def test_a_whole_skewer_system_shorter_than_min_pixels_is_dropped_by_both_finder
 
 
 def test_audit_flags_over_span_entries_and_ignores_valid_ones():
-    sk, ps, pe = [3, 4, 4], [0, 10, N - 2], [2 * N - 1, 20, N + 4]   # skewer 3: the pre-fix all-above entry
-    assert C.find_wrap_duplicates(sk, ps, pe, N).tolist() == [True, False, False]
+    sk, ps, pe = [3, 4, 4, 5], [0, 10, N - 2, 0], [2 * N - 1, 20, N + 4, N - 1]   # skewer 3: the pre-fix all-above
+    assert C.find_wrap_duplicates(sk, ps, pe, N).tolist() == [True, False, False, False]   # skewer 5: valid (0, n-1)
 
 
-def test_non_finite_column_densities_are_refused_with_a_clear_message():
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])
+def test_non_finite_column_densities_are_refused_with_a_clear_message(bad):
     cat = _cat([17.5, 19.4])
-    cat.absorbers[0].NHI = float("nan")
+    cat.absorbers[0].NHI = bad
     edges = np.linspace(17.0, 23.0, 31)
     with pytest.raises(C.CatalogIntegrityError, match="non-finite N_HI"):
         C.reconcile_counts(cat, np.histogram([19.4], bins=edges)[0], edges)
+    with pytest.raises(C.CatalogIntegrityError, match="non-finite N_HI"):
+        C.check_catalog_values(cat)
+
+
+def test_label_value_mismatch_is_refused_before_saving():
+    with pytest.raises(C.CatalogIntegrityError, match="labels"):
+        C.check_catalog_values(_cat([17.5, 19.4], ["DLA", "subDLA"]))
 
 
 def test_a_cached_pre_fix_catalogue_is_refused_on_reuse(tmp_path):
@@ -203,3 +211,86 @@ def test_a_cached_pre_fix_catalogue_is_refused_on_reuse(tmp_path):
     bad.save_npz(tmp_path / "bad.npz")
     with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
         C.load_validated_catalog(tmp_path / "bad.npz", N)
+
+
+# ----------------------------------------------------------------------------- the pipeline's resume paths
+def _pipeline(monkeypatch):
+    """hcd_analysis.pipeline, importable without PyYAML: the config module imports it at load time, but the snapshot
+    path exercised here never calls it, so a stub stands in when it is absent."""
+    try:
+        import yaml  # noqa: F401
+    except ImportError:
+        monkeypatch.setitem(sys.modules, "yaml", types.ModuleType("yaml"))
+    from hcd_analysis import pipeline as PL
+    return PL
+
+
+def _synthetic_snapshot(root, nb=64, n_sk=4, z=3.0):
+    """A tiny tau file: skewer 0 holds a system straddling the box edge, skewer 1 a system in the middle."""
+    import h5py
+    p = root / "s.hdf5"
+    tau = np.random.default_rng(0).uniform(0.0, 0.3, size=(n_sk, nb)).astype(np.float32)
+    tau[0, nb - 5:] = 1e5
+    tau[0, :4] = 1e5
+    tau[1, 20:26] = 1e5
+    with h5py.File(p, "w") as f:
+        g = f.create_group("Header")
+        for k, v in dict(redshift=z, hubble=0.7, omegam=0.3, omegal=0.7, box=1200.0, nbins=nb, omegab=0.05).items():
+            g.attrs[k] = v
+        f.create_dataset("tau/H/1/1215", data=tau)
+    return p
+
+
+def _pre_fix_catalogue(PL, hdr, nb, snap=1, z=3.0):
+    """What the pre-fix finder wrote for that file: the straddling system on skewer 0 AND its own head."""
+    cat = C.AbsorberCatalog(sim_name="synthsim", snap=snap, z=z, dv_kms=PL.pixel_dv_kms(hdr))
+    for sk, ps, pe in ((0, nb - 5, nb + 3), (0, 0, 3), (1, 20, 25)):
+        cat.absorbers.append(C.Absorber(skewer_idx=sk, pix_start=ps, pix_end=pe, v_center=0.0, NHI=10 ** 20.5,
+                                        b_kms=np.nan, log_NHI=20.5, absorber_class="DLA", fit_success=True,
+                                        fast_mode=True))
+    return cat
+
+
+def test_pipeline_resume_refuses_a_cached_pre_fix_catalogue_done_or_not(tmp_path, monkeypatch):
+    PL = _pipeline(monkeypatch)
+    from hcd_analysis.config import PipelineConfig
+    from hcd_analysis.io import SimInfo, read_header
+    from hcd_analysis.snapshot_map import SimSnapshot, SnapEntry
+    h5 = _synthetic_snapshot(tmp_path)
+    hdr = read_header(h5)
+    nb = int(hdr.nbins)
+    entry = SnapEntry(snap=1, a=0.25, z=3.0, path=h5)
+    ss = SimSnapshot(sim=SimInfo(name="synthsim", path=tmp_path / "simroot", params={}), entries=[entry])
+
+    def cfg(name):
+        c = PipelineConfig(output_root=str(tmp_path / name), resume=True, n_workers=1)
+        c.p1d.nhi_excl_thresholds = []
+        return c
+
+    # a fresh build lists the straddling system once and completes
+    c0 = cfg("fresh")
+    res = PL.run_one_snap(ss, entry, c0)
+    assert res is not None and sum(json.load(open(PL.snap_output_dir(c0, "synthsim", 1) / "meta.json"))
+                                   ["n_absorbers"].values()) == 2
+    # not done, with a cached pre-fix catalogue: refused (the snapshot fails; no meta.json, not marked done)
+    c1 = cfg("cached")
+    d1 = PL.snap_output_dir(c1, "synthsim", 1)
+    _pre_fix_catalogue(PL, hdr, nb).save_npz(d1 / "catalog.npz")
+    assert PL.run_one_snap(ss, entry, c1) is None
+    assert not (d1 / "meta.json").exists() and not PL.is_done(c1, "synthsim", 1)
+    assert "cached catalogue refused" in "".join(p.read_text() for p in d1.rglob("error*.txt"))
+    # done, with a pre-fix catalogue: refused loudly, never reused, and nothing is written
+    c2 = cfg("done")
+    d2 = PL.snap_output_dir(c2, "synthsim", 1)
+    bad = _pre_fix_catalogue(PL, hdr, nb)
+    bad.save_npz(d2 / "catalog.npz")
+    PL._save_snap_outputs(d2, bad, {}, {}, PL.measure_cddf(bad, hdr), None, None, {}, {}, hdr, "synthsim", 1, 3.0,
+                          PL.pixel_dv_kms(hdr))
+    PL.mark_done(c2, "synthsim", 1)
+    before = sorted((p.name, p.stat().st_mtime_ns) for p in d2.iterdir())
+    with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
+        PL.run_one_snap(ss, entry, c2)
+    with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
+        PL.run_sim_all_z(ss, c2)
+    assert sorted((p.name, p.stat().st_mtime_ns) for p in d2.iterdir()) == before
+    assert not (tmp_path / "done" / "synthsim" / "cddf_stacked.npz").exists()

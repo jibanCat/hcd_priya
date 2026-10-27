@@ -44,7 +44,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .catalog import AbsorberCatalog, build_catalog, load_validated_catalog, reconcile_counts, LOG_NHI_LLS_MIN
+from .catalog import (AbsorberCatalog, CatalogIntegrityError, build_catalog, load_validated_catalog,
+                      reconcile_counts, LOG_NHI_LLS_MIN)
 from .cddf import (
     CDDFPerturbation,
     compute_perturbed_p1d,
@@ -320,7 +321,8 @@ def _save_snap_outputs(
     dv_kms: float,
 ) -> None:
     """Save all outputs for one (sim, snap) to out_dir."""
-    # reconcile the absorber counts first: nothing is written for a catalogue that fails (CatalogIntegrityError)
+    # reconcile the absorber counts against the CDDF first: none of the files below is written if that fails
+    # (catalog.npz was written earlier, only after the finder, overlap and value checks of build_catalog)
     n_absorbers = reconcile_counts(catalog, cddf_result["n_absorbers"], cddf_result["log_nhi_edges"])
 
     # P1D variants → npz
@@ -385,7 +387,7 @@ def _load_snap_result(out_dir: Path, sim_name: str, snap: int, z: float) -> Opti
         with open(meta_path) as f:
             meta = json.load(f)
 
-        catalog = AbsorberCatalog.load_npz(out_dir / "catalog.npz")
+        catalog = load_validated_catalog(out_dir / "catalog.npz", int(meta["nbins"]))   # refuses a pre-fix catalogue
 
         p1d_data = np.load(out_dir / "p1d.npz")
         p1d_variants = {}
@@ -413,6 +415,8 @@ def _load_snap_result(out_dir: Path, sim_name: str, snap: int, z: float) -> Opti
             cddf_result=cddf_result,
             timing=meta.get("timing_s", {}),
         )
+    except CatalogIntegrityError:
+        raise                                 # a refused catalogue is never reused, nor silently dropped from a stack
     except Exception as exc:
         logger.warning("Could not load cached result for snap %03d: %s", snap, exc)
         return None

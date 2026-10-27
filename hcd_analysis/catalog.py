@@ -346,7 +346,8 @@ def find_wrap_duplicates(skewer_idx, pix_start, pix_end, n: int) -> np.ndarray:
     """Boolean mask of the entries the pre-fix finder wrote wrongly: (1) a box-edge duplicate, an entry with
     pix_end < n whose pix_end equals pix_end_w - n of a wrapping entry w (pix_end_w >= n) on the same skewer; (2) an
     entry spanning more than the skewer (pix_end - pix_start + 1 > n, a whole-skewer system listed twice over).
-    Read-only audit of existing catalogues (they are not rewritten); a catalogue built by the fixed finder has neither."""
+    Read-only audit of existing catalogues (they are not rewritten); a catalogue built by the fixed finder has
+    neither."""
     sk = np.asarray(skewer_idx, dtype=np.int64)
     ps = np.asarray(pix_start, dtype=np.int64)
     pe = np.asarray(pix_end, dtype=np.int64)
@@ -365,10 +366,35 @@ def load_validated_catalog(path, n: int) -> "AbsorberCatalog":
         try:
             validate_catalog_entries([a.skewer_idx for a in cat.absorbers], [a.pix_start for a in cat.absorbers],
                                      [a.pix_end for a in cat.absorbers], n)
+            check_catalog_values(cat)
         except CatalogIntegrityError as e:
             raise CatalogIntegrityError(f"{path}: cached catalogue refused ({e}); it was built before the box-edge "
                                         f"fix (docs/bugs_found.md, bug 8) or is damaged; rebuild it") from None
     return cat
+
+
+def _class_counts(catalog: "AbsorberCatalog"):
+    nhi = np.array([a.NHI for a in catalog.absorbers], dtype=np.float64)
+    if not np.all(np.isfinite(nhi)):
+        raise CatalogIntegrityError(f"{int(np.sum(~np.isfinite(nhi)))} absorbers with a non-finite N_HI")
+    labels = [a.absorber_class for a in catalog.absorbers]
+    by_label = {c: labels.count(c) for c in ("LLS", "subDLA", "DLA", "forest")}
+    logn = np.log10(np.maximum(nhi, 1e1))
+    by_value = {
+        "LLS": int(np.sum((logn >= LOG_NHI_LLS_MIN) & (logn < LOG_NHI_SUBDLA_MIN))),
+        "subDLA": int(np.sum((logn >= LOG_NHI_SUBDLA_MIN) & (logn < LOG_NHI_DLA_MIN))),
+        "DLA": int(np.sum(logn >= LOG_NHI_DLA_MIN)),
+        "forest": int(np.sum(logn < LOG_NHI_LLS_MIN)),
+    }
+    if by_label != by_value:
+        raise CatalogIntegrityError(f"class counts from labels {by_label} != from NHI values {by_value}")
+    return by_label, logn
+
+
+def check_catalog_values(catalog: "AbsorberCatalog") -> None:
+    """Refuse non-finite N_HI and stored class labels that disagree with the classes of the stored N_HI. Run before a
+    catalogue is saved (``build_catalog``) and when a cached one is loaded (``load_validated_catalog``)."""
+    _class_counts(catalog)
 
 
 def validate_catalog_entries(skewer_idx, pix_start, pix_end, n: int) -> None:
@@ -407,20 +433,7 @@ def reconcile_counts(catalog: "AbsorberCatalog", cddf_counts, cddf_edges) -> Dic
     the CDDF edges). All three come from the same entries, so they guard the labels, the thresholds and the CDDF against
     drift, not against a duplicated entry (the finder cross-check and validate_catalog_entries do that). Returns the
     per-class counts written to meta.json."""
-    nhi = np.array([a.NHI for a in catalog.absorbers], dtype=np.float64)
-    if not np.all(np.isfinite(nhi)):
-        raise CatalogIntegrityError(f"{int(np.sum(~np.isfinite(nhi)))} absorbers with a non-finite N_HI")
-    labels = [a.absorber_class for a in catalog.absorbers]
-    by_label = {c: labels.count(c) for c in ("LLS", "subDLA", "DLA", "forest")}
-    logn = np.log10(np.maximum(nhi, 1e1))
-    by_value = {
-        "LLS": int(np.sum((logn >= LOG_NHI_LLS_MIN) & (logn < LOG_NHI_SUBDLA_MIN))),
-        "subDLA": int(np.sum((logn >= LOG_NHI_SUBDLA_MIN) & (logn < LOG_NHI_DLA_MIN))),
-        "DLA": int(np.sum(logn >= LOG_NHI_DLA_MIN)),
-        "forest": int(np.sum(logn < LOG_NHI_LLS_MIN)),
-    }
-    if by_label != by_value:
-        raise CatalogIntegrityError(f"class counts from labels {by_label} != from NHI values {by_value}")
+    by_label, logn = _class_counts(catalog)
     edges = np.asarray(cddf_edges, dtype=np.float64)
     inside = int(np.sum((logn >= edges[0]) & (logn <= edges[-1])))
     if int(np.sum(cddf_counts)) != inside:
@@ -662,6 +675,7 @@ def build_catalog(
     if nbins is not None and catalog.absorbers:                # refuse overlapping entries (independent of the finder)
         validate_catalog_entries([a.skewer_idx for a in catalog.absorbers], [a.pix_start for a in catalog.absorbers],
                                  [a.pix_end for a in catalog.absorbers], nbins)
+    check_catalog_values(catalog)                              # before any caller can save it
     elapsed = time.perf_counter() - t0
     logger.info(
         "Catalog built: %d absorbers in %.1f s (sim=%s snap=%03d z=%.2f)",

@@ -41,7 +41,7 @@ def test_class_strings_outside_the_allowlist_are_refused(copy_basedir):
     f = os.path.join(td, "zbin3.0.json")
     with open(f) as fh:
         d = json.load(fh)
-    d["class"] = "__import__('os').system"
+    d["class"] = "GPy.kern.NotAllowed"
     with open(f, "w") as fh:
         json.dump(d, fh)
     with pytest.raises(A.ReferenceRefused, match="allowlist"):

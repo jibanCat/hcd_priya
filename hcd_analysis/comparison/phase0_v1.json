@@ -43,6 +43,6 @@
          "reason": "implementation commit not identified (README names sbird/lya_emulator_full without a commit); HF level waits for the x885 MF product"},
   "R3": {"name": "LaCE CH24 GP", "status": "BLOCKED",
          "repo": "https://github.com/igmhub/LaCE", "commit": "24132cdfc5a9ac0418f855a391a14463d10a97e7",
-         "reason": "models load through pickle (needs PI authorization for trusted legacy loading in isolation); no defensible map from a PRIYA state to (Delta2_p, n_p, mF, sigT_Mpc, gamma, kF_Mpc); Delta2_p and n_p need CAMB, absent from the environments"}
+         "reason": "not loaded: its models load through pickle, which is out of scope here; no defensible map from a PRIYA state to (Delta2_p, n_p, mF, sigT_Mpc, gamma, kF_Mpc); Delta2_p and n_p need CAMB, absent from the environments"}
  }
 }
