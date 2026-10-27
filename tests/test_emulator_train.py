@@ -161,8 +161,9 @@ def test_checkpoint_roundtrip(tmp_path):
 
 
 def test_padded_batch_matches_unpadded(tmp_path):
-    """CS-I2: a padded fixed-size batch gives loss/grad numerically identical
-    (~1e-12) to the unpadded ragged batch (padding contributes nothing), and the
+    """CS-I2: a padded fixed-size batch gives the loss of the unpadded ragged batch
+    (to 1e-12) and its gradients up to float64 rounding (padding contributes nothing),
+    padding content cannot leak (garbage in the padded rows changes nothing), and the
     padded batch has the FIXED (batch_size, ...) leading shape."""
     from hcd_analysis.emulator.data import fit_target_norm, make_batch
     d = _small_cache(tmp_path)
@@ -186,9 +187,32 @@ def test_padded_batch_matches_unpadded(tmp_path):
     lr, gr = eqx.filter_value_and_grad(joint_loss)(m, ragged)
     lp, gp = eqx.filter_value_and_grad(joint_loss)(m, padded)
     assert abs(float(lr) - float(lp)) <= 1e-12 * max(1.0, abs(float(lr)))
+    # The padded and ragged batches reduce over arrays of different shapes, so XLA may reassociate the sums: the
+    # gradients then differ by rounding at the scale of each leaf's largest gradient, not of each element (measured
+    # <= 9 eps of it under jax 0.10.1 and 0.10.2). The bound is 64 eps of that scale; a padding leak is O(1) of it.
+    eps = np.finfo(np.float64).eps
     for a, b in zip(jax.tree_util.tree_leaves(eqx.filter(gr, eqx.is_array)),
                     jax.tree_util.tree_leaves(eqx.filter(gp, eqx.is_array))):
-        assert np.allclose(np.asarray(a), np.asarray(b), atol=1e-12, rtol=0)
+        a, b = np.asarray(a), np.asarray(b)
+        assert np.all(np.isfinite(b))
+        assert np.max(np.abs(a - b)) <= 64 * eps * np.max(np.abs(a))
+    # masking: large garbage in every padded value that is not a mask, a weight or a cell index changes nothing
+    rng = np.random.default_rng(20261027)
+    garbage = dict(padded)
+    for k, v in padded.items():
+        if k in ("n_cells", "mask", "t_f_nhi_mask", "t_dndx_mask", "inv_nc", "inv_nalpha", "cell"):
+            continue
+        g = np.asarray(v).copy()
+        if g.dtype.kind == "f":
+            g[7:] = rng.uniform(-1e3, 1e3, g[7:].shape)
+            garbage[k] = jnp.asarray(g)
+    lg, gg = eqx.filter_value_and_grad(joint_loss)(m, garbage)
+    assert abs(float(lg) - float(lp)) <= 1e-12 * max(1.0, abs(float(lp)))
+    for a, b in zip(jax.tree_util.tree_leaves(eqx.filter(gp, eqx.is_array)),
+                    jax.tree_util.tree_leaves(eqx.filter(gg, eqx.is_array))):
+        a, b = np.asarray(a), np.asarray(b)
+        assert np.all(np.isfinite(b))
+        assert np.max(np.abs(a - b)) <= 64 * eps * np.max(np.abs(a))
 
 
 def test_padded_batch_matches_unpadded_with_structural_zeros_and_nan(tmp_path):
