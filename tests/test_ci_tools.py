@@ -154,6 +154,27 @@ def test_junit_counts_declared_skips(tmp_path):
     assert (c["skipped"], c["asset_skipped"]) == (1, 0)
 
 
+def test_junit_counts_in_an_assets_job_a_required_test_must_run(tmp_path):
+    """In a job meant to have the assets, a declared asset test that skips means its asset is missing; one that runs
+    is what that job is for. A skipped_by_design test (declared, not required) may still skip."""
+    p = tmp_path / "r.xml"
+    p.write_text(_JUNIT)
+    c = RT.junit_counts(str(p), declared_skips=["d", "a"], required=["d", "a"])
+    assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"], c["skipped"]) == (1, 0, 0, 0)
+    c = RT.junit_counts(str(p), declared_skips=["d", "a"], required=["a"])          # d skipped by design
+    assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0)
+
+
+def test_the_assets_job_runs_the_assets_tier_and_every_file_with_asset_tests():
+    _, files = RT.load_tiers()
+    picked = RT.asset_job_files(files)
+    assert set(RT.files_of(files, "assets")) <= set(picked)
+    for path in picked:
+        assert files[path]["tier"] == "assets" or files[path].get("asset_tests")
+    assert not {p for p in picked if files[p]["tier"] in ("deferred", "external", "no_tests")}
+    assert not set(RT.not_run(files, ran=("assets",))) & {"assets", *RT.CI_TIERS}
+
+
 def test_deferred_legacy_messages_are_exactly_what_conftest_writes():
     from tests.gate_helpers import DEFERRED_CAUSES
     assert RT.deferred_legacy_messages() == {f"deferred_legacy {cause}: {reason}"
@@ -167,6 +188,7 @@ def test_deferred_legacy_messages_are_exactly_what_conftest_writes():
     (0, _c(skipped=1), False),                      # a skip is never a pass
     (0, _c(bad_xfail=1), False),                    # only declared deferrals may be expected failures
     (0, _c(asset_ran=1), False),                    # a declared skip must skip without its asset
+    (0, _c(asset_missing=1), False),                # an assets job: a missing asset fails, never skips
     (0, _c(tests=0, passed=0), False),              # nothing ran
     (0, _c(tests=2, passed=0, xfailed=2), False),   # deferrals only: nothing passed
     (0, _c(tests=2, passed=0, asset_skipped=2), False),
