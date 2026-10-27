@@ -14,18 +14,23 @@ permissions:
 
 jobs:
   fixture-tests:
-    name: wheel and source tiers (Python ${{ matrix.python }}, ${{ matrix.deps }} dependencies)
+    name: ${{ matrix.label }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
+        # Only the pinned job is a supported environment (docs/compatibility.md). The others show how newer
+        # versions behave; their failures stay visible (no continue-on-error) and do not make them supported.
         include:
           - python: "3.11"
             deps: development-environment
+            label: Python 3.11, pinned (supported)
           - python: "3.11"
             deps: newest
+            label: Python 3.11, newest dependencies (not supported)
           - python: "3.12"
             deps: newest
+            label: Python 3.12, newest dependencies (not supported)
     env:
       JAX_PLATFORMS: cpu
       MPLBACKEND: Agg

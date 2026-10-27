@@ -7,11 +7,11 @@ HCD outputs from the ground up.  Read them in order:
 
 1. **Install the package.**  Follow the install instructions in the
    [top-level `README.md`](../../README.md#installation) — either run
-   `bash scripts/install_greatlakes.sh` on Great Lakes, or do the generic
-   `pip install -r requirements.txt && pip install -e .` path on a
-   laptop / other cluster.  The tutorial notebooks need `pandas`,
-   `jupyter`, and `nbformat` in addition to the runtime stack; all are
-   pulled in by `requirements.txt`.
+   `bash scripts/install_greatlakes.sh` on Great Lakes, or the generic
+   `pip install -c tools/ci/constraints-devenv.txt ".[tutorials]"` from the
+   repository root on a laptop / other cluster.  The tutorial notebooks need
+   `jupyter` and `nbformat` in addition to the runtime stack; the
+   `tutorials` extra installs them.
 
 2. **Confirm data access.**  All five notebooks read from two paths:
 

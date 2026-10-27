@@ -5,8 +5,8 @@
 # allowed to skip there; they are reported as NOT RUN, never as passed, and must skip (a declared test that runs
 # fails its file). Expected failures are allowed only as exact deferrals: the deferred_legacy causes of
 # tests/gate_helpers.py, or the messages a file lists in deferred_xfails. reason says why, for every test or file
-# that CI does not run; tests marked slow are deselected and listed by the runner. Classified from run r1 of
-# B_CHECKPOINT_01 (no data links; private trees hidden) and corrected after its AI-assisted review.
+# that CI does not run; tests marked slow are deselected and listed by the runner. Classified from a run with no
+# data links and the private trees hidden, and corrected after an AI-assisted review.
 
 [tiers]
 wheel = "fixture and synthetic tests of the installed package; CI runs them from a directory holding only tests/"

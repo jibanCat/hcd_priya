@@ -8,16 +8,16 @@
 #
 # What this does:
 #   1. Creates a conda env 'hcd_env' with Python 3.11
-#   2. Installs all requirements
-#   3. Installs fake_spectra from GitHub
-#   4. Installs this package in editable mode
+#   2. Installs fake_spectra from GitHub
+#   3. Installs this package in editable mode, with the pinned versions of the supported environment
+#      (tools/ci/constraints-devenv.txt) and the tutorials extra
 
 set -euo pipefail
 
 ENV_NAME="hcd_env"
 PYTHON_VERSION="3.11"
 
-echo "=== hcd_analysis installation on Great Lakes ==="
+echo "=== hcd-priya (hcd_analysis) installation on Great Lakes ==="
 
 # Load modules if needed
 module load python/3.11 2>/dev/null || true
@@ -36,12 +36,7 @@ conda activate "${ENV_NAME}"
 
 echo "Python: $(python --version)"
 
-# ---------------------------------------------------------------------------
-# Core dependencies
-# ---------------------------------------------------------------------------
-echo "Installing core dependencies..."
 pip install --upgrade pip
-pip install -r requirements.txt
 
 # ---------------------------------------------------------------------------
 # fake_spectra from Simeon Bird's GitHub
@@ -61,11 +56,11 @@ python -c "import fake_spectra; print('fake_spectra OK:', fake_spectra.__file__)
 # ---------------------------------------------------------------------------
 # Install this package
 # ---------------------------------------------------------------------------
-echo "Installing hcd_analysis..."
+echo "Installing hcd-priya and its dependencies..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_ROOT"
-pip install -e .
+pip install -c tools/ci/constraints-devenv.txt -e ".[tutorials]"
 
 # Verify
 python -c "import hcd_analysis; print('hcd_analysis OK:', hcd_analysis.__version__)"
@@ -77,7 +72,7 @@ echo "Activate environment with: conda activate ${ENV_NAME}"
 echo "Run pipeline with: hcd --help"
 echo ""
 echo "To test with one (sim, snap):"
-echo "  hcd run-one --sim ns0.803 --snap 17 --debug"
+echo "  hcd run-one --config config/default.yaml --sim ns0.803 --snap 17 --debug"
 echo ""
 echo "To benchmark:"
-echo "  hcd benchmark --n-sims 1 --n-snaps 2"
+echo "  hcd benchmark --config config/default.yaml --n-sims 1 --n-snaps 2"
