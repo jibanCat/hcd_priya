@@ -22,34 +22,34 @@ def _load(name):
 CD = _load("check_dist")
 RT = _load("run_test_tier")
 X = CD.git_blob_id(b"x")
-PACKAGE = {n: X for n in ("hcd_analysis/__init__.py", "hcd_analysis/emulator/__init__.py", "cli/__init__.py",
-                          "cli/run.py", *CD.PACKAGE_DATA)}
+PACKAGE = {n: X for n in ("hcd_analysis/__init__.py", "hcd_analysis/emulator/__init__.py",
+                          "hcd_analysis/cli/__init__.py", "hcd_analysis/cli/run.py", *CD.PACKAGE_DATA)}
 TOP = {n: X for n in CD.SDIST_COMMITTED}
 DIST_INFO = ["METADATA", "WHEEL", "RECORD", "entry_points.txt", "licenses/LICENSE"]
 
 
-def _wheel(tmp_path, extra=(), drop=(), top="cli\nhcd_analysis\n", content=None):
-    path = tmp_path / "hcd_analysis-0.0.0-py3-none-any.whl"
+def _wheel(tmp_path, extra=(), drop=(), top="hcd_analysis\n", content=None):
+    path = tmp_path / "hcd_priya-0.0.0-py3-none-any.whl"
     with zipfile.ZipFile(path, "w") as zf:
         for name in sorted((set(PACKAGE) | set(extra)) - set(drop)):
             zf.writestr(name, (content or {}).get(name, "x"))
         for name in DIST_INFO:
-            zf.writestr(f"hcd_analysis-0.0.0.dist-info/{name}", "x")
-        zf.writestr("hcd_analysis-0.0.0.dist-info/top_level.txt", top)
+            zf.writestr(f"hcd_priya-0.0.0.dist-info/{name}", "x")
+        zf.writestr("hcd_priya-0.0.0.dist-info/top_level.txt", top)
     return str(path)
 
 
 def _sdist(tmp_path, extra=(), drop=(), link=None, content=None):
-    path = tmp_path / "hcd_analysis-0.0.0.tar.gz"
-    names = set(PACKAGE) | set(TOP) | {"PKG-INFO", "setup.cfg", "hcd_analysis.egg-info/SOURCES.txt"} | set(extra)
+    path = tmp_path / "hcd_priya-0.0.0.tar.gz"
+    names = set(PACKAGE) | set(TOP) | {"PKG-INFO", "setup.cfg", "hcd_priya.egg-info/SOURCES.txt"} | set(extra)
     with tarfile.open(path, "w:gz") as tf:
         for name in sorted(names - set(drop)):
             data = (content or {}).get(name, "x").encode()
-            info = tarfile.TarInfo(f"hcd_analysis-0.0.0/{name}")
+            info = tarfile.TarInfo(f"hcd_priya-0.0.0/{name}")
             info.size = len(data)
             tf.addfile(info, io.BytesIO(data))
         if link:
-            info = tarfile.TarInfo(f"hcd_analysis-0.0.0/{link}")
+            info = tarfile.TarInfo(f"hcd_priya-0.0.0/{link}")
             info.type = tarfile.SYMTYPE
             info.linkname = "/etc/passwd"
             tf.addfile(info)
@@ -67,25 +67,27 @@ def test_check_wheel_accepts_exactly_the_committed_package(tmp_path):
 @pytest.mark.parametrize("extra", ["hcd_analysis/_emulator_data/observables_tau0_lf.h5",
                                    "hcd_analysis/emulator/member.norm.pkl", "tests/test_x.py",
                                    "hcd_analysis/scratch.py", "hcd_analysis/emulator/README.md",
-                                   "hcd_analysis-0.0.0.dist-info/extra.txt"])
+                                   "hcd_priya-0.0.0.dist-info/extra.txt"])
 def test_check_wheel_refuses_any_other_file(tmp_path, extra):
     """Data, pickles, tests, an uncommitted module, docs or extra metadata never pass."""
     assert any(extra in p for p in CD.check_wheel(_wheel(tmp_path, extra=[extra]), PACKAGE))
 
 
-@pytest.mark.parametrize("drop", ["cli/run.py", "hcd_analysis/comparison/phase0_v1.json"])
+@pytest.mark.parametrize("drop", ["hcd_analysis/cli/run.py", "hcd_analysis/comparison/phase0_v1.json"])
 def test_check_wheel_refuses_a_missing_file(tmp_path, drop):
     assert any(f"missing {drop}" in p for p in CD.check_wheel(_wheel(tmp_path, drop=[drop]), PACKAGE))
 
 
 def test_check_wheel_refuses_a_file_that_differs_from_head(tmp_path):
     """An uncommitted edit (or a stale build/ directory) ships different bytes under the right name."""
-    problems = CD.check_wheel(_wheel(tmp_path, content={"cli/run.py": "edited"}), PACKAGE)
-    assert problems == ["wheel: cli/run.py differs from HEAD"]
+    problems = CD.check_wheel(_wheel(tmp_path, content={"hcd_analysis/cli/run.py": "edited"}), PACKAGE)
+    assert problems == ["wheel: hcd_analysis/cli/run.py differs from HEAD"]
 
 
 def test_check_wheel_refuses_another_top_level_package(tmp_path):
-    assert any("top_level" in p for p in CD.check_wheel(_wheel(tmp_path, top="cli\nhcd_analysis\ntests\n"), PACKAGE))
+    """A generic top-level name such as cli, which another distribution could also install, never ships."""
+    for top in ("cli\nhcd_analysis\n", "hcd_analysis\ntests\n"):
+        assert any("top_level" in p for p in CD.check_wheel(_wheel(tmp_path, top=top), PACKAGE))
 
 
 def test_check_sdist_accepts_exactly_the_committed_package(tmp_path):
@@ -107,7 +109,7 @@ def test_check_sdist_refuses_links_missing_and_edited_files(tmp_path):
 
 def test_committed_files_cover_the_packages_and_nothing_else():
     package, top = CD.committed_files()
-    assert {"hcd_analysis/__init__.py", "hcd_analysis/paths.py", "cli/run.py"} <= set(package)
+    assert {"hcd_analysis/__init__.py", "hcd_analysis/paths.py", "hcd_analysis/cli/run.py"} <= set(package)
     assert set(CD.PACKAGE_DATA) <= set(package) and set(top) == set(CD.SDIST_COMMITTED)
     assert all(p.split("/")[0] in CD.PACKAGES and (p.endswith(".py") or p in CD.PACKAGE_DATA) for p in package)
 

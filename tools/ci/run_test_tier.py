@@ -133,8 +133,8 @@ def check_installed_is(wheel):
     with zipfile.ZipFile(wheel) as zf:
         (rec,) = [n for n in zf.namelist() if n.endswith(".dist-info/RECORD")]
         want = {line.rsplit(",", 2)[0]: line.rsplit(",", 2)[1] for line in zf.read(rec).decode().splitlines()
-                if line.split("/")[0] in ("hcd_analysis", "cli")}
-    dist = md.distribution("hcd_analysis")
+                if line.split("/")[0] == "hcd_analysis"}
+    dist = md.distribution("hcd-priya")
     bad = []
     for path, digest in sorted(want.items()):
         data = open(dist.locate_file(path), "rb").read()

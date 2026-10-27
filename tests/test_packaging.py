@@ -5,7 +5,7 @@
 - Every module imports with only the declared dependencies; the modules that need fake_spectra (installed separately,
   docs/fake_spectra_integration.md) are named here and must fail on exactly that import when it is absent.
 - The two package-data files ship and their loaders read them from the installed package.
-- The console script resolves and runs.
+- The console script resolves and runs, with the same subcommands, and no generic top-level `cli` package ships.
 Synthetic expectations only: no value read from a package-data file is asserted."""
 import ast
 import glob
@@ -21,7 +21,6 @@ from importlib import resources
 
 import pytest
 
-import cli
 import hcd_analysis
 
 NEEDS_FAKE_SPECTRA = {"hcd_analysis.priya_p1d"}
@@ -45,9 +44,8 @@ def _have_fake_spectra():
 
 def _module_names():
     names = []
-    for pkg in (hcd_analysis, cli):
-        names.append(pkg.__name__)
-        names += [m.name for m in pkgutil.walk_packages(pkg.__path__, pkg.__name__ + ".")]
+    names = [hcd_analysis.__name__]
+    names += [m.name for m in pkgutil.walk_packages(hcd_analysis.__path__, hcd_analysis.__name__ + ".")]
     return sorted(names)
 
 
@@ -58,7 +56,7 @@ def _norm(name):
 def _third_party_imports():
     """{import root: {module file}} over every .py of the installed packages, imports at any depth."""
     roots = {}
-    for pkg in (hcd_analysis, cli):
+    for pkg in (hcd_analysis,):
         base = os.path.dirname(os.path.dirname(pkg.__file__))
         for path in glob.glob(os.path.join(os.path.dirname(pkg.__file__), "**", "*.py"), recursive=True):
             for node in ast.walk(ast.parse(open(path, encoding="utf-8").read())):
@@ -70,7 +68,7 @@ def _third_party_imports():
                     continue
                 for n in names:
                     root = n.split(".")[0]
-                    if root not in sys.stdlib_module_names and root not in ("hcd_analysis", "cli", "__future__"):
+                    if root not in sys.stdlib_module_names and root not in ("hcd_analysis", "__future__"):
                         roots.setdefault(root, set()).add(os.path.relpath(path, base))
     return roots
 
@@ -79,7 +77,7 @@ def test_every_import_is_a_declared_requirement_and_every_requirement_is_importe
     """Static, so function-local imports count too, and a dependency that only arrives with pytest or as another
     package's dependency (tqdm through numpyro) is not mistaken for a declared one."""
     required = {_norm(re.split(r"[\s;<>=!~\[(]", r, maxsplit=1)[0])
-                for r in md.requires("hcd_analysis") or () if "extra ==" not in r}
+                for r in md.requires("hcd-priya") or () if "extra ==" not in r}
     providers = md.packages_distributions()
     imports = _third_party_imports()
     undeclared, used = {}, set()
@@ -126,17 +124,18 @@ def test_package_data_loaders_read_the_installed_files():
 
 
 def test_distribution_metadata_matches_the_package():
-    dist = md.distribution("hcd_analysis")
+    dist = md.distribution("hcd-priya")
+    assert dist.metadata["Name"] == "hcd-priya"
     assert dist.version == hcd_analysis.__version__
     assert dist.metadata["Requires-Python"] == ">=3.11"
     assert dist.metadata["License-Expression"] == "MIT"
-    assert sorted((dist.read_text("top_level.txt") or "").split()) == ["cli", "hcd_analysis"]
+    assert sorted((dist.read_text("top_level.txt") or "").split()) == ["hcd_analysis"]
 
 
 def test_console_script_runs():
     """The installed `hcd` executable itself (not only its entry point object) runs, from a neutral directory."""
     (ep,) = [e for e in md.entry_points(group="console_scripts") if e.name == "hcd"]
-    assert ep.value == "cli.run:cli"
+    assert ep.value == "hcd_analysis.cli.run:cli"
     exe = os.path.join(os.path.dirname(sys.executable), "hcd")
     assert os.path.isfile(exe), f"no installed console script next to {sys.executable}"
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
@@ -144,3 +143,10 @@ def test_console_script_runs():
                             timeout=300)
     assert result.returncode == 0, result.stderr[-2000:]
     assert "run-one" in result.stdout
+
+
+def test_cli_keeps_its_subcommands():
+    """Moving the CLI under hcd_analysis.cli kept the `hcd` command set."""
+    from hcd_analysis.cli.run import cli
+    assert sorted(cli.commands) == ["benchmark", "convergence", "coverage", "report", "run-all", "run-hires",
+                                    "run-one", "run-sim"]

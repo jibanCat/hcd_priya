@@ -16,7 +16,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # relative path does not match (the leading slash must not follow a word character, ":", "/" or ".").
 _CHECKOUT_RX = re.compile(r"(?<![\w:/.])/(?:[^/\s\"'<>]+/)*hcd_priya(?!_notes)(?:_[A-Za-z0-9]+)?(?=[/\"'\s:;,)]|$)")
 _EXEMPT_MARK = "# historical-artifact path"
-PROJECT_TOP = ("hcd_analysis", "scripts", "tests", "cli", "config")
+PROJECT_TOP = ("hcd_analysis", "scripts", "tests", "config")
 
 
 def _code_files():

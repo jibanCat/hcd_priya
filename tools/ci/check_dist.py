@@ -5,8 +5,8 @@ checkpoint, test, script, linked, uncommitted or stale file).
 usage: python tools/ci/check_dist.py DIST_DIR
 
 DIST_DIR must hold exactly one wheel and one sdist (the output of `python -m build`), and this script must run from
-a git checkout: the expected files are the .py files under hcd_analysis/ and cli/ and the package-data files in the
-HEAD commit, each compared by its git blob id. Exit status 1 with the offending names on any violation.
+a git checkout: the expected files are the .py files under hcd_analysis/ and the package-data files in the HEAD
+commit, each compared by its git blob id. Exit status 1 with the offending names on any violation.
 """
 from __future__ import annotations
 
@@ -20,7 +20,8 @@ import tarfile
 import zipfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-PACKAGES = ("hcd_analysis", "cli")
+PACKAGES = ("hcd_analysis",)
+DIST = "hcd_priya"            # the distribution name hcd-priya as wheel, sdist and metadata directories spell it
 PACKAGE_DATA = ("hcd_analysis/comparison/phase0_v1.json", "hcd_analysis/emulator/hcd_lit_dndx_corrected.json")
 DIST_INFO_FILES = {"METADATA", "WHEEL", "RECORD", "entry_points.txt", "top_level.txt", "licenses/LICENSE"}
 SDIST_COMMITTED = ("pyproject.toml", "LICENSE", "README.md", "MANIFEST.in")
@@ -71,7 +72,7 @@ def check_wheel(path, package):
     problems, found, top = [], {}, None
     with zipfile.ZipFile(path) as zf:
         for name in sorted(zf.namelist()):
-            m = re.fullmatch(r"hcd_analysis-[^/]+\.dist-info/(.+)", name)
+            m = re.fullmatch(DIST + r"-[^/]+\.dist-info/(.+)", name)
             if m:
                 if m.group(1) not in DIST_INFO_FILES:
                     problems.append(f"wheel: unexpected metadata file {name}")
@@ -101,7 +102,7 @@ def check_sdist(path, package, top):
             if m.isdir():
                 continue
             rel = "/".join(parts[1:])
-            if rel in SDIST_GENERATED or (parts[1] == "hcd_analysis.egg-info"
+            if rel in SDIST_GENERATED or (parts[1] == DIST + ".egg-info"
                                           and "/".join(parts[2:]) in EGG_INFO_FILES):
                 continue
             data = tf.extractfile(m).read()

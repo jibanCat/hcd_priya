@@ -35,7 +35,7 @@ OUTPUT_ROOT="/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"
 mkdir -p "${HCD_ROOT}/logs"; cd "${HCD_ROOT}"
 
 echo "=== Phase-1 re-run: LF ns0.907 (resume:false) === $(date)"
-"$PYTHON" -m cli.run run-sim \
+"$PYTHON" -m hcd_analysis.cli.run run-sim \
   --sim ns0.907Ap1.5e-09 \
   --config config/default.yaml \
   --output-root "$OUTPUT_ROOT" \

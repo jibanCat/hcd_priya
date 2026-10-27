@@ -468,7 +468,7 @@ private notes repository (`hcd_priya_notes/docs/superpowers/`, latest
 ```
 hcd_analysis/            catalog/P1D/CDDF pipeline (catalog.py, p1d.py, cddf.py, hcd_template.py, ...)
 hcd_analysis/emulator/   the JAX/Equinox emulator + likelihood + inference (see its own README)
-cli/run.py               the `hcd` command-line entry point
+hcd_analysis/cli/run.py  the `hcd` command-line entry point
 config/default.yaml      default pipeline config
 scripts/                 install, SLURM batch, cache build, LOSO sweep, plotting
 notebooks/tutorials/     five starter notebooks for new students

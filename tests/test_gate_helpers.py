@@ -62,12 +62,12 @@ def test_checkout_layout_requires_the_tests_tree(monkeypatch, tmp_path):
 
 
 def test_installed_layout_splits_package_and_repository_modules(monkeypatch, tmp_path):
-    """Against an installed wheel, hcd_analysis and cli must come from site-packages and tests from the tests' tree;
-    the same files the other way round are foreign."""
+    """Against an installed wheel, hcd_analysis (its cli included) must come from site-packages and tests from the
+    tests' tree; the same files the other way round are foreign."""
     site = str(tmp_path.resolve() / "site-packages")
     monkeypatch.setattr(G, "installed_root", lambda: site)
     assert G.foreign_project_modules({"hcd_analysis.emulator.data": _Mod(site + "/hcd_analysis/emulator/data.py"),
-                                      "cli.run": _Mod(site + "/cli/run.py"),
+                                      "hcd_analysis.cli.run": _Mod(site + "/hcd_analysis/cli/run.py"),
                                       "tests.test_x": _Mod(G.TESTS_ROOT + "/tests/test_x.py")}) == []
     assert len(G.foreign_project_modules({"hcd_analysis.emulator.data": _Mod(G.TESTS_ROOT + "/hcd_analysis/x.py"),
                                           "tests.test_x": _Mod(site + "/tests/test_x.py")})) == 2

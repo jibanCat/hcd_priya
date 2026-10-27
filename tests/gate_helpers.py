@@ -10,8 +10,8 @@ import pytest
 
 from hcd_analysis.paths import REPO_ROOT
 
-PROJECT_TOP = ("hcd_analysis", "scripts", "tests", "cli", "config")
-PACKAGE_TOP = ("hcd_analysis", "cli")      # the top-level packages the wheel installs (pyproject.toml)
+PROJECT_TOP = ("hcd_analysis", "scripts", "tests", "config")
+PACKAGE_TOP = ("hcd_analysis",)      # the top-level package the wheel installs (pyproject.toml)
 TESTS_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))   # the tree these tests belong to
 
 # deferred_legacy causes (tests/conftest.py, tests/DEFERRED.md): cause -> (exact error pattern, reason).
@@ -78,7 +78,7 @@ def require_real_cache(path):
 
 def installed_root():
     """The directory hcd_analysis was imported from when an installed wheel put it there, else None (hcd_analysis was
-    imported from a checkout). Installed means: the hcd_analysis distribution found on sys.path has a RECORD (only a
+    imported from a checkout). Installed means: the hcd-priya distribution found on sys.path has a RECORD (only a
     pip-installed .dist-info has one), the RECORD lists hcd_analysis/paths.py, and the distribution lives in the
     directory paths.py was imported from (a venv, a user site, a --target directory). A checkout carrying a legacy
     hcd_analysis.egg-info (no RECORD) and an editable install (its RECORD lists no package module) stay checkouts, so
@@ -87,7 +87,7 @@ def installed_root():
     if os.path.isfile(os.path.join(TESTS_ROOT, "hcd_analysis", "__init__.py")):
         return None
     try:
-        dist = md.distribution("hcd_analysis")
+        dist = md.distribution("hcd-priya")
     except md.PackageNotFoundError:
         return None
     record = dist.read_text("RECORD") or ""

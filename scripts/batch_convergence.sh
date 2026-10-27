@@ -34,7 +34,7 @@ echo "=== hcd_analysis convergence ratios ==="
 echo "Date:     $(date)"
 echo "Output:   ${OUTPUT_ROOT}/hires/"
 
-"$PYTHON" -m cli.run convergence \
+"$PYTHON" -m hcd_analysis.cli.run convergence \
   --config "$HCD_CONFIG" \
   --output-root "$OUTPUT_ROOT" \
   --verbose

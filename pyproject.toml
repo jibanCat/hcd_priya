@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hcd_analysis"
+name = "hcd-priya"
 dynamic = ["version"]
 description = "HCD (High-Column-Density) absorber analysis pipeline for fake_spectra emulator outputs"
 license = "MIT"
@@ -42,14 +42,14 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=9.0"]
-dev = ["hcd_analysis[test]", "build", "pytest-cov", "ipython"]
+dev = ["hcd-priya[test]", "build", "pytest-cov", "ipython"]
 tutorials = ["jupyter>=1.0", "nbformat>=5.9"]
 
 [project.urls]
 Repository = "https://github.com/jibanCat/hcd_priya"
 
 [project.scripts]
-hcd = "cli.run:cli"
+hcd = "hcd_analysis.cli.run:cli"
 
 [tool.setuptools]
 # Only the files named below ship besides the code: never caches, checkpoints or anything linked into the tree.
@@ -60,7 +60,7 @@ version = {attr = "hcd_analysis.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["hcd_analysis*", "cli*"]
+include = ["hcd_analysis*"]
 namespaces = false
 
 [tool.setuptools.package-data]

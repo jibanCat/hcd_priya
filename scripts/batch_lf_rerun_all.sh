@@ -43,7 +43,7 @@ echo "=== LF re-run: array ${SLURM_ARRAY_TASK_ID} -> ${SIM_NAME}  $(date)"
 echo "CPUs: ${SLURM_CPUS_PER_TASK:-21}"
 
 # n_workers=1 (one sim/task); n_workers_skewer = all CPUs (intra-snap); resume:false
-"$PYTHON" -m cli.run run-sim \
+"$PYTHON" -m hcd_analysis.cli.run run-sim \
   --config "$HCD_CONFIG" \
   --output-root "$OUTPUT_ROOT" \
   --set "n_workers=1" \
