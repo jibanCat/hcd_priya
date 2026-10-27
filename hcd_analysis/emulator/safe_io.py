@@ -1,5 +1,5 @@
 """Prototype pickle-free format for the emulator, ``hcd_priya.safe/1`` (contract: docs/release_format.md), kept as
-evidence; it is not the release format (that is HDF5 + JSON, ``hcd_priya.h5/1``).
+evidence; it is not the release format (HDF5 + JSON, ``hcd_priya.h5/1``, adopted subject to review, is).
 
 Layout of one LF member ``<prefix>``:
   ``<prefix>.safetensors``  every array: the network leaves (``model<tree path>``) and the normalizer (``norm/<key>/...``;
@@ -528,7 +528,7 @@ def verify_manifest(bundle_dir, *, expected_sha256=None, allow_extra=False):
 
 def load_bundle(bundle_dir, *, expected_manifest_sha256):
     """Verify the manifest, then load every member with the manifest's digests. Returns ``[(model, meta, norm)]``.
-    ``expected_manifest_sha256`` is required: the release anchor. Passing ``None`` explicitly loads an unanchored
+    ``expected_manifest_sha256`` is required: the manifest anchor. Passing ``None`` explicitly loads an unanchored
     bundle (development only)."""
     return [load_member(p, expected_sha256=s, expected_json_sha256=j)
             for p, s, j in _manifest_entries(bundle_dir, expected_manifest_sha256)]

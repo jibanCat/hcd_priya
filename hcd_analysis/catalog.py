@@ -226,12 +226,16 @@ def find_systems_in_skewer(
     For systems that wrap across the periodic box boundary, pix_end >= len(tau);
     the wrap segment occupies pixels [pix_start:] and [:pix_end - len(tau) + 1].
 
+    Every system is listed once. A skewer whose gaps are all merged (or whose tau is above threshold everywhere) is one
+    system (0, n - 1), of n pixels, kept only if n >= min_pixels.
+
     Algorithm:
     1. Threshold: mark pixels where tau > tau_threshold.
     2. Use a doubled array to handle periodic boundary wrap-around.
-    3. Merge runs separated by < merge_gap_pixels.
+    3. Merge runs separated by gaps of at most merge_gap_pixels.
     4. Drop runs shorter than min_pixels.
-    5. Only return runs starting in [0, n) to avoid duplicates.
+    5. Keep the runs starting in [0, n) (the second copy repeats them), then drop the first-copy runs that a wrapping
+       run already covers (its own head, found again).
     """
     n = len(tau)
     above = tau > tau_threshold
@@ -275,13 +279,14 @@ def find_systems_in_skewer(
             result.append((s, e))
     # A run that wraps (e >= n) already holds the first copy's pixels [0, e - n]; the first-copy runs that start
     # there are its own head, found again (the box-edge duplicate, docs/bugs_found.md). Drop them. If the wrapping run
-    # itself starts at or before e - n, every gap is merged: one system covering the whole skewer, reported once.
+    # itself starts at or before e - n, every gap is merged: one system covering the whole skewer (n pixels), reported
+    # once and kept only if n >= min_pixels.
     if result and result[-1][1] >= n:
         head_end = result[-1][1] - n
         if result[-1][0] > head_end:
             result = [(s, e) for s, e in result if s > head_end]
         else:
-            result = [(0, n - 1)]
+            result = [(0, n - 1)] if n >= min_pixels else []
     return result
 
 
@@ -307,7 +312,7 @@ def find_systems_in_skewer_reference(
     if below.size == n:
         return []
     if below.size == 0:
-        return [(0, n - 1)]
+        return [(0, n - 1)] if n >= min_pixels else []
     r = int(below[0])
     rot = np.roll(above, -r)                                    # rot[0] is below threshold
     d = np.diff(np.concatenate([[0], rot.astype(np.int8), [0]]))
@@ -334,19 +339,36 @@ def find_systems_in_skewer_reference(
 
 class CatalogIntegrityError(ValueError):
     """An absorber catalogue failed an integrity check (independent finders disagree, entries overlap, counts do not
-    reconcile). A catalogue that fails is never written."""
+    reconcile, or a cached catalogue loaded for reuse is invalid). Nothing is written past a failed check."""
 
 
 def find_wrap_duplicates(skewer_idx, pix_start, pix_end, n: int) -> np.ndarray:
-    """Boolean mask of the box-edge duplicates written by the pre-fix finder: an entry with pix_end < n whose pix_end
-    equals pix_end_w - n of a wrapping entry w (pix_end_w >= n) on the same skewer. Read-only audit of existing
-    catalogues (they are not rewritten); a catalogue built by the fixed finder has none."""
+    """Boolean mask of the entries the pre-fix finder wrote wrongly: (1) a box-edge duplicate, an entry with
+    pix_end < n whose pix_end equals pix_end_w - n of a wrapping entry w (pix_end_w >= n) on the same skewer; (2) an
+    entry spanning more than the skewer (pix_end - pix_start + 1 > n, a whole-skewer system listed twice over).
+    Read-only audit of existing catalogues (they are not rewritten); a catalogue built by the fixed finder has neither."""
     sk = np.asarray(skewer_idx, dtype=np.int64)
+    ps = np.asarray(pix_start, dtype=np.int64)
     pe = np.asarray(pix_end, dtype=np.int64)
     wrap = pe >= n
     key = sk * (2 * n) + pe
     target = sk[wrap] * (2 * n) + (pe[wrap] - n)
-    return (~wrap) & np.isin(key, target)
+    return ((~wrap) & np.isin(key, target)) | (pe - ps + 1 > n)
+
+
+def load_validated_catalog(path, n: int) -> "AbsorberCatalog":
+    """Load a cached catalogue for reuse and refuse it unless its entries are distinct systems
+    (``validate_catalog_entries`` with the skewer length ``n``). A catalogue built by the pre-fix finder is refused,
+    never re-used silently; rebuilding it is a separate decision."""
+    cat = AbsorberCatalog.load_npz(path)
+    if cat.absorbers:
+        try:
+            validate_catalog_entries([a.skewer_idx for a in cat.absorbers], [a.pix_start for a in cat.absorbers],
+                                     [a.pix_end for a in cat.absorbers], n)
+        except CatalogIntegrityError as e:
+            raise CatalogIntegrityError(f"{path}: cached catalogue refused ({e}); it was built before the box-edge "
+                                        f"fix (docs/bugs_found.md, bug 8) or is damaged; rebuild it") from None
+    return cat
 
 
 def validate_catalog_entries(skewer_idx, pix_start, pix_end, n: int) -> None:
@@ -382,10 +404,15 @@ def validate_catalog_entries(skewer_idx, pix_start, pix_end, n: int) -> None:
 def reconcile_counts(catalog: "AbsorberCatalog", cddf_counts, cddf_edges) -> Dict[str, int]:
     """Count the catalogue's absorbers three ways and refuse unless they agree: (1) the stored per-entry class labels,
     (2) the classes recomputed from each entry's NHI with the class thresholds, (3) the CDDF histogram (entries inside
-    the CDDF edges). Returns the per-class counts written to meta.json."""
+    the CDDF edges). All three come from the same entries, so they guard the labels, the thresholds and the CDDF against
+    drift, not against a duplicated entry (the finder cross-check and validate_catalog_entries do that). Returns the
+    per-class counts written to meta.json."""
+    nhi = np.array([a.NHI for a in catalog.absorbers], dtype=np.float64)
+    if not np.all(np.isfinite(nhi)):
+        raise CatalogIntegrityError(f"{int(np.sum(~np.isfinite(nhi)))} absorbers with a non-finite N_HI")
     labels = [a.absorber_class for a in catalog.absorbers]
     by_label = {c: labels.count(c) for c in ("LLS", "subDLA", "DLA", "forest")}
-    logn = np.log10(np.maximum(np.array([a.NHI for a in catalog.absorbers], dtype=np.float64), 1e1))
+    logn = np.log10(np.maximum(nhi, 1e1))
     by_value = {
         "LLS": int(np.sum((logn >= LOG_NHI_LLS_MIN) & (logn < LOG_NHI_SUBDLA_MIN))),
         "subDLA": int(np.sum((logn >= LOG_NHI_SUBDLA_MIN) & (logn < LOG_NHI_DLA_MIN))),

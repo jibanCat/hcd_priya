@@ -2,9 +2,9 @@
 shrunk silently.
 
 Both analysis scripts used to drop entries with a non-finite residual before matching and to drop unmatched entries
-after it, printing (not asserting) the count 7790; defect F1 was excluded by our simulation name. Now: every upstream
-(loo row, z) entry outside F1 is matched exactly once, F1 is identified on the upstream side by a pinned parameter
-vector, a non-finite residual in any member of a matched entry raises, and the count is pinned."""
+after it, printing (not asserting) the count 7790; the excluded entries F1 were selected by our simulation name.
+Now: every upstream (loo row, z) entry outside F1 is matched exactly once, F1 is identified on the upstream side by a
+pinned parameter vector, a non-finite residual in any member of a matched entry raises, and the count is pinned."""
 import json
 import os
 

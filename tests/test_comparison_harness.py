@@ -372,8 +372,8 @@ def test_runner_family_verdicts_use_the_declared_case_list():
 def test_reference_parent_is_checked_before_it_is_importable(tmp_path):
     """The reference adapter must refuse a parent directory holding anything besides lyaemu/ BEFORE that directory is
     on sys.path: shadowing packages there must never execute (run in this interpreter, no GPy needed). hcd_analysis/ is
-    imported from --repo first, so GPy/ and paramz/ (imported by the refit refusal) are shadowed too: an adapter that put
-    the parent on sys.path before checking it would execute one of them."""
+    imported from --repo first, so GPy/ and paramz/ (imported by the refit refusal) are shadowed too: an adapter that
+    imported hcd_analysis, GPy or paramz with the parent on sys.path before checking it would execute one of them."""
     import json as _json
     import os as _os
     import subprocess as _sp

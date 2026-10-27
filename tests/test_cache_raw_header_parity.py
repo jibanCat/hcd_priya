@@ -1,11 +1,12 @@
 """Cache and raw-header parity rows extracted VERBATIM from 863df63 tests/test_parity_upstream.py (gate B): the rows that
 execute no upstream code and read no upstream emulator product (row 10: the class decomposition reconstructs the total;
 row 11: the production legs lie inside the simulated modes; row 04d: every cache row matches its raw snapshot header,
-the S4 invariant; row 23b: the PRIYA-HR6 slot-label audit, finding F7). Row 11 loads the data legs through the carried
+the S4 invariant; row 23b: the PRIYA-HR6 slot-label audit, F7). Row 11 loads the data legs through the carried
 data_likelihood loaders, whose KS default reads the KODIAQ-SQUAD measurement files from the local upstream checkout's
 data directory, as every carried KS-leg test does. The other rows of that module run lya_emulator_full or read its
-emulator products from the local upstream checkout and stay excluded (listed in the Phase-0 record of the PR-0 owner).
-Module constants are copied verbatim; _raw_headers comes from tests/raw_headers.py (itself verbatim)."""
+emulator products from the local upstream checkout and stay excluded.
+Module constants are copied verbatim (one renamed: SIM_F1); docstrings are worded neutrally; _raw_headers comes from
+tests/raw_headers.py (itself verbatim)."""
 import json
 import os
 
@@ -21,7 +22,7 @@ from tests.raw_headers import _raw_headers
 
 LF = real_cache_path("lf")
 HR = real_cache_path("hr")
-SIM_UPSTREAM_DEFECT = "ns0.959Ap2.34e-09herei3.81heref2.99alphaq1.77hub0.725omegamh20.144hireionz6.83bhfeedback0.0467"
+SIM_F1 = "ns0.959Ap2.34e-09herei3.81heref2.99alphaq1.77hub0.725omegamh20.144hireionz6.83bhfeedback0.0467"
 SIM_OUR_GAP = "ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662omegamh20.144hireionz7.47bhfeedback0.0347"
 RAW = "/nfs/turbo/umor-yueyingn/mfho/emu_full"
 LF_HIST = real_cache_path("lf_hist")
@@ -142,11 +143,10 @@ def test_row04d_every_cache_row_matches_its_raw_header(fid):
 
 
 def test_row23b_priya_hr6_slot_labels_audited():
-    """BT-B1 (upstream DEFECT, finding F7). In PRIYA-HR6 exactly 120 of the 1020 (row, z-slot) entries hold a velocity
-    grid that is not the slot label's: all slots z <= 3.8 of sim ns0.885 and z <= 2.6 of sim ns0.972 (10 rungs each).
-    Each holds the neighbouring snapshot, the same positional mechanism as F1 (row 4c): the implied redshift is the
-    next-higher grid z, except the first shifted slot of each simulation, which holds an off-grid snapshot (z = 3.9936
-    and 2.7936). Our HR rows for these simulations carry the label-z snapshot."""
+    """BT-B1 (F7): the slot-label audit of the PRIYA-HR6 product. The (row, z-slot) entries whose velocity grid does not
+    follow from the slot label are pinned exactly (an enumerated set of 120 of the 1020, slots z <= 3.8 of sim ns0.885
+    and z <= 2.6 of sim ns0.972, 10 rungs each) together with the redshift each grid implies; our HR rows for these
+    simulations are checked to carry the label-z snapshot."""
     require_real_cache(HR)
     _require_paths(UP_HR6)
     with h5py.File(UP_HR6, "r") as f:

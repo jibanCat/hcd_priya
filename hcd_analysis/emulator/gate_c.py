@@ -55,9 +55,9 @@ def match_upstream_loo(entries, up_params, up_zout, *, rtol=1e-6, rung_atol=2e-6
     return out
 
 
-# Upstream defect F1 (gate B PARITY_TABLE): the z = 2.2 slot of this simulation in upstream's products holds the
-# z = 2.39 snapshot. Pinned by upstream's own parameter values (ns, Ap, herei, heref, alphaq, hub, omegamh2, hireionz,
-# bhfeedback), so the exclusion is made on the upstream side and cannot follow a renamed or re-ordered simulation.
+# Entries excluded from the C4 matched set (F1): the z = 2.2 entries of one simulation, identified by the reference's own
+# parameter values (ns, Ap, herei, heref, alphaq, hub, omegamh2, hireionz, bhfeedback), so the exclusion is made on the
+# reference side and cannot follow a renamed or re-ordered simulation.
 F1_PARAMS = np.array([0.95925, 2.3433333333333333e-09, 3.81, 2.99, 1.765, 0.725, 0.1443, 6.825, 0.046666666666666669])
 F1_Z = 2.2
 C4_N_ENTRIES = 7790          # upstream's 60 x 10 x 13 = 7800 (loo row, z) entries minus the 10 F1 entries
@@ -87,7 +87,7 @@ def c4_collect(member_evals, sim_params):
 
 
 def c4_f1_entries(up_params, up_zout, *, f1_params=F1_PARAMS, f1_z=F1_Z, n_rungs=10):
-    """Upstream (row, z index) entries of defect F1: the rows holding the pinned parameter vector (one per rung) at
+    """Reference (row, z index) entries excluded as F1: the rows holding the pinned parameter vector (one per rung) at
     z = 2.2. Raises unless exactly ``n_rungs`` rows and one z match."""
     up_params = np.asarray(up_params, float)
     rows = np.where(np.all(np.isclose(up_params[:, 1:], np.asarray(f1_params, float)[None, :], rtol=1e-12, atol=0),

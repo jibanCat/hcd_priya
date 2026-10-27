@@ -89,7 +89,7 @@ def test_symlinks_in_a_reference_tree_are_refused(copy_basedir, tmp_path):
 
 
 def test_a_missing_trained_file_is_refused_never_refit(copy_basedir):
-    """lyaemu catches the load failure and would OPTIMIZE and SAVE; the adapter's refusal must stop it, and nothing
+    """The adapter must refuse any fit or save while loading a reference whose trained file is missing, and nothing
     may be written back into the trained directory."""
     td = os.path.join(copy_basedir, "trained_mf")
     os.remove(os.path.join(td, "zbin3.0"))

@@ -196,23 +196,26 @@ def test_padded_batch_matches_unpadded(tmp_path):
         a, b = np.asarray(a), np.asarray(b)
         assert np.all(np.isfinite(b))
         assert np.max(np.abs(a - b)) <= 64 * eps * np.max(np.abs(a))
-    # masking: large garbage in every padded value that is not a mask, a weight or a cell index changes nothing
+    # masking: large garbage in every padded value that is not a mask or a cell index changes nothing, first with the
+    # zero weights inv_nc / inv_nalpha kept (both protections), then with garbage weights too (the masks alone)
     rng = np.random.default_rng(20261027)
-    garbage = dict(padded)
-    for k, v in padded.items():
-        if k in ("n_cells", "mask", "t_f_nhi_mask", "t_dndx_mask", "inv_nc", "inv_nalpha", "cell"):
-            continue
-        g = np.asarray(v).copy()
-        if g.dtype.kind == "f":
-            g[7:] = rng.uniform(-1e3, 1e3, g[7:].shape)
-            garbage[k] = jnp.asarray(g)
-    lg, gg = eqx.filter_value_and_grad(joint_loss)(m, garbage)
-    assert abs(float(lg) - float(lp)) <= 1e-12 * max(1.0, abs(float(lp)))
-    for a, b in zip(jax.tree_util.tree_leaves(eqx.filter(gp, eqx.is_array)),
-                    jax.tree_util.tree_leaves(eqx.filter(gg, eqx.is_array))):
-        a, b = np.asarray(a), np.asarray(b)
-        assert np.all(np.isfinite(b))
-        assert np.max(np.abs(a - b)) <= 64 * eps * np.max(np.abs(a))
+    n_real = len(ragged["x"])
+    for keep in (("inv_nc", "inv_nalpha"), ()):
+        garbage = dict(padded)
+        for k, v in padded.items():
+            if k in ("n_cells", "mask", "t_f_nhi_mask", "t_dndx_mask", "cell") + keep:
+                continue
+            g = np.asarray(v).copy()
+            if g.dtype.kind == "f":
+                g[n_real:] = rng.uniform(-1e3, 1e3, g[n_real:].shape)
+                garbage[k] = jnp.asarray(g)
+        lg, gg = eqx.filter_value_and_grad(joint_loss)(m, garbage)
+        assert abs(float(lg) - float(lp)) <= 1e-12 * max(1.0, abs(float(lp)))
+        for a, b in zip(jax.tree_util.tree_leaves(eqx.filter(gp, eqx.is_array)),
+                        jax.tree_util.tree_leaves(eqx.filter(gg, eqx.is_array))):
+            a, b = np.asarray(a), np.asarray(b)
+            assert np.all(np.isfinite(b))
+            assert np.max(np.abs(a - b)) <= 64 * eps * np.max(np.abs(a))
 
 
 def test_padded_batch_matches_unpadded_with_structural_zeros_and_nan(tmp_path):

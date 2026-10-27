@@ -162,18 +162,18 @@ For every `<sim>/snap_NNN/cddf.npz` (1146 files) and `<sim>/cddf_stacked.npz` (6
 
 **Cause**. The finder doubles the thresholded mask (`[above | above]`) so that a wrapping run is contiguous, merges runs across gaps <= `merge_gap_pixels`, and keeps the merged runs that start in the first copy. The wrapping run starts in the first copy, but so does the first copy's leading run, which is its head. The comment "only return runs starting in [0, n) to avoid duplicates" removed the second copy's runs, not this one. It came in with `5ccfe5b` (the periodic-boundary fix), which the item in the list below wrongly cleared.
 
-**Not affected**. The per-sightline classes (each sightline is classed by its highest-N_HI absorber, and a head never exceeds its whole system), hence the per-class P1D and the class weights.
+**Not affected**. The per-sightline classes (each sightline is classed by its highest-N_HI absorber), hence the per-class P1D and the class weights, under two conditions that hold for the production catalogues: they were built in fast mode, where a head's N_HI (a sum over a subset of the whole system's pixels) never exceeds the whole system's (in Voigt mode a non-wrapping head is fitted with the ±200-pixel wing window while the wrapping system uses its core only, so a head could exceed it); and they hold no entry spanning more than the skewer (the all-merged case above, whose N_HI was about doubled and could raise a sightline's class), none was found in an audit of the existing catalogues.
 
 **Fix**. `hcd_analysis/catalog.py:find_systems_in_skewer` drops the first-copy runs that the wrapping run already covers; a skewer whose gaps are all merged is one system `(0, n - 1)`.
 
-**Guards** (so this class of error cannot be written silently again; several independent counts must agree before a catalogue is accepted):
+**Guards** (so this class of error cannot be written silently again; two independent finders and a pixel-overlap check must pass before a catalogue is written or reused, and the class counts are reconciled against the CDDF):
 
 - `find_systems_in_skewer_reference`, an independent implementation (rotate the mask to start on a gap, find linear runs, merge the circular gap), must agree with the production finder on every skewer: `process_skewer_batch` raises `CatalogIntegrityError` otherwise (`verify_finder=True` by default).
-- `validate_catalog_entries` refuses any two entries of one skewer that share a pixel modulo n (and impossible spans); `build_catalog` runs it on every catalogue.
-- `reconcile_counts` counts the absorbers three ways (stored labels, classes recomputed from N_HI, the CDDF histogram) and refuses a mismatch before `meta.json` is written.
-- `find_wrap_duplicates` identifies the duplicates in catalogues built before the fix, for a read-only audit.
+- `validate_catalog_entries` refuses any two entries of one skewer that share a pixel modulo n (and impossible spans); `build_catalog` runs it on every catalogue, and the pipeline's resume path runs it (`load_validated_catalog`) on a cached catalogue before reusing it, so a catalogue built before the fix is refused, not re-used.
+- `reconcile_counts` counts the absorbers three ways (stored labels, classes recomputed from N_HI, the CDDF histogram) and refuses a mismatch, or a non-finite N_HI, before any output of the snapshot is written. All three come from the same entries: it guards the labels, the thresholds and the CDDF against drift, not against a duplicated entry.
+- `find_wrap_duplicates` identifies, for a read-only audit of catalogues built before the fix, both kinds of wrong entry: the box-edge duplicates and entries spanning more than the skewer.
 
-**Existing products**. Catalogues and the caches built from them before the fix are NOT regenerated automatically; they carry the duplicates in their counts and are audited with `find_wrap_duplicates`. Whether and when to regenerate is a separate decision.
+**Existing products**. Catalogues and the caches built from them before the fix are NOT regenerated automatically; they carry the duplicates in their counts and are audited with `find_wrap_duplicates`; a resumed pipeline run refuses them instead of reusing them. Whether and when to regenerate is a separate decision.
 
 **Tests**. `tests/test_catalog_systems.py`: the regression cases (a straddling system, a straddling and a middle system, a head merged across a gap at the edge, τ above threshold everywhere, all gaps merged), the two finders agreeing on seeded random skewers, the validators, and that each guard actually refuses.
 

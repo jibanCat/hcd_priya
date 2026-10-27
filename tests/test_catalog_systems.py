@@ -32,7 +32,7 @@ def _both(tau, gap=GAP, minpix=MINPIX, thr=THR):
     return a
 
 
-# ----------------------------------------------------------------------------- the notice's regression cases
+# --------------------------------------------------------- regression cases for bug 8 (docs/bugs_found.md)
 def test_a_system_straddling_the_box_edge_is_listed_once():
     out = _both(_tau(range(N - 5, N + 10)))
     assert out == [(N - 5, N + 9)] and out[0][1] >= N
@@ -91,6 +91,7 @@ def test_validator_and_audit_catch_the_pre_fix_duplicate():
     ([1], [N], [N + 3], "impossible pixel spans"),
     ([1], [5], [N + 5], "impossible pixel spans"),
     ([1], [9], [8], "impossible pixel spans"),
+    ([5, 5], [N - 5, 9], [N + 9, 9], "box-edge duplicate"),          # the head ends exactly at the wrapped tail end
 ])
 def test_validator_refuses_other_impossible_catalogues(sk, ps, pe, match):
     with pytest.raises(C.CatalogIntegrityError, match=match):
@@ -165,4 +166,40 @@ def test_pipeline_writes_reconciled_counts_and_refuses_a_mismatch(tmp_path):
     bad.mkdir()
     with pytest.raises(C.CatalogIntegrityError):
         PL._save_snap_outputs(bad, _cat(logn), cddf_result=dict(cddf, n_absorbers=cddf["n_absorbers"] * 2), **args)
-    assert not (bad / "meta.json").exists()
+    assert not any(bad.iterdir())                                    # nothing written past the failed check
+
+
+# ----------------------------------------------------------------------------- review follow-ups
+def test_a_whole_skewer_system_shorter_than_min_pixels_is_dropped_by_both_finders():
+    short = 5
+    assert _both(np.full(short, 1e3), gap=1, minpix=6) == []                       # above threshold everywhere
+    assert _both(np.array([1e3, 1e3, 1e3, 1e3, 0.0]), gap=1, minpix=6) == []       # every gap merged
+    assert _both(np.array([1e3, 1e3, 1e3, 1e3, 0.0]), gap=1, minpix=5) == [(0, 4)]
+    assert _both(np.full(short, 1e3), gap=1, minpix=5) == [(0, 4)]
+
+
+def test_audit_flags_over_span_entries_and_ignores_valid_ones():
+    sk, ps, pe = [3, 4, 4], [0, 10, N - 2], [2 * N - 1, 20, N + 4]   # skewer 3: the pre-fix all-above entry
+    assert C.find_wrap_duplicates(sk, ps, pe, N).tolist() == [True, False, False]
+
+
+def test_non_finite_column_densities_are_refused_with_a_clear_message():
+    cat = _cat([17.5, 19.4])
+    cat.absorbers[0].NHI = float("nan")
+    edges = np.linspace(17.0, 23.0, 31)
+    with pytest.raises(C.CatalogIntegrityError, match="non-finite N_HI"):
+        C.reconcile_counts(cat, np.histogram([19.4], bins=edges)[0], edges)
+
+
+def test_a_cached_pre_fix_catalogue_is_refused_on_reuse(tmp_path):
+    good = _cat([17.5, 19.4])
+    good.absorbers[1].skewer_idx, good.absorbers[1].pix_start, good.absorbers[1].pix_end = 0, N - 5, N + 9
+    good.absorbers[0].skewer_idx, good.absorbers[0].pix_start, good.absorbers[0].pix_end = 0, 100, 120
+    good.save_npz(tmp_path / "good.npz")
+    assert len(C.load_validated_catalog(tmp_path / "good.npz", N).absorbers) == 2
+    bad = _cat([17.5, 19.4])
+    bad.absorbers[1].skewer_idx, bad.absorbers[1].pix_start, bad.absorbers[1].pix_end = 0, N - 5, N + 9
+    bad.absorbers[0].skewer_idx, bad.absorbers[0].pix_start, bad.absorbers[0].pix_end = 0, 0, 9   # its own head
+    bad.save_npz(tmp_path / "bad.npz")
+    with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
+        C.load_validated_catalog(tmp_path / "bad.npz", N)

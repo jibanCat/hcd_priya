@@ -44,7 +44,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .catalog import AbsorberCatalog, build_catalog, reconcile_counts, LOG_NHI_LLS_MIN
+from .catalog import AbsorberCatalog, build_catalog, load_validated_catalog, reconcile_counts, LOG_NHI_LLS_MIN
 from .cddf import (
     CDDFPerturbation,
     compute_perturbed_p1d,
@@ -163,7 +163,7 @@ def run_one_snap(
         catalog_path = out_dir / "catalog.npz"
 
         if cfg.resume and catalog_path.exists():
-            catalog = AbsorberCatalog.load_npz(catalog_path)
+            catalog = load_validated_catalog(catalog_path, int(header.nbins))     # refuses a pre-fix catalogue
             logger.info("  loaded catalog from cache (%d absorbers)", len(catalog.absorbers))
         else:
             n_skewers = cfg.p1d.n_skewers if cfg.debug else None
@@ -320,6 +320,8 @@ def _save_snap_outputs(
     dv_kms: float,
 ) -> None:
     """Save all outputs for one (sim, snap) to out_dir."""
+    # reconcile the absorber counts first: nothing is written for a catalogue that fails (CatalogIntegrityError)
+    n_absorbers = reconcile_counts(catalog, cddf_result["n_absorbers"], cddf_result["log_nhi_edges"])
 
     # P1D variants → npz
     p1d_save = {}
@@ -366,7 +368,7 @@ def _save_snap_outputs(
         "n_skewers": int(header.n_skewers),
         "box_kpc_h": float(header.box),
         "hubble": float(header.hubble),
-        "n_absorbers": reconcile_counts(catalog, cddf_result["n_absorbers"], cddf_result["log_nhi_edges"]),
+        "n_absorbers": n_absorbers,
         "timing_s": {k: round(v, 3) for k, v in timing.items()},
     }
     if ics_meta:

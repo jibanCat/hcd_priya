@@ -40,7 +40,7 @@
          "lf_shipped_path": "NOT COMPARABLE: the shipped LF-only path is outside the phase0_v1 comparison"},
   "R2": {"name": "PRIYA eBOSS release (earlier)", "status": "BLOCKED",
          "repo": "https://github.com/mafern/InferenceLyaData", "commit": "11c02580ed4c53bef93aabf683b3f3e793c4ac2a",
-         "reason": "implementation commit not identified (README names sbird/lya_emulator_full without a commit); LF path would fit; HF level waits for the x885 MF product"},
+         "reason": "implementation commit not identified (README names sbird/lya_emulator_full without a commit); HF level waits for the x885 MF product"},
   "R3": {"name": "LaCE CH24 GP", "status": "BLOCKED",
          "repo": "https://github.com/igmhub/LaCE", "commit": "24132cdfc5a9ac0418f855a391a14463d10a97e7",
          "reason": "models load through pickle (needs PI authorization for trusted legacy loading in isolation); no defensible map from a PRIYA state to (Delta2_p, n_p, mF, sigT_Mpc, gamma, kF_Mpc); Delta2_p and n_p need CAMB, absent from the environments"}
