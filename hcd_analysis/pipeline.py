@@ -29,9 +29,12 @@ Failure handling
 ----------------
 Failures are caught per (sim, snap), logged, and written to
 <output_dir>/<sim>/<snap>/error.txt. The pipeline continues.
-One exception: when a snapshot marked done has a cached catalogue that
-load_validated_catalog refuses (built before the box-edge fix, or damaged),
-CatalogIntegrityError is raised, nothing is written, and the run stops.
+For a snapshot marked done: if load_validated_catalog refuses its cached
+catalogue (built before the box-edge fix, or holding a non-finite N_HI),
+CatalogIntegrityError is raised and the run stops, with nothing written for that
+snapshot and no stack for its simulation (snapshots finished earlier keep their
+outputs); if its cached outputs cannot be read, it is skipped with a WARNING (no
+error.txt) and left out of the simulation's cddf_stacked.npz.
 """
 
 from __future__ import annotations
@@ -140,9 +143,9 @@ def run_one_snap(
     """
     Run the full analysis pipeline for one (sim, snap) pair.
 
-    Returns SnapResult on success, None on failure (error is logged and written).
-    Raises CatalogIntegrityError, writing nothing, when the snapshot is marked done
-    and its cached catalogue is refused.
+    Returns SnapResult on success, None on failure (logged; written to error.txt
+    unless the snapshot is marked done). Raises CatalogIntegrityError, writing
+    nothing, when the snapshot is marked done and its cached catalogue is refused.
     """
     sim_name = sim_snapshot.sim.name
     snap = entry.snap

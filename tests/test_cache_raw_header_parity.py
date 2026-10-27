@@ -1,10 +1,10 @@
 """Cache and raw-header parity rows extracted from 863df63 tests/test_parity_upstream.py (gate B; test code verbatim):
 the rows that execute no upstream code and read no upstream emulator product (row 10: the class decomposition
-reconstructs the total; row 11: the production legs lie inside the simulated modes; row 04d: every cache row matches its raw snapshot header,
-the S4 invariant; row 23b: the PRIYA-HR6 slot-label audit, F7). Row 11 loads the data legs through the carried
-data_likelihood loaders, whose KS default reads the KODIAQ-SQUAD measurement files from the local upstream checkout's
-data directory, as every carried KS-leg test does. The other rows of that module run lya_emulator_full or read its
-emulator products from the local upstream checkout and stay excluded.
+reconstructs the total; row 11: the production legs lie inside the simulated modes; row 04d: every cache row matches
+its raw snapshot header, the S4 invariant; row 23b: the PRIYA-HR6 slot-label audit, F7). Row 11 loads the data legs
+through the carried data_likelihood loaders, whose KS default reads the KODIAQ-SQUAD measurement files from the local
+upstream checkout's data directory, as every carried KS-leg test does. The other rows of that module run
+lya_emulator_full or read its emulator products from the local upstream checkout and stay excluded.
 The module constants these rows use are copied verbatim; docstrings are reworded; _raw_headers comes from
 tests/raw_headers.py (itself verbatim)."""
 import json

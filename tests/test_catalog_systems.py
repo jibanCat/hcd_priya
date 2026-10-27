@@ -228,15 +228,18 @@ def test_a_cached_pre_fix_catalogue_is_refused_on_reuse(tmp_path):
 def _pipeline(monkeypatch):
     """hcd_analysis.pipeline, importable without PyYAML: the config module imports it at load time, but the snapshot
     path exercised here never calls it, so a stub stands in when it is absent. The stub is removed from sys.modules at
-    teardown, but hcd_analysis.config stays cached with it bound; any use of it raises ImportError, as a missing
-    PyYAML would."""
+    teardown, but hcd_analysis.config stays cached with it bound; any attribute other than a module dunder raises
+    ImportError, as a missing PyYAML would."""
     try:
         import yaml  # noqa: F401
     except ImportError:
         stub = types.ModuleType("yaml")
 
         def _absent(name):
-            raise ImportError(f"PyYAML is not installed (yaml.{name} requested; stub from tests/test_catalog_systems.py)")
+            if name.startswith("__") and name.endswith("__"):
+                raise AttributeError(name)                         # so hasattr / inspect see a plain module
+            raise ImportError(f"PyYAML is not installed (yaml.{name} requested; "
+                              "stub from tests/test_catalog_systems.py)")
         stub.__getattr__ = _absent
         monkeypatch.setitem(sys.modules, "yaml", stub)
     from hcd_analysis import pipeline as PL
@@ -300,19 +303,37 @@ def test_pipeline_resume_refuses_a_cached_pre_fix_catalogue_done_or_not(tmp_path
     before = files(d0)
     again = PL.run_one_snap(ss, entry, c0)
     assert again is not None and len(again.catalog.absorbers) == 2 and files(d0) == before
+    # not done, with a valid cached catalogue: reused as it is (validated with the file's own nbins), then completed
+    cv = cfg("cached_valid")
+    dv = PL.snap_output_dir(cv, "synthsim", 1)
+    shutil.copy2(d0 / "catalog.npz", dv / "catalog.npz")
+    stamp = (dv / "catalog.npz").stat().st_mtime_ns
+    reused = PL.run_one_snap(ss, entry, cv)
+    assert reused is not None and len(reused.catalog.absorbers) == 2 and PL.is_done(cv, "synthsim", 1)
+    assert (dv / "catalog.npz").stat().st_mtime_ns == stamp
     # the refused catalogues: the pre-fix one, and a valid one damaged to hold a non-finite N_HI
     nan_cat = C.AbsorberCatalog.load_npz(d0 / "catalog.npz")
     nan_cat.absorbers[1].NHI = float("nan")
     # not done, with a cached refused catalogue: the snapshot fails before anything else is written (no per-class
     # P1D, no meta.json, not marked done)
-    for name, bad in (("cached", _pre_fix_catalogue(PL, hdr, nb)), ("cached_nan", nan_cat)):
+    for name, bad, why in (("cached", _pre_fix_catalogue(PL, hdr, nb), "overlap"),
+                           ("cached_nan", nan_cat, "non-finite N_HI")):
         c1 = cfg(name)
         d1 = PL.snap_output_dir(c1, "synthsim", 1)
         bad.save_npz(d1 / "catalog.npz")
         assert PL.run_one_snap(ss, entry, c1) is None
         assert sorted(p.name for p in d1.iterdir()) == ["catalog.npz", "error.txt"]
         assert not PL.is_done(c1, "synthsim", 1)
-        assert "cached catalogue refused" in (d1 / "error.txt").read_text()
+        err = (d1 / "error.txt").read_text()
+        assert "cached catalogue refused" in err and why in err
+    # ... and at simulation level the rest of the simulation runs and is stacked without that snapshot
+    cm = cfg("cached_mixed")
+    _pre_fix_catalogue(PL, hdr, nb).save_npz(PL.snap_output_dir(cm, "synthsim", 1) / "catalog.npz")
+    out = PL.run_sim_all_z(ss2, cm)
+    assert out[0] is None and out[1] is not None
+    with np.load(Path(cm.output_root) / "synthsim" / "cddf_stacked.npz") as st:
+        zs = [st[k].tolist() for k in st.files if k.endswith("__z_snapshots")]
+    assert zs and all(z == [3.1] for z in zs)
     # done, with a refused catalogue: refused loudly, never reused, nothing written, and the simulation's other
     # snapshot (which on its own is stacked: control below) is not stacked without it
     c2 = cfg("done")
@@ -328,12 +349,16 @@ def test_pipeline_resume_refuses_a_cached_pre_fix_catalogue_done_or_not(tmp_path
     nan_cat.save_npz(d3 / "catalog.npz")                           # ... whose catalogue was then damaged
     for c, d in ((c2, d2), (c3, d3)):
         before = files(d)
+        sim_dir = Path(c.output_root) / "synthsim"
         with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
             PL.run_one_snap(ss, entry, c)
         with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
             PL.run_sim_all_z(ss2, c)
-        assert files(d) == before
-        assert not (Path(c.output_root) / "synthsim" / "cddf_stacked.npz").exists()
+        assert files(d) == before and not (sim_dir / "snap_002").exists()          # the run stopped at snapshot 1
+        assert not (sim_dir / "cddf_stacked.npz").exists()
+        with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
+            PL.run_sim_all_z(SimSnapshot(sim=sim, entries=[entry2, entry]), c)      # the refused snapshot second
+        assert files(d) == before and not (sim_dir / "cddf_stacked.npz").exists()
     c4 = cfg("control")
     PL.run_sim_all_z(SimSnapshot(sim=sim, entries=[entry2]), c4)
     assert (Path(c4.output_root) / "synthsim" / "cddf_stacked.npz").exists()

@@ -393,9 +393,9 @@ def _class_counts(catalog: "AbsorberCatalog"):
 
 def check_catalog_values(catalog: "AbsorberCatalog") -> None:
     """Refuse non-finite N_HI, and class labels that disagree with the classes of N_HI. Run before a catalogue is saved
-    (``build_catalog``) and when a cached one is loaded (``load_validated_catalog``). ``catalog.npz`` stores no labels
-    (``load_npz`` recomputes them from N_HI), so on a cached catalogue only the N_HI check can fail; the label check
-    guards in-memory catalogues against drift between ``classify_system`` and the class thresholds."""
+    (``build_catalog``) and when a cached one is loaded (``load_validated_catalog``). ``catalog.npz`` stores no labels:
+    ``load_npz``, like ``process_skewer_batch``, assigns them with ``classify_system``, so on every catalogue the label
+    check compares ``classify_system`` with the class thresholds (drift between the two)."""
     _class_counts(catalog)
 
 
