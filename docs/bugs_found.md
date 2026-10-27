@@ -156,11 +156,32 @@ For every `<sim>/snap_NNN/cddf.npz` (1146 files) and `<sim>/cddf_stacked.npz` (6
 
 **Lesson**. A "general claim" like "the dX formula is correct" should always be backed by an independent cross-check. I should have written `tests/test_absorption_path.py` *before* publishing any plot that quantifies CDDF/dN/dX disagreement vs observations. The bug had been in the codebase since at least commit `5ccfe5b` (April 19) and propagated through every CDDF / dN/dX figure I made until today.
 
+## 8. `find_systems_in_skewer` listed every box-edge system twice
+
+**Symptom**. A system that straddles the periodic box edge appeared twice in the catalogue: once whole, with `pix_end >= n`, and once as its own head `[s', pix_end - n]`, a pixel subset of the same absorber. Every count made from a catalogue (the class counts in `meta.json`, the CDDF, dN/dX and the HCD incidence) counted those systems twice; the head's column density is at most the whole system's, so it often landed in a lower N_HI bin as well. With τ above threshold everywhere the single "system" spanned the skewer twice, doubling its N_HI.
+
+**Cause**. The finder doubles the thresholded mask (`[above | above]`) so that a wrapping run is contiguous, merges runs across gaps <= `merge_gap_pixels`, and keeps the merged runs that start in the first copy. The wrapping run starts in the first copy, but so does the first copy's leading run, which is its head. The comment "only return runs starting in [0, n) to avoid duplicates" removed the second copy's runs, not this one. It came in with `5ccfe5b` (the periodic-boundary fix), which the item in the list below wrongly cleared.
+
+**Not affected**. The per-sightline classes (each sightline is classed by its highest-N_HI absorber, and a head never exceeds its whole system), hence the per-class P1D and the class weights.
+
+**Fix**. `hcd_analysis/catalog.py:find_systems_in_skewer` drops the first-copy runs that the wrapping run already covers; a skewer whose gaps are all merged is one system `(0, n - 1)`.
+
+**Guards** (so this class of error cannot be written silently again; several independent counts must agree before a catalogue is accepted):
+
+- `find_systems_in_skewer_reference`, an independent implementation (rotate the mask to start on a gap, find linear runs, merge the circular gap), must agree with the production finder on every skewer: `process_skewer_batch` raises `CatalogIntegrityError` otherwise (`verify_finder=True` by default).
+- `validate_catalog_entries` refuses any two entries of one skewer that share a pixel modulo n (and impossible spans); `build_catalog` runs it on every catalogue.
+- `reconcile_counts` counts the absorbers three ways (stored labels, classes recomputed from N_HI, the CDDF histogram) and refuses a mismatch before `meta.json` is written.
+- `find_wrap_duplicates` identifies the duplicates in catalogues built before the fix, for a read-only audit.
+
+**Existing products**. Catalogues and the caches built from them before the fix are NOT regenerated automatically; they carry the duplicates in their counts and are audited with `find_wrap_duplicates`. Whether and when to regenerate is a separate decision.
+
+**Tests**. `tests/test_catalog_systems.py`: the regression cases (a straddling system, a straddling and a middle system, a head merged across a gap at the edge, τ above threshold everywhere, all gaps merged), the two finders agreeing on seeded random skewers, the validators, and that each guard actually refuses.
+
 ## Things checked and ruled OUT
 
 The audit considered but found to be fine:
 
 - `io.py`, `snapshot_map.py` — HDF5 reading, folder discovery, Snapshots.txt parsing all work correctly; confirmed against directory listings.
 - `p1d.py:P1DAccumulator`, `compute_p1d_single` — the streaming two-pass mean-flux + rfft P1D computation is consistent with Palanque-Delabrouille 2013 / Chabanier 2019 convention and documented correctly in `docs/p1d_definition.md`.
-- `find_systems_in_skewer` (catalog.py) — threshold + merge + min-pixels detection is internally correct; wrap-around handling is right.
+- `find_systems_in_skewer` (catalog.py) — threshold + merge + min-pixels detection is internally correct; wrap-around handling is right. **Corrected later: the wrap-around handling listed every box-edge system twice; see bug 8.**
 - The `_WING_PIXELS = 200` (±2000 km/s) expansion window in `measure_nhi_for_system` is the cause of the Voigt-fit over-counting observed post-fix (forest pixels in the window bias the single-Voigt fit upward); but this is a design issue, not a bug in the strict sense. The resolution is to default to `fast_mode=True`, which bypasses this window entirely.

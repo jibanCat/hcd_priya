@@ -44,7 +44,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .catalog import AbsorberCatalog, build_catalog, LOG_NHI_LLS_MIN
+from .catalog import AbsorberCatalog, build_catalog, reconcile_counts, LOG_NHI_LLS_MIN
 from .cddf import (
     CDDFPerturbation,
     compute_perturbed_p1d,
@@ -366,7 +366,7 @@ def _save_snap_outputs(
         "n_skewers": int(header.n_skewers),
         "box_kpc_h": float(header.box),
         "hubble": float(header.hubble),
-        "n_absorbers": {cls: len(catalog.by_class(cls)) for cls in ["LLS", "subDLA", "DLA", "forest"]},
+        "n_absorbers": reconcile_counts(catalog, cddf_result["n_absorbers"], cddf_result["log_nhi_edges"]),
         "timing_s": {k: round(v, 3) for k, v in timing.items()},
     }
     if ics_meta:
