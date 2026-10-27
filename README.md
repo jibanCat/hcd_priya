@@ -246,7 +246,7 @@ Build the catalog as part of the per-simulation pipeline (`hcd_env`):
 
 ```bash
 hcd run-sim --sim ns0.803Ap2.2e-09 --config config/default.yaml   # one sim, all snaps
-hcd run-all --n-workers 36                                         # full 60-sim LF campaign
+hcd run-all --n-workers 36 --config config/default.yaml             # full 60-sim LF campaign
 ```
 
 On Great Lakes the full campaign runs as a SLURM array, one task per simulation:
@@ -301,7 +301,7 @@ Run it (catalog/P1D side, `hcd_env`):
 
 ```bash
 hcd run-sim --sim ns0.803Ap2.2e-09 --config config/default.yaml   # one sim, all snaps
-hcd run-all --n-workers 36                                         # full campaign
+hcd run-all --n-workers 36 --config config/default.yaml             # full campaign
 ```
 
 Build the τ₀ cache for the emulator:
