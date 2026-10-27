@@ -1,7 +1,9 @@
-# Release format for emulator members (`hcd_priya.safe/1`)
+# Prototype pickle-free format for emulator members (`hcd_priya.safe/1`)
 
-Status: prototype for the release. The training checkpoints (`.eqx` + `.norm.pkl` + `.meta.json`, written by
-`train.save_checkpoint`) remain the working format; this format is what a release would ship.
+Status: PROTOTYPE, kept as evidence; it is NOT the release format. The release format is HDF5 + JSON
+(`hcd_priya.h5/1`), developed separately and adopted subject to its loader hardening, an independent review and a
+compatibility test with an older HDF5 library. The training checkpoints (`.eqx` + `.norm.pkl` + `.meta.json`, written by
+`train.save_checkpoint`) remain the working format. Nothing here is a second required release format.
 
 ## Why
 

@@ -6,9 +6,9 @@ interpreter (it needs GPy/emukit), as a subprocess:
 
 Guards (a reference is never refit or modified):
   * artifact sha256 and the lyaemu code md5 must equal the request's pins;
-  * every ``class`` string in the trained GPy JSONs must be on an allowlist (GPy ``from_dict`` evals them);
-  * paramz ``Model.optimize`` / ``optimize_restarts`` and GPy ``Model.save`` are replaced by a refusal, because lyaemu
-    falls back to fitting and saving into ``traindir`` when a trained file fails to load;
+  * every ``class`` string in the trained GPy JSONs must be on an allowlist (strings from the files are not trusted);
+  * paramz ``Model.optimize`` / ``optimize_restarts`` and GPy ``Model.save`` are replaced by a refusal, so that loading
+    a reference can never fit a model or write into its directory;
   * exactly 13 'Loading pre-trained GP' and no 'Optimizing GP' lines while loading;
   * the basedir file tree hashes the same before and after.
 The AR1 output at fidelity ``res`` is assembled per redshift exactly as ``MultiBinGP.predict`` does (column 0 times
@@ -142,7 +142,7 @@ def refuse_compiled(pkg):
 
 
 def check_class_strings(trained_dir):
-    """Every ``class`` string GPy's from_dict would eval must be on the allowlist."""
+    """Every ``class`` string in the trained JSONs must be on the allowlist."""
     seen = set()
     for f in sorted(os.listdir(trained_dir)):
         if f.endswith(".json"):

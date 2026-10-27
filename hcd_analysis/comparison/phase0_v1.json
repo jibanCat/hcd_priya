@@ -37,7 +37,7 @@
                               "hires/mf_emulator_flux_vectors_tau1000000.hdf5": "8aac9f9782fc8d0d6498eea66671de1e48dc034d4fcc939a194a6bba6d1ec980"},
          "trained_mf_tree_sha256": "c079383b92534ec78891c4a88e6cd36d584261b3c7b3e608e1e8a75bd567cbaa",
          "levels": {"L2-LF": "SingleBinAR1.predict res=0", "L2-MF": "SingleBinAR1.predict res=1 (NOT RUN: x885 MF product not built)"},
-         "lf_shipped_path": "NOT COMPARABLE: SkLearnGP discards the stored hyperparameters (GPy from_dict is a staticmethod)"},
+         "lf_shipped_path": "NOT COMPARABLE: the shipped LF-only path is outside the phase0_v1 comparison"},
   "R2": {"name": "PRIYA eBOSS release (earlier)", "status": "BLOCKED",
          "repo": "https://github.com/mafern/InferenceLyaData", "commit": "11c02580ed4c53bef93aabf683b3f3e793c4ac2a",
          "reason": "implementation commit not identified (README names sbird/lya_emulator_full without a commit); LF path would fit; HF level waits for the x885 MF product"},

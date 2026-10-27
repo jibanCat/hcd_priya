@@ -1,4 +1,5 @@
-"""Pickle-free release format for the emulator: format ``hcd_priya.safe/1`` (contract: docs/release_format.md).
+"""Prototype pickle-free format for the emulator, ``hcd_priya.safe/1`` (contract: docs/release_format.md), kept as
+evidence; it is not the release format (that is HDF5 + JSON, ``hcd_priya.h5/1``).
 
 Layout of one LF member ``<prefix>``:
   ``<prefix>.safetensors``  every array: the network leaves (``model<tree path>``) and the normalizer (``norm/<key>/...``;

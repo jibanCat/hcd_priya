@@ -1,4 +1,4 @@
-"""The pickle-free release format (hcd_analysis/emulator/safe_io.py, docs/release_format.md).
+"""The pickle-free prototype format (hcd_analysis/emulator/safe_io.py, docs/release_format.md; kept as evidence).
 
 Synthetic only: a small Emulator built from a fixed PRNG key and a synthetic normalizer with the production key layout
 (nested dicts, integer keys). The real-member pilot is scripts/export_safe_bundle.py, run outside the test suite."""

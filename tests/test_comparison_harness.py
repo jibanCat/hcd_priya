@@ -371,7 +371,9 @@ def test_runner_family_verdicts_use_the_declared_case_list():
 
 def test_reference_parent_is_checked_before_it_is_importable(tmp_path):
     """The reference adapter must refuse a parent directory holding anything besides lyaemu/ BEFORE that directory is
-    on sys.path: a shadowing hcd_analysis/ there must never execute (run in this interpreter, no GPy needed)."""
+    on sys.path: shadowing packages there must never execute (run in this interpreter, no GPy needed). hcd_analysis/ is
+    imported from --repo first, so GPy/ and paramz/ (imported by the refit refusal) are shadowed too: an adapter that put
+    the parent on sys.path before checking it would execute one of them."""
     import json as _json
     import os as _os
     import subprocess as _sp
@@ -382,8 +384,9 @@ def test_reference_parent_is_checked_before_it_is_importable(tmp_path):
     (parent / "lyaemu").mkdir(parents=True)
     (parent / "lyaemu" / "__init__.py").write_text("")
     marker = tmp_path / "SHADOW_EXECUTED"
-    (parent / "hcd_analysis").mkdir()
-    (parent / "hcd_analysis" / "__init__.py").write_text(f"open({str(marker)!r}, 'w').write('x')\n")
+    for shadow in ("hcd_analysis", "GPy", "paramz"):
+        (parent / shadow).mkdir()
+        (parent / shadow / "__init__.py").write_text(f"open({str(marker)!r}, 'a').write({shadow!r})\n")
     basedir = tmp_path / "basedir"
     (basedir / "trained_mf").mkdir(parents=True)
     (basedir / "emulator_params.json").write_text("{}")
