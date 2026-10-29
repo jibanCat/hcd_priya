@@ -12,27 +12,38 @@ cache loader (``hcd_analysis.emulator.data._collapse_p1d``), and the templates a
     T_LLS = P_LLS / P_clean - 1,  T_subDLA = P_subDLA / P_clean - 1   (filtered)
     T_DLA = P_DLA,unfiltered / P_clean - 1
 
-Each threshold is compared with the reference threshold (``--reference``, default 100) by: the absorber count ratio
-per class, the template amplitude ratio ``a = sum T T_ref / sum T_ref^2``, the shape residual
-``s = rms(T - a T_ref) / rms(T_ref)`` and the largest change of ``P_clean``, over the first ``--n-k`` native k bins
-(k = 0 excluded). An amplitude change is what a free class amplitude in the likelihood absorbs; a shape change is not.
+Each threshold is compared with the reference threshold (``--reference``, default 100) over the first ``--n-k`` stored
+native k bins (172: the LF emulator grid; k = 0 is never stored) by: the absorber count ratio per class, the template
+amplitude ratio ``a = sum T T_ref / sum T_ref^2``, the shape residual ``s = rms(T - a T_ref) / rms(T_ref)``, the
+largest fractional change of ``P_clean``, and, at low k (below ``--lowk-kmax``, 0.01 s/km), the largest template change
+relative to the template's largest value there. An amplitude change is what a free class amplitude in the likelihood
+absorbs; a shape change is not.
+
+The reading of the ``--headline`` thresholds (default 50 and 200), over every class and input:
+
+    negligible  every |a - 1| < 0.05, every s < 0.05 and every clean change < 1%
+    modest      every |a - 1| <= 0.29 and every s <= 0.10   (0.29: about the width of the LLS amplitude prior)
+    important   otherwise
 
 The run reads each input in blocks of ``--chunk`` skewers (twice: once for the mean flux the PRIYA filter uses), so its
-memory stays near three blocks; the per-bin P1D is a mean over sightlines, so the blocks combine exactly by their
-counts, and ``--self-check N`` compares the blocked path with the whole-array production path on N skewers. The
-mean-flux scale is the cache row's (production) value with ``--anchor-cache``, else solved over the file.
+memory stays near three blocks. The per-bin P1D is a mean over sightlines, so the blocks combine exactly by their
+counts. ``--self-check N`` compares the blocked path with the whole-array production path on the first N skewers (the
+catalogue, the per-bin counts and P1D, the filter's mean optical depth and the mean-flux scale); a failed self-check
+makes the reading "invalid" and the exit status 2. The mean-flux scale is the cache row's (production) value with
+``--anchor-cache``, else solved over the file.
 
-Outputs, in ``--out``: ``run_settings.json`` (every setting and input, written once; a rerun into the same directory
-with any different setting is refused, hcd_analysis/run_settings.py), one ``result_<tag>_T<threshold>.npz`` per input
-and threshold (written once; a rerun with identical settings reuses them), and ``summary.json``. With
-``--anchor-cache``, the reference threshold's counts and P1D are also compared with the cache rows of the same
-simulation, redshift and ``--alpha`` (an implementation check of the path).
+Outputs, in ``--out``: ``run_settings.json`` (the inputs and every setting the results depend on, written once; a rerun
+into the same directory with any of them different is refused, hcd_analysis/run_settings.py), one
+``result_<tag>_T<threshold>.npz`` per input and threshold and one ``self_check_<tag>.json`` per input (each written
+once; a rerun reuses them), and ``summary.json`` (recomputed from the result files on every complete run; it records
+its own parameters and code commit). With ``--anchor-cache``, the reference threshold's counts and P1D are also
+compared with the cache row of the same simulation, redshift and ``--alpha`` (an implementation check of the path).
 
 Needs fake_spectra (run it in the environment that builds the emulator cache). Example:
 
   python scripts/tau_threshold_sensitivity.py --out NEW_DIR --sim SIM_NAME \\
       --input z2.2=/path/SPECTRA_021/lya_forest_spectra_grid_480.hdf5 --input z3.0=... \\
-      --thresholds 30 50 100 200 300 --alpha 1.011182770662847
+      --thresholds 30 50 100 200 300 --alpha ALPHA --anchor-cache CACHE.h5 --self-check 40000
 """
 from __future__ import annotations
 
@@ -41,7 +52,9 @@ import hashlib
 import json
 import os
 import platform
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -57,6 +70,12 @@ CLASSES = ("clean", "LLS", "subDLA", "DLA")
 # equal by tests/test_tau_threshold_sensitivity.py; that module needs jax, which this environment may lack).
 COARSE_RANGES = ((0, 1), (1, 8), (8, 13), (13, 15))
 TEMPLATE_CLASSES = ("LLS", "subDLA", "DLA")
+# The reading rule (module docstring).
+NEGLIGIBLE_A, NEGLIGIBLE_S, NEGLIGIBLE_CLEAN = 0.05, 0.05, 0.01
+MODEST_A, MODEST_S = 0.29, 0.10
+# The self-check's tolerances: the blocked path must equal the whole-array path to rounding; the solved scale is
+# compared with fake_spectra's mean_flux, which stops at a mean-flux tolerance of 1e-5.
+SELF_CHECK_REL_TOL, SELF_CHECK_SCALE_TOL = 1e-10, 1e-4
 
 
 # ------------------------------------------------------------------------------------------------ pure helpers
@@ -97,50 +116,64 @@ def class_counts(log_nhi):
             "DLA": int((x >= 20.3).sum())}
 
 
-def summarize(results, reference, n_k):
-    """Per (tag, threshold, class): count ratio, a, s; per (tag, threshold): the largest clean change. ``results`` maps
-    (tag, threshold) to dicts with counts15, pf15, pu15 (fine-bin arrays) and abs_counts (class -> count)."""
+def lowk_change(t, t_ref, kf, kmax):
+    """Largest |t - t_ref| at k < kmax, relative to the largest |t_ref| there (a pointwise ratio would blow up where a
+    template crosses zero)."""
+    m = np.asarray(kf) < kmax
+    den = float(np.max(np.abs(np.asarray(t_ref)[m]))) if m.any() else 0.0
+    return float(np.max(np.abs(np.asarray(t)[m] - np.asarray(t_ref)[m]))) / den if den > 0 else float("nan")
+
+
+def summarize(results, reference, n_k, lowk_kmax=0.01):
+    """Per (tag, threshold): the threshold, the sightline counts per class, the largest fractional clean change, and per
+    class the absorber count ratio, a, s and the low-k change, all over the first n_k stored k bins (k = 0 is never
+    stored). ``results`` maps (tag, threshold) to dicts with kf, counts15, pf15, pu15 and abs_counts (class -> count)."""
     out = {}
     for (tag, thr) in sorted(results):
         ref = results.get((tag, reference))
         if ref is None:
             raise KeyError(f"no reference threshold {reference} for {tag}")
         cur = results[(tag, thr)]
-        sl = slice(1, n_k)
+        sl = slice(0, n_k)
         pf, pu = collapse(cur["pf15"], cur["counts15"]), collapse(cur["pu15"], cur["counts15"])
         pf_r, pu_r = collapse(ref["pf15"], ref["counts15"]), collapse(ref["pu15"], ref["counts15"])
         t, t_r = templates(pf[:, sl], pu[:, sl]), templates(pf_r[:, sl], pu_r[:, sl])
-        row = {"clean_max_frac_change": float(np.max(np.abs(pf[0, sl] / pf_r[0, sl] - 1.0))),
+        kf = np.asarray(cur["kf"])[sl]
+        row = {"tag": tag, "threshold": float(thr), "n_k": int(kf.size),
+               "clean_max_frac_change": float(np.max(np.abs(pf[0, sl] / pf_r[0, sl] - 1.0))),
                "sightlines": {c: int(n) for c, n in zip(CLASSES, (cur["counts15"][lo:hi].sum()
                                                                   for lo, hi in COARSE_RANGES))}}
         for c in TEMPLATE_CLASSES:
             a, s = compare(t[c], t_r[c])
             n, n_r = cur["abs_counts"][c], ref["abs_counts"][c]
-            row[c] = {"count_ratio": (n / n_r) if n_r else float("nan"), "amplitude_ratio": a, "shape_residual": s}
+            row[c] = {"count_ratio": (n / n_r) if n_r else float("nan"), "amplitude_ratio": a, "shape_residual": s,
+                      "lowk_change": lowk_change(t[c], t_r[c], kf, lowk_kmax)}
         out[f"{tag}|T{thr:g}"] = row
     return out
 
 
+def _reading(a, s, clean=0.0):
+    if a < NEGLIGIBLE_A and s < NEGLIGIBLE_S and clean < NEGLIGIBLE_CLEAN:
+        return "negligible"
+    return "modest" if (a <= MODEST_A and s <= MODEST_S) else "important"
+
+
 def verdict(summary, headline, reference):
-    """The pre-registered reading rule (A3 design): over the headline thresholds, all classes and inputs."""
-    rows = [(k, v) for k, v in summary.items() if float(k.split("|T")[1]) in headline]
-    worst_a = max(abs(v[c]["amplitude_ratio"] - 1.0) for _, v in rows for c in TEMPLATE_CLASSES)
-    worst_s = max(v[c]["shape_residual"] for _, v in rows for c in TEMPLATE_CLASSES)
-    worst_clean = max(v["clean_max_frac_change"] for _, v in rows)
-    if worst_a < 0.05 and worst_s < 0.05 and worst_clean < 0.01:
-        word = "negligible"
-    elif worst_a <= 0.29 and worst_s <= 0.10:
-        word = "modest"
-    else:
-        word = "important"
+    """The reading rule (module docstring) over the headline thresholds, all classes and inputs; per class too."""
+    rows = [v for v in summary.values() if v["threshold"] in headline]
+    if not rows:
+        raise ValueError(f"no summary rows for the headline thresholds {sorted(headline)}")
+    worst_a = max(abs(v[c]["amplitude_ratio"] - 1.0) for v in rows for c in TEMPLATE_CLASSES)
+    worst_s = max(v[c]["shape_residual"] for v in rows for c in TEMPLATE_CLASSES)
+    worst_clean = max(v["clean_max_frac_change"] for v in rows)
     per_class = {}
     for c in TEMPLATE_CLASSES:
-        wa = max(abs(v[c]["amplitude_ratio"] - 1.0) for _, v in rows)
-        ws = max(v[c]["shape_residual"] for _, v in rows)
-        per_class[c] = {"max_abs_a_minus_1": wa, "max_s": ws,
-                        "reading": "negligible" if (wa < 0.05 and ws < 0.05) else
-                                   "modest" if (wa <= 0.29 and ws <= 0.10) else "important"}
-    return {"headline_thresholds": sorted(headline), "reference": reference, "reading": word,
+        wa = max(abs(v[c]["amplitude_ratio"] - 1.0) for v in rows)
+        ws = max(v[c]["shape_residual"] for v in rows)
+        per_class[c] = {"max_abs_a_minus_1": wa, "max_s": ws, "max_lowk_change": max(v[c]["lowk_change"] for v in rows),
+                        "reading": _reading(wa, ws)}
+    return {"headline_thresholds": sorted(headline), "reference": reference,
+            "reading": _reading(worst_a, worst_s, worst_clean),
             "max_abs_a_minus_1": worst_a, "max_s": worst_s, "max_clean_frac_change": worst_clean,
             "per_class": per_class}
 
@@ -157,14 +190,23 @@ def _file_identity(path):
                 "redshift": float(h["redshift"]), "nbins": int(h["nbins"]), "n_skewers": int(shape[0])}
 
 
-def _save_once(path, **arrays):
-    """Write an npz to a temporary name and link it into place; an existing result is never replaced."""
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp.npz")
-    np.savez(tmp, **arrays)
+def _link_once(path, write):
+    """Write through ``write(fileobj)`` into a fresh temporary file beside ``path`` and link it into place; an existing
+    file is never replaced (FileExistsError)."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
+        with os.fdopen(fd, "wb") as fh:
+            write(fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o644)
         os.link(tmp, path)
     finally:
         os.unlink(tmp)
+
+
+def _save_once(path, **arrays):
+    _link_once(path, lambda fh: np.savez(fh, **arrays))
 
 
 def _read_rows(path, s, e):
@@ -216,9 +258,10 @@ def _solve_scale(path, n_total, chunk, tau_eff, target_f):
 
 def chunked_tier_c(path, n_total, thresholds, absorber, dv, vmax, alpha, z_grid, tau_eff, scale, target_f, chunk,
                    batch_size=4096):
-    """For every threshold: the catalogue's absorbers (production process_skewer_batch, batches of batch_size with
-    global indices, as build_catalog) and the filtered and unfiltered Tier-C P1D (production compute_tier_c_p1d at
-    the given scale and target flux), over the first n_total skewers in blocks of ``chunk`` rows, each read once.
+    """For every threshold: the catalogue's absorbers (production process_skewer_batch with global skewer indices; it
+    treats every skewer on its own, so where the batches start does not matter) and the filtered and unfiltered
+    Tier-C P1D (production compute_tier_c_p1d at the given scale and target flux), over the first n_total skewers in
+    blocks of ``chunk`` rows, each read once.
     The per-bin P1D is a mean over sightlines, so the blocks combine exactly by their counts. Returns
     {threshold: dict(absorbers, kf, pf15, pu15, counts15)}."""
     from types import SimpleNamespace
@@ -324,11 +367,13 @@ def run_input(tag, path, thresholds, alpha, absorber, sim, out_dir, log, n_skewe
 
 
 def self_check(tag, path, n, reference, alpha, absorber, sim, out_dir, log):
-    """The chunked path against the whole-array production path (build_catalog, _apply_priya_filter,
-    compute_tier_c_p1d) on the first n skewers at the reference threshold; written once to self_check_<tag>.json."""
+    """The blocked path against the whole-array production path (build_catalog, _apply_priya_filter,
+    compute_tier_c_p1d with fake_spectra's mean_flux) on the first n skewers at the reference threshold: the
+    catalogue, the per-bin counts and P1D, the filter's mean optical depth and the solved mean-flux scale. Written once
+    to self_check_<tag>.json, with ``passed``."""
     dest = out_dir / f"self_check_{tag}.json"
     if dest.exists():
-        return
+        return json.loads(dest.read_text())
     from hcd_analysis.catalog import build_catalog
     from hcd_analysis.io import pixel_dv_kms, read_header
     from hcd_analysis.priya_p1d import _apply_priya_filter, compute_tier_c_p1d
@@ -337,6 +382,7 @@ def self_check(tag, path, n, reference, alpha, absorber, sim, out_dir, log):
     dv, vmax = pixel_dv_kms(hdr), bt.vmax_from_header(hdr)
     z_grid = bt._snap_z_to_priya_grid(float(hdr.redshift))
     tau = bt._read_tau(path, n_skewers=n)
+    tau_eff = float(-np.log(np.mean(np.exp(-tau))))                  # what _apply_priya_filter computes
     tau_f = _apply_priya_filter(tau.copy(), tau_thresh=1.0e6)
     cat = build_catalog(Path(path), sim_name=sim, snap=-1, z=float(hdr.redshift), dv_kms=dv,
                         tau_threshold=float(reference), merge_dv_kms=absorber["merge_dv_kms"],
@@ -347,21 +393,31 @@ def self_check(tag, path, n, reference, alpha, absorber, sim, out_dir, log):
     kf, pf, nf, target_f, scale = compute_tier_c_p1d(tau_f, vmax, alpha_slope=alpha, z=z_grid, catalog=cat)
     _, pu, _, _, _ = compute_tier_c_p1d(tau, vmax, alpha_slope=alpha, z=z_grid, catalog=cat,
                                         external_scale=scale, external_target_F=target_f)
-    tau_eff = float(-np.log(np.mean(np.exp(-tau))))
     del tau, tau_f
-    ch = chunked_tier_c(path, n, [reference], absorber, dv, vmax, alpha, z_grid, tau_eff, scale, target_f,
-                        chunk=max(1, n // 4))[reference]
+    block = max(1, n // 4)
+    tau_eff_blocked = _global_tau_eff(path, n, block)
+    scale_solved = _solve_scale(path, n, block, tau_eff_blocked, target_f)
+    ch = chunked_tier_c(path, n, [reference], absorber, dv, vmax, alpha, z_grid, tau_eff_blocked, scale, target_f,
+                        chunk=block)[reference]
     key = lambda a: (a.skewer_idx, a.pix_start, a.pix_end, a.log_NHI)   # noqa: E731
-    same_cat = sorted(map(key, cat.absorbers)) == sorted(map(key, ch["absorbers"]))
     ok = nf > 0
 
     def rel(x, y):
         return float(np.max(np.abs(x[ok] / y[ok] - 1.0)))
-    doc = {"n_skewers": n, "threshold": reference, "catalogue_identical": bool(same_cat),
-           "n_absorbers": len(cat.absorbers), "counts_identical": bool(np.array_equal(nf, ch["counts15"])),
-           "max_rel_diff_filtered": rel(ch["pf15"], pf), "max_rel_diff_unfiltered": rel(ch["pu15"], pu)}
-    dest.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
+    doc = {"n_skewers": n, "threshold": reference, "block": block, "n_absorbers": len(cat.absorbers),
+           "catalogue_identical": sorted(map(key, cat.absorbers)) == sorted(map(key, ch["absorbers"])),
+           "counts_identical": bool(np.array_equal(nf, ch["counts15"])),
+           "max_rel_diff_filtered": rel(ch["pf15"], pf), "max_rel_diff_unfiltered": rel(ch["pu15"], pu),
+           "tau_eff_rel_diff": abs(tau_eff_blocked / tau_eff - 1.0),
+           "scale_solved_rel_diff": abs(scale_solved / scale - 1.0),
+           "tolerances": {"p1d_and_tau_eff": SELF_CHECK_REL_TOL, "scale": SELF_CHECK_SCALE_TOL}}
+    doc["passed"] = bool(doc["catalogue_identical"] and doc["counts_identical"]
+                         and max(doc["max_rel_diff_filtered"], doc["max_rel_diff_unfiltered"],
+                                 doc["tau_eff_rel_diff"]) <= SELF_CHECK_REL_TOL
+                         and doc["scale_solved_rel_diff"] <= SELF_CHECK_SCALE_TOL)
+    _link_once(dest, lambda fh: fh.write((json.dumps(doc, indent=1, sort_keys=True) + "\n").encode()))
     log(f"self-check {tag}: {doc}")
+    return doc
 
 
 def load_results(out_dir, tags, thresholds):
@@ -375,7 +431,8 @@ def load_results(out_dir, tags, thresholds):
 
 
 def anchor(results, cache, sim, alpha, reference, n_k):
-    """The reference threshold against the cache rows of the same simulation, z grid and alpha."""
+    """The reference threshold against the cache row of the same simulation, z grid and alpha, over the first n_k
+    stored k bins."""
     import h5py
     out = {}
     with h5py.File(cache, "r") as h:
@@ -395,7 +452,7 @@ def anchor(results, cache, sim, alpha, reference, n_k):
             ok = (c_counts > 0) & (r["counts15"] > 0)
 
             def rel(cache_key, mine):
-                a, b = h[cache_key][i][ok, 1:m], mine[ok, 1:m]
+                a, b = h[cache_key][i][ok, :m], mine[ok, :m]
                 return float(np.max(np.abs(b / a - 1.0)))
             out[tag] = {"cache_row": i, "count_diff_by_bin": (r["counts15"] - c_counts).astype(int).tolist(),
                         "max_rel_diff_filtered": rel("P_tier_c_filtered", r["pf15"]),
@@ -404,18 +461,27 @@ def anchor(results, cache, sim, alpha, reference, n_k):
     return out
 
 
+def _git(*args):
+    try:
+        return subprocess.check_output(["git", *args], cwd=str(REPO_ROOT), text=True, stderr=subprocess.DEVNULL).strip()
+    except Exception:
+        return None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--sim", required=True, help="simulation name (catalogue label; cache lookup for --anchor-cache)")
     ap.add_argument("--input", action="append", required=True, metavar="TAG=PATH",
                     help="a raw fake_spectra grid file, tagged (repeatable)")
-    ap.add_argument("--thresholds", type=float, nargs="+", default=[30.0, 50.0, 100.0, 200.0, 300.0])
+    ap.add_argument("--thresholds", type=float, nargs="+", default=[30.0, 50.0, 100.0, 200.0, 300.0],
+                    help="at most 6 significant digits each (they name the result files)")
     ap.add_argument("--reference", type=float, default=100.0)
     ap.add_argument("--headline", type=float, nargs="+", default=[50.0, 200.0],
                     help="thresholds the reading rule is applied to")
     ap.add_argument("--alpha", type=float, required=True, help="mean-flux scaling alpha_slope")
-    ap.add_argument("--n-k", type=int, default=172, help="native k bins compared (172: the LF emulator grid)")
+    ap.add_argument("--n-k", type=int, default=172, help="stored native k bins compared (172: the LF emulator grid)")
+    ap.add_argument("--lowk-kmax", type=float, default=0.01, help="upper k (s/km) of the low-k change")
     ap.add_argument("--config", type=Path, default=REPO_ROOT / "config" / "default.yaml",
                     help="every catalogue setting except tau_threshold is read from here")
     ap.add_argument("--anchor-cache", type=Path, default=None)
@@ -428,9 +494,11 @@ def main(argv=None):
                     help="process only these inputs (parallel workers; the summary is written once all results exist)")
     a = ap.parse_args(argv)
 
-    import yaml
-    sys.path.insert(0, str(REPO_ROOT / "scripts"))
-    if a.reference not in a.thresholds or not set(a.headline) <= set(a.thresholds):
+    thresholds = sorted(set(a.thresholds))
+    for t in thresholds + [a.reference] + list(a.headline):
+        if not (np.isfinite(t) and t > 0 and float(f"{t:g}") == t):
+            ap.error(f"threshold {t!r}: give a positive value with at most 6 significant digits")
+    if a.reference not in thresholds or not set(a.headline) <= set(thresholds):
         ap.error("--reference and every --headline threshold must be among --thresholds")
     if a.n_skewers is not None and a.anchor_cache is not None:
         ap.error("--anchor-cache compares whole files; it cannot be combined with --n-skewers")
@@ -440,35 +508,35 @@ def main(argv=None):
         if not tag or not p or tag in inputs:
             ap.error(f"--input {item!r}: expected a unique TAG=PATH")
         inputs[tag] = Path(p).resolve()
+    if a.only is not None and not set(a.only) <= set(inputs):
+        ap.error(f"--only {a.only}: not among the inputs {sorted(inputs)}")
+
+    import yaml
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
     cfg_bytes = a.config.read_bytes()
     absorber = dict(yaml.safe_load(cfg_bytes)["absorber"])
     absorber.pop("tau_threshold", None)
-    thresholds = sorted(set(a.thresholds))
-    settings = {"tool": "tau_threshold_sensitivity/1", "sim": a.sim,
+    # Compared settings: the inputs and everything the result files depend on. The block size (rounding only), the
+    # self-check size and the summary's parameters (reference, headline, n_k, low-k cut) are recorded in summary.json.
+    settings = {"tool": "tau_threshold_sensitivity/2", "sim": a.sim,
                 "inputs": {t: _file_identity(p) for t, p in sorted(inputs.items())},
-                "thresholds": thresholds, "reference": a.reference, "headline": sorted(a.headline),
-                "alpha_slope": a.alpha, "n_k": a.n_k, "absorber_except_threshold": absorber,
+                "thresholds": thresholds, "alpha_slope": a.alpha, "absorber_except_threshold": absorber,
                 "config": {"path": str(a.config.resolve()), "sha256": hashlib.sha256(cfg_bytes).hexdigest()},
                 "anchor_cache": str(a.anchor_cache.resolve()) if a.anchor_cache else None,
-                "n_skewers": a.n_skewers, "chunk": a.chunk, "self_check": a.self_check,
+                "n_skewers": a.n_skewers,
                 "scale": "the cache row's (production) scale and target flux" if a.anchor_cache and a.n_skewers is None
                          else "solved over the file (Newton, 1e-12)"}
 
     def info():
-        import subprocess
-        try:
-            commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT), text=True).strip()
-            dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=str(REPO_ROOT), text=True))
-        except Exception:
-            commit, dirty = "unknown", None
         import h5py
         try:
             import fake_spectra
             fs = getattr(fake_spectra, "__version__", fake_spectra.__file__)
         except Exception:
             fs = None
-        return {"code_commit": commit, "code_dirty": dirty, "python": platform.python_version(),
-                "numpy": np.__version__, "h5py": h5py.__version__, "fake_spectra": fs}
+        return {"code_commit": _git("rev-parse", "HEAD") or "unknown", "code_dirty": bool(_git("status", "--porcelain")),
+                "python": platform.python_version(), "numpy": np.__version__, "h5py": h5py.__version__,
+                "fake_spectra": fs}
 
     record_or_verify(a.out, settings, info=info)
     logf = open(a.out / "log.txt", "a")
@@ -479,8 +547,6 @@ def main(argv=None):
         logf.write(line + "\n")
         logf.flush()
 
-    if a.only is not None and not set(a.only) <= set(inputs):
-        ap.error(f"--only {a.only}: not among the inputs {sorted(inputs)}")
     for tag, p in sorted(inputs.items()):
         if a.only is not None and tag not in a.only:
             continue
@@ -494,18 +560,29 @@ def main(argv=None):
         log(f"summary deferred: {len(missing)} result files not yet written")
         return 0
     results = load_results(a.out, sorted(inputs), thresholds)
-    summary = summarize(results, a.reference, a.n_k)
-    doc = {"rows": summary, "verdict": verdict(summary, set(a.headline), a.reference)}
+    summary = summarize(results, a.reference, a.n_k, a.lowk_kmax)
+    doc = {"rows": summary, "verdict": verdict(summary, set(a.headline), a.reference),
+           "summary_settings": {"reference": a.reference, "headline": sorted(a.headline), "n_k": a.n_k,
+                                "lowk_kmax": a.lowk_kmax, "self_check_n": a.self_check,
+                                "code_commit": _git("rev-parse", "HEAD") or "unknown",
+                                "code_dirty": bool(_git("status", "--porcelain"))}}
     if a.anchor_cache:
         doc["anchor"] = anchor(results, a.anchor_cache, a.sim, a.alpha, a.reference, a.n_k)
-    checks = sorted(a.out.glob("self_check_*.json"))
+    checks = {c.stem[len("self_check_"):]: json.loads(c.read_text()) for c in sorted(a.out.glob("self_check_*.json"))}
     if checks:
-        doc["self_check"] = {c.stem[len("self_check_"):]: json.loads(c.read_text()) for c in checks}
-    tmp = a.out / f".summary.json.{os.getpid()}.tmp"
-    tmp.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
+        doc["self_check"] = checks
+    failed = sorted(t for t, c in checks.items() if not c.get("passed"))
+    if a.self_check and set(checks) != set(inputs):
+        failed += sorted(set(inputs) - set(checks))
+    if failed:
+        doc["verdict"]["reading"] = f"invalid: self-check failed or missing for {failed}"
+    fd, tmp = tempfile.mkstemp(dir=a.out, prefix=".summary.json.", suffix=".tmp")
+    with os.fdopen(fd, "w") as fh:
+        fh.write(json.dumps(doc, indent=1, sort_keys=True) + "\n")
+    os.chmod(tmp, 0o644)
     os.replace(tmp, a.out / "summary.json")                         # derived from the result files; recomputable
     log(f"verdict: {doc['verdict']['reading']}")
-    return 0
+    return 2 if failed else 0
 
 
 if __name__ == "__main__":
