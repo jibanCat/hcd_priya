@@ -117,6 +117,20 @@ request the checkpoint and a cache slice from the PI (mfho@umich.edu) or open an
 issue. Please do not commit any large data or model artefacts to this code
 repository.
 
+### Release format of the emulator (HDF5 + JSON)
+
+Released emulator members will use a pickle-free format, `hcd_priya.h5/1`: per member one HDF5 file (the network
+weights as datasets named by their JAX tree paths, and the output normalizer) and one JSON sidecar (the meta and the
+file's sha256), plus a bundle `manifest.json`. Loading builds the network from code, checks every array by name, shape
+and dtype, verifies the sha256 before the HDF5 library parses the file, and never unpickles anything:
+
+```python
+from hcd_analysis.emulator import safe_h5
+ensemble, metas, norm = safe_h5.load_ensemble("path/to/bundle", expected_manifest_sha256="<published digest>")
+```
+
+The files open with standard tools (`h5ls -r member.h5`). Contract and full usage: `docs/release_format_h5.md`.
+
 Throughout the rest of this README, each stage is marked with what it needs:
 **requires the full data / Great Lakes (not in this repo)** for anything that
 builds the catalogs, the full cache, or trains the emulator; and

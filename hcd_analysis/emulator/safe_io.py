@@ -44,6 +44,8 @@ _INT_SEGMENT = re.compile(r"#(0|-?[1-9][0-9]{0,17})\Z")        # canonical, fits
 _MAX_DIM = 1 << 40
 _PLAIN_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*\Z")
 MANIFEST = "manifest.json"
+MAX_JSON_BYTES = 1 << 24                     # 16 MiB: a sidecar or a manifest
+MAX_DATA_BYTES = 1 << 30                     # 1 GiB: one member data file read into memory
 
 
 class SafeFormatError(ValueError):
@@ -61,9 +63,19 @@ def _no_duplicate_keys(pairs):
 
 
 def _json_loads(raw, where):
-    """Strict JSON from bytes: UTF-8, no duplicate keys; every failure is a SafeFormatError."""
+    """Strict JSON from bytes: UTF-8, no duplicate keys, no NaN or Infinity (neither the literals nor a number that
+    overflows to infinity, such as 1e999); every failure is a SafeFormatError."""
+    def no_constant(c):
+        raise SafeFormatError(f"{where}: JSON constant {c} is not allowed")
+
+    def finite_float(t):
+        v = float(t)
+        if not math.isfinite(v):
+            raise SafeFormatError(f"{where}: JSON number {t[:24]} is not finite")
+        return v
     try:
-        return json.loads(bytes(raw).decode("utf-8", errors="strict"), object_pairs_hook=_no_duplicate_keys)
+        return json.loads(bytes(raw).decode("utf-8", errors="strict"), object_pairs_hook=_no_duplicate_keys,
+                          parse_constant=no_constant, parse_float=finite_float)
     except SafeFormatError:
         raise
     except (UnicodeDecodeError, ValueError, RecursionError) as e:
@@ -74,41 +86,85 @@ def _is_int(x):
     return isinstance(x, int) and not isinstance(x, bool)
 
 
+def _require_finite(tensors, where):
+    """Every float array finite: a member's weights and normalizer never hold NaN or inf."""
+    bad = sorted(n for n, a in tensors.items() if a.dtype.kind == "f" and not np.all(np.isfinite(a)))
+    if bad:
+        raise SafeFormatError(f"{where}: non-finite values in {bad[:5]}")
+
+
 def _code(dtype):
     return _CODES.get(dtype.newbyteorder("<") if dtype.byteorder == ">" else dtype)
 
 
-def _publish(tmp, path):
+def _publish(tmp, path, held):
     """Move ``tmp`` to ``path`` only if ``path`` does not exist (a hard link fails atomically on an existing target).
-    An EEXIST is accepted only when ``path`` is the very same inode as ``tmp`` and not a symlink (an NFS retransmit can
-    report EEXIST for our own new link); every other failure is a SafeFormatError."""
+    ``held`` is the still-open file this process wrote through (``_write_tmp``): its inode stays allocated while it is
+    open, so its (st_dev, st_ino) cannot be reused by a file swapped in at the temporary name. The temporary name must
+    still be that regular file before the link (a symlink or another file there is refused), the link never follows a
+    symlink, and ``path`` must be that file after it. An EEXIST is accepted only when ``path`` is the very same inode
+    and not a symlink (an NFS retransmit can report EEXIST for our own new link); every other failure is a
+    SafeFormatError. ``held`` is closed and ``tmp`` removed in every case."""
     try:
+        st_h = os.fstat(held.fileno())
+        ident = (st_h.st_dev, st_h.st_ino)
         try:
-            os.link(tmp, path)
-        except FileExistsError:
-            try:
-                st_p, st_t = os.lstat(path), os.lstat(tmp)
-            except OSError as e:
-                raise SafeFormatError(f"{path} cannot be published ({e})") from None
-            if stat.S_ISLNK(st_p.st_mode) or (st_p.st_dev, st_p.st_ino) != (st_t.st_dev, st_t.st_ino):
-                raise SafeFormatError(f"{path} exists: never overwritten") from None
+            st_t = os.lstat(tmp)
         except OSError as e:
             raise SafeFormatError(f"{path} cannot be published ({e})") from None
+        if not stat.S_ISREG(st_t.st_mode) or (st_t.st_dev, st_t.st_ino) != ident:
+            raise SafeFormatError(f"{path}: the temporary file was replaced before publishing; nothing published")
+        try:
+            os.link(tmp, path, follow_symlinks=False)
+        except FileExistsError:
+            pass                                                   # checked below: only our own inode is accepted
+        except OSError as e:
+            raise SafeFormatError(f"{path} cannot be published ({e})") from None
+        try:
+            st_p = os.lstat(path)
+        except OSError as e:
+            raise SafeFormatError(f"{path} cannot be published ({e})") from None
+        if stat.S_ISLNK(st_p.st_mode) or (st_p.st_dev, st_p.st_ino) != ident:
+            raise SafeFormatError(f"{path} exists (or the temporary file was swapped just before linking): never "
+                                  f"overwritten; nothing of this call is published") from None
     finally:
-        os.remove(tmp)
+        held.close()
+        try:
+            os.remove(tmp)
+        except FileNotFoundError:
+            pass
 
 
-def _finalize_tmp(tmp):
-    """fsync before publishing. The mode is the one any new file gets (0o666 under the umask and the directory's
-    default ACLs): nothing is chmodded, so no permission or ACL entry wider than the directory's policy is added."""
-    with open(tmp, "rb+") as f:
-        os.fsync(f.fileno())
+def _write_tmp(path, suffix, writer):
+    """Create a temporary file next to ``path`` and fill it through its own descriptor (``writer(fileobj)``), never by
+    reopening the name; fsync; hash it through the same descriptor; return (tmp, the still-open file, sha256) for
+    ``_publish``, which closes it. The mode is the one any new file gets (0o666 under the umask and the directory's
+    default ACLs): nothing is chmodded."""
+    fd, tmp = _new_tmp(path, suffix)
+    fh = os.fdopen(fd, "w+b")
+    try:
+        writer(fh)
+        fh.flush()
+        os.fsync(fh.fileno())
+        fh.seek(0)
+        h = hashlib.sha256()
+        for b in iter(lambda: fh.read(1 << 20), b""):
+            h.update(b)
+    except BaseException:
+        fh.close()
+        try:
+            os.remove(tmp)
+        except FileNotFoundError:
+            pass
+        raise
+    return tmp, fh, h.hexdigest()
 
 
 def _new_tmp(path, suffix=""):
-    """A new temporary file next to ``path``, created exclusively and never through a symlink."""
+    """A new temporary file next to ``path``, created exclusively and never through a symlink (read-write, so that an
+    HDF5 writer can use the descriptor)."""
     d = os.path.dirname(os.path.abspath(path))
-    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_CREAT | os.O_EXCL | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     for _ in range(100):
         tmp = os.path.join(d, f".tmp_{secrets.token_hex(8)}{suffix}")
         try:
@@ -120,17 +176,69 @@ def _new_tmp(path, suffix=""):
     raise SafeFormatError(f"{path}: no free temporary name")
 
 
-def _write_exclusive(path, chunks):
-    fd, tmp = _new_tmp(path)
+def _open_regular(path):
+    """A raw descriptor of ``path`` and its fstat, opened without following a symlink and without blocking; refused
+    (and closed) unless it is a regular file."""
+    if os.path.islink(path):
+        raise SafeFormatError(f"{path} is a symlink")
     try:
-        with os.fdopen(fd, "wb") as f:
-            for c in chunks:
-                f.write(c)
-        _finalize_tmp(tmp)
-    except BaseException:
-        os.remove(tmp)
-        raise
-    _publish(tmp, path)
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except OSError as e:
+        raise SafeFormatError(f"{path} cannot be read ({e})") from None
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
+        os.close(fd)
+        raise SafeFormatError(f"{path} is not a regular file")
+    return fd, st
+
+
+def read_regular(path, cap):
+    """The whole content of ``path``, which must be a regular file (not a symlink, directory, FIFO or device) of at
+    most ``cap`` bytes, checked on its descriptor before anything is read."""
+    fd, st = _open_regular(path)
+    try:
+        if st.st_size > cap:
+            raise SafeFormatError(f"{path}: {st.st_size} bytes exceed the bound of {cap}")
+        chunks, n = [], 0
+        while True:
+            b = os.read(fd, min(1 << 20, cap + 1 - n))
+            if not b:
+                break
+            chunks.append(b)
+            n += len(b)
+            if n > cap:
+                raise SafeFormatError(f"{path}: more than {cap} bytes")
+    finally:
+        os.close(fd)
+    return b"".join(chunks)
+
+
+def _sha256_regular(path, expected_bytes=None):
+    """(sha256, size) of a regular file read through one no-follow descriptor, streamed. With ``expected_bytes`` a
+    different size is refused from fstat, before anything is hashed."""
+    fd, st = _open_regular(path)
+    try:
+        if expected_bytes is not None and st.st_size != expected_bytes:
+            raise SafeFormatError(f"{path}: {st.st_size} bytes, the manifest lists {expected_bytes}")
+        h, n = hashlib.sha256(), 0
+        while True:
+            b = os.read(fd, 1 << 20)
+            if not b:
+                break
+            h.update(b)
+            n += len(b)
+    finally:
+        os.close(fd)
+    return h.hexdigest(), n
+
+
+def _write_exclusive(path, chunks):
+    def writer(fh):
+        for c in chunks:
+            fh.write(c)
+    tmp, held, digest = _write_tmp(path, "", writer)
+    _publish(tmp, path, held)
+    return digest
 
 
 def write_safetensors(path, tensors, metadata=None):
@@ -155,7 +263,7 @@ def write_safetensors(path, tensors, metadata=None):
         header["__metadata__"] = dict(metadata)
     hb = json.dumps(header, separators=(",", ":"), sort_keys=True, allow_nan=False).encode("utf-8")
     hb += b" " * (-len(hb) % 8)
-    _write_exclusive(path, [struct.pack("<Q", len(hb)), hb] + chunks)
+    return _write_exclusive(path, [struct.pack("<Q", len(hb)), hb] + chunks)
 
 
 def parse_safetensors(raw, where="<bytes>"):
@@ -213,8 +321,7 @@ def parse_safetensors(raw, where="<bytes>"):
 
 def read_safetensors(path, expected_sha256=None):
     """Read and parse a safetensors file; with ``expected_sha256`` the SAME bytes that are parsed are hashed first."""
-    with open(path, "rb") as f:
-        raw = f.read()
+    raw = read_regular(path, MAX_DATA_BYTES)
     if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
         raise SafeFormatError(f"{path}: sha256 does not match the expected digest")
     return parse_safetensors(raw, path)
@@ -345,6 +452,13 @@ def _validate_meta(meta, where):
         raise SafeFormatError(f"{where}: checkpoint schema "
                               f"{meta.get('schema_version') if isinstance(meta, dict) else None!r}, expected "
                               f"{CHECKPOINT_SCHEMA_VERSION}")
+    try:                                                         # plain, finite JSON that round-trips through the
+        same = json.loads(json.dumps(meta, sort_keys=True, allow_nan=False)) == meta   # writer's own sorted dump
+    except (TypeError, ValueError) as e:
+        raise SafeFormatError(f"{where}: meta is not plain finite JSON ({e})"[:300]) from None
+    if not same:
+        raise SafeFormatError(f"{where}: meta is not plain finite JSON (it does not round-trip: non-string keys or "
+                              f"tuples)")
     missing = [k for k in _SCHEMA2_REQUIRED if meta.get(k) is None]
     if missing:
         raise SafeFormatError(f"{where}: schema-2.0 meta lacks {missing}")
@@ -376,9 +490,11 @@ def export_member(prefix, model, meta, norm):
             raise SafeFormatError(f"{p} exists: export never overwrites")
     _validate_meta(meta, prefix)
     tensors = {**model_tensors(model), **norm_tensors(norm)}
-    write_safetensors(st, tensors, metadata={"format": FORMAT, "schema_version": str(meta.get("schema_version"))})
+    _require_finite(tensors, prefix)
+    st_sha = write_safetensors(st, tensors, metadata={"format": FORMAT,
+                                                       "schema_version": str(meta.get("schema_version"))})
     index = {n: {"shape": list(a.shape), "dtype": _code(a.dtype)} for n, a in sorted(tensors.items())}
-    doc = {"format": FORMAT, "meta": meta, "tensors": index, "safetensors_sha256": sha256_file(st),
+    doc = {"format": FORMAT, "meta": meta, "tensors": index, "safetensors_sha256": st_sha,
            "safetensors_file": os.path.basename(st)}
     _write_exclusive(js, [json.dumps(doc, indent=1, sort_keys=True, allow_nan=False).encode("utf-8")])
     return st, js
@@ -396,8 +512,7 @@ def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None):
     import jax.numpy as jnp
 
     js = f"{prefix}.json"
-    with open(js, "rb") as f:
-        raw_js = f.read()
+    raw_js = read_regular(js, MAX_JSON_BYTES)
     if expected_json_sha256 is not None and hashlib.sha256(raw_js).hexdigest() != expected_json_sha256:
         raise SafeFormatError(f"{js}: sha256 does not match the manifest")
     doc = _json_loads(raw_js, js)
@@ -412,8 +527,7 @@ def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None):
         raise SafeFormatError(f"{js}: safetensors_file {doc['safetensors_file']!r} is not "
                               f"{os.path.basename(prefix)}.safetensors")
     st = f"{prefix}.safetensors"
-    with open(st, "rb") as f:
-        raw = f.read()
+    raw = read_regular(st, MAX_DATA_BYTES)
     digest = hashlib.sha256(raw).hexdigest()
     if digest != doc["safetensors_sha256"] or (expected_sha256 is not None and digest != expected_sha256):
         raise SafeFormatError(f"{st}: sha256 does not match {js}" + (" or the manifest" if expected_sha256 else ""))
@@ -445,6 +559,7 @@ def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None):
     norm = norm_from_tensors(tensors)
     _validate_norm(norm, meta["arch_cfg"]["n_k"], shapes["model.head_a.cddf.weight"][0],
                    shapes["model.head_a.dndx.weight"][0])
+    _require_finite(tensors, st)
     model = jax.tree_util.tree_unflatten(treedef, [jnp.asarray(tensors[n]) for n, _, _ in want])
     return model, meta, norm
 
@@ -468,7 +583,8 @@ def write_manifest(bundle_dir, member_prefixes, provenance, *, data_ext=".safete
         names.append(m)
         for ext in (data_ext, ".json"):
             p = os.path.join(bd, m + ext)
-            files.append({"path": m + ext, "sha256": sha256_file(p), "bytes": os.path.getsize(p)})
+            digest, size = _sha256_regular(p)
+            files.append({"path": m + ext, "sha256": digest, "bytes": size})
     if len(set(names)) != len(names):
         raise SafeFormatError("duplicate member names")
     man = {"format": fmt, "members": names, "files": files, "provenance": provenance}
@@ -480,10 +596,7 @@ def write_manifest(bundle_dir, member_prefixes, provenance, *, data_ext=".safete
 def _manifest_entries(bundle_dir, expected_sha256=None, allow_extra=False, *, data_ext=".safetensors", fmt=FORMAT):
     bd = os.path.abspath(bundle_dir)
     mp = os.path.join(bd, MANIFEST)
-    if os.path.islink(mp):
-        raise SafeFormatError(f"{mp} is a symlink")
-    with open(mp, "rb") as f:
-        raw = f.read()
+    raw = read_regular(mp, MAX_JSON_BYTES)
     if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
         raise SafeFormatError(f"{mp}: sha256 does not match the expected digest")
     man = _json_loads(raw, mp)
@@ -511,7 +624,13 @@ def _manifest_entries(bundle_dir, expected_sha256=None, allow_extra=False, *, da
         fp = os.path.join(bd, p)
         if os.path.islink(fp) or not os.path.isfile(fp):
             raise SafeFormatError(f"bundle file {p} is missing, not a regular file, or a symlink")
-        if os.path.getsize(fp) != e["bytes"] or sha256_file(fp) != e["sha256"]:
+        if not _is_int(e["bytes"]) or e["bytes"] < 0:
+            raise SafeFormatError(f"manifest entry {p}: bytes {e['bytes']!r} is not a non-negative int")
+        try:
+            digest, _ = _sha256_regular(fp, expected_bytes=e["bytes"])
+        except SafeFormatError:
+            raise SafeFormatError(f"bundle file {p} does not match the manifest") from None
+        if digest != e["sha256"]:
             raise SafeFormatError(f"bundle file {p} does not match the manifest")
     extra = sorted(set(os.listdir(bd)) - want - {MANIFEST})
     if extra and not allow_extra:
@@ -550,20 +669,16 @@ def write_table_h5(path, arrays, attrs):
             raise SafeFormatError(f"dataset {k!r}: dtype {a.dtype} is not numeric or the name is not plain")
     if os.path.lexists(path):
         raise SafeFormatError(f"{path} exists: never overwritten")
-    fd, tmp = _new_tmp(path, ".h5")
-    os.close(fd)
-    try:
-        with h5py.File(tmp, "w") as f:                 # our own new temporary file
+
+    def writer(fh):
+        with h5py.File(fh, "w", libver=("earliest", "v110")) as f:   # our own descriptor; readable by libhdf5 1.10
             f.attrs["format"] = FORMAT
             for k, v in attrs.items():
                 f.attrs[k] = v
             for k, v in arrays.items():
                 f.create_dataset(k, data=np.asarray(v))
-        _finalize_tmp(tmp)
-    except BaseException:
-        os.remove(tmp)
-        raise
-    _publish(tmp, path)
+    tmp, held, _ = _write_tmp(path, ".h5", writer)
+    _publish(tmp, path, held)
 
 
 def read_table_h5(path, required):
@@ -574,6 +689,8 @@ def read_table_h5(path, required):
     out, attrs = {}, {}
     with h5py.File(path, "r") as f:
         for k in f.attrs:
+            if f.attrs.get_id(k).shape != ():                     # checked from metadata before the value is read
+                raise SafeFormatError(f"{path}: attribute {k!r} is not a scalar")
             v = f.attrs[k]
             try:
                 if isinstance(v, bytes):

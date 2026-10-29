@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Convert the pinned production LF ensemble to the pickle-free prototype format and prove the conversion exact.
 
-This is the deliberate legacy-conversion step of docs/release_format.md. The production manifest must hash to the
+This is the deliberate legacy-conversion step of docs/release_format_h5.md. The production manifest must hash to the
 digest given on the command line BEFORE anything is read; the members are then read only after
 ``prod_ensemble.verify_manifest`` has checked their digests, through the existing ``train.load_checkpoint`` (which
 unpickles this project's own ``.norm.pkl``), and written into ``<out>/bundle`` (a NEW directory holding only the bundle).
@@ -13,10 +13,11 @@ identical on fixed inputs; a clean subprocess that only sees the bundle (``load_
 reproduces the ensemble P_filt; the bundle verifies with no unlisted file; the originals are unchanged. Evidence
 (inputs, predictions, ``pilot_summary.json``) goes to ``<out>/evidence``.
 
-  python scripts/export_safe_bundle.py --out NEW_DIR --manifest-sha256 HEX [--manifest PATH] [--container h5]
+  python scripts/export_safe_bundle.py --out NEW_DIR --manifest-sha256 HEX [--manifest PATH] [--container safetensors]
 
-``--container`` picks the member container: ``safetensors`` (``safe_io``, ``hcd_priya.safe/1``, the default) or ``h5``
-(``safe_h5``, ``hcd_priya.h5/1``); the clean subprocess loads the bundle with the same module.
+``--container`` picks the member container: ``h5`` (``safe_h5``, ``hcd_priya.h5/1``, the release format and the
+default) or ``safetensors`` (``safe_io``, ``hcd_priya.safe/1``, the earlier prototype, kept as evidence only); the clean
+subprocess loads the bundle with the same module.
 """
 import argparse
 import datetime
@@ -91,6 +92,14 @@ def _maxabs(a, b):
     return float(np.max(np.abs(np.asarray(a) - np.asarray(b)))) if np.size(a) else 0.0
 
 
+def _h5_versions(container):
+    """The HDF5 stack that wrote an h5 bundle (the bytes depend on it)."""
+    if container != "h5":
+        return {}
+    import h5py
+    return {"h5py": h5py.__version__, "libhdf5": h5py.version.hdf5_version}
+
+
 def _git(*args):
     return subprocess.run(["git", "-C", REPO, *args], capture_output=True, text=True).stdout.strip()
 
@@ -100,7 +109,8 @@ def main():
     ap.add_argument("--out", required=True, help="NEW directory (refused if it exists)")
     ap.add_argument("--manifest", default=None, help="production manifest (default: the pinned one)")
     ap.add_argument("--manifest-sha256", required=True, help="expected sha256 of the production manifest")
-    ap.add_argument("--container", choices=sorted(CONTAINERS), default="safetensors", help="member container")
+    ap.add_argument("--container", choices=sorted(CONTAINERS), default="h5",
+                    help="member container (h5 = the release format; safetensors = the prototype)")
     a = ap.parse_args()
     F = CONTAINERS[a.container]
     if os.path.exists(a.out):
@@ -128,8 +138,8 @@ def main():
         "source_manifest": os.path.basename(man_src), "source_manifest_sha256": src_sha,
         "source_files_sha256": {os.path.basename(k): v for k, v in before.items()},
         "code_commit": _git("rev-parse", "HEAD"), "code_dirty": bool(_git("status", "--porcelain")),
-        "versions": {"python": platform.python_version(), "jax": jax.__version__, "equinox": equinox.__version__,
-                     "numpy": np.__version__},
+        "versions": dict({"python": platform.python_version(), "jax": jax.__version__, "equinox": equinox.__version__,
+                          "numpy": np.__version__}, **_h5_versions(a.container)),
         "conversion": "legacy .eqx/.norm.pkl/.meta.json read by train.load_checkpoint after verify_manifest",
         "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()})
     bundle_sha = S.sha256_file(man_path)
