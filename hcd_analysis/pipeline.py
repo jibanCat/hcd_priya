@@ -60,6 +60,7 @@ from .cddf import (
     stack_cddf_for_sim,
 )
 from .config import PipelineConfig, save_config
+from .run_settings import RunSettingsMismatch, record_or_verify  # noqa: F401  (RunSettingsMismatch: re-exported)
 from .io import pixel_dv_kms, read_header, read_sim_ics
 from .p1d import (
     ALL_VARIANTS,
@@ -90,6 +91,29 @@ def _repo_commit() -> str:
         return out.decode().strip()
     except Exception:
         return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Run settings (hcd_analysis/run_settings.py)
+# ---------------------------------------------------------------------------
+
+# The settings that determine a run's products. Selection (z range, sim filter, debug sizes), parallelism, batching,
+# resume and the output location are not product settings and may change between runs into one output root.
+PRODUCT_SETTING_KEYS = ("data_root", "prefer_grid", "absorber_classes", "absorber", "p1d", "cddf", "benchmark", "debug")
+
+
+def product_settings(cfg: PipelineConfig) -> dict:
+    """The product-determining part of ``cfg``, as recorded in ``<output_root>/run_settings.json``."""
+    d = dataclasses.asdict(cfg)
+    return {k: d[k] for k in PRODUCT_SETTING_KEYS}
+
+
+def check_run_settings(cfg: PipelineConfig) -> Path:
+    """Record the run's product settings at its output root, or verify them against the record there.
+
+    Raises RunSettingsMismatch, before anything is read or written, when the output root holds results made with
+    different settings (for example another ``absorber.tau_threshold``)."""
+    return record_or_verify(Path(cfg.output_root), product_settings(cfg), info=lambda: {"code_commit": _repo_commit()})
 
 
 # ---------------------------------------------------------------------------
@@ -145,11 +169,14 @@ def run_one_snap(
 
     Returns SnapResult on success, None on failure (logged; written to error.txt
     unless the snapshot is marked done). Raises CatalogIntegrityError, writing
-    nothing, when the snapshot is marked done and its cached catalogue is refused.
+    nothing, when the snapshot is marked done and its cached catalogue is refused,
+    and RunSettingsMismatch, touching nothing, when the output root's recorded
+    run settings differ from cfg's (check_run_settings).
     """
     sim_name = sim_snapshot.sim.name
     snap = entry.snap
     z = entry.z
+    check_run_settings(cfg)                    # refuses a rerun with other settings before anything is touched
     out_dir = snap_output_dir(cfg, sim_name, snap)
 
     if cfg.resume and is_done(cfg, sim_name, snap):
