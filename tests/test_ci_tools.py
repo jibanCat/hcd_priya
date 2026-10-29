@@ -238,7 +238,26 @@ def test_devenv_pins_sit_in_the_release_series_of_the_lower_bounds():
 
 def test_the_workflow_calls_the_ci_helpers_that_exist():
     text = open(os.path.join(REPO, ".github", "workflows", "tests.yml")).read()
-    for helper in ("tools/ci/check_dist.py", "tools/ci/run_test_tier.py", "tools/ci/constraints-devenv.txt"):
+    for helper in ("tools/ci/check_dist.py", "tools/ci/run_test_tier.py", "tools/ci/constraints-devenv.txt",
+                   "tools/ci/h5_cross_version.py"):
         assert helper in text and os.path.isfile(os.path.join(REPO, helper))
     for tier in ("--tier wheel", "--tier source", "--list-not-run"):
         assert tier in text
+
+
+def test_h5_cross_version_check_reads_back_and_catches_a_change_or_a_new_library(tmp_path, capsys):
+    """tools/ci/h5_cross_version.py: a synthetic bundle reads back with every digest equal; an edited digest fails; and
+    --max-hdf5 fails on a library that is not older than the limit (here the running one), so the older-libhdf5 job
+    cannot pass on a new library."""
+    import json
+    XV = _load("h5_cross_version")
+    out = tmp_path / "x"
+    assert XV.main(["write", str(out)]) == 0
+    assert XV.main(["read", str(out)]) == 0
+    assert XV.main(["read", str(out), "--max-hdf5", "1.0"]) == 1
+    exp = json.loads((out / "expected.json").read_text())
+    key = sorted(exp["members"][1])[0]
+    exp["members"][1][key] = "0" * 64
+    (out / "expected.json").write_text(json.dumps(exp))
+    assert XV.main(["read", str(out)]) == 1
+    assert f"MISMATCH member 1 {key}" in capsys.readouterr().out

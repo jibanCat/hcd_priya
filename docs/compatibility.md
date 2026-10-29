@@ -10,6 +10,7 @@ stage only one environment is supported; wider support will be considered before
 | Linux x86-64, CPython 3.12, the newest versions the dependency bounds allow | Tested in CI, **not supported**. |
 | CPython 3.13 or later | Not tested. `requires-python` does not exclude it. |
 | macOS, Windows, other CPU architectures, GPUs | Not tested. |
+| The HDF5 release format read with an older libhdf5 | Tested in CI: a bundle written with the pinned stack is read bit for bit with h5py built against Ubuntu's system libhdf5 1.10, and the loader's tests pass there (job "HDF5 release format with an older libhdf5"). |
 | The lower bounds in `pyproject.toml` | Tested only where a bound equals the pinned version (jax, equinox, optax, numpyro, numpy, scipy, h5py, matplotlib, pytest, at the pinned patch release). The bounds of pandas, pyyaml, click and joblib are not tested. |
 
 A job that is tested but not supported may fail. Its failures are shown, not hidden: no CI job is allowed to fail
