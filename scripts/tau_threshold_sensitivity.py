@@ -101,7 +101,8 @@ def collapse(p15, counts15):
 def templates(pf4, pu4):
     """Class templates as the forward model uses them: filtered LLS and subDLA, unfiltered DLA, over filtered clean."""
     clean = pf4[0]
-    return {"LLS": pf4[1] / clean - 1.0, "subDLA": pf4[2] / clean - 1.0, "DLA": pu4[3] / clean - 1.0}
+    with np.errstate(divide="ignore", invalid="ignore"):              # an empty clean set: undefined, refused later
+        return {"LLS": pf4[1] / clean - 1.0, "subDLA": pf4[2] / clean - 1.0, "DLA": pu4[3] / clean - 1.0}
 
 
 def compare(t, t_ref):
@@ -151,13 +152,24 @@ def summarize(results, reference, n_k, lowk_kmax=0.01, lowk_kmin=1e-3):
                "clean_max_frac_change": float(np.max(np.abs(pf[0, sl] / pf_r[0, sl] - 1.0))),
                "sightlines": {c: int(n) for c, n in zip(CLASSES, (cur["counts15"][lo:hi].sum()
                                                                   for lo, hi in COARSE_RANGES))}}
-        for c in TEMPLATE_CLASSES:
-            a, s = compare(t[c], t_r[c])
+        for i, c in enumerate(CLASSES[1:], 1):
+            lo, hi = COARSE_RANGES[i]
+            if cur["counts15"][lo:hi].sum() == 0 or ref["counts15"][lo:hi].sum() == 0:
+                a = s = low = float("nan")                         # no sightline of the class: nothing to compare
+            else:
+                a, s = compare(t[c], t_r[c])
+                low = lowk_change(t[c], t_r[c], kf, lowk_kmax, lowk_kmin)
             n, n_r = cur["abs_counts"][c], ref["abs_counts"][c]
             row[c] = {"count_ratio": (n / n_r) if n_r else float("nan"), "amplitude_ratio": a, "shape_residual": s,
-                      "lowk_change": lowk_change(t[c], t_r[c], kf, lowk_kmax, lowk_kmin)}
+                      "lowk_change": low}
         out[f"{tag}|T{thr:g}"] = row
     return out
+
+
+def _nan_max(values):
+    """max(), but NaN if any value is NaN (Python's max() skips a NaN that is not first)."""
+    values = list(values)
+    return float("nan") if any(not np.isfinite(v) for v in values) else max(values)
 
 
 def _reading(a, s, clean=0.0):
@@ -178,8 +190,8 @@ def verdict(summary, headline, reference):
                      if not all(np.isfinite(x) for x in [v["clean_max_frac_change"]] + [
                          v[c][k] for c in TEMPLATE_CLASSES for k in ("amplitude_ratio", "shape_residual")]))
         return {"headline_thresholds": sorted(headline), "reference": reference,
-                "reading": f"invalid: undefined comparison (an empty class or clean set) in {bad}",
-                "per_class": {c: {"reading": "invalid"} for c in TEMPLATE_CLASSES}}
+                "reading": f"invalid: undefined comparison (a class or the clean set without sightlines) in {bad}",
+                "valid": False, "per_class": {c: {"reading": "invalid"} for c in TEMPLATE_CLASSES}}
     worst_a = max(abs(v[c]["amplitude_ratio"] - 1.0) for v in rows for c in TEMPLATE_CLASSES)
     worst_s = max(v[c]["shape_residual"] for v in rows for c in TEMPLATE_CLASSES)
     worst_clean = max(v["clean_max_frac_change"] for v in rows)
@@ -187,8 +199,8 @@ def verdict(summary, headline, reference):
     for c in TEMPLATE_CLASSES:
         wa = max(abs(v[c]["amplitude_ratio"] - 1.0) for v in rows)
         ws = max(v[c]["shape_residual"] for v in rows)
-        per_class[c] = {"max_abs_a_minus_1": wa, "max_s": ws, "max_lowk_change": max(v[c]["lowk_change"] for v in rows),
-                        "reading": _reading(wa, ws)}
+        per_class[c] = {"max_abs_a_minus_1": wa, "max_s": ws,
+                        "max_lowk_change": _nan_max(v[c]["lowk_change"] for v in rows), "reading": _reading(wa, ws)}
     return {"headline_thresholds": sorted(headline), "reference": reference,
             "reading": _reading(worst_a, worst_s, worst_clean),
             "max_abs_a_minus_1": worst_a, "max_s": worst_s, "max_clean_frac_change": worst_clean,
@@ -368,7 +380,8 @@ def run_input(tag, path, thresholds, alpha, absorber, sim, out_dir, log, n_skewe
     tau_eff = _global_tau_eff(path, n_total, chunk)
     scale, target_f, src = _scale_and_target(path, n_total, chunk, tau_eff, alpha, z_grid,
                                              cache_row_for(cache, sim, z_grid, alpha) if n_skewers is None else None)
-    log(f"{tag}: {n_total} skewers, tau_eff {tau_eff:.6g}, scale {scale:.10g} ({src}), target_F {target_f:.10g}; "
+    log(f"{tag}: {n_total} skewers in blocks of {chunk}, tau_eff {tau_eff:.6g}, scale {scale:.10g} ({src}), "
+        f"target_F {target_f:.10g}; "
         f"{time.time() - t0:.0f} s")
     t1 = time.time()
     res = chunked_tier_c(path, n_total, todo, absorber, dv, vmax, alpha, z_grid, tau_eff, scale, target_f, chunk)
@@ -573,6 +586,8 @@ def main(argv=None):
             ap.error(f"threshold {t!r}: give a positive value with at most 6 significant digits")
     if a.reference not in thresholds or not set(a.headline) <= set(thresholds):
         ap.error("--reference and every --headline threshold must be among --thresholds")
+    if not (np.isfinite(a.lowk_kmin) and np.isfinite(a.lowk_kmax) and 0 <= a.lowk_kmin < a.lowk_kmax):
+        ap.error("--lowk-kmin and --lowk-kmax: need 0 <= kmin < kmax")
     for name in ("n_k", "chunk"):
         if getattr(a, name) < 1:
             ap.error(f"--{name.replace('_', '-')} must be positive")
@@ -595,8 +610,9 @@ def main(argv=None):
     absorber = dict(yaml.safe_load(cfg_bytes)["absorber"])
     absorber.pop("tau_threshold", None)
     # Compared settings: the inputs and everything the result files depend on (the anchor cache by size and mtime, as
-    # it supplies the scale; the config file by its hash, deliberately conservative). The block size (rounding only),
-    # the self-check size and the summary's parameters (reference, headline, n_k, low-k cut) go to summary.json.
+    # it supplies the scale; the config file by its hash, deliberately conservative). Not compared: the block size
+    # (rounding only; in log.txt), the self-check size (in each self_check file) and the summary's parameters
+    # (reference, headline, n_k, low-k window; in summary.json).
     settings = {"tool": "tau_threshold_sensitivity/3", "sim": a.sim,
                 "inputs": {t: _file_identity(p) for t, p in sorted(inputs.items())},
                 "thresholds": thresholds, "alpha_slope": a.alpha, "absorber_except_threshold": absorber,
@@ -660,18 +676,21 @@ def _run(a, inputs, thresholds, absorber, logf):
                     if not self_check_passed(c) or c.get("threshold") != a.reference)
     if a.self_check or checks:                                      # once any input is checked, every input must be
         failed += sorted(set(inputs) - set(checks))
-    doc["verdict"]["valid"] = not failed
+    valid = doc["verdict"].get("valid", True) and not failed
     if failed:
-        doc["verdict"]["reading"] = f"invalid: self-check failed or missing for {sorted(failed)}"
+        msg = f"invalid: self-check failed or missing for {sorted(failed)}"
+        prior = doc["verdict"]["reading"]
+        doc["verdict"]["reading"] = msg if not prior.startswith("invalid") else f"{prior}; {msg[len('invalid: '):]}"
         for c in doc["verdict"]["per_class"].values():
             c["reading"] = "invalid"
+    doc["verdict"]["valid"] = valid
     fd, tmp = tempfile.mkstemp(dir=a.out, prefix=".summary.json.", suffix=".tmp")
     with os.fdopen(fd, "w") as fh:
         fh.write(json.dumps(_finite_or_none(doc), indent=1, sort_keys=True, allow_nan=False) + "\n")
     os.chmod(tmp, 0o644)
     os.replace(tmp, a.out / "summary.json")                         # derived from the result files; recomputable
     log(f"verdict: {doc['verdict']['reading']}")
-    return 2 if failed else 0
+    return 0 if valid else 2
 
 
 if __name__ == "__main__":

@@ -440,8 +440,4 @@ def test_the_dirty_flag_is_null_when_git_cannot_tell(monkeypatch):
     def fail(*a, **k):
         raise OSError("no git")
     monkeypatch.setattr(subprocess, "check_output", fail)
-    PL._repo_dirty.cache_clear()
-    try:
-        assert PL._repo_dirty() is None
-    finally:
-        PL._repo_dirty.cache_clear()
+    assert PL._repo_dirty() is None

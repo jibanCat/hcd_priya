@@ -499,3 +499,52 @@ def test_the_one_pass_check_tolerates_summation_order_only(tmp_path):
         else:
             with pytest.raises(ValueError, match="disagree on tau_eff"):
                 TS.load_results(tmp_path, ["a"], [50.0, 100.0, 200.0])
+
+
+def test_a_class_without_sightlines_is_an_undefined_comparison():
+    empty = _result()
+    empty["counts15"] = empty["counts15"].copy()
+    empty["counts15"][13:15] = 0                                       # no DLA sightline at this threshold
+    s = _summary(T50=empty, T200=_result())
+    assert np.isnan(s["z|T50"]["DLA"]["amplitude_ratio"]) and np.isnan(s["z|T50"]["DLA"]["lowk_change"])
+    v = TS.verdict(s, {50.0, 200.0}, 100.0)
+    assert v["reading"].startswith("invalid: undefined comparison") and v["valid"] is False
+
+
+def test_an_undefined_comparison_exits_2_and_is_marked_invalid(tmp_path, monkeypatch):
+    args = _main_env(tmp_path, monkeypatch, []) + ["--thresholds", "50", "100", "200"]
+    out = tmp_path / "out"
+    TS.main(args + ["--out", str(out)])
+    _write_results(out)
+    f = out / "result_a_T50.npz"
+    d = dict(np.load(f))
+    d["counts15"] = d["counts15"].copy()
+    d["counts15"][0] = 0                                               # no clean sightline
+    f.unlink()
+    np.savez(f, **d)
+    assert TS.main(args + ["--out", str(out)]) == 2
+    doc = json.loads((out / "summary.json").read_text())
+    assert doc["verdict"]["valid"] is False and doc["verdict"]["reading"].startswith("invalid: undefined")
+    (out / "self_check_a.json").write_text(json.dumps(dict(_check(passed=False), threshold=100.0)))
+    assert TS.main(args + ["--out", str(out)]) == 2                    # both reasons are reported
+    reading = json.loads((out / "summary.json").read_text())["verdict"]["reading"]
+    assert "undefined comparison" in reading and "self-check failed or missing" in reading
+
+
+def test_existing_results_and_self_checks_are_reused_not_recomputed(tmp_path):
+    _write_results(tmp_path, tags=("a",))
+    TS.run_input("a", tmp_path / "no_such_input.hdf5", [50.0, 100.0, 200.0], 1.0, {}, "synth", tmp_path,
+                 lambda m: None)                                       # nothing to do: the input is never opened
+    doc = dict(_check(), threshold=100.0)
+    (tmp_path / "self_check_a.json").write_text(json.dumps(doc))
+    before = (tmp_path / "self_check_a.json").stat().st_mtime_ns
+    got = TS.self_check("a", tmp_path / "no_such_input.hdf5", 10, 100.0, 1.0, {}, "synth", tmp_path, lambda m: None)
+    assert got == doc and (tmp_path / "self_check_a.json").stat().st_mtime_ns == before
+
+
+def test_the_low_k_window_is_validated(tmp_path, monkeypatch, capsys):
+    args = _main_env(tmp_path, monkeypatch, [])
+    with pytest.raises(SystemExit):
+        TS.main(args + ["--out", str(tmp_path / "out"), "--lowk-kmin", "0.02"])
+    assert "kmin < kmax" in capsys.readouterr().err and not (tmp_path / "out").exists()
+    assert np.isnan(TS._nan_max([0.01, float("nan")])) and TS._nan_max([0.01, 0.02]) == 0.02
