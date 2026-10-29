@@ -108,11 +108,12 @@ def templates(pf4, pu4):
 def compare(t, t_ref):
     """Amplitude ratio a (least squares of t on t_ref) and shape residual s = rms(t - a t_ref) / rms(t_ref)."""
     t, t_ref = np.asarray(t, dtype=np.float64), np.asarray(t_ref, dtype=np.float64)
-    ref2 = float(np.sum(t_ref * t_ref))
-    if not ref2 > 0:
-        return float("nan"), float("nan")
-    a = float(np.sum(t * t_ref)) / ref2
-    s = float(np.sqrt(np.mean((t - a * t_ref) ** 2)) / np.sqrt(np.mean(t_ref ** 2)))
+    with np.errstate(invalid="ignore", over="ignore"):                # non-finite templates give NaN, refused later
+        ref2 = float(np.sum(t_ref * t_ref))
+        if not (ref2 > 0 and np.isfinite(ref2)):
+            return float("nan"), float("nan")
+        a = float(np.sum(t * t_ref)) / ref2
+        s = float(np.sqrt(np.mean((t - a * t_ref) ** 2)) / np.sqrt(np.mean(t_ref ** 2)))
     return a, s
 
 
