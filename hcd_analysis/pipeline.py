@@ -78,6 +78,21 @@ logger = logging.getLogger(__name__)
 # Metadata helper
 # ---------------------------------------------------------------------------
 
+def _repo_dirty() -> Optional[bool]:
+    """Whether the hcd_priya checkout has uncommitted changes (None when git cannot tell)."""
+    import subprocess
+    try:
+        out = subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=str(Path(__file__).resolve().parent.parent),
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        return bool(out.strip())
+    except Exception:
+        return None
+
+
 def _repo_commit() -> str:
     """Return short git commit hash of the hcd_priya repo, or 'unknown'."""
     import subprocess
@@ -416,6 +431,7 @@ def _save_snap_outputs(
         "n_absorbers": n_absorbers,
         "timing_s": {k: round(v, 3) for k, v in timing.items()},
         "code_commit": _repo_commit(),
+        "code_dirty": _repo_dirty(),
     }
     if ics_meta:
         meta["sim_ics"] = {k: (float(v) if isinstance(v, (int, float)) else v)
@@ -675,15 +691,19 @@ def _match_snaps_by_z(
 
 def check_convergence_settings(lf_root: Path, hf_root: Path) -> None:
     """Refuse to combine the two resolutions' products when their recorded run settings differ in anything but
-    data_root (RunSettingsMismatch). Without both records the settings cannot be compared: a warning is logged."""
+    data_root, or when only one of them has a record (RunSettingsMismatch). Two roots without records (written before
+    records existed) cannot be compared: a warning is logged."""
     recs = {}
     for name, root in (("low-resolution", Path(lf_root)), ("hires", Path(hf_root))):
         p = root / RUN_SETTINGS_FILE
         recs[name] = read_record(p)["settings"] if os.path.lexists(p) else None
     missing = [n for n, r in recs.items() if r is None]
+    if len(missing) == 1:
+        raise RunSettingsMismatch(f"convergence: the {missing[0]} root has no {RUN_SETTINGS_FILE}, so its settings are "
+                                  f"unknown and cannot be combined with the recorded {lf_root} / {hf_root}")
     if missing:
-        logger.warning("convergence: no run-settings record for %s; the two resolutions' settings are not compared",
-                       " and ".join(missing))
+        logger.warning("convergence: neither %s nor %s has a run-settings record; their settings are not compared",
+                       lf_root, hf_root)
         return
     lf, hf = ({k: v for k, v in r.items() if k != "data_root"} for r in recs.values())
     from .run_settings import _differences, _lookup

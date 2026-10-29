@@ -4,8 +4,10 @@
 # Identical to config/default.yaml EXCEPT hires_data_root + resume:false.
 # resume:false FORCES reprocessing of every snap (overwrites any stale catalog
 # built from the old emu_full_hires raw tau). Outputs land under
-# <output-root>/hires/<sim>/snap_NNN/ (pass
-# --output-root /scratch/cavestru_root/cavestru0/mfho/hcd_outputs).
+# <output-root>/hires/<sim>/snap_NNN/. Pass a NEW --output-root: an output root that
+# holds files but no run_settings.json is refused (hcd_analysis/run_settings.py), and
+# the 2026-05 products under /scratch/cavestru_root/cavestru0/mfho/hcd_outputs predate
+# the record.
 
 data_root: /nfs/turbo/umor-yueyingn/mfho/emu_full
 hires_data_root: /scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2
@@ -31,12 +33,13 @@ absorber:
   fast_mode: true
   # tau_threshold: a system is a run of pixels with tau above this value (runs closer
   # than merge_dv_kms are merged); in fast_mode its NHI is the tau integral over that
-  # run divided by the Lyman-alpha cross-section. A line-centre tau of 100 is reached at NHI ~ 10^15.6 for b = 30 km/s, far below
-  # the LLS lower edge (log N = 17.2, line-centre tau ~ 4000), so the core of every HCD
-  # is captured; min_log_nhi below then discards the sub-LLS detections. A skewer is
-  # searched only if its max tau reaches max(tau_threshold, ~400) (hcd_analysis/catalog.py).
-  # How much the catalogue and the class templates change with this value:
-  # docs/tau_threshold.md (scripts/tau_threshold_sensitivity.py).
+  # run divided by the Lyman-alpha cross-section. A line-centre tau of 100 is reached
+  # at NHI ~ 10^15.6 for b = 30 km/s, far below the LLS lower edge (log N = 17.2,
+  # line-centre tau ~ 4000), so the core of every HCD is captured; min_log_nhi below
+  # then discards the sub-LLS detections. A skewer is searched only if its max tau
+  # reaches max(tau_threshold, ~400) (hcd_analysis/catalog.py). How much the catalogue
+  # and the class templates change with this value: docs/tau_threshold.md
+  # (scripts/tau_threshold_sensitivity.py).
   tau_threshold: 100.0      # pixel tau floor for system detection
   merge_dv_kms: 100.0       # merge gap (km/s) between adjacent blobs
   min_pixels: 2             # minimum pixels for a valid system

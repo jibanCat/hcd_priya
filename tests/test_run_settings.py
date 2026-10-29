@@ -68,10 +68,70 @@ def test_an_unreadable_record_is_refused_even_when_its_settings_are_equal(tmp_pa
 
 @pytest.mark.parametrize("kind", ["directory", "fifo"])
 def test_a_record_that_is_not_a_regular_file_is_refused_without_blocking(tmp_path, kind):
+    import threading
     p = tmp_path / RS.RUN_SETTINGS_FILE
     p.mkdir() if kind == "directory" else os.mkfifo(p)
-    with pytest.raises(RS.RunSettingsMismatch, match="not a regular file|cannot be read"):
-        RS.record_or_verify(tmp_path, {"a": 1})
+    caught = []
+
+    def call():
+        try:
+            RS.record_or_verify(tmp_path, {"a": 1})
+        except RS.RunSettingsMismatch as e:
+            caught.append(str(e))
+    t = threading.Thread(target=call, daemon=True)
+    t.start()
+    t.join(timeout=10)
+    assert not t.is_alive(), "reading the record blocked"
+    assert caught and ("not a regular file" in caught[0] or "cannot be read" in caught[0])
+
+
+def test_the_record_is_world_readable_and_the_message_lists_at_most_twelve_keys(tmp_path):
+    RS.record_or_verify(tmp_path, {f"k{i:02d}": i for i in range(13)})
+    assert (tmp_path / RS.RUN_SETTINGS_FILE).stat().st_mode & 0o777 == 0o644
+    with pytest.raises(RS.RunSettingsMismatch) as e:
+        RS.record_or_verify(tmp_path, {f"k{i:02d}": -1 for i in range(12)})
+    msg = str(e.value)
+    assert "(and 1 more)" in msg and "k00: recorded 0, this run -1" in msg and "k12" not in msg
+    with pytest.raises(RS.RunSettingsMismatch, match="k12: recorded 12, this run '<absent>'"):
+        RS.record_or_verify(tmp_path, {f"k{i:02d}": i for i in range(12)})
+
+
+def test_a_process_that_recorded_and_wrote_between_the_check_and_the_scan_is_not_mistaken_for_unknown_files(
+        tmp_path, monkeypatch):
+    """The re-check after the scan: another process records, then writes a product, after this one found no record."""
+    real = RS._holds_files
+
+    def other_process_first(out_dir, ignore=()):
+        if not (tmp_path / RS.RUN_SETTINGS_FILE).exists():
+            RS._publish(tmp_path, tmp_path / RS.RUN_SETTINGS_FILE, {"format": RS.FORMAT, "settings": {"a": 1},
+                                                                    "info": {}})
+            (tmp_path / "sim").mkdir()
+            (tmp_path / "sim" / "done").write_text("")
+        return real(out_dir, ignore)
+    monkeypatch.setattr(RS, "_holds_files", other_process_first)
+    RS.record_or_verify(tmp_path, {"a": 1})                                     # verified, not refused
+    with pytest.raises(RS.RunSettingsMismatch, match="a: recorded 1, this run 2"):
+        RS.record_or_verify(tmp_path, {"a": 2})
+
+
+def test_the_scan_rules(tmp_path):
+    """Only top-level entries can be ignored; a symlink counts as contents and is not followed; a loop ends."""
+    nested = tmp_path / "n"
+    (nested / "sim" / "hires").mkdir(parents=True)
+    (nested / "sim" / "hires" / "x").write_text("")
+    with pytest.raises(RS.RunSettingsMismatch, match="holds files"):
+        RS.record_or_verify(nested, {"a": 1}, ignore=("hires",))
+    (tmp_path / "empty").mkdir()
+    link = tmp_path / "l"
+    link.mkdir()
+    (link / "to_empty").symlink_to(tmp_path / "empty")
+    with pytest.raises(RS.RunSettingsMismatch, match="holds files"):
+        RS.record_or_verify(link, {"a": 1})
+    loop = tmp_path / "loop"
+    (loop / "d").mkdir(parents=True)
+    (loop / "d" / "back").symlink_to(loop)
+    with pytest.raises(RS.RunSettingsMismatch, match="holds files"):
+        RS.record_or_verify(loop, {"a": 1})
 
 
 def test_a_stale_temporary_file_does_not_block_or_count_as_contents(tmp_path):
@@ -325,6 +385,22 @@ def test_run_hires_then_run_all_into_one_root(tmp_path, monkeypatch):
     PL.run_all(cfg(tau_threshold=100.0))
     root = Path(tmp_path / "out")
     assert (root / RS.RUN_SETTINGS_FILE).exists() and (root / "hires" / RS.RUN_SETTINGS_FILE).exists()
+
+
+def test_convergence_ratios_check_the_records_first(tmp_path, monkeypatch, caplog):
+    PL, ss, entry, cfg = _setup(tmp_path, monkeypatch)
+    c = cfg(tau_threshold=100.0)
+    root = Path(c.output_root)
+    (root / "hires").mkdir(parents=True)
+    assert PL.compute_convergence_ratios(c) == {}                            # two unrecorded roots: warned
+    assert "not compared" in caplog.text
+    RS.record_or_verify(root, PL.product_settings(c), ignore=("hires",))
+    with pytest.raises(RS.RunSettingsMismatch, match="hires root has no run_settings.json"):
+        PL.compute_convergence_ratios(c)                                     # one record only
+    h = cfg(tau_threshold=300.0)
+    RS.record_or_verify(root / "hires", PL.product_settings(h))
+    with pytest.raises(RS.RunSettingsMismatch, match="absorber.tau_threshold: low-resolution 100.0, hires 300.0"):
+        PL.compute_convergence_ratios(c)
 
 
 def test_convergence_refuses_resolutions_made_with_different_settings(tmp_path, monkeypatch, caplog):

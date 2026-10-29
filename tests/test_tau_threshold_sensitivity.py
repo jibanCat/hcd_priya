@@ -119,6 +119,7 @@ def test_a_change_confined_to_the_first_stored_k_bin_registers():
     ({"lls": 1.40}, "important"),
     ({"lls": 0.60}, "important"),
     ({"clean": np.full(K, 1.02)}, "modest"),                   # templates unchanged, clean changed by 2%
+    ({"clean": np.full(K, 0.98)}, "modest"),                   # a clean decrease counts too
     ({"shape": 0.012 * np.cos(np.linspace(0, 3, K))}, "modest"),
     ({"shape": 0.05 * np.cos(np.linspace(0, 3, K))}, "important"),
 ])
@@ -135,6 +136,23 @@ def test_the_rule_boundaries():
     assert TS._reading(0.29, 0.10, 0.5) == "modest"
     assert TS._reading(0.2901, 0.0, 0.0) == "important"
     assert TS._reading(0.0, 0.1001, 0.0) == "important"
+
+
+def test_per_class_readings_use_a_and_s_of_that_class_only():
+    shape = 0.05 * np.cos(np.linspace(0, 3, K))
+    v = TS.verdict(_summary(T50=_result(sub=0.7, clean=np.full(K, 1.02)), T200=_result(shape=shape)),
+                   {50.0, 200.0}, 100.0)
+    assert v["per_class"]["subDLA"]["reading"] == "important"          # a decrease of 30%
+    assert v["per_class"]["LLS"]["reading"] == "important"             # shape only
+    assert v["per_class"]["DLA"]["reading"] == "negligible"            # the clean change is not a class's
+
+
+def test_lowk_change_cut_and_normalisation():
+    kf = np.array([0.002, 0.006, 0.01, 0.02])
+    ref = np.array([0.2, -0.1, 50.0, 50.0])
+    t = np.array([0.1, -0.1, 0.0, 0.0])
+    assert TS.lowk_change(t, ref, kf, 0.01) == pytest.approx(0.1 / 0.2)  # k = 0.01 excluded; max |t_ref| below
+    assert np.isnan(TS.lowk_change(t, ref, kf, 0.001))                    # no bin below the cut
 
 
 def test_per_class_readings_differ_and_only_headline_rows_count():
@@ -196,7 +214,12 @@ def test_the_command_line_records_its_settings_and_refuses_a_rerun_with_others(t
 
 @pytest.mark.parametrize("extra, why", [(["--only", "c"], "not among the inputs"),
                                         (["--thresholds", "100", "33.3333333"], "6 significant digits"),
-                                        (["--headline", "75"], "must be among")])
+                                        (["--thresholds", "100", "-5", "50", "200"], "positive"),
+                                        (["--thresholds", "100", "inf", "50", "200"], "positive"),
+                                        (["--headline", "75"], "must be among"),
+                                        (["--reference", "75"], "must be among"),
+                                        (["--anchor-cache", "c.h5", "--n-skewers", "2"], "cannot be combined"),
+                                        (["--input", "a=x"], "unique TAG=PATH")])
 def test_bad_arguments_are_refused_before_anything_is_created(tmp_path, monkeypatch, capsys, extra, why):
     args = _main_env(tmp_path, monkeypatch, [])
     with pytest.raises(SystemExit):
@@ -205,25 +228,106 @@ def test_bad_arguments_are_refused_before_anything_is_created(tmp_path, monkeypa
     assert not (tmp_path / "out").exists()
 
 
-def test_a_failed_self_check_makes_the_reading_invalid(tmp_path, monkeypatch):
-    args = _main_env(tmp_path, monkeypatch, [])
-    out = tmp_path / "out"
-    TS.main(args + ["--out", str(out), "--thresholds", "50", "100", "200"])
-    for tag in ("a", "b"):
-        for thr in (50, 100, 200):
-            r = _result()
+def _check(passed=True, **over):
+    doc = {"catalogue_identical": True, "counts_identical": True, "max_rel_diff_filtered": 1e-15,
+           "max_rel_diff_unfiltered": 1e-15, "tau_eff_rel_diff": 1e-15, "scale_solved_rel_diff": 1e-12}
+    if not passed:
+        doc["counts_identical"] = False
+    doc.update(over)
+    doc["passed"] = TS.self_check_passed(doc)
+    return doc
+
+
+@pytest.mark.parametrize("over, ok", [
+    ({}, True), ({"catalogue_identical": False}, False), ({"counts_identical": False}, False),
+    ({"max_rel_diff_filtered": 1e-9}, False), ({"max_rel_diff_unfiltered": float("nan")}, False),
+    ({"tau_eff_rel_diff": 2e-10}, False), ({"scale_solved_rel_diff": 2e-4}, False),
+    ({"scale_solved_rel_diff": 9e-5}, True), ({"tau_eff_rel_diff": None}, False)])
+def test_the_self_check_criterion(over, ok):
+    doc = _check(**over)
+    assert TS.self_check_passed(doc) is ok
+    doc.pop("max_rel_diff_filtered")
+    assert TS.self_check_passed(doc) is False                          # a missing entry fails
+
+
+def _write_results(out, tags=("a", "b"), thrs=(50, 100, 200), **over):
+    for tag in tags:
+        for thr in thrs:
+            r = _result(**over.get((tag, thr), {}))
             np.savez(out / f"result_{tag}_T{thr}.npz", kf=r["kf"], pf15=r["pf15"], pu15=r["pu15"],
-                     counts15=r["counts15"], log_nhi=np.array([17.5, 19.5, 20.5]))
-    (out / "self_check_a.json").write_text(json.dumps({"passed": True}))
-    (out / "self_check_b.json").write_text(json.dumps({"passed": False}))
-    assert TS.main(args + ["--out", str(out), "--thresholds", "50", "100", "200", "--self-check", "4"]) == 2
+                     counts15=r["counts15"], log_nhi=np.array([17.5, 19.5, 20.5]), scale=np.array(0.8),
+                     target_F=np.array(0.7), tau_eff=np.array(0.4), z_grid=np.array(3.0))
+
+
+def test_a_failed_or_missing_self_check_makes_the_reading_invalid(tmp_path, monkeypatch):
+    args = _main_env(tmp_path, monkeypatch, []) + ["--thresholds", "50", "100", "200"]
+    out = tmp_path / "out"
+    TS.main(args + ["--out", str(out)])
+    _write_results(out)
+    (out / "self_check_a.json").write_text(json.dumps(_check()))
+    (out / "self_check_b.json").write_text(json.dumps(_check(passed=False)))
+    assert TS.main(args + ["--out", str(out), "--self-check", "4"]) == 2
     doc = json.loads((out / "summary.json").read_text())
     assert doc["verdict"]["reading"].startswith("invalid") and "'b'" in doc["verdict"]["reading"]
-    (out / "self_check_b.json").unlink()
-    (out / "self_check_b.json").write_text(json.dumps({"passed": True}))
-    assert TS.main(args + ["--out", str(out), "--thresholds", "50", "100", "200", "--self-check", "4"]) == 0
+    assert doc["verdict"]["valid"] is False
+    assert {c["reading"] for c in doc["verdict"]["per_class"].values()} == {"invalid"}
+    (out / "self_check_b.json").unlink()                              # missing, and this call has no --self-check
+    assert TS.main(args + ["--out", str(out)]) == 2
+    assert "'b'" in json.loads((out / "summary.json").read_text())["verdict"]["reading"]
+    (out / "self_check_b.json").write_text(json.dumps(_check()))
+    assert TS.main(args + ["--out", str(out)]) == 0
     doc = json.loads((out / "summary.json").read_text())
-    assert doc["verdict"]["reading"] == "negligible" and doc["summary_settings"]["n_k"] == 172
+    assert doc["verdict"]["reading"] == "negligible" and doc["verdict"]["valid"] is True
+    assert doc["summary_settings"]["n_k"] == 172 and doc["summary_settings"]["lowk_kmax"] == 0.01
+
+
+def test_the_summary_is_strict_json_when_a_ratio_is_undefined(tmp_path, monkeypatch):
+    args = _main_env(tmp_path, monkeypatch, []) + ["--thresholds", "50", "100", "200"]
+    out = tmp_path / "out"
+    TS.main(args + ["--out", str(out)])
+    _write_results(out)
+    for tag in ("a", "b"):                                            # the reference has no LLS absorber
+        f = out / f"result_{tag}_T100.npz"
+        d = dict(np.load(f))
+        d["log_nhi"] = np.array([19.5, 20.5])
+        f.unlink()
+        np.savez(f, **d)
+    TS.main(args + ["--out", str(out)])
+
+    def no_constant(c):
+        raise ValueError(c)
+    doc = json.loads((out / "summary.json").read_text(), parse_constant=no_constant)
+    assert doc["rows"]["a|T50"]["LLS"]["count_ratio"] is None
+
+
+def test_results_of_one_input_from_different_passes_are_refused(tmp_path):
+    _write_results(tmp_path, tags=("a",))
+    TS.load_results(tmp_path, ["a"], [50.0, 100.0, 200.0])
+    d = dict(np.load(tmp_path / "result_a_T200.npz"))
+    d["scale"] = np.array(0.81)
+    np.savez(tmp_path / "result_a_T200.npz", **d)
+    with pytest.raises(ValueError, match="disagree on scale"):
+        TS.load_results(tmp_path, ["a"], [50.0, 100.0, 200.0])
+
+
+def test_results_are_written_once(tmp_path):
+    p = tmp_path / "r.npz"
+    TS._save_once(p, x=np.arange(3))
+    before = p.read_bytes()
+    with pytest.raises(FileExistsError):
+        TS._save_once(p, x=np.arange(4))
+    assert p.read_bytes() == before and [f.name for f in tmp_path.iterdir()] == ["r.npz"]
+    assert p.stat().st_mode & 0o777 == 0o644
+
+
+def test_the_blocked_mean_optical_depth_and_scale_with_an_uneven_last_block(monkeypatch):
+    tau = np.random.default_rng(3).exponential(0.5, size=(103, 16))
+    monkeypatch.setattr(TS, "_read_rows", lambda path, s, e: tau[s:e].copy())
+    monkeypatch.setattr(TS, "_filter_rows", lambda t, tau_eff: t)
+    whole = float(-np.log(np.mean(np.exp(-tau))))
+    assert TS._global_tau_eff("x", 103, 25) == pytest.approx(whole, rel=1e-13)     # blocks 25 x 4 + 3
+    s_val = TS._solve_scale("x", 103, 25, whole, 0.55)
+    assert float(np.mean(np.exp(-s_val * tau))) == pytest.approx(0.55, rel=1e-12)
 
 
 def test_the_anchor_compares_every_stored_bin_with_the_matching_cache_row(tmp_path):
@@ -239,7 +343,64 @@ def test_the_anchor_compares_every_stored_bin_with_the_matching_cache_row(tmp_pa
         pu = r["pu15"].copy()
         pu[3, 0] *= 1.001                                         # differs only in the first stored k bin
         h["P_tier_c"] = np.stack([r["pu15"], pu])
-    out = TS.anchor({("z", 100.0): r}, cache, "synth", 1.0, 100.0, n_k=K)["z"]
+    out = TS.anchor({("z", 100.0): r, ("z", 50.0): _result(lls=3.0)}, cache, "synth", 1.0, 100.0, n_k=K)
+    assert set(out) == {"z"}                                         # only the reference threshold is anchored
+    out = out["z"]
     assert out["cache_row"] == 1 and out["count_diff_by_bin"] == [0] * 15 and out["scale_rel_diff"] == 0.0
     assert out["max_rel_diff_filtered"] == 0.0
     assert out["max_rel_diff_unfiltered"] == pytest.approx(abs(1 / 1.001 - 1))          # mine / cache - 1, bin 0
+
+
+def test_the_anchor_needs_exactly_one_row_of_that_simulation_z_and_alpha(tmp_path):
+    import h5py
+    r = _result()
+    r["z_grid"], r["scale"] = np.array(3.0), np.array(0.8)
+    for name, alphas in (("two_rows", [1.0, 1.0]), ("other_alpha", [1.1, 1.2])):
+        cache = tmp_path / f"{name}.h5"
+        with h5py.File(cache, "w") as h:
+            h["sim_name"] = np.array([b"synth", b"synth"])
+            h["z_grid"], h["alpha_slope"], h["scale"] = [3.0, 3.0], alphas, [0.8, 0.8]
+            h["tier_c_counts"] = np.stack([r["counts15"]] * 2)
+            h["P_tier_c_filtered"] = np.stack([r["pf15"]] * 2)
+            h["P_tier_c"] = np.stack([r["pu15"]] * 2)
+        out = TS.anchor({("z", 100.0): r}, cache, "synth", 1.0, 100.0, n_k=K)["z"]
+        assert out == {"error": f"{2 if name == 'two_rows' else 0} matching cache rows"}
+
+
+def _replace_arg(args, flag, value):
+    out = list(args)
+    out[out.index(flag) + 1] = value
+    return out
+
+
+@pytest.mark.parametrize("change, key", [
+    (lambda a: _replace_arg(a, "--alpha", "1.1"), "alpha_slope"),
+    (lambda a: _replace_arg(a, "--sim", "other"), "sim"),
+    (lambda a: a + ["--n-skewers", "2"], "n_skewers"),
+])
+def test_the_command_line_refuses_each_result_setting(tmp_path, monkeypatch, change, key):
+    args = _main_env(tmp_path, monkeypatch, [])
+    out = tmp_path / "out"
+    TS.main(args + ["--out", str(out)])
+    rec = json.loads((out / RS.RUN_SETTINGS_FILE).read_text())["settings"]
+    assert set(rec) == {"tool", "sim", "inputs", "thresholds", "alpha_slope", "absorber_except_threshold", "config",
+                        "anchor_cache", "n_skewers", "scale"}
+    with pytest.raises(RS.RunSettingsMismatch, match=key):
+        TS.main(change(args) + ["--out", str(out)])
+
+
+def test_the_command_line_refuses_another_config_or_a_rewritten_input(tmp_path, monkeypatch):
+    import os
+    args = _main_env(tmp_path, monkeypatch, [])
+    out = tmp_path / "out"
+    TS.main(args + ["--out", str(out)])
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(json.dumps({"absorber": {"tau_threshold": 100.0, "fast_mode": True, "min_log_nhi": 17.5}}))
+    with pytest.raises(RS.RunSettingsMismatch, match="absorber_except_threshold.min_log_nhi"):
+        TS.main(args + ["--out", str(out)])
+    cfg.write_text(json.dumps({"absorber": {"tau_threshold": 100.0, "fast_mode": True, "min_log_nhi": 17.2}}))
+    src = tmp_path / "in.hdf5"
+    st = src.stat()
+    os.utime(src, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    with pytest.raises(RS.RunSettingsMismatch, match="mtime_ns"):
+        TS.main(args + ["--out", str(out)])

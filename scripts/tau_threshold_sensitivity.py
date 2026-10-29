@@ -22,15 +22,19 @@ absorbs; a shape change is not.
 The reading of the ``--headline`` thresholds (default 50 and 200), over every class and input:
 
     negligible  every |a - 1| < 0.05, every s < 0.05 and every clean change < 1%
-    modest      every |a - 1| <= 0.29 and every s <= 0.10   (0.29: about the width of the LLS amplitude prior)
+    modest      every |a - 1| <= 0.29 and every s <= 0.10   (0.29: the DESI/eBOSS LLS fractional prior width, 0.287)
     important   otherwise
+
+The per-class readings apply the same thresholds to a and s only (the clean change belongs to no class). a weights the
+k bins by T_ref^2, so a class whose template is steep at the lowest k (DLA) is dominated by the first stored bins.
 
 The run reads each input in blocks of ``--chunk`` skewers (twice: once for the mean flux the PRIYA filter uses), so its
 memory stays near three blocks. The per-bin P1D is a mean over sightlines, so the blocks combine exactly by their
 counts. ``--self-check N`` compares the blocked path with the whole-array production path on the first N skewers (the
-catalogue, the per-bin counts and P1D, the filter's mean optical depth and the mean-flux scale); a failed self-check
-makes the reading "invalid" and the exit status 2. The mean-flux scale is the cache row's (production) value with
-``--anchor-cache``, else solved over the file.
+catalogue, the per-bin counts and P1D, the filter's mean optical depth and the mean-flux scale), in blocks that leave a
+shorter last block, as a full-file run does. Once any input has a self-check, every input must have a passed one: a
+failed or missing self-check makes the reading "invalid" and the exit status 2. The mean-flux scale is the cache row's
+(production) value with ``--anchor-cache``, else solved over the skewers used (the whole file unless ``--n-skewers``).
 
 Outputs, in ``--out``: ``run_settings.json`` (the inputs and every setting the results depend on, written once; a rerun
 into the same directory with any of them different is refused, hcd_analysis/run_settings.py), one
@@ -127,7 +131,8 @@ def lowk_change(t, t_ref, kf, kmax):
 def summarize(results, reference, n_k, lowk_kmax=0.01):
     """Per (tag, threshold): the threshold, the sightline counts per class, the largest fractional clean change, and per
     class the absorber count ratio, a, s and the low-k change, all over the first n_k stored k bins (k = 0 is never
-    stored). ``results`` maps (tag, threshold) to dicts with kf, counts15, pf15, pu15 and abs_counts (class -> count)."""
+    stored). ``results`` maps (tag, threshold) to dicts with kf, counts15, pf15, pu15 and abs_counts
+    (class -> count)."""
     out = {}
     for (tag, thr) in sorted(results):
         ref = results.get((tag, reference))
@@ -238,7 +243,8 @@ def _filter_rows(tau, tau_eff):
 
 def _solve_scale(path, n_total, chunk, tau_eff, target_f):
     """The uniform scale s with <exp(-s tau_filtered)> = target_F over the file (Newton on chunked sums); used only
-    when no cache row supplies the production scale (fake_spectra's mean_flux, tolerance 1e-5, needs the whole array)."""
+    when no cache row supplies the production scale (fake_spectra's mean_flux, tolerance 1e-5, needs the whole
+    array)."""
     s_val = 1.0
     for _ in range(50):
         f = df = 0.0
@@ -366,6 +372,18 @@ def run_input(tag, path, thresholds, alpha, absorber, sim, out_dir, log, n_skewe
         log(f"{tag} T={thr:g}: {len(r['absorbers'])} absorbers")
 
 
+def self_check_passed(doc):
+    """The self-check's criterion: identical catalogue and counts, P1D and tau_eff within SELF_CHECK_REL_TOL, the solved
+    scale within SELF_CHECK_SCALE_TOL. A missing or NaN entry fails."""
+    try:
+        return bool(doc["catalogue_identical"] is True and doc["counts_identical"] is True
+                    and all(float(doc[k]) <= SELF_CHECK_REL_TOL
+                            for k in ("max_rel_diff_filtered", "max_rel_diff_unfiltered", "tau_eff_rel_diff"))
+                    and float(doc["scale_solved_rel_diff"]) <= SELF_CHECK_SCALE_TOL)
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def self_check(tag, path, n, reference, alpha, absorber, sim, out_dir, log):
     """The blocked path against the whole-array production path (build_catalog, _apply_priya_filter,
     compute_tier_c_p1d with fake_spectra's mean_flux) on the first n skewers at the reference threshold: the
@@ -394,7 +412,7 @@ def self_check(tag, path, n, reference, alpha, absorber, sim, out_dir, log):
     _, pu, _, _, _ = compute_tier_c_p1d(tau, vmax, alpha_slope=alpha, z=z_grid, catalog=cat,
                                         external_scale=scale, external_target_F=target_f)
     del tau, tau_f
-    block = max(1, n // 4)
+    block = n // 4 + 1 if n > 4 else 1                                 # a shorter last block, as in a full-file run
     tau_eff_blocked = _global_tau_eff(path, n, block)
     scale_solved = _solve_scale(path, n, block, tau_eff_blocked, target_f)
     ch = chunked_tier_c(path, n, [reference], absorber, dv, vmax, alpha, z_grid, tau_eff_blocked, scale, target_f,
@@ -411,22 +429,25 @@ def self_check(tag, path, n, reference, alpha, absorber, sim, out_dir, log):
            "tau_eff_rel_diff": abs(tau_eff_blocked / tau_eff - 1.0),
            "scale_solved_rel_diff": abs(scale_solved / scale - 1.0),
            "tolerances": {"p1d_and_tau_eff": SELF_CHECK_REL_TOL, "scale": SELF_CHECK_SCALE_TOL}}
-    doc["passed"] = bool(doc["catalogue_identical"] and doc["counts_identical"]
-                         and max(doc["max_rel_diff_filtered"], doc["max_rel_diff_unfiltered"],
-                                 doc["tau_eff_rel_diff"]) <= SELF_CHECK_REL_TOL
-                         and doc["scale_solved_rel_diff"] <= SELF_CHECK_SCALE_TOL)
+    doc["passed"] = self_check_passed(doc)
     _link_once(dest, lambda fh: fh.write((json.dumps(doc, indent=1, sort_keys=True) + "\n").encode()))
     log(f"self-check {tag}: {doc}")
     return doc
 
 
 def load_results(out_dir, tags, thresholds):
+    """The result files, refusing an input whose thresholds were computed at different scale, target flux, filter mean
+    optical depth, z grid or k grid (results of one input must come from one pass)."""
     res = {}
     for tag in tags:
         for thr in thresholds:
             with np.load(out_dir / f"result_{tag}_T{thr:g}.npz") as d:
                 res[(tag, thr)] = {k: d[k] for k in d.files}
             res[(tag, thr)]["abs_counts"] = class_counts(res[(tag, thr)]["log_nhi"])
+        first = res[(tag, thresholds[0])]
+        for k in ("scale", "target_F", "tau_eff", "z_grid", "kf"):
+            if k in first and not all(np.array_equal(res[(tag, t)].get(k), first[k]) for t in thresholds):
+                raise ValueError(f"{tag}: the result files disagree on {k}; they are not from one pass")
     return res
 
 
@@ -461,6 +482,29 @@ def anchor(results, cache, sim, alpha, reference, n_k):
     return out
 
 
+def _cache_identity(path):
+    if path is None:
+        return None
+    st = os.stat(path)
+    return {"path": str(Path(path).resolve()), "bytes": st.st_size, "mtime_ns": st.st_mtime_ns}
+
+
+def _dirty():
+    d = _git("status", "--porcelain", "--untracked-files=no")
+    return None if d is None else bool(d)
+
+
+def _finite_or_none(obj):
+    """NaN and infinities as null, so summary.json is strict JSON."""
+    if isinstance(obj, float):
+        return obj if np.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _finite_or_none(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_finite_or_none(v) for v in obj]
+    return obj
+
+
 def _git(*args):
     try:
         return subprocess.check_output(["git", *args], cwd=str(REPO_ROOT), text=True, stderr=subprocess.DEVNULL).strip()
@@ -487,7 +531,8 @@ def main(argv=None):
     ap.add_argument("--anchor-cache", type=Path, default=None)
     ap.add_argument("--n-skewers", type=int, default=None,
                     help="only the first N skewers of each input (a quick look; the anchor then does not apply)")
-    ap.add_argument("--chunk", type=int, default=40000, help="skewers per block (memory: about 3 x chunk x nbins x 8 B)")
+    ap.add_argument("--chunk", type=int, default=40000,
+                    help="skewers per block (memory: about 3 x chunk x nbins x 8 B)")
     ap.add_argument("--self-check", type=int, default=0, metavar="N",
                     help="compare the blocked path with the whole-array production path on the first N skewers")
     ap.add_argument("--only", action="append", default=None, metavar="TAG",
@@ -516,16 +561,17 @@ def main(argv=None):
     cfg_bytes = a.config.read_bytes()
     absorber = dict(yaml.safe_load(cfg_bytes)["absorber"])
     absorber.pop("tau_threshold", None)
-    # Compared settings: the inputs and everything the result files depend on. The block size (rounding only), the
-    # self-check size and the summary's parameters (reference, headline, n_k, low-k cut) are recorded in summary.json.
-    settings = {"tool": "tau_threshold_sensitivity/2", "sim": a.sim,
+    # Compared settings: the inputs and everything the result files depend on (the anchor cache by size and mtime, as
+    # it supplies the scale; the config file by its hash, deliberately conservative). The block size (rounding only),
+    # the self-check size and the summary's parameters (reference, headline, n_k, low-k cut) go to summary.json.
+    settings = {"tool": "tau_threshold_sensitivity/3", "sim": a.sim,
                 "inputs": {t: _file_identity(p) for t, p in sorted(inputs.items())},
                 "thresholds": thresholds, "alpha_slope": a.alpha, "absorber_except_threshold": absorber,
                 "config": {"path": str(a.config.resolve()), "sha256": hashlib.sha256(cfg_bytes).hexdigest()},
-                "anchor_cache": str(a.anchor_cache.resolve()) if a.anchor_cache else None,
+                "anchor_cache": _cache_identity(a.anchor_cache),
                 "n_skewers": a.n_skewers,
                 "scale": "the cache row's (production) scale and target flux" if a.anchor_cache and a.n_skewers is None
-                         else "solved over the file (Newton, 1e-12)"}
+                         else "solved over the skewers used (Newton, 1e-12)"}
 
     def info():
         import h5py
@@ -534,12 +580,16 @@ def main(argv=None):
             fs = getattr(fake_spectra, "__version__", fake_spectra.__file__)
         except Exception:
             fs = None
-        return {"code_commit": _git("rev-parse", "HEAD") or "unknown", "code_dirty": bool(_git("status", "--porcelain")),
+        return {"code_commit": _git("rev-parse", "HEAD") or "unknown", "code_dirty": _dirty(),
                 "python": platform.python_version(), "numpy": np.__version__, "h5py": h5py.__version__,
                 "fake_spectra": fs}
 
     record_or_verify(a.out, settings, info=info)
-    logf = open(a.out / "log.txt", "a")
+    with open(a.out / "log.txt", "a") as logf:
+        return _run(a, inputs, thresholds, absorber, logf)
+
+
+def _run(a, inputs, thresholds, absorber, logf):
 
     def log(msg):
         line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {msg}"
@@ -564,21 +614,23 @@ def main(argv=None):
     doc = {"rows": summary, "verdict": verdict(summary, set(a.headline), a.reference),
            "summary_settings": {"reference": a.reference, "headline": sorted(a.headline), "n_k": a.n_k,
                                 "lowk_kmax": a.lowk_kmax, "self_check_n": a.self_check,
-                                "code_commit": _git("rev-parse", "HEAD") or "unknown",
-                                "code_dirty": bool(_git("status", "--porcelain"))}}
+                                "code_commit": _git("rev-parse", "HEAD") or "unknown", "code_dirty": _dirty()}}
     if a.anchor_cache:
         doc["anchor"] = anchor(results, a.anchor_cache, a.sim, a.alpha, a.reference, a.n_k)
     checks = {c.stem[len("self_check_"):]: json.loads(c.read_text()) for c in sorted(a.out.glob("self_check_*.json"))}
     if checks:
         doc["self_check"] = checks
-    failed = sorted(t for t, c in checks.items() if not c.get("passed"))
-    if a.self_check and set(checks) != set(inputs):
+    failed = sorted(t for t, c in checks.items() if not self_check_passed(c))
+    if a.self_check or checks:                                      # once any input is checked, every input must be
         failed += sorted(set(inputs) - set(checks))
+    doc["verdict"]["valid"] = not failed
     if failed:
-        doc["verdict"]["reading"] = f"invalid: self-check failed or missing for {failed}"
+        doc["verdict"]["reading"] = f"invalid: self-check failed or missing for {sorted(failed)}"
+        for c in doc["verdict"]["per_class"].values():
+            c["reading"] = "invalid"
     fd, tmp = tempfile.mkstemp(dir=a.out, prefix=".summary.json.", suffix=".tmp")
     with os.fdopen(fd, "w") as fh:
-        fh.write(json.dumps(doc, indent=1, sort_keys=True) + "\n")
+        fh.write(json.dumps(_finite_or_none(doc), indent=1, sort_keys=True, allow_nan=False) + "\n")
     os.chmod(tmp, 0o644)
     os.replace(tmp, a.out / "summary.json")                         # derived from the result files; recomputable
     log(f"verdict: {doc['verdict']['reading']}")

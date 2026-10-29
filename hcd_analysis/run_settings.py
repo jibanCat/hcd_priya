@@ -130,16 +130,16 @@ def record_or_verify(out_dir, settings, info=None, ignore=()):
     its record.
 
     ``info`` is an optional callable returning a dict of fields recorded but never compared; it is called only when
-    a record is written. ``ignore`` names entries of ``out_dir`` that do not count as its contents (a nested output
-    directory with its own record). Returns the record's path. Raises ``RunSettingsMismatch`` (and changes nothing) when the
-    recorded settings differ (the message names up to 12 differing keys with both values), when ``out_dir`` holds
-    files but no record, or when the record is unreadable; ``ValueError`` for non-finite settings (before anything is
-    created)."""
+    a record is written. ``ignore`` names top-level entries of ``out_dir`` that do not count as its contents (a nested
+    output directory with its own record). Returns the record's path. Raises ``RunSettingsMismatch`` (and changes
+    nothing) when the recorded settings differ (the message names up to 12 differing keys with both values), when
+    ``out_dir`` holds files but no record, or when the record is unreadable; ``ValueError`` for non-finite settings
+    (before anything is created)."""
     out_dir = Path(out_dir)
     path = out_dir / RUN_SETTINGS_FILE
     want = _canonical(settings)
     if not os.path.lexists(path):
-        # A record is always linked before anything else is written, so files without one are of unknown settings
+        # The writers here link a record before anything else, so files without one are of unknown settings
         # (re-checked: a process starting together with this one may have just recorded and begun writing).
         if _holds_files(out_dir, ignore) and not os.path.lexists(path):
             raise RunSettingsMismatch(
