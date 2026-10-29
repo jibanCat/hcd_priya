@@ -332,7 +332,7 @@ def test_meta_records_the_code_commit(tmp_path, monkeypatch):
     c = cfg()
     PL.run_one_snap(ss, entry, c)
     meta = json.loads((PL.snap_output_dir(c, "synthsim", 1) / "meta.json").read_text())
-    assert meta["code_commit"] == PL._repo_commit()
+    assert meta["code_commit"] == PL._repo_commit() and meta["code_dirty"] in (True, False, None)
 
 
 def test_an_output_root_written_without_a_record_is_refused(tmp_path, monkeypatch):
@@ -440,4 +440,8 @@ def test_the_dirty_flag_is_null_when_git_cannot_tell(monkeypatch):
     def fail(*a, **k):
         raise OSError("no git")
     monkeypatch.setattr(subprocess, "check_output", fail)
-    assert PL._repo_dirty() is None
+    PL._repo_dirty.cache_clear()
+    try:
+        assert PL._repo_dirty() is None
+    finally:
+        PL._repo_dirty.cache_clear()

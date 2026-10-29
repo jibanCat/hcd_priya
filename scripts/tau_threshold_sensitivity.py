@@ -171,6 +171,15 @@ def verdict(summary, headline, reference):
     rows = [v for v in summary.values() if v["threshold"] in headline]
     if not rows:
         raise ValueError(f"no summary rows for the headline thresholds {sorted(headline)}")
+    values = [v["clean_max_frac_change"] for v in rows] + [v[c][k] for v in rows for c in TEMPLATE_CLASSES
+                                                           for k in ("amplitude_ratio", "shape_residual")]
+    if not all(np.isfinite(x) for x in values):
+        bad = sorted(f"{v['tag']}|T{v['threshold']:g}" for v in rows
+                     if not all(np.isfinite(x) for x in [v["clean_max_frac_change"]] + [
+                         v[c][k] for c in TEMPLATE_CLASSES for k in ("amplitude_ratio", "shape_residual")]))
+        return {"headline_thresholds": sorted(headline), "reference": reference,
+                "reading": f"invalid: undefined comparison (an empty class or clean set) in {bad}",
+                "per_class": {c: {"reading": "invalid"} for c in TEMPLATE_CLASSES}}
     worst_a = max(abs(v[c]["amplitude_ratio"] - 1.0) for v in rows for c in TEMPLATE_CLASSES)
     worst_s = max(v[c]["shape_residual"] for v in rows for c in TEMPLATE_CLASSES)
     worst_clean = max(v["clean_max_frac_change"] for v in rows)
@@ -444,7 +453,8 @@ def self_check(tag, path, n, reference, alpha, absorber, sim, out_dir, log):
            "scale_solved_rel_diff": abs(scale_solved / scale - 1.0),
            "tolerances": {"p1d_and_tau_eff": SELF_CHECK_REL_TOL, "scale": SELF_CHECK_SCALE_TOL}}
     doc["passed"] = self_check_passed(doc)
-    _link_once(dest, lambda fh: fh.write((json.dumps(doc, indent=1, sort_keys=True) + "\n").encode()))
+    _link_once(dest, lambda fh: fh.write(
+        (json.dumps(_finite_or_none(doc), indent=1, sort_keys=True, allow_nan=False) + "\n").encode()))
     log(f"self-check {tag}: {doc}")
     return doc
 
@@ -460,7 +470,9 @@ def load_results(out_dir, tags, thresholds):
             res[(tag, thr)]["abs_counts"] = class_counts(res[(tag, thr)]["log_nhi"])
         first = res[(tag, thresholds[0])]
         for k in ("scale", "target_F", "tau_eff", "z_grid", "kf"):
-            if k in first and not all(np.array_equal(res[(tag, t)].get(k), first[k]) for t in thresholds):
+            same = (lambda x, y: np.array_equal(x, y)) if k in ("z_grid", "kf") else \
+                (lambda x, y: x is not None and np.allclose(x, y, rtol=1e-12, atol=0))   # block size: last bits only
+            if k in first and not all(same(res[(tag, t)].get(k), first[k]) for t in thresholds):
                 raise ValueError(f"{tag}: the result files disagree on {k}; they are not from one pass")
     return res
 
@@ -504,7 +516,7 @@ def _cache_identity(path):
 
 
 def _dirty():
-    d = _git("status", "--porcelain", "--untracked-files=no")
+    d = _git("--no-optional-locks", "status", "--porcelain", "--untracked-files=no")
     return None if d is None else bool(d)
 
 
@@ -561,6 +573,11 @@ def main(argv=None):
             ap.error(f"threshold {t!r}: give a positive value with at most 6 significant digits")
     if a.reference not in thresholds or not set(a.headline) <= set(thresholds):
         ap.error("--reference and every --headline threshold must be among --thresholds")
+    for name in ("n_k", "chunk"):
+        if getattr(a, name) < 1:
+            ap.error(f"--{name.replace('_', '-')} must be positive")
+    if a.self_check < 0 or (a.n_skewers is not None and a.n_skewers < 1):
+        ap.error("--self-check must be 0 (off) or positive, and --n-skewers positive")
     if a.n_skewers is not None and a.anchor_cache is not None:
         ap.error("--anchor-cache compares whole files; it cannot be combined with --n-skewers")
     inputs = {}
@@ -600,6 +617,9 @@ def main(argv=None):
                 "python": platform.python_version(), "numpy": np.__version__, "h5py": h5py.__version__,
                 "fake_spectra": fs}
 
+    too_big = [t for t, ident in settings["inputs"].items() if a.self_check > ident["n_skewers"]]
+    if too_big:
+        ap.error(f"--self-check {a.self_check} exceeds the skewers of {too_big}")
     record_or_verify(a.out, settings, info=info)
     with open(a.out / "log.txt", "a") as logf:
         return _run(a, inputs, thresholds, absorber, logf)
@@ -629,14 +649,15 @@ def _run(a, inputs, thresholds, absorber, logf):
     summary = summarize(results, a.reference, a.n_k, a.lowk_kmax, a.lowk_kmin)
     doc = {"rows": summary, "verdict": verdict(summary, set(a.headline), a.reference),
            "summary_settings": {"reference": a.reference, "headline": sorted(a.headline), "n_k": a.n_k,
-                                "lowk_kmin": a.lowk_kmin, "lowk_kmax": a.lowk_kmax, "self_check_n": a.self_check,
+                                "lowk_kmin": a.lowk_kmin, "lowk_kmax": a.lowk_kmax,
                                 "code_commit": _git("rev-parse", "HEAD") or "unknown", "code_dirty": _dirty()}}
     if a.anchor_cache:
         doc["anchor"] = anchor(results, a.anchor_cache, a.sim, a.alpha, a.reference, a.n_k)
     checks = {c.stem[len("self_check_"):]: json.loads(c.read_text()) for c in sorted(a.out.glob("self_check_*.json"))}
     if checks:
         doc["self_check"] = checks
-    failed = sorted(t for t, c in checks.items() if not self_check_passed(c))
+    failed = sorted(t for t, c in checks.items()
+                    if not self_check_passed(c) or c.get("threshold") != a.reference)
     if a.self_check or checks:                                      # once any input is checked, every input must be
         failed += sorted(set(inputs) - set(checks))
     doc["verdict"]["valid"] = not failed

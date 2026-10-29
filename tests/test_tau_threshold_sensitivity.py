@@ -274,8 +274,8 @@ def test_a_failed_or_missing_self_check_makes_the_reading_invalid(tmp_path, monk
     out = tmp_path / "out"
     TS.main(args + ["--out", str(out)])
     _write_results(out)
-    (out / "self_check_a.json").write_text(json.dumps(_check()))
-    (out / "self_check_b.json").write_text(json.dumps(_check(passed=False)))
+    (out / "self_check_a.json").write_text(json.dumps(dict(_check(), threshold=100.0)))
+    (out / "self_check_b.json").write_text(json.dumps(dict(_check(passed=False), threshold=100.0)))
     assert TS.main(args + ["--out", str(out), "--self-check", "4"]) == 2
     doc = json.loads((out / "summary.json").read_text())
     assert doc["verdict"]["reading"].startswith("invalid") and "'b'" in doc["verdict"]["reading"]
@@ -284,7 +284,7 @@ def test_a_failed_or_missing_self_check_makes_the_reading_invalid(tmp_path, monk
     (out / "self_check_b.json").unlink()                              # missing, and this call has no --self-check
     assert TS.main(args + ["--out", str(out)]) == 2
     assert "'b'" in json.loads((out / "summary.json").read_text())["verdict"]["reading"]
-    (out / "self_check_b.json").write_text(json.dumps(_check()))
+    (out / "self_check_b.json").write_text(json.dumps(dict(_check(), threshold=100.0)))
     assert TS.main(args + ["--out", str(out)]) == 0
     doc = json.loads((out / "summary.json").read_text())
     assert doc["verdict"]["reading"] == "negligible" and doc["verdict"]["valid"] is True
@@ -449,3 +449,53 @@ def test_asking_for_a_self_check_with_none_written_is_invalid(tmp_path, monkeypa
 def test_code_dirty_is_null_when_git_cannot_tell(monkeypatch):
     monkeypatch.setattr(TS, "_git", lambda *a: None)
     assert TS._dirty() is None
+
+
+@pytest.mark.parametrize("order", ["undefined_first", "undefined_last"])
+def test_an_undefined_comparison_makes_the_reading_invalid_whatever_the_order(order):
+    good = _summary(T50=_result(), T200=_result())
+    bad = dict(good["z|T50"])
+    bad.update(tag="a" if order == "undefined_first" else "zz",
+               LLS=dict(good["z|T50"]["LLS"], amplitude_ratio=float("nan")))
+    rows = {"x|T50": bad, **good} if order == "undefined_first" else {**good, "x|T50": bad}
+    v = TS.verdict(rows, {50.0, 200.0}, 100.0)
+    assert v["reading"].startswith("invalid: undefined comparison")
+    assert {c["reading"] for c in v["per_class"].values()} == {"invalid"}
+
+
+def test_a_self_check_at_another_threshold_does_not_count(tmp_path, monkeypatch):
+    args = _main_env(tmp_path, monkeypatch, []) + ["--thresholds", "50", "100", "200"]
+    out = tmp_path / "out"
+    TS.main(args + ["--out", str(out)])
+    _write_results(out)
+    (out / "self_check_a.json").write_text(json.dumps(dict(_check(), threshold=100.0)))
+    (out / "self_check_b.json").write_text(json.dumps(dict(_check(), threshold=200.0)))
+    assert TS.main(args + ["--out", str(out)]) == 2
+    assert "'b'" in json.loads((out / "summary.json").read_text())["verdict"]["reading"]
+
+
+@pytest.mark.parametrize("extra, why", [(["--self-check", "-1"], "--self-check must be"),
+                                        (["--self-check", "5"], "exceeds the skewers"),
+                                        (["--chunk", "0"], "--chunk must be positive"),
+                                        (["--n-k", "0"], "--n-k must be positive"),
+                                        (["--n-skewers", "0"], "--n-skewers positive")])
+def test_sizes_are_validated_before_anything_is_created(tmp_path, monkeypatch, capsys, extra, why):
+    args = _main_env(tmp_path, monkeypatch, [])
+    with pytest.raises(SystemExit):
+        TS.main(args + ["--out", str(tmp_path / "out")] + extra)
+    assert why in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
+
+
+def test_the_one_pass_check_tolerates_summation_order_only(tmp_path):
+    _write_results(tmp_path, tags=("a",))
+    for rel, ok in ((1e-15, True), (1e-9, False)):
+        d = dict(np.load(tmp_path / "result_a_T200.npz"))
+        d["tau_eff"] = np.array(0.4 * (1 + rel))
+        (tmp_path / "result_a_T200.npz").unlink()
+        np.savez(tmp_path / "result_a_T200.npz", **d)
+        if ok:
+            TS.load_results(tmp_path, ["a"], [50.0, 100.0, 200.0])
+        else:
+            with pytest.raises(ValueError, match="disagree on tau_eff"):
+                TS.load_results(tmp_path, ["a"], [50.0, 100.0, 200.0])

@@ -40,6 +40,7 @@ error.txt) and left out of the simulation's cddf_stacked.npz.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import logging
 import os
@@ -78,12 +79,14 @@ logger = logging.getLogger(__name__)
 # Metadata helper
 # ---------------------------------------------------------------------------
 
+@functools.lru_cache(maxsize=1)
 def _repo_dirty() -> Optional[bool]:
-    """Whether the hcd_priya checkout has uncommitted changes (None when git cannot tell)."""
+    """Whether the hcd_priya checkout has uncommitted changes (None when git cannot tell). Asked once per process,
+    without git's optional index lock, so a run never writes into the checkout's git metadata."""
     import subprocess
     try:
         out = subprocess.check_output(
-            ["git", "status", "--porcelain", "--untracked-files=no"],
+            ["git", "--no-optional-locks", "status", "--porcelain", "--untracked-files=no"],
             cwd=str(Path(__file__).resolve().parent.parent),
             stderr=subprocess.DEVNULL,
             timeout=5,
