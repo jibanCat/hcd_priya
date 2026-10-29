@@ -394,9 +394,13 @@ def test_convergence_ratios_check_the_records_first(tmp_path, monkeypatch, caplo
     (root / "hires").mkdir(parents=True)
     assert PL.compute_convergence_ratios(c) == {}                            # two unrecorded roots: warned
     assert "not compared" in caplog.text
+    RS.record_or_verify(root / "hires", PL.product_settings(cfg(tau_threshold=100.0)))
+    with pytest.raises(RS.RunSettingsMismatch, match="low-resolution root has no run_settings.json"):
+        PL.compute_convergence_ratios(c)                                     # the hires record only
+    (root / "hires" / RS.RUN_SETTINGS_FILE).unlink()
     RS.record_or_verify(root, PL.product_settings(c), ignore=("hires",))
     with pytest.raises(RS.RunSettingsMismatch, match="hires root has no run_settings.json"):
-        PL.compute_convergence_ratios(c)                                     # one record only
+        PL.compute_convergence_ratios(c)                                     # the low-resolution record only
     h = cfg(tau_threshold=300.0)
     RS.record_or_verify(root / "hires", PL.product_settings(h))
     with pytest.raises(RS.RunSettingsMismatch, match="absorber.tau_threshold: low-resolution 100.0, hires 300.0"):
@@ -427,3 +431,13 @@ def test_operational_settings_do_not_refuse_a_rerun(tmp_path, monkeypatch):
     c.n_workers, c.n_workers_skewer, c.skewer_batch_size = 3, 2, 17
     c.z_min, c.z_max, c.sim_filter, c.debug_n_sims, c.debug_n_snaps = 2.5, 3.5, ["synth"], 5, 7
     assert PL.run_one_snap(ss, entry, c) is not None
+
+
+def test_the_dirty_flag_is_null_when_git_cannot_tell(monkeypatch):
+    PL = _pipeline(monkeypatch)
+    import subprocess
+
+    def fail(*a, **k):
+        raise OSError("no git")
+    monkeypatch.setattr(subprocess, "check_output", fail)
+    assert PL._repo_dirty() is None

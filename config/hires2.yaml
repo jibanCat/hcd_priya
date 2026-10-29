@@ -6,8 +6,7 @@
 # built from the old emu_full_hires raw tau). Outputs land under
 # <output-root>/hires/<sim>/snap_NNN/. Pass a NEW --output-root: an output root that
 # holds files but no run_settings.json is refused (hcd_analysis/run_settings.py), and
-# the 2026-05 products under /scratch/cavestru_root/cavestru0/mfho/hcd_outputs predate
-# the record.
+# the 2026-05 production root predates the record.
 
 data_root: /nfs/turbo/umor-yueyingn/mfho/emu_full
 hires_data_root: /scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2

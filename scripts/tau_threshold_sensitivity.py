@@ -15,9 +15,9 @@ cache loader (``hcd_analysis.emulator.data._collapse_p1d``), and the templates a
 Each threshold is compared with the reference threshold (``--reference``, default 100) over the first ``--n-k`` stored
 native k bins (172: the LF emulator grid; k = 0 is never stored) by: the absorber count ratio per class, the template
 amplitude ratio ``a = sum T T_ref / sum T_ref^2``, the shape residual ``s = rms(T - a T_ref) / rms(T_ref)``, the
-largest fractional change of ``P_clean``, and, at low k (below ``--lowk-kmax``, 0.01 s/km), the largest template change
-relative to the template's largest value there. An amplitude change is what a free class amplitude in the likelihood
-absorbs; a shape change is not.
+largest fractional change of ``P_clean``, and, at low k within the data range (``--lowk-kmin`` 1e-3 to ``--lowk-kmax``
+0.01 s/km), the largest template change relative to the template's largest absolute value there. An amplitude change
+is what a free class amplitude in the likelihood absorbs; a shape change is not.
 
 The reading of the ``--headline`` thresholds (default 50 and 200), over every class and input:
 
@@ -26,15 +26,17 @@ The reading of the ``--headline`` thresholds (default 50 and 200), over every cl
     important   otherwise
 
 The per-class readings apply the same thresholds to a and s only (the clean change belongs to no class). a weights the
-k bins by T_ref^2, so a class whose template is steep at the lowest k (DLA) is dominated by the first stored bins.
+k bins by T_ref^2, so a template that is steep at the lowest k (DLA at low redshift) is dominated by the first stored
+bins, which can lie below the data range.
 
 The run reads each input in blocks of ``--chunk`` skewers (twice: once for the mean flux the PRIYA filter uses), so its
 memory stays near three blocks. The per-bin P1D is a mean over sightlines, so the blocks combine exactly by their
 counts. ``--self-check N`` compares the blocked path with the whole-array production path on the first N skewers (the
-catalogue, the per-bin counts and P1D, the filter's mean optical depth and the mean-flux scale), in blocks that leave a
-shorter last block, as a full-file run does. Once any input has a self-check, every input must have a passed one: a
-failed or missing self-check makes the reading "invalid" and the exit status 2. The mean-flux scale is the cache row's
-(production) value with ``--anchor-cache``, else solved over the skewers used (the whole file unless ``--n-skewers``).
+catalogue, the per-bin counts and P1D, the filter's mean optical depth and the mean-flux scale), in blocks whose last
+one is shorter (for N > 4), as in a full-file run. Once any input has a self-check, every input must have a passed
+one: a failed or missing self-check makes the reading "invalid" and the exit status 2. The mean-flux scale is the
+cache row's (production) value with ``--anchor-cache``, else solved over the skewers used (the whole file unless
+``--n-skewers``).
 
 Outputs, in ``--out``: ``run_settings.json`` (the inputs and every setting the results depend on, written once; a rerun
 into the same directory with any of them different is refused, hcd_analysis/run_settings.py), one
@@ -120,15 +122,16 @@ def class_counts(log_nhi):
             "DLA": int((x >= 20.3).sum())}
 
 
-def lowk_change(t, t_ref, kf, kmax):
-    """Largest |t - t_ref| at k < kmax, relative to the largest |t_ref| there (a pointwise ratio would blow up where a
-    template crosses zero)."""
-    m = np.asarray(kf) < kmax
+def lowk_change(t, t_ref, kf, kmax, kmin=0.0):
+    """Largest |t - t_ref| at kmin <= k < kmax, relative to the largest |t_ref| there (a pointwise ratio would blow up
+    where a template crosses zero)."""
+    kf = np.asarray(kf)
+    m = (kf >= kmin) & (kf < kmax)
     den = float(np.max(np.abs(np.asarray(t_ref)[m]))) if m.any() else 0.0
     return float(np.max(np.abs(np.asarray(t)[m] - np.asarray(t_ref)[m]))) / den if den > 0 else float("nan")
 
 
-def summarize(results, reference, n_k, lowk_kmax=0.01):
+def summarize(results, reference, n_k, lowk_kmax=0.01, lowk_kmin=1e-3):
     """Per (tag, threshold): the threshold, the sightline counts per class, the largest fractional clean change, and per
     class the absorber count ratio, a, s and the low-k change, all over the first n_k stored k bins (k = 0 is never
     stored). ``results`` maps (tag, threshold) to dicts with kf, counts15, pf15, pu15 and abs_counts
@@ -152,7 +155,7 @@ def summarize(results, reference, n_k, lowk_kmax=0.01):
             a, s = compare(t[c], t_r[c])
             n, n_r = cur["abs_counts"][c], ref["abs_counts"][c]
             row[c] = {"count_ratio": (n / n_r) if n_r else float("nan"), "amplitude_ratio": a, "shape_residual": s,
-                      "lowk_change": lowk_change(t[c], t_r[c], kf, lowk_kmax)}
+                      "lowk_change": lowk_change(t[c], t_r[c], kf, lowk_kmax, lowk_kmin)}
         out[f"{tag}|T{thr:g}"] = row
     return out
 
@@ -372,6 +375,17 @@ def run_input(tag, path, thresholds, alpha, absorber, sim, out_dir, log, n_skewe
         log(f"{tag} T={thr:g}: {len(r['absorbers'])} absorbers")
 
 
+def _self_check_block(n):
+    """The self-check's block size: about n / 4, chosen so that the last block is shorter (as in a full-file run)
+    whenever n > 4."""
+    if n <= 4:
+        return 1
+    block = n // 4 + 1
+    while n % block == 0:
+        block += 1
+    return block
+
+
 def self_check_passed(doc):
     """The self-check's criterion: identical catalogue and counts, P1D and tau_eff within SELF_CHECK_REL_TOL, the solved
     scale within SELF_CHECK_SCALE_TOL. A missing or NaN entry fails."""
@@ -412,7 +426,7 @@ def self_check(tag, path, n, reference, alpha, absorber, sim, out_dir, log):
     _, pu, _, _, _ = compute_tier_c_p1d(tau, vmax, alpha_slope=alpha, z=z_grid, catalog=cat,
                                         external_scale=scale, external_target_F=target_f)
     del tau, tau_f
-    block = n // 4 + 1 if n > 4 else 1                                 # a shorter last block, as in a full-file run
+    block = _self_check_block(n)
     tau_eff_blocked = _global_tau_eff(path, n, block)
     scale_solved = _solve_scale(path, n, block, tau_eff_blocked, target_f)
     ch = chunked_tier_c(path, n, [reference], absorber, dv, vmax, alpha, z_grid, tau_eff_blocked, scale, target_f,
@@ -526,6 +540,8 @@ def main(argv=None):
     ap.add_argument("--alpha", type=float, required=True, help="mean-flux scaling alpha_slope")
     ap.add_argument("--n-k", type=int, default=172, help="stored native k bins compared (172: the LF emulator grid)")
     ap.add_argument("--lowk-kmax", type=float, default=0.01, help="upper k (s/km) of the low-k change")
+    ap.add_argument("--lowk-kmin", type=float, default=1e-3,
+                    help="lower k (s/km) of the low-k change (1e-3: the lower edge of the data range)")
     ap.add_argument("--config", type=Path, default=REPO_ROOT / "config" / "default.yaml",
                     help="every catalogue setting except tau_threshold is read from here")
     ap.add_argument("--anchor-cache", type=Path, default=None)
@@ -610,10 +626,10 @@ def _run(a, inputs, thresholds, absorber, logf):
         log(f"summary deferred: {len(missing)} result files not yet written")
         return 0
     results = load_results(a.out, sorted(inputs), thresholds)
-    summary = summarize(results, a.reference, a.n_k, a.lowk_kmax)
+    summary = summarize(results, a.reference, a.n_k, a.lowk_kmax, a.lowk_kmin)
     doc = {"rows": summary, "verdict": verdict(summary, set(a.headline), a.reference),
            "summary_settings": {"reference": a.reference, "headline": sorted(a.headline), "n_k": a.n_k,
-                                "lowk_kmax": a.lowk_kmax, "self_check_n": a.self_check,
+                                "lowk_kmin": a.lowk_kmin, "lowk_kmax": a.lowk_kmax, "self_check_n": a.self_check,
                                 "code_commit": _git("rev-parse", "HEAD") or "unknown", "code_dirty": _dirty()}}
     if a.anchor_cache:
         doc["anchor"] = anchor(results, a.anchor_cache, a.sim, a.alpha, a.reference, a.n_k)

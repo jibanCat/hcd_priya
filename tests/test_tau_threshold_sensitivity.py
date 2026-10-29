@@ -148,11 +148,21 @@ def test_per_class_readings_use_a_and_s_of_that_class_only():
 
 
 def test_lowk_change_cut_and_normalisation():
-    kf = np.array([0.002, 0.006, 0.01, 0.02])
-    ref = np.array([0.2, -0.1, 50.0, 50.0])
-    t = np.array([0.1, -0.1, 0.0, 0.0])
-    assert TS.lowk_change(t, ref, kf, 0.01) == pytest.approx(0.1 / 0.2)  # k = 0.01 excluded; max |t_ref| below
-    assert np.isnan(TS.lowk_change(t, ref, kf, 0.001))                    # no bin below the cut
+    kf = np.array([0.0005, 0.002, 0.006, 0.01, 0.02])
+    ref = np.array([9.0, 0.2, -0.3, 50.0, 50.0])
+    t = np.array([0.0, 0.1, -0.3, 0.0, 0.0])
+    # 1e-3 <= k < 0.01: the first bin (below the data range) and k = 0.01 are excluded; normalised by max |t_ref|
+    assert TS.lowk_change(t, ref, kf, 0.01, 1e-3) == pytest.approx(0.1 / 0.3)
+    assert TS.lowk_change(t, ref, kf, 0.01) == pytest.approx(9.0 / 9.0)     # kmin 0 includes the first bin
+    assert np.isnan(TS.lowk_change(t, ref, kf, 0.001, 0.0006))              # no bin in the range
+
+
+@pytest.mark.parametrize("n", [5, 6, 9, 12, 13, 1003, 20000, 40000, 691200])
+def test_the_self_check_blocks_always_end_with_a_shorter_block(n):
+    b = TS._self_check_block(n)
+    assert 1 <= b < n and n % b != 0                                       # the last block is shorter
+    if n >= 100:
+        assert n // b in (3, 4)                                            # and there are about four blocks
 
 
 def test_per_class_readings_differ_and_only_headline_rows_count():
@@ -300,13 +310,16 @@ def test_the_summary_is_strict_json_when_a_ratio_is_undefined(tmp_path, monkeypa
     assert doc["rows"]["a|T50"]["LLS"]["count_ratio"] is None
 
 
-def test_results_of_one_input_from_different_passes_are_refused(tmp_path):
+@pytest.mark.parametrize("key, value", [("scale", np.array(0.81)), ("target_F", np.array(0.71)),
+                                        ("tau_eff", np.array(0.41)), ("z_grid", np.array(3.2)),
+                                        ("kf", np.linspace(0.001, 0.03, K))])
+def test_results_of_one_input_from_different_passes_are_refused(tmp_path, key, value):
     _write_results(tmp_path, tags=("a",))
     TS.load_results(tmp_path, ["a"], [50.0, 100.0, 200.0])
     d = dict(np.load(tmp_path / "result_a_T200.npz"))
-    d["scale"] = np.array(0.81)
+    d[key] = value
     np.savez(tmp_path / "result_a_T200.npz", **d)
-    with pytest.raises(ValueError, match="disagree on scale"):
+    with pytest.raises(ValueError, match=f"disagree on {key}"):
         TS.load_results(tmp_path, ["a"], [50.0, 100.0, 200.0])
 
 
@@ -404,3 +417,35 @@ def test_the_command_line_refuses_another_config_or_a_rewritten_input(tmp_path, 
     os.utime(src, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
     with pytest.raises(RS.RunSettingsMismatch, match="mtime_ns"):
         TS.main(args + ["--out", str(out)])
+
+
+def test_the_command_line_refuses_a_rewritten_anchor_cache(tmp_path, monkeypatch):
+    import os
+    args = _main_env(tmp_path, monkeypatch, [])
+    cache = tmp_path / "cache.h5"
+    cache.write_bytes(b"not read here")
+    out = tmp_path / "out"
+    TS.main(args + ["--out", str(out), "--anchor-cache", str(cache)])
+    rec = json.loads((out / RS.RUN_SETTINGS_FILE).read_text())["settings"]["anchor_cache"]
+    assert rec["bytes"] == 13 and rec["path"] == str(cache.resolve())
+    st = cache.stat()
+    os.utime(cache, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    with pytest.raises(RS.RunSettingsMismatch, match="anchor_cache.mtime_ns"):
+        TS.main(args + ["--out", str(out), "--anchor-cache", str(cache)])
+
+
+def test_asking_for_a_self_check_with_none_written_is_invalid(tmp_path, monkeypatch):
+    args = _main_env(tmp_path, monkeypatch, []) + ["--thresholds", "50", "100", "200"]
+    out = tmp_path / "out"
+    TS.main(args + ["--out", str(out)])
+    _write_results(out)
+    assert TS.main(args + ["--out", str(out)]) == 0                           # no self-check asked for, none present
+    assert TS.main(args + ["--out", str(out), "--self-check", "4"]) == 2      # asked for, none written
+    doc = json.loads((out / "summary.json").read_text())
+    assert doc["verdict"]["reading"] == "invalid: self-check failed or missing for ['a', 'b']"
+    assert doc["summary_settings"]["lowk_kmin"] == 1e-3
+
+
+def test_code_dirty_is_null_when_git_cannot_tell(monkeypatch):
+    monkeypatch.setattr(TS, "_git", lambda *a: None)
+    assert TS._dirty() is None
