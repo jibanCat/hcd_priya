@@ -289,6 +289,7 @@ def test_pipeline_resume_refuses_a_cached_pre_fix_catalogue_done_or_not(tmp_path
     def cfg(name):
         c = PipelineConfig(output_root=str(tmp_path / name), resume=True, n_workers=1)
         c.p1d.nhi_excl_thresholds = []
+        PL.check_run_settings(c)              # record the root's settings before the scenarios below place files in it
         return c
 
     def files(d):

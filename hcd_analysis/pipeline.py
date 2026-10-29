@@ -60,7 +60,7 @@ from .cddf import (
     stack_cddf_for_sim,
 )
 from .config import PipelineConfig, save_config
-from .run_settings import RunSettingsMismatch, record_or_verify  # noqa: F401  (RunSettingsMismatch: re-exported)
+from .run_settings import RUN_SETTINGS_FILE, RunSettingsMismatch, read_record, record_or_verify
 from .io import pixel_dv_kms, read_header, read_sim_ics
 from .p1d import (
     ALL_VARIANTS,
@@ -97,9 +97,14 @@ def _repo_commit() -> str:
 # Run settings (hcd_analysis/run_settings.py)
 # ---------------------------------------------------------------------------
 
-# The settings that determine a run's products. Selection (z range, sim filter, debug sizes), parallelism, batching,
-# resume and the output location are not product settings and may change between runs into one output root.
+# The settings that may determine a run's products, compared on every run into one output root. The list is
+# deliberately conservative: it holds whole sections, so some keys that no product reads today are compared too, and
+# data_root is compared as written. Selection (z range, sim filter, debug sizes), parallelism, batching, resume and the
+# output location are not product settings and may change between runs; the per-snapshot products do not depend on
+# them, while <sim>/cddf_stacked.npz is rebuilt from the snapshots each invocation selects and lists them
+# (z_snapshots). A change of code alone is not refused; each snapshot's meta.json records the code commit.
 PRODUCT_SETTING_KEYS = ("data_root", "prefer_grid", "absorber_classes", "absorber", "p1d", "cddf", "benchmark", "debug")
+HIRES_SUBDIR = "hires"     # run_hires writes under <output_root>/hires, an output root with its own record
 
 
 def product_settings(cfg: PipelineConfig) -> dict:
@@ -112,8 +117,11 @@ def check_run_settings(cfg: PipelineConfig) -> Path:
     """Record the run's product settings at its output root, or verify them against the record there.
 
     Raises RunSettingsMismatch, before anything is read or written, when the output root holds results made with
-    different settings (for example another ``absorber.tau_threshold``)."""
-    return record_or_verify(Path(cfg.output_root), product_settings(cfg), info=lambda: {"code_commit": _repo_commit()})
+    different settings (for example another ``absorber.tau_threshold``), or holds files but no record (results of
+    unknown settings, such as an output root written before records existed). The hires subdirectory, an output root
+    with its own record, does not count as the low-resolution root's contents."""
+    return record_or_verify(Path(cfg.output_root), product_settings(cfg), info=lambda: {"code_commit": _repo_commit()},
+                            ignore=(HIRES_SUBDIR,))
 
 
 # ---------------------------------------------------------------------------
@@ -407,6 +415,7 @@ def _save_snap_outputs(
         "hubble": float(header.hubble),
         "n_absorbers": n_absorbers,
         "timing_s": {k: round(v, 3) for k, v in timing.items()},
+        "code_commit": _repo_commit(),
     }
     if ics_meta:
         meta["sim_ics"] = {k: (float(v) if isinstance(v, (int, float)) else v)
@@ -532,6 +541,7 @@ def run_all(cfg: PipelineConfig) -> Dict[str, List[Optional[SnapResult]]]:
     """
     from joblib import Parallel, delayed
 
+    check_run_settings(cfg)                    # before anything is read or written (config_used.yaml included)
     snap_map = build_snapshot_map(
         data_root=cfg.data_root,
         z_min=cfg.z_min,
@@ -576,7 +586,8 @@ def run_hires(cfg: PipelineConfig) -> Dict[str, List[Optional[SnapResult]]]:
     from joblib import Parallel, delayed
 
     hires_cfg = dataclasses.replace(cfg, data_root=cfg.hires_data_root)
-    hires_cfg = dataclasses.replace(hires_cfg, output_root=str(Path(cfg.output_root) / "hires"))
+    hires_cfg = dataclasses.replace(hires_cfg, output_root=str(Path(cfg.output_root) / HIRES_SUBDIR))
+    check_run_settings(hires_cfg)              # before anything is read or written (config_hires.yaml included)
 
     snap_map = build_snapshot_map(
         data_root=hires_cfg.data_root,
@@ -662,6 +673,26 @@ def _match_snaps_by_z(
     return matches
 
 
+def check_convergence_settings(lf_root: Path, hf_root: Path) -> None:
+    """Refuse to combine the two resolutions' products when their recorded run settings differ in anything but
+    data_root (RunSettingsMismatch). Without both records the settings cannot be compared: a warning is logged."""
+    recs = {}
+    for name, root in (("low-resolution", Path(lf_root)), ("hires", Path(hf_root))):
+        p = root / RUN_SETTINGS_FILE
+        recs[name] = read_record(p)["settings"] if os.path.lexists(p) else None
+    missing = [n for n, r in recs.items() if r is None]
+    if missing:
+        logger.warning("convergence: no run-settings record for %s; the two resolutions' settings are not compared",
+                       " and ".join(missing))
+        return
+    lf, hf = ({k: v for k, v in r.items() if k != "data_root"} for r in recs.values())
+    from .run_settings import _differences, _lookup
+    diff = _differences(lf, hf)
+    if diff:
+        detail = "; ".join(f"{k}: low-resolution {_lookup(lf, k)!r}, hires {_lookup(hf, k)!r}" for k in diff[:12])
+        raise RunSettingsMismatch(f"convergence: {lf_root} and {hf_root} were made with different settings: {detail}")
+
+
 def compute_convergence_ratios(
     cfg: PipelineConfig,
     variants: Optional[List[str]] = None,
@@ -687,7 +718,8 @@ def compute_convergence_ratios(
         variants = ["all", "no_DLA_priya"]
 
     lf_root = Path(cfg.output_root)
-    hf_root = Path(cfg.output_root) / "hires"
+    hf_root = Path(cfg.output_root) / HIRES_SUBDIR
+    check_convergence_settings(lf_root, hf_root)
 
     # Find common sims
     lf_sims = {p.name for p in lf_root.iterdir() if p.is_dir() and not p.name.startswith(".")}
