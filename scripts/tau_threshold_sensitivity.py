@@ -17,6 +17,11 @@ per class, the template amplitude ratio ``a = sum T T_ref / sum T_ref^2``, the s
 ``s = rms(T - a T_ref) / rms(T_ref)`` and the largest change of ``P_clean``, over the first ``--n-k`` native k bins
 (k = 0 excluded). An amplitude change is what a free class amplitude in the likelihood absorbs; a shape change is not.
 
+The run reads each input in blocks of ``--chunk`` skewers (twice: once for the mean flux the PRIYA filter uses), so its
+memory stays near three blocks; the per-bin P1D is a mean over sightlines, so the blocks combine exactly by their
+counts, and ``--self-check N`` compares the blocked path with the whole-array production path on N skewers. The
+mean-flux scale is the cache row's (production) value with ``--anchor-cache``, else solved over the file.
+
 Outputs, in ``--out``: ``run_settings.json`` (every setting and input, written once; a rerun into the same directory
 with any different setting is refused, hcd_analysis/run_settings.py), one ``result_<tag>_T<threshold>.npz`` per input
 and threshold (written once; a rerun with identical settings reuses them), and ``summary.json``. With
@@ -162,42 +167,201 @@ def _save_once(path, **arrays):
         os.unlink(tmp)
 
 
-def run_input(tag, path, thresholds, alpha, absorber, sim, out_dir, log, n_skewers=None):
-    from hcd_analysis.catalog import build_catalog
+def _read_rows(path, s, e):
+    import h5py
+    with h5py.File(path, "r") as f:
+        return f["tau/H/1/1215"][s:e].astype(np.float64)
+
+
+def _global_tau_eff(path, n_total, chunk):
+    """-log <exp(-tau)> over the first n_total skewers: the tau_eff _apply_priya_filter computes on the whole array."""
+    acc, npix = 0.0, 0
+    for s in range(0, n_total, chunk):
+        t = _read_rows(path, s, min(n_total, s + chunk))
+        acc += float(np.sum(np.exp(-t)))
+        npix += t.size
+    return float(-np.log(acc / npix))
+
+
+def _filter_rows(tau, tau_eff):
+    """In place: hcd_analysis.priya_p1d._apply_priya_filter on a block of rows, with the WHOLE file's tau_eff (the
+    function itself would take the block's)."""
+    from types import SimpleNamespace
+    from hcd_analysis.priya_p1d import _filter_single_tau_complex
+    stub = SimpleNamespace(nbins=tau.shape[1])
+    for i in np.where(np.max(tau, axis=1) > 1.0e6)[0]:
+        tau[i], _ = _filter_single_tau_complex(stub, tau[i], tau_eff, tau_thresh=1.0e6, thresh2=0.25)
+    return tau
+
+
+def _solve_scale(path, n_total, chunk, tau_eff, target_f):
+    """The uniform scale s with <exp(-s tau_filtered)> = target_F over the file (Newton on chunked sums); used only
+    when no cache row supplies the production scale (fake_spectra's mean_flux, tolerance 1e-5, needs the whole array)."""
+    s_val = 1.0
+    for _ in range(50):
+        f = df = 0.0
+        n = 0
+        for s in range(0, n_total, chunk):
+            t = _filter_rows(_read_rows(path, s, min(n_total, s + chunk)), tau_eff)
+            ex = np.exp(-s_val * t)
+            f += float(np.sum(ex))
+            df += float(-np.sum(t * ex))
+            n += t.size
+        step = (f / n - target_f) / (df / n)
+        s_val -= step
+        if abs(step) < 1e-12 * abs(s_val):
+            return s_val
+    raise RuntimeError("mean-flux scale did not converge")
+
+
+def chunked_tier_c(path, n_total, thresholds, absorber, dv, vmax, alpha, z_grid, tau_eff, scale, target_f, chunk,
+                   batch_size=4096):
+    """For every threshold: the catalogue's absorbers (production process_skewer_batch, batches of batch_size with
+    global indices, as build_catalog) and the filtered and unfiltered Tier-C P1D (production compute_tier_c_p1d at
+    the given scale and target flux), over the first n_total skewers in blocks of ``chunk`` rows, each read once.
+    The per-bin P1D is a mean over sightlines, so the blocks combine exactly by their counts. Returns
+    {threshold: dict(absorbers, kf, pf15, pu15, counts15)}."""
+    from types import SimpleNamespace
+    from hcd_analysis.catalog import process_skewer_batch
+    from hcd_analysis.priya_p1d import compute_tier_c_p1d
+    acc = {t: {"absorbers": [], "sf": None, "su": None, "n": None, "kf": None} for t in thresholds}
+    for s in range(0, n_total, chunk):
+        e = min(n_total, s + chunk)
+        tau = _read_rows(path, s, e)
+        tau_f = _filter_rows(tau.copy(), tau_eff)
+        for thr in thresholds:
+            new = []
+            for b0 in range(0, e - s, batch_size):
+                new.extend(process_skewer_batch(
+                    tau[b0:b0 + batch_size], s + b0, dv, float(thr), absorber["merge_dv_kms"], absorber["min_pixels"],
+                    absorber["b_init_kms"], tuple(absorber["b_bounds"]), absorber["tau_fit_cap"],
+                    absorber["voigt_max_iter"], absorber["fast_mode"], min_log_nhi=absorber["min_log_nhi"]))
+            a = acc[thr]
+            a["absorbers"].extend(new)
+            local = SimpleNamespace(absorbers=[SimpleNamespace(skewer_idx=x.skewer_idx - s, log_NHI=x.log_NHI)
+                                               for x in new])
+            kf, pf, nf, _, _ = compute_tier_c_p1d(tau_f, vmax, alpha_slope=alpha, z=z_grid, catalog=local,
+                                                  external_scale=scale, external_target_F=target_f)
+            _, pu, nu, _, _ = compute_tier_c_p1d(tau, vmax, alpha_slope=alpha, z=z_grid, catalog=local,
+                                                 external_scale=scale, external_target_F=target_f)
+            assert np.array_equal(nf, nu)
+            if a["n"] is None:
+                a["sf"], a["su"], a["n"], a["kf"] = np.zeros_like(pf), np.zeros_like(pu), np.zeros_like(nf), kf
+            a["sf"] += nf[:, None] * pf
+            a["su"] += nu[:, None] * pu
+            a["n"] += nf
+    out = {}
+    for thr, a in acc.items():
+        w = np.where(a["n"] > 0, a["n"], 1)[:, None]
+        out[thr] = {"absorbers": a["absorbers"], "kf": a["kf"], "pf15": a["sf"] / w, "pu15": a["su"] / w,
+                    "counts15": a["n"]}
+    return out
+
+
+def _check_catalogue(absorbers, nbins, sim, z, dv):
+    """build_catalog's own checks on a finished catalogue: no overlapping entries, finite values."""
+    from hcd_analysis.catalog import AbsorberCatalog, check_catalog_values, validate_catalog_entries
+    if absorbers:
+        validate_catalog_entries([a.skewer_idx for a in absorbers], [a.pix_start for a in absorbers],
+                                 [a.pix_end for a in absorbers], nbins)
+    cat = AbsorberCatalog(sim_name=sim, snap=-1, z=z, dv_kms=dv)
+    cat.absorbers.extend(absorbers)
+    check_catalog_values(cat)
+
+
+def _scale_and_target(path, n_total, chunk, tau_eff, alpha, z_grid, cache_row):
+    if cache_row is not None:
+        return float(cache_row["scale"]), float(cache_row["target_F"]), "cache"
+    from hcd_analysis.priya_p1d import obs_mean_tau
+    target_f = float(np.exp(-alpha * obs_mean_tau(z_grid)))
+    return _solve_scale(path, n_total, chunk, tau_eff, target_f), target_f, "solved"
+
+
+def cache_row_for(cache, sim, z_grid, alpha):
+    """The production cache row of (sim, z grid, alpha_slope): its scale and target flux, or None."""
+    if cache is None:
+        return None
+    import h5py
+    with h5py.File(cache, "r") as h:
+        names = np.array([x.decode() if isinstance(x, bytes) else x for x in h["sim_name"][:]])
+        rows = np.where((names == sim) & np.isclose(h["z_grid"][:], z_grid, atol=1e-6, rtol=0)
+                        & np.isclose(h["alpha_slope"][:], alpha, atol=1e-12, rtol=0))[0]
+        if len(rows) != 1:
+            raise ValueError(f"{len(rows)} cache rows for {sim} z_grid {z_grid} alpha {alpha}")
+        i = int(rows[0])
+        return {"row": i, "scale": float(h["scale"][i]), "target_F": float(h["target_F"][i])}
+
+
+def run_input(tag, path, thresholds, alpha, absorber, sim, out_dir, log, n_skewers=None, chunk=40000, cache=None):
     from hcd_analysis.io import pixel_dv_kms, read_header
-    from hcd_analysis.priya_p1d import _apply_priya_filter, compute_tier_c_p1d
     import build_emulator_cache_tau0 as bt                          # scripts/: the cache builder's own helpers
 
     todo = [t for t in thresholds if not (out_dir / f"result_{tag}_T{t:g}.npz").exists()]
     if not todo:
         return
     hdr = read_header(path)
-    dv = pixel_dv_kms(hdr)
-    vmax = bt.vmax_from_header(hdr)
+    dv, vmax = pixel_dv_kms(hdr), bt.vmax_from_header(hdr)
     z_grid = bt._snap_z_to_priya_grid(float(hdr.redshift))
+    n_total = int(hdr.n_skewers) if n_skewers is None else min(int(n_skewers), int(hdr.n_skewers))
     t0 = time.time()
-    tau = bt._read_tau(path, n_skewers=n_skewers)
-    tau_filt = tau.copy()
-    _apply_priya_filter(tau_filt, tau_thresh=1.0e6)                  # label-independent: once per input
-    log(f"{tag}: read and filtered {tau.shape} in {time.time() - t0:.0f} s")
+    tau_eff = _global_tau_eff(path, n_total, chunk)
+    scale, target_f, src = _scale_and_target(path, n_total, chunk, tau_eff, alpha, z_grid,
+                                             cache_row_for(cache, sim, z_grid, alpha) if n_skewers is None else None)
+    log(f"{tag}: {n_total} skewers, tau_eff {tau_eff:.6g}, scale {scale:.10g} ({src}), target_F {target_f:.10g}; "
+        f"{time.time() - t0:.0f} s")
+    t1 = time.time()
+    res = chunked_tier_c(path, n_total, todo, absorber, dv, vmax, alpha, z_grid, tau_eff, scale, target_f, chunk)
+    log(f"{tag}: {len(todo)} thresholds in {time.time() - t1:.0f} s")
     for thr in todo:
-        t1 = time.time()
-        cat = build_catalog(Path(path), sim_name=sim, snap=-1, z=float(hdr.redshift), dv_kms=dv,
-                            tau_threshold=float(thr), merge_dv_kms=absorber["merge_dv_kms"],
-                            min_pixels=absorber["min_pixels"], b_init=absorber["b_init_kms"],
-                            b_bounds=tuple(absorber["b_bounds"]), tau_fit_cap=absorber["tau_fit_cap"],
-                            voigt_max_iter=absorber["voigt_max_iter"], fast_mode=absorber["fast_mode"],
-                            n_workers=1, min_log_nhi=absorber["min_log_nhi"], n_skewers=n_skewers)
-        t2 = time.time()
-        kf, pf15, n15, target_f, scale = compute_tier_c_p1d(tau_filt, vmax, alpha_slope=alpha, z=z_grid, catalog=cat)
-        _, pu15, n15u, _, _ = compute_tier_c_p1d(tau, vmax, alpha_slope=alpha, z=z_grid, catalog=cat,
-                                                 external_scale=scale, external_target_F=target_f)
-        assert np.array_equal(n15, n15u)
-        log_nhi = np.array([a.log_NHI for a in cat.absorbers], dtype=np.float64)
-        _save_once(out_dir / f"result_{tag}_T{thr:g}.npz", kf=kf, pf15=pf15, pu15=pu15, counts15=n15,
-                   log_nhi=log_nhi, skewer_idx=np.array([a.skewer_idx for a in cat.absorbers], dtype=np.int64),
-                   target_F=np.array(target_f), scale=np.array(scale), z_grid=np.array(z_grid))
-        log(f"{tag} T={thr:g}: {len(cat.absorbers)} absorbers; catalogue {t2 - t1:.0f} s, P1D {time.time() - t2:.0f} s")
+        r = res[thr]
+        _check_catalogue(r["absorbers"], int(hdr.nbins), sim, float(hdr.redshift), dv)
+        _save_once(out_dir / f"result_{tag}_T{thr:g}.npz", kf=r["kf"], pf15=r["pf15"], pu15=r["pu15"],
+                   counts15=r["counts15"], log_nhi=np.array([a.log_NHI for a in r["absorbers"]], dtype=np.float64),
+                   skewer_idx=np.array([a.skewer_idx for a in r["absorbers"]], dtype=np.int64),
+                   target_F=np.array(target_f), scale=np.array(scale), z_grid=np.array(z_grid),
+                   tau_eff=np.array(tau_eff), scale_source=np.array(src))
+        log(f"{tag} T={thr:g}: {len(r['absorbers'])} absorbers")
+
+
+def self_check(tag, path, n, reference, alpha, absorber, sim, out_dir, log):
+    """The chunked path against the whole-array production path (build_catalog, _apply_priya_filter,
+    compute_tier_c_p1d) on the first n skewers at the reference threshold; written once to self_check_<tag>.json."""
+    dest = out_dir / f"self_check_{tag}.json"
+    if dest.exists():
+        return
+    from hcd_analysis.catalog import build_catalog
+    from hcd_analysis.io import pixel_dv_kms, read_header
+    from hcd_analysis.priya_p1d import _apply_priya_filter, compute_tier_c_p1d
+    import build_emulator_cache_tau0 as bt
+    hdr = read_header(path)
+    dv, vmax = pixel_dv_kms(hdr), bt.vmax_from_header(hdr)
+    z_grid = bt._snap_z_to_priya_grid(float(hdr.redshift))
+    tau = bt._read_tau(path, n_skewers=n)
+    tau_f = _apply_priya_filter(tau.copy(), tau_thresh=1.0e6)
+    cat = build_catalog(Path(path), sim_name=sim, snap=-1, z=float(hdr.redshift), dv_kms=dv,
+                        tau_threshold=float(reference), merge_dv_kms=absorber["merge_dv_kms"],
+                        min_pixels=absorber["min_pixels"], b_init=absorber["b_init_kms"],
+                        b_bounds=tuple(absorber["b_bounds"]), tau_fit_cap=absorber["tau_fit_cap"],
+                        voigt_max_iter=absorber["voigt_max_iter"], fast_mode=absorber["fast_mode"], n_workers=1,
+                        min_log_nhi=absorber["min_log_nhi"], n_skewers=n)
+    kf, pf, nf, target_f, scale = compute_tier_c_p1d(tau_f, vmax, alpha_slope=alpha, z=z_grid, catalog=cat)
+    _, pu, _, _, _ = compute_tier_c_p1d(tau, vmax, alpha_slope=alpha, z=z_grid, catalog=cat,
+                                        external_scale=scale, external_target_F=target_f)
+    tau_eff = float(-np.log(np.mean(np.exp(-tau))))
+    del tau, tau_f
+    ch = chunked_tier_c(path, n, [reference], absorber, dv, vmax, alpha, z_grid, tau_eff, scale, target_f,
+                        chunk=max(1, n // 4))[reference]
+    key = lambda a: (a.skewer_idx, a.pix_start, a.pix_end, a.log_NHI)   # noqa: E731
+    same_cat = sorted(map(key, cat.absorbers)) == sorted(map(key, ch["absorbers"]))
+    ok = nf > 0
+
+    def rel(x, y):
+        return float(np.max(np.abs(x[ok] / y[ok] - 1.0)))
+    doc = {"n_skewers": n, "threshold": reference, "catalogue_identical": bool(same_cat),
+           "n_absorbers": len(cat.absorbers), "counts_identical": bool(np.array_equal(nf, ch["counts15"])),
+           "max_rel_diff_filtered": rel(ch["pf15"], pf), "max_rel_diff_unfiltered": rel(ch["pu15"], pu)}
+    dest.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
+    log(f"self-check {tag}: {doc}")
 
 
 def load_results(out_dir, tags, thresholds):
@@ -257,6 +421,11 @@ def main(argv=None):
     ap.add_argument("--anchor-cache", type=Path, default=None)
     ap.add_argument("--n-skewers", type=int, default=None,
                     help="only the first N skewers of each input (a quick look; the anchor then does not apply)")
+    ap.add_argument("--chunk", type=int, default=40000, help="skewers per block (memory: about 3 x chunk x nbins x 8 B)")
+    ap.add_argument("--self-check", type=int, default=0, metavar="N",
+                    help="compare the blocked path with the whole-array production path on the first N skewers")
+    ap.add_argument("--only", action="append", default=None, metavar="TAG",
+                    help="process only these inputs (parallel workers; the summary is written once all results exist)")
     a = ap.parse_args(argv)
 
     import yaml
@@ -281,7 +450,9 @@ def main(argv=None):
                 "alpha_slope": a.alpha, "n_k": a.n_k, "absorber_except_threshold": absorber,
                 "config": {"path": str(a.config.resolve()), "sha256": hashlib.sha256(cfg_bytes).hexdigest()},
                 "anchor_cache": str(a.anchor_cache.resolve()) if a.anchor_cache else None,
-                "n_skewers": a.n_skewers}
+                "n_skewers": a.n_skewers, "chunk": a.chunk, "self_check": a.self_check,
+                "scale": "the cache row's (production) scale and target flux" if a.anchor_cache and a.n_skewers is None
+                         else "solved over the file (Newton, 1e-12)"}
 
     def info():
         import subprocess
@@ -308,13 +479,28 @@ def main(argv=None):
         logf.write(line + "\n")
         logf.flush()
 
+    if a.only is not None and not set(a.only) <= set(inputs):
+        ap.error(f"--only {a.only}: not among the inputs {sorted(inputs)}")
     for tag, p in sorted(inputs.items()):
-        run_input(tag, p, thresholds, a.alpha, absorber, a.sim, a.out, log, n_skewers=a.n_skewers)
+        if a.only is not None and tag not in a.only:
+            continue
+        if a.self_check:
+            self_check(tag, p, a.self_check, a.reference, a.alpha, absorber, a.sim, a.out, log)
+        run_input(tag, p, thresholds, a.alpha, absorber, a.sim, a.out, log, n_skewers=a.n_skewers, chunk=a.chunk,
+                  cache=a.anchor_cache)
+    missing = [f"result_{t}_T{x:g}.npz" for t in sorted(inputs) for x in thresholds
+               if not (a.out / f"result_{t}_T{x:g}.npz").exists()]
+    if missing:
+        log(f"summary deferred: {len(missing)} result files not yet written")
+        return 0
     results = load_results(a.out, sorted(inputs), thresholds)
     summary = summarize(results, a.reference, a.n_k)
     doc = {"rows": summary, "verdict": verdict(summary, set(a.headline), a.reference)}
     if a.anchor_cache:
         doc["anchor"] = anchor(results, a.anchor_cache, a.sim, a.alpha, a.reference, a.n_k)
+    checks = sorted(a.out.glob("self_check_*.json"))
+    if checks:
+        doc["self_check"] = {c.stem[len("self_check_"):]: json.loads(c.read_text()) for c in checks}
     tmp = a.out / f".summary.json.{os.getpid()}.tmp"
     tmp.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
     os.replace(tmp, a.out / "summary.json")                         # derived from the result files; recomputable
