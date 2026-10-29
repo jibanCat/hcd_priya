@@ -357,8 +357,9 @@ HCD_LLS_REALFIT_ZSLOPE = 2.127
 # ...pre_swap (the honest post-swap label) + fresh created/git_commit; also carried live in
 # hcd_prior_constants_payload()["derivation_json_sha256"]). Spec + decision record:
 # hcd_priya_notes/docs/superpowers/2026-07-18-corrected-law-spec.md (incl. ADDENDUM) and the
-# 2026-07-18 PI decision bundle. Tests: tests/test_lit_dndx_corrected.py (reproduction, bit-level
-# but the LLS amplitude at 16 eps; estimand regression, telescoping record),
+# 2026-07-18 PI decision bundle. Tests: tests/test_lit_dndx_corrected.py (reproduction: subDLA
+# bit-level, DLA at the deployed rounding, LLS amplitude to 16 eps relative; estimand regression,
+# telescoping record),
 # tests/test_lit_dndx{,_fits,_kernel}.py.
 HCD_LIT_DNDX_LAW = {"LLS": (0.01840091965972645, 2.127),
                     "subDLA": (0.004832763139114936, 2.438007767664778),

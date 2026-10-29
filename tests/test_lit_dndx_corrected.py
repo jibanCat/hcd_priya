@@ -7,8 +7,9 @@ cache-dependent cases sit behind the _HAS_CACHE skipif pattern.
 Case list (spec sec 7):
   1. Reproduction: refit the JSON's input points with the estimator RECORDED per class
      and compare with HCD_LIT_DNDX_LAW (anti-hand-tuning; incl. the CONSTRAINED LLS
-     estimator as recorded): bit-level, except the constrained LLS amplitude, which agrees
-     to 16 eps relative (its slope and the JSON-versus-deployed constants stay bit-level).
+     estimator as recorded): subDLA bit-level; the DLA anchor at its deployed rounding; the
+     constrained LLS slope exact and its amplitude to 16 eps relative. The JSON-versus-deployed
+     constants are bit-level for all three classes.
   2. Estimand-regression vs the tombstoned wrong-object arrays (subDLA > 3 combined
      sigma; LLS — see the documented K1a deviation in the test).
   3. Poisson-consistency: deployed subDLA deviance/dof < 2; internal consistency < 5%.
