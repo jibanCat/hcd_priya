@@ -66,7 +66,10 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_lit_dndx_fits.py" = { tier = "source" }
 "tests/test_lls_dispcenter_arm.py" = { tier = "source" }
 "tests/test_lls_width_study_override.py" = { tier = "source" }
+"tests/test_loo_matched.py" = { tier = "source" }
+"tests/test_loo_readout.py" = { tier = "source" }
 "tests/test_loso_sweep_error_vector.py" = { tier = "source" }
+"tests/test_lyaemu_loo_refit.py" = { tier = "source" }
 "tests/test_metal_inject.py" = { tier = "wheel" }
 "tests/test_mf_modes.py" = { tier = "wheel" }
 "tests/test_norc_single_authority.py" = { tier = "source" }
@@ -82,18 +85,26 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_res_corr_injection_gate.py" = { tier = "source" }
 "tests/test_resinj_instr.py" = { tier = "wheel" }
 "tests/test_resinj_oos_spec.py" = { tier = "source" }
+"tests/test_run_gate_d_write_once.py" = { tier = "source" }
+"tests/test_run_settings.py" = { tier = "wheel" }
+"tests/test_safe_h5.py" = { tier = "wheel" }
 "tests/test_safe_io.py" = { tier = "wheel" }
 "tests/test_seed_determinism.py" = { tier = "source" }
 "tests/test_splice_tau0_cache.py" = { tier = "source" }
 "tests/test_tau0_bands.py" = { tier = "wheel" }
 "tests/test_tau0_powerlaw.py" = { tier = "wheel" }
 "tests/test_tau0_rescale.py" = { tier = "wheel" }
+"tests/test_tau_threshold_sensitivity.py" = { tier = "source" }
 "tests/test_xclass_cemu.py" = { tier = "wheel" }
 "tests/test_zflat_alpha_guard.py" = { tier = "wheel" }
 "tests/test_zslope_center.py" = { tier = "wheel" }
 "tests/test_zzz_checkout_integrity.py" = { tier = "source" }
 
 [files."tests/external/test_lyaemu_adapter_guards.py"]
+tier = "external"
+reason = "optional reference-environment test (its own venv), never collected by CI"
+
+[files."tests/external/test_lyaemu_loo_refit_external.py"]
 tier = "external"
 reason = "optional reference-environment test (its own venv), never collected by CI"
 
