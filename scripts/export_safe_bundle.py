@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert the pinned production LF ensemble to the pickle-free prototype format and prove the conversion exact.
+"""Convert the pinned production LF ensemble to the pickle-free release format and prove the conversion exact.
 
 This is the deliberate legacy-conversion step of docs/release_format_h5.md. The production manifest must hash to the
 digest given on the command line BEFORE anything is read; the members are then read only after
