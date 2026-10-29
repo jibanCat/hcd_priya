@@ -243,9 +243,12 @@ def benchmark(config_path, output_root, set_values, debug, fast, verbose, n_sims
     setup_logging(verbose)
     cfg = make_config(config_path, output_root, set_values, debug=False, fast=True)
 
-    from hcd_analysis.pipeline import run_benchmark
+    from hcd_analysis.pipeline import check_run_settings, run_benchmark
     from hcd_analysis.report import generate_benchmarking_md
 
+    # benchmarking.md goes into the output root: record (or verify) the benchmark's settings there first, so the root
+    # never holds files of unrecorded settings (hcd_analysis/run_settings.py)
+    check_run_settings(cfg)
     result = run_benchmark(cfg, n_sims=n_sims, n_snaps=n_snaps)
 
     click.echo("\n=== Benchmark Results ===")

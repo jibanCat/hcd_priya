@@ -25,6 +25,8 @@ set -euo pipefail
 HCD_ROOT="$REPO"
 PYTHON="/sw/pkgs/arc/mamba/py3.11/bin/python3"
 HCD_CONFIG="${HCD_CONFIG:-${HCD_ROOT}/config/default.yaml}"
+# The 2026-05 production root below holds results but no run_settings.json, so the pipeline now refuses to run
+# into it (hcd_analysis/run_settings.py). For a new run, set OUTPUT_ROOT to a new directory.
 OUTPUT_ROOT="/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"
 
 mkdir -p "${HCD_ROOT}/logs"

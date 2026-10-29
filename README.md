@@ -244,6 +244,10 @@ hcd run-sim --sim ns0.803Ap2.2e-09 --config config/default.yaml   # one sim, all
 hcd run-all --n-workers 36 --config config/default.yaml             # full 60-sim LF campaign
 ```
 
+Each output root holds the results of one set of settings: the first run writes `run_settings.json` there, and a
+later run with different settings, or into a root that holds files but no record, is refused before anything is
+written ([`docs/tau_threshold.md`](docs/tau_threshold.md), "Run settings").
+
 On Great Lakes the full campaign runs as a SLURM array, one task per simulation:
 
 ```bash
