@@ -34,7 +34,8 @@ memory stays near three blocks. The per-bin P1D is a mean over sightlines, so th
 counts. ``--self-check N`` compares the blocked path with the whole-array production path on the first N skewers (the
 catalogue, the per-bin counts and P1D, the filter's mean optical depth and the mean-flux scale), in blocks whose last
 one is shorter (for N > 4), as in a full-file run. Once any input has a self-check, every input must have a passed
-one: a failed or missing self-check makes the reading "invalid" and the exit status 2. The mean-flux scale is the
+one at the reference threshold; a failed or missing self-check, or an undefined comparison (a class or the clean set
+without sightlines), makes the reading "invalid", ``valid`` false and the exit status 2. The mean-flux scale is the
 cache row's (production) value with ``--anchor-cache``, else solved over the skewers used (the whole file unless
 ``--n-skewers``).
 

@@ -332,7 +332,7 @@ def test_meta_records_the_code_commit(tmp_path, monkeypatch):
     c = cfg()
     PL.run_one_snap(ss, entry, c)
     meta = json.loads((PL.snap_output_dir(c, "synthsim", 1) / "meta.json").read_text())
-    assert meta["code_commit"] == PL._repo_commit() and meta["code_dirty"] in (True, False, None)
+    assert meta["code_commit"] == PL._repo_commit() and meta["code_dirty"] == PL._repo_dirty()
 
 
 def test_an_output_root_written_without_a_record_is_refused(tmp_path, monkeypatch):
@@ -441,3 +441,8 @@ def test_the_dirty_flag_is_null_when_git_cannot_tell(monkeypatch):
         raise OSError("no git")
     monkeypatch.setattr(subprocess, "check_output", fail)
     assert PL._repo_dirty() is None
+    seen = []
+    for answer, dirty in ((b"", False), (b" M x\n", True)):
+        monkeypatch.setattr(subprocess, "check_output", lambda argv, **k: seen.append(argv) or answer)
+        assert PL._repo_dirty() is dirty
+    assert all("--no-optional-locks" in argv for argv in seen)          # never takes git's index lock

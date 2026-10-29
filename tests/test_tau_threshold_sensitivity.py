@@ -548,3 +548,35 @@ def test_the_low_k_window_is_validated(tmp_path, monkeypatch, capsys):
         TS.main(args + ["--out", str(tmp_path / "out"), "--lowk-kmin", "0.02"])
     assert "kmin < kmax" in capsys.readouterr().err and not (tmp_path / "out").exists()
     assert np.isnan(TS._nan_max([0.01, float("nan")])) and TS._nan_max([0.01, 0.02]) == 0.02
+
+
+def test_the_summary_applies_the_data_range_low_k_window():
+    kf = np.array([0.0004, 0.002, 0.004, 0.006, 0.008, 0.02, 0.03, 0.04])   # the first bin lies below the data range
+    ref = _result(kf=kf)
+    cur = _result(kf=kf)
+    cur["pf15"] = cur["pf15"].copy()
+    cur["pf15"][1:8, 0] *= 1.5                                         # a large LLS change in that first bin only
+    res = {("z", 100.0): ref, ("z", 50.0): cur}
+    inside = TS.summarize(res, 100.0, n_k=K)["z|T50"]["LLS"]["lowk_change"]
+    with_first = TS.summarize(res, 100.0, n_k=K, lowk_kmin=0.0)["z|T50"]["LLS"]["lowk_change"]
+    assert inside == pytest.approx(0.0, abs=1e-15) and with_first > 0.1
+
+
+def test_a_stored_self_check_without_its_threshold_does_not_count(tmp_path, monkeypatch):
+    args = _main_env(tmp_path, monkeypatch, []) + ["--thresholds", "50", "100", "200"]
+    out = tmp_path / "out"
+    TS.main(args + ["--out", str(out)])
+    _write_results(out)
+    (out / "self_check_a.json").write_text(json.dumps(dict(_check(), threshold=100.0)))
+    (out / "self_check_b.json").write_text(json.dumps(_check()))     # no threshold recorded
+    assert TS.main(args + ["--out", str(out)]) == 2
+
+
+def test_the_scripts_dirty_flag(monkeypatch):
+    for answer, dirty in (("", False), (" M x", True), (None, None)):
+        monkeypatch.setattr(TS, "_git", lambda *a, _r=answer: _r)
+        assert TS._dirty() is dirty
+    seen = []
+    monkeypatch.setattr(TS, "_git", lambda *a: seen.append(a) or "")
+    TS._dirty()
+    assert seen and seen[0][0] == "--no-optional-locks"
