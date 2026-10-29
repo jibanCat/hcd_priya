@@ -509,6 +509,55 @@ def test_a_class_without_sightlines_is_an_undefined_comparison():
     assert np.isnan(s["z|T50"]["DLA"]["amplitude_ratio"]) and np.isnan(s["z|T50"]["DLA"]["lowk_change"])
     v = TS.verdict(s, {50.0, 200.0}, 100.0)
     assert v["reading"].startswith("invalid: undefined comparison") and v["valid"] is False
+    ref = _result()
+    ref["counts15"] = ref["counts15"].copy()
+    ref["counts15"][13:15] = 0                                         # empty at the reference only
+    res = {("z", 100.0): ref, ("z", 50.0): _result(), ("z", 200.0): _result()}
+    s = TS.summarize(res, 100.0, n_k=K)
+    assert all(np.isnan(s[k]["DLA"]["amplitude_ratio"]) and np.isnan(s[k]["DLA"]["lowk_change"])
+               for k in ("z|T50", "z|T200"))
+    v = TS.verdict(s, {50.0, 200.0}, 100.0)
+    assert v["reading"].startswith("invalid: undefined comparison") and v["valid"] is False
+
+
+def test_the_low_k_maximum_is_undefined_if_any_row_is():
+    s = _summary(T50=_result(), T200=_result())
+    s["z|T200"]["LLS"]["lowk_change"] = float("nan")                    # a finite row first, a NaN one later
+    assert np.isnan(TS.verdict(s, {50.0, 200.0}, 100.0)["per_class"]["LLS"]["max_lowk_change"])
+
+
+def test_the_command_line_uses_the_data_range_low_k_window(tmp_path, monkeypatch):
+    kf = np.array([0.0004, 0.002, 0.004, 0.006, 0.008, 0.02, 0.03, 0.04])
+    args = _main_env(tmp_path, monkeypatch, []) + ["--thresholds", "50", "100", "200"]
+    out = tmp_path / "out"
+    TS.main(args + ["--out", str(out)])
+    for tag in ("a", "b"):
+        for thr in (50, 100, 200):
+            r = _result(kf=kf)
+            if thr == 50:
+                r["pf15"] = r["pf15"].copy()
+                r["pf15"][1:8, 0] *= 1.5                               # a change only in the bin below 1e-3
+            np.savez(out / f"result_{tag}_T{thr}.npz", kf=kf, pf15=r["pf15"], pu15=r["pu15"], counts15=r["counts15"],
+                     log_nhi=np.array([17.5, 19.5, 20.5]), scale=np.array(0.8), target_F=np.array(0.7),
+                     tau_eff=np.array(0.4), z_grid=np.array(3.0))
+    TS.main(args + ["--out", str(out)])
+    rows = json.loads((out / "summary.json").read_text())["rows"]
+    assert rows["a|T50"]["LLS"]["lowk_change"] == pytest.approx(0.0, abs=1e-15)
+    TS.main(args + ["--out", str(out), "--lowk-kmin", "0"])
+    assert json.loads((out / "summary.json").read_text())["rows"]["a|T50"]["LLS"]["lowk_change"] > 0.1
+
+
+def test_an_empty_clean_set_at_the_reference_is_invalid_without_warnings():
+    import warnings
+    ref = _result()
+    ref["counts15"] = ref["counts15"].copy()
+    ref["pf15"] = ref["pf15"].copy()
+    ref["counts15"][0] = 0
+    ref["pf15"][0] = 0.0
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        s = TS.summarize({("z", 100.0): ref, ("z", 50.0): _result(), ("z", 200.0): _result()}, 100.0, n_k=K)
+    assert TS.verdict(s, {50.0, 200.0}, 100.0)["valid"] is False
 
 
 def test_an_undefined_comparison_exits_2_and_is_marked_invalid(tmp_path, monkeypatch):

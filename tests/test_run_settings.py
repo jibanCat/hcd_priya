@@ -329,10 +329,11 @@ def test_a_rerun_into_a_new_snapshot_of_the_same_root_is_refused_on_each_product
 
 def test_meta_records_the_code_commit(tmp_path, monkeypatch):
     PL, ss, entry, cfg = _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(PL, "_repo_dirty", lambda: "probe")             # what meta.json records is the helper's answer
     c = cfg()
     PL.run_one_snap(ss, entry, c)
     meta = json.loads((PL.snap_output_dir(c, "synthsim", 1) / "meta.json").read_text())
-    assert meta["code_commit"] == PL._repo_commit() and meta["code_dirty"] == PL._repo_dirty()
+    assert meta["code_commit"] == PL._repo_commit() and meta["code_dirty"] == "probe"
 
 
 def test_an_output_root_written_without_a_record_is_refused(tmp_path, monkeypatch):

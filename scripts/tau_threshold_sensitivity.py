@@ -34,8 +34,9 @@ memory stays near three blocks. The per-bin P1D is a mean over sightlines, so th
 counts. ``--self-check N`` compares the blocked path with the whole-array production path on the first N skewers (the
 catalogue, the per-bin counts and P1D, the filter's mean optical depth and the mean-flux scale), in blocks whose last
 one is shorter (for N > 4), as in a full-file run. Once any input has a self-check, every input must have a passed
-one at the reference threshold; a failed or missing self-check, or an undefined comparison (a class or the clean set
-without sightlines), makes the reading "invalid", ``valid`` false and the exit status 2. The mean-flux scale is the
+one at the reference threshold; a failed or missing self-check, or an undefined comparison at a headline threshold or
+the reference (a class or the clean set without sightlines), makes the reading "invalid", ``valid`` false and the exit
+status 2. The mean-flux scale is the
 cache row's (production) value with ``--anchor-cache``, else solved over the skewers used (the whole file unless
 ``--n-skewers``).
 
@@ -130,8 +131,17 @@ def lowk_change(t, t_ref, kf, kmax, kmin=0.0):
     where a template crosses zero)."""
     kf = np.asarray(kf)
     m = (kf >= kmin) & (kf < kmax)
-    den = float(np.max(np.abs(np.asarray(t_ref)[m]))) if m.any() else 0.0
-    return float(np.max(np.abs(np.asarray(t)[m] - np.asarray(t_ref)[m]))) / den if den > 0 else float("nan")
+    with np.errstate(invalid="ignore"):
+        den = float(np.max(np.abs(np.asarray(t_ref)[m]))) if m.any() else 0.0
+        if not (den > 0 and np.isfinite(den)):
+            return float("nan")
+        return float(np.max(np.abs(np.asarray(t)[m] - np.asarray(t_ref)[m]))) / den
+
+
+def _clean_change(p, p_ref):
+    """Largest |p / p_ref - 1|; inf or NaN (no warning) when the reference has no clean sightline."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return float(np.max(np.abs(p / p_ref - 1.0)))
 
 
 def summarize(results, reference, n_k, lowk_kmax=0.01, lowk_kmin=1e-3):
@@ -151,7 +161,7 @@ def summarize(results, reference, n_k, lowk_kmax=0.01, lowk_kmin=1e-3):
         t, t_r = templates(pf[:, sl], pu[:, sl]), templates(pf_r[:, sl], pu_r[:, sl])
         kf = np.asarray(cur["kf"])[sl]
         row = {"tag": tag, "threshold": float(thr), "n_k": int(kf.size),
-               "clean_max_frac_change": float(np.max(np.abs(pf[0, sl] / pf_r[0, sl] - 1.0))),
+               "clean_max_frac_change": _clean_change(pf[0, sl], pf_r[0, sl]),
                "sightlines": {c: int(n) for c, n in zip(CLASSES, (cur["counts15"][lo:hi].sum()
                                                                   for lo, hi in COARSE_RANGES))}}
         for i, c in enumerate(CLASSES[1:], 1):
@@ -368,12 +378,11 @@ def cache_row_for(cache, sim, z_grid, alpha):
 
 
 def run_input(tag, path, thresholds, alpha, absorber, sim, out_dir, log, n_skewers=None, chunk=40000, cache=None):
-    from hcd_analysis.io import pixel_dv_kms, read_header
-    import build_emulator_cache_tau0 as bt                          # scripts/: the cache builder's own helpers
-
     todo = [t for t in thresholds if not (out_dir / f"result_{tag}_T{t:g}.npz").exists()]
     if not todo:
-        return
+        return                                                      # all results exist: nothing imported or read
+    from hcd_analysis.io import pixel_dv_kms, read_header
+    import build_emulator_cache_tau0 as bt                          # scripts/: the cache builder's own helpers
     hdr = read_header(path)
     dv, vmax = pixel_dv_kms(hdr), bt.vmax_from_header(hdr)
     z_grid = bt._snap_z_to_priya_grid(float(hdr.redshift))
