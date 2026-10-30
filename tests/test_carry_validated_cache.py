@@ -29,6 +29,12 @@ def world(tmp_path_factory):
         yield W.make_world(tmp_path_factory.mktemp("world"), mp)
 
 
+@pytest.fixture(autouse=True)
+def of_record(world, monkeypatch):
+    """The synthetic world's historical cache and builder commit as the tool's source and commits of record."""
+    W.pin_of_record(monkeypatch, CV, world["hist"])
+
+
 @pytest.fixture
 def same_code(monkeypatch):
     """The row-path diff against the builder commits of record, as an empty one (tested on a real repository below)."""
@@ -36,10 +42,13 @@ def same_code(monkeypatch):
                                                                                          new_commit=b), ""))
 
 
-def carry(w, out_dir, *, hist=None, old=None, rebuilt=None, emu=None, extra=()):
+def carry(w, out_dir, *, hist=None, old=None, rebuilt=None, emu=None, extra=(), rehash=True,
+          commits=(W.BUILDER_COMMIT,)):
     args = ["--historical-cache", hist or w["hist"], "--old-root", old or w["old"], "--rebuilt-root",
-            rebuilt or w["rebuilt"], "--raw-root", emu or w["emu"], "--row-path-commit", "abc1234",
-            "--validation-dir", out_dir / "val", "--output", out_dir / "carried.h5", *extra]
+            rebuilt or w["rebuilt"], "--raw-root", emu or w["emu"], *[x for c in commits for x in
+                                                                      ("--row-path-commit", c)],
+            "--validation-dir", out_dir / "val", "--output", out_dir / "carried.h5", *extra,
+            *(["--rehash-raw"] if rehash else [])]
     return CV.main([str(a) for a in args])
 
 
@@ -79,12 +88,22 @@ def test_the_carry_copies_validated_rows_and_rebuilds_every_count(world, tmp_pat
     s = summary(tmp_path)
     assert s["passed"] and s["n_groups"] == 3 and all(s["global_checks"].values())
     assert s["origins"]["spliced"] == [f"{W.SIMS[0]}:5"]
+    assert s["of_record"]["source_sha256"] == L.sha256_file(world["hist"])
+    assert s["of_record"]["repair_builder_commit"] == W.BUILDER_COMMIT
     for name, sha in s["group_records_sha256"].items():
         g = json.loads((tmp_path / "val" / name).read_text())
         assert L.sha256_file(tmp_path / "val" / name) == sha and g["ok"] and len(g["checks"]) == 12
+        dg = g["digests"]                                    # enough to audit the record without the catalogues
+        assert set(dg["carried_slices_sha256"]) == set(T.CARRIED_FIELDS)
+        assert dg["labels_old_sha256"] == dg["labels_rebuilt_sha256"]
+        assert dg["old_meta_sha256"] == L.sha256_file(world["old"] / g["sim"] / f"snap_{g['snap']:03d}" / "meta.json")
+        rows = np.arange(g["rows"][0], g["rows"][1] + 1)
+        assert dg["carried_slices_sha256"]["scale"] == L.arrays_sha256({"scale": src["scale"][rows]})
+        assert g["checks"]["raw_matches_rebuilt_record"]["evidence"] == "re-hashed by this run"
     from hcd_analysis.emulator.data import load_cache
     loaded = load_cache(out)
     assert loaded["cache_sha256"] == L.sha256_file(out) and loaded["lineage"] == rec
+    assert not list(tmp_path.glob(".*unchecked"))
 
 
 def _copy(world, tmp_path, *names):
@@ -158,6 +177,8 @@ def test_any_failed_check_writes_no_cache(world, tmp_path, same_code, monkeypatc
         meta["box_kpc_h"] = meta["box_kpc_h"] * 2
         m.write_text(json.dumps(meta))
         kw["old"] = w["old"]
+    if "hist" in kw:                                             # an edited source: make it the one of record
+        W.pin_of_record(monkeypatch, CV, kw["hist"])
     assert carry(world, tmp_path, **kw) == 2
     assert not (tmp_path / "carried.h5").exists()
     assert not summary(tmp_path)["passed"] and check in failed_checks(tmp_path)
@@ -190,10 +211,189 @@ def test_the_carry_runs_only_from_a_clean_tree_into_new_places(world, tmp_path, 
     assert carry(world, tmp_path) == 2 and "never overwritten" in capsys.readouterr().out
 
 
-def test_a_release_cache_is_never_a_carry_source(world, tmp_path, same_code):
+def test_a_release_cache_is_never_a_carry_source(world, tmp_path, same_code, monkeypatch):
     assert carry(world, tmp_path / "a") == 0
+    W.pin_of_record(monkeypatch, CV, tmp_path / "a" / "carried.h5")
     assert carry(world, tmp_path / "b", hist=tmp_path / "a" / "carried.h5") == 2
     assert not summary(tmp_path / "b")["global_checks"]["source_is_version_3.3"]
+
+
+# ------------------------------------------------------------------------------- the source and commits of record
+def test_a_source_that_is_not_of_record_is_refused(world, tmp_path, same_code, monkeypatch):
+    monkeypatch.setattr(CV, "SOURCE_OF_RECORD_SHA256", "d9c3783892872f8739f6c1a4039ee84cae5ab84803235a61d7d06ac119336cf2")
+    assert carry(world, tmp_path) == 2 and not (tmp_path / "carried.h5").exists()
+    s = summary(tmp_path)
+    assert s["global_checks"]["source_of_record"] is False and s["n_groups"] == 0
+
+
+def test_the_pinned_source_and_commits_are_the_reviewed_ones():
+    import ast
+    tree = ast.parse((REPO_ROOT / "scripts" / "carry_validated_cache.py").read_text())
+    pins = {t.id: ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign) for t in n.targets
+            if isinstance(t, ast.Name) and t.id in ("SOURCE_OF_RECORD_SHA256", "COMMITS_OF_RECORD")}
+    assert pins["SOURCE_OF_RECORD_SHA256"] == "d9c3783892872f8739f6c1a4039ee84cae5ab84803235a61d7d06ac119336cf2"
+    assert sorted(c[:7] for c in pins["COMMITS_OF_RECORD"]) == ["03f03b8", "3557ae2", "964e935", "bce73bf",
+                                                                 "ddd22ad"]
+    assert all(len(c) == 40 for c in pins["COMMITS_OF_RECORD"])
+
+
+def test_head_as_a_commit_of_record_is_refused(world, tmp_path, monkeypatch):
+    """A commit equal to HEAD would make the code-lineage check vacuous: the real diff is empty, yet the commit is not
+    one of record, so the carry is refused."""
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+    head = subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], capture_output=True, text=True,
+                          check=True).stdout.strip()
+    monkeypatch.setattr(L, "code_identity", lambda repo_dir=None: {"commit": head, "dirty": False})
+    assert carry(world, tmp_path, commits=("HEAD",)) == 2 and not (tmp_path / "carried.h5").exists()
+    s = summary(tmp_path)
+    assert s["row_path"][0]["identical"] and s["row_path"][0]["old_commit"] == head
+    assert s["global_checks"]["row_path_commits_of_record"] is False and s["n_groups"] == 0
+
+
+@pytest.mark.parametrize("commits", [(), ("abc1234", "def5678"), ("abc1234", "abc1234"), ("def5678",)])
+def test_a_commit_set_other_than_the_record_is_refused(world, tmp_path, same_code, monkeypatch, commits):
+    W.pin_of_record(monkeypatch, CV, world["hist"], commits=("abc1234", "fff0000") if not commits else ("abc1234",))
+    assert carry(world, tmp_path, commits=commits or ("abc1234",)) == 2
+    assert summary(tmp_path)["global_checks"]["row_path_commits_of_record"] is False
+
+
+def test_a_repair_record_naming_another_builder_is_refused(world, tmp_path, same_code, monkeypatch):
+    p = _v33_attr(world, tmp_path, "repair_record", json.dumps({"added": [[W.SIMS[0], 5, 2.6]],
+                                                                "builder_commit": "fff0000"}))
+    W.pin_of_record(monkeypatch, CV, p)
+    assert carry(world, tmp_path, hist=p) == 2
+    assert summary(tmp_path)["global_checks"]["repair_builder_commit_of_record"] is False
+
+
+# ------------------------------------------------------------------------------------------------ raw re-hash evidence
+def _acceptance(world, tmp_path, *, rehashed=True, all_accepted=True, raw_sha=None):
+    acc = tmp_path / "acceptance"
+    files = {}
+    for sim, snap, _z in W.GROUPS:
+        cat = L.read_npz(world["rebuilt"] / sim / f"snap_{snap:03d}" / "catalog.npz")[1]
+        raw = L.find_input(cat, "raw_spectra")
+        rec = {"sim": sim, "snap": snap, "accepted": True,
+               "checks": {"release_loader": {"ok": True, "rehashed": rehashed,
+                                             "raw": {"sha256": raw_sha or raw["sha256"], "size": raw["size"]}}}}
+        name = f"groups/{sim}__snap_{snap:03d}.json"
+        (acc / "groups").mkdir(parents=True, exist_ok=True)
+        (acc / name).write_text(json.dumps(rec))
+        files[name] = L.sha256_file(acc / name)
+    (acc / "summary.json").write_text(json.dumps({"format": "hcd_priya.catalogue_acceptance/1",
+                                                  "all_accepted": all_accepted, "group_files_sha256": files}))
+    return acc / "summary.json"
+
+
+def test_the_raw_files_are_rehashed_here_or_by_the_pinned_acceptance(world, tmp_path, same_code, capsys):
+    assert carry(world, tmp_path / "none", rehash=False) == 2
+    assert "re-hashed" in capsys.readouterr().out and not (tmp_path / "none" / "carried.h5").exists()
+    acc = _acceptance(world, tmp_path / "a")
+    ok = ["--acceptance-summary", acc, "--acceptance-summary-sha256", L.sha256_file(acc)]
+    assert carry(world, tmp_path / "ok", rehash=False, extra=ok) == 0
+    g = json.loads(next((tmp_path / "ok" / "val" / "groups").iterdir()).read_text())
+    assert g["checks"]["raw_matches_rebuilt_record"]["evidence"].startswith("re-hashed by the catalogue acceptance")
+    assert summary(tmp_path / "ok")["catalogue_acceptance"]["sha256"] == L.sha256_file(acc)
+    assert carry(world, tmp_path / "pin", rehash=False, extra=ok[:3] + ["0" * 64]) == 2
+    assert carry(world, tmp_path / "half", rehash=False, extra=ok[:2]) == 2
+    for name, kw, check in (("notall", dict(all_accepted=False), None),
+                            ("norehash", dict(rehashed=False), "raw_matches_rebuilt_record"),
+                            ("otherraw", dict(raw_sha="1" * 64), "raw_matches_rebuilt_record")):
+        a = _acceptance(world, tmp_path / name, **kw)
+        out = tmp_path / f"run_{name}"
+        assert carry(world, out, rehash=False,
+                     extra=["--acceptance-summary", a, "--acceptance-summary-sha256", L.sha256_file(a)]) == 2
+        if check is None:
+            assert summary(out)["global_checks"]["catalogue_acceptance_passed"] is False
+        else:
+            assert check in failed_checks(out)
+
+
+# --------------------------------------------------------------------------------- the global checks and inputs
+def _v33_attr(world, tmp_path, name, value):
+    p = tmp_path / f"hist_attr_{name}.h5"
+    shutil.copy2(world["hist"], p)
+    with h5py.File(p, "r+") as f:
+        if value is None:
+            del f.attrs[name]
+        else:
+            f.attrs[name] = value
+    return p
+
+
+@pytest.mark.parametrize("edit, check", [
+    (("dataset", "alpha_idx", lambda a: a.__setitem__(slice(0, 2), a[[1, 0]])), "canonical_layout"),
+    (("attr", "n_k", 7), "n_k_equal_builder"),
+    (("attr", "tau_thresh", 2.0e6), "recipe_attributes_equal_builder"),
+    (("dataset", "alpha_slope", lambda a: a.__setitem__(0, a[0] * 1.001)), "mean_flux_ladder_equal_builder"),
+    (("dataset", "tier_c_nhi_edges", lambda a: a.__setitem__(0, a[0] + 0.1)), "static_tables_equal_builder"),
+])
+def test_each_global_check_refuses(world, tmp_path, same_code, monkeypatch, edit, check):
+    kind, key, change = edit
+    p = _v33_with(world, tmp_path, key, change) if kind == "dataset" else _v33_attr(world, tmp_path, key, change)
+    W.pin_of_record(monkeypatch, CV, p)
+    assert carry(world, tmp_path, hist=p) == 2 and not (tmp_path / "carried.h5").exists()
+    s = summary(tmp_path)
+    assert s["global_checks"][check] is False and s["n_groups"] == 0
+
+
+def test_a_changed_absorption_path_is_refused(world, tmp_path, same_code, monkeypatch):
+    p = _v33_with(world, tmp_path, "snap_total_path_dX", lambda a: a.__setitem__(1, a[1] * 1.01))
+    W.pin_of_record(monkeypatch, CV, p)
+    assert carry(world, tmp_path, hist=p) == 2
+    assert "cddf_bins_and_absorption_path_equal_stored" in failed_checks(tmp_path)
+
+
+@pytest.mark.parametrize("missing", ["raw", "old_catalogue", "rebuilt_group"])
+def test_a_missing_input_fails_its_group(world, tmp_path, same_code, missing):
+    sim, snap, _z = W.GROUPS[2]
+    kw = {}
+    if missing == "raw":
+        w = _copy(world, tmp_path, "emu")
+        shutil.rmtree(w["emu"] / sim / "output" / f"SPECTRA_{snap:03d}")
+        kw["emu"] = w["emu"]
+    elif missing == "old_catalogue":
+        w = _copy(world, tmp_path, "old")
+        (w["old"] / sim / f"snap_{snap:03d}" / "catalog.npz").unlink()
+        kw["old"] = w["old"]
+    else:
+        w = _copy(world, tmp_path, "rebuilt")
+        shutil.rmtree(w["rebuilt"] / sim / f"snap_{snap:03d}")
+        kw["rebuilt"] = w["rebuilt"]
+    assert carry(world, tmp_path, **kw) == 2 and not (tmp_path / "carried.h5").exists()
+    assert "inputs" in failed_checks(tmp_path)
+
+
+def test_an_unexpected_error_exits_2_with_a_summary_and_no_cache(world, tmp_path, same_code, monkeypatch, capsys):
+    p = _v33_attr(world, tmp_path, "created_utc", None)
+    W.pin_of_record(monkeypatch, CV, p)
+    assert carry(world, tmp_path, hist=p) == 2
+    assert "unexpected KeyError" in capsys.readouterr().out
+    s = summary(tmp_path)
+    assert s["passed"] is False and s["error"].startswith("KeyError") and not (tmp_path / "carried.h5").exists()
+
+
+def test_an_ineligible_output_never_appears_under_the_output_name(world, tmp_path, same_code, monkeypatch):
+    calls = []
+
+    def code(repo_dir=None):                     # clean when the run starts, dirty when the cache is written
+        calls.append(1)
+        return {"commit": "c" * 40, "dirty": len(calls) > 1}
+    monkeypatch.setattr(L, "code_identity", code)
+    real = T.write_cache
+
+    def spy(path, *a, **k):
+        assert path.name.startswith(".") and path.name.endswith(".unchecked")
+        return real(path, *a, **k)
+    monkeypatch.setattr(T, "write_cache", spy)
+    assert carry(world, tmp_path) == 2
+    assert not (tmp_path / "carried.h5").exists() and not list(tmp_path.glob(".*unchecked"))
+
+
+@pytest.mark.parametrize("bad", ["abc1234=xyz", "=" + "d" * 64, "abc1234=" + "D" * 64, "abc1234"])
+def test_a_malformed_accepted_digest_is_refused(world, tmp_path, same_code, bad, capsys):
+    assert carry(world, tmp_path, extra=["--accept-row-path-diff", bad]) == 2
+    assert "expected COMMIT=SHA256" in capsys.readouterr().out
 
 
 # ------------------------------------------------------------------------------------- the row-path diff, for real

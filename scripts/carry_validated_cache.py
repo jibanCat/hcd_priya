@@ -23,20 +23,25 @@ Checks, for every (simulation, snapshot) group of the historical cache:
   5. the per-row DLA core (the loader's delta[:, 2]) from the rebuilt counts equals the one from the stored counts;
   6. the snapshot block rebuilt from the rebuilt CDDF and meta.json: CDDF counts equal the rebuilt catalogue's
      histogram, meta.json counts its class counts, the CDDF bins and the absorption path equal the stored ones.
-Once, first: the row-path code (ROW_PATH) at each builder commit of record equals the code at HEAD, by a
-function-level diff (a non-empty diff passes only when its sha256 is accepted with --accept-row-path-diff, after
-review); the historical cache's layout, recipe attributes, static tables and mean-flux ladder equal the builder's.
+Once, first: the source is the historical cache of record (SOURCE_OF_RECORD_SHA256); the --row-path-commit set is
+exactly the builder commits of record (COMMITS_OF_RECORD), and the source's repair record names one of them; the
+row-path code (ROW_PATH) at each of them equals the code at HEAD, by a function-level diff (a non-empty diff passes
+only when its sha256 is accepted with --accept-row-path-diff, after review); the historical cache's layout, recipe
+attributes, static tables and mean-flux ladder equal the builder's; the catalogue acceptance passed (its summary, pinned
+by sha256, with every group's raw file re-hashed there), unless this run re-hashes every raw file (--rehash-raw).
 If one of these fails, no group is validated (the summary and the diffs are still written).
 
 Output: a validation record per group (<validation-dir>/groups/), the row-path diffs (<validation-dir>/row_path/) and
 <validation-dir>/summary.json. Only if every check passes, the cache: the CARRIED_FIELDS copied from the historical
-cache (marked carried_validated in the lineage record, with its sha256), every other field rebuilt. On any failure no
-cache is written and the exit status is 2.
+cache (marked carried_validated in the lineage record, with its sha256), every other field rebuilt. On any failure,
+including an unexpected error, no cache is written, a summary is written, and the exit status is 2.
 
 Usage (from a clean, committed checkout; the interpreter of the cache build):
     python scripts/carry_validated_cache.py --historical-cache OLD.h5 --old-root OLD_SNAPSHOT_ROOT \\
-        --rebuilt-root REBUILT_SNAPSHOT_ROOT --raw-root RAW_SPECTRA_ROOT --row-path-commit COMMIT [...] \\
-        [--accept-row-path-diff COMMIT=SHA256 ...] [--rehash-raw] --validation-dir DIR --output NEW.h5
+        --rebuilt-root REBUILT_SNAPSHOT_ROOT --raw-root RAW_SPECTRA_ROOT \\
+        --row-path-commit COMMIT [... every commit of record] [--accept-row-path-diff COMMIT=SHA256 ...] \\
+        (--acceptance-summary SUMMARY.json --acceptance-summary-sha256 SHA256 | --rehash-raw) \\
+        --validation-dir DIR --output NEW.h5
 """
 from __future__ import annotations
 
@@ -65,8 +70,27 @@ from hcd_analysis.catalog import load_catalog_historical  # noqa: E402
 from hcd_analysis.io import pixel_dv_kms, read_header  # noqa: E402
 from hcd_analysis.tau0_rescale import make_alpha_grid_priya_aligned  # noqa: E402
 
+# The historical cache the carry may read (the S4-repaired LF cache) and the builder commits of record of its rows: the
+# merge stamp of the base cache, the commits stamped on its base shards (88 shards, shard 089, shard 044) and the commit
+# that built the two spliced shards. A carry from another source, or with another commit set, is refused: an operator
+# cannot make the code-lineage check vacuous by naming a commit equal to HEAD. Reviewed row-path digests, given on the
+# command line with --accept-row-path-diff: the four base commits share one row-path code, 03f03b8 another.
+SOURCE_OF_RECORD_SHA256 = "d9c3783892872f8739f6c1a4039ee84cae5ab84803235a61d7d06ac119336cf2"
+COMMITS_OF_RECORD = {
+    "964e935adad9e520f56d12d6ad0043cd5f19864c": "base cache (merge stamp)",
+    "3557ae27d67924b31d0fd519f45d0bec40e8209a": "base shards (88)",
+    "bce73bf484ec6b10550301c18a169adf1139cfdf": "base shard 089",
+    "ddd22ada1e018b1a564de5d2066c2f732d3f3fda": "base shard 044",
+    "03f03b8a157e5d0aea9b967c02b04f3f2f120677": "the two spliced shards (repair record builder)",
+}
+
 # The code that computes the carried fields: (file, symbols) with None for the whole file. A symbol is a function,
 # a class method ("Class.method") or a module-level assignment.
+# Not in this list: the catalogue-to-raw pairing (build_emulator_cache_tau0.locate_raw_tau_file and its helpers; at the
+# base cache's merge commit also _raw_spectra_index and _RAW_SPECTRA_DIR_OVERRIDE), where the paired-file defect of the
+# S4 repair lived. For the source of record it was compared by hand at review: the one group the old override paired
+# with another directory is not in that source, and pairing is the identity for every carried group. Add the pairing
+# symbols (and io.read_header) before any other use of this tool; that changes the reviewed digests.
 ROW_PATH = (
     ("scripts/build_emulator_cache_tau0.py", ("build_tau0_rows", "_read_tau", "_snap_z_to_priya_grid",
                                               "catalogue_z_label", "_PHASE1_Z_OVERRIDE")),
@@ -163,9 +187,9 @@ def validate_group(src, b, rows, ctx):
     rec = {"sim": sim, "snap": snap, "z_grid": float(src["z_grid"][rows[0]]), "rows": [int(rows[0]), int(rows[-1])],
            "origin": ctx["origins"].get((sim, snap), "base"), "checks": {}}
     checks = rec["checks"]
-    raw = bt0.locate_raw_tau_file(ctx["raw_root"], sim, snap)
     old_dir = Path(ctx["old_root"]) / sim / f"snap_{snap:03d}"
     try:
+        raw = bt0.locate_raw_tau_file(ctx["raw_root"], sim, snap)
         if raw is None:
             raise FileNotFoundError(f"no raw spectra file for {sim} snap {snap} under the raw root")
         inp, entries = T.load_snapshot_inputs(Path(ctx["rebuilt_root"]) / sim / f"snap_{snap:03d}", raw, sim=sim,
@@ -197,20 +221,29 @@ def validate_group(src, b, rows, ctx):
                                                                         old_hist),
            n_old_entries=len(old.absorbers), stored_total=int(np.sum(src["snap_n_absorbers"][b])))
 
-    # 3. raw identity
+    # 3. raw identity: the file matches the rebuilt record (the inputs step), its bytes re-hashed by this run or by
+    # the catalogue acceptance, which recorded the same sha256
     raw_rec = L.find_input(inp.catalog.lineage, "raw_spectra")
     st, st_old = os.stat(raw), os.stat(old_dir / "catalog.npz")
-    _check(checks, "raw_matches_rebuilt_record", True, sha256=raw_rec["sha256"], size=raw_rec["size"],   # step 1
+    if ctx["rehash_raw"]:
+        rehash_ok, evidence = True, "re-hashed by this run"
+    else:
+        rehash_ok, evidence = _rehashed_by_acceptance(ctx["acceptance"], sim, snap, raw_rec["sha256"])
+    _check(checks, "raw_matches_rebuilt_record", rehash_ok, sha256=raw_rec["sha256"], size=raw_rec["size"],
            recorded_mtime_ns=raw_rec.get("mtime_ns"), mtime_ns=int(st.st_mtime_ns), rehashed=ctx["rehash_raw"],
-           note="verified by the inputs step (the release catalogue loader with this raw file)")
+           evidence=evidence)
     _check(checks, "raw_predates_old_catalogue_and_source", st.st_mtime_ns < st_old.st_mtime_ns
            and st.st_mtime_ns < ctx["source_created_ns"], raw_mtime_ns=int(st.st_mtime_ns),
            old_catalogue_mtime_ns=int(st_old.st_mtime_ns), source_created_ns=ctx["source_created_ns"])
     header = {"nbins": int(hdr.nbins), "n_skewers": n_sk, "box_kpc_h": float(hdr.box), "hubble": float(hdr.hubble),
               "dv_kms": float(pixel_dv_kms(hdr))}
     recorded = {k: old_meta.get(k) for k in ("nbins", "n_skewers", "box_kpc_h", "hubble", "dv_kms", "z")}
-    _check(checks, "raw_header_equals_old_meta", all(recorded[k] == v for k, v in header.items()), header=header,
-           old_meta_recorded=recorded, old_sha256_recorded=None)
+    override = any(tag in sim and s == snap for tag, s in bt0._PHASE1_Z_OVERRIDE)
+    z_ok = override or (recorded["z"] is not None
+                        and abs(float(recorded["z"]) - float(hdr.redshift)) <= bt0._Z_LABEL_TOL)
+    _check(checks, "raw_header_equals_old_meta", all(recorded[k] == v for k, v in header.items()) and z_ok,
+           header=dict(header, redshift=float(hdr.redshift)), old_meta_recorded=recorded, old_sha256_recorded=None,
+           z_label_override=override, old_meta_z_equals_rebuilt=recorded["z"] == inp.meta.get("z"))
     p1d_attrs = old_dir / "p1d_per_class.h5"
     if p1d_attrs.exists():
         with h5py.File(p1d_attrs, "r") as f:
@@ -265,8 +298,48 @@ def validate_group(src, b, rows, ctx):
     rec["counts_old_minus_rebuilt_per_bin"] = (np.asarray(src["snap_n_absorbers"][b]) - block["snap_n_absorbers"]
                                                ).tolist()
     rec["old_catalogue"] = {k: v for k, v in L.file_identity(old_dir / "catalog.npz").items()}
+    # digests to audit the record without the catalogues: the label vectors, the old meta.json, the carried slices
+    rec["digests"] = {"labels_old_sha256": L.arrays_sha256({"labels": lab_old}),
+                      "labels_rebuilt_sha256": L.arrays_sha256({"labels": lab_new}),
+                      "old_meta_sha256": L.sha256_file(old_dir / "meta.json"),
+                      "carried_slices_sha256": {k: L.arrays_sha256({k: np.asarray(src[k])[rows]})
+                                                for k in T.CARRIED_FIELDS}}
     rec["ok"] = all(c["ok"] for c in checks.values())
     return rec, (dict(meta_rows, tier_c_counts=np.tile(counts, (nr, 1))), block, entries, raw)
+
+
+def _rehashed_by_acceptance(acc, sim, snap, raw_sha256):
+    """``(ok, evidence)``: the catalogue acceptance's record of this group is the file its summary pins, accepted, with
+    its raw file re-hashed there to ``raw_sha256``."""
+    if acc is None:
+        return False, "no catalogue acceptance summary and no --rehash-raw"
+    name = f"groups/{sim}__snap_{snap:03d}.json"
+    p = acc["dir"] / name
+    try:
+        if acc["files"].get(name) != L.sha256_file(p):
+            return False, f"{name}: not the record the acceptance summary pins"
+        g = json.loads(p.read_text())
+        lr = g["checks"]["release_loader"]
+        ok = g.get("accepted") is True and lr.get("rehashed") is True and (lr.get("raw") or {}).get("sha256") \
+            == raw_sha256
+        return ok, (f"re-hashed by the catalogue acceptance ({name})" if ok else
+                    f"{name}: accepted {g.get('accepted')}, rehashed {lr.get('rehashed')}, raw sha256 "
+                    f"{(lr.get('raw') or {}).get('sha256')}")
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return False, f"{name}: {type(e).__name__}: {e}"
+
+
+def load_acceptance(path, sha256):
+    """The catalogue acceptance summary, pinned by ``sha256`` (CarryRefused otherwise): ``{"dir", "files",
+    "summary"}``."""
+    path = Path(path)
+    got = L.sha256_file(path)
+    if got != sha256:
+        raise CarryRefused(f"{path}: sha256 {got} is not the pinned {sha256}")
+    doc = json.loads(path.read_text())
+    return {"dir": path.parent, "files": dict(doc.get("group_files_sha256") or {}), "summary": doc,
+            "sha256": got, "passed": doc.get("format") == "hcd_priya.catalogue_acceptance/1"
+            and doc.get("all_accepted") is True}
 
 
 # ------------------------------------------------------------------------------------------------------- the run
@@ -315,9 +388,16 @@ def run(args):
     accepted = {}
     for a in args.accept_row_path_diff or []:
         c, _, sha = a.partition("=")
-        if len(sha) != 64:
+        if not c or len(sha) != 64 or any(ch not in "0123456789abcdef" for ch in sha):
             raise CarryRefused(f"--accept-row-path-diff {a!r}: expected COMMIT=SHA256")
         accepted[c] = sha
+    if (args.acceptance_summary is None) != (args.acceptance_summary_sha256 is None):
+        raise CarryRefused("--acceptance-summary and --acceptance-summary-sha256 go together")
+    if args.acceptance_summary is None and not args.rehash_raw:
+        raise CarryRefused("the raw files must be re-hashed: pass the catalogue acceptance summary (pinned by its "
+                           "sha256) or --rehash-raw")
+    acceptance = (load_acceptance(args.acceptance_summary, args.acceptance_summary_sha256)
+                  if args.acceptance_summary is not None else None)
 
     # once: the code, then the source
     row_path = []
@@ -337,13 +417,21 @@ def run(args):
         raise CarryRefused(f"the source holds {n_alpha} mean-flux rungs, not a multiple of the PRIYA ten")
     globals_, grid = check_source(src, attrs, n_alpha // 10, args.fidelity)
     globals_["source_is_version_3.3"] = version == "3.3"
+    globals_["source_of_record"] = source_ident["sha256"] == SOURCE_OF_RECORD_SHA256
+    resolved = [r["old_commit"] for r in row_path]
+    globals_["row_path_commits_of_record"] = sorted(resolved) == sorted(COMMITS_OF_RECORD)
     globals_["row_path_code"] = all(r["ok"] for r in row_path)
+    repair = json.loads(T._attr_value(attrs["repair_record"])) if "repair_record" in attrs else {}
+    bc = str(repair.get("builder_commit") or "")
+    globals_["repair_builder_commit_of_record"] = not repair or (len(bc) >= 7 and any(c.startswith(bc)
+                                                                                      for c in COMMITS_OF_RECORD))
+    if acceptance is not None:
+        globals_["catalogue_acceptance_passed"] = acceptance["passed"]
     origins = {}
-    if "repair_record" in attrs:
-        for sim, snap, _z in json.loads(T._attr_value(attrs["repair_record"])).get("added", []):
-            origins[(str(sim), int(snap))] = "spliced"
+    for sim, snap, _z in repair.get("added", []):
+        origins[(str(sim), int(snap))] = "spliced"
     ctx = dict(raw_root=args.raw_root, old_root=args.old_root, rebuilt_root=args.rebuilt_root, origins=origins,
-               rehash_raw=bool(args.rehash_raw), alpha_grid=grid,
+               rehash_raw=bool(args.rehash_raw), alpha_grid=grid, acceptance=acceptance,
                source_created_ns=_utc_ns(T._attr_value(attrs["created_utc"])))
 
     # every group (skipped when a global check already failed: no group could be carried)
@@ -370,6 +458,11 @@ def run(args):
                    "git_sha": str(T._attr_value(attrs.get("git_sha")))},
         "roots": {"old": str(args.old_root), "rebuilt": str(args.rebuilt_root), "raw": str(args.raw_root)},
         "rehash_raw": bool(args.rehash_raw), "global_checks": globals_, "row_path": row_path,
+        "of_record": {"source_sha256": SOURCE_OF_RECORD_SHA256, "commits": COMMITS_OF_RECORD,
+                      "repair_builder_commit": bc or None},
+        "catalogue_acceptance": None if acceptance is None else {"path": str(args.acceptance_summary),
+                                                                 "sha256": acceptance["sha256"],
+                                                                 "passed": acceptance["passed"]},
         "n_groups": len(records), "n_groups_in_source": len(src["snap_snap"]), "n_failed": len(failed),
         "failed": failed, "group_records_sha256": files,
         "origins": {"spliced": sorted(f"{s}:{n}" for s, n in origins)}, "rule": CARRY_RULE,
@@ -401,8 +494,9 @@ def run(args):
     n_k = int(T._attr_value(attrs["n_k"]))
     out_attrs = dict(bt0.cache_attrs(n_k, (grid[0], grid[-1])), n_rows=int(d["sim_name"].size),
                      n_snaps=len(rebuilt))
+    unchecked = out_path.with_name(f".{out_path.name}.unchecked")     # eligibility is decided before the rename
     rec = T.write_cache(
-        out_path, d, out_attrs, inputs=T.combine_inputs(entries),
+        unchecked, d, out_attrs, inputs=T.combine_inputs(entries),
         settings=T.cache_settings(fidelity=args.fidelity, n_k=n_k, alpha_refine=n_alpha // 10,
                                   alpha_range=(grid[0], grid[-1])),
         groups=[{"sim": r["sim"], "snap": r["snap"], "z_grid": r["z_grid"], "rows": T.ROWS_CARRIED} for r in records],
@@ -413,9 +507,10 @@ def run(args):
         validation={"validated_inputs": [SOURCE_ROLE], "all_passed": True, "n_groups": len(records),
                     "summary_sha256": summary_sha, "checks": sorted(records[0]["checks"]) + sorted(globals_)})
     if not rec["release_eligible"]:
-        out_path.unlink()
+        unchecked.unlink()
         print("CARRY REFUSED: the output would not be release-eligible: " + "; ".join(rec["ineligible_reasons"]))
         return 2
+    os.replace(unchecked, out_path)
     print(f"wrote {out_path} sha256 {L.sha256_file(out_path)}: {len(records)} groups carried_validated; "
           f"validation summary sha256 {summary_sha}")
     return 0
@@ -433,6 +528,9 @@ def main(argv=None):
     ap.add_argument("--accept-row-path-diff", action="append", metavar="COMMIT=SHA256",
                     help="accept the reviewed non-empty row-path diff with this sha256")
     ap.add_argument("--rehash-raw", action="store_true", help="re-hash every raw spectra file")
+    ap.add_argument("--acceptance-summary", type=Path, default=None,
+                    help="the catalogue acceptance summary.json (its group records beside it, raw files re-hashed)")
+    ap.add_argument("--acceptance-summary-sha256", default=None, help="the pinned sha256 of that summary")
     ap.add_argument("--fidelity", choices=("lf", "hr"), default="lf")
     ap.add_argument("--validation-dir", type=Path, required=True, help="new directory for the validation records")
     ap.add_argument("--output", type=Path, required=True, help="the new cache (format 3.4)")
@@ -441,6 +539,20 @@ def main(argv=None):
         return run(args)
     except CarryRefused as e:
         print(f"CARRY REFUSED: {e}")
+        return 2
+    except Exception as e:                       # an unexpected error: no cache (it is written last), a summary, exit 2
+        import traceback
+        vdir = Path(args.validation_dir)
+        doc = {"format": "hcd_priya.carry_validation/1", "passed": False, "error": f"{type(e).__name__}: {e}",
+               "traceback": traceback.format_exc()[-4000:]}
+        try:
+            _write_json(vdir / ("failure.json" if (vdir / "summary.json").exists() else "summary.json"), doc)
+        except OSError:
+            pass
+        unchecked = Path(args.output).with_name(f".{Path(args.output).name}.unchecked")
+        if unchecked.exists():
+            unchecked.unlink()
+        print(f"CARRY REFUSED: unexpected {type(e).__name__}: {e}; no cache written")
         return 2
 
 

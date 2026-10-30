@@ -192,6 +192,15 @@ def trace_rows(old_root):
     return rows
 
 
+BUILDER_COMMIT = "abc1234"           # the synthetic historical cache's builder commit of record
+
+
+def pin_of_record(mp, cv, hist, commits=(BUILDER_COMMIT,)):
+    """Make ``hist`` and ``commits`` the carry tool's (module ``cv``) source and builder commits of record."""
+    mp.setattr(cv, "SOURCE_OF_RECORD_SHA256", L.sha256_file(hist))
+    mp.setattr(cv, "COMMITS_OF_RECORD", {c: "synthetic" for c in commits})
+
+
 def to_v33(src, dst, *, repair_added=None):
     """A copy of a cache as a pre-lineage 3.3 file: the same datasets and attributes, no record."""
     from hcd_analysis import tau0_cache as T
@@ -201,7 +210,7 @@ def to_v33(src, dst, *, repair_added=None):
             f.attrs[k] = v
         f.attrs["cache_version"] = "3.3"
         if repair_added is not None:
-            f.attrs["repair_record"] = json.dumps({"added": repair_added})
+            f.attrs["repair_record"] = json.dumps({"added": repair_added, "builder_commit": BUILDER_COMMIT})
         for k, v in d.items():
             if k in T.STR_KEYS:
                 f.create_dataset(k, data=np.asarray(v, dtype=object), dtype=h5py.string_dtype())

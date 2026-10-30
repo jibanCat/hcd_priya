@@ -191,10 +191,11 @@ def carried(world, tmp_path_factory):
         mp.setattr(CV, "row_path_diff", lambda repo, a, b, spec=None: ({"old_commit": a, "new_commit": b,
                                                                         "identical": True, "items": [],
                                                                         "diff_sha256": "0" * 64}, ""))
+        W.pin_of_record(mp, CV, world["hist"])
         assert CV.main([str(x) for x in ("--historical-cache", world["hist"], "--old-root", world["old"],
                                          "--rebuilt-root", world["rebuilt"], "--raw-root", world["emu"],
-                                         "--row-path-commit", "abc", "--validation-dir", base / "val",
-                                         "--output", base / "carried.h5")]) == 0
+                                         "--row-path-commit", W.BUILDER_COMMIT, "--rehash-raw",
+                                         "--validation-dir", base / "val", "--output", base / "carried.h5")]) == 0
     pre = base / "prereg.json"
     FR.main(["select", "--cache", str(world["hist"]), "--seed", "5", "--n-total", "2", "--out", str(pre)])
     return base / "carried.h5", pre
