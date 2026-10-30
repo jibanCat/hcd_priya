@@ -24,9 +24,10 @@ def main(argv=None):
     ap.add_argument("--cache-sha256", required=True, help="its expected sha256 (checked at load)")
     ap.add_argument("--out", required=True, help="the NEW map file (refused if it exists)")
     a = ap.parse_args(argv)
+    from hcd_analysis.tau0_cache import CacheLineageError
     try:
         rec, sha = W.build(a.cache, a.out, expected_cache_sha256=a.cache_sha256)
-    except W.WcMapError as e:
+    except (W.WcMapError, CacheLineageError) as e:                   # the map, or the strict cache loader, refused
         print(f"refused: {e}", file=sys.stderr)
         return 2
     m = W.read_wc_map(a.out, expected_sha256=sha)

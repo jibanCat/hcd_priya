@@ -119,6 +119,11 @@ def test_the_refit_command(cache, tmp_path, monkeypatch, capsys):
     assert not (tmp_path / "b.json").exists()
     with pytest.raises(SystemExit):
         cmd.main(["--cache", str(cache), "--out", str(tmp_path / "c.json")])          # the digest is required
+    tf.clean_code(monkeypatch)
+    old = tf.write_v33(tmp_path / "v33.h5", [("simA", 16, 3.2, 3, 1)])             # the strict loader refuses it:
+    assert cmd.main(["--cache", str(old), "--cache-sha256", L.sha256_file(old),    # refused, exit 2, nothing written
+                     "--out", str(tmp_path / "d.json")]) == 2
+    assert "refused" in capsys.readouterr().err and not (tmp_path / "d.json").exists()
 
 
 # ------------------------------------------------------------------------------------------------- strict reading
