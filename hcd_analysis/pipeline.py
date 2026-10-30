@@ -849,6 +849,7 @@ def run_benchmark(cfg: PipelineConfig, n_sims: int = 1, n_snaps: int = 1) -> Dic
             n_skewers=min(10000, n_total),
             fast_mode=True,
             min_log_nhi=LOG_NHI_LLS_MIN,
+            record_lineage=False,             # a timing build, never saved: the whole-file hash would distort it
         )
         t_cat_10k = time.perf_counter() - t0
 
