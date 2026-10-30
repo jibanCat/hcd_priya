@@ -19,14 +19,14 @@ from hcd_analysis.emulator import kcoord as K
 from hcd_analysis.emulator import release_testing as RT
 from hcd_analysis.emulator import safe_h5 as H
 from hcd_analysis.emulator.data import Z_LIMITS, normalize_params
-from hcd_analysis.emulator.meanflux_prior import kim_tau0
+from hcd_analysis.emulator.mean_flux_model import kim_tau0
 from hcd_analysis.emulator.predict import predict_P_filt, reconstruct_P_filt_jax
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PARAMS = {"ns": 0.95, "Ap": 2.0e-9, "herei": 3.8, "heref": 2.9, "alphaq": 1.8, "hub": 0.7, "omegamh2": 0.143,
           "hireionz": 7.0, "bhfeedback": 0.05}
 FORBIDDEN = ("hcd_analysis.emulator.inference", "hcd_analysis.emulator.closure_legb", "hcd_analysis.emulator.lit_dndx",
-             "hcd_analysis.emulator.lit_dndx_kernel")
+             "hcd_analysis.emulator.lit_dndx_kernel", "hcd_analysis.emulator.meanflux_prior")
 
 
 @pytest.fixture(scope="module")
@@ -274,7 +274,8 @@ def test_the_module_never_imports_the_historical_likelihood(info, tmp_path):
     tree = ast.parse(open(hp.__file__).read())
     mods = {(n.module or "") for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)} | \
         {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
-    assert not any(m.split(".")[-1] in ("inference", "closure_legb") or "lit_dndx" in m for m in mods), mods
+    assert not any(m.split(".")[-1] in ("inference", "closure_legb", "meanflux_prior") or "lit_dndx" in m
+                   for m in mods), mods
     code = ("import sys, json; sys.path.insert(0, sys.argv[1]);"
             "import hcd_analysis.predictor as hp;"
             "emu = hp.load_bundle(sys.argv[2], sys.argv[3]);"
@@ -288,3 +289,13 @@ def test_the_module_never_imports_the_historical_likelihood(info, tmp_path):
     loaded = json.loads(r.stdout.strip().splitlines()[-1])
     assert "hcd_analysis.predictor" in loaded and "hcd_analysis.emulator.wc_map" in loaded
     assert not [m for m in loaded if m in FORBIDDEN or "lit_dndx" in m], loaded
+
+
+def test_the_mean_flux_conversions_are_the_historical_ones():
+    from hcd_analysis.emulator import mean_flux_model as N
+    from hcd_analysis.emulator import meanflux_prior as M
+    assert M.kim_tau0 is N.kim_tau0 and M.tau0_alpha_priya is N.tau0_alpha_priya and M.TAU0_PIVOT_Z == 3.0
+    z = np.linspace(2.0, 5.4, 18)
+    assert np.allclose(np.asarray(N.kim_tau0(z)), 0.0023 * (1 + z) ** 3.65, rtol=1e-15, atol=0)
+    assert hp.tau_eff_priya(3.4, 1.1, 0.2) == pytest.approx(1.1 * (4.4 / 4.0) ** 0.2 * 0.0023 * 4.4 ** 3.65,
+                                                            rel=1e-14)

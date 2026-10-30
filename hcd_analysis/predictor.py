@@ -37,8 +37,8 @@ the mode axis, kcoord.bind / at_data). Values outside the training box are evalu
 or per class per redshift ((n_z, 3) on a stack). A_c is the effective sightline fraction of class c: A = w_c
 reproduces the simulation's own filtered total sum_c w_c P_c. Only physical validity is imposed: every A_c >= 0 and the
 clean fraction 1 - sum_c A_c >= 0; anything else is a clear error. This module has no prior, no survey key and no DLA
-forward-fraction default, and it never imports the historical likelihood (``inference``, ``closure_legb``,
-``lit_dndx*``). Two contributions are not in the total (documented omissions): the subDLA filtered remnant (the power of
+forward-fraction default, and it never imports the historical likelihood or priors (``inference``, ``closure_legb``,
+``lit_dndx*``, ``meanflux_prior``). Two contributions are not in the total (documented omissions): the subDLA filtered remnant (the power of
 subDLA cores the PRIYA filter removes) and the DLA damping-wing core (the DLA spectrum here is the filtered one).
 
 The checked entry points take host values and refuse a JAX tracer; the forward itself runs as one jitted function per
@@ -58,7 +58,7 @@ import jax.numpy as jnp
 from .emulator import kcoord as _K
 from .emulator import safe_h5 as _H
 from .emulator.data import DATA_RANGE, PARAM_LIMITS, SAMPLING_LIMITS, Z_LIMITS, normalize_params
-from .emulator.meanflux_prior import TAU0_PIVOT_Z, kim_tau0, tau0_alpha_priya
+from .emulator.mean_flux_model import TAU0_PIVOT_Z, kim_tau0, tau0_alpha_priya
 from .emulator.predict import reconstruct_P_filt_jax
 from .emulator.schema import CHECKPOINT_SCHEMA_VERSION, L_BOX_HMPC
 
@@ -129,7 +129,7 @@ def snapshot_z(z):
 
 def tau_eff_priya(z, tau0_amp, dtau0, *, z_pivot=TAU0_PIVOT_Z):
     """PRIYA's mean-flux model as the predictor's input: tau_eff(z) = tau0_amp ((1 + z) / (1 + z_pivot))^dtau0
-    tau_Kim07(z), the optical depth of the PRIYA-filtered forest (meanflux_prior.tau0_alpha_priya times kim_tau0)."""
+    tau_Kim07(z), the optical depth of the PRIYA-filtered forest (mean_flux_model.tau0_alpha_priya times kim_tau0)."""
     zz = _scalar("z", z)
     return float(tau0_alpha_priya(zz, _scalar("tau0_amp", tau0_amp), _scalar("dtau0", dtau0), z_pivot=z_pivot)
                  * kim_tau0(zz))

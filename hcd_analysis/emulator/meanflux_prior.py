@@ -15,6 +15,8 @@ import jax
 import jax.numpy as jnp
 
 from .data import KIM_AMP, KIM_SLOPE
+# the conversions (no prior) live in mean_flux_model; re-exported here unchanged for the historical callers
+from .mean_flux_model import TAU0_PIVOT_Z, kim_tau0, tau0_alpha_priya  # noqa: F401
 
 assert jax.config.read("jax_enable_x64"), \
     "x64 must be on (import hcd_analysis.emulator before jax)"
@@ -41,11 +43,6 @@ BECKER13_C = -0.132
 BECKER13_ZREF = 3.5     # the pivot (1+z)/(1+3.5) = (1+z)/4.5 in Becker+2013 Eq. 6
 
 
-def kim_tau0(z):
-    """Kim2013 central mean-flux τ₀(z) = KIM_AMP·(1+z)^KIM_SLOPE (the cache ladder anchor)."""
-    return KIM_AMP * (1.0 + jnp.asarray(z)) ** KIM_SLOPE
-
-
 def becker13_tau0(z):
     """Becker+2013 (1208.2584 Eq. 6) τ_eff(z) = 0.751·((1+z)/4.5)^2.90 − 0.132.
 
@@ -64,22 +61,10 @@ def becker13_tau0(z):
 # per-z wiggle) + co-varying HCD, not a tight prior. These REPLACE the 13 independent per-z rungs.
 TAU0_AMP_RANGE = (0.75, 1.25)    # PRIYA uniform prior on amplitude τ₀ (×, center 1.0 = Kim07)
 DTAU0_RANGE = (-0.40, 0.25)      # PRIYA uniform prior on slope dτ₀ (center 0 = Kim07 slope)
-TAU0_PIVOT_Z = 3.0               # the (1+z)/(1+z_p) pivot (PRIYA (1+z)/4 → z_p=3)
+# TAU0_PIVOT_Z: the (1+z)/(1+z_p) pivot, with kim_tau0 and tau0_alpha_priya re-exported from mean_flux_model
 # (legacy τ₀-space power-law-with-C widths, kept for the Becker-anchored utility path only:)
 TAU0_LOGA_SIGMA = 0.05
 TAU0_BETA_SIGMA = 0.15
-
-
-def tau0_alpha_priya(z, tau0_amp, dtau0, *, z_pivot=TAU0_PIVOT_Z):
-    """PRIYA mean-flux model in the α = τ₀/Kim LADDER coordinate (Bird+2023 §2.7.1, Eq.2.14–15:
-    τ_eff = τ₀·((1+z)/4)^dτ₀·τ_Kim): ``α(z) = tau0_amp · ((1+z)/(1+z_pivot))^dtau0``.
-
-    Replaces the 13 INDEPENDENT per-z α rungs with this 2-parameter smooth curve, so τ₀ evolves
-    on a physically-informed amplitude+slope (PRIYA-native) instead of a free per-z wiggle that
-    biases A_p. ``tau0_amp=1, dtau0=0`` = the Kim central rung (the cache ladder anchor).
-    Multiply by ``kim_tau0(z)`` for τ₀(z). Differentiable in (tau0_amp, dtau0) for NUTS."""
-    z = jnp.asarray(z)
-    return tau0_amp * ((1.0 + z) / (1.0 + z_pivot)) ** dtau0
 
 
 def fit_tau0_alpha_priya(z, alpha_z, *, z_pivot=TAU0_PIVOT_Z):
