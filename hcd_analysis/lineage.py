@@ -2,7 +2,8 @@
 catalogue finder, and whether it may be used for a release.
 
 A record is embedded in the product it describes (an ``.npz`` field ``lineage_json`` holding the canonical JSON; a JSON
-field; an HDF5 attribute), so the product's own sha256 covers it. Each record lists the sha256 of every direct input,
+field; in HDF5 a scalar string dataset, not an attribute, since compact HDF5 attributes are limited to 64 KiB), so the
+product's own sha256 covers it. Each record lists the sha256 of every direct input,
 so pinning the sha256 of a top product pins every ancestor back to the catalogues and the raw spectra.
 
 Layout::
@@ -22,9 +23,13 @@ Layout::
      "created_utc": "..."}
 
 **Release eligibility** (``eligibility``): a product is release-eligible only if the code commit is known and the tree
-was clean, every finder id is in the release allow-list, and every lineage-bearing input is itself eligible. It is
-computed when the record is built and recomputed by every check, so a record that claims eligibility it does not have
-is refused. Historical products carry ``release_eligible: false``.
+was clean (clean means the tracked files are those of the commit; untracked files are not looked at), every finder id
+is in the release allow-list, every lineage-bearing input is itself eligible, and every other input is a raw file
+(``RAW_INPUT_KINDS``) or one the record's ``validation`` block names as validated. It is computed when the record is
+built and recomputed by every check, so a record that claims eligibility it does not have is refused. Historical
+products carry ``release_eligible: false``. Eligibility is provenance only: it says which finder and which code made a
+product, not that it was made with the release settings or from a whole file; release consumers check those
+themselves (for a catalogue, ``catalog.load_validated_catalog`` with its expectations).
 
 Standard library only; numpy is imported by the ``.npz`` helpers alone."""
 from __future__ import annotations
@@ -47,6 +52,10 @@ _TOP_KEYS = {"format", "kind", "kind_version", "inputs", "finder_ids", "settings
              "release_eligible", "ineligible_reasons", "product", "validation", "created_utc"}
 _OPTIONAL_TOP_KEYS = {"validation", "created_utc"}
 _INPUT_KEYS = {"role", "kind", "sha256", "size", "mtime_ns", "finder_ids", "release_eligible", "info"}
+# inputs that carry no lineage of their own and need none: simulation outputs read as they are (the raw spectra and
+# the simulation's initial-conditions parameter file). Any other input must be lineage-bearing, or be named as
+# validated in the record's validation block (``validation.validated_inputs``, the R1 carry's historical source).
+RAW_INPUT_KINDS = frozenset({"raw_spectra", "sim_ics"})
 
 
 class LineageError(ValueError):
@@ -152,11 +161,17 @@ def code_identity(repo_dir=None):
 def input_entry(role, kind, identity, record=None, info=None):
     """One direct input. ``identity`` gives its ``sha256`` and ``size`` (and ``mtime_ns`` for a raw input, from
     ``file_identity``). ``record`` is the input's own lineage record when it is a lineage-bearing product: its finder
-    ids and release eligibility are copied. ``info`` holds facts recorded but not compared (a path, a header)."""
+    ids and release eligibility are copied (a record a historical loader handed out is refused). Without ``record``
+    the input is not lineage-bearing, and a product listing it is eligible only if its kind is in ``RAW_INPUT_KINDS``
+    or the product's validation names it. ``info`` holds facts recorded but not compared (a path, a header)."""
     entry = {"role": str(role), "kind": str(kind), "sha256": identity["sha256"], "size": int(identity["size"])}
     if identity.get("mtime_ns") is not None:
         entry["mtime_ns"] = int(identity["mtime_ns"])
     if record is not None:
+        if (record.get("product") or {}).get("historical_reason"):
+            raise LineageError(f"input {role!r}: a record read through a historical loader is never listed as a "
+                               "lineage-bearing input (list the file without its record; the product is then not "
+                               "release-eligible)")
         entry["finder_ids"] = sorted(record["finder_ids"])
         entry["release_eligible"] = record["release_eligible"] is True
     if info is not None:
@@ -167,8 +182,9 @@ def input_entry(role, kind, identity, record=None, info=None):
 # ---------------------------------------------------------------------------------------------------- eligibility
 def eligibility(record, allowed_finder_ids):
     """The reasons (a list; empty means eligible) why ``record`` is not release-eligible under the rule: a known commit
-    and a clean tree, every finder id in ``allowed_finder_ids`` (at least one), every lineage-bearing input eligible
-    with allowed finder ids, and no historical marker."""
+    and a clean tree (tracked files only), every finder id in ``allowed_finder_ids`` (at least one), every
+    lineage-bearing input eligible with allowed finder ids, every other input raw (``RAW_INPUT_KINDS``) or named in
+    ``validation.validated_inputs``, and no historical marker. Provenance only (see the module docstring)."""
     allowed = frozenset(allowed_finder_ids)
     why = []
     code = record.get("code") or {}
@@ -182,6 +198,7 @@ def eligibility(record, allowed_finder_ids):
     bad = sorted(f for f in fids if f not in allowed)
     if bad:
         why.append(f"finder ids not in the release allow-list: {bad}")
+    validated = set((record.get("validation") or {}).get("validated_inputs") or [])
     for inp in record.get("inputs") or []:
         if "release_eligible" in inp or "finder_ids" in inp:
             if inp.get("release_eligible") is not True:
@@ -189,6 +206,9 @@ def eligibility(record, allowed_finder_ids):
             ibad = sorted(f for f in inp.get("finder_ids") or [] if f not in allowed)
             if ibad or not inp.get("finder_ids"):
                 why.append(f"input {inp.get('role')!r} has finder ids {inp.get('finder_ids')} outside the allow-list")
+        elif inp.get("kind") not in RAW_INPUT_KINDS and inp.get("role") not in validated:
+            why.append(f"input {inp.get('role')!r} of kind {inp.get('kind')!r} carries no lineage record (only "
+                       f"{sorted(RAW_INPUT_KINDS)} inputs, or inputs the validation names, may)")
     if (record.get("product") or {}).get("historical_reason"):
         why.append("historical: " + str(record["product"]["historical_reason"]))
     return why

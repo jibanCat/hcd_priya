@@ -679,7 +679,30 @@ def test_an_old_catalogue_is_read_only_through_the_historical_loader(tmp_path, c
     stamped = _stamp(_cat([17.5]))                                        # a stamped one read historically ...
     stamped.save_npz(tmp_path / "s.npz")
     hs = C.load_catalog_historical(tmp_path / "s.npz", reason="audit")
-    assert hs.lineage == stamped.lineage and not hs.release_eligible      # ... keeps its record, stays historical
+    assert hs.original_lineage == stamped.lineage and not hs.release_eligible    # ... keeps its record as stored,
+    assert hs.lineage["release_eligible"] is False and hs.lineage["product"]["historical_reason"] == "audit"
+    assert h.original_lineage is None
+
+
+def test_nothing_built_from_a_historically_read_catalogue_is_release_eligible(tmp_path):
+    """The review probe (L1R-1): a stamped, eligible catalogue read through load_catalog_historical, listed as the input
+    of a product, with its record or without it."""
+    stamped = _stamp(_cat([17.5]))
+    p = tmp_path / "s.npz"
+    stamped.save_npz(p)
+    ident = {k: v for k, v in L.file_identity(p).items() if k != "mtime_ns"}
+    good = C.AbsorberCatalog.load_npz(p)
+    assert good.release_eligible
+
+    def child(entry):
+        return L.build_record("child", 1, inputs=[entry], finder_ids=None, settings={}, code=CLEAN,
+                              allowed_finder_ids=C.RELEASE_FINDER_IDS)
+    assert child(L.input_entry("catalog", "catalog", ident, record=good.lineage))["release_eligible"]
+    hs = C.load_catalog_historical(p, reason="probe")
+    with pytest.raises(L.LineageError, match="historical loader"):
+        L.input_entry("catalog", "catalog", ident, record=hs.lineage)
+    r = child(L.input_entry("catalog", "catalog", ident, record=None))    # listed bare
+    assert not r["release_eligible"] and any("carries no lineage" in w for w in r["ineligible_reasons"])
 
 
 # ----------------------------------------------------------------------------- catalogue-only mode, product hashes

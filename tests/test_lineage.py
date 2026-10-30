@@ -57,6 +57,33 @@ def test_eligibility_propagates_from_lineage_bearing_inputs_only():
     assert not none["release_eligible"] and "no finder id" in none["ineligible_reasons"]
 
 
+def test_an_input_without_a_record_is_eligible_only_as_a_raw_file_or_a_validated_input():
+    """Opt-in lineage closed: an input listed without its record (an old product) makes the child ineligible unless it
+    is a raw simulation file or the child's validation block names it."""
+    ident = {"sha256": H, "size": 10}
+
+    def child(inputs, validation=None):
+        return L.build_record("child", 1, inputs=inputs, finder_ids=None, settings={}, code=CLEAN,
+                              allowed_finder_ids=ALLOWED, validation=validation)
+    parent = L.input_entry("parent", "thing", ident, record=_rec())
+    for kind in sorted(L.RAW_INPUT_KINDS):
+        assert child([parent, L.input_entry("raw", kind, ident)])["release_eligible"]
+    old = L.input_entry("old_catalogue", "catalog", ident)                       # no record: not raw
+    r = child([parent, old])
+    assert not r["release_eligible"] and any("'old_catalogue' of kind 'catalog' carries no lineage" in w
+                                             for w in r["ineligible_reasons"])
+    assert child([parent, old], validation={"validated_inputs": ["old_catalogue"]})["release_eligible"]
+    assert not child([parent, old], validation={"validated_inputs": ["other"]})["release_eligible"]
+    with pytest.raises(L.LineageError, match="claims release eligibility"):     # a forged flag is refused on check
+        L.check_record(dict(r, release_eligible=True, ineligible_reasons=[]), ALLOWED)
+
+
+def test_a_record_a_historical_loader_handed_out_is_never_listed_as_lineage_bearing():
+    rec = _rec(product={"historical_reason": "an audit"})
+    with pytest.raises(L.LineageError, match="historical loader"):
+        L.input_entry("parent", "thing", {"sha256": H, "size": 1}, record=rec)
+
+
 def test_a_record_claiming_eligibility_it_does_not_have_is_refused():
     r = _rec()
     forged = dict(r, code={"commit": "a" * 40, "dirty": True})                 # eligible flag kept, tree dirty

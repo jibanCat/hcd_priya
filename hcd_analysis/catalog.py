@@ -120,6 +120,7 @@ class AbsorberCatalog:
     absorbers: List[Absorber] = dataclasses.field(default_factory=list)
     lineage: Optional[dict] = None             # the hcd_priya.lineage/1 record (build_catalog, load_npz)
     historical_reason: Optional[str] = None    # set by load_catalog_historical only
+    original_lineage: Optional[dict] = None    # load_catalog_historical: the record as stored in the file
 
     @property
     def release_eligible(self) -> bool:
@@ -488,7 +489,9 @@ def load_catalog_historical(path, *, reason: str) -> "AbsorberCatalog":
     """Read a catalogue as it is, with or without a lineage record and with no value check: the only reader of a
     catalogue written before records existed (a pre-fix catalogue, with its box-edge duplicates). ``reason`` (a
     non-empty string) is logged and kept on the result, which is never release-eligible and cannot be saved, reused
-    by the pipeline or passed to a release loader."""
+    by the pipeline or passed to a release loader. Its ``lineage`` is None (no record in the file) or a copy of the
+    stored record marked not release-eligible and historical, which ``lineage.input_entry`` refuses, so nothing
+    built from it can be eligible; the stored record is kept as ``original_lineage``."""
     if not (isinstance(reason, str) and reason.strip()):
         raise ValueError("load_catalog_historical needs a non-empty reason")
     try:
@@ -496,10 +499,20 @@ def load_catalog_historical(path, *, reason: str) -> "AbsorberCatalog":
     except L.LineageError as e:
         raise CatalogProvenanceError(f"{path}: {e}") from None
     cat = AbsorberCatalog._from_arrays(arrays)
-    cat.lineage = rec
+    cat.original_lineage = rec
+    cat.lineage = None if rec is None else _historical_record(rec, reason.strip())
     cat.historical_reason = reason.strip()
     logger.warning("historical read of %s (%s): not release-eligible", path, cat.historical_reason)
     return cat
+
+
+def _historical_record(rec: dict, reason: str) -> dict:
+    """A copy of ``rec`` that says what a historical read makes of it: not release-eligible, with the reason."""
+    out = L.canonicalise(rec)
+    out["product"] = dict(out["product"], historical_reason=reason)
+    out["release_eligible"] = False
+    out["ineligible_reasons"] = list(out["ineligible_reasons"]) + [f"read by load_catalog_historical: {reason}"]
+    return L.check_record(out)
 
 
 def load_validated_catalog(path, n: int, *, settings: Optional[dict] = None, raw_path=None,
