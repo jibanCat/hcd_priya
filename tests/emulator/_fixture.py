@@ -73,3 +73,41 @@ def write_synthetic_cache(path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8, see
         h["snap_total_path_dX"] = snap_path; h["snap_snap"] = snap_snap
         h.create_dataset("snap_sim_name", data=np.array(snap_sim, dtype=object), dtype=h5py.string_dtype())
         for c in snap_dndx: h[f"snap_dNdX_{c}"] = snap_dndx[c]
+
+
+def write_synthetic_cache_v34(path, n_sims=3, snaps_per_sim=4, n_alpha=4, n_k=8, seed=0, *, rows="built"):
+    """The ``write_synthetic_cache`` datasets as a release cache (format 3.4, through ``tau0_cache.write_cache``), with
+    the keys the 3.3 synthetic file lacks filled with made-up values and placeholder release-eligible group inputs.
+    Call it with the code identity patched to a clean commit (``tests.tau0_fixtures.clean_code``). Returns the record."""
+    import os
+    import tempfile
+    from hcd_analysis import tau0_cache as T
+    from tests import tau0_fixtures as tf
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(str(path)))) as tmp:
+        src = os.path.join(tmp, "v33.h5")
+        write_synthetic_cache(src, n_sims=n_sims, snaps_per_sim=snaps_per_sim, n_alpha=n_alpha, n_k=n_k, seed=seed)
+        with h5py.File(src, "r") as h:
+            d = {k: (h[k].asstr()[...] if k in T.STR_KEYS else h[k][...]) for k in h.keys()}
+            attrs = {k: h.attrs[k] for k in h.attrs}
+    R, G = d["sim_name"].shape[0], d["snap_snap"].shape[0]
+    rng = np.random.default_rng(seed + 1)
+    d["snap"] = d["snap_snap"][d["snap_group_idx"]].astype(np.int32)
+    d["mean_F_by_bin"] = rng.uniform(0.5, 0.9, (R, 15))
+    d["tier_c_labels"] = np.array([f"c{i}" for i in range(15)], dtype=object)
+    d["tier_c_nhi_edges"] = np.linspace(17.2, 22.0, 14)
+    d["log_nhi_centres"] = np.linspace(17.1, 22.9, 30)
+    d["log_nhi_edges"] = np.linspace(17.0, 23.0, 31)
+    for k in T.STR_KEYS:
+        d[k] = np.asarray(d[k], dtype=object)
+    entries = [e for g in range(G) for e in tf.group_entries(str(d["snap_sim_name"][g]), int(d["snap_snap"][g]))]
+    groups = [{"sim": str(d["snap_sim_name"][g]), "snap": int(d["snap_snap"][g]),
+               "z_grid": float(d["z_grid"][np.flatnonzero(d["snap_group_idx"] == g)[0]]), "rows": rows}
+              for g in range(G)]
+    attrs.pop("cache_version", None)
+    kw = {}
+    if rows == T.ROWS_CARRIED:
+        kw = {"carried": {"source_sha256": "0" * 64, "fields": list(T.CARRIED_FIELDS)},
+              "validation": {"all_passed": True, "validated_inputs": [], "summary_sha256": "1" * 64}}
+    return T.write_cache(path, d, attrs, inputs=entries, settings={"cache_version": T.CACHE_VERSION, "fidelity": "lf",
+                                                                    "alpha_range": [0.66, 1.33]},
+                         groups=groups, **kw)
