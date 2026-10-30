@@ -7,8 +7,10 @@ For every member checkpoint prefix (``.eqx``, ``.meta.json``, ``.norm.pkl``, ``.
     record stored in that cache file (read from the file whose sha256 is checked; the record is parsed and checked);
   * ``cache_path`` is a file name, the seeds are distinct, the recipe and architecture are the same for every member;
   * the basename and directory are not the historical ensembles' (``--historical-prefix``, repeatable);
-  * training completed under the recipe's stopping rule: the history holds finite losses, all three stages, and at most
-    the recipe's epochs;
+  * training completed under the recipe's stopping rule, as ``train.train_fold`` applies it: finite losses, at most the
+    recipe's ``epochs``, and either all of them or a stop exactly ``patience`` epochs after the restored epoch (the last
+    improvement, by more than 1e-9, of the stop metric val_resid_loss + w_coh val_coh_loss, or val_resid_loss when
+    w_coh is 0);
   * the validation error is not worse than the old ensemble's beyond its seed spread: for each ``--metric`` (a history
     key; the best, i.e. smallest, value per member), mean(new) <= mean(old) + std(old) (ddof 1) over the members, with
     the old ensemble's histories given by ``--old-hist`` (repeatable). The old-to-new change is reported per metric.
@@ -47,6 +49,35 @@ def cache_record_digest(path, sha256):
     if rec["kind"] != "tau0_cache" or not rec["release_eligible"]:
         raise SystemExit(f"refusing: {path} does not hold an eligible tau0_cache record")
     return L.record_sha256(rec)
+
+
+def restored_epoch(hist, w_coh):
+    """The epoch ``train.train_fold`` restores: the last strict improvement (by more than 1e-9) of its stop metric
+    val_resid_loss + w_coh val_coh_loss (val_resid_loss when w_coh is 0). Returns ``(epoch or None, stop metric)``."""
+    stop = np.asarray(hist.get("val_resid_loss", []), dtype=float)
+    if w_coh > 0:
+        stop = stop + float(w_coh) * np.asarray(hist.get("val_coh_loss", []), dtype=float)
+    best_metric, r = np.inf, None
+    for i, m in enumerate(stop):
+        if m < best_metric - 1e-9:
+            best_metric, r = m, i
+    return r, stop
+
+
+def stopped_by_the_rule(hist, recipe):
+    """Whether the history ended as ``train_fold`` ends: finite losses, at most ``epochs``, and either all epochs or a
+    stop ``patience`` epochs after the restored epoch."""
+    try:
+        epochs, patience, w = int(recipe["epochs"]), int(recipe["patience"]), float(recipe.get("w_coh", 0.0))
+    except (KeyError, TypeError, ValueError):
+        return False
+    keys = ("train_loss", "val_loss", "val_resid_loss") + (("val_coh_loss",) if w > 0 else ())
+    vals = [np.asarray(hist.get(k, []), dtype=float) for k in keys]
+    n = vals[0].size
+    if n == 0 or any(v.size != n or not np.all(np.isfinite(v)) for v in vals):
+        return False
+    r, _ = restored_epoch(hist, w)
+    return r is not None and n <= epochs and (n == epochs or n - 1 - r == patience)
 
 
 def best(hist, metric):
@@ -89,14 +120,8 @@ def main(argv=None):
     stems = {re.sub(r"_seed\d+\Z", "", os.path.basename(p)) for p in a.member}
     checks["distinct_basename_and_directory"] = not (stems & {re.sub(r"_seed\d+\Z", "", n) for n in hist_names}) and \
         not ({os.path.realpath(os.path.dirname(p)) for p in a.member} & hist_dirs)
-    epochs = (m0.get("recipe") or {}).get("epochs")
-    done = []
-    for p, meta, hist in members:
-        losses = [np.asarray(hist.get(k, []), dtype=float) for k in ("train_loss", "val_loss", "val_resid_loss")]
-        done.append(all(v.size and np.all(np.isfinite(v)) for v in losses)
-                    and set(int(s) for s in hist.get("stage", [])) == {1, 2, 3}
-                    and (epochs is None or len(hist["train_loss"]) <= int(epochs)))
-    checks["training_completed_under_the_stopping_rule"] = all(done)
+    checks["training_completed_under_the_stopping_rule"] = all(stopped_by_the_rule(hist, meta.get("recipe") or {})
+                                                               for _, meta, hist in members)
     old = [json.load(open(h)) for h in a.old_hist]
     comparison = {}
     for metric in a.metric:

@@ -86,29 +86,42 @@ def test_the_w_c_check_refuses_another_cache_or_incomplete_tolerances(bundle, ca
 
 
 # --------------------------------------------------------------------------------------- the ensemble acceptance
-def _member(dirpath, cache, seed, *, hist=None, **meta_over):
+RECIPE = {"epochs": 12, "patience": 3, "w_coh": 2.0, "all_sims": True, "holdout_sim": None, "val_seed": 12345,
+          "val_frac": 0.1}
+
+
+def _hist(restore=5, *, n=None, resid=0.30, recipe=RECIPE):
+    """A history shaped as train.train_fold writes it (no stage key): the stop metric val_resid + w_coh val_coh
+    improves until ``restore`` and stalls after it; ``n`` epochs in all (default: the early stop, restore + patience
+    + 1)."""
+    n = restore + recipe["patience"] + 1 if n is None else n
+    vr = [resid + 0.1 * (restore - i) if i <= restore else resid + 0.01 * (i - restore) for i in range(n)]
+    return {"train_loss": [1.0 / (i + 1) for i in range(n)], "val_loss": [v + 0.2 for v in vr], "val_resid_loss": vr,
+            "val_coh_loss": [0.001] * n, "grad_norm": [1.0] * n, "lr": [1e-3] * n, "recipe": dict(recipe)}
+
+
+def _member(dirpath, cache, seed, *, hist=None, recipe=RECIPE, **meta_over):
     d = load_cache(cache)
     os.makedirs(dirpath, exist_ok=True)
     pre = os.path.join(dirpath, f"a4lin_prod_seed{seed}")
     model = Emulator(in_dim=10, n_k=8, n_basis=4, baseline_n_layers=1, baseline_width=16, key=jax.random.PRNGKey(seed))
     T.save_checkpoint(pre, model, {}, fit_target_norm(d, np.arange(d["P_tier_p"].shape[0])), seed=seed, cache=d,
-                      cache_path=str(cache), recipe={"epochs": 10}, release=True, code=dict(tf.CLEAN))
+                      cache_path=str(cache), recipe=dict(recipe), release=True, code=dict(tf.CLEAN))
     if meta_over:
         m = json.load(open(pre + ".meta.json"))
         m.update(meta_over)
         os.remove(pre + ".meta.json")
         json.dump(m, open(pre + ".meta.json", "w"))
-    h = hist or {"train_loss": [1.0, 0.5, 0.4], "val_loss": [1.0, 0.6, 0.5], "val_resid_loss": [0.9, 0.4, 0.3],
-                 "stage": [1, 2, 3]}
-    json.dump(h, open(pre + ".hist.json", "w"))
+    json.dump(hist or _hist(), open(pre + ".hist.json", "w"))
     return pre
 
 
 def _old_hists(tmp_path, values):
     out = []
+    os.makedirs(tmp_path, exist_ok=True)
     for i, v in enumerate(values):
         p = tmp_path / f"old_seed{i}.hist.json"
-        json.dump({"val_resid_loss": [1.0, v], "val_loss": [1.0, v + 0.2]}, open(p, "w"))
+        json.dump(_hist(resid=v), open(p, "w"))
         out.append(str(p))
     return out
 
@@ -123,16 +136,39 @@ def _acc_argv(members, cache, olds, out, *extra):
     return a
 
 
+def test_the_stopping_rule_is_the_one_train_fold_applies():
+    A = _script("accept_retrained_ensemble")
+    h = _hist(5)
+    assert "stage" not in h and A.restored_epoch(h, RECIPE["w_coh"])[0] == 5
+    assert A.stopped_by_the_rule(h, RECIPE)                                         # stopped patience after restore
+    assert A.stopped_by_the_rule(_hist(11, n=12), RECIPE)                           # ran every epoch
+    assert A.stopped_by_the_rule(_hist(10, n=12), RECIPE)                           # every epoch, restore earlier
+    assert not A.stopped_by_the_rule(_hist(5, n=8), RECIPE)                         # stopped one epoch early
+    assert not A.stopped_by_the_rule(_hist(5, n=10), RECIPE)                        # ran past the stop
+    assert not A.stopped_by_the_rule(_hist(11, n=13), RECIPE)                       # more than the recipe's epochs
+    bad = _hist(5)
+    bad["val_loss"][2] = float("nan")
+    assert not A.stopped_by_the_rule(bad, RECIPE)
+    no_coh = {k: v for k, v in _hist(5).items() if k != "val_coh_loss"}
+    assert not A.stopped_by_the_rule(no_coh, RECIPE)
+    assert A.stopped_by_the_rule(no_coh, dict(RECIPE, w_coh=0.0))                 # the stop is val_resid alone
+    flat = _hist(5)
+    flat["val_resid_loss"][6] = flat["val_resid_loss"][5] - 5e-10                  # within 1e-9: no improvement
+    assert A.restored_epoch(flat, RECIPE["w_coh"])[0] == 5 and A.stopped_by_the_rule(flat, RECIPE)
+    assert not A.stopped_by_the_rule(_hist(5), {"epochs": 12})                     # the recipe must give the rule
+
+
 def test_the_ensemble_acceptance(cache, tmp_path):
     A = _script("accept_retrained_ensemble")
     ens = tmp_path / "ens"
     members = [_member(ens, cache, s) for s in (0, 1)]
-    olds = _old_hists(tmp_path, [0.29, 0.31, 0.30])
+    olds = _old_hists(tmp_path / "old", [0.29, 0.31, 0.30])
     hist_prefix = ["--historical-prefix", str(tmp_path / "gate" / "prod_repaired_seed0")]
     assert A.main(_acc_argv(members, cache, olds, tmp_path / "ok.json", *hist_prefix)) == 0
     r = json.load(open(tmp_path / "ok.json"))
     assert r["passed"] and r["validation"]["val_resid_loss"]["new_mean"] == pytest.approx(0.3)
-    worse = _old_hists(tmp_path / "w", [0.10, 0.11, 0.12]) if os.makedirs(tmp_path / "w") is None else None
+    assert r["checks"]["training_completed_under_the_stopping_rule"]
+    worse = _old_hists(tmp_path / "w", [0.10, 0.11, 0.12])
     assert A.main(_acc_argv(members, cache, worse, tmp_path / "worse.json")) == 1
     assert not json.load(open(tmp_path / "worse.json"))["checks"]["validation_val_resid_loss_within_old_seed_spread"]
     cases = {
@@ -145,8 +181,7 @@ def test_the_ensemble_acceptance(cache, tmp_path):
     for name, over in cases.items():
         bad = [members[0], _member(tmp_path / name, cache, 1, **over)]
         assert A.main(_acc_argv(bad, cache, olds, tmp_path / f"{name}.json")) == 1, name
-    short = [members[0], _member(tmp_path / "short", cache, 1, hist={"train_loss": [1.0], "val_loss": [1.0],
-                                                                      "val_resid_loss": [0.3], "stage": [1]})]
+    short = [members[0], _member(tmp_path / "short", cache, 1, hist=_hist(5, n=7))]
     assert A.main(_acc_argv(short, cache, olds, tmp_path / "short.json")) == 1
     assert not json.load(open(tmp_path / "short.json"))["checks"]["training_completed_under_the_stopping_rule"]
     same_dir = ["--historical-prefix", str(ens / "prod_repaired_seed0")]
