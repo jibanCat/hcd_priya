@@ -170,6 +170,9 @@ def input_entry(role, kind, identity, record=None, info=None):
     if identity.get("mtime_ns") is not None:
         entry["mtime_ns"] = int(identity["mtime_ns"])
     if record is not None:
+        if not isinstance(record, dict):
+            raise LineageError(f"input {role!r}: a lineage-bearing input needs its parsed, checked record (a dict), "
+                               f"not {type(record).__name__}")
         if (record.get("product") or {}).get("historical_reason"):
             raise LineageError(f"input {role!r}: a record read through a historical loader is never listed as a "
                                "lineage-bearing input (list the file without its record; the product is then not "

@@ -757,9 +757,9 @@ def test_an_old_catalogue_is_read_only_through_the_historical_loader(tmp_path, c
     stamped = _stamp(_cat([17.5]))                                        # a stamped one read historically ...
     stamped.save_npz(tmp_path / "s.npz")
     hs = C.load_catalog_historical(tmp_path / "s.npz", reason="audit")
-    assert hs.original_lineage == stamped.lineage and not hs.release_eligible    # ... keeps its record as stored,
-    assert hs.lineage["release_eligible"] is False and hs.lineage["product"]["historical_reason"] == "audit"
-    assert h.original_lineage is None
+    assert json.loads(hs.original_lineage_json) == stamped.lineage and not hs.release_eligible  # ... keeps its record
+    assert hs.lineage["release_eligible"] is False and hs.lineage["product"]["historical_reason"] == "audit"  # as text
+    assert h.original_lineage_json is None
 
 
 def test_nothing_built_from_a_historically_read_catalogue_is_release_eligible(tmp_path):
@@ -779,6 +779,9 @@ def test_nothing_built_from_a_historically_read_catalogue_is_release_eligible(tm
     hs = C.load_catalog_historical(p, reason="probe")
     with pytest.raises(L.LineageError, match="historical loader"):
         L.input_entry("catalog", "catalog", ident, record=hs.lineage)
+    with pytest.raises(L.LineageError, match="parsed, checked record"):        # the stored record, kept as text
+        L.input_entry("catalog", "catalog", ident, record=hs.original_lineage_json)
+    assert not hasattr(hs, "original_lineage")
     r = child(L.input_entry("catalog", "catalog", ident, record=None))    # listed bare
     assert not r["release_eligible"] and any("carries no lineage" in w for w in r["ineligible_reasons"])
 
