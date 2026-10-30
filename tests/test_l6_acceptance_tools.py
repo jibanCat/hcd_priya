@@ -127,8 +127,7 @@ def _old_hists(tmp_path, values):
 
 
 def _acc_argv(members, cache, olds, out, *extra):
-    a = ["--cache", str(cache), "--cache-sha256", L.sha256_file(cache), "--out", str(out), "--metric",
-         "val_resid_loss", "--metric", "val_loss", *extra]
+    a = ["--cache", str(cache), "--cache-sha256", L.sha256_file(cache), "--out", str(out), *extra]
     for m in members:
         a += ["--member", m]
     for h in olds:
@@ -166,11 +165,15 @@ def test_the_ensemble_acceptance(cache, tmp_path):
     hist_prefix = ["--historical-prefix", str(tmp_path / "gate" / "prod_repaired_seed0")]
     assert A.main(_acc_argv(members, cache, olds, tmp_path / "ok.json", *hist_prefix)) == 0
     r = json.load(open(tmp_path / "ok.json"))
-    assert r["passed"] and r["validation"]["val_resid_loss"]["new_mean"] == pytest.approx(0.3)
-    assert r["checks"]["training_completed_under_the_stopping_rule"]
+    v = r["validation"]
+    assert r["passed"] and v["new_mean"] == pytest.approx(0.3) and v["old_threshold"] == pytest.approx(0.31)
+    assert r["checks"]["training_completed_under_the_stopping_rule"] and set(v["reported"]) == {
+        "val_loss", "val_coh_loss", "stop_metric"}
     worse = _old_hists(tmp_path / "w", [0.10, 0.11, 0.12])
     assert A.main(_acc_argv(members, cache, worse, tmp_path / "worse.json")) == 1
-    assert not json.load(open(tmp_path / "worse.json"))["checks"]["validation_val_resid_loss_within_old_seed_spread"]
+    w = json.load(open(tmp_path / "worse.json"))
+    assert not w["checks"]["validation_val_resid_loss_at_restore_within_old_seed_spread"]
+    assert w["validation"]["old_threshold"] == pytest.approx(0.12)
     cases = {
         "git": dict(git_sha="d" * 40),
         "dirty": dict(code_dirty=True),
@@ -187,5 +190,18 @@ def test_the_ensemble_acceptance(cache, tmp_path):
     same_dir = ["--historical-prefix", str(ens / "prod_repaired_seed0")]
     assert A.main(_acc_argv(members, cache, olds, tmp_path / "dir.json", *same_dir)) == 1
     with pytest.raises(SystemExit, match="does not hash"):
-        A.main(["--cache", str(cache), "--cache-sha256", "0" * 64, "--out", str(tmp_path / "x.json"), "--metric", "m",
+        A.main(["--cache", str(cache), "--cache-sha256", "0" * 64, "--out", str(tmp_path / "x.json"),
                 "--member", members[0], "--old-hist", olds[0]])
+
+
+def test_every_metric_is_read_at_the_restored_epoch(capsys):
+    """The saved model is the stop-metric argmin, not the val_resid_loss minimum: a later val_resid_loss dip whose
+    coherence term rose does not count, for old and new members alike."""
+    A = _script("accept_retrained_ensemble")
+    h = _hist(5)
+    h["val_resid_loss"][7] = 0.05                                    # lower val_resid, but the stop metric is worse:
+    h["val_coh_loss"][7] = 1.0                                       # 0.05 + 2 x 1.0 > 0.30 + 2 x 0.001
+    x = A.at_restore(h, RECIPE)
+    assert x["epoch"] == 5 and x["val_resid_loss"] == pytest.approx(0.30) and x["val_loss"] == pytest.approx(0.50)
+    assert x["stop_metric"] == pytest.approx(0.302) and min(h["val_resid_loss"]) == 0.05
+    assert A.at_restore({"val_resid_loss": []}, RECIPE) is None

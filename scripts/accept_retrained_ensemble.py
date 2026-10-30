@@ -11,14 +11,16 @@ For every member checkpoint prefix (``.eqx``, ``.meta.json``, ``.norm.pkl``, ``.
     recipe's ``epochs``, and either all of them or a stop exactly ``patience`` epochs after the restored epoch (the last
     improvement, by more than 1e-9, of the stop metric val_resid_loss + w_coh val_coh_loss, or val_resid_loss when
     w_coh is 0);
-  * the validation error is not worse than the old ensemble's beyond its seed spread: for each ``--metric`` (a history
-    key; the best, i.e. smallest, value per member), mean(new) <= mean(old) + std(old) (ddof 1) over the members, with
-    the old ensemble's histories given by ``--old-hist`` (repeatable). The old-to-new change is reported per metric.
+  * the validation error is not worse than the old ensemble's beyond its seed spread, every value taken at each
+    member's restored epoch (the saved model; ``restored_epoch``), for the old and the new members alike: pass iff
+    mean(new val_resid_loss) <= mean(old val_resid_loss) + std(old val_resid_loss, ddof 1), with the old ensemble's
+    histories given by ``--old-hist`` (repeatable). val_loss, val_coh_loss and the stop metric at the restored epoch,
+    and the old-to-new change, are reported only. The old threshold is printed.
 
 Writes a JSON report; exit 0 when every check passes, 1 otherwise.
 
     python scripts/accept_retrained_ensemble.py --member DIR/NAME_seed0 [...] --cache CACHE.h5 --cache-sha256 HEX \\
-        --old-hist OLD_seed0.hist.json [...] --metric val_resid_loss --metric val_loss \\
+        --old-hist OLD_seed0.hist.json [...] \\
         --historical-prefix OLD_DIR/prod_repaired --out REPORT.json
 """
 import argparse
@@ -80,9 +82,25 @@ def stopped_by_the_rule(hist, recipe):
     return r is not None and n <= epochs and (n == epochs or n - 1 - r == patience)
 
 
-def best(hist, metric):
-    v = np.asarray(hist.get(metric, []), dtype=float)
-    return float(np.min(v)) if v.size and np.all(np.isfinite(v)) else None
+DECIDING = "val_resid_loss"
+REPORTED = ("val_loss", "val_coh_loss", "stop_metric")
+
+
+def at_restore(hist, recipe):
+    """``{epoch, val_resid_loss, val_loss, val_coh_loss, stop_metric}`` of the saved model (the restored epoch), or
+    None when the history does not give one."""
+    try:
+        w = float(recipe.get("w_coh", 0.0))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    r, stop = restored_epoch(hist, w)
+    if r is None:
+        return None
+    out = {"epoch": int(r), "stop_metric": float(stop[r])}
+    for k in ("val_resid_loss", "val_loss", "val_coh_loss"):
+        v = np.asarray(hist.get(k, []), dtype=float)
+        out[k] = float(v[r]) if v.size > r else None
+    return out
 
 
 def main(argv=None):
@@ -91,7 +109,6 @@ def main(argv=None):
     ap.add_argument("--cache", required=True)
     ap.add_argument("--cache-sha256", required=True)
     ap.add_argument("--old-hist", action="append", required=True)
-    ap.add_argument("--metric", action="append", required=True)
     ap.add_argument("--historical-prefix", action="append", default=[])
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
@@ -123,35 +140,46 @@ def main(argv=None):
     checks["training_completed_under_the_stopping_rule"] = all(stopped_by_the_rule(hist, meta.get("recipe") or {})
                                                                for _, meta, hist in members)
     old = [json.load(open(h)) for h in a.old_hist]
-    comparison = {}
-    for metric in a.metric:
-        new_b = [best(h, metric) for _, _, h in members]
-        old_b = [best(h, metric) for h in old]
-        ok = None not in new_b and None not in old_b and len(old_b) > 1
-        if ok:
-            mo, so, mn = float(np.mean(old_b)), float(np.std(old_b, ddof=1)), float(np.mean(new_b))
-            ok = mn <= mo + so
-            comparison[metric] = {"new_best": new_b, "old_best": old_b, "new_mean": mn, "old_mean": mo,
-                                  "old_std": so, "new_std": float(np.std(new_b, ddof=1)) if len(new_b) > 1 else None,
-                                  "change_new_minus_old": mn - mo, "change_in_old_std": (mn - mo) / so if so else None,
-                                  "ok": ok}
-        else:
-            comparison[metric] = {"ok": False, "error": "a history lacks the metric, holds non-finite values, or the "
-                                                        "old ensemble has fewer than two members"}
-        checks[f"validation_{metric}_within_old_seed_spread"] = bool(ok)
+    new_at = [at_restore(h, meta.get("recipe") or {}) for _, meta, h in members]
+    old_at = [at_restore(h, h.get("recipe") or {}) for h in old]
+    usable = None not in new_at and None not in old_at and len(old_at) > 1 and all(
+        np.isfinite(x[DECIDING]) for x in new_at + old_at if x[DECIDING] is not None) and all(
+        x[DECIDING] is not None for x in new_at + old_at)
+    validation = {"rule": f"mean(new {DECIDING}) <= mean(old {DECIDING}) + std(old {DECIDING}, ddof 1), each at the "
+                          "member's restored epoch; the other metrics are reported only",
+                  "new_at_restore": new_at, "old_at_restore": old_at}
+    if usable:
+        o = np.array([x[DECIDING] for x in old_at])
+        n = np.array([x[DECIDING] for x in new_at])
+        mo, so, mn = float(o.mean()), float(o.std(ddof=1)), float(n.mean())
+        validation.update(old_mean=mo, old_std=so, old_threshold=mo + so, new_mean=mn,
+                          new_std=float(n.std(ddof=1)) if n.size > 1 else None, change_new_minus_old=mn - mo,
+                          change_in_old_std=(mn - mo) / so if so else None, ok=bool(mn <= mo + so))
+        validation["reported"] = {}
+        for k in REPORTED:
+            ov = [x[k] for x in old_at]
+            nv = [x[k] for x in new_at]
+            if None not in ov and None not in nv:
+                validation["reported"][k] = {"old_mean": float(np.mean(ov)), "new_mean": float(np.mean(nv)),
+                                             "change_new_minus_old": float(np.mean(nv) - np.mean(ov))}
+    else:
+        validation.update(ok=False, error="a history gives no restored epoch or no finite value, or the old ensemble "
+                                          "has fewer than two members")
+    checks[f"validation_{DECIDING}_at_restore_within_old_seed_spread"] = bool(validation["ok"])
     passed = all(checks.values())
     report = {"format": "hcd_priya.ensemble_acceptance/1", "passed": passed, "checks": checks,
               "members": [os.path.basename(p) for p in a.member], "cache_sha256": a.cache_sha256,
-              "cache_lineage_sha256": rec_sha, "git_sha": m0.get("git_sha"), "validation": comparison,
-              "rule": "mean over members of the best value of each metric: new <= old + std(old, ddof 1)"}
+              "cache_lineage_sha256": rec_sha, "git_sha": m0.get("git_sha"), "validation": validation}
     with open(a.out, "x") as fh:
         json.dump(report, fh, indent=1, sort_keys=True)
     for k, v in checks.items():
         print(f"{'ok  ' if v else 'FAIL'} {k}")
-    for k, v in comparison.items():
-        if "new_mean" in v:
-            print(f"  {k}: old {v['old_mean']:.6g} +- {v['old_std']:.3g}, new {v['new_mean']:.6g} "
-                  f"(change {v['change_new_minus_old']:+.3g})")
+    if "old_threshold" in validation:
+        print(f"  {DECIDING} at the restored epoch: old mean {validation['old_mean']:.6f} + std "
+              f"{validation['old_std']:.6f} = threshold {validation['old_threshold']:.6f}; new mean "
+              f"{validation['new_mean']:.6f} (change {validation['change_new_minus_old']:+.6f})")
+        for k, v in validation["reported"].items():
+            print(f"  (reported only) {k}: old {v['old_mean']:.6g}, new {v['new_mean']:.6g}")
     print(f"verdict: {'PASS' if passed else 'FAIL'}")
     return 0 if passed else 1
 
