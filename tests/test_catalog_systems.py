@@ -12,6 +12,7 @@ once as its own head [s', pix_end - n]. The guards make that class of error impo
     catalogue without one, and load_catalog_historical is the only reader of an old one. A golden output pins
     FINDER_ID to what the finder and the N_HI estimator produce.
 Synthetic optical depths only."""
+import dataclasses
 import json
 import shutil
 import sys
@@ -644,6 +645,27 @@ def test_a_catalogue_changed_after_stamping_is_refused(tmp_path, monkeypatch):
     for load in (C.AbsorberCatalog.load_npz, lambda q: C.load_validated_catalog(q, 400)):
         with pytest.raises(C.CatalogProvenanceError, match="edited after it was made"):
             load(p)
+
+
+def test_a_catalogue_record_without_its_payload_digest_is_refused(tmp_path, monkeypatch):
+    """The review probe (L1R-2): the record rebuilt without product.payload_sha256 and N_HI tripled."""
+    h5, cat = _golden_build(tmp_path, monkeypatch)
+    rec = cat.lineage
+    bad = C.AbsorberCatalog(sim_name=cat.sim_name, snap=cat.snap, z=cat.z, dv_kms=cat.dv_kms,
+                            absorbers=[dataclasses.replace(a, NHI=3 * a.NHI) for a in cat.absorbers])
+    product = {k: v for k, v in rec["product"].items() if k != "payload_sha256"}
+    bad.lineage = L.build_record("catalog", rec["kind_version"], inputs=rec["inputs"], finder_ids=rec["finder_ids"],
+                                 settings=rec["settings"], code=rec["code"], allowed_finder_ids=C.RELEASE_FINDER_IDS,
+                                 run_settings_sha256=rec["run_settings_sha256"], product=product)
+    p = tmp_path / "catalog.npz"
+    np.savez(str(p), **bad._arrays(), **{L.NPZ_KEY: np.array(L.canonical_json(bad.lineage))})
+    for load in (C.AbsorberCatalog.load_npz,
+                 lambda q: C.load_validated_catalog(q, 400, settings=rec["settings"], raw_path=h5, n_skewers_built=12,
+                                                    require_release_eligible=True)):
+        with pytest.raises(C.CatalogProvenanceError, match="payload_sha256"):
+            load(p)
+    with pytest.raises(C.CatalogProvenanceError, match="payload_sha256 is missing"):
+        C.check_catalog_record(bad, 400)
 
 
 @pytest.mark.parametrize("finder_ids, verified, why", [(["hcd_priya.finder/1"], True, "not in the release allow-list"),

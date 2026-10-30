@@ -361,9 +361,9 @@ def write_npz(path, arrays, record):
 
 
 def read_npz(path, require_record=True):
-    """``(arrays, record)`` of an ``.npz`` product, read without pickle. The record is checked for form, and when it
-    names ``product.payload_sha256`` the arrays must match it. Without a record: LineageError, or ``(arrays, None)``
-    when ``require_record`` is false."""
+    """``(arrays, record)`` of an ``.npz`` product, read without pickle. The record is checked for form, must name
+    ``product.payload_sha256`` (a 64-hex digest), and the arrays must match it. Without a record: LineageError, or
+    ``(arrays, None)`` when ``require_record`` is false."""
     import numpy as np
     with np.load(str(path), allow_pickle=False) as d:
         arrays = {k: d[k] for k in d.files}
@@ -376,6 +376,8 @@ def read_npz(path, require_record=True):
         raise LineageError(f"{path}: {NPZ_KEY} is not a 0-d string")
     record = parse_record(str(raw[()]))
     payload = record["product"].get("payload_sha256")
-    if payload is not None and payload != arrays_sha256(arrays):
+    if not (isinstance(payload, str) and _HEX64.match(payload)):
+        raise LineageError(f"{path}: the record names no payload_sha256, so its arrays are not bound to it")
+    if payload != arrays_sha256(arrays):
         raise LineageError(f"{path}: the arrays do not match the record's payload_sha256 (edited after it was made)")
     return arrays, record

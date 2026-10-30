@@ -213,6 +213,10 @@ def test_npz_refusals(tmp_path):
     np.savez(tmp_path / "list.npz", x=arrays["x"], **{L.NPZ_KEY: np.array([L.canonical_json(rec)])})
     with pytest.raises(L.LineageError, match="0-d string"):
         L.read_npz(tmp_path / "list.npz")
+    unbound = dict(rec, product={k: v for k, v in rec["product"].items() if k != "payload_sha256"})
+    np.savez(tmp_path / "unbound.npz", x=arrays["x"] * 3, **{L.NPZ_KEY: np.array(L.canonical_json(unbound))})
+    with pytest.raises(L.LineageError, match="names no payload_sha256"):        # a record must bind the arrays
+        L.read_npz(tmp_path / "unbound.npz")
 
 
 def test_code_identity_of_a_directory_that_is_not_the_top_of_a_checkout(tmp_path):

@@ -456,6 +456,9 @@ def check_catalog_record(cat: "AbsorberCatalog", nbins: Optional[int] = None, *,
         raise CatalogProvenanceError(f"finder ids {rec['finder_ids']} are not in the release allow-list "
                                      f"{sorted(RELEASE_FINDER_IDS)}")
     prod = rec["product"]
+    if not (isinstance(prod.get("payload_sha256"), str) and len(prod["payload_sha256"]) == 64
+            and prod["payload_sha256"] == L.arrays_sha256(cat._arrays())):
+        raise CatalogProvenanceError("the record's payload_sha256 is missing or is not the digest of the entries")
     finder = prod.get("finder") or {}
     if finder.get("verified") is not True:
         raise CatalogProvenanceError("the record does not say the finder cross-check ran")
