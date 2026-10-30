@@ -65,6 +65,20 @@ def test_the_w_c_check_compares_every_simulation_and_redshift(bundle, cache, tmp
     one = r["pairs"][0]
     rows = np.flatnonzero((d["sim_name"] == one["sim"]) & (np.abs(d["z_grid"] - one["z"]) < 1e-6))
     assert np.allclose(one["w_cache"], d["w_c_cache"][rows[0], 1:], rtol=1e-15)
+    diag = r["diagnostics_not_gates"]
+    assert set(diag["xbar_by_z"]) == {"2.4", "2.8"} and set(diag["map_fit_xbar"]) == {"LLS", "subDLA", "DLA"}
+    m = W.read_wc_map(os.path.join(bundle.bundle_dir, "wc_map.json"))
+    g = np.flatnonzero(d["snap_group_idx"] == d["snap_group_idx"][rows[0]])
+    gi = int(d["snap_group_idx"][rows[0]])
+    dn = d["snap_dNdX"][gi]
+    xg = d["snap_total_path_dX"][gi] / d["coarse_counts"][g[0]].sum()
+    assert np.allclose(one["diagnostic"]["dndx_cache"], dn, rtol=0) and one["diagnostic"]["xbar_geom"] == \
+        pytest.approx(xg, rel=1e-15)
+    assert np.allclose(one["diagnostic"]["w_map_fit_xbar"], m.w_c(dn, one["z"])[1:], rtol=1e-14)
+    zk = str(one["z"])
+    assert diag["xbar_by_z"][zk]["fit_over_geom"] == pytest.approx(
+        diag["xbar_by_z"][zk]["fit"] / diag["xbar_by_z"][zk]["geom_median"])
+    assert all(len(x["diagnostic"]["rel_map_geom_xbar"]) == 3 for x in r["pairs"])
     assert C.main(_wc_argv(bundle, cache, tmp_path / "f.json", tol=("LLS=1e-12", "subDLA=1e9", "DLA=1e9"))) == 1
     f = json.load(open(tmp_path / "f.json"))
     assert not f["passed"] and f["per_class"]["LLS"]["n_over"] == 6 and f["per_class"]["DLA"]["n_over"] == 0
