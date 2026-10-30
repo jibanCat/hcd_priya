@@ -877,6 +877,9 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     historical analyses on the pre-lineage cache). Either way every ensemble member's recorded ``cache_sha256`` must be
     the loaded cache's sha256, and that digest is the one the products (MF, DLA core, T1, T3) are bound to. The HCD
     prior centres built here come from that cache (``hcd_pivot_wc_and_xbar``); they belong to the historical analysis.
+    Note: the w_c / alpha maps of this context use ``dndx_wc``'s default delta_c, the HISTORICAL coefficients fitted to
+    the pre-fix counts, whichever cache is read; on a release cache (the strict path) that pairs a clean Xbar(z) with
+    the pre-fix delta_c. A clean-lineage analysis takes its map from the model bundle (``wc_map``) instead.
 
     The DESI + KS (+ eBOSS) legs; the LF ensemble ``ensemble_ckpts`` (schema-2.0 checkpoint prefixes; a single model is
     a one-member list); the mode-axis MF product ``mf_product`` (refused unless fitted against exactly this ensemble
