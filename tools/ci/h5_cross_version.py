@@ -1,15 +1,17 @@
-"""Cross-version check of the HDF5 release format (hcd_priya.h5/1): a bundle written with one libhdf5 is read, bit for
+"""Cross-version check of the HDF5 release format (hcd_priya.h5/2): a bundle written with one libhdf5 is read, bit for
 bit, with another (the release writer keeps files readable by libhdf5 1.10).
 
 usage:
   python tools/ci/h5_cross_version.py write NEW_DIR      # with the pinned stack: a synthetic two-member bundle
   python tools/ci/h5_cross_version.py read DIR [--max-hdf5 MAJOR.MINOR]   # with the library under test
 
-`write` records, in NEW_DIR/expected.json, the bundle manifest's sha256, the sha256 of every model leaf and normalizer
-array, and the writer's h5py and libhdf5 versions. `read` loads the bundle with safe_h5.load_ensemble (anchored on that
-sha256) and requires every digest to match; with --max-hdf5 it also requires the reading libhdf5 to be older than that
-version, so a job meant to test an old library cannot pass on a new one. Synthetic values only. Exit status 1 on any
-mismatch.
+`write` builds the bundle with hcd_analysis.emulator.release_testing.write_synthetic_bundle (small untrained networks,
+a made-up eligible lineage block and w_c map: synthetic values only, never a real model) and records, in
+NEW_DIR/expected.json, the bundle manifest's sha256, the sha256 of every model leaf and normalizer array, and the
+writer's h5py and libhdf5 versions. `read` loads the bundle with safe_h5.load_ensemble anchored on that sha256 (so the
+release loader's lineage checks run under the library under test too) and requires every digest to match; with
+--max-hdf5 it also requires the reading libhdf5 to be older than that version, so a job meant to test an old library
+cannot pass on a new one. Exit status 1 on any mismatch.
 """
 from __future__ import annotations
 
@@ -18,27 +20,6 @@ import hashlib
 import json
 import os
 import sys
-
-ARCH = {"in_dim": 10, "n_k": 8, "n_basis": 4, "baseline_n_layers": 1, "baseline_width": 16}
-
-
-def _meta(seed):
-    from hcd_analysis.emulator.schema import CHECKPOINT_SCHEMA_VERSION
-    return {"schema_version": CHECKPOINT_SCHEMA_VERSION, "arch_cfg": dict(ARCH), "seed": seed,
-            "k_com_hmpc": [0.05 * (i + 1) for i in range(ARCH["n_k"])], "L_box_hmpc": 120.0,
-            "k_convention": "synthetic", "cache_sha256": "0" * 64, "param_limits": [[0.0, 1.0]] * 9,
-            "cache_path": "synthetic.h5", "git_sha": "synthetic", "n_k": ARCH["n_k"], "recipe": {"w": 1.0}}
-
-
-def _norm():
-    import numpy as np
-    r = np.random.default_rng(0)
-    return {"f_nhi": {"mean": r.normal(size=30), "std": r.uniform(1, 2, 30)},
-            "dndx": {"mean": r.normal(size=3), "std": r.uniform(1, 2, 3)},
-            "P_filt": {"mu_marg": r.normal(size=(4, 8)), "sig_marg": r.uniform(1, 2, (4, 8)),
-                       "sig_cosmo": r.uniform(1, 2, (4, 8)),
-                       "cell_mean": {i: r.normal(size=(4, 8)) for i in range(5)}},
-            "delta": {"mean": r.normal(size=(3, 8)), "std": r.uniform(1, 2, (3, 8))}}
 
 
 def _digests(model, norm):
@@ -63,25 +44,14 @@ def _versions():
 
 
 def write(out_dir):
-    import jax
-    from hcd_analysis.emulator import safe_h5 as H
-    from hcd_analysis.emulator.model import Emulator
+    from hcd_analysis.emulator import release_testing
     os.makedirs(out_dir)
-    bundle = os.path.join(out_dir, "bundle")
-    os.makedirs(bundle)
-    prefixes, members = [], []
-    for i in range(2):
-        model = Emulator(**ARCH, key=jax.random.PRNGKey(i))
-        prefix = os.path.join(bundle, f"m{i}")
-        H.export_member(prefix, model, _meta(i), _norm())
-        prefixes.append(prefix)
-        members.append(_digests(model, _norm()))
-    H.write_manifest(bundle, prefixes, {"source": "synthetic cross-version check"})
-    expected = {"manifest_sha256": H.sha256_file(os.path.join(bundle, "manifest.json")), "members": members,
-                "writer": _versions()}
+    info = release_testing.write_synthetic_bundle(os.path.join(out_dir, "bundle"))
+    expected = {"manifest_sha256": info.manifest_sha256,
+                "members": [_digests(model, info.norm) for model in info.models], "writer": _versions()}
     with open(os.path.join(out_dir, "expected.json"), "x") as f:
         json.dump(expected, f, indent=1)
-    print(f"wrote {bundle} with libhdf5 {expected['writer']['libhdf5']}")
+    print(f"wrote {info.bundle_dir} with libhdf5 {expected['writer']['libhdf5']}")
     return 0
 
 
