@@ -63,7 +63,7 @@ import jax.numpy as jnp
 import equinox as eqx
 
 import hcd_analysis.emulator  # enables x64
-from hcd_analysis.emulator.data import load_cache, Z_LIMITS
+from hcd_analysis.emulator.data import load_cache_historical, Z_LIMITS
 from hcd_analysis.emulator import multifidelity as MF
 
 # reuse the build_mf_delta HF-LOSO / Fisher harness verbatim (same metrics, same
@@ -472,8 +472,8 @@ def main():
     print("jax.devices():", jax.devices())
     t0 = time.time()
 
-    lf = load_cache(MF.LF_CACHE)
-    hr = load_cache(MF.HR_CACHE)
+    lf = load_cache_historical(MF.LF_CACHE, reason='diagnostic of the historical cache (scripts/diag_mf_complexity.py)')
+    hr = load_cache_historical(MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/diag_mf_complexity.py)')
     lf_model, meta, lf_norm, lf_logk = MF.load_lf_backbone(fold=args.lf_fold)
     pairs = MF.match_hr_to_lf(lf, hr)
     k_eval, eval_logk = MF.build_eval_grid(hr, k_max=args.k_max, n_k=args.n_k)

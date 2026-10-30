@@ -14,7 +14,7 @@ import pytest
 
 from hcd_analysis.emulator import gate_d as GD
 from hcd_analysis.emulator import mf_modes as MM
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from tests.gate_helpers import real_cache_path
 
 LF, HR = real_cache_path("lf"), real_cache_path("hr")
@@ -38,7 +38,7 @@ def test_gate_d_d1_failure_pinned_to_parameter_precision():
     from tests.raw_headers import _raw_headers
     from hcd_analysis.emulator.kcoord import k_skm_from_kcom
     _need(LF, HR, RAW_LF, RAW_HR)
-    lf, hr = load_cache(LF), load_cache(HR)
+    lf, hr = load_cache_historical(LF, reason='test: a cache in the pre-lineage 3.3 format'), load_cache_historical(HR, reason='test: a cache in the pre-lineage 3.3 format')
     pairs = MM.match_pairs(lf, hr)
     K = 172
     hdr = {}
@@ -110,7 +110,7 @@ def test_d3_on_the_frozen_product_is_reported_per_simulation():
 # ---------------------------------------------------------------------------------------------------------- BT-D3
 def _real_targets():
     _need(LF, HR, f"{GATED}/gate_d_arrays.npz")
-    lf, hr = load_cache(LF), load_cache(HR)
+    lf, hr = load_cache_historical(LF, reason='test: a cache in the pre-lineage 3.3 format'), load_cache_historical(HR, reason='test: a cache in the pre-lineage 3.3 format')
     pairs = MM.match_pairs(lf, hr)
     a = np.load(f"{GATED}/gate_d_arrays.npz")
     l_rows = np.array([p[1] for p in pairs])

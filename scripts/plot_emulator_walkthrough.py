@@ -42,7 +42,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from hcd_analysis.emulator.data import (
-    load_cache, make_splits, make_batch, cell_id, safe_log,
+    load_cache_historical, make_splits, make_batch, cell_id, safe_log,
     reconstruct_P_filt, untransform_prediction, COARSE_NAMES,
     PARAM_LIMITS,
 )
@@ -505,7 +505,7 @@ def main():
 
     Path(OUTDIR).mkdir(parents=True, exist_ok=True)
     print("jax.devices():", jax.devices())
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/plot_emulator_walkthrough.py)')
     kf = d["kfkms"][0]
     print(f"cache: {d['P_tier_p'].shape[0]} rows, n_k={len(kf)}")
 

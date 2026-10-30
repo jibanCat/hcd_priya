@@ -50,7 +50,7 @@ def test_row10_class_decomposition_reconstructs_the_upstream_total():
     """Our emulator target is the per-class filtered P1D; its count-weighted sum is the Tier P total that row 5 shows
     equal to upstream's flux_vectors (structural identity on every real row)."""
     require_real_cache(LF)
-    d = D.load_cache(LF)
+    d = D.load_cache_historical(LF, reason='test: a cache in the pre-lineage 3.3 format')
     tot = np.einsum("rc,rck->rk", d["w_c_cache"], d["P_filt"])
     ok = np.isfinite(d["P_tier_p"])
     assert np.max(np.abs(tot[ok] / d["P_tier_p"][ok] - 1.0)) < 1e-10
@@ -164,7 +164,7 @@ def test_row23b_priya_hr6_slot_labels_audited():
     for (r, z), zi in bad.items():
         first = (ns[r] == 0.885 and z == 3.8) or (ns[r] == 0.972 and z == 2.6)
         assert abs(zi - (3.9936 if ns[r] == 0.885 else 2.7936)) < 2e-3 if first else abs(zi - (z + 0.2)) < 1e-4, (r, z, zi)
-    ours = D.load_cache(HR)
+    ours = D.load_cache_historical(HR, reason='test: a cache in the pre-lineage 3.3 format')
     for s in ("ns0.885", "ns0.972"):
         rows = np.where(np.char.startswith(ours["sim_name"].astype(str), s))[0]
         assert rows.size > 0

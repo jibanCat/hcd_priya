@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 
 import hcd_analysis.emulator  # noqa: F401  x64 before jax
 from hcd_analysis.emulator import train as T
-from hcd_analysis.emulator.data import make_splits, load_cache
+from hcd_analysis.emulator.data import make_splits, load_cache_historical
 from hcd_analysis.emulator.closure_legb import CACHE_PATH
 from scripts.build_xclass_error_vector import fold_rfrac
 
@@ -40,7 +40,7 @@ CLEAN = 0                        # clean-forest class (the cosmology-bearing one
 
 def main():
     t0 = time.time()
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/diag_lf_emu_kcoherence.py)')
     kf = np.asarray(d["kfkms"])           # (N,K) per-row k (s/km)
     z = np.asarray(d["z_grid"])
     # Historical diagnostic: the per-column median is a LABEL only. Rows do NOT share a k grid (they differ by up to

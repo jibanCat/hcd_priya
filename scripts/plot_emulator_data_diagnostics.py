@@ -20,7 +20,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
-from hcd_analysis.emulator.data import load_cache, signed_log, COARSE_NAMES
+from hcd_analysis.emulator.data import load_cache_historical, signed_log, COARSE_NAMES
 
 SHARD_GLOB = "/scratch/cavestru_root/cavestru0/mfho/tau0_shards/observables_tau0_lf.shard*.h5"
 N_SHARDS = 10
@@ -34,7 +34,7 @@ DELTA_NAMES = ("LLS", "subDLA", "DLA")  # delta = (Pu-Pf)[:,1:]  -> classes 1..3
 def load_many(n=N_SHARDS):
     files = sorted(glob.glob(SHARD_GLOB))[:n]
     assert files, f"no shards at {SHARD_GLOB}"
-    dicts = [load_cache(f) for f in files]
+    dicts = [load_cache_historical(f, reason='diagnostic of the historical cache (scripts/plot_emulator_data_diagnostics.py)') for f in files]
     keys_cat = ["params", "kfkms", "P_tier_p", "target_F", "scale", "z_grid",
                 "z_meta", "alpha_idx", "P_filt", "delta", "coarse_counts",
                 "tau0", "mask", "w_c_cache", "inv_nc"]

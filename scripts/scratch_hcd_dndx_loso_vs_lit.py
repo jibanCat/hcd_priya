@@ -31,7 +31,7 @@ import matplotlib.pyplot as plt
 
 import hcd_analysis.emulator  # x64 before jax
 import jax.numpy as jnp
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from hcd_analysis.emulator.dndx_wc import alpha_to_dndx
 from hcd_analysis.emulator.inference import (HCD_LIT_OVER_SIM, HCD_LIT_OVER_SIM_SLOPE,
                                              HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC, lit_over_sim_at_z)
@@ -75,7 +75,7 @@ def chains_for(base):
 def build_xbar():
     """Xbar(z) = X_tot / N_sl from the LF cache (mean absorption path per sightline).
     N_sl inferred per snap-group from the clean-fraction Poisson identity, then averaged."""
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/scratch_hcd_dndx_loso_vs_lit.py)')
     gid = np.asarray(d["snap_group_idx"]); zrow = np.asarray(d["z_grid"])
     Xtot = np.asarray(d["snap_total_path_dX"]); wc = np.asarray(d["w_c_cache"])
     dndx = np.asarray(d["snap_dNdX"])

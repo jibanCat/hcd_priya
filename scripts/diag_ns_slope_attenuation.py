@@ -38,7 +38,7 @@ assert jax.config.read("jax_enable_x64"), "x64 must be on (import hcd_analysis.e
 from hcd_analysis.emulator.closure_legb import (
     build_legb_ctx, held_out_sims, make_truth_from_sim,
 )
-from hcd_analysis.emulator.data import load_cache, make_splits, safe_log
+from hcd_analysis.emulator.data import load_cache_historical, make_splits, safe_log
 from hcd_analysis.emulator.predict import predict_P_filt
 from hcd_analysis.emulator.inference import PARAM_NAMES
 
@@ -125,7 +125,7 @@ def main():
     emit(f"# k-grid: cache angular k (172 bins), data band z∈[{Z_LO},{Z_HI}]. high-k tilt band k>{HIGHK}.")
     emit("")
 
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/diag_ns_slope_attenuation.py)')
     cache_k = np.asarray(d["kfkms"])
     if cache_k.ndim == 2:                       # cache stores per-row k (all identical) → take row 0
         cache_k = cache_k[0]

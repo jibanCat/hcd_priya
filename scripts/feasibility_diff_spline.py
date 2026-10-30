@@ -41,7 +41,7 @@ import jax.numpy as jnp
 from scipy.interpolate import CubicSpline
 
 sys.path.insert(0, _REPO_ROOT)
-from hcd_analysis.emulator.data import load_cache, safe_log
+from hcd_analysis.emulator.data import load_cache_historical, safe_log
 from hcd_analysis.emulator.model import svd_basis_init
 
 import matplotlib
@@ -227,7 +227,7 @@ def canonical_grid_and_logP(cache_path):
     single uniform-linear template. The trained decoder emits on ONE canonical sim
     grid; we use row-0's grid as that template. logP is NaN-safe (NaN above the
     native Nyquist of the rescaled grid)."""
-    d = load_cache(cache_path)
+    d = load_cache_historical(cache_path, reason='diagnostic of the historical cache (scripts/feasibility_diff_spline.py)')
     k_sim = d["kfkms"][0].astype(np.float64)
     logP = safe_log(d["P_filt"]).astype(np.float64)     # (R,4,K) NaN above Nyquist
     return k_sim, logP, d

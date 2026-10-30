@@ -25,7 +25,7 @@ FOLD = 6
 
 def main():
     hrn = sorted(set(s.decode() if isinstance(s, bytes) else s
-                     for s in MF.load_cache(MF.HR_CACHE)["sim_name"]))
+                     for s in MF.load_cache_historical(MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/plot_cemu_structure.py)')["sim_name"]))
     sim972 = [s for s in hrn if "ns0.972" in s][0]
 
     # ctx with MF + shape floor on DESI (the HFLOSO972 config); keep DESI only.

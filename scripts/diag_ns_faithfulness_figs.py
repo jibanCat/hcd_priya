@@ -33,7 +33,7 @@ import jax, jax.numpy as jnp
 assert jax.config.read("jax_enable_x64"), "x64 must be on (import hcd_analysis.emulator first)"
 
 from hcd_analysis.emulator.closure_legb import build_legb_ctx, held_out_sims
-from hcd_analysis.emulator.data import load_cache, make_splits, safe_log
+from hcd_analysis.emulator.data import load_cache_historical, make_splits, safe_log
 from hcd_analysis.emulator.predict import predict_P_filt, reconstruct_P_filt_jax
 from hcd_analysis.emulator.inference import PARAM_NAMES
 
@@ -534,7 +534,7 @@ def main():
         print("[sanity] resp_shapes.npz absent; relying on sign check", flush=True)
 
     print("[cache] loading + truth cell-means", flush=True)
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/diag_ns_faithfulness_figs.py)')
     m_cell = truth_cell_means(d)
     print(f"[cache] {len(m_cell)} (z,alpha) cells with >= {MIN_SIMS} sims", flush=True)
 

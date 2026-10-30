@@ -48,7 +48,7 @@ from numpyro.infer.util import constrain_fn
 from scipy.stats import norm as _scipy_norm
 
 from . import train as T
-from .data import load_cache, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS, sampling_unit_bounds
+from .data import load_cache, load_cache_historical, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS, sampling_unit_bounds
 from .meanflux_prior import (meanflux_tau0_prior, becker13_tau0, tau0_alpha_priya,
                              fit_tau0_alpha_priya, TAU0_AMP_RANGE, DTAU0_RANGE, TAU0_PIVOT_Z)
 from .inference import (PARAM_NAMES, hcd_incidence_prior,
@@ -926,7 +926,7 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
 
     z_global = np.unique(np.round(np.concatenate([leg.z for leg in legs]), 6))
 
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason="the historical inference context (closure_legb.CACHE_PATH)")
     k_com = np.asarray(meta["k_com_hmpc"], float)
     if not np.array_equal(k_com, np.asarray(d["k_com_hmpc"], float)):
         raise ValueError("the checkpoints' k_com_hmpc differ from the production cache's box modes")

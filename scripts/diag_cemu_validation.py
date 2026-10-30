@@ -60,7 +60,7 @@ import h5py
 
 from hcd_analysis.emulator import train as T
 from hcd_analysis.emulator.data import (
-    load_cache, make_splits, datarange_mask, DATA_RANGE, COARSE_NAMES,
+    load_cache_historical, make_splits, datarange_mask, DATA_RANGE, COARSE_NAMES,
 )
 from hcd_analysis.emulator.predict import predict_P_filt
 from hcd_analysis.emulator.inference import predict_P_obs_and_cov_single_z
@@ -564,7 +564,7 @@ def _xclass_revalidate(args):
         pf_by_fold.append({k: jnp.asarray(norm["P_filt"][k])
                            for k in ("mu_marg", "sig_marg", "sig_cosmo")})
     cache_path = meta["cache_path"]
-    d = load_cache(cache_path)
+    d = load_cache_historical(cache_path, reason='diagnostic of the historical cache (scripts/diag_cemu_validation.py)')
     nyq = lf_nyquist_kmax(cache_path, kgrid)
     k_max = nyq["k_max_proposed"]
 
@@ -648,7 +648,7 @@ def main():
           f"τ₀-centres {np.array2string(np.asarray(alpha_centres), precision=3)}; "
           f"z-edges {z_band_edges}; n_dla_shot={int(dla_shot_flag_k.sum())}")
 
-    d = load_cache(cache_path)
+    d = load_cache_historical(cache_path, reason='diagnostic of the historical cache (scripts/diag_cemu_validation.py)')
     train_idx, val_idx, holdout_idx = make_splits(d, 0)
     print(f"fold-0 split: train={len(train_idx)} val(held-out)={len(val_idx)} "
           f"holdout(τ₀-edge)={len(holdout_idx)}")

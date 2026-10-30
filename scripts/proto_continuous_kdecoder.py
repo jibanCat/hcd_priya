@@ -43,7 +43,7 @@ import numpy as np
 import optax
 from scipy.interpolate import CubicSpline
 
-from hcd_analysis.emulator.data import load_cache, safe_log
+from hcd_analysis.emulator.data import load_cache_historical, safe_log
 from hcd_analysis.emulator.model import svd_basis_init
 
 # ----------------------------------------------------------------------------
@@ -250,7 +250,7 @@ def fit_trunk_and_coeffs(trunk, kgrid_train, Y_train, *, steps=1500, lr=3e-3,
 # DATA
 # ============================================================================
 def load_logP(cache_path):
-    d = load_cache(cache_path)
+    d = load_cache_historical(cache_path, reason='diagnostic of the historical cache (scripts/proto_continuous_kdecoder.py)')
     kgrid = d["kfkms"][0].astype(np.float64)        # row-0 grid as a LABEL only (rows differ; incident note 2026-10-05)
     logP = safe_log(d["P_filt"]).astype(np.float64)  # (R, 4, K)
     return d, kgrid, logP

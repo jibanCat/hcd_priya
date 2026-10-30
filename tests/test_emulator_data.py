@@ -19,7 +19,7 @@ def test_fixture_is_valid_v33(tmp_path):
         assert np.allclose(recon[ok], Pp[ok], rtol=0, atol=1e-12)
         assert np.isnan(Pp).any()
 
-from hcd_analysis.emulator.data import load_cache, COARSE_SLICES, _collapse_p1d
+from hcd_analysis.emulator.data import load_cache_historical, COARSE_SLICES, _collapse_p1d
 
 def test_empty_class_collapses_to_zero_not_nan():
     # Only the clean class (fine bin 0) is populated; LLS/subDLA/DLA are empty.
@@ -38,7 +38,7 @@ def test_empty_class_collapses_to_zero_not_nan():
 
 def test_load_collapses_15_to_4_and_builds_tau0_masks_weights(tmp_path):
     path = tmp_path / "obs.h5"; write_synthetic_cache(path, n_k=8)
-    d = load_cache(path)
+    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
     R = d["P_tier_p"].shape[0]
     assert d["P_filt"].shape == (R, 4, 8)
     assert d["delta"].shape == (R, 3, 8)
@@ -101,7 +101,7 @@ from hcd_analysis.emulator.data import kfold_loso, tau0_edge_holdout
 
 def test_kfold_loso_every_sim_held_once(tmp_path):
     path = tmp_path / "obs.h5"; write_synthetic_cache(path, n_sims=6, snaps_per_sim=2, n_alpha=4)
-    d = load_cache(path)
+    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
     folds = kfold_loso(d["sim_name"], n_folds=3)
     held = set()
     for tr, va in folds:
@@ -111,7 +111,7 @@ def test_kfold_loso_every_sim_held_once(tmp_path):
 
 def test_tau0_edge_holdout_picks_extremes(tmp_path):
     path = tmp_path / "obs.h5"; write_synthetic_cache(path, n_sims=4, snaps_per_sim=3, n_alpha=4)
-    d = load_cache(path)
+    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
     tr, ho = tau0_edge_holdout(d["tau0"], frac=0.2)
     assert d["tau0"][ho].min() <= d["tau0"][tr].min()
     assert d["tau0"][ho].max() >= d["tau0"][tr].max()
@@ -125,7 +125,7 @@ def test_make_splits_holdout_disjoint_from_train_and_val(tmp_path):
     union covers all rows; LOSO (no sim straddles train/val)."""
     path = tmp_path / "obs.h5"
     write_synthetic_cache(path, n_sims=8, snaps_per_sim=2, n_alpha=4)
-    d = load_cache(path)
+    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
     n_rows = len(d["tau0"])
     for fold in range(8):
         tr, va, ho = make_splits(d, fold, n_folds=8, holdout_frac=0.15)
@@ -152,7 +152,7 @@ def test_make_splits_disjoint_on_real_lf_cache():
     """A-list referee guard: run make_splits' disjointness/LOSO/union invariants on
     the REAL merged LF cache (not just the synthetic fixture), since the production
     sweep splits this exact cache. Spot-checks a few folds across the LOSO set."""
-    d = load_cache(_REAL_LF_CACHE)
+    d = load_cache_historical(_REAL_LF_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
     n_rows = len(d["tau0"])
     n_folds = len(kfold_loso(d["sim_name"], n_folds=8))
     for fold in (0, n_folds // 2, n_folds - 1):
@@ -170,7 +170,7 @@ def test_make_splits_matches_inline_cli_logic(tmp_path):
     """make_splits reproduces the old inline tau0-holdout x LOSO composition."""
     path = tmp_path / "obs.h5"
     write_synthetic_cache(path, n_sims=6, snaps_per_sim=2, n_alpha=4)
-    d = load_cache(path)
+    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
     fold, n_folds, frac = 1, 4, 0.15
     # old inline logic
     tr_pool, holdout = tau0_edge_holdout(d["tau0"], frac=frac)
@@ -214,7 +214,7 @@ def test_param_limits_cover_nine_params_in_cache_order():
 
 def test_normalize_params_maps_to_unit_cube(tmp_path):
     path = tmp_path / "obs.h5"; write_synthetic_cache(path)   # fixture params are uniform(0.5,1.5)
-    d = load_cache(path)
+    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
     # load_cache must now expose normalized model input x = [params_unit (9), z_unit (1)]
     assert "x" in d and d["x"].shape == (d["params"].shape[0], 10)
     # real-cache params (when in-domain) normalize into [0,1]; synthetic may be out-of-domain ->
@@ -236,7 +236,7 @@ from hcd_analysis.emulator.data import (
 def _load_fixture(tmp_path, **kw):
     path = tmp_path / "obs.h5"
     write_synthetic_cache(path, **kw)
-    return load_cache(path)
+    return load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
 
 
 def test_make_batch_keys_and_shapes(tmp_path):
@@ -604,10 +604,10 @@ def test_loso_assert_fires_off_cells():
     import warnings as _w
     import tempfile, os
     from tests.emulator._fixture import write_synthetic_cache
-    from hcd_analysis.emulator.data import load_cache
+    from hcd_analysis.emulator.data import load_cache_historical
     p = os.path.join(tempfile.mkdtemp(), "obs.h5")
     write_synthetic_cache(p, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=8)
-    d = load_cache(p)
+    d = load_cache_historical(p, reason='test: a cache in the pre-lineage 3.3 format')
     cid = cell_id(d)
     # train = all rows EXCEPT one whole cell; val = that cell -> not in train_cells
     target_cell = int(cid[0])

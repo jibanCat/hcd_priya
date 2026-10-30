@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from hcd_analysis.emulator import loo_matched as L
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from hcd_analysis.emulator.dndx_wc import _DELTA_C_COEFFS, w_c_corrected
 from tests.emulator._fixture import write_synthetic_cache
 
@@ -17,7 +17,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def d(tmp_path):
     p = tmp_path / "obs.h5"
     write_synthetic_cache(p, n_sims=5, snaps_per_sim=4, n_alpha=4, n_k=8)
-    return load_cache(p)
+    return load_cache_historical(p, reason='test: a cache in the pre-lineage 3.3 format')
 
 
 def test_matched_mask_selects_the_priya_design(d):

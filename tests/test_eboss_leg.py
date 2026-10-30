@@ -183,8 +183,8 @@ def test_legb_model_priors_only_site_order_match(marg_zslope, hierarchical_hcd):
                               hierarchical_hcd=hierarchical_hcd)
     ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "eBOSS"],
                        marginalize_zslope=marg_zslope)
-    truth = C.make_truth_from_sim(C.load_cache(C.CACHE_PATH),
-                                  C.held_out_sims(C.load_cache(C.CACHE_PATH), fold=6)[0][0], fold=6)
+    truth = C.make_truth_from_sim(C.load_cache_historical(C.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format'),
+                                  C.held_out_sims(C.load_cache_historical(C.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format'), fold=6)[0][0], fold=6)
     mock_legs, _, _ = C.make_legb_mock(ctx, truth, jax.random.PRNGKey(0))
     core = C._mock_core_per_leg(ctx, truth)
 

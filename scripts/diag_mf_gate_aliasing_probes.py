@@ -138,7 +138,7 @@ def build_heads(fold, lf_cache, hr_cache, pairs, hr_sims):
 emit("# T3 GATE aliasing probes G4.2 (τ₀-width inflation) + G4.3 (∂g/∂n_s structural).")
 emit("# u_tau FIXED to the physical mean-flux axis (Step-0).")
 
-lf_cache = MF.load_cache(MF.LF_CACHE); hr_cache = MF.load_cache(MF.HR_CACHE)
+lf_cache = MF.load_cache_historical(MF.LF_CACHE, reason='diagnostic of the historical cache (scripts/diag_mf_gate_aliasing_probes.py)'); hr_cache = MF.load_cache_historical(MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/diag_mf_gate_aliasing_probes.py)')
 pairs = MF.match_hr_to_lf(lf_cache, hr_cache)
 hr_sims = sorted(set(s.decode() if isinstance(s, bytes) else s for s in hr_cache["sim_name"]))
 hr_row_sim = np.array([s.decode() if isinstance(s, bytes) else s
