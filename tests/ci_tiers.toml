@@ -18,12 +18,15 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 
 [files]
 "tests/test_absorption_path.py" = { tier = "wheel" }
+"tests/test_accept_rebuilt_catalogues.py" = { tier = "source" }
 "tests/test_analyze_dla_selfdraw.py" = { tier = "source" }
 "tests/test_analyze_dnuis_overall_summary.py" = { tier = "source" }
 "tests/test_analyze_dnuis_pooling.py" = { tier = "source" }
 "tests/test_analyze_dnuis_resolution_oos.py" = { tier = "source" }
 "tests/test_analyze_lls_dispcenter.py" = { tier = "source" }
 "tests/test_blinding.py" = { tier = "wheel" }
+"tests/test_bundle_lineage.py" = { tier = "wheel" }
+"tests/test_carry_validated_cache.py" = { tier = "source" }
 "tests/test_catalog_systems.py" = { tier = "wheel" }
 "tests/test_cddf_dx_patch.py" = { tier = "source" }
 "tests/test_cemu_t3.py" = { tier = "wheel" }
@@ -35,6 +38,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_comparison_harness.py" = { tier = "source" }
 "tests/test_convergence_z_match.py" = { tier = "wheel" }
 "tests/test_data_weights.py" = { tier = "wheel" }
+"tests/test_derive_dndx_historical.py" = { tier = "source" }
 "tests/test_dla_completeness_forward_parity.py" = { tier = "source" }
 "tests/test_dla_selfdraw_arm.py" = { tier = "source" }
 "tests/test_dla_truth.py" = { tier = "wheel" }
@@ -48,6 +52,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_emulator_train.py" = { tier = "wheel" }
 "tests/test_error_vector_io.py" = { tier = "wheel" }
 "tests/test_export_deployed_centre.py" = { tier = "source" }
+"tests/test_export_release_bundle.py" = { tier = "source" }
 "tests/test_fisher_kit.py" = { tier = "wheel" }
 "tests/test_forward_ctx_v2.py" = { tier = "source" }
 "tests/test_forward_v2.py" = { tier = "wheel" }
@@ -60,8 +65,11 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_kcoord_binding.py" = { tier = "wheel" }
 "tests/test_ks_selboost_hooks.py" = { tier = "wheel" }
 "tests/test_ks_selboost_runner.py" = { tier = "source" }
+"tests/test_l6_acceptance_tools.py" = { tier = "source" }
+"tests/test_legb_ctx_cache.py" = { tier = "wheel" }
 "tests/test_legb_tau0_priya.py" = { tier = "wheel" }
 "tests/test_likelihood_driver.py" = { tier = "wheel" }
+"tests/test_lineage.py" = { tier = "wheel" }
 "tests/test_lit_dndx.py" = { tier = "source" }
 "tests/test_lit_dndx_fits.py" = { tier = "source" }
 "tests/test_lls_dispcenter_arm.py" = { tier = "source" }
@@ -76,6 +84,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_omega_hi.py" = { tier = "source" }
 "tests/test_packaging.py" = { tier = "wheel" }
 "tests/test_predict_physical_grid.py" = { tier = "wheel" }
+"tests/test_predictor.py" = { tier = "wheel" }
 "tests/test_prod_forward_wiring.py" = { tier = "source" }
 "tests/test_prod_sbc_checkpoint.py" = { tier = "source" }
 "tests/test_product_manifest.py" = { tier = "wheel" }
@@ -92,9 +101,12 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_seed_determinism.py" = { tier = "source" }
 "tests/test_splice_tau0_cache.py" = { tier = "source" }
 "tests/test_tau0_bands.py" = { tier = "wheel" }
+"tests/test_tau0_cache_lineage.py" = { tier = "source" }
 "tests/test_tau0_powerlaw.py" = { tier = "wheel" }
 "tests/test_tau0_rescale.py" = { tier = "wheel" }
 "tests/test_tau_threshold_sensitivity.py" = { tier = "source" }
+"tests/test_train_release_meta.py" = { tier = "source" }
+"tests/test_wc_map.py" = { tier = "source" }
 "tests/test_xclass_cemu.py" = { tier = "wheel" }
 "tests/test_zflat_alpha_guard.py" = { tier = "wheel" }
 "tests/test_zslope_center.py" = { tier = "wheel" }
