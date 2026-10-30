@@ -583,7 +583,7 @@ def test_the_release_finder_settings_are_those_of_the_default_configuration():
 
 
 def test_a_release_eligible_load_needs_its_expectations_and_a_whole_file_build(tmp_path, monkeypatch):
-    """The review probe (L1R-3): eligibility is provenance only, so the release load states what it expects."""
+    """Eligibility is provenance only, so the release load states what it expects (settings, raw file, whole file)."""
     h5, cat = _golden_build(tmp_path, monkeypatch, tau_threshold=100.0)
     p = tmp_path / "c.npz"
     cat.save_npz(p)
@@ -704,7 +704,7 @@ def test_a_catalogue_changed_after_stamping_is_refused(tmp_path, monkeypatch):
 
 
 def test_a_catalogue_record_without_its_payload_digest_is_refused(tmp_path, monkeypatch):
-    """The review probe (L1R-2): the record rebuilt without product.payload_sha256 and N_HI tripled."""
+    """A record rebuilt without product.payload_sha256, with N_HI tripled, is refused."""
     h5, cat = _golden_build(tmp_path, monkeypatch)
     rec = cat.lineage
     bad = C.AbsorberCatalog(sim_name=cat.sim_name, snap=cat.snap, z=cat.z, dv_kms=cat.dv_kms,
@@ -763,7 +763,7 @@ def test_an_old_catalogue_is_read_only_through_the_historical_loader(tmp_path, c
 
 
 def test_nothing_built_from_a_historically_read_catalogue_is_release_eligible(tmp_path):
-    """The review probe (L1R-1): a stamped, eligible catalogue read through load_catalog_historical, listed as the input
+    """A stamped, eligible catalogue read through load_catalog_historical, listed as the input
     of a product, with its record or without it."""
     stamped = _stamp(_cat([17.5]))
     p = tmp_path / "s.npz"
@@ -965,7 +965,7 @@ def test_a_cached_catalogue_of_other_settings_or_another_raw_file_is_refused(tmp
 
 
 def test_the_snapshot_verifier_compares_the_copied_finder_ids_and_eligibility(tmp_path, monkeypatch):
-    """L1R-8: a meta.json whose snapshot record copies other flags than its products' own records hold is refused,
+    """A meta.json whose snapshot record copies other flags than its products' own records hold is refused,
     even when the record is kept self-consistent."""
     from hcd_analysis.snapshot_record import verify_snapshot_dir
     PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
@@ -995,7 +995,7 @@ def test_the_snapshot_verifier_compares_the_copied_finder_ids_and_eligibility(tm
 
 @pytest.mark.parametrize("damage", ["missing", "unreadable", "no_nbins"])
 def test_a_done_snapshot_without_a_readable_meta_json_is_refused_not_dropped(tmp_path, monkeypatch, damage):
-    """L1R-9: on the done path a missing or unreadable meta.json stops the run (run-one and run-sim); it is never
+    """On the done path a missing or unreadable meta.json stops the run (run-one and run-sim); it is never
     logged and skipped, so a stacked CDDF never silently loses a snapshot."""
     PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
     c = cfg("cat")
