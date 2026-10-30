@@ -84,11 +84,30 @@ def group_entries(sim, snap, *, eligible=True, tag=""):
     return out
 
 
+SOURCE_ROLE = "historical_source"
+
+
+def source_entry(sha256="0" * 64, size=1, kind=T.KIND):
+    """A carry's historical source as a cache input (no record of its own)."""
+    return {"role": SOURCE_ROLE, "kind": kind, "sha256": sha256, "size": size}
+
+
+def carry_kw(source=None, *, promoted=True):
+    """The write_v34 keywords of a carried cache whose source is ``source`` (``source_entry()`` by default)."""
+    src = source or source_entry()
+    car = {"source_sha256": src["sha256"], "source_size": src["size"], "fields": list(T.CARRIED_FIELDS)}
+    if promoted:
+        car["promoted"] = {"passed": True, "comparison_sha256": "1" * 64, "staged_sha256": "2" * 64}
+    return {"rows": T.ROWS_CARRIED, "carried": car, "extra_inputs": [src],
+            "validation": {"all_passed": True, "validated_inputs": [SOURCE_ROLE]}}
+
+
 def write_v34(path, groups, *, edges_shift=0.0, attrs=None, eligible=True, settings=None, rows=T.ROWS_BUILT,
-              **kw):
+              extra_inputs=(), **kw):
     d = datasets(groups, edges_shift=edges_shift)
     entries = [e for (sim, snap, *_r) in groups for e in group_entries(sim, snap, eligible=eligible,
                                                                        tag=str(path).rsplit("/", 1)[-1])]
+    entries += [dict(e) for e in extra_inputs]
     gl = [{"sim": sim, "snap": int(snap), "z_grid": float(zg), "rows": rows} for (sim, snap, zg, *_r) in groups]
     a = dict(ATTRS, n_rows=len(d["sim_name"]), n_snaps=len(d["snap_snap"]), **(attrs or {}))
     return T.write_cache(path, d, a, inputs=entries, settings=settings or {"cache_version": T.CACHE_VERSION},

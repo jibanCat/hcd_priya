@@ -106,9 +106,9 @@ def write_synthetic_cache_v34(path, n_sims=3, snaps_per_sim=4, n_alpha=4, n_k=8,
     attrs.pop("cache_version", None)
     kw = {}
     if rows == T.ROWS_CARRIED:
-        kw = {"carried": {"source_sha256": "0" * 64, "fields": list(T.CARRIED_FIELDS),
-                          "promoted": {"passed": True, "comparison_sha256": "2" * 64, "staged_sha256": "3" * 64}},
-              "validation": {"all_passed": True, "validated_inputs": [], "summary_sha256": "1" * 64}}
+        kw = tf.carry_kw()
+        kw.pop("rows")
+        entries += kw.pop("extra_inputs")
     return T.write_cache(path, d, attrs, inputs=entries, settings={"cache_version": T.CACHE_VERSION, "fidelity": "lf",
                                                                     "alpha_range": [0.66, 1.33]},
                          groups=groups, **kw)

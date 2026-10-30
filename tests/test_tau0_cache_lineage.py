@@ -144,17 +144,103 @@ def test_a_carried_group_needs_the_carry_block_and_a_passed_validation(tmp_path,
     tf.write_v34(tmp_path / "a.h5", groups, rows=T.ROWS_CARRIED)
     with pytest.raises(T.CacheLineageError, match="carried rows without the carry's source"):
         T.read_cache(tmp_path / "a.h5")
-    carried = {"source_sha256": "0" * 64, "fields": list(T.CARRIED_FIELDS)}
-    tf.write_v34(tmp_path / "b.h5", groups, rows=T.ROWS_CARRIED, carried=carried, validation={"all_passed": False})
+    kw = tf.carry_kw()
+    kw["validation"] = dict(kw["validation"], all_passed=False)
+    tf.write_v34(tmp_path / "b.h5", groups, **kw)
     with pytest.raises(T.CacheLineageError, match="without a passed validation"):
         T.read_cache(tmp_path / "b.h5")
-    tf.write_v34(tmp_path / "c.h5", groups, rows=T.ROWS_CARRIED, carried=carried, validation={"all_passed": True})
+    tf.write_v34(tmp_path / "c.h5", groups, **tf.carry_kw(promoted=False))
     with pytest.raises(T.CacheLineageError, match="not yet promoted"):          # staged: the release reader refuses
         T.read_cache(tmp_path / "c.h5")
     T.read_cache_staged(tmp_path / "c.h5")
-    promoted = dict(carried, promoted={"passed": True, "comparison_sha256": "1" * 64, "staged_sha256": "2" * 64})
-    tf.write_v34(tmp_path / "e.h5", groups, rows=T.ROWS_CARRIED, carried=promoted, validation={"all_passed": True})
+    tf.write_v34(tmp_path / "e.h5", groups, **tf.carry_kw())
     T.read_cache(tmp_path / "e.h5")
+
+
+def _probe(tmp_path, name, groups, **kw):
+    rec = tf.write_v34(tmp_path / name, groups, **kw)
+    assert rec["release_eligible"]                     # the writer computes eligibility; the reader must still refuse
+    return tmp_path / name
+
+
+def test_the_validated_input_escape_is_bound_to_the_carry_source(tmp_path, monkeypatch):
+    """Inputs named as validated carry no lineage of their own: allowed only for carried rows, and only as the one
+    historical cache the carry block names."""
+    tf.clean_code(monkeypatch)
+    groups = [("simA", 16, 3.2, 3, 1)]
+    src = tf.source_entry("5" * 64, 7)
+    # every group built, an unrecorded cache named as validated
+    p = _probe(tmp_path, "p2.h5", groups, extra_inputs=[src],
+               validation={"all_passed": True, "validated_inputs": [tf.SOURCE_ROLE]})
+    with pytest.raises(T.CacheLineageError, match="validated inputs without carried rows"):
+        T.read_cache(p)
+    # carried rows whose carry block names another source than the validated input
+    kw = tf.carry_kw(src)
+    kw["carried"] = dict(kw["carried"], source_sha256="6" * 64)
+    with pytest.raises(T.CacheLineageError, match="exactly the carry's source"):
+        T.read_cache(_probe(tmp_path, "p2b.h5", groups, **kw))
+    kw = tf.carry_kw(src)
+    kw["carried"] = dict(kw["carried"], source_size=8)
+    with pytest.raises(T.CacheLineageError, match="exactly the carry's source"):
+        T.read_cache(_probe(tmp_path, "p2c.h5", groups, **kw))
+    other = tf.source_entry("5" * 64, 7, kind="catalog")
+    with pytest.raises(T.CacheLineageError, match="exactly the carry's source"):
+        T.read_cache(_probe(tmp_path, "p2d.h5", groups, **tf.carry_kw(other)))
+    kw = tf.carry_kw(src)
+    kw["extra_inputs"] = [src, dict(src, role="second")]
+    kw["validation"] = dict(kw["validation"], validated_inputs=[tf.SOURCE_ROLE, "second"])
+    with pytest.raises(T.CacheLineageError, match="exactly the carry's source"):
+        T.read_cache(_probe(tmp_path, "p2e.h5", groups, **kw))
+    T.read_cache(_probe(tmp_path, "ok.h5", groups, **tf.carry_kw(src)))
+
+
+def _with_entries(tmp_path, name, groups, edit):
+    """A cache whose group inputs are edited by ``edit(entries)`` before it is written."""
+    d = tf.datasets(groups)
+    entries = [e for (sim, snap, *_r) in groups for e in tf.group_entries(sim, snap)]
+    edit(entries)
+    gl = [{"sim": sim, "snap": int(snap), "z_grid": float(zg), "rows": T.ROWS_BUILT} for (sim, snap, zg, *_r) in groups]
+    a = dict(tf.ATTRS, n_rows=len(d["sim_name"]), n_snaps=len(d["snap_snap"]))
+    rec = T.write_cache(tmp_path / name, d, a, inputs=entries, settings={"cache_version": T.CACHE_VERSION},
+                        groups=gl)
+    return tmp_path / name, rec
+
+
+@pytest.mark.parametrize("edit, match", [
+    # a catalogue role filled by an unrecorded raw file (eligible by the lineage rule, refused by the reader)
+    (lambda es: es.__setitem__(1, {"role": es[1]["role"], "kind": "raw_spectra", "sha256": "7" * 64, "size": 1}),
+     "not one input of kind catalog"),
+    (lambda es: es[2].__setitem__("kind", "catalog"), "not one input of kind cddf"),
+    (lambda es: es[3].__setitem__("kind", "sim_ics"), "not one input of kind raw_spectra"),
+    (lambda es: es.__setitem__(0, {k: v for k, v in es[0].items() if k not in ("finder_ids", "release_eligible")}
+                               | {"kind": "snapshot"}), "not a release-eligible product"),
+    (lambda es: es.pop(2), r"no \['cddf'\] input"),
+])
+def test_each_group_input_has_its_kind_and_lineage(tmp_path, monkeypatch, edit, match):
+    tf.clean_code(monkeypatch)
+    from hcd_analysis import lineage as LL
+    monkeypatch.setattr(LL, "RAW_INPUT_KINDS", LL.RAW_INPUT_KINDS | {"snapshot"})   # let the writer call it eligible
+    p, _rec = _with_entries(tmp_path, "g.h5", [("simA", 16, 3.2, 3, 1)], edit)
+    with pytest.raises(T.CacheLineageError, match=match):
+        T.read_cache(p)
+
+
+@pytest.mark.parametrize("edit, match", [
+    (lambda g: g.reverse(), "not the file's snapshot blocks"),
+    (lambda g: g[0].__setitem__("rows", "copied"), "unknown row origin"),
+    (lambda g: g.pop(), "not the file's snapshot blocks"),
+])
+def test_the_record_groups_must_be_the_file_blocks(tmp_path, monkeypatch, edit, match):
+    tf.clean_code(monkeypatch)
+    groups = [("simA", 16, 3.2, 3, 1), ("simB", 5, 4.0, 3, 4)]
+    d = tf.datasets(groups)
+    entries = [e for (sim, snap, *_r) in groups for e in tf.group_entries(sim, snap)]
+    gl = [{"sim": sim, "snap": int(snap), "z_grid": float(zg), "rows": T.ROWS_BUILT} for (sim, snap, zg, *_r) in groups]
+    edit(gl)
+    a = dict(tf.ATTRS, n_rows=len(d["sim_name"]), n_snaps=len(d["snap_snap"]))
+    T.write_cache(tmp_path / "g.h5", d, a, inputs=entries, settings={}, groups=gl)
+    with pytest.raises(T.CacheLineageError, match=match):
+        T.read_cache(tmp_path / "g.h5")
 
 
 # ------------------------------------------------------------------------------------------- the fresh-row sample

@@ -232,9 +232,12 @@ def _read_release(path, *, staged_ok):
 
 
 def check_groups(rec, d, refuse, *, staged_ok=False):
-    """The record's groups are the file's snapshot blocks, in order; each has its catalogue, CDDF, snapshot and raw
-    inputs; carried groups name the carry's source and the carried fields and, unless ``staged_ok``, the promotion
-    (the fresh-row comparison that passed, by sha256)."""
+    """The record's groups are the file's snapshot blocks, in order; each has its snapshot, catalogue and CDDF inputs
+    (each of its own kind, lineage-bearing and release-eligible) and its raw input (of kind raw_spectra); carried
+    groups name the carry's source and the carried fields and, unless ``staged_ok``, the promotion (the fresh-row
+    comparison that passed, by sha256). ``validation.validated_inputs`` (the inputs that may carry no lineage of their
+    own) is allowed only with carried groups, and must then name exactly the carry's source: one ``tau0_cache`` input
+    whose sha256 and size are the carry block's."""
     groups = rec["product"].get("groups")
     ids = list(zip([str(s) for s in d["snap_sim_name"]], [int(s) for s in d["snap_snap"]]))
     if not isinstance(groups, list) or [(g.get("sim"), g.get("snap")) for g in groups] != ids:
@@ -242,19 +245,39 @@ def check_groups(rec, d, refuse, *, staged_ok=False):
     if rec["product"].get("n_rows") != int(np.asarray(d["sim_name"]).shape[0]) or rec["product"].get("n_snaps") \
             != len(ids):
         refuse("the record's row or group count is not the file's")
-    roles = {i["role"] for i in rec["inputs"]}
+    by_role = {}
+    for i in rec["inputs"]:
+        by_role.setdefault(i["role"], []).append(i)
     for g in groups:
         if g.get("rows") not in (ROWS_BUILT, ROWS_CARRIED):
             refuse(f"group {g.get('sim')} {g.get('snap')}: unknown row origin {g.get('rows')!r}")
-        missing = [k for k in GROUP_INPUT_KINDS if group_role(k, g["sim"], g["snap"]) not in roles]
+        missing = [k for k in GROUP_INPUT_KINDS if group_role(k, g["sim"], g["snap"]) not in by_role]
         if missing:
             refuse(f"group {g['sim']} {g['snap']}: no {missing} input in the record")
-    if any(g["rows"] == ROWS_CARRIED for g in groups):
+        for k in GROUP_INPUT_KINDS:
+            role = group_role(k, g["sim"], g["snap"])
+            hits = by_role[role]
+            if len(hits) != 1 or hits[0]["kind"] != k:
+                refuse(f"group {g['sim']} {g['snap']}: the input {role} is not one input of kind {k}")
+            if k != "raw_spectra" and not (hits[0].get("finder_ids") and hits[0].get("release_eligible") is True):
+                refuse(f"group {g['sim']} {g['snap']}: the input {role} is not a release-eligible product with "
+                       "finder ids")
+    validation = rec.get("validation") or {}
+    validated = list(validation.get("validated_inputs") or [])
+    carried_any = any(g["rows"] == ROWS_CARRIED for g in groups)
+    if validated and not carried_any:
+        refuse("validated inputs without carried rows (only the carry's source may be named as validated)")
+    if carried_any:
         car = rec["product"].get("carried") or {}
         if list(car.get("fields") or []) != list(CARRIED_FIELDS) or not isinstance(car.get("source_sha256"), str):
             refuse("carried rows without the carry's source and field list")
-        if not (rec.get("validation") or {}).get("all_passed") is True:
+        if not validation.get("all_passed") is True:
             refuse("carried rows without a passed validation")
+        src = by_role.get(validated[0], []) if len(validated) == 1 else []
+        if not (len(src) == 1 and src[0]["kind"] == KIND and src[0]["sha256"] == car.get("source_sha256")
+                and src[0]["size"] == car.get("source_size")):
+            refuse("carried rows: the validated input must be exactly the carry's source (one tau0_cache input "
+                   "whose sha256 and size are the carry block's)")
         prom = car.get("promoted")
         if not staged_ok and not (isinstance(prom, dict) and prom.get("passed") is True
                                   and all(isinstance(prom.get(k), str) and len(prom[k]) == 64
