@@ -874,21 +874,21 @@ def _match_snaps_by_z(
 
 
 def check_convergence_settings(lf_root: Path, hf_root: Path) -> None:
-    """Refuse to combine the two resolutions' products when their recorded run settings differ in anything but
-    data_root, or when only one of them has a record (RunSettingsMismatch). Two roots without records (written before
-    records existed) cannot be compared: a warning is logged."""
+    """Refuse (RunSettingsMismatch) to combine the two resolutions' products unless both roots have a run-settings
+    record, neither is a catalogue-only root (no P1D products), and the records agree in everything but data_root. A
+    root written before records existed holds products of unknown settings, so it is refused too."""
     recs = {}
     for name, root in (("low-resolution", Path(lf_root)), ("hires", Path(hf_root))):
         p = root / RUN_SETTINGS_FILE
         recs[name] = read_record(p)["settings"] if os.path.lexists(p) else None
     missing = [n for n, r in recs.items() if r is None]
-    if len(missing) == 1:
-        raise RunSettingsMismatch(f"convergence: the {missing[0]} root has no {RUN_SETTINGS_FILE}, so its settings are "
-                                  f"unknown and cannot be combined with the recorded {lf_root} / {hf_root}")
     if missing:
-        logger.warning("convergence: neither %s nor %s has a run-settings record; their settings are not compared",
-                       lf_root, hf_root)
-        return
+        raise RunSettingsMismatch("convergence: " + "; ".join(f"the {n} root has no {RUN_SETTINGS_FILE}" for n in missing)
+                                  + f", so the settings of its products are unknown and {lf_root} / {hf_root} cannot "
+                                  "be combined")
+    for name, r in recs.items():
+        if r.get("catalogue_only"):
+            raise RunSettingsMismatch(f"convergence: the {name} root is a catalogue-only root (no P1D products)")
     lf, hf = ({k: v for k, v in r.items() if k != "data_root"} for r in recs.values())
     from .run_settings import _differences, _lookup
     diff = _differences(lf, hf)

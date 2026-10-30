@@ -390,13 +390,15 @@ def test_run_hires_then_run_all_into_one_root(tmp_path, monkeypatch):
     assert (root / RS.RUN_SETTINGS_FILE).exists() and (root / "hires" / RS.RUN_SETTINGS_FILE).exists()
 
 
-def test_convergence_ratios_check_the_records_first(tmp_path, monkeypatch, caplog):
+def test_convergence_ratios_check_the_records_first(tmp_path, monkeypatch):
     PL, ss, entry, cfg = _setup(tmp_path, monkeypatch)
     c = cfg(tau_threshold=100.0)
     root = Path(c.output_root)
     (root / "hires").mkdir(parents=True)
-    assert PL.compute_convergence_ratios(c) == {}                            # two unrecorded roots: warned
-    assert "not compared" in caplog.text
+    with pytest.raises(RS.RunSettingsMismatch, match="the low-resolution root has no run_settings.json; the hires root "
+                                                     "has no run_settings.json"):
+        PL.compute_convergence_ratios(c)                                     # two unrecorded roots: refused
+    assert not any(root.rglob("*.npz"))
     RS.record_or_verify(root / "hires", PL.product_settings(cfg(tau_threshold=100.0)))
     with pytest.raises(RS.RunSettingsMismatch, match="low-resolution root has no run_settings.json"):
         PL.compute_convergence_ratios(c)                                     # the hires record only
@@ -410,11 +412,11 @@ def test_convergence_ratios_check_the_records_first(tmp_path, monkeypatch, caplo
         PL.compute_convergence_ratios(c)
 
 
-def test_convergence_refuses_resolutions_made_with_different_settings(tmp_path, monkeypatch, caplog):
+def test_convergence_refuses_resolutions_made_with_different_settings(tmp_path, monkeypatch):
     PL, ss, entry, cfg = _setup(tmp_path, monkeypatch)
     lf, hf = tmp_path / "lf", tmp_path / "lf" / "hires"
-    PL.check_convergence_settings(lf, hf)                                     # no records: warned, not refused
-    assert "not compared" in caplog.text
+    with pytest.raises(RS.RunSettingsMismatch, match="settings of its products are unknown"):
+        PL.check_convergence_settings(lf, hf)                                 # no records: refused
     a, b = cfg(tau_threshold=100.0), cfg(tau_threshold=100.0)
     b.data_root = "/the/hires/suite"
     RS.record_or_verify(hf, PL.product_settings(b))
@@ -425,6 +427,17 @@ def test_convergence_refuses_resolutions_made_with_different_settings(tmp_path, 
     RS.record_or_verify(other, PL.product_settings(c))
     with pytest.raises(RS.RunSettingsMismatch, match="absorber.tau_threshold: low-resolution 100.0, hires 300.0"):
         PL.check_convergence_settings(lf, other)
+
+
+def test_convergence_refuses_catalogue_only_roots(tmp_path, monkeypatch):
+    PL, ss, entry, cfg = _setup(tmp_path, monkeypatch)
+    lf, hf = tmp_path / "lf", tmp_path / "lf" / "hires"
+    c = cfg()
+    c.catalogue_only = True
+    RS.record_or_verify(hf, PL.product_settings(c))
+    RS.record_or_verify(lf, PL.product_settings(c), ignore=("hires",))
+    with pytest.raises(RS.RunSettingsMismatch, match="catalogue-only root"):
+        PL.check_convergence_settings(lf, hf)
 
 
 def test_operational_settings_do_not_refuse_a_rerun(tmp_path, monkeypatch):
