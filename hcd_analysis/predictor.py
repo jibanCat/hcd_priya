@@ -20,7 +20,8 @@ k_p = 0.78 h/Mpc, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hir
 snapshot redshift (2.0, 2.2, ..., 5.4, matched to 1e-9). The mean flux: either ``tau_eff``, -ln<F> of the PRIYA-filtered
 simulated forest (the model's tau0 input), or PRIYA's (``tau0_amp``, ``dtau0``), converted by ``tau_eff_priya``. ``k``:
 None for the native modes k_skm(z, hub, omegamh2), or wavenumbers in s/km inside that span (linear interpolation along
-the mode axis, kcoord.bind / at_data). Values outside the training box are evaluated and flagged, not refused.
+the mode axis, kcoord.bind / at_data). Values outside the training box are evaluated and flagged, not refused; n_s
+above the original PRIYA design box (``NS_RIDGE``, where the design is sparse) is flagged ``ns_ridge``.
 
 **Outputs** (``Prediction``; host numpy, float64):
   * ``k`` (K,) s/km; ``P_class`` (4, K): clean, LLS, subDLA, DLA, PRIYA-filtered (tau > 1e6 troughs filled), the mean
@@ -71,6 +72,8 @@ Z_TOL = 1e-9
 OMISSIONS = ("the subDLA filtered remnant: the power of subDLA cores the PRIYA filter removes is not added back",
              "the DLA damping-wing core: the DLA class is the PRIYA-filtered spectrum, without its core")
 _I_HUB, _I_OMH2 = PARAM_NAMES.index("hub"), PARAM_NAMES.index("omegamh2")
+# the upper n_s edge of the original PRIYA design box: the design is sparse above it (flag ns_ridge; a diagnostic)
+NS_RIDGE = 0.995
 
 
 class PredictorInputError(ValueError):
@@ -350,7 +353,8 @@ class Bundle:
         ladder = None if self._alpha_range is None else bool(np.any(alpha < self._alpha_range[0])
                                                              or np.any(alpha > self._alpha_range[1]))
         xb_lo, xb_hi = self._rb.wc_map.xbar_z_fit
-        return {"outside_training_box": out_train,
+        return {"ns_ridge": bool(pv[PARAM_NAMES.index("ns")] > NS_RIDGE),
+                "outside_training_box": out_train,
                 "outside_sampling_box": out_samp and not out_train,
                 "params_outside_training_box": [n for n, v, (lo, hi) in zip(PARAM_NAMES, pv, lim) if v < lo or v > hi],
                 "mean_flux_off_ladder": ladder,

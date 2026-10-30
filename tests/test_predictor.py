@@ -253,7 +253,9 @@ def test_flags_and_labels(emu):
     p = emu.predict(PARAMS, 3.0, tau_eff=float(kim_tau0(3.0)))
     f = p.flags
     assert not f["outside_training_box"] and not f["outside_sampling_box"] and not f["mean_flux_off_ladder"]
-    assert not f["z_downweighted"] and not f["w_c_xbar_extrapolated"]
+    assert not f["z_downweighted"] and not f["w_c_xbar_extrapolated"] and not f["ns_ridge"]
+    assert emu.predict(dict(PARAMS, ns=1.0), 3.0, tau_eff=0.4).flags["ns_ridge"]
+    assert not emu.predict(dict(PARAMS, ns=0.995), 3.0, tau_eff=0.4).flags["ns_ridge"]
     assert emu.predict(dict(PARAMS, ns=1.1), 3.0, tau_eff=0.4).flags["params_outside_training_box"] == ["ns"]
     assert emu.predict(dict(PARAMS, ns=1.1), 3.0, tau_eff=0.4).flags["outside_training_box"]
     assert emu.predict(dict(PARAMS, herei=4.3), 3.0, tau_eff=0.4).flags["outside_sampling_box"]
