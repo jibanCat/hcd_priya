@@ -141,3 +141,57 @@ def test_summarize_requires_rehash_one_clean_checker_one_trace_and_the_expected_
     assert summarize(world, o) == 0
     _edit_record(o, 0, lambda r: r["checks"]["duplicates_per_class_equal_trace"]["trace"].__setitem__("LLS", 99))
     assert summarize(world, o) == 1
+
+
+@pytest.mark.parametrize("damage, failing", [
+    ("duplicates_left", "no_duplicate_or_overspan_left"),
+    ("nhi_beyond_ulp", "nhi_bitwise_or_within_one_ulp"),
+    ("cddf_path", "cddf_counts_equal_old_minus_duplicates_per_bin"),
+])
+def test_a_rebuilt_catalogue_that_is_not_the_old_minus_duplicates_is_refused(world, tmp_path, monkeypatch, damage,
+                                                                             failing):
+    import numpy as np
+    sim, snap, _z = W.GROUPS[0]
+    kw = {}
+    if damage == "duplicates_left":                       # the duplicate finder flags an entry of the rebuilt one
+        real, calls = AC.C.find_wrap_duplicates, []
+
+        def flagged(*a):
+            calls.append(1)
+            out = real(*a)
+            if len(calls) == 2:                           # the second call scans the rebuilt catalogue
+                out = out.copy()
+                out[:1] = True
+            return out
+        monkeypatch.setattr(AC.C, "find_wrap_duplicates", flagged)
+    elif damage == "nhi_beyond_ulp":                      # the rebuilt N_HI read 1e-10 away from the old
+        real, calls = AC._columns, []
+
+        def shifted(cat):
+            calls.append(1)
+            out = real(cat)
+            if len(calls) == 2:
+                out = dict(out, NHI=out["NHI"] * (1 + 1e-10))
+            return out
+        monkeypatch.setattr(AC, "_columns", shifted)
+    else:                                                 # the old CDDF's absorption path differs
+        old = W.copy_tree(world["old"], tmp_path / "old")
+        p = old / sim / f"snap_{snap:03d}" / "cddf.npz"
+        with np.load(p, allow_pickle=False) as f:
+            c = {k: f[k] for k in f.files}
+        c["total_path"] = c["total_path"] * 1.01
+        np.savez(p, **c)
+        kw["old"] = old
+    assert check(world, tmp_path / "out", extra=["--index", "1"], **kw) == 1
+    rec = records(tmp_path / "out")[f"{sim}__snap_{snap:03d}.json"]
+    assert not rec["accepted"] and not rec["checks"][failing]["ok"]
+
+
+def test_summarize_refuses_two_catalogue_code_identities(world, tmp_path):
+    out = tmp_path / "out"
+    assert check(world, out, extra=["--rehash-raw"]) == 0
+    assert summarize(world, out) == 0
+    _edit_record(out, 1, lambda r: r["checks"]["release_loader"].__setitem__("code", {"commit": "f" * 40,
+                                                                                     "dirty": False}))
+    assert summarize(world, out) == 1
+    assert len(json.loads((out / "summary.json").read_text())["code_identities"]) == 2

@@ -205,3 +205,44 @@ def test_the_release_reader_refuses_an_edited_or_unrecorded_cache(tmp_path):
     with pytest.raises(ValueError, match="non-empty reason"):
         T.read_cache_historical(r, reason=" ")
     assert T.read_cache_historical(r, reason="audit")[2] is None
+
+
+def test_carried_shards_are_never_merged_or_spliced_in(tmp_path):
+    a = _write(tmp_path / "a.h5", BASE[:2])
+    carried = _write(tmp_path / "carried.h5", BASE[2:], **tf.carry_kw())
+    with pytest.raises(ValueError, match="carried rows is not merged"):
+        mg.merge_shards([a, carried], tmp_path / "m.h5")
+    base = _write(tmp_path / "base.h5", BASE[:3])
+    shard = _write(tmp_path / "shard.h5", [("simC", 7, 3.4, 3, 30)], **tf.carry_kw())
+    with pytest.raises(ValueError, match="carried rows is not spliced in"):
+        sp.splice_cache(base, [shard], [], tmp_path / "s.h5", record={"spec": "test"})
+    staged = _write(tmp_path / "staged.h5", BASE[2:], **tf.carry_kw(promoted=False))
+    with pytest.raises(T.CacheLineageError, match="not yet promoted"):          # a staged carry is read by nothing
+        mg.merge_shards([a, staged], tmp_path / "m2.h5")
+
+
+def test_splicing_into_a_carried_base_keeps_its_carry_and_validation(tmp_path):
+    kw = tf.carry_kw()
+    base = _write(tmp_path / "base.h5", BASE, **kw)
+    shard = _write(tmp_path / "shard.h5", SHARD)
+    out = tmp_path / "out.h5"
+    sp.splice_cache(base, [shard], [("simA", 17, 2.8)], out, record={"spec": "test"})
+    _d, _a, rec = T.read_cache(out)                                          # eligible, carry bound to its source
+    _bd, _ba, brec = T.read_cache(base)
+    assert rec["release_eligible"] and rec["product"]["carried"] == brec["product"]["carried"]
+    assert rec["validation"] == brec["validation"]
+    rows = {(g["sim"], g["snap"]): g["rows"] for g in rec["product"]["groups"]}
+    assert rows[("simA", 17)] == rows[("simA", 18)] == T.ROWS_BUILT
+    assert rows[("simA", 16)] == rows[("simB", 5)] == T.ROWS_CARRIED
+    assert [i for i in rec["inputs"] if i["role"] == tf.SOURCE_ROLE] == [kw["extra_inputs"][0]]
+
+
+def test_the_release_reader_refuses_a_record_whose_counts_are_not_the_files(tmp_path):
+    p = _write(tmp_path / "a.h5", BASE)
+    with h5py.File(p, "r+") as f:
+        rec = json.loads(f[T.LINEAGE_KEY].asstr()[()])
+        rec["product"]["n_rows"] += 1
+        del f[T.LINEAGE_KEY]
+        f.create_dataset(T.LINEAGE_KEY, data=json.dumps(rec), dtype=h5py.string_dtype())
+    with pytest.raises(T.CacheLineageError, match="row or group count"):
+        T.read_cache(p)
