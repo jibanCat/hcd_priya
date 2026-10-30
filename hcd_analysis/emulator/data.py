@@ -1,4 +1,9 @@
-"""v3.3 cache loader for the Phase-2b emulator. Returns numpy arrays (host side).
+"""Training-cache loader for the Phase-2b emulator. Returns numpy arrays (host side).
+
+``load_cache`` is the release loader: cache format 3.4 only, through ``hcd_analysis.tau0_cache.read_cache`` (a
+well-formed lineage record, the payload digest, release eligibility); it also returns the record and the file's
+sha256. A v3.3 cache (written before caches carried lineage) is historical: ``load_cache_historical(path,
+reason=...)`` reads it exactly as the v3.3 loader did.
 
 15->4 coarse-class collapse, tau0 coordinate, native-Nyquist NaN masks, and the
 analytic 1/n_c sample-variance weights. See spec sec.4, sec.7, sec.9.
@@ -10,11 +15,17 @@ via ``0·NaN``). Only a bin that is NaN across all fine sub-bins (above native
 Nyquist) stays NaN, so it can be masked out downstream.
 """
 from __future__ import annotations
+import logging
+import os
 import warnings
 import h5py, numpy as np
 
-COARSE_SLICES = (slice(0, 1), slice(1, 8), slice(8, 13), slice(13, 15))
-COARSE_NAMES = ("clean", "LLS", "subDLA", "DLA")
+from .. import lineage as _L
+from .. import tau0_cache as _T
+# the 15 -> 4 coarse collapse lives with the cache format (jax-free, shared with the carry tool's checks)
+from ..tau0_cache import COARSE_SLICES, COARSE_NAMES, _collapse_counts, _collapse_p1d  # noqa: F401
+
+_log = logging.getLogger(__name__)
 
 # --- Unit-cube input normalization (spec sec.10 / preprocessing audit) --------
 # PRIYA's design box for the production grid, pulled verbatim from the saved
@@ -100,67 +111,65 @@ def normalize_params(params):
     hi = PARAM_LIMITS[:, 1]
     return (np.asarray(params) - lo) / (hi - lo)
 
-def _collapse_counts(counts15):
-    return np.stack([counts15[:, s].sum(1) for s in COARSE_SLICES], axis=1)
-
-def _collapse_p1d(p15, counts15):
-    """Count-weighted collapse of fine-bin P1D to coarse classes (R,15,K)->(R,4,K).
-
-    NaN-safe over fine bins. An *empty* coarse class (zero counts) collapses to
-    0.0, not NaN: the production cache stores finite zeros for empty classes
-    (see ``priya_p1d._per_class_p1d_at_scale``), and the downstream structural
-    sum ``P_tier_p = Σ_c w_c·P_filt`` weights an empty class by ``w_c=0`` — a
-    NaN there would poison the whole total via ``0·NaN=NaN``. Only a bin that is
-    NaN across *all* fine sub-bins (genuinely above native Nyquist) stays NaN so
-    it can be masked.
-
-    Corner case: when a single k mixes finite and NaN fine sub-bins within one
-    coarse class, NaN sub-bins contribute 0 while their weight stays in the
-    denominator, slightly under-weighting the surviving finite sub-bins. This is
-    a documented, accepted approximation (no behaviour change)."""
-    R, _, K = p15.shape
-    out = np.full((R, 4, K), np.nan)
-    for ci, s in enumerate(COARSE_SLICES):
-        c = counts15[:, s].astype(float)
-        w = c / np.where(c.sum(1, keepdims=True) == 0, 1.0, c.sum(1, keepdims=True))
-        seg = p15[:, s, :]
-        contrib = np.where(np.isfinite(seg), seg, 0.0) * w[:, :, None]
-        summ = contrib.sum(1)
-        # Fires only for the Nyquist-NaN case (ALL fine sub-bins NaN), NOT for
-        # zero-count empties (those have finite zeros and correctly stay 0.0).
-        allnan = (~np.isfinite(seg)).all(1)
-        summ[allnan] = np.nan
-        out[:, ci, :] = summ
+def load_cache(path, *, validate=True):
+    """Load a release training cache (format 3.4). Refused (tau0_cache.CacheLineageError) unless
+    ``tau0_cache.read_cache`` accepts it: a well-formed ``tau0_cache`` lineage record, datasets and attributes equal to
+    its payload digest, release eligibility, groups matching the record. A v3.3 or older cache is refused; read it with
+    ``load_cache_historical``. The file is hashed at load and must not change while it is read. Returns the arrays of
+    the v3.3 loader plus ``lineage`` (the record) and ``cache_sha256`` (the file's sha256, the digest a model trained
+    on it records). ``kfkms`` is PER_ROW (each row's own velocity grid); the validated GLOBAL_STATIC comoving modes
+    are exposed as ``k_com_hmpc`` (schema.py; docs/kgrid_incident_2026-10.md)."""
+    ident = _L.file_identity(path)
+    d, _attrs, rec = _T.read_cache(path)
+    st = os.stat(path)
+    if (int(st.st_size), int(st.st_mtime_ns)) != (ident["size"], ident["mtime_ns"]):
+        raise _T.CacheLineageError(f"{path}: the cache changed while it was read")
+    out = _assemble(lambda k: d[k], validate)
+    out["lineage"] = rec
+    out["cache_sha256"] = ident["sha256"]
     return out
 
-def load_cache(path, *, validate=True):
-    """Load a v3.3 cache. ``kfkms`` is PER_ROW (each row's own velocity grid); the validated GLOBAL_STATIC
-    comoving modes are exposed as ``k_com_hmpc`` (schema.py; docs/kgrid_incident_2026-10.md)."""
+
+def load_cache_historical(path, *, reason, validate=True):
+    """Load a cache written before caches carried lineage (format 3.3), or a 3.4 one without checking its lineage,
+    exactly as the v3.3 loader did. ``reason`` (non-empty) is logged. Never the input of a release product: only the
+    carry tool (scripts/carry_validated_cache.py) moves historical rows into a release cache, after validating them."""
+    if not (isinstance(reason, str) and reason.strip()):
+        raise ValueError("load_cache_historical needs a non-empty reason")
     with h5py.File(path, "r") as h:
-        assert h.attrs["cache_version"] == "3.3", h.attrs.get("cache_version")
-        g = lambda k: h[k][:]
-        counts15 = g("tier_c_counts")
-        Pf15, Pu15 = g("P_tier_c_filtered"), g("P_tier_c")
-        out = dict(
-            params=g("params").astype(np.float64),
-            kfkms=g("kfkms").astype(np.float64),
-            nbins_native=g("nbins_native").astype(np.int64),
-            dv_kms=g("dv_kms").astype(np.float64),
-            P_tier_p=g("P_tier_p").astype(np.float64),
-            target_F=g("target_F").astype(np.float64),
-            scale=g("scale").astype(np.float64),
-            z_grid=g("z_grid").astype(np.float64),
-            z_meta=g("z_meta").astype(np.float64),
-            alpha_idx=g("alpha_idx").astype(np.int32),
-            snap_group_idx=g("snap_group_idx").astype(np.int32),
-            sim_name=np.array([s.decode() if isinstance(s, bytes) else s
-                               for s in h["sim_name"][:]]),
-            snap_dNdX=np.stack([g("snap_dNdX_LLS"), g("snap_dNdX_subDLA"),
-                                g("snap_dNdX_DLA")], axis=1),
-            snap_f_nhi=g("snap_f_nhi").astype(np.float64),
-            snap_total_path_dX=g("snap_total_path_dX").astype(np.float64),
-            snap_n_absorbers=g("snap_n_absorbers").astype(np.float64),
-        )
+        ver = h.attrs["cache_version"]
+        ver = ver.decode() if isinstance(ver, bytes) else str(ver)
+        if ver not in _T.HISTORICAL_VERSIONS:
+            raise _T.CacheLineageError(f"{path}: cache version {ver!r} is not one of {_T.HISTORICAL_VERSIONS}")
+        _log.warning("historical read of the cache %s (%s): not release-eligible", path, reason.strip())
+        return _assemble(lambda k: h[k][:], validate)
+
+
+def _assemble(get, validate):
+    """The loader's arrays from ``get(name)`` (a stored dataset)."""
+    counts15 = get("tier_c_counts")
+    Pf15, Pu15 = get("P_tier_c_filtered"), get("P_tier_c")
+    g = get
+    out = dict(
+        params=g("params").astype(np.float64),
+        kfkms=g("kfkms").astype(np.float64),
+        nbins_native=g("nbins_native").astype(np.int64),
+        dv_kms=g("dv_kms").astype(np.float64),
+        P_tier_p=g("P_tier_p").astype(np.float64),
+        target_F=g("target_F").astype(np.float64),
+        scale=g("scale").astype(np.float64),
+        z_grid=g("z_grid").astype(np.float64),
+        z_meta=g("z_meta").astype(np.float64),
+        alpha_idx=g("alpha_idx").astype(np.int32),
+        snap_group_idx=g("snap_group_idx").astype(np.int32),
+        sim_name=np.array([s.decode() if isinstance(s, bytes) else s
+                           for s in g("sim_name")]),
+        snap_dNdX=np.stack([g("snap_dNdX_LLS"), g("snap_dNdX_subDLA"),
+                            g("snap_dNdX_DLA")], axis=1),
+        snap_f_nhi=g("snap_f_nhi").astype(np.float64),
+        snap_total_path_dX=g("snap_total_path_dX").astype(np.float64),
+        snap_n_absorbers=g("snap_n_absorbers").astype(np.float64),
+    )
     coarse_counts = _collapse_counts(counts15)
     Pf4 = _collapse_p1d(Pf15, counts15)
     Pu4 = _collapse_p1d(Pu15, counts15)
