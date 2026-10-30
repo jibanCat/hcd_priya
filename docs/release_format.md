@@ -32,8 +32,9 @@ little-endian buffer. `hcd_analysis/emulator/safe_io.py` reads and writes it wit
 
 ## Loading contract
 
-`safe_io.load_bundle(bundle_dir, expected_manifest_sha256=...)` is the prototype's entry point (the digest keyword is
-required; `None` explicitly loads an unanchored bundle, for development only):
+`safe_io.load_bundle_historical(bundle_dir, expected_manifest_sha256=..., reason=...)` is the prototype's entry point.
+The prototype carries no lineage, so the load is a historical read with a non-empty reason, never a release model (the
+digest keyword is required; `None` explicitly loads an unanchored bundle, for development only):
 
 1. The manifest (whose own sha256 the caller supplies) must list exactly the two files of each member under plain
    names (no directories, no symlinks), with matching sizes and sha256, and the directory must hold no other file.

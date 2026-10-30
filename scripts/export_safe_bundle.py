@@ -76,7 +76,7 @@ if mode == 'release':
     pf = norm['P_filt']
 else:
     loaded = (H.load_bundle_historical(bundle, expected_manifest_sha256=sha, reason=sys.argv[7]) if mode == 'h5'
-              else S.load_bundle(bundle, expected_manifest_sha256=sha))
+              else S.load_bundle_historical(bundle, expected_manifest_sha256=sha, reason=sys.argv[7]))
     ens = EnsembleEmulator([m for m, _, _ in loaded])
     pf = loaded[0][2]['P_filt']
 inp = np.load(sys.argv[4])
@@ -349,7 +349,8 @@ def run_historical(a):
     bundle_sha = S.sha256_file(man_path)
     checks, dmax = {}, {}
     loaded = (H.load_bundle_historical(bundle, expected_manifest_sha256=bundle_sha, reason=a.historical_reproduction)
-              if F is H else S.load_bundle(bundle, expected_manifest_sha256=bundle_sha))
+              if F is H else S.load_bundle_historical(bundle, expected_manifest_sha256=bundle_sha,
+                                                      reason=a.historical_reproduction))
     checks["bundle_verifies"] = True
     _x, _t, _p, r = verify(legacy, loaded, bundle, bundle_sha, evidence,
                            ["h5" if F is H else "safetensors", a.historical_reproduction], checks, dmax)

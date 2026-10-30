@@ -1,5 +1,7 @@
 """Prototype pickle-free format for the emulator, ``hcd_priya.safe/1`` (contract: docs/release_format.md), kept as
-evidence; it is not the release format (HDF5 + JSON, ``hcd_priya.h5/1``, adopted subject to review, is).
+evidence; it is not the release format (HDF5 + JSON, ``hcd_priya.h5/2`` with a lineage block, safe_h5.py and
+docs/release_format_h5.md, is). A ``hcd_priya.safe/1`` bundle carries no lineage, so it loads only through the
+historical ``load_bundle_historical`` with a reason. The manifest and file helpers here are shared with safe_h5.
 
 Layout of one LF member ``<prefix>``:
   ``<prefix>.safetensors``  every array: the network leaves (``model<tree path>``) and the normalizer (``norm/<key>/...``;
@@ -681,10 +683,16 @@ def verify_manifest(bundle_dir, *, expected_sha256=None, allow_extra=False):
     return [p for p, _, _ in _manifest_entries(bundle_dir, expected_sha256, allow_extra)]
 
 
-def load_bundle(bundle_dir, *, expected_manifest_sha256):
-    """Verify the manifest, then load every member with the manifest's digests. Returns ``[(model, meta, norm)]``.
-    ``expected_manifest_sha256`` is required: the manifest anchor. Passing ``None`` explicitly loads an unanchored
-    bundle (development only)."""
+def load_bundle_historical(bundle_dir, *, expected_manifest_sha256, reason):
+    """Verify the manifest, then load every member of a ``hcd_priya.safe/1`` bundle with the manifest's digests.
+    Returns ``[(model, meta, norm)]``. The prototype carries no lineage, so this is a historical read: ``reason``
+    (non-empty) is logged, and nothing loaded this way is a release model. ``expected_manifest_sha256`` is required:
+    the manifest anchor (``None`` explicitly loads an unanchored bundle)."""
+    import logging
+    if not (isinstance(reason, str) and reason.strip()):
+        raise ValueError("a historical bundle load needs a non-empty reason")
+    logging.getLogger(__name__).warning("historical load of the %s bundle %s (%s): not a release model", FORMAT,
+                                        bundle_dir, reason.strip())
     return [load_member(p, expected_sha256=s, expected_json_sha256=j)
             for p, s, j in _manifest_entries(bundle_dir, expected_manifest_sha256)]
 

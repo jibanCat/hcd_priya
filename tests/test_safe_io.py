@@ -341,9 +341,13 @@ def test_bundle_round_trip_and_manifest_digest(bundle):
     bd, pres = bundle
     assert S.verify_manifest(bd) == pres
     sha = S.sha256_file(os.path.join(bd, "manifest.json"))
-    loaded = S.load_bundle(bd, expected_manifest_sha256=sha)
+    loaded = S.load_bundle_historical(bd, expected_manifest_sha256=sha, reason="test")
     with pytest.raises(TypeError):
-        S.load_bundle(bd)                                                    # the anchor must be passed explicitly
+        S.load_bundle_historical(bd, reason="test")                         # the anchor must be passed explicitly
+    for bad in ("", "  ", None):
+        with pytest.raises(ValueError, match="non-empty reason"):
+            S.load_bundle_historical(bd, expected_manifest_sha256=sha, reason=bad)
+    assert not hasattr(S, "load_bundle")                                     # no lineage-free release-sounding name
     assert [m["seed"] for _, m, _ in loaded] == [0, 1]
     with pytest.raises(S.SafeFormatError, match="expected digest"):
         S.verify_manifest(bd, expected_sha256="0" * 64)
@@ -379,7 +383,7 @@ def test_manifest_refuses_tampering_extras_and_symlinks(bundle, tmp_path):
     with pytest.raises(S.SafeFormatError, match="does not match the manifest"):
         S.verify_manifest(bd)
     with pytest.raises(S.SafeFormatError, match="does not match the manifest"):
-        S.load_bundle(bd, expected_manifest_sha256=None)
+        S.load_bundle_historical(bd, expected_manifest_sha256=None, reason="test")
     os.remove(pres[1] + ".safetensors")
     os.symlink(str(tmp_path / "elsewhere"), pres[1] + ".safetensors")
     with pytest.raises(S.SafeFormatError):
@@ -393,7 +397,8 @@ def test_clean_process_load(bundle, tmp_path):
     out = str(tmp_path / "clean.npy")
     code = ("import sys, numpy as np, jax; jax.config.update('jax_enable_x64', True); sys.path.insert(0, sys.argv[1]);"
             "from hcd_analysis.emulator import safe_io as S;"
-            "(m, _, _), _ = S.load_bundle(sys.argv[2], expected_manifest_sha256=sys.argv[4]); import jax.numpy as jnp;"
+            "(m, _, _), _ = S.load_bundle_historical(sys.argv[2], expected_manifest_sha256=sys.argv[4], reason='t');"
+            "import jax.numpy as jnp;"
             "o = m(jnp.linspace(0.1, 0.9, 10), 0.4); np.save(sys.argv[3], np.asarray(o['P_filt_resid']))")
     sha = S.sha256_file(os.path.join(bd, "manifest.json"))
     subprocess.run([sys.executable, "-I", "-B", "-c", code, REPO, bd, out, sha], check=True, cwd=str(tmp_path))
