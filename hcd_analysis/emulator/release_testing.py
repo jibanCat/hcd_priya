@@ -114,10 +114,12 @@ class SyntheticBundle(NamedTuple):
 
 
 def write_synthetic_bundle(bundle_dir, *, n_members=2, seeds=None, arch=None, norm=None, carried=False,
-                           export_code=None, member_fn=None):
+                           export_code=None, member_fn=None, cache=None, wc_map_path=None):
     """Write an h5/2 bundle of ``n_members`` untrained networks (``Emulator(**arch, key=PRNGKey(seed))``, seeds
     0, 1, ... by default) into the NEW or empty directory ``bundle_dir``. ``member_fn(i, model, meta, norm)``, when
     given, returns the ``(model, meta, norm)`` to export as member ``i`` (a test that needs one member to differ).
+    ``cache`` = ``(record, {sha256, size})`` of another (for example a synthetic test) cache file, and ``wc_map_path``
+    a w_c map fitted to it, replace the made-up ones.
     Returns a ``SyntheticBundle`` with the manifest's sha256 (the anchor to load it with) and the models and
     normalizer that were written."""
     import jax
@@ -130,11 +132,14 @@ def write_synthetic_bundle(bundle_dir, *, n_members=2, seeds=None, arch=None, no
     arch = dict(arch or SYNTHETIC_ARCH)
     seeds = list(range(n_members)) if seeds is None else list(seeds)
     norm = norm if norm is not None else synthetic_norm(arch["n_k"])
-    rec, ident = synthetic_cache_record(carried=carried)
-    doc = synthetic_wc_map_doc()
-    wrec = W.make_record(doc, rec, ident, code=SYNTHETIC_CODE, cache_name=SYNTHETIC_CACHE_NAME)
-    W.write_wc_map(os.path.join(bundle_dir, H.WC_MAP_FILE), doc, wrec)
-    wcm = W.read_wc_map(os.path.join(bundle_dir, H.WC_MAP_FILE))
+    rec, ident = synthetic_cache_record(carried=carried) if cache is None else cache
+    if wc_map_path is None:
+        doc = synthetic_wc_map_doc()
+        wrec = W.make_record(doc, rec, ident, code=SYNTHETIC_CODE, cache_name=SYNTHETIC_CACHE_NAME)
+        W.write_wc_map(os.path.join(bundle_dir, H.WC_MAP_FILE), doc, wrec)
+        wcm = W.read_wc_map(os.path.join(bundle_dir, H.WC_MAP_FILE))
+    else:
+        wcm = H.export_wc_map(bundle_dir, wc_map_path)
     prefixes, models, metas = [], [], []
     for i, s in enumerate(seeds):
         model, meta, mnorm = Emulator(**arch, key=jax.random.PRNGKey(s)), synthetic_meta(s, rec, ident, arch=arch), norm
