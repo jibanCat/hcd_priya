@@ -119,10 +119,12 @@ repository.
 
 ### Release format of the emulator (HDF5 + JSON)
 
-Released emulator members will use a pickle-free format, `hcd_priya.h5/1`: per member one HDF5 file (the network
+Released emulator members will use a pickle-free format, `hcd_priya.h5/2`: per member one HDF5 file (the network
 weights as datasets named by their JAX tree paths, and the output normalizer) and one JSON sidecar (the meta and the
-file's sha256), plus a bundle `manifest.json`. Loading builds the network from code, checks every array by name, shape
-and dtype, verifies the sha256 before the HDF5 library parses the file, and never unpickles anything:
+file's sha256), plus the dN/dX-to-w_c map and a bundle `manifest.json` whose lineage block names the training cache,
+its catalogues and the code. Loading builds the network from code, checks every array by name, shape and dtype,
+verifies the sha256 before the HDF5 library parses the file, refuses a bundle whose lineage it cannot establish, and
+never unpickles anything:
 
 ```python
 from hcd_analysis.emulator import safe_h5

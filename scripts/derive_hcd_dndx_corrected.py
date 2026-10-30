@@ -1,5 +1,5 @@
 """HISTORICAL (the analysis of record of 2026-07; not a release product). Corrected literature dN/dX law
-re-derivation — the FULL decision table + JSON emitter
+re-derivation: the FULL decision table + JSON emitter
 (spec hcd_priya_notes/docs/superpowers/2026-07-18-corrected-law-spec.md, steps 6-8).
 
 Its kernel inputs come from the deployed pre-lineage cache (lit_dndx_kernel.CACHE_PATH, read directly, counts that
