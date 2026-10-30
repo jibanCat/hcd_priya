@@ -81,6 +81,8 @@ from .p1d import (
     _DEFAULT_K_BINS,
 )
 from .snapshot_map import SimSnapshot, SnapEntry, build_snapshot_map
+from .snapshot_record import (DONE_CATALOGUE, DONE_FULL, PRODUCT_KINDS, SnapshotIntegrityError,  # noqa: F401
+                              verify_snapshot_dir)
 
 logger = logging.getLogger(__name__)
 
@@ -134,16 +136,10 @@ def _repo_commit() -> str:
 PRODUCT_SETTING_KEYS = ("data_root", "prefer_grid", "absorber_classes", "absorber", "p1d", "cddf", "benchmark", "debug",
                         "catalogue_only")
 HIRES_SUBDIR = "hires"     # run_hires writes under <output_root>/hires, an output root with its own record
-DONE_FULL, DONE_CATALOGUE = "done", "done_catalogue"     # the completion markers of the two modes
 CDDF_KIND_VERSION = 1
 SNAPSHOT_KIND_VERSION = 1
-# the files a snapshot directory may list in meta.json["products"], with their lineage kinds
-PRODUCT_KINDS = {"catalog.npz": "catalog", "cddf.npz": "cddf", "p1d.npz": "p1d", "p1d_ratios.npz": "p1d_ratios",
-                 "p1d_excl.npz": "p1d_excl", "p1d_perturbed.npz": "p1d_perturbed", "p1d_per_class.h5": "p1d_per_class"}
-
-
-class SnapshotIntegrityError(CatalogIntegrityError):
-    """A completed snapshot's products do not match the sha256 its meta.json records, or its records disagree."""
+# the completion markers, the product kinds a snapshot may list, SnapshotIntegrityError and the snapshot verifier live
+# in hcd_analysis.snapshot_record (imported above), shared with the consumers of snapshot directories
 
 
 def product_settings(cfg: PipelineConfig) -> dict:
@@ -310,42 +306,6 @@ def _meta_base(header, sim_name, snap, z, dv_kms, n_absorbers, timing, ics_meta)
         meta["sim_ics"] = {k: (float(v) if isinstance(v, (int, float)) else v)
                            for k, v in ics_meta.items()}
     return meta
-
-
-def _verify_snapshot(out_dir: Path, meta: dict, cfg: PipelineConfig) -> Dict:
-    """Refuse (SnapshotIntegrityError) a completed snapshot unless meta.json is of this run's mode, lists the sha256
-    of every product the mode writes, every listed product matches it, the snapshot record agrees with the list, and
-    cddf.npz's record names the listed catalogue. Returns the CDDF arrays."""
-    mode = "catalogue" if cfg.catalogue_only else "full"
-
-    def refuse(why):
-        raise SnapshotIntegrityError(f"{out_dir}: completed snapshot refused ({why}); rebuild it")
-    if meta.get("mode") != mode:
-        refuse(f"meta.json mode {meta.get('mode')!r}, this run {mode!r}")
-    prods = meta.get("products")
-    if not isinstance(prods, dict) or not prods:
-        refuse("meta.json lists no product hashes (written before snapshots recorded them)")
-    need = {"catalog.npz", "cddf.npz"} | (set() if cfg.catalogue_only else {"p1d.npz"})
-    if need - set(prods) or set(prods) - set(PRODUCT_KINDS):
-        refuse(f"meta.json products {sorted(prods)}, expected {sorted(need)} and only known names")
-    for name, ident in sorted(prods.items()):
-        p = out_dir / name
-        if not (isinstance(ident, dict) and isinstance(ident.get("sha256"), str) and isinstance(ident.get("size"), int)):
-            refuse(f"malformed product entry for {name}")
-        if not p.is_file() or not L.same_file(p, {"sha256": ident["sha256"], "size": ident["size"]}):
-            refuse(f"{name} does not match the sha256 meta.json records")
-    try:
-        rec = L.check_record(meta.get("lineage"), RELEASE_FINDER_IDS)
-        if rec["kind"] != "snapshot" or {i["role"]: i["sha256"] for i in rec["inputs"]} != \
-                {k: v["sha256"] for k, v in prods.items()}:
-            refuse("the snapshot record does not list the products meta.json lists")
-        cddf, crec = L.read_npz(out_dir / "cddf.npz")
-        L.check_record(crec, RELEASE_FINDER_IDS)
-        if crec["kind"] != "cddf" or L.find_input(crec, "catalog")["sha256"] != prods["catalog.npz"]["sha256"]:
-            refuse("cddf.npz was not made from the listed catalog.npz")
-    except L.LineageError as e:
-        refuse(str(e))
-    return cddf
 
 
 # ---------------------------------------------------------------------------
@@ -621,19 +581,14 @@ def _save_catalogue_outputs(out_dir: Path, catalog: AbsorberCatalog, cddf_result
 
 def _load_snap_result(out_dir: Path, sim_name: str, snap: int, z: float, cfg: PipelineConfig,
                       raw_path) -> Optional[SnapResult]:
-    """Load a previously-saved SnapResult (lightweight: the raw spectra file is only stat-ed). The catalogue must pass
-    load_validated_catalog with this run's settings and raw file, and every product must match the sha256 meta.json
-    records (_verify_snapshot); a refusal raises CatalogIntegrityError."""
+    """Load a previously-saved SnapResult (lightweight: the raw spectra file is only stat-ed). The snapshot must pass
+    verify_snapshot_dir with this run's mode, finder settings and raw file: a readable meta.json, the catalogue through
+    load_validated_catalog, every product matching the sha256 meta.json records, and records that agree. A refusal,
+    including a missing or unreadable meta.json, raises CatalogIntegrityError (SnapshotIntegrityError)."""
     try:
-        meta_path = out_dir / "meta.json"
-        with open(meta_path) as f:
-            meta = json.load(f)
-
-        kw = _catalog_kwargs(cfg)
-        catalog = load_validated_catalog(out_dir / "catalog.npz", int(meta["nbins"]), settings=finder_settings(**kw),
-                                         raw_path=raw_path,
-                                         n_skewers_built=_n_skewers_built(kw, int(meta["n_skewers"])))
-        cddf_result = _verify_snapshot(out_dir, meta, cfg)
+        v = verify_snapshot_dir(out_dir, mode="catalogue" if cfg.catalogue_only else "full",
+                                settings=finder_settings(**_catalog_kwargs(cfg)), raw_path=raw_path)
+        meta, catalog, cddf_result = v.meta, v.catalog, v.cddf
 
         p1d_variants, p1d_ratios = {}, {}
         if not cfg.catalogue_only:

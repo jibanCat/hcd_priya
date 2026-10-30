@@ -959,3 +959,77 @@ def test_a_cached_catalogue_of_other_settings_or_another_raw_file_is_refused(tmp
         assert sorted(p.name for p in d.iterdir()) == ["catalog.npz", "error.txt"]
         err = (d / "error.txt").read_text()
         assert "cached catalogue refused" in err and why in err
+
+
+def test_the_snapshot_verifier_compares_the_copied_finder_ids_and_eligibility(tmp_path, monkeypatch):
+    """L1R-8: a meta.json whose snapshot record copies other flags than its products' own records hold is refused,
+    even when the record is kept self-consistent."""
+    from hcd_analysis.snapshot_record import verify_snapshot_dir
+    PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
+    c = cfg("cat")
+    assert PL.run_one_snap(ss, entry, c) is not None
+    d = PL.snap_output_dir(c, "synthsim", 1)
+    kw = dict(mode="catalogue", settings=PL.finder_settings(**PL._catalog_kwargs(c)), raw_path=entry.path)
+    v = verify_snapshot_dir(d, require_release_eligible=True, rehash=True, sim="synthsim", snap=1, **kw)
+    assert v.record["release_eligible"] and v.catalog.release_eligible and v.cddf_record["kind"] == "cddf"
+    assert v.meta_identity == {k: x for k, x in L.file_identity(d / "meta.json").items() if k != "mtime_ns"}
+    good = (d / "meta.json").read_text()
+    for role, change in (("catalog.npz", dict(release_eligible=False)), ("cddf.npz", dict(finder_ids=["other/1"]))):
+        meta = json.loads(good)
+        rec = meta["lineage"]
+        for inp in rec["inputs"]:
+            if inp["role"] == role:
+                inp.update(change)
+        why = L.eligibility(rec, C.RELEASE_FINDER_IDS)
+        rec.update(release_eligible=not why, ineligible_reasons=why)            # the record kept consistent
+        (d / "meta.json").write_text(json.dumps(meta))
+        with pytest.raises(PL.SnapshotIntegrityError, match=f"copy of the {role} finder ids or eligibility"):
+            verify_snapshot_dir(d, **kw)
+    (d / "meta.json").write_text(good)
+    with pytest.raises(PL.SnapshotIntegrityError, match=r"expected \('other', 1\)"):
+        verify_snapshot_dir(d, sim="other", snap=1, **kw)
+
+
+@pytest.mark.parametrize("damage", ["missing", "unreadable", "no_nbins"])
+def test_a_done_snapshot_without_a_readable_meta_json_is_refused_not_dropped(tmp_path, monkeypatch, damage):
+    """L1R-9: on the done path a missing or unreadable meta.json stops the run (run-one and run-sim); it is never
+    logged and skipped, so a stacked CDDF never silently loses a snapshot."""
+    PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
+    c = cfg("cat")
+    assert all(r is not None for r in PL.run_sim_all_z(ss2, c))
+    m = PL.snap_output_dir(c, "synthsim", 1) / "meta.json"
+    if damage == "missing":
+        m.unlink()
+    elif damage == "unreadable":
+        m.write_text("{not json")
+    else:
+        meta = json.loads(m.read_text())
+        del meta["nbins"]
+        m.write_text(json.dumps(meta))
+    with pytest.raises(PL.SnapshotIntegrityError, match="meta.json missing or unreadable"):
+        PL.run_one_snap(ss, entry, c)
+    with pytest.raises(PL.SnapshotIntegrityError, match="meta.json missing or unreadable"):
+        PL.run_sim_all_z(ss2, c)
+
+
+def test_a_catalogue_only_snapshot_written_by_the_rebuild_commit_still_verifies(tmp_path):
+    """Products written by the catalogue-only mode at the commit the LF catalogue rebuild runs from (the L1 commit;
+    tests/golden/fe77e0f_catalogue_only, made from a clean checkout of it on a synthetic snapshot) pass the stricter
+    checks added since: the release finder settings, a whole-file build, the payload digests, the copied flags, and
+    release eligibility under the current rule."""
+    from hcd_analysis.paths import REPO_ROOT
+    from hcd_analysis.snapshot_record import verify_snapshot_dir
+    src = REPO_ROOT / "tests" / "golden" / "fe77e0f_catalogue_only"
+    d = tmp_path / "synthsim" / "snap_001"
+    shutil.copytree(src / "snap_001", d)
+    raw = tmp_path / "s.hdf5"
+    shutil.copy(src / "s.hdf5", raw)                                     # another path and mtime: matched by content
+    v = verify_snapshot_dir(d, mode="catalogue", settings=C.RELEASE_FINDER_SETTINGS, raw_path=raw, rehash=True,
+                            require_release_eligible=True, sim="synthsim", snap=1)
+    for rec in (v.catalog.lineage, v.cddf_record, v.record):
+        assert L.check_record(rec, C.RELEASE_FINDER_IDS)["release_eligible"] is True
+        assert rec["finder_ids"] == [C.FINDER_ID] and rec["code"]["dirty"] is False and len(rec["code"]["commit"]) == 40
+        assert not L.eligibility(rec, C.RELEASE_FINDER_IDS)                  # the current rule, recomputed
+    assert v.catalog.lineage["kind_version"] == C.CATALOG_KIND_VERSION and v.catalog.lineage["settings"] == \
+        C.RELEASE_FINDER_SETTINGS
+    assert len(v.catalog.absorbers) == sum(v.meta["n_absorbers"].values()) == int(v.cddf["n_absorbers"].sum())
