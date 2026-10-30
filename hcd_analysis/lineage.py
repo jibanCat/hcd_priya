@@ -140,7 +140,9 @@ def parse_record(text):
 def code_identity(repo_dir=None):
     """``{"commit": <40 hex> | None, "dirty": bool | None}`` of the git checkout holding this package (or
     ``repo_dir``). None when git cannot tell, including when the package is not the top of a checkout (an installed
-    copy). Tracked files only, without git's optional index lock, so asking never writes into the checkout."""
+    copy). ``dirty`` looks at tracked files only (a modified or staged tracked file makes the tree dirty; an untracked
+    file does not, as with ``git diff --quiet HEAD``), without git's optional index lock, so asking never writes into
+    the checkout."""
     root = Path(repo_dir) if repo_dir is not None else Path(__file__).resolve().parent.parent
     try:
         top = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=str(root),

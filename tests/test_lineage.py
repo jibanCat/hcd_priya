@@ -224,3 +224,43 @@ def test_code_identity_of_a_directory_that_is_not_the_top_of_a_checkout(tmp_path
     ident = L.code_identity()                                                   # this checkout, or an installed copy
     assert set(ident) == {"commit", "dirty"}
     assert ident["commit"] is None or len(ident["commit"]) == 40
+
+
+def test_code_identity_of_a_real_checkout_clean_edited_staged_and_untracked(tmp_path):
+    """The dirty detection the rule hinges on, on a real git repository (not monkeypatched)."""
+    import shutil
+    import subprocess
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*a):
+        subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)
+    git("init", "-q")
+    git("config", "user.email", "test@example.org")
+    git("config", "user.name", "test")
+    (repo / "m.py").write_text("x = 1\n")
+    git("add", "m.py")
+    git("commit", "-q", "-m", "one")
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+    def child(code):
+        return L.build_record("thing", 1, inputs=[], finder_ids=["test.finder/2"], settings={}, code=code,
+                              allowed_finder_ids=ALLOWED)
+    clean = L.code_identity(repo)
+    assert clean == {"commit": head, "dirty": False} and child(clean)["release_eligible"]
+    (repo / "new.py").write_text("y = 2\n")                                   # untracked only: still clean
+    assert L.code_identity(repo) == {"commit": head, "dirty": False}
+    (repo / "m.py").write_text("x = 2\n")                                     # a tracked edit
+    dirty = L.code_identity(repo)
+    assert dirty == {"commit": head, "dirty": True}
+    r = child(dirty)
+    assert not r["release_eligible"] and "the code tree was dirty" in r["ineligible_reasons"]
+    git("add", "m.py")                                                         # staged, not committed
+    assert L.code_identity(repo)["dirty"] is True
+    git("commit", "-q", "-m", "two")
+    assert L.code_identity(repo)["dirty"] is False and L.code_identity(repo)["commit"] != head
+    (repo / "sub").mkdir()
+    assert L.code_identity(repo / "sub") == {"commit": None, "dirty": None}      # not the top of the checkout
