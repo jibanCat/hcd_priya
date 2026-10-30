@@ -176,6 +176,10 @@ def cmd_compare(a):
         raise SystemExit(f"{pre_path}: not a {FORMAT} file with this script's criterion")
     want = [(g["sim"], int(g["snap"])) for g in pre["groups"]]
     car, _ca, car_rec = T.read_cache_staged(a.carried)                # the staged carry, before its promotion
+    source = (car_rec["product"].get("carried") or {}).get("source_sha256")
+    if source is None or (pre.get("historical_cache") or {}).get("sha256") != source:
+        raise SystemExit(f"{pre_path} does not name the carried cache's source ({source}); it pre-registers "
+                         f"{(pre.get('historical_cache') or {}).get('sha256')}")
     fresh = [T.read_cache(p) for p in a.fresh]
     car_inputs = {i["role"]: i["sha256"] for i in car_rec["inputs"]}
     found, report, worst = {}, {"groups": [], "fields": {}}, {}
@@ -216,7 +220,7 @@ def cmd_compare(a):
         g["ok"] = bool(ok)
         ok_all &= bool(ok)
         report["groups"].append(g)
-    report.update(fields=worst, passed=bool(ok_all), criterion=pre["criterion"],
+    report.update(fields=worst, passed=bool(ok_all), criterion=pre["criterion"], source_sha256=source,
                   prereg={"path": str(pre_path), "sha256": a.prereg_sha256},
                   carried={"path": str(a.carried), "sha256": L.sha256_file(a.carried)},
                   fresh=[{"path": str(p), "sha256": L.sha256_file(p)} for p in a.fresh], code=L.code_identity())

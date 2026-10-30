@@ -330,6 +330,38 @@ def test_a_fresh_row_difference_or_a_wrong_sample_is_caught(world, carried, tmp_
         _compare(pre, car, fresh[:2], tmp_path / "x.json")
 
 
+def test_a_passed_comparison_promotes_the_staged_carry(world, carried, tmp_path, monkeypatch):
+    import promote_carried_cache as PC
+    car, pre = carried
+    with pytest.raises(T.CacheLineageError, match="not yet promoted"):
+        T.read_cache(car)
+    assert _compare(pre, car, _fresh(world, pre, tmp_path), tmp_path / "r.json") == 0
+    rep = json.loads((tmp_path / "r.json").read_text())
+    assert rep["source_sha256"] == L.sha256_file(world["hist"]) and rep["code"]["dirty"] is False
+    assert PC.main(["--staged", str(car), "--comparison", str(tmp_path / "r.json"), "--comparison-sha256",
+                    L.sha256_file(tmp_path / "r.json"), "--prereg", str(pre), "--output",
+                    str(tmp_path / "x.h5")]) == 2                         # not the pre-registration of record
+    monkeypatch.setattr(PC, "PREREG_OF_RECORD_SHA256", L.sha256_file(pre))
+    assert PC.main(["--staged", str(car), "--comparison", str(tmp_path / "r.json"), "--comparison-sha256",
+                    L.sha256_file(tmp_path / "r.json"), "--prereg", str(pre), "--output",
+                    str(tmp_path / "final.h5")]) == 0
+    _d, _a, rec = T.read_cache(tmp_path / "final.h5")
+    assert rec["product"]["carried"]["promoted"]["prereg_sha256"] == L.sha256_file(pre)
+
+
+def test_the_comparison_refuses_a_pre_registration_of_another_source(world, carried, tmp_path):
+    car, pre = carried
+    other = tmp_path / "other_hist.h5"
+    shutil.copy2(world["hist"], other)
+    with h5py.File(other, "r+") as f:
+        f.attrs["created_utc"] = "2026-01-01T00:00:00Z"
+    pre2 = tmp_path / "prereg_other.json"
+    FR.main(["select", "--cache", str(other), "--seed", "5", "--n-total", "2", "--out", str(pre2)])
+    with pytest.raises(SystemExit, match="does not name the carried cache's source"):
+        _compare(pre2, car, _fresh(world, pre2, tmp_path), tmp_path / "r.json")
+    assert not (tmp_path / "r.json").exists()
+
+
 def test_the_comparison_criterion():
     a = np.array([[1.0, 2.0, np.nan], [0.0, 0.0, 0.0]])
     assert FR.compare_field(a, a.copy()) == (True, True, 0.0)

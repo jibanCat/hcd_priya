@@ -109,46 +109,129 @@ def test_the_carry_copies_validated_rows_and_rebuilds_every_count(world, tmp_pat
     assert not list(tmp_path.glob(".*unchecked"))
 
 
-def _report(path, staged, *, passed=True, ok=True, carried_sha=None):
-    rep = {"passed": passed, "groups": [{"sim": W.GROUPS[0][0], "snap": W.GROUPS[0][1], "ok": ok}],
-           "carried": {"sha256": carried_sha or L.sha256_file(staged)}, "prereg": {"sha256": "a" * 64}}
+def _prereg(world, out, hist=None):
+    """A pre-registration written by fresh_row_sample.py select (the strata of the synthetic historical cache)."""
+    import fresh_row_sample as FR
+    FR.main(["select", "--cache", str(hist or world["hist"]), "--seed", "5", "--n-total", "2", "--out", str(out)])
+    return out, L.sha256_file(out)
+
+
+def _report(tmp_path, staged, prereg, name="cmp", *, edit=None):
+    """A comparison report as fresh_row_sample.py compare writes it (fresh files: stand-in bytes, listed by sha256);
+    ``edit(report)`` damages it before it is written."""
+    pre = json.loads(prereg.read_text())
+    fresh, groups = [], []
+    for i, g in enumerate(pre["groups"]):
+        f = tmp_path / f"{name}_fresh{i}.h5"
+        f.write_bytes(f"fresh rows {i}".encode())
+        fresh.append({"path": str(f), "sha256": L.sha256_file(f)})
+        groups.append({"sim": g["sim"], "snap": g["snap"], "ok": True, "same_rebuilt_catalogue": True,
+                       "fresh_file": str(f), "n_rows": [20, 20], "fields": {}})
+    rep = {"passed": True, "groups": groups, "fields": {}, "criterion": pre["criterion"],
+           "source_sha256": pre["historical_cache"]["sha256"],
+           "prereg": {"path": str(prereg), "sha256": L.sha256_file(prereg)},
+           "carried": {"path": str(staged), "sha256": L.sha256_file(staged)}, "fresh": fresh, "code": dict(W.CLEAN)}
+    if edit is not None:
+        edit(rep)
+    path = tmp_path / f"{name}.json"
     path.write_text(json.dumps(rep))
     return path, L.sha256_file(path)
 
 
-def test_promotion_needs_the_passed_comparison_of_this_staged_cache(world, tmp_path, same_code, monkeypatch):
+def _promote(staged, rep, sha, out, prereg):
+    return PC.main(["--staged", str(staged), "--comparison", str(rep), "--comparison-sha256", sha,
+                    "--prereg", str(prereg), "--output", str(out)])
+
+
+def test_the_pre_registration_of_record_is_pinned():
+    import ast
+    tree = ast.parse((REPO_ROOT / "scripts" / "promote_carried_cache.py").read_text())
+    pins = {t.id: ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign) for t in n.targets
+            if isinstance(t, ast.Name) and t.id == "PREREG_OF_RECORD_SHA256"}
+    assert pins == {"PREREG_OF_RECORD_SHA256": "d26b210c1a1249eb60e475ab9c9d28f9851c57e35bc2536c9e78506b6c132ee0"}
+
+
+def test_a_forged_report_is_refused_by_the_pinned_pre_registration(world, tmp_path, same_code, capsys):
+    """The four-key report: passed, one ok group, the staged sha256, a pre-registration digest of b's."""
     assert carry(world, tmp_path) == 0
     staged = tmp_path / "carried.h5"
-    rep, sha = _report(tmp_path / "cmp.json", staged)
+    prereg, _ = _prereg(world, tmp_path / "prereg.json")
+    forged = {"passed": True, "groups": [{"sim": W.GROUPS[0][0], "snap": W.GROUPS[0][1], "ok": True}],
+              "carried": {"sha256": L.sha256_file(staged)}, "prereg": {"sha256": "b" * 64}}
+    (tmp_path / "forged.json").write_text(json.dumps(forged))
+    assert _promote(staged, tmp_path / "forged.json", L.sha256_file(tmp_path / "forged.json"), tmp_path / "f.h5",
+                    prereg) == 2
+    assert "not the one of record" in capsys.readouterr().out and not (tmp_path / "f.h5").exists()
+
+
+def test_promotion_needs_the_passed_comparison_bound_to_the_pre_registration(world, tmp_path, same_code, monkeypatch,
+                                                                             capsys):
+    assert carry(world, tmp_path) == 0
+    staged = tmp_path / "carried.h5"
+    prereg, pre_sha = _prereg(world, tmp_path / "prereg.json")
+    monkeypatch.setattr(PC, "PREREG_OF_RECORD_SHA256", pre_sha)      # the synthetic pre-registration is of record
+    rep, sha = _report(tmp_path, staged, prereg)
     final = tmp_path / "final.h5"
-    assert PC.main(["--staged", str(staged), "--comparison", str(rep), "--comparison-sha256", sha,
-                    "--output", str(final)]) == 0
+    assert _promote(staged, rep, sha, final, prereg) == 0
     d, _a, rec = T.read_cache(final)                                             # the release reader accepts it
     _s, _sa, srec = T.read_cache_staged(staged)
     assert rec["product"]["payload_sha256"] == srec["product"]["payload_sha256"]
-    assert rec["product"]["carried"]["promoted"] == {"passed": True, "comparison_sha256": sha,
-                                                     "staged_sha256": L.sha256_file(staged), "prereg_sha256": "a" * 64,
-                                                     "n_groups_compared": 1}
+    report = json.loads(rep.read_text())
+    assert rec["product"]["carried"]["promoted"] == {
+        "passed": True, "comparison_sha256": sha, "staged_sha256": L.sha256_file(staged), "prereg_sha256": pre_sha,
+        "fresh_sha256": sorted(f["sha256"] for f in report["fresh"]), "n_groups_compared": len(report["groups"])}
     from hcd_analysis.emulator.data import load_cache
     assert load_cache(final, validate=False)["cache_sha256"] == L.sha256_file(final)
+    capsys.readouterr()
+    other_hist = tmp_path / "other_hist.h5"
+    shutil.copy2(world["hist"], other_hist)
+    with h5py.File(other_hist, "r+") as f:
+        f.attrs["created_utc"] = "2026-01-01T00:00:00Z"                      # another source file
+    other_prereg, _ = _prereg(world, tmp_path / "prereg_other.json", hist=other_hist)
     bad = {
-        "digest": dict(sha="0" * 64),
-        "failed": dict(passed=False),
-        "group": dict(ok=False),
-        "other cache": dict(carried_sha="1" * 64),
+        "four keys, the pre-registration's digest": (lambda r: [r.pop(k) for k in ("criterion", "fresh", "code",
+                                                                                   "source_sha256")]
+                                                     and r.update(groups=r["groups"][:1]), "criterion"),
+        "one group": (lambda r: r.update(groups=r["groups"][:1]), "groups, not exactly the"),
+        "another group": (lambda r: r["groups"][1].update(snap=99), "groups, not exactly the"),
+        "failed": (lambda r: r.update(passed=False), "did not pass"),
+        "group not ok": (lambda r: r["groups"][0].update(ok=False), "did not pass"),
+        "another catalogue": (lambda r: r["groups"][0].update(same_rebuilt_catalogue=False), "did not pass"),
+        "criterion": (lambda r: r["criterion"].update(rtol=1e-9), "criterion"),
+        "another prereg": (lambda r: r["prereg"].update(sha256="b" * 64), "not the one of record"),
+        "another cache": (lambda r: r["carried"].update(sha256="1" * 64), "not the staged file"),
+        "source": (lambda r: r.update(source_sha256="2" * 64), "names the source"),
+        "fresh unlisted": (lambda r: r.update(fresh=[]), "fresh files"),
+        "fresh without sha": (lambda r: r["fresh"][0].pop("sha256"), "fresh files"),
+        "fresh changed": (lambda r: r["fresh"][0].update(sha256="3" * 64), "missing or not the one"),
+        "group fresh file": (lambda r: r["groups"][0].update(fresh_file="elsewhere.h5"), "fresh list"),
+        "dirty report": (lambda r: r.update(code={"commit": "c" * 40, "dirty": True}), "clean, committed"),
+        "no report code": (lambda r: r.pop("code"), "clean, committed"),
     }
-    for name, kw in bad.items():
-        r, h = _report(tmp_path / f"{name}.json", staged, **{k: v for k, v in kw.items() if k != "sha"})
-        assert PC.main(["--staged", str(staged), "--comparison", str(r), "--comparison-sha256", kw.get("sha", h),
-                        "--output", str(tmp_path / f"{name}.h5")]) == 2, name
-        assert not (tmp_path / f"{name}.h5").exists()
-    assert PC.main(["--staged", str(final), "--comparison", str(rep), "--comparison-sha256", sha,
-                    "--output", str(tmp_path / "again.h5")]) == 2                 # already promoted (and another sha)
-    assert PC.main(["--staged", str(staged), "--comparison", str(rep), "--comparison-sha256", sha,
-                    "--output", str(final)]) == 2                                 # never overwritten
+    for name, (edit, match) in bad.items():
+        key = name.replace(" ", "_").replace(",", "").replace("'", "")
+        r, h = _report(tmp_path, staged, prereg, key, edit=edit)
+        assert _promote(staged, r, h, tmp_path / f"{key}.h5", prereg) == 2, name
+        out = capsys.readouterr().out
+        assert match in out, (name, out)
+        assert not (tmp_path / f"{key}.h5").exists()
+    # the pre-registration file itself: edited, or one naming another source
+    edited = tmp_path / "prereg_edited.json"
+    edited.write_text(prereg.read_text().replace('"seed": 5', '"seed": 6'))
+    assert _promote(staged, rep, sha, tmp_path / "e.h5", edited) == 2
+    assert "not the pre-registration of record" in capsys.readouterr().out
+    monkeypatch.setattr(PC, "PREREG_OF_RECORD_SHA256", L.sha256_file(other_prereg))
+    r, h = _report(tmp_path, staged, other_prereg, "other_source")
+    assert _promote(staged, r, h, tmp_path / "o.h5", other_prereg) == 2
+    assert "names the source" in capsys.readouterr().out
+    monkeypatch.setattr(PC, "PREREG_OF_RECORD_SHA256", pre_sha)
+    assert _promote(final, rep, sha, tmp_path / "again.h5", prereg) == 2       # already promoted
+    assert _promote(staged, rep, sha, final, prereg) == 2                      # never overwritten
+    with pytest.raises(SystemExit):
+        PC.main(["--staged", str(staged), "--comparison", str(rep), "--comparison-sha256", sha,
+                 "--output", str(tmp_path / "noprereg.h5")])                    # the pre-registration is required
     monkeypatch.setattr(L, "code_identity", lambda repo_dir=None: {"commit": "c" * 40, "dirty": True})
-    assert PC.main(["--staged", str(staged), "--comparison", str(rep), "--comparison-sha256", sha,
-                    "--output", str(tmp_path / "dirty.h5")]) == 2
+    assert _promote(staged, rep, sha, tmp_path / "dirty.h5", prereg) == 2
 
 
 def _copy(world, tmp_path, *names):
