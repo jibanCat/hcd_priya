@@ -31,7 +31,10 @@ def X(monkeypatch):
     return mod
 
 
-def _members(dirpath, cache, *, seeds=(0, 1), name="a4lin_prod", release=True):
+RECIPE = {"synthetic": 1, "all_sims": True, "holdout_sim": None}
+
+
+def _members(dirpath, cache, *, seeds=(0, 1), name="a4lin_prod", release=True, recipe=RECIPE):
     d = load_cache(cache)
     os.makedirs(dirpath, exist_ok=True)
     prefixes = []
@@ -39,7 +42,7 @@ def _members(dirpath, cache, *, seeds=(0, 1), name="a4lin_prod", release=True):
         model = Emulator(**ARCH, key=jax.random.PRNGKey(s))
         pre = os.path.join(dirpath, f"{name}_seed{s}")
         T.save_checkpoint(pre, model, {"in_dim": 10, "n_k": 8, "n_basis": 4}, fit_target_norm(d, np.arange(
-            d["P_tier_p"].shape[0])), seed=s, cache=d, cache_path=str(cache), recipe={"synthetic": 1},
+            d["P_tier_p"].shape[0])), seed=s, cache=d, cache_path=str(cache), recipe=dict(recipe),
             release=release, code=dict(tf.CLEAN) if release else None)
         prefixes.append(pre)
     sums = os.path.join(dirpath, "SHA256SUMS")
@@ -100,7 +103,7 @@ def test_the_release_export_writes_an_h5_2_bundle_that_the_release_loaders_accep
 
 @pytest.mark.parametrize("damage", ["dirty", "sums_digest", "member_changed", "member_unlisted", "cache_digest",
                                     "historical_cache", "wc_digest", "wc_other_cache", "members_other_cache",
-                                    "members_dev", "member_elsewhere"])
+                                    "members_dev", "member_elsewhere", "holdout_sim", "not_all_sims"])
 def test_the_release_export_refuses_ineligible_inputs_before_writing(X, inputs, tmp_path, monkeypatch, damage,
                                                                      capsys):
     out = tmp_path / "out"
@@ -136,6 +139,11 @@ def test_the_release_export_refuses_ineligible_inputs_before_writing(X, inputs, 
             over.update({"members": prefixes, "--sha256sums": sums, "--sha256sums-sha256": L.sha256_file(sums)})
     elif damage == "members_dev":                         # development checkpoints (no release meta)
         prefixes, sums = _members(tmp_path / "ens3", inputs["cache"], release=False)
+        over.update({"members": prefixes, "--sha256sums": sums, "--sha256sums-sha256": L.sha256_file(sums)})
+    elif damage in ("holdout_sim", "not_all_sims"):         # a leave-one-simulation-out member is not a release one
+        recipe = dict(RECIPE, all_sims=False, holdout_sim="sim1") if damage == "holdout_sim" else dict(
+            RECIPE, all_sims=None)
+        prefixes, sums = _members(tmp_path / "ens5", inputs["cache"], recipe=recipe)
         over.update({"members": prefixes, "--sha256sums": sums, "--sha256sums-sha256": L.sha256_file(sums)})
     elif damage == "member_elsewhere":
         prefixes, _ = _members(tmp_path / "ens4", inputs["cache"], seeds=(5,))

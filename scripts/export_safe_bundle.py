@@ -9,7 +9,8 @@ given digest, or that does not list every member file with its digest (checked b
 that does not hash to its digest or that the release reader refuses (format 3.4, eligible, promoted if carried); a w_c
 map that does not hash to its digest, is not eligible or was fitted to another cache; members that were not all trained
 on that cache and its lineage record at one clean, known commit, that record a cache path instead of a file name, or
-that differ in architecture or recipe; and a lineage block that is not release-eligible.
+that differ in architecture or recipe, or that were not trained on every simulation (``all_sims`` true, no
+``holdout_sim``); and a lineage block that is not release-eligible.
 
     python scripts/export_safe_bundle.py --out NEW_DIR --member DIR/NAME_seed0 [--member ...] \\
         --sha256sums DIR/SHA256SUMS --sha256sums-sha256 HEX --cache CACHE.h5 --cache-sha256 HEX \\
@@ -195,6 +196,10 @@ def check_release_inputs(a):
     for i, m in enumerate(metas):
         if m.get("arch_cfg") != m0.get("arch_cfg") or m.get("recipe") != m0.get("recipe"):
             raise Refused(f"member {i} has another architecture or recipe than member 0")
+        r = m.get("recipe") or {}
+        if r.get("all_sims") is not True or r.get("holdout_sim") is not None:
+            raise Refused(f"member {i} was not trained on every simulation (recipe all_sims {r.get('all_sims')!r}, "
+                          f"holdout_sim {r.get('holdout_sim')!r}): a release member uses them all")
     if len({m.get("seed") for m in metas}) != len(metas):
         raise Refused("two members share a seed")
     return prefixes, metas, rec, {"sha256": ident["sha256"], "size": ident["size"]}, wcm, code, files

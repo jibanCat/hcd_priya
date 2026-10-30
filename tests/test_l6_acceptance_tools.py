@@ -250,3 +250,17 @@ def test_the_comparison_must_be_like_for_like(cache, tmp_path):
     argv[argv.index("--old-source-sha256") + 1] = "0" * 64
     with pytest.raises(SystemExit, match="does not hash"):
         A.main(argv)
+
+
+def test_a_member_left_out_of_a_simulation_is_refused(cache, tmp_path):
+    A = _script("accept_retrained_ensemble")
+    loso = dict(RECIPE, all_sims=False, holdout_sim="sim1")
+    members = [_member(tmp_path / "ens", cache, s, recipe=loso, hist=_hist(recipe=loso)) for s in (0, 1)]
+    olds = []
+    for i in range(3):
+        p = tmp_path / f"old{i}.hist.json"
+        json.dump(_hist(resid=0.3, recipe=loso), open(p, "w"))
+        olds.append(str(p))
+    assert A.main(_acc_argv(members, cache, olds, tmp_path / "r.json")) == 1
+    r = json.load(open(tmp_path / "r.json"))
+    assert not r["checks"]["trained_on_every_simulation"] and r["checks"]["recipe_equal_to_the_old_ensemble"]
