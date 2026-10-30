@@ -1,8 +1,9 @@
-"""The HDF5 + JSON release-format prototype (hcd_analysis/emulator/safe_h5.py).
+"""The HDF5 + JSON release format (hcd_analysis/emulator/safe_h5.py): members and h5/2 bundles; the lineage checks of
+the release loader are in tests/test_bundle_lineage.py, the historical h5/1 loader at the end of this file.
 
-Synthetic only: a small Emulator from a fixed PRNG key and a synthetic normalizer with the production key layout.
-Malformed artifacts are built by editing a valid file and re-anchoring its sha256 in the sidecar, so each refusal is
-exercised by the structural checks, not by the digest."""
+Synthetic only: a small Emulator from a fixed PRNG key and a synthetic normalizer with the production key layout;
+bundles from hcd_analysis.emulator.release_testing. Malformed artifacts are built by editing a valid file and
+re-anchoring its sha256 in the sidecar, so each refusal is exercised by the structural checks, not by the digest."""
 import json
 import os
 import subprocess
@@ -15,6 +16,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from hcd_analysis.emulator import release_testing as RT
 from hcd_analysis.emulator import safe_h5 as H
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator.schema import CHECKPOINT_SCHEMA_VERSION
@@ -290,15 +292,8 @@ def test_float32_networks_are_refused_in_a_non_x64_process(member, tmp_path):
 # --------------------------------------------------------------------------------------------- bundles, clean process
 @pytest.fixture
 def bundle(tmp_path):
-    bd = tmp_path / "bundle"
-    bd.mkdir()
-    pres = []
-    for i in range(2):
-        pre = str(bd / f"m{i}")
-        H.export_member(pre, Emulator(**ARCH, key=jax.random.PRNGKey(i)), _meta(seed=i), _norm())
-        pres.append(pre)
-    H.write_manifest(str(bd), pres, {"source": "synthetic"})
-    return str(bd), pres
+    info = RT.write_synthetic_bundle(str(tmp_path / "bundle"), arch=ARCH, norm=_norm())
+    return info.bundle_dir, info.prefixes
 
 
 def test_bundle_round_trip_manifest_and_unlisted_files(bundle):
@@ -428,7 +423,7 @@ def test_index_entry_json_digest_nan_and_truncation_are_refused(bundle, tmp_path
     doc["tensors"]["norm/dndx/mean"]["shape"] = [4]
     os.remove(js)
     json.dump(doc, open(js, "w"))
-    with pytest.raises(H.SafeFormatError, match="m0.json does not match the manifest"):
+    with pytest.raises(H.SafeFormatError, match="member0.json does not match the manifest"):
         H.load_bundle(bd, expected_manifest_sha256=sha)          # the manifest's file digests refuse it first
     with pytest.raises(H.SafeFormatError, match="sha256 does not match the manifest"):
         H.load_member(pres[0], expected_json_sha256=json_sha)    # and so does the member's own digest check
@@ -646,25 +641,18 @@ def test_a_meta_that_does_not_round_trip_is_refused_before_anything_is_written(t
 
 def test_load_ensemble_requires_one_normalizer_and_one_k_grid(tmp_path):
     from hcd_analysis.emulator.ensemble import EnsembleEmulator
-    for name, norms in (("same", (_norm(), _norm())), ("diff", (_norm(), None))):
-        bd = tmp_path / name
-        bd.mkdir()
-        pres = []
-        for i, nm in enumerate(norms):
-            if nm is None:
-                nm = _norm()
-                nm["dndx"]["mean"] = np.asarray(nm["dndx"]["mean"]) + 1.0
-            pre = str(bd / f"m{i}")
-            H.export_member(pre, Emulator(**ARCH, key=jax.random.PRNGKey(i)), _meta(seed=i), nm)
-            pres.append(pre)
-        H.write_manifest(str(bd), pres, {"source": "synthetic"})
-        sha = H.sha256_file(str(bd / "manifest.json"))
-        if name == "same":
-            ens, metas, norm = H.load_ensemble(str(bd), expected_manifest_sha256=sha)
-            assert isinstance(ens, EnsembleEmulator) and len(metas) == 2
-        else:
-            with pytest.raises(H.SafeFormatError, match="does not share member 0's normalizer"):
-                H.load_ensemble(str(bd), expected_manifest_sha256=sha)
+    same = RT.write_synthetic_bundle(str(tmp_path / "same"), arch=ARCH, norm=_norm())
+    ens, metas, norm = H.load_ensemble(same.bundle_dir, expected_manifest_sha256=same.manifest_sha256)
+    assert isinstance(ens, EnsembleEmulator) and len(metas) == 2 and metas.anchored and metas.lineage_verified
+
+    def other_norm(i, model, meta, nm):
+        if i == 1:
+            nm = _norm()
+            nm["dndx"]["mean"] = np.asarray(nm["dndx"]["mean"]) + 1.0
+        return model, meta, nm
+    diff = RT.write_synthetic_bundle(str(tmp_path / "diff"), arch=ARCH, norm=_norm(), member_fn=other_norm)
+    with pytest.raises(H.SafeFormatError, match="does not share member 0's normalizer"):
+        H.load_ensemble(diff.bundle_dir, expected_manifest_sha256=diff.manifest_sha256)
 
 
 def test_a_size_mismatch_in_the_manifest_check_is_refused_before_hashing(tmp_path, monkeypatch):
@@ -711,27 +699,29 @@ def test_link_counts_are_checked_before_any_name_is_read(member, monkeypatch):
     assert "/norm" in listed and "/norm/many" not in listed       # /norm was listed, never the 40-link group
 
 
-@pytest.mark.parametrize("what", ["k", "arch", "norm_keys"])
+@pytest.mark.parametrize("what", ["k", "arch", "norm_keys", "param_limits"])
 def test_load_ensemble_refuses_another_k_grid_architecture_or_normalizer_structure(tmp_path, what):
-    bd = tmp_path / what
-    bd.mkdir()
-    pres = []
-    for i in range(2):
-        meta, arch, nm = _meta(seed=i), dict(ARCH), _norm()
-        if i == 1 and what == "k":
-            meta["k_com_hmpc"] = list(np.arange(1, ARCH["n_k"] + 1) * 0.06)
-        if i == 1 and what == "arch":
-            arch["baseline_width"] = ARCH["baseline_width"] // 2
+    def differ(i, model, meta, nm):
+        if i != 1:
+            return model, meta, nm
+        meta = dict(meta)
+        if what == "k":
+            meta["k_com_hmpc"] = [1.2 * k for k in meta["k_com_hmpc"]]
+        if what == "arch":
+            arch = dict(ARCH, baseline_width=ARCH["baseline_width"] // 2)
             meta["arch_cfg"] = arch
-        if i == 1 and what == "norm_keys":
+            model = Emulator(**arch, key=jax.random.PRNGKey(i))
+        if what == "norm_keys":
+            nm = _norm()
             nm["P_filt"]["cell_mean"][5] = np.zeros((4, 8))
-        pre = str(bd / f"m{i}")
-        H.export_member(pre, Emulator(**arch, key=jax.random.PRNGKey(i)), meta, nm)
-        pres.append(pre)
-    H.write_manifest(str(bd), pres, {"source": "synthetic"})
-    match = "share member 0's normalizer" if what == "norm_keys" else "another architecture or k grid"
+        if what == "param_limits":
+            meta["param_limits"] = [[lo, hi * 1.01] for lo, hi in meta["param_limits"]]
+        return model, meta, nm
+    info = RT.write_synthetic_bundle(str(tmp_path / what), arch=ARCH, norm=_norm(), member_fn=differ)
+    match = {"norm_keys": "share member 0's normalizer", "param_limits": "another parameter box"}.get(
+        what, "another architecture or k grid")
     with pytest.raises(H.SafeFormatError, match=match):
-        H.load_ensemble(str(bd), expected_manifest_sha256=H.sha256_file(str(bd / "manifest.json")))
+        H.load_ensemble(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
 
 
 def test_the_manifest_pass_refuses_a_size_mismatch_before_hashing_it(bundle, monkeypatch):
@@ -754,7 +744,7 @@ def test_the_manifest_pass_refuses_a_size_mismatch_before_hashing_it(bundle, mon
         def hexdigest(self):
             return self.h.hexdigest()
     monkeypatch.setattr(H.S, "hashlib", types.SimpleNamespace(sha256=Counting))
-    with pytest.raises(H.SafeFormatError, match="m0.h5 does not match the manifest"):
+    with pytest.raises(H.SafeFormatError, match="member0.h5 does not match the manifest"):
         H.verify_manifest(bd)
     assert sum(fed) < len(raw)                                     # the oversized member was never hashed
 
@@ -802,3 +792,54 @@ def test_a_name_one_past_the_bound_is_refused_for_its_length(member):
           index_from_file=False)
     with pytest.raises(H.SafeFormatError, match="longer than 255 characters"):
         H.load_member(prefix)
+
+
+# ------------------------------------------------------------------------------------- historical h5/1 bundles
+def _v1_bundle(tmp_path, norms=None):
+    bd = tmp_path / "v1"
+    bd.mkdir()
+    pres = []
+    for i, nm in enumerate(norms or (_norm(), _norm())):
+        pre = str(bd / f"m{i}")
+        H.export_member(pre, Emulator(**ARCH, key=jax.random.PRNGKey(i)), _meta(seed=i), nm, fmt=H.FORMAT_HISTORICAL)
+        pres.append(pre)
+    H.write_manifest_historical(str(bd), pres, {"source": "synthetic"})
+    return str(bd), pres, H.sha256_file(str(bd / "manifest.json"))
+
+
+def test_an_h5_1_bundle_loads_only_through_the_historical_loader_with_a_reason(tmp_path, caplog):
+    from hcd_analysis.emulator.ensemble import EnsembleEmulator
+    bd, pres, sha = _v1_bundle(tmp_path)
+    with pytest.raises(H.SafeFormatError, match="historical: it loads only through load_ensemble_historical"):
+        H.load_ensemble(bd, expected_manifest_sha256=sha)
+    with pytest.raises(H.SafeFormatError, match="historical: it loads only through load_ensemble_historical"):
+        H.load_bundle(bd, expected_manifest_sha256=sha)
+    with pytest.raises(H.SafeFormatError, match="manifest format"):
+        H.load_ensemble(bd, expected_manifest_sha256=None)
+    with pytest.raises(H.SafeFormatError, match="historical member"):
+        H.load_member(pres[0])                                     # an h5/1 member is not read as h5/2
+    for bad in ("", "  ", None):
+        with pytest.raises(ValueError, match="non-empty reason"):
+            H.load_ensemble_historical(bd, expected_manifest_sha256=sha, reason=bad)
+    ens, metas, norm = H.load_ensemble_historical(bd, expected_manifest_sha256=sha, reason="a reproduction")
+    assert isinstance(ens, EnsembleEmulator) and [m["seed"] for m in metas] == [0, 1]
+    assert metas.historical_reason == "a reproduction" and not metas.lineage_verified and metas.anchored
+    assert metas.format == H.FORMAT_HISTORICAL and "a reproduction" in caplog.text
+    assert H.verify_manifest_historical(bd, expected_sha256=sha) == pres
+    with pytest.raises(H.SafeFormatError, match="manifest"):
+        H.load_ensemble_historical(bd, expected_manifest_sha256="f" * 64, reason="r")
+    assert [m["seed"] for _, m, _ in H.load_bundle_historical(bd, expected_manifest_sha256=sha, reason="r")] == [0, 1]
+
+
+def test_the_historical_loader_keeps_the_h5_1_checks(tmp_path):
+    nm = _norm()
+    nm["dndx"]["mean"] = np.asarray(nm["dndx"]["mean"]) + 1.0
+    bd, pres, sha = _v1_bundle(tmp_path, norms=(_norm(), nm))
+    with pytest.raises(H.SafeFormatError, match="does not share member 0's normalizer"):
+        H.load_ensemble_historical(bd, expected_manifest_sha256=sha, reason="r")
+    open(os.path.join(bd, "extra.json"), "w").write("{}")
+    with pytest.raises(H.SafeFormatError, match="does not list"):
+        H.load_bundle_historical(bd, expected_manifest_sha256=sha, reason="r")
+    os.remove(os.path.join(bd, "extra.json"))
+    with h5py.File(pres[1] + ".h5", "r") as f:
+        assert f.attrs["format"] == H.FORMAT_HISTORICAL

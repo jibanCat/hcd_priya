@@ -1,5 +1,6 @@
-"""Pickle-free HDF5 + JSON release format for emulator members: format ``hcd_priya.h5/1`` (contract and usage in
-docs/release_format_h5.md).
+"""Pickle-free HDF5 + JSON release format for emulator bundles: format ``hcd_priya.h5/2`` (contract and usage in
+docs/release_format_h5.md). The earlier ``hcd_priya.h5/1`` (bundles without lineage) loads only through the separately
+named ``load_ensemble_historical`` / ``load_bundle_historical``, with a reason.
 
 One member ``<prefix>``:
   ``<prefix>.h5``    root attribute ``format`` only; group ``/model`` holds one dataset per network leaf, named by its
@@ -7,7 +8,21 @@ One member ``<prefix>``:
                      nested groups (an integer dict key is written ``#<int>``). Every dataset is contiguous, allocated,
                      unfiltered, attribute-free, little-endian float64.
   ``<prefix>.json``  the schema-2.0 checkpoint meta, the tensor index (name, shape, dtype) and the sha256 of the .h5.
-A bundle directory holds the members and ``manifest.json`` (the strict manifest of ``safe_io``) and nothing else.
+A bundle directory holds the members, the dN/dX-to-w_c map ``wc_map.json`` (wc_map.py, with its own lineage record)
+and ``manifest.json`` (the strict manifest of ``safe_io``), and nothing else. The h5/2 manifest's keys are exactly
+format, members, files (every other file, pinned by sha256 and size), provenance, wc_map (the map's file name) and
+lineage: the bundle's lineage block (``make_lineage_block``): the training cache (sha256, size, the digest of its lineage
+record, its settings, its row origins and the ``carried_validated`` label of carried rows), the digest of its catalogue
+set, the finder ids, the code commit that trained the members, the export's code identity, the w_c map (sha256, the
+digest of its record), and ``release_eligible`` with the reasons when it is not.
+
+Loading with a manifest digest (the release path, ``load_ensemble`` / ``load_bundle`` / ``load_release``) requires
+h5/2, a well-formed lineage block whose eligibility recomputes to true under the release finder allow-list, the w_c map
+the block names (its record eligible and fitted to the block's cache), and every member trained on the block's cache
+(``cache_sha256`` and ``cache_lineage_sha256``) at the block's commit from a clean tree. ``expected_manifest_sha256=None``
+loads an unanchored development bundle: the lineage is not enforced, a warning is issued, and the returned metas are
+marked (``MemberMetas.anchored`` False). The block is a declaration pinned by the manifest digest: each builder verified
+its inputs when it ran; the loader checks that the declaration is complete, consistent and eligible.
 
 Loading: every file is read through one descriptor that does not follow a symlink, must be a regular file and is
 size-bounded before it is read. The .h5 bytes are read once, hashed and compared with the sidecar (and with the
@@ -22,17 +37,30 @@ model AND the normalizer are checked against the code-derived structure before a
 finite. Any other HDF5 error becomes a SafeFormatError. No pickle is read or written."""
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 import json
 import os
+import re
+import warnings
+from typing import NamedTuple
 
 import numpy as np
 
 from . import safe_io as S
 
-FORMAT = "hcd_priya.h5/1"
+FORMAT = "hcd_priya.h5/2"                    # the release format (bundles with a lineage block and the w_c map)
+FORMAT_HISTORICAL = "hcd_priya.h5/1"         # bundles written before bundles carried lineage: historical loaders only
+FORMATS = (FORMAT, FORMAT_HISTORICAL)
 EXT = ".h5"
+WC_MAP_KEY = "wc_map"                        # manifest key naming the w_c map file
+WC_MAP_FILE = "wc_map.json"
+LINEAGE_KEY = "lineage"                      # manifest key of the lineage block
+LINEAGE_FORMAT = "hcd_priya.bundle_lineage/1"
+CARRIED_LABEL = "carried_validated"
+CATALOGUE_SET_RULE = ("sha256 of the canonical JSON (sorted keys, no spaces) of the sorted [role, sha256] pairs of the "
+                      "training cache record's inputs of kind catalog")
 _F64 = np.dtype("<f8")
 _MAX_DATASET_BYTES = 1 << 28                 # 256 MiB per dataset (the production members are a few MB in all)
 _MAX_TOTAL_BYTES = 1 << 28                   # 256 MiB of declared dataset bytes per member
@@ -50,15 +78,22 @@ def _h5():
 
 
 # --------------------------------------------------------------------------------------------- export
-def export_member(prefix, model, meta, norm):
+def export_member(prefix, model, meta, norm, *, fmt=FORMAT):
     """Write ``<prefix>.h5`` and ``<prefix>.json`` for one member. Never touches existing files; the .h5 is written
-    through the temporary file's own descriptor and published by hard link only if that name still holds it."""
+    through the temporary file's own descriptor and published by hard link only if that name still holds it.
+    ``fmt``: ``FORMAT`` (h5/2, the release format; the meta's ``cache_path`` must be a plain file name or None, so a
+    bundle never carries a private path) or ``FORMAT_HISTORICAL`` (h5/1, for reproducing historical bundles)."""
     h5py = _h5()
+    if fmt not in FORMATS:
+        raise SafeFormatError(f"unknown member format {fmt!r}")
     hp, js = prefix + EXT, prefix + ".json"
     for p in (hp, js):
         if os.path.lexists(p):
             raise SafeFormatError(f"{p} exists: export never overwrites")
     S._validate_meta(meta, prefix)                             # includes: plain finite JSON, before anything is written
+    if fmt == FORMAT and meta.get("cache_path") is not None and not _plain_name(meta["cache_path"]):
+        raise SafeFormatError(f"{prefix}: meta cache_path {meta['cache_path']!r} is a path; an h5/2 member records "
+                              "the cache's file name only")
     tensors = {**S.model_tensors(model), **S.norm_tensors(norm)}
     for n, a in tensors.items():
         if S._code(a.dtype) != "F64":
@@ -67,7 +102,7 @@ def export_member(prefix, model, meta, norm):
 
     def writer(fh):
         with h5py.File(fh, "w", libver=_LIBVER) as f:
-            f.attrs["format"] = FORMAT
+            f.attrs["format"] = fmt
             gm, gn = f.create_group("model"), f.create_group("norm")
             for name in sorted(tensors):
                 arr = np.ascontiguousarray(tensors[name], dtype=_F64)
@@ -82,7 +117,7 @@ def export_member(prefix, model, meta, norm):
     tmp, held, h5_sha = S._write_tmp(hp, EXT, writer)               # hashed through the writer's own descriptor
     S._publish(tmp, hp, held)
     index = {n: {"shape": list(np.shape(a)), "dtype": "F64"} for n, a in sorted(tensors.items())}
-    doc = {"format": FORMAT, "meta": meta, "tensors": index, "h5_sha256": h5_sha,
+    doc = {"format": fmt, "meta": meta, "tensors": index, "h5_sha256": h5_sha,
            "h5_file": os.path.basename(hp)}
     S._write_exclusive(js, [json.dumps(doc, indent=1, sort_keys=True, allow_nan=False).encode("utf-8")])
     return hp, js
@@ -156,7 +191,7 @@ def _walk(group, path, where, raw_len, seen):
     return out, total, groups
 
 
-def read_member_arrays(raw, where, want_model, norm_check):
+def read_member_arrays(raw, where, want_model, norm_check, *, fmt=FORMAT):
     """Strictly parse the anchored .h5 bytes ``raw``. ``want_model`` = [(name, shape, dtype)] of the network derived
     from code; ``norm_check(tensors)`` validates the normalizer structure. Both are checked on metadata BEFORE any data
     is read (the normalizer through zero-memory views of the declared shapes). Returns ``{tensor name: array}``."""
@@ -165,13 +200,13 @@ def read_member_arrays(raw, where, want_model, norm_check):
         with h5py.File(io.BytesIO(raw), "r") as f:
             if f.userblock_size:
                 raise SafeFormatError(f"{where}: a user block is not allowed")
-            fmt = None
+            got = None
             if len(f.attrs) == 1 and list(f.attrs.keys()) == ["format"]:   # a count, then one name; no value yet
                 aid = f.attrs.get_id("format")
                 if aid.shape == () and aid.get_type().get_class() == h5py.h5t.STRING:
-                    fmt = f.attrs["format"]                        # one scalar string, at most the file's size
-            if not isinstance(fmt, str) or fmt != FORMAT:
-                raise SafeFormatError(f"{where}: root attributes must be exactly a scalar string format = {FORMAT}")
+                    got = f.attrs["format"]                        # one scalar string, at most the file's size
+            if not isinstance(got, str) or got != fmt:
+                raise SafeFormatError(f"{where}: root attributes must be exactly a scalar string format = {fmt}")
             if len(f) != 2 or set(f.keys()) != {"model", "norm"}:
                 raise SafeFormatError(f"{where}: top level must hold exactly /model and /norm")
             seen = set()
@@ -215,7 +250,7 @@ def read_member_arrays(raw, where, want_model, norm_check):
     return out
 
 
-def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None):
+def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None, fmt=FORMAT):
     """Load one member exported by ``export_member``. Returns ``(model, meta, norm)``; refuses everything
     ``safe_io.load_member`` refuses plus the HDF5-specific structures listed in the module docstring. The .h5 is
     checked against its own sidecar; without ``expected_sha256`` / ``expected_json_sha256`` (the manifest's digests,
@@ -232,8 +267,12 @@ def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None):
     need = ("format", "meta", "tensors", "h5_sha256", "h5_file")
     if not isinstance(doc, dict) or any(k not in doc for k in need):
         raise SafeFormatError(f"{js}: sidecar lacks {[k for k in need if not isinstance(doc, dict) or k not in doc]}")
-    if doc["format"] != FORMAT:
-        raise SafeFormatError(f"{js}: format {doc['format']!r}, this loader reads {FORMAT}")
+    if fmt not in FORMATS:
+        raise SafeFormatError(f"unknown member format {fmt!r}")
+    if doc["format"] != fmt:
+        raise SafeFormatError(f"{js}: format {doc['format']!r}, this loader reads {fmt}"
+                              + (" (a historical member: load_ensemble_historical)" if doc["format"] ==
+                                 FORMAT_HISTORICAL else ""))
     meta = doc["meta"]
     S._validate_meta(meta, js)
     if doc["h5_file"] != os.path.basename(prefix) + EXT:
@@ -250,7 +289,7 @@ def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None):
 
     def norm_check(views):
         S._validate_norm(S.norm_from_tensors(views), n_k, n_cddf, n_dndx)
-    tensors = read_member_arrays(raw, hp, want, norm_check)
+    tensors = read_member_arrays(raw, hp, want, norm_check, fmt=fmt)
     index = doc["tensors"]
     if not isinstance(index, dict) or set(index) != set(tensors):
         raise SafeFormatError(f"{hp}: tensor names differ from the JSON index")
@@ -264,37 +303,382 @@ def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None):
     return model, meta, norm
 
 
+# --------------------------------------------------------------------------------------------- lineage block
+_HEX64 = re.compile(r"[0-9a-f]{64}\Z")
+_HEX40 = re.compile(r"[0-9a-f]{40}\Z")
+_PLAIN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*\Z")
+_BLOCK_KEYS = {"format", "cache", "catalogues", "finder_ids", "code_commit", "export_code", "wc_map", "n_members",
+               "release_eligible", "ineligible_reasons"}
+_CACHE_KEYS = {"sha256", "size", "lineage_record_sha256", "kind", "kind_version", "release_eligible", "settings",
+               "n_groups", "rows", "carried"}
+_CARRIED_KEYS = {"label", "fields", "source_sha256", "source_size", "n_groups", "validation_all_passed",
+                 "validation_summary_sha256", "promoted"}
+_WC_KEYS = {"path", "sha256", "lineage_record_sha256", "release_eligible", "cache_sha256"}
+
+
+def _plain_name(x):
+    return isinstance(x, str) and bool(_PLAIN.match(x))
+
+
+def _hex64(x):
+    return isinstance(x, str) and bool(_HEX64.match(x))
+
+
+def _release_finder_ids():
+    from ..catalog import RELEASE_FINDER_IDS
+    return RELEASE_FINDER_IDS
+
+
+def catalogue_set_sha256(cache_record):
+    """``(n, sha256)`` of the training cache record's catalogue inputs (``CATALOGUE_SET_RULE``)."""
+    from .. import lineage as L
+    pairs = sorted([i["role"], i["sha256"]] for i in cache_record["inputs"] if i.get("kind") == "catalog")
+    return len(pairs), hashlib.sha256(L.canonical_json(pairs).encode("ascii")).hexdigest()
+
+
+def make_lineage_block(*, cache_record, cache_identity, wc_map, member_metas, export_code, allowed_finder_ids=None):
+    """The bundle's lineage block, from the verified training-cache record (``tau0_cache.read_cache``), the cache
+    file's ``{sha256, size}``, the parsed w_c map (``wc_map.WcMap``), the members' metas and the export's code identity.
+    ``release_eligible`` is computed here (``lineage_block_reasons`` plus the members' ties), never passed in."""
+    from .. import lineage as L
+    from ..tau0_cache import ROWS_CARRIED
+    allowed = _release_finder_ids() if allowed_finder_ids is None else frozenset(allowed_finder_ids)
+    rec = cache_record
+    groups = rec["product"].get("groups") or []
+    n_carried = sum(1 for g in groups if g.get("rows") == ROWS_CARRIED)
+    car = rec["product"].get("carried") or {}
+    val = rec.get("validation") or {}
+    carried = None if not n_carried else {
+        "label": CARRIED_LABEL, "fields": list(car.get("fields") or []), "source_sha256": car.get("source_sha256"),
+        "source_size": car.get("source_size"), "n_groups": n_carried,
+        "validation_all_passed": val.get("all_passed") is True, "validation_summary_sha256": val.get("summary_sha256"),
+        "promoted": copy.deepcopy(car.get("promoted"))}
+    n_cat, cat_sha = catalogue_set_sha256(rec)
+    commits = {m.get("git_sha") for m in member_metas}
+    block = L.canonicalise({
+        "format": LINEAGE_FORMAT,
+        "cache": {"sha256": cache_identity["sha256"], "size": int(cache_identity["size"]),
+                  "lineage_record_sha256": L.record_sha256(rec), "kind": rec["kind"],
+                  "kind_version": rec["kind_version"], "release_eligible": rec["release_eligible"] is True,
+                  "settings": rec.get("settings") or {}, "n_groups": len(groups),
+                  "rows": {"built": len(groups) - n_carried, CARRIED_LABEL: n_carried}, "carried": carried},
+        "catalogues": {"n": n_cat, "sha256": cat_sha, "rule": CATALOGUE_SET_RULE},
+        "finder_ids": sorted(rec["finder_ids"]),
+        "code_commit": commits.pop() if len(commits) == 1 else None,
+        "export_code": {"commit": export_code.get("commit"), "dirty": export_code.get("dirty")},
+        "wc_map": {"path": WC_MAP_FILE, "sha256": wc_map.sha256, "lineage_record_sha256": L.record_sha256(wc_map.record),
+                   "release_eligible": wc_map.record["release_eligible"] is True, "cache_sha256": wc_map.cache_sha256},
+        "n_members": len(member_metas)})
+    why = lineage_block_reasons(block, allowed) + member_reasons(block, member_metas)
+    block["release_eligible"] = not why
+    block["ineligible_reasons"] = why
+    return check_lineage_block(block)
+
+
+def lineage_block_reasons(block, allowed_finder_ids):
+    """The reasons (empty: eligible) why the block, read on its own, does not describe a release bundle."""
+    from ..tau0_cache import CARRIED_FIELDS
+    why = []
+    allowed = frozenset(allowed_finder_ids)
+    fids = block.get("finder_ids") or []
+    if not fids:
+        why.append("no finder id")
+    bad = sorted(f for f in fids if f not in allowed)
+    if bad:
+        why.append(f"finder ids not in the release allow-list: {bad}")
+    c = block.get("cache") or {}
+    if c.get("kind") != "tau0_cache" or c.get("release_eligible") is not True:
+        why.append("the training cache is not a release-eligible tau0_cache")
+    if (block.get("catalogues") or {}).get("n", 0) < 1:
+        why.append("the training cache names no catalogue")
+    if (c.get("rows") or {}).get(CARRIED_LABEL, 0):
+        car = c.get("carried") or {}
+        prom = car.get("promoted") or {}
+        if car.get("label") != CARRIED_LABEL or car.get("fields") != list(CARRIED_FIELDS) \
+                or not _hex64(car.get("source_sha256")) or car.get("validation_all_passed") is not True:
+            why.append("carried rows without the carry's label, fields, source and passed validation")
+        if not (isinstance(prom, dict) and prom.get("passed") is True and _hex64(prom.get("comparison_sha256"))):
+            why.append("carried rows not promoted (the fresh-row comparison has not passed)")
+    if not (isinstance(block.get("code_commit"), str) and _HEX40.match(block["code_commit"])):
+        why.append("the members' code commit is unknown or not one commit")
+    ex = block.get("export_code") or {}
+    if not (isinstance(ex.get("commit"), str) and _HEX40.match(ex["commit"])) or ex.get("dirty") is not False:
+        why.append("the export ran from an unknown commit or a dirty tree")
+    w = block.get("wc_map") or {}
+    if w.get("release_eligible") is not True:
+        why.append("the w_c map is not release-eligible")
+    if w.get("cache_sha256") != c.get("sha256"):
+        why.append("the w_c map was fitted to another cache")
+    if w.get("path") != WC_MAP_FILE:
+        why.append(f"the w_c map is not {WC_MAP_FILE}")
+    if not isinstance(block.get("n_members"), int) or block["n_members"] < 1:
+        why.append("no member")
+    return why
+
+
+def member_reasons(block, metas):
+    """The reasons why the members are not the ones the block describes: each trained on the block's cache (sha256
+    and lineage-record digest) at the block's commit from a clean tree, recording a file name, not a path."""
+    why = []
+    c = block.get("cache") or {}
+    if len(metas) != block.get("n_members"):
+        why.append(f"{len(metas)} members, the block states {block.get('n_members')}")
+    for i, m in enumerate(metas):
+        if m.get("cache_sha256") != c.get("sha256"):
+            why.append(f"member {i} was trained on another cache")
+        if m.get("cache_lineage_sha256") != c.get("lineage_record_sha256"):
+            why.append(f"member {i} does not name the cache's lineage record")
+        if m.get("git_sha") != block.get("code_commit") or not (isinstance(m.get("git_sha"), str)
+                                                                and _HEX40.match(m["git_sha"])):
+            why.append(f"member {i} was trained at another or an unknown commit")
+        if m.get("code_dirty") is not False:
+            why.append(f"member {i} was trained from a tree not known to be clean")
+        if m.get("cache_path") is not None and not _plain_name(m["cache_path"]):
+            why.append(f"member {i} records a cache path, not a file name")
+    return why
+
+
+def check_lineage_block(block):
+    """Refuse (SafeFormatError) a lineage block that is not well formed (keys, types, digests); returns it. Says
+    nothing about eligibility (``lineage_block_reasons``)."""
+    def bad(why):
+        raise SafeFormatError(f"lineage block: {why}")
+    if not isinstance(block, dict) or set(block) != _BLOCK_KEYS:
+        bad(f"keys {sorted(block) if isinstance(block, dict) else type(block).__name__}, expected {sorted(_BLOCK_KEYS)}")
+    if block["format"] != LINEAGE_FORMAT:
+        bad(f"format {block['format']!r}, expected {LINEAGE_FORMAT}")
+    c = block["cache"]
+    if not isinstance(c, dict) or set(c) != _CACHE_KEYS:
+        bad("malformed cache entry")
+    if not (_hex64(c["sha256"]) and _hex64(c["lineage_record_sha256"]) and S._is_int(c["size"]) and c["size"] >= 0
+            and isinstance(c["settings"], dict) and isinstance(c["rows"], dict)
+            and set(c["rows"]) == {"built", CARRIED_LABEL} and all(S._is_int(v) for v in c["rows"].values())
+            and isinstance(c["release_eligible"], bool)):
+        bad("malformed cache entry")
+    if c["carried"] is not None and (not isinstance(c["carried"], dict) or set(c["carried"]) != _CARRIED_KEYS):
+        bad("malformed carried entry")
+    cat = block["catalogues"]
+    if not (isinstance(cat, dict) and set(cat) == {"n", "sha256", "rule"} and S._is_int(cat["n"])
+            and _hex64(cat["sha256"])):
+        bad("malformed catalogues entry")
+    f = block["finder_ids"]
+    if not (isinstance(f, list) and all(isinstance(x, str) and x for x in f) and f == sorted(set(f))):
+        bad("finder_ids must be a sorted list of distinct non-empty strings")
+    if block["code_commit"] is not None and not isinstance(block["code_commit"], str):
+        bad("code_commit must be a string or null")
+    ex = block["export_code"]
+    if not (isinstance(ex, dict) and set(ex) == {"commit", "dirty"}):
+        bad("export_code must be {commit, dirty}")
+    w = block["wc_map"]
+    if not (isinstance(w, dict) and set(w) == _WC_KEYS and _hex64(w["sha256"]) and _hex64(w["lineage_record_sha256"])
+            and isinstance(w["release_eligible"], bool)):
+        bad("malformed wc_map entry")
+    if not isinstance(block["release_eligible"], bool) or not (isinstance(block["ineligible_reasons"], list) and all(
+            isinstance(r, str) for r in block["ineligible_reasons"])):
+        bad("release_eligible must be a boolean and ineligible_reasons a list of strings")
+    if block["release_eligible"] == bool(block["ineligible_reasons"]):
+        bad("release_eligible disagrees with ineligible_reasons")
+    return block
+
+
 # --------------------------------------------------------------------------------------------- bundles
-def write_manifest(bundle_dir, member_prefixes, provenance):
-    return S.write_manifest(bundle_dir, member_prefixes, provenance, data_ext=EXT, fmt=FORMAT)
+class UnanchoredBundleWarning(UserWarning):
+    """A bundle was loaded without a manifest digest (a development load): nothing anchors it, lineage not enforced."""
+
+
+class MemberMetas(list):
+    """The members' metas, in member order (a list, as before), marked with how the bundle was loaded:
+    ``anchored`` (a manifest digest was given and matched), ``lineage_verified`` (the lineage block, the w_c map and the
+    members' ties were enforced), ``manifest_sha256``, ``format``, ``lineage`` (the manifest's block, or None for h5/1)
+    and ``historical_reason`` (set by the historical loaders)."""
+
+    def __init__(self, metas, *, anchored, lineage_verified, manifest_sha256, fmt, lineage=None,
+                 historical_reason=None):
+        super().__init__(metas)
+        self.anchored, self.lineage_verified = bool(anchored), bool(lineage_verified)
+        self.manifest_sha256, self.format = manifest_sha256, fmt
+        self.lineage, self.historical_reason = lineage, historical_reason
+
+
+class ReleaseBundle(NamedTuple):
+    """A loaded h5/2 bundle (``load_release``)."""
+    ensemble: object               # ensemble.EnsembleEmulator
+    metas: MemberMetas
+    norm: dict                     # member 0's normalizer (shared by every member)
+    manifest: dict
+    manifest_sha256: str
+    lineage: dict
+    wc_map: object                 # wc_map.WcMap
+    anchored: bool
+    bundle_dir: str
+
+
+def export_wc_map(bundle_dir, src_path, *, require_release_eligible=True):
+    """Copy the w_c map at ``src_path`` into ``bundle_dir`` as ``WC_MAP_FILE`` (the bytes parsed and checked first;
+    never overwritten). Returns the parsed map of the bytes written."""
+    from . import wc_map as W
+    raw = S.read_regular(str(src_path), W.MAX_BYTES)
+    m = W.parse_wc_map(raw, str(src_path), require_release_eligible=require_release_eligible)
+    dst = os.path.join(os.path.abspath(bundle_dir), WC_MAP_FILE)
+    if os.path.lexists(dst):
+        raise SafeFormatError(f"{dst} exists: export never overwrites")
+    if S._write_exclusive(dst, [raw]) != m.sha256:
+        raise SafeFormatError(f"{dst}: the bytes written are not the map's")
+    return m
+
+
+def write_manifest(bundle_dir, member_prefixes, provenance, *, lineage):
+    """The h5/2 ``manifest.json``: the members' files, the w_c map (``WC_MAP_FILE``, already in ``bundle_dir``), the
+    provenance and the lineage block (``make_lineage_block``), which must name that very map file."""
+    check_lineage_block(lineage)
+    wc = os.path.join(os.path.abspath(bundle_dir), WC_MAP_FILE)
+    if S._sha256_regular(wc)[0] != lineage["wc_map"]["sha256"]:
+        raise SafeFormatError(f"{wc} is not the w_c map the lineage block names")
+    return S.write_manifest(bundle_dir, member_prefixes, provenance, data_ext=EXT, fmt=FORMAT,
+                            aux={WC_MAP_KEY: WC_MAP_FILE}, extra={LINEAGE_KEY: lineage})
+
+
+def write_manifest_historical(bundle_dir, member_prefixes, provenance):
+    """An h5/1 ``manifest.json`` (members only), for reproducing historical bundles; their members are exported with
+    ``fmt=FORMAT_HISTORICAL``."""
+    return S.write_manifest(bundle_dir, member_prefixes, provenance, data_ext=EXT, fmt=FORMAT_HISTORICAL)
+
+
+def _manifest_format(bundle_dir):
+    try:
+        man = S._json_loads(S.read_regular(os.path.join(os.path.abspath(bundle_dir), S.MANIFEST), S.MAX_JSON_BYTES),
+                            S.MANIFEST)
+    except SafeFormatError:
+        return None
+    return man.get("format") if isinstance(man, dict) else None
+
+
+def _read_v2(bundle_dir, expected):
+    if expected is not None and _manifest_format(bundle_dir) == FORMAT_HISTORICAL:
+        raise SafeFormatError(f"{bundle_dir}: an {FORMAT_HISTORICAL} bundle (written before bundles carried lineage) "
+                              f"is historical: it loads only through load_ensemble_historical(..., reason=...)")
+    return S.read_manifest(bundle_dir, expected, data_ext=EXT, fmt=FORMAT, aux_keys=(WC_MAP_KEY,),
+                           extra_keys=(LINEAGE_KEY,))
 
 
 def verify_manifest(bundle_dir, *, expected_sha256=None, allow_extra=False):
-    return [p for p, _, _ in S._manifest_entries(bundle_dir, expected_sha256, allow_extra, data_ext=EXT, fmt=FORMAT)]
+    """Check an h5/2 bundle's manifest against the directory without loading it. Returns the member prefixes."""
+    return [p for p, _, _ in S.read_manifest(bundle_dir, expected_sha256, allow_extra, data_ext=EXT, fmt=FORMAT,
+                                             aux_keys=(WC_MAP_KEY,), extra_keys=(LINEAGE_KEY,))[2]]
 
 
-def load_ensemble(bundle_dir, *, expected_manifest_sha256):
-    """The release entry point: ``load_bundle``, then require every member to share one network architecture, one k
-    grid and one normalizer (a prediction applies member 0's normalizer to every member). Returns
-    ``(ensemble.EnsembleEmulator, [meta per member], norm)``."""
-    from .ensemble import EnsembleEmulator
-    members = load_bundle(bundle_dir, expected_manifest_sha256=expected_manifest_sha256)
+def _same_network(bundle_dir, members):
+    """Every member shares member 0's architecture, k grid, parameter box and normalizer."""
     _, meta0, norm0 = members[0]
     t0 = S.norm_tensors(norm0)
     for i, (_, meta, norm) in enumerate(members[1:], 1):
         if meta["arch_cfg"] != meta0["arch_cfg"] or meta["k_com_hmpc"] != meta0["k_com_hmpc"]:
             raise SafeFormatError(f"{bundle_dir}: member {i} has another architecture or k grid than member 0")
+        if meta["param_limits"] != meta0["param_limits"]:
+            raise SafeFormatError(f"{bundle_dir}: member {i} has another parameter box than member 0")
         t = S.norm_tensors(norm)
         if set(t) != set(t0) or any(t[n].shape != t0[n].shape or t[n].tobytes() != t0[n].tobytes() for n in t0):
             raise SafeFormatError(f"{bundle_dir}: member {i} does not share member 0's normalizer")
-    return EnsembleEmulator([m for m, _, _ in members]), [meta for _, meta, _ in members], norm0
+
+
+def _load_v2(bundle_dir, expected):
+    """Everything an h5/2 load does; with ``expected`` (the anchored release path) the lineage is enforced."""
+    from .. import lineage as L
+    from . import wc_map as W
+    from .ensemble import EnsembleEmulator
+    man, sha, entries, aux = _read_v2(bundle_dir, expected)
+    block = check_lineage_block(man[LINEAGE_KEY])
+    wc_path, wc_sha = aux[WC_MAP_KEY]
+    try:
+        wcm = W.parse_wc_map(S.read_regular(wc_path, W.MAX_BYTES), wc_path, expected_sha256=wc_sha,
+                             require_release_eligible=expected is not None)
+    except W.WcMapError as e:
+        raise SafeFormatError(str(e)) from None
+    if expected is not None:
+        why = lineage_block_reasons(block, _release_finder_ids())
+        if why or block["release_eligible"] is not True or block["ineligible_reasons"]:
+            raise SafeFormatError(f"{bundle_dir}: the bundle's lineage does not establish a clean release: "
+                                  + "; ".join(why or block["ineligible_reasons"] or ["stated ineligible"]))
+        if wcm.sha256 != block["wc_map"]["sha256"] or L.record_sha256(wcm.record) != \
+                block["wc_map"]["lineage_record_sha256"] or wcm.cache_sha256 != block["cache"]["sha256"]:
+            raise SafeFormatError(f"{bundle_dir}: the w_c map is not the one the lineage block names")
+    members = [load_member(p, expected_sha256=s, expected_json_sha256=j, fmt=FORMAT) for p, s, j in entries]
+    metas = [m for _, m, _ in members]
+    if expected is not None:
+        why = member_reasons(block, metas)
+        if why:
+            raise SafeFormatError(f"{bundle_dir}: the members are not the ones the lineage block describes: "
+                                  + "; ".join(why))
+    _same_network(bundle_dir, members)
+    if expected is None:
+        warnings.warn(f"{bundle_dir}: loaded WITHOUT a manifest digest (unanchored development bundle); its lineage "
+                      "was not enforced", UnanchoredBundleWarning, stacklevel=3)
+    mm = MemberMetas(metas, anchored=expected is not None, lineage_verified=expected is not None,
+                     manifest_sha256=sha, fmt=FORMAT, lineage=copy.deepcopy(block))
+    return ReleaseBundle(EnsembleEmulator([m for m, _, _ in members]), mm, members[0][2], man, sha,
+                         copy.deepcopy(block), wcm, expected is not None, os.path.abspath(bundle_dir)), members
+
+
+def load_release(bundle_dir, *, expected_manifest_sha256):
+    """The release load of an h5/2 bundle, anchored on the published manifest digest (None is refused): the lineage
+    checks of ``load_ensemble`` plus the parsed w_c map and the block. Returns a ``ReleaseBundle``."""
+    if not _hex64(expected_manifest_sha256):
+        raise SafeFormatError("load_release needs the published manifest sha256 (64 hex digits); an unanchored "
+                              "development load is load_ensemble(..., expected_manifest_sha256=None)")
+    return _load_v2(bundle_dir, expected_manifest_sha256)[0]
+
+
+def load_ensemble(bundle_dir, *, expected_manifest_sha256):
+    """The release entry point: an h5/2 bundle, every member sharing one network architecture, one k grid, one
+    parameter box and one normalizer (a prediction applies member 0's normalizer to every member). With the published
+    manifest digest the bundle must establish a clean lineage (module docstring) or it is refused; ``None`` loads an
+    unanchored development bundle, warns, and marks the metas (``MemberMetas.anchored`` False). An h5/1 bundle is
+    refused: ``load_ensemble_historical``. Returns ``(ensemble.EnsembleEmulator, MemberMetas, norm)``."""
+    rb, _ = _load_v2(bundle_dir, expected_manifest_sha256)
+    return rb.ensemble, rb.metas, rb.norm
 
 
 def load_bundle(bundle_dir, *, expected_manifest_sha256):
-    """Verify the manifest, then load every member with the manifest's digests (anchor keyword required; ``None``
-    explicitly loads an unanchored development bundle)."""
-    return [load_member(p, expected_sha256=s, expected_json_sha256=j)
-            for p, s, j in S._manifest_entries(bundle_dir, expected_manifest_sha256, data_ext=EXT, fmt=FORMAT)]
+    """The members of an h5/2 bundle, ``[(model, meta, norm)]``, after every check of ``load_ensemble`` (anchor keyword
+    required; ``None`` loads an unanchored development bundle and warns)."""
+    return _load_v2(bundle_dir, expected_manifest_sha256)[1]
+
+
+def _historical_reason(reason):
+    if not (isinstance(reason, str) and reason.strip()):
+        raise ValueError("a historical bundle load needs a non-empty reason")
+    return reason.strip()
+
+
+def load_bundle_historical(bundle_dir, *, expected_manifest_sha256, reason):
+    """The members of an h5/1 bundle (written before bundles carried lineage), ``[(model, meta, norm)]``: every format
+    check of the h5/1 loader, no lineage. ``reason`` (non-empty) is logged; nothing loaded this way is a release
+    model."""
+    import logging
+    why = _historical_reason(reason)
+    logging.getLogger(__name__).warning("historical load of the bundle %s (%s): not a release model", bundle_dir, why)
+    return [load_member(p, expected_sha256=s, expected_json_sha256=j, fmt=FORMAT_HISTORICAL)
+            for p, s, j in S._manifest_entries(bundle_dir, expected_manifest_sha256, data_ext=EXT,
+                                               fmt=FORMAT_HISTORICAL)]
+
+
+def load_ensemble_historical(bundle_dir, *, expected_manifest_sha256, reason):
+    """``load_ensemble`` for an h5/1 bundle: ``(EnsembleEmulator, MemberMetas, norm)`` with the metas marked
+    historical (``historical_reason``) and ``lineage_verified`` False."""
+    from .ensemble import EnsembleEmulator
+    members = load_bundle_historical(bundle_dir, expected_manifest_sha256=expected_manifest_sha256, reason=reason)
+    _same_network(bundle_dir, members)
+    sha = S.sha256_file(os.path.join(os.path.abspath(bundle_dir), S.MANIFEST))
+    mm = MemberMetas([m for _, m, _ in members], anchored=expected_manifest_sha256 is not None,
+                     lineage_verified=False, manifest_sha256=sha, fmt=FORMAT_HISTORICAL,
+                     historical_reason=_historical_reason(reason))
+    return EnsembleEmulator([m for m, _, _ in members]), mm, members[0][2]
+
+
+def verify_manifest_historical(bundle_dir, *, expected_sha256=None, allow_extra=False):
+    """Check an h5/1 bundle's manifest against the directory without loading it. Returns the member prefixes."""
+    return [p for p, _, _ in S._manifest_entries(bundle_dir, expected_sha256, allow_extra, data_ext=EXT,
+                                                 fmt=FORMAT_HISTORICAL)]
 
 
 sha256_file = S.sha256_file
