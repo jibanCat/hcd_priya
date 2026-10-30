@@ -186,14 +186,25 @@ def test_pipeline_writes_reconciled_counts_and_refuses_a_mismatch(tmp_path, monk
     hdr = types.SimpleNamespace(nbins=N, n_skewers=3, box=120000.0, hubble=0.7)
     args = dict(p1d_variants={}, p1d_ratios={}, perturbed_p1d=None, excl_result=None, ics_meta={}, timing={},
                 header=hdr, sim_name="synthetic", snap=1, z=3.0, dv_kms=10.0)
-    PL._save_snap_outputs(tmp_path, _cat(logn), cddf_result=cddf, **args)
+    cat = _stamp(_cat(logn))
+    cat.save_npz(tmp_path / "catalog.npz")
+    PL._save_snap_outputs(tmp_path, cat, cddf_result=cddf, **args)
     meta = json.load(open(tmp_path / "meta.json"))
     assert meta["n_absorbers"] == {"LLS": 1, "subDLA": 1, "DLA": 1, "forest": 0}
+    assert meta["mode"] == "full" and sorted(meta["products"]) == ["catalog.npz", "cddf.npz", "p1d.npz"]
+    for name, ident in meta["products"].items():
+        assert ident == {k: v for k, v in L.file_identity(tmp_path / name).items() if k != "mtime_ns"}
     bad = tmp_path / "bad"
     bad.mkdir()
     with pytest.raises(C.CatalogIntegrityError):
-        PL._save_snap_outputs(bad, _cat(logn), cddf_result=dict(cddf, n_absorbers=cddf["n_absorbers"] * 2), **args)
+        PL._save_snap_outputs(bad, cat, cddf_result=dict(cddf, n_absorbers=cddf["n_absorbers"] * 2), **args)
     assert not any(bad.iterdir())                                    # nothing written past the failed check
+    other = tmp_path / "other"
+    other.mkdir()
+    _stamp(_cat(logn[:2])).save_npz(other / "catalog.npz")         # not the catalogue in memory
+    with pytest.raises(C.CatalogProvenanceError, match="not the one this snapshot used"):
+        PL._save_snap_outputs(other, cat, cddf_result=cddf, **args)
+    assert sorted(p.name for p in other.iterdir()) == ["catalog.npz"]
 
 
 # ----------------------------------------------------------------------------- review follow-ups
@@ -669,3 +680,179 @@ def test_an_old_catalogue_is_read_only_through_the_historical_loader(tmp_path, c
     stamped.save_npz(tmp_path / "s.npz")
     hs = C.load_catalog_historical(tmp_path / "s.npz", reason="audit")
     assert hs.lineage == stamped.lineage and not hs.release_eligible      # ... keeps its record, stays historical
+
+
+# ----------------------------------------------------------------------------- catalogue-only mode, product hashes
+def _modes_setup(tmp_path, monkeypatch, code=CLEAN):
+    PL = _pipeline(monkeypatch)
+    monkeypatch.setattr(L, "code_identity", lambda repo_dir=None: dict(code))
+    from hcd_analysis.config import PipelineConfig
+    from hcd_analysis.io import SimInfo
+    from hcd_analysis.snapshot_map import SimSnapshot, SnapEntry
+    entry = SnapEntry(snap=1, a=0.25, z=3.0, path=_synthetic_snapshot(tmp_path / "data"))
+    entry2 = SnapEntry(snap=2, a=1 / 4.1, z=3.1, path=_synthetic_snapshot(tmp_path / "data2", z=3.1))
+    sim = SimInfo(name="synthsim", path=tmp_path / "simroot", params={})
+
+    def cfg(name, catalogue_only=True, **absorber):
+        c = PipelineConfig(output_root=str(tmp_path / name), resume=True, n_workers=1, catalogue_only=catalogue_only)
+        c.p1d.nhi_excl_thresholds = []
+        for k, v in absorber.items():
+            setattr(c.absorber, k, v)
+        return c
+    return PL, SimSnapshot(sim=sim, entries=[entry]), SimSnapshot(sim=sim, entries=[entry, entry2]), entry, entry2, cfg
+
+
+def _tree(root):
+    return sorted((str(p.relative_to(root)), p.stat().st_mtime_ns) for p in Path(root).rglob("*"))
+
+
+def test_catalogue_only_mode_writes_the_catalogue_its_cddf_and_meta_and_no_p1d(tmp_path, monkeypatch):
+    PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
+    c = cfg("cat")
+    res = PL.run_one_snap(ss, entry, c)
+    d = PL.snap_output_dir(c, "synthsim", 1)
+    assert res is not None and res.p1d_variants == {} and res.p1d_ratios == {} and len(res.catalog.absorbers) == 2
+    assert sorted(p.name for p in d.iterdir()) == ["catalog.npz", "cddf.npz", "done_catalogue", "meta.json"]
+    assert PL.is_done(c, "synthsim", 1) and not (d / "done").exists()
+    root_rec = json.loads((Path(c.output_root) / "run_settings.json").read_text())
+    assert root_rec["settings"]["catalogue_only"] is True
+    meta = json.loads((d / "meta.json").read_text())
+    assert meta["mode"] == "catalogue" and sum(meta["n_absorbers"].values()) == 2
+    assert meta["code_commit"] == PL._repo_commit() and "code_dirty" in meta
+    assert sorted(meta["products"]) == ["catalog.npz", "cddf.npz"]
+    for name, ident in meta["products"].items():
+        assert ident == {k: v for k, v in L.file_identity(d / name).items() if k != "mtime_ns"}
+    cat = C.load_validated_catalog(d / "catalog.npz", 64, raw_path=entry.path, require_release_eligible=True)
+    raw = L.find_input(cat.lineage, "raw_spectra")
+    assert {k: raw[k] for k in ("sha256", "size", "mtime_ns")} == L.file_identity(entry.path)
+    assert cat.lineage["run_settings_sha256"] == L.sha256_file(Path(c.output_root) / "run_settings.json")
+    _, crec = L.read_npz(d / "cddf.npz")
+    assert crec["kind"] == "cddf" and crec["release_eligible"] and crec["finder_ids"] == [C.FINDER_ID]
+    assert L.find_input(crec, "catalog")["sha256"] == meta["products"]["catalog.npz"]["sha256"]
+    assert L.find_input(crec, "raw_spectra_header")["sha256"] == raw["sha256"]
+    snap_rec = L.check_record(meta["lineage"], C.RELEASE_FINDER_IDS)
+    assert snap_rec["kind"] == "snapshot" and snap_rec["release_eligible"] and snap_rec["settings"] == {"mode":
+                                                                                                         "catalogue"}
+    # done: reused, nothing rewritten; the simulation level stacks the CDDFs as in a full run
+    before = _tree(c.output_root)
+    again = PL.run_one_snap(ss, entry, c)
+    assert again is not None and len(again.catalog.absorbers) == 2 and _tree(c.output_root) == before
+    assert set(again.cddf_result) >= {"f_nhi", "n_absorbers", "log_nhi_edges"} and L.NPZ_KEY not in again.cddf_result
+    out = PL.run_sim_all_z(ss2, c)
+    assert all(r is not None for r in out) and (Path(c.output_root) / "synthsim" / "cddf_stacked.npz").exists()
+
+
+def test_a_dirty_tree_writes_products_that_are_not_release_eligible(tmp_path, monkeypatch):
+    PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch, code={"commit": "c" * 40, "dirty": True})
+    c = cfg("cat")
+    assert PL.run_one_snap(ss, entry, c) is not None
+    d = PL.snap_output_dir(c, "synthsim", 1)
+    meta = json.loads((d / "meta.json").read_text())
+    assert not meta["lineage"]["release_eligible"] and not L.read_npz(d / "cddf.npz")[1]["release_eligible"]
+    assert PL.run_one_snap(ss, entry, c) is not None                       # resumable, never eligible
+    with pytest.raises(C.CatalogProvenanceError, match="not release-eligible"):
+        C.load_validated_catalog(d / "catalog.npz", 64, require_release_eligible=True)
+
+
+def test_catalogue_only_and_full_runs_never_share_a_root_or_a_snapshot(tmp_path, monkeypatch):
+    from hcd_analysis.run_settings import RunSettingsMismatch
+    PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
+    full = cfg("root", catalogue_only=False)
+    assert PL.run_one_snap(ss, entry, full) is not None
+    before = _tree(full.output_root)
+    with pytest.raises(RunSettingsMismatch, match="catalogue_only: recorded False, this run True"):
+        PL.run_one_snap(ss, entry, cfg("root"))
+    assert _tree(full.output_root) == before
+    # a snapshot directory of one mode copied into a root of the other: refused, nothing touched
+    for src_mode, dst_mode in ((False, True), (True, False)):
+        src, dst = cfg(f"src_{src_mode}", catalogue_only=src_mode), cfg(f"dst_{src_mode}", catalogue_only=dst_mode)
+        assert PL.run_one_snap(ss, entry, src) is not None
+        PL.check_run_settings(dst)
+        shutil.copytree(PL.snap_output_dir(src, "synthsim", 1), PL.snap_output_dir(dst, "synthsim", 1),
+                        dirs_exist_ok=True)
+        before = _tree(dst.output_root)
+        with pytest.raises(RunSettingsMismatch, match="of the other mode"):
+            PL.run_one_snap(ss, entry, dst)
+        assert _tree(dst.output_root) == before
+
+
+@pytest.mark.parametrize("catalogue_only", [True, False])
+def test_a_completed_snapshot_whose_products_do_not_match_meta_is_refused(tmp_path, monkeypatch, catalogue_only):
+    PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
+    good = cfg("good", catalogue_only=catalogue_only)
+    assert PL.run_one_snap(ss2, entry2, good) is not None and PL.run_one_snap(ss, entry, good) is not None
+    d_good = PL.snap_output_dir(good, "synthsim", 1)
+    other = PL.snap_output_dir(good, "synthsim", 2)
+
+    def swap(name):
+        def f(d):
+            shutil.copy2(other / name, d / name)                           # another snapshot's product
+        return f
+
+    def drop_products(d):
+        meta = json.loads((d / "meta.json").read_text())
+        del meta["products"]                                               # as written before meta listed them
+        (d / "meta.json").write_text(json.dumps(meta))
+
+    def edit_record(d):
+        meta = json.loads((d / "meta.json").read_text())
+        meta["lineage"]["inputs"][0]["sha256"] = "0" * 64
+        (d / "meta.json").write_text(json.dumps(meta))
+    cases = [("swapped_cddf", swap("cddf.npz"), "cddf.npz does not match"),
+             ("no_products", drop_products, "lists no product hashes"),
+             ("edited_record", edit_record, "does not list the products")]
+    if not catalogue_only:
+        cases.append(("swapped_p1d", swap("p1d.npz"), "p1d.npz does not match"))
+    for name, damage, why in cases:
+        c = cfg(name, catalogue_only=catalogue_only)
+        PL.check_run_settings(c)
+        d = PL.snap_output_dir(c, "synthsim", 1)
+        shutil.copytree(d_good, d, dirs_exist_ok=True)
+        damage(d)
+        before = _tree(c.output_root)
+        with pytest.raises(PL.SnapshotIntegrityError, match=why):
+            PL.run_one_snap(ss, entry, c)
+        with pytest.raises(C.CatalogIntegrityError, match=why):
+            PL.run_sim_all_z(ss, c)
+        assert _tree(c.output_root) == before
+    # meta.json made consistent with a swapped cddf.npz: cddf.npz's own record names another catalogue
+    c = cfg("relisted", catalogue_only=catalogue_only)
+    PL.check_run_settings(c)
+    d = PL.snap_output_dir(c, "synthsim", 1)
+    shutil.copytree(d_good, d, dirs_exist_ok=True)
+    shutil.copy2(other / "cddf.npz", d / "cddf.npz")
+    meta = json.loads((d / "meta.json").read_text())
+    meta["products"]["cddf.npz"] = {k: v for k, v in L.file_identity(d / "cddf.npz").items() if k != "mtime_ns"}
+    for inp in meta["lineage"]["inputs"]:
+        if inp["role"] == "cddf.npz":
+            inp["sha256"] = meta["products"]["cddf.npz"]["sha256"]
+    (d / "meta.json").write_text(json.dumps(meta))
+    with pytest.raises(PL.SnapshotIntegrityError, match="not made from the listed catalog.npz"):
+        PL.run_one_snap(ss, entry, c)
+
+
+@pytest.mark.parametrize("catalogue_only", [True, False])
+def test_a_cached_catalogue_of_other_settings_or_another_raw_file_is_refused(tmp_path, monkeypatch, catalogue_only):
+    PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
+    src = cfg("src", catalogue_only=catalogue_only, min_pixels=3)
+    assert PL.run_one_snap(ss, entry, src) is not None
+    assert PL.run_one_snap(ss2, entry2, src) is not None
+    for name, from_snap, why in (("settings", 1, "other finder settings: min_pixels: recorded 3, expected 2"),
+                                 ("raw", 2, "not the raw_spectra input")):
+        c = cfg(name, catalogue_only=catalogue_only)
+        PL.check_run_settings(c)
+        d = PL.snap_output_dir(c, "synthsim", 1)
+        if name == "raw":                                                  # the same settings, another snapshot's file
+            c_src = cfg("src_raw", catalogue_only=catalogue_only)
+            assert PL.run_one_snap(ss2, entry2, c_src) is not None
+            cached = PL.snap_output_dir(c_src, "synthsim", 2) / "catalog.npz"
+            arrays, rec = L.read_npz(cached)
+            arrays["snap"] = np.array(1, dtype=np.int64)                   # relabelled by hand to this snapshot
+            rec = dict(rec, product=dict(rec["product"], snap=1, payload_sha256=L.arrays_sha256(arrays)))
+            L.write_npz(d / "catalog.npz", arrays, rec)
+        else:
+            shutil.copy2(PL.snap_output_dir(src, "synthsim", from_snap) / "catalog.npz", d / "catalog.npz")
+        assert PL.run_one_snap(ss, entry, c) is None                      # not done: fails, nothing else written
+        assert sorted(p.name for p in d.iterdir()) == ["catalog.npz", "error.txt"]
+        err = (d / "error.txt").read_text()
+        assert "cached catalogue refused" in err and why in err

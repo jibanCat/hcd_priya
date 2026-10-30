@@ -66,6 +66,11 @@ prefer_grid: true           # prefer lya_forest_spectra_grid_480.hdf5
 # Resume: skip completed (sim, snap) pairs
 resume: true
 
+# Catalogue-only mode: catalog.npz, cddf.npz and meta.json per snapshot (marker
+# done_catalogue), no P1D products. Recorded in run_settings.json, so one output
+# root holds either catalogue-only or full runs.
+catalogue_only: false
+
 # Debug/benchmark
 benchmark: false
 debug: false

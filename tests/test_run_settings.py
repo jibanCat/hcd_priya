@@ -288,7 +288,8 @@ def test_the_pipeline_records_its_product_settings_at_the_output_root(tmp_path, 
     assert doc["settings"] == RS._canonical(PL.product_settings(c))
     assert doc["settings"]["absorber"]["tau_threshold"] == 100.0
     assert set(doc["settings"]) == {"data_root", "prefer_grid", "absorber_classes", "absorber", "p1d", "cddf",
-                                    "benchmark", "debug"}
+                                    "benchmark", "debug", "catalogue_only"}
+    assert doc["settings"]["catalogue_only"] is False
 
 
 @pytest.mark.parametrize("done", [True, False])
@@ -313,7 +314,8 @@ def test_a_rerun_with_another_threshold_is_refused_before_anything_is_read_or_wr
     ("cddf.A", lambda c: setattr(c.cddf, "A", 2.0)),
     ("absorber_classes", lambda c: setattr(c, "absorber_classes", ["LLS"])),
     ("data_root", lambda c: setattr(c, "data_root", "/elsewhere")),
-    ("debug", lambda c: setattr(c, "debug", True))])
+    ("debug", lambda c: setattr(c, "debug", True)),
+    ("catalogue_only", lambda c: setattr(c, "catalogue_only", True))])
 def test_a_rerun_into_a_new_snapshot_of_the_same_root_is_refused_on_each_product_setting(tmp_path, monkeypatch, key,
                                                                                            change):
     PL, ss, entry, cfg = _setup(tmp_path, monkeypatch)

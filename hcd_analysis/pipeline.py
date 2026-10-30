@@ -20,10 +20,20 @@ Level 3 – all sims, all z:
   Iterate over all sims; run Level 2 for each.
   Parallelism over sims via joblib.
 
+Catalogue-only mode (cfg.catalogue_only, a product setting)
+-------------------------------------------------------------
+Each (sim, snap) writes catalog.npz (with its lineage record), cddf.npz (with a record naming the catalogue's sha256)
+and meta.json, then the marker done_catalogue; no P1D product is computed. The setting is recorded in the output
+root's run_settings.json, so one root holds either catalogue-only or full runs.
+
 Resume / idempotency
 --------------------
-Each (sim, snap) writes a sentinel file <output_dir>/<sim>/<snap>/done.
-If this file exists and cfg.resume=True, the pair is skipped.
+Each (sim, snap) writes a sentinel file <output_dir>/<sim>/<snap>/done (done_catalogue in catalogue-only mode), after
+meta.json, which lists the sha256 and size of every product written for the snapshot ("products") and a lineage
+record of the snapshot. If the sentinel exists and cfg.resume=True, the pair is not recomputed: its catalogue must pass
+load_validated_catalog (lineage record from an allowed finder, the run's finder settings, the same raw spectra file,
+then the value checks) and every listed product must match its sha256; otherwise the run stops. A snapshot directory
+holding the other mode's sentinel is refused (RunSettingsMismatch), touching nothing.
 
 Failure handling
 ----------------
@@ -50,8 +60,9 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .catalog import (AbsorberCatalog, CatalogIntegrityError, build_catalog, load_validated_catalog,
-                      reconcile_counts, LOG_NHI_LLS_MIN)
+from . import lineage as L
+from .catalog import (AbsorberCatalog, CatalogIntegrityError, CatalogProvenanceError, RELEASE_FINDER_IDS,
+                      build_catalog, finder_settings, load_validated_catalog, reconcile_counts, LOG_NHI_LLS_MIN)
 from .cddf import (
     CDDFPerturbation,
     compute_perturbed_p1d,
@@ -120,8 +131,19 @@ def _repo_commit() -> str:
 # output location are not product settings and may change between runs; the per-snapshot products do not depend on
 # them, while <sim>/cddf_stacked.npz is rebuilt from the snapshots each invocation selects and lists them
 # (z_snapshots). A change of code alone is not refused; each snapshot's meta.json records the code commit.
-PRODUCT_SETTING_KEYS = ("data_root", "prefer_grid", "absorber_classes", "absorber", "p1d", "cddf", "benchmark", "debug")
+PRODUCT_SETTING_KEYS = ("data_root", "prefer_grid", "absorber_classes", "absorber", "p1d", "cddf", "benchmark", "debug",
+                        "catalogue_only")
 HIRES_SUBDIR = "hires"     # run_hires writes under <output_root>/hires, an output root with its own record
+DONE_FULL, DONE_CATALOGUE = "done", "done_catalogue"     # the completion markers of the two modes
+CDDF_KIND_VERSION = 1
+SNAPSHOT_KIND_VERSION = 1
+# the files a snapshot directory may list in meta.json["products"], with their lineage kinds
+PRODUCT_KINDS = {"catalog.npz": "catalog", "cddf.npz": "cddf", "p1d.npz": "p1d", "p1d_ratios.npz": "p1d_ratios",
+                 "p1d_excl.npz": "p1d_excl", "p1d_perturbed.npz": "p1d_perturbed", "p1d_per_class.h5": "p1d_per_class"}
+
+
+class SnapshotIntegrityError(CatalogIntegrityError):
+    """A completed snapshot's products do not match the sha256 its meta.json records, or its records disagree."""
 
 
 def product_settings(cfg: PipelineConfig) -> dict:
@@ -151,19 +173,179 @@ def snap_output_dir(cfg: PipelineConfig, sim_name: str, snap: int) -> Path:
     return d
 
 
+def done_marker(cfg: PipelineConfig) -> str:
+    return DONE_CATALOGUE if cfg.catalogue_only else DONE_FULL
+
+
 def is_done(cfg: PipelineConfig, sim_name: str, snap: int) -> bool:
-    sentinel = snap_output_dir(cfg, sim_name, snap) / "done"
+    sentinel = snap_output_dir(cfg, sim_name, snap) / done_marker(cfg)
     return sentinel.exists()
 
 
 def mark_done(cfg: PipelineConfig, sim_name: str, snap: int) -> None:
-    (snap_output_dir(cfg, sim_name, snap) / "done").touch()
+    (snap_output_dir(cfg, sim_name, snap) / done_marker(cfg)).touch()
+
+
+def _refuse_other_mode(out_dir: Path, cfg: PipelineConfig) -> None:
+    """A snapshot directory completed in the other mode (copied in; the root's record keeps the modes apart) is
+    neither resumed nor overwritten."""
+    other = DONE_FULL if cfg.catalogue_only else DONE_CATALOGUE
+    if (out_dir / other).exists():
+        mode = "catalogue-only" if cfg.catalogue_only else "full"
+        raise RunSettingsMismatch(f"{out_dir} holds the marker {other} of the other mode; this {mode} run neither "
+                                  "resumes nor overwrites it. Nothing was read or written.")
 
 
 def write_error(cfg: PipelineConfig, sim_name: str, snap: int, msg: str) -> None:
     path = snap_output_dir(cfg, sim_name, snap) / "error.txt"
     with open(path, "w") as f:
         f.write(msg)
+
+
+# ---------------------------------------------------------------------------
+# Catalogue and lineage helpers
+# ---------------------------------------------------------------------------
+
+def _catalog_kwargs(cfg: PipelineConfig) -> dict:
+    """The catalogue-determining arguments of build_catalog for this run (the keyword names of finder_settings)."""
+    a = cfg.absorber
+    return dict(tau_threshold=a.tau_threshold, merge_dv_kms=a.merge_dv_kms, min_pixels=a.min_pixels,
+                b_init=a.b_init_kms, b_bounds=tuple(a.b_bounds), tau_fit_cap=a.tau_fit_cap,
+                voigt_max_iter=a.voigt_max_iter, n_skewers=cfg.p1d.n_skewers if cfg.debug else None,
+                fast_mode=a.fast_mode or cfg.benchmark, min_log_nhi=a.min_log_nhi)
+
+
+def _n_skewers_built(kw: dict, n_skewers_file: int) -> int:
+    return int(n_skewers_file) if kw["n_skewers"] is None else min(int(kw["n_skewers"]), int(n_skewers_file))
+
+
+def _catalog_for_snap(cfg, entry, out_dir, header, dv_kms, sim_name, snap, z, run_settings_sha256) -> AbsorberCatalog:
+    """The snapshot's catalogue: a cached catalog.npz on resume, refused unless load_validated_catalog accepts it
+    with this run's finder settings, raw spectra file and skewer count; else built (stamped) and saved."""
+    catalog_path = out_dir / "catalog.npz"
+    kw = _catalog_kwargs(cfg)
+    if cfg.resume and catalog_path.exists():
+        catalog = load_validated_catalog(catalog_path, int(header.nbins), settings=finder_settings(**kw),
+                                         raw_path=entry.path, n_skewers_built=_n_skewers_built(kw, header.n_skewers))
+        logger.info("  loaded catalog from cache (%d absorbers)", len(catalog.absorbers))
+        return catalog
+    catalog = build_catalog(hdf5_path=entry.path, sim_name=sim_name, snap=snap, z=z, dv_kms=dv_kms,
+                            batch_size=cfg.skewer_batch_size, n_workers=cfg.n_workers_skewer,
+                            run_settings_sha256=run_settings_sha256, **kw)
+    catalog.save_npz(catalog_path)
+    return catalog
+
+
+def _catalog_input(out_dir: Path, catalog: AbsorberCatalog) -> dict:
+    """The lineage input entry of the snapshot's catalog.npz, refused unless the file on disk carries the record of
+    the catalogue in memory."""
+    path = out_dir / "catalog.npz"
+    with np.load(path, allow_pickle=False) as d:
+        on_disk = L.parse_record(str(d[L.NPZ_KEY][()])) if L.NPZ_KEY in d.files else None
+    if catalog.lineage is None or on_disk != catalog.lineage:
+        raise CatalogProvenanceError(f"{path}: the catalogue on disk is not the one this snapshot used")
+    ident = L.file_identity(path)
+    return L.input_entry("catalog", "catalog", {"sha256": ident["sha256"], "size": ident["size"]},
+                         record=catalog.lineage)
+
+
+def _write_cddf(out_dir: Path, cddf_result: Dict, catalog: AbsorberCatalog, catalog_entry: dict,
+                run_settings_sha256: Optional[str]) -> dict:
+    """cddf.npz with its lineage record: the catalogue (sha256 of catalog.npz) and the raw spectra file whose header
+    gives the absorption path. Returns the record."""
+    arrays = {k: np.asarray(v) for k, v in cddf_result.items() if not isinstance(v, (str, dict))}
+    raw = L.find_input(catalog.lineage, "raw_spectra")
+    rec = L.build_record(
+        "cddf", CDDF_KIND_VERSION,
+        inputs=[catalog_entry, L.input_entry("raw_spectra_header", "raw_spectra", raw)],
+        finder_ids=None, settings={"log_nhi_edges": [float(x) for x in np.asarray(cddf_result["log_nhi_edges"])]},
+        code=L.code_identity(), allowed_finder_ids=RELEASE_FINDER_IDS, run_settings_sha256=run_settings_sha256,
+        product={"sim_name": catalog.sim_name, "snap": int(catalog.snap), "z": float(catalog.z),
+                 "n_absorbers": int(np.sum(arrays["n_absorbers"])), "payload_sha256": L.arrays_sha256(arrays)})
+    L.write_npz(out_dir / "cddf.npz", arrays, rec)
+    return rec
+
+
+def _write_meta(out_dir: Path, meta: dict, products: List[str], records: Dict[str, dict], mode: str,
+                run_settings_sha256: Optional[str]) -> None:
+    """meta.json, written last before the completion marker (atomically): ``mode``, ``products`` (sha256 and size of
+    every product written for the snapshot) and ``lineage``, the snapshot's record listing those products as its
+    inputs (with the records of the lineage-bearing ones, ``records``)."""
+    prods, entries = {}, []
+    for name in products:
+        ident = L.file_identity(out_dir / name)
+        prods[name] = {"sha256": ident["sha256"], "size": ident["size"]}
+        entries.append(L.input_entry(name, PRODUCT_KINDS[name], prods[name], record=records.get(name)))
+    meta = dict(meta, mode=mode, products=prods)
+    meta["lineage"] = L.build_record(
+        "snapshot", SNAPSHOT_KIND_VERSION, inputs=entries, finder_ids=None, settings={"mode": mode},
+        code=L.code_identity(), allowed_finder_ids=RELEASE_FINDER_IDS, run_settings_sha256=run_settings_sha256,
+        product={"sim_name": meta["sim_name"], "snap": int(meta["snap"]), "z": float(meta["z"])})
+    tmp = out_dir / f".meta.json.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(meta, f, indent=2)
+        os.replace(tmp, out_dir / "meta.json")
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def _meta_base(header, sim_name, snap, z, dv_kms, n_absorbers, timing, ics_meta) -> dict:
+    meta = {
+        "sim_name": sim_name,
+        "snap": snap,
+        "z": z,
+        "dv_kms": dv_kms,
+        "nbins": int(header.nbins),
+        "n_skewers": int(header.n_skewers),
+        "box_kpc_h": float(header.box),
+        "hubble": float(header.hubble),
+        "n_absorbers": n_absorbers,
+        "timing_s": {k: round(v, 3) for k, v in timing.items()},
+        "code_commit": _repo_commit(),
+        "code_dirty": _repo_dirty(),
+    }
+    if ics_meta:
+        meta["sim_ics"] = {k: (float(v) if isinstance(v, (int, float)) else v)
+                           for k, v in ics_meta.items()}
+    return meta
+
+
+def _verify_snapshot(out_dir: Path, meta: dict, cfg: PipelineConfig) -> Dict:
+    """Refuse (SnapshotIntegrityError) a completed snapshot unless meta.json is of this run's mode, lists the sha256
+    of every product the mode writes, every listed product matches it, the snapshot record agrees with the list, and
+    cddf.npz's record names the listed catalogue. Returns the CDDF arrays."""
+    mode = "catalogue" if cfg.catalogue_only else "full"
+
+    def refuse(why):
+        raise SnapshotIntegrityError(f"{out_dir}: completed snapshot refused ({why}); rebuild it")
+    if meta.get("mode") != mode:
+        refuse(f"meta.json mode {meta.get('mode')!r}, this run {mode!r}")
+    prods = meta.get("products")
+    if not isinstance(prods, dict) or not prods:
+        refuse("meta.json lists no product hashes (written before snapshots recorded them)")
+    need = {"catalog.npz", "cddf.npz"} | (set() if cfg.catalogue_only else {"p1d.npz"})
+    if need - set(prods) or set(prods) - set(PRODUCT_KINDS):
+        refuse(f"meta.json products {sorted(prods)}, expected {sorted(need)} and only known names")
+    for name, ident in sorted(prods.items()):
+        p = out_dir / name
+        if not (isinstance(ident, dict) and isinstance(ident.get("sha256"), str) and isinstance(ident.get("size"), int)):
+            refuse(f"malformed product entry for {name}")
+        if not p.is_file() or not L.same_file(p, {"sha256": ident["sha256"], "size": ident["size"]}):
+            refuse(f"{name} does not match the sha256 meta.json records")
+    try:
+        rec = L.check_record(meta.get("lineage"), RELEASE_FINDER_IDS)
+        if rec["kind"] != "snapshot" or {i["role"]: i["sha256"] for i in rec["inputs"]} != \
+                {k: v["sha256"] for k, v in prods.items()}:
+            refuse("the snapshot record does not list the products meta.json lists")
+        cddf, crec = L.read_npz(out_dir / "cddf.npz")
+        L.check_record(crec, RELEASE_FINDER_IDS)
+        if crec["kind"] != "cddf" or L.find_input(crec, "catalog")["sha256"] != prods["catalog.npz"]["sha256"]:
+            refuse("cddf.npz was not made from the listed catalog.npz")
+    except L.LineageError as e:
+        refuse(str(e))
+    return cddf
 
 
 # ---------------------------------------------------------------------------
@@ -192,21 +374,26 @@ def run_one_snap(
     """
     Run the full analysis pipeline for one (sim, snap) pair.
 
+    In catalogue-only mode (cfg.catalogue_only) only the catalogue, its CDDF and
+    meta.json are written, and the marker is done_catalogue.
+
     Returns SnapResult on success, None on failure (logged; written to error.txt
     unless the snapshot is marked done). Raises CatalogIntegrityError, writing
-    nothing, when the snapshot is marked done and its cached catalogue is refused,
-    and RunSettingsMismatch, touching nothing, when the output root's recorded
-    run settings differ from cfg's (check_run_settings).
+    nothing, when the snapshot is marked done and its cached catalogue or products
+    are refused, and RunSettingsMismatch, touching nothing, when the output root's
+    recorded run settings differ from cfg's (check_run_settings) or the snapshot
+    directory holds the other mode's marker.
     """
     sim_name = sim_snapshot.sim.name
     snap = entry.snap
     z = entry.z
-    check_run_settings(cfg)                    # refuses a rerun with other settings before anything is touched
+    rs_path = check_run_settings(cfg)          # refuses a rerun with other settings before anything is touched
     out_dir = snap_output_dir(cfg, sim_name, snap)
+    _refuse_other_mode(out_dir, cfg)
 
     if cfg.resume and is_done(cfg, sim_name, snap):
         logger.info("SKIP (done): sim=%s snap=%03d z=%.2f", sim_name[:30], snap, z)
-        return _load_snap_result(out_dir, sim_name, snap, z)
+        return _load_snap_result(out_dir, sim_name, snap, z, cfg, entry.path)
 
     logger.info("START: sim=%s snap=%03d z=%.2f", sim_name[:30], snap, z)
     timing: Dict[str, float] = {}
@@ -217,40 +404,26 @@ def run_one_snap(
         header = read_header(entry.path)
         dv_kms = pixel_dv_kms(header)
         ics_meta = read_sim_ics(sim_snapshot.sim)  # empty dict if file absent
+        rs_sha = L.sha256_file(rs_path)
         timing["header"] = time.perf_counter() - t0
 
-        # --- Build absorber catalog ---------------------------------------
+        # --- Build absorber catalog (or reuse a validated cached one) -----
         t0 = time.perf_counter()
-        catalog_path = out_dir / "catalog.npz"
-
-        if cfg.resume and catalog_path.exists():
-            catalog = load_validated_catalog(catalog_path, int(header.nbins))     # refuses a pre-fix catalogue
-            logger.info("  loaded catalog from cache (%d absorbers)", len(catalog.absorbers))
-        else:
-            n_skewers = cfg.p1d.n_skewers if cfg.debug else None
-            catalog = build_catalog(
-                hdf5_path=entry.path,
-                sim_name=sim_name,
-                snap=snap,
-                z=z,
-                dv_kms=dv_kms,
-                tau_threshold=cfg.absorber.tau_threshold,
-                merge_dv_kms=cfg.absorber.merge_dv_kms,
-                min_pixels=cfg.absorber.min_pixels,
-                b_init=cfg.absorber.b_init_kms,
-                b_bounds=tuple(cfg.absorber.b_bounds),
-                tau_fit_cap=cfg.absorber.tau_fit_cap,
-                voigt_max_iter=cfg.absorber.voigt_max_iter,
-                batch_size=cfg.skewer_batch_size,
-                n_skewers=n_skewers,
-                fast_mode=cfg.absorber.fast_mode or cfg.benchmark,
-                n_workers=cfg.n_workers_skewer,
-                min_log_nhi=cfg.absorber.min_log_nhi,
-            )
-            catalog.save_npz(catalog_path)
-
+        catalog = _catalog_for_snap(cfg, entry, out_dir, header, dv_kms, sim_name, snap, z, rs_sha)
         timing["catalog"] = time.perf_counter() - t0
         logger.info("  catalog: %s", catalog.summary())
+
+        if cfg.catalogue_only:
+            t0 = time.perf_counter()
+            cddf_result = measure_cddf(catalog, header)
+            timing["cddf"] = time.perf_counter() - t0
+            _save_catalogue_outputs(out_dir, catalog, cddf_result, ics_meta, timing, header, sim_name, snap, z, dv_kms,
+                                    run_settings_sha256=rs_sha)
+            mark_done(cfg, sim_name, snap)
+            logger.info("DONE (catalogue): sim=%s snap=%03d z=%.2f  timing=%s", sim_name[:30], snap, z,
+                        {k: f"{v:.1f}s" for k, v in timing.items()})
+            return SnapResult(sim_name=sim_name, snap=snap, z=z, dv_kms=dv_kms, catalog=catalog, p1d_variants={},
+                              p1d_ratios={}, cddf_result=cddf_result, timing=timing)
 
         # --- Compute P1D variants -----------------------------------------
         t0 = time.perf_counter()
@@ -344,7 +517,8 @@ def run_one_snap(
         # --- Save outputs -------------------------------------------------
         _save_snap_outputs(out_dir, catalog, p1d_variants, p1d_ratios, cddf_result,
                            perturbed_p1d, excl_result, ics_meta,
-                           timing, header, sim_name, snap, z, dv_kms)
+                           timing, header, sim_name, snap, z, dv_kms,
+                           run_settings_sha256=rs_sha, written_before=("p1d_per_class.h5",))
         mark_done(cfg, sim_name, snap)
 
         result = SnapResult(
@@ -379,11 +553,17 @@ def _save_snap_outputs(
     snap: int,
     z: float,
     dv_kms: float,
+    *,
+    run_settings_sha256: Optional[str] = None,
+    written_before=(),
 ) -> None:
-    """Save all outputs for one (sim, snap) to out_dir."""
+    """Save all outputs for one (sim, snap) to out_dir; meta.json last, listing the sha256 of every product written
+    for the snapshot (``written_before``: the ones the caller wrote earlier, besides catalog.npz)."""
     # reconcile the absorber counts against the CDDF first: none of the files below is written if that fails
     # (catalog.npz was written earlier, only after the finder, overlap and value checks of build_catalog)
     n_absorbers = reconcile_counts(catalog, cddf_result["n_absorbers"], cddf_result["log_nhi_edges"])
+    catalog_entry = _catalog_input(out_dir, catalog)
+    written = ["catalog.npz", *written_before, "p1d.npz", "cddf.npz"]
 
     # P1D variants → npz
     p1d_save = {}
@@ -397,12 +577,10 @@ def _save_snap_outputs(
     ratio_save = {k: v for k, v in p1d_ratios.items() if isinstance(v, np.ndarray)}
     if ratio_save:
         np.savez(out_dir / "p1d_ratios.npz", **ratio_save)
+        written.append("p1d_ratios.npz")
 
-    # CDDF → npz
-    cddf_save = {k: np.array(v) if not isinstance(v, np.ndarray) else v
-                 for k, v in cddf_result.items()
-                 if not isinstance(v, (str, dict))}
-    np.savez(out_dir / "cddf.npz", **cddf_save)
+    # CDDF → npz, with its lineage record
+    cddf_record = _write_cddf(out_dir, cddf_result, catalog, catalog_entry, run_settings_sha256)
 
     # NHI exclusion sweep → npz
     if excl_result is not None:
@@ -413,60 +591,64 @@ def _save_snap_outputs(
             elif isinstance(val, (list, tuple)):
                 excl_save[key] = np.array(val)
         np.savez(out_dir / "p1d_excl.npz", **excl_save)
+        written.append("p1d_excl.npz")
 
     # Perturbed P1D → npz
     if perturbed_p1d is not None:
         pert_save = {k: v for k, v in perturbed_p1d.items()
                      if isinstance(v, np.ndarray)}
         np.savez(out_dir / "p1d_perturbed.npz", **pert_save)
+        written.append("p1d_perturbed.npz")
 
-    # Timing + metadata → JSON (includes SimulationICs fields)
-    meta = {
-        "sim_name": sim_name,
-        "snap": snap,
-        "z": z,
-        "dv_kms": dv_kms,
-        "nbins": int(header.nbins),
-        "n_skewers": int(header.n_skewers),
-        "box_kpc_h": float(header.box),
-        "hubble": float(header.hubble),
-        "n_absorbers": n_absorbers,
-        "timing_s": {k: round(v, 3) for k, v in timing.items()},
-        "code_commit": _repo_commit(),
-        "code_dirty": _repo_dirty(),
-    }
-    if ics_meta:
-        meta["sim_ics"] = {k: (float(v) if isinstance(v, (int, float)) else v)
-                           for k, v in ics_meta.items()}
-    with open(out_dir / "meta.json", "w") as f:
-        json.dump(meta, f, indent=2)
+    # Timing + metadata → JSON (includes SimulationICs fields), with the products' sha256 and the snapshot record
+    meta = _meta_base(header, sim_name, snap, z, dv_kms, n_absorbers, timing, ics_meta)
+    _write_meta(out_dir, meta, written, {"catalog.npz": catalog.lineage, "cddf.npz": cddf_record}, "full",
+                run_settings_sha256)
 
 
-def _load_snap_result(out_dir: Path, sim_name: str, snap: int, z: float) -> Optional[SnapResult]:
-    """Load a previously-saved SnapResult (lightweight, without re-reading HDF5)."""
+def _save_catalogue_outputs(out_dir: Path, catalog: AbsorberCatalog, cddf_result: Dict, ics_meta: Dict, timing: Dict,
+                            header, sim_name: str, snap: int, z: float, dv_kms: float, *,
+                            run_settings_sha256: Optional[str] = None) -> None:
+    """Catalogue-only mode: cddf.npz (with its lineage) and meta.json (counts, the sha256 of catalog.npz and
+    cddf.npz, the code commit and dirty flag, the snapshot record), after the same count reconciliation."""
+    n_absorbers = reconcile_counts(catalog, cddf_result["n_absorbers"], cddf_result["log_nhi_edges"])
+    catalog_entry = _catalog_input(out_dir, catalog)
+    cddf_record = _write_cddf(out_dir, cddf_result, catalog, catalog_entry, run_settings_sha256)
+    meta = _meta_base(header, sim_name, snap, z, dv_kms, n_absorbers, timing, ics_meta)
+    _write_meta(out_dir, meta, ["catalog.npz", "cddf.npz"], {"catalog.npz": catalog.lineage, "cddf.npz": cddf_record},
+                "catalogue", run_settings_sha256)
+
+
+def _load_snap_result(out_dir: Path, sim_name: str, snap: int, z: float, cfg: PipelineConfig,
+                      raw_path) -> Optional[SnapResult]:
+    """Load a previously-saved SnapResult (lightweight: the raw spectra file is only stat-ed). The catalogue must pass
+    load_validated_catalog with this run's settings and raw file, and every product must match the sha256 meta.json
+    records (_verify_snapshot); a refusal raises CatalogIntegrityError."""
     try:
         meta_path = out_dir / "meta.json"
         with open(meta_path) as f:
             meta = json.load(f)
 
-        catalog = load_validated_catalog(out_dir / "catalog.npz", int(meta["nbins"]))   # refuses a pre-fix catalogue
+        kw = _catalog_kwargs(cfg)
+        catalog = load_validated_catalog(out_dir / "catalog.npz", int(meta["nbins"]), settings=finder_settings(**kw),
+                                         raw_path=raw_path,
+                                         n_skewers_built=_n_skewers_built(kw, int(meta["n_skewers"])))
+        cddf_result = _verify_snapshot(out_dir, meta, cfg)
 
-        p1d_data = np.load(out_dir / "p1d.npz")
-        p1d_variants = {}
-        # Reconstruct variant dict
-        for key in p1d_data.files:
-            if key.startswith("k_"):
-                var = key[2:]
-                k = p1d_data[f"k_{var}"]
-                p1d = p1d_data[f"p1d_{var}"]
-                mf = float(p1d_data[f"meanF_{var}"][0])
-                p1d_variants[var] = (k, p1d, mf)
+        p1d_variants, p1d_ratios = {}, {}
+        if not cfg.catalogue_only:
+            p1d_data = np.load(out_dir / "p1d.npz")
+            # Reconstruct variant dict
+            for key in p1d_data.files:
+                if key.startswith("k_"):
+                    var = key[2:]
+                    k = p1d_data[f"k_{var}"]
+                    p1d = p1d_data[f"p1d_{var}"]
+                    mf = float(p1d_data[f"meanF_{var}"][0])
+                    p1d_variants[var] = (k, p1d, mf)
 
-        ratio_path = out_dir / "p1d_ratios.npz"
-        p1d_ratios = dict(np.load(ratio_path)) if ratio_path.exists() else {}
-
-        cddf_path = out_dir / "cddf.npz"
-        cddf_result = dict(np.load(cddf_path)) if cddf_path.exists() else {}
+            ratio_path = out_dir / "p1d_ratios.npz"
+            p1d_ratios = dict(np.load(ratio_path)) if ratio_path.exists() else {}
 
         return SnapResult(
             sim_name=sim_name, snap=snap, z=z,
