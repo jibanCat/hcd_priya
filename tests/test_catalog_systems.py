@@ -1036,3 +1036,31 @@ def test_a_catalogue_only_snapshot_written_by_the_rebuild_commit_still_verifies(
     assert v.catalog.lineage["kind_version"] == C.CATALOG_KIND_VERSION and v.catalog.lineage["settings"] == \
         C.RELEASE_FINDER_SETTINGS
     assert len(v.catalog.absorbers) == sum(v.meta["n_absorbers"].values()) == int(v.cddf["n_absorbers"].sum())
+
+
+@pytest.mark.parametrize("edit, match", [
+    (lambda m: m.update(n_absorbers={"LLS": 7, "subDLA": 3, "DLA": 1, "forest": 0}), "n_absorbers"),
+    (lambda m: m.update(z=2.2), "meta.json z"),
+    (lambda m: m.update(dv_kms=m["dv_kms"] * (1 + 1e-12)), "meta.json dv_kms"),
+    (lambda m: m.update(nbins=m["nbins"] + 1), "nbins|skewers of 64 pixels"),
+    (lambda m: m.update(n_skewers=m["n_skewers"] - 1), "n_skewers|skewer"),
+    (lambda m: m.pop("z"), "meta.json z"),
+])
+def test_meta_json_fields_are_bound_to_the_catalogue(tmp_path, edit, match):
+    """meta.json's own fields (the counts the builder turns into dN/dX, the redshift label, the pixel facts) must agree
+    with the catalogue and its record; the products and records are left untouched."""
+    from hcd_analysis.paths import REPO_ROOT
+    from hcd_analysis.snapshot_record import SnapshotIntegrityError, verify_snapshot_dir
+    src = REPO_ROOT / "tests" / "golden" / "fe77e0f_catalogue_only"
+    d = tmp_path / "synthsim" / "snap_001"
+    shutil.copytree(src / "snap_001", d)
+    raw = tmp_path / "s.hdf5"
+    shutil.copy(src / "s.hdf5", raw)
+    kw = dict(mode="catalogue", settings=C.RELEASE_FINDER_SETTINGS, raw_path=raw, rehash=True,
+              require_release_eligible=True, sim="synthsim", snap=1)
+    verify_snapshot_dir(d, **kw)
+    meta = json.loads((d / "meta.json").read_text())
+    edit(meta)
+    (d / "meta.json").write_text(json.dumps(meta))
+    with pytest.raises((SnapshotIntegrityError, C.CatalogIntegrityError, C.CatalogProvenanceError), match=match):
+        verify_snapshot_dir(d, **kw)

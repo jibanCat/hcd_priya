@@ -57,7 +57,10 @@ def verify_snapshot_dir(snap_dir, *, mode: Optional[str] = None, settings: Optio
       5. the finder ids and release eligibility copied into the snapshot record and the cddf record equal those of the
          records they were copied from;
       6. the three name one (simulation, snapshot), equal to ``sim`` and ``snap`` when given;
-      7. with ``require_release_eligible``, the snapshot and cddf records are eligible; with ``rehash`` and
+      7. meta.json's own fields agree with the catalogue and its record: ``n_absorbers`` per class equals the
+         catalogue's class counts (and their total the record's count), ``z`` and ``dv_kms`` equal the catalogue's and
+         its record's, ``nbins`` the record's and the raw file's, ``n_skewers`` the raw file's (as the record states);
+      8. with ``require_release_eligible``, the snapshot and cddf records are eligible; with ``rehash`` and
          ``raw_path``, the raw file is re-hashed against the catalogue's record."""
     snap_dir = Path(snap_dir)
 
@@ -121,6 +124,7 @@ def verify_snapshot_dir(snap_dir, *, mode: Optional[str] = None, settings: Optio
         refuse(f"a product does not name its simulation and snapshot ({type(e).__name__}: {e})")
     if len(names) != 1 or (sim is not None and names != {(str(sim), int(snap))}):
         refuse(f"the products name {sorted(map(str, names))}, expected {(sim, snap)}")
+    _check_meta_fields(meta, catalog, refuse)
     if require_release_eligible:
         for what, r in (("snapshot record", rec), ("cddf.npz", crec)):
             if not r["release_eligible"]:
@@ -133,3 +137,23 @@ def verify_snapshot_dir(snap_dir, *, mode: Optional[str] = None, settings: Optio
     meta_identity = {"sha256": hashlib.sha256(meta_bytes).hexdigest(), "size": len(meta_bytes)}
     return SnapshotProducts(meta=meta, record=rec, products=prods, meta_identity=meta_identity, catalog=catalog,
                             cddf=cddf, cddf_record=crec)
+
+
+def _check_meta_fields(meta, catalog, refuse):
+    """meta.json's own fields against the catalogue, its record and the raw file facts the record holds (the builder
+    computes dN/dX from ``n_absorbers`` and labels the rows with ``z``, so neither may disagree with the catalogue)."""
+    prod = catalog.lineage.get("product") or {}
+    raw = L.find_input(catalog.lineage, "raw_spectra").get("info") or {}
+    counts = meta.get("n_absorbers")
+    want = catalog.summary()
+    if not isinstance(counts, dict) or {str(k): v for k, v in counts.items()} != want:
+        refuse(f"meta.json n_absorbers {counts} are not the catalogue's class counts {want}")
+    if sum(want.values()) != prod.get("n_absorbers"):
+        refuse(f"the catalogue holds {sum(want.values())} entries, its record states {prod.get('n_absorbers')}")
+    pairs = (("z", meta.get("z"), (catalog.z, prod.get("z"))),
+             ("dv_kms", meta.get("dv_kms"), (catalog.dv_kms, prod.get("dv_kms"))),
+             ("nbins", meta.get("nbins"), (prod.get("nbins"), raw.get("nbins"))),
+             ("n_skewers", meta.get("n_skewers"), (raw.get("n_skewers"),)))
+    for name, got, refs in pairs:
+        if got is None or any(r is None or r != got for r in refs):
+            refuse(f"meta.json {name} = {got!r} disagrees with the catalogue or its record ({list(refs)})")
