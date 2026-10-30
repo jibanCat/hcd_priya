@@ -869,8 +869,14 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
                    metal_siII_legs=("DESI",), metal_knode_lo=1e-3, metal_knode_hi=0.1,
                    hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0,
                    hcd_2d_tilt=False, survey=None, ks_legacy_alpha_param=False,
-                   theta_unit_lo=None, theta_unit_hi=None):
+                   theta_unit_lo=None, theta_unit_hi=None, cache_path=None, historical_reason=None):
     """The gate E production context (GATE_E_SPEC v1 section 2). Returns ``(LegBCtx, cache dict)``.
+
+    The training cache (``cache_path``, default ``CACHE_PATH``) is read through the strict ``data.load_cache`` unless
+    ``historical_reason`` (a non-empty string) is given, which reads it through ``load_cache_historical`` (the
+    historical analyses on the pre-lineage cache). Either way every ensemble member's recorded ``cache_sha256`` must be
+    the loaded cache's sha256, and that digest is the one the products (MF, DLA core, T1, T3) are bound to. The HCD
+    prior centres built here come from that cache (``hcd_pivot_wc_and_xbar``); they belong to the historical analysis.
 
     The DESI + KS (+ eBOSS) legs; the LF ensemble ``ensemble_ckpts`` (schema-2.0 checkpoint prefixes; a single model is
     a one-member list); the mode-axis MF product ``mf_product`` (refused unless fitted against exactly this ensemble
@@ -897,6 +903,22 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     model, meta, norm = load_ensemble(list(ensemble_ckpts))
     pf = {k: jnp.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
     alpha_centres = None
+    # the training cache, before anything else is read: strict unless a historical reason is given, and the cache
+    # every member was trained on
+    cpath = CACHE_PATH if cache_path is None else str(cache_path)
+    if historical_reason is None:
+        d = load_cache(cpath)                                         # strict: format 3.4, lineage, eligibility
+        cache_sha = d["cache_sha256"]                                 # hashed at load
+    else:
+        d = load_cache_historical(cpath, reason=historical_reason)
+        cache_sha = T._sha256_or_none(cpath)
+    member_shas = []
+    for p in ensemble_ckpts:
+        with open(str(p) + ".meta.json") as fh:
+            member_shas.append(json.load(fh).get("cache_sha256"))
+    if any(sha != cache_sha for sha in member_shas):
+        raise ValueError(f"the ensemble members were trained on caches {sorted(set(map(str, member_shas)))}, not on "
+                         f"the cache read here ({cache_sha}, {cpath})")
 
     # ARM-D (coherent-cov, no forward float) is a DISTINCT covariance treatment from option-b (sample_res):
     # it does NOT set ctx.sample_res (no f_res site), only the loader's resolution_coherent cov mode.
@@ -926,7 +948,6 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
 
     z_global = np.unique(np.round(np.concatenate([leg.z for leg in legs]), 6))
 
-    d = load_cache_historical(CACHE_PATH, reason="the historical inference context (closure_legb.CACHE_PATH)")
     k_com = np.asarray(meta["k_com_hmpc"], float)
     if not np.array_equal(k_com, np.asarray(d["k_com_hmpc"], float)):
         raise ValueError("the checkpoints' k_com_hmpc differ from the production cache's box modes")
@@ -937,11 +958,10 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     if mf_product is not None:
         mf_obj, mf_k, _ = PR.load_mf_product(
             mf_product, lf_ckpt_sha256=[T._sha256_or_none(p + ".eqx") for p in ensemble_ckpts],
-            lf_cache_sha256=T._sha256_or_none(CACHE_PATH))
+            lf_cache_sha256=cache_sha)
         if not np.allclose(mf_k, k_com, rtol=1e-14, atol=0):
             raise ValueError("the MF product's k_com_hmpc differ from the checkpoints'")
     # the DLA core at each leg's bins: a fixed function of physical k (amendment A1 rev 1 section 4).
-    cache_sha = T._sha256_or_none(CACHE_PATH)
     dla_core_leg, dla_digest = _dla_core_data_per_leg(legs, dla_core_product, cache_sha)
     rho_zb_per_leg = t1_digest = t3_per_leg = t3_digest = None
     if t1_product is not None:

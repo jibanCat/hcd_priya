@@ -35,7 +35,8 @@ def _need(*paths):
 @pytest.fixture(scope="module")
 def prod_ctx():
     _need(f"{GATEC}/prod_repaired_seed0.eqx", MF, DLA_CORE)
-    ctx, d = CL.build_legb_ctx(ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
+    ctx, d = CL.build_legb_ctx(historical_reason="test of the historical gate E context",
+                               ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
                                dla_core_product=DLA_CORE,
                                ks_kwargs=dict(resolution_float=True, k_max=0.065), with_eboss=True, metals_on=True,
                                sample_res=True)
@@ -240,7 +241,8 @@ def test_e1d_dynamic_call_graph_touches_no_retired_code():
             seen.add((os.path.basename(co.co_filename), co.co_name))
     sys.setprofile(prof)
     try:
-        ctx, _ = CL.build_legb_ctx(ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
+        ctx, _ = CL.build_legb_ctx(historical_reason="test of the historical gate E context",
+                               ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
                                    dla_core_product=DLA_CORE,
                                    ks_kwargs=dict(resolution_float=True, k_max=0.065), with_eboss=True,
                                    metals_on=True, sample_res=True)

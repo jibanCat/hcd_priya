@@ -63,7 +63,9 @@ def _sha(path):
 
 def build_leg_ctx(name, members, mf, dla):
     kw = SURVEYS[name]
-    ctx, d = CL.build_legb_ctx(ensemble_ckpts=members, mf_product=mf, dla_core_product=dla, metals_on=kw["metals"],
+    ctx, d = CL.build_legb_ctx(
+        historical_reason="historical analysis on the deployed cache (closure_legb.CACHE_PATH)",
+        ensemble_ckpts=members, mf_product=mf, dla_core_product=dla, metals_on=kw["metals"],
                                sample_metals=kw["metals"], metal_prior=("flatlog2node" if kw["metals"] else "uniform"),
                                survey=name, with_eboss=kw["with_eboss"], ks_kwargs=dict(k_max=0.065))
     leg = next(l for l in ctx.legs if l.name == name)

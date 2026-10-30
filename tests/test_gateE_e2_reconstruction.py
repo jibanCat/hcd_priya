@@ -71,7 +71,8 @@ T3_PRODUCT = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/gateE/products/t3_ga
 def prod_ctx_cemu():
     from hcd_analysis.emulator import closure_legb as CL
     _need(f"{GATEC}/prod_repaired_seed0.eqx", MF, DLA_CORE, T1_PRODUCT, T3_PRODUCT)
-    ctx, _ = CL.build_legb_ctx(ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
+    ctx, _ = CL.build_legb_ctx(historical_reason="test of the historical gate E context",
+                               ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
                                dla_core_product=DLA_CORE, t1_product=T1_PRODUCT, t3_product=T3_PRODUCT,
                                ks_kwargs=dict(resolution_float=True, k_max=0.065), with_eboss=True, metals_on=True,
                                sample_res=True)

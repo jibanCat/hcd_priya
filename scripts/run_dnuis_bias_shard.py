@@ -204,6 +204,7 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     # build_legb_ctx assembles DESI+KS(+eBOSS); we then keep ONLY the chosen survey's leg(s) so the
     # arm fits a single-survey likelihood (the bias is per-survey).  survey= sets the LLS pin.
     ctx, d = build_legb_ctx(
+        historical_reason="historical analysis on the deployed cache (closure_legb.CACHE_PATH)",
         ensemble_ckpts=members, use_xclass=True,
         with_mf=with_mf, mf_with_floor=with_mf,
         res_corr_on=_res_corr_on,                          # NORC: True (default) off; False under use_prod_forward (deployed)
