@@ -126,8 +126,10 @@ def _old_hists(tmp_path, values):
     return out
 
 
-def _acc_argv(members, cache, olds, out, *extra):
-    a = ["--cache", str(cache), "--cache-sha256", L.sha256_file(cache), "--out", str(out), *extra]
+def _acc_argv(members, cache, olds, out, *extra, old_source=None):
+    src = old_source or cache                            # the old ensemble's source: the same rows by default
+    a = ["--cache", str(cache), "--cache-sha256", L.sha256_file(cache), "--out", str(out), "--old-source", str(src),
+         "--old-source-sha256", L.sha256_file(src), *extra]
     for m in members:
         a += ["--member", m]
     for h in olds:
@@ -191,7 +193,8 @@ def test_the_ensemble_acceptance(cache, tmp_path):
     assert A.main(_acc_argv(members, cache, olds, tmp_path / "dir.json", *same_dir)) == 1
     with pytest.raises(SystemExit, match="does not hash"):
         A.main(["--cache", str(cache), "--cache-sha256", "0" * 64, "--out", str(tmp_path / "x.json"),
-                "--member", members[0], "--old-hist", olds[0]])
+                "--member", members[0], "--old-hist", olds[0], "--old-source", str(cache), "--old-source-sha256",
+                L.sha256_file(cache)])
 
 
 def test_every_metric_is_read_at_the_restored_epoch(capsys):
@@ -205,3 +208,45 @@ def test_every_metric_is_read_at_the_restored_epoch(capsys):
     assert x["epoch"] == 5 and x["val_resid_loss"] == pytest.approx(0.30) and x["val_loss"] == pytest.approx(0.50)
     assert x["stop_metric"] == pytest.approx(0.302) and min(h["val_resid_loss"]) == 0.05
     assert A.at_restore({"val_resid_loss": []}, RECIPE) is None
+
+
+def test_the_comparison_must_be_like_for_like(cache, tmp_path):
+    import shutil
+    import h5py
+    A = _script("accept_retrained_ensemble")
+    members = [_member(tmp_path / "ens", cache, s) for s in (0, 1)]
+    olds = _old_hists(tmp_path / "old", [0.29, 0.31, 0.30])
+    assert A.main(_acc_argv(members, cache, olds, tmp_path / "ok.json")) == 0
+    r = json.load(open(tmp_path / "ok.json"))
+    assert r["checks"]["recipe_equal_to_the_old_ensemble"] and r["rows"]["rows_differing"] == {
+        "sim_name": 0, "z_grid": 0, "target_F": 0}
+    other = _old_hists(tmp_path / "other", [0.29, 0.31, 0.30])
+    h = json.load(open(other[1]))
+    h["recipe"]["patience"] = 4                                        # another recipe in one old member
+    json.dump(h, open(other[1], "w"))
+    assert A.main(_acc_argv(members, cache, other, tmp_path / "recipe.json")) == 1
+    assert not json.load(open(tmp_path / "recipe.json"))["checks"]["recipe_equal_to_the_old_ensemble"]
+    for key, edit in (("target_F", lambda a: a.__setitem__(3, a[3] * (1 + 1e-15))),
+                      ("z_grid", lambda a: a.__setitem__(0, a[0] + 0.2))):
+        src = tmp_path / f"old_source_{key}.h5"
+        shutil.copy2(cache, src)
+        with h5py.File(src, "r+") as f:
+            arr = f[key][...]
+            edit(arr)
+            f[key][...] = arr
+        assert A.main(_acc_argv(members, cache, olds, tmp_path / f"{key}.json", old_source=src)) == 1
+        rr = json.load(open(tmp_path / f"{key}.json"))
+        assert not rr["checks"]["same_rows_and_validation_split_as_the_old_ensemble"]
+        assert rr["rows"]["rows_differing"][key] >= 1
+    stated = [_member(tmp_path / "stated", cache, s, recipe=dict(RECIPE, n_val=5)) for s in (0, 1)]
+    hists = []
+    for i in range(3):
+        p = tmp_path / f"stated_old{i}.hist.json"
+        json.dump(_hist(resid=0.3, recipe=dict(RECIPE, n_val=5)), open(p, "w"))
+        hists.append(str(p))
+    assert A.main(_acc_argv(stated, cache, hists, tmp_path / "sizes.json")) == 1      # the split has 4 rows
+    assert json.load(open(tmp_path / "sizes.json"))["rows"]["n_val"] == 4
+    argv = _acc_argv(members, cache, olds, tmp_path / "pin.json")
+    argv[argv.index("--old-source-sha256") + 1] = "0" * 64
+    with pytest.raises(SystemExit, match="does not hash"):
+        A.main(argv)

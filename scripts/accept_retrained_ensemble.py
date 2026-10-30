@@ -7,6 +7,11 @@ For every member checkpoint prefix (``.eqx``, ``.meta.json``, ``.norm.pkl``, ``.
     record stored in that cache file (read from the file whose sha256 is checked; the record is parsed and checked);
   * ``cache_path`` is a file name, the seeds are distinct, the recipe and architecture are the same for every member;
   * the basename and directory are not the historical ensembles' (``--historical-prefix``, repeatable);
+  * the comparison is like for like: the old ensemble's recipe (in each old history) equals the new members' recipe,
+    and the old training cache (``--old-source``, pinned by ``--old-source-sha256``) and the new cache hold the same
+    rows in the same order (``sim_name``, ``z_grid`` and ``target_F``, hence tau0, equal row by row), so the fixed row
+    split (``data.production_row_split``) selects the same validation rows; its sizes must be the recipe's
+    ``n_train`` / ``n_val`` when the recipe states them;
   * training completed under the recipe's stopping rule, as ``train.train_fold`` applies it: finite losses, at most the
     recipe's ``epochs``, and either all of them or a stop exactly ``patience`` epochs after the restored epoch (the last
     improvement, by more than 1e-9, of the stop metric val_resid_loss + w_coh val_coh_loss, or val_resid_loss when
@@ -20,7 +25,7 @@ For every member checkpoint prefix (``.eqx``, ``.meta.json``, ``.norm.pkl``, ``.
 Writes a JSON report; exit 0 when every check passes, 1 otherwise.
 
     python scripts/accept_retrained_ensemble.py --member DIR/NAME_seed0 [...] --cache CACHE.h5 --cache-sha256 HEX \\
-        --old-hist OLD_seed0.hist.json [...] \\
+        --old-hist OLD_seed0.hist.json [...] --old-source OLD_CACHE.h5 --old-source-sha256 HEX \\
         --historical-prefix OLD_DIR/prod_repaired --out REPORT.json
 """
 import argparse
@@ -36,6 +41,7 @@ sys.path.insert(0, REPO)
 
 from hcd_analysis import lineage as L  # noqa: E402
 from hcd_analysis.catalog import RELEASE_FINDER_IDS  # noqa: E402
+from hcd_analysis.emulator.data import production_row_split  # noqa: E402
 
 _HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 
@@ -82,6 +88,26 @@ def stopped_by_the_rule(hist, recipe):
     return r is not None and n <= epochs and (n == epochs or n - 1 - r == patience)
 
 
+ROW_KEYS = ("sim_name", "z_grid", "target_F")
+
+
+def same_rows(old_path, old_sha256, new_path):
+    """``(ok, info)``: the old source (hashing to ``old_sha256``) and the new cache hold the same rows in the same order
+    (``ROW_KEYS`` equal row by row, the floats bitwise)."""
+    import h5py
+    if L.sha256_file(old_path) != old_sha256:
+        raise SystemExit(f"refusing: {old_path} does not hash to {old_sha256}")
+    cols = []
+    for path in (old_path, new_path):
+        with h5py.File(path, "r") as f:
+            cols.append({k: (f[k].asstr()[...] if k == "sim_name" else f[k][...]) for k in ROW_KEYS})
+    o, n = cols
+    differing = {k: (int(np.sum(o[k] != n[k])) if o[k].shape == n[k].shape else "shape") for k in ROW_KEYS}
+    ok = all(v == 0 for v in differing.values())
+    return ok, {"n_rows": [int(o["sim_name"].size), int(n["sim_name"].size)], "rows_differing": differing,
+                "n_sim_name": n["sim_name"]}
+
+
 DECIDING = "val_resid_loss"
 REPORTED = ("val_loss", "val_coh_loss", "stop_metric")
 
@@ -109,6 +135,8 @@ def main(argv=None):
     ap.add_argument("--cache", required=True)
     ap.add_argument("--cache-sha256", required=True)
     ap.add_argument("--old-hist", action="append", required=True)
+    ap.add_argument("--old-source", required=True, help="the old ensemble's training cache (rows compared)")
+    ap.add_argument("--old-source-sha256", required=True)
     ap.add_argument("--historical-prefix", action="append", default=[])
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
@@ -140,6 +168,20 @@ def main(argv=None):
     checks["training_completed_under_the_stopping_rule"] = all(stopped_by_the_rule(hist, meta.get("recipe") or {})
                                                                for _, meta, hist in members)
     old = [json.load(open(h)) for h in a.old_hist]
+    old_recipes = [h.get("recipe") for h in old]
+    checks["recipe_equal_to_the_old_ensemble"] = all(r == m0.get("recipe") for r in old_recipes) and all(
+        m.get("recipe") == m0.get("recipe") for m in metas)
+    rows_ok, rows = same_rows(a.old_source, a.old_source_sha256, a.cache)
+    names = rows.pop("n_sim_name")
+    r0 = m0.get("recipe") or {}
+    try:
+        tr, va, _held = production_row_split(names, val_seed=int(r0["val_seed"]), val_frac=float(r0["val_frac"]))
+        sizes_ok = all(r0.get(k) is None or int(r0[k]) == v for k, v in (("n_train", tr.size), ("n_val", va.size)))
+        rows.update(n_train=int(tr.size), n_val=int(va.size))
+    except (KeyError, TypeError, ValueError) as e:
+        sizes_ok = False
+        rows["split_error"] = f"{type(e).__name__}: {e}"
+    checks["same_rows_and_validation_split_as_the_old_ensemble"] = bool(rows_ok and sizes_ok)
     new_at = [at_restore(h, meta.get("recipe") or {}) for _, meta, h in members]
     old_at = [at_restore(h, h.get("recipe") or {}) for h in old]
     usable = None not in new_at and None not in old_at and len(old_at) > 1 and all(
@@ -169,7 +211,8 @@ def main(argv=None):
     passed = all(checks.values())
     report = {"format": "hcd_priya.ensemble_acceptance/1", "passed": passed, "checks": checks,
               "members": [os.path.basename(p) for p in a.member], "cache_sha256": a.cache_sha256,
-              "cache_lineage_sha256": rec_sha, "git_sha": m0.get("git_sha"), "validation": validation}
+              "cache_lineage_sha256": rec_sha, "git_sha": m0.get("git_sha"), "validation": validation,
+              "rows": rows, "old_source_sha256": a.old_source_sha256}
     with open(a.out, "x") as fh:
         json.dump(report, fh, indent=1, sort_keys=True)
     for k, v in checks.items():
