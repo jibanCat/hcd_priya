@@ -170,6 +170,8 @@ def test_a_changed_row_path_passes_only_with_its_reviewed_digest(world, tmp_path
     assert carry(world, tmp_path / "a") == 2
     s = summary(tmp_path / "a")
     assert not s["global_checks"]["row_path_code"] and (tmp_path / "a" / "val" / "row_path").is_dir()
+    assert s["n_groups"] == 0 and s["n_groups_in_source"] == 3 and not (tmp_path / "a" / "val" / "groups").exists()
+    assert (tmp_path / "a" / "val" / s["row_path"][0]["diff_file"]).read_text() == "- a\n+ b\n"
     assert carry(world, tmp_path / "b", extra=["--accept-row-path-diff", "abc1234=" + "e" * 64]) == 2
     assert carry(world, tmp_path / "c", extra=["--accept-row-path-diff", "abc1234=" + "d" * 64]) == 0
     rec = T.read_cache(tmp_path / "c" / "carried.h5")[2]
@@ -228,6 +230,10 @@ def test_row_path_diff_on_a_real_repository(tmp_path):
     assert "-    return x + K" in text and "+    return x - K" in text and "+A = 2" in text
     again, _ = CV.row_path_diff(repo, first, "HEAD", spec)
     assert again["diff_sha256"] == res["diff_sha256"]
+    (repo / "pkg" / "c.py").write_text("x = 1\n")                             # another commit, the same code
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "four: outside")
+    assert CV.row_path_diff(repo, first, "HEAD", spec)[0]["diff_sha256"] == res["diff_sha256"]
     res, _ = CV.row_path_diff(repo, first, "HEAD", (("pkg/b.py", ("gone",)),))
     assert res["items"] == [{"item": "pkg/b.py:gone", "status": "absent at both"}] and not res["identical"]
 

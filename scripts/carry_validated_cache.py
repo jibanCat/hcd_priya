@@ -23,9 +23,10 @@ Checks, for every (simulation, snapshot) group of the historical cache:
   5. the per-row DLA core (the loader's delta[:, 2]) from the rebuilt counts equals the one from the stored counts;
   6. the snapshot block rebuilt from the rebuilt CDDF and meta.json: CDDF counts equal the rebuilt catalogue's
      histogram, meta.json counts its class counts, the CDDF bins and the absorption path equal the stored ones.
-Once: the row-path code (ROW_PATH) at each builder commit of record equals the code at HEAD, by a function-level
-diff (a non-empty diff passes only when its sha256 is accepted with --accept-row-path-diff, after review); the
-historical cache's layout, recipe attributes, static tables and mean-flux ladder equal the builder's.
+Once, first: the row-path code (ROW_PATH) at each builder commit of record equals the code at HEAD, by a
+function-level diff (a non-empty diff passes only when its sha256 is accepted with --accept-row-path-diff, after
+review); the historical cache's layout, recipe attributes, static tables and mean-flux ladder equal the builder's.
+If one of these fails, no group is validated (the summary and the diffs are still written).
 
 Output: a validation record per group (<validation-dir>/groups/), the row-path diffs (<validation-dir>/row_path/) and
 <validation-dir>/summary.json. Only if every check passes, the cache: the CARRIED_FIELDS copied from the historical
@@ -115,8 +116,9 @@ def _git(repo, *args):
 
 def row_path_diff(repo, old_commit, new_commit, spec=ROW_PATH):
     """Function-level diff of the row-path code between two commits: ``(result, diff_text)``. ``result`` holds the
-    resolved commits, each item's status (identical, changed, absent at one side) and the diff's sha256; the diff
-    is empty when every item is identical."""
+    resolved commits, each item's status (identical, changed, absent at one side) and the diff's sha256, which
+    depends on the code only (not on the commit hashes), so a reviewed diff keeps its digest; the diff is empty when
+    every item is identical."""
     old = _git(repo, "rev-parse", "--verify", f"{old_commit}^{{commit}}").strip()
     new = _git(repo, "rev-parse", "--verify", f"{new_commit}^{{commit}}").strip()
     items, chunks = [], []
@@ -136,7 +138,7 @@ def row_path_diff(repo, old_commit, new_commit, spec=ROW_PATH):
             items.append({"item": name, "status": status})
             if status != "identical":
                 chunks.append("".join(difflib.unified_diff((a or "").splitlines(True), (b or "").splitlines(True),
-                                                           f"{old[:12]}/{name}", f"{new[:12]}/{name}")))
+                                                           f"old/{name}", f"new/{name}")))
     text = "\n".join(chunks)
     return ({"old_commit": old, "new_commit": new, "identical": not chunks, "items": items,
              "diff_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}, text)
@@ -198,8 +200,9 @@ def validate_group(src, b, rows, ctx):
     # 3. raw identity
     raw_rec = L.find_input(inp.catalog.lineage, "raw_spectra")
     st, st_old = os.stat(raw), os.stat(old_dir / "catalog.npz")
-    _check(checks, "raw_matches_rebuilt_record", True, sha256=raw_rec["sha256"], size=raw_rec["size"],
-           recorded_mtime_ns=raw_rec.get("mtime_ns"), mtime_ns=int(st.st_mtime_ns), rehashed=ctx["rehash_raw"])
+    _check(checks, "raw_matches_rebuilt_record", True, sha256=raw_rec["sha256"], size=raw_rec["size"],   # step 1
+           recorded_mtime_ns=raw_rec.get("mtime_ns"), mtime_ns=int(st.st_mtime_ns), rehashed=ctx["rehash_raw"],
+           note="verified by the inputs step (the release catalogue loader with this raw file)")
     _check(checks, "raw_predates_old_catalogue_and_source", st.st_mtime_ns < st_old.st_mtime_ns
            and st.st_mtime_ns < ctx["source_created_ns"], raw_mtime_ns=int(st.st_mtime_ns),
            old_catalogue_mtime_ns=int(st_old.st_mtime_ns), source_created_ns=ctx["source_created_ns"])
@@ -343,10 +346,10 @@ def run(args):
                rehash_raw=bool(args.rehash_raw), alpha_grid=grid,
                source_created_ns=_utc_ns(T._attr_value(attrs["created_utc"])))
 
-    # every group
+    # every group (skipped when a global check already failed: no group could be carried)
     gi = np.asarray(src["snap_group_idx"])
     records, rebuilt, files = [], [], {}
-    for b in range(len(src["snap_snap"])):
+    for b in range(len(src["snap_snap"]) if all(globals_.values()) else 0):
         rows = np.flatnonzero(gi == b)
         rec, reb = validate_group(src, b, rows, ctx)
         name = f"groups/{rec['sim']}__snap_{rec['snap']:03d}.json"
@@ -358,7 +361,7 @@ def run(args):
                   flush=True)
     failed = [f"{r['sim']} {r['snap']}: " + ", ".join(k for k, c in r["checks"].items() if not c["ok"])
               for r in records if not r["ok"]]
-    passed = not failed and all(globals_.values())
+    passed = not failed and all(globals_.values()) and len(records) == len(src["snap_snap"])
     summary = {
         "format": "hcd_priya.carry_validation/1", "created_utc": datetime.datetime.now(datetime.timezone.utc)
         .strftime("%Y-%m-%dT%H:%M:%SZ"), "code": code, "passed": passed,
@@ -367,7 +370,8 @@ def run(args):
                    "git_sha": str(T._attr_value(attrs.get("git_sha")))},
         "roots": {"old": str(args.old_root), "rebuilt": str(args.rebuilt_root), "raw": str(args.raw_root)},
         "rehash_raw": bool(args.rehash_raw), "global_checks": globals_, "row_path": row_path,
-        "n_groups": len(records), "n_failed": len(failed), "failed": failed, "group_records_sha256": files,
+        "n_groups": len(records), "n_groups_in_source": len(src["snap_snap"]), "n_failed": len(failed),
+        "failed": failed, "group_records_sha256": files,
         "origins": {"spliced": sorted(f"{s}:{n}" for s, n in origins)}, "rule": CARRY_RULE,
     }
     summary_sha = _write_json(vdir / "summary.json", summary)
