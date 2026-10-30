@@ -77,6 +77,10 @@ def test_provenance_names_the_manifest_the_lineage_and_the_map(emu, info):
     assert pv["manifest_sha256"] == info.manifest_sha256 == emu.manifest_sha256 and pv["format"] == H.FORMAT
     assert pv["lineage"] == info.lineage and pv["n_members"] == 3
     assert pv["wc_map_sha256"] == info.lineage["wc_map"]["sha256"]
+    man = json.load(open(os.path.join(info.bundle_dir, "manifest.json")))
+    assert pv["bundle_provenance"] == man["provenance"]
+    pv["bundle_provenance"]["source"] = "edited"                                  # a copy, not the bundle's own
+    assert emu.provenance["bundle_provenance"] == man["provenance"]
 
 
 # -------------------------------------------------------------------------------------------------- the forward

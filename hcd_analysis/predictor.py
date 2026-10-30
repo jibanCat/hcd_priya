@@ -31,7 +31,8 @@ the mode axis, kcoord.bind / at_data). Values outside the training box are evalu
     delta_c(z) and Xbar(z)); never the historical constants;
   * ``member_std`` (4, K): the standard deviation over the members (ddof 1), a SEED-SPREAD DIAGNOSTIC (five networks
     differing only in their initialisation), not a calibrated emulator error and not a covariance;
-  * ``flags``, ``labels`` and ``provenance`` (the manifest sha256, the lineage block, the w_c map's sha256).
+  * ``flags``, ``labels`` and ``provenance`` (the manifest sha256, the lineage block, the w_c map's sha256 and the
+    manifest's own provenance: the export's identity, software versions, creation time, the source digests).
 
 **HCD.** ``add_hcd(pred, A)`` returns P_clean + sum_c A_c (P_c - P_clean), with one amplitude per class (A of shape (3,))
 or per class per redshift ((n_z, 3) on a stack). A_c is the effective sightline fraction of class c: A = w_c
@@ -261,7 +262,8 @@ class Bundle:
     @property
     def provenance(self):
         return {"format": _H.FORMAT, "manifest_sha256": self._rb.manifest_sha256, "lineage": self.lineage,
-                "wc_map_sha256": self._rb.wc_map.sha256, "n_members": self.n_members}
+                "wc_map_sha256": self._rb.wc_map.sha256, "n_members": self.n_members,
+                "bundle_provenance": copy.deepcopy(self._rb.manifest.get("provenance"))}
 
     def labels(self):
         return {"filter": "PRIYA tau > 1e6 trough-filtered", "product": self._fidelity,
