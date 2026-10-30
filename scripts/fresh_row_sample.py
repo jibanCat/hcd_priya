@@ -175,7 +175,7 @@ def cmd_compare(a):
     if pre.get("format") != FORMAT or pre["criterion"]["rtol"] != RTOL:
         raise SystemExit(f"{pre_path}: not a {FORMAT} file with this script's criterion")
     want = [(g["sim"], int(g["snap"])) for g in pre["groups"]]
-    car, _ca, car_rec = T.read_cache(a.carried)
+    car, _ca, car_rec = T.read_cache_staged(a.carried)                # the staged carry, before its promotion
     fresh = [T.read_cache(p) for p in a.fresh]
     car_inputs = {i["role"]: i["sha256"] for i in car_rec["inputs"]}
     found, report, worst = {}, {"groups": [], "fields": {}}, {}

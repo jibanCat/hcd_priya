@@ -19,6 +19,7 @@ from tests import tau0_world as W
 
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import carry_validated_cache as CV  # noqa: E402
+import promote_carried_cache as PC  # noqa: E402
 
 IDENTICAL = {"identical": True, "items": [], "diff_sha256": "0" * 64}
 
@@ -66,7 +67,9 @@ def failed_checks(out_dir):
 def test_the_carry_copies_validated_rows_and_rebuilds_every_count(world, tmp_path, same_code):
     assert carry(world, tmp_path) == 0
     out = tmp_path / "carried.h5"
-    d, attrs, rec = T.read_cache(out)                                             # the release reader accepts it
+    with pytest.raises(T.CacheLineageError, match="not yet promoted"):          # staged: the release reader refuses
+        T.read_cache(out)
+    d, attrs, rec = T.read_cache_staged(out)
     src, _sa, _ = T.read_cache_historical(world["hist"], reason="test")
     assert rec["release_eligible"] and attrs["cache_version"] == T.CACHE_VERSION
     assert [g["rows"] for g in rec["product"]["groups"]] == [T.ROWS_CARRIED] * 3
@@ -101,9 +104,51 @@ def test_the_carry_copies_validated_rows_and_rebuilds_every_count(world, tmp_pat
         assert dg["carried_slices_sha256"]["scale"] == L.arrays_sha256({"scale": src["scale"][rows]})
         assert g["checks"]["raw_matches_rebuilt_record"]["evidence"] == "re-hashed by this run"
     from hcd_analysis.emulator.data import load_cache
-    loaded = load_cache(out)
-    assert loaded["cache_sha256"] == L.sha256_file(out) and loaded["lineage"] == rec
+    with pytest.raises(T.CacheLineageError, match="not yet promoted"):
+        load_cache(out)
     assert not list(tmp_path.glob(".*unchecked"))
+
+
+def _report(path, staged, *, passed=True, ok=True, carried_sha=None):
+    rep = {"passed": passed, "groups": [{"sim": W.GROUPS[0][0], "snap": W.GROUPS[0][1], "ok": ok}],
+           "carried": {"sha256": carried_sha or L.sha256_file(staged)}, "prereg": {"sha256": "a" * 64}}
+    path.write_text(json.dumps(rep))
+    return path, L.sha256_file(path)
+
+
+def test_promotion_needs_the_passed_comparison_of_this_staged_cache(world, tmp_path, same_code, monkeypatch):
+    assert carry(world, tmp_path) == 0
+    staged = tmp_path / "carried.h5"
+    rep, sha = _report(tmp_path / "cmp.json", staged)
+    final = tmp_path / "final.h5"
+    assert PC.main(["--staged", str(staged), "--comparison", str(rep), "--comparison-sha256", sha,
+                    "--output", str(final)]) == 0
+    d, _a, rec = T.read_cache(final)                                             # the release reader accepts it
+    _s, _sa, srec = T.read_cache_staged(staged)
+    assert rec["product"]["payload_sha256"] == srec["product"]["payload_sha256"]
+    assert rec["product"]["carried"]["promoted"] == {"passed": True, "comparison_sha256": sha,
+                                                     "staged_sha256": L.sha256_file(staged), "prereg_sha256": "a" * 64,
+                                                     "n_groups_compared": 1}
+    from hcd_analysis.emulator.data import load_cache
+    assert load_cache(final, validate=False)["cache_sha256"] == L.sha256_file(final)
+    bad = {
+        "digest": dict(sha="0" * 64),
+        "failed": dict(passed=False),
+        "group": dict(ok=False),
+        "other cache": dict(carried_sha="1" * 64),
+    }
+    for name, kw in bad.items():
+        r, h = _report(tmp_path / f"{name}.json", staged, **{k: v for k, v in kw.items() if k != "sha"})
+        assert PC.main(["--staged", str(staged), "--comparison", str(r), "--comparison-sha256", kw.get("sha", h),
+                        "--output", str(tmp_path / f"{name}.h5")]) == 2, name
+        assert not (tmp_path / f"{name}.h5").exists()
+    assert PC.main(["--staged", str(final), "--comparison", str(rep), "--comparison-sha256", sha,
+                    "--output", str(tmp_path / "again.h5")]) == 2                 # already promoted (and another sha)
+    assert PC.main(["--staged", str(staged), "--comparison", str(rep), "--comparison-sha256", sha,
+                    "--output", str(final)]) == 2                                 # never overwritten
+    monkeypatch.setattr(L, "code_identity", lambda repo_dir=None: {"commit": "c" * 40, "dirty": True})
+    assert PC.main(["--staged", str(staged), "--comparison", str(rep), "--comparison-sha256", sha,
+                    "--output", str(tmp_path / "dirty.h5")]) == 2
 
 
 def _copy(world, tmp_path, *names):
@@ -195,7 +240,7 @@ def test_a_changed_row_path_passes_only_with_its_reviewed_digest(world, tmp_path
     assert (tmp_path / "a" / "val" / s["row_path"][0]["diff_file"]).read_text() == "- a\n+ b\n"
     assert carry(world, tmp_path / "b", extra=["--accept-row-path-diff", "abc1234=" + "e" * 64]) == 2
     assert carry(world, tmp_path / "c", extra=["--accept-row-path-diff", "abc1234=" + "d" * 64]) == 0
-    rec = T.read_cache(tmp_path / "c" / "carried.h5")[2]
+    rec = T.read_cache_staged(tmp_path / "c" / "carried.h5")[2]
     assert rec["product"]["carried"]["row_path"][0]["accepted_sha256"] == "d" * 64
 
 

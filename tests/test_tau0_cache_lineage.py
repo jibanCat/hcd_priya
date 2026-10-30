@@ -149,7 +149,12 @@ def test_a_carried_group_needs_the_carry_block_and_a_passed_validation(tmp_path,
     with pytest.raises(T.CacheLineageError, match="without a passed validation"):
         T.read_cache(tmp_path / "b.h5")
     tf.write_v34(tmp_path / "c.h5", groups, rows=T.ROWS_CARRIED, carried=carried, validation={"all_passed": True})
-    T.read_cache(tmp_path / "c.h5")
+    with pytest.raises(T.CacheLineageError, match="not yet promoted"):          # staged: the release reader refuses
+        T.read_cache(tmp_path / "c.h5")
+    T.read_cache_staged(tmp_path / "c.h5")
+    promoted = dict(carried, promoted={"passed": True, "comparison_sha256": "1" * 64, "staged_sha256": "2" * 64})
+    tf.write_v34(tmp_path / "e.h5", groups, rows=T.ROWS_CARRIED, carried=promoted, validation={"all_passed": True})
+    T.read_cache(tmp_path / "e.h5")
 
 
 # ------------------------------------------------------------------------------------------- the fresh-row sample

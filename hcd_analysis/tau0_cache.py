@@ -194,7 +194,19 @@ def read_datasets(path):
 def read_cache(path):
     """The release reader: ``(datasets, attrs, record)``. Refused (CacheLineageError) unless the file is format 3.4
     with a well-formed ``tau0_cache`` record, its datasets and attributes match the record's payload digest, its groups
-    match the record, and it is release-eligible."""
+    match the record, and it is release-eligible. Carried rows must also be promoted (``product.carried.promoted``:
+    the fresh-row comparison passed; scripts/promote_carried_cache.py)."""
+    return _read_release(path, staged_ok=False)
+
+
+def read_cache_staged(path):
+    """``read_cache`` without the promotion requirement: reads a carried cache the carry tool wrote before the fresh-row
+    comparison has passed. Only the fresh-row comparison (scripts/fresh_row_sample.py) and the promotion step read a
+    cache this way; no training, product or model reads a staged cache."""
+    return _read_release(path, staged_ok=True)
+
+
+def _read_release(path, *, staged_ok):
     def refuse(why):
         raise CacheLineageError(f"{path}: training cache refused ({why})")
     d, attrs, text = read_datasets(path)
@@ -215,13 +227,14 @@ def read_cache(path):
         refuse("its datasets or attributes differ from the record's payload digest (edited after it was written)")
     if not rec["release_eligible"]:
         refuse("not release-eligible: " + "; ".join(rec["ineligible_reasons"]))
-    check_groups(rec, d, refuse)
+    check_groups(rec, d, refuse, staged_ok=staged_ok)
     return d, attrs, rec
 
 
-def check_groups(rec, d, refuse):
+def check_groups(rec, d, refuse, *, staged_ok=False):
     """The record's groups are the file's snapshot blocks, in order; each has its catalogue, CDDF, snapshot and raw
-    inputs; carried groups name the carry's source and the carried fields."""
+    inputs; carried groups name the carry's source and the carried fields and, unless ``staged_ok``, the promotion
+    (the fresh-row comparison that passed, by sha256)."""
     groups = rec["product"].get("groups")
     ids = list(zip([str(s) for s in d["snap_sim_name"]], [int(s) for s in d["snap_snap"]]))
     if not isinstance(groups, list) or [(g.get("sim"), g.get("snap")) for g in groups] != ids:
@@ -242,6 +255,12 @@ def check_groups(rec, d, refuse):
             refuse("carried rows without the carry's source and field list")
         if not (rec.get("validation") or {}).get("all_passed") is True:
             refuse("carried rows without a passed validation")
+        prom = car.get("promoted")
+        if not staged_ok and not (isinstance(prom, dict) and prom.get("passed") is True
+                                  and all(isinstance(prom.get(k), str) and len(prom[k]) == 64
+                                          for k in ("comparison_sha256", "staged_sha256"))):
+            refuse("carried rows not yet promoted: a staged carry is usable only after the fresh-row comparison "
+                   "passed (scripts/promote_carried_cache.py)")
 
 
 def read_cache_historical(path, *, reason):

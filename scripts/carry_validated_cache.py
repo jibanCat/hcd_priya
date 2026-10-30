@@ -33,15 +33,17 @@ If one of these fails, no group is validated (the summary and the diffs are stil
 
 Output: a validation record per group (<validation-dir>/groups/), the row-path diffs (<validation-dir>/row_path/) and
 <validation-dir>/summary.json. Only if every check passes, the cache: the CARRIED_FIELDS copied from the historical
-cache (marked carried_validated in the lineage record, with its sha256), every other field rebuilt. On any failure,
-including an unexpected error, no cache is written, a summary is written, and the exit status is 2.
+cache (marked carried_validated in the lineage record, with its sha256), every other field rebuilt. The cache is
+STAGED: the release reader (tau0_cache.read_cache, data.load_cache) refuses it until scripts/promote_carried_cache.py
+promotes it, which requires the pre-registered fresh-row comparison to have passed. On any failure, including an
+unexpected error, no cache is written, a summary is written, and the exit status is 2.
 
 Usage (from a clean, committed checkout; the interpreter of the cache build):
     python scripts/carry_validated_cache.py --historical-cache OLD.h5 --old-root OLD_SNAPSHOT_ROOT \\
         --rebuilt-root REBUILT_SNAPSHOT_ROOT --raw-root RAW_SPECTRA_ROOT \\
         --row-path-commit COMMIT [... every commit of record] [--accept-row-path-diff COMMIT=SHA256 ...] \\
         (--acceptance-summary SUMMARY.json --acceptance-summary-sha256 SHA256 | --rehash-raw) \\
-        --validation-dir DIR --output NEW.h5
+        --validation-dir DIR --output NEW.staged.h5
 """
 from __future__ import annotations
 
@@ -511,8 +513,9 @@ def run(args):
         print("CARRY REFUSED: the output would not be release-eligible: " + "; ".join(rec["ineligible_reasons"]))
         return 2
     os.replace(unchecked, out_path)
-    print(f"wrote {out_path} sha256 {L.sha256_file(out_path)}: {len(records)} groups carried_validated; "
-          f"validation summary sha256 {summary_sha}")
+    print(f"wrote the STAGED cache {out_path} sha256 {L.sha256_file(out_path)}: {len(records)} groups "
+          f"carried_validated; validation summary sha256 {summary_sha}. Usable only after "
+          f"scripts/promote_carried_cache.py (the fresh-row comparison passed)")
     return 0
 
 
