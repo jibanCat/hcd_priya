@@ -424,7 +424,8 @@ def run(args):
     globals_["row_path_commits_of_record"] = sorted(resolved) == sorted(COMMITS_OF_RECORD)
     globals_["row_path_code"] = all(r["ok"] for r in row_path)
     repair = json.loads(T._attr_value(attrs["repair_record"])) if "repair_record" in attrs else {}
-    bc = str(repair.get("builder_commit") or "")
+    bc_text = str(repair.get("builder_commit") or "")
+    bc = bc_text.split()[0] if bc_text.split() else ""              # "<commit> (free text)" in the source of record
     globals_["repair_builder_commit_of_record"] = not repair or (len(bc) >= 7 and any(c.startswith(bc)
                                                                                       for c in COMMITS_OF_RECORD))
     if acceptance is not None:
@@ -461,7 +462,7 @@ def run(args):
         "roots": {"old": str(args.old_root), "rebuilt": str(args.rebuilt_root), "raw": str(args.raw_root)},
         "rehash_raw": bool(args.rehash_raw), "global_checks": globals_, "row_path": row_path,
         "of_record": {"source_sha256": SOURCE_OF_RECORD_SHA256, "commits": COMMITS_OF_RECORD,
-                      "repair_builder_commit": bc or None},
+                      "repair_builder_commit": bc_text or None},
         "catalogue_acceptance": None if acceptance is None else {"path": str(args.acceptance_summary),
                                                                  "sha256": acceptance["sha256"],
                                                                  "passed": acceptance["passed"]},

@@ -92,7 +92,7 @@ def test_the_carry_copies_validated_rows_and_rebuilds_every_count(world, tmp_pat
     assert s["passed"] and s["n_groups"] == 3 and all(s["global_checks"].values())
     assert s["origins"]["spliced"] == [f"{W.SIMS[0]}:5"]
     assert s["of_record"]["source_sha256"] == L.sha256_file(world["hist"])
-    assert s["of_record"]["repair_builder_commit"] == W.BUILDER_COMMIT
+    assert s["of_record"]["repair_builder_commit"].split()[0] == W.BUILDER_COMMIT
     for name, sha in s["group_records_sha256"].items():
         g = json.loads((tmp_path / "val" / name).read_text())
         assert L.sha256_file(tmp_path / "val" / name) == sha and g["ok"] and len(g["checks"]) == 12
@@ -304,11 +304,12 @@ def test_a_commit_set_other_than_the_record_is_refused(world, tmp_path, same_cod
 
 
 def test_a_repair_record_naming_another_builder_is_refused(world, tmp_path, same_code, monkeypatch):
-    p = _v33_attr(world, tmp_path, "repair_record", json.dumps({"added": [[W.SIMS[0], 5, 2.6]],
-                                                                "builder_commit": "fff0000"}))
-    W.pin_of_record(monkeypatch, CV, p)
-    assert carry(world, tmp_path, hist=p) == 2
-    assert summary(tmp_path)["global_checks"]["repair_builder_commit_of_record"] is False
+    for i, bc in enumerate(("fff0000", "", "fff0000 (abc1234)", "abc12")):    # another, none, in the note, too short
+        p = _v33_attr(world, tmp_path / str(i), "repair_record", json.dumps({"added": [[W.SIMS[0], 5, 2.6]],
+                                                                             "builder_commit": bc}))
+        W.pin_of_record(monkeypatch, CV, p)
+        assert carry(world, tmp_path / str(i), hist=p) == 2, bc
+        assert summary(tmp_path / str(i))["global_checks"]["repair_builder_commit_of_record"] is False
 
 
 # ------------------------------------------------------------------------------------------------ raw re-hash evidence
@@ -356,6 +357,7 @@ def test_the_raw_files_are_rehashed_here_or_by_the_pinned_acceptance(world, tmp_
 
 # --------------------------------------------------------------------------------- the global checks and inputs
 def _v33_attr(world, tmp_path, name, value):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     p = tmp_path / f"hist_attr_{name}.h5"
     shutil.copy2(world["hist"], p)
     with h5py.File(p, "r+") as f:

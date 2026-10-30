@@ -210,7 +210,8 @@ def to_v33(src, dst, *, repair_added=None):
             f.attrs[k] = v
         f.attrs["cache_version"] = "3.3"
         if repair_added is not None:
-            f.attrs["repair_record"] = json.dumps({"added": repair_added, "builder_commit": BUILDER_COMMIT})
+            f.attrs["repair_record"] = json.dumps({"added": repair_added,                  # as the real record:
+                                                   "builder_commit": f"{BUILDER_COMMIT} (a free-text note)"})
         for k, v in d.items():
             if k in T.STR_KEYS:
                 f.create_dataset(k, data=np.asarray(v, dtype=object), dtype=h5py.string_dtype())
