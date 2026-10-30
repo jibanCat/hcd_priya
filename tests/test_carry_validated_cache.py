@@ -435,6 +435,18 @@ def test_an_ineligible_output_never_appears_under_the_output_name(world, tmp_pat
     monkeypatch.setattr(T, "write_cache", spy)
     assert carry(world, tmp_path) == 2
     assert not (tmp_path / "carried.h5").exists() and not list(tmp_path.glob(".*unchecked"))
+    s = summary(tmp_path)                                    # written as passed before the cache: now says failed
+    assert s["passed"] is False and "would not be release-eligible" in s["error"] and s["n_groups"] == 3
+
+
+def test_a_failure_after_the_summary_leaves_it_saying_failed(world, tmp_path, same_code, monkeypatch, capsys):
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(T, "write_cache", boom)
+    assert carry(world, tmp_path) == 2 and "unexpected OSError" in capsys.readouterr().out
+    s = summary(tmp_path)
+    assert s["passed"] is False and s["error"] == "OSError: disk full" and s["n_groups"] == 3   # the record is kept
+    assert not (tmp_path / "carried.h5").exists() and not (tmp_path / "val" / "failure.json").exists()
 
 
 @pytest.mark.parametrize("bad", ["abc1234=xyz", "=" + "d" * 64, "abc1234=" + "D" * 64, "abc1234"])

@@ -36,7 +36,8 @@ Output: a validation record per group (<validation-dir>/groups/), the row-path d
 cache (marked carried_validated in the lineage record, with its sha256), every other field rebuilt. The cache is
 STAGED: the release reader (tau0_cache.read_cache, data.load_cache) refuses it until scripts/promote_carried_cache.py
 promotes it, which requires the pre-registered fresh-row comparison to have passed. On any failure, including an
-unexpected error, no cache is written, a summary is written, and the exit status is 2.
+unexpected error or one after the summary was written, no cache is written, summary.json says passed false (with the
+error), and the exit status is 2.
 
 Usage (from a clean, committed checkout; the interpreter of the cache build):
     python scripts/carry_validated_cache.py --historical-cache OLD.h5 --old-root OLD_SNAPSHOT_ROOT \\
@@ -310,6 +311,22 @@ def validate_group(src, b, rows, ctx):
     return rec, (dict(meta_rows, tier_c_counts=np.tile(counts, (nr, 1))), block, entries, raw)
 
 
+def _fail_summary(vdir, error, tb=None):
+    """Make ``summary.json`` say the carry failed: a summary already written as passed (the failure came after it) is
+    rewritten with ``passed: false`` and the error; without one, a minimal failed summary is written."""
+    path = Path(vdir) / "summary.json"
+    doc = {"format": "hcd_priya.carry_validation/1"}
+    if path.exists():
+        try:
+            doc = json.loads(path.read_text())
+        except ValueError:
+            pass
+    doc.update(passed=False, error=error)
+    if tb:
+        doc["traceback"] = tb[-4000:]
+    return _write_json(path, doc)
+
+
 def _rehashed_by_acceptance(acc, sim, snap, raw_sha256):
     """``(ok, evidence)``: the catalogue acceptance's record of this group is the file its summary pins, accepted, with
     its raw file re-hashed there to ``raw_sha256``."""
@@ -511,7 +528,9 @@ def run(args):
                     "summary_sha256": summary_sha, "checks": sorted(records[0]["checks"]) + sorted(globals_)})
     if not rec["release_eligible"]:
         unchecked.unlink()
-        print("CARRY REFUSED: the output would not be release-eligible: " + "; ".join(rec["ineligible_reasons"]))
+        why = "the output would not be release-eligible: " + "; ".join(rec["ineligible_reasons"])
+        _fail_summary(vdir, why)
+        print("CARRY REFUSED: " + why)
         return 2
     os.replace(unchecked, out_path)
     print(f"wrote the STAGED cache {out_path} sha256 {L.sha256_file(out_path)}: {len(records)} groups "
@@ -546,11 +565,8 @@ def main(argv=None):
         return 2
     except Exception as e:                       # an unexpected error: no cache (it is written last), a summary, exit 2
         import traceback
-        vdir = Path(args.validation_dir)
-        doc = {"format": "hcd_priya.carry_validation/1", "passed": False, "error": f"{type(e).__name__}: {e}",
-               "traceback": traceback.format_exc()[-4000:]}
         try:
-            _write_json(vdir / ("failure.json" if (vdir / "summary.json").exists() else "summary.json"), doc)
+            _fail_summary(Path(args.validation_dir), f"{type(e).__name__}: {e}", traceback.format_exc())
         except OSError:
             pass
         unchecked = Path(args.output).with_name(f".{Path(args.output).name}.unchecked")
