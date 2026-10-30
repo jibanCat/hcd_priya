@@ -555,6 +555,61 @@ def test_build_catalog_stamps_the_record(tmp_path, monkeypatch):
     assert few.lineage["product"]["n_skewers_built"] == 7 and few.lineage["settings"]["n_skewers"] == 7
 
 
+def _default_yaml_absorber():
+    """The absorber section of config/default.yaml, read without PyYAML (flat ``key: value  # comment`` lines)."""
+    from hcd_analysis.paths import REPO_ROOT
+    out, inside = {}, False
+    for line in (REPO_ROOT / "config" / "default.yaml").read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(" "):
+            inside = line.split(":")[0].strip() == "absorber"
+            continue
+        if inside:
+            key, val = line.split("#")[0].split(":", 1)
+            val = val.strip()
+            out[key.strip()] = (json.loads(val) if val.startswith("[") else {"true": True, "false": False}.get(val, val))
+    return out
+
+
+def test_the_release_finder_settings_are_those_of_the_default_configuration():
+    a = _default_yaml_absorber()
+    want = C.finder_settings(tau_threshold=float(a["tau_threshold"]), merge_dv_kms=float(a["merge_dv_kms"]),
+                             min_pixels=int(a["min_pixels"]), b_init=float(a["b_init_kms"]),
+                             b_bounds=tuple(a["b_bounds"]), tau_fit_cap=float(a["tau_fit_cap"]),
+                             voigt_max_iter=int(a["voigt_max_iter"]), n_skewers=None, fast_mode=a["fast_mode"],
+                             min_log_nhi=float(a["min_log_nhi"]))
+    assert C.RELEASE_FINDER_SETTINGS == want and want["fast_mode"] is True and want["n_skewers"] is None
+
+
+def test_a_release_eligible_load_needs_its_expectations_and_a_whole_file_build(tmp_path, monkeypatch):
+    """The review probe (L1R-3): eligibility is provenance only, so the release load states what it expects."""
+    h5, cat = _golden_build(tmp_path, monkeypatch, tau_threshold=100.0)
+    p = tmp_path / "c.npz"
+    cat.save_npz(p)
+    full = dict(settings=cat.lineage["settings"], raw_path=h5, n_skewers_built=12)
+    C.load_validated_catalog(p, 400, require_release_eligible=True, **full)
+    for missing in full:
+        with pytest.raises(C.CatalogProvenanceError, match="must state the expected"):
+            C.load_validated_catalog(p, 400, require_release_eligible=True,
+                                     **{k: v for k, v in full.items() if k != missing})
+    h5b, part = _golden_build(tmp_path / "part", monkeypatch, n_skewers=3)             # 3 of 12 skewers
+    part.save_npz(tmp_path / "part.npz")
+    with pytest.raises(C.CatalogProvenanceError, match="partial build"):
+        C.load_validated_catalog(tmp_path / "part.npz", 400, require_release_eligible=True,
+                                 settings=part.lineage["settings"], raw_path=h5b, n_skewers_built=3)
+    C.load_validated_catalog(tmp_path / "part.npz", 400, settings=part.lineage["settings"], raw_path=h5b,
+                             n_skewers_built=3)                                         # a debug resume still loads
+    for kw in (dict(tau_threshold=50.0), dict(fast_mode=False)):                       # other settings, Voigt mode
+        h5c, other = _golden_build(tmp_path / str(len(kw)) / next(iter(kw)), monkeypatch, **kw)
+        q = tmp_path / f"{next(iter(kw))}.npz"
+        other.save_npz(q)
+        assert other.release_eligible                                                  # provenance only ...
+        with pytest.raises(C.CatalogProvenanceError, match="other finder settings"):  # ... the settings are checked
+            C.load_validated_catalog(q, 400, require_release_eligible=True, settings=dict(
+                C.RELEASE_FINDER_SETTINGS, n_skewers=None), raw_path=h5c, n_skewers_built=12)
+
+
 @pytest.mark.parametrize("code, why", [({"commit": "c" * 40, "dirty": True}, "dirty"),
                                        ({"commit": None, "dirty": None}, "commit is unknown")])
 def test_a_build_from_a_dirty_or_unknown_tree_is_stamped_but_not_release_eligible(tmp_path, monkeypatch, code, why):
@@ -564,7 +619,8 @@ def test_a_build_from_a_dirty_or_unknown_tree_is_stamped_but_not_release_eligibl
     cat.save_npz(tmp_path / "c.npz")                                 # saved and reusable, never release-eligible
     C.load_validated_catalog(tmp_path / "c.npz", 400)
     with pytest.raises(C.CatalogProvenanceError, match="not release-eligible"):
-        C.load_validated_catalog(tmp_path / "c.npz", 400, require_release_eligible=True)
+        C.load_validated_catalog(tmp_path / "c.npz", 400, settings=cat.lineage["settings"], raw_path=h5,
+                                 n_skewers_built=12, require_release_eligible=True)
 
 
 def test_without_the_finder_cross_check_no_finder_id_is_stamped_and_nothing_can_be_saved(tmp_path, monkeypatch):
@@ -767,7 +823,8 @@ def test_catalogue_only_mode_writes_the_catalogue_its_cddf_and_meta_and_no_p1d(t
     assert sorted(meta["products"]) == ["catalog.npz", "cddf.npz"]
     for name, ident in meta["products"].items():
         assert ident == {k: v for k, v in L.file_identity(d / name).items() if k != "mtime_ns"}
-    cat = C.load_validated_catalog(d / "catalog.npz", 64, raw_path=entry.path, require_release_eligible=True)
+    cat = C.load_validated_catalog(d / "catalog.npz", 64, raw_path=entry.path, require_release_eligible=True,
+                                   settings=PL.finder_settings(**PL._catalog_kwargs(c)), n_skewers_built=4)
     raw = L.find_input(cat.lineage, "raw_spectra")
     assert {k: raw[k] for k in ("sha256", "size", "mtime_ns")} == L.file_identity(entry.path)
     assert cat.lineage["run_settings_sha256"] == L.sha256_file(Path(c.output_root) / "run_settings.json")
@@ -796,7 +853,8 @@ def test_a_dirty_tree_writes_products_that_are_not_release_eligible(tmp_path, mo
     assert not meta["lineage"]["release_eligible"] and not L.read_npz(d / "cddf.npz")[1]["release_eligible"]
     assert PL.run_one_snap(ss, entry, c) is not None                       # resumable, never eligible
     with pytest.raises(C.CatalogProvenanceError, match="not release-eligible"):
-        C.load_validated_catalog(d / "catalog.npz", 64, require_release_eligible=True)
+        C.load_validated_catalog(d / "catalog.npz", 64, require_release_eligible=True, raw_path=entry.path,
+                                 settings=PL.finder_settings(**PL._catalog_kwargs(c)), n_skewers_built=4)
 
 
 def test_catalogue_only_and_full_runs_never_share_a_root_or_a_snapshot(tmp_path, monkeypatch):

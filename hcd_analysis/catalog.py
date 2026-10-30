@@ -431,6 +431,14 @@ def finder_settings(*, tau_threshold, merge_dv_kms, min_pixels, b_init, b_bounds
     })
 
 
+# The finder settings of the release catalogues (config/default.yaml, absorber section, all skewers). A release consumer
+# compares a catalogue's recorded settings with these (release eligibility is provenance only); a test pins them to
+# the configuration file.
+RELEASE_FINDER_SETTINGS = finder_settings(tau_threshold=100.0, merge_dv_kms=100.0, min_pixels=2, b_init=30.0,
+                                          b_bounds=(1.0, 300.0), tau_fit_cap=1.0e6, voigt_max_iter=200,
+                                          n_skewers=None, fast_mode=True, min_log_nhi=17.2)
+
+
 def check_catalog_record(cat: "AbsorberCatalog", nbins: Optional[int] = None, *, settings: Optional[dict] = None,
                          raw_path=None, n_skewers_built: Optional[int] = None,
                          require_release_eligible: bool = False) -> dict:
@@ -438,7 +446,12 @@ def check_catalog_record(cat: "AbsorberCatalog", nbins: Optional[int] = None, *,
     finder with the cross-check run, or that differs from what the caller expects: the skewer length ``nbins``, the
     finder ``settings`` (``finder_settings``), the raw spectra file ``raw_path`` (its sha256; a matching size and mtime
     are accepted without rereading), the number of skewers searched, and, with ``require_release_eligible``, release
-    eligibility. Returns the record."""
+    eligibility. A release-eligible load must state all three expectations (``settings``, usually
+    ``RELEASE_FINDER_SETTINGS``, ``raw_path`` and ``n_skewers_built``, the file's skewer count) and refuses a partial
+    build (a recorded skewer limit, or fewer skewers than the raw file holds). Returns the record."""
+    if require_release_eligible and (settings is None or raw_path is None or n_skewers_built is None):
+        raise CatalogProvenanceError("a release-eligible load must state the expected finder settings, raw spectra "
+                                     "file and skewer count (settings, raw_path, n_skewers_built)")
     rec = cat.lineage
     if cat.historical_reason is not None:
         raise CatalogProvenanceError(f"read as historical ({cat.historical_reason}); never reused")
@@ -483,8 +496,14 @@ def check_catalog_record(cat: "AbsorberCatalog", nbins: Optional[int] = None, *,
             L.verify_input(rec, "raw_spectra", raw_path)
         except (L.LineageError, OSError) as e:
             raise CatalogProvenanceError(str(e)) from None
-    if require_release_eligible and not rec["release_eligible"]:
-        raise CatalogProvenanceError("not release-eligible: " + "; ".join(rec["ineligible_reasons"]))
+    if require_release_eligible:
+        if not rec["release_eligible"]:
+            raise CatalogProvenanceError("not release-eligible: " + "; ".join(rec["ineligible_reasons"]))
+        raw_info = L.find_input(rec, "raw_spectra").get("info") or {}
+        if rec["settings"].get("n_skewers") is not None or prod.get("n_skewers_built") != raw_info.get("n_skewers"):
+            raise CatalogProvenanceError(f"a partial build ({prod.get('n_skewers_built')} of "
+                                         f"{raw_info.get('n_skewers')} skewers, limit "
+                                         f"{rec['settings'].get('n_skewers')}); a release catalogue covers the file")
     return rec
 
 
