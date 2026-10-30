@@ -347,3 +347,24 @@ def test_the_comparison_criterion():
     assert not FR.compare_field(d, a)[0]
     assert FR.compare_field(np.array([1, 2]), np.array([1, 3]))[0] is False
     assert FR.compare_field(np.array(["a"], dtype=object), np.array(["a"], dtype=object))[0]
+
+
+def test_the_cache_file_is_fsynced_before_it_is_renamed_into_place(tmp_path, monkeypatch):
+    tf.clean_code(monkeypatch)
+    events, real_fsync, real_replace = [], T.os.fsync, T.os.replace
+
+    def fsync(fd):
+        events.append(("fsync", os.readlink(f"/proc/self/fd/{fd}") if os.path.exists("/proc/self/fd") else fd))
+        return real_fsync(fd)
+
+    def replace(a, b):
+        events.append(("replace", str(a)))
+        return real_replace(a, b)
+    monkeypatch.setattr(T.os, "fsync", fsync)
+    monkeypatch.setattr(T.os, "replace", replace)
+    tf.write_v34(tmp_path / "c.h5", [("simA", 16, 3.2, 3, 1)])
+    kinds = [e[0] for e in events]
+    i = kinds.index("replace")
+    assert "fsync" in kinds[:i]
+    if os.path.exists("/proc/self/fd"):
+        assert any(e[0] == "fsync" and str(e[1]) == events[i][1] for e in events[:i])   # the temporary file itself

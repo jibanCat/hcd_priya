@@ -397,6 +397,11 @@ def write_cache(path, datasets, attrs, *, inputs, settings, groups, carried=None
             raise CacheLineageError("the lineage record exceeds the readable size")
         with h5py.File(tmp, "a") as f:
             f.create_dataset(LINEAGE_KEY, data=text, dtype=h5py.string_dtype())
+        ffd = os.open(str(tmp), os.O_RDONLY)                       # the file's bytes on disk before the rename
+        try:
+            os.fsync(ffd)
+        finally:
+            os.close(ffd)
         os.replace(tmp, path)
         try:
             dfd = os.open(str(path.parent), os.O_RDONLY)
