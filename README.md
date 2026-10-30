@@ -246,7 +246,7 @@ hcd run-all --n-workers 36 --config config/default.yaml             # full 60-si
 
 Each output root holds the results of one set of settings: the first run writes `run_settings.json` there, and a
 later run with different settings, or into a root that holds files but no record, is refused before anything is
-written ([`docs/tau_threshold.md`](docs/tau_threshold.md), "Run settings").
+written (`hcd_analysis/run_settings.py`).
 
 On Great Lakes the full campaign runs as a SLURM array, one task per simulation:
 
@@ -267,6 +267,11 @@ the τ₀ training cache described in Stage 1.
 ---
 
 ## The pipeline, stage by stage
+
+> **A historical record, not a validation of a released model.** The stages, figures and numbers below describe the
+> analysis campaign carried out with the historical emulator, which was trained on absorber catalogues made before the
+> box-edge duplicate fix ([`docs/bugs_found.md`](docs/bugs_found.md), bug 8). They are kept as a record of that work.
+> A released model will come with its own validation.
 
 The pipeline has four stages, described in order. Each stage notes the product it
 yields, shows the figure it produces, and gives the command that generated or
