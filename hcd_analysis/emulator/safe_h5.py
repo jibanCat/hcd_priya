@@ -377,7 +377,7 @@ def make_lineage_block(*, cache_record, cache_identity, wc_map, member_metas, ex
 
 def lineage_block_reasons(block, allowed_finder_ids):
     """The reasons (empty: eligible) why the block, read on its own, does not describe a release bundle."""
-    from ..tau0_cache import CARRIED_FIELDS
+    from ..tau0_cache import CACHE_VERSION, CARRIED_FIELDS, KIND_VERSION
     why = []
     allowed = frozenset(allowed_finder_ids)
     fids = block.get("finder_ids") or []
@@ -389,8 +389,17 @@ def lineage_block_reasons(block, allowed_finder_ids):
     c = block.get("cache") or {}
     if c.get("kind") != "tau0_cache" or c.get("release_eligible") is not True:
         why.append("the training cache is not a release-eligible tau0_cache")
-    if (block.get("catalogues") or {}).get("n", 0) < 1:
+    if c.get("kind_version") != KIND_VERSION or (c.get("settings") or {}).get("cache_version") != CACHE_VERSION:
+        why.append(f"the training cache is not a version {CACHE_VERSION} tau0_cache record of kind version "
+                   f"{KIND_VERSION}")
+    rows = c.get("rows") or {}
+    if c.get("n_groups") != rows.get("built", 0) + rows.get(CARRIED_LABEL, 0):
+        why.append("the cache's group count is not the sum of its built and carried groups")
+    cat = block.get("catalogues") or {}
+    if cat.get("n", 0) < 1:
         why.append("the training cache names no catalogue")
+    if cat.get("rule") != CATALOGUE_SET_RULE:
+        why.append("the catalogue-set digest is not made by this format's rule")
     if (c.get("rows") or {}).get(CARRIED_LABEL, 0):
         car = c.get("carried") or {}
         prom = car.get("promoted") or {}

@@ -91,6 +91,11 @@ def test_the_unanchored_development_path_loads_marked_and_warns(info):
     (lambda m: m["lineage"]["wc_map"].update(cache_sha256="0" * 64), "fitted to another cache"),
     (lambda m: m["lineage"].update(release_eligible=False, ineligible_reasons=["stated"]), "stated"),
     (lambda m: m["lineage"]["cache"]["rows"].update(carried_validated=1), "carried rows without the carry"),
+    (lambda m: m["lineage"]["cache"]["rows"].update(built=1), "group count is not the sum"),
+    (lambda m: m["lineage"]["cache"].update(kind_version=2), "not a version 3.4 tau0_cache"),
+    (lambda m: m["lineage"]["cache"]["settings"].update(cache_version="3.3"), "not a version 3.4 tau0_cache"),
+    (lambda m: m["lineage"]["cache"]["settings"].pop("cache_version"), "not a version 3.4 tau0_cache"),
+    (lambda m: m["lineage"]["catalogues"].update(rule="another rule"), "not made by this format's rule"),
 ])
 def test_a_block_that_does_not_establish_a_clean_lineage_is_refused(info, edit, match):
     sha = _rewrite(info, edit)
