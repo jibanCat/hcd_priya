@@ -12,8 +12,13 @@ For one (simulation, snapshot) group, the rebuilt snapshot directory (catalogue-
   5. the per-sightline Tier-C labels and the 4-class highest-class labels are identical;
   6. meta.json counts equal the old meta.json counts minus the duplicates per class; cddf.npz counts equal the
      histogram of the old catalogue minus its duplicates in every bin, with the same bins and absorption path.
-One JSON per group (<out>/groups/<sim>__snap_NNN.json); ``summarize`` writes <out>/summary.json and exits 0 only when
-every listed group was checked and accepted.
+One JSON per group (<out>/groups/<sim>__snap_NNN.json), which also records what it was checked against: the old
+catalogue's sha256 and size (and whether it carried a record), the old meta.json's sha256, the trace file's sha256 and
+the three roots. ``summarize`` writes <out>/summary.json and exits 0 only when every listed group was checked and
+accepted, every group's raw file was re-hashed, every group was checked by one clean, committed acceptance code
+identity, every group agrees with the one trace file given to ``summarize`` (by its recorded sha256 or, for a record
+written before records named it, by its recorded duplicate counts), the rebuilt catalogues have one code identity
+(at ``--expect-commit`` when given) and one finder-digest set.
 
 The group list has one "SIM SNAP" per line. ``check --index I`` checks line I (1-based, e.g. $SLURM_ARRAY_TASK_ID);
 without --index every line is checked in turn.
@@ -21,12 +26,14 @@ without --index every line is checked in turn.
 Usage:
     python scripts/accept_rebuilt_catalogues.py check --groups LIST --old-root OLD --new-root NEW --raw-root RAW \\
         --trace-rows TRACE.json --out OUT [--index I] [--rehash-raw]
-    python scripts/accept_rebuilt_catalogues.py summarize --groups LIST --out OUT
+    python scripts/accept_rebuilt_catalogues.py summarize --groups LIST --trace-rows TRACE.json --out OUT \\
+        [--expect-commit COMMIT]
 """
 from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import sys
@@ -79,10 +86,13 @@ def _class4(cat, n_sk):
                                                         np.where(m >= C.LOG_NHI_LLS_MIN, 1, 0)))
 
 
-def check_group(sim, snap, *, old_root, new_root, raw_root, trace_rows, rehash_raw=False, tier="LF"):
-    """The acceptance record of one group: ``{"sim", "snap", "checks": {name: {"ok", ...}}, "accepted"}``."""
+def check_group(sim, snap, *, old_root, new_root, raw_root, trace_rows, rehash_raw=False, tier="LF",
+                trace_sha256=None):
+    """The acceptance record of one group: ``{"sim", "snap", "inputs", "checks": {name: {"ok", ...}}, "accepted"}``."""
     from hcd_analysis.priya_p1d import bin_sightlines_by_nhi
-    rec = {"sim": sim, "snap": snap, "checks": {}}
+    rec = {"sim": sim, "snap": snap, "checks": {},
+           "inputs": {"trace_sha256": trace_sha256,
+                      "roots": {"old": str(old_root), "new": str(new_root), "raw": str(raw_root)}}}
     ck = rec["checks"]
 
     def check(name, ok, **info):
@@ -109,8 +119,14 @@ def check_group(sim, snap, *, old_root, new_root, raw_root, trace_rows, rehash_r
           code=lrec["code"], raw={k: raw_rec.get(k) for k in ("sha256", "size", "mtime_ns")}, rehashed=rehash_raw,
           n_skewers_searched=fin["n_skewers_searched"], n_skewers_verified=fin["n_skewers_verified"],
           estimator_source_sha256=fin.get("estimator_source_sha256"), source_sha256=fin.get("source_sha256"))
+    old_ident = L.file_identity(old_dir / "catalog.npz")
     old = C.load_catalog_historical(old_dir / "catalog.npz", reason="catalogue acceptance: the old catalogue")
-    old_meta = json.loads((old_dir / "meta.json").read_text())
+    if L.file_identity(old_dir / "catalog.npz") != old_ident:
+        raise RuntimeError(f"{old_dir / 'catalog.npz'} changed while it was read")
+    old_meta_bytes = (old_dir / "meta.json").read_bytes()
+    old_meta = json.loads(old_meta_bytes)
+    rec["inputs"]["old_catalogue"] = dict(old_ident, has_record=old.original_lineage_json is not None)
+    rec["inputs"]["old_meta_sha256"] = hashlib.sha256(old_meta_bytes).hexdigest()
     n, n_sk = int(meta["nbins"]), int(meta["n_skewers"])
     o, w = _columns(old), _columns(new)
     dup = C.find_wrap_duplicates(o["skewer_idx"], o["pix_start"], o["pix_end"], n)
@@ -172,10 +188,11 @@ def cmd_check(a):
     groups = read_groups(a.groups)
     todo = [groups[a.index - 1]] if a.index is not None else groups
     trace = json.loads(Path(a.trace_rows).read_text())
+    trace_sha = L.sha256_file(a.trace_rows)
     bad = 0
     for sim, snap in todo:
         rec = check_group(sim, snap, old_root=a.old_root, new_root=a.new_root, raw_root=a.raw_root,
-                          trace_rows=trace, rehash_raw=a.rehash_raw)
+                          trace_rows=trace, rehash_raw=a.rehash_raw, trace_sha256=trace_sha)
         rec["checked_utc"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         rec["code"] = L.code_identity()
         _write(group_file(a.out, sim, snap), rec)
@@ -185,10 +202,18 @@ def cmd_check(a):
     return 1 if bad else 0
 
 
+def _trace_row(trace, sim, snap, tier="LF"):
+    hits = [r for r in trace if r.get("tier") == tier and r.get("sim") == sim and int(r.get("snap")) == snap]
+    return hits[0]["dups"] if len(hits) == 1 else None
+
+
 def cmd_summarize(a):
     groups = read_groups(a.groups)
+    trace = json.loads(Path(a.trace_rows).read_text())
+    trace_sha = L.sha256_file(a.trace_rows)
     missing, refused, files, totals = [], [], {}, {c: 0 for c in CLASSES}
-    commits, digests = set(), set()
+    commits, digests, checkers = set(), set(), set()
+    not_rehashed, trace_mismatch, off_commit = [], [], []
     for sim, snap in groups:
         p = group_file(a.out, sim, snap)
         if not p.exists():
@@ -204,15 +229,33 @@ def cmd_summarize(a):
         lr = rec["checks"]["release_loader"]
         commits.add(json.dumps(lr["code"], sort_keys=True))
         digests.add(json.dumps([lr["estimator_source_sha256"], lr["source_sha256"]], sort_keys=True))
+        checkers.add(json.dumps(rec.get("code"), sort_keys=True))
+        if lr.get("rehashed") is not True:
+            not_rehashed.append(f"{sim} {snap}")
+        recorded = (rec.get("inputs") or {}).get("trace_sha256")
+        want = _trace_row(trace, sim, snap)
+        if (recorded is not None and recorded != trace_sha) or want is None or \
+                rec["checks"]["duplicates_per_class_equal_trace"].get("trace") != want:
+            trace_mismatch.append(f"{sim} {snap}")
+        if a.expect_commit and not str((lr.get("code") or {}).get("commit") or "").startswith(a.expect_commit):
+            off_commit.append(f"{sim} {snap}")
+    checker = [json.loads(c) for c in checkers]
+    clean_checker = len(checker) == 1 and isinstance(checker[0], dict) and isinstance(checker[0].get("commit"), str) \
+        and len(checker[0]["commit"]) == 40 and checker[0].get("dirty") is False
     summary = {"format": "hcd_priya.catalogue_acceptance/1", "n_groups": len(groups),
                "n_accepted": len(groups) - len(missing) - len(refused), "missing": missing, "refused": refused,
                "duplicates_per_class_total": totals, "code_identities": sorted(commits),
                "finder_source_digests": sorted(digests), "group_files_sha256": files,
-               "group_list_sha256": L.sha256_file(a.groups),
-               "all_accepted": not missing and not refused and len(commits) == 1 and len(digests) == 1}
+               "group_list_sha256": L.sha256_file(a.groups), "trace_rows_sha256": trace_sha,
+               "acceptance_code_identities": sorted(checkers), "not_rehashed": not_rehashed,
+               "trace_mismatch": trace_mismatch, "expect_commit": a.expect_commit, "off_commit": off_commit,
+               "all_accepted": not missing and not refused and len(commits) == 1 and len(digests) == 1
+               and clean_checker and not not_rehashed and not trace_mismatch and not off_commit}
     _write(Path(a.out) / "summary.json", summary)
     print(f"{summary['n_accepted']}/{len(groups)} accepted; {len(missing)} missing, {len(refused)} refused; "
-          f"{len(commits)} code identity, {len(digests)} finder digest set(s)")
+          f"{len(commits)} code identity, {len(digests)} finder digest set(s); {len(checkers)} acceptance identity "
+          f"({'clean' if clean_checker else 'NOT one clean commit'}); {len(not_rehashed)} not re-hashed; "
+          f"{len(trace_mismatch)} trace mismatch(es); {len(off_commit)} off the expected commit")
     return 0 if summary["all_accepted"] else 1
 
 
@@ -230,7 +273,9 @@ def main(argv=None):
     c.add_argument("--rehash-raw", action="store_true")
     s = sub.add_parser("summarize")
     s.add_argument("--groups", type=Path, required=True)
+    s.add_argument("--trace-rows", type=Path, required=True, help="the trace file every group must agree with")
     s.add_argument("--out", type=Path, required=True)
+    s.add_argument("--expect-commit", default=None, help="the rebuilt catalogues' code commit (prefix)")
     a = ap.parse_args(argv)
     return cmd_check(a) if a.cmd == "check" else cmd_summarize(a)
 

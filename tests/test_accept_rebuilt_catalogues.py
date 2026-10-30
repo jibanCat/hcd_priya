@@ -7,6 +7,7 @@ import sys
 
 import pytest
 
+from hcd_analysis import lineage as L
 from hcd_analysis.paths import REPO_ROOT
 from tests import tau0_world as W
 
@@ -32,6 +33,11 @@ def records(out):
     return {p.name: json.loads(p.read_text()) for p in sorted((out / "groups").iterdir())}
 
 
+def summarize(w, out, *, trace=None, extra=()):
+    return AC.main([str(a) for a in ("summarize", "--groups", w["base"] / "groups.txt", "--trace-rows",
+                                     trace or w["trace"], "--out", out, *extra)])
+
+
 def test_the_rebuilt_world_is_accepted_group_by_group_and_summarized(world, tmp_path):
     assert check(world, tmp_path, extra=["--rehash-raw"]) == 0
     recs = records(tmp_path)
@@ -40,17 +46,24 @@ def test_the_rebuilt_world_is_accepted_group_by_group_and_summarized(world, tmp_
     assert r["checks"]["release_loader"]["rehashed"] and r["checks"]["entries_old_minus_duplicates"]["old_duplicates"] == 2
     assert r["checks"]["nhi_bitwise_or_within_one_ulp"]["bitwise"] == r["checks"]["entries_old_minus_duplicates"]["new"]
     assert r["info"]["old_cddf_equals_old_catalogue_histogram"]
-    assert AC.main(["summarize", "--groups", str(world["base"] / "groups.txt"), "--out", str(tmp_path)]) == 0
+    assert summarize(world, tmp_path) == 0
     s = json.loads((tmp_path / "summary.json").read_text())
     assert s["all_accepted"] and s["n_accepted"] == 3 and len(s["code_identities"]) == 1
     assert sum(s["duplicates_per_class_total"].values()) == 6
+    assert s["trace_rows_sha256"] == L.sha256_file(world["trace"]) and len(s["acceptance_code_identities"]) == 1
+    inp = r["inputs"]                                    # what the group was checked against
+    sim, snap = r["sim"], r["snap"]
+    assert inp["trace_sha256"] == L.sha256_file(world["trace"])
+    assert inp["old_catalogue"]["sha256"] == L.sha256_file(world["old"] / sim / f"snap_{snap:03d}" / "catalog.npz")
+    assert inp["old_catalogue"]["has_record"] is False and len(inp["old_meta_sha256"]) == 64
+    assert inp["roots"] == {"old": str(world["old"]), "new": str(world["rebuilt"]), "raw": str(world["emu"])}
 
 
 def test_one_array_task_checks_one_line(world, tmp_path):
     assert check(world, tmp_path, extra=["--index", "2"]) == 0
     sim, snap, _z = W.GROUPS[1]
     assert list(records(tmp_path)) == [f"{sim}__snap_{snap:03d}.json"]
-    assert AC.main(["summarize", "--groups", str(world["base"] / "groups.txt"), "--out", str(tmp_path)]) == 1
+    assert summarize(world, tmp_path) == 1
     assert len(json.loads((tmp_path / "summary.json").read_text())["missing"]) == 2
 
 
@@ -89,3 +102,42 @@ def test_a_rebuilt_snapshot_not_made_with_the_release_settings_is_refused(world,
     assert check(w, tmp_path / "out") == 1
     rec = records(tmp_path / "out")[f"{sim}__snap_{snap:03d}.json"]
     assert not rec["accepted"] and "other finder settings" in rec["checks"]["release_loader"]["error"]
+
+
+def _edit_record(out, i, fn):
+    p = sorted((out / "groups").iterdir())[i]
+    r = json.loads(p.read_text())
+    fn(r)
+    p.write_text(json.dumps(r))
+
+
+def test_summarize_requires_rehash_one_clean_checker_one_trace_and_the_expected_commit(world, tmp_path):
+    assert check(world, tmp_path / "plain") == 0                     # accepted, but the raw files were not re-hashed
+    assert summarize(world, tmp_path / "plain") == 1
+    assert len(json.loads((tmp_path / "plain" / "summary.json").read_text())["not_rehashed"]) == 3
+    out = tmp_path / "ok"
+    assert check(world, out, extra=["--rehash-raw"]) == 0
+    assert summarize(world, out, extra=["--expect-commit", "c" * 7]) == 0
+    assert summarize(world, out, extra=["--expect-commit", "d" * 7]) == 1
+    assert len(json.loads((out / "summary.json").read_text())["off_commit"]) == 3
+    rows = json.loads(world["trace"].read_text())
+    rows[0]["dups"]["LLS"] += 1
+    (tmp_path / "other_trace.json").write_text(json.dumps(rows))
+    assert summarize(world, out, trace=tmp_path / "other_trace.json") == 1             # another trace file
+    assert json.loads((out / "summary.json").read_text())["trace_mismatch"]
+    for i, fn in enumerate((lambda r: r.__setitem__("code", {"commit": "e" * 40, "dirty": False}),   # two checkers
+                            lambda r: r.__setitem__("code", {"commit": "c" * 40, "dirty": True}))):
+        o = tmp_path / f"id{i}"
+        shutil.copytree(out, o)
+        if i == 1:
+            for j in range(3):
+                _edit_record(o, j, fn)                                  # one identity, but dirty
+        else:
+            _edit_record(o, 0, fn)
+        assert summarize(world, o) == 1, i
+    o = tmp_path / "older"                                              # a record written before records named the
+    shutil.copytree(out, o)                                             # trace: checked by its duplicate counts
+    _edit_record(o, 0, lambda r: r.pop("inputs"))
+    assert summarize(world, o) == 0
+    _edit_record(o, 0, lambda r: r["checks"]["duplicates_per_class_equal_trace"]["trace"].__setitem__("LLS", 99))
+    assert summarize(world, o) == 1
