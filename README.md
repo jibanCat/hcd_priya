@@ -420,6 +420,7 @@ public yet.
 
 ## Where to go next
 
+- To report an issue, ask for help or contribute: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - The emulator deep-dive covers the architecture, the τ₀ cache, the training
   recipe, the forward model, the input contract and the conventions:
   [`hcd_analysis/emulator/README.md`](hcd_analysis/emulator/README.md).
