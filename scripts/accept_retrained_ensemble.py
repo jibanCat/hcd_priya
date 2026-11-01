@@ -6,7 +6,8 @@ For every member checkpoint prefix (``.eqx``, ``.meta.json``, ``.norm.pkl``, ``.
   * ``cache_sha256`` is the release cache's (``--cache-sha256``) and ``cache_lineage_sha256`` the digest of the lineage
     record stored in that cache file (read from the file whose sha256 is checked; the record is parsed and checked);
   * ``cache_path`` is a file name, the seeds are distinct, the recipe and architecture are the same for every member,
-    and the recipe trained on every simulation (``all_sims`` true, no ``holdout_sim``);
+    and the recipe trained on every simulation (``all_sims`` true, no ``holdout_sim``, no held-out simulation list
+    ``holdout_sims`` and no ``fold``);
   * the basename and directory are not the historical ensembles' (``--historical-prefix``, repeatable);
   * the comparison is like for like: the old ensemble's recipe (in each old history) equals the new members' recipe,
     and the old training cache (``--old-source``, pinned by ``--old-source-sha256``) and the new cache hold the same
@@ -130,6 +131,13 @@ def at_restore(hist, recipe):
     return out
 
 
+def trained_on_every_simulation(recipe):
+    """True iff the recipe trained on every simulation: ``all_sims`` true, and no held-out simulation
+    (``holdout_sim``), held-out simulation list (``holdout_sims``) or fold (``fold``)."""
+    return (recipe.get("all_sims") is True and recipe.get("holdout_sim") is None
+            and recipe.get("holdout_sims") is None and recipe.get("fold") is None)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--member", action="append", required=True)
@@ -163,8 +171,7 @@ def main(argv=None):
     checks["seeds_distinct"] = len({m.get("seed") for m in metas}) == len(metas)
     checks["one_recipe_and_architecture"] = all(m.get("recipe") == m0.get("recipe") and m.get("arch_cfg") ==
                                                 m0.get("arch_cfg") for m in metas)
-    checks["trained_on_every_simulation"] = all((m.get("recipe") or {}).get("all_sims") is True
-                                                and (m.get("recipe") or {}).get("holdout_sim") is None for m in metas)
+    checks["trained_on_every_simulation"] = all(trained_on_every_simulation(m.get("recipe") or {}) for m in metas)
     stems = {re.sub(r"_seed\d+\Z", "", os.path.basename(p)) for p in a.member}
     checks["distinct_basename_and_directory"] = not (stems & {re.sub(r"_seed\d+\Z", "", n) for n in hist_names}) and \
         not ({os.path.realpath(os.path.dirname(p)) for p in a.member} & hist_dirs)

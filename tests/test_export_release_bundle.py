@@ -103,7 +103,8 @@ def test_the_release_export_writes_an_h5_2_bundle_that_the_release_loaders_accep
 
 @pytest.mark.parametrize("damage", ["dirty", "sums_digest", "member_changed", "member_unlisted", "cache_digest",
                                     "historical_cache", "wc_digest", "wc_other_cache", "members_other_cache",
-                                    "members_dev", "member_elsewhere", "holdout_sim", "not_all_sims"])
+                                    "members_dev", "member_elsewhere", "holdout_sim", "not_all_sims",
+                                    "fold_model", "holdout_sims_only", "fold_only"])
 def test_the_release_export_refuses_ineligible_inputs_before_writing(X, inputs, tmp_path, monkeypatch, damage,
                                                                      capsys):
     out = tmp_path / "out"
@@ -140,9 +141,14 @@ def test_the_release_export_refuses_ineligible_inputs_before_writing(X, inputs, 
     elif damage == "members_dev":                         # development checkpoints (no release meta)
         prefixes, sums = _members(tmp_path / "ens3", inputs["cache"], release=False)
         over.update({"members": prefixes, "--sha256sums": sums, "--sha256sums-sha256": L.sha256_file(sums)})
-    elif damage in ("holdout_sim", "not_all_sims"):         # a leave-one-simulation-out member is not a release one
-        recipe = dict(RECIPE, all_sims=False, holdout_sim="sim1") if damage == "holdout_sim" else dict(
-            RECIPE, all_sims=None)
+    elif damage in ("holdout_sim", "not_all_sims", "fold_model", "holdout_sims_only", "fold_only"):
+        # a leave-one-simulation-out or grouped-fold member (several held-out simulations) is not a release one, even
+        # when its recipe claims all_sims
+        recipe = {"holdout_sim": dict(RECIPE, all_sims=False, holdout_sim="sim1"),
+                  "not_all_sims": dict(RECIPE, all_sims=None),
+                  "fold_model": dict(RECIPE, all_sims=False, holdout_sim=None, holdout_sims=["sim0", "sim1"], fold=3),
+                  "holdout_sims_only": dict(RECIPE, all_sims=True, holdout_sim=None, holdout_sims=["sim0", "sim1"]),
+                  "fold_only": dict(RECIPE, all_sims=True, holdout_sim=None, fold=0)}[damage]
         prefixes, sums = _members(tmp_path / "ens5", inputs["cache"], recipe=recipe)
         over.update({"members": prefixes, "--sha256sums": sums, "--sha256sums-sha256": L.sha256_file(sums)})
     elif damage == "member_elsewhere":
