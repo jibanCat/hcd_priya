@@ -1,12 +1,13 @@
 # Release format for emulator bundles: HDF5 + JSON (`hcd_priya.h5/2`)
 
 Status: the format for released emulator bundles, adopted subject to an independent review of its loader and a
-compatibility test with an older HDF5 library. The trained models themselves are not distributed yet. The training
+compatibility test with an older HDF5 library (passed locally with libhdf5 1.10.8 reading a bundle written with 2.0.0;
+not yet run in continuous integration). The trained models themselves are not distributed yet. The training
 checkpoints (`.eqx` + `.norm.pkl` + `.meta.json`, written by `train.save_checkpoint`) remain the working format; a
 release converts them once (`scripts/export_safe_bundle.py`). `hcd_priya.h5/2` adds to the earlier `hcd_priya.h5/1`
-a lineage block and the dN/dX-to-w_c map; an `h5/1` bundle loads only through the separately named historical loaders
-(below). The earlier safetensors-layout prototype (`docs/release_format.md`) is kept as evidence only and is not a
-second release format.
+a lineage block and the map from absorber incidence (dN/dX) to the class weights w_c; an `h5/1` bundle loads only
+through the separately named historical loaders (below). The earlier safetensors-layout prototype
+(`docs/release_format.md`) is kept as evidence only and is not a second release format.
 
 ## Why
 
@@ -69,10 +70,15 @@ ensemble, metas, norm = safe_h5.load_ensemble("path/to/bundle",
 P_filt = predict_P_filt(ensemble, theta9_unit, z_unit, tau0, norm["P_filt"])   # (4, K): clean, LLS, subDLA, DLA
 ```
 
-The public predictor wraps this (`hcd_analysis/predictor.py`): `hp.load_bundle(bundle_dir, "<digest>")` (None refused),
-`emu.predict(params, z, tau_eff=...)` (the class spectra, the templates, w_c from the bundled map, the members' spread
-as a seed-spread diagnostic, provenance) and `hp.add_hcd(pred, A)` (free amplitudes; only A_c >= 0 and
-1 - sum_c A_c >= 0 are imposed).
+The public predictor (`hcd_analysis/predictor.py`) wraps this:
+
+```python
+import hcd_analysis.predictor as hp
+emu = hp.load_bundle("path/to/bundle", "<the published manifest sha256>")   # None is refused
+pred = emu.predict(params, z, tau_eff=tau_eff)   # class spectra, templates, w_c from the bundled map,
+                                                  # the members' spread (a seed-spread diagnostic), provenance
+P = hp.add_hcd(pred, A)                           # free amplitudes; only A_c >= 0 and 1 - sum_c A_c >= 0 imposed
+```
 
 `load_ensemble` is the release entry point. With the published digest it requires format `h5/2` and a lineage block
 that establishes a clean lineage: every finder id in the release allow-list, an eligible training cache (its carried
@@ -106,8 +112,9 @@ with every `h5/1` format check and no lineage, log the reason, and mark the meta
   virtual, compact, chunked or filtered storage, storage not allocated inside the file, attributes other than the root
   `format` (a scalar string, whose shape and type are checked before its value is read), a user block, anything
   outside `/model` and `/norm`, a group inside `/model`, a group without datasets inside `/norm`, a link name longer
-  than 255 characters, non-finite values, more objects, depth or bytes than the bounds in `safe_h5.py`. Shapes of the network and of the normalizer are checked from metadata before any data is
-  read. Any HDF5 error becomes a `SafeFormatError`.
+  than 255 characters, non-finite values, more objects, depth or bytes than the bounds in `safe_h5.py`. Shapes of the
+  network and of the normalizer are checked from metadata before any data is read. Any HDF5 error becomes a
+  `SafeFormatError`.
 - **Never a silent down-cast.** A process without JAX float64 is refused.
 
 ## Writing
@@ -124,6 +131,6 @@ bundles for tests and CI: `hcd_analysis.emulator.release_testing.write_synthetic
 ## Inspecting a member with standard tools
 
 ```
-h5ls -r prod_member.h5          # every dataset and its shape
-python -c "import json; print(json.load(open('prod_member.json'))['meta']['arch_cfg'])"
+h5ls -r member0.h5              # every dataset and its shape
+python -c "import json; print(json.load(open('member0.json'))['meta']['arch_cfg'])"
 ```

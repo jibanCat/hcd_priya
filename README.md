@@ -121,7 +121,8 @@ repository.
 
 Released emulator members will use a pickle-free format, `hcd_priya.h5/2`: per member one HDF5 file (the network
 weights as datasets named by their JAX tree paths, and the output normalizer) and one JSON sidecar (the meta and the
-file's sha256), plus the dN/dX-to-w_c map and a bundle `manifest.json` whose lineage block names the training cache,
+file's sha256), plus the map from absorber incidence (dN/dX) to the class weights w_c, and a bundle `manifest.json`
+whose lineage block names the training cache,
 its catalogues and the code. Loading builds the network from code, checks every array by name, shape and dtype,
 verifies the sha256 before the HDF5 library parses the file, refuses a bundle whose lineage it cannot establish, and
 never unpickles anything:
@@ -129,6 +130,13 @@ never unpickles anything:
 ```python
 from hcd_analysis.emulator import safe_h5
 ensemble, metas, norm = safe_h5.load_ensemble("path/to/bundle", expected_manifest_sha256="<published digest>")
+```
+
+Most users load through the public predictor instead, which wraps this call and refuses an unanchored bundle:
+
+```python
+import hcd_analysis.predictor as hp
+emu = hp.load_bundle("path/to/bundle", "<published digest>")
 ```
 
 The files open with standard tools (`h5ls -r member.h5`). Contract and full usage: `docs/release_format_h5.md`.
