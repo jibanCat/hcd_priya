@@ -16,19 +16,20 @@ record, its settings, its row origins and the ``carried_validated`` label of car
 set, the finder ids, the code commit that trained the members, the export's code identity, the w_c map (sha256, the
 digest of its record), and ``release_eligible`` with the reasons when it is not.
 
-Loading with a manifest digest (the release path, ``load_ensemble`` / ``load_bundle`` / ``load_release``) requires
-h5/2, a well-formed lineage block whose eligibility recomputes to true under the release finder allow-list, the w_c map
-the block names (its record eligible and fitted to the block's cache), every member trained on the block's cache
+Loading with a manifest digest (the release path, ``load_ensemble`` / ``load_bundle`` / ``load_release``) requires h5/2,
+a well-formed lineage block whose eligibility recomputes to true under the release finder allow-list, the w_c map the
+block names (its record eligible and fitted to the block's cache), every member trained on the block's cache
 (``cache_sha256`` and ``cache_lineage_sha256``) at the block's commit from a clean tree, and every member a production
 member (``eligibility.production_recipe_reasons``: its recipe declares the full training set, no reserved held-out or
 fold key, no research marking), and the w_c map fitted on the whole training cache (its ``delta_c.n_blocks`` equals the
-block's ``cache.n_groups``: ``wc_map_production_reasons``). Every reason carries a stable code (``eligibility.reason_code``: ``LIN_*`` for the
-block, ``TIE_*`` for the members' ties, the production rule's codes). A bundle whose provenance carries a
-research marking (``provenance.research``: cross-validation folds, full-simulation research models) is refused by every
-release loader; it loads only through ``load_research`` (anchored, with a purpose), which returns a ``ResearchBundle``,
-never a ``ReleaseBundle``. ``expected_manifest_sha256=None`` loads an unanchored development bundle: the lineage is not
-enforced, a warning is issued, and the returned metas are marked (``MemberMetas.anchored`` False, ``kind`` "dev"). The block is a declaration pinned by the manifest digest: each builder verified
-its inputs when it ran; the loader checks that the declaration is complete, consistent and eligible.
+block's ``cache.n_groups``: ``wc_map_production_reasons``). Every reason carries a stable code
+(``eligibility.reason_code``: ``LIN_*`` for the block, ``TIE_*`` for the members' ties, the production rule's codes). A
+bundle whose provenance carries a research marking (``provenance.research``: cross-validation folds, full-simulation
+research models) is refused by every release loader; it loads only through ``load_research`` (anchored, with a purpose),
+which returns a ``ResearchBundle``, never a ``ReleaseBundle``. ``expected_manifest_sha256=None`` loads an unanchored
+development bundle: the lineage is not enforced, a warning is issued, and the returned metas are marked
+(``MemberMetas.anchored`` False, ``kind`` "dev"). The block is a declaration pinned by the manifest digest: each builder
+verified its inputs when it ran; the loader checks that the declaration is complete, consistent and eligible.
 
 Loading: every file is read through one descriptor that does not follow a symlink, must be a regular file and is
 size-bounded before it is read. The .h5 bytes are read once, hashed and compared with the sidecar (and with the
@@ -729,8 +730,8 @@ def _check_mode(mode, expected, purpose):
                                   "a digest the bundle loads as a release (load_release) or research "
                                   "(load_research) bundle")
     elif not _hex64(expected):
-        raise SafeFormatError(f"a {mode} load needs the published manifest sha256 (64 hex digits); an unanchored "
-                              "development load is load_ensemble(..., expected_manifest_sha256=None)")
+        raise SafeFormatError(f"a {mode} load needs the published manifest sha256 (64 lowercase hex digits); an "
+                              "unanchored development load is load_ensemble(..., expected_manifest_sha256=None)")
     if mode == "research":
         if not (isinstance(purpose, str) and purpose.strip()):
             raise ValueError("a research load needs a non-empty purpose (why this research model is loaded)")
@@ -852,17 +853,18 @@ def load_release(bundle_dir, *, expected_manifest_sha256):
     member that is not a production member (``member_reasons``). Returns a ``ReleaseBundle`` (``kind`` "release",
     ``release_verified`` True)."""
     if not _hex64(expected_manifest_sha256):
-        raise SafeFormatError("load_release needs the published manifest sha256 (64 hex digits); an unanchored "
-                              "development load is load_ensemble(..., expected_manifest_sha256=None)")
+        raise SafeFormatError("load_release needs the published manifest sha256 (64 lowercase hex digits); an "
+                              "unanchored development load is load_ensemble(..., expected_manifest_sha256=None)")
     return _load_v2(bundle_dir, expected=expected_manifest_sha256, mode="release")[0]
 
 
 def load_research(bundle_dir, *, expected_manifest_sha256, purpose):
     """The research load of an h5/2 research bundle (``provenance.research``; a cross-validation fold model, a
-    full-simulation research model): anchored on its manifest digest (64 hex digits), with ``purpose`` (non-empty,
-    logged and kept as ``load_purpose``). Enforces the lineage, the members' ties, the research marking and the
-    member admission (``eligibility.research_member_reasons``: one declared split). Returns a ``ResearchBundle``,
-    never a ``ReleaseBundle``; a production bundle is refused here."""
+    full-simulation research model): anchored on its manifest digest (64 lowercase hex digits), with ``purpose``
+    (non-empty; logged at INFO, kept as ``load_purpose`` and recorded in every research prediction's provenance).
+    Enforces the lineage, the members' ties, the research marking (its recorded content checks and map rule
+    included) and the member admission (``eligibility.research_member_reasons``: one declared split). Returns a
+    ``ResearchBundle``, never a ``ReleaseBundle``; a production bundle is refused here."""
     return _load_v2(bundle_dir, expected=expected_manifest_sha256, mode="research", purpose=purpose)[0]
 
 

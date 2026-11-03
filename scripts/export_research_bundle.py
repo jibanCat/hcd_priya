@@ -149,6 +149,7 @@ def check_inputs(a):
             raise Refused(f"{a.fold_file} does not hash to {a.fold_file_sha256}")
         if a.folds_digest is not None and a.folds_digest != fold_file_sha:
             raise Refused("--folds-digest is not the fold file's sha256")
+        a.folds_digest = fold_file_sha                       # the verified fold file gives the folds digest
     if L.sha256_file(a.sha256sums) != a.sha256sums_sha256:
         raise Refused(f"{a.sha256sums} does not hash to {a.sha256sums_sha256}; nothing was read")
     sums = read_sums(a.sha256sums)
@@ -190,7 +191,7 @@ def check_inputs(a):
     if fold_file_sha is not None:
         rs["fold_file_sha256"] = fold_file_sha
     try:
-        E.check_research_marking(rs)
+        E.check_research_marking(rs, check_recorded=False)   # the declaration; the checks are recorded later
     except E.EligibilityError as err:
         raise Refused(str(err)) from None
     why = E.research_member_reasons(metas, rs)
@@ -345,7 +346,8 @@ def main(argv=None):
     ap.add_argument("--out", required=True, help="NEW directory (refused if it exists)")
     ap.add_argument("--purpose", required=True, help="what the research bundle is for (recorded)")
     ap.add_argument("--split-rule", required=True, choices=[*E.SPLIT_RULES, E.RULE_EXPLICIT_ROWS])
-    ap.add_argument("--held-out-sim", action="append", help="a held-out simulation (repeatable; none: nothing held out)")
+    ap.add_argument("--held-out-sim", action="append",
+                    help="a held-out simulation (repeatable; none: nothing held out)")
     ap.add_argument("--fold", type=int, default=None, help="the fold index (multi_holdout_row_split/1)")
     ap.add_argument("--folds-digest", default=None, help="sha256 of the fold file the members record (folds_sha256)")
     ap.add_argument("--fold-file", default=None, help="the fold file itself (its digest recorded)")

@@ -91,6 +91,6 @@ def test_every_w1_member_split_normaliser_map_and_admission(cache):
               "folds_digest": w1["fold_file_sha256"], "content_checks": [],
               "wc_map": {"rule": E.RULE_WCMAP_SUBSET, "fitted_on_sims_sha256": E.sims_sha256(train),
                          "n_sims": len(train)}}
-        E.check_research_marking(rs)
+        E.check_research_marking(rs, check_recorded=False)
         assert E.research_member_reasons(metas, rs) == [] and all("research" not in m["recipe"] for m in metas)
         del pair

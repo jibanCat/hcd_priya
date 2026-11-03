@@ -93,7 +93,8 @@ def synthetic_wc_map_doc(n_sims=2, n_blocks=None):
             "delta_c": {"coeffs": [[0.0, 0.002, -0.01], [0.0, 0.001, -0.005], [0.0, 0.0, -0.003],
                                    [0.0, 0.0, -0.002]], "deg": 2, "z_clamp": list(W.DELTA_C_Z_CLAMP),
                         "resid_std": [0.01, 0.005, 0.003, 0.002], "resid_max": [0.03, 0.02, 0.01, 0.005],
-                        "mean": [-0.004, -0.002, -0.003, -0.002], "n_blocks": int(n_sims if n_blocks is None else n_blocks), "n_sims": int(n_sims), "z_min": 2.0,
+                        "mean": [-0.004, -0.002, -0.003, -0.002],
+                        "n_blocks": int(n_sims if n_blocks is None else n_blocks), "n_sims": int(n_sims), "z_min": 2.0,
                         "z_max": 5.4},
             "xbar": {"coeffs": [0.0, 0.02, 0.3], "deg": 2, "z_fit": list(W.XBAR_Z_FIT), "n_groups": 4}}
 
@@ -230,7 +231,8 @@ def write_synthetic_research_bundle(bundle_dir, *, purpose="synthetic research b
     if research_fn is not None:
         research = research_fn(research)
     train = set(sims) - set(held_out_sims)
-    doc = synthetic_wc_map_doc(n_sims=len(train), n_blocks=sum(1 for g in rec["product"]["groups"] if g["sim"] in train))
+    doc = synthetic_wc_map_doc(n_sims=len(train),
+                               n_blocks=sum(1 for g in rec["product"]["groups"] if g["sim"] in train))
     wrec = W.make_record(doc, rec, ident, code=SYNTHETIC_CODE, cache_name=SYNTHETIC_CACHE_NAME)
     W.write_wc_map(os.path.join(bundle_dir, H.WC_MAP_FILE), doc, wrec)
     wcm = W.read_wc_map(os.path.join(bundle_dir, H.WC_MAP_FILE))

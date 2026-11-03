@@ -440,7 +440,8 @@ class ResearchPredictor(_PredictorBase):
 
     @property
     def provenance(self):
-        return dict(super().provenance, model_kind="research", research=self.research)
+        return dict(super().provenance, model_kind="research", research=self.research,
+                    load_purpose=self._rb.load_purpose)
 
     def labels(self):
         sp = self._rb.split

@@ -82,8 +82,9 @@ def reason_code(r):
 
 
 def code_class(r):
-    """``"lineage"`` (LIN_*), ``"tie"`` (TIE_*), ``"research"`` (RESEARCH_BUNDLE), ``"production"`` (every other code:
-    the member recipe rules), or None for an uncoded string."""
+    """``"lineage"`` (LIN_*), ``"tie"`` (TIE_*), ``"research"`` (RESEARCH_BUNDLE), ``"admission"`` (RES_*: why a
+    member is not admitted to a research bundle), ``"production"`` (every other code: the member recipe rules and the
+    w_c map rule), or None for an uncoded string."""
     c = reason_code(r)
     if c is None:
         return None
@@ -94,6 +95,8 @@ def code_class(r):
         return "tie"
     if base == "RESEARCH_BUNDLE":
         return "research"
+    if base.startswith("RES_"):
+        return "admission"
     return "production"
 
 
@@ -231,14 +234,22 @@ def _int(x):
     return isinstance(x, int) and not isinstance(x, bool)
 
 
-def check_research_marking(rs):
+_COMPONENTS = ("cache", "split", "normaliser", "wc_map")
+
+
+def check_research_marking(rs, *, check_recorded=True):
     """Refuse (EligibilityError) a ``provenance.research`` that is not a well-formed ``research/1`` record; returns it.
 
         {"schema": "research/1", "purpose": str, "split_rule": one of SPLIT_RULES,
          "split": {held_out_sims: [sorted names], ...per rule}, "content_checks": [component records],
          "wc_map": {"rule", "fitted_on_sims_sha256", "n_sims"},
          optional: "folds_digest" (hex64 or null), "cv_set_id" (str or null), "fold_file_sha256" (hex64 or null),
-         "restored_epoch" ({member: {...}} or null)}"""
+         "restored_epoch" ({member: {...}} or null)}
+
+    With ``check_recorded`` (the default; the writers and the research loader) the recorded content checks must hold
+    exactly one record per component (cache, split, normaliser, wc_map), none MISMATCH, and ``wc_map.rule`` must agree
+    with the split (``wcmap_refit_subset/1`` with a held-out set, ``wcmap_refit/1`` without). ``check_recorded=False``
+    checks the declaration only (the research export, before its checks have run)."""
     def bad(why):
         raise EligibilityError(f"provenance.research: {why}")
     if not isinstance(rs, dict):
@@ -280,11 +291,21 @@ def check_research_marking(rs):
         bad("cv_set_id must be a non-empty string or null")
     if not isinstance(rs["content_checks"], list) or not all(isinstance(c, dict) for c in rs["content_checks"]):
         bad("content_checks must be a list of component records")
+    if check_recorded:
+        names = [c.get("component") for c in rs["content_checks"]]
+        if sorted(names) != sorted(_COMPONENTS):
+            bad(f"content_checks must record each of {list(_COMPONENTS)} once, not {names}")
+        outs = {c.get("component"): c.get("outcome") for c in rs["content_checks"]}
+        if any(o not in (PASS, UNAVAILABLE) for o in outs.values()):
+            bad(f"a recorded MISMATCH (or an unknown outcome) is never a research bundle: {outs}")
     w = rs["wc_map"]
     if not (isinstance(w, dict) and set(w) == _WC_RS_KEYS and w["rule"] in (RULE_WCMAP, RULE_WCMAP_SUBSET)
             and (w["fitted_on_sims_sha256"] is None or _hex64(w["fitted_on_sims_sha256"])) and _int(w["n_sims"])
             and w["n_sims"] > 0):
         bad(f"wc_map must be {{rule, fitted_on_sims_sha256, n_sims}} with rule {RULE_WCMAP_SUBSET} or {RULE_WCMAP}")
+    if check_recorded and w["rule"] != (RULE_WCMAP_SUBSET if held else RULE_WCMAP):
+        bad(f"wc_map.rule {w['rule']} contradicts the split: a held-out set needs {RULE_WCMAP_SUBSET}, none needs "
+            f"{RULE_WCMAP}")
     try:
         json.dumps(rs, allow_nan=False)
     except (TypeError, ValueError) as e:
@@ -324,59 +345,67 @@ def research_member_reasons(metas, rs):
     under ``unverifiable`` (nothing is recomputed) a member that declares an exclusion needs a non-empty declared
     held-out set, and a member's ``holdout_sims`` / ``holdout_sim`` must equal it exactly, so the w_c map's training
     set (the cache minus the declared set) never includes a member's held-out simulation.
-    A bundle mixing (a) and (b) members is refused, and a member whose ``recipe.research`` names another purpose."""
+    A bundle mixing (a) and (b) members is refused, and a member whose ``recipe.research`` names another purpose.
+    Every reason is coded ``RES_*`` (``code_class`` "admission")."""
+    R = reason
     rule, sp = rs["split_rule"], rs["split"]
     out, kinds = [], set()
     for i, m in enumerate(metas):
         r = m.get("recipe") if isinstance(m, dict) else None
         if not isinstance(r, dict):
-            out.append(f"member {i}'s recipe is not a JSON object")
+            out.append(R("RES_RECIPE_NOT_DICT", f"member {i}'s recipe is not a JSON object"))
             continue
         rr = r.get("research")
         if rr is not None and not (isinstance(rr, dict) and rr.get("purpose") == rs["purpose"]):
-            out.append(f"member {i}'s recipe.research names another purpose than the bundle's {rs['purpose']!r}")
+            out.append(R("RES_PURPOSE", f"member {i}'s recipe.research names another purpose than the bundle's "
+                                            f"{rs['purpose']!r}"))
         kind, held = declared_exclusion(r)
         kinds.add("exclusion" if kind != "none" else "full")
         if kind == "none":
             if rr is None:
-                out.append(f"member {i} declares no exclusion and carries no recipe.research: it is "
-                           "indistinguishable from a production member")
+                out.append(R("RES_UNMARKED_FULL", f"member {i} declares no exclusion and carries no "
+                                                  "recipe.research: it is indistinguishable from a production member"))
             if sp["held_out_sims"]:
-                out.append(f"member {i} declares no exclusion, the bundle's split holds out {sp['held_out_sims']}")
+                out.append(R("RES_HELD", f"member {i} declares no exclusion, the bundle's split holds out "
+                                         f"{sp['held_out_sims']}"))
         else:
             if r.get("all_sims") is True:
-                out.append(f"member {i} declares an exclusion and all_sims true (contradictory)")
+                out.append(R("RES_EXCLUSION_ALL_SIMS", f"member {i} declares an exclusion and all_sims true "
+                                                       "(contradictory)"))
             if rule == RULE_UNVERIFIABLE:
                 # nothing is recomputed under this rule, so the declared held-out set (from which the w_c map's
                 # training set is taken) must be the members' own: never empty, and equal to a recognised exclusion
                 if not sp["held_out_sims"]:
-                    out.append(f"member {i} declares an exclusion ({sorted({p.split('.')[0] for p in find_reserved(r)})});"
-                               " an unverifiable split must declare the held-out simulations")
+                    out.append(R("RES_UNVERIFIABLE_NO_HELD", f"member {i} declares an exclusion "
+                                 f"({sorted({p.split('.')[0] for p in find_reserved(r)})}); an unverifiable split "
+                                 "must declare the held-out simulations"))
                 elif kind in ("multi", "one") and held != sp["held_out_sims"]:
-                    out.append(f"member {i} holds out {held}, the bundle's split {sp['held_out_sims']}")
+                    out.append(R("RES_HELD", f"member {i} holds out {held}, the bundle's split {sp['held_out_sims']}"))
                 continue
             keys = {p.split(".")[0] for p in find_reserved(r)}
             allowed = _MULTI_OK if rule == RULE_MULTI_HOLDOUT else _ONE_OK
             if kind not in (("multi",) if rule == RULE_MULTI_HOLDOUT else ("one",)) or keys - allowed:
-                out.append(f"member {i}'s declared exclusion ({sorted(keys)}) is not one of the {rule} rule "
-                           f"({sorted(allowed)}); declare the bundle {RULE_UNVERIFIABLE} instead")
+                out.append(R("RES_RULE", f"member {i}'s declared exclusion ({sorted(keys)}) is not one of the "
+                                         f"{rule} rule ({sorted(allowed)}); declare the bundle {RULE_UNVERIFIABLE} "
+                                         "instead"))
                 continue
             if not held:
-                out.append(f"member {i} declares an empty held-out set: no exclusion")
+                out.append(R("RES_EMPTY_HELD", f"member {i} declares an empty held-out set: no exclusion"))
             if held != sp["held_out_sims"]:
-                out.append(f"member {i} holds out {held}, the bundle's split {sp['held_out_sims']}")
+                out.append(R("RES_HELD", f"member {i} holds out {held}, the bundle's split {sp['held_out_sims']}"))
             if rule == RULE_MULTI_HOLDOUT:
                 if r.get("fold") != sp["fold"]:
-                    out.append(f"member {i}'s fold {r.get('fold')!r} is not the split's {sp['fold']!r}")
+                    out.append(R("RES_FOLD", f"member {i}'s fold {r.get('fold')!r} is not the split's "
+                                             f"{sp['fold']!r}"))
                 if r.get("folds_sha256") != rs.get("folds_digest"):
-                    out.append(f"member {i}'s folds_sha256 is not the bundle's folds_digest")
+                    out.append(R("RES_FOLDS_DIGEST", f"member {i}'s folds_sha256 is not the bundle's folds_digest"))
         if rule == RULE_UNVERIFIABLE:
             continue
         for k in ("val_seed", "val_frac", "n_train", "n_val"):
             if r.get(k) != sp[k] or type(r.get(k)) is not type(sp[k]):
-                out.append(f"member {i}'s {k} {r.get(k)!r} is not the split's {sp[k]!r}")
+                out.append(R("RES_KNOB", f"member {i}'s {k} {r.get(k)!r} is not the split's {sp[k]!r}"))
     if len(kinds) > 1:
-        out.append("the bundle mixes members that declare an exclusion with full-simulation members")
+        out.append(R("RES_MIXED", "the bundle mixes members that declare an exclusion with full-simulation members"))
     return out
 
 
@@ -571,9 +600,8 @@ def split_component(d, metas, rule, held_out_sims):
         tr, va, held = D.production_row_split(sim, val_seed=rs["val_seed"], val_frac=rs["val_frac"],
                                               holdout_sim=held_out_sims[0] if held_out_sims else None)
     else:
-        return component("split", rule, MISMATCH, "content", detail=dict(detail, why=f"rule {rule!r} with "
-                                                                                    f"{len(held_out_sims)} held out")), \
-            None, None, None
+        why = f"rule {rule!r} with {len(held_out_sims)} held out"
+        return component("split", rule, MISMATCH, "content", detail=dict(detail, why=why)), None, None, None
     train_sims = sorted(set(sim[tr].tolist()))
     want_sims = sorted(set(all_sims) - set(held_out_sims))
     detail.update(n_train=int(tr.size), n_val=int(va.size), n_held=int(held.size), train_idx_sha256=index_sha256(tr),

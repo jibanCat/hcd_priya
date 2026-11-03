@@ -410,3 +410,9 @@ def test_the_bundle_checks_the_map_identity_and_the_metas_marks(info, research):
     with pytest.raises(H.SafeFormatError, match="release-verified metas"):
         hp.Bundle(rb._replace(metas=other))
     assert hp.Bundle(rb).n_members == 3
+
+
+def test_the_research_predictions_record_the_callers_purpose(research):                       # R2 m2
+    rp = hp.load_research_bundle(research.bundle_dir, research.manifest_sha256, purpose="why this load happened")
+    pred = rp.predict(PARAMS, 3.0, tau_eff=0.4)
+    assert pred.provenance["load_purpose"] == "why this load happened" == rp.provenance["load_purpose"]

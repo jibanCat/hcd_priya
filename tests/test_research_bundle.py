@@ -342,3 +342,56 @@ def test_an_unverifiable_split_must_declare_the_members_own_held_out_set(tmp_pat
                                              member_fn=_recipe_fn(member_edit) if member_edit else None)
     with pytest.raises(H.SafeFormatError, match="not admitted to this research bundle.*" + match):
         _load(bad)
+
+
+# --------------------------------------------------------- D5 review R2 m1, m4, m8: the recorded checks and the codes
+def _marking(edit):
+    def fn(rs):
+        rs = copy.deepcopy(rs)
+        edit(rs)
+        return rs
+    return fn
+
+
+@pytest.mark.parametrize("edit, match", [
+    (lambda rs: rs["content_checks"][1].update(outcome="MISMATCH"), "recorded MISMATCH"),
+    (lambda rs: rs.update(content_checks=[]), "content_checks must record"),
+    (lambda rs: rs["content_checks"].pop(2), "content_checks must record"),
+    (lambda rs: rs["content_checks"].append(dict(rs["content_checks"][0])), "content_checks must record"),
+    (lambda rs: rs["wc_map"].update(rule=E.RULE_WCMAP), "wcmap_refit_subset/1"),
+])
+def test_a_research_marking_with_inconsistent_recorded_checks_is_refused(tmp_path, res, edit, match):
+    """R2 m1: a recorded MISMATCH, a missing or repeated component, or a map rule that contradicts the held-out set
+    is refused by the writer and by the research loader."""
+    with pytest.raises(H.SafeFormatError, match=match):
+        RT.write_synthetic_research_bundle(str(tmp_path / "w"), purpose=PURPOSE, research_fn=_marking(edit))
+
+    def manifest_edit(m):
+        edit(m["provenance"]["research"])
+    sha = _rewrite(res, manifest_edit)
+    with pytest.raises(H.SafeFormatError, match=match):
+        H.load_research(res.bundle_dir, expected_manifest_sha256=sha, purpose="a test")
+
+
+def test_a_full_simulation_marking_must_name_the_full_map_rule(tmp_path):
+    with pytest.raises(H.SafeFormatError, match="wcmap_refit/1"):
+        RT.write_synthetic_research_bundle(str(tmp_path / "f"), purpose=PURPOSE, held_out_sims=(),
+                                           research_fn=_marking(lambda rs: rs["wc_map"].update(
+                                               rule=E.RULE_WCMAP_SUBSET)))
+
+
+def test_research_admission_refusals_carry_codes(tmp_path):                                    # R2 m4
+    bad = RT.write_synthetic_research_bundle(str(tmp_path / "b"), purpose=PURPOSE,
+                                             member_fn=_recipe_fn(lambda r: r.update(fold=1, n_train=35), only=1))
+    rs = bad.research
+    metas = [json.load(open(p + ".json"))["meta"] for p in bad.prefixes]
+    why = E.research_member_reasons(metas, rs)
+    assert {E.reason_code(r) for r in why} == {"RES_FOLD", "RES_KNOB"}
+    assert {E.code_class(r) for r in why} == {"admission"}
+    with pytest.raises(H.SafeFormatError, match=r"\[RES_FOLD\]"):
+        _load(bad)
+
+
+def test_a_digest_must_be_lowercase_hex(res):                                                   # R2 m8
+    with pytest.raises(H.SafeFormatError, match="64 lowercase hex digits"):
+        H.load_research(res.bundle_dir, expected_manifest_sha256=res.manifest_sha256.upper(), purpose="x")

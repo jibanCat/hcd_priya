@@ -244,3 +244,13 @@ def test_the_recorded_checks_are_the_read_back_ones(X, world, monkeypatch):
     assert X.main(_argv(world, out)) == 0
     s = json.load(open(out / "evidence" / "research_export_summary.json"))
     assert len(calls) == 2 and {c["detail"]["call"] for c in s["research"]["content_checks"]} == {2}
+
+
+def test_the_fold_file_alone_fills_the_folds_digest(X, world):                                  # R2 m5
+    out = world["tmp"] / "out"
+    argv = _argv(world, out)
+    i = argv.index("--folds-digest")
+    del argv[i:i + 2]
+    assert X.main(argv) == 0
+    s = json.load(open(out / "evidence" / "research_export_summary.json"))
+    assert s["research"]["folds_digest"] == s["research"]["fold_file_sha256"] == world["fsha"]
