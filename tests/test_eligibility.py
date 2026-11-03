@@ -189,3 +189,72 @@ def test_each_clause_alone_gives_exactly_its_code(make, only):
     m = copy.deepcopy(_meta())
     make(m)
     assert _codes(m) == only
+
+
+# ------------------------------------------------------------------------------------ the split rules (T28, T31)
+import hashlib  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from hcd_analysis.emulator import data as D  # noqa: E402
+
+
+def _w1_reference_split(sim_name, held_sims, *, val_seed=12345, val_frac=0.10):
+    """W-1's production_split_multi (scripts/w1/common.py at 5067bb4), copied as the reference."""
+    sim_name = np.asarray(sim_name).astype(str)
+    held_sims = [str(s) for s in held_sims]
+    is_held = np.isin(sim_name, held_sims)
+    avail, held = np.flatnonzero(~is_held), np.flatnonzero(is_held)
+    perm = np.random.default_rng(val_seed).permutation(avail.size)
+    n_val = int(val_frac * avail.size)
+    return np.sort(avail[perm[n_val:]]), np.sort(avail[perm[:n_val]]), held
+
+
+def _sims(counts):
+    return np.repeat([f"s{i}" for i in range(len(counts))], counts)
+
+
+def _digest(*arrays):
+    h = hashlib.sha256()
+    for a in arrays:
+        h.update(np.ascontiguousarray(np.asarray(a, dtype="<i8")).tobytes())
+    return h.hexdigest()
+
+
+SIMS7 = _sims([10, 12, 9, 11, 10, 13, 8])
+# sha256 of (train, val, held) int64 bytes on SIMS7, val_seed 12345, val_frac 0.1, computed with the W-1 reference
+GOLDEN_PRODUCTION_SPLIT = "1cc37f31cd886126f83b618b1b88893018c9de4d059feca458f7c3307ed9017a"     # nothing held out
+GOLDEN_MULTI_SPLIT = "f9088d03215622f2b738b4cfa01303a04b111d0b5513d99886ebe2b2bc83d2a5"          # s2, s5 held out
+
+
+@pytest.mark.parametrize("held", [[], ["s3"], ["s2", "s5"], ["s0", "s1", "s6"], ["s6", "s0"]])
+@pytest.mark.parametrize("val_seed, val_frac", [(12345, 0.1), (7, 0.25)])
+def test_the_multi_holdout_split_is_numerically_the_w1_splitter(held, val_seed, val_frac):
+    got = D.multi_holdout_row_split(SIMS7, held, val_seed=val_seed, val_frac=val_frac)
+    ref = _w1_reference_split(SIMS7, held, val_seed=val_seed, val_frac=val_frac)
+    assert all(np.array_equal(a, b) and a.dtype == b.dtype for a, b in zip(got, ref))
+    tr, va, ho = got
+    assert np.array_equal(np.sort(np.concatenate([tr, va, ho])), np.arange(SIMS7.size))
+    assert set(SIMS7[ho]) == set(held) and not set(SIMS7[tr]) & set(held) and not set(SIMS7[va]) & set(held)
+
+
+def test_with_none_or_one_held_out_it_is_the_production_split():
+    for held, one in (([], None), (["s4"], "s4")):
+        a = D.multi_holdout_row_split(SIMS7, held, val_seed=3, val_frac=0.2)
+        b = D.production_row_split(SIMS7, val_seed=3, val_frac=0.2, holdout_sim=one)
+        assert all(np.array_equal(x, y) for x, y in zip(a, b))
+    with pytest.raises(ValueError, match="not in the cache"):
+        D.multi_holdout_row_split(SIMS7, ["s9"])
+
+
+def test_the_number_of_simulations_is_the_caches_own():
+    for counts in ([4, 4, 4], [3, 5, 4, 6, 2, 7, 5, 3, 4, 6, 5]):          # 3 and 11 simulations
+        sims = _sims(counts)
+        tr, va, _ = D.multi_holdout_row_split(sims, [])
+        assert tr.size + va.size == sims.size and va.size == int(0.1 * sims.size)
+
+
+def test_golden_digests_of_the_split_rules():                               # T31: a change forces a new rule version
+    assert _digest(*D.production_row_split(SIMS7)) == _digest(*_w1_reference_split(SIMS7, []))
+    assert _digest(*D.production_row_split(SIMS7)) == GOLDEN_PRODUCTION_SPLIT
+    assert _digest(*D.multi_holdout_row_split(SIMS7, ["s2", "s5"])) == GOLDEN_MULTI_SPLIT
