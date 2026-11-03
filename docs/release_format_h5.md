@@ -127,9 +127,11 @@ models; it is never a production model, whatever its split. The rules live in on
 
 **The production metadata rule** (every release load, and `predictor.Bundle` again): each member's recipe is a JSON
 object, declares `all_sims: true`, carries no research marking (`recipe.research`), and no key anywhere in the meta
-normalises (lower case, `_` and `-` removed) to a reserved held-out or fold name (`reserved_keys/2`: holdoutsim(s),
-heldoutsim(s), heldout, fold(s), foldid, foldssha256, nheld, nheldrows, leftout, leftoutsims, withheld(sims),
-exclude(d)sims, loo, loso, kfold, cvfold; dicts and lists recursed; a null value counts as absent). Choices derived
+normalises (lower case, every character but a-z and 0-9 removed) to a reserved held-out or fold name
+(`reserved_keys/3`: holdout, holdoutsim(s), holdoutsimulations, heldout, heldoutsim(s), heldoutsimulations, fold(s),
+foldid, foldidx, foldindex, foldnum, foldnumber, foldssha256, nheld, nheldrows, nholdout, leftout, leftoutsims,
+withheld(sims), exclude(d)sims, testsims, loo, loocv, loso, kfold, cvfold; dicts and lists recursed; a null value
+counts as absent; a recipe key that normalises to `research` is a research marking). Choices derived
 from a cross-validation may be recorded in `recipe.cv_selection`, the closed schema `cv_selection/1`
 (`{schema, source_cv_set_id, source_folds_digest, [source_record_sha256], derived: {knob: {value, rule}}}`, each value a
 JSON scalar equal to the recipe knob it names); the scan exempts nothing.

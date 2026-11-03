@@ -4,7 +4,7 @@
 A **production** model is trained on every simulation of its training cache. The **metadata rule**
 (``production_recipe_reasons(meta)``, run by every release load) requires that the member's recipe is a JSON object,
 declares ``all_sims`` true, carries no research marking (``recipe.research``), and that no key anywhere in the meta is
-a reserved held-out or fold name (``RESERVED_FORMS``, rule ``reserved_keys/2``: matched by the normalised WHOLE key
+a reserved held-out or fold name (``RESERVED_FORMS``, rule ``reserved_keys/3``: matched by the normalised WHOLE key
 name, at any depth of dicts and lists; a null value counts as absent). Choices derived from a cross-validation (an
 epoch count taken from the folds) may be recorded in ``recipe.cv_selection``, a closed schema (``cv_selection/1``) whose
 keys avoid every reserved name; the scan exempts nothing. The reserved list is a heuristic against accidental misuse,
@@ -40,7 +40,7 @@ import re
 import numpy as np
 
 # ------------------------------------------------------------------------------------------------ rule identifiers
-RULE_RESERVED_KEYS = "reserved_keys/2"
+RULE_RESERVED_KEYS = "reserved_keys/3"
 RULE_CV_SELECTION = "cv_selection/1"
 RESEARCH_SCHEMA = "research/1"
 RULE_PRODUCTION_SPLIT = "production_row_split/1"      # data.production_row_split: none or one simulation held out
@@ -59,11 +59,14 @@ RULES = {"reserved_keys": RULE_RESERVED_KEYS, "cv_selection": RULE_CV_SELECTION,
          "split": [RULE_PRODUCTION_SPLIT, RULE_MULTI_HOLDOUT, RULE_UNVERIFIABLE], "normaliser": RULE_NORM,
          "wc_map": [RULE_WCMAP, RULE_WCMAP_SUBSET], "cache": RULE_CACHE_TIE}
 
-# the normalised forms (lower case, "_" and "-" removed) of the reserved held-out / fold key names (reserved_keys/2)
+# the normalised forms (lower case, every character but a-z and 0-9 removed) of the reserved held-out / fold key names
+# (reserved_keys/3 = reserved_keys/2 plus the spellings of the D5 delta review R1 m2)
 RESERVED_FORMS = frozenset({
     "holdoutsim", "holdoutsims", "heldoutsim", "heldoutsims", "heldout", "fold", "folds", "foldid", "foldssha256",
     "nheld", "nheldrows", "leftout", "leftoutsims", "withheld", "withheldsims", "excludesims", "excludedsims", "loo",
-    "loso", "kfold", "cvfold"})
+    "loso", "kfold", "cvfold",
+    "holdout", "holdoutsimulations", "heldoutsimulations", "foldindex", "foldidx", "foldnum", "foldnumber", "loocv",
+    "testsims", "nholdout"})
 
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _CODE = re.compile(r"\[([A-Z][A-Z0-9_]*)(?::([^\]\s]*))?\] ")
@@ -111,7 +114,9 @@ def research_reason(purpose):
 
 # ----------------------------------------------------------------------------------------------- reserved keys
 def normalise_key(k):
-    return str(k).lower().replace("_", "").replace("-", "")
+    """A key name as the reserved-key rule matches it: lower case, every character but a-z and 0-9 removed (so
+    camelCase, snake_case, hyphens, dots and spaces agree)."""
+    return re.sub(r"[^a-z0-9]", "", str(k).lower())
 
 
 def find_reserved(obj, path=""):
@@ -205,7 +210,7 @@ def production_recipe_reasons(meta, i=None):
             why.append(reason("ALL_SIMS_NOT_TRUE", f"{who} does not declare all_sims true (recipe all_sims "
                                                    f"{r.get('all_sims')!r}): a production member is trained on every "
                                                    "simulation of its cache"))
-        if r.get("research") is not None:
+        if any(normalise_key(k) == "research" and v is not None for k, v in r.items()):
             why.append(reason("RECIPE_RESEARCH", f"{who} is marked as a research model (recipe.research)"))
         if r.get("cv_selection") is not None:
             why += [reason("CV_SELECTION", f"{who}: {w}") for w in cv_selection_problems(r["cv_selection"], r)]

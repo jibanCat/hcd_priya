@@ -131,7 +131,7 @@ def test_a_key_path_with_spaces_or_brackets_still_gives_a_parseable_code():
 def test_key_normalisation():
     assert E.normalise_key("Held_Out-Sims") == "heldoutsims" and E.normalise_key(3) == "3"
     assert {"holdoutsims", "heldoutsims", "fold", "foldssha256", "kfold", "cvfold", "loso"} <= E.RESERVED_FORMS
-    assert E.RULE_RESERVED_KEYS == "reserved_keys/2"
+    assert E.RULE_RESERVED_KEYS == "reserved_keys/3"
     assert E.find_reserved({"a": [{"b": {"Fold": 0}}], "fold": None}) == ["a.0.b.Fold"]
 
 
@@ -585,3 +585,21 @@ def test_the_map_records_validation_entry_is_compared(world):                 # 
     c = _prod(world, wcm=W.parse_wc_map(W.to_bytes(doc, with_validation)))
     assert _oc(c)["wc_map"] == ("MISMATCH", "content") and "record validation" in next(
         x for x in c["components"] if x["component"] == "wc_map")["detail"]["why"]
+
+
+
+# ---------------------------------------------- D5 review R1 m2: reserved_keys/3 and the research name normalised
+@pytest.mark.parametrize("key", ["holdout", "hold_out", "holdout_simulations", "heldout_simulations", "fold_index",
+                                 "fold_idx", "foldnum", "fold_number", "loocv", "test_sims", "n_holdout", "fold ",
+                                 "held out sims", "Held.Out.Sims", "k fold"])
+def test_the_reviewers_spellings_are_reserved(key):
+    assert f"RSV_KEY:recipe.{key}".replace(" ", "_") in _codes(_meta(**{key: ["simA"]}))
+
+
+@pytest.mark.parametrize("key", ["Research", "RESEARCH", "re-search", " research"])
+def test_the_research_marking_is_matched_by_its_normalised_name(key):
+    assert _codes(_meta(**{key: {"purpose": "an ablation"}})) == {"RECIPE_RESEARCH"}
+
+
+def test_the_normalisation_removes_every_non_alphanumeric_character():
+    assert E.normalise_key(" Held.Out Sims-2 ") == "heldoutsims2" and E.normalise_key("fold\t") == "fold"
