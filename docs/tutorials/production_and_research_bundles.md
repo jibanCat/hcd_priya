@@ -96,7 +96,9 @@ The examples share one namespace and run in a temporary directory. The first blo
 release-format training cache of five simulations (`sim0` ... `sim4`), its w_c map, and one helper that saves a member
 the way the trainers do. Release-grade products record the code that made them and require a clean, committed
 checkout; here a made-up clean identity stands in for yours (in a real run, your checkout's own identity is used and
-nothing is replaced). The made-up simulations' parameters lie outside the PRIYA design box, so the strict cache reader
+nothing is replaced). The replacement lasts until the last example of the tutorial restores the real function: if
+you paste the examples into a session, run that last example (or restart the session) before any real export. The
+made-up simulations' parameters lie outside the PRIYA design box, so the strict cache reader
 prints a `WARN load_cache` line each time it reads the cache; that is expected here.
 
 <!-- example: setup -->
@@ -105,11 +107,17 @@ import json
 import os
 import warnings
 
+import sys
+
 import jax
 import numpy as np
 
 import hcd_analysis.predictor as hp
 from hcd_analysis import lineage
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(hp.__file__)))   # the repository checkout
+if REPO not in sys.path:
+    sys.path.insert(0, REPO)                                              # for the test suite's cache writer
 from hcd_analysis.emulator import eligibility as E
 from hcd_analysis.emulator import release_testing as RT
 from hcd_analysis.emulator import safe_h5 as H
@@ -119,6 +127,7 @@ from hcd_analysis.emulator.data import load_cache, multi_holdout_row_split, prod
 from tests.emulator._fixture import write_synthetic_cache_v34    # the test suite's synthetic cache writer
 
 MADE_UP_CLEAN_CHECKOUT = {"commit": "c" * 40, "dirty": False}
+REAL_CODE_IDENTITY = lineage.code_identity                         # restored by the last example of this tutorial
 lineage.code_identity = lambda repo_dir=None: dict(MADE_UP_CLEAN_CHECKOUT)
 
 write_synthetic_cache_v34("cache.h5", n_sims=5, snaps_per_sim=4)  # 5 simulations x 4 snapshots x 4 mean-flux rungs
@@ -304,7 +313,7 @@ Each line is one check after writing: the research loader reads the bundle, the 
 normaliser are bitwise the training checkpoints', the ensemble prediction is bitwise the checkpoints', the research
 predictor loads it, and every production loader refuses it.
 Now load it as a user would, through the research path. A research load always needs the digest and a purpose (why
-you load it; it is logged and kept).
+you load it; it is kept as `load_purpose` and recorded in every prediction's provenance).
 
 <!-- example: research_load -->
 ```python
@@ -314,6 +323,7 @@ print("bundle purpose:", rp.purpose)
 print("split:", {k: rp.split[k] for k in ("rule", "held_out_sims", "fold", "n_train", "n_val")})
 print("content checks:", {c["component"]: c["outcome"] for c in rp.research["content_checks"]})
 print("w_c map fitted on", rp.research["wc_map"]["n_sims"], "simulations, rule", rp.research["wc_map"]["rule"])
+print("load purpose in the provenance:", rp.provenance["load_purpose"])
 ```
 
 <!-- expected: research_load -->
@@ -323,10 +333,13 @@ bundle purpose: fold 0 of a synthetic cross-validation
 split: {'rule': 'multi_holdout_row_split/1', 'held_out_sims': ['sim3'], 'fold': 0, 'n_train': 58, 'n_val': 6}
 content checks: {'cache': 'PASS', 'split': 'PASS', 'normaliser': 'PASS', 'wc_map': 'PASS'}
 w_c map fitted on 4 simulations, rule wcmap_refit_subset/1
+load purpose in the provenance: evaluate the held-out simulation
 ```
 
 To evaluate the fold, predict at the held-out simulation's own parameters and compare with its spectra in the cache.
-Every research prediction carries `research_model: True`, so it cannot be mistaken for a production prediction later.
+Every research prediction carries `research_model: True`; production predictions carry no such key, so code that
+checks `pred.flags.get("research_model", False)` can tell them apart. Arrays returned by `hp.add_hcd` do not carry the
+flag: keep the `Prediction` (or its `provenance`) with them.
 
 <!-- example: research_evaluate -->
 ```python
@@ -351,7 +364,8 @@ label: a RESEARCH model (fold 0 of a synthetic cross-validation; split multi_hol
 ```
 
 (The networks here are trained for two epochs on made-up data, so the residuals mean nothing; the point is that the
-held-out rows were never seen by the members, the normaliser or the w_c map.)
+members were trained without the held-out rows: the export verified the split, the normaliser and the w_c map; the
+network weights themselves are not verified.)
 
 ## 3. A fold-trained model passed to the production loader
 
@@ -405,6 +419,30 @@ The reason codes say what was found: `ALL_SIMS_NOT_TRUE` (the recipe does not de
 `RSV_KEY:<path>` for each reserved held-out or fold key (`recipe.holdout_sims`, `recipe.fold`,
 `recipe.folds_sha256`). The same codes appear if somebody edits the manifest to say "eligible": the loader recomputes
 from the members and refuses anyway.
+
+A fold's w_c map is a training-set refit too. Placed beside production members, it is refused as well: a production
+map must count every snapshot group of the training cache.
+
+<!-- example: refusal_fold_map -->
+```python
+ident = {"sha256": d["cache_sha256"], "size": os.path.getsize("cache.h5")}
+mixed = RT.write_synthetic_bundle("production_members_fold_map", cache=(d["lineage"], ident),
+                                  wc_map_path="research_out/bundle/wc_map.json")
+print("fold map groups:", W.read_wc_map("research_out/bundle/wc_map.json").doc["delta_c"]["n_blocks"],
+      "| cache groups:", mixed.lineage["cache"]["n_groups"])
+print("reason codes:", sorted({E.reason_code(r) for r in mixed.lineage["ineligible_reasons"]}))
+try:
+    hp.load_bundle("production_members_fold_map", mixed.manifest_sha256)
+except H.SafeFormatError as e:
+    print("refused:", "WCMAP_NOT_FULL_CACHE" in str(e))
+```
+
+<!-- expected: refusal_fold_map -->
+```text
+fold map groups: 16 | cache groups: 20
+reason codes: ['WCMAP_NOT_FULL_CACHE']
+refused: True
+```
 
 What if the recipe itself is edited to look like production (the fold keys deleted, `all_sims: true`)? The metadata
 rule cannot see through that, by design: it reads what the recipe says. The content checks at export and acceptance
@@ -558,6 +596,35 @@ honest selection record: []
 smuggled fold list: ['CV_SELECTION', 'RSV_KEY:recipe.cv_selection.holdout_sims']
 ```
 
+**(e) An `unverifiable` split.** When a training loop does not fit a recognised split rule, the research export
+accepts `--split-rule unverifiable` with a `--description`. Then the split and the normaliser are NOT recomputed
+(recorded UNAVAILABLE), so the declared held-out simulations carry the whole weight: the w_c map is fitted on the
+cache minus them. The export therefore requires a declared held-out set whenever a member declares an exclusion, and
+it must equal any member's own `holdout_sims` / `holdout_sim` exactly:
+
+<!-- example: leak_unverifiable -->
+```python
+log = io.StringIO()
+with warnings.catch_warnings(), contextlib.redirect_stdout(log):
+    warnings.simplefilter("ignore")
+    status = X.main(["--out", "unverifiable_out", "--purpose", "fold 0, declared by hand",
+                     "--split-rule", "unverifiable", "--description", "the held-out flag forgotten",
+                     "--sha256sums", "fold0/SHA256SUMS", "--sha256sums-sha256", sums_digest,
+                     "--cache", "cache.h5", "--cache-sha256", lineage.sha256_file("cache.h5")]
+                    + [x for p in fold_prefixes for x in ("--member", p)])
+print("exit status:", status)
+refusal = [line for line in log.getvalue().splitlines() if line.startswith("refusing")][0]
+print("first reason:", refusal.split(": ", 2)[2].split("; [")[0])
+print("anything written:", os.path.exists("unverifiable_out"))
+```
+
+<!-- expected: leak_unverifiable -->
+```text
+exit status: 2
+first reason: [RES_UNVERIFIABLE_NO_HELD] member 0 declares an exclusion (['fold', 'folds_sha256', 'holdout_sims']); an unverifiable split must declare the held-out simulations
+anything written: False
+```
+
 Two more rules close the export: the content checks run on the objects **actually written** (the files are read back
 before the manifest exists), and the manifest is written **last**, so a failed check never leaves a loadable bundle.
 
@@ -616,3 +683,19 @@ cache, new training, new acceptance, new export, and a new published digest.
   see the training rows.
 - Research bundles need a release-grade cache. Research on other caches stays on the training checkpoints.
 - A full-simulation research model trained without `recipe.research` looks like a production member to every rule.
+
+## Cleaning up
+
+The synthetic world replaced the code-identity function; the last example restores the real one, so a session that
+ran the examples can go on to real work.
+
+<!-- example: cleanup -->
+```python
+lineage.code_identity = REAL_CODE_IDENTITY
+print("real code identity restored:", lineage.code_identity is REAL_CODE_IDENTITY)
+```
+
+<!-- expected: cleanup -->
+```text
+real code identity restored: True
+```

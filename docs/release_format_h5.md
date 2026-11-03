@@ -134,15 +134,20 @@ withheld(sims), exclude(d)sims, testsims, loo, loocv, loso, kfold, cvfold; dicts
 counts as absent; a recipe key that normalises to `research` is a research marking). Choices derived
 from a cross-validation may be recorded in `recipe.cv_selection`, the closed schema `cv_selection/1`
 (`{schema, source_cv_set_id, source_folds_digest, [source_record_sha256], derived: {knob: {value, rule}}}`, each value a
-JSON scalar equal to the recipe knob it names); the scan exempts nothing.
+JSON scalar equal to the recipe knob it names); the scan exempts nothing. The bundle's w_c map must count every
+snapshot group of the training cache (`WCMAP_NOT_FULL_CACHE` otherwise), so a fold map never passes as production.
+Before a member's metas are read, these rules check what the bundle DECLARES; the content rules below verify it
+against the cache.
 
 **The content rules** (they need the training cache, so they run at export and acceptance, not at load):
 `eligibility.production_content_check` ties the cache first, then recomputes the split from that cache's own rows with
 the trainer's rule (`production_row_split/1`; the recipe must state `n_train` and `n_val`; "complete" means every
 simulation of that cache, whatever their number), refits every member's normaliser with `train._fit_norm` on the
 training rows (`norm_fingerprint/1`, every tensor compared bitwise first) and refits the w_c map on the cache
-(`wcmap_refit/1`: the whole payload and the record's inputs, settings, finder ids, product and kind; never the writing
-run's code, time or settings digest). Each component is PASS, MISMATCH or UNAVAILABLE: a difference within `DRIFT_BOUND`
+(`wcmap_refit/1`: the whole payload and the record's inputs, settings, finder ids, product, kind and validation entry;
+never the writing run's code, time or settings digest). The record's input entry includes the cache's FILE NAME, so
+the cache given to the export or the acceptance (`--cache`) must carry the name the map's record names: a renamed
+copy of the right cache gives MISMATCH, and there is no override (rename the file back, or refit the map). Each component is PASS, MISMATCH or UNAVAILABLE: a difference within `DRIFT_BOUND`
 = 1e-12 relative (per-tensor scale floor) is UNAVAILABLE only when a training environment is recorded and differs from
 the current one; with none recorded the strict rule makes it MISMATCH. There is no override. `scripts/export_safe_bundle.py`
 requires PASS everywhere before writing, checks again on the files read back, writes the manifest last and records the
@@ -184,9 +189,37 @@ loads them. Synthetic bundles written now declare `all_sims: true`.
 
 `ResearchPredictor` has the same prediction interface as `Bundle`, so code that accepts any predictor object does not
 tell them apart by type; such code is protected by what it pins, not by the type. A fold-refit w_c map file is not
-self-describing outside its bundle (its record names the full cache; only `n_sims` differs); the production export's
-map check is what catches one placed in a production bundle. A full-simulation research model trained without
-`recipe.research` looks like a production member to every rule.
+self-describing outside its bundle: its record names the full cache, and it differs from the full map in
+`delta_c.n_blocks`, `n_sims`, `xbar.n_groups`, the residual statistics and the record's `product`. Every production
+loader and `Bundle` refuse one placed in a production bundle (`WCMAP_NOT_FULL_CACHE`: its `n_blocks` is not the
+block's `cache.n_groups`; fail-closed edge: a full cache with a snapshot group without sightlines would be refused
+too), and the production export's map refit compares the whole map. A full-simulation research model trained
+without `recipe.research` looks like a production member to every rule.
+
+## Compatibility with earlier versions of the library
+
+The production and research rules apply from the D5 commits of branch `a6-d5-fold-guards` (first commit `0b6fe33`,
+package version 0.1.0; not yet released). The library at earlier commits (for example `372204f` and the frozen
+benchmark's `3496030`) predates them. Differences a user of an earlier version meets:
+
+- synthetic `h5/2` bundles written before the rule (recipe without `all_sims`) are refused by the release loaders
+  (`ALL_SIMS_NOT_TRUE`) and load through the development path; synthetic bundles written now declare `all_sims: true`
+  and their made-up w_c map counts the synthetic cache's groups, so their digests differ from earlier ones;
+- a bundle whose w_c map does not count every group of its training cache is refused (`WCMAP_NOT_FULL_CACHE`);
+- `ReleaseBundle` has 11 fields (`kind` mandatory, `release_verified` defaulting to False); `MemberMetas(...)` needs
+  `kind=`; a slice of the metas is a plain list; `ResearchBundle` is a separate type;
+- `predictor.Bundle` takes only a release-verified `ReleaseBundle` with its release-verified metas;
+- `metas.anchored and metas.lineage_verified` is no longer a production test (both are true after a research load):
+  use `metas.release_verified` (or `kind == "release"`);
+- `ineligible_reasons` strings are `"[CODE] text"`;
+- `provenance` must be a JSON object on every write and every load, the development path included;
+  `write_manifest_historical` refuses a research marking;
+- a digest given to `load_ensemble` / `load_bundle` that is not 64 lowercase hex digits (and not None) is refused
+  before the manifest is read;
+- `scripts/accept_retrained_ensemble.py` requires `--wc-map` and `--wc-map-sha256`, writes report format
+  `hcd_priya.ensemble_acceptance/2`, and its `trained_on_every_simulation` takes a member meta (a recipe raises
+  `TypeError`);
+- `scripts/export_safe_bundle.py` requires the recipe to state `n_train` and `n_val` and the content checks to PASS.
 
 ## What the loader guarantees
 

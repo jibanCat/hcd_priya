@@ -39,7 +39,9 @@ Writes a JSON report; exit 0 when every check passes, 1 otherwise.
         --old-hist OLD_seed0.hist.json [...] --old-source OLD_CACHE.h5 --old-source-sha256 HEX \\
         --historical-prefix OLD_DIR/prod_repaired --out REPORT.json
 
-The report format is ``hcd_priya.ensemble_acceptance/2`` (``/1`` plus the content-check entries).
+The report format is ``hcd_priya.ensemble_acceptance/2`` (``/1`` plus the content-check entries). The map's record
+names the cache's FILE NAME and the map check compares it: ``--cache`` must carry that name (a renamed copy of the
+right cache fails ``wc_map_refit_equal``).
 """
 import argparse
 import json

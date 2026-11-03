@@ -16,9 +16,11 @@ key anywhere and no research marking); members whose content does not match the 
 ``n_train`` / ``n_val``, every normaliser tensor refitted on the training rows bitwise, the w_c map refitted on the
 cache); and a lineage block that is not release-eligible.
 
-Write order: the members and the map first, then the content checks again on the files READ BACK (``safe_h5.load_member``
-with the digests just written, the map from the bundle), and only then the manifest, whose provenance records the
-outcomes (``eligibility_checks``). A failed read-back check leaves no manifest, hence nothing loadable (exit 1).
+Write order: the members and the map first, then the content checks again on the files READ BACK
+(``safe_h5.load_member`` with the digests just written, the map from the bundle), and only then the manifest, whose
+provenance records the outcomes (``eligibility_checks``). A failed read-back check leaves no manifest, hence nothing
+loadable (exit 1). The map's record names the cache's FILE NAME and the map check compares it: ``--cache`` must carry
+that name (a renamed copy of the right cache is refused).
 
     python scripts/export_safe_bundle.py --out NEW_DIR --member DIR/NAME_seed0 [--member ...] \\
         --sha256sums DIR/SHA256SUMS --sha256sums-sha256 HEX --cache CACHE.h5 --cache-sha256 HEX \\

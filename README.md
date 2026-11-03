@@ -139,16 +139,21 @@ import hcd_analysis.predictor as hp
 emu = hp.load_bundle("path/to/bundle", "<published digest>")
 ```
 
-`load_bundle` serves **production** models only: every member must be trained on every simulation of its training
-cache, and a fold-trained or otherwise ineligible bundle is refused with a coded reason (for example
-`ALL_SIMS_NOT_TRUE` or `RSV_KEY:recipe.holdout_sims`). Cross-validation folds and other **research** models travel in
-research bundles (`scripts/export_research_bundle.py`, which refits the w_c map on the training simulations only) and
-load through their own explicit path, never as production:
+`load_bundle` serves **production** models only: every member must declare training on every simulation of its
+training cache (verified against the cache at export and acceptance), and the bundle's w_c map must be fitted on the
+whole cache. A bundle that declares fold or research members, or carries a fold map, is refused with a coded reason
+(for example `ALL_SIMS_NOT_TRUE`, `RSV_KEY:recipe.holdout_sims` or `WCMAP_NOT_FULL_CACHE`). Cross-validation folds
+and other **research** models travel in research bundles (`scripts/export_research_bundle.py`, which needs a
+repository checkout and refits the w_c map on the training simulations only) and load through their own explicit
+path, never as production:
 
 ```python
 rp = hp.load_research_bundle("path/to/research_bundle", "<its digest>", purpose="evaluate fold 3")
-pred = rp.predict(params, 3.0, tau_eff=0.36)        # pred.flags["research_model"] is True
+pred = rp.predict(params, 3.0, tau_eff=0.36)
+pred.flags.get("research_model", False)             # True here; production predictions carry no such key
 ```
+
+Arrays returned by `hp.add_hcd` do not carry the flag: keep the `Prediction` (or its `provenance`) with them.
 
 The files open with standard tools (`h5ls -r member.h5`). Contract and full usage: `docs/release_format_h5.md`; a
 step-by-step guide to production and research bundles, with executable examples:

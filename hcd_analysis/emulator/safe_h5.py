@@ -558,7 +558,9 @@ class MemberMetas(list):
     for a release load that enforced the lineage and the production rule), ``anchored`` (a manifest digest was given
     and matched), ``lineage_verified`` (the lineage block, the w_c map and the members' ties were enforced),
     ``manifest_sha256``, ``format``, ``lineage`` (the manifest's block, or None for h5/1) and ``historical_reason``
-    (set by the historical loaders). A slice is a plain list: the marks never travel with part of the members."""
+    (set by the historical loaders). A slice is a plain list: the marks never travel with part of the members. Only
+    ``release_verified`` (equivalently ``kind == "release"``) means a production load: ``anchored`` and
+    ``lineage_verified`` are also true after a research load."""
 
     def __init__(self, metas, *, anchored, lineage_verified, manifest_sha256, fmt, kind, lineage=None,
                  historical_reason=None, release_verified=False):

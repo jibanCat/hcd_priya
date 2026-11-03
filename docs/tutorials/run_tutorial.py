@@ -80,7 +80,7 @@ def run(path=TUTORIAL, workdir=None):
     results = []
     with tempfile.TemporaryDirectory(dir=workdir) as tmp:
         os.chdir(tmp)
-        ns = {"__name__": "tutorial", "REPO": REPO}
+        ns = {"__name__": "tutorial"}                 # the tutorial defines everything it uses
         try:
             for ex in examples:
                 buf = io.StringIO()
