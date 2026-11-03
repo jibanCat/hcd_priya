@@ -278,6 +278,7 @@ def run(a):
         print("FAIL: the content checks on the files read back differ or are MISMATCH (no manifest written, nothing "
               "loadable): " + _failed(after))
         return 1
+    rs["content_checks"] = after["components"]               # the outcomes of the objects actually written
     del d
     import equinox
     import h5py

@@ -470,21 +470,34 @@ def tensor_differences(stored, recomputed):
     return out
 
 
+_ENV_KEYS = ("python", "numpy", "jax", "jaxlib", "scipy", "h5py", "hcd_priya")
+
+
+def recorded_environment(env):
+    """Whether ``env`` is a recorded training environment: a dict with exactly the keys ``environment()`` records and
+    no None value. Anything else (None, ``{}``, a partial or foreign record) counts as not recorded, so the strict
+    rule applies."""
+    return isinstance(env, dict) and set(env) == set(_ENV_KEYS) and all(v is not None for v in env.values())
+
+
 def classify(diff, *, training_environment=None, current_environment=None):
     """``(outcome, sub_reason)`` of a tensor comparison (``tensor_differences``) under v3 2.3 and v3.1 E2:
 
-    * every tensor bitwise equal: PASS;
-    * otherwise within ``DRIFT_BOUND`` relative, a RECORDED training environment that differs from the current one:
-      UNAVAILABLE (``env-drift``);
+    * at least one tensor, every tensor bitwise equal: PASS;
+    * otherwise within ``DRIFT_BOUND`` relative, a RECORDED training environment (``recorded_environment``) that
+      differs from the current one: UNAVAILABLE (``env-drift``);
     * within the bound with no recorded training environment: MISMATCH (``strict-env``);
-    * anything else (beyond the bound, another structure, or the same recorded environment): MISMATCH (``content``).
+    * anything else (no tensor at all, beyond the bound, another structure, or the same recorded environment):
+      MISMATCH (``content``).
     No override exists."""
-    if diff["same_structure"] and diff["n_bitwise"] == diff["n"]:
+    if diff["n"] > 0 and diff["same_structure"] and diff["n_bitwise"] == diff["n"]:
         return PASS, "bitwise"
-    within = diff["same_structure"] and diff["max_rel"] is not None and diff["max_rel"] <= DRIFT_BOUND
-    if within and training_environment is not None and training_environment != current_environment:
+    within = diff["n"] > 0 and diff["same_structure"] and diff["max_rel"] is not None and \
+        diff["max_rel"] <= DRIFT_BOUND
+    recorded = recorded_environment(training_environment)
+    if within and recorded and training_environment != current_environment:
         return UNAVAILABLE, "env-drift"
-    if within and training_environment is None:
+    if within and not recorded:
         return MISMATCH, "strict-env"
     return MISMATCH, "content"
 
@@ -507,6 +520,14 @@ def _result(components, env, kind):
 
 
 # ------------------------------------------------------------------------------------- content: the components
+def _check_inputs(metas, norms, wcm):
+    if not metas or len(norms) != len(metas):
+        raise EligibilityError(f"the content checks take one normaliser per member and at least one member "
+                               f"({len(metas)} metas, {len(norms)} normalisers)")
+    if wcm is None:
+        raise EligibilityError("the content checks need the bundle's w_c map")
+
+
 def _load(cache, cache_path):
     if cache is not None:
         return cache
@@ -602,7 +623,8 @@ def wc_map_component(d, wcm, train_sims, *, cache_identity, cache_name, subset, 
     the WHOLE payload (the coefficient and residual arrays classified as tensors, every other field exactly), and the
     record's whole input entry (role, kind, sha256, size, finder ids, info: the cache's file name ``cache_name`` and
     lineage-record digest) but its eligibility flag, the settings, finder_ids, product (its payload digest follows from
-    the payload), kind and kind_version. Excluded: code, created_utc, run_settings_sha256 and the eligibility fields.
+    the payload), kind, kind_version and the optional validation entry (presence included). Excluded: code,
+    created_utc, run_settings_sha256 and the eligibility fields.
     The simulation set comes from the recomputation; ``declared`` (a research bundle's ``provenance.research.wc_map``)
     must name the same set."""
     from .. import lineage as L
@@ -631,8 +653,8 @@ def wc_map_component(d, wcm, train_sims, *, cache_identity, cache_name, subset, 
     for k in sorted((set(i0) | set(r0)) - {"release_eligible"}):
         if L.canonical_json(i0.get(k)) != L.canonical_json(r0.get(k)):
             why.append(f"record inputs[0].{k}")
-    for k in ("settings", "finder_ids", "kind", "kind_version"):
-        if L.canonical_json(rec.get(k)) != L.canonical_json(ref.get(k)):
+    for k in ("settings", "finder_ids", "kind", "kind_version", "validation"):
+        if (k in rec) != (k in ref) or L.canonical_json(rec.get(k)) != L.canonical_json(ref.get(k)):
             why.append(f"record {k}")
     pr, pf = dict(rec.get("product") or {}), dict(ref["product"])
     pr.pop("payload_sha256", None)
@@ -682,6 +704,7 @@ def production_content_check(metas, norms, wcm, *, cache_path=None, cache=None, 
     (``norm_fingerprint/1``); the w_c map refitted on the full cache (``wcmap_refit/1``). ``cache`` (a dict from the
     strict ``data.load_cache`` of ``cache_path``) or ``cache_path`` alone (loaded here); ``cache_path`` is required
     either way. Returns a ``ContentCheck``; production needs ``passed``."""
+    _check_inputs(metas, norms, wcm)
     env = environment()
     d = _load(cache, cache_path)
     ident = _identity(d, cache_path, cache_size)
@@ -712,6 +735,7 @@ def research_content_check(metas, norms, wcm, rs, *, cache_path=None, cache=None
     (``wcmap_refit_subset/1``; the full refit when nothing is held out). Under ``unverifiable`` the split and the
     normaliser are recorded UNAVAILABLE and the map is still refitted on the cache minus the declared held-out
     simulations. MISMATCH refuses a research export; UNAVAILABLE is allowed and recorded."""
+    _check_inputs(metas, norms, wcm)
     env = environment()
     d = _load(cache, cache_path)
     ident = _identity(d, cache_path, cache_size)

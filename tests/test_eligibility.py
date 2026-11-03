@@ -362,7 +362,7 @@ def _drifted(norm, rel=1e-14):
 
 
 def test_outcome_classification(world):                                       # T30, T17b
-    other_env = {"python": "0.0", "numpy": "0.0"}
+    other_env = dict(E.environment(), numpy="0.0")                            # a complete, differing record
     assert _oc(_prod(world))["normaliser"] == ("PASS", "bitwise")                                     # (a)
     c = _prod(world, norms=[_drifted(world["norm"])] * 2, env=other_env)
     assert _oc(c)["normaliser"] == ("UNAVAILABLE", "env-drift") and not c.passed                      # (b), T17b
@@ -547,3 +547,41 @@ def test_a_validation_split_that_removes_whole_simulations_is_not_complete(world
     c = _prod(world, metas=metas, norms=[T._fit_norm(d, tr)])
     sp = next(x for x in c["components"] if x["component"] == "split")
     assert sp["outcome"] == "MISMATCH" and "the training rows cover" in sp["detail"]["why"]
+
+
+
+# ------------------------------------------------------------------------- D5 review R1 m3, m4, m5
+@pytest.mark.parametrize("env", [{}, {"python": None}, {"python": "3.0"},
+                                 "a string", lambda: dict(E.environment(), numpy=None),
+                                 lambda: dict(E.environment(), extra="x")])
+def test_only_a_complete_environment_record_counts_as_recorded(world, env):
+    """m3: an empty, partial, None-valued or foreign record is not a recorded training environment, so a drift
+    within the bound stays the strict MISMATCH."""
+    env = env() if callable(env) else env
+    c = _prod(world, norms=[_drifted(world["norm"])] * 2, env=env)
+    assert _oc(c)["normaliser"] == ("MISMATCH", "strict-env")
+    assert not E.recorded_environment(env)
+    assert E.recorded_environment(dict(E.environment(), numpy="0.0"))
+
+
+def test_the_content_checks_refuse_mismatched_or_empty_inputs(world):
+    """m4: as many normalisers as metas (at least one) and a map are required; zero tensors are never PASS."""
+    d = world["d"]
+    kw = dict(cache=d, cache_path=world["cache"], expected_cache_sha256=d["cache_sha256"])
+    for metas, norms, wcm in ((world["metas"] + world["metas"][:1], [world["norm"]] * 2, world["wcm"]),
+                              ([], [], world["wcm"]), (world["metas"], [world["norm"]] * 2, None)):
+        with pytest.raises(E.EligibilityError, match="metas|w_c map"):
+            E.production_content_check(metas, norms, wcm, **kw)
+    rs, rmetas, rnorms, rwcm = _research(world)
+    for metas, norms, wcm in ((rmetas * 2, rnorms, rwcm), ([], [], rwcm), (rmetas, rnorms, None)):
+        with pytest.raises(E.EligibilityError, match="metas|w_c map"):
+            E.research_content_check(metas, norms, wcm, rs, **kw)
+    assert E.classify(E.tensor_differences({}, {})) == ("MISMATCH", "content")
+
+
+def test_the_map_records_validation_entry_is_compared(world):                 # m5
+    doc, rec = _map_doc_record(world)
+    with_validation = dict(rec, validation={"note": "an entry the refit does not make"})
+    c = _prod(world, wcm=W.parse_wc_map(W.to_bytes(doc, with_validation)))
+    assert _oc(c)["wc_map"] == ("MISMATCH", "content") and "record validation" in next(
+        x for x in c["components"] if x["component"] == "wc_map")["detail"]["why"]

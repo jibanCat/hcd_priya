@@ -226,3 +226,21 @@ def test_an_unverifiable_export_must_declare_the_members_own_held_out_set(X, wor
                         folds=False, extra=["--description", "a hand-written loop"])) == 2
     t = capsys.readouterr().out
     assert "refusing" in t and text in t and not out.exists()
+
+
+
+def test_the_recorded_checks_are_the_read_back_ones(X, world, monkeypatch):
+    """D5 review R1 m8: provenance.research.content_checks records the checks run on the files read back."""
+    real, calls = X.E.research_content_check, []
+
+    def spy(*a, **k):
+        c = real(*a, **k)
+        calls.append(c)
+        for comp in c["components"]:
+            comp["detail"]["call"] = len(calls)
+        return c
+    monkeypatch.setattr(X.E, "research_content_check", spy)
+    out = world["tmp"] / "out"
+    assert X.main(_argv(world, out)) == 0
+    s = json.load(open(out / "evidence" / "research_export_summary.json"))
+    assert len(calls) == 2 and {c["detail"]["call"] for c in s["research"]["content_checks"]} == {2}
