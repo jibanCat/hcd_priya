@@ -533,3 +533,17 @@ def test_the_map_records_whole_input_entry_is_compared_but_its_eligibility(world
     with pytest.raises(E.EligibilityError, match="cache_path"):
         E.production_content_check(world["metas"], [world["norm"]] * 2, world["wcm"], cache=d,
                                    expected_cache_sha256=d["cache_sha256"], cache_size=1)
+
+
+def test_a_validation_split_that_removes_whole_simulations_is_not_complete(world):
+    """Production means the TRAINING rows cover every simulation of the cache: a validation fraction so large that
+    whole simulations fall out of training is MISMATCH even with consistent sizes (killed mutant
+    split_membership_unchecked)."""
+    d = world["d"]
+    tr, va, _ = D.production_row_split(d["sim_name"], val_seed=12345, val_frac=0.95)
+    assert len(set(d["sim_name"][tr].tolist())) < 5
+    metas = [{"cache_sha256": d["cache_sha256"], "recipe": dict(world["metas"][0]["recipe"], val_frac=0.95,
+                                                                n_train=int(tr.size), n_val=int(va.size))}]
+    c = _prod(world, metas=metas, norms=[T._fit_norm(d, tr)])
+    sp = next(x for x in c["components"] if x["component"] == "split")
+    assert sp["outcome"] == "MISMATCH" and "the training rows cover" in sp["detail"]["why"]
