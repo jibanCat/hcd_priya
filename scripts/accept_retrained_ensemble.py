@@ -6,8 +6,16 @@ For every member checkpoint prefix (``.eqx``, ``.meta.json``, ``.norm.pkl``, ``.
   * ``cache_sha256`` is the release cache's (``--cache-sha256``) and ``cache_lineage_sha256`` the digest of the lineage
     record stored in that cache file (read from the file whose sha256 is checked; the record is parsed and checked);
   * ``cache_path`` is a file name, the seeds are distinct, the recipe and architecture are the same for every member,
-    and the recipe trained on every simulation (``all_sims`` true, no ``holdout_sim``, no held-out simulation list
-    ``holdout_sims`` and no ``fold``);
+    and every member is a production member by the metadata rule (``eligibility.production_recipe_reasons``: the
+    recipe declares ``all_sims`` true, no reserved held-out or fold key anywhere, no research marking;
+    ``trained_on_every_simulation``), declaring its split sizes (``training_set_declared_complete``);
+  * the content of the declared full training set (``eligibility.production_content_check`` on the release cache and
+    the w_c map ``--wc-map``, pinned by ``--wc-map-sha256``): the production split recomputed from THIS cache's rows
+    gives the recipe's ``n_train`` / ``n_val`` and covers every simulation (``split_recomputed_equal``), every
+    member's normaliser equals ``train._fit_norm`` on the recomputed training rows bitwise
+    (``normaliser_fingerprint_equal``), and the w_c map equals its refit on the cache (``wc_map_refit_equal``); the
+    environment of the check is recorded (``content_check_environment``) with the component outcomes
+    (``content_checks``);
   * the basename and directory are not the historical ensembles' (``--historical-prefix``, repeatable);
   * the comparison is like for like: the old ensemble's recipe (in each old history) equals the new members' recipe,
     and the old training cache (``--old-source``, pinned by ``--old-source-sha256``) and the new cache hold the same
@@ -27,8 +35,11 @@ For every member checkpoint prefix (``.eqx``, ``.meta.json``, ``.norm.pkl``, ``.
 Writes a JSON report; exit 0 when every check passes, 1 otherwise.
 
     python scripts/accept_retrained_ensemble.py --member DIR/NAME_seed0 [...] --cache CACHE.h5 --cache-sha256 HEX \\
+        --wc-map WC_MAP.json --wc-map-sha256 HEX \\
         --old-hist OLD_seed0.hist.json [...] --old-source OLD_CACHE.h5 --old-source-sha256 HEX \\
         --historical-prefix OLD_DIR/prod_repaired --out REPORT.json
+
+The report format is ``hcd_priya.ensemble_acceptance/2`` (``/1`` plus the content-check entries).
 """
 import argparse
 import json
@@ -43,7 +54,10 @@ sys.path.insert(0, REPO)
 
 from hcd_analysis import lineage as L  # noqa: E402
 from hcd_analysis.catalog import RELEASE_FINDER_IDS  # noqa: E402
+from hcd_analysis.emulator import eligibility as E  # noqa: E402
 from hcd_analysis.emulator.data import production_row_split  # noqa: E402
+
+FORMAT = "hcd_priya.ensemble_acceptance/2"
 
 _HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 
@@ -131,11 +145,32 @@ def at_restore(hist, recipe):
     return out
 
 
-def trained_on_every_simulation(recipe):
-    """True iff the recipe trained on every simulation: ``all_sims`` true, and no held-out simulation
-    (``holdout_sim``), held-out simulation list (``holdout_sims``) or fold (``fold``)."""
-    return (recipe.get("all_sims") is True and recipe.get("holdout_sim") is None
-            and recipe.get("holdout_sims") is None and recipe.get("fold") is None)
+def trained_on_every_simulation(meta):
+    """True iff the member is a production member by the metadata rule (``eligibility.production_recipe_reasons``
+    empty: the recipe declares ``all_sims`` true, no reserved held-out or fold key anywhere in the meta, no research
+    marking)."""
+    return not E.production_recipe_reasons(meta)
+
+
+def declared_complete(meta):
+    """The recipe declares the full training set in a form a recomputation can check: ``all_sims`` true and the split
+    sizes ``n_train`` and ``n_val``."""
+    r = meta.get("recipe") if isinstance(meta.get("recipe"), dict) else {}
+    return (r.get("all_sims") is True and isinstance(r.get("n_train"), int) and isinstance(r.get("n_val"), int)
+            and not isinstance(r.get("n_train"), bool) and not isinstance(r.get("n_val"), bool))
+
+
+def content_checks(members, a):
+    """The production content rules on the members' checkpoints (``train.load_checkpoint``) against the cache and
+    the w_c map (both hashed to their pinned digests)."""
+    from hcd_analysis.emulator import train as T
+    from hcd_analysis.emulator import wc_map as W
+    if L.sha256_file(a.wc_map) != a.wc_map_sha256:
+        raise SystemExit(f"refusing: {a.wc_map} does not hash to {a.wc_map_sha256}")
+    wcm = W.read_wc_map(a.wc_map, expected_sha256=a.wc_map_sha256)
+    loaded = [T.load_checkpoint(p) for p, _, _ in members]
+    return E.production_content_check([m for _, m, _ in loaded], [n for _, _, n in loaded], wcm,
+                                      cache_path=a.cache, expected_cache_sha256=a.cache_sha256)
 
 
 def main(argv=None):
@@ -143,6 +178,8 @@ def main(argv=None):
     ap.add_argument("--member", action="append", required=True)
     ap.add_argument("--cache", required=True)
     ap.add_argument("--cache-sha256", required=True)
+    ap.add_argument("--wc-map", required=True, help="the w_c map the bundle will carry (scripts/refit_wc_map.py)")
+    ap.add_argument("--wc-map-sha256", required=True)
     ap.add_argument("--old-hist", action="append", required=True)
     ap.add_argument("--old-source", required=True, help="the old ensemble's training cache (rows compared)")
     ap.add_argument("--old-source-sha256", required=True)
@@ -171,7 +208,7 @@ def main(argv=None):
     checks["seeds_distinct"] = len({m.get("seed") for m in metas}) == len(metas)
     checks["one_recipe_and_architecture"] = all(m.get("recipe") == m0.get("recipe") and m.get("arch_cfg") ==
                                                 m0.get("arch_cfg") for m in metas)
-    checks["trained_on_every_simulation"] = all(trained_on_every_simulation(m.get("recipe") or {}) for m in metas)
+    checks["trained_on_every_simulation"] = all(trained_on_every_simulation(m) for m in metas)
     stems = {re.sub(r"_seed\d+\Z", "", os.path.basename(p)) for p in a.member}
     checks["distinct_basename_and_directory"] = not (stems & {re.sub(r"_seed\d+\Z", "", n) for n in hist_names}) and \
         not ({os.path.realpath(os.path.dirname(p)) for p in a.member} & hist_dirs)
@@ -218,8 +255,15 @@ def main(argv=None):
         validation.update(ok=False, error="a history gives no restored epoch or no finite value, or the old ensemble "
                                           "has fewer than two members")
     checks[f"validation_{DECIDING}_at_restore_within_old_seed_spread"] = bool(validation["ok"])
+    checks["training_set_declared_complete"] = all(declared_complete(m) for m in metas)
+    cc = content_checks(members, a)
+    oc = cc.outcomes()
+    checks["split_recomputed_equal"] = oc.get("cache") == E.PASS and oc.get("split") == E.PASS
+    checks["normaliser_fingerprint_equal"] = oc.get("normaliser") == E.PASS
+    checks["wc_map_refit_equal"] = oc.get("wc_map") == E.PASS
     passed = all(checks.values())
-    report = {"format": "hcd_priya.ensemble_acceptance/1", "passed": passed, "checks": checks,
+    report = {"format": FORMAT, "passed": passed, "checks": checks,
+              "content_check_environment": cc["environment"], "content_checks": cc["components"],
               "members": [os.path.basename(p) for p in a.member], "cache_sha256": a.cache_sha256,
               "cache_lineage_sha256": rec_sha, "git_sha": m0.get("git_sha"), "validation": validation,
               "rows": rows, "old_source_sha256": a.old_source_sha256}

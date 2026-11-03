@@ -13,7 +13,7 @@ from hcd_analysis import lineage as L
 from hcd_analysis.emulator import release_testing as RT
 from hcd_analysis.emulator import train as T
 from hcd_analysis.emulator import wc_map as W
-from hcd_analysis.emulator.data import fit_target_norm, load_cache
+from hcd_analysis.emulator.data import load_cache, production_row_split
 from hcd_analysis.emulator.model import Emulator
 from tests import tau0_fixtures as tf
 from tests.emulator._fixture import write_synthetic_cache_v34
@@ -101,7 +101,7 @@ def test_the_w_c_check_refuses_another_cache_or_incomplete_tolerances(bundle, ca
 
 # --------------------------------------------------------------------------------------- the ensemble acceptance
 RECIPE = {"epochs": 12, "patience": 3, "w_coh": 2.0, "all_sims": True, "holdout_sim": None, "val_seed": 12345,
-          "val_frac": 0.1}
+          "val_frac": 0.1, "n_train": 44, "n_val": 4}           # the production split of the 48-row synthetic cache
 
 
 def _hist(restore=5, *, n=None, resid=0.30, recipe=RECIPE):
@@ -114,12 +114,16 @@ def _hist(restore=5, *, n=None, resid=0.30, recipe=RECIPE):
             "val_coh_loss": [0.001] * n, "grad_norm": [1.0] * n, "lr": [1e-3] * n, "recipe": dict(recipe)}
 
 
-def _member(dirpath, cache, seed, *, hist=None, recipe=RECIPE, **meta_over):
+def _member(dirpath, cache, seed, *, hist=None, recipe=RECIPE, rows=None, **meta_over):
+    """A member as the production trainer leaves it: the normaliser fitted on the production split's training rows
+    (``rows``: other rows) and the recipe stating the split sizes (R3-M2)."""
     d = load_cache(cache)
+    tr, va, _ = production_row_split(d["sim_name"], val_seed=12345, val_frac=0.1)
+    assert (tr.size, va.size) == (RECIPE["n_train"], RECIPE["n_val"])
     os.makedirs(dirpath, exist_ok=True)
     pre = os.path.join(dirpath, f"a4lin_prod_seed{seed}")
     model = Emulator(in_dim=10, n_k=8, n_basis=4, baseline_n_layers=1, baseline_width=16, key=jax.random.PRNGKey(seed))
-    T.save_checkpoint(pre, model, {}, fit_target_norm(d, np.arange(d["P_tier_p"].shape[0])), seed=seed, cache=d,
+    T.save_checkpoint(pre, model, {}, T._fit_norm(d, tr if rows is None else rows), seed=seed, cache=d,
                       cache_path=str(cache), recipe=dict(recipe), release=True, code=dict(tf.CLEAN))
     if meta_over:
         m = json.load(open(pre + ".meta.json"))
@@ -140,10 +144,19 @@ def _old_hists(tmp_path, values):
     return out
 
 
-def _acc_argv(members, cache, olds, out, *extra, old_source=None):
+def _wc_for(cache):
+    """The w_c map refitted on the cache (beside it, built once)."""
+    p = os.path.join(os.path.dirname(str(cache)), "acceptance_wc_map.json")
+    if not os.path.exists(p):
+        W.build(cache, p)
+    return p
+
+
+def _acc_argv(members, cache, olds, out, *extra, old_source=None, wc=None):
     src = old_source or cache                            # the old ensemble's source: the same rows by default
+    wc = wc or _wc_for(cache)
     a = ["--cache", str(cache), "--cache-sha256", L.sha256_file(cache), "--out", str(out), "--old-source", str(src),
-         "--old-source-sha256", L.sha256_file(src), *extra]
+         "--old-source-sha256", L.sha256_file(src), "--wc-map", str(wc), "--wc-map-sha256", L.sha256_file(wc), *extra]
     for m in members:
         a += ["--member", m]
     for h in olds:
@@ -208,7 +221,7 @@ def test_the_ensemble_acceptance(cache, tmp_path):
     with pytest.raises(SystemExit, match="does not hash"):
         A.main(["--cache", str(cache), "--cache-sha256", "0" * 64, "--out", str(tmp_path / "x.json"),
                 "--member", members[0], "--old-hist", olds[0], "--old-source", str(cache), "--old-source-sha256",
-                L.sha256_file(cache)])
+                L.sha256_file(cache), "--wc-map", _wc_for(cache), "--wc-map-sha256", L.sha256_file(_wc_for(cache))])
 
 
 def test_every_metric_is_read_at_the_restored_epoch(capsys):
@@ -283,3 +296,74 @@ def test_a_member_left_out_of_a_simulation_is_refused(cache, tmp_path, held):
     assert A.main(_acc_argv(members, cache, olds, tmp_path / "r.json")) == 1
     r = json.load(open(tmp_path / "r.json"))
     assert not r["checks"]["trained_on_every_simulation"] and r["checks"]["recipe_equal_to_the_old_ensemble"]
+
+
+# ------------------------------------------------------------------- D5: the content checks in the acceptance
+NEW_CHECKS = {"training_set_declared_complete", "split_recomputed_equal", "normaliser_fingerprint_equal",
+              "wc_map_refit_equal"}
+
+
+def _olds(tmp_path, name="old", recipe=RECIPE):
+    out = []
+    os.makedirs(tmp_path / name, exist_ok=True)
+    for i, v in enumerate((0.29, 0.31, 0.30)):
+        p = tmp_path / name / f"old_seed{i}.hist.json"
+        json.dump(_hist(resid=v, recipe=recipe), open(p, "w"))
+        out.append(str(p))
+    return out
+
+
+def test_the_acceptance_report_gains_the_content_checks(cache, tmp_path):
+    A = _script("accept_retrained_ensemble")
+    members = [_member(tmp_path / "ens", cache, s) for s in (0, 1)]
+    assert A.main(_acc_argv(members, cache, _olds(tmp_path), tmp_path / "ok.json")) == 0
+    r = json.load(open(tmp_path / "ok.json"))
+    assert r["format"] == "hcd_priya.ensemble_acceptance/2" and r["passed"]
+    assert NEW_CHECKS <= set(r["checks"]) and all(r["checks"][k] for k in NEW_CHECKS)
+    assert r["content_check_environment"]["hcd_priya"] == tf.CLEAN
+    assert {c["component"]: c["outcome"] for c in r["content_checks"]} == {
+        "cache": "PASS", "split": "PASS", "normaliser": "PASS", "wc_map": "PASS"}
+
+
+def test_the_acceptance_fails_a_member_whose_content_is_not_the_declared_training_set(cache, tmp_path):    # T16, T17
+    A = _script("accept_retrained_ensemble")
+    d = load_cache(cache)
+    olds = _olds(tmp_path)
+    all_rows = [_member(tmp_path / "all", cache, s, rows=np.arange(d["sim_name"].size)) for s in (0, 1)]
+    assert A.main(_acc_argv(all_rows, cache, olds, tmp_path / "rows.json")) == 1
+    r = json.load(open(tmp_path / "rows.json"))
+    assert not r["checks"]["normaliser_fingerprint_equal"] and r["checks"]["split_recomputed_equal"]
+    doc = W.refit_subset(d, ["sim0", "sim2"])
+    rec = W.make_record(doc, d["lineage"], {"sha256": d["cache_sha256"], "size": os.path.getsize(cache)},
+                        code=dict(tf.CLEAN))
+    sub = tmp_path / "wc_subset.json"
+    W.write_wc_map(sub, doc, rec)
+    good = [_member(tmp_path / "ens", cache, s) for s in (0, 1)]
+    assert A.main(_acc_argv(good, cache, olds, tmp_path / "wc.json", wc=sub)) == 1
+    assert not json.load(open(tmp_path / "wc.json"))["checks"]["wc_map_refit_equal"]
+    undeclared = {k: v for k, v in RECIPE.items() if k not in ("n_train", "n_val")}
+    nosize = [_member(tmp_path / "nosize", cache, s, recipe=undeclared, hist=_hist(recipe=undeclared)) for s in (0, 1)]
+    assert A.main(_acc_argv(nosize, cache, _olds(tmp_path, "o2", undeclared), tmp_path / "nosize.json")) == 1
+    r = json.load(open(tmp_path / "nosize.json"))
+    assert not r["checks"]["training_set_declared_complete"] and not r["checks"]["split_recomputed_equal"]
+
+
+def test_a_relabelled_fold_member_fails_the_acceptance_by_its_content(cache, tmp_path):            # T15
+    A = _script("accept_retrained_ensemble")
+    d = load_cache(cache)
+    ftr, fva, _ = production_row_split(d["sim_name"], val_seed=12345, val_frac=0.1, holdout_sim="sim1")
+    relabelled = dict(RECIPE, n_train=int(ftr.size), n_val=int(fva.size))
+    members = [_member(tmp_path / "f", cache, s, recipe=relabelled, rows=ftr, hist=_hist(recipe=relabelled))
+               for s in (0, 1)]
+    assert A.main(_acc_argv(members, cache, _olds(tmp_path, "o", relabelled), tmp_path / "f.json")) == 1
+    r = json.load(open(tmp_path / "f.json"))
+    assert r["checks"]["trained_on_every_simulation"] and not r["checks"]["split_recomputed_equal"]
+
+
+def test_the_w_c_map_is_pinned(cache, tmp_path):
+    A = _script("accept_retrained_ensemble")
+    members = [_member(tmp_path / "ens", cache, s) for s in (0, 1)]
+    argv = _acc_argv(members, cache, _olds(tmp_path), tmp_path / "x.json")
+    argv[argv.index("--wc-map-sha256") + 1] = "0" * 64
+    with pytest.raises(SystemExit, match="does not hash"):
+        A.main(argv)
