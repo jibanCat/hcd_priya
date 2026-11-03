@@ -243,7 +243,7 @@ def run(a):
                         "fitted_on_sims_sha256": E.sims_sha256(train_sims), "n_sims": doc["delta_c"]["n_sims"]}
         wraw = W.to_bytes(doc, wrec)
         wcm = W.parse_wc_map(wraw, "the refitted w_c map")
-        before = E.research_content_check(metas, [n for _, _, n in ckpts], wcm, rs, cache=d,
+        before = E.research_content_check(metas, [n for _, _, n in ckpts], wcm, rs, cache=d, cache_path=a.cache,
                                           expected_cache_sha256=a.cache_sha256, cache_size=ident["size"])
         if not E.research_outcome_ok(before):
             raise Refused("a content check is MISMATCH: " + _failed(before))
@@ -272,7 +272,8 @@ def run(a):
             for q in out_prefixes]
     wback = W.read_wc_map(os.path.join(bundle, H.WC_MAP_FILE))
     after = E.research_content_check([m for _, m, _ in back], [n for _, _, n in back], wback, rs, cache=d,
-                                     expected_cache_sha256=a.cache_sha256, cache_size=ident["size"])
+                                     cache_path=a.cache, expected_cache_sha256=a.cache_sha256,
+                                     cache_size=ident["size"])
     if not E.research_outcome_ok(after) or E.outcomes_differ(before, after):
         print("FAIL: the content checks on the files read back differ or are MISMATCH (no manifest written, nothing "
               "loadable): " + _failed(after))

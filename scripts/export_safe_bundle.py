@@ -217,8 +217,8 @@ def check_release_inputs(a):
 
 def content_checks(metas, norms, wcm, d, a):
     """The production content rules on the given objects (every component must PASS)."""
-    return E.production_content_check(metas, norms, wcm, cache=d, expected_cache_sha256=a.cache_sha256,
-                                      cache_size=os.path.getsize(a.cache))
+    return E.production_content_check(metas, norms, wcm, cache=d, cache_path=a.cache,
+                                      expected_cache_sha256=a.cache_sha256, cache_size=os.path.getsize(a.cache))
 
 
 def _failed(check):

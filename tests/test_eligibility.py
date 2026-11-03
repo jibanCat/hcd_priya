@@ -387,7 +387,7 @@ def _map_doc_record(w, doc=None, code=None, cache=None):
     d = cache if cache is not None else w["d"]
     doc = doc if doc is not None else W.refit(d)
     rec = W.make_record(doc, d["lineage"], {"sha256": d["cache_sha256"], "size": os.path.getsize(w["cache"])},
-                        code=code or {"commit": "d" * 40, "dirty": False})
+                        code=code or {"commit": "d" * 40, "dirty": False}, cache_name=os.path.basename(w["cache"]))
     return doc, rec
 
 
@@ -516,3 +516,20 @@ def test_the_trainer_fits_the_normaliser_on_the_training_rows_only(world, monkey
     poisoned["delta"][va] += 5.0
     a, b = S.norm_tensors(real(d, tr)), S.norm_tensors(real(poisoned, tr))
     assert set(a) == set(b) and all(a[k].tobytes() == b[k].tobytes() for k in a)
+
+
+def test_the_map_records_whole_input_entry_is_compared_but_its_eligibility(world):        # dossier section 6
+    d = world["d"]
+    doc = W.refit(d)
+    ident = {"sha256": d["cache_sha256"], "size": os.path.getsize(world["cache"])}
+    renamed = W.make_record(doc, d["lineage"], ident, code={"commit": "d" * 40, "dirty": False},
+                            cache_name="another_name.h5")
+    c = _prod(world, wcm=W.parse_wc_map(W.to_bytes(doc, renamed)))
+    assert _oc(c)["wc_map"] == ("MISMATCH", "content") and "inputs[0].info" in next(
+        x for x in c["components"] if x["component"] == "wc_map")["detail"]["why"]
+    same = W.make_record(doc, d["lineage"], ident, code={"commit": "d" * 40, "dirty": False},
+                         cache_name=os.path.basename(world["cache"]))
+    assert _oc(_prod(world, wcm=W.parse_wc_map(W.to_bytes(doc, same))))["wc_map"] == ("PASS", "bitwise")
+    with pytest.raises(E.EligibilityError, match="cache_path"):
+        E.production_content_check(world["metas"], [world["norm"]] * 2, world["wcm"], cache=d,
+                                   expected_cache_sha256=d["cache_sha256"], cache_size=1)

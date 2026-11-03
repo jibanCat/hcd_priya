@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 
 import numpy as np
@@ -585,15 +586,16 @@ _WC_TENSORS = (("delta_c", "coeffs"), ("delta_c", "resid_std"), ("delta_c", "res
                ("xbar", "coeffs"))
 
 
-def wc_map_component(d, wcm, train_sims, *, cache_identity, subset, training_environment, current_environment,
-                     declared=None):
+def wc_map_component(d, wcm, train_sims, *, cache_identity, cache_name, subset, training_environment,
+                     current_environment, declared=None):
     """The bundle's w_c map ``wcm`` (a parsed ``wc_map.WcMap``) against the map refitted on ``train_sims``
     (``wc_map.refit`` for the full cache, ``wc_map.refit_subset`` otherwise). Compared (v3.1 E1, dossier section 6):
     the WHOLE payload (the coefficient and residual arrays classified as tensors, every other field exactly), and the
-    record's inputs[0] {role, kind, sha256, size, info.lineage_record_sha256}, settings, finder_ids, product (but its
-    payload digest), kind and kind_version. Excluded: code, created_utc, run_settings_sha256 and the eligibility
-    fields. The simulation set comes from the recomputation; ``declared`` (a research bundle's
-    ``provenance.research.wc_map``) must name the same set."""
+    record's whole input entry (role, kind, sha256, size, finder ids, info: the cache's file name ``cache_name`` and
+    lineage-record digest) but its eligibility flag, the settings, finder_ids, product (its payload digest follows from
+    the payload), kind and kind_version. Excluded: code, created_utc, run_settings_sha256 and the eligibility fields.
+    The simulation set comes from the recomputation; ``declared`` (a research bundle's ``provenance.research.wc_map``)
+    must name the same set."""
     from .. import lineage as L
     from . import wc_map as W
     rule = RULE_WCMAP_SUBSET if subset else RULE_WCMAP
@@ -601,7 +603,7 @@ def wc_map_component(d, wcm, train_sims, *, cache_identity, subset, training_env
         doc = W.refit_subset(d, train_sims) if subset else W.refit(d)
     except W.WcMapError as e:
         return component("wc_map", rule, MISMATCH, "content", detail={"why": f"refit refused: {e}"})
-    ref = W.make_record(doc, d["lineage"], cache_identity, code={"commit": None, "dirty": None})
+    ref = W.make_record(doc, d["lineage"], cache_identity, code={"commit": None, "dirty": None}, cache_name=cache_name)
     body = {k: v for k, v in wcm.doc.items() if k != "lineage"}
     rec = wcm.record
     why = []
@@ -617,11 +619,9 @@ def wc_map_component(d, wcm, train_sims, *, cache_identity, subset, training_env
         if body.get(k) != doc[k]:
             why.append(f"payload {k}")
     i0, r0 = rec["inputs"][0], ref["inputs"][0]
-    for k in ("role", "kind", "sha256", "size"):
-        if i0.get(k) != r0.get(k):
+    for k in sorted((set(i0) | set(r0)) - {"release_eligible"}):
+        if L.canonical_json(i0.get(k)) != L.canonical_json(r0.get(k)):
             why.append(f"record inputs[0].{k}")
-    if (i0.get("info") or {}).get("lineage_record_sha256") != (r0.get("info") or {}).get("lineage_record_sha256"):
-        why.append("record inputs[0].info.lineage_record_sha256")
     for k in ("settings", "finder_ids", "kind", "kind_version"):
         if L.canonical_json(rec.get(k)) != L.canonical_json(ref.get(k)):
             why.append(f"record {k}")
@@ -671,11 +671,12 @@ def production_content_check(metas, norms, wcm, *, cache_path=None, cache=None, 
     """The production content rules (v2 3.4, v3 2.3, v3.1 E1): the cache tie first; the production split
     (``production_row_split/1``, every simulation of THIS cache, n_train / n_val required); every member's normaliser
     (``norm_fingerprint/1``); the w_c map refitted on the full cache (``wcmap_refit/1``). ``cache`` (a dict from the
-    strict ``data.load_cache``) or ``cache_path`` (loaded here). Returns a ``ContentCheck``; production needs
-    ``passed``."""
+    strict ``data.load_cache`` of ``cache_path``) or ``cache_path`` alone (loaded here); ``cache_path`` is required
+    either way. Returns a ``ContentCheck``; production needs ``passed``."""
     env = environment()
     d = _load(cache, cache_path)
     ident = _identity(d, cache_path, cache_size)
+    name = os.path.basename(str(cache_path))
     comps = [_cache_component(d, metas, expected_cache_sha256, wcm)]
     if comps[0]["outcome"] != PASS:
         return _result(comps + [_not_run(n, r, "the cache tie failed") for n, r in
@@ -689,7 +690,7 @@ def production_content_check(metas, norms, wcm, *, cache_path=None, cache=None, 
         comps.append(normaliser_component(d, norms, tr, training_environment=training_environment,
                                           current_environment=env))
     all_sims = sorted(set(np.asarray(d["sim_name"]).astype(str).tolist()))
-    comps.append(wc_map_component(d, wcm, all_sims, cache_identity=ident, subset=False,
+    comps.append(wc_map_component(d, wcm, all_sims, cache_identity=ident, cache_name=name, subset=False,
                                   training_environment=training_environment, current_environment=env))
     return _result(comps, env, "production")
 
@@ -705,6 +706,7 @@ def research_content_check(metas, norms, wcm, rs, *, cache_path=None, cache=None
     env = environment()
     d = _load(cache, cache_path)
     ident = _identity(d, cache_path, cache_size)
+    name = os.path.basename(str(cache_path))
     rule, held = rs["split_rule"], list(rs["split"]["held_out_sims"])
     comps = [_cache_component(d, metas, expected_cache_sha256, wcm)]
     if comps[0]["outcome"] != PASS:
@@ -722,17 +724,16 @@ def research_content_check(metas, norms, wcm, rs, *, cache_path=None, cache=None
     if train_sims is None:
         comps.append(_not_run("wc_map", RULE_WCMAP_SUBSET, "the training simulations are not known"))
     else:
-        comps.append(wc_map_component(d, wcm, train_sims, cache_identity=ident, subset=bool(held),
+        comps.append(wc_map_component(d, wcm, train_sims, cache_identity=ident, cache_name=name, subset=bool(held),
                                       training_environment=training_environment, current_environment=env,
                                       declared=rs.get("wc_map") if check_declared_map else None))
     return _result(comps, env, "research")
 
 
 def _identity(d, cache_path, cache_size):
-    import os
-    size = cache_size if cache_size is not None else (os.stat(cache_path).st_size if cache_path else None)
-    if size is None:
-        raise EligibilityError("the cache size is needed (cache_path or cache_size)")
+    if not cache_path:
+        raise EligibilityError("the content checks need the cache_path (its file name is part of the w_c map's record)")
+    size = cache_size if cache_size is not None else os.stat(cache_path).st_size
     return {"sha256": d["cache_sha256"], "size": int(size)}
 
 
