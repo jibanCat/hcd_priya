@@ -305,3 +305,71 @@ def test_the_mean_flux_conversions_are_the_historical_ones():
     assert np.allclose(np.asarray(N.kim_tau0(z)), 0.0023 * (1 + z) ** 3.65, rtol=1e-15, atol=0)
     assert hp.tau_eff_priya(3.4, 1.1, 0.2) == pytest.approx(1.1 * (4.4 / 4.0) ** 0.2 * 0.0023 * 4.4 ** 3.65,
                                                             rel=1e-14)
+
+
+# -------------------------------------------------------- D5: production only, recomputed; the research predictor
+PUBLIC = ["labels", "lineage", "manifest_sha256", "n_members", "predict", "predict_many", "provenance", "wc_map"]
+FLAGS = {"ns_ridge", "outside_training_box", "outside_sampling_box", "params_outside_training_box",
+         "mean_flux_off_ladder", "z_downweighted", "k_downweighted", "w_c_xbar_extrapolated"}
+
+
+@pytest.fixture(scope="module")
+def research(tmp_path_factory):
+    return RT.write_synthetic_research_bundle(str(tmp_path_factory.mktemp("r") / "research"),
+                                              purpose="synthetic fold (predictor tests)")
+
+
+def test_the_production_bundle_keeps_its_public_surface(emu):
+    assert sorted(n for n in dir(emu) if not n.startswith("_")) == PUBLIC
+    assert set(emu.predict(PARAMS, 3.0, tau_eff=0.4).flags) == FLAGS and type(emu) is hp.Bundle
+
+
+def test_the_bundle_takes_only_a_release_verified_production_bundle_and_recomputes(info, research):     # T22
+    rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
+    rr = H.load_research(research.bundle_dir, expected_manifest_sha256=research.manifest_sha256, purpose="T22")
+    for bad in (rr, rb._replace(kind="dev"), rb._replace(release_verified=False), rb._replace(anchored=False),
+                tuple(rb)):
+        with pytest.raises(H.SafeFormatError, match="anchored hcd_priya.h5/2 release bundle"):
+            hp.Bundle(bad)
+    forged = H.ReleaseBundle(*rr[:9], kind="release", release_verified=True)          # research fields, forged flags
+    with pytest.raises(H.SafeFormatError, match="refuses a research bundle"):
+        hp.Bundle(forged)
+    man = dict(rr.manifest, provenance={"source": "cleaned"})
+    block = dict(rr.lineage, release_eligible=True, ineligible_reasons=[])
+    forged = H.ReleaseBundle(rr.ensemble, rr.metas, rr.norm, man, rr.manifest_sha256, block, rr.wc_map, True,
+                             rr.bundle_dir, kind="release", release_verified=True)
+    with pytest.raises(H.SafeFormatError, match="eligibility recomputed.*RSV_KEY:recipe.holdout_sims"):
+        hp.Bundle(forged)                                                             # fold metas: recomputed
+    stated = rb._replace(lineage=dict(rb.lineage, release_eligible=False, ineligible_reasons=["[X] stated"]))
+    with pytest.raises(H.SafeFormatError, match="eligibility recomputed"):
+        hp.Bundle(stated)
+    assert hp.Bundle(rb).n_members == 3
+
+
+def test_the_research_predictor_flags_every_prediction(research):
+    rp = hp.load_research_bundle(research.bundle_dir, research.manifest_sha256, purpose="evaluate the held-out sim")
+    assert isinstance(rp, hp.ResearchPredictor) and not isinstance(rp, hp.Bundle)
+    assert rp.purpose == "synthetic fold (predictor tests)" and rp.load_purpose == "evaluate the held-out sim"
+    assert rp.split["held_out_sims"] == ["synthsim2"] and rp.research == research.research
+    pred = rp.predict(PARAMS, 3.0, tau_eff=0.4)
+    assert pred.flags["research_model"] is True and pred.flags["research_split"] == rp.split
+    assert set(pred.flags["research_content_checks"]) == {"cache", "split", "normaliser", "wc_map"}
+    assert FLAGS < set(pred.flags) and "RESEARCH model" in pred.labels["model"]
+    assert pred.provenance["model_kind"] == "research" and pred.provenance["research"] == research.research
+    stack = rp.predict_many(PARAMS, [2.6, 3.0], tau0_amp=1.0, dtau0=0.0)
+    assert stack.flags["research_model"] is True and stack.P_class.shape[0] == 2
+    th, zu = _theta_x(3.0)
+    rr = H.load_research(research.bundle_dir, expected_manifest_sha256=research.manifest_sha256, purpose="ref")
+    ref = np.asarray(predict_P_filt(rr.ensemble, jnp.asarray(th), zu, 0.4, rr.norm["P_filt"]))
+    assert np.allclose(pred.P_class, ref, rtol=1e-13, atol=0)
+
+
+def test_the_research_predictor_refuses_a_production_bundle_and_needs_a_purpose(info, research):
+    with pytest.raises(H.SafeFormatError, match="not a research bundle"):
+        hp.load_research_bundle(info.bundle_dir, info.manifest_sha256, purpose="x")
+    with pytest.raises(TypeError):
+        hp.load_research_bundle(research.bundle_dir, research.manifest_sha256)
+    with pytest.raises(H.SafeFormatError, match="ResearchPredictor takes a research bundle"):
+        hp.ResearchPredictor(H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256))
+    with pytest.raises(H.SafeFormatError, match="never a production model"):
+        hp.load_bundle(research.bundle_dir, research.manifest_sha256)

@@ -16,6 +16,11 @@ artefacts: the release loaders refuse them and they load through the development
     from hcd_analysis.emulator import release_testing as RT
     info = RT.write_synthetic_bundle(bundle_dir)                       # two members by default
     ens, metas, norm = safe_h5.load_ensemble(bundle_dir, expected_manifest_sha256=info.manifest_sha256)
+    res = RT.write_synthetic_research_bundle(other_dir)                # fold members, one simulation held out
+    rb = safe_h5.load_research(other_dir, expected_manifest_sha256=res.manifest_sha256, purpose="a test")
+
+``write_synthetic_research_bundle`` writes the research counterpart (``provenance.research``; fold members, or
+full-simulation research members), which only ``safe_h5.load_research`` loads.
 """
 from __future__ import annotations
 
@@ -79,14 +84,14 @@ def synthetic_cache_record(n_groups=2, *, carried=False, code=None):
     return rec, {"sha256": _h("synthetic training cache", L.record_sha256(rec)), "size": 1 << 20}
 
 
-def synthetic_wc_map_doc():
-    """A w_c map payload with made-up coefficients (no fit behind it)."""
+def synthetic_wc_map_doc(n_sims=2):
+    """A w_c map payload with made-up coefficients (no fit behind it), recording ``n_sims`` simulations."""
     from . import wc_map as W
     return {"format": W.FORMAT, "class_order": list(W.CLASS_ORDER),
             "delta_c": {"coeffs": [[0.0, 0.002, -0.01], [0.0, 0.001, -0.005], [0.0, 0.0, -0.003],
                                    [0.0, 0.0, -0.002]], "deg": 2, "z_clamp": list(W.DELTA_C_Z_CLAMP),
                         "resid_std": [0.01, 0.005, 0.003, 0.002], "resid_max": [0.03, 0.02, 0.01, 0.005],
-                        "mean": [-0.004, -0.002, -0.003, -0.002], "n_blocks": 4, "n_sims": 2, "z_min": 2.0,
+                        "mean": [-0.004, -0.002, -0.003, -0.002], "n_blocks": 4, "n_sims": int(n_sims), "z_min": 2.0,
                         "z_max": 5.4},
             "xbar": {"coeffs": [0.0, 0.02, 0.3], "deg": 2, "z_fit": list(W.XBAR_Z_FIT), "n_groups": 4}}
 
@@ -115,6 +120,7 @@ class SyntheticBundle(NamedTuple):
     lineage: dict
     cache_record: dict
     cache_identity: dict
+    research: dict = None          # provenance.research of a synthetic research bundle
 
 
 def write_synthetic_bundle(bundle_dir, *, n_members=2, seeds=None, arch=None, norm=None, carried=False,
@@ -158,3 +164,87 @@ def write_synthetic_bundle(bundle_dir, *, n_members=2, seeds=None, arch=None, no
                                  export_code=export_code or SYNTHETIC_CODE)
     path = H.write_manifest(bundle_dir, prefixes, {"source": "synthetic (release_testing)"}, lineage=block)
     return SyntheticBundle(os.path.abspath(bundle_dir), H.sha256_file(path), prefixes, models, norm, block, rec, ident)
+
+
+SYNTHETIC_FOLDS_SHA256 = _h("synthetic fold file")
+
+
+def synthetic_research_recipe(purpose, held_out_sims, *, fold=0, n_train=36, n_val=4):
+    """A synthetic member recipe under the bundle's split: ``holdout_sims`` (sorted), ``fold`` and ``folds_sha256``
+    for a fold member (``multi_holdout_row_split/1``), or ``all_sims`` true with ``recipe.research`` naming the
+    purpose for a full-simulation research member. Made-up sizes."""
+    base = {"synthetic": True, "val_seed": 12345, "val_frac": 0.1, "n_train": int(n_train), "n_val": int(n_val)}
+    if held_out_sims:
+        return dict(base, all_sims=False, holdout_sim=None, holdout_sims=sorted(held_out_sims), fold=fold,
+                    folds_sha256=SYNTHETIC_FOLDS_SHA256)
+    return dict(base, all_sims=True, holdout_sim=None, research={"purpose": purpose})
+
+
+def synthetic_research_marking(purpose, held_out_sims, sims, *, fold=0, n_train=36, n_val=4):
+    """The ``provenance.research`` of a synthetic research bundle over the simulation names ``sims``: the split
+    (``multi_holdout_row_split/1`` with a held-out set, ``production_row_split/1`` without), the w_c map's training
+    set, and content checks recorded UNAVAILABLE (a synthetic bundle has no training cache)."""
+    from . import eligibility as E
+    held = sorted(held_out_sims)
+    train = sorted(set(sims) - set(held))
+    rule = E.RULE_MULTI_HOLDOUT if held else E.RULE_PRODUCTION_SPLIT
+    split = {"held_out_sims": held, "val_seed": 12345, "val_frac": 0.1, "n_train": int(n_train), "n_val": int(n_val)}
+    if held:
+        split["fold"] = fold
+    checks = [E.component(c, r, E.UNAVAILABLE, "synthetic", detail={"why": "a synthetic bundle has no training cache"})
+              for c, r in (("cache", E.RULE_CACHE_TIE), ("split", rule), ("normaliser", E.RULE_NORM),
+                           ("wc_map", E.RULE_WCMAP_SUBSET if held else E.RULE_WCMAP))]
+    return {"schema": E.RESEARCH_SCHEMA, "purpose": purpose, "split_rule": rule, "split": split,
+            "folds_digest": SYNTHETIC_FOLDS_SHA256 if held else None, "cv_set_id": None, "content_checks": checks,
+            "wc_map": {"rule": E.RULE_WCMAP_SUBSET if held else E.RULE_WCMAP,
+                       "fitted_on_sims_sha256": E.sims_sha256(train), "n_sims": len(train)}}
+
+
+def write_synthetic_research_bundle(bundle_dir, *, purpose="synthetic research bundle (release_testing)",
+                                    held_out_sims=("synthsim2",), n_groups=3, fold=0, n_members=2, seeds=None,
+                                    arch=None, norm=None, export_code=None, member_fn=None, research_fn=None):
+    """Write an h5/2 RESEARCH bundle (``provenance.research`` plus the block's research reason) into the NEW or empty
+    directory ``bundle_dir``: a made-up cache of ``n_groups`` simulations (``synthsim0``, ...), members whose recipe
+    declares ``held_out_sims`` under ``multi_holdout_row_split/1`` (empty: full-simulation research members carrying
+    ``recipe.research``), a made-up w_c map recording the training simulations' count. ``member_fn(i, model, meta,
+    norm)`` and ``research_fn(marking)`` may replace a member or the marking (tests). Returns a ``SyntheticBundle``
+    with its ``research`` marking; the release loaders refuse it, ``safe_h5.load_research`` loads it."""
+    import jax
+    from . import safe_h5 as H
+    from . import wc_map as W
+    from .model import Emulator
+    os.makedirs(bundle_dir, exist_ok=True)
+    if os.listdir(bundle_dir):
+        raise FileExistsError(f"{bundle_dir} is not empty")
+    arch = dict(arch or SYNTHETIC_ARCH)
+    seeds = list(range(n_members)) if seeds is None else list(seeds)
+    norm = norm if norm is not None else synthetic_norm(arch["n_k"])
+    rec, ident = synthetic_cache_record(n_groups=n_groups)
+    sims = sorted({g["sim"] for g in rec["product"]["groups"]})
+    if not set(held_out_sims) <= set(sims):
+        raise ValueError(f"held_out_sims {sorted(held_out_sims)} are not all in the synthetic cache {sims}")
+    research = synthetic_research_marking(purpose, held_out_sims, sims, fold=fold)
+    if research_fn is not None:
+        research = research_fn(research)
+    doc = synthetic_wc_map_doc(n_sims=len(set(sims) - set(held_out_sims)))
+    wrec = W.make_record(doc, rec, ident, code=SYNTHETIC_CODE, cache_name=SYNTHETIC_CACHE_NAME)
+    W.write_wc_map(os.path.join(bundle_dir, H.WC_MAP_FILE), doc, wrec)
+    wcm = W.read_wc_map(os.path.join(bundle_dir, H.WC_MAP_FILE))
+    prefixes, models, metas = [], [], []
+    for i, s in enumerate(seeds):
+        meta = dict(synthetic_meta(s, rec, ident, arch=arch), recipe=synthetic_research_recipe(purpose, held_out_sims,
+                                                                                              fold=fold))
+        model, meta, mnorm = Emulator(**arch, key=jax.random.PRNGKey(s)), meta, norm
+        if member_fn is not None:
+            model, meta, mnorm = member_fn(i, model, meta, mnorm)
+        prefix = os.path.join(bundle_dir, f"member{s}")
+        H.export_member(prefix, model, meta, mnorm)
+        prefixes.append(prefix)
+        models.append(model)
+        metas.append(meta)
+    block = H.make_lineage_block(cache_record=rec, cache_identity=ident, wc_map=wcm, member_metas=metas,
+                                 export_code=export_code or SYNTHETIC_CODE, research=research)
+    path = H.write_manifest(bundle_dir, prefixes, {"source": "synthetic (release_testing)", "research": research},
+                            lineage=block)
+    return SyntheticBundle(os.path.abspath(bundle_dir), H.sha256_file(path), prefixes, models, norm, block, rec, ident,
+                           research)

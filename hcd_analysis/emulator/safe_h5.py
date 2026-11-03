@@ -22,9 +22,11 @@ the block names (its record eligible and fitted to the block's cache), every mem
 (``cache_sha256`` and ``cache_lineage_sha256``) at the block's commit from a clean tree, and every member a production
 member (``eligibility.production_recipe_reasons``: its recipe declares the full training set, no reserved held-out or
 fold key, no research marking). Every reason carries a stable code (``eligibility.reason_code``: ``LIN_*`` for the
-block, ``TIE_*`` for the members' ties, the production rule's codes). ``expected_manifest_sha256=None``
-loads an unanchored development bundle: the lineage is not enforced, a warning is issued, and the returned metas are
-marked (``MemberMetas.anchored`` False). The block is a declaration pinned by the manifest digest: each builder verified
+block, ``TIE_*`` for the members' ties, the production rule's codes). A bundle whose provenance carries a
+research marking (``provenance.research``: cross-validation folds, full-simulation research models) is refused by every
+release loader; it loads only through ``load_research`` (anchored, with a purpose), which returns a ``ResearchBundle``,
+never a ``ReleaseBundle``. ``expected_manifest_sha256=None`` loads an unanchored development bundle: the lineage is not
+enforced, a warning is issued, and the returned metas are marked (``MemberMetas.anchored`` False, ``kind`` "dev"). The block is a declaration pinned by the manifest digest: each builder verified
 its inputs when it ran; the loader checks that the declaration is complete, consistent and eligible.
 
 Loading: every file is read through one descriptor that does not follow a symlink, must be a regular file and is
@@ -340,12 +342,20 @@ def catalogue_set_sha256(cache_record):
     return len(pairs), hashlib.sha256(L.canonical_json(pairs).encode("ascii")).hexdigest()
 
 
-def make_lineage_block(*, cache_record, cache_identity, wc_map, member_metas, export_code, allowed_finder_ids=None):
+def make_lineage_block(*, cache_record, cache_identity, wc_map, member_metas, export_code, allowed_finder_ids=None,
+                       research=None):
     """The bundle's lineage block, from the verified training-cache record (``tau0_cache.read_cache``), the cache
     file's ``{sha256, size}``, the parsed w_c map (``wc_map.WcMap``), the members' metas and the export's code identity.
     ``release_eligible`` is computed here (``lineage_block_reasons`` plus ``member_reasons``: the members' ties and the
-    production rule), never passed in."""
+    production rule), never passed in. ``research`` (the bundle's ``provenance.research``, ``eligibility.
+    check_research_marking``) adds the reason ``[RESEARCH_BUNDLE] research bundle: <purpose>``, so a research block is
+    never release-eligible."""
     from .. import lineage as L
+    if research is not None:
+        try:
+            E.check_research_marking(research)
+        except E.EligibilityError as e:
+            raise SafeFormatError(str(e)) from None
     from ..tau0_cache import ROWS_CARRIED
     allowed = _release_finder_ids() if allowed_finder_ids is None else frozenset(allowed_finder_ids)
     rec = cache_record
@@ -375,6 +385,8 @@ def make_lineage_block(*, cache_record, cache_identity, wc_map, member_metas, ex
                    "release_eligible": wc_map.record["release_eligible"] is True, "cache_sha256": wc_map.cache_sha256},
         "n_members": len(member_metas)})
     why = lineage_block_reasons(block, allowed) + member_reasons(block, member_metas)
+    if research is not None:
+        why.append(E.research_reason(research["purpose"]))
     block["release_eligible"] = not why
     block["ineligible_reasons"] = why
     return check_lineage_block(block)
@@ -521,20 +533,33 @@ class UnanchoredBundleWarning(UserWarning):
 
 class MemberMetas(list):
     """The members' metas, in member order (a list, as before), marked with how the bundle was loaded:
-    ``anchored`` (a manifest digest was given and matched), ``lineage_verified`` (the lineage block, the w_c map and the
-    members' ties were enforced), ``manifest_sha256``, ``format``, ``lineage`` (the manifest's block, or None for h5/1)
-    and ``historical_reason`` (set by the historical loaders)."""
+    ``kind`` ("release", "research", "dev" or "historical"; always set by the loader), ``release_verified`` (True only
+    for a release load that enforced the lineage and the production rule), ``anchored`` (a manifest digest was given
+    and matched), ``lineage_verified`` (the lineage block, the w_c map and the members' ties were enforced),
+    ``manifest_sha256``, ``format``, ``lineage`` (the manifest's block, or None for h5/1) and ``historical_reason``
+    (set by the historical loaders). A slice is a plain list: the marks never travel with part of the members."""
 
-    def __init__(self, metas, *, anchored, lineage_verified, manifest_sha256, fmt, lineage=None,
-                 historical_reason=None):
+    def __init__(self, metas, *, anchored, lineage_verified, manifest_sha256, fmt, kind, lineage=None,
+                 historical_reason=None, release_verified=False):
+        if kind not in LOAD_KINDS:
+            raise ValueError(f"kind must be one of {LOAD_KINDS}, got {kind!r}")
         super().__init__(metas)
         self.anchored, self.lineage_verified = bool(anchored), bool(lineage_verified)
         self.manifest_sha256, self.format = manifest_sha256, fmt
         self.lineage, self.historical_reason = lineage, historical_reason
+        self.kind, self.release_verified = kind, release_verified is True and kind == "release"
+
+    def __getitem__(self, i):
+        out = super().__getitem__(i)
+        return list(out) if isinstance(i, slice) else out
+
+
+LOAD_KINDS = ("release", "research", "dev", "historical")
 
 
 class ReleaseBundle(NamedTuple):
-    """A loaded h5/2 bundle (``load_release``)."""
+    """A loaded h5/2 bundle (``load_release``; the unanchored development path gives ``kind`` "dev"). ``kind`` is
+    mandatory; ``release_verified`` defaults to the fail-closed False and is True only for a release load."""
     ensemble: object               # ensemble.EnsembleEmulator
     metas: MemberMetas
     norm: dict                     # member 0's normalizer (shared by every member)
@@ -544,6 +569,29 @@ class ReleaseBundle(NamedTuple):
     wc_map: object                 # wc_map.WcMap
     anchored: bool
     bundle_dir: str
+    kind: str                      # "release" or "dev"
+    release_verified: bool = False
+
+
+class ResearchBundle(NamedTuple):
+    """A loaded research bundle (``load_research``): NOT a ``ReleaseBundle`` (a separate type, never accepted by
+    ``predictor.Bundle``). ``purpose`` is the bundle's declared purpose, ``load_purpose`` the caller's, ``research``
+    the manifest's ``provenance.research`` and ``split`` its summary (``eligibility.split_summary``)."""
+    ensemble: object
+    metas: MemberMetas
+    norm: dict
+    manifest: dict
+    manifest_sha256: str
+    lineage: dict
+    wc_map: object
+    anchored: bool
+    bundle_dir: str
+    kind: str                      # "research"
+    purpose: str
+    load_purpose: str
+    research: dict
+    split: dict
+    release_verified: bool = False
 
 
 def export_wc_map(bundle_dir, src_path, *, require_release_eligible=True):
@@ -560,10 +608,43 @@ def export_wc_map(bundle_dir, src_path, *, require_release_eligible=True):
     return m
 
 
+def _provenance_dict(provenance, where):
+    if not isinstance(provenance, dict):
+        raise SafeFormatError(f"{where}: provenance must be a JSON object, not {type(provenance).__name__}")
+    return provenance
+
+
+def research_marking_problems(lineage, provenance):
+    """Why the block's research reason and ``provenance.research`` disagree (empty: consistent): a research bundle has
+    both (the reason naming the marking's purpose), any other bundle neither."""
+    reasons = lineage.get("ineligible_reasons") or []
+    tagged = [r for r in reasons if E.reason_code(r) == "RESEARCH_BUNDLE"]
+    if "research" not in provenance:
+        return ["the block carries a research reason, the provenance no research marking"] if tagged else []
+    try:
+        rs = E.check_research_marking(provenance["research"])
+    except E.EligibilityError as e:
+        return [str(e)]
+    out = []
+    if tagged != [E.research_reason(rs["purpose"])]:
+        out.append("the provenance is marked research, the block does not carry exactly its research reason "
+                   f"{E.research_reason(rs['purpose'])!r}")
+    if lineage.get("release_eligible") is not False:
+        out.append("a research block must be stated ineligible")
+    return out
+
+
 def write_manifest(bundle_dir, member_prefixes, provenance, *, lineage):
     """The h5/2 ``manifest.json``: the members' files, the w_c map (``WC_MAP_FILE``, already in ``bundle_dir``), the
-    provenance and the lineage block (``make_lineage_block``), which must name that very map file."""
+    provenance (a JSON object) and the lineage block (``make_lineage_block``), which must name that very map file. A
+    research bundle carries ``provenance.research`` AND the block's research reason (``make_lineage_block(research=
+    ...)``); a block and provenance that disagree are refused. Write the manifest last: before it exists nothing
+    loads."""
     check_lineage_block(lineage)
+    _provenance_dict(provenance, "write_manifest")
+    why = research_marking_problems(lineage, provenance)
+    if why:
+        raise SafeFormatError("write_manifest: " + "; ".join(why))
     wc = os.path.join(os.path.abspath(bundle_dir), WC_MAP_FILE)
     if S._sha256_regular(wc)[0] != lineage["wc_map"]["sha256"]:
         raise SafeFormatError(f"{wc} is not the w_c map the lineage block names")
@@ -573,7 +654,9 @@ def write_manifest(bundle_dir, member_prefixes, provenance, *, lineage):
 
 def write_manifest_historical(bundle_dir, member_prefixes, provenance):
     """An h5/1 ``manifest.json`` (members only), for reproducing historical bundles; their members are exported with
-    ``fmt=FORMAT_HISTORICAL``."""
+    ``fmt=FORMAT_HISTORICAL``. An h5/1 bundle carries no research marking."""
+    if "research" in _provenance_dict(provenance, "write_manifest_historical"):
+        raise SafeFormatError("write_manifest_historical: an h5/1 bundle carries no research marking")
     return S.write_manifest(bundle_dir, member_prefixes, provenance, data_ext=EXT, fmt=FORMAT_HISTORICAL)
 
 
@@ -614,67 +697,171 @@ def _same_network(bundle_dir, members):
             raise SafeFormatError(f"{bundle_dir}: member {i} does not share member 0's normalizer")
 
 
-def _load_v2(bundle_dir, expected):
-    """Everything an h5/2 load does; with ``expected`` (the anchored release path) the lineage is enforced."""
+MODES = ("release", "research", "dev")
+
+
+def _check_mode(mode, expected, purpose):
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+    if mode == "dev":
+        if expected is not None:
+            raise SafeFormatError("a development load takes no manifest digest (expected_manifest_sha256=None); with "
+                                  "a digest the bundle loads as a release (load_release) or research "
+                                  "(load_research) bundle")
+    elif not _hex64(expected):
+        raise SafeFormatError(f"a {mode} load needs the published manifest sha256 (64 hex digits); an unanchored "
+                              "development load is load_ensemble(..., expected_manifest_sha256=None)")
+    if mode == "research":
+        if not (isinstance(purpose, str) and purpose.strip()):
+            raise ValueError("a research load needs a non-empty purpose (why this research model is loaded)")
+    elif purpose is not None:
+        raise ValueError("purpose belongs to a research load (load_research) only")
+
+
+def _research_block_problems(block, rs, allowed):
+    """Research mode's lineage rules (v3 2.6, v3.1 E2): the block's own lineage reasons recompute to none; the stored
+    block is ineligible, carries exactly the research reason of ``rs``'s purpose, every stored reason is coded, and
+    none of them is a lineage or tie code (a stale block). The per-member production codes are not compared."""
+    out = [f"the lineage does not establish a clean lineage: {r}" for r in lineage_block_reasons(block, allowed)]
+    stored = block["ineligible_reasons"]
+    if block["release_eligible"] is not False:
+        out.append("the block is stated release-eligible")
+    if [r for r in stored if E.reason_code(r) == "RESEARCH_BUNDLE"] != [E.research_reason(rs["purpose"])]:
+        out.append(f"the block does not carry exactly the research reason {E.research_reason(rs['purpose'])!r}")
+    uncoded = [r for r in stored if E.reason_code(r) is None]
+    if uncoded:
+        out.append(f"the block carries reasons without a code: {uncoded[:3]}")
+    stale = [r for r in stored if E.code_class(r) in ("lineage", "tie")]
+    if stale:
+        out.append(f"the block carries lineage or tie reasons (a stale block): {stale[:3]}")
+    return out
+
+
+def _load_v2(bundle_dir, *, expected, mode, purpose=None):
+    """Everything an h5/2 load does. ``mode`` (required): "release" (a 64-hex digest; the lineage, the members' ties
+    and the production rule enforced; a research marking refused), "research" (a 64-hex digest and a purpose; the
+    research marking required and checked, the lineage and the ties enforced, the members admitted by
+    ``eligibility.research_member_reasons``), or "dev" (no digest; nothing enforced, a warning). Returns the bundle
+    object (``ReleaseBundle`` or ``ResearchBundle``, decided here) and the members."""
     from .. import lineage as L
     from . import wc_map as W
     from .ensemble import EnsembleEmulator
+    _check_mode(mode, expected, purpose)
     man, sha, entries, aux = _read_v2(bundle_dir, expected)
+    prov = man["provenance"]
+    if not isinstance(prov, dict):
+        raise SafeFormatError(f"{bundle_dir}: the manifest's provenance is not a JSON object")
     block = check_lineage_block(man[LINEAGE_KEY])
     wc_path, wc_sha = aux[WC_MAP_KEY]
     try:
         wcm = W.parse_wc_map(S.read_regular(wc_path, W.MAX_BYTES), wc_path, expected_sha256=wc_sha,
-                             require_release_eligible=expected is not None)
+                             require_release_eligible=mode != "dev")
     except W.WcMapError as e:
         raise SafeFormatError(str(e)) from None
-    if expected is not None:
+    rs = None
+    if mode == "release":
+        if "research" in prov:
+            raise SafeFormatError(f"{bundle_dir}: a research bundle (provenance.research) is never a production model; "
+                                  "it loads only through safe_h5.load_research / predictor.load_research_bundle")
         why = lineage_block_reasons(block, _release_finder_ids())
         if why or block["release_eligible"] is not True or block["ineligible_reasons"]:
             raise SafeFormatError(f"{bundle_dir}: the bundle's lineage does not establish a clean release: "
                                   + "; ".join(why or block["ineligible_reasons"] or ["stated ineligible"]))
+    elif mode == "research":
+        if "research" not in prov:
+            raise SafeFormatError(f"{bundle_dir}: not a research bundle (the provenance carries no research marking); "
+                                  "a production bundle loads through load_release / predictor.load_bundle")
+        try:
+            rs = E.check_research_marking(prov["research"])
+        except E.EligibilityError as e:
+            raise SafeFormatError(f"{bundle_dir}: {e}") from None
+        why = _research_block_problems(block, rs, _release_finder_ids())
+        if why:
+            raise SafeFormatError(f"{bundle_dir}: the research bundle's lineage block is refused: " + "; ".join(why))
+        if rs["wc_map"]["n_sims"] != wcm.doc["delta_c"]["n_sims"]:
+            raise SafeFormatError(f"{bundle_dir}: provenance.research.wc_map.n_sims {rs['wc_map']['n_sims']} is not "
+                                  f"the map's {wcm.doc['delta_c']['n_sims']}")
+    if mode != "dev":
         if wcm.sha256 != block["wc_map"]["sha256"] or L.record_sha256(wcm.record) != \
                 block["wc_map"]["lineage_record_sha256"] or wcm.cache_sha256 != block["cache"]["sha256"]:
             raise SafeFormatError(f"{bundle_dir}: the w_c map is not the one the lineage block names")
     members = [load_member(p, expected_sha256=s, expected_json_sha256=j, fmt=FORMAT) for p, s, j in entries]
     metas = [m for _, m, _ in members]
-    if expected is not None:
+    if mode == "release":
         why = member_reasons(block, metas)
         if why:
             raise SafeFormatError(f"{bundle_dir}: the members are not the ones the lineage block describes: "
                                   + "; ".join(why))
+    elif mode == "research":
+        why = member_tie_reasons(block, metas)
+        if why:
+            raise SafeFormatError(f"{bundle_dir}: the members are not the ones the lineage block describes: "
+                                  + "; ".join(why))
+        why = E.research_member_reasons(metas, rs)
+        if why:
+            raise SafeFormatError(f"{bundle_dir}: the members are not admitted to this research bundle: "
+                                  + "; ".join(why))
     _same_network(bundle_dir, members)
-    if expected is None:
+    if mode == "dev":
         warnings.warn(f"{bundle_dir}: loaded WITHOUT a manifest digest (unanchored development bundle); its lineage "
-                      "was not enforced", UnanchoredBundleWarning, stacklevel=3)
-    mm = MemberMetas(metas, anchored=expected is not None, lineage_verified=expected is not None,
-                     manifest_sha256=sha, fmt=FORMAT, lineage=copy.deepcopy(block))
-    return ReleaseBundle(EnsembleEmulator([m for m, _, _ in members]), mm, members[0][2], man, sha,
-                         copy.deepcopy(block), wcm, expected is not None, os.path.abspath(bundle_dir)), members
+                      "was not enforced" + ("; it is a RESEARCH bundle (provenance.research), never a production "
+                                            "model" if "research" in prov else ""), UnanchoredBundleWarning,
+                      stacklevel=3)
+    anchored = mode != "dev"
+    mm = MemberMetas(metas, anchored=anchored, lineage_verified=anchored, manifest_sha256=sha, fmt=FORMAT,
+                     lineage=copy.deepcopy(block), kind=mode, release_verified=mode == "release")
+    common = (EnsembleEmulator([m for m, _, _ in members]), mm, members[0][2], man, sha, copy.deepcopy(block), wcm,
+              anchored, os.path.abspath(bundle_dir))
+    if mode == "research":
+        import logging
+        logging.getLogger(__name__).info("research load of %s (%s): %s; not a production model", bundle_dir,
+                                         purpose.strip(), rs["purpose"])
+        rb = ResearchBundle(*common, kind="research", purpose=rs["purpose"], load_purpose=purpose.strip(),
+                            research=copy.deepcopy(rs), split=E.split_summary(rs))
+    else:
+        rb = ReleaseBundle(*common, kind=mode, release_verified=mode == "release")
+    return rb, members
 
 
 def load_release(bundle_dir, *, expected_manifest_sha256):
-    """The release load of an h5/2 bundle, anchored on the published manifest digest (None is refused): the lineage
-    checks of ``load_ensemble`` plus the parsed w_c map and the block. Returns a ``ReleaseBundle``."""
+    """The release load of an h5/2 production bundle, anchored on the published manifest digest (None is refused):
+    the lineage checks of ``load_ensemble`` plus the parsed w_c map and the block. Refuses a research bundle and any
+    member that is not a production member (``member_reasons``). Returns a ``ReleaseBundle`` (``kind`` "release",
+    ``release_verified`` True)."""
     if not _hex64(expected_manifest_sha256):
         raise SafeFormatError("load_release needs the published manifest sha256 (64 hex digits); an unanchored "
                               "development load is load_ensemble(..., expected_manifest_sha256=None)")
-    return _load_v2(bundle_dir, expected_manifest_sha256)[0]
+    return _load_v2(bundle_dir, expected=expected_manifest_sha256, mode="release")[0]
+
+
+def load_research(bundle_dir, *, expected_manifest_sha256, purpose):
+    """The research load of an h5/2 research bundle (``provenance.research``; a cross-validation fold model, a
+    full-simulation research model): anchored on its manifest digest (64 hex digits), with ``purpose`` (non-empty,
+    logged and kept as ``load_purpose``). Enforces the lineage, the members' ties, the research marking and the
+    member admission (``eligibility.research_member_reasons``: one declared split). Returns a ``ResearchBundle``,
+    never a ``ReleaseBundle``; a production bundle is refused here."""
+    return _load_v2(bundle_dir, expected=expected_manifest_sha256, mode="research", purpose=purpose)[0]
+
+
+def _mode(expected):
+    return "dev" if expected is None else "release"
 
 
 def load_ensemble(bundle_dir, *, expected_manifest_sha256):
     """The release entry point: an h5/2 bundle, every member sharing one network architecture, one k grid, one
     parameter box and one normalizer (a prediction applies member 0's normalizer to every member). With the published
-    manifest digest the bundle must establish a clean lineage (module docstring) or it is refused; ``None`` loads an
-    unanchored development bundle, warns, and marks the metas (``MemberMetas.anchored`` False). An h5/1 bundle is
-    refused: ``load_ensemble_historical``. Returns ``(ensemble.EnsembleEmulator, MemberMetas, norm)``."""
-    rb, _ = _load_v2(bundle_dir, expected_manifest_sha256)
+    manifest digest the bundle must establish a clean lineage and be a production bundle (module docstring) or it is
+    refused; ``None`` loads an unanchored development bundle, warns, and marks the metas (``MemberMetas.anchored``
+    False, ``kind`` "dev"). An h5/1 bundle is refused: ``load_ensemble_historical``. A research bundle is refused with
+    a digest: ``load_research``. Returns ``(ensemble.EnsembleEmulator, MemberMetas, norm)``."""
+    rb, _ = _load_v2(bundle_dir, expected=expected_manifest_sha256, mode=_mode(expected_manifest_sha256))
     return rb.ensemble, rb.metas, rb.norm
 
 
 def load_bundle(bundle_dir, *, expected_manifest_sha256):
     """The members of an h5/2 bundle, ``[(model, meta, norm)]``, after every check of ``load_ensemble`` (anchor keyword
     required; ``None`` loads an unanchored development bundle and warns)."""
-    return _load_v2(bundle_dir, expected_manifest_sha256)[1]
+    return _load_v2(bundle_dir, expected=expected_manifest_sha256, mode=_mode(expected_manifest_sha256))[1]
 
 
 def _historical_reason(reason):
@@ -703,7 +890,7 @@ def load_ensemble_historical(bundle_dir, *, expected_manifest_sha256, reason):
     _same_network(bundle_dir, members)
     sha = S.sha256_file(os.path.join(os.path.abspath(bundle_dir), S.MANIFEST))
     mm = MemberMetas([m for _, m, _ in members], anchored=expected_manifest_sha256 is not None,
-                     lineage_verified=False, manifest_sha256=sha, fmt=FORMAT_HISTORICAL,
+                     lineage_verified=False, manifest_sha256=sha, fmt=FORMAT_HISTORICAL, kind="historical",
                      historical_reason=_historical_reason(reason))
     return EnsembleEmulator([m for m, _, _ in members]), mm, members[0][2]
 
