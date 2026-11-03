@@ -40,7 +40,9 @@ sha256 and holds nothing else. A published bundle comes with the sha256 of its `
   sha256 of the `.h5` bytes) and `h5_file` (the `.h5` file name, `<prefix basename>.h5`).
 - **Manifest** `manifest.json`: exactly the keys `format` (`"hcd_priya.h5/2"`), `members` (member names in order),
   `files` (`[{"path", "sha256", "bytes"}]`, exactly the members' `.h5` and `.json` and the w_c map), `wc_map` (the map's
-  file name, `"wc_map.json"`), `lineage` (the lineage block, below) and `provenance` (free-form).
+  file name, `"wc_map.json"`), `lineage` (the lineage block, below) and `provenance` (a JSON object, otherwise
+  free-form; a production export adds `eligibility_checks`, a research bundle carries `research`: see "Production and
+  research bundles" below).
 - **Lineage block** `lineage` (format `hcd_priya.bundle_lineage/1`, written by `safe_h5.make_lineage_block`):
   - `cache`: the training cache's `sha256` and `size`, `lineage_record_sha256` (the sha256 of its canonical lineage
     record), `kind` and `kind_version`, `release_eligible`, its `settings`, `n_groups`, `rows` (`built` and
@@ -52,7 +54,10 @@ sha256 and holds nothing else. A published bundle comes with the sha256 of its `
   - `finder_ids` (the catalogue finder ids of the cache's lineage);
   - `code_commit` (the 40-hex commit every member was trained at) and `export_code` (`{commit, dirty}` of the export);
   - `wc_map`: `path`, `sha256`, `lineage_record_sha256`, `release_eligible` and the `cache_sha256` it was fitted to;
-  - `n_members`, `release_eligible` and `ineligible_reasons` (computed when the block is made, never passed in).
+  - `n_members`, `release_eligible` and `ineligible_reasons` (computed when the block is made, never passed in; each
+    reason is `"[CODE] text"` with a stable code: `LIN_*` for the block, `TIE_*` for the members' ties, the production
+    rule's `RECIPE_NOT_DICT`, `ALL_SIMS_NOT_TRUE`, `RSV_KEY:<path>`, `RECIPE_RESEARCH`, `CV_SELECTION`, and
+    `RESEARCH_BUNDLE` for a research bundle).
 - **Tensor names.** A network leaf named `model<path>` in the index is the dataset `/model/<path>` (the path keeps
   its leading dot, for example index `model.enc.layers[0].weight` is `/model/.enc.layers[0].weight`). A normalizer
   entry `norm/<a>/<b>/...` is the dataset `/norm/<a>/<b>/...`, one group per path segment.
@@ -83,20 +88,99 @@ P = hp.add_hcd(pred, A)                           # free amplitudes; only A_c >=
 `load_ensemble` is the release entry point. With the published digest it requires format `h5/2` and a lineage block
 that establishes a clean lineage: every finder id in the release allow-list, an eligible training cache (its carried
 rows labelled and promoted), the members' commit known and the export's tree clean, the w_c map eligible and fitted to
-the block's cache and equal to the listed file, and every member trained on the block's cache and lineage record at the
-block's commit from a clean tree; otherwise it refuses the bundle. It also refuses members that do not share one
+the block's cache and equal to the listed file, every member trained on the block's cache and lineage record at the
+block's commit from a clean tree, and every member a production member (below); otherwise it refuses the bundle. A
+research bundle is refused here (`load_research` reads it). It also refuses members that do not share one
 architecture, k grid, parameter box and normalizer. `load_bundle` returns the members after the same checks;
 `load_release` (digest required) also returns the parsed w_c map and the block. `load_member(prefix)` loads one member,
 anchored only by its own sidecar unless the manifest's digests are passed (`expected_sha256`, `expected_json_sha256`);
 a release therefore loads through `load_ensemble`. `verify_manifest(bundle_dir)` checks a bundle without loading it.
 The `expected_manifest_sha256` keyword is required: pass the published digest. Passing `None` loads an unanchored
 development bundle: the lineage is not enforced, an `UnanchoredBundleWarning` is issued and the returned metas say so
-(`metas.anchored` is False). The block is a declaration pinned by the manifest digest: each product's builder verified
-its own inputs when it ran, and the loader checks that the declaration is complete, consistent and eligible.
+(`metas.anchored` is False, `metas.kind` is `"dev"`). The block is a declaration pinned by the manifest digest: each
+product's builder verified its own inputs when it ran, and the loader checks that the declaration is complete,
+consistent and eligible. Every loaded object says how it was loaded: `kind` (`"release"`, `"research"`, `"dev"` or
+`"historical"`) and `release_verified` (True only after a release load; the fail-closed default is False), on
+`ReleaseBundle`, `ResearchBundle` and `MemberMetas`; a slice of the metas is a plain list.
 
 **Historical bundles.** An `h5/1` bundle (written before bundles carried lineage) is refused by the release loaders;
 `load_ensemble_historical(bundle_dir, expected_manifest_sha256=..., reason=...)` and `load_bundle_historical` read it
-with every `h5/1` format check and no lineage, log the reason, and mark the metas (`metas.historical_reason`).
+with every `h5/1` format check and no lineage, log the reason, and mark the metas (`metas.historical_reason`,
+`metas.kind == "historical"`).
+
+## Production and research bundles
+
+A **production** bundle holds members trained on every simulation of their training cache; it is what
+`predictor.load_bundle` serves. A **research** bundle holds cross-validation fold members, or full-simulation research
+models; it is never a production model, whatever its split. The rules live in one module,
+`hcd_analysis/emulator/eligibility.py`; a step-by-step user guide with executable examples is
+[`docs/tutorials/production_and_research_bundles.md`](tutorials/production_and_research_bundles.md).
+
+**The loaders.**
+
+| loader | takes | returns | refuses |
+|---|---|---|---|
+| `predictor.load_bundle(dir, sha256)` | a production bundle | `Bundle` (it recomputes the eligibility itself) | research, fold, ineligible, `h5/1`, `None` |
+| `safe_h5.load_release(dir, expected_manifest_sha256=...)` (and `load_ensemble`, `load_bundle` with a digest) | a production bundle | `ReleaseBundle`, `kind` "release", `release_verified` True | the same |
+| `safe_h5.load_research(dir, expected_manifest_sha256=..., purpose=...)`, `predictor.load_research_bundle(dir, sha256, purpose=...)` | a research bundle | `ResearchBundle` / `ResearchPredictor` (never a `ReleaseBundle` or `Bundle`; every prediction flagged `research_model`) | a production bundle, an empty purpose, no digest |
+| `safe_h5.load_ensemble(dir, expected_manifest_sha256=None)` | any h5/2 bundle (development) | the ensemble, metas `kind` "dev"; a warning (naming a research bundle as such) | an `h5/1` bundle |
+
+**The production metadata rule** (every release load, and `predictor.Bundle` again): each member's recipe is a JSON
+object, declares `all_sims: true`, carries no research marking (`recipe.research`), and no key anywhere in the meta
+normalises (lower case, `_` and `-` removed) to a reserved held-out or fold name (`reserved_keys/2`: holdoutsim(s),
+heldoutsim(s), heldout, fold(s), foldid, foldssha256, nheld, nheldrows, leftout, leftoutsims, withheld(sims),
+exclude(d)sims, loo, loso, kfold, cvfold; dicts and lists recursed; a null value counts as absent). Choices derived
+from a cross-validation may be recorded in `recipe.cv_selection`, the closed schema `cv_selection/1`
+(`{schema, source_cv_set_id, source_folds_digest, [source_record_sha256], derived: {knob: {value, rule}}}`, each value a
+JSON scalar equal to the recipe knob it names); the scan exempts nothing.
+
+**The content rules** (they need the training cache, so they run at export and acceptance, not at load):
+`eligibility.production_content_check` ties the cache first, then recomputes the split from that cache's own rows with
+the trainer's rule (`production_row_split/1`; the recipe must state `n_train` and `n_val`; "complete" means every
+simulation of that cache, whatever their number), refits every member's normaliser with `train._fit_norm` on the
+training rows (`norm_fingerprint/1`, every tensor compared bitwise first) and refits the w_c map on the cache
+(`wcmap_refit/1`: the whole payload and the record's inputs, settings, finder ids, product and kind; never the writing
+run's code, time or settings digest). Each component is PASS, MISMATCH or UNAVAILABLE: a difference within `DRIFT_BOUND`
+= 1e-12 relative (per-tensor scale floor) is UNAVAILABLE only when a training environment is recorded and differs from
+the current one; with none recorded the strict rule makes it MISMATCH. There is no override. `scripts/export_safe_bundle.py`
+requires PASS everywhere before writing, checks again on the files read back, writes the manifest last and records the
+outcomes in `provenance.eligibility_checks` (the loaders do not require that field; it is information).
+`scripts/accept_retrained_ensemble.py` (report format `hcd_priya.ensemble_acceptance/2`) adds the checks
+`training_set_declared_complete`, `split_recomputed_equal`, `normaliser_fingerprint_equal`, `wc_map_refit_equal` and
+records `content_check_environment` and `content_checks`.
+
+**Research bundles.** The marking is bundle-level: `provenance.research` (schema `research/1`: `purpose`, `split_rule`
+one of `production_row_split/1`, `multi_holdout_row_split/1` or `unverifiable`, the declared `split`, `folds_digest`,
+optional `cv_set_id`, `fold_file_sha256` and `restored_epoch`, the `content_checks` and `wc_map` = `{rule,
+fitted_on_sims_sha256, n_sims}`), and the block's reason `[RESEARCH_BUNDLE] research bundle: <purpose>`
+(`make_lineage_block(research=...)`); `write_manifest` refuses a block and provenance that disagree. A member that
+declares an exclusion under the declared rule is admitted as it is (the existing cross-validation members); a member
+that declares no exclusion must carry `recipe.research` naming the purpose; one split per bundle. The research loader
+enforces the lineage and the ties, refuses a stale block (lineage or tie codes present, the research reason absent;
+the per-member production codes are not compared, so a later reserved name does not orphan a bundle) and checks the
+map's simulation count. `scripts/export_research_bundle.py` writes research bundles: the split is declared on the
+command line, checked against every member and recomputed; the w_c map is refitted on the training simulations only
+(`wc_map.refit_subset`, rule `wcmap_refit_subset/1`; byte-identical to `wc_map.refit` for the full set). Research
+bundles need a release-grade cache and finder ids; research on other caches stays on the training checkpoints.
+
+**Historical synthetic bundles.** Synthetic `h5/2` bundles written before this rule (recipe `{"synthetic": true}`,
+no `all_sims`) are historical artefacts: the release loaders refuse them (`ALL_SIMS_NOT_TRUE`) and the development path
+loads them. Synthetic bundles written now declare `all_sims: true`.
+
+**What protects what.**
+
+| layer | protects against | does not protect against |
+|---|---|---|
+| the published manifest digest, pinned after a recorded acceptance | substitution, corruption, an unaccepted bundle presented as accepted | a compromised maintainer, an unprotected registry manifest |
+| the loader metadata rules and the separate types | accidental export or load of fold or research models as production; mislabelled recipes using reserved names | deliberately forged metadata with a recomputed digest; a novel key spelling outside the reserved list |
+| the content checks at export and acceptance | a split, normaliser or w_c map that is not from the declared training set | a forger who has the cache and refits; network weights trained on other rows than the declared ones |
+| out of scope | in-process objects (a hand-built `ReleaseBundle` is mitigated by `Bundle`'s recomputation), pickled objects, the training checkpoints, the frozen benchmark environment | |
+
+`ResearchPredictor` has the same prediction interface as `Bundle`, so code that accepts any predictor object does not
+tell them apart by type; such code is protected by what it pins, not by the type. A fold-refit w_c map file is not
+self-describing outside its bundle (its record names the full cache; only `n_sims` differs); the production export's
+map check is what catches one placed in a production bundle. A full-simulation research model trained without
+`recipe.research` looks like a production member to every rule.
 
 ## What the loader guarantees
 
@@ -124,9 +208,10 @@ the descriptor of a new temporary file and published by hard link only if that n
 byte-identical across exports for a fixed HDF5 library version (no timestamps are stored). The writer limits the HDF5
 object versions to those libhdf5 1.10 reads (`libver=("earliest", "v110")`). The sidecar's `h5_sha256` is computed
 through the same descriptor that wrote the file, never by reopening its name. `export_wc_map` copies the w_c map in;
-`write_manifest(bundle_dir, prefixes, provenance, lineage=block)` writes the manifest. The release export
-(`scripts/export_safe_bundle.py`) refuses ineligible inputs before writing anything. Synthetic, self-consistent `h5/2`
-bundles for tests and CI: `hcd_analysis.emulator.release_testing.write_synthetic_bundle`.
+`write_manifest(bundle_dir, prefixes, provenance, lineage=block)` writes the manifest, last. The release export
+(`scripts/export_safe_bundle.py`) refuses ineligible inputs before writing anything; the research export
+(`scripts/export_research_bundle.py`) writes research bundles. Synthetic, self-consistent `h5/2` bundles for tests and
+CI: `hcd_analysis.emulator.release_testing.write_synthetic_bundle` and `write_synthetic_research_bundle`.
 
 ## Inspecting a member with standard tools
 

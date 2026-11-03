@@ -139,7 +139,20 @@ import hcd_analysis.predictor as hp
 emu = hp.load_bundle("path/to/bundle", "<published digest>")
 ```
 
-The files open with standard tools (`h5ls -r member.h5`). Contract and full usage: `docs/release_format_h5.md`.
+`load_bundle` serves **production** models only: every member must be trained on every simulation of its training
+cache, and a fold-trained or otherwise ineligible bundle is refused with a coded reason (for example
+`ALL_SIMS_NOT_TRUE` or `RSV_KEY:recipe.holdout_sims`). Cross-validation folds and other **research** models travel in
+research bundles (`scripts/export_research_bundle.py`, which refits the w_c map on the training simulations only) and
+load through their own explicit path, never as production:
+
+```python
+rp = hp.load_research_bundle("path/to/research_bundle", "<its digest>", purpose="evaluate fold 3")
+pred = rp.predict(params, 3.0, tau_eff=0.36)        # pred.flags["research_model"] is True
+```
+
+The files open with standard tools (`h5ls -r member.h5`). Contract and full usage: `docs/release_format_h5.md`; a
+step-by-step guide to production and research bundles, with executable examples:
+[`docs/tutorials/production_and_research_bundles.md`](docs/tutorials/production_and_research_bundles.md).
 
 Throughout the rest of this README, each stage is marked with what it needs:
 **requires the full data / Great Lakes (not in this repo)** for anything that
