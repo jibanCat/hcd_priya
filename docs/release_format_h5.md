@@ -178,7 +178,7 @@ loads them. Synthetic bundles written now declare `all_sims: true`.
 | the published manifest digest, pinned after a recorded acceptance | substitution, corruption, an unaccepted bundle presented as accepted | a compromised maintainer, an unprotected registry manifest |
 | the loader metadata rules and the separate types | accidental export or load of fold or research models as production; mislabelled recipes using reserved names | deliberately forged metadata with a recomputed digest; a novel key spelling outside the reserved list |
 | the content checks at export and acceptance | a split, normaliser or w_c map that is not from the declared training set | a forger who has the cache and refits; network weights trained on other rows than the declared ones |
-| out of scope | in-process objects (a hand-built `ReleaseBundle` is mitigated by `Bundle`'s recomputation), pickled objects, the training checkpoints, the frozen benchmark environment | |
+| out of scope | in-process objects (for a hand-built `ReleaseBundle`, `Bundle` recomputes the block, the metas' rules and marks, the map rule and the map's identity, but not the network arrays or the normaliser), pickled objects, the training checkpoints, the frozen benchmark environment | |
 
 `ResearchPredictor` has the same prediction interface as `Bundle`, so code that accepts any predictor object does not
 tell them apart by type; such code is protected by what it pins, not by the type. A fold-refit w_c map file is not

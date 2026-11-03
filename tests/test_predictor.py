@@ -338,8 +338,13 @@ def test_the_bundle_takes_only_a_release_verified_production_bundle_and_recomput
     block = dict(rr.lineage, release_eligible=True, ineligible_reasons=[])
     forged = H.ReleaseBundle(rr.ensemble, rr.metas, rr.norm, man, rr.manifest_sha256, block, rr.wc_map, True,
                              rr.bundle_dir, kind="release", release_verified=True)
+    with pytest.raises(H.SafeFormatError, match="release-verified metas"):
+        hp.Bundle(forged)                                                             # research-marked metas
+    fold_metas = H.MemberMetas(list(rr.metas), anchored=True, lineage_verified=True,
+                               manifest_sha256=rr.manifest_sha256, fmt=H.FORMAT, kind="release",
+                               release_verified=True, lineage=block)                 # the marks forged as well
     with pytest.raises(H.SafeFormatError, match="eligibility recomputed.*RSV_KEY:recipe.holdout_sims"):
-        hp.Bundle(forged)                                                             # fold metas: recomputed
+        hp.Bundle(forged._replace(metas=fold_metas))                                  # fold metas: recomputed
     stated = rb._replace(lineage=dict(rb.lineage, release_eligible=False, ineligible_reasons=["[X] stated"]))
     with pytest.raises(H.SafeFormatError, match="eligibility recomputed"):
         hp.Bundle(stated)
@@ -384,3 +389,24 @@ def test_the_bundle_refuses_a_fold_subset_map(info, research):
     with pytest.raises(H.SafeFormatError, match="WCMAP_NOT_FULL_CACHE"):
         hp.Bundle(rb._replace(wc_map=small))
     assert rr.wc_map.doc["delta_c"]["n_blocks"] < rr.lineage["cache"]["n_groups"]
+
+
+def test_the_bundle_checks_the_map_identity_and_the_metas_marks(info, research):
+    """D5 review R1 m1: the reviewer's in-process cases 8d (the arrays and the map of a research bundle swapped in)
+    and 8m (the metas of a development load) are refused; the network arrays themselves are not verified."""
+    rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
+    rr = H.load_research(research.bundle_dir, expected_manifest_sha256=research.manifest_sha256, purpose="m1")
+    with pytest.raises(H.SafeFormatError, match="not the one the lineage block names"):
+        hp.Bundle(rb._replace(ensemble=rr.ensemble, norm=rr.norm, wc_map=rr.wc_map))
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")
+        dev = H._load_v2(info.bundle_dir, expected=None, mode="dev")[0]
+    for metas in (dev.metas, list(rb.metas)):
+        with pytest.raises(H.SafeFormatError, match="release-verified metas"):
+            hp.Bundle(rb._replace(metas=metas))
+    other = H.MemberMetas(list(rb.metas), anchored=True, lineage_verified=True, manifest_sha256="0" * 64,
+                          fmt=H.FORMAT, kind="release", release_verified=True, lineage=rb.lineage)
+    with pytest.raises(H.SafeFormatError, match="release-verified metas"):
+        hp.Bundle(rb._replace(metas=other))
+    assert hp.Bundle(rb).n_members == 3

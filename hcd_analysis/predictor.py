@@ -366,17 +366,20 @@ class _PredictorBase:
 
 class Bundle(_PredictorBase):
     """A loaded production release bundle (``load_bundle``). It takes only a ``safe_h5.ReleaseBundle`` of kind
-    "release" that is release-verified and anchored, and it RECOMPUTES the eligibility from the bundle's own block and
-    member metas (``safe_h5.lineage_block_reasons`` and ``member_reasons``: the ties and the production rule) instead
-    of trusting stored flags; a research marking is refused. A hand-built object therefore cannot pass as production
-    by its flags alone (it is not a defence against code that forges the metadata itself)."""
+    "release" that is release-verified and anchored, with the release-verified ``MemberMetas`` of the same manifest,
+    and it RECOMPUTES the eligibility from the bundle's own block, member metas and w_c map
+    (``safe_h5.lineage_block_reasons``, ``member_reasons``: the ties and the production rule,
+    ``wc_map_production_reasons``) and checks that the map is the one the block names, instead of trusting stored
+    flags; a research marking is refused. A hand-built object therefore cannot pass as production by its flags alone.
+    The network arrays and the normaliser of a hand-built object are not verified (this is not a defence against code
+    that forges the objects or the metadata itself)."""
 
     def __init__(self, release_bundle):
         if not jax.config.jax_enable_x64:
             raise RuntimeError("the predictor needs JAX float64 (import hcd_analysis.emulator first)")
         rb = release_bundle
         if not isinstance(rb, _H.ReleaseBundle) or rb.kind != "release" or rb.release_verified is not True \
-                or rb.anchored is not True or getattr(rb.metas, "format", None) != _H.FORMAT:
+                or rb.anchored is not True:
             raise _H.SafeFormatError("the predictor takes only an anchored hcd_priya.h5/2 release bundle "
                                      "(safe_h5.load_release: kind release, release_verified); a research bundle loads "
                                      "with predictor.load_research_bundle")
@@ -384,12 +387,22 @@ class Bundle(_PredictorBase):
         if not isinstance(prov, dict) or "research" in prov:
             raise _H.SafeFormatError("the predictor refuses a research bundle (provenance.research) or a provenance "
                                      "that is not a JSON object: load_research_bundle")
+        m = rb.metas
+        if not (isinstance(m, _H.MemberMetas) and m.format == _H.FORMAT and m.kind == "release"
+                and m.release_verified is True and m.manifest_sha256 == rb.manifest_sha256):
+            raise _H.SafeFormatError("the bundle's metas are not the release-verified metas of this manifest "
+                                     "(safe_h5.load_release)")
         block = rb.lineage if isinstance(rb.lineage, dict) else {}
         why = (_H.lineage_block_reasons(block, _H._release_finder_ids()) + _H.member_reasons(block, list(rb.metas))
                + _H.wc_map_production_reasons(block, rb.wc_map))
         if why or block.get("release_eligible") is not True or block.get("ineligible_reasons"):
             raise _H.SafeFormatError("the bundle is not a production release bundle (eligibility recomputed): "
                                      + "; ".join(why or ["the block is stated ineligible"]))
+        from . import lineage as _L
+        w, wm = block.get("wc_map") or {}, rb.wc_map
+        if getattr(wm, "sha256", None) != w.get("sha256") or _L.record_sha256(wm.record) != \
+                w.get("lineage_record_sha256") or wm.cache_sha256 != (block.get("cache") or {}).get("sha256"):
+            raise _H.SafeFormatError("the w_c map is not the one the lineage block names")
         self._setup(rb)
 
 
