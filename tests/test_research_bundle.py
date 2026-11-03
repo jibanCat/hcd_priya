@@ -302,3 +302,19 @@ def test_the_objects_carry_a_mandatory_kind_and_fail_closed_defaults(res, tmp_pa
         H.ReleaseBundle(*rb[:9])                                                     # kind has no default
     assert H.ReleaseBundle(*rb[:9], kind="release").release_verified is False        # fail-closed default
     assert H.ResearchBundle._field_defaults == {"release_verified": False}
+
+
+@pytest.mark.parametrize("key, value, code", [("cache_sha256", "1" * 64, "TIE_CACHE"),
+                                              ("code_dirty", True, "TIE_DIRTY"),
+                                              ("cache_lineage_sha256", "2" * 64, "TIE_CACHE_RECORD")])
+def test_the_research_loader_recomputes_the_members_ties(tmp_path, key, value, code):
+    """A research member not tied to the block's cache or commit is refused by the recomputed ties even when the
+    stored block was edited to hide the tie reason (killed mutant research_ties_unchecked)."""
+    def untie(i, model, meta, nm):
+        return model, (dict(meta, **{key: value}) if i == 1 else meta), nm
+    bad = RT.write_synthetic_research_bundle(str(tmp_path / "b"), purpose=PURPOSE, member_fn=untie)
+    assert any(E.reason_code(r) == code for r in bad.lineage["ineligible_reasons"])
+    sha = _rewrite(bad, lambda m: m["lineage"].update(ineligible_reasons=[
+        r for r in m["lineage"]["ineligible_reasons"] if E.code_class(r) != "tie"]))
+    with pytest.raises(H.SafeFormatError, match=f"members are not the ones the lineage block describes.*{code}"):
+        H.load_research(bad.bundle_dir, expected_manifest_sha256=sha, purpose="a test")
