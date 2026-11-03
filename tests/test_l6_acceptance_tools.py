@@ -367,3 +367,12 @@ def test_the_w_c_map_is_pinned(cache, tmp_path):
     argv[argv.index("--wc-map-sha256") + 1] = "0" * 64
     with pytest.raises(SystemExit, match="does not hash"):
         A.main(argv)
+
+
+def test_the_member_predicate_takes_a_meta_not_a_recipe():                       # D5 review R3 m3
+    A = _script("accept_retrained_ensemble")
+    for not_a_meta in ({"all_sims": True, "holdout_sim": None}, None, ["recipe"]):
+        with pytest.raises(TypeError, match="takes a member meta"):
+            A.trained_on_every_simulation(not_a_meta)
+    assert A.trained_on_every_simulation({"recipe": dict(RECIPE)})
+    assert not A.trained_on_every_simulation({"recipe": dict(RECIPE, fold=1)})

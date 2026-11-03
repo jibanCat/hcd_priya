@@ -148,7 +148,10 @@ def at_restore(hist, recipe):
 def trained_on_every_simulation(meta):
     """True iff the member is a production member by the metadata rule (``eligibility.production_recipe_reasons``
     empty: the recipe declares ``all_sims`` true, no reserved held-out or fold key anywhere in the meta, no research
-    marking)."""
+    marking). It takes the member's whole META (it used to take the recipe): anything without a ``recipe`` key is a
+    TypeError, so an old-style call cannot silently return False."""
+    if not isinstance(meta, dict) or "recipe" not in meta:
+        raise TypeError("trained_on_every_simulation takes a member meta (with its 'recipe'), not a recipe")
     return not E.production_recipe_reasons(meta)
 
 

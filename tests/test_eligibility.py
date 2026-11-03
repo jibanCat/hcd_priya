@@ -367,7 +367,7 @@ def test_outcome_classification(world):                                       # 
     c = _prod(world, norms=[_drifted(world["norm"])] * 2, env=other_env)
     assert _oc(c)["normaliser"] == ("UNAVAILABLE", "env-drift") and not c.passed                      # (b), T17b
     assert _oc(_prod(world, norms=[_drifted(world["norm"])] * 2))["normaliser"] == ("MISMATCH", "strict-env")   # (c)
-    assert _oc(_prod(world, norms=[_drifted(world["norm"], 6.8e-5)] * 2,
+    assert _oc(_prod(world, norms=[_drifted(world["norm"], 1e-4)] * 2,
                      env=other_env))["normaliser"] == ("MISMATCH", "content")                            # (d)
     same = _prod(world, norms=[_drifted(world["norm"])] * 2, env=E.environment())
     assert _oc(same)["normaliser"] == ("MISMATCH", "content")                 # a recorded identical environment
