@@ -206,3 +206,23 @@ def test_an_unverifiable_split_is_exported_with_its_checks_recorded(X, world):
     s = json.load(open(out / "evidence" / "research_export_summary.json"))
     oc = {c["component"]: c["outcome"] for c in s["research"]["content_checks"]}
     assert oc == {"cache": "PASS", "split": "UNAVAILABLE", "normaliser": "UNAVAILABLE", "wc_map": "PASS"}
+
+
+# ------------------------------- D5 review R2 M1: the unverifiable export cannot leak held-out simulations into the map
+@pytest.mark.parametrize("held, withheld, text", [
+    ((), False, "an unverifiable split must declare the held-out simulations"),                 # P1
+    (("sim1",), False, "holds out ['sim3'], the bundle's split ['sim1']"),                      # P2
+    ((), True, "an unverifiable split must declare the held-out simulations"),                  # P3
+])
+def test_an_unverifiable_export_must_declare_the_members_own_held_out_set(X, world, capsys, held, withheld, text):
+    prefixes, sums = world["prefixes"], world["sums"]
+    if withheld:
+        d = world["d"]
+        tr, va, _ = multi_holdout_row_split(d["sim_name"], ["sim3"])
+        recipe = dict(KNOBS, all_sims=False, withheld_sims=["sim3"], n_train=int(tr.size), n_val=int(va.size))
+        prefixes, sums = _write_members(world["tmp"] / "u", world["cache"], recipe, tr)
+    out = world["tmp"] / "out"
+    assert X.main(_argv(world, out, prefixes=prefixes, sums=sums, rule=E.RULE_UNVERIFIABLE, held=held, fold=None,
+                        folds=False, extra=["--description", "a hand-written loop"])) == 2
+    t = capsys.readouterr().out
+    assert "refusing" in t and text in t and not out.exists()

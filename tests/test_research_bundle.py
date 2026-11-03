@@ -318,3 +318,27 @@ def test_the_research_loader_recomputes_the_members_ties(tmp_path, key, value, c
         r for r in m["lineage"]["ineligible_reasons"] if E.code_class(r) != "tie"]))
     with pytest.raises(H.SafeFormatError, match=f"members are not the ones the lineage block describes.*{code}"):
         H.load_research(bad.bundle_dir, expected_manifest_sha256=sha, purpose="a test")
+
+
+# ------------------------------- D5 review R2 M1: an unverifiable split must not contradict the members' exclusion
+def _unverifiable(held, rule=E.RULE_WCMAP_SUBSET):
+    def fn(rs):
+        rs = copy.deepcopy(rs)
+        rs.update(split_rule=E.RULE_UNVERIFIABLE, split={"held_out_sims": list(held), "description": "a test"})
+        rs["wc_map"] = dict(rs["wc_map"], rule=rule if held else E.RULE_WCMAP)
+        return rs
+    return fn
+
+
+@pytest.mark.parametrize("held, member_edit, match", [
+    ((), None, "an unverifiable split must declare the held-out simulations"),                 # P1
+    (("synthsim1",), None, "member 0 holds out \\['synthsim2'\\], the bundle's split \\['synthsim1'\\]"),   # P2
+    ((), lambda r: [r.pop(k) for k in ("holdout_sims", "fold", "folds_sha256")] and None or r.update(
+        withheld_sims=["synthsim2"]), "an unverifiable split must declare the held-out simulations"),  # P3
+    (("synthsim1", "synthsim2"), None, "holds out"),
+])
+def test_an_unverifiable_split_must_declare_the_members_own_held_out_set(tmp_path, held, member_edit, match):
+    bad = RT.write_synthetic_research_bundle(str(tmp_path / "u"), purpose=PURPOSE, research_fn=_unverifiable(held),
+                                             member_fn=_recipe_fn(member_edit) if member_edit else None)
+    with pytest.raises(H.SafeFormatError, match="not admitted to this research bundle.*" + match):
+        _load(bad)

@@ -321,7 +321,9 @@ def research_member_reasons(metas, rs):
     (b) a member declaring NO exclusion (a full-simulation research model) must carry ``recipe.research`` naming the
         bundle's purpose (otherwise it is indistinguishable from a production member), under a split that holds out
         nothing;
-    under ``unverifiable`` a member with any reserved key is admitted as declared (flagged; nothing is recomputed).
+    under ``unverifiable`` (nothing is recomputed) a member that declares an exclusion needs a non-empty declared
+    held-out set, and a member's ``holdout_sims`` / ``holdout_sim`` must equal it exactly, so the w_c map's training
+    set (the cache minus the declared set) never includes a member's held-out simulation.
     A bundle mixing (a) and (b) members is refused, and a member whose ``recipe.research`` names another purpose."""
     rule, sp = rs["split_rule"], rs["split"]
     out, kinds = [], set()
@@ -345,6 +347,13 @@ def research_member_reasons(metas, rs):
             if r.get("all_sims") is True:
                 out.append(f"member {i} declares an exclusion and all_sims true (contradictory)")
             if rule == RULE_UNVERIFIABLE:
+                # nothing is recomputed under this rule, so the declared held-out set (from which the w_c map's
+                # training set is taken) must be the members' own: never empty, and equal to a recognised exclusion
+                if not sp["held_out_sims"]:
+                    out.append(f"member {i} declares an exclusion ({sorted({p.split('.')[0] for p in find_reserved(r)})});"
+                               " an unverifiable split must declare the held-out simulations")
+                elif kind in ("multi", "one") and held != sp["held_out_sims"]:
+                    out.append(f"member {i} holds out {held}, the bundle's split {sp['held_out_sims']}")
                 continue
             keys = {p.split(".")[0] for p in find_reserved(r)}
             allowed = _MULTI_OK if rule == RULE_MULTI_HOLDOUT else _ONE_OK

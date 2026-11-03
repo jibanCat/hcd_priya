@@ -159,8 +159,12 @@ that declares no exclusion must carry `recipe.research` naming the purpose; one 
 enforces the lineage and the ties, refuses a stale block (lineage or tie codes present, the research reason absent;
 the per-member production codes are not compared, so a later reserved name does not orphan a bundle) and checks the
 map's simulation count. `scripts/export_research_bundle.py` writes research bundles: the split is declared on the
-command line, checked against every member and recomputed; the w_c map is refitted on the training simulations only
-(`wc_map.refit_subset`, rule `wcmap_refit_subset/1`; byte-identical to `wc_map.refit` for the full set). Research
+command line and checked against every member; under `production_row_split/1` and `multi_holdout_row_split/1` it is
+also recomputed from the cache. Under `unverifiable` the split and the normaliser are NOT recomputed (recorded
+UNAVAILABLE): the declared held-out set must then be non-empty whenever a member declares an exclusion, and must equal
+any member's `holdout_sims` / `holdout_sim` exactly, because the w_c map is fitted on the cache minus that set. The w_c
+map is refitted on the training simulations only (`wc_map.refit_subset`, rule `wcmap_refit_subset/1`;
+byte-identical to `wc_map.refit` for the full set). Research
 bundles need a release-grade cache and finder ids; research on other caches stays on the training checkpoints.
 
 **Historical synthetic bundles.** Synthetic `h5/2` bundles written before this rule (recipe `{"synthetic": true}`,
