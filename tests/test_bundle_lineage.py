@@ -188,8 +188,8 @@ def test_the_member_count_must_be_the_blocks(info):
 
 def test_the_block_eligibility_is_computed_never_passed_in(tmp_path):
     info = RT.write_synthetic_bundle(str(tmp_path / "b"), export_code={"commit": RT.SYNTHETIC_COMMIT, "dirty": True})
-    assert info.lineage["release_eligible"] is False and "the export ran from an unknown commit or a dirty tree" in \
-        info.lineage["ineligible_reasons"]
+    assert info.lineage["release_eligible"] is False and "[LIN_EXPORT_CODE] the export ran from an unknown commit or a " \
+        "dirty tree" in info.lineage["ineligible_reasons"]
     with pytest.raises(H.SafeFormatError, match="dirty tree"):
         H.load_ensemble(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
     rec, ident = RT.synthetic_cache_record(code={"commit": None, "dirty": None})       # an ineligible cache
@@ -219,3 +219,116 @@ def test_the_writer_refuses_a_block_naming_another_map(tmp_path, info):
     with pytest.raises(H.SafeFormatError, match="not the w_c map the lineage block names"):
         H.write_manifest(str(bd), [str(bd / os.path.basename(p)) for p in info.prefixes], {}, lineage=block)
     assert L.canonical_json(info.lineage)                                  # the block is plain canonical JSON
+
+
+# -------------------------------------------------------------- the production rule at the library boundary (D5)
+from hcd_analysis.emulator import eligibility as E  # noqa: E402
+import hcd_analysis.predictor as hp  # noqa: E402
+
+
+def _recipe_fn(recipe_edit):
+    def fn(i, model, meta, nm):
+        r = dict(meta["recipe"])
+        recipe_edit(r)
+        return model, dict(meta, recipe=r), nm
+    return fn
+
+
+def _fold(r):
+    r.update(all_sims=False, holdout_sims=["synthsim1"], fold=0, folds_sha256="f" * 64, n_train=36, n_val=4)
+
+
+def _refused_by_every_release_loader(bundle_dir, sha, match):
+    for load in (lambda: H.load_release(bundle_dir, expected_manifest_sha256=sha),
+                 lambda: H.load_ensemble(bundle_dir, expected_manifest_sha256=sha),
+                 lambda: H.load_bundle(bundle_dir, expected_manifest_sha256=sha),
+                 lambda: hp.load_bundle(bundle_dir, sha)):
+        with pytest.raises(H.SafeFormatError, match=match):
+            load()
+
+
+def test_every_reason_carries_a_stable_code(tmp_path):
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), export_code={"commit": None, "dirty": True},
+                                     member_fn=_recipe_fn(_fold))
+    reasons = info.lineage["ineligible_reasons"]
+    assert all(E.reason_code(r) for r in reasons)
+    assert {E.code_class(r) for r in reasons} == {"lineage", "production"}
+    assert {E.reason_code(r) for r in reasons} >= {"LIN_EXPORT_CODE", "ALL_SIMS_NOT_TRUE",
+                                                   "RSV_KEY:recipe.holdout_sims", "RSV_KEY:recipe.fold"}
+    block = json.loads(json.dumps(info.lineage))
+    block["code_commit"] = None
+    tie = H.member_tie_reasons(block, [dict(m, code_dirty=None) for m in json.loads(json.dumps(
+        [RT.synthetic_meta(0, info.cache_record, info.cache_identity)]))])
+    assert {E.reason_code(r) for r in tie} == {"TIE_COUNT", "TIE_COMMIT", "TIE_DIRTY"}
+
+
+def test_a_fold_bundle_written_through_the_library_is_ineligible_and_every_release_loader_refuses_it(tmp_path):
+    """T20/T21: the library writers write it (a research artefact), but it is never release-eligible, and a block
+    forged eligible is refused by the recomputed production rule."""
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(_fold))
+    assert info.lineage["release_eligible"] is False
+    assert any(E.reason_code(r) == "RSV_KEY:recipe.holdout_sims" for r in info.lineage["ineligible_reasons"])
+    _refused_by_every_release_loader(info.bundle_dir, info.manifest_sha256, "does not establish a clean release")
+    sha = _rewrite(info, _forge_eligible)
+    _refused_by_every_release_loader(info.bundle_dir, sha, r"members are not the ones.*RSV_KEY:recipe\.holdout_sims")
+
+
+@pytest.mark.parametrize("edit, code", [
+    (lambda r: r.update(fold=0), "RSV_KEY:recipe.fold"),
+    (lambda r: r.update(holdout_sims=[]), "RSV_KEY:recipe.holdout_sims"),
+    (lambda r: r.update(holdout_sim=""), "RSV_KEY:recipe.holdout_sim"),
+    (lambda r: r.update(all_sims="true"), "ALL_SIMS_NOT_TRUE"),
+    (lambda r: r.update(all_sims=1), "ALL_SIMS_NOT_TRUE"),
+    (lambda r: r.pop("all_sims"), "ALL_SIMS_NOT_TRUE"),
+    (lambda r: r.update(all_sims=None), "ALL_SIMS_NOT_TRUE"),
+    (lambda r: r.update(held_out_sims=["synthsim1"]), "RSV_KEY:recipe.held_out_sims"),
+    (lambda r: r.update(nested={"deeper": {"holdoutSims": ["synthsim1"]}}), "RSV_KEY:recipe.nested.deeper.holdoutSims"),
+    (lambda r: r.update(research={"purpose": "an ablation"}), "RECIPE_RESEARCH"),
+])
+def test_each_malformed_recipe_is_refused_at_the_loader_with_its_code(tmp_path, edit, code):     # T5-T14
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(edit))
+    assert not info.lineage["release_eligible"]
+    sha = _rewrite(info, _forge_eligible)                                    # flags stripped: the block says eligible
+    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*" + code.replace(".", r"\."))
+
+
+def test_a_recipe_that_is_not_an_object_is_refused_at_the_loader(tmp_path):
+    def none_recipe(i, model, meta, nm):
+        return model, dict(meta, recipe=None), nm
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=none_recipe)
+    sha = _rewrite(info, _forge_eligible)
+    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*RECIPE_NOT_DICT")
+
+
+@pytest.mark.parametrize("edit", [lambda r: r.update(threshold=0.5, lr_floor=1e-5, manifold_dim=3, loop=2),
+                                  lambda r: r.update(holdout_sim=None, fold=None),
+                                  lambda r: r.update(cv_selection={
+                                      "schema": "cv_selection/1", "source_cv_set_id": "synthetic cv set",
+                                      "source_folds_digest": "f" * 64,
+                                      "derived": {"synthetic": {"value": True, "rule": "kept as is"}}})])
+def test_ordinary_knobs_and_an_honest_selection_record_load(tmp_path, edit):                 # T14b
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(edit))
+    assert info.lineage["release_eligible"] and not info.lineage["ineligible_reasons"]
+    rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
+    assert rb.anchored and rb.metas.lineage_verified
+    assert hp.load_bundle(info.bundle_dir, info.manifest_sha256).n_members == 2
+
+
+def test_new_synthetic_bundles_declare_the_full_training_set(info):
+    for p in info.prefixes:
+        meta = json.load(open(p + ".json"))["meta"]
+        assert meta["recipe"] == {"synthetic": True, "all_sims": True} and not E.production_recipe_reasons(meta)
+
+
+def test_a_pre_d5_synthetic_bundle_is_historical_it_loads_only_through_the_dev_path(tmp_path):
+    """A3a: a synthetic h5/2 bundle written before D5 (recipe {"synthetic": true}, its stored block eligible)."""
+    def pre_d5(i, model, meta, nm):
+        return model, dict(meta, recipe={"synthetic": True}), nm
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=pre_d5)
+    sha = _rewrite(info, _forge_eligible)                                    # as written before D5: eligible
+    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*ALL_SIMS_NOT_TRUE")
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        ens, metas, _ = H.load_ensemble(info.bundle_dir, expected_manifest_sha256=None)
+    assert [x.category for x in w] == [H.UnanchoredBundleWarning] and len(ens.members) == 2
+    assert not metas.anchored and not metas.lineage_verified

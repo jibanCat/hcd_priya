@@ -18,8 +18,11 @@ digest of its record), and ``release_eligible`` with the reasons when it is not.
 
 Loading with a manifest digest (the release path, ``load_ensemble`` / ``load_bundle`` / ``load_release``) requires
 h5/2, a well-formed lineage block whose eligibility recomputes to true under the release finder allow-list, the w_c map
-the block names (its record eligible and fitted to the block's cache), and every member trained on the block's cache
-(``cache_sha256`` and ``cache_lineage_sha256``) at the block's commit from a clean tree. ``expected_manifest_sha256=None``
+the block names (its record eligible and fitted to the block's cache), every member trained on the block's cache
+(``cache_sha256`` and ``cache_lineage_sha256``) at the block's commit from a clean tree, and every member a production
+member (``eligibility.production_recipe_reasons``: its recipe declares the full training set, no reserved held-out or
+fold key, no research marking). Every reason carries a stable code (``eligibility.reason_code``: ``LIN_*`` for the
+block, ``TIE_*`` for the members' ties, the production rule's codes). ``expected_manifest_sha256=None``
 loads an unanchored development bundle: the lineage is not enforced, a warning is issued, and the returned metas are
 marked (``MemberMetas.anchored`` False). The block is a declaration pinned by the manifest digest: each builder verified
 its inputs when it ran; the loader checks that the declaration is complete, consistent and eligible.
@@ -48,6 +51,7 @@ from typing import NamedTuple
 
 import numpy as np
 
+from . import eligibility as E
 from . import safe_io as S
 
 FORMAT = "hcd_priya.h5/2"                    # the release format (bundles with a lineage block and the w_c map)
@@ -339,7 +343,8 @@ def catalogue_set_sha256(cache_record):
 def make_lineage_block(*, cache_record, cache_identity, wc_map, member_metas, export_code, allowed_finder_ids=None):
     """The bundle's lineage block, from the verified training-cache record (``tau0_cache.read_cache``), the cache
     file's ``{sha256, size}``, the parsed w_c map (``wc_map.WcMap``), the members' metas and the export's code identity.
-    ``release_eligible`` is computed here (``lineage_block_reasons`` plus the members' ties), never passed in."""
+    ``release_eligible`` is computed here (``lineage_block_reasons`` plus ``member_reasons``: the members' ties and the
+    production rule), never passed in."""
     from .. import lineage as L
     from ..tau0_cache import ROWS_CARRIED
     allowed = _release_finder_ids() if allowed_finder_ids is None else frozenset(allowed_finder_ids)
@@ -376,75 +381,94 @@ def make_lineage_block(*, cache_record, cache_identity, wc_map, member_metas, ex
 
 
 def lineage_block_reasons(block, allowed_finder_ids):
-    """The reasons (empty: eligible) why the block, read on its own, does not describe a release bundle."""
+    """The coded reasons (empty: eligible) why the block, read on its own, does not describe a release bundle. Every
+    code starts with ``LIN_`` (``eligibility.code_class`` "lineage")."""
     from ..tau0_cache import CACHE_VERSION, CARRIED_FIELDS, KIND_VERSION
+    R = E.reason
     why = []
     allowed = frozenset(allowed_finder_ids)
     fids = block.get("finder_ids") or []
     if not fids:
-        why.append("no finder id")
+        why.append(R("LIN_FINDER_NONE", "no finder id"))
     bad = sorted(f for f in fids if f not in allowed)
     if bad:
-        why.append(f"finder ids not in the release allow-list: {bad}")
+        why.append(R("LIN_FINDER_NOT_ALLOWED", f"finder ids not in the release allow-list: {bad}"))
     c = block.get("cache") or {}
     if c.get("kind") != "tau0_cache" or c.get("release_eligible") is not True:
-        why.append("the training cache is not a release-eligible tau0_cache")
+        why.append(R("LIN_CACHE_NOT_ELIGIBLE", "the training cache is not a release-eligible tau0_cache"))
     if c.get("kind_version") != KIND_VERSION or (c.get("settings") or {}).get("cache_version") != CACHE_VERSION:
-        why.append(f"the training cache is not a version {CACHE_VERSION} tau0_cache record of kind version "
-                   f"{KIND_VERSION}")
+        why.append(R("LIN_CACHE_VERSION", f"the training cache is not a version {CACHE_VERSION} tau0_cache record of "
+                                          f"kind version {KIND_VERSION}"))
     rows = c.get("rows") or {}
     if c.get("n_groups") != rows.get("built", 0) + rows.get(CARRIED_LABEL, 0):
-        why.append("the cache's group count is not the sum of its built and carried groups")
+        why.append(R("LIN_CACHE_GROUPS", "the cache's group count is not the sum of its built and carried groups"))
     cat = block.get("catalogues") or {}
     if cat.get("n", 0) < 1:
-        why.append("the training cache names no catalogue")
+        why.append(R("LIN_CATALOGUE_NONE", "the training cache names no catalogue"))
     if cat.get("rule") != CATALOGUE_SET_RULE:
-        why.append("the catalogue-set digest is not made by this format's rule")
+        why.append(R("LIN_CATALOGUE_RULE", "the catalogue-set digest is not made by this format's rule"))
     if (c.get("rows") or {}).get(CARRIED_LABEL, 0):
         car = c.get("carried") or {}
         prom = car.get("promoted") or {}
         if car.get("label") != CARRIED_LABEL or car.get("fields") != list(CARRIED_FIELDS) \
                 or not _hex64(car.get("source_sha256")) or car.get("validation_all_passed") is not True:
-            why.append("carried rows without the carry's label, fields, source and passed validation")
+            why.append(R("LIN_CARRIED_LABEL", "carried rows without the carry's label, fields, source and passed "
+                                              "validation"))
         if not (isinstance(prom, dict) and prom.get("passed") is True and _hex64(prom.get("comparison_sha256"))):
-            why.append("carried rows not promoted (the fresh-row comparison has not passed)")
+            why.append(R("LIN_CARRIED_PROMOTED", "carried rows not promoted (the fresh-row comparison has not "
+                                                 "passed)"))
     if not (isinstance(block.get("code_commit"), str) and _HEX40.match(block["code_commit"])):
-        why.append("the members' code commit is unknown or not one commit")
+        why.append(R("LIN_CODE_COMMIT", "the members' code commit is unknown or not one commit"))
     ex = block.get("export_code") or {}
     if not (isinstance(ex.get("commit"), str) and _HEX40.match(ex["commit"])) or ex.get("dirty") is not False:
-        why.append("the export ran from an unknown commit or a dirty tree")
+        why.append(R("LIN_EXPORT_CODE", "the export ran from an unknown commit or a dirty tree"))
     w = block.get("wc_map") or {}
     if w.get("release_eligible") is not True:
-        why.append("the w_c map is not release-eligible")
+        why.append(R("LIN_WCMAP_NOT_ELIGIBLE", "the w_c map is not release-eligible"))
     if w.get("cache_sha256") != c.get("sha256"):
-        why.append("the w_c map was fitted to another cache")
+        why.append(R("LIN_WCMAP_CACHE", "the w_c map was fitted to another cache"))
     if w.get("path") != WC_MAP_FILE:
-        why.append(f"the w_c map is not {WC_MAP_FILE}")
+        why.append(R("LIN_WCMAP_PATH", f"the w_c map is not {WC_MAP_FILE}"))
     if not isinstance(block.get("n_members"), int) or block["n_members"] < 1:
-        why.append("no member")
+        why.append(R("LIN_NO_MEMBER", "no member"))
     return why
 
 
-def member_reasons(block, metas):
-    """The reasons why the members are not the ones the block describes: each trained on the block's cache (sha256
-    and lineage-record digest) at the block's commit from a clean tree, recording a file name, not a path."""
+def member_tie_reasons(block, metas):
+    """The coded reasons (``TIE_*``) why the members are not the ones the block describes: each trained on the block's
+    cache (sha256 and lineage-record digest) at the block's commit from a clean tree, recording a file name, not a
+    path, and as many as the block states."""
+    R = E.reason
     why = []
     c = block.get("cache") or {}
     if len(metas) != block.get("n_members"):
-        why.append(f"{len(metas)} members, the block states {block.get('n_members')}")
+        why.append(R("TIE_COUNT", f"{len(metas)} members, the block states {block.get('n_members')}"))
     for i, m in enumerate(metas):
         if m.get("cache_sha256") != c.get("sha256"):
-            why.append(f"member {i} was trained on another cache")
+            why.append(R("TIE_CACHE", f"member {i} was trained on another cache"))
         if m.get("cache_lineage_sha256") != c.get("lineage_record_sha256"):
-            why.append(f"member {i} does not name the cache's lineage record")
+            why.append(R("TIE_CACHE_RECORD", f"member {i} does not name the cache's lineage record"))
         if m.get("git_sha") != block.get("code_commit") or not (isinstance(m.get("git_sha"), str)
                                                                 and _HEX40.match(m["git_sha"])):
-            why.append(f"member {i} was trained at another or an unknown commit")
+            why.append(R("TIE_COMMIT", f"member {i} was trained at another or an unknown commit"))
         if m.get("code_dirty") is not False:
-            why.append(f"member {i} was trained from a tree not known to be clean")
+            why.append(R("TIE_DIRTY", f"member {i} was trained from a tree not known to be clean"))
         if m.get("cache_path") is not None and not _plain_name(m["cache_path"]):
-            why.append(f"member {i} records a cache path, not a file name")
+            why.append(R("TIE_CACHE_PATH", f"member {i} records a cache path, not a file name"))
     return why
+
+
+def member_production_reasons(metas):
+    """The coded production-rule reasons of every member (``eligibility.production_recipe_reasons``: a recipe that
+    declares the full training set, no reserved held-out or fold key, no research marking)."""
+    return [r for i, m in enumerate(metas) for r in E.production_recipe_reasons(m, i)]
+
+
+def member_reasons(block, metas):
+    """The reasons why the members are not a production ensemble the block describes: ``member_tie_reasons`` plus
+    ``member_production_reasons``. ``make_lineage_block``, every release load and ``predictor.Bundle`` use it, so
+    ``release_eligible`` reflects both."""
+    return member_tie_reasons(block, metas) + member_production_reasons(metas)
 
 
 def check_lineage_block(block):

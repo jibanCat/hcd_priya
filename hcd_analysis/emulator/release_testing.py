@@ -5,9 +5,13 @@ and the release loader (``safe_h5.load_ensemble`` with a manifest digest) refuse
 establish a clean lineage. Tests and CI jobs that only need a loadable bundle (for example the cross-version check of
 the HDF5 format) build one here: a made-up cache record (eligible, the current finder id, made-up digests), a w_c map
 fitted to nothing (made-up coefficients, its record naming that cache), small untrained networks, and metas that tie
-every member to the cache and to one made-up clean commit. Everything passes the release loader's checks because it is
-self-consistent, not because it describes real data; the trust of a real bundle comes from its published manifest
+every member to the cache and to one made-up clean commit, with a recipe that declares the full training set
+(``all_sims`` true: the production rule of ``eligibility``). Everything passes the release loader's checks because it
+is self-consistent, not because it describes real data; the trust of a real bundle comes from its published manifest
 digest.
+
+Synthetic h5/2 bundles written before D5 (recipe ``{"synthetic": true}`` without ``all_sims``) are historical
+artefacts: the release loaders refuse them and they load through the development path only.
 
     from hcd_analysis.emulator import release_testing as RT
     info = RT.write_synthetic_bundle(bundle_dir)                       # two members by default
@@ -99,7 +103,7 @@ def synthetic_meta(seed, cache_record, cache_identity, *, arch=None, commit=SYNT
             "L_box_hmpc": float(L_BOX_HMPC), "k_convention": K_CONVENTION,
             "param_limits": np.asarray(PARAM_LIMITS, float).tolist(), "git_sha": commit, "code_dirty": False,
             "cache_sha256": cache_identity["sha256"], "cache_lineage_sha256": L.record_sha256(cache_record),
-            "cache_path": SYNTHETIC_CACHE_NAME, "recipe": {"synthetic": True}}
+            "cache_path": SYNTHETIC_CACHE_NAME, "recipe": {"synthetic": True, "all_sims": True}}
 
 
 class SyntheticBundle(NamedTuple):
