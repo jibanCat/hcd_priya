@@ -21,6 +21,8 @@ def load():
     p = os.environ.get(ENV)
     if not p:
         return None
+    if not os.path.isfile(p):
+        raise pytest.UsageError(f"{ENV} names {p!r}, which is not a file (unset it to skip the integration tests)")
     with open(p) as fh:
         return json.load(fh)
 

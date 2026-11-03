@@ -34,6 +34,16 @@ def test_t1b_the_acceptance_report_at_leaf_level(tmp_path):
     a, b = flat(old), flat(new)
     differing = sorted(k for k in a if k != "/format" and a[k] != b.get(k, "<absent>"))
     assert not differing, differing
+    # both directions and the JSON types (D5 review R3 m1): the old report, with format replaced and exactly the
+    # stated additions copied in, is the new report, canonical JSON for canonical JSON
+    from hcd_analysis import lineage as L
+    expected = json.loads(json.dumps(old))
+    expected["format"] = new["format"]
+    for k in NEW_CHECKS:
+        expected["checks"][k] = new["checks"][k]
+    for k in ("content_check_environment", "content_checks"):
+        expected[k] = new[k]
+    assert L.canonical_json(expected) == L.canonical_json(new)
     assert old["format"] == "hcd_priya.ensemble_acceptance/1" and new["format"] == "hcd_priya.ensemble_acceptance/2"
     assert set(new["checks"]) - set(old["checks"]) == NEW_CHECKS and all(new["checks"][k] for k in NEW_CHECKS)
     assert set(new) - set(old) == {"content_check_environment", "content_checks"} and new["passed"]
@@ -58,6 +68,12 @@ def test_t1c_the_re_export_reproduces_the_published_manifest(tmp_path):
     new = json.load(open(bundle / "manifest.json"))
     ec = new["provenance"].pop("eligibility_checks")
     assert ec["passed"] and ec["read_back"] and {c["outcome"] for c in ec["components"]} == {"PASS"}
+    g, by = CFG["step0"]["production_content"], {c["component"]: c for c in ec["components"]}   # R3 m2
+    assert (by["split"]["detail"]["train_idx_sha256"], by["split"]["detail"]["val_idx_sha256"]) == (
+        g["train_idx_sha256"], g["val_idx_sha256"])
+    assert by["normaliser"]["detail"]["recomputed_tensors_sha256"] == g["normaliser_tensors_sha256"]
+    assert by["wc_map"]["detail"]["refit_payload_sha256"] == g["wc_refit_payload_sha256"]
+    assert by["wc_map"]["detail"]["fitted_on_sims_sha256"] == g["all_sims_sha256"]
     assert new["provenance"]["export_code"] == code and new["lineage"]["export_code"] == code
     new["provenance"]["created_utc"] = ref["provenance"]["created_utc"]
     new["provenance"]["export_code"]["commit"] = ref["provenance"]["export_code"]["commit"]
