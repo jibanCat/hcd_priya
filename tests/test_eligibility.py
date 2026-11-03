@@ -2,6 +2,8 @@
 training set, research markings, the cv_selection/1 schema) and its stable reason codes. Synthetic metas only; the
 values mean nothing, the tests check the rules (D5 plan v2 3.1, v3 2.1, v3.1 E2; T5-T14, T14b, T26, T29)."""
 import copy
+import json
+import os
 
 import pytest
 
@@ -258,3 +260,259 @@ def test_golden_digests_of_the_split_rules():                               # T3
     assert _digest(*D.production_row_split(SIMS7)) == _digest(*_w1_reference_split(SIMS7, []))
     assert _digest(*D.production_row_split(SIMS7)) == GOLDEN_PRODUCTION_SPLIT
     assert _digest(*D.multi_holdout_row_split(SIMS7, ["s2", "s5"])) == GOLDEN_MULTI_SPLIT
+
+
+# ---------------------------------------------------- the content rules (v2 3.4, v3 2.3-2.4, v3.1 E1/E2; T15-T17b, T27,
+#                                                      T30, T31, T35, T37) on synthetic release-format caches
+from hcd_analysis import lineage as L  # noqa: E402
+from hcd_analysis.emulator import safe_io as S  # noqa: E402
+from hcd_analysis.emulator import train as T  # noqa: E402
+from hcd_analysis.emulator import wc_map as W  # noqa: E402
+from tests import tau0_fixtures as tf  # noqa: E402
+from tests.emulator._fixture import write_synthetic_cache_v34  # noqa: E402
+
+# tensors_sha256 of train._fit_norm on the 5-simulation synthetic cache (seed 0) under its production split
+# (val_seed 12345, val_frac 0.1), computed with the pre-D5 trainer
+GOLDEN_NORM_FINGERPRINT = "c60b1ac36059e32837f0b55e6657c9e05d00c4fbdbe8c2cd10a0f48eae921d54"
+
+
+@pytest.fixture
+def world(tmp_path, monkeypatch):
+    """A 5-simulation synthetic release cache, its w_c map, and honest production member metas and normaliser."""
+    tf.clean_code(monkeypatch)
+    cache = tmp_path / "cache5_v34.h5"
+    write_synthetic_cache_v34(cache, n_sims=5, snaps_per_sim=4)
+    d = D.load_cache(cache)
+    wc = tmp_path / "wc.json"
+    W.build(cache, wc)
+    tr, va, _ = D.production_row_split(d["sim_name"], val_seed=12345, val_frac=0.1)
+    recipe = {"synthetic": 1, "all_sims": True, "holdout_sim": None, "val_seed": 12345, "val_frac": 0.1,
+              "n_train": int(tr.size), "n_val": int(va.size)}
+    metas = [{"cache_sha256": d["cache_sha256"], "recipe": dict(recipe), "seed": s} for s in (0, 1)]
+    return {"cache": str(cache), "d": d, "wcm": W.read_wc_map(wc), "metas": metas, "norm": T._fit_norm(d, tr),
+            "tr": tr, "va": va, "tmp": tmp_path}
+
+
+def _prod(w, *, metas=None, norms=None, wcm=None, env=None, d=None, sha=None):
+    return E.production_content_check(metas or w["metas"], norms or [w["norm"], w["norm"]], wcm or w["wcm"],
+                                      cache=d or w["d"], cache_path=w["cache"],
+                                      expected_cache_sha256=sha or w["d"]["cache_sha256"], training_environment=env)
+
+
+def _oc(check):
+    return {c["component"]: (c["outcome"], c["sub_reason"]) for c in check["components"]}
+
+
+def test_honest_production_members_pass_every_component(world):
+    c = _prod(world)
+    assert c.passed and _oc(c) == {"cache": ("PASS", "tied"), "split": ("PASS", "recomputed"),
+                                   "normaliser": ("PASS", "bitwise"), "wc_map": ("PASS", "bitwise")}
+    sp = next(x for x in c["components"] if x["component"] == "split")["detail"]
+    assert sp["n_sims_in_cache"] == 5 and sp["n_train_sims"] == 5 and sp["n_train"] == world["tr"].size
+    nm = next(x for x in c["components"] if x["component"] == "normaliser")
+    assert nm["n_tensors"] == nm["n_bitwise"] == len(S.norm_tensors(world["norm"]))
+    assert nm["detail"]["recomputed_tensors_sha256"] == GOLDEN_NORM_FINGERPRINT                       # T31
+    env = c["environment"]
+    assert {"python", "numpy", "jax", "scipy", "hcd_priya"} <= set(env) and env["hcd_priya"]["commit"] == "c" * 40
+    json.dumps(dict(c), allow_nan=False)                                       # recorded as is: finite JSON
+
+
+def test_a_split_size_or_membership_that_differs_is_mismatch(world):          # T30(e), T16
+    bad = [dict(m, recipe=dict(m["recipe"], n_train=m["recipe"]["n_train"] - 1)) for m in world["metas"]]
+    c = _prod(world, metas=bad)
+    assert not c.passed and _oc(c)["split"] == ("MISMATCH", "content") and _oc(c)["normaliser"][1] == "not-run"
+    no_sizes = [dict(m, recipe={k: v for k, v in m["recipe"].items() if k not in ("n_train", "n_val")})
+                for m in world["metas"]]
+    assert _oc(_prod(world, metas=no_sizes))["split"] == ("MISMATCH", "content")    # sizes required in production
+    two = [world["metas"][0], dict(world["metas"][1], recipe=dict(world["metas"][1]["recipe"], val_seed=7))]
+    assert "different splits" in next(x for x in _prod(world, metas=two)["components"]
+                                      if x["component"] == "split")["detail"]["why"]
+
+
+def test_a_normaliser_not_fitted_on_the_declared_training_rows_is_mismatch(world):      # T16, T17
+    d = world["d"]
+    all_rows = T._fit_norm(d, np.arange(d["sim_name"].size))
+    fold_tr, _, _ = D.multi_holdout_row_split(d["sim_name"], ["sim1"])
+    one_row = np.array(world["tr"], copy=True)
+    one_row[0] = world["va"][0]                                                # one wrong training row
+    for norm in (all_rows, T._fit_norm(d, fold_tr), T._fit_norm(d, np.sort(one_row))):
+        c = _prod(world, norms=[world["norm"], norm])
+        assert not c.passed and _oc(c)["normaliser"] == ("MISMATCH", "content")
+        nm = next(x for x in c["components"] if x["component"] == "normaliser")
+        assert nm["max_rel"] > E.DRIFT_BOUND and [m["outcome"] for m in nm["detail"]["members"]] == ["PASS",
+                                                                                                    "MISMATCH"]
+
+
+def test_a_relabelled_fold_member_passes_the_loader_rule_but_not_the_content_check(world):      # T15
+    d = world["d"]
+    fold_tr, fold_va, _ = D.multi_holdout_row_split(d["sim_name"], ["sim2"])
+    relabelled = dict(world["metas"][0], recipe=dict(world["metas"][0]["recipe"], n_train=int(fold_tr.size),
+                                                     n_val=int(fold_va.size)))
+    assert E.production_recipe_reasons(dict(relabelled, recipe=relabelled["recipe"])) == []
+    c = _prod(world, metas=[relabelled, relabelled], norms=[T._fit_norm(d, fold_tr)] * 2)
+    assert _oc(c)["split"] == ("MISMATCH", "content")                          # its sizes are a fold's
+    forged = _prod(world, norms=[T._fit_norm(d, fold_tr)] * 2)                 # sizes forged to the production ones
+    assert _oc(forged)["split"][0] == "PASS" and _oc(forged)["normaliser"] == ("MISMATCH", "content")
+
+
+def _drifted(norm, rel=1e-14):
+    out = copy.deepcopy(norm)
+    out["P_filt"]["mu_marg"] = np.asarray(out["P_filt"]["mu_marg"]) * (1.0 + rel)
+    return out
+
+
+def test_outcome_classification(world):                                       # T30, T17b
+    other_env = {"python": "0.0", "numpy": "0.0"}
+    assert _oc(_prod(world))["normaliser"] == ("PASS", "bitwise")                                     # (a)
+    c = _prod(world, norms=[_drifted(world["norm"])] * 2, env=other_env)
+    assert _oc(c)["normaliser"] == ("UNAVAILABLE", "env-drift") and not c.passed                      # (b), T17b
+    assert _oc(_prod(world, norms=[_drifted(world["norm"])] * 2))["normaliser"] == ("MISMATCH", "strict-env")   # (c)
+    assert _oc(_prod(world, norms=[_drifted(world["norm"], 6.8e-5)] * 2,
+                     env=other_env))["normaliser"] == ("MISMATCH", "content")                            # (d)
+    same = _prod(world, norms=[_drifted(world["norm"])] * 2, env=E.environment())
+    assert _oc(same)["normaliser"] == ("MISMATCH", "content")                 # a recorded identical environment
+
+
+def test_the_relative_difference_has_a_per_tensor_scale_floor():
+    a = {"t": np.array([1.0, 1e-20, -3.0])}
+    b = {"t": np.array([1.0, 1e-20 + 1e-26, -3.0])}
+    diff = E.tensor_differences(a, b)
+    assert diff["max_rel"] == pytest.approx(1e-26 / 3e-12) and diff["max_rel"] <= E.DRIFT_BOUND
+    assert E.tensor_differences({"t": np.zeros(3)}, {"t": np.zeros(3)})["n_bitwise"] == 1
+    assert E.classify(E.tensor_differences({"t": np.zeros(2)}, {"t": np.zeros(3)})) == ("MISMATCH", "content")
+    assert E.classify(E.tensor_differences({"t": np.zeros(2)}, {"u": np.zeros(2)})) == ("MISMATCH", "content")
+
+
+def _map_doc_record(w, doc=None, code=None, cache=None):
+    d = cache if cache is not None else w["d"]
+    doc = doc if doc is not None else W.refit(d)
+    rec = W.make_record(doc, d["lineage"], {"sha256": d["cache_sha256"], "size": os.path.getsize(w["cache"])},
+                        code=code or {"commit": "d" * 40, "dirty": False})
+    return doc, rec
+
+
+def test_the_map_comparison_ignores_the_run_that_wrote_it_and_nothing_else(world):          # T37
+    doc, rec = _map_doc_record(world)
+    rec = dict(rec, created_utc="2031-01-01T00:00:00Z", run_settings_sha256="b" * 64)
+    other_run = W.parse_wc_map(W.to_bytes(doc, rec))                          # another commit, another time
+    assert other_run.record["code"]["commit"] != world["wcm"].record["code"]["commit"]
+    assert _oc(_prod(world, wcm=other_run))["wc_map"] == ("PASS", "bitwise")
+    last_bit = copy.deepcopy(doc)
+    last_bit["delta_c"]["coeffs"][1][2] = float(np.nextafter(doc["delta_c"]["coeffs"][1][2], np.inf))
+    bit = W.parse_wc_map(W.to_bytes(*_map_doc_record(world, last_bit)))
+    assert _oc(_prod(world, wcm=bit))["wc_map"] == ("MISMATCH", "strict-env")
+    subset = W.parse_wc_map(W.to_bytes(*_map_doc_record(world, W.refit_subset(world["d"], ["sim0", "sim1", "sim2"]))))
+    c = _prod(world, wcm=subset)
+    assert _oc(c)["wc_map"] == ("MISMATCH", "content") and "payload delta_c.n_sims" in next(
+        x for x in c["components"] if x["component"] == "wc_map")["detail"]["why"]
+    zfit = copy.deepcopy(doc)
+    zfit["xbar"]["z_fit"] = [2.1, 4.5]                                          # dossier section 6: xbar.z_fit too
+    assert _oc(_prod(world, wcm=W.parse_wc_map(W.to_bytes(*_map_doc_record(world, zfit)))))["wc_map"][0] == "MISMATCH"
+
+
+def test_another_cache_fails_the_tie_first(world, monkeypatch):                # T27
+    tf.clean_code(monkeypatch)
+    other = world["tmp"] / "cache3_v34.h5"
+    write_synthetic_cache_v34(other, n_sims=3, snaps_per_sim=4, seed=3)
+    d3 = D.load_cache(other)
+    c = _prod(world, d=d3, sha=d3["cache_sha256"])
+    assert _oc(c)["cache"] == ("MISMATCH", "content") and {_oc(c)[k][1] for k in ("split", "normaliser",
+                                                                                   "wc_map")} == {"not-run"}
+    assert _oc(_prod(world, sha="0" * 64))["cache"] == ("MISMATCH", "content")
+
+
+def test_complete_means_every_row_of_this_cache_whatever_its_simulation_count(world, monkeypatch):    # T27
+    tf.clean_code(monkeypatch)
+    p = world["tmp"] / "cache3_v34.h5"
+    write_synthetic_cache_v34(p, n_sims=3, snaps_per_sim=4, seed=3)
+    d3 = D.load_cache(p)
+    wc3 = world["tmp"] / "wc3.json"
+    W.build(p, wc3)
+    tr, va, _ = D.production_row_split(d3["sim_name"])
+    metas = [{"cache_sha256": d3["cache_sha256"], "recipe": dict(world["metas"][0]["recipe"], n_train=int(tr.size),
+                                                                 n_val=int(va.size))}]
+    c = E.production_content_check(metas, [T._fit_norm(d3, tr)], W.read_wc_map(wc3), cache=d3, cache_path=str(p),
+                                   expected_cache_sha256=d3["cache_sha256"])
+    sp = next(x for x in c["components"] if x["component"] == "split")["detail"]
+    assert c.passed and sp["n_sims_in_cache"] == sp["n_train_sims"] == 3
+
+
+# ------------------------------------------------------------------------------- research content checks
+def _research(world, held=("sim3",), rule=E.RULE_MULTI_HOLDOUT, **split_over):
+    d = world["d"]
+    tr, va, _ = D.multi_holdout_row_split(d["sim_name"], list(held))
+    train_sims = sorted(set(d["sim_name"].tolist()) - set(held))
+    split = {"held_out_sims": sorted(held), "fold": 0, "val_seed": 12345, "val_frac": 0.1, "n_train": int(tr.size),
+             "n_val": int(va.size)}
+    split.update(split_over)
+    rs = {"schema": E.RESEARCH_SCHEMA, "purpose": "synthetic", "split_rule": rule, "split": split,
+          "folds_digest": HEX, "content_checks": [],
+          "wc_map": {"rule": E.RULE_WCMAP_SUBSET, "fitted_on_sims_sha256": E.sims_sha256(train_sims),
+                     "n_sims": len(train_sims)}}
+    recipe = {"all_sims": False, "holdout_sim": None, "holdout_sims": sorted(held), "fold": 0, "folds_sha256": HEX,
+              "val_seed": 12345, "val_frac": 0.1, "n_train": int(tr.size), "n_val": int(va.size)}
+    metas = [{"cache_sha256": d["cache_sha256"], "recipe": recipe}]
+    wcm = W.parse_wc_map(W.to_bytes(*_map_doc_record(world, W.refit_subset(d, train_sims))))
+    return rs, metas, [T._fit_norm(d, tr)], wcm
+
+
+def _res(world, rs, metas, norms, wcm):
+    return E.research_content_check(metas, norms, wcm, rs, cache=world["d"], cache_path=world["cache"],
+                                    expected_cache_sha256=world["d"]["cache_sha256"])
+
+
+def test_an_honest_fold_member_passes_the_research_content_check(world):
+    rs, metas, norms, wcm = _research(world)
+    c = _res(world, rs, metas, norms, wcm)
+    assert c.passed and E.research_outcome_ok(c) and _oc(c)["wc_map"] == ("PASS", "bitwise")
+    assert next(x for x in c["components"] if x["component"] == "wc_map")["rule"] == E.RULE_WCMAP_SUBSET
+
+
+def test_research_content_mismatches(world):
+    rs, metas, norms, wcm = _research(world)
+    assert _oc(_res(world, rs, metas, [world["norm"]], wcm))["normaliser"] == ("MISMATCH", "content")
+    c = _res(world, rs, metas, norms, world["wcm"])                            # the full-cache map: a leak
+    assert _oc(c)["wc_map"][0] == "MISMATCH" and not E.research_outcome_ok(c)
+    bad = copy.deepcopy(rs)
+    bad["wc_map"]["fitted_on_sims_sha256"] = HEX
+    assert "fitted_on_sims_sha256" in next(x for x in _res(world, bad, metas, norms, wcm)["components"]
+                                           if x["component"] == "wc_map")["detail"]["why"]
+    missing = copy.deepcopy(rs)
+    missing["split"]["held_out_sims"] = ["sim9"]
+    assert _oc(_res(world, missing, metas, norms, wcm))["split"] == ("MISMATCH", "content")
+
+
+def test_an_unverifiable_split_still_refits_the_map_on_the_declared_training_set(world):
+    rs, metas, norms, wcm = _research(world)
+    u = dict(copy.deepcopy(rs), split_rule=E.RULE_UNVERIFIABLE, split={"held_out_sims": ["sim3"],
+                                                                        "description": "by hand"})
+    c = _res(world, u, metas, norms, wcm)
+    assert _oc(c)["split"] == ("UNAVAILABLE", "unverifiable") and _oc(c)["normaliser"] == ("UNAVAILABLE", "not-run")
+    assert _oc(c)["wc_map"] == ("PASS", "bitwise") and E.research_outcome_ok(c) and not c.passed
+
+
+# --------------------------------------------------------------------- T35: the trainer's normaliser rows
+def test_the_trainer_fits_the_normaliser_on_the_training_rows_only(world, monkeypatch):
+    d, tr, va = world["d"], world["tr"], world["va"]
+    seen = []
+    real = T._fit_norm
+
+    def spy(dd, idx):
+        seen.append(np.array(idx, copy=True))
+        return real(dd, idx)
+
+    class Stop(Exception):
+        pass
+
+    def stop(*a, **k):
+        raise Stop
+    monkeypatch.setattr(T, "_fit_norm", spy)
+    monkeypatch.setattr(T, "_warmstart_bases", stop)
+    with pytest.raises(Stop):
+        T.train_fold(d, tr, va, epochs=1, prefit_baseline_epochs=0)
+    assert len(seen) == 1 and np.array_equal(seen[0], tr)
+    poisoned = {k: (np.array(v, copy=True) if isinstance(v, np.ndarray) else v) for k, v in d.items()}
+    poisoned["P_filt"][va] *= 1000.0
+    poisoned["delta"][va] += 5.0
+    a, b = S.norm_tensors(real(d, tr)), S.norm_tensors(real(poisoned, tr))
+    assert set(a) == set(b) and all(a[k].tobytes() == b[k].tobytes() for k in a)

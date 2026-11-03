@@ -10,6 +10,17 @@ epoch count taken from the folds) may be recorded in ``recipe.cv_selection``, a 
 keys avoid every reserved name; the scan exempts nothing. The reserved list is a heuristic against accidental misuse,
 not a parser of arbitrary metadata: a novel spelling outside it passes the loader.
 
+The **content rules** (they need the training cache; run at export and acceptance, never at load):
+``production_content_check`` and ``research_content_check`` tie the cache first, then recompute the split from THIS
+cache's rows with the trainer's own rule (no simulation count is assumed), refit the normaliser on the training rows
+(``train._fit_norm``, every tensor compared bitwise: ``norm_fingerprint/1``) and the w_c map on the training
+simulations (``wcmap_refit/1`` on the full cache, ``wcmap_refit_subset/1`` on a training subset; the whole payload and
+the record's fit fields compared, never the writing run's code, time or settings digest). Each component is PASS,
+MISMATCH or UNAVAILABLE (``classify``: a non-bitwise tensor within ``DRIFT_BOUND`` relative is UNAVAILABLE only with a
+RECORDED training environment that differs from the current one; with none recorded the strict rule gives MISMATCH).
+Production requires PASS everywhere; a research export refuses MISMATCH and records UNAVAILABLE. The trainer and the
+cache reader are imported inside these functions only, never by a loader.
+
 A **research** bundle is marked at the bundle level (``provenance.research``, schema ``research/1``:
 ``check_research_marking``). Every production loader refuses it whatever its split; it loads only through
 ``safe_h5.load_research`` / ``predictor.load_research_bundle``, and ``research_member_reasons`` decides which members it
@@ -17,13 +28,15 @@ admits (one declared split per bundle).
 
 Reasons are strings ``"[CODE] text"`` with a stable machine code (``reason_code``); comparisons use the codes, never
 the wording. Nothing here resists deliberately forged metadata with a recomputed digest: that defence is the published
-digest pinned after a recorded acceptance. This module imports neither the trainer nor the cache reader."""
+digest pinned after a recorded acceptance."""
 from __future__ import annotations
 
 import hashlib
 import json
 import math
 import re
+
+import numpy as np
 
 # ------------------------------------------------------------------------------------------------ rule identifiers
 RULE_RESERVED_KEYS = "reserved_keys/2"
@@ -40,6 +53,10 @@ RULE_WCMAP_SUBSET = "wcmap_refit_subset/1"
 RULE_CACHE_TIE = "cache_tie/1"
 
 PASS, MISMATCH, UNAVAILABLE = "PASS", "MISMATCH", "UNAVAILABLE"      # the outcomes of a content-check component
+DRIFT_BOUND = 1e-12           # max relative difference a recorded environment change may explain (v3 2.3)
+RULES = {"reserved_keys": RULE_RESERVED_KEYS, "cv_selection": RULE_CV_SELECTION, "research": RESEARCH_SCHEMA,
+         "split": [RULE_PRODUCTION_SPLIT, RULE_MULTI_HOLDOUT, RULE_UNVERIFIABLE], "normaliser": RULE_NORM,
+         "wc_map": [RULE_WCMAP, RULE_WCMAP_SUBSET], "cache": RULE_CACHE_TIE}
 
 # the normalised forms (lower case, "_" and "-" removed) of the reserved held-out / fold key names (reserved_keys/2)
 RESERVED_FORMS = frozenset({
@@ -378,4 +395,354 @@ def component(name, rule, outcome, sub_reason, *, detail=None, diff=None):
                    worst=diff["worst"])
     json.dumps(rec, allow_nan=False)
     return rec
+
+
+# ------------------------------------------------------------------------------------------------- content rules
+def index_sha256(idx):
+    """sha256 of row indices as little-endian int64 bytes."""
+    return hashlib.sha256(np.ascontiguousarray(np.asarray(idx, dtype="<i8")).tobytes()).hexdigest()
+
+
+def tensors_sha256(tensors):
+    """sha256 over the sorted tensors: name, dtype, shape and bytes of each (the golden-digest rule)."""
+    h = hashlib.sha256()
+    for k in sorted(tensors):
+        a = np.ascontiguousarray(tensors[k])
+        h.update(k.encode()); h.update(str(a.dtype).encode()); h.update(str(a.shape).encode()); h.update(a.tobytes())
+    return h.hexdigest()
+
+
+def environment():
+    """The environment a content check ran in: Python, numpy, jax, jaxlib, scipy and h5py versions and the hcd_priya
+    code identity (lineage.code_identity)."""
+    import platform
+    from .. import lineage as L
+    out = {"python": platform.python_version(), "numpy": np.__version__}
+    for mod in ("jax", "jaxlib", "scipy", "h5py"):
+        try:
+            out[mod] = __import__(mod).__version__
+        except Exception:                                              # noqa: BLE001  (absent: recorded as None)
+            out[mod] = None
+    out["hcd_priya"] = L.code_identity()
+    return out
+
+
+def _finite(x):
+    return float(x) if x is not None and math.isfinite(float(x)) else None
+
+
+def tensor_differences(stored, recomputed):
+    """``{n, n_bitwise, same_structure, max_abs, max_rel, worst}`` over two dicts of arrays. The relative difference
+    of a pair is |a-b| / max(|a|, |b|, floor) with floor = 1e-300 + 1e-12 max(|a|, |b|) over the tensor (v3.1 E2)."""
+    names = sorted(set(stored) | set(recomputed))
+    out = {"n": len(names), "n_bitwise": 0, "same_structure": set(stored) == set(recomputed), "max_abs": 0.0,
+           "max_rel": 0.0, "worst": None}
+    for k in names:
+        if k not in stored or k not in recomputed:
+            continue
+        a, b = np.asarray(stored[k]), np.asarray(recomputed[k])
+        if a.shape != b.shape or a.dtype != b.dtype:
+            out["same_structure"] = False
+            continue
+        if a.tobytes() == b.tobytes():
+            out["n_bitwise"] += 1
+            continue
+        a64, b64 = a.astype(np.float64), b.astype(np.float64)
+        if not (np.all(np.isfinite(a64)) and np.all(np.isfinite(b64))):
+            out["same_structure"], out["worst"] = False, k
+            continue
+        d = np.abs(a64 - b64)
+        floor = 1e-300 + 1e-12 * max(float(np.max(np.abs(a64))), float(np.max(np.abs(b64))))
+        rel = float(np.max(d / np.maximum(np.maximum(np.abs(a64), np.abs(b64)), floor)))
+        if rel > out["max_rel"] or out["worst"] is None:
+            out["max_abs"], out["max_rel"], out["worst"] = float(d.max()), rel, k
+    out["max_abs"], out["max_rel"] = _finite(out["max_abs"]), _finite(out["max_rel"])
+    return out
+
+
+def classify(diff, *, training_environment=None, current_environment=None):
+    """``(outcome, sub_reason)`` of a tensor comparison (``tensor_differences``) under v3 2.3 and v3.1 E2:
+
+    * every tensor bitwise equal: PASS;
+    * otherwise within ``DRIFT_BOUND`` relative, a RECORDED training environment that differs from the current one:
+      UNAVAILABLE (``env-drift``);
+    * within the bound with no recorded training environment: MISMATCH (``strict-env``);
+    * anything else (beyond the bound, another structure, or the same recorded environment): MISMATCH (``content``).
+    No override exists."""
+    if diff["same_structure"] and diff["n_bitwise"] == diff["n"]:
+        return PASS, "bitwise"
+    within = diff["same_structure"] and diff["max_rel"] is not None and diff["max_rel"] <= DRIFT_BOUND
+    if within and training_environment is not None and training_environment != current_environment:
+        return UNAVAILABLE, "env-drift"
+    if within and training_environment is None:
+        return MISMATCH, "strict-env"
+    return MISMATCH, "content"
+
+
+class ContentCheck(dict):
+    """The result of a content check: ``{"rules", "environment", "components": [...], "passed"}`` (a dict, recorded
+    as is in provenance)."""
+
+    @property
+    def passed(self):
+        return self["passed"]
+
+    def outcomes(self):
+        return {c["component"]: c["outcome"] for c in self["components"]}
+
+
+def _result(components, env, kind):
+    passed = all(c["outcome"] == PASS for c in components)
+    return ContentCheck(kind=kind, rules=dict(RULES), environment=env, components=components, passed=passed)
+
+
+# ------------------------------------------------------------------------------------- content: the components
+def _load(cache, cache_path):
+    if cache is not None:
+        return cache
+    from .data import load_cache
+    return load_cache(cache_path)
+
+
+def _recipe_split(metas):
+    r0 = metas[0].get("recipe") or {}
+    return {k: r0.get(k) for k in ("val_seed", "val_frac", "n_train", "n_val")}
+
+
+def split_component(d, metas, rule, held_out_sims):
+    """The split recomputed from the cache's own rows (no hard-coded simulation count): ``(component record, train
+    rows, val rows, training simulations)``; the training rows are None when the split cannot be recomputed."""
+    from . import data as D
+    sim = np.asarray(d["sim_name"]).astype(str)
+    all_sims = sorted(set(sim.tolist()))
+    rs = _recipe_split(metas)
+    detail = {"n_rows": int(sim.size), "n_sims_in_cache": len(all_sims), "held_out_sims": list(held_out_sims),
+              "recorded": rs}
+    if any({k: (m.get("recipe") or {}).get(k) for k in rs} != rs for m in metas):
+        return component("split", rule, MISMATCH, "content", detail=dict(detail, why="members record different "
+                                                                                     "splits")), None, None, None
+    if rule == RULE_UNVERIFIABLE:
+        train_sims = sorted(set(all_sims) - set(held_out_sims))
+        return component("split", rule, UNAVAILABLE, "unverifiable", detail=dict(
+            detail, why="an unverifiable split rule: the split is not recomputed")), None, None, train_sims
+    missing = sorted(set(held_out_sims) - set(all_sims))
+    if missing:
+        return component("split", rule, MISMATCH, "content", detail=dict(detail, why=f"held-out simulations not in "
+                                                                                    f"the cache: {missing}")), \
+            None, None, None
+    if not (_int(rs["val_seed"]) and isinstance(rs["val_frac"], float)):
+        return component("split", rule, MISMATCH, "content", detail=dict(detail, why="the recipe does not state "
+                                                                                    "val_seed and val_frac")), \
+            None, None, None
+    if rule == RULE_MULTI_HOLDOUT:
+        tr, va, held = D.multi_holdout_row_split(sim, held_out_sims, val_seed=rs["val_seed"], val_frac=rs["val_frac"])
+    elif rule == RULE_PRODUCTION_SPLIT and len(held_out_sims) <= 1:
+        tr, va, held = D.production_row_split(sim, val_seed=rs["val_seed"], val_frac=rs["val_frac"],
+                                              holdout_sim=held_out_sims[0] if held_out_sims else None)
+    else:
+        return component("split", rule, MISMATCH, "content", detail=dict(detail, why=f"rule {rule!r} with "
+                                                                                    f"{len(held_out_sims)} held out")), \
+            None, None, None
+    train_sims = sorted(set(sim[tr].tolist()))
+    want_sims = sorted(set(all_sims) - set(held_out_sims))
+    detail.update(n_train=int(tr.size), n_val=int(va.size), n_held=int(held.size), train_idx_sha256=index_sha256(tr),
+                  val_idx_sha256=index_sha256(va), train_sims_sha256=sims_sha256(train_sims),
+                  n_train_sims=len(train_sims))
+    why = []
+    if not (_int(rs["n_train"]) and _int(rs["n_val"])):
+        why.append("the recipe does not state n_train and n_val")
+    elif (rs["n_train"], rs["n_val"]) != (int(tr.size), int(va.size)):
+        why.append(f"recomputed sizes {tr.size}/{va.size}, the recipe states {rs['n_train']}/{rs['n_val']}")
+    if train_sims != want_sims:
+        why.append(f"the training rows cover {len(train_sims)} simulations, the declared training set "
+                   f"{len(want_sims)}")
+    if why:
+        return component("split", rule, MISMATCH, "content", detail=dict(detail, why="; ".join(why))), None, None, None
+    return component("split", rule, PASS, "recomputed", detail=detail), tr, va, train_sims
+
+
+def normaliser_component(d, norms, train_idx, *, training_environment, current_environment):
+    """Every member's stored normaliser against ``train._fit_norm`` on the recomputed training rows (``norm_fingerprint/
+    1``: all tensors, bitwise first)."""
+    from . import safe_io as S
+    from .train import _fit_norm                                     # imported here only (pickle, optax)
+    ref = S.norm_tensors(_fit_norm(d, train_idx))
+    worst, per = None, []
+    for i, n in enumerate(norms):
+        diff = tensor_differences(S.norm_tensors(n), ref)
+        oc = classify(diff, training_environment=training_environment, current_environment=current_environment)
+        per.append({"member": i, "outcome": oc[0], "sub_reason": oc[1], "n_bitwise": diff["n_bitwise"], "n": diff["n"],
+                    "max_rel": diff["max_rel"]})
+        rank = {PASS: 0, UNAVAILABLE: 1, MISMATCH: 2}[oc[0]]
+        if worst is None or rank > worst[0]:
+            worst = (rank, oc, diff)
+    _, (outcome, sub), diff = worst
+    return component("normaliser", RULE_NORM, outcome, sub, diff=diff,
+                     detail={"members": per, "recomputed_tensors_sha256": tensors_sha256(ref)})
+
+
+_WC_TENSORS = (("delta_c", "coeffs"), ("delta_c", "resid_std"), ("delta_c", "resid_max"), ("delta_c", "mean"),
+               ("xbar", "coeffs"))
+
+
+def wc_map_component(d, wcm, train_sims, *, cache_identity, subset, training_environment, current_environment,
+                     declared=None):
+    """The bundle's w_c map ``wcm`` (a parsed ``wc_map.WcMap``) against the map refitted on ``train_sims``
+    (``wc_map.refit`` for the full cache, ``wc_map.refit_subset`` otherwise). Compared (v3.1 E1, dossier section 6):
+    the WHOLE payload (the coefficient and residual arrays classified as tensors, every other field exactly), and the
+    record's inputs[0] {role, kind, sha256, size, info.lineage_record_sha256}, settings, finder_ids, product (but its
+    payload digest), kind and kind_version. Excluded: code, created_utc, run_settings_sha256 and the eligibility
+    fields. The simulation set comes from the recomputation; ``declared`` (a research bundle's
+    ``provenance.research.wc_map``) must name the same set."""
+    from .. import lineage as L
+    from . import wc_map as W
+    rule = RULE_WCMAP_SUBSET if subset else RULE_WCMAP
+    try:
+        doc = W.refit_subset(d, train_sims) if subset else W.refit(d)
+    except W.WcMapError as e:
+        return component("wc_map", rule, MISMATCH, "content", detail={"why": f"refit refused: {e}"})
+    ref = W.make_record(doc, d["lineage"], cache_identity, code={"commit": None, "dirty": None})
+    body = {k: v for k, v in wcm.doc.items() if k != "lineage"}
+    rec = wcm.record
+    why = []
+    tensors_s, tensors_r = {}, {}
+    for sec in ("delta_c", "xbar"):
+        for k in sorted(set(body.get(sec, {})) | set(doc[sec])):
+            if (sec, k) in _WC_TENSORS:
+                tensors_s[f"{sec}.{k}"] = np.asarray(body[sec].get(k), dtype=np.float64)
+                tensors_r[f"{sec}.{k}"] = np.asarray(doc[sec][k], dtype=np.float64)
+            elif L.canonical_json(body[sec].get(k)) != L.canonical_json(doc[sec].get(k)):
+                why.append(f"payload {sec}.{k}")
+    for k in ("format", "class_order"):
+        if body.get(k) != doc[k]:
+            why.append(f"payload {k}")
+    i0, r0 = rec["inputs"][0], ref["inputs"][0]
+    for k in ("role", "kind", "sha256", "size"):
+        if i0.get(k) != r0.get(k):
+            why.append(f"record inputs[0].{k}")
+    if (i0.get("info") or {}).get("lineage_record_sha256") != (r0.get("info") or {}).get("lineage_record_sha256"):
+        why.append("record inputs[0].info.lineage_record_sha256")
+    for k in ("settings", "finder_ids", "kind", "kind_version"):
+        if L.canonical_json(rec.get(k)) != L.canonical_json(ref.get(k)):
+            why.append(f"record {k}")
+    pr, pf = dict(rec.get("product") or {}), dict(ref["product"])
+    pr.pop("payload_sha256", None)
+    pf.pop("payload_sha256", None)
+    if L.canonical_json(pr) != L.canonical_json(pf):
+        why.append("record product")
+    fitted = sims_sha256(train_sims)
+    if declared is not None:
+        if declared.get("fitted_on_sims_sha256") != fitted:
+            why.append("provenance.research.wc_map.fitted_on_sims_sha256 is not the recomputed training set")
+        if declared.get("n_sims") != doc["delta_c"]["n_sims"]:
+            why.append("provenance.research.wc_map.n_sims is not the recomputed map's")
+        if declared.get("rule") != rule:
+            why.append(f"provenance.research.wc_map.rule is not {rule}")
+    diff = tensor_differences(tensors_s, tensors_r)
+    detail = {"fitted_on_sims_sha256": fitted, "n_sims": doc["delta_c"]["n_sims"],
+              "refit_payload_sha256": W.payload_sha256(doc), "bundle_wc_map_sha256": wcm.sha256}
+    if why:
+        return component("wc_map", rule, MISMATCH, "content", diff=diff, detail=dict(detail, why="; ".join(why)))
+    outcome, sub = classify(diff, training_environment=training_environment, current_environment=current_environment)
+    return component("wc_map", rule, outcome, sub, diff=diff, detail=detail)
+
+
+def _cache_component(d, metas, expected_cache_sha256, wcm):
+    got = d.get("cache_sha256")
+    why = []
+    if got != expected_cache_sha256:
+        why.append("the cache file does not hash to the expected digest")
+    if any(m.get("cache_sha256") != got for m in metas):
+        why.append("a member was trained on another cache")
+    if wcm is not None and wcm.cache_sha256 != got:
+        why.append("the w_c map was fitted to another cache")
+    detail = {"cache_sha256": got}
+    if why:
+        return component("cache", RULE_CACHE_TIE, MISMATCH, "content", detail=dict(detail, why="; ".join(why)))
+    return component("cache", RULE_CACHE_TIE, PASS, "tied", detail=detail)
+
+
+def _not_run(name, rule, why):
+    return component(name, rule, UNAVAILABLE, "not-run", detail={"why": why})
+
+
+def production_content_check(metas, norms, wcm, *, cache_path=None, cache=None, expected_cache_sha256,
+                             cache_size=None, training_environment=None):
+    """The production content rules (v2 3.4, v3 2.3, v3.1 E1): the cache tie first; the production split
+    (``production_row_split/1``, every simulation of THIS cache, n_train / n_val required); every member's normaliser
+    (``norm_fingerprint/1``); the w_c map refitted on the full cache (``wcmap_refit/1``). ``cache`` (a dict from the
+    strict ``data.load_cache``) or ``cache_path`` (loaded here). Returns a ``ContentCheck``; production needs
+    ``passed``."""
+    env = environment()
+    d = _load(cache, cache_path)
+    ident = _identity(d, cache_path, cache_size)
+    comps = [_cache_component(d, metas, expected_cache_sha256, wcm)]
+    if comps[0]["outcome"] != PASS:
+        return _result(comps + [_not_run(n, r, "the cache tie failed") for n, r in
+                                (("split", RULE_PRODUCTION_SPLIT), ("normaliser", RULE_NORM), ("wc_map", RULE_WCMAP))],
+                       env, "production")
+    sc, tr, _va, train_sims = split_component(d, metas, RULE_PRODUCTION_SPLIT, [])
+    comps.append(sc)
+    if tr is None:
+        comps.append(_not_run("normaliser", RULE_NORM, "the split was not recomputed"))
+    else:
+        comps.append(normaliser_component(d, norms, tr, training_environment=training_environment,
+                                          current_environment=env))
+    all_sims = sorted(set(np.asarray(d["sim_name"]).astype(str).tolist()))
+    comps.append(wc_map_component(d, wcm, all_sims, cache_identity=ident, subset=False,
+                                  training_environment=training_environment, current_environment=env))
+    return _result(comps, env, "production")
+
+
+def research_content_check(metas, norms, wcm, rs, *, cache_path=None, cache=None, expected_cache_sha256,
+                           cache_size=None, training_environment=None, check_declared_map=True):
+    """The research content rules for the declared split ``rs`` (a ``research/1`` record, or the part of it the
+    research export has built: ``split_rule``, ``split`` and, with ``check_declared_map``, ``wc_map``): the cache tie;
+    the split under its rule; the normaliser; the w_c map refitted on the training simulations only
+    (``wcmap_refit_subset/1``; the full refit when nothing is held out). Under ``unverifiable`` the split and the
+    normaliser are recorded UNAVAILABLE and the map is still refitted on the cache minus the declared held-out
+    simulations. MISMATCH refuses a research export; UNAVAILABLE is allowed and recorded."""
+    env = environment()
+    d = _load(cache, cache_path)
+    ident = _identity(d, cache_path, cache_size)
+    rule, held = rs["split_rule"], list(rs["split"]["held_out_sims"])
+    comps = [_cache_component(d, metas, expected_cache_sha256, wcm)]
+    if comps[0]["outcome"] != PASS:
+        return _result(comps + [_not_run(n, r, "the cache tie failed") for n, r in
+                                (("split", rule), ("normaliser", RULE_NORM), ("wc_map", RULE_WCMAP_SUBSET))],
+                       env, "research")
+    sc, tr, _va, train_sims = split_component(d, metas, rule, held)
+    comps.append(sc)
+    if tr is None:
+        why = "an unverifiable split rule" if rule == RULE_UNVERIFIABLE else "the split was not recomputed"
+        comps.append(_not_run("normaliser", RULE_NORM, why))
+    else:
+        comps.append(normaliser_component(d, norms, tr, training_environment=training_environment,
+                                          current_environment=env))
+    if train_sims is None:
+        comps.append(_not_run("wc_map", RULE_WCMAP_SUBSET, "the training simulations are not known"))
+    else:
+        comps.append(wc_map_component(d, wcm, train_sims, cache_identity=ident, subset=bool(held),
+                                      training_environment=training_environment, current_environment=env,
+                                      declared=rs.get("wc_map") if check_declared_map else None))
+    return _result(comps, env, "research")
+
+
+def _identity(d, cache_path, cache_size):
+    import os
+    size = cache_size if cache_size is not None else (os.stat(cache_path).st_size if cache_path else None)
+    if size is None:
+        raise EligibilityError("the cache size is needed (cache_path or cache_size)")
+    return {"sha256": d["cache_sha256"], "size": int(size)}
+
+
+def research_outcome_ok(check):
+    """A research export proceeds unless a component is MISMATCH (UNAVAILABLE is allowed and recorded)."""
+    return all(c["outcome"] != MISMATCH for c in check["components"])
+
+
+def outcomes_differ(a, b):
+    """Whether two content checks give different outcomes per component (the read-back check must repeat the
+    pre-write one)."""
+    return a.outcomes() != b.outcomes()
 
