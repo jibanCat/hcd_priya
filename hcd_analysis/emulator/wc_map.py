@@ -136,6 +136,43 @@ def refit(d):
     return doc
 
 
+_VIEW_ROW_KEYS = ("sim_name", "z_grid", "params", "x", "coarse_counts", "w_c_cache", "alpha_idx", "tau0")
+_VIEW_GROUP_KEYS = ("snap_dNdX", "snap_total_path_dX", "snap_f_nhi", "snap_n_absorbers")
+
+
+def training_view(d, train_sims):
+    """The rows and snapshot groups of the simulations ``train_sims`` only, as a cache-like dict with the groups
+    re-indexed 0..G'-1: the keys the w_c estimators read and nothing of any other simulation, so a group-level fit
+    given the view cannot reach a held-out group (``fit_xbar`` loops over every group of the dict it is given).
+    ``source_groups`` and ``source_rows`` map back to ``d``."""
+    sims = sorted({str(s) for s in train_sims})
+    sim = np.asarray(d["sim_name"]).astype(str)
+    have = set(sim.tolist())
+    if not sims or not set(sims) <= have:
+        raise WcMapError(f"the training simulations must be a non-empty subset of the cache's: "
+                         f"{sorted(set(sims) - have)[:5]} are not in it")
+    rows = np.flatnonzero(np.isin(sim, sims))
+    old_g = np.asarray(d["snap_group_idx"])[rows]
+    groups = np.unique(old_g)
+    view = {k: np.asarray(d[k])[rows] for k in _VIEW_ROW_KEYS if k in d}
+    view["sim_name"] = sim[rows]
+    view["snap_group_idx"] = np.searchsorted(groups, old_g).astype(np.int32)
+    for k in _VIEW_GROUP_KEYS:
+        if k in d:
+            view[k] = np.asarray(d[k])[groups]
+    view["source_groups"], view["source_rows"] = groups, rows
+    return view
+
+
+def refit_subset(d, train_sims):
+    """The map's payload refitted on the simulations ``train_sims`` only (rule ``wcmap_refit_subset/1``: ``refit`` of
+    ``training_view``), so a cross-validation fold's w_c map never sees its held-out simulations. With every
+    simulation of the cache it is ``refit(d)`` byte for byte. The map file format is unchanged: the payload records
+    ``delta_c.n_sims``; which simulations were used is recorded by the research bundle
+    (``provenance.research.wc_map``), not in the map file."""
+    return refit(training_view(d, train_sims))
+
+
 # ---------------------------------------------------------------------------------------------- record and writing
 def payload_sha256(doc):
     """sha256 of the canonical JSON of the document without its ``lineage``."""

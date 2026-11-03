@@ -233,3 +233,89 @@ def test_an_explicit_map_is_used_clamped_and_traceable():
     assert np.allclose(back, 0.02 * 4.0 ** 2.0 * np.array([1.0, 0.5, 0.25]), rtol=1e-10)
     with pytest.raises(ValueError, match=r"shape \(4, 3\)"):
         D.delta_c(3.0, D.DeltaCMap(np.zeros((4, 4)), 2.0, 5.4, "bad"))
+
+
+# ---------------------------------------------------------------- the training-set refit (wcmap_refit_subset/1, T33)
+@pytest.fixture
+def cache5(tmp_path, monkeypatch):
+    tf.clean_code(monkeypatch)
+    p = tmp_path / "cache5_v34.h5"
+    write_synthetic_cache_v34(p, n_sims=5, snaps_per_sim=4)
+    return p
+
+
+# payload sha256 on the 5-simulation synthetic cache (seed 0), computed with the pre-D5 refit and the W-1 reference view
+GOLDEN_WCMAP_REFIT = "d3d1100320904150cdf7693bdc2162b36c47d8178cc44b1c892c05c3ade19e57"
+GOLDEN_WCMAP_SUBSET = "ceef303edcaf4f39f6cefc8044d33079b2a3dff49e637b3a3c1e3dfdf95f62b6"       # sim2 held out
+
+
+def _w1_reference_fold_map(d, train_sims):
+    """W-1's fold_view + fit_fold_map (scripts/w1/common.py at 5067bb4), copied as the reference: (delta_c coeffs,
+    xbar coeffs, n_blocks, n_xbar_groups, n_sims)."""
+    rk = ("sim_name", "z_grid", "params", "x", "coarse_counts", "w_c_cache", "alpha_idx", "tau0")
+    gk = ("snap_dNdX", "snap_total_path_dX", "snap_f_nhi", "snap_n_absorbers")
+    sim = np.asarray(d["sim_name"]).astype(str)
+    rows = np.flatnonzero(np.isin(sim, [str(s) for s in train_sims]))
+    old_g = np.asarray(d["snap_group_idx"])[rows]
+    groups = np.unique(old_g)
+    view = {k: np.asarray(d[k])[rows] for k in rk if k in d}
+    view["sim_name"] = sim[rows]
+    view["snap_group_idx"] = np.searchsorted(groups, old_g).astype(np.int32)
+    for k in gk:
+        if k in d:
+            view[k] = np.asarray(d[k])[groups]
+    z, wc, wm, sims = W.delta_c_blocks(view)
+    coeffs, _delta, _rs, _rm = W.fit_delta_c(z, wc, wm, W.DEG)
+    xcf, n_groups = W.fit_xbar(view)
+    return np.asarray(coeffs, np.float64), np.asarray(xcf, np.float64), int(z.size), int(n_groups), len(set(sims))
+
+
+def test_the_full_set_refit_is_the_refit_byte_for_byte(cache5):
+    d = _load(cache5)
+    sims = sorted(set(d["sim_name"].tolist()))
+    assert L.canonical_json(W.refit_subset(d, sims)) == L.canonical_json(W.refit(d))
+    assert L.canonical_json(W.refit_subset(d, list(reversed(sims)) + sims[:1])) == L.canonical_json(W.refit(d))
+
+
+@pytest.mark.parametrize("held", [["sim0"], ["sim1", "sim3"], ["sim4", "sim2", "sim0"]])
+def test_the_training_set_refit_is_the_w1_fold_map(cache5, held):
+    d = _load(cache5)
+    train = sorted(set(d["sim_name"].tolist()) - set(held))
+    doc = W.refit_subset(d, train)
+    dc, xb, nb, ng, ns = _w1_reference_fold_map(d, train)
+    assert np.asarray(doc["delta_c"]["coeffs"]).tobytes() == dc.tobytes()
+    assert np.asarray(doc["xbar"]["coeffs"]).tobytes() == xb.tobytes()
+    assert (doc["delta_c"]["n_blocks"], doc["xbar"]["n_groups"], doc["delta_c"]["n_sims"]) == (nb, ng, ns)
+    assert ns == len(train) and doc["delta_c"]["coeffs"] != W.refit(d)["delta_c"]["coeffs"]
+
+
+def test_no_held_out_simulation_reaches_the_training_set_refit(cache5):
+    d = _load(cache5)
+    train = ["sim0", "sim2", "sim3"]
+    ref = W.refit_subset(d, train)
+    poisoned = {k: np.array(v, copy=True) if isinstance(v, np.ndarray) else v for k, v in d.items()}
+    held_rows = np.flatnonzero(~np.isin(d["sim_name"], train))
+    held_groups = np.unique(d["snap_group_idx"][held_rows])
+    poisoned["coarse_counts"][held_rows] = poisoned["coarse_counts"][held_rows] * 7 + 3
+    poisoned["w_c_cache"][held_rows] = 0.5
+    poisoned["snap_dNdX"][held_groups] *= 11.0
+    poisoned["snap_total_path_dX"][held_groups] *= 0.1
+    assert L.canonical_json(W.refit_subset(poisoned, train)) == L.canonical_json(ref)
+    assert L.canonical_json(W.refit(poisoned)) != L.canonical_json(W.refit(d))
+    view = W.training_view(d, train)
+    assert set(view["sim_name"].tolist()) == set(train) and np.array_equal(view["source_rows"],
+                                                                            np.flatnonzero(np.isin(d["sim_name"],
+                                                                                                   train)))
+
+
+def test_the_training_set_refit_refuses_an_empty_or_unknown_set(cache5):
+    d = _load(cache5)
+    for bad in ([], ["sim9"], ["sim0", "simX"]):
+        with pytest.raises(W.WcMapError, match="non-empty subset"):
+            W.refit_subset(d, bad)
+
+
+def test_golden_digests_of_the_map_rules(cache5):                                 # T31
+    d = _load(cache5)
+    assert W.payload_sha256(W.refit(d)) == GOLDEN_WCMAP_REFIT
+    assert W.payload_sha256(W.refit_subset(d, ["sim0", "sim1", "sim3", "sim4"])) == GOLDEN_WCMAP_SUBSET
