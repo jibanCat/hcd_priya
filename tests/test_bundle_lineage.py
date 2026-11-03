@@ -332,3 +332,39 @@ def test_a_pre_d5_synthetic_bundle_is_historical_it_loads_only_through_the_dev_p
         ens, metas, _ = H.load_ensemble(info.bundle_dir, expected_manifest_sha256=None)
     assert [x.category for x in w] == [H.UnanchoredBundleWarning] and len(ens.members) == 2
     assert not metas.anchored and not metas.lineage_verified
+
+
+# ------------------------------------------------- D5 review R1 M1: a fold-subset w_c map is never a production map
+def test_synthetic_maps_count_the_caches_groups(info):
+    rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
+    assert rb.wc_map.doc["delta_c"]["n_blocks"] == rb.lineage["cache"]["n_groups"]
+    assert H.wc_map_production_reasons(rb.lineage, rb.wc_map) == []
+
+
+def test_a_fold_subset_map_with_production_members_is_refused_by_every_production_loader(tmp_path):
+    """Reviewer R1's reproduction (8o): production members plus a research bundle's honest fold map, written by
+    library calls, must not load as production."""
+    res = RT.write_synthetic_research_bundle(str(tmp_path / "research"))
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), cache=(res.cache_record, res.cache_identity),
+                                     wc_map_path=os.path.join(res.bundle_dir, H.WC_MAP_FILE))
+    assert info.lineage["release_eligible"] is False
+    assert [E.reason_code(r) for r in info.lineage["ineligible_reasons"]] == ["WCMAP_NOT_FULL_CACHE"]
+    assert E.code_class(info.lineage["ineligible_reasons"][0]) == "production"
+    _refused_by_every_release_loader(info.bundle_dir, info.manifest_sha256, "WCMAP_NOT_FULL_CACHE")
+    sha = _rewrite(info, _forge_eligible)                                    # the block forged eligible
+    _refused_by_every_release_loader(info.bundle_dir, sha, "not fitted on the whole training cache.*"
+                                                           "WCMAP_NOT_FULL_CACHE")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert len(H.load_ensemble(info.bundle_dir, expected_manifest_sha256=None)[0].members) == 2   # dev path
+
+
+def test_the_map_rule_is_listed_after_the_member_rules(tmp_path):
+    """A bundle with fold members AND a fold map names both (the member reasons first)."""
+    res = RT.write_synthetic_research_bundle(str(tmp_path / "research"))
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), cache=(res.cache_record, res.cache_identity),
+                                     wc_map_path=os.path.join(res.bundle_dir, H.WC_MAP_FILE),
+                                     member_fn=_recipe_fn(_fold))
+    sha = _rewrite(info, _forge_eligible)
+    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*ALL_SIMS_NOT_TRUE.*"
+                                                           "WCMAP_NOT_FULL_CACHE")

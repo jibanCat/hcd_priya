@@ -84,14 +84,16 @@ def synthetic_cache_record(n_groups=2, *, carried=False, code=None):
     return rec, {"sha256": _h("synthetic training cache", L.record_sha256(rec)), "size": 1 << 20}
 
 
-def synthetic_wc_map_doc(n_sims=2):
-    """A w_c map payload with made-up coefficients (no fit behind it), recording ``n_sims`` simulations."""
+def synthetic_wc_map_doc(n_sims=2, n_blocks=None):
+    """A w_c map payload with made-up coefficients (no fit behind it), recording ``n_sims`` simulations and
+    ``n_blocks`` snapshot groups (default ``n_sims``: each synthetic simulation has one group). A production map counts
+    every group of its cache (``safe_h5.wc_map_production_reasons``)."""
     from . import wc_map as W
     return {"format": W.FORMAT, "class_order": list(W.CLASS_ORDER),
             "delta_c": {"coeffs": [[0.0, 0.002, -0.01], [0.0, 0.001, -0.005], [0.0, 0.0, -0.003],
                                    [0.0, 0.0, -0.002]], "deg": 2, "z_clamp": list(W.DELTA_C_Z_CLAMP),
                         "resid_std": [0.01, 0.005, 0.003, 0.002], "resid_max": [0.03, 0.02, 0.01, 0.005],
-                        "mean": [-0.004, -0.002, -0.003, -0.002], "n_blocks": 4, "n_sims": int(n_sims), "z_min": 2.0,
+                        "mean": [-0.004, -0.002, -0.003, -0.002], "n_blocks": int(n_sims if n_blocks is None else n_blocks), "n_sims": int(n_sims), "z_min": 2.0,
                         "z_max": 5.4},
             "xbar": {"coeffs": [0.0, 0.02, 0.3], "deg": 2, "z_fit": list(W.XBAR_Z_FIT), "n_groups": 4}}
 
@@ -144,7 +146,8 @@ def write_synthetic_bundle(bundle_dir, *, n_members=2, seeds=None, arch=None, no
     norm = norm if norm is not None else synthetic_norm(arch["n_k"])
     rec, ident = synthetic_cache_record(carried=carried) if cache is None else cache
     if wc_map_path is None:
-        doc = synthetic_wc_map_doc()
+        groups = rec["product"].get("groups") or []
+        doc = synthetic_wc_map_doc(n_sims=len({g["sim"] for g in groups}), n_blocks=len(groups))
         wrec = W.make_record(doc, rec, ident, code=SYNTHETIC_CODE, cache_name=SYNTHETIC_CACHE_NAME)
         W.write_wc_map(os.path.join(bundle_dir, H.WC_MAP_FILE), doc, wrec)
         wcm = W.read_wc_map(os.path.join(bundle_dir, H.WC_MAP_FILE))
@@ -226,7 +229,8 @@ def write_synthetic_research_bundle(bundle_dir, *, purpose="synthetic research b
     research = synthetic_research_marking(purpose, held_out_sims, sims, fold=fold)
     if research_fn is not None:
         research = research_fn(research)
-    doc = synthetic_wc_map_doc(n_sims=len(set(sims) - set(held_out_sims)))
+    train = set(sims) - set(held_out_sims)
+    doc = synthetic_wc_map_doc(n_sims=len(train), n_blocks=sum(1 for g in rec["product"]["groups"] if g["sim"] in train))
     wrec = W.make_record(doc, rec, ident, code=SYNTHETIC_CODE, cache_name=SYNTHETIC_CACHE_NAME)
     W.write_wc_map(os.path.join(bundle_dir, H.WC_MAP_FILE), doc, wrec)
     wcm = W.read_wc_map(os.path.join(bundle_dir, H.WC_MAP_FILE))

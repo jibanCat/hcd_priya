@@ -55,6 +55,11 @@ def test_every_w1_member_split_normaliser_map_and_admission(cache):
     folds = json.load(open(w1["fold_file"]))["folds"]
     maps = json.load(open(path(w1["summary"])))["folds_maps"]
     sim = np.asarray(cache["sim_name"]).astype(str)
+    from hcd_analysis.emulator import safe_h5 as H
+    p = CFG["production"]
+    rb = H.load_release(path(p["bundle"]), expected_manifest_sha256=p["manifest_sha256"])
+    n_groups, doc_full_blocks = rb.lineage["cache"]["n_groups"], rb.wc_map.doc["delta_c"]["n_blocks"]
+    assert H.wc_map_production_reasons(rb.lineage, rb.wc_map) == []
     for k in range(len(folds)):
         held = sorted(folds[f"fold{k}"])
         pair = [_w1(f"w1_b0_fold{k}_seed{s}") for s in (0, 1)]
@@ -78,6 +83,8 @@ def test_every_w1_member_split_normaliser_map_and_admission(cache):
         assert (doc["delta_c"]["n_blocks"], doc["xbar"]["n_groups"], doc["delta_c"]["n_sims"]) == (
             rec["n_blocks"], rec["n_xbar_groups"], rec["n_sims"])
         assert W.payload_sha256(doc) == CFG["step0"]["w1_fold_maps"][str(k)]["refit_payload_sha256"]
+        # D5 review R1 M1: a fold map never counts the whole cache's groups, the production map does
+        assert rec["n_blocks"] < n_groups == doc_full_blocks
         rs = {"schema": E.RESEARCH_SCHEMA, "purpose": f"W-1 fold {k}", "split_rule": E.RULE_MULTI_HOLDOUT,
               "split": {"held_out_sims": held, "fold": k, "val_seed": r["val_seed"], "val_frac": r["val_frac"],
                         "n_train": r["n_train"], "n_val": r["n_val"]},

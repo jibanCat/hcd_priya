@@ -373,3 +373,14 @@ def test_the_research_predictor_refuses_a_production_bundle_and_needs_a_purpose(
         hp.ResearchPredictor(H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256))
     with pytest.raises(H.SafeFormatError, match="never a production model"):
         hp.load_bundle(research.bundle_dir, research.manifest_sha256)
+
+
+def test_the_bundle_refuses_a_fold_subset_map(info, research):
+    """D5 review R1 M1: Bundle recomputes the map rule too (n_blocks against the block's cache groups)."""
+    rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
+    rr = H.load_research(research.bundle_dir, expected_manifest_sha256=research.manifest_sha256, purpose="m1")
+    doc = dict(rb.wc_map.doc, delta_c=dict(rb.wc_map.doc["delta_c"], n_blocks=rb.lineage["cache"]["n_groups"] - 1))
+    small = rb.wc_map._replace(doc=doc)
+    with pytest.raises(H.SafeFormatError, match="WCMAP_NOT_FULL_CACHE"):
+        hp.Bundle(rb._replace(wc_map=small))
+    assert rr.wc_map.doc["delta_c"]["n_blocks"] < rr.lineage["cache"]["n_groups"]

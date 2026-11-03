@@ -260,7 +260,7 @@ def test_a_w_c_map_fitted_on_a_subset_is_refused(X, inputs, capsys):            
     W.write_wc_map(sub, doc, rec)
     text = _refused(X, inputs, inputs["tmp"] / "o", capsys, **{"--wc-map": str(sub),
                                                                "--wc-map-sha256": L.sha256_file(sub)})
-    assert "wc_map MISMATCH" in text
+    assert "WCMAP_NOT_FULL_CACHE" in text                    # the block rule refuses it before the content check
 
 
 def test_the_files_read_back_are_checked_and_the_manifest_is_written_last(X, inputs, tmp_path, monkeypatch,

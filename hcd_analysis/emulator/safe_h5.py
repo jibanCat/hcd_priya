@@ -21,7 +21,8 @@ h5/2, a well-formed lineage block whose eligibility recomputes to true under the
 the block names (its record eligible and fitted to the block's cache), every member trained on the block's cache
 (``cache_sha256`` and ``cache_lineage_sha256``) at the block's commit from a clean tree, and every member a production
 member (``eligibility.production_recipe_reasons``: its recipe declares the full training set, no reserved held-out or
-fold key, no research marking). Every reason carries a stable code (``eligibility.reason_code``: ``LIN_*`` for the
+fold key, no research marking), and the w_c map fitted on the whole training cache (its ``delta_c.n_blocks`` equals the
+block's ``cache.n_groups``: ``wc_map_production_reasons``). Every reason carries a stable code (``eligibility.reason_code``: ``LIN_*`` for the
 block, ``TIE_*`` for the members' ties, the production rule's codes). A bundle whose provenance carries a
 research marking (``provenance.research``: cross-validation folds, full-simulation research models) is refused by every
 release loader; it loads only through ``load_research`` (anchored, with a purpose), which returns a ``ResearchBundle``,
@@ -389,6 +390,8 @@ def make_lineage_block(*, cache_record, cache_identity, wc_map, member_metas, ex
     why = lineage_block_reasons(block, allowed) + member_reasons(block, member_metas)
     if research is not None:
         why.append(E.research_reason(research["purpose"]))
+    else:
+        why += wc_map_production_reasons(block, wc_map)
     block["release_eligible"] = not why
     block["ineligible_reasons"] = why
     return check_lineage_block(block)
@@ -476,6 +479,21 @@ def member_production_reasons(metas):
     """The coded production-rule reasons of every member (``eligibility.production_recipe_reasons``: a recipe that
     declares the full training set, no reserved held-out or fold key, no research marking)."""
     return [r for i, m in enumerate(metas) for r in E.production_recipe_reasons(m, i)]
+
+
+def wc_map_production_reasons(block, wcm):
+    """The coded reason (``WCMAP_NOT_FULL_CACHE``, a production-rule code) why the bundle's w_c map ``wcm`` (a parsed
+    ``wc_map.WcMap``) is not a map fitted on the whole training cache the block names: its ``delta_c.n_blocks`` (the
+    snapshot groups the delta_c fit used) differs from the block's ``cache.n_groups``. A cross-validation fold or any
+    other subset refit counts fewer groups. Both numbers are pinned by the manifest digest. Fail-closed edge: a full
+    cache holding a group without sightlines would be refused too, because the delta_c fit skips such a group."""
+    n_blocks = ((getattr(wcm, "doc", None) or {}).get("delta_c") or {}).get("n_blocks")
+    n_groups = (block.get("cache") or {}).get("n_groups")
+    if not (isinstance(n_blocks, int) and n_blocks == n_groups):
+        return [E.reason("WCMAP_NOT_FULL_CACHE", f"the w_c map was fitted on {n_blocks} snapshot groups, the training "
+                                                 f"cache has {n_groups}: a fold or subset map is never a production "
+                                                 "map")]
+    return []
 
 
 def member_reasons(block, metas):
@@ -790,10 +808,13 @@ def _load_v2(bundle_dir, *, expected, mode, purpose=None):
     members = [load_member(p, expected_sha256=s, expected_json_sha256=j, fmt=FORMAT) for p, s, j in entries]
     metas = [m for _, m, _ in members]
     if mode == "release":
-        why = member_reasons(block, metas)
+        why, wwhy = member_reasons(block, metas), wc_map_production_reasons(block, wcm)
         if why:
             raise SafeFormatError(f"{bundle_dir}: the members are not the ones the lineage block describes: "
-                                  + "; ".join(why))
+                                  + "; ".join(why + wwhy))
+        if wwhy:
+            raise SafeFormatError(f"{bundle_dir}: the w_c map was not fitted on the whole training cache: "
+                                  + "; ".join(wwhy))
     elif mode == "research":
         why = member_tie_reasons(block, metas)
         if why:
