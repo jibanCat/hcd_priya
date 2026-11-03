@@ -257,11 +257,13 @@ def read_member_arrays(raw, where, want_model, norm_check, *, fmt=FORMAT):
 
 
 def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None, fmt=FORMAT):
-    """Load one member exported by ``export_member``. Returns ``(model, meta, norm)``; refuses everything
-    ``safe_io.load_member`` refuses plus the HDF5-specific structures listed in the module docstring. The .h5 is
-    checked against its own sidecar; without ``expected_sha256`` / ``expected_json_sha256`` (the manifest's digests,
-    which ``load_bundle`` passes) nothing outside the member anchors the pair, so a release loads through
-    ``load_ensemble`` (or ``load_bundle``) with the published manifest digest."""
+    """Load one member exported by ``export_member``: a low-level member read, NOT a bundle load and never a production
+    model (no lineage, no production or research rule; it returns no bundle object). Returns ``(model, meta, norm)``;
+    refuses everything ``safe_io.load_member`` refuses plus the HDF5-specific structures listed in the module
+    docstring. The .h5 is checked against its own sidecar; without ``expected_sha256`` / ``expected_json_sha256`` (the
+    manifest's digests, which ``load_bundle`` passes) nothing outside the member anchors the pair, so a release loads
+    through ``load_ensemble`` (or ``load_bundle`` / ``load_release``) with the published manifest digest, and a research
+    bundle through ``load_research``."""
     import jax
     import jax.numpy as jnp
 
