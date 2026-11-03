@@ -449,7 +449,7 @@ def _validate_arch(arch):
 def _validate_meta(meta, where):
     """The checkpoint-schema-2.0 meta checks of ``train.load_checkpoint``, plus the architecture allowlist and seed."""
     from .schema import CHECKPOINT_SCHEMA_VERSION
-    from .train import _SCHEMA2_REQUIRED, _velocity_key_paths
+    from .schema import SCHEMA2_REQUIRED as _SCHEMA2_REQUIRED, velocity_key_paths as _velocity_key_paths
     if not isinstance(meta, dict) or meta.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
         raise SafeFormatError(f"{where}: checkpoint schema "
                               f"{meta.get('schema_version') if isinstance(meta, dict) else None!r}, expected "

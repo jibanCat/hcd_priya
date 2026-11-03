@@ -666,22 +666,9 @@ def _sha256_or_none(path):
     return h.hexdigest()
 
 
-def _velocity_key_paths(obj, prefix=""):
-    """Paths of every dict key named ``kfkms`` (a per-row velocity grid) at any depth of ``obj``."""
-    hits = []
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            p = f"{prefix}.{k}" if prefix else str(k)
-            if str(k) == "kfkms":
-                hits.append(p)
-            hits += _velocity_key_paths(v, p)
-    elif isinstance(obj, (list, tuple)):
-        for i, v in enumerate(obj):
-            hits += _velocity_key_paths(v, f"{prefix}[{i}]")
-    return hits
-
-
-_SCHEMA2_REQUIRED = ("k_com_hmpc", "L_box_hmpc", "k_convention", "cache_sha256", "param_limits")
+# the schema-2.0 meta rules live in schema.py (so the release readers never import the trainer); the names stay here
+from hcd_analysis.emulator.schema import SCHEMA2_REQUIRED as _SCHEMA2_REQUIRED  # noqa: E402
+from hcd_analysis.emulator.schema import velocity_key_paths as _velocity_key_paths  # noqa: E402
 
 
 def release_cache_identity(cache):

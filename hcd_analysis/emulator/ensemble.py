@@ -16,8 +16,6 @@ from __future__ import annotations
 import equinox as eqx
 import numpy as np
 
-from hcd_analysis.emulator import train as T
-
 _NORM_KEYS = ("mu_marg", "sig_marg", "sig_cosmo")
 
 
@@ -42,6 +40,7 @@ def load_ensemble(paths):
     members are trained on the same data with the same recipe (only the init seed differs),
     so a differing norm signals a wiring error that would silently corrupt the mean.
     """
+    from hcd_analysis.emulator import train as T      # the pickle checkpoints: imported here, never by bundle loads
     paths = list(paths)
     assert len(paths) >= 1, "load_ensemble needs >=1 checkpoint path"
     members, metas, norms = [], [], []
