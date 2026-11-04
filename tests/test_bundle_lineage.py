@@ -337,6 +337,42 @@ def test_a_pre_d5_synthetic_bundle_is_historical_it_loads_only_through_the_dev_p
     assert not metas.anchored and not metas.lineage_verified
 
 
+# ------------------------------------------- the library version that carries the D5 rules (PU-0522; R3 delta d1)
+D5_VERSION = "0.2.0"
+
+
+def _pyproject_version_source(text):
+    """``("static", version)`` or ``("dynamic", attr)`` of the ``[project]`` version in a pyproject.toml text."""
+    import re
+    project = re.search(r"^\[project\]\s*$(.*?)(?=^\[|\Z)", text, re.M | re.S).group(1)
+    static = re.search(r'^version\s*=\s*"([^"]+)"\s*$', project, re.M)
+    if static:
+        return "static", static.group(1)
+    assert re.search(r'^dynamic\s*=\s*\[[^\]]*"version"', project, re.M), "no [project] version, static or dynamic"
+    attr = re.search(r'^version\s*=\s*\{\s*attr\s*=\s*"([^"]+)"\s*\}', text, re.M)
+    return "dynamic", attr.group(1) if attr else None
+
+
+def test_the_library_version_is_the_one_the_docs_name_for_the_d5_rules():
+    import re
+    import hcd_analysis
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    assert hcd_analysis.__version__ == D5_VERSION
+    kind, value = _pyproject_version_source(open(os.path.join(repo, "pyproject.toml")).read())
+    assert (kind, value) in (("static", D5_VERSION), ("dynamic", "hcd_analysis.__version__")), (kind, value)
+    doc = re.sub(r"\s+", " ", open(os.path.join(repo, "docs", "release_format_h5.md")).read())
+    rules = re.findall(r"The production and research rules apply from library version (\d+\.\d+\.\d+) ", doc)
+    a3a = re.findall(r"Synthetic `h5/2` bundles written by a library before version (\d+\.\d+\.\d+) ", doc)
+    written_by = re.findall(r"bundles written by (\d+\.\d+\.\d+) declare", doc, re.I)
+    earlier = re.findall(r"Every earlier version, (\d+\.\d+\.\d+) included", doc)
+    assert rules == [hcd_analysis.__version__] and a3a == [hcd_analysis.__version__], (rules, a3a)
+    assert len(written_by) == 2 and set(written_by) == {hcd_analysis.__version__}, written_by
+    assert earlier and all(e != hcd_analysis.__version__ for e in earlier)
+    dynamic = ('[project]\nname = "x"\ndynamic = ["version"]\n\n[tool.setuptools.dynamic]\n'
+               'version = {attr = "hcd_analysis.__version__"}\n')                 # Session B's packaging form
+    assert _pyproject_version_source(dynamic) == ("dynamic", "hcd_analysis.__version__")
+
+
 # ------------------------------------------------- D5 review R1 M1: a fold-subset w_c map is never a production map
 def test_synthetic_maps_count_the_caches_groups(info):
     rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
