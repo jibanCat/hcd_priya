@@ -146,8 +146,7 @@ from a cross-validation may be recorded in `recipe.cv_selection`, the closed sch
 (`{schema, source_cv_set_id, source_folds_digest, [source_record_sha256], derived: {knob: {value, rule}}}`, each value a
 JSON scalar equal to the recipe knob it names); the scan exempts nothing. The bundle's w_c map must count every
 snapshot group of the training cache (`WCMAP_NOT_FULL_CACHE` otherwise), so a fold map never passes as production.
-Before a member's metas are read, these rules check what the bundle DECLARES; the content rules below verify it
-against the cache.
+At load, these rules check what the bundle DECLARES; the content rules below verify it against the cache.
 
 **The content rules** (they need the training cache, so they run at export and acceptance, not at load):
 `eligibility.production_content_check` ties the cache first, then recomputes the split from that cache's own rows with
@@ -157,10 +156,11 @@ training rows (`norm_fingerprint/1`, every tensor compared bitwise first) and re
 (`wcmap_refit/1`: the whole payload and the record's inputs, settings, finder ids, product, kind and validation entry;
 never the writing run's code, time or settings digest). The record's input entry includes the cache's FILE NAME, so
 the cache given to the export or the acceptance (`--cache`) must carry the name the map's record names: a renamed
-copy of the right cache gives MISMATCH, and there is no override (rename the file back, or refit the map). Each component is PASS, MISMATCH or UNAVAILABLE: a difference within `DRIFT_BOUND`
-= 1e-12 relative (per-tensor scale floor) is UNAVAILABLE only when a training environment is recorded and differs from
-the current one; with none recorded the strict rule makes it MISMATCH. There is no override. `scripts/export_safe_bundle.py`
-requires PASS everywhere before writing, checks again on the files read back, writes the manifest last and records the
+copy of the right cache gives MISMATCH, and there is no override (rename the file back, or refit the map). Each
+component is PASS, MISMATCH or UNAVAILABLE: a difference within `DRIFT_BOUND` = 1e-12 relative (per-tensor scale floor)
+is UNAVAILABLE only when a training environment is recorded and differs from the current one; with none recorded the
+strict rule makes it MISMATCH. There is no override. `scripts/export_safe_bundle.py` requires PASS everywhere before
+writing, checks again on the files read back, writes the manifest last and records the
 outcomes in `provenance.eligibility_checks` (the loaders do not require that field; it is information).
 `scripts/accept_retrained_ensemble.py` (report format `hcd_priya.ensemble_acceptance/2`) adds the checks
 `training_set_declared_complete`, `split_recomputed_equal`, `normaliser_fingerprint_equal`, `wc_map_refit_equal` and
@@ -192,9 +192,10 @@ map is refitted on the training simulations only (`wc_map.refit_subset`, rule `w
 byte-identical to `wc_map.refit` for the full set). Research
 bundles need a release-grade cache and finder ids; research on other caches stays on the training checkpoints.
 
-**Historical synthetic bundles.** Synthetic `h5/2` bundles written before this rule (recipe `{"synthetic": true}`,
-no `all_sims`) are historical artefacts: the release loaders refuse them (`ALL_SIMS_NOT_TRUE`) and the development path
-loads them. Synthetic bundles written now declare `all_sims: true`.
+**Historical synthetic bundles.** Synthetic `h5/2` bundles written by a library before version 0.2.0 (recipe
+`{"synthetic": true}`, no `all_sims`, a made-up w_c map that does not count the synthetic cache's groups) are
+historical artefacts: the release loaders refuse them (`ALL_SIMS_NOT_TRUE`, and `WCMAP_NOT_FULL_CACHE` for their map)
+and the development path loads them. Synthetic bundles written by 0.2.0 declare `all_sims: true` and count the groups.
 
 **What protects what.**
 
@@ -216,13 +217,14 @@ without `recipe.research` looks like a production member to every rule.
 
 ## Compatibility with earlier versions of the library
 
-The production and research rules apply from the D5 commits of branch `a6-d5-fold-guards` (first commit `0b6fe33`,
-package version 0.1.0; not yet released). The library at earlier commits (for example `372204f` and the frozen
-benchmark's `3496030`) predates them. Differences a user of an earlier version meets:
+The production and research rules apply from library version 0.2.0 (`hcd_analysis.__version__`), the first version
+that carries them. Every earlier version, 0.1.0 included (for example the release line at `372204f` and the frozen
+benchmark's `3496030`), predates them. Differences a user of an earlier version meets:
 
-- synthetic `h5/2` bundles written before the rule (recipe without `all_sims`) are refused by the release loaders
-  (`ALL_SIMS_NOT_TRUE`) and load through the development path; synthetic bundles written now declare `all_sims: true`
-  and their made-up w_c map counts the synthetic cache's groups, so their digests differ from earlier ones;
+- synthetic `h5/2` bundles written by an earlier version (recipe without `all_sims`, a made-up w_c map that does not
+  count the cache's groups) are refused by the release loaders (`ALL_SIMS_NOT_TRUE`, and `WCMAP_NOT_FULL_CACHE` for
+  the map) and load through the development path; synthetic bundles written by 0.2.0 declare `all_sims: true` and
+  their made-up w_c map counts the synthetic cache's groups, so their digests differ from earlier ones;
 - a bundle whose w_c map does not count every group of its training cache is refused (`WCMAP_NOT_FULL_CACHE`);
 - `ReleaseBundle` has 11 fields (`kind` mandatory, `release_verified` defaulting to False); `MemberMetas(...)` needs
   `kind=`; a slice of the metas is a plain list; `ResearchBundle` is a separate type;

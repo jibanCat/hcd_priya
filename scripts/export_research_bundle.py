@@ -23,11 +23,11 @@ tensor refitted on the training rows, and the w_c map refitted on the TRAINING s
 simulations never enter it). UNAVAILABLE is allowed and recorded.
 
 The w_c map is refitted here (``wc_map.refit_subset``) on the cache minus the declared held-out simulations and written
-with its lineage record (which names ``--cache``'s file name). Write order: members and map, then the content checks again on the files read back, then the
-manifest (``provenance.research`` with the outcomes). After writing: the research loader and the research predictor
-load the bundle anchored on its digest, the members' leaves, normaliser and meta equal the checkpoints', the ensemble
-P_filt is bitwise the checkpoints', and every production loader refuses the bundle. Evidence goes to
-``<out>/evidence``. Exit status: 0 PASS, 1 FAIL, 2 refused (nothing written)."""
+with its lineage record (which names ``--cache``'s file name). Write order: members and map, then the content checks
+again on the files read back, then the manifest (``provenance.research`` with the outcomes). After writing: the research
+loader and the research predictor load the bundle anchored on its digest, the members' leaves, normaliser and meta equal
+the checkpoints', the ensemble P_filt is bitwise the checkpoints', and every production loader refuses the bundle.
+Evidence goes to ``<out>/evidence``. Exit status: 0 PASS, 1 FAIL, 2 refused (nothing written)."""
 import argparse
 import datetime
 import json
