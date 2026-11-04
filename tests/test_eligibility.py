@@ -746,3 +746,20 @@ def test_a_recognised_fold_member_with_another_simulation_list_is_refused():
             "RES_SIM_SET_UNDECLARED"}
         held_more = dict(fold, recipe=dict(fold["recipe"], excluded_runs=[SIMS[1]]))
         assert "RES_HELD" in _adm([held_more], _rs([SIMS[3]], rule=E.RULE_MULTI_HOLDOUT), sims)
+
+
+# the mutation run of simulation_sets/1 (evidence/D5_IMPL/addendum2): clauses the tests above did not reach
+def test_a_held_out_or_training_key_is_read_as_simulation_names_whatever_their_form():
+    assert _codes_kw(_meta(train_sims=["run_a", "run_b"]), n_sims=5) == {"SIM_SET:recipe.train_sims"}
+    m = _excl(holdout_sims=[SIMS[3]], withheld_sims=["run_b"])               # a name outside the form, at load
+    assert _adm([m], _rs([SIMS[3]]), None) == {"RES_HELD"}
+
+
+def test_a_training_key_that_names_no_simulation_is_not_production():
+    assert _codes_kw(_meta(train_sims=5), sims=SIMS) == {"SIM_SET:recipe.train_sims"}
+
+
+def test_an_unreadable_exclusion_beside_a_readable_one_fails_closed():
+    m = _excl(holdout_sims=[SIMS[3]], withheld=3)                            # its excluded set is otherwise the split
+    for sims in (SIMS, None):
+        assert _adm([m], _rs([SIMS[3]]), sims) == {"RES_EXCLUSION_UNPARSED"}
