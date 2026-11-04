@@ -187,10 +187,42 @@ then be non-empty whenever a member declares an exclusion, and must EQUAL every 
 union), because the w_c map is fitted on the cache minus that set; a member recording `holdout_sims: [a]` and
 `withheld_sims: [b]` needs both `a` and `b` declared. Under the recognised rules the excluded set must equal the split
 too. The block's writer judges the admission with the cache's names and records any refusal (a `RES_*` reason), which
-the research loader enforces. The w_c
-map is refitted on the training simulations only (`wc_map.refit_subset`, rule `wcmap_refit_subset/1`;
-byte-identical to `wc_map.refit` for the full set). Research
-bundles need a release-grade cache and finder ids; research on other caches stays on the training checkpoints.
+the research loader enforces, and `scripts/export_research_bundle.py` also judges the members as the research loader
+will, without the cache's names, and refuses before writing anything if that loader would refuse them. The w_c map is
+refitted on the training simulations only (`wc_map.refit_subset`, rule `wcmap_refit_subset/1`; byte-identical to
+`wc_map.refit` for the full set). Research bundles need a release-grade cache and finder ids; research on other caches
+stays on the training checkpoints.
+
+**The `simulation_sets/1` vocabulary.** Where a simulation set is found:
+
+- as a list or tuple element, a dict key, a whole string, or a token of a string split on spaces, commas, semicolons or
+  bars, at any depth;
+- a string is a simulation name when it is one of the cache's names (when the cache is at hand: the block's writer, the
+  exports, the acceptance), one of the declared held-out names (a research load), or in the simulation-name form
+  (`eligibility.SIM_NAME_FORM`, the cache's folder naming);
+- the value of a reserved held-out key (`eligibility.SET_FORMS`: holdoutsim(s), heldoutsim(s), heldout, holdout,
+  holdoutsimulations, heldoutsimulations, leftout(sims), withheld(sims), exclude(d)sims, testsims) or of a training-set
+  key (`eligibility.TRAIN_SET_FORMS`: trainsim(s), trainingsim(s), trainsimulations, trainingsimulations, trainedon,
+  trainedonsims) is read as simulation names whatever their form; a value of such a key that is not a name or a list of
+  names fails closed.
+
+What a set means is read from the nearest dict key above it, normalised as for the reserved names (lower case, a-z
+and 0-9 only):
+
+- **trained on** (its complement is held out): the key contains `train`, for example `train_sims`,
+  `training_simulations`, `trained_on`;
+- **held out**: the key is a reserved held-out form or contains `holdout`, `heldout`, `withheld`, `exclud`, `leftout`,
+  `omit` or `test`, for example `holdout_sims`, `excluded`, `left_out_runs`, `test_sims`;
+- **no stated meaning**: any other key, or one that matches both, for example `val_sims`, `eval_sim`, `cache_sims`,
+  `weights`. A research member with such a set is refused (`RES_SIM_SET_UNDECLARED`) unless the set lists every
+  simulation; a production member is refused (`SIM_SET:<path>`) for any set that is not every simulation, whatever its
+  meaning.
+
+A substring such as `test` also matches words like `latest`; that can only refuse a set, never admit one. Not
+recognised by the tokeniser: a name is read only as an exact whole token, so a name inside a path (`/data/<name>`),
+with a suffix, in another case, in quotes or brackets (a stringified list), joined by `/` or `+`, or several names in
+one list element is not read, at write or at load (a reserved held-out or training-set key still reads its value, and
+for a production member the content checks still see training on fewer simulations).
 
 **Historical synthetic bundles.** Synthetic `h5/2` bundles written by a library before version 0.2.0 (recipe
 `{"synthetic": true}`, no `all_sims`, a made-up w_c map that does not count the synthetic cache's groups) are
