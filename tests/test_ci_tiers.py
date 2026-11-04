@@ -21,7 +21,7 @@ def _doc():
 
 def _test_files():
     root = os.path.dirname(TESTS_DIR)
-    pats = ("test_*.py", "regression/test_*.py", "external/test_*.py")
+    pats = ("test_*.py", "regression/test_*.py", "integration/test_*.py", "external/test_*.py")
     found = (p for pat in pats for p in glob.glob(os.path.join(TESTS_DIR, pat)))
     return {os.path.relpath(p, root).replace(os.sep, "/") for p in found}
 
