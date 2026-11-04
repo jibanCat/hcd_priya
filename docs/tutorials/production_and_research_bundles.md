@@ -600,7 +600,9 @@ smuggled fold list: ['CV_SELECTION', 'RSV_KEY:recipe.cv_selection.holdout_sims']
 accepts `--split-rule unverifiable` with a `--description`. Then the split and the normaliser are NOT recomputed
 (recorded UNAVAILABLE), so the declared held-out simulations carry the whole weight: the w_c map is fitted on the
 cache minus them. The export therefore requires a declared held-out set whenever a member declares an exclusion, and
-it must equal any member's own `holdout_sims` / `holdout_sim` exactly:
+it must equal each member's excluded set, derived from every simulation list its metadata names, under any key (a
+member recording both `holdout_sims` and `withheld_sims` needs their union declared; a list whose key says neither
+held out nor trained on is refused):
 
 <!-- example: leak_unverifiable -->
 ```python
@@ -679,8 +681,9 @@ cache, new training, new acceptance, new export, and a new published digest.
 - The metadata rules guard against accidents, not forgery: a deliberately rewritten recipe with a recomputed digest
   passes them. The content checks catch a split, normaliser or w_c map that does not match the declared training set,
   but they need the training cache and they verify the normaliser's rows, not the network weights.
-- The reserved key list is a list. A new spelling of "held out" outside it passes the loader; the content checks still
-  see the training rows.
+- Simulation lists are found by value, under any key (`simulation_sets/1`), but only when they name simulations: an
+  index, a digest or a sentence is not recognisable. A new spelling of a fold or size marker outside the reserved list
+  passes the loader; for production the content checks still see the training rows.
 - Research bundles need a release-grade cache. Research on other caches stays on the training checkpoints.
 - A full-simulation research model trained without `recipe.research` looks like a production member to every rule.
 

@@ -393,7 +393,8 @@ class Bundle(_PredictorBase):
             raise _H.SafeFormatError("the bundle's metas are not the release-verified metas of this manifest "
                                      "(safe_h5.load_release)")
         block = rb.lineage if isinstance(rb.lineage, dict) else {}
-        why = (_H.lineage_block_reasons(block, _H._release_finder_ids()) + _H.member_reasons(block, list(rb.metas))
+        why = (_H.lineage_block_reasons(block, _H._release_finder_ids())
+               + _H.member_reasons(block, list(rb.metas), n_sims=_H.wc_map_n_sims(rb.wc_map))
                + _H.wc_map_production_reasons(block, rb.wc_map))
         if why or block.get("release_eligible") is not True or block.get("ineligible_reasons"):
             raise _H.SafeFormatError("the bundle is not a production release bundle (eligibility recomputed): "

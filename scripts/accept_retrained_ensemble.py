@@ -147,14 +147,15 @@ def at_restore(hist, recipe):
     return out
 
 
-def trained_on_every_simulation(meta):
+def trained_on_every_simulation(meta, sims=None):
     """True iff the member is a production member by the metadata rule (``eligibility.production_recipe_reasons``
-    empty: the recipe declares ``all_sims`` true, no reserved held-out or fold key anywhere in the meta, no research
-    marking). It takes the member's whole META (it used to take the recipe): anything without a ``recipe`` key is a
-    TypeError, so an old-style call cannot silently return False."""
+    empty: the recipe declares ``all_sims`` true, no reserved held-out or fold key anywhere in the meta, no simulation
+    subset named anywhere (``sims``: the cache's simulation names), no research marking). It takes the member's whole
+    META (it used to take the recipe): anything without a ``recipe`` key is a TypeError, so an old-style call cannot
+    silently return False."""
     if not isinstance(meta, dict) or "recipe" not in meta:
         raise TypeError("trained_on_every_simulation takes a member meta (with its 'recipe'), not a recipe")
-    return not E.production_recipe_reasons(meta)
+    return not E.production_recipe_reasons(meta, sims=sims)
 
 
 def declared_complete(meta):
@@ -213,7 +214,6 @@ def main(argv=None):
     checks["seeds_distinct"] = len({m.get("seed") for m in metas}) == len(metas)
     checks["one_recipe_and_architecture"] = all(m.get("recipe") == m0.get("recipe") and m.get("arch_cfg") ==
                                                 m0.get("arch_cfg") for m in metas)
-    checks["trained_on_every_simulation"] = all(trained_on_every_simulation(m) for m in metas)
     stems = {re.sub(r"_seed\d+\Z", "", os.path.basename(p)) for p in a.member}
     checks["distinct_basename_and_directory"] = not (stems & {re.sub(r"_seed\d+\Z", "", n) for n in hist_names}) and \
         not ({os.path.realpath(os.path.dirname(p)) for p in a.member} & hist_dirs)
@@ -225,6 +225,8 @@ def main(argv=None):
         m.get("recipe") == m0.get("recipe") for m in metas)
     rows_ok, rows = same_rows(a.old_source, a.old_source_sha256, a.cache)
     names = rows.pop("n_sim_name")
+    sims = sorted(set(np.asarray(names).astype(str).tolist()))         # simulation_sets/1 with the cache's names
+    checks["trained_on_every_simulation"] = all(trained_on_every_simulation(m, sims=sims) for m in metas)
     r0 = m0.get("recipe") or {}
     try:
         tr, va, _held = production_row_split(names, val_seed=int(r0["val_seed"]), val_frac=float(r0["val_frac"]))

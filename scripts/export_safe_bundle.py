@@ -205,10 +205,11 @@ def check_release_inputs(a):
     if wcm.cache_sha256 != ident["sha256"]:
         raise Refused(f"the w_c map was fitted to the cache {wcm.cache_sha256}, not {ident['sha256']}")
     m0 = metas[0]
+    sims = sorted(set(np.asarray(d["sim_name"]).astype(str).tolist()))     # simulation_sets/1 with the cache's names
     for i, m in enumerate(metas):
         if m.get("arch_cfg") != m0.get("arch_cfg") or m.get("recipe") != m0.get("recipe"):
             raise Refused(f"member {i} has another architecture or recipe than member 0")
-        why = E.production_recipe_reasons(m, i)
+        why = E.production_recipe_reasons(m, i, sims=sims)
         if why:
             raise Refused(f"member {i} is not a production member (it was not trained on every simulation, or it is "
                           "marked research): " + "; ".join(why))

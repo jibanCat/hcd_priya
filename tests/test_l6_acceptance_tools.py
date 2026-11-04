@@ -279,14 +279,16 @@ def test_the_comparison_must_be_like_for_like(cache, tmp_path):
         A.main(argv)
 
 
-@pytest.mark.parametrize("held", ["one_simulation", "fold_of_simulations", "list_claiming_all", "fold_claiming_all"])
+@pytest.mark.parametrize("held", ["one_simulation", "fold_of_simulations", "list_claiming_all", "fold_claiming_all",
+                                  "list_under_another_key"])
 def test_a_member_left_out_of_a_simulation_is_refused(cache, tmp_path, held):
     A = _script("accept_retrained_ensemble")
     loso = {"one_simulation": dict(RECIPE, all_sims=False, holdout_sim="sim1"),
             "fold_of_simulations": dict(RECIPE, all_sims=False, holdout_sim=None, holdout_sims=["sim0", "sim1"],
                                         fold=2),
             "list_claiming_all": dict(RECIPE, all_sims=True, holdout_sim=None, holdout_sims=["sim0", "sim1"]),
-            "fold_claiming_all": dict(RECIPE, all_sims=True, holdout_sim=None, fold=2)}[held]
+            "fold_claiming_all": dict(RECIPE, all_sims=True, holdout_sim=None, fold=2),
+            "list_under_another_key": dict(RECIPE, all_sims=True, holdout_sim=None, excluded=["sim1"])}[held]  # PU-0522
     members = [_member(tmp_path / "ens", cache, s, recipe=loso, hist=_hist(recipe=loso)) for s in (0, 1)]
     olds = []
     for i in range(3):

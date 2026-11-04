@@ -194,7 +194,7 @@ def check_inputs(a):
         E.check_research_marking(rs, check_recorded=False)   # the declaration; the checks are recorded later
     except E.EligibilityError as err:
         raise Refused(str(err)) from None
-    why = E.research_member_reasons(metas, rs)
+    why = E.research_member_reasons(metas, rs, sims=sorted(set(np.asarray(d["sim_name"]).astype(str).tolist())))
     if why:
         raise Refused("the declared split does not admit the members: " + "; ".join(why))
     checkpoints = [T.load_checkpoint(p) for p in prefixes]        # digests verified above

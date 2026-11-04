@@ -351,9 +351,11 @@ def make_lineage_block(*, cache_record, cache_identity, wc_map, member_metas, ex
     """The bundle's lineage block, from the verified training-cache record (``tau0_cache.read_cache``), the cache
     file's ``{sha256, size}``, the parsed w_c map (``wc_map.WcMap``), the members' metas and the export's code identity.
     ``release_eligible`` is computed here (``lineage_block_reasons`` plus ``member_reasons``: the members' ties and the
-    production rule), never passed in. ``research`` (the bundle's ``provenance.research``, ``eligibility.
-    check_research_marking``) adds the reason ``[RESEARCH_BUNDLE] research bundle: <purpose>``, so a research block is
-    never release-eligible."""
+    production rule), never passed in, with the cache record's simulation names (``simulation_sets/1`` judged
+    exactly). ``research`` (the bundle's ``provenance.research``, ``eligibility.check_research_marking``) adds the
+    reason ``[RESEARCH_BUNDLE] research bundle: <purpose>``, so a research block is never release-eligible, and the
+    member admission (``eligibility.research_member_reasons`` with the cache's names): any ``RES_*`` reason recorded
+    here is enforced by the research loader."""
     from .. import lineage as L
     if research is not None:
         try:
@@ -388,9 +390,11 @@ def make_lineage_block(*, cache_record, cache_identity, wc_map, member_metas, ex
         "wc_map": {"path": WC_MAP_FILE, "sha256": wc_map.sha256, "lineage_record_sha256": L.record_sha256(wc_map.record),
                    "release_eligible": wc_map.record["release_eligible"] is True, "cache_sha256": wc_map.cache_sha256},
         "n_members": len(member_metas)})
-    why = lineage_block_reasons(block, allowed) + member_reasons(block, member_metas)
+    sims = cache_simulations(rec)
+    why = lineage_block_reasons(block, allowed) + member_reasons(block, member_metas, sims=sims)
     if research is not None:
         why.append(E.research_reason(research["purpose"]))
+        why += E.research_member_reasons(member_metas, research, sims=sims)
     else:
         why += wc_map_production_reasons(block, wc_map)
     block["release_eligible"] = not why
@@ -476,10 +480,23 @@ def member_tie_reasons(block, metas):
     return why
 
 
-def member_production_reasons(metas):
+def member_production_reasons(metas, *, sims=None, n_sims=None):
     """The coded production-rule reasons of every member (``eligibility.production_recipe_reasons``: a recipe that
-    declares the full training set, no reserved held-out or fold key, no research marking)."""
-    return [r for i, m in enumerate(metas) for r in E.production_recipe_reasons(m, i)]
+    declares the full training set, no reserved held-out or fold key, no simulation subset named anywhere, no research
+    marking). ``sims``: the cache's simulation names (the block's writer); ``n_sims``: its count (a load)."""
+    return [r for i, m in enumerate(metas) for r in E.production_recipe_reasons(m, i, sims=sims, n_sims=n_sims)]
+
+
+def wc_map_n_sims(wcm):
+    """The number of simulations the w_c map's delta_c fit used (``delta_c.n_sims``, pinned by the manifest), or
+    None. For a map that passes ``wc_map_production_reasons`` it is the training cache's simulation count."""
+    v = ((getattr(wcm, "doc", None) or {}).get("delta_c") or {}).get("n_sims")
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def cache_simulations(cache_record):
+    """The simulation names of a training-cache lineage record's snapshot groups."""
+    return sorted({str(g.get("sim")) for g in (cache_record.get("product") or {}).get("groups") or []})
 
 
 def wc_map_production_reasons(block, wcm):
@@ -497,11 +514,12 @@ def wc_map_production_reasons(block, wcm):
     return []
 
 
-def member_reasons(block, metas):
+def member_reasons(block, metas, *, sims=None, n_sims=None):
     """The reasons why the members are not a production ensemble the block describes: ``member_tie_reasons`` plus
-    ``member_production_reasons``. ``make_lineage_block``, every release load and ``predictor.Bundle`` use it, so
-    ``release_eligible`` reflects both."""
-    return member_tie_reasons(block, metas) + member_production_reasons(metas)
+    ``member_production_reasons`` (``sims`` / ``n_sims`` as there). ``make_lineage_block`` (with the cache's names),
+    every release load and ``predictor.Bundle`` (with the map's simulation count) use it, so ``release_eligible``
+    reflects both."""
+    return member_tie_reasons(block, metas) + member_production_reasons(metas, sims=sims, n_sims=n_sims)
 
 
 def check_lineage_block(block):
@@ -811,7 +829,7 @@ def _load_v2(bundle_dir, *, expected, mode, purpose=None):
     members = [load_member(p, expected_sha256=s, expected_json_sha256=j, fmt=FORMAT) for p, s, j in entries]
     metas = [m for _, m, _ in members]
     if mode == "release":
-        why, wwhy = member_reasons(block, metas), wc_map_production_reasons(block, wcm)
+        why, wwhy = member_reasons(block, metas, n_sims=wc_map_n_sims(wcm)), wc_map_production_reasons(block, wcm)
         if why:
             raise SafeFormatError(f"{bundle_dir}: the members are not the ones the lineage block describes: "
                                   + "; ".join(why + wwhy))
@@ -827,6 +845,10 @@ def _load_v2(bundle_dir, *, expected, mode, purpose=None):
         if why:
             raise SafeFormatError(f"{bundle_dir}: the members are not admitted to this research bundle: "
                                   + "; ".join(why))
+        why = [r for r in block["ineligible_reasons"] if E.code_class(r) == "admission"]
+        if why:
+            raise SafeFormatError(f"{bundle_dir}: the members are not admitted to this research bundle (refused when "
+                                  "it was written, with the cache's simulation names): " + "; ".join(why))
     _same_network(bundle_dir, members)
     if mode == "dev":
         warnings.warn(f"{bundle_dir}: loaded WITHOUT a manifest digest (unanchored development bundle); its lineage "

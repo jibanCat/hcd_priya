@@ -142,7 +142,8 @@ emu = hp.load_bundle("path/to/bundle", "<published digest>")
 `load_bundle` serves **production** models only: every member must declare training on every simulation of its
 training cache (verified against the cache at export and acceptance), and the bundle's w_c map must be fitted on the
 whole cache. A bundle that declares fold or research members, or carries a fold map, is refused with a coded reason
-(for example `ALL_SIMS_NOT_TRUE`, `RSV_KEY:recipe.holdout_sims` or `WCMAP_NOT_FULL_CACHE`). Cross-validation folds
+(for example `ALL_SIMS_NOT_TRUE`, `RSV_KEY:recipe.holdout_sims`, `SIM_SET:recipe.train_sims` for a simulation list
+under any key, or `WCMAP_NOT_FULL_CACHE`). Cross-validation folds
 and other **research** models travel in research bundles (`scripts/export_research_bundle.py`, which needs a
 repository checkout and refits the w_c map on the training simulations only) and load through their own explicit
 path, never as production:

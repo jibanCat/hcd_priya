@@ -344,6 +344,42 @@ def test_an_unverifiable_split_must_declare_the_members_own_held_out_set(tmp_pat
         _load(bad)
 
 
+# ------------------------------------ PI ruling 2026-11-04 (PU-0522): the excluded set from every simulation list
+def test_two_exclusion_keys_need_their_union_declared_at_load(tmp_path):            # D5 R2 delta n1 (D2)
+    two = _recipe_fn(lambda r: r.update(withheld_sims=["synthsim1"]))
+    bad = RT.write_synthetic_research_bundle(str(tmp_path / "u"), purpose=PURPOSE, research_fn=_unverifiable(
+        ("synthsim2",)), member_fn=two)
+    with pytest.raises(H.SafeFormatError, match="RES_HELD.*holds out \\['synthsim1', 'synthsim2'\\]"):
+        _load(bad)
+    good = RT.write_synthetic_research_bundle(str(tmp_path / "g"), purpose=PURPOSE, held_out_sims=(
+        "synthsim1", "synthsim2"), research_fn=_unverifiable(("synthsim1", "synthsim2")), member_fn=_recipe_fn(
+        lambda r: r.update(holdout_sims=["synthsim2"], withheld_sims=["synthsim1"])))
+    assert _load(good).split["held_out_sims"] == ["synthsim1", "synthsim2"]
+
+
+@pytest.mark.parametrize("edit, code", [
+    (lambda r: r.update(notes={"x": ["synthsim2"]}), "RES_SIM_SET_UNDECLARED"),      # the declared name, another key
+    (lambda r: r.update(withheld=3), "RES_EXCLUSION_UNPARSED"),
+])
+def test_a_simulation_list_the_loader_cannot_interpret_is_refused(tmp_path, edit, code):
+    bad = RT.write_synthetic_research_bundle(str(tmp_path / "u"), purpose=PURPOSE, member_fn=_recipe_fn(edit))
+    with pytest.raises(H.SafeFormatError, match=f"not admitted to this research bundle.*{code}"):
+        _load(bad)
+
+
+def test_the_write_time_admission_with_the_caches_names_is_enforced_at_load(tmp_path, res):
+    """A name the load cannot recognise (not the declared set, not in the simulation-name form) is judged when the
+    block is written, with the cache's names; the block records the refusal and the research loader enforces it."""
+    assert not [r for r in res.lineage["ineligible_reasons"] if E.code_class(r) == "admission"]
+    bad = RT.write_synthetic_research_bundle(str(tmp_path / "u"), purpose=PURPOSE, member_fn=_recipe_fn(
+        lambda r: r.update(excluded=["synthsim1"])))
+    assert "RES_HELD" in {E.reason_code(r) for r in bad.lineage["ineligible_reasons"]}
+    with pytest.raises(H.SafeFormatError, match="not admitted to this research bundle.*when it was written.*RES_HELD"):
+        _load(bad)
+    with pytest.raises(H.SafeFormatError, match="not admitted"):
+        hp.load_research_bundle(bad.bundle_dir, bad.manifest_sha256, purpose="a test")
+
+
 # --------------------------------------------------------- D5 review R2 m1, m4, m8: the recorded checks and the codes
 def _marking(edit):
     def fn(rs):

@@ -229,6 +229,49 @@ def test_an_unverifiable_export_must_declare_the_members_own_held_out_set(X, wor
 
 
 
+# ------------------------------------ PI ruling 2026-11-04 (PU-0522): the excluded set from every simulation list
+def _members_without(world, held, name, **extra):
+    tr, va, _ = multi_holdout_row_split(world["d"]["sim_name"], list(held))
+    recipe = dict(KNOBS, all_sims=False, holdout_sim=None, n_train=int(tr.size), n_val=int(va.size), **extra)
+    return _write_members(world["tmp"] / name, world["cache"], recipe, tr)
+
+
+def _unverifiable_argv(world, out, prefixes, sums, held):
+    return _argv(world, out, prefixes=prefixes, sums=sums, rule=E.RULE_UNVERIFIABLE, held=held, fold=None,
+                 folds=False, extra=["--description", "a hand-written loop"])
+
+
+@pytest.mark.parametrize("held, status", [(("sim3",), 2), (("sim1", "sim3"), 0)])
+def test_two_exclusion_keys_need_their_union_declared_at_export(X, world, capsys, held, status):   # R2 delta n1, D2
+    prefixes, sums = _members_without(world, ("sim1", "sim3"), "two", holdout_sims=["sim3"], withheld_sims=["sim1"])
+    out = world["tmp"] / "out"
+    assert X.main(_unverifiable_argv(world, out, prefixes, sums, held)) == status
+    t = capsys.readouterr().out
+    if status:
+        assert "RES_HELD" in t and "holds out ['sim1', 'sim3']" in t and not out.exists()
+    else:
+        s = json.load(open(out / "evidence" / "research_export_summary.json"))
+        assert s["verdict"] == "PASS" and s["research"]["wc_map"]["fitted_on_sims_sha256"] == E.sims_sha256(
+            ["sim0", "sim2", "sim4"])
+
+
+@pytest.mark.parametrize("extra, refusal", [
+    ({"excluded": ["sim3"]}, None),                                  # an exclusion under an ordinary word
+    ({"train_sims": ["sim0", "sim1", "sim2", "sim4"]}, None),        # a training list: its complement is held out
+    ({"holdout_sims": ["sim3"], "notes": {"runs": ["sim3"]}}, "RES_SIM_SET_UNDECLARED"),   # no stated meaning
+])
+def test_an_exclusion_in_another_representation_at_export(X, world, capsys, extra, refusal):
+    prefixes, sums = _members_without(world, ("sim3",), "rep", **extra)
+    out = world["tmp"] / "out3"
+    assert X.main(_unverifiable_argv(world, out, prefixes, sums, ("sim3",))) == (2 if refusal else 0)
+    t = capsys.readouterr().out
+    assert (refusal in t and not out.exists()) if refusal else json.load(open(
+        out / "evidence" / "research_export_summary.json"))["verdict"] == "PASS"
+    out1 = world["tmp"] / "out1"
+    assert X.main(_unverifiable_argv(world, out1, prefixes, sums, ("sim1",))) == 2 and not out1.exists()
+    assert "RES_HELD" in capsys.readouterr().out
+
+
 def test_the_recorded_checks_are_the_read_back_ones(X, world, monkeypatch):
     """D5 review R1 m8: provenance.research.content_checks records the checks run on the files read back."""
     real, calls = X.E.research_content_check, []

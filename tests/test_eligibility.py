@@ -603,3 +603,146 @@ def test_the_research_marking_is_matched_by_its_normalised_name(key):
 
 def test_the_normalisation_removes_every_non_alphanumeric_character():
     assert E.normalise_key(" Held.Out Sims-2 ") == "heldoutsims2" and E.normalise_key("fold\t") == "fold"
+
+
+# ------------------------- PI ruling 2026-11-04 (PU-0522): simulation_sets/1, simulations named in any representation
+# made-up names in the cache's simulation-name form (the values mean nothing)
+SIMS = [f"ns0.9{i}Ap2e-09herei3.5heref3alphaq2hub0.7omegamh20.14hireionz7bhfeedback0.05" for i in range(5)]
+
+
+def test_the_simulation_name_form_is_the_caches_folder_naming():
+    from hcd_analysis import io
+    assert E.SIM_NAME_FORM.pattern == io._PARAM_RE.pattern + r"\Z" and E.RULE_SIM_SETS == "simulation_sets/1"
+    assert all(E.SIM_NAME_FORM.match(s) and io.parse_sim_params(s) for s in SIMS)
+    assert not E.SIM_NAME_FORM.match(SIMS[0] + "x") and not E.SIM_NAME_FORM.match("sim3")
+
+
+@pytest.mark.parametrize("edit, paths", [
+    (lambda m: m["recipe"].update(excluded=[SIMS[3]]), {"recipe.excluded"}),
+    (lambda m: m["recipe"].update(exclude=[SIMS[3]]), {"recipe.exclude"}),
+    (lambda m: m["recipe"].update(train_sims=SIMS[:3]), {"recipe.train_sims"}),
+    (lambda m: m["recipe"].update(split={"train": SIMS[:4], "test": [SIMS[4]]}), {"recipe.split.train",
+                                                                                    "recipe.split.test"}),
+    (lambda m: m["recipe"].update(data={"subsets": [[SIMS[1], SIMS[2]]]}), {"recipe.data.subsets.0"}),   # nested
+    (lambda m: m["recipe"].update(zq7=[SIMS[0], SIMS[1]]), {"recipe.zq7"}),                              # a random key
+    (lambda m: m.update(notes={"weights": {SIMS[2]: 0.5}}), {"notes.weights"}),          # dict keys, outside the recipe
+    (lambda m: m["recipe"].update(tag=f"{SIMS[1]}, {SIMS[2]}"), {"recipe.tag"}),          # a separated string
+    (lambda m: m["recipe"].update(only=SIMS[4]), {"recipe.only"}),                        # one name
+])
+def test_a_simulation_subset_in_any_representation_is_not_production(edit, paths):
+    m = _meta()
+    edit(m)
+    for kw in ({}, {"n_sims": 5}, {"sims": SIMS}):
+        codes = {E.reason_code(r) for r in E.production_recipe_reasons(m, **kw)}
+        assert {f"SIM_SET:{p}" for p in paths} <= codes, kw
+        assert all(E.code_class(r) == "production" for r in E.production_recipe_reasons(m, **kw))
+
+
+def test_with_the_caches_names_any_naming_is_recognised():
+    m = _meta(excluded=["sim3"], note={"sim1": True})
+    assert E.production_recipe_reasons(m) == []           # at load, "sim3" is not in the simulation-name form
+    assert _codes_kw(m, sims=[f"sim{i}" for i in range(5)]) == {"SIM_SET:recipe.excluded", "SIM_SET:recipe.note"}
+
+
+def _codes_kw(meta, **kw):
+    return {E.reason_code(r) for r in E.production_recipe_reasons(meta, **kw)}
+
+
+def test_a_list_of_every_simulation_is_not_an_exclusion():
+    m = _meta(sims_used=list(reversed(SIMS)))
+    assert E.production_recipe_reasons(m, sims=SIMS) == [] and E.production_recipe_reasons(m, n_sims=5) == []
+    assert _codes_kw(m) == {"SIM_SET:recipe.sims_used"}            # without the cache's count it cannot be told full
+    assert _codes_kw(m, n_sims=6) == {"SIM_SET:recipe.sims_used"}
+    assert _codes_kw(_meta(sims_used=SIMS[:4] + [SIMS[0]]), sims=SIMS) == {"SIM_SET:recipe.sims_used"}
+
+
+def test_a_reserved_key_is_reported_once():
+    m = _meta(all_sims=False, holdout_sims=[SIMS[3]], withheld_sims=[SIMS[1]])
+    assert _codes_kw(m, sims=SIMS) == {"ALL_SIMS_NOT_TRUE", "RSV_KEY:recipe.holdout_sims",
+                                       "RSV_KEY:recipe.withheld_sims"}
+
+
+@pytest.mark.parametrize("over", [{"threshold": 0.5}, {"scaffold": "x"}, {"heldout_sims_count_note": "none"},
+                                  {"holdout_sims": None}, {"optimizer": "adam"}, {"layers": [256, 256]},
+                                  {"note": "trained on every simulation"}, {"schedule": ["warmup", "cosine"]}])
+def test_no_false_refusal_of_ordinary_values_with_the_caches_names(over):              # T14b, by value
+    for kw in ({}, {"n_sims": 5}, {"sims": SIMS}):
+        assert E.production_recipe_reasons(_meta(**over), **kw) == []
+
+
+# research admission: every simulation set a member's metadata names, whatever its key, decides its excluded set
+def _rs(held, rule=E.RULE_UNVERIFIABLE, purpose="a synthetic research test"):
+    held = sorted(held)
+    train = sorted(set(SIMS) - set(held))
+    split = {"held_out_sims": held, "description": "a test"} if rule == E.RULE_UNVERIFIABLE else {
+        "held_out_sims": held, "fold": 0 if rule == E.RULE_MULTI_HOLDOUT else None, "val_seed": 1, "val_frac": 0.1,
+        "n_train": 90, "n_val": 10}
+    if rule == E.RULE_PRODUCTION_SPLIT:
+        split.pop("fold")
+    return {"schema": E.RESEARCH_SCHEMA, "purpose": purpose, "split_rule": rule, "split": split,
+            "folds_digest": HEX if rule == E.RULE_MULTI_HOLDOUT else None, "cv_set_id": None, "content_checks": [],
+            "wc_map": {"rule": E.RULE_WCMAP_SUBSET if held else E.RULE_WCMAP,
+                       "fitted_on_sims_sha256": E.sims_sha256(train), "n_sims": len(train)}}
+
+
+def _excl(**recipe):
+    return _meta(all_sims=False, **recipe)
+
+
+def _adm(metas, rs, sims):
+    return {E.reason_code(r) for r in E.research_member_reasons(metas, rs, **({} if sims is None else {"sims": sims}))}
+
+
+@pytest.mark.parametrize("sims", [SIMS, None], ids=["export", "load"])
+def test_a_member_with_two_exclusion_keys_must_declare_their_union(sims):          # D5 R2 delta n1 (D2)
+    m = _excl(holdout_sims=[SIMS[3]], withheld_sims=[SIMS[1]])
+    why = E.research_member_reasons([m, m], _rs([SIMS[3]]), **({} if sims is None else {"sims": sims}))
+    assert {E.reason_code(r) for r in why} == {"RES_HELD"} and f"holds out {sorted([SIMS[1], SIMS[3]])}" in why[0]
+    assert _adm([m, m], _rs([SIMS[1], SIMS[3]]), sims) == set()
+
+
+@pytest.mark.parametrize("sims", [SIMS, None], ids=["export", "load"])
+def test_an_exclusion_under_any_key_name_is_the_members_excluded_set(sims):
+    for m in (_excl(excluded=[SIMS[3]]), _excl(exclude=SIMS[3]), _excl(left_out_runs=[SIMS[3]])):
+        assert _adm([m], _rs([SIMS[3]]), sims) == set()
+        assert _adm([m], _rs([]), sims) == {"RES_UNVERIFIABLE_NO_HELD"}
+        assert _adm([m], _rs([SIMS[1]]), sims) == {"RES_HELD"}
+
+
+def test_a_training_list_implies_its_complement():
+    m = _excl(train_sims=[s for s in SIMS if s != SIMS[3]])
+    for sims in (SIMS, None):
+        assert _adm([m], _rs([SIMS[3]]), sims) == set()
+    assert _adm([m], _rs([SIMS[1]]), SIMS) == {"RES_HELD"}
+    assert _adm([m], _rs([SIMS[1]]), None) == {"RES_SIM_SET_TRAINING"}       # at load: not the map's training set
+
+
+@pytest.mark.parametrize("sims", [SIMS, None], ids=["export", "load"])
+@pytest.mark.parametrize("extra", [{"data": {"subsets": [[SIMS[3]]]}}, {"zq7": [SIMS[3]]}, {"weights": {SIMS[3]: 0.}}])
+def test_a_simulation_list_of_no_stated_meaning_fails_closed(sims, extra):
+    assert _adm([_excl(holdout_sims=[SIMS[3]], **extra)], _rs([SIMS[3]]), sims) == {"RES_SIM_SET_UNDECLARED"}
+    full = _meta(research={"purpose": "a synthetic research test"}, **extra)              # a "full" member too
+    assert "RES_SIM_SET_UNDECLARED" in _adm([full], _rs([], rule=E.RULE_PRODUCTION_SPLIT), sims)
+
+
+@pytest.mark.parametrize("sims", [SIMS, None], ids=["export", "load"])
+def test_a_list_of_every_simulation_says_nothing_about_the_split(sims):
+    m = _excl(holdout_sims=[SIMS[3]], sims_used=list(SIMS))
+    assert _adm([m], _rs([SIMS[3]]), sims) == set()
+
+
+@pytest.mark.parametrize("recipe", [{"holdout_sims": {"a": 1}}, {"withheld": 3}, {"holdout_sim": [1, 2]},
+                                    {"fold": 3, "folds_sha256": HEX}])
+def test_an_exclusion_that_names_no_simulation_fails_closed(recipe):
+    for sims in (SIMS, None):
+        assert "RES_EXCLUSION_UNPARSED" in _adm([_excl(**recipe)], _rs([SIMS[3]]), sims)
+
+
+def test_a_recognised_fold_member_with_another_simulation_list_is_refused():
+    fold = _excl(holdout_sims=[SIMS[3]], fold=0, folds_sha256=HEX, val_seed=1, val_frac=0.1, n_train=90, n_val=10)
+    for sims in (SIMS, None):
+        assert _adm([fold], _rs([SIMS[3]], rule=E.RULE_MULTI_HOLDOUT), sims) == set()
+        assert _adm([dict(fold, notes={"x": [SIMS[1]]})], _rs([SIMS[3]], rule=E.RULE_MULTI_HOLDOUT), sims) == {
+            "RES_SIM_SET_UNDECLARED"}
+        held_more = dict(fold, recipe=dict(fold["recipe"], excluded_runs=[SIMS[1]]))
+        assert "RES_HELD" in _adm([held_more], _rs([SIMS[3]], rule=E.RULE_MULTI_HOLDOUT), sims)

@@ -3,12 +3,18 @@
 
 A **production** model is trained on every simulation of its training cache. The **metadata rule**
 (``production_recipe_reasons(meta)``, run by every release load) requires that the member's recipe is a JSON object,
-declares ``all_sims`` true, carries no research marking (``recipe.research``), and that no key anywhere in the meta is
+declares ``all_sims`` true, carries no research marking (``recipe.research``), that no key anywhere in the meta is
 a reserved held-out or fold name (``RESERVED_FORMS``, rule ``reserved_keys/3``: matched by the normalised WHOLE key
-name, at any depth of dicts and lists; a null value counts as absent). Choices derived from a cross-validation (an
-epoch count taken from the folds) may be recorded in ``recipe.cv_selection``, a closed schema (``cv_selection/1``) whose
-keys avoid every reserved name; the scan exempts nothing. The reserved list is a heuristic against accidental misuse,
-not a parser of arbitrary metadata: a novel spelling outside it passes the loader.
+name, at any depth of dicts and lists; a null value counts as absent), and that nothing in the meta names a proper
+subset of the cache's simulations (rule ``simulation_sets/1``, ``simulation_sets``: a list or tuple of simulation
+names, a dict keyed by them, one name or a separated string of names, at any depth, under ANY key; ``SIM_SET:<path>``).
+The simulation sets are found by VALUE, so a held-out or training list is found whatever its key is called. Where the
+cache's names are at hand (``safe_h5.make_lineage_block``, the exports, the acceptance) a simulation name is one of
+them; a load has no cache, so it recognises the simulation-name form (``SIM_NAME_FORM``, the cache's folder naming) and
+takes the cache's simulation count from the w_c map, and it enforces the verdict the block recorded when it was
+written. Not recognisable from metadata: simulations given by index, by digest or in prose. Choices derived from a
+cross-validation (an epoch count taken from the folds) may be recorded in ``recipe.cv_selection``, a closed schema
+(``cv_selection/1``) whose keys avoid every reserved name; the scan exempts nothing.
 
 The **content rules** (they need the training cache; run at export and acceptance, never at load):
 ``production_content_check`` and ``research_content_check`` tie the cache first, then recompute the split from THIS
@@ -24,7 +30,8 @@ cache reader are imported inside these functions only, never by a loader.
 A **research** bundle is marked at the bundle level (``provenance.research``, schema ``research/1``:
 ``check_research_marking``). Every production loader refuses it whatever its split; it loads only through
 ``safe_h5.load_research`` / ``predictor.load_research_bundle``, and ``research_member_reasons`` decides which members it
-admits (one declared split per bundle).
+admits (one declared split per bundle; each member's excluded set, derived from EVERY simulation set its metadata
+names, must be the declared held-out set).
 
 Reasons are strings ``"[CODE] text"`` with a stable machine code (``reason_code``); comparisons use the codes, never
 the wording. Nothing here resists deliberately forged metadata with a recomputed digest: that defence is the published
@@ -67,6 +74,31 @@ RESERVED_FORMS = frozenset({
     "loso", "kfold", "cvfold",
     "holdout", "holdoutsimulations", "heldoutsimulations", "foldindex", "foldidx", "foldnum", "foldnumber", "loocv",
     "testsims", "nholdout"})
+
+# simulation_sets/1 (PI ruling 2026-11-04): where a member's metadata names simulations, under any key
+RULE_SIM_SETS = "simulation_sets/1"
+# the cache's simulation-name form: the folder name hcd_analysis.io parses (io._PARAM_RE), matched whole. A load, which
+# has no cache, recognises a simulation name by it.
+SIM_NAME_FORM = re.compile(
+    r"ns(?P<ns>[0-9.e+\-]+)"
+    r"Ap(?P<Ap>[0-9.e+\-]+)"
+    r"herei(?P<herei>[0-9.e+\-]+)"
+    r"heref(?P<heref>[0-9.e+\-]+)"
+    r"alphaq(?P<alphaq>[0-9.e+\-]+)"
+    r"hub(?P<hub>[0-9.e+\-]+)"
+    r"omegamh2(?P<omegamh2>[0-9.e+\-]+)"
+    r"hireionz(?P<hireionz>[0-9.e+\-]+)"
+    r"bhfeedback(?P<bhfeedback>[0-9.e+\-]+)"
+    r"\Z")
+# the reserved forms whose value IS a set of held-out simulations (the other reserved forms are fold or size markers)
+SET_FORMS = frozenset({"holdoutsim", "holdoutsims", "heldoutsim", "heldoutsims", "heldout", "leftout", "leftoutsims",
+                       "withheld", "withheldsims", "excludesims", "excludedsims", "holdout", "holdoutsimulations",
+                       "heldoutsimulations", "testsims"})
+# the key forms whose value is the set of simulations TRAINED on (its complement is held out)
+TRAIN_SET_FORMS = frozenset({"trainsim", "trainsims", "trainingsim", "trainingsims", "trainsimulations",
+                             "trainingsimulations", "trainedon", "trainedonsims"})
+_EXCLUDE_WORDS = ("holdout", "heldout", "withheld", "exclud", "leftout", "omit", "test")
+_NAME_SEPARATORS = re.compile(r"[\s,;|]+")
 
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _CODE = re.compile(r"\[([A-Z][A-Z0-9_]*)(?::([^\]\s]*))?\] ")
@@ -139,6 +171,75 @@ def _hex64(x):
     return isinstance(x, str) and bool(_HEX64.match(x))
 
 
+# ------------------------------------------------------------------------------- simulation_sets/1: names by value
+def set_direction(key):
+    """How a simulation set found under the dict key ``key`` is read: ``"trained"`` (its complement is held out) when
+    the normalised name contains "train", ``"excluded"`` when it is a reserved held-out form or contains holdout,
+    heldout, withheld, exclud, leftout, omit or test, ``"unknown"`` otherwise (or when both apply)."""
+    k = "" if key is None else normalise_key(key)
+    trained = "train" in k
+    excluded = k in SET_FORMS or any(w in k for w in _EXCLUDE_WORDS)
+    return "trained" if trained and not excluded else "excluded" if excluded and not trained else "unknown"
+
+
+def simulation_sets(meta, *, sims=None, known=()):
+    """Every place ``meta`` names simulations (``simulation_sets/1``), at any depth and under any key: the string
+    elements of a list or tuple, the keys of a dict, a scalar string, or a string of names separated by spaces,
+    commas, semicolons or bars. A string is a simulation name when it is one of ``sims`` (the cache's names, when the
+    cache is at hand), one of ``known`` (names the bundle declares) or in the simulation-name form (``SIM_NAME_FORM``).
+    The value of a reserved held-out key (``SET_FORMS``) or of a training-set key (``TRAIN_SET_FORMS``) is read as
+    simulation names whatever their form. Returns ``(sets, unparsed)``: ``sets`` a list of ``{"path", "direction",
+    "sims", "declared"}`` (``direction`` from ``set_direction`` of the nearest key; ``declared``: the value of one of
+    those keys), ``unparsed`` the paths of those keys whose value is not a name or a list of names."""
+    names = frozenset(map(str, sims or ())) | frozenset(map(str, known))
+
+    def is_sim(s):
+        return isinstance(s, str) and (s in names or bool(SIM_NAME_FORM.match(s)))
+    sets, unparsed = [], []
+
+    def add(path, key, found, *, declared=False, how=None):
+        if found:
+            sets.append({"path": path or "meta", "direction": how or set_direction(key), "sims": sorted(set(found)),
+                         "declared": declared})
+
+    def walk(o, path, key):
+        if isinstance(o, dict):
+            add(path, key, [k for k in o if is_sim(k)])
+            for k, v in o.items():
+                p = f"{path}.{k}" if path else str(k)
+                nk = normalise_key(k)
+                if (nk in SET_FORMS or nk in TRAIN_SET_FORMS) and v is not None:
+                    vals = [v] if isinstance(v, str) else v
+                    if isinstance(vals, (list, tuple)) and all(isinstance(s, str) and s for s in vals):
+                        add(p, k, vals, declared=True, how="excluded" if nk in SET_FORMS else "trained")
+                    else:
+                        unparsed.append(p)
+                    continue
+                walk(v, p, k)
+        elif isinstance(o, (list, tuple)):
+            add(path, key, [s for s in o if is_sim(s)])
+            for j, v in enumerate(o):
+                if isinstance(v, (dict, list, tuple)):
+                    walk(v, f"{path}.{j}" if path else str(j), key)
+        elif isinstance(o, str):
+            toks = [t for t in _NAME_SEPARATORS.split(o) if t]
+            if toks and all(is_sim(t) for t in toks):
+                add(path, key, toks)
+    walk(meta, "", None)
+    return sets, unparsed
+
+
+def _every(found, sims, n_sims):
+    """Whether a simulation set is every simulation of the cache: its names (``sims``) when known, else its count."""
+    if sims is not None:
+        return set(found) == set(map(str, sims))
+    return _int(n_sims) and len(set(found)) == n_sims
+
+
+def _under(path, roots):
+    return any(path == r or path.startswith(r + ".") for r in roots)
+
+
 def _scalar(v):
     return v is None or isinstance(v, (bool, str)) or (isinstance(v, (int, float)) and math.isfinite(v))
 
@@ -193,10 +294,13 @@ def cv_selection_problems(cv, recipe):
 
 
 # -------------------------------------------------------------------------------------- the production metadata rule
-def production_recipe_reasons(meta, i=None):
+def production_recipe_reasons(meta, i=None, *, sims=None, n_sims=None):
     """The coded reasons (empty: eligible by metadata) why the member with meta ``meta`` is not a production member:
-    ``RECIPE_NOT_DICT``, ``ALL_SIMS_NOT_TRUE``, ``RECIPE_RESEARCH``, ``CV_SELECTION`` and one ``RSV_KEY:<path>`` per
-    reserved key found anywhere in the meta. ``i`` names the member in the text."""
+    ``RECIPE_NOT_DICT``, ``ALL_SIMS_NOT_TRUE``, ``RECIPE_RESEARCH``, ``CV_SELECTION``, one ``RSV_KEY:<path>`` per
+    reserved key found anywhere in the meta, and one ``SIM_SET:<path>`` per simulation set (``simulation_sets``) that
+    is not every simulation of the cache: ``sims`` the cache's simulation names (when the cache is at hand), else
+    ``n_sims`` its simulation count (a load: the w_c map's); with neither, any simulation set is refused. A set under
+    a reserved key is reported once, as ``RSV_KEY``. ``i`` names the member in the text."""
     who = "the member" if i is None else f"member {i}"
     if not isinstance(meta, dict):
         return [reason("RECIPE_NOT_DICT", f"{who}'s meta is not a JSON object")]
@@ -214,9 +318,20 @@ def production_recipe_reasons(meta, i=None):
             why.append(reason("RECIPE_RESEARCH", f"{who} is marked as a research model (recipe.research)"))
         if r.get("cv_selection") is not None:
             why += [reason("CV_SELECTION", f"{who}: {w}") for w in cv_selection_problems(r["cv_selection"], r)]
-    for p in find_reserved(meta):
+    reserved = find_reserved(meta)
+    for p in reserved:
         why.append(reason(f"RSV_KEY:{_code_path(p)}", f"{who} declares the held-out or fold key {p!r} "
                                                        f"({RULE_RESERVED_KEYS})"))
+    sets, unparsed = simulation_sets(meta, sims=sims)
+    for g in sets:
+        if not _under(g["path"], reserved) and not _every(g["sims"], sims, n_sims):
+            why.append(reason(f"SIM_SET:{_code_path(g['path'])}",
+                              f"{who} names {len(g['sims'])} simulation(s) at {g['path']!r}, not every simulation of "
+                              f"its cache ({RULE_SIM_SETS}): a held-out or training-subset declaration"))
+    for p in unparsed:
+        if not _under(p, reserved):
+            why.append(reason(f"SIM_SET:{_code_path(p)}", f"{who} declares a training set at {p!r} that is not a list "
+                                                          f"of simulation names ({RULE_SIM_SETS})"))
     return why
 
 
@@ -337,7 +452,42 @@ _MULTI_OK = {"holdout_sims", "fold", "folds_sha256"}       # the keys W-1-style 
 _ONE_OK = {"holdout_sim"}
 
 
-def research_member_reasons(metas, rs):
+def _excluded_set(i, meta, held, wm, sims):
+    """``(excluded, reasons, keys)`` of member ``i``: the simulations its metadata excludes (``simulation_sets``), the
+    coded reasons its simulation sets cannot be read, and the recipe keys (first path segments) naming them."""
+    R = reason
+    sets, unparsed = simulation_sets(meta, sims=sims, known=held)
+    every = None if sims is None else set(map(str, sims))
+    n_total = None if sims is not None or not _int(wm.get("n_sims")) else wm["n_sims"] + len(held)
+    out, why = set(), []
+    for g in sets:
+        s = set(g["sims"])
+        if (s == every) if every is not None else (n_total is not None and len(s) == n_total and set(held) <= s):
+            continue                                                    # every simulation: says nothing of the split
+        if g["direction"] == "excluded":
+            out |= s
+        elif g["direction"] == "trained" and every is not None:
+            out |= every - s
+        elif g["direction"] == "trained" and wm.get("fitted_on_sims_sha256") is not None and \
+                sims_sha256(s) == wm["fitted_on_sims_sha256"]:
+            out |= set(held)                                            # the map's training set: its complement
+        elif g["direction"] == "trained":
+            why.append(R("RES_SIM_SET_TRAINING", f"member {i} trains on {len(s)} simulation(s) at {g['path']!r}, not "
+                                                 "the bundle's training set (the cache minus the declared held-out "
+                                                 "set)"))
+        else:
+            why.append(R("RES_SIM_SET_UNDECLARED", f"member {i} names {len(s)} simulation(s) at {g['path']!r} under a "
+                                                   "key that says neither held out nor trained on "
+                                                   f"({RULE_SIM_SETS}): its excluded set cannot be derived"))
+    for p in unparsed:
+        why.append(R("RES_EXCLUSION_UNPARSED", f"member {i} declares an exclusion at {p!r} that is not a list of "
+                                               f"simulation names ({RULE_SIM_SETS})"))
+    keys = {(g["path"][len("recipe."):] if g["path"].startswith("recipe.") else g["path"]).split(".")[0]
+            for g in sets}
+    return out, why, keys
+
+
+def research_member_reasons(metas, rs, *, sims=None):
     """What keeps the members from this research bundle (``rs``: its checked ``provenance.research``); empty: admitted.
 
     (a) a member declaring an exclusion under the bundle's recognised split rule is admitted as it is (the existing
@@ -347,13 +497,22 @@ def research_member_reasons(metas, rs):
     (b) a member declaring NO exclusion (a full-simulation research model) must carry ``recipe.research`` naming the
         bundle's purpose (otherwise it is indistinguishable from a production member), under a split that holds out
         nothing;
-    under ``unverifiable`` (nothing is recomputed) a member that declares an exclusion needs a non-empty declared
-    held-out set, and a member's ``holdout_sims`` / ``holdout_sim`` must equal it exactly, so the w_c map's training
-    set (the cache minus the declared set) never includes a member's held-out simulation.
+    every member's EXCLUDED SET is derived from every simulation set its metadata names (``simulation_sets``, under
+    any key): a held-out list adds its names, a training list its complement, a list of every simulation nothing; a
+    list whose key says neither (``RES_SIM_SET_UNDECLARED``), a training list that is not the bundle's training set
+    (``RES_SIM_SET_TRAINING``) and an exclusion key whose value names no simulation (``RES_EXCLUSION_UNPARSED``) fail
+    closed. Under ``unverifiable`` (nothing is recomputed) a member that declares an exclusion needs a non-empty
+    declared held-out set, and its excluded set must EQUAL it (each member's, hence their union), so the w_c map's
+    training set (the cache minus the declared set) never includes a held-out simulation and the label is the
+    members' own; under the recognised rules the excluded set must equal it too.
+    ``sims``: the cache's simulation names, when the cache is at hand (the export; the block's writer); a load passes
+    none and recognises the simulation-name form and the declared names, and takes the training set from
+    ``rs["wc_map"]``.
     A bundle mixing (a) and (b) members is refused, and a member whose ``recipe.research`` names another purpose.
     Every reason is coded ``RES_*`` (``code_class`` "admission")."""
     R = reason
     rule, sp = rs["split_rule"], rs["split"]
+    held_set = list(sp["held_out_sims"])
     out, kinds = [], set()
     for i, m in enumerate(metas):
         r = m.get("recipe") if isinstance(m, dict) else None
@@ -365,8 +524,11 @@ def research_member_reasons(metas, rs):
             out.append(R("RES_PURPOSE", f"member {i}'s recipe.research names another purpose than the bundle's "
                                             f"{rs['purpose']!r}"))
         kind, held = declared_exclusion(r)
-        kinds.add("exclusion" if kind != "none" else "full")
-        if kind == "none":
+        excluded, why_sets, named = _excluded_set(i, m, held_set, rs.get("wc_map") or {}, sims)
+        out += why_sets
+        is_exclusion = kind != "none" or bool(excluded) or bool(why_sets)
+        kinds.add("exclusion" if is_exclusion else "full")
+        if not is_exclusion:
             if rr is None:
                 out.append(R("RES_UNMARKED_FULL", f"member {i} declares no exclusion and carries no "
                                                   "recipe.research: it is indistinguishable from a production member"))
@@ -379,13 +541,17 @@ def research_member_reasons(metas, rs):
                                                        "(contradictory)"))
             if rule == RULE_UNVERIFIABLE:
                 # nothing is recomputed under this rule, so the declared held-out set (from which the w_c map's
-                # training set is taken) must be the members' own: never empty, and equal to a recognised exclusion
-                if not sp["held_out_sims"]:
-                    out.append(R("RES_UNVERIFIABLE_NO_HELD", f"member {i} declares an exclusion "
-                                 f"({sorted({p.split('.')[0] for p in find_reserved(r)})}); an unverifiable split "
-                                 "must declare the held-out simulations"))
-                elif kind in ("multi", "one") and held != sp["held_out_sims"]:
-                    out.append(R("RES_HELD", f"member {i} holds out {held}, the bundle's split {sp['held_out_sims']}"))
+                # training set is taken) must be the member's own excluded set: never empty, and equal to it
+                keys = sorted({p.split('.')[0] for p in find_reserved(r)} | named)
+                if not held_set:
+                    out.append(R("RES_UNVERIFIABLE_NO_HELD", f"member {i} declares an exclusion ({keys}); an "
+                                 "unverifiable split must declare the held-out simulations"))
+                elif not excluded and not why_sets:
+                    out.append(R("RES_EXCLUSION_UNPARSED", f"member {i} declares an exclusion ({keys}) but names no "
+                                 "simulation: its excluded set cannot be derived"))
+                elif excluded and excluded != set(held_set):
+                    out.append(R("RES_HELD", f"member {i} holds out {sorted(excluded)}, the bundle's split "
+                                             f"{held_set}"))
                 continue
             keys = {p.split(".")[0] for p in find_reserved(r)}
             allowed = _MULTI_OK if rule == RULE_MULTI_HOLDOUT else _ONE_OK
@@ -398,6 +564,9 @@ def research_member_reasons(metas, rs):
                 out.append(R("RES_EMPTY_HELD", f"member {i} declares an empty held-out set: no exclusion"))
             if held != sp["held_out_sims"]:
                 out.append(R("RES_HELD", f"member {i} holds out {held}, the bundle's split {sp['held_out_sims']}"))
+            elif excluded != set(held):
+                out.append(R("RES_HELD", f"member {i}'s metadata holds out {sorted(excluded)}, the bundle's split "
+                                         f"{sp['held_out_sims']}"))
             if rule == RULE_MULTI_HOLDOUT:
                 if r.get("fold") != sp["fold"]:
                     out.append(R("RES_FOLD", f"member {i}'s fold {r.get('fold')!r} is not the split's "

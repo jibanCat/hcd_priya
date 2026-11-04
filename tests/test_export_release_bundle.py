@@ -239,6 +239,14 @@ def test_a_normaliser_not_fitted_on_the_declared_rows_is_refused_before_writing(
     assert "split MISMATCH" in _refused(X, inputs, inputs["tmp"] / "o2", capsys, **_ens(inputs, "e_n", recipe=bad))
 
 
+def test_a_simulation_list_under_an_ordinary_key_is_refused_before_writing(X, inputs, capsys):    # PU-0522
+    d = load_cache(inputs["cache"])
+    tr, va, _ = production_row_split(d["sim_name"], val_seed=12345, val_frac=0.1)
+    recipe = dict(RECIPE, n_train=int(tr.size), n_val=int(va.size), excluded=["sim1"])     # by the cache's own names
+    assert "SIM_SET:recipe.excluded" in _refused(X, inputs, inputs["tmp"] / "o", capsys,
+                                                 **_ens(inputs, "e_x", recipe=recipe))
+
+
 def test_a_relabelled_fold_member_is_refused_by_its_content(X, inputs, capsys):        # T15
     d = load_cache(inputs["cache"])
     ftr, fva, _ = production_row_split(d["sim_name"], val_seed=12345, val_frac=0.1, holdout_sim="sim1")

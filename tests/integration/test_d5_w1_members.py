@@ -31,19 +31,26 @@ def _w1(name):
     return T.load_checkpoint(pre)
 
 
-def test_the_reserved_keys_hit_every_fold_member_and_no_production_meta():
+def test_the_reserved_keys_hit_every_fold_member_and_no_production_meta(cache):
     from hcd_analysis.emulator import eligibility as E
     from hcd_analysis.emulator import safe_h5 as H
     p = CFG["production"]
+    sims = sorted(set(np.asarray(cache["sim_name"]).astype(str).tolist()))
+    rb = H.load_release(path(p["bundle"]), expected_manifest_sha256=p["manifest_sha256"])
+    n_sims = rb.wc_map.doc["delta_c"]["n_sims"]
+    assert n_sims == len(sims) and all(E.SIM_NAME_FORM.match(s) for s in sims)   # the load-time form fits the cache
+    kws = ({}, {"n_sims": n_sims}, {"sims": sims})                     # simulation_sets/1 (PU-0522): no false positive
     for _, meta, _ in H.load_bundle(path(p["bundle"]), expected_manifest_sha256=p["manifest_sha256"]):
-        assert E.production_recipe_reasons(meta) == []
+        assert all(E.production_recipe_reasons(meta, **kw) == [] for kw in kws)
     for n in p["member_names"]:
-        assert E.production_recipe_reasons(json.load(open(os.path.join(path(p["members_dir"]), n + ".meta.json")))) == []
+        meta = json.load(open(os.path.join(path(p["members_dir"]), n + ".meta.json")))
+        assert all(E.production_recipe_reasons(meta, **kw) == [] for kw in kws)
     for name in CFG["w1"]["members"]:
         meta = json.load(open(os.path.join(path(CFG["w1"]["b0_dir"]), name + ".meta.json")))
-        codes = {E.reason_code(r) for r in E.production_recipe_reasons(meta)}
-        assert {"RSV_KEY:recipe.holdout_sims", "RSV_KEY:recipe.fold", "RSV_KEY:recipe.folds_sha256",
-                "ALL_SIMS_NOT_TRUE"} <= codes, name
+        for kw in kws:
+            codes = {E.reason_code(r) for r in E.production_recipe_reasons(meta, **kw)}
+            assert codes == {"RSV_KEY:recipe.holdout_sims", "RSV_KEY:recipe.fold", "RSV_KEY:recipe.folds_sha256",
+                             "ALL_SIMS_NOT_TRUE"}, (name, kw, codes)
 
 
 def test_every_w1_member_split_normaliser_map_and_admission(cache):
@@ -93,4 +100,5 @@ def test_every_w1_member_split_normaliser_map_and_admission(cache):
                          "n_sims": len(train)}}
         E.check_research_marking(rs, check_recorded=False)
         assert E.research_member_reasons(metas, rs) == [] and all("research" not in m["recipe"] for m in metas)
+        assert E.research_member_reasons(metas, rs, sims=sorted(set(sim.tolist()))) == []      # PU-0522, exact names
         del pair

@@ -131,7 +131,17 @@ normalises (lower case, every character but a-z and 0-9 removed) to a reserved h
 (`reserved_keys/3`: holdout, holdoutsim(s), holdoutsimulations, heldout, heldoutsim(s), heldoutsimulations, fold(s),
 foldid, foldidx, foldindex, foldnum, foldnumber, foldssha256, nheld, nheldrows, nholdout, leftout, leftoutsims,
 withheld(sims), exclude(d)sims, testsims, loo, loocv, loso, kfold, cvfold; dicts and lists recursed; a null value
-counts as absent; a recipe key that normalises to `research` is a research marking). Choices derived
+counts as absent; a recipe key that normalises to `research` is a research marking). Nor may the meta name a
+proper subset of the cache's simulations anywhere (`simulation_sets/1`, code `SIM_SET:<path>`). The simulations are
+found by VALUE: a list or tuple of names, a dict keyed by them, one name, or names separated by spaces, commas,
+semicolons or bars, at any depth and under any key. So `excluded: [...]`, `train_sims: [...]` or a list under an
+arbitrary key is refused like a reserved name, and a list of every simulation is not an exclusion. Where the cache is
+at hand (the block's writer `make_lineage_block`, the exports, the acceptance) a simulation name is one of the
+cache's; a load has no cache, so it recognises the simulation-name form (the cache's folder naming,
+`eligibility.SIM_NAME_FORM`), takes the simulation count from the w_c map, and refuses a block whose write-time verdict
+is ineligible. Not recognisable from metadata: simulations given by index, by digest or in prose; for a production
+member the content checks below still see training on fewer simulations (the normaliser recomputed on every
+simulation's training rows differs). Choices derived
 from a cross-validation may be recorded in `recipe.cv_selection`, the closed schema `cv_selection/1`
 (`{schema, source_cv_set_id, source_folds_digest, [source_record_sha256], derived: {knob: {value, rule}}}`, each value a
 JSON scalar equal to the recipe knob it names); the scan exempts nothing. The bundle's w_c map must count every
@@ -167,9 +177,17 @@ enforces the lineage and the ties, refuses a stale block (lineage or tie codes p
 the per-member production codes are not compared, so a later reserved name does not orphan a bundle) and checks the
 map's simulation count. `scripts/export_research_bundle.py` writes research bundles: the split is declared on the
 command line and checked against every member; under `production_row_split/1` and `multi_holdout_row_split/1` it is
-also recomputed from the cache. Under `unverifiable` the split and the normaliser are NOT recomputed (recorded
-UNAVAILABLE): the declared held-out set must then be non-empty whenever a member declares an exclusion, and must equal
-any member's `holdout_sims` / `holdout_sim` exactly, because the w_c map is fitted on the cache minus that set. The w_c
+also recomputed from the cache. Every member's excluded set is derived from every simulation set its metadata
+names (`simulation_sets/1`, by value, under any key): a held-out list adds its names, a training list (`train_sims`
+and its spellings) its complement, and a list of every simulation adds nothing. A list whose key says neither held
+out nor trained on (`RES_SIM_SET_UNDECLARED`), a training list that is not the bundle's training set
+(`RES_SIM_SET_TRAINING`) and an exclusion key that names no simulation (`RES_EXCLUSION_UNPARSED`) are refused. Under
+`unverifiable` the split and the normaliser are NOT recomputed (recorded UNAVAILABLE): the declared held-out set must
+then be non-empty whenever a member declares an exclusion, and must EQUAL every member's excluded set (hence their
+union), because the w_c map is fitted on the cache minus that set; a member recording `holdout_sims: [a]` and
+`withheld_sims: [b]` needs both `a` and `b` declared. Under the recognised rules the excluded set must equal the split
+too. The block's writer judges the admission with the cache's names and records any refusal (a `RES_*` reason), which
+the research loader enforces. The w_c
 map is refitted on the training simulations only (`wc_map.refit_subset`, rule `wcmap_refit_subset/1`;
 byte-identical to `wc_map.refit` for the full set). Research
 bundles need a release-grade cache and finder ids; research on other caches stays on the training checkpoints.
@@ -183,7 +201,7 @@ loads them. Synthetic bundles written now declare `all_sims: true`.
 | layer | protects against | does not protect against |
 |---|---|---|
 | the published manifest digest, pinned after a recorded acceptance | substitution, corruption, an unaccepted bundle presented as accepted | a compromised maintainer, an unprotected registry manifest |
-| the loader metadata rules and the separate types | accidental export or load of fold or research models as production; mislabelled recipes using reserved names | deliberately forged metadata with a recomputed digest; a novel key spelling outside the reserved list |
+| the loader metadata rules and the separate types | accidental export or load of fold or research models as production; mislabelled recipes using reserved names; a held-out or training simulation list under any key (`simulation_sets/1`) | deliberately forged metadata with a recomputed digest; simulations given by index, digest or prose; at load, a name outside the simulation-name form in a hand-edited block |
 | the content checks at export and acceptance | a split, normaliser or w_c map that is not from the declared training set | a forger who has the cache and refits; network weights trained on other rows than the declared ones |
 | out of scope | in-process objects (for a hand-built `ReleaseBundle`, `Bundle` recomputes the block, the metas' rules and marks, the map rule and the map's identity, but not the network arrays or the normaliser), pickled objects, the training checkpoints, the frozen benchmark environment | |
 
@@ -212,6 +230,10 @@ benchmark's `3496030`) predates them. Differences a user of an earlier version m
 - `metas.anchored and metas.lineage_verified` is no longer a production test (both are true after a research load):
   use `metas.release_verified` (or `kind == "release"`);
 - `ineligible_reasons` strings are `"[CODE] text"`;
+- a member meta that names a proper subset of the cache's simulations anywhere is refused (`SIM_SET:<path>`), and a
+  research member's excluded set is derived from every such list (`simulation_sets/1`);
+  `eligibility.production_recipe_reasons` takes the keywords `sims` / `n_sims`, `research_member_reasons` the keyword
+  `sims`, and a research block may record `RES_*` admission reasons;
 - `provenance` must be a JSON object on every write and every load, the development path included;
   `write_manifest_historical` refuses a research marking;
 - a digest given to `load_ensemble` / `load_bundle` that is not 64 lowercase hex digits (and not None) is refused
