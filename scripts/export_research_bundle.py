@@ -23,11 +23,13 @@ tensor refitted on the training rows, and the w_c map refitted on the TRAINING s
 simulations never enter it). UNAVAILABLE is allowed and recorded.
 
 The w_c map is refitted here (``wc_map.refit_subset``) on the cache minus the declared held-out simulations and written
-with its lineage record (which names ``--cache``'s file name). Write order: members and map, then the content checks
-again on the files read back, then the manifest (``provenance.research`` with the outcomes). After writing: the research
-loader and the research predictor load the bundle anchored on its digest, the members' leaves, normaliser and meta equal
-the checkpoints', the ensemble P_filt is bitwise the checkpoints', and every production loader refuses the bundle.
-Evidence goes to ``<out>/evidence``. Exit status: 0 PASS, 1 FAIL, 2 refused (nothing written)."""
+with its lineage record (which names ``--cache``'s file name). Before anything is written the members are also judged as
+the research loader will judge them, without the cache's names (``eligibility.research_member_reasons``), so a bundle
+that loader would refuse is never written. Write order: members and map, then the content checks again on the files read
+back, then the manifest (``provenance.research`` with the outcomes). After writing: the research loader and the research
+predictor load the bundle anchored on its digest, the members' leaves, normaliser and meta equal the checkpoints', the
+ensemble P_filt is bitwise the checkpoints', and every production loader refuses the bundle. Evidence goes to
+``<out>/evidence``. Exit status: 0 PASS, 1 FAIL, 2 refused (nothing written)."""
 import argparse
 import datetime
 import json
@@ -242,6 +244,10 @@ def run(a):
             raise Refused("the refitted w_c map's record is not eligible: " + "; ".join(wrec["ineligible_reasons"]))
         rs["wc_map"] = {"rule": E.RULE_WCMAP_SUBSET if held else E.RULE_WCMAP,
                         "fitted_on_sims_sha256": E.sims_sha256(train_sims), "n_sims": doc["delta_c"]["n_sims"]}
+        why = E.research_member_reasons(metas, rs)          # as the research loader will judge them: no cache names
+        if why:
+            raise Refused("the research loader would not admit the members (at load a simulation name is recognised "
+                          "only in the simulation-name form or as a declared held-out simulation): " + "; ".join(why))
         wraw = W.to_bytes(doc, wrec)
         wcm = W.parse_wc_map(wraw, "the refitted w_c map")
         before = E.research_content_check(metas, [n for _, _, n in ckpts], wcm, rs, cache=d, cache_path=a.cache,
@@ -311,7 +317,11 @@ def verify(bundle, sha, purpose, ckpts):
     meta, ensemble P_filt), and every production loader refuses it."""
     import hcd_analysis.predictor as hp
     checks = {}
-    rb = H.load_research(bundle, expected_manifest_sha256=sha, purpose=purpose)
+    try:
+        rb = H.load_research(bundle, expected_manifest_sha256=sha, purpose=purpose)
+    except H.SafeFormatError as e:                          # reported as a FAIL verdict, never a traceback
+        print(f"FAIL research_load: {e}")
+        return {"research_load": False}
     checks["research_load"] = rb.kind == "research" and rb.release_verified is False and rb.metas.kind == "research"
     for i, ((m0, meta0, n0), m1, meta1) in enumerate(zip(ckpts, rb.ensemble.members, rb.metas)):
         l0, t0 = jax.tree_util.tree_flatten(m0)

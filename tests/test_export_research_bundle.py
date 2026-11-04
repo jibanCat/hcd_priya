@@ -272,6 +272,31 @@ def test_an_exclusion_in_another_representation_at_export(X, world, capsys, extr
     assert "RES_HELD" in capsys.readouterr().out
 
 
+# ---------------------- D5 R2 pre-merge n2: what the research loader would refuse is refused before anything is written
+@pytest.mark.parametrize("extra", [{"cache_sims": [f"sim{k}" for k in range(5)]},            # PM2 L2: every simulation
+                                   {"sim_weights": {f"sim{k}": 1.0 for k in range(5)}}])     # PM2 L6: keyed by all
+def test_a_list_the_research_loader_cannot_read_is_refused_before_anything_is_written(X, world, capsys, extra):
+    """Names outside the simulation-name form: the export (with the cache's names) sees every simulation, the loader
+    (with only the declared held-out names) sees a part under a key of no stated meaning. Refused, nothing written."""
+    prefixes, sums = _write_members(world["tmp"] / "n2", world["cache"], dict(world["recipe"], **extra), world["tr"])
+    out = world["tmp"] / "out"
+    assert X.main(_argv(world, out, prefixes=prefixes, sums=sums)) == 2
+    t = capsys.readouterr().out
+    assert "refusing" in t and "research loader would not admit" in t and "RES_SIM_SET_UNDECLARED" in t
+    assert not out.exists()                                                     # no manifest, no file at all
+
+
+def test_a_research_load_failure_after_writing_is_a_fail_verdict_not_a_traceback(X, world, capsys, monkeypatch):
+    def refuse(*a, **k):
+        raise H.SafeFormatError("a synthetic load refusal (test)")
+    monkeypatch.setattr(X.H, "load_research", refuse)
+    out = world["tmp"] / "out"
+    assert X.main(_argv(world, out)) == 1
+    s = json.load(open(out / "evidence" / "research_export_summary.json"))
+    assert s["verdict"] == "FAIL" and s["checks"] == {"research_load": False}
+    assert "a synthetic load refusal (test)" in capsys.readouterr().out
+
+
 def test_the_recorded_checks_are_the_read_back_ones(X, world, monkeypatch):
     """D5 review R1 m8: provenance.research.content_checks records the checks run on the files read back."""
     real, calls = X.E.research_content_check, []
