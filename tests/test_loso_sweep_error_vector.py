@@ -34,10 +34,16 @@ def _sha(p):
 
 @pytest.fixture(scope="module")
 def two_sweeps(tmp_path_factory):
-    from tests.emulator._fixture import write_synthetic_cache
+    """The sweep reads its cache with the strict ``data.load_cache`` (format 3.4, a release-eligible lineage record),
+    so the test cache is a 3.4 synthetic cache written through the library's own writer (``tau0_cache.write_cache``,
+    by ``write_synthetic_cache_v34``), its record made with the code identity patched to a clean commit."""
+    from tests import tau0_fixtures as tf
+    from tests.emulator._fixture import write_synthetic_cache_v34
     d = tmp_path_factory.mktemp("sweeps")
     cache = d / "obs.h5"
-    write_synthetic_cache(cache, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12)
+    with pytest.MonkeyPatch.context() as mp:
+        tf.clean_code(mp)
+        write_synthetic_cache_v34(cache, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12)
     runs = {s: _sweep(cache, d / f"loso8_seed{s}", s, d) for s in (0, 1)}
     return d, cache, runs
 
