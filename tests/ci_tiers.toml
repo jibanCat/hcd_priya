@@ -27,7 +27,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_blinding.py" = { tier = "wheel" }
 "tests/test_bundle_lineage.py" = { tier = "wheel" }
 "tests/test_carry_validated_cache.py" = { tier = "source" }
-"tests/test_catalog_systems.py" = { tier = "wheel" }
+"tests/test_catalog_systems.py" = { tier = "source" }
 "tests/test_cddf_dx_patch.py" = { tier = "source" }
 "tests/test_cemu_t3.py" = { tier = "wheel" }
 "tests/test_cert_prereqs.py" = { tier = "source" }
