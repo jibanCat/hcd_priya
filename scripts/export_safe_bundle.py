@@ -9,8 +9,18 @@ given digest, or that does not list every member file with its digest (checked b
 that does not hash to its digest or that the release reader refuses (format 3.4, eligible, promoted if carried); a w_c
 map that does not hash to its digest, is not eligible or was fitted to another cache; members that were not all trained
 on that cache and its lineage record at one clean, known commit, that record a cache path instead of a file name, or
-that differ in architecture or recipe, or that were not trained on every simulation (``all_sims`` true, no
-``holdout_sim``); and a lineage block that is not release-eligible.
+that differ in architecture or recipe; members that are not production members by the metadata rule
+(``eligibility.production_recipe_reasons``: the recipe declares ``all_sims`` true, carries no reserved held-out or fold
+key anywhere and no research marking); members whose content does not match the declared full training set
+(``eligibility.production_content_check``, every component PASS: the split recomputed from the cache with the recipe's
+``n_train`` / ``n_val``, every normaliser tensor refitted on the training rows bitwise, the w_c map refitted on the
+cache); and a lineage block that is not release-eligible.
+
+Write order: the members and the map first, then the content checks again on the files READ BACK
+(``safe_h5.load_member`` with the digests just written, the map from the bundle), and only then the manifest, whose
+provenance records the outcomes (``eligibility_checks``). A failed read-back check leaves no manifest, hence nothing
+loadable (exit 1). The map's record names the cache's FILE NAME and the map check compares it: ``--cache`` must carry
+that name (a renamed copy of the right cache is refused).
 
     python scripts/export_safe_bundle.py --out NEW_DIR --member DIR/NAME_seed0 [--member ...] \\
         --sha256sums DIR/SHA256SUMS --sha256sums-sha256 HEX --cache CACHE.h5 --cache-sha256 HEX \\
@@ -50,6 +60,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp  # noqa: E402
 
 from hcd_analysis import lineage as L  # noqa: E402
+from hcd_analysis.emulator import eligibility as E  # noqa: E402
 from hcd_analysis.emulator import prod_ensemble as PE  # noqa: E402
 from hcd_analysis.emulator import safe_h5 as H  # noqa: E402
 from hcd_analysis.emulator import safe_io as S  # noqa: E402
@@ -72,7 +83,7 @@ from hcd_analysis.emulator.predict import predict_P_filt
 mode, bundle, sha = sys.argv[6], sys.argv[2], sys.argv[3]
 if mode == 'release':
     ens, metas, norm = H.load_ensemble(bundle, expected_manifest_sha256=sha)
-    assert metas.anchored and metas.lineage_verified
+    assert metas.release_verified and metas.kind == 'release'
     pf = norm['P_filt']
 else:
     loaded = (H.load_bundle_historical(bundle, expected_manifest_sha256=sha, reason=sys.argv[7]) if mode == 'h5'
@@ -147,10 +158,11 @@ def read_sums(path):
 
 
 def check_release_inputs(a):
-    """Every check before anything is written. Returns (prefixes, metas, cache record, cache identity, w_c map, code,
-    the member files' sha256)."""
+    """Every metadata check before anything is written. Returns (prefixes, metas, cache record, cache identity, w_c
+    map, code, the member files' sha256, the loaded cache)."""
     from hcd_analysis import tau0_cache as TC
     from hcd_analysis.emulator import wc_map as W
+    from hcd_analysis.emulator.data import load_cache
     code = L.code_identity()
     if not (isinstance(code.get("commit"), str) and len(code["commit"]) == 40) or code.get("dirty") is not False:
         raise Refused(f"the release export runs from a clean, committed checkout only (code identity {code})")
@@ -178,11 +190,11 @@ def check_release_inputs(a):
     if ident["sha256"] != a.cache_sha256:
         raise Refused(f"{a.cache} has sha256 {ident['sha256']}, not {a.cache_sha256}")
     try:
-        _d, _attrs, rec = TC.read_cache(a.cache)                     # strict: 3.4, eligible, promoted if carried
+        d = load_cache(a.cache)                     # strict (tau0_cache.read_cache: 3.4, eligible, promoted if carried)
     except TC.CacheLineageError as e:
         raise Refused(str(e)) from None
-    del _d
-    if L.file_identity(a.cache) != ident:
+    rec = d["lineage"]
+    if d["cache_sha256"] != ident["sha256"] or L.file_identity(a.cache) != ident:
         raise Refused(f"{a.cache} changed while it was read")
     if L.sha256_file(a.wc_map) != a.wc_map_sha256:
         raise Refused(f"{a.wc_map} does not hash to {a.wc_map_sha256}")
@@ -193,16 +205,30 @@ def check_release_inputs(a):
     if wcm.cache_sha256 != ident["sha256"]:
         raise Refused(f"the w_c map was fitted to the cache {wcm.cache_sha256}, not {ident['sha256']}")
     m0 = metas[0]
+    sims = sorted(set(np.asarray(d["sim_name"]).astype(str).tolist()))     # simulation_sets/1 with the cache's names
     for i, m in enumerate(metas):
         if m.get("arch_cfg") != m0.get("arch_cfg") or m.get("recipe") != m0.get("recipe"):
             raise Refused(f"member {i} has another architecture or recipe than member 0")
-        r = m.get("recipe") or {}
-        if r.get("all_sims") is not True or r.get("holdout_sim") is not None:
-            raise Refused(f"member {i} was not trained on every simulation (recipe all_sims {r.get('all_sims')!r}, "
-                          f"holdout_sim {r.get('holdout_sim')!r}): a release member uses them all")
+        why = E.production_recipe_reasons(m, i, sims=sims)
+        if why:
+            raise Refused(f"member {i} is not a production member (it was not trained on every simulation, or it is "
+                          "marked research): " + "; ".join(why))
     if len({m.get("seed") for m in metas}) != len(metas):
         raise Refused("two members share a seed")
-    return prefixes, metas, rec, {"sha256": ident["sha256"], "size": ident["size"]}, wcm, code, files
+    return prefixes, metas, rec, {"sha256": ident["sha256"], "size": ident["size"]}, wcm, code, files, d
+
+
+def content_checks(metas, norms, wcm, d, a):
+    """The production content rules on the given objects (every component must PASS)."""
+    return E.production_content_check(metas, norms, wcm, cache=d, cache_path=a.cache,
+                                      expected_cache_sha256=a.cache_sha256, cache_size=os.path.getsize(a.cache))
+
+
+def _failed(check):
+    return "; ".join(f"{c['component']} {c['outcome']} ({c['sub_reason']}"
+                     + (f", max_rel {c['max_rel']:.3g}" if c.get("max_rel") else "")
+                     + (f": {c['detail'].get('why')}" if c["detail"].get("why") else "") + ")"
+                     for c in check["components"] if c["outcome"] != E.PASS)
 
 
 # -------------------------------------------------------------------------------------------------- verification
@@ -277,12 +303,17 @@ def predictor_check(bundle, bundle_sha, metas, x, tau0, P0, checks, dmax):
 # --------------------------------------------------------------------------------------------------------- modes
 def run_release(a):
     try:
-        prefixes, metas, rec, ident, wcm, code, files = check_release_inputs(a)
+        prefixes, metas, rec, ident, wcm, code, files, d = check_release_inputs(a)
         legacy = [T.load_checkpoint(p) for p in prefixes]           # digests verified above
+        if [json.loads(json.dumps(m)) for _, m, _ in legacy] != metas:
+            raise Refused("a member's meta changed between the two reads")
         block = H.make_lineage_block(cache_record=rec, cache_identity=ident, wc_map=wcm, member_metas=metas,
                                      export_code=code)
         if not block["release_eligible"]:
             raise Refused("the bundle would not be release-eligible: " + "; ".join(block["ineligible_reasons"]))
+        before = content_checks(metas, [n for _, _, n in legacy], wcm, d, a)
+        if not before.passed:
+            raise Refused("the members' content is not the declared full training set: " + _failed(before))
     except Refused as e:
         print(f"refusing: {e}")
         return 2
@@ -295,17 +326,29 @@ def run_release(a):
         H.export_member(q, model, meta, norm)
         out_prefixes.append(q)
     H.export_wc_map(bundle, a.wc_map)
+    back = [H.load_member(q, expected_sha256=S.sha256_file(q + H.EXT), expected_json_sha256=S.sha256_file(q + ".json"))
+            for q in out_prefixes]                                    # the objects actually written
+    from hcd_analysis.emulator import wc_map as W
+    after = content_checks([m for _, m, _ in back], [n for _, _, n in back],
+                           W.read_wc_map(os.path.join(bundle, H.WC_MAP_FILE)), d, a)
+    if not after.passed:
+        print("FAIL: the content checks on the files read back do not pass (no manifest written, nothing loadable): "
+              + _failed(after))
+        return 1
+    del d
     man_path = H.write_manifest(bundle, out_prefixes, {
         "source_sha256sums": os.path.basename(a.sha256sums), "source_sha256sums_sha256": a.sha256sums_sha256,
         "source_files_sha256": files, "cache_file": os.path.basename(a.cache), "export_code": code,
         "versions": _versions("h5"),
         "conversion": "training checkpoints read by train.load_checkpoint after their sha256 matched the pinned "
                       "SHA256SUMS; the cache read by tau0_cache.read_cache; the w_c map by wc_map.read_wc_map",
-        "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()}, lineage=block)
+        "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "eligibility_checks": dict(after, read_back=True, before_writing_passed=before.passed)}, lineage=block)
     bundle_sha = S.sha256_file(man_path)
     checks, dmax = {}, {}
     ens, loaded_metas, _norm = H.load_ensemble(bundle, expected_manifest_sha256=bundle_sha)   # the lineage enforced
-    checks["bundle_lineage_verified"] = loaded_metas.anchored and loaded_metas.lineage_verified
+    checks["bundle_lineage_verified"] = loaded_metas.release_verified and loaded_metas.kind == "release"
+    checks["content_checks_passed"] = after.passed
     loaded = H.load_bundle(bundle, expected_manifest_sha256=bundle_sha)
     x, tau0, P0, r = verify(legacy, loaded, bundle, bundle_sha, evidence, ["release"], checks, dmax)
     predictor_check(bundle, bundle_sha, metas, x, tau0, P0, checks, dmax)

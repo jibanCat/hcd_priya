@@ -708,6 +708,25 @@ def production_row_split(sim_name, *, val_seed=12345, val_frac=0.10, holdout_sim
     return np.sort(avail[perm[n_val:]]), np.sort(avail[perm[:n_val]]), held
 
 
+def multi_holdout_row_split(sim_name, held_sims, *, val_seed=12345, val_frac=0.10):
+    """``production_row_split`` with a SET of held-out simulations (the split rule ``multi_holdout_row_split/1``, used
+    by grouped cross-validation folds): every row of ``held_sims`` is removed, then a fixed random ``val_frac`` of the
+    remaining rows (permutation seeded by ``val_seed``) is the validation split (early stopping only). Returns
+    (train_idx, val_idx, held_idx), sorted. With no held-out simulation it is the production split, with one it is
+    ``production_row_split``'s; numerically identical to the W-1 experiment's splitter. The number of simulations is
+    whatever the cache holds (nothing here assumes a count)."""
+    sim_name = np.asarray(sim_name).astype(str)
+    held_sims = [str(s) for s in held_sims]
+    missing = sorted(set(held_sims) - set(sim_name.tolist()))
+    if missing:
+        raise ValueError(f"held-out simulations not in the cache: {missing}")
+    is_held = np.isin(sim_name, held_sims)
+    avail, held = np.flatnonzero(~is_held), np.flatnonzero(is_held)
+    perm = np.random.default_rng(val_seed).permutation(avail.size)
+    n_val = int(val_frac * avail.size)
+    return np.sort(avail[perm[n_val:]]), np.sort(avail[perm[:n_val]]), held
+
+
 def tau0_edge_holdout(tau0, frac=0.15):
     """Hold out the low+high tau0 tails (the extrapolation probe in tau0-space)."""
     order = np.argsort(tau0)

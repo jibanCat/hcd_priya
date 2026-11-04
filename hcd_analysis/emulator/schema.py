@@ -174,3 +174,23 @@ def validate_cache_schema(d, *, n_rows=None):
             f"L_box_hmpc invariant fails: v_box / analytic deviates by {dev:.3e} > {VBOX_RTOL}")
     derived["vbox_rtol_measured"] = dev
     return {"n_rows": R, "checked": checked, "derived": derived}
+
+
+# the schema-2.0 checkpoint meta keys every member must carry, and the per-row velocity-grid key no checkpoint may carry
+# (here, not in train, so the release readers never import the trainer; train re-exports both)
+SCHEMA2_REQUIRED = ("k_com_hmpc", "L_box_hmpc", "k_convention", "cache_sha256", "param_limits")
+
+
+def velocity_key_paths(obj, prefix=""):
+    """Paths of every dict key named ``kfkms`` (a per-row velocity grid) at any depth of ``obj``."""
+    hits = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            p = f"{prefix}.{k}" if prefix else str(k)
+            if str(k) == "kfkms":
+                hits.append(p)
+            hits += velocity_key_paths(v, p)
+    elif isinstance(obj, (list, tuple)):
+        for i, v in enumerate(obj):
+            hits += velocity_key_paths(v, f"{prefix}[{i}]")
+    return hits

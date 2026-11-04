@@ -188,8 +188,8 @@ def test_the_member_count_must_be_the_blocks(info):
 
 def test_the_block_eligibility_is_computed_never_passed_in(tmp_path):
     info = RT.write_synthetic_bundle(str(tmp_path / "b"), export_code={"commit": RT.SYNTHETIC_COMMIT, "dirty": True})
-    assert info.lineage["release_eligible"] is False and "the export ran from an unknown commit or a dirty tree" in \
-        info.lineage["ineligible_reasons"]
+    assert info.lineage["release_eligible"] is False and "[LIN_EXPORT_CODE] the export ran from an unknown commit or a " \
+        "dirty tree" in info.lineage["ineligible_reasons"]
     with pytest.raises(H.SafeFormatError, match="dirty tree"):
         H.load_ensemble(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
     rec, ident = RT.synthetic_cache_record(code={"commit": None, "dirty": None})       # an ineligible cache
@@ -219,3 +219,210 @@ def test_the_writer_refuses_a_block_naming_another_map(tmp_path, info):
     with pytest.raises(H.SafeFormatError, match="not the w_c map the lineage block names"):
         H.write_manifest(str(bd), [str(bd / os.path.basename(p)) for p in info.prefixes], {}, lineage=block)
     assert L.canonical_json(info.lineage)                                  # the block is plain canonical JSON
+
+
+# -------------------------------------------------------------- the production rule at the library boundary (D5)
+from hcd_analysis.emulator import eligibility as E  # noqa: E402
+import hcd_analysis.predictor as hp  # noqa: E402
+
+
+def _recipe_fn(recipe_edit):
+    def fn(i, model, meta, nm):
+        r = dict(meta["recipe"])
+        recipe_edit(r)
+        return model, dict(meta, recipe=r), nm
+    return fn
+
+
+def _fold(r):
+    r.update(all_sims=False, holdout_sims=["synthsim1"], fold=0, folds_sha256="f" * 64, n_train=36, n_val=4)
+
+
+def _refused_by_every_release_loader(bundle_dir, sha, match):
+    for load in (lambda: H.load_release(bundle_dir, expected_manifest_sha256=sha),
+                 lambda: H.load_ensemble(bundle_dir, expected_manifest_sha256=sha),
+                 lambda: H.load_bundle(bundle_dir, expected_manifest_sha256=sha),
+                 lambda: hp.load_bundle(bundle_dir, sha)):
+        with pytest.raises(H.SafeFormatError, match=match):
+            load()
+
+
+def test_every_reason_carries_a_stable_code(tmp_path):
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), export_code={"commit": None, "dirty": True},
+                                     member_fn=_recipe_fn(_fold))
+    reasons = info.lineage["ineligible_reasons"]
+    assert all(E.reason_code(r) for r in reasons)
+    assert {E.code_class(r) for r in reasons} == {"lineage", "production"}
+    assert {E.reason_code(r) for r in reasons} >= {"LIN_EXPORT_CODE", "ALL_SIMS_NOT_TRUE",
+                                                   "RSV_KEY:recipe.holdout_sims", "RSV_KEY:recipe.fold"}
+    block = json.loads(json.dumps(info.lineage))
+    block["code_commit"] = None
+    tie = H.member_tie_reasons(block, [dict(m, code_dirty=None) for m in json.loads(json.dumps(
+        [RT.synthetic_meta(0, info.cache_record, info.cache_identity)]))])
+    assert {E.reason_code(r) for r in tie} == {"TIE_COUNT", "TIE_COMMIT", "TIE_DIRTY"}
+
+
+def test_a_fold_bundle_written_through_the_library_is_ineligible_and_every_release_loader_refuses_it(tmp_path):
+    """T20/T21: the library writers write it (a research artefact), but it is never release-eligible, and a block
+    forged eligible is refused by the recomputed production rule."""
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(_fold))
+    assert info.lineage["release_eligible"] is False
+    assert any(E.reason_code(r) == "RSV_KEY:recipe.holdout_sims" for r in info.lineage["ineligible_reasons"])
+    _refused_by_every_release_loader(info.bundle_dir, info.manifest_sha256, "does not establish a clean release")
+    sha = _rewrite(info, _forge_eligible)
+    _refused_by_every_release_loader(info.bundle_dir, sha, r"members are not the ones.*RSV_KEY:recipe\.holdout_sims")
+
+
+@pytest.mark.parametrize("edit, code", [
+    (lambda r: r.update(fold=0), "RSV_KEY:recipe.fold"),
+    (lambda r: r.update(holdout_sims=[]), "RSV_KEY:recipe.holdout_sims"),
+    (lambda r: r.update(holdout_sim=""), "RSV_KEY:recipe.holdout_sim"),
+    (lambda r: r.update(all_sims="true"), "ALL_SIMS_NOT_TRUE"),
+    (lambda r: r.update(all_sims=1), "ALL_SIMS_NOT_TRUE"),
+    (lambda r: r.pop("all_sims"), "ALL_SIMS_NOT_TRUE"),
+    (lambda r: r.update(all_sims=None), "ALL_SIMS_NOT_TRUE"),
+    (lambda r: r.update(held_out_sims=["synthsim1"]), "RSV_KEY:recipe.held_out_sims"),
+    (lambda r: r.update(nested={"deeper": {"holdoutSims": ["synthsim1"]}}), "RSV_KEY:recipe.nested.deeper.holdoutSims"),
+    (lambda r: r.update(research={"purpose": "an ablation"}), "RECIPE_RESEARCH"),
+])
+def test_each_malformed_recipe_is_refused_at_the_loader_with_its_code(tmp_path, edit, code):     # T5-T14
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(edit))
+    assert not info.lineage["release_eligible"]
+    sha = _rewrite(info, _forge_eligible)                                    # flags stripped: the block says eligible
+    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*" + code.replace(".", r"\."))
+
+
+def test_a_recipe_that_is_not_an_object_is_refused_at_the_loader(tmp_path):
+    def none_recipe(i, model, meta, nm):
+        return model, dict(meta, recipe=None), nm
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=none_recipe)
+    sha = _rewrite(info, _forge_eligible)
+    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*RECIPE_NOT_DICT")
+
+
+@pytest.mark.parametrize("edit", [lambda r: r.update(threshold=0.5, lr_floor=1e-5, manifold_dim=3, loop=2),
+                                  lambda r: r.update(holdout_sim=None, fold=None),
+                                  lambda r: r.update(cv_selection={
+                                      "schema": "cv_selection/1", "source_cv_set_id": "synthetic cv set",
+                                      "source_folds_digest": "f" * 64,
+                                      "derived": {"synthetic": {"value": True, "rule": "kept as is"}}})])
+def test_ordinary_knobs_and_an_honest_selection_record_load(tmp_path, edit):                 # T14b
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(edit))
+    assert info.lineage["release_eligible"] and not info.lineage["ineligible_reasons"]
+    rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
+    assert rb.anchored and rb.metas.lineage_verified
+    assert hp.load_bundle(info.bundle_dir, info.manifest_sha256).n_members == 2
+
+
+def test_new_synthetic_bundles_declare_the_full_training_set(info):
+    for p in info.prefixes:
+        meta = json.load(open(p + ".json"))["meta"]
+        assert meta["recipe"] == {"synthetic": True, "all_sims": True} and not E.production_recipe_reasons(meta)
+
+
+def test_a_pre_d5_synthetic_bundle_is_historical_it_loads_only_through_the_dev_path(tmp_path):
+    """A3a: a synthetic h5/2 bundle written before version 0.2.0 (recipe {"synthetic": true}, its stored block
+    eligible). The analogue reproduces the old recipe with the current writer, whose made-up w_c map counts the cache's
+    groups; the old writer's map did not, so the refusals of the real pre-0.2.0 bundles also name WCMAP_NOT_FULL_CACHE
+    (T25 checks those bundles)."""
+    def pre_d5(i, model, meta, nm):
+        return model, dict(meta, recipe={"synthetic": True}), nm
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=pre_d5)
+    sha = _rewrite(info, _forge_eligible)                                    # as written before D5: eligible
+    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*ALL_SIMS_NOT_TRUE")
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        ens, metas, _ = H.load_ensemble(info.bundle_dir, expected_manifest_sha256=None)
+    assert [x.category for x in w] == [H.UnanchoredBundleWarning] and len(ens.members) == 2
+    assert not metas.anchored and not metas.lineage_verified
+
+
+# ------------------------------------------------- D5 review R1 M1: a fold-subset w_c map is never a production map
+def test_synthetic_maps_count_the_caches_groups(info):
+    rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
+    assert rb.wc_map.doc["delta_c"]["n_blocks"] == rb.lineage["cache"]["n_groups"]
+    assert H.wc_map_production_reasons(rb.lineage, rb.wc_map) == []
+
+
+def test_a_fold_subset_map_with_production_members_is_refused_by_every_production_loader(tmp_path):
+    """Reviewer R1's reproduction (8o): production members plus a research bundle's honest fold map, written by
+    library calls, must not load as production."""
+    res = RT.write_synthetic_research_bundle(str(tmp_path / "research"))
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), cache=(res.cache_record, res.cache_identity),
+                                     wc_map_path=os.path.join(res.bundle_dir, H.WC_MAP_FILE))
+    assert info.lineage["release_eligible"] is False
+    assert [E.reason_code(r) for r in info.lineage["ineligible_reasons"]] == ["WCMAP_NOT_FULL_CACHE"]
+    assert E.code_class(info.lineage["ineligible_reasons"][0]) == "production"
+    _refused_by_every_release_loader(info.bundle_dir, info.manifest_sha256, "WCMAP_NOT_FULL_CACHE")
+    sha = _rewrite(info, _forge_eligible)                                    # the block forged eligible
+    _refused_by_every_release_loader(info.bundle_dir, sha, "not fitted on the whole training cache.*"
+                                                           "WCMAP_NOT_FULL_CACHE")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert len(H.load_ensemble(info.bundle_dir, expected_manifest_sha256=None)[0].members) == 2   # dev path
+
+
+def test_the_map_rule_is_listed_after_the_member_rules(tmp_path):
+    """A bundle with fold members AND a fold map names both (the member reasons first)."""
+    res = RT.write_synthetic_research_bundle(str(tmp_path / "research"))
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), cache=(res.cache_record, res.cache_identity),
+                                     wc_map_path=os.path.join(res.bundle_dir, H.WC_MAP_FILE),
+                                     member_fn=_recipe_fn(_fold))
+    sha = _rewrite(info, _forge_eligible)
+    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*ALL_SIMS_NOT_TRUE.*"
+                                                           "WCMAP_NOT_FULL_CACHE")
+
+
+# ------------------------------------ PI ruling 2026-11-04 (PU-0522): simulation subsets in any representation
+PRIYA_FORM = "ns0.91Ap2e-09herei3.5heref3alphaq2hub0.7omegamh20.14hireionz7bhfeedback0.05"   # made-up values
+
+
+@pytest.mark.parametrize("key, value", [
+    ("excluded", ["synthsim1"]), ("exclude", ["synthsim1"]), ("train_sims", ["synthsim0"]),     # the R1 m2 spellings
+    ("split", {"train": ["synthsim0"], "test": ["synthsim1"]}),
+    ("opts", {"runs": [["synthsim1"]]}),                                                     # nested, innocuous key
+    ("q9", "synthsim1; synthsim1"), ("w", {"synthsim0": 1.0}), ("zq7", [PRIYA_FORM])])
+def test_a_simulation_list_under_any_key_is_refused_by_every_release_loader(tmp_path, key, value):
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(lambda r: r.update({key: value})))
+    codes = {E.reason_code(r) for r in info.lineage["ineligible_reasons"]}
+    assert info.lineage["release_eligible"] is False and codes and all(c.startswith(f"SIM_SET:recipe.{key}")
+                                                                       for c in codes), codes
+    _refused_by_every_release_loader(info.bundle_dir, info.manifest_sha256, "SIM_SET")
+
+
+def test_a_hand_edited_block_hiding_a_simulation_list_is_refused_by_the_recomputation(tmp_path):
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(lambda r: r.update(zq7=[PRIYA_FORM])))
+    sha = _rewrite(info, _forge_eligible)
+    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*SIM_SET:recipe.zq7")
+
+
+def test_a_list_of_every_simulation_of_the_cache_is_production(tmp_path):
+    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(
+        lambda r: r.update(sims_used=["synthsim1", "synthsim0"])))
+    assert info.lineage["release_eligible"] is True
+    assert H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256).release_verified is True
+    assert type(hp.load_bundle(info.bundle_dir, info.manifest_sha256)).__name__ == "Bundle"
+
+
+def _named_cache(n_groups=2):
+    """A synthetic cache record whose simulations carry names in the simulation-name form (made-up values)."""
+    rec, ident = RT.synthetic_cache_record(n_groups=n_groups)
+    names = [f"ns0.9{g}Ap2e-09herei3.5heref3alphaq2hub0.7omegamh20.14hireionz7bhfeedback0.05" for g in range(n_groups)]
+    raw = json.dumps(rec)
+    for g, n in enumerate(names):
+        raw = raw.replace(f"synthsim{g}", n)
+    return (json.loads(raw), ident), names
+
+
+def test_at_load_a_full_list_in_the_simulation_name_form_is_counted_against_the_map(tmp_path):
+    cache, names = _named_cache()
+    full = RT.write_synthetic_bundle(str(tmp_path / "f"), cache=cache, member_fn=_recipe_fn(
+        lambda r: r.update(sims_used=list(names))))
+    assert full.lineage["release_eligible"] is True
+    assert H.load_release(full.bundle_dir, expected_manifest_sha256=full.manifest_sha256).release_verified is True
+    assert type(hp.load_bundle(full.bundle_dir, full.manifest_sha256)).__name__ == "Bundle"
+    part = RT.write_synthetic_bundle(str(tmp_path / "p"), cache=cache, member_fn=_recipe_fn(
+        lambda r: r.update(sims_used=names[:1])))
+    assert {E.reason_code(r) for r in part.lineage["ineligible_reasons"]} == {"SIM_SET:recipe.sims_used"}
+    sha = _rewrite(part, _forge_eligible)
+    _refused_by_every_release_loader(part.bundle_dir, sha, "members are not the ones.*SIM_SET:recipe.sims_used")

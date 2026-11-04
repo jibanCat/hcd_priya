@@ -825,6 +825,7 @@ def test_an_h5_1_bundle_loads_only_through_the_historical_loader_with_a_reason(t
     assert isinstance(ens, EnsembleEmulator) and [m["seed"] for m in metas] == [0, 1]
     assert metas.historical_reason == "a reproduction" and not metas.lineage_verified and metas.anchored
     assert metas.format == H.FORMAT_HISTORICAL and "a reproduction" in caplog.text
+    assert metas.kind == "historical" and metas.release_verified is False                   # T24
     assert H.verify_manifest_historical(bd, expected_sha256=sha) == pres
     with pytest.raises(H.SafeFormatError, match="manifest"):
         H.load_ensemble_historical(bd, expected_manifest_sha256="f" * 64, reason="r")
@@ -843,3 +844,18 @@ def test_the_historical_loader_keeps_the_h5_1_checks(tmp_path):
     os.remove(os.path.join(bd, "extra.json"))
     with h5py.File(pres[1] + ".h5", "r") as f:
         assert f.attrs["format"] == H.FORMAT_HISTORICAL
+
+
+def test_a_research_bundle_loads_through_the_research_loader_only(tmp_path):
+    """The research path on this HDF5 stack too (B's older-libhdf5 job runs this file): the release loaders refuse a
+    research bundle and load_research reads it, anchored, as a ResearchBundle."""
+    res = RT.write_synthetic_research_bundle(str(tmp_path / "research"), arch=ARCH, norm=_norm())
+    for load in (H.load_release, H.load_ensemble, H.load_bundle):
+        with pytest.raises(H.SafeFormatError, match="never a production model"):
+            load(res.bundle_dir, expected_manifest_sha256=res.manifest_sha256)
+    rb = H.load_research(res.bundle_dir, expected_manifest_sha256=res.manifest_sha256, purpose="format test")
+    assert isinstance(rb, H.ResearchBundle) and rb.kind == "research" and not rb.release_verified
+    assert len(rb.ensemble.members) == 2 and rb.metas.format == H.FORMAT and rb.split["held_out_sims"]
+    rel = RT.write_synthetic_bundle(str(tmp_path / "release"), arch=ARCH, norm=_norm())
+    rr = H.load_release(rel.bundle_dir, expected_manifest_sha256=rel.manifest_sha256)
+    assert rr.kind == "release" and rr.release_verified and rr.metas.kind == "release" and rr.metas.release_verified

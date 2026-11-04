@@ -9,11 +9,16 @@ amplitudes and no prior.
     stack = emu.predict_many(params, z=[2.6, 2.8, 3.0], tau0_amp=1.0, dtau0=0.0)
     P_tot = hp.add_hcd(stack, A)                                             # A: (3,) for every z, or (n_z, 3)
 
-**Loading.** ``load_bundle`` loads a bundle of format ``hcd_priya.h5/2`` through ``safe_h5.load_release``, anchored on
-the manifest sha256 published with the release: the bundle's lineage block must establish a clean lineage (the
-corrected finder, a release-eligible training cache, the members trained on it at one clean commit, the w_c map fitted
-to it), or it is refused. ``None`` is refused here; an unanchored development load is
-``safe_h5.load_ensemble(..., expected_manifest_sha256=None)``.
+**Loading.** ``load_bundle`` loads a PRODUCTION bundle of format ``hcd_priya.h5/2`` through
+``safe_h5.load_release``, anchored on the manifest sha256 published with the release: the bundle's lineage block must
+establish a clean lineage (the corrected finder, a release-eligible training cache, the members trained on it at one
+clean commit, the w_c map fitted to it) and every member must be a production member (trained on every simulation of
+the cache: ``eligibility.production_recipe_reasons``), or it is refused; ``Bundle`` recomputes that eligibility
+itself. ``None`` is refused here; an unanchored development load is
+``safe_h5.load_ensemble(..., expected_manifest_sha256=None)``. A RESEARCH bundle (cross-validation folds,
+full-simulation research models: ``provenance.research``) is refused by ``load_bundle`` and loads with
+``load_research_bundle(bundle_dir, sha256, purpose=...)``, which returns a ``ResearchPredictor`` (the same forward,
+every prediction flagged ``research_model``); it is never a ``Bundle``.
 
 **Inputs.** ``params``: a dict of the nine PRIYA parameters (``PARAM_NAMES``): ``ns`` and ``Ap`` at the PRIYA pivot
 k_p = 0.78 h/Mpc, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hireionz``, ``bhfeedback``. ``z``: a PRIYA
@@ -215,15 +220,11 @@ class Prediction:
     stacked: bool
 
 
-class Bundle:
-    """A loaded release bundle (``load_bundle``)."""
+class _PredictorBase:
+    """The forward shared by the production ``Bundle`` and the ``ResearchPredictor`` (moved unchanged from
+    ``Bundle``): the members' checks, the jitted forward, the attributes, the labels, the flags."""
 
-    def __init__(self, release_bundle):
-        if not jax.config.jax_enable_x64:
-            raise RuntimeError("the predictor needs JAX float64 (import hcd_analysis.emulator first)")
-        rb = release_bundle
-        if not rb.anchored or rb.metas.format != _H.FORMAT:
-            raise _H.SafeFormatError("the predictor takes only an anchored hcd_priya.h5/2 release bundle")
+    def _setup(self, rb):
         for i, m in enumerate(rb.metas):
             if m.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
                 raise _H.SafeFormatError(f"member {i}: checkpoint schema {m.get('schema_version')!r}")
@@ -363,13 +364,115 @@ class Bundle:
                 "w_c_xbar_extrapolated": bool(any(z < xb_lo or z > xb_hi for z in zs))}
 
 
+class Bundle(_PredictorBase):
+    """A loaded production release bundle (``load_bundle``). It takes only a ``safe_h5.ReleaseBundle`` of kind
+    "release" that is release-verified and anchored, with the release-verified ``MemberMetas`` of the same manifest,
+    and it RECOMPUTES the eligibility from the bundle's own block, member metas and w_c map
+    (``safe_h5.lineage_block_reasons``, ``member_reasons``: the ties and the production rule,
+    ``wc_map_production_reasons``) and checks that the map is the one the block names, instead of trusting stored
+    flags; a research marking is refused. A hand-built object therefore cannot pass as production by its flags alone.
+    The network arrays and the normaliser of a hand-built object are not verified (this is not a defence against code
+    that forges the objects or the metadata itself)."""
+
+    def __init__(self, release_bundle):
+        if not jax.config.jax_enable_x64:
+            raise RuntimeError("the predictor needs JAX float64 (import hcd_analysis.emulator first)")
+        rb = release_bundle
+        if not isinstance(rb, _H.ReleaseBundle) or rb.kind != "release" or rb.release_verified is not True \
+                or rb.anchored is not True:
+            raise _H.SafeFormatError("the predictor takes only an anchored hcd_priya.h5/2 release bundle "
+                                     "(safe_h5.load_release: kind release, release_verified); a research bundle loads "
+                                     "with predictor.load_research_bundle")
+        prov = rb.manifest.get("provenance") if isinstance(rb.manifest, dict) else None
+        if not isinstance(prov, dict) or "research" in prov:
+            raise _H.SafeFormatError("the predictor refuses a research bundle (provenance.research) or a provenance "
+                                     "that is not a JSON object: load_research_bundle")
+        m = rb.metas
+        if not (isinstance(m, _H.MemberMetas) and m.format == _H.FORMAT and m.kind == "release"
+                and m.release_verified is True and m.manifest_sha256 == rb.manifest_sha256):
+            raise _H.SafeFormatError("the bundle's metas are not the release-verified metas of this manifest "
+                                     "(safe_h5.load_release)")
+        block = rb.lineage if isinstance(rb.lineage, dict) else {}
+        why = (_H.lineage_block_reasons(block, _H._release_finder_ids())
+               + _H.member_reasons(block, list(rb.metas), n_sims=_H.wc_map_n_sims(rb.wc_map))
+               + _H.wc_map_production_reasons(block, rb.wc_map))
+        if why or block.get("release_eligible") is not True or block.get("ineligible_reasons"):
+            raise _H.SafeFormatError("the bundle is not a production release bundle (eligibility recomputed): "
+                                     + "; ".join(why or ["the block is stated ineligible"]))
+        from . import lineage as _L
+        w, wm = block.get("wc_map") or {}, rb.wc_map
+        if getattr(wm, "sha256", None) != w.get("sha256") or _L.record_sha256(wm.record) != \
+                w.get("lineage_record_sha256") or wm.cache_sha256 != (block.get("cache") or {}).get("sha256"):
+            raise _H.SafeFormatError("the w_c map is not the one the lineage block names")
+        self._setup(rb)
+
+
+class ResearchPredictor(_PredictorBase):
+    """A loaded RESEARCH bundle (``load_research_bundle``): the same forward as ``Bundle``, on a
+    ``safe_h5.ResearchBundle`` only. It is not a ``Bundle``. Every prediction is flagged ``research_model`` True and
+    carries the declared split (``research_split``) and the recorded content-check outcomes
+    (``research_content_checks``); the labels say it is a research model. ``research``, ``purpose``,
+    ``load_purpose`` and ``split`` describe it."""
+
+    def __init__(self, research_bundle):
+        if not jax.config.jax_enable_x64:
+            raise RuntimeError("the predictor needs JAX float64 (import hcd_analysis.emulator first)")
+        rb = research_bundle
+        if not isinstance(rb, _H.ResearchBundle) or rb.kind != "research" or rb.anchored is not True \
+                or getattr(rb.metas, "format", None) != _H.FORMAT:
+            raise _H.SafeFormatError("ResearchPredictor takes a research bundle from safe_h5.load_research")
+        self._setup(rb)
+
+    @property
+    def research(self):
+        return copy.deepcopy(self._rb.research)
+
+    @property
+    def purpose(self):
+        return self._rb.purpose
+
+    @property
+    def load_purpose(self):
+        return self._rb.load_purpose
+
+    @property
+    def split(self):
+        return copy.deepcopy(self._rb.split)
+
+    @property
+    def provenance(self):
+        return dict(super().provenance, model_kind="research", research=self.research,
+                    load_purpose=self._rb.load_purpose)
+
+    def labels(self):
+        sp = self._rb.split
+        return dict(super().labels(), model=(f"a RESEARCH model ({self._rb.purpose}; split {sp['rule']}, held out "
+                                             f"{sp['held_out_sims']}): never a production model"))
+
+    def _flags(self, pv, th, zs, taus, k):
+        out = super()._flags(pv, th, zs, taus, k)
+        out.update(research_model=True, research_split=copy.deepcopy(self._rb.split),
+                   research_content_checks={c.get("component"): c.get("outcome")
+                                            for c in self._rb.research.get("content_checks") or []})
+        return out
+
+
 def load_bundle(bundle_dir, expected_manifest_sha256):
-    """Load an approved release bundle (``hcd_priya.h5/2``) anchored on its published manifest sha256; ``None`` and
-    any bundle whose clean lineage cannot be established are refused (safe_h5.load_release). Returns a ``Bundle``."""
+    """Load an approved release bundle (``hcd_priya.h5/2``) anchored on its published manifest sha256; ``None``, any
+    bundle whose clean lineage cannot be established, a research bundle and any member that is not a production
+    member (trained on every simulation of the cache) are refused (safe_h5.load_release). Returns a ``Bundle``."""
     if expected_manifest_sha256 is None:
         raise _H.SafeFormatError("load_bundle needs the published manifest sha256; None is refused (an unanchored "
                                  "development load is safe_h5.load_ensemble(..., expected_manifest_sha256=None))")
     return Bundle(_H.load_release(bundle_dir, expected_manifest_sha256=expected_manifest_sha256))
+
+
+def load_research_bundle(bundle_dir, expected_manifest_sha256, *, purpose):
+    """Load a RESEARCH bundle (cross-validation folds, full-simulation research models) anchored on its manifest
+    sha256, with a non-empty ``purpose`` (safe_h5.load_research). Returns a ``ResearchPredictor``; a production
+    bundle is refused here."""
+    return ResearchPredictor(_H.load_research(bundle_dir, expected_manifest_sha256=expected_manifest_sha256,
+                                              purpose=purpose))
 
 
 def add_hcd(pred, A):
