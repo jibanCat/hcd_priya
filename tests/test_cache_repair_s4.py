@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from hcd_analysis.paths import REPO_ROOT
-from tests.gate_helpers import real_cache_path, require_real_cache
+from tests.gate_helpers import external_path, real_cache_path, require_real_cache
 
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import splice_tau0_cache as sp  # noqa: E402
@@ -91,7 +91,7 @@ def test_restored_z30_rows_and_their_block():
     assert np.allclose(np.einsum("rc,rck->rk", w, n["P_tier_c_filtered"]), n["P_tier_p"], rtol=1e-10, atol=0)
 
 
-SHARDS = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/caches/s4_build_shards"
+SHARDS = external_path("HCD_EMULATOR_V2_DIR", "caches", "s4_build_shards")
 # Built with 2 threads, as the historical production build (PU-0044): fake_spectra's mean-flux scale solve is
 # thread-count dependent at ~1e-9 (the first, 4-thread shards shard_03f03b8_task{2..5}.h5 differ by that much in scale
 # and the keys computed with it; kept as the recorded evidence).

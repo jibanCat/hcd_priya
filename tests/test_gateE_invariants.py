@@ -10,9 +10,10 @@ import pytest
 
 from hcd_analysis.emulator import data_likelihood as DL
 
-DATA = {"DESI": "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
-        "eBOSS": "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
-        "KS": "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"}
+from tests.gate_helpers import external_path  # noqa: E402
+DATA = {"DESI": external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d", "desi_dr1_p1d.npz"),
+        "eBOSS": external_path("HCD_P1D_DATA_DIR", "eboss_dr14_p1d", "eboss_dr14_p1d.npz"),
+        "KS": external_path("HCD_LYAEMU_PARENT", "lyaemu", "data", "kodiaq_squad", "")}
 
 # Production leg arguments: build_legb_ctx(sample_res=True, coherent_res=False) with PROD_FORWARD_BY_LEG
 # (DESI and eBOSS metals on, KS resolution_float=True, k_max=0.065).

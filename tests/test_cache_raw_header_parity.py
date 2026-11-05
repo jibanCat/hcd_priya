@@ -17,18 +17,17 @@ import pytest
 from hcd_analysis.emulator import data as D
 from hcd_analysis.emulator import kcoord as KC
 from hcd_analysis.emulator import schema as S
-from tests.gate_helpers import real_cache_path, require_real_cache
+from tests.gate_helpers import external_path, real_cache_path, require_real_cache
 from tests.raw_headers import _raw_headers
 
 LF = real_cache_path("lf")
 HR = real_cache_path("hr")
 SIM_OUR_GAP = "ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662omegamh20.144hireionz7.47bhfeedback0.0347"
-RAW = "/nfs/turbo/umor-yueyingn/mfho/emu_full"
+RAW = external_path("HCD_LF_RAW_DIR")
 LF_HIST = real_cache_path("lf_hist")
-HR_RAW = "/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2"
-HCD_OUT = "/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"
-UP_HR6 = ("/nfs/turbo/umor-yueyingn/mfho/birdgroup/lya_xq100/kodiaq_2_2_4_6-48-48_20260414_newhires/hires/"
-          "mf_emulator_flux_vectors_tau1000000.hdf5")
+HR_RAW = external_path("HCD_HR_RAW_DIR")
+HCD_OUT = external_path("HCD_OUTPUTS_DIR")
+UP_HR6 = external_path("HCD_UPSTREAM_HR_DIR", "mf_emulator_flux_vectors_tau1000000.hdf5")
 F8_GROUP = (SIM_OUR_GAP, 17)
 
 

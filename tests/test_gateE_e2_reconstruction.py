@@ -63,8 +63,9 @@ def test_e2_forward_equals_independent_reconstruction(prod_ctx):
 
 
 # ------------------------------------------------------------------------------------------------ E2 (covariance part)
-T1_PRODUCT = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/gateE/products/t1_gateE.npz"
-T3_PRODUCT = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/gateE/products/t3_gateE.npz"
+from tests.gate_helpers import external_path  # noqa: E402
+T1_PRODUCT = external_path("HCD_EMULATOR_V2_DIR", "gateE", "products", "t1_gateE.npz")
+T3_PRODUCT = external_path("HCD_EMULATOR_V2_DIR", "gateE", "products", "t3_gateE.npz")
 
 
 @pytest.fixture(scope="module")

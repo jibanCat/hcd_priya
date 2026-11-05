@@ -10,7 +10,8 @@ import pytest
 
 from hcd_analysis.emulator import mf_modes as MM
 
-PRODUCT = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/mf/gateD/mf_modes_all6.npz"
+from tests.gate_helpers import external_path  # noqa: E402
+PRODUCT = external_path("HCD_EMULATOR_V2_DIR", "mf", "gateD", "mf_modes_all6.npz")
 
 
 def _synthetic_tables(K=5, C=4, nz=3, nr=4, seed=0):

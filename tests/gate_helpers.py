@@ -46,6 +46,24 @@ def real_cache_path(which="lf"):
     return os.path.join(str(REPO_ROOT), "hcd_analysis", "_emulator_data", f"observables_tau0_{which}.h5")
 
 
+# Data that lives outside the repository is located by environment variables, never by an absolute literal. An unset
+# variable gives a path that does not exist, so the test's own guard skips (or fails under HCD_GATE_RUN=1) and names
+# the variable. The variables, each a directory:
+#   HCD_CHECKPOINTS_DIR      the production ensemble members (also read by prod_ensemble.verify_manifest)
+#   HCD_EMULATOR_V2_DIR      the emulator products: gateC_eval/, mf/gateD/, gateE/products/, caches/s4_build_shards/
+#   HCD_LF_RAW_DIR           the LF simulation outputs (config data_root: <sim>/output/SPECTRA_<snap>/...)
+#   HCD_HR_RAW_DIR           the HR simulation outputs
+#   HCD_OUTPUTS_DIR          the HCD catalogue outputs (<sim>/snap_<snap>/..., hires/...)
+#   HCD_UPSTREAM_HR_DIR      the upstream PRIYA HR emulator directory (mf_emulator_flux_vectors_*.hdf5)
+#   HCD_P1D_DATA_DIR         the P1D data products (desi_dr1_p1d/, eboss_dr14_p1d/)
+#   HCD_HISTORICAL_CHECKOUT  the checkout holding the frozen pre-2026-10 products (checkpoints/, _emulator_data/)
+#   HCD_LYAEMU_PARENT, HCD_KS_BASEDIR   as in tests/external/test_lyaemu_adapter_guards.py
+def external_path(var, *parts):
+    """``os.path.join($var, *parts)``; ``<var unset>/...`` (a path that never exists) when the variable is unset."""
+    root = os.environ.get(var) or f"<{var} unset>"
+    return os.path.join(root, *parts)
+
+
 def require_real_cache(path):
     if os.path.exists(path):
         return path

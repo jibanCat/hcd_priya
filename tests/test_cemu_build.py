@@ -72,7 +72,8 @@ def test_bracketing_modes_cover_every_bin_over_the_box():
             assert lo <= int(np.floor(u_lo)) and int(np.ceil(u_hi)) <= hi
 
 
-EVAL = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/gateC_eval"
+from tests.gate_helpers import external_path  # noqa: E402
+EVAL = external_path("HCD_EMULATOR_V2_DIR", "gateC_eval")
 
 
 def test_loo_ensemble_residuals_are_member_means_on_the_held_out_rows():

@@ -17,14 +17,15 @@ KCOM = 2 * np.pi * np.arange(1, K + 1) / L_BOX_HMPC
 CACHE = "d9c3783892872f8739f6c1a4039ee84cae5ab84803235a61d7d06ac119336cf2"
 PROV = dict(code_commit="abc1234", cache_sha256=CACHE, inputs={"eval_a": "11" * 32}, row_rule="validation rows")
 
-GATEC_NOT_FOR_USE = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC/error_vector.npz"
+from tests.gate_helpers import external_path  # noqa: E402
+GATEC_NOT_FOR_USE = external_path("HCD_CHECKPOINTS_DIR", "error_vector.npz")
 from hcd_analysis.paths import REPO_ROOT_STR  # noqa: E402
-HIST = ["/home/mfho/hcd_priya/checkpoints/error_vector.npz",  # historical-artifact path
-        "/home/mfho/hcd_priya/checkpoints/error_vector_xclass.npz",  # historical-artifact path
+HIST = [external_path("HCD_HISTORICAL_CHECKOUT", "checkpoints", "error_vector.npz"),
+        external_path("HCD_HISTORICAL_CHECKOUT", "checkpoints", "error_vector_xclass.npz"),
         f"{REPO_ROOT_STR}/figures/analysis/04_emulator/mf_cemu_floor.npz",
-        "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"]  # historical-artifact path
-MF_PRODUCT = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/mf/gateD/mf_modes_all6.npz"
-GATEC = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC"
+        external_path("HCD_HISTORICAL_CHECKOUT", "hcd_analysis", "_emulator_data", "mf_cemu_emucoh.npz")]
+MF_PRODUCT = external_path("HCD_EMULATOR_V2_DIR", "mf", "gateD", "mf_modes_all6.npz")
+GATEC = external_path("HCD_CHECKPOINTS_DIR")
 
 
 def _unavailable(msg):
