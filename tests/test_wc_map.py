@@ -287,22 +287,75 @@ WC_MAP_RTOL = 1e-9
 TOLERANT_FIELDS = (("delta_c", "coeffs"), ("delta_c", "resid_std"), ("delta_c", "resid_max"), ("xbar", "coeffs"))
 
 
-def numpy_pins(text):
-    """The ``numpy==X`` pins of a pip constraints text (comment lines and other packages ignored)."""
-    return tuple(re.findall(r"^numpy==([^\s#;]+)\s*(?:#.*)?$", text, re.M))
+CONSTRAINTS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "ci",
+                                "constraints-devenv.txt")
+_STRICT_REQUIREMENT = re.compile(r"(?P<name>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\s*(?:\[[^\]]*\])?\s*"
+                                 r"(?P<spec>[^;]*?)\s*(?:;(?P<marker>.*))?")
+_EXACT_SPEC = re.compile(r"===?\s*(?P<version>[0-9][0-9A-Za-z.+!_-]*)")
 
 
-def pinned_numpy_versions():
-    """The numpy version(s) of the supported, pinned environment (docs/compatibility.md; the PI's rule B-D3): the
-    ``numpy==`` pins of ``tools/ci/constraints-devenv.txt`` when this checkout carries Session B's constraints file,
-    else ``PINNED_NUMPY_RECORDED`` (a tests-only copy, or a tree without that file)."""
-    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "ci",
-                        "constraints-devenv.txt")
-    if os.path.isfile(path):
-        pins = numpy_pins(open(path).read())
-        if pins:
-            return pins
-    return PINNED_NUMPY_RECORDED
+def _requirement_strict(line):
+    """``(canonical name, exact version or None)`` of one requirement line, without ``packaging``: a name (``-``,
+    ``_`` and ``.`` runs equal, any case), optional extras, the specifiers and an optional environment marker. The
+    version is returned only for one ``==`` or ``===`` specifier without a wildcard. Unparsable: ValueError."""
+    m = _STRICT_REQUIREMENT.fullmatch(line)
+    if m is None or (m.group("marker") is not None and not m.group("marker").strip()):
+        raise ValueError(f"unparsable requirement line {line!r}")
+    e = _EXACT_SPEC.fullmatch(m.group("spec").strip())
+    return re.sub(r"[-_.]+", "-", m.group("name")).lower(), e.group("version") if e and "*" not in e.group(0) else None
+
+
+def _requirement(line):
+    """``(canonical name, exact version or None)`` of one requirement line, with the standard requirement grammar
+    (``packaging.requirements``, a pytest dependency) when it is importable, else ``_requirement_strict``."""
+    try:
+        from packaging.requirements import InvalidRequirement, Requirement
+        from packaging.utils import canonicalize_name
+    except ImportError:
+        return _requirement_strict(line)
+    try:
+        req = Requirement(line)
+    except InvalidRequirement as e:
+        raise ValueError(f"unparsable requirement line {line!r}: {e}") from None
+    specs = list(req.specifier)
+    exact = len(specs) == 1 and specs[0].operator in ("==", "===") and "*" not in specs[0].version
+    return canonicalize_name(req.name), specs[0].version if exact else None
+
+
+def numpy_pins(text, parse=None):
+    """The exact numpy pins of a pip constraints text, in any valid spelling (spaces, case, an environment marker, an
+    inline comment, per-requirement options such as ``--hash``); comment, blank and option (``-c``, ``-r``) lines are
+    skipped. Fail closed: a numpy line that is not one exact pin (a range, a wildcard, several specifiers) or any
+    unparsable line raises ValueError. ``parse``: the line parser (default ``_requirement``)."""
+    parse = parse or _requirement
+    pins = []
+    for raw in text.splitlines():
+        line = re.sub(r"\s+--\S.*$", "", re.sub(r"(^|\s)#.*$", "", raw)).strip()
+        if not line or line.startswith("-"):
+            continue
+        name, version = parse(line)
+        if name == "numpy":
+            if version is None:
+                raise ValueError(f"the numpy line {raw.strip()!r} is not an exact pin (numpy==X)")
+            pins.append(version)
+    return tuple(pins)
+
+
+def pinned_numpy_versions(path=CONSTRAINTS_FILE):
+    """The numpy version(s) of the supported, pinned environment (docs/compatibility.md; the PI's rule B-D3).
+
+    - When the constraints file (Session B's ``tools/ci/constraints-devenv.txt``) exists, its exact numpy pins, read
+      by ``numpy_pins``. Fail closed: a file that pins no numpy version, or whose numpy line is not one exact pin,
+      raises ValueError, so the test fails instead of silently taking the recorded version.
+    - Only when the file is absent (a tests-only copy, or a tree without it): ``PINNED_NUMPY_RECORDED``."""
+    if not os.path.exists(path):
+        return PINNED_NUMPY_RECORDED
+    with open(path) as fh:
+        pins = numpy_pins(fh.read())
+    if not pins:
+        raise ValueError(f"{path} exists but pins no numpy version (numpy==X): the pinned stack cannot be told, so "
+                         "the bit-level T31 digests cannot be placed; fix the constraints file or this parser")
+    return pins
 
 
 def payload_mismatches(got, want, rtol=WC_MAP_RTOL):
@@ -411,10 +464,16 @@ def test_golden_digests_of_the_map_rules(cache5):                               
     difference is 5.0e-13 relative (``xbar.coeffs`` of the subset fit, 3598 ulps: the degree-2 fit's conditioning
     amplifies another linear-algebra path's last-bit rounding), then 6.4e-14 (``delta_c.coeffs``), 3.0e-15
     (``resid_max``, 18 ulps) and 2.2e-16 (``resid_std``, 1 ulp); the means, ranges and counts are identical. 1e-9 is
-    2000 times the largest, so a linear-algebra path that rounds several times worse still passes; it is 1e7 times
-    below the smallest scientific scale of these numbers (the emulator's relative error, about 1e-2). A change of the
-    rules (another simulation set, estimator, degree or clamp) moves the fitted outputs by orders of magnitude more
-    than 1e-9 and fails (test_the_t31_comparison_refuses_a_change_above_the_tolerance)."""
+    2000 times the largest, so a linear-algebra path that rounds several times worse still passes, and it is above the
+    normwise worst case of these fits' conditioning (cond(V)^2 eps, at most about 3e-10 here); it is orders of
+    magnitude below any scientific use of these numbers. A change of the rules (another simulation set, estimator,
+    degree or clamp) moves the fitted outputs by orders of magnitude more than 1e-9 and fails
+    (test_the_t31_comparison_refuses_a_change_above_the_tolerance).
+
+    The pinned branch is keyed on the numpy version string, not on its linear-algebra build: the same numpy version
+    built on another BLAS would fail the bit-level digests, loudly (fail closed, outside the supported stack). The
+    means are compared exactly; on some other, unsupported numpy a reduction could move one by an ulp and fail
+    (fail closed by design)."""
     d = _load(cache5)
     full, sub = W.refit(d), W.refit_subset(d, ["sim0", "sim1", "sim3", "sim4"])
     if np.__version__ in pinned_numpy_versions():
@@ -455,6 +514,9 @@ def test_the_t31_comparison_refuses_a_change_above_the_tolerance():
     bad = copy.deepcopy(want)
     del bad["xbar"]["n_groups"]
     assert payload_mismatches(bad, want) == ["xbar keys"]
+    assert payload_mismatches(dict(want, class_order=["clean", "LLS", "DLA", "subDLA"]), want) == ["class_order"]
+    assert payload_mismatches(dict(want, format="hcd_priya.wc_map/2"), want) == ["format"]
+    assert payload_mismatches(dict(want, extra=1), want) == ["keys"]
     assert "delta_c.coeffs" in payload_mismatches(GOLDEN_PAYLOAD_REFIT, want)      # another simulation set fails
 
 
@@ -462,3 +524,36 @@ def test_the_pinned_numpy_versions():
     assert numpy_pins("jax==0.10.1\nnumpy==2.4.6\nnumpyro==0.21.0\nscipy==1.17.1\n") == ("2.4.6",)
     assert numpy_pins("# numpy==1.0 (a comment)\nnumpy==2.4.6  # the pin\n") == ("2.4.6",)
     assert pinned_numpy_versions() and all(re.fullmatch(r"\d+\.\d+\.\d+", v) for v in pinned_numpy_versions())
+
+
+# T31 review t1 (fail closed): a pin is read in any valid spelling, and a constraints file without one fails the test
+@pytest.mark.parametrize("parse", [None, "strict"], ids=["requirement-grammar", "strict-parser"])
+@pytest.mark.parametrize("line", ["numpy==2.5.4", "numpy == 2.5.4", "  numpy ==2.5.4", "NumPy==2.5.4", "NUMPY==2.5.4",
+                                  "numpy==2.5.4 ; python_version >= '3.11'", "numpy==2.5.4;python_version>='3.11'",
+                                  "numpy==2.5.4  # the pin", "numpy===2.5.4", "numpy==2.5.4 --hash=sha256:" + "0" * 64])
+def test_a_numpy_pin_in_any_valid_spelling_is_read(line, parse):
+    text = f"# the supported stack\njax==0.10.1\n{line}\nnumpyro==0.21.0\n-c other.txt\n"
+    assert numpy_pins(text, parse=_requirement_strict if parse else None) == ("2.5.4",)
+
+
+@pytest.mark.parametrize("parse", [None, "strict"], ids=["requirement-grammar", "strict-parser"])
+@pytest.mark.parametrize("line", ["numpy>=2.4", "numpy==2.*", "numpy==2.4.6,<3", "numpy", "numpy==", "numpy=2.4.6",
+                                  "numpy~=2.4"])
+def test_a_numpy_line_that_is_not_an_exact_pin_fails(line, parse):
+    with pytest.raises(ValueError, match="numpy"):
+        numpy_pins(f"jax==0.10.1\n{line}\n", parse=_requirement_strict if parse else None)
+
+
+@pytest.mark.parametrize("text", ["", "# only comments\n\n", "jax==0.10.1\nscipy==1.17.1\n", "numpyro==0.21.0\n"])
+def test_a_constraints_file_that_pins_no_numpy_fails(tmp_path, text):
+    path = tmp_path / "constraints-devenv.txt"
+    path.write_text(text)
+    with pytest.raises(ValueError, match="pins no numpy version"):
+        pinned_numpy_versions(str(path))
+
+
+def test_the_recorded_pin_applies_only_when_the_constraints_file_is_absent(tmp_path):
+    assert pinned_numpy_versions(str(tmp_path / "absent.txt")) == PINNED_NUMPY_RECORDED
+    path = tmp_path / "constraints-devenv.txt"
+    path.write_text("numpy == 9.9.9 ; python_version >= '3.11'\n")
+    assert pinned_numpy_versions(str(path)) == ("9.9.9",)
