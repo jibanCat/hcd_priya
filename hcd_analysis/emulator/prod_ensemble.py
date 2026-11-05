@@ -100,11 +100,17 @@ def verify_manifest(checkpoints_dir=None, manifest_path=None):
     Returns ``(manifest, member_prefixes)`` where ``member_prefixes`` are the extensionless
     checkpoint paths (what ``train.load_checkpoint`` / ``ensemble.load_ensemble`` take), in
     manifest order.
+
+    The members' directory is, in order: ``checkpoints_dir``; the manifest's ``checkpoints_dir`` when it names one;
+    the environment variable ``HCD_CHECKPOINTS_DIR``; the manifest's own directory. The committed manifest names no
+    directory (``null``): the binaries are not in git, so a deployment sets ``HCD_CHECKPOINTS_DIR`` or passes the
+    directory, and an unresolved location fails the existence check loudly.
     """
     manifest_path = manifest_path or DEFAULT_MANIFEST_PATH
     manifest = load_manifest(manifest_path)
     if checkpoints_dir is None:
-        checkpoints_dir = manifest.get("checkpoints_dir") or os.path.dirname(os.path.abspath(manifest_path))
+        checkpoints_dir = (manifest.get("checkpoints_dir") or os.environ.get("HCD_CHECKPOINTS_DIR")
+                           or os.path.dirname(os.path.abspath(manifest_path)))
 
     sv = manifest.get("schema_version")
     _expect(sv == MANIFEST_SCHEMA_VERSION,

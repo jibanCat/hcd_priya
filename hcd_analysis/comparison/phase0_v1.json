@@ -24,7 +24,7 @@
  "comparators": {
   "C1": {"name": "hcd_priya LF production ensemble", "fidelity": "LF",
          "manifest": "checkpoints/production_ensemble_manifest.json",
-         "manifest_sha256": "690fba0c0107fc5ce551df14cdd45e7e0aa5d418e745c6abb4722f9739efb34d",
+         "manifest_sha256": "9998668bc366f3ae09a15e3e30924594c399937fa4c4de3abed385ec2acbd7e2",
          "cache_sha256": "d9c3783892872f8739f6c1a4039ee84cae5ab84803235a61d7d06ac119336cf2"},
   "R1": {"name": "PRIYA KODIAQ-SQUAD multi-fidelity GP (AR1)",
          "repo": "https://github.com/jibanCat/kodiaq-squad-gp", "commit": "4a108e4e7745323ccd223d48077fa823e0e2d638",

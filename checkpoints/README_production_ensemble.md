@@ -6,9 +6,11 @@ The deployed production emulator is an N=5 ensemble: `prod_repaired_seed{0..4}.e
 deployed forward is the ensemble MEAN over members of the reconstructed post-exp `P_filt`
 (`hcd_analysis/emulator/ensemble.py`).
 
-The binaries live on Turbo in the gate C directory, `/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC`
-(not in git). Their identity of record is the committed machine-readable manifest
-`checkpoints/production_ensemble_manifest.json`, which names that directory, the training cache and the member schema,
+The binaries are not in git: they live in the gate C checkpoints directory of the maintainers' data store, which the
+loader finds through the environment variable `HCD_CHECKPOINTS_DIR` (or an explicit `checkpoints_dir` argument /
+`--checkpoints-dir`). Their identity of record is the committed machine-readable manifest
+`checkpoints/production_ensemble_manifest.json`, which pins the members by SHA256 and names the training cache and the
+member schema (its `checkpoints_dir` is `null`: the location is a deployment setting, not part of the identity),
 and which this file mirrors for humans. The manifest, this README, the on-disk files, the directory's `SHA256SUMS` and
 the (regenerated) `analysis.lock` must always agree.
 
