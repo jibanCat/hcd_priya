@@ -403,7 +403,8 @@ class LegBCtx(NamedTuple):
                                          # the SIM incidence-weight slope; see _zslope_sites)
     zslope_sigma: object = None          # (3,) prior width on s_c (default the literature WLS σ_s)
     # PRIYA mean-flux model (replaces the 13 per-z τ₀ rungs): α(z)=τ₀·((1+z)/(1+z_p))^dτ₀, τ₀(z)=α·Kim07.
-    # UNIFORM priors (Bird+2023 §2.7.1; arXiv:2509.18271). tau0_mu/tau0_sigma above are now legacy.
+    # UNIFORM priors (model: Bird et al. 2023, arXiv:2306.05471, §2.7.1; uniform priors as in Ho et al. 2025,
+    # arXiv:2509.18271). tau0_mu/tau0_sigma above are now legacy.
     tau0_amp_range: object = TAU0_AMP_RANGE   # PRIYA uniform prior on amplitude τ₀ (center 1.0=Kim)
     dtau0_range: object = DTAU0_RANGE         # PRIYA uniform prior on slope dτ₀ (center 0=Kim slope)
     tau0_pivot_z: float = TAU0_PIVOT_Z        # the (1+z)/(1+z_p) pivot (PRIYA z_p=3)

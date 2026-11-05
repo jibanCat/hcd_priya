@@ -3,7 +3,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-# Kim2013 central mean-flux curve (== data.KIM_AMP/SLOPE) for the τ₀→α ladder mapping.
+# Kim07 central mean-flux curve (== data.KIM_AMP/SLOPE) for the τ₀→α ladder mapping.
 _KIM_AMP, _KIM_SLOPE = 2.3e-3, 3.65
 
 
