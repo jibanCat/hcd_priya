@@ -265,6 +265,26 @@ def test_redirects_to_anything_but_https_are_refused():
             R._HttpsOnlyRedirect().redirect_request(req, None, 302, "Found", {}, url)
 
 
+
+def test_downloads_go_through_an_opener_that_follows_only_https_redirects(monkeypatch):
+    """The opener _open_url uses carries exactly one redirect handler, the https-only one (urllib's default handler
+    is replaced, not kept beside it); _open_url opens through that opener; and a redirect to https is followed."""
+    redirects = [h for h in R._OPENER.handlers if isinstance(h, urllib.request.HTTPRedirectHandler)]
+    assert len(redirects) == 1 and type(redirects[0]) is R._HttpsOnlyRedirect
+    seen = []
+
+    class _Opener:
+        def open(self, url, timeout):
+            seen.append((url, timeout))
+            return "response"
+
+    monkeypatch.setattr(R, "_OPENER", _Opener())
+    assert R._open_url("https://models.example.org/a") == "response"
+    assert seen == [("https://models.example.org/a", R.TIMEOUT_S)]
+    req = urllib.request.Request("https://models.example.org/a")
+    new = R._HttpsOnlyRedirect().redirect_request(req, None, 302, "Found", {}, "https://cdn.example.org/a")
+    assert isinstance(new, urllib.request.Request) and new.full_url == "https://cdn.example.org/a"
+
 def test_the_cache_location_follows_the_environment(tmp_path, monkeypatch):
     assert R.cache_dir() == tmp_path / "cache"
     monkeypatch.delenv("HCD_PRIYA_CACHE")
