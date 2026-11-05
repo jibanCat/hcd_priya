@@ -22,13 +22,15 @@ classifiers = [
 # Every third-party package the installed modules import, except fake_spectra (simulation side; install it
 # separately, see docs/fake_spectra_integration.md) and the reference-emulator adapters' own packages, which run in
 # the reference's environment (hcd_analysis/comparison/adapters).
-# Lower bounds: jax, equinox, optax, numpyro, numpy, scipy, h5py and matplotlib are the release series of the
-# development environment in which the test suite runs (pinned in tools/ci/constraints-devenv.txt, which a CI job
-# installs); jax 0.10.1 needs Python 3.11 or later. That environment lacks pandas, pyyaml, click and joblib: their
-# bounds are carried over (pandas raised to 2.2.2, the first release built against numpy 2) and no CI job tests
-# them at the bound.
+# Lower bounds: jax, equinox, optax, numpyro, scipy, h5py and matplotlib are the release series of the development
+# environment in which the test suite runs (pinned in tools/ci/constraints-devenv.txt, which a CI job installs); jax
+# 0.10.1 needs Python 3.11 or later. numpy's bound is 2.0, not the pinned 2.4: jax 0.10.1 itself requires numpy 2.0
+# or later, the package uses no numpy interface newer than 2.0, and the numerically pinned tests pass on numpy 2.0.2
+# (checked outside CI, 2026-10); no CI job installs numpy 2.0 itself. The development environment lacks pandas,
+# pyyaml, click and joblib: their bounds are carried over (pandas raised to 2.2.2, the first release built against
+# numpy 2) and no CI job tests them at the bound.
 dependencies = [
-    "numpy>=2.4",
+    "numpy>=2.0",
     "scipy>=1.17",
     "h5py>=3.16",
     "jax>=0.10.1",

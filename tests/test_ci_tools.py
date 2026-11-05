@@ -219,9 +219,14 @@ def _bounds():
     return out
 
 
+# Direct dependencies whose lower bound is deliberately below the pinned release series, with the reason.
+BOUND_BELOW_PIN = {"numpy": "2.0: jax 0.10.1 requires numpy 2.0 or later and no newer numpy interface is used"}
+
+
 def test_devenv_pins_sit_in_the_release_series_of_the_lower_bounds():
     """tools/ci/constraints-devenv.txt pins the development environment; each pinned direct dependency's lower
-    bound in pyproject.toml is the pin's release series (CI's development-environment job keeps the bounds tested)."""
+    bound in pyproject.toml is the pin's release series (CI's development-environment job keeps the bounds tested),
+    except the bounds named in BOUND_BELOW_PIN, which must still lie at or below the pin."""
     bounds = _bounds()
     pins = {}
     for line in open(os.path.join(REPO, "tools", "ci", "constraints-devenv.txt")):
@@ -233,6 +238,10 @@ def test_devenv_pins_sit_in_the_release_series_of_the_lower_bounds():
     assert direct >= {"jax", "equinox", "optax", "numpyro", "numpy", "scipy", "h5py", "matplotlib", "pytest"}
     for name in direct:
         b, p = bounds[name].split("."), pins[name].split(".")
+        if name in BOUND_BELOW_PIN:
+            assert BOUND_BELOW_PIN[name].startswith(bounds[name] + ":"), f"{name}: the stated bound is not the bound"
+            assert tuple(map(int, b)) <= tuple(map(int, p[:len(b)])), f"{name}: bound {bounds[name]} above the pin"
+            continue
         assert p[:len(b)] == b, f"{name}: bound {bounds[name]} is not the series of the pin {pins[name]}"
 
 
