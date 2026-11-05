@@ -479,3 +479,34 @@ def test_v2_sha256sums_cross_check(fake):
     (d / "SHA256SUMS").write_text("\n".join(lines) + "\n")
     with pytest.raises(PE.ProductionEnsembleError, match="SHA256SUMS"):
         _verify(fake)
+
+
+# --------------------------------------------------------------------------------------------- #
+#  the comparison config pins the committed manifest by sha256 (data-free; scrub delta review m2)
+# --------------------------------------------------------------------------------------------- #
+def _c1_pins():
+    from hcd_analysis.comparison import cases as CS
+    return CS.load_config("phase0_v1")["comparators"]["C1"]
+
+
+def test_phase0_pin_is_the_committed_manifest():
+    """phase0_v1.json's C1 entry names the committed manifest and pins its exact bytes: a regenerated manifest must
+    land together with the new pin."""
+    c1 = _c1_pins()
+    assert ROOT / c1["manifest"] == COMMITTED_MANIFEST
+    assert c1["manifest_sha256"] == hashlib.sha256(COMMITTED_MANIFEST.read_bytes()).hexdigest()
+
+
+def test_adapter_refuses_a_manifest_that_is_not_the_pinned_one(tmp_path, monkeypatch):
+    """hcd_priya.predict checks the manifest's sha256 against the pin before it loads anything."""
+    from hcd_analysis.comparison.adapters import hcd_priya as H
+    monkeypatch.setenv("HCD_CHECKPOINTS_DIR", str(tmp_path / "absent"))
+    edited = tmp_path / PE.MANIFEST_BASENAME
+    edited.write_bytes(COMMITTED_MANIFEST.read_bytes() + b"\n")          # same content, other bytes
+    pins = _c1_pins()
+    with pytest.raises(RuntimeError, match="does not match the pinned sha256"):
+        H.predict([], cache_path=str(tmp_path / "absent.h5"), pins=pins, manifest_path=str(edited))
+    # control: pinning the edited bytes passes the check, and the loader then stops at the absent members
+    pins = dict(pins, manifest_sha256=hashlib.sha256(edited.read_bytes()).hexdigest())
+    with pytest.raises(PE.ProductionEnsembleError, match="MISSING"):
+        H.predict([], cache_path=str(tmp_path / "absent.h5"), pins=pins, manifest_path=str(edited))
