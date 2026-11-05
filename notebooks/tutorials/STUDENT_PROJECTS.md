@@ -373,7 +373,8 @@ similar.
   Gaussian errors, plus a covariance ellipse plot.
 - A statement on the new σ(β_DLA). Pérez-Ràfols et al. 2018 (MNRAS 473,
   3019; arXiv:1709.00889) did not measure β_DLA: they fixed
-  β_DLA b_DLA = f(Ω) and measured b_DLA = 1.99 ± 0.11 from 13,734 DLAs.
+  β_DLA b_DLA = f(Ω) and measured b_DLA = 1.99 ± 0.11 from 19,655 DLAs (their
+  sample C2).
   Say what precision on β_DLA would test that assumption.
 
 **Pointers.**
