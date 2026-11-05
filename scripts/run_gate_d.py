@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate D (spec GATE_D_SPEC.md in the notes repository; criteria D1-D3 registered in PU-0053 before measurement).
+"""Gate D (internal spec GATE_D_SPEC; criteria D1-D3 registered in PU-0053 before measurement).
 
 1. matches HR and LF rows exactly on (theta, z_grid, rung); D1: coordinate mapping error on modes 1..172 against the
    stored LF grids and the canonical coordinate k_skm(z, theta);

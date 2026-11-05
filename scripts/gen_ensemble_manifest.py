@@ -14,7 +14,9 @@ the same battery every deployed driver runs at load time
 member plumbing can call ``gen_ensemble_manifest.verify(...)`` (subprocess-free) instead.
 
 ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/gen_ensemble_manifest.py [--check]
+     python3 scripts/gen_ensemble_manifest.py [--checkpoints-dir DIR] [--check]
+The checkpoints directory defaults to $HCD_CHECKPOINTS_DIR. The manifest records it only with
+--record-checkpoints-dir; the committed manifest records none (the loader then reads $HCD_CHECKPOINTS_DIR).
 """
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
@@ -29,9 +31,9 @@ from datetime import datetime, timezone
 
 from hcd_analysis.emulator import prod_ensemble as PE
 
-# Gate E (PU-0067): the production members are the repaired-cache gate C checkpoints on Turbo; the manifest (committed with
-# the code) names that directory. The pre-2026-10 schema-1 manifest is kept as checkpoints/production_ensemble_manifest_v1_pre2026-10.json.
-DEFAULT_CHECKPOINTS_DIR = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC"
+# Gate E (PU-0067): the production members are the repaired-cache gate C checkpoints, kept outside git in the directory
+# named by HCD_CHECKPOINTS_DIR. The pre-2026-10 schema-1 manifest is kept as checkpoints/production_ensemble_manifest_v1_pre2026-10.json.
+DEFAULT_CHECKPOINTS_DIR = os.environ.get("HCD_CHECKPOINTS_DIR")
 
 DESCRIPTION = (
     "The deployed N=5 production emulator ensemble (prod_repaired_seed0..4, gate C, S4-repaired cache, schema 2.0): "
@@ -50,7 +52,7 @@ PROVENANCE_NOTE = (
     "SHA256 and cross-checked against that directory's SHA256SUMS. Per-member training config: "
     f"{PE.PROD_BASENAME}<i>.meta.json (digest-pinned here; schema 2.0, cache_sha256, k_com_hmpc); history: "
     f"{PE.PROD_BASENAME}<i>.hist.json beside it. Trained by gate C (PU-0056/PU-0057) from a git-archive export of "
-    "commit 01ad2ff by the notes batch gateC/batch_gateC_train_01ad2ff.sbatch (metas carry git_sha null; see checkpoints_dir/MANIFEST_README.txt)."
+    "commit 01ad2ff by a gate C batch script (metas carry git_sha null; see checkpoints_dir/MANIFEST_README.txt)."
 )
 REPLACEMENT_PROCEDURE = (
     "Intentional replacement ONLY: retrain via scripts/train_production_emulator.py (once per "
@@ -60,7 +62,7 @@ REPLACEMENT_PROCEDURE = (
 )
 
 
-def build_manifest(checkpoints_dir, n_members=PE.N_PROD_MEMBERS):
+def build_manifest(checkpoints_dir, n_members=PE.N_PROD_MEMBERS, record_dir=False):
     """Build the manifest dict from a checkpoints dir. Refuses to build over a stray
     production-prefix file (the manifest must pin EVERYTHING the prefix can match)."""
     members = []
@@ -108,7 +110,7 @@ def build_manifest(checkpoints_dir, n_members=PE.N_PROD_MEMBERS):
         "schema_version": PE.MANIFEST_SCHEMA_VERSION,
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "description": DESCRIPTION,
-        "checkpoints_dir": os.path.abspath(checkpoints_dir),
+        "checkpoints_dir": os.path.abspath(checkpoints_dir) if record_dir else None,   # None: located at load time
         "basename": PE.PROD_BASENAME,
         "member_schema_version": PE.MEMBER_SCHEMA_VERSION,
         "cache_sha256": caches.pop(),
@@ -136,14 +138,18 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--checkpoints-dir", default=DEFAULT_CHECKPOINTS_DIR,
-                    help="dir holding the prod_repaired_seed{0..4} binaries "
-                         f"(default {DEFAULT_CHECKPOINTS_DIR})")
+                    help="dir holding the prod_repaired_seed{0..4} binaries (default $HCD_CHECKPOINTS_DIR)")
+    ap.add_argument("--record-checkpoints-dir", action="store_true",
+                    help="write the absolute checkpoints dir into the manifest (default: write null, so the "
+                         "loader locates the binaries through $HCD_CHECKPOINTS_DIR)")
     ap.add_argument("--manifest", default=PE.DEFAULT_MANIFEST_PATH,
                     help=f"manifest path (default {PE.DEFAULT_MANIFEST_PATH})")
     ap.add_argument("--check", action="store_true",
                     help="verify the on-disk files against the COMMITTED manifest; exit "
                          "nonzero on any mismatch (write nothing)")
     a = ap.parse_args(argv)
+    if not a.checkpoints_dir:
+        ap.error("no checkpoints dir: pass --checkpoints-dir or set HCD_CHECKPOINTS_DIR")
 
     if a.check:
         try:
@@ -156,7 +162,7 @@ def main(argv=None):
               f"({a.checkpoints_dir} vs {a.manifest})")
         return 0
 
-    manifest = build_manifest(a.checkpoints_dir)
+    manifest = build_manifest(a.checkpoints_dir, record_dir=a.record_checkpoints_dir)
     os.makedirs(os.path.dirname(os.path.abspath(a.manifest)), exist_ok=True)
     with open(a.manifest, "w") as f:
         json.dump(manifest, f, indent=2)

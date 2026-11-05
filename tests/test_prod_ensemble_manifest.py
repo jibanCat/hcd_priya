@@ -36,7 +36,8 @@ ROOT = Path(__file__).resolve().parents[1]
 COMMITTED_MANIFEST = ROOT / "checkpoints" / PE.MANIFEST_BASENAME
 README = ROOT / "checkpoints" / "README_production_ensemble.md"
 ANALYSIS_LOCK = ROOT / "analysis.lock"
-REAL_CKPT_DIR = Path("/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC")   # gate C members
+from tests.gate_helpers import external_path  # noqa: E402
+REAL_CKPT_DIR = Path(external_path("HCD_CHECKPOINTS_DIR"))   # gate C members
 BASE = PE.PROD_BASENAME
 
 
@@ -68,7 +69,7 @@ def fake(tmp_path):
     d.mkdir()
     _make_fake_members(d)
     mpath = d / PE.MANIFEST_BASENAME
-    rc = GEN.main(["--checkpoints-dir", str(d), "--manifest", str(mpath)])
+    rc = GEN.main(["--checkpoints-dir", str(d), "--manifest", str(mpath), "--record-checkpoints-dir"])
     assert rc == 0
     return d, mpath
 
@@ -414,6 +415,32 @@ def test_v2_manifest_names_its_directory_and_the_cache(fake):
     assert m["schema_version"] == 2 and m["checkpoints_dir"] == str(d) and m["cache_sha256"] == FAKE_CACHE
     _, prefixes = PE.verify_manifest(manifest_path=str(mpath))          # directory taken from the manifest
     assert [os.path.basename(p) for p in prefixes] == [f"{BASE}{i}" for i in range(5)]
+
+
+def test_v2_manifest_without_a_directory_is_located_by_the_environment(fake, monkeypatch):
+    """A manifest whose checkpoints_dir is null (the committed form) takes HCD_CHECKPOINTS_DIR; an explicit argument wins."""
+    d, mpath = fake
+    _edit_manifest(mpath, lambda m: m.update(checkpoints_dir=None))
+    monkeypatch.setenv("HCD_CHECKPOINTS_DIR", str(d))
+    _, prefixes = PE.verify_manifest(manifest_path=str(mpath))
+    assert prefixes == [os.path.join(str(d), f"{BASE}{i}") for i in range(5)]
+    monkeypatch.setenv("HCD_CHECKPOINTS_DIR", str(d / "absent"))
+    assert PE.verify_manifest(checkpoints_dir=str(d), manifest_path=str(mpath))[1] == prefixes
+    with pytest.raises(PE.ProductionEnsembleError, match="MISSING"):
+        PE.verify_manifest(manifest_path=str(mpath))
+
+
+def test_generator_writes_no_directory_unless_asked(tmp_path):
+    d = tmp_path / "checkpoints"
+    d.mkdir()
+    _make_fake_members(d)
+    mpath = tmp_path / PE.MANIFEST_BASENAME
+    assert GEN.main(["--checkpoints-dir", str(d), "--manifest", str(mpath)]) == 0
+    assert json.loads(mpath.read_text())["checkpoints_dir"] is None
+
+
+def test_committed_manifest_names_no_directory():
+    assert json.loads(COMMITTED_MANIFEST.read_text())["checkpoints_dir"] is None
 
 
 def test_v2_schema1_manifest_refused(fake):

@@ -18,9 +18,10 @@ from hcd_analysis.emulator import kcoord as KC
 from hcd_analysis.emulator.data import PARAM_LIMITS, sampling_unit_bounds
 
 ROOT = Path(__file__).resolve().parents[1]
-GATEC = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC"
-MF = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/mf/gateD/mf_modes_all6.npz"
-DLA_CORE = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/gateE/products/dla_core_gateE.npz"   # A1 rev 1 s4 (PU-0071)
+from tests.gate_helpers import external_path  # noqa: E402
+GATEC = external_path("HCD_CHECKPOINTS_DIR")
+MF = external_path("HCD_EMULATOR_V2_DIR", "mf", "gateD", "mf_modes_all6.npz")
+DLA_CORE = external_path("HCD_EMULATOR_V2_DIR", "gateE", "products", "dla_core_gateE.npz")   # A1 rev 1 s4 (PU-0071)
 L_BOX = 120.0
 
 

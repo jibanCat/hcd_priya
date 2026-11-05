@@ -708,10 +708,9 @@ The following points have repeatedly cost time, and are worth reviewing before d
 Before an inference pipeline can be trusted on real data, we run a closure test and its stricter
 counterpart, simulation-based calibration (SBC): we feed the pipeline mock data drawn from a known
 truth and check that it recovers that truth within the stated error bars. On held-out-sim mocks the
-pipeline recovers `n_s` in 8 of 8 cases within ±1σ, with no divergences (a divergence is the NUTS
-sampler's signal of a pathological posterior geometry). For `A_p`, 6 of 8 fall within ±1σ; the two
-outside are a
-high-n_s box-corner LOSO outlier and one +1.1σ mock, not a likelihood bug. The corner is the
+pipeline recovers `n_s` within its error bars, with no divergences (a divergence is the NUTS
+sampler's signal of a pathological posterior geometry). The `A_p` misses come from a
+high-n_s box-corner LOSO outlier and ordinary mock scatter, not a likelihood bug. The corner is the
 sparse-design n_s ≳ 0.98 ridge where the held-out emulator extrapolates, and the production
 interior cosmology sits away from it.
 
@@ -725,7 +724,7 @@ gate, and it remains pending before the real fit (notes
 
 *The **per-mock closure-coverage detail** (distinct from the root README's Leg-B / closure coverage
 headline, despite the similar filename). Left: the HCD DESI-like mock closure bias `z = (θ̂ − θ_true)/σ`
-per mock; `n_s` is 8/8 inside ±1σ. Middle: the α_subDLA mean bias (a known subDLA↔DLA degeneracy
+per mock. Middle: the α_subDLA mean bias (a known subDLA↔DLA degeneracy
 that is harmless to cosmology and covered by the error model). Right: the eBOSS-like mock low-k recovery.
 0 divergences throughout.*
 
@@ -787,29 +786,28 @@ error), and project it onto the (`A_p`, `n_s`) Fisher directions the data actual
 projection is the linearised maximum-likelihood displacement,
 `bias = [(F + Π)⁻¹ Jᵀ C⁻¹ ΔP] / σ`, where `J` is the forward Jacobian, `C` the data covariance,
 `F` the Fisher information, `Π` the prior precision, and `σ` the marginal posterior width; the
-result is a cosmology shift in σ. The acceptance requirement is `|bias_z| < 0.2σ` for every fold
-and both parameters. This per-fold object is what the deployed model inherits; it is the production
+result is a cosmology shift in σ. The acceptance requirement is a fixed small `|bias_z|` bound for
+every fold and both parameters. This per-fold object is what the deployed model inherits; it is the production
 gate, distinct from the per-simulation scatter discussed below.
 
-All eight folds sit well inside the ±0.2σ band on both parameters: 0 of 8 fail. The per-fold RMS
-bias is 0.067σ for `A_p` and 0.071σ for `n_s`, so the typical fold injects under a tenth of a
-posterior width. The emulator is thus validated as unbiased in the cosmology on held-out
+Every fold sits inside the acceptance band on both parameters, and the typical fold injects a small
+fraction of a posterior width. The emulator is thus validated as unbiased in the cosmology on held-out
 simulations, not merely as small-RMS. This is the held-out-sim cosmology gate, subject to the
 production-SBC caveat of Demo A: the per-fold LOSO result is what the production all-sims ensemble
 inherits, and the ensemble-level SBC is still pending before the real fit.
 
-![Per-fold A_p and n_s Fisher bias across the 8 LOSO folds, inside the ±0.2σ gate](../../figures/analysis/04_emulator/B5_fisher_bias_perfold.png)
+![Per-fold A_p and n_s Fisher bias across the LOSO folds, inside the acceptance gate](../../figures/analysis/04_emulator/B5_fisher_bias_perfold.png)
 
 *Per-fold `A_p` (left) and `n_s` (right) Fisher bias, in σ, one bar per LOSO fold. The shaded band
-is the ±0.2σ acceptance gate and the dotted lines mark the per-fold RMS (0.067σ for `A_p`, 0.071σ
-for `n_s`). Every fold is inside the gate on both parameters (0/8 fail). This is the per-FOLD gate
+is the acceptance gate and the dotted lines mark the per-fold RMS. Every fold is inside the gate on
+both parameters. This is the per-FOLD gate
 (the production object), not the per-simulation cloud.*
 
 There is a finer-grained view in which the same projection is computed for each of the 60
 held-out simulations individually rather than pooled per fold; that per-simulation scatter is wider
 (the box-corner simulations are noisier) and is recorded in the validation document. Pooled over all
 60 held-out simulations and pushed through the deployed multi-fidelity forward, the mean bias is
-`n_s +0.026σ` and `A_p +0.055σ`, consistent with no bias (bootstrap 95% intervals straddle zero).
+consistent with no bias (bootstrap 95% intervals straddle zero).
 The per-fold gate above is the headline; the per-simulation pool is the supporting detail.
 
 To reproduce:
@@ -818,7 +816,7 @@ To reproduce:
 # per-fold A_p/n_s Fisher bias (the figure above), via the performance-walkthrough builder:
 PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
   /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_performance_walkthrough.py   # → B5_fisher_bias_perfold.png
-# per-simulation pool and the deployed multi-fidelity forward (the +0.026σ / +0.055σ pooled means):
+# per-simulation pool and the deployed multi-fidelity forward (the pooled means):
 #   scripts/diag_emu_bias_allfolds.py
 #   scripts/diag_emu_bias_allfolds_mf.py   → figures/analysis/04_emulator/emu_bias_allfolds_mf.txt
 ```
@@ -888,9 +886,9 @@ degeneracy: the data alone cannot fully separate "more LLS" from "more `A_p` or 
 That is why the off-diagonal correlation is large, and why it is *prior*-mediated rather than
 intrinsic to the data. With no HCD prior the data place almost no constraint on `A_HCD`, so its
 correlation with the cosmology is ≈ 0; it is only once the external incidence prior pins `A_HCD` that
-the pinned amplitude propagates into the forest plane and the `+0.83` correlation appears. The
-practical consequence is that a ±1σ shift in where we centre the HCD-amplitude prior drags `n_s` by
-roughly 0.5σ. This factorises exactly as 0.5σ = corr(A_HCD, n_s) × prior-dominance ≈ 0.83 × 0.62, so
+the pinned amplitude propagates into the forest plane and the large correlation appears. The
+practical consequence is that a shift in where we centre the HCD-amplitude prior drags `n_s` by a
+sizeable fraction of that shift. The drag factorises exactly as corr(A_HCD, n_s) × prior-dominance, so
 it is a real and irreducible systematic: a tighter prior shrinks the prior-dominance factor but
 leaves the correlation untouched, and therefore cannot remove the coupling.
 
@@ -901,14 +899,13 @@ template lies inside the forest (`A_p`, `n_s`) directions the data constrain.
 ![LLS template projected into the forest (A_p, n_s) plane](../../figures/analysis/04_emulator/degeneracy_lls_inplane_projection.png)
 
 *The pure-LLS amplitude template projected into the C_data-whitened forest (`A_p`, `n_s`) plane.
-Left (DESI leg): the template lies 93% inside the forest plane (`|cos(LLS, A_p)| = 0.84`; only ~7%
-orthogonal). Right: how much of the template the forest can absorb: 93% on DESI's (`A_p`, `n_s`),
-98% once the τ₀ nuisances are added, dropping to 65% on the high-k KS leg. These are the
-single-fiducial Fisher ref-script (DESI-leg) values; the joint DESI+KS panel headline is 91%
-in-plane on DESI / 64% on KS with `cos(LLS, A_p) = 0.81`, consistent to ~2% (the small offset is the
+Left (DESI leg): the template lies almost entirely inside the forest plane, with only a small
+orthogonal part. Right: how much of the template the forest can absorb: most of it on DESI's
+(`A_p`, `n_s`), more once the τ₀ nuisances are added, and markedly less on the high-k KS leg. The
+single-fiducial Fisher values and the joint DESI+KS panel agree (the small offset is the
 single-fiducial-vs-joint method difference, not a disagreement).*
 
-The drop from 91% in-plane on DESI to 64% on the high-k KS leg is the degeneracy-breaker. It is not
+The drop in the in-plane fraction from DESI to the high-k KS leg is the degeneracy-breaker. It is not
 the damping wing in general but specifically its high-k Voigt deficit: that high-k shape is what KS
 sees and what separates LLS from a pure amplitude change (the cure), whereas the low-k excess is what
 mimics the amplitude in the first place (the confusion). The z-tilt of the HCD incidence (`B_HCD`) is
@@ -920,10 +917,10 @@ of Demo B above (`eboss_corner_cosmo_E_f6.png`) shows the `n_s`–`α` contours 
 correlation matrix here is the primary summary; the corner is the worked example.
 
 Two points follow for the real fit. First, the accuracy of the external LLS-incidence prior centre
-matters, because a wrong centre is the 0.5σ-per-1σ systematic. Second, the genuine
+matters, because a wrong centre is the systematic described above. Second, the genuine
 degeneracy-breaker is the high-k KS leg together with the damping-wing high-k Voigt deficit (the
 low-k excess is the confusion, the high-k deficit is the cure), not a tighter incidence prior. The
-full derivation, the correlation matrix and the factorisation 0.5σ = corr × prior-dominance are in
+full derivation, the correlation matrix and the factorisation corr × prior-dominance are in
 notes `hcd_priya_notes/docs/superpowers/2026-06-14-hcd-cosmology-degeneracy.md`, with the related figures
 `degeneracy_prior_center_law.png` and `degeneracy_snr_amplitude_vs_ztilt.png` in the notes
 `04_emulator/`. All three correlation/projection figures are reproduced by
@@ -992,9 +989,8 @@ while remaining a fixed, reproducible transform.
 
 The offset is derived deterministically from a SHA256 seed string, salted per parameter so the two
 offsets are independent: `u = SHA256("{seed_str}|{param}")` read as a `[0,1)` fraction, then
-`δ = (2u − 1)·(3·σ_prior)`. The seed string is `seed_str = "{project_string}@{git_commit}"`. The
-frozen lock (`blind.lock` at the repo root) has `project_string = "hcd_priya_real_fit_v1"` and
-`git_commit = "aefaf51"`, so `seed_str = "hcd_priya_real_fit_v1@aefaf51"`.
+`δ = (2u − 1)·(3·σ_prior)`. The seed string is `seed_str = "{project_string}@{git_commit}"`, with
+both parts recorded in the frozen lock (`blind.lock` at the repo root).
 
 `blind.lock` stores the seed only: the project string, the commit, `seed_str`, `blind_params`,
 `σ_prior` and the ±3σ multiple. It deliberately does not store the offset values; the offset is

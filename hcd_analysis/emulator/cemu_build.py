@@ -1,4 +1,4 @@
-"""Building blocks of the gate E emulator-error products (GATE_E_AMENDMENT_A1.md in the notes repository, registered
+"""Building blocks of the gate E emulator-error products (internal amendment GATE_E_AMENDMENT_A1, registered
 before any final product is built): simulation-level cross-validation folds, per-cell second moments of the
 leave-one-simulation-out ensemble residuals, PSD-preserving smoothing along ln(mode) and z, the Gaussian predictive
 score used for model selection, and the modes that bracket a leg's data bins over the whole sampling box.

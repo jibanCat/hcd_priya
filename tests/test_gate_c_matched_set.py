@@ -13,8 +13,9 @@ import pytest
 
 from hcd_analysis.emulator import gate_c as G
 
-EVAL_DIR = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/gateC_eval"
-UP_LOO = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/loo_fps.hdf5"
+from tests.gate_helpers import external_path  # noqa: E402
+EVAL_DIR = external_path("HCD_EMULATOR_V2_DIR", "gateC_eval")
+UP_LOO = external_path("HCD_KS_BASEDIR", "loo_fps.hdf5")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE = f"{REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 

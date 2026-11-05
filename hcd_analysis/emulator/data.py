@@ -736,7 +736,7 @@ def tau0_edge_holdout(tau0, frac=0.15):
     return tr, ho
 
 
-# Kim2013 central mean-flux curve (== tau0_rescale.obs_mean_tau_kim2013): the cache's
+# Kim07 central mean-flux curve (== tau0_rescale.obs_mean_tau_kim2013): the cache's
 # tau0 = alpha_factor * KIM_AMP*(1+z)^KIM_SLOPE, so alpha_factor = tau0/Kim(z) is the
 # z-INDEPENDENT ladder coordinate (the natural axis for a smooth sigma(tau0) interp).
 KIM_AMP, KIM_SLOPE = 2.3e-3, 3.65

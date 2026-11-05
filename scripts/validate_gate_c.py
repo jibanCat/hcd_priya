@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate C held-out evaluation in PHYSICAL coordinates (spec GATE_C_SPEC.md in the notes repository, sections 2-4).
+"""Gate C held-out evaluation in PHYSICAL coordinates (internal spec GATE_C_SPEC, sections 2-4).
 
 For every held-out row of one checkpoint: the prediction comes through the production API
 ``predict.predict_on_physical_grid`` (k_skm derived from the query (z, theta)); the truth is the held-out simulation's
@@ -41,10 +41,19 @@ from hcd_analysis.emulator.predict import predict_on_physical_grid  # noqa: E402
 CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 
 
+def _env_dir(var):
+    """A data directory outside the repository, named by an environment variable (as in tests/gate_helpers.py)."""
+    d = _os_rr.environ.get(var)
+    if not d:
+        raise SystemExit(f"set {var}: the directory this read-out's input lives in")
+    return d
+
+
 def ks_bins():
     """Upstream's LOO k values: the KODIAQ-SQUAD conservative bins its likelihood keeps (0.005 <= k <= 0.064,
     lyaemu/likelihood.py, kf_old), read from the same table."""
-    path = "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"
+    path = _os_rr.path.join(_env_dir("HCD_LYAEMU_PARENT"), "lyaemu", "data", "kodiaq_squad",
+                            "final-conservative-p1d-karacayli_etal2021.txt")
     k = np.array(sorted({float(ln.split("|")[2]) for ln in open(path).readlines()[1:] if ln.strip()}))   # "| z | k | P | e |"
     k = k[(k >= 0.005) & (k <= 0.064)]
     if k.size != 11:
@@ -53,7 +62,7 @@ def ks_bins():
 
 
 def eboss_bins():
-    d = np.load("/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz", allow_pickle=True)
+    d = np.load(_os_rr.path.join(_env_dir("HCD_P1D_DATA_DIR"), "eboss_dr14_p1d", "eboss_dr14_p1d.npz"), allow_pickle=True)
     return np.unique(np.asarray(d["k"], float))
 
 

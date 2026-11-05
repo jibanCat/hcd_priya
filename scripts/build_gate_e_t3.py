@@ -7,7 +7,7 @@ r) (rows of other bins zero) and w (r,), fractional; production algebra (amplitu
 absorbed by max). Production applies T3 on DESI and KS. A leg whose recorded choice is M is refused (not wired).
 Write-once ``cemu_t3`` product.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu /home/mfho/.conda/envs/emu-jax/bin/python3 \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu python3 \
      scripts/build_gate_e_t3.py --eval-dir <..> --comparison <t3_comparison.json> --out <product.npz>
 """
 from __future__ import annotations

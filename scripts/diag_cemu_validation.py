@@ -70,7 +70,7 @@ CKPT = f"{REPO}/checkpoints/final_fold0"
 ERROR_VECTOR = f"{REPO}/checkpoints/error_vector.npz"
 FIGDIR = f"{REPO}/figures/analysis/05_likelihood"
 
-# Kim2013 ladder (== data.KIM_AMP/SLOPE) for the z-band edge selection commentary only.
+# Kim07 ladder (== data.KIM_AMP/SLOPE) for the z-band edge selection commentary only.
 _KIM_AMP, _KIM_SLOPE = 2.3e-3, 3.65
 
 

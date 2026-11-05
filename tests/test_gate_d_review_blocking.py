@@ -1,13 +1,12 @@
-"""Gate D review blocking tests (PU-0063/PU-0064; review notes reviews/gate_D in the notes repository).
+"""Gate D review blocking tests (PU-0063/PU-0064; gate D review records).
 
 BT-D1 the accepted D1 failure is pinned to its cause (one design point's HR/LF parameter precision), so a later genuine
 mapping error cannot hide behind "the known 4.4e-10". BT-D2 D3 is reported per held-out simulation and on a common
 mode-index band (the pooled value of a leave-one-out mean correction is fixed by construction). BT-D3 the MF prediction
 does not depend on log_rho or on the held-out rows (the historical "log_rho leak" was a misstatement). BT-D4 the R-D1
-report quotes the JSON and is k-resolved."""
+products (the R-D1 summary and its k-resolved table) are complete and consistent."""
 import json
 import os
-import re
 
 import numpy as np
 import pytest
@@ -15,13 +14,12 @@ import pytest
 from hcd_analysis.emulator import gate_d as GD
 from hcd_analysis.emulator import mf_modes as MM
 from hcd_analysis.emulator.data import load_cache_historical
-from tests.gate_helpers import real_cache_path
+from tests.gate_helpers import external_path, real_cache_path
 
 LF, HR = real_cache_path("lf"), real_cache_path("hr")
-GATED = "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/mf/gateD"
-RAW_LF = "/nfs/turbo/umor-yueyingn/mfho/emu_full"
-RAW_HR = "/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2"
-RESULTS = "/home/mfho/hcd_priya_notes/docs/superpowers/emulator-debug-2026-10/gateD/GATE_D_RESULTS.md"
+GATED = external_path("HCD_EMULATOR_V2_DIR", "mf", "gateD")
+RAW_LF = external_path("HCD_LF_RAW_DIR")
+RAW_HR = external_path("HCD_HR_RAW_DIR")
 NS0914 = "ns0.914Ap1.32e-09"
 
 
@@ -138,16 +136,24 @@ def test_mode_mf_prediction_invariant_to_log_rho_and_heldout_rows_real():
 
 # ---------------------------------------------------------------------------------------------------------- BT-D4
 def test_gate_d_rd1_report_matches_json():
-    _need(RESULTS, f"{GATED}/gate_d_results.json", f"{GATED}/gate_d_rd1_k_resolved.json")
+    """The JSON products only (the human-readable report is not part of the repository): R_D1 has one value per class
+    at every z, all finite on one contiguous data band and NaN outside it, and the k-resolved table covers every class
+    at the representative z with one finite value per k, inside the spread over simulations."""
+    _need(f"{GATED}/gate_d_results.json", f"{GATED}/gate_d_rd1_k_resolved.json")
     R = json.load(open(f"{GATED}/gate_d_results.json"))["R_D1"]
-    doc = open(RESULTS).read()
-    line = next(l for l in doc.splitlines() if l.startswith("- clean median g by z (JSON R_D1):"))
-    quoted = dict(re.findall(r"z (\d\.\d) ([+-]\d+\.\d+)%", line))
-    assert set(quoted) == {zz for zz, v in R.items() if np.isfinite(v[0])}      # data-band z (NaN outside)
-    for zz, v in quoted.items():
-        assert abs(float(v) - 100 * R[zz][0]) < 0.005 + 1e-12, (zz, v, R[zz][0])
+    zs = sorted(R, key=float)
+    assert all(len(R[zz]) == len(GD.CLS) for zz in zs)
+    band = [zz for zz in zs if np.isfinite(R[zz][0])]
+    assert band and band == zs[zs.index(band[0]): zs.index(band[-1]) + 1]          # one contiguous data band
+    assert all(np.all(np.isfinite(R[zz])) for zz in band)
+    assert all(np.all(np.isnan(R[zz])) for zz in zs if zz not in band)               # NaN outside the band
     kres = json.load(open(f"{GATED}/gate_d_rd1_k_resolved.json"))
+    nk = len(kres["k_skm"])
     for zz in ("2.2", "3.0", "4.6"):
+        assert zz in band
         for c in GD.CLS:
-            assert zz in kres["representative"]["table"][c]
-    assert "k-resolved" in doc and "gate_d_rd1_k_resolved.json" in doc
+            row = np.asarray(kres["representative"]["table"][c][zz], dtype=float)
+            assert row.shape == (nk,) and np.all(np.isfinite(row))
+            lo = np.asarray(kres["spread_over_sims"][c][zz]["min"], dtype=float)
+            hi = np.asarray(kres["spread_over_sims"][c][zz]["max"], dtype=float)
+            assert lo.shape == hi.shape == (nk,) and np.all(lo <= row) and np.all(row <= hi), (c, zz)

@@ -1,7 +1,7 @@
 """Gate A, task 11 and blocking test BT8: the checkout under test is self-contained.
 
 A test run in one checkout must import and load only that checkout's code and products. Absolute paths naming a
-checkout of this repository (historically /home/mfho/hcd_priya, also any sibling such as a git worktree) make a
+checkout of this repository (a directory named hcd_priya, or a sibling such as hcd_priya_<x>, or a git worktree) make a
 second checkout silently test or load the first one's code and products. Lines carrying '# historical-artifact path'
 are exempt: they name a frozen historical product on purpose. The separate notes repository may be named.
 The module-origin check also runs at session end (tests/conftest.py, pytest_sessionfinish)."""
@@ -12,7 +12,9 @@ import sys
 import tokenize
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_CHECKOUT_RX = re.compile(r"/home/mfho/hcd_priya(?!_notes)(?:_[A-Za-z0-9]+)?(?=[/\"'\s:;,)]|$)")  # historical-artifact path
+# Any absolute path with a component named hcd_priya (or hcd_priya_<x>, the notes repository excepted); a URL or a
+# relative path does not match (the leading slash must not follow a word character, ":", "/" or ".").
+_CHECKOUT_RX = re.compile(r"(?<![\w:/.])/(?:[^/\s\"'<>]+/)*hcd_priya(?!_notes)(?:_[A-Za-z0-9]+)?(?=[/\"'\s:;,)]|$)")
 _EXEMPT_MARK = "# historical-artifact path"
 PROJECT_TOP = ("hcd_analysis", "scripts", "tests", "cli", "config")
 
@@ -41,11 +43,14 @@ def _absolute_checkout_literals(path):
 
 
 def test_guard_pattern_catches_every_checkout_and_spares_the_notes_repo():
-    base = "/home/mfho/" + "hcd_priya"          # assembled so that no literal in this file names a checkout
+    base = "/" + "/".join(("home", "someone", "hcd_" + "priya"))   # assembled so that no literal here names a checkout
     assert _CHECKOUT_RX.search(f'"cd {base} && pytest"')
     assert _CHECKOUT_RX.search(f'"{base}_emudebug/scripts/x.py"')
     assert _CHECKOUT_RX.search(f"'PYTHONPATH={base} python3'")
     assert not _CHECKOUT_RX.search(f'"{base}_notes/docs/x.md"')
+    assert _CHECKOUT_RX.search(f'"/{"hcd_" + "priya"}/tests"')                       # a checkout at the root
+    assert not _CHECKOUT_RX.search('"https://github.com/jibanCat/hcd_' + 'priya"')  # a URL is not a checkout
+    assert not _CHECKOUT_RX.search('"../hcd_' + 'priya/scripts"')                  # nor a relative path
 
 
 def test_no_absolute_checkout_literals_in_code():

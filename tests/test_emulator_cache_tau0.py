@@ -1,8 +1,9 @@
 """Tests for scripts/build_emulator_cache_tau0.py (v3.1, fake_spectra-driven).
 
 Real-data tests need the emu-3.9 + GSL env:
-    export LD_LIBRARY_PATH=/sw/pkgs/arc/stacks/gcc/10.3.0/gsl/2.7/lib:/home/mfho/.conda/envs/emu-3.9/lib:$LD_LIBRARY_PATH
-    /home/mfho/.conda/envs/emu-3.9/bin/python3 tests/test_emulator_cache_tau0.py
+    export LD_LIBRARY_PATH=<GSL lib dir>:<emu-3.9 env>/lib:$LD_LIBRARY_PATH
+    <emu-3.9 env>/bin/python3 tests/test_emulator_cache_tau0.py
+with the data directories set as listed in tests/gate_helpers.py (HCD_OUTPUTS_DIR, HCD_LF_RAW_DIR, ...).
 The synthetic write_cache_tau0 round-trip runs under plain python3.
 """
 import os
@@ -42,11 +43,17 @@ def _hist(snap_dir):
     """An old (pre-lineage) snapshot directory's products, read for the PRIYA bit-identity checks."""
     return T.load_snapshot_inputs_historical(snap_dir, reason="PRIYA bit-identity test on an old snapshot root")[0]
 
-_HCD_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
-_EMU_LF = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
-_EMU_HR = Path("/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2")
+# Data outside the repository, located by environment variable (tests/gate_helpers.py lists them; inlined here because
+# this file also runs as a plain script). An unset variable gives a path that does not exist.
+def _ext(var, *parts):
+    return os.path.join(os.environ.get(var) or f"<{var} unset>", *parts)
+
+
+_HCD_ROOT = Path(_ext("HCD_OUTPUTS_DIR"))
+_EMU_LF = Path(_ext("HCD_LF_RAW_DIR"))
+_EMU_HR = Path(_ext("HCD_HR_RAW_DIR"))
 _EMU_ROOT = _EMU_LF  # backward-compat alias used by test_read_priya_params / test_build_tau0_rows
-_PRIYA_FILE = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/mf_emulator_flux_vectors_tau1000000.hdf5"
+_PRIYA_FILE = _ext("HCD_KS_BASEDIR", "mf_emulator_flux_vectors_tau1000000.hdf5")
 
 
 def test_locate_raw_tau_file_finds_grid_file():
@@ -205,11 +212,11 @@ def test_discover_dedups_one_snap_per_grid_z():
 def test_build_tau0_rows_tier_p_matches_priya():
     SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
     SNAP = 17; NK = 172; ZIDX = 8; ROW = 344
-    snap_dir = Path(f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}")
-    raw = Path(f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
+    snap_dir = _HCD_ROOT / SIM / f"snap_{SNAP:03d}"
+    raw = _EMU_LF / SIM / "output" / f"SPECTRA_{SNAP:03d}" / "lya_forest_spectra_grid_480.hdf5"
     if not (snap_dir.exists() and raw.exists()):
         _unavailable("test_build_tau0_rows_tier_p_matches_priya: data unavailable")
-    priya = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/mf_emulator_flux_vectors_tau1000000.hdf5"
+    priya = _PRIYA_FILE
     with h5py.File(priya, "r") as f:
         alpha = float(f["params"][ROW, 0])
         P_priya = f["flux_vectors"][ROW, ZIDX*NK:(ZIDX+1)*NK].astype(np.float64)
@@ -300,8 +307,8 @@ def test_v33_uniform_schema_roundtrip():
 def test_filtered_tier_c_reconstructs_priya():
     SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
     SNAP, NK = 17, 172
-    sd = Path(f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}")
-    raw = Path(f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
+    sd = _HCD_ROOT / SIM / f"snap_{SNAP:03d}"
+    raw = _EMU_LF / SIM / "output" / f"SPECTRA_{SNAP:03d}" / "lya_forest_spectra_grid_480.hdf5"
     if not (sd.exists() and raw.exists()):
         _unavailable("filtered_tier_c: data unavailable")
     rows, _ = bt0.build_tau0_rows(SIM, SNAP, _hist(sd), raw, np.array([1.0]), n_k=NK)
@@ -338,11 +345,10 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
     is bit-identical to PRIYA's hires flux vectors."""
     import json
     # The 6-simulation PRIYA HR product (60 rows = 6 sims x 10 rungs, 17 z, 525 modes); its scratch copy beside the
-    # raw spectra is gone, the Turbo copy is the reference (gate B, 2026-10).
-    HR_REF = ("/nfs/turbo/umor-yueyingn/mfho/birdgroup/lya_xq100/kodiaq_2_2_4_6-48-48_20260414_newhires/hires/"
-              "mf_emulator_flux_vectors_tau1000000.hdf5")
-    EMU_HR = "/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2"
-    HCD_BASE = "/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"   # discover appends /hires
+    # raw spectra is gone, the upstream copy is the reference (gate B, 2026-10).
+    HR_REF = _ext("HCD_UPSTREAM_HR_DIR", "mf_emulator_flux_vectors_tau1000000.hdf5")
+    EMU_HR = str(_EMU_HR)
+    HCD_BASE = str(_HCD_ROOT)   # discover appends /hires
     if not Path(HR_REF).exists():
         _unavailable("HR bit-identity: 6-sim reference unavailable")
     pairs = bt0.discover_tau0_pairs(HCD_BASE, EMU_HR, fidelity="hr")

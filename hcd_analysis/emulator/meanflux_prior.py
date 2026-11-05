@@ -2,7 +2,7 @@
 
 The τ_eff–cosmology degeneracy biases cosmology unless τ₀(z) is anchored on the
 observed mean flux (design §4); this module is the PRODUCER of that anchor. For the MVP
-the centre μ_z is the **Kim2013 curve** (``KIM_AMP·(1+z)^KIM_SLOPE``), the SAME curve the
+the centre μ_z is the **Kim07 curve** (``KIM_AMP·(1+z)^KIM_SLOPE``), the SAME curve the
 cache's τ₀ ladder is built on — so the prior is matched to the cache by construction
 (α = τ₀/Kim(z) = 1 at the centre, the ladder's interior). The width is a fractional
 fraction of μ_z (the measurement width); ``flat=True`` gives a genuinely-wide-but-finite
@@ -21,7 +21,7 @@ from .mean_flux_model import TAU0_PIVOT_Z, kim_tau0, tau0_alpha_priya  # noqa: F
 assert jax.config.read("jax_enable_x64"), \
     "x64 must be on (import hcd_analysis.emulator before jax)"
 
-# Nominal fractional width of the mean-flux prior, δτ₀/τ₀. The Kim2013 / Becker19 ⟨F⟩(z)
+# Nominal fractional width of the mean-flux prior, δτ₀/τ₀. The Kim07 / Becker19 ⟨F⟩(z)
 # is measured to a few-percent; 0.05 is a conservative measurement-width MVP value (the
 # production value should track the actual ⟨F⟩(z) error budget — see LYA-CONSULT below).
 DEFAULT_FRAC_SIGMA = 0.05
@@ -116,7 +116,7 @@ def fit_tau0_powerlaw(z, tau0, *, zref=BECKER13_ZREF):
 def meanflux_tau0_prior(z, *, frac_sigma=DEFAULT_FRAC_SIGMA, flat=False, center="kim"):
     """Per-z mean-flux prior ``(tau0_mu, tau0_sigma)`` in τ₀ units.
 
-    ``center="kim"`` (default, MVP): μ_z = Kim2013 ⟨τ_eff⟩(z) — matched to the cache τ₀
+    ``center="kim"`` (default, MVP): μ_z = Kim07 ⟨τ_eff⟩(z) — matched to the cache τ₀
     ladder (α=τ₀/Kim(z)=1 at centre).  ``center="becker13"``: μ_z = Becker+2013 Eq. 6
     (the DLA-masked + metal-corrected curve the DESI/KS pipelines use) — the production
     anchor.  σ_z = frac_sigma·μ_z (the measurement width; Becker+2013 reports ~3–8%
@@ -133,10 +133,10 @@ def meanflux_tau0_prior(z, *, frac_sigma=DEFAULT_FRAC_SIGMA, flat=False, center=
 
     LYA-CONSULT: the PRODUCTION μ_z must be the OBSERVED mean-flux optical depth
     ⟨τ_eff⟩(z) = −ln⟨F⟩(z) **in the data's DLA-masked / metal-corrected state** (the
-    Becker+2019 / Turner+2024 / Kim+2013 choice the data pipeline actually uses, incl.
-    which metal/DLA treatment ⟨F⟩(z) was measured under). Using the Kim2013 curve here is
+    Becker+2019 / Turner+2024 / Kim+2007 choice the data pipeline actually uses, incl.
+    which metal/DLA treatment ⟨F⟩(z) was measured under). Using the Kim07 curve here is
     a deliberate MVP so the prior is matched to the cache ladder (α=1 at centre); it is
-    NOT a claim that Kim2013 is the right observational anchor. The Lyα agent must pick
+    NOT a claim that Kim07 is the right observational anchor. The Lyα agent must pick
     the production ⟨F⟩(z) (and its z-dependent error budget for ``frac_sigma``); do not
     ship the cosmology result on the Kim MVP without that sign-off.
     """

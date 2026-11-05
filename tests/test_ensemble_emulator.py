@@ -14,7 +14,7 @@ pins the contract:
       members, and returns a (model, meta, norm) triple like load_checkpoint.
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ensemble_emulator.py -q
+     python3 -m pytest tests/test_ensemble_emulator.py -q
 """
 import glob
 import os
@@ -31,7 +31,8 @@ from hcd_analysis.emulator.ensemble import EnsembleEmulator, load_ensemble
 from hcd_analysis.emulator.schema import SchemaCollapseError
 
 # The pre-2026-10 production checkpoints live only in the eBOSS checkout (historical artifact, schema v1).
-HISTORICAL_PROD_PREFIX = "/home/mfho/hcd_priya/checkpoints/final_prod_seed"  # historical-artifact path
+from tests.gate_helpers import external_path  # noqa: E402
+HISTORICAL_PROD_PREFIX = external_path("HCD_HISTORICAL_CHECKOUT", "checkpoints", "final_prod_seed")
 
 
 def _members(n=3, n_k=10, n_basis=6):

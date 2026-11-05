@@ -126,7 +126,7 @@ def main():
     axb.fill_between(z_grid, mu_b13 - sig_b13, mu_b13 + sig_b13, color="#117733",
                      alpha=0.25, label=r"$\pm\,\sigma_z$  ($\sigma=5\%\,\mu$)")
     axb.plot(z_grid, kim_z, color="grey", ls="--", lw=1.3,
-             label=r"Kim2013 $(\alpha{=}1)$ ladder anchor")
+             label=r"Kim07 $(\alpha{=}1)$ ladder anchor")
     axb.set_xlabel("redshift z"); axb.set_ylabel(r"$\tau_0(z)=-\ln\langle F\rangle$")
     axb.set_title(r"(b) $\tau_0$ mean-flux prior  —  per-z Gaussian on the $\alpha=\tau_0/$Kim ladder",
                   fontsize=10.5)

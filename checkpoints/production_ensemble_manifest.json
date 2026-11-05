@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "created_utc": "2026-10-06T21:25:20.033052+00:00",
+  "created_utc": "2026-11-05T14:56:15.187439+00:00",
   "description": "The deployed N=5 production emulator ensemble (prod_repaired_seed0..4, gate C, S4-repaired cache, schema 2.0): all-sims-trained Equinox checkpoints + paired normalizers, pinned by SHA256. The deployed forward is the ensemble MEAN over members of the reconstructed post-exp P_filt (ensemble.load_ensemble).",
-  "checkpoints_dir": "/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC",
+  "checkpoints_dir": null,
   "basename": "prod_repaired_seed",
   "member_schema_version": "2.0",
   "cache_sha256": "d9c3783892872f8739f6c1a4039ee84cae5ab84803235a61d7d06ac119336cf2",
@@ -79,7 +79,7 @@
   ],
   "provenance": {
     "training_script": "scripts/train_production_emulator.py",
-    "note": "The .eqx/.norm.pkl/.meta.json/.hist.json files live in checkpoints_dir (not in git) and are pinned here by SHA256 and cross-checked against that directory's SHA256SUMS. Per-member training config: prod_repaired_seed<i>.meta.json (digest-pinned here; schema 2.0, cache_sha256, k_com_hmpc); history: prod_repaired_seed<i>.hist.json beside it. Trained by gate C (PU-0056/PU-0057) from a git-archive export of commit 01ad2ff by the notes batch gateC/batch_gateC_train_01ad2ff.sbatch (metas carry git_sha null; see checkpoints_dir/MANIFEST_README.txt).",
+    "note": "The .eqx/.norm.pkl/.meta.json/.hist.json files live in checkpoints_dir (not in git) and are pinned here by SHA256 and cross-checked against that directory's SHA256SUMS. Per-member training config: prod_repaired_seed<i>.meta.json (digest-pinned here; schema 2.0, cache_sha256, k_com_hmpc); history: prod_repaired_seed<i>.hist.json beside it. Trained by gate C (PU-0056/PU-0057) from a git-archive export of commit 01ad2ff by a gate C batch script (metas carry git_sha null; see checkpoints_dir/MANIFEST_README.txt).",
     "replacement_procedure": "Intentional replacement ONLY: retrain via scripts/train_production_emulator.py (once per seed), regenerate this manifest via scripts/gen_ensemble_manifest.py (NEVER hand-edit), obtain PI sign-off, and regenerate analysis.lock. See checkpoints/README_production_ensemble.md."
   }
 }

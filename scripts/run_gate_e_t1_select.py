@@ -8,7 +8,7 @@ cell: the union over the production legs (DESI, KS k <= 0.065, eBOSS) of the mod
 that z over the whole sampling box. k band of a mode: its physical k at the box centre (< 0.01, 0.01-0.031,
 0.031-0.050, >= 0.050 s/km). Class coefficients: production, main arm (DLA masked), the row's own w_c.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu /home/mfho/.conda/envs/emu-jax/bin/python3 \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu python3 \
      scripts/run_gate_e_t1_select.py --eval-dir <gateC_eval> --out-json <..> --out-npz <..>
 """
 from __future__ import annotations

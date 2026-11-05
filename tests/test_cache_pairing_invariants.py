@@ -21,9 +21,10 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import build_emulator_cache_tau0 as bt0  # noqa: E402
 
 NS0907 = "ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662omegamh20.144hireionz7.47bhfeedback0.0347"
-LF_RAW = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
-HR_RAW = Path("/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2")
-HCD = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+from tests.gate_helpers import external_path  # noqa: E402
+LF_RAW = Path(external_path("HCD_LF_RAW_DIR"))
+HR_RAW = Path(external_path("HCD_HR_RAW_DIR"))
+HCD = Path(external_path("HCD_OUTPUTS_DIR"))
 
 
 def _require(*paths):

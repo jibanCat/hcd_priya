@@ -24,7 +24,7 @@ ALPHA_LO_DEFAULT = 0.66
 ALPHA_HI_DEFAULT = 1.36
 N_ALPHA_DEFAULT = 20
 
-# PRIYA's published mean-flux factor grid (Kim 2013 slope-alpha) is exactly
+# PRIYA's published mean-flux factor grid (Kim et al. 2007 slope-alpha) is exactly
 # np.linspace(PRIYA_ALPHA_LO, PRIYA_ALPHA_HI, 10), sim-INDEPENDENT (verified
 # across all 60 LF sims; spread 0). The Phase-2 production grid refines this so
 # PRIYA's exact 10 alpha land on a subset of our grid -> bit-identical
@@ -89,7 +89,7 @@ def make_alpha_grid_priya_aligned(refine=2):
 
 
 def obs_mean_tau_kim2013(z):
-    """Kim 2013 (arXiv 0711.1862) fit: tau_obs(z) = 2.3e-3 * (1+z)^3.65.
+    """Kim et al. 2007 (arXiv:0711.1862) fit (the function name keeps a historical '2013' label): tau_obs(z) = 2.3e-3 * (1+z)^3.65.
     Same formula as fake_spectra.fluxstatistics.obs_mean_tau; duplicated
     here so it can be called without loading fake_spectra (which needs gsl)."""
     return 2.3e-3 * (1.0 + np.asarray(z, dtype=np.float64)) ** 3.65
