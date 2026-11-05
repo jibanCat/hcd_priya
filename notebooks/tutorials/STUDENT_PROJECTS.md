@@ -160,7 +160,7 @@ right thing to know.
 
 **Difficulty.** Intermediate.  **Time.** 2–4 weeks.
 **Prereqs.** NB04, plus reading Cooke, Pettini & Steidel 2018
-(ApJ 855, 102; arXiv:1710.11129) (or any paper on DLA Voigt
+(ApJ 855, 102; arXiv:1710.11129) §3 (or any paper on DLA Voigt
 fitting).
 
 The current Voigt fitter assumes a single component per absorber.
