@@ -318,8 +318,12 @@ def _workflow():
 
 def test_only_the_pinned_job_declares_the_pinned_stack():
     """HCD_PINNED_STACK is "1" in the development-environment (supported) job and empty in the others, and it is set
-    nowhere else: not for the whole workflow, not in another job, not in any step. The matrix holds exactly the one
-    supported job (Python 3.11 with the pinned versions) and the two newest-dependency jobs."""
+    nowhere else: the name occurs exactly once in the workflow outside comments (the fixture-tests job's env), so no
+    other env, run command or $GITHUB_ENV write can set it. The matrix is exactly its include list (no other axis)
+    and holds the one supported job (Python 3.11 with the pinned versions) and the two newest-dependency jobs."""
+    text = open(os.path.join(REPO, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
+    code = "\n".join(re.sub(r"(^|\s)#.*", "", line) for line in text.splitlines())
+    assert code.count("HCD_PINNED_STACK") == 1
     wf = _workflow()
     assert "HCD_PINNED_STACK" not in (wf.get("env") or {})
     for name, job in wf["jobs"].items():
@@ -329,10 +333,25 @@ def test_only_the_pinned_job_declares_the_pinned_stack():
             assert "HCD_PINNED_STACK" not in (step.get("env") or {}), (name, step.get("name"))
     job = wf["jobs"]["fixture-tests"]
     assert job["env"]["HCD_PINNED_STACK"] == "${{ matrix.deps == 'development-environment' && '1' || '' }}"
+    assert set(job["strategy"]["matrix"]) == {"include"}
     include = job["strategy"]["matrix"]["include"]
     assert [(e["python"], e["deps"]) for e in include] == [("3.11", "development-environment"), ("3.11", "newest"),
                                                            ("3.12", "newest")]
     assert [e["label"].endswith("(supported)") for e in include] == [True, False, False]
+
+
+# The `with` inputs each action may take: an input such as setup-python's pip-install would install packages
+# outside the pinned steps.
+ACTION_INPUTS = {"actions/checkout@v4": {"persist-credentials"}, "actions/setup-python@v5": {"python-version"},
+                 "actions/upload-artifact@v4": {"name", "path", "retention-days"}}
+
+
+def test_every_action_takes_only_its_known_inputs():
+    for name, job in _workflow()["jobs"].items():
+        for step in job["steps"]:
+            if "uses" in step:
+                assert step["uses"] in ACTION_INPUTS, (name, step["uses"])
+                assert set(step.get("with") or {}) <= ACTION_INPUTS[step["uses"]], (name, step["uses"])
 
 
 def test_the_docs_build_is_pinned_and_treats_warnings_as_errors():
