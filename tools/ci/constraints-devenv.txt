@@ -1,7 +1,8 @@
 # The supported environment (docs/compatibility.md): the versions of the development environment (a conda-forge
 # Python 3.11 environment) in which the test suite runs, for every package of this project's install closure (with
-# the test extra) that it holds. Each lower bound in pyproject.toml for jax, equinox, optax, numpyro, numpy, scipy,
-# h5py, matplotlib and pytest is the release series of its pin here. The CI job "Python 3.11, pinned (supported)"
+# the test extra) that it holds. Each lower bound in pyproject.toml for jax, equinox, optax, numpyro, scipy, h5py,
+# matplotlib and pytest is the release series of its pin here; numpy's bound (2.0) is below its pin, for the reason
+# pyproject.toml states. The CI job "Python 3.11, pinned (supported)"
 # installs these versions from PyPI (PyPI builds, not the conda-forge ones). Not in that environment, so not pinned:
 # click, joblib, pandas, pyyaml, cloudpickle, tzdata.
 absl-py==2.4.0
