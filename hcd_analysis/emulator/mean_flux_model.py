@@ -11,7 +11,7 @@ TAU0_PIVOT_Z = 3.0               # the (1+z)/(1+z_p) pivot (PRIYA (1+z)/4, so z_
 
 
 def kim_tau0(z):
-    """Kim2013 central mean-flux tau0(z) = KIM_AMP (1+z)^KIM_SLOPE (the cache ladder anchor)."""
+    """Kim07 central mean-flux tau0(z) = KIM_AMP (1+z)^KIM_SLOPE (the cache ladder anchor)."""
     return KIM_AMP * (1.0 + jnp.asarray(z)) ** KIM_SLOPE
 
 
