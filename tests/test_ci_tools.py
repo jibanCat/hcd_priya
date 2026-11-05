@@ -309,13 +309,28 @@ def test_every_run_step_fails_when_a_command_in_a_pipe_fails():
             assert "shell" not in step, (name, step.get("name"))
 
 
-def test_only_the_pinned_job_declares_the_pinned_stack():
-    """HCD_PINNED_STACK is "1" in the development-environment (supported) job and empty in the others."""
+def _workflow():
     import yaml
-    job = yaml.safe_load(open(os.path.join(REPO, ".github", "workflows", "tests.yml")))["jobs"]["fixture-tests"]
-    expr = job["env"]["HCD_PINNED_STACK"]
-    assert expr == "${{ matrix.deps == 'development-environment' && '1' || '' }}"
-    assert {e["deps"] for e in job["strategy"]["matrix"]["include"]} == {"development-environment", "newest"}
+    return yaml.safe_load(open(os.path.join(REPO, ".github", "workflows", "tests.yml")))
+
+
+def test_only_the_pinned_job_declares_the_pinned_stack():
+    """HCD_PINNED_STACK is "1" in the development-environment (supported) job and empty in the others, and it is set
+    nowhere else: not for the whole workflow, not in another job, not in any step. The matrix holds exactly the one
+    supported job (Python 3.11 with the pinned versions) and the two newest-dependency jobs."""
+    wf = _workflow()
+    assert "HCD_PINNED_STACK" not in (wf.get("env") or {})
+    for name, job in wf["jobs"].items():
+        if name != "fixture-tests":
+            assert "HCD_PINNED_STACK" not in (job.get("env") or {}), name
+        for step in job["steps"]:
+            assert "HCD_PINNED_STACK" not in (step.get("env") or {}), (name, step.get("name"))
+    job = wf["jobs"]["fixture-tests"]
+    assert job["env"]["HCD_PINNED_STACK"] == "${{ matrix.deps == 'development-environment' && '1' || '' }}"
+    include = job["strategy"]["matrix"]["include"]
+    assert [(e["python"], e["deps"]) for e in include] == [("3.11", "development-environment"), ("3.11", "newest"),
+                                                           ("3.12", "newest")]
+    assert [e["label"].endswith("(supported)") for e in include] == [True, False, False]
 
 
 def test_the_docs_build_is_pinned_and_treats_warnings_as_errors():
@@ -324,10 +339,12 @@ def test_the_docs_build_is_pinned_and_treats_warnings_as_errors():
     rtd = yaml.safe_load(open(os.path.join(REPO, ".readthedocs.yaml")))
     assert rtd["sphinx"] == {"configuration": "docs/conf.py", "fail_on_warning": True}
     assert rtd["python"]["install"] == [{"requirements": "docs/requirements.txt"}]
-    job = yaml.safe_load(open(os.path.join(REPO, ".github", "workflows", "tests.yml")))["jobs"]["docs"]
-    runs = [step.get("run", "") for step in job["steps"]]
-    assert "python -m pip install -r docs/requirements.txt" in runs
-    assert any(r.startswith("python -m sphinx -W --keep-going -b html docs ") for r in runs)
+    job = _workflow()["jobs"]["docs"]
+    assert [step.get("uses") for step in job["steps"] if "uses" in step] == ["actions/checkout@v4",
+                                                                             "actions/setup-python@v5"]
+    runs = [step["run"] for step in job["steps"] if "run" in step]
+    assert runs == ["python -m pip install -r docs/requirements.txt",
+                    'python -m sphinx -W --keep-going -b html docs "$RUNNER_TEMP/html"']      # nothing else installed
     lines = [ln.strip() for ln in open(os.path.join(REPO, "docs", "requirements.txt"))]
     reqs = [ln for ln in lines if ln and not ln.startswith("#")]
     assert reqs and all(re.fullmatch(r"[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9.]*", r) for r in reqs), reqs
