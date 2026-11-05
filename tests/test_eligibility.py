@@ -748,7 +748,7 @@ def test_a_recognised_fold_member_with_another_simulation_list_is_refused():
         assert "RES_HELD" in _adm([held_more], _rs([SIMS[3]], rule=E.RULE_MULTI_HOLDOUT), sims)
 
 
-# the mutation run of simulation_sets/1 (evidence/D5_IMPL/addendum2): clauses the tests above did not reach
+# the mutation run of simulation_sets/1 (its second addendum): clauses the tests above did not reach
 def test_a_held_out_or_training_key_is_read_as_simulation_names_whatever_their_form():
     assert _codes_kw(_meta(train_sims=["run_a", "run_b"]), n_sims=5) == {"SIM_SET:recipe.train_sims"}
     m = _excl(holdout_sims=[SIMS[3]], withheld_sims=["run_b"])               # a name outside the form, at load
