@@ -3,7 +3,7 @@
 T3 (and, once amendment A2 registers it, T2) products, against the production training cache and the committed
 production ensemble manifest. Never hand-edited; regenerated here and committed with the analysis.lock.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu /home/mfho/.conda/envs/emu-jax/bin/python3 \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu python3 \
      scripts/gen_product_manifest.py --mf <..> --dla-core <..> --t1 <..> --t3 <..> [--t2 <..>] [--check]
 """
 from __future__ import annotations

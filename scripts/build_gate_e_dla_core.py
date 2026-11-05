@@ -5,7 +5,7 @@ z (|z - z_grid| < 0.05, all simulations and rungs) of each row's DLA core (cache
 from the row's OWN stored grid (kfkms) onto a fixed log grid (400 points, 4e-4 to 0.1 s/km). The forward reads it at
 the data bins by linear interpolation in ln k (no binding, no theta-dependence). Write-once product kind ``dla_core``.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu /home/mfho/.conda/envs/emu-jax/bin/python3 \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu python3 \
      scripts/build_gate_e_dla_core.py --cache <lf cache> --out <product.npz>
 """
 from __future__ import annotations

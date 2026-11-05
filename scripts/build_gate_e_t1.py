@@ -5,7 +5,7 @@
 bands, and the mode-to-mode correlation of the ensemble residuals across rows at lags 1, 2, 5, 10 (per class).
 Write-once: the ``cemu_t1`` product (private storage), the report JSON and figure (private notes).
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu /home/mfho/.conda/envs/emu-jax/bin/python3 \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu python3 \
      scripts/build_gate_e_t1.py --eval-dir <..> --cache <..> --selection <t1_selection.json> --out <product.npz> \
      --report-json <..> --report-fig <..>
 """

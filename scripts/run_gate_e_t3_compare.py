@@ -15,7 +15,7 @@ and the net pull at each simulation's theta with S_s = r_s r_s^T + C_data; all p
 A_p, tau0_amp. Decision (registered): P unless M wins by > 2 paired SE and > 1 nat per held-out simulation AND is
 meaningfully better calibrated; a qualifying M with a material (f) or (g) STOPS (stop 2). Write-once outputs.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu /home/mfho/.conda/envs/emu-jax/bin/python3 \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu python3 \
      scripts/run_gate_e_t3_compare.py --eval-dir <gateC_eval> --mf <mf product> --dla-core <dla_core product> \
      --out-json <..> --out-npz <..>
 """
