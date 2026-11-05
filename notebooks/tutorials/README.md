@@ -144,7 +144,7 @@ look at the background reading below.
    normalisation?
 2. The corrected CDDF differs from the original by a factor of
    `(1+z)·h`.  At z = 2.2 with h = 0.67, what is that factor numerically?
-   Why is this the difference between a 0.3 dex offset vs Prochaska+05
+   Why is this the difference between a 0.3 dex offset vs Prochaska+2014
    and a 0.0 dex one?
 3. dN/dX(DLA) at z = 2.0 is ~0.032 in the example sim, vs ~0.05 in
    the observations (Prochaska & Wolfe 2009, Noterdaeme+12, Ho+21).
