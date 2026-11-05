@@ -125,3 +125,21 @@ jobs:
           "$RUNNER_TEMP/old/bin/python" -m pytest -q -rs -p no:cacheprovider -c "$GITHUB_WORKSPACE/pyproject.toml" \
             --rootdir . --confcutdir . tests/test_safe_h5.py | tee pytest.log
           if grep -q SKIPPED pytest.log; then echo "a test of the loader was skipped"; exit 1; fi
+
+  docs:
+    # The documentation site, built as Read the Docs builds it (.readthedocs.yaml): the pinned docs/requirements.txt,
+    # and every Sphinx warning an error, so a broken link, a missing page or a docstring that does not parse fails
+    # the job. The package is not installed: the API reference is read from the source.
+    name: Documentation (Sphinx, warnings are errors)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the pinned documentation requirements
+        run: python -m pip install -r docs/requirements.txt
+      - name: Build the site
+        run: python -m sphinx -W --keep-going -b html docs "$RUNNER_TEMP/html"

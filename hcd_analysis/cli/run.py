@@ -1,7 +1,8 @@
 """
 CLI entry points for hcd_analysis.
 
-Usage:
+Usage::
+
   hcd run-one  --sim <sim_fragment> --snap <snap_number> [options]
   hcd run-sim  --sim <sim_fragment> [options]
   hcd run-all  [options]
@@ -9,7 +10,8 @@ Usage:
   hcd report   [options]
   hcd coverage [options]
 
-Global options (all subcommands):
+Global options (all subcommands)::
+
   --config PATH          YAML config file (required, for example config/default.yaml in a checkout: no default
                          is applied until one approved set of defaults is chosen)
   --output-root PATH     Override output directory

@@ -32,6 +32,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   - an older-libhdf5 read test of the release format.
 - **Project files:** [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) (Contributor
   Covenant 2.1) and [`CITATION.cff`](CITATION.cff).
+- **A documentation site** for Read the Docs (Sphinx with MyST): install, data availability, supported environments,
+  the release format, the production and research bundles tutorial and an API reference of the public modules. CI
+  builds it with every warning treated as an error.
 
 ### Changed
 - The `hcd` command needs an explicit `--config`; it never falls back to built-in settings.

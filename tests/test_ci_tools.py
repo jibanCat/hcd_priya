@@ -3,6 +3,7 @@ development-environment versions against pyproject.toml's lower bounds. Syntheti
 import importlib.util
 import io
 import os
+import re
 import tarfile
 import tomllib
 import zipfile
@@ -261,6 +262,23 @@ def test_only_the_pinned_job_declares_the_pinned_stack():
     expr = job["env"]["HCD_PINNED_STACK"]
     assert expr == "${{ matrix.deps == 'development-environment' && '1' || '' }}"
     assert {e["deps"] for e in job["strategy"]["matrix"]["include"]} == {"development-environment", "newest"}
+
+
+def test_the_docs_build_is_pinned_and_treats_warnings_as_errors():
+    """Read the Docs and the CI docs job install the same fully pinned requirements and fail on any Sphinx warning."""
+    import yaml
+    rtd = yaml.safe_load(open(os.path.join(REPO, ".readthedocs.yaml")))
+    assert rtd["sphinx"] == {"configuration": "docs/conf.py", "fail_on_warning": True}
+    assert rtd["python"]["install"] == [{"requirements": "docs/requirements.txt"}]
+    job = yaml.safe_load(open(os.path.join(REPO, ".github", "workflows", "tests.yml")))["jobs"]["docs"]
+    runs = [step.get("run", "") for step in job["steps"]]
+    assert "python -m pip install -r docs/requirements.txt" in runs
+    assert any(r.startswith("python -m sphinx -W --keep-going -b html docs ") for r in runs)
+    lines = [ln.strip() for ln in open(os.path.join(REPO, "docs", "requirements.txt"))]
+    reqs = [ln for ln in lines if ln and not ln.startswith("#")]
+    assert reqs and all(re.fullmatch(r"[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9.]*", r) for r in reqs), reqs
+    names = {r.split("==")[0].lower().replace("_", "-") for r in reqs}
+    assert {"sphinx", "myst-parser", "sphinx-autoapi", "sphinx-rtd-theme", "sphinxcontrib-mermaid"} <= names
 
 
 def test_h5_cross_version_check_reads_back_and_catches_a_change_or_a_new_library(tmp_path, capsys):
