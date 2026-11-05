@@ -417,12 +417,34 @@ def test_current_loader_refuses_the_manifest_the_july_lock_pins():
 #  schema v2 (gate E, PU-0067): members are schema-2.0 checkpoints of one training cache; the
 #  manifest names its directory; schema-1 (pre-2026-10) manifests are refused
 # --------------------------------------------------------------------------------------------- #
-def test_v2_manifest_names_its_directory_and_the_cache(fake):
+def test_v2_manifest_names_its_directory_and_the_cache(fake, monkeypatch):
+    """A recorded directory beats HCD_CHECKPOINTS_DIR (set here to an absent directory)."""
     d, mpath = fake
     m = json.loads(Path(mpath).read_text())
     assert m["schema_version"] == 2 and m["checkpoints_dir"] == str(d) and m["cache_sha256"] == FAKE_CACHE
+    monkeypatch.setenv("HCD_CHECKPOINTS_DIR", str(d / "absent"))
     _, prefixes = PE.verify_manifest(manifest_path=str(mpath))          # directory taken from the manifest
-    assert [os.path.basename(p) for p in prefixes] == [f"{BASE}{i}" for i in range(5)]
+    assert prefixes == [os.path.join(str(d), f"{BASE}{i}") for i in range(5)]
+
+
+def test_argument_beats_a_recorded_directory(fake, monkeypatch):
+    """Loader order, first rule: an explicit checkpoints_dir wins over the manifest's directory and the environment."""
+    d, mpath = fake
+    _edit_manifest(mpath, lambda m: m.update(checkpoints_dir=str(d / "absent_recorded")))
+    monkeypatch.setenv("HCD_CHECKPOINTS_DIR", str(d / "absent_env"))
+    _, prefixes = PE.verify_manifest(checkpoints_dir=str(d), manifest_path=str(mpath))
+    assert prefixes == [os.path.join(str(d), f"{BASE}{i}") for i in range(5)]
+
+
+def test_null_manifest_without_the_environment_uses_its_own_directory(fake, monkeypatch, tmp_path):
+    """Loader order, last rule: no argument, checkpoints_dir null, HCD_CHECKPOINTS_DIR unset -> the manifest's own
+    directory (not the working directory)."""
+    d, mpath = fake
+    _edit_manifest(mpath, lambda m: m.update(checkpoints_dir=None))
+    monkeypatch.delenv("HCD_CHECKPOINTS_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    _, prefixes = PE.verify_manifest(manifest_path=str(mpath))
+    assert prefixes == [os.path.join(str(d), f"{BASE}{i}") for i in range(5)]
 
 
 def test_v2_manifest_without_a_directory_is_located_by_the_environment(fake, monkeypatch):
