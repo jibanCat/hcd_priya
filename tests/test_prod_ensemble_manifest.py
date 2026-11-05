@@ -316,15 +316,23 @@ def _real_files_present():
                for i in range(5) for ext in (".eqx", ".norm.pkl", ".meta.json"))
 
 
-needs_real = pytest.mark.skipif(
-    not _real_files_present(),
-    reason=f"real production checkpoints not present at {_REPO_ROOT}/checkpoints "
-           "(gitignored binaries live only in the main tree); the red battery above still "
-           "pins the contract")
+def _unavailable(msg):
+    """Skip normally; FAIL in a gate run (HCD_GATE_RUN=1), so a gate can not pass without the real-member checks."""
+    if os.environ.get("HCD_GATE_RUN") == "1":
+        pytest.fail(msg + " (HCD_GATE_RUN=1: gate runs require the real production checkpoints)")
+    pytest.skip(msg)
 
 
-@needs_real
+def needs_real():
+    """Called first in each real-member test (a call, not a fixture, so a gate run reports FAILED, not ERROR): the
+    real members (gitignored binaries) in HCD_CHECKPOINTS_DIR. The red battery above still pins the contract."""
+    if not _real_files_present():
+        _unavailable(f"real production checkpoints not present at {REAL_CKPT_DIR}: set HCD_CHECKPOINTS_DIR to the "
+                     f"directory holding {BASE}0..4 (.eqx, .norm.pkl, .meta.json)")
+
+
 def test_real_checkpoints_verify_against_committed_manifest():
+    needs_real()
     manifest, prefixes = PE.verify_manifest(checkpoints_dir=str(REAL_CKPT_DIR),
                                             manifest_path=str(COMMITTED_MANIFEST))
     assert [os.path.basename(p) for p in prefixes] == \
@@ -334,8 +342,8 @@ def test_real_checkpoints_verify_against_committed_manifest():
     assert len({m["norm_sha256"] for m in manifest["members"]}) == 1
 
 
-@needs_real
 def test_real_load_production_ensemble():
+    needs_real()
     ens, meta0, norm0, manifest = PE.load_production_ensemble(
         checkpoints_dir=str(REAL_CKPT_DIR), manifest_path=str(COMMITTED_MANIFEST))
     assert len(ens.members) == 5
@@ -343,8 +351,8 @@ def test_real_load_production_ensemble():
     assert manifest["n_members"] == 5
 
 
-@needs_real
 def test_gen_check_green_on_real_dir():
+    needs_real()
     rc = GEN.main(["--check", "--checkpoints-dir", str(REAL_CKPT_DIR),
                    "--manifest", str(COMMITTED_MANIFEST)])
     assert rc == 0
@@ -409,12 +417,34 @@ def test_current_loader_refuses_the_manifest_the_july_lock_pins():
 #  schema v2 (gate E, PU-0067): members are schema-2.0 checkpoints of one training cache; the
 #  manifest names its directory; schema-1 (pre-2026-10) manifests are refused
 # --------------------------------------------------------------------------------------------- #
-def test_v2_manifest_names_its_directory_and_the_cache(fake):
+def test_v2_manifest_names_its_directory_and_the_cache(fake, monkeypatch):
+    """A recorded directory beats HCD_CHECKPOINTS_DIR (set here to an absent directory)."""
     d, mpath = fake
     m = json.loads(Path(mpath).read_text())
     assert m["schema_version"] == 2 and m["checkpoints_dir"] == str(d) and m["cache_sha256"] == FAKE_CACHE
+    monkeypatch.setenv("HCD_CHECKPOINTS_DIR", str(d / "absent"))
     _, prefixes = PE.verify_manifest(manifest_path=str(mpath))          # directory taken from the manifest
-    assert [os.path.basename(p) for p in prefixes] == [f"{BASE}{i}" for i in range(5)]
+    assert prefixes == [os.path.join(str(d), f"{BASE}{i}") for i in range(5)]
+
+
+def test_argument_beats_a_recorded_directory(fake, monkeypatch):
+    """Loader order, first rule: an explicit checkpoints_dir wins over the manifest's directory and the environment."""
+    d, mpath = fake
+    _edit_manifest(mpath, lambda m: m.update(checkpoints_dir=str(d / "absent_recorded")))
+    monkeypatch.setenv("HCD_CHECKPOINTS_DIR", str(d / "absent_env"))
+    _, prefixes = PE.verify_manifest(checkpoints_dir=str(d), manifest_path=str(mpath))
+    assert prefixes == [os.path.join(str(d), f"{BASE}{i}") for i in range(5)]
+
+
+def test_null_manifest_without_the_environment_uses_its_own_directory(fake, monkeypatch, tmp_path):
+    """Loader order, last rule: no argument, checkpoints_dir null, HCD_CHECKPOINTS_DIR unset -> the manifest's own
+    directory (not the working directory)."""
+    d, mpath = fake
+    _edit_manifest(mpath, lambda m: m.update(checkpoints_dir=None))
+    monkeypatch.delenv("HCD_CHECKPOINTS_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    _, prefixes = PE.verify_manifest(manifest_path=str(mpath))
+    assert prefixes == [os.path.join(str(d), f"{BASE}{i}") for i in range(5)]
 
 
 def test_v2_manifest_without_a_directory_is_located_by_the_environment(fake, monkeypatch):
@@ -471,3 +501,34 @@ def test_v2_sha256sums_cross_check(fake):
     (d / "SHA256SUMS").write_text("\n".join(lines) + "\n")
     with pytest.raises(PE.ProductionEnsembleError, match="SHA256SUMS"):
         _verify(fake)
+
+
+# --------------------------------------------------------------------------------------------- #
+#  the comparison config pins the committed manifest by sha256 (data-free; scrub delta review m2)
+# --------------------------------------------------------------------------------------------- #
+def _c1_pins():
+    from hcd_analysis.comparison import cases as CS
+    return CS.load_config("phase0_v1")["comparators"]["C1"]
+
+
+def test_phase0_pin_is_the_committed_manifest():
+    """phase0_v1.json's C1 entry names the committed manifest and pins its exact bytes: a regenerated manifest must
+    land together with the new pin."""
+    c1 = _c1_pins()
+    assert ROOT / c1["manifest"] == COMMITTED_MANIFEST
+    assert c1["manifest_sha256"] == hashlib.sha256(COMMITTED_MANIFEST.read_bytes()).hexdigest()
+
+
+def test_adapter_refuses_a_manifest_that_is_not_the_pinned_one(tmp_path, monkeypatch):
+    """hcd_priya.predict checks the manifest's sha256 against the pin before it loads anything."""
+    from hcd_analysis.comparison.adapters import hcd_priya as H
+    monkeypatch.setenv("HCD_CHECKPOINTS_DIR", str(tmp_path / "absent"))
+    edited = tmp_path / PE.MANIFEST_BASENAME
+    edited.write_bytes(COMMITTED_MANIFEST.read_bytes() + b"\n")          # same content, other bytes
+    pins = _c1_pins()
+    with pytest.raises(RuntimeError, match="does not match the pinned sha256"):
+        H.predict([], cache_path=str(tmp_path / "absent.h5"), pins=pins, manifest_path=str(edited))
+    # control: pinning the edited bytes passes the check, and the loader then stops at the absent members
+    pins = dict(pins, manifest_sha256=hashlib.sha256(edited.read_bytes()).hexdigest())
+    with pytest.raises(PE.ProductionEnsembleError, match="MISSING"):
+        H.predict([], cache_path=str(tmp_path / "absent.h5"), pins=pins, manifest_path=str(edited))

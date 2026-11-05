@@ -160,6 +160,10 @@ def test_load_ensemble_refuses_pre_2026_10_production_checkpoints():
     from hcd_analysis.emulator.schema import SchemaCollapseError
     paths = sorted(p[:-4] for p in glob.glob(HISTORICAL_PROD_PREFIX + "*.eqx"))
     if not paths:
-        pytest.skip("historical production checkpoints not present")
+        msg = (f"historical production checkpoints not present at {HISTORICAL_PROD_PREFIX}*.eqx: set "
+               "HCD_HISTORICAL_CHECKOUT to the checkout holding checkpoints/")
+        if os.environ.get("HCD_GATE_RUN") == "1":
+            pytest.fail(msg + " (HCD_GATE_RUN=1: gate runs require the historical checkpoints)")
+        pytest.skip(msg)
     with pytest.raises(SchemaCollapseError):
         load_ensemble(paths[:1])
