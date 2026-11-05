@@ -166,6 +166,20 @@ def test_junit_counts_in_an_assets_job_a_required_test_must_run(tmp_path):
     assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0)
 
 
+def test_junit_counts_in_an_assets_job_a_required_test_absent_from_the_report_is_missing(tmp_path):
+    """A required asset test that never reaches the report (not collected: a renamed test or parameter; or
+    deselected) is missing too; a required name matched by its full id or by its function name is not."""
+    p = tmp_path / "r.xml"
+    p.write_text(_JUNIT)
+    c = RT.junit_counts(str(p), declared_skips=["a", "zz"], required=["a", "zz"])
+    assert (c["asset_missing"], c["passed"]) == (1, 1)
+    c = RT.junit_counts(str(p), declared_skips=["d[p1]", "d[p9]", "a"], required=["d[p1]", "d[p9]", "a"])
+    assert c["asset_missing"] == 2                                   # d[p1] skipped, d[p9] absent
+    c = RT.junit_counts(str(p), declared_skips=["a"], required=["a"])
+    assert c["asset_missing"] == 0
+    assert RT.junit_counts(str(p), declared_skips=["zz"])["asset_missing"] == 0     # not required: not counted
+
+
 def test_the_assets_job_runs_the_assets_tier_and_every_file_with_asset_tests():
     _, files = RT.load_tiers()
     picked = RT.asset_job_files(files)
@@ -182,7 +196,7 @@ def test_the_plan_of_a_ci_tier_runs_its_files_without_required_tests_or_added_en
     for tier in RT.CI_TIERS:
         plan = RT.tier_plan(tier, files)
         assert plan["todo"] == sorted(p for p, e in files.items() if e["tier"] == tier)
-        assert plan["env"] == {} and plan["marker"] == "not slow"
+        assert plan["env"] == {} and plan["marker"] == "not slow"           # slow tests listed as NOT RUN
         assert set(plan["declared"]) == set(plan["required"]) == set(plan["todo"])
         for rel in plan["todo"]:
             assert plan["declared"][rel] == files[rel].get("asset_tests", []) + files[rel].get("skipped_by_design", [])
@@ -198,6 +212,7 @@ def test_the_plan_of_the_assets_job_runs_every_qualifying_file_with_the_gate_on_
                   if e["tier"] == "assets" or (e["tier"] in ("wheel", "source") and e.get("asset_tests")))
     assert plan["todo"] == want and len(want) > len(RT.files_of(files, "assets"))
     assert plan["env"] == {"HCD_GATE_RUN": "1"}
+    assert plan["marker"] is None                       # slow tests run too: an asset test may be marked slow
     for rel in want:
         assert plan["required"][rel] == files[rel].get("asset_tests", [])
         assert not set(plan["required"][rel]) & set(files[rel].get("skipped_by_design", []))
