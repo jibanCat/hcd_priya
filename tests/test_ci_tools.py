@@ -353,18 +353,27 @@ def test_the_docs_build_is_pinned_and_treats_warnings_as_errors():
 
 
 def test_h5_cross_version_check_reads_back_and_catches_a_change_or_a_new_library(tmp_path, capsys):
-    """tools/ci/h5_cross_version.py: a synthetic bundle reads back with every digest equal; an edited digest fails; and
-    --max-hdf5 fails on a library that is not older than the limit (here the running one), so the older-libhdf5 job
-    cannot pass on a new library."""
+    """tools/ci/h5_cross_version.py: a synthetic bundle reads back with every digest equal; an edited digest fails, of
+    a model leaf or of a normalizer array; and --max-hdf5 fails on a library that is not older than the limit, at the
+    limit too (the running library's own MAJOR.MINOR), so the older-libhdf5 job cannot pass on a new library."""
     import json
+    import h5py
     XV = _load("h5_cross_version")
     out = tmp_path / "x"
     assert XV.main(["write", str(out)]) == 0
     assert XV.main(["read", str(out)]) == 0
+    major, minor = (int(x) for x in h5py.version.hdf5_version.split(".")[:2])
     assert XV.main(["read", str(out), "--max-hdf5", "1.0"]) == 1
-    exp = json.loads((out / "expected.json").read_text())
-    key = sorted(exp["members"][1])[0]
-    exp["members"][1][key] = "0" * 64
-    (out / "expected.json").write_text(json.dumps(exp))
-    assert XV.main(["read", str(out)]) == 1
-    assert f"MISMATCH member 1 {key}" in capsys.readouterr().out
+    assert XV.main(["read", str(out), "--max-hdf5", f"{major}.{minor}"]) == 1
+    assert XV.main(["read", str(out), "--max-hdf5", f"{major}.{minor + 1}"]) == 0
+    capsys.readouterr()
+    pristine = (out / "expected.json").read_text()
+    exp = json.loads(pristine)
+    model_key = sorted(k for k in exp["members"][1] if k.startswith("model"))[0]
+    norm_key = sorted(k for k in exp["members"][0] if k.startswith("norm/"))[0]
+    for member, key in ((1, model_key), (0, norm_key)):
+        exp = json.loads(pristine)
+        exp["members"][member][key] = "0" * 64
+        (out / "expected.json").write_text(json.dumps(exp))
+        assert XV.main(["read", str(out)]) == 1
+        assert f"MISMATCH member {member} {key}" in capsys.readouterr().out
