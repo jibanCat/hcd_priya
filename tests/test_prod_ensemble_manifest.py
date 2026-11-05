@@ -316,15 +316,23 @@ def _real_files_present():
                for i in range(5) for ext in (".eqx", ".norm.pkl", ".meta.json"))
 
 
-needs_real = pytest.mark.skipif(
-    not _real_files_present(),
-    reason=f"real production checkpoints not present at {_REPO_ROOT}/checkpoints "
-           "(gitignored binaries live only in the main tree); the red battery above still "
-           "pins the contract")
+def _unavailable(msg):
+    """Skip normally; FAIL in a gate run (HCD_GATE_RUN=1), so a gate can not pass without the real-member checks."""
+    if os.environ.get("HCD_GATE_RUN") == "1":
+        pytest.fail(msg + " (HCD_GATE_RUN=1: gate runs require the real production checkpoints)")
+    pytest.skip(msg)
 
 
-@needs_real
+def needs_real():
+    """Called first in each real-member test (a call, not a fixture, so a gate run reports FAILED, not ERROR): the
+    real members (gitignored binaries) in HCD_CHECKPOINTS_DIR. The red battery above still pins the contract."""
+    if not _real_files_present():
+        _unavailable(f"real production checkpoints not present at {REAL_CKPT_DIR}: set HCD_CHECKPOINTS_DIR to the "
+                     f"directory holding {BASE}0..4 (.eqx, .norm.pkl, .meta.json)")
+
+
 def test_real_checkpoints_verify_against_committed_manifest():
+    needs_real()
     manifest, prefixes = PE.verify_manifest(checkpoints_dir=str(REAL_CKPT_DIR),
                                             manifest_path=str(COMMITTED_MANIFEST))
     assert [os.path.basename(p) for p in prefixes] == \
@@ -334,8 +342,8 @@ def test_real_checkpoints_verify_against_committed_manifest():
     assert len({m["norm_sha256"] for m in manifest["members"]}) == 1
 
 
-@needs_real
 def test_real_load_production_ensemble():
+    needs_real()
     ens, meta0, norm0, manifest = PE.load_production_ensemble(
         checkpoints_dir=str(REAL_CKPT_DIR), manifest_path=str(COMMITTED_MANIFEST))
     assert len(ens.members) == 5
@@ -343,8 +351,8 @@ def test_real_load_production_ensemble():
     assert manifest["n_members"] == 5
 
 
-@needs_real
 def test_gen_check_green_on_real_dir():
+    needs_real()
     rc = GEN.main(["--check", "--checkpoints-dir", str(REAL_CKPT_DIR),
                    "--manifest", str(COMMITTED_MANIFEST)])
     assert rc == 0
