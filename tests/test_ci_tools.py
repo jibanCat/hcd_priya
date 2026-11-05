@@ -176,6 +176,32 @@ def test_the_assets_job_runs_the_assets_tier_and_every_file_with_asset_tests():
     assert not set(RT.not_run(files, ran=("assets",))) & {"assets", *RT.CI_TIERS}
 
 
+
+def test_the_plan_of_a_ci_tier_runs_its_files_without_required_tests_or_added_environment():
+    _, files = RT.load_tiers()
+    for tier in RT.CI_TIERS:
+        plan = RT.tier_plan(tier, files)
+        assert plan["todo"] == sorted(p for p, e in files.items() if e["tier"] == tier)
+        assert plan["env"] == {} and plan["marker"] == "not slow"
+        assert set(plan["declared"]) == set(plan["required"]) == set(plan["todo"])
+        for rel in plan["todo"]:
+            assert plan["declared"][rel] == files[rel].get("asset_tests", []) + files[rel].get("skipped_by_design", [])
+            assert plan["required"][rel] == []
+
+
+def test_the_plan_of_the_assets_job_runs_every_qualifying_file_with_the_gate_on_and_requires_its_asset_tests():
+    """Every file of the assets tier and every CI-tier file with asset_tests, and nothing else; HCD_GATE_RUN=1 (a
+    missing real cache fails instead of skipping); each file's asset_tests are required, skipped_by_design is not."""
+    _, files = RT.load_tiers()
+    plan = RT.tier_plan("assets", files)
+    want = sorted(p for p, e in files.items()
+                  if e["tier"] == "assets" or (e["tier"] in ("wheel", "source") and e.get("asset_tests")))
+    assert plan["todo"] == want and len(want) > len(RT.files_of(files, "assets"))
+    assert plan["env"] == {"HCD_GATE_RUN": "1"}
+    for rel in want:
+        assert plan["required"][rel] == files[rel].get("asset_tests", [])
+        assert not set(plan["required"][rel]) & set(files[rel].get("skipped_by_design", []))
+
 def test_deferred_legacy_messages_are_exactly_what_conftest_writes():
     from tests.gate_helpers import DEFERRED_CAUSES
     assert RT.deferred_legacy_messages() == {f"deferred_legacy {cause}: {reason}"

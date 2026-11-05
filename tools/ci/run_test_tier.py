@@ -71,6 +71,18 @@ def asset_job_files(files):
                   if entry["tier"] == ASSET_JOB or (entry["tier"] in CI_TIERS and entry.get("asset_tests")))
 
 
+def tier_plan(tier, files):
+    """What a run of `tier` does, as data: the files it runs (todo), the environment variables it adds (env), the
+    pytest marker expression of each file's run (marker), and per file the declared skips (declared: asset_tests and
+    skipped_by_design) and the tests that must run (required: an assets job's asset_tests; none in a CI tier)."""
+    assets = tier == ASSET_JOB
+    todo = asset_job_files(files) if assets else files_of(files, tier)
+    return dict(todo=todo, env={"HCD_GATE_RUN": "1"} if assets else {}, marker="not slow",
+                declared={rel: files[rel].get("asset_tests", []) + files[rel].get("skipped_by_design", [])
+                          for rel in todo},
+                required={rel: list(files[rel].get("asset_tests", [])) if assets else [] for rel in todo})
+
+
 def deferred_legacy_messages(path=os.path.join(REPO, "tests", "gate_helpers.py")):
     """The exact junit messages of the deferred_legacy causes, as tests/conftest.py writes them, read from the
     DEFERRED_CAUSES literal without importing the tests."""
@@ -174,7 +186,8 @@ def slow_tests(cmd_base, cwd, env, todo):
 
 def run_tier(tier, out, workdir=None, wheel=None):
     tiers, files = load_tiers()
-    todo = asset_job_files(files) if tier == ASSET_JOB else files_of(files, tier)
+    plan = tier_plan(tier, files)
+    todo = plan["todo"]
     if not todo:
         sys.exit(f"tier {tier!r} has no file")
     if tier == "wheel":
@@ -193,8 +206,7 @@ def run_tier(tier, out, workdir=None, wheel=None):
     deferrals = deferred_legacy_messages()
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTEST_ADDOPTS", "PYTEST_PLUGINS")}
     env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
-    if tier == ASSET_JOB:
-        env["HCD_GATE_RUN"] = "1"
+    env.update(plan["env"])
     cmd_base = [sys.executable, "-m", "pytest", "-c", os.path.join(REPO, "pyproject.toml"), "--rootdir", cwd,
                 "--confcutdir", cwd, "-p", "no:cacheprovider"]
     slow, slow_error = slow_tests(cmd_base, cwd, env, todo)
@@ -204,7 +216,7 @@ def run_tier(tier, out, workdir=None, wheel=None):
         xml = os.path.join(out, slug + ".xml")
         t0 = time.time()
         try:
-            proc = subprocess.run(cmd_base + ["-m", "not slow", "-q", "-rA", f"--junitxml={xml}", rel], cwd=cwd,
+            proc = subprocess.run(cmd_base + ["-m", plan["marker"], "-q", "-rA", f"--junitxml={xml}", rel], cwd=cwd,
                                   env=env, capture_output=True, text=True, timeout=FILE_TIMEOUT_S)
             rc, log = proc.returncode, proc.stdout + proc.stderr
         except subprocess.TimeoutExpired as exc:
@@ -212,8 +224,7 @@ def run_tier(tier, out, workdir=None, wheel=None):
             rc, log = None, f"timeout after {FILE_TIMEOUT_S} s; output so far:\n{partial}"
         with open(os.path.join(out, slug + ".log"), "w") as f:
             f.write(log)
-        declared = files[rel].get("asset_tests", []) + files[rel].get("skipped_by_design", [])
-        required = files[rel].get("asset_tests", []) if tier == ASSET_JOB else []
+        declared, required = plan["declared"][rel], plan["required"][rel]
         counts = None
         if rc is not None and os.path.exists(xml):
             try:
