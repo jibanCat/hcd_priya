@@ -68,9 +68,11 @@ def test_check_wheel_accepts_exactly_the_committed_package(tmp_path):
 @pytest.mark.parametrize("extra", ["hcd_analysis/_emulator_data/observables_tau0_lf.h5",
                                    "hcd_analysis/emulator/member.norm.pkl", "tests/test_x.py",
                                    "hcd_analysis/scratch.py", "hcd_analysis/emulator/README.md",
-                                   "hcd_priya-0.0.0.dist-info/extra.txt"])
+                                   "hcd_priya-0.0.0.dist-info/extra.txt", "other-0.0.0.dist-info/METADATA",
+                                   "hcd_analysis-0.0.0.dist-info/METADATA"])
 def test_check_wheel_refuses_any_other_file(tmp_path, extra):
-    """Data, pickles, tests, an uncommitted module, docs or extra metadata never pass."""
+    """Data, pickles, tests, an uncommitted module, docs, extra metadata, or the metadata of another distribution
+    (also the old name hcd_analysis) never pass."""
     assert any(extra in p for p in CD.check_wheel(_wheel(tmp_path, extra=[extra]), PACKAGE))
 
 
