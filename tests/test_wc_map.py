@@ -542,6 +542,9 @@ def test_the_t31_comparison_refuses_a_change_above_the_tolerance():
     bad["delta_c"]["coeffs"] = bad["delta_c"]["coeffs"][:1]
     assert np.asarray(bad["delta_c"]["coeffs"]).shape[0] == 1 < np.asarray(want["delta_c"]["coeffs"]).shape[0]
     assert payload_mismatches(bad, want) == ["delta_c.coeffs"]
+    bad = copy.deepcopy(want)                       # the same values under an extra axis: broadcasting alone passes it
+    bad["delta_c"]["coeffs"] = [copy.deepcopy(want["delta_c"]["coeffs"])]
+    assert payload_mismatches(bad, want) == ["delta_c.coeffs"]
     bad = copy.deepcopy(want)
     del bad["xbar"]["n_groups"]
     assert payload_mismatches(bad, want) == ["xbar keys"]
