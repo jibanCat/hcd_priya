@@ -106,7 +106,7 @@ class _Dist:
 @pytest.mark.parametrize("record, at_root, installed", [
     ("hcd_analysis/paths.py,sha256=x,1\nhcd_analysis/__init__.py,sha256=y,2\n", True, True),   # wheel install
     (None, True, False),                       # a checkout with a legacy egg-info: no RECORD (PU-0241's tree)
-    ("__editable__.hcd_analysis-0.1.0.pth,sha256=x,1\n", True, False),                            # editable install
+    ("__editable__.hcd_priya-0.2.0.pth,sha256=x,1\n", True, False),                               # editable install
     ("hcd_analysis/paths.py,sha256=x,1\n", False, False),                # installed elsewhere, imported from here
 ])
 def test_installed_root_requires_a_wheel_record_where_the_package_was_imported(monkeypatch, tmp_path, record,

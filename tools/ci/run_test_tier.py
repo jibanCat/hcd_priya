@@ -160,7 +160,7 @@ def check_origin(tier, origin):
         if pkg_parent not in site:
             sys.exit(f"wheel tier: hcd_analysis imports from {origin}, not from this interpreter's site-packages")
     elif pkg_parent != REPO:
-        sys.exit(f"source tier: hcd_analysis imports from {origin}, not from the checkout {REPO}")
+        sys.exit(f"{tier} tier: hcd_analysis imports from {origin}, not from the checkout {REPO}")
 
 
 def check_installed_is(wheel):
