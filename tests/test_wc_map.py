@@ -1,9 +1,11 @@
 """The dN/dX-to-w_c map as a stamped product (hcd_analysis/emulator/wc_map.py) and the explicit map argument of
 dndx_wc. Synthetic caches only (tests/emulator/_fixture.py), made-up values."""
+import copy
 import hashlib
 import importlib.util
 import json
 import os
+import re
 
 import jax
 import jax.numpy as jnp
@@ -247,6 +249,86 @@ def cache5(tmp_path, monkeypatch):
 # payload sha256 on the 5-simulation synthetic cache (seed 0), computed with the pre-D5 refit and the W-1 reference view
 GOLDEN_WCMAP_REFIT = "d3d1100320904150cdf7693bdc2162b36c47d8178cc44b1c892c05c3ade19e57"
 GOLDEN_WCMAP_SUBSET = "ceef303edcaf4f39f6cefc8044d33079b2a3dff49e637b3a3c1e3dfdf95f62b6"       # sim2 held out
+# the same two payloads at full precision (the pinned stack writes exactly these: their payload sha256 are the two
+# digests above, test_the_stored_golden_payloads_are_the_golden_digests); synthetic values, they pin the rules
+GOLDEN_PAYLOAD_REFIT = {
+    "format": "hcd_priya.wc_map/1", "class_order": ["clean", "LLS", "subDLA", "DLA"],
+    "delta_c": {
+        "coeffs": [[-0.2558140142630737, 1.086232151951372, -0.8339652484747228],
+                   [-3.371583723084258, 18.87252282190424, -23.383002642375782],
+                   [0.1943593534564159, -0.9943498618156089, 0.9387341019851997],
+                   [0.652787623343305, -2.926487979024196, 2.345262745419201]],
+        "resid_std": [0.25508745913109915, 3.204096481046615, 0.3364998879918978, 0.3110236086633414],
+        "resid_max": [0.5816143414321119, 11.59961699306672, 0.674562139811513, 1.0622273775829256],
+        "mean": [0.20977280732785228, 2.219333981908799, -0.2938344386787291, -0.7202041415743079],
+        "deg": 2, "z_clamp": [2.0, 5.4], "n_blocks": 20, "n_sims": 5, "z_min": 2.0,
+        "z_max": 3.2},
+    "xbar": {"coeffs": [-0.8406544359243013, 4.973241918435401, -6.438738972618132], "deg": 2, "z_fit": [2.1, 4.7],
+             "n_groups": 15}}
+GOLDEN_PAYLOAD_SUBSET = {
+    "format": "hcd_priya.wc_map/1", "class_order": ["clean", "LLS", "subDLA", "DLA"],
+    "delta_c": {
+        "coeffs": [[-0.2501597781683499, 1.0648171033485048, -0.8428675491290122],
+                   [-4.189298425081595, 23.725116478868625, -29.95923699423536],
+                   [0.2500145360768185, -1.1937680079433415, 1.0787854707412903],
+                   [0.26057575578392755, -1.0962792018178298, 0.2514987355858057]],
+        "resid_std": [0.24809156943553037, 3.431741946699929, 0.3401519670599727, 0.18250530775505683],
+        "resid_max": [0.6093443588276736, 10.999472369085149, 0.6492028302550328, 0.5034005538877963],
+        "mean": [0.18454486352538607, 2.5685488122551874, -0.2849101788167422, -0.785219928884416],
+        "deg": 2, "z_clamp": [2.0, 5.4], "n_blocks": 16, "n_sims": 4, "z_min": 2.0,
+        "z_max": 3.2},
+    "xbar": {"coeffs": [-0.21489274949232198, 1.4614637851215497, -1.5494406419981959], "deg": 2, "z_fit": [2.1, 4.7],
+             "n_groups": 12}}
+
+# T31 off the pinned stack (Session B r18): the numpy of the supported, pinned environment, and the tolerance of the
+# least-squares outputs elsewhere (test_golden_digests_of_the_map_rules says why 1e-9)
+PINNED_NUMPY_RECORDED = ("2.4.6",)        # numpy==2.4.6 in Session B's tools/ci/constraints-devenv.txt (ef23c83)
+WC_MAP_RTOL = 1e-9
+TOLERANT_FIELDS = (("delta_c", "coeffs"), ("delta_c", "resid_std"), ("delta_c", "resid_max"), ("xbar", "coeffs"))
+
+
+def numpy_pins(text):
+    """The ``numpy==X`` pins of a pip constraints text (comment lines and other packages ignored)."""
+    return tuple(re.findall(r"^numpy==([^\s#;]+)\s*(?:#.*)?$", text, re.M))
+
+
+def pinned_numpy_versions():
+    """The numpy version(s) of the supported, pinned environment (docs/compatibility.md; the PI's rule B-D3): the
+    ``numpy==`` pins of ``tools/ci/constraints-devenv.txt`` when this checkout carries Session B's constraints file,
+    else ``PINNED_NUMPY_RECORDED`` (a tests-only copy, or a tree without that file)."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "ci",
+                        "constraints-devenv.txt")
+    if os.path.isfile(path):
+        pins = numpy_pins(open(path).read())
+        if pins:
+            return pins
+    return PINNED_NUMPY_RECORDED
+
+
+def payload_mismatches(got, want, rtol=WC_MAP_RTOL):
+    """The dotted paths where the w_c map payload ``got`` departs from ``want`` (empty: they agree). The key sets must
+    be equal; the least-squares outputs (``TOLERANT_FIELDS``) must have the same shape, be finite and agree element by
+    element to ``rtol`` relative (``|got - want| <= rtol |want|``); every other field (counts, degrees, the clamp and
+    fit ranges, the redshift range, the means, the format and class order) must be exactly equal (canonical JSON)."""
+    out = []
+    if set(got) != set(want):
+        out.append("keys")
+    for sec in ("delta_c", "xbar"):
+        g, w = got.get(sec), want[sec]
+        if not isinstance(g, dict) or set(g) != set(w):
+            out.append(f"{sec} keys")
+            continue
+        for k in sorted(w):
+            if (sec, k) in TOLERANT_FIELDS:
+                a, b = np.asarray(g[k], dtype=np.float64), np.asarray(w[k], dtype=np.float64)
+                if a.shape != b.shape or not np.all(np.isfinite(a)) or np.any(np.abs(a - b) > rtol * np.abs(b)):
+                    out.append(f"{sec}.{k}")
+            elif L.canonical_json(g[k]) != L.canonical_json(w[k]):
+                out.append(f"{sec}.{k}")
+    for k in sorted(set(want) - {"delta_c", "xbar"}):
+        if L.canonical_json(got.get(k)) != L.canonical_json(want[k]):
+            out.append(k)
+    return out
 
 
 def _w1_reference_fold_map(d, train_sims):
@@ -316,6 +398,67 @@ def test_the_training_set_refit_refuses_an_empty_or_unknown_set(cache5):
 
 
 def test_golden_digests_of_the_map_rules(cache5):                                 # T31
+    """The map rules on cache5, against the goldens.
+
+    On the pinned numpy (``np.__version__`` in ``pinned_numpy_versions()``: the supported environment) the payload
+    sha256 must be the golden digests, bit level, as before. On any other numpy the least-squares outputs may move by
+    linear-algebra (BLAS/LAPACK) rounding, so the payload is compared field by field with the stored golden payloads
+    (``payload_mismatches``, which also runs on the pinned stack): every count, degree, clamp and fit range, the
+    redshift range, the means, the format and the class order exactly; ``delta_c.coeffs``, ``delta_c.resid_std``,
+    ``delta_c.resid_max`` and ``xbar.coeffs`` to ``WC_MAP_RTOL`` = 1e-9 relative, element by element.
+
+    Why 1e-9. Measured (Session B r18: numpy 2.5.4 against the pinned 2.4.6, the same code and cache): the largest
+    difference is 5.0e-13 relative (``xbar.coeffs`` of the subset fit, 3598 ulps: the degree-2 fit's conditioning
+    amplifies another linear-algebra path's last-bit rounding), then 6.4e-14 (``delta_c.coeffs``), 3.0e-15
+    (``resid_max``, 18 ulps) and 2.2e-16 (``resid_std``, 1 ulp); the means, ranges and counts are identical. 1e-9 is
+    2000 times the largest, so a linear-algebra path that rounds several times worse still passes; it is 1e7 times
+    below the smallest scientific scale of these numbers (the emulator's relative error, about 1e-2). A change of the
+    rules (another simulation set, estimator, degree or clamp) moves the fitted outputs by orders of magnitude more
+    than 1e-9 and fails (test_the_t31_comparison_refuses_a_change_above_the_tolerance)."""
     d = _load(cache5)
-    assert W.payload_sha256(W.refit(d)) == GOLDEN_WCMAP_REFIT
-    assert W.payload_sha256(W.refit_subset(d, ["sim0", "sim1", "sim3", "sim4"])) == GOLDEN_WCMAP_SUBSET
+    full, sub = W.refit(d), W.refit_subset(d, ["sim0", "sim1", "sim3", "sim4"])
+    if np.__version__ in pinned_numpy_versions():
+        assert W.payload_sha256(full) == GOLDEN_WCMAP_REFIT
+        assert W.payload_sha256(sub) == GOLDEN_WCMAP_SUBSET
+    assert payload_mismatches(full, GOLDEN_PAYLOAD_REFIT) == []
+    assert payload_mismatches(sub, GOLDEN_PAYLOAD_SUBSET) == []
+
+
+def test_the_stored_golden_payloads_are_the_golden_digests():
+    assert W.payload_sha256(GOLDEN_PAYLOAD_REFIT) == GOLDEN_WCMAP_REFIT
+    assert W.payload_sha256(GOLDEN_PAYLOAD_SUBSET) == GOLDEN_WCMAP_SUBSET
+
+
+def test_the_t31_comparison_refuses_a_change_above_the_tolerance():
+    want = GOLDEN_PAYLOAD_SUBSET
+    assert payload_mismatches(copy.deepcopy(want), want) == []
+    measured = copy.deepcopy(want)                 # the largest measured cross-stack difference, 5.0e-13, passes
+    measured["xbar"]["coeffs"] = [c * (1 + 5e-13) for c in want["xbar"]["coeffs"]]
+    assert payload_mismatches(measured, want) == []
+    for sec, k in TOLERANT_FIELDS:                  # ten times the tolerance, on one element of each, fails
+        bad = copy.deepcopy(want)
+        a = np.asarray(bad[sec][k], dtype=np.float64)
+        a.flat[0] *= 1 + 10 * WC_MAP_RTOL
+        bad[sec][k] = a.tolist()
+        assert payload_mismatches(bad, want) == [f"{sec}.{k}"]
+    for sec, k in (("delta_c", "mean"), ("delta_c", "z_clamp"), ("xbar", "z_fit")):     # one ulp on an exact field
+        bad = copy.deepcopy(want)
+        bad[sec][k][0] = float(np.nextafter(bad[sec][k][0], np.inf))
+        assert payload_mismatches(bad, want) == [f"{sec}.{k}"]
+    for sec, k in (("delta_c", "n_blocks"), ("delta_c", "n_sims"), ("delta_c", "deg"), ("xbar", "n_groups")):
+        bad = copy.deepcopy(want)
+        bad[sec][k] += 1
+        assert payload_mismatches(bad, want) == [f"{sec}.{k}"]
+    bad = copy.deepcopy(want)
+    bad["delta_c"]["coeffs"][0][0] = float("nan")
+    assert payload_mismatches(bad, want) == ["delta_c.coeffs"]
+    bad = copy.deepcopy(want)
+    del bad["xbar"]["n_groups"]
+    assert payload_mismatches(bad, want) == ["xbar keys"]
+    assert "delta_c.coeffs" in payload_mismatches(GOLDEN_PAYLOAD_REFIT, want)      # another simulation set fails
+
+
+def test_the_pinned_numpy_versions():
+    assert numpy_pins("jax==0.10.1\nnumpy==2.4.6\nnumpyro==0.21.0\nscipy==1.17.1\n") == ("2.4.6",)
+    assert numpy_pins("# numpy==1.0 (a comment)\nnumpy==2.4.6  # the pin\n") == ("2.4.6",)
+    assert pinned_numpy_versions() and all(re.fullmatch(r"\d+\.\d+\.\d+", v) for v in pinned_numpy_versions())
