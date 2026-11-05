@@ -10,8 +10,8 @@ imported, so the build needs neither jax nor any other dependency of the package
 
 Pages that include a file from the repository root (README.md, CONTRIBUTING.md, CHANGELOG.md, CODE_OF_CONDUCT.md)
 get their links rewritten by ``rewrite_included_links``: a link to a file that is also a page of the site points to
-that page, and a link to any other repository file points to that file on GitHub. A link to a file that does not
-exist stops the build.
+that page, and a link to any other repository file points to that file on GitHub (an image to its raw bytes, so it
+displays). A link to a file that does not exist stops the build.
 """
 from __future__ import annotations
 
@@ -84,6 +84,7 @@ SITE_PAGES = {
     "docs/release_checklist.md": "release_checklist",
     "docs/tutorials/production_and_research_bundles.md": "tutorials/production_and_research_bundles",
 }
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
 _LOCAL_LINK = re.compile(r"\]\((?!https?://|mailto:|#)([^)\s#]+)(#[^)\s]*)?\)")
 
 
@@ -106,7 +107,8 @@ def rewrite_included_links(app, relative_path, parent_docname, content):
             raise RuntimeError(f"{os.path.basename(path)} links to {target}, which is not in the repository")
         if rel in SITE_PAGES:
             return f"]({'../' * depth}{SITE_PAGES[rel]}.md{anchor})"
-        return f"]({REPO_URL}/blob/{_git_ref()}/{rel}{anchor})"
+        kind = "raw" if rel.lower().endswith(IMAGE_SUFFIXES) else "blob"
+        return f"]({REPO_URL}/{kind}/{_git_ref()}/{rel}{anchor})"
 
     content[0] = _LOCAL_LINK.sub(repl, content[0])
 
