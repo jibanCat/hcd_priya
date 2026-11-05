@@ -607,10 +607,10 @@ reason = "the declared tests need emulator error-vector products, trained emulat
 [files."tests/test_products_io_v2.py"]
 tier = "source"
 asset_tests = [
-    "test_every_pre_gate_e_product_is_refused[/home/mfho/hcd_priya/checkpoints/error_vector.npz]",
-    "test_every_pre_gate_e_product_is_refused[/home/mfho/hcd_priya/checkpoints/error_vector_xclass.npz]",
-    "test_every_pre_gate_e_product_is_refused[/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz]",
-    "test_every_pre_gate_e_product_is_refused[/nfs/turbo/umor-yueyingn/mfho/hcd/emulator_v2/checkpoints/gateC/error_vector.npz]",
+    "test_every_pre_gate_e_product_is_refused[<HCD_CHECKPOINTS_DIR unset>/error_vector.npz]",
+    "test_every_pre_gate_e_product_is_refused[<HCD_HISTORICAL_CHECKOUT unset>/checkpoints/error_vector.npz]",
+    "test_every_pre_gate_e_product_is_refused[<HCD_HISTORICAL_CHECKOUT unset>/checkpoints/error_vector_xclass.npz]",
+    "test_every_pre_gate_e_product_is_refused[<HCD_HISTORICAL_CHECKOUT unset>/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz]",
     "test_mf_product_identity_is_checked_against_the_lf_ensemble",
 ]
 reason = "the declared tests need emucoh products, emulator error-vector products, gate D MF products, trained emulator members, absent in CI"
