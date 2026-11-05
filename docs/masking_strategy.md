@@ -110,7 +110,7 @@ For a target `k_max = 0.1 rad·s/km` (PRIYA-convention, typical emulator range),
 
 ## References
 
-- **PRIYA paper**: Bird, S. et al. 2023, *JCAP* 10, 037 (arXiv:2306.05471). §3.3 for the DLA masking recipe quoted here.
-- **HCD template**: Rogers, K. K., Bird, S., Peiris, H. V. et al. 2018, *MNRAS* 476, 3716 (arXiv:1706.08532). Eq. 4 and §3.2 for the four-parameter α template.
+- **PRIYA paper**: Bird, S. et al. 2023, *JCAP* 10, 037 (arXiv:2306.05471). §2.7 for the DLA masking recipe quoted here.
+- **HCD template**: Rogers, K. K., Bird, S., Peiris, H. V. et al. 2018, *MNRAS* 474, 3032 (arXiv:1706.08532). Eq. 4 and §3.3 for the α template.
 - **fake_spectra**: https://github.com/sbird/fake_spectra. `fluxstatistics.flux_power` and `spectra.get_flux_power_1D` are the production implementations.
 - **PRIYA emulator code**: https://github.com/sbird/lya_emulator, specifically `lyaemu/flux_power.py:get_power_native_binning` and `lyaemu/coarse_grid.py:get_flux_vectors`.

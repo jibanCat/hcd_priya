@@ -160,7 +160,7 @@ right thing to know.
 
 **Difficulty.** Intermediate.  **Time.** 2–4 weeks.
 **Prereqs.** NB04, plus reading Cooke, Pettini & Steidel 2018
-(arXiv:1710.11129, MNRAS 476, 4271) §3 (or any paper on DLA Voigt
+(ApJ 855, 102; arXiv:1710.11129) (or any paper on DLA Voigt
 fitting).
 
 The current Voigt fitter assumes a single component per absorber.
@@ -204,9 +204,10 @@ plotting and statistical comparisons against observations.
 
 For one sim, plot dN/dX(DLA), dN/dX(subDLA), dN/dX(LLS) as functions
 of redshift over all available snapshots.  Compare against the PRIYA
-suite paper (Bird et al. 2023, MNRAS 526, 3392, arXiv:2306.05471) and
-the DLA-bias predictions in Bird, Haehnelt, Neeleman et al. 2017
-(arXiv:1605.06151, MNRAS 466, 2111), plus BOSS/DESI dN/dX
+suite paper (Bird et al. 2023, JCAP 10, 037, arXiv:2306.05471), the
+DLA predictions of Bird et al. 2014 (MNRAS 445, 2313, arXiv:1405.3994)
+and the SDSS DR12 dN/dX of Bird, Garnett & Ho 2017 (MNRAS 466, 2111,
+arXiv:1610.01165), plus BOSS/DESI dN/dX
 compilations (Prochaska & Wolfe 2009, Noterdaeme+2012, Ho+2021).
 
 **Deliverable.**
@@ -322,7 +323,8 @@ the parameter-dependence of the systematic itself.
 ### C2. Rogers α-template fits across the LHS
 
 **Difficulty.** Intermediate.  **Time.** 3–4 weeks.
-**Prereqs.** NB03, plus reading Rogers+2018.
+**Prereqs.** NB03, plus reading Rogers et al. 2018 (MNRAS 474, 3032;
+arXiv:1706.08532).
 
 For each (sim, snap), fit the Rogers α-template to the per-class
 P1D ratio `P_<class>_only / P_clean`.  Then study how each `α_class`
@@ -369,8 +371,10 @@ similar.
 
 - A combined-sample joint fit reporting `(b_DLA, β_DLA)` with
   Gaussian errors, plus a covariance ellipse plot.
-- A statement on whether the new σ(β_DLA) is competitive with
-  Pérez-Ràfols+2018 (BOSS DR12, ~30k DLAs, σ_β = 0.1).
+- A statement on the new σ(β_DLA). Pérez-Ràfols et al. 2018 (MNRAS 473,
+  3019; arXiv:1709.00889) did not measure β_DLA: they fixed
+  β_DLA b_DLA = f(Ω) and measured b_DLA = 1.99 ± 0.11 from 13,734 DLAs.
+  Say what precision on β_DLA would test that assumption.
 
 **Pointers.**
 
