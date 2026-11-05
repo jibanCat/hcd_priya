@@ -44,7 +44,7 @@ class DeltaCMap(NamedTuple):
 
 # HISTORICAL delta_c(z) deg-2 coeffs from scripts/calibrate_delta_c.py (89 LF shards, 1060 snap-blocks, 60 sims),
 # fitted to counts that include the pre-fix box-edge duplicates. np.polyval order [a2,a1,a0]; class order
-# (clean, LLS, subDLA, DLA). See hcd_priya_notes/docs/superpowers/2026-06-01-delta_c-coeffs.md. Used only when
+# (clean, LLS, subDLA, DLA). See the internal note 2026-06-01-delta_c-coeffs. Used only when
 # ``delta_map`` is None (the historical analyses); a release model bundle carries its own refitted map (wc_map.py).
 HISTORICAL_DELTA_C = DeltaCMap(
     coeffs=np.array([
