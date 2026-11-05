@@ -358,6 +358,32 @@ def pinned_numpy_versions(path=CONSTRAINTS_FILE):
     return pins
 
 
+PINNED_STACK_ENV = "HCD_PINNED_STACK"
+
+
+def pinned_stack_declared(environ=None):
+    """Whether this run declares itself the supported pinned stack: ``HCD_PINNED_STACK`` exactly ``"1"`` (Session B's
+    supported CI job and its pinned replays set it; the newer-dependency jobs set it empty). Unset, empty or any other
+    value (``"true"``, ``" 1"``) is not a declaration."""
+    return (os.environ if environ is None else environ).get(PINNED_STACK_ENV) == "1"
+
+
+def on_pinned_numpy(version=None, environ=None, pins=None):
+    """Whether T31 takes the exact-digest branch: ``version`` (default ``np.__version__``) is one of ``pins`` (default
+    ``pinned_numpy_versions()``: the constraints file's pins, fail closed; the recorded pin only when that file is
+    absent). A run that declares the pinned stack (``pinned_stack_declared``) MUST be on a pinned numpy: otherwise
+    ValueError, so a supported job that drifted to another numpy fails instead of quietly taking the tolerance path."""
+    version = np.__version__ if version is None else version
+    pins = pinned_numpy_versions() if pins is None else tuple(pins)
+    if version in pins:
+        return True
+    if pinned_stack_declared(environ):
+        raise ValueError(f"{PINNED_STACK_ENV}=1 declares the supported pinned stack, but numpy {version} is not one of "
+                         f"the pinned versions {pins}: the bit-level T31 digests would not be checked; fix the "
+                         "environment or the pin")
+    return False
+
+
 def payload_mismatches(got, want, rtol=WC_MAP_RTOL):
     """The dotted paths where the w_c map payload ``got`` departs from ``want`` (empty: they agree). The key sets must
     be equal; the least-squares outputs (``TOLERANT_FIELDS``) must have the same shape, be finite and agree element by
@@ -453,8 +479,9 @@ def test_the_training_set_refit_refuses_an_empty_or_unknown_set(cache5):
 def test_golden_digests_of_the_map_rules(cache5):                                 # T31
     """The map rules on cache5, against the goldens.
 
-    On the pinned numpy (``np.__version__`` in ``pinned_numpy_versions()``: the supported environment) the payload
-    sha256 must be the golden digests, bit level, as before. On any other numpy the least-squares outputs may move by
+    On the pinned numpy (``on_pinned_numpy()``: ``np.__version__`` in ``pinned_numpy_versions()``, the supported
+    environment) the payload sha256 must be the golden digests, bit level, as before; a run that declares the pinned
+    stack (``HCD_PINNED_STACK=1``) on another numpy fails. On any other numpy the least-squares outputs may move by
     linear-algebra (BLAS/LAPACK) rounding, so the payload is compared field by field with the stored golden payloads
     (``payload_mismatches``, which also runs on the pinned stack): every count, degree, clamp and fit range, the
     redshift range, the means, the format and the class order exactly; ``delta_c.coeffs``, ``delta_c.resid_std``,
@@ -476,7 +503,7 @@ def test_golden_digests_of_the_map_rules(cache5):                               
     (fail closed by design)."""
     d = _load(cache5)
     full, sub = W.refit(d), W.refit_subset(d, ["sim0", "sim1", "sim3", "sim4"])
-    if np.__version__ in pinned_numpy_versions():
+    if on_pinned_numpy():                        # a declared pinned stack (HCD_PINNED_STACK=1) must take this branch
         assert W.payload_sha256(full) == GOLDEN_WCMAP_REFIT
         assert W.payload_sha256(sub) == GOLDEN_WCMAP_SUBSET
     assert payload_mismatches(full, GOLDEN_PAYLOAD_REFIT) == []
@@ -550,6 +577,37 @@ def test_a_constraints_file_that_pins_no_numpy_fails(tmp_path, text):
     path.write_text(text)
     with pytest.raises(ValueError, match="pins no numpy version"):
         pinned_numpy_versions(str(path))
+
+
+# T31 review t2: a run that declares the supported pinned stack (HCD_PINNED_STACK exactly "1") must be on a pinned numpy
+@pytest.mark.parametrize("environ", [{"HCD_PINNED_STACK": "1"}], ids=["declared"])
+def test_a_declared_pinned_stack_on_a_pinned_numpy_takes_the_exact_branch(environ):
+    assert on_pinned_numpy(version="2.4.6", environ=environ, pins=("2.4.6",)) is True
+
+
+def test_a_declared_pinned_stack_on_another_numpy_fails():
+    with pytest.raises(ValueError, match="HCD_PINNED_STACK=1 declares the supported pinned stack, but numpy 2.5.4"):
+        on_pinned_numpy(version="2.5.4", environ={"HCD_PINNED_STACK": "1"}, pins=("2.4.6",))
+
+
+@pytest.mark.parametrize("environ", [{}, {"HCD_PINNED_STACK": ""}, {"HCD_PINNED_STACK": "true"},
+                                     {"HCD_PINNED_STACK": " 1"}, {"HCD_PINNED_STACK": "1 "}, {"HCD_PINNED_STACK": "01"},
+                                     {"HCD_PINNED_STACK": "yes"}, {"OTHER": "1"}],
+                         ids=["unset", "empty", "true", "space-1", "1-space", "01", "yes", "other-variable"])
+def test_only_exactly_1_declares_the_pinned_stack(environ):
+    assert not pinned_stack_declared(environ)
+    assert on_pinned_numpy(version="2.5.4", environ=environ, pins=("2.4.6",)) is False      # as today: tolerance path
+    assert on_pinned_numpy(version="2.4.6", environ=environ, pins=("2.4.6",)) is True       # as today: exact digests
+    assert pinned_stack_declared({"HCD_PINNED_STACK": "1"})
+
+
+def test_a_declared_pinned_stack_uses_the_constraints_files_pins(tmp_path):
+    path = tmp_path / "constraints-devenv.txt"
+    path.write_text("numpy == 2.5.4 ; python_version >= '3.11'\n")
+    pins = pinned_numpy_versions(str(path))
+    assert on_pinned_numpy(version="2.5.4", environ={"HCD_PINNED_STACK": "1"}, pins=pins) is True
+    with pytest.raises(ValueError, match="not one of the pinned versions"):
+        on_pinned_numpy(version="2.4.6", environ={"HCD_PINNED_STACK": "1"}, pins=pins)
 
 
 def test_the_recorded_pin_applies_only_when_the_constraints_file_is_absent(tmp_path):
