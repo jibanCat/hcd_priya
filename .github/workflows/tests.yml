@@ -12,6 +12,12 @@ on:
 permissions:
   contents: read
 
+# Every run step runs in bash with -e and -o pipefail: GitHub adds pipefail only when the shell is named. So a failing
+# command on the left of a pipe (pytest piped into tee) fails its step. No job or step overrides this.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   fixture-tests:
     name: ${{ matrix.label }}
