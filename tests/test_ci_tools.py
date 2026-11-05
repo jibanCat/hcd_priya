@@ -298,10 +298,14 @@ def test_the_workflow_calls_the_ci_helpers_that_exist():
         assert tier in text
 
 
+UNDO_FAILURE = re.compile(r"set\s+\+[a-zA-Z]*[eo]|\|\|\s*(true|:|exit\s+0)(?![\w-])")
+
+
 def test_every_run_step_fails_when_a_command_in_a_pipe_fails():
     """The workflow names bash as the shell of every run step, so GitHub runs each with `bash -eo pipefail` and
     `pytest ... | tee log` fails its step when pytest fails. With no shell named, GitHub runs `bash -e`, where a pipe's
-    status is that of its last command (tee). No job or step may set another shell or its own defaults."""
+    status is that of its last command (tee). No job or step may set another shell or its own defaults, and no
+    run step may turn -e or pipefail off (set +e, set +o pipefail) or swallow a failure (|| true, || :, || exit 0)."""
     import yaml
     wf = yaml.safe_load(open(os.path.join(REPO, ".github", "workflows", "tests.yml")))
     assert wf["defaults"] == {"run": {"shell": "bash"}}
@@ -309,6 +313,8 @@ def test_every_run_step_fails_when_a_command_in_a_pipe_fails():
         assert "defaults" not in job, name
         for step in job["steps"]:
             assert "shell" not in step, (name, step.get("name"))
+            # nor may a step undo -e or pipefail, or swallow a failing command
+            assert not UNDO_FAILURE.search(step.get("run", "")), (name, step.get("name"))
 
 
 def _workflow():
