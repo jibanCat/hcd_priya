@@ -1,4 +1,4 @@
-"""Gate C validation helpers (emulator-debug campaign 2026-10; spec GATE_C_SPEC.md in the notes repository).
+"""Gate C validation helpers (emulator-debug campaign 2026-10; internal spec GATE_C_SPEC).
 
 Truth is the held-out simulation's own source product (cache rows on their own header-exact grid); predictions come
 through the schema-2.0 physical-coordinate API. These helpers keep the comparison honest: coordinate agreement is

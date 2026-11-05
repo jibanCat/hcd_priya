@@ -44,7 +44,7 @@ def main():
     kf = np.asarray(d["kfkms"])           # (N,K) per-row k (s/km)
     z = np.asarray(d["z_grid"])
     # Historical diagnostic: the per-column median is a LABEL only. Rows do NOT share a k grid (they differ by up to
-    # 41 percent with z and Omega_m); see incident note 2026-10-05-INCIDENT-kgrid-representation-regression.
+    # 41 percent with z and Omega_m); see docs/kgrid_incident_2026-10.md.
     kcol = np.nanmedian(kf, axis=0)       # (K,)
     kband = (kcol >= K_LO) & (kcol <= K_HI)
     print(f"k cols in [{K_LO},{K_HI}]: {kband.sum()} of {kcol.size}")

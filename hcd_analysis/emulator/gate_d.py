@@ -1,4 +1,4 @@
-"""Gate D read-outs added by the blind review (PU-0063; review notes reviews/gate_D in the notes repository).
+"""Gate D read-outs added by the blind review (PU-0063; gate D review records).
 
 D3 (registered, PU-0053) pools the held-out log residual over the band z 2.8-3.4, k >= 0.0442 s/km. For a
 leave-one-simulation-out MEAN correction that pooled value is fixed by construction: over complete (z, rung) blocks the
