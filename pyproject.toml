@@ -7,6 +7,7 @@ name = "hcd-priya"
 dynamic = ["version"]
 description = "Lyman-alpha forest P1D emulator with high-column-density absorber classes, built on PRIYA simulations"
 readme = "README.md"
+authors = [{ name = "Ming-Feng Ho", email = "mfho@umich.edu" }]
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
