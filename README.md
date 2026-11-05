@@ -21,6 +21,7 @@ generates.
 
 ## What this is
 
+<!-- docs:about:start -->
 The Lyα forest is the series of absorption lines seen blueward of a distant
 quasar's Lyα emission, each produced by intergalactic hydrogen along the line of
 sight. The statistics of that absorption, and in particular its one-dimensional
@@ -46,10 +47,18 @@ PRIYA: Bird, Fernandez, Ho et al. 2023, JCAP 10 037
 Fernandez, Bird & Ho 2024, JCAP 07 029
 ([arXiv:2309.03943](https://arxiv.org/abs/2309.03943)).
 
+hcd_priya is the continuation of, and the maintained production software for, the analysis of Ho et al. 2026,
+"Small-scale Lyman alpha forest cosmology with PRIYA: constraints from XQ100 and KODIAQ-SQUAD one-dimensional flux
+power spectra", JCAP 2026 (07) 094
+([doi:10.1088/1475-7516/2026/07/094](https://doi.org/10.1088/1475-7516/2026/07/094),
+[arXiv:2509.18271](https://arxiv.org/abs/2509.18271)). How to cite the software: [`CITATION.cff`](CITATION.cff).
+<!-- docs:about:end -->
+
 ---
 
 ## Install / environment
 
+<!-- docs:install:start -->
 **Supported environment.** Linux on x86-64, CPython 3.11, with the dependency versions pinned in
 [`tools/ci/constraints-devenv.txt`](tools/ci/constraints-devenv.txt): the environment the test suite is developed
 and run in. Other environments (newer dependency versions, Python 3.12 or later, macOS, Windows) are not supported
@@ -82,10 +91,20 @@ JAX_PLATFORMS=cpu python <your_script.py>
 ```
 
 The scripts under `scripts/` are not part of the installed package; run them from the repository root.
+<!-- docs:install:end -->
 
 ---
 
 ## Data and checkpoints
+
+<!-- docs:data:start -->
+**Data availability.** The data products of this project are HCD absorber catalogues and the products derived from
+them; it does not provide raw simulation data. Researchers who need the raw PRIYA simulation outputs can request them
+from the authors of Bird et al. 2023, JCAP 2023 (10) 037
+([doi:10.1088/1475-7516/2023/10/037](https://doi.org/10.1088/1475-7516/2023/10/037),
+[arXiv:2306.05471](https://arxiv.org/abs/2306.05471)). The catalogues and derived products are not in this code
+repository, and their release is planned but not yet available.
+<!-- docs:data:end -->
 
 The repository ships the code, not the data or the trained models. To set
 expectations before the Quickstart:
