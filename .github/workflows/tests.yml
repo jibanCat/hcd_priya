@@ -34,6 +34,9 @@ jobs:
     env:
       JAX_PLATFORMS: cpu
       MPLBACKEND: Agg
+      # "1" only in the pinned (supported) job: tests that check bit-level results on the pinned stack then require
+      # the running versions to be the pins, so the supported job cannot pass on another stack by mistake.
+      HCD_PINNED_STACK: ${{ matrix.deps == 'development-environment' && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:

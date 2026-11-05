@@ -245,6 +245,15 @@ def test_the_workflow_calls_the_ci_helpers_that_exist():
         assert tier in text
 
 
+def test_only_the_pinned_job_declares_the_pinned_stack():
+    """HCD_PINNED_STACK is "1" in the development-environment (supported) job and empty in the others."""
+    import yaml
+    job = yaml.safe_load(open(os.path.join(REPO, ".github", "workflows", "tests.yml")))["jobs"]["fixture-tests"]
+    expr = job["env"]["HCD_PINNED_STACK"]
+    assert expr == "${{ matrix.deps == 'development-environment' && '1' || '' }}"
+    assert {e["deps"] for e in job["strategy"]["matrix"]["include"]} == {"development-environment", "newest"}
+
+
 def test_h5_cross_version_check_reads_back_and_catches_a_change_or_a_new_library(tmp_path, capsys):
     """tools/ci/h5_cross_version.py: a synthetic bundle reads back with every digest equal; an edited digest fails; and
     --max-hdf5 fails on a library that is not older than the limit (here the running one), so the older-libhdf5 job
