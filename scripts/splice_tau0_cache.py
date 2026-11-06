@@ -2,7 +2,10 @@
 
 Used for the S4/F8 repair (emulator-debug campaign 2026-10; internal spec S4_REPAIR_SPEC): the historical cache is never modified; a NEW file is
 written in which named groups are removed and the groups of freshly built shards are inserted, in the canonical
-(sim, snap) order the builder produces, with snap_group_idx recomputed. `cache_delta` compares two caches by identity
+(sim, snap) order the builder produces, with snap_group_idx recomputed. An existing --output path (a file, a directory
+or a symlink, dangling or not) is refused before any input is opened, and the output is opened exclusively, so an
+earlier product can never be truncated. The code commit is required: --code-commit, else the checkout's git HEAD;
+the splice refuses when neither is available rather than recording "unknown". `cache_delta` compares two caches by identity
 (row = (sim, z_grid, alpha_idx); snapshot block = (sim, snap)) so position shifts are not mistaken for changes.
 
 Usage (<repo> = this checkout):
@@ -15,6 +18,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -80,11 +84,32 @@ def _check_canonical(groups, d, path):
             raise ValueError(f"{path}: rows of a group are not in canonical alpha order")
 
 
-def splice_cache(base_path, shard_paths, remove, out_path, *, record, code_commit=None):
-    """Write a NEW cache = base minus the groups `remove` [(sim, snap, z_grid)] plus every group of `shard_paths`."""
-    out_path = Path(out_path).resolve()
-    if out_path in {Path(p).resolve() for p in [base_path, *shard_paths]}:
+def _git_head():
+    """Full git HEAD of this checkout, or None when it cannot be read (for example a git-archive export)."""
+    try:
+        r = subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], capture_output=True, text=True,
+                           timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _refuse_existing_output(out_path):
+    p = Path(out_path)
+    if p.exists() or p.is_symlink():
+        raise FileExistsError(f"refusing to overwrite an existing path: {p} (the splice writes a NEW file only)")
+
+
+def splice_cache(base_path, shard_paths, remove, out_path, *, record, code_commit):
+    """Write a NEW cache = base minus the groups `remove` [(sim, snap, z_grid)] plus every group of `shard_paths`.
+
+    `code_commit` is required (no "unknown" fallback). An existing `out_path` is refused before any input is opened."""
+    if not code_commit or str(code_commit).strip().lower() == "unknown":
+        raise ValueError("refusing: no code commit given (pass the commit that produced this splice)")
+    if Path(out_path).resolve() in {Path(p).resolve() for p in [base_path, *shard_paths]}:
         raise ValueError("refusing to overwrite an input cache")
+    _refuse_existing_output(out_path)
+    out_path = Path(out_path).resolve()
     base, base_dt, base_attrs = _load(base_path)
     bgroups = _groups(base, base_path)
     _check_canonical(bgroups, base, base_path)
@@ -135,21 +160,26 @@ def splice_cache(base_path, shard_paths, remove, out_path, *, record, code_commi
     rec.update(base=str(base_path), base_sha256=sha256(base_path), shards=shard_meta, removed=removed, added=added,
                n_rows=[int(base_attrs["n_rows"]), n_rows], n_snaps=[int(base_attrs["n_snaps"]), len(order)],
                code_commit=code_commit)
-    with h5py.File(out_path, "w") as f:
-        for k, v in base_attrs.items():
-            if k not in _REPLACED_ATTRS:
-                f.attrs[k] = v
-        f.attrs["created_utc"] = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
-        f.attrs["git_sha"] = code_commit or "unknown"
-        f.attrs["n_rows"] = n_rows
-        f.attrs["n_snaps"] = len(order)
-        f.attrs["repair_record"] = json.dumps(rec, sort_keys=True)
-        for k in STATIC_KEYS:
-            _write(f, k, base[k], base_dt[k])
-        for k in ROW_KEYS:
-            _write(f, k, np.concatenate(rows_out[k], axis=0), base_dt[k])
-        for k in SNAP_KEYS:
-            _write(f, k, np.concatenate(snap_out[k], axis=0), base_dt[k])
+    f = h5py.File(out_path, "x")                       # exclusive: never truncates a path that appeared meanwhile
+    try:
+        with f:
+            for k, v in base_attrs.items():
+                if k not in _REPLACED_ATTRS:
+                    f.attrs[k] = v
+            f.attrs["created_utc"] = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+            f.attrs["git_sha"] = code_commit
+            f.attrs["n_rows"] = n_rows
+            f.attrs["n_snaps"] = len(order)
+            f.attrs["repair_record"] = json.dumps(rec, sort_keys=True)
+            for k in STATIC_KEYS:
+                _write(f, k, base[k], base_dt[k])
+            for k in ROW_KEYS:
+                _write(f, k, np.concatenate(rows_out[k], axis=0), base_dt[k])
+            for k in SNAP_KEYS:
+                _write(f, k, np.concatenate(snap_out[k], axis=0), base_dt[k])
+    except BaseException:
+        out_path.unlink(missing_ok=True)               # only ever the file this call created
+        raise
     return rec
 
 
@@ -237,15 +267,20 @@ def main():
     ap.add_argument("--shard", action="append", required=True, type=Path)
     ap.add_argument("--remove", action="append", default=[], metavar="SIM:SNAP:ZGRID")
     ap.add_argument("--record-json", type=Path, required=True)
-    ap.add_argument("--code-commit", default=None)
+    ap.add_argument("--code-commit", default=None, help="default: this checkout's git HEAD (refused if unreadable)")
     ap.add_argument("--output", required=True, type=Path)
     a = ap.parse_args()
+    if a.output.exists() or a.output.is_symlink():
+        sys.exit(f"refusing: --output {a.output} exists (the splice writes a NEW file only)")
+    commit = a.code_commit or _git_head()
+    if not commit:
+        sys.exit("refusing: no git HEAD readable here; pass --code-commit (no 'unknown' commit is recorded)")
     remove = []
     for r in a.remove:
         sim, snap, zg = r.rsplit(":", 2)
         remove.append((sim, int(snap), float(zg)))
     rec = splice_cache(a.base, a.shard, remove, a.output, record=json.load(open(a.record_json)),
-                       code_commit=a.code_commit)
+                       code_commit=commit)
     print(json.dumps({k: rec[k] for k in ("removed", "added", "n_rows", "n_snaps", "base_sha256")}, indent=1))
     print(f"wrote {a.output} sha256 {sha256(a.output)}")
 

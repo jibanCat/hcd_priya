@@ -60,12 +60,14 @@ def _write(path, groups, *, edges_shift=0.0, attrs=None):
 
 BASE = [("simA", 16, 3.2, 3, 1), ("simA", 17, 2.8, 3, 2), ("simA", 19, 2.6, 3, 3), ("simB", 5, 4.0, 3, 4)]
 SHARD = [("simA", 17, 3.0, 3, 20), ("simA", 18, 2.8, 3, 21)]
+COMMIT = "0123456789abcdef0123456789abcdef01234567"          # synthetic
 
 
 def _splice(tmp_path, base=BASE, shard=SHARD, remove=(("simA", 17, 2.8),), **kw):
     b = _write(tmp_path / "base.h5", base)
     s = _write(tmp_path / "shard.h5", shard)
     out = tmp_path / "out.h5"
+    kw.setdefault("code_commit", COMMIT)
     sp.splice_cache(b, [s], list(remove), out, record={"spec": "test"}, **kw)
     return b, s, out
 
@@ -141,7 +143,7 @@ def test_splice_refuses_mismatched_static_tables(tmp_path):
     b = _write(tmp_path / "base.h5", BASE)
     s = _write(tmp_path / "shard.h5", SHARD, edges_shift=1e-9)
     with pytest.raises(ValueError, match="log_nhi_centres"):
-        sp.splice_cache(b, [s], [("simA", 17, 2.8)], tmp_path / "out.h5", record={})
+        sp.splice_cache(b, [s], [("simA", 17, 2.8)], tmp_path / "out.h5", record={}, code_commit=COMMIT)
 
 
 def test_splice_refuses_a_base_not_in_canonical_order(tmp_path):
@@ -153,4 +155,95 @@ def test_splice_refuses_to_overwrite_its_inputs(tmp_path):
     b = _write(tmp_path / "base.h5", BASE)
     s = _write(tmp_path / "shard.h5", SHARD)
     with pytest.raises(ValueError, match="overwrite"):
-        sp.splice_cache(b, [s], [("simA", 17, 2.8)], b, record={})
+        sp.splice_cache(b, [s], [("simA", 17, 2.8)], b, record={}, code_commit=COMMIT)
+
+
+# --- R1-2 (B-D9 #18): an existing output is refused before anything is opened; no "unknown" commit ----------------
+
+def _inputs(tmp_path):
+    return _write(tmp_path / "base.h5", BASE), _write(tmp_path / "shard.h5", SHARD)
+
+
+@pytest.mark.parametrize("kind", ["file", "dangling_symlink"])
+def test_splice_refuses_an_existing_output_before_opening_anything(tmp_path, monkeypatch, kind):
+    b, s = _inputs(tmp_path)
+    out = tmp_path / "earlier_repaired.h5"
+    if kind == "file":
+        out.write_bytes(b"an earlier product")
+    else:
+        out.symlink_to(tmp_path / "nowhere.h5")
+
+    def no_open(*a, **k):
+        raise AssertionError("an input was opened before the output path was checked")
+    monkeypatch.setattr(sp, "_load", no_open)
+    with pytest.raises(FileExistsError, match="overwrite"):
+        sp.splice_cache(b, [s], [("simA", 17, 2.8)], out, record={}, code_commit=COMMIT)
+    if kind == "file":
+        assert out.read_bytes() == b"an earlier product"
+    else:
+        assert out.is_symlink() and not (tmp_path / "nowhere.h5").exists()
+
+
+def test_splice_opens_the_output_exclusively(tmp_path, monkeypatch):
+    """Even if the path appears after the up-front check (a race), the write must not truncate it."""
+    b, s = _inputs(tmp_path)
+    out = tmp_path / "out.h5"
+    real_load = sp._load
+
+    def load_then_race(path):
+        if not out.exists():
+            out.write_bytes(b"appeared meanwhile")
+        return real_load(path)
+    monkeypatch.setattr(sp, "_load", load_then_race)
+    with pytest.raises((FileExistsError, OSError)):
+        sp.splice_cache(b, [s], [("simA", 17, 2.8)], out, record={}, code_commit=COMMIT)
+    assert out.read_bytes() == b"appeared meanwhile"
+
+
+@pytest.mark.parametrize("commit", [None, "", "unknown"])
+def test_splice_refuses_without_a_code_commit(tmp_path, commit):
+    b, s = _inputs(tmp_path)
+    out = tmp_path / "out.h5"
+    with pytest.raises(ValueError, match="code commit"):
+        sp.splice_cache(b, [s], [("simA", 17, 2.8)], out, record={}, code_commit=commit)
+    assert not out.exists()
+
+
+def test_splice_records_the_code_commit(tmp_path):
+    b, s, out = _splice(tmp_path)
+    d, a = _read(out)
+    assert a["git_sha"] == COMMIT and json.loads(a["repair_record"])["code_commit"] == COMMIT
+
+
+def _main(monkeypatch, tmp_path, out, extra=()):
+    b, s = _inputs(tmp_path)
+    rj = tmp_path / "record.json"
+    rj.write_text(json.dumps({"spec": "test"}))
+    monkeypatch.setattr(sys, "argv", ["splice_tau0_cache.py", "--base", str(b), "--shard", str(s), "--remove",
+                                      "simA:17:2.8", "--record-json", str(rj), "--output", str(out), *extra])
+    return sp.main()
+
+
+def test_main_without_code_commit_records_the_git_head(tmp_path, monkeypatch):
+    monkeypatch.setattr(sp, "_git_head", lambda: COMMIT)
+    out = tmp_path / "out.h5"
+    _main(monkeypatch, tmp_path, out)
+    assert _read(out)[1]["git_sha"] == COMMIT
+
+
+def test_main_refuses_when_no_commit_can_be_determined(tmp_path, monkeypatch):
+    monkeypatch.setattr(sp, "_git_head", lambda: None)
+    out = tmp_path / "out.h5"
+    with pytest.raises(SystemExit, match="code-commit"):
+        _main(monkeypatch, tmp_path, out)
+    assert not out.exists()
+
+
+def test_main_refuses_an_existing_output_before_reading_its_inputs(tmp_path, monkeypatch):
+    out = tmp_path / "out.h5"
+    out.write_bytes(b"keep")
+    monkeypatch.setattr(sp, "_git_head", lambda: COMMIT)
+    monkeypatch.setattr(sp, "_load", lambda *a, **k: (_ for _ in ()).throw(AssertionError("input opened")))
+    with pytest.raises(SystemExit, match="exists"):
+        _main(monkeypatch, tmp_path, out)
+    assert out.read_bytes() == b"keep"
