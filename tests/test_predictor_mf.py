@@ -3,6 +3,8 @@ synthetic MF tables: untrained networks, made-up corrections, made-up digests; t
 correction is applied (P_MF = P_LF exp(g), per member, before any k placement), LF-only prediction is untouched,
 the MF provenance is reported, and an absent, mismatched, historical or fold MF is refused clearly on a production
 bundle."""
+import os
+
 import numpy as np
 import pytest
 
@@ -394,3 +396,115 @@ def test_held_out_path_needs_a_fold_record(emu_lf, emu_mf):
     for e in (emu_lf, emu_mf):
         with pytest.raises(MR.MFRecordError, match="fold MF record"):
             hp.heldout_P_filt_at(e, _x(3.0)[None], np.array([0.4]))
+
+
+# ------------------------------------------------------------------------- the release manifest (C1 review m3)
+@pytest.fixture(scope="module")
+def release(tmp_path_factory):
+    """A synthetic release directory: backbone/ (h5/2 bundle), mf/ (its MF record), other_mf/ (a record of another
+    backbone) and release.json naming backbone/ and mf/."""
+    from hcd_analysis.emulator import release_manifest as RM
+    root = tmp_path_factory.mktemp("rel") / "release"
+    root.mkdir()
+    b = RT.write_synthetic_bundle(str(root / "backbone"), n_members=2)
+    s = write_mf(root / "mf", manifest=b.manifest_sha256, cache=b.lineage["cache"]["sha256"])
+    o = RT.write_synthetic_bundle(str(tmp_path_factory.mktemp("o") / "other"), n_members=2, seeds=[7, 8])
+    so = write_mf(root / "other_mf", manifest=o.manifest_sha256, cache=o.lineage["cache"]["sha256"])
+    _, rs = RM.write_release_manifest(str(root), release_version="synthetic-release-1", backbone_dir="backbone",
+                                      backbone_manifest_sha256=b.manifest_sha256, mf_dir="mf", mf_record_sha256=s)
+    return {"root": root, "sha": rs, "bundle": b, "mf_sha": s, "other_mf_sha": so}
+
+
+def _manifest_copy(release, tmp_path, fn):
+    """A copy of the release whose release.json is rewritten by fn(dict) and re-anchored: (dir, its sha256)."""
+    import hashlib
+    import json
+    import shutil
+    d = tmp_path / "copy"
+    shutil.copytree(release["root"], d, symlinks=True)
+    m = json.load(open(d / "release.json"))
+    raw = json.dumps(fn(m), indent=1, sort_keys=True).encode()
+    os.chmod(d / "release.json", 0o644)
+    (d / "release.json").write_bytes(raw)
+    return str(d), hashlib.sha256(raw).hexdigest()
+
+
+def test_release_round_trip_equals_the_two_digest_path(release):
+    r, b = release["root"], release["bundle"]
+    emu = hp.load_release(str(r), release["sha"])
+    two = hp.load_bundle(b.bundle_dir, b.manifest_sha256, mf_dir=str(r / "mf"), mf_record_sha256=release["mf_sha"])
+    p, q = emu.predict(PARAMS, 3.0, tau_eff=0.4), two.predict(PARAMS, 3.0, tau_eff=0.4)
+    assert p.P_class.tobytes() == q.P_class.tobytes() and p.flags["mf_applied"] is True
+    assert p.provenance["release"] == {"format": "hcd_priya.release/1", "release_version": "synthetic-release-1",
+                                       "release_sha256": release["sha"]}
+    assert p.provenance["mf"] == q.provenance["mf"] and "release" not in q.provenance
+    assert "release" not in hp.load_bundle(b.bundle_dir, b.manifest_sha256).provenance        # LF-only unchanged
+    from hcd_analysis.emulator import release_manifest as RM
+    with pytest.raises(FileExistsError, match="written once"):
+        RM.write_release_manifest(str(r), release_version="again", backbone_dir="backbone",
+                                  backbone_manifest_sha256=b.manifest_sha256, mf_dir="mf",
+                                  mf_record_sha256=release["mf_sha"])
+
+
+def test_release_is_anchored_on_its_published_sha256(release):
+    from hcd_analysis.emulator import release_manifest as RM
+    for bad in (None, H64("another release"), release["sha"].upper()):
+        with pytest.raises(RM.ReleaseManifestError, match="sha256"):
+            hp.load_release(str(release["root"]), bad)
+
+
+def test_release_without_an_mf_part_is_refused(release, tmp_path):
+    from hcd_analysis.emulator import release_manifest as RM
+    d, s = _manifest_copy(release, tmp_path, lambda m: dict(m, mf=None))
+    with pytest.raises(RM.ReleaseManifestError, match="names no MF record"):
+        hp.load_release(d, s)
+    d2, s2 = _manifest_copy(release, tmp_path / "b", lambda m: {k: v for k, v in m.items() if k != "mf"})
+    with pytest.raises(RM.ReleaseManifestError, match="missing \\['mf'\\]"):
+        hp.load_release(d2, s2)
+
+
+def test_release_manifest_refuses_an_extra_key_and_another_format(release, tmp_path):
+    from hcd_analysis.emulator import release_manifest as RM
+    for i, (fn, why) in enumerate(((lambda m: dict(m, note="anything"), "unknown \\['note'\\]"),
+                                   (lambda m: dict(m, mf=dict(m["mf"], tables_sha256=H64("x"))), "mf: keys"),
+                                   (lambda m: dict(m, format="hcd_priya.release/0"), "format"),
+                                   (lambda m: dict(m, release_version=" "), "release_version"))):
+        d, s = _manifest_copy(release, tmp_path / str(i), fn)
+        with pytest.raises(RM.ReleaseManifestError, match=why):
+            hp.load_release(d, s)
+
+
+def test_release_part_directories_are_plain_names_inside_the_release(release, tmp_path):
+    from hcd_analysis.emulator import release_manifest as RM
+    cases = [(lambda m: dict(m, backbone=dict(m["backbone"], dir="../backbone")), "plain path segment"),
+             (lambda m: dict(m, mf=dict(m["mf"], dir="sub/mf")), "plain path segment"),
+             (lambda m: dict(m, mf=dict(m["mf"], dir="..")), "plain path segment"),
+             (lambda m: dict(m, mf=dict(m["mf"], dir=str(release["root"] / "mf"))), "plain path segment"),
+             (lambda m: dict(m, mf=dict(m["mf"], dir="backbone")), "two different directories"),
+             (lambda m: dict(m, mf=dict(m["mf"], dir="absent")), "not a directory inside the release")]
+    for i, (fn, why) in enumerate(cases):
+        d, s = _manifest_copy(release, tmp_path / str(i), fn)
+        with pytest.raises(RM.ReleaseManifestError, match=why):
+            hp.load_release(d, s)
+    d, s = _manifest_copy(release, tmp_path / "link", lambda m: dict(m, mf=dict(m["mf"], dir="mf_link")))
+    os.symlink(os.path.join(d, "mf"), os.path.join(d, "mf_link"))
+    with pytest.raises(RM.ReleaseManifestError, match="symlink"):
+        hp.load_release(d, s)
+
+
+def test_release_naming_a_mismatched_pair_is_refused(release, tmp_path):
+    """The manifest names another backbone's MF record (with its correct digest): the record's backbone pin refuses
+    it; and a correct record named with a wrong digest is refused by its anchor."""
+    d, s = _manifest_copy(release, tmp_path / "a", lambda m: dict(m, mf={"dir": "other_mf",
+                                                                         "record_sha256": release["other_mf_sha"]}))
+    with pytest.raises(MR.MFRecordError, match="backbone"):
+        hp.load_release(d, s)
+    d2, s2 = _manifest_copy(release, tmp_path / "b", lambda m: dict(m, mf=dict(m["mf"],
+                                                                               record_sha256=release["other_mf_sha"])))
+    with pytest.raises(MR.MFRecordError, match="sha256"):
+        hp.load_release(d2, s2)
+    d3, s3 = _manifest_copy(release, tmp_path / "c", lambda m: dict(m, backbone=dict(m["backbone"],
+                                                                                     manifest_sha256=H64("other"))))
+    from hcd_analysis.emulator import safe_h5 as H
+    with pytest.raises(H.SafeFormatError):                       # the backbone's own anchor
+        hp.load_release(d3, s3)

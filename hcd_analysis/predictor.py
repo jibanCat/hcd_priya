@@ -20,6 +20,10 @@ full-simulation research models: ``provenance.research``) is refused by ``load_b
 ``load_research_bundle(bundle_dir, sha256, purpose=...)``, which returns a ``ResearchPredictor`` (the same forward,
 every prediction flagged ``research_model``); it is never a ``Bundle``.
 
+**A release (LF+MF).** ``load_release(release_dir, "<the published release sha256>")`` loads a whole release from its
+release manifest (``release.json``, ``emulator.release_manifest``): the backbone bundle and the MF record it names,
+each checked against the digest the manifest gives, through ``load_bundle`` below.
+
 **The MF correction (LF+MF).** ``load_bundle(bundle_dir, sha256, mf_dir=..., mf_record_sha256=...)`` also loads the
 release MF record (format ``hcd_priya.mf_record/1``, ``emulator.mf_release``), anchored on its published sha256 and
 bound to this bundle: its backbone manifest sha256, training cache, backbone kind and box modes must be this
@@ -27,11 +31,11 @@ bundle's, and a historical or fold record is refused. Each member's per-class sp
 exp(g(z, tau0, k)) on the native modes, before the mean, the spread and any k placement: P_MF = P_LF exp(g). g does not
 depend on the cosmological parameters. Below the lowest redshift of the record's tables the MF is REFUSED
 (``MFRangeError``; ask for ``fidelity="LF"``): it is never clamped there. Above the highest redshift and outside the
-tau0 tables it is held constant and flagged (``mf_z_clamped``, ``mf_tau0_clamped``). ``w_c`` and ``dndx`` stay the LF backbone's. ``fidelity`` ("LF" or "LF+MF";
-None: the bundle's own) selects the output; "LF+MF" without a record raises ``MFUnavailableError``. The record's
-provenance (version, composition and ruling ids, cache digests, fit commit, the PROPOSED mean-flux convention of its
-targets, the HR inputs used) is in ``provenance["mf"]``. Without an MF record nothing here
-changes. A FOLD record (a held-out fit for grouped cross-validation) applies only on its research backbone
+tau0 tables it is held constant and flagged (``mf_z_clamped``, ``mf_tau0_clamped``). ``w_c`` and ``dndx`` stay the LF
+backbone's. ``fidelity`` ("LF" or "LF+MF"; None: the bundle's own) selects the output; "LF+MF" without a record raises
+``MFUnavailableError``. The record's provenance (version, composition and ruling ids, cache digests and their
+provenance statements, fit commit, the PROPOSED mean-flux convention of its targets, the HR inputs used) is in
+``provenance["mf"]``. Without an MF record nothing here changes. A FOLD record (a held-out fit for grouped cross-validation) applies only on its research backbone
 (``load_research_bundle(..., mf_dir=..., mf_record_sha256=...)``); ``heldout_P_filt_at(pred, x, tau0)`` gives that
 fold's held-out LF and MF predictions at cache inputs from the same object. ``backbone_identity(pred)`` is what an MF
 record must declare about a backbone, derived from its member metas; ``lf_P_filt_at`` and ``native_modes`` serve the
@@ -301,6 +305,8 @@ class _PredictorBase:
                "bundle_provenance": copy.deepcopy(self._rb.manifest.get("provenance"))}
         if self._mf is not None:
             out["mf"] = self._mf.provenance()
+        if self._release is not None:
+            out["release"] = copy.deepcopy(self._release)
         return out
 
     def _lf_P_filt_at(self, x, tau0, *, chunk=256):
@@ -380,6 +386,7 @@ class _PredictorBase:
 
     # ------------------------------------------------------------------ the MF correction
     _mf = None
+    _release = None                                   # set only by load_release: {format, release_version, sha256}
 
     def _attach_mf(self, mf, *, kind):
         """Bind a loaded MF record to this backbone: it must come from ``mf_release.load_mf_record`` (anchored), and
@@ -681,6 +688,22 @@ def load_bundle(bundle_dir, expected_manifest_sha256, *, mf_dir=None, mf_record_
                                  "development load is safe_h5.load_ensemble(..., expected_manifest_sha256=None))")
     rb = _H.load_release(bundle_dir, expected_manifest_sha256=expected_manifest_sha256)
     return Bundle(rb, mf=_load_mf(rb, mf_dir, mf_record_sha256, "release"))
+
+
+def load_release(release_dir, expected_release_sha256):
+    """Load an LF+MF release through its release manifest (``release.json``, format ``hcd_priya.release/1``;
+    ``emulator.release_manifest``) anchored on its ONE published sha256: the manifest names the backbone bundle and the
+    MF record with their digests, and both load through ``load_bundle(..., mf_dir=..., mf_record_sha256=...)``, which
+    refuses any mismatch (the record pins the backbone's manifest). A manifest without an MF part, another format, an
+    unknown key, a directory that is a path or a symlink, and a wrong digest are refused; an LF-only bundle keeps
+    loading with ``load_bundle``. Returns a ``Bundle`` whose ``provenance["release"]`` names the release."""
+    from .emulator import release_manifest as _RM
+    m, parts = _RM.read_release_manifest(release_dir, expected_release_sha256)
+    b = load_bundle(parts["backbone"], m["backbone"]["manifest_sha256"], mf_dir=parts["mf"],
+                    mf_record_sha256=m["mf"]["record_sha256"])
+    b._release = {"format": m["format"], "release_version": m["release_version"],
+                  "release_sha256": expected_release_sha256}
+    return b
 
 
 def load_research_bundle(bundle_dir, expected_manifest_sha256, *, purpose, mf_dir=None, mf_record_sha256=None):

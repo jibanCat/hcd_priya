@@ -353,6 +353,28 @@ container, read with `allow_pickle=False` by `products.load_mf_product`, which c
 cache digests and the composition (`"all"` for a product that records none). It is not a release record and the
 release loader refuses it.
 
+## The release manifest (`hcd_priya.release/1`)
+
+An LF+MF release is published under ONE digest, the sha256 of a small `release.json` in the release directory
+(`hcd_analysis/emulator/release_manifest.py`):
+
+```json
+{"format": "hcd_priya.release/1", "release_version": "<text>",
+ "backbone": {"dir": "<name>", "manifest_sha256": "<64 hex>"},
+ "mf": {"dir": "<name>", "record_sha256": "<64 hex>"}}
+```
+
+`backbone.dir` holds the `hcd_priya.h5/2` production bundle and `mf.dir` the `hcd_priya.mf_record/1` record; each
+`dir` is one plain directory name inside the release directory (never a path, `..` or a symlink), and the two differ.
+The key set is closed and the `mf` part is required: an LF-only bundle is not a release of this format and loads with
+`load_bundle` as before. `predictor.load_release(release_dir, "<published release sha256>")` reads `release.json`
+through a no-follow descriptor, compares its sha256 before parsing, validates it, and loads both parts through
+`load_bundle(..., mf_dir=..., mf_record_sha256=...)` with the digests it names; since the record pins its backbone's
+manifest, a manifest naming a mismatched pair is refused. The returned bundle's `provenance["release"]` gives the
+format, the release version and the release sha256. `release_manifest.write_release_manifest` writes the file once,
+into a directory that already holds both parts. The two-digest call (`load_bundle` with `mf_dir` and
+`mf_record_sha256`) keeps working.
+
 ## What the loader guarantees
 
 - **No code execution from the files.** Nothing is unpickled or evaluated; the network is built from code
