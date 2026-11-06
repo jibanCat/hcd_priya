@@ -278,6 +278,15 @@ def test_backbone_identity_refuses_disagreeing_members_or_another_cache(res):
         hp.backbone_identity(hp.ResearchPredictor(cache))
 
 
+def test_backbone_identity_refuses_metas_whose_excluded_set_cannot_be_derived(res):
+    """R14a (panel M1): a member naming simulations under a key that says neither held out nor trained on has no
+    derivable excluded set; the identity is refused, not guessed from the other keys."""
+    rb = _rb(res)
+    vague = _metas(rb, lambda i, m: dict(m, recipe=dict(m["recipe"], compared_with=["synthsim2"])) if i else m)
+    with pytest.raises(MR.MFRecordError, match="cannot be derived from their metas"):
+        hp.backbone_identity(hp.ResearchPredictor(vague))
+
+
 def test_fold_whose_backbone_saw_the_held_out_group_is_refused(res, tmp_path):
     c = res.lineage["cache"]["sha256"]
     d = tmp_path / "saw"                                    # the backbone holds out synthsim2, the fold synthsim1

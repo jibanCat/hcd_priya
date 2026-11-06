@@ -69,3 +69,16 @@ def test_an_object_array_is_never_unpickled(tmp_path):
              **dict(t, log_rho=np.array([object()] * K, dtype=object)))
     with pytest.raises(PR.ProductRefused):
         PR.load_mf_product(p, lf_ckpt_sha256=CK, lf_cache_sha256=LF, hr_cache_sha256=HR, composition="all")
+
+
+def test_a_product_that_records_no_composition_is_not_a_named_one(tmp_path):
+    """R4b: a product written before compositions were recorded was fitted on every matched pair; asked for a named
+    composition (an id string), it is refused, not read as "all"."""
+    implicit = _product(tmp_path, "implicit.npz")
+    for wrong in ("synthetic-x", "synthetic-named"):
+        with pytest.raises(PR.ProductRefused, match="composition"):
+            PR.load_mf_product(implicit, lf_ckpt_sha256=CK, lf_cache_sha256=LF, hr_cache_sha256=HR, composition=wrong)
+    named = _product(tmp_path, "named_str.npz", composition="synthetic-named")
+    PR.load_mf_product(named, lf_ckpt_sha256=CK, lf_cache_sha256=LF, hr_cache_sha256=HR, composition="synthetic-named")
+    with pytest.raises(PR.ProductRefused, match="composition"):
+        PR.load_mf_product(named, lf_ckpt_sha256=CK, lf_cache_sha256=LF, hr_cache_sha256=HR, composition="all")

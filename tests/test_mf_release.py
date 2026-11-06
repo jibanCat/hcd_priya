@@ -403,3 +403,140 @@ def test_the_writer_takes_no_cache_provenance_from_the_caller(tmp_path):
     with pytest.raises(MR.MFRecordError, match="caches must be"):
         build(tmp_path, caches=claim)
     assert not os.path.lexists(tmp_path / "mf")
+
+
+# ------------------------------------------------------------------- pinned guards (C1 review MAJOR-2, mutants R*)
+def test_hr_inputs_are_pinned_exactly():
+    """R10c: the HR inputs of record are this exact constant (06b A1); dropping a catalogue-derived name from the
+    excluded list, or changing the status, is a deliberate edit of this test."""
+    assert MR.HR_INPUTS == {
+        "used": ["P_tier_c_filtered", "tier_c_counts", "params", "z_grid", "alpha_idx", "sim_name", "kfkms"],
+        "used_as": "the per-class P1D rows (P_filt, the count-weighted collapse of P_tier_c_filtered over the fine "
+                   "N_HI bins) and the row keys that match them to LF rows",
+        "excluded_catalogue_derived": ["snap_dNdX_LLS", "snap_dNdX_subDLA", "snap_dNdX_DLA", "snap_f_nhi",
+                                       "snap_n_absorbers", "snap_total_path_dX"],
+        "catalogue_derived_status": "PRE-FIX: not read by the MF; no verified or corrected provenance is claimed for "
+                                    "them"}
+    for prefix in MR.HR_CATALOGUE_DERIVED:                       # every refused prefix is named as excluded
+        assert any(n.startswith(prefix) for n in MR.HR_INPUTS["excluded_catalogue_derived"]), prefix
+    assert not set(MR.HR_INPUTS["used"]) & set(MR.HR_INPUTS["excluded_catalogue_derived"])
+
+
+def test_mean_flux_convention_is_global_and_its_source_line_holds_the_stated_expression():
+    """R12a, R12b: the convention is "global" (D2 open: PROPOSED), and the cited file:line holds the expression the
+    record quotes, inside the named function, so the citation cannot drift silently."""
+    import importlib.util
+    import re
+    mfc = MR.MEAN_FLUX_CONVENTION
+    assert mfc["name"] == "global" and mfc["status"] == "PROPOSED"
+    m = re.match(r"(hcd_analysis/[\w/]+\.py):(\d+) \((.+?)\),", mfc["source"])
+    assert m, mfc["source"]
+    rel, line, expr = m.group(1), int(m.group(2)), m.group(3)
+    assert rel == mfc["function"].rsplit(".", 1)[0].replace(".", "/") + ".py"
+    path = importlib.util.find_spec(mfc["function"].rsplit(".", 1)[0]).origin    # works from a wheel install too
+    assert path.replace(os.sep, "/").endswith(rel)
+    lines = open(path).read().splitlines()
+    assert lines[line - 1].strip() == expr == "dflux = np.exp(-tau_eff) / target_F - 1.0"
+    defs = [ln for ln in lines[:line] if re.match(r"def \w+\(", ln)]
+    assert defs[-1].startswith(f"def {mfc['function'].rsplit('.', 1)[1]}(")
+
+
+def test_fit_code_dirty_must_be_a_boolean(tmp_path):
+    """R13c: a clean-tree flag that is not a boolean (0, "false") is refused, not read as falsy."""
+    d, sha, _ = build(tmp_path)
+    for bad in (0, "false", None):
+        s2 = rewrite(d, lambda r: dict(r, fit_code={"commit": COMMIT, "dirty": bad}))
+        with pytest.raises(MR.MFRecordError, match="boolean"):
+            load(d, s2)
+
+
+def test_composition_id_alone_is_checked_at_load(tmp_path):
+    """R2b: the same excluded simulations under another composition id is another composition."""
+    d, sha, _ = build(tmp_path)
+    with pytest.raises(MR.MFRecordError, match="composition"):
+        load(d, sha, composition={"id": "synthetic-other", "excluded_sims": ["synthD"]})
+    with pytest.raises(MR.MFRecordError, match="composition"):
+        load(d, sha, composition={"id": "synthetic-xD", "excluded_sims": ["synthD"], "ruling_ids": ["another"]})
+
+
+def test_fold_holdout_must_lie_outside_the_training_and_excluded_sets(tmp_path):
+    """R11a: a re-anchored fold record that trained on its held-out group, or holds out an excluded simulation, is
+    refused at load (D1: such a fold is not a held-out fit)."""
+    fold = {"fold_id": "synthetic-fold-0", "holdout_sims": ["synthA"]}
+    rb = {"manifest_sha256": BACKBONE, "kind": "research", "cache_sha256": LF_SHA, "held_out_sims": ["synthA"]}
+    d, sha, _ = build(tmp_path, kind="fold", fold=fold, backbone=rb)
+    s2 = rewrite(d, lambda r: dict(r, train_sims=sorted(r["train_sims"] + ["synthA"])))
+    with pytest.raises(MR.MFRecordError, match="outside the training and excluded sets"):
+        load(d, s2, kind="fold")
+    s3 = rewrite(d, lambda r: dict(r, train_sims=["synthB", "synthC"],
+                                   composition=dict(r["composition"], excluded_sims=["synthA", "synthD"])))
+    with pytest.raises(MR.MFRecordError, match="outside the training and excluded sets"):
+        load(d, s3, kind="fold")
+    s4 = rewrite(d, lambda r: dict(r, fold=dict(r["fold"], holdout_sims=[]), train_sims=["synthB", "synthC"]))
+    with pytest.raises(MR.MFRecordError, match="non-empty"):
+        load(d, s4, kind="fold")
+
+
+def _copy_dir(src, dst):
+    os.makedirs(dst)
+    for n in os.listdir(src):
+        with open(os.path.join(dst, n), "wb") as fh:
+            fh.write(open(os.path.join(src, n), "rb").read())
+    return str(dst)
+
+
+def _retable(tmp_path, d, name, write):
+    """A copy of record ``d`` whose tables file is rewritten by ``write(path, arrays)`` and re-anchored (the attacker
+    controls both files): returns (dir, the new record sha256)."""
+    import h5py
+    e = _copy_dir(d, tmp_path / name)
+    tp = os.path.join(e, MR.TABLES_FILE)
+    with h5py.File(tp, "r") as f:
+        arrays = {k: f["mf"][k][...] for k in f["mf"]}
+    os.chmod(tp, 0o644)
+    os.remove(tp)
+    write(tp, arrays)
+    new = hashlib.sha256(open(tp, "rb").read()).hexdigest()
+    return e, rewrite(e, lambda r: dict(r, tables=dict(r["tables"], sha256=new, bytes=os.path.getsize(tp))))
+
+
+def _tables_file(fmt=MR.TABLES_FORMAT, userblock=0, extra_top=False):
+    def write(path, arrays):
+        import h5py
+        kw = {"userblock_size": userblock} if userblock else {}
+        with h5py.File(path, "w", libver=("earliest", "v110"), **kw) as f:
+            f.attrs["format"] = fmt
+            g = f.create_group("mf")
+            for n in sorted(arrays):
+                g.create_dataset(n, data=np.ascontiguousarray(arrays[n], dtype="<f8"))
+            if extra_top:
+                f.create_group("notes")
+    return write
+
+
+def test_strict_tables_file_refuses_a_user_block_a_second_top_level_entry_and_another_format(tmp_path):
+    """R5a, R5b, R5e: a re-anchored tables file with a user block, a top level holding more than /mf, or another
+    format value is refused; the same rewrite with none of them loads (the control)."""
+    d, sha, _ = build(tmp_path)
+    e, s = _retable(tmp_path, d, "control", _tables_file())
+    assert load(e, s).kind == "release"
+    for name, write, why in (("ub", _tables_file(userblock=512), "user block"),
+                             ("top", _tables_file(extra_top=True), "exactly /mf"),
+                             ("fmt", _tables_file(fmt="hcd_priya.mf/0"), "format")):
+        e, s = _retable(tmp_path, d, name, write)
+        with pytest.raises(MR.MFRecordError, match=why):
+            load(e, s)
+
+
+def test_record_directory_refuses_an_extra_file_and_a_symlink(tmp_path):
+    """R5c, R5d (the reviewer's forgeries F09 and F07b): an extra file in the record directory, and a record directory
+    reached through a symlink, are refused."""
+    d, sha, _ = build(tmp_path)
+    e = _copy_dir(d, tmp_path / "extra")
+    assert load(e, sha).kind == "release"                       # the copy itself loads
+    (tmp_path / "extra" / "README.txt").write_text("anything")
+    with pytest.raises(MR.MFRecordError, match="unexpected files"):
+        load(e, sha)
+    os.symlink(d, str(tmp_path / "link"))
+    with pytest.raises(MR.MFRecordError, match="not an MF record directory"):
+        load(str(tmp_path / "link"), sha)

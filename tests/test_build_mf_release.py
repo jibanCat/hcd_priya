@@ -159,3 +159,90 @@ def test_build_takes_the_backbone_identity_from_a_loaded_predictor_only(info, tm
                             caches=_caches(bb), composition={"id": "c", "excluded_sims": [], "ruling_ids": ["r"]},
                             fold=None, fit_code=CLEAN())
     assert not os.path.lexists(tmp_path / "x")
+
+
+# --------------------------------------------------------------------- code identity and TOCTOU (C1 review MAJOR-2)
+def _git(repo, *args):
+    import subprocess
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=synthetic", "-c", "user.email=synthetic@example.invalid",
+                    "-c", "commit.gpgsign=false", *args], check=True, capture_output=True, env=env)
+
+
+def test_code_identity_reads_the_commit_and_the_dirty_state_of_a_real_checkout(tmp_path, monkeypatch):
+    """R13a, R13b: the real git check (main's default), on a temporary repository: clean, a modified tracked file and
+    an untracked file; a directory that is not a checkout is refused."""
+    for k in [k for k in os.environ if k.startswith("GIT_")]:
+        monkeypatch.delenv(k)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "a.txt").write_text("one\n")
+    _git(repo, "add", "a.txt")
+    _git(repo, "commit", "-q", "-m", "synthetic")
+    import subprocess
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    assert B.code_identity(str(repo)) == {"commit": head, "dirty": False}
+    (repo / "a.txt").write_text("two\n")
+    assert B.code_identity(str(repo)) == {"commit": head, "dirty": True}
+    _git(repo, "checkout", "-q", "--", "a.txt")
+    assert B.code_identity(str(repo))["dirty"] is False
+    (repo / "untracked.txt").write_text("new\n")
+    assert B.code_identity(str(repo))["dirty"] is True
+    (tmp_path / "plain").mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    with pytest.raises(SystemExit, match="code identity"):
+        B.code_identity(str(tmp_path / "plain"))
+
+
+def _pinned_inputs(tmp_path):
+    import hashlib
+    (tmp_path / "lf.h5").write_bytes(b"synthetic lf bytes")
+    (tmp_path / "hr.h5").write_bytes(b"synthetic hr bytes")
+    lf_sha = hashlib.sha256(b"synthetic lf bytes").hexdigest()
+    argv = _argv(tmp_path)
+    argv[argv.index("--lf-cache-sha256") + 1] = lf_sha
+    argv[argv.index("--hr-cache-sha256") + 1] = hashlib.sha256(b"synthetic hr bytes").hexdigest()
+    return argv, lf_sha
+
+
+def _stub_loaders(monkeypatch, lf_sha, *, lf_loaded_sha, during_hr_read=None):
+    """main() with the backbone and cache readers stubbed (the pins and the re-checks are the code under test)."""
+    from hcd_analysis.emulator import data as D
+    from hcd_analysis.emulator import safe_h5 as H
+
+    class Backbone:
+        lineage = {"cache": {"sha256": lf_sha}}
+
+    def hist(path, *, reason, validate=True):
+        if during_hr_read:
+            during_hr_read(path)
+        return {}
+
+    monkeypatch.setattr(H, "load_release", lambda *a, **k: object())
+    monkeypatch.setattr(hp, "Bundle", lambda rb: Backbone())
+    monkeypatch.setattr(D, "load_cache", lambda path, **k: {"cache_sha256": lf_loaded_sha})
+    monkeypatch.setattr(D, "load_cache_historical", hist)
+    monkeypatch.setattr(B, "build_from_inputs", lambda *a, **k: pytest.fail("reached the build"))
+
+
+def test_lf_cache_digest_at_read_is_compared_with_the_pin(tmp_path, monkeypatch):
+    """R3d: the LF cache's digest as loaded (data.load_cache hashes the file it reads) must be the pinned one."""
+    argv, lf_sha = _pinned_inputs(tmp_path)
+    _stub_loaders(monkeypatch, lf_sha, lf_loaded_sha=H64("changed after hashing"))
+    with pytest.raises(SystemExit, match="LF cache changed after it was hashed"):
+        B.main(argv, _code=CLEAN)
+    assert not os.path.lexists(tmp_path / "out")
+
+
+def test_hr_cache_is_rehashed_after_the_read(tmp_path, monkeypatch):
+    """R3b: an HR cache that changes while it is read (between the pin check and the end of the read) is refused."""
+    argv, lf_sha = _pinned_inputs(tmp_path)
+
+    def change(path):
+        with open(path, "ab") as fh:
+            fh.write(b" changed")
+    _stub_loaders(monkeypatch, lf_sha, lf_loaded_sha=lf_sha, during_hr_read=change)
+    with pytest.raises(SystemExit, match="HR cache changed while it was read"):
+        B.main(argv, _code=CLEAN)
+    assert not os.path.lexists(tmp_path / "out")
