@@ -29,8 +29,9 @@ the wheel into a fresh virtual environment and runs two tiers of tests (`tests/c
 Tests that need real assets (the training cache, trained emulator members, observational data, raw simulation
 outputs) are not run in CI. They are listed with their reasons in `tests/ci_tiers.toml` and reported as not run.
 
-Floating-point results are compared with stored reference arrays at stated tolerances, so a job gives the same
-verdict on any runner CPU. The bit-level digests of three test files are never checked in CI: they run only in an
+Floating-point results are compared with stored reference arrays at stated tolerances, so a verdict does not
+depend on the last bits of the runner CPU's arithmetic: the tolerances are larger than the differences measured
+between the CPUs tried. The bit-level digests of three test files are never checked in CI: they run only in an
 opt-in replay with the pinned stack on the kind of CPU they were recorded on, x86-64 with AVX-512
 (`HCD_EXACT_REPLAY=1`; see `docs/release_checklist.md`). On another kind of CPU a digest failure is inconclusive.
 
