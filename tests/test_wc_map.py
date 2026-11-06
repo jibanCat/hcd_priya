@@ -17,6 +17,7 @@ from hcd_analysis import tau0_cache as T
 from hcd_analysis.catalog import FINDER_ID
 from hcd_analysis.emulator import dndx_wc as D
 from hcd_analysis.emulator import wc_map as W
+from tests import portable_numerics as PN
 from tests import tau0_fixtures as tf
 from tests.emulator._fixture import write_synthetic_cache_v34
 
@@ -280,115 +281,32 @@ GOLDEN_PAYLOAD_SUBSET = {
     "xbar": {"coeffs": [-0.21489274949232198, 1.4614637851215497, -1.5494406419981959], "deg": 2, "z_fit": [2.1, 4.7],
              "n_groups": 12}}
 
-# T31 off the pinned stack (Session B r18): the numpy of the supported, pinned environment, and the tolerance of the
-# least-squares outputs elsewhere (test_golden_digests_of_the_map_rules says why 1e-9)
-PINNED_NUMPY_RECORDED = ("2.4.6",)        # numpy==2.4.6 in Session B's tools/ci/constraints-devenv.txt (ef23c83)
-WC_MAP_RTOL = 1e-9
-TOLERANT_FIELDS = (("delta_c", "coeffs"), ("delta_c", "resid_std"), ("delta_c", "resid_max"), ("xbar", "coeffs"))
+# T31 off the exact replay: per-field tolerances of the payload's computed floats (test_golden_digests_of_the_map_rules
+# says why each). The pin parsing and the exact-replay rule live in tests/portable_numerics.py.
+WC_MAP_TOLS = {                           # (section, key): (rtol, atol)
+    ("delta_c", "coeffs"): (1e-9, 0.0),
+    ("xbar", "coeffs"): (1e-9, 0.0),
+    ("delta_c", "resid_std"): (1e-12, 0.0),
+    ("delta_c", "resid_max"): (1e-10, 0.0),
+    ("delta_c", "mean"): (1e-12, 0.0),
+}
+TOLERANT_FIELDS = tuple(WC_MAP_TOLS)
+CONSTRAINTS_FILE = PN.CONSTRAINTS_FILE
+PINNED_STACK_ENV = PN.PINNED_STACK_ENV
+_requirement_strict = PN._requirement_strict
+numpy_pins = PN.numpy_pins
+pinned_numpy_versions = PN.pinned_numpy_versions
+pinned_stack_declared = PN.pinned_stack_declared
+exact_replay = PN.exact_replay
 
 
-CONSTRAINTS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "ci",
-                                "constraints-devenv.txt")
-_STRICT_REQUIREMENT = re.compile(r"(?P<name>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\s*(?:\[[^\]]*\])?\s*"
-                                 r"(?P<spec>[^;]*?)\s*(?:;(?P<marker>.*))?")
-_EXACT_SPEC = re.compile(r"===?\s*(?P<version>[0-9][0-9A-Za-z.+!_-]*)")
-
-
-def _requirement_strict(line):
-    """``(canonical name, exact version or None)`` of one requirement line, without ``packaging``: a name (``-``,
-    ``_`` and ``.`` runs equal, any case), optional extras, the specifiers and an optional environment marker. The
-    version is returned only for one ``==`` or ``===`` specifier without a wildcard. Unparsable: ValueError."""
-    m = _STRICT_REQUIREMENT.fullmatch(line)
-    if m is None or (m.group("marker") is not None and not m.group("marker").strip()):
-        raise ValueError(f"unparsable requirement line {line!r}")
-    e = _EXACT_SPEC.fullmatch(m.group("spec").strip())
-    return re.sub(r"[-_.]+", "-", m.group("name")).lower(), e.group("version") if e and "*" not in e.group(0) else None
-
-
-def _requirement(line):
-    """``(canonical name, exact version or None)`` of one requirement line, with the standard requirement grammar
-    (``packaging.requirements``, a pytest dependency) when it is importable, else ``_requirement_strict``."""
-    try:
-        from packaging.requirements import InvalidRequirement, Requirement
-        from packaging.utils import canonicalize_name
-    except ImportError:
-        return _requirement_strict(line)
-    try:
-        req = Requirement(line)
-    except InvalidRequirement as e:
-        raise ValueError(f"unparsable requirement line {line!r}: {e}") from None
-    specs = list(req.specifier)
-    exact = len(specs) == 1 and specs[0].operator in ("==", "===") and "*" not in specs[0].version
-    return canonicalize_name(req.name), specs[0].version if exact else None
-
-
-def numpy_pins(text, parse=None):
-    """The exact numpy pins of a pip constraints text, in any valid spelling (spaces, case, an environment marker, an
-    inline comment, per-requirement options such as ``--hash``); comment, blank and option (``-c``, ``-r``) lines are
-    skipped. Fail closed: a numpy line that is not one exact pin (a range, a wildcard, several specifiers) or any
-    unparsable line raises ValueError. ``parse``: the line parser (default ``_requirement``)."""
-    parse = parse or _requirement
-    pins = []
-    for raw in text.splitlines():
-        line = re.sub(r"\s+--\S.*$", "", re.sub(r"(^|\s)#.*$", "", raw)).strip()
-        if not line or line.startswith("-"):
-            continue
-        name, version = parse(line)
-        if name == "numpy":
-            if version is None:
-                raise ValueError(f"the numpy line {raw.strip()!r} is not an exact pin (numpy==X)")
-            pins.append(version)
-    return tuple(pins)
-
-
-def pinned_numpy_versions(path=CONSTRAINTS_FILE):
-    """The numpy version(s) of the supported, pinned environment (docs/compatibility.md; the PI's rule B-D3).
-
-    - When the constraints file (Session B's ``tools/ci/constraints-devenv.txt``) exists, its exact numpy pins, read
-      by ``numpy_pins``. Fail closed: a file that pins no numpy version, or whose numpy line is not one exact pin,
-      raises ValueError, so the test fails instead of silently taking the recorded version.
-    - Only when the file is absent (a tests-only copy, or a tree without it): ``PINNED_NUMPY_RECORDED``."""
-    if not os.path.exists(path):
-        return PINNED_NUMPY_RECORDED
-    with open(path) as fh:
-        pins = numpy_pins(fh.read())
-    if not pins:
-        raise ValueError(f"{path} exists but pins no numpy version (numpy==X): the pinned stack cannot be told, so "
-                         "the bit-level T31 digests cannot be placed; fix the constraints file or this parser")
-    return pins
-
-
-PINNED_STACK_ENV = "HCD_PINNED_STACK"
-
-
-def pinned_stack_declared(environ=None):
-    """Whether this run declares itself the supported pinned stack: ``HCD_PINNED_STACK`` exactly ``"1"`` (Session B's
-    supported CI job and its pinned replays set it; the newer-dependency jobs set it empty). Unset, empty or any other
-    value (``"true"``, ``" 1"``) is not a declaration."""
-    return (os.environ if environ is None else environ).get(PINNED_STACK_ENV) == "1"
-
-
-def on_pinned_numpy(version=None, environ=None, pins=None):
-    """Whether T31 takes the exact-digest branch: ``version`` (default ``np.__version__``) is one of ``pins`` (default
-    ``pinned_numpy_versions()``: the constraints file's pins, fail closed; the recorded pin only when that file is
-    absent). A run that declares the pinned stack (``pinned_stack_declared``) MUST be on a pinned numpy: otherwise
-    ValueError, so a supported job that drifted to another numpy fails instead of quietly taking the tolerance path."""
-    version = np.__version__ if version is None else version
-    pins = pinned_numpy_versions() if pins is None else tuple(pins)
-    if version in pins:
-        return True
-    if pinned_stack_declared(environ):
-        raise ValueError(f"{PINNED_STACK_ENV}=1 declares the supported pinned stack, but numpy {version} is not one of "
-                         f"the pinned versions {pins}: the bit-level T31 digests would not be checked; fix the "
-                         "environment or the pin")
-    return False
-
-
-def payload_mismatches(got, want, rtol=WC_MAP_RTOL):
+def payload_mismatches(got, want, tols=None):
     """The dotted paths where the w_c map payload ``got`` departs from ``want`` (empty: they agree). The key sets must
-    be equal; the least-squares outputs (``TOLERANT_FIELDS``) must have the same shape, be finite and agree element by
-    element to ``rtol`` relative (``|got - want| <= rtol |want|``); every other field (counts, degrees, the clamp and
-    fit ranges, the redshift range, the means, the format and class order) must be exactly equal (canonical JSON)."""
+    be equal; the computed floats (``WC_MAP_TOLS``: the least-squares outputs and the block means) must have the same
+    shape, be finite and agree element by element to their own tolerance (``|got - want| <= atol + rtol |want|``,
+    ``portable_numerics.field_mismatches``); every other field (counts, degrees, the clamp and fit ranges, the redshift
+    range, the format and class order) must be exactly equal (canonical JSON)."""
+    tols = WC_MAP_TOLS if tols is None else tols
     out = []
     if set(got) != set(want):
         out.append("keys")
@@ -398,9 +316,9 @@ def payload_mismatches(got, want, rtol=WC_MAP_RTOL):
             out.append(f"{sec} keys")
             continue
         for k in sorted(w):
-            if (sec, k) in TOLERANT_FIELDS:
+            if (sec, k) in tols:
                 a, b = np.asarray(g[k], dtype=np.float64), np.asarray(w[k], dtype=np.float64)
-                if a.shape != b.shape or not np.all(np.isfinite(a)) or np.any(np.abs(a - b) > rtol * np.abs(b)):
+                if not np.all(np.isfinite(a)) or PN.field_mismatches({k: a}, {k: b}, {k: tols[(sec, k)]}):
                     out.append(f"{sec}.{k}")
             elif L.canonical_json(g[k]) != L.canonical_json(w[k]):
                 out.append(f"{sec}.{k}")
@@ -479,35 +397,45 @@ def test_the_training_set_refit_refuses_an_empty_or_unknown_set(cache5):
 def test_golden_digests_of_the_map_rules(cache5):                                 # T31
     """The map rules on cache5, against the goldens.
 
-    On the pinned numpy (``on_pinned_numpy()``: ``np.__version__`` in ``pinned_numpy_versions()``, the supported
-    environment) the payload sha256 must be the golden digests, bit level, as before; a run that declares the pinned
-    stack (``HCD_PINNED_STACK=1``) on another numpy fails. On any other numpy the least-squares outputs may move by
-    linear-algebra (BLAS/LAPACK) rounding, so the payload is compared field by field with the stored golden payloads
-    (``payload_mismatches``, which also runs on the pinned stack): every count, degree, clamp and fit range, the
-    redshift range, the means, the format and the class order exactly; ``delta_c.coeffs``, ``delta_c.resid_std``,
-    ``delta_c.resid_max`` and ``xbar.coeffs`` to ``WC_MAP_RTOL`` = 1e-9 relative, element by element.
+    Always: the payload is compared field by field with the stored golden payloads (``payload_mismatches``): every
+    count, degree, clamp and fit range, the redshift range, the format and the class order exactly; the computed
+    floats to their own tolerance (``WC_MAP_TOLS``). Only in an exact replay (``exact_replay()``: HCD_EXACT_REPLAY=1
+    with HCD_PINNED_STACK=1 and numpy, jax and jaxlib at their pins, never on a GitHub runner) also the payload sha256
+    against the golden digests, bit level. The numpy version alone no longer selects the digests: the GitHub job
+    "Python 3.11, newest dependencies" ran the pinned numpy on another CPU and failed them (run 42143147836). Its
+    digest is reproduced here by OpenBLAS's Haswell or Zen kernels (OPENBLAS_CORETYPE), the ones a CPU without
+    AVX-512 gets.
 
-    Why 1e-9. Measured (Session B r18: numpy 2.5.4 against the pinned 2.4.6, the same code and cache): the largest
-    difference is 5.0e-13 relative (``xbar.coeffs`` of the subset fit, 3598 ulps: the degree-2 fit's conditioning
-    amplifies another linear-algebra path's last-bit rounding), then 6.4e-14 (``delta_c.coeffs``), 3.0e-15
-    (``resid_max``, 18 ulps) and 2.2e-16 (``resid_std``, 1 ulp); the means, ranges and counts are identical. 1e-9 is
-    2000 times the largest, so a linear-algebra path that rounds several times worse still passes, and it is above the
-    normwise worst case of these fits' conditioning (cond(V)^2 eps, at most about 3e-10 here); it is orders of
-    magnitude below any scientific use of these numbers. A change of the rules (another simulation set, estimator,
-    degree or clamp) moves the fitted outputs by orders of magnitude more than 1e-9 and fails
-    (test_the_t31_comparison_refuses_a_change_above_the_tolerance).
+    The tolerances. The w_c map enters the forward as w_c = w_M0 (1 + delta_c(z)) and through Xbar(z), the mean path
+    per sightline; the scientific scale of delta_c(z) is its fit-residual scatter (resid_std, the per-class prior
+    width), of order 0.2 to 3 on this fixture and percent level on the production map. Measured discrepancies (relative,
+    element by element): OpenBLAS kernels for other CPUs (Haswell, Zen, SandyBridge, SkylakeX), one thread, numpy and
+    XLA instruction-set variants, both stacks (A6 CI portability report); Session B r18, numpy 2.5.4 against the pinned
+    2.4.6; and an 8-ulp perturbation of every libm, XLA and least-squares input (backward stability: any LAPACK).
 
-    The pinned branch is keyed on the numpy version string, not on its linear-algebra build: the same numpy version
-    built on another BLAS would fail the bit-level digests, loudly (fail closed, outside the supported stack). The
-    means are compared exactly; on some other, unsupported numpy a reduction could move one by an ulp and fail
-    (fail closed by design)."""
+    - ``delta_c.coeffs`` and ``xbar.coeffs``: 1e-9. Measured at most 2.5e-14 (CPU) and 5.0e-13 (numpy 2.5.4,
+      ``xbar.coeffs`` of the subset fit, 3598 ulps: the degree-2 fit's conditioning amplifies the last-bit rounding of
+      another linear-algebra path), 3.0e-13 under the 8-ulp bound; 1e-9 is 2000 times the largest and above the
+      normwise worst case of these fits' conditioning (cond(V)^2 eps, about 3e-10). A coefficient change of 1e-9
+      moves delta_c(z) by at most 3e-7 over the clamp range (sum of |c_i| z^i), about 1e-7 of that class's
+      resid_std, and Xbar(z) by at most 5e-8 (values of order 1).
+    - ``delta_c.resid_std``: 1e-12. Measured 1 ulp (2.2e-16) on every path, 3.3e-15 under the 8-ulp bound: the
+      residual norm is stationary in the coefficients at the least-squares optimum. 300 times the bound.
+    - ``delta_c.resid_max``: 1e-10. Measured at most 4.6e-15 (CPU) and 3.0e-15 (numpy 2.5.4), 7.9e-15 under the
+      8-ulp bound; a diagnostic (not used by the forward), so the tolerance is loose: 1e4 times the bound.
+    - ``delta_c.mean``: 1e-12. Bitwise on every measured path; 2.3e-15 under the 8-ulp bound (it goes through XLA's
+      exp in w_M0); 400 times the bound. The means are of order 0.2 to 3 here, never near zero, so atol is 0.
+
+    A change of the rules (another simulation set, estimator, degree or clamp) moves the fitted outputs by orders of
+    magnitude more and fails (test_the_t31_comparison_refuses_a_change_above_the_tolerance,
+    test_the_t31_comparison_refuses_a_meaningful_change)."""
     d = _load(cache5)
     full, sub = W.refit(d), W.refit_subset(d, ["sim0", "sim1", "sim3", "sim4"])
-    if on_pinned_numpy():                        # a declared pinned stack (HCD_PINNED_STACK=1) must take this branch
-        assert W.payload_sha256(full) == GOLDEN_WCMAP_REFIT
-        assert W.payload_sha256(sub) == GOLDEN_WCMAP_SUBSET
     assert payload_mismatches(full, GOLDEN_PAYLOAD_REFIT) == []
     assert payload_mismatches(sub, GOLDEN_PAYLOAD_SUBSET) == []
+    if exact_replay():                           # HCD_EXACT_REPLAY=1: a same-machine replay on the pinned stack
+        assert W.payload_sha256(full) == GOLDEN_WCMAP_REFIT
+        assert W.payload_sha256(sub) == GOLDEN_WCMAP_SUBSET
 
 
 def test_the_stored_golden_payloads_are_the_golden_digests():
@@ -521,16 +449,25 @@ def test_the_t31_comparison_refuses_a_change_above_the_tolerance():
     measured = copy.deepcopy(want)                 # the largest measured cross-stack difference, 5.0e-13, passes
     measured["xbar"]["coeffs"] = [c * (1 + 5e-13) for c in want["xbar"]["coeffs"]]
     assert payload_mismatches(measured, want) == []
-    for sec, k in TOLERANT_FIELDS:                  # ten times the tolerance, on one element of each, fails
+    for sec, k in TOLERANT_FIELDS:                  # ten times its own tolerance, on one element of each, fails
         bad = copy.deepcopy(want)
         a = np.asarray(bad[sec][k], dtype=np.float64)
-        a.flat[0] *= 1 + 10 * WC_MAP_RTOL
+        a.flat[0] *= 1 + 10 * WC_MAP_TOLS[(sec, k)][0]
         bad[sec][k] = a.tolist()
         assert payload_mismatches(bad, want) == [f"{sec}.{k}"]
-    for sec, k in (("delta_c", "mean"), ("delta_c", "z_clamp"), ("xbar", "z_fit")):     # one ulp on an exact field
+        ok = copy.deepcopy(want)                    # a tenth of it passes
+        a = np.asarray(ok[sec][k], dtype=np.float64)
+        a.flat[0] *= 1 + 0.1 * WC_MAP_TOLS[(sec, k)][0]
+        ok[sec][k] = a.tolist()
+        assert payload_mismatches(ok, want) == []
+    for sec, k in (("delta_c", "z_clamp"), ("xbar", "z_fit")):     # one ulp on an exact field
         bad = copy.deepcopy(want)
         bad[sec][k][0] = float(np.nextafter(bad[sec][k][0], np.inf))
         assert payload_mismatches(bad, want) == [f"{sec}.{k}"]
+    for k in ("z_min", "z_max"):
+        bad = copy.deepcopy(want)
+        bad["delta_c"][k] = float(np.nextafter(bad["delta_c"][k], np.inf))
+        assert payload_mismatches(bad, want) == [f"delta_c.{k}"]
     for sec, k in (("delta_c", "n_blocks"), ("delta_c", "n_sims"), ("delta_c", "deg"), ("xbar", "n_groups")):
         bad = copy.deepcopy(want)
         bad[sec][k] += 1
@@ -552,6 +489,31 @@ def test_the_t31_comparison_refuses_a_change_above_the_tolerance():
     assert payload_mismatches(dict(want, format="hcd_priya.wc_map/2"), want) == ["format"]
     assert payload_mismatches(dict(want, extra=1), want) == ["keys"]
     assert "delta_c.coeffs" in payload_mismatches(GOLDEN_PAYLOAD_REFIT, want)      # another simulation set fails
+
+
+def test_the_t31_comparison_refuses_a_meaningful_change():
+    want = GOLDEN_PAYLOAD_REFIT
+    bad = copy.deepcopy(want)                       # the sign of one class's correction
+    bad["delta_c"]["coeffs"][1] = [-c for c in want["delta_c"]["coeffs"][1]]
+    assert payload_mismatches(bad, want) == ["delta_c.coeffs"]
+    bad = copy.deepcopy(want)                       # two classes exchanged (the class order of the rows)
+    bad["delta_c"]["coeffs"][2], bad["delta_c"]["coeffs"][3] = want["delta_c"]["coeffs"][3], want["delta_c"]["coeffs"][2]
+    assert payload_mismatches(bad, want) == ["delta_c.coeffs"]
+    bad = copy.deepcopy(want)                       # the polynomial order reversed
+    bad["xbar"]["coeffs"] = want["xbar"]["coeffs"][::-1]
+    assert payload_mismatches(bad, want) == ["xbar.coeffs"]
+    bad = copy.deepcopy(want)                       # delta_c(z) shifted by 1e-6 of the smallest resid_std
+    bad["delta_c"]["coeffs"][0][2] += 1e-6 * min(want["delta_c"]["resid_std"])
+    assert payload_mismatches(bad, want) == ["delta_c.coeffs"]
+    bad = copy.deepcopy(want)                       # resid_std and resid_max exchanged
+    bad["delta_c"]["resid_std"], bad["delta_c"]["resid_max"] = want["delta_c"]["resid_max"], want["delta_c"]["resid_std"]
+    assert payload_mismatches(bad, want) == ["delta_c.resid_max", "delta_c.resid_std"]
+    bad = copy.deepcopy(want)                       # a truncated mean
+    bad["delta_c"]["mean"] = want["delta_c"]["mean"][:3]
+    assert payload_mismatches(bad, want) == ["delta_c.mean"]
+    bad = copy.deepcopy(want)
+    bad["delta_c"]["mean"][0] = float("inf")
+    assert payload_mismatches(bad, want) == ["delta_c.mean"]
 
 
 def test_the_pinned_numpy_versions():
@@ -586,15 +548,23 @@ def test_a_constraints_file_that_pins_no_numpy_fails(tmp_path, text):
         pinned_numpy_versions(str(path))
 
 
-# T31 review t2: a run that declares the supported pinned stack (HCD_PINNED_STACK exactly "1") must be on a pinned numpy
-@pytest.mark.parametrize("environ", [{"HCD_PINNED_STACK": "1"}], ids=["declared"])
+# T31 review t2: a run that declares the supported pinned stack (HCD_PINNED_STACK exactly "1") must be on a pinned numpy.
+# CI portability (PI decision 2026-11-05n): the exact digests need HCD_EXACT_REPLAY=1 as well, never on a GitHub runner.
+PINS = {"numpy": ("2.4.6",), "jax": ("0.10.1",), "jaxlib": ("0.10.1",)}
+ON_PINS = {"numpy": "2.4.6", "jax": "0.10.1", "jaxlib": "0.10.1"}
+REPLAY = {"HCD_PINNED_STACK": "1", "HCD_EXACT_REPLAY": "1"}
+
+
+@pytest.mark.parametrize("environ", [REPLAY], ids=["declared"])
 def test_a_declared_pinned_stack_on_a_pinned_numpy_takes_the_exact_branch(environ):
-    assert on_pinned_numpy(version="2.4.6", environ=environ, pins=("2.4.6",)) is True
+    assert exact_replay(environ, versions=ON_PINS, pins=PINS) is True
+    assert exact_replay({"HCD_PINNED_STACK": "1"}, versions=ON_PINS, pins=PINS) is False     # not without the opt-in
 
 
 def test_a_declared_pinned_stack_on_another_numpy_fails():
-    with pytest.raises(ValueError, match="HCD_PINNED_STACK=1 declares the supported pinned stack, but numpy 2.5.4"):
-        on_pinned_numpy(version="2.5.4", environ={"HCD_PINNED_STACK": "1"}, pins=("2.4.6",))
+    for environ in ({"HCD_PINNED_STACK": "1"}, REPLAY):
+        with pytest.raises(ValueError, match="HCD_PINNED_STACK=1 declares the supported pinned stack, but numpy 2.5.4"):
+            exact_replay(environ, versions=dict(ON_PINS, numpy="2.5.4"), pins=PINS)
 
 
 @pytest.mark.parametrize("environ", [{}, {"HCD_PINNED_STACK": ""}, {"HCD_PINNED_STACK": "true"},
@@ -603,22 +573,80 @@ def test_a_declared_pinned_stack_on_another_numpy_fails():
                          ids=["unset", "empty", "true", "space-1", "1-space", "01", "yes", "other-variable"])
 def test_only_exactly_1_declares_the_pinned_stack(environ):
     assert not pinned_stack_declared(environ)
-    assert on_pinned_numpy(version="2.5.4", environ=environ, pins=("2.4.6",)) is False      # as today: tolerance path
-    assert on_pinned_numpy(version="2.4.6", environ=environ, pins=("2.4.6",)) is True       # as today: exact digests
+    assert exact_replay(environ, versions=dict(ON_PINS, numpy="2.5.4"), pins=PINS) is False     # tolerance path
+    assert exact_replay(environ, versions=ON_PINS, pins=PINS) is False      # the numpy version alone: tolerance path
+    with pytest.raises(ValueError, match="needs HCD_PINNED_STACK=1"):
+        exact_replay(dict(environ, HCD_EXACT_REPLAY="1"), versions=ON_PINS, pins=PINS)
     assert pinned_stack_declared({"HCD_PINNED_STACK": "1"})
 
 
 def test_a_declared_pinned_stack_uses_the_constraints_files_pins(tmp_path):
     path = tmp_path / "constraints-devenv.txt"
-    path.write_text("numpy == 2.5.4 ; python_version >= '3.11'\n")
-    pins = pinned_numpy_versions(str(path))
-    assert on_pinned_numpy(version="2.5.4", environ={"HCD_PINNED_STACK": "1"}, pins=pins) is True
+    path.write_text("numpy == 2.5.4 ; python_version >= '3.11'\njax==0.10.1\njaxlib==0.10.1\n")
+    pins = {n: PN.pinned_versions(n, str(path)) for n in PN.EXACT_REPLAY_PACKAGES}
+    assert exact_replay(REPLAY, versions=dict(ON_PINS, numpy="2.5.4"), pins=pins) is True
     with pytest.raises(ValueError, match="not one of the pinned versions"):
-        on_pinned_numpy(version="2.4.6", environ={"HCD_PINNED_STACK": "1"}, pins=pins)
+        exact_replay(REPLAY, versions=ON_PINS, pins=pins)
 
 
 def test_the_recorded_pin_applies_only_when_the_constraints_file_is_absent(tmp_path):
-    assert pinned_numpy_versions(str(tmp_path / "absent.txt")) == PINNED_NUMPY_RECORDED
+    assert pinned_numpy_versions(str(tmp_path / "absent.txt")) == PN.PINNED_RECORDED["numpy"]
+    for n in PN.EXACT_REPLAY_PACKAGES:
+        assert PN.pinned_versions(n, str(tmp_path / "absent.txt")) == PN.PINNED_RECORDED[n]
     path = tmp_path / "constraints-devenv.txt"
     path.write_text("numpy == 9.9.9 ; python_version >= '3.11'\n")
     assert pinned_numpy_versions(str(path)) == ("9.9.9",)
+    with pytest.raises(ValueError, match="pins no jax version"):
+        PN.pinned_versions("jax", str(path))
+
+
+def test_the_recorded_pins_are_the_constraints_files():
+    """The wheel tier (tests/ alone, no constraints file) uses PINNED_RECORDED: it must be the file's pins."""
+    assert os.path.exists(CONSTRAINTS_FILE)
+    for n in PN.EXACT_REPLAY_PACKAGES:
+        assert PN.pinned_versions(n) == PN.PINNED_RECORDED[n], n
+
+
+@pytest.mark.parametrize("gha", ["true"], ids=["github-actions"])
+def test_a_github_runner_never_takes_the_exact_branch(gha):
+    runner = {"GITHUB_ACTIONS": gha, "HCD_PINNED_STACK": "1"}          # the supported job: pinned, declared
+    assert exact_replay(runner, versions=ON_PINS, pins=PINS) is False
+    assert exact_replay({"GITHUB_ACTIONS": gha, "HCD_PINNED_STACK": ""}, versions=ON_PINS, pins=PINS) is False
+    with pytest.raises(ValueError, match="on a GitHub runner"):
+        exact_replay(dict(runner, HCD_EXACT_REPLAY="1"), versions=ON_PINS, pins=PINS)
+    assert exact_replay(dict(REPLAY, GITHUB_ACTIONS=""), versions=ON_PINS, pins=PINS) is True    # not a runner
+
+
+@pytest.mark.parametrize("value", ["", "0", "true", "yes", " 1", "1 ", "01"])
+def test_only_exactly_1_asks_for_the_exact_replay(value):
+    assert exact_replay(dict(REPLAY, HCD_EXACT_REPLAY=value), versions=ON_PINS, pins=PINS) is False
+
+
+@pytest.mark.parametrize("package", ["jax", "jaxlib"])
+def test_the_exact_replay_needs_jax_and_jaxlib_at_their_pins(package):
+    off = dict(ON_PINS, **{package: "0.10.2"})
+    assert exact_replay({"HCD_PINNED_STACK": "1"}, versions=off, pins=PINS) is False      # tolerance path: allowed
+    with pytest.raises(ValueError, match=f"not on the pinned stack: {package} 0.10.2"):
+        exact_replay(REPLAY, versions=off, pins=PINS)
+
+
+def test_the_field_comparison_rules():
+    want = {"f": np.array([1.0, -2.0, 0.0, np.nan]), "i": np.array([1, 2, 3])}
+    tols = {"f": (1e-12, 1e-15), "i": (0, 0)}
+    assert PN.field_mismatches({k: np.array(v, copy=True) for k, v in want.items()}, want, tols) == []
+    assert PN.field_mismatches(dict(want, f=np.array([1.0 + 5e-13, -2.0, 5e-16, np.nan])), want, tols) == []
+    assert PN.field_mismatches(dict(want, f=np.array([1.0 + 2e-12, -2.0, 0.0, np.nan])), want, tols) == ["f"]
+    assert PN.field_mismatches(dict(want, f=np.array([1.0, -2.0, 2e-15, np.nan])), want, tols) == ["f"]   # atol
+    assert PN.field_mismatches(dict(want, f=np.array([1.0, -2.0, 0.0, 0.0])), want, tols) == ["f"]   # a lost NaN
+    assert PN.field_mismatches(dict(want, f=np.array([1.0, -2.0, np.nan, np.nan])), want, tols) == ["f"]
+    assert PN.field_mismatches(dict(want, f=np.array([1.0, -2.0, 0.0, np.inf])), want, tols) == ["f"]
+    assert PN.field_mismatches(dict(want, f=np.array([[1.0, -2.0, 0.0, np.nan]])), want, tols) == ["f"]   # shape
+    assert PN.field_mismatches(dict(want, i=np.array([1, 2, 4])), want, tols) == ["i"]           # integers: exact
+    assert PN.field_mismatches(dict(want, i=np.array([1.0, 2.0, 3.0])), want, tols) == ["i"]     # dtype
+    assert PN.field_mismatches(dict(want, extra=np.zeros(1)), want, tols) == ["keys"]
+    with pytest.raises(ValueError, match="compared exactly"):
+        PN.field_mismatches(want, want, dict(tols, i=(1e-12, 0)))
+    with pytest.raises(ValueError, match="non-negative"):
+        PN.field_mismatches(want, want, dict(tols, f=(-1e-12, 0)))
+    with pytest.raises(ValueError, match="its own tolerance"):
+        PN.field_mismatches(want, want, {"f": tols["f"]})
