@@ -63,3 +63,43 @@ def test_differentiable_in_theta_tau0_alpha():
 
     g = jax.grad(f, argnums=(0, 1, 2))(jnp.full(9, 0.5), 0.3, jnp.array([0.1, 0.05, 0.01]))
     assert all(np.all(np.isfinite(np.asarray(x))) for x in g)
+
+
+# --- B-D9 #18 R1-4: the retired mode-indexed DLA core is refused here, as forward.predict_leg refuses it -----------
+
+@pytest.mark.parametrize("core", ["ones", "one_bin", "nan"])
+def test_a_mode_indexed_dla_core_is_refused(core):
+    """A core added on the mode axis would sit at k_skm(z, theta) and move in physical k with theta; the DLA core is a
+    fixed function of physical k (forward.predict_leg takes it at the data bins and refuses a mode-indexed one)."""
+    model, pf, meta, K = _tiny()
+    c = np.zeros(K)
+    if core == "ones":
+        c[:] = 1.0
+    elif core == "one_bin":
+        c[K // 2] = 1e-9                                       # synthetic: any non-zero entry
+    else:
+        c[0] = np.nan
+    with pytest.raises(ValueError, match="forward.predict_leg"):
+        PR.predict_on_physical_grid(model, meta, np.full(9, 0.5), 2.6, 0.3, np.array([0.1, 0.05, 0.01]), pf, c)
+
+
+@pytest.mark.parametrize("core", [None, "zeros", "scalar_zero"])
+def test_a_zero_or_absent_dla_core_is_accepted_and_adds_nothing(core):
+    model, pf, meta, K = _tiny()
+    th, alpha = np.full(9, 0.5), np.array([0.1, 0.05, 0.01])
+    c = {None: None, "zeros": np.zeros(K), "scalar_zero": 0.0}[core]
+    pred = PR.predict_on_physical_grid(model, meta, th, 2.6, 0.3, alpha, pf, c)
+    ref = PR.predict_P_obs(model, th, (2.6 - 2.0) / 3.4, 0.3, alpha, pf, np.zeros(K))
+    assert np.array_equal(np.asarray(pred.P_obs), np.asarray(ref))
+
+
+def test_a_traced_dla_core_is_refused_not_silently_used():
+    """The refusal needs concrete values; a core passed through a jax transformation cannot be checked and is refused."""
+    import jax.numpy as jnp
+    model, pf, meta, K = _tiny()
+
+    def f(core):
+        return jnp.sum(PR.predict_on_physical_grid(model, meta, jnp.full(9, 0.5), 2.6, 0.3, jnp.zeros(3), pf,
+                                                   core).P_obs)
+    with pytest.raises(ValueError, match="concrete"):
+        jax.grad(f)(jnp.zeros(K))
