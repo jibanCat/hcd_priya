@@ -10,7 +10,8 @@ GitHub-hosted runners come with different CPU models. So:
   explicit relative and absolute tolerance for each field (``field_mismatches``). Each test file states and justifies
   its own per-field tolerances. There is no default tolerance.
 - **``HCD_EXACT_REPLAY=1``** asks, in addition, for the bit-level golden digests: a replay on the same machine with
-  the pinned stack. It requires ``HCD_PINNED_STACK=1`` and numpy, jax and jaxlib at their pinned versions, and it is
+  the pinned stack. The digests are separate tests (``require_exact_replay``), which report a SKIP with the reason
+  when the replay is not requested. It requires ``HCD_PINNED_STACK=1`` and numpy, jax and jaxlib at their pinned versions, and it is
   refused on a GitHub runner (``GITHUB_ACTIONS=true``), which is not a same-machine replay (``exact_replay``).
 - **Discrete invariants** (source and stored-file hashes, lineage, cache identity, split indices, schema, integer
   arrays) are not handled here: they stay exact everywhere.
@@ -164,6 +165,19 @@ def exact_replay(environ=None, versions=None, pins=None):
     if off:
         raise ValueError(f"{EXACT_REPLAY_ENV}=1, but not on the pinned stack: {'; '.join(off)}")
     return True
+
+
+SKIP_REASON = ("exact digests not requested: set HCD_EXACT_REPLAY=1 with HCD_PINNED_STACK=1 for a same-machine "
+               "replay on the pinned stack (never on a GitHub runner); the per-field tolerance tests ran instead")
+
+
+def require_exact_replay(environ=None, versions=None, pins=None):
+    """For a bit-level digest test: return when ``exact_replay`` is True, else ``pytest.skip(SKIP_REASON)``, so the
+    report always says the digests were not checked. Its refusals (ValueError) propagate: a contradictory request
+    fails, it is never skipped."""
+    import pytest
+    if not exact_replay(environ, versions, pins):
+        pytest.skip(SKIP_REASON)
 
 
 def field_mismatches(got, want, tols):

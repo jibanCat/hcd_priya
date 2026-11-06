@@ -349,11 +349,16 @@ def test_honest_production_members_pass_every_component(world):
     assert nm["n_tensors"] == nm["n_bitwise"] == len(S.norm_tensors(world["norm"]))
     ref = PN.load_reference(NORM_REF)                                                                  # T31
     assert PN.field_mismatches(S.norm_tensors(world["norm"]), ref, norm_tols(ref)) == []
-    if PN.exact_replay():                      # HCD_EXACT_REPLAY=1: a same-machine replay on the pinned stack
-        assert nm["detail"]["recomputed_tensors_sha256"] == GOLDEN_NORM_FINGERPRINT
     env = c["environment"]
     assert {"python", "numpy", "jax", "scipy", "hcd_priya"} <= set(env) and env["hcd_priya"]["commit"] == "c" * 40
     json.dumps(dict(c), allow_nan=False)                                       # recorded as is: finite JSON
+
+
+def test_the_normaliser_fingerprint_is_bitwise_in_an_exact_replay(world):
+    """Byte identity of the recomputed normaliser: only in an exact replay; otherwise a SKIP that says so."""
+    PN.require_exact_replay()
+    nm = next(x for x in _prod(world)["components"] if x["component"] == "normaliser")
+    assert nm["detail"]["recomputed_tensors_sha256"] == GOLDEN_NORM_FINGERPRINT
 
 
 def test_the_stored_normaliser_is_the_golden_fingerprint():

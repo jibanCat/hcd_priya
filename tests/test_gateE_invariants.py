@@ -107,10 +107,13 @@ def test_production_leg_loaders_unchanged(leg):
 
 
 def test_metal_and_resolution_factors_unchanged():
-    got = factor_arrays()
-    if PN.exact_replay():                      # HCD_EXACT_REPLAY=1: a same-machine replay on the pinned stack
-        assert factors_digest(got) == PINNED["factors"]
-    assert PN.field_mismatches(got, PN.load_reference(FACTORS_REF), FACTOR_TOLS) == []
+    assert PN.field_mismatches(factor_arrays(), PN.load_reference(FACTORS_REF), FACTOR_TOLS) == []
+
+
+def test_metal_and_resolution_factors_bitwise_in_an_exact_replay():
+    """Byte identity of the computed factors: only in an exact replay; otherwise a SKIP that says so."""
+    PN.require_exact_replay()
+    assert factors_digest(factor_arrays()) == PINNED["factors"]
 
 
 def test_the_stored_factors_are_the_pinned_digest():

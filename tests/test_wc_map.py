@@ -399,9 +399,10 @@ def test_golden_digests_of_the_map_rules(cache5):                               
 
     Always: the payload is compared field by field with the stored golden payloads (``payload_mismatches``): every
     count, degree, clamp and fit range, the redshift range, the format and the class order exactly; the computed
-    floats to their own tolerance (``WC_MAP_TOLS``). Only in an exact replay (``exact_replay()``: HCD_EXACT_REPLAY=1
-    with HCD_PINNED_STACK=1 and numpy, jax and jaxlib at their pins, never on a GitHub runner) also the payload sha256
-    against the golden digests, bit level. The numpy version alone no longer selects the digests: the GitHub job
+    floats to their own tolerance (``WC_MAP_TOLS``). The payload sha256 against the golden digests, bit level, is
+    test_golden_digests_of_the_map_rules_in_an_exact_replay: it runs only in an exact replay (``exact_replay()``:
+    HCD_EXACT_REPLAY=1 with HCD_PINNED_STACK=1 and numpy, jax and jaxlib at their pins, never on a GitHub runner) and
+    otherwise reports a SKIP with the reason. The numpy version alone no longer selects the digests: the GitHub job
     "Python 3.11, newest dependencies" ran the pinned numpy on another CPU and failed them (run 42143147836). Its
     digest is reproduced here by OpenBLAS's Haswell or Zen kernels (OPENBLAS_CORETYPE), the ones a CPU without
     AVX-512 gets.
@@ -433,9 +434,14 @@ def test_golden_digests_of_the_map_rules(cache5):                               
     full, sub = W.refit(d), W.refit_subset(d, ["sim0", "sim1", "sim3", "sim4"])
     assert payload_mismatches(full, GOLDEN_PAYLOAD_REFIT) == []
     assert payload_mismatches(sub, GOLDEN_PAYLOAD_SUBSET) == []
-    if exact_replay():                           # HCD_EXACT_REPLAY=1: a same-machine replay on the pinned stack
-        assert W.payload_sha256(full) == GOLDEN_WCMAP_REFIT
-        assert W.payload_sha256(sub) == GOLDEN_WCMAP_SUBSET
+
+
+def test_golden_digests_of_the_map_rules_in_an_exact_replay(cache5):              # T31, bit level
+    """Byte identity of the refitted payloads: only in an exact replay; otherwise a SKIP that says so."""
+    PN.require_exact_replay()
+    d = _load(cache5)
+    assert W.payload_sha256(W.refit(d)) == GOLDEN_WCMAP_REFIT
+    assert W.payload_sha256(W.refit_subset(d, ["sim0", "sim1", "sim3", "sim4"])) == GOLDEN_WCMAP_SUBSET
 
 
 def test_the_stored_golden_payloads_are_the_golden_digests():
@@ -634,6 +640,16 @@ def test_the_exact_replay_needs_jax_and_jaxlib_at_their_pins(package):
     assert exact_replay({"HCD_PINNED_STACK": "1"}, versions=off, pins=PINS) is False      # tolerance path: allowed
     with pytest.raises(ValueError, match=f"not on the pinned stack: {package} 0.10.2"):
         exact_replay(REPLAY, versions=off, pins=PINS)
+
+
+@pytest.mark.parametrize("environ", [{}, {"HCD_PINNED_STACK": "1"}, {"GITHUB_ACTIONS": "true", "HCD_PINNED_STACK": "1"}],
+                         ids=["unset", "pinned-without-opt-in", "github-runner"])
+def test_without_the_opt_in_the_digest_tests_skip_with_a_reason(environ):
+    with pytest.raises(pytest.skip.Exception, match="exact digests not requested: set HCD_EXACT_REPLAY=1"):
+        PN.require_exact_replay(environ, versions=ON_PINS, pins=PINS)
+    assert PN.require_exact_replay(REPLAY, versions=ON_PINS, pins=PINS) is None           # requested: runs
+    with pytest.raises(ValueError, match="on a GitHub runner"):                            # refused, not skipped
+        PN.require_exact_replay(dict(REPLAY, GITHUB_ACTIONS="true"), versions=ON_PINS, pins=PINS)
 
 
 def test_the_field_comparison_rules():
