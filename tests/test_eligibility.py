@@ -293,7 +293,7 @@ NORM_REF = Path(__file__).parent / "golden" / "ci_portability" / "norm_cache5_pr
 # Measured cross-CPU discrepancy (numpy with and without AVX-512, OpenBLAS and XLA variants, both stacks): zero for
 # every field but delta (at most 9.8e-19 absolute, 5.9e-15 relative, on delta/mean). An 8-ulp perturbation of every
 # libm, BLAS and XLA output, which bounds an implementation not reachable on our machine (another glibc): at most
-# 3.6e-14 absolute (f_nhi/mean, at a value near 47), 9.3e-14 relative (a cell mean near zero). Each tolerance is at
+# 4.3e-14 absolute (f_nhi/mean, at a value near 47), 5.9e-13 relative (a cell mean near zero, 6.7e-16 absolute). Each tolerance is at
 # least 15 times that bound and 100 times the measured discrepancy, and at least 1e9 times below the scientific scale.
 LOG_MEAN_TOL = (1e-12, 0.0)          # f_nhi, dN/dX means (log units; values of order 1 to 50, never near zero)
 LOG_STD_TOL = (1e-12, 1e-13)         # f_nhi, dN/dX stds (log units; f_nhi's sits on a log offset near 47)

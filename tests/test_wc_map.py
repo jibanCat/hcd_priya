@@ -413,18 +413,18 @@ def test_golden_digests_of_the_map_rules(cache5):                               
     XLA instruction-set variants, both stacks (A6 CI portability report); Session B r18, numpy 2.5.4 against the pinned
     2.4.6; and an 8-ulp perturbation of every libm, XLA and least-squares input (backward stability: any LAPACK).
 
-    - ``delta_c.coeffs`` and ``xbar.coeffs``: 1e-9. Measured at most 2.5e-14 (CPU) and 5.0e-13 (numpy 2.5.4,
+    - ``delta_c.coeffs`` and ``xbar.coeffs``: 1e-9. Measured at most 6.4e-14 (CPU) and 5.2e-13 (numpy 2.5.4,
       ``xbar.coeffs`` of the subset fit, 3598 ulps: the degree-2 fit's conditioning amplifies the last-bit rounding of
-      another linear-algebra path), 3.0e-13 under the 8-ulp bound; 1e-9 is 2000 times the largest and above the
+      another linear-algebra path), 5.4e-13 under the 8-ulp bound; 1e-9 is 2000 times the largest and above the
       normwise worst case of these fits' conditioning (cond(V)^2 eps, about 3e-10). A coefficient change of 1e-9
       moves delta_c(z) by at most 3e-7 over the clamp range (sum of |c_i| z^i), about 1e-7 of that class's
       resid_std, and Xbar(z) by at most 5e-8 (values of order 1).
     - ``delta_c.resid_std``: 1e-12. Measured 1 ulp (2.2e-16) on every path, 3.3e-15 under the 8-ulp bound: the
       residual norm is stationary in the coefficients at the least-squares optimum. 300 times the bound.
-    - ``delta_c.resid_max``: 1e-10. Measured at most 4.6e-15 (CPU) and 3.0e-15 (numpy 2.5.4), 7.9e-15 under the
+    - ``delta_c.resid_max``: 1e-10. Measured at most 4.6e-15 (CPU) and 3.0e-15 (numpy 2.5.4), 8.2e-15 under the
       8-ulp bound; a diagnostic (not used by the forward), so the tolerance is loose: 1e4 times the bound.
-    - ``delta_c.mean``: 1e-12. Bitwise on every measured path; 2.3e-15 under the 8-ulp bound (it goes through XLA's
-      exp in w_M0); 400 times the bound. The means are of order 0.2 to 3 here, never near zero, so atol is 0.
+    - ``delta_c.mean``: 1e-12. Bitwise on every measured path; 3.8e-15 under the 8-ulp bound (it goes through XLA's
+      exp in w_M0); 260 times the bound. The means are of order 0.2 to 3 here, never near zero, so atol is 0.
 
     A change of the rules (another simulation set, estimator, degree or clamp) moves the fitted outputs by orders of
     magnitude more and fails (test_the_t31_comparison_refuses_a_change_above_the_tolerance,
@@ -508,6 +508,12 @@ def test_the_t31_comparison_refuses_a_meaningful_change():
     bad = copy.deepcopy(want)                       # resid_std and resid_max exchanged
     bad["delta_c"]["resid_std"], bad["delta_c"]["resid_max"] = want["delta_c"]["resid_max"], want["delta_c"]["resid_std"]
     assert payload_mismatches(bad, want) == ["delta_c.resid_max", "delta_c.resid_std"]
+    for sec, k in TOLERANT_FIELDS:                  # 1e-8 relative on one element of each fails, whatever the field
+        bad = copy.deepcopy(want)
+        a = np.asarray(bad[sec][k], dtype=np.float64)
+        a.flat[-1] *= 1 + 1e-8
+        bad[sec][k] = a.tolist()
+        assert payload_mismatches(bad, want) == [f"{sec}.{k}"]
     bad = copy.deepcopy(want)                       # a truncated mean
     bad["delta_c"]["mean"] = want["delta_c"]["mean"][:3]
     assert payload_mismatches(bad, want) == ["delta_c.mean"]
@@ -644,6 +650,13 @@ def test_the_field_comparison_rules():
     assert PN.field_mismatches(dict(want, i=np.array([1, 2, 4])), want, tols) == ["i"]           # integers: exact
     assert PN.field_mismatches(dict(want, i=np.array([1.0, 2.0, 3.0])), want, tols) == ["i"]     # dtype
     assert PN.field_mismatches(dict(want, extra=np.zeros(1)), want, tols) == ["keys"]
+    exact = {"z": np.zeros(2), "b": np.array([1.0, 2.0]), "s": np.float64(1.0)}
+    etols = {"z": (1e-12, 0.0), "b": (1e-12, 2.0 ** -40), "s": (1e-12, 0.0)}
+    assert PN.field_mismatches(dict(exact), exact, etols) == []                   # equal zeros pass, atol 0
+    assert PN.field_mismatches(dict(exact, b=np.array([1.0, 2.0 + 2.0 ** -40])), exact, etols) == []
+    assert PN.field_mismatches(dict(exact, b=np.array([[1.0, 2.0]])), exact, etols) == ["b"]      # broadcasts, but
+    assert PN.field_mismatches(dict(exact, s=np.array([1.0])), exact, etols) == ["s"]             # not the shape
+    assert PN.field_mismatches(dict(exact, b=np.array([1.0, 2.0], dtype=np.float32)), exact, etols) == ["b"]
     with pytest.raises(ValueError, match="compared exactly"):
         PN.field_mismatches(want, want, dict(tols, i=(1e-12, 0)))
     with pytest.raises(ValueError, match="non-negative"):

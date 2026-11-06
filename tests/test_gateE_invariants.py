@@ -138,9 +138,9 @@ def test_the_factor_comparison_passes_rounding_and_refuses_a_meaningful_change()
     got = dict(ref, **{FACTOR_FIELDS[3]: np.asarray(DL._resolution_factor(np.geomspace(5e-4, 0.1, 257), 10.0,
                                                                             b_res=-0.1))})      # b_res sign
     assert PN.field_mismatches(got, ref, FACTOR_TOLS) == [FACTOR_FIELDS[3]]
-    for name in FACTOR_FIELDS:                     # 1000 times the tolerance on one element of each field fails
+    for name in FACTOR_FIELDS:      # 1e-9 relative on one element of each field (1e-6 of the scientific scale) fails
         bad = {k: np.array(v, copy=True) for k, v in ref.items()}
-        bad[name][128] *= 1 + 1000 * FACTOR_TOLS[name][0]
+        bad[name][128] *= 1 + 1e-9
         assert PN.field_mismatches(bad, ref, FACTOR_TOLS) == [name]
     swapped = dict(ref, **{FACTOR_FIELDS[0]: ref[FACTOR_FIELDS[3]], FACTOR_FIELDS[3]: ref[FACTOR_FIELDS[0]]})
     assert PN.field_mismatches(swapped, ref, FACTOR_TOLS) == sorted([FACTOR_FIELDS[0], FACTOR_FIELDS[3]])
