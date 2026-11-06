@@ -9,7 +9,11 @@ L1b  harness self-consistency: record JSON round trip, k round trip, the referen
 L1c  data lineage: hcd_priya cache P_tier_p against the reference's LF flux vectors, every matched row.
 L2-LF  hcd_priya LF ensemble (C1) against the reference AR1 LF output (R1, res 0) on families D and I.
 Every result (records, residuals, summaries) is written under --out only; the terminal gets verdicts. The reference
-runs in its own interpreter through hcd_analysis/comparison/adapters/lyaemu_priya.py, which refuses to refit it."""
+runs in its own interpreter through hcd_analysis/comparison/adapters/lyaemu_priya.py, which refuses to refit it.
+
+Exit status: 0 only for a PASS with the reference master tree unchanged (or not hashed). FAIL, NOT RUN, BLOCKED and NOT
+COMPARABLE each exit with their own non-zero code (EXIT_CODES); a reference master tree that changed during the run turns
+the verdict into FAIL and exits with EXIT_MASTER_CHANGED. result.json is written in every case."""
 import argparse
 import json
 import os
@@ -28,6 +32,9 @@ from hcd_analysis.comparison import schema as S  # noqa: E402
 from hcd_analysis.comparison.adapters import lace  # noqa: E402
 
 KS_LF = "mf_emulator_flux_vectors_tau1000000.hdf5"
+EXIT_CODES = {"PASS": 0, "FAIL": 1, "NOT RUN": 3, "BLOCKED": 4, "NOT COMPARABLE": 5}   # 2 is argparse's usage error
+EXIT_MASTER_CHANGED = 6
+EXIT_UNKNOWN_VERDICT = 7
 _KS_DESIGN = None                     # the reference's LF design parameters (context strata only)
 
 
@@ -162,9 +169,11 @@ def level_L1c(a, cfg, ks, res_out):
     bad = [q for q in pairs if q[2] > th["L1c_lineage"] or q[3] > th["L1c_kfkms"]]
     bad_sz = sorted({(q[4], q[1]) for q in bad})
     rest = [q for q in pairs if (q[4], q[1]) not in set(bad_sz)]
+    lineage = "FAIL" if unmatched else M.verdict(both, th["L1c_lineage"])
+    kfkms = "NOT RUN" if not pairs else ("PASS" if kf_max <= th["L1c_kfkms"] else "FAIL")
     res_out.update(
-        verdict="PASS" if (not unmatched and M.verdict(both, th["L1c_lineage"]) == "PASS") else "FAIL",
-        kfkms_verdict="PASS" if kf_max <= th["L1c_kfkms"] else "FAIL", kfkms_max_rel=kf_max,
+        verdict=S.level_verdict([lineage, kfkms]),      # PASS only when the power AND the k labels agree
+        lineage_verdict=lineage, kfkms_verdict=kfkms, kfkms_max_rel=kf_max,
         n_rows_matched=int(r_all.shape[0] + r_added.shape[0]), n_unmatched=len(unmatched), unmatched=unmatched[:50],
         summary_all=M.summarize(both, th["L1c_lineage"]),
         summary_unrepaired=M.summarize(r_all, th["L1c_lineage"]),
@@ -320,15 +329,33 @@ def main():
     {"L1b": lambda: level_L1b(a, cfg, cases, res), "L1c": lambda: level_L1c(a, cfg, ks, res),
      "L2-LF": lambda: level_L2LF(a, cfg, cases, res)}[a.level]()
     res["ks_master_unchanged"] = (tree_hash(a.ks_master) == master_before) if a.ks_master else None
+    res.setdefault("verdict", "NOT RUN")                       # a level that set no verdict ran nothing checkable
+    if res["ks_master_unchanged"] is False:                    # the reference changed under the run: never a pass
+        res["level_verdict"] = res["verdict"]
+        res["verdict"] = "FAIL"
+        res["master_changed_reason"] = "the reference master tree hash changed during the run"
     with open(os.path.join(a.out, "result.json"), "x") as f:
         json.dump(res, f, indent=1, sort_keys=True, default=float)
     print(f"{a.level}: {res['verdict']}" + (f" (reference master unchanged: {res['ks_master_unchanged']})"
                                            if a.ks_master else ""))
+    if "level_verdict" in res:
+        print(f"  level_verdict={res['level_verdict']} (overridden: {res['master_changed_reason']})")
+    sub = {k: res[k] for k in ("lineage_verdict", "kfkms_verdict", "kfkms_max_rel") if k in res}
+    if sub:
+        print("  " + ", ".join(f"{x}={y}" for x, y in sub.items()))
     for k in ("passes", "other", "case_outcomes"):
         if k in res:
             vals = res[k]
             print(f"  {k}: " + (", ".join(f"{x}={y}" for x, y in vals.items()) if k != "case_outcomes" else
                                 ", ".join(f"{v}:{list(vals.values()).count(v)}" for v in sorted(set(vals.values())))))
+    sys.exit(exit_status(res))
+
+
+def exit_status(res):
+    """0 only for PASS with the master unchanged or not hashed; a distinct non-zero code otherwise."""
+    if res.get("ks_master_unchanged") is False:
+        return EXIT_MASTER_CHANGED
+    return EXIT_CODES.get(res.get("verdict"), EXIT_UNKNOWN_VERDICT)
 
 
 if __name__ == "__main__":
