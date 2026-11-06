@@ -527,7 +527,8 @@ def test_the_t31_comparison_refuses_a_meaningful_change():
     bad["delta_c"]["coeffs"][1] = [-c for c in want["delta_c"]["coeffs"][1]]
     assert payload_mismatches(bad, want) == ["delta_c.coeffs"]
     bad = copy.deepcopy(want)                       # two classes exchanged (the class order of the rows)
-    bad["delta_c"]["coeffs"][2], bad["delta_c"]["coeffs"][3] = want["delta_c"]["coeffs"][3], want["delta_c"]["coeffs"][2]
+    rows = want["delta_c"]["coeffs"]
+    bad["delta_c"]["coeffs"][2], bad["delta_c"]["coeffs"][3] = rows[3], rows[2]
     assert payload_mismatches(bad, want) == ["delta_c.coeffs"]
     bad = copy.deepcopy(want)                       # the polynomial order reversed
     bad["xbar"]["coeffs"] = want["xbar"]["coeffs"][::-1]
@@ -536,7 +537,8 @@ def test_the_t31_comparison_refuses_a_meaningful_change():
     bad["delta_c"]["coeffs"][0][2] += 1e-6 * min(want["delta_c"]["resid_std"])
     assert payload_mismatches(bad, want) == ["delta_c.coeffs"]
     bad = copy.deepcopy(want)                       # resid_std and resid_max exchanged
-    bad["delta_c"]["resid_std"], bad["delta_c"]["resid_max"] = want["delta_c"]["resid_max"], want["delta_c"]["resid_std"]
+    dc = want["delta_c"]
+    bad["delta_c"]["resid_std"], bad["delta_c"]["resid_max"] = dc["resid_max"], dc["resid_std"]
     assert payload_mismatches(bad, want) == ["delta_c.resid_max", "delta_c.resid_std"]
     for sec, k in TOLERANT_FIELDS:                  # 1e-8 relative on one element of each fails, whatever the field
         bad = copy.deepcopy(want)
@@ -584,7 +586,8 @@ def test_a_constraints_file_that_pins_no_numpy_fails(tmp_path, text):
         pinned_numpy_versions(str(path))
 
 
-# T31 review t2: a run that declares the supported pinned stack (HCD_PINNED_STACK exactly "1") must be on a pinned numpy.
+# T31 review t2: a run that declares the supported pinned stack (HCD_PINNED_STACK exactly "1") must be on a pinned
+# numpy.
 # CI portability (GitHub Actions run 42143147836 failed the digests on a runner's CPU): the exact digests need
 # HCD_EXACT_REPLAY=1 as well, never on a GitHub runner.
 PINS = {"numpy": ("2.4.6",), "jax": ("0.10.1",), "jaxlib": ("0.10.1",)}
@@ -667,7 +670,8 @@ def test_the_exact_replay_needs_jax_and_jaxlib_at_their_pins(package):
         exact_replay(REPLAY, versions=off, pins=PINS)
 
 
-@pytest.mark.parametrize("environ", [{}, {"HCD_PINNED_STACK": "1"}, {"GITHUB_ACTIONS": "true", "HCD_PINNED_STACK": "1"}],
+@pytest.mark.parametrize("environ", [{}, {"HCD_PINNED_STACK": "1"},
+                                     {"GITHUB_ACTIONS": "true", "HCD_PINNED_STACK": "1"}],
                          ids=["unset", "pinned-without-opt-in", "github-runner"])
 def test_without_the_opt_in_the_digest_tests_skip_with_a_reason(environ):
     with pytest.raises(pytest.skip.Exception, match="exact digests not requested: set HCD_EXACT_REPLAY=1"):

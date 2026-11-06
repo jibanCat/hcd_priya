@@ -11,8 +11,9 @@ GitHub-hosted runners come with different CPU models. So:
   its own per-field tolerances. There is no default tolerance.
 - **``HCD_EXACT_REPLAY=1``** asks, in addition, for the bit-level golden digests: a replay on the same machine with
   the pinned stack. The digests are separate tests (``require_exact_replay``), which report a SKIP with the reason
-  when the replay is not requested. It requires ``HCD_PINNED_STACK=1`` and numpy, jax and jaxlib at their pinned versions, and it is
-  refused on a GitHub runner (``GITHUB_ACTIONS=true``), which is not a same-machine replay (``exact_replay``).
+  when the replay is not requested. It requires ``HCD_PINNED_STACK=1`` and numpy, jax and jaxlib at their pinned
+  versions, and it is refused on a GitHub runner (``GITHUB_ACTIONS=true``), which is not a same-machine replay
+  (``exact_replay``).
 - **Discrete invariants** (source and stored-file hashes, lineage, cache identity, split indices, schema, integer
   arrays) are not handled here: they stay exact everywhere.
 

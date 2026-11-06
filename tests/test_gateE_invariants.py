@@ -86,7 +86,7 @@ FACTORS_REF = Path(__file__).parent / "golden" / "ci_portability" / "gateE_facto
 # and XLA instruction-set variants, both stacks): at most 3 ulps (3.4e-16 relative, metal) and 1 ulp (1.8e-16,
 # resolution); an 8-ulp perturbation of every libm, XLA and k-grid output, which bounds an implementation not
 # reachable on our machine, moves them by less than 1e-14. Each tolerance is 1e-12 relative: about 3000 times the
-# measured discrepancy and 100 times the 8-ulp bound, and 1e-9 of the scientific scale. The factors are of order 1
+# measured discrepancy and about 240 times the 8-ulp bound, and 1e-9 of the scientific scale. The factors are of order 1
 # (0.97 to 1.3) and never near zero, so atol is 0.
 METAL_TOL = (1e-12, 0.0)      # P -> P (1 + f_metal): oscillatory cos(k dv) terms of amplitude 2a
 RES_TOL = (1e-12, 0.0)        # P -> P exp(2 b_res k^2 R^2)
