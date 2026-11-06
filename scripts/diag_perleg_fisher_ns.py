@@ -50,6 +50,7 @@ members = production_member_paths(checkpoints_dir=f"{REPO}/checkpoints")
 print(f"ensemble members ({len(members)}):", [os.path.basename(m) for m in members])
 
 ctx, d = build_legb_ctx(
+    historical_reason="historical analysis on the deployed cache (closure_legb.CACHE_PATH)",
     ensemble_ckpts=members, use_xclass=True, with_mf=True, mf_with_floor=True,
     mf_emucoh=True, mf_emucoh_offdiag_only=True, with_eboss=True, metals_on=True,
     sample_metals=True, hierarchical_hcd=False)

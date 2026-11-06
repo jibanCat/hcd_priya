@@ -244,8 +244,8 @@ def test_make_truth_stores_masked_baseline_and_full_dla_excess():
     full DLA excess add-back, per row) — the §0c construction the per-leg mock applies truth_frac
     to. Verified against the cache P_filt directly (the truth uses cache P_filt, not the emulator)."""
     from hcd_analysis.emulator import closure_legb as CL
-    from hcd_analysis.emulator.data import load_cache
-    d = load_cache(CL.CACHE_PATH)
+    from hcd_analysis.emulator.data import load_cache_historical
+    d = load_cache_historical(CL.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format')
     sims, _ = CL.held_out_sims(d, fold=0)
     truth = CL.make_truth_from_sim(d, sims[0], fold=0)            # LF (mf=None)
     assert "dla_excess_true" in truth, "make_truth_from_sim must store the full DLA excess add-back"
@@ -275,8 +275,8 @@ def test_make_legb_mock_applies_per_leg_truth_frac():
     minus its known ε is impractical, so we re-derive the per-leg truth_frac from the noiseless
     truth-on-leg the mock exposes via info)."""
     from hcd_analysis.emulator import closure_legb as CL
-    from hcd_analysis.emulator.data import load_cache
-    d = load_cache(CL.CACHE_PATH)
+    from hcd_analysis.emulator.data import load_cache_historical
+    d = load_cache_historical(CL.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format')
     ctx, _ = CL.build_legb_ctx()
     sims, _ = CL.held_out_sims(d, fold=0)
     truth = CL.make_truth_from_sim(d, sims[0], fold=0)
@@ -299,8 +299,8 @@ def test_truth_pack_alpha_dla_is_ten_percent_residual():
     """The closure truth_pack α_DLA = 0.10·w_DLA (the DESI residual the forward marginalizes),
     while α_LLS/α_subDLA stay at the sim's structural w_c."""
     from hcd_analysis.emulator import closure_legb as CL
-    from hcd_analysis.emulator.data import load_cache
-    d = load_cache(CL.CACHE_PATH)
+    from hcd_analysis.emulator.data import load_cache_historical
+    d = load_cache_historical(CL.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format')
     ctx, _ = CL.build_legb_ctx()
     sims, _ = CL.held_out_sims(d, fold=0)
     truth = CL.make_truth_from_sim(d, sims[0], fold=0)
@@ -320,8 +320,8 @@ def test_real_ctx_truth_forward_consistency_desi_ten_percent():
     (frac 1.0), the forward reproduces the DESI 10% target built from the SAME emulator P_filt
     (isolates the DLA handling; the emulator residual cancels)."""
     from hcd_analysis.emulator import closure_legb as CL
-    from hcd_analysis.emulator.data import load_cache
-    d = load_cache(CL.CACHE_PATH)
+    from hcd_analysis.emulator.data import load_cache_historical
+    d = load_cache_historical(CL.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format')
     ctx, _ = CL.build_legb_ctx()
     sims, _ = CL.held_out_sims(d, fold=0)
     truth = CL.make_truth_from_sim(d, sims[0], fold=0)

@@ -48,7 +48,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from hcd_analysis.emulator.data import (load_cache, make_splits, cell_id, safe_log,
+from hcd_analysis.emulator.data import (load_cache_historical, make_splits, cell_id, safe_log,
                                         fit_baseline_residual_norm)
 from hcd_analysis.emulator.model import Encoder, HeadB, svd_basis_init
 
@@ -207,7 +207,7 @@ def _train_resid(d, tr, Ttr, mtr, nb, n_k, epochs, lr, bs=512, seed=0, wd=1e-5):
 # ===========================================================================
 def train_fold0(fid):
     path, n_folds, n_k = CACHES[fid]
-    d = load_cache(path)
+    d = load_cache_historical(path, reason='diagnostic of the historical cache (scripts/diag_tilt_bias_lf_hr.py)')
     tr, va, ho = make_splits(d, 0, n_folds)
     pf = fit_baseline_residual_norm(d, tr)
     mu, sm, sc, cm = pf["mu_marg"], pf["sig_marg"], pf["sig_cosmo"], pf["cell_mean"]

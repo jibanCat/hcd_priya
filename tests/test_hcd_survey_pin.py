@@ -23,7 +23,7 @@ import jax.numpy as jnp
 
 from hcd_analysis.emulator import inference as INF
 from hcd_analysis.emulator import closure_legb as C
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 
 _CACHE = "hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 W = jnp.array([0.27, 0.09, 0.04])   # toy w_c (LLS, subDLA, DLA)
@@ -88,7 +88,7 @@ def test_lls_width_hedge_2x_toggle():
 @pytest.mark.deferred_legacy("RETIRED_BUILDER")
 @pytest.mark.skipif(not os.path.exists(_CACHE), reason="LF cache not present")
 def test_lls_truth_boost_propagates_to_mock_and_truth():
-    d = load_cache(_CACHE)
+    d = load_cache_historical(_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
     sims, _ = C.held_out_sims(d, fold=0)
     s = str(np.asarray(sims)[0])
     t1 = C.make_truth_from_sim(d, s, fold=0, lls_truth_boost=1.0)

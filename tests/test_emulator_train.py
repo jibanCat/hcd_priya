@@ -17,7 +17,7 @@ import equinox as eqx
 
 from tests.emulator._fixture import write_synthetic_cache
 from hcd_analysis.emulator.data import (
-    load_cache, fit_target_norm, make_batch, kfold_loso,
+    load_cache_historical, fit_target_norm, make_batch, kfold_loso,
 )
 from hcd_analysis.emulator.model import Emulator, joint_loss
 from hcd_analysis.emulator.model import p_resid_loss
@@ -77,7 +77,7 @@ def test_grad_norm_finite():
 def _small_cache(tmp_path):
     path = tmp_path / "obs.h5"
     write_synthetic_cache(path, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=N_K)
-    return load_cache(path)
+    return load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
 
 
 def _check_history(hist):

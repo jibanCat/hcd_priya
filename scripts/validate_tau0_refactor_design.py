@@ -8,7 +8,7 @@ import warnings; warnings.simplefilter("ignore")
 import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 import hcd_analysis.emulator  # noqa: enable x64
 import jax.numpy as jnp
-from hcd_analysis.emulator.data import load_cache, KIM_AMP, KIM_SLOPE
+from hcd_analysis.emulator.data import load_cache_historical, KIM_AMP, KIM_SLOPE
 from hcd_analysis.emulator import closure_legb as CL
 from hcd_analysis.emulator.meanflux_prior import (
     becker13_tau0, kim_tau0, tau0_alpha_priya, meanflux_tau0_prior,
@@ -16,7 +16,7 @@ from hcd_analysis.emulator.meanflux_prior import (
 
 rng = np.random.default_rng(0)
 CACHE = "hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-d = load_cache(CACHE)
+d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/validate_tau0_refactor_design.py)')
 z = np.unique(np.round(d["z_grid"], 4))
 z = z[(z >= 2.2 - 1e-6) & (z <= 4.6 + 1e-6)]
 kim = np.asarray(kim_tau0(jnp.asarray(z)))

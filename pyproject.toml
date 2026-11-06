@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hcd_analysis"
-version = "0.1.0"
+version = "0.2.0"
 description = "HCD (High-Column-Density) absorber analysis pipeline for fake_spectra emulator outputs"
 requires-python = ">=3.9"
 dependencies = [

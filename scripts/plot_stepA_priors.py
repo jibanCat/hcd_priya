@@ -26,7 +26,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from hcd_analysis.emulator.data import PARAM_LIMITS, KIM_AMP, KIM_SLOPE, load_cache
+from hcd_analysis.emulator.data import PARAM_LIMITS, KIM_AMP, KIM_SLOPE, load_cache_historical
 from hcd_analysis.emulator.meanflux_prior import (
     meanflux_tau0_prior, becker13_tau0, DEFAULT_FRAC_SIGMA,
     BECKER13_TAU0, BECKER13_BETA, BECKER13_C, BECKER13_ZREF)
@@ -54,7 +54,7 @@ ZSLOPE_EDGE_INFLATE = 1.25
 
 def main():
     print("[stepA-priors] loading cache for the structural HCD weights w_c ...")
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/plot_stepA_priors.py)')
     w_c_med = np.median(d["w_c_cache"][:, 1:], axis=0)   # (3,) [LLS,subDLA,DLA]
 
     # ---- θ9 box ----

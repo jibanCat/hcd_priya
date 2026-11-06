@@ -74,8 +74,14 @@ def _build_fake_tree(root: Path, sim: str, lf_snaps: dict, hr_snaps: dict) -> No
         root/<sim>/snap_NNN/...            (LF)
         root/hires/<sim>/snap_NNN/...      (HR)
 
-    `lf_snaps` / `hr_snaps` map snap_name -> (z, p1d_value).
+    `lf_snaps` / `hr_snaps` map snap_name -> (z, p1d_value). Both roots get a run-settings record first (the
+    convergence step refuses roots without one).
     """
+    from hcd_analysis.pipeline import HIRES_SUBDIR, product_settings
+    from hcd_analysis.run_settings import record_or_verify
+    settings = product_settings(PipelineConfig(output_root=str(root)))
+    record_or_verify(root / HIRES_SUBDIR, settings)
+    record_or_verify(root, settings, ignore=(HIRES_SUBDIR,))
     for snap_name, (z, pval) in lf_snaps.items():
         _write_snap(root / sim / snap_name, z=z, p1d_value=pval)
     for snap_name, (z, pval) in hr_snaps.items():

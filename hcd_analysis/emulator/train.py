@@ -666,26 +666,55 @@ def _sha256_or_none(path):
     return h.hexdigest()
 
 
-def _velocity_key_paths(obj, prefix=""):
-    """Paths of every dict key named ``kfkms`` (a per-row velocity grid) at any depth of ``obj``."""
-    hits = []
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            p = f"{prefix}.{k}" if prefix else str(k)
-            if str(k) == "kfkms":
-                hits.append(p)
-            hits += _velocity_key_paths(v, p)
-    elif isinstance(obj, (list, tuple)):
-        for i, v in enumerate(obj):
-            hits += _velocity_key_paths(v, f"{prefix}[{i}]")
-    return hits
+# the schema-2.0 meta rules live in schema.py (so the release readers never import the trainer); the names stay here
+from hcd_analysis.emulator.schema import SCHEMA2_REQUIRED as _SCHEMA2_REQUIRED  # noqa: E402
+from hcd_analysis.emulator.schema import velocity_key_paths as _velocity_key_paths  # noqa: E402
 
 
-_SCHEMA2_REQUIRED = ("k_com_hmpc", "L_box_hmpc", "k_convention", "cache_sha256", "param_limits")
+def release_cache_identity(cache):
+    """``(cache_sha256, cache_lineage_sha256)`` of a cache dict loaded by the strict ``data.load_cache``: the file's
+    sha256 hashed at load and the digest of its ``tau0_cache`` lineage record, which must be well formed and
+    release-eligible under the release finder allow-list. Refused (ValueError) for any other cache dict."""
+    from .. import lineage as _L
+    from ..catalog import RELEASE_FINDER_IDS
+    sha, rec = cache.get("cache_sha256"), cache.get("lineage")
+    if not (isinstance(sha, str) and len(sha) == 64) or not isinstance(rec, dict):
+        raise ValueError("a release member is trained on a cache loaded by the strict data.load_cache (it carries "
+                         "cache_sha256 and lineage); this cache dict does not")
+    try:
+        _L.check_record(rec, RELEASE_FINDER_IDS)
+    except _L.LineageError as e:
+        raise ValueError(f"the training cache's lineage record is refused: {e}") from None
+    if rec.get("kind") != "tau0_cache" or rec.get("release_eligible") is not True:
+        raise ValueError("the training cache is not a release-eligible tau0_cache")
+    return sha, _L.record_sha256(rec)
 
 
-def save_checkpoint(path, model, arch_cfg, norm_stats, seed, *, cache, cache_path=None, recipe=None):
+def release_code_identity(expected=None):
+    """The checkout's ``{commit, dirty}`` (lineage.code_identity), refused (ValueError) unless the commit is known and
+    the tree clean (tracked files at the commit), and, with ``expected``, unchanged since then."""
+    from .. import lineage as _L
+    code = _L.code_identity()
+    if not (isinstance(code.get("commit"), str) and len(code["commit"]) == 40) or code.get("dirty") is not False:
+        raise ValueError(f"release training needs a clean tree at a known commit; code identity is {code}")
+    if expected is not None and code != expected:
+        raise ValueError(f"the code changed during training: {expected} at the start, {code} now")
+    return code
+
+
+def save_checkpoint(path, model, arch_cfg, norm_stats, seed, *, cache, cache_path=None, recipe=None, release=False,
+                    code=None):
     """Serialise eqx leaves + JSON meta + pickled norm_stats under checkpoint schema 2.0.
+
+    The meta's ``cache_sha256`` is the digest the strict ``data.load_cache`` computed when it read the cache
+    (``cache["cache_sha256"]``); only a cache dict without it (a historical read) is hashed here from ``cache_path``.
+
+    ``release=True`` (a release ensemble member): the cache must be a release cache from the strict loader
+    (``release_cache_identity``), the checkout clean at a known commit and, with ``code`` (the identity at the start of
+    training), unchanged (``release_code_identity``); none of the three files may exist. The meta then records
+    ``git_sha`` = the full 40-hex commit, ``code_dirty`` = False, ``cache_sha256`` = the digest hashed at load,
+    ``cache_lineage_sha256`` = the digest of the cache's lineage record, and ``cache_path`` = the file name only (a
+    public bundle never carries a private path).
 
     ``cache`` is the loaded cache dict the model was trained on. The meta records the VALIDATED comoving modes
     ``k_com_hmpc`` (GLOBAL_STATIC, schema.py) and the coordinate convention; it never stores a velocity grid,
@@ -699,7 +728,6 @@ def save_checkpoint(path, model, arch_cfg, norm_stats, seed, *, cache, cache_pat
     knobs (``recipe``: w_coh, term_w, edge_gain/lowk, datarange, …). The frozen LF
     backbone the MF/likelihood load is then fully reproducible from the checkpoint
     alone — previously the recipe lived only in the separate hist.json."""
-    eqx.tree_serialise_leaves(str(path) + ".eqx", model)
     # complete the caller's arch_cfg from the model's static fields (caller-supplied
     # keys win on conflict, but the model is the source of truth for the arch).
     full_arch = _arch_cfg_from_model(model)
@@ -718,17 +746,30 @@ def save_checkpoint(path, model, arch_cfg, norm_stats, seed, *, cache, cache_pat
     k_com = np.asarray(k_com_hmpc_from_cache(cache), float)       # GLOBAL_STATIC, validated across ALL rows
     if int(full_arch.get("n_k", k_com.shape[0])) != int(k_com.shape[0]):
         raise ValueError(f"model n_k {full_arch.get('n_k')} != cache modes {k_com.shape[0]}")
+    at_load = cache.get("cache_sha256")
     meta = {"schema_version": CHECKPOINT_SCHEMA_VERSION, "arch_cfg": full_arch, "seed": int(seed),
             "git_sha": _git_sha(),
             "recipe": (dict(recipe) if recipe is not None else None),
             "cache_path": (str(cache_path) if cache_path is not None else None),
-            "cache_sha256": _sha256_or_none(cache_path),
+            "cache_sha256": at_load if isinstance(at_load, str) and len(at_load) == 64 else _sha256_or_none(cache_path),
             "k_com_hmpc": k_com.tolist(), "n_k": int(k_com.shape[0]),
             "L_box_hmpc": float(L_BOX_HMPC), "k_convention": K_CONVENTION,
             "param_limits": np.asarray(PARAM_LIMITS, float).tolist()}
-    with open(str(path) + ".meta.json", "w") as f:
+    if release:
+        cache_sha, rec_sha = release_cache_identity(cache)
+        code_now = release_code_identity(code)
+        meta.update(git_sha=code_now["commit"], code_dirty=False, cache_sha256=cache_sha,
+                    cache_lineage_sha256=rec_sha, cache_path=_os.path.basename(str(cache_path)))
+    mode = "x" if release else "w"                                # a release checkpoint is never overwritten
+    if release:
+        clash = [str(path) + e for e in (".eqx", ".meta.json", ".norm.pkl") if _os.path.lexists(str(path) + e)]
+        if clash:
+            raise FileExistsError(f"a release checkpoint is never overwritten: {clash}")
+    with open(str(path) + ".eqx", mode + "b") as f:
+        eqx.tree_serialise_leaves(f, model)
+    with open(str(path) + ".meta.json", mode) as f:
         json.dump(meta, f)
-    with open(str(path) + ".norm.pkl", "wb") as f:
+    with open(str(path) + ".norm.pkl", mode + "b") as f:
         pickle.dump(norm_stats, f)
 
 

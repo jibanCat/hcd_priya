@@ -4,8 +4,15 @@ See hcd_priya_notes/docs/superpowers/2026-05-29-wc-dndx-poisson-coupling.md. JAX
 branching on traced values, so the whole dN/dX -> w_c -> P_obs path is one jit.
 Class order throughout: (clean, LLS, subDLA, DLA); mu/dN-dX inputs are the 3 HCD
 classes in order (LLS, subDLA, DLA).
+
+The delta_c(z) correction is a map argument (``delta_map``, a ``DeltaCMap``): the release path passes the map refitted
+on the release training cache and shipped with a model bundle (``wc_map.WcMap.delta_c_map()``). ``delta_map=None``
+selects ``HISTORICAL_DELTA_C``, the coefficients fitted in 2026-06 to counts that include the pre-fix box-edge
+duplicates; they remain only so the historical analyses reproduce, and the public predictor never uses them.
 """
 from __future__ import annotations
+from typing import NamedTuple
+
 import numpy as np
 import jax.numpy as jnp
 
@@ -25,43 +32,68 @@ def mu_from_dndx(dndx, Xbar):
     return dndx * Xbar[..., None]
 
 
-# Frozen delta_c(z) deg-2 coeffs from scripts/calibrate_delta_c.py (89 LF shards,
-# 1060 snap-blocks, 60 sims). np.polyval order [a2,a1,a0]; class order
-# (clean, LLS, subDLA, DLA). See hcd_priya_notes/docs/superpowers/2026-06-01-delta_c-coeffs.md.
-_DELTA_C_COEFFS = jnp.array([
-    [-0.0044601756018632,    0.02941370276821661,  -0.04147804040644924],   # clean
-    [-7.391610723256435e-06, 0.008526578464137916, -0.03592195195833433],   # LLS
-    [-0.0006304124952415818, 0.009001921148434061, -0.03672596701410354],   # subDLA
-    [-0.0002204519439413697, 0.0033098470327118175,-0.0245078526302848],    # DLA
-])
+class DeltaCMap(NamedTuple):
+    """A delta_c(z) correction: ``coeffs`` (4, 3) np.polyval-order coefficients of the degree-2 polynomial per class
+    (clean, LLS, subDLA, DLA), applied with z clamped to [``z_lo``, ``z_hi``] (the fit's redshift range: the quadratic
+    is never extrapolated). Host values; pass it to traced code as a closed-over constant, not as a traced argument."""
+    coeffs: np.ndarray
+    z_lo: float
+    z_hi: float
+    label: str
 
 
-# Calibration z-range of the delta_c fit. The deg-2 polynomial extrapolates as an
+# HISTORICAL delta_c(z) deg-2 coeffs from scripts/calibrate_delta_c.py (89 LF shards, 1060 snap-blocks, 60 sims),
+# fitted to counts that include the pre-fix box-edge duplicates. np.polyval order [a2,a1,a0]; class order
+# (clean, LLS, subDLA, DLA). See the internal note 2026-06-01-delta_c-coeffs. Used only when
+# ``delta_map`` is None (the historical analyses); a release model bundle carries its own refitted map (wc_map.py).
+HISTORICAL_DELTA_C = DeltaCMap(
+    coeffs=np.array([
+        [-0.0044601756018632,    0.02941370276821661,  -0.04147804040644924],   # clean
+        [-7.391610723256435e-06, 0.008526578464137916, -0.03592195195833433],   # LLS
+        [-0.0006304124952415818, 0.009001921148434061, -0.03672596701410354],   # subDLA
+        [-0.0002204519439413697, 0.0033098470327118175,-0.0245078526302848],    # DLA
+    ], dtype=np.float64),
+    z_lo=2.0, z_hi=5.4,
+    label="historical: fitted to the pre-fix (box-edge duplicate) counts; historical analyses only")
+_DELTA_C_COEFFS = jnp.asarray(HISTORICAL_DELTA_C.coeffs)        # historical alias (same values)
+
+
+# Calibration z-range of the HISTORICAL delta_c fit. The deg-2 polynomial extrapolates as an
 # unbounded quadratic outside this; clamp z to the range so HMC / tau0-edge queries
 # get the boundary value, not a divergent correction (CS finding I3).
-Z_FIT_LO, Z_FIT_HI = 2.0, 5.4
+Z_FIT_LO, Z_FIT_HI = HISTORICAL_DELTA_C.z_lo, HISTORICAL_DELTA_C.z_hi
 
-# Per-class fit-residual std of delta_c (clean,LLS,subDLA,DLA), from
+# HISTORICAL per-class fit-residual std of delta_c (clean,LLS,subDLA,DLA), from
 # hcd_priya_notes/docs/superpowers/2026-06-01-delta_c-coeffs.md. These are the per-class w_c/alpha_c
-# PRIOR WIDTHS: the irreducible cosmology-dependent delta_c scatter at fixed z that the
-# deg-2 z-trend fit cannot remove.
+# PRIOR WIDTHS of the historical analyses: the irreducible cosmology-dependent delta_c scatter at fixed z that the
+# deg-2 z-trend fit cannot remove. Pre-fix counts; not used by the public predictor.
 DELTA_C_RESID_STD = jnp.array([0.0093, 0.0059, 0.0032, 0.0016])
 
 
-def delta_c(z):
+def _delta_map(delta_map):
+    m = HISTORICAL_DELTA_C if delta_map is None else delta_map
+    if np.shape(m.coeffs) != (4, 3):
+        raise ValueError(f"delta_c map coefficients must have shape (4, 3), got {np.shape(m.coeffs)}")
+    return m
+
+
+def delta_c(z, delta_map=None):
     """Per-class diagonal-Poisson correction delta_c(z), JAX-pure deg-2 polynomial.
     z: scalar or (...,). Returns (...,4) in class order (clean,LLS,subDLA,DLA).
-    z is clamped to [Z_FIT_LO, Z_FIT_HI] so the fit is never extrapolated."""
-    z = jnp.clip(jnp.asarray(z), Z_FIT_LO, Z_FIT_HI)
+    z is clamped to the map's fit range so the fit is never extrapolated. ``delta_map``: a ``DeltaCMap``; None is the
+    HISTORICAL map (pre-fix counts; historical analyses only)."""
+    m = _delta_map(delta_map)
+    z = jnp.clip(jnp.asarray(z), m.z_lo, m.z_hi)
     zz = jnp.stack([z**2, z, jnp.ones_like(z)], axis=-1)   # (...,3)
-    return zz @ _DELTA_C_COEFFS.T                          # (...,4)
+    return zz @ jnp.asarray(m.coeffs).T                    # (...,4)
 
 
-def w_c_corrected(dndx, Xbar, z):
+def w_c_corrected(dndx, Xbar, z, delta_map=None):
     """Corrected per-sightline class weights: w_M0*(1+delta_c(z)), renormalised to 1.
-    dndx: (...,3) HCD incidence (LLS,subDLA,DLA); Xbar: (...); z: (...). Returns (...,4)."""
+    dndx: (...,3) HCD incidence (LLS,subDLA,DLA); Xbar: (...); z: (...). Returns (...,4).
+    ``delta_map`` as in ``delta_c`` (None: the historical map)."""
     w0 = w_c_from_mu(mu_from_dndx(dndx, Xbar))   # (...,4)
-    w = w0 * (1.0 + delta_c(z))
+    w = w0 * (1.0 + delta_c(z, delta_map))
     return w / jnp.sum(w, axis=-1, keepdims=True)
 
 
@@ -78,16 +110,16 @@ def dndx_powerlaw(z, A, gamma):
     return A * (1.0 + z[..., None]) ** gamma
 
 
-def alpha_from_dndx_law(A, gamma, Xbar, z):
+def alpha_from_dndx_law(A, gamma, Xbar, z, delta_map=None):
     """Forward alpha_c(z) parametrized by (A_c, gamma_c): the 3 HCD entries of
     w_c_corrected applied to the PW14 incidence law.
     A, gamma: scalar or (3,); Xbar: (...); z: scalar or (...). Returns (...,3)
-    for (LLS, subDLA, DLA)."""
+    for (LLS, subDLA, DLA). ``delta_map`` as in ``delta_c`` (None: the historical map)."""
     dndx = dndx_powerlaw(z, A, gamma)                  # (...,3)
-    return w_c_corrected(dndx, Xbar, z)[..., 1:]       # drop clean -> HCD (LLS,subDLA,DLA)
+    return w_c_corrected(dndx, Xbar, z, delta_map)[..., 1:]   # drop clean -> HCD (LLS,subDLA,DLA)
 
 
-def alpha_to_dndx(alpha_hcd, Xbar, z, apply_delta=True):
+def alpha_to_dndx(alpha_hcd, Xbar, z, apply_delta=True, delta_map=None):
     """DEPRECATED approximate M0-inverse. RETAINED SOLELY TO REPRODUCE PRE-2026-07-22
     FROZEN ARTIFACTS (paper exports built with this approximate inverse). ALL NEW
     CODE MUST USE ``alpha_to_dndx_exact`` instead (readout defect B, 2026-07-22).
@@ -106,6 +138,7 @@ def alpha_to_dndx(alpha_hcd, Xbar, z, apply_delta=True):
 
     alpha_hcd: (...,3) per-class effective incidence weights for (LLS,subDLA,DLA).
     Xbar: (...); z: scalar or (...). Returns (...,3) dN/dX_c for (LLS,subDLA,DLA).
+    ``delta_map`` as in ``delta_c`` (None: the historical map).
 
     Steps:
       1. If apply_delta, divide out the delta_c correction on the HCD slice:
@@ -120,7 +153,7 @@ def alpha_to_dndx(alpha_hcd, Xbar, z, apply_delta=True):
     """
     w = jnp.asarray(alpha_hcd)
     if apply_delta:
-        w = w / (1.0 + delta_c(z)[..., 1:])
+        w = w / (1.0 + delta_c(z, delta_map)[..., 1:])
     w_LLS, w_sub, w_DLA = w[..., 0], w[..., 1], w[..., 2]
 
     # Exact top-down inverse of w_c_from_mu. Clip the (1 - ...) args to a tiny positive
@@ -135,7 +168,7 @@ def alpha_to_dndx(alpha_hcd, Xbar, z, apply_delta=True):
     return mu / jnp.asarray(Xbar)[..., None]
 
 
-def alpha_to_dndx_exact(alpha_hcd, Xbar, z, *, mode="raise"):
+def alpha_to_dndx_exact(alpha_hcd, Xbar, z, *, mode="raise", delta_map=None):
     """EXACT inverse of the ``w_c_corrected`` forward on the HCD classes (the readout).
 
     SUPERSEDES ``alpha_to_dndx`` for ALL new readouts/exports/plots (readout defect B,
@@ -176,6 +209,8 @@ def alpha_to_dndx_exact(alpha_hcd, Xbar, z, *, mode="raise"):
     mode="mask": returns (dndx, valid) with valid = all(alpha >= 0, axis=-1)
       & (1 - sum(alpha) > 0); invalid entries are NaN in dndx, no exception.
 
+    ``delta_map`` as in ``delta_c`` (None: the historical map).
+
     Returns: (...,3) dN/dX_c for (LLS,subDLA,DLA) [mode="raise"], or the tuple
     (dndx, valid) [mode="mask"].
     """
@@ -210,7 +245,7 @@ def alpha_to_dndx_exact(alpha_hcd, Xbar, z, *, mode="raise"):
     a = np.where(valid[..., None], a, np.nan)
     a_clean = np.where(valid, a_clean, np.nan)
 
-    d = np.asarray(delta_c(z), dtype=np.float64)                      # (...,4)
+    d = np.asarray(delta_c(z, delta_map), dtype=np.float64)           # (...,4)
     Z = 1.0 / (a_clean / (1.0 + d[..., 0])
                + np.sum(a / (1.0 + d[..., 1:]), axis=-1))
     w0 = a * Z[..., None] / (1.0 + d[..., 1:])                        # (...,3)

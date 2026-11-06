@@ -75,7 +75,7 @@ def _resolve_hr_sim_name():
     """The HR-cache sim closest to TARGET_NS (same selection run_stepA uses for HFLOSO909)."""
     from hcd_analysis.emulator import multifidelity as MF
     from hcd_analysis.emulator.data import PARAM_LIMITS
-    d = MF.load_cache(MF.HR_CACHE)
+    d = MF.load_cache_historical(MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/scratch_mf_nscert_fwdresid_fisher.py)')
     names = np.array([s.decode() if isinstance(s, bytes) else s for s in d["sim_name"]])
     pu = d["params_unit"]
     ns_lo, ns_hi = PARAM_LIMITS[0]

@@ -38,7 +38,7 @@ import hcd_analysis.emulator  # x64 hard-assert BEFORE jax
 import jax, jax.numpy as jnp
 
 from hcd_analysis.emulator import train as T
-from hcd_analysis.emulator.data import load_cache, datarange_mask
+from hcd_analysis.emulator.data import load_cache_historical, datarange_mask
 from hcd_analysis.emulator.predict import predict_P_filt
 from hcd_analysis.emulator.closure_legb import CACHE_PATH, held_out_sims
 
@@ -71,7 +71,7 @@ def member_pred(model, norm, d, idx):
 
 
 def main():
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/diag_emu_loso_perk.py)')
     keep_all = datarange_mask(d) & d["mask"]          # (R,K) in-range finite
     kf = np.asarray(d["kfkms"])                        # (R,K) ANGULAR k [s/km], per-row grid
     P_true_all = np.asarray(d["P_filt"])              # (R,4,K)

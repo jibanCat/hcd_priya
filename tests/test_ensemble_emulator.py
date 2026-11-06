@@ -95,10 +95,10 @@ def _schema2_members(tmp_path, n=3, n_k=12):
     The pre-2026-10 production checkpoints are schema v1 and are refused by load_checkpoint by design
     (docs/kgrid_incident_2026-10.md)."""
     from tests.emulator._fixture import write_synthetic_cache
-    from hcd_analysis.emulator.data import load_cache, fit_target_norm
+    from hcd_analysis.emulator.data import load_cache_historical, fit_target_norm
     from hcd_analysis.emulator.train import save_checkpoint
     write_synthetic_cache(tmp_path / "obs.h5", n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=n_k)
-    d = load_cache(tmp_path / "obs.h5")
+    d = load_cache_historical(tmp_path / "obs.h5", reason='test: a cache in the pre-lineage 3.3 format')
     norm = fit_target_norm(d, np.arange(d["P_filt"].shape[0]))
     paths = []
     for s in range(n):

@@ -36,6 +36,12 @@ def _unavailable(msg):
 
 import build_emulator_cache_tau0 as bt0
 from hcd_analysis import priya_p1d as bt0_pp
+from hcd_analysis import tau0_cache as T
+
+
+def _hist(snap_dir):
+    """An old (pre-lineage) snapshot directory's products, read for the PRIYA bit-identity checks."""
+    return T.load_snapshot_inputs_historical(snap_dir, reason="PRIYA bit-identity test on an old snapshot root")[0]
 
 # Data outside the repository, located by environment variable (tests/gate_helpers.py lists them; inlined here because
 # this file also runs as a plain script). An unset variable gives a path that does not exist.
@@ -159,9 +165,9 @@ def test_write_cache_tau0_round_trip(tmp_path=Path("/tmp")):
     rows = _fake_rows(nk)
     snap_blocks = [_fake_snap_block(f"sim{i%2}", 10 + i) for i in range(3)]
     out = tmp_path / "rt_tau0.h5"
-    bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(1.0, 1.2), n_k=nk)
+    bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(1.0, 1.2), n_k=nk, inputs=[], settings={})
     with h5py.File(out, "r") as f:
-        assert f.attrs["cache_version"] == "3.3"
+        assert f.attrs["cache_version"] == "3.4" and T.LINEAGE_KEY in f
         assert f.attrs["tier_c_recipe"] == "uniform"
         assert f.attrs["n_k"] == nk
         assert f["P_tier_p"].shape == (3, nk)
@@ -177,7 +183,7 @@ def test_write_cache_tau0_round_trip(tmp_path=Path("/tmp")):
         assert f["tier_c_counts"].dtype == np.int64
         assert np.allclose(f["tier_c_nhi_edges"][...], pp.FINE_NHI_EDGES)
         assert f["snap_group_idx"][...].tolist() == [0, 1, 2]
-    print("OK write_cache_tau0 v3.3 round-trip")
+    print("OK write_cache_tau0 v3.4 round-trip")
 
 
 def test_discover_dedups_one_snap_per_grid_z():
@@ -215,7 +221,7 @@ def test_build_tau0_rows_tier_p_matches_priya():
         alpha = float(f["params"][ROW, 0])
         P_priya = f["flux_vectors"][ROW, ZIDX*NK:(ZIDX+1)*NK].astype(np.float64)
         kp = f["kfkms"][ROW, ZIDX, :].astype(np.float64)
-    rows, _ = bt0.build_tau0_rows(SIM, SNAP, snap_dir, raw,
+    rows, _ = bt0.build_tau0_rows(SIM, SNAP, _hist(snap_dir), raw,
                                   alpha_slope_grid=np.array([alpha]), n_k=NK)
     r = rows[0]
     assert r["kfkms"].shape == (NK,) and r["P_tier_p"].shape == (NK,)
@@ -239,11 +245,12 @@ def test_merge_v3_synthetic(tmp_path=Path("/tmp")):
             r["snap_group_idx"] = 0  # one snap per shard
         blocks = [_fake_snap_block(f"sim{si}", 0)]
         bt0.write_cache_tau0(rows, blocks, tmp_path / f"shard_{si}.h5",
-                             alpha_range=(1.0, 1.2), n_k=nk)
+                             alpha_range=(1.0, 1.2), n_k=nk, inputs=[], settings={})
     out = tmp_path / "merged.h5"
-    mg.merge_shards([str(tmp_path / f"shard_{i}.h5") for i in range(2)], out)
+    mg.merge_shards([str(tmp_path / f"shard_{i}.h5") for i in range(2)], out,
+                    historical_reason="synthetic shards without inputs")
     with h5py.File(out, "r") as f:
-        assert f.attrs["cache_version"] == "3.3"
+        assert f.attrs["cache_version"] == "3.4"
         assert f.attrs["tier_c_recipe"] == "uniform"
         assert f.attrs["n_k"] == nk
         assert f["P_tier_p"].shape == (4, nk)
@@ -281,10 +288,10 @@ def test_v33_uniform_schema_roundtrip():
     rows = [_row(0), _row(1)]
     snap_blocks = [_fake_snap_block("nsTEST", 1)]
     out = os.path.join(tempfile.mkdtemp(), "c.h5")
-    bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(0.0, 1.0), n_k=nk)
+    bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(0.0, 1.0), n_k=nk, inputs=[], settings={})
     with h5py.File(out, "r") as f:
-        assert f.attrs["cache_version"] == "3.3", \
-            f"expected cache_version='3.3', got '{f.attrs['cache_version']}'"
+        assert f.attrs["cache_version"] == "3.4", \
+            f"expected cache_version='3.4', got '{f.attrs['cache_version']}'"
         assert f.attrs["tier_c_recipe"] == "uniform"
         assert "P_tier_c_frozen" not in f, "frozen tier should be removed in v3.3"
         assert "tau_freeze_tierc" not in f.attrs, "tau_freeze_tierc attr should be gone"
@@ -304,7 +311,7 @@ def test_filtered_tier_c_reconstructs_priya():
     raw = _EMU_LF / SIM / "output" / f"SPECTRA_{SNAP:03d}" / "lya_forest_spectra_grid_480.hdf5"
     if not (sd.exists() and raw.exists()):
         _unavailable("filtered_tier_c: data unavailable")
-    rows, _ = bt0.build_tau0_rows(SIM, SNAP, sd, raw, np.array([1.0]), n_k=NK)
+    rows, _ = bt0.build_tau0_rows(SIM, SNAP, _hist(sd), raw, np.array([1.0]), n_k=NK)
     r = rows[0]
     assert r["P_tier_c_filtered"].shape == (bt0_pp.N_TIER_C_BINS, NK)
     N = int(r["tier_c_counts"].sum())
@@ -381,7 +388,7 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
     orig = bt0._read_priya_params
     bt0._read_priya_params = read_params               # build_tau0_rows reads the parameters through the same helper
     try:
-        rows, _ = bt0.build_tau0_rows(sim, snap, sd, raw,
+        rows, _ = bt0.build_tau0_rows(sim, snap, _hist(sd), raw,
                                       alpha_slope_grid=np.array([alpha]), n_k=NK)
     finally:
         bt0._read_priya_params = orig

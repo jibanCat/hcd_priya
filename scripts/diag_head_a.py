@@ -47,7 +47,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from hcd_analysis.emulator.data import (
-    load_cache, make_splits, make_batch, fit_target_norm, safe_log, signed_log,
+    load_cache_historical, make_splits, make_batch, fit_target_norm, safe_log, signed_log,
     untransform_prediction, COARSE_NAMES,
 )
 from hcd_analysis.emulator import train as T
@@ -95,7 +95,7 @@ def summarize(arr):
 
 def main():
     FIGDIR.mkdir(parents=True, exist_ok=True)
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/diag_head_a.py)')
     grp_all = d["snap_group_idx"]
     z_all = d["z_grid"]
     z_levels = np.unique(np.round(z_all, 3))

@@ -36,7 +36,8 @@ def _need(*paths):
 @pytest.fixture(scope="module")
 def prod_ctx():
     _need(f"{GATEC}/prod_repaired_seed0.eqx", MF, DLA_CORE)
-    ctx, d = CL.build_legb_ctx(ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
+    ctx, d = CL.build_legb_ctx(historical_reason="test of the historical gate E context",
+                               ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
                                dla_core_product=DLA_CORE,
                                ks_kwargs=dict(resolution_float=True, k_max=0.065), with_eboss=True, metals_on=True,
                                sample_res=True)
@@ -130,9 +131,9 @@ def test_e1a_one_binding_per_leg_z_feeds_every_consumer_and_equals_first_princip
 # ---------------------------------------------------------------------------------------------------------- E1 (b)
 def test_e1b_box_modes_identical_across_checkpoints_cache_and_mf(prod_ctx):
     from hcd_analysis.emulator import products as PR, train as T
-    from hcd_analysis.emulator.data import load_cache
+    from hcd_analysis.emulator.data import load_cache_historical
     k = np.asarray(prod_ctx.k_com_hmpc)
-    np.testing.assert_array_equal(k, 2 * np.pi * np.arange(1, 173) / L_BOX * 0 + np.asarray(load_cache(CL.CACHE_PATH)["k_com_hmpc"]))
+    np.testing.assert_array_equal(k, 2 * np.pi * np.arange(1, 173) / L_BOX * 0 + np.asarray(load_cache_historical(CL.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format')["k_com_hmpc"]))
     _, mf_k, _ = PR.load_mf_product(MF, lf_ckpt_sha256=prod_ctx.product_digests["lf_ensemble_eqx_sha256"],
                                     lf_cache_sha256=T._sha256_or_none(CL.CACHE_PATH))
     np.testing.assert_allclose(mf_k, k, rtol=1e-14, atol=0)
@@ -150,6 +151,8 @@ ALLOW = {("hcd_analysis.emulator.schema", None), ("hcd_analysis.emulator.data", 
          ("hcd_analysis.emulator.mf_modes", "measure_mode_targets"), ("hcd_analysis.emulator.mf_modes", "mode_mapping_error"),
          ("hcd_analysis.emulator.mf_modes", "canonical_mapping_error"), ("hcd_analysis.emulator.mf_modes", "load_mode_mf"),
          ("hcd_analysis.emulator.products", None), ("hcd_analysis.emulator.error_vector_io", None),
+         # the lineage-checked .npz reader (no pickle, payload digest), reached through the training-cache loader
+         ("hcd_analysis.lineage", "read_npz"),
          ("hcd_analysis.emulator.train", "load_checkpoint"), ("hcd_analysis.emulator.train", "save_checkpoint"),
          ("hcd_analysis.emulator.train", "_velocity_key_paths"),
          # np.load of the OBSERVATIONAL data files (not emulator products)
@@ -239,7 +242,8 @@ def test_e1d_dynamic_call_graph_touches_no_retired_code():
             seen.add((os.path.basename(co.co_filename), co.co_name))
     sys.setprofile(prof)
     try:
-        ctx, _ = CL.build_legb_ctx(ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
+        ctx, _ = CL.build_legb_ctx(historical_reason="test of the historical gate E context",
+                               ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
                                    dla_core_product=DLA_CORE,
                                    ks_kwargs=dict(resolution_float=True, k_max=0.065), with_eboss=True,
                                    metals_on=True, sample_res=True)

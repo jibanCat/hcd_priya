@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import hcd_analysis.emulator  # x64 BEFORE jax
 import jax, jax.numpy as jnp
 
-from hcd_analysis.emulator.data import load_cache, invert_norm
+from hcd_analysis.emulator.data import load_cache_historical, invert_norm
 from hcd_analysis.emulator.train import load_checkpoint
 from hcd_analysis.emulator import closure_legb as C
 
@@ -32,7 +32,7 @@ LIT = {"LLS": ([2.4,2.8,3.35,3.47,3.58,3.74,3.97,4.23],[0.29,0.33,0.35,0.57,0.41
        "subDLA": ([2.27,2.73,3.25,3.77,4.20],[0.07,0.06,0.08,0.10,0.10]),
        "DLA": ([2.31,2.57,2.86,3.22,3.70,4.39],[0.048,0.055,0.067,0.084,0.075,0.106])}
 
-d = load_cache(CACHE)
+d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/plot_dndx_pred_vs_truth.py)')
 sim_name = np.asarray(d["sim_name"]); gidx = np.asarray(d["snap_group_idx"])
 zrow = np.asarray(d["z_grid"]); X = np.asarray(d["x"]); truth = np.asarray(d["snap_dNdX"])  # (Ng,3)
 

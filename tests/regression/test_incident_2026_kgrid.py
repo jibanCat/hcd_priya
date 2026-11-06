@@ -42,8 +42,8 @@ def test_new_schema_refuses_the_collapsed_cache():
 
 def test_anti_row_zero_on_the_real_cache():
     require_real_cache(LF)
-    from hcd_analysis.emulator.data import load_cache
-    d = load_cache(LF)
+    from hcd_analysis.emulator.data import load_cache_historical
+    d = load_cache_historical(LF, reason='test: a cache in the pre-lineage 3.3 format')
     kcom = d["k_com_hmpc"]
     row0 = d["kfkms"][0]
     z = d["z_grid"]

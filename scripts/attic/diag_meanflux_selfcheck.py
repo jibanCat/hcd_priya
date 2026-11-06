@@ -41,6 +41,7 @@ AMP_LO, AMP_HI = 0.85, 1.15   # fine grid inside the [0.75,1.25] prior, around 1
 members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
 print(f"[build] {len(members)} ensemble members")
 ctx, d = build_legb_ctx(
+    historical_reason="historical analysis on the deployed cache (closure_legb.CACHE_PATH)",
     ensemble_ckpts=members, use_xclass=True, with_mf=True, mf_with_floor=True,
     mf_emucoh=True, mf_emucoh_offdiag_only=True,
     with_eboss=True, metals_on=True, sample_metals=True, hierarchical_hcd=False)

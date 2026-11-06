@@ -85,8 +85,8 @@ def cache_logP(cache, row, eval_logk, extrap):
 
 
 def main():
-    lf_cache = MF.load_cache(MF.LF_CACHE)
-    hr_cache = MF.load_cache(MF.HR_CACHE)
+    lf_cache = MF.load_cache_historical(MF.LF_CACHE, reason='diagnostic of the historical cache (scripts/diag_mf_cemu_floor.py)')
+    hr_cache = MF.load_cache_historical(MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/diag_mf_cemu_floor.py)')
     pairs = MF.match_hr_to_lf(lf_cache, hr_cache)
     hr_sim_of_pair = np.array([
         (hr_cache["sim_name"][h].decode()

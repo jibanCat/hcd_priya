@@ -94,7 +94,7 @@ def ctx():
 @pytest.fixture(scope="module")
 def hr_sim_name():
     """A concrete held-out HR sim name (the gate's hr_truth arm reads the HR cache)."""
-    d = MF.load_cache(MF.HR_CACHE)
+    d = MF.load_cache_historical(MF.HR_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
     names = np.array([s.decode() if isinstance(s, bytes) else s for s in d["sim_name"]])
     return sorted(set(map(str, names)))[0]
 

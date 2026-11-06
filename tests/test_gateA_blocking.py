@@ -111,11 +111,11 @@ def test_bt5_k_com_length_must_match_the_model_output():
 # --------------------------------------------------------------------------------------------- BT6
 def _train_and_save(tmp_path, **kw):
     from tests.emulator._fixture import write_synthetic_cache
-    from hcd_analysis.emulator.data import fit_target_norm, load_cache
+    from hcd_analysis.emulator.data import fit_target_norm, load_cache_historical
     from hcd_analysis.emulator.train import save_checkpoint
     p = tmp_path / "obs.h5"
     write_synthetic_cache(p, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12)
-    d = load_cache(p)
+    d = load_cache_historical(p, reason='test: a cache in the pre-lineage 3.3 format')
     norm = fit_target_norm(d, np.arange(d["P_filt"].shape[0]))
     m = Emulator(in_dim=10, n_k=12, n_basis=4, key=jax.random.PRNGKey(0))
     prefix = str(tmp_path / "ck")

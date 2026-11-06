@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 
 import hcd_analysis.emulator  # x64 before jax
 import jax.numpy as jnp
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
 from hcd_analysis.emulator.inference import (
     hcd_incidence_prior, HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC, HCD_PRIOR_FRAC_SIGMA,
@@ -57,7 +57,7 @@ SURVEY_Z = {"DESI": np.arange(2.2, 4.21, 0.1), "KS": np.arange(2.4, 4.61, 0.1),
 def build_xbar_and_sim_dndx():
     """Xbar(z) = X_tot/N_sl (mean absorption path per sightline) from the LF cache, smoothed in z;
     plus the sim-mean dN/dX(z) per class (the truth band) binned from the cache snap_dNdX."""
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/plot_hcd_prior_dndx_overlay.py)')
     gid = np.asarray(d["snap_group_idx"]); zrow = np.asarray(d["z_grid"])
     Xtot = np.asarray(d["snap_total_path_dX"]); wc = np.asarray(d["w_c_cache"])
     dndx = np.asarray(d["snap_dNdX"])                         # (Ngroup, 3) LLS, subDLA, DLA

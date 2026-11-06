@@ -46,7 +46,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from hcd_analysis.emulator.data import (
-    load_cache, make_splits, make_batch, cell_id, safe_log,
+    load_cache_historical, make_splits, make_batch, cell_id, safe_log,
     edge_emphasis_k_weight,
 )
 from hcd_analysis.emulator import train as T
@@ -304,7 +304,7 @@ def main():
     ap.add_argument("--tag", default="prod")
     args = ap.parse_args()
 
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/diag_ap_fisher_bias.py)')
     term_w = None
     if args.p_resid_w != 1.0:
         term_w = {"f_nhi": 1.0, "dndx": 1.0, "p_base": 1.0,
