@@ -338,6 +338,6 @@ def test_no_format_is_supported_yet_and_nothing_heavy_or_pickle_is_imported():
     code = ("import sys, hcd_analysis.registry; "
             "print(sorted(m for m in ('jax', 'numpy', 'h5py', 'safetensors', 'pickle', 'cloudpickle', 'dill') "
             "if m in sys.modules))")
-    out = subprocess.run([sys.executable, "-E", "-s", "-c", code], capture_output=True, text=True, check=True,
+    out = subprocess.run([sys.executable, "-E", "-s", "-B", "-c", code], capture_output=True, text=True, check=True,
                          cwd=os.path.dirname(os.path.dirname(R.__file__)))      # the directory holding hcd_analysis
     assert out.stdout.strip() == "[]"
