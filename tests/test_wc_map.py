@@ -444,6 +444,22 @@ def test_golden_digests_of_the_map_rules_in_an_exact_replay(cache5):            
     assert W.payload_sha256(W.refit_subset(d, ["sim0", "sim1", "sim3", "sim4"])) == GOLDEN_WCMAP_SUBSET
 
 
+@pytest.mark.parametrize("which", ["refit", "refit_subset"])
+def test_the_exact_replay_hashes_the_refitted_payloads(cache5, monkeypatch, which):
+    """The exact branch forced, one refitted payload moved by one ulp in one coefficient: the digest test must fail.
+    So it hashes the refitted payloads, never the stored golden payloads (which hash to the goldens everywhere)."""
+    monkeypatch.setattr(PN, "exact_replay", lambda *a, **k: True)
+    real = getattr(W, which)
+
+    def one_ulp(*a, **k):
+        doc = copy.deepcopy(real(*a, **k))
+        doc["delta_c"]["coeffs"][0][0] = float(np.nextafter(doc["delta_c"]["coeffs"][0][0], np.inf))
+        return doc
+    monkeypatch.setattr(W, which, one_ulp)
+    with pytest.raises(AssertionError):
+        PN.call_unskipped(test_golden_digests_of_the_map_rules_in_an_exact_replay, cache5)
+
+
 def test_the_stored_golden_payloads_are_the_golden_digests():
     assert W.payload_sha256(GOLDEN_PAYLOAD_REFIT) == GOLDEN_WCMAP_REFIT
     assert W.payload_sha256(GOLDEN_PAYLOAD_SUBSET) == GOLDEN_WCMAP_SUBSET
@@ -647,9 +663,10 @@ def test_the_exact_replay_needs_jax_and_jaxlib_at_their_pins(package):
 def test_without_the_opt_in_the_digest_tests_skip_with_a_reason(environ):
     with pytest.raises(pytest.skip.Exception, match="exact digests not requested: set HCD_EXACT_REPLAY=1"):
         PN.require_exact_replay(environ, versions=ON_PINS, pins=PINS)
-    assert PN.require_exact_replay(REPLAY, versions=ON_PINS, pins=PINS) is None           # requested: runs
-    with pytest.raises(ValueError, match="on a GitHub runner"):                            # refused, not skipped
-        PN.require_exact_replay(dict(REPLAY, GITHUB_ACTIONS="true"), versions=ON_PINS, pins=PINS)
+    run = PN.call_unskipped                         # a skip here fails the test instead of hiding in it
+    assert run(PN.require_exact_replay, REPLAY, versions=ON_PINS, pins=PINS) is None          # requested: runs
+    with pytest.raises(ValueError, match="on a GitHub runner"):                                # refused, not skipped
+        run(PN.require_exact_replay, dict(REPLAY, GITHUB_ACTIONS="true"), versions=ON_PINS, pins=PINS)
 
 
 def test_the_field_comparison_rules():

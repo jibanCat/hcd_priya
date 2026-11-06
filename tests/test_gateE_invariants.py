@@ -116,6 +116,21 @@ def test_metal_and_resolution_factors_bitwise_in_an_exact_replay():
     assert factors_digest(factor_arrays()) == PINNED["factors"]
 
 
+def test_the_exact_replay_hashes_the_computed_factors(monkeypatch):
+    """The exact branch forced, the computed factors moved by one ulp in one element: the digest test must fail. So it
+    hashes the computed result, never the stored reference (which hashes to the pin everywhere)."""
+    monkeypatch.setattr(PN, "exact_replay", lambda *a, **k: True)
+    real = DL._metal_factor
+
+    def one_ulp(k, **kw):
+        out = np.array(real(k, **kw), dtype=np.float64)
+        out[100] = np.nextafter(out[100], np.inf)
+        return out
+    monkeypatch.setattr(DL, "_metal_factor", one_ulp)
+    with pytest.raises(AssertionError):
+        PN.call_unskipped(test_metal_and_resolution_factors_bitwise_in_an_exact_replay)
+
+
 def test_the_stored_factors_are_the_pinned_digest():
     """The stored reference arrays are the 80bbc5d factors, bit for bit (a stored file: exact everywhere)."""
     ref = PN.load_reference(FACTORS_REF)

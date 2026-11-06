@@ -361,6 +361,23 @@ def test_the_normaliser_fingerprint_is_bitwise_in_an_exact_replay(world):
     assert nm["detail"]["recomputed_tensors_sha256"] == GOLDEN_NORM_FINGERPRINT
 
 
+def test_the_exact_replay_hashes_the_recomputed_normaliser(world, monkeypatch):
+    """The exact branch forced, the recomputed normaliser moved by one ulp in one element: the digest test must fail.
+    So it hashes the recomputed tensors, never the stored reference (which hashes to the golden everywhere)."""
+    monkeypatch.setattr(PN, "exact_replay", lambda *a, **k: True)
+    real = T._fit_norm
+
+    def one_ulp(d, idx):
+        norm = real(d, idx)
+        mu = np.array(norm["P_filt"]["mu_marg"], dtype=np.float64, copy=True)
+        mu.flat[0] = np.nextafter(mu.flat[0], np.inf)
+        norm["P_filt"]["mu_marg"] = mu
+        return norm
+    monkeypatch.setattr(T, "_fit_norm", one_ulp)
+    with pytest.raises(AssertionError):
+        PN.call_unskipped(test_the_normaliser_fingerprint_is_bitwise_in_an_exact_replay, world)
+
+
 def test_the_stored_normaliser_is_the_golden_fingerprint():
     """The stored reference tensors are the pre-D5 normaliser, bit for bit (a stored file: exact everywhere)."""
     ref = PN.load_reference(NORM_REF)

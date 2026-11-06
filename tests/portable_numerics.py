@@ -180,6 +180,16 @@ def require_exact_replay(environ=None, versions=None, pins=None):
         pytest.skip(SKIP_REASON)
 
 
+def call_unskipped(fn, *args, **kwargs):
+    """``fn(*args, **kwargs)``, with a pytest SKIP raised inside turned into a failure: for a test that checks a call
+    which must run (a skip would otherwise mark the whole checking test skipped, hiding the defect)."""
+    import pytest
+    try:
+        return fn(*args, **kwargs)
+    except pytest.skip.Exception as e:
+        pytest.fail(f"{getattr(fn, '__name__', fn)} skipped where it must run: {e}")
+
+
 def field_mismatches(got, want, tols):
     """The names of the fields where ``got`` departs from the reference ``want`` (empty: they agree).
 
