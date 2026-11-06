@@ -140,6 +140,33 @@ def test_mf_domain_flags(emu_mf):
     assert emu_mf.predict(PARAMS, 3.0, tau_eff=3.0).flags["mf_tau0_clamped"] is True
 
 
+def test_mf_below_the_tables_lowest_redshift_is_refused_not_clamped(emu_mf, emu_lf, res, tmp_path):
+    """C1 review m4 (D1 panel, physics lens): the synthetic tables start at z 2.6. Below that the MF path refuses,
+    single, stacked and on the held-out path; the LF prediction there is still available, and equals the LF-only
+    bundle's. Above the tables (z 4.2) the MF is still held constant and flagged."""
+    for f in (None, "LF+MF"):
+        with pytest.raises(hp.MFRangeError, match="refused below its tables' lowest redshift z = 2.6"):
+            emu_mf.predict(PARAMS, 2.4, tau_eff=0.3, fidelity=f)
+        with pytest.raises(hp.MFRangeError, match=r"z = \[2.2, 2.4\]"):
+            emu_mf.predict_many(PARAMS, [2.2, 2.4, 3.0], tau_eff=0.3, fidelity=f)
+    assert issubclass(hp.MFRangeError, hp.PredictorInputError)
+    lf = emu_mf.predict(PARAMS, 2.4, tau_eff=0.3, fidelity="LF")
+    assert lf.flags["mf_applied"] is False
+    assert lf.P_class.tobytes() == emu_lf.predict(PARAMS, 2.4, tau_eff=0.3).P_class.tobytes()
+    assert emu_mf.predict(PARAMS, 2.6, tau_eff=0.3).flags["mf_z_clamped"] is False      # the lowest table z itself
+    hi = emu_mf.predict(PARAMS, 4.2, tau_eff=0.4)
+    assert hi.flags["mf_applied"] is True and hi.flags["mf_z_clamped"] is True
+    c = res.lineage["cache"]["sha256"]
+    d = tmp_path / "fold"
+    s = write_mf(d, manifest=res.manifest_sha256, cache=c, kind="fold", backbone_kind="research",
+                 held_out=["synthsim2"], fold={"fold_id": "f3", "holdout_sims": ["synthsim2"]})
+    rp = hp.load_research_bundle(res.bundle_dir, res.manifest_sha256, purpose="a test", mf_dir=str(d),
+                                 mf_record_sha256=s)
+    with pytest.raises(hp.MFRangeError, match="refused below"):
+        hp.heldout_P_filt_at(rp, np.stack([_x(3.0), _x(2.4)]), np.array([0.4, 0.3]))
+    assert hp.heldout_P_filt_at(rp, _x(2.6)[None], np.array([0.3]))["mf"].shape[0] == 1
+
+
 # ------------------------------------------------------------------------------------------------ refusals
 def test_absent_mf_is_refused_when_asked_for(emu_lf, info, mf):
     with pytest.raises(hp.MFUnavailableError, match="no MF record"):

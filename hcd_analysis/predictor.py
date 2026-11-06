@@ -25,8 +25,9 @@ release MF record (format ``hcd_priya.mf_record/1``, ``emulator.mf_release``), a
 bound to this bundle: its backbone manifest sha256, training cache, backbone kind and box modes must be this
 bundle's, and a historical or fold record is refused. Each member's per-class spectrum is then multiplied by
 exp(g(z, tau0, k)) on the native modes, before the mean, the spread and any k placement: P_MF = P_LF exp(g). g does not
-depend on the cosmological parameters; outside the record's z and tau0 tables it is held constant and flagged
-(``mf_z_clamped``, ``mf_tau0_clamped``). ``w_c`` and ``dndx`` stay the LF backbone's. ``fidelity`` ("LF" or "LF+MF";
+depend on the cosmological parameters. Below the lowest redshift of the record's tables the MF is REFUSED
+(``MFRangeError``; ask for ``fidelity="LF"``): it is never clamped there. Above the highest redshift and outside the
+tau0 tables it is held constant and flagged (``mf_z_clamped``, ``mf_tau0_clamped``). ``w_c`` and ``dndx`` stay the LF backbone's. ``fidelity`` ("LF" or "LF+MF";
 None: the bundle's own) selects the output; "LF+MF" without a record raises ``MFUnavailableError``. The record's
 provenance (version, composition and ruling ids, cache digests, fit commit, the PROPOSED mean-flux convention of its
 targets, the HR inputs used) is in ``provenance["mf"]``. Without an MF record nothing here
@@ -105,6 +106,11 @@ class PredictorInputError(ValueError):
 
 class MFUnavailableError(PredictorInputError):
     """The LF+MF prediction was asked for, but the loaded bundle carries no MF record."""
+
+
+class MFRangeError(PredictorInputError):
+    """The LF+MF prediction was asked for below the lowest redshift of the MF record's tables: the MF is refused
+    there, never extrapolated or clamped (ask for ``fidelity="LF"``)."""
 
 
 FIDELITIES = ("LF", "LF+MF")
@@ -360,6 +366,7 @@ class _PredictorBase:
         t = _array("tau0", tau0, ndim=1)
         if x.shape[1] != 10 or t.shape != (x.shape[0],):
             raise PredictorInputError(f"x must be (n, 10) and tau0 (n,), got {x.shape} and {t.shape}")
+        self._mf_refuse_low_z(Z_LIMITS[0] + x[:, 9] * (Z_LIMITS[1] - Z_LIMITS[0]))
         lf, mf = [], []
         for i in range(0, x.shape[0], chunk):
             P, _ = _forward_many(self._rb.ensemble, self._pf, *self._dn, jnp.asarray(x[i:i + chunk]),
@@ -425,9 +432,16 @@ class _PredictorBase:
                                      "mf_record_sha256)")
         return fidelity == "LF+MF"
 
+    def _mf_refuse_low_z(self, zs):
+        lo = float(self._mf_dom[0][0])
+        low = sorted({round(float(z), 9) for z in zs if z < lo - Z_TOL})
+        if low:
+            raise MFRangeError(f"the MF is refused below its tables' lowest redshift z = {lo:g} (asked at z = {low}); "
+                               "it is not extrapolated or clamped there: ask for fidelity='LF'")
+
     def _mf_flags(self, zs, taus, use_mf):
         z_tab, tau_by_z = self._mf_dom
-        zc = [z < z_tab[0] - Z_TOL or z > z_tab[-1] + Z_TOL for z in zs]
+        zc = [z > z_tab[-1] + Z_TOL for z in zs]                  # below the tables the MF is refused, never clamped
         tc = []
         for z, t in zip(zs, taus):
             ladder = np.array([np.interp(z, z_tab, tau_by_z[:, r]) for r in range(tau_by_z.shape[1])])
@@ -436,8 +450,8 @@ class _PredictorBase:
 
     def _mf_labels(self, labels, use_mf):
         out = {"mf": "the MF correction P_MF = P_LF exp(g(z, tau0, k)) of the loaded record (theta-independent, "
-                     "fitted on matched HR/LF pairs; outside its z and tau0 tables it is held constant and flagged); "
-                     "w_c stays the LF backbone's"}
+                     "fitted on matched HR/LF pairs; refused below its lowest z; above its highest z and outside its "
+                     "tau0 tables it is held constant and flagged); w_c stays the LF backbone's"}
         if use_mf:
             out["product"] = f"{labels.get('product') or 'LF'}+MF"
             out["P_class"] = labels["P_class"] + ", each multiplied by exp(g) before the mean"
@@ -478,6 +492,8 @@ class _PredictorBase:
 
     def _many(self, params, zs, tau_eff, tau0_amp, dtau0, k, *, single, fidelity=None):
         use_mf = self._use_mf(fidelity)
+        if use_mf:
+            self._mf_refuse_low_z(zs)
         pv = params_vector(params)
         taus = _taus(zs, tau_eff, tau0_amp, dtau0)
         th = np.asarray(normalize_params(pv), dtype=np.float64)

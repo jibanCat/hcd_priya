@@ -335,9 +335,12 @@ record to its research backbone (genuine held-out predictions for grouped cross-
 the held-out group). Both refuse a record whose backbone manifest, training cache, backbone kind, held-out simulations
 or box modes are not the bundle's. The predictor applies only what it re-derives from the record's own anchored
 bytes (`mf_release.reverify`; a loaded `MFRecord` keeps them): a record built or changed in memory (another record's
-tables, a relabelled kind) is refused, so `provenance["mf"]` always describes the tables applied. `predict(...,
-fidelity="LF")` gives the LF prediction of the same bundle, bit for
-bit what the bundle loaded without an MF gives.
+tables, a relabelled kind) is refused, so `provenance["mf"]` always describes the tables applied.
+`predict(..., fidelity="LF")` gives the LF prediction of the same bundle, bit for bit what the bundle loaded without
+an MF gives. Below the lowest redshift of the record's tables the LF+MF prediction
+is refused (`MFRangeError`), never clamped: the correction was not measured there, so only `fidelity="LF"` is
+available. Above the highest redshift, and outside the tau0 tables, g is held at its edge value and the prediction is
+flagged (`mf_z_clamped`, `mf_tau0_clamped`).
 
 **Writing.** `mf_release.write_mf_record(out_dir, tables, ...)` validates everything first, then creates `out_dir`
 (an existing directory, file or symlink is refused: a record is written once), writes the tables through the
