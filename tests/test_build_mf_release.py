@@ -104,7 +104,7 @@ def test_release_build_binds_to_the_backbone_and_uses_its_lf_prediction(info, tm
     from hcd_analysis.emulator import mf_modes as MM
     pairs = MM.match_pairs(lf, hr)
     l_rows = np.array([p[1] for p in pairs])
-    P_lf = bb.lf_P_filt_at(lf["x"][l_rows], lf["tau0"][l_rows])
+    P_lf = hp.lf_P_filt_at(bb, lf["x"][l_rows], lf["tau0"][l_rows])
     np.testing.assert_array_equal(P_lf[0], bb.predict({n: float(v) for n, v in zip(hp.PARAM_NAMES,
                                                                                       lf["params"][l_rows[0]])},
                                                       float(lf["z_grid"][l_rows[0]]),
@@ -114,7 +114,7 @@ def test_release_build_binds_to_the_backbone_and_uses_its_lf_prediction(info, tm
     for k in MM.TABLE_KEYS:
         np.testing.assert_array_equal(rec.tables[k], np.asarray(ref[k], float))
     emu = hp.load_bundle(info.bundle_dir, info.manifest_sha256, mf_dir=str(tmp_path / "mf"), mf_record_sha256=sha)
-    assert emu.has_mf
+    assert "mf" in emu.provenance
 
 
 def test_build_never_reads_the_hr_catalogue_columns(info, tmp_path):
@@ -147,4 +147,15 @@ def test_fold_build_on_a_research_backbone_holds_out_the_group(tmp_path):
                                       "cache_sha256": res.lineage["cache"]["sha256"], "held_out_sims": ["synthsim2"]}
     rp = hp.load_research_bundle(res.bundle_dir, res.manifest_sha256, purpose="a test", mf_dir=str(tmp_path / "fold"),
                                  mf_record_sha256=sha)
-    assert rp.has_mf
+    assert "mf" in rp.provenance
+
+
+def test_build_takes_the_backbone_identity_from_a_loaded_predictor_only(info, tmp_path):
+    lf, hr = _inputs()
+    bb = hp.load_bundle(info.bundle_dir, info.manifest_sha256)
+    fake = {"manifest_sha256": info.manifest_sha256, "kind": "research", "held_out_sims": ["synthsim2"]}
+    with pytest.raises(SystemExit, match="loaded predictor"):
+        B.build_from_inputs(str(tmp_path / "x"), lf=lf, hr=hr, backbone=fake, kind="release", mf_version="v1",
+                            caches=_caches(bb), composition={"id": "c", "excluded_sims": [], "ruling_ids": ["r"]},
+                            fold=None, fit_code=CLEAN())
+    assert not os.path.lexists(tmp_path / "x")

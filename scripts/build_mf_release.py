@@ -80,7 +80,9 @@ def build_from_inputs(out_dir, *, lf, hr, backbone, kind, mf_version, caches, co
     from hcd_analysis.emulator import mf_release as MR
     hrv = MR.hr_view(hr)
     import hcd_analysis.predictor as hp
-    k_com = np.asarray(backbone.k_com_hmpc, dtype=np.float64)
+    if not isinstance(backbone, hp._PredictorBase):
+        raise SystemExit("refusing: the backbone must be a loaded predictor (one object forms the targets)")
+    k_com = np.asarray(hp.native_modes(backbone), dtype=np.float64)
     K = k_com.size
     if not np.allclose(np.asarray(lf["k_com_hmpc"], float)[:K], k_com, rtol=1e-12, atol=0):
         raise SystemExit("refusing: the LF cache's box modes are not the backbone's")
@@ -92,15 +94,12 @@ def build_from_inputs(out_dir, *, lf, hr, backbone, kind, mf_version, caches, co
     if not all(v <= D1_TOL for v in d1.values()):
         raise SystemExit(f"refusing: HR and LF modes do not map one to one (D1 {d1})")
     l_rows = np.array([p[1] for p in pairs])
-    P_lf = backbone.lf_P_filt_at(np.asarray(lf["x"])[l_rows], np.asarray(lf["tau0"])[l_rows])
+    P_lf = hp.lf_P_filt_at(backbone, np.asarray(lf["x"])[l_rows], np.asarray(lf["tau0"])[l_rows])
     t = MM.measure_mode_targets(lf, hrv, pairs, P_lf, x=lf["x"], n_modes=K)
     rows, train = MR.select_train_rows(t, exclude_sims=composition["excluded_sims"],
                                        holdout_sims=(fold or {}).get("holdout_sims", ()))
     tables = MM.fit_mode_mf(t, train_rows=rows)
-    research = isinstance(backbone, hp.ResearchPredictor)
-    bb = {"manifest_sha256": backbone.manifest_sha256, "kind": "research" if research else "release",
-          "cache_sha256": (backbone.lineage.get("cache") or {}).get("sha256"),
-          "held_out_sims": sorted(backbone.split.get("held_out_sims") or []) if research else []}
+    bb = hp.backbone_identity(backbone)                         # derived from the member metas, never a caller flag
     path, sha = MR.write_mf_record(out_dir, tables, k_com_hmpc=k_com, kind=kind, mf_version=mf_version, backbone=bb,
                                    caches=caches, composition=composition, fold=fold, fit_code=fit_code,
                                    train_sims=train, n_pairs_train=int(rows.size))

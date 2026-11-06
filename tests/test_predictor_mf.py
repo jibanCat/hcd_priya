@@ -124,7 +124,7 @@ def test_mf_provenance_is_reported(emu_mf, mf, info):
     assert m["composition"]["ruling_ids"] == ["synthetic ruling"]
     assert m["mean_flux_convention"]["status"] == "PROPOSED"
     assert m["hr_inputs"] == MR.HR_INPUTS
-    assert emu_mf.has_mf is True and emu_mf.mf_provenance == m
+    assert "mf" in emu_mf.provenance and emu_mf.provenance["mf"] == m
     assert "mf" in p.labels
 
 
@@ -186,7 +186,7 @@ def test_a_hand_built_or_unverified_mf_is_refused(info, mf):
         hp.Bundle(rb, mf=rec._replace(verified=False))
     with pytest.raises(MR.MFRecordError, match="load_mf_record"):
         hp.Bundle(rb, mf={"tables": rec.tables})
-    assert hp.Bundle(rb, mf=rec).has_mf is True
+    assert "mf" in hp.Bundle(rb, mf=rec).provenance
 
 
 def test_bundle_rechecks_the_binding_of_a_loaded_record(info, tmp_path):
@@ -230,3 +230,83 @@ def test_fold_mf_on_its_research_backbone_gives_held_out_predictions(tmp_path):
     with pytest.raises(MR.MFRecordError):                            # a release record on a research backbone
         hp.load_research_bundle(res.bundle_dir, res.manifest_sha256, purpose="a test", mf_dir=str(rel),
                                 mf_record_sha256=s2)
+
+
+# ------------------------------------------------------------------------------- fold backbones (D1 panel M1, M2)
+@pytest.fixture(scope="module")
+def res(tmp_path_factory):
+    return RT.write_synthetic_research_bundle(str(tmp_path_factory.mktemp("r") / "res"), held_out_sims=("synthsim2",),
+                                              n_groups=3)
+
+
+def _rb(res):
+    from hcd_analysis.emulator import safe_h5 as H
+    return H.load_research(res.bundle_dir, expected_manifest_sha256=res.manifest_sha256, purpose="a test")
+
+
+def _metas(rb, fn):
+    from hcd_analysis.emulator import safe_h5 as H
+    m = rb.metas
+    return rb._replace(metas=H.MemberMetas([fn(i, dict(x)) for i, x in enumerate(m)], anchored=m.anchored,
+                                           lineage_verified=m.lineage_verified, manifest_sha256=m.manifest_sha256,
+                                           fmt=m.format, kind=m.kind, lineage=m.lineage))
+
+
+def test_backbone_identity_is_derived_from_the_member_metas_not_the_declared_split(res):
+    rb = _rb(res)
+    assert hp.backbone_identity(hp.ResearchPredictor(rb)) == {
+        "manifest_sha256": res.manifest_sha256, "kind": "research", "cache_sha256": res.lineage["cache"]["sha256"],
+        "held_out_sims": ["synthsim2"]}
+    lie = dict(rb.split, held_out_sims=["synthsim1"])
+    rb2 = rb._replace(split=lie, research=dict(rb.research, split=dict(rb.research["split"],
+                                                                         held_out_sims=["synthsim1"])))
+    assert hp.backbone_identity(hp.ResearchPredictor(rb2))["held_out_sims"] == ["synthsim2"]
+
+
+def test_backbone_identity_refuses_disagreeing_members_or_another_cache(res):
+    rb = _rb(res)
+    other = _metas(rb, lambda i, m: dict(m, recipe=dict(m["recipe"], holdout_sims=["synthsim1"])) if i else m)
+    with pytest.raises(MR.MFRecordError, match="different simulations"):
+        hp.backbone_identity(hp.ResearchPredictor(other))
+    cache = _metas(rb, lambda i, m: dict(m, cache_sha256=H64("another cache")) if i else m)
+    with pytest.raises(MR.MFRecordError, match="training cache"):
+        hp.backbone_identity(hp.ResearchPredictor(cache))
+
+
+def test_fold_whose_backbone_saw_the_held_out_group_is_refused(res, tmp_path):
+    c = res.lineage["cache"]["sha256"]
+    d = tmp_path / "saw"                                    # the backbone holds out synthsim2, the fold synthsim1
+    s = write_mf(d, manifest=res.manifest_sha256, cache=c, kind="fold", backbone_kind="research",
+                 held_out=["synthsim2"], fold={"fold_id": "f1", "holdout_sims": ["synthsim1"]})
+    with pytest.raises(MR.MFRecordError, match="trained on held-out"):
+        hp.load_research_bundle(res.bundle_dir, res.manifest_sha256, purpose="a test", mf_dir=str(d),
+                                mf_record_sha256=s)
+    d2 = tmp_path / "claims"                                # the record claims a held-out set the metas do not have
+    s2 = write_mf(d2, manifest=res.manifest_sha256, cache=c, kind="fold", backbone_kind="research",
+                  held_out=["synthsim1"], fold={"fold_id": "f1", "holdout_sims": ["synthsim1"]})
+    with pytest.raises(MR.MFRecordError, match="member metas say"):
+        hp.load_research_bundle(res.bundle_dir, res.manifest_sha256, purpose="a test", mf_dir=str(d2),
+                                mf_record_sha256=s2)
+
+
+def test_one_fold_through_the_predictor_reproduces_the_cache_input_path(res, tmp_path):
+    c = res.lineage["cache"]["sha256"]
+    d = tmp_path / "fold"
+    s = write_mf(d, manifest=res.manifest_sha256, cache=c, kind="fold", backbone_kind="research",
+                 held_out=["synthsim2"], fold={"fold_id": "f2", "holdout_sims": ["synthsim2"]})
+    rp = hp.load_research_bundle(res.bundle_dir, res.manifest_sha256, purpose="a test", mf_dir=str(d),
+                                 mf_record_sha256=s)
+    zs, taus = [2.6, 3.0, 3.4], [0.25, 0.4, 0.33]
+    x = np.stack([_x(z) for z in zs])
+    cache_path = hp.heldout_P_filt_at(rp, x, np.array(taus))
+    for i, (z, t) in enumerate(zip(zs, taus)):
+        np.testing.assert_allclose(rp.predict(PARAMS, z, tau_eff=t).P_class, cache_path["mf"][i], rtol=1e-12, atol=0)
+        np.testing.assert_allclose(rp.predict(PARAMS, z, tau_eff=t, fidelity="LF").P_class, cache_path["lf"][i],
+                                   rtol=1e-12, atol=0)
+    np.testing.assert_allclose(cache_path["lf"], hp.lf_P_filt_at(rp, x, np.array(taus)), rtol=1e-12, atol=0)
+
+
+def test_held_out_path_needs_a_fold_record(emu_lf, emu_mf):
+    for e in (emu_lf, emu_mf):
+        with pytest.raises(MR.MFRecordError, match="fold MF record"):
+            hp.heldout_P_filt_at(e, _x(3.0)[None], np.array([0.4]))
