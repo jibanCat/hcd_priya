@@ -47,7 +47,6 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_dndx_exact_inverse.py" = { tier = "wheel" }
 "tests/test_dnuis_arm_inject_spec.py" = { tier = "source" }
 "tests/test_dnuis_inject.py" = { tier = "wheel" }
-"tests/test_eligibility.py" = { tier = "wheel" }
 "tests/test_emulator_dndx_wc.py" = { tier = "wheel" }
 "tests/test_emulator_likelihood.py" = { tier = "wheel" }
 "tests/test_emulator_model.py" = { tier = "wheel" }
@@ -112,7 +111,6 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_tau_threshold_sensitivity.py" = { tier = "source" }
 "tests/test_train_release_meta.py" = { tier = "source" }
 "tests/test_tutorial_production_research.py" = { tier = "source" }
-"tests/test_wc_map.py" = { tier = "source" }
 "tests/test_xclass_cemu.py" = { tier = "wheel" }
 "tests/test_zflat_alpha_guard.py" = { tier = "wheel" }
 "tests/test_zslope_center.py" = { tier = "wheel" }
@@ -319,7 +317,10 @@ tier = "wheel"
 asset_tests = [
     "test_production_leg_loaders_unchanged",
 ]
-reason = "the declared tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, eBOSS DR14 P1D data, files of a local lya_emulator_full checkout, absent in CI"
+skipped_by_design = [
+    "test_metal_and_resolution_factors_bitwise_in_an_exact_replay",
+]
+reason = "the asset tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, eBOSS DR14 P1D data, files of a local lya_emulator_full checkout, absent in CI; the bit-level digest test needs a same-machine exact replay (HCD_EXACT_REPLAY=1 with HCD_PINNED_STACK=1 and the pinned stack), which a GitHub runner never is"
 
 [files."tests/test_gate_c_matched_set.py"]
 tier = "wheel"
@@ -679,3 +680,17 @@ reason = "the declared tests need DESI DR1 P1D data, the real LF training cache,
 [files."tests/test_tau_sum_rule.py"]
 tier = "no_tests"
 reason = "a diagnostic script named test_*.py with no test function; pytest collects nothing from it"
+
+[files."tests/test_eligibility.py"]
+tier = "wheel"
+skipped_by_design = [
+    "test_the_normaliser_fingerprint_is_bitwise_in_an_exact_replay",
+]
+reason = "the bit-level digest test needs a same-machine exact replay (HCD_EXACT_REPLAY=1 with HCD_PINNED_STACK=1 and the pinned stack), which a GitHub runner never is; the per-field tolerance tests of the file run instead"
+
+[files."tests/test_wc_map.py"]
+tier = "source"
+skipped_by_design = [
+    "test_golden_digests_of_the_map_rules_in_an_exact_replay",
+]
+reason = "the bit-level digest test needs a same-machine exact replay (HCD_EXACT_REPLAY=1 with HCD_PINNED_STACK=1 and the pinned stack), which a GitHub runner never is; the per-field tolerance tests of the file run instead"
