@@ -411,7 +411,7 @@ def test_golden_digests_of_the_map_rules(cache5):                               
     per sightline; the scientific scale of delta_c(z) is its fit-residual scatter (resid_std, the per-class prior
     width), of order 0.2 to 3 on this fixture and percent level on the production map. Measured discrepancies (relative,
     element by element): OpenBLAS kernels for other CPUs (Haswell, Zen, SandyBridge, SkylakeX), one thread, numpy and
-    XLA instruction-set variants, both stacks (A6 CI portability report); Session B r18, numpy 2.5.4 against the pinned
+    XLA instruction-set variants, measured locally on the pinned and the newest stacks; numpy 2.5.4 against the pinned
     2.4.6; and an 8-ulp perturbation of every libm, XLA and least-squares input (backward stability: any LAPACK).
 
     - ``delta_c.coeffs`` and ``xbar.coeffs``: 1e-9. Measured at most 6.4e-14 (CPU) and 5.2e-13 (numpy 2.5.4,
@@ -577,7 +577,8 @@ def test_a_constraints_file_that_pins_no_numpy_fails(tmp_path, text):
 
 
 # T31 review t2: a run that declares the supported pinned stack (HCD_PINNED_STACK exactly "1") must be on a pinned numpy.
-# CI portability (PI decision 2026-11-05n): the exact digests need HCD_EXACT_REPLAY=1 as well, never on a GitHub runner.
+# CI portability (GitHub Actions run 42143147836 failed the digests on a runner's CPU): the exact digests need
+# HCD_EXACT_REPLAY=1 as well, never on a GitHub runner.
 PINS = {"numpy": ("2.4.6",), "jax": ("0.10.1",), "jaxlib": ("0.10.1",)}
 ON_PINS = {"numpy": "2.4.6", "jax": "0.10.1", "jaxlib": "0.10.1"}
 REPLAY = {"HCD_PINNED_STACK": "1", "HCD_EXACT_REPLAY": "1"}

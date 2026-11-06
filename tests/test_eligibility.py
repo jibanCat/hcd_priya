@@ -283,7 +283,7 @@ GOLDEN_NORM_FINGERPRINT = "c60b1ac36059e32837f0b55e6657c9e05d00c4fbdbe8c2cd10a0f
 # a cross-run digest of computed floats (numpy's arcsinh and log are dispatched by CPU or taken from the system libm),
 # so it is required only in an exact replay (tests/portable_numerics.py); otherwise the tensors are compared with the
 # stored ones under the per-field tolerances below.
-NORM_REF = Path(__file__).parent / "golden" / "ci_portability" / "norm_cache5_pre_d5.npz"
+NORM_REF = Path(__file__).parent / "golden" / "ci_portability" / "norm_cache5_golden.npz"
 # Per-field tolerances (rtol, atol). Every tensor is a statistic in the transformed target space (log for f_nhi,
 # dN/dX and P_filt; arcsinh for delta): a change of a mean by e shifts the emulated log quantity by e (a relative
 # change e of the CDDF, dN/dX or P1D), a change of a std by e shifts it by e times the standardised target (a few).
@@ -379,7 +379,7 @@ def test_the_exact_replay_hashes_the_recomputed_normaliser(world, monkeypatch):
 
 
 def test_the_stored_normaliser_is_the_golden_fingerprint():
-    """The stored reference tensors are the pre-D5 normaliser, bit for bit (a stored file: exact everywhere)."""
+    """The stored reference tensors are the golden normaliser, bit for bit (a stored file: exact everywhere)."""
     ref = PN.load_reference(NORM_REF)
     assert E.tensors_sha256(ref) == GOLDEN_NORM_FINGERPRINT and set(norm_tols(ref)) == set(ref)
     flipped = {k: np.array(v, copy=True) for k, v in ref.items()}

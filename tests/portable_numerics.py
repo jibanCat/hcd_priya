@@ -28,7 +28,7 @@ CONSTRAINTS_FILE = os.path.join(REPO, "tools", "ci", "constraints-devenv.txt")
 PINNED_STACK_ENV = "HCD_PINNED_STACK"
 EXACT_REPLAY_ENV = "HCD_EXACT_REPLAY"
 EXACT_REPLAY_PACKAGES = ("numpy", "jax", "jaxlib")
-# The pins of Session B's tools/ci/constraints-devenv.txt, used only where that file is absent (the wheel tier runs a
+# The pins of tools/ci/constraints-devenv.txt, used only where that file is absent (the wheel tier runs a
 # copy of tests/ alone); test_wc_map.py checks that they equal the file's pins.
 PINNED_RECORDED = {"numpy": ("2.4.6",), "jax": ("0.10.1",), "jaxlib": ("0.10.1",)}
 
@@ -91,9 +91,9 @@ def numpy_pins(text, parse=None):
 
 
 def pinned_versions(name, path=CONSTRAINTS_FILE):
-    """The version(s) of ``name`` in the supported, pinned environment (docs/compatibility.md; the PI's rule B-D3).
+    """The version(s) of ``name`` in the supported, pinned environment (docs/compatibility.md).
 
-    - When the constraints file (Session B's ``tools/ci/constraints-devenv.txt``) exists, its exact pins of ``name``,
+    - When the constraints file (``tools/ci/constraints-devenv.txt``) exists, its exact pins of ``name``,
       read by ``package_pins``. Fail closed: a file that pins no version of ``name``, or whose line for it is not one
       exact pin, raises ValueError.
     - Only when the file is absent (a tests-only copy, or a tree without it): ``PINNED_RECORDED``."""
@@ -113,7 +113,7 @@ def pinned_numpy_versions(path=CONSTRAINTS_FILE):
 
 
 def pinned_stack_declared(environ=None):
-    """Whether this run declares itself the supported pinned stack: ``HCD_PINNED_STACK`` exactly ``"1"`` (Session B's
+    """Whether this run declares itself the supported pinned stack: ``HCD_PINNED_STACK`` exactly ``"1"`` (the
     supported CI job and its pinned replays set it; the newer-dependency jobs set it empty). Unset, empty or any other
     value (``"true"``, ``" 1"``) is not a declaration."""
     return (os.environ if environ is None else environ).get(PINNED_STACK_ENV) == "1"
