@@ -29,8 +29,11 @@ Questions about installing or using the package are welcome as issues too; say i
 
    ```bash
    python3.11 -m venv .venv && source .venv/bin/activate
-   pip install -c tools/ci/constraints-devenv.txt ".[test]"
+   pip install -c tools/ci/constraints-devenv.txt -e ".[test]"
    ```
+
+   The install is editable, so the code you change is the code that runs, and the commit the pipeline records
+   matches it.
 
 3. **Work on a branch** of your fork, and keep each pull request to one change.
 4. **Test.** Add tests for what you change. Tests use synthetic inputs only: no private data, unpublished results or
