@@ -154,10 +154,12 @@ def test_record_and_tables_are_anchored(tmp_path):
     with pytest.raises(MR.MFRecordError, match="published"):
         load(d, None)
     tp = os.path.join(d, MR.TABLES_FILE)
-    raw = bytearray(open(tp, "rb").read())
-    raw[-9] ^= 0x01
+    import h5py
+    size = os.path.getsize(tp)
     os.chmod(tp, 0o644)
-    open(tp, "wb").write(bytes(raw))
+    with h5py.File(tp, "r+") as f:                       # a changed table VALUE, same layout and size
+        f["mf"]["log_rho"][0] = f["mf"]["log_rho"][0] + 1.0
+    assert os.path.getsize(tp) == size
     with pytest.raises(MR.MFRecordError, match="tables"):
         load(d, sha)
 
