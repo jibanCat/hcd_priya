@@ -687,6 +687,20 @@ def test_without_the_opt_in_the_digest_tests_skip_with_a_reason(environ):
         run(PN.require_exact_replay, dict(REPLAY, GITHUB_ACTIONS="true"), versions=ON_PINS, pins=PINS)
 
 
+def test_a_skip_inside_call_unskipped_is_a_failure():
+    def skips():
+        pytest.skip("inner skip")
+    try:
+        PN.call_unskipped(skips)
+    except pytest.fail.Exception as e:
+        assert "skips skipped where it must run: inner skip" in str(e)
+    except pytest.skip.Exception:                  # caught here, so a skip let through fails this test
+        pytest.fail("call_unskipped let the skip through")
+    else:
+        pytest.fail("call_unskipped swallowed the skip")
+    assert PN.call_unskipped(lambda x, y=0: x + y, 2, y=3) == 5                       # otherwise a plain call
+
+
 def test_the_field_comparison_rules():
     want = {"f": np.array([1.0, -2.0, 0.0, np.nan]), "i": np.array([1, 2, 3])}
     tols = {"f": (1e-12, 1e-15), "i": (0, 0)}
