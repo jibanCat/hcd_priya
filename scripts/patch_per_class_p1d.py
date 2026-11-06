@@ -6,7 +6,9 @@ stream the tau file once and append a p1d_per_class.h5 file with four
 subset P1Ds (clean / LLS / subDLA / DLA) plus their mean-F and sightline
 counts, all in HDF5 with metadata attributes.
 
-Does NOT modify any existing output; only adds p1d_per_class.h5.
+Does NOT modify any existing output; only adds p1d_per_class.h5. A catalogue that the pipeline resume paths would
+refuse (catalog.load_validated_catalog: a pre-fix box-edge duplicate, an impossible span, a non-finite N_HI) is
+reported as REFUSED and nothing is written for that snapshot.
 
 Usage:
     python3 scripts/patch_per_class_p1d.py                       # all done snaps
@@ -26,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from hcd_analysis.catalog import AbsorberCatalog
+from hcd_analysis.catalog import CatalogIntegrityError, load_validated_catalog
 from hcd_analysis.io import parse_sim_params, spectra_files_for_sim, SimInfo
 from hcd_analysis.p1d import compute_p1d_per_class, save_p1d_per_class_hdf5
 
@@ -65,7 +67,10 @@ def patch_one(snap_dir: Path) -> str:
     hdf5_path = spectra_map[snap_num]
 
     try:
-        cat = AbsorberCatalog.load_npz(cat_path)
+        cat = load_validated_catalog(cat_path, nbins)     # the pipeline resume-path guard: refuses a pre-fix catalogue
+    except CatalogIntegrityError as e:
+        return f"REFUSED {snap_dir.name}: {e}"
+    try:
         res = compute_p1d_per_class(
             hdf5_path=hdf5_path,
             nbins=nbins, dv_kms=dv_kms,

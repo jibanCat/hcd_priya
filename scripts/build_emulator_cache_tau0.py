@@ -327,12 +327,14 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
     sharing Tier P's scale + target_F (so they decompose against the total).
     Stores P_by_bin[:, :n_k] and n_by_bin counts.
 
+    The Phase-1 catalogue is loaded through catalog.load_validated_catalog, the guard of the pipeline resume paths:
+    a catalogue built by the pre-fix finder (docs/bugs_found.md, bug 8) raises CatalogIntegrityError before any P1D
+    or dN/dX is computed from it.
+
     Returns (rows, snap_block).
     """
-    from hcd_analysis.catalog import AbsorberCatalog
+    from hcd_analysis import catalog as hcd_catalog
     from hcd_analysis.io import read_header
-    from hcd_analysis.priya_p1d import (compute_tier_c_p1d, bin_sightlines_by_nhi,
-                                        N_TIER_C_BINS, _apply_priya_filter)
 
     # PRIYA-exact params from SimulationICs.json (full precision; folder-name
     # parsing rounds them, and PRIYA's "Ap" is at a different pivot than CAMB As).
@@ -340,14 +342,15 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
 
     meta = bec.read_meta(snap_dir)
     cddf = bec.read_cddf(snap_dir)
-    dndx = bec.compute_dndx_per_class(meta["n_absorbers"], float(cddf["total_path"]))
-    catalog = AbsorberCatalog.load_npz(snap_dir / "catalog.npz")
 
     hdr = read_header(raw_tau_path)
     nbins = int(hdr.nbins)
     z_raw = float(hdr.redshift)
     # Hard pairing invariant: the catalogue (and its dv_kms, CDDF) must have been built on THIS raw file.
     assert_catalogue_built_on(meta, _catalogue_pix_max(snap_dir), hdr)
+    # Refuse a pre-fix (box-edge duplicated) or damaged catalogue, with the skewer length of the paired raw file.
+    catalog = hcd_catalog.load_validated_catalog(snap_dir / "catalog.npz", nbins)
+    dndx = bec.compute_dndx_per_class(meta["n_absorbers"], float(cddf["total_path"]))
     dv_kms = float(meta["dv_kms"])
     vmax = nbins * dv_kms
 
@@ -355,6 +358,8 @@ def build_tau0_rows(sim_name, snap, snap_dir, raw_tau_path, alpha_slope_grid,
     assert_label_matches_header(z_meta, z_raw)
     z_grid = _snap_z_to_priya_grid(z_meta)
 
+    from hcd_analysis.priya_p1d import (compute_tier_c_p1d, bin_sightlines_by_nhi,
+                                        N_TIER_C_BINS, _apply_priya_filter)
     tau_unfilt = _read_tau(raw_tau_path, n_skewers=n_skewers)
     rows = []
     for a_idx, alpha in enumerate(alpha_slope_grid):
