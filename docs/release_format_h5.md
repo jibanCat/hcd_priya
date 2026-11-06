@@ -333,7 +333,10 @@ simulations", so a record built with a production backbone (in-sample LF for the
 record to a production bundle; `predictor.load_research_bundle(..., mf_dir=..., mf_record_sha256=...)` applies a fold
 record to its research backbone (genuine held-out predictions for grouped cross-validation when that backbone excludes
 the held-out group). Both refuse a record whose backbone manifest, training cache, backbone kind, held-out simulations
-or box modes are not the bundle's. `predict(..., fidelity="LF")` gives the LF prediction of the same bundle, bit for
+or box modes are not the bundle's. The predictor applies only what it re-derives from the record's own anchored
+bytes (`mf_release.reverify`; a loaded `MFRecord` keeps them): a record built or changed in memory (another record's
+tables, a relabelled kind) is refused, so `provenance["mf"]` always describes the tables applied. `predict(...,
+fidelity="LF")` gives the LF prediction of the same bundle, bit for
 bit what the bundle loaded without an MF gives.
 
 **Writing.** `mf_release.write_mf_record(out_dir, tables, ...)` validates everything first, then creates `out_dir`

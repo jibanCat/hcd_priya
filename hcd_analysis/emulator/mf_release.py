@@ -422,7 +422,11 @@ def copy_json(x):
 class MFRecord(NamedTuple):
     """A loaded MF record, anchored on its published sha256 (``anchored``: the record bytes matched the published
     digest and the tables matched the record's; it says nothing about the HR cache's lineage, see ``caches`` in the
-    record). ``g(x, tau0)`` evaluates the correction (4, K) at one LF encoder input."""
+    record). ``g(x, tau0)`` evaluates the correction (4, K) at one LF encoder input.
+
+    It is sealed: ``record_bytes`` and ``tables_bytes`` are the anchored bytes it was parsed from. The predictor applies
+    a record only through ``reverify``, which re-derives the record and the tables from those bytes, so an object
+    built or modified in memory is refused rather than applied under another record's provenance."""
     record: dict
     record_sha256: str
     tables: dict
@@ -430,6 +434,8 @@ class MFRecord(NamedTuple):
     kind: str
     mf_dir: str
     anchored: bool
+    record_bytes: bytes = None
+    tables_bytes: bytes = None
 
     def module(self):
         from .mf_modes import ModeMF
@@ -473,11 +479,7 @@ def load_mf_record(mf_dir, *, expected_record_sha256, backbone_manifest_sha256, 
         raise MFRecordError(f"{mf_dir}: no readable {RECORD_FILE} ({e})") from None
     if hashlib.sha256(raw).hexdigest() != expected_record_sha256:
         raise MFRecordError(f"{rp}: sha256 does not match the published record sha256")
-    try:
-        rec = S._json_loads(raw, rp)
-    except S.SafeFormatError as e:
-        raise MFRecordError(str(e)) from None
-    check_record(rec)
+    rec = _parse_record(raw, rp)
     extra = sorted(set(os.listdir(d)) - {RECORD_FILE, TABLES_FILE})
     if extra:
         raise MFRecordError(f"{mf_dir}: unexpected files {extra}")
@@ -507,14 +509,57 @@ def load_mf_record(mf_dir, *, expected_record_sha256, backbone_manifest_sha256, 
         traw = S.read_regular(tp, _MAX_TABLE_BYTES + (1 << 20))
     except (S.SafeFormatError, OSError) as e:
         raise MFRecordError(f"{mf_dir}: tables unreadable ({e})") from None
+    tables, k = _parse_tables(rec, traw, tp)
+    return MFRecord(rec, expected_record_sha256, tables, k, rec["kind"], d, True, raw, traw)
+
+
+def _parse_record(raw, where):
+    try:
+        rec = S._json_loads(raw, where)
+    except S.SafeFormatError as e:
+        raise MFRecordError(str(e)) from None
+    return check_record(rec)
+
+
+def _parse_tables(rec, traw, where):
+    """The tables from their bytes, checked against the record: size and sha256 before libhdf5 parses them, then the
+    strict walk, the table checks and the shapes. Returns read-only (tables, k_com_hmpc)."""
     if len(traw) != rec["tables"]["bytes"] or hashlib.sha256(traw).hexdigest() != rec["tables"]["sha256"]:
-        raise MFRecordError(f"{tp}: the tables' sha256 or size does not match the record")
-    arrays = _read_tables(traw, tp)
+        raise MFRecordError(f"{where}: the tables' sha256 or size does not match the record")
+    arrays = _read_tables(traw, where)
     tables, k = _check_tables(arrays, arrays["k_com_hmpc"])
     t = rec["tables"]
     if (k.size, tables["z_tab"].size, tables["tau_tab"].size) != (t["n_modes"], t["n_z"], t["n_rung"]):
-        raise MFRecordError(f"{tp}: table shapes differ from the record")
+        raise MFRecordError(f"{where}: table shapes differ from the record")
     for v in tables.values():
         v.setflags(write=False)
     k.setflags(write=False)
-    return MFRecord(rec, expected_record_sha256, tables, k, rec["kind"], d, True)
+    return tables, k
+
+
+def reverify(mf):
+    """The record to APPLY, re-derived from a loaded record's own sealed bytes (``MFRecord.record_bytes`` and
+    ``tables_bytes``): the record bytes must hash to ``record_sha256``, and the record, its kind, the tables and the
+    modes are parsed again from the bytes, exactly as ``load_mf_record`` does. Refused: anything that is not an
+    ``MFRecord`` from ``load_mf_record`` (no sealed bytes, not anchored), bytes that do not match the digest, and an
+    object whose record, kind, tables or modes were changed in memory (they differ from what its bytes give). Returns
+    a fresh ``MFRecord`` built from the bytes only, so the provenance it reports describes the tables applied. What it
+    cannot catch: a caller who replaces the bytes and the digest together is presenting another anchored record; the
+    trust root is the published digest the caller passes to ``load_mf_record``."""
+    if not isinstance(mf, MFRecord) or mf.anchored is not True or not isinstance(mf.record_bytes, bytes) \
+            or not isinstance(mf.tables_bytes, bytes) or not isinstance(mf.record_sha256, str):
+        raise MFRecordError("the predictor takes an MF record loaded by mf_release.load_mf_record (sealed with its "
+                            "anchored bytes)")
+    where = f"the MF record {mf.record_sha256[:12]}"
+    if hashlib.sha256(mf.record_bytes).hexdigest() != mf.record_sha256:
+        raise MFRecordError(f"{where}: its sealed bytes do not match its record sha256")
+    rec = _parse_record(mf.record_bytes, where)
+    tables, k = _parse_tables(rec, mf.tables_bytes, where)
+    same = (isinstance(mf.record, dict) and mf.record == rec and mf.kind == rec["kind"]
+            and isinstance(mf.tables, Mapping) and set(mf.tables) == set(tables)
+            and all(np.array_equal(np.asarray(mf.tables[n]), tables[n]) for n in tables)
+            and np.array_equal(np.asarray(mf.k_com_hmpc), k))
+    if not same:
+        raise MFRecordError(f"{where}: the record, kind, tables or modes were changed in memory (they differ from its "
+                            "anchored bytes); load the record with mf_release.load_mf_record")
+    return MFRecord(rec, mf.record_sha256, tables, k, rec["kind"], mf.mf_dir, True, mf.record_bytes, mf.tables_bytes)

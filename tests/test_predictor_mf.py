@@ -191,7 +191,50 @@ def test_a_hand_built_or_unverified_mf_is_refused(info, mf):
         hp.Bundle(rb, mf=rec._replace(anchored=False))
     with pytest.raises(MR.MFRecordError, match="load_mf_record"):
         hp.Bundle(rb, mf={"tables": rec.tables})
+    with pytest.raises(MR.MFRecordError, match="load_mf_record"):              # a hand-built tuple has no sealed bytes
+        hp.Bundle(rb, mf=MR.MFRecord(rec.record, rec.record_sha256, rec.tables, rec.k_com_hmpc, rec.kind,
+                                     rec.mf_dir, True))
     assert "mf" in hp.Bundle(rb, mf=rec).provenance
+
+
+def test_a_record_changed_in_memory_is_refused_and_provenance_describes_the_tables_applied(info, mf, tmp_path):
+    """C1 review m1 (forgeries F11, F10d): the predictor applies only what it re-derives from the record's sealed
+    bytes. Another record's tables, a relabelled kind, a changed record dict or bytes that do not match the digest are
+    refused; an accepted record's provenance names the sha256 of the tables actually applied."""
+    import hashlib
+    from hcd_analysis.emulator import safe_h5 as H
+    rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
+    c = info.lineage["cache"]["sha256"]
+    a = MR.load_mf_record(mf[0], expected_record_sha256=mf[1], backbone_manifest_sha256=info.manifest_sha256)
+    d = tmp_path / "b"
+    sb = write_mf(d, manifest=info.manifest_sha256, cache=c, exclude=("synthsim2",))   # another fit, same backbone
+    b = MR.load_mf_record(str(d), expected_record_sha256=sb, backbone_manifest_sha256=info.manifest_sha256)
+    assert any(not np.array_equal(a.tables[n], b.tables[n]) for n in MM.TABLE_KEYS)
+    forged = {
+        "F11: A's record with B's tables": a._replace(tables=b.tables),
+        "A's digest with B's bytes": a._replace(record_bytes=b.record_bytes, tables_bytes=b.tables_bytes),
+        "A's bytes with B's tables bytes": a._replace(tables_bytes=b.tables_bytes),
+        "a changed record dict": a._replace(record=dict(a.record, mf_version="another")),
+        "a relabelled kind": a._replace(kind="historical"),
+        "B's modes": a._replace(k_com_hmpc=np.asarray(a.k_com_hmpc) * 1.5),
+    }
+    for what, f in forged.items():
+        with pytest.raises(MR.MFRecordError, match="changed in memory|do not match|sha256"):
+            hp.Bundle(rb, mf=f)
+    hd = tmp_path / "hist"
+    sh = write_mf(hd, manifest=info.manifest_sha256, cache=c, kind="historical", exclude=())
+    hist = MR.load_mf_record(str(hd), expected_record_sha256=sh, backbone_manifest_sha256=info.manifest_sha256,
+                             kind="historical")
+    relabelled = hist._replace(kind="release", record=dict(hist.record, kind="release"))       # F10d
+    with pytest.raises(MR.MFRecordError, match="changed in memory"):
+        hp.Bundle(rb, mf=relabelled)
+    for rec, sha in ((a, mf[1]), (b, sb)):                    # genuine records: provenance = the tables applied
+        emu = hp.Bundle(rb, mf=rec)
+        p = emu.predict(PARAMS, 3.0, tau_eff=0.4)
+        assert p.provenance["mf"]["record_sha256"] == sha
+        assert p.provenance["mf"]["tables_sha256"] == hashlib.sha256(rec.tables_bytes).hexdigest()
+        lf = emu.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF").P_class
+        np.testing.assert_allclose(p.P_class, lf * np.exp(rec.g(_x(3.0), 0.4)), rtol=1e-13, atol=0)
 
 
 def test_bundle_rechecks_the_binding_of_a_loaded_record(info, tmp_path):
