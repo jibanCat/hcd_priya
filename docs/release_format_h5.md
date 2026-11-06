@@ -319,8 +319,9 @@ kind; it is never applied as the release MF), a composition or cache digest othe
 file, a record whose `hr_inputs` name a catalogue-derived HR column or give those columns another status, a
 `mean_flux_convention` other than the code's, and a legacy `.npz` product.
 
-**Kind rules.** A `release` record has a release backbone, no fold, a clean fit tree (`fit_code.dirty` false) and an LF
-cache equal to the backbone's training cache. A `fold` record names its held-out group, which lies outside its
+**Kind rules.** Every record's LF cache is its backbone's training cache (`caches.lf.sha256` equals
+`backbone.cache_sha256`): the targets were formed with that backbone. A `release` record has a release backbone, no
+fold and a clean fit tree (`fit_code.dirty` false). A `fold` record names its held-out group, which lies outside its
 training and excluded sets; `backbone_excludes_holdout` must equal "the group is among the backbone's held-out
 simulations", so a record built with a production backbone (in-sample LF for the held-out group) says so.
 

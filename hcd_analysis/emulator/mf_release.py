@@ -221,6 +221,8 @@ def check_record(rec):
         if not isinstance(c[side]["file"], str) or not _PLAIN.match(c[side]["file"]):
             raise MFRecordError(f"caches.{side}.file must be a plain file name, never a path")
         _hex(c[side]["sha256"], 64, f"caches.{side}.sha256")
+    if c["lf"]["sha256"] != b["cache_sha256"]:                     # every kind: the targets used the backbone's cache
+        raise MFRecordError(f"a {rec['kind']} MF's LF cache must be its backbone's training cache")
     comp = rec["composition"]
     _keys(comp, _COMPOSITION_KEYS, "composition")
     if not isinstance(comp["id"], str) or not comp["id"].strip():
@@ -272,8 +274,6 @@ def check_record(rec):
                 raise MFRecordError("a release MF needs a release backbone, not a research one")
             if fc["dirty"]:
                 raise MFRecordError("a release MF is fitted from a clean tree (fit_code.dirty is true)")
-            if c["lf"]["sha256"] != b["cache_sha256"]:
-                raise MFRecordError("a release MF's LF cache must be its backbone's training cache")
     return rec
 
 

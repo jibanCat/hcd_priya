@@ -258,6 +258,22 @@ def test_release_record_needs_its_lf_cache_to_be_the_backbone_cache(tmp_path):
                                           "hr": {"file": "hr.h5", "sha256": HR_SHA}})
 
 
+def test_every_kind_needs_its_lf_cache_to_be_the_backbone_cache(tmp_path):
+    """A fold (or historical) record's targets were formed with its backbone, so its LF cache is that backbone's
+    training cache: refused at write and at load (check_record), not only when attached to a predictor."""
+    other = {"lf": {"file": "lf.h5", "sha256": H64("another lf")}, "hr": {"file": "hr.h5", "sha256": HR_SHA}}
+    fold = {"fold_id": "synthetic-fold-0", "holdout_sims": ["synthA"]}
+    rb = {"manifest_sha256": BACKBONE, "kind": "research", "cache_sha256": LF_SHA, "held_out_sims": ["synthA"]}
+    with pytest.raises(MR.MFRecordError, match="fold MF's LF cache must be its backbone's training cache"):
+        build(tmp_path, name="f", kind="fold", fold=fold, backbone=rb, caches=other)
+    with pytest.raises(MR.MFRecordError, match="historical MF's LF cache must be its backbone's training cache"):
+        build(tmp_path, name="h", kind="historical", caches=other)
+    d, sha, _ = build(tmp_path, name="ok", kind="fold", fold=fold, backbone=rb)
+    s2 = rewrite(d, lambda r: dict(r, caches=dict(r["caches"], lf=dict(r["caches"]["lf"], sha256=H64("another lf")))))
+    with pytest.raises(MR.MFRecordError, match="fold MF's LF cache must be its backbone's training cache"):
+        load(d, s2, kind="fold")
+
+
 # --------------------------------------------------------------------------------------------- clean tree
 def test_release_record_from_a_dirty_tree_is_refused(tmp_path):
     with pytest.raises(MR.MFRecordError, match="dirty"):
