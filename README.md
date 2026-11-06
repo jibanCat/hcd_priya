@@ -179,6 +179,34 @@ The files open with standard tools (`h5ls -r member.h5`). Contract and full usag
 step-by-step guide to production and research bundles, with executable examples:
 [`docs/tutorials/production_and_research_bundles.md`](docs/tutorials/production_and_research_bundles.md).
 
+### LF+MF prediction (the multi-fidelity correction)
+
+The low-fidelity (LF) emulator predicts the per-class P1D of the low-resolution PRIYA simulations. A multi-fidelity
+(MF) record, fitted on matched high- and low-resolution simulation pairs, calibrates it to high resolution:
+P_MF = P_LF exp(g(z, tau0, k)), where g does not depend on the cosmological parameters and is bound to exactly one LF
+backbone bundle. **No validated release MF exists yet.** The build of the release MF record and its grouped (K-fold)
+cross-validation are both pending, and the PI approves the K-fold acceptance criteria before any MF is released. The
+calls below show the interface only; every path and digest in them is a placeholder.
+
+```python
+import hcd_analysis.predictor as hp
+emu = hp.load_release("path/to/release", "<published release sha256>")    # release.json names both parts
+# the same, with the two digests given directly:
+emu = hp.load_bundle("path/to/release/backbone", "<backbone manifest sha256>",
+                     mf_dir="path/to/release/mf", mf_record_sha256="<MF record sha256>")
+pred = emu.predict(params, 3.0, tau_eff=0.36)                 # LF+MF: the default once an MF record is loaded
+lf = emu.predict(params, 3.0, tau_eff=0.36, fidelity="LF")    # the LF backbone alone, bit for bit
+pred.flags["mf_applied"], pred.provenance["mf"]["record_sha256"]
+```
+
+`provenance["mf"]` names the record, its composition and the rulings that set it, the fit commit, the mean-flux
+convention of its targets (status PROPOSED), the HR inputs used, and the two cache digests with what each establishes:
+the LF cache is lineage-verified through the backbone, while the HR cache is digest-anchored only and never
+lineage-verified. Below the lowest redshift of the MF tables an LF+MF prediction is refused (`MFRangeError`); ask for
+`fidelity="LF"` there. A bundle loaded without an MF record predicts exactly as before, and `fidelity="LF+MF"` on it
+raises `MFUnavailableError`. Details: `docs/release_format_h5.md`, sections "The multi-fidelity record" and "The
+release manifest".
+
 Throughout the rest of this README, each stage is marked with what it needs:
 **requires the full data / Great Lakes (not in this repo)** for anything that
 builds the catalogs, the full cache, or trains the emulator; and
