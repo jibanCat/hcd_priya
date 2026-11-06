@@ -697,3 +697,5 @@ def test_the_field_comparison_rules():
         PN.field_mismatches(want, want, dict(tols, f=(-1e-12, 0)))
     with pytest.raises(ValueError, match="its own tolerance"):
         PN.field_mismatches(want, want, {"f": tols["f"]})
+    with pytest.raises(ValueError, match=r"missing \[\], unknown \['extra'\]"):            # an extra entry too
+        PN.field_mismatches(want, want, dict(tols, extra=(1e-12, 0.0)))

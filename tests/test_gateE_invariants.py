@@ -174,3 +174,5 @@ def test_the_factor_comparison_passes_rounding_and_refuses_a_meaningful_change()
     assert PN.field_mismatches({k: v for k, v in ref.items() if k != FACTOR_FIELDS[5]}, ref, FACTOR_TOLS) == ["keys"]
     with pytest.raises(ValueError, match="its own tolerance"):
         PN.field_mismatches(ref, ref, {k: v for k, v in FACTOR_TOLS.items() if k != FACTOR_FIELDS[0]})
+    with pytest.raises(ValueError, match="unknown"):
+        PN.field_mismatches(ref, ref, dict(FACTOR_TOLS, extra=(1e-12, 0.0)))
