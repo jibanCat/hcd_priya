@@ -26,6 +26,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_analyze_dnuis_resolution_oos.py" = { tier = "source" }
 "tests/test_analyze_lls_dispcenter.py" = { tier = "source" }
 "tests/test_blinding.py" = { tier = "wheel" }
+"tests/test_build_mf_release.py" = { tier = "source" }
 "tests/test_bundle_lineage.py" = { tier = "wheel" }
 "tests/test_carry_validated_cache.py" = { tier = "source" }
 "tests/test_catalog_systems.py" = { tier = "source" }
@@ -83,14 +84,17 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_lyaemu_loo_refit.py" = { tier = "source" }
 "tests/test_metal_inject.py" = { tier = "wheel" }
 "tests/test_mf_modes.py" = { tier = "wheel" }
+"tests/test_mf_release.py" = { tier = "wheel" }
 "tests/test_norc_single_authority.py" = { tier = "source" }
 "tests/test_omega_hi.py" = { tier = "source" }
 "tests/test_packaging.py" = { tier = "wheel" }
 "tests/test_predict_physical_grid.py" = { tier = "wheel" }
 "tests/test_predictor.py" = { tier = "wheel" }
+"tests/test_predictor_mf.py" = { tier = "wheel" }
 "tests/test_prod_forward_wiring.py" = { tier = "source" }
 "tests/test_prod_sbc_checkpoint.py" = { tier = "source" }
 "tests/test_product_manifest.py" = { tier = "wheel" }
+"tests/test_products_mf_loader.py" = { tier = "wheel" }
 "tests/test_rcinj_oos_spec.py" = { tier = "source" }
 "tests/test_real_fit_export.py" = { tier = "source" }
 "tests/test_registry.py" = { tier = "wheel" }
@@ -135,6 +139,10 @@ reason = "needs the D5 integration data (Turbo bundles and members) named by HCD
 [files."tests/integration/test_d5_w1_members.py"]
 tier = "assets"
 reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+
+[files."tests/integration/test_mf_release_real.py"]
+tier = "assets"
+reason = "needs the MF integration data (the release MF record and its inputs) named by HCD_MF_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
 
 [files."tests/external/test_lyaemu_adapter_guards.py"]
 tier = "external"
