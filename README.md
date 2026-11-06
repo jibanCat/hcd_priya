@@ -75,7 +75,8 @@ hcd --help
 
 **Working in a clone.** To run the scripts or the pipeline from the clone, install it editable instead:
 `pip install -c tools/ci/constraints-devenv.txt -e ".[test]"`. The pipeline records the clone's commit, and only
-an editable install makes that commit the code that runs; a plain install runs the copy made when it was installed.
+an editable install makes that commit the code that runs (with your changes committed); a plain install runs the
+copy made when it was installed.
 
 The distribution is named `hcd-priya` (it is not on PyPI); it installs the `hcd_analysis` package and the `hcd`
 command. `pyproject.toml` declares the dependencies, and `requirements.txt` only points to the install above.

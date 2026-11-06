@@ -43,7 +43,8 @@ pip install -c tools/ci/constraints-devenv.txt ".[test]"
 ```
 
 To run the scripts or the pipeline from a clone, install it editable (`-e`), as `CONTRIBUTING.md` does: the pipeline
-records the clone's commit, and only an editable install makes that the code that runs.
+records the clone's commit, and only an editable install makes that the code that runs (with the changes
+committed).
 
 `fake_spectra`, needed only to build catalogs and P1D from raw simulation spectra, is installed separately
 (`docs/fake_spectra_integration.md`) and is not covered by this table.
