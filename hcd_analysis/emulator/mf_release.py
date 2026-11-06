@@ -233,19 +233,20 @@ def check_record(rec):
     if not train:
         raise MFRecordError("train_sims is empty")
     if set(train) & set(comp["excluded_sims"]):
-        raise MFRecordError(f"train_sims include excluded simulations {sorted(set(train) & set(comp['excluded_sims']))}")
+        both = sorted(set(train) & set(comp["excluded_sims"]))
+        raise MFRecordError(f"train_sims include excluded simulations {both}")
     if not isinstance(rec["n_pairs_train"], int) or isinstance(rec["n_pairs_train"], bool) or rec["n_pairs_train"] < 1:
         raise MFRecordError("n_pairs_train must be a positive integer")
     h = rec["hr_inputs"]
     if h != HR_INPUTS:
         bad = sorted(set((h or {}).get("used", [])) & set(HR_INPUTS["excluded_catalogue_derived"])) \
             if isinstance(h, dict) and isinstance(h.get("used"), list) else []
-        raise MFRecordError("hr_inputs differ from the MF's HR inputs: the HR catalogue-derived columns are pre-fix and "
-                            "are neither used nor given another status (PI ruling 2026-11-06b A1)"
+        raise MFRecordError("hr_inputs differ from the MF's HR inputs: the HR catalogue-derived columns are pre-fix "
+                            "and are neither used nor given another status (PI ruling 2026-11-06b A1)"
                             + (f"; it names {bad}" if bad else ""))
     if rec["mean_flux_convention"] != MEAN_FLUX_CONVENTION:
-        raise MFRecordError("mean-flux convention differs from the code's PROPOSED record (it is under audit, PI ruling "
-                            "2026-11-06b D2; it changes only with the code)")
+        raise MFRecordError("mean-flux convention differs from the code's PROPOSED record (it is under audit, PI "
+                            "ruling 2026-11-06b D2; it changes only with the code)")
     fc = rec["fit_code"]
     _keys(fc, {"commit", "dirty"}, "fit_code")
     _hex(fc["commit"], 40, "fit_code.commit")
@@ -327,7 +328,8 @@ def _read_tables(raw, where):
                 if aid.shape == () and aid.get_type().get_class() == h5py.h5t.STRING:
                     got = f.attrs["format"]
             if not isinstance(got, str) or got != TABLES_FORMAT:
-                raise MFRecordError(f"{where}: root attributes must be exactly a scalar string format = {TABLES_FORMAT}")
+                raise MFRecordError(f"{where}: root attributes must be exactly a scalar string format = "
+                                    f"{TABLES_FORMAT}")
             if len(f) != 1 or list(f.keys()) != ["mf"]:
                 raise MFRecordError(f"{where}: the top level must hold exactly /mf")
             link = f.get("mf", getlink=True)
@@ -418,7 +420,8 @@ class MFRecord(NamedTuple):
     def provenance(self):
         r = self.record
         return {"record_sha256": self.record_sha256, "mf_version": r["mf_version"], "kind": r["kind"],
-                "backbone_manifest_sha256": r["backbone"]["manifest_sha256"], "composition": copy_json(r["composition"]),
+                "backbone_manifest_sha256": r["backbone"]["manifest_sha256"],
+                "composition": copy_json(r["composition"]),
                 "fold": copy_json(r["fold"]), "train_sims": list(r["train_sims"]), "caches": copy_json(r["caches"]),
                 "tables_sha256": r["tables"]["sha256"], "fit_code": copy_json(r["fit_code"]),
                 "mean_flux_convention": copy_json(r["mean_flux_convention"]),

@@ -5,7 +5,6 @@ Predicates checked here: write-once; the composition and its ruling ids recorded
 backbone digests recorded and checked at load; the record anchored by its own sha256 and the tables by theirs; a strict
 HDF5 structure; the HR catalogue-derived columns excluded (a tested refusal); the mean-flux convention recorded as
 PROPOSED; a release record refused from a dirty tree; held-out (fold) fits that exclude simulation groups."""
-import copy
 import hashlib
 import json
 import os
@@ -166,7 +165,6 @@ def test_record_and_tables_are_anchored(tmp_path):
 def test_strict_tables_file_refuses_an_extra_dataset_or_attribute(tmp_path):
     import h5py
     d, sha, _ = build(tmp_path)
-    tp = os.path.join(d, MR.TABLES_FILE)
     for mutate in (lambda f: f["mf"].create_dataset("extra", data=np.zeros(2)),
                    lambda f: f.attrs.__setitem__("note", "x"),
                    lambda f: f["mf"]["log_rho"].attrs.__setitem__("unit", "x")):
@@ -268,7 +266,7 @@ def test_release_record_from_a_dirty_tree_is_refused(tmp_path):
         load(d, s2)
 
 
-# --------------------------------------------------------------------------------------------- HR catalogue columns (06b A1)
+# ------------------------------------------------------------------------------------- HR catalogue columns (06b A1)
 def test_hr_view_refuses_catalogue_derived_columns():
     _, hr = synthetic_pairs()
     v = MR.hr_view(hr)

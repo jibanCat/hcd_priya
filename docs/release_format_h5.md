@@ -277,6 +277,71 @@ benchmark's `3496030`), predates them. Differences a user of an earlier version 
   `TypeError`);
 - `scripts/export_safe_bundle.py` requires the recipe to state `n_train` and `n_val` and the content checks to PASS.
 
+## The multi-fidelity record (`hcd_priya.mf_record/1`)
+
+**What it is.** The LF members predict the per-class PRIYA-filtered P1D of the low-resolution simulations. The
+multi-fidelity (MF) correction turns that into an HR-calibrated prediction, P_MF = P_LF exp(g(z, tau0, k)). g is
+measured mode by mode on matched HR/LF pairs, g = log P_HR - log P_LF,backbone, and fitted as a table model that does
+not depend on the cosmological parameters (`mf_modes.fit_mode_mf`: log_rho + gbar_z + gbar_tau + one rank-1 z x tau0
+term). Because the targets use the LF backbone's predictions, a record is bound to exactly one backbone bundle.
+
+**Layout.** A record is a directory of its own (it is not listed in a bundle's manifest, so a backbone's manifest
+digest does not change when an MF is added). It holds exactly:
+
+- `mf_tables.h5`: the root attribute `format = "hcd_priya.mf/1"` and the group `/mf`, flat, holding one contiguous,
+  unfiltered, attribute-free, little-endian float64 dataset per table: `log_rho` (K), `gbar_z_tab` (Nz, 4, K),
+  `gtau_tab` (Nr, 4, K), `a_k` (4, K), `u_z` (Nz), `u_tau` (Nr), `z_tab` (Nz, ascending), `tau_tab` (the rung index
+  0..Nr-1), `tau_by_z` (Nz, Nr, ascending in rung) and `k_com_hmpc` (K, the box modes 2 pi n / L). Nothing else.
+- `mf_record.json` (UTF-8 JSON, closed key set; `hcd_analysis/emulator/mf_release.py`):
+  - `format` (`"hcd_priya.mf_record/1"`), `mf_version`, `kind` (`release`, `fold` or `historical`), `model_form`;
+  - `tables`: `file`, `format`, `sha256`, `bytes`, `n_modes`, `n_z`, `n_rung`;
+  - `backbone`: `manifest_sha256` (the backbone bundle's manifest), `kind` (`release` or `research`),
+    `cache_sha256` (the backbone's training cache) and `held_out_sims` (a research backbone's held-out simulations);
+  - `caches`: `lf` and `hr`, each `{file, sha256}` (file names only, never paths);
+  - `composition`: `id`, `excluded_sims` and `ruling_ids` (the rulings that set it; at least one);
+  - `fold`: null, or `{fold_id, holdout_sims, backbone_excludes_holdout}` for a held-out fit;
+  - `train_sims`, `n_pairs_train`;
+  - `hr_inputs`: the HR cache fields the MF reads (the per-class P1D rows and their row keys) and the
+    catalogue-derived HR columns it excludes, with their status;
+  - `mean_flux_convention`: the normalisation of the per-class P1D targets as the code computes it today (the
+    function and line are named), status `PROPOSED`;
+  - `fit_code`: `{commit, dirty}` of the fit.
+
+A published record comes with the sha256 of its `mf_record.json`; the record pins the tables by sha256 and size.
+
+**Loading.** `mf_release.load_mf_record(dir, expected_record_sha256=..., backbone_manifest_sha256=..., kind="release",
+composition=None, lf_cache_sha256=None, hr_cache_sha256=None)` reads the record through one no-follow descriptor,
+compares its sha256 with the published one before parsing, validates the closed schema and the kind rules, compares the
+tables' sha256 before libhdf5 parses them, and walks the tables file with the same strict rules as a member (no links,
+no attributes but the root `format`, no chunked, filtered, compact, external or virtual storage, finite values only).
+It refuses: another backbone, another kind than the one asked for (a `historical` record loads only when asked for by
+kind; it is never applied as the release MF), a composition or cache digest other than the expected ones, any extra
+file, a record whose `hr_inputs` name a catalogue-derived HR column or give those columns another status, a
+`mean_flux_convention` other than the code's, and a legacy `.npz` product.
+
+**Kind rules.** A `release` record has a release backbone, no fold, a clean fit tree (`fit_code.dirty` false) and an LF
+cache equal to the backbone's training cache. A `fold` record names its held-out group, which lies outside its
+training and excluded sets; `backbone_excludes_holdout` must equal "the group is among the backbone's held-out
+simulations", so a record built with a production backbone (in-sample LF for the held-out group) says so.
+
+**In the predictor.** `predictor.load_bundle(bundle_dir, sha256, mf_dir=..., mf_record_sha256=...)` applies a release
+record to a production bundle; `predictor.load_research_bundle(..., mf_dir=..., mf_record_sha256=...)` applies a fold
+record to its research backbone (genuine held-out predictions for grouped cross-validation when that backbone excludes
+the held-out group). Both refuse a record whose backbone manifest, training cache, backbone kind, held-out simulations
+or box modes are not the bundle's. `predict(..., fidelity="LF")` gives the LF prediction of the same bundle, bit for
+bit what the bundle loaded without an MF gives.
+
+**Writing.** `mf_release.write_mf_record(out_dir, tables, ...)` validates everything first, then creates `out_dir`
+(an existing directory, file or symlink is refused: a record is written once), writes the tables through the
+temporary file's own descriptor and publishes them by hard link, then writes the record last.
+`scripts/build_mf_release.py` builds a record from digest-pinned caches and an anchored backbone; it refuses an existing
+output directory and a release build from a dirty tree before reading any input.
+
+**Historical MF products.** The gate D product (`mf_modes_all6.npz`, `mf_modes.save_mode_mf`) is the historical `.npz`
+container, read with `allow_pickle=False` by `products.load_mf_product`, which checks the LF ensemble, the LF and HR
+cache digests and the composition (`"all"` for a product that records none). It is not a release record and the
+release loader refuses it.
+
 ## What the loader guarantees
 
 - **No code execution from the files.** Nothing is unpickled or evaluated; the network is built from code
