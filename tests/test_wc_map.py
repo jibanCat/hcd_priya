@@ -444,18 +444,23 @@ def test_golden_digests_of_the_map_rules(cache5):                               
     assert payload_mismatches(sub, GOLDEN_PAYLOAD_SUBSET) == []
 
 
-def test_golden_digests_of_the_map_rules_in_an_exact_replay(cache5):              # T31, bit level
-    """Byte identity of the refitted payloads: only in an exact replay; otherwise a SKIP that says so."""
+@pytest.mark.parametrize("which", ["refit", "refit_subset"])
+def test_golden_digests_of_the_map_rules_in_an_exact_replay(cache5, which):        # T31, bit level
+    """Byte identity of each refitted payload, one digest per case (refit_subset calls refit, so a shared test would
+    let one digest hide behind the other): only in an exact replay; otherwise a SKIP that says so."""
     PN.require_exact_replay()
     d = _load(cache5)
-    assert W.payload_sha256(W.refit(d)) == GOLDEN_WCMAP_REFIT
-    assert W.payload_sha256(W.refit_subset(d, ["sim0", "sim1", "sim3", "sim4"])) == GOLDEN_WCMAP_SUBSET
+    if which == "refit":
+        assert W.payload_sha256(W.refit(d)) == GOLDEN_WCMAP_REFIT
+    else:
+        assert W.payload_sha256(W.refit_subset(d, ["sim0", "sim1", "sim3", "sim4"])) == GOLDEN_WCMAP_SUBSET
 
 
 @pytest.mark.parametrize("which", ["refit", "refit_subset"])
 def test_the_exact_replay_hashes_the_refitted_payloads(cache5, monkeypatch, which):
-    """The exact branch forced, one refitted payload moved by one ulp in one coefficient: the digest test must fail.
-    So it hashes the refitted payloads, never the stored golden payloads (which hash to the goldens everywhere)."""
+    """The exact branch forced, one refitted payload moved by one ulp in one coefficient: that payload's own digest
+    case must fail. So each digest hashes its refitted payload, never the stored golden payload (which hashes to the
+    golden everywhere)."""
     monkeypatch.setattr(PN, "exact_replay", lambda *a, **k: True)
     real = getattr(W, which)
 
@@ -465,7 +470,7 @@ def test_the_exact_replay_hashes_the_refitted_payloads(cache5, monkeypatch, whic
         return doc
     monkeypatch.setattr(W, which, one_ulp)
     with pytest.raises(AssertionError):
-        PN.call_unskipped(test_golden_digests_of_the_map_rules_in_an_exact_replay, cache5)
+        PN.call_unskipped(test_golden_digests_of_the_map_rules_in_an_exact_replay, cache5, which)
 
 
 def test_the_stored_golden_payloads_are_the_golden_digests():
