@@ -13,6 +13,12 @@ code release (see the last section).
 - [ ] The newer-dependency jobs are read. A failure there is listed in the release notes and is never hidden.
 - [ ] The older-libhdf5 job passes.
 - [ ] The documentation builds on Read the Docs, with warnings treated as errors.
+- [ ] The bit-level digest replay passes on a maintainer's machine with the supported pinned stack (CI never runs
+      it: CI compares floating-point results with stored references at stated tolerances). From the clone, with an
+      editable install, one file per run:
+      `HCD_EXACT_REPLAY=1 HCD_PINNED_STACK=1 JAX_PLATFORMS=cpu python -m pytest -q tests/<file>` for
+      `test_eligibility.py`, `test_gateE_invariants.py` and `test_wc_map.py`. Run pytest directly:
+      `tools/ci/run_test_tier.py` declares these digest tests as skipped by design and fails a file where they run.
 
 ## 3. Distribution
 - [ ] The sdist and wheel are built from a clean checkout of the release commit, with `SOURCE_DATE_EPOCH` set to the
