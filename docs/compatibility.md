@@ -31,8 +31,8 @@ outputs) are not run in CI. They are listed with their reasons in `tests/ci_tier
 
 Floating-point results are compared with stored reference arrays at stated tolerances, so a job gives the same
 verdict on any runner CPU. The bit-level digests of three test files are never checked in CI: they run only in an
-opt-in replay on a maintainer's machine with the pinned stack (`HCD_EXACT_REPLAY=1`; see
-`docs/release_checklist.md`).
+opt-in replay with the pinned stack on the kind of CPU they were recorded on, x86-64 with AVX-512
+(`HCD_EXACT_REPLAY=1`; see `docs/release_checklist.md`). On another kind of CPU a digest failure is inconclusive.
 
 ## Installing the supported environment
 

@@ -13,9 +13,11 @@ code release (see the last section).
 - [ ] The newer-dependency jobs are read. A failure there is listed in the release notes and is never hidden.
 - [ ] The older-libhdf5 job passes.
 - [ ] The documentation builds on Read the Docs, with warnings treated as errors.
-- [ ] The bit-level digest replay passes on a maintainer's machine with the supported pinned stack (CI never runs
-      it: CI compares floating-point results with stored references at stated tolerances). From the clone, with an
-      editable install, one file per run:
+- [ ] The bit-level digest replay passes with the supported pinned stack on the kind of CPU the digests were
+      recorded on, x86-64 with AVX-512 (CI never runs it: CI compares floating-point results with stored references
+      at stated tolerances). A digest failure on another kind of CPU is inconclusive: rerun on such a machine, and
+      never make it pass by re-recording the stored digests (`tests/portable_numerics.py` explains why). From the
+      clone, with an editable install, one file per run:
       `HCD_EXACT_REPLAY=1 HCD_PINNED_STACK=1 JAX_PLATFORMS=cpu python -m pytest -q tests/<file>` for
       `test_eligibility.py`, `test_gateE_invariants.py` and `test_wc_map.py`. Run pytest directly:
       `tools/ci/run_test_tier.py` declares these digest tests as skipped by design and fails a file where they run.
