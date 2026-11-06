@@ -246,9 +246,11 @@ def test_a_record_changed_in_memory_is_refused_and_provenance_describes_the_tabl
         "a changed record dict": a._replace(record=dict(a.record, mf_version="another")),
         "a relabelled kind": a._replace(kind="historical"),
         "B's modes": a._replace(k_com_hmpc=np.asarray(a.k_com_hmpc) * 1.5),
+        "B entirely under A's digest": b._replace(record_sha256=mf[1]),     # provenance would name A, apply B
+        "A without its record bytes": a._replace(record_bytes=None),
     }
     for what, f in forged.items():
-        with pytest.raises(MR.MFRecordError, match="changed in memory|do not match|sha256"):
+        with pytest.raises(MR.MFRecordError, match="changed in memory|do not match|sha256|load_mf_record"):
             hp.Bundle(rb, mf=f)
     hd = tmp_path / "hist"
     sh = write_mf(hd, manifest=info.manifest_sha256, cache=c, kind="historical", exclude=())
