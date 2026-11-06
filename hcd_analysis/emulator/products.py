@@ -81,9 +81,24 @@ def load_product(path, kind, *, cache_sha256, inputs=None):
     return arrays, k, prov
 
 
-def load_mf_product(path, *, lf_ckpt_sha256, lf_cache_sha256):
-    """The gate D mode-axis MF product as a ``ModeMF``, refused unless it was fitted against exactly the LF ensemble
-    ``lf_ckpt_sha256`` (ordered .eqx digests) and the LF cache ``lf_cache_sha256``."""
+IMPLICIT_COMPOSITION = "all"      # a product written before compositions were recorded: fitted on every matched pair
+
+
+def _composition(c):
+    """(id, sorted excluded simulations) of a composition given as an id string (no exclusions) or a dict."""
+    if isinstance(c, str):
+        return c, []
+    if isinstance(c, dict) and isinstance(c.get("id"), str):
+        return c["id"], sorted(set(c.get("excluded_sims") or []))
+    raise ProductRefused(f"composition must be an id or {{id, excluded_sims}}, got {c!r}")
+
+
+def load_mf_product(path, *, lf_ckpt_sha256, lf_cache_sha256, hr_cache_sha256, composition):
+    """The gate D mode-axis MF product (.npz, the historical container) as a ``ModeMF``, refused unless it was fitted
+    against exactly the LF ensemble ``lf_ckpt_sha256`` (ordered .eqx digests), the LF cache ``lf_cache_sha256`` and the
+    HR cache ``hr_cache_sha256``, with the composition ``composition`` (an id, or {id, excluded_sims}; a product that
+    records none was fitted on every matched pair and has the composition ``IMPLICIT_COMPOSITION``). Read with
+    ``allow_pickle=False``. The release MF is not this container: ``mf_release.load_mf_record``."""
     from .mf_modes import ModeMF, load_mode_mf
     try:
         tables, k_com, prov = load_mode_mf(path)
@@ -95,6 +110,12 @@ def load_mf_product(path, *, lf_ckpt_sha256, lf_cache_sha256):
     if prov.get("lf_cache_sha256") != lf_cache_sha256:
         raise ProductRefused(f"{path}: built from LF cache {str(prov.get('lf_cache_sha256'))[:12]}, "
                              f"expected {lf_cache_sha256[:12]}")
+    if prov.get("hr_cache_sha256") != hr_cache_sha256:
+        raise ProductRefused(f"{path}: built from HR cache {str(prov.get('hr_cache_sha256'))[:12]}, "
+                             f"expected {str(hr_cache_sha256)[:12]}")
+    got = _composition(prov.get("composition", IMPLICIT_COMPOSITION))
+    if got != _composition(composition):
+        raise ProductRefused(f"{path}: composition {got[0]!r} excluding {got[1]}, expected {_composition(composition)}")
     if prov.get("res_corr") != "off (NORC)":
         raise ProductRefused(f"{path}: res_corr is retired in the gate E forward (provenance {prov.get('res_corr')!r})")
     return ModeMF.from_tables(tables), k_com, prov

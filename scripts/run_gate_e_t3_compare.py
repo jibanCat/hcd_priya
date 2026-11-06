@@ -61,11 +61,12 @@ def _sha(path):
     return h.hexdigest()
 
 
-def build_leg_ctx(name, members, mf, dla):
+def build_leg_ctx(name, members, mf, dla, mf_hr_cache_sha256, mf_composition):
     kw = SURVEYS[name]
     ctx, d = CL.build_legb_ctx(
         historical_reason="historical analysis on the deployed cache (closure_legb.CACHE_PATH)",
-        ensemble_ckpts=members, mf_product=mf, dla_core_product=dla, metals_on=kw["metals"],
+        ensemble_ckpts=members, mf_product=mf, mf_hr_cache_sha256=mf_hr_cache_sha256,
+        mf_composition=mf_composition, dla_core_product=dla, metals_on=kw["metals"],
                                sample_metals=kw["metals"], metal_prior=("flatlog2node" if kw["metals"] else "uniform"),
                                survey=name, with_eboss=kw["with_eboss"], ks_kwargs=dict(k_max=0.065))
     leg = next(l for l in ctx.legs if l.name == name)
@@ -128,6 +129,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--eval-dir", required=True)
     ap.add_argument("--mf", required=True)
+    ap.add_argument("--mf-hr-cache-sha256", required=True, help="the HR cache digest the MF product must record")
+    ap.add_argument("--mf-composition", required=True, help="the MF product's composition id ('all': every matched "
+                    "pair, the historical product)")
     ap.add_argument("--dla-core", required=True)
     ap.add_argument("--out-json", required=True)
     ap.add_argument("--out-npz", required=True)
@@ -144,7 +148,7 @@ def main(argv=None):
     summary, arrays = {}, {}
     R = None
     for name in a.legs.split(","):
-        ctx, d, leg = build_leg_ctx(name, members, a.mf, a.dla_core)
+        ctx, d, leg = build_leg_ctx(name, members, a.mf, a.dla_core, a.mf_hr_cache_sha256, a.mf_composition)
         if R is None:
             R = CB.load_loo_ensemble_residuals(a.eval_dir, d)
             sims, coh, theta = coh_per_sim(R, d)

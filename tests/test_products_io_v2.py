@@ -25,6 +25,7 @@ HIST = [external_path("HCD_HISTORICAL_CHECKOUT", "checkpoints", "error_vector.np
         f"{REPO_ROOT_STR}/figures/analysis/04_emulator/mf_cemu_floor.npz",
         external_path("HCD_HISTORICAL_CHECKOUT", "hcd_analysis", "_emulator_data", "mf_cemu_emucoh.npz")]
 MF_PRODUCT = external_path("HCD_EMULATOR_V2_DIR", "mf", "gateD", "mf_modes_all6.npz")
+MF_HR_CACHE = external_path("HCD_EMULATOR_V2_DIR", "caches", "observables_tau0_hr.h5")
 GATEC = external_path("HCD_CHECKPOINTS_DIR")
 
 
@@ -105,15 +106,23 @@ def _sha(p):
 
 
 def test_mf_product_identity_is_checked_against_the_lf_ensemble():
-    if not os.path.exists(MF_PRODUCT):
-        _unavailable(f"gate D product absent: {MF_PRODUCT}")
+    for p in (MF_PRODUCT, MF_HR_CACHE):
+        if not os.path.exists(p):
+            _unavailable(f"gate D product or HR cache absent: {p}")
     digests = [_sha(f"{GATEC}/prod_repaired_seed{i}.eqx") for i in range(5)]
-    mf, k_com, prov = PR.load_mf_product(MF_PRODUCT, lf_ckpt_sha256=digests, lf_cache_sha256=CACHE)
+    kw = dict(hr_cache_sha256=_sha(MF_HR_CACHE), composition="all")   # the historical product: every matched pair
+    mf, k_com, prov = PR.load_mf_product(MF_PRODUCT, lf_ckpt_sha256=digests, lf_cache_sha256=CACHE, **kw)
     np.testing.assert_allclose(k_com, KCOM, rtol=1e-14, atol=0)   # the cache's validated modes
     with pytest.raises(PR.ProductRefused, match="LF ensemble"):
-        PR.load_mf_product(MF_PRODUCT, lf_ckpt_sha256=digests[::-1], lf_cache_sha256=CACHE)
+        PR.load_mf_product(MF_PRODUCT, lf_ckpt_sha256=digests[::-1], lf_cache_sha256=CACHE, **kw)
     with pytest.raises(PR.ProductRefused, match="cache"):
-        PR.load_mf_product(MF_PRODUCT, lf_ckpt_sha256=digests, lf_cache_sha256="00" * 32)
+        PR.load_mf_product(MF_PRODUCT, lf_ckpt_sha256=digests, lf_cache_sha256="00" * 32, **kw)
+    with pytest.raises(PR.ProductRefused, match="HR cache"):
+        PR.load_mf_product(MF_PRODUCT, lf_ckpt_sha256=digests, lf_cache_sha256=CACHE,
+                           hr_cache_sha256="00" * 32, composition="all")
+    with pytest.raises(PR.ProductRefused, match="composition"):
+        PR.load_mf_product(MF_PRODUCT, lf_ckpt_sha256=digests, lf_cache_sha256=CACHE, hr_cache_sha256=kw[
+            "hr_cache_sha256"], composition={"id": "x", "excluded_sims": ["any"]})
     if os.path.exists(HIST[2]):
         with pytest.raises(PR.ProductRefused):
-            PR.load_mf_product(HIST[2], lf_ckpt_sha256=digests, lf_cache_sha256=CACHE)
+            PR.load_mf_product(HIST[2], lf_ckpt_sha256=digests, lf_cache_sha256=CACHE, **kw)

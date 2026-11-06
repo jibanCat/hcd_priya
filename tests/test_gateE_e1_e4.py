@@ -21,6 +21,14 @@ ROOT = Path(__file__).resolve().parents[1]
 from tests.gate_helpers import external_path  # noqa: E402
 GATEC = external_path("HCD_CHECKPOINTS_DIR")
 MF = external_path("HCD_EMULATOR_V2_DIR", "mf", "gateD", "mf_modes_all6.npz")
+MF_HR_CACHE = external_path("HCD_EMULATOR_V2_DIR", "caches", "observables_tau0_hr.h5")
+
+
+def mf_kw():
+    """The MF product's expected HR cache digest (of the cache file itself) and composition (the historical product
+    records none: fitted on every matched pair)."""
+    from hcd_analysis.emulator import train as T
+    return dict(mf_hr_cache_sha256=T._sha256_or_none(MF_HR_CACHE), mf_composition="all")
 DLA_CORE = external_path("HCD_EMULATOR_V2_DIR", "gateE", "products", "dla_core_gateE.npz")   # A1 rev 1 s4 (PU-0071)
 L_BOX = 120.0
 
@@ -35,9 +43,9 @@ def _need(*paths):
 
 @pytest.fixture(scope="module")
 def prod_ctx():
-    _need(f"{GATEC}/prod_repaired_seed0.eqx", MF, DLA_CORE)
+    _need(f"{GATEC}/prod_repaired_seed0.eqx", MF, MF_HR_CACHE, DLA_CORE)
     ctx, d = CL.build_legb_ctx(historical_reason="test of the historical gate E context",
-                               ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
+                               ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF, **mf_kw(),
                                dla_core_product=DLA_CORE,
                                ks_kwargs=dict(resolution_float=True, k_max=0.065), with_eboss=True, metals_on=True,
                                sample_res=True)
@@ -135,7 +143,8 @@ def test_e1b_box_modes_identical_across_checkpoints_cache_and_mf(prod_ctx):
     k = np.asarray(prod_ctx.k_com_hmpc)
     np.testing.assert_array_equal(k, 2 * np.pi * np.arange(1, 173) / L_BOX * 0 + np.asarray(load_cache_historical(CL.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format')["k_com_hmpc"]))
     _, mf_k, _ = PR.load_mf_product(MF, lf_ckpt_sha256=prod_ctx.product_digests["lf_ensemble_eqx_sha256"],
-                                    lf_cache_sha256=T._sha256_or_none(CL.CACHE_PATH))
+                                    lf_cache_sha256=T._sha256_or_none(CL.CACHE_PATH),
+                                    hr_cache_sha256=mf_kw()["mf_hr_cache_sha256"], composition="all")
     np.testing.assert_allclose(mf_k, k, rtol=1e-14, atol=0)
     for i in range(5):
         _, meta, _ = T.load_checkpoint(f"{GATEC}/prod_repaired_seed{i}")
@@ -230,7 +239,7 @@ def test_e1c_static_scan_of_the_production_import_graph():
 
 # ---------------------------------------------------------------------------------------------------------- E1 (d)
 def test_e1d_dynamic_call_graph_touches_no_retired_code():
-    _need(f"{GATEC}/prod_repaired_seed0.eqx", MF, DLA_CORE)
+    _need(f"{GATEC}/prod_repaired_seed0.eqx", MF, MF_HR_CACHE, DLA_CORE)
     deny_files = ("multifidelity.py", "legacy_forward_pre2026_10.py", "closure_legb_figs.py")
     deny_names = {"predict_P_obs_on_leg", "build_mf_correction", "load_lf_backbone", "_predict_P_obs_mf",
                   "_emu_var_on_cache", "data_loglik", "load_mf_floor", "load_mf_emucoh", "load_mf_shape"}
@@ -243,7 +252,7 @@ def test_e1d_dynamic_call_graph_touches_no_retired_code():
     sys.setprofile(prof)
     try:
         ctx, _ = CL.build_legb_ctx(historical_reason="test of the historical gate E context",
-                               ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
+                               ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF, **mf_kw(),
                                    dla_core_product=DLA_CORE,
                                    ks_kwargs=dict(resolution_float=True, k_max=0.065), with_eboss=True,
                                    metals_on=True, sample_res=True)
