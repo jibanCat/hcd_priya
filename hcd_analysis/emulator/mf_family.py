@@ -1,5 +1,6 @@
-"""The certified LF -> HF multi-fidelity model family (moved verbatim from multifidelity.py at gate E, emulator-debug
-campaign 2026-10): the theta-independent resolved FixedMeanHead
+"""The historically selected LF -> HF multi-fidelity model family (chosen in pre-2026-10 mock tests; it is not the
+validated release MF, which is pending), moved verbatim from multifidelity.py at gate E (emulator-debug campaign
+2026-10): the theta-independent resolved FixedMeanHead
 (log_rho + gbar_z + gbar_tau + rank-1), its conditioning vector, its table construction and the exact HR/LF row
 matching. The gate E forward reaches the MF correction only through this module and mf_modes; the pre-2026-10
 single-grid machinery stays in multifidelity.py (historical), which re-imports these names."""
@@ -17,7 +18,9 @@ class FixedMeanHead(eqx.Module):
     """The DEFAULT (delta_mode='none') head: a FIXED, THETA-INDEPENDENT z-(and,
     optionally, tau0-)resolved mean correction on top of the per-k ``log_rho``.
 
-    The validated MF default (commit d93fadc / scripts/diag_mf_complexity.py): the
+    The historical MF default, selected in pre-2026-10 mock tests (commit d93fadc /
+    scripts/diag_mf_complexity.py; those tests ran on the pre-2026-10 forward, which placed the
+    MF tables at the wrong k, docs/kgrid_incident_2026-10.md). The finding then: the
     LF->HF correction is dominated by the fixed resolution tilt with a small theta-
     departure, and the learned MLP delta-head OVER-FITS that departure on 6 HF sims (a
     large n_s Fisher bias in mock tests).  The rho(k,z)-ONLY model (this head + log_rho)

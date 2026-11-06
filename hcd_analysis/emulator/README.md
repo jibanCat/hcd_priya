@@ -787,14 +787,15 @@ projection is the linearised maximum-likelihood displacement,
 `bias = [(F + Π)⁻¹ Jᵀ C⁻¹ ΔP] / σ`, where `J` is the forward Jacobian, `C` the data covariance,
 `F` the Fisher information, `Π` the prior precision, and `σ` the marginal posterior width; the
 result is a cosmology shift in σ. The acceptance requirement is a fixed small `|bias_z|` bound for
-every fold and both parameters. This per-fold object is what the deployed model inherits; it is the production
-gate, distinct from the per-simulation scatter discussed below.
+every fold and both parameters. In that analysis this per-fold object was what the deployed model inherited, the
+production gate, distinct from the per-simulation scatter discussed below.
 
-Every fold sits inside the acceptance band on both parameters, and the typical fold injects a small
-fraction of a posterior width. The emulator is thus validated as unbiased in the cosmology on held-out
-simulations, not merely as small-RMS. This is the held-out-sim cosmology gate, subject to the
-production-SBC caveat of Demo A: the per-fold LOSO result is what the production all-sims ensemble
-inherits, and the ensemble-level SBC is still pending before the real fit.
+Historical result (pre-2026-10, superseded): every fold sat inside the acceptance band on both parameters,
+and the typical fold injected a small fraction of a posterior width, so the emulator was then described as
+unbiased in the cosmology on held-out simulations. That result was obtained with the pre-2026-10 forward
+model, which placed the emulator outputs at the wrong k (`docs/kgrid_incident_2026-10.md`, and the status
+note at the top of this file); it does not validate the current forward. It was the held-out-sim cosmology
+gate of that analysis, subject to the production-SBC caveat of Demo A.
 
 ![Per-fold A_p and n_s Fisher bias across the LOSO folds, inside the acceptance gate](../../figures/analysis/04_emulator/B5_fisher_bias_perfold.png)
 
