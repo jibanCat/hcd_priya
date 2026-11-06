@@ -37,7 +37,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   builds it with every warning treated as an error.
 
 ### Changed
-- The `hcd` command needs an explicit `--config`; it never falls back to built-in settings.
+- The `hcd` command needs an explicit `--config` file and refuses to run without one. Keys the file leaves out
+  still take the built-in values of `hcd_analysis.config`, and keys it does not know are ignored.
 - The install name is `hcd-priya`; the import name stays `hcd_analysis`.
 
 ## 0.1.0

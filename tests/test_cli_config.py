@@ -1,4 +1,4 @@
-"""The `hcd` command never falls back to built-in settings: every subcommand needs an existing --config file.
+"""The `hcd` command does not run without a config file: every subcommand needs an existing --config file.
 
 The built-in values of hcd_analysis.config and config/default.yaml differ, and one approved set of defaults is not
 chosen yet, so a run without a config file must stop with a clear message before any work starts. Synthetic config

@@ -12,8 +12,9 @@ Usage::
 
 Global options (all subcommands)::
 
-  --config PATH          YAML config file (required, for example config/default.yaml in a checkout: no default
-                         is applied until one approved set of defaults is chosen)
+  --config PATH          YAML config file (required, for example config/default.yaml in a checkout). Keys the
+                         file leaves out take the built-in values of hcd_analysis.config, and keys it does not
+                         know are ignored, until one approved set of defaults is chosen
   --output-root PATH     Override output directory
   --set KEY=VALUE        Override any config key (dot notation, repeatable)
                          Example: --set n_workers=8 --set cddf.A=1.2
