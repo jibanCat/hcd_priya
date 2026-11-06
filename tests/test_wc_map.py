@@ -300,6 +300,14 @@ pinned_stack_declared = PN.pinned_stack_declared
 exact_replay = PN.exact_replay
 
 
+def test_the_w_c_map_tolerances_are_the_justified_values():
+    """The tolerances are the values justified in test_golden_digests_of_the_map_rules; any change (a loosening above
+    all) must edit this test."""
+    assert WC_MAP_TOLS == {("delta_c", "coeffs"): (1e-9, 0.0), ("xbar", "coeffs"): (1e-9, 0.0),
+                           ("delta_c", "resid_std"): (1e-12, 0.0), ("delta_c", "resid_max"): (1e-10, 0.0),
+                           ("delta_c", "mean"): (1e-12, 0.0)}
+
+
 def payload_mismatches(got, want, tols=None):
     """The dotted paths where the w_c map payload ``got`` departs from ``want`` (empty: they agree). The key sets must
     be equal; the computed floats (``WC_MAP_TOLS``: the least-squares outputs and the block means) must have the same

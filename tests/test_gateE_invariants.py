@@ -93,6 +93,12 @@ RES_TOL = (1e-12, 0.0)        # P -> P exp(2 b_res k^2 R^2)
 FACTOR_TOLS = {name: METAL_TOL if name.startswith("metal") else RES_TOL for name in FACTOR_FIELDS}
 
 
+def test_the_factor_tolerances_are_the_justified_values():
+    """The tolerances are the values justified above; any change (a loosening above all) must edit this test."""
+    assert (METAL_TOL, RES_TOL) == ((1e-12, 0.0), (1e-12, 0.0))
+    assert set(FACTOR_TOLS) == set(FACTOR_FIELDS) and set(FACTOR_TOLS.values()) == {METAL_TOL, RES_TOL}
+
+
 def _unavailable(msg):
     if os.environ.get("HCD_GATE_RUN") == "1":
         pytest.fail(msg + " (HCD_GATE_RUN=1)")

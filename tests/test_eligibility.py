@@ -312,6 +312,13 @@ def norm_tols(names):
     return {n: P_CELL_TOL if n.startswith("norm/P_filt/cell_mean/") else table[n] for n in names}
 
 
+def test_the_normaliser_tolerances_are_the_justified_values():
+    """The tolerances are the values justified above; any change (a loosening above all) must edit this test."""
+    assert (LOG_MEAN_TOL, LOG_STD_TOL, P_MARG_TOL, P_CELL_TOL, DELTA_MEAN_TOL, DELTA_STD_TOL) == (
+        (1e-12, 0.0), (1e-12, 1e-13), (1e-12, 0.0), (1e-12, 1e-14), (1e-12, 1e-16), (1e-12, 0.0))
+    assert all(rtol <= E.DRIFT_BOUND for rtol, _ in norm_tols(PN.load_reference(NORM_REF)).values())
+
+
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     """A 5-simulation synthetic release cache, its w_c map, and honest production member metas and normaliser."""
