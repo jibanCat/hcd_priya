@@ -297,7 +297,11 @@ digest does not change when an MF is added). It holds exactly:
   - `tables`: `file`, `format`, `sha256`, `bytes`, `n_modes`, `n_z`, `n_rung`;
   - `backbone`: `manifest_sha256` (the backbone bundle's manifest), `kind` (`release` or `research`),
     `cache_sha256` (the backbone's training cache) and `held_out_sims` (a research backbone's held-out simulations);
-  - `caches`: `lf` and `hr`, each `{file, sha256}` (file names only, never paths);
+  - `caches`: `lf` and `hr`, each `{file, sha256, provenance}` (file names only, never paths). The two digests do
+    not establish the same thing, and `provenance` says so with a fixed statement from the code
+    (`mf_release.CACHE_PROVENANCE`, checked at load): the LF cache is lineage-verified through the bound backbone (it is
+    the backbone's training cache), while the HR cache is digest-anchored only and never lineage-verified (it is read
+    without a lineage check, and only its per-class P1D rows and row keys are used);
   - `composition`: `id`, `excluded_sims` and `ruling_ids` (the rulings that set it; at least one);
   - `fold`: null, or `{fold_id, holdout_sims, backbone_excludes_holdout}` for a held-out fit;
   - `train_sims`, `n_pairs_train`;

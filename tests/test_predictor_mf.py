@@ -124,6 +124,11 @@ def test_mf_provenance_is_reported(emu_mf, mf, info):
     assert m["composition"]["ruling_ids"] == ["synthetic ruling"]
     assert m["mean_flux_convention"]["status"] == "PROPOSED"
     assert m["hr_inputs"] == MR.HR_INPUTS
+    assert m["caches"] == {"lf": {"file": RT.SYNTHETIC_CACHE_NAME, "sha256": info.lineage["cache"]["sha256"],
+                                  "provenance": MR.CACHE_PROVENANCE["lf"]},
+                           "hr": {"file": "synthetic_hr.h5", "sha256": H64("synthetic hr"),
+                                  "provenance": MR.CACHE_PROVENANCE["hr"]}}
+    assert m["caches"]["hr"]["provenance"].startswith("digest-anchored only, never lineage-verified")
     assert "mf" in emu_mf.provenance and emu_mf.provenance["mf"] == m
     assert "mf" in p.labels
 
@@ -183,7 +188,7 @@ def test_a_hand_built_or_unverified_mf_is_refused(info, mf):
     rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
     rec = MR.load_mf_record(mf[0], expected_record_sha256=mf[1], backbone_manifest_sha256=info.manifest_sha256)
     with pytest.raises(MR.MFRecordError, match="load_mf_record"):
-        hp.Bundle(rb, mf=rec._replace(verified=False))
+        hp.Bundle(rb, mf=rec._replace(anchored=False))
     with pytest.raises(MR.MFRecordError, match="load_mf_record"):
         hp.Bundle(rb, mf={"tables": rec.tables})
     assert "mf" in hp.Bundle(rb, mf=rec).provenance

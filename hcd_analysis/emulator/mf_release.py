@@ -14,8 +14,9 @@ bundle (its manifest sha256) and is refused with any other.
                       (the box modes 2 pi n / L the tables are labelled by); nothing else.
   ``mf_record.json``  the record (closed key set, ``RECORD_KEYS``): the MF version, the kind (``release``, ``fold`` or
                       ``historical``), the tables file's sha256 and shapes, the backbone's manifest sha256 and kind, the
-                      LF and HR caches' file names and sha256, the composition with its ruling ids, the fold (for a
-                      held-out fit), the training simulations, the HR inputs used (``HR_INPUTS``), the mean-flux
+                      LF and HR caches' file names, sha256 and provenance (``CACHE_PROVENANCE``: the LF cache is
+                      lineage-verified through the backbone, the HR cache digest-anchored only), the composition
+                      with its ruling ids, the fold (for a held-out fit), the training simulations, the HR inputs used (``HR_INPUTS``), the mean-flux
                       convention of the targets (``MEAN_FLUX_CONVENTION``, PROPOSED) and the fit code's commit and
                       clean-tree flag.
 
@@ -72,6 +73,17 @@ HR_INPUTS = {
     "catalogue_derived_status": "PRE-FIX: not read by the MF; no verified or corrected provenance is claimed for them",
 }
 
+# What each cache's digest establishes (PI ruling 2026-11-06b A1: no incompatible products under one verified claim).
+# Constants, written by write_mf_record and closed-checked by check_record: a record cannot claim more for either side.
+CACHE_PROVENANCE = {
+    "lf": "lineage-verified through the bound backbone: the backbone bundle's training cache (caches.lf.sha256 equals "
+          "backbone.cache_sha256), which the bundle's lineage block and every member meta name; the builder reads it "
+          "with data.load_cache, which checks its lineage record",
+    "hr": "digest-anchored only, never lineage-verified: the builder pins its sha256 and reads it with "
+          "data.load_cache_historical, which checks no lineage (a pre-lineage format 3.3 cache has no lineage record); "
+          "only its per-class P1D rows and row keys are read (hr_inputs)",
+}
+
 # The mean-flux normalisation of the per-class P1D targets, as the code computes it today (read at be675c6).
 # Under audit (PI ruling 2026-11-06b D2): recorded, PROPOSED, and not changed here.
 MEAN_FLUX_CONVENTION = {
@@ -91,7 +103,7 @@ RECORD_KEYS = {"format", "mf_version", "kind", "model_form", "tables", "backbone
                "train_sims", "n_pairs_train", "hr_inputs", "mean_flux_convention", "fit_code"}
 _TABLES_KEYS = {"format", "file", "sha256", "bytes", "n_modes", "n_z", "n_rung"}
 _BACKBONE_KEYS = {"manifest_sha256", "kind", "cache_sha256", "held_out_sims"}
-_CACHE_KEYS = {"file", "sha256"}
+_CACHE_KEYS = {"file", "sha256", "provenance"}
 _COMPOSITION_KEYS = {"id", "excluded_sims", "ruling_ids"}
 _FOLD_KEYS = {"fold_id", "holdout_sims", "backbone_excludes_holdout"}
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -221,6 +233,10 @@ def check_record(rec):
         if not isinstance(c[side]["file"], str) or not _PLAIN.match(c[side]["file"]):
             raise MFRecordError(f"caches.{side}.file must be a plain file name, never a path")
         _hex(c[side]["sha256"], 64, f"caches.{side}.sha256")
+        if c[side]["provenance"] != CACHE_PROVENANCE[side]:
+            raise MFRecordError(f"caches.{side}.provenance is not the code's statement for the {side.upper()} cache "
+                                "(the HR cache is digest-anchored only, never lineage-verified: PI ruling 2026-11-06b "
+                                "A1)")
     if c["lf"]["sha256"] != b["cache_sha256"]:                     # every kind: the targets used the backbone's cache
         raise MFRecordError(f"a {rec['kind']} MF's LF cache must be its backbone's training cache")
     comp = rec["composition"]
@@ -358,10 +374,14 @@ def _read_tables(raw, where):
 def write_mf_record(out_dir, tables, *, k_com_hmpc, kind, mf_version, backbone, caches, composition, fold, fit_code,
                     train_sims, n_pairs_train):
     """Write a record directory ONCE: ``out_dir`` must not exist (an existing directory, file or symlink is refused);
-    it is created, the tables are written, then the record (last). ``fold`` = None, or {fold_id, holdout_sims} (the
+    it is created, the tables are written, then the record (last). ``caches`` = {lf, hr: {file, sha256}}; the writer
+    adds each side's ``provenance`` (``CACHE_PROVENANCE``). ``fold`` = None, or {fold_id, holdout_sims} (the
     writer adds ``backbone_excludes_holdout`` from the backbone's held-out simulations). Every field is validated
     (``check_record``) before anything is written. Returns (the record's path, its sha256: the anchor to publish)."""
     out_dir = os.fspath(out_dir)
+    if not isinstance(caches, dict) or set(caches) != {"lf", "hr"} or \
+            not all(isinstance(caches[s], dict) and set(caches[s]) == {"file", "sha256"} for s in ("lf", "hr")):
+        raise MFRecordError("caches must be {lf, hr: {file, sha256}} (the provenance is the code's, CACHE_PROVENANCE)")
     if os.path.lexists(out_dir):
         raise FileExistsError(f"{out_dir} exists: an MF record is written once into a new directory, never overwritten")
     arrays, k = _check_tables(tables, k_com_hmpc)
@@ -377,7 +397,7 @@ def write_mf_record(out_dir, tables, *, k_com_hmpc, kind, mf_version, backbone, 
            "tables": {"format": TABLES_FORMAT, "file": TABLES_FILE, "sha256": "0" * 64, "bytes": 1, "n_modes": k.size,
                       "n_z": nz, "n_rung": nr},
            "backbone": dict(backbone, held_out_sims=sorted(set(backbone.get("held_out_sims") or []))),
-           "caches": copy_json(caches),
+           "caches": {s: dict(copy_json(caches[s]), provenance=CACHE_PROVENANCE[s]) for s in ("lf", "hr")},
            "composition": dict(composition, excluded_sims=sorted(set(composition.get("excluded_sims") or []))),
            "fold": fold_rec, "train_sims": sorted(set(train_sims)), "n_pairs_train": int(n_pairs_train),
            "hr_inputs": copy_json(HR_INPUTS), "mean_flux_convention": copy_json(MEAN_FLUX_CONVENTION),
@@ -400,14 +420,16 @@ def copy_json(x):
 
 # --------------------------------------------------------------------------------------------- load
 class MFRecord(NamedTuple):
-    """A loaded, anchored MF record. ``g(x, tau0)`` evaluates the correction (4, K) at one LF encoder input."""
+    """A loaded MF record, anchored on its published sha256 (``anchored``: the record bytes matched the published
+    digest and the tables matched the record's; it says nothing about the HR cache's lineage, see ``caches`` in the
+    record). ``g(x, tau0)`` evaluates the correction (4, K) at one LF encoder input."""
     record: dict
     record_sha256: str
     tables: dict
     k_com_hmpc: np.ndarray
     kind: str
     mf_dir: str
-    verified: bool
+    anchored: bool
 
     def module(self):
         from .mf_modes import ModeMF

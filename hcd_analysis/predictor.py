@@ -375,11 +375,11 @@ class _PredictorBase:
     _mf = None
 
     def _attach_mf(self, mf, *, kind):
-        """Bind a loaded MF record to this backbone: it must come from ``mf_release.load_mf_record`` (verified), be of
+        """Bind a loaded MF record to this backbone: it must come from ``mf_release.load_mf_record`` (anchored), be of
         ``kind``, and declare exactly this backbone's identity as RE-DERIVED from the member metas
         (``_backbone_identity``: manifest, training cache, kind, held-out simulations); its modes must be the bundle's.
         A fold record must hold out a group its backbone was trained without (``backbone_excludes_holdout``)."""
-        if not isinstance(mf, _MR.MFRecord) or mf.verified is not True:
+        if not isinstance(mf, _MR.MFRecord) or mf.anchored is not True:
             raise _MR.MFRecordError("the predictor takes an MF record loaded by mf_release.load_mf_record")
         rec = _MR.check_record(copy.deepcopy(mf.record))
         if rec["kind"] != kind or mf.kind != kind:

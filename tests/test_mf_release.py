@@ -123,7 +123,7 @@ def test_round_trip_reproduces_the_tables_and_the_correction(tmp_path):
     t = synthetic_targets()
     d, sha, tables = build(tmp_path, targets=t)
     rec = load(d, sha)
-    assert rec.kind == "release" and rec.record_sha256 == sha and rec.verified is True
+    assert rec.kind == "release" and rec.record_sha256 == sha and rec.anchored is True
     for k in MM.TABLE_KEYS:
         np.testing.assert_array_equal(rec.tables[k], np.asarray(tables[k], float))
     np.testing.assert_array_equal(rec.k_com_hmpc, KCOM)
@@ -369,3 +369,37 @@ def test_fold_record_states_whether_its_backbone_excludes_the_held_out_group(tmp
         build(tmp_path, name="relfold", kind="release", fold=fold)
     with pytest.raises(MR.MFRecordError, match="research"):        # a release MF never sits on a research backbone
         build(tmp_path, name="relres", backbone=rb)
+
+
+# ------------------------------------------------------------------------- cache provenance (C1 review MAJOR-1)
+def test_cache_provenance_says_hr_is_digest_anchored_only_and_lf_lineage_verified(tmp_path):
+    """The two cache digests are not symmetric: the LF cache is the bound backbone's lineage-verified training cache,
+    the HR cache is digest-anchored only and never lineage-verified (PI ruling 2026-11-06b A1). Both statements are
+    code constants written into every record and closed-checked at load."""
+    assert MR.CACHE_PROVENANCE["hr"].startswith("digest-anchored only, never lineage-verified:")
+    assert MR.CACHE_PROVENANCE["lf"].startswith("lineage-verified through the bound backbone:")
+    assert set(MR.CACHE_PROVENANCE) == {"lf", "hr"}
+    d, sha, _ = build(tmp_path)
+    r = load(d, sha).record
+    for side in ("lf", "hr"):
+        assert r["caches"][side]["provenance"] == MR.CACHE_PROVENANCE[side]
+        assert set(r["caches"][side]) == {"file", "sha256", "provenance"}
+    upgraded = MR.CACHE_PROVENANCE["lf"]                        # the HR side may not claim the LF side's lineage
+    s2 = rewrite(d, lambda r: dict(r, caches=dict(r["caches"], hr=dict(r["caches"]["hr"], provenance=upgraded))))
+    with pytest.raises(MR.MFRecordError, match="caches.hr.provenance .*digest-anchored only"):
+        load(d, s2)
+    s3 = rewrite(d, lambda r: dict(r, caches=dict(r["caches"], lf=dict(r["caches"]["lf"], provenance="unverified"))))
+    with pytest.raises(MR.MFRecordError, match="caches.lf.provenance"):
+        load(d, s3)
+    s4 = rewrite(d, lambda r: dict(r, caches={s: {"file": c["file"], "sha256": c["sha256"]}
+                                              for s, c in r["caches"].items()}))
+    with pytest.raises(MR.MFRecordError, match="keys"):          # a record without the statements (the old form)
+        load(d, s4)
+
+
+def test_the_writer_takes_no_cache_provenance_from_the_caller(tmp_path):
+    claim = {"lf": {"file": "lf_cache.h5", "sha256": LF_SHA},
+             "hr": {"file": "hr_cache.h5", "sha256": HR_SHA, "provenance": MR.CACHE_PROVENANCE["lf"]}}
+    with pytest.raises(MR.MFRecordError, match="caches must be"):
+        build(tmp_path, caches=claim)
+    assert not os.path.lexists(tmp_path / "mf")
