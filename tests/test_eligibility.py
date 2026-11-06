@@ -271,9 +271,45 @@ from hcd_analysis.emulator import wc_map as W  # noqa: E402
 from tests import tau0_fixtures as tf  # noqa: E402
 from tests.emulator._fixture import write_synthetic_cache_v34  # noqa: E402
 
+from pathlib import Path  # noqa: E402
+
+from tests import portable_numerics as PN  # noqa: E402
+
 # tensors_sha256 of train._fit_norm on the 5-simulation synthetic cache (seed 0) under its production split
 # (val_seed 12345, val_frac 0.1), computed with the pre-D5 trainer
 GOLDEN_NORM_FINGERPRINT = "c60b1ac36059e32837f0b55e6657c9e05d00c4fbdbe8c2cd10a0f48eae921d54"
+# The same normaliser tensors, stored at full precision (synthetic: fitted on the synthetic fixture cache); their
+# tensors_sha256 is GOLDEN_NORM_FINGERPRINT (test_the_stored_normaliser_is_the_golden_fingerprint). The fingerprint is
+# a cross-run digest of computed floats (numpy's arcsinh and log are dispatched by CPU or taken from the system libm),
+# so it is required only in an exact replay (tests/portable_numerics.py); otherwise the tensors are compared with the
+# stored ones under the per-field tolerances below.
+NORM_REF = Path(__file__).parent / "golden" / "ci_portability" / "norm_cache5_pre_d5.npz"
+# Per-field tolerances (rtol, atol). Every tensor is a statistic in the transformed target space (log for f_nhi,
+# dN/dX and P_filt; arcsinh for delta): a change of a mean by e shifts the emulated log quantity by e (a relative
+# change e of the CDDF, dN/dX or P1D), a change of a std by e shifts it by e times the standardised target (a few).
+# Scientific scale: the emulator and P1D errors, percent level (never below 1e-3). rtol is 1e-12 throughout, the
+# production rule's own bound for a recorded environment change (eligibility.DRIFT_BOUND). atol covers the entries
+# near zero, where a sum's cancellation makes the relative error large; it is set per field from its natural unit.
+# Measured cross-CPU discrepancy (numpy with and without AVX-512, OpenBLAS and XLA variants, both stacks): zero for
+# every field but delta (at most 9.8e-19 absolute, 5.9e-15 relative, on delta/mean). An 8-ulp perturbation of every
+# libm, BLAS and XLA output, which bounds an implementation not reachable on our machine (another glibc): at most
+# 3.6e-14 absolute (f_nhi/mean, at a value near 47), 9.3e-14 relative (a cell mean near zero). Each tolerance is at
+# least 15 times that bound and 100 times the measured discrepancy, and at least 1e9 times below the scientific scale.
+LOG_MEAN_TOL = (1e-12, 0.0)          # f_nhi, dN/dX means (log units; values of order 1 to 50, never near zero)
+LOG_STD_TOL = (1e-12, 1e-13)         # f_nhi, dN/dX stds (log units; f_nhi's sits on a log offset near 47)
+P_MARG_TOL = (1e-12, 0.0)            # P_filt mu_marg, sig_marg, sig_cosmo (log units, of order 0.1, never near zero)
+P_CELL_TOL = (1e-12, 1e-14)          # P_filt cell means (log units; some entries near zero)
+DELTA_MEAN_TOL = (1e-12, 1e-16)      # delta means (arcsinh of values of order 1e-2; some near zero)
+DELTA_STD_TOL = (1e-12, 0.0)         # delta stds (of order 1e-2, never near zero)
+
+
+def norm_tols(names):
+    """The tolerance of each normaliser tensor, by its name (an unknown name is a KeyError: no default)."""
+    table = {"norm/f_nhi/mean": LOG_MEAN_TOL, "norm/dndx/mean": LOG_MEAN_TOL, "norm/f_nhi/std": LOG_STD_TOL,
+             "norm/dndx/std": LOG_STD_TOL, "norm/P_filt/mu_marg": P_MARG_TOL, "norm/P_filt/sig_marg": P_MARG_TOL,
+             "norm/P_filt/sig_cosmo": P_MARG_TOL, "norm/delta/mean": DELTA_MEAN_TOL,
+             "norm/delta/std": DELTA_STD_TOL}
+    return {n: P_CELL_TOL if n.startswith("norm/P_filt/cell_mean/") else table[n] for n in names}
 
 
 @pytest.fixture
@@ -311,10 +347,54 @@ def test_honest_production_members_pass_every_component(world):
     assert sp["n_sims_in_cache"] == 5 and sp["n_train_sims"] == 5 and sp["n_train"] == world["tr"].size
     nm = next(x for x in c["components"] if x["component"] == "normaliser")
     assert nm["n_tensors"] == nm["n_bitwise"] == len(S.norm_tensors(world["norm"]))
-    assert nm["detail"]["recomputed_tensors_sha256"] == GOLDEN_NORM_FINGERPRINT                       # T31
+    ref = PN.load_reference(NORM_REF)                                                                  # T31
+    assert PN.field_mismatches(S.norm_tensors(world["norm"]), ref, norm_tols(ref)) == []
+    if PN.exact_replay():                      # HCD_EXACT_REPLAY=1: a same-machine replay on the pinned stack
+        assert nm["detail"]["recomputed_tensors_sha256"] == GOLDEN_NORM_FINGERPRINT
     env = c["environment"]
     assert {"python", "numpy", "jax", "scipy", "hcd_priya"} <= set(env) and env["hcd_priya"]["commit"] == "c" * 40
     json.dumps(dict(c), allow_nan=False)                                       # recorded as is: finite JSON
+
+
+def test_the_stored_normaliser_is_the_golden_fingerprint():
+    """The stored reference tensors are the pre-D5 normaliser, bit for bit (a stored file: exact everywhere)."""
+    ref = PN.load_reference(NORM_REF)
+    assert E.tensors_sha256(ref) == GOLDEN_NORM_FINGERPRINT and set(norm_tols(ref)) == set(ref)
+    flipped = {k: np.array(v, copy=True) for k, v in ref.items()}
+    flipped["norm/P_filt/mu_marg"].view(np.uint64).flat[3] ^= np.uint64(1)              # one bit of one element
+    assert E.tensors_sha256(flipped) != GOLDEN_NORM_FINGERPRINT
+
+
+def test_the_normaliser_comparison_passes_rounding_and_refuses_a_meaningful_change(world):
+    ref = PN.load_reference(NORM_REF)
+    tols = norm_tols(ref)
+    rng = np.random.default_rng(0)
+    rounded = {k: v + rng.integers(-8, 9, v.shape) * np.spacing(np.abs(v)) for k, v in ref.items()}
+    assert PN.field_mismatches(rounded, ref, tols) == []                     # 8 ulps everywhere: rounding, passes
+    d, tr, va = world["d"], world["tr"], world["va"]
+    one_row = np.array(tr, copy=True)
+    one_row[0] = va[0]                                                       # one wrong training row
+    for idx in (np.sort(one_row), tr[1:], np.arange(d["sim_name"].size)):   # ... one row fewer, every row
+        assert PN.field_mismatches(S.norm_tensors(T._fit_norm(d, idx)), ref, tols) != []
+    for name in sorted(ref):                  # a shift of 1e-9 (1e-3 of the percent scale) on one element fails
+        bad = {k: np.array(v, copy=True) for k, v in ref.items()}
+        bad[name].flat[0] += 1e-9 * max(1.0, abs(bad[name].flat[0]))
+        assert PN.field_mismatches(bad, ref, tols) == [name], name
+    flipped = dict(ref, **{"norm/P_filt/mu_marg": -ref["norm/P_filt/mu_marg"]})          # a sign flip
+    assert PN.field_mismatches(flipped, ref, tols) == ["norm/P_filt/mu_marg"]
+    swapped = dict(ref, **{"norm/delta/mean": ref["norm/delta/std"], "norm/delta/std": ref["norm/delta/mean"]})
+    assert PN.field_mismatches(swapped, ref, tols) == ["norm/delta/mean", "norm/delta/std"]
+    cells = sorted(k for k in ref if k.startswith("norm/P_filt/cell_mean/"))
+    renamed = dict(ref, **{cells[0]: ref[cells[1]], cells[1]: ref[cells[0]]})            # two cells exchanged
+    assert PN.field_mismatches(renamed, ref, tols) == sorted(cells[:2])
+    assert PN.field_mismatches({k: v for k, v in ref.items() if k != cells[-1]}, ref, tols) == ["keys"]
+    truncated = dict(ref, **{"norm/f_nhi/mean": ref["norm/f_nhi/mean"][:-1]})
+    assert PN.field_mismatches(truncated, ref, tols) == ["norm/f_nhi/mean"]
+    nan = {k: np.array(v, copy=True) for k, v in ref.items()}
+    nan["norm/dndx/std"][1] = np.nan
+    assert PN.field_mismatches(nan, ref, tols) == ["norm/dndx/std"]
+    with pytest.raises(KeyError):
+        norm_tols(list(ref) + ["norm/new/tensor"])
 
 
 def test_a_split_size_or_membership_that_differs_is_mismatch(world):          # T30(e), T16
