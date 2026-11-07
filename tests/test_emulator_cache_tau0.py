@@ -159,7 +159,7 @@ def _fake_rows(nk, nrows=3):
     return rows
 
 
-def test_write_cache_tau0_round_trip(tmp_path=Path("/tmp")):
+def test_write_cache_tau0_round_trip(tmp_path):
     import hcd_analysis.priya_p1d as pp
     nk = 172
     rows = _fake_rows(nk)
@@ -235,7 +235,7 @@ def test_build_tau0_rows_tier_p_matches_priya():
     print("OK build_tau0_rows native-grid Tier-P bit-identical")
 
 
-def test_merge_v3_synthetic(tmp_path=Path("/tmp")):
+def test_merge_v3_synthetic(tmp_path):
     import scripts.merge_tau0_cache as mg
     import hcd_analysis.priya_p1d as pp
     nk = 172
@@ -419,9 +419,9 @@ if __name__ == "__main__":
     test_discover_hr_pairs_six_sims()
     test_discover_dedups_one_snap_per_grid_z()
     test_read_priya_params_matches_priya_array()
-    test_write_cache_tau0_round_trip()
+    test_write_cache_tau0_round_trip(Path(tempfile.mkdtemp()))       # a fresh directory per run, as pytest's tmp_path
     test_v33_uniform_schema_roundtrip()
-    test_merge_v3_synthetic()
+    test_merge_v3_synthetic(Path(tempfile.mkdtemp()))
     test_build_tau0_rows_tier_p_matches_priya()
     test_filtered_tier_c_reconstructs_priya()
     test_build_tau0_rows_hr_matches_priya_6sim()
