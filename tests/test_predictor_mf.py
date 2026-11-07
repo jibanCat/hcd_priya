@@ -14,7 +14,7 @@ from hcd_analysis.emulator import mf_release as MR
 from hcd_analysis.emulator import release_testing as RT
 from hcd_analysis.emulator.data import Z_LIMITS, normalize_params
 from hcd_analysis.emulator.schema import L_BOX_HMPC
-from tests.test_mf_release import COMMIT, H64, HR_STATEMENT, LF_STATEMENT, synthetic_targets
+from tests.test_mf_release import COMMIT, H64, HR_STATEMENT, LF_STATEMENT, LyingStr, PlainStr, synthetic_targets
 
 K = RT.SYNTHETIC_ARCH["n_k"]
 KCOM = 2 * np.pi * np.arange(1, K + 1) / L_BOX_HMPC
@@ -269,6 +269,50 @@ def test_a_record_changed_in_memory_is_refused_and_provenance_describes_the_tabl
         np.testing.assert_allclose(p.P_class, lf * np.exp(rec.g(_x(3.0), 0.4)), rtol=1e-13, atol=0)
 
 
+
+class _TwoFacedBytes(bytes):
+    """Hashes (its buffer) as one record's bytes while bytes(x) gives another's (delta review Q3h)."""
+    other = b""
+
+    def __bytes__(self):
+        return self.other
+
+
+class _PlainBytes(bytes):
+    """A bytes subclass with no overrides: genuine content, but not exactly bytes."""
+
+
+def test_sealed_digest_and_bytes_must_be_exact_str_and_bytes(info, mf, tmp_path):
+    """Delta review R1-2 (Q3g, Q3h): reverify takes the digest and the sealed bytes only as exact str and bytes. A str
+    subclass that equals anything, or a bytes subclass whose buffer is A's record while bytes() gives B's, would apply
+    B while provenance names A's record digest; plain subclasses carrying the genuine values are refused too."""
+    from hcd_analysis.emulator import safe_h5 as H
+    rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
+    a = MR.load_mf_record(mf[0], expected_record_sha256=mf[1], backbone_manifest_sha256=info.manifest_sha256)
+    d = tmp_path / "b"
+    sb = write_mf(d, manifest=info.manifest_sha256, cache=info.lineage["cache"]["sha256"], exclude=("synthsim2",))
+    b = MR.load_mf_record(str(d), expected_record_sha256=sb, backbone_manifest_sha256=info.manifest_sha256)
+    two_faced = type("TF", (_TwoFacedBytes,), {"other": b.record_bytes})(a.record_bytes)
+    two_faced_tables = type("TFT", (_TwoFacedBytes,), {"other": b.tables_bytes})(a.tables_bytes)
+    forged = {
+        "Q3g: B under a str subclass equal to anything, printing A's digest": b._replace(record_sha256=LyingStr(mf[1])),
+        "Q3h: A's buffer, B's bytes(), B's record and tables, A's digest": b._replace(record_sha256=mf[1],
+                                                                                    record_bytes=two_faced),
+        "A's tables buffer whose bytes() is B's tables": a._replace(tables_bytes=two_faced_tables),
+        "A's own digest as a plain str subclass": a._replace(record_sha256=PlainStr(mf[1])),
+        "A's own record bytes as a plain bytes subclass": a._replace(record_bytes=_PlainBytes(a.record_bytes)),
+        "A's own tables bytes as a plain bytes subclass": a._replace(tables_bytes=_PlainBytes(a.tables_bytes)),
+    }
+    for what, f in forged.items():
+        with pytest.raises(MR.MFRecordError, match="load_mf_record"):
+            hp.Bundle(rb, mf=f)
+        with pytest.raises(MR.MFRecordError, match="load_mf_record"):
+            MR.reverify(f)
+    fresh = MR.reverify(a)                                    # the genuine record: exact types throughout
+    assert (type(fresh.record_sha256), type(fresh.record_bytes), type(fresh.tables_bytes)) == (str, bytes, bytes)
+    assert hp.Bundle(rb, mf=a).provenance["mf"]["record_sha256"] == mf[1]
+
+
 def test_bundle_rechecks_the_binding_of_a_loaded_record(info, tmp_path):
     """Bundle itself (not only load_mf_record) refuses a record of another backbone or another kind."""
     from hcd_analysis.emulator import safe_h5 as H
@@ -511,3 +555,33 @@ def test_release_naming_a_mismatched_pair_is_refused(release, tmp_path):
     from hcd_analysis.emulator import safe_h5 as H
     with pytest.raises(H.SafeFormatError):                       # the backbone's own anchor
         hp.load_release(d3, s3)
+
+
+@pytest.mark.parametrize("make", [lambda s: LyingStr(H64("x")), lambda s: PlainStr(s)],
+                         ids=["lying-str-other-digest", "plain-str-subclass-own-digest"])
+def test_release_digest_must_be_an_exact_str(release, make):
+    """Delta review R1-2: the published release sha256 is exact str; a lying subclass would pass the comparison for
+    any release.json."""
+    from hcd_analysis.emulator import release_manifest as RM
+    with pytest.raises(RM.ReleaseManifestError, match="published sha256"):
+        hp.load_release(str(release["root"]), make(release["sha"]))
+    assert hp.load_release(str(release["root"]), release["sha"]).provenance["release"]["release_sha256"] == \
+        release["sha"]
+
+
+@pytest.mark.parametrize("field", ["backbone_dir", "mf_dir", "backbone_manifest_sha256", "mf_record_sha256"])
+def test_release_manifest_parts_must_be_exact_str(release, tmp_path, field):
+    """Delta review R1-2: the part names and digests written into release.json are exact str (a parsed manifest
+    always has them); a subclass is refused before anything is written."""
+    from hcd_analysis.emulator import release_manifest as RM
+    import shutil
+    d = tmp_path / "rel"
+    shutil.copytree(release["root"], d, symlinks=True)
+    os.chmod(d / "release.json", 0o644)
+    os.remove(d / "release.json")
+    kw = dict(release_version="v", backbone_dir="backbone", mf_dir="mf",
+              backbone_manifest_sha256=release["bundle"].manifest_sha256, mf_record_sha256=release["mf_sha"])
+    with pytest.raises(RM.ReleaseManifestError, match="exact str"):
+        RM.write_release_manifest(str(d), **dict(kw, **{field: PlainStr(kw[field])}))
+    assert not os.path.lexists(d / "release.json")
+    assert RM.write_release_manifest(str(d), **kw)[1]

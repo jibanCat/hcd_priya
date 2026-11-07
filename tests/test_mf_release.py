@@ -579,3 +579,43 @@ def test_record_directory_refuses_an_extra_file_and_a_symlink(tmp_path):
     os.symlink(d, str(tmp_path / "link"))
     with pytest.raises(MR.MFRecordError, match="not an MF record directory"):
         load(str(tmp_path / "link"), sha)
+
+
+# --------------------------------------------------------------- exact-type digests (delta review R1-2, Q3g and Q3h)
+class LyingStr(str):
+    """A str subclass that compares equal to anything: a forged digest that passes `!=` against any hex digest."""
+    def __eq__(self, other):
+        return True
+
+    def __ne__(self, other):
+        return False
+
+    __hash__ = str.__hash__
+
+
+class PlainStr(str):
+    """A str subclass with no overrides: its value is a genuine digest, but its type is not str."""
+
+
+@pytest.mark.parametrize("make", [lambda sha: LyingStr(H64("another record")), lambda sha: PlainStr(sha)],
+                         ids=["lying-str-other-digest", "plain-str-subclass-own-digest"])
+def test_the_published_record_digest_must_be_an_exact_str(tmp_path, make):
+    """A str subclass as the published digest is refused before the file is read: a lying one would otherwise pass
+    the digest comparison for any record and be carried as the record's sha256 into provenance."""
+    d, sha, _ = build(tmp_path)
+    with pytest.raises(MR.MFRecordError, match="published sha256"):
+        load(d, make(sha))
+    assert type(load(d, sha).record_sha256) is str
+
+
+@pytest.mark.parametrize("arg", ["backbone_manifest_sha256", "lf_cache_sha256", "hr_cache_sha256"])
+@pytest.mark.parametrize("make", [lambda v: LyingStr(H64("another")), lambda v: PlainStr(v)],
+                         ids=["lying-str", "plain-str-subclass"])
+def test_the_backbone_and_cache_digests_must_be_exact_str(tmp_path, arg, make):
+    """The digests a record is checked against at load are exact str: a lying subclass would pass `!=` against any
+    record's value, so a record of another backbone or cache would load."""
+    d, sha, _ = build(tmp_path)
+    genuine = {"backbone_manifest_sha256": BACKBONE, "lf_cache_sha256": LF_SHA, "hr_cache_sha256": HR_SHA}[arg]
+    with pytest.raises(MR.MFRecordError, match="exact str"):
+        load(d, sha, **{arg: make(genuine)})
+    assert load(d, sha, **{arg: genuine}).kind == "release"

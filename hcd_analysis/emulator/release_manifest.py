@@ -55,6 +55,8 @@ def check_release_manifest(m):
             raise ReleaseManifestError(f"{part}.{dk} must be one plain path segment inside the release, never a path")
         if not isinstance(p[hk], str) or not _HEX64.match(p[hk]):
             raise ReleaseManifestError(f"{part}.{hk} must be 64 lowercase hex digits")
+        if type(p[dk]) is not str or type(p[hk]) is not str:       # a parsed manifest always holds exact str
+            raise ReleaseManifestError(f"{part}: {dk} and {hk} must be exact str (a str subclass is refused)")
     if m["backbone"]["dir"] == m["mf"]["dir"]:
         raise ReleaseManifestError("the backbone and the MF record are two different directories")
     return m
@@ -75,8 +77,9 @@ def read_release_manifest(release_dir, expected_sha256):
     """Read ``release.json`` through a no-follow descriptor, compare its sha256 with the published one BEFORE parsing
     (strict JSON: no duplicate keys, no NaN), validate it, and resolve the two part directories. Returns
     (manifest dict, {"backbone": path, "mf": path})."""
-    if not isinstance(expected_sha256, str) or not _HEX64.match(expected_sha256):
-        raise ReleaseManifestError("a release loads only with its published sha256 (64 lowercase hex digits)")
+    if type(expected_sha256) is not str or not _HEX64.match(expected_sha256):    # exact str (delta review R1-2)
+        raise ReleaseManifestError("a release loads only with its published sha256 (64 lowercase hex digits, an "
+                                   "exact str)")
     d = os.path.abspath(os.fspath(release_dir))
     if os.path.islink(d) or not os.path.isdir(d):
         raise ReleaseManifestError(f"{release_dir}: not a release directory")

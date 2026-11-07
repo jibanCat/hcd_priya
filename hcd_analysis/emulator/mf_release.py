@@ -462,11 +462,18 @@ def load_mf_record(mf_dir, *, expected_record_sha256, backbone_manifest_sha256, 
     ``backbone_manifest_sha256`` (required). ``kind`` is the kind the caller expects (a ``historical`` or ``fold``
     record is refused unless asked for). ``composition`` = {id, excluded_sims[, ruling_ids]} and the cache digests,
     when given, must equal the record's. Returns an ``MFRecord``."""
-    if expected_record_sha256 is None or not isinstance(expected_record_sha256, str) \
+    # Every digest is taken as an exact str (delta review R1-2): a str subclass can override == and != and pass the
+    # comparisons below for any record, so it is refused, not compared.
+    if expected_record_sha256 is None or type(expected_record_sha256) is not str \
             or not _HEX64.match(expected_record_sha256):
-        raise MFRecordError("load_mf_record needs the record's published sha256 (64 lowercase hex digits)")
+        raise MFRecordError("load_mf_record needs the record's published sha256 (64 lowercase hex digits, an exact "
+                            "str)")
     if backbone_manifest_sha256 is None:
         raise MFRecordError("load_mf_record needs the backbone manifest sha256 the MF must be bound to")
+    for name, v in (("backbone_manifest_sha256", backbone_manifest_sha256), ("lf_cache_sha256", lf_cache_sha256),
+                    ("hr_cache_sha256", hr_cache_sha256)):
+        if v is not None and type(v) is not str:
+            raise MFRecordError(f"load_mf_record: {name} must be an exact str (a str subclass is refused)")
     if kind not in KINDS:
         raise MFRecordError(f"kind {kind!r} is not one of {KINDS}")
     d = os.path.abspath(os.fspath(mf_dir))
@@ -542,12 +549,14 @@ def reverify(mf):
     ``tables_bytes``): the record bytes must hash to ``record_sha256``, and the record, its kind, the tables and the
     modes are parsed again from the bytes, exactly as ``load_mf_record`` does. Refused: anything that is not an
     ``MFRecord`` from ``load_mf_record`` (no sealed bytes, not anchored), bytes that do not match the digest, and an
-    object whose record, kind, tables or modes were changed in memory (they differ from what its bytes give). Returns
+    object whose record, kind, tables or modes were changed in memory (they differ from what its bytes give), and a
+    digest or sealed bytes that are not exactly ``str`` and ``bytes`` (a subclass can override ``!=`` or
+    ``__bytes__`` and make the bytes hashed differ from the bytes parsed: delta review R1-2). Returns
     a fresh ``MFRecord`` built from the bytes only, so the provenance it reports describes the tables applied. What it
     cannot catch: a caller who replaces the bytes and the digest together is presenting another anchored record; the
     trust root is the published digest the caller passes to ``load_mf_record``."""
-    if not isinstance(mf, MFRecord) or mf.anchored is not True or not isinstance(mf.record_bytes, bytes) \
-            or not isinstance(mf.tables_bytes, bytes) or not isinstance(mf.record_sha256, str):
+    if not isinstance(mf, MFRecord) or mf.anchored is not True or type(mf.record_bytes) is not bytes \
+            or type(mf.tables_bytes) is not bytes or type(mf.record_sha256) is not str:
         raise MFRecordError("the predictor takes an MF record loaded by mf_release.load_mf_record (sealed with its "
                             "anchored bytes)")
     where = f"the MF record {mf.record_sha256[:12]}"
