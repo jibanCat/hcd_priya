@@ -23,6 +23,16 @@ class ProductRefused(ValueError):
     """A product that may not enter the gate E forward."""
 
 
+def _exact_digests(where, **digests):
+    """Each caller-given digest (a list or tuple: each element) that is not None must be an exact str of 64 lowercase
+    hex digits (``safe_io.exact_hex64``): a str subclass could pass the comparisons below for any product."""
+    from .safe_io import require_exact_hex64
+    for name, v in digests.items():
+        for x in (v if isinstance(v, (list, tuple)) else [v]):
+            if x is not None:
+                require_exact_hex64(x, f"{where}: {name}", ProductRefused)
+
+
 def _check_kcom(k_com_hmpc):
     k = np.asarray(k_com_hmpc, float)
     if k.ndim != 1 or not np.allclose(k, 2 * np.pi * np.arange(1, k.size + 1) / L_BOX_HMPC, rtol=1e-12, atol=0):
@@ -57,6 +67,7 @@ def save_product(path, kind, *, k_com_hmpc, provenance, **arrays):
 def load_product(path, kind, *, cache_sha256, inputs=None):
     """(arrays, k_com_hmpc, provenance) of a product of ``kind`` built from the cache ``cache_sha256`` and, if given,
     from exactly the ``inputs`` digests named there; refuses everything else."""
+    _exact_digests("load_product", cache_sha256=cache_sha256, inputs=list((inputs or {}).values()))
     with np.load(path, allow_pickle=False) as f:
         files = set(f.files)
         if not {"product_kind", "schema_version", "k_com_hmpc", "provenance"} <= files:
@@ -99,6 +110,8 @@ def load_mf_product(path, *, lf_ckpt_sha256, lf_cache_sha256, hr_cache_sha256, c
     HR cache ``hr_cache_sha256``, with the composition ``composition`` (an id, or {id, excluded_sims}; a product that
     records none was fitted on every matched pair and has the composition ``IMPLICIT_COMPOSITION``). Read with
     ``allow_pickle=False``. The release MF is not this container: ``mf_release.load_mf_record``."""
+    _exact_digests("load_mf_product", lf_ckpt_sha256=list(lf_ckpt_sha256), lf_cache_sha256=lf_cache_sha256,
+                   hr_cache_sha256=hr_cache_sha256)
     from .mf_modes import ModeMF, load_mode_mf
     try:
         tables, k_com, prov = load_mode_mf(path)

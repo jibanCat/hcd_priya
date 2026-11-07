@@ -50,7 +50,13 @@ def build(paths, *, cache_sha256, ensemble_manifest_sha256):
 
 
 def verify(manifest_path, *, cache_sha256, ensemble_manifest_sha256):
-    """{kind: path or None} after checking schema, cache, ensemble and every digest."""
+    """{kind: path or None} after checking schema, cache, ensemble and every digest. The two digests, when not None,
+    are taken only as exact str (``safe_io.exact_hex64``): a str subclass could pass the comparisons for any
+    manifest."""
+    from .safe_io import require_exact_hex64
+    for name, v in (("cache_sha256", cache_sha256), ("ensemble_manifest_sha256", ensemble_manifest_sha256)):
+        if v is not None:
+            require_exact_hex64(v, f"verify: {name}", ProductManifestError)
     with open(manifest_path) as f:
         m = json.load(f)
     if m.get("schema_version") != SCHEMA_VERSION:

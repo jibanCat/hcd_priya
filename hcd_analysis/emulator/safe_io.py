@@ -54,6 +54,22 @@ class SafeFormatError(ValueError):
     """A file, header, tensor set or configuration that does not match the format."""
 
 
+_EXACT_HEX64 = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def exact_hex64(x):
+    """A caller-given digest: 64 lowercase hex digits as an EXACT str. A str subclass (np.str_ included) can override
+    == and != and so pass any later digest comparison, so it is refused, not compared."""
+    return type(x) is str and bool(_EXACT_HEX64.match(x))
+
+
+def require_exact_hex64(x, what, err=SafeFormatError):
+    """Refuse (``err``) a caller-given digest ``x`` that is not ``exact_hex64``; ``what`` names the argument."""
+    if not exact_hex64(x):
+        raise err(f"{what} must be a sha256 (64 lowercase hex digits, an exact str; a str subclass is refused, not "
+                  f"compared), got a {type(x).__name__}")
+
+
 # --------------------------------------------------------------------------------------------- safetensors layer
 def _no_duplicate_keys(pairs):
     out = {}
@@ -322,7 +338,10 @@ def parse_safetensors(raw, where="<bytes>"):
 
 
 def read_safetensors(path, expected_sha256=None):
-    """Read and parse a safetensors file; with ``expected_sha256`` the SAME bytes that are parsed are hashed first."""
+    """Read and parse a safetensors file; with ``expected_sha256`` (an exact str) the SAME bytes that are parsed are
+    hashed first."""
+    if expected_sha256 is not None:
+        require_exact_hex64(expected_sha256, "read_safetensors: expected_sha256")
     raw = read_regular(path, MAX_DATA_BYTES)
     if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
         raise SafeFormatError(f"{path}: sha256 does not match the expected digest")
@@ -513,6 +532,9 @@ def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None):
     import jax
     import jax.numpy as jnp
 
+    for name, v in (("expected_sha256", expected_sha256), ("expected_json_sha256", expected_json_sha256)):
+        if v is not None:
+            require_exact_hex64(v, f"load_member: {name}")
     js = f"{prefix}.json"
     raw_js = read_regular(js, MAX_JSON_BYTES)
     if expected_json_sha256 is not None and hashlib.sha256(raw_js).hexdigest() != expected_json_sha256:
@@ -620,6 +642,8 @@ def read_manifest(bundle_dir, expected_sha256=None, allow_extra=False, *, data_e
     the ``aux_keys`` (each naming one further listed file) and the ``extra_keys``; without it (the earlier formats) other
     keys are not looked at. Every listed file is checked (plain name, regular file, size, then sha256) and, unless
     ``allow_extra``, the directory holds nothing else."""
+    if expected_sha256 is not None:
+        require_exact_hex64(expected_sha256, "the expected manifest sha256")
     bd = os.path.abspath(bundle_dir)
     mp = os.path.join(bd, MANIFEST)
     raw = read_regular(mp, MAX_JSON_BYTES)

@@ -269,6 +269,9 @@ def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None, fmt=
     import jax
     import jax.numpy as jnp
 
+    for name, v in (("expected_sha256", expected_sha256), ("expected_json_sha256", expected_json_sha256)):
+        if v is not None:                                    # an exact str only (safe_io.exact_hex64)
+            S.require_exact_hex64(v, f"load_member: {name}")
     js = prefix + ".json"
     raw_js = S.read_regular(js, S.MAX_JSON_BYTES)
     if expected_json_sha256 is not None and hashlib.sha256(raw_js).hexdigest() != expected_json_sha256:
@@ -336,8 +339,9 @@ def _hex64(x):
 
 def _exact_hex64(x):
     """A caller-given anchor digest: 64 lowercase hex digits as an EXACT str. A str subclass can override == and !=
-    and pass every later digest comparison, so it is refused, not compared (as the MF and release digests are)."""
-    return type(x) is str and bool(_HEX64.match(x))
+    and pass every later digest comparison, so it is refused, not compared (as the MF and release digests are). The
+    one rule for every caller-given digest: ``safe_io.exact_hex64``."""
+    return S.exact_hex64(x)
 
 
 def _release_finder_ids():
