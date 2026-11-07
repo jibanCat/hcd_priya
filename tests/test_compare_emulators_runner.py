@@ -126,7 +126,8 @@ def _l1c_inputs(tmp_path, kfkms_scale=1.0, p_scale=1.0, bad_k=None):
     """A two-row synthetic cache and the matching synthetic reference design, one rung, two redshifts.
 
     ``bad_k`` puts one non-finite k label in the second redshift row: "cache" or "reference" sets a NaN on that side,
-    "zero_over_zero" sets 0 on both sides (0/0)."""
+    "zero_over_zero" sets 0 on both sides (0/0), "inf_cache" sets +inf on the cache side, and "x_over_0" sets 0 on the
+    reference side only (a finite label over zero)."""
     import h5py
     from hcd_analysis.comparison import conventions as C
     rng = np.random.default_rng(3)
@@ -139,6 +140,10 @@ def _l1c_inputs(tmp_path, kfkms_scale=1.0, p_scale=1.0, bad_k=None):
         kf_cache[1, 2] = np.nan if bad_k == "cache" else 0.0
     if bad_k in ("reference", "zero_over_zero"):
         kf_ref[1, 2] = np.nan if bad_k == "reference" else 0.0
+    if bad_k == "inf_cache":
+        kf_cache[1, 2] = np.inf
+    if bad_k == "x_over_0":
+        kf_ref[1, 2] = 0.0
     ks = {"params": np.concatenate([[0.0], theta])[None, :], "zout": zout, "kfmpc": np.arange(nk, dtype=float),
           "flux_vectors": fv, "kfkms": kf_ref[None, :, :]}
     path = tmp_path / "cache.h5"
@@ -183,9 +188,9 @@ def test_l1c_power_mismatch_still_fails(tmp_path):
     assert res["lineage_verdict"] == "FAIL" and res["kfkms_verdict"] == "PASS" and res["verdict"] == "FAIL"
 
 
-@pytest.mark.parametrize("bad_k", ["cache", "reference", "zero_over_zero"])
+@pytest.mark.parametrize("bad_k", ["cache", "reference", "zero_over_zero", "inf_cache", "x_over_0"])
 def test_l1c_non_finite_k_label_cannot_read_pass(tmp_path, bad_k):
-    """A NaN k label (on either side, or 0/0) is a k-label FAIL, never dropped from the maximum."""
+    """A non-finite k label (NaN on either side, 0/0, +inf, or a finite label over 0) is a k-label FAIL, never dropped."""
     res = _run_l1c(tmp_path, bad_k=bad_k)
     assert res["lineage_verdict"] == "PASS"
     assert res["kfkms_verdict"] == "FAIL" and res["verdict"] == "FAIL"
