@@ -227,6 +227,36 @@ def test_build_records_a_raised_validated_z_min(info, tmp_path):
     assert not os.path.lexists(tmp_path / "lo")
 
 
+def test_main_writes_the_validated_z_min_it_is_given(tmp_path, monkeypatch, capsys):
+    """--validated-z-min reaches the written record through main() (the default 2.2, and a raised 2.6), on a synthetic
+    build: real cache pins, a real synthetic backbone bound to the pinned LF bytes, the real build, write and reload.
+    Only the two cache readers are stubbed (they return synthetic matched caches)."""
+    import hashlib
+    import json
+    from hcd_analysis.emulator import data as D
+    lf_bytes, hr_bytes = b"synthetic lf cache bytes", b"synthetic hr cache bytes"
+    (tmp_path / "lf.h5").write_bytes(lf_bytes)
+    (tmp_path / "hr.h5").write_bytes(hr_bytes)
+    lf_sha, hr_sha = hashlib.sha256(lf_bytes).hexdigest(), hashlib.sha256(hr_bytes).hexdigest()
+    crec, _ = RT.synthetic_cache_record()
+    bb = RT.write_synthetic_bundle(str(tmp_path / "bundle"), n_members=2,
+                                   cache=(crec, {"sha256": lf_sha, "size": len(lf_bytes)}))
+    lf, hr = _inputs()
+    monkeypatch.setattr(D, "load_cache", lambda path, **k: dict(lf, cache_sha256=lf_sha))
+    monkeypatch.setattr(D, "load_cache_historical", lambda path, *, reason, validate=True: hr)
+    for out, extra, want in (("mf_default", (), 2.2), ("mf_raised", ("--validated-z-min", "2.6"), 2.6)):
+        argv = _argv(tmp_path, out=out, extra=extra)
+        for flag, value in (("--lf-cache-sha256", lf_sha), ("--hr-cache-sha256", hr_sha),
+                            ("--backbone-manifest-sha256", bb.manifest_sha256)):
+            argv[argv.index(flag) + 1] = value
+        B.main(argv, _code=CLEAN)
+        printed = json.loads(capsys.readouterr().out)
+        rec = MR.load_mf_record(str(tmp_path / out), expected_record_sha256=printed["record_sha256"],
+                                backbone_manifest_sha256=bb.manifest_sha256)
+        assert rec.record["validated_z_min"] == want == printed["validated_z_min"]
+        assert rec.provenance()["validated_z_min"] == want
+
+
 @pytest.mark.parametrize("err, group, kw", [
     (0.6 * EXC["bound"], "synthsim1", {}),                              # the same error on another group
     (1.2 * EXC["bound"], EXC["lf_sim"], {}),                            # a larger error on the recorded group
