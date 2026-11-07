@@ -9,6 +9,7 @@ import numpyro
 import pytest
 
 from hcd_analysis.emulator import closure_legb as CL
+from hcd_analysis.emulator import dndx_wc as DW
 from hcd_analysis.emulator import fisher_kit as FK
 from tests.test_forward_ctx_v2 import _ctx
 from tests.test_forward_v2 import _emu, _leg
@@ -28,9 +29,17 @@ def _synthetic(ks=False):
     return ctx
 
 
-@pytest.mark.parametrize("ks", [False, True], ids=["default", "ks_mapped"])
-def test_parameter_map_equals_the_production_model(ks):
-    ctx = _synthetic(ks)
+# A synthetic, non-historical delta_c map (test values only, distinct per class so the renormalisation does not
+# cancel it): what a release-cache context carries (build_legb_ctx requires an explicit map there).
+SYNTH_MAP = DW.DeltaCMap(coeffs=np.array([[0.002, -0.01, 0.03], [-0.001, 0.006, -0.02],
+                                          [0.0005, -0.003, 0.01], [-0.0002, 0.002, -0.004]]),
+                         z_lo=2.0, z_hi=5.4, label="synthetic: test only")
+
+
+@pytest.mark.parametrize("ks, delta_map", [(False, None), (True, None), (True, SYNTH_MAP)],
+                         ids=["default", "ks_mapped", "ks_mapped_release_delta_map"])
+def test_parameter_map_equals_the_production_model(ks, delta_map):
+    ctx = _synthetic(ks)._replace(delta_map=delta_map)
     p = FK.p_centre(ctx, np.full(9, 0.4)) + np.r_[np.zeros(9), 0.05, -0.2, 0.01, -0.01, 0.1]
     names = FK.param_names(ctx)
     sub = {"theta_unit": jnp.asarray(p[:9]), "tau0_amp": p[9], "dtau0": p[10]}
@@ -45,6 +54,9 @@ def test_parameter_map_equals_the_production_model(ks):
     th, tau0, alpha = FK.forward_inputs(ctx, jnp.asarray(p))
     np.testing.assert_allclose(np.asarray(tau0), np.asarray(tr["tau0_vec"]["value"]), rtol=1e-13)
     np.testing.assert_allclose(np.asarray(alpha), np.asarray(tr["alpha_hcd_z"]["value"]), rtol=1e-13)
+    if delta_map is not None:            # not vacuous: the map moves alpha away from the historical map's value
+        _, _, alpha_hist = FK.forward_inputs(ctx._replace(delta_map=None), jnp.asarray(p))
+        assert np.max(np.abs(np.asarray(alpha) / np.asarray(alpha_hist) - 1.0)) > 1e-3
 
 
 def test_jacobian_equals_finite_differences_of_the_leg_mean():

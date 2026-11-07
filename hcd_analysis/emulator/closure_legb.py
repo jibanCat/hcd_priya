@@ -525,6 +525,7 @@ class LegBCtx(NamedTuple):
     product_digests: object = None            # gate E: sha256 of every product the forward loaded (forward_stamp)
     # the delta_c(z) map of every w_c map call of this context (a dndx_wc.DeltaCMap): None on the historical path (the
     # historical, pre-fix map); on the release-cache path the caller's explicit map (build_legb_ctx refuses None there).
+    # Every consumer of a context that calls a w_c map (dndx_wc) must pass this field (fisher_kit.forward_inputs does).
     # APPENDED last so positional construction does not shift.
     delta_map: object = None
 
