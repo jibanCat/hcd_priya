@@ -37,8 +37,9 @@ release MF record (format ``hcd_priya.mf_record/1``, ``emulator.mf_release``), a
 bound to this bundle: its backbone manifest sha256, training cache, backbone kind and box modes must be this
 bundle's, and a historical or fold record is refused. Each member's per-class spectrum is then multiplied by
 exp(g(z, tau0, k)) on the native modes, before the mean, the spread and any k placement: P_MF = P_LF exp(g). g does not
-depend on the cosmological parameters. Below the lowest redshift of the record's tables the MF is REFUSED
-(``MFRangeError``; ask for ``fidelity="LF"``): it is never clamped there. Above the highest redshift and outside the
+depend on the cosmological parameters. Below max(the lowest redshift of the record's tables, the record's
+``validated_z_min``, 2.2 by default) the MF is REFUSED (``MFRangeError``; ask for ``fidelity="LF"``): it is never
+clamped there. Above the highest redshift and outside the
 tau0 tables it is held constant and flagged (``mf_z_clamped``, ``mf_tau0_clamped``). ``w_c`` and ``dndx`` stay the LF
 backbone's. ``fidelity`` ("LF" or "LF+MF"; None: the bundle's own) selects the output; "LF+MF" without a record raises
 ``MFUnavailableError``. The record's provenance (version, composition and ruling ids, cache digests and their
@@ -126,8 +127,8 @@ class MFUnavailableError(PredictorInputError):
 
 
 class MFRangeError(PredictorInputError):
-    """The LF+MF prediction was asked for below the lowest redshift of the MF record's tables: the MF is refused
-    there, never extrapolated or clamped (ask for ``fidelity="LF"``)."""
+    """The LF+MF prediction was asked for below max(the lowest redshift of the MF record's tables, the record's
+    ``validated_z_min``): the MF is refused there, never extrapolated or clamped (ask for ``fidelity="LF"``)."""
 
 
 FIDELITIES = ("LF", "LF+MF")
@@ -441,6 +442,7 @@ class _PredictorBase:
         self._mf_module = mf.module()
         t = mf.tables
         self._mf_dom = (np.asarray(t["z_tab"], dtype=np.float64), np.asarray(t["tau_by_z"], dtype=np.float64))
+        self._mf_vzmin = float(rec["validated_z_min"])            # the record's lowest validated redshift
 
     def _use_mf(self, fidelity):
         if fidelity is None:
@@ -453,11 +455,13 @@ class _PredictorBase:
         return fidelity == "LF+MF"
 
     def _mf_refuse_low_z(self, zs):
-        lo = float(self._mf_dom[0][0])
+        z0, vz = float(self._mf_dom[0][0]), self._mf_vzmin
+        lo = max(z0, vz)
         low = sorted({round(float(z), 9) for z in zs if z < lo - Z_TOL})
         if low:
-            raise MFRangeError(f"the MF is refused below its tables' lowest redshift z = {lo:g} (asked at z = {low}); "
-                               "it is not extrapolated or clamped there: ask for fidelity='LF'")
+            raise MFRangeError(f"the MF is refused below z = {lo:g} (its tables' lowest redshift {z0:g} and the "
+                               f"record's validated_z_min {vz:g}; asked at z = {low}); it is not extrapolated or "
+                               "clamped there: ask for fidelity='LF'")
 
     def _mf_flags(self, zs, taus, use_mf):
         z_tab, tau_by_z = self._mf_dom
@@ -470,8 +474,9 @@ class _PredictorBase:
 
     def _mf_labels(self, labels, use_mf):
         out = {"mf": "the MF correction P_MF = P_LF exp(g(z, tau0, k)) of the loaded record (theta-independent, "
-                     "fitted on matched HR/LF pairs; refused below its lowest z; above its highest z and outside its "
-                     "tau0 tables it is held constant and flagged); w_c stays the LF backbone's"}
+                     "fitted on matched HR/LF pairs; refused below max(its lowest z, its validated_z_min); above its "
+                     "highest z and outside its tau0 tables it is held constant and flagged); w_c stays the LF "
+                     "backbone's"}
         if use_mf:
             out["product"] = f"{labels.get('product') or 'LF'}+MF"
             out["P_class"] = labels["P_class"] + ", each multiplied by exp(g) before the mean"

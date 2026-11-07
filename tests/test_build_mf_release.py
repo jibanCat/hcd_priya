@@ -65,6 +65,8 @@ def test_argument_rules(tmp_path):
         B.parse(_argv(tmp_path, kind="fold"))                      # a fold needs its id and group
     a = B.parse(_argv(tmp_path, kind="fold", extra=("--fold-id", "f", "--holdout-sim", "x")))
     assert a.holdout_sim == ["x"] and a.exclude_sim == []
+    assert a.validated_z_min == MR.VALIDATED_Z_MIN == 2.2                       # the default
+    assert B.parse(_argv(tmp_path, extra=("--validated-z-min", "2.6"))).validated_z_min == 2.6
 
 
 # --------------------------------------------------------------------------------------------- the build
@@ -201,11 +203,28 @@ def test_d1_exception_passes_the_recorded_case_and_is_recorded(info, tmp_path):
     assert {k: exc[k] for k in EXC} == EXC and exc["n_pairs"] == 9            # every pair of the group, no other
     assert abs(exc["max_error"] / err - 1.0) < 1e-4
     assert summ["D1"] == mm
+    assert rec.record["validated_z_min"] == 2.2 and summ["validated_z_min"] == 2.2
     emu = hp.load_bundle(info.bundle_dir, info.manifest_sha256, mf_dir=str(tmp_path / "mf"), mf_record_sha256=sha)
     assert emu.provenance["mf"]["mode_mapping"] == mm
     _, sha0, _ = _build_d1(info, tmp_path, *_inputs_d1(0.0, EXC["lf_sim"]), name="none")
     assert MR.load_mf_record(str(tmp_path / "none"), expected_record_sha256=sha0,
                              backbone_manifest_sha256=info.manifest_sha256).record["mode_mapping"]["exception"] is None
+
+
+def test_build_records_a_raised_validated_z_min(info, tmp_path):
+    lf, hr = _inputs()
+    bb = hp.load_bundle(info.bundle_dir, info.manifest_sha256)
+    comp = {"id": "c", "excluded_sims": [], "ruling_ids": ["r"]}
+    _, sha, summ = B.build_from_inputs(str(tmp_path / "mf"), lf=lf, hr=hr, backbone=bb, kind="release",
+                                       mf_version="v1", caches=_caches(bb), composition=comp, fold=None,
+                                       fit_code=CLEAN(), validated_z_min=2.6)
+    rec = MR.load_mf_record(str(tmp_path / "mf"), expected_record_sha256=sha,
+                            backbone_manifest_sha256=info.manifest_sha256)
+    assert rec.record["validated_z_min"] == 2.6 == summ["validated_z_min"]
+    with pytest.raises(MR.MFRecordError, match="validated_z_min"):          # never below the code floor
+        B.build_from_inputs(str(tmp_path / "lo"), lf=lf, hr=hr, backbone=bb, kind="release", mf_version="v1",
+                            caches=_caches(bb), composition=comp, fold=None, fit_code=CLEAN(), validated_z_min=2.0)
+    assert not os.path.lexists(tmp_path / "lo")
 
 
 @pytest.mark.parametrize("err, group, kw", [

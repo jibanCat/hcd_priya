@@ -72,7 +72,8 @@ def record_fields(**over):
                composition={"id": "synthetic-xD", "excluded_sims": ["synthD"],
                             "ruling_ids": ["synthetic ruling 1"]},
                fold=None, fit_code={"commit": COMMIT, "dirty": False},
-               mode_mapping={"tol": MR.D1_TOL, "canonical_max": 0.0, "stored_max": 0.0, "exception": None})
+               mode_mapping={"tol": MR.D1_TOL, "canonical_max": 0.0, "stored_max": 0.0, "exception": None},
+               validated_z_min=MR.VALIDATED_Z_MIN)
     out.update(over)
     return out
 
@@ -382,6 +383,26 @@ def test_mode_mapping_block_is_closed_checked(tmp_path, bad, why):
     s2 = rewrite(d, lambda r: dict(r, mode_mapping=dict(good, **bad)))
     with pytest.raises(MR.MFRecordError, match=why):
         load(d, s2)
+
+
+# --------------------------------------------------------------------------------------------- validated_z_min
+def test_validated_z_min_is_recorded_and_never_below_the_code_floor(tmp_path):
+    """The record states the lowest redshift its MF is validated at (2.2 by default, the K-fold evaluation domain);
+    the builder may raise it, never lower it; it is reported in the provenance."""
+    assert MR.VALIDATED_Z_MIN == 2.2
+    d, sha, _ = build(tmp_path)
+    rec = load(d, sha)
+    assert rec.record["validated_z_min"] == 2.2 and rec.provenance()["validated_z_min"] == 2.2
+    d2, sha2, _ = build(tmp_path, name="hi", validated_z_min=2.6)
+    assert load(d2, sha2).record["validated_z_min"] == 2.6
+    for bad, why in ((2.0, "validated_z_min"), (2.2 - 1e-6, "validated_z_min"), (3, "validated_z_min"),
+                     ("2.2", "validated_z_min"), (None, "validated_z_min"), (float("inf"), "Infinity|validated_z_min")):
+        s2 = rewrite(d, lambda r: dict(r, validated_z_min=bad))
+        with pytest.raises(MR.MFRecordError, match=why):
+            load(d, s2)
+    with pytest.raises(MR.MFRecordError, match="validated_z_min"):
+        build(tmp_path, name="lo", validated_z_min=2.0)
+    assert not os.path.lexists(tmp_path / "lo")
 
 
 # --------------------------------------------------------------------------------------------- kinds

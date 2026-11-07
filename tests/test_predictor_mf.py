@@ -31,8 +31,10 @@ def _tables(sims=SIMS, exclude=(), holdout=(), k=K):
 
 
 def write_mf(path, *, manifest, cache, kind="release", backbone_kind="release", held_out=(), fold=None,
-             exclude=("synthsim3",), k=K):
+             exclude=("synthsim3",), k=K, z_shift=0.0, validated_z_min=MR.VALIDATED_Z_MIN):
     tables, train, n = _tables(exclude=exclude, holdout=(fold or {}).get("holdout_sims", ()), k=k)
+    if z_shift:                                                     # synthetic tables labelled at lower redshifts
+        tables = dict(tables, z_tab=np.asarray(tables["z_tab"], float) - z_shift)
     kcom = 2 * np.pi * np.arange(1, k + 1) / L_BOX_HMPC
     return MR.write_mf_record(
         str(path), tables, k_com_hmpc=kcom, kind=kind, mf_version="synthetic-mf-1",
@@ -43,7 +45,8 @@ def write_mf(path, *, manifest, cache, kind="release", backbone_kind="release", 
         composition={"id": "synthetic-composition", "excluded_sims": list(exclude),
                      "ruling_ids": ["synthetic ruling"]},
         fold=fold, fit_code={"commit": COMMIT, "dirty": False}, train_sims=train, n_pairs_train=n,
-        mode_mapping={"tol": MR.D1_TOL, "canonical_max": 0.0, "stored_max": 0.0, "exception": None})[1]
+        mode_mapping={"tol": MR.D1_TOL, "canonical_max": 0.0, "stored_max": 0.0, "exception": None},
+        validated_z_min=validated_z_min)[1]
 
 
 @pytest.fixture(scope="module")
@@ -159,7 +162,7 @@ def test_mf_below_the_tables_lowest_redshift_is_refused_not_clamped(emu_mf, emu_
     single, stacked and on the held-out path; the LF prediction there is still available, and equals the LF-only
     bundle's. Above the tables (z 4.2) the MF is still held constant and flagged."""
     for f in (None, "LF+MF"):
-        with pytest.raises(hp.MFRangeError, match="refused below its tables' lowest redshift z = 2.6"):
+        with pytest.raises(hp.MFRangeError, match=r"refused below z = 2.6 \(its tables' lowest redshift 2.6"):
             emu_mf.predict(PARAMS, 2.4, tau_eff=0.3, fidelity=f)
         with pytest.raises(hp.MFRangeError, match=r"z = \[2.2, 2.4\]"):
             emu_mf.predict_many(PARAMS, [2.2, 2.4, 3.0], tau_eff=0.3, fidelity=f)
@@ -179,6 +182,37 @@ def test_mf_below_the_tables_lowest_redshift_is_refused_not_clamped(emu_mf, emu_
     with pytest.raises(hp.MFRangeError, match="refused below"):
         hp.heldout_P_filt_at(rp, np.stack([_x(3.0), _x(2.4)]), np.array([0.4, 0.3]))
     assert hp.heldout_P_filt_at(rp, _x(2.6)[None], np.array([0.3]))["mf"].shape[0] == 1
+
+
+def test_mf_below_validated_z_min_is_refused_even_inside_the_tables(info, emu_lf, res, tmp_path):
+    """The record's validated_z_min (2.2 by default) bounds the MF from below together with the tables' lowest
+    redshift: tables starting at z 2.0 still refuse an LF+MF prediction at z 2.0 (single, stacked, held-out); the LF
+    prediction there is unchanged; a record that raises validated_z_min to 2.6 refuses below 2.6."""
+    c = info.lineage["cache"]["sha256"]
+    s = write_mf(tmp_path / "lo", manifest=info.manifest_sha256, cache=c, z_shift=0.6)          # z_tab 2.0, 2.4, 2.8
+    e = hp.load_bundle(info.bundle_dir, info.manifest_sha256, mf_dir=str(tmp_path / "lo"), mf_record_sha256=s)
+    assert float(e._mf_dom[0][0]) == pytest.approx(2.0)
+    assert e.provenance["mf"]["validated_z_min"] == 2.2
+    with pytest.raises(hp.MFRangeError, match=r"refused below z = 2.2 .*validated_z_min 2.2"):
+        e.predict(PARAMS, 2.0, tau_eff=0.3)
+    with pytest.raises(hp.MFRangeError, match=r"z = \[2.0\]"):
+        e.predict_many(PARAMS, [2.0, 2.2, 3.0], tau_eff=0.3, fidelity="LF+MF")
+    assert e.predict(PARAMS, 2.2, tau_eff=0.3).flags["mf_applied"] is True
+    lf = e.predict(PARAMS, 2.0, tau_eff=0.3, fidelity="LF")
+    assert lf.P_class.tobytes() == emu_lf.predict(PARAMS, 2.0, tau_eff=0.3).P_class.tobytes()
+    s2 = write_mf(tmp_path / "hi", manifest=info.manifest_sha256, cache=c, z_shift=0.6, validated_z_min=2.6)
+    e2 = hp.load_bundle(info.bundle_dir, info.manifest_sha256, mf_dir=str(tmp_path / "hi"), mf_record_sha256=s2)
+    with pytest.raises(hp.MFRangeError, match=r"refused below z = 2.6"):
+        e2.predict(PARAMS, 2.4, tau_eff=0.3)
+    assert e2.predict(PARAMS, 2.6, tau_eff=0.3).flags["mf_applied"] is True
+    rc = res.lineage["cache"]["sha256"]
+    s3 = write_mf(tmp_path / "fold", manifest=res.manifest_sha256, cache=rc, kind="fold", backbone_kind="research",
+                  held_out=["synthsim2"], fold={"fold_id": "f3", "holdout_sims": ["synthsim2"]}, z_shift=0.6)
+    rp = hp.load_research_bundle(res.bundle_dir, res.manifest_sha256, purpose="a test", mf_dir=str(tmp_path / "fold"),
+                                 mf_record_sha256=s3)
+    with pytest.raises(hp.MFRangeError, match="validated_z_min"):
+        hp.heldout_P_filt_at(rp, _x(2.0)[None], np.array([0.3]))
+    assert hp.heldout_P_filt_at(rp, _x(2.2)[None], np.array([0.3]))["mf"].shape[0] == 1
 
 
 # ------------------------------------------------------------------------------------------------ refusals

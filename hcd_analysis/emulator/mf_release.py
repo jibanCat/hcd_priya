@@ -20,7 +20,8 @@ bundle (its manifest sha256) and is refused with any other.
                       convention of the targets (``MEAN_FLUX_CONVENTION``, the settled global convention) and the
                       fit code's commit and
                       clean-tree flag, and the HR/LF mode-mapping check (``mode_mapping``: ``D1_TOL`` and the one
-                      recorded stored-grid exception, ``D1_EXCEPTION``).
+                      recorded stored-grid exception, ``D1_EXCEPTION``), and ``validated_z_min``, the lowest
+                      redshift at which the MF is validated (``VALIDATED_Z_MIN`` by default, never lower).
 
 A published record is anchored by the sha256 of ``mf_record.json``; the record anchors the tables. Nothing is pickled
 or evaluated: the tables are read from anchored bytes with the strict HDF5 walk of ``safe_h5``.
@@ -125,8 +126,14 @@ D1_EXCEPTION = {
 _D1_KEYS = {"tol", "canonical_max", "stored_max", "exception"}
 _D1_EXC_KEYS = set(D1_EXCEPTION) | {"n_pairs", "max_error"}
 
+# The lowest redshift at which an MF is validated: the grouped (K-fold) validation evaluates z 2.2-4.6. A record states
+# its own value (the builder's, VALIDATED_Z_MIN by default; it may be raised, never lowered), and the predictor refuses
+# an LF+MF prediction below max(the tables' lowest redshift, validated_z_min).
+VALIDATED_Z_MIN = 2.2
+
 RECORD_KEYS = {"format", "mf_version", "kind", "model_form", "tables", "backbone", "caches", "composition", "fold",
-               "train_sims", "n_pairs_train", "hr_inputs", "mean_flux_convention", "fit_code", "mode_mapping"}
+               "train_sims", "n_pairs_train", "hr_inputs", "mean_flux_convention", "fit_code", "mode_mapping",
+               "validated_z_min"}
 _TABLES_KEYS = {"format", "file", "sha256", "bytes", "n_modes", "n_z", "n_rung"}
 _BACKBONE_KEYS = {"manifest_sha256", "kind", "cache_sha256", "held_out_sims"}
 _CACHE_KEYS = {"file", "sha256", "provenance"}
@@ -325,6 +332,10 @@ def check_record(rec):
         raise MFRecordError("mean-flux convention differs from the code's settled production convention (global: "
                             "the class spectra share the whole sample's mean flux; it changes only with the code)")
     check_mode_mapping(rec["mode_mapping"])
+    vz = rec["validated_z_min"]
+    if type(vz) is not float or not np.isfinite(vz) or not vz >= VALIDATED_Z_MIN:
+        raise MFRecordError(f"validated_z_min must be a finite float >= {VALIDATED_Z_MIN!r} (the lowest validated "
+                            f"redshift; it may be raised, never lowered), got {vz!r}")
     fc = rec["fit_code"]
     _keys(fc, {"commit", "dirty"}, "fit_code")
     _hex(fc["commit"], 40, "fit_code.commit")
@@ -432,12 +443,13 @@ def _read_tables(raw, where):
 
 # --------------------------------------------------------------------------------------------- write
 def write_mf_record(out_dir, tables, *, k_com_hmpc, kind, mf_version, backbone, caches, composition, fold, fit_code,
-                    train_sims, n_pairs_train, mode_mapping):
+                    train_sims, n_pairs_train, mode_mapping, validated_z_min):
     """Write a record directory ONCE: ``out_dir`` must not exist (an existing directory, file or symlink is refused);
     it is created, the tables are written, then the record (last). ``caches`` = {lf, hr: {file, sha256}}; the writer
     adds each side's ``provenance`` (``CACHE_PROVENANCE``). ``fold`` = None, or {fold_id, holdout_sims} (the
     writer adds ``backbone_excludes_holdout`` from the backbone's held-out simulations). ``mode_mapping``: the D1
-    check the builder ran (``check_mode_mapping``). Every field is validated
+    check the builder ran (``check_mode_mapping``). ``validated_z_min``: the lowest validated redshift (a float, at least
+    ``VALIDATED_Z_MIN``). Every field is validated
     (``check_record``) before anything is written. Returns (the record's path, its sha256: the anchor to publish)."""
     out_dir = os.fspath(out_dir)
     if not isinstance(caches, dict) or set(caches) != {"lf", "hr"} or \
@@ -462,7 +474,8 @@ def write_mf_record(out_dir, tables, *, k_com_hmpc, kind, mf_version, backbone, 
            "composition": dict(composition, excluded_sims=sorted(set(composition.get("excluded_sims") or []))),
            "fold": fold_rec, "train_sims": sorted(set(train_sims)), "n_pairs_train": int(n_pairs_train),
            "hr_inputs": copy_json(HR_INPUTS), "mean_flux_convention": copy_json(MEAN_FLUX_CONVENTION),
-           "fit_code": copy_json(fit_code), "mode_mapping": copy_json(mode_mapping)}
+           "fit_code": copy_json(fit_code), "mode_mapping": copy_json(mode_mapping),
+           "validated_z_min": validated_z_min}
     check_record(rec)                                               # everything refused before anything is written
     os.makedirs(out_dir)                                            # no exist_ok: a race is refused too
     tpath = os.path.join(out_dir, TABLES_FILE)
@@ -514,7 +527,8 @@ class MFRecord(NamedTuple):
                 "fold": copy_json(r["fold"]), "train_sims": list(r["train_sims"]), "caches": copy_json(r["caches"]),
                 "tables_sha256": r["tables"]["sha256"], "fit_code": copy_json(r["fit_code"]),
                 "mean_flux_convention": copy_json(r["mean_flux_convention"]),
-                "hr_inputs": copy_json(r["hr_inputs"]), "mode_mapping": copy_json(r["mode_mapping"])}
+                "hr_inputs": copy_json(r["hr_inputs"]), "mode_mapping": copy_json(r["mode_mapping"]),
+                "validated_z_min": r["validated_z_min"]}
 
 
 def load_mf_record(mf_dir, *, expected_record_sha256, backbone_manifest_sha256, kind="release", composition=None,

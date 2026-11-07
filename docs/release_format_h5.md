@@ -328,7 +328,10 @@ digest does not change when an MF is added). It holds exactly:
     and stored-grid maxima, and `exception`). The canonical mapping holds to 1e-12 on every pair; so do the stored
     grids, except, when `exception` is not null, the pairs of one recorded design point (`mf_release.D1_EXCEPTION`:
     its LF and HR run names, whose parameter values differ in their last quoted digits) below the recorded bound
-    5e-10, with their count and largest error. Any other exception, bound or tolerance is refused.
+    5e-10, with their count and largest error. Any other exception, bound or tolerance is refused;
+  - `validated_z_min`: the lowest redshift at which the MF is validated, a float set by the builder
+    (`--validated-z-min`, 2.2 by default, `mf_release.VALIDATED_Z_MIN`); it may be raised, never lowered. The
+    predictor refuses an LF+MF prediction below the larger of it and the tables' lowest redshift.
 
 A published record comes with the sha256 of its `mf_record.json`; the record pins the tables by sha256 and size.
 
@@ -356,9 +359,9 @@ or box modes are not the bundle's. The predictor applies only what it re-derives
 bytes (`mf_release.reverify`; a loaded `MFRecord` keeps them): a record built or changed in memory (another record's
 tables, a relabelled kind) is refused, so `provenance["mf"]` always describes the tables applied.
 `predict(..., fidelity="LF")` gives the LF prediction of the same bundle, bit for bit what the bundle loaded without
-an MF gives. Below the lowest redshift of the record's tables the LF+MF prediction
-is refused (`MFRangeError`), never clamped: the correction was not measured there, so only `fidelity="LF"` is
-available. Above the highest redshift, and outside the tau0 tables, g is held at its edge value and the prediction is
+an MF gives. Below the larger of the lowest redshift of the record's tables and the record's `validated_z_min` the
+LF+MF prediction is refused (`MFRangeError`), never clamped: the correction was not measured or not validated there,
+so only `fidelity="LF"` is available. Above the highest redshift, and outside the tau0 tables, g is held at its edge value and the prediction is
 flagged (`mf_z_clamped`, `mf_tau0_clamped`).
 
 **Writing.** `mf_release.write_mf_record(out_dir, tables, ...)` validates everything first, then creates `out_dir`

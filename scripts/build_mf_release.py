@@ -11,7 +11,8 @@ pinned inputs, into a NEW directory.
   5. matches HR and LF rows exactly, checks the mode mapping (``d1_check``: canonical <= 1e-12 on every pair; stored
      grids <= 1e-12 except the one recorded design point, mf_release.D1_EXCEPTION, below its bound; recorded in the
      record's ``mode_mapping``), forms the targets g = log P_HR - log P_LF,backbone per matched pair, class and mode;
-  6. fits the tables on the composition's training pairs (minus a fold's held-out simulations) and writes the record;
+  6. fits the tables on the composition's training pairs (minus a fold's held-out simulations) and writes the record,
+     with its lowest validated redshift (--validated-z-min, mf_release.VALIDATED_Z_MIN = 2.2 by default; never lower);
   7. reloads it through mf_release.load_mf_record and prints the record's sha256 (the anchor to publish).
 
 Release:
@@ -33,7 +34,7 @@ import sys
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _REPO_ROOT)
 
-from hcd_analysis.emulator.mf_release import D1_TOL  # noqa: E402  (the one tolerance, shared with the record check)
+from hcd_analysis.emulator.mf_release import D1_TOL, VALIDATED_Z_MIN  # noqa: E402  (shared with the record check)
 
 HR_HISTORICAL_REASON = ("the HR cache predates cache lineage; the MF reads only its per-class P1D rows and row keys "
                         "(PI ruling 2026-11-06b A1)")
@@ -65,6 +66,9 @@ def parse(argv=None):
     ap.add_argument("--ruling-id", action="append", default=[], required=True)
     ap.add_argument("--fold-id", default=None)
     ap.add_argument("--holdout-sim", action="append", default=[])
+    ap.add_argument("--validated-z-min", type=float, default=VALIDATED_Z_MIN,
+                    help=f"the lowest redshift the MF is validated at (default {VALIDATED_Z_MIN}; it may be raised, "
+                         "never lowered); the predictor refuses LF+MF below it")
     a = ap.parse_args(argv)
     if a.kind == "release" and (a.fold_id or a.holdout_sim or a.backbone_purpose):
         ap.error("a release build takes no --fold-id, --holdout-sim or --backbone-purpose")
@@ -104,7 +108,8 @@ def d1_check(lf, hrv, pairs, k_com):
     return MR.check_mode_mapping(out)
 
 
-def build_from_inputs(out_dir, *, lf, hr, backbone, kind, mf_version, caches, composition, fold, fit_code):
+def build_from_inputs(out_dir, *, lf, hr, backbone, kind, mf_version, caches, composition, fold, fit_code,
+                      validated_z_min=VALIDATED_Z_MIN):
     """Steps 5 and 6 on loaded inputs: ``lf`` the LF cache dict, ``hr`` the HR cache dict (seen through
     ``hr_view`` here), ``backbone`` a loaded predictor (``predictor.Bundle`` or ``ResearchPredictor``). Returns
     (record path, record sha256, summary)."""
@@ -132,8 +137,10 @@ def build_from_inputs(out_dir, *, lf, hr, backbone, kind, mf_version, caches, co
     bb = hp.backbone_identity(backbone)                         # derived from the member metas, never a caller flag
     path, sha = MR.write_mf_record(out_dir, tables, k_com_hmpc=k_com, kind=kind, mf_version=mf_version, backbone=bb,
                                    caches=caches, composition=composition, fold=fold, fit_code=fit_code,
-                                   train_sims=train, n_pairs_train=int(rows.size), mode_mapping=d1)
+                                   train_sims=train, n_pairs_train=int(rows.size), mode_mapping=d1,
+                                   validated_z_min=float(validated_z_min))
     summary = {"n_pairs": len(pairs), "n_pairs_train": int(rows.size), "train_sims": train, "D1": d1,
+               "validated_z_min": float(validated_z_min),
                "sims": sorted(set(t["sim"]))}
     return path, sha, summary
 
@@ -175,7 +182,7 @@ def main(argv=None, *, _code=None):
     fold = {"fold_id": a.fold_id, "holdout_sims": sorted(set(a.holdout_sim))} if a.kind == "fold" else None
     path, sha, summary = build_from_inputs(out, lf=lf, hr=hr, backbone=backbone, kind=a.kind,
                                            mf_version=a.mf_version, caches=caches, composition=composition, fold=fold,
-                                           fit_code=code)
+                                           fit_code=code, validated_z_min=a.validated_z_min)
     from hcd_analysis.emulator import mf_release as MR
     rec = MR.load_mf_record(out, expected_record_sha256=sha, backbone_manifest_sha256=a.backbone_manifest_sha256,
                             kind=a.kind, composition=composition, lf_cache_sha256=a.lf_cache_sha256,
