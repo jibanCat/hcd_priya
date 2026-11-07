@@ -9,6 +9,15 @@ a lineage block and the map from absorber incidence (dN/dX) to the class weights
 through the separately named historical loaders (below). The earlier safetensors-layout prototype
 (`docs/release_format.md`) is kept as evidence only and is not a second release format.
 
+## Scope: single fidelity
+
+An `hcd_priya.h5/2` bundle holds the members of ONE training cache and the w_c map fitted to it. It has no slot for a
+multi-fidelity (LF to HR) correction, and the predictor (`hcd_analysis/predictor.py`) applies none: a bundle trained on
+the low-fidelity cache gives low-fidelity predictions, and every prediction's labels say so (`product` names the
+training cache's fidelity; `mf_correction` is `none`). The multi-fidelity correction, its representation in the bundle
+and a release-level manifest come in a later change. Because the manifest's keys are fixed (below), adding them
+changes the format, so an `hcd_priya.h5/2` bundle is not the complete release model.
+
 ## Why
 
 `.norm.pkl` is a pickle: loading it can run arbitrary code. A release needs files that load without executing anything

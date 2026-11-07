@@ -156,6 +156,12 @@ pred.flags.get("research_model", False)             # True here; production pred
 
 Arrays returned by `hp.add_hcd` do not carry the flag: keep the `Prediction` (or its `provenance`) with them.
 
+**Scope: single fidelity.** `hcd_priya.h5/2` and the predictor serve the members of one training cache and the w_c
+map fitted to it. They apply no multi-fidelity (LF to HR) correction, so a bundle trained on the low-fidelity cache
+gives low-fidelity predictions; each prediction's labels say so (`product`, `mf_correction`). The multi-fidelity
+correction, its representation in the bundle and a release-level manifest come in a later change, which also changes
+the bundle format; until then an `hcd_priya.h5/2` bundle is not the complete release model.
+
 The files open with standard tools (`h5ls -r member.h5`). Contract and full usage: `docs/release_format_h5.md`; a
 step-by-step guide to production and research bundles, with executable examples:
 [`docs/tutorials/production_and_research_bundles.md`](docs/tutorials/production_and_research_bundles.md).

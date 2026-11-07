@@ -267,6 +267,14 @@ def test_flags_and_labels(emu):
     assert lab["omissions"] == list(hp.OMISSIONS) and "no prior" in lab["amplitudes"]
 
 
+def test_the_labels_and_the_docstring_state_the_single_fidelity_scope(emu):
+    """h5/2 and this predictor carry no multi-fidelity correction: the labels and the module docstring say so."""
+    lab = emu.predict(PARAMS, 3.0, tau_eff=0.4).labels
+    assert lab["mf_correction"].startswith("none")
+    assert "single-fidelity" in lab["mf_correction"]
+    assert "no multi-fidelity" in " ".join(hp.__doc__.split())
+
+
 # ------------------------------------------------------------------------------------- no prior, no survey key
 def test_the_public_interface_has_no_prior_survey_or_dla_fraction():
     names = {n for f in (hp.load_bundle, hp.Bundle.predict, hp.Bundle.predict_many, hp.add_hcd)

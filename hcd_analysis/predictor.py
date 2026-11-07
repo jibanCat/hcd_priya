@@ -20,6 +20,13 @@ full-simulation research models: ``provenance.research``) is refused by ``load_b
 ``load_research_bundle(bundle_dir, sha256, purpose=...)``, which returns a ``ResearchPredictor`` (the same forward,
 every prediction flagged ``research_model``); it is never a ``Bundle``.
 
+**Scope: single fidelity.** Format ``hcd_priya.h5/2`` and this predictor serve the members of ONE training cache and
+the w_c map fitted to it, with no multi-fidelity (LF to HR) correction: a bundle trained on the low-fidelity cache
+gives low-fidelity predictions (``labels["product"]`` names the training cache's fidelity; ``labels["mf_correction"]``
+is ``none``). The multi-fidelity correction, its representation in the bundle and a release-level manifest come in a
+later change; the bundle format does not hold them yet, so an ``hcd_priya.h5/2`` bundle is not the complete release
+model.
+
 **Inputs.** ``params``: a dict of the nine PRIYA parameters (``PARAM_NAMES``): ``ns`` and ``Ap`` at the PRIYA pivot
 k_p = 0.78 h/Mpc, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hireionz``, ``bhfeedback``. ``z``: a PRIYA
 snapshot redshift (2.0, 2.2, ..., 5.4, matched to 1e-9). The mean flux: either ``tau_eff``, -ln<F> of the PRIYA-filtered
@@ -271,6 +278,8 @@ class _PredictorBase:
 
     def labels(self):
         return {"filter": "PRIYA tau > 1e6 trough-filtered", "product": self._fidelity,
+                "mf_correction": "none: single-fidelity members of one training cache; no multi-fidelity (LF to HR) "
+                                 "correction is applied",
                 "resolution": "not resolution-corrected",
                 "dla": "the filtered DLA spectrum; the damping-wing core is not included",
                 "P_class": "the mean over the ensemble members of their reconstructed per-class spectra",
