@@ -242,7 +242,8 @@ def test_merge_v3_synthetic(tmp_path):
     for si in range(2):
         rows = _fake_rows(nk, nrows=2)
         for r in rows:
-            r["snap_group_idx"] = 0  # one snap per shard
+            r["snap_group_idx"] = 0  # one snap per shard: every row belongs to the shard's one snap block
+            r["sim_name"], r["snap"] = f"sim{si}", 0
         blocks = [_fake_snap_block(f"sim{si}", 0)]
         bt0.write_cache_tau0(rows, blocks, tmp_path / f"shard_{si}.h5",
                              alpha_range=(1.0, 1.2), n_k=nk, inputs=[], settings={})
