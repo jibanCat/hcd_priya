@@ -5,6 +5,8 @@ run whose reference tree changed while it ran, as a pass. Synthetic values only;
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -92,6 +94,30 @@ def test_a_missing_verdict_is_not_a_pass(monkeypatch, tmp_path):
     R = _runner()
     _stub_main(monkeypatch, tmp_path, R, {})
     assert _exit_code(R) not in (0, None)
+
+
+def test_a_refusal_inside_a_level_exits_1_without_result_json(monkeypatch, tmp_path):
+    """As the module docstring says: a refusal exits 1 (a message to sys.exit) and writes no result.json."""
+    R = _runner()
+    out = _stub_main(monkeypatch, tmp_path, R, {"verdict": "PASS"})
+
+    def refusing_level(a, cfg, cases_or_ks, res_out):
+        sys.exit("refusing: synthetic")
+    monkeypatch.setattr(R, "level_L1b", refusing_level)
+    code = _exit_code(R)
+    assert isinstance(code, str) and code.startswith("refusing:")      # Python exits 1 for a message
+    assert out.is_dir() and not (out / "result.json").exists()
+
+
+def test_an_existing_out_dir_is_refused_with_exit_status_1(tmp_path):
+    """The real process exit status of a refusal is 1, the same code as FAIL; no result.json is written."""
+    out = tmp_path / "out"
+    out.mkdir()
+    p = subprocess.run([sys.executable, "-B", os.path.join(REPO, "scripts", "compare_emulators.py"), "--level", "L1b",
+                        "--out", str(out), "--cache", "c.h5", "--ks-basedir", "b", "--lyaemu-parent", "p",
+                        "--ks-python", "py"], capture_output=True, text=True)
+    assert p.returncode == 1 and "refusing:" in p.stderr
+    assert list(out.iterdir()) == []
 
 
 # --- L1c: the k-grid label check is part of the headline verdict -------------------------------------------------

@@ -11,9 +11,11 @@ L2-LF  hcd_priya LF ensemble (C1) against the reference AR1 LF output (R1, res 0
 Every result (records, residuals, summaries) is written under --out only; the terminal gets verdicts. The reference
 runs in its own interpreter through hcd_analysis/comparison/adapters/lyaemu_priya.py, which refuses to refit it.
 
-Exit status: 0 only for a PASS with the reference master tree unchanged (or not hashed). FAIL, NOT RUN, BLOCKED and NOT
-COMPARABLE each exit with their own non-zero code (EXIT_CODES); a reference master tree that changed during the run turns
-the verdict into FAIL and exits with EXIT_MASTER_CHANGED. result.json is written in every case."""
+Exit status: 0 only for a PASS with the reference master tree unchanged (or not hashed). When a level returns, the
+verdict is written to result.json and FAIL, NOT RUN, BLOCKED and NOT COMPARABLE each exit with their own non-zero code
+(EXIT_CODES); a reference master tree that changed during the run turns the verdict into FAIL and exits with
+EXIT_MASTER_CHANGED. A refusal ("refusing: ...") or an uncaught error exits 1, Python's default, without writing
+result.json, so exit 1 alone does not mean that a comparison ran: read result.json."""
 import argparse
 import json
 import os
