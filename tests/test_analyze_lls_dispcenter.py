@@ -387,9 +387,9 @@ def test_paired_delta_bias_z_is_contaminated_by_unequal_arm_widths():
     """Regression pin for the defect this replaced. The DLA-arm convention
     Delta bias_z = (mu_b - T)/s_b - (mu_c - T)/s_c picks up a spurious -T*(1/s_b - 1/s_c) term
     when the arms' posterior widths differ, which they do here (ESS-thinned draw counts run
-    20..150). On the real campaign that pushed tau0_amp -- the site with the largest
-    truth/sigma ratio -- from +0.14 to +0.23. This test pins that the MEAN-SHIFT estimator does
-    not inherit the artifact; it is the reason the primary line is not Delta bias_z."""
+    20..150). The artifact is immaterial for n_s/A_p, whose truth/sigma ratios are modest, but not
+    for tau0_amp, whose truth/sigma ratio is large. This test pins that the MEAN-SHIFT estimator
+    does not inherit the artifact; it is the reason the primary line is not Delta bias_z."""
     from scripts.analyze_dla_selfdraw import paired_delta_named
     truth = np.array([0.4, 0.8, 0.3, MU, 0.06, 0.004])
     rc = _rec(NAMES, truth, truth + 0.5, 0.05, L=20000, seed=81)
