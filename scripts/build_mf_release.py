@@ -8,8 +8,9 @@ pinned inputs, into a NEW directory.
      --backbone-purpose a research bundle, for a fold build only) and refuses one not trained on the pinned LF cache;
   4. reads the LF cache (strict, lineage-checked) and only the per-class P1D rows and row keys of the HR cache
      (mf_release.hr_view: the catalogue-derived HR columns are never read);
-  5. matches HR and LF rows exactly, checks the mode mapping (both <= 1e-12), forms the targets
-     g = log P_HR - log P_LF,backbone per matched pair, class and mode;
+  5. matches HR and LF rows exactly, checks the mode mapping (``d1_check``: canonical <= 1e-12 on every pair; stored
+     grids <= 1e-12 except the one recorded design point, mf_release.D1_EXCEPTION, below its bound; recorded in the
+     record's ``mode_mapping``), forms the targets g = log P_HR - log P_LF,backbone per matched pair, class and mode;
   6. fits the tables on the composition's training pairs (minus a fold's held-out simulations) and writes the record;
   7. reloads it through mf_release.load_mf_record and prints the record's sha256 (the anchor to publish).
 
@@ -32,9 +33,10 @@ import sys
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _REPO_ROOT)
 
+from hcd_analysis.emulator.mf_release import D1_TOL  # noqa: E402  (the one tolerance, shared with the record check)
+
 HR_HISTORICAL_REASON = ("the HR cache predates cache lineage; the MF reads only its per-class P1D rows and row keys "
                         "(PI ruling 2026-11-06b A1)")
-D1_TOL = 1e-12
 
 
 def code_identity(repo=_REPO_ROOT):
@@ -71,6 +73,37 @@ def parse(argv=None):
     return a
 
 
+def d1_check(lf, hrv, pairs, k_com):
+    """The HR/LF mode mapping (D1) over ALL matched pairs, before any composition: the canonical mapping must hold to
+    D1_TOL on every pair, and the stored grids too, except the pairs of the one recorded design point
+    (mf_release.D1_EXCEPTION: its LF and HR run names both, each pair below its bound). Returns the record's
+    ``mode_mapping`` block; refuses (SystemExit) anything else."""
+    from hcd_analysis.emulator import mf_modes as MM
+    from hcd_analysis.emulator import mf_release as MR
+    K = len(k_com)
+    canonical = float(MM.canonical_mapping_error(hrv, pairs, k_com))
+    if not canonical <= D1_TOL:
+        raise SystemExit(f"refusing: HR and LF modes do not map one to one (D1 canonical {canonical!r} > {D1_TOL!r})")
+    exc = MR.D1_EXCEPTION
+    stored, excepted, bad = 0.0, [], []
+    for h, l in pairs:
+        e = float(MM.mode_mapping_error(lf, hrv, [(h, l)], K))
+        if e <= D1_TOL:
+            stored = max(stored, e)
+        elif str(lf["sim_name"][l]) == exc["lf_sim"] and str(hrv["sim_name"][h]) == exc["hr_sim"] and e < exc["bound"]:
+            excepted.append(e)
+        else:
+            bad.append((str(lf["sim_name"][l]), e))
+    if bad:
+        sims = sorted({s for s, _ in bad})
+        raise SystemExit(f"refusing: HR and LF modes do not map one to one (D1 stored grids: {len(bad)} pairs of "
+                         f"{sims} above {D1_TOL!r} outside the recorded exception; largest {max(e for _, e in bad)!r})")
+    out = {"tol": D1_TOL, "canonical_max": canonical, "stored_max": stored, "exception": None}
+    if excepted:
+        out["exception"] = dict(MR.copy_json(exc), n_pairs=len(excepted), max_error=max(excepted))
+    return MR.check_mode_mapping(out)
+
+
 def build_from_inputs(out_dir, *, lf, hr, backbone, kind, mf_version, caches, composition, fold, fit_code):
     """Steps 5 and 6 on loaded inputs: ``lf`` the LF cache dict, ``hr`` the HR cache dict (seen through
     ``hr_view`` here), ``backbone`` a loaded predictor (``predictor.Bundle`` or ``ResearchPredictor``). Returns
@@ -89,10 +122,7 @@ def build_from_inputs(out_dir, *, lf, hr, backbone, kind, mf_version, caches, co
     pairs = MM.match_pairs(lf, hrv)
     if not pairs:
         raise SystemExit("refusing: no HR row matches an LF row")
-    d1 = {"stored_grids": MM.mode_mapping_error(lf, hrv, pairs, K),
-          "canonical": MM.canonical_mapping_error(hrv, pairs, k_com)}
-    if not all(v <= D1_TOL for v in d1.values()):
-        raise SystemExit(f"refusing: HR and LF modes do not map one to one (D1 {d1})")
+    d1 = d1_check(lf, hrv, pairs, k_com)
     l_rows = np.array([p[1] for p in pairs])
     P_lf = hp.lf_P_filt_at(backbone, np.asarray(lf["x"])[l_rows], np.asarray(lf["tau0"])[l_rows])
     t = MM.measure_mode_targets(lf, hrv, pairs, P_lf, x=lf["x"], n_modes=K)
@@ -102,7 +132,7 @@ def build_from_inputs(out_dir, *, lf, hr, backbone, kind, mf_version, caches, co
     bb = hp.backbone_identity(backbone)                         # derived from the member metas, never a caller flag
     path, sha = MR.write_mf_record(out_dir, tables, k_com_hmpc=k_com, kind=kind, mf_version=mf_version, backbone=bb,
                                    caches=caches, composition=composition, fold=fold, fit_code=fit_code,
-                                   train_sims=train, n_pairs_train=int(rows.size))
+                                   train_sims=train, n_pairs_train=int(rows.size), mode_mapping=d1)
     summary = {"n_pairs": len(pairs), "n_pairs_train": int(rows.size), "train_sims": train, "D1": d1,
                "sims": sorted(set(t["sim"]))}
     return path, sha, summary

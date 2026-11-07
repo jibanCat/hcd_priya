@@ -71,7 +71,8 @@ def record_fields(**over):
                        "hr": {"file": "hr_cache.h5", "sha256": HR_SHA}},
                composition={"id": "synthetic-xD", "excluded_sims": ["synthD"],
                             "ruling_ids": ["synthetic ruling 1"]},
-               fold=None, fit_code={"commit": COMMIT, "dirty": False})
+               fold=None, fit_code={"commit": COMMIT, "dirty": False},
+               mode_mapping={"tol": MR.D1_TOL, "canonical_max": 0.0, "stored_max": 0.0, "exception": None})
     out.update(over)
     return out
 
@@ -339,6 +340,48 @@ def test_mean_flux_convention_text_is_public_safe():
         assert word not in text, word
     assert "production convention" in MR.MEAN_FLUX_CONVENTION["production"]
     assert "diagnostic" in MR.MEAN_FLUX_CONVENTION["production"]
+
+
+# --------------------------------------------------------------------------------------------- mode mapping (D1)
+def _exc(**over):
+    return {**MR.D1_EXCEPTION, "n_pairs": 3, "max_error": 0.5 * MR.D1_EXCEPTION["bound"], **over}
+
+
+def test_mode_mapping_block_records_the_one_recorded_exception(tmp_path):
+    """The record carries the D1 check: tolerance, the canonical and stored maxima, and the stored-grid exception
+    (only the recorded design point, below its bound), and the provenance reports it."""
+    d, sha, _ = build(tmp_path)
+    assert load(d, sha).record["mode_mapping"]["exception"] is None
+    d2, sha2, _ = build(tmp_path, name="exc", mode_mapping={"tol": MR.D1_TOL, "canonical_max": 0.0,
+                                                            "stored_max": 0.0, "exception": _exc()})
+    rec = load(d2, sha2)
+    assert rec.record["mode_mapping"]["exception"] == _exc()
+    assert rec.provenance()["mode_mapping"] == rec.record["mode_mapping"]
+    assert MR.D1_TOL == 1e-12 and MR.D1_EXCEPTION["bound"] > MR.D1_TOL
+    assert MR.D1_EXCEPTION["lf_sim"].startswith("ns0.914") and MR.D1_EXCEPTION["hr_sim"].startswith("ns0.914")
+
+
+@pytest.mark.parametrize("bad, why", [
+    (dict(tol=1e-10), "tol"),
+    (dict(stored_max=2e-12), "stored"),
+    (dict(canonical_max=2e-12), "canonical"),
+    (dict(canonical_max=float("nan")), "NaN"),                          # refused when the JSON is parsed
+    (dict(canonical_max=-1e-13), "canonical"),
+    (dict(stored_max=0), "stored"),                                     # an int, not a float
+    (dict(exception=_exc(lf_sim="synthA")), "exception"),
+    (dict(exception=_exc(hr_sim="synthA")), "exception"),
+    (dict(exception=_exc(bound=1e-9)), "exception"),
+    (dict(exception=_exc(max_error=MR.D1_EXCEPTION["bound"])), "exception"),
+    (dict(exception=_exc(max_error=1e-13)), "exception"),
+    (dict(exception=_exc(n_pairs=0)), "exception"),
+    (dict(exception=dict(_exc(), extra=1)), "exception"),
+])
+def test_mode_mapping_block_is_closed_checked(tmp_path, bad, why):
+    d, sha, _ = build(tmp_path)
+    good = {"tol": MR.D1_TOL, "canonical_max": 0.0, "stored_max": 0.0, "exception": None}
+    s2 = rewrite(d, lambda r: dict(r, mode_mapping=dict(good, **bad)))
+    with pytest.raises(MR.MFRecordError, match=why):
+        load(d, s2)
 
 
 # --------------------------------------------------------------------------------------------- kinds

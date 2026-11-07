@@ -42,7 +42,8 @@ def write_mf(path, *, manifest, cache, kind="release", backbone_kind="release", 
                 "hr": {"file": "synthetic_hr.h5", "sha256": H64("synthetic hr")}},
         composition={"id": "synthetic-composition", "excluded_sims": list(exclude),
                      "ruling_ids": ["synthetic ruling"]},
-        fold=fold, fit_code={"commit": COMMIT, "dirty": False}, train_sims=train, n_pairs_train=n)[1]
+        fold=fold, fit_code={"commit": COMMIT, "dirty": False}, train_sims=train, n_pairs_train=n,
+        mode_mapping={"tol": MR.D1_TOL, "canonical_max": 0.0, "stored_max": 0.0, "exception": None})[1]
 
 
 @pytest.fixture(scope="module")

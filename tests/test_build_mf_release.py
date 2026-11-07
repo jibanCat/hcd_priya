@@ -161,6 +161,66 @@ def test_build_takes_the_backbone_identity_from_a_loaded_predictor_only(info, tm
     assert not os.path.lexists(tmp_path / "x")
 
 
+# --------------------------------------------------------------------- the D1 stored-grid exception (one design point)
+EXC = MR.D1_EXCEPTION
+D1_SIMS = (EXC["lf_sim"], "synthsim1", "synthsim2", "synthsim3")
+
+
+def _inputs_d1(err, group, *, hr_name=None, side="lf", name_group=None):
+    """Synthetic matched caches whose stored grids of one LF group differ by a factor (1 + err) between LF and HR
+    (side "lf"; side "hr" perturbs the HR grid, which the canonical check sees). The exception group's HR rows carry
+    the recorded HR run name (or ``hr_name``), or ``name_group``'s HR rows do."""
+    lf, hr = synthetic_pairs(sims=D1_SIMS)
+    from hcd_analysis.emulator.schema import L_BOX_HMPC
+    k_ext = 2 * np.pi * np.arange(1, K + 5) / L_BOX_HMPC
+    kf = np.stack([np.asarray(KC.k_skm_from_kcom(k_ext, z, p[5], p[6])) for z, p in zip(lf["z_grid"], lf["params"])])
+    rows = np.asarray(lf["sim_name"]) == group
+    kl, kh = kf.copy(), kf.copy()
+    (kl if side == "lf" else kh)[rows] *= 1.0 + err
+    names = np.asarray(hr["sim_name"]).astype(object)
+    names[np.asarray(lf["sim_name"]) == (name_group or EXC["lf_sim"])] = hr_name or EXC["hr_sim"]
+    return dict(lf, kfkms=kl, k_com_hmpc=k_ext), dict(hr, kfkms=kh, k_com_hmpc=k_ext, sim_name=names.astype(str))
+
+
+def _build_d1(info, tmp_path, lf, hr, name="mf"):
+    bb = hp.load_bundle(info.bundle_dir, info.manifest_sha256)
+    comp = {"id": "synthetic-x3", "excluded_sims": ["synthsim3"], "ruling_ids": ["synthetic ruling"]}
+    return B.build_from_inputs(str(tmp_path / name), lf=lf, hr=hr, backbone=bb, kind="release", mf_version="v1",
+                               caches=_caches(bb), composition=comp, fold=None, fit_code=CLEAN())
+
+
+def test_d1_exception_passes_the_recorded_case_and_is_recorded(info, tmp_path):
+    err = 0.6 * EXC["bound"]
+    _, sha, summ = _build_d1(info, tmp_path, *_inputs_d1(err, EXC["lf_sim"]))
+    rec = MR.load_mf_record(str(tmp_path / "mf"), expected_record_sha256=sha,
+                            backbone_manifest_sha256=info.manifest_sha256)
+    mm = rec.record["mode_mapping"]
+    assert mm["tol"] == B.D1_TOL == MR.D1_TOL == 1e-12
+    assert mm["stored_max"] <= 1e-12 and mm["canonical_max"] <= 1e-12
+    exc = mm["exception"]
+    assert {k: exc[k] for k in EXC} == EXC and exc["n_pairs"] == 9            # every pair of the group, no other
+    assert abs(exc["max_error"] / err - 1.0) < 1e-4
+    assert summ["D1"] == mm
+    emu = hp.load_bundle(info.bundle_dir, info.manifest_sha256, mf_dir=str(tmp_path / "mf"), mf_record_sha256=sha)
+    assert emu.provenance["mf"]["mode_mapping"] == mm
+    _, sha0, _ = _build_d1(info, tmp_path, *_inputs_d1(0.0, EXC["lf_sim"]), name="none")
+    assert MR.load_mf_record(str(tmp_path / "none"), expected_record_sha256=sha0,
+                             backbone_manifest_sha256=info.manifest_sha256).record["mode_mapping"]["exception"] is None
+
+
+@pytest.mark.parametrize("err, group, kw", [
+    (0.6 * EXC["bound"], "synthsim1", {}),                              # the same error on another group
+    (1.2 * EXC["bound"], EXC["lf_sim"], {}),                            # a larger error on the recorded group
+    (0.6 * EXC["bound"], EXC["lf_sim"], {"hr_name": "synthsim0"}),      # the recorded LF run with another HR run
+    (0.6 * EXC["bound"], "synthsim1", {"name_group": "synthsim1"}),     # the recorded HR run name on another LF run
+    (0.6 * EXC["bound"], EXC["lf_sim"], {"side": "hr"}),                # the canonical mapping stays strict
+])
+def test_d1_exception_is_narrow(info, tmp_path, err, group, kw):
+    with pytest.raises(SystemExit, match="do not map one to one"):
+        _build_d1(info, tmp_path, *_inputs_d1(err, group, **kw))
+    assert not os.path.lexists(tmp_path / "mf")
+
+
 # --------------------------------------------------------------------- code identity and TOCTOU (C1 review MAJOR-2)
 def _git(repo, *args):
     import subprocess

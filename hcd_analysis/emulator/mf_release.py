@@ -19,7 +19,8 @@ bundle (its manifest sha256) and is refused with any other.
                       with its ruling ids, the fold (for a held-out fit), the training simulations, the HR inputs used (``HR_INPUTS``), the mean-flux
                       convention of the targets (``MEAN_FLUX_CONVENTION``, the settled global convention) and the
                       fit code's commit and
-                      clean-tree flag.
+                      clean-tree flag, and the HR/LF mode-mapping check (``mode_mapping``: ``D1_TOL`` and the one
+                      recorded stored-grid exception, ``D1_EXCEPTION``).
 
 A published record is anchored by the sha256 of ``mf_record.json``; the record anchors the tables. Nothing is pickled
 or evaluated: the tables are read from anchored bytes with the strict HDF5 walk of ``safe_h5``.
@@ -102,8 +103,30 @@ MEAN_FLUX_CONVENTION = {
                   "production convention",
 }
 
+# The HR/LF mode mapping (D1): every matched pair's HR and LF modes must be the same physical wavenumbers. The
+# canonical mapping (k_skm from the box modes and the pair's shared cache parameters against the HR grid) must hold to
+# D1_TOL on every pair; so must the stored grids (|k_HR,n / k_LF,n - 1|), with ONE recorded exception: the matched
+# pairs of one design point, whose HR and LF runs were made with parameter values that differ in their last quoted
+# digits (the run names differ in alpha_q and omega_m h^2), so that their stored velocity grids differ by the ratio
+# of the runs' header velocity scales. The exception covers only pairs whose LF and HR run names are both the recorded
+# ones, each below the recorded bound; it never loosens D1_TOL for any other pair or for the canonical mapping. A
+# record states the check it passed (``mode_mapping``) and, when the exception was used, how many pairs it covered and
+# their largest error.
+D1_TOL = 1e-12
+D1_EXCEPTION = {
+    "lf_sim": "ns0.914Ap1.32e-09herei3.85heref2.65alphaq1.58hub0.742omegamh20.142hireionz6.88bhfeedback0.04",
+    "hr_sim": "ns0.914Ap1.32e-09herei3.85heref2.65alphaq1.57hub0.742omegamh20.141hireionz6.88bhfeedback0.04",
+    "bound": 5e-10,
+    "applies_to": "stored_grids",
+    "reason": "the HR and LF runs of this design point carry parameter values that differ in their last quoted digits, "
+              "so their stored velocity grids differ by the ratio of the runs' header velocity scales (below the "
+              "bound); the canonical mapping from the pair's shared cache parameters holds to D1_TOL",
+}
+_D1_KEYS = {"tol", "canonical_max", "stored_max", "exception"}
+_D1_EXC_KEYS = set(D1_EXCEPTION) | {"n_pairs", "max_error"}
+
 RECORD_KEYS = {"format", "mf_version", "kind", "model_form", "tables", "backbone", "caches", "composition", "fold",
-               "train_sims", "n_pairs_train", "hr_inputs", "mean_flux_convention", "fit_code"}
+               "train_sims", "n_pairs_train", "hr_inputs", "mean_flux_convention", "fit_code", "mode_mapping"}
 _TABLES_KEYS = {"format", "file", "sha256", "bytes", "n_modes", "n_z", "n_rung"}
 _BACKBONE_KEYS = {"manifest_sha256", "kind", "cache_sha256", "held_out_sims"}
 _CACHE_KEYS = {"file", "sha256", "provenance"}
@@ -201,6 +224,39 @@ def _hex(v, n, where):
         raise MFRecordError(f"{where} must be {n} lowercase hex digits")
 
 
+def _finite_float(v, where):
+    if type(v) is not float or not np.isfinite(v):
+        raise MFRecordError(f"{where} must be a finite float")
+    return v
+
+
+def check_mode_mapping(mm):
+    """The record's D1 block: ``tol`` is D1_TOL; ``canonical_max`` and ``stored_max`` (the stored-grid maximum over the
+    pairs the exception does not cover) are in [0, D1_TOL]; ``exception`` is None or the recorded ``D1_EXCEPTION``
+    with ``n_pairs`` (a positive integer) and ``max_error`` in (D1_TOL, bound). Raises MFRecordError."""
+    _keys(mm, _D1_KEYS, "mode_mapping")
+    if type(mm["tol"]) is not float or mm["tol"] != D1_TOL:
+        raise MFRecordError(f"mode_mapping.tol must be {D1_TOL!r}")
+    for k in ("canonical_max", "stored_max"):
+        v = _finite_float(mm[k], f"mode_mapping.{k}")
+        if not 0.0 <= v <= D1_TOL:
+            raise MFRecordError(f"mode_mapping.{k} = {v!r} is outside [0, {D1_TOL!r}]")
+    exc = mm["exception"]
+    if exc is None:
+        return mm
+    _keys(exc, _D1_EXC_KEYS, "mode_mapping.exception")
+    if {k: exc[k] for k in D1_EXCEPTION} != D1_EXCEPTION:
+        raise MFRecordError("mode_mapping.exception is not the recorded stored-grid exception (its design point, "
+                            "bound and statement are the code's D1_EXCEPTION)")
+    if type(exc["n_pairs"]) is not int or exc["n_pairs"] < 1:
+        raise MFRecordError("mode_mapping.exception.n_pairs must be a positive integer")
+    e = _finite_float(exc["max_error"], "mode_mapping.exception.max_error")
+    if not D1_TOL < e < D1_EXCEPTION["bound"]:
+        raise MFRecordError(f"mode_mapping.exception.max_error = {e!r} is outside ({D1_TOL!r}, "
+                            f"{D1_EXCEPTION['bound']!r})")
+    return mm
+
+
 def check_record(rec):
     """Validate a record dict (closed schema, kind rules, the HR-input and mean-flux fields). Raises MFRecordError."""
     _keys(rec, RECORD_KEYS, "MF record")
@@ -268,6 +324,7 @@ def check_record(rec):
     if rec["mean_flux_convention"] != MEAN_FLUX_CONVENTION:
         raise MFRecordError("mean-flux convention differs from the code's settled production convention (global: "
                             "the class spectra share the whole sample's mean flux; it changes only with the code)")
+    check_mode_mapping(rec["mode_mapping"])
     fc = rec["fit_code"]
     _keys(fc, {"commit", "dirty"}, "fit_code")
     _hex(fc["commit"], 40, "fit_code.commit")
@@ -375,11 +432,12 @@ def _read_tables(raw, where):
 
 # --------------------------------------------------------------------------------------------- write
 def write_mf_record(out_dir, tables, *, k_com_hmpc, kind, mf_version, backbone, caches, composition, fold, fit_code,
-                    train_sims, n_pairs_train):
+                    train_sims, n_pairs_train, mode_mapping):
     """Write a record directory ONCE: ``out_dir`` must not exist (an existing directory, file or symlink is refused);
     it is created, the tables are written, then the record (last). ``caches`` = {lf, hr: {file, sha256}}; the writer
     adds each side's ``provenance`` (``CACHE_PROVENANCE``). ``fold`` = None, or {fold_id, holdout_sims} (the
-    writer adds ``backbone_excludes_holdout`` from the backbone's held-out simulations). Every field is validated
+    writer adds ``backbone_excludes_holdout`` from the backbone's held-out simulations). ``mode_mapping``: the D1
+    check the builder ran (``check_mode_mapping``). Every field is validated
     (``check_record``) before anything is written. Returns (the record's path, its sha256: the anchor to publish)."""
     out_dir = os.fspath(out_dir)
     if not isinstance(caches, dict) or set(caches) != {"lf", "hr"} or \
@@ -404,7 +462,7 @@ def write_mf_record(out_dir, tables, *, k_com_hmpc, kind, mf_version, backbone, 
            "composition": dict(composition, excluded_sims=sorted(set(composition.get("excluded_sims") or []))),
            "fold": fold_rec, "train_sims": sorted(set(train_sims)), "n_pairs_train": int(n_pairs_train),
            "hr_inputs": copy_json(HR_INPUTS), "mean_flux_convention": copy_json(MEAN_FLUX_CONVENTION),
-           "fit_code": copy_json(fit_code)}
+           "fit_code": copy_json(fit_code), "mode_mapping": copy_json(mode_mapping)}
     check_record(rec)                                               # everything refused before anything is written
     os.makedirs(out_dir)                                            # no exist_ok: a race is refused too
     tpath = os.path.join(out_dir, TABLES_FILE)
@@ -456,7 +514,7 @@ class MFRecord(NamedTuple):
                 "fold": copy_json(r["fold"]), "train_sims": list(r["train_sims"]), "caches": copy_json(r["caches"]),
                 "tables_sha256": r["tables"]["sha256"], "fit_code": copy_json(r["fit_code"]),
                 "mean_flux_convention": copy_json(r["mean_flux_convention"]),
-                "hr_inputs": copy_json(r["hr_inputs"])}
+                "hr_inputs": copy_json(r["hr_inputs"]), "mode_mapping": copy_json(r["mode_mapping"])}
 
 
 def load_mf_record(mf_dir, *, expected_record_sha256, backbone_manifest_sha256, kind="release", composition=None,

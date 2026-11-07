@@ -323,7 +323,12 @@ digest does not change when an MF is added). It holds exactly:
   - `mean_flux_convention`: the normalisation of the per-class P1D targets as the code computes it (the function
     and line are named), status `SETTLED`: the global convention, in which the four class spectra share the whole
     sample's mean flux, is the production convention; normalising each class by its own mean flux is a diagnostic;
-  - `fit_code`: `{commit, dirty}` of the fit.
+  - `fit_code`: `{commit, dirty}` of the fit;
+  - `mode_mapping`: the HR/LF mode-mapping check the builder ran over every matched pair (`tol` = 1e-12, the canonical
+    and stored-grid maxima, and `exception`). The canonical mapping holds to 1e-12 on every pair; so do the stored
+    grids, except, when `exception` is not null, the pairs of one recorded design point (`mf_release.D1_EXCEPTION`:
+    its LF and HR run names, whose parameter values differ in their last quoted digits) below the recorded bound
+    5e-10, with their count and largest error. Any other exception, bound or tolerance is refused.
 
 A published record comes with the sha256 of its `mf_record.json`; the record pins the tables by sha256 and size.
 
