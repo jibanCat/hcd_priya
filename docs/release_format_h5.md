@@ -367,7 +367,9 @@ An LF+MF release is published under ONE digest, the sha256 of a small `release.j
 `backbone.dir` holds the `hcd_priya.h5/2` production bundle and `mf.dir` the `hcd_priya.mf_record/1` record; each
 `dir` is one plain directory name inside the release directory (never a path, `..` or a symlink), and the two differ.
 The key set is closed and the `mf` part is required: an LF-only bundle is not a release of this format and loads with
-`load_bundle` as before. `predictor.load_release(release_dir, "<published release sha256>")` reads `release.json`
+`load_bundle` as before. Only `release.json` is anchored by the release digest: the loader reads the two parts it
+names and ignores every other file in the release directory, which is not part of the release.
+`predictor.load_release(release_dir, "<published release sha256>")` reads `release.json`
 through a no-follow descriptor, compares its sha256 before parsing, validates it, and loads both parts through
 `load_bundle(..., mf_dir=..., mf_record_sha256=...)` with the digests it names; since the record pins its backbone's
 manifest, a manifest naming a mismatched pair is refused. The returned bundle's `provenance["release"]` gives the
