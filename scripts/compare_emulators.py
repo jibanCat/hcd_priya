@@ -148,7 +148,7 @@ def level_L1c(a, cfg, ks, res_out):
     added_set = {(s, int(n)) for s, n, _ in added}
     nz, nk = ks["zout"].size, ks["kfmpc"].size
     FV = ks["flux_vectors"].reshape(-1, nz, nk)
-    r_all, r_added, kf_max, unmatched, pairs = [], [], 0.0, [], []
+    r_all, r_added, unmatched, pairs = [], [], [], []
     for i, row in enumerate(ks["params"]):
         sim = np.all(np.abs(cp - row[1:]) <= 1e-6 * np.abs(row[1:]), axis=1)
         for j, z in enumerate(ks["zout"]):
@@ -158,15 +158,17 @@ def level_L1c(a, cfg, ks, res_out):
                 continue
             r = M.ratio_residual(P[m[0]], FV[i, j])
             (r_added if (sims[m[0]], int(snaps[m[0]])) in added_set else r_all).append(r)
-            dk = float(np.max(np.abs(kk[m[0]] / ks["kfkms"][i, j] - 1)))
-            kf_max = max(kf_max, dk)
+            with np.errstate(divide="ignore", invalid="ignore"):          # 0/0 or x/0 is a non-finite label: FAIL
+                dk = float(np.max(np.abs(kk[m[0]] / ks["kfkms"][i, j] - 1)))
             pairs.append((i, float(z), float(np.max(np.abs(r))), dk, str(sims[m[0]])))
     r_all, r_added = np.array(r_all), np.array(r_added)
     both = np.concatenate([r_all.ravel(), r_added.ravel()])
     np.savez(os.path.join(a.out, "L1c_residuals.npz"), r_unrepaired=r_all, r_s4_added=r_added,
              pair_ks_row=np.array([q[0] for q in pairs]), pair_z=np.array([q[1] for q in pairs]),
              pair_max_abs_r=np.array([q[2] for q in pairs]), pair_kfkms_max_rel=np.array([q[3] for q in pairs]))
-    bad = [q for q in pairs if q[2] > th["L1c_lineage"] or q[3] > th["L1c_kfkms"]]
+    # np.max propagates NaN (Python's max(0.0, nan) is 0.0 and would drop it); "not <=" counts NaN as a failure
+    kf_max = float(np.max([q[3] for q in pairs])) if pairs else 0.0
+    bad = [q for q in pairs if q[2] > th["L1c_lineage"] or not q[3] <= th["L1c_kfkms"]]
     bad_sz = sorted({(q[4], q[1]) for q in bad})
     rest = [q for q in pairs if (q[4], q[1]) not in set(bad_sz)]
     lineage = "FAIL" if unmatched else M.verdict(both, th["L1c_lineage"])

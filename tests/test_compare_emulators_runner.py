@@ -96,8 +96,11 @@ def test_a_missing_verdict_is_not_a_pass(monkeypatch, tmp_path):
 
 # --- L1c: the k-grid label check is part of the headline verdict -------------------------------------------------
 
-def _l1c_inputs(tmp_path, kfkms_scale=1.0, p_scale=1.0):
-    """A two-row synthetic cache and the matching synthetic reference design, one rung, two redshifts."""
+def _l1c_inputs(tmp_path, kfkms_scale=1.0, p_scale=1.0, bad_k=None):
+    """A two-row synthetic cache and the matching synthetic reference design, one rung, two redshifts.
+
+    ``bad_k`` puts one non-finite k label in the second redshift row: "cache" or "reference" sets a NaN on that side,
+    "zero_over_zero" sets 0 on both sides (0/0)."""
     import h5py
     from hcd_analysis.comparison import conventions as C
     rng = np.random.default_rng(3)
@@ -105,15 +108,20 @@ def _l1c_inputs(tmp_path, kfkms_scale=1.0, p_scale=1.0):
     zout, nk = np.array([3.0, 2.5]), 4
     kf = np.outer(1.0 + zout, np.arange(1, nk + 1) * 1e-3)
     fv = rng.uniform(1.0, 2.0, size=(1, zout.size * nk))
+    kf_ref, kf_cache = kf.copy(), kf * kfkms_scale
+    if bad_k in ("cache", "zero_over_zero"):
+        kf_cache[1, 2] = np.nan if bad_k == "cache" else 0.0
+    if bad_k in ("reference", "zero_over_zero"):
+        kf_ref[1, 2] = np.nan if bad_k == "reference" else 0.0
     ks = {"params": np.concatenate([[0.0], theta])[None, :], "zout": zout, "kfmpc": np.arange(nk, dtype=float),
-          "flux_vectors": fv, "kfkms": kf[None, :, :]}
+          "flux_vectors": fv, "kfkms": kf_ref[None, :, :]}
     path = tmp_path / "cache.h5"
     with h5py.File(path, "w") as h:
         h["params"] = np.vstack([theta, theta])
         h["param_names"] = np.array([n.encode() for n in C.PARAM_NAMES])
         h["z_grid"], h["alpha_slope"] = zout, np.zeros(2)
         h["P_tier_p"] = fv.reshape(zout.size, nk) * p_scale
-        h["kfkms"] = kf * kfkms_scale
+        h["kfkms"] = kf_cache
         h["sim_name"] = np.array([b"sim_a", b"sim_a"])
         h["snap"] = np.array([1, 2])
         h.attrs["repair_record"] = json.dumps({"added": []})
@@ -147,6 +155,31 @@ def test_l1c_k_label_mismatch_cannot_read_pass(tmp_path):
 def test_l1c_power_mismatch_still_fails(tmp_path):
     res = _run_l1c(tmp_path, p_scale=1.01)
     assert res["lineage_verdict"] == "FAIL" and res["kfkms_verdict"] == "PASS" and res["verdict"] == "FAIL"
+
+
+@pytest.mark.parametrize("bad_k", ["cache", "reference", "zero_over_zero"])
+def test_l1c_non_finite_k_label_cannot_read_pass(tmp_path, bad_k):
+    """A NaN k label (on either side, or 0/0) is a k-label FAIL, never dropped from the maximum."""
+    res = _run_l1c(tmp_path, bad_k=bad_k)
+    assert res["lineage_verdict"] == "PASS"
+    assert res["kfkms_verdict"] == "FAIL" and res["verdict"] == "FAIL"
+    assert not np.isfinite(res["kfkms_max_rel"])
+    assert ["sim_a", 2.5] in res["post_hoc_failing_sim_z"]
+
+
+def test_l1c_non_finite_k_label_exits_nonzero_end_to_end(monkeypatch, tmp_path, capsys):
+    """Through main(), with the real L1c level: the headline is FAIL and the exit status is FAIL's."""
+    R = _runner()
+    ks, cache = _l1c_inputs(tmp_path, bad_k="cache")
+    monkeypatch.setattr(R, "ks_design", lambda basedir: dict(ks, rungs=np.array([0.0])))
+    monkeypatch.setattr(R, "build_cases", lambda cfg, k: [{"case_id": "c0", "support": {"status": "COMPARABLE"}}])
+    monkeypatch.setattr(R, "_git_head", lambda: "0" * 40)
+    monkeypatch.setattr(R.sys, "argv", ["compare_emulators.py", "--level", "L1c", "--out", str(tmp_path / "out"),
+                                        "--cache", str(cache), "--ks-basedir", "b", "--lyaemu-parent", "p",
+                                        "--ks-python", "py"])
+    assert _exit_code(R) == R.EXIT_CODES["FAIL"]
+    assert capsys.readouterr().out.splitlines()[0] == "L1c: FAIL"
+    assert json.loads((tmp_path / "out" / "result.json").read_text())["kfkms_verdict"] == "FAIL"
 
 
 def test_l1c_terminal_prints_the_k_grid_verdict(monkeypatch, tmp_path, capsys):
