@@ -1,5 +1,9 @@
 """Multi-fidelity (LF -> HF) resolution-correction layer for the Phase-2b emulator.
 
+HISTORICAL (pre-2026-10). The defaults below were selected in pre-2026-10 mock tests, on a forward that placed the MF
+tables at the wrong k (docs/kgrid_incident_2026-10.md); they are not the validated release MF, which is pending. The
+gate E forward reaches the MF correction through mf_family and mf_modes.
+
 Forward model (spec):
 
     P_MF(theta, z, k) = ( rho(k) * f_LF(theta, z, k) + delta(theta, z, k) ) * res_corr(z, k)
@@ -19,7 +23,8 @@ where
                      additive-space delta = rho*f_LF*(exp(g)-1) is recovered exactly).
                      delta MUST be a learned function of (theta, z, k) (the measured
                      ratio is strongly theta- and z-dependent), not a fixed kernel.
-  * ``rho(k)``    -- per-k AR1 amplitude (PRIYA-style). RECOMMENDED DEFAULT (validated):
+  * ``rho(k)``    -- per-k AR1 amplitude (PRIYA-style). HISTORICAL DEFAULT (selected in
+                     pre-2026-10 mock tests; not the validated release MF):
                      rho = the per-k MEAN log-ratio over the HF sims (carried as
                      ``log_rho``), so the learned delta only models the (small,
                      well-constrained) theta/z DEPARTURE from the coherent mean tilt.
@@ -27,7 +32,7 @@ where
                      delta head must learn the whole coherent high-k tilt AND its
                      theta-dependence from 5 LOSO sims and over-attributes it to n_s
                      (a large n_s Fisher bias); with rho = mean log-ratio the n_s
-                     bias drops strongly (see scripts/build_mf_delta.py). rho==1
+                     bias dropped strongly in those tests (scripts/build_mf_delta.py). rho==1
                      (delta carries everything) is available via ``--no-rho``.
   * ``res_corr``  -- a FIXED, parameter-independent particle-convergence factor
                      (L15n512 / L15n384), 15z x 59k, applied MULTIPLICATIVELY on the
@@ -91,9 +96,9 @@ LF_CACHE = f"{_REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 RES_CORR_DIR = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/res_corr"
 N_CLASSES = 4
 
-# KODIAQ reach (cut to validated range; HF reaches ~0.29 s/km, but we evaluate /
-# validate to KODIAQ's ~0.1-0.2 s/km). The eval grid below caps here.
-KODIAQ_KMAX = 0.2            # s/km -- upper edge of the validated MF eval band
+# KODIAQ reach (cut to the evaluated range; HF reaches ~0.29 s/km, but the historical MF
+# was evaluated to KODIAQ's ~0.1-0.2 s/km). The eval grid below caps here.
+KODIAQ_KMAX = 0.2            # s/km -- upper edge of the historical MF eval band
 KODIAQ_BAND = (0.07, 0.2)    # the high-k band the LF cannot reach on its own
 
 
@@ -402,8 +407,9 @@ class GlobalLinearHead(eqx.Module):
 class MultiFidelity(eqx.Module):
     """P_MF = ( rho(k,z) * f_LF ) * res_corr  -- the full MF forward model.
 
-    DEFAULT forward model (``delta_mode='none'``, validated -- commit d93fadc /
-    scripts/diag_mf_complexity.py):
+    DEFAULT forward model (``delta_mode='none'``): the historical MF default, selected in
+    pre-2026-10 mock tests (commit d93fadc / scripts/diag_mf_complexity.py; the forward then
+    placed the MF tables at the wrong k); it is not the validated release MF, which is pending:
 
         log P_MF = log P_hat_LF(theta,z,k) + rho(k,z) + log res_corr(z,k)
 
@@ -412,8 +418,8 @@ class MultiFidelity(eqx.Module):
     This is the rho(k,z)-ONLY model -- the learned MLP delta-head is REMOVED from the
     default path because it OVER-FITS the theta-gradient on 6 HF sims (a large n_s
     Fisher bias; the LF->HF correction is dominated by the fixed resolution tilt, with a
-    small theta-departure).  rho(k,z)-only cures it (a much smaller n_s Fisher bias; the best A_p
-    result of the heads tested).
+    small theta-departure).  rho(k,z)-only cured it in those mock tests (a much smaller n_s Fisher
+    bias; the best A_p result of the heads tested).
 
     The trainable submodule is held in ``delta_head`` and selected by
     ``delta_mode`` (carried as a STATIC field, informational):
