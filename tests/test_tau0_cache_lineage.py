@@ -381,22 +381,103 @@ def test_the_comparison_criterion():
     assert FR.compare_field(np.array(["a"], dtype=object), np.array(["a"], dtype=object))[0]
 
 
-def test_the_cache_file_is_fsynced_before_it_is_renamed_into_place(tmp_path, monkeypatch):
+def test_the_cache_file_is_fsynced_before_it_is_published(tmp_path, monkeypatch):
     tf.clean_code(monkeypatch)
-    events, real_fsync, real_replace = [], T.os.fsync, T.os.replace
+    events, real_fsync, real_link = [], T.os.fsync, T.os.link
 
     def fsync(fd):
         events.append(("fsync", os.readlink(f"/proc/self/fd/{fd}") if os.path.exists("/proc/self/fd") else fd))
         return real_fsync(fd)
 
-    def replace(a, b):
-        events.append(("replace", str(a)))
-        return real_replace(a, b)
+    def link(a, b, **kw):
+        events.append(("link", str(a)))
+        return real_link(a, b, **kw)
     monkeypatch.setattr(T.os, "fsync", fsync)
-    monkeypatch.setattr(T.os, "replace", replace)
+    monkeypatch.setattr(T.os, "link", link)
     tf.write_v34(tmp_path / "c.h5", [("simA", 16, 3.2, 3, 1)])
     kinds = [e[0] for e in events]
-    i = kinds.index("replace")
+    i = kinds.index("link")
     assert "fsync" in kinds[:i]
     if os.path.exists("/proc/self/fd"):
         assert any(e[0] == "fsync" and str(e[1]) == events[i][1] for e in events[:i])   # the temporary file itself
+
+
+# ----------------------------------------------------------------------------- write-once publish (PR #19 R1-4)
+def _plant_after_the_check(monkeypatch, target, how):
+    """Create ``target`` after write_cache's existence check and before its publish (another run with the same
+    output), by hooking the payload digest, which runs in between."""
+    real = T.payload_sha256_of_file
+
+    def digest(p):
+        if how == "file":
+            target.write_bytes(b"published by another writer")
+        elif how == "symlink":
+            (target.parent / "elsewhere").write_bytes(b"another file")
+            os.symlink(target.parent / "elsewhere", target)
+        else:                                                   # a symlink to this write's own temporary file
+            os.symlink(p, target)
+        return real(p)
+    monkeypatch.setattr(T, "payload_sha256_of_file", digest)
+
+
+@pytest.mark.parametrize("how", ["file", "symlink", "symlink_to_tmp"])
+def test_a_cache_published_by_another_writer_after_the_check_is_never_replaced(tmp_path, monkeypatch, how):
+    tf.clean_code(monkeypatch)
+    target = tmp_path / "c.h5"
+    _plant_after_the_check(monkeypatch, target, how)
+    with pytest.raises(FileExistsError, match="never overwritten"):
+        tf.write_v34(target, [("simA", 16, 3.2, 3, 1)])
+    if how == "file":
+        assert target.read_bytes() == b"published by another writer" and not target.is_symlink()
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["c.h5"]                 # no temporary file is left
+    elif how == "symlink":
+        assert target.is_symlink() and target.read_bytes() == b"another file"
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["c.h5", "elsewhere"]
+    else:                                                       # never taken for the published file
+        assert target.is_symlink() and not target.exists()
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["c.h5"]
+
+
+def test_a_published_cache_has_one_name_and_no_temporary_file(tmp_path, monkeypatch):
+    tf.clean_code(monkeypatch)
+    tf.write_v34(tmp_path / "c.h5", [("simA", 16, 3.2, 3, 1)])
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["c.h5"] and os.stat(tmp_path / "c.h5").st_nlink == 1
+    T.read_cache(tmp_path / "c.h5")
+
+
+def test_an_eexist_for_this_writers_own_link_is_accepted(tmp_path, monkeypatch):
+    """An NFS retransmit can report EEXIST for the link just made: accepted only because the target is this write's
+    own file."""
+    tf.clean_code(monkeypatch)
+    real_link = os.link
+
+    def link(src, dst, **kw):
+        real_link(src, dst, **kw)
+        raise FileExistsError(17, "File exists (retransmitted)", str(dst))
+    monkeypatch.setattr(T.os, "link", link)
+    tf.write_v34(tmp_path / "c.h5", [("simA", 16, 3.2, 3, 1)])
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["c.h5"] and os.stat(tmp_path / "c.h5").st_nlink == 1
+    T.read_cache(tmp_path / "c.h5")
+
+
+def test_the_builder_never_replaces_an_output_published_after_its_check(world, tmp_path, monkeypatch):
+    """The builder checks --output at the start and builds for minutes to hours; an output another run publishes in
+    between stays as it is."""
+    out = tmp_path / "b.h5"
+    _plant_after_the_check(monkeypatch, out, "file")
+    with pytest.raises(FileExistsError, match="never overwritten"):
+        build(world, out)
+    assert out.read_bytes() == b"published by another writer"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["b.h5"]
+
+
+def test_publish_once_leaves_one_name_and_refuses_an_existing_target(tmp_path):
+    """publish_once itself (the carry tool publishes its staged file with it): the temporary name is gone after a
+    publish and after a refusal, and an existing target keeps its bytes."""
+    (tmp_path / "t1").write_bytes(b"new")
+    T.publish_once(tmp_path / "t1", tmp_path / "out")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["out"] and os.stat(tmp_path / "out").st_nlink == 1
+    (tmp_path / "t2").write_bytes(b"newer")
+    with pytest.raises(FileExistsError, match="never overwritten"):
+        T.publish_once(tmp_path / "t2", tmp_path / "out")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["out"] and (tmp_path / "out").read_bytes() == b"new"

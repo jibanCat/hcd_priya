@@ -1,13 +1,26 @@
 # Release format for emulator bundles: HDF5 + JSON (`hcd_priya.h5/2`)
 
-Status: the format for released emulator bundles, adopted subject to an independent review of its loader and a
-compatibility test with an older HDF5 library (passed locally with libhdf5 1.10.8 reading a bundle written with 2.0.0;
-not yet run in continuous integration). The trained models themselves are not distributed yet. The training
+Status: the pickle-free format for single-fidelity emulator bundles (see Scope below; the multi-fidelity correction
+is a separate record, "The multi-fidelity record" and "The release manifest" below), adopted subject to an independent review of
+its loader and a compatibility test with an older HDF5 library (passed locally with libhdf5 1.10.8 reading a bundle
+written with 2.0.0; not yet run in continuous integration). The trained models themselves are not distributed yet.
+The training
 checkpoints (`.eqx` + `.norm.pkl` + `.meta.json`, written by `train.save_checkpoint`) remain the working format; a
 release converts them once (`scripts/export_safe_bundle.py`). `hcd_priya.h5/2` adds to the earlier `hcd_priya.h5/1`
 a lineage block and the map from absorber incidence (dN/dX) to the class weights w_c; an `h5/1` bundle loads only
 through the separately named historical loaders (below). The earlier safetensors-layout prototype
 (`docs/release_format.md`) is kept as evidence only and is not a second release format.
+
+## Scope: single fidelity
+
+An `hcd_priya.h5/2` bundle holds the members of ONE training cache and the w_c map fitted to it. It has no slot for a
+multi-fidelity (LF to HR) correction, and the predictor (`hcd_analysis/predictor.py`) applies none to a bundle loaded
+alone: a bundle trained on the low-fidelity cache gives low-fidelity predictions, and every such prediction's labels
+say so (`product` names the training cache's fidelity; `mf_correction` is `none`). The multi-fidelity correction is
+kept outside the bundle, so the bundle's fixed manifest keys (below) and its digest do not change: it is a separate
+record bound to one bundle ("The multi-fidelity record"), and an LF+MF release publishes the two under one release
+manifest ("The release manifest"); an LF+MF prediction's `mf_correction` label says the correction is applied. An
+`hcd_priya.h5/2` bundle alone is therefore not the complete release model.
 
 ## Why
 

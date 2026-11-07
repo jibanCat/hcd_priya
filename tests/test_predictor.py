@@ -267,6 +267,24 @@ def test_flags_and_labels(emu):
     assert lab["omissions"] == list(hp.OMISSIONS) and "no prior" in lab["amplitudes"]
 
 
+def test_the_labels_and_the_docstring_state_the_single_fidelity_scope(emu):
+    """h5/2 and this predictor carry no multi-fidelity correction: the labels and the module docstring say so."""
+    lab = emu.predict(PARAMS, 3.0, tau_eff=0.4).labels
+    assert lab["mf_correction"].startswith("none")
+    assert "single-fidelity" in lab["mf_correction"]
+    assert "no multi-fidelity" in " ".join(hp.__doc__.split())
+
+
+def test_the_labels_name_the_class_normalisation_and_qualify_a_equals_w_c(emu):
+    """sum_c w_c P_c is the full-sample filtered P1D only under the current global-mean-flux normalisation of the
+    class spectra and with counted fractions; the shipped w_c is the map's estimate. Nothing asserts the convention."""
+    lab = emu.predict(PARAMS, 3.0, tau_eff=0.4).labels
+    assert "global mean flux" in lab["normalisation"] and "under review" in lab["normalisation"]
+    assert "estimate" in lab["amplitudes"] and "normalisation" in lab["amplitudes"]
+    doc = " ".join(hp.__doc__.split())
+    assert "under review" in doc and "counted" in doc
+
+
 # ------------------------------------------------------------------------------------- no prior, no survey key
 def test_the_public_interface_has_no_prior_survey_or_dla_fraction():
     names = {n for f in (hp.load_bundle, hp.Bundle.predict, hp.Bundle.predict_many, hp.add_hcd)

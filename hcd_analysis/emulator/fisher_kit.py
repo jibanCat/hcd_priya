@@ -8,7 +8,8 @@ their log-uniform priors; the uniform a_SiIII at the middle of its range when sa
 z-slopes / KS exponent deviations (the production centre). Prior precision: theta9 the variance of the uniform
 sampling box (width^2 / 12), none for tau0_amp and dtau0 (uniform priors), the production widths for the HCD sites.
 The map from parameters to the forward's (tau0 per z, alpha_hcd per z) is tested against the production numpyro
-model."""
+model, with the context's delta_c map (``ctx.delta_map``: None on the historical path, the caller's explicit map on
+the release-cache path)."""
 from __future__ import annotations
 
 import jax
@@ -72,7 +73,8 @@ def forward_inputs(ctx, p):
         ones = jnp.ones_like(zg)
         fac = jnp.stack([jnp.exp(p[11]) * ones, jnp.exp(p[12]) * ones, dla_amp * ones], axis=-1)
         alpha = CL._simplex_tie_norm(
-            w_c_corrected(jnp.asarray(ctx.ks_dndx_ref) * fac, jnp.asarray(ctx.ks_xbar_z), zg)[..., 1:])
+            w_c_corrected(jnp.asarray(ctx.ks_dndx_ref) * fac, jnp.asarray(ctx.ks_xbar_z), zg,
+                          delta_map=getattr(ctx, "delta_map", None))[..., 1:])   # the context's map, as the model
     else:
         piv = jnp.stack([p[11], p[12], jax.nn.softplus(p[13])])
         alpha = piv[None, :] * ((1.0 + zg)[:, None] / (1.0 + CL.HCD_Z_PIVOT)) ** _zslopes(ctx)

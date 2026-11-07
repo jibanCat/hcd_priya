@@ -138,7 +138,8 @@ repository.
 
 ### Release format of the emulator (HDF5 + JSON)
 
-Released emulator members will use a pickle-free format, `hcd_priya.h5/2`: per member one HDF5 file (the network
+Emulator members are exported in a pickle-free, single-fidelity format, `hcd_priya.h5/2` (scope below; the
+multi-fidelity correction is a separate record, see "LF+MF prediction" below): per member one HDF5 file (the network
 weights as datasets named by their JAX tree paths, and the output normalizer) and one JSON sidecar (the meta and the
 file's sha256), plus the map from absorber incidence (dN/dX) to the class weights w_c, and a bundle `manifest.json`
 whose lineage block names the training cache,
@@ -174,6 +175,13 @@ pred.flags.get("research_model", False)             # True here; production pred
 ```
 
 Arrays returned by `hp.add_hcd` do not carry the flag: keep the `Prediction` (or its `provenance`) with them.
+
+**Scope: single fidelity.** An `hcd_priya.h5/2` bundle holds the members of one training cache and the w_c map fitted
+to it, and no multi-fidelity (LF to HR) correction: loaded alone, a bundle trained on the low-fidelity cache gives
+low-fidelity predictions; each prediction's labels say so (`product`, `mf_correction`). The multi-fidelity correction
+is not part of this format: it is a separate MF record bound to one bundle, and an LF+MF release publishes the two
+under one release manifest (next section). An `hcd_priya.h5/2` bundle alone is therefore not the complete release
+model.
 
 The files open with standard tools (`h5ls -r member.h5`). Contract and full usage: `docs/release_format_h5.md`; a
 step-by-step guide to production and research bundles, with executable examples:

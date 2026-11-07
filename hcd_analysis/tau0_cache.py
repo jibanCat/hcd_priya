@@ -29,6 +29,7 @@ import hashlib
 import json
 import logging
 import os
+import stat
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -352,13 +353,48 @@ def combine_inputs(*entry_lists):
     return list(out.values())
 
 
+def publish_once(tmp, path):
+    """Publish the finished file ``tmp`` at ``path`` write-once and remove the name ``tmp``. A hard link fails
+    atomically when ``path`` exists, so a file another writer published there after the caller's existence check
+    (another run with the same output) is never replaced: that is a FileExistsError, and ``path`` is left as it is.
+    An EEXIST is accepted only when ``path`` is ``tmp``'s own inode and not a symlink (an NFS retransmit can report
+    EEXIST for the link just made). The link never follows a symlink. The directory is fsynced where the platform
+    allows it."""
+    tmp, path = Path(tmp), Path(path)
+    try:
+        st_t = os.lstat(tmp)
+        if not stat.S_ISREG(st_t.st_mode):
+            raise CacheLineageError(f"{tmp} is not a regular file; nothing published at {path}")
+        try:
+            os.link(tmp, path, follow_symlinks=False)
+        except FileExistsError:
+            st_p = os.lstat(path)
+            if stat.S_ISLNK(st_p.st_mode) or (st_p.st_dev, st_p.st_ino) != (st_t.st_dev, st_t.st_ino):
+                raise FileExistsError(f"{path} exists (published by another writer after this run's check); a cache "
+                                      f"is never overwritten: nothing of this run is published") from None
+    finally:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+    try:
+        dfd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
+
+
 def write_cache(path, datasets, attrs, *, inputs, settings, groups, carried=None, validation=None,
                 historical_reason=None, selection=None):
     """Write a v3.4 cache and its lineage record; return the record. ``datasets`` is the full tau0 layout, ``attrs``
     the descriptive attributes (``cache_version`` is set here). Eligibility is computed from ``inputs`` and the code
     identity (lineage.build_record); ``historical_reason`` makes the product ineligible. The file is written under a
-    temporary name in the target directory, digested as written, given its record and renamed; an existing ``path``
-    is refused."""
+    temporary name in the target directory, digested as written, given its record and published write-once
+    (``publish_once``: a hard link, so an existing ``path`` is refused, before the write and at the publish, and
+    never replaced)."""
     path = Path(path)
     if path.exists():
         raise FileExistsError(f"{path} exists; a cache is never overwritten")
@@ -397,20 +433,12 @@ def write_cache(path, datasets, attrs, *, inputs, settings, groups, carried=None
             raise CacheLineageError("the lineage record exceeds the readable size")
         with h5py.File(tmp, "a") as f:
             f.create_dataset(LINEAGE_KEY, data=text, dtype=h5py.string_dtype())
-        ffd = os.open(str(tmp), os.O_RDONLY)                       # the file's bytes on disk before the rename
+        ffd = os.open(str(tmp), os.O_RDONLY)                       # the file's bytes on disk before the publish
         try:
             os.fsync(ffd)
         finally:
             os.close(ffd)
-        os.replace(tmp, path)
-        try:
-            dfd = os.open(str(path.parent), os.O_RDONLY)
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
-        except OSError:
-            pass
+        publish_once(tmp, path)
     finally:
         if tmp.exists():
             tmp.unlink()

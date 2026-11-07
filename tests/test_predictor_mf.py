@@ -103,6 +103,16 @@ def test_stacked_mf_prediction_equals_the_single_ones(emu_mf):
     assert st.flags["mf_applied"] is True
 
 
+def test_the_mf_correction_label_says_whether_the_mf_is_applied(emu_lf, emu_mf):
+    """PR #19's single-fidelity label (``mf_correction`` "none ...") stays true of every LF output; an LF+MF output
+    says the record's correction is applied (merge of pr19/round1-fixes)."""
+    assert emu_mf.predict(PARAMS, 3.0, tau_eff=0.4).labels["mf_correction"].startswith("applied")
+    assert emu_mf.predict_many(PARAMS, [2.6, 3.0], tau_eff=0.4).labels["mf_correction"].startswith("applied")
+    for e, f in ((emu_mf, "LF"), (emu_lf, None), (emu_lf, "LF")):
+        lab = e.predict(PARAMS, 3.0, tau_eff=0.4, fidelity=f).labels["mf_correction"]
+        assert lab.startswith("none") and "single-fidelity" in lab
+
+
 # ------------------------------------------------------------------------------------------------ LF unchanged
 def test_lf_prediction_is_bit_for_bit_unchanged(emu_lf, emu_mf, info):
     fresh = hp.load_bundle(info.bundle_dir, info.manifest_sha256)

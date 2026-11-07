@@ -532,6 +532,25 @@ def test_a_failure_after_the_summary_leaves_it_saying_failed(world, tmp_path, sa
     assert not (tmp_path / "carried.h5").exists() and not (tmp_path / "val" / "failure.json").exists()
 
 
+def test_an_output_published_by_another_run_after_the_check_is_never_replaced(world, tmp_path, same_code, monkeypatch,
+                                                                             capsys):
+    """R1-4: the output exists check runs first, the publish last; a cache another run publishes at the output name in
+    between stays as it is, this run is refused and its summary says failed."""
+    real = T.write_cache
+
+    def plant(path, *a, **k):
+        rec = real(path, *a, **k)
+        (tmp_path / "carried.h5").write_bytes(b"another run's cache")
+        return rec
+    monkeypatch.setattr(T, "write_cache", plant)
+    assert carry(world, tmp_path) == 2
+    assert "never overwritten" in capsys.readouterr().out
+    assert (tmp_path / "carried.h5").read_bytes() == b"another run's cache"
+    assert not list(tmp_path.glob(".*unchecked"))
+    s = summary(tmp_path)
+    assert s["passed"] is False and "never overwritten" in s["error"]
+
+
 @pytest.mark.parametrize("bad", ["abc1234=xyz", "=" + "d" * 64, "abc1234=" + "D" * 64, "abc1234"])
 def test_a_malformed_accepted_digest_is_refused(world, tmp_path, same_code, bad, capsys):
     assert carry(world, tmp_path, extra=["--accept-row-path-diff", bad]) == 2

@@ -532,7 +532,12 @@ def run(args):
         _fail_summary(vdir, why)
         print("CARRY REFUSED: " + why)
         return 2
-    os.replace(unchecked, out_path)
+    try:
+        T.publish_once(unchecked, out_path)                           # write-once: an output published meanwhile stays
+    except FileExistsError as e:
+        _fail_summary(vdir, str(e))
+        print(f"CARRY REFUSED: {e}")
+        return 2
     print(f"wrote the STAGED cache {out_path} sha256 {L.sha256_file(out_path)}: {len(records)} groups "
           f"carried_validated; validation summary sha256 {summary_sha}. Usable only after "
           f"scripts/promote_carried_cache.py (the fresh-row comparison passed)")
