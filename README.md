@@ -209,7 +209,8 @@ pred.flags["mf_applied"], pred.provenance["mf"]["record_sha256"]
 
 `provenance["mf"]` names the record, its composition and the rulings that set it, the fit commit, the mean-flux
 convention of its targets (the settled global convention), the HR inputs used, the HR/LF mode-mapping check, the
-lowest validated redshift (`validated_z_min`, 2.2 by default), and the two cache digests with what each establishes:
+lower edge of the MF's validation domain (`validated_z_min`, 2.2 by default; the domain edge, not a passed
+validation), and the two cache digests with what each establishes:
 the LF cache is lineage-verified through the backbone, while the HR cache is digest-anchored only and never
 lineage-verified. Below the larger of the MF tables' lowest redshift and `validated_z_min` an LF+MF prediction is
 refused (`MFRangeError`); ask for `fidelity="LF"` there. A bundle loaded without an MF record predicts exactly as before, and `fidelity="LF+MF"` on it

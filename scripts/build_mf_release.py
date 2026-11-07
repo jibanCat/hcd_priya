@@ -12,7 +12,8 @@ pinned inputs, into a NEW directory.
      grids <= 1e-12 except the one recorded design point, mf_release.D1_EXCEPTION, below its bound; recorded in the
      record's ``mode_mapping``), forms the targets g = log P_HR - log P_LF,backbone per matched pair, class and mode;
   6. fits the tables on the composition's training pairs (minus a fold's held-out simulations) and writes the record,
-     with its lowest validated redshift (--validated-z-min, mf_release.VALIDATED_Z_MIN = 2.2 by default; never lower);
+     with the lower edge of its validation domain (--validated-z-min, mf_release.VALIDATED_Z_MIN = 2.2 by default;
+     never lower; the domain edge, not a passed validation);
   7. reloads it through mf_release.load_mf_record and prints the record's sha256 (the anchor to publish).
 
 Release:
@@ -67,8 +68,9 @@ def parse(argv=None):
     ap.add_argument("--fold-id", default=None)
     ap.add_argument("--holdout-sim", action="append", default=[])
     ap.add_argument("--validated-z-min", type=float, default=VALIDATED_Z_MIN,
-                    help=f"the lowest redshift the MF is validated at (default {VALIDATED_Z_MIN}; it may be raised, "
-                         "never lowered); the predictor refuses LF+MF below it")
+                    help=f"the lower edge of the redshift range over which the MF is validated (the frozen "
+                         f"validation domain's edge, not a passed validation; default {VALIDATED_Z_MIN}; it may be "
+                         "raised, never lowered); the predictor refuses LF+MF below it")
     a = ap.parse_args(argv)
     if a.kind == "release" and (a.fold_id or a.holdout_sim or a.backbone_purpose):
         ap.error("a release build takes no --fold-id, --holdout-sim or --backbone-purpose")

@@ -20,8 +20,10 @@ bundle (its manifest sha256) and is refused with any other.
                       convention of the targets (``MEAN_FLUX_CONVENTION``, the settled global convention) and the
                       fit code's commit and
                       clean-tree flag, and the HR/LF mode-mapping check (``mode_mapping``: ``D1_TOL`` and the one
-                      recorded stored-grid exception, ``D1_EXCEPTION``), and ``validated_z_min``, the lowest
-                      redshift at which the MF is validated (``VALIDATED_Z_MIN`` by default, never lower).
+                      recorded stored-grid exception, ``D1_EXCEPTION``), and ``validated_z_min``, the lower
+                      edge of the redshift range over which the MF correction is validated (the frozen
+                      grouped-validation domain; at build time the domain edge, not a passed validation;
+                      ``VALIDATED_Z_MIN`` by default, never lower).
 
 A published record is anchored by the sha256 of ``mf_record.json``; the record anchors the tables. Nothing is pickled
 or evaluated: the tables are read from anchored bytes with the strict HDF5 walk of ``safe_h5``.
@@ -126,9 +128,11 @@ D1_EXCEPTION = {
 _D1_KEYS = {"tol", "canonical_max", "stored_max", "exception"}
 _D1_EXC_KEYS = set(D1_EXCEPTION) | {"n_pairs", "max_error"}
 
-# The lowest redshift at which an MF is validated: the grouped (K-fold) validation evaluates z 2.2-4.6. A record states
-# its own value (the builder's, VALIDATED_Z_MIN by default; it may be raised, never lowered), and the predictor refuses
-# an LF+MF prediction below max(the tables' lowest redshift, validated_z_min).
+# validated_z_min: the lower edge of the redshift range over which the MF correction is validated (the frozen
+# grouped-validation domain); at build time this is the domain edge, not a passed validation. The grouped (K-fold)
+# validation evaluates z 2.2-4.6. A record states its own value (the builder's, VALIDATED_Z_MIN by default; it may be
+# raised, never lowered), and the predictor refuses an LF+MF prediction below max(the tables' lowest redshift,
+# validated_z_min).
 VALIDATED_Z_MIN = 2.2
 
 RECORD_KEYS = {"format", "mf_version", "kind", "model_form", "tables", "backbone", "caches", "composition", "fold",
@@ -334,8 +338,8 @@ def check_record(rec):
     check_mode_mapping(rec["mode_mapping"])
     vz = rec["validated_z_min"]
     if type(vz) is not float or not np.isfinite(vz) or not vz >= VALIDATED_Z_MIN:
-        raise MFRecordError(f"validated_z_min must be a finite float >= {VALIDATED_Z_MIN!r} (the lowest validated "
-                            f"redshift; it may be raised, never lowered), got {vz!r}")
+        raise MFRecordError(f"validated_z_min must be a finite float >= {VALIDATED_Z_MIN!r} (the lower edge of the "
+                            f"MF's validation domain; it may be raised, never lowered), got {vz!r}")
     fc = rec["fit_code"]
     _keys(fc, {"commit", "dirty"}, "fit_code")
     _hex(fc["commit"], 40, "fit_code.commit")
@@ -448,8 +452,8 @@ def write_mf_record(out_dir, tables, *, k_com_hmpc, kind, mf_version, backbone, 
     it is created, the tables are written, then the record (last). ``caches`` = {lf, hr: {file, sha256}}; the writer
     adds each side's ``provenance`` (``CACHE_PROVENANCE``). ``fold`` = None, or {fold_id, holdout_sims} (the
     writer adds ``backbone_excludes_holdout`` from the backbone's held-out simulations). ``mode_mapping``: the D1
-    check the builder ran (``check_mode_mapping``). ``validated_z_min``: the lowest validated redshift (a float, at least
-    ``VALIDATED_Z_MIN``). Every field is validated
+    check the builder ran (``check_mode_mapping``). ``validated_z_min``: the lower edge of the MF's validation
+    domain (a float, at least ``VALIDATED_Z_MIN``; the domain edge, not a passed validation). Every field is validated
     (``check_record``) before anything is written. Returns (the record's path, its sha256: the anchor to publish)."""
     out_dir = os.fspath(out_dir)
     if not isinstance(caches, dict) or set(caches) != {"lf", "hr"} or \

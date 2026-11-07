@@ -442,7 +442,9 @@ class _PredictorBase:
         self._mf_module = mf.module()
         t = mf.tables
         self._mf_dom = (np.asarray(t["z_tab"], dtype=np.float64), np.asarray(t["tau_by_z"], dtype=np.float64))
-        self._mf_vzmin = float(rec["validated_z_min"])            # the record's lowest validated redshift
+        # validated_z_min: the lower edge of the redshift range over which the MF correction is validated (the frozen
+        # grouped-validation domain); at build time this is the domain edge, not a passed validation.
+        self._mf_vzmin = float(rec["validated_z_min"])
 
     def _use_mf(self, fidelity):
         if fidelity is None:

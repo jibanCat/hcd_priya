@@ -329,9 +329,10 @@ digest does not change when an MF is added). It holds exactly:
     grids, except, when `exception` is not null, the pairs of one recorded design point (`mf_release.D1_EXCEPTION`:
     its LF and HR run names, whose parameter values differ in their last quoted digits) below the recorded bound
     5e-10, with their count and largest error. Any other exception, bound or tolerance is refused;
-  - `validated_z_min`: the lowest redshift at which the MF is validated, a float set by the builder
-    (`--validated-z-min`, 2.2 by default, `mf_release.VALIDATED_Z_MIN`); it may be raised, never lowered. The
-    predictor refuses an LF+MF prediction below the larger of it and the tables' lowest redshift.
+  - `validated_z_min`: the lower edge of the redshift range over which the MF correction is validated (the frozen
+    grouped-validation domain); at build time this is the domain edge, not a passed validation. It is a float set by
+    the builder (`--validated-z-min`, 2.2 by default, `mf_release.VALIDATED_Z_MIN`); it may be raised, never lowered.
+    The predictor refuses an LF+MF prediction below the larger of it and the tables' lowest redshift.
 
 A published record comes with the sha256 of its `mf_record.json`; the record pins the tables by sha256 and size.
 

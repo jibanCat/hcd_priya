@@ -387,7 +387,8 @@ def test_mode_mapping_block_is_closed_checked(tmp_path, bad, why):
 
 # --------------------------------------------------------------------------------------------- validated_z_min
 def test_validated_z_min_is_recorded_and_never_below_the_code_floor(tmp_path):
-    """The record states the lowest redshift its MF is validated at (2.2 by default, the K-fold evaluation domain);
+    """The record states the lower edge of its MF's validation domain (2.2 by default, the K-fold evaluation domain;
+    the domain edge, not a passed validation);
     the builder may raise it, never lower it; it is reported in the provenance."""
     assert MR.VALIDATED_Z_MIN == 2.2
     d, sha, _ = build(tmp_path)
