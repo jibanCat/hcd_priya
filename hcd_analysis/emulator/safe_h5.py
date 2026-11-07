@@ -334,6 +334,12 @@ def _hex64(x):
     return isinstance(x, str) and bool(_HEX64.match(x))
 
 
+def _exact_hex64(x):
+    """A caller-given anchor digest: 64 lowercase hex digits as an EXACT str. A str subclass can override == and !=
+    and pass every later digest comparison, so it is refused, not compared (as the MF and release digests are)."""
+    return type(x) is str and bool(_HEX64.match(x))
+
+
 def _release_finder_ids():
     from ..catalog import RELEASE_FINDER_IDS
     return RELEASE_FINDER_IDS
@@ -749,9 +755,10 @@ def _check_mode(mode, expected, purpose):
             raise SafeFormatError("a development load takes no manifest digest (expected_manifest_sha256=None); with "
                                   "a digest the bundle loads as a release (load_release) or research "
                                   "(load_research) bundle")
-    elif not _hex64(expected):
-        raise SafeFormatError(f"a {mode} load needs the published manifest sha256 (64 lowercase hex digits); an "
-                              "unanchored development load is load_ensemble(..., expected_manifest_sha256=None)")
+    elif not _exact_hex64(expected):
+        raise SafeFormatError(f"a {mode} load needs the published manifest sha256 (64 lowercase hex digits, an exact "
+                              "str); an unanchored development load is load_ensemble(..., "
+                              "expected_manifest_sha256=None)")
     if mode == "research":
         if not (isinstance(purpose, str) and purpose.strip()):
             raise ValueError("a research load needs a non-empty purpose (why this research model is loaded)")
@@ -876,9 +883,10 @@ def load_release(bundle_dir, *, expected_manifest_sha256):
     the lineage checks of ``load_ensemble`` plus the parsed w_c map and the block. Refuses a research bundle and any
     member that is not a production member (``member_reasons``). Returns a ``ReleaseBundle`` (``kind`` "release",
     ``release_verified`` True)."""
-    if not _hex64(expected_manifest_sha256):
-        raise SafeFormatError("load_release needs the published manifest sha256 (64 lowercase hex digits); an "
-                              "unanchored development load is load_ensemble(..., expected_manifest_sha256=None)")
+    if not _exact_hex64(expected_manifest_sha256):
+        raise SafeFormatError("load_release needs the published manifest sha256 (64 lowercase hex digits, an exact "
+                              "str); an unanchored development load is load_ensemble(..., "
+                              "expected_manifest_sha256=None)")
     return _load_v2(bundle_dir, expected=expected_manifest_sha256, mode="release")[0]
 
 

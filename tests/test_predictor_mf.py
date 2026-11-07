@@ -702,3 +702,28 @@ def test_release_manifest_parts_must_be_exact_str(release, tmp_path, field):
         RM.write_release_manifest(str(d), **dict(kw, **{field: PlainStr(kw[field])}))
     assert not os.path.lexists(d / "release.json")
     assert RM.write_release_manifest(str(d), **kw)[1]
+
+
+# ------------------------------------------------------------------------------- the backbone digest (R2-1)
+def test_backbone_digest_is_taken_only_as_an_exact_str(info, res):
+    """R2-1: the backbone manifest digest given to safe_h5.load_release / load_research (and through them to
+    predictor.load_bundle / load_research_bundle) must be an exact str, like the MF and release digests. A str
+    subclass that compares equal to anything (a forged digest, here of the wrong value) is refused before any
+    comparison; so are a plain subclass and np.str_ carrying the right value; the plain str of that value loads."""
+    from hcd_analysis.emulator import safe_h5 as H
+    wrong = LyingStr("0" * 64)
+    with pytest.raises(H.SafeFormatError, match="load_release needs .*an exact str"):
+        H.load_release(info.bundle_dir, expected_manifest_sha256=wrong)
+    with pytest.raises(H.SafeFormatError, match="research load needs .*an exact str"):
+        H.load_research(res.bundle_dir, expected_manifest_sha256=LyingStr("0" * 64), purpose="a test")
+    with pytest.raises(H.SafeFormatError, match="exact str"):
+        hp.load_research_bundle(res.bundle_dir, LyingStr("0" * 64), purpose="a test")
+    for v in (wrong, PlainStr(info.manifest_sha256), np.str_(info.manifest_sha256)):
+        with pytest.raises(H.SafeFormatError, match="exact str"):
+            hp.load_bundle(info.bundle_dir, v)
+    for v in (PlainStr(res.manifest_sha256), np.str_(res.manifest_sha256)):
+        with pytest.raises(H.SafeFormatError, match="exact str"):
+            hp.load_research_bundle(res.bundle_dir, v, purpose="a test")
+    assert hp.load_bundle(info.bundle_dir, str(np.str_(info.manifest_sha256))).manifest_sha256 == info.manifest_sha256
+    assert hp.load_research_bundle(res.bundle_dir, str(PlainStr(res.manifest_sha256)), purpose="a test") \
+        .manifest_sha256 == res.manifest_sha256
