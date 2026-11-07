@@ -42,8 +42,9 @@ above the original PRIYA design box (``NS_RIDGE``, where the design is sparse) i
   * ``w_c`` (3,): an estimate of the simulation's own sightline fractions (LLS, subDLA, DLA) at (params, z), from the
     members' mean Head-A dN/dX (``dndx``, (3,)) through the w_c map shipped in the bundle (``dndx_wc.w_c_corrected``
     with the map's delta_c(z) and Xbar(z)); never the historical constants;
-  * ``member_std`` (4, K): the standard deviation over the members (ddof 1), a SEED-SPREAD DIAGNOSTIC (five networks
-    differing only in their initialisation), not a calibrated emulator error and not a covariance;
+  * ``member_std`` (4, K): the standard deviation over the members (ddof 1), a SEED-SPREAD DIAGNOSTIC (the bundle's
+    ``n_members`` networks, differing only in their initialisation), not a calibrated emulator error and not a
+    covariance;
   * ``flags``, ``labels`` and ``provenance`` (the manifest sha256, the lineage block, the w_c map's sha256 and the
     manifest's own provenance: the export's identity, software versions, creation time, the source digests).
 
