@@ -53,6 +53,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_emulator_model.py" = { tier = "wheel" }
 "tests/test_emulator_train.py" = { tier = "wheel" }
 "tests/test_error_vector_io.py" = { tier = "wheel" }
+"tests/test_exact_digest_args.py" = { tier = "wheel" }
 "tests/test_export_deployed_centre.py" = { tier = "source" }
 "tests/test_export_release_bundle.py" = { tier = "source" }
 "tests/test_export_research_bundle.py" = { tier = "source" }
