@@ -270,6 +270,58 @@ def test_a_record_changed_in_memory_is_refused_and_provenance_describes_the_tabl
 
 
 
+
+def test_the_predictor_keeps_the_fresh_object_reverify_returns(info, mf, tmp_path):
+    """Delta review R1-3a (mutants D3b, D3e): the bundle stores the FRESH MFRecord that reverify re-derives from the
+    sealed bytes, never the caller's object. Kept the caller's object, a subclass overriding provenance() and g()
+    (Q3e), the caller editing its own record after attach (Q3f) and an always-equal record dict claiming B (Q3i)
+    would make provenance["mf"] name something other than the correction applied (F11 reopened)."""
+    import copy
+    import hashlib
+    from hcd_analysis.emulator import safe_h5 as H
+    rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
+    a = MR.load_mf_record(mf[0], expected_record_sha256=mf[1], backbone_manifest_sha256=info.manifest_sha256)
+    d = tmp_path / "b"
+    sb = write_mf(d, manifest=info.manifest_sha256, cache=info.lineage["cache"]["sha256"], exclude=("synthsim2",))
+    b = MR.load_mf_record(str(d), expected_record_sha256=sb, backbone_manifest_sha256=info.manifest_sha256)
+    g_a, g_b = a.g(_x(3.0), 0.4), b.g(_x(3.0), 0.4)
+    assert not np.allclose(g_a, g_b)
+    tables_a = hashlib.sha256(a.tables_bytes).hexdigest()
+
+    def assert_applies_and_names_a(emu, caller):
+        assert type(emu._mf) is MR.MFRecord and emu._mf is not caller           # the fresh object, not the caller's
+        p = emu.predict(PARAMS, 3.0, tau_eff=0.4)
+        lf = emu.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF").P_class
+        np.testing.assert_allclose(p.P_class, lf * np.exp(g_a), rtol=1e-13, atol=0)     # A is applied ...
+        pm = p.provenance["mf"]
+        assert pm["record_sha256"] == mf[1] and pm["tables_sha256"] == tables_a          # ... and A is named
+        assert pm["train_sims"] == a.record["train_sims"] and pm["mf_version"] == "synthetic-mf-1"
+
+    class SubRec(MR.MFRecord):                                  # Q3e
+        def provenance(self):
+            return {"record_sha256": "forged"}
+
+        def g(self, x, tau0):
+            return g_b
+    sub = SubRec(*a)
+    assert_applies_and_names_a(hp.Bundle(rb, mf=sub), sub)
+
+    own = MR.load_mf_record(mf[0], expected_record_sha256=mf[1], backbone_manifest_sha256=info.manifest_sha256)
+    emu = hp.Bundle(rb, mf=own)                                 # Q3f: the caller edits its own object after attach
+    own.record["mf_version"] = "changed after attach"
+    own.record["train_sims"] = ["synthsim9"]
+    assert_applies_and_names_a(emu, own)
+
+    class EqDict(dict):                                         # Q3i: equal to anything, claiming B's record
+        def __eq__(self, other):
+            return True
+
+        def __ne__(self, other):
+            return False
+    eq = a._replace(record=EqDict(copy.deepcopy(b.record)))
+    assert_applies_and_names_a(hp.Bundle(rb, mf=eq), eq)
+
+
 class _TwoFacedBytes(bytes):
     """Hashes (its buffer) as one record's bytes while bytes(x) gives another's (delta review Q3h)."""
     other = b""
@@ -536,6 +588,26 @@ def test_release_part_directories_are_plain_names_inside_the_release(release, tm
     d, s = _manifest_copy(release, tmp_path / "link", lambda m: dict(m, mf=dict(m["mf"], dir="mf_link")))
     os.symlink(os.path.join(d, "mf"), os.path.join(d, "mf_link"))
     with pytest.raises(RM.ReleaseManifestError, match="symlink"):
+        hp.load_release(d, s)
+
+
+@pytest.mark.parametrize("target", ["inside", "outside"])
+def test_a_symlinked_backbone_part_is_refused(release, tmp_path, target):
+    """Delta review R1-3b (mutant D5c, forgery Q4g): the backbone part, like the MF part, is a plain directory, never a
+    symlink, whether the link points at the release's own backbone or at a bundle outside the release. load_bundle
+    itself accepts a symlinked bundle directory, so this check is the only one that catches it."""
+    import shutil
+    from hcd_analysis.emulator import release_manifest as RM
+    d, s = _manifest_copy(release, tmp_path / target, lambda m: dict(m, backbone=dict(m["backbone"],
+                                                                                     dir="backbone_link")))
+    if target == "inside":
+        link_to = os.path.join(d, "backbone")
+    else:
+        link_to = str(tmp_path / "elsewhere")
+        shutil.copytree(os.path.join(d, "backbone"), link_to, symlinks=True)
+    os.symlink(link_to, os.path.join(d, "backbone_link"))
+    assert hp.load_bundle(link_to, release["bundle"].manifest_sha256).manifest_sha256    # the target itself loads
+    with pytest.raises(RM.ReleaseManifestError, match="backbone: 'backbone_link' is not a directory .*symlink"):
         hp.load_release(d, s)
 
 
