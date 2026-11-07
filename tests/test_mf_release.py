@@ -405,6 +405,45 @@ def test_the_writer_takes_no_cache_provenance_from_the_caller(tmp_path):
     assert not os.path.lexists(tmp_path / "mf")
 
 
+# The two cache statements, written out in full (delta review R1-1): changing either is a schema change of the
+# write-once record and a deliberate edit of these literals.
+LF_STATEMENT = ("lineage-verified through the bound backbone: the backbone bundle's training cache (caches.lf.sha256 "
+                "equals backbone.cache_sha256), which the bundle's lineage block and every member meta name; the "
+                "builder reads it with data.load_cache, which checks its lineage record")
+HR_STATEMENT = ("digest-anchored only, never lineage-verified: the builder pins its sha256 and reads it with "
+                "data.load_cache_historical, which checks no lineage (a pre-lineage format 3.3 cache has no lineage "
+                "record); only its per-class P1D rows and row keys are read (hr_inputs)")
+
+
+def test_cache_provenance_statements_are_pinned_exactly(tmp_path):
+    """Delta review R1-1 (mutants D1d, D1e): both statements are these exact strings, in the code constant and in a
+    written and reloaded record; a clause appended to the HR statement or a changed LF clause fails here."""
+    assert MR.CACHE_PROVENANCE == {"lf": LF_STATEMENT, "hr": HR_STATEMENT}
+    d, sha, _ = build(tmp_path)
+    with open(os.path.join(d, MR.RECORD_FILE)) as fh:
+        on_disk = json.load(fh)["caches"]
+    assert on_disk["lf"]["provenance"] == LF_STATEMENT and on_disk["hr"]["provenance"] == HR_STATEMENT
+    caches = load(d, sha).record["caches"]
+    assert caches["lf"]["provenance"] == LF_STATEMENT and caches["hr"]["provenance"] == HR_STATEMENT
+
+
+@pytest.mark.parametrize("side, altered", [
+    ("hr", HR_STATEMENT + "; lineage-verified by a later audit"),           # delta review Q2c
+    ("hr", HR_STATEMENT + " "),                                             # Q2b
+    ("hr", HR_STATEMENT.replace("never lineage-verified", "lineage-verified")),   # Q2d
+    ("hr", "note: " + HR_STATEMENT),
+    ("lf", LF_STATEMENT + "; and the HR cache too"),
+    ("lf", LF_STATEMENT[:-1]),
+])
+def test_a_cache_statement_that_differs_by_any_text_is_refused(tmp_path, side, altered):
+    """Delta review R1-1 (mutant D1b): the statements are compared by exact equality, not containment, so a record
+    carrying the code's statement plus anything else, or less than it, is refused at load."""
+    d, _, _ = build(tmp_path)
+    s = rewrite(d, lambda r: dict(r, caches=dict(r["caches"], **{side: dict(r["caches"][side], provenance=altered)})))
+    with pytest.raises(MR.MFRecordError, match=f"caches.{side}.provenance is not the code's statement"):
+        load(d, s)
+
+
 # ------------------------------------------------------------------- pinned guards (C1 review MAJOR-2, mutants R*)
 def test_hr_inputs_are_pinned_exactly():
     """R10c: the HR inputs of record are this exact constant (06b A1); dropping a catalogue-derived name from the

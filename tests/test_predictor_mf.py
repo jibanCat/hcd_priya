@@ -14,7 +14,7 @@ from hcd_analysis.emulator import mf_release as MR
 from hcd_analysis.emulator import release_testing as RT
 from hcd_analysis.emulator.data import Z_LIMITS, normalize_params
 from hcd_analysis.emulator.schema import L_BOX_HMPC
-from tests.test_mf_release import COMMIT, H64, synthetic_targets
+from tests.test_mf_release import COMMIT, H64, HR_STATEMENT, LF_STATEMENT, synthetic_targets
 
 K = RT.SYNTHETIC_ARCH["n_k"]
 KCOM = 2 * np.pi * np.arange(1, K + 1) / L_BOX_HMPC
@@ -130,7 +130,8 @@ def test_mf_provenance_is_reported(emu_mf, mf, info):
                                   "provenance": MR.CACHE_PROVENANCE["lf"]},
                            "hr": {"file": "synthetic_hr.h5", "sha256": H64("synthetic hr"),
                                   "provenance": MR.CACHE_PROVENANCE["hr"]}}
-    assert m["caches"]["hr"]["provenance"].startswith("digest-anchored only, never lineage-verified")
+    assert m["caches"]["hr"]["provenance"] == HR_STATEMENT          # the literals (delta review R1-1)
+    assert m["caches"]["lf"]["provenance"] == LF_STATEMENT
     assert "mf" in emu_mf.provenance and emu_mf.provenance["mf"] == m
     assert "mf" in p.labels
 
