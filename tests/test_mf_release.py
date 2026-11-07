@@ -4,7 +4,8 @@
 Predicates checked here: write-once; the composition and its ruling ids recorded and checked at load; the cache and
 backbone digests recorded and checked at load; the record anchored by its own sha256 and the tables by theirs; a strict
 HDF5 structure; the HR catalogue-derived columns excluded (a tested refusal); the mean-flux convention recorded as
-PROPOSED; a release record refused from a dirty tree; held-out (fold) fits that exclude simulation groups."""
+the settled global convention; a release record refused from a dirty tree; held-out (fold) fits that exclude
+simulation groups."""
 import hashlib
 import json
 import os
@@ -140,7 +141,7 @@ def test_record_carries_the_required_provenance_fields(tmp_path):
     assert r["backbone"]["manifest_sha256"] == BACKBONE
     assert r["caches"]["lf"]["sha256"] == LF_SHA and r["caches"]["hr"]["sha256"] == HR_SHA
     assert r["fit_code"] == {"commit": COMMIT, "dirty": False}
-    assert r["mean_flux_convention"]["status"] == "PROPOSED"
+    assert r["mean_flux_convention"]["status"] == "SETTLED"
     assert "priya_p1d.py" in r["mean_flux_convention"]["source"]
     assert r["hr_inputs"] == MR.HR_INPUTS
     assert r["tables"]["sha256"] == hashlib.sha256(open(os.path.join(d, MR.TABLES_FILE), "rb").read()).hexdigest()
@@ -318,12 +319,26 @@ def test_record_claiming_hr_catalogue_columns_or_a_verified_status_is_refused(tm
 
 
 # --------------------------------------------------------------------------------------------- mean-flux convention
-def test_mean_flux_convention_is_recorded_as_proposed_and_cannot_be_promoted(tmp_path):
+def test_mean_flux_convention_is_recorded_as_settled_and_cannot_be_altered(tmp_path):
+    """The global convention is the settled production convention: the record carries the code's statement, and a
+    record that calls it proposed, names another convention or drops the production statement is refused."""
     d, sha, _ = build(tmp_path)
     assert load(d, sha).record["mean_flux_convention"] == MR.MEAN_FLUX_CONVENTION
-    s2 = rewrite(d, lambda r: dict(r, mean_flux_convention=dict(r["mean_flux_convention"], status="SETTLED")))
-    with pytest.raises(MR.MFRecordError, match="mean-flux"):
-        load(d, s2)
+    assert MR.MEAN_FLUX_CONVENTION["status"] == "SETTLED"
+    for bad in (dict(MR.MEAN_FLUX_CONVENTION, status="PROPOSED"), dict(MR.MEAN_FLUX_CONVENTION, name="per-subset"),
+                {k: v for k, v in MR.MEAN_FLUX_CONVENTION.items() if k != "production"}):
+        s2 = rewrite(d, lambda r: dict(r, mean_flux_convention=bad))
+        with pytest.raises(MR.MFRecordError, match="mean-flux"):
+            load(d, s2)
+
+
+def test_mean_flux_convention_text_is_public_safe():
+    """The settled convention is stated without private references (no ruling ids, no audit wording)."""
+    text = " ".join(str(v) for v in MR.MEAN_FLUX_CONVENTION.values())
+    for word in ("PI ruling", "ruling", "under audit", "PROPOSED", "D2", "H6", "2026-"):
+        assert word not in text, word
+    assert "production convention" in MR.MEAN_FLUX_CONVENTION["production"]
+    assert "diagnostic" in MR.MEAN_FLUX_CONVENTION["production"]
 
 
 # --------------------------------------------------------------------------------------------- kinds
@@ -462,12 +477,12 @@ def test_hr_inputs_are_pinned_exactly():
 
 
 def test_mean_flux_convention_is_global_and_its_source_line_holds_the_stated_expression():
-    """R12a, R12b: the convention is "global" (D2 open: PROPOSED), and the cited file:line holds the expression the
+    """R12a, R12b: the convention is "global" (settled: the production convention), and the cited file:line holds the expression the
     record quotes, inside the named function, so the citation cannot drift silently."""
     import importlib.util
     import re
     mfc = MR.MEAN_FLUX_CONVENTION
-    assert mfc["name"] == "global" and mfc["status"] == "PROPOSED"
+    assert mfc["name"] == "global" and mfc["status"] == "SETTLED"
     m = re.match(r"(hcd_analysis/[\w/]+\.py):(\d+) \((.+?)\),", mfc["source"])
     assert m, mfc["source"]
     rel, line, expr = m.group(1), int(m.group(2)), m.group(3)

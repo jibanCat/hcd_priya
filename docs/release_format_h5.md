@@ -320,8 +320,9 @@ digest does not change when an MF is added). It holds exactly:
   - `train_sims`, `n_pairs_train`;
   - `hr_inputs`: the HR cache fields the MF reads (the per-class P1D rows and their row keys) and the
     catalogue-derived HR columns it excludes, with their status;
-  - `mean_flux_convention`: the normalisation of the per-class P1D targets as the code computes it today (the
-    function and line are named), status `PROPOSED`;
+  - `mean_flux_convention`: the normalisation of the per-class P1D targets as the code computes it (the function
+    and line are named), status `SETTLED`: the global convention, in which the four class spectra share the whole
+    sample's mean flux, is the production convention; normalising each class by its own mean flux is a diagnostic;
   - `fit_code`: `{commit, dirty}` of the fit.
 
 A published record comes with the sha256 of its `mf_record.json`; the record pins the tables by sha256 and size.

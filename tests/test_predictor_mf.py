@@ -134,7 +134,7 @@ def test_mf_provenance_is_reported(emu_mf, mf, info):
     assert m["record_sha256"] == mf[1] and m["backbone_manifest_sha256"] == info.manifest_sha256
     assert m["kind"] == "release" and m["mf_version"] == "synthetic-mf-1"
     assert m["composition"]["ruling_ids"] == ["synthetic ruling"]
-    assert m["mean_flux_convention"]["status"] == "PROPOSED"
+    assert m["mean_flux_convention"]["status"] == "SETTLED" and m["mean_flux_convention"]["name"] == "global"
     assert m["hr_inputs"] == MR.HR_INPUTS
     assert m["caches"] == {"lf": {"file": RT.SYNTHETIC_CACHE_NAME, "sha256": info.lineage["cache"]["sha256"],
                                   "provenance": MR.CACHE_PROVENANCE["lf"]},

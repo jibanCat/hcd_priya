@@ -42,7 +42,7 @@ depend on the cosmological parameters. Below the lowest redshift of the record's
 tau0 tables it is held constant and flagged (``mf_z_clamped``, ``mf_tau0_clamped``). ``w_c`` and ``dndx`` stay the LF
 backbone's. ``fidelity`` ("LF" or "LF+MF"; None: the bundle's own) selects the output; "LF+MF" without a record raises
 ``MFUnavailableError``. The record's provenance (version, composition and ruling ids, cache digests and their
-provenance statements, fit commit, the PROPOSED mean-flux convention of its targets, the HR inputs used) is in
+provenance statements, fit commit, the settled mean-flux convention of its targets, the HR inputs used) is in
 ``provenance["mf"]``. Without an MF record nothing here changes. A FOLD record (a held-out fit for grouped cross-validation) applies only on its research backbone
 (``load_research_bundle(..., mf_dir=..., mf_record_sha256=...)``); ``heldout_P_filt_at(pred, x, tau0)`` gives that
 fold's held-out LF and MF predictions at cache inputs from the same object. ``backbone_identity(pred)`` is what an MF
@@ -72,11 +72,11 @@ above the original PRIYA design box (``NS_RIDGE``, where the design is sparse) i
 
 **HCD.** ``add_hcd(pred, A)`` returns P_clean + sum_c A_c (P_c - P_clean), with one amplitude per class (A of shape (3,))
 or per class per redshift ((n_z, 3) on a stack). A_c is the effective sightline fraction of class c. The class
-spectra are normalised as in the current training cache, by the snapshot's global mean flux
-(``labels["normalisation"]``; the convention is under review). Under that normalisation and with the counted class
-fractions, sum over the four classes of w_c P_c is the full-sample filtered P1D; the shipped w_c is the map's fitted
-estimate of those fractions (the fit residuals are recorded in the map), so A = w_c gives that total only to the
-accuracy of the map, and only under this normalisation. Only physical validity is imposed: every A_c >= 0 and the
+spectra are normalised as in the training cache, by the snapshot's global mean flux (``labels["normalisation"]``):
+the settled production convention; normalising each class by its own mean flux is a diagnostic only. Under that
+normalisation and with the counted class fractions, sum over the four classes of w_c P_c is the full-sample filtered
+P1D; the shipped w_c is the map's fitted estimate of those fractions (the fit residuals are recorded in the map), so
+A = w_c gives that total only to the accuracy of the map, and only under this normalisation. Only physical validity is imposed: every A_c >= 0 and the
 clean fraction 1 - sum_c A_c >= 0; anything else is a clear error. This module has no prior, no survey key and no DLA
 forward-fraction default, and it never imports the historical likelihood or priors (``inference``, ``closure_legb``,
 ``lit_dndx*``, ``meanflux_prior``). Two contributions are not in the total (documented omissions): the subDLA filtered remnant (the power of
@@ -490,8 +490,10 @@ class _PredictorBase:
                               "calibrated emulator error and not a covariance",
                 "w_c": "an estimate of the simulation's own sightline fractions (LLS, subDLA, DLA) from the members' "
                        "mean Head-A dN/dX through the w_c map shipped in this bundle",
-                "normalisation": "each class spectrum is normalised by the snapshot's global mean flux, as in the "
-                                 "current training cache; the convention is under review",
+                "normalisation": "each class spectrum is normalised by the snapshot's global mean flux (the whole "
+                                 "sample's, shared by the four classes), as in the training cache: the settled "
+                                 "production convention; normalising each class by its own mean flux is a "
+                                 "diagnostic only, not used here",
                 "amplitudes": "add_hcd: A_c is an effective sightline fraction; with counted fractions and under the "
                               "class normalisation above, sum_c w_c P_c is the full-sample filtered P1D, and w_c here "
                               "is the map's estimate of those fractions; only A_c >= 0 and 1 - sum_c A_c >= 0 are "

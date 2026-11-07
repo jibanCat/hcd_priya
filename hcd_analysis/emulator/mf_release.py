@@ -17,7 +17,8 @@ bundle (its manifest sha256) and is refused with any other.
                       LF and HR caches' file names, sha256 and provenance (``CACHE_PROVENANCE``: the LF cache is
                       lineage-verified through the backbone, the HR cache digest-anchored only), the composition
                       with its ruling ids, the fold (for a held-out fit), the training simulations, the HR inputs used (``HR_INPUTS``), the mean-flux
-                      convention of the targets (``MEAN_FLUX_CONVENTION``, PROPOSED) and the fit code's commit and
+                      convention of the targets (``MEAN_FLUX_CONVENTION``, the settled global convention) and the
+                      fit code's commit and
                       clean-tree flag.
 
 A published record is anchored by the sha256 of ``mf_record.json``; the record anchors the tables. Nothing is pickled
@@ -84,10 +85,10 @@ CACHE_PROVENANCE = {
           "only its per-class P1D rows and row keys are read (hr_inputs)",
 }
 
-# The mean-flux normalisation of the per-class P1D targets, as the code computes it today (read at be675c6).
-# Under audit (PI ruling 2026-11-06b D2): recorded, PROPOSED, and not changed here.
+# The mean-flux normalisation of the per-class P1D targets, as the code computes it (read at be675c6): the settled
+# production convention. A record carries exactly this statement (check_record); it changes only with the code.
 MEAN_FLUX_CONVENTION = {
-    "status": "PROPOSED",
+    "status": "SETTLED",
     "name": "global",
     "statement": "each class's flux contrast is normalised by the mean flux of the whole sample, shared by the four "
                  "classes: delta_F,c = exp(-s tau) / F_target - 1, with (s, F_target) of Tier P (all sightlines); "
@@ -96,7 +97,9 @@ MEAN_FLUX_CONVENTION = {
     "source": "hcd_analysis/priya_p1d.py:146 (dflux = np.exp(-tau_eff) / target_F - 1.0), called per class by "
               "compute_tier_c_p1d with Tier P's (scale, target_F)",
     "read_at_commit": "be675c66b7d6d84126eb7a8501d15e874197d96a",
-    "audit": "under audit (PI ruling 2026-11-06b D2); no normalisation is changed until the convention is settled",
+    "production": "the production convention of the emulator and the likelihood: the four class spectra share the "
+                  "whole sample's mean flux; normalising each class by its own mean flux is a diagnostic, not the "
+                  "production convention",
 }
 
 RECORD_KEYS = {"format", "mf_version", "kind", "model_form", "tables", "backbone", "caches", "composition", "fold",
@@ -263,8 +266,8 @@ def check_record(rec):
                             "and are neither used nor given another status (PI ruling 2026-11-06b A1)"
                             + (f"; it names {bad}" if bad else ""))
     if rec["mean_flux_convention"] != MEAN_FLUX_CONVENTION:
-        raise MFRecordError("mean-flux convention differs from the code's PROPOSED record (it is under audit, PI "
-                            "ruling 2026-11-06b D2; it changes only with the code)")
+        raise MFRecordError("mean-flux convention differs from the code's settled production convention (global: "
+                            "the class spectra share the whole sample's mean flux; it changes only with the code)")
     fc = rec["fit_code"]
     _keys(fc, {"commit", "dirty"}, "fit_code")
     _hex(fc["commit"], 40, "fit_code.commit")
