@@ -5,7 +5,7 @@ amplitudes and no prior.
     emu = hp.load_bundle(bundle_dir, "<the published manifest sha256>")     # None is refused
     pred = emu.predict(params, z=3.0, tau_eff=0.36)                          # or tau0_amp=..., dtau0=...
     pred.k, pred.P_class, pred.template, pred.w_c                            # (K,), (4, K), (3, K), (3,)
-    P_tot = hp.add_hcd(pred, pred.w_c)                                       # the simulation's own HCD content
+    P_tot = hp.add_hcd(pred, pred.w_c)                                       # the map's estimate of its HCD content
     stack = emu.predict_many(params, z=[2.6, 2.8, 3.0], tau0_amp=1.0, dtau0=0.0)
     P_tot = hp.add_hcd(stack, A)                                             # A: (3,) for every z, or (n_z, 3)
 
@@ -39,17 +39,21 @@ above the original PRIYA design box (``NS_RIDGE``, where the design is sparse) i
   * ``k`` (K,) s/km; ``P_class`` (4, K): clean, LLS, subDLA, DLA, PRIYA-filtered (tau > 1e6 troughs filled), the mean
     over the ensemble members of their reconstructed spectra;
   * ``template`` (3, K) = P_c / P_clean - 1 for LLS, subDLA, DLA;
-  * ``w_c`` (3,): the simulation's own sightline fractions (LLS, subDLA, DLA) at (params, z), from the members' mean
-    Head-A dN/dX (``dndx``, (3,)) through the w_c map shipped in the bundle (``dndx_wc.w_c_corrected`` with the map's
-    delta_c(z) and Xbar(z)); never the historical constants;
+  * ``w_c`` (3,): an estimate of the simulation's own sightline fractions (LLS, subDLA, DLA) at (params, z), from the
+    members' mean Head-A dN/dX (``dndx``, (3,)) through the w_c map shipped in the bundle (``dndx_wc.w_c_corrected``
+    with the map's delta_c(z) and Xbar(z)); never the historical constants;
   * ``member_std`` (4, K): the standard deviation over the members (ddof 1), a SEED-SPREAD DIAGNOSTIC (five networks
     differing only in their initialisation), not a calibrated emulator error and not a covariance;
   * ``flags``, ``labels`` and ``provenance`` (the manifest sha256, the lineage block, the w_c map's sha256 and the
     manifest's own provenance: the export's identity, software versions, creation time, the source digests).
 
 **HCD.** ``add_hcd(pred, A)`` returns P_clean + sum_c A_c (P_c - P_clean), with one amplitude per class (A of shape (3,))
-or per class per redshift ((n_z, 3) on a stack). A_c is the effective sightline fraction of class c: A = w_c
-reproduces the simulation's own filtered total sum_c w_c P_c. Only physical validity is imposed: every A_c >= 0 and the
+or per class per redshift ((n_z, 3) on a stack). A_c is the effective sightline fraction of class c. The class
+spectra are normalised as in the current training cache, by the snapshot's global mean flux
+(``labels["normalisation"]``; the convention is under review). Under that normalisation and with the counted class
+fractions, sum over the four classes of w_c P_c is the full-sample filtered P1D; the shipped w_c is the map's fitted
+estimate of those fractions (the fit residuals are recorded in the map), so A = w_c gives that total only to the
+accuracy of the map, and only under this normalisation. Only physical validity is imposed: every A_c >= 0 and the
 clean fraction 1 - sum_c A_c >= 0; anything else is a clear error. This module has no prior, no survey key and no DLA
 forward-fraction default, and it never imports the historical likelihood or priors (``inference``, ``closure_legb``,
 ``lit_dndx*``, ``meanflux_prior``). Two contributions are not in the total (documented omissions): the subDLA filtered remnant (the power of
@@ -285,10 +289,14 @@ class _PredictorBase:
                 "P_class": "the mean over the ensemble members of their reconstructed per-class spectra",
                 "member_std": "seed-spread diagnostic: the standard deviation over the members (ddof 1); not a "
                               "calibrated emulator error and not a covariance",
-                "w_c": "the simulation's own sightline fractions (LLS, subDLA, DLA) from the members' mean Head-A "
-                       "dN/dX through the w_c map shipped in this bundle",
-                "amplitudes": "add_hcd: A_c is an effective sightline fraction; A = w_c reproduces the simulation's "
-                              "filtered total; only A_c >= 0 and 1 - sum_c A_c >= 0 are imposed; no prior",
+                "w_c": "an estimate of the simulation's own sightline fractions (LLS, subDLA, DLA) from the members' "
+                       "mean Head-A dN/dX through the w_c map shipped in this bundle",
+                "normalisation": "each class spectrum is normalised by the snapshot's global mean flux, as in the "
+                                 "current training cache; the convention is under review",
+                "amplitudes": "add_hcd: A_c is an effective sightline fraction; with counted fractions and under the "
+                              "class normalisation above, sum_c w_c P_c is the full-sample filtered P1D, and w_c here "
+                              "is the map's estimate of those fractions; only A_c >= 0 and 1 - sum_c A_c >= 0 are "
+                              "imposed; no prior",
                 "omissions": list(OMISSIONS)}
 
     # ------------------------------------------------------------------ predictions
