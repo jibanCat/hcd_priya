@@ -29,16 +29,18 @@ Usage:
     python3 scripts/build_mf_shape_floor.py --fig      # also write the diagnostic figure
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os, sys
 import numpy as np
 import h5py
 
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 from hcd_analysis.emulator.data import normalize_params  # noqa: E402
 
-LF_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-HR_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
-OUT_NPZ = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_shape.npz"
+LF_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+HR_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
+OUT_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/mf_cemu_shape.npz"
 NOTES_FIG = "/home/mfho/hcd_priya_notes/figures/analysis/05_multifidelity/mf_shape_floor_modes.png"
 
 CLEAN = 0

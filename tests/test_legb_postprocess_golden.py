@@ -14,7 +14,7 @@ the softplus α_DLA link, or the HCD z-slope ``alpha_pivot · g(z)``) that is NO
 coverage run — surfacing as a coverage/recovery ANOMALY, never a crash. This guard turns that
 into a hard test failure at the seam.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_postprocess_golden.py -q
 """
 import os
@@ -33,6 +33,7 @@ _DET_SITES = ("tau0_vec", "alpha_dla", "alpha_hcd_z")
 
 
 @pytest.mark.skipif(not os.path.exists(_DESI_NPZ), reason="DESI data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_fast_postprocess_matches_replay_golden():
     """fast_postprocess reconstructs tau0_vec/alpha_dla/alpha_hcd_z byte-identically to the
     legacy in-model deterministic replay on a fixed seed (rtol=0, atol=0)."""

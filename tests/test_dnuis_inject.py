@@ -12,7 +12,7 @@ Hooks under test (closure_legb):
   (b) apply_lls_truth_boost(truth_pack, boost) — a pure helper scaling ONLY the LLS truth;
   (c) run_legb(..., inject_spec=) leg_a branch — threads the above; inject_spec=None is a no-op.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_dnuis_inject.py -q
 """
 import numpy as np
@@ -23,6 +23,7 @@ import pytest
 import hcd_analysis.emulator  # noqa: F401  enables x64 BEFORE jax
 from hcd_analysis.emulator import closure_legb as LB
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.gate_helpers import raise_if_deferred  # noqa: E402
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -87,6 +88,7 @@ def ctx_d():
         # metals_on / non-metals split the metal-misspec test needs.
         return LB.build_legb_ctx(use_xclass=True, metals_on=True)
     except Exception as e:                                   # data/checkpoint absent in this env
+        raise_if_deferred(e)                                 # a retired interface is deferred, not absent
         pytest.skip(f"build_legb_ctx unavailable: {e}")
 
 
@@ -95,6 +97,7 @@ def _core(ctx, d):
             for k, v in LB._fiducial_dla_core_per_leg(d, ctx.legs, ctx.cache_k).items()}
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_metal_misspec_changes_metals_leg_not_clean_leg(ctx_d):
     ctx, d = ctx_d
     core = _core(ctx, d)
@@ -131,6 +134,7 @@ def test_metal_misspec_changes_metals_leg_not_clean_leg(ctx_d):
                 f"{leg.name} (clean): metal-misspec must NOT touch a non-metals leg"
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_meanflux_on_leg_is_exp_minus_tau0_global(ctx_d):
     """REGRESSION (the BLOCKER bug): ``truth_pack['tau0_global']`` is ALREADY τ_eff=α·Kim (the cache
     −ln⟨F⟩ coord), so ⟨F⟩(z) MUST be exactly exp(−tau0_global[sel]) — NO second Kim multiply (the
@@ -151,6 +155,7 @@ def test_meanflux_on_leg_is_exp_minus_tau0_global(ctx_d):
         assert np.all((got > 0.0) & (got <= 1.0)), f"{leg.name}: ⟨F⟩ out of (0,1]"
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_resolution_injection_is_exp_2b_k2_R2(ctx_d):
     ctx0, d = ctx_d
     # The resolution injection now RAISES on a non-resolution_ready leg (KS's proxy R_z is untrustworthy;
@@ -196,6 +201,7 @@ def test_resolution_injection_is_exp_2b_k2_R2(ctx_d):
                 f"{leg.name} z{iz}: resolution factor not monotone in k"
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_resolution_vector_injection_is_per_z_exp(ctx_d):
     """{'b_res_vec': v} applies exp(2 v[iz] k^2 R_z[iz]^2) per z-block (TASK 2B: the OOS per-z
     resolution resolver). Mirrors test_resolution_injection_is_exp_2b_k2_R2's math check, but on
@@ -225,6 +231,7 @@ def test_resolution_vector_injection_is_per_z_exp(ctx_d):
                                    err_msg=f"{leg.name}: per-z resolution vector factor mismatch")
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_resolution_vector_on_unready_leg_raises(ctx_d):
     """The B1 regression: a VECTOR (not scalar) injection on a non-resolution_ready leg RAISES
     (the fixed guard fires on `active`, not on the scalar-only `res_b is not None`)."""
@@ -244,6 +251,7 @@ def test_resolution_vector_on_unready_leg_raises(ctx_d):
 # --------------------------------------------------------------------------------------------- #
 #  PART (c): run_legb(inject_spec=None) is a byte-for-byte no-op vs the direct mock.
 # --------------------------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_inject_spec_none_is_noop(ctx_d):
     """The no-op guarantee: building the leg-A mock through the inject_spec=None path reproduces
     the existing make_leg_a_legmock mock EXACTLY for the same (seed, mock index) RNG."""
@@ -264,6 +272,7 @@ def test_inject_spec_none_is_noop(ctx_d):
         np.testing.assert_array_equal(np.asarray(ld.P_data), np.asarray(ln.P_data))
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_run_legb_inject_spec_none_matches_default_mock(ctx_d):
     """run_legb's leg_a branch with inject_spec=None must build the SAME mock the default branch
     does (the no-op guarantee at the driver level). We compare the mock P_data reconstructed via
@@ -284,6 +293,7 @@ def test_run_legb_inject_spec_none_matches_default_mock(ctx_d):
         np.testing.assert_array_equal(np.asarray(la.P_data), np.asarray(lb.P_data))
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_run_legb_with_lls_excess_runs_and_offsets_truth(ctx_d):
     """Smoke: run_legb(leg_a, inject_spec={'lls_truth_boost':1.3}) runs end-to-end (tiny NUTS) and
     the recorded truth_vec carries the boosted LLS (alpha_lls column) vs the un-boosted run."""

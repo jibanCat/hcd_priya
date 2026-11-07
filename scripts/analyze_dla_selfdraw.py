@@ -25,7 +25,7 @@ AND d["survey"] identical across shards (F6b), smoke-suffixed pkls filtered out 
 truth contract (boosted alpha_dla == boost x clean, all other truth entries bit-identical).
 Pure numpy on purpose — safe on the login node (no JAX import).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
      scripts/analyze_dla_selfdraw.py --shard-dir /scratch/cavestru_root/cavestru1/mfho/dla_selfdraw \
      [--npz-out out.npz] [--fig-out fig.png]
 """

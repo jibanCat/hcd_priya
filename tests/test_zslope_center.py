@@ -14,7 +14,7 @@ These tests are lightweight (SimpleNamespace ctx; no cache/ckpt/data) — they t
 HCD z-slope sample sites of ``_zslope_sites``.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_zslope_center.py -q
 """
 import numpy as np

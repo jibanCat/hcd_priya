@@ -7,7 +7,7 @@ is weakly *constrained* though strongly *felt*; the shared-latent neural emulato
 (a per-bin GP without cross-bin C_emu cannot). bhfeedback response ~0 = a null direction (unconstrained
 by physics, not emulation). Output: figures/analysis/05_likelihood/emu_hub_bhfb_response.png.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_param_response.py
 """
 import numpy as np

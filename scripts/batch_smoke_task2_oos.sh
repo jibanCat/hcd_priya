@@ -14,20 +14,22 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32g
 #SBATCH --time=03:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/smoke_task2oos_%A.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/smoke_task2oos_%A.err
+#SBATCH --output=logs/smoke_task2oos_%A.out
+#SBATCH --error=logs/smoke_task2oos_%A.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -uo pipefail
 
 NCPU=${SLURM_CPUS_PER_TASK:-8}
 export OMP_NUM_THREADS=$NCPU OPENBLAS_NUM_THREADS=$NCPU MKL_NUM_THREADS=$NCPU
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=$NCPU"
-export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
 OUT=/scratch/cavestru_root/cavestru0/mfho
-mkdir -p "$OUT/smoke_t2_scalar" "$OUT/smoke_t2_oos" /home/mfho/hcd_priya/logs
+mkdir -p "$OUT/smoke_t2_scalar" "$OUT/smoke_t2_oos" $REPO/logs
 
 echo "=== [1] resolution/OOS regression pytest  start: $(date) ==="
 "$PY" -m pytest tests/test_legb_resolution.py tests/test_dnuis_inject.py tests/test_resinj_instr.py \

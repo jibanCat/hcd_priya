@@ -25,6 +25,8 @@ Reuses: scripts/diag_legb_perf_and_binding.py (the Fisher: jacrev -> J^T Cinv J 
 -> invert) and scripts/diag_legb_zresolved_alpha_check.py (the forward construction path).
 Forward-only; ~minutes; no NUTS. Writes a results table + figure to figures/analysis/05_likelihood/.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 from pathlib import Path
 
@@ -38,9 +40,9 @@ from hcd_analysis.emulator.closure_legb_figs import truth_tau0_on_leg
 from hcd_analysis.emulator import data_likelihood as DL
 from hcd_analysis.emulator.inference import PARAM_NAMES, HCD_Z_PIVOT
 
-FIGDIR = "/home/mfho/hcd_priya/figures/analysis/05_likelihood"
+FIGDIR = f"{_REPO_ROOT}/figures/analysis/05_likelihood"
 RESULTS = f"{FIGDIR}/legb_slope_prior_tradeoff.txt"
-HOLD0 = "/home/mfho/hcd_priya/checkpoints/error_vector_xclass_holdout0.npz"  # de-circularized rho
+HOLD0 = f"{_REPO_ROOT}/checkpoints/error_vector_xclass_holdout0.npz"  # de-circularized rho
 
 # --- Literature slope priors (Lyα consult 2026-06-06; WLS fit of dN/dX vs PRIYA, errors propagated)
 #     class order (LLS, subDLA, DLA). The code's HCD_LIT_OVER_SIM_SLOPE has NO uncertainty;

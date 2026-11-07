@@ -13,9 +13,11 @@ or add the CV floor under a production driver, invisible to every audit artifact
       (data_likelihood.assert_env_data_flags_unset);
   (c) an explicit loader kwarg still overrides the env (the test back-door is preserved).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_env_data_flags.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 
 import hcd_analysis.emulator  # noqa: F401  enables jax_enable_x64
@@ -29,7 +31,7 @@ EBOSS_NPZ = "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz"
 _have_desi = os.path.exists(DESI_NPZ) and os.path.exists(DL.DESI_SNR3_NPZ)
 _have_eboss = os.path.exists(EBOSS_NPZ)
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 @pytest.fixture(autouse=True)
@@ -106,7 +108,7 @@ def test_explicit_kwarg_overrides_env(monkeypatch):
     "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"),
     reason="KS data not present")
 def test_ks_leg_stamps_default_false():
-    leg = DL.load_ks_leg()
+    leg = DL.load_ks_leg(k_max=0.069)
     assert leg.use_snr3 is False and leg.cv_floor_on is False and leg.cv_floor_rank1 is False
 
 

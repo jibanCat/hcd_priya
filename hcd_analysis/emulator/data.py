@@ -45,8 +45,8 @@ PARAM_LIMITS = np.array([
 # sparse in the widened corners: the Bird+2023 LHS densely sampled only the ORIGINAL coarse_grid.py
 # box, and the widening (ns_hi 0.995->1.05, herei_hi 4.1->4.5, heref_lo 2.6->2.2, alphaq_hi
 # 2.5->3.0) added only a few design points. The held-out emulator EXTRAPOLATES badly there —
-# Phase-4b closure: a mock at alphaq=2.98 recovered A_p +3.7sigma, at herei=4.46 +2.0sigma (both
-# OUTSIDE the original box), and the bias equalled the standalone emulator-LOSO Fisher bias (pure
+# Phase-4b closure: mocks at alphaq and herei values OUTSIDE the original box recovered strongly
+# biased A_p, and the bias equalled the standalone emulator-LOSO Fisher bias (pure
 # emulator edge error, not a likelihood/HCD effect). So NUTS samples the IGM params (herei, heref,
 # alphaq) only over their ORIGINAL PRIYA ranges — NO retrain (the emulator box is unchanged; we
 # just do not FIT at its corners). n_s is KEPT extended to 1.05 (PI 2026-06-08: the real n_s may
@@ -133,7 +133,9 @@ def _collapse_p1d(p15, counts15):
         out[:, ci, :] = summ
     return out
 
-def load_cache(path):
+def load_cache(path, *, validate=True):
+    """Load a v3.3 cache. ``kfkms`` is PER_ROW (each row's own velocity grid); the validated GLOBAL_STATIC
+    comoving modes are exposed as ``k_com_hmpc`` (schema.py; docs/kgrid_incident_2026-10.md)."""
     with h5py.File(path, "r") as h:
         assert h.attrs["cache_version"] == "3.3", h.attrs.get("cache_version")
         g = lambda k: h[k][:]
@@ -142,6 +144,8 @@ def load_cache(path):
         out = dict(
             params=g("params").astype(np.float64),
             kfkms=g("kfkms").astype(np.float64),
+            nbins_native=g("nbins_native").astype(np.int64),
+            dv_kms=g("dv_kms").astype(np.float64),
             P_tier_p=g("P_tier_p").astype(np.float64),
             target_F=g("target_F").astype(np.float64),
             scale=g("scale").astype(np.float64),
@@ -182,6 +186,12 @@ def load_cache(path):
     if n_oob:
         print(f"WARN load_cache: {n_oob}/{len(out['in_domain'])} rows "
               f"out of PRIYA param domain (params_unit outside [0,1])")
+    # schema guard (incident 2026-10-05): every key classified; k_com validated across ALL rows, never row 0.
+    if validate:
+        from .schema import validate_cache_schema
+        rep = validate_cache_schema(out)
+        out["k_com_hmpc"] = np.asarray(rep["derived"]["k_com_hmpc"], np.float64)
+        out["schema_report"] = rep
     return out
 
 
@@ -413,7 +423,7 @@ def fit_target_norm(d, train_idx):
     return stats
 
 
-def edge_emphasis_k_weight(kfkms, edge_gain=3.0, lowk_extra=1.0, mid_frac=0.5):
+def edge_emphasis_k_weight(k_com_hmpc, edge_gain=3.0, lowk_extra=1.0):
     """Per-k RESIDUAL loss weight (K,): a U-shaped low/high-k EDGE emphasis.
 
     The deployed residual head is flat mid-band but biased at the band EDGES — low-k
@@ -426,17 +436,17 @@ def edge_emphasis_k_weight(kfkms, edge_gain=3.0, lowk_extra=1.0, mid_frac=0.5):
     finite k-range. The weight is ``1 + edge_gain·g(u)`` where g(u) is a symmetric
     parabola ``(2u−1)²`` (0 at mid, 1 at both edges), PLUS an extra low-k ramp
     ``lowk_extra·(1−u)`` so the A_p-relevant low-k edge gets additional pull (A_p is
-    the priority param). ``mid_frac`` is unused historically; kept for signature
-    stability. The weight is normalized to mean 1 over finite bins so the overall
+    the priority param). The input is the GLOBAL_STATIC comoving mode grid (schema.py); the profile depends
+    only on log-k position, so it is the same for every row's velocity grid. The weight is normalized to mean 1 over finite bins so the overall
     p_resid term scale (hence its balance against term_w) is unchanged — only the
     RELATIVE per-k attention shifts. Non-finite/zero k bins get weight 1.
 
     Returns a float64 (K,) array. With edge_gain=0 and lowk_extra=0 it is all-ones
     (the uniform/back-compat case).
     """
-    k = np.asarray(kfkms, dtype=np.float64)
-    if k.ndim == 2:
-        k = k[0]
+    k = np.asarray(k_com_hmpc, dtype=np.float64)
+    if k.ndim != 1:
+        raise ValueError("per-row grid passed; pass the validated k_com_hmpc (GLOBAL_STATIC), see schema.py")
     w = np.ones_like(k)
     good = np.isfinite(k) & (k > 0)
     if good.sum() < 2 or (edge_gain == 0.0 and lowk_extra == 0.0):
@@ -671,6 +681,24 @@ def kfold_loso(sim_name, n_folds=8):
         folds.append((all_idx[~is_val], all_idx[is_val]))
     return folds
 
+def production_row_split(sim_name, *, val_seed=12345, val_frac=0.10, holdout_sim=None):
+    """The production split: a fixed random row-val fraction (early stopping only) over every row, optionally after
+    removing ONE held-out simulation entirely (the upstream-matched leave-one-simulation-out protocol of gate C).
+    Returns (train_idx, val_idx, held_idx). Without ``holdout_sim`` it is exactly the historical inline split of
+    scripts/train_production_emulator.py."""
+    sim_name = np.asarray(sim_name)
+    if holdout_sim is None:
+        avail, held = np.arange(sim_name.size), np.array([], dtype=int)
+    else:
+        held = np.where(sim_name == holdout_sim)[0]
+        if held.size == 0:
+            raise ValueError(f"holdout simulation {holdout_sim!r} is not in the cache")
+        avail = np.where(sim_name != holdout_sim)[0]
+    perm = np.random.default_rng(val_seed).permutation(avail.size)
+    n_val = int(val_frac * avail.size)
+    return np.sort(avail[perm[n_val:]]), np.sort(avail[perm[:n_val]]), held
+
+
 def tau0_edge_holdout(tau0, frac=0.15):
     """Hold out the low+high tau0 tails (the extrapolation probe in tau0-space)."""
     order = np.argsort(tau0)
@@ -680,7 +708,7 @@ def tau0_edge_holdout(tau0, frac=0.15):
     return tr, ho
 
 
-# Kim2013 central mean-flux curve (== tau0_rescale.obs_mean_tau_kim2013): the cache's
+# Kim07 central mean-flux curve (== tau0_rescale.obs_mean_tau_kim2013): the cache's
 # tau0 = alpha_factor * KIM_AMP*(1+z)^KIM_SLOPE, so alpha_factor = tau0/Kim(z) is the
 # z-INDEPENDENT ladder coordinate (the natural axis for a smooth sigma(tau0) interp).
 KIM_AMP, KIM_SLOPE = 2.3e-3, 3.65

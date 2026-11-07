@@ -32,10 +32,12 @@ Sidecar stepA_target_viz.txt: per fiducial, the exact sim + n_s, and the size of
 DLA residual (% of P1D at k~0.02, z~2.4) vs KS=0.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_stepA_target_viz.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 
 # import the package FIRST (sets jax config) before any jax import.
 import hcd_analysis.emulator  # noqa: F401
@@ -55,7 +57,7 @@ from hcd_analysis.emulator.closure_legb import (
     make_splits, TRUTH_DLA_FRAC,
 )
 
-OUT = "/home/mfho/hcd_priya/figures/analysis/05_likelihood"
+OUT = f"{_REPO_ROOT}/figures/analysis/05_likelihood"
 
 # Fiducial targets: (label, fold, target n_s) — the L1a-lo/-mid/-hi + M1 the prompt names.
 FIDUCIALS = [

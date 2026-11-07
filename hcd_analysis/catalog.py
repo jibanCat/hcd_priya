@@ -226,12 +226,16 @@ def find_systems_in_skewer(
     For systems that wrap across the periodic box boundary, pix_end >= len(tau);
     the wrap segment occupies pixels [pix_start:] and [:pix_end - len(tau) + 1].
 
+    Every system is listed once. A skewer whose gaps are all merged (or whose tau is above threshold everywhere) is one
+    system (0, n - 1), of n pixels, kept only if n >= min_pixels.
+
     Algorithm:
     1. Threshold: mark pixels where tau > tau_threshold.
     2. Use a doubled array to handle periodic boundary wrap-around.
-    3. Merge runs separated by < merge_gap_pixels.
+    3. Merge runs separated by gaps of at most merge_gap_pixels.
     4. Drop runs shorter than min_pixels.
-    5. Only return runs starting in [0, n) to avoid duplicates.
+    5. Keep the runs starting in [0, n) (the second copy repeats them), then drop the first-copy runs that a wrapping
+       run already covers (its own head, found again).
     """
     n = len(tau)
     above = tau > tau_threshold
@@ -273,7 +277,171 @@ def find_systems_in_skewer(
             break  # remaining runs are duplicates from the second copy
         if (e - s + 1) >= min_pixels:
             result.append((s, e))
+    # A run that wraps (e >= n) already holds the first copy's pixels [0, e - n]; the first-copy runs that start
+    # there are its own head, found again (the box-edge duplicate, docs/bugs_found.md). Drop them. If the wrapping run
+    # itself starts at or before e - n, every gap is merged: one system covering the whole skewer (n pixels), reported
+    # once and kept only if n >= min_pixels.
+    if result and result[-1][1] >= n:
+        head_end = result[-1][1] - n
+        if result[-1][0] > head_end:
+            result = [(s, e) for s, e in result if s > head_end]
+        else:
+            result = [(0, n - 1)] if n >= min_pixels else []
     return result
+
+
+def find_systems_in_skewer_reference(
+    tau: np.ndarray,
+    tau_threshold: float,
+    merge_gap_pixels: int,
+    min_pixels: int,
+) -> List[Tuple[int, int]]:
+    """
+    Independent implementation of find_systems_in_skewer, used to cross-check it (process_skewer_batch refuses a
+    skewer on which the two disagree) and in the tests. Same conventions and output: (pix_start, pix_end) with
+    0 <= pix_start < n and pix_end >= n for a system that wraps; a skewer whose gaps are all merged is one system
+    (0, n - 1).
+
+    Algorithm: rotate the thresholded mask so that it starts on a below-threshold pixel (no run then crosses the
+    array start), find linear runs, merge gaps <= merge_gap_pixels including the circular gap between the last and
+    the first run, drop runs shorter than min_pixels, rotate the starts back.
+    """
+    above = np.asarray(tau) > tau_threshold
+    n = above.size
+    below = np.flatnonzero(~above)
+    if below.size == n:
+        return []
+    if below.size == 0:
+        return [(0, n - 1)] if n >= min_pixels else []
+    r = int(below[0])
+    rot = np.roll(above, -r)                                    # rot[0] is below threshold
+    d = np.diff(np.concatenate([[0], rot.astype(np.int8), [0]]))
+    starts, ends = np.flatnonzero(d == 1), np.flatnonzero(d == -1) - 1
+    runs = []
+    for s, e in zip(starts.tolist(), ends.tolist()):
+        if runs and s - runs[-1][1] - 1 <= merge_gap_pixels:
+            runs[-1][1] = e
+        else:
+            runs.append([s, e])
+    wrap_gap = (n - 1 - runs[-1][1]) + runs[0][0]
+    if wrap_gap <= merge_gap_pixels:
+        if len(runs) == 1:
+            return [(0, n - 1)] if n >= min_pixels else []
+        first = runs.pop(0)
+        runs[-1][1] = first[1] + n                              # the last run continues through the array start
+    out = []
+    for s, e in runs:
+        if e - s + 1 >= min_pixels:
+            s0 = (s + r) % n
+            out.append((s0, s0 + (e - s)))
+    return sorted(out)
+
+
+class CatalogIntegrityError(ValueError):
+    """An absorber catalogue failed an integrity check (independent finders disagree, entries overlap, counts do not
+    reconcile, or a cached catalogue loaded for reuse is invalid). Nothing is written past a failed check."""
+
+
+def find_wrap_duplicates(skewer_idx, pix_start, pix_end, n: int) -> np.ndarray:
+    """Boolean mask of the entries the pre-fix finder wrote wrongly: (1) a box-edge duplicate, an entry with
+    pix_end < n whose pix_end equals pix_end_w - n of a wrapping entry w (pix_end_w >= n) on the same skewer; (2) an
+    entry spanning more than the skewer (pix_end - pix_start + 1 > n, a whole-skewer system listed twice over).
+    Read-only audit of existing catalogues (they are not rewritten); a catalogue built by the fixed finder has
+    neither."""
+    sk = np.asarray(skewer_idx, dtype=np.int64)
+    ps = np.asarray(pix_start, dtype=np.int64)
+    pe = np.asarray(pix_end, dtype=np.int64)
+    wrap = pe >= n
+    key = sk * (2 * n) + pe
+    target = sk[wrap] * (2 * n) + (pe[wrap] - n)
+    return ((~wrap) & np.isin(key, target)) | (pe - ps + 1 > n)
+
+
+def load_validated_catalog(path, n: int) -> "AbsorberCatalog":
+    """Load a cached catalogue for reuse and refuse it unless its entries are distinct systems
+    (``validate_catalog_entries`` with the skewer length ``n``) and its N_HI values pass ``check_catalog_values``. A
+    catalogue built by the pre-fix finder is refused, never re-used silently; rebuilding it is a separate decision."""
+    cat = AbsorberCatalog.load_npz(path)
+    if cat.absorbers:
+        try:
+            validate_catalog_entries([a.skewer_idx for a in cat.absorbers], [a.pix_start for a in cat.absorbers],
+                                     [a.pix_end for a in cat.absorbers], n)
+            check_catalog_values(cat)
+        except CatalogIntegrityError as e:
+            raise CatalogIntegrityError(f"{path}: cached catalogue refused ({e}); it was built before the box-edge "
+                                        f"fix (docs/bugs_found.md, bug 8) or is damaged; rebuild it") from None
+    return cat
+
+
+def _class_counts(catalog: "AbsorberCatalog"):
+    nhi = np.array([a.NHI for a in catalog.absorbers], dtype=np.float64)
+    if not np.all(np.isfinite(nhi)):
+        raise CatalogIntegrityError(f"{int(np.sum(~np.isfinite(nhi)))} absorbers with a non-finite N_HI")
+    labels = [a.absorber_class for a in catalog.absorbers]
+    by_label = {c: labels.count(c) for c in ("LLS", "subDLA", "DLA", "forest")}
+    logn = np.log10(np.maximum(nhi, 1e1))
+    by_value = {
+        "LLS": int(np.sum((logn >= LOG_NHI_LLS_MIN) & (logn < LOG_NHI_SUBDLA_MIN))),
+        "subDLA": int(np.sum((logn >= LOG_NHI_SUBDLA_MIN) & (logn < LOG_NHI_DLA_MIN))),
+        "DLA": int(np.sum(logn >= LOG_NHI_DLA_MIN)),
+        "forest": int(np.sum(logn < LOG_NHI_LLS_MIN)),
+    }
+    if by_label != by_value:
+        raise CatalogIntegrityError(f"class counts from labels {by_label} != from NHI values {by_value}")
+    return by_label, logn
+
+
+def check_catalog_values(catalog: "AbsorberCatalog") -> None:
+    """Refuse non-finite N_HI, and class labels that disagree with the classes of N_HI. Run before a catalogue is saved
+    (``build_catalog``) and when a cached one is loaded (``load_validated_catalog``). ``catalog.npz`` stores no labels:
+    ``load_npz``, like ``process_skewer_batch``, assigns them with ``classify_system``, so on every catalogue the label
+    check compares ``classify_system`` with the class thresholds (drift between the two)."""
+    _class_counts(catalog)
+
+
+def validate_catalog_entries(skewer_idx, pix_start, pix_end, n: int) -> None:
+    """Refuse a catalogue whose entries are not distinct systems: every entry must satisfy 0 <= pix_start < n and
+    pix_start <= pix_end < pix_start + n, and no two entries of one skewer may share a pixel modulo n (this catches
+    the box-edge duplicate, a head inside its own wrapping system). Independent of the finder."""
+    sk = np.asarray(skewer_idx, dtype=np.int64)
+    ps = np.asarray(pix_start, dtype=np.int64)
+    pe = np.asarray(pix_end, dtype=np.int64)
+    bad = np.flatnonzero((ps < 0) | (ps >= n) | (pe < ps) | (pe >= ps + n))
+    if bad.size:
+        i = int(bad[0])
+        raise CatalogIntegrityError(f"{bad.size} entries with impossible pixel spans, first: skewer {sk[i]} "
+                                    f"({ps[i]}, {pe[i]}), n = {n}")
+    o = np.lexsort((ps, sk))
+    s, a, b = sk[o], ps[o], pe[o]
+    lin = np.flatnonzero((s[1:] == s[:-1]) & (a[1:] <= b[:-1]))
+    if lin.size:
+        i = int(lin[0])
+        raise CatalogIntegrityError(f"{lin.size} overlapping neighbours, first on skewer {s[i]}: ({a[i]}, {b[i]}) and "
+                                    f"({a[i + 1]}, {b[i + 1]})")
+    keys = s * (2 * n) + a
+    w = np.flatnonzero(b >= n)
+    lo = np.searchsorted(keys, s[w] * (2 * n), "left")
+    hi = np.searchsorted(keys, s[w] * (2 * n) + (b[w] - n), "right")
+    hit = np.flatnonzero(hi > lo)
+    if hit.size:
+        j = int(w[hit[0]])
+        raise CatalogIntegrityError(f"{hit.size} wrapping entries overlap an entry at the start of their skewer "
+                                    f"(box-edge duplicate), first on skewer {s[j]}: ({a[j]}, {b[j]})")
+
+
+def reconcile_counts(catalog: "AbsorberCatalog", cddf_counts, cddf_edges) -> Dict[str, int]:
+    """Count the catalogue's absorbers three ways and refuse unless they agree: (1) the stored per-entry class labels,
+    (2) the classes recomputed from each entry's NHI with the class thresholds, (3) the CDDF histogram (entries inside
+    the CDDF edges). All three come from the same entries, so they guard the labels, the thresholds and the CDDF against
+    drift, not against a duplicated entry (the finder cross-check and validate_catalog_entries do that). Returns the
+    per-class counts written to meta.json."""
+    by_label, logn = _class_counts(catalog)
+    edges = np.asarray(cddf_edges, dtype=np.float64)
+    inside = int(np.sum((logn >= edges[0]) & (logn <= edges[-1])))
+    if int(np.sum(cddf_counts)) != inside:
+        raise CatalogIntegrityError(f"CDDF holds {int(np.sum(cddf_counts))} absorbers, the catalogue {inside} inside "
+                                    f"its edges [{edges[0]}, {edges[-1]}]")
+    return by_label
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +533,7 @@ def process_skewer_batch(
     fast_mode: bool,
     lls_only_above: bool = True,
     min_log_nhi: float = 17.0,
+    verify_finder: bool = True,
 ) -> List[Absorber]:
     """
     Process a batch of skewers and return all detected absorbers.
@@ -375,6 +544,9 @@ def process_skewer_batch(
     batch_start : global row index of tau_batch[0]
     lls_only_above : if True, skip skewers whose max(tau) is below the
                      LLS tau equivalent (very fast pre-filter)
+    verify_finder : if True (the default), every skewer's systems are found a second time by the independent
+                    find_systems_in_skewer_reference and the batch is refused (CatalogIntegrityError) unless the two
+                    agree exactly
     """
     merge_gap_pixels = max(1, int(merge_dv_kms / dv_kms))
     absorbers: List[Absorber] = []
@@ -398,6 +570,10 @@ def process_skewer_batch(
         systems = find_systems_in_skewer(
             tau_row, tau_threshold, merge_gap_pixels, min_pixels
         )
+        if verify_finder:
+            ref = find_systems_in_skewer_reference(tau_row, tau_threshold, merge_gap_pixels, min_pixels)
+            if systems != ref:
+                raise CatalogIntegrityError(f"skewer {global_idx}: the two system finders disagree: {systems} != {ref}")
 
         for pix_start, pix_end in systems:
             NHI, b, success = measure_nhi_for_system(
@@ -480,9 +656,11 @@ def build_catalog(
         )
         for abs_list in results:
             catalog.absorbers.extend(abs_list)
+        nbins = batches[0][2].shape[1] if batches else None
 
     else:
         n_processed = 0
+        nbins = None
         for row_start, row_end, tau_batch in iter_tau_batches(
             hdf5_path, batch_size=batch_size, n_skewers=n_skewers
         ):
@@ -494,7 +672,12 @@ def build_catalog(
             )
             catalog.absorbers.extend(batch_abs)
             n_processed += (row_end - row_start)
+            nbins = tau_batch.shape[1]
 
+    if nbins is not None and catalog.absorbers:                # refuse overlapping entries (independent of the finder)
+        validate_catalog_entries([a.skewer_idx for a in catalog.absorbers], [a.pix_start for a in catalog.absorbers],
+                                 [a.pix_end for a in catalog.absorbers], nbins)
+    check_catalog_values(catalog)                              # before any caller can save it
     elapsed = time.perf_counter() - t0
     logger.info(
         "Catalog built: %d absorbers in %.1f s (sim=%s snap=%03d z=%.2f)",

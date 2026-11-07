@@ -340,7 +340,8 @@ HCD_LLS_REALFIT_ZSLOPE = 2.127
 #   LLS    = the K1a-corrected 8-point compilation refit with gamma CONSTRAINED to the deployed
 #            z-slope 2.127 (amplitude-only GLS under the same covariance; PI decision 1c — the
 #            free-gamma fit 2.137±0.67 is the consistency evidence, recorded in the JSON), at
-#            full precision so the reproduction test is bit-level.
+#            full precision (the reproduction test pins the slope exactly and the amplitude to
+#            16 eps relative).
 #   subDLA = the Poisson GLM on the verified Zafar+2013 Table 3 >=19.0-block counts
 #            (n=(4,11,24,23,19,8), sum 89; deviance/dof 0.73 — healthy where the old
 #            wrong-object law showed chi2/dof 5.41), full precision.
@@ -354,10 +355,12 @@ HCD_LLS_REALFIT_ZSLOPE = 2.127
 # d3f1406243d01c081fedee3382bd4871b00daa194e4b4fcf5524d481b8b2721c — regenerated 2026-07-19
 # with ZERO numeric drift: the F3 refresh only renamed lit_over_sim.LLS.deployed →
 # ...pre_swap (the honest post-swap label) + fresh created/git_commit; also carried live in
-# hcd_prior_constants_payload()["derivation_json_sha256"]). Spec + decision record:
-# hcd_priya_notes/docs/superpowers/2026-07-18-corrected-law-spec.md (incl. ADDENDUM) and the
-# 2026-07-18 PI decision bundle. Tests: tests/test_lit_dndx_corrected.py (bit-level
-# reproduction, estimand regression, telescoping record), tests/test_lit_dndx{,_fits,_kernel}.py.
+# hcd_prior_constants_payload()["derivation_json_sha256"]). Spec + decision record (internal):
+# the 2026-07-18 corrected-law spec (incl. its ADDENDUM) and the 2026-07-18 PI decision bundle.
+# Tests: tests/test_lit_dndx_corrected.py (reproduction: subDLA
+# bit-level, DLA at the deployed rounding, LLS amplitude to 16 eps relative; estimand regression,
+# telescoping record),
+# tests/test_lit_dndx{,_fits,_kernel}.py.
 HCD_LIT_DNDX_LAW = {"LLS": (0.01840091965972645, 2.127),
                     "subDLA": (0.004832763139114936, 2.438007767664778),
                     "DLA": (0.0076, 1.592)}

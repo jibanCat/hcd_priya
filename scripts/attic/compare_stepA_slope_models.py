@@ -9,13 +9,15 @@ model recovers truth closest. Pick the production HCD-slope model = whichever re
 to truth with the least overshoot, per survey.
 
 Run (any env; CPU-only, no jax needed):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/compare_stepA_slope_models.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 import os
 import numpy as np
 
-REPO = "/home/mfho/hcd_priya"
+REPO = f"{_REPO_ROOT}"
 DIR_1D = f"{REPO}/checkpoints/stepA_slfix"     # 1D re-centered power-law
 DIR_2D = f"{REPO}/checkpoints/stepA_2dtilt"    # 2D amplitude×tilt + hierarchical
 MOCKS = ["D_f3", "K_f4", "XS_f6_s0", "E_f5"]   # DESI / KS / DESI+KS / eBOSS

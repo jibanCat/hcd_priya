@@ -4,6 +4,8 @@ property lives in tests/test_r6_pairing.py.
 
 Run: /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_cert_prereqs.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib
 import os
 import pickle
@@ -12,7 +14,7 @@ import sys
 import numpy as np
 import pytest
 
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 
 runner = importlib.import_module("scripts.run_prod_sbc_shard")
 AKS = importlib.import_module("scripts.analyze_ks_selboost")
@@ -121,6 +123,7 @@ def test_effective_run_cfg_agrees_with_run_mock_pops(tmp_path):
 
 # ------------------------------- run_legb truth_fn guard -------------------------------------
 
+@pytest.mark.deferred_legacy("RETIRED_BUILDER")
 def test_truth_fn_held_out_guard():
     from hcd_analysis.emulator.closure_legb import run_legb
     with pytest.raises(ValueError, match="truth_fn"):

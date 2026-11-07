@@ -17,7 +17,7 @@ post-1876a14 (by-name indexing, exact t-quantile pooling, smoke filtering) with 
     mocks; Part-2 S = max over mis-centered arms of (|mean| + 2 SE)/D_a vs 0.50; Part-3
     projection lines at the K4 coordinates.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_analyze_ks_selboost.py -q
 """
 import pickle

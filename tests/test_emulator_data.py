@@ -1,3 +1,5 @@
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import h5py, numpy as np
 from tests.emulator._fixture import write_synthetic_cache
 
@@ -141,7 +143,7 @@ def test_make_splits_holdout_disjoint_from_train_and_val(tmp_path):
 import os
 import pytest
 
-_REAL_LF_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+_REAL_LF_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 
 
 @pytest.mark.skipif(not os.path.exists(_REAL_LF_CACHE),

@@ -10,11 +10,13 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=6g
 #SBATCH --time=1:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/retrain_wider_%A_%a.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/retrain_wider_%A_%a.err
+#SBATCH --output=logs/retrain_wider_%A_%a.out
+#SBATCH --error=logs/retrain_wider_%A_%a.err
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -e
-export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=${SLURM_CPUS_PER_TASK:-4}"
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3

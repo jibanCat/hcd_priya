@@ -15,7 +15,7 @@ matplotlib. THIS ENV HAS NO getdist -> the scipy/KDE backend is wired below (aut
 DO NOT RUN until the on/off pkls have landed in both OUTDIRs. This is the STUB the analysis agent
 calls; the KDE/contour helpers are complete.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3
 Usage:
   python scripts/plot_desi_hcd_prior_sensitivity.py \
       --on-dir  /scratch/cavestru_root/cavestru1/mfho/desi_hcd_prior_on \

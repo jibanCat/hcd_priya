@@ -25,11 +25,13 @@ Pieces (LF fold-0):
      fixable coherent bias vs the irreducible CV/sampling scatter.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_ap_fisher_bias.py [--reuse]
 Writes figures + a JSON summary to figures/analysis/04_emulator/.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import json
@@ -49,10 +51,10 @@ from hcd_analysis.emulator.data import (
 )
 from hcd_analysis.emulator import train as T
 
-CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-OUT = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
-CKPT = "/home/mfho/hcd_priya/checkpoints/ap_fisher_fold0"
-CV_JSON = "/home/mfho/hcd_priya/figures/analysis/04_emulator/diag_lfhf_tilt_and_cv.json"
+CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+OUT = f"{_REPO_ROOT}/figures/analysis/04_emulator"
+CKPT = f"{_REPO_ROOT}/checkpoints/ap_fisher_fold0"
+CV_JSON = f"{_REPO_ROOT}/figures/analysis/04_emulator/diag_lfhf_tilt_and_cv.json"
 CLS = ("clean", "LLS", "subDLA", "DLA")
 PARAMS = ("ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2",
           "hireionz", "bhfeedback")
@@ -87,7 +89,7 @@ def train_or_load(d, *, fold=0, n_basis=24, epochs=180, lr=1e-3, batch=512, seed
         early_stop_metric=early_stop_metric, weight_decay=weight_decay)
     arch = {"in_dim": 10, "n_k": n_k, "n_basis": n_basis}
     T.save_checkpoint(CKPT, model, arch, norm, seed=seed,
-                      kfkms=d["kfkms"], cache_path=CACHE)
+                      cache=d, cache_path=CACHE)
     n_ep = len(history["train_loss"])
     argmin = int(np.argmin(history["val_resid_loss"]))
     print(f"[train] {n_ep} epochs (val_resid min @ ep {argmin+1}); -> {CKPT}")
@@ -309,7 +311,7 @@ def main():
                   "p_resid": args.p_resid_w, "delta": 1.0}
     k_weight = None
     if args.edge_gain != 0.0 or args.lowk_extra != 0.0:
-        k_weight = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=args.edge_gain,
+        k_weight = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=args.edge_gain,
                                           lowk_extra=args.lowk_extra)
         print(f"  k_weight edge-emphasis: min={k_weight.min():.3f} "
               f"max={k_weight.max():.3f} mean={k_weight.mean():.3f}")

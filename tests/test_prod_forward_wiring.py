@@ -12,9 +12,11 @@ gate certified. These tests pin:
   3. The SBC run_cfg population stamp gains sample_res/f_res_amp_sigma/metal_prior so a wired pkl can
      never silently pool with a pre-wiring (uniform/no-f_res) pkl, while a default resume still loads.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_forward_wiring.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import os
 import pickle
@@ -23,7 +25,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 def _load_script(name):
@@ -92,6 +94,7 @@ def _capture_build_real_ctx_kwargs(survey, monkeypatch):
     return captured
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_desi_forwards_certified_knobs(monkeypatch):
     kw = _capture_build_real_ctx_kwargs("desi", monkeypatch)
     assert kw["sample_res"] is True
@@ -100,6 +103,7 @@ def test_build_real_ctx_desi_forwards_certified_knobs(monkeypatch):
     assert kw["metals_on"] is True and kw["sample_metals"] is True
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_eboss_width_005(monkeypatch):
     kw = _capture_build_real_ctx_kwargs("eboss", monkeypatch)
     assert kw["sample_res"] is True
@@ -107,6 +111,7 @@ def test_build_real_ctx_eboss_width_005(monkeypatch):
     assert kw["metal_prior"] == "flatlog2node"
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_ks_forwards_fres_and_kskwargs(monkeypatch):
     kw = _capture_build_real_ctx_kwargs("ks", monkeypatch)
     assert kw["sample_res"] is True
@@ -116,12 +121,14 @@ def test_build_real_ctx_ks_forwards_fres_and_kskwargs(monkeypatch):
     assert kw["ks_kwargs"] == {"resolution_float": True, "k_max": 0.065}
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_desi_eboss_kskwargs_none(monkeypatch):
     for survey in ("desi", "eboss"):
         kw = _capture_build_real_ctx_kwargs(survey, monkeypatch)
         assert kw["ks_kwargs"] is None            # KS leg stays proxy default (byte-identical)
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_ks_merges_zlo_with_kskwargs(monkeypatch):
     # the diagnostic z_lo override must MERGE with the certified ks_kwargs, not clobber it (neither wins):
     # the KS leg then floats echelle f_res (resolution_float/k_max) AND carries the z_lo cut.

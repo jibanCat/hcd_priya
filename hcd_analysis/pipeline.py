@@ -29,6 +29,12 @@ Failure handling
 ----------------
 Failures are caught per (sim, snap), logged, and written to
 <output_dir>/<sim>/<snap>/error.txt. The pipeline continues.
+For a snapshot marked done: if load_validated_catalog refuses its cached
+catalogue (built before the box-edge fix, or holding a non-finite N_HI),
+CatalogIntegrityError is raised and the run stops, with nothing written for that
+snapshot and no stack for its simulation (snapshots finished earlier keep their
+outputs); if its cached outputs cannot be read, it is skipped with a WARNING (no
+error.txt) and left out of the simulation's cddf_stacked.npz.
 """
 
 from __future__ import annotations
@@ -44,7 +50,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .catalog import AbsorberCatalog, build_catalog, LOG_NHI_LLS_MIN
+from .catalog import (AbsorberCatalog, CatalogIntegrityError, build_catalog, load_validated_catalog,
+                      reconcile_counts, LOG_NHI_LLS_MIN)
 from .cddf import (
     CDDFPerturbation,
     compute_perturbed_p1d,
@@ -136,7 +143,9 @@ def run_one_snap(
     """
     Run the full analysis pipeline for one (sim, snap) pair.
 
-    Returns SnapResult on success, None on failure (error is logged and written).
+    Returns SnapResult on success, None on failure (logged; written to error.txt
+    unless the snapshot is marked done). Raises CatalogIntegrityError, writing
+    nothing, when the snapshot is marked done and its cached catalogue is refused.
     """
     sim_name = sim_snapshot.sim.name
     snap = entry.snap
@@ -163,7 +172,7 @@ def run_one_snap(
         catalog_path = out_dir / "catalog.npz"
 
         if cfg.resume and catalog_path.exists():
-            catalog = AbsorberCatalog.load_npz(catalog_path)
+            catalog = load_validated_catalog(catalog_path, int(header.nbins))     # refuses a pre-fix catalogue
             logger.info("  loaded catalog from cache (%d absorbers)", len(catalog.absorbers))
         else:
             n_skewers = cfg.p1d.n_skewers if cfg.debug else None
@@ -320,6 +329,9 @@ def _save_snap_outputs(
     dv_kms: float,
 ) -> None:
     """Save all outputs for one (sim, snap) to out_dir."""
+    # reconcile the absorber counts against the CDDF first: none of the files below is written if that fails
+    # (catalog.npz was written earlier, only after the finder, overlap and value checks of build_catalog)
+    n_absorbers = reconcile_counts(catalog, cddf_result["n_absorbers"], cddf_result["log_nhi_edges"])
 
     # P1D variants → npz
     p1d_save = {}
@@ -366,7 +378,7 @@ def _save_snap_outputs(
         "n_skewers": int(header.n_skewers),
         "box_kpc_h": float(header.box),
         "hubble": float(header.hubble),
-        "n_absorbers": {cls: len(catalog.by_class(cls)) for cls in ["LLS", "subDLA", "DLA", "forest"]},
+        "n_absorbers": n_absorbers,
         "timing_s": {k: round(v, 3) for k, v in timing.items()},
     }
     if ics_meta:
@@ -383,7 +395,7 @@ def _load_snap_result(out_dir: Path, sim_name: str, snap: int, z: float) -> Opti
         with open(meta_path) as f:
             meta = json.load(f)
 
-        catalog = AbsorberCatalog.load_npz(out_dir / "catalog.npz")
+        catalog = load_validated_catalog(out_dir / "catalog.npz", int(meta["nbins"]))   # refuses a pre-fix catalogue
 
         p1d_data = np.load(out_dir / "p1d.npz")
         p1d_variants = {}
@@ -411,6 +423,8 @@ def _load_snap_result(out_dir: Path, sim_name: str, snap: int, z: float) -> Opti
             cddf_result=cddf_result,
             timing=meta.get("timing_s", {}),
         )
+    except CatalogIntegrityError:
+        raise                                 # a refused catalogue is never reused, nor silently dropped from a stack
     except Exception as exc:
         logger.warning("Could not load cached result for snap %03d: %s", snap, exc)
         return None

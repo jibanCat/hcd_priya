@@ -23,11 +23,13 @@ NB: r_ns/r_dtau/r_aHCD are taken d/d(unit or natural param); the constant param-
 cancels in BOTH the cosine and the inflation factor (only the DIRECTION of each response matters).
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/scratch_res_corr_ns_fisher.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import functools
 print = functools.partial(print, flush=True)
 
@@ -47,7 +49,7 @@ from hcd_analysis.emulator.data import SAMPLING_LIMITS, PARAM_LIMITS, normalize_
 
 # v2 figure (the v1 path is left for the original prior check).
 FIG = "/home/mfho/hcd_priya_notes/figures/analysis/04_emulator/res_corr_fisher_v2.png"
-EMUCOH_NPZ = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"
+EMUCOH_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"
 
 # --- k_box anchor (L15 box fundamental in s/km), prompt formula --------------- #
 H0, OM, HUB = 70.0, 0.3, 0.7

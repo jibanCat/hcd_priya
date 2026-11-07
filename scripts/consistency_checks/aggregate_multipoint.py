@@ -117,7 +117,7 @@ cax = fig.add_axes([0.93, 0.15, 0.013, 0.7])
 sm = cm.ScalarMappable(norm=norm, cmap=cmap)
 sm.set_array([])
 cb = fig.colorbar(sm, cax=cax)
-cb.set_label(r"$\alpha$ (Kim 2013 slope)", fontsize=9)
+cb.set_label(r"$\alpha$ (Kim et al. 2007 slope)", fontsize=9)
 
 fig.suptitle(
     f"P_mine / P_PRIYA across {ncols} sims × {nrows} redshifts × 10 α "

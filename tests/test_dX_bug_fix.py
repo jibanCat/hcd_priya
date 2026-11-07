@@ -166,7 +166,13 @@ for a, f_val, lbl in [(ax[0], f_old, "broken code"),
 fig.suptitle(f"CDDF at z≈3, {len(records)} PRIYA sims stacked\n"
               f"dX bug fix: X_new/X_old = {X_new/X_old:.2f}")
 fig.tight_layout()
-outp = ROOT / "figures" / "analysis" / "01_catalog_obs" / "cddf_bugfix_comparison.png"
+# The tracked figure is written only when this file is run as a script; collected by pytest it writes to the temp dir
+# (gate E incident 2026-10-07: a suite run overwrote the tracked figure).
+if __name__ == "__main__":
+    outp = ROOT / "figures" / "analysis" / "01_catalog_obs" / "cddf_bugfix_comparison.png"
+else:
+    import tempfile
+    outp = Path(tempfile.gettempdir()) / "cddf_bugfix_comparison.png"
 outp.parent.mkdir(parents=True, exist_ok=True)
 fig.savefig(outp, dpi=120); plt.close(fig)
 print(f"\n  wrote {outp}")
