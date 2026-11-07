@@ -39,9 +39,9 @@ def _sha(path):
 
 
 def _forged(right):
-    """The values refused in place of a digest: a lying subclass of a WRONG digest, and the right digest as np.str_
-    and as a plain subclass (neither is an exact str)."""
-    return [Liar(WRONG), np.str_(right), type("Sub", (str,), {})(right)]
+    """The values refused in place of a digest: a lying subclass of a WRONG digest, the right digest as np.str_ and
+    as a plain subclass (neither is an exact str), and an exact str that is not 64 lowercase hex digits."""
+    return [Liar(WRONG), np.str_(right), type("Sub", (str,), {})(right), "Z" * 64]
 
 
 @pytest.fixture(scope="module")
