@@ -119,7 +119,8 @@ repository.
 
 ### Release format of the emulator (HDF5 + JSON)
 
-Released emulator members will use a pickle-free format, `hcd_priya.h5/2`: per member one HDF5 file (the network
+Emulator members are exported in a pickle-free, single-fidelity format, `hcd_priya.h5/2` (scope below; the release
+format with the multi-fidelity correction follows in a later change): per member one HDF5 file (the network
 weights as datasets named by their JAX tree paths, and the output normalizer) and one JSON sidecar (the meta and the
 file's sha256), plus the map from absorber incidence (dN/dX) to the class weights w_c, and a bundle `manifest.json`
 whose lineage block names the training cache,

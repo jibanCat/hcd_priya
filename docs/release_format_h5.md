@@ -1,8 +1,10 @@
 # Release format for emulator bundles: HDF5 + JSON (`hcd_priya.h5/2`)
 
-Status: the format for released emulator bundles, adopted subject to an independent review of its loader and a
-compatibility test with an older HDF5 library (passed locally with libhdf5 1.10.8 reading a bundle written with 2.0.0;
-not yet run in continuous integration). The trained models themselves are not distributed yet. The training
+Status: the pickle-free format for single-fidelity emulator bundles (see Scope below; the format of the released
+emulator, with the multi-fidelity correction, follows in a later change), adopted subject to an independent review of
+its loader and a compatibility test with an older HDF5 library (passed locally with libhdf5 1.10.8 reading a bundle
+written with 2.0.0; not yet run in continuous integration). The trained models themselves are not distributed yet.
+The training
 checkpoints (`.eqx` + `.norm.pkl` + `.meta.json`, written by `train.save_checkpoint`) remain the working format; a
 release converts them once (`scripts/export_safe_bundle.py`). `hcd_priya.h5/2` adds to the earlier `hcd_priya.h5/1`
 a lineage block and the map from absorber incidence (dN/dX) to the class weights w_c; an `h5/1` bundle loads only
