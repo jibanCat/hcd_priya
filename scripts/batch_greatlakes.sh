@@ -32,6 +32,8 @@ set -euo pipefail
 HCD_ROOT="$REPO"
 PYTHON="/sw/pkgs/arc/mamba/py3.11/bin/python3"
 HCD_CONFIG="${HCD_CONFIG:-${HCD_ROOT}/config/default.yaml}"
+# The 2026-05 production root below holds results but no run_settings.json, so the pipeline now refuses to run
+# into it (hcd_analysis/run_settings.py). For a new run, set OUTPUT_ROOT to a new directory.
 OUTPUT_ROOT="/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"
 
 mkdir -p "${HCD_ROOT}/logs"
@@ -69,7 +71,7 @@ case "$MODE" in
       exit 1
     fi
     echo "Array task ${SLURM_ARRAY_TASK_ID} → ${SIM_NAME}"
-    "$PYTHON" -m cli.run run-sim \
+    "$PYTHON" -m hcd_analysis.cli.run run-sim \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --set "n_workers=1" \
@@ -79,7 +81,7 @@ case "$MODE" in
     ;;
 
   run-all)
-    "$PYTHON" -m cli.run run-all \
+    "$PYTHON" -m hcd_analysis.cli.run run-all \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --n-workers "${SLURM_CPUS_PER_TASK:-4}" \
@@ -88,7 +90,7 @@ case "$MODE" in
     ;;
 
   run-sim)
-    "$PYTHON" -m cli.run run-sim \
+    "$PYTHON" -m hcd_analysis.cli.run run-sim \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --verbose \
@@ -96,7 +98,7 @@ case "$MODE" in
     ;;
 
   run-one)
-    "$PYTHON" -m cli.run run-one \
+    "$PYTHON" -m hcd_analysis.cli.run run-one \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --verbose \
@@ -104,7 +106,7 @@ case "$MODE" in
     ;;
 
   convergence)
-    "$PYTHON" -m cli.run convergence \
+    "$PYTHON" -m hcd_analysis.cli.run convergence \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --verbose \
@@ -112,7 +114,7 @@ case "$MODE" in
     ;;
 
   benchmark)
-    "$PYTHON" -m cli.run benchmark \
+    "$PYTHON" -m hcd_analysis.cli.run benchmark \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --n-sims 2 --n-snaps 3 \
@@ -121,7 +123,7 @@ case "$MODE" in
     ;;
 
   report)
-    "$PYTHON" -m cli.run report \
+    "$PYTHON" -m hcd_analysis.cli.run report \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --figures-dir "${HCD_ROOT}/figures" \

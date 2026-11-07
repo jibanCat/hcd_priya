@@ -221,7 +221,7 @@ A six-bullet primer for a first-day grad student.
        single sightline — is NB04.
 
 * **Reading suggestion before continuing.**  If anything above is
-  unfamiliar, skim §1–3 of Croft+1998 or §1–3 of Wolfe, Gawiser &
+  unfamiliar, skim §1–3 of Croft+1998 or §1–2 of Wolfe, Gawiser &
   Prochaska 2005 before you start NB01.  Both are linked from
   `notebooks/tutorials/README.md` under "Background reading".
 """),
@@ -619,9 +619,10 @@ A few things worth noting in the above:
   | DLA    | ≥ 20.3       |
 
   These boundaries are fixed across the project.  The DLA threshold
-  log NHI = 20.3 is the canonical Wolfe definition (Wolfe, Gawiser &
-  Prochaska 2005); the sub-DLA cut at 19.0 is from Péroux et al.
-  2003 (MNRAS 346, 1103, arXiv:astro-ph/0306387); the LLS lower edge
+  log NHI = 20.3 is the historical survey threshold of the Lick survey
+  (Wolfe et al. 1986, ApJS 61, 249; Wolfe, Gawiser & Prochaska 2005,
+  §1.3); the sub-DLA cut at 19.0 is from Péroux et al.
+  2003 (MNRAS 346, 1103, arXiv:astro-ph/0107045); the LLS lower edge
   at 17.2 corresponds to `τ_LL ≈ 1` (Lyman-limit optical depth of
   unity; `N_HI = 1/σ_LL ≈ 1.6 × 10¹⁷ cm⁻²`).
 """),
@@ -1018,10 +1019,9 @@ constant comoving density show up as a flat `dN/dX(z)`.  This is the
 useful property of the absorption-distance variable — any
 **evolution** seen in `dN/dX(z)` is then a real signal about the
 absorber population.  Bahcall & Peebles 1969 (ApJ 156, L7) introduced
-the underlying constant-comoving-density integral; the explicit `X(z)`
-variable in its modern form is **Tytler 1987 (ApJ 321, 49)**; Wolfe,
-Gawiser & Prochaska 2005 §3.2 (ARA&A 43, 861) is the standard modern
-review.
+the underlying constant-comoving-density integral, the absorption
+distance `X(z)`; Wolfe, Gawiser & Prochaska 2005 §2.1 (ARA&A 43, 861)
+defines `dX` with it and is the standard modern review.
 
 **Per-sightline construction (the part that bit me when I tried to
 reproduce this from scratch).**  The differential is `dz` along the
@@ -1247,8 +1247,8 @@ settled):
    continuum-placement systematics and to proximate-DLA blending;
    real surveys may *under*-count this regime, which would
    contribute to the apparent sim-over-prediction independently of
-   any sim defect.  Ho+21 and Berg+17 discuss the completeness
-   correction.
+   any sim defect.  Ho, Bird & Garnett 2021 and, for subDLAs, Berg et
+   al. 2019 (MNRAS 488, 4356; arXiv:1907.07703) discuss completeness.
 
 This is exactly the figure that `scripts/plot_cddf_vs_ho21.py` produces
 for all four redshift bins; here we do just the one corresponding to our
@@ -1299,7 +1299,9 @@ plt.show()
    at one snap and compute the median CDDF and its 16/84-percentile
    spread.  This is the within-LHS scatter at fixed redshift; visualise it.
 3. **dN/dX(z).**  For one sim, plot dN/dX (DLA) as a function of redshift
-   (snaps 4 → 23).  Compare against PRIYA papers (Bird et al. 2017).
+   (snaps 4 → 23).  Compare against the observed dN/dX of Bird, Garnett &
+   Ho 2017 (MNRAS 466, 2111; arXiv:1610.01165) and the PW09 / N12 /
+   Ho+21 tables in `docs/analysis.md`.
 
 These exercises are good warm-ups for the emulator work, where the
 inputs *are* CDDFs and dN/dX values across the whole (sim, snap)
@@ -2253,7 +2255,7 @@ but they differ on what to do with the wings:
   production mask used in `compute_p1d_priya_masked` and is what feeds
   the emulator's `no_DLA_priya` variant.  The `τ > 10⁶` trigger
   threshold corresponds to log NHI ≈ 20.3 for typical Doppler widths
-  and is the PRIYA recipe described in Bird et al. 2023 §3.3
+  and is the PRIYA recipe described in Bird et al. 2023 §2.7
   (arXiv:2306.05471).
 """),
 
