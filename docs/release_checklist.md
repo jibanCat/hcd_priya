@@ -26,11 +26,27 @@ code release (see the last section).
 - [ ] The sdist and wheel are built from a clean checkout of the release commit, with `SOURCE_DATE_EPOCH` set to the
       commit time.
 - [ ] `python tools/ci/check_dist.py dist` reports 0 problems.
+- [ ] **Blocking:** `python tools/ci/check_dist_content.py dist --release` reports 0 findings. It scans every file,
+      file name, link target and comment of the built wheel and sdist, and the sdist's tar owner fields, for private
+      filesystem paths, pointers into private notes, batch-system account directives, credentials, confidentiality
+      markers, undeclared e-mail addresses and a builder's account name, and prints where, never what. No wheel or
+      sdist is published before it passes.
+      - Build the release archives on a CI runner, or re-pack the sdist with anonymous owners: an sdist built on a
+        personal account names that account in every tar header (rule archive-owner).
+      - An e-mail address in shipped text is declared in `pyproject.toml` as an author, written with a reserved
+        example domain, or removed.
+      - CI runs the same scan against `tools/ci/dist_content_known.txt`, the known findings still to be cleaned
+        (listed by rule, file and line digest, one line per occurrence), so that CI fails on any new or stale one;
+        that list must be empty at a release. One of them, a path in the package-data file
+        `hcd_analysis/emulator/hcd_lit_dndx_corrected.json`, can only be fixed together with a re-cut of the
+        analysis lock, which needs the maintainer's separate approval.
 - [ ] The wheel installs into a fresh environment with the pinned constraints, and `hcd --help` runs.
 
 ## 4. Public content
 - [ ] The diff since the last release holds no private filesystem path, no pointer into private notes, no credential,
       no analysis-derived number from unpublished work and no real-data result that is not yet public.
+- [ ] A maintainer has read what the distribution ships for unpublished numbers and results, which no automated scan
+      recognises (the content scan of section 3 finds paths, pointers, credentials and markers only).
 
 ## 5. Review
 - [ ] Every change since the last release was reviewed by a human maintainer. AI-assisted reviews are advisory and

@@ -28,6 +28,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   - the supported, pinned environment (Linux, Python 3.11), plus newer-dependency jobs that are tested but not
     supported;
   - a check that the built wheel and source archive contain exactly the committed package;
+  - a scan of what the built wheel and source archive contain for private paths, internal pointers, credentials
+    and confidentiality markers: CI fails on a new finding, and a release needs none
+    ([`docs/release_checklist.md`](docs/release_checklist.md));
   - test tiers in which every skip must be declared;
   - an older-libhdf5 read test of the release format.
 - **Project files:** [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) (Contributor
