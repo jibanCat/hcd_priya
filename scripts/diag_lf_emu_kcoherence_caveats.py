@@ -21,7 +21,7 @@ import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 
 import hcd_analysis.emulator  # noqa: F401
 from hcd_analysis.emulator import train as T
-from hcd_analysis.emulator.data import make_splits, load_cache
+from hcd_analysis.emulator.data import make_splits, load_cache_historical
 from hcd_analysis.emulator.closure_legb import CACHE_PATH
 from scripts.build_xclass_error_vector import fold_rfrac
 
@@ -50,7 +50,7 @@ CLEAN = 0
 
 def main():
     t0 = time.time()
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/diag_lf_emu_kcoherence_caveats.py)')
     kf = np.asarray(d["kfkms"]); kcol = np.nanmedian(kf, axis=0)
     kband = (kcol >= K_LO) & (kcol <= K_HI)
     kb = kcol[kband]

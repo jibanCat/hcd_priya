@@ -30,7 +30,7 @@ import jax.numpy as jnp
 
 from hcd_analysis.emulator import inference as INF
 from hcd_analysis.emulator import closure_legb as CL
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 
 _CACHE = CL.CACHE_PATH
 _HAS_CACHE = os.path.exists(_CACHE)
@@ -66,7 +66,7 @@ _SUB_ALLZ = 0.0902         # the all-z-median subDLA (the bug)
 def test_pivot_helper_returns_z3_wc_not_allz_median():
     """closure_legb.hcd_pivot_wc_and_xbar returns the z=3 STRUCTURAL w_c (LLS≈0.189), NOT the
     all-z median (LLS≈0.274 = z≈3.6) — the load-bearing fix the callers consume."""
-    d = load_cache(_CACHE)
+    d = load_cache_historical(_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
     w_c_z3, Xbar_z3 = CL.hcd_pivot_wc_and_xbar(d)
     allz = np.nanmedian(np.asarray(d["w_c_cache"])[:, 1:], axis=0)
     assert w_c_z3[0] == pytest.approx(0.1891, abs=2e-3), f"z=3 w_c LLS {w_c_z3[0]} != ~0.189"
@@ -81,7 +81,7 @@ def test_production_path_lls_pivot_is_z3_consistent_not_allz_median():
     a z=3-consistent α_pivot(LLS) (≈ lit/sim × w_LLS(z3) ≈ 0.188 with the corrected ratio 0.995),
     NOT ≈0.291 (the all-z-median bug). This FAILS on the OLD all-z-median construction (RED) and
     PASSES on the fix. subDLA pinned the same way (its lit/sim slot is unchanged at 1.00)."""
-    d = load_cache(_CACHE)
+    d = load_cache_historical(_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
     w_c_z3, _ = CL.hcd_pivot_wc_and_xbar(d)
     mu, _ = map(np.asarray, INF.hcd_incidence_prior(jnp.asarray(w_c_z3), z=3.0, survey="DESI"))
     # LLS pivot z=3-consistent, NOT the all-z median
@@ -107,7 +107,7 @@ def test_realfit_litlaw_lls_center_is_adopted_and_roundtrips():
     INF.HCD_LIT_DNDX_LAW — plus the human-blessed 3-dp tripwire literal. Round-trips the
     lit dN/dX_LLS(z=3) to <0.2% (re-measured at the corrected laws). Distinct from the
     all-z-median bug (~0.291)."""
-    d = load_cache(_CACHE)
+    d = load_cache_historical(_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
     _, Xbar_z3 = CL.hcd_pivot_wc_and_xbar(d)
     a_lls = INF.hcd_lls_realfit_alpha_center(Xbar_z3, z=3.0, boost=1.0)
     # expected center from the DEPLOYED law dict through the deployed path (not a copy of
@@ -153,7 +153,7 @@ def test_hier_ratios_rederived_at_pivot_z():
     """The hierarchical r_sub/r_dla ratio centers (Option B) are derived at the z=3 PIVOT w_c, NOT
     the all-z-median w_c (which inherited the same bug). r_sub = w_sub(z3)/w_LLS(z3),
     r_dla = 0.10·w_DLA(z3)/w_LLS(z3). build_legb_ctx exposes them via ctx.hcd_ratio_mu."""
-    d = load_cache(_CACHE)
+    d = load_cache_historical(_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
     w_c_z3, _ = CL.hcd_pivot_wc_and_xbar(d)
     r_sub = float(w_c_z3[1] / w_c_z3[0])
     r_dla = float(INF.HCD_DLA_RESIDUAL_FRAC * w_c_z3[2] / w_c_z3[0])

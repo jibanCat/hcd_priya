@@ -5,7 +5,7 @@ import hcd_analysis.emulator  # noqa: F401
 import jax.numpy as jnp
 import pytest
 from hcd_analysis.emulator import closure_legb as CL
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from hcd_analysis.emulator.meanflux_prior import tau0_alpha_priya, kim_tau0
 
 CACHE = "hcd_analysis/_emulator_data/observables_tau0_lf.h5"
@@ -14,7 +14,7 @@ CACHE = "hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 @pytest.mark.deferred_legacy("RETIRED_BUILDER")
 @pytest.mark.parametrize("amp_t,dt_t", [(1.0, 0.0), (1.1, 0.15), (0.85, -0.25)])
 def test_priya_anchored_truth_recovers_requested_curve(amp_t, dt_t):
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='test: a cache in the pre-lineage 3.3 format')
     sims, _ = CL.held_out_sims(d, fold=0)
     t = CL.make_truth_from_sim(d, sims[0], fold=0, tau0_anchor=(amp_t, dt_t))
     assert "tau0_amp" in t and "dtau0" in t
@@ -31,7 +31,7 @@ def test_priya_anchored_truth_recovers_requested_curve(amp_t, dt_t):
 
 @pytest.mark.deferred_legacy("RETIRED_BUILDER")
 def test_default_anchor_is_priya_central():
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='test: a cache in the pre-lineage 3.3 format')
     sims, _ = CL.held_out_sims(d, fold=0)
     t = CL.make_truth_from_sim(d, sims[0], fold=0)   # default tau0_anchor="priya"
     # central PRIYA curve ≈ Kim (τ₀≈1, dτ₀≈0)

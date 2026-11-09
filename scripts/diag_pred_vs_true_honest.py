@@ -34,7 +34,7 @@ import jax.numpy as jnp
 
 from hcd_analysis.emulator import train as T
 from hcd_analysis.emulator.data import (
-    load_cache, make_splits, untransform_prediction, COARSE_NAMES,
+    load_cache_historical, make_splits, untransform_prediction, COARSE_NAMES,
 )
 
 CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
@@ -50,7 +50,7 @@ K_LOWK_CV = 0.005  # below this = the lowest, cosmic-variance-sparse modes
 
 
 def main():
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/diag_pred_vs_true_honest.py)')
     n_k = d["P_tier_p"].shape[1]
     # same split machinery the deployed run / training figure used (fold 0, 8 folds)
     tr, va, holdout = make_splits(d, fold=0, n_folds=8, holdout_frac=0.15)

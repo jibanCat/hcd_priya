@@ -21,7 +21,7 @@ import numpy as np
 sys.path.insert(0, _REPO_ROOT)
 from hcd_analysis.emulator import gate_d as GD  # noqa: E402
 from hcd_analysis.emulator import mf_modes as MM  # noqa: E402
-from hcd_analysis.emulator.data import load_cache  # noqa: E402
+from hcd_analysis.emulator.data import load_cache_historical  # noqa: E402
 
 LF = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 HR = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
@@ -72,7 +72,7 @@ def main():
     l_mf, l_lf = np.log1p(a["r_mf"]), np.log1p(a["r_lf"])
     keep = a["in_range"][:, None, :] & np.isfinite(a["r_mf"]) & np.isfinite(a["r_lf"])
     d3 = GD.d3_per_simulation(l_mf, l_lf, a["sim"], a["z"], a["k_hr"], keep)
-    lf, hr = load_cache(LF), load_cache(HR)
+    lf, hr = load_cache_historical(LF, reason='diagnostic of the historical cache (scripts/report_gate_d_review.py)'), load_cache_historical(HR, reason='diagnostic of the historical cache (scripts/report_gate_d_review.py)')
     l_rows = np.array([p[1] for p in MM.match_pairs(lf, hr)])
     assert np.allclose(np.asarray(lf["z_grid"])[l_rows], a["z"])
     rd1 = rd1_k_resolved(a, np.asarray(lf["x"])[l_rows])

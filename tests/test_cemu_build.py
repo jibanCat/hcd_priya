@@ -79,12 +79,12 @@ EVAL = external_path("HCD_EMULATOR_V2_DIR", "gateC_eval")
 def test_loo_ensemble_residuals_are_member_means_on_the_held_out_rows():
     import os
     from tests.gate_helpers import real_cache_path
-    from hcd_analysis.emulator.data import load_cache
+    from hcd_analysis.emulator.data import load_cache_historical
     if not os.path.exists(f"{EVAL}/eval_loo60_s00.npz"):
         if os.environ.get("HCD_GATE_RUN") == "1":
             pytest.fail("gate C evaluations absent")
         pytest.skip("gate C evaluations absent")
-    d = load_cache(real_cache_path("lf"))
+    d = load_cache_historical(real_cache_path("lf"), reason='test: a cache in the pre-lineage 3.3 format')
     R = CB.load_loo_ensemble_residuals(EVAL, d, sims=[0, 7])
     assert R["r"].shape == (720, 4, K) and np.all(np.isfinite(R["r"]))
     m = [np.load(f"{EVAL}/eval_loo60_s07.npz", allow_pickle=True)["res_cls"]]

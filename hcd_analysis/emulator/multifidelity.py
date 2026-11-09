@@ -79,7 +79,7 @@ _warnings.filterwarnings(
     "ignore", message="A JAX array is being set as static", category=UserWarning)
 
 from .data import (
-    load_cache, normalize_params, reconstruct_P_filt, safe_log,
+    load_cache, load_cache_historical, normalize_params, reconstruct_P_filt, safe_log,
     COARSE_NAMES, DATA_RANGE, Z_LIMITS,
 )
 from .model import Emulator

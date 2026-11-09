@@ -148,9 +148,9 @@ def build_config(verbose=False):
     Sim names are resolved here from the cache (closest held-out sim to each target n_s)."""
     import hcd_analysis.emulator  # noqa: F401  x64 BEFORE jax
     from hcd_analysis.emulator.data import PARAM_LIMITS
-    from hcd_analysis.emulator.closure_legb import held_out_sims, CACHE_PATH, load_cache
+    from hcd_analysis.emulator.closure_legb import held_out_sims, CACHE_PATH, load_cache_historical
 
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/run_stepA.py)')
     # per-fold (ns, sim) sorted by ns.
     fold_sims = {}
     for f in range(N_FOLDS):
@@ -486,7 +486,7 @@ def build_config(verbose=False):
     # MF-resolution GENERALIZATION in the inference (the integrated MF-LOSO). prior_center="truth"
     # centers the HCD α on the HR sim's own w_c → isolates the resolution from the LLS-center lever.
     from hcd_analysis.emulator import multifidelity as _MF
-    _hrn = sorted(set(s.decode() if isinstance(s, bytes) else s for s in _MF.load_cache(_MF.HR_CACHE)["sim_name"]))
+    _hrn = sorted(set(s.decode() if isinstance(s, bytes) else s for s in _MF.load_cache_historical(_MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/run_stepA.py)')["sim_name"]))
     for _hs in _hrn:
         _f = _fold_of(_hs)
         if _f is None:
@@ -662,7 +662,7 @@ def _resolve_hr_sim(d, fold_sims, PARAM_LIMITS, target_ns=0.979):
     contains the SAME sim name (so make_truth_from_sim can read its LF cache rows for the
     MF-resolution truth). Returns dict(sim, fold, n_s)."""
     from hcd_analysis.emulator import multifidelity as MF
-    hr = MF.load_cache(MF.HR_CACHE)
+    hr = MF.load_cache_historical(MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/run_stepA.py)')
     hrs = np.array([s.decode() if isinstance(s, bytes) else s for s in hr["sim_name"]])
     if "params_unit" in hr:
         pu = hr["params_unit"]
@@ -827,7 +827,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     # sim explicitly, but the SEED stream uses mock_index — so derive a STABLE mock_index from the
     # sim's position in the fold's held-out list (so all of a mock's chains share one noise draw,
     # and distinct mocks get distinct noise). This makes the seed reproducible + per-mock unique.
-    sims, _ = held_out_sims(C.load_cache(CACHE_PATH), fold=fold)
+    sims, _ = held_out_sims(C.load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/run_stepA.py)'), fold=fold)
     try:
         mock_index = sims.index(chain["sim"])
     except ValueError:

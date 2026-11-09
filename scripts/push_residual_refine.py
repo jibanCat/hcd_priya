@@ -50,7 +50,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from hcd_analysis.emulator.data import (
-    load_cache, make_splits, make_batch, cell_id, safe_log,
+    load_cache_historical, make_splits, make_batch, cell_id, safe_log,
     edge_emphasis_k_weight,
 )
 from hcd_analysis.emulator.model import (
@@ -610,7 +610,7 @@ def main():
     ap.add_argument("--tag", default="coh")
     args = ap.parse_args()
 
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/push_residual_refine.py)')
     n_k = d["P_tier_p"].shape[1]
 
     def tw(w):

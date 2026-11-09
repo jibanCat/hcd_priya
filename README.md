@@ -117,6 +117,56 @@ request the checkpoint and a cache slice from the PI (mfho@umich.edu) or open an
 issue. Please do not commit any large data or model artefacts to this code
 repository.
 
+### Release format of the emulator (HDF5 + JSON)
+
+Emulator members are exported in a pickle-free, single-fidelity format, `hcd_priya.h5/2` (scope below; the release
+format with the multi-fidelity correction follows in a later change): per member one HDF5 file (the network
+weights as datasets named by their JAX tree paths, and the output normalizer) and one JSON sidecar (the meta and the
+file's sha256), plus the map from absorber incidence (dN/dX) to the class weights w_c, and a bundle `manifest.json`
+whose lineage block names the training cache,
+its catalogues and the code. Loading builds the network from code, checks every array by name, shape and dtype,
+verifies the sha256 before the HDF5 library parses the file, refuses a bundle whose lineage it cannot establish, and
+never unpickles anything:
+
+```python
+from hcd_analysis.emulator import safe_h5
+ensemble, metas, norm = safe_h5.load_ensemble("path/to/bundle", expected_manifest_sha256="<published digest>")
+```
+
+Most users load through the public predictor instead, which wraps this call and refuses an unanchored bundle:
+
+```python
+import hcd_analysis.predictor as hp
+emu = hp.load_bundle("path/to/bundle", "<published digest>")
+```
+
+`load_bundle` serves **production** models only: every member must declare training on every simulation of its
+training cache (verified against the cache at export and acceptance), and the bundle's w_c map must be fitted on the
+whole cache. A bundle that declares fold or research members, or carries a fold map, is refused with a coded reason
+(for example `ALL_SIMS_NOT_TRUE`, `RSV_KEY:recipe.holdout_sims`, `SIM_SET:recipe.train_sims` for a simulation list
+under any key, or `WCMAP_NOT_FULL_CACHE`). Cross-validation folds
+and other **research** models travel in research bundles (`scripts/export_research_bundle.py`, which needs a
+repository checkout and refits the w_c map on the training simulations only) and load through their own explicit
+path, never as production:
+
+```python
+rp = hp.load_research_bundle("path/to/research_bundle", "<its digest>", purpose="evaluate fold 3")
+pred = rp.predict(params, 3.0, tau_eff=0.36)
+pred.flags.get("research_model", False)             # True here; production predictions carry no such key
+```
+
+Arrays returned by `hp.add_hcd` do not carry the flag: keep the `Prediction` (or its `provenance`) with them.
+
+**Scope: single fidelity.** `hcd_priya.h5/2` and the predictor serve the members of one training cache and the w_c
+map fitted to it. They apply no multi-fidelity (LF to HR) correction, so a bundle trained on the low-fidelity cache
+gives low-fidelity predictions; each prediction's labels say so (`product`, `mf_correction`). The multi-fidelity
+correction, its representation in the bundle and a release-level manifest come in a later change, which also changes
+the bundle format; until then an `hcd_priya.h5/2` bundle is not the complete release model.
+
+The files open with standard tools (`h5ls -r member.h5`). Contract and full usage: `docs/release_format_h5.md`; a
+step-by-step guide to production and research bundles, with executable examples:
+[`docs/tutorials/production_and_research_bundles.md`](docs/tutorials/production_and_research_bundles.md).
+
 Throughout the rest of this README, each stage is marked with what it needs:
 **requires the full data / Great Lakes (not in this repo)** for anything that
 builds the catalogs, the full cache, or trains the emulator; and

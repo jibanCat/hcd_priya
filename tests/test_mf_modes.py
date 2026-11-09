@@ -108,3 +108,27 @@ def test_tables_round_trip_with_k_com_labels_and_refuse_velocity_keys(tmp_path):
         MM.save_mode_mf(tmp_path / "bad.npz", dict(tables, kfkms=np.ones(K)), k_com_hmpc=k_com, provenance={})
     with pytest.raises(ValueError, match="2 pi n / L"):
         MM.save_mode_mf(tmp_path / "bad2.npz", tables, k_com_hmpc=k_com * 1.01, provenance={})
+
+
+def test_save_never_overwrites_an_existing_product(tmp_path):
+    """An MF product is written once: an existing file (or a symlink, even a dangling one) at the target is refused and
+    left byte for byte unchanged; a name without .npz is refused when the .npz that np.savez would write exists."""
+    lf, _ = _pair_caches()
+    t, _ = _separable_targets(lf, lambda zz, aa: np.full((4, K), 0.05))
+    tables = MM.fit_mode_mf(t)
+    k_com = 2 * np.pi * np.arange(1, K + 1) / 120.0
+    p = tmp_path / "mf.npz"
+    MM.save_mode_mf(p, tables, k_com_hmpc=k_com, provenance={"v": 1})
+    before = p.read_bytes()
+    with pytest.raises(FileExistsError):
+        MM.save_mode_mf(p, tables, k_com_hmpc=k_com, provenance={"v": 2})
+    with pytest.raises(FileExistsError):
+        MM.save_mode_mf(tmp_path / "mf", tables, k_com_hmpc=k_com, provenance={"v": 2})
+    assert p.read_bytes() == before and MM.load_mode_mf(p)[2] == {"v": 1}
+    link = tmp_path / "link.npz"
+    link.symlink_to(tmp_path / "nowhere.npz")
+    with pytest.raises(FileExistsError):
+        MM.save_mode_mf(link, tables, k_com_hmpc=k_com, provenance={})
+    assert not (tmp_path / "nowhere.npz").exists()
+    MM.save_mode_mf(tmp_path / "fresh", tables, k_com_hmpc=k_com, provenance={})
+    assert (tmp_path / "fresh.npz").exists() and not (tmp_path / "fresh").exists()

@@ -48,7 +48,7 @@ from numpyro.infer.util import constrain_fn
 from scipy.stats import norm as _scipy_norm
 
 from . import train as T
-from .data import load_cache, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS, sampling_unit_bounds
+from .data import load_cache, load_cache_historical, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS, sampling_unit_bounds
 from .meanflux_prior import (meanflux_tau0_prior, becker13_tau0, tau0_alpha_priya,
                              fit_tau0_alpha_priya, TAU0_AMP_RANGE, DTAU0_RANGE, TAU0_PIVOT_Z)
 from .inference import (PARAM_NAMES, hcd_incidence_prior,
@@ -64,7 +64,7 @@ from .inference import (PARAM_NAMES, hcd_incidence_prior,
                         # prior from hcd_prior_signature (JAX-specialist review 2026-07-22;
                         # the HCD_LLS_SURVEY_BOOST rebinding trap, immutable-float variant).
                         HCD_LIT_DNDX_LAW, assert_ks_mapped_pivot)
-from .dndx_wc import alpha_to_dndx_exact, w_c_corrected
+from .dndx_wc import HISTORICAL_DELTA_C, DeltaCMap, alpha_to_dndx_exact, w_c_corrected
 from .sampler_numpyro import _dla_raw_mu
 from . import data_likelihood as DL
 from . import forward as FW
@@ -523,6 +523,11 @@ class LegBCtx(NamedTuple):
     ks_dndx_ref_pivot: object = None          # (3,) reference dN/dX at z=HCD_Z_PIVOT
     ks_xbar_pivot: object = None              # scalar Xbar(z=HCD_Z_PIVOT)
     product_digests: object = None            # gate E: sha256 of every product the forward loaded (forward_stamp)
+    # the delta_c(z) map of every w_c map call of this context (a dndx_wc.DeltaCMap): None on the historical path (the
+    # historical, pre-fix map); on the release-cache path the caller's explicit map (build_legb_ctx refuses None there).
+    # Every consumer of a context that calls a w_c map (dndx_wc) must pass this field (fisher_kit.forward_inputs does).
+    # APPENDED last so positional construction does not shift.
+    delta_map: object = None
 
 
 def _kim(z):
@@ -800,7 +805,7 @@ def _survey_alpha_prior(w_c_med, Xbar_z3, survey):
     return alpha_mu, alpha_sd, survey_zslope_mu
 
 
-def _ks_dndx_reference(alpha_mu, xbar_cf, z_global):
+def _ks_dndx_reference(alpha_mu, xbar_cf, z_global, *, delta_map=None):
     """The deterministic KS dN/dX-mapped prior REFERENCE (V-A, W2 2026-07-22) — built once at
     ctx build, host-side numpy. Returns ``(dndx_ref (n_zg,3), xbar_z (n_zg,), dndx_ref_pivot
     (3,), xbar_pivot scalar)``.
@@ -826,7 +831,8 @@ def _ks_dndx_reference(alpha_mu, xbar_cf, z_global):
     assert_ks_mapped_pivot on the MAPPED pivot centre (band (0.326, 0.476)).
 
     ``alpha_mu`` is the (3,) deployed KS alpha-space prior centre (its subDLA/DLA slots are the
-    survey-agnostic centres the boost-1.0 triple reuses); ``xbar_cf`` from hcd_xbar_polyfit."""
+    survey-agnostic centres the boost-1.0 triple reuses); ``xbar_cf`` from hcd_xbar_polyfit.
+    ``delta_map``: the delta_c(z) map of both map calls (None: the historical map, ``dndx_wc``)."""
     zg = np.asarray(z_global, float)
     xbar_z = np.polyval(xbar_cf, zg)                                # (n_zg,)
     xbar_piv = float(np.polyval(xbar_cf, float(HCD_Z_PIVOT)))
@@ -845,7 +851,7 @@ def _ks_dndx_reference(alpha_mu, xbar_cf, z_global):
     alpha_ref_b1 = mu_piv[None, :] * ((1.0 + z_eval[:, None]) / (1.0 + HCD_Z_PIVOT)) ** s[None, :]
     # exact occupancy-map inverse (raises outside the simplex — the boost-1.0 triple is the
     # pinned invertible source; a raise here means the source triple drifted).
-    dndx_ref = alpha_to_dndx_exact(alpha_ref_b1, xb_eval, z_eval)   # (n_zg+1, 3)
+    dndx_ref = alpha_to_dndx_exact(alpha_ref_b1, xb_eval, z_eval, delta_map=delta_map)   # (n_zg+1, 3)
     A_lls, g_lls = HCD_LIT_DNDX_LAW["LLS"]
     boost = float(HCD_LLS_SURVEY_BOOST["KS"])
     dndx_ref[:, 0] = boost * float(A_lls) * (1.0 + z_eval) ** float(g_lls)   # dndx_premap 2.5×
@@ -853,9 +859,31 @@ def _ks_dndx_reference(alpha_mu, xbar_cf, z_global):
     dndx_ref = dndx_ref[:-1]
     # MAPPED pivot-centre guard (the map OUTPUT band; assert_ks_mapped_pivot docstring).
     a_piv = np.asarray(w_c_corrected(jnp.asarray(dndx_piv), jnp.asarray(xbar_piv),
-                                     jnp.asarray(float(HCD_Z_PIVOT))))[..., 1:]
+                                     jnp.asarray(float(HCD_Z_PIVOT)), delta_map=delta_map))[..., 1:]
     assert_ks_mapped_pivot(float(a_piv[0]), "_ks_dndx_reference mapped pivot")
     return dndx_ref, xbar_z, dndx_piv, xbar_piv
+
+
+def _check_ctx_delta_map(delta_map, historical_reason):
+    """The delta_c map rule of ``build_legb_ctx``: the historical path takes the historical map (``delta_map`` None);
+    the strict (release-cache) path needs an explicit ``DeltaCMap`` that is not the historical one."""
+    if historical_reason is not None:
+        if delta_map is not None:
+            raise ValueError("delta_map is for the release-cache (strict) path; the historical path (historical_reason "
+                             "given) uses the historical delta_c and takes no delta_map")
+        return
+    if delta_map is None:
+        raise ValueError("the release-cache (strict) path needs an explicit delta_map: the default delta_c is "
+                         "HISTORICAL_DELTA_C, fitted to the pre-fix (box-edge duplicate) counts, and must not be "
+                         "paired with a clean cache. Pass the delta_c map fitted to clean counts (for example a model "
+                         "bundle's WcMap.delta_c_map()), or give historical_reason for a historical analysis")
+    if not isinstance(delta_map, DeltaCMap):
+        raise TypeError(f"delta_map must be a dndx_wc.DeltaCMap, got {type(delta_map).__name__}")
+    if delta_map is HISTORICAL_DELTA_C or (np.shape(delta_map.coeffs) == np.shape(HISTORICAL_DELTA_C.coeffs) and
+                                           np.array_equal(np.asarray(delta_map.coeffs, dtype=np.float64),
+                                                          HISTORICAL_DELTA_C.coeffs)):
+        raise ValueError("delta_map has the coefficients of HISTORICAL_DELTA_C (fitted to the pre-fix counts); the "
+                         "release-cache path needs a map fitted to clean counts")
 
 
 def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
@@ -870,8 +898,21 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
                    metal_siII_legs=("DESI",), metal_knode_lo=1e-3, metal_knode_hi=0.1,
                    hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0,
                    hcd_2d_tilt=False, survey=None, ks_legacy_alpha_param=False,
-                   theta_unit_lo=None, theta_unit_hi=None):
+                   theta_unit_lo=None, theta_unit_hi=None, cache_path=None, historical_reason=None,
+                   delta_map=None):
     """The gate E production context (GATE_E_SPEC v1 section 2). Returns ``(LegBCtx, cache dict)``.
+
+    The training cache (``cache_path``, default ``CACHE_PATH``) is read through the strict ``data.load_cache`` unless
+    ``historical_reason`` (a non-empty string) is given, which reads it through ``load_cache_historical`` (the
+    historical analyses on the pre-lineage cache). Either way every ensemble member's recorded ``cache_sha256`` must be
+    the loaded cache's sha256, and that digest is the one the products (MF, DLA core, T1, T3) are bound to. The HCD
+    prior centres built here come from that cache (``hcd_pivot_wc_and_xbar``); they belong to the historical analysis.
+    The delta_c(z) of every w_c / alpha map call of this context: on the historical path, ``dndx_wc``'s HISTORICAL
+    coefficients, fitted to the pre-fix (box-edge duplicate) counts, and ``delta_map`` must be None. On the strict
+    (release-cache) path the caller must pass ``delta_map``, a ``dndx_wc.DeltaCMap`` fitted to clean counts (for
+    example a model bundle's ``WcMap.delta_c_map()``); None, ``HISTORICAL_DELTA_C`` or a map with its coefficients is
+    refused, so a clean cache is never paired with the pre-fix delta_c. The map is kept in ``ctx.delta_map``. The HCD
+    prior centres and guard bands of this context are the historical analysis's, whichever map is passed.
 
     The DESI + KS (+ eBOSS) legs; the LF ensemble ``ensemble_ckpts`` (schema-2.0 checkpoint prefixes; a single model is
     a one-member list); the mode-axis MF product ``mf_product`` (refused unless fitted against exactly this ensemble
@@ -895,9 +936,26 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
         raise ValueError("the KS k_max must be explicit (CACHE_KMAX and the NORC auto-cap are retired; production 0.065)")
     if not ensemble_ckpts:
         raise ValueError("ensemble_ckpts: the schema-2.0 LF checkpoint prefixes (one or more)")
+    _check_ctx_delta_map(delta_map, historical_reason)
     model, meta, norm = load_ensemble(list(ensemble_ckpts))
     pf = {k: jnp.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
     alpha_centres = None
+    # the training cache, before anything else is read: strict unless a historical reason is given, and the cache
+    # every member was trained on
+    cpath = CACHE_PATH if cache_path is None else str(cache_path)
+    if historical_reason is None:
+        d = load_cache(cpath)                                         # strict: format 3.4, lineage, eligibility
+        cache_sha = d["cache_sha256"]                                 # hashed at load
+    else:
+        d = load_cache_historical(cpath, reason=historical_reason)
+        cache_sha = T._sha256_or_none(cpath)
+    member_shas = []
+    for p in ensemble_ckpts:
+        with open(str(p) + ".meta.json") as fh:
+            member_shas.append(json.load(fh).get("cache_sha256"))
+    if any(sha != cache_sha for sha in member_shas):
+        raise ValueError(f"the ensemble members were trained on caches {sorted(set(map(str, member_shas)))}, not on "
+                         f"the cache read here ({cache_sha}, {cpath})")
 
     # ARM-D (coherent-cov, no forward float) is a DISTINCT covariance treatment from option-b (sample_res):
     # it does NOT set ctx.sample_res (no f_res site), only the loader's resolution_coherent cov mode.
@@ -927,7 +985,6 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
 
     z_global = np.unique(np.round(np.concatenate([leg.z for leg in legs]), 6))
 
-    d = load_cache(CACHE_PATH)
     k_com = np.asarray(meta["k_com_hmpc"], float)
     if not np.array_equal(k_com, np.asarray(d["k_com_hmpc"], float)):
         raise ValueError("the checkpoints' k_com_hmpc differ from the production cache's box modes")
@@ -938,11 +995,10 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     if mf_product is not None:
         mf_obj, mf_k, _ = PR.load_mf_product(
             mf_product, lf_ckpt_sha256=[T._sha256_or_none(p + ".eqx") for p in ensemble_ckpts],
-            lf_cache_sha256=T._sha256_or_none(CACHE_PATH))
+            lf_cache_sha256=cache_sha)
         if not np.allclose(mf_k, k_com, rtol=1e-14, atol=0):
             raise ValueError("the MF product's k_com_hmpc differ from the checkpoints'")
     # the DLA core at each leg's bins: a fixed function of physical k (amendment A1 rev 1 section 4).
-    cache_sha = T._sha256_or_none(CACHE_PATH)
     dla_core_leg, dla_digest = _dla_core_data_per_leg(legs, dla_core_product, cache_sha)
     rho_zb_per_leg = t1_digest = t3_per_leg = t3_digest = None
     if t1_product is not None:
@@ -989,7 +1045,7 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
                 "hcd_2d_tilt (forbidden combination, W2 2026-07-22; use "
                 "ks_legacy_alpha_param=True only for the matched legacy-comparison arm)")
         ks_ref, ks_xbar, ks_ref_piv, ks_xbar_piv = _ks_dndx_reference(
-            np.asarray(alpha_mu), hcd_xbar_polyfit(d), z_global)
+            np.asarray(alpha_mu), hcd_xbar_polyfit(d), z_global, delta_map=delta_map)
 
     # HIERARCHICAL HCD ratio-prior centers/widths (must-fix #1, the LOAD-BEARING fix). The ratio
     # centers are derived from the z=3 PIVOT sim w_c (``w_c_med`` is now the z=3 structural weight —
@@ -1053,7 +1109,7 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
         alpha_centres=alpha_centres, tau0_mu=tau0_mu, tau0_sigma=tau0_sigma,
         alpha_hcd_mu=jnp.asarray(alpha_mu), alpha_hcd_sigma=jnp.asarray(alpha_sd),
         cemu_inflate=float(cemu_inflate), mf=mf_obj, t2_per_leg=None, t3_per_leg=t3_per_leg,
-        theta_unit_lo=theta_unit_lo, theta_unit_hi=theta_unit_hi, product_digests=product_digests,
+        theta_unit_lo=theta_unit_lo, theta_unit_hi=theta_unit_hi, product_digests=product_digests, delta_map=delta_map,
         sample_metals=bool(sample_metals), sample_res=bool(sample_res),
         f_res_amp_sigma=(None if f_res_amp_sigma is None else float(f_res_amp_sigma)),
         a_siiii_max=float(a_siiii_max),
@@ -2186,14 +2242,16 @@ def _ks_dndx_sites(ctx):
                      dla_amp * ratio ** t_dla], axis=-1)           # (n_zg,3)
     dndx_z = jnp.asarray(ctx.ks_dndx_ref) * fac
     alpha_z = _simplex_tie_norm(
-        w_c_corrected(dndx_z, jnp.asarray(ctx.ks_xbar_z), zg)[..., 1:])        # (n_zg,3)
+        w_c_corrected(dndx_z, jnp.asarray(ctx.ks_xbar_z), zg,
+                      delta_map=getattr(ctx, "delta_map", None))[..., 1:])        # (n_zg,3)
     # PIVOT (z=3) deterministics through the IDENTICAL map at the exact pivot (ratio(z=3)=1, so
     # the exponent sites drop out): dndx_piv = ref_piv · [exp(eps_lls), exp(m_sub), dla_amp].
     fac_piv = jnp.stack([jnp.exp(eps_lls), jnp.exp(m_sub), dla_amp])
     dndx_piv = jnp.asarray(ctx.ks_dndx_ref_pivot) * fac_piv
     a_piv = _simplex_tie_norm(
         w_c_corrected(dndx_piv, jnp.asarray(float(ctx.ks_xbar_pivot)),
-                      jnp.asarray(float(HCD_Z_PIVOT)))[..., 1:])               # (3,)
+                      jnp.asarray(float(HCD_Z_PIVOT)),
+                      delta_map=getattr(ctx, "delta_map", None))[..., 1:])     # (3,)
     numpyro.deterministic("alpha_lls", a_piv[0])
     numpyro.deterministic("alpha_subdla", a_piv[1])
     numpyro.deterministic("alpha_dla", a_piv[2])
@@ -2515,13 +2573,14 @@ def _legb_reconstruct_deterministics(ctx, samples):
         dndx_z = jnp.asarray(ctx.ks_dndx_ref)[None, :, :] * fac
         out["alpha_hcd_z"] = _simplex_tie_norm(
             w_c_corrected(dndx_z, jnp.asarray(ctx.ks_xbar_z)[None, :],
-                          zg[None, :])[..., 1:])                     # (L, nZg, 3)
+                          zg[None, :], delta_map=getattr(ctx, "delta_map", None))[..., 1:])   # (L, nZg, 3)
         fac_piv = jnp.stack([jnp.exp(eps[:, 0]), jnp.exp(msub[:, 0]),
                              dla_amp[:, 0]], axis=-1)                # (L, 3)
         dndx_piv = jnp.asarray(ctx.ks_dndx_ref_pivot)[None, :] * fac_piv
         a_piv = _simplex_tie_norm(
             w_c_corrected(dndx_piv, jnp.asarray(float(ctx.ks_xbar_pivot)),
-                          jnp.asarray(float(HCD_Z_PIVOT)))[..., 1:])      # (L, 3)
+                          jnp.asarray(float(HCD_Z_PIVOT)),
+                          delta_map=getattr(ctx, "delta_map", None))[..., 1:])      # (L, 3)
         out["alpha_lls"] = a_piv[:, 0]
         out["alpha_subdla"] = a_piv[:, 1]
         out["alpha_dla"] = a_piv[:, 2]

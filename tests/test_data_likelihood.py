@@ -636,8 +636,8 @@ def test_mf_path_matches_gate_script_to_tight_tol():
     measured path (scripts/diag_emu_bias_allfolds_mf.py)."""
     # build the MF EXACTLY as the gate does: fold-0 frozen backbone + resolved head on the
     # real LF/HR caches, eval grid == LF native cache grid.
-    lf_cache = MFI.load_cache(_LF_CACHE)
-    hr_cache = MFI.load_cache(_HR_CACHE)
+    lf_cache = MFI.load_cache_historical(_LF_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
+    hr_cache = MFI.load_cache_historical(_HR_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
     pairs = MFI.match_hr_to_lf(lf_cache, hr_cache)
     fold_model, fold_meta, fold_norm, lf_logk = MFI.load_lf_backbone(0)
     # the FLAT pf_stats the gate uses for predict_P_filt (norm["P_filt"] sub-dict).

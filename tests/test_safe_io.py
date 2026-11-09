@@ -341,9 +341,13 @@ def test_bundle_round_trip_and_manifest_digest(bundle):
     bd, pres = bundle
     assert S.verify_manifest(bd) == pres
     sha = S.sha256_file(os.path.join(bd, "manifest.json"))
-    loaded = S.load_bundle(bd, expected_manifest_sha256=sha)
+    loaded = S.load_bundle_historical(bd, expected_manifest_sha256=sha, reason="test")
     with pytest.raises(TypeError):
-        S.load_bundle(bd)                                                    # the anchor must be passed explicitly
+        S.load_bundle_historical(bd, reason="test")                         # the anchor must be passed explicitly
+    for bad in ("", "  ", None):
+        with pytest.raises(ValueError, match="non-empty reason"):
+            S.load_bundle_historical(bd, expected_manifest_sha256=sha, reason=bad)
+    assert not hasattr(S, "load_bundle")                                     # no lineage-free release-sounding name
     assert [m["seed"] for _, m, _ in loaded] == [0, 1]
     with pytest.raises(S.SafeFormatError, match="expected digest"):
         S.verify_manifest(bd, expected_sha256="0" * 64)
@@ -379,7 +383,7 @@ def test_manifest_refuses_tampering_extras_and_symlinks(bundle, tmp_path):
     with pytest.raises(S.SafeFormatError, match="does not match the manifest"):
         S.verify_manifest(bd)
     with pytest.raises(S.SafeFormatError, match="does not match the manifest"):
-        S.load_bundle(bd, expected_manifest_sha256=None)
+        S.load_bundle_historical(bd, expected_manifest_sha256=None, reason="test")
     os.remove(pres[1] + ".safetensors")
     os.symlink(str(tmp_path / "elsewhere"), pres[1] + ".safetensors")
     with pytest.raises(S.SafeFormatError):
@@ -393,7 +397,8 @@ def test_clean_process_load(bundle, tmp_path):
     out = str(tmp_path / "clean.npy")
     code = ("import sys, numpy as np, jax; jax.config.update('jax_enable_x64', True); sys.path.insert(0, sys.argv[1]);"
             "from hcd_analysis.emulator import safe_io as S;"
-            "(m, _, _), _ = S.load_bundle(sys.argv[2], expected_manifest_sha256=sys.argv[4]); import jax.numpy as jnp;"
+            "(m, _, _), _ = S.load_bundle_historical(sys.argv[2], expected_manifest_sha256=sys.argv[4], reason='t');"
+            "import jax.numpy as jnp;"
             "o = m(jnp.linspace(0.1, 0.9, 10), 0.4); np.save(sys.argv[3], np.asarray(o['P_filt_resid']))")
     sha = S.sha256_file(os.path.join(bd, "manifest.json"))
     subprocess.run([sys.executable, "-I", "-B", "-c", code, REPO, bd, out, sha], check=True, cwd=str(tmp_path))
@@ -473,14 +478,72 @@ def test_publish_refuses_symlink_targets_and_accepts_only_our_own_inode(tmp_path
     assert os.path.islink(target) and not os.path.exists(tmp_path / "nowhere")
     real_link = os.link
 
-    def link_then_eexist(src, dst):                                          # an NFS retransmit: done, then EEXIST
-        real_link(src, dst)
+    def link_then_eexist(src, dst, **kw):                                    # an NFS retransmit: done, then EEXIST
+        real_link(src, dst, **kw)
         raise FileExistsError(dst)
     monkeypatch.setattr(os, "link", link_then_eexist)
     p = str(tmp_path / "ok.safetensors")
     S.write_safetensors(p, {"a": np.arange(3.0)})
     assert np.array_equal(S.read_safetensors(p)[0]["a"], np.arange(3.0))
     assert not [f for f in os.listdir(tmp_path) if f.startswith(".tmp_")]
+
+
+def test_publish_refuses_a_temporary_file_replaced_before_linking(tmp_path):
+    """The temporary file is written through its own descriptor; if its name is swapped (a symlink, or another file)
+    before the hard link, nothing is published and the swapped-in target is left untouched."""
+    victim = tmp_path / "victim"
+    victim.write_bytes(b"keep me")
+    for swap in ("symlink", "file"):
+        path = str(tmp_path / f"out_{swap}.safetensors")
+        tmp, held, _ = S._write_tmp(path, "", lambda fh: fh.write(b"payload"))
+        os.remove(tmp)
+        if swap == "symlink":
+            os.symlink(str(victim), tmp)
+        else:
+            open(tmp, "wb").write(b"other")                        # may reuse a freed inode number: held is open
+        with pytest.raises(S.SafeFormatError, match="replaced before publishing"):
+            S._publish(tmp, path, held)
+        assert held.closed and not os.path.lexists(path) and not os.path.lexists(tmp)
+    assert victim.read_bytes() == b"keep me"
+
+
+def test_hdf5_writer_never_reopens_the_temporary_name(tmp_path, monkeypatch):
+    import h5py
+    real = h5py.File
+
+    def only_file_objects(name, *a, **k):
+        assert not isinstance(name, (str, bytes, os.PathLike)), f"reopened by name: {name}"
+        return real(name, *a, **k)
+    monkeypatch.setattr(h5py, "File", only_file_objects)
+    S.write_table_h5(str(tmp_path / "t.h5"), {"x": np.arange(3.0)}, {"a": 1})
+    monkeypatch.setattr(h5py, "File", real)
+    assert np.array_equal(S.read_table_h5(str(tmp_path / "t.h5"), {"x": ("float64", (3,))})[0]["x"], np.arange(3.0))
+
+
+def test_json_refuses_nan_and_infinity_and_loader_refuses_non_finite_arrays(member):
+    for c in ("NaN", "Infinity", "-Infinity"):
+        with pytest.raises(S.SafeFormatError, match="not allowed"):
+            S._json_loads(f'{{"a": {c}}}'.encode(), "x.json")
+    for c in ("1e999", "-1e400"):                                 # numbers that overflow to infinity
+        with pytest.raises(S.SafeFormatError, match="not finite"):
+            S._json_loads(f'{{"a": {c}}}'.encode(), "x.json")
+    assert S._json_loads(b'{"a": 1e300}', "x.json") == {"a": 1e300}
+    with pytest.raises(S.SafeFormatError, match="non-finite"):
+        S._require_finite({"model.w": np.array([1.0, np.nan])}, "m")
+    S._require_finite({"model.w": np.array([1.0, 2.0]), "i": np.array([1, 2])}, "m")
+    prefix, _ = member                                             # the safetensors loader itself refuses a NaN
+    st, js = prefix + ".safetensors", prefix + ".json"
+    tensors, smeta = S.read_safetensors(st)
+    name = sorted(n for n in tensors if n.startswith("model"))[0]
+    tensors[name] = np.full_like(tensors[name], np.nan)
+    os.remove(st)
+    S.write_safetensors(st, tensors, metadata=smeta)
+    doc = json.load(open(js))
+    doc["safetensors_sha256"] = S.sha256_file(st)
+    os.remove(js)
+    json.dump(doc, open(js, "w"))
+    with pytest.raises(S.SafeFormatError, match="non-finite"):
+        S.load_member(prefix)
 
 
 def test_published_files_get_the_umask_mode(tmp_path):

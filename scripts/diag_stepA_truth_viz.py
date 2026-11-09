@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt
 
 import jax.numpy as jnp
 
-from hcd_analysis.emulator.data import load_cache, Z_LIMITS
+from hcd_analysis.emulator.data import load_cache_historical, Z_LIMITS
 from hcd_analysis.emulator.closure_legb import (
     CACHE_PATH, held_out_sims, make_truth_from_sim, build_legb_ctx,
 )
@@ -480,7 +480,7 @@ def main():
     import os
     os.makedirs(OUT, exist_ok=True)
     print("loading LF cache ...")
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/diag_stepA_truth_viz.py)')
 
     resolved = resolve_fiducials(d)
     m4 = resolve_m4(d)

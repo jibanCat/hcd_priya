@@ -169,6 +169,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
     ks_kw = ({**(fc.get("ks_kwargs") or {}),
               **({"z_lo": float(ks_zlo)} if ks_zlo is not None else {})}) or None
     ctx, d = build_legb_ctx(
+        historical_reason="historical analysis on the deployed cache (closure_legb.CACHE_PATH)",
         ensemble_ckpts=ens, use_xclass=True,
         with_mf=True, mf_with_floor=True,
         res_corr_on=norc["res_corr_on"],  # NORC: drop res_corr (+ auto-cap KS k<=0.045 in build_legb_ctx)

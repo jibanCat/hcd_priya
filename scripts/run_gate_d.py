@@ -61,7 +61,10 @@ def main():
     ap.add_argument("--out-dir", required=True)
     a = ap.parse_args()
     os = _os_rr
-    os.makedirs(a.out_dir, exist_ok=True)
+    try:
+        os.makedirs(a.out_dir)                    # write once: never into an existing (recorded) product directory
+    except FileExistsError:
+        sys.exit(f"refusing: --out-dir {a.out_dir} exists (gate D products are written once, never overwritten)")
     lf, hr = D.load_cache(LF), D.load_cache(HR)
     pairs = MM.match_pairs(lf, hr)
     h_rows = np.array([p[0] for p in pairs]); l_rows = np.array([p[1] for p in pairs])
@@ -142,9 +145,9 @@ def main():
     # R-D1 the genuine correction (all-6), median over rows of g in the data band, per class and z
     R["R_D1"] = {str(zz): [float(np.nanmedian(np.where(in_range[np.round(z, 1) == zz], g_all[np.round(z, 1) == zz][:, c], np.nan)))
                            for c in range(4)] for zz in np.unique(np.round(z, 1))}
-    np.savez_compressed(f"{a.out_dir}/gate_d_arrays.npz", g_all=g_all, g_measured=t["g"], r_mf=r_mf, r_lf=r_lf, r_full=r_full,
+    np.savez_compressed(open(f"{a.out_dir}/gate_d_arrays.npz", "xb"), g_all=g_all, g_measured=t["g"], r_mf=r_mf, r_lf=r_lf, r_full=r_full,
                         z=z, k_hr=k_hr, sim=t["sim"], alpha_idx=t["alpha_idx"], in_range=in_range)
-    json.dump(R, open(f"{a.out_dir}/gate_d_results.json", "w"), indent=1)
+    json.dump(R, open(f"{a.out_dir}/gate_d_results.json", "x"), indent=1)
     print(json.dumps({k: R[k] for k in ("n_pairs", "D1", "D2", "D3", "R_D2b_fully_held_out")}, indent=1))
 
 

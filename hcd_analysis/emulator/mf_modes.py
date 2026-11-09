@@ -11,6 +11,7 @@ docstring and commit a42bd5f called it a leak fix)."""
 from __future__ import annotations
 
 import json
+import os
 
 import numpy as np
 import equinox as eqx
@@ -112,7 +113,13 @@ def apply_mode_mf(tables, x, tau0):
 
 def save_mode_mf(path, tables, *, k_com_hmpc, provenance):
     """Write the correction tables labelled by the comoving modes (schema 2.0). Refuses velocity-labelled keys and any
-    k_com that is not 2 pi n / L."""
+    k_com that is not 2 pi n / L. Written once: an existing file or symlink at the target (the name np.savez would
+    write, with .npz appended if missing) is refused, never overwritten."""
+    path = os.fspath(path)
+    if not path.endswith(".npz"):
+        path += ".npz"
+    if os.path.lexists(path):
+        raise FileExistsError(f"{path} exists: an MF product is written once, never overwritten")
     bad = [k for k in tables if any(v in k for v in _VELOCITY_KEYS)]
     if bad:
         raise ValueError(f"velocity-labelled keys refused in an MF product: {bad}")
@@ -123,8 +130,9 @@ def save_mode_mf(path, tables, *, k_com_hmpc, provenance):
     for k in TABLE_KEYS:
         if k not in tables:
             raise ValueError(f"missing table {k}")
-    np.savez(path, schema_version=CHECKPOINT_SCHEMA_VERSION, k_com_hmpc=k_com,
-             provenance=json.dumps(provenance, sort_keys=True), **{k: np.asarray(tables[k]) for k in TABLE_KEYS})
+    with open(path, "xb") as fh:                                 # exclusive create: no race with the check above
+        np.savez(fh, schema_version=CHECKPOINT_SCHEMA_VERSION, k_com_hmpc=k_com,
+                 provenance=json.dumps(provenance, sort_keys=True), **{k: np.asarray(tables[k]) for k in TABLE_KEYS})
 
 
 def load_mode_mf(path):

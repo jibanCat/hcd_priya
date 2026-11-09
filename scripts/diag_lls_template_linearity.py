@@ -13,9 +13,9 @@ import numpy as np
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import hcd_analysis.emulator  # x64
-from hcd_analysis.emulator.data import load_cache, DATA_RANGE
+from hcd_analysis.emulator.data import load_cache_historical, DATA_RANGE
 
-d = load_cache("hcd_analysis/_emulator_data/observables_tau0_lf.h5")
+d = load_cache_historical("hcd_analysis/_emulator_data/observables_tau0_lf.h5", reason='diagnostic of the historical cache (scripts/diag_lls_template_linearity.py)')
 Pf = np.asarray(d["P_filt"])              # (R,4,K) [clean,LLS,subDLA,DLA] filtered
 wc = np.asarray(d["w_c_cache"])[:, 1:]    # (R,3) LLS,subDLA,DLA sightline fraction
 z  = np.asarray(d["z_grid"]); k = np.asarray(d["kfkms"])[0]   # row-0 velocity grid used as a LABEL only: rows differ with z and Omega_m (incident note 2026-10-05)
