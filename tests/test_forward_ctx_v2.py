@@ -13,6 +13,10 @@ from hcd_analysis.emulator import forward as FW
 from hcd_analysis.emulator.likelihood import gaussian_loglik
 from tests.test_forward_v2 import KCOM, _core_data, _emu, _leg, _t1
 
+# A synthetic cache digest: the product loaders take only an exact str of 64 lowercase hex digits
+# (products._exact_digests, since e8db4d8), so a placeholder such as "cache" is refused before the product is read.
+CACHE_SHA = "ca" * 32
+
 
 def _ctx(model, pf, legs, z_global, rho_per_leg=None, ac=None):
     req = {f: None for f in CL.LegBCtx._fields if f not in CL.LegBCtx._field_defaults}
@@ -95,8 +99,8 @@ def _cache_rows(zs=(3.0, 3.0, 3.2), seed=0):
 
 def test_dla_core_product_is_required_when_a_leg_forwards_the_dla_class():
     with pytest.raises(ValueError, match="DLA-core product"):
-        CL._dla_core_data_per_leg([_leg([3.0])], None, "cache")                    # DESI-like: dla_forward_frac 1
-    out, digest = CL._dla_core_data_per_leg([_leg([3.0], name="KS", dff=0.0)], None, "cache")
+        CL._dla_core_data_per_leg([_leg([3.0])], None, CACHE_SHA)                    # DESI-like: dla_forward_frac 1
+    out, digest = CL._dla_core_data_per_leg([_leg([3.0], name="KS", dff=0.0)], None, CACHE_SHA)
     assert np.all(np.asarray(out["KS"]) == 0.0) and out["KS"].shape == (9,) and digest.startswith("not used")
 
 
@@ -107,14 +111,14 @@ def test_dla_core_product_is_provenance_checked_and_matches_the_legs_z(tmp_path)
     d = _cache_rows()
     leg = _leg([3.0])
     c = CB.dla_core_leg(d["kfkms"], d["delta"][:, 2], d["z_grid"], [3.0], CB.DLA_CORE_GRID)
-    prov = dict(code_commit="x", cache_sha256="cache", inputs={}, row_rule="A1 s4", leg_z={"DESI": [3.0]})
+    prov = dict(code_commit="x", cache_sha256=CACHE_SHA, inputs={}, row_rule="A1 s4", leg_z={"DESI": [3.0]})
     path = str(tmp_path / "core.npz")
     save_product(path, "dla_core", k_com_hmpc=KCOM, provenance=prov, k_grid=CB.DLA_CORE_GRID, core_DESI=c)
-    out, digest = CL._dla_core_data_per_leg([leg], path, "cache")
+    out, digest = CL._dla_core_data_per_leg([leg], path, CACHE_SHA)
     np.testing.assert_allclose(np.asarray(out["DESI"]), PRD.dla_core_at(leg.k, CB.DLA_CORE_GRID, c), rtol=1e-13)
     assert len(digest) == 64
     with pytest.raises(ValueError, match="z"):
-        CL._dla_core_data_per_leg([_leg([3.0, 3.2])], path, "cache")      # the product's z-mean is another leg's
+        CL._dla_core_data_per_leg([_leg([3.0, 3.2])], path, CACHE_SHA)      # the product's z-mean is another leg's
     with pytest.raises(Exception):
         CL._dla_core_data_per_leg([leg], path, "another-cache")
 
@@ -124,14 +128,14 @@ def test_t1_product_maps_leg_z_to_its_cells(tmp_path):
     rng = np.random.default_rng(3)
     zc = np.round(np.arange(2.2, 4.61, 0.2), 1)
     rho = rng.uniform(0, 1e-4, (zc.size, 1, 4, 4, 172))
-    prov = dict(code_commit="x", cache_sha256="cache", inputs={}, row_rule="A1 s1")
+    prov = dict(code_commit="x", cache_sha256=CACHE_SHA, inputs={}, row_rule="A1 s1")
     path = str(tmp_path / "t1.npz")
     save_product(path, "cemu_t1", k_com_hmpc=KCOM, provenance=prov, rho=rho, z_cells=zc, alpha_centres=np.array([1.0]))
-    per_leg, ac, digest = CL._t1_per_leg(path, [_leg([2.4, 3.8])], KCOM, "cache")
+    per_leg, ac, digest = CL._t1_per_leg(path, [_leg([2.4, 3.8])], KCOM, CACHE_SHA)
     assert per_leg["DESI"].shape == (2, 4, 4, 172, 1) and np.asarray(ac).tolist() == [1.0]
     np.testing.assert_array_equal(np.asarray(per_leg["DESI"])[1, ..., 0], rho[8, 0])
     with pytest.raises(ValueError, match="cell"):
-        CL._t1_per_leg(path, [_leg([5.0])], KCOM, "cache")
+        CL._t1_per_leg(path, [_leg([5.0])], KCOM, CACHE_SHA)
 
 
 def test_t3_product_is_bound_to_the_legs_exact_bins(tmp_path):
@@ -139,15 +143,15 @@ def test_t3_product_is_bound_to_the_legs_exact_bins(tmp_path):
     leg = _leg([2.6, 3.4])
     rng = np.random.default_rng(4)
     U, w = rng.normal(0, 0.01, (leg.k.size, 3)), rng.uniform(0.5, 1, 3)
-    prov = dict(code_commit="x", cache_sha256="cache", inputs={}, row_rule="A1 s3", representation="P")
+    prov = dict(code_commit="x", cache_sha256=CACHE_SHA, inputs={}, row_rule="A1 s3", representation="P")
     path = str(tmp_path / "t3.npz")
     save_product(path, "cemu_t3", k_com_hmpc=KCOM, provenance=prov, U_DESI=U, w_DESI=w, k_DESI=leg.k, z_DESI=leg.z_row)
-    per_leg, digest = CL._t3_per_leg(path, [leg, _leg([3.0], name="eBOSS")], "cache")
+    per_leg, digest = CL._t3_per_leg(path, [leg, _leg([3.0], name="eBOSS")], CACHE_SHA)
     np.testing.assert_array_equal(np.asarray(per_leg["DESI"][0]), U)
     assert "eBOSS" not in per_leg                                       # production: no T3 on eBOSS
     moved = leg._replace(k=leg.k * 1.001)
     with pytest.raises(ValueError, match="bins"):
-        CL._t3_per_leg(path, [moved], "cache")
+        CL._t3_per_leg(path, [moved], CACHE_SHA)
 
 
 def test_t2_product_is_held_for_the_pi_ruling():
