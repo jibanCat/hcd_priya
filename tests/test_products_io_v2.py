@@ -74,7 +74,11 @@ def test_refusals_on_read(tmp_path):
         PR.load_product(old, "cemu_t1", cache_sha256=CACHE)
 
 
-@pytest.mark.parametrize("path", [GATEC_NOT_FOR_USE] + HIST)
+# Stable ids: the paths depend on the HCD_* variables, so ids built from them would differ between machines and
+# would not match the ids that tests/ci_tiers.toml declares (review B_CP03 F5).
+@pytest.mark.parametrize("path", [GATEC_NOT_FOR_USE] + HIST,
+                         ids=["gatec_error_vector_not_for_use", "hist_error_vector", "hist_error_vector_xclass",
+                              "repo_mf_cemu_floor", "hist_mf_cemu_emucoh"])
 def test_every_pre_gate_e_product_is_refused(path):
     if not os.path.exists(path):
         _unavailable(f"product absent: {path}")

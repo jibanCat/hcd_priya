@@ -2,6 +2,7 @@
 
 Set HCD_GATE_RUN=1 in a gate run: a test that needs the real caches then FAILS when they are absent instead of
 skipping, so a gate can never pass by silently not running its load-bearing tests."""
+import importlib.metadata as md
 import os
 import re
 
@@ -9,7 +10,9 @@ import pytest
 
 from hcd_analysis.paths import REPO_ROOT
 
-PROJECT_TOP = ("hcd_analysis", "scripts", "tests", "cli", "config")
+PROJECT_TOP = ("hcd_analysis", "scripts", "tests", "config")
+PACKAGE_TOP = ("hcd_analysis",)      # the top-level package the wheel installs (pyproject.toml)
+TESTS_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))   # the tree these tests belong to
 
 # deferred_legacy causes (tests/conftest.py, tests/DEFERRED.md): cause -> (exact error pattern, reason).
 DEFERRED_CAUSES = {
@@ -73,14 +76,42 @@ def require_real_cache(path):
     pytest.skip(msg)
 
 
+def installed_root():
+    """The directory hcd_analysis was imported from when an installed wheel put it there, else None (hcd_analysis was
+    imported from a checkout). Installed means: the hcd-priya distribution found on sys.path has a RECORD (only a
+    pip-installed .dist-info has one), the RECORD lists hcd_analysis/paths.py, and the distribution lives in the
+    directory paths.py was imported from (a venv, a user site, a --target directory). A checkout carrying a legacy
+    hcd_analysis.egg-info (no RECORD) and an editable install (its RECORD lists no package module) stay checkouts, so
+    the cross-checkout guard below keeps its full strength there. Tests that sit in a checkout (their tree holds the
+    package) are never in installed mode, so a stale installed copy cannot excuse a checkout's mixed origins."""
+    if os.path.isfile(os.path.join(TESTS_ROOT, "hcd_analysis", "__init__.py")):
+        return None
+    try:
+        dist = md.distribution("hcd-priya")
+    except md.PackageNotFoundError:
+        return None
+    record = dist.read_text("RECORD") or ""
+    if not any(line.split(",")[0] == "hcd_analysis/paths.py" for line in record.splitlines()):
+        return None
+    root = os.path.realpath(str(REPO_ROOT))
+    return root if os.path.realpath(str(dist.locate_file(""))) == root else None
+
+
 def foreign_project_modules(modules):
-    """Project modules (top-level package in PROJECT_TOP) whose file lies outside this checkout."""
-    root = str(REPO_ROOT)
+    """Project modules (top-level package in PROJECT_TOP) whose file lies outside the code under test.
+
+    From a checkout, every project module must come from the tree these tests belong to. Against an installed wheel
+    (hcd_analysis imported from this interpreter's site-packages), the installed packages (PACKAGE_TOP) must come from
+    that site-packages and the repository modules (tests, scripts, config) from the tests' tree. Both sides of each
+    comparison are resolved, so a symlinked path (a venv's lib64, a linked checkout) is neither foreign nor hidden."""
+    site = installed_root()
     foreign = []
     for name, mod in list(modules.items()):
-        if name.split(".")[0] not in PROJECT_TOP:
+        top = name.split(".")[0]
+        if top not in PROJECT_TOP:
             continue
         f = getattr(mod, "__file__", None)
-        if f and not os.path.abspath(f).startswith(root + os.sep):
+        root = site if site is not None and top in PACKAGE_TOP else TESTS_ROOT
+        if f and not os.path.realpath(f).startswith(root + os.sep):
             foreign.append(f"{name}: {f}")
     return foreign

@@ -75,7 +75,7 @@ and the compensating `* 1e5` factors in `fit_nhi_from_tau`'s initial guess (line
 
 **Impact**. For a single-DLA sightline the two behaviours are identical (the damping wing is already contiguous around the peak). For sightlines with two DLAs, or a DLA plus an unrelated saturated LLS, the old behaviour masked both; the new one masks only the brightest. For sightlines with bright forest structure, the old behaviour erroneously masked forest pixels; the new one does not.
 
-**Measured effect on P1D**. At snap 017, `p1d_no_DLA_priya / p1d_all` ≈ 0.999 across the emulator k range — too close to 1 to diagnose the difference between the two variants without a dedicated A/B test. The original contiguity argument in the PRIYA paper (arXiv:2306.05471 §3.3) is physically reasonable (the mask should correspond to the wings of a single identified DLA), so the patch is probably correct in direction; the question is whether stopping at the first τ dip loses legitimate wing pixels when the profile has brief under-threshold notches.
+**Measured effect on P1D**. At snap 017, `p1d_no_DLA_priya / p1d_all` ≈ 0.999 across the emulator k range — too close to 1 to diagnose the difference between the two variants without a dedicated A/B test. The original contiguity argument in the PRIYA paper (arXiv:2306.05471 §2.7) is physically reasonable (the mask should correspond to the wings of a single identified DLA), so the patch is probably correct in direction; the question is whether stopping at the first τ dip loses legitimate wing pixels when the profile has brief under-threshold notches.
 
 **Status**. Not committed. Re-run an A/B comparison once the Phase B per-class mask is in place and decide whether to keep the contiguity restriction.
 
