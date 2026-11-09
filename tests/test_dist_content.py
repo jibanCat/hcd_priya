@@ -47,7 +47,7 @@ BAD = {
 }
 # Ordinary code and text that must not be flagged.
 GOOD = ["x = P @ np.linalg.inv(C)", "@dataclasses.dataclass", "base = 'lyaemu/data/kodiaq_squad/'",
-        "cache = '~/.cache/hcd_priya'", "os.path.join(home, 'x')", "see PU-0123 and GATE_E_SPEC section 2",
+        "cache = '~/.cache/hcd_" + "priya'", "os.path.join(home, 'x')", "see PU-0123 and GATE_E_SPEC section 2",
         "the confidence interval", "relative/home/path", f"maintainer: {AUTHOR}", "a@b", "arr @ w.T",
         "for internal use only", "token = tokens[i]", "n_tokens = 128", "SCHEMA = 'hcd_priya.registry/1'",
         "url = 'https://host.xx/project/a'", "user" + "@" + "example.com", "git" + "@" + "github.com:org/repo.git",
