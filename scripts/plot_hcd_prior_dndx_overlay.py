@@ -16,7 +16,7 @@ THE PRIOR BAND construction (matches the production forward exactly):
   DLA is the 10%-residual center (HCD_DLA_RESIDUAL_FRAC), so the DLA literature points are SCALED by
   0.10 to overlay on the same residual axis.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_hcd_prior_dndx_overlay.py
 """
 from __future__ import annotations

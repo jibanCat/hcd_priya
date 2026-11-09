@@ -21,9 +21,11 @@ For every config: pooled n_s + A_p EMU bias over the SAME 60 honestly-held-out s
 folds, each fold's own held-out emulator final_fold{f}), with bootstrap95% CI, t, signs, and
 a cheap KS-vs-DESI split (per-leg Fisher MAP shift, with the full posterior covariance).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_nsbias_kscut_scan.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import gc
 import numpy as np
 from pathlib import Path
@@ -63,7 +65,7 @@ def _load_emu_bias_one_sim():
 
 emu_bias_one_sim = _load_emu_bias_one_sim()
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 FIGDIR = f"{REPO}/figures/analysis/04_emulator"
 RESULTS = f"{FIGDIR}/nsbias_kscut_scan.txt"
 NPZ = f"{FIGDIR}/nsbias_kscut_scan.npz"

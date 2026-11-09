@@ -24,11 +24,13 @@ DECOMPOSITION of δ (exact algebra, all in logP units unless whitened):
   (f) CV floor per (z,k) from diag_lfhf_tilt_and_cv.json (irreducible).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_residual_decomposition.py
         [--reuse] [--folds N] [--nbasis-test]   (writes figures + JSON to 04_emulator)
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 
 import argparse
 import json
@@ -47,8 +49,8 @@ from hcd_analysis.emulator.data import (
 )
 from hcd_analysis.emulator import train as T
 
-CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-OUT = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
+CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+OUT = f"{_REPO_ROOT}/figures/analysis/04_emulator"
 CV_JSON = f"{OUT}/diag_lfhf_tilt_and_cv.json"
 CLS = ("clean", "LLS", "subDLA", "DLA")
 PARAMS = ("ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2",
@@ -72,7 +74,7 @@ DEPLOYED = dict(n_basis=24, epochs=180, lr=1e-3, batch=512, patience=25,
 # Train / load one fold at the deployed config.
 # --------------------------------------------------------------------------- #
 def train_or_load_fold(d, fold, n_k, *, n_basis=24, reuse=True, tag="decomp"):
-    ckpt = f"/home/mfho/hcd_priya/checkpoints/{tag}_nb{n_basis}_fold{fold}"
+    ckpt = f"{_REPO_ROOT}/checkpoints/{tag}_nb{n_basis}_fold{fold}"
     tr, va, ho = make_splits(d, fold, n_folds=8, holdout_frac=0.15)
     if reuse and Path(ckpt + ".eqx").exists():
         model, meta, norm = T.load_checkpoint(ckpt)

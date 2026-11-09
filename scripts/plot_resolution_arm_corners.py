@@ -9,7 +9,7 @@ dumps into tau0). A second panel shows per-arm |Delta|+2SE (n_s, A_p) and sigma(
 Arms: a = option-a (res in cov, no float); b = option-b TIGHT N(0,0.02); c = option-b WIDE N(0,0.05);
 d = arm-D (coherent cross-z cov). Gate = |mean Delta_bias|+2SE < 0.30 sigma_post on n_s AND A_p.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu ... python3 this.py
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu ... python3 this.py
 """
 import glob, os, pickle
 import numpy as np

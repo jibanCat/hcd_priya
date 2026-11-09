@@ -72,7 +72,7 @@ class Ctx(eqx.Module):
 
 
 def ctx_kim(z):
-    """Kim2013 central mean-flux τ₀(z) = KIM_AMP·(1+z)^KIM_SLOPE — the curve the cache's
+    """Kim07 central mean-flux τ₀(z) = KIM_AMP·(1+z)^KIM_SLOPE — the curve the cache's
     τ₀ ladder is anchored to, so α = τ₀/Kim(z) is the z-isotropic ladder coordinate."""
     return KIM_AMP * (1.0 + jnp.asarray(z)) ** KIM_SLOPE
 

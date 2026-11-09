@@ -147,11 +147,11 @@ print(f"  filter took {time.time()-t0:.1f}s; new max(tau) = {tau_native.max():.4
 
 
 # =============================================== 4. Target mean flux per PRIYA
-print("\n=== 4. PRIYA's mean_flux_desired (Kim 2013 obs_mean_tau) ===")
-tau_obs_kim = obs_mean_tau(priya_z)         # = 0.0023 * (1+z)^3.65 (Kim 2013 / 0711.1862)
+print("\n=== 4. PRIYA's mean_flux_desired (Kim et al. 2007 obs_mean_tau) ===")
+tau_obs_kim = obs_mean_tau(priya_z)         # = 0.0023 * (1+z)^3.65 (Kim et al. 2007 / 0711.1862)
 target_tau = priya_alpha * tau_obs_kim       # PRIYA convention: alpha is multiplier on Kim
 mean_flux_desired = np.exp(-target_tau)
-print(f"  obs_mean_tau(z={priya_z}) [Kim 2013] = {tau_obs_kim:.6f}")
+print(f"  obs_mean_tau(z={priya_z}) [Kim et al. 2007] = {tau_obs_kim:.6f}")
 print(f"  target_tau    = alpha * obs_mean_tau = {target_tau:.6f}")
 print(f"  target <F>    = exp(-target_tau) = {mean_flux_desired:.6f}")
 print(f"  measured <F>α=1     (pre-filter)  = {mean_F_pre:.6f}")

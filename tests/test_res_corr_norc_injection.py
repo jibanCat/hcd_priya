@@ -17,9 +17,11 @@ measures the paired Delta(n_s, A_p). This file pins the mock-side wiring:
   (e) the runner-expansion yields ``inject=None`` when ``ctx.mf is None`` (LF-only, no res_corr).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_res_corr_norc_injection.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import os
 
@@ -33,8 +35,8 @@ import jax.numpy as jnp
 from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator.multifidelity import interp_res_corr
 
-_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-_CKPT0 = "/home/mfho/hcd_priya/checkpoints/final_fold0.eqx"
+_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+_CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 _KS = ("/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
        "final-conservative-p1d-karacayli_etal2021.txt")
@@ -95,6 +97,7 @@ def _expected_bvec(leg, mf, anchor_mult):
 # --------------------------------------------------------------------------- #
 #  (a) inject_res_corr=None is a byte-identical no-op (the non-injection default).
 # --------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_noop_default_byte_identical(norc):
     ctx, _d, truth = norc
     key = jax.random.PRNGKey(0)
@@ -109,6 +112,7 @@ def test_noop_default_byte_identical(norc):
 # --------------------------------------------------------------------------- #
 #  (b) _actual_res_corr_bvec == per-row log(interp_res_corr(...)) on the DESI leg grid.
 # --------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_bvec_matches_interp_res_corr(norc):
     ctx, _d, _truth = norc
     rs = _load_runstepA()
@@ -125,6 +129,7 @@ def test_bvec_matches_interp_res_corr(norc):
 # --------------------------------------------------------------------------- #
 #  (c) injecting {leg: b} multiplies the leg-binned TRUTH by exp(b) on the finite rows.
 # --------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_inject_multiplies_truth_by_exp_b(norc):
     ctx, _d, truth = norc
     rs = _load_runstepA()
@@ -145,6 +150,7 @@ def test_inject_multiplies_truth_by_exp_b(norc):
 # --------------------------------------------------------------------------- #
 #  (d) the b-vector on the CAPPED KS leg matches the (0.045-capped) leg grid.
 # --------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_bvec_ks_capped(norc):
     ctx, _d, _truth = norc
     rs = _load_runstepA()

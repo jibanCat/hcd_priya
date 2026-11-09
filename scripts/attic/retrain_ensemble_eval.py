@@ -11,9 +11,11 @@ Loads the saved single-member checkpoints checkpoints/retrain/ens_baseline_fold{
 Ensemble pred path == predict.predict_P_filt with an EnsembleEmulator (mean of post-exp
 P_filt over members), the SAME definition production uses.
 
-ENV: PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3
+ENV: PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 import json
 from pathlib import Path
 import numpy as np
@@ -25,7 +27,7 @@ from hcd_analysis.emulator.data import load_cache, datarange_mask, make_splits
 from hcd_analysis.emulator.predict import predict_P_filt
 
 CLASSES = ["clean", "LLS", "subDLA", "DLA"]
-REPO = "/home/mfho/hcd_priya"
+REPO = f"{_REPO_ROOT}"
 CK = f"{REPO}/checkpoints/retrain"
 
 

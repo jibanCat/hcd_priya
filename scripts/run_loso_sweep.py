@@ -5,16 +5,19 @@ Runs the full LOSO cross-validation sweep over the merged v3.3 cache, training o
 emulator per fold (REUSING ``hcd_analysis.emulator.train.train_fold``), collecting
 per-fold fractional P1D residuals stratified into (class, k, z-band) cells, then
 aggregates them into the σ error vector + DLA high-k shot-noise flag that feeds the
-likelihood covariance (``aggregate_error_vector``). Emits ``error_vector.npz`` and
+likelihood covariance (``aggregate_error_vector``). Emits ``<out>.error_vector.npz`` (with provenance;
+refuses to overwrite) and
 three review figures.
 
 Does NOT modify any ``hcd_analysis/emulator/*.py`` (other work reads them).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_loso_sweep.py [args]
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import time
@@ -30,7 +33,7 @@ from hcd_analysis.emulator.data import (
 )
 from hcd_analysis.emulator import train as T
 
-DEFAULT_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+DEFAULT_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 
 # FINALIZED LF emulator recipe (the two productionized wins + the residual tuning
 # from commit 73009c5): deep frozen θ-blind baseline, term_w[p_resid]=8, edge
@@ -41,6 +44,12 @@ FINAL_RECIPE = dict(
     w_coh=80.0, weight_decay=3e-4, datarange=True,
     epochs=180, patience=25, lr=1e-3, batch=512,
 )
+
+
+def error_vector_path(out):
+    """This sweep's error vector, next to its checkpoints (``<out>_fold{f}``): ``<out>.error_vector.npz``. Never a
+    shared ``<out parent>/error_vector.npz`` (gate C: four sweeps overwrote one such file, PU-0056)."""
+    return Path(f"{out}.error_vector.npz")
 
 
 # --- z-band scheme ------------------------------------------------------------
@@ -243,11 +252,11 @@ def fig_perfold_convergence(histories, figdir,
     return str(p)
 
 
-def fig_error_vs_k(sigma, kfkms, z_band_edges, figdir):
+def fig_error_vs_k(sigma, k_com_hmpc, z_band_edges, figdir):
     """σ error vector vs k, one line per class, one panel per z-band, log-log."""
     plt = _plt()
     n_cls, K, Zb = sigma.shape
-    k = np.asarray(kfkms)
+    k = np.asarray(k_com_hmpc)
     fig, axes = plt.subplots(1, Zb, figsize=(4.2 * Zb, 4.2), sharey=True,
                              squeeze=False)
     axes = axes[0]
@@ -259,7 +268,7 @@ def fig_error_vs_k(sigma, kfkms, z_band_edges, figdir):
             ok = np.isfinite(s) & (s > 0)
             if ok.any():
                 ax.loglog(k[ok], s[ok], "-o", ms=2.5, color=f"C{ci}", label=cname)
-        ax.set_xlabel("k [s/km]")
+        ax.set_xlabel("comoving k [h/Mpc] (box mode; s/km depends on z, theta)")
         ax.set_title(f"z-band {zb}  [{lo:.2f}, {hi:.2f})")
         ax.grid(alpha=0.3, which="both")
         if zb == 0:
@@ -271,9 +280,9 @@ def fig_error_vs_k(sigma, kfkms, z_band_edges, figdir):
     return str(p)
 
 
-def fig_dla_shotflag(dla_shot_flag, kfkms, figdir):
+def fig_dla_shotflag(dla_shot_flag, k_com_hmpc, figdir):
     plt = _plt()
-    k = np.asarray(kfkms)
+    k = np.asarray(k_com_hmpc)
     flag = np.asarray(dla_shot_flag).astype(int)
     fig, ax = plt.subplots(figsize=(8, 3.2))
     ax.bar(np.arange(len(k)), flag, width=1.0, color="C3", alpha=0.85)
@@ -333,6 +342,10 @@ def main():
         print(f"[SMOKE] n_folds={args.n_folds} epochs={args.epochs} "
               f"batch={args.batch} n_basis={args.n_basis} z_bands={args.z_bands}")
 
+    out_npz = error_vector_path(args.out)
+    if out_npz.exists():
+        raise SystemExit(f"refusing to overwrite the error vector {out_npz} (another sweep's product); choose a new --out")
+
     datarange = not args.no_datarange
     term_w = None
     if args.p_resid_w != 1.0:
@@ -346,12 +359,7 @@ def main():
     t0 = time.time()
     d = load_cache(args.cache)
     n_k = d["P_tier_p"].shape[1]
-    # Representative k-grid for labelling the error vector + figures. kfkms is NOT
-    # identical across rows (per-snap vmax differs; max dev ~3% LF / ~9% HR at high
-    # k). Training/residuals use each row's OWN grid per-index; only this saved label
-    # is row-0's grid, so downstream likelihood must treat error_vector["kfkms"] as a
-    # representative grid, not exact per-mode k. (Review I2.)
-    kgrid = d["kfkms"][0]                                  # representative k-grid (n_k,)
+    k_com = d["k_com_hmpc"]                 # validated comoving modes (schema.py); never a row's velocity grid
     print(f"loaded cache {args.cache}: {d['P_tier_p'].shape[0]} rows, n_k={n_k}, "
           f"{len(set(d['sim_name']))} sims ({time.time()-t0:.1f}s)")
 
@@ -360,7 +368,7 @@ def main():
     from hcd_analysis.emulator.data import edge_emphasis_k_weight
     k_weight = None
     if args.edge_gain != 0.0 or args.lowk_extra != 0.0:
-        k_weight = edge_emphasis_k_weight(kgrid, edge_gain=args.edge_gain,
+        k_weight = edge_emphasis_k_weight(k_com, edge_gain=args.edge_gain,
                                           lowk_extra=args.lowk_extra)
     print(f"recipe: n_basis={args.n_basis} p_resid_w={args.p_resid_w} "
           f"edge_gain={args.edge_gain} lowk_extra={args.lowk_extra} "
@@ -421,7 +429,7 @@ def main():
         arch_cfg = {"in_dim": 10, "n_k": n_k, "n_basis": args.n_basis}
         ckpt = f"{args.out}_fold{fold}"
         T.save_checkpoint(ckpt, model, arch_cfg, norm_stats, seed=args.seed,
-                          kfkms=d["kfkms"], cache_path=args.cache, recipe=recipe)
+                          cache=d, cache_path=args.cache, recipe=recipe)
         print(f"  checkpoint -> {ckpt}.eqx / .meta.json / .norm.pkl")
 
         # SAVE per-fold per-epoch history (+ per-term metrics) to disk for the
@@ -465,23 +473,30 @@ def main():
     dla_shot_flag = ev["dla_shot_flag"]       # (K,)
     sigma_zonly = np.sqrt(np.nanmean(sigma ** 2, axis=3))   # (4,K,Zb) τ₀-marginalized
 
-    out_npz = Path(args.out).parent / "error_vector.npz"
-    np.savez(
+    import json as _json
+    from hcd_analysis.emulator.error_vector_io import save_error_vector
+    provenance = _json.dumps(dict(
+        ckpt_prefix=str(args.out), seed=args.seed, n_folds=args.n_folds, cache_path=str(args.cache),
+        cache_sha256=T._sha256_or_none(args.cache), code_commit=T._git_sha()))
+    if out_npz.exists():                       # appeared while this sweep was training
+        raise SystemExit(f"refusing to overwrite the error vector {out_npz}")
+    save_error_vector(
         out_npz,
         sigma=sigma,                          # (4,K,Zb,Tb) — the τ₀-aware vector
         dla_shot_flag=dla_shot_flag,
         z_band_edges=z_band_edges,
         tau0_band_centres=tau0_band_centres,  # (Tb,) α=τ₀/Kim(z) band centres
         class_names=np.array(COARSE_NAMES),
-        kfkms=kgrid,
+        k_com_hmpc=k_com,
+        provenance=np.array(provenance),      # JSON: checkpoint prefix, seed, folds, cache sha256, code commit
     )
     print(f"\nerror vector -> {out_npz}  (sigma shape {sigma.shape})")
 
     # --- figures --------------------------------------------------------------
     fp_loss = fig_loss_curves(histories, args.figdir)
     fp_conv = fig_perfold_convergence(histories, args.figdir)
-    fp_evk = fig_error_vs_k(sigma_zonly, kgrid, z_band_edges, args.figdir)
-    fp_flag = fig_dla_shotflag(dla_shot_flag, kgrid, args.figdir)
+    fp_evk = fig_error_vs_k(sigma_zonly, k_com, z_band_edges, args.figdir)
+    fp_flag = fig_dla_shotflag(dla_shot_flag, k_com, args.figdir)
     print("figures:")
     for p in (fp_loss, fp_conv, fp_evk, fp_flag):
         print("  ", p)
@@ -500,7 +515,7 @@ def main():
         med = float(np.nanmedian(sigma[ci]))
         print(f"  {cname}: median σ = {med:.4g}")
     n_flag = int(np.asarray(dla_shot_flag).sum())
-    print(f"DLA shot-flagged k-bins: {n_flag}/{len(kgrid)}")
+    print(f"DLA shot-flagged k-bins: {n_flag}/{len(k_com)}")
     print(f"total wall: {total_wall:.1f}s "
           f"({total_wall/max(args.n_folds,1):.1f}s/fold)")
 

@@ -19,9 +19,11 @@ What this run produces:
   - combined readout appended to nsbias_kscut_scan.txt
   - regenerated nsbias_kscut_scan.png / .npz with the full z series {2.0,2.1,2.3,2.4,2.6,2.8}
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_nsbias_kscut_scan_2426.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import gc
 import os
 import numpy as np
@@ -39,7 +41,7 @@ from hcd_analysis.emulator.inference import PARAM_NAMES, HCD_Z_PIVOT
 NS_I = int(np.where(np.array(PARAM_NAMES) == "ns")[0][0])
 AP_I = int(np.where(np.array(PARAM_NAMES) == "Ap")[0][0])
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 FIGDIR = f"{REPO}/figures/analysis/04_emulator"
 RESULTS = f"{FIGDIR}/nsbias_kscut_scan.txt"
 NPZ = f"{FIGDIR}/nsbias_kscut_scan.npz"

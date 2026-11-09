@@ -44,7 +44,7 @@ Cross-campaign constants: seed 20260615, NUTS 250/300, max_tree_depth 10, dense 
 (pilot-gated per Sec 7 before any array). SMOKE writes a .smoke-suffixed pkl the analyzer can
 never pool (F6a convention).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import argparse, functools, os, pickle, time
 import numpy as np

@@ -36,14 +36,15 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8g
 #SBATCH --time=24:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/stepA_cosmo_2dtilt_%A_%a.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/stepA_cosmo_2dtilt_%A_%a.err
+#SBATCH --output=logs/stepA_cosmo_2dtilt_%A_%a.out
+#SBATCH --error=logs/stepA_cosmo_2dtilt_%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 
-REPO=/home/mfho/hcd_priya
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
 export STEPA_CKPT_DIR=$REPO/checkpoints/stepA_2dtilt
 mkdir -p "$STEPA_CKPT_DIR" "$REPO/logs"

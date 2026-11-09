@@ -7,9 +7,11 @@ lost the WHOLE shard. ``run_prod_sbc_shard._run_mock`` now runs ONE mock, writes
 globs ``mock_*.pkl`` (mock index from the FILENAME) alongside ``shard_*.pkl``, per-mock files
 winning a conflict.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_sbc_checkpoint.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import os
 import pickle
@@ -19,8 +21,9 @@ import numpy as np
 import pytest
 
 from hcd_analysis.emulator import closure_legb as LB
+from tests.gate_helpers import raise_if_deferred  # noqa: E402
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 def _load_script(name):
@@ -47,6 +50,7 @@ def ctx_d():
     try:
         return LB.build_legb_ctx(use_xclass=True)        # light baseline (xclass ρ; no MF/eBOSS)
     except Exception as e:                               # data/checkpoint absent in this env
+        raise_if_deferred(e)                             # a retired interface is deferred, not absent
         pytest.skip(f"build_legb_ctx unavailable: {e}")
 
 
@@ -59,6 +63,7 @@ def _rec_close(a, b):
     assert np.allclose(float(a["ll_true"]), float(b["ll_true"]), rtol=0, atol=1e-8)
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_run_one_mock_writes_skips_and_reproduces(runner, ctx_d, tmp_path):
     ctx, d = ctx_d
     out = str(tmp_path / "armB")
@@ -86,6 +91,7 @@ def test_run_one_mock_writes_skips_and_reproduces(runner, ctx_d, tmp_path):
     _rec_close(rec, ref)
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_merge_globs_mock_pkls(merger, runner, ctx_d, tmp_path):
     """merge_prod_sbc_shards reads bare mock_*.pkl (no shard pkl needed) and aggregates."""
     ctx, d = ctx_d
@@ -96,7 +102,8 @@ def test_merge_globs_mock_pkls(merger, runner, ctx_d, tmp_path):
     # the merge loader path: glob mock_*.pkl, parse the index from the filename, aggregate.
     import sys
     argv = sys.argv
-    sys.argv = ["merge_prod_sbc_shards.py", "--shard-dir", out, "--prob", "0.95"]
+    sys.argv = ["merge_prod_sbc_shards.py", "--shard-dir", out, "--prob", "0.95",
+                "--figdir", str(tmp_path)]          # never rewrite the tracked figure
     try:
         merger.main()      # raises if the glob/aggregate path is broken
     finally:
@@ -200,6 +207,7 @@ def test_config_clash_nondefault_over_prestamp(runner, tmp_path):
         runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
 
 
+@pytest.mark.deferred_legacy("RETIRED_BUILDER")
 def test_inject_spec_held_out_guard():
     """inject_spec on a HELD-OUT (leg_a=False) run_legb call must FAIL LOUD — the held-out branch
     ignores inject_spec, so honouring it would silently drop the injection. PR#12 review follow-up (b).

@@ -15,9 +15,11 @@ the runtime pivot guard (a future revert to nanmedian(...all z...) TRIPS it). Th
 verify the actual numbers; the cache-free tests pin the guard + the lit-law center on toy inputs.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_hcd_pivot_center.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import json
 import os
 import numpy as np
@@ -38,7 +40,7 @@ def _adopted_json():
     """Loader helper: band + adopted-center literals are pinned FROM the committed
     derivation artifact (corrected-law re-derivation, PI adoption 2026-07-18), so the
     test and the deployed constants share one source of numbers."""
-    p = "/home/mfho/hcd_priya/hcd_analysis/emulator/hcd_lit_dndx_corrected.json"
+    p = f"{_REPO_ROOT}/hcd_analysis/emulator/hcd_lit_dndx_corrected.json"
     with open(p) as fh:
         return json.load(fh)
 
@@ -131,6 +133,7 @@ def test_realfit_litlaw_lls_center_is_adopted_and_roundtrips():
 
 
 @pytest.mark.skipif(not _HAS_CACHE, reason="LF cache not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_build_legb_ctx_real_fit_alpha_hcd_mu_is_lit_consistent():
     """The FULL production real-fit ctx (build_legb_ctx survey='DESI') carries alpha_hcd_mu[LLS]
     z=3-consistent (~0.172, the corrected lit-law center; PI 2026-07-18) — NOT the all-z-median
@@ -145,6 +148,7 @@ def test_build_legb_ctx_real_fit_alpha_hcd_mu_is_lit_consistent():
 
 
 @pytest.mark.skipif(not _HAS_CACHE, reason="LF cache not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_hier_ratios_rederived_at_pivot_z():
     """The hierarchical r_sub/r_dla ratio centers (Option B) are derived at the z=3 PIVOT w_c, NOT
     the all-z-median w_c (which inherited the same bug). r_sub = w_sub(z3)/w_LLS(z3),

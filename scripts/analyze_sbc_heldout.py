@@ -13,7 +13,7 @@ Standing rule (feedback-report-tau0-dtau0-bias): ALWAYS report tau0 amplitude + 
 bias alongside any cosmo-bias report.
 
 Usage:
-  PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+  PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/analyze_sbc_heldout.py [SRC_DIR] [OUT_PREFIX]
 
   SRC_DIR     default /scratch/cavestru_root/cavestru1/mfho/prod_sbc_heldout

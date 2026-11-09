@@ -96,9 +96,9 @@ def test_compute_p1d_per_class_tau_transform_changes_mean_flux():
 
 def test_kim_slope_alpha_to_target_F_matches_obs_mean_tau():
     """The Tier P / Tier C convention is target_F = exp(-alpha * obs_mean_tau_Kim(z)).
-    Verify the helper agrees with the Kim 2013 (0711.1862) formula."""
+    Verify the helper agrees with the Kim et al. 2007 (0711.1862) formula."""
     from hcd_analysis.tau0_rescale import slope_alpha_to_target_F
-    # at z=3, Kim 2013: obs_mean_tau = 2.3e-3 * 4^3.65
+    # at z=3, Kim et al. 2007: obs_mean_tau = 2.3e-3 * 4^3.65
     target = slope_alpha_to_target_F(alpha_slope=1.0, z=3.0)
     expected = np.exp(-2.3e-3 * 4.0 ** 3.65)
     assert np.isclose(target, expected, rtol=1e-12), f"got {target}, expected {expected}"

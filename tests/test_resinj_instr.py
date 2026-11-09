@@ -4,7 +4,7 @@ _check_resolution_injectable guard fired on an `active` flag (blocker B1 fix).
 Pure, fast unit tests (no ctx build). The end-to-end (real leg) tests live in
 tests/test_dnuis_inject.py alongside the existing scalar/none golden tests.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_resinj_instr.py -q
 """
 import numpy as np

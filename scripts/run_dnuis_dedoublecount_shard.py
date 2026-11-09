@@ -15,7 +15,7 @@ SBC-SAFE: process-local monkeypatch only (on-disk closure_legb unchanged; the ru
 golden test are separate processes/untouched). Same seed (20260615) + same N=8 mocks as the original
 metal_misspec:desi cell -> directly comparable (-0.96 inflated vs the honest number measured here).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import argparse
 import functools

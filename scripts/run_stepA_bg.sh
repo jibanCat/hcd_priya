@@ -9,9 +9,11 @@
 # Watch:   tail -f checkpoints/stepA/run_stepA.out
 #          watch -n5 cat checkpoints/stepA/health.txt
 #          python3 -c "import json;print(json.load(open('checkpoints/stepA/health.json'))['counts'])"
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 
-REPO=/home/mfho/hcd_priya
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
 CKPT=$REPO/checkpoints/stepA
 WORKERS=${WORKERS:-14}

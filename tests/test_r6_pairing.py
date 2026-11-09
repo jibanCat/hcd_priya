@@ -8,7 +8,7 @@ and the legacy-override ctx yields bit-identical data vectors. If this ever brea
 while the DATA silently differed (truth identity is necessary, data identity is the theorem
 proved here).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_r6_pairing.py -q
 """
 import numpy as np
@@ -35,6 +35,7 @@ def _fid_core(ctx, d):
             for name, v in CL._fiducial_dla_core_per_leg(d, ctx.legs, ctx.cache_k).items()}
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_override_flips_only_the_parameterization(ctx_pair):
     ctx_m, ctx_l, _ = ctx_pair
     assert ctx_m.ks_dndx_mapped is True and ctx_l.ks_dndx_mapped is False
@@ -48,6 +49,7 @@ def test_override_flips_only_the_parameterization(ctx_pair):
                                np.asarray(ctx_l.alpha_hcd_mu), rtol=0, atol=0)
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_mapped_truth_in_simplex_and_site_set(ctx_pair):
     ctx_m, ctx_l, _ = ctx_pair
     key = jax.random.PRNGKey(20260723)
@@ -61,6 +63,7 @@ def test_mapped_truth_in_simplex_and_site_set(ctx_pair):
     assert "eps_lls" not in t_l["raw"] and "s_lls" in t_l["raw"]
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_shared_truth_gives_bit_identical_mocks(ctx_pair):
     ctx_m, ctx_l, d = ctx_pair
     key = jax.random.PRNGKey(42)

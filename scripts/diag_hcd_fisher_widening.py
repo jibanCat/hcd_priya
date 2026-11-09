@@ -28,13 +28,15 @@ the prior closure had |bias_z(subDLA)| ≈ 1–3σ (RMS ~2). If the diagonal mod
 the observed miscoverage (≳1.5–2×); a token widening (f≈1.05) would mean the term is real but
 NOT the dominant cause → escalate.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_hcd_fisher_widening.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import sys
 import numpy as np
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 import hcd_analysis.emulator  # noqa: F401  x64 before jax
 import jax
 import jax.numpy as jnp

@@ -16,10 +16,12 @@ Reports per fold + mean±scatter, and confirms vs the pre-finalization numbers
 median <1%). READ-ONLY on production code.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_final_inrange.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 
 import argparse
 import json
@@ -43,9 +45,9 @@ from scripts.archive.diag_datarange_mask import (
     CLS, PARAMS, Z_DATA, K_DATA_MIN, LOWK, MIDK, HIGHK,
 )
 
-CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-OUT = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
-CKPT = "/home/mfho/hcd_priya/checkpoints/final_fold{}"
+CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+OUT = f"{_REPO_ROOT}/figures/analysis/04_emulator"
+CKPT = (_REPO_ROOT + "/checkpoints/final_fold{}")
 Z_FID = 3.0
 
 
@@ -72,9 +74,12 @@ def deployed_median_inrange(model, d, va, norm):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--folds", type=int, default=8)
+    ap.add_argument("--ckpt-pattern", default=CKPT, help="checkpoint prefix with {} for the fold (gate C port)")
+    ap.add_argument("--outdir", default=OUT, help="where final_inrange_metrics.json is written (gate C port)")
+    ap.add_argument("--cache", default=CACHE)
     args = ap.parse_args()
 
-    d = load_cache(CACHE)
+    d = load_cache(args.cache)
     n_k = d["P_tier_p"].shape[1]
     kf = np.nanmedian(np.where(np.isfinite(d["kfkms"]), d["kfkms"], np.nan), 0)
     cv = load_cv_band()
@@ -83,7 +88,7 @@ def main():
     perfold = {}
     coh0 = None
     for fold in range(args.folds):
-        ckpt = CKPT.format(fold)
+        ckpt = args.ckpt_pattern.format(fold)
         if not Path(ckpt + ".eqx").exists():
             print(f"  [skip] fold {fold}: no checkpoint {ckpt}.eqx")
             continue
@@ -170,7 +175,7 @@ def main():
         },
         "coherent_lowk_tilt_fold0": tilt,
     }
-    jpath = f"{OUT}/final_inrange_metrics.json"
+    jpath = f"{args.outdir}/final_inrange_metrics.json"
     with open(jpath, "w") as f:
         json.dump(out, f, indent=2)
     print(f"\nwrote {jpath}")

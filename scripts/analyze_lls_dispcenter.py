@@ -29,8 +29,8 @@ TWO estimator decisions, both forced by review (2026-07-21, two independent agen
    for its EQUIVALENCE gate (a calibration statement). Here the estimand is "how far did the
    posterior move", and that difference-of-bias_z picks up a spurious -T*(1/s_b - 1/s_c) term
    whenever the two arms' posterior widths differ -- which they do, since ESS-thinned draw
-   counts run 20..150. Immaterial for n_s/A_p (whose truth/sigma ratios are modest) but it
-   moved tau0_amp from +0.14 to +0.23 on the real data. PRIMARY is therefore
+   counts run 20..150. Immaterial for n_s/A_p (whose truth/sigma ratios are modest) but not
+   for tau0_amp, whose truth/sigma ratio is large. PRIMARY is therefore
    (mu_b - mu_c)/s_pooled; the DLA-convention Delta bias_z is reported as a SECONDARY line for
    continuity with that arm.
 
@@ -53,7 +53,7 @@ stamped, never silent.
 
 Pure numpy on purpose -- safe on the login node (no JAX import).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
      scripts/analyze_lls_dispcenter.py \
      --shard-dir /scratch/cavestru_root/cavestru1/mfho/lls_dispcenter --allow-incomplete \
      [--npz-out out.npz] [--fig-out fig.png]

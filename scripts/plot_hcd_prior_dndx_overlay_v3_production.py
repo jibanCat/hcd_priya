@@ -15,7 +15,7 @@ LLS, sim incidence slope for subDLA/DLA; σ_LLS 0.287/0.574 DESI, 0.40 KS — co
 2026-07-18). This is the v2 fix promoted
 to the actual production functions (a future revert to the all-z median trips the pivot guard).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_hcd_prior_dndx_overlay_v3_production.py
 """
 from __future__ import annotations

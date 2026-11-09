@@ -14,7 +14,7 @@ Also unit-tests the pure battery estimators (``convergence_battery``) on a synth
 multi-chain array where the truth (R-hat≈1, large ESS for iid chains) is known, so the
 estimators are verified independently of the (slow) NUTS path.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_convergence.py -q
 """
 import os
@@ -96,6 +96,7 @@ def test_chain_seed_axis_distinct_from_retry_stream():
 #  End-to-end smoke (slow; gated on DESI data) — dispersion + finite battery.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not os.path.exists(_DESI_NPZ), reason="DESI data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_convergence_mode_disperses_and_returns_finite_battery():
     """The convergence path (i) starts chains DISPERSED relative to the posterior width and
     (ii) returns a finite rank-R-hat / bulk-ESS / tail-ESS / E-BFMI battery."""

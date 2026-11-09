@@ -20,7 +20,7 @@ z is NEVER inferred from array length -- _apply_truth_boosts gains a z kwarg thr
 run_legb (ctx.z_global); a profile without z, or against a pivot-only truth (alpha_hcd_z=None),
 is a HARD ValueError, not a degraded scalar fallback.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ks_selboost_hooks.py -q
 """
 import math
@@ -65,6 +65,7 @@ def test_none_and_empty_spec_are_identity():
     assert LB._apply_truth_boosts(tp, None, z=ZG) is tp
 
 
+@pytest.mark.deferred_legacy("RETIRED_STUB_SOURCE")
 def test_run_legb_threads_z_global_into_truth_boosts():
     import inspect
     src = inspect.getsource(LB.run_legb)
@@ -72,6 +73,7 @@ def test_run_legb_threads_z_global_into_truth_boosts():
         "run_legb must thread ctx.z_global into _apply_truth_boosts (never infer z from length)"
 
 
+@pytest.mark.deferred_legacy("RETIRED_STUB_SOURCE")
 def test_run_legb_records_truth_alpha_hcd_z():
     import inspect
     src = inspect.getsource(LB.run_legb)

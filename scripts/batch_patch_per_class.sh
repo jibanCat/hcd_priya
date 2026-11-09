@@ -11,14 +11,16 @@
 #SBATCH --cpus-per-task=21
 #SBATCH --mem-per-cpu=4g
 #SBATCH --time=02:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/patch_per_class_%j.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/patch_per_class_%j.err
+#SBATCH --output=logs/patch_per_class_%j.out
+#SBATCH --error=logs/patch_per_class_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
 
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
-cd /home/mfho/hcd_priya
+cd $REPO
 PYTHON="/sw/pkgs/arc/mamba/py3.11/bin/python3"
 
 echo "=== patch_per_class_p1d  start $(date) ==="

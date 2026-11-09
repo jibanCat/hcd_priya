@@ -21,10 +21,12 @@ axis-labeled. A trained checkpoint is cached under checkpoints/walkthrough_fold0
 re-runs of the plotting alone are fast (--reuse).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_emulator_walkthrough.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import json
@@ -46,9 +48,9 @@ from hcd_analysis.emulator.data import (
 )
 from hcd_analysis.emulator import train as T
 
-CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-OUTDIR = "/home/mfho/hcd_priya/figures/analysis/04_emulator/walkthrough"
-CKPT = "/home/mfho/hcd_priya/checkpoints/walkthrough_fold0"
+CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+OUTDIR = f"{_REPO_ROOT}/figures/analysis/04_emulator/walkthrough"
+CKPT = f"{_REPO_ROOT}/checkpoints/walkthrough_fold0"
 CLS = COARSE_NAMES
 PARAM_NAMES = ["ns", "Ap", "herei", "heref", "alphaq",
                "hub", "omegamh2", "hireionz", "bhfeedback"]
@@ -86,7 +88,7 @@ def train_or_load(d, *, fold=0, n_basis=24, epochs=180, lr=1e-3, batch=512,
         return model, norm, history, (tr, va, ho)
     print(f"[train] fold={fold} epochs={epochs} n_basis={n_basis} "
           f"train={len(tr)} val={len(va)} holdout={len(ho)}  (tuned residual recipe)")
-    k_weight = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=RESID_TUNE["edge_gain"],
+    k_weight = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=RESID_TUNE["edge_gain"],
                                       lowk_extra=RESID_TUNE["lowk_extra"])
     model, norm, history = T.train_fold(
         d, tr, va, n_basis=n_basis, lr=lr, epochs=epochs, batch_size=batch,
@@ -96,7 +98,7 @@ def train_or_load(d, *, fold=0, n_basis=24, epochs=180, lr=1e-3, batch=512,
         weight_decay=RESID_TUNE["weight_decay"])
     arch_cfg = {"in_dim": 10, "n_k": n_k, "n_basis": n_basis}
     T.save_checkpoint(CKPT, model, arch_cfg, norm, seed=seed,
-                      kfkms=d["kfkms"], cache_path=CACHE)
+                      cache=d, cache_path=CACHE)
     with open(CKPT + ".hist.json", "w") as f:
         json.dump({k: np.asarray(v).tolist() for k, v in history.items()}, f)
     print(f"[train] {len(history['train_loss'])} epochs; checkpoint -> {CKPT}")
@@ -425,7 +427,7 @@ def _theta_tracking(model, d, va, norm):
 def fig08_theta_tracking(model, d, va, norm):
     """Within-cell θ-tracking (AFTER, this model) next to the saved BEFORE figure."""
     dev_t, dev_p, corr, ratio = _theta_tracking(model, d, va, norm)
-    before = "/home/mfho/hcd_priya/figures/analysis/04_emulator/fold0_cosmology_tracking.png"
+    before = f"{_REPO_ROOT}/figures/analysis/04_emulator/fold0_cosmology_tracking.png"
 
     fig = plt.figure(figsize=(12.5, 5.6))
     ax1 = fig.add_subplot(1, 2, 2)
