@@ -664,11 +664,11 @@ def test_structural_identity_through_transform_roundtrip(tmp_path):
     import numpy as np
     from tests.emulator._fixture import write_synthetic_cache
     from hcd_analysis.emulator.data import (
-        load_cache, fit_target_norm, make_batch, reconstruct_P_filt,
+        load_cache_historical, fit_target_norm, make_batch, reconstruct_P_filt,
     )
     path = tmp_path / "obs.h5"
     write_synthetic_cache(path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
-    d = load_cache(path)
+    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
     R = d["x"].shape[0]
     norm = fit_target_norm(d, np.arange(R))
 

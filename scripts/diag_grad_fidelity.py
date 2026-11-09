@@ -11,7 +11,7 @@ sweep over the unit cube.
 GATE: median rel-err < 1e-4 at every τ₀ position; zero non-finite P_obs/gradient.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_grad_fidelity.py [--ckpt ...]
 Writes figures/analysis/05_likelihood/grad_fidelity.png + grad_fidelity.json.
 """
@@ -29,7 +29,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from hcd_analysis.emulator import train as T
 from hcd_analysis.emulator.predict import predict_P_obs
 
@@ -148,7 +148,7 @@ def main():
     args = ap.parse_args()
     OUTDIR.mkdir(parents=True, exist_ok=True)
 
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/diag_grad_fidelity.py)')
     model, meta, norm = T.load_checkpoint(args.ckpt)
     pf = norm["P_filt"]
     print(f"[gate] ckpt={args.ckpt} n_basis={meta['arch_cfg']['n_basis']}")

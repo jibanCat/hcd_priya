@@ -19,7 +19,7 @@ printed explicitly.
 Column indexing reuses run_legb's by-NAME positional map (θ9 → j; the α/τ₀ block offset by the
 per-mock kept-z count), so it stays aligned with the metals/hierarchical appended columns.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/analyze_dnuis_bias.py --shard-dir <dir>
 """
 import argparse

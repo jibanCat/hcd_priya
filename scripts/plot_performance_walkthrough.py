@@ -57,7 +57,7 @@ alongside. The MF figure (B6) trains the small rho(k,z)-only fixed-mean head per
 fold (fast); everything else is pure evaluation of the frozen finalized models.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_performance_walkthrough.py
 """
 from __future__ import annotations
@@ -116,7 +116,7 @@ def _caption(fig, text, y=0.005):
 
 import hcd_analysis.emulator  # noqa: F401 -- enables jax_enable_x64 on import
 from hcd_analysis.emulator.data import (
-    load_cache, make_splits, make_batch, cell_id, safe_log,
+    load_cache_historical, make_splits, make_batch, cell_id, safe_log,
     reconstruct_P_filt, untransform_prediction, datarange_mask,
     COARSE_NAMES, DATA_RANGE,
 )
@@ -716,7 +716,7 @@ def figB6_mf_high_k(d_lf):
         return None, f"MF import failed: {e!r}"
     try:
         lf = d_lf
-        hr = load_cache(MF.HR_CACHE)
+        hr = load_cache_historical(MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/plot_performance_walkthrough.py)')
         lf_model, meta, lf_norm, lf_logk = MF.load_lf_backbone(fold=0)
         pairs = MF.match_hr_to_lf(lf, hr)
         k_eval, eval_logk = MF.build_eval_grid(hr, k_max=MF.KODIAQ_KMAX, n_k=48)
@@ -1184,7 +1184,7 @@ def main():
     _mode_desc = ("DEPLOYED production ensemble (in-sample) + retained LOSO held-out overlays"
                   if ENS_MODE else "LOSO held-out (out-of-sample)")
     print(f"--emulator {args.emulator}  ({_mode_desc})")
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/plot_performance_walkthrough.py)')
     kf = d["kfkms"][0]
     z_levels = np.unique(np.round(d["z_grid"], 1))
     print(f"cache: {d['P_tier_p'].shape[0]} rows, n_k={len(kf)}, z-levels={len(z_levels)}")

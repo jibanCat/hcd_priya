@@ -29,7 +29,7 @@ Two questions this answers:
      large DLA -> a real sub-1 high-k suppression; Rogers is NOT pure-boost once c is included).
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_hcd_template_vs_rogers.py
 """
 from __future__ import annotations
@@ -42,7 +42,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from hcd_analysis.emulator.data import load_cache, DATA_RANGE
+from hcd_analysis.emulator.data import load_cache_historical, DATA_RANGE
 from hcd_analysis.emulator import train as T
 from hcd_analysis.emulator.predict import predict_P_filt
 
@@ -77,7 +77,7 @@ def used_classes(P_filt4, dla_core):
 
 
 def main():
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/diag_hcd_template_vs_rogers.py)')
     model, meta, norm = T.load_checkpoint(CKPT)
     pf = norm["P_filt"]
     z = d["z_grid"]

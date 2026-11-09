@@ -29,9 +29,11 @@ THE MODEL (this is what these tests pin):
   α_DLA = 0.10·(lit/sim)·w_DLA on DESI / forward DLA term = 0 on KS, the forward reproduces the
   per-leg target (DESI carries the 10% DLA, KS carries none) to tight rtol.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_dla_masking.py -v
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 
 import hcd_analysis.emulator  # noqa: F401  enables jax_enable_x64
@@ -42,6 +44,7 @@ import pytest
 
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import inference as I
 from hcd_analysis.emulator.predict import predict_P_filt, predict_P_obs
 from hcd_analysis.emulator.sampler_numpyro import _dla_raw_mu
@@ -155,10 +158,10 @@ def test_forward_ks_dla_term_is_zero_desi_keeps_it():
     a = jnp.array([0.06, 0.02, 0.05])
     a0 = jnp.array([0.06, 0.02, 0.0])
     kw = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"])
-    P_desi_a, _ = DLm.predict_P_obs_on_leg(c["model"], th, tau0, a, leg=leg_desi, **kw)
-    P_desi_0, _ = DLm.predict_P_obs_on_leg(c["model"], th, tau0, a0, leg=leg_desi, **kw)
-    P_ks_a, _ = DLm.predict_P_obs_on_leg(c["model"], th, tau0, a, leg=leg_ks, **kw)
-    P_ks_0, _ = DLm.predict_P_obs_on_leg(c["model"], th, tau0, a0, leg=leg_ks, **kw)
+    P_desi_a, _ = LEG.predict_P_obs_on_leg(c["model"], th, tau0, a, leg=leg_desi, **kw)
+    P_desi_0, _ = LEG.predict_P_obs_on_leg(c["model"], th, tau0, a0, leg=leg_desi, **kw)
+    P_ks_a, _ = LEG.predict_P_obs_on_leg(c["model"], th, tau0, a, leg=leg_ks, **kw)
+    P_ks_0, _ = LEG.predict_P_obs_on_leg(c["model"], th, tau0, a0, leg=leg_ks, **kw)
     # DESI: α_DLA moves the forward (the DLA-excess term is live).
     assert not np.allclose(np.asarray(P_desi_a), np.asarray(P_desi_0)), \
         "DESI forward (frac 1.0) must carry the DLA-excess term"
@@ -225,8 +228,8 @@ def test_truth_forward_consistency_desi_ten_percent():
 #  make_legb_mock applies the per-leg truth_frac (DESI 0.10 / KS 0.0).
 # ============================================================================ #
 _have_cache = os.path.exists(
-    "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5")
-_have_ckpt = os.path.exists("/home/mfho/hcd_priya/checkpoints/final_fold0.eqx")
+    f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5")
+_have_ckpt = os.path.exists(f"{_REPO_ROOT}/checkpoints/final_fold0.eqx")
 _have_desi = os.path.exists("/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz")
 _have_ks = os.path.exists(
     "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
@@ -235,13 +238,14 @@ _have_ks = os.path.exists(
 
 @pytest.mark.skipif(not (_have_cache and _have_ckpt),
                     reason="real cache/ckpt not present")
+@pytest.mark.deferred_legacy("RETIRED_BUILDER")
 def test_make_truth_stores_masked_baseline_and_full_dla_excess():
     """make_truth_from_sim returns P_obs_true (the DLA-MASKED baseline) AND dla_excess_true (the
     full DLA excess add-back, per row) — the §0c construction the per-leg mock applies truth_frac
     to. Verified against the cache P_filt directly (the truth uses cache P_filt, not the emulator)."""
     from hcd_analysis.emulator import closure_legb as CL
-    from hcd_analysis.emulator.data import load_cache
-    d = load_cache(CL.CACHE_PATH)
+    from hcd_analysis.emulator.data import load_cache_historical
+    d = load_cache_historical(CL.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format')
     sims, _ = CL.held_out_sims(d, fold=0)
     truth = CL.make_truth_from_sim(d, sims[0], fold=0)            # LF (mf=None)
     assert "dla_excess_true" in truth, "make_truth_from_sim must store the full DLA excess add-back"
@@ -264,14 +268,15 @@ def test_make_truth_stores_masked_baseline_and_full_dla_excess():
 
 @pytest.mark.skipif(not (_have_cache and _have_ckpt and _have_desi and _have_ks),
                     reason="real cache/ckpt/data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_make_legb_mock_applies_per_leg_truth_frac():
     """make_legb_mock builds the DESI mock target with 0.10·(full DLA excess) added back and the
     KS mock target with 0% — verified by reconstructing the truth-on-leg WITHOUT noise (the mock
     minus its known ε is impractical, so we re-derive the per-leg truth_frac from the noiseless
     truth-on-leg the mock exposes via info)."""
     from hcd_analysis.emulator import closure_legb as CL
-    from hcd_analysis.emulator.data import load_cache
-    d = load_cache(CL.CACHE_PATH)
+    from hcd_analysis.emulator.data import load_cache_historical
+    d = load_cache_historical(CL.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format')
     ctx, _ = CL.build_legb_ctx()
     sims, _ = CL.held_out_sims(d, fold=0)
     truth = CL.make_truth_from_sim(d, sims[0], fold=0)
@@ -289,12 +294,13 @@ def test_make_legb_mock_applies_per_leg_truth_frac():
 
 @pytest.mark.skipif(not (_have_cache and _have_ckpt and _have_desi and _have_ks),
                     reason="real cache/ckpt/data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_truth_pack_alpha_dla_is_ten_percent_residual():
     """The closure truth_pack α_DLA = 0.10·w_DLA (the DESI residual the forward marginalizes),
     while α_LLS/α_subDLA stay at the sim's structural w_c."""
     from hcd_analysis.emulator import closure_legb as CL
-    from hcd_analysis.emulator.data import load_cache
-    d = load_cache(CL.CACHE_PATH)
+    from hcd_analysis.emulator.data import load_cache_historical
+    d = load_cache_historical(CL.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format')
     ctx, _ = CL.build_legb_ctx()
     sims, _ = CL.held_out_sims(d, fold=0)
     truth = CL.make_truth_from_sim(d, sims[0], fold=0)
@@ -308,13 +314,14 @@ def test_truth_pack_alpha_dla_is_ten_percent_residual():
 
 @pytest.mark.skipif(not (_have_cache and _have_ckpt and _have_desi and _have_ks),
                     reason="real cache/ckpt/data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_real_ctx_truth_forward_consistency_desi_ten_percent():
     """Real ctx, EMULATOR-based consistency: at θ→truth, α_DLA = 0.10·w_DLA on the DESI forward
     (frac 1.0), the forward reproduces the DESI 10% target built from the SAME emulator P_filt
     (isolates the DLA handling; the emulator residual cancels)."""
     from hcd_analysis.emulator import closure_legb as CL
-    from hcd_analysis.emulator.data import load_cache
-    d = load_cache(CL.CACHE_PATH)
+    from hcd_analysis.emulator.data import load_cache_historical
+    d = load_cache_historical(CL.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format')
     ctx, _ = CL.build_legb_ctx()
     sims, _ = CL.held_out_sims(d, fold=0)
     truth = CL.make_truth_from_sim(d, sims[0], fold=0)

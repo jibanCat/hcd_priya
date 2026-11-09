@@ -6,7 +6,7 @@ STABLE, modest physical under-recovery (prior centered on data dN/dX < PRIYA sim
 and cosmology (ns,Ap) stays unbiased -> not a worry.
 
 Writes 2 figures into the NOTES repo 05_likelihood dir.
-Usage: PYTHONPATH=/home/mfho/hcd_priya python3 scripts/plot_heldout_dndx_consistency.py
+Usage: PYTHONPATH=<repo> python3 scripts/plot_heldout_dndx_consistency.py
 """
 import pickle, glob, os, numpy as np
 import matplotlib

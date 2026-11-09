@@ -2,7 +2,7 @@
 (readout defect B, 2026-07-22) -- plus the frozen-behavior regression pin on the OLD
 approximate alpha_to_dndx (retained solely to reproduce pre-2026-07-22 artifacts).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_dndx_exact_inverse.py -q
 """
 import jax

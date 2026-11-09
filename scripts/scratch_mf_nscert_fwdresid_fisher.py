@@ -36,7 +36,7 @@ CONFIGS (all DESI-only, ns0.909 HR-LOSO truth, theta*=truth, alpha==1 forward):
   g_ident_rc: g==0 but KEEP raw res_corr — isolates g from res_corr.
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/scratch_mf_nscert_fwdresid_fisher.py
 """
 from __future__ import annotations
@@ -75,7 +75,7 @@ def _resolve_hr_sim_name():
     """The HR-cache sim closest to TARGET_NS (same selection run_stepA uses for HFLOSO909)."""
     from hcd_analysis.emulator import multifidelity as MF
     from hcd_analysis.emulator.data import PARAM_LIMITS
-    d = MF.load_cache(MF.HR_CACHE)
+    d = MF.load_cache_historical(MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/scratch_mf_nscert_fwdresid_fisher.py)')
     names = np.array([s.decode() if isinstance(s, bytes) else s for s in d["sim_name"]])
     pu = d["params_unit"]
     ns_lo, ns_hi = PARAM_LIMITS[0]

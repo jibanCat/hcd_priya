@@ -10,10 +10,12 @@ with the MF correction ON vs OFF, per (z,k). Report the fractional imprint P_MF/
 k-extremes (the tilt) and the implied Δn_s ≈ d ln(P_MF/P_LF)/d ln(k) over the eBOSS band (a tilt in
 the multiplicative ratio aliases directly into the power-law tilt n_s).
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import sys
 import numpy as np
 
-sys.path.insert(0, "/home/mfho/hcd_priya/scripts")
+sys.path.insert(0, f"{_REPO_ROOT}/scripts")
 import hcd_analysis.emulator  # noqa: F401
 import jax.numpy as jnp
 from hcd_analysis.emulator import data_likelihood as DL
@@ -22,7 +24,7 @@ from hcd_analysis.emulator.closure_legb import build_legb_ctx, make_truth_from_s
 
 def main():
     # fold6 (Planck-ish) MF correction + the eBOSS leg.
-    ctx, d = build_legb_ctx(ckpt="/home/mfho/hcd_priya/checkpoints/final_fold6", with_eboss=True,
+    ctx, d = build_legb_ctx(ckpt=f"{_REPO_ROOT}/checkpoints/final_fold6", with_eboss=True,
                             with_mf=True, mf_fold=6, mf_with_floor=False)
     leg = next(l for l in ctx.legs if l.name == "eBOSS")
     # truth θ for the Planck-ish held-out sim (E_f6 uses the fold6 sim closest to n_s 0.966).

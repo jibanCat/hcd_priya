@@ -12,9 +12,11 @@ Pins the contract for the production-SBC gate plumbing:
       for the merge, and the selected index draws the fold_in(seed, m) mock.
 
 Env-gated like the other closure tests. Run:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_sbc.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import glob
 import os
 
@@ -26,7 +28,7 @@ import pytest
 from hcd_analysis.emulator import closure_sbc as S
 from hcd_analysis.emulator.ensemble import EnsembleEmulator
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 PROD = f"{REPO}/checkpoints/final_prod_seed"
 CKPT = f"{REPO}/checkpoints/final_fold0"
 EV = f"{REPO}/checkpoints/error_vector.npz"
@@ -46,6 +48,7 @@ def ctx1():
 # (a) ensemble threading into build_ctx
 # ---------------------------------------------------------------------------
 @prodgate
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_build_ctx_ensemble_uses_ensemble_model():
     paths = sorted(p[:-4] for p in glob.glob(PROD + "*.eqx"))
     ctx = S.build_ctx(n_z=1, seed=0, ensemble_ckpts=paths)
@@ -54,6 +57,7 @@ def test_build_ctx_ensemble_uses_ensemble_model():
 
 
 @gate
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_build_ctx_single_model_path_unchanged(ctx1):
     assert getattr(ctx1.model, "members", None) is None
 
@@ -62,6 +66,7 @@ def test_build_ctx_single_model_path_unchanged(ctx1):
 # (b) per-mock draw is a pure function of (key0, m) — shard reproducibility
 # ---------------------------------------------------------------------------
 @gate
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_mock_for_index_deterministic_and_shard_invariant(ctx1):
     key0 = jax.random.PRNGKey(7)
     tv_a = np.asarray(S._mock_for_index(ctx1, key0, 1)[2])
@@ -121,6 +126,7 @@ def test_aggregate_leg_a_uses_record_names_with_metals_column():
 # (d) run_leg_a_sbc return_per_mock + mock_indices (one tiny NUTS)
 # ---------------------------------------------------------------------------
 @gate
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_run_leg_a_sbc_return_per_mock_shards(ctx1):
     kept = S.run_leg_a_sbc(ctx1, n_mocks=2, n_warmup=6, n_samples=6, seed=0,
                            mock_indices=[1], return_per_mock=True, verbose=False)

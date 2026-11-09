@@ -7,14 +7,17 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH --job-name=priya_pcheck
-#SBATCH --output=/home/mfho/hcd_priya/scripts/consistency_checks/sbatch_logs/%x_%A_%a.out
-#SBATCH --error=/home/mfho/hcd_priya/scripts/consistency_checks/sbatch_logs/%x_%A_%a.err
+#SBATCH --output=scripts/consistency_checks/sbatch_logs/%x_%A_%a.out
+#SBATCH --error=scripts/consistency_checks/sbatch_logs/%x_%A_%a.err
 #SBATCH --array=0-11
 
 # Fan out 12 (sim_idx, snap, z_idx, sim_folder) tuples to one task each.
 # 3 sims × 4 redshifts. Same parameter set as the serial multipoint script.
 
 # All in shell arrays (bash >= 4):
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 SIM_IDX=(    44 44 44 44     0  0  0  0    29 29 29 29 )
 SIM_FOLDER=(
     "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
@@ -52,10 +55,10 @@ export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
 export OPENBLAS_NUM_THREADS=4
 
-OUT_DIR=/home/mfho/hcd_priya/docs/superpowers/figs/multipoint
+OUT_DIR=$REPO/docs/superpowers/figs/multipoint
 mkdir -p "$OUT_DIR"
 
-$PY /home/mfho/hcd_priya/scripts/consistency_checks/priya_p1d_consistency_one_snap.py \
+$PY $REPO/scripts/consistency_checks/priya_p1d_consistency_one_snap.py \
     --sim-idx ${SIM_IDX[$i]} \
     --sim-folder "${SIM_FOLDER[$i]}" \
     --snap ${SNAP[$i]} \

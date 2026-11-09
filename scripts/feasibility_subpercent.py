@@ -22,7 +22,7 @@ Five experiments on the fold-0 LOSO split of ``observables_tau0_lf.h5``:
   5. Within-data-k-range check — DESI (~1e-3..2e-2 s/km) and KODIAQ (~3e-3..0.1)
      k-windows, excluding k<data-k_min where the known low-k spike lives.
 
-Env (MANDATORY): PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+Env (MANDATORY): PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/feasibility_subpercent.py
 Writes figures to figures/analysis/04_emulator/ and a JSON summary.
 """
@@ -41,7 +41,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from hcd_analysis.emulator.data import (load_cache, make_splits, cell_id, safe_log,
+from hcd_analysis.emulator.data import (load_cache_historical, make_splits, cell_id, safe_log,
                                         fit_baseline_residual_norm)
 from hcd_analysis.emulator.model import Encoder, HeadB, BaselineHead, svd_basis_init
 
@@ -439,7 +439,7 @@ def exp4_5_combined(d, tr, va, pf, sc_over_sm, baseline_cfg, resid_cfg):
 
 def main():
     t0 = time.time()
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/feasibility_subpercent.py)')
     tr, va, ho = make_splits(d, 0, 8)
     pf = fit_baseline_residual_norm(d, tr)
     sc_over_sm = pf["sig_cosmo"].mean(1) / pf["sig_marg"].mean(1)   # per class (4,)

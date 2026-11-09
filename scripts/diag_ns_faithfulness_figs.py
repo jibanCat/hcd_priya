@@ -19,9 +19,11 @@ NEGATIVE Δns. The decomposition splits ΔlogP into the θ-blind baseline-head t
 cosmology residual-head term so the carrier is visible.
 
 Run (import hcd_analysis.emulator BEFORE jax; x64):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_ns_faithfulness_figs.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 from pathlib import Path
 
@@ -31,7 +33,7 @@ import jax, jax.numpy as jnp
 assert jax.config.read("jax_enable_x64"), "x64 must be on (import hcd_analysis.emulator first)"
 
 from hcd_analysis.emulator.closure_legb import build_legb_ctx, held_out_sims
-from hcd_analysis.emulator.data import load_cache, make_splits, safe_log
+from hcd_analysis.emulator.data import load_cache_historical, make_splits, safe_log
 from hcd_analysis.emulator.predict import predict_P_filt, reconstruct_P_filt_jax
 from hcd_analysis.emulator.inference import PARAM_NAMES
 
@@ -39,7 +41,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 FIGDIR = f"{REPO}/figures/analysis/04_emulator"
 ATTN_NPZ = f"{FIGDIR}/ns_slope_attenuation.npz"
 HOLD0 = f"{REPO}/checkpoints/error_vector_xclass_holdout0.npz"
@@ -532,7 +534,7 @@ def main():
         print("[sanity] resp_shapes.npz absent; relying on sign check", flush=True)
 
     print("[cache] loading + truth cell-means", flush=True)
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/diag_ns_faithfulness_figs.py)')
     m_cell = truth_cell_means(d)
     print(f"[cache] {len(m_cell)} (z,alpha) cells with >= {MIN_SIMS} sims", flush=True)
 

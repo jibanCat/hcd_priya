@@ -15,11 +15,13 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64g
 #SBATCH --time=18:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/lls_dispcenter_%A_%a.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/lls_dispcenter_%A_%a.err
+#SBATCH --output=logs/lls_dispcenter_%A_%a.out
+#SBATCH --error=logs/lls_dispcenter_%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 TID=${SLURM_ARRAY_TASK_ID:-0}
 N_SHARDS=${N_SHARDS:-8}; N_MOCKS=${N_MOCKS:-8}; SEED=${SEED:-20260615}
@@ -28,9 +30,9 @@ OUTDIR=${OUTDIR:-/scratch/cavestru_root/cavestru1/mfho/lls_dispcenter}
 NCPU=${SLURM_CPUS_PER_TASK:-4}; SMOKE_FLAG=""; [[ "${SMOKE:-0}" == "1" ]] && SMOKE_FLAG="--smoke"
 export OMP_NUM_THREADS=$NCPU OPENBLAS_NUM_THREADS=$NCPU MKL_NUM_THREADS=$NCPU NUMEXPR_NUM_THREADS=$NCPU
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=$NCPU"
-export PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 PY=/home/mfho/.conda/envs/emu-jax/bin/python3
-mkdir -p "$OUTDIR" /home/mfho/hcd_priya/logs
+mkdir -p "$OUTDIR" $REPO/logs
 [[ -f "$OUTDIR/lls_dispcenter_desi_shard_$(printf %03d "$TID").pkl" ]] && { echo "shard ${TID} exists -- SKIP"; exit 0; }
 echo "=== lls_dispcenter shard ${TID}/${N_SHARDS} (N=${N_MOCKS} seed=${SEED} boost=${BOOST}) start: $(date) ==="
 "$PY" -u scripts/run_lls_dispcenter_shard.py --shard "$TID" --n-shards "$N_SHARDS" --n-mocks "$N_MOCKS" \

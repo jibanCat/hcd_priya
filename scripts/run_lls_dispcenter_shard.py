@@ -25,7 +25,7 @@ displacement -1 sigma).
 Both arms fit under the final production likelihood (reduced DESI covariance,
 DESI_DLA_COV_REDUCE -- asserted), N = 8 paired mocks (16 fits, ~270 CPU-h on cavestru1).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import argparse, functools, os, pickle, time
 import numpy as np

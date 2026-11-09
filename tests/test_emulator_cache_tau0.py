@@ -1,10 +1,12 @@
 """Tests for scripts/build_emulator_cache_tau0.py (v3.1, fake_spectra-driven).
 
 Real-data tests need the emu-3.9 + GSL env:
-    export LD_LIBRARY_PATH=/sw/pkgs/arc/stacks/gcc/10.3.0/gsl/2.7/lib:/home/mfho/.conda/envs/emu-3.9/lib:$LD_LIBRARY_PATH
-    /home/mfho/.conda/envs/emu-3.9/bin/python3 tests/test_emulator_cache_tau0.py
+    export LD_LIBRARY_PATH=<GSL lib dir>:<emu-3.9 env>/lib:$LD_LIBRARY_PATH
+    <emu-3.9 env>/bin/python3 tests/test_emulator_cache_tau0.py
+with the data directories set as listed in tests/gate_helpers.py (HCD_OUTPUTS_DIR, HCD_LF_RAW_DIR, ...).
 The synthetic write_cache_tau0 round-trip runs under plain python3.
 """
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -23,14 +25,35 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import pytest
 pytest.importorskip("fake_spectra")
 
+
+def _unavailable(msg):
+    """Real-data test cannot run here: skip normally, FAIL in gate mode (HCD_GATE_RUN=1). pytest is imported lazily so
+    the module still runs directly under emu-3.9's python (no pytest there) when the data are present."""
+    import pytest
+    if os.environ.get("HCD_GATE_RUN") == "1":
+        pytest.fail(msg + " (HCD_GATE_RUN=1)")
+    pytest.skip(msg)
+
 import build_emulator_cache_tau0 as bt0
 from hcd_analysis import priya_p1d as bt0_pp
+from hcd_analysis import tau0_cache as T
 
-_HCD_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
-_EMU_LF = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
-_EMU_HR = Path("/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2")
+
+def _hist(snap_dir):
+    """An old (pre-lineage) snapshot directory's products, read for the PRIYA bit-identity checks."""
+    return T.load_snapshot_inputs_historical(snap_dir, reason="PRIYA bit-identity test on an old snapshot root")[0]
+
+# Data outside the repository, located by environment variable (tests/gate_helpers.py lists them; inlined here because
+# this file also runs as a plain script). An unset variable gives a path that does not exist.
+def _ext(var, *parts):
+    return os.path.join(os.environ.get(var) or f"<{var} unset>", *parts)
+
+
+_HCD_ROOT = Path(_ext("HCD_OUTPUTS_DIR"))
+_EMU_LF = Path(_ext("HCD_LF_RAW_DIR"))
+_EMU_HR = Path(_ext("HCD_HR_RAW_DIR"))
 _EMU_ROOT = _EMU_LF  # backward-compat alias used by test_read_priya_params / test_build_tau0_rows
-_PRIYA_FILE = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/mf_emulator_flux_vectors_tau1000000.hdf5"
+_PRIYA_FILE = _ext("HCD_KS_BASEDIR", "mf_emulator_flux_vectors_tau1000000.hdf5")
 
 
 def test_locate_raw_tau_file_finds_grid_file():
@@ -53,27 +76,9 @@ _NS0907 = ("ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662"
            "omegamh20.144hireionz7.47bhfeedback0.0347")
 
 
-def test_raw_spectra_index_ns0907_ladder_offset():
-    # ns0.907 has a raw SPECTRA ladder gap (snap 15/18): its Phase-1 snap_17 is
-    # the z=2.8 snapshot, whose grid_480 tau lives in raw SPECTRA_018 (SPECTRA_017
-    # is a z=3.0 grid). All other (sim, snap) map 1:1. Without this the build's
-    # z_raw-vs-z_meta assert trips on this single pair (production shard 44).
-    assert bt0._raw_spectra_index(_NS0907, 17) == 18
-    assert bt0._raw_spectra_index(_NS0907, 16) == 16
-    assert bt0._raw_spectra_index(_NS0907, 18) == 18
-    assert bt0._raw_spectra_index("ns0.803Ap2e-09herei4", 17) == 17  # other sims unaffected
-
-
-def test_locate_raw_tau_file_ns0907_snap17_maps_to_spectra018():
-    with tempfile.TemporaryDirectory() as tmp:
-        emu_root = Path(tmp)
-        # Lay down BOTH SPECTRA_017 and SPECTRA_018 grid files; snap 17 must pick 018.
-        for s in (17, 18):
-            d = emu_root / _NS0907 / "output" / f"SPECTRA_{s:03d}"
-            d.mkdir(parents=True)
-            (d / "lya_forest_spectra_grid_480.hdf5").write_bytes(b"")
-        got = bt0.locate_raw_tau_file(emu_root, _NS0907, 17)
-        assert got == emu_root / _NS0907 / "output" / "SPECTRA_018" / "lya_forest_spectra_grid_480.hdf5"
+# The two legacy tests that pinned the 2026-06-01 tau re-pointing (ns0.907 snap 17 -> SPECTRA_018) were removed in the
+# S4/F8 repair: that re-pointing paired z = 2.8 tau with the z = 3.0 catalogue. Pairing is now by file identity and the
+# mislabelled redshifts are corrected; see tests/test_cache_pairing_invariants.py.
 
 
 def test_snap_z_to_priya_grid():
@@ -115,8 +120,7 @@ def test_read_priya_params_matches_priya_array():
     for sim_idx, folder in cases:
         raw = _EMU_ROOT / folder / "output" / "SPECTRA_008" / "lya_forest_spectra_grid_480.hdf5"
         if not raw.exists():
-            print(f"SKIP _read_priya_params for sim {sim_idx} (no raw tau)")
-            continue
+            _unavailable(f"_read_priya_params: no raw tau for sim {sim_idx}")
         ours = bt0._read_priya_params(raw)
         theirs = priya_params[sim_idx, 1:].astype(np.float64)  # col 0 is alpha
         rel = np.max(np.abs(ours / theirs - 1.0))
@@ -155,15 +159,15 @@ def _fake_rows(nk, nrows=3):
     return rows
 
 
-def test_write_cache_tau0_round_trip(tmp_path=Path("/tmp")):
+def test_write_cache_tau0_round_trip(tmp_path):
     import hcd_analysis.priya_p1d as pp
     nk = 172
     rows = _fake_rows(nk)
     snap_blocks = [_fake_snap_block(f"sim{i%2}", 10 + i) for i in range(3)]
     out = tmp_path / "rt_tau0.h5"
-    bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(1.0, 1.2), n_k=nk)
+    bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(1.0, 1.2), n_k=nk, inputs=[], settings={})
     with h5py.File(out, "r") as f:
-        assert f.attrs["cache_version"] == "3.3"
+        assert f.attrs["cache_version"] == "3.4" and T.LINEAGE_KEY in f
         assert f.attrs["tier_c_recipe"] == "uniform"
         assert f.attrs["n_k"] == nk
         assert f["P_tier_p"].shape == (3, nk)
@@ -179,7 +183,7 @@ def test_write_cache_tau0_round_trip(tmp_path=Path("/tmp")):
         assert f["tier_c_counts"].dtype == np.int64
         assert np.allclose(f["tier_c_nhi_edges"][...], pp.FINE_NHI_EDGES)
         assert f["snap_group_idx"][...].tolist() == [0, 1, 2]
-    print("OK write_cache_tau0 v3.3 round-trip")
+    print("OK write_cache_tau0 v3.4 round-trip")
 
 
 def test_discover_dedups_one_snap_per_grid_z():
@@ -187,35 +191,37 @@ def test_discover_dedups_one_snap_per_grid_z():
     # no duplicate (sim, z_grid)
     seen = {}
     import json as _json
+    def label(sim, snap, sd, raw):     # the builder's redshift label (meta z, corrected for the two mislabelled dirs)
+        return bt0.catalogue_z_label(sim, snap, float(_json.load(open(sd / "meta.json"))["z"]), bt0.raw_header_z(raw))
     for sim, snap, sd, raw in pairs:
-        zg = bt0._snap_z_to_priya_grid(float(_json.load(open(sd / "meta.json"))["z"]))
+        zg = bt0._snap_z_to_priya_grid(label(sim, snap, sd, raw))
         key = (sim, round(zg, 4))
         assert key not in seen, f"duplicate (sim,z_grid) {key}: snaps {seen[key]} and {snap}"
         seen[key] = snap
     # every kept snap is within 0.05 of its grid z
     for sim, snap, sd, raw in pairs:
-        z = float(_json.load(open(sd / "meta.json"))["z"])
+        z = label(sim, snap, sd, raw)
         assert abs(z - bt0._snap_z_to_priya_grid(z)) <= 0.05, f"{sim} {snap} too far off-grid"
-    # ns0.907: the on-grid snaps survive, the off-grid extras (snap_015 z3.27, snap_018 z2.67) are gone
-    n907 = [snap for sim, snap, sd, raw in pairs if "ns0.907Ap1.5e-09" in sim]
-    assert 16 in n907 and 15 not in n907, "ns0.907 should keep snap_016 (z3.2), drop snap_015 (z3.27)"
-    assert 19 in n907 and 18 not in n907, "ns0.907 should keep snap_019 (z2.6), drop snap_018 (z2.67)"
+    # ns0.907: snaps 16..19 hold z 3.2, 3.0, 2.8, 2.6 (17 and 18 relabelled from their raw headers, S4/F8 repair);
+    # snap_015 has no grid_480 raw file and is not discovered
+    n907 = sorted(snap for sim, snap, sd, raw in pairs if "ns0.907Ap1.5e-09" in sim)
+    assert {16, 17, 18, 19} <= set(n907) and 15 not in n907, n907
     print(f"OK discovery dedup: {len(pairs)} LF pairs, one per (sim,z_grid)")
 
 
 def test_build_tau0_rows_tier_p_matches_priya():
     SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
     SNAP = 17; NK = 172; ZIDX = 8; ROW = 344
-    snap_dir = Path(f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}")
-    raw = Path(f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
+    snap_dir = _HCD_ROOT / SIM / f"snap_{SNAP:03d}"
+    raw = _EMU_LF / SIM / "output" / f"SPECTRA_{SNAP:03d}" / "lya_forest_spectra_grid_480.hdf5"
     if not (snap_dir.exists() and raw.exists()):
-        print("SKIP test_build_tau0_rows_tier_p_matches_priya (data unavailable)"); return
-    priya = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/mf_emulator_flux_vectors_tau1000000.hdf5"
+        _unavailable("test_build_tau0_rows_tier_p_matches_priya: data unavailable")
+    priya = _PRIYA_FILE
     with h5py.File(priya, "r") as f:
         alpha = float(f["params"][ROW, 0])
         P_priya = f["flux_vectors"][ROW, ZIDX*NK:(ZIDX+1)*NK].astype(np.float64)
         kp = f["kfkms"][ROW, ZIDX, :].astype(np.float64)
-    rows, _ = bt0.build_tau0_rows(SIM, SNAP, snap_dir, raw,
+    rows, _ = bt0.build_tau0_rows(SIM, SNAP, _hist(snap_dir), raw,
                                   alpha_slope_grid=np.array([alpha]), n_k=NK)
     r = rows[0]
     assert r["kfkms"].shape == (NK,) and r["P_tier_p"].shape == (NK,)
@@ -229,21 +235,23 @@ def test_build_tau0_rows_tier_p_matches_priya():
     print("OK build_tau0_rows native-grid Tier-P bit-identical")
 
 
-def test_merge_v3_synthetic(tmp_path=Path("/tmp")):
+def test_merge_v3_synthetic(tmp_path):
     import scripts.merge_tau0_cache as mg
     import hcd_analysis.priya_p1d as pp
     nk = 172
     for si in range(2):
         rows = _fake_rows(nk, nrows=2)
         for r in rows:
-            r["snap_group_idx"] = 0  # one snap per shard
+            r["snap_group_idx"] = 0  # one snap per shard: every row belongs to the shard's one snap block
+            r["sim_name"], r["snap"] = f"sim{si}", 0
         blocks = [_fake_snap_block(f"sim{si}", 0)]
         bt0.write_cache_tau0(rows, blocks, tmp_path / f"shard_{si}.h5",
-                             alpha_range=(1.0, 1.2), n_k=nk)
+                             alpha_range=(1.0, 1.2), n_k=nk, inputs=[], settings={})
     out = tmp_path / "merged.h5"
-    mg.merge_shards([str(tmp_path / f"shard_{i}.h5") for i in range(2)], out)
+    mg.merge_shards([str(tmp_path / f"shard_{i}.h5") for i in range(2)], out,
+                    historical_reason="synthetic shards without inputs")
     with h5py.File(out, "r") as f:
-        assert f.attrs["cache_version"] == "3.3"
+        assert f.attrs["cache_version"] == "3.4"
         assert f.attrs["tier_c_recipe"] == "uniform"
         assert f.attrs["n_k"] == nk
         assert f["P_tier_p"].shape == (4, nk)
@@ -281,10 +289,10 @@ def test_v33_uniform_schema_roundtrip():
     rows = [_row(0), _row(1)]
     snap_blocks = [_fake_snap_block("nsTEST", 1)]
     out = os.path.join(tempfile.mkdtemp(), "c.h5")
-    bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(0.0, 1.0), n_k=nk)
+    bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(0.0, 1.0), n_k=nk, inputs=[], settings={})
     with h5py.File(out, "r") as f:
-        assert f.attrs["cache_version"] == "3.3", \
-            f"expected cache_version='3.3', got '{f.attrs['cache_version']}'"
+        assert f.attrs["cache_version"] == "3.4", \
+            f"expected cache_version='3.4', got '{f.attrs['cache_version']}'"
         assert f.attrs["tier_c_recipe"] == "uniform"
         assert "P_tier_c_frozen" not in f, "frozen tier should be removed in v3.3"
         assert "tau_freeze_tierc" not in f.attrs, "tau_freeze_tierc attr should be gone"
@@ -300,11 +308,11 @@ def test_v33_uniform_schema_roundtrip():
 def test_filtered_tier_c_reconstructs_priya():
     SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
     SNAP, NK = 17, 172
-    sd = Path(f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}")
-    raw = Path(f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
+    sd = _HCD_ROOT / SIM / f"snap_{SNAP:03d}"
+    raw = _EMU_LF / SIM / "output" / f"SPECTRA_{SNAP:03d}" / "lya_forest_spectra_grid_480.hdf5"
     if not (sd.exists() and raw.exists()):
-        print("SKIP filtered_tier_c (data unavailable)"); return
-    rows, _ = bt0.build_tau0_rows(SIM, SNAP, sd, raw, np.array([1.0]), n_k=NK)
+        _unavailable("filtered_tier_c: data unavailable")
+    rows, _ = bt0.build_tau0_rows(SIM, SNAP, _hist(sd), raw, np.array([1.0]), n_k=NK)
     r = rows[0]
     assert r["P_tier_c_filtered"].shape == (bt0_pp.N_TIER_C_BINS, NK)
     N = int(r["tier_c_counts"].sum())
@@ -337,14 +345,16 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
     N_K is READ from the ref (525), not hardcoded — confirms Tier P (tau_thresh=1e6)
     is bit-identical to PRIYA's hires flux vectors."""
     import json
-    HR_REF = "/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2/mf_emulator_flux_vectors_tau1000000.hdf5"
-    EMU_HR = "/scratch/yueyingn_root/yueyingn0/mfho/priya/emu_full_hires_2"
-    HCD_BASE = "/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"   # discover appends /hires
+    # The 6-simulation PRIYA HR product (60 rows = 6 sims x 10 rungs, 17 z, 525 modes); its scratch copy beside the
+    # raw spectra is gone, the upstream copy is the reference (gate B, 2026-10).
+    HR_REF = _ext("HCD_UPSTREAM_HR_DIR", "mf_emulator_flux_vectors_tau1000000.hdf5")
+    EMU_HR = str(_EMU_HR)
+    HCD_BASE = str(_HCD_ROOT)   # discover appends /hires
     if not Path(HR_REF).exists():
-        print("SKIP HR bit-identity (6-sim ref unavailable)"); return
+        _unavailable("HR bit-identity: 6-sim reference unavailable")
     pairs = bt0.discover_tau0_pairs(HCD_BASE, EMU_HR, fidelity="hr")
     if not pairs:
-        print("SKIP HR bit-identity (no HR Phase-1 catalogs)"); return
+        _unavailable("HR bit-identity: no HR Phase-1 catalogs")
     cand = None
     for sim, snap, sd, raw in pairs:
         z = bt0._snap_z_to_priya_grid(json.load(open(sd / "meta.json"))["z"])
@@ -352,7 +362,19 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
             cand = (sim, snap, sd, raw); break
     assert cand, "no HR z=3.0 pair"
     sim, snap, sd, raw = cand
-    my_params = bt0._read_priya_params(raw)            # 9 cosmo in bec.PARAM_ORDER
+    # The scratch copy of the HR runs has lost its SimulationICs.json (scratch purge; spectra re-copied 2026-08-18).
+    # An HR run re-simulates an LF design point with the same cosmology, so the parameters come from the LF run's ICs
+    # when the HR file is absent; the PRIYA-HR6 parameter match below checks that they are the right ones.
+    read_params = bt0._read_priya_params
+    if not (Path(raw).resolve().parents[2] / "SimulationICs.json").exists():
+        lf_ics = _EMU_LF / sim / "SimulationICs.json"
+        if not lf_ics.exists():
+            _unavailable(f"HR bit-identity: no SimulationICs.json for {sim} (HR or LF)")
+        lf_like = _EMU_LF / sim / "output" / "SPECTRA_000" / "unused.hdf5"   # only parents[2] is used
+
+        def read_params(_raw_tau_path, _f=bt0._read_priya_params, _p=lf_like):
+            return _f(_p)
+    my_params = read_params(raw)                       # 9 cosmo in bec.PARAM_ORDER
     with h5py.File(HR_REF, "r") as f:
         params = f["params"][...]; fv = f["flux_vectors"][...]
         zout = f["zout"][...]
@@ -364,8 +386,13 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
         zidx = int(np.argmin(np.abs(zout - 3.0)))
         P_priya = fv[row, zidx*NK:(zidx+1)*NK].astype(np.float64)
         kp = f["kfkms"][row, zidx, :].astype(np.float64)
-    rows, _ = bt0.build_tau0_rows(sim, snap, sd, raw,
-                                  alpha_slope_grid=np.array([alpha]), n_k=NK)
+    orig = bt0._read_priya_params
+    bt0._read_priya_params = read_params               # build_tau0_rows reads the parameters through the same helper
+    try:
+        rows, _ = bt0.build_tau0_rows(sim, snap, _hist(sd), raw,
+                                      alpha_slope_grid=np.array([alpha]), n_k=NK)
+    finally:
+        bt0._read_priya_params = orig
     r = rows[0]
     assert r["kfkms"].shape == (NK,), f"expected {NK} k-bins, got {r['kfkms'].shape}"
     assert np.max(np.abs(r["kfkms"] / kp - 1)) < 1e-10, "HR native k-grid mismatch"
@@ -387,17 +414,15 @@ if __name__ == "__main__":
     test_dndx_class_edges_match_fine_nhi_edges()
     test_locate_raw_tau_file_finds_grid_file()
     test_locate_raw_tau_file_returns_none_when_missing()
-    test_raw_spectra_index_ns0907_ladder_offset()
-    test_locate_raw_tau_file_ns0907_snap17_maps_to_spectra018()
     test_snap_z_to_priya_grid()
     test_grid_in_dir_requires_grid_480()
     test_discover_lf_pairs_sorted_no_hires()
     test_discover_hr_pairs_six_sims()
     test_discover_dedups_one_snap_per_grid_z()
     test_read_priya_params_matches_priya_array()
-    test_write_cache_tau0_round_trip()
+    test_write_cache_tau0_round_trip(Path(tempfile.mkdtemp()))       # a fresh directory per run, as pytest's tmp_path
     test_v33_uniform_schema_roundtrip()
-    test_merge_v3_synthetic()
+    test_merge_v3_synthetic(Path(tempfile.mkdtemp()))
     test_build_tau0_rows_tier_p_matches_priya()
     test_filtered_tier_c_reconstructs_priya()
     test_build_tau0_rows_hr_matches_priya_6sim()

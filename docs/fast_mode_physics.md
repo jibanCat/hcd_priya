@@ -139,7 +139,7 @@ Interpretation: the residual excess is universal across the PRIYA parameter extr
 **Superseded** — see [`docs/masking_strategy.md`](masking_strategy.md) for the final answer. The short version:
 
 1. The sum-rule catalogue is used *only* for classification / statistics (CDDF, f(NHI,X), per-sightline class labels).
-2. For P1D masking we use the literal PRIYA recipe (arXiv:2306.05471 §3.3): spatially mask only sightlines with `max(τ) > 10⁶`, with one contiguous region around the argmax, bounded where `τ > 0.25 + τ_eff`, filled with `τ_eff`. This is already implemented in `masking.priya_dla_mask_row` / `p1d.compute_p1d_priya_masked`.
+2. For P1D masking we use the literal PRIYA recipe (arXiv:2306.05471 §2.7): spatially mask only sightlines with `max(τ) > 10⁶`, with one contiguous region around the argmax, bounded where `τ > 0.25 + τ_eff`, filled with `τ_eff`. This is already implemented in `masking.priya_dla_mask_row` / `p1d.compute_p1d_priya_masked`.
 3. LLS and subDLA *residual* contamination is handled in P1D-space via the Rogers+2018 α template, not by any spatial mask.
 
 My earlier recommendation of a "τ-space per-class mask generalisation" was wrong: it over-masks LLS and subDLA (they have no meaningful damping wings), removes real forest power at low k, and adds mask-edge artefacts at k > 0.02 s/km (cyclic). `masking.apply_tauspace_mask_to_batch` is retained only for diagnostics. See `docs/bugs_found.md` §#6 and `docs/masking_strategy.md` for the evidence and correction.
@@ -149,6 +149,6 @@ My earlier recommendation of a "τ-space per-class mask generalisation" was wron
 - **Ladenburg, R. & Reiche, F.** 1913, *Annalen der Physik*, **347**, 181 ("Über selektive Absorption") — original oscillator-strength sum-rule paper (verified on NASA ADS bibcode 1913AnP...347..181L).
 - **Draine, B. T.** 2011, *Physics of the Interstellar and Intergalactic Medium*, Princeton University Press — cited as a standard textbook reference; I have not personally re-checked specific equation numbers.
 - **Prochaska, J. X., Madau, P., O'Meara, J. M., & Fumagalli, M.** 2014, *MNRAS*, **438**, 476 (arXiv:1310.0052) — validated against Table 2 "Results for Spline Model (Figure 7)"; the 8 spline knot values in our code match exactly. The fit is quoted by the paper as applying at **z ≈ 2.5**; our use of it at higher z in `cddf_per_z.png` is **extrapolation**, not a claim backed by the paper.
-- **Rogers, K. K., Bird, S., Peiris, H. V., Pontzen, A., Font-Ribera, A., Leistedt, B.** 2018, *MNRAS*, **476**, 3716 (arXiv:1706.08532) — the HCD-template reference that motivates the P1D spatial-mask recipe and the α-parameter correction.
+- **Rogers, K. K., Bird, S., Peiris, H. V., Pontzen, A., Font-Ribera, A., Leistedt, B.** 2018, *MNRAS*, **474**, 3032 (arXiv:1706.08532) — the HCD-template reference that motivates the P1D spatial-mask recipe and the α-parameter correction.
 - **Bird, S.** `fake_spectra` — https://github.com/sbird/fake_spectra — the spectral generation code whose output we consume; uses the canonical oscillator-strength normalisation.
 - **Bird, S.** `dla_data` — https://github.com/sbird/dla_data — repository of observational DLA CDDF / dN/dX tabulations. Our `regen_intermediate_figures.py` script pulls the PW09, N12, and Ho+2021 dN/dX tables verbatim from this repo. No other observational comparison data is used.

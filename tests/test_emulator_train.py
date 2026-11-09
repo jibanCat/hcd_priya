@@ -6,17 +6,18 @@ trips predictions bit-for-bit; grad_norm is finite; and the Task-14 error-vector
 aggregator's shape + DLA high-k shot flag.
 
 Run (env mandatory):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_emulator_train.py -v
 """
 import numpy as np
 import jax
 import jax.numpy as jnp
+import pytest
 import equinox as eqx
 
 from tests.emulator._fixture import write_synthetic_cache
 from hcd_analysis.emulator.data import (
-    load_cache, fit_target_norm, make_batch, kfold_loso,
+    load_cache_historical, fit_target_norm, make_batch, kfold_loso,
 )
 from hcd_analysis.emulator.model import Emulator, joint_loss
 from hcd_analysis.emulator.model import p_resid_loss
@@ -76,7 +77,7 @@ def test_grad_norm_finite():
 def _small_cache(tmp_path):
     path = tmp_path / "obs.h5"
     write_synthetic_cache(path, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=N_K)
-    return load_cache(path)
+    return load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
 
 
 def _check_history(hist):
@@ -129,7 +130,7 @@ def test_checkpoint_roundtrip(tmp_path):
     pred0 = jax.vmap(model)(jnp.asarray(x), jnp.asarray(tau0))
 
     prefix = str(tmp_path / "ckpt")
-    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=2)
+    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=2, cache=d, cache_path=str(tmp_path / "obs.h5"))
     model2, meta, norm2 = load_checkpoint(prefix)
 
     pred1 = jax.vmap(model2)(jnp.asarray(x), jnp.asarray(tau0))
@@ -160,8 +161,9 @@ def test_checkpoint_roundtrip(tmp_path):
 
 
 def test_padded_batch_matches_unpadded(tmp_path):
-    """CS-I2: a padded fixed-size batch gives loss/grad numerically identical
-    (~1e-12) to the unpadded ragged batch (padding contributes nothing), and the
+    """CS-I2: a padded fixed-size batch gives the loss of the unpadded ragged batch
+    (to 1e-12) and its gradients up to float64 rounding (padding contributes nothing),
+    padding content cannot leak (garbage in the padded rows changes nothing), and the
     padded batch has the FIXED (batch_size, ...) leading shape."""
     from hcd_analysis.emulator.data import fit_target_norm, make_batch
     d = _small_cache(tmp_path)
@@ -185,9 +187,35 @@ def test_padded_batch_matches_unpadded(tmp_path):
     lr, gr = eqx.filter_value_and_grad(joint_loss)(m, ragged)
     lp, gp = eqx.filter_value_and_grad(joint_loss)(m, padded)
     assert abs(float(lr) - float(lp)) <= 1e-12 * max(1.0, abs(float(lr)))
+    # The padded and ragged batches reduce over arrays of different shapes, so XLA may reassociate the sums: the
+    # gradients then differ by rounding at the scale of each leaf's largest gradient, not of each element (measured
+    # <= 9 eps of it under jax 0.10.1 and 0.10.2). The bound is 64 eps of that scale; a padding leak is O(1) of it.
+    eps = np.finfo(np.float64).eps
     for a, b in zip(jax.tree_util.tree_leaves(eqx.filter(gr, eqx.is_array)),
                     jax.tree_util.tree_leaves(eqx.filter(gp, eqx.is_array))):
-        assert np.allclose(np.asarray(a), np.asarray(b), atol=1e-12, rtol=0)
+        a, b = np.asarray(a), np.asarray(b)
+        assert np.all(np.isfinite(b))
+        assert np.max(np.abs(a - b)) <= 64 * eps * np.max(np.abs(a))
+    # masking: large garbage in every padded value that is not a mask or a cell index changes nothing, first with the
+    # zero weights inv_nc / inv_nalpha kept (both protections), then with garbage weights too (the masks alone)
+    rng = np.random.default_rng(20261027)
+    n_real = len(ragged["x"])
+    for keep in (("inv_nc", "inv_nalpha"), ()):
+        garbage = dict(padded)
+        for k, v in padded.items():
+            if k in ("n_cells", "mask", "t_f_nhi_mask", "t_dndx_mask", "cell") + keep:
+                continue
+            g = np.asarray(v).copy()
+            if g.dtype.kind == "f":
+                g[n_real:] = rng.uniform(-1e3, 1e3, g[n_real:].shape)
+                garbage[k] = jnp.asarray(g)
+        lg, gg = eqx.filter_value_and_grad(joint_loss)(m, garbage)
+        assert abs(float(lg) - float(lp)) <= 1e-12 * max(1.0, abs(float(lp)))
+        for a, b in zip(jax.tree_util.tree_leaves(eqx.filter(gp, eqx.is_array)),
+                        jax.tree_util.tree_leaves(eqx.filter(gg, eqx.is_array))):
+            a, b = np.asarray(a), np.asarray(b)
+            assert np.all(np.isfinite(b))
+            assert np.max(np.abs(a - b)) <= 64 * eps * np.max(np.abs(a))
 
 
 def test_padded_batch_matches_unpadded_with_structural_zeros_and_nan(tmp_path):
@@ -317,7 +345,7 @@ def test_train_fold_kweight_term_w_resid_earlystop(tmp_path):
     d = _small_cache(tmp_path)
     folds = kfold_loso(d["sim_name"], n_folds=4)
     tr, va = folds[0]
-    kw = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=3.0, lowk_extra=2.0)
+    kw = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=3.0, lowk_extra=2.0)
     term_w = {"f_nhi": 1., "dndx": 1., "p_base": 1., "p_resid": 4., "delta": 1.}
     # short pre-fit so the baseline is frozen (auto -> residual early-stop), long-ish
     # joint loop + small patience so the residual rises after its min and we stop.
@@ -351,31 +379,67 @@ def test_train_fold_joint_earlystop_backcompat(tmp_path):
     assert abs(float(evaluate(model, val_batch)) - best_val) <= 1e-6
 
 
-def test_checkpoint_meta_has_kgrid(tmp_path):
-    """M4: saved .meta.json records the k-grid (kfkms + n_k) and the cache id, and
-    load reconstructs. n_k matches len(kfkms)."""
+def test_checkpoint_schema_v2_stores_k_com_not_a_velocity_grid(tmp_path):
+    """Schema 2.0 (incident 2026-10-05): the meta carries the validated comoving modes and the convention
+    string; it never carries a velocity grid (the old row-0 'kfkms')."""
     import json
+    from hcd_analysis.emulator import schema as S
     d = _small_cache(tmp_path)
     folds = kfold_loso(d["sim_name"], n_folds=4)
     tr, va = folds[0]
-    arch_cfg = {"in_dim": 10, "n_k": N_K, "n_basis": None}
     model, norm_stats, _ = train_fold(
         d, tr, va, n_basis=None, lr=1e-3, epochs=3, batch_size=8,
         seed=0, key=jax.random.PRNGKey(0),
     )
-    prefix = str(tmp_path / "ckpt_kg")
+    prefix = str(tmp_path / "ckpt_v2")
     cache_path = str(tmp_path / "obs.h5")
-    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=0,
-                    kfkms=d["kfkms"], cache_path=cache_path)
+    save_checkpoint(prefix, model, {"in_dim": 10, "n_k": N_K, "n_basis": None}, norm_stats, seed=0,
+                    cache=d, cache_path=cache_path)
     with open(prefix + ".meta.json") as f:
         meta = json.load(f)
-    assert meta["n_k"] == N_K
-    assert len(meta["kfkms"]) == N_K
-    assert np.allclose(meta["kfkms"], d["kfkms"][0])
-    assert meta["cache_path"] == cache_path
-    # load_checkpoint still round-trips with the enriched meta
+    assert meta["schema_version"] == S.CHECKPOINT_SCHEMA_VERSION
+    assert "kfkms" not in meta
+    assert np.allclose(meta["k_com_hmpc"], S.k_com_hmpc_from_cache(d)) and meta["n_k"] == N_K
+    assert meta["k_convention"] == S.K_CONVENTION and meta["L_box_hmpc"] == S.L_BOX_HMPC
+    assert meta["cache_path"] == cache_path and len(meta["cache_sha256"]) == 64
     model2, meta2, norm2 = load_checkpoint(prefix)
-    assert meta2["n_k"] == N_K and meta2["cache_path"] == cache_path
+    assert meta2["schema_version"] == "2.0" and meta2["n_k"] == N_K
+
+
+def test_save_checkpoint_refuses_old_kfkms_keyword(tmp_path):
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+    model, norm_stats, _ = train_fold(
+        d, tr, va, n_basis=None, lr=1e-3, epochs=1, batch_size=8,
+        seed=0, key=jax.random.PRNGKey(0),
+    )
+    with pytest.raises(TypeError):
+        save_checkpoint(str(tmp_path / "x"), model, {"in_dim": 10, "n_k": N_K, "n_basis": None}, norm_stats,
+                        seed=0, kfkms=d["kfkms"])
+
+
+def test_load_checkpoint_refuses_schema_v1(tmp_path):
+    import json
+    from hcd_analysis.emulator import schema as S
+    d = _small_cache(tmp_path)
+    folds = kfold_loso(d["sim_name"], n_folds=4)
+    tr, va = folds[0]
+    model, norm_stats, _ = train_fold(
+        d, tr, va, n_basis=None, lr=1e-3, epochs=1, batch_size=8,
+        seed=0, key=jax.random.PRNGKey(0),
+    )
+    prefix = str(tmp_path / "v1")
+    save_checkpoint(prefix, model, {"in_dim": 10, "n_k": N_K, "n_basis": None}, norm_stats, seed=0, cache=d,
+                    cache_path=str(tmp_path / "obs.h5"))
+    with open(prefix + ".meta.json") as f:
+        meta = json.load(f)
+    del meta["schema_version"]
+    meta["kfkms"] = [float(v) for v in d["kfkms"][0]]           # the pre-2026-10 layout
+    with open(prefix + ".meta.json", "w") as f:
+        json.dump(meta, f)
+    with pytest.raises(S.SchemaCollapseError, match=r"docs/kgrid_incident_2026-10\.md"):
+        load_checkpoint(prefix)
 
 
 def test_checkpoint_roundtrip_nondefault_baseline_depth(tmp_path):
@@ -403,7 +467,8 @@ def test_checkpoint_roundtrip_nondefault_baseline_depth(tmp_path):
     recipe = {"w_coh": 80.0, "edge_gain": 3.0, "lowk_extra": 2.0, "datarange": True,
               "term_w": {"f_nhi": 1.0, "p_resid": 8.0}}
     prefix = str(tmp_path / "ckpt_deep")
-    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=7, recipe=recipe)
+    save_checkpoint(prefix, model, arch_cfg, norm_stats, seed=7, recipe=recipe, cache=d,
+                    cache_path=str(tmp_path / "obs.h5"))
 
     with open(prefix + ".meta.json") as f:
         meta = json.load(f)
@@ -543,7 +608,7 @@ def test_train_fold_finalized_recipe_runs_with_debias_and_datarange(tmp_path):
     d = _small_cache(tmp_path)
     folds = kfold_loso(d["sim_name"], n_folds=4)
     tr, va = folds[0]
-    kw = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=3.0, lowk_extra=2.0)
+    kw = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=3.0, lowk_extra=2.0)
     term_w = {"f_nhi": 1., "dndx": 1., "p_base": 1., "p_resid": 8., "delta": 1.}
     model, norm, hist = train_fold(
         d, tr, va, n_basis=N_K, lr=1e-2, epochs=40, batch_size=8, seed=0,

@@ -34,9 +34,11 @@ sufficient; ns>0.98 is the edge term, NOT certified.
 
 Output: figures/analysis/04_emulator/mf_cemu_floor.{png,txt,npz}. New script; no commit.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_mf_cemu_floor.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -48,7 +50,7 @@ import jax.numpy as jnp
 from hcd_analysis.emulator import multifidelity as MF
 from hcd_analysis.emulator.data import Z_LIMITS
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 FIGDIR = f"{REPO}/figures/analysis/04_emulator"
 TXT = f"{FIGDIR}/mf_cemu_floor.txt"
 NPZ = f"{FIGDIR}/mf_cemu_floor.npz"
@@ -83,8 +85,8 @@ def cache_logP(cache, row, eval_logk, extrap):
 
 
 def main():
-    lf_cache = MF.load_cache(MF.LF_CACHE)
-    hr_cache = MF.load_cache(MF.HR_CACHE)
+    lf_cache = MF.load_cache_historical(MF.LF_CACHE, reason='diagnostic of the historical cache (scripts/diag_mf_cemu_floor.py)')
+    hr_cache = MF.load_cache_historical(MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/diag_mf_cemu_floor.py)')
     pairs = MF.match_hr_to_lf(lf_cache, hr_cache)
     hr_sim_of_pair = np.array([
         (hr_cache["sim_name"][h].decode()

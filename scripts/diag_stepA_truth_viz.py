@@ -20,10 +20,12 @@ the becker13-anchored tau0 rung per z — EXACTLY closure_legb.make_truth_from_s
 interpolated onto a common canonical LF k-grid before averaging.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_stepA_truth_viz.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import numpy as np
 import h5py
@@ -33,15 +35,15 @@ import matplotlib.pyplot as plt
 
 import jax.numpy as jnp
 
-from hcd_analysis.emulator.data import load_cache, Z_LIMITS
+from hcd_analysis.emulator.data import load_cache_historical, Z_LIMITS
 from hcd_analysis.emulator.closure_legb import (
     CACHE_PATH, held_out_sims, make_truth_from_sim, build_legb_ctx,
 )
 from hcd_analysis.emulator.meanflux_prior import becker13_tau0
 from hcd_analysis.emulator import multifidelity as MF
 
-OUT = "/home/mfho/hcd_priya/figures/analysis/05_likelihood"
-HR_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
+OUT = f"{_REPO_ROOT}/figures/analysis/05_likelihood"
+HR_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
 
 # Fiducial targets: (label, fold, target n_s). M4 is the HR truth (n_s ~= 0.979).
 FIDUCIALS = [
@@ -478,7 +480,7 @@ def main():
     import os
     os.makedirs(OUT, exist_ok=True)
     print("loading LF cache ...")
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/diag_stepA_truth_viz.py)')
 
     resolved = resolve_fiducials(d)
     m4 = resolve_m4(d)

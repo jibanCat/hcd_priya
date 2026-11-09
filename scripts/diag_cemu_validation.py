@@ -37,11 +37,13 @@ Conventions (matched to inference.py / run_loso_sweep.py):
 Does NOT modify any committed library module. Proposes (does not edit) the DATA_RANGE k_max.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/diag_cemu_validation.py [--max-rows N]
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import functools
@@ -58,17 +60,17 @@ import h5py
 
 from hcd_analysis.emulator import train as T
 from hcd_analysis.emulator.data import (
-    load_cache, make_splits, datarange_mask, DATA_RANGE, COARSE_NAMES,
+    load_cache_historical, make_splits, datarange_mask, DATA_RANGE, COARSE_NAMES,
 )
 from hcd_analysis.emulator.predict import predict_P_filt
 from hcd_analysis.emulator.inference import predict_P_obs_and_cov_single_z
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 CKPT = f"{REPO}/checkpoints/final_fold0"
 ERROR_VECTOR = f"{REPO}/checkpoints/error_vector.npz"
 FIGDIR = f"{REPO}/figures/analysis/05_likelihood"
 
-# Kim2013 ladder (== data.KIM_AMP/SLOPE) for the z-band edge selection commentary only.
+# Kim07 ladder (== data.KIM_AMP/SLOPE) for the z-band edge selection commentary only.
 _KIM_AMP, _KIM_SLOPE = 2.3e-3, 3.65
 
 
@@ -562,7 +564,7 @@ def _xclass_revalidate(args):
         pf_by_fold.append({k: jnp.asarray(norm["P_filt"][k])
                            for k in ("mu_marg", "sig_marg", "sig_cosmo")})
     cache_path = meta["cache_path"]
-    d = load_cache(cache_path)
+    d = load_cache_historical(cache_path, reason='diagnostic of the historical cache (scripts/diag_cemu_validation.py)')
     nyq = lf_nyquist_kmax(cache_path, kgrid)
     k_max = nyq["k_max_proposed"]
 
@@ -646,7 +648,7 @@ def main():
           f"τ₀-centres {np.array2string(np.asarray(alpha_centres), precision=3)}; "
           f"z-edges {z_band_edges}; n_dla_shot={int(dla_shot_flag_k.sum())}")
 
-    d = load_cache(cache_path)
+    d = load_cache_historical(cache_path, reason='diagnostic of the historical cache (scripts/diag_cemu_validation.py)')
     train_idx, val_idx, holdout_idx = make_splits(d, 0)
     print(f"fold-0 split: train={len(train_idx)} val(held-out)={len(val_idx)} "
           f"holdout(τ₀-edge)={len(holdout_idx)}")

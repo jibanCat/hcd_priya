@@ -21,16 +21,20 @@
 #SBATCH --cpus-per-task=21
 #SBATCH --mem-per-cpu=8g
 #SBATCH --time=08:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/hcd_lf_rerun_%A_%a.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/hcd_lf_rerun_%A_%a.err
+#SBATCH --output=logs/hcd_lf_rerun_%A_%a.out
+#SBATCH --error=logs/hcd_lf_rerun_%A_%a.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=mfho@umich.edu
 
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
-HCD_ROOT="/home/mfho/hcd_priya"
+HCD_ROOT="$REPO"
 PYTHON="/sw/pkgs/arc/mamba/py3.11/bin/python3"
 HCD_CONFIG="${HCD_ROOT}/config/default.yaml"
+# The 2026-05 production root below holds results but no run_settings.json, so the pipeline now refuses to run
+# into it (hcd_analysis/run_settings.py). For a new run, set OUTPUT_ROOT to a new directory.
 OUTPUT_ROOT="/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"
 SIM_LIST="${HCD_ROOT}/sim_list.txt"
 mkdir -p "${HCD_ROOT}/logs"; cd "${HCD_ROOT}"
@@ -41,7 +45,7 @@ echo "=== LF re-run: array ${SLURM_ARRAY_TASK_ID} -> ${SIM_NAME}  $(date)"
 echo "CPUs: ${SLURM_CPUS_PER_TASK:-21}"
 
 # n_workers=1 (one sim/task); n_workers_skewer = all CPUs (intra-snap); resume:false
-"$PYTHON" -m cli.run run-sim \
+"$PYTHON" -m hcd_analysis.cli.run run-sim \
   --config "$HCD_CONFIG" \
   --output-root "$OUTPUT_ROOT" \
   --set "n_workers=1" \

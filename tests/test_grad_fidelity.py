@@ -5,7 +5,7 @@ is smooth and its autodiff Jacobian matches central finite differences end-to-en
 (encoder -> SVD-basis HeadB -> exp reconstruction -> structural Tier-P -> HCD add-back),
 i.e. HMC/NUTS will not hit a non-differentiable op or a NaN gradient.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_grad_fidelity.py -v
 """
 import hcd_analysis.emulator  # noqa: F401  enables jax_enable_x64

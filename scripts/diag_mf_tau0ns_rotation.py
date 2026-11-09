@@ -12,9 +12,11 @@ C_post = (F+P)^{-1} the gate built) under three forwards — LF, MF-OFF (pure se
 MF-ON (separable+rank-1) — and reports the ABSOLUTE marginal widths + the r(τ₀,n_s),
 per fold, that the aliasing txt did not print. Forward-only Fisher; no NUTS; no commit.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_mf_tau0ns_rotation.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util as _ilu
 import numpy as np
 
@@ -27,14 +29,14 @@ from hcd_analysis.emulator.inference import PARAM_NAMES
 
 # Import the gate's wired forward + cpost_for_sim verbatim (do NOT re-implement).
 _spec = _ilu.spec_from_file_location(
-    "mfprobe", "/home/mfho/hcd_priya/scripts/diag_mf_gate_aliasing_probes.py")
+    "mfprobe", f"{_REPO_ROOT}/scripts/diag_mf_gate_aliasing_probes.py")
 # the probe module runs a full analysis on import; instead load only the funcs we need
 # by importing the gate-bias module's forward and re-using cpost_for_sim's definition.
 # cpost_for_sim lives in the probe module but that module executes on import. To avoid
 # re-running it, we replicate the tiny import surface here by exec'ing only the defs.
 import types
 _probe_src = open(
-    "/home/mfho/hcd_priya/scripts/diag_mf_gate_aliasing_probes.py").read()
+    f"{_REPO_ROOT}/scripts/diag_mf_gate_aliasing_probes.py").read()
 # cut the script at the first top-level emit() driver call so only defs execute.
 _cut = _probe_src.index('emit("# T3 GATE aliasing probes')
 _mod = types.ModuleType("mfprobe_defs")
@@ -44,7 +46,7 @@ exec(compile(_probe_src[:_cut], "diag_mf_gate_aliasing_probes.py(defs)", "exec")
 cpost_for_sim = _mod.cpost_for_sim
 build_heads = _mod.build_heads
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 FIGDIR = f"{REPO}/figures/analysis/04_emulator"
 RESULTS = f"{FIGDIR}/mf_tau0ns_rotation.txt"
 NPZ = f"{FIGDIR}/mf_tau0ns_rotation.npz"
@@ -64,7 +66,7 @@ emit("#")
 emit("# fold sim                       σ(n_s)  σ(n_s) σ(n_s)  | σ(τ0) σ(τ0) σ(τ0) | r(τ0,n_s)")
 emit("#                                  LF    OFF    ON      |  LF    OFF    ON   | LF   OFF   ON")
 
-lf_cache = MF.load_cache(MF.LF_CACHE); hr_cache = MF.load_cache(MF.HR_CACHE)
+lf_cache = MF.load_cache_historical(MF.LF_CACHE, reason='diagnostic of the historical cache (scripts/diag_mf_tau0ns_rotation.py)'); hr_cache = MF.load_cache_historical(MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/diag_mf_tau0ns_rotation.py)')
 pairs = MF.match_hr_to_lf(lf_cache, hr_cache)
 hr_sims = sorted(set(s.decode() if isinstance(s, bytes) else s
                      for s in hr_cache["sim_name"]))

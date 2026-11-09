@@ -15,7 +15,7 @@ correct: autodiff==finite-diff to ~1e-7). This asks whether they are PHYSICALLY 
   Q5  emulator Fisher CORRELATION vs PRIYA's published posterior covmat correlation.
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_grad_physics.py
 Writes figures/analysis/05_likelihood/grad_physics.png + grad_physics.json.
 """
@@ -32,7 +32,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from hcd_analysis.emulator import train as T
 from hcd_analysis.emulator.predict import predict_P_tier_p, predict_P_filt
 
@@ -95,7 +95,7 @@ def rep_row(d, z_fid):
 
 def main():
     OUTDIR.mkdir(parents=True, exist_ok=True)
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/diag_grad_physics.py)')
     model, meta, norm = T.load_checkpoint(CKPT)
     pf = norm["P_filt"]
     theta0 = jnp.full(9, 0.5)

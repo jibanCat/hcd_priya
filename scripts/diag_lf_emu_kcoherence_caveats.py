@@ -12,18 +12,20 @@ Also CACHES the pooled per-(sim,z) coherent residual → mf_cemu_lfcoh_pool.npz 
 OUTPUT: figures/analysis/04_emulator/lf_emu_kcoherence_caveats.{png}, the npz cache, console.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os, sys, time
 import numpy as np
-sys.path.insert(0, "/home/mfho/hcd_priya")
+sys.path.insert(0, _REPO_ROOT)
 import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 
 import hcd_analysis.emulator  # noqa: F401
 from hcd_analysis.emulator import train as T
-from hcd_analysis.emulator.data import make_splits, load_cache
+from hcd_analysis.emulator.data import make_splits, load_cache_historical
 from hcd_analysis.emulator.closure_legb import CACHE_PATH
 from scripts.build_xclass_error_vector import fold_rfrac
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 CKPT = f"{REPO}/checkpoints/final_fold"
 OUT_PNG = os.environ.get(
     "CEMU_OUT_PNG", f"{REPO}/figures/analysis/04_emulator/lf_emu_kcoherence_caveats.png")
@@ -48,7 +50,7 @@ CLEAN = 0
 
 def main():
     t0 = time.time()
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/diag_lf_emu_kcoherence_caveats.py)')
     kf = np.asarray(d["kfkms"]); kcol = np.nanmedian(kf, axis=0)
     kband = (kcol >= K_LO) & (kcol <= K_HI)
     kb = kcol[kband]

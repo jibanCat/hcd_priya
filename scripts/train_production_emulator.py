@@ -10,12 +10,20 @@ all members share the SAME row-val split (VAL_SEED fixed) so the ensemble isolat
 optimisation/init scatter. C_emu = the existing 8-fold error_vector.npz (the LOSO generalisation budget,
 conservative for an all-sims model trained on MORE data).
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/train_production_emulator.py --seed 0
+Release lineage (2026-10): the cache is read through the strict ``data.load_cache`` (format 3.4, lineage record,
+release eligibility; the file is hashed at load) and its path is required (no default). The run refuses a dirty tree or
+an unknown commit before reading anything, and again when the checkpoint is saved; the meta records the full commit
+(``git_sha``), ``code_dirty`` false, the cache digest hashed at load (``cache_sha256``) and its lineage-record digest.
+Outputs go to ``<out-dir>/<name>_seed<S>.{eqx,meta.json,norm.pkl,hist.json}``, both given on the command line, never
+overwritten, and never the historical ensemble's names or directory.
+
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+     python3 scripts/train_production_emulator.py --cache CACHE_v34.h5 --out-dir DIR --name NAME --seed 0
 """
 from __future__ import annotations
-import argparse, json, time
-from pathlib import Path
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
+import argparse, json, os, sys, time
 import numpy as np
 import jax
 
@@ -23,9 +31,11 @@ import hcd_analysis.emulator  # noqa: F401  x64 before jax
 from hcd_analysis.emulator import train as T
 from hcd_analysis.emulator.data import load_cache, edge_emphasis_k_weight
 
-REPO = "/home/mfho/hcd_priya"
-CACHE = f"{REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-OUT = f"{REPO}/checkpoints/final_prod"          # → final_prod_seed{S}.{eqx,meta.json,norm.pkl}
+REPO = _REPO_ROOT
+# the historical ensembles' basenames and directory: a release run never writes there
+HISTORICAL_NAMES = ("final_prod", "prod_repaired", "prod_hist")
+HISTORICAL_DIR = os.path.join(REPO, "checkpoints")
+OUTPUT_EXTS = (".eqx", ".meta.json", ".norm.pkl", ".hist.json")
 VAL_SEED = 12345                                 # FIXED row-val split (shared across ALL ensemble members)
 VAL_FRAC = 0.10                                  # ~10% random rows held out for restore-best early-stop ONLY
 
@@ -35,29 +45,52 @@ RECIPE = dict(n_basis=24, p_resid_w=8.0, edge_gain=3.0, lowk_extra=2.0,
               epochs=180, patience=25, lr=1e-3, batch=512)
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--seed", type=int, required=True, help="ensemble-member seed (→ final_prod_seed{S})")
-    ap.add_argument("--cache", default=CACHE)
-    ap.add_argument("--out", default=OUT)
-    args = ap.parse_args()
+def output_prefix(out_dir, name, seed):
+    """``<out_dir>/<name>_seed<seed>``, refused (SystemExit) if ``name`` is not a plain file name, is one of the
+    historical ensembles' names, ``out_dir`` is the historical checkpoints directory, or any output file exists."""
+    if not name or os.sep in name or name.startswith(".") or name in HISTORICAL_NAMES:
+        sys.exit(f"refusing --name {name!r}: a plain file name, distinct from the historical {HISTORICAL_NAMES}")
+    if os.path.realpath(out_dir) == os.path.realpath(HISTORICAL_DIR):
+        sys.exit(f"refusing --out-dir {out_dir}: the historical checkpoints directory")
+    prefix = os.path.join(out_dir, f"{name}_seed{seed}")
+    clash = [prefix + e for e in OUTPUT_EXTS if os.path.lexists(prefix + e)]
+    if clash:
+        sys.exit(f"refusing: {clash} exist (a release member is never overwritten)")
+    return prefix
 
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--seed", type=int, required=True, help="ensemble-member seed (→ <name>_seed{S})")
+    ap.add_argument("--cache", required=True, help="the release training cache (format 3.4)")
+    ap.add_argument("--out-dir", required=True, help="output directory (created if missing)")
+    ap.add_argument("--name", required=True, help="member basename (→ <out-dir>/<name>_seed{S}.*)")
+    ap.add_argument("--holdout-sim", default=None,
+                    help="leave this simulation out entirely (gate C upstream-matched leave-one-simulation-out)")
+    args = ap.parse_args(argv)
+
+    try:
+        code = T.release_code_identity()                          # before anything is read
+    except ValueError as e:
+        sys.exit(f"refusing: {e}")
+    ckpt = output_prefix(args.out_dir, args.name, args.seed)
     t0 = time.time()
-    d = load_cache(args.cache)
+    d = load_cache(args.cache)                                    # strict: 3.4, lineage, eligibility; hashed at load
+    print(f"[prod] code {code['commit']} (clean); cache sha256 {d['cache_sha256']} (hashed at load)")
     n_rows = d["P_tier_p"].shape[0]; n_k = d["P_tier_p"].shape[1]
     n_sims = len(set(d["sim_name"]))
     # ALL-SIMS split: fixed random row-val (same for every member), train on the rest. ALL τ₀ rungs
     # included (NO τ₀-edge holdout — the production model should be accurate everywhere it's evaluated).
-    perm = np.random.default_rng(VAL_SEED).permutation(n_rows)
-    n_val = int(VAL_FRAC * n_rows)
-    val_idx = np.sort(perm[:n_val]); train_idx = np.sort(perm[n_val:])
+    from hcd_analysis.emulator.data import production_row_split
+    train_idx, val_idx, held_idx = production_row_split(d["sim_name"], val_seed=VAL_SEED, val_frac=VAL_FRAC,
+                                                        holdout_sim=args.holdout_sim)
     print(f"[prod] cache {args.cache}: {n_rows} rows, n_k={n_k}, {n_sims} sims  ({time.time()-t0:.1f}s)")
-    print(f"[prod] ALL-SIMS split: train={len(train_idx)} val={len(val_idx)} (row-val frac {VAL_FRAC}, "
-          f"VAL_SEED={VAL_SEED}); member seed={args.seed}")
+    print(f"[prod] split: train={len(train_idx)} val={len(val_idx)} held-out sim rows={len(held_idx)} "
+          f"(row-val frac {VAL_FRAC}, VAL_SEED={VAL_SEED}, holdout_sim={args.holdout_sim}); member seed={args.seed}")
 
     # FINAL_RECIPE weighting (identical to run_loso_sweep)
     term_w = {"f_nhi": 1.0, "dndx": 1.0, "p_base": 1.0, "p_resid": RECIPE["p_resid_w"], "delta": 1.0}
-    k_weight = edge_emphasis_k_weight(d["kfkms"][0], edge_gain=RECIPE["edge_gain"],
+    k_weight = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=RECIPE["edge_gain"],
                                       lowk_extra=RECIPE["lowk_extra"])
 
     tf = time.time()
@@ -70,14 +103,16 @@ def main():
     print(f"[prod] seed {args.seed}: {n_ep} epochs in {time.time()-tf:.0f}s; best_val={best_val:.6g}")
 
     arch_cfg = {"in_dim": 10, "n_k": n_k, "n_basis": RECIPE["n_basis"]}
-    recipe = dict(RECIPE, all_sims=True, val_frac=VAL_FRAC, val_seed=VAL_SEED,
+    recipe = dict(RECIPE, all_sims=args.holdout_sim is None, holdout_sim=args.holdout_sim,
+                  val_frac=VAL_FRAC, val_seed=VAL_SEED,
                   n_train=int(len(train_idx)), n_val=int(len(val_idx)))
-    ckpt = f"{args.out}_seed{args.seed}"
+    os.makedirs(args.out_dir, exist_ok=True)
     T.save_checkpoint(ckpt, model, arch_cfg, norm_stats, seed=args.seed,
-                      kfkms=d["kfkms"], cache_path=args.cache, recipe=recipe)
+                      cache=d, cache_path=args.cache, recipe=recipe, release=True, code=code)
     hist_json = {k: np.asarray(v).astype(float).tolist() for k, v in history.items()}
     hist_json["recipe"] = recipe
-    Path(f"{ckpt}.hist.json").write_text(json.dumps(hist_json, indent=2))
+    with open(f"{ckpt}.hist.json", "x") as fh:
+        fh.write(json.dumps(hist_json, indent=2))
     print(f"[prod] checkpoint → {ckpt}.eqx/.meta.json/.norm.pkl/.hist.json  (total {time.time()-t0:.0f}s)")
 
 

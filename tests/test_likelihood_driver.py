@@ -12,7 +12,7 @@ POST-REVIEW REGRESSIONS (the production NaN path the original fixture missed):
   I1  a degenerate C (zero diagonal) gives finite logL + grad (SPD jitter).
   inflate  cemu_inflate scales the emulator variance.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_likelihood_driver.py -v
 """
 import hcd_analysis.emulator  # noqa: F401  enables jax_enable_x64

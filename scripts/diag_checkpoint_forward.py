@@ -10,7 +10,7 @@ A single multi-panel figure for the checkpoint review:
       (the field-standard "is the emulator error sub-dominant" check).
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_checkpoint_forward.py
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from hcd_analysis.emulator import train as T
 from hcd_analysis.emulator import inference as I
 from hcd_analysis.emulator.predict import predict_P_filt, _excess_from_P_filt, predict_P_obs
@@ -38,7 +38,7 @@ DATA_FRAC = 0.05   # DESI-like per-mode fractional data error (illustrative)
 
 
 def main():
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/diag_checkpoint_forward.py)')
     model, meta, norm = T.load_checkpoint(CKPT)
     pf = norm["P_filt"]
     ev = np.load(str(ROOT / "checkpoints/error_vector.npz"))

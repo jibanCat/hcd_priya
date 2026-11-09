@@ -15,9 +15,11 @@ and LF. Report σ_τ0(ON)/σ_τ0(OFF) (PASS ≤1.05) and |r(τ₀,n_s)(ON) − r
 worst (max |Δr|) over the τ₀ z-bins. C_post = (F+P)^{-1}; F is the SAME Fisher the bias
 run builds (forward Jacobian), so this reads the joint (n_s,τ₀) geometry directly.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_mf_gate_aliasing_probes.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 
 import hcd_analysis.emulator
@@ -33,9 +35,9 @@ from hcd_analysis.emulator.data import Z_LIMITS
 
 # reuse the wired forward from the gate script
 import importlib.util as _ilu
-_spec = _ilu.spec_from_file_location("mfgate", "/home/mfho/hcd_priya/scripts/diag_emu_bias_allfolds_mf.py")
+_spec = _ilu.spec_from_file_location("mfgate", f"{_REPO_ROOT}/scripts/diag_emu_bias_allfolds_mf.py")
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 FIGDIR = f"{REPO}/figures/analysis/04_emulator"
 RESULTS = f"{FIGDIR}/emu_bias_allfolds_mf_aliasing.txt"
 HOLD0 = f"{REPO}/checkpoints/error_vector_xclass_holdout0.npz"
@@ -136,7 +138,7 @@ def build_heads(fold, lf_cache, hr_cache, pairs, hr_sims):
 emit("# T3 GATE aliasing probes G4.2 (τ₀-width inflation) + G4.3 (∂g/∂n_s structural).")
 emit("# u_tau FIXED to the physical mean-flux axis (Step-0).")
 
-lf_cache = MF.load_cache(MF.LF_CACHE); hr_cache = MF.load_cache(MF.HR_CACHE)
+lf_cache = MF.load_cache_historical(MF.LF_CACHE, reason='diagnostic of the historical cache (scripts/diag_mf_gate_aliasing_probes.py)'); hr_cache = MF.load_cache_historical(MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/diag_mf_gate_aliasing_probes.py)')
 pairs = MF.match_hr_to_lf(lf_cache, hr_cache)
 hr_sims = sorted(set(s.decode() if isinstance(s, bytes) else s for s in hr_cache["sim_name"]))
 hr_row_sim = np.array([s.decode() if isinstance(s, bytes) else s

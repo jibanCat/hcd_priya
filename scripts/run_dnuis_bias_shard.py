@@ -35,8 +35,10 @@ truth boost must sit OFF the pin center to be a real test:
   eboss = 1.30  (no per-survey pin → forward keeps the cosmic average; 1.30 is a deliberate STRESS
                  offset since eBOSS is low-k/cosmic and otherwise carries no LLS excess)
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse
 import functools
 import glob
@@ -55,7 +57,7 @@ from hcd_analysis.emulator.closure_legb import (build_legb_ctx, run_legb, prod_f
 from hcd_analysis.emulator.inference import (HCD_LLS_SURVEY_BOOST,
                                              HCD_LLS_SURVEY_FRAC_SIGMA)
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
 RES_INSTR_BASIS = os.path.join(REPO, "hcd_analysis", "_emulator_data", "res_instr_injection_basis.npz")
 
@@ -202,6 +204,7 @@ def build_arm_ctx(arm, survey, with_mf, with_eboss_unused=None, *, b_res=0.02, f
     # build_legb_ctx assembles DESI+KS(+eBOSS); we then keep ONLY the chosen survey's leg(s) so the
     # arm fits a single-survey likelihood (the bias is per-survey).  survey= sets the LLS pin.
     ctx, d = build_legb_ctx(
+        historical_reason="historical analysis on the deployed cache (closure_legb.CACHE_PATH)",
         ensemble_ckpts=members, use_xclass=True,
         with_mf=with_mf, mf_with_floor=with_mf,
         res_corr_on=_res_corr_on,                          # NORC: True (default) off; False under use_prod_forward (deployed)

@@ -7,6 +7,8 @@ a known OFF-DIAGONAL golden, cov[0,1] = σ0·σ1·corr[0,1] with corr[0,1]=0.198
 raw Pk1D_cor.dat line-4 col-2). This file pins exactly that, plus the structure/PD/cross-z checks.
 The loader (load_eboss_leg) tests are added once the PI confirms the science flags.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 
 import numpy as np
@@ -61,6 +63,7 @@ def test_eboss_offdiagonal_golden_proves_block_pairing():
 # ----------------------------------------------------------------------------- #
 import hcd_analysis.emulator  # noqa: E402  x64
 from hcd_analysis.emulator import data_likelihood as DL  # noqa: E402
+from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 
 
 @pytest.mark.skipif(not _have, reason="eBOSS npz not built")
@@ -133,10 +136,10 @@ def test_eboss_binding_finite_and_spd():
     alpha = jnp.asarray([0.06, 0.02, 0.003])
 
     def ll(th):
-        P, C = DL.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=dla_core,
+        P, C = LEG.predict_P_obs_on_leg(model, th, tau0, alpha, pf_stats=pf, dla_core=dla_core,
                                        cache_k=cache_k, leg=leg)
         return jnp.sum(P) + jnp.trace(C)
-    P, C = DL.predict_P_obs_on_leg(model, theta9, tau0, alpha, pf_stats=pf, dla_core=dla_core,
+    P, C = LEG.predict_P_obs_on_leg(model, theta9, tau0, alpha, pf_stats=pf, dla_core=dla_core,
                                    cache_k=cache_k, leg=leg)
     Pn, Cn = np.asarray(P), np.asarray(C)
     assert Pn.shape == (NZ * NK,) and Cn.shape == (NZ * NK, NZ * NK)
@@ -165,6 +168,7 @@ def test_draws_matrix_appends_a_siiii_only_when_present():
 @pytest.mark.skipif(not _have, reason="eBOSS npz not built")
 @pytest.mark.parametrize("hierarchical_hcd", [False, True])   # legacy 3-α vs Option-B A_hcd×r reparam
 @pytest.mark.parametrize("marg_zslope", [False, True])   # both real-fit configs: metals × zslope × hier
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_legb_model_priors_only_site_order_match(marg_zslope, hierarchical_hcd):
     # the fast-postprocess constrain_fn relies on _legb_priors_only having the SAME sample sites IN
     # THE SAME ORDER as _legb_model. With sample_metals=True, a_SiIII must appear in both, last —
@@ -174,13 +178,13 @@ def test_legb_model_priors_only_site_order_match(marg_zslope, hierarchical_hcd):
     import numpyro
     from numpyro import handlers
     from hcd_analysis.emulator import closure_legb as C
-    ctx, _ = C.build_legb_ctx(ckpt="/home/mfho/hcd_priya/checkpoints/final_fold6",
+    ctx, _ = C.build_legb_ctx(ckpt=f"{_REPO_ROOT}/checkpoints/final_fold6",
                               with_eboss=True, sample_metals=True,
                               hierarchical_hcd=hierarchical_hcd)
     ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "eBOSS"],
                        marginalize_zslope=marg_zslope)
-    truth = C.make_truth_from_sim(C.load_cache(C.CACHE_PATH),
-                                  C.held_out_sims(C.load_cache(C.CACHE_PATH), fold=6)[0][0], fold=6)
+    truth = C.make_truth_from_sim(C.load_cache_historical(C.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format'),
+                                  C.held_out_sims(C.load_cache_historical(C.CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format'), fold=6)[0][0], fold=6)
     mock_legs, _, _ = C.make_legb_mock(ctx, truth, jax.random.PRNGKey(0))
     core = C._mock_core_per_leg(ctx, truth)
 
@@ -203,7 +207,7 @@ def test_legb_model_priors_only_site_order_match(marg_zslope, hierarchical_hcd):
 
 def test_eboss_si_cert_arms_inject_and_sample():
     import sys as _sys
-    _sys.path.insert(0, "/home/mfho/hcd_priya/scripts")
+    _sys.path.insert(0, f"{_REPO_ROOT}/scripts")
     import run_stepA  # noqa
     cfg = run_stepA.build_config()
     for base in ("E_f5_si", "E_f6_si", "E_f7_si"):

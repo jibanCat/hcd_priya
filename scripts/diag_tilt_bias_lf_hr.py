@@ -29,7 +29,7 @@ and the HR τ₀ caches, fold-0 LOSO. Three pieces:
      ns & Ap, for LF and HR separately over their own k-ranges.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_tilt_bias_lf_hr.py
 Writes figures + a JSON summary to figures/analysis/04_emulator/.
 """
@@ -48,7 +48,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from hcd_analysis.emulator.data import (load_cache, make_splits, cell_id, safe_log,
+from hcd_analysis.emulator.data import (load_cache_historical, make_splits, cell_id, safe_log,
                                         fit_baseline_residual_norm)
 from hcd_analysis.emulator.model import Encoder, HeadB, svd_basis_init
 
@@ -207,7 +207,7 @@ def _train_resid(d, tr, Ttr, mtr, nb, n_k, epochs, lr, bs=512, seed=0, wd=1e-5):
 # ===========================================================================
 def train_fold0(fid):
     path, n_folds, n_k = CACHES[fid]
-    d = load_cache(path)
+    d = load_cache_historical(path, reason='diagnostic of the historical cache (scripts/diag_tilt_bias_lf_hr.py)')
     tr, va, ho = make_splits(d, 0, n_folds)
     pf = fit_baseline_residual_norm(d, tr)
     mu, sm, sc, cm = pf["mu_marg"], pf["sig_marg"], pf["sig_cosmo"], pf["cell_mean"]
@@ -246,8 +246,8 @@ def train_fold0(fid):
 def tilt_diagnostic(R):
     """Per-class deployed frac error vs k; tilt = slope of ⟨frac⟩ vs log10 k.
 
-    Builds a per-class median frac-error profile on a common finite k-grid (the
-    cache k-grid is the same across rows up to the Nyquist mask), then fits a
+    Builds a per-class median frac-error profile on a common finite k-grid (a LABEL: the
+    per-row velocity grids differ with z and Omega_m, see incident note 2026-10-05), then fits a
     line in log10 k and reports low-/high-k band means + the KODIAQ-band mean."""
     fid = R["fid"]
     frac = np.exp(R["logP_hat"] - R["logP_true"]) - 1.0    # (n,4,K) deployed frac err

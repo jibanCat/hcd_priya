@@ -23,7 +23,7 @@ pytestmark = pytest.mark.filterwarnings(
     "ignore:A JAX array is being set as static:UserWarning")
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator.data import (
-    load_cache, fit_target_norm, reconstruct_P_filt, Z_LIMITS,
+    load_cache_historical, fit_target_norm, reconstruct_P_filt, Z_LIMITS,
 )
 from tests.emulator._fixture import write_synthetic_cache
 
@@ -253,7 +253,7 @@ def lf_backbone(tmp_path):
     """A tiny trained-free LF Emulator + norm fit on a synthetic cache."""
     path = tmp_path / "lf.h5"
     write_synthetic_cache(path, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=1)
-    d = _sanitize_unit_cube(load_cache(path))
+    d = _sanitize_unit_cube(load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format'))
     norm = fit_target_norm(d, np.arange(len(d["z_grid"])))
     n_k = d["P_tier_p"].shape[1]
     model = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(0))
@@ -534,7 +534,7 @@ def test_train_global_linear_head_reduces_loss_and_ap_prior(tmp_path):
     lfp = tmp_path / "lf.h5"; hrp = tmp_path / "hr.h5"
     write_synthetic_cache(lfp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
     write_synthetic_cache(hrp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
-    lf = _sanitize_unit_cube(load_cache(lfp)); hr = _sanitize_unit_cube(load_cache(hrp))
+    lf = _sanitize_unit_cube(load_cache_historical(lfp, reason='test: a cache in the pre-lineage 3.3 format')); hr = _sanitize_unit_cube(load_cache_historical(hrp, reason='test: a cache in the pre-lineage 3.3 format'))
     pairs = MF.match_hr_to_lf(lf, hr)
     norm = fit_target_norm(lf, np.arange(len(lf["z_grid"])))
     model = Emulator(in_dim=10, n_k=lf["P_tier_p"].shape[1], n_basis=4,
@@ -566,7 +566,7 @@ def test_build_default_head_builds_fixed_mean(tmp_path):
     lfp = tmp_path / "lf.h5"; hrp = tmp_path / "hr.h5"
     write_synthetic_cache(lfp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
     write_synthetic_cache(hrp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
-    lf = _sanitize_unit_cube(load_cache(lfp)); hr = _sanitize_unit_cube(load_cache(hrp))
+    lf = _sanitize_unit_cube(load_cache_historical(lfp, reason='test: a cache in the pre-lineage 3.3 format')); hr = _sanitize_unit_cube(load_cache_historical(hrp, reason='test: a cache in the pre-lineage 3.3 format'))
     pairs = MF.match_hr_to_lf(lf, hr)
     norm = fit_target_norm(lf, np.arange(len(lf["z_grid"])))
     model = Emulator(in_dim=10, n_k=lf["P_tier_p"].shape[1], n_basis=4,
@@ -597,17 +597,18 @@ def test_match_and_measure_and_train(tmp_path):
     stream aligns and every HR row matches an LF row exactly on the (params, z,
     alpha) key) -- the real HR cache likewise hits exact LF design points."""
     lfp = tmp_path / "lf.h5"; hrp = tmp_path / "hr.h5"
-    write_synthetic_cache(lfp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
-    write_synthetic_cache(hrp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
-    lf = _sanitize_unit_cube(load_cache(lfp))
-    hr = _sanitize_unit_cube(load_cache(hrp))
+    # 172 true box modes so the synthetic band reaches the 0.05 s/km eval grid (the fixture keeps the first n_k modes).
+    write_synthetic_cache(lfp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=172, seed=7)
+    write_synthetic_cache(hrp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=172, seed=7)
+    lf = _sanitize_unit_cube(load_cache_historical(lfp, reason='test: a cache in the pre-lineage 3.3 format'))
+    hr = _sanitize_unit_cube(load_cache_historical(hrp, reason='test: a cache in the pre-lineage 3.3 format'))
     pairs = MF.match_hr_to_lf(lf, hr)
     assert len(pairs) == len(hr["z_grid"])           # all HR rows match an LF row
 
     norm = fit_target_norm(lf, np.arange(len(lf["z_grid"])))
     model = Emulator(in_dim=10, n_k=lf["P_tier_p"].shape[1], n_basis=4,
                      key=jax.random.PRNGKey(0))
-    lf_logk = np.log10(lf["kfkms"][0])
+    lf_logk = np.log10(lf["kfkms"][0])   # PRE-2026-10 INTERFACE (row-0 label of the MF mapping); rebuilt at gate D
     # eval grid stays within the synthetic LF k-support (no extrap needed here).
     k_eval, eval_logk = MF.build_eval_grid(hr, k_max=0.05, n_k=16)
     tg = MF.measure_delta_targets(lf, hr, model, norm, lf_logk, eval_logk, pairs)

@@ -34,7 +34,9 @@ sim, snap, snap_dir, raw = cand[0]
 print(f"sim={sim[:24]} snap={snap} z_meta={zmeta(snap_dir):.3f} raw={raw.name}")
 print(f"alphas={ALPHAS}  n_skewers={N_SKEWERS}  n_k={N_K}\n")
 
-rows, _ = bt0.build_tau0_rows(sim, snap, snap_dir, raw, ALPHAS, N_K,
+from hcd_analysis.tau0_cache import load_snapshot_inputs_historical
+_inputs, _ = load_snapshot_inputs_historical(snap_dir, reason="diagnostic: Tier-C response to tau0 on the old root")
+rows, _ = bt0.build_tau0_rows(sim, snap, _inputs, raw, ALPHAS, N_K,
                               n_skewers=N_SKEWERS)
 
 # counts (alpha-invariant)

@@ -1,5 +1,5 @@
 """Single source of truth: literature HCD dN/dX tables, estimand-named (corrected-law
-re-derivation, spec hcd_priya_notes/docs/superpowers/2026-07-18-corrected-law-spec.md sec 2.1).
+re-derivation; internal record: the 2026-07-18 corrected-law spec, section 2.1).
 
 Every array is ESTIMAND-NAMED and carries ``estimand`` + ``cite`` (arXiv ID) metadata.
 Provenance discipline: every number below traces to (a) the 2026-07-18 spec provenance

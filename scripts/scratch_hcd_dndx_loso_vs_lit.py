@@ -16,10 +16,12 @@ Literature dN/dX (z,val,err,src) and the lit/sim ratio centres are the repo's ow
 (lit_dndx.lit_points_for_display, corrected estimands; inference.HCD_LIT_OVER_SIM(_SLOPE)).
 
 Writes PNGs to the notes repo figures dir + a small JSON of the per-fold readouts.
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/scratch_hcd_dndx_loso_vs_lit.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import glob, json, re
 from pathlib import Path
 import numpy as np
@@ -29,13 +31,13 @@ import matplotlib.pyplot as plt
 
 import hcd_analysis.emulator  # x64 before jax
 import jax.numpy as jnp
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from hcd_analysis.emulator.dndx_wc import alpha_to_dndx
 from hcd_analysis.emulator.inference import (HCD_LIT_OVER_SIM, HCD_LIT_OVER_SIM_SLOPE,
                                              HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC, lit_over_sim_at_z)
 from hcd_analysis.emulator.closure_legb import HCD_INCIDENCE_SLOPE
 
-REPO = Path("/home/mfho/hcd_priya")
+REPO = Path(_REPO_ROOT)
 CACHE = str(REPO / "hcd_analysis/_emulator_data/observables_tau0_lf.h5")
 STEPA = REPO / "checkpoints/stepA"
 OUTDIR = Path("/home/mfho/hcd_priya_notes/figures/analysis/03_templates_and_p1d")
@@ -73,7 +75,7 @@ def chains_for(base):
 def build_xbar():
     """Xbar(z) = X_tot / N_sl from the LF cache (mean absorption path per sightline).
     N_sl inferred per snap-group from the clean-fraction Poisson identity, then averaged."""
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/scratch_hcd_dndx_loso_vs_lit.py)')
     gid = np.asarray(d["snap_group_idx"]); zrow = np.asarray(d["z_grid"])
     Xtot = np.asarray(d["snap_total_path_dX"]); wc = np.asarray(d["w_c_cache"])
     dndx = np.asarray(d["snap_dNdX"])

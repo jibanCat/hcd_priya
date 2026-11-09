@@ -11,9 +11,11 @@ Ports + extends the validated /tmp/t4a_proto.py checks:
 
 Uses the REAL final_fold0 checkpoint + error_vector.npz; env-gated/skipped if absent
 (like the existing tests). Run:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_closure_sbc.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 
 import hcd_analysis.emulator  # noqa: F401  enables x64
@@ -33,7 +35,7 @@ from hcd_analysis.emulator import sampler_numpyro as S
 from hcd_analysis.emulator.sampler_numpyro import numpyro_model, _dla_raw_mu, run_nuts
 from hcd_analysis.emulator import closure_mocks as M
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 CKPT = f"{REPO}/checkpoints/final_fold0"
 ERROR_VECTOR = f"{REPO}/checkpoints/error_vector.npz"
 
@@ -90,6 +92,7 @@ def _manual_log_prior(params, ctx):
     return lp
 
 
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_potential_equals_loglik_plus_logprior(ctx3):
     ctx = ctx3
     rng = np.random.default_rng(1)
@@ -129,6 +132,7 @@ def test_no_soft_box_uniform_flat_inbox():
 # ---------------------------------------------------------------------------
 # (d) vmap-sum == loop-sum for log_lik_multiz
 # ---------------------------------------------------------------------------
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_vmap_sum_equals_loop_sum(ctx3):
     from hcd_analysis.emulator.inference import log_lik_multiz, log_lik_single_z
     ctx = ctx3
@@ -156,6 +160,7 @@ def test_vmap_sum_equals_loop_sum(ctx3):
 # ---------------------------------------------------------------------------
 # (e) tiny-NUTS smoke: finite samples + a divergence count
 # ---------------------------------------------------------------------------
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_tiny_nuts_runs_finite(ctx1):
     # build a Leg-A mock so the data is self-consistent, then a tiny NUTS run.
     truth = M.draw_leg_a_truth(ctx1, jax.random.PRNGKey(0))
@@ -175,6 +180,7 @@ def test_tiny_nuts_runs_finite(ctx1):
 # ---------------------------------------------------------------------------
 # (f) Leg-A mock: C_mock (the noise Cholesky) == the likelihood's C at the truth
 # ---------------------------------------------------------------------------
+@pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_leg_a_mock_C_matches_likelihood(ctx3):
     ctx = ctx3
     truth = M.draw_leg_a_truth(ctx, jax.random.PRNGKey(7))

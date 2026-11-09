@@ -1,4 +1,9 @@
-"""v3.3 cache loader for the Phase-2b emulator. Returns numpy arrays (host side).
+"""Training-cache loader for the Phase-2b emulator. Returns numpy arrays (host side).
+
+``load_cache`` is the release loader: cache format 3.4 only, through ``hcd_analysis.tau0_cache.read_cache`` (a
+well-formed lineage record, the payload digest, release eligibility); it also returns the record and the file's
+sha256. A v3.3 cache (written before caches carried lineage) is historical: ``load_cache_historical(path,
+reason=...)`` reads it exactly as the v3.3 loader did.
 
 15->4 coarse-class collapse, tau0 coordinate, native-Nyquist NaN masks, and the
 analytic 1/n_c sample-variance weights. See spec sec.4, sec.7, sec.9.
@@ -10,16 +15,22 @@ via ``0·NaN``). Only a bin that is NaN across all fine sub-bins (above native
 Nyquist) stays NaN, so it can be masked out downstream.
 """
 from __future__ import annotations
+import logging
+import os
 import warnings
 import h5py, numpy as np
 
-COARSE_SLICES = (slice(0, 1), slice(1, 8), slice(8, 13), slice(13, 15))
-COARSE_NAMES = ("clean", "LLS", "subDLA", "DLA")
+from .. import lineage as _L
+from .. import tau0_cache as _T
+# the 15 -> 4 coarse collapse lives with the cache format (jax-free, shared with the carry tool's checks)
+from ..tau0_cache import COARSE_SLICES, COARSE_NAMES, _collapse_counts, _collapse_p1d  # noqa: F401
+
+_log = logging.getLogger(__name__)
 
 # --- Unit-cube input normalization (spec sec.10 / preprocessing audit) --------
 # PRIYA's design box for the production grid, pulled verbatim from the saved
 # emulator config that THIS cache reproduces:
-#   /home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/emulator_params.json
+#   <lya_emulator_full checkout>/kodiaq_2_2_4_6-48-48/emulator_params.json
 #   ("param_names":{ns:0,Ap:1,herei:2,heref:3,alphaq:4,hub:5,omegamh2:6,
 #                    hireionz:7,bhfeedback:8}, "param_limits":[...])
 # This is the actual Emulator.param_limits serialized for this grid (it widens
@@ -45,8 +56,8 @@ PARAM_LIMITS = np.array([
 # sparse in the widened corners: the Bird+2023 LHS densely sampled only the ORIGINAL coarse_grid.py
 # box, and the widening (ns_hi 0.995->1.05, herei_hi 4.1->4.5, heref_lo 2.6->2.2, alphaq_hi
 # 2.5->3.0) added only a few design points. The held-out emulator EXTRAPOLATES badly there —
-# Phase-4b closure: a mock at alphaq=2.98 recovered A_p +3.7sigma, at herei=4.46 +2.0sigma (both
-# OUTSIDE the original box), and the bias equalled the standalone emulator-LOSO Fisher bias (pure
+# Phase-4b closure: mocks at alphaq and herei values OUTSIDE the original box recovered strongly
+# biased A_p, and the bias equalled the standalone emulator-LOSO Fisher bias (pure
 # emulator edge error, not a likelihood/HCD effect). So NUTS samples the IGM params (herei, heref,
 # alphaq) only over their ORIGINAL PRIYA ranges — NO retrain (the emulator box is unchanged; we
 # just do not FIT at its corners). n_s is KEPT extended to 1.05 (PI 2026-06-08: the real n_s may
@@ -100,63 +111,65 @@ def normalize_params(params):
     hi = PARAM_LIMITS[:, 1]
     return (np.asarray(params) - lo) / (hi - lo)
 
-def _collapse_counts(counts15):
-    return np.stack([counts15[:, s].sum(1) for s in COARSE_SLICES], axis=1)
-
-def _collapse_p1d(p15, counts15):
-    """Count-weighted collapse of fine-bin P1D to coarse classes (R,15,K)->(R,4,K).
-
-    NaN-safe over fine bins. An *empty* coarse class (zero counts) collapses to
-    0.0, not NaN: the production cache stores finite zeros for empty classes
-    (see ``priya_p1d._per_class_p1d_at_scale``), and the downstream structural
-    sum ``P_tier_p = Σ_c w_c·P_filt`` weights an empty class by ``w_c=0`` — a
-    NaN there would poison the whole total via ``0·NaN=NaN``. Only a bin that is
-    NaN across *all* fine sub-bins (genuinely above native Nyquist) stays NaN so
-    it can be masked.
-
-    Corner case: when a single k mixes finite and NaN fine sub-bins within one
-    coarse class, NaN sub-bins contribute 0 while their weight stays in the
-    denominator, slightly under-weighting the surviving finite sub-bins. This is
-    a documented, accepted approximation (no behaviour change)."""
-    R, _, K = p15.shape
-    out = np.full((R, 4, K), np.nan)
-    for ci, s in enumerate(COARSE_SLICES):
-        c = counts15[:, s].astype(float)
-        w = c / np.where(c.sum(1, keepdims=True) == 0, 1.0, c.sum(1, keepdims=True))
-        seg = p15[:, s, :]
-        contrib = np.where(np.isfinite(seg), seg, 0.0) * w[:, :, None]
-        summ = contrib.sum(1)
-        # Fires only for the Nyquist-NaN case (ALL fine sub-bins NaN), NOT for
-        # zero-count empties (those have finite zeros and correctly stay 0.0).
-        allnan = (~np.isfinite(seg)).all(1)
-        summ[allnan] = np.nan
-        out[:, ci, :] = summ
+def load_cache(path, *, validate=True):
+    """Load a release training cache (format 3.4). Refused (tau0_cache.CacheLineageError) unless
+    ``tau0_cache.read_cache`` accepts it: a well-formed ``tau0_cache`` lineage record, datasets and attributes equal to
+    its payload digest, release eligibility, groups matching the record. A v3.3 or older cache is refused; read it with
+    ``load_cache_historical``. The file is hashed at load and must not change while it is read. Returns the arrays of
+    the v3.3 loader plus ``lineage`` (the record) and ``cache_sha256`` (the file's sha256, the digest a model trained
+    on it records). ``kfkms`` is PER_ROW (each row's own velocity grid); the validated GLOBAL_STATIC comoving modes
+    are exposed as ``k_com_hmpc`` (schema.py; docs/kgrid_incident_2026-10.md)."""
+    ident = _L.file_identity(path)
+    d, _attrs, rec = _T.read_cache(path)
+    st = os.stat(path)
+    if (int(st.st_size), int(st.st_mtime_ns)) != (ident["size"], ident["mtime_ns"]):
+        raise _T.CacheLineageError(f"{path}: the cache changed while it was read")
+    out = _assemble(lambda k: d[k], validate)
+    out["lineage"] = rec
+    out["cache_sha256"] = ident["sha256"]
     return out
 
-def load_cache(path):
+
+def load_cache_historical(path, *, reason, validate=True):
+    """Load a cache written before caches carried lineage (format 3.3), or a 3.4 one without checking its lineage,
+    exactly as the v3.3 loader did. ``reason`` (non-empty) is logged. Never the input of a release product: only the
+    carry tool (scripts/carry_validated_cache.py) moves historical rows into a release cache, after validating them."""
+    if not (isinstance(reason, str) and reason.strip()):
+        raise ValueError("load_cache_historical needs a non-empty reason")
     with h5py.File(path, "r") as h:
-        assert h.attrs["cache_version"] == "3.3", h.attrs.get("cache_version")
-        g = lambda k: h[k][:]
-        counts15 = g("tier_c_counts")
-        Pf15, Pu15 = g("P_tier_c_filtered"), g("P_tier_c")
-        out = dict(
-            params=g("params").astype(np.float64),
-            kfkms=g("kfkms").astype(np.float64),
-            P_tier_p=g("P_tier_p").astype(np.float64),
-            target_F=g("target_F").astype(np.float64),
-            scale=g("scale").astype(np.float64),
-            z_grid=g("z_grid").astype(np.float64),
-            z_meta=g("z_meta").astype(np.float64),
-            alpha_idx=g("alpha_idx").astype(np.int32),
-            snap_group_idx=g("snap_group_idx").astype(np.int32),
-            sim_name=np.array([s.decode() if isinstance(s, bytes) else s
-                               for s in h["sim_name"][:]]),
-            snap_dNdX=np.stack([g("snap_dNdX_LLS"), g("snap_dNdX_subDLA"),
-                                g("snap_dNdX_DLA")], axis=1),
-            snap_f_nhi=g("snap_f_nhi").astype(np.float64),
-            snap_total_path_dX=g("snap_total_path_dX").astype(np.float64),
-            snap_n_absorbers=g("snap_n_absorbers").astype(np.float64),
-        )
+        ver = h.attrs["cache_version"]
+        ver = ver.decode() if isinstance(ver, bytes) else str(ver)
+        if ver not in _T.HISTORICAL_VERSIONS:
+            raise _T.CacheLineageError(f"{path}: cache version {ver!r} is not one of {_T.HISTORICAL_VERSIONS}")
+        _log.warning("historical read of the cache %s (%s): not release-eligible", path, reason.strip())
+        return _assemble(lambda k: h[k][:], validate)
+
+
+def _assemble(get, validate):
+    """The loader's arrays from ``get(name)`` (a stored dataset)."""
+    counts15 = get("tier_c_counts")
+    Pf15, Pu15 = get("P_tier_c_filtered"), get("P_tier_c")
+    g = get
+    out = dict(
+        params=g("params").astype(np.float64),
+        kfkms=g("kfkms").astype(np.float64),
+        nbins_native=g("nbins_native").astype(np.int64),
+        dv_kms=g("dv_kms").astype(np.float64),
+        P_tier_p=g("P_tier_p").astype(np.float64),
+        target_F=g("target_F").astype(np.float64),
+        scale=g("scale").astype(np.float64),
+        z_grid=g("z_grid").astype(np.float64),
+        z_meta=g("z_meta").astype(np.float64),
+        alpha_idx=g("alpha_idx").astype(np.int32),
+        snap_group_idx=g("snap_group_idx").astype(np.int32),
+        sim_name=np.array([s.decode() if isinstance(s, bytes) else s
+                           for s in g("sim_name")]),
+        snap_dNdX=np.stack([g("snap_dNdX_LLS"), g("snap_dNdX_subDLA"),
+                            g("snap_dNdX_DLA")], axis=1),
+        snap_f_nhi=g("snap_f_nhi").astype(np.float64),
+        snap_total_path_dX=g("snap_total_path_dX").astype(np.float64),
+        snap_n_absorbers=g("snap_n_absorbers").astype(np.float64),
+    )
     coarse_counts = _collapse_counts(counts15)
     Pf4 = _collapse_p1d(Pf15, counts15)
     Pu4 = _collapse_p1d(Pu15, counts15)
@@ -182,6 +195,12 @@ def load_cache(path):
     if n_oob:
         print(f"WARN load_cache: {n_oob}/{len(out['in_domain'])} rows "
               f"out of PRIYA param domain (params_unit outside [0,1])")
+    # schema guard (incident 2026-10-05): every key classified; k_com validated across ALL rows, never row 0.
+    if validate:
+        from .schema import validate_cache_schema
+        rep = validate_cache_schema(out)
+        out["k_com_hmpc"] = np.asarray(rep["derived"]["k_com_hmpc"], np.float64)
+        out["schema_report"] = rep
     return out
 
 
@@ -413,7 +432,7 @@ def fit_target_norm(d, train_idx):
     return stats
 
 
-def edge_emphasis_k_weight(kfkms, edge_gain=3.0, lowk_extra=1.0, mid_frac=0.5):
+def edge_emphasis_k_weight(k_com_hmpc, edge_gain=3.0, lowk_extra=1.0):
     """Per-k RESIDUAL loss weight (K,): a U-shaped low/high-k EDGE emphasis.
 
     The deployed residual head is flat mid-band but biased at the band EDGES — low-k
@@ -426,17 +445,17 @@ def edge_emphasis_k_weight(kfkms, edge_gain=3.0, lowk_extra=1.0, mid_frac=0.5):
     finite k-range. The weight is ``1 + edge_gain·g(u)`` where g(u) is a symmetric
     parabola ``(2u−1)²`` (0 at mid, 1 at both edges), PLUS an extra low-k ramp
     ``lowk_extra·(1−u)`` so the A_p-relevant low-k edge gets additional pull (A_p is
-    the priority param). ``mid_frac`` is unused historically; kept for signature
-    stability. The weight is normalized to mean 1 over finite bins so the overall
+    the priority param). The input is the GLOBAL_STATIC comoving mode grid (schema.py); the profile depends
+    only on log-k position, so it is the same for every row's velocity grid. The weight is normalized to mean 1 over finite bins so the overall
     p_resid term scale (hence its balance against term_w) is unchanged — only the
     RELATIVE per-k attention shifts. Non-finite/zero k bins get weight 1.
 
     Returns a float64 (K,) array. With edge_gain=0 and lowk_extra=0 it is all-ones
     (the uniform/back-compat case).
     """
-    k = np.asarray(kfkms, dtype=np.float64)
-    if k.ndim == 2:
-        k = k[0]
+    k = np.asarray(k_com_hmpc, dtype=np.float64)
+    if k.ndim != 1:
+        raise ValueError("per-row grid passed; pass the validated k_com_hmpc (GLOBAL_STATIC), see schema.py")
     w = np.ones_like(k)
     good = np.isfinite(k) & (k > 0)
     if good.sum() < 2 or (edge_gain == 0.0 and lowk_extra == 0.0):
@@ -671,6 +690,43 @@ def kfold_loso(sim_name, n_folds=8):
         folds.append((all_idx[~is_val], all_idx[is_val]))
     return folds
 
+def production_row_split(sim_name, *, val_seed=12345, val_frac=0.10, holdout_sim=None):
+    """The production split: a fixed random row-val fraction (early stopping only) over every row, optionally after
+    removing ONE held-out simulation entirely (the upstream-matched leave-one-simulation-out protocol of gate C).
+    Returns (train_idx, val_idx, held_idx). Without ``holdout_sim`` it is exactly the historical inline split of
+    scripts/train_production_emulator.py."""
+    sim_name = np.asarray(sim_name)
+    if holdout_sim is None:
+        avail, held = np.arange(sim_name.size), np.array([], dtype=int)
+    else:
+        held = np.where(sim_name == holdout_sim)[0]
+        if held.size == 0:
+            raise ValueError(f"holdout simulation {holdout_sim!r} is not in the cache")
+        avail = np.where(sim_name != holdout_sim)[0]
+    perm = np.random.default_rng(val_seed).permutation(avail.size)
+    n_val = int(val_frac * avail.size)
+    return np.sort(avail[perm[n_val:]]), np.sort(avail[perm[:n_val]]), held
+
+
+def multi_holdout_row_split(sim_name, held_sims, *, val_seed=12345, val_frac=0.10):
+    """``production_row_split`` with a SET of held-out simulations (the split rule ``multi_holdout_row_split/1``, used
+    by grouped cross-validation folds): every row of ``held_sims`` is removed, then a fixed random ``val_frac`` of the
+    remaining rows (permutation seeded by ``val_seed``) is the validation split (early stopping only). Returns
+    (train_idx, val_idx, held_idx), sorted. With no held-out simulation it is the production split, with one it is
+    ``production_row_split``'s; numerically identical to the W-1 experiment's splitter. The number of simulations is
+    whatever the cache holds (nothing here assumes a count)."""
+    sim_name = np.asarray(sim_name).astype(str)
+    held_sims = [str(s) for s in held_sims]
+    missing = sorted(set(held_sims) - set(sim_name.tolist()))
+    if missing:
+        raise ValueError(f"held-out simulations not in the cache: {missing}")
+    is_held = np.isin(sim_name, held_sims)
+    avail, held = np.flatnonzero(~is_held), np.flatnonzero(is_held)
+    perm = np.random.default_rng(val_seed).permutation(avail.size)
+    n_val = int(val_frac * avail.size)
+    return np.sort(avail[perm[n_val:]]), np.sort(avail[perm[:n_val]]), held
+
+
 def tau0_edge_holdout(tau0, frac=0.15):
     """Hold out the low+high tau0 tails (the extrapolation probe in tau0-space)."""
     order = np.argsort(tau0)
@@ -680,7 +736,7 @@ def tau0_edge_holdout(tau0, frac=0.15):
     return tr, ho
 
 
-# Kim2013 central mean-flux curve (== tau0_rescale.obs_mean_tau_kim2013): the cache's
+# Kim07 central mean-flux curve (== tau0_rescale.obs_mean_tau_kim2013): the cache's
 # tau0 = alpha_factor * KIM_AMP*(1+z)^KIM_SLOPE, so alpha_factor = tau0/Kim(z) is the
 # z-INDEPENDENT ladder coordinate (the natural axis for a smooth sigma(tau0) interp).
 KIM_AMP, KIM_SLOPE = 2.3e-3, 3.65

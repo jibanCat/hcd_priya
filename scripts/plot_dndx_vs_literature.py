@@ -17,7 +17,7 @@ lit_dndx.lit_points_for_display). Old wrong-object arrays: tombstoned in
 hcd_analysis/emulator/lit_dndx.py, never plotted as truth again.
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_dndx_vs_literature.py
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from hcd_analysis.emulator.lit_dndx import lit_points_for_display
 from hcd_analysis.emulator.inference import HCD_LIT_DNDX_ESTIMAND, assert_dndx_law_estimand
 
@@ -49,7 +49,7 @@ CLS = ["LLS", "subDLA", "DLA"]
 
 
 def main():
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/plot_dndx_vs_literature.py)')
     gid = np.asarray(d["snap_group_idx"]); zrow = np.asarray(d["z_grid"])
     dndx = np.asarray(d["snap_dNdX"])                       # (Ngroup, 3) LLS, subDLA, DLA
     ng = dndx.shape[0]

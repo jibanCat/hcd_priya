@@ -357,7 +357,7 @@ def generate_data_layout_md(out_dir: Path) -> None:
     content = """\
 # Data Layout
 
-**Root:** `/nfs/turbo/umor-yueyingn/mfho/emu_full/`
+**Root:** the configured `data_root` (`PipelineConfig.data_root`)
 
 ## Simulation Folders (60 total)
 
@@ -818,8 +818,8 @@ def generate_pipeline_overview_md(out_dir: Path) -> None:
 Process all `fake_spectra` outputs for the lyman-alpha forest emulator at Great Lakes.
 Two simulation sets are processed:
 
-- **Low-force (LF):** 60 sims in `/nfs/turbo/umor-yueyingn/mfho/emu_full/`
-- **HiRes (HF):**      3 sims in `/nfs/turbo/lsa-cavestru/mfho/priya/emu_full_hires/`
+- **Low-force (LF):** 60 sims under the configured `data_root`
+- **HiRes (HF):**      3 sims under the configured `hires_data_root`
 
 For each (simulation, redshift) pair:
 

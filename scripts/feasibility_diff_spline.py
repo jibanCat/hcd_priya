@@ -23,13 +23,15 @@ derivatives and the per-interval Hermite blend are both linear maps of the value
 the whole evaluation is a single dense matrix ``W`` of shape (n_data, n_sim).
 
 RUN
-    PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+    PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
         /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/feasibility_diff_spline.py
 
 Writes figures to figures/analysis/04_emulator/feas_diff_spline_*.png and prints a
 verdict block. NaN-safe; x64 on.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os, sys, time
 
 import numpy as np
@@ -38,17 +40,17 @@ jax.config.update("jax_enable_x64", True)          # MANDATORY: P1D needs float6
 import jax.numpy as jnp
 from scipy.interpolate import CubicSpline
 
-sys.path.insert(0, "/home/mfho/hcd_priya")
-from hcd_analysis.emulator.data import load_cache, safe_log
+sys.path.insert(0, _REPO_ROOT)
+from hcd_analysis.emulator.data import load_cache_historical, safe_log
 from hcd_analysis.emulator.model import svd_basis_init
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-FIGDIR = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
-LF_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-HR_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
+FIGDIR = f"{_REPO_ROOT}/figures/analysis/04_emulator"
+LF_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+HR_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
 CLASSES = ("clean", "LLS", "subDLA", "DLA")
 N_BASIS = 12
 os.makedirs(FIGDIR, exist_ok=True)
@@ -217,14 +219,15 @@ def test1_differentiable_spline():
 # Helpers for real-cache accuracy
 # ===========================================================================
 def canonical_grid_and_logP(cache_path):
-    """Return (k_sim canonical row-0 grid, logP_filt (R,4,K)) for a cache.
+    """Return (k_sim row-0 grid used as a label, logP_filt (R,4,K)) for a cache (rows differ by a z- and
+    cosmology-dependent scale; incident note 2026-10-05).
 
     The cache's per-row k-grids are EXACT scalar multiples of the row-0 grid
     (per-row std of the ratio ~5e-16 — verified), i.e. a z-dependent rescale of a
     single uniform-linear template. The trained decoder emits on ONE canonical sim
     grid; we use row-0's grid as that template. logP is NaN-safe (NaN above the
     native Nyquist of the rescaled grid)."""
-    d = load_cache(cache_path)
+    d = load_cache_historical(cache_path, reason='diagnostic of the historical cache (scripts/feasibility_diff_spline.py)')
     k_sim = d["kfkms"][0].astype(np.float64)
     logP = safe_log(d["P_filt"]).astype(np.float64)     # (R,4,K) NaN above Nyquist
     return k_sim, logP, d

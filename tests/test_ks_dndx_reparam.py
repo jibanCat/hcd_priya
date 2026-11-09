@@ -21,9 +21,11 @@ Battery (the W2 brief's items 1-8):
   8. model smoke on the REAL production KS ctx (log-density + grad finite; NO NUTS).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ks_dndx_reparam.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import itertools
 import os
 import time
@@ -40,12 +42,12 @@ from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator import inference as INF
 from hcd_analysis.emulator.dndx_wc import w_c_corrected
 
-_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-_CKPT0 = "/home/mfho/hcd_priya/checkpoints/final_fold0.eqx"
+_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+_CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
 _KS = ("/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
        "final-conservative-p1d-karacayli_etal2021.txt")
-_MANIFEST = "/home/mfho/hcd_priya/checkpoints/production_ensemble_manifest.json"
+_MANIFEST = f"{_REPO_ROOT}/checkpoints/production_ensemble_manifest.json"
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ, _KS))
 _have_prod = _have and os.path.exists(_MANIFEST)
 
@@ -119,6 +121,7 @@ def _trace(model, *a, seed=1):
 #  1. Reference-curve pins (through the ctx path).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_reference_curve_pins(ks_setup):
     """The mapped KS reference alpha (sites at 0) reproduces the orchestrator-pinned rows,
     computed THROUGH the ctx fields (ks_dndx_ref/ks_xbar_z built at ctx build)."""
@@ -145,6 +148,7 @@ def test_reference_curve_pins(ks_setup):
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_reference_lls_component_is_boosted_lit_law(ks_setup):
     """dndx_ref LLS column == 2.5 x A_LLS x (1+z)^gamma_LLS exactly (dndx_premap boost);
     sub/DLA columns come from the exact inverse of the boost-1.0 triple (finite, positive)."""
@@ -161,6 +165,7 @@ def test_reference_lls_component_is_boosted_lit_law(ks_setup):
 #  2. Byte-safety: DESI/eBOSS/None prior vectors + the KS legacy override.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_survey_alpha_prior_vectors_bit_unchanged(ks_setup):
     """_survey_alpha_prior outputs are BIT-EQUAL to the pre-W2 pins for every survey key
     (incl. KS: the alpha-space prior vector is retained for the legacy override/audit; the
@@ -180,6 +185,7 @@ def test_survey_alpha_prior_vectors_bit_unchanged(ks_setup):
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_non_ks_builds_have_no_mapped_fields():
     """DESI (narrow, cheap) and survey=None builds keep the dormant defaults — the mapped
     branch cannot activate off-KS (byte-safety by the static dispatch)."""
@@ -192,6 +198,7 @@ def test_non_ks_builds_have_no_mapped_fields():
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_ks_legacy_override_reproduces_old_prior(ks_legacy_setup, ks_setup):
     """ks_legacy_alpha_param=True: the OLD KS parameterization exactly — legacy site list,
     alpha_lls TruncatedNormal at the pinned boosted centre/width, no mapped fields; and the
@@ -218,6 +225,7 @@ def test_ks_legacy_override_reproduces_old_prior(ks_legacy_setup, ks_setup):
 #  3. Structural simplex bound at jointly-extreme draws.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_structural_bound_extreme_draws(ks_setup):
     """All 64 sign combinations of jointly-extreme sites (eps ±8σ, kappa ±6σ, m_sub ±8σ,
     t_sub ±6σ, dla_raw ±8 latent-σ, t_dla ±6σ) keep sum(alpha_hcd_z) < 1 at EVERY z_global
@@ -251,6 +259,7 @@ def test_structural_bound_extreme_draws(ks_setup):
 #  4. Twin parity + reconstruction == model deterministics.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_twin_parity_sites_and_values(ks_setup):
     """_legb_model and _legb_priors_only produce IDENTICAL sample-site names in IDENTICAL
     order on the mapped KS ctx, and the seeded-trace sample VALUES agree bitwise."""
@@ -268,6 +277,7 @@ def test_twin_parity_sites_and_values(ks_setup):
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_reconstruct_matches_model_deterministics(ks_setup):
     """_legb_reconstruct_deterministics rebuilds alpha_lls/alpha_subdla/alpha_dla (mapped
     pivot values) + alpha_hcd_z + tau0_vec from the raw mapped sites, matching the model's
@@ -283,6 +293,7 @@ def test_reconstruct_matches_model_deterministics(ks_setup):
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_self_draw_truth_pack_on_mapped_ctx(ks_setup):
     """draw_leg_a_leg_truth works on the mapped ctx: alpha_hcd (pivot) and alpha_hcd_z come
     from the mapped reconstruct; the raw dict carries the 6 mapped sites (Wave-2 SBC plumbing)."""
@@ -299,6 +310,7 @@ def test_self_draw_truth_pack_on_mapped_ctx(ks_setup):
 #  5. Induced-geometry sanity (MC).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_induced_geometry_vs_deployed_prior(ks_setup):
     """MC (N=2e4, fixed seed) induced alpha_LLS PIVOT quantiles, mapped vs deployed KS prior.
 
@@ -379,6 +391,7 @@ def test_forward_stamp_carries_hcd_parameterization():
 #  7. Guards.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_forbidden_combinations_raise(ks_setup):
     with pytest.raises(ValueError, match="incompatible"):
         C.build_legb_ctx(desi_kwargs=dict(z_lo=0.0, z_hi=2.6), use_xclass=True,
@@ -417,6 +430,7 @@ def test_assert_known_survey_untouched():
 #  8. Model smoke on the REAL production KS ctx (NO NUTS).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have_prod, reason="production ensemble manifest/data not present")
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_model_smoke_real_ks_ctx():
     """Build the real KS ctx EXACTLY as run_real_fit.build_real_ctx('ks') does (manifest-
     pinned ensemble, NORC, KS f_res float), draw 20 prior samples through

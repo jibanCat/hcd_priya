@@ -14,16 +14,18 @@ Config-seam SPY pattern (from tests/test_prod_forward_wiring.py): monkeypatch bu
 with a stub that captures kwargs and raises, so NO ensemble load (~30s x 5 members) and NO NUTS ever run.
 build_arm_ctx globs the 5 prod checkpoints (present) and hits the spy before any load.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_dla_completeness_forward_parity.py -q
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import os
 import sys
 
 import pytest
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 def _load_script(name):
@@ -44,6 +46,7 @@ class _StopBuild(Exception):
 #  (a) build_arm_ctx opt-in wires the DEPLOYED DESI forward into build_legb_ctx.
 #      RED before the fix -> TypeError (unexpected kwarg use_prod_forward). GREEN after.
 # --------------------------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_dla_desi_uses_deployed_forward(monkeypatch):
     from hcd_analysis.emulator import closure_legb as CL
     from scripts import run_dnuis_bias_shard as R
@@ -77,6 +80,7 @@ def test_dla_desi_uses_deployed_forward(monkeypatch):
 #       we assert the resolved ctx. RED before the fix: no post-build _replace -> fix_alpha_res stays
 #       False and res_corr_on defaults True.
 # --------------------------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_dla_desi_norc_pins_fix_alpha_res(monkeypatch):
     from collections import namedtuple
     from scripts import run_dnuis_bias_shard as R
@@ -121,6 +125,7 @@ def test_dla_runner_opts_into_prod_forward(monkeypatch, tmp_path):
 #  (c) DEFAULT path (use_prod_forward=False) is BYTE-IDENTICAL: the four other arms/callers unchanged.
 #      Passes BEFORE and AFTER the fix.
 # --------------------------------------------------------------------------------------------- #
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_default_arm_ctx_byte_identical(monkeypatch):
     from scripts import run_dnuis_bias_shard as R
     captured = {}

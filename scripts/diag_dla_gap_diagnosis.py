@@ -12,7 +12,7 @@ lowest mode k0=5e-4 (BELOW k_min) carries a 10x boost from the mean-flux offset
 Read-only: reads the committed LF cache; writes ONE figure.
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
     scripts/diag_dla_gap_diagnosis.py
 """

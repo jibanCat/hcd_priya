@@ -7,10 +7,12 @@ transforms, per-class structure / sample-variance weights, and the
 Nyquist mask coverage. See the Phase-2b spec (sec.4, 7, 9, 10).
 
 Run:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_emulator_data_diagnostics.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import glob, os
 import numpy as np
 import matplotlib
@@ -18,11 +20,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
-from hcd_analysis.emulator.data import load_cache, signed_log, COARSE_NAMES
+from hcd_analysis.emulator.data import load_cache_historical, signed_log, COARSE_NAMES
 
 SHARD_GLOB = "/scratch/cavestru_root/cavestru0/mfho/tau0_shards/observables_tau0_lf.shard*.h5"
 N_SHARDS = 10
-OUTDIR = "/home/mfho/hcd_priya/figures/analysis/04_emulator"
+OUTDIR = f"{_REPO_ROOT}/figures/analysis/04_emulator"
 
 PARAM_NAMES = ["ns", "Ap", "herei", "heref", "alphaq",
                "hub", "omegamh2", "hireionz", "bhfeedback"]
@@ -32,7 +34,7 @@ DELTA_NAMES = ("LLS", "subDLA", "DLA")  # delta = (Pu-Pf)[:,1:]  -> classes 1..3
 def load_many(n=N_SHARDS):
     files = sorted(glob.glob(SHARD_GLOB))[:n]
     assert files, f"no shards at {SHARD_GLOB}"
-    dicts = [load_cache(f) for f in files]
+    dicts = [load_cache_historical(f, reason='diagnostic of the historical cache (scripts/plot_emulator_data_diagnostics.py)') for f in files]
     keys_cat = ["params", "kfkms", "P_tier_p", "target_F", "scale", "z_grid",
                 "z_meta", "alpha_idx", "P_filt", "delta", "coarse_counts",
                 "tau0", "mask", "w_c_cache", "inv_nc"]

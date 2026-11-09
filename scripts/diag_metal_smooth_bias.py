@@ -32,12 +32,14 @@ RESIDUAL: the metal_misspec arm injects metal_inject(P_clean, k, <F>, form="desi
 FIDUCIAL TRUTH: theta9 = unit-cube CENTRE (0.5); tau0_amp=1.0, dtau0=0.0 (Kim/PRIYA prior mean);
   alpha at the HCD-prior MEAN (ctx.alpha_hcd_mu). a_SiIII=a_SiII=0 for P_clean.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
   OMP_NUM_THREADS=4 /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_metal_smooth_bias.py
 
 READ-ONLY on all modules (a NEW script). Outputs to the NOTES repo 05_likelihood/.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os, glob, json, functools
 print = functools.partial(print, flush=True)
 
@@ -55,7 +57,7 @@ from hcd_analysis.emulator.closure_legb import (
 import hcd_analysis.emulator.data_likelihood as DL
 
 FIG = "/home/mfho/hcd_priya_notes/figures/analysis/05_likelihood"
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 os.makedirs(FIG, exist_ok=True)
 
 # fitted param pack (16):
@@ -86,6 +88,7 @@ def build_ctx():
     members = production_member_paths(checkpoints_dir=f"{REPO}/checkpoints")
     print(f"ensemble members ({len(members)}):", [os.path.basename(m) for m in members])
     ctx, d = build_legb_ctx(
+        historical_reason="historical analysis on the deployed cache (closure_legb.CACHE_PATH)",
         ensemble_ckpts=members, use_xclass=True, with_mf=True, mf_with_floor=True,
         mf_emucoh=True, mf_emucoh_offdiag_only=True, with_eboss=True, metals_on=True,
         sample_metals=True, hierarchical_hcd=False)

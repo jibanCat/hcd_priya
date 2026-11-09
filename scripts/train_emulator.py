@@ -8,10 +8,12 @@ vs-cache per-class P1D). ``--profile`` runs a single short fold and prints devic
 timing so the budget can be sized before the full k-fold sweep (cavestru0 is tight).
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/train_emulator.py [args]
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
 import os
@@ -28,7 +30,7 @@ from hcd_analysis.emulator.data import (
 )
 from hcd_analysis.emulator import train as T
 
-DEFAULT_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+DEFAULT_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 
 
 def _peak_mem_mb():
@@ -179,7 +181,7 @@ def main():
 
     arch_cfg = {"in_dim": 10, "n_k": n_k, "n_basis": args.n_basis}
     T.save_checkpoint(args.out, model, arch_cfg, norm_stats, seed=args.seed,
-                      kfkms=d["kfkms"], cache_path=args.cache)
+                      cache=d, cache_path=args.cache)
     print(f"checkpoint -> {args.out}.eqx / .meta.json / .norm.pkl")
 
     # figures + history

@@ -26,7 +26,7 @@ for a like-for-like, round-trip-exact display; DLA on the 10%-residual axis (x0.
 (0.287/0.574 DESI-family, 0.40/0.40 KS; corrected-law widths 2026-07-18). Laws + points + widths
 all come from the deployed module constants / lit_dndx (no hard-codes).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_hcd_prior_dndx_overlay_v2.py
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ import matplotlib.pyplot as plt
 
 import hcd_analysis.emulator  # x64 before jax
 import jax.numpy as jnp
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from hcd_analysis.emulator.closure_legb import CACHE_PATH
 
 OUTDIR = Path("/home/mfho/hcd_priya_notes/figures/analysis/03_templates_and_p1d")
@@ -70,7 +70,7 @@ SURVEY_Z = {"DESI": np.arange(2.2, 4.21, 0.1), "KS": np.arange(2.4, 4.61, 0.1),
 
 def sim_truth_dndx_binned():
     """The cache sim-mean dN/dX(z) per class (the truth), binned in z."""
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/plot_hcd_prior_dndx_overlay_v2.py)')
     gid = np.asarray(d["snap_group_idx"]); zrow = np.asarray(d["z_grid"])
     dndx = np.asarray(d["snap_dNdX"]); Ng = dndx.shape[0]
     zg = np.array([zrow[gid == g][0] for g in range(Ng)])

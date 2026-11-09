@@ -26,9 +26,11 @@ x-axis = k in s/km, ANGULAR (k = 2π/λ_v); kfkms is fed directly, NO /(2π).
 
 Forward-only; no NUTS, no training. Runs in ~minutes on CPU.
 
-ENV: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_loso_perk.py
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 from pathlib import Path
 
@@ -36,11 +38,11 @@ import hcd_analysis.emulator  # x64 hard-assert BEFORE jax
 import jax, jax.numpy as jnp
 
 from hcd_analysis.emulator import train as T
-from hcd_analysis.emulator.data import load_cache, datarange_mask
+from hcd_analysis.emulator.data import load_cache_historical, datarange_mask
 from hcd_analysis.emulator.predict import predict_P_filt
 from hcd_analysis.emulator.closure_legb import CACHE_PATH, held_out_sims
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 # validation figure → PRIVATE notes repo (the code README is reproduction/quickstart only)
 FIGDIR = "/home/mfho/hcd_priya_notes/figures/analysis/06_validation_summary"
 FIG = f"{FIGDIR}/loso_perk_pred_error.png"
@@ -69,7 +71,7 @@ def member_pred(model, norm, d, idx):
 
 
 def main():
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/diag_emu_loso_perk.py)')
     keep_all = datarange_mask(d) & d["mask"]          # (R,K) in-range finite
     kf = np.asarray(d["kfkms"])                        # (R,K) ANGULAR k [s/km], per-row grid
     P_true_all = np.asarray(d["P_filt"])              # (R,4,K)

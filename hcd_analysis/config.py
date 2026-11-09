@@ -106,6 +106,9 @@ class PipelineConfig:
     debug_n_snaps: int = 3
     # Resume: skip (sim, snap) pairs that already have output
     resume: bool = True
+    # Catalogue-only mode: write catalog.npz, cddf.npz and meta.json (marker done_catalogue) and no P1D product.
+    # A product setting: an output root holds either catalogue-only or full runs, never both.
+    catalogue_only: bool = False
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

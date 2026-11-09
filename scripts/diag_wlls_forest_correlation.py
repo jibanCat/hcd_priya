@@ -29,6 +29,8 @@ over, and the decision-rule product is a box-scale extrapolation down to
 posterior scale.
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import h5py
 import numpy as np
@@ -36,7 +38,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 FIG = ("/home/mfho/hcd_priya_notes/docs/superpowers/corrected-dndx-artifacts/"
        "diag_wlls_forest_correlation.png")   # working diagnostic -> NOTES repo (PI convention)
 

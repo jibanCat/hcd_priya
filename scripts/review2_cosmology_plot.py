@@ -12,23 +12,25 @@ Panel C: the MF resolution-correction rho vs tau0 at low z (from the on-disk vs_
 Panel D: HR-sim n_s coverage vs the design + eBOSS/Planck landing
          -> the MF correction's ns in [0.86,0.98] gap relative to n_P~1.0.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import h5py
 
-OUT = "/home/mfho/hcd_priya/figures/analysis/review/2026-06-08-review2-cosmology.png"
+OUT = f"{_REPO_ROOT}/figures/analysis/review/2026-06-08-review2-cosmology.png"
 
 # ---- Panel A data: z-attribution npz -----------------------------------------
-za = np.load("/home/mfho/hcd_priya/figures/analysis/04_emulator/nsbias_z_attribution.npz",
+za = np.load(f"{_REPO_ROOT}/figures/analysis/04_emulator/nsbias_z_attribution.npz",
              allow_pickle=True)
 zg = za["z_global"]; bks = za["bias_z_ks_mean"]; bds = za["bias_z_desi_mean"]
 total = float(za["allNs"].mean())
 
 # ---- Panel B data: independent LF-HR filtered-clean deficit z-trend ----------
-hr = h5py.File("/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_hr.h5", "r")
-lf = h5py.File("/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5", "r")
+hr = h5py.File(f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_hr.h5", "r")
+lf = h5py.File(f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5", "r")
 Pf_hr = hr["P_tier_c_filtered"][:, 0, :]; Pf_lf = lf["P_tier_c_filtered"][:, 0, :]
 khr = hr["kfkms"][:]; klf = lf["kfkms"][:]
 zhr = hr["z_grid"][:]; zlf = lf["z_grid"][:]

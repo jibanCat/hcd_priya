@@ -8,11 +8,12 @@ bundle (eqx leaves + JSON arch/seed meta + pickled train-split norm stats).
 Also hosts ``aggregate_error_vector`` (plan Task-14 stub): RMS-over-folds error
 vector + DLA high-k shot-noise flag, feeding the likelihood covariance.
 
-Env (MANDATORY): PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya, emu-jax python.
+Env (MANDATORY): PYTHONNOUSERSITE=1 PYTHONPATH=<repo>, emu-jax python.
 """
 from __future__ import annotations
 
 import json
+import os
 import pickle
 import subprocess
 from pathlib import Path
@@ -320,8 +321,8 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
       flat_w80; default 0 OFF, set ~80 for production). Adds
       ``w_coh·coherent_debias_term`` to the joint loss — penalizes the per-(z,τ₀)-cell
       θ-mean of the residual fit error (UNIFORM in k), flattening the coherent low-k
-      tilt the per-sim MSE leaves free. Drives gate failures 3/8→1/8, ns RMS
-      0.182→0.133σ (jax-traps #24). When >0 the early-stop metric folds it in
+      tilt the per-sim MSE leaves free (it reduced the coherent n_s error in the
+      internal gate tests). When >0 the early-stop metric folds it in
       (resid + coh) so the stop tracks both.
     - ``datarange`` (bool): SOFT down-weight out-of-range (z∉[2.2,4.6] OR k<1e-3) bins
       by ~0.2 in the P_filt-channel loss terms (keeps z>4.6's regularizing signal but
@@ -620,15 +621,18 @@ def _git_sha():
 
     Records exactly which code trained the frozen LF backbone so the MF / likelihood
     that load it are fully reproducible. Never raises — a checkpoint must still save
-    outside a git tree (returns None instead)."""
+    outside a git tree. A git-archive export (batch runs) has no .git: the batch then
+    exports the archived commit as HCD_CODE_COMMIT, used here as the fallback."""
     repo = Path(__file__).resolve().parents[2]            # .../hcd_priya
     try:
         out = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=5)
-        return out.stdout.strip() if out.returncode == 0 else None
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
     except Exception:
-        return None
+        pass
+    return os.environ.get("HCD_CODE_COMMIT") or None
 
 
 def _arch_cfg_from_model(model):
@@ -650,14 +654,72 @@ def _arch_cfg_from_model(model):
     }
 
 
-def save_checkpoint(path, model, arch_cfg, norm_stats, seed,
-                    kfkms=None, cache_path=None, recipe=None):
-    """Serialise eqx leaves + JSON meta + pickled norm_stats.
+def _sha256_or_none(path):
+    import hashlib
+    import os
+    if path is None or not os.path.isfile(str(path)):
+        return None
+    h = hashlib.sha256()
+    with open(str(path), "rb") as f:
+        for b in iter(lambda: f.read(1 << 24), b""):
+            h.update(b)
+    return h.hexdigest()
 
-    M4: the meta now records the k-grid identity so a checkpoint is self-
-    describing — ``kfkms`` (the cache's k-grid, list of floats; ``n_k`` derived
-    from it) and ``cache_path`` (the cache the model was trained on). Either may
-    be omitted (back-compat), in which case the corresponding key is null.
+
+# the schema-2.0 meta rules live in schema.py (so the release readers never import the trainer); the names stay here
+from hcd_analysis.emulator.schema import SCHEMA2_REQUIRED as _SCHEMA2_REQUIRED  # noqa: E402
+from hcd_analysis.emulator.schema import velocity_key_paths as _velocity_key_paths  # noqa: E402
+
+
+def release_cache_identity(cache):
+    """``(cache_sha256, cache_lineage_sha256)`` of a cache dict loaded by the strict ``data.load_cache``: the file's
+    sha256 hashed at load and the digest of its ``tau0_cache`` lineage record, which must be well formed and
+    release-eligible under the release finder allow-list. Refused (ValueError) for any other cache dict."""
+    from .. import lineage as _L
+    from ..catalog import RELEASE_FINDER_IDS
+    sha, rec = cache.get("cache_sha256"), cache.get("lineage")
+    if not (isinstance(sha, str) and len(sha) == 64) or not isinstance(rec, dict):
+        raise ValueError("a release member is trained on a cache loaded by the strict data.load_cache (it carries "
+                         "cache_sha256 and lineage); this cache dict does not")
+    try:
+        _L.check_record(rec, RELEASE_FINDER_IDS)
+    except _L.LineageError as e:
+        raise ValueError(f"the training cache's lineage record is refused: {e}") from None
+    if rec.get("kind") != "tau0_cache" or rec.get("release_eligible") is not True:
+        raise ValueError("the training cache is not a release-eligible tau0_cache")
+    return sha, _L.record_sha256(rec)
+
+
+def release_code_identity(expected=None):
+    """The checkout's ``{commit, dirty}`` (lineage.code_identity), refused (ValueError) unless the commit is known and
+    the tree clean (tracked files at the commit), and, with ``expected``, unchanged since then."""
+    from .. import lineage as _L
+    code = _L.code_identity()
+    if not (isinstance(code.get("commit"), str) and len(code["commit"]) == 40) or code.get("dirty") is not False:
+        raise ValueError(f"release training needs a clean tree at a known commit; code identity is {code}")
+    if expected is not None and code != expected:
+        raise ValueError(f"the code changed during training: {expected} at the start, {code} now")
+    return code
+
+
+def save_checkpoint(path, model, arch_cfg, norm_stats, seed, *, cache, cache_path=None, recipe=None, release=False,
+                    code=None):
+    """Serialise eqx leaves + JSON meta + pickled norm_stats under checkpoint schema 2.0.
+
+    The meta's ``cache_sha256`` is the digest the strict ``data.load_cache`` computed when it read the cache
+    (``cache["cache_sha256"]``); only a cache dict without it (a historical read) is hashed here from ``cache_path``.
+
+    ``release=True`` (a release ensemble member): the cache must be a release cache from the strict loader
+    (``release_cache_identity``), the checkout clean at a known commit and, with ``code`` (the identity at the start of
+    training), unchanged (``release_code_identity``); none of the three files may exist. The meta then records
+    ``git_sha`` = the full 40-hex commit, ``code_dirty`` = False, ``cache_sha256`` = the digest hashed at load,
+    ``cache_lineage_sha256`` = the digest of the cache's lineage record, and ``cache_path`` = the file name only (a
+    public bundle never carries a private path).
+
+    ``cache`` is the loaded cache dict the model was trained on. The meta records the VALIDATED comoving modes
+    ``k_com_hmpc`` (GLOBAL_STATIC, schema.py) and the coordinate convention; it never stores a velocity grid,
+    because the bins' s/km values depend on (z, theta) and are derived at prediction time (kcoord.py;
+    docs/kgrid_incident_2026-10.md).
 
     REPRODUCIBILITY (Phase-2b PR-prep): the stored ``arch_cfg`` is COMPLETED from the
     model's own static fields (``_arch_cfg_from_model`` — adds baseline_n_layers/
@@ -666,34 +728,68 @@ def save_checkpoint(path, model, arch_cfg, norm_stats, seed,
     knobs (``recipe``: w_coh, term_w, edge_gain/lowk, datarange, …). The frozen LF
     backbone the MF/likelihood load is then fully reproducible from the checkpoint
     alone — previously the recipe lived only in the separate hist.json."""
-    eqx.tree_serialise_leaves(str(path) + ".eqx", model)
     # complete the caller's arch_cfg from the model's static fields (caller-supplied
     # keys win on conflict, but the model is the source of truth for the arch).
     full_arch = _arch_cfg_from_model(model)
     full_arch.update(arch_cfg or {})
-    meta = {"arch_cfg": full_arch, "seed": int(seed),
+    from .data import PARAM_LIMITS
+    from .schema import (CHECKPOINT_SCHEMA_VERSION, K_CONVENTION, L_BOX_HMPC, SchemaCollapseError,
+                         k_com_hmpc_from_cache, validate_cache_schema)
+    import os as _os
+    if cache_path is None or not _os.path.isfile(str(cache_path)):
+        raise SchemaCollapseError(f"cache_path must name the cache file the model was trained on (got {cache_path!r}); "
+                                  "its sha256 is part of every schema-2.0 checkpoint")
+    if recipe is not None and _velocity_key_paths(recipe):
+        raise SchemaCollapseError(f"recipe carries a velocity grid key {_velocity_key_paths(recipe)}; kfkms never "
+                                  "enters a checkpoint (k is derived per request, kcoord.py)")
+    validate_cache_schema(cache)                                  # refuses a collapsed or inconsistent cache
+    k_com = np.asarray(k_com_hmpc_from_cache(cache), float)       # GLOBAL_STATIC, validated across ALL rows
+    if int(full_arch.get("n_k", k_com.shape[0])) != int(k_com.shape[0]):
+        raise ValueError(f"model n_k {full_arch.get('n_k')} != cache modes {k_com.shape[0]}")
+    at_load = cache.get("cache_sha256")
+    meta = {"schema_version": CHECKPOINT_SCHEMA_VERSION, "arch_cfg": full_arch, "seed": int(seed),
             "git_sha": _git_sha(),
             "recipe": (dict(recipe) if recipe is not None else None),
-            "cache_path": (str(cache_path) if cache_path is not None else None)}
-    if kfkms is not None:
-        # cache kfkms is (R, n_k) (per-row, shared grid); store the single k-grid.
-        kf = np.asarray(kfkms)
-        kgrid = kf[0] if kf.ndim == 2 else np.atleast_1d(kf).ravel()
-        meta["kfkms"] = kgrid.astype(float).tolist()
-        meta["n_k"] = int(kgrid.shape[0])
-    else:
-        meta["kfkms"] = None
-        meta["n_k"] = full_arch.get("n_k")
-    with open(str(path) + ".meta.json", "w") as f:
+            "cache_path": (str(cache_path) if cache_path is not None else None),
+            "cache_sha256": at_load if isinstance(at_load, str) and len(at_load) == 64 else _sha256_or_none(cache_path),
+            "k_com_hmpc": k_com.tolist(), "n_k": int(k_com.shape[0]),
+            "L_box_hmpc": float(L_BOX_HMPC), "k_convention": K_CONVENTION,
+            "param_limits": np.asarray(PARAM_LIMITS, float).tolist()}
+    if release:
+        cache_sha, rec_sha = release_cache_identity(cache)
+        code_now = release_code_identity(code)
+        meta.update(git_sha=code_now["commit"], code_dirty=False, cache_sha256=cache_sha,
+                    cache_lineage_sha256=rec_sha, cache_path=_os.path.basename(str(cache_path)))
+    mode = "x" if release else "w"                                # a release checkpoint is never overwritten
+    if release:
+        clash = [str(path) + e for e in (".eqx", ".meta.json", ".norm.pkl") if _os.path.lexists(str(path) + e)]
+        if clash:
+            raise FileExistsError(f"a release checkpoint is never overwritten: {clash}")
+    with open(str(path) + ".eqx", mode + "b") as f:
+        eqx.tree_serialise_leaves(f, model)
+    with open(str(path) + ".meta.json", mode) as f:
         json.dump(meta, f)
-    with open(str(path) + ".norm.pkl", "wb") as f:
+    with open(str(path) + ".norm.pkl", mode + "b") as f:
         pickle.dump(norm_stats, f)
 
 
 def load_checkpoint(path):
-    """Inverse of ``save_checkpoint``. Returns (model, meta, norm_stats)."""
+    """Inverse of ``save_checkpoint``. Returns (model, meta, norm_stats). Only schema-2.0 checkpoints load."""
     with open(str(path) + ".meta.json") as f:
         meta = json.load(f)
+    from .schema import CHECKPOINT_SCHEMA_VERSION, SchemaCollapseError
+    if meta.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+        raise SchemaCollapseError(
+            f"checkpoint {path} has schema {meta.get('schema_version')!r}, expected {CHECKPOINT_SCHEMA_VERSION}: "
+            "pre-2026-10 checkpoints carry a single velocity grid (kfkms) and are not loadable; see "
+            "docs/kgrid_incident_2026-10.md")
+    missing = [k for k in _SCHEMA2_REQUIRED if meta.get(k) is None]
+    if missing:
+        raise SchemaCollapseError(f"checkpoint {path}: schema-2.0 meta lacks {missing}")
+    if not (isinstance(meta["cache_sha256"], str) and len(meta["cache_sha256"]) == 64):
+        raise SchemaCollapseError(f"checkpoint {path}: cache_sha256 is not a 64-hex digest")
+    if _velocity_key_paths(meta):
+        raise SchemaCollapseError(f"checkpoint {path}: meta carries a velocity grid key {_velocity_key_paths(meta)}")
     skeleton = Emulator(**meta["arch_cfg"], key=jax.random.PRNGKey(meta["seed"]))
     model = eqx.tree_deserialise_leaves(str(path) + ".eqx", skeleton)
     with open(str(path) + ".norm.pkl", "rb") as f:

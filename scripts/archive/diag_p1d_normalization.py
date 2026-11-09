@@ -5,7 +5,7 @@ Produces the figures for hcd_priya_notes/docs/superpowers/2026-06-02-training-wa
  2. spectrum spread: per-k mean P1D +/- total std (tau0/z) vs +/- within-cell std (cosmology)
  3. fold-0 cosmology tracking: pred-dev vs true-dev from the (z,tau0)-cell mean
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_p1d_normalization.py
 """
 from __future__ import annotations

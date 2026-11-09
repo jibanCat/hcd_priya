@@ -303,3 +303,6 @@ figures/analysis/04_emulator/embias_*
 
 # internal multi-agent review scratch (archived in the notes repo)
 REVIEW_*.md
+
+# Output-bearing plotting notebook (moved out of the repository 2026-11-05); notebooks/_build_emulator_notebooks.py can regenerate it locally
+notebooks/02_emulator_plotting.ipynb

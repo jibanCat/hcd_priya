@@ -17,6 +17,8 @@ Build the production ctx exactly as run_prod_sbc_shard.py. For each held-out (fo
 Output: per-z and overall tau0_amp bias, in sigma (prior sd of the tau0_amp posterior ~ from
 the curvature), and the per-z <F> offset.  Saves a figure.
 """
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__))))
 import glob, os, sys
 import numpy as np
 
@@ -27,7 +29,7 @@ from hcd_analysis.emulator.closure_legb import (
     _mock_core_per_leg, _data_loglik_legcore, _kim, tau0_alpha_priya)
 from hcd_analysis.emulator import data_likelihood as DL
 
-REPO = "/home/mfho/hcd_priya"
+REPO = f"{_REPO_ROOT}"
 PROD_PREFIX = f"{REPO}/checkpoints/final_prod_seed"
 FIGDIR = "/home/mfho/hcd_priya_notes/figures/analysis/05_likelihood"
 os.makedirs(FIGDIR, exist_ok=True)
@@ -39,6 +41,7 @@ AMP_LO, AMP_HI = 0.85, 1.15   # fine grid inside the [0.75,1.25] prior, around 1
 members = sorted(p[:-4] for p in glob.glob(PROD_PREFIX + "*.eqx"))
 print(f"[build] {len(members)} ensemble members")
 ctx, d = build_legb_ctx(
+    historical_reason="historical analysis on the deployed cache (closure_legb.CACHE_PATH)",
     ensemble_ckpts=members, use_xclass=True, with_mf=True, mf_with_floor=True,
     mf_emucoh=True, mf_emucoh_offdiag_only=True,
     with_eboss=True, metals_on=True, sample_metals=True, hierarchical_hcd=False)

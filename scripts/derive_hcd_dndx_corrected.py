@@ -1,5 +1,12 @@
-"""Corrected literature dN/dX law re-derivation — the FULL decision table + JSON emitter
+"""HISTORICAL (the analysis of record of 2026-07; not a release product). Corrected literature dN/dX law
+re-derivation: the FULL decision table + JSON emitter
 (spec hcd_priya_notes/docs/superpowers/2026-07-18-corrected-law-spec.md, steps 6-8).
+
+Its kernel inputs come from the deployed pre-lineage cache (lit_dndx_kernel.CACHE_PATH, read directly, counts that
+include the pre-fix box-edge duplicates), so it and the JSON it writes (hcd_analysis/emulator/hcd_lit_dndx_corrected.json)
+belong to the historical analysis only: no release default reads them, and the public predictor never imports them.
+The optional strict tier (DERIVE_ALPHA_FULL=1) reads the cache through the strict loader and fails loudly when that
+loader refuses it; it never falls back.
 
 Prints: the 0.88-vs-0.96 adjudication (both prior recipes under the pinned definition +
 attribution), every kernel candidate's intermediate b(z), both estimators per count class,
@@ -21,10 +28,12 @@ free-gamma K1a fit (~2.137) is recorded as the consistency evidence justifying t
 constraint. The full decision table (all kernels) stays in the JSON for the record.
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/derive_hcd_dndx_corrected.py
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import datetime
 import json
@@ -34,7 +43,7 @@ import sys
 
 import numpy as np
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 sys.path.insert(0, REPO)
 
 from hcd_analysis.emulator import lit_dndx as LD            # noqa: E402
@@ -91,16 +100,13 @@ def deployed_alpha_fn():
     if os.environ.get("DERIVE_ALPHA_FULL", "0") == "1":
         # tier (a) is opt-in: load_cache materializes the ~1 GB cache + P1D collapses,
         # heavy for the 8-CPU/32-GB login node (repo memory: submit heavy work via SLURM)
-        try:
-            from hcd_analysis.emulator import closure_legb as CL
-            from hcd_analysis.emulator.data import load_cache
-            d = load_cache(LK.CACHE_PATH)
-            _, xbar = CL.hcd_pivot_wc_and_xbar(d)
-            tier = f"tier-a (full deployed path, Xbar(z=3)={xbar:.4f} via load_cache)"
-            del d
-        except Exception as e:
-            xbar = None
-            print(f"[alpha] tier-a failed ({e}); falling back to tier-b")
+        # strict: a cache the release loader refuses (a pre-lineage one included) stops the run; no fallback
+        from hcd_analysis.emulator import closure_legb as CL
+        from hcd_analysis.emulator.data import load_cache
+        d = load_cache(LK.CACHE_PATH)
+        _, xbar = CL.hcd_pivot_wc_and_xbar(d)
+        tier = f"tier-a (full deployed path, Xbar(z=3)={xbar:.4f} via load_cache)"
+        del d
     if xbar is None:
         xbar = XBAR_Z3_PINNED
         tier = (f"tier-b (deployed inference.hcd_lls_realfit_alpha_center with the PINNED "

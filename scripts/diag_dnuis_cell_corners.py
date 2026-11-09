@@ -37,7 +37,7 @@ title so the visual shift can be read against the certified number.
 
 READ-ONLY on the pkls. Writes ONLY new PNGs into the notes figure dir. Edits NO existing module.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=4 /home/mfho/.conda/envs/emu-jax/bin/python3
 """
 import argparse

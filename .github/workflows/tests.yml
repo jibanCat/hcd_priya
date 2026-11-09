@@ -1,0 +1,156 @@
+# Fixture and synthetic tests of the built package. No job here has, or needs, a real cache, a trained model or
+# observational data: the tests that need them are listed in tests/ci_tiers.toml with their reasons and are reported
+# as NOT RUN, never as passed. tests/external (optional reference-environment tests) is not run here either.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Every run step runs in bash with -e and -o pipefail: GitHub adds pipefail only when the shell is named. So a failing
+# command on the left of a pipe (pytest piped into tee) fails its step. No job or step overrides this.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  fixture-tests:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Only the pinned job is a supported environment (docs/compatibility.md). The others show how newer
+        # versions behave; their failures stay visible (no continue-on-error) and do not make them supported.
+        include:
+          - python: "3.11"
+            deps: development-environment
+            label: Python 3.11, pinned (supported)
+          - python: "3.11"
+            deps: newest
+            label: Python 3.11, newest dependencies (not supported)
+          - python: "3.12"
+            deps: newest
+            label: Python 3.12, newest dependencies (not supported)
+    env:
+      JAX_PLATFORMS: cpu
+      MPLBACKEND: Agg
+      # "1" only in the pinned (supported) job: tests that check bit-level results on the pinned stack then require
+      # the running versions to be the pins, so the supported job cannot pass on another stack by mistake.
+      HCD_PINNED_STACK: ${{ matrix.deps == 'development-environment' && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Build the sdist and the wheel (SOURCE_DATE_EPOCH set to the commit time)
+        run: |
+          python -m pip install build
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --outdir dist .
+          sha256sum dist/*
+      - name: Check the distribution contents against the commit
+        run: python tools/ci/check_dist.py dist
+      # The archives can match the commit and still carry private content: scan what they hold. A finding not in the
+      # known list fails; the release gate (docs/release_checklist.md) runs the same scan with --release, no list.
+      # A failure here stops the job before the install and both test tiers, on purpose: fix the content first.
+      - name: Scan the distribution for private or internal content
+        run: python tools/ci/check_dist_content.py dist --known tools/ci/dist_content_known.txt
+      - name: Install the wheel into a fresh virtual environment
+        id: install
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          constraints=()
+          if [ "${{ matrix.deps }}" = development-environment ]; then
+            constraints=(-c tools/ci/constraints-devenv.txt)
+          fi
+          "$RUNNER_TEMP/venv/bin/python" -m pip install "${constraints[@]}" "$(ls dist/*.whl)[test]"
+          "$RUNNER_TEMP/venv/bin/python" -m pip check
+          mkdir -p "$RUNNER_TEMP/results"
+          "$RUNNER_TEMP/venv/bin/python" -m pip freeze | tee "$RUNNER_TEMP/results/pip-freeze.txt"
+      - name: Wheel tier (the installed package, tests copied outside the checkout)
+        run: >-
+          "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier wheel --wheel "$(ls dist/*.whl)"
+          --workdir "$RUNNER_TEMP/wheeltest" --out "$RUNNER_TEMP/results/wheel"
+      - name: Source tier (tests that also read repository files, from the checkout)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: >-
+          "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier source
+          --out "$RUNNER_TEMP/results/source"
+      - name: List the test files outside the CI tiers (never run by this workflow)
+        if: ${{ !cancelled() }}
+        run: python tools/ci/run_test_tier.py --list-not-run
+      - name: Keep the results (junit reports, tier summaries and the pip freeze)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-py${{ matrix.python }}-${{ matrix.deps }}
+          path: ${{ runner.temp }}/results
+          retention-days: 14
+
+  older-libhdf5:
+    # D4: the HDF5 release format must stay readable by an older libhdf5. A bundle written with the pinned stack is
+    # read, bit for bit, with h5py built from source against Ubuntu's system libhdf5 1.10; the loader's own tests also
+    # run against that library. Synthetic bundles only.
+    name: HDF5 release format with an older libhdf5 (Ubuntu's 1.10)
+    runs-on: ubuntu-24.04
+    env:
+      JAX_PLATFORMS: cpu
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build the wheel
+        run: |
+          python -m pip install build
+          python -m build --wheel --outdir dist .
+      - name: Write a synthetic bundle with the pinned stack
+        run: |
+          python -m venv "$RUNNER_TEMP/pinned"
+          "$RUNNER_TEMP/pinned/bin/python" -m pip install -c tools/ci/constraints-devenv.txt "$(ls dist/*.whl)"
+          "$RUNNER_TEMP/pinned/bin/python" -I tools/ci/h5_cross_version.py write "$RUNNER_TEMP/xbundle"
+      - name: Install the package with h5py built against the system libhdf5 1.10
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libhdf5-dev pkg-config
+          python -m venv "$RUNNER_TEMP/old"
+          HDF5_DIR=/usr/lib/x86_64-linux-gnu/hdf5/serial "$RUNNER_TEMP/old/bin/python" -m pip install --no-binary h5py \
+            -c tools/ci/constraints-devenv.txt "$(ls dist/*.whl)[test]"
+          "$RUNNER_TEMP/old/bin/python" -c "import h5py; print('h5py', h5py.version.version, 'libhdf5', h5py.version.hdf5_version)"
+      - name: Read the bundle with libhdf5 1.10, bit for bit
+        run: '"$RUNNER_TEMP/old/bin/python" -I tools/ci/h5_cross_version.py read "$RUNNER_TEMP/xbundle" --max-hdf5 1.11'
+      - name: The loader's tests with libhdf5 1.10 (installed package, tests outside the checkout; a skip fails)
+        run: |
+          mkdir "$RUNNER_TEMP/h5test" && cp -r tests "$RUNNER_TEMP/h5test/"
+          cd "$RUNNER_TEMP/h5test"
+          "$RUNNER_TEMP/old/bin/python" -m pytest -q -rs -p no:cacheprovider -c "$GITHUB_WORKSPACE/pyproject.toml" \
+            --rootdir . --confcutdir . tests/test_safe_h5.py | tee pytest.log
+          if grep -q SKIPPED pytest.log; then echo "a test of the loader was skipped"; exit 1; fi
+
+  docs:
+    # The documentation site, built as Read the Docs builds it (.readthedocs.yaml): the pinned docs/requirements.txt,
+    # and every Sphinx warning an error, so a broken link, a missing page or a docstring that does not parse fails
+    # the job. The package is not installed: the API reference is read from the source.
+    name: Documentation (Sphinx, warnings are errors)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the pinned documentation requirements
+        run: python -m pip install -r docs/requirements.txt
+      - name: Build the site
+        run: python -m sphinx -W --keep-going -b html docs "$RUNNER_TEMP/html"

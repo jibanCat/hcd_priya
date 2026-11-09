@@ -10,7 +10,7 @@ This pins the contract:
   (c) emu_var ≥ 0 ALWAYS (the SPD guarantee: coefᵀ(P∘ρ∘P)coef ≥ 0);
   (d) ∂emu_var/∂α is finite (the α-derivative now carries the cross terms).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_xclass_cemu.py -q
 """
 import hcd_analysis.emulator  # noqa: F401  enables x64

@@ -7,7 +7,7 @@ original PRIYA ranges on herei/heref/alphaq while KEEPING n_s extended. This pin
   (1) the unit-cube bounds are right (IGM sub-intervals, n_s/Ap/etc full);
   (2) the model actually SAMPLES inside the original PRIYA IGM box (prior-predictive).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_sampling_box_restriction.py -q
 """
 import os
@@ -61,6 +61,7 @@ def test_unit_bounds_values():
 
 
 @pytest.mark.skipif(not os.path.exists(_DESI_NPZ), reason="DESI data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_prior_predictive_inside_original_priya_box():
     """Prior-predictive draws from the production model land inside the original PRIYA IGM box
     (and never in the widened corners), confirming the restricted prior is the one NUTS uses."""

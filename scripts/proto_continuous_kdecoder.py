@@ -24,7 +24,7 @@ This script NUMERICALLY VERIFIES feasibility against the REAL cache and prints a
 verdict.  Tests A-F + a coverage note (see module __doc__ of each ``test_*``).
 
 ENV (mandatory):
-    PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
+    PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
         /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/proto_continuous_kdecoder.py
 
 x64 is enabled package-wide by ``import hcd_analysis.emulator`` (see that
@@ -43,7 +43,7 @@ import numpy as np
 import optax
 from scipy.interpolate import CubicSpline
 
-from hcd_analysis.emulator.data import load_cache, safe_log
+from hcd_analysis.emulator.data import load_cache_historical, safe_log
 from hcd_analysis.emulator.model import svd_basis_init
 
 # ----------------------------------------------------------------------------
@@ -250,8 +250,8 @@ def fit_trunk_and_coeffs(trunk, kgrid_train, Y_train, *, steps=1500, lr=3e-3,
 # DATA
 # ============================================================================
 def load_logP(cache_path):
-    d = load_cache(cache_path)
-    kgrid = d["kfkms"][0].astype(np.float64)        # canonical (row-0) grid
+    d = load_cache_historical(cache_path, reason='diagnostic of the historical cache (scripts/proto_continuous_kdecoder.py)')
+    kgrid = d["kfkms"][0].astype(np.float64)        # row-0 grid as a LABEL only (rows differ; incident note 2026-10-05)
     logP = safe_log(d["P_filt"]).astype(np.float64)  # (R, 4, K)
     return d, kgrid, logP
 

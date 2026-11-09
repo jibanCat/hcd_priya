@@ -55,7 +55,7 @@ import numpy as np
 import pytest
 
 from hcd_analysis.emulator import multifidelity as MF
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from hcd_analysis.emulator.closure_legb import CACHE_PATH, held_out_sims
 
 
@@ -68,8 +68,8 @@ def _decode(a):
 
 @pytest.fixture(scope="module")
 def caches():
-    d = load_cache(CACHE_PATH)
-    hr_cache = MF.load_cache(MF.HR_CACHE)
+    d = load_cache_historical(CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format')
+    hr_cache = MF.load_cache_historical(MF.HR_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
     hr_sim_names = hr_cache["sim_name"]
     hr_sims = sorted(set(_decode(hr_sim_names)))
     return d, hr_sim_names, hr_sims

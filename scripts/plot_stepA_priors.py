@@ -12,6 +12,8 @@ Emits:
   figures/analysis/05_likelihood/stepA_priors.txt
 """
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import functools
 import numpy as np
@@ -24,7 +26,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from hcd_analysis.emulator.data import PARAM_LIMITS, KIM_AMP, KIM_SLOPE, load_cache
+from hcd_analysis.emulator.data import PARAM_LIMITS, KIM_AMP, KIM_SLOPE, load_cache_historical
 from hcd_analysis.emulator.meanflux_prior import (
     meanflux_tau0_prior, becker13_tau0, DEFAULT_FRAC_SIGMA,
     BECKER13_TAU0, BECKER13_BETA, BECKER13_C, BECKER13_ZREF)
@@ -34,7 +36,7 @@ from hcd_analysis.emulator.inference import (
     HCD_LIT_OVER_SIM, HCD_LIT_OVER_SIM_SLOPE)
 from hcd_analysis.emulator.closure_legb import ZSLOPE_PRIOR_SIGMA
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 CACHE = f"{REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 OUT_PNG = f"{REPO}/figures/analysis/05_likelihood/stepA_priors.png"
 OUT_TXT = f"{REPO}/figures/analysis/05_likelihood/stepA_priors.txt"
@@ -52,7 +54,7 @@ ZSLOPE_EDGE_INFLATE = 1.25
 
 def main():
     print("[stepA-priors] loading cache for the structural HCD weights w_c ...")
-    d = load_cache(CACHE)
+    d = load_cache_historical(CACHE, reason='diagnostic of the historical cache (scripts/plot_stepA_priors.py)')
     w_c_med = np.median(d["w_c_cache"][:, 1:], axis=0)   # (3,) [LLS,subDLA,DLA]
 
     # ---- θ9 box ----
@@ -124,7 +126,7 @@ def main():
     axb.fill_between(z_grid, mu_b13 - sig_b13, mu_b13 + sig_b13, color="#117733",
                      alpha=0.25, label=r"$\pm\,\sigma_z$  ($\sigma=5\%\,\mu$)")
     axb.plot(z_grid, kim_z, color="grey", ls="--", lw=1.3,
-             label=r"Kim2013 $(\alpha{=}1)$ ladder anchor")
+             label=r"Kim07 $(\alpha{=}1)$ ladder anchor")
     axb.set_xlabel("redshift z"); axb.set_ylabel(r"$\tau_0(z)=-\ln\langle F\rangle$")
     axb.set_title(r"(b) $\tau_0$ mean-flux prior  —  per-z Gaussian on the $\alpha=\tau_0/$Kim ladder",
                   fontsize=10.5)

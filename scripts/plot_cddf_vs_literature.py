@@ -10,7 +10,7 @@ sub-DLA+DLA Γ-fit = Zafar+2013 Table 5 (z 1.51–3.10: log k_g=−22.30, log N_
 α_g=−0.95); LLS = O'Meara+2013 power law (f=k·N^β, log f(10^19)=−20.2, β=−0.9, z~2.4).
 
 Env:
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
       /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_cddf_vs_literature.py
 """
 from __future__ import annotations

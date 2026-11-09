@@ -15,7 +15,7 @@ LLS, sim incidence slope for subDLA/DLA; σ_LLS 0.287/0.574 DESI, 0.40 KS — co
 2026-07-18). This is the v2 fix promoted
 to the actual production functions (a future revert to the all-z median trips the pivot guard).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_hcd_prior_dndx_overlay_v3_production.py
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 
 import hcd_analysis.emulator  # x64 before jax
 import jax.numpy as jnp
-from hcd_analysis.emulator.data import load_cache
+from hcd_analysis.emulator.data import load_cache_historical
 from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact
 from hcd_analysis.emulator.inference import (
     hcd_incidence_prior, hcd_lls_realfit_alpha_center, assert_hcd_pivot_z3,
@@ -96,7 +96,7 @@ def build_xbar_fn_and_sim(d):
 
 
 def main():
-    d = load_cache(CACHE_PATH)
+    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/plot_hcd_prior_dndx_overlay_v3_production.py)')
     w_c_z3, Xbar_z3 = hcd_pivot_wc_and_xbar(d)
     xbar_fn, zg, dndx_cache = build_xbar_fn_and_sim(d)
     s_c = np.array([HCD_LLS_REALFIT_ZSLOPE, float(HCD_INCIDENCE_SLOPE[1]), float(HCD_INCIDENCE_SLOPE[2])])
