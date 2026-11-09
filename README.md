@@ -410,14 +410,12 @@ simulations but one and test on the held-out simulation, which is how we estimat
 the emulator's own error budget.
 
 This stage yields a fast, autodifferentiable forward model
-`P_obs(θ, z, τ₀, α_HCD)` whose held-out per-fold cosmology bias sits well inside
-the ±0.2σ inference gate. The figure below shows the per-fold A_p and n_s Fisher
-bias across all eight LOSO folds. By Fisher bias we mean the emulator residual
-projected onto the directions the data actually constrain (the Fisher-information
-eigendirections) and read off as a cosmology shift in units of σ along those
-directions; this is the cosmology-relevant bias rather than a raw spectral error.
-
-![Per-fold A_p and n_s Fisher-bias across the 8 LOSO folds, inside the 0.2 sigma gate](figures/analysis/06_performance_walkthrough/B5_fisher_bias_perfold.png)
+`P_obs(θ, z, τ₀, α_HCD)`. Its held-out error is measured per fold as a Fisher
+bias: the emulator residual projected onto the directions the data actually
+constrain (the Fisher-information eigendirections) and read off as a cosmology
+shift in units of σ along those directions; this is the cosmology-relevant bias
+rather than a raw spectral error. The results are reported with the release
+validation, which is not public yet.
 
 Train it (the 8-fold LOSO sweep; `--smoke` for a fast shape check):
 
@@ -444,12 +442,9 @@ constructed so that an incorrect prior centre does not propagate into the
 cosmology.
 
 This stage yields a fully differentiable `log_posterior` suitable for a gradient
-sampler, together with the HCD-incidence prior. The figure below verifies that
-the HCD incidence prior does not bias the cosmology: the θ bias from a
-mis-centred prior stays inside the 0.2σ gate, and the prior tightens θ rather
-than shifting it.
-
-![HCD incidence prior does not bias cosmology: bias inside the gate, prior tightens not shifts](figures/analysis/06_validation_summary/hcd_prior_cosmology.png)
+sampler, together with the HCD-incidence prior. Whether a mis-centred incidence
+prior shifts the cosmology is one of the release validation checks, which are not
+public yet.
 
 The likelihood is a Python API rather than a one-shot script. The snippet below
 shows the import only; it does not produce output on its own, and the full call
@@ -474,16 +469,9 @@ mocks and on public archival data (eBOSS DR14, KODIAQ-SQUAD) may be committed;
 the DESI cosmology result itself remains local and blinded.
 
 This stage yields posterior constraints on (A_p, n_s) and a closure verdict: how
-many of the held-out mocks recover the truth within ±1σ, with no sampler
-divergences. The figure below is the Leg-B closure coverage summary, combining
-the HCD mock closure, the subDLA degeneracy diagnostic and the eBOSS DR14 low-k
-recovery.
-
-![Leg-B closure coverage summary: mock recovery in-gate, 0 divergences, eBOSS DR14 recovery](figures/analysis/06_validation_summary/coverage_summary.png)
-
-*This is the Leg-B / closure coverage headline (the production-readiness summary
-panel). It is distinct from the per-mock closure-coverage detail shown in the
-emulator README's Demo A, even though the filenames are similar.*
+many of the held-out mocks recover the truth within ±1σ, and whether the sampler
+diverges. The closure results are reported with the release validation, which is
+not public yet.
 
 What these closures do and do not certify is worth stating plainly. They validate
 the architecture, that is the forward model, the covariance and the sampler, that

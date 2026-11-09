@@ -1060,10 +1060,10 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     # — NOT from alpha_hcd_mu (which bakes in the lit/sim 1.06/1.00/1.34 offset). This makes the
     # closure TRUTH (= the held-out sim's w_sub/w_LLS and 0.10·w_DLA/w_LLS, make_legb_mock:716-717)
     # match the prior CENTER to within the per-sim CV — a tight prior at an OFFSET center would
-    # re-create the exact center-bias this redesign kills, relocated onto r (verified: alpha_hcd_mu
-    # centers put the closure truth at −0.81σ subDLA / +2.64σ DLA, and fail SBC). Widths are
+    # re-create the exact center-bias this redesign kills, relocated onto r (alpha_hcd_mu centers put
+    # the closure truth off the prior center and fail SBC in internal closure tests). Widths are
     # (0.10, 0.12)·center × hcd_ratio_infl (the CLOSURE defense-in-depth widths, ≥ the bare 7%/10%
-    # CV; the real fit inflates to ~25–30% for CDDF-shape uncertainty via hcd_ratio_infl).
+    # CV; the real fit inflates them for CDDF-shape uncertainty via hcd_ratio_infl).
     r_sub_center = float(w_c_med[1] / w_c_med[0])
     r_dla_center = float(HCD_DLA_RESIDUAL_FRAC * w_c_med[2] / w_c_med[0])
     hcd_ratio_mu = jnp.asarray([r_sub_center, r_dla_center])

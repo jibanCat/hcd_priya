@@ -99,8 +99,8 @@ HCD_Z_PIVOT = 3.0
 HCD_LIT_OVER_SIM = (0.995, 1.00, 1.34)       # (LLS, subDLA, DLA): data/sim at z_pivot=3.0
 # subDLA centered on the SIM (1.00) — KEPT by PI decision 9 (2026-07-18): PRIYA produces
 # subDLAs IN-SITU (Rahmati+2013 self-shielding) so the sim is the faithful prior here, and
-# the correction is CONSISTENT with the sim anchor at ~1.0σ (marginally: the corrected lit/sim subDLA ratio is 1.40 = +1.008σ at width 0.40
-# , recorded as EVIDENCE in hcd_lit_dndx_corrected.json), just inside the broad σ/μ=0.40
+# the correction is CONSISTENT with the sim anchor (marginally: the corrected lit/sim subDLA ratio, recorded as
+# EVIDENCE in hcd_lit_dndx_corrected.json, lies just inside the broad σ/μ=0.40
 # (HCD_PRIOR_FRAC_SIGMA[1]) that marginalizes the residual subDLA-abundance uncertainty
 # rather than imposing an offset center. (The old "Zafar 0.76 / factor-2" story was the
 # wrong-object DLA-column bug; see the HCD_LIT_DNDX_LAW provenance block below.)
@@ -334,7 +334,7 @@ HCD_LLS_REALFIT_ZSLOPE = 2.127
 # Eddington-bias and classification issues and is not trusted at the 30-50% level over a
 # physically consistent simulation; the absolute incidence stays anchored to observations."
 # (PI, 2026-07-18). K3 (lit-anchored telescoping-consistent) and K2 (POW10-own-words) remain in
-# the JSON as the one-sided minus bracket arms; the K1a telescoping pulls (+1.7..+2.4σ at z>=3)
+# the JSON as the one-sided minus bracket arms; the K1a telescoping pulls at z>=3
 # are EXPECTED by design (PRIYA-shape vs literature class-decomposition tension, PI-accepted).
 # DEPLOYED LAWS:
 #   LLS    = the K1a-corrected 8-point compilation refit with gamma CONSTRAINED to the deployed
