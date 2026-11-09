@@ -363,7 +363,9 @@ tables, a relabelled kind) is refused, so `provenance["mf"]` always describes th
 an MF gives. Below the larger of the lowest redshift of the record's tables and the record's `validated_z_min` the
 LF+MF prediction is refused (`MFRangeError`), never clamped: the correction was not measured or not validated there,
 so only `fidelity="LF"` is available. Above the highest redshift, and outside the tau0 tables, g is held at its edge value and the prediction is
-flagged (`mf_z_clamped`, `mf_tau0_clamped`).
+flagged (`mf_z_clamped`, `mf_tau0_clamped`). Above z 4.6 (`mf_release.VALIDATED_Z_MAX`, the upper edge of the grouped
+validation; not a record field) an LF+MF prediction keeps its values but is flagged `mf_z_above_validated`, also
+inside the tables, because no validation covers it; an LF prediction is never so flagged.
 
 **Writing.** `mf_release.write_mf_record(out_dir, tables, ...)` validates everything first, then creates `out_dir`
 (an existing directory, file or symlink is refused: a record is written once), writes the tables through the

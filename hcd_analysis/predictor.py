@@ -40,7 +40,9 @@ exp(g(z, tau0, k)) on the native modes, before the mean, the spread and any k pl
 depend on the cosmological parameters. Below max(the lowest redshift of the record's tables, the record's
 ``validated_z_min``, 2.2 by default) the MF is REFUSED (``MFRangeError``; ask for ``fidelity="LF"``): it is never
 clamped there. Above the highest redshift and outside the
-tau0 tables it is held constant and flagged (``mf_z_clamped``, ``mf_tau0_clamped``). ``w_c`` and ``dndx`` stay the LF
+tau0 tables it is held constant and flagged (``mf_z_clamped``, ``mf_tau0_clamped``). Above z 4.6
+(``mf_release.VALIDATED_Z_MAX``, the upper edge of the grouped validation) an LF+MF prediction is served with the same
+values but flagged ``mf_z_above_validated``, inside the tables too: no validation covers it. ``w_c`` and ``dndx`` stay the LF
 backbone's. ``fidelity`` ("LF" or "LF+MF"; None: the bundle's own) selects the output; "LF+MF" without a record raises
 ``MFUnavailableError``. The record's provenance (version, composition and ruling ids, cache digests and their
 provenance statements, fit commit, the settled mean-flux convention of its targets, the HR inputs used) is in
@@ -472,13 +474,17 @@ class _PredictorBase:
         for z, t in zip(zs, taus):
             ladder = np.array([np.interp(z, z_tab, tau_by_z[:, r]) for r in range(tau_by_z.shape[1])])
             tc.append(bool(t < ladder.min() or t > ladder.max()))
-        return {"mf_applied": bool(use_mf), "mf_z_clamped": bool(any(zc)), "mf_tau0_clamped": bool(any(tc))}
+        # above the grouped-validation domain the applied MF is served unchanged but flagged (an LF output is not)
+        above = bool(use_mf) and any(z > _MR.VALIDATED_Z_MAX + Z_TOL for z in zs)
+        return {"mf_applied": bool(use_mf), "mf_z_clamped": bool(any(zc)), "mf_tau0_clamped": bool(any(tc)),
+                "mf_z_above_validated": bool(above)}
 
     def _mf_labels(self, labels, use_mf):
         out = {"mf": "the MF correction P_MF = P_LF exp(g(z, tau0, k)) of the loaded record (theta-independent, "
                      "fitted on matched HR/LF pairs; refused below max(its lowest z, its validated_z_min); above its "
-                     "highest z and outside its tau0 tables it is held constant and flagged); w_c stays the LF "
-                     "backbone's"}
+                     "highest z and outside its tau0 tables it is held constant and flagged; above z "
+                     f"{_MR.VALIDATED_Z_MAX:g}, the upper edge of its grouped validation, it is applied unchanged but "
+                     "flagged mf_z_above_validated); w_c stays the LF backbone's"}
         if use_mf:
             out["product"] = f"{labels.get('product') or 'LF'}+MF"
             out["P_class"] = labels["P_class"] + ", each multiplied by exp(g) before the mean"

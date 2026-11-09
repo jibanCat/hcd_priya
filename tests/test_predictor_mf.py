@@ -153,8 +153,35 @@ def test_mf_provenance_is_reported(emu_mf, mf, info):
 def test_mf_domain_flags(emu_mf):
     inside = emu_mf.predict(PARAMS, 3.0, tau_eff=0.4)
     assert inside.flags["mf_z_clamped"] is False and inside.flags["mf_tau0_clamped"] is False
+    assert inside.flags["mf_z_above_validated"] is False
     assert emu_mf.predict(PARAMS, 4.2, tau_eff=0.4).flags["mf_z_clamped"] is True
     assert emu_mf.predict(PARAMS, 3.0, tau_eff=3.0).flags["mf_tau0_clamped"] is True
+
+
+def test_mf_above_the_validated_range_is_served_unchanged_but_flagged(info, emu_lf, tmp_path):
+    """The grouped validation of the MF covers z up to mf_release.VALIDATED_Z_MAX (4.6) only. An LF+MF prediction
+    above it, even inside the record's tables (where nothing else flags it), is served with the same values but
+    flagged mf_z_above_validated; the edge itself (to the redshift tolerance) is inside; an LF prediction from the same
+    object is not flagged. The synthetic tables (z 2.6, 3.0, 3.4) are relabelled 1.6 up (4.2, 4.6, 5.0), so that 4.8 and
+    5.0 are inside them."""
+    assert MR.VALIDATED_Z_MAX == 4.6
+    d = tmp_path / "hi"
+    s = write_mf(d, manifest=info.manifest_sha256, cache=info.lineage["cache"]["sha256"], z_shift=-1.6)
+    e = hp.load_bundle(info.bundle_dir, info.manifest_sha256, mf_dir=str(d), mf_record_sha256=s)
+    for z, above in ((4.4, False), (4.6, False), (4.6 + 5e-10, False), (4.8, True), (5.0, True)):
+        p = e.predict(PARAMS, z, tau_eff=0.4)
+        assert p.flags["mf_applied"] is True and p.flags["mf_z_clamped"] is False
+        assert p.flags["mf_z_above_validated"] is above, z
+    hi = e.predict(PARAMS, 4.8, tau_eff=0.4)
+    again = e.predict(PARAMS, 4.8, tau_eff=0.4, fidelity="LF+MF")
+    assert hi.P_class.tobytes() == again.P_class.tobytes()                  # flagged, not changed or refused
+    assert "validated" in hi.labels["mf"] and "4.6" in hi.labels["mf"]
+    lf = e.predict(PARAMS, 4.8, tau_eff=0.4, fidelity="LF")
+    assert lf.flags["mf_applied"] is False and lf.flags["mf_z_above_validated"] is False
+    assert lf.P_class.tobytes() == emu_lf.predict(PARAMS, 4.8, tau_eff=0.4).P_class.tobytes()
+    assert e.predict_many(PARAMS, [4.4, 4.8], tau_eff=0.4).flags["mf_z_above_validated"] is True
+    assert e.predict_many(PARAMS, [4.4, 4.6], tau_eff=0.4).flags["mf_z_above_validated"] is False
+    assert emu_lf.predict(PARAMS, 4.8, tau_eff=0.4).flags.get("mf_z_above_validated") is None   # no MF record
 
 
 def test_mf_below_the_tables_lowest_redshift_is_refused_not_clamped(emu_mf, emu_lf, res, tmp_path):
