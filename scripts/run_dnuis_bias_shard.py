@@ -266,6 +266,8 @@ def _out_arm(arm, b_res_oos_member):
 
 
 def main():
+    from hcd_analysis import runtime_data as _RDATA
+    _RDATA.show_loads()      # each verified data load on stderr: product id, version, digest, path
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", required=True,
                     choices=["metal_misspec", "resolution", "lls_excess", "metal_matched"])

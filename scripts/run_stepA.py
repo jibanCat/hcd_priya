@@ -1353,6 +1353,8 @@ def _tail_file(path, n_bytes):
 #  CLI
 # ----------------------------------------------------------------------------- #
 def main():
+    from hcd_analysis import runtime_data as _RDATA
+    _RDATA.show_loads()      # each verified data load on stderr: product id, version, digest, path
     ap = argparse.ArgumentParser(description="STEP-A closure-mock launcher")
     ap.add_argument("--print-table", action="store_true", help="resolve + print the 44-chain table")
     ap.add_argument("--run", action="store_true", help="run the FULL battery (pool of workers)")

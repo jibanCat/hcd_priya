@@ -152,8 +152,8 @@ def test_every_loader_reads_its_data_through_the_verified_resolver(monkeypatch, 
         seen.append(pid)
         raise RD.DataProductError("stop")
 
-    monkeypatch.setattr(RD, "product_file", stop)
-    monkeypatch.setattr(RD, "product_dir", stop)
+    monkeypatch.setattr(RD, "resolve_file", stop)
+    monkeypatch.setattr(RD, "resolve_dir", stop)
     with pytest.raises(RD.DataProductError):
         load()
     assert seen and seen[0] == product
@@ -168,7 +168,7 @@ def test_the_ks_loader_verifies_every_file_it_reads(monkeypatch, resolution_floa
         seen["names"] = list(names)
         raise RD.DataProductError("stop")
 
-    monkeypatch.setattr(RD, "product_dir", stop)
+    monkeypatch.setattr(RD, "resolve_dir", stop)
     with pytest.raises(RD.DataProductError):
         DL.load_ks_leg(k_max=0.065, resolution_float=resolution_float)
     assert len(seen["names"]) == n_files and set(seen["names"]) <= set(RD.PRODUCTS["ks_p1d_conservative"].files)
@@ -237,3 +237,236 @@ def test_the_shipped_derivation_record_names_its_cache_as_the_writer_would():
     from hcd_analysis.emulator import lit_dndx_kernel as LK
     rec = json.load(open(os.path.join(os.path.dirname(LK.__file__), "hcd_lit_dndx_corrected.json"), encoding="utf-8"))
     assert rec["cache_provenance"]["path"] == P.repo_relative(LK.CACHE_PATH)
+
+
+# --- what a load establishes, carried by its result and shown at local load (C4a review MAJOR-1, MINOR-1, MINOR-2) ---
+import dataclasses  # noqa: E402
+import io as _io  # noqa: E402
+import pickle  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+LOGGER = "hcd_analysis.runtime_data"
+
+
+@pytest.fixture
+def shown():
+    """Restore the runtime_data logger after a test that attaches the display."""
+    lg = logging.getLogger(LOGGER)
+    handlers, level = list(lg.handlers), lg.level
+    yield lg
+    lg.handlers[:] = handlers
+    lg.setLevel(level)
+
+
+def test_a_verified_load_returns_a_record_of_what_it_established(registry, monkeypatch):
+    monkeypatch.setenv(VAR, str(registry))
+    rec = RD.resolve_file("prod_b", "b2.txt")
+    assert isinstance(rec, RD.LoadRecord)
+    assert (rec.product_id, rec.version, rec.file) == ("prod_b", "beta v2", "b2.txt")
+    assert rec.sha256 == RD.PRODUCTS["prod_b"].files["b2.txt"]
+    assert rec.source == f"environment variable {VAR}"
+    assert rec.path == str(registry / "pb" / "b2.txt") and rec.real_path == os.path.realpath(rec.path)
+    directory, recs = RD.resolve_dir("prod_b")
+    assert directory == str(registry / "pb") and [r.file for r in recs] == ["b1.txt", "b2.txt"]
+    rec = RD.resolve_file("prod_a", "a.txt", explicit=registry / "pa" / "a.txt")       # a path object is accepted
+    assert rec.source == "argument" and rec.path == str(registry / "pa" / "a.txt")
+
+
+def test_the_record_and_the_line_give_the_path_as_given_and_its_real_path(registry, monkeypatch, tmp_path, caplog):
+    link = tmp_path / "link"
+    link.symlink_to(registry, target_is_directory=True)
+    monkeypatch.setenv(VAR, str(link))
+    with caplog.at_level(logging.INFO, logger=LOGGER):
+        rec = RD.resolve_file("prod_a", "a.txt")
+    assert rec.path == str(link / "pa" / "a.txt")
+    assert rec.real_path == os.path.realpath(registry / "pa" / "a.txt") != rec.path
+    assert rec.path in caplog.text and rec.real_path in caplog.text
+    assert rec.sha256[:12] in caplog.text and "alpha v1" in caplog.text and "prod_a" in caplog.text
+    monkeypatch.chdir(registry)
+    monkeypatch.setenv(VAR, ".")
+    rec = RD.resolve_file("prod_a", "a.txt")
+    assert rec.path == os.path.join(".", "pa", "a.txt") and os.path.isabs(rec.real_path)
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_an_empty_or_blank_variable_is_refused_with_what_to_do(registry, monkeypatch, value):
+    monkeypatch.chdir(registry)                  # an empty variable taken as a location would find pa/a.txt here
+    monkeypatch.setenv(VAR, value)
+    with pytest.raises(RD.DataProductError, match=f"{VAR} is set but empty"):
+        RD.product_file("prod_a", "a.txt")
+    with pytest.raises(RD.DataProductError, match=f"{VAR} is set but empty"):
+        RD.product_dir("prod_a")
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_an_explicit_empty_path_is_refused_not_ignored(registry, monkeypatch, value):
+    monkeypatch.setenv(VAR, str(registry))      # falling back to the variable would succeed
+    with pytest.raises(RD.DataProductError, match="the path passed to the loader is empty"):
+        RD.product_file("prod_a", "a.txt", explicit=value)
+    with pytest.raises(RD.DataProductError, match="the path passed to the loader is empty"):
+        RD.product_dir("prod_a", explicit=value)
+
+
+def test_show_loads_prints_every_verified_load_without_configuring_the_root_logger(registry, monkeypatch, shown):
+    root = logging.getLogger()
+    before = (list(root.handlers), root.level)
+    buf = _io.StringIO()
+    RD.show_loads(stream=buf)
+    RD.show_loads(stream=buf)                    # idempotent: one display, one line per load
+    assert sum(h.name == RD.SHOW_HANDLER_NAME for h in shown.handlers) == 1
+    monkeypatch.setenv(VAR, str(registry))
+    rec = RD.resolve_file("prod_a", "a.txt")
+    lines = buf.getvalue().splitlines()
+    assert len(lines) == 1
+    for part in ("prod_a", "a.txt", "alpha v1", rec.sha256[:12], VAR, rec.path, rec.real_path):
+        assert part in lines[0]
+    assert (list(root.handlers), root.level) == before
+
+
+def test_the_library_configures_no_logging_on_import():
+    """Importing the loaders attaches no handler to the root logger or to runtime_data's own logger."""
+    import subprocess
+    import sys
+    code = ("import logging; from hcd_analysis import runtime_data; "
+            "from hcd_analysis.emulator import data_likelihood, multifidelity; "
+            "print(len(logging.getLogger().handlers), len(logging.getLogger('hcd_analysis.runtime_data').handlers))")
+    out = subprocess.run([sys.executable, "-B", "-c", code], env={**os.environ, "JAX_PLATFORMS": "cpu"},
+                         capture_output=True, text=True, check=True).stdout.split()
+    assert out == ["0", "0"]
+
+
+# Synthetic P1D files in the loaders' formats, with the registry swapped for their digests.
+def _npz(path, scale):
+    z = np.repeat([2.2, 2.4], 4)
+    k = np.tile([0.002, 0.004, 0.008, 0.016], 2)
+    n = z.size
+    np.savez(path, z=z, k=k, plya=scale * np.ones(n), cov=np.eye(n), cov_stat=0.5 * np.eye(n),
+             cov_diag_inflation=np.zeros(n), syst_e_dla_completeness=np.full(n, 0.01))
+    return _sha(path.read_bytes())
+
+
+@pytest.fixture
+def p1d(monkeypatch, tmp_path):
+    """$HCD_P1D_DATA_DIR-style tree (root) and a second copy elsewhere (other), with the three P1D products'
+    registry entries replaced by the synthetic files' digests."""
+    root, other = tmp_path / "p1d", tmp_path / "elsewhere"
+    (root / "desi_dr1_p1d").mkdir(parents=True)
+    (root / "eboss_dr14_p1d").mkdir()
+    other.mkdir()
+    digests = {}
+    for pid, sub, name, scale in (("desi_dr1_p1d", "desi_dr1_p1d", "desi_dr1_p1d.npz", 1.0),
+                                  ("desi_dr1_p1d_snr3", "desi_dr1_p1d", "desi_dr1_p1d_snr3.npz", 2.0),
+                                  ("eboss_dr14_p1d", "eboss_dr14_p1d", "eboss_dr14_p1d.npz", 3.0)):
+        digests[pid] = _npz(root / sub / name, scale)
+        (other / name).write_bytes((root / sub / name).read_bytes())
+    products = dict(RD.PRODUCTS)
+    for pid, d in digests.items():
+        p = products[pid]
+        products[pid] = dataclasses.replace(p, files={next(iter(p.files)): d})
+    monkeypatch.setattr(RD, "PRODUCTS", products)
+    for var in ("HCD_P1D_DATA_DIR", "HCD_DESI_SNR3", "HCD_CV_FLOOR", "HCD_CV_FLOOR_RANK1"):
+        monkeypatch.delenv(var, raising=False)
+    return dataclasses.make_dataclass("P1D", ["root", "other", "digests"])(root, other, digests)
+
+
+def test_a_loaded_leg_carries_the_record_of_its_verified_data(p1d, monkeypatch):
+    monkeypatch.setenv("HCD_P1D_DATA_DIR", str(p1d.root))
+    leg = DL.load_eboss_leg()
+    (rec,) = leg.data_products
+    assert (rec.product_id, rec.file, rec.sha256) == ("eboss_dr14_p1d", "eboss_dr14_p1d.npz",
+                                                      p1d.digests["eboss_dr14_p1d"])
+    assert rec.version == RD.PRODUCTS["eboss_dr14_p1d"].version
+    assert rec.source == "environment variable HCD_P1D_DATA_DIR"
+    assert rec.path == str(p1d.root / "eboss_dr14_p1d" / "eboss_dr14_p1d.npz")
+    assert DL.load_desi_leg().data_products[0].product_id == "desi_dr1_p1d"
+    # an attribute, not a field: the fields, and every digest taken over them, are those of a leg without it
+    assert "data_products" not in DL.DataLeg._fields and len(DL.DataLeg._fields) == 21
+    assert leg._replace(P_data=2 * leg.P_data).data_products == leg.data_products
+    assert pickle.loads(pickle.dumps(leg)).data_products == leg.data_products
+    assert DL.DataLeg(*leg).data_products == ()                   # a leg built directly records no load
+
+
+@pytest.mark.parametrize("via_env", [False, True])
+def test_the_desi_snr3_switch_reads_an_explicit_file_as_the_snr3_product(p1d, monkeypatch, via_env):
+    """An explicit path wins over the variable under the SNR>3 switch, from the argument or HCD_DESI_SNR3."""
+    monkeypatch.setenv("HCD_P1D_DATA_DIR", str(p1d.root))
+    explicit = p1d.other / "desi_dr1_p1d_snr3.npz"
+    if via_env:
+        monkeypatch.setenv("HCD_DESI_SNR3", "1")
+        leg = DL.load_desi_leg(str(explicit))
+    else:
+        leg = DL.load_desi_leg(str(explicit), use_snr3=True)
+    (rec,) = leg.data_products
+    assert leg.use_snr3 and rec.product_id == "desi_dr1_p1d_snr3"
+    assert rec.source == "argument" and rec.path == str(explicit)
+    monkeypatch.delenv("HCD_P1D_DATA_DIR")
+    assert DL.load_desi_leg(str(explicit), use_snr3=True).data_products[0].path == str(explicit)   # no variable
+
+
+@pytest.mark.parametrize("given, use_snr3", [("desi_dr1_p1d.npz", True), ("desi_dr1_p1d_snr3.npz", False)])
+@pytest.mark.parametrize("via_env", [False, True])
+def test_an_explicit_desi_file_of_the_other_sample_is_refused_never_swapped(p1d, monkeypatch, given, use_snr3,
+                                                                           via_env):
+    monkeypatch.setenv("HCD_P1D_DATA_DIR", str(p1d.root))           # the selected sample's file is there too
+    if via_env:
+        monkeypatch.setenv("HCD_DESI_SNR3", "1" if use_snr3 else "0")
+        call = lambda: DL.load_desi_leg(str(p1d.other / given))     # noqa: E731
+    else:
+        call = lambda: DL.load_desi_leg(str(p1d.other / given), use_snr3=use_snr3)   # noqa: E731
+    with pytest.raises(RD.DataProductConflict, match="never swaps") as e:
+        call()
+    text = str(e.value)
+    assert "desi_dr1_p1d_snr3" in text and str(p1d.other / given) in text
+    assert ("(from HCD_DESI_SNR3)" in text) == via_env and ("(from the use_snr3 argument)" in text) != via_env
+
+
+def test_the_conflict_names_the_default_when_neither_argument_nor_variable_set_the_switch(p1d, monkeypatch):
+    monkeypatch.setenv("HCD_P1D_DATA_DIR", str(p1d.root))
+    with pytest.raises(RD.DataProductConflict, match=r"use_snr3=False \(from the default: HCD_DESI_SNR3 is unset\)"):
+        DL.load_desi_leg(str(p1d.other / "desi_dr1_p1d_snr3.npz"))
+
+
+def _ks_files(d):
+    rows = [(z, k) for z in (2.4, 2.6) for k in (0.006, 0.01, 0.02)]
+    (d / "final-conservative-p1d-karacayli_etal2021.txt").write_text(
+        "| z | k | P | e |\n" + "".join(f"| {z} | {k} | 0.5 | 0.05 |\n" for z, k in rows))
+    np.savetxt(d / "final-conservative-covariance-karacayli_etal2021.txt", np.eye(len(rows)))
+
+
+def test_the_ks_leg_and_the_res_corr_table_carry_their_records(monkeypatch, tmp_path):
+    ks, rc = tmp_path / "ks", tmp_path / "rc"
+    ks.mkdir()
+    rc.mkdir()
+    _ks_files(ks)
+    np.savetxt(rc / "resolution_correction.txt", np.ones((2, 3)))
+    np.savetxt(rc / "kfkms.txt", np.array([[0.01, 0.02, 0.03], [0.011, 0.021, 0.031]]))
+    np.savetxt(rc / "zout.txt", np.array([3.0, 2.0]))
+    products = dict(RD.PRODUCTS)
+    for pid, d in (("ks_p1d_conservative", ks), ("mf_res_corr", rc)):
+        p = products[pid]
+        products[pid] = dataclasses.replace(p, files={n: (_sha((d / n).read_bytes()) if (d / n).exists() else h)
+                                                      for n, h in p.files.items()})
+    monkeypatch.setattr(RD, "PRODUCTS", products)
+    leg = DL.load_ks_leg(str(ks), k_max=0.065)
+    assert [r.file for r in leg.data_products] == ["final-conservative-p1d-karacayli_etal2021.txt",
+                                                   "final-conservative-covariance-karacayli_etal2021.txt"]
+    assert {r.product_id for r in leg.data_products} == {"ks_p1d_conservative"}
+    table = MF.load_res_corr(str(rc))
+    z_rc, logk_rc, rc_tab = table                                   # still the three arrays
+    assert [r.file for r in table.data_products] == list(RD.PRODUCTS["mf_res_corr"].files)
+    assert pickle.loads(pickle.dumps(table)).data_products == table.data_products
+
+
+@pytest.mark.parametrize("load", [
+    lambda: DL.load_desi_leg(""),
+    lambda: DL.load_desi_leg("", use_snr3=True),
+    lambda: DL.load_eboss_leg(""),
+    lambda: DL.load_ks_leg("", k_max=0.065),
+    lambda: MF.load_res_corr(""),
+])
+def test_every_loader_refuses_an_explicit_empty_path(p1d, monkeypatch, tmp_path, load):
+    for var in ("HCD_P1D_DATA_DIR", "HCD_LYAEMU_PARENT", "HCD_KS_BASEDIR"):
+        monkeypatch.setenv(var, str(p1d.root))
+    with pytest.raises(RD.DataProductError, match="the path passed to the loader is empty"):
+        load()

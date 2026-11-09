@@ -144,9 +144,10 @@ def load_res_corr(res_dir=None):
     the differentiable interpolation lives in ``interp_res_corr``).
 
     The table is the runtime data product ``mf_res_corr`` (hcd_analysis.runtime_data): the directory ``res_dir`` when
-    given, else ``$HCD_KS_BASEDIR/res_corr``; its three files are verified by sha256 before they are read.
+    given, else ``$HCD_KS_BASEDIR/res_corr``; its three files are verified by sha256 before they are read. The returned
+    tuple also carries their ``runtime_data.LoadRecord`` s (``data_products``).
     """
-    res_dir = _RD.product_dir("mf_res_corr", explicit=res_dir)
+    res_dir, recs = _RD.resolve_dir("mf_res_corr", explicit=res_dir)
     rc = np.loadtxt(f"{res_dir}/resolution_correction.txt").astype(np.float64)   # (Nz, Nk)
     kf = np.loadtxt(f"{res_dir}/kfkms.txt").astype(np.float64)                    # (Nz, Nk)
     zo = np.loadtxt(f"{res_dir}/zout.txt").astype(np.float64)                     # (Nz,)
@@ -156,7 +157,7 @@ def load_res_corr(res_dir=None):
         raise ValueError("res_corr per-z k-grid is not strictly increasing")
     # sort z ascending so the searchsorted interpolation is monotone.
     order = np.argsort(zo)
-    return zo[order], np.log10(kf[order]), rc[order]
+    return _RD.ProductTuple((zo[order], np.log10(kf[order]), rc[order]), data_products=recs)
 
 
 def interp_res_corr(z_rc, logk_rc, rc_vals, z_eval, k_eval, anchor_mult=5.0):

@@ -247,6 +247,8 @@ def _run_mock(ctx, d, m, out_dir, *, n_mocks, n_warmup, n_samples, max_tree_dept
 
 
 def main():
+    from hcd_analysis import runtime_data as _RDATA
+    _RDATA.show_loads()      # each verified data load on stderr: product id, version, digest, path
     ap = argparse.ArgumentParser()
     ap.add_argument("--shard", type=int, required=True)
     ap.add_argument("--n-shards", type=int, required=True)

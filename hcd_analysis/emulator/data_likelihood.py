@@ -161,7 +161,7 @@ def _add_cv_floor(C_data, k, P_data, *, rank1=False):
 # ============================================================================ #
 #  DataLeg container
 # ============================================================================ #
-class DataLeg(NamedTuple):
+class _DataLegFields(NamedTuple):
     """One independent P1D measurement leg (DESI or KS), post-cut, flat z-major.
 
     Fields (all numpy on the host; jnp-cast at binding time):
@@ -233,6 +233,29 @@ class DataLeg(NamedTuple):
     cv_floor_rank1: bool = False
 
 
+class DataLeg(_DataLegFields):
+    __doc__ = _DataLegFields.__doc__ + """
+    Besides the fields, a leg returned by a loader carries ``data_products``: one
+    ``runtime_data.LoadRecord`` per verified file it read (the product id, version, sha256, how the file
+    was found, the path and its real path). It is an ATTRIBUTE, not a field, so the fields, and every
+    digest taken over them (the gate E pins, the leg summaries), are those of a leg without it.
+    ``_replace`` and pickling keep it; a leg built directly (a test, a stub) has ().
+    """
+    data_products = ()
+
+    def __new__(cls, *args, data_products=(), **kwargs):
+        self = super().__new__(cls, *args, **kwargs)
+        if data_products:
+            self.data_products = tuple(data_products)
+        return self
+
+    def _replace(self, **kwargs):
+        new = super()._replace(**kwargs)
+        if self.data_products:
+            new.data_products = self.data_products
+        return new
+
+
 # PER-LEG DLA-forward fraction (§0c, PI-confirmed final intent 2026-06-09): the leg-specific
 # scale on the sampled α_DLA's DLA-excess contribution. DESI carries the ~10% unmasked-DLA
 # residual (the finder misses ~10% → full systems remain) so the forward keeps the FULL sampled
@@ -302,7 +325,9 @@ def load_desi_leg(npz_path=None,
 
     The data are the runtime data products ``desi_dr1_p1d`` (SNR>1) and ``desi_dr1_p1d_snr3`` (hcd_analysis.runtime_data):
     ``npz_path`` when given, else ``$HCD_P1D_DATA_DIR/desi_dr1_p1d/``; either way the file is verified by sha256 before it
-    is read, and a missing or different file stops the load with what to do. There is no built-in path.
+    is read, and a missing or different file stops the load with what to do. There is no built-in path. ``use_snr3``
+    (or ``HCD_DESI_SNR3``) selects WHICH product; ``npz_path`` says WHERE it is: an explicit file is verified as the
+    selected sample, and the other sample's file is refused (``DataProductConflict``), never swapped for it.
 
     Cuts (z-major flat layout, ``row_is_zmajor=True``):
       * z in [z_lo, z_hi] (default 2.2–4.2 → drop z=4.4, 11 z-bins);
@@ -334,14 +359,27 @@ def load_desi_leg(npz_path=None,
     alpha_DLA mean model. Stamped on the leg as ``dla_cov_reduced``. Pass False ONLY to reproduce
     pre-2026-07-17 archival results.
     """
+    _use_snr3_arg = use_snr3
     use_snr3 = _env_flag("HCD_DESI_SNR3") if use_snr3 is None else bool(use_snr3)
     dla_cov_reduce = DESI_DLA_COV_REDUCE if dla_cov_reduce is None else bool(dla_cov_reduce)
     add_cv_floor = _env_flag("HCD_CV_FLOOR") if add_cv_floor is None else bool(add_cv_floor)
-    if use_snr3:
-        # Fix 1: the cosmology-paper baseline (SNR>3 measurement + its own covariance).
-        npz_path = _RD.product_file("desi_dr1_p1d_snr3", "desi_dr1_p1d_snr3.npz")
-    else:
-        npz_path = _RD.product_file("desi_dr1_p1d", "desi_dr1_p1d.npz", explicit=npz_path)
+    # Fix 1: SNR>3 selects the cosmology-paper baseline (SNR>3 measurement + its own covariance).
+    product, fname = (("desi_dr1_p1d_snr3", "desi_dr1_p1d_snr3.npz") if use_snr3
+                      else ("desi_dr1_p1d", "desi_dr1_p1d.npz"))
+    try:
+        rec = _RD.resolve_file(product, fname, explicit=npz_path)
+    except _RD.DataProductError as e:
+        if npz_path is not None and e.other_product in ("desi_dr1_p1d", "desi_dr1_p1d_snr3"):
+            import os
+            how = ("the use_snr3 argument" if _use_snr3_arg is not None
+                   else "HCD_DESI_SNR3" if os.environ.get("HCD_DESI_SNR3", "").strip()
+                   else "the default: HCD_DESI_SNR3 is unset")
+            raise _RD.DataProductConflict(
+                f"load_desi_leg: npz_path {npz_path} is the {e.other_product} file, but use_snr3={bool(use_snr3)} "
+                f"(from {how}) selects {product}. The loader never swaps one sample for the other: pass the "
+                f"{product} file, or set use_snr3 (or HCD_DESI_SNR3) to match the file.") from e
+        raise
+    npz_path = rec.path
     d = np.load(npz_path, allow_pickle=True)
     z = np.asarray(d["z"], float)              # (1020,) z-major
     k = np.asarray(d["k"], float)              # (1020,) angular k
@@ -380,7 +418,7 @@ def load_desi_leg(npz_path=None,
                          resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp,
                          dla_e=dla_e,
                          use_snr3=use_snr3, cv_floor_on=add_cv_floor,
-                         cv_floor_rank1=cv_floor_rank1)
+                         cv_floor_rank1=cv_floor_rank1, data_products=(rec,))
 
 
 def _read_ks_resolution_e(detail_path, z_grid, k_grid):
@@ -439,8 +477,9 @@ def load_ks_leg(base=None,
     MODEL terms would double-count.  LYA-CONSULT: confirm KS carries NO model systematics.
     """
     _names = ["final-conservative-p1d-karacayli_etal2021.txt", "final-conservative-covariance-karacayli_etal2021.txt"]
-    base = _RD.product_dir("ks_p1d_conservative", explicit=base,
-                           names=_names + (["detailed-p1d-results-karacayli_etal2021.txt"] if resolution_float else []))
+    base, recs = _RD.resolve_dir("ks_p1d_conservative", explicit=base,
+                                 names=_names + (["detailed-p1d-results-karacayli_etal2021.txt"] if resolution_float
+                                                 else []))
     p1d_file = base.rstrip("/") + "/final-conservative-p1d-karacayli_etal2021.txt"
     cov_file = base.rstrip("/") + "/final-conservative-covariance-karacayli_etal2021.txt"
     z, k, P = _read_ks_p1d(p1d_file)            # z-major (182,)
@@ -465,11 +504,11 @@ def load_ks_leg(base=None,
                              resolution_on=resolution_on, mf_floor_on=mf_floor_on,
                              dla_forward_frac=KS_DLA_FORWARD_FRAC,
                              resolution_e=res_e, resolution_float=True, resolution_mode="diag",
-                             resolution_ready=True)
+                             resolution_ready=True, data_products=recs)
     return _assemble_leg("KS", z, k, P, cov, keep,
                          R_func=desi_resolution_R, metals_on=metals_on,
                          resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-                         dla_forward_frac=KS_DLA_FORWARD_FRAC, resolution_ready=False)
+                         dla_forward_frac=KS_DLA_FORWARD_FRAC, resolution_ready=False, data_products=recs)
 
 
 def load_eboss_leg(npz_path=None,
@@ -502,7 +541,8 @@ def load_eboss_leg(npz_path=None,
     A_p pivot k≈0.009). resolution_on=False — eBOSS resolution syst (~2e-4 in-band) stays in C_data.
     """
     add_cv_floor = _env_flag("HCD_CV_FLOOR") if add_cv_floor is None else bool(add_cv_floor)
-    npz_path = _RD.product_file("eboss_dr14_p1d", "eboss_dr14_p1d.npz", explicit=npz_path)
+    rec = _RD.resolve_file("eboss_dr14_p1d", "eboss_dr14_p1d.npz", explicit=npz_path)
+    npz_path = rec.path
     d = np.load(npz_path, allow_pickle=True)
     z = np.asarray(d["z"], float)              # (455,) z-major
     k = np.asarray(d["k"], float)              # (455,) angular k
@@ -529,7 +569,7 @@ def load_eboss_leg(npz_path=None,
                          resolution_e=res_e,
                          resolution_float=resolution_float, resolution_mode="rescale",
                          resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp,
-                         cv_floor_on=add_cv_floor, cv_floor_rank1=cv_floor_rank1)
+                         cv_floor_on=add_cv_floor, cv_floor_rank1=cv_floor_rank1, data_products=(rec,))
 
 
 def _read_ks_p1d(path):
@@ -569,7 +609,7 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
                   metals_on, resolution_on, mf_floor_on=False, dla_forward_frac=1.0,
                   resolution_e=None, resolution_float=False, resolution_mode="rank1",
                   resolution_ready=True, resolution_coherent=False, resolution_coh_amp=1.0,
-                  dla_e=None, use_snr3=False, cv_floor_on=False, cv_floor_rank1=False):
+                  dla_e=None, use_snr3=False, cv_floor_on=False, cv_floor_rank1=False, data_products=()):
     """Sub-select the kept (z,k) rows + their covariance block, build the z-major flat
     DataLeg.  The covariance is row/col-sliced by the SAME boolean mask as the data so the
     flat-row ordering matches C_data exactly (CS-REVIEW: ordering invariant).
@@ -656,7 +696,7 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
         dla_forward_frac=dla_forward_frac, resolution_ready=resolution_ready,
         resolution_coherent_on=resolution_coherent_on, dla_cov_reduced=dla_cov_reduced,
         use_snr3=bool(use_snr3), cv_floor_on=bool(cv_floor_on),
-        cv_floor_rank1=bool(cv_floor_rank1))
+        cv_floor_rank1=bool(cv_floor_rank1), data_products=data_products)
 
 
 # ============================================================================ #

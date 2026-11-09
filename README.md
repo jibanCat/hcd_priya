@@ -128,7 +128,11 @@ expectations before the Quickstart:
 are read from files the package does not ship. Each loader takes an explicit path; without one it reads the directory
 an environment variable names, and with neither it stops and names the variable. There is no built-in path. Every
 file is checked against the sha256 the package records before it is read, and a different file is refused
-(`hcd_analysis.runtime_data`).
+(`hcd_analysis.runtime_data`). An empty path, and a variable that is set but empty, are refused too. For DESI,
+`use_snr3` (or `HCD_DESI_SNR3=1`) chooses the SNR>3 sample and an explicit path says where it is: a file of the other
+sample is refused, never swapped. Each loaded leg records what it read (`leg.data_products`: the product, its version
+and sha256, how the file was found and its path), and the likelihood's command-line entry points print one line per
+verified file on stderr; in your own script, call `hcd_analysis.runtime_data.show_loads()` for the same lines.
 
 | Variable | Holds |
 |---|---|

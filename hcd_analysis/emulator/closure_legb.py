@@ -3285,6 +3285,8 @@ def _smoke_convergence(args):
 
 
 def main():
+    from hcd_analysis import runtime_data as _RDATA
+    _RDATA.show_loads()      # each verified data load on stderr: product id, version, digest, path
     ap = argparse.ArgumentParser(description="Phase-C T4b Leg-B closure on the real grids")
     ap.add_argument("--smoke", action="store_true",
                     help="tiny end-to-end Leg-B path (N≈4–8) + per-param coverage")

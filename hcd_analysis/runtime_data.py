@@ -6,14 +6,21 @@ observed P1D measurement with its covariance, a correction table) is found, in t
 1. an explicit argument: the path given to the loader (a file, or a directory for a product of several files);
 2. the product's environment variable: a directory under which the product's files lie at a fixed relative path.
 
-There is no built-in default. With neither, the loader stops and names the variable to set.
+There is no built-in default. With neither, the loader stops and names the variable to set. An explicit argument
+that is empty, and a variable that is set but empty or blank, are refused, not ignored.
 
 Every file is then verified against the sha256 recorded below before it is read, whichever way it was found. A file
 whose bytes are those of another listed product (for example the SNR>3 DESI file where the SNR>1 one belongs) is
 refused with that product's name; any other content is refused as an unknown version. A missing file is refused with
-its product, variable and relative path. A passing load logs, at INFO on the logger ``hcd_analysis.runtime_data``, the
-product id, its version, where it was found and the verified digest. Only that local log line shows the resolved path;
-the product id and version are what a run should record.
+its product, variable and relative path.
+
+What a passing load established is returned with it: :func:`resolve_file` and :func:`resolve_dir` give a
+:class:`LoadRecord` per file (the product id, its version, the verified sha256, how the file was found, the path as
+given and its real path), and the loaders attach those records to what they return (``DataLeg.data_products``; the
+``data_products`` of the resolution-correction table). Each passing load is also logged at INFO on the logger
+``hcd_analysis.runtime_data``. The library configures no logging; an application's entry point calls
+:func:`show_loads` to print those lines on stderr (the likelihood's main entry points do). The resolved path appears
+only in that local output and in the local record; the product id, version and digest are what a run should record.
 
 | Product id | Variable | Files under ``$VARIABLE/<subdir>/`` |
 |---|---|---|
@@ -40,7 +47,43 @@ _log = logging.getLogger(__name__)
 
 
 class DataProductError(RuntimeError):
-    """A runtime data product is not where it should be, or not the bytes it should be."""
+    """A runtime data product is not where it should be, or not the bytes it should be. ``other_product`` names the
+    listed product whose bytes the file holds, when it holds another product's bytes (else None)."""
+
+    def __init__(self, message, *, other_product=None):
+        super().__init__(message)
+        self.other_product = other_product
+
+
+class DataProductConflict(DataProductError):
+    """The inputs of a load contradict each other (for example an explicit file of one product where the loader's
+    settings select another); the loader refuses rather than choose."""
+
+
+@dataclasses.dataclass(frozen=True)
+class LoadRecord:
+    """What one verified load of one file established."""
+    product_id: str
+    version: str
+    file: str
+    sha256: str                    # the verified digest, equal to the registry's
+    source: str                    # "argument" or "environment variable <VAR>"
+    path: str                      # the path as given, or as built from the variable
+    real_path: str                 # os.path.realpath(path): symlinks and relative parts resolved
+
+    def line(self) -> str:
+        return (f"{self.product_id} {self.file}: {self.version} verified (sha256 {self.sha256[:12]}...), found by "
+                f"{self.source} at {self.path} (real path {self.real_path})")
+
+
+class ProductTuple(tuple):
+    """A loader's tuple result that also carries the :class:`LoadRecord` of each file it read (``data_products``)."""
+    data_products = ()
+
+    def __new__(cls, items, data_products=()):
+        self = super().__new__(cls, items)
+        self.data_products = tuple(data_products)
+        return self
 
 
 @dataclasses.dataclass(frozen=True)
@@ -100,20 +143,39 @@ def _sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
-def _where(p: DataProduct, explicit: Optional[str], name: Optional[str] = None):
-    """(directory, source) of a product: the explicit directory, else the variable's; refuses neither."""
-    if explicit:
-        return explicit, "argument"
-    root = os.environ.get(p.env)
-    if not root:
+def _explicit(p: DataProduct, explicit, name: Optional[str] = None) -> Optional[str]:
+    """The explicit path as a string, None when none was given; an empty or blank one is refused."""
+    if explicit is None:
+        return None
+    explicit = os.fspath(explicit)
+    if not explicit.strip():
         what = f"{p.subdir}/{name}" if name else f"{p.subdir}/"
+        raise DataProductError(
+            f"{p.product_id} ({p.version}): the path passed to the loader is empty. Pass the path of {what}, or pass "
+            f"None to use {p.env}.")
+    return explicit
+
+
+def _where(p: DataProduct, explicit: Optional[str], name: Optional[str] = None):
+    """(directory, source) of a product: the explicit directory, else the variable's. Refuses an empty explicit
+    directory, an unset variable and a variable that is set but empty or blank."""
+    explicit = _explicit(p, explicit, name)
+    if explicit is not None:
+        return explicit, "argument"
+    what = f"{p.subdir}/{name}" if name else f"{p.subdir}/"
+    root = os.environ.get(p.env)
+    if root is None:
         raise DataProductError(
             f"{p.product_id} ({p.version}): no location given. Set {p.env} to the directory under which "
             f"{what} lies, or pass the path to the loader. There is no built-in default.")
+    if not root.strip():
+        raise DataProductError(
+            f"{p.product_id} ({p.version}): {p.env} is set but empty. Set it to the directory under which {what} "
+            f"lies, or unset it and pass the path to the loader.")
     return os.path.join(root, p.subdir), f"environment variable {p.env}"
 
 
-def _verify(p: DataProduct, name: str, path: str, source: str) -> str:
+def _verify(p: DataProduct, name: str, path: str, source: str) -> LoadRecord:
     if not os.path.isfile(path):
         raise DataProductError(
             f"{p.product_id} ({p.version}): {p.subdir}/{name} not found at {path} (from {source}). Point {p.env} at "
@@ -124,33 +186,68 @@ def _verify(p: DataProduct, name: str, path: str, source: str) -> str:
         if other:
             raise DataProductError(
                 f"{p.product_id}: the file at {path} (from {source}) is {other[0][0]}'s {other[0][1]}, not "
-                f"{p.subdir}/{name}. Check {p.env} or the path passed to the loader.")
+                f"{p.subdir}/{name}. Check {p.env} or the path passed to the loader.", other_product=other[0][0])
         raise DataProductError(
             f"{p.product_id}: the file at {path} (from {source}) is an unknown version of {p.subdir}/{name}: "
             f"sha256 {digest[:12]}..., expected {p.files[name][:12]}... ({p.version}). Use the release's file.")
-    _log.info("%s %s: %s verified (sha256 %s...), found by %s at %s", p.product_id, name, p.version, digest[:12],
-              source, path)
-    return path
+    rec = LoadRecord(p.product_id, p.version, name, digest, source, path, os.path.realpath(path))
+    _log.info("%s", rec.line())
+    return rec
 
 
-def product_file(product_id: str, name: str, explicit: Optional[str] = None) -> str:
-    """The verified path of file ``name`` of product ``product_id``. ``explicit`` is a path to that file (it takes
-    precedence over the product's variable). Raises :class:`DataProductError` when the file cannot be found or is not
-    the recorded bytes, and ``KeyError`` for an unlisted product or file."""
+def resolve_file(product_id: str, name: str, explicit=None) -> LoadRecord:
+    """Find and verify file ``name`` of product ``product_id``; returns its :class:`LoadRecord` (``.path`` is the
+    path to read). ``explicit`` is a path to that file (it takes precedence over the product's variable). Raises
+    :class:`DataProductError` when the file cannot be found or is not the recorded bytes, or the explicit path or the
+    variable is empty, and ``KeyError`` for an unlisted product or file."""
     p = PRODUCTS[product_id]
     p.files[name]                                  # KeyError for a file the product does not list
-    if explicit:
+    explicit = _explicit(p, explicit, name)
+    if explicit is not None:
         return _verify(p, name, explicit, "argument")
     directory, source = _where(p, None, name)
     return _verify(p, name, os.path.join(directory, name), source)
 
 
-def product_dir(product_id: str, explicit: Optional[str] = None, names=None) -> str:
-    """The directory of a product of several files, after verifying ``names`` (default: every listed file).
-    ``explicit`` is the directory itself (it takes precedence over the product's variable)."""
+def resolve_dir(product_id: str, explicit=None, names=None):
+    """Find a product of several files and verify ``names`` (default: every listed file); returns
+    ``(directory, records)``, one :class:`LoadRecord` per verified file. ``explicit`` is the directory itself (it
+    takes precedence over the product's variable)."""
     p = PRODUCTS[product_id]
     directory, source = _where(p, explicit)
+    records = []
     for name in (p.files if names is None else names):
         p.files[name]
-        _verify(p, name, os.path.join(directory, name), source)
-    return directory
+        records.append(_verify(p, name, os.path.join(directory, name), source))
+    return directory, tuple(records)
+
+
+def product_file(product_id: str, name: str, explicit=None) -> str:
+    """The verified path of file ``name`` of product ``product_id`` (:func:`resolve_file`, path only)."""
+    return resolve_file(product_id, name, explicit).path
+
+
+def product_dir(product_id: str, explicit=None, names=None) -> str:
+    """The verified directory of a product of several files (:func:`resolve_dir`, directory only)."""
+    return resolve_dir(product_id, explicit, names)[0]
+
+
+SHOW_HANDLER_NAME = "hcd_analysis.runtime_data.show_loads"
+
+
+def show_loads(stream=None) -> logging.Handler:
+    """Print every verified load on ``stream`` (default: stderr), one line per file: the product id, version, digest,
+    how it was found, the path and its real path. For an application's entry point (a script's ``main``): it adds one
+    handler to the ``hcd_analysis.runtime_data`` logger and lets that logger pass INFO records; the root logger is
+    not touched, and the library never calls this itself. Calling it again changes nothing. An application that
+    already routes this logger's INFO records to its own handlers does not need it."""
+    for h in _log.handlers:
+        if h.name == SHOW_HANDLER_NAME:
+            return h
+    h = logging.StreamHandler(stream)
+    h.name = SHOW_HANDLER_NAME
+    h.setFormatter(logging.Formatter("%(name)s %(levelname)s %(message)s"))
+    _log.addHandler(h)
+    if _log.getEffectiveLevel() > logging.INFO:
+        _log.setLevel(logging.INFO)
+    return h

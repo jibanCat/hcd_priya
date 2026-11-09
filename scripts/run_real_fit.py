@@ -548,6 +548,8 @@ def export_getdist(result, out_dir, root, *, offset, blind=True, survey="", meta
 
 
 def main():
+    from hcd_analysis import runtime_data as _RDATA
+    _RDATA.show_loads()      # each verified data load on stderr: product id, version, digest, path
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--survey", required=True, choices=("eboss", "ks", "desi"))
     ap.add_argument("--n-chains", type=int, default=4)

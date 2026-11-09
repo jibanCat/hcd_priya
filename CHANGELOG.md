@@ -23,7 +23,10 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 - **Runtime data inputs** (`hcd_analysis.runtime_data`): the observed P1D legs and the multi-fidelity
   resolution-correction table come from an explicit path or an environment variable, never a built-in path, and are
   verified by sha256 before use; the simulation roots come from the config file or `HCD_LF_RAW_DIR` /
-  `HCD_HR_RAW_DIR`, and an empty or missing root is refused.
+  `HCD_HR_RAW_DIR`, and an empty or missing root is refused. An empty path or variable is refused; an explicit DESI
+  path is checked as the sample `use_snr3` selects, and the other sample's file is refused. Loaded legs carry a record
+  of each verified file (`data_products`), and the likelihood's entry points print each verified load
+  (`runtime_data.show_loads`).
 - **A run-settings record** in each output directory: a rerun with different settings is refused instead of mixing
   results.
 - **A model registry** (`hcd_analysis.registry`), provisional: download, sha256 check, cache and offline use for
