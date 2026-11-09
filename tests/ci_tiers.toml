@@ -1,0 +1,697 @@
+# Test tiers (B.2). Every tests/test_*.py, tests/regression/test_*.py, tests/integration/test_*.py and
+# tests/external/test_*.py file appears here exactly once (tests/test_ci_tiers.py checks this). CI
+# (.github/workflows/tests.yml) runs the wheel and source tiers with tools/ci/run_test_tier.py, which fails a file
+# on any failure, error, undeclared skip or
+# undeclared expected failure, or when no test passes. asset_tests and skipped_by_design name the only tests
+# allowed to skip there; they are reported as NOT RUN, never as passed, and must skip (a declared test that runs
+# fails its file). Expected failures are allowed only as exact deferrals: the deferred_legacy causes of
+# tests/gate_helpers.py, or the messages a file lists in deferred_xfails. reason says why, for every test or file
+# that CI does not run; tests marked slow are deselected and listed by the runner. Classified from a run with no
+# data links and the private trees hidden, and corrected after an AI-assisted review.
+
+[tiers]
+wheel = "fixture and synthetic tests of the installed package; CI runs them from a directory holding only tests/"
+source = "fixture and synthetic tests that also need repository files (scripts/, docs/, a git checkout); CI runs them from the checkout"
+assets = "the file cannot run in CI: its tests need a real asset that CI does not have (a cache, trained members, observational data, raw simulation outputs, the private notes, or fake_spectra), and without it some fail rather than skip, or none passes; tests in it that need no asset are not run in CI either"
+deferred = "no test of the file passes in CI: each is an explicit deferral (tests/DEFERRED.md) or needs a real asset; not run in CI"
+external = "tests/external: optional tests in a reference environment of their own; not run in CI"
+no_tests = "a file named test_*.py from which pytest collects no test; not run in CI"
+
+[files]
+"tests/test_absorption_path.py" = { tier = "wheel" }
+"tests/test_accept_rebuilt_catalogues.py" = { tier = "source" }
+"tests/test_analyze_dla_selfdraw.py" = { tier = "source" }
+"tests/test_analyze_dnuis_overall_summary.py" = { tier = "source" }
+"tests/test_analyze_dnuis_pooling.py" = { tier = "source" }
+"tests/test_analyze_dnuis_resolution_oos.py" = { tier = "source" }
+"tests/test_analyze_lls_dispcenter.py" = { tier = "source" }
+"tests/test_blinding.py" = { tier = "wheel" }
+"tests/test_bundle_lineage.py" = { tier = "wheel" }
+"tests/test_carry_validated_cache.py" = { tier = "source" }
+"tests/test_catalog_systems.py" = { tier = "source" }
+"tests/test_cddf_dx_patch.py" = { tier = "source" }
+"tests/test_cemu_t3.py" = { tier = "wheel" }
+"tests/test_cert_prereqs.py" = { tier = "source" }
+"tests/test_ci_tiers.py" = { tier = "wheel" }
+"tests/test_ci_tools.py" = { tier = "source" }
+"tests/test_cli_config.py" = { tier = "wheel" }
+"tests/test_closure_diagnostics.py" = { tier = "wheel" }
+"tests/test_comparison_harness.py" = { tier = "source" }
+"tests/test_convergence_z_match.py" = { tier = "wheel" }
+"tests/test_data_weights.py" = { tier = "wheel" }
+"tests/test_derive_dndx_historical.py" = { tier = "source" }
+"tests/test_dist_content.py" = { tier = "source" }
+"tests/test_dla_completeness_forward_parity.py" = { tier = "source" }
+"tests/test_dla_selfdraw_arm.py" = { tier = "source" }
+"tests/test_dla_truth.py" = { tier = "wheel" }
+"tests/test_dndx_display_guard.py" = { tier = "wheel" }
+"tests/test_dndx_exact_inverse.py" = { tier = "wheel" }
+"tests/test_dnuis_arm_inject_spec.py" = { tier = "source" }
+"tests/test_dnuis_inject.py" = { tier = "wheel" }
+"tests/test_emulator_dndx_wc.py" = { tier = "wheel" }
+"tests/test_emulator_likelihood.py" = { tier = "wheel" }
+"tests/test_emulator_model.py" = { tier = "wheel" }
+"tests/test_emulator_train.py" = { tier = "wheel" }
+"tests/test_error_vector_io.py" = { tier = "wheel" }
+"tests/test_export_deployed_centre.py" = { tier = "source" }
+"tests/test_export_release_bundle.py" = { tier = "source" }
+"tests/test_export_research_bundle.py" = { tier = "source" }
+"tests/test_fisher_kit.py" = { tier = "wheel" }
+"tests/test_forward_ctx_v2.py" = { tier = "source" }
+"tests/test_forward_v2.py" = { tier = "wheel" }
+"tests/test_gateA_blocking.py" = { tier = "wheel" }
+"tests/test_gate_c_validation.py" = { tier = "wheel" }
+"tests/test_gate_helpers.py" = { tier = "wheel" }
+"tests/test_grad_fidelity.py" = { tier = "wheel" }
+"tests/test_hcd_template.py" = { tier = "wheel" }
+"tests/test_interface_markers.py" = { tier = "source" }
+"tests/test_kcoord_binding.py" = { tier = "wheel" }
+"tests/test_ks_selboost_hooks.py" = { tier = "wheel" }
+"tests/test_ks_selboost_runner.py" = { tier = "source" }
+"tests/test_l6_acceptance_tools.py" = { tier = "source" }
+"tests/test_legb_ctx_cache.py" = { tier = "wheel" }
+"tests/test_legb_tau0_priya.py" = { tier = "wheel" }
+"tests/test_likelihood_driver.py" = { tier = "wheel" }
+"tests/test_lineage.py" = { tier = "wheel" }
+"tests/test_lit_dndx.py" = { tier = "source" }
+"tests/test_lit_dndx_fits.py" = { tier = "source" }
+"tests/test_lls_dispcenter_arm.py" = { tier = "source" }
+"tests/test_lls_width_study_override.py" = { tier = "source" }
+"tests/test_loader_isolation.py" = { tier = "wheel" }
+"tests/test_loo_matched.py" = { tier = "source" }
+"tests/test_loo_readout.py" = { tier = "source" }
+"tests/test_loso_sweep_error_vector.py" = { tier = "source" }
+"tests/test_lyaemu_loo_refit.py" = { tier = "source" }
+"tests/test_metal_inject.py" = { tier = "wheel" }
+"tests/test_mf_modes.py" = { tier = "wheel" }
+"tests/test_norc_single_authority.py" = { tier = "source" }
+"tests/test_omega_hi.py" = { tier = "source" }
+"tests/test_packaging.py" = { tier = "wheel" }
+"tests/test_predict_physical_grid.py" = { tier = "wheel" }
+"tests/test_predictor.py" = { tier = "wheel" }
+"tests/test_prod_forward_wiring.py" = { tier = "source" }
+"tests/test_prod_sbc_checkpoint.py" = { tier = "source" }
+"tests/test_product_manifest.py" = { tier = "wheel" }
+"tests/test_rcinj_oos_spec.py" = { tier = "source" }
+"tests/test_real_fit_export.py" = { tier = "source" }
+"tests/test_registry.py" = { tier = "wheel" }
+"tests/test_res_corr_injection_gate.py" = { tier = "source" }
+"tests/test_research_bundle.py" = { tier = "wheel" }
+"tests/test_resinj_instr.py" = { tier = "wheel" }
+"tests/test_resinj_oos_spec.py" = { tier = "source" }
+"tests/test_run_gate_d_write_once.py" = { tier = "source" }
+"tests/test_run_settings.py" = { tier = "wheel" }
+"tests/test_safe_h5.py" = { tier = "wheel" }
+"tests/test_safe_io.py" = { tier = "wheel" }
+"tests/test_seed_determinism.py" = { tier = "source" }
+"tests/test_splice_tau0_cache.py" = { tier = "source" }
+"tests/test_tau0_bands.py" = { tier = "wheel" }
+"tests/test_tau0_cache_lineage.py" = { tier = "source" }
+"tests/test_tau0_powerlaw.py" = { tier = "wheel" }
+"tests/test_tau0_rescale.py" = { tier = "wheel" }
+"tests/test_tau_threshold_sensitivity.py" = { tier = "source" }
+"tests/test_train_release_meta.py" = { tier = "source" }
+"tests/test_tutorial_production_research.py" = { tier = "source" }
+"tests/test_xclass_cemu.py" = { tier = "wheel" }
+"tests/test_zflat_alpha_guard.py" = { tier = "wheel" }
+"tests/test_zslope_center.py" = { tier = "wheel" }
+"tests/test_zzz_checkout_integrity.py" = { tier = "source" }
+
+[files."tests/integration/test_d5_research_export_w1.py"]
+tier = "assets"
+reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+
+[files."tests/integration/test_d5_t1_production.py"]
+tier = "assets"
+reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+
+[files."tests/integration/test_d5_t1_scripts.py"]
+tier = "assets"
+reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+
+[files."tests/integration/test_d5_turbo_bundles.py"]
+tier = "assets"
+reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+
+[files."tests/integration/test_d5_w1_members.py"]
+tier = "assets"
+reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+
+[files."tests/external/test_lyaemu_adapter_guards.py"]
+tier = "external"
+reason = "optional reference-environment test (its own venv), never collected by CI"
+
+[files."tests/external/test_lyaemu_loo_refit_external.py"]
+tier = "external"
+reason = "optional reference-environment test (its own venv), never collected by CI"
+
+[files."tests/external/test_safetensors_interop.py"]
+tier = "external"
+reason = "optional reference-environment test (its own venv), never collected by CI"
+
+[files."tests/regression/test_incident_2026_kgrid.py"]
+tier = "wheel"
+asset_tests = [
+    "test_anti_row_zero_on_the_real_cache",
+]
+reason = "the declared tests need the real LF training cache, absent in CI"
+
+[files."tests/test_analysis_lock_generator.py"]
+tier = "source"
+asset_tests = [
+    "test_real_leg_build_matches_fixture_schema",
+]
+skipped_by_design = [
+    "test_committed_lock_matches_live_AT_FREEZE",
+]
+deferred_xfails = [
+    "deferred lock-generator rework (gate E step 7, PI-authorized lock regeneration): the generator verifies the ensemble against <repo>/checkpoints, which does not hold the schema-2 members",
+]
+reason = "test_real_leg_build_matches_fixture_schema needs the real production legs (opt-in, HCD_LOCK_REAL_LEGS=1); test_committed_lock_matches_live_AT_FREEZE is skipped until the freeze step; the 9 LOCK_REWORK tests are a strict exact-exception deferral (tests/DEFERRED.md)"
+
+[files."tests/test_analyze_ks_selboost.py"]
+tier = "assets"
+reason = "collection reads a table from the private notes repository (scripts/ks_selboost_arms.py); a public-exposure item"
+
+[files."tests/test_cache_pairing_invariants.py"]
+tier = "source"
+asset_tests = [
+    "test_every_discovered_pair_satisfies_the_build_invariants",
+    "test_lf_discovery_pairs_ns0907_by_identity",
+    "test_override_entries_match_the_raw_headers_and_meta",
+]
+reason = "the declared tests need cluster scratch outputs, raw PRIYA simulation outputs, absent in CI"
+
+[files."tests/test_cache_raw_header_parity.py"]
+tier = "assets"
+reason = "needs the real LF training cache and eBOSS DR14 P1D data; row 11 errors rather than skips without them (verbatim from 863df63)"
+
+[files."tests/test_cache_repair_s4.py"]
+tier = "assets"
+reason = "needs S4 cache-build shards, the real LF training cache"
+
+[files."tests/test_cddf_excess_hypotheses.py"]
+tier = "assets"
+reason = "needs raw PRIYA simulation outputs; without these, tests fail rather than skip"
+
+[files."tests/test_cemu_build.py"]
+tier = "wheel"
+asset_tests = [
+    "test_loo_ensemble_residuals_are_member_means_on_the_held_out_rows",
+]
+reason = "the declared tests need gate C products, absent in CI"
+
+[files."tests/test_closure_sbc.py"]
+tier = "assets"
+reason = "needs emulator error-vector products, trained emulator members"
+
+[files."tests/test_clustering.py"]
+tier = "wheel"
+asset_tests = [
+    "test_load_real",
+    "test_real_data_smoke",
+]
+reason = "the declared tests need PRIYA production spectra, absent in CI"
+
+[files."tests/test_cov_lowk_fixes.py"]
+tier = "wheel"
+asset_tests = [
+    "test_desi_cv_floor_widens_lowk_only",
+    "test_desi_env_unset_byte_identical",
+    "test_desi_snr3_swaps_cov_and_inflates_stat",
+    "test_eboss_env_unset_byte_identical",
+]
+reason = "the declared tests need DESI DR1 P1D data, eBOSS DR14 P1D data, absent in CI"
+
+[files."tests/test_dX_bug_fix.py"]
+tier = "assets"
+reason = "collection needs cluster scratch outputs; it fails rather than skips"
+
+[files."tests/test_dX_formula.py"]
+tier = "no_tests"
+reason = "a diagnostic script named test_*.py with no test function; pytest collects nothing from it"
+
+[files."tests/test_data_likelihood.py"]
+tier = "assets"
+reason = "needs DESI DR1 P1D data, KODIAQ-SQUAD P1D data, files of a local lya_emulator_full checkout, trained emulator members; without these, tests fail rather than skip"
+
+[files."tests/test_dla_cov_reduce.py"]
+tier = "wheel"
+asset_tests = [
+    "test_default_load_is_reduced_and_stamped",
+    "test_dla_only_removal_is_exact_per_z_block",
+    "test_fid_rebuild_matches_shipped_on_kept_grid",
+    "test_optout_byte_identical_to_pre_change_behavior",
+    "test_reduced_equals_cup1d_red_build",
+    "test_reduced_symmetric_spd_cholesky_every_z",
+]
+reason = "the declared tests need DESI DR1 P1D data, absent in CI"
+
+[files."tests/test_eboss_leg.py"]
+tier = "assets"
+reason = "needs eBOSS DR14 P1D data, the real LF training cache; without these, tests fail rather than skip"
+
+[files."tests/test_emucoh_arms.py"]
+tier = "assets"
+reason = "needs the real LF training cache; without these, tests fail rather than skip"
+
+[files."tests/test_emulator_cache.py"]
+tier = "assets"
+reason = "needs cluster scratch outputs; without these, tests fail rather than skip"
+
+[files."tests/test_emulator_cache_tau0.py"]
+tier = "assets"
+reason = "needs fake_spectra (installed separately); the module skips at collection without it"
+
+[files."tests/test_emulator_data.py"]
+tier = "wheel"
+asset_tests = [
+    "test_make_splits_disjoint_on_real_lf_cache",
+]
+reason = "the declared tests need the real LF training cache, absent in CI"
+
+[files."tests/test_emulator_multifidelity.py"]
+tier = "assets"
+reason = "needs KODIAQ-SQUAD P1D data, files of a local lya_emulator_full checkout; without these, tests fail rather than skip"
+
+[files."tests/test_ensemble_emulator.py"]
+tier = "wheel"
+asset_tests = [
+    "test_load_ensemble_refuses_pre_2026_10_production_checkpoints",
+]
+reason = "the declared tests need trained emulator members, absent in CI"
+
+[files."tests/test_env_data_flags.py"]
+tier = "source"
+asset_tests = [
+    "test_desi_default_stamps_all_false",
+    "test_desi_env_cv_floor_is_stamped",
+    "test_desi_env_snr3_is_stamped",
+    "test_desi_rank1_without_floor_is_not_stamped",
+    "test_eboss_env_cv_floor_is_stamped",
+    "test_explicit_kwarg_overrides_env",
+    "test_ks_leg_stamps_default_false",
+]
+reason = "the declared tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, eBOSS DR14 P1D data, absent in CI"
+
+[files."tests/test_gateE_e1_e4.py"]
+tier = "source"
+asset_tests = [
+    "test_e1a_one_binding_per_leg_z_feeds_every_consumer_and_equals_first_principles",
+    "test_e1b_box_modes_identical_across_checkpoints_cache_and_mf",
+    "test_e1d_dynamic_call_graph_touches_no_retired_code",
+    "test_e4a_cosmology_response_of_k_and_zero_mf_derivative",
+    "test_e4b_one_fixed_grid_for_every_z_changes_the_forward_by_more_than_one_percent",
+]
+reason = "the declared tests need gate D MF products, trained emulator members, absent in CI"
+
+[files."tests/test_gateE_e2_reconstruction.py"]
+tier = "wheel"
+asset_tests = [
+    "test_e2_covariance_equals_independent_reconstruction",
+    "test_e2_forward_equals_independent_reconstruction",
+]
+reason = "the declared tests need gate D MF products, trained emulator members, absent in CI"
+
+[files."tests/test_gateE_invariants.py"]
+tier = "wheel"
+asset_tests = [
+    "test_production_leg_loaders_unchanged",
+]
+skipped_by_design = [
+    "test_metal_and_resolution_factors_bitwise_in_an_exact_replay",
+]
+reason = "the asset tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, eBOSS DR14 P1D data, files of a local lya_emulator_full checkout, absent in CI; the bit-level digest test needs a same-machine exact replay (HCD_EXACT_REPLAY=1 with HCD_PINNED_STACK=1 and the pinned stack), which a GitHub runner never is"
+
+[files."tests/test_gate_c_matched_set.py"]
+tier = "wheel"
+asset_tests = [
+    "test_c4_matched_set_is_complete",
+]
+reason = "the declared tests need KODIAQ-SQUAD P1D data, files of a local lya_emulator_full checkout, gate C products, absent in CI"
+
+[files."tests/test_gate_d_review_blocking.py"]
+tier = "wheel"
+asset_tests = [
+    "test_d3_on_the_frozen_product_is_reported_per_simulation",
+    "test_gate_d_d1_failure_pinned_to_parameter_precision",
+    "test_gate_d_rd1_report_matches_json",
+    "test_mode_mf_prediction_invariant_to_log_rho_and_heldout_rows_real",
+]
+reason = "the declared tests need gate D MF products, the private notes repository, the real LF training cache, absent in CI"
+
+[files."tests/test_hcd_pivot_center.py"]
+tier = "source"
+asset_tests = [
+    "test_build_legb_ctx_real_fit_alpha_hcd_mu_is_lit_consistent",
+    "test_hier_ratios_rederived_at_pivot_z",
+    "test_pivot_helper_returns_z3_wc_not_allz_median",
+    "test_production_path_lls_pivot_is_z3_consistent_not_allz_median",
+    "test_realfit_litlaw_lls_center_is_adopted_and_roundtrips",
+]
+reason = "the declared tests need the real LF training cache, absent in CI"
+
+[files."tests/test_hcd_survey_pin.py"]
+tier = "source"
+asset_tests = [
+    "test_lls_truth_boost_propagates_to_mock_and_truth",
+]
+reason = "the declared tests need the real LF training cache, absent in CI"
+
+[files."tests/test_kcoord.py"]
+tier = "wheel"
+asset_tests = [
+    "test_real_rows_reproduced_from_theta_within_tolerance",
+]
+reason = "the declared tests need the real LF training cache, absent in CI"
+
+[files."tests/test_ks_dndx_reparam.py"]
+tier = "wheel"
+asset_tests = [
+    "test_forbidden_combinations_raise",
+    "test_induced_geometry_vs_deployed_prior",
+    "test_ks_legacy_override_reproduces_old_prior",
+    "test_model_smoke_real_ks_ctx",
+    "test_non_ks_builds_have_no_mapped_fields",
+    "test_reconstruct_matches_model_deterministics",
+    "test_reference_curve_pins",
+    "test_reference_lls_component_is_boosted_lit_law",
+    "test_self_draw_truth_pack_on_mapped_ctx",
+    "test_structural_bound_extreme_draws",
+    "test_survey_alpha_prior_vectors_bit_unchanged",
+    "test_twin_parity_sites_and_values",
+]
+reason = "the declared tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, the real LF training cache, trained emulator members, absent in CI"
+
+[files."tests/test_ks_selboost_arms.py"]
+tier = "assets"
+reason = "needs a table from the private notes repository (scripts/ks_selboost_arms.py); without it tests fail rather than skip; a public-exposure item"
+
+[files."tests/test_legb_2d_tilt.py"]
+tier = "assets"
+reason = "every test needs the real LF training cache, trained emulator members and DESI DR1 or KODIAQ-SQUAD P1D data, except one deferred_legacy CTX_SIGNATURE deferral and one slow test; no test passes without them"
+
+[files."tests/test_legb_convergence.py"]
+tier = "wheel"
+asset_tests = [
+    "test_convergence_mode_disperses_and_returns_finite_battery",
+]
+reason = "the declared tests need DESI DR1 P1D data, absent in CI"
+
+[files."tests/test_legb_dla_masking.py"]
+tier = "wheel"
+asset_tests = [
+    "test_make_legb_mock_applies_per_leg_truth_frac",
+    "test_make_truth_stores_masked_baseline_and_full_dla_excess",
+    "test_real_ctx_truth_forward_consistency_desi_ten_percent",
+    "test_truth_pack_alpha_dla_is_ten_percent_residual",
+]
+reason = "the declared tests need observational P1D data, the real LF training cache, trained emulator members, absent in CI"
+
+[files."tests/test_legb_golden.py"]
+tier = "assets"
+reason = "needs DESI DR1 P1D data"
+
+[files."tests/test_legb_hier_hcd.py"]
+tier = "wheel"
+asset_tests = [
+    "test_fast_postprocess_on_branch_yields_alpha_columns",
+    "test_loglik_grad_in_A_r_finite",
+    "test_model_priors_only_site_order_match",
+    "test_off_branch_potential_byte_exact_vs_legacy",
+    "test_off_branch_site_list_is_the_current_code",
+    "test_on_branch_reparam_alpha_equals_A_times_r",
+    "test_ratio_centers_match_closure_truth",
+    "test_ratio_infl_scales_widths_not_centers",
+    "test_reconstruct_deterministics_on_branch_reinserts_alpha",
+]
+reason = "the declared tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, the real LF training cache, trained emulator members, absent in CI"
+
+[files."tests/test_legb_ks_resolution.py"]
+tier = "assets"
+reason = "needs KODIAQ-SQUAD P1D data"
+
+[files."tests/test_legb_leg_a.py"]
+tier = "deferred"
+reason = "4 tests are deferred_legacy CTX_SIGNATURE deferrals and the other needs trained emulator members"
+
+[files."tests/test_legb_metal_flatlog.py"]
+tier = "wheel"
+asset_tests = [
+    "test_a_siII_threaded_into_rescore_loglik",
+    "test_amplitude_map_and_Fref_provenance",
+    "test_constrain_fn_mirror_parity",
+    "test_flatlog_sites_are_loguniform_with_expected_bounds",
+    "test_uniform_default_site_construction_unchanged",
+]
+reason = "the declared tests need DESI DR1 P1D data, the real LF training cache, trained emulator members, absent in CI"
+
+[files."tests/test_legb_metal_modelcplus.py"]
+tier = "wheel"
+asset_tests = [
+    "test_arm4_out_of_class_decreasing_gauss",
+    "test_arm_desi_in_class_carries_cross",
+    "test_arm_eboss_in_class_to_machine_precision",
+    "test_knode_constrain_fn_mirror_parity",
+    "test_knode_site_inventory_and_order",
+    "test_knodes_none_uses_scalar_decorr_default",
+    "test_per_z_decorrelation_interp_and_forward_golden",
+]
+reason = "the declared tests need DESI DR1 P1D data, eBOSS DR14 P1D data, the real LF training cache, trained emulator members, absent in CI"
+
+[files."tests/test_legb_metal_zevo.py"]
+tier = "wheel"
+asset_tests = [
+    "test_arm3_ma2025_injection_finite_and_siII_off",
+    "test_arm_injection_de_double_count_and_desi_siII",
+    "test_arm_injection_eboss_is_siIII_only",
+    "test_arms_registry_amplitude_trends",
+    "test_cemu_variance_transform_uses_same_per_z_mfac",
+    "test_eboss_high_z_clamp_forward_finite",
+    "test_flatlog2node_constrain_fn_mirror_parity",
+    "test_flatlog2node_site_inventory_and_order",
+    "test_per_z_map_equals_metal_inject_and_forward_golden",
+    "test_predict_nodes_none_is_scalar_path_byte_exact",
+]
+reason = "the declared tests need DESI DR1 P1D data, eBOSS DR14 P1D data, the real LF training cache, trained emulator members, absent in CI"
+
+[files."tests/test_legb_per_leg_alpha.py"]
+tier = "source"
+asset_tests = [
+    "test_dict_loglik_equals_per_leg_sum",
+    "test_guard_per_leg_zslope_requires_per_leg_alpha",
+    "test_joint_builder_fields_and_poison",
+    "test_joint_reconstruction_matches_replay",
+    "test_joint_stamp_contents",
+    "test_joint_stamp_rejects_mixed_signatures",
+    "test_joint_trace_per_leg_zslope_switch",
+    "test_joint_trace_site_names_and_order",
+    "test_mirror_parity_per_leg",
+    "test_one_leg_joint_bitwise_rename_equivalence",
+    "test_per_leg_priors_bitwise_match_single_leg_builds",
+    "test_reconstruct_rejects_shared_samples_on_per_leg_zslope_ctx",
+    "test_short_nuts_matches_golden",
+    "test_trace_matches_sites_golden",
+]
+reason = "the declared tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, eBOSS DR14 P1D data, the real LF training cache, trained emulator members, absent in CI"
+
+[files."tests/test_legb_postprocess_golden.py"]
+tier = "assets"
+reason = "needs DESI DR1 P1D data"
+
+[files."tests/test_legb_resolution.py"]
+tier = "wheel"
+asset_tests = [
+    "test_bres_vec_forward_response_per_z_indexed",
+    "test_cov_arm_d_desi_coherent_and_amplitude",
+    "test_cov_arm_d_eboss_coherent_mode",
+    "test_cov_b_desi_deployed_cut_spd",
+    "test_cov_b_eboss_rescale_spd_and_golden",
+    "test_cov_b_resolution_float_spd_and_golden",
+    "test_f_res_prior_sigma_configurable",
+    "test_fres_sites_in_both_models_same_order",
+    "test_fres_sites_present_ordered_and_golden_off",
+    "test_resolution_ready_flag_per_leg",
+]
+reason = "the declared tests need DESI DR1 P1D data, an MF golden file, eBOSS DR14 P1D data, the real LF training cache, trained emulator members, absent in CI"
+
+[files."tests/test_legb_truth_anchor.py"]
+tier = "assets"
+reason = "needs the real LF training cache; without these, tests fail rather than skip"
+
+[files."tests/test_lit_dndx_corrected.py"]
+tier = "source"
+asset_tests = [
+    "test_case5_kernel_r3_reproducible_from_cache",
+]
+reason = "the declared tests need the real LF training cache, absent in CI"
+
+[files."tests/test_lit_dndx_kernel.py"]
+tier = "source"
+asset_tests = [
+    "test_adjudication_table_attributions",
+    "test_cache_provenance",
+    "test_emitted_json_kernel_reproducibility",
+    "test_fit_ordering_with_real_kernel",
+    "test_floor_factor_range",
+    "test_k1_monotonic_in_z",
+    "test_k1_r3_reproducible_and_in_range",
+    "test_pinned_k1_uses_subbin_powerlaw",
+    "test_same_file_consistency",
+    "test_sibling_lx_above_recipe_reproduces_0877",
+]
+reason = "the declared tests need the real LF training cache, absent in CI"
+
+[files."tests/test_lya_bias.py"]
+tier = "wheel"
+asset_tests = [
+    "test_load_real_camb_file",
+]
+reason = "the declared tests need a PRIYA CAMB file, absent in CI"
+
+[files."tests/test_mf_emucoh_floor.py"]
+tier = "assets"
+reason = "needs DESI DR1 P1D data, KODIAQ-SQUAD P1D data, emucoh products, the MF shape-floor product"
+
+[files."tests/test_mf_shape_floor.py"]
+tier = "wheel"
+asset_tests = [
+    "test_load_mf_shape_symmetric_psd",
+    "test_loglik_finite_and_differentiable_through_shape",
+    "test_mf_shape_cov_for_leg_psd_and_diagonal",
+    "test_predict_with_shape_offdiag_pd_and_backcompat",
+    "test_shape_offdiag_scales_as_infl_squared",
+]
+reason = "the declared tests need DESI DR1 P1D data, the MF shape-floor product, absent in CI"
+
+[files."tests/test_mf_true_loo.py"]
+tier = "assets"
+reason = "needs the real LF training cache; without these, tests fail rather than skip"
+
+[files."tests/test_mode_mf_module.py"]
+tier = "wheel"
+asset_tests = [
+    "test_production_product_module_equals_table_application",
+]
+reason = "the declared tests need gate D MF products, absent in CI"
+
+[files."tests/test_nhi_recovery.py"]
+tier = "no_tests"
+reason = "a diagnostic script named test_*.py with no test function; pytest collects nothing from it"
+
+[files."tests/test_norc_forward.py"]
+tier = "assets"
+reason = "needs DESI DR1 P1D data, KODIAQ-SQUAD P1D data, an MF golden file, the real LF training cache, trained emulator members"
+
+[files."tests/test_priya_p1d.py"]
+tier = "assets"
+reason = "needs fake_spectra (installed separately); the module skips at collection without it"
+
+[files."tests/test_prod_ensemble_manifest.py"]
+tier = "source"
+asset_tests = [
+    "test_gen_check_green_on_real_dir",
+    "test_real_checkpoints_verify_against_committed_manifest",
+    "test_real_load_production_ensemble",
+]
+reason = "the declared tests need trained emulator members, absent in CI"
+
+[files."tests/test_prod_sbc.py"]
+tier = "wheel"
+asset_tests = [
+    "test_build_ctx_ensemble_uses_ensemble_model",
+    "test_build_ctx_single_model_path_unchanged",
+    "test_mock_for_index_deterministic_and_shard_invariant",
+    "test_run_leg_a_sbc_return_per_mock_shards",
+]
+reason = "the declared tests need emulator error-vector products, trained emulator members, absent in CI"
+
+[files."tests/test_products_io_v2.py"]
+tier = "source"
+asset_tests = [
+    "test_every_pre_gate_e_product_is_refused[gatec_error_vector_not_for_use]",
+    "test_every_pre_gate_e_product_is_refused[hist_error_vector]",
+    "test_every_pre_gate_e_product_is_refused[hist_error_vector_xclass]",
+    "test_every_pre_gate_e_product_is_refused[hist_mf_cemu_emucoh]",
+    "test_mf_product_identity_is_checked_against_the_lf_ensemble",
+]
+reason = "the declared tests need emucoh products, emulator error-vector products, gate D MF products, trained emulator members, absent in CI"
+
+[files."tests/test_r6_pairing.py"]
+tier = "deferred"
+reason = "all 3 tests are deferred_legacy REAL_FIT_CKPT_DIR deferrals"
+
+[files."tests/test_res_corr_alpha.py"]
+tier = "assets"
+reason = "needs DESI DR1 P1D data, KODIAQ-SQUAD P1D data, an MF golden file, the real LF training cache, trained emulator members"
+
+[files."tests/test_res_corr_inject.py"]
+tier = "deferred"
+reason = "all 4 tests are deferred_legacy CTX_SIGNATURE deferrals"
+
+[files."tests/test_res_corr_norc_injection.py"]
+tier = "assets"
+reason = "needs DESI DR1 P1D data, KODIAQ-SQUAD P1D data, the real LF training cache, trained emulator members"
+
+[files."tests/test_res_instr_basis.py"]
+tier = "source"
+asset_tests = [
+    "test_artifact_bstar_at_least_as_ns_aligned_as_dict",
+    "test_artifact_bstar_shape",
+    "test_artifact_cos_span_certificate",
+    "test_artifact_env_used_recorded",
+    "test_artifact_gate_member_valid",
+    "test_artifact_legs_present",
+    "test_artifact_worst_ns_member",
+]
+reason = "the declared tests need a resolution-injection basis product, absent in CI"
+
+[files."tests/test_resolution_cup1d_consistency.py"]
+tier = "wheel"
+asset_tests = [
+    "test_cov_b_equals_cup1d_additive_build_without_resolution",
+    "test_forward_factor_exp_vs_linear_inband_gap_leq_1pct",
+    "test_npz_fid_split_reproduces_shipped_cov_syst",
+]
+reason = "the declared tests need DESI DR1 P1D data, absent in CI"
+
+[files."tests/test_sampling_box_restriction.py"]
+tier = "wheel"
+asset_tests = [
+    "test_prior_predictive_inside_original_priya_box",
+]
+reason = "the declared tests need DESI DR1 P1D data, absent in CI"
+
+[files."tests/test_schema.py"]
+tier = "wheel"
+asset_tests = [
+    "test_load_cache_exposes_k_com_and_report",
+    "test_real_caches_satisfy_schema",
+]
+reason = "the declared tests need the real LF training cache, absent in CI"
+
+[files."tests/test_tau0_informative_prior.py"]
+tier = "wheel"
+asset_tests = [
+    "test_priors_only_site_order_identical_uniform_vs_gauss",
+    "test_priors_only_site_order_unchanged_default",
+]
+reason = "the declared tests need DESI DR1 P1D data, the real LF training cache, trained emulator members, absent in CI"
+
+[files."tests/test_tau_sum_rule.py"]
+tier = "no_tests"
+reason = "a diagnostic script named test_*.py with no test function; pytest collects nothing from it"
+
+[files."tests/test_eligibility.py"]
+tier = "wheel"
+skipped_by_design = [
+    "test_the_normaliser_fingerprint_is_bitwise_in_an_exact_replay",
+]
+reason = "the bit-level digest test needs a same-machine exact replay (HCD_EXACT_REPLAY=1 with HCD_PINNED_STACK=1 and the pinned stack), which a GitHub runner never is; the per-field tolerance tests of the file run instead"
+
+[files."tests/test_wc_map.py"]
+tier = "source"
+skipped_by_design = [
+    "test_golden_digests_of_the_map_rules_in_an_exact_replay",
+]
+reason = "the bit-level digest test needs a same-machine exact replay (HCD_EXACT_REPLAY=1 with HCD_PINNED_STACK=1 and the pinned stack), which a GitHub runner never is; the per-field tolerance tests of the file run instead"

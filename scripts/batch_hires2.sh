@@ -35,6 +35,8 @@ set -euo pipefail
 HCD_ROOT="$REPO"
 PYTHON="/sw/pkgs/arc/mamba/py3.11/bin/python3"
 HCD_CONFIG="${HCD_ROOT}/config/hires2.yaml"
+# The 2026-05 production root below holds results but no run_settings.json, so the pipeline now refuses to run
+# into it (hcd_analysis/run_settings.py). For a new run, set OUTPUT_ROOT to a new directory.
 OUTPUT_ROOT="/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"   # hires/ subdir created by pipeline
 
 mkdir -p "${HCD_ROOT}/logs"
@@ -49,7 +51,7 @@ echo "CPUs:     ${SLURM_CPUS_PER_TASK:-30}"
 
 # n_workers=6          : the 6 HiRes sims in parallel
 # n_workers_skewer=5   : 5 CPUs per sim for intra-snap skewer parallelism (30/6)
-"$PYTHON" -m cli.run run-hires \
+"$PYTHON" -m hcd_analysis.cli.run run-hires \
   --config "$HCD_CONFIG" \
   --output-root "$OUTPUT_ROOT" \
   --n-workers 6 \

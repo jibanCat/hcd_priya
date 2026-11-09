@@ -1,0 +1,4 @@
+# The sdist carries what builds the wheel (pyproject.toml, the package code and its two package-data JSONs) plus
+# LICENSE and README.md. The tests run from a repository checkout, so none of tests/ is shipped.
+prune tests
+global-exclude *.py[cod] __pycache__

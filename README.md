@@ -3,8 +3,7 @@
 ![Python](https://img.shields.io/badge/python-3.11-blue)
 ![JAX](https://img.shields.io/badge/JAX%20%2F%20Equinox-float64-orange)
 ![numpyro](https://img.shields.io/badge/numpyro-NUTS-9cf)
-![tests](https://img.shields.io/badge/tests-passing-brightgreen)
-![phase](https://img.shields.io/badge/Phase--C-likelihood%20%26%20inference-blueviolet)
+[![tests](https://github.com/jibanCat/hcd_priya/actions/workflows/tests.yml/badge.svg)](https://github.com/jibanCat/hcd_priya/actions/workflows/tests.yml)
 ![data](https://img.shields.io/badge/data-DESI%20DR1%20%C2%B7%20KODIAQ--SQUAD%20%C2%B7%20eBOSS-informational)
 
 This repository implements an end-to-end pipeline that measures two cosmological
@@ -22,6 +21,7 @@ generates.
 
 ## What this is
 
+<!-- docs:about:start -->
 The Lyα forest is the series of absorption lines seen blueward of a distant
 quasar's Lyα emission, each produced by intergalactic hydrogen along the line of
 sight. The statistics of that absorption, and in particular its one-dimensional
@@ -47,50 +47,69 @@ PRIYA: Bird, Fernandez, Ho et al. 2023, JCAP 10 037
 Fernandez, Bird & Ho 2024, JCAP 07 029
 ([arXiv:2309.03943](https://arxiv.org/abs/2309.03943)).
 
+hcd_priya is the continuation of, and the maintained production software for, the analysis of Ho et al. 2026,
+"Small-scale Lyman alpha forest cosmology with PRIYA: constraints from XQ100 and KODIAQ-SQUAD one-dimensional flux
+power spectra", JCAP 2026 (07) 094
+([doi:10.1088/1475-7516/2026/07/094](https://doi.org/10.1088/1475-7516/2026/07/094),
+[arXiv:2509.18271](https://arxiv.org/abs/2509.18271)). How to cite the software: [`CITATION.cff`](CITATION.cff).
+<!-- docs:about:end -->
+
 ---
 
 ## Install / environment
 
-The repository has two halves, each with its own environment.
+<!-- docs:install:start -->
+**Supported environment.** Linux on x86-64, CPython 3.11, with the dependency versions pinned in
+[`tools/ci/constraints-devenv.txt`](tools/ci/constraints-devenv.txt): the environment the test suite is developed
+and run in. Other environments (newer dependency versions, Python 3.12 or later, macOS, Windows) are not supported
+yet; [`docs/compatibility.md`](docs/compatibility.md) lists what is tested and what is not.
 
-The first is the catalog, P1D and CDDF pipeline, the simulation-side code that
-turns raw spectra into per-class P1D and absorber catalogs. It installs with:
-
-```bash
-# Great Lakes / cluster — the supported one-shot installer:
-bash scripts/install_greatlakes.sh
-
-# Generic / laptop:
-conda create -n hcd_env python=3.11 -y && conda activate hcd_env
-pip install -r requirements.txt
-pip install -e .
-```
-
-Verify it imported:
+From a clone of this repository:
 
 ```bash
-python -c "import hcd_analysis; print(hcd_analysis.__file__)"
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install -c tools/ci/constraints-devenv.txt ".[test]"    # the supported, pinned install
+python -c "import hcd_analysis; print(hcd_analysis.__version__)"
+hcd --help
 ```
 
-The second is the emulator and likelihood, written in JAX/Equinox. It lives in a
-dedicated float64 conda environment, `emu-jax`, and must be run with the exact
-environment string below. Double precision is required because several
-structural identities in the model hold only to bit-level accuracy and break
-under JAX's default float32:
+**Working in a clone.** To run the scripts or the pipeline from the clone, install it editable instead:
+`pip install -c tools/ci/constraints-devenv.txt -e ".[test]"`. The pipeline records the clone's commit, and only
+an editable install makes that commit the code that runs (with your changes committed); a plain install runs the
+copy made when it was installed.
+
+The distribution is named `hcd-priya` (it is not on PyPI); it installs the `hcd_analysis` package and the `hcd`
+command. `pyproject.toml` declares the dependencies, and `requirements.txt` only points to the install above.
+Extras: `test` (pytest), `tutorials` (jupyter, nbformat) and `dev`.
+
+The simulation side (building absorber catalogs and P1D from raw spectra) also needs `fake_spectra`, installed
+separately ([`docs/fake_spectra_integration.md`](docs/fake_spectra_integration.md)); the emulator and the
+likelihood do not. On the Great Lakes cluster, `bash scripts/install_greatlakes.sh` creates a conda environment
+with both.
+
+The emulator and the likelihood are written in JAX/Equinox and run on the CPU in double precision. Importing
+`hcd_analysis.emulator` enables float64, which several structural identities of the model need: they hold only
+to bit-level accuracy and break under JAX's default float32. Run scripts with:
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
-    /home/mfho/.conda/envs/emu-jax/bin/python3  <your_script.py>
+JAX_PLATFORMS=cpu python <your_script.py>
 ```
 
-- `PYTHONNOUSERSITE=1` keeps stray user-site packages out of the import path.
-- `JAX_PLATFORMS=cpu` runs on CPU (this pipeline is CPU-only).
-- `import hcd_analysis.emulator` enables x64 on import; the environment string
-  above is still required so JAX picks up the right interpreter and path.
+The scripts under `scripts/` are not part of the installed package; run them from the repository root.
+<!-- docs:install:end -->
 
 ---
 
 ## Data and checkpoints
+
+<!-- docs:data:start -->
+**Data availability.** The data products of this project are HCD absorber catalogues and the products derived from
+them; it does not provide raw simulation data. Researchers who need the raw PRIYA simulation outputs can request them
+from the authors of Bird et al. 2023, JCAP 2023 (10) 037
+([doi:10.1088/1475-7516/2023/10/037](https://doi.org/10.1088/1475-7516/2023/10/037),
+[arXiv:2306.05471](https://arxiv.org/abs/2306.05471)). The catalogues and derived products are not in this code
+repository, and their release is planned but not yet available.
+<!-- docs:data:end -->
 
 The repository ships the code, not the data or the trained models. To set
 expectations before the Quickstart:
@@ -184,8 +203,8 @@ checkpoint and at least the one cache row it reads, neither of which is in the
 repository.
 
 The smallest end-to-end example loads the trained emulator and calls the forward
-model to predict a contaminated P1D. Run it with the `emu-jax` environment string
-given above.
+model to predict a contaminated P1D. Run it in the installed environment with
+`JAX_PLATFORMS=cpu`, as given above.
 
 ```python
 import hcd_analysis.emulator                       # enables JAX float64 on import
@@ -253,8 +272,12 @@ Build the catalog as part of the per-simulation pipeline (`hcd_env`):
 
 ```bash
 hcd run-sim --sim ns0.803Ap2.2e-09 --config config/default.yaml   # one sim, all snaps
-hcd run-all --n-workers 36                                         # full 60-sim LF campaign
+hcd run-all --n-workers 36 --config config/default.yaml             # full 60-sim LF campaign
 ```
+
+Each output root holds the results of one set of settings: the first run writes `run_settings.json` there, and a
+later run with different settings, or into a root that holds files but no record, is refused before anything is
+written (`hcd_analysis/run_settings.py`).
 
 On Great Lakes the full campaign runs as a SLURM array, one task per simulation:
 
@@ -276,11 +299,15 @@ the τ₀ training cache described in Stage 1.
 
 ## The pipeline, stage by stage
 
+> **A historical record, not a validation of a released model.** The stages, figures and numbers below describe the
+> analysis campaign carried out with the historical emulator, which was trained on absorber catalogues made before the
+> box-edge duplicate fix ([`docs/bugs_found.md`](docs/bugs_found.md), bug 8). They are kept as a record of that work.
+> A released model will come with its own validation.
+
 The pipeline has four stages, described in order. Each stage notes the product it
 yields, shows the figure it produces, and gives the command that generated or
-exercises it. The emulator environment string is abbreviated to `<emu-env>`
-below; expand it to the full string from
-[Install / environment](#install--environment).
+exercises it. `<emu-env>` below stands for `JAX_PLATFORMS=cpu python`, run from the
+repository root in the installed environment ([Install / environment](#install--environment)).
 
 ### Stage 1 — the simulation P1D, absorber catalog and τ₀ cache
 
@@ -308,7 +335,7 @@ Run it (catalog/P1D side, `hcd_env`):
 
 ```bash
 hcd run-sim --sim ns0.803Ap2.2e-09 --config config/default.yaml   # one sim, all snaps
-hcd run-all --n-workers 36                                         # full campaign
+hcd run-all --n-workers 36 --config config/default.yaml             # full campaign
 ```
 
 Build the τ₀ cache for the emulator:
@@ -414,17 +441,17 @@ What these closures do and do not certify is worth stating plainly. They validat
 the architecture, that is the forward model, the covariance and the sampler, that
 the production all-sims N=5 ensemble inherits. The ensemble-level production SBC
 (rank-based simulation-based calibration on the production ensemble itself) is the
-final inference-calibration gate, and it remains pending before the real fit (see
-notes `2026-06-14-validation-likelihood-production.md` §6).
+final inference-calibration gate, and it remains pending before the real fit.
 
 The SBC / closure machinery (PIT-ECDF bands, coverage, whitening tests) lives in
-`hcd_analysis/emulator/closure_diagnostics.py`; the validation writeups are in
-the notes repo (see below).
+`hcd_analysis/emulator/closure_diagnostics.py`; the validation writeups are not
+public yet.
 
 ---
 
 ## Where to go next
 
+- To report an issue, ask for help or contribute: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - The emulator deep-dive covers the architecture, the τ₀ cache, the training
   recipe, the forward model, the input contract and the conventions:
   [`hcd_analysis/emulator/README.md`](hcd_analysis/emulator/README.md).
@@ -437,36 +464,32 @@ the notes repo (see below).
   [`docs/data_layout.md`](docs/data_layout.md) and
   [`docs/p1d_definition.md`](docs/p1d_definition.md).
 - The validation results (held-out LOSO error, coverage, the closure gates and
-  the Fisher checks) are kept in the private notes repository, indexed from
-  `hcd_priya_notes/docs/superpowers/INDEX.md`. Begin with
-  `hcd_priya_notes/docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md` for the emulator
-  validation and `hcd_priya_notes/docs/superpowers/2026-06-14-validation-likelihood-production.md`
-  for the likelihood and closure.
+  the Fisher checks) are not public yet.
 
 ---
 
 ## Tests / status
 
-The catalog/P1D test suite locks the post-audit science claims: the τ sum rule,
-N_HI recovery, Voigt normalisation, the absorption-distance formula, the Rogers
-HCD template, the LF/HR z-matching and an end-to-end pipeline regression. Run it
-with:
+Install the test extra (above), then run a test file with pytest, one file per process:
 
 ```bash
-for t in tests/test_*.py; do python3 "$t"; done
+JAX_PLATFORMS=cpu python -m pytest -q tests/test_cli_config.py
 ```
 
-Status (2026-06-14): the catalog/P1D pipeline is merged and audited, with the
-PRIYA CDDF tracking Prochaska et al. 2014 to within 0.1–0.3 dex. The Phase-2
-emulator (the τ₀ cache and the Equinox emulator, validated over eight LOSO folds)
-is merged to `main`. The current branch `phase2c-likelihood` carries the
-differentiable likelihood and the inference and closure work; these closures
-validate the architecture that the production N=5 ensemble inherits, but the
-ensemble-level production SBC is the final inference-calibration gate and remains
-pending before the real fit. The live process-level state is tracked in the
-private notes repository (`hcd_priya_notes/docs/superpowers/`, latest
-`2026-06-21-session-handoff.md`; the older dated handovers are archived under
-`hcd_priya_notes/docs/code-repo-archive/handovers/`).
+Many tests need real assets that are not in this repository (the training cache, trained emulator members,
+observational data, raw simulation outputs). [`tests/ci_tiers.toml`](tests/ci_tiers.toml) assigns every test
+file to a tier and says why a file or test is not run in continuous integration. The workflow
+[`.github/workflows/tests.yml`](.github/workflows/tests.yml) builds the wheel and the source archive, checks
+their contents against the commit, installs the wheel into a fresh environment and runs the "wheel" and "source"
+tiers with [`tools/ci/run_test_tier.py`](tools/ci/run_test_tier.py), which reports every skipped, deferred or
+deselected test as not run, never as passed. The same runner works from a clone:
+
+```bash
+JAX_PLATFORMS=cpu python tools/ci/run_test_tier.py --tier source --out <new_results_dir>
+python tools/ci/run_test_tier.py --list-not-run
+```
+
+Status: research code under active development. The validation results are not public yet.
 
 ---
 
@@ -475,7 +498,7 @@ private notes repository (`hcd_priya_notes/docs/superpowers/`, latest
 ```
 hcd_analysis/            catalog/P1D/CDDF pipeline (catalog.py, p1d.py, cddf.py, hcd_template.py, ...)
 hcd_analysis/emulator/   the JAX/Equinox emulator + likelihood + inference (see its own README)
-cli/run.py               the `hcd` command-line entry point
+hcd_analysis/cli/run.py  the `hcd` command-line entry point
 config/default.yaml      default pipeline config
 scripts/                 install, SLURM batch, cache build, LOSO sweep, plotting
 notebooks/tutorials/     five starter notebooks for new students

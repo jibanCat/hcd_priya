@@ -1,7 +1,8 @@
 """
 CLI entry points for hcd_analysis.
 
-Usage:
+Usage::
+
   hcd run-one  --sim <sim_fragment> --snap <snap_number> [options]
   hcd run-sim  --sim <sim_fragment> [options]
   hcd run-all  [options]
@@ -9,8 +10,11 @@ Usage:
   hcd report   [options]
   hcd coverage [options]
 
-Global options (all subcommands):
-  --config PATH          YAML config file (default: config/default.yaml)
+Global options (all subcommands)::
+
+  --config PATH          YAML config file (required until one approved set of defaults is chosen; for example
+                         config/default.yaml in a checkout). Keys the file leaves out take the built-in values
+                         of hcd_analysis.config, and keys it does not know are ignored
   --output-root PATH     Override output directory
   --set KEY=VALUE        Override any config key (dot notation, repeatable)
                          Example: --set n_workers=8 --set cddf.A=1.2
@@ -20,6 +24,7 @@ Global options (all subcommands):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sys
@@ -62,8 +67,8 @@ def _parse_set_overrides(set_values):
 # ---------------------------------------------------------------------------
 
 _common_options = [
-    click.option("--config", "config_path", default="config/default.yaml",
-                 show_default=True, help="YAML config file"),
+    click.option("--config", "config_path", default=None,
+                 help="YAML config file (required; for example config/default.yaml in a checkout)"),
     click.option("--output-root", default=None, help="Override output root directory"),
     click.option("--set", "set_values", multiple=True, metavar="KEY=VALUE",
                  help="Override config key (dot notation). Repeatable."),
@@ -96,8 +101,17 @@ def make_config(config_path, output_root, set_values, debug, fast):
         overrides["debug"] = True
     if fast:
         overrides["benchmark"] = True
-    cfg_file = config_path if Path(config_path).exists() else None
-    return load_config(cfg_file, overrides)
+    # The built-in values of hcd_analysis.config and config/default.yaml differ, and one approved, versioned set of
+    # defaults is not chosen yet: never fall back to either set silently.
+    if config_path is None:
+        raise click.UsageError(
+            "--config is required: the built-in defaults and config/default.yaml differ and no approved default "
+            "is chosen yet, so none is applied (pass --config config/default.yaml to use the repository's file)")
+    if not Path(config_path).is_file():
+        raise click.UsageError(f"config file not found: {config_path}")
+    digest = hashlib.sha256(Path(config_path).read_bytes()).hexdigest()
+    logging.getLogger(__name__).info("config %s (sha256 %s), overrides %s", config_path, digest, overrides)
+    return load_config(config_path, overrides)
 
 
 # ---------------------------------------------------------------------------
@@ -232,9 +246,12 @@ def benchmark(config_path, output_root, set_values, debug, fast, verbose, n_sims
     setup_logging(verbose)
     cfg = make_config(config_path, output_root, set_values, debug=False, fast=True)
 
-    from hcd_analysis.pipeline import run_benchmark
+    from hcd_analysis.pipeline import check_run_settings, run_benchmark
     from hcd_analysis.report import generate_benchmarking_md
 
+    # benchmarking.md goes into the output root: record (or verify) the benchmark's settings there first, so the root
+    # never holds files of unrecorded settings (hcd_analysis/run_settings.py)
+    check_run_settings(cfg)
     result = run_benchmark(cfg, n_sims=n_sims, n_snaps=n_snaps)
 
     click.echo("\n=== Benchmark Results ===")
