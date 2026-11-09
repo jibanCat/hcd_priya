@@ -134,6 +134,10 @@ _D1_EXC_KEYS = set(D1_EXCEPTION) | {"n_pairs", "max_error"}
 # raised, never lowered), and the predictor refuses an LF+MF prediction below max(the tables' lowest redshift,
 # validated_z_min).
 VALIDATED_Z_MIN = 2.2
+# The upper edge of the same grouped-validation domain (z 2.2-4.6). It is not a record field (the record format is
+# unchanged): the predictor serves an LF+MF prediction above it with the same values, inside the tables or held at
+# their edge, but flags it mf_z_above_validated, because no validation covers it.
+VALIDATED_Z_MAX = 4.6
 
 RECORD_KEYS = {"format", "mf_version", "kind", "model_form", "tables", "backbone", "caches", "composition", "fold",
                "train_sims", "n_pairs_train", "hr_inputs", "mean_flux_convention", "fit_code", "mode_mapping",
