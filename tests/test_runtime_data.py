@@ -213,3 +213,27 @@ def test_simulation_discovery_refuses_an_unset_or_missing_root(tmp_path, root):
     arg = str(tmp_path / root) if root else root
     with pytest.raises(ValueError, match="HCD_LF_RAW_DIR"):
         HIO.discover_simulations(arg)
+
+
+# --- provenance records name repository files by their repository-relative path (review m2) -------------------------
+from hcd_analysis import paths as P  # noqa: E402
+
+
+def test_repo_relative_names_a_repository_file_without_this_machines_layout():
+    p = os.path.join(P.REPO_ROOT_STR, "hcd_analysis", "_emulator_data", "observables_tau0_lf.h5")
+    assert P.repo_relative(p) == "hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+    assert P.repo_relative(os.path.join(P.REPO_ROOT_STR, "a", "..", "b.txt")) == "b.txt"
+
+
+@pytest.mark.parametrize("outside", ["/" + "elsewhere/x.h5", "../outside/x.h5"])
+def test_repo_relative_refuses_a_path_outside_the_repository(outside):
+    path = outside if outside.startswith("/") else os.path.join(P.REPO_ROOT_STR, outside)
+    with pytest.raises(ValueError, match="not inside the repository"):
+        P.repo_relative(path)
+
+
+def test_the_shipped_derivation_record_names_its_cache_as_the_writer_would():
+    import json
+    from hcd_analysis.emulator import lit_dndx_kernel as LK
+    rec = json.load(open(os.path.join(os.path.dirname(LK.__file__), "hcd_lit_dndx_corrected.json"), encoding="utf-8"))
+    assert rec["cache_provenance"]["path"] == P.repo_relative(LK.CACHE_PATH)

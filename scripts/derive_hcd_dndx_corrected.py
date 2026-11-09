@@ -48,6 +48,7 @@ sys.path.insert(0, REPO)
 
 from hcd_analysis.emulator import lit_dndx as LD            # noqa: E402
 from hcd_analysis.emulator import lit_dndx_kernel as LK     # noqa: E402
+from hcd_analysis.paths import repo_relative                # noqa: E402
 
 OUT_JSON = f"{REPO}/hcd_analysis/emulator/hcd_lit_dndx_corrected.json"
 # the PRE-2026-07-18 laws (validation baseline / wrong-object references ONLY; the deployed
@@ -135,6 +136,14 @@ def _deployed_laws():
             j = _json.load(fh)
         # closing-panel fix 3: laws_deployed lives under adopted_law, not pi_adoption
         return {c: tuple(v) for c, v in j["adopted_law"]["laws_deployed"].items()}
+
+
+def cache_provenance(inputs, same_file_consistency):
+    """The record's cache_provenance block. The cache is named by its repository-relative path
+    (hcd_analysis.paths.repo_relative), never by this machine's absolute path, so a regenerated record that ships in
+    the package carries no developer path; a cache outside the repository is refused."""
+    return dict(path=repo_relative(inputs["path"]), shapes=inputs["shapes"],
+                sha256_f_nhi=inputs["sha256_f_nhi"], same_file_consistency=same_file_consistency)
 
 
 def main():
@@ -528,9 +537,7 @@ def main():
                                  gamma=sens["journal_fix"]["cum_uncorrected"]["gamma"]),
             journal_fix_K3=dict(A=sens["journal_fix"]["K3"]["law"]["fit"]["A"],
                                 gamma=sens["journal_fix"]["K3"]["law"]["fit"]["gamma"])),
-        cache_provenance=dict(path=inputs["path"], shapes=inputs["shapes"],
-                              sha256_f_nhi=inputs["sha256_f_nhi"],
-                              same_file_consistency=sfc),
+        cache_provenance=cache_provenance(inputs, sfc),
         xbar_z3=xbar_used,
     )
     if os.environ.get("DERIVE_WRITE_JSON", "0") == "1":
