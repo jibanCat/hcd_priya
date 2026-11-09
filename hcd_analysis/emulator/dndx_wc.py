@@ -1,6 +1,6 @@
 """dN/dX -> w_c diagonal telescoping-Poisson map (M0) + JAX-pure delta_c(z).
 
-See hcd_priya_notes/docs/superpowers/2026-05-29-wc-dndx-poisson-coupling.md. JAX-pure: no python
+Internal record: the w_c / dN/dX Poisson-coupling note of 2026-05-29. JAX-pure: no python
 branching on traced values, so the whole dN/dX -> w_c -> P_obs path is one jit.
 Class order throughout: (clean, LLS, subDLA, DLA); mu/dN-dX inputs are the 3 HCD
 classes in order (LLS, subDLA, DLA).
@@ -64,7 +64,7 @@ _DELTA_C_COEFFS = jnp.asarray(HISTORICAL_DELTA_C.coeffs)        # historical ali
 Z_FIT_LO, Z_FIT_HI = HISTORICAL_DELTA_C.z_lo, HISTORICAL_DELTA_C.z_hi
 
 # HISTORICAL per-class fit-residual std of delta_c (clean,LLS,subDLA,DLA), from
-# hcd_priya_notes/docs/superpowers/2026-06-01-delta_c-coeffs.md. These are the per-class w_c/alpha_c
+# the internal delta_c-coefficients note of 2026-06-01. These are the per-class w_c/alpha_c
 # PRIOR WIDTHS of the historical analyses: the irreducible cosmology-dependent delta_c scatter at fixed z that the
 # deg-2 z-trend fit cannot remove. Pre-fix counts; not used by the public predictor.
 DELTA_C_RESID_STD = jnp.array([0.0093, 0.0059, 0.0032, 0.0016])

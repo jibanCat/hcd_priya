@@ -30,7 +30,7 @@ _log = logging.getLogger(__name__)
 # --- Unit-cube input normalization (spec sec.10 / preprocessing audit) --------
 # PRIYA's design box for the production grid, pulled verbatim from the saved
 # emulator config that THIS cache reproduces:
-#   /home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/emulator_params.json
+#   <lya_emulator_full checkout>/kodiaq_2_2_4_6-48-48/emulator_params.json
 #   ("param_names":{ns:0,Ap:1,herei:2,heref:3,alphaq:4,hub:5,omegamh2:6,
 #                    hireionz:7,bhfeedback:8}, "param_limits":[...])
 # This is the actual Emulator.param_limits serialized for this grid (it widens

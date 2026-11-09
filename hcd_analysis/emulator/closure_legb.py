@@ -21,7 +21,7 @@ and prints per-param coverage + #divergences + L + the cross-class-C_emu-on-leg 
 
 Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
-    CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
+    CUDA_VISIBLE_DEVICES="" python \
     -m hcd_analysis.emulator.closure_legb --smoke
 """
 from __future__ import annotations
