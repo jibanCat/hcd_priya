@@ -889,7 +889,8 @@ def _check_ctx_delta_map(delta_map, historical_reason):
 def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
                    metals_on=False, desi_kwargs=None, ks_kwargs=None,
                    with_eboss=False, eboss_kwargs=None,
-                   mf_product=None, t1_product=None, t2_product=None, t3_product=None, dla_core_product=None,
+                   mf_product=None, mf_hr_cache_sha256=None, mf_composition=None,
+                   t1_product=None, t2_product=None, t3_product=None, dla_core_product=None,
                    res_corr_on=False, sample_metals=False, sample_res=False,
                    coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None, a_siiii_max=0.15,
                    metal_prior="uniform", metal_logf_lo=-11.0, metal_logf_hi=-2.0,
@@ -916,7 +917,8 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
 
     The DESI + KS (+ eBOSS) legs; the LF ensemble ``ensemble_ckpts`` (schema-2.0 checkpoint prefixes; a single model is
     a one-member list); the mode-axis MF product ``mf_product`` (refused unless fitted against exactly this ensemble
-    and the production cache); the box modes ``k_com_hmpc`` (identical across checkpoints, cache and MF); the DLA core
+    and the production cache, and from the HR cache ``mf_hr_cache_sha256`` with the composition ``mf_composition``,
+    both required with it); the box modes ``k_com_hmpc`` (identical across checkpoints, cache and MF); the DLA core
     at each leg's bins (``dla_core_product``, required when a leg forwards the DLA class; amendment A1 rev 1 section 4); the T1 and T3 products (``t1_product``, ``t3_product``; sections 1 and 3); the priors
     (unchanged). Every kept data bin is checked against the simulated
     modes over the whole sampling box. ``desi_kwargs`` / ``ks_kwargs`` / ``eboss_kwargs`` override the loader cuts; the
@@ -993,9 +995,12 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     _assert_bins_inside_modes(legs, k_com, np.asarray(lo_u), np.asarray(hi_u))
     mf_obj = None
     if mf_product is not None:
+        if mf_hr_cache_sha256 is None or mf_composition is None:
+            raise ValueError("mf_product needs mf_hr_cache_sha256 and mf_composition (products.load_mf_product checks "
+                             "every digest and the composition)")
         mf_obj, mf_k, _ = PR.load_mf_product(
             mf_product, lf_ckpt_sha256=[T._sha256_or_none(p + ".eqx") for p in ensemble_ckpts],
-            lf_cache_sha256=cache_sha)
+            lf_cache_sha256=cache_sha, hr_cache_sha256=mf_hr_cache_sha256, composition=mf_composition)
         if not np.allclose(mf_k, k_com, rtol=1e-14, atol=0):
             raise ValueError("the MF product's k_com_hmpc differ from the checkpoints'")
     # the DLA core at each leg's bins: a fixed function of physical k (amendment A1 rev 1 section 4).

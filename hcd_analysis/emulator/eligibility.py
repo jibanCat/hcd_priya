@@ -723,6 +723,14 @@ def _result(components, env, kind):
 
 
 # ------------------------------------------------------------------------------------- content: the components
+def _exact_cache_digest(x):
+    """The caller's expected cache digest, when not None, is taken only as an exact str (``safe_io.exact_hex64``): a
+    str subclass could pass the cache tie for any cache."""
+    from .safe_io import require_exact_hex64
+    if x is not None:
+        require_exact_hex64(x, "expected_cache_sha256", EligibilityError)
+
+
 def _check_inputs(metas, norms, wcm):
     if not metas or len(norms) != len(metas):
         raise EligibilityError(f"the content checks take one normaliser per member and at least one member "
@@ -906,6 +914,7 @@ def production_content_check(metas, norms, wcm, *, cache_path=None, cache=None, 
     (``norm_fingerprint/1``); the w_c map refitted on the full cache (``wcmap_refit/1``). ``cache`` (a dict from the
     strict ``data.load_cache`` of ``cache_path``) or ``cache_path`` alone (loaded here); ``cache_path`` is required
     either way. Returns a ``ContentCheck``; production needs ``passed``."""
+    _exact_cache_digest(expected_cache_sha256)
     _check_inputs(metas, norms, wcm)
     env = environment()
     d = _load(cache, cache_path)
@@ -937,6 +946,7 @@ def research_content_check(metas, norms, wcm, rs, *, cache_path=None, cache=None
     (``wcmap_refit_subset/1``; the full refit when nothing is held out). Under ``unverifiable`` the split and the
     normaliser are recorded UNAVAILABLE and the map is still refitted on the cache minus the declared held-out
     simulations. MISMATCH refuses a research export; UNAVAILABLE is allowed and recorded."""
+    _exact_cache_digest(expected_cache_sha256)
     _check_inputs(metas, norms, wcm)
     env = environment()
     d = _load(cache, cache_path)

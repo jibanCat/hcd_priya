@@ -196,7 +196,11 @@ def assemble_fold(d, holdout_sim, members, rec, *, cache_sha256, expected_member
     expected, a member was trained on another cache or holds out another simulation, the members mix training arms,
     k grids or fold rows, or the GP's training rows are not C1's fit and early-stopping rows. A missing member, or one
     with a non-finite prediction on a compared mode, counts as dropped; fewer than 4 usable members or a GP NOT_RUN make the fold
-    NOT_RUN for both methods. ``predict`` defaults to ``predict_fold``."""
+    NOT_RUN for both methods. ``predict`` defaults to ``predict_fold``. ``cache_sha256``, when not None, is taken only
+    as an exact str (``safe_io.exact_hex64``; a str subclass could pass the cache tie for any member)."""
+    from .safe_io import require_exact_hex64
+    if cache_sha256 is not None:
+        require_exact_hex64(cache_sha256, "assemble_fold: cache_sha256", ValueError)
     predict = predict or predict_fold
     real = [os.path.realpath(m[0]) for m in members]
     if len(set(real)) != len(real):

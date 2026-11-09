@@ -1,7 +1,7 @@
 # Release format for emulator bundles: HDF5 + JSON (`hcd_priya.h5/2`)
 
-Status: the pickle-free format for single-fidelity emulator bundles (see Scope below; the format of the released
-emulator, with the multi-fidelity correction, follows in a later change), adopted subject to an independent review of
+Status: the pickle-free format for single-fidelity emulator bundles (see Scope below; the multi-fidelity correction
+is a separate record, "The multi-fidelity record" and "The release manifest" below), adopted subject to an independent review of
 its loader and a compatibility test with an older HDF5 library (passed locally with libhdf5 1.10.8 reading a bundle
 written with 2.0.0; not yet run in continuous integration). The trained models themselves are not distributed yet.
 The training
@@ -14,11 +14,13 @@ through the separately named historical loaders (below). The earlier safetensors
 ## Scope: single fidelity
 
 An `hcd_priya.h5/2` bundle holds the members of ONE training cache and the w_c map fitted to it. It has no slot for a
-multi-fidelity (LF to HR) correction, and the predictor (`hcd_analysis/predictor.py`) applies none: a bundle trained on
-the low-fidelity cache gives low-fidelity predictions, and every prediction's labels say so (`product` names the
-training cache's fidelity; `mf_correction` is `none`). The multi-fidelity correction, its representation in the bundle
-and a release-level manifest come in a later change. Because the manifest's keys are fixed (below), adding them
-changes the format, so an `hcd_priya.h5/2` bundle is not the complete release model.
+multi-fidelity (LF to HR) correction, and the predictor (`hcd_analysis/predictor.py`) applies none to a bundle loaded
+alone: a bundle trained on the low-fidelity cache gives low-fidelity predictions, and every such prediction's labels
+say so (`product` names the training cache's fidelity; `mf_correction` is `none`). The multi-fidelity correction is
+kept outside the bundle, so the bundle's fixed manifest keys (below) and its digest do not change: it is a separate
+record bound to one bundle ("The multi-fidelity record"), and an LF+MF release publishes the two under one release
+manifest ("The release manifest"); an LF+MF prediction's `mf_correction` label says the correction is applied. An
+`hcd_priya.h5/2` bundle alone is therefore not the complete release model.
 
 ## Why
 
@@ -287,6 +289,116 @@ benchmark's `3496030`), predates them. Differences a user of an earlier version 
   `hcd_priya.ensemble_acceptance/2`, and its `trained_on_every_simulation` takes a member meta (a recipe raises
   `TypeError`);
 - `scripts/export_safe_bundle.py` requires the recipe to state `n_train` and `n_val` and the content checks to PASS.
+
+## The multi-fidelity record (`hcd_priya.mf_record/1`)
+
+**What it is.** The LF members predict the per-class PRIYA-filtered P1D of the low-resolution simulations. The
+multi-fidelity (MF) correction turns that into an HR-calibrated prediction, P_MF = P_LF exp(g(z, tau0, k)). g is
+measured mode by mode on matched HR/LF pairs, g = log P_HR - log P_LF,backbone, and fitted as a table model that does
+not depend on the cosmological parameters (`mf_modes.fit_mode_mf`: log_rho + gbar_z + gbar_tau + one rank-1 z x tau0
+term). Because the targets use the LF backbone's predictions, a record is bound to exactly one backbone bundle.
+
+**Layout.** A record is a directory of its own (it is not listed in a bundle's manifest, so a backbone's manifest
+digest does not change when an MF is added). It holds exactly:
+
+- `mf_tables.h5`: the root attribute `format = "hcd_priya.mf/1"` and the group `/mf`, flat, holding one contiguous,
+  unfiltered, attribute-free, little-endian float64 dataset per table: `log_rho` (K), `gbar_z_tab` (Nz, 4, K),
+  `gtau_tab` (Nr, 4, K), `a_k` (4, K), `u_z` (Nz), `u_tau` (Nr), `z_tab` (Nz, ascending), `tau_tab` (the rung index
+  0..Nr-1), `tau_by_z` (Nz, Nr, ascending in rung) and `k_com_hmpc` (K, the box modes 2 pi n / L). Nothing else.
+- `mf_record.json` (UTF-8 JSON, closed key set; `hcd_analysis/emulator/mf_release.py`):
+  - `format` (`"hcd_priya.mf_record/1"`), `mf_version`, `kind` (`release`, `fold` or `historical`), `model_form`;
+  - `tables`: `file`, `format`, `sha256`, `bytes`, `n_modes`, `n_z`, `n_rung`;
+  - `backbone`: `manifest_sha256` (the backbone bundle's manifest), `kind` (`release` or `research`),
+    `cache_sha256` (the backbone's training cache) and `held_out_sims` (a research backbone's held-out simulations);
+  - `caches`: `lf` and `hr`, each `{file, sha256, provenance}` (file names only, never paths). The two digests do
+    not establish the same thing, and `provenance` says so with a fixed statement from the code
+    (`mf_release.CACHE_PROVENANCE`, checked at load): the LF cache is lineage-verified through the bound backbone (it is
+    the backbone's training cache), while the HR cache is digest-anchored only and never lineage-verified (it is read
+    without a lineage check, and only its per-class P1D rows and row keys are used);
+  - `composition`: `id`, `excluded_sims` and `ruling_ids` (the rulings that set it; at least one);
+  - `fold`: null, or `{fold_id, holdout_sims, backbone_excludes_holdout}` for a held-out fit;
+  - `train_sims`, `n_pairs_train`;
+  - `hr_inputs`: the HR cache fields the MF reads (the per-class P1D rows and their row keys) and the
+    catalogue-derived HR columns it excludes, with their status;
+  - `mean_flux_convention`: the normalisation of the per-class P1D targets as the code computes it (the function
+    and line are named), status `SETTLED`: the global convention, in which the four class spectra share the whole
+    sample's mean flux, is the production convention; normalising each class by its own mean flux is a diagnostic;
+  - `fit_code`: `{commit, dirty}` of the fit;
+  - `mode_mapping`: the HR/LF mode-mapping check the builder ran over every matched pair (`tol` = 1e-12, the canonical
+    and stored-grid maxima, and `exception`). The canonical mapping holds to 1e-12 on every pair; so do the stored
+    grids, except, when `exception` is not null, the pairs of one recorded design point (`mf_release.D1_EXCEPTION`:
+    its LF and HR run names, whose parameter values differ in their last quoted digits) below the recorded bound
+    5e-10, with their count and largest error. Any other exception, bound or tolerance is refused;
+  - `validated_z_min`: the lower edge of the redshift range over which the MF correction is validated (the frozen
+    grouped-validation domain); at build time this is the domain edge, not a passed validation. It is a float set by
+    the builder (`--validated-z-min`, 2.2 by default, `mf_release.VALIDATED_Z_MIN`); it may be raised, never lowered.
+    The predictor refuses an LF+MF prediction below the larger of it and the tables' lowest redshift.
+
+A published record comes with the sha256 of its `mf_record.json`; the record pins the tables by sha256 and size.
+
+**Loading.** `mf_release.load_mf_record(dir, expected_record_sha256=..., backbone_manifest_sha256=..., kind="release",
+composition=None, lf_cache_sha256=None, hr_cache_sha256=None)` reads the record through one no-follow descriptor,
+compares its sha256 with the published one before parsing, validates the closed schema and the kind rules, compares the
+tables' sha256 before libhdf5 parses them, and walks the tables file with the same strict rules as a member (no links,
+no attributes but the root `format`, no chunked, filtered, compact, external or virtual storage, finite values only).
+It refuses: another backbone, another kind than the one asked for (a `historical` record loads only when asked for by
+kind; it is never applied as the release MF), a composition or cache digest other than the expected ones, any extra
+file, a record whose `hr_inputs` name a catalogue-derived HR column or give those columns another status, a
+`mean_flux_convention` other than the code's, and a legacy `.npz` product.
+
+**Kind rules.** Every record's LF cache is its backbone's training cache (`caches.lf.sha256` equals
+`backbone.cache_sha256`): the targets were formed with that backbone. A `release` record has a release backbone, no
+fold and a clean fit tree (`fit_code.dirty` false). A `fold` record names its held-out group, which lies outside its
+training and excluded sets; `backbone_excludes_holdout` must equal "the group is among the backbone's held-out
+simulations", so a record built with a production backbone (in-sample LF for the held-out group) says so.
+
+**In the predictor.** `predictor.load_bundle(bundle_dir, sha256, mf_dir=..., mf_record_sha256=...)` applies a release
+record to a production bundle; `predictor.load_research_bundle(..., mf_dir=..., mf_record_sha256=...)` applies a fold
+record to its research backbone (genuine held-out predictions for grouped cross-validation when that backbone excludes
+the held-out group). Both refuse a record whose backbone manifest, training cache, backbone kind, held-out simulations
+or box modes are not the bundle's. The predictor applies only what it re-derives from the record's own anchored
+bytes (`mf_release.reverify`; a loaded `MFRecord` keeps them): a record built or changed in memory (another record's
+tables, a relabelled kind) is refused, so `provenance["mf"]` always describes the tables applied.
+`predict(..., fidelity="LF")` gives the LF prediction of the same bundle, bit for bit what the bundle loaded without
+an MF gives. Below the larger of the lowest redshift of the record's tables and the record's `validated_z_min` the
+LF+MF prediction is refused (`MFRangeError`), never clamped: the correction was not measured or not validated there,
+so only `fidelity="LF"` is available. Above the highest redshift, and outside the tau0 tables, g is held at its edge value and the prediction is
+flagged (`mf_z_clamped`, `mf_tau0_clamped`).
+
+**Writing.** `mf_release.write_mf_record(out_dir, tables, ...)` validates everything first, then creates `out_dir`
+(an existing directory, file or symlink is refused: a record is written once), writes the tables through the
+temporary file's own descriptor and publishes them by hard link, then writes the record last.
+`scripts/build_mf_release.py` builds a record from digest-pinned caches and an anchored backbone; it refuses an existing
+output directory and a release build from a dirty tree before reading any input.
+
+**Historical MF products.** The gate D product (`mf_modes_all6.npz`, `mf_modes.save_mode_mf`) is the historical `.npz`
+container, read with `allow_pickle=False` by `products.load_mf_product`, which checks the LF ensemble, the LF and HR
+cache digests and the composition (`"all"` for a product that records none). It is not a release record and the
+release loader refuses it.
+
+## The release manifest (`hcd_priya.release/1`)
+
+An LF+MF release is published under ONE digest, the sha256 of a small `release.json` in the release directory
+(`hcd_analysis/emulator/release_manifest.py`):
+
+```json
+{"format": "hcd_priya.release/1", "release_version": "<text>",
+ "backbone": {"dir": "<name>", "manifest_sha256": "<64 hex>"},
+ "mf": {"dir": "<name>", "record_sha256": "<64 hex>"}}
+```
+
+`backbone.dir` holds the `hcd_priya.h5/2` production bundle and `mf.dir` the `hcd_priya.mf_record/1` record; each
+`dir` is one plain directory name inside the release directory (never a path, `..` or a symlink), and the two differ.
+The key set is closed and the `mf` part is required: an LF-only bundle is not a release of this format and loads with
+`load_bundle` as before. Only `release.json` is anchored by the release digest: the loader reads the two parts it
+names and ignores every other file in the release directory, which is not part of the release.
+`predictor.load_release(release_dir, "<published release sha256>")` reads `release.json`
+through a no-follow descriptor, compares its sha256 before parsing, validates it, and loads both parts through
+`load_bundle(..., mf_dir=..., mf_record_sha256=...)` with the digests it names; since the record pins its backbone's
+manifest, a manifest naming a mismatched pair is refused. The returned bundle's `provenance["release"]` gives the
+format, the release version and the release sha256. `release_manifest.write_release_manifest` writes the file once,
+into a directory that already holds both parts. The two-digest call (`load_bundle` with `mf_dir` and
+`mf_record_sha256`) keeps working.
 
 ## What the loader guarantees
 

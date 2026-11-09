@@ -138,8 +138,8 @@ repository.
 
 ### Release format of the emulator (HDF5 + JSON)
 
-Emulator members are exported in a pickle-free, single-fidelity format, `hcd_priya.h5/2` (scope below; the release
-format with the multi-fidelity correction follows in a later change): per member one HDF5 file (the network
+Emulator members are exported in a pickle-free, single-fidelity format, `hcd_priya.h5/2` (scope below; the
+multi-fidelity correction is a separate record, see "LF+MF prediction" below): per member one HDF5 file (the network
 weights as datasets named by their JAX tree paths, and the output normalizer) and one JSON sidecar (the meta and the
 file's sha256), plus the map from absorber incidence (dN/dX) to the class weights w_c, and a bundle `manifest.json`
 whose lineage block names the training cache,
@@ -176,15 +176,46 @@ pred.flags.get("research_model", False)             # True here; production pred
 
 Arrays returned by `hp.add_hcd` do not carry the flag: keep the `Prediction` (or its `provenance`) with them.
 
-**Scope: single fidelity.** `hcd_priya.h5/2` and the predictor serve the members of one training cache and the w_c
-map fitted to it. They apply no multi-fidelity (LF to HR) correction, so a bundle trained on the low-fidelity cache
-gives low-fidelity predictions; each prediction's labels say so (`product`, `mf_correction`). The multi-fidelity
-correction, its representation in the bundle and a release-level manifest come in a later change, which also changes
-the bundle format; until then an `hcd_priya.h5/2` bundle is not the complete release model.
+**Scope: single fidelity.** An `hcd_priya.h5/2` bundle holds the members of one training cache and the w_c map fitted
+to it, and no multi-fidelity (LF to HR) correction: loaded alone, a bundle trained on the low-fidelity cache gives
+low-fidelity predictions; each prediction's labels say so (`product`, `mf_correction`). The multi-fidelity correction
+is not part of this format: it is a separate MF record bound to one bundle, and an LF+MF release publishes the two
+under one release manifest (next section). An `hcd_priya.h5/2` bundle alone is therefore not the complete release
+model.
 
 The files open with standard tools (`h5ls -r member.h5`). Contract and full usage: `docs/release_format_h5.md`; a
 step-by-step guide to production and research bundles, with executable examples:
 [`docs/tutorials/production_and_research_bundles.md`](docs/tutorials/production_and_research_bundles.md).
+
+### LF+MF prediction (the multi-fidelity correction)
+
+The low-fidelity (LF) emulator predicts the per-class P1D of the low-resolution PRIYA simulations. A multi-fidelity
+(MF) record, fitted on matched high- and low-resolution simulation pairs, calibrates it to high resolution:
+P_MF = P_LF exp(g(z, tau0, k)), where g does not depend on the cosmological parameters and is bound to exactly one LF
+backbone bundle. **No validated release MF exists yet.** The build of the release MF record and its grouped (K-fold)
+cross-validation are both pending, and the PI approves the K-fold acceptance criteria before any MF is released. The
+calls below show the interface only; every path and digest in them is a placeholder.
+
+```python
+import hcd_analysis.predictor as hp
+emu = hp.load_release("path/to/release", "<published release sha256>")    # release.json names both parts
+# the same, with the two digests given directly:
+emu = hp.load_bundle("path/to/release/backbone", "<backbone manifest sha256>",
+                     mf_dir="path/to/release/mf", mf_record_sha256="<MF record sha256>")
+pred = emu.predict(params, 3.0, tau_eff=0.36)                 # LF+MF: the default once an MF record is loaded
+lf = emu.predict(params, 3.0, tau_eff=0.36, fidelity="LF")    # the LF backbone alone, bit for bit
+pred.flags["mf_applied"], pred.provenance["mf"]["record_sha256"]
+```
+
+`provenance["mf"]` names the record, its composition and the rulings that set it, the fit commit, the mean-flux
+convention of its targets (the settled global convention), the HR inputs used, the HR/LF mode-mapping check, the
+lower edge of the MF's validation domain (`validated_z_min`, 2.2 by default; the domain edge, not a passed
+validation), and the two cache digests with what each establishes:
+the LF cache is lineage-verified through the backbone, while the HR cache is digest-anchored only and never
+lineage-verified. Below the larger of the MF tables' lowest redshift and `validated_z_min` an LF+MF prediction is
+refused (`MFRangeError`); ask for `fidelity="LF"` there. A bundle loaded without an MF record predicts exactly as before, and `fidelity="LF+MF"` on it
+raises `MFUnavailableError`. Details: `docs/release_format_h5.md`, sections "The multi-fidelity record" and "The
+release manifest".
 
 Throughout the rest of this README, each stage is marked with what it needs:
 **requires the full data / Great Lakes (not in this repo)** for anything that

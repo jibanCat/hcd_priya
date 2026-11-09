@@ -14,7 +14,7 @@ import jax.numpy as jnp
 
 from hcd_analysis.emulator import forward as FW
 from hcd_analysis.emulator.data import PARAM_LIMITS
-from tests.test_gateE_e1_e4 import DLA_CORE, GATEC, MF, _inputs, _need, _theta_set, prod_ctx  # noqa: F401
+from tests.test_gateE_e1_e4 import DLA_CORE, GATEC, MF, MF_HR_CACHE, _inputs, mf_kw, _need, _theta_set, prod_ctx  # noqa: F401
 
 RECON = Path(__file__).with_name("gate_e_reconstruction.py")
 ALLOWED = {"json", "pickle", "numpy", "jax", "equinox", "h5py", "hcd_analysis.emulator.model"}
@@ -71,9 +71,9 @@ T3_PRODUCT = external_path("HCD_EMULATOR_V2_DIR", "gateE", "products", "t3_gateE
 @pytest.fixture(scope="module")
 def prod_ctx_cemu():
     from hcd_analysis.emulator import closure_legb as CL
-    _need(f"{GATEC}/prod_repaired_seed0.eqx", MF, DLA_CORE, T1_PRODUCT, T3_PRODUCT)
+    _need(f"{GATEC}/prod_repaired_seed0.eqx", MF, MF_HR_CACHE, DLA_CORE, T1_PRODUCT, T3_PRODUCT)
     ctx, _ = CL.build_legb_ctx(historical_reason="test of the historical gate E context",
-                               ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF,
+                               ensemble_ckpts=[f"{GATEC}/prod_repaired_seed{i}" for i in range(5)], mf_product=MF, **mf_kw(),
                                dla_core_product=DLA_CORE, t1_product=T1_PRODUCT, t3_product=T3_PRODUCT,
                                ks_kwargs=dict(resolution_float=True, k_max=0.065), with_eboss=True, metals_on=True,
                                sample_res=True)

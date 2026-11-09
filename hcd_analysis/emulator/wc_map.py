@@ -226,7 +226,10 @@ def build(cache_path, out_path, *, expected_cache_sha256=None, require_release_e
     ``expected_cache_sha256`` when given) and write it to ``out_path`` with its record. The code identity is the
     current checkout's; with ``require_release_eligible`` an ineligible record (a dirty tree, an unknown commit) is
     refused before anything is written. Returns ``(record, sha256 of the written file)``."""
+    from . import safe_io as S
     from .data import load_cache
+    if expected_cache_sha256 is not None:                    # an exact str only (safe_io.exact_hex64)
+        S.require_exact_hex64(expected_cache_sha256, "build: expected_cache_sha256", WcMapError)
     if os.path.lexists(out_path):
         raise WcMapError(f"{out_path} exists: a w_c map is never overwritten")
     d = load_cache(cache_path)
@@ -333,6 +336,8 @@ def parse_wc_map(raw, where="<w_c map>", *, expected_sha256=None, require_releas
     ``expected_sha256`` the bytes must hash to it first."""
     from . import safe_io as S
     from ..catalog import RELEASE_FINDER_IDS
+    if expected_sha256 is not None:                          # an exact str only (safe_io.exact_hex64)
+        S.require_exact_hex64(expected_sha256, f"{where}: expected_sha256", WcMapError)
     raw = bytes(raw)
     sha = hashlib.sha256(raw).hexdigest()
     if expected_sha256 is not None and sha != expected_sha256:

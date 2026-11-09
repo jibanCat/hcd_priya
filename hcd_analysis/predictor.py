@@ -20,12 +20,35 @@ full-simulation research models: ``provenance.research``) is refused by ``load_b
 ``load_research_bundle(bundle_dir, sha256, purpose=...)``, which returns a ``ResearchPredictor`` (the same forward,
 every prediction flagged ``research_model``); it is never a ``Bundle``.
 
-**Scope: single fidelity.** Format ``hcd_priya.h5/2`` and this predictor serve the members of ONE training cache and
-the w_c map fitted to it, with no multi-fidelity (LF to HR) correction: a bundle trained on the low-fidelity cache
-gives low-fidelity predictions (``labels["product"]`` names the training cache's fidelity; ``labels["mf_correction"]``
-is ``none``). The multi-fidelity correction, its representation in the bundle and a release-level manifest come in a
-later change; the bundle format does not hold them yet, so an ``hcd_priya.h5/2`` bundle is not the complete release
-model.
+**Scope: one bundle is single fidelity.** Format ``hcd_priya.h5/2`` holds the members of ONE training cache and the
+w_c map fitted to it, and no multi-fidelity (LF to HR) correction: a bundle loaded alone, trained on the low-fidelity
+cache, gives low-fidelity predictions (``labels["product"]`` names the training cache's fidelity;
+``labels["mf_correction"]`` is ``none``). The multi-fidelity correction is not part of the bundle format: it is a
+separate MF record (``hcd_priya.mf_record/1``) bound to one bundle by its manifest sha256, and an LF+MF release
+publishes the two under one release manifest (below). An ``hcd_priya.h5/2`` bundle alone is therefore not the complete
+release model.
+
+**A release (LF+MF).** ``load_release(release_dir, "<the published release sha256>")`` loads a whole release from its
+release manifest (``release.json``, ``emulator.release_manifest``): the backbone bundle and the MF record it names,
+each checked against the digest the manifest gives, through ``load_bundle`` below.
+
+**The MF correction (LF+MF).** ``load_bundle(bundle_dir, sha256, mf_dir=..., mf_record_sha256=...)`` also loads the
+release MF record (format ``hcd_priya.mf_record/1``, ``emulator.mf_release``), anchored on its published sha256 and
+bound to this bundle: its backbone manifest sha256, training cache, backbone kind and box modes must be this
+bundle's, and a historical or fold record is refused. Each member's per-class spectrum is then multiplied by
+exp(g(z, tau0, k)) on the native modes, before the mean, the spread and any k placement: P_MF = P_LF exp(g). g does not
+depend on the cosmological parameters. Below max(the lowest redshift of the record's tables, the record's
+``validated_z_min``, 2.2 by default) the MF is REFUSED (``MFRangeError``; ask for ``fidelity="LF"``): it is never
+clamped there. Above the highest redshift and outside the
+tau0 tables it is held constant and flagged (``mf_z_clamped``, ``mf_tau0_clamped``). ``w_c`` and ``dndx`` stay the LF
+backbone's. ``fidelity`` ("LF" or "LF+MF"; None: the bundle's own) selects the output; "LF+MF" without a record raises
+``MFUnavailableError``. The record's provenance (version, composition and ruling ids, cache digests and their
+provenance statements, fit commit, the settled mean-flux convention of its targets, the HR inputs used) is in
+``provenance["mf"]``. Without an MF record nothing here changes. A FOLD record (a held-out fit for grouped cross-validation) applies only on its research backbone
+(``load_research_bundle(..., mf_dir=..., mf_record_sha256=...)``); ``heldout_P_filt_at(pred, x, tau0)`` gives that
+fold's held-out LF and MF predictions at cache inputs from the same object. ``backbone_identity(pred)`` is what an MF
+record must declare about a backbone, derived from its member metas; ``lf_P_filt_at`` and ``native_modes`` serve the
+MF builder. These are module functions, so the public surface of ``Bundle`` is unchanged.
 
 **Inputs.** ``params``: a dict of the nine PRIYA parameters (``PARAM_NAMES``): ``ns`` and ``Ap`` at the PRIYA pivot
 k_p = 0.78 h/Mpc, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hireionz``, ``bhfeedback``. ``z``: a PRIYA
@@ -50,11 +73,11 @@ above the original PRIYA design box (``NS_RIDGE``, where the design is sparse) i
 
 **HCD.** ``add_hcd(pred, A)`` returns P_clean + sum_c A_c (P_c - P_clean), with one amplitude per class (A of shape (3,))
 or per class per redshift ((n_z, 3) on a stack). A_c is the effective sightline fraction of class c. The class
-spectra are normalised as in the current training cache, by the snapshot's global mean flux
-(``labels["normalisation"]``; the convention is under review). Under that normalisation and with the counted class
-fractions, sum over the four classes of w_c P_c is the full-sample filtered P1D; the shipped w_c is the map's fitted
-estimate of those fractions (the fit residuals are recorded in the map), so A = w_c gives that total only to the
-accuracy of the map, and only under this normalisation. Only physical validity is imposed: every A_c >= 0 and the
+spectra are normalised as in the training cache, by the snapshot's global mean flux (``labels["normalisation"]``):
+the settled production convention; normalising each class by its own mean flux is a diagnostic only. Under that
+normalisation and with the counted class fractions, sum over the four classes of w_c P_c is the full-sample filtered
+P1D; the shipped w_c is the map's fitted estimate of those fractions (the fit residuals are recorded in the map), so
+A = w_c gives that total only to the accuracy of the map, and only under this normalisation. Only physical validity is imposed: every A_c >= 0 and the
 clean fraction 1 - sum_c A_c >= 0; anything else is a clear error. This module has no prior, no survey key and no DLA
 forward-fraction default, and it never imports the historical likelihood or priors (``inference``, ``closure_legb``,
 ``lit_dndx*``, ``meanflux_prior``). Two contributions are not in the total (documented omissions): the subDLA filtered remnant (the power of
@@ -75,6 +98,7 @@ import jax
 import jax.numpy as jnp
 
 from .emulator import kcoord as _K
+from .emulator import mf_release as _MR
 from .emulator import safe_h5 as _H
 from .emulator.data import DATA_RANGE, PARAM_LIMITS, SAMPLING_LIMITS, Z_LIMITS, normalize_params
 from .emulator.mean_flux_model import TAU0_PIVOT_Z, kim_tau0, tau0_alpha_priya
@@ -96,6 +120,18 @@ NS_RIDGE = 0.995
 class PredictorInputError(ValueError):
     """An input the checked predictor refuses (shape, type, non-finite, off the grid, outside the native k span,
     or an HCD amplitude that is not a physical class fraction)."""
+
+
+class MFUnavailableError(PredictorInputError):
+    """The LF+MF prediction was asked for, but the loaded bundle carries no MF record."""
+
+
+class MFRangeError(PredictorInputError):
+    """The LF+MF prediction was asked for below max(the lowest redshift of the MF record's tables, the record's
+    ``validated_z_min``): the MF is refused there, never extrapolated or clamped (ask for ``fidelity="LF"``)."""
+
+
+FIDELITIES = ("LF", "LF+MF")
 
 
 # -------------------------------------------------------------------------------------------------- host checks
@@ -204,6 +240,7 @@ def _members_forward(ens, pf, dn_mean, dn_std, x, tau):
 
 
 _forward_one = eqx.filter_jit(_members_forward)
+_mf_g = eqx.filter_jit(lambda mf, x, tau: mf(x, tau))           # the MF correction g (4, K) at one input
 _forward_many = eqx.filter_jit(eqx.filter_vmap(_members_forward, in_axes=(None, None, None, None, 0, 0)))
 
 
@@ -277,9 +314,177 @@ class _PredictorBase:
 
     @property
     def provenance(self):
-        return {"format": _H.FORMAT, "manifest_sha256": self._rb.manifest_sha256, "lineage": self.lineage,
-                "wc_map_sha256": self._rb.wc_map.sha256, "n_members": self.n_members,
-                "bundle_provenance": copy.deepcopy(self._rb.manifest.get("provenance"))}
+        out = {"format": _H.FORMAT, "manifest_sha256": self._rb.manifest_sha256, "lineage": self.lineage,
+               "wc_map_sha256": self._rb.wc_map.sha256, "n_members": self.n_members,
+               "bundle_provenance": copy.deepcopy(self._rb.manifest.get("provenance"))}
+        if self._mf is not None:
+            out["mf"] = self._mf.provenance()
+        if self._release is not None:
+            out["release"] = copy.deepcopy(self._release)
+        return out
+
+    def _lf_P_filt_at(self, x, tau0, *, chunk=256):
+        """The LF backbone's per-class P_filt (n, 4, K) on the native modes at encoder inputs ``x`` (n, 10) =
+        [theta_unit (9), z_unit] and mean-flux inputs ``tau0`` (n,): the mean over the members, exactly as
+        ``predict`` forms ``P_class`` without the MF. Used to form MF targets on cache rows
+        (scripts/build_mf_release.py); never applies an MF."""
+        x = _array("x", x, ndim=2)
+        t = _array("tau0", tau0, ndim=1)
+        if x.shape[1] != 10 or t.shape != (x.shape[0],):
+            raise PredictorInputError(f"x must be (n, 10) and tau0 (n,), got {x.shape} and {t.shape}")
+        out = []
+        for i in range(0, x.shape[0], chunk):
+            P, _ = _forward_many(self._rb.ensemble, self._pf, *self._dn, jnp.asarray(x[i:i + chunk]),
+                                 jnp.asarray(t[i:i + chunk]))
+            out.append(np.asarray(P).mean(axis=1))
+        return np.concatenate(out, axis=0)
+
+    def _backbone_identity(self):
+        """What an MF record must declare about this backbone, DERIVED FROM THE MEMBER METAS (never from a caller
+        flag): the manifest sha256; the training cache, which every member's meta must name (``cache_sha256``) and
+        which must be the lineage block's; the kind; and the simulations every member was trained without. For a
+        production bundle that set is empty: ``Bundle`` recomputed the production rule on the metas, which refuses any
+        meta that names a proper subset of the simulations. For a research bundle it is each member's excluded set
+        (``eligibility._excluded_set``: every simulation set its meta names, under any key), which must be the same
+        for every member. Returns {manifest_sha256, kind, cache_sha256, held_out_sims}."""
+        from .emulator import eligibility as _E
+        metas = list(self._rb.metas)
+        block_cache = ((self._rb.lineage or {}).get("cache") or {}).get("sha256")
+        caches = sorted({str(m.get("cache_sha256")) for m in metas})
+        if not metas or caches != [str(block_cache)]:
+            raise _MR.MFRecordError(f"the members were not all trained on the bundle's training cache (metas name "
+                                    f"{[c[:12] for c in caches]})")
+        research = isinstance(self._rb, _H.ResearchBundle)
+        if not research:
+            return {"manifest_sha256": self._rb.manifest_sha256, "kind": "release", "cache_sha256": block_cache,
+                    "held_out_sims": []}
+        rs = self._rb.research or {}
+        known = list((rs.get("split") or {}).get("held_out_sims") or [])   # names to recognise, not the answer
+        sets = []
+        for i, m in enumerate(metas):
+            ex, why, _ = _E._excluded_set(i, m, known, rs.get("wc_map") or {}, None)
+            if why:
+                raise _MR.MFRecordError("the members' excluded simulations cannot be derived from their metas: "
+                                        + "; ".join(why))
+            sets.append(sorted(ex))
+        if any(x != sets[0] for x in sets):
+            raise _MR.MFRecordError(f"the members exclude different simulations ({sets}): not one fold backbone")
+        return {"manifest_sha256": self._rb.manifest_sha256, "kind": "research", "cache_sha256": block_cache,
+                "held_out_sims": sets[0]}
+
+    def _heldout_P_filt_at(self, x, tau0, *, chunk=256):
+        """The held-out prediction of a FOLD at cache inputs, from this ONE backbone object: {"lf": the members' mean
+        LF P_filt, "mf": the members' mean of P_LF exp(g)} (n, 4, K), both on the native modes. The fold record must be
+        attached (``load_research_bundle(..., mf_dir=..., mf_record_sha256=...)``), so the backbone that formed the
+        record's training targets (its manifest digest, re-derived from the member metas at attach), the one making
+        the held-out MF prediction and the one making the LF-alone reference are the same object; and the backbone
+        must exclude the held-out group (``backbone_excludes_holdout``, re-derived from the metas), or it is
+        refused."""
+        if self._mf is None or self._mf.kind != "fold":
+            raise _MR.MFRecordError("heldout_P_filt_at needs a fold MF record attached to its research backbone")
+        x = _array("x", x, ndim=2)
+        t = _array("tau0", tau0, ndim=1)
+        if x.shape[1] != 10 or t.shape != (x.shape[0],):
+            raise PredictorInputError(f"x must be (n, 10) and tau0 (n,), got {x.shape} and {t.shape}")
+        self._mf_refuse_low_z(Z_LIMITS[0] + x[:, 9] * (Z_LIMITS[1] - Z_LIMITS[0]))
+        lf, mf = [], []
+        for i in range(0, x.shape[0], chunk):
+            P, _ = _forward_many(self._rb.ensemble, self._pf, *self._dn, jnp.asarray(x[i:i + chunk]),
+                                 jnp.asarray(t[i:i + chunk]))
+            P = np.asarray(P)                                                 # (n, M, 4, K)
+            g = np.stack([np.asarray(_mf_g(self._mf_module, jnp.asarray(x[j]), jnp.asarray(t[j])))
+                          for j in range(i, min(i + chunk, x.shape[0]))])
+            lf.append(P.mean(axis=1))
+            mf.append((P * np.exp(g)[:, None, :, :]).mean(axis=1))
+        return {"lf": np.concatenate(lf, axis=0), "mf": np.concatenate(mf, axis=0)}
+
+    # ------------------------------------------------------------------ the MF correction
+    _mf = None
+    _release = None                                   # set only by load_release: {format, release_version, sha256}
+
+    def _attach_mf(self, mf, *, kind):
+        """Bind a loaded MF record to this backbone: it must come from ``mf_release.load_mf_record`` (anchored), and
+        what is applied is re-derived from its sealed bytes (``mf_release.reverify``: an object built or changed in
+        memory is refused), so the provenance describes the tables applied. It must be of ``kind`` and declare exactly
+        this backbone's identity as RE-DERIVED from the member metas (``_backbone_identity``: manifest, training
+        cache, kind, held-out simulations); its modes must be the bundle's. A fold record must hold out a group its
+        backbone was trained without (``backbone_excludes_holdout``)."""
+        if not isinstance(mf, _MR.MFRecord) or mf.anchored is not True:
+            raise _MR.MFRecordError("the predictor takes an MF record loaded by mf_release.load_mf_record")
+        mf = _MR.reverify(mf)
+        rec = copy.deepcopy(mf.record)
+        if rec["kind"] != kind or mf.kind != kind:
+            why = {"historical": " (historical only: never applied as the release MF)",
+                   "fold": " (a held-out fold fit: load it on its research backbone, load_research_bundle)"}
+            raise _MR.MFRecordError(f"a {rec['kind']} MF record cannot be applied here (this predictor applies a "
+                                    f"{kind} record){why.get(rec['kind'], '')}")
+        b = rec["backbone"]
+        if b["manifest_sha256"] != self._rb.manifest_sha256:
+            raise _MR.MFRecordError(f"the MF record is bound to the backbone {b['manifest_sha256'][:12]}, not this "
+                                    f"bundle {self._rb.manifest_sha256[:12]}")
+        ident = self._backbone_identity()
+        if b["cache_sha256"] != ident["cache_sha256"] or rec["caches"]["lf"]["sha256"] != ident["cache_sha256"]:
+            raise _MR.MFRecordError("the MF record's LF cache is not this bundle's training cache")
+        if b["kind"] != ident["kind"] or b["held_out_sims"] != ident["held_out_sims"]:
+            raise _MR.MFRecordError(f"the MF record declares a {b['kind']} backbone holding out {b['held_out_sims']}; "
+                                    f"the member metas say {ident['kind']} holding out {ident['held_out_sims']}")
+        if kind == "fold":
+            ho = rec["fold"]["holdout_sims"]
+            if not set(ho) <= set(ident["held_out_sims"]) or rec["fold"]["backbone_excludes_holdout"] is not True:
+                raise _MR.MFRecordError(f"refusing the fold {rec['fold']['fold_id']!r}: its backbone was trained on "
+                                        f"held-out simulations {sorted(set(ho) - set(ident['held_out_sims']))} (the "
+                                        "member metas exclude only " f"{ident['held_out_sims']}): not a held-out "
+                                        "prediction")
+        k = np.asarray(mf.k_com_hmpc, dtype=np.float64)
+        if k.shape != self._k_com.shape or not np.allclose(k, self._k_com, rtol=1e-12, atol=0):
+            raise _MR.MFRecordError("the MF record's box modes differ from the bundle's modes")
+        self._mf = mf
+        self._mf_module = mf.module()
+        t = mf.tables
+        self._mf_dom = (np.asarray(t["z_tab"], dtype=np.float64), np.asarray(t["tau_by_z"], dtype=np.float64))
+        # validated_z_min: the lower edge of the redshift range over which the MF correction is validated (the frozen
+        # grouped-validation domain); at build time this is the domain edge, not a passed validation.
+        self._mf_vzmin = float(rec["validated_z_min"])
+
+    def _use_mf(self, fidelity):
+        if fidelity is None:
+            return self._mf is not None
+        if fidelity not in FIDELITIES:
+            raise PredictorInputError(f"fidelity must be None, 'LF' or 'LF+MF', got {fidelity!r}")
+        if fidelity == "LF+MF" and self._mf is None:
+            raise MFUnavailableError("fidelity 'LF+MF': this bundle carries no MF record (load it with mf_dir and "
+                                     "mf_record_sha256)")
+        return fidelity == "LF+MF"
+
+    def _mf_refuse_low_z(self, zs):
+        z0, vz = float(self._mf_dom[0][0]), self._mf_vzmin
+        lo = max(z0, vz)
+        low = sorted({round(float(z), 9) for z in zs if z < lo - Z_TOL})
+        if low:
+            raise MFRangeError(f"the MF is refused below z = {lo:g} (its tables' lowest redshift {z0:g} and the "
+                               f"record's validated_z_min {vz:g}; asked at z = {low}); it is not extrapolated or "
+                               "clamped there: ask for fidelity='LF'")
+
+    def _mf_flags(self, zs, taus, use_mf):
+        z_tab, tau_by_z = self._mf_dom
+        zc = [z > z_tab[-1] + Z_TOL for z in zs]                  # below the tables the MF is refused, never clamped
+        tc = []
+        for z, t in zip(zs, taus):
+            ladder = np.array([np.interp(z, z_tab, tau_by_z[:, r]) for r in range(tau_by_z.shape[1])])
+            tc.append(bool(t < ladder.min() or t > ladder.max()))
+        return {"mf_applied": bool(use_mf), "mf_z_clamped": bool(any(zc)), "mf_tau0_clamped": bool(any(tc))}
+
+    def _mf_labels(self, labels, use_mf):
+        out = {"mf": "the MF correction P_MF = P_LF exp(g(z, tau0, k)) of the loaded record (theta-independent, "
+                     "fitted on matched HR/LF pairs; refused below max(its lowest z, its validated_z_min); above its "
+                     "highest z and outside its tau0 tables it is held constant and flagged); w_c stays the LF "
+                     "backbone's"}
+        if use_mf:
+            out["product"] = f"{labels.get('product') or 'LF'}+MF"
+            out["P_class"] = labels["P_class"] + ", each multiplied by exp(g) before the mean"
+            out["mf_correction"] = ("applied: the multi-fidelity (LF to HR) correction of the loaded MF record, "
+                                    "P_MF = P_LF exp(g), on a single-fidelity LF backbone")
+        return out
 
     def labels(self):
         return {"filter": "PRIYA tau > 1e6 trough-filtered", "product": self._fidelity,
@@ -292,8 +497,10 @@ class _PredictorBase:
                               "calibrated emulator error and not a covariance",
                 "w_c": "an estimate of the simulation's own sightline fractions (LLS, subDLA, DLA) from the members' "
                        "mean Head-A dN/dX through the w_c map shipped in this bundle",
-                "normalisation": "each class spectrum is normalised by the snapshot's global mean flux, as in the "
-                                 "current training cache; the convention is under review",
+                "normalisation": "each class spectrum is normalised by the snapshot's global mean flux (the whole "
+                                 "sample's, shared by the four classes), as in the training cache: the settled "
+                                 "production convention; normalising each class by its own mean flux is a "
+                                 "diagnostic only, not used here",
                 "amplitudes": "add_hcd: A_c is an effective sightline fraction; with counted fractions and under the "
                               "class normalisation above, sum_c w_c P_c is the full-sample filtered P1D, and w_c here "
                               "is the map's estimate of those fractions; only A_c >= 0 and 1 - sum_c A_c >= 0 are "
@@ -301,14 +508,15 @@ class _PredictorBase:
                 "omissions": list(OMISSIONS)}
 
     # ------------------------------------------------------------------ predictions
-    def predict(self, params, z, *, tau_eff=None, tau0_amp=None, dtau0=None, k=None):
-        """The prediction at one snapshot redshift (module docstring)."""
+    def predict(self, params, z, *, tau_eff=None, tau0_amp=None, dtau0=None, k=None, fidelity=None):
+        """The prediction at one snapshot redshift (module docstring). ``fidelity``: None (the bundle's own: LF+MF
+        when an MF record is loaded, LF otherwise), "LF" or "LF+MF" (refused without an MF record)."""
         zg = snapshot_z(z)
         p = self._many(params, [zg], tau_eff, tau0_amp, dtau0, None if k is None else _array("k", k, ndim=1),
-                       single=True)
+                       single=True, fidelity=fidelity)
         return p
 
-    def predict_many(self, params, z, *, tau_eff=None, tau0_amp=None, dtau0=None, k=None):
+    def predict_many(self, params, z, *, tau_eff=None, tau0_amp=None, dtau0=None, k=None, fidelity=None):
         """The stacked prediction at several snapshot redshifts (one parameter set; ``tau_eff`` a scalar or one value
         per z, or PRIYA's global ``tau0_amp``, ``dtau0``; ``k`` None, one array for every z, or (n_z, K'))."""
         zs = [snapshot_z(v) for v in np.atleast_1d(_array("z", z, ndim=(0, 1)))]
@@ -317,9 +525,12 @@ class _PredictorBase:
         kk = None if k is None else _array("k", k, ndim=(1, 2))
         if kk is not None and kk.ndim == 2 and kk.shape[0] != len(zs):
             raise PredictorInputError(f"k has {kk.shape[0]} rows for {len(zs)} redshifts")
-        return self._many(params, zs, tau_eff, tau0_amp, dtau0, kk, single=False)
+        return self._many(params, zs, tau_eff, tau0_amp, dtau0, kk, single=False, fidelity=fidelity)
 
-    def _many(self, params, zs, tau_eff, tau0_amp, dtau0, k, *, single):
+    def _many(self, params, zs, tau_eff, tau0_amp, dtau0, k, *, single, fidelity=None):
+        use_mf = self._use_mf(fidelity)
+        if use_mf:
+            self._mf_refuse_low_z(zs)
         pv = params_vector(params)
         taus = _taus(zs, tau_eff, tau0_amp, dtau0)
         th = np.asarray(normalize_params(pv), dtype=np.float64)
@@ -332,6 +543,10 @@ class _PredictorBase:
         else:
             P, dn = _forward_many(ens, self._pf, *self._dn, jnp.asarray(x), jnp.asarray(taus))
             P, dn = np.asarray(P), np.asarray(dn)                            # (n_z, M, 4, K), (n_z, M, 3)
+        if use_mf:                                               # P_MF = P_LF exp(g), per member, on the modes
+            g = np.stack([np.asarray(_mf_g(self._mf_module, jnp.asarray(x[i]), jnp.asarray(taus[i])))
+                          for i in range(len(zs))])
+            P = P * np.exp(g)[:, None, :, :]
         hub, omh2 = pv[_I_HUB], pv[_I_OMH2]
         modes = np.stack([np.asarray(_K.k_skm_from_kcom(self._k_com, z, hub, omh2), dtype=np.float64) for z in zs])
         if k is not None:
@@ -355,14 +570,17 @@ class _PredictorBase:
         dmean = dn.mean(axis=1)                                              # (n_z, 3)
         w4 = np.stack([self._rb.wc_map.w_c(dmean[i], z) for i, z in enumerate(zs)])
         template = Pm[:, 1:, :] / Pm[:, :1, :] - 1.0
-        flags = self._flags(pv, th, zs, taus, kout)
+        flags, labels, prov = self._flags(pv, th, zs, taus, kout), self.labels(), self.provenance
+        if self._mf is not None:
+            flags.update(self._mf_flags(zs, taus, use_mf))
+            labels.update(self._mf_labels(labels, use_mf))
         sel = (lambda a: a[0]) if single else (lambda a: a)
         return Prediction(
             z=zs[0] if single else _frozen(zs), k=_frozen(sel(kout)), P_class=_frozen(sel(Pm)),
             template=_frozen(sel(template)), w_c=_frozen(sel(w4[:, 1:])), dndx=_frozen(sel(dmean)),
             member_std=None if std is None else _frozen(sel(std)), tau_eff=float(taus[0]) if single else _frozen(taus),
-            params={n: float(v) for n, v in zip(PARAM_NAMES, pv)}, flags=flags, labels=self.labels(),
-            provenance=self.provenance, stacked=not single)
+            params={n: float(v) for n, v in zip(PARAM_NAMES, pv)}, flags=flags, labels=labels,
+            provenance=prov, stacked=not single)
 
     def _flags(self, pv, th, zs, taus, k):
         lim, samp = np.asarray(PARAM_LIMITS, float), np.asarray(SAMPLING_LIMITS, float)
@@ -392,7 +610,7 @@ class Bundle(_PredictorBase):
     The network arrays and the normaliser of a hand-built object are not verified (this is not a defence against code
     that forges the objects or the metadata itself)."""
 
-    def __init__(self, release_bundle):
+    def __init__(self, release_bundle, mf=None):
         if not jax.config.jax_enable_x64:
             raise RuntimeError("the predictor needs JAX float64 (import hcd_analysis.emulator first)")
         rb = release_bundle
@@ -423,6 +641,8 @@ class Bundle(_PredictorBase):
                 w.get("lineage_record_sha256") or wm.cache_sha256 != (block.get("cache") or {}).get("sha256"):
             raise _H.SafeFormatError("the w_c map is not the one the lineage block names")
         self._setup(rb)
+        if mf is not None:
+            self._attach_mf(mf, kind="release")
 
 
 class ResearchPredictor(_PredictorBase):
@@ -432,7 +652,7 @@ class ResearchPredictor(_PredictorBase):
     (``research_content_checks``); the labels say it is a research model. ``research``, ``purpose``,
     ``load_purpose`` and ``split`` describe it."""
 
-    def __init__(self, research_bundle):
+    def __init__(self, research_bundle, mf=None):
         if not jax.config.jax_enable_x64:
             raise RuntimeError("the predictor needs JAX float64 (import hcd_analysis.emulator first)")
         rb = research_bundle
@@ -440,6 +660,8 @@ class ResearchPredictor(_PredictorBase):
                 or getattr(rb.metas, "format", None) != _H.FORMAT:
             raise _H.SafeFormatError("ResearchPredictor takes a research bundle from safe_h5.load_research")
         self._setup(rb)
+        if mf is not None:
+            self._attach_mf(mf, kind="fold")
 
     @property
     def research(self):
@@ -475,22 +697,81 @@ class ResearchPredictor(_PredictorBase):
         return out
 
 
-def load_bundle(bundle_dir, expected_manifest_sha256):
+def _load_mf(rb, mf_dir, mf_record_sha256, kind):
+    if (mf_dir is None) != (mf_record_sha256 is None):
+        raise _MR.MFRecordError("give both mf_dir and mf_record_sha256 (the record's published sha256), or neither")
+    if mf_dir is None:
+        return None
+    return _MR.load_mf_record(mf_dir, expected_record_sha256=mf_record_sha256,
+                              backbone_manifest_sha256=rb.manifest_sha256, kind=kind)
+
+
+def load_bundle(bundle_dir, expected_manifest_sha256, *, mf_dir=None, mf_record_sha256=None):
     """Load an approved release bundle (``hcd_priya.h5/2``) anchored on its published manifest sha256; ``None``, any
     bundle whose clean lineage cannot be established, a research bundle and any member that is not a production
-    member (trained on every simulation of the cache) are refused (safe_h5.load_release). Returns a ``Bundle``."""
+    member (trained on every simulation of the cache) are refused (safe_h5.load_release). With ``mf_dir`` and
+    ``mf_record_sha256`` (the MF record's published sha256) the release MF record is loaded too
+    (``mf_release.load_mf_record``) and bound to this bundle: a record of another backbone, cache or k grid, a
+    historical or fold record, and one of the two arguments without the other are refused. Returns a ``Bundle``."""
     if expected_manifest_sha256 is None:
         raise _H.SafeFormatError("load_bundle needs the published manifest sha256; None is refused (an unanchored "
                                  "development load is safe_h5.load_ensemble(..., expected_manifest_sha256=None))")
-    return Bundle(_H.load_release(bundle_dir, expected_manifest_sha256=expected_manifest_sha256))
+    rb = _H.load_release(bundle_dir, expected_manifest_sha256=expected_manifest_sha256)
+    return Bundle(rb, mf=_load_mf(rb, mf_dir, mf_record_sha256, "release"))
 
 
-def load_research_bundle(bundle_dir, expected_manifest_sha256, *, purpose):
+def load_release(release_dir, expected_release_sha256):
+    """Load an LF+MF release through its release manifest (``release.json``, format ``hcd_priya.release/1``;
+    ``emulator.release_manifest``) anchored on its ONE published sha256: the manifest names the backbone bundle and the
+    MF record with their digests, and both load through ``load_bundle(..., mf_dir=..., mf_record_sha256=...)``, which
+    refuses any mismatch (the record pins the backbone's manifest). A manifest without an MF part, another format, an
+    unknown key, a directory that is a path or a symlink, and a wrong digest are refused; an LF-only bundle keeps
+    loading with ``load_bundle``. Returns a ``Bundle`` whose ``provenance["release"]`` names the release."""
+    from .emulator import release_manifest as _RM
+    m, parts = _RM.read_release_manifest(release_dir, expected_release_sha256)
+    b = load_bundle(parts["backbone"], m["backbone"]["manifest_sha256"], mf_dir=parts["mf"],
+                    mf_record_sha256=m["mf"]["record_sha256"])
+    b._release = {"format": m["format"], "release_version": m["release_version"],
+                  "release_sha256": expected_release_sha256}
+    return b
+
+
+def load_research_bundle(bundle_dir, expected_manifest_sha256, *, purpose, mf_dir=None, mf_record_sha256=None):
     """Load a RESEARCH bundle (cross-validation folds, full-simulation research models) anchored on its manifest
-    sha256, with a non-empty ``purpose`` (safe_h5.load_research). Returns a ``ResearchPredictor``; a production
-    bundle is refused here."""
-    return ResearchPredictor(_H.load_research(bundle_dir, expected_manifest_sha256=expected_manifest_sha256,
-                                              purpose=purpose))
+    sha256, with a non-empty ``purpose`` (safe_h5.load_research). With ``mf_dir`` and ``mf_record_sha256`` a FOLD MF
+    record fitted on this backbone is applied (held-out predictions for grouped cross-validation). Returns a
+    ``ResearchPredictor``; a production bundle is refused here."""
+    rb = _H.load_research(bundle_dir, expected_manifest_sha256=expected_manifest_sha256, purpose=purpose)
+    return ResearchPredictor(rb, mf=_load_mf(rb, mf_dir, mf_record_sha256, "fold"))
+
+
+def _predictor(pred, what):
+    if not isinstance(pred, _PredictorBase):
+        raise TypeError(f"{what} takes a loaded predictor (load_bundle or load_research_bundle)")
+    return pred
+
+
+def native_modes(pred):
+    """The predictor's comoving box modes 2 pi n / L (h/Mpc): the axis of ``P_class`` before any k placement."""
+    return _predictor(pred, "native_modes")._k_com.copy()
+
+
+def backbone_identity(pred):
+    """What an MF record must declare about this backbone, derived from its member metas
+    (``_PredictorBase._backbone_identity``): {manifest_sha256, kind, cache_sha256, held_out_sims}."""
+    return _predictor(pred, "backbone_identity")._backbone_identity()
+
+
+def lf_P_filt_at(pred, x, tau0):
+    """The backbone's LF per-class P_filt (n, 4, K) on the native modes at encoder inputs ``x`` (n, 10) and mean-flux
+    inputs ``tau0`` (n,), as ``predict`` forms ``P_class`` without the MF (the LF side of the MF targets)."""
+    return _predictor(pred, "lf_P_filt_at")._lf_P_filt_at(x, tau0)
+
+
+def heldout_P_filt_at(pred, x, tau0):
+    """A fold's held-out prediction at cache inputs from ONE backbone object, {"lf", "mf"} (n, 4, K); needs a fold
+    record attached to a backbone that excludes the held-out group (``_PredictorBase._heldout_P_filt_at``)."""
+    return _predictor(pred, "heldout_P_filt_at")._heldout_P_filt_at(x, tau0)
 
 
 def add_hcd(pred, A):
