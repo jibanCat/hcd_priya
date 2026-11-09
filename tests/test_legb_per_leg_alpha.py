@@ -79,7 +79,7 @@ NUTS_GOLDEN = os.path.join(_GOLDEN_DIR, "legb_shortnuts_golden.npz")
 # single-grid forward's signature can never recur. Old value (pre-2026-10 forward):
 #  68f71a3d45d6e49f036c03e46a5f7953fbc932d943c7d2479746cfe08d1af09b
 FORWARD_SIGNATURE_PIN = "df05e8a6a55f937c9cac6ce14b6be444906637e7fa130bd5820e7e61761e1e9f"
-HCD_PRIOR_SIGNATURE_PIN = "50befc941edfc4c789286d2054d0107f1eb19a5672bcb86131426fb101eea216"
+HCD_PRIOR_SIGNATURE_PIN = "2a5f5bdb839e30138a3265a078eb9241ca1b01864f2bdfd0fa9c163f09f68749"
 
 
 def test_signatures_unmoved():

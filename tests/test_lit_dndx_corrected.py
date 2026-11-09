@@ -333,12 +333,13 @@ def test_case8_g3_tripwire_human_blessed_literal_pins():
     freeze-critical derivation numbers, independent of the live payload machinery (which would
     track a silently regenerated JSON). The sha256 is the 2026-07-19 refreshed artifact
     (regenerated with ZERO numeric drift; the only content change vs the 2026-07-18 original is
-    the lit_over_sim.LLS 'deployed'→'pre_swap' key rename + created/git_commit). Any future JSON
-    regeneration MUST re-bless these literals deliberately."""
+    the lit_over_sim.LLS 'deployed'→'pre_swap' key rename + created/git_commit), re-blessed
+    2026-11 when cache_provenance.path became the repository-relative cache path (no numeric
+    change). Any future JSON regeneration MUST re-bless these literals deliberately."""
     # (1) the committed artifact bytes
     with open(_JSON, "rb") as fh:
         sha = hashlib.sha256(fh.read()).hexdigest()
-    assert sha == "d3f1406243d01c081fedee3382bd4871b00daa194e4b4fcf5524d481b8b2721c"
+    assert sha == "ad00e26311017fbe398adceb13665f3ffed9c7a309e7b97ef7889558fefd63d0"
     # (2) the live payload agrees with the literal (the live sha checks must agree)
     p = INF.hcd_prior_constants_payload()
     assert p["derivation_json_sha256"] == sha

@@ -352,10 +352,11 @@ HCD_LLS_REALFIT_ZSLOPE = 2.127
 # (arXiv:1204.3093); Fumagalli+2013 (arXiv:1308.1101). (Two arXiv IDs circulating in older
 # notes were WRONG: 0912.0562 is a graphene paper, 1306.0333 is not Zafar.)
 # ARTIFACT: hcd_analysis/emulator/hcd_lit_dndx_corrected.json (committed; sha256
-# d3f1406243d01c081fedee3382bd4871b00daa194e4b4fcf5524d481b8b2721c — regenerated 2026-07-19
+# ad00e26311017fbe398adceb13665f3ffed9c7a309e7b97ef7889558fefd63d0 — regenerated 2026-07-19
 # with ZERO numeric drift: the F3 refresh only renamed lit_over_sim.LLS.deployed →
-# ...pre_swap (the honest post-swap label) + fresh created/git_commit; also carried live in
-# hcd_prior_constants_payload()["derivation_json_sha256"]). Spec + decision record (internal):
+# ...pre_swap (the honest post-swap label) + fresh created/git_commit; edited 2026-11 with
+# ZERO numeric drift: cache_provenance.path became the repository-relative cache path; also
+# carried live in hcd_prior_constants_payload()["derivation_json_sha256"]). Spec + decision record (internal):
 # the 2026-07-18 corrected-law spec (incl. its ADDENDUM) and the 2026-07-18 PI decision bundle.
 # Tests: tests/test_lit_dndx_corrected.py (reproduction: subDLA
 # bit-level, DLA at the deployed rounding, LLS amplitude to 16 eps relative; estimand regression,
