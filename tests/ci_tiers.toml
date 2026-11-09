@@ -28,6 +28,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_blinding.py" = { tier = "wheel" }
 "tests/test_build_mf_release.py" = { tier = "source" }
 "tests/test_bundle_lineage.py" = { tier = "wheel" }
+"tests/test_cache_builder_catalogue_guard.py" = { tier = "source" }
 "tests/test_carry_validated_cache.py" = { tier = "source" }
 "tests/test_catalog_systems.py" = { tier = "source" }
 "tests/test_cddf_dx_patch.py" = { tier = "source" }
@@ -37,6 +38,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_ci_tools.py" = { tier = "source" }
 "tests/test_cli_config.py" = { tier = "wheel" }
 "tests/test_closure_diagnostics.py" = { tier = "wheel" }
+"tests/test_compare_emulators_runner.py" = { tier = "source" }
 "tests/test_comparison_harness.py" = { tier = "source" }
 "tests/test_convergence_z_match.py" = { tier = "wheel" }
 "tests/test_data_weights.py" = { tier = "wheel" }
