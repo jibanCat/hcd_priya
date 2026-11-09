@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -74,10 +75,11 @@ class P1DConfig:
 @dataclasses.dataclass
 class PipelineConfig:
     """Top-level pipeline configuration."""
-    # Data root (low-force simulations, 60 sims)
-    data_root: str = "/nfs/turbo/umor-yueyingn/mfho/emu_full"
-    # HiRes data root (3 matching sims, 2× npart)
-    hires_data_root: str = "/nfs/turbo/lsa-cavestru/mfho/priya/emu_full_hires"
+    # Simulation roots: the low-force suite (60 sims) and the HiRes suite (3 matching sims, 2x npart). Precedence: the
+    # config file or --set, else the environment variable (HCD_LF_RAW_DIR, HCD_HR_RAW_DIR); there is no built-in
+    # path, and simulation discovery refuses an empty or missing root (hcd_analysis.io.discover_simulations).
+    data_root: str = dataclasses.field(default_factory=lambda: os.environ.get("HCD_LF_RAW_DIR", ""))
+    hires_data_root: str = dataclasses.field(default_factory=lambda: os.environ.get("HCD_HR_RAW_DIR", ""))
     # Output root
     output_root: str = "./outputs"
     # Redshift range filter (inclusive)

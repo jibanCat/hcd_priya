@@ -37,6 +37,7 @@ import jax.numpy as jnp
 
 from .data import KIM_AMP, KIM_SLOPE, Z_LIMITS
 from ..paths import REPO_ROOT_STR as _REPO
+from .. import runtime_data as _RD
 from .predict import predict_P_obs, predict_P_filt, _excess_from_P_filt
 from .likelihood import sigma_at_tau0, rho_at_tau0, gaussian_loglik
 
@@ -84,7 +85,10 @@ DESI_KMIN = 1e-3
 #  ("possible percent-level large-scale biases", CCD image sims). Our default loads
 #  the SNR>1 baseline. Set HCD_DESI_SNR3=1 to swap to the SNR>3 npz; the +5% stat
 #  inflation rides along with it (on the SEPARATE cov_stat block: cov += (1.05²−1)·cov_stat).
-DESI_SNR3_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d_snr3.npz"
+# The SNR>3 npz is the runtime data product ``desi_dr1_p1d_snr3`` (hcd_analysis.runtime_data): found through
+# HCD_P1D_DATA_DIR and verified by sha256 when loaded. This name is kept for older callers, for display and existence
+# checks only ("<HCD_P1D_DATA_DIR unset>/..." when the variable is unset).
+DESI_SNR3_NPZ = _RD.env_path("desi_dr1_p1d_snr3", "desi_dr1_p1d_snr3.npz")
 DESI_SNR3_STAT_INFLATE = 1.05         # +5% on the STAT uncertainty (paper baseline)
 
 
@@ -289,12 +293,16 @@ def ks_resolution_R(z):
 # ============================================================================ #
 #  Loaders
 # ============================================================================ #
-def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
+def load_desi_leg(npz_path=None,
                   *, z_lo=2.2, z_hi=4.2, k_min=DESI_KMIN, metals_on=True,
                   resolution_on=False, add_cov_diag_inflation=True, mf_floor_on=False,
                   use_snr3=None, snr3_stat_inflate=None, add_cv_floor=None, resolution_float=False,
                   resolution_coherent=False, resolution_coh_amp=1.0, dla_cov_reduce=None):
     """Load DESI DR1 P1D → a post-cut ``DataLeg`` (usage doc §"Covariance + cuts").
+
+    The data are the runtime data products ``desi_dr1_p1d`` (SNR>1) and ``desi_dr1_p1d_snr3`` (hcd_analysis.runtime_data):
+    ``npz_path`` when given, else ``$HCD_P1D_DATA_DIR/desi_dr1_p1d/``; either way the file is verified by sha256 before it
+    is read, and a missing or different file stops the load with what to do. There is no built-in path.
 
     Cuts (z-major flat layout, ``row_is_zmajor=True``):
       * z in [z_lo, z_hi] (default 2.2–4.2 → drop z=4.4, 11 z-bins);
@@ -331,7 +339,9 @@ def load_desi_leg(npz_path="/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz",
     add_cv_floor = _env_flag("HCD_CV_FLOOR") if add_cv_floor is None else bool(add_cv_floor)
     if use_snr3:
         # Fix 1: the cosmology-paper baseline (SNR>3 measurement + its own covariance).
-        npz_path = DESI_SNR3_NPZ
+        npz_path = _RD.product_file("desi_dr1_p1d_snr3", "desi_dr1_p1d_snr3.npz")
+    else:
+        npz_path = _RD.product_file("desi_dr1_p1d", "desi_dr1_p1d.npz", explicit=npz_path)
     d = np.load(npz_path, allow_pickle=True)
     z = np.asarray(d["z"], float)              # (1020,) z-major
     k = np.asarray(d["k"], float)              # (1020,) angular k
@@ -403,10 +413,13 @@ def _read_ks_resolution_e(detail_path, z_grid, k_grid):
     return e
 
 
-def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
+def load_ks_leg(base=None,
                 *, z_lo=2.4, z_hi=4.6, k_max=None,
                 metals_on=False, resolution_on=False, mf_floor_on=True, resolution_float=False):
     """Load KODIAQ-SQUAD conservative-mode P1D → a post-cut ``DataLeg``.
+
+    The data are the runtime data product ``ks_p1d_conservative`` (hcd_analysis.runtime_data): the directory ``base``
+    when given, else ``$HCD_LYAEMU_PARENT/lyaemu/data/kodiaq_squad/``; the files it reads are verified by sha256 first.
 
     Format: pipe-separated ``final-conservative-p1d-karacayli_etal2021.txt`` (z|k|P|e) +
     the 182×182 ``final-conservative-covariance-karacayli_etal2021.txt`` (z-major,
@@ -425,6 +438,9 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
     metals/continuum/resolution + inflates its covariance, so re-applying the SiIII/resolution
     MODEL terms would double-count.  LYA-CONSULT: confirm KS carries NO model systematics.
     """
+    _names = ["final-conservative-p1d-karacayli_etal2021.txt", "final-conservative-covariance-karacayli_etal2021.txt"]
+    base = _RD.product_dir("ks_p1d_conservative", explicit=base,
+                           names=_names + (["detailed-p1d-results-karacayli_etal2021.txt"] if resolution_float else []))
     p1d_file = base.rstrip("/") + "/final-conservative-p1d-karacayli_etal2021.txt"
     cov_file = base.rstrip("/") + "/final-conservative-covariance-karacayli_etal2021.txt"
     z, k, P = _read_ks_p1d(p1d_file)            # z-major (182,)
@@ -456,12 +472,15 @@ def load_ks_leg(base="/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/",
                          dla_forward_frac=KS_DLA_FORWARD_FRAC, resolution_ready=False)
 
 
-def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
+def load_eboss_leg(npz_path=None,
                    *, z_lo=2.2, z_hi=4.6, k_min=0.0, k_max=None,
                    metals_on=True, resolution_on=False, mf_floor_on=False,
                    dla_forward_frac=EBOSS_DLA_FORWARD_FRAC, add_cv_floor=None, resolution_float=False,
                    resolution_coherent=False, resolution_coh_amp=1.0):
     """Load eBOSS DR14 P1D (Chabanier+2019, 1812.03554) → a post-cut ``DataLeg`` (block-diag cov).
+
+    The data are the runtime data product ``eboss_dr14_p1d`` (hcd_analysis.runtime_data): ``npz_path`` when given, else
+    ``$HCD_P1D_DATA_DIR/eboss_dr14_p1d/``; verified by sha256 before it is read. There is no built-in path.
 
     Format: the npz from ``scripts/convert_eboss_dr14_p1d.py`` (z, k, plya, sigma, cov, syst_*).
     13 z∈[2.2,4.6] × 35 k∈[0.001084,0.019512] s/km, z-MAJOR; k ANGULAR (no 2π, the cache
@@ -483,6 +502,7 @@ def load_eboss_leg(npz_path="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz",
     A_p pivot k≈0.009). resolution_on=False — eBOSS resolution syst (~2e-4 in-band) stays in C_data.
     """
     add_cv_floor = _env_flag("HCD_CV_FLOOR") if add_cv_floor is None else bool(add_cv_floor)
+    npz_path = _RD.product_file("eboss_dr14_p1d", "eboss_dr14_p1d.npz", explicit=npz_path)
     d = np.load(npz_path, allow_pickle=True)
     z = np.asarray(d["z"], float)              # (455,) z-major
     k = np.asarray(d["k"], float)              # (455,) angular k

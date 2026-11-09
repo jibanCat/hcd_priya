@@ -20,6 +20,10 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   clean-lineage bundle, with free HCD amplitudes and no informative HCD priors.
 - **Production and research bundles kept apart.** A bundle trained without some simulations (a validation fold) can
   only be loaded through the explicit research path.
+- **Runtime data inputs** (`hcd_analysis.runtime_data`): the observed P1D legs and the multi-fidelity
+  resolution-correction table come from an explicit path or an environment variable, never a built-in path, and are
+  verified by sha256 before use; the simulation roots come from the config file or `HCD_LF_RAW_DIR` /
+  `HCD_HR_RAW_DIR`, and an empty or missing root is refused.
 - **A run-settings record** in each output directory: a rerun with different settings is refused instead of mixing
   results.
 - **A model registry** (`hcd_analysis.registry`), provisional: download, sha256 check, cache and offline use for

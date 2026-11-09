@@ -4,10 +4,3 @@
 # (docs/release_checklist.md, section 3). CI fails on an occurrence not listed and on an entry no longer found, so
 # remove an entry in the change that fixes its line. tests/test_dist_content.py pins the entries this file may hold:
 # adding one means editing that test. The release gate (--release) ignores this list; it must be empty at a release.
-private-path	hcd_analysis/config.py	78d159c49cc0aca54f38c0dfc3d2b410771fb02aea77ce3df5ec74f3a20d7bd0
-private-path	hcd_analysis/config.py	d40478a1d152021d1a4b257d7cfbf04227067403539d2f065883582f7f5b336e
-private-path	hcd_analysis/emulator/data_likelihood.py	0b37abbd40dd71c20c09f9696d7c09e9b6dfe7e47c7de450bb0e74b693024154
-private-path	hcd_analysis/emulator/data_likelihood.py	209355a921108651c8e806d9d398772ba20a052766aebb08c5dba05e090a2c1d
-private-path	hcd_analysis/emulator/data_likelihood.py	2331a8c9681cdcfb0c640627905f0882eceaa6423654839f90ea02082261950f
-private-path	hcd_analysis/emulator/data_likelihood.py	71a9384ac89dc0b6c4b353a58d834ef439d2def5e7cd28b115064c236e874eed
-private-path	hcd_analysis/emulator/multifidelity.py	7fec9684082fea2cf0c0597f9bc0c021ab44d0da82dce3402d63eec9dc8d58fa

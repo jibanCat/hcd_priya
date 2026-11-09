@@ -124,6 +124,19 @@ expectations before the Quickstart:
   `*.meta.json`) are gitignored, so a usable checkpoint is not present in a fresh
   clone either.
 
+**Runtime data inputs.** The likelihood's observed P1D legs and the historical multi-fidelity resolution correction
+are read from files the package does not ship. Each loader takes an explicit path; without one it reads the directory
+an environment variable names, and with neither it stops and names the variable. There is no built-in path. Every
+file is checked against the sha256 the package records before it is read, and a different file is refused
+(`hcd_analysis.runtime_data`).
+
+| Variable | Holds |
+|---|---|
+| `HCD_P1D_DATA_DIR` | `desi_dr1_p1d/` (DESI DR1 P1D, SNR>1 and SNR>3 samples) and `eboss_dr14_p1d/` (eBOSS DR14 P1D) |
+| `HCD_LYAEMU_PARENT` | `lyaemu/data/kodiaq_squad/` (KODIAQ-SQUAD P1D, conservative mode) |
+| `HCD_KS_BASEDIR` | `res_corr/` (the historical multi-fidelity layer's resolution-correction table) |
+| `HCD_LF_RAW_DIR`, `HCD_HR_RAW_DIR` | the LF and HiRes simulation outputs, used when the config file gives no `data_root` or `hires_data_root` |
+
 What you actually need to run the emulator or the likelihood yourself is modest:
 a trained checkpoint bundle plus at least a slice of the τ₀ cache — one LOSO fold
 is enough to exercise the forward model and the likelihood on real cache rows.

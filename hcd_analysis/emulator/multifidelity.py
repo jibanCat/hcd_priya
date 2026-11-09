@@ -89,11 +89,15 @@ from . import train as T
 # Paths / constants
 # ---------------------------------------------------------------------------- #
 from ..paths import REPO_ROOT_STR as _REPO
+from .. import runtime_data as _RD
 from .mf_family import (FixedMeanHead, _rowkey, fixed_mean_table_resolved,  # noqa: F401  moved at gate E
                         make_cond, match_hr_to_lf)
 HR_CACHE = f"{_REPO}/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
 LF_CACHE = f"{_REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-RES_CORR_DIR = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/res_corr"
+# The resolution-correction table is the runtime data product ``mf_res_corr`` (hcd_analysis.runtime_data): found through
+# HCD_KS_BASEDIR and verified by sha256 when loaded. This name is kept for older callers, for display and existence
+# checks only ("<HCD_KS_BASEDIR unset>/res_corr" when the variable is unset).
+RES_CORR_DIR = _RD.env_path("mf_res_corr")
 N_CLASSES = 4
 
 # KODIAQ reach (cut to the evaluated range; HF reaches ~0.29 s/km, but the historical MF
@@ -129,7 +133,7 @@ def kbox_skm(z):
     return (2.0 * jnp.pi / 15.0) * _RC_h * (1.0 + z) / Hz
 
 
-def load_res_corr(res_dir=RES_CORR_DIR):
+def load_res_corr(res_dir=None):
     """Load the fixed L15n512/L15n384 resolution-correction table.
 
     Returns ``(z_rc (Nz,), logk_rc (Nz, Nk), rc (Nz, Nk))`` with ``z_rc`` SORTED
@@ -138,7 +142,11 @@ def load_res_corr(res_dir=RES_CORR_DIR):
     so ``logk_rc = log10(k)`` is itself ``(Nz, Nk)`` (one ascending log-k row per z).
     ``rc`` is the multiplicative factor (0.82-1.06).  All float64 numpy (host side;
     the differentiable interpolation lives in ``interp_res_corr``).
+
+    The table is the runtime data product ``mf_res_corr`` (hcd_analysis.runtime_data): the directory ``res_dir`` when
+    given, else ``$HCD_KS_BASEDIR/res_corr``; its three files are verified by sha256 before they are read.
     """
+    res_dir = _RD.product_dir("mf_res_corr", explicit=res_dir)
     rc = np.loadtxt(f"{res_dir}/resolution_correction.txt").astype(np.float64)   # (Nz, Nk)
     kf = np.loadtxt(f"{res_dir}/kfkms.txt").astype(np.float64)                    # (Nz, Nk)
     zo = np.loadtxt(f"{res_dir}/zout.txt").astype(np.float64)                     # (Nz,)
@@ -1051,7 +1059,7 @@ _HEAD_MODE = {"FixedMeanHead": "none", "GlobalLinearHead": "linear",
 
 
 def build_multifidelity(lf_model, lf_norm, lf_logk, delta_head, *, eval_logk,
-                        log_rho=None, n_basis=4, res_dir=RES_CORR_DIR, n_tail=6,
+                        log_rho=None, n_basis=4, res_dir=None, n_tail=6,
                         delta_mode=None, anchor_mult=5.0, res_corr_on=True):
     """Assemble a ``MultiFidelity`` from a frozen LF backbone + a head.
 

@@ -17,12 +17,15 @@ Assumptions (confirmed by inspection):
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple
 
 import h5py
 import numpy as np
+
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -85,8 +88,19 @@ def discover_simulations(data_root: str | Path) -> List[SimInfo]:
     """
     Walk data_root and return all parseable simulation folders sorted by name.
     Folders that do not match the ns…bhfeedback… pattern are silently skipped.
+
+    An empty root is refused (``Path("")`` would walk the current directory), and so is one that is not a directory:
+    the error says where the root comes from (hcd_analysis.config: the config file or --set, else HCD_LF_RAW_DIR or
+    HCD_HR_RAW_DIR).
     """
+    if not str(data_root).strip():
+        raise ValueError("no simulation root is set: give data_root (hires_data_root for the HiRes suite) in the config "
+                         "file or with --set, or set HCD_LF_RAW_DIR (HCD_HR_RAW_DIR); there is no built-in default")
     root = Path(data_root)
+    if not root.is_dir():
+        raise ValueError(f"the simulation root {root} is not a directory: correct data_root (hires_data_root) in the "
+                         "config file, or HCD_LF_RAW_DIR (HCD_HR_RAW_DIR)")
+    _log.info("simulation root: %s", root)
     sims = []
     for d in sorted(root.iterdir()):
         if not d.is_dir():
