@@ -53,6 +53,11 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   still take the built-in values of `hcd_analysis.config`, and keys it does not know are ignored.
 - The install name is `hcd-priya`; the import name stays `hcd_analysis`.
 
+### Removed
+- Historical analysis and campaign scripts, batch scripts, write-ups, figures and old manifests that neither the
+  package nor its tests use were removed from the tree. They remain in the Git history; documents that still name
+  them refer to that history.
+
 ## 0.1.0
 
 The research code before it was packaged for release.

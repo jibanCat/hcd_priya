@@ -339,12 +339,12 @@ pass and tests 10 + 11 land within their literature windows.
 Concrete examples that connect the math above to real PRIYA outputs:
 
 * **`ξ_FF^(0)(r)` recovery, real data** — see
-  [`docs/clustering_test11_results.md`](clustering_test11_results.md)
+  `docs/clustering_test11_results.md` (a historical write-up, in the repository's Git history)
   with the test 11 fit figure inlined.  Shows both the failed P1D
   path and the successful ξ_FF path on the same z = 2.20 snap.
 
 * **`ξ_×(r, |μ|)` heatmap + monopole + quadrupole, real data** — see
-  [`docs/clustering_test10_results.md`](clustering_test10_results.md)
+  `docs/clustering_test10_results.md` (a historical write-up, in the repository's Git history)
   with both the legacy and the rmu joint-fit figures inlined.  The
   rmu heatmap is a direct visualisation of the cross-correlation
   field that the math in §4 describes.

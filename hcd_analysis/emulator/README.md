@@ -2,7 +2,8 @@
 
 This is the emulator at the centre of the Lyman-α cosmology analysis. The document describes what
 it does, why it is built the way it is, and how to **use the deployed ensemble** and how to
-**rebuild it from scratch**.
+**rebuild it from scratch**. Some commands below name historical scripts that are no longer in the tree; they
+remain in the repository's Git history.
 
 > **Status, 2026-10 (read first).** Most of this document predates the 2026 k-grid fix
 > (`docs/kgrid_incident_2026-10.md`). The coordinate contract (sections on `kfkms`, `k_com_hmpc` and the top

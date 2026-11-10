@@ -307,7 +307,7 @@ programming, here are some starting points by topic.
 | Mask choice rationale | `docs/masking_strategy.md` |
 | Clustering definitions and conventions | `docs/clustering_definitions.md` |
 | Catalog truth-validation against particle data | `docs/dla_truth_validation.md` |
-| Figure index for the analysis figures | `docs/analysis_index.md` |
+| Figure index for the analysis figures | `docs/analysis_index.md` (historical, in the repository's Git history) |
 
 ## Running them yourself
 
