@@ -1,8 +1,8 @@
 # hcd_analysis default configuration
 # Override any key at the CLI with --set key.subkey=value
 
-data_root: /nfs/turbo/umor-yueyingn/mfho/emu_full
-hires_data_root: /nfs/turbo/lsa-cavestru/mfho/priya/emu_full_hires
+# data_root: the LF simulation outputs; when not set here, HCD_LF_RAW_DIR (hcd_analysis.config)
+# hires_data_root: the HiRes simulation outputs; when not set here, HCD_HR_RAW_DIR
 output_root: ./outputs
 
 # Redshift range (inclusive)

@@ -234,7 +234,7 @@ the full Kaiser model.
 `ξ_lin(r)` is the linear matter correlation function at the snap's
 redshift. We compute it from CAMB power spectra, which are saved per
 sim in
-`/nfs/turbo/umor-yueyingn/mfho/emu_full/<sim>/output/powerspectrum-<a>.txt`
+`$HCD_LF_RAW_DIR/<sim>/output/powerspectrum-<a>.txt`
 (see `_class_params.ini`).
 
 ## 7. Cross-validation: the auto–cross consistency check
@@ -290,7 +290,7 @@ science number is published. Pattern follows
 
 Tests 4, 5, 6, 7 are deterministic and run in CI. Tests 8, 9 are
 seeded-stochastic and must be reproducible. Test 10 runs against
-`/scratch/.../hcd_outputs` data and is not a CI gate but is required
+`$HCD_OUTPUTS_DIR` data and is not a CI gate but is required
 before the 60-sim production sweep.
 
 ## 9. Conventions and gotchas to remember

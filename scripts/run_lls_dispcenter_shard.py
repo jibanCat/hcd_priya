@@ -23,7 +23,7 @@ median correction at mu/sigma ~ 3.48 is < 1e-3 (both stamped into meta["prior"])
 displacement -1 sigma).
 
 Both arms fit under the final production likelihood (reduced DESI covariance,
-DESI_DLA_COV_REDUCE -- asserted), N = 8 paired mocks (16 fits, ~270 CPU-h on cavestru1).
+DESI_DLA_COV_REDUCE -- asserted), N = 8 paired mocks (16 fits, ~270 CPU-h).
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """

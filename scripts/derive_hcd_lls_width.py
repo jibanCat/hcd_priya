@@ -2,7 +2,7 @@
 HCD fractional dN/dX measurement widths ON THE OLD (WRONG-OBJECT) literature arrays.
 
 SUPERSESSION: the corrected-law re-derivation (PI adoption 2026-07-18, spec
-hcd_priya_notes/docs/superpowers/2026-07-18-corrected-law-spec.md) retired the arrays this
+the maintainers' private design notes) retired the arrays this
 script fits: its 'LLS' points are the CUMULATIVE tau>=2 compilation (not the binned class)
 and its 'subDLA' points are Zafar Table 3's Peroux DLA column (wrong object). They are now
 served from the TOMBSTONE constants in hcd_analysis/emulator/lit_dndx.py (greppable, never
@@ -32,7 +32,7 @@ subDLA 1x = 0.102, DLA 1x = 0.094 (wrong-object subDLA; the repo keeps subDLA
 sigma/mu=0.40, DLA=0.50 broad). Deployed knobs of record: 0.287 / 0.574 (see above).
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/derive_hcd_lls_width.py
+     python scripts/derive_hcd_lls_width.py
 """
 import numpy as np
 

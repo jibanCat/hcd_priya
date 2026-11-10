@@ -5,7 +5,7 @@ baseline: n_s +0.030σ, A_p +0.034σ). The ONLY load-bearing change: the per-cla
 forward goes THROUGH the MF correction `g(z,τ₀,k) + log res_corr(z,k)` (resolved
 separable + rank-1 FixedMeanHead + the fixed particle-convergence res_corr) instead of
 the raw LF `predict_P_filt`. The LF backbone is FROZEN (only the fixed MF correction is
-added). This is the contract of hcd_priya_notes/docs/superpowers/onboarding/2026-06-08-mf-gate-spec.md.
+added). This is the contract of the maintainers' MF gate specification (2026-06-08; private design notes).
 
 FAITHFUL through-MF wiring (spec §1.1): the MF eval grid is set EQUAL to the LF native
 cache grid (`eval_logk = lf_logk`, 172 bins up to 0.0694 s/km), so the MF correction
@@ -28,7 +28,7 @@ Output: figures/analysis/04_emulator/emu_bias_allfolds_mf.txt (+ _mf.npz). Does 
 overwrite emu_bias_allfolds.txt (z_lo=2.0 LF) or _zlo24.txt (z_lo=2.4 LF shipped).
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/diag_emu_bias_allfolds_mf.py
+     python scripts/diag_emu_bias_allfolds_mf.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

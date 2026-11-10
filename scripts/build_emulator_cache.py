@@ -13,11 +13,12 @@ so every dataset in the cache lives in the project convention.
 
 Usage:
     python3 scripts/build_emulator_cache.py \
-        [--root /scratch/cavestru_root/cavestru0/mfho/hcd_outputs] \
+        [--root $HCD_OUTPUTS_DIR] \
         [--output hcd_analysis/_emulator_data/observables.h5] \
         [--limit N] [--spot-check]
 """
 from __future__ import annotations
+import os
 
 import argparse
 import datetime
@@ -255,7 +256,7 @@ def write_cache(rows: list[dict], k_target: np.ndarray, output_path: Path) -> No
             f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0))
 
 
-_DEFAULT_HCD_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+_DEFAULT_HCD_ROOT = Path(os.environ.get("HCD_OUTPUTS_DIR", "<HCD_OUTPUTS_DIR unset>"))
 
 
 def verify_round_trip(cache_path: Path, sim: str, snap: int,

@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Default: scratch storage scoped to the HCD analysis campaign.
 # To relocate (e.g. Turbo), export HCD_DATA_DIR in the shell.
 _DEFAULT_DATA_DIR = Path(
-    "/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/_hcd_analysis_data"
+    os.path.join(os.environ.get("HCD_OUTPUTS_DIR", "<HCD_OUTPUTS_DIR unset>"), "_hcd_analysis_data")
 )
 
 

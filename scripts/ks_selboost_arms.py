@@ -30,6 +30,7 @@ Pure numpy on purpose (login-node safe; the analyzer imports this). ``eval_profi
 agree with the deployed hook evaluator closure_legb.eval_boost_profile to float precision —
 enforced by test_registry_evaluator_matches_hook_evaluator.
 """
+import os
 import hashlib
 import json
 
@@ -40,8 +41,8 @@ KS_Z_RANGE = (2.4, 4.6)
 ENVELOPE_REL = (0.8, 3.2)     # A2.1: relative-boost envelope == cosmic 2x-8x over the 2.5 center
 KS_DEPLOYED_LLS_BOOST = 2.5   # the deployed KS survey boost (cosmic-units conversion reference)
 
-K5_TABLE_PATH = ("/home/mfho/hcd_priya_notes/docs/superpowers/corrected-dndx-artifacts/"
-                 "conditional_incidence_table.txt")
+K5_TABLE_PATH = os.path.join(os.environ.get("HCD_K5_TABLE_DIR", "<HCD_K5_TABLE_DIR unset>"),
+                             "conditional_incidence_table.txt")   # the measured table of record
 # provenance pin (D3 measurement of record, 2026-07-19): sha256 of the committed table file.
 # An updated measurement silently swapped under a running campaign fails loud here AND at the
 # analyzer ingest re-assert (same philosophy as the runner prior-state tripwire).

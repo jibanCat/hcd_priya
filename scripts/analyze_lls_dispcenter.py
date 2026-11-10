@@ -53,9 +53,9 @@ stamped, never silent.
 
 Pure numpy on purpose -- safe on the login node (no JAX import).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> python \
      scripts/analyze_lls_dispcenter.py \
-     --shard-dir /scratch/cavestru_root/cavestru1/mfho/lls_dispcenter --allow-incomplete \
+     --shard-dir $HCD_RUNS_DIR/lls_dispcenter --allow-incomplete \
      [--npz-out out.npz] [--fig-out fig.png]
 """
 import argparse
@@ -337,7 +337,7 @@ def _corr(rec, name_a, name_b):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--shard-dir", default="/scratch/cavestru_root/cavestru1/mfho/lls_dispcenter")
+    ap.add_argument("--shard-dir", default=os.path.join(os.environ.get("HCD_RUNS_DIR", "<HCD_RUNS_DIR unset>"), "lls_dispcenter"))
     ap.add_argument("--allow-incomplete", action="store_true",
                     help="read out a reduced-N campaign; the missing mock idxs are stamped "
                          "onto every quotable line (job 54175284 task 2 hit the 18h wall)")

@@ -1,6 +1,6 @@
 """
 Build a per-(sim, z) summary of HCD-related scalars from the fresh
-catalogs on /scratch/.../hcd_outputs/, for both LF (60 sims) and
+catalogs on $HCD_OUTPUTS_DIR/, for both LF (60 sims) and
 HiRes (4 sims) campaigns.
 
 For each (sim, snap) we record:
@@ -20,6 +20,7 @@ Usage:
 Tested against the catalog/meta format in place as of 2026-04-22.
 """
 from __future__ import annotations
+import os
 
 import json
 import re
@@ -225,7 +226,7 @@ def main():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from common import data_dir
     DATA = data_dir()
-    SCRATCH = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+    SCRATCH = Path(os.environ.get("HCD_OUTPUTS_DIR", "<HCD_OUTPUTS_DIR unset>"))
 
     print("Scanning LF (60-sim) root…")
     lf_recs = scan_root(SCRATCH)

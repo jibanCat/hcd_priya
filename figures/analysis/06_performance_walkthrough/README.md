@@ -75,12 +75,12 @@ prediction, `∂ln(mean_m P_filt)/∂θ`.
 **Regenerate:**
 ```
 # DEPLOYED production ensemble (the object the real fit uses), with retained LOSO overlays:
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_performance_walkthrough.py --emulator ensemble
+PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  python scripts/plot_performance_walkthrough.py --emulator ensemble
 
 # LOSO held-out only (byte-identical to the original walkthrough):
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_performance_walkthrough.py --emulator loso
+PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  python scripts/plot_performance_walkthrough.py --emulator loso
 # --no-mf skips the multi-fidelity figure B6 (needs the HR cache + res_corr table)
 ```
 

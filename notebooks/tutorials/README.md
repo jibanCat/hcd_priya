@@ -15,8 +15,9 @@ HCD outputs from the ground up.  Read them in order:
 
 2. **Confirm data access.**  All five notebooks read from two paths:
 
-   - Raw spectra (Turbo): `/nfs/turbo/umor-yueyingn/mfho/emu_full`
-   - Processed outputs (scratch): `/scratch/cavestru_root/cavestru0/mfho/hcd_outputs`
+   - Raw spectra: `$HCD_LF_RAW_DIR` (the LF simulation outputs)
+   - Processed outputs: `$HCD_OUTPUTS_DIR` (the per-(sim, snap) HCD outputs)
+   - For notebook 02's comparison with Ho+21: `$HCD_DLA_DATA_DIR/ho21/` (a local copy of those tables)
 
    On Great Lakes both are mounted on every login / compute node; from
    anywhere else you'll need a tunnel or a local copy of one (sim, snap).
@@ -234,8 +235,7 @@ programming, here are some starting points by topic.
   [arXiv:1405.3994](https://arxiv.org/abs/1405.3994)) —
   hydrodynamic prediction of DLA bias and the f(N_HI) shape.
   Sections 2.5 and 4.3 (DLA bias) are what feed the scale-dependent-bias TODO tracked in the project
-  handoffs (archived in the private notes repo,
-  `hcd_priya_notes/docs/code-repo-archive/handovers/`).
+  handoffs (in the maintainers' private notes).
 - **Font-Ribera, Miralda-Escudé et al. 2012** (JCAP 11, 059;
   [arXiv:1209.4596](https://arxiv.org/abs/1209.4596)) — the BOSS DLA-Lyα
   cross correlation that the project's clustering pipeline mirrors.
@@ -300,8 +300,8 @@ programming, here are some starting points by topic.
 
 | Topic | File |
 |---|---|
-| Project state, current TODOs | private notes repo: `hcd_priya_notes/docs/superpowers/` (latest session handoff) |
-| Older audit context (CDDF / fast-mode / per-class templates) | archived: `hcd_priya_notes/docs/code-repo-archive/handovers/` |
+| Project state, current TODOs | the maintainers' private notes (latest session handoff) |
+| Older audit context (CDDF / fast-mode / per-class templates) | the maintainers' private notes (archived handovers) |
 | Bug history (the seven bugs the audit caught) | `docs/bugs_found.md` |
 | Why fast-mode NHI estimation works | `docs/fast_mode_physics.md` |
 | Mask choice rationale | `docs/masking_strategy.md` |
@@ -355,7 +355,6 @@ The four observables you've now learned to read — `catalog`,
 the HCD emulator under construction.  The next milestone is **phase 1
 of the emulator work**: building a single in-repo HDF5 cache that stacks
 the per-(sim, snap) observables across all 1076 outputs onto a shared
-k-grid and NHI-grid.  See the project handoffs in the private notes repo
-(`hcd_priya_notes/docs/code-repo-archive/handovers/`) for the
+k-grid and NHI-grid.  See the project handoffs in the maintainers' private notes for the
 overall project state and the next planning thread for the emulator
 design.

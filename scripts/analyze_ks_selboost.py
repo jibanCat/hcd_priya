@@ -32,8 +32,8 @@ registry twin scripts/ks_selboost_arms.eval_profile, hook-agreement test-enforce
 MAPPED-era campaign lazily imports jax.numpy + dndx_wc inside _mapped_lls_geometry (the
 D_exact/reachability companion; x64 is set by the hcd_analysis.emulator package import).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
-     scripts/analyze_ks_selboost.py --shard-dir /scratch/cavestru_root/cavestru1/mfho/ks_selboost \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> python \
+     scripts/analyze_ks_selboost.py --shard-dir $HCD_RUNS_DIR/ks_selboost \
      [--npz-out out.npz] [--fig-dir figures/analysis/07_ks_selection]
 """
 import argparse
@@ -816,7 +816,7 @@ def main_report(shard_dir, npz_out=None, fig_dir=None, w=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--shard-dir", default="/scratch/cavestru_root/cavestru1/mfho/ks_selboost")
+    ap.add_argument("--shard-dir", default=os.path.join(os.environ.get("HCD_RUNS_DIR", "<HCD_RUNS_DIR unset>"), "ks_selboost"))
     ap.add_argument("--npz-out", default=None)
     ap.add_argument("--fig-dir", default=None,
                     help="e.g. figures/analysis/07_ks_selection (mock closure: committable)")

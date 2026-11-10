@@ -18,10 +18,11 @@ fixed z (a z-only polynomial cannot remove it; carried as a prior width per the
 2026-05-29 w_c<->dN/dX coupling note).
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/calibrate_delta_c.py [--shards GLOB] [--deg 2]
-Outputs: docs/superpowers/2026-06-01-delta_c-coeffs.md  and  .../delta_c-coeffs.npz
+     python scripts/calibrate_delta_c.py [--shards GLOB] [--deg 2]
+Outputs: 2026-06-01-delta_c-coeffs.md and .npz, in $HCD_OUT_DIR (default: the current directory)
 """
 from __future__ import annotations
+import os
 import argparse
 import glob
 import numpy as np
@@ -31,7 +32,7 @@ from hcd_analysis.emulator.data import load_cache
 from hcd_analysis.emulator.dndx_wc import w_c_from_mu, mu_from_dndx
 from hcd_analysis.emulator import CLASS_NAMES
 
-_DEFAULT_GLOB = "/scratch/cavestru_root/cavestru0/mfho/tau0_shards/observables_tau0_lf.shard*.h5"
+_DEFAULT_GLOB = os.path.join(os.environ.get("HCD_RUNS_DIR", "<HCD_RUNS_DIR unset>"), "tau0_shards", "observables_tau0_lf.shard*.h5")
 
 
 def collect(shard_glob):
@@ -90,7 +91,8 @@ def main():
     for ci, name in enumerate(CLASS_NAMES):
         print(f"{name:8s} {delta[:,ci].mean():+9.4f} {resid_std[ci]:14.4f} {resid_max[ci]:11.4f}")
 
-    out_npz = "docs/superpowers/2026-06-01-delta_c-coeffs.npz"
+    out_dir = os.environ.get("HCD_OUT_DIR", ".")
+    out_npz = os.path.join(out_dir, "2026-06-01-delta_c-coeffs.npz")
     np.savez(out_npz, coeffs=coeffs, resid_std=resid_std, resid_max=resid_max,
              class_names=np.array(CLASS_NAMES), deg=args.deg, n_blocks=len(z), n_sims=n_sims)
 
@@ -119,9 +121,9 @@ def main():
     for ci, name in enumerate(CLASS_NAMES):
         lines.append(f"| {name} | {delta[:,ci].mean():+.4f} | {resid_std[ci]:.4f} | {resid_max[ci]:.4f} |")
     lines.append("")
-    with open("docs/superpowers/2026-06-01-delta_c-coeffs.md", "w") as f:
+    with open(os.path.join(out_dir, "2026-06-01-delta_c-coeffs.md"), "w") as f:
         f.write("\n".join(lines))
-    print(f"wrote docs/superpowers/2026-06-01-delta_c-coeffs.md and {out_npz}")
+    print(f"wrote {os.path.join(out_dir, '2026-06-01-delta_c-coeffs.md')} and {out_npz}")
 
 
 if __name__ == "__main__":

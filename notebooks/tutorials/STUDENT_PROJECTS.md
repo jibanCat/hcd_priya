@@ -63,9 +63,8 @@ the recommended path is the three rows above.
    can run them on your machine, not just look at the committed
    outputs — the moment you change `n_skewers` or pick a different
    sim, you're already doing science.
-2. Read `hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER_2026_04_28.md` (the most recent state of
-   the project) and skim `hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER.md` (the previous
-   audit handover) for context.
+2. Ask the maintainers for the latest session handover (the most recent state of the project) and the previous
+   audit handover, for context; both are in the maintainers' private notes.
 3. Start on **A1** (the recommended starter; see the table above).
    Open a feature branch named for the project (e.g.
    `student/voigt-vs-fast-residuals`) and put any new code under
@@ -223,7 +222,7 @@ compilations (Prochaska & Wolfe 2009, Noterdaeme+2012, Ho+2021).
   see notebook 02 §3 for the integration-over-NHI recipe.
 - `docs/cddf_model.md` — the analytic CDDF model in the package, which
   has its own dN/dX(z) prediction you can overplot.
-- `/home/mfho/DLA_data/` for observational compilations.
+- `$HCD_DLA_DATA_DIR/` (a local copy of the observational compilations) for observational data.
 
 **Extensions.** Repeat for all 60 LF sims and show the within-LHS
 scatter at fixed redshift.  Decide whether the scatter grows or shrinks
@@ -280,7 +279,7 @@ sources.
 
 - `scripts/plot_cddf_vs_ho21.py` — the existing 1-source script;
   extend rather than rewrite.
-- `/home/mfho/DLA_data/` — already has many of the data files.
+- `$HCD_DLA_DATA_DIR/` (your local copy of the observational compilations) holds many of the data files.
 
 ---
 
@@ -352,7 +351,7 @@ dependent template.
 
 ## D. Clustering  (advanced)
 
-These come straight out of `hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER_2026_04_28.md` §4.
+These come straight out of the 2026-04-28 session handover (§4; in the maintainers' private notes).
 Read that file first.  These are open research problems, not exercises.
 
 ### D1. Tighten β_DLA via LF+HR + z-stacking
@@ -517,7 +516,7 @@ To avoid duplicating work, here's what's already in the repo:
 
 - 60 LF + 4 HR simulations fully processed: catalog, CDDF, P1D, per-
   class P1D, P1D-with-PRIYA-mask, P1D ratios.  See
-  `hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER.md` §1 for the production state.
+  the audit handover (§1; in the maintainers' private notes) for the production state.
 - Catalog validation against particle-based truth on the 4 HR sims.
   See `docs/dla_truth_validation.md` and
   `docs/dla_truth_unmatched_analysis.md`.

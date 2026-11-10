@@ -10,9 +10,9 @@ emulator cache — NO 2π factor). The covariance is BLOCK-DIAGONAL per z (no cr
   C_data    = block_diag(C_block_0, …, C_block_12)              # 455×455
 
 Run (emu-jax python):
-  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/convert_eboss_dr14_p1d.py \
-    --base /home/mfho/lya_emulator_full/lyaemu/data/boss_dr14_data \
-    --out  /home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz
+  python scripts/convert_eboss_dr14_p1d.py \
+    --base $HCD_LYAEMU_PARENT/lyaemu/data/boss_dr14_data \
+    --out  $HCD_P1D_DATA_DIR/eboss_dr14_p1d/eboss_dr14_p1d.npz
 
 Pk1D_cor.dat layout TRAP (the single biggest pitfall): the file has 3 comment lines + 26 blank
 separators (2 after each of the 13 z-blocks). np.loadtxt skips BOTH → (455,35), and .reshape(13,35,35)
@@ -73,8 +73,8 @@ def build(base):
 
 def main():
     ap = argparse.ArgumentParser(description="Convert eBOSS DR14 P1D → npz")
-    ap.add_argument("--base", default="/home/mfho/lya_emulator_full/lyaemu/data/boss_dr14_data")
-    ap.add_argument("--out", default="/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz")
+    ap.add_argument("--base", default=os.path.join(os.environ.get("HCD_LYAEMU_PARENT", "<HCD_LYAEMU_PARENT unset>"), "lyaemu/data/boss_dr14_data"))
+    ap.add_argument("--out", default=os.path.join(os.environ.get("HCD_P1D_DATA_DIR", "<HCD_P1D_DATA_DIR unset>"), "eboss_dr14_p1d", "eboss_dr14_p1d.npz"))
     args = ap.parse_args()
     out, (diag_ok, sym_ok, block_pd, crossz) = build(args.base)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)

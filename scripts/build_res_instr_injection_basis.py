@@ -58,9 +58,9 @@ ONLY changes are (1) work in b_res-space (n_z) with metric M instead of P-space 
 with C_data^-1; (2) the span is {ones, logfac}; (3) the perturbation is B@b_res;
 (4) store per-z (n_z,) vectors.
 
-Env (HEAVY -- run via SLURM on cavestru0, NOT the interactive node):
+Env (HEAVY -- run via SLURM, NOT an interactive node):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
-    CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
+    CUDA_VISIBLE_DEVICES="" python \
     scripts/build_res_instr_injection_basis.py
 """
 from __future__ import annotations
@@ -72,12 +72,12 @@ print = functools.partial(print, flush=True)
 import numpy as np  # module top-level is numpy-ONLY so the pure helper imports cheap
 
 OUT_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/res_instr_injection_basis.npz"
-FIG = "/home/mfho/hcd_priya_notes/figures/analysis/08_resolution/res_instr_oos_basis.png"
+FIG = os.path.join(os.environ.get("HCD_FIGURES_DIR", "<HCD_FIGURES_DIR unset>"), "res_instr_oos_basis.png")
 
 # DESI/eBOSS raw-data sources for the (un-stored) 1-sigma resolution error re-read.
-DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
-EBOSS_NPZ = "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz"
-KS_BASE = "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
+DESI_NPZ = os.path.join(os.environ.get("HCD_P1D_DATA_DIR", "<HCD_P1D_DATA_DIR unset>"), "desi_dr1_p1d", "desi_dr1_p1d.npz")
+EBOSS_NPZ = os.path.join(os.environ.get("HCD_P1D_DATA_DIR", "<HCD_P1D_DATA_DIR unset>"), "eboss_dr14_p1d", "eboss_dr14_p1d.npz")
+KS_BASE = os.path.join(os.environ.get("HCD_LYAEMU_PARENT", "<HCD_LYAEMU_PARENT unset>"), "lyaemu/data/kodiaq_squad/")
 
 Z_HEII = 2.8                 # He-II window lower edge (localization)
 F_RES_PIVOT_Z = 3.0          # the f_res(z) pivot (1+z)/(1+3) -- closure_legb.F_RES_PIVOT_Z

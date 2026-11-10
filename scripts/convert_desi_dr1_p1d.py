@@ -9,9 +9,9 @@ the SAME convention as the emulator cache `kfkms`.
 
 Run (SYSTEM python, NOT emu-jax):
   python3 scripts/convert_desi_dr1_p1d.py \
-    --fits /home/mfho/data/desi_dr1_p1d/desi_y1_baseline_p1d_sb1subt_qmle_power_estimate_contcorr_v3.fits \
-    --inflation /home/mfho/data/desi_dr1_p1d/cov_diag_inflation.fits \
-    --out /home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz
+    --fits $HCD_P1D_DATA_DIR/desi_dr1_p1d/desi_y1_baseline_p1d_sb1subt_qmle_power_estimate_contcorr_v3.fits \
+    --inflation $HCD_P1D_DATA_DIR/desi_dr1_p1d/cov_diag_inflation.fits \
+    --out $HCD_P1D_DATA_DIR/desi_dr1_p1d/desi_dr1_p1d.npz
 """
 from __future__ import annotations
 import argparse

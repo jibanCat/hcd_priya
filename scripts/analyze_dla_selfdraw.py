@@ -25,8 +25,8 @@ AND d["survey"] identical across shards (F6b), smoke-suffixed pkls filtered out 
 truth contract (boosted alpha_dla == boost x clean, all other truth entries bit-identical).
 Pure numpy on purpose — safe on the login node (no JAX import).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> /home/mfho/.conda/envs/emu-jax/bin/python3 \
-     scripts/analyze_dla_selfdraw.py --shard-dir /scratch/cavestru_root/cavestru1/mfho/dla_selfdraw \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> python \
+     scripts/analyze_dla_selfdraw.py --shard-dir $HCD_RUNS_DIR/dla_selfdraw \
      [--npz-out out.npz] [--fig-out fig.png]
 """
 import argparse
@@ -268,7 +268,7 @@ def _railing_frac(rec, floor_frac=0.05, ref=0.004414):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--shard-dir", default="/scratch/cavestru_root/cavestru1/mfho/dla_selfdraw")
+    ap.add_argument("--shard-dir", default=os.path.join(os.environ.get("HCD_RUNS_DIR", "<HCD_RUNS_DIR unset>"), "dla_selfdraw"))
     ap.add_argument("--prior-median", type=float, default=0.004414,
                     help="deployed alpha_dla prior median (railing reference)")
     ap.add_argument("--npz-out", default=None)

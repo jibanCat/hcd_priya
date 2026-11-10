@@ -31,7 +31,7 @@ Usage:
 
 Env (MANDATORY for every process):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-    OMP_NUM_THREADS=1 /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_stepA.py ...
+    OMP_NUM_THREADS=1 python scripts/run_stepA.py ...
 """
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
@@ -48,7 +48,7 @@ from datetime import datetime, timezone
 import numpy as np
 
 REPO = _REPO_ROOT
-PY = "/home/mfho/.conda/envs/emu-jax/bin/python3"
+PY = sys.executable
 # CKPT_DIR is env-overridable (STEPA_CKPT_DIR) so a re-run on a CORRECTED forward can write to a
 # SEPARATE dir (e.g. checkpoints/stepA_slfix/) without overwriting the existing baseline checkpoints
 # and without colliding on the single-writer health.json. Default = the canonical stepA dir.
@@ -835,7 +835,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
 
     # fold-matched emulator backbone; the error vector is the production (fold0) C_emu (the ONE
     # matched xclass pair; there is no per-fold error vector — see the archived project
-    # handoffs in the private notes repo, hcd_priya_notes/docs/code-repo-archive/handovers/).
+    # handoffs in the maintainers' private notes).
     # Phase-5a shape-floor validation knobs: mf_shape>0 fires the shape-aware MF floor on the
     # tested leg (the survey of this chain) at that inflation; desi_floor turns the EXISTING
     # diagonal MF floor ON for DESI (the simpler-fix comparison arm).

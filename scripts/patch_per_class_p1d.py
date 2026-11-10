@@ -18,6 +18,7 @@ Usage:
     python3 scripts/patch_per_class_p1d.py --hires               # /hires subtree only
 """
 from __future__ import annotations
+import os
 
 import argparse
 import json
@@ -32,9 +33,9 @@ from hcd_analysis.catalog import CatalogIntegrityError, load_validated_catalog
 from hcd_analysis.io import parse_sim_params, spectra_files_for_sim, SimInfo
 from hcd_analysis.p1d import compute_p1d_per_class, save_p1d_per_class_hdf5
 
-LF_DATA_ROOT = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
-HIRES_DATA_ROOT = Path("/nfs/turbo/lsa-cavestru/mfho/priya/emu_full_hires")
-OUTPUT_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+LF_DATA_ROOT = Path(os.environ.get("HCD_LF_RAW_DIR", "<HCD_LF_RAW_DIR unset>"))
+HIRES_DATA_ROOT = Path(os.environ.get("HCD_HR_RAW_DIR", "<HCD_HR_RAW_DIR unset>"))
+OUTPUT_ROOT = Path(os.environ.get("HCD_OUTPUTS_DIR", "<HCD_OUTPUTS_DIR unset>"))
 FORCE = False
 
 

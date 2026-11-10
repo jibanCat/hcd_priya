@@ -45,7 +45,8 @@ def _mock_with_dla(ctx, dla_core_per_leg, truth_pack, key, **kw):
 
 def build_e_dla(ctx):
     """Map syst_e_dla_completeness (DESI npz, 1020 rows) onto each leg's (z,k) rows (nearest)."""
-    npz = np.load("/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz")
+    from hcd_analysis import runtime_data as _RD   # the verified DESI DR1 file (HCD_P1D_DATA_DIR)
+    npz = np.load(_RD.product_file("desi_dr1_p1d", "desi_dr1_p1d.npz"))
     nz, nk, edla = npz["z"], npz["k"], npz["syst_e_dla_completeness"]
     e = {}
     for leg in ctx.legs:

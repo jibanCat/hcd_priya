@@ -8,7 +8,7 @@ Narrative of the HCD analysis pipeline, step by step, with inline figures at eac
 
 ## 1. Pipeline overview
 
-For each (sim, snap) we execute five independent stages, each writing one self-contained output file into `/scratch/.../hcd_outputs/<sim>/snap_NNN/`:
+For each (sim, snap) we execute five independent stages, each writing one self-contained output file into `$HCD_OUTPUTS_DIR/<sim>/snap_NNN/`:
 
 ```
   tau/H/1/1215 HDF5

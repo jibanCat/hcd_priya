@@ -62,7 +62,7 @@ Blind status: BLIND-SAFE. Prior geometry only -- no data, no posterior, no cosmo
 
 Run (login node):
   cd <repo> && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu \
-    /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/export_deployed_centre_dndx.py
+    python scripts/export_deployed_centre_dndx.py
 """
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
@@ -98,11 +98,11 @@ from hcd_analysis.emulator.inference import (
 )
 
 CLS = ("LLS", "subDLA", "DLA")
-FROZEN = Path("/home/mfho/hcd_priya_notes/artifacts/paper_exports/dndx_repin_2026-07-20")
-DEFAULT_OUT = Path("/home/mfho/hcd_priya_notes/artifacts/paper_exports/deployed_centre_2026-07-22_v4")
+FROZEN = Path(os.environ.get("HCD_FROZEN_DNDX_EXPORT", "<HCD_FROZEN_DNDX_EXPORT unset>"))   # the frozen 2026-07-20 export
+DEFAULT_OUT = Path(os.environ.get("HCD_EXPORT_OUT", "<HCD_EXPORT_OUT unset>"))
 SURVEYS = ("eBOSS", "KS", "DESI")
 RUN_CMD = (f"cd {_REPO_ROOT} && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu "
-           "/home/mfho/.conda/envs/emu-jax/bin/python3 scripts/export_deployed_centre_dndx.py")
+           "python scripts/export_deployed_centre_dndx.py")
 
 # The W2-pinned MAPPED KS alpha-space LLS pivot centre (the z=3 LLS occupancy weight of the
 # dN/dX-premap 2.5x lit-law reference through the exact occupancy map; sites at 0). The legacy

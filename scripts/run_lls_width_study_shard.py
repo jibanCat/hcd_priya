@@ -15,7 +15,7 @@ DESIGN. Reuses the paired-selfdraw machinery pattern (scripts/run_dla_selfdraw_s
 build_arm_ctx use_prod_forward=True: the DEPLOYED NORC forward + the REDUCED DESI covariance),
 but runs the CLEAN ARM ONLY (run_legb inject_spec=None) at an OVERRIDDEN LLS width. The
 BASELINE (width 0.287) is the clean arm of the spot-check campaign already on disk
-(/scratch/cavestru_root/cavestru1/mfho/dla_selfdraw_spotchk, job 53937355, seed 20260615,
+($HCD_RUNS_DIR/dla_selfdraw_spotchk, seed 20260615,
 shards {0, 8, 15}) -- NOT re-run here, and this runner must NEVER write into that outdir.
 
 WIDTH OVERRIDE = a RUNTIME prior override in THIS process only (the desi_hcd_prior_sensitivity
@@ -47,7 +47,7 @@ READOUT PLAN (run when jobs finish; per width w in {0.416, 0.574}, per mock m in
   posteriors (their mean-shift difference and sd-ratio difference), to inform whether the
   hedge-form decision matters for cosmology at all.
 
-Budget: 2 widths x 2 mocks = 4 clean fits, ~15 ks/fit on 4 CPUs => ~70 CPU-h (cavestru1).
+Budget: 2 widths x 2 mocks = 4 clean fits, ~15 ks/fit on 4 CPUs => ~70 CPU-h.
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
 import argparse, functools, os, pickle, time

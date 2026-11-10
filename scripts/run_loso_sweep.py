@@ -13,7 +13,7 @@ Does NOT modify any ``hcd_analysis/emulator/*.py`` (other work reads them).
 
 Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
-    /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_loso_sweep.py [args]
+    python scripts/run_loso_sweep.py [args]
 """
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

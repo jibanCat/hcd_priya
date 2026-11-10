@@ -13,7 +13,7 @@ This document is the conclusion of a multi-step audit of the HCD masking pipelin
 
 ### 1. PRIYA's production P1D is smooth monotonic-decreasing
 
-From `/nfs/turbo/umor-yueyingn/mfho/emu_full/mf_emulator_flux_vectors_tau1000000.hdf5` (600 emulator sims × 13 z-bins × 525 k-bins):
+From `$HCD_LF_RAW_DIR/mf_emulator_flux_vectors_tau1000000.hdf5` (600 emulator sims × 13 z-bins × 525 k-bins):
 
 ![PRIYA stored P1D](../figures/diagnostics/priya_stored_p1d.png)
 

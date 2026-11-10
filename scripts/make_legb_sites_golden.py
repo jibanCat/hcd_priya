@@ -22,7 +22,7 @@ edit; the generating commit hash is recorded inside each npz):
 REGENERATION PROTOCOL (T2 is env-pinned): regenerate ONLY with an explicit, recorded
 reason (a deliberate model change or a jax/numpyro env migration), via
     PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
-      CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
+      CUDA_VISIBLE_DEVICES="" python \
       scripts/make_legb_sites_golden.py
 then commit the new npz together with the reason; the generating commit + jax/numpyro
 versions are stamped inside the npz for the audit trail.

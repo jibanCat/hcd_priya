@@ -92,7 +92,7 @@
     z∈[3.4,6.0): Δn_s +0.0001σ
   G4.1: PASS  (Δn_s not > 0.10σ)
 
-[npz] /home/mfho/hcd_priya/figures/analysis/04_emulator/emu_bias_allfolds_mf.npz
+[npz] figures/analysis/04_emulator/emu_bias_allfolds_mf.npz
 [done]
 
 # ============================================================================ #

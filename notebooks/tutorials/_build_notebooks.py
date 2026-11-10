@@ -32,6 +32,7 @@ because the build script regenerates them).
 """
 
 from __future__ import annotations
+import os
 
 import json
 from pathlib import Path
@@ -258,8 +259,8 @@ different sizes:
 
 | Path | Contents | Per-file size |
 |---|---|---|
-| `/nfs/turbo/umor-yueyingn/mfho/emu_full/<sim>/output/SPECTRA_NNN/lya_forest_spectra_grid_480.hdf5` | **Raw** Lyman-α optical-depth skewers (`tau`), 691 200 sightlines on a regular 480² grid × the LOS axis | ~3 GB |
-| `/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/<sim>/snap_NNN/` | **Processed** per-(sim, snap) outputs — absorber catalog, CDDF, P1D variants, per-class P1D, metadata | ~few MB total |
+| `$HCD_LF_RAW_DIR/<sim>/output/SPECTRA_NNN/lya_forest_spectra_grid_480.hdf5` | **Raw** Lyman-α optical-depth skewers (`tau`), 691 200 sightlines on a regular 480² grid × the LOS axis | ~3 GB |
+| `$HCD_OUTPUTS_DIR/<sim>/snap_NNN/` | **Processed** per-(sim, snap) outputs — absorber catalog, CDDF, P1D variants, per-class P1D, metadata | ~few MB total |
 
 A few rules to internalise:
 
@@ -275,11 +276,13 @@ A few rules to internalise:
 
         code("""
 # Imports used throughout this notebook
+import os
 from pathlib import Path
 import numpy as np
 
-DATA_ROOT = Path('/nfs/turbo/umor-yueyingn/mfho/emu_full')
-HCD_OUT_ROOT = Path('/scratch/cavestru_root/cavestru0/mfho/hcd_outputs')
+# The data roots come from environment variables (see notebooks/tutorials/README.md)
+DATA_ROOT = Path(os.environ.get('HCD_LF_RAW_DIR', '<HCD_LF_RAW_DIR unset>'))
+HCD_OUT_ROOT = Path(os.environ.get('HCD_OUTPUTS_DIR', '<HCD_OUTPUTS_DIR unset>'))
 
 print('raw spectra root :', DATA_ROOT,  '->', DATA_ROOT.exists())
 print('processed root   :', HCD_OUT_ROOT, '->', HCD_OUT_ROOT.exists())
@@ -552,14 +555,15 @@ bug-hunting session starts.
 """),
 
         code("""
+import os
 from pathlib import Path
 import json
 import numpy as np
 import matplotlib.pyplot as plt
 import h5py
 
-DATA_ROOT    = Path('/nfs/turbo/umor-yueyingn/mfho/emu_full')
-HCD_OUT_ROOT = Path('/scratch/cavestru_root/cavestru0/mfho/hcd_outputs')
+DATA_ROOT    = Path(os.environ.get('HCD_LF_RAW_DIR', '<HCD_LF_RAW_DIR unset>'))
+HCD_OUT_ROOT = Path(os.environ.get('HCD_OUTPUTS_DIR', '<HCD_OUTPUTS_DIR unset>'))
 
 # A sim known to have snap_022 fully processed (used in NB00):
 SIM = 'ns0.81Ap1.6e-09herei3.59heref2.79alphaq1.71hub0.668omegamh20.145hireionz7.92bhfeedback0.0333'
@@ -925,12 +929,13 @@ Ho+21 report and what every HCD-emulator deliverable will reproduce.
 """),
 
         code("""
+import os
 from pathlib import Path
 import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-HCD_OUT_ROOT = Path('/scratch/cavestru_root/cavestru0/mfho/hcd_outputs')
+HCD_OUT_ROOT = Path(os.environ.get('HCD_OUTPUTS_DIR', '<HCD_OUTPUTS_DIR unset>'))
 SIM = 'ns0.81Ap1.6e-09herei3.59heref2.79alphaq1.71hub0.668omegamh20.145hireionz7.92bhfeedback0.0333'
 SNAP = 22
 SNAP_DIR = HCD_OUT_ROOT / SIM / f'snap_{SNAP:03d}'
@@ -1167,7 +1172,7 @@ print(f'  dN/dX (subDLA) = {dndx_subdla:.4f}')
 print(f'  dN/dX (DLA)    = {dndx_dla:.4f}')
 
 # Cross-check against the project-wide summary
-SUMMARY = Path('/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/_hcd_analysis_data/hcd_summary_lf.h5')
+SUMMARY = HCD_OUT_ROOT / '_hcd_analysis_data' / 'hcd_summary_lf.h5'
 if SUMMARY.exists():
     with h5py.File(SUMMARY, 'r') as f:
         sims  = f['sim'][:]
@@ -1209,7 +1214,7 @@ but is not exact for `dN/dX` per class.
 
 ## 4. Compare against Ho+21
 
-The Ho+21 CDDF tables live at `/home/mfho/DLA_data/ho21/`.  At z = 2.2
+The Ho+21 CDDF tables live at `$HCD_DLA_DATA_DIR/ho21/`.  At z = 2.2
 the closest table is `cddf_z225.txt`.  We overplot to check the sim
 follows the observed CDDF roughly: at the DLA range the sim and the
 data agree to within a factor of a few, but **LLS and sub-DLAs tend to
@@ -1256,7 +1261,7 @@ chosen snap.
 """),
 
         code("""
-HO21 = Path('/home/mfho/DLA_data/ho21/cddf_z225.txt')
+HO21 = Path(os.environ.get('HCD_DLA_DATA_DIR', '<HCD_DLA_DATA_DIR unset>')) / 'ho21' / 'cddf_z225.txt'
 fig, ax = plt.subplots(figsize=(7.5, 5.5))
 
 # Sim curve from cache
@@ -1368,14 +1373,15 @@ the 9 PRIYA parameters — is the central job of this dataset.
 """),
 
         code("""
+import os
 from pathlib import Path
 import json
 import numpy as np
 import matplotlib.pyplot as plt
 import h5py
 
-DATA_ROOT    = Path('/nfs/turbo/umor-yueyingn/mfho/emu_full')
-HCD_OUT_ROOT = Path('/scratch/cavestru_root/cavestru0/mfho/hcd_outputs')
+DATA_ROOT    = Path(os.environ.get('HCD_LF_RAW_DIR', '<HCD_LF_RAW_DIR unset>'))
+HCD_OUT_ROOT = Path(os.environ.get('HCD_OUTPUTS_DIR', '<HCD_OUTPUTS_DIR unset>'))
 SIM  = 'ns0.81Ap1.6e-09herei3.59heref2.79alphaq1.71hub0.668omegamh20.145hireionz7.92bhfeedback0.0333'
 SNAP = 22
 SNAP_DIR = HCD_OUT_ROOT / SIM / f'snap_{SNAP:03d}'
@@ -1720,14 +1726,15 @@ two questions are the substrate of every science decision downstream.
 """),
 
         code("""
+import os
 from pathlib import Path
 import json
 import numpy as np
 import matplotlib.pyplot as plt
 import h5py
 
-DATA_ROOT    = Path('/nfs/turbo/umor-yueyingn/mfho/emu_full')
-HCD_OUT_ROOT = Path('/scratch/cavestru_root/cavestru0/mfho/hcd_outputs')
+DATA_ROOT    = Path(os.environ.get('HCD_LF_RAW_DIR', '<HCD_LF_RAW_DIR unset>'))
+HCD_OUT_ROOT = Path(os.environ.get('HCD_OUTPUTS_DIR', '<HCD_OUTPUTS_DIR unset>'))
 SIM  = 'ns0.81Ap1.6e-09herei3.59heref2.79alphaq1.71hub0.668omegamh20.145hireionz7.92bhfeedback0.0333'
 SNAP = 22
 

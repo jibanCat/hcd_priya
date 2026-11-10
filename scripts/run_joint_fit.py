@@ -21,7 +21,7 @@ SCOPE / STANDING DECISIONS:
 
 Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-    /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_joint_fit.py --legs DESI,eBOSS
+    python scripts/run_joint_fit.py --legs DESI,eBOSS
 """
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

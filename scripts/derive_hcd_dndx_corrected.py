@@ -1,6 +1,6 @@
 """HISTORICAL (the analysis of record of 2026-07; not a release product). Corrected literature dN/dX law
 re-derivation: the FULL decision table + JSON emitter
-(spec hcd_priya_notes/docs/superpowers/2026-07-18-corrected-law-spec.md, steps 6-8).
+(the maintainers' corrected-law specification, 2026-07-18, steps 6-8; private design notes).
 
 Its kernel inputs come from the deployed pre-lineage cache (lit_dndx_kernel.CACHE_PATH, read directly, counts that
 include the pre-fix box-edge duplicates), so it and the JSON it writes (hcd_analysis/emulator/hcd_lit_dndx_corrected.json)
@@ -29,7 +29,7 @@ constraint. The full decision table (all kernels) stays in the JSON for the reco
 
 Env:
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-    /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/derive_hcd_dndx_corrected.py
+    python scripts/derive_hcd_dndx_corrected.py
 """
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)

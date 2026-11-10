@@ -16,7 +16,7 @@ where ``total_path = n_sightlines · dX_per_sightline``, so the buggy
 
 The fix in commit ``c210990`` updated the in-code formula but did not
 re-write the artefacts that had already been saved on
-``/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/``.  Plotting
+``$HCD_OUTPUTS_DIR/``.  Plotting
 scripts recompute dX on the fly so figures from that commit are
 correct, but anyone consuming the ``.npz`` files directly still sees
 inflated values.
@@ -65,7 +65,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+DEFAULT_OUTPUT_ROOT = Path(os.environ.get("HCD_OUTPUTS_DIR", "<HCD_OUTPUTS_DIR unset>"))
 
 logging.basicConfig(format="%(message)s", level=logging.INFO)
 log = logging.getLogger(__name__)

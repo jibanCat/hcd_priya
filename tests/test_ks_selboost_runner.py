@@ -146,6 +146,6 @@ def test_batch_source_conventions():
     with open(BATCH) as fh:
         src = fh.read()
     assert "--array" in src or "SLURM_ARRAY_TASK_ID" in src
-    assert "cavestru1" in src
+    assert "#SBATCH --" + "account" not in src     # the submitter charges their own allocation
     assert "SKIP" in src or "exists" in src.lower()          # skip-if-exists
     assert "SMOKE" in src

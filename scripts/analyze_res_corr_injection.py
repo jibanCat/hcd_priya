@@ -44,7 +44,7 @@ per leg rather than assume it away). tau0_mean / tau0_tilt paired shifts are als
 is the suspected n_s driver) but are NOT gated.
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/analyze_res_corr_injection.py
+     python scripts/analyze_res_corr_injection.py
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
@@ -60,7 +60,7 @@ print = functools.partial(print, flush=True)
 
 REPO = _REPO_ROOT
 CKPT = f"{REPO}/checkpoints/stepA"
-NOTES_FIG = "/home/mfho/hcd_priya_notes/figures/analysis/05_truth_validation"
+NOTES_FIG = os.environ.get("HCD_FIGURES_DIR", "<HCD_FIGURES_DIR unset>")   # where the gate figure is written
 
 # The two blinded cosmology params this gate protects. n_s is index 0, A_p index 1 of the packed
 # draws (the theta9 block leads _draws_matrix), looked up BY NAME from each checkpoint's `names`.

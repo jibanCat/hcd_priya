@@ -1,5 +1,5 @@
 #!/bin/bash
-# cavestru1 -- KS selection-function mock challenge (spec 2026-07-18 + Amendment 2, PI-signed
+# KS selection-function mock challenge (spec 2026-07-18 + Amendment 2, PI-signed
 # 2026-07-19; second-ask matrix). Array id -> (arm, mock) via scripts/ks_selboost_arms.batch_cells:
 #   0-15 K0_clean | 16-27 K1_flat_lo | 28-43 K2_flat_hi | 44-59 K3_rising | 60-75 K4_u_paper |
 #   76-87 K6_inv_u | 88-99 K7_falling | 100-107 K5_joint_meas   (108 fits, 1 fit/task).
@@ -11,7 +11,7 @@
 # values); skip-if-exists makes resubmission idempotent.
 #
 #SBATCH --job-name=ks_selboost
-#SBATCH --account=cavestru1
+# Charge your own allocation when you submit (sbatch's account option).
 #SBATCH --partition=standard
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -21,7 +21,6 @@
 #SBATCH --output=logs/ks_selboost_%A_%a.out
 #SBATCH --error=logs/ks_selboost_%A_%a.err
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=mfho@umich.edu
 REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
 cd "$REPO" || exit 2
 [ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
@@ -31,12 +30,12 @@ SEED=${SEED:-20260615}
 N_WARMUP=${N_WARMUP:-250}; N_SAMPLES=${N_SAMPLES:-300}
 EXPECT_LLS_BOOST=${EXPECT_LLS_BOOST:-2.5}
 EXPECT_LLS_FRAC_SIGMA=${EXPECT_LLS_FRAC_SIGMA:-0.40}
-OUTDIR=${OUTDIR:-/scratch/cavestru_root/cavestru1/mfho/ks_selboost}
+OUTDIR=${OUTDIR:-${HCD_RUNS_DIR:?set HCD_RUNS_DIR or OUTDIR}/ks_selboost}
 NCPU=${SLURM_CPUS_PER_TASK:-4}; SMOKE_FLAG=""; [[ "${SMOKE:-0}" == "1" ]] && SMOKE_FLAG="--smoke"
 export OMP_NUM_THREADS=$NCPU OPENBLAS_NUM_THREADS=$NCPU MKL_NUM_THREADS=$NCPU NUMEXPR_NUM_THREADS=$NCPU
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=$NCPU"
 export PYTHONNOUSERSITE=1 PYTHONPATH=$REPO JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
-PY=/home/mfho/.conda/envs/emu-jax/bin/python3
+PY=${PYTHON:-python3}
 mkdir -p "$OUTDIR" $REPO/logs
 
 # resolve (arm, mock, n_arm, pkl) from the array id through the numpy-light registry module

@@ -86,7 +86,7 @@ This README serves both as a reproduction, install and quickstart guide and as a
 validation evidence. The full validation verdicts (the held-out error, the coverage and the
 cosmology-bias gate) are kept in the private notes repository and linked from each demo below; the
 headline validation document is
-`hcd_priya_notes/docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md`.
+`2026-06-14-validation-loso-emulator-lf-mf.md` (in the maintainers' private notes).
 
 ### Where to go
 
@@ -227,7 +227,7 @@ The **HCD incidence `alpha_hcd` `(3,)`** (LLS, subDLA, DLA) enters only `predict
   identities (`P_tier_p = Σ_c w_c·P_filt`, the telescoping `Σ w_c = 1`) hold at the bit level only in
   float64.
 - **The env string is mandatory.** Always launch with
-  `PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3`
+  `PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" python`
   (CPU-pinned, deterministic; see §1).
 - **Per-member files.** Each ensemble member is a **four-file bundle**:
   `final_prod_seed{S}.{eqx, meta.json, norm.pkl, hist.json}`. `load_ensemble` needs `.eqx` +
@@ -346,8 +346,8 @@ exactly and break under the default float32. It therefore lives in a dedicated c
 and every script must be launched with the same environment string.
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-    /home/mfho/.conda/envs/emu-jax/bin/python3  <script>
+PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+    python  <script>
 ```
 
 What each piece does:
@@ -359,7 +359,7 @@ What each piece does:
 - `JAX_PLATFORMS=cpu` and `CUDA_VISIBLE_DEVICES=""` pin execution to the CPU, which is deterministic
   and avoids GPU surprises.
 - The JAX/Equinox traps we have already encountered are logged in
-  `hcd_priya_notes/docs/superpowers/jax-traps-log.md` (for example trap #29: sanitise `jnp.interp` y-data before
+  `jax-traps-log.md` (in the maintainers' private notes) (for example trap #29: sanitise `jnp.interp` y-data before
   the call, not after).
 
 This yields a working float64 JAX runtime that can `import` the package.
@@ -518,8 +518,8 @@ epochs=180, patience=25, lr=1e-3, batch=512,                 # optax AdamW + cos
 Run it:
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_loso_sweep.py \
+PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  python scripts/run_loso_sweep.py \
     --out checkpoints/final --histdir checkpoints     # (defaults == FINAL_RECIPE)
 ```
 
@@ -572,7 +572,7 @@ Reading it:
   4-class form is also what PRIYA-on-KODIAQ-SQUAD uses,
   [arXiv:2509.18271](https://arxiv.org/abs/2509.18271)). Unlike the fixed Rogers kernel, ours
   carries the θ, τ₀ sensitivity and preserves the global-⟨F⟩ normalisation. See
-  `hcd_priya_notes/docs/superpowers/2026-06-04-phase-c-walkthrough.md` §6 and
+  `2026-06-04-phase-c-walkthrough.md` (in the maintainers' private notes) §6 and
   `[[hcd-template-rogers-normalization]]`.
 
 The figure below shows an example fold-0 prediction (dashed) over the cache truth (solid), per
@@ -730,10 +730,10 @@ that is harmless to cosmology and covered by the error model). Right: the eBOSS-
 
 To reproduce, the closure and SBC machinery is `hcd_analysis/emulator/closure_diagnostics.py`
 (PIT-ECDF bands, rank tests, coverage). The coverage figure is built by
-`hcd_priya_notes/figures/analysis/06_validation_summary/make_coverage_summary.py` from the
+`make_coverage_summary.py` (in the maintainers' private notes) from the
 closure-chain outputs (`checkpoints/stepA/`). The full writeup is in notes
-`hcd_priya_notes/docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md` (validation summary) and the
-closure plan `hcd_priya_notes/docs/superpowers/plans/2026-06-04-phase-c-t4-closure-plan.md`.
+`2026-06-14-validation-loso-emulator-lf-mf.md` (in the maintainers' private notes) (validation summary) and the
+closure plan `2026-06-04-phase-c-t4-closure-plan.md` (in the maintainers' private notes).
 
 ---
 
@@ -755,12 +755,12 @@ The exact steps to reproduce it are:
 ```bash
 # 1. Run the eBOSS closure-cert chains (writes checkpoints/stepA/E_f6_c*.npz).
 #    (Concurrent-pool launcher; the fiducials E_f5/E_f6/E_f7 are defined in run_stepA.build_config.)
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya OMP_NUM_THREADS=1 \
-  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/run_eboss_cert.py --workers 10
+PYTHONNOUSERSITE=1 PYTHONPATH=<repo> OMP_NUM_THREADS=1 \
+  python scripts/run_eboss_cert.py --workers 10
 
 # 2. Make the corner from those chains (getdist env). FID defaults to E_f6.
-PYTHONPATH=/home/mfho/hcd_priya \
-  /home/mfho/.conda/envs/emu-3.9/bin/python3 scripts/plot_eboss_corners.py E_f6
+PYTHONPATH=<repo> \
+  python scripts/plot_eboss_corners.py E_f6
 ```
 
 `plot_eboss_corners.py` emits two corners per fiducial (cosmology plus HCD, and the IGM nuisances)
@@ -815,15 +815,15 @@ To reproduce:
 
 ```bash
 # per-fold A_p/n_s Fisher bias (the figure above), via the performance-walkthrough builder:
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_performance_walkthrough.py   # → B5_fisher_bias_perfold.png
+PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  python scripts/plot_performance_walkthrough.py   # → B5_fisher_bias_perfold.png
 # per-simulation pool and the deployed multi-fidelity forward (the pooled means):
 #   scripts/diag_emu_bias_allfolds.py
 #   scripts/diag_emu_bias_allfolds_mf.py   → figures/analysis/04_emulator/emu_bias_allfolds_mf.txt
 ```
 
 The full writeup, with the acceptance gate, the per-fold numbers and the MF-forward G-gates, is in
-notes `hcd_priya_notes/docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md` §2b.
+notes `2026-06-14-validation-loso-emulator-lf-mf.md` (in the maintainers' private notes) §2b.
 
 ---
 
@@ -851,10 +851,10 @@ The companion CDDF-vs-literature figure is `06_performance_walkthrough/A7_cddf_v
 To reproduce:
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_dndx_vs_literature.py
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_cddf_vs_literature.py
+PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  python scripts/plot_dndx_vs_literature.py
+PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  python scripts/plot_cddf_vs_literature.py
 ```
 
 HeadA's own prediction-versus-truth accuracy is in
@@ -922,7 +922,7 @@ matters, because a wrong centre is the systematic described above. Second, the g
 degeneracy-breaker is the high-k KS leg together with the damping-wing high-k Voigt deficit (the
 low-k excess is the confusion, the high-k deficit is the cure), not a tighter incidence prior. The
 full derivation, the correlation matrix and the factorisation corr × prior-dominance are in
-notes `hcd_priya_notes/docs/superpowers/2026-06-14-hcd-cosmology-degeneracy.md`, with the related figures
+notes `2026-06-14-hcd-cosmology-degeneracy.md` (in the maintainers' private notes), with the related figures
 `degeneracy_prior_center_law.png` and `degeneracy_snr_amplitude_vs_ztilt.png` in the notes
 `04_emulator/`. All three correlation/projection figures are reproduced by
 `scripts/diag_hcd_cosmo_degeneracy_ref.py`.
@@ -952,8 +952,8 @@ The closures these tools drive validate the architecture that the production all
 inherits; the ensemble-level production SBC is the final inference-calibration gate and remains
 pending before the real fit (notes `2026-06-14-validation-likelihood-production.md` §6).
 
-See `hcd_priya_notes/docs/superpowers/plans/2026-06-04-phase-c-t4-closure-plan.md` for the closure/SBC harness
-(Phase-C T4, in progress) and `hcd_priya_notes/docs/superpowers/2026-06-04-phase-c-checkpoint-review.md` for the
+See `2026-06-04-phase-c-t4-closure-plan.md` (in the maintainers' private notes) for the closure/SBC harness
+(Phase-C T4, in progress) and `2026-06-04-phase-c-checkpoint-review.md` (in the maintainers' private notes) for the
 latest 4-agent review status.
 
 ---
@@ -1040,7 +1040,7 @@ unblind.
 
 Per the project's privacy policy the actual unblinding is run by the PI. The eBOSS+KS unblinding
 notebook lives in the private notes repository, not here:
-`hcd_priya_notes/notebooks/2026-06-15-unblind_eboss_ks.ipynb`. DESI cosmology results are private,
+`2026-06-15-unblind_eboss_ks.ipynb` (in the maintainers' private notes). DESI cosmology results are private,
 and no unblinded numbers are reproduced in this public README.
 
 To unblind (PI, once, post-freeze):
