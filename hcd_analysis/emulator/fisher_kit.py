@@ -1,5 +1,5 @@
 """Linearized (Fisher) projections for the gate E audits, the T3 comparison and the E7 projected calibration (gate E
-amendment A1 rev 1 section 0, registered PU-0068).
+amendment A1 rev 1 section 0, registered).
 
 Parameters (the production sample sites): theta9 (unit cube), tau0_amp, dtau0 and the 3 HCD amplitude sites
 (alpha_lls, alpha_subdla, alpha_dla_raw on the default branch; eps_lls, m_sub, dla_raw on the KS dN/dX-mapped

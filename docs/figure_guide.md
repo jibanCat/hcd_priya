@@ -33,7 +33,7 @@ index with one short block per figure.
 6. `02_param_sensitivity/param_sens_{dndx,omega_hi}.png` — 9-parameter scan, A_p dominance.
 7. `04_hcd_mf/mf_global_fit_visual.png` — G1/G2 global fit at 3 representative z.
 8. `04_hcd_mf/mf_slope_stability.png` — the 4th-HR-sim argument.
-9. `04_hcd_mf/mf_fourth_sim_test.png` — held-out validation on ns0.914.
+9. `04_hcd_mf/mf_fourth_sim_test.png` — held-out validation on ns0.914 (April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF).
 
 ---
 
@@ -130,6 +130,8 @@ resolution fall-off).
 
 ## 04_hcd_mf/ — HCD multi-fidelity development
 
+April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF.
+
 All 12 figures in this subdir are catalogued in detail in
 [`hcd_mf_analysis.md`](hcd_mf_analysis.md).  Compact index here:
 
@@ -171,7 +173,7 @@ All 12 figures in this subdir are catalogued in detail in
 - `mf_global_fit_visual.png` — global G1 (1-slope) vs G2 (+ z-drift)
   fit at 3 representative z.  Shows the stable, over-determined fit.
 - `mf_fourth_sim_test.png` — held-out validation on ns0.914 (no LF
-  counterpart).  `Q_HR_pred = Q_LF_nearest · R_MF` recovers all six
+  counterpart; April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF).  `Q_HR_pred = Q_LF_nearest · R_MF` recovers all six
   quantities to 1.5–4.3 %.
 
 ---

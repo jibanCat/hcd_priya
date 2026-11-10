@@ -1217,8 +1217,10 @@ but is not exact for `dN/dX` per class.
 The Ho+21 CDDF tables live at `$HCD_DLA_DATA_DIR/ho21/`.  At z = 2.2
 the closest table is `cddf_z225.txt`.  We overplot to check the sim
 follows the observed CDDF roughly: at the DLA range the sim and the
-data agree to within a factor of a few, but **LLS and sub-DLAs tend to
-be over-predicted by current PRIYA-class sims**.
+data agree to within a factor of a few. **Sub-DLAs tend to be over-predicted
+relative to the literature compilations, while the LLS incidence is close to
+the corrected literature law** (the in-tree comparison is the HCD incidence
+prior of `hcd_analysis/emulator/inference.py`).
 
 Several physical reasons this happens; the first two are most cited
 but the others appear in the literature too (none is quantitatively
@@ -1237,12 +1239,13 @@ settled):
    clumping and self-shielding affect the column distribution at
    log NHI ≈ 17–19 strongly (see McQuinn, Oh & Faucher-Giguère 2011
    or Rahmati et al. 2013 for the relevant self-shielding
-   prescriptions).  Higher-resolution runs (the HR set) typically
-   lower the LLS prediction by 0.1–0.3 dex without changing the DLA
-   prediction much, which is the signature of a resolution effect
-   rather than a cosmological one.
+   prescriptions).  In the matched HR and LF pairs, the HR runs find
+   more HCDs than LF in every class (`docs/hcd_mf_analysis.md`, an
+   April 2026 study), so resolution does change the column
+   distribution; how much of the data-model difference it explains is
+   not settled.
 3. **Missing large-scale modes / box-size effects.**  The LF
-   simulation boxes have `L_box ~ 60–100 Mpc/h`; modes larger than
+   simulation boxes have `L_box = 120 Mpc/h` (PRIYA); modes larger than
    the box are absent, which underpopulates the HCD-hosting halo
    mass function relative to a `Gpc/h` mock.  Bird et al. 2014
    (1405.3994) argues this contributes at the ~10–20 % level for the

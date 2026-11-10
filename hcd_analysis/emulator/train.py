@@ -142,7 +142,7 @@ def _baseline_cell_table(d, train_idx, norm_stats):
     The baseline head maps (z,τ₀)→(4,K); under LOSO a cell's target is its
     train-cell-mean (shared across the 60 cosmologies). Collapsing the train rows
     to one entry per distinct cell makes the pre-fit a small, well-posed regression
-    (≈306 cells on LF) — the same construction the validated feasibility recipe
+    (≈306 cells on LF) — the same construction the pre-2026-10 feasibility recipe
     (scripts/feasibility_subpercent.py Exp 2) trained the deep baseline on.
     Returns (z_cells, tau0_cells, target (Nc,4,K), mask (Nc,4,K))."""
     train_idx = np.asarray(train_idx)
@@ -164,7 +164,7 @@ def _baseline_cell_table(d, train_idx, norm_stats):
 
 
 def _prefit_baseline(model, d, train_idx, norm_stats, *, epochs, lr):
-    """Pre-fit ONLY the θ-blind BaselineHead to its cell-mean floor (validated recipe).
+    """Pre-fit ONLY the θ-blind BaselineHead to its cell-mean floor (the pre-2026-10 feasibility recipe).
 
     The deep baseline needs MANY gradient steps to reach term (b) ≈ 0.03–0.05·σ_cosmo
     (feasibility Exp 2 used ~12–15k epochs of baseline-only training); in the joint
@@ -280,14 +280,14 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
     - Fits the train-split target normalisation (``fit_target_norm``) on ``train_idx``.
     - SVD warm-starts both P_filt bases (REDESIGN: baseline + residual) when
       ``n_basis`` is set.
-    - PRE-FITS the θ-blind BaselineHead to its cell-mean floor (validated recipe;
+    - PRE-FITS the θ-blind BaselineHead to its cell-mean floor (the pre-2026-10 feasibility recipe;
       ``prefit_baseline_epochs`` baseline-only steps) BEFORE the joint loop, so term
       (b) reaches ~0.03–0.05·σ_cosmo. The joint early-stop is driven by the much
       larger p_resid/f_nhi terms and would otherwise cut the deep baseline off long
       before convergence. Set ``prefit_baseline_epochs=0`` to disable (the joint loop
       then trains the baseline from the SVD warm-start only).
     - FREEZES the pre-fit baseline during the joint loop (``freeze_baseline``, default
-      True whenever a pre-fit ran). This mirrors the validated recipe (Exp 4 trained
+      True whenever a pre-fit ran). This mirrors the pre-2026-10 feasibility recipe (Exp 4 trained
       the baseline + residual as SEPARATE fixed fits, never jointly fine-tuned): if
       the baseline kept training jointly it DRIFTS off its floor (the inv_nc-weighted
       p_base term at shared LR pulls it), re-inflating term (b). With it frozen the

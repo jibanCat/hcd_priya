@@ -11,7 +11,9 @@ All figures here are inline and live under
 Summary HDF5s and CSVs are under
 [`figures/analysis/data/`](../figures/analysis/data/).
 
-> **Quick status**: *preliminary* — 3 matched HR↔LF pairs are the current
+> **April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF.**
+>
+> **Quick status** (2026-04): *preliminary* — 3 matched HR↔LF pairs are the current
 > training sample, which saturates a per-z 2-parameter fit and leaves no
 > residual DOF for proper error bars.  The global (across-z) fit is
 > stable; a 4th matched HR sim would unlock proper uncertainties.  A
@@ -380,7 +382,7 @@ In-window median |fractional error|:
 | Ω_HI(subDLA) | 2.2% | 2.5% | 16.7% |
 | Ω_HI(DLA) | 4.3% | 4.5% | 20.2% |
 
-**Verdict**: `nearest-LF + G1` recovers HR at ns0.914 to 1.5–4.3 %
+**Verdict** (April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF): `nearest-LF + G1` recovers HR at ns0.914 to 1.5–4.3 %
 across all 6 quantities.  A_p-only regression is too coarse (10–20 %) —
 expected, since it ignores n_s, herei, heref, etc.  This is
 out-of-sample validation that the global MF *does* generalise.
@@ -431,7 +433,7 @@ for a proper (A_p × z)-coupled emulator rather than a scalar correction.
   sims to maximise Fisher info.
 - **GP MF emulator** is the natural next step after more HR sims land
   and parameter sensitivity is nailed down.  Deferred per current
-  plan — the analytical global fit does 1.5–4 % out-of-sample already.
+  plan — the analytical global fit does 1.5–4 % out-of-sample already (April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF).
 - **Parameter sensitivity scan for HCD emulator** — separate exercise,
   per-parameter Δθ experiments to map the ridge structure in §7.
   User-specified plan pending.

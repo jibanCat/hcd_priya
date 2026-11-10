@@ -9,7 +9,7 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   ([`docs/bugs_found.md`](docs/bugs_found.md), bug 8). An independent second finder, an overlap check and a
   three-way count reconciliation now guard every catalogue, and a cached catalogue made before the fix is refused on
   reuse.
-- An LF+MF prediction above z 4.6, the upper edge of the multi-fidelity correction's grouped validation, is now
+- An LF+MF prediction above z 4.6, the upper edge of the frozen grouped-validation domain (z 2.2-4.6; the held-out validation is reported separately), is now
   flagged `mf_z_above_validated` (values unchanged; the record format is unchanged).
 
 ### Added

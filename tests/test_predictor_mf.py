@@ -159,7 +159,7 @@ def test_mf_domain_flags(emu_mf):
 
 
 def test_mf_above_the_validated_range_is_served_unchanged_but_flagged(info, emu_lf, tmp_path):
-    """The grouped validation of the MF covers z up to mf_release.VALIDATED_Z_MAX (4.6) only. An LF+MF prediction
+    """The frozen grouped-validation domain of the MF ends at mf_release.VALIDATED_Z_MAX (4.6). An LF+MF prediction
     above it, even inside the record's tables (where nothing else flags it), is served with the same values but
     flagged mf_z_above_validated; the edge itself (to the redshift tolerance) is inside; an LF prediction from the same
     object is not flagged. The synthetic tables (z 2.6, 3.0, 3.4) are relabelled 1.6 up (4.2, 4.6, 5.0), so that 4.8 and

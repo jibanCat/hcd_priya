@@ -1,3 +1,4 @@
+# Historical (pre-2026-10 FixedMeanHead MF, outputs at the wrong k; validates no release MF).
 # T3 GATE — EMU bias THROUGH the MF forward (resolved separable+rank-1 g + res_corr).
 # all 8 folds, each fold's OWN held-out LF backbone; HF-LOSO head when an HR sim is held out.
 # KS z_lo=2.4 (SHIPPED), KS<0.06, same C_total as LF. forward-only Fisher.

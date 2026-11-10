@@ -329,8 +329,8 @@ digest does not change when an MF is added). It holds exactly:
     grids, except, when `exception` is not null, the pairs of one recorded design point (`mf_release.D1_EXCEPTION`:
     its LF and HR run names, whose parameter values differ in their last quoted digits) below the recorded bound
     5e-10, with their count and largest error. Any other exception, bound or tolerance is refused;
-  - `validated_z_min`: the lower edge of the redshift range over which the MF correction is validated (the frozen
-    grouped-validation domain); at build time this is the domain edge, not a passed validation. It is a float set by
+  - `validated_z_min`: the lower edge of the frozen grouped-validation domain (z 2.2-4.6; the held-out validation
+    is reported separately); at build time this is the domain edge, not a passed validation. It is a float set by
     the builder (`--validated-z-min`, 2.2 by default, `mf_release.VALIDATED_Z_MIN`); it may be raised, never lowered.
     The predictor refuses an LF+MF prediction below the larger of it and the tables' lowest redshift.
 
@@ -361,11 +361,11 @@ bytes (`mf_release.reverify`; a loaded `MFRecord` keeps them): a record built or
 tables, a relabelled kind) is refused, so `provenance["mf"]` always describes the tables applied.
 `predict(..., fidelity="LF")` gives the LF prediction of the same bundle, bit for bit what the bundle loaded without
 an MF gives. Below the larger of the lowest redshift of the record's tables and the record's `validated_z_min` the
-LF+MF prediction is refused (`MFRangeError`), never clamped: the correction was not measured or not validated there,
+LF+MF prediction is refused (`MFRangeError`), never clamped: the correction was not measured there or it lies outside the frozen grouped-validation domain,
 so only `fidelity="LF"` is available. Above the highest redshift, and outside the tau0 tables, g is held at its edge value and the prediction is
-flagged (`mf_z_clamped`, `mf_tau0_clamped`). Above z 4.6 (`mf_release.VALIDATED_Z_MAX`, the upper edge of the grouped
-validation; not a record field) an LF+MF prediction keeps its values but is flagged `mf_z_above_validated`, also
-inside the tables, because no validation covers it; an LF prediction is never so flagged.
+flagged (`mf_z_clamped`, `mf_tau0_clamped`). Above z 4.6 (`mf_release.VALIDATED_Z_MAX`, the upper edge of the frozen grouped-validation domain (z 2.2-4.6; the held-out validation is reported separately);
+not a record field) an LF+MF prediction keeps its values but is flagged `mf_z_above_validated`, also
+inside the tables, because it lies outside that domain; an LF prediction is never so flagged.
 
 **Writing.** `mf_release.write_mf_record(out_dir, tables, ...)` validates everything first, then creates `out_dir`
 (an existing directory, file or symlink is refused: a record is written once), writes the tables through the

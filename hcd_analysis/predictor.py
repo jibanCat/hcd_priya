@@ -41,8 +41,8 @@ depend on the cosmological parameters. Below max(the lowest redshift of the reco
 ``validated_z_min``, 2.2 by default) the MF is REFUSED (``MFRangeError``; ask for ``fidelity="LF"``): it is never
 clamped there. Above the highest redshift and outside the
 tau0 tables it is held constant and flagged (``mf_z_clamped``, ``mf_tau0_clamped``). Above z 4.6
-(``mf_release.VALIDATED_Z_MAX``, the upper edge of the grouped validation) an LF+MF prediction is served with the same
-values but flagged ``mf_z_above_validated``, inside the tables too: no validation covers it. ``w_c`` and ``dndx`` stay the LF
+(``mf_release.VALIDATED_Z_MAX``, the upper edge of the frozen grouped-validation domain (z 2.2-4.6; the held-out validation is reported separately)) an LF+MF prediction is
+served with the same values but flagged ``mf_z_above_validated``, inside the tables too: it lies outside that domain. ``w_c`` and ``dndx`` stay the LF
 backbone's. ``fidelity`` ("LF" or "LF+MF"; None: the bundle's own) selects the output; "LF+MF" without a record raises
 ``MFUnavailableError``. The record's provenance (version, composition and ruling ids, cache digests and their
 provenance statements, fit commit, the settled mean-flux convention of its targets, the HR inputs used) is in
@@ -483,7 +483,8 @@ class _PredictorBase:
         out = {"mf": "the MF correction P_MF = P_LF exp(g(z, tau0, k)) of the loaded record (theta-independent, "
                      "fitted on matched HR/LF pairs; refused below max(its lowest z, its validated_z_min); above its "
                      "highest z and outside its tau0 tables it is held constant and flagged; above z "
-                     f"{_MR.VALIDATED_Z_MAX:g}, the upper edge of its grouped validation, it is applied unchanged but "
+                     f"{_MR.VALIDATED_Z_MAX:g}, the upper edge of the frozen grouped-validation domain (z 2.2-4.6; the held-out "
+                     "validation is reported separately), it is applied unchanged but "
                      "flagged mf_z_above_validated); w_c stays the LF backbone's"}
         if use_mf:
             out["product"] = f"{labels.get('product') or 'LF'}+MF"

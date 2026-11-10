@@ -404,10 +404,10 @@ A differentiable JAX/Equinox network learns the per-class P1D as a smooth
 function of the cosmology θ, the redshift z and τ₀. The central design choice is
 that the HCD contamination enters as a free per-class amplitude on top of the
 clean forest, so that the inference can marginalise over the HCD incidence rather
-than assuming the simulation reproduced it exactly. We validate the emulator with
-leave-one-simulation-out (LOSO) cross-validation: for each fold we train on all
-simulations but one and test on the held-out simulation, which is how we estimate
-the emulator's own error budget.
+than assuming the simulation reproduced it exactly. Before 2026-10 the emulator was
+checked with leave-one-simulation-out (LOSO) cross-validation: for each fold it was
+trained on all simulations but one and tested on the held-out simulation, which is
+how its own error budget was estimated. The release validation is reported separately.
 
 This stage yields a fast, autodifferentiable forward model
 `P_obs(θ, z, τ₀, α_HCD)`. Its held-out error is measured per fold as a Fisher
@@ -437,9 +437,9 @@ bindings and a cache slice but not the full cache or a cluster.
 The emulator's `P_obs` is wired into a Gaussian log-likelihood that compares the
 prediction to the data (the DESI DR1 and KODIAQ-SQUAD P1D) through an
 emulator-error covariance and physically motivated priors. The HCD incidence
-prior is centred on the observed dN/dX rather than the simulation's, and it is
-constructed so that an incorrect prior centre does not propagate into the
-cosmology.
+prior is centred on the observed dN/dX rather than the simulation's; it was
+designed so that an incorrect prior centre should not propagate into the
+cosmology, which the release validation tests (below).
 
 This stage yields a fully differentiable `log_posterior` suitable for a gradient
 sampler, together with the HCD-incidence prior. Whether a mis-centred incidence
@@ -462,9 +462,9 @@ short closure or eBOSS chain runs on CPU once a checkpoint and a cache slice are
 in place; the production all-sims ensemble is heavier and was run on the cluster.
 
 The final stage samples the posterior with NUTS, the No-U-Turn Sampler, a
-gradient-based MCMC method that exploits the differentiable likelihood, and
-validates the pipeline with closure tests: we fit mock data drawn from a known
-truth and confirm that it is recovered within the stated error bars. Closure on
+gradient-based MCMC method that exploits the differentiable likelihood. Before
+2026-10 the pipeline was checked with closure tests: mock data drawn from a known
+truth were fitted to confirm that it is recovered within the stated error bars. Closure on
 mocks and on public archival data (eBOSS DR14, KODIAQ-SQUAD) may be committed;
 the DESI cosmology result itself remains local and blinded.
 
@@ -473,9 +473,9 @@ many of the held-out mocks recover the truth within ±1σ, and whether the sampl
 diverges. The closure results are reported with the release validation, which is
 not public yet.
 
-What these closures do and do not certify is worth stating plainly. They validate
-the architecture, that is the forward model, the covariance and the sampler, that
-the production all-sims N=5 ensemble inherits. The ensemble-level production SBC
+What these closures do and do not certify is worth stating plainly. Before 2026-10
+they checked the architecture, that is the forward model, the covariance and the
+sampler, that the production all-sims N=5 ensemble inherits. The ensemble-level production SBC
 (rank-based simulation-based calibration on the production ensemble itself) is the
 final inference-calibration gate, and it remains pending before the real fit.
 

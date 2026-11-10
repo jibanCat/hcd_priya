@@ -72,11 +72,10 @@ class BaselineHead(eqx.Module):
     structured mean). Because θ never enters, ∂m̂/∂θ = 0 exactly.
 
     Depth/width are configurable (``n_layers`` hidden layers of ``width``; default
-    n_layers=3, width=256). The validated sub-percent recipe
-    (scripts/feasibility_subpercent.py Exp 2 / scripts/diag_tilt_bias_lf_hr.py)
-    PROVED a 1-hidden-layer head plateaus at ~0.10–0.18·σ_cosmo, while a ≥3-layer
-    w256 head drops the baseline misfit (term (b)) to ~0.03–0.05·σ_cosmo — so the
-    production default is deep.
+    n_layers=3, width=256). The pre-2026-10 sub-percent feasibility study
+    (historical scripts feasibility_subpercent.py Exp 2 / diag_tilt_bias_lf_hr.py)
+    found that a 1-hidden-layer head plateaued at a larger baseline misfit (term (b))
+    than a >=3-layer w256 head, so the production default is deep.
 
     Mirrors HeadB's P_filt path: low-rank when ``n_basis`` is set (4 coeffs ×
     n_basis through its OWN trainable basis ``p_filt_basis``), dense (4*n_k)

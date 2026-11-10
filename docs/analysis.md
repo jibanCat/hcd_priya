@@ -209,7 +209,7 @@ dedicated doc:
 > **[docs/hcd_mf_analysis.md](hcd_mf_analysis.md)** — comprehensive HCD
 > MF story: bootstrap + fiducial-slice tests, matched-pair HR vs LF,
 > per-class template convergence, global G1/G2 linear-in-A_p fit,
-> held-out validation on the 4th HR sim (ns0.914), z = 2.2 anomaly, and
+> held-out validation on the 4th HR sim (ns0.914; April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF), z = 2.2 anomaly, and
 > the A_p threshold finding for dN/dX(DLA) z-evolution.
 
 Summary headlines:
@@ -230,7 +230,7 @@ Summary headlines:
 - **Global linear-in-A_p MF**: G1 (single slope) achieves ≤ 1 %
   residual for 5/6 quantities; G2 (+ z-drift) brings dN/dX(DLA) from
   1.0 → 0.7 %.  Ω_HI(DLA) is the noisy one at 1.3 %.
-- **Held-out test on ns0.914** (4th HR sim, no LF counterpart):
+- **Held-out test on ns0.914** (4th HR sim, no LF counterpart; April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF):
   `Q_HR_pred = Q_LF_nearest · R_MF(A_p, z)` recovers all 6 HR
   quantities to 1.5–4.3 %.
 - **Physical finding**: dN/dX(DLA) has an A_p threshold at
