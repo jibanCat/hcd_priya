@@ -65,6 +65,7 @@ Env (HEAVY -- run via SLURM, NOT an interactive node):
 """
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+import os
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import functools
 print = functools.partial(print, flush=True)
