@@ -270,7 +270,7 @@ class TestRealSpectraLoad(unittest.TestCase):
         external_path("HCD_LF_RAW_DIR", "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056/output/SPECTRA_017/lya_forest_spectra_grid_480.hdf5")
     )
 
-    @unittest.skipUnless(SPEC.exists(), "production spectra file unavailable")
+    @unittest.skipUnless(SPEC.exists(), "production spectra file unavailable (set HCD_LF_RAW_DIR)")
     def test_load_real(self):
         from hcd_analysis.clustering import load_sightline_geometry
 
@@ -706,7 +706,7 @@ class TestBuildDeltaFField(unittest.TestCase):
             external_path("HCD_HR_RAW_DIR", "ns0.914Ap1.32e-09herei3.85heref2.65alphaq1.57hub0.742omegamh20.141hireionz6.88bhfeedback0.04/output/SPECTRA_017/rand_spectra_DLA.hdf5")
         )
         if not spec.exists():
-            self.skipTest("production HiRes spectra unavailable")
+            self.skipTest("production HiRes spectra unavailable (set HCD_HR_RAW_DIR)")
         import h5py
         with h5py.File(spec, "r") as f:
             tau = f["tau/H/1/1215"][:].astype(np.float64)

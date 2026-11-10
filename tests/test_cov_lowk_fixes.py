@@ -59,7 +59,7 @@ def test_add_cv_floor_diag_and_rank1():
 # --------------------------------------------------------------------------- #
 #  2. env-UNSET ⇒ byte-identical (the back-compat guarantee)
 # --------------------------------------------------------------------------- #
-@pytest.mark.skipif(not _have_desi, reason="DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_desi_env_unset_byte_identical(monkeypatch):
     """With HCD_DESI_SNR3 / HCD_CV_FLOOR UNSET, load_desi_leg is BYTE-IDENTICAL to the explicit
     deployed path (use_snr3=False, add_cv_floor=False) — the reversibility guarantee."""
@@ -72,7 +72,7 @@ def test_desi_env_unset_byte_identical(monkeypatch):
     np.testing.assert_array_equal(leg_env.k, leg_explicit.k)
 
 
-@pytest.mark.skipif(not _have_eboss, reason="eBOSS npz not present")
+@pytest.mark.skipif(not _have_eboss, reason="eBOSS npz not present (set HCD_P1D_DATA_DIR)")
 def test_eboss_env_unset_byte_identical(monkeypatch):
     """eBOSS: HCD_CV_FLOOR unset ⇒ load_eboss_leg byte-identical to add_cv_floor=False."""
     for v in ("HCD_CV_FLOOR", "HCD_CV_FLOOR_RANK1"):
@@ -86,7 +86,7 @@ def test_eboss_env_unset_byte_identical(monkeypatch):
 # --------------------------------------------------------------------------- #
 #  3. each flag, when SET, WIDENS the low-k covariance (no silent no-op)
 # --------------------------------------------------------------------------- #
-@pytest.mark.skipif(not _have_desi, reason="DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_desi_cv_floor_widens_lowk_only():
     """add_cv_floor=True raises the diagonal of the low-k rows (k<K_ZERO) and leaves high-k rows
     byte-identical — the floor is a low-k-only inflation."""
@@ -102,7 +102,7 @@ def test_desi_cv_floor_widens_lowk_only():
         np.testing.assert_array_equal(d1[highk], d0[highk])  # high-k untouched
 
 
-@pytest.mark.skipif(not (_have_desi and _have_snr3), reason="DESI baseline or SNR3 npz not present")
+@pytest.mark.skipif(not (_have_desi and _have_snr3), reason="DESI baseline or SNR3 npz not present (set HCD_P1D_DATA_DIR)")
 def test_desi_snr3_swaps_cov_and_inflates_stat():
     """use_snr3=True loads the SNR>3 measurement+cov (DIFFERENT from the SNR>1 baseline) and the
     +5% stat inflation rides along (the cov is not byte-identical to the SNR>1 path)."""

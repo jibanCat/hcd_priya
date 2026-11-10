@@ -120,9 +120,8 @@ def test_case2_subdla_law_3sigma_from_tombstoned_dla_block():
     'Combined sigma' = the 2D Mahalanobis distance of the tombstone law from the deployed
     law in the RECORDED estimator's (lnA_pivot, gamma) covariance (the deployed fit's own
     metric; a naive hypot with the tombstone WLS's slope error is diluted by that fit's
-    huge sigma_gamma ~0.79 on 5 noisy points and understates the separation). Measured:
-    ~6 combined sigma (the amplitude-at-pivot separation dominates; the slope alone is
-    ~2.4 sigma of the GLM slope error 0.62 — few points, narrow ln(1+z) lever arm)."""
+    large slope uncertainty on a few noisy points and understates the separation). The amplitude-at-pivot
+    separation dominates; the slope alone separates less (few points, narrow ln(1+z) lever arm)."""
     t = LD.ZAFAR13_T3_DLA_BLOCK_WRONG_SUBDLA_LABEL
     wrong = LD.wls_powerlaw(t["z"], t["lx"], t["err"])
     a = LD.ELL_X_SUBDLA_BINNED_19P0_20P3_ZAFAR13_T3
@@ -146,8 +145,7 @@ def test_case2_lls_law_distinct_from_tombstoned_cumulative_wls():
 
     DOCUMENTED DEVIATION from the spec's generic '>3 sigma' criterion: with the
     PI-adopted K1 kernel (-11% at z=3) AND the slope constrained to the same 2.127, the
-    parameter-space separation is ~1.1 sigma of the measurement-only amplitude error (and
-    ~0.4 sigma of the kernel-inflated error) BY CONSTRUCTION — the 3-sigma criterion was
+    parameter-space separation cannot reach that criterion BY CONSTRUCTION: the 3-sigma criterion was
     written for the K3 (-31%) candidate and is unachievable for K1a. The regression guard
     here is therefore (a) the amplitude moved by the full kernel correction (>5%,
     measured -8.3%), (b) exact distinctness from the tombstone WLS at reproduction
@@ -200,7 +198,7 @@ def test_case3_subdla_deviance_healthy_and_internal_consistency(J):
 def test_case4_telescoping_k3_closure_and_k1a_expected_pulls(J):
     """K3 (the fit-based-cap kernel) is telescoping-consistent BY CONSTRUCTION: its pulls
     stay < 1 — the closure property is pinned where it applies. The ADOPTED K1a law's
-    pulls are +1.7..+2.4 sigma at z in [3.0, 4.0] BY DESIGN (the PRIYA-CDDF class shares
+    pulls are larger at z in [3.0, 4.0] BY DESIGN (the PRIYA-CDDF class shares
     vs the literature class decomposition are in real tension; PI-accepted 2026-07-18,
     recorded in the JSON pi_adoption.telescoping_note) — so for K1a the test pins the
     RECORDED expected values, NOT closure."""

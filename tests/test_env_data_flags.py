@@ -50,7 +50,7 @@ def test_env_data_flags_constant():
 # --------------------------------------------------------------------------------------------- #
 #  (a) DataLeg stamps
 # --------------------------------------------------------------------------------------------- #
-@pytest.mark.skipif(not _have_desi, reason="DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_desi_default_stamps_all_false():
     leg = DL.load_desi_leg()
     assert leg.use_snr3 is False
@@ -58,7 +58,7 @@ def test_desi_default_stamps_all_false():
     assert leg.cv_floor_rank1 is False
 
 
-@pytest.mark.skipif(not _have_desi, reason="DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_desi_env_snr3_is_stamped(monkeypatch):
     monkeypatch.setenv("HCD_DESI_SNR3", "1")
     leg = DL.load_desi_leg()
@@ -66,7 +66,7 @@ def test_desi_env_snr3_is_stamped(monkeypatch):
     assert leg.cv_floor_on is False
 
 
-@pytest.mark.skipif(not _have_desi, reason="DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_desi_env_cv_floor_is_stamped(monkeypatch):
     monkeypatch.setenv("HCD_CV_FLOOR", "1")
     leg = DL.load_desi_leg()
@@ -76,7 +76,7 @@ def test_desi_env_cv_floor_is_stamped(monkeypatch):
     assert leg2.cv_floor_on is True and leg2.cv_floor_rank1 is True
 
 
-@pytest.mark.skipif(not _have_desi, reason="DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_desi_rank1_without_floor_is_not_stamped(monkeypatch):
     """HCD_CV_FLOOR_RANK1 alone is inert (never consulted when the floor is off) — the stamp
     must record what was APPLIED, not the raw env."""
@@ -85,7 +85,7 @@ def test_desi_rank1_without_floor_is_not_stamped(monkeypatch):
     assert leg.cv_floor_on is False and leg.cv_floor_rank1 is False
 
 
-@pytest.mark.skipif(not _have_eboss, reason="eBOSS npz not present")
+@pytest.mark.skipif(not _have_eboss, reason="eBOSS npz not present (set HCD_P1D_DATA_DIR)")
 def test_eboss_env_cv_floor_is_stamped(monkeypatch):
     leg0 = DL.load_eboss_leg()
     assert leg0.cv_floor_on is False and leg0.cv_floor_rank1 is False and leg0.use_snr3 is False
@@ -96,7 +96,7 @@ def test_eboss_env_cv_floor_is_stamped(monkeypatch):
     assert leg.use_snr3 is False                      # SNR3 is a DESI-only concept
 
 
-@pytest.mark.skipif(not _have_eboss, reason="eBOSS npz not present")
+@pytest.mark.skipif(not _have_eboss, reason="eBOSS npz not present (set HCD_P1D_DATA_DIR)")
 def test_explicit_kwarg_overrides_env(monkeypatch):
     """The explicit add_cv_floor=False test back-door still beats the env — and the stamp
     reflects the APPLIED value."""
@@ -107,7 +107,7 @@ def test_explicit_kwarg_overrides_env(monkeypatch):
 
 @pytest.mark.skipif(not os.path.exists(
     external_path("HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt")),
-    reason="KS data not present")
+    reason="KS data not present (set HCD_LYAEMU_PARENT)")
 def test_ks_leg_stamps_default_false():
     leg = DL.load_ks_leg(k_max=0.069)
     assert leg.use_snr3 is False and leg.cv_floor_on is False and leg.cv_floor_rank1 is False

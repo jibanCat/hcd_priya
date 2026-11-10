@@ -66,7 +66,7 @@ def test_fres_prior_constants_tight():
     assert 0.0 < float(F_RES_SLOPE_SIGMA) <= 1.0
 
 
-@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present (DESI: set HCD_P1D_DATA_DIR)")
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_fres_sites_present_ordered_and_golden_off():
     """sample_res=True adds f_res_amp/f_res_slope to _legb_priors_only IN ORDER AFTER alpha_res (the
@@ -83,7 +83,7 @@ def test_fres_sites_present_ordered_and_golden_off():
     assert set(off) == set(on) - {"f_res_amp", "f_res_slope"}, "f_res is the ONLY site-set change"
 
 
-@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present (DESI: set HCD_P1D_DATA_DIR)")
 def test_cov_b_resolution_float_spd_and_golden():
     """option-b: load_desi_leg(resolution_float=True) removes the per-z-block rank-1 resolution mode
     (cov_b = cov - sum_z outer(e_res|z)) -> SPD + diagonal reduced by the resolution variance, and flips
@@ -101,7 +101,7 @@ def test_cov_b_resolution_float_spd_and_golden():
     np.testing.assert_array_equal(np.asarray(leg_off.C_data, float), Ca)
 
 
-@pytest.mark.skipif(not os.path.exists(_EBOSS_NPZ), reason="eBOSS npz not present")
+@pytest.mark.skipif(not os.path.exists(_EBOSS_NPZ), reason="eBOSS npz not present (set HCD_P1D_DATA_DIR)")
 def test_cov_b_eboss_rescale_spd_and_golden():
     """eBOSS option-b uses the MULTIPLICATIVE sigma-rescale (cov=corr(x)sigma-sigma^T, resolution baked
     into sigma): sigma'^2 = sigma^2 - res^2 -> cov' rescaled. Reference-verified SPD; the per-z rank-1
@@ -123,7 +123,7 @@ _MF_GOLDEN = os.path.join(_GOLDEN_DIR, "legb_mf_golden.npz")
 
 
 @pytest.mark.skipif(not (_have and os.path.exists(_MF_GOLDEN)),
-                    reason="real cache/ckpt/DESI or MF golden not present")
+                    reason="real cache/ckpt/DESI or MF golden not present (DESI: set HCD_P1D_DATA_DIR)")
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_bres_vec_forward_response_per_z_indexed():
     """THE load-bearing change: predict_P_obs_on_leg threads a per-z sampled b_res_vec into the forward.
@@ -165,7 +165,7 @@ def test_bres_vec_forward_response_per_z_indexed():
         err_msg="forward b_res_vec threading misindexes iz (b_res_vec[iz] or R_z[iz])")
 
 
-@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present (DESI: set HCD_P1D_DATA_DIR)")
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_fres_sites_in_both_models_same_order():
     """f_res_amp/f_res_slope appear in BOTH _legb_model AND _legb_priors_only at the SAME relative
@@ -189,7 +189,7 @@ def test_fres_sites_in_both_models_same_order():
     assert s_model.index("f_res_amp") == s_prior.index("f_res_amp")
 
 
-@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present (DESI: set HCD_P1D_DATA_DIR)")
 def test_cov_b_desi_deployed_cut_spd():
     """The SPD guarantee must hold on the DEPLOYED z-cut (z_lo=2.2, z_hi=4.2 -> 11 z-bins), NOT only the
     reduced 3-bin z<=2.6 slice the other SPD test uses (code-lens step-review #5). The high-z He-II bins
@@ -266,7 +266,7 @@ def test_check_resolution_injectable_guards_unready_leg():
         C._check_resolution_injectable([ready, unready], active=True)    # stray KS + active -> RAISE
 
 
-@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present (DESI: set HCD_P1D_DATA_DIR)")
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_f_res_prior_sigma_configurable():
     """Arm-C (cup1d-faithful WIDE) + the eBOSS leg-matched prior need the f_res_amp prior width to be
@@ -289,7 +289,7 @@ def test_f_res_prior_sigma_configurable():
     assert float(trm["f_res_amp"]["fn"].scale) == 0.05
 
 
-@pytest.mark.skipif(not os.path.exists(_EBOSS_NPZ), reason="eBOSS npz not present")
+@pytest.mark.skipif(not os.path.exists(_EBOSS_NPZ), reason="eBOSS npz not present (set HCD_P1D_DATA_DIR)")
 def test_cov_arm_d_eboss_coherent_mode():
     """ARM-D (first-class bracket arm, esp. eBOSS): remove resolution the deployed way (sigma-rescale) then
     RE-ADD it as ONE coherent cross-z mode s^2*outer(e,e) -- NO forward float. Invariants: SPD; PRESERVES the
@@ -318,7 +318,7 @@ def test_cov_arm_d_eboss_coherent_mode():
     np.testing.assert_array_equal(np.asarray(leg_off.C_data, float), Ca)   # golden
 
 
-@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present (DESI: set HCD_P1D_DATA_DIR)")
 def test_cov_arm_d_desi_coherent_and_amplitude():
     """Arm-D on DESI (rank-1 removal + coherent add) + the amplitude knob: cov_D(s) - cov_b scales as s^2."""
     from hcd_analysis.emulator.data_likelihood import load_desi_leg
@@ -348,7 +348,7 @@ def test_check_single_instrument_for_res_guards_multileg():
         C._check_single_instrument_for_res([desi, eboss], True)   # multi-instrument + sample_res -> RAISE
 
 
-@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present (DESI: set HCD_P1D_DATA_DIR)")
 def test_resolution_ready_flag_per_leg():
     """The per-leg resolution_ready flag the injection guard reads (panel domain #10): DESI/eBOSS R_z is
     trustworthy (True); KS reuses the DESI proxy (8-15x too large) -> False. Default DataLeg is True."""

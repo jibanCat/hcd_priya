@@ -593,10 +593,12 @@ def main():
 
     if a.blind and not os.path.exists(a.blind_lock):
         raise SystemExit(
-            f"blind.lock not found at {a.blind_lock}. Create it FIRST (frozen seed) e.g.:\n"
-            f"  python3 -c \"from hcd_analysis.emulator import blinding as B; "
-            f"B.write_blind_lock('{a.blind_lock}', 'hcd_priya_real_fit_v1')\"\n"
-            f"or pass --no-blind only post-freeze/unblind.")
+            f"blind.lock not found at {a.blind_lock}. A formal release archive leaves the committed blind.lock out "
+            f"(.gitattributes export-ignore): run the real fit from a git checkout of the repository, where the "
+            f"committed lock is at {a.blind_lock}. "
+            f"Do not create a new blind seed in its place: a new seed gives different blinding offsets, and the "
+            f"blinding is defined by the committed lock.\n"
+            f"Pass --no-blind only post-freeze/unblind.")
     offset = BL.offset_from_lock(a.blind_lock) if a.blind else {p: 0.0 for p in BL.BLIND_PARAMS}
 
     info = SURVEY[a.survey]

@@ -199,7 +199,7 @@ def test_model_priors_only_site_order_match(hierarchical, marg_zslope, sample_me
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_ratio_centers_match_closure_truth():
-    """The raw-sim-ratio prior centers (build_legb_ctx) put the closure TRUTH r_c within ~1.5σ_r.
+    """The raw-sim-ratio prior centers (build_legb_ctx) put the closure TRUTH r_c within the asserted tolerance.
 
     The closure truth (make_legb_mock truth_pack.alpha_hcd) is [w_LLS, w_sub, 0.10·w_DLA]; the
     truth ratios are r_sub=w_sub/w_LLS and r_dla=0.10·w_DLA/w_LLS. The prior centers are derived
@@ -220,7 +220,7 @@ def test_ratio_centers_match_closure_truth():
         a = np.asarray(truth["w_c"])                       # [w_LLS, w_sub, w_DLA] (z-median)
         truth_r_sub = a[1] / a[0]
         truth_r_dla = C.TRUTH_DLA_FRAC["DESI"] * a[2] / a[0]   # 0.10·w_DLA/w_LLS
-        # within ~1.5σ_r (σ_r = the prior width, which is ≥ the per-sim CV by defense-in-depth).
+        # within the asserted multiple of σ_r (σ_r = the prior width, which is ≥ the per-sim CV by defense-in-depth).
         assert abs(truth_r_sub - rmu[0]) < 1.5 * rsg[0], \
             f"sim {s[:16]} r_sub truth {truth_r_sub:.4f} vs center {rmu[0]:.4f}±{rsg[0]:.4f}"
         assert abs(truth_r_dla - rmu[1]) < 1.5 * rsg[1], \

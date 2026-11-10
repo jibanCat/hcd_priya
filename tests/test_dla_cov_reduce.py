@@ -94,7 +94,7 @@ def test_authority_constant_is_on():
     assert DL.DESI_DLA_COV_REDUCE is True
 
 
-@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_default_load_is_reduced_and_stamped():
     """load_desi_leg() default resolves the authority constant -> reduced C_data, stamped on the leg."""
     leg = DL.load_desi_leg()
@@ -107,7 +107,7 @@ def test_default_load_is_reduced_and_stamped():
 # --------------------------------------------------------------------------------------------- #
 #  PI req 1 + 3: fid reconstruction (kept grid) + cup1d red-convention agreement
 # --------------------------------------------------------------------------------------------- #
-@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_fid_rebuild_matches_shipped_on_kept_grid():
     """The fid split rebuilt from the systematic vectors reproduces the shipped cov on the kept
     rows (re-pins the baseline this module subtracts from; full-grid pin lives in
@@ -120,7 +120,7 @@ def test_fid_rebuild_matches_shipped_on_kept_grid():
                                rtol=1e-12, atol=1e-18)
 
 
-@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_reduced_equals_cup1d_red_build():
     """PERMANENT GUARD (the load-bearing equality): our subtractive resolution_float +
     dla_cov_reduce build == cup1d's additive type_analysis="red" build (drop E_RESOLUTION AND
@@ -145,7 +145,7 @@ def test_reduced_equals_cup1d_red_build():
 # --------------------------------------------------------------------------------------------- #
 #  PI req 2: exact removal of ONLY the intended DLA blocks; other systematics untouched
 # --------------------------------------------------------------------------------------------- #
-@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_dla_only_removal_is_exact_per_z_block():
     """dla_cov_reduce alone (resolution untouched): C_fid - C_reduced == sum_z outer(e_dla|z)
     exactly on the kept grid, ZERO outside the z blocks (the shipped z-block-diagonal convention;
@@ -183,7 +183,7 @@ def test_dla_only_removal_is_exact_per_z_block():
 # --------------------------------------------------------------------------------------------- #
 #  PI req 4: symmetry + SPD + per-z-block Cholesky (deployed config: inflation ON)
 # --------------------------------------------------------------------------------------------- #
-@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
 @pytest.mark.parametrize("inflation", [True, False])
 def test_reduced_symmetric_spd_cholesky_every_z(inflation):
     """The deployed reduced covariance (resolution_float + dla_cov_reduce) is symmetric, SPD, and
@@ -245,7 +245,7 @@ def test_forward_signature_sensitive_to_dla_cov_reduce(monkeypatch):
     assert CL.forward_signature() == sig_on            # deterministic + restored
 
 
-@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_optout_byte_identical_to_pre_change_behavior():
     """dla_cov_reduce=False reproduces the pre-change covariance exactly: the option-b build
     without resolution ONLY (the old cov_b pin from test_resolution_cup1d_consistency)."""

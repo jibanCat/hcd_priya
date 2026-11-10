@@ -12,7 +12,7 @@ PROBLEM (the bug these tests pin):
         fold 6  ->  {ns0.972, ns0.979}   (both dropped together)
 
     So the MF correction for those folds is fit on 4 HR sims instead of 5 -> a worse
-    correction -> an inflated apparent bias (the +3.26sigma was ~1.7x inflated by this).
+    correction -> an inflated apparent bias.
 
 FIX (Task 1.5):
     Thread a ``target_hr_sim`` through so the held HR set is EXACTLY {target_hr_sim}

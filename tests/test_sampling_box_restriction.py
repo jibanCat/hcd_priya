@@ -1,7 +1,7 @@
 """The NUTS sampling prior restricts the IGM params to the ORIGINAL PRIYA box.
 
-Phase-4b found the catastrophic closure biases (alphaq=2.98 -> A_p +3.7sigma, herei=4.46 ->
-+2.0sigma) sit in the WIDENED-box corners where the held-out emulator extrapolates. The fix
+Phase-4b found large closure biases for mocks in the WIDENED-box corners (high alphaq, high herei),
+where the held-out emulator extrapolates. The fix
 restricts the NUTS theta prior (data.SAMPLING_LIMITS / closure_legb._THETA_UNIT_*) to the
 original PRIYA ranges on herei/heref/alphaq while KEEPING n_s extended. This pins:
   (1) the unit-cube bounds are right (IGM sub-intervals, n_s/Ap/etc full);
@@ -61,7 +61,7 @@ def test_unit_bounds_values():
     np.testing.assert_allclose(C._THETA_UNIT_HI, hi)
 
 
-@pytest.mark.skipif(not os.path.exists(_DESI_NPZ), reason="DESI data not present")
+@pytest.mark.skipif(not os.path.exists(_DESI_NPZ), reason="DESI DR1 npz not present (set HCD_P1D_DATA_DIR)")
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_prior_predictive_inside_original_priya_box():
     """Prior-predictive draws from the production model land inside the original PRIYA IGM box

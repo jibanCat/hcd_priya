@@ -51,7 +51,7 @@ class TestCambLoader(unittest.TestCase):
             external_path("HCD_HR_RAW_DIR", "ns0.914Ap1.32e-09herei3.85heref2.65alphaq1.57hub0.742omegamh20.141hireionz6.88bhfeedback0.04/output/powerspectrum-0.2500.txt")
         )
         if not p.exists():
-            self.skipTest("real PRIYA CAMB file unavailable")
+            self.skipTest("real PRIYA CAMB file unavailable (set HCD_HR_RAW_DIR)")
         k, P = load_camb_pk(p)
         # Range from earlier inspection: k ∈ [5e-2, 280] h/Mpc, P > 0
         self.assertGreater(k.size, 100)

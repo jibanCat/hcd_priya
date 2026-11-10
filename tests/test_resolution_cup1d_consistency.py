@@ -88,7 +88,7 @@ def test_desi_resolution_R_matches_cup1d_get_Rz_Naim():
     np.testing.assert_allclose(np.asarray(DL.desi_resolution_R(z)), _get_Rz_Naim(z), rtol=1e-12)
 
 
-@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_npz_fid_split_reproduces_shipped_cov_syst():
     """cup1d's 'fid' correlated/uncorrelated split, rebuilt from the syst vectors, reproduces
     the shipped cov_syst (and cov == cov_stat + cov_syst). Pins that the split we subtract
@@ -107,7 +107,7 @@ def test_npz_fid_split_reproduces_shipped_cov_syst():
     np.testing.assert_allclose(cov_syst_fid, cov_syst_shipped, rtol=1e-12, atol=1e-18)
 
 
-@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_cov_b_equals_cup1d_additive_build_without_resolution():
     """PERMANENT GUARD: our subtractive DESI cov_b == cup1d's additive build-without-resolution
     to rtol 1e-10 on the same post-cut grid; both SPD. (add_cov_diag_inflation=False for an
@@ -151,7 +151,7 @@ def test_cov_b_equals_cup1d_additive_build_without_resolution():
     assert np.linalg.eigvalsh(our_cov_b).min() > 0.0
 
 
-@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_forward_factor_exp_vs_linear_inband_gap_leq_1pct():
     """PERMANENT GUARD: our exp resolution factor vs cup1d's linear one differ <= 1% in-band
     at b_res=0.02 (after the half-Nyquist cut). Both use the same R_z, and our
