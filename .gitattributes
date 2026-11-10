@@ -3,3 +3,5 @@
 # such an archive (run those tests from a git checkout).
 analysis.lock export-ignore
 blind.lock export-ignore
+# The lock generator only reads and writes analysis.lock, which the archive leaves out; its own tests skip there too.
+scripts/gen_analysis_lock.py export-ignore
