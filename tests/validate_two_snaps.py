@@ -20,11 +20,12 @@ sys.path.insert(0, str(ROOT))
 from hcd_analysis.catalog import build_catalog
 from hcd_analysis.cddf import measure_cddf
 from hcd_analysis.io import read_header, pixel_dv_kms
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
 SNAP_PATHS = {
-    17: Path("/nfs/turbo/umor-yueyingn/mfho/emu_full") / SIM / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5",
-    10: Path("/nfs/turbo/umor-yueyingn/mfho/emu_full") / SIM / "output" / "SPECTRA_010" / "lya_forest_spectra_grid_480.hdf5",
+    17: Path(external_path("HCD_LF_RAW_DIR")) / SIM / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5",
+    10: Path(external_path("HCD_LF_RAW_DIR")) / SIM / "output" / "SPECTRA_010" / "lya_forest_spectra_grid_480.hdf5",
 }
 
 

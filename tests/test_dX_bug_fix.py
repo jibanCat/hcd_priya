@@ -94,8 +94,9 @@ print("=" * 78)
 
 from pathlib import Path
 import json
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-OUTPUT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+OUTPUT = Path(external_path("HCD_OUTPUTS_DIR"))
 
 # Collect all catalog entries at z ≈ 3
 records = []

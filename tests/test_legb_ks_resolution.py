@@ -11,7 +11,7 @@ Default load_ks_leg (resolution_float=False) stays byte-identical (proxy R_z unu
 
 These are pure-numpy loader tests (no emulator / NUTS). Run:
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-    /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_ks_resolution.py -q
+    python -m pytest tests/test_legb_ks_resolution.py -q
 """
 import os
 
@@ -19,8 +19,9 @@ import numpy as np
 import pytest
 
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-_KS_BASE = "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
+_KS_BASE = external_path("HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/")
 _HAVE_KS = os.path.exists(_KS_BASE + "final-conservative-covariance-karacayli_etal2021.txt")
 pytestmark = pytest.mark.skipif(not _HAVE_KS, reason="KS KODIAQ-SQUAD data files not present")
 

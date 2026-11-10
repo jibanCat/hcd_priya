@@ -30,7 +30,7 @@ THE MODEL (this is what these tests pin):
   per-leg target (DESI carries the 10% DLA, KS carries none) to tight rtol.
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_dla_masking.py -v
+     python -m pytest tests/test_legb_dla_masking.py -v
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
@@ -48,6 +48,7 @@ from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10
 from hcd_analysis.emulator import inference as I
 from hcd_analysis.emulator.predict import predict_P_filt, predict_P_obs
 from hcd_analysis.emulator.sampler_numpyro import _dla_raw_mu
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 
 # ----------------------------------------------------------------------------- #
@@ -230,10 +231,9 @@ def test_truth_forward_consistency_desi_ten_percent():
 _have_cache = os.path.exists(
     f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5")
 _have_ckpt = os.path.exists(f"{_REPO_ROOT}/checkpoints/final_fold0.eqx")
-_have_desi = os.path.exists("/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz")
+_have_desi = os.path.exists(external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz"))
 _have_ks = os.path.exists(
-    "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
-    "final-conservative-p1d-karacayli_etal2021.txt")
+    external_path("HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"))
 
 
 @pytest.mark.skipif(not (_have_cache and _have_ckpt),

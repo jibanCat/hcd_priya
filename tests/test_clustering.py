@@ -61,6 +61,7 @@ from hcd_analysis.clustering import (
     xi_cross_dla_lya_rmu,
     xyz_to_nearest_pixel,
 )
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 
 def _toy_geometry(box: float = 120.0, n_pix: int = 1250, n_per_axis: int = 8) -> SightlineGeometry:
@@ -266,10 +267,7 @@ class TestRealSpectraLoad(unittest.TestCase):
     """
 
     SPEC = Path(
-        "/nfs/turbo/umor-yueyingn/mfho/emu_full/"
-        "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735"
-        "omegamh20.141hireionz7.17bhfeedback0.056/output/SPECTRA_017/"
-        "lya_forest_spectra_grid_480.hdf5"
+        external_path("HCD_LF_RAW_DIR", "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056/output/SPECTRA_017/lya_forest_spectra_grid_480.hdf5")
     )
 
     @unittest.skipUnless(SPEC.exists(), "production spectra file unavailable")
@@ -705,10 +703,7 @@ class TestBuildDeltaFField(unittest.TestCase):
         rand_spectra (1 sim/snap), confirm ⟨F⟩ ∈ [0.6, 0.95] (Lyα
         forest at z = 2-5).  Skipped if the file is missing."""
         spec = Path(
-            "/nfs/turbo/lsa-cavestru/mfho/priya/emu_full_hires/"
-            "ns0.914Ap1.32e-09herei3.85heref2.65alphaq1.57hub0.742"
-            "omegamh20.141hireionz6.88bhfeedback0.04/output/SPECTRA_017/"
-            "rand_spectra_DLA.hdf5"
+            external_path("HCD_HR_RAW_DIR", "ns0.914Ap1.32e-09herei3.85heref2.65alphaq1.57hub0.742omegamh20.141hireionz6.88bhfeedback0.04/output/SPECTRA_017/rand_spectra_DLA.hdf5")
         )
         if not spec.exists():
             self.skipTest("production HiRes spectra unavailable")

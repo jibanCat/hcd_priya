@@ -1,8 +1,8 @@
 """Bit-identity test against PRIYA's flux_vectors HDF5.
 
 Runs in emu-3.9 + GSL env:
-    export LD_LIBRARY_PATH=/sw/pkgs/arc/stacks/gcc/10.3.0/gsl/2.7/lib:/home/mfho/.conda/envs/emu-3.9/lib:$LD_LIBRARY_PATH
-    /home/mfho/.conda/envs/emu-3.9/bin/python3 tests/test_priya_p1d.py
+    export LD_LIBRARY_PATH=<your GSL library directory>:$LD_LIBRARY_PATH
+    python tests/test_priya_p1d.py
 """
 import os, sys, json
 from pathlib import Path
@@ -11,6 +11,7 @@ import h5py
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 try:
     from hcd_analysis.priya_p1d import compute_tier_p_p1d
@@ -36,7 +37,7 @@ def _unavailable(msg):
     pytest.skip(msg)
 
 
-PRIYA_FILE = "/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/mf_emulator_flux_vectors_tau1000000.hdf5"
+PRIYA_FILE = external_path("HCD_KS_BASEDIR", "mf_emulator_flux_vectors_tau1000000.hdf5")
 SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
 SNAP = 17
 PRIYA_ROW = 344
@@ -45,8 +46,8 @@ N_K = 172
 
 
 def test_tier_p_bit_identical_to_priya_at_sim0_z3_alpha1():
-    tau_p = f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5"
-    meta_p = f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/meta.json"
+    tau_p = external_path("HCD_LF_RAW_DIR", f"{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
+    meta_p = external_path("HCD_OUTPUTS_DIR", f"{SIM}/snap_{SNAP:03d}/meta.json")
     with open(meta_p) as f: m = json.load(f)
     nbins, dv_kms, z = int(m["nbins"]), float(m["dv_kms"]), float(m["z"])
     vmax = nbins * dv_kms
@@ -76,9 +77,9 @@ def test_tier_c_fine_bins_sum_to_total_at_alpha_one():
     """Count-weighted sum of all fine-N_HI bin P1Ds == Tier-P-no-filter P1D."""
     from hcd_analysis.priya_p1d import compute_tier_c_p1d, compute_tier_p_p1d
     from hcd_analysis.catalog import AbsorberCatalog
-    tau_p = f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5"
-    meta_p = f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/meta.json"
-    cat_p = f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/catalog.npz"
+    tau_p = external_path("HCD_LF_RAW_DIR", f"{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
+    meta_p = external_path("HCD_OUTPUTS_DIR", f"{SIM}/snap_{SNAP:03d}/meta.json")
+    cat_p = external_path("HCD_OUTPUTS_DIR", f"{SIM}/snap_{SNAP:03d}/catalog.npz")
     with open(meta_p) as fh: m = json.load(fh)
     vmax = int(m["nbins"]) * float(m["dv_kms"]); z = float(m["z"])
     with h5py.File(tau_p, "r") as fh:
@@ -104,9 +105,9 @@ def test_fine_bins_reconstruct_subdla_split():
         compute_tier_c_p1d, compute_tier_p_p1d, merge_fine_to_classes,
         _per_class_p1d_at_scale, bin_sightlines_by_nhi, FINE_NHI_EDGES)
     from hcd_analysis.catalog import AbsorberCatalog
-    tau_p = f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5"
-    meta_p = f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/meta.json"
-    cat_p = f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/catalog.npz"
+    tau_p = external_path("HCD_LF_RAW_DIR", f"{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
+    meta_p = external_path("HCD_OUTPUTS_DIR", f"{SIM}/snap_{SNAP:03d}/meta.json")
+    cat_p = external_path("HCD_OUTPUTS_DIR", f"{SIM}/snap_{SNAP:03d}/catalog.npz")
     with open(meta_p) as fh: m = json.load(fh)
     vmax = int(m["nbins"]) * float(m["dv_kms"]); z = float(m["z"])
     with h5py.File(tau_p, "r") as fh:
@@ -130,10 +131,10 @@ def test_tier_c_nonDLA_reproduces_priya_filtered():
     from hcd_analysis.catalog import AbsorberCatalog
     SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
     SNAP=17; NK=172; ZIDX=8; ROW=344
-    tau_p=f"/nfs/turbo/umor-yueyingn/mfho/emu_full/{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5"
-    cat_p=f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/catalog.npz"
-    meta_p=f"/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/{SIM}/snap_{SNAP:03d}/meta.json"
-    priya="/home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/mf_emulator_flux_vectors_tau1000000.hdf5"
+    tau_p=external_path("HCD_LF_RAW_DIR", f"{SIM}/output/SPECTRA_{SNAP:03d}/lya_forest_spectra_grid_480.hdf5")
+    cat_p=external_path("HCD_OUTPUTS_DIR", f"{SIM}/snap_{SNAP:03d}/catalog.npz")
+    meta_p=external_path("HCD_OUTPUTS_DIR", f"{SIM}/snap_{SNAP:03d}/meta.json")
+    priya=external_path("HCD_KS_BASEDIR", "mf_emulator_flux_vectors_tau1000000.hdf5")
     if not all(os.path.exists(p) for p in (tau_p,cat_p,meta_p,priya)):
         _unavailable("tier_c_nonDLA: data unavailable")
     with open(meta_p) as fh: m=json.load(fh)
@@ -192,15 +193,15 @@ def test_priya_p1d_bit_identical_multipoint():
 
     Guarded by SLOW_TESTS=1 (skips otherwise). To run:
         SLOW_TESTS=1 \\
-        LD_LIBRARY_PATH=/sw/pkgs/arc/stacks/gcc/10.3.0/gsl/2.7/lib:/home/mfho/.conda/envs/emu-3.9/lib:$LD_LIBRARY_PATH \\
-        /home/mfho/.conda/envs/emu-3.9/bin/python3 tests/test_priya_p1d.py
+        LD_LIBRARY_PATH=<your GSL library directory>:$LD_LIBRARY_PATH \\
+        python tests/test_priya_p1d.py
     For the parallel sbatch fan-out, see scripts/consistency_checks/sbatch_multipoint.sh.
     """
     if not os.environ.get("SLOW_TESTS"):
         _unavailable("test_priya_p1d_bit_identical_multipoint: set SLOW_TESTS=1 to run")
 
-    HCD = "/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"
-    EMU = "/nfs/turbo/umor-yueyingn/mfho/emu_full"
+    HCD = external_path("HCD_OUTPUTS_DIR")
+    EMU = external_path("HCD_LF_RAW_DIR")
     sims = {  # PRIYA sim_idx -> hcd_outputs folder
         44: "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056",
         0:  "ns0.842Ap1.36e-09herei3.51heref2.85alphaq2hub0.658omegamh20.14hireionz6.72bhfeedback0.0453",

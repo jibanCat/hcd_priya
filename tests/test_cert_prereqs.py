@@ -2,7 +2,7 @@
 R6 paired machinery. Cheap paths only (no ctx build, no NUTS) — the heavy pair-identity
 property lives in tests/test_r6_pairing.py.
 
-Run: /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_cert_prereqs.py -q
+Run: python -m pytest tests/test_cert_prereqs.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

@@ -53,7 +53,7 @@ so the harness can confirm the default stays byte-identical.
 
 Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
-    CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
+    CUDA_VISIBLE_DEVICES="" python \
     -m pytest tests/test_res_corr_inject.py -v
 """
 from __future__ import annotations

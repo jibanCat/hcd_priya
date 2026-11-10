@@ -22,10 +22,11 @@ from hcd_analysis.catalog import build_catalog, AbsorberCatalog
 from hcd_analysis.io import read_header, pixel_dv_kms, iter_tau_batches
 from hcd_analysis.masking import apply_tauspace_mask_to_batch, apply_mask_to_batch
 from hcd_analysis.p1d import P1DAccumulator
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 SIM = "ns0.909Ap1.98e-09herei3.75heref3.01alphaq2.43hub0.682omegamh20.14hireionz7.6bhfeedback0.0449"
-LF_HDF5 = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full") / SIM / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5"
-HR_HDF5 = Path("/nfs/turbo/lsa-cavestru/mfho/priya/emu_full_hires") / SIM / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5"
+LF_HDF5 = Path(external_path("HCD_LF_RAW_DIR")) / SIM / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5"
+HR_HDF5 = Path(external_path("HCD_HR_RAW_DIR")) / SIM / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5"
 OUT = ROOT / "tests" / "out"
 DIAG = ROOT / "figures" / "diagnostics"
 

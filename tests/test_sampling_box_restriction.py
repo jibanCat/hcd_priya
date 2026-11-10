@@ -8,7 +8,7 @@ original PRIYA ranges on herei/heref/alphaq while KEEPING n_s extended. This pin
   (2) the model actually SAMPLES inside the original PRIYA IGM box (prior-predictive).
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_sampling_box_restriction.py -q
+     python -m pytest tests/test_sampling_box_restriction.py -q
 """
 import os
 import numpy as np
@@ -19,8 +19,9 @@ import jax
 
 from hcd_analysis.emulator import data as D
 from hcd_analysis.emulator import closure_legb as C
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-_DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
+_DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
 
 # original PRIYA (coarse_grid.py defaults) for the IGM params we restrict
 _ORIG = {"herei": (3.5, 4.1), "heref": (2.6, 3.2), "alphaq": (1.3, 2.5)}

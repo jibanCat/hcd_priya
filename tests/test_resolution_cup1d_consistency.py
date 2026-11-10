@@ -20,7 +20,7 @@ Two permanent guards documenting "our DESI implementation is numerically identic
      k < 0.5 pi/R_z cut), and that our R_z proxy equals cup1d's get_Rz_Naim exactly.
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_resolution_cup1d_consistency.py -q
+     python -m pytest tests/test_resolution_cup1d_consistency.py -q
 """
 import os
 
@@ -29,8 +29,9 @@ import numpy as np
 import pytest
 
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
+DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
 _have_desi = os.path.exists(DESI_NPZ)
 
 # cup1d compute_cov (QMLE) systematic labels + the 'fid' correlated/uncorrelated split, mapped

@@ -36,7 +36,7 @@ but in FIXED-reference units instead of the per-record bias_z):
      two arms share a large common noise component.
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_res_corr_injection_gate.py -q
+     python -m pytest tests/test_res_corr_injection_gate.py -q
 """
 import importlib.util
 import os

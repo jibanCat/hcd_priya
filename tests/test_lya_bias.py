@@ -40,6 +40,7 @@ from hcd_analysis.lya_bias import (
     xi_lin_monopole,
     xi_lin_quadrupole,
 )
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 
 class TestCambLoader(unittest.TestCase):
@@ -47,10 +48,7 @@ class TestCambLoader(unittest.TestCase):
     def test_load_real_camb_file(self):
         """Smoke test on a real PRIYA CAMB output."""
         p = Path(
-            "/nfs/turbo/lsa-cavestru/mfho/priya/emu_full_hires/"
-            "ns0.914Ap1.32e-09herei3.85heref2.65alphaq1.57hub0.742"
-            "omegamh20.141hireionz6.88bhfeedback0.04/output/"
-            "powerspectrum-0.2500.txt"
+            external_path("HCD_HR_RAW_DIR", "ns0.914Ap1.32e-09herei3.85heref2.65alphaq1.57hub0.742omegamh20.141hireionz6.88bhfeedback0.04/output/powerspectrum-0.2500.txt")
         )
         if not p.exists():
             self.skipTest("real PRIYA CAMB file unavailable")

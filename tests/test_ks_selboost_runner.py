@@ -17,7 +17,7 @@ test_dla_selfdraw_arm.py forward_stamp-stub convention):
   * pkl naming + .smoke suffix convention; batch array->(arm, mock) mapping totals 108.
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ks_selboost_runner.py -q
+     python -m pytest tests/test_ks_selboost_runner.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

@@ -13,9 +13,10 @@ import numpy as np
 import pytest
 
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
-EBOSS_NPZ = "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz"
+DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
+EBOSS_NPZ = external_path("HCD_P1D_DATA_DIR", "eboss_dr14_p1d/eboss_dr14_p1d.npz")
 _have_desi = os.path.exists(DESI_NPZ)
 _have_snr3 = os.path.exists(DL.DESI_SNR3_NPZ)
 _have_eboss = os.path.exists(EBOSS_NPZ)

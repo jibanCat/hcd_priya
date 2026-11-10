@@ -28,10 +28,11 @@ sys.path.insert(0, str(ROOT))
 from hcd_analysis.catalog import build_catalog
 from hcd_analysis.cddf import measure_cddf
 from hcd_analysis.io import read_header, pixel_dv_kms
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 SIM_NAME = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
-HDF5 = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full") / SIM_NAME / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5"
-OLD_CAT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs") / SIM_NAME / "snap_017" / "catalog.npz"
+HDF5 = Path(external_path("HCD_LF_RAW_DIR")) / SIM_NAME / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5"
+OLD_CAT = Path(external_path("HCD_OUTPUTS_DIR")) / SIM_NAME / "snap_017" / "catalog.npz"
 NEW_CAT = ROOT / "tests" / "out" / "snap_017_fixed_catalog.npz"
 DIAG_DIR = ROOT / "figures" / "diagnostics"
 

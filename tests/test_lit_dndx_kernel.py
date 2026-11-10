@@ -8,7 +8,7 @@ Cache-dependent (skipif pattern; CI consumes only the committed JSON).
 
 Env:
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-    /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_lit_dndx_kernel.py -q
+    python -m pytest tests/test_lit_dndx_kernel.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

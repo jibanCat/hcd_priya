@@ -7,7 +7,7 @@ committed reference tests/golden/legb_lf_golden.npz (regenerate ONLY with explic
 scripts/make_legb_golden.py). rtol=1e-12 (bit-level intent; absolute tol 0).
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_golden.py -q
+     python -m pytest tests/test_legb_golden.py -q
 """
 import os
 import numpy as np
@@ -20,10 +20,11 @@ from hcd_analysis.emulator.closure_legb import build_legb_ctx
 from hcd_analysis.emulator import data_likelihood as DL
 from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import meanflux_prior as MF
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 GOLDEN = os.path.join(os.path.dirname(__file__), "golden", "legb_lf_golden.npz")
 MF_GOLDEN = os.path.join(os.path.dirname(__file__), "golden", "legb_mf_golden.npz")
-_DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
+_DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
 
 
 @pytest.mark.skipif(not os.path.exists(GOLDEN), reason="golden reference not generated")

@@ -17,7 +17,7 @@ Contract under test:
   * registry_signature is a stable sha256 covering profiles + Ns + envelope labels.
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ks_selboost_arms.py -q
+     python -m pytest tests/test_ks_selboost_arms.py -q
 """
 import numpy as np
 import pytest

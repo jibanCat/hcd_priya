@@ -3,7 +3,7 @@
 approximate alpha_to_dndx (retained solely to reproduce pre-2026-07-22 artifacts).
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_dndx_exact_inverse.py -q
+     python -m pytest tests/test_dndx_exact_inverse.py -q
 """
 import jax
 jax.config.update("jax_enable_x64", True)   # the readout is float64 end to end

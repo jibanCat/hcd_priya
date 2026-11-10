@@ -13,7 +13,7 @@ gate certified. These tests pin:
      never silently pool with a pre-wiring (uniform/no-f_res) pkl, while a default resume still loads.
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_forward_wiring.py -q
+     python -m pytest tests/test_prod_forward_wiring.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

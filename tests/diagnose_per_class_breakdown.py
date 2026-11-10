@@ -40,9 +40,10 @@ from hcd_analysis.masking import (
     apply_tauspace_mask_to_batch,
     priya_dla_mask_row,
 )
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
-HDF5 = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full") / SIM / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5"
+HDF5 = Path(external_path("HCD_LF_RAW_DIR")) / SIM / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5"
 CAT_PATH = ROOT / "tests" / "out" / "snap_017_fastfix_catalog.npz"
 DIAG = ROOT / "figures" / "diagnostics"
 

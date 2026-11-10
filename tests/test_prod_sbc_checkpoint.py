@@ -8,7 +8,7 @@ globs ``mock_*.pkl`` (mock index from the FILENAME) alongside ``shard_*.pkl``, p
 winning a conflict.
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_sbc_checkpoint.py -q
+     python -m pytest tests/test_prod_sbc_checkpoint.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

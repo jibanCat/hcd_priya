@@ -11,7 +11,7 @@ This pins the contract:
   (d) ∂emu_var/∂α is finite (the α-derivative now carries the cross terms).
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_xclass_cemu.py -q
+     python -m pytest tests/test_xclass_cemu.py -q
 """
 import hcd_analysis.emulator  # noqa: F401  enables x64
 import jax

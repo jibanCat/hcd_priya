@@ -9,7 +9,7 @@ while the DATA silently differed (truth identity is necessary, data identity is 
 proved here).
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_r6_pairing.py -q
+     python -m pytest tests/test_r6_pairing.py -q
 """
 import numpy as np
 import pytest

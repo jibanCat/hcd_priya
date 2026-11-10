@@ -13,8 +13,9 @@ import os
 
 import numpy as np
 import pytest
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-EBOSS_NPZ = "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz"
+EBOSS_NPZ = external_path("HCD_P1D_DATA_DIR", "eboss_dr14_p1d/eboss_dr14_p1d.npz")
 _have = os.path.exists(EBOSS_NPZ)
 NZ, NK = 13, 35
 
@@ -99,7 +100,7 @@ def test_eboss_loader_z_unit_and_angular_k():
     leg = DL.load_eboss_leg()
     assert np.allclose(leg.z_unit, (leg.z - 2.0) / 3.4)     # the cache encoder convention
     # angular k [s/km], NOT /2π: matches the raw Pk1D_data.dat k column on the kept rows
-    raw = np.loadtxt("/home/mfho/lya_emulator_full/lyaemu/data/boss_dr14_data/Pk1D_data.dat")
+    raw = np.loadtxt(external_path("HCD_LYAEMU_PARENT", "lyaemu/data/boss_dr14_data/Pk1D_data.dat"))
     assert np.allclose(np.sort(np.unique(leg.k)), np.sort(np.unique(raw[:, 1])))
     assert leg.k.min() > 1e-3 and leg.k.max() < 0.02
 

@@ -14,8 +14,9 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import build_emulator_cache as bec
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-HCD_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+HCD_ROOT = Path(external_path("HCD_OUTPUTS_DIR"))
 
 
 def test_discover_sim_snap_pairs_returns_nonempty():

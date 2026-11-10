@@ -15,7 +15,7 @@ coverage run — surfacing as a coverage/recovery ANOMALY, never a crash. This g
 into a hard test failure at the seam.
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_postprocess_golden.py -q
+     python -m pytest tests/test_legb_postprocess_golden.py -q
 """
 import os
 import numpy as np
@@ -25,8 +25,9 @@ import hcd_analysis.emulator  # x64 BEFORE jax
 import jax
 
 from hcd_analysis.emulator import closure_legb as C
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-_DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
+_DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
 
 # The 3 numpyro.deterministic sites of _legb_model that the host-side reconstruction must match.
 _DET_SITES = ("tau0_vec", "alpha_dla", "alpha_hcd_z")

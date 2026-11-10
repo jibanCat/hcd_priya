@@ -13,7 +13,7 @@ Hooks under test (closure_legb):
   (c) run_legb(..., inject_spec=) leg_a branch — threads the above; inject_spec=None is a no-op.
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_dnuis_inject.py -q
+     python -m pytest tests/test_dnuis_inject.py -q
 """
 import numpy as np
 import jax

@@ -15,7 +15,7 @@ multi-chain array where the truth (R-hat≈1, large ESS for iid chains) is known
 estimators are verified independently of the (slow) NUTS path.
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_convergence.py -q
+     python -m pytest tests/test_legb_convergence.py -q
 """
 import os
 import numpy as np
@@ -25,8 +25,9 @@ import hcd_analysis.emulator  # x64 BEFORE jax
 import jax
 
 from hcd_analysis.emulator import closure_legb as C
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-_DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
+_DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
 
 
 # --------------------------------------------------------------------------- #

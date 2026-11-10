@@ -7,7 +7,7 @@ aggregator's shape + DLA high-k shot flag.
 
 Run (env mandatory):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
-    /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_emulator_train.py -v
+    python -m pytest tests/test_emulator_train.py -v
 """
 import numpy as np
 import jax

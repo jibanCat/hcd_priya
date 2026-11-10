@@ -1,7 +1,7 @@
 """res_corr AMPLITUDE nuisance α(z) — forward-only marginalization (Task 1.3, TDD).
 
-Plan : hcd_priya_notes/docs/superpowers/plans/2026-06-16-res-corr-anchor-marginalize-plan.md (Task 1.3)
-Spec : hcd_priya_notes/docs/superpowers/specs/2026-06-16-res-corr-anchor-marginalize-design.md (§3.2/§5)
+Plan : the maintainers' res_corr anchor-marginalization plan (2026-06-16, Task 1.3; private design notes)
+Spec : the matching design specification (2026-06-16, §3.2/§5; private design notes)
 
 The multi-fidelity ``res_corr`` correction (``mf.res_corr``, the HF→n512 particle-convergence
 factor) is currently a FIXED, zero-uncertainty deterministic factor whose high-k amplitude is
@@ -45,7 +45,7 @@ nuisance cancels in the closure and is unconstrained).
 
 Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-    /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_res_corr_alpha.py -q
+    python -m pytest tests/test_res_corr_alpha.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
@@ -64,14 +64,14 @@ from hcd_analysis.emulator import data_likelihood as DL
 from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import meanflux_prior as MF
 from hcd_analysis.emulator.data import Z_LIMITS
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "golden")
 MF_GOLDEN = os.path.join(GOLDEN_DIR, "legb_mf_golden.npz")
 _CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 _CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
-_DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
-_KS = ("/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
-       "final-conservative-p1d-karacayli_etal2021.txt")
+_DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
+_KS = (external_path("HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"))
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
 _have_ks = os.path.exists(_KS)
 

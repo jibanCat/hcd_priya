@@ -18,7 +18,7 @@ moves the live signatures. The opt-in real-leg test (HCD_LOCK_REAL_LEGS=1) build
 and is strict. At the freeze step the fixture is REBUILT from the merged tree.
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<tree> JAX_PLATFORMS=cpu OMP_NUM_THREADS=1 \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_analysis_lock_generator.py -q
+     python -m pytest tests/test_analysis_lock_generator.py -q
 """
 import copy
 import hashlib
@@ -172,7 +172,7 @@ def test_required_sections_present(lock):
     # decisions: PI records + ks_zlo
     assert lock["decisions"]["pi_decision_records"], "no PI decision records"
     for rec in lock["decisions"]["pi_decision_records"]:
-        assert rec["path"].startswith("/home/mfho/hcd_priya_notes/")
+        assert os.path.isabs(rec["path"]), f"decision record path is not absolute: {rec}"
         assert len(rec["sha256"]) == 64, f"unresolved decision record: {rec}"
     assert lock["decisions"]["ks_zlo"]["baseline"] == 2.4
     assert lock["decisions"]["ks_zlo"]["diagnostic"] == 2.8

@@ -6,7 +6,7 @@ the alpha_res forward-only pattern. Default OFF (ctx.sample_res=False) -> byte-i
 per-z-block rank-1 cov surgery for option-b; forward-only (not in truth -> no closure cancellation).
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_resolution.py -q
+     python -m pytest tests/test_legb_resolution.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
@@ -21,11 +21,12 @@ from numpyro.infer.util import constrain_fn
 from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator import data_likelihood as DL
 from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 _CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 _CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
-_DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
-_EBOSS_NPZ = "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz"
+_DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
+_EBOSS_NPZ = external_path("HCD_P1D_DATA_DIR", "eboss_dr14_p1d/eboss_dr14_p1d.npz")
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
 
 
@@ -355,7 +356,6 @@ def test_resolution_ready_flag_per_leg():
     assert load_desi_leg(z_lo=2.2, z_hi=4.2).resolution_ready is True
     if os.path.exists(_EBOSS_NPZ):
         assert load_eboss_leg().resolution_ready is True
-    _KS = ("/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/"
-           "final-conservative-p1d-karacayli_etal2021.txt")
+    _KS = (external_path("HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"))
     if os.path.exists(_KS):
         assert load_ks_leg(k_max=0.069).resolution_ready is False, "KS proxy R_z is untrustworthy -> not resolution_ready"

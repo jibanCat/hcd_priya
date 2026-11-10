@@ -18,7 +18,7 @@ post-1876a14 (by-name indexing, exact t-quantile pooling, smoke filtering) with 
     projection lines at the K4 coordinates.
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_analyze_ks_selboost.py -q
+     python -m pytest tests/test_analyze_ks_selboost.py -q
 """
 import pickle
 

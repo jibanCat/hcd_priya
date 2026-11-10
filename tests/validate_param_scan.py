@@ -30,8 +30,9 @@ sys.path.insert(0, str(ROOT))
 from hcd_analysis.catalog import build_catalog
 from hcd_analysis.cddf import measure_cddf
 from hcd_analysis.io import read_header, pixel_dv_kms
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-DATA_ROOT = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
+DATA_ROOT = Path(external_path("HCD_LF_RAW_DIR"))
 SIMS = [
     ("min ns", "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"),
     ("max ns", "ns1.04Ap1.73e-09herei4.21heref2.49alphaq2.52hub0.671omegamh20.145hireionz7.81bhfeedback0.0683"),

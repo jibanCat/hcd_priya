@@ -13,7 +13,7 @@ Pins the contract for the production-SBC gate plumbing:
 
 Env-gated like the other closure tests. Run:
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
-    /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_sbc.py -q
+    python -m pytest tests/test_prod_sbc.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

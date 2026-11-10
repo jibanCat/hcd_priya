@@ -21,9 +21,10 @@ from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator import data_likelihood as DL
 from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator.likelihood import gaussian_loglik
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 SHAPE_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/mf_cemu_shape.npz"
-DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
+DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
 _have_shape = os.path.exists(SHAPE_NPZ)
 _have_desi = os.path.exists(DESI_NPZ)
 

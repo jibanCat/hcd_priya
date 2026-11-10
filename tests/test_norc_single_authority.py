@@ -13,7 +13,7 @@ members) and NO NUTS ever run. The single lever is monkeypatch CL.PROD_RES_CORR_
 prod_norc_forward() reads at call time -> ALL three consumers move together.
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_norc_single_authority.py -q
+     python -m pytest tests/test_norc_single_authority.py -q
 """
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))

@@ -10,7 +10,7 @@ TWO tiers:
       the cos_span<0.8 certificate, and worst_ns_member in (1,2).
 
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
-     CUDA_VISIBLE_DEVICES="" /home/mfho/.conda/envs/emu-jax/bin/python3 \
+     CUDA_VISIBLE_DEVICES="" python \
      -m pytest tests/test_res_instr_basis.py -q
 """
 from __future__ import annotations
