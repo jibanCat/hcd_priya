@@ -38,6 +38,13 @@ BLIND_LOCK = os.path.join(REPO, "blind.lock")
 COMMITTED_LOCK = os.path.join(REPO, "analysis.lock")
 MANIFEST = os.path.join(REPO, "checkpoints", "production_ensemble_manifest.json")
 
+# A formal release archive leaves out the frozen lock files (.gitattributes export-ignore), so this file has nothing
+# to test there. In a git checkout they are always present, and a missing one fails below as before.
+if not os.path.exists(os.path.join(REPO, ".git")) and not all(
+        os.path.exists(p) for p in (GEN_PATH, BLIND_LOCK, COMMITTED_LOCK)):
+    pytest.skip("the lock files are export-ignored from source archives; run these tests from a git checkout",
+                allow_module_level=True)
+
 # DEFERRED (gate E amendment A1 rev 1 section 8, step 7; PI ruling 2026-10-21, D2 = a): scripts/gen_analysis_lock.py
 # is reworked only when analysis.lock is regenerated, which needs PI authorization. Until then the generator verifies
 # the production ensemble against <repo>/checkpoints (the schema-1 layout), which does not hold the schema-2 members

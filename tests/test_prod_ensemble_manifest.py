@@ -383,6 +383,8 @@ V1_MANIFEST = ROOT / "checkpoints" / "production_ensemble_manifest_v1_pre2026-10
 
 
 def _july_lock_emulator():
+    if not ANALYSIS_LOCK.exists() and not (ROOT / ".git").exists():
+        pytest.skip("analysis.lock is export-ignored from source archives; run this test from a git checkout")
     return json.loads(ANALYSIS_LOCK.read_text())["emulator"]
 
 

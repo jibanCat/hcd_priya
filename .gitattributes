@@ -1,0 +1,5 @@
+# Formal release archives (git archive, and the GitHub and Zenodo archives made from it) leave out the frozen
+# analysis records below. They stay in the repository and its history, unchanged; the tests that read them skip in
+# such an archive (run those tests from a git checkout).
+analysis.lock export-ignore
+blind.lock export-ignore
