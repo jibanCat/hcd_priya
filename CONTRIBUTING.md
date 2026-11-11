@@ -58,5 +58,17 @@ Questions about installing or using the package are welcome as issues too; say i
    what they did in the pull request description.
 7. **Review.** Every pull request is reviewed by a human maintainer before it is merged.
 
-Please match the style of the surrounding code (names, comments and the 120-character line length), and keep large
-data and model files out of the repository.
+Please match the style of the surrounding code (names and comments), and keep large data and model files out of
+the repository.
+
+**Code format.** The Python code is formatted with [black](https://black.readthedocs.io), line length 100, with the
+version pinned in `tools/ci/requirements-format.txt` (settings in `pyproject.toml`, `[tool.black]`). Before you
+commit, run:
+
+```bash
+pip install -r tools/ci/requirements-format.txt
+black .
+```
+
+The CI job "Format" runs `black --check .` and fails if any file would change. One file is excluded and never
+reformatted: `scripts/gen_analysis_lock.py`, the generator of the historical analysis lock.

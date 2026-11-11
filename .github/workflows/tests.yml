@@ -154,3 +154,21 @@ jobs:
         run: python -m pip install -r docs/requirements.txt
       - name: Build the site
         run: python -m sphinx -W --keep-going -b html docs "$RUNNER_TEMP/html"
+
+  format:
+    # The code format: black, pinned in tools/ci/requirements-format.txt, with the settings in pyproject.toml
+    # [tool.black] (line length 100; scripts/gen_analysis_lock.py is excluded there). It changes no file: --check
+    # fails the job if any file would be reformatted, and --diff shows what would change. The package is not installed.
+    name: Format (black --check)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the pinned black
+        run: python -m pip install -r tools/ci/requirements-format.txt
+      - name: Check the format of every Python file
+        run: python -m black --check --diff .
