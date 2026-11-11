@@ -70,8 +70,10 @@ pip install -r tools/ci/requirements-format.txt
 black .
 ```
 
-The CI job "Format" runs `black --check .` and fails if any file would change. One file is excluded and never
-reformatted: `scripts/gen_analysis_lock.py`, the generator of the historical analysis lock.
+The CI job "Format" runs `black --check .` and fails if any file would change. Two files are excluded and never
+reformatted: `scripts/gen_analysis_lock.py`, the generator of the historical analysis lock, and
+`hcd_analysis/priya_p1d.py`, because a release record cites one of its lines by number (the MF record's mean-flux
+convention) and the loader refuses a record whose citation differs.
 
 **What a reformat changes.** A format-only commit changes source text, not behaviour. Two provenance mechanisms
 follow the source text, so they see a reformat:

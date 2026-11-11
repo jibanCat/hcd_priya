@@ -7,7 +7,6 @@ flux_vector training data at matching (sim, z, alpha_slope).
 Requires the emu-3.9 conda env with gsl loaded (libgsl.so.25 is dlopen'd by
 fake_spectra._spectra_priv).
 """
-
 from __future__ import annotations
 from types import SimpleNamespace
 from typing import Optional, Tuple
@@ -15,23 +14,18 @@ from typing import Optional, Tuple
 import numpy as np
 
 from fake_spectra.fluxstatistics import (
-    flux_power,
-    obs_mean_tau,
-    _powerspectrum,
-    _flux_power_bins,
+    flux_power, obs_mean_tau, _powerspectrum, _flux_power_bins,
 )
 from fake_spectra.spectra import Spectra
 
 from hcd_analysis.tau0_rescale import freeze_core_rescale
-
 # Unbound method, reads only `self.nbins`. Calling via a SimpleNamespace
 # stand-in avoids constructing a full Spectra (which needs a snapshot dir).
 _filter_single_tau_complex = Spectra._filter_single_tau_complex
 
 
-def _apply_priya_filter(
-    tau: np.ndarray, tau_thresh: float = 1.0e6, thresh2: float = 0.25
-) -> np.ndarray:
+def _apply_priya_filter(tau: np.ndarray, tau_thresh: float = 1.0e6,
+                        thresh2: float = 0.25) -> np.ndarray:
     """In-place: apply fake_spectra._filter_single_tau_complex to every
     sightline with `max(tau) > tau_thresh`. Returns the same array."""
     tau_eff = -np.log(np.mean(np.exp(-tau)))
@@ -40,19 +34,15 @@ def _apply_priya_filter(
         return tau
     self_stub = SimpleNamespace(nbins=tau.shape[1])
     for i in ii:
-        tau[i], _ = _filter_single_tau_complex(
-            self_stub, tau[i], tau_eff, tau_thresh=tau_thresh, thresh2=thresh2
-        )
+        tau[i], _ = _filter_single_tau_complex(self_stub, tau[i], tau_eff,
+                                               tau_thresh=tau_thresh, thresh2=thresh2)
     return tau
 
 
-def compute_tier_p_p1d(
-    tau: np.ndarray,
-    vmax: float,
-    alpha_slope: float,
-    z: float,
-    tau_thresh: float = 1.0e6,
-) -> Tuple[np.ndarray, np.ndarray, float, float]:
+def compute_tier_p_p1d(tau: np.ndarray, vmax: float,
+                       alpha_slope: float, z: float,
+                       tau_thresh: float = 1.0e6,
+                       ) -> Tuple[np.ndarray, np.ndarray, float, float]:
     """PRIYA-compatible total P1D over all sightlines, after filter.
 
     GOLD REFERENCE — do NOT delete. The production cache builder
@@ -74,12 +64,12 @@ def compute_tier_p_p1d(
     """
     target_F = float(np.exp(-alpha_slope * obs_mean_tau(z)))
     _apply_priya_filter(tau, tau_thresh=tau_thresh)
-    kf, P = flux_power(tau, vmax, spec_res=0.0, mean_flux_desired=target_F, window=False)
+    kf, P = flux_power(tau, vmax, spec_res=0.0,
+                       mean_flux_desired=target_F, window=False)
     # scale (the actual tau-multiplier) is solved inside flux_power; we can
     # recover it by calling mean_flux explicitly (cheap — Newton iteration on
     # the same tau).
     from fake_spectra.fluxstatistics import mean_flux
-
     scale = float(mean_flux(tau, target_F))
     return kf[1:], P[1:], target_F, scale
 
@@ -96,13 +86,12 @@ def compute_tier_p_p1d(
 #   14     : DLA tail >= 21.0
 # 17.2/19.0/20.3 are exact edges -> LLS/subDLA/DLA reconstruct exactly. P1D is
 # sightline-additive, so any class is a count-weighted sum (merge_fine_to_classes).
-_LLS_EDGES = np.linspace(17.2, 19.0, 8)  # 7 bins (~0.257 dex)
-_SUBDLA_EDGES = np.linspace(19.0, 20.3, 6)  # 5 bins (0.26 dex)
-_DLA_EDGES = np.array([20.3, 21.0])  # DLA edge bin; >=21.0 overflow
+_LLS_EDGES = np.linspace(17.2, 19.0, 8)        # 7 bins (~0.257 dex)
+_SUBDLA_EDGES = np.linspace(19.0, 20.3, 6)     # 5 bins (0.26 dex)
+_DLA_EDGES = np.array([20.3, 21.0])            # DLA edge bin; >=21.0 overflow
 FINE_NHI_EDGES = np.round(
-    np.unique(np.concatenate([_LLS_EDGES, _SUBDLA_EDGES, _DLA_EDGES])), 4
-)  # 14 edges
-N_TIER_C_BINS = len(FINE_NHI_EDGES) + 1  # 15
+    np.unique(np.concatenate([_LLS_EDGES, _SUBDLA_EDGES, _DLA_EDGES])), 4)  # 14 edges
+N_TIER_C_BINS = len(FINE_NHI_EDGES) + 1                                     # 15
 # Self-shielding freeze threshold for the UNFILTERED Tier-C path. NOT the PRIYA
 # 1e6 trough-fill threshold (that is the *filtered* tier). Default value to be
 # pinned by scripts/calibrate_tau_freeze.py; override per-call. Spec 2026-05-29 §2a.
@@ -123,24 +112,19 @@ def bin_sightlines_by_nhi(catalog, n_skewers: int) -> np.ndarray:
     sightline's highest-log_NHI absorber. 0 = clean (no absorber)."""
     maxnhi = np.full(n_skewers, -np.inf)
     for ab in catalog.absorbers:
-        if (
-            ab.skewer_idx < n_skewers
-            and ab.log_NHI >= FINE_NHI_EDGES[0]
-            and ab.log_NHI > maxnhi[ab.skewer_idx]
-        ):
+        if (ab.skewer_idx < n_skewers and ab.log_NHI >= FINE_NHI_EDGES[0]
+                and ab.log_NHI > maxnhi[ab.skewer_idx]):
             maxnhi[ab.skewer_idx] = ab.log_NHI
-    cls = np.zeros(n_skewers, dtype=np.int64)  # clean = 0
+    cls = np.zeros(n_skewers, dtype=np.int64)         # clean = 0
     finite = np.isfinite(maxnhi)
-    d = np.digitize(
-        maxnhi[finite], FINE_NHI_EDGES
-    )  # digitize 0..14; clipped to 1..14 below (0 only for sub-17.2)
+    d = np.digitize(maxnhi[finite], FINE_NHI_EDGES)   # digitize 0..14; clipped to 1..14 below (0 only for sub-17.2)
     cls[finite] = np.clip(d, 1, len(FINE_NHI_EDGES))  # <17.2->1; >=21.0->14
     return cls
 
 
-def _per_class_p1d_at_scale(
-    tau_class: np.ndarray, vmax: float, scale: float, target_F: float, tau_freeze: float = np.inf
-):
+def _per_class_p1d_at_scale(tau_class: np.ndarray, vmax: float,
+                             scale: float, target_F: float,
+                             tau_freeze: float = np.inf):
     """Mirror fake_spectra.fluxstatistics.flux_power but with predetermined
     (scale, target_F) — used by Tier C so all four classes share Tier P's
     mean-flux normalisation. `tau_freeze`: pixels with native tau > tau_freeze
@@ -166,16 +150,13 @@ def _per_class_p1d_at_scale(
     return kf[1:], mfp[1:]
 
 
-def compute_tier_c_p1d(
-    tau: np.ndarray,
-    vmax: float,
-    alpha_slope: float,
-    z: float,
-    catalog,
-    external_scale: Optional[float] = None,
-    external_target_F: Optional[float] = None,
-    tau_freeze: float = np.inf,
-):
+def compute_tier_c_p1d(tau: np.ndarray, vmax: float,
+                       alpha_slope: float, z: float,
+                       catalog,
+                       external_scale: Optional[float] = None,
+                       external_target_F: Optional[float] = None,
+                       tau_freeze: float = np.inf,
+                       ):
     """Per-fine-N_HI-bin P1Ds on the GIVEN tau, sharing Tier P's
     (scale, target_F) when given. Pass UNFILTERED tau for the HCD add-back tier,
     or PRIYA's whole-array tau=1e6-filtered tau for the exact-reconstruction tier
@@ -190,7 +171,6 @@ def compute_tier_c_p1d(
         target_F, scale
     """
     from fake_spectra.fluxstatistics import mean_flux
-
     if external_target_F is None:
         target_F = float(np.exp(-alpha_slope * obs_mean_tau(z)))
     else:
@@ -201,8 +181,9 @@ def compute_tier_c_p1d(
     P_by_bin, n_by_bin = [], np.zeros(N_TIER_C_BINS, dtype=np.int64)
     kf_ref = None
     for c in range(N_TIER_C_BINS):
-        mask = cls == c
-        kf, P = _per_class_p1d_at_scale(tau[mask], vmax, scale, target_F, tau_freeze=tau_freeze)
+        mask = (cls == c)
+        kf, P = _per_class_p1d_at_scale(tau[mask], vmax, scale, target_F,
+                                        tau_freeze=tau_freeze)
         if kf_ref is None:
             kf_ref = kf
         P_by_bin.append(P)
