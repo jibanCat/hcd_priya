@@ -125,17 +125,30 @@ NS_RIDGE = 0.995
 
 
 class PredictorInputError(ValueError):
-    """An input the checked predictor refuses (shape, type, non-finite, off the grid, outside the native k span,
-    or an HCD amplitude that is not a physical class fraction)."""
+    """An input that the predictor refuses.
+
+    Raised for an input of the wrong type or shape, a value that is not finite, a redshift that is
+    not a PRIYA snapshot, a ``k`` outside the native mode span, or an HCD amplitude that is not a
+    physical fraction. The message names the input and the reason. It is a ``ValueError``.
+    """
 
 
 class MFUnavailableError(PredictorInputError):
-    """The LF+MF prediction was asked for, but the loaded bundle carries no MF record."""
+    """An LF+MF prediction was asked for, but no MF record is loaded.
+
+    The MF record holds the multi-fidelity (MF) correction from the low-fidelity (LF) simulations to
+    high resolution. ``load_release`` loads it, and so does ``load_bundle`` with ``mf_dir`` and
+    ``mf_record_sha256``. The message says how to load it.
+    """
 
 
 class MFRangeError(PredictorInputError):
-    """The LF+MF prediction was asked for below max(the lowest redshift of the MF record's tables, the record's
-    ``validated_z_min``): the MF is refused there, never extrapolated or clamped (ask for ``fidelity="LF"``).
+    """An LF+MF prediction was asked for below the lowest redshift the MF record covers.
+
+    The lower edge is the larger of two values: the lowest redshift in the record's tables, and the
+    record's ``validated_z_min`` (2.2 by default). Below it the correction is refused. It is never
+    extrapolated or held constant there. Ask for ``fidelity="LF"`` instead. The message gives the
+    edge and the redshifts you asked for.
     """
 
 
@@ -182,7 +195,33 @@ def _array(name, v, ndim=None):
 
 
 def params_vector(params):
-    """The nine physical parameters, in ``PARAM_NAMES`` order, from a dict holding exactly those names."""
+    """Return the nine PRIYA parameters as an array in ``PARAM_NAMES`` order.
+
+    Parameters
+    ----------
+    params : dict
+        Exactly the nine names in ``PARAM_NAMES``, each with a finite real value.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape (9,), float64, in ``PARAM_NAMES`` order.
+
+    Raises
+    ------
+    PredictorInputError
+        If ``params`` is not a dict, lacks a name or has an extra one (the message lists both), or
+        holds a value that is not a finite real number.
+
+    Examples
+    --------
+    The centre of the parameter box (synthetic values):
+
+    >>> import hcd_analysis.predictor as hp
+    >>> params = {n: 0.5 * (lo + hi) for n, (lo, hi) in zip(hp.PARAM_NAMES, hp.PARAM_LIMITS)}
+    >>> hp.params_vector(params).shape
+    (9,)
+    """
     if not isinstance(params, dict):
         raise PredictorInputError(f"params must be a dict of {PARAM_NAMES}")
     keys = set(params)
@@ -194,7 +233,36 @@ def params_vector(params):
 
 
 def snapshot_z(z):
-    """``z`` matched to the PRIYA snapshot grid (to ``Z_TOL``); returns the grid value."""
+    """Match a redshift to the PRIYA snapshot grid.
+
+    The predictor works only at the snapshot redshifts 2.0, 2.2, ..., 5.4 (``Z_GRID``). A value
+    within ``Z_TOL`` (1e-9) of a grid point is accepted.
+
+    Parameters
+    ----------
+    z : float
+        The redshift.
+
+    Returns
+    -------
+    float
+        The grid value.
+
+    Raises
+    ------
+    PredictorInputError
+        If ``z`` is not a finite real number, or is not within ``Z_TOL`` of a snapshot redshift.
+
+    Examples
+    --------
+    >>> import hcd_analysis.predictor as hp
+    >>> hp.snapshot_z(3.0000000001)
+    3.0
+    >>> hp.snapshot_z(3.1)  # doctest: +ELLIPSIS
+    Traceback (most recent call last):
+        ...
+    hcd_analysis.predictor.PredictorInputError: z = 3.1 is not a PRIYA snapshot redshift ...
+    """
     x = _scalar("z", z)
     hit = [g for g in Z_GRID if abs(x - g) <= Z_TOL]
     if not hit:
@@ -205,8 +273,43 @@ def snapshot_z(z):
 
 
 def tau_eff_priya(z, tau0_amp, dtau0, *, z_pivot=TAU0_PIVOT_Z):
-    """PRIYA's mean-flux model as the predictor's input: tau_eff(z) = tau0_amp ((1 + z) / (1 + z_pivot))^dtau0
-    tau_Kim07(z), the optical depth of the PRIYA-filtered forest (mean_flux_model.tau0_alpha_priya times kim_tau0).
+    """Convert PRIYA's mean-flux parameters to the predictor's input ``tau_eff``.
+
+    ``tau_eff`` is the effective optical depth of the PRIYA-filtered forest: minus the natural log
+    of its mean transmitted flux. PRIYA's model of it is::
+
+        tau_eff(z) = tau0_amp * ((1 + z) / (1 + z_pivot))**dtau0 * tau_Kim(z)
+
+    where ``tau_Kim`` is the mean-flux fit of Kim et al. (2007), ``mean_flux_model.kim_tau0``.
+
+    Parameters
+    ----------
+    z : float
+        The redshift.
+    tau0_amp : float
+        The amplitude: a multiplier of ``tau_Kim``.
+    dtau0 : float
+        The slope of the redshift power law.
+    z_pivot : float, optional
+        The pivot redshift. The default is ``mean_flux_model.TAU0_PIVOT_Z`` (3.0).
+
+    Returns
+    -------
+    float
+        ``tau_eff`` at ``z`` (dimensionless).
+
+    Raises
+    ------
+    PredictorInputError
+        If an input is not a finite real number.
+
+    Examples
+    --------
+    Doubling ``tau0_amp`` doubles ``tau_eff``:
+
+    >>> import hcd_analysis.predictor as hp
+    >>> round(hp.tau_eff_priya(3.0, 2.0, 0.0) / hp.tau_eff_priya(3.0, 1.0, 0.0), 12)
+    2.0
     """
     zz = _scalar("z", z)
     return float(
@@ -236,8 +339,42 @@ def _taus(zs, tau_eff, tau0_amp, dtau0):
 
 
 def check_amplitudes(A, zs=None):
-    """Physical validity of HCD amplitudes A (..., 3) [LLS, subDLA, DLA]: finite, every A_c >= 0, and the clean-class
-    fraction 1 - sum_c A_c >= 0. Raises PredictorInputError naming the class (and the redshift); returns A.
+    """Check that HCD amplitudes are physical sightline fractions.
+
+    An HCD amplitude A_c is the effective fraction of sightlines in class c, where c is LLS, subDLA
+    or DLA (high-column-density absorbers, from the lowest column density to the highest). Each
+    A_c must be zero or more. Together they must leave a clean fraction, 1 - sum_c A_c, of zero or
+    more. No other condition is imposed: there is no prior.
+
+    Parameters
+    ----------
+    A : array_like
+        Shape (..., 3). The last axis is [A_LLS, A_subDLA, A_DLA].
+    zs : sequence of float, optional
+        The redshift of each row, used only to name the redshift in an error message.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``A`` as float64.
+
+    Raises
+    ------
+    PredictorInputError
+        If ``A`` is not finite, its last axis does not have length 3, an A_c is negative, or the
+        clean fraction is negative. The message names the class and, with ``zs``, the redshift.
+
+    Examples
+    --------
+    Synthetic amplitudes:
+
+    >>> import hcd_analysis.predictor as hp
+    >>> hp.check_amplitudes([0.01, 0.002, 0.001]).shape
+    (3,)
+    >>> hp.check_amplitudes([0.6, 0.3, 0.2])  # doctest: +ELLIPSIS
+    Traceback (most recent call last):
+        ...
+    hcd_analysis.predictor.PredictorInputError: the clean-class fraction 1 - sum_c A_c = ...
     """
     A = _array("A", A)
     if A.shape[-1:] != (3,):
@@ -286,8 +423,53 @@ def _frozen(a):
 
 @dataclasses.dataclass(frozen=True)
 class Prediction:
-    """A prediction at one redshift (``stacked`` False: arrays as in the module docstring) or at several (``stacked``
-    True: every array gains a leading redshift axis, ``z`` and ``tau_eff`` are (n_z,))."""
+    """One prediction, returned by ``predict`` (one redshift) or ``predict_many`` (several).
+
+    Every array is a read-only float64 numpy array. K is the number of wavenumbers. On a stack
+    (``stacked`` True), every array gains a leading redshift axis of length n_z.
+
+    Attributes
+    ----------
+    z : float or numpy.ndarray
+        The snapshot redshift, or the redshifts of a stack, shape (n_z,).
+    k : numpy.ndarray
+        The wavenumbers in s/km, shape (K,): the simulation's own modes, or the ``k`` asked for.
+    P_class : numpy.ndarray
+        Shape (4, K). The one-dimensional flux power spectrum (P1D, in km/s) of each class, in the
+        order clean, LLS, subDLA, DLA. It is the PRIYA-filtered spectrum (pixels with optical depth
+        above 1e6 are filled), averaged over the ensemble members.
+    template : numpy.ndarray
+        Shape (3, K): P_c / P_clean - 1 for LLS, subDLA and DLA.
+    w_c : numpy.ndarray
+        Shape (3,). The model's estimate of each HCD class's sightline fraction at these
+        parameters and redshift, from ``dndx`` through the w_c map of the bundle.
+    dndx : numpy.ndarray
+        Shape (3,). The predicted incidence dN/dX of each HCD class (absorbers per unit absorption
+        distance X), averaged over the members.
+    member_std : numpy.ndarray or None
+        Shape (4, K). The standard deviation of ``P_class`` over the members. It shows how much the
+        members disagree. It is not a calibrated emulator error and not a covariance. None for a
+        bundle with one member.
+    tau_eff : float or numpy.ndarray
+        The mean-flux input used, one value per redshift.
+    params : dict
+        The nine parameters used.
+    flags : dict
+        Warnings about this prediction, each True when it applies: for example
+        ``outside_training_box``, ``ns_ridge`` or ``mf_z_above_validated``. ``predict`` lists them.
+    labels : dict
+        Plain-text statements of what the numbers are and are not.
+    provenance : dict
+        Which model made the prediction: the bundle's manifest sha256, its lineage record (the
+        record of how the bundle was made) and, with an MF record, the record's identity.
+    stacked : bool
+        False for one redshift, True for a stack.
+
+    Notes
+    -----
+    ``add_hcd`` returns plain arrays without these flags. Keep the ``Prediction``, or its
+    ``flags`` and ``provenance``, with any number you derive from it.
+    """
 
     z: object
     k: np.ndarray
@@ -644,8 +826,72 @@ class _PredictorBase:
 
     # ------------------------------------------------------------------ predictions
     def predict(self, params, z, *, tau_eff=None, tau0_amp=None, dtau0=None, k=None, fidelity=None):
-        """The prediction at one snapshot redshift (module docstring). ``fidelity``: None (the bundle's own: LF+MF
-        when an MF record is loaded, LF otherwise), "LF" or "LF+MF" (refused without an MF record).
+        """Predict the per-class P1D at one snapshot redshift.
+
+        Parameters
+        ----------
+        params : dict
+            The nine PRIYA parameters by name (``PARAM_NAMES``): ``ns`` and ``Ap``, the slope and
+            amplitude of the primordial power spectrum at the pivot 0.78 h/Mpc; ``herei`` and
+            ``heref``, the redshifts at which helium reionization starts and ends; ``alphaq``, the
+            quasar spectral index that sets the heating of helium reionization; ``hub``, the
+            dimensionless Hubble parameter h; ``omegamh2``, Omega_m h^2; ``hireionz``, the
+            redshift of hydrogen reionization; ``bhfeedback``, the black-hole feedback strength.
+        z : float
+            A PRIYA snapshot redshift: 2.0, 2.2, ..., 5.4.
+        tau_eff : float, optional
+            The effective optical depth of the PRIYA-filtered forest (see ``tau_eff_priya``). Give
+            either ``tau_eff``, or both ``tau0_amp`` and ``dtau0``.
+        tau0_amp, dtau0 : float, optional
+            PRIYA's mean-flux parameters, converted with ``tau_eff_priya``.
+        k : array_like, optional
+            Wavenumbers in s/km, shape (K',), inside the native mode span at this redshift. The
+            prediction is interpolated linearly between modes. None (the default) returns the native
+            modes, which depend on ``hub`` and ``omegamh2``.
+        fidelity : {None, "LF", "LF+MF"}, optional
+            "LF" gives the low-fidelity prediction; "LF+MF" applies the MF correction. None (the
+            default) gives "LF+MF" when an MF record is loaded, and "LF" otherwise.
+
+        Returns
+        -------
+        Prediction
+            With ``stacked`` False; ``P_class`` has shape (4, K).
+
+        Raises
+        ------
+        PredictorInputError
+            If an input has the wrong type, shape or name, or is not finite; if ``z`` is not a
+            snapshot redshift; if both or neither mean-flux forms are given, or ``tau_eff`` is not
+            positive; or if ``k`` lies outside the native mode span (the message gives the span in
+            s/km).
+        MFUnavailableError
+            If ``fidelity`` is "LF+MF" and no MF record is loaded.
+        MFRangeError
+            If an LF+MF prediction is asked for below the lowest redshift of the MF record. Ask for
+            ``fidelity="LF"`` there.
+        TypeError
+            If an input is a JAX tracer. This method takes ordinary values; to differentiate, use
+            ``hcd_analysis.emulator.predict``.
+
+        Notes
+        -----
+        Values outside the training box are predicted, not refused, so read ``flags`` before using
+        the numbers:
+
+        - ``outside_training_box``: a parameter lies outside the box the model was trained on;
+          ``params_outside_training_box`` names them. ``outside_sampling_box``: inside the training
+          box but outside the original PRIYA design box.
+        - ``ns_ridge``: ``ns`` is above 0.995, where the PRIYA design has few simulations.
+        - ``mean_flux_off_ladder``: ``tau_eff`` is outside the mean-flux range of the training data.
+        - ``z_downweighted`` and ``k_downweighted``: ``z`` is outside 2.2-4.6, or some ``k`` is
+          below 1e-3 s/km, where training gave less weight.
+        - ``w_c_xbar_extrapolated``: the w_c map is used outside the redshifts it was fitted on.
+        - With an MF record: ``mf_applied``; ``mf_z_clamped`` and ``mf_tau0_clamped``, the
+          correction is held constant beyond its tables; ``mf_z_above_validated``, an LF+MF
+          prediction above z 4.6, outside the frozen grouped-validation domain (z 2.2-4.6). The
+          values there are served unchanged.
+
+        The first call for an input shape compiles the model with JAX; later calls reuse it.
         """
         zg = snapshot_z(z)
         p = self._many(
@@ -663,8 +909,38 @@ class _PredictorBase:
     def predict_many(
         self, params, z, *, tau_eff=None, tau0_amp=None, dtau0=None, k=None, fidelity=None
     ):
-        """The stacked prediction at several snapshot redshifts (one parameter set; ``tau_eff`` a scalar or one value
-        per z, or PRIYA's global ``tau0_amp``, ``dtau0``; ``k`` None, one array for every z, or (n_z, K')).
+        """Predict the per-class P1D at several snapshot redshifts, for one parameter set.
+
+        Parameters
+        ----------
+        params : dict
+            The nine PRIYA parameters by name, as in ``predict``.
+        z : sequence of float
+            Distinct PRIYA snapshot redshifts, shape (n_z,).
+        tau_eff : float or array_like, optional
+            One value for every redshift, or one per redshift, shape (n_z,). Give either
+            ``tau_eff``, or both ``tau0_amp`` and ``dtau0``.
+        tau0_amp, dtau0 : float, optional
+            PRIYA's mean-flux parameters, the same at every redshift (``tau_eff_priya``).
+        k : array_like, optional
+            Wavenumbers in s/km: one array (K',) for every redshift, or one row per redshift,
+            shape (n_z, K'). None (the default) returns the native modes.
+        fidelity : {None, "LF", "LF+MF"}, optional
+            As in ``predict``.
+
+        Returns
+        -------
+        Prediction
+            With ``stacked`` True; ``P_class`` has shape (n_z, 4, K).
+
+        Raises
+        ------
+        PredictorInputError
+            As in ``predict``; also if ``z`` repeats a redshift, or if ``tau_eff`` or ``k`` has a
+            different number of rows than ``z``.
+        MFUnavailableError, MFRangeError
+            As in ``predict``. ``MFRangeError`` is raised if any redshift is below the MF record's
+            lowest redshift.
         """
         zs = [snapshot_z(v) for v in np.atleast_1d(_array("z", z, ndim=(0, 1)))]
         if len(set(zs)) != len(zs):
@@ -783,14 +1059,31 @@ class _PredictorBase:
 
 
 class Bundle(_PredictorBase):
-    """A loaded production release bundle (``load_bundle``). It takes only a ``safe_h5.ReleaseBundle`` of kind
-    "release" that is release-verified and anchored, with the release-verified ``MemberMetas`` of the same manifest,
-    and it RECOMPUTES the eligibility from the bundle's own block, member metas and w_c map
-    (``safe_h5.lineage_block_reasons``, ``member_reasons``: the ties and the production rule,
-    ``wc_map_production_reasons``) and checks that the map is the one the block names, instead of trusting stored
-    flags; a research marking is refused. A hand-built object therefore cannot pass as production by its flags alone.
-    The network arrays and the normaliser of a hand-built object are not verified (this is not a defence against code
-    that forges the objects or the metadata itself)."""
+    """A production model, ready to predict. ``load_bundle`` and ``load_release`` return it.
+
+    A bundle holds an ensemble of neural networks (the members), trained on the PRIYA
+    low-fidelity simulations, and a map from their predicted HCD incidence to sightline fractions
+    (the w_c map). With an MF record, it also applies the multi-fidelity correction to high
+    resolution.
+
+    Use ``predict`` for one redshift and ``predict_many`` for several; both return a
+    ``Prediction``. ``provenance`` and ``labels()`` describe the loaded model; ``manifest_sha256``
+    and ``n_members`` identify it.
+
+    Do not build a ``Bundle`` yourself: load it with ``load_bundle`` or ``load_release``. The
+    constructor takes only a bundle loaded by ``safe_h5.load_release`` and checked against its
+    published digest. It recomputes, from the bundle's own records, whether the bundle is a
+    production bundle, so an object whose stored flags were set by hand does not pass. It does not
+    check the network arrays of a hand-built object.
+
+    Raises
+    ------
+    RuntimeError
+        If JAX float64 is off. Importing ``hcd_analysis.predictor`` turns it on.
+    SafeFormatError
+        If the object is not such a bundle, carries a research marking, or fails the production
+        checks. The message lists the reasons.
+    """
 
     def __init__(self, release_bundle, mf=None):
         if not jax.config.jax_enable_x64:
@@ -853,11 +1146,32 @@ class Bundle(_PredictorBase):
 
 
 class ResearchPredictor(_PredictorBase):
-    """A loaded RESEARCH bundle (``load_research_bundle``): the same forward as ``Bundle``, on a
-    ``safe_h5.ResearchBundle`` only. It is not a ``Bundle``. Every prediction is flagged ``research_model`` True and
-    carries the declared split (``research_split``) and the recorded content-check outcomes
-    (``research_content_checks``); the labels say it is a research model. ``research``, ``purpose``,
-    ``load_purpose`` and ``split`` describe it."""
+    """A research model, ready to predict. ``load_research_bundle`` returns it.
+
+    A research model is one made for a study: for example one fold of a cross-validation, trained
+    with some simulations held out. It is never a production model and never a ``Bundle``. It
+    predicts as a ``Bundle`` does, but every ``Prediction`` it returns has
+    ``flags["research_model"]`` True, the declared split in ``flags["research_split"]``, and a
+    ``labels["model"]`` line saying it is a research model.
+
+    Attributes
+    ----------
+    research : dict
+        The bundle's research record.
+    purpose : str
+        The purpose the bundle declares.
+    load_purpose : str
+        The purpose given when it was loaded.
+    split : dict
+        A summary of the declared split, including the held-out simulations.
+
+    Raises
+    ------
+    RuntimeError
+        If JAX float64 is off. Importing ``hcd_analysis.predictor`` turns it on.
+    SafeFormatError
+        If the object is not a research bundle loaded by ``safe_h5.load_research``.
+    """
 
     def __init__(self, research_bundle, mf=None):
         if not jax.config.jax_enable_x64:
@@ -942,12 +1256,51 @@ def _load_mf(rb, mf_dir, mf_record_sha256, kind):
 
 
 def load_bundle(bundle_dir, expected_manifest_sha256, *, mf_dir=None, mf_record_sha256=None):
-    """Load an approved release bundle (``hcd_priya.h5/2``) anchored on its published manifest sha256; ``None``, any
-    bundle whose clean lineage cannot be established, a research bundle and any member that is not a production
-    member (trained on every simulation of the cache) are refused (safe_h5.load_release). With ``mf_dir`` and
-    ``mf_record_sha256`` (the MF record's published sha256) the release MF record is loaded too
-    (``mf_release.load_mf_record``) and bound to this bundle: a record of another backbone, cache or k grid, a
-    historical or fold record, and one of the two arguments without the other are refused. Returns a ``Bundle``.
+    """Load a production model bundle, checked against its published digest.
+
+    A bundle is a directory in the release format ``hcd_priya.h5/2``: the member networks, the
+    w_c map and ``manifest.json``. The sha256 of ``manifest.json`` is published with the release.
+    The load stops unless the directory matches it.
+
+    Parameters
+    ----------
+    bundle_dir : str or os.PathLike
+        The bundle directory.
+    expected_manifest_sha256 : str
+        The published sha256 of ``manifest.json``: 64 lowercase hex digits. None is refused.
+    mf_dir : str or os.PathLike, optional
+        The directory of an MF record to apply. Give it together with ``mf_record_sha256``.
+    mf_record_sha256 : str, optional
+        The published sha256 of that MF record.
+
+    Returns
+    -------
+    Bundle
+
+    Raises
+    ------
+    SafeFormatError
+        If the digest is None or malformed; if the directory does not match the manifest, or a file
+        fails a format check; if the bundle's records do not show a clean lineage (the absorber
+        catalogues, the training cache, and members trained on that cache at one committed code
+        version); if a member is not a production member (trained on every simulation of the
+        cache); or if it is a research bundle (use ``load_research_bundle``). The message lists the
+        reasons.
+    MFRecordError
+        If only one of ``mf_dir`` and ``mf_record_sha256`` is given; if the record does not match
+        its digest; if it belongs to another bundle, training cache or k grid; or if it is a
+        historical or a fold record.
+
+    Notes
+    -----
+    A typical call, with placeholder path and digest::
+
+        import hcd_analysis.predictor as hp
+        emu = hp.load_bundle("path/to/bundle", "<published manifest sha256>")
+        pred = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
+
+    For a whole release (the bundle and its MF record), use ``load_release``. A bundle loaded
+    alone is the low-fidelity model: ``labels["mf_correction"]`` says so.
     """
     if expected_manifest_sha256 is None:
         raise _H.SafeFormatError(
@@ -959,12 +1312,43 @@ def load_bundle(bundle_dir, expected_manifest_sha256, *, mf_dir=None, mf_record_
 
 
 def load_release(release_dir, expected_release_sha256):
-    """Load an LF+MF release through its release manifest (``release.json``, format ``hcd_priya.release/1``;
-    ``emulator.release_manifest``) anchored on its ONE published sha256: the manifest names the backbone bundle and the
-    MF record with their digests, and both load through ``load_bundle(..., mf_dir=..., mf_record_sha256=...)``, which
-    refuses any mismatch (the record pins the backbone's manifest). A manifest without an MF part, another format, an
-    unknown key, a directory that is a path or a symlink, and a wrong digest are refused; an LF-only bundle keeps
-    loading with ``load_bundle``. Returns a ``Bundle`` whose ``provenance["release"]`` names the release.
+    """Load a whole release, the backbone bundle and its MF record, from one published digest.
+
+    A release directory holds ``release.json`` (format ``hcd_priya.release/1``) and the two parts
+    it names with their sha256: the backbone bundle and the MF record. The one published sha256,
+    that of ``release.json``, anchors the whole release.
+
+    Parameters
+    ----------
+    release_dir : str or os.PathLike
+        The release directory, the one that holds ``release.json``.
+    expected_release_sha256 : str
+        The published sha256 of ``release.json``: 64 lowercase hex digits.
+
+    Returns
+    -------
+    Bundle
+        With the MF record applied. ``provenance["release"]`` names the release.
+
+    Raises
+    ------
+    ReleaseManifestError
+        If the digest is malformed or differs from that of ``release.json``; if the directory is
+        not a release directory or is a symbolic link; or if the manifest is malformed (another
+        format, an unknown key, or no MF part).
+    SafeFormatError, MFRecordError
+        As in ``load_bundle``, if the backbone or the MF record fails its checks.
+
+    Notes
+    -----
+    A typical call, with placeholder path and digest::
+
+        import hcd_analysis.predictor as hp
+        emu = hp.load_release("path/to/release", "<published release sha256>")
+        pred = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)   # LF+MF by default
+        lf = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0, fidelity="LF")
+
+    A bundle without an MF record loads with ``load_bundle``.
     """
     from .emulator import release_manifest as _RM
 
@@ -986,10 +1370,41 @@ def load_release(release_dir, expected_release_sha256):
 def load_research_bundle(
     bundle_dir, expected_manifest_sha256, *, purpose, mf_dir=None, mf_record_sha256=None
 ):
-    """Load a RESEARCH bundle (cross-validation folds, full-simulation research models) anchored on its manifest
-    sha256, with a non-empty ``purpose`` (safe_h5.load_research). With ``mf_dir`` and ``mf_record_sha256`` a FOLD MF
-    record fitted on this backbone is applied (held-out predictions for grouped cross-validation). Returns a
-    ``ResearchPredictor``; a production bundle is refused here."""
+    """Load a research model bundle, checked against its manifest digest.
+
+    A research bundle holds models made for a study, such as cross-validation folds. It is never
+    loaded as a production model. You must say why you load it: ``purpose`` is logged and
+    recorded in the provenance of every prediction.
+
+    Parameters
+    ----------
+    bundle_dir : str or os.PathLike
+        The bundle directory.
+    expected_manifest_sha256 : str
+        The sha256 of its ``manifest.json``: 64 lowercase hex digits.
+    purpose : str
+        Why this research model is loaded; not empty.
+    mf_dir : str or os.PathLike, optional
+        The directory of a fold MF record fitted on this bundle, for held-out predictions in a
+        grouped cross-validation. Give it together with ``mf_record_sha256``.
+    mf_record_sha256 : str, optional
+        The sha256 of that MF record.
+
+    Returns
+    -------
+    ResearchPredictor
+
+    Raises
+    ------
+    ValueError
+        If ``purpose`` is empty.
+    SafeFormatError
+        If the digest is malformed; if the directory or its records fail a check; or if the bundle
+        is a production bundle (use ``load_bundle``).
+    MFRecordError
+        If only one of ``mf_dir`` and ``mf_record_sha256`` is given; if the record is not a fold
+        record of this bundle; or if its held-out simulations were used to train this bundle.
+    """
     rb = _H.load_research(
         bundle_dir, expected_manifest_sha256=expected_manifest_sha256, purpose=purpose
     )
@@ -1029,10 +1444,53 @@ def heldout_P_filt_at(pred, x, tau0):
 
 
 def add_hcd(pred, A):
-    """P_clean + sum_c A_c (P_c - P_clean) for a ``Prediction``: ``A`` of shape (3,) [A_LLS, A_subDLA, A_DLA] (on a
-    stack: the same amplitudes at every z) or (n_z, 3) on a stack (one per class per redshift). Only physical validity
-    is imposed (``check_amplitudes``: every A_c >= 0, 1 - sum_c A_c >= 0). Returns (K,) or (n_z, K). The subDLA
-    filtered remnant and the DLA damping-wing core are not included (module docstring)."""
+    """Add the HCD classes to the clean P1D, with the given amplitudes.
+
+    Returns P_clean + sum_c A_c (P_c - P_clean), where c runs over LLS, subDLA and DLA, and A_c is
+    the effective sightline fraction of class c. With ``A = pred.w_c`` this is the model's
+    estimate of the full-sample P1D, to the accuracy of the w_c map.
+
+    Parameters
+    ----------
+    pred : Prediction
+        From ``predict`` or ``predict_many``.
+    A : array_like
+        Shape (3,): [A_LLS, A_subDLA, A_DLA]. On a stack, shape (3,) applies the same amplitudes at
+        every redshift, and shape (n_z, 3) gives one row per redshift.
+
+    Returns
+    -------
+    numpy.ndarray
+        The P1D in km/s, shape (K,), or (n_z, K) on a stack. It carries no flags: keep
+        ``pred.flags`` with it.
+
+    Raises
+    ------
+    TypeError
+        If ``pred`` is not a ``Prediction``.
+    PredictorInputError
+        If ``A`` has the wrong shape or is not finite, an A_c is negative, or 1 - sum_c A_c is
+        negative. The message names the class and, on a stack, the redshift.
+
+    Notes
+    -----
+    No prior is applied, only A_c >= 0 and 1 - sum_c A_c >= 0. Two contributions are not
+    included: the power of the subDLA cores that the PRIYA filter removes, and the DLA
+    damping-wing core.
+
+    Examples
+    --------
+    A hand-made ``Prediction`` with synthetic spectra, to show the arithmetic:
+
+    >>> import numpy as np
+    >>> import hcd_analysis.predictor as hp
+    >>> P = np.array([[1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [5.0, 5.0]])  # clean, LLS, subDLA, DLA
+    >>> pred = hp.Prediction(z=3.0, k=np.array([0.01, 0.02]), P_class=P, template=P[1:] / P[0] - 1,
+    ...                      w_c=np.zeros(3), dndx=np.zeros(3), member_std=None, tau_eff=0.5,
+    ...                      params={}, flags={}, labels={}, provenance={}, stacked=False)
+    >>> hp.add_hcd(pred, [0.1, 0.0, 0.0])
+    array([1.1, 1.1])
+    """
     if not isinstance(pred, Prediction):
         raise TypeError("add_hcd takes a Prediction from Bundle.predict or Bundle.predict_many")
     A = _array("A", A)

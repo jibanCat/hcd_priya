@@ -228,10 +228,47 @@ def _verify(p: DataProduct, name: str, path: str, source: str) -> LoadRecord:
 
 
 def resolve_file(product_id: str, name: str, explicit=None) -> LoadRecord:
-    """Find and verify file ``name`` of product ``product_id``; returns its :class:`LoadRecord` (``.path`` is the
-    path to read). ``explicit`` is a path to that file (it takes precedence over the product's variable). Raises
-    :class:`DataProductError` when the file cannot be found or is not the recorded bytes, or the explicit path or the
-    variable is empty, and ``KeyError`` for an unlisted product or file."""
+    """Find one file of a runtime data product and check its bytes.
+
+    The file is found from ``explicit`` if it is given, and otherwise under the product's
+    environment variable (the table in the module docstring). Its sha256 must equal the recorded
+    one before anything reads it. There is no built-in default location.
+
+    Parameters
+    ----------
+    product_id : str
+        A listed product, for example ``"desi_dr1_p1d"``.
+    name : str
+        One of the product's files, for example ``"desi_dr1_p1d.npz"``.
+    explicit : str or os.PathLike, optional
+        The path to the file itself. It takes precedence over the environment variable.
+
+    Returns
+    -------
+    LoadRecord
+        What the load established: the product, its version, the verified sha256, how the file
+        was found, the path (``.path``, the one to read) and its real path.
+
+    Raises
+    ------
+    DataProductError
+        If ``explicit`` is empty; if the variable is unset, or set but empty; if the file is
+        missing; or if its bytes are not the recorded ones. When the file holds another listed
+        product's bytes (for example the SNR>3 DESI file where the SNR>1 file belongs), the
+        message names that product and ``other_product`` holds its id.
+    KeyError
+        If the product or the file is not listed.
+
+    Examples
+    --------
+    An empty path is refused, with what to do instead:
+
+    >>> from hcd_analysis import runtime_data as rd
+    >>> rd.resolve_file("eboss_dr14_p1d", "eboss_dr14_p1d.npz", explicit="")  # doctest: +ELLIPSIS
+    Traceback (most recent call last):
+        ...
+    hcd_analysis.runtime_data.DataProductError: ...the path passed to the loader is empty. ...
+    """
     p = PRODUCTS[product_id]
     p.files[name]  # KeyError for a file the product does not list
     explicit = _explicit(p, explicit, name)
@@ -242,9 +279,32 @@ def resolve_file(product_id: str, name: str, explicit=None) -> LoadRecord:
 
 
 def resolve_dir(product_id: str, explicit=None, names=None):
-    """Find a product of several files and verify ``names`` (default: every listed file); returns
-    ``(directory, records)``, one :class:`LoadRecord` per verified file. ``explicit`` is the directory itself (it
-    takes precedence over the product's variable)."""
+    """Find a runtime data product made of several files, and check their bytes.
+
+    The directory is ``explicit`` if it is given, and otherwise the product's directory under its
+    environment variable. Each file in ``names`` must have its recorded sha256.
+
+    Parameters
+    ----------
+    product_id : str
+        A listed product, for example ``"mf_res_corr"``.
+    explicit : str or os.PathLike, optional
+        The product's directory itself. It takes precedence over the environment variable.
+    names : sequence of str, optional
+        The files to check. The default is every file the product lists.
+
+    Returns
+    -------
+    tuple
+        ``(directory, records)``: the directory, and one ``LoadRecord`` per checked file.
+
+    Raises
+    ------
+    DataProductError
+        As in ``resolve_file``.
+    KeyError
+        If the product or a name is not listed.
+    """
     p = PRODUCTS[product_id]
     directory, source = _where(p, explicit)
     records = []
@@ -268,11 +328,35 @@ SHOW_HANDLER_NAME = "hcd_analysis.runtime_data.show_loads"
 
 
 def show_loads(stream=None) -> logging.Handler:
-    """Print every verified load on ``stream`` (default: stderr), one line per file: the product id, version, digest,
-    how it was found, the path and its real path. For an application's entry point (a script's ``main``): it adds one
-    handler to the ``hcd_analysis.runtime_data`` logger and lets that logger pass INFO records; the root logger is
-    not touched, and the library never calls this itself. Calling it again changes nothing. An application that
-    already routes this logger's INFO records to its own handlers does not need it."""
+    """Print one line for every verified data load on ``stream``.
+
+    Each line gives the product id, its version, the verified sha256, how the file was found,
+    the path and its real path. Call it once at the start of a script's ``main``; the likelihood's
+    main entry points already do. Calling it again changes nothing.
+
+    It adds one handler to the ``hcd_analysis.runtime_data`` logger and lets that logger pass INFO
+    records. The root logger is not touched, and the library never calls this function itself.
+    An application that already routes this logger's INFO records does not need it.
+
+    Parameters
+    ----------
+    stream : file-like, optional
+        Where to print. The default is ``sys.stderr``.
+
+    Returns
+    -------
+    logging.Handler
+        The handler, the same object on every call.
+
+    Examples
+    --------
+    >>> import io, logging
+    >>> from hcd_analysis import runtime_data as rd
+    >>> handler = rd.show_loads(io.StringIO())
+    >>> rd.show_loads() is handler
+    True
+    >>> logging.getLogger("hcd_analysis.runtime_data").removeHandler(handler)  # undo the example
+    """
     for h in _log.handlers:
         if h.name == SHOW_HANDLER_NAME:
             return h

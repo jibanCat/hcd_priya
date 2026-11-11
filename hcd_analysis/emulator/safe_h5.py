@@ -1013,7 +1013,30 @@ def _read_v2(bundle_dir, expected):
 
 
 def verify_manifest(bundle_dir, *, expected_sha256=None, allow_extra=False):
-    """Check an h5/2 bundle's manifest against the directory without loading it. Returns the member prefixes."""
+    """Check a bundle directory against its manifest, without loading the networks.
+
+    Parameters
+    ----------
+    bundle_dir : str or os.PathLike
+        A bundle directory in format ``hcd_priya.h5/2``.
+    expected_sha256 : str, optional
+        The published sha256 of ``manifest.json``. None checks the directory against the manifest
+        without anchoring the manifest itself.
+    allow_extra : bool, optional
+        If True, files that the manifest does not list are allowed. The default refuses them.
+
+    Returns
+    -------
+    list of str
+        The member prefixes the manifest lists.
+
+    Raises
+    ------
+    SafeFormatError
+        If ``manifest.json`` differs from the expected digest; if a listed file is missing, has
+        another size or sha256, or is a symbolic link; or if an unlisted file is present (unless
+        ``allow_extra``).
+    """
     return [
         p
         for p, _, _ in S.read_manifest(
@@ -1266,10 +1289,34 @@ def _load_v2(bundle_dir, *, expected, mode, purpose=None):
 
 
 def load_release(bundle_dir, *, expected_manifest_sha256):
-    """The release load of an h5/2 production bundle, anchored on the published manifest digest (None is refused):
-    the lineage checks of ``load_ensemble`` plus the parsed w_c map and the block. Refuses a research bundle and any
-    member that is not a production member (``member_reasons``). Returns a ``ReleaseBundle`` (``kind`` "release",
-    ``release_verified`` True)."""
+    """Load a production bundle, checked against its published manifest digest.
+
+    This is the release-format loader under ``predictor.load_bundle``; most users call that
+    instead. Every file is read and checked before it is parsed: its sha256, its size, and the
+    structure of each HDF5 file. The bundle's records must show a clean lineage, every member must
+    be a production member (trained on every simulation of the training cache), and the w_c map
+    must be the one the records name.
+
+    Parameters
+    ----------
+    bundle_dir : str or os.PathLike
+        The bundle directory.
+    expected_manifest_sha256 : str
+        The published sha256 of ``manifest.json``: 64 lowercase hex digits, as a ``str``. None is
+        refused.
+
+    Returns
+    -------
+    ReleaseBundle
+        With ``kind`` "release" and ``release_verified`` True.
+
+    Raises
+    ------
+    SafeFormatError
+        If the digest is missing or malformed, a file fails a check, the lineage is not clean, a
+        member is not a production member, or the bundle is a research bundle (use
+        ``load_research``). The message lists the reasons.
+    """
     if not _exact_hex64(expected_manifest_sha256):
         raise SafeFormatError(
             "load_release needs the published manifest sha256 (64 lowercase hex digits, an exact "
@@ -1280,12 +1327,38 @@ def load_release(bundle_dir, *, expected_manifest_sha256):
 
 
 def load_research(bundle_dir, *, expected_manifest_sha256, purpose):
-    """The research load of an h5/2 research bundle (``provenance.research``; a cross-validation fold model, a
-    full-simulation research model): anchored on its manifest digest (64 lowercase hex digits), with ``purpose``
-    (non-empty; logged at INFO, kept as ``load_purpose`` and recorded in every research prediction's provenance).
-    Enforces the lineage, the members' ties, the research marking (its recorded content checks and map rule
-    included) and the member admission (``eligibility.research_member_reasons``: one declared split). Returns a
-    ``ResearchBundle``, never a ``ReleaseBundle``; a production bundle is refused here."""
+    """Load a research bundle, checked against its manifest digest.
+
+    A research bundle (``provenance.research`` in its manifest) holds models made for a study, for
+    example one cross-validation fold or a model trained on every simulation for a test. The same
+    file checks apply as in ``load_release``, with the research rules in place of the production
+    rule: a clean lineage, every member trained on the bundle's training cache at the bundle's
+    code commit, a complete research marking, and every member in the one declared split.
+    ``predictor.load_research_bundle`` calls this.
+
+    Parameters
+    ----------
+    bundle_dir : str or os.PathLike
+        The bundle directory.
+    expected_manifest_sha256 : str
+        The sha256 of ``manifest.json``: 64 lowercase hex digits.
+    purpose : str
+        Why this research model is loaded; not empty. It is logged at INFO, kept as
+        ``load_purpose`` and recorded in the provenance of every research prediction.
+
+    Returns
+    -------
+    ResearchBundle
+        Never a ``ReleaseBundle``.
+
+    Raises
+    ------
+    ValueError
+        If ``purpose`` is empty.
+    SafeFormatError
+        If the digest is malformed, a file or record fails a check, or the bundle is a production
+        bundle (use ``load_release``).
+    """
     return _load_v2(
         bundle_dir, expected=expected_manifest_sha256, mode="research", purpose=purpose
     )[0]
@@ -1296,12 +1369,35 @@ def _mode(expected):
 
 
 def load_ensemble(bundle_dir, *, expected_manifest_sha256):
-    """The release entry point: an h5/2 bundle, every member sharing one network architecture, one k grid, one
-    parameter box and one normalizer (a prediction applies member 0's normalizer to every member). With the published
-    manifest digest the bundle must establish a clean lineage and be a production bundle (module docstring) or it is
-    refused; ``None`` loads an unanchored development bundle, warns, and marks the metas (``MemberMetas.anchored``
-    False, ``kind`` "dev"). An h5/1 bundle is refused: ``load_ensemble_historical``. A research bundle is refused with
-    a digest: ``load_research``. Returns ``(ensemble.EnsembleEmulator, MemberMetas, norm)``."""
+    """Load a bundle's ensemble, member metadata and normalizer.
+
+    Every member must share one network architecture, one k grid, one parameter box and one
+    normalizer: a prediction applies member 0's normalizer to every member. With the published
+    manifest digest, the same checks apply as in ``load_release``. With ``None``, the bundle loads
+    unanchored for development: the lineage is not enforced, an ``UnanchoredBundleWarning`` is
+    issued, and the returned metadata say so (``MemberMetas.anchored`` False, ``kind`` "dev").
+
+    Parameters
+    ----------
+    bundle_dir : str or os.PathLike
+        The bundle directory.
+    expected_manifest_sha256 : str or None
+        The published sha256 of ``manifest.json``, or None for an unanchored development load.
+        The keyword is required.
+
+    Returns
+    -------
+    tuple
+        ``(ensemble, metas, norm)``: an ``ensemble.EnsembleEmulator``, the ``MemberMetas`` and
+        member 0's normalizer (a dict).
+
+    Raises
+    ------
+    SafeFormatError
+        If a check fails (as in ``load_release``, when a digest is given); if the bundle is in the
+        earlier format ``hcd_priya.h5/1`` (use ``load_ensemble_historical``); or if it is a research
+        bundle loaded with a digest (use ``load_research``).
+    """
     rb, _ = _load_v2(
         bundle_dir, expected=expected_manifest_sha256, mode=_mode(expected_manifest_sha256)
     )
@@ -1309,8 +1405,29 @@ def load_ensemble(bundle_dir, *, expected_manifest_sha256):
 
 
 def load_bundle(bundle_dir, *, expected_manifest_sha256):
-    """The members of an h5/2 bundle, ``[(model, meta, norm)]``, after every check of ``load_ensemble`` (anchor keyword
-    required; ``None`` loads an unanchored development bundle and warns)."""
+    """Load a bundle's members as a list of ``(model, meta, norm)``.
+
+    The same checks apply as in ``load_ensemble``. The keyword ``expected_manifest_sha256`` is
+    required: the published sha256 of ``manifest.json``, or None for an unanchored development load,
+    which warns.
+
+    Parameters
+    ----------
+    bundle_dir : str or os.PathLike
+        The bundle directory.
+    expected_manifest_sha256 : str or None
+        The published sha256 of ``manifest.json``, or None.
+
+    Returns
+    -------
+    list of tuple
+        One ``(model, meta, norm)`` per member: the network, its metadata dict and its normalizer.
+
+    Raises
+    ------
+    SafeFormatError
+        As in ``load_ensemble``.
+    """
     return _load_v2(
         bundle_dir, expected=expected_manifest_sha256, mode=_mode(expected_manifest_sha256)
     )[1]

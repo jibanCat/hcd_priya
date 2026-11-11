@@ -38,7 +38,13 @@ author = "Ming-Feng Ho"
 copyright = "Ming-Feng Ho"
 release = version = _version()
 
-extensions = ["myst_parser", "autoapi.extension", "sphinxcontrib.mermaid"]
+extensions = ["myst_parser", "autoapi.extension", "sphinxcontrib.mermaid", "sphinx.ext.napoleon"]
+# NumPy-style docstring sections (Parameters, Returns, Raises, Notes, Examples) render as fields; Google-style
+# parsing stays off, so docstrings without such sections render as before. An "Attributes" section renders as
+# fields too (:ivar:), not as entries that would duplicate the attributes autoapi documents.
+napoleon_google_docstring = False
+napoleon_numpy_docstring = True
+napoleon_use_ivar = True
 source_suffix = {".md": "markdown"}
 myst_fence_as_directive = [
     "mermaid"
