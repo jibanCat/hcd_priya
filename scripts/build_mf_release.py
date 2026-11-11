@@ -24,6 +24,7 @@ Release:
 Fold (held-out fit for grouped cross-validation): add --kind fold --fold-id F --holdout-sim NAME [...], and
 --backbone-purpose TEXT when the backbone is a research bundle (for example one that excludes the held-out LF partner).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,23 +36,34 @@ import sys
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _REPO_ROOT)
 
-from hcd_analysis.emulator.mf_release import D1_TOL, VALIDATED_Z_MIN  # noqa: E402  (shared with the record check)
+from hcd_analysis.emulator.mf_release import (
+    D1_TOL,
+    VALIDATED_Z_MIN,
+)  # noqa: E402  (shared with the record check)
 
-HR_HISTORICAL_REASON = ("the HR cache predates cache lineage; the MF reads only its per-class P1D rows and row keys "
-                        "(PI ruling 2026-11-06b A1)")
+HR_HISTORICAL_REASON = (
+    "the HR cache predates cache lineage; the MF reads only its per-class P1D rows and row keys "
+    "(PI ruling 2026-11-06b A1)"
+)
 
 
 def code_identity(repo=_REPO_ROOT):
     """{commit, dirty} of the checkout this script runs from."""
-    commit = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    st = subprocess.run(["git", "-C", repo, "status", "--porcelain"], capture_output=True, text=True)
+    commit = subprocess.run(
+        ["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    st = subprocess.run(
+        ["git", "-C", repo, "status", "--porcelain"], capture_output=True, text=True
+    )
     if not commit or st.returncode != 0:
         raise SystemExit("refusing: the code identity (git commit and status) cannot be read")
     return {"commit": commit, "dirty": bool(st.stdout.strip())}
 
 
 def parse(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--kind", required=True, choices=("release", "fold"))
     ap.add_argument("--mf-version", required=True)
     ap.add_argument("--out-dir", required=True, help="a NEW directory (an existing one is refused)")
@@ -61,16 +73,24 @@ def parse(argv=None):
     ap.add_argument("--hr-cache-sha256", required=True)
     ap.add_argument("--backbone", required=True, help="the LF backbone bundle directory")
     ap.add_argument("--backbone-manifest-sha256", required=True)
-    ap.add_argument("--backbone-purpose", default=None, help="the backbone is a research bundle (fold builds only)")
+    ap.add_argument(
+        "--backbone-purpose",
+        default=None,
+        help="the backbone is a research bundle (fold builds only)",
+    )
     ap.add_argument("--composition-id", required=True)
     ap.add_argument("--exclude-sim", action="append", default=[])
     ap.add_argument("--ruling-id", action="append", default=[], required=True)
     ap.add_argument("--fold-id", default=None)
     ap.add_argument("--holdout-sim", action="append", default=[])
-    ap.add_argument("--validated-z-min", type=float, default=VALIDATED_Z_MIN,
-                    help=f"the lower edge of the redshift range over which the MF is validated (the frozen "
-                         f"validation domain's edge, not a passed validation; default {VALIDATED_Z_MIN}; it may be "
-                         "raised, never lowered); the predictor refuses LF+MF below it")
+    ap.add_argument(
+        "--validated-z-min",
+        type=float,
+        default=VALIDATED_Z_MIN,
+        help=f"the lower edge of the redshift range over which the MF is validated (the frozen "
+        f"validation domain's edge, not a passed validation; default {VALIDATED_Z_MIN}; it may be "
+        "raised, never lowered); the predictor refuses LF+MF below it",
+    )
     a = ap.parse_args(argv)
     if a.kind == "release" and (a.fold_id or a.holdout_sim or a.backbone_purpose):
         ap.error("a release build takes no --fold-id, --holdout-sim or --backbone-purpose")
@@ -86,42 +106,67 @@ def d1_check(lf, hrv, pairs, k_com):
     ``mode_mapping`` block; refuses (SystemExit) anything else."""
     from hcd_analysis.emulator import mf_modes as MM
     from hcd_analysis.emulator import mf_release as MR
+
     K = len(k_com)
     canonical = float(MM.canonical_mapping_error(hrv, pairs, k_com))
     if not canonical <= D1_TOL:
-        raise SystemExit(f"refusing: HR and LF modes do not map one to one (D1 canonical {canonical!r} > {D1_TOL!r})")
+        raise SystemExit(
+            f"refusing: HR and LF modes do not map one to one (D1 canonical {canonical!r} > {D1_TOL!r})"
+        )
     exc = MR.D1_EXCEPTION
     stored, excepted, bad = 0.0, [], []
     for h, l in pairs:
         e = float(MM.mode_mapping_error(lf, hrv, [(h, l)], K))
         if e <= D1_TOL:
             stored = max(stored, e)
-        elif str(lf["sim_name"][l]) == exc["lf_sim"] and str(hrv["sim_name"][h]) == exc["hr_sim"] and e < exc["bound"]:
+        elif (
+            str(lf["sim_name"][l]) == exc["lf_sim"]
+            and str(hrv["sim_name"][h]) == exc["hr_sim"]
+            and e < exc["bound"]
+        ):
             excepted.append(e)
         else:
             bad.append((str(lf["sim_name"][l]), e))
     if bad:
         sims = sorted({s for s, _ in bad})
-        raise SystemExit(f"refusing: HR and LF modes do not map one to one (D1 stored grids: {len(bad)} pairs of "
-                         f"{sims} above {D1_TOL!r} outside the recorded exception; largest {max(e for _, e in bad)!r})")
+        raise SystemExit(
+            f"refusing: HR and LF modes do not map one to one (D1 stored grids: {len(bad)} pairs of "
+            f"{sims} above {D1_TOL!r} outside the recorded exception; largest {max(e for _, e in bad)!r})"
+        )
     out = {"tol": D1_TOL, "canonical_max": canonical, "stored_max": stored, "exception": None}
     if excepted:
         out["exception"] = dict(MR.copy_json(exc), n_pairs=len(excepted), max_error=max(excepted))
     return MR.check_mode_mapping(out)
 
 
-def build_from_inputs(out_dir, *, lf, hr, backbone, kind, mf_version, caches, composition, fold, fit_code,
-                      validated_z_min=VALIDATED_Z_MIN):
+def build_from_inputs(
+    out_dir,
+    *,
+    lf,
+    hr,
+    backbone,
+    kind,
+    mf_version,
+    caches,
+    composition,
+    fold,
+    fit_code,
+    validated_z_min=VALIDATED_Z_MIN,
+):
     """Steps 5 and 6 on loaded inputs: ``lf`` the LF cache dict, ``hr`` the HR cache dict (seen through
     ``hr_view`` here), ``backbone`` a loaded predictor (``predictor.Bundle`` or ``ResearchPredictor``). Returns
     (record path, record sha256, summary)."""
     import numpy as np
     from hcd_analysis.emulator import mf_modes as MM
     from hcd_analysis.emulator import mf_release as MR
+
     hrv = MR.hr_view(hr)
     import hcd_analysis.predictor as hp
+
     if not isinstance(backbone, hp._PredictorBase):
-        raise SystemExit("refusing: the backbone must be a loaded predictor (one object forms the targets)")
+        raise SystemExit(
+            "refusing: the backbone must be a loaded predictor (one object forms the targets)"
+        )
     k_com = np.asarray(hp.native_modes(backbone), dtype=np.float64)
     K = k_com.size
     if not np.allclose(np.asarray(lf["k_com_hmpc"], float)[:K], k_com, rtol=1e-12, atol=0):
@@ -133,29 +178,52 @@ def build_from_inputs(out_dir, *, lf, hr, backbone, kind, mf_version, caches, co
     l_rows = np.array([p[1] for p in pairs])
     P_lf = hp.lf_P_filt_at(backbone, np.asarray(lf["x"])[l_rows], np.asarray(lf["tau0"])[l_rows])
     t = MM.measure_mode_targets(lf, hrv, pairs, P_lf, x=lf["x"], n_modes=K)
-    rows, train = MR.select_train_rows(t, exclude_sims=composition["excluded_sims"],
-                                       holdout_sims=(fold or {}).get("holdout_sims", ()))
+    rows, train = MR.select_train_rows(
+        t,
+        exclude_sims=composition["excluded_sims"],
+        holdout_sims=(fold or {}).get("holdout_sims", ()),
+    )
     tables = MM.fit_mode_mf(t, train_rows=rows)
-    bb = hp.backbone_identity(backbone)                         # derived from the member metas, never a caller flag
-    path, sha = MR.write_mf_record(out_dir, tables, k_com_hmpc=k_com, kind=kind, mf_version=mf_version, backbone=bb,
-                                   caches=caches, composition=composition, fold=fold, fit_code=fit_code,
-                                   train_sims=train, n_pairs_train=int(rows.size), mode_mapping=d1,
-                                   validated_z_min=float(validated_z_min))
-    summary = {"n_pairs": len(pairs), "n_pairs_train": int(rows.size), "train_sims": train, "D1": d1,
-               "validated_z_min": float(validated_z_min),
-               "sims": sorted(set(t["sim"]))}
+    bb = hp.backbone_identity(backbone)  # derived from the member metas, never a caller flag
+    path, sha = MR.write_mf_record(
+        out_dir,
+        tables,
+        k_com_hmpc=k_com,
+        kind=kind,
+        mf_version=mf_version,
+        backbone=bb,
+        caches=caches,
+        composition=composition,
+        fold=fold,
+        fit_code=fit_code,
+        train_sims=train,
+        n_pairs_train=int(rows.size),
+        mode_mapping=d1,
+        validated_z_min=float(validated_z_min),
+    )
+    summary = {
+        "n_pairs": len(pairs),
+        "n_pairs_train": int(rows.size),
+        "train_sims": train,
+        "D1": d1,
+        "validated_z_min": float(validated_z_min),
+        "sims": sorted(set(t["sim"])),
+    }
     return path, sha, summary
 
 
 def main(argv=None, *, _code=None):
     a = parse(argv)
     out = os.path.abspath(a.out_dir)
-    if os.path.lexists(out):                                     # write once: before any input is read
-        sys.exit(f"refusing: --out-dir {out} exists (an MF record is written once into a new directory)")
+    if os.path.lexists(out):  # write once: before any input is read
+        sys.exit(
+            f"refusing: --out-dir {out} exists (an MF record is written once into a new directory)"
+        )
     code = (_code or code_identity)()
     if a.kind == "release" and code["dirty"]:
         sys.exit("refusing: a release MF is built from a clean tree (git status is not empty)")
     from hcd_analysis import lineage as L
+
     pins = {"LF": (a.lf_cache, a.lf_cache_sha256), "HR": (a.hr_cache, a.hr_cache_sha256)}
     for side, (p, want) in pins.items():
         got = L.sha256_file(p)
@@ -165,11 +233,19 @@ def main(argv=None, *, _code=None):
     import hcd_analysis.predictor as hp
     from hcd_analysis.emulator import data as D
     from hcd_analysis.emulator import safe_h5 as H
+
     if a.backbone_purpose:
-        backbone = hp.ResearchPredictor(H.load_research(a.backbone, expected_manifest_sha256=a.backbone_manifest_sha256,
-                                                        purpose=a.backbone_purpose))
+        backbone = hp.ResearchPredictor(
+            H.load_research(
+                a.backbone,
+                expected_manifest_sha256=a.backbone_manifest_sha256,
+                purpose=a.backbone_purpose,
+            )
+        )
     else:
-        backbone = hp.Bundle(H.load_release(a.backbone, expected_manifest_sha256=a.backbone_manifest_sha256))
+        backbone = hp.Bundle(
+            H.load_release(a.backbone, expected_manifest_sha256=a.backbone_manifest_sha256)
+        )
     if (backbone.lineage.get("cache") or {}).get("sha256") != a.lf_cache_sha256:
         sys.exit("refusing: the backbone was not trained on the pinned LF cache")
     lf = D.load_cache(a.lf_cache)
@@ -178,17 +254,44 @@ def main(argv=None, *, _code=None):
     hr = D.load_cache_historical(a.hr_cache, reason=HR_HISTORICAL_REASON)
     if L.sha256_file(a.hr_cache) != a.hr_cache_sha256:
         sys.exit("refusing: the HR cache changed while it was read")
-    caches = {"lf": {"file": os.path.basename(a.lf_cache), "sha256": a.lf_cache_sha256},
-              "hr": {"file": os.path.basename(a.hr_cache), "sha256": a.hr_cache_sha256}}
-    composition = {"id": a.composition_id, "excluded_sims": sorted(set(a.exclude_sim)), "ruling_ids": a.ruling_id}
-    fold = {"fold_id": a.fold_id, "holdout_sims": sorted(set(a.holdout_sim))} if a.kind == "fold" else None
-    path, sha, summary = build_from_inputs(out, lf=lf, hr=hr, backbone=backbone, kind=a.kind,
-                                           mf_version=a.mf_version, caches=caches, composition=composition, fold=fold,
-                                           fit_code=code, validated_z_min=a.validated_z_min)
+    caches = {
+        "lf": {"file": os.path.basename(a.lf_cache), "sha256": a.lf_cache_sha256},
+        "hr": {"file": os.path.basename(a.hr_cache), "sha256": a.hr_cache_sha256},
+    }
+    composition = {
+        "id": a.composition_id,
+        "excluded_sims": sorted(set(a.exclude_sim)),
+        "ruling_ids": a.ruling_id,
+    }
+    fold = (
+        {"fold_id": a.fold_id, "holdout_sims": sorted(set(a.holdout_sim))}
+        if a.kind == "fold"
+        else None
+    )
+    path, sha, summary = build_from_inputs(
+        out,
+        lf=lf,
+        hr=hr,
+        backbone=backbone,
+        kind=a.kind,
+        mf_version=a.mf_version,
+        caches=caches,
+        composition=composition,
+        fold=fold,
+        fit_code=code,
+        validated_z_min=a.validated_z_min,
+    )
     from hcd_analysis.emulator import mf_release as MR
-    rec = MR.load_mf_record(out, expected_record_sha256=sha, backbone_manifest_sha256=a.backbone_manifest_sha256,
-                            kind=a.kind, composition=composition, lf_cache_sha256=a.lf_cache_sha256,
-                            hr_cache_sha256=a.hr_cache_sha256)
+
+    rec = MR.load_mf_record(
+        out,
+        expected_record_sha256=sha,
+        backbone_manifest_sha256=a.backbone_manifest_sha256,
+        kind=a.kind,
+        composition=composition,
+        lf_cache_sha256=a.lf_cache_sha256,
+        hr_cache_sha256=a.hr_cache_sha256,
+    )
     print(json.dumps(dict(summary, record=path, record_sha256=sha, kind=rec.kind), indent=1))
 
 

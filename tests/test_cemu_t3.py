@@ -1,6 +1,7 @@
 """Gate E amendment A1 rev 1 section 3: the T3 representation comparison (mode-aligned M vs fixed physical k P). The
 bin placement uses the same log-k weights as the production binding; truncation; the Gaussian score; and the comparison
 favours the representation the synthetic truth was built in. Cache-free."""
+
 import hcd_analysis.emulator  # noqa: F401
 import jax.numpy as jnp
 import numpy as np
@@ -16,14 +17,17 @@ KCOM = 2 * np.pi * np.arange(1, K + 1) / L_BOX_HMPC
 
 def test_bin_weights_are_the_production_log_k_binding():
     th = np.random.default_rng(0).uniform(0.1, 0.9, 9)
-    zs = np.array([2.4, 3.0]); kb = np.array([0.012, 0.02, 0.031, 0.015, 0.045])
+    zs = np.array([2.4, 3.0])
+    kb = np.array([0.012, 0.02, 0.031, 0.015, 0.045])
     iz = np.array([0, 0, 0, 1, 1])
     W = T3.weights(KCOM, th, zs, iz, kb)
     f = np.random.default_rng(1).normal(0, 1, (2, K))
     for i in range(kb.size):
         b = KC.bind(KC.kgrid(KCOM, float(zs[iz[i]]), jnp.asarray(th)), jnp.asarray([kb[i]]))
         j, t = int(b.j[0]), float(b.t_log[0])
-        np.testing.assert_allclose(W[i] @ f.ravel(), (1 - t) * f[iz[i], j - 1] + t * f[iz[i], j], rtol=1e-13)
+        np.testing.assert_allclose(
+            W[i] @ f.ravel(), (1 - t) * f[iz[i], j - 1] + t * f[iz[i], j], rtol=1e-13
+        )
 
 
 def test_truncation_keeps_the_top_rank_and_the_discarded_diagonal_is_the_topup():
@@ -40,10 +44,14 @@ def test_truncation_keeps_the_top_rank_and_the_discarded_diagonal_is_the_topup()
 
 def test_gaussian_score_matches_scipy():
     from scipy.stats import multivariate_normal
+
     rng = np.random.default_rng(3)
-    A = rng.normal(0, 1, (8, 8)); S = A @ A.T + np.eye(8)
+    A = rng.normal(0, 1, (8, 8))
+    S = A @ A.T + np.eye(8)
     v = rng.normal(0, 1, 8)
-    np.testing.assert_allclose(T3.logpdf(v, S, jitter=0.0), multivariate_normal(np.zeros(8), S).logpdf(v), rtol=1e-12)
+    np.testing.assert_allclose(
+        T3.logpdf(v, S, jitter=0.0), multivariate_normal(np.zeros(8), S).logpdf(v), rtol=1e-12
+    )
 
 
 def _synthetic(kind, n_sim=40, seed=4):
@@ -71,14 +79,23 @@ def _synthetic(kind, n_sim=40, seed=4):
 def test_the_comparison_favours_the_representation_of_the_truth(kind):
     coh, th, bins = _synthetic(kind)
     res = T3.compare(coh, th, bins, KCOM, ranks=(3,), n_folds=5, lo=np.zeros(9), hi=np.ones(9))
-    gain = res["score"]["M"][3].mean() - res["score"]["P"][3].mean()      # per held-out simulation
+    gain = res["score"]["M"][3].mean() - res["score"]["P"][3].mean()  # per held-out simulation
     assert (gain > 0) == (kind == "M"), gain
 
 
 def test_hook_sees_every_held_out_simulation_with_its_covariance():
     coh, th, bins = _synthetic("P", n_sim=10)
     seen = []
-    res = T3.compare(coh, th, bins, KCOM, ranks=(2,), n_folds=5, lo=np.zeros(9), hi=np.ones(9),
-                     hook=lambda rep, r, s, Sig, v: (seen.append((rep, s)), Sig.shape)[1])
+    res = T3.compare(
+        coh,
+        th,
+        bins,
+        KCOM,
+        ranks=(2,),
+        n_folds=5,
+        lo=np.zeros(9),
+        hi=np.ones(9),
+        hook=lambda rep, r, s, Sig, v: (seen.append((rep, s)), Sig.shape)[1],
+    )
     assert sorted(seen) == sorted([(rep, s) for rep in ("M", "P") for s in range(10)])
     assert all(res["hook"][rep][2][s] == (30, 30) for rep in ("M", "P") for s in range(10))

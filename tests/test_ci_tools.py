@@ -1,5 +1,6 @@
 """The CI helpers in tools/ci: the distribution-content check, the tier runner's verdict, and the pinned
 development-environment versions against pyproject.toml's lower bounds. Synthetic inputs only."""
+
 import importlib.util
 import io
 import os
@@ -14,7 +15,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load(name):
-    spec = importlib.util.spec_from_file_location(f"_ci_{name}", os.path.join(REPO, "tools", "ci", f"{name}.py"))
+    spec = importlib.util.spec_from_file_location(
+        f"_ci_{name}", os.path.join(REPO, "tools", "ci", f"{name}.py")
+    )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -23,8 +26,16 @@ def _load(name):
 CD = _load("check_dist")
 RT = _load("run_test_tier")
 X = CD.git_blob_id(b"x")
-PACKAGE = {n: X for n in ("hcd_analysis/__init__.py", "hcd_analysis/emulator/__init__.py",
-                          "hcd_analysis/cli/__init__.py", "hcd_analysis/cli/run.py", *CD.PACKAGE_DATA)}
+PACKAGE = {
+    n: X
+    for n in (
+        "hcd_analysis/__init__.py",
+        "hcd_analysis/emulator/__init__.py",
+        "hcd_analysis/cli/__init__.py",
+        "hcd_analysis/cli/run.py",
+        *CD.PACKAGE_DATA,
+    )
+}
 TOP = {n: X for n in CD.SDIST_COMMITTED}
 DIST_INFO = ["METADATA", "WHEEL", "RECORD", "entry_points.txt", "licenses/LICENSE"]
 
@@ -42,7 +53,12 @@ def _wheel(tmp_path, extra=(), drop=(), top="hcd_analysis\n", content=None):
 
 def _sdist(tmp_path, extra=(), drop=(), link=None, content=None):
     path = tmp_path / "hcd_priya-0.0.0.tar.gz"
-    names = set(PACKAGE) | set(TOP) | {"PKG-INFO", "setup.cfg", "hcd_priya.egg-info/SOURCES.txt"} | set(extra)
+    names = (
+        set(PACKAGE)
+        | set(TOP)
+        | {"PKG-INFO", "setup.cfg", "hcd_priya.egg-info/SOURCES.txt"}
+        | set(extra)
+    )
     with tarfile.open(path, "w:gz") as tf:
         for name in sorted(names - set(drop)):
             data = (content or {}).get(name, "x").encode()
@@ -58,32 +74,48 @@ def _sdist(tmp_path, extra=(), drop=(), link=None, content=None):
 
 
 def test_git_blob_id_is_gits():
-    assert CD.git_blob_id(b"") == "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"   # git hash-object /dev/null
+    assert (
+        CD.git_blob_id(b"") == "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+    )  # git hash-object /dev/null
 
 
 def test_check_wheel_accepts_exactly_the_committed_package(tmp_path):
     assert CD.check_wheel(_wheel(tmp_path), PACKAGE) == []
 
 
-@pytest.mark.parametrize("extra", ["hcd_analysis/_emulator_data/observables_tau0_lf.h5",
-                                   "hcd_analysis/emulator/member.norm.pkl", "tests/test_x.py",
-                                   "hcd_analysis/scratch.py", "hcd_analysis/emulator/README.md",
-                                   "hcd_priya-0.0.0.dist-info/extra.txt", "other-0.0.0.dist-info/METADATA",
-                                   "hcd_analysis-0.0.0.dist-info/METADATA"])
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "hcd_analysis/_emulator_data/observables_tau0_lf.h5",
+        "hcd_analysis/emulator/member.norm.pkl",
+        "tests/test_x.py",
+        "hcd_analysis/scratch.py",
+        "hcd_analysis/emulator/README.md",
+        "hcd_priya-0.0.0.dist-info/extra.txt",
+        "other-0.0.0.dist-info/METADATA",
+        "hcd_analysis-0.0.0.dist-info/METADATA",
+    ],
+)
 def test_check_wheel_refuses_any_other_file(tmp_path, extra):
     """Data, pickles, tests, an uncommitted module, docs, extra metadata, or the metadata of another distribution
     (also the old name hcd_analysis) never pass."""
     assert any(extra in p for p in CD.check_wheel(_wheel(tmp_path, extra=[extra]), PACKAGE))
 
 
-@pytest.mark.parametrize("drop", ["hcd_analysis/cli/run.py", "hcd_analysis/comparison/phase0_v1.json"])
+@pytest.mark.parametrize(
+    "drop", ["hcd_analysis/cli/run.py", "hcd_analysis/comparison/phase0_v1.json"]
+)
 def test_check_wheel_refuses_a_missing_file(tmp_path, drop):
-    assert any(f"missing {drop}" in p for p in CD.check_wheel(_wheel(tmp_path, drop=[drop]), PACKAGE))
+    assert any(
+        f"missing {drop}" in p for p in CD.check_wheel(_wheel(tmp_path, drop=[drop]), PACKAGE)
+    )
 
 
 def test_check_wheel_refuses_a_file_that_differs_from_head(tmp_path):
     """An uncommitted edit (or a stale build/ directory) ships different bytes under the right name."""
-    problems = CD.check_wheel(_wheel(tmp_path, content={"hcd_analysis/cli/run.py": "edited"}), PACKAGE)
+    problems = CD.check_wheel(
+        _wheel(tmp_path, content={"hcd_analysis/cli/run.py": "edited"}), PACKAGE
+    )
     assert problems == ["wheel: hcd_analysis/cli/run.py differs from HEAD"]
 
 
@@ -97,24 +129,47 @@ def test_check_sdist_accepts_exactly_the_committed_package(tmp_path):
     assert CD.check_sdist(_sdist(tmp_path), PACKAGE, TOP) == []
 
 
-@pytest.mark.parametrize("extra", ["tests/test_x.py", "checkpoints/manifest.json", "scripts/run.py",
-                                   "hcd_analysis/_emulator_data/observables_tau0_lf.h5", "hcd_analysis/scratch.py"])
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "tests/test_x.py",
+        "checkpoints/manifest.json",
+        "scripts/run.py",
+        "hcd_analysis/_emulator_data/observables_tau0_lf.h5",
+        "hcd_analysis/scratch.py",
+    ],
+)
 def test_check_sdist_refuses_any_other_file(tmp_path, extra):
     assert any(extra in p for p in CD.check_sdist(_sdist(tmp_path, extra=[extra]), PACKAGE, TOP))
 
 
 def test_check_sdist_refuses_links_missing_and_edited_files(tmp_path):
-    problems = CD.check_sdist(_sdist(tmp_path, drop=["pyproject.toml"], link="hcd_analysis/x.py",
-                                     content={"MANIFEST.in": "graft tests"}), PACKAGE, TOP)
-    assert any("link" in p for p in problems) and any("missing pyproject.toml" in p for p in problems)
+    problems = CD.check_sdist(
+        _sdist(
+            tmp_path,
+            drop=["pyproject.toml"],
+            link="hcd_analysis/x.py",
+            content={"MANIFEST.in": "graft tests"},
+        ),
+        PACKAGE,
+        TOP,
+    )
+    assert any("link" in p for p in problems) and any(
+        "missing pyproject.toml" in p for p in problems
+    )
     assert "sdist: MANIFEST.in differs from HEAD" in problems
 
 
 def test_committed_files_cover_the_packages_and_nothing_else():
     package, top = CD.committed_files()
-    assert {"hcd_analysis/__init__.py", "hcd_analysis/paths.py", "hcd_analysis/cli/run.py"} <= set(package)
+    assert {"hcd_analysis/__init__.py", "hcd_analysis/paths.py", "hcd_analysis/cli/run.py"} <= set(
+        package
+    )
     assert set(CD.PACKAGE_DATA) <= set(package) and set(top) == set(CD.SDIST_COMMITTED)
-    assert all(p.split("/")[0] in CD.PACKAGES and (p.endswith(".py") or p in CD.PACKAGE_DATA) for p in package)
+    assert all(
+        p.split("/")[0] in CD.PACKAGES and (p.endswith(".py") or p in CD.PACKAGE_DATA)
+        for p in package
+    )
 
 
 _JUNIT = """<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest">
@@ -140,9 +195,12 @@ DEFERRAL = {"deferred_legacy X: y"}
 def test_junit_counts_separate_skips_deferrals_and_other_expected_failures(tmp_path):
     p = tmp_path / "r.xml"
     p.write_text(_JUNIT)
-    assert RT.junit_counts(str(p), deferrals=DEFERRAL) == _c(tests=6, passed=1, failures=1, errors=1, skipped=1,
-                                                             xfailed=1, bad_xfail=1)
-    assert RT.junit_counts(str(p))["bad_xfail"] == 2        # only exactly declared deferral messages count
+    assert RT.junit_counts(str(p), deferrals=DEFERRAL) == _c(
+        tests=6, passed=1, failures=1, errors=1, skipped=1, xfailed=1, bad_xfail=1
+    )
+    assert (
+        RT.junit_counts(str(p))["bad_xfail"] == 2
+    )  # only exactly declared deferral messages count
 
 
 def test_junit_counts_declared_skips(tmp_path):
@@ -151,9 +209,11 @@ def test_junit_counts_declared_skips(tmp_path):
     p.write_text(_JUNIT)
     c = RT.junit_counts(str(p), declared_skips=["d", "a"])
     assert (c["skipped"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 1)
-    c = RT.junit_counts(str(p), declared_skips=["d[p1]"])          # one parameter case, named exactly
+    c = RT.junit_counts(str(p), declared_skips=["d[p1]"])  # one parameter case, named exactly
     assert (c["skipped"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0)
-    c = RT.junit_counts(str(p), declared_skips=["d[p2]"])          # another case: the skip of d[p1] stays undeclared
+    c = RT.junit_counts(
+        str(p), declared_skips=["d[p2]"]
+    )  # another case: the skip of d[p1] stays undeclared
     assert (c["skipped"], c["asset_skipped"]) == (1, 0)
 
 
@@ -164,22 +224,27 @@ def test_junit_counts_in_an_assets_job_a_required_test_must_run(tmp_path):
     p.write_text(_JUNIT)
     c = RT.junit_counts(str(p), declared_skips=["d", "a"], required=["d", "a"])
     assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"], c["skipped"]) == (1, 0, 0, 0)
-    c = RT.junit_counts(str(p), declared_skips=["d", "a"], required=["a"])          # d skipped by design
+    c = RT.junit_counts(str(p), declared_skips=["d", "a"], required=["a"])  # d skipped by design
     assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0)
 
 
 def test_junit_counts_in_an_assets_job_a_required_test_absent_from_the_report_is_missing(tmp_path):
     """A required asset test that never reaches the report (not collected: a renamed test or parameter; or
-    deselected) is missing too; a required name matched by its full id or by its function name is not."""
+    deselected) is missing too; a required name matched by its full id or by its function name is not.
+    """
     p = tmp_path / "r.xml"
     p.write_text(_JUNIT)
     c = RT.junit_counts(str(p), declared_skips=["a", "zz"], required=["a", "zz"])
     assert (c["asset_missing"], c["passed"]) == (1, 1)
-    c = RT.junit_counts(str(p), declared_skips=["d[p1]", "d[p9]", "a"], required=["d[p1]", "d[p9]", "a"])
-    assert c["asset_missing"] == 2                                   # d[p1] skipped, d[p9] absent
+    c = RT.junit_counts(
+        str(p), declared_skips=["d[p1]", "d[p9]", "a"], required=["d[p1]", "d[p9]", "a"]
+    )
+    assert c["asset_missing"] == 2  # d[p1] skipped, d[p9] absent
     c = RT.junit_counts(str(p), declared_skips=["a"], required=["a"])
     assert c["asset_missing"] == 0
-    assert RT.junit_counts(str(p), declared_skips=["zz"])["asset_missing"] == 0     # not required: not counted
+    assert (
+        RT.junit_counts(str(p), declared_skips=["zz"])["asset_missing"] == 0
+    )  # not required: not counted
 
 
 def test_the_assets_job_runs_the_assets_tier_and_every_file_with_asset_tests():
@@ -192,55 +257,66 @@ def test_the_assets_job_runs_the_assets_tier_and_every_file_with_asset_tests():
     assert not set(RT.not_run(files, ran=("assets",))) & {"assets", *RT.CI_TIERS}
 
 
-
 def test_the_plan_of_a_ci_tier_runs_its_files_without_required_tests_or_added_environment():
     _, files = RT.load_tiers()
     for tier in RT.CI_TIERS:
         plan = RT.tier_plan(tier, files)
         assert plan["todo"] == sorted(p for p, e in files.items() if e["tier"] == tier)
-        assert plan["env"] == {} and plan["marker"] == "not slow"           # slow tests listed as NOT RUN
+        assert plan["env"] == {} and plan["marker"] == "not slow"  # slow tests listed as NOT RUN
         assert set(plan["declared"]) == set(plan["required"]) == set(plan["todo"])
         for rel in plan["todo"]:
-            assert plan["declared"][rel] == files[rel].get("asset_tests", []) + files[rel].get("skipped_by_design", [])
+            assert plan["declared"][rel] == files[rel].get("asset_tests", []) + files[rel].get(
+                "skipped_by_design", []
+            )
             assert plan["required"][rel] == []
 
 
 def test_the_plan_of_the_assets_job_runs_every_qualifying_file_with_the_gate_on_and_requires_its_asset_tests():
     """Every file of the assets tier and every CI-tier file with asset_tests, and nothing else; HCD_GATE_RUN=1 (a
-    missing real cache fails instead of skipping); each file's asset_tests are required, skipped_by_design is not."""
+    missing real cache fails instead of skipping); each file's asset_tests are required, skipped_by_design is not.
+    """
     _, files = RT.load_tiers()
     plan = RT.tier_plan("assets", files)
-    want = sorted(p for p, e in files.items()
-                  if e["tier"] == "assets" or (e["tier"] in ("wheel", "source") and e.get("asset_tests")))
+    want = sorted(
+        p
+        for p, e in files.items()
+        if e["tier"] == "assets" or (e["tier"] in ("wheel", "source") and e.get("asset_tests"))
+    )
     assert plan["todo"] == want and len(want) > len(RT.files_of(files, "assets"))
     assert plan["env"] == {"HCD_GATE_RUN": "1"}
-    assert plan["marker"] is None                       # slow tests run too: an asset test may be marked slow
+    assert plan["marker"] is None  # slow tests run too: an asset test may be marked slow
     for rel in want:
         assert plan["required"][rel] == files[rel].get("asset_tests", [])
         assert not set(plan["required"][rel]) & set(files[rel].get("skipped_by_design", []))
 
+
 def test_deferred_legacy_messages_are_exactly_what_conftest_writes():
     from tests.gate_helpers import DEFERRED_CAUSES
-    assert RT.deferred_legacy_messages() == {f"deferred_legacy {cause}: {reason}"
-                                             for cause, (_, reason) in DEFERRED_CAUSES.items()}
+
+    assert RT.deferred_legacy_messages() == {
+        f"deferred_legacy {cause}: {reason}" for cause, (_, reason) in DEFERRED_CAUSES.items()
+    }
 
 
-@pytest.mark.parametrize("rc, counts, ok", [
-    (0, _c(), True),
-    (0, _c(tests=5, xfailed=2), True),
-    (0, _c(tests=4, asset_skipped=1), True),
-    (0, _c(skipped=1), False),                      # a skip is never a pass
-    (0, _c(bad_xfail=1), False),                    # only declared deferrals may be expected failures
-    (0, _c(asset_ran=1), False),                    # a declared skip must skip without its asset
-    (0, _c(asset_missing=1), False),                # an assets job: a missing asset fails, never skips
-    (0, _c(tests=0, passed=0), False),              # nothing ran
-    (0, _c(tests=2, passed=0, xfailed=2), False),   # deferrals only: nothing passed
-    (0, _c(tests=2, passed=0, asset_skipped=2), False),
-    (1, _c(), False),                               # e.g. the session-end origin check
-    (1, _c(failures=1), False),
-    (None, None, False),                            # timeout
-    (4, None, False),                               # no readable junit report
-])
+@pytest.mark.parametrize(
+    "rc, counts, ok",
+    [
+        (0, _c(), True),
+        (0, _c(tests=5, xfailed=2), True),
+        (0, _c(tests=4, asset_skipped=1), True),
+        (0, _c(skipped=1), False),  # a skip is never a pass
+        (0, _c(bad_xfail=1), False),  # only declared deferrals may be expected failures
+        (0, _c(asset_ran=1), False),  # a declared skip must skip without its asset
+        (0, _c(asset_missing=1), False),  # an assets job: a missing asset fails, never skips
+        (0, _c(tests=0, passed=0), False),  # nothing ran
+        (0, _c(tests=2, passed=0, xfailed=2), False),  # deferrals only: nothing passed
+        (0, _c(tests=2, passed=0, asset_skipped=2), False),
+        (1, _c(), False),  # e.g. the session-end origin check
+        (1, _c(failures=1), False),
+        (None, None, False),  # timeout
+        (4, None, False),  # no readable junit report
+    ],
+)
 def test_file_verdict(rc, counts, ok):
     assert RT.file_verdict(rc, counts)[0] is ok
 
@@ -264,7 +340,9 @@ def _bounds():
 
 
 # Direct dependencies whose lower bound is deliberately below the pinned release series, with the reason.
-BOUND_BELOW_PIN = {"numpy": "2.0: jax 0.10.1 requires numpy 2.0 or later and no newer numpy interface is used"}
+BOUND_BELOW_PIN = {
+    "numpy": "2.0: jax 0.10.1 requires numpy 2.0 or later and no newer numpy interface is used"
+}
 
 
 def test_devenv_pins_sit_in_the_release_series_of_the_lower_bounds():
@@ -279,20 +357,40 @@ def test_devenv_pins_sit_in_the_release_series_of_the_lower_bounds():
             name, _, version = line.partition("==")
             pins[name.lower()] = version
     direct = set(pins) & set(bounds)
-    assert direct >= {"jax", "equinox", "optax", "numpyro", "numpy", "scipy", "h5py", "matplotlib", "pytest"}
+    assert direct >= {
+        "jax",
+        "equinox",
+        "optax",
+        "numpyro",
+        "numpy",
+        "scipy",
+        "h5py",
+        "matplotlib",
+        "pytest",
+    }
     for name in direct:
         b, p = bounds[name].split("."), pins[name].split(".")
         if name in BOUND_BELOW_PIN:
-            assert BOUND_BELOW_PIN[name].startswith(bounds[name] + ":"), f"{name}: the stated bound is not the bound"
-            assert tuple(map(int, b)) <= tuple(map(int, p[:len(b)])), f"{name}: bound {bounds[name]} above the pin"
+            assert BOUND_BELOW_PIN[name].startswith(
+                bounds[name] + ":"
+            ), f"{name}: the stated bound is not the bound"
+            assert tuple(map(int, b)) <= tuple(
+                map(int, p[: len(b)])
+            ), f"{name}: bound {bounds[name]} above the pin"
             continue
-        assert p[:len(b)] == b, f"{name}: bound {bounds[name]} is not the series of the pin {pins[name]}"
+        assert (
+            p[: len(b)] == b
+        ), f"{name}: bound {bounds[name]} is not the series of the pin {pins[name]}"
 
 
 def test_the_workflow_calls_the_ci_helpers_that_exist():
     text = open(os.path.join(REPO, ".github", "workflows", "tests.yml")).read()
-    for helper in ("tools/ci/check_dist.py", "tools/ci/run_test_tier.py", "tools/ci/constraints-devenv.txt",
-                   "tools/ci/h5_cross_version.py"):
+    for helper in (
+        "tools/ci/check_dist.py",
+        "tools/ci/run_test_tier.py",
+        "tools/ci/constraints-devenv.txt",
+        "tools/ci/h5_cross_version.py",
+    ):
         assert helper in text and os.path.isfile(os.path.join(REPO, helper))
     for tier in ("--tier wheel", "--tier source", "--list-not-run"):
         assert tier in text
@@ -305,8 +403,10 @@ def test_every_run_step_fails_when_a_command_in_a_pipe_fails():
     """The workflow names bash as the shell of every run step, so GitHub runs each with `bash -eo pipefail` and
     `pytest ... | tee log` fails its step when pytest fails. With no shell named, GitHub runs `bash -e`, where a pipe's
     status is that of its last command (tee). No job or step may set another shell or its own defaults, and no
-    run step may turn -e or pipefail off (set +e, set +o pipefail) or swallow a failure (|| true, || :, || exit 0)."""
+    run step may turn -e or pipefail off (set +e, set +o pipefail) or swallow a failure (|| true, || :, || exit 0).
+    """
     import yaml
+
     wf = yaml.safe_load(open(os.path.join(REPO, ".github", "workflows", "tests.yml")))
     assert wf["defaults"] == {"run": {"shell": "bash"}}
     for name, job in wf["jobs"].items():
@@ -319,6 +419,7 @@ def test_every_run_step_fails_when_a_command_in_a_pipe_fails():
 
 def _workflow():
     import yaml
+
     return yaml.safe_load(open(os.path.join(REPO, ".github", "workflows", "tests.yml")))
 
 
@@ -326,7 +427,8 @@ def test_only_the_pinned_job_declares_the_pinned_stack():
     """HCD_PINNED_STACK is "1" in the development-environment (supported) job and empty in the others, and it is set
     nowhere else: the name occurs exactly once in the workflow outside comments (the fixture-tests job's env), so no
     other env, run command or $GITHUB_ENV write can set it. The matrix is exactly its include list (no other axis)
-    and holds the one supported job (Python 3.11 with the pinned versions) and the two newest-dependency jobs."""
+    and holds the one supported job (Python 3.11 with the pinned versions) and the two newest-dependency jobs.
+    """
     text = open(os.path.join(REPO, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
     code = "\n".join(re.sub(r"(^|\s)#.*", "", line) for line in text.splitlines())
     assert code.count("HCD_PINNED_STACK") == 1
@@ -338,18 +440,27 @@ def test_only_the_pinned_job_declares_the_pinned_stack():
         for step in job["steps"]:
             assert "HCD_PINNED_STACK" not in (step.get("env") or {}), (name, step.get("name"))
     job = wf["jobs"]["fixture-tests"]
-    assert job["env"]["HCD_PINNED_STACK"] == "${{ matrix.deps == 'development-environment' && '1' || '' }}"
+    assert (
+        job["env"]["HCD_PINNED_STACK"]
+        == "${{ matrix.deps == 'development-environment' && '1' || '' }}"
+    )
     assert set(job["strategy"]["matrix"]) == {"include"}
     include = job["strategy"]["matrix"]["include"]
-    assert [(e["python"], e["deps"]) for e in include] == [("3.11", "development-environment"), ("3.11", "newest"),
-                                                           ("3.12", "newest")]
+    assert [(e["python"], e["deps"]) for e in include] == [
+        ("3.11", "development-environment"),
+        ("3.11", "newest"),
+        ("3.12", "newest"),
+    ]
     assert [e["label"].endswith("(supported)") for e in include] == [True, False, False]
 
 
 # The `with` inputs each action may take: an input such as setup-python's pip-install would install packages
 # outside the pinned steps.
-ACTION_INPUTS = {"actions/checkout@v4": {"persist-credentials"}, "actions/setup-python@v5": {"python-version"},
-                 "actions/upload-artifact@v4": {"name", "path", "retention-days"}}
+ACTION_INPUTS = {
+    "actions/checkout@v4": {"persist-credentials"},
+    "actions/setup-python@v5": {"python-version"},
+    "actions/upload-artifact@v4": {"name", "path", "retention-days"},
+}
 
 
 def test_every_action_takes_only_its_known_inputs():
@@ -357,34 +468,50 @@ def test_every_action_takes_only_its_known_inputs():
         for step in job["steps"]:
             if "uses" in step:
                 assert step["uses"] in ACTION_INPUTS, (name, step["uses"])
-                assert set(step.get("with") or {}) <= ACTION_INPUTS[step["uses"]], (name, step["uses"])
+                assert set(step.get("with") or {}) <= ACTION_INPUTS[step["uses"]], (
+                    name,
+                    step["uses"],
+                )
 
 
 def test_the_docs_build_is_pinned_and_treats_warnings_as_errors():
     """Read the Docs and the CI docs job install the same fully pinned requirements and fail on any Sphinx warning."""
     import yaml
+
     rtd = yaml.safe_load(open(os.path.join(REPO, ".readthedocs.yaml")))
     assert rtd["sphinx"] == {"configuration": "docs/conf.py", "fail_on_warning": True}
     assert rtd["python"]["install"] == [{"requirements": "docs/requirements.txt"}]
     job = _workflow()["jobs"]["docs"]
-    assert [step.get("uses") for step in job["steps"] if "uses" in step] == ["actions/checkout@v4",
-                                                                             "actions/setup-python@v5"]
+    assert [step.get("uses") for step in job["steps"] if "uses" in step] == [
+        "actions/checkout@v4",
+        "actions/setup-python@v5",
+    ]
     runs = [step["run"] for step in job["steps"] if "run" in step]
-    assert runs == ["python -m pip install -r docs/requirements.txt",
-                    'python -m sphinx -W --keep-going -b html docs "$RUNNER_TEMP/html"']      # nothing else installed
+    assert runs == [
+        "python -m pip install -r docs/requirements.txt",
+        'python -m sphinx -W --keep-going -b html docs "$RUNNER_TEMP/html"',
+    ]  # nothing else installed
     lines = [ln.strip() for ln in open(os.path.join(REPO, "docs", "requirements.txt"))]
     reqs = [ln for ln in lines if ln and not ln.startswith("#")]
     assert reqs and all(re.fullmatch(r"[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9.]*", r) for r in reqs), reqs
     names = {r.split("==")[0].lower().replace("_", "-") for r in reqs}
-    assert {"sphinx", "myst-parser", "sphinx-autoapi", "sphinx-rtd-theme", "sphinxcontrib-mermaid"} <= names
+    assert {
+        "sphinx",
+        "myst-parser",
+        "sphinx-autoapi",
+        "sphinx-rtd-theme",
+        "sphinxcontrib-mermaid",
+    } <= names
 
 
 def test_h5_cross_version_check_reads_back_and_catches_a_change_or_a_new_library(tmp_path, capsys):
     """tools/ci/h5_cross_version.py: a synthetic bundle reads back with every digest equal; an edited digest fails, of
     a model leaf or of a normalizer array; and --max-hdf5 fails on a library that is not older than the limit, at the
-    limit too (the running library's own MAJOR.MINOR), so the older-libhdf5 job cannot pass on a new library."""
+    limit too (the running library's own MAJOR.MINOR), so the older-libhdf5 job cannot pass on a new library.
+    """
     import json
     import h5py
+
     XV = _load("h5_cross_version")
     out = tmp_path / "x"
     assert XV.main(["write", str(out)]) == 0

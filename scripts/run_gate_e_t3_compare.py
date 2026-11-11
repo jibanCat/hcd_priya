@@ -19,6 +19,7 @@ ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu python3 \
      scripts/run_gate_e_t3_compare.py --eval-dir <gateC_eval> --mf <mf product> --dla-core <dla_core product> \
      --out-json <..> --out-npz <..>
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,9 +47,12 @@ from hcd_analysis.emulator.prod_ensemble import production_member_paths
 T3_Z = np.round(np.arange(2.0, 4.41, 0.2), 1)
 T3_KMIN = 0.01
 RANKS = (5, 10, 15, 25)
-SURVEYS = {"DESI": dict(metals=True, with_eboss=False), "KS": dict(metals=False, with_eboss=False),
-           "eBOSS": dict(metals=True, with_eboss=True)}
-AUDIT_LEGS = ("DESI", "KS")                                    # production applies T3 on DESI and KS only
+SURVEYS = {
+    "DESI": dict(metals=True, with_eboss=False),
+    "KS": dict(metals=False, with_eboss=False),
+    "eBOSS": dict(metals=True, with_eboss=True),
+}
+AUDIT_LEGS = ("DESI", "KS")  # production applies T3 on DESI and KS only
 I_NS, I_AP, I_TAU = 0, 1, 9
 I_HUB, I_OMH2 = 5, 6
 
@@ -65,10 +69,18 @@ def build_leg_ctx(name, members, mf, dla, mf_hr_cache_sha256, mf_composition):
     kw = SURVEYS[name]
     ctx, d = CL.build_legb_ctx(
         historical_reason="historical analysis on the deployed cache (closure_legb.CACHE_PATH)",
-        ensemble_ckpts=members, mf_product=mf, mf_hr_cache_sha256=mf_hr_cache_sha256,
-        mf_composition=mf_composition, dla_core_product=dla, metals_on=kw["metals"],
-                               sample_metals=kw["metals"], metal_prior=("flatlog2node" if kw["metals"] else "uniform"),
-                               survey=name, with_eboss=kw["with_eboss"], ks_kwargs=dict(k_max=0.065))
+        ensemble_ckpts=members,
+        mf_product=mf,
+        mf_hr_cache_sha256=mf_hr_cache_sha256,
+        mf_composition=mf_composition,
+        dla_core_product=dla,
+        metals_on=kw["metals"],
+        sample_metals=kw["metals"],
+        metal_prior=("flatlog2node" if kw["metals"] else "uniform"),
+        survey=name,
+        with_eboss=kw["with_eboss"],
+        ks_kwargs=dict(k_max=0.065),
+    )
     leg = next(l for l in ctx.legs if l.name == name)
     return ctx._replace(legs=[leg]), d, leg
 
@@ -84,7 +96,9 @@ def coh_per_sim(R, d):
         theta[i] = pu[np.asarray(R["rows"])[sel][0]]
         for j, zz in enumerate(T3_Z):
             rows = sel & (np.abs(z - zz) < 0.05)
-            coh[i, j] = np.asarray(R["r"])[rows, 0, :].mean(axis=0) if rows.any() else np.nan   # 7 sims lack z 2.0
+            coh[i, j] = (
+                np.asarray(R["r"])[rows, 0, :].mean(axis=0) if rows.any() else np.nan
+            )  # 7 sims lack z 2.0
     return sims, coh, theta
 
 
@@ -95,7 +109,7 @@ def leg_bins(leg):
     onz = np.abs(T3_Z[iz] - zr) < 0.05
     B = np.where(keep & (k >= T3_KMIN) & onz)[0]
     kept = np.where(keep)[0]
-    pos = np.searchsorted(kept, B)                             # positions of B inside the kept-bin vector
+    pos = np.searchsorted(kept, B)  # positions of B inside the kept-bin vector
     return dict(z=T3_Z, iz=iz[B], k=k[B]), B, kept, pos
 
 
@@ -126,12 +140,20 @@ def jax_weights(k_com, theta, bins, Mi):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--eval-dir", required=True)
     ap.add_argument("--mf", required=True)
-    ap.add_argument("--mf-hr-cache-sha256", required=True, help="the HR cache digest the MF product must record")
-    ap.add_argument("--mf-composition", required=True, help="the MF product's composition id ('all': every matched "
-                    "pair, the historical product)")
+    ap.add_argument(
+        "--mf-hr-cache-sha256", required=True, help="the HR cache digest the MF product must record"
+    )
+    ap.add_argument(
+        "--mf-composition",
+        required=True,
+        help="the MF product's composition id ('all': every matched "
+        "pair, the historical product)",
+    )
     ap.add_argument("--dla-core", required=True)
     ap.add_argument("--out-json", required=True)
     ap.add_argument("--out-npz", required=True)
@@ -148,7 +170,9 @@ def main(argv=None):
     summary, arrays = {}, {}
     R = None
     for name in a.legs.split(","):
-        ctx, d, leg = build_leg_ctx(name, members, a.mf, a.dla_core, a.mf_hr_cache_sha256, a.mf_composition)
+        ctx, d, leg = build_leg_ctx(
+            name, members, a.mf, a.dla_core, a.mf_hr_cache_sha256, a.mf_composition
+        )
         if R is None:
             R = CB.load_loo_ensemble_residuals(a.eval_dir, d)
             sims, coh, theta = coh_per_sim(R, d)
@@ -156,8 +180,10 @@ def main(argv=None):
         bins, B, kept, pos = leg_bins(leg)
         used = np.unique(bins["iz"])
         if not np.all(np.isfinite(coh[:, used])):
-            raise SystemExit(f"{name}: a z cell used by the leg's bins lacks rows in some simulation")
-        coh_leg = np.nan_to_num(coh)                              # unused z cells carry zero weight
+            raise SystemExit(
+                f"{name}: a z cell used by the leg's bins lacks rows in some simulation"
+            )
+        coh_leg = np.nan_to_num(coh)  # unused z cells carry zero weight
         P = np.asarray(leg.P_data, float)
         Ck = np.asarray(leg.C_data, float)[np.ix_(kept, kept)]
         PB = P[B]
@@ -182,10 +208,23 @@ def main(argv=None):
             V = Finv @ (CiJ.T @ Spow @ CiJ) @ Finv
             idx = [I_NS, I_AP, I_TAU]
             db, Vb = delta[idx], V[np.ix_(idx, idx)]
-            return dict(T=float(db @ np.linalg.solve(Vb, db) / 3.0), q=(db ** 2 / np.diag(Vb)).tolist())
+            return dict(
+                T=float(db @ np.linalg.solve(Vb, db) / 3.0), q=(db**2 / np.diag(Vb)).tolist()
+            )
 
-        res = T3.compare(coh_leg, theta, bins, k_com, ranks=RANKS, n_folds=10, lo=lo, hi=hi, names=sims, C_frac=C_frac,
-                         hook=hook)
+        res = T3.compare(
+            coh_leg,
+            theta,
+            bins,
+            k_com,
+            ranks=RANKS,
+            n_folds=10,
+            lo=lo,
+            hi=hi,
+            names=sims,
+            C_frac=C_frac,
+            hook=hook,
+        )
         dec = T3.decide(res, RANKS, n_boot=a.n_boot, seed=0)
         out = dict(n_bins=int(B.size), n_sims=len(sims), decision_stats=dec, per_rank={})
         for rep in ("M", "P"):
@@ -195,8 +234,11 @@ def main(argv=None):
                 out["per_rank"][f"{rep}{r}"] = dict(
                     score_mean=float(res["score"][rep][r].mean()),
                     kappa=float(res["quad"][rep][r].mean() / res["trace"][rep][r].mean()),
-                    T=float(Ts.mean()), q_ns=float(qs[:, 0].mean()), q_Ap=float(qs[:, 1].mean()),
-                    q_tau0=float(qs[:, 2].mean()))
+                    T=float(Ts.mean()),
+                    q_ns=float(qs[:, 0].mean()),
+                    q_Ap=float(qs[:, 1].mean()),
+                    q_tau0=float(qs[:, 2].mean()),
+                )
                 arrays[f"{name}_score_{rep}{r}"] = res["score"][rep][r]
         kM = out["per_rank"][f"M{dec['best_rank']['M']}"]["kappa"]
         kP = out["per_rank"][f"P{dec['best_rank']['P']}"]["kappa"]
@@ -220,17 +262,51 @@ def main(argv=None):
         out["stationarity"] = dict(P=stationarity(Sig_P, bins), M=stationarity(Sig_Mc, bins))
         # (d)-(g) for M (P is theta-independent: identically zero)
         if name in AUDIT_LEGS:
-            out["M_theta_dependence"] = m_theta_audit(ctx, leg, k_com, bins, Mi, F_M, S_M, Ck, pos, PB, kept, Pprior,
-                                                      centre, lo, hi, theta, J, coh_leg, a.grid)
+            out["M_theta_dependence"] = m_theta_audit(
+                ctx,
+                leg,
+                k_com,
+                bins,
+                Mi,
+                F_M,
+                S_M,
+                Ck,
+                pos,
+                PB,
+                kept,
+                Pprior,
+                centre,
+                lo,
+                hi,
+                theta,
+                J,
+                coh_leg,
+                a.grid,
+            )
         out["choice"] = "M" if out["m_qualifies"] else "P"
-        out["stop_2"] = bool(out["m_qualifies"] and out.get("M_theta_dependence", {}).get("material", False))
+        out["stop_2"] = bool(
+            out["m_qualifies"] and out.get("M_theta_dependence", {}).get("material", False)
+        )
         summary[name] = out
         print(name, json.dumps({k: out[k] for k in ("choice", "m_qualifies", "stop_2")}), dec)
-    commit = subprocess.run(["git", "-C", os.path.dirname(os.path.abspath(__file__)), "rev-parse", "HEAD"],
-                            capture_output=True, text=True).stdout.strip()
-    meta = dict(created_utc=datetime.now(timezone.utc).isoformat(), code_commit=commit, eval_dir=a.eval_dir,
-                mf=a.mf, mf_sha256=_sha(a.mf), dla_core=a.dla_core, dla_core_sha256=_sha(a.dla_core),
-                members=members, ranks=list(RANKS), t3_z=T3_Z.tolist(), t3_kmin=T3_KMIN)
+    commit = subprocess.run(
+        ["git", "-C", os.path.dirname(os.path.abspath(__file__)), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    meta = dict(
+        created_utc=datetime.now(timezone.utc).isoformat(),
+        code_commit=commit,
+        eval_dir=a.eval_dir,
+        mf=a.mf,
+        mf_sha256=_sha(a.mf),
+        dla_core=a.dla_core,
+        dla_core_sha256=_sha(a.dla_core),
+        members=members,
+        ranks=list(RANKS),
+        t3_z=T3_Z.tolist(),
+        t3_kmin=T3_KMIN,
+    )
     os.makedirs(os.path.dirname(os.path.abspath(a.out_npz)), exist_ok=True)
     np.savez(a.out_npz, sims=np.array(sims), **arrays)
     meta["npz"], meta["npz_sha256"] = a.out_npz, _sha(a.out_npz)
@@ -239,7 +315,9 @@ def main(argv=None):
     return 0
 
 
-def m_theta_audit(ctx, leg, k_com, bins, Mi, F_M, S_M, Ck, pos, PB, kept, Pprior, centre, lo, hi, theta, J, coh, n):
+def m_theta_audit(
+    ctx, leg, k_com, bins, Mi, F_M, S_M, Ck, pos, PB, kept, Pprior, centre, lo, hi, theta, J, coh, n
+):
     """(d)-(g) for the M representation (A1 rev 1 section 3), log|C| with C = C_data + T3_M(theta) on the kept bins."""
     F_Mj, S_Mj, Ckj = jnp.asarray(F_M), jnp.asarray(S_M), jnp.asarray(Ck)
     PP = jnp.asarray(np.outer(PB, PB))
@@ -248,7 +326,9 @@ def m_theta_audit(ctx, leg, k_com, bins, Mi, F_M, S_M, Ck, pos, PB, kept, Pprior
     def C_of(th):
         Bm = jax_weights(k_com, th, bins, Mi)
         Sig = Bm @ F_Mj @ Bm.T
-        Sig = Sig + jnp.diag(jnp.maximum(jnp.einsum("ij,jk,ik->i", Bm, S_Mj, Bm) - jnp.diag(Sig), 0.0))
+        Sig = Sig + jnp.diag(
+            jnp.maximum(jnp.einsum("ij,jk,ik->i", Bm, S_Mj, Bm) - jnp.diag(Sig), 0.0)
+        )
         return Ckj.at[jnp.ix_(posj, posj)].add(Sig * PP)
 
     ld = jax.jit(lambda th: jnp.linalg.slogdet(C_of(th))[1])
@@ -257,6 +337,7 @@ def m_theta_audit(ctx, leg, k_com, bins, Mi, F_M, S_M, Ck, pos, PB, kept, Pprior
     def LC(th, S):
         C = C_of(th)
         return -0.5 * (jnp.linalg.slogdet(C)[1] + jnp.trace(jnp.linalg.solve(C, S)))
+
     gLC = jax.jit(jax.grad(LC))
     # Fisher at the box centre (for the grid and path projections)
     Jc = np.asarray(FK.jacobian(ctx, leg, FK.p_centre(ctx, centre)))
@@ -268,12 +349,14 @@ def m_theta_audit(ctx, leg, k_com, bins, Mi, F_M, S_M, Ck, pos, PB, kept, Pprior
         g = np.zeros(F.shape[0])
         g[:9] = g9
         return np.abs(FK.projected(F, g)[idx])
+
     hubs = lo[I_HUB] + (hi[I_HUB] - lo[I_HUB]) * np.linspace(0, 1, n)
     oms = lo[I_OMH2] + (hi[I_OMH2] - lo[I_OMH2]) * np.linspace(0, 1, n)
     lds, pulls = np.zeros((n, n)), np.zeros((n, n, 3))
     for i, h in enumerate(hubs):
         for j, o in enumerate(oms):
-            th = centre.copy(); th[I_HUB], th[I_OMH2] = h, o
+            th = centre.copy()
+            th[I_HUB], th[I_OMH2] = h, o
             lds[i, j] = float(ld(jnp.asarray(th)))
             pulls[i, j] = proj(Fc, np.asarray(gld(jnp.asarray(th))))
     # (f) mode crossings along the hub and omegamh2 paths through the centre
@@ -283,8 +366,13 @@ def m_theta_audit(ctx, leg, k_com, bins, Mi, F_M, S_M, Ck, pos, PB, kept, Pprior
         eps = 1e-6 * width
 
         def k1(x):
-            th = centre.copy(); th[ax] = x
-            return {c: float(KC.k_skm_from_theta9(k_com, float(T3_Z[c]), jnp.asarray(th))[0]) for c in np.unique(bins["iz"])}
+            th = centre.copy()
+            th[ax] = x
+            return {
+                c: float(KC.k_skm_from_theta9(k_com, float(T3_Z[c]), jnp.asarray(th))[0])
+                for c in np.unique(bins["iz"])
+            }
+
         k1_lo, k1_hi = k1(lo[ax]), k1(hi[ax])
         for kb, c in zip(bins["k"], bins["iz"]):
             ua, ub = kb / k1_lo[c], kb / k1_hi[c]
@@ -305,19 +393,34 @@ def m_theta_audit(ctx, leg, k_com, bins, Mi, F_M, S_M, Ck, pos, PB, kept, Pprior
     for s in range(theta.shape[0]):
         Bs = T3.weights(k_com, theta[s], bins["z"], bins["iz"], bins["k"])
         v = Bs @ coh[s].ravel()
-        r = np.zeros(kept.size); r[pos] = v * PB
+        r = np.zeros(kept.size)
+        r[pos] = v * PB
         S = np.outer(r, r) + Ck
         th = jnp.asarray(theta[s])
         Cs = np.asarray(C_of(th))
         Fs = FK.fisher(J[s], Cs, Pprior)
-        net.append(FK.projected(Fs, np.r_[np.asarray(gLC(th, jnp.asarray(S))), np.zeros(Fs.shape[0] - 9)])[idx])
+        net.append(
+            FK.projected(Fs, np.r_[np.asarray(gLC(th, jnp.asarray(S))), np.zeros(Fs.shape[0] - 9)])[
+                idx
+            ]
+        )
     net = np.array(net)
-    out = dict(logdet_range=float(lds.max() - lds.min()), logdet_pull_max=pulls.max(axis=(0, 1)).tolist(),
-               kink_max=(jumps.max(axis=0).tolist() if jumps.size else [0.0, 0.0, 0.0]), n_crossings=int(len(jumps)),
-               net_pull_mean=np.abs(net.mean(axis=0)).tolist(), net_pull_rms=np.sqrt((net ** 2).mean(axis=0)).tolist(),
-               net_pull_max=np.abs(net).max(axis=0).tolist())
-    out["material"] = bool(max(out["kink_max"]) > 0.05 or max(out["net_pull_mean"]) > 0.1 or max(out["net_pull_rms"]) > 0.2
-                           or max(out["net_pull_max"]) > 0.5 or max(out["logdet_pull_max"]) > 0.3)   # A2/A3 thresholds
+    out = dict(
+        logdet_range=float(lds.max() - lds.min()),
+        logdet_pull_max=pulls.max(axis=(0, 1)).tolist(),
+        kink_max=(jumps.max(axis=0).tolist() if jumps.size else [0.0, 0.0, 0.0]),
+        n_crossings=int(len(jumps)),
+        net_pull_mean=np.abs(net.mean(axis=0)).tolist(),
+        net_pull_rms=np.sqrt((net**2).mean(axis=0)).tolist(),
+        net_pull_max=np.abs(net).max(axis=0).tolist(),
+    )
+    out["material"] = bool(
+        max(out["kink_max"]) > 0.05
+        or max(out["net_pull_mean"]) > 0.1
+        or max(out["net_pull_rms"]) > 0.2
+        or max(out["net_pull_max"]) > 0.5
+        or max(out["logdet_pull_max"]) > 0.3
+    )  # A2/A3 thresholds
     return out
 
 

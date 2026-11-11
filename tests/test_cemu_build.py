@@ -1,6 +1,7 @@
 """Gate E amendment A1 building blocks (hcd_analysis/emulator/cemu_build.py): simulation-level folds, per-cell second
 moments of the ensemble residuals, PSD-preserving smoothing along ln(mode) and z, the Gaussian predictive score, and
 the modes that bracket the data bins over the sampling box. Synthetic inputs."""
+
 import numpy as np
 import pytest
 
@@ -24,7 +25,9 @@ def test_second_moment_per_cell_is_the_uncentered_mean_outer_product():
     cell = np.repeat([0, 1], 25)
     rho, n = CB.second_moment_cells(r, cell, 2)
     assert rho.shape == (2, 4, 4, 6) and list(n) == [25, 25]
-    np.testing.assert_allclose(rho[1, :, :, 3], np.einsum("rc,rd->cd", r[25:, :, 3], r[25:, :, 3]) / 25, rtol=1e-13)
+    np.testing.assert_allclose(
+        rho[1, :, :, 3], np.einsum("rc,rd->cd", r[25:, :, 3], r[25:, :, 3]) / 25, rtol=1e-13
+    )
 
 
 def test_mode_smoothing_keeps_psd_and_h0_is_identity():
@@ -37,7 +40,9 @@ def test_mode_smoothing_keeps_psd_and_h0_is_identity():
         for k in (0, 50, 171):
             assert np.linalg.eigvalsh(s[z, :, :, k]).min() >= -1e-18
     const = np.ones((1, 4, 4, K))
-    np.testing.assert_allclose(CB.smooth_modes(const, 0.3), const, rtol=1e-13)      # a constant is unchanged
+    np.testing.assert_allclose(
+        CB.smooth_modes(const, 0.3), const, rtol=1e-13
+    )  # a constant is unchanged
 
 
 def test_z_smoothing_is_a_normalised_kernel():
@@ -45,17 +50,26 @@ def test_z_smoothing_is_a_normalised_kernel():
     rho = np.ones((z.size, 4, 4, 5)) * z[:, None, None, None]
     np.testing.assert_array_equal(CB.smooth_z(rho, z, 0.0), rho)
     s = CB.smooth_z(rho, z, 0.2)
-    np.testing.assert_allclose(s[6], rho[6], rtol=1e-12)        # linear in z: interior unchanged by a symmetric kernel
+    np.testing.assert_allclose(
+        s[6], rho[6], rtol=1e-12
+    )  # linear in z: interior unchanged by a symmetric kernel
 
 
 def test_gaussian_score_matches_scipy():
     from scipy.stats import multivariate_normal
+
     rng = np.random.default_rng(2)
     r = rng.normal(0, 0.01, (7, 4, 3))
-    A = rng.normal(0, 0.01, (4, 4, 3)); cov = np.einsum("cek,dek->cdk", A, A) + 1e-6 * np.eye(4)[:, :, None]
-    got = CB.gaussian_score(r, np.broadcast_to(cov, (7, 4, 4, 3)), jitter=0.0)   # scipy has no jitter
-    expect = sum(multivariate_normal(np.zeros(4), cov[:, :, k], allow_singular=False).logpdf(r[i, :, k])
-                 for i in range(7) for k in range(3))
+    A = rng.normal(0, 0.01, (4, 4, 3))
+    cov = np.einsum("cek,dek->cdk", A, A) + 1e-6 * np.eye(4)[:, :, None]
+    got = CB.gaussian_score(
+        r, np.broadcast_to(cov, (7, 4, 4, 3)), jitter=0.0
+    )  # scipy has no jitter
+    expect = sum(
+        multivariate_normal(np.zeros(4), cov[:, :, k], allow_singular=False).logpdf(r[i, :, k])
+        for i in range(7)
+        for k in range(3)
+    )
     np.testing.assert_allclose(got, expect, rtol=1e-10)
 
 
@@ -64,6 +78,7 @@ def test_bracketing_modes_cover_every_bin_over_the_box():
     lo, hi = CB.bracket_modes(KCOM, 3.0, k_lo, k_hi, np.zeros(9), np.ones(9))
     from hcd_analysis.emulator.kcoord import kbounds_over_box, k_skm_from_kcom
     from hcd_analysis.emulator.data import PARAM_LIMITS
+
     lim = np.asarray(PARAM_LIMITS, float)
     for hub in np.linspace(lim[5, 0], lim[5, 1], 7):
         for om in np.linspace(lim[6, 0], lim[6, 1], 7):
@@ -73,6 +88,7 @@ def test_bracketing_modes_cover_every_bin_over_the_box():
 
 
 from tests.gate_helpers import external_path  # noqa: E402
+
 EVAL = external_path("HCD_EMULATOR_V2_DIR", "gateC_eval")
 
 
@@ -80,15 +96,21 @@ def test_loo_ensemble_residuals_are_member_means_on_the_held_out_rows():
     import os
     from tests.gate_helpers import real_cache_path
     from hcd_analysis.emulator.data import load_cache_historical
+
     if not os.path.exists(f"{EVAL}/eval_loo60_s00.npz"):
         if os.environ.get("HCD_GATE_RUN") == "1":
             pytest.fail("gate C evaluations absent")
         pytest.skip("gate C evaluations absent")
-    d = load_cache_historical(real_cache_path("lf"), reason='test: a cache in the pre-lineage 3.3 format')
+    d = load_cache_historical(
+        real_cache_path("lf"), reason="test: a cache in the pre-lineage 3.3 format"
+    )
     R = CB.load_loo_ensemble_residuals(EVAL, d, sims=[0, 7])
     assert R["r"].shape == (720, 4, K) and np.all(np.isfinite(R["r"]))
     m = [np.load(f"{EVAL}/eval_loo60_s07.npz", allow_pickle=True)["res_cls"]]
-    m += [np.load(f"{EVAL}/loo60_ensemble/eval_loo60_s07_seed{s}.npz", allow_pickle=True)["res_cls"] for s in range(1, 5)]
+    m += [
+        np.load(f"{EVAL}/loo60_ensemble/eval_loo60_s07_seed{s}.npz", allow_pickle=True)["res_cls"]
+        for s in range(1, 5)
+    ]
     np.testing.assert_allclose(R["r"][360:], np.mean(m, axis=0), rtol=1e-14)
     names = np.asarray(d["sim_name"]).astype(str)
     assert len(set(names[R["rows"][:360]])) == 1 and len(set(names[R["rows"][360:]])) == 1
@@ -102,24 +124,32 @@ def test_loo_ensemble_residuals_are_member_means_on_the_held_out_rows():
 def test_rho_interp_matches_the_deployed_rho_at_tau0():
     from hcd_analysis.emulator.likelihood import rho_at_tau0
     from hcd_analysis.emulator.data import KIM_AMP, KIM_SLOPE
+
     rng = np.random.default_rng(3)
     rho = rng.normal(0, 1e-4, (4, 4, 9, 4))
     centres = np.array([0.6, 0.9, 1.1, 1.5])
     z = 3.2
     for alpha in (0.4, 0.6, 0.75, 1.0, 1.49, 2.0):
         tau0 = alpha * KIM_AMP * (1 + z) ** KIM_SLOPE
-        np.testing.assert_allclose(CB.rho_interp_alpha(rho, centres, np.array([alpha]))[0],
-                                   np.asarray(rho_at_tau0(rho, centres, z, tau0)), rtol=1e-12, atol=1e-20)
+        np.testing.assert_allclose(
+            CB.rho_interp_alpha(rho, centres, np.array([alpha]))[0],
+            np.asarray(rho_at_tau0(rho, centres, z, tau0)),
+            rtol=1e-12,
+            atol=1e-20,
+        )
 
 
 def test_class_coefficients_are_production_with_and_without_the_dla_mask():
     w = np.array([[0.70, 0.10, 0.15, 0.05]])
-    np.testing.assert_allclose(CB.class_coef(w, masked=False), [[0.70, 0.10, 0.15, 0.05]], rtol=1e-14)
+    np.testing.assert_allclose(
+        CB.class_coef(w, masked=False), [[0.70, 0.10, 0.15, 0.05]], rtol=1e-14
+    )
     np.testing.assert_allclose(CB.class_coef(w, masked=True), [[0.75, 0.10, 0.15, 0.0]], rtol=1e-14)
 
 
 def test_combined_variance_is_the_deployed_emu_var_algebra():
     from hcd_analysis.emulator import data_likelihood as DL
+
     rng = np.random.default_rng(4)
     Kc = 7
     A = rng.normal(0, 1e-2, (4, 4, Kc))
@@ -128,13 +158,23 @@ def test_combined_variance_is_the_deployed_emu_var_algebra():
     a = np.array([0.1, 0.15, 0.05])
     coef = CB.class_coef(np.concatenate([[1 - a.sum()], a])[None], masked=False)[0]
     var_frac, P_obs = CB.combined_variance(P, coef, rho)
-    ev = np.asarray(DL.emu_var_modes(P, 3.0, 1.0, a, dla_core=np.zeros(Kc), alpha_centres=np.array([1.0]),
-                                     rho_zb=rho[..., None]))
-    np.testing.assert_allclose(var_frac * P_obs ** 2, ev, rtol=1e-12)
+    ev = np.asarray(
+        DL.emu_var_modes(
+            P,
+            3.0,
+            1.0,
+            a,
+            dla_core=np.zeros(Kc),
+            alpha_centres=np.array([1.0]),
+            rho_zb=rho[..., None],
+        )
+    )
+    np.testing.assert_allclose(var_frac * P_obs**2, ev, rtol=1e-12)
 
 
 def test_combined_score_is_the_1d_gaussian_of_the_combined_fractional_residual():
     from scipy.stats import norm
+
     rng = np.random.default_rng(5)
     Kc = 6
     A = rng.normal(0, 1e-2, (4, 4, Kc))
@@ -146,22 +186,22 @@ def test_combined_score_is_the_1d_gaussian_of_the_combined_fractional_residual()
     got = CB.combined_logpdf(r, P, coef, rho, mask)
     P_obs = coef @ P
     e = (coef[:, None] * P * r).sum(0) / P_obs
-    var = np.einsum("c,d,cdk,ck,dk->k", coef, coef, rho, P, P) / P_obs ** 2
+    var = np.einsum("c,d,cdk,ck,dk->k", coef, coef, rho, P, P) / P_obs**2
     np.testing.assert_allclose(got, norm(0, np.sqrt(var[mask])).logpdf(e[mask]).sum(), rtol=1e-12)
 
 
 def test_paired_bootstrap_se_resamples_simulations():
     rng = np.random.default_rng(6)
     a = rng.normal(0, 1, 60)
-    b = a + rng.normal(0.1, 0.05, 60)              # strongly paired: unpaired SE would be ~20x larger
+    b = a + rng.normal(0.1, 0.05, 60)  # strongly paired: unpaired SE would be ~20x larger
     se = CB.paired_se(a, b, n_boot=2000, seed=0)
     assert abs(se / (np.std(a - b, ddof=1) / np.sqrt(60)) - 1) < 0.1
-    assert se == CB.paired_se(a, b, n_boot=2000, seed=0)          # deterministic
+    assert se == CB.paired_se(a, b, n_boot=2000, seed=0)  # deterministic
 
 
 def test_selection_is_argmax_with_ties_to_more_smoothing():
     means = np.array([-10.0, -9.0, -9.0 * (1 + 1e-8), -9.5])
-    smooth_rank = np.array([0, 1, 2, 3])             # larger = more smoothing
+    smooth_rank = np.array([0, 1, 2, 3])  # larger = more smoothing
     assert CB.select_argmax(means, smooth_rank) == 2
     assert CB.select_argmax(np.array([-3.0, -1.0, -2.0]), np.array([0, 1, 2])) == 1
 
@@ -170,7 +210,9 @@ def test_tau0_pooling_preferred_unless_banded_wins_by_two_paired_se():
     rng = np.random.default_rng(7)
     pooled = rng.normal(0, 1, 60)
     noise = rng.normal(0, 1, 60)
-    assert CB.choose_tau0(pooled + noise - noise.mean() + 0.001, pooled, seed=0) == "pooled"   # tiny gain, SE ~ 0.13
+    assert (
+        CB.choose_tau0(pooled + noise - noise.mean() + 0.001, pooled, seed=0) == "pooled"
+    )  # tiny gain, SE ~ 0.13
     assert CB.choose_tau0(pooled + 1.0 + rng.normal(0, 0.01, 60), pooled, seed=0) == "banded"
     assert CB.choose_tau0(pooled - 1.0, pooled, seed=0) == "pooled"
 
@@ -179,12 +221,14 @@ def test_guard_acts_on_the_whole_z_cell_with_the_largest_h_within_one_se_of_raw(
     rng = np.random.default_rng(8)
     n_sim, n_h, n_z, n_band = 60, 4, 2, 3
     base = rng.normal(0, 1, (n_sim, 1, 1, 1))
-    s = np.broadcast_to(base, (n_sim, n_h, n_z, n_band)).copy() + rng.normal(0, 1e-3, (n_sim, n_h, n_z, n_band))
+    s = np.broadcast_to(base, (n_sim, n_h, n_z, n_band)).copy() + rng.normal(
+        0, 1e-3, (n_sim, n_h, n_z, n_band)
+    )
     # z cell 1, band 2: raw (h index 0) beats everything else strongly; h index 1 within noise of raw
     s[:, 2:, 1, 2] -= 1.0
-    s[:, 1, 1, 2] = s[:, 0, 1, 2] + 5e-4            # h index 1 slightly better than raw there: within 1 SE
+    s[:, 1, 1, 2] = s[:, 0, 1, 2] + 5e-4  # h index 1 slightly better than raw there: within 1 SE
     h_of_z = CB.guard(s, selected=3, n_boot=500, seed=0)
-    assert list(h_of_z) == [3, 1]                    # z cell 0 untouched; z cell 1 takes h index 1 for ALL bands
+    assert list(h_of_z) == [3, 1]  # z cell 0 untouched; z cell 1 takes h index 1 for ALL bands
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -195,16 +239,16 @@ def _synthetic_t1(seed=0, n_sim=20, Ksyn=40, spike=None, tau0_dep=False):
     z_cells = np.array([2.4, 3.0])
     alphas = np.array([0.7, 0.9, 1.1, 1.3])
     n = np.arange(1, Ksyn + 1)
-    sig = 0.01 * (1 + 0.5 * np.log(n) / np.log(Ksyn))          # smooth in ln(mode)
+    sig = 0.01 * (1 + 0.5 * np.log(n) / np.log(Ksyn))  # smooth in ln(mode)
     if spike is not None:
         sig = sig.copy()
-        sig[spike] *= 5.0                                       # a real narrow feature, in every simulation
+        sig[spike] *= 5.0  # a real narrow feature, in every simulation
     L = np.linalg.cholesky(0.5 * np.eye(4) + 0.5 * np.ones((4, 4)))
     rows = []
     for s in range(n_sim):
         for iz in range(2):
             for a in alphas:
-                amp = (a if tau0_dep else 1.0)
+                amp = a if tau0_dep else 1.0
                 eps = rng.normal(0, 1, (Ksyn, 4)) @ L.T
                 rows.append((f"sim{s:02d}", iz, a, (eps * sig[:, None] * amp).T))
     sim = np.array([r[0] for r in rows])
@@ -212,13 +256,25 @@ def _synthetic_t1(seed=0, n_sim=20, Ksyn=40, spike=None, tau0_dep=False):
     alpha = np.array([r[2] for r in rows])
     r = np.stack([r[3] for r in rows])
     band = np.searchsorted(alphas, alpha)
-    T = CB.T1Data(r=r, P=np.ones_like(r), coef=CB.class_coef(np.tile([0.7, 0.1, 0.15, 0.05], (len(rows), 1)), masked=True),
-                  alpha=alpha, band=band, centres=alphas.copy(), zc=zc, sim=sim, z_cells=z_cells,
-                  mask=np.ones((2, Ksyn), bool), kband=np.tile(np.repeat([0, 1, 2, 3], Ksyn // 4), (2, 1)))
+    T = CB.T1Data(
+        r=r,
+        P=np.ones_like(r),
+        coef=CB.class_coef(np.tile([0.7, 0.1, 0.15, 0.05], (len(rows), 1)), masked=True),
+        alpha=alpha,
+        band=band,
+        centres=alphas.copy(),
+        zc=zc,
+        sim=sim,
+        z_cells=z_cells,
+        mask=np.ones((2, Ksyn), bool),
+        kband=np.tile(np.repeat([0, 1, 2, 3], Ksyn // 4), (2, 1)),
+    )
     return T
 
 
-CANDS_SYN = [(h, sz, pooled) for pooled in (True, False) for h in (0.0, 0.05, 0.2, 0.5) for sz in (0.0, 0.2)]
+CANDS_SYN = [
+    (h, sz, pooled) for pooled in (True, False) for h in (0.0, 0.05, 0.2, 0.5) for sz in (0.0, 0.2)
+]
 
 
 def test_t1_cv_prefers_smoothing_for_a_smooth_noisy_truth_and_pools_tau0():
@@ -233,16 +289,20 @@ def test_t1_cv_prefers_smoothing_for_a_smooth_noisy_truth_and_pools_tau0():
 def test_t1_cv_flags_a_real_tau0_dependence():
     T = _synthetic_t1(seed=2, tau0_dep=True)
     sel = CB.t1_select(CB.t1_cv(T, CANDS_SYN, n_folds=5), CANDS_SYN, n_boot=500, seed=0)
-    assert sel["tau0"] == "banded"                  # the caller STOPS for the PI on this (amendment A1 rev 1)
+    assert sel["tau0"] == "banded"  # the caller STOPS for the PI on this (amendment A1 rev 1)
 
 
 def test_t1_final_product_keeps_a_real_narrow_feature():
     T = _synthetic_t1(seed=3, spike=17)
     cv = CB.t1_cv(T, CANDS_SYN, n_folds=5)
     sel = CB.t1_select(cv, CANDS_SYN, n_boot=500, seed=0)
-    rho = CB.t1_build(T, np.arange(len(T.sim)), CANDS_SYN, sel)            # (n_z, B, 4, 4, K)
-    raw = CB.t1_build(T, np.arange(len(T.sim)), CANDS_SYN, dict(sel, chosen=CANDS_SYN.index((0.0, 0.0, True)),
-                                                                h_of_z=[0.0, 0.0]))
+    rho = CB.t1_build(T, np.arange(len(T.sim)), CANDS_SYN, sel)  # (n_z, B, 4, 4, K)
+    raw = CB.t1_build(
+        T,
+        np.arange(len(T.sim)),
+        CANDS_SYN,
+        dict(sel, chosen=CANDS_SYN.index((0.0, 0.0, True)), h_of_z=[0.0, 0.0]),
+    )
     for iz in range(2):
         peak = rho[iz, 0, 0, 0, 17] / np.median(rho[iz, 0, 0, 0])
         assert peak > 0.5 * raw[iz, 0, 0, 0, 17] / np.median(raw[iz, 0, 0, 0])
@@ -258,7 +318,7 @@ def test_t1_cv_cell_split_sums_to_the_simulation_total():
 
 def test_t1_cv_tolerates_folds_without_held_out_simulations():
     T = _synthetic_t1(seed=5, n_sim=4)
-    cv = CB.t1_cv(T, [(0.0, 0.0, True)], n_folds=5)                 # fold 4 holds no simulation
+    cv = CB.t1_cv(T, [(0.0, 0.0, True)], n_folds=5)  # fold 4 holds no simulation
     assert cv["main"].shape == (4, 1) and np.all(np.isfinite(cv["main"]))
 
 
@@ -267,7 +327,7 @@ def test_t1_cv_tolerates_folds_without_held_out_simulations():
 # --------------------------------------------------------------------------------------------- #
 def test_dla_core_is_a_fixed_function_of_physical_k_whatever_each_rows_mode_grid():
     grid = CB.DLA_CORE_GRID
-    f = lambda k: 3.0 - 20.0 * k                                 # linear in k: interpolation is exact
+    f = lambda k: 3.0 - 20.0 * k  # linear in k: interpolation is exact
     rows_k = [np.linspace(5e-4, 0.09, 172) * s for s in (0.9, 1.0, 1.1)]
     core = np.array([f(k) for k in rows_k])
     got = CB.dla_core_z(np.array(rows_k), core, np.array([3.0, 3.0, 3.0]), 3.0, grid)
@@ -280,9 +340,9 @@ def test_dla_core_excludes_rows_not_covering_a_point_and_selects_z_within_005():
     grid = np.array([1e-3, 5e-2, 9.5e-2])
     k_a, k_b = np.linspace(5e-4, 0.09, 50), np.linspace(5e-4, 0.1, 50)
     core = np.array([np.full(50, 1.0), np.full(50, 3.0), np.full(50, 100.0)])
-    z = np.array([3.0, 3.04, 3.2])                               # the third row is another z cell
+    z = np.array([3.0, 3.04, 3.2])  # the third row is another z cell
     got = CB.dla_core_z(np.array([k_a, k_b, k_b]), core, z, 3.0, grid)
-    np.testing.assert_allclose(got, [2.0, 2.0, 3.0])            # 0.095 only covered by row b
+    np.testing.assert_allclose(got, [2.0, 2.0, 3.0])  # 0.095 only covered by row b
 
 
 def test_dla_core_leg_is_the_mean_over_the_legs_z_and_is_read_in_ln_k():
@@ -292,7 +352,7 @@ def test_dla_core_leg_is_the_mean_over_the_legs_z_and_is_read_in_ln_k():
     core = np.array([np.full(172, 1.0), np.full(172, 5.0)])
     leg = CB.dla_core_leg(rows_k, core, np.array([2.2, 2.4]), [2.2, 2.4], grid)
     np.testing.assert_allclose(leg, 3.0)
-    g = np.log(grid) ** 2                                         # linear in ln k -> exact at any k inside
+    g = np.log(grid) ** 2  # linear in ln k -> exact at any k inside
     kd = np.array([1e-3, 2.345e-2, 0.07])
     np.testing.assert_allclose(CB.dla_core_at(kd, grid, np.log(grid)), np.log(kd), rtol=1e-12)
     with pytest.raises(ValueError):

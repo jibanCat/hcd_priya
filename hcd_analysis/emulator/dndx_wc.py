@@ -10,6 +10,7 @@ on the release training cache and shipped with a model bundle (``wc_map.WcMap.de
 selects ``HISTORICAL_DELTA_C``, the coefficients fitted in 2026-06 to counts that include the pre-fix box-edge
 duplicates; they remain only so the historical analyses reproduce, and the public predictor never uses them.
 """
+
 from __future__ import annotations
 from typing import NamedTuple
 
@@ -35,7 +36,9 @@ def mu_from_dndx(dndx, Xbar):
 class DeltaCMap(NamedTuple):
     """A delta_c(z) correction: ``coeffs`` (4, 3) np.polyval-order coefficients of the degree-2 polynomial per class
     (clean, LLS, subDLA, DLA), applied with z clamped to [``z_lo``, ``z_hi``] (the fit's redshift range: the quadratic
-    is never extrapolated). Host values; pass it to traced code as a closed-over constant, not as a traced argument."""
+    is never extrapolated). Host values; pass it to traced code as a closed-over constant, not as a traced argument.
+    """
+
     coeffs: np.ndarray
     z_lo: float
     z_hi: float
@@ -47,15 +50,20 @@ class DeltaCMap(NamedTuple):
 # (clean, LLS, subDLA, DLA). See the internal note 2026-06-01-delta_c-coeffs. Used only when
 # ``delta_map`` is None (the historical analyses); a release model bundle carries its own refitted map (wc_map.py).
 HISTORICAL_DELTA_C = DeltaCMap(
-    coeffs=np.array([
-        [-0.0044601756018632,    0.02941370276821661,  -0.04147804040644924],   # clean
-        [-7.391610723256435e-06, 0.008526578464137916, -0.03592195195833433],   # LLS
-        [-0.0006304124952415818, 0.009001921148434061, -0.03672596701410354],   # subDLA
-        [-0.0002204519439413697, 0.0033098470327118175,-0.0245078526302848],    # DLA
-    ], dtype=np.float64),
-    z_lo=2.0, z_hi=5.4,
-    label="historical: fitted to the pre-fix (box-edge duplicate) counts; historical analyses only")
-_DELTA_C_COEFFS = jnp.asarray(HISTORICAL_DELTA_C.coeffs)        # historical alias (same values)
+    coeffs=np.array(
+        [
+            [-0.0044601756018632, 0.02941370276821661, -0.04147804040644924],  # clean
+            [-7.391610723256435e-06, 0.008526578464137916, -0.03592195195833433],  # LLS
+            [-0.0006304124952415818, 0.009001921148434061, -0.03672596701410354],  # subDLA
+            [-0.0002204519439413697, 0.0033098470327118175, -0.0245078526302848],  # DLA
+        ],
+        dtype=np.float64,
+    ),
+    z_lo=2.0,
+    z_hi=5.4,
+    label="historical: fitted to the pre-fix (box-edge duplicate) counts; historical analyses only",
+)
+_DELTA_C_COEFFS = jnp.asarray(HISTORICAL_DELTA_C.coeffs)  # historical alias (same values)
 
 
 # Calibration z-range of the HISTORICAL delta_c fit. The deg-2 polynomial extrapolates as an
@@ -73,7 +81,9 @@ DELTA_C_RESID_STD = jnp.array([0.0093, 0.0059, 0.0032, 0.0016])
 def _delta_map(delta_map):
     m = HISTORICAL_DELTA_C if delta_map is None else delta_map
     if np.shape(m.coeffs) != (4, 3):
-        raise ValueError(f"delta_c map coefficients must have shape (4, 3), got {np.shape(m.coeffs)}")
+        raise ValueError(
+            f"delta_c map coefficients must have shape (4, 3), got {np.shape(m.coeffs)}"
+        )
     return m
 
 
@@ -84,21 +94,21 @@ def delta_c(z, delta_map=None):
     HISTORICAL map (pre-fix counts; historical analyses only)."""
     m = _delta_map(delta_map)
     z = jnp.clip(jnp.asarray(z), m.z_lo, m.z_hi)
-    zz = jnp.stack([z**2, z, jnp.ones_like(z)], axis=-1)   # (...,3)
-    return zz @ jnp.asarray(m.coeffs).T                    # (...,4)
+    zz = jnp.stack([z**2, z, jnp.ones_like(z)], axis=-1)  # (...,3)
+    return zz @ jnp.asarray(m.coeffs).T  # (...,4)
 
 
 def w_c_corrected(dndx, Xbar, z, delta_map=None):
     """Corrected per-sightline class weights: w_M0*(1+delta_c(z)), renormalised to 1.
     dndx: (...,3) HCD incidence (LLS,subDLA,DLA); Xbar: (...); z: (...). Returns (...,4).
     ``delta_map`` as in ``delta_c`` (None: the historical map)."""
-    w0 = w_c_from_mu(mu_from_dndx(dndx, Xbar))   # (...,4)
+    w0 = w_c_from_mu(mu_from_dndx(dndx, Xbar))  # (...,4)
     w = w0 * (1.0 + delta_c(z, delta_map))
     return w / jnp.sum(w, axis=-1, keepdims=True)
 
 
 # --- Task 3: alpha_c(z) incidence parametrization + analytic M0-inverse ----------
-_LOG_FLOOR = 1e-12   # positive floor on (1 - w...) so log stays finite & differentiable
+_LOG_FLOOR = 1e-12  # positive floor on (1 - w...) so log stays finite & differentiable
 
 
 def dndx_powerlaw(z, A, gamma):
@@ -106,7 +116,8 @@ def dndx_powerlaw(z, A, gamma):
     z: scalar or (...); A, gamma: scalar or (3,) for (LLS,subDLA,DLA).
     Returns (...,3) dN/dX_c for (LLS, subDLA, DLA)."""
     z = jnp.asarray(z)
-    A = jnp.asarray(A); gamma = jnp.asarray(gamma)
+    A = jnp.asarray(A)
+    gamma = jnp.asarray(gamma)
     return A * (1.0 + z[..., None]) ** gamma
 
 
@@ -115,8 +126,8 @@ def alpha_from_dndx_law(A, gamma, Xbar, z, delta_map=None):
     w_c_corrected applied to the PW14 incidence law.
     A, gamma: scalar or (3,); Xbar: (...); z: scalar or (...). Returns (...,3)
     for (LLS, subDLA, DLA). ``delta_map`` as in ``delta_c`` (None: the historical map)."""
-    dndx = dndx_powerlaw(z, A, gamma)                  # (...,3)
-    return w_c_corrected(dndx, Xbar, z, delta_map)[..., 1:]   # drop clean -> HCD (LLS,subDLA,DLA)
+    dndx = dndx_powerlaw(z, A, gamma)  # (...,3)
+    return w_c_corrected(dndx, Xbar, z, delta_map)[..., 1:]  # drop clean -> HCD (LLS,subDLA,DLA)
 
 
 def alpha_to_dndx(alpha_hcd, Xbar, z, apply_delta=True, delta_map=None):
@@ -159,12 +170,14 @@ def alpha_to_dndx(alpha_hcd, Xbar, z, apply_delta=True, delta_map=None):
     # Exact top-down inverse of w_c_from_mu. Clip the (1 - ...) args to a tiny positive
     # floor so log stays finite for valid inputs (keeps it differentiable).
     mu_DLA = -jnp.log(jnp.clip(1.0 - w_DLA, _LOG_FLOOR, None))
-    mu_sub = -jnp.log(jnp.clip(1.0 - w_sub / jnp.clip(1.0 - w_DLA, _LOG_FLOOR, None),
-                               _LOG_FLOOR, None))
-    mu_LLS = -jnp.log(jnp.clip(1.0 - w_LLS / jnp.clip((1.0 - w_DLA) - w_sub, _LOG_FLOOR, None),
-                               _LOG_FLOOR, None))
+    mu_sub = -jnp.log(
+        jnp.clip(1.0 - w_sub / jnp.clip(1.0 - w_DLA, _LOG_FLOOR, None), _LOG_FLOOR, None)
+    )
+    mu_LLS = -jnp.log(
+        jnp.clip(1.0 - w_LLS / jnp.clip((1.0 - w_DLA) - w_sub, _LOG_FLOOR, None), _LOG_FLOOR, None)
+    )
 
-    mu = jnp.stack([mu_LLS, mu_sub, mu_DLA], axis=-1)   # (...,3)
+    mu = jnp.stack([mu_LLS, mu_sub, mu_DLA], axis=-1)  # (...,3)
     return mu / jnp.asarray(Xbar)[..., None]
 
 
@@ -235,20 +248,21 @@ def alpha_to_dndx_exact(alpha_hcd, Xbar, z, *, mode="raise", delta_map=None):
             kinds.append(f"sum(alpha) >= 1 (outside the occupancy simplex) in {n_over} row(s)")
         raise ValueError(
             f"alpha_to_dndx_exact: {n_bad} input row(s) outside the valid domain "
-            f"[all(alpha) >= 0 and 1 - sum(alpha) > 0]: " + "; ".join(kinds) +
-            f". Worst sum(alpha) = {worst_sum!r}. Draws from the pre-2026-07-22 "
+            f"[all(alpha) >= 0 and 1 - sum(alpha) > 0]: "
+            + "; ".join(kinds)
+            + f". Worst sum(alpha) = {worst_sum!r}. Draws from the pre-2026-07-22 "
             f"unbounded alpha prior can legitimately violate this domain; use "
-            f"mode='mask' to read such historical draws (invalid entries -> NaN).")
+            f"mode='mask' to read such historical draws (invalid entries -> NaN)."
+        )
 
     # Mask invalid rows to NaN BEFORE the logs (NaN propagates silently -- no
     # log-of-negative warnings). In raise mode everything is valid at this point.
     a = np.where(valid[..., None], a, np.nan)
     a_clean = np.where(valid, a_clean, np.nan)
 
-    d = np.asarray(delta_c(z, delta_map), dtype=np.float64)           # (...,4)
-    Z = 1.0 / (a_clean / (1.0 + d[..., 0])
-               + np.sum(a / (1.0 + d[..., 1:]), axis=-1))
-    w0 = a * Z[..., None] / (1.0 + d[..., 1:])                        # (...,3)
+    d = np.asarray(delta_c(z, delta_map), dtype=np.float64)  # (...,4)
+    Z = 1.0 / (a_clean / (1.0 + d[..., 0]) + np.sum(a / (1.0 + d[..., 1:]), axis=-1))
+    w0 = a * Z[..., None] / (1.0 + d[..., 1:])  # (...,3)
     w_LLS, w_sub, w_DLA = w0[..., 0], w0[..., 1], w0[..., 2]
 
     mu_DLA = -np.log1p(-w_DLA)

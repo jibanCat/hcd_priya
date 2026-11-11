@@ -3,6 +3,7 @@
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
      python -m pytest tests/test_tau0_bands.py -v
 """
+
 import sys
 from pathlib import Path
 
@@ -12,7 +13,10 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from hcd_analysis.emulator.data import (
-    make_tau0_bands, tau0_ladder_factor, KIM_AMP, KIM_SLOPE,
+    make_tau0_bands,
+    tau0_ladder_factor,
+    KIM_AMP,
+    KIM_SLOPE,
 )
 from hcd_analysis.emulator.train import aggregate_error_vector
 
@@ -89,7 +93,7 @@ def test_aggregate_error_vector_dla_flag_worst_over_all_bands():
     neff[0][3, 2, 1, 0] = 0.5
     out = aggregate_error_vector(resid, neff, shot_thresh=1.0)
     flag = out["dla_shot_flag"]
-    assert flag[2] and flag.sum() == 1   # only k=2 flagged (worst-case over all bands)
+    assert flag[2] and flag.sum() == 1  # only k=2 flagged (worst-case over all bands)
 
 
 def test_aggregate_error_vector_3d_backcompat():

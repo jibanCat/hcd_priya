@@ -27,7 +27,9 @@ Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     python -m pytest tests/test_legb_per_leg_alpha.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import numpy as np
@@ -45,7 +47,9 @@ from tests.gate_helpers import external_path  # noqa: E402  (data roots come fro
 _CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 _CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
-_KS = (external_path("HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"))
+_KS = external_path(
+    "HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"
+)
 # eBOSS DR14 P1D (load_eboss_leg's default npz_path, hcd_analysis/emulator/data_likelihood.py).
 _EBOSS_NPZ = external_path("HCD_P1D_DATA_DIR", "eboss_dr14_p1d/eboss_dr14_p1d.npz")
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
@@ -89,11 +93,13 @@ def test_signatures_unmoved():
     assert C.forward_signature() == FORWARD_SIGNATURE_PIN, (
         "forward_signature moved — neither the per-leg alpha build nor the W2 KS reparam "
         "may edit the forward decision payload (PROD_FORWARD_BY_LEG / PROD_RES_CORR_ON / "
-        "DESI_DLA_COV_REDUCE)")
+        "DESI_DLA_COV_REDUCE)"
+    )
     assert INF.hcd_prior_signature() == HCD_PRIOR_SIGNATURE_PIN, (
         "hcd_prior_signature moved off the W2-pinned literal — an HCD prior constant "
         "changed without a sanctioned re-pin (record old->new in the commit message and "
-        "update this pin only with a signed decision)")
+        "update this pin only with a signed decision)"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -133,19 +139,26 @@ def test_trace_matches_sites_golden(trace_setup):
     g = np.load(SITES_GOLDEN, allow_pickle=True)
     model_rec, model_factor, prior_rec = G.trace_records(ctx, mock_legs, core)
 
-    assert [n for n, _, _ in model_rec] == list(g["model_names"]), \
-        "_legb_model site NAME ORDER drifted vs the pre-feature golden"
+    assert [n for n, _, _ in model_rec] == list(
+        g["model_names"]
+    ), "_legb_model site NAME ORDER drifted vs the pre-feature golden"
     assert [k for _, k, _ in model_rec] == list(g["model_kinds"])
-    assert [n for n, _, _ in prior_rec] == list(g["prior_names"]), \
-        "_legb_priors_only site NAME ORDER drifted vs the pre-feature golden"
+    assert [n for n, _, _ in prior_rec] == list(
+        g["prior_names"]
+    ), "_legb_priors_only site NAME ORDER drifted vs the pre-feature golden"
     for n, _, v in model_rec:
-        np.testing.assert_array_equal(v, g[f"model::{n}"],
-                                      err_msg=f"model site {n!r} value drifted (bitwise)")
+        np.testing.assert_array_equal(
+            v, g[f"model::{n}"], err_msg=f"model site {n!r} value drifted (bitwise)"
+        )
     for n, _, v in prior_rec:
-        np.testing.assert_array_equal(v, g[f"prior::{n}"],
-                                      err_msg=f"priors-only site {n!r} value drifted (bitwise)")
-    np.testing.assert_array_equal(np.asarray(model_factor), g["loglik_factor"],
-                                  err_msg="loglik factor value drifted (bitwise)")
+        np.testing.assert_array_equal(
+            v, g[f"prior::{n}"], err_msg=f"priors-only site {n!r} value drifted (bitwise)"
+        )
+    np.testing.assert_array_equal(
+        np.asarray(model_factor),
+        g["loglik_factor"],
+        err_msg="loglik factor value drifted (bitwise)",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -162,12 +175,16 @@ def test_short_nuts_matches_golden(nuts_setup):
     ctx, d, mock_legs, core = nuts_setup
     g = np.load(NUTS_GOLDEN, allow_pickle=True)
     samples, n_div = G.run_short_nuts(ctx, mock_legs, core)
-    assert list(samples.keys()) == list(g["sample_keys"]), \
-        "samples-dict key set/order drifted vs the pre-feature golden"
+    assert list(samples.keys()) == list(
+        g["sample_keys"]
+    ), "samples-dict key set/order drifted vs the pre-feature golden"
     assert int(n_div) == int(g["n_div"])
     for k in samples:
-        np.testing.assert_array_equal(np.asarray(samples[k]), g[f"nuts::{k}"],
-                                      err_msg=f"NUTS draws for {k!r} drifted (bitwise)")
+        np.testing.assert_array_equal(
+            np.asarray(samples[k]),
+            g[f"nuts::{k}"],
+            err_msg=f"NUTS draws for {k!r} drifted (bitwise)",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -184,8 +201,9 @@ def joint2_setup():
     MIGRATED off DESI+KS (W2 RF1, 2026-07-22): a joint build including the KS survey now
     REFUSES (see test_guard_joint_including_ks_forbidden). eBOSS shares dla_forward_frac=0
     with KS, so every prior-only-DLA semantics assertion carries over unchanged."""
-    ctx, d = C.build_legb_joint_ctx({"DESI": "DESI", "eBOSS": "eBOSS"},
-                                    desi_kwargs=dict(_NARROW), use_xclass=True)
+    ctx, d = C.build_legb_joint_ctx(
+        {"DESI": "DESI", "eBOSS": "eBOSS"}, desi_kwargs=dict(_NARROW), use_xclass=True
+    )
     mock_legs, core = G.mock_for(ctx, d)
     return ctx, d, mock_legs, core
 
@@ -196,9 +214,15 @@ def joint1_setup():
     EXACTLY the scripts/make_legb_sites_golden.build_nuts_ctx flag set so the single-leg
     reference is the pre-feature short-NUTS golden itself."""
     ctx, d = C.build_legb_joint_ctx(
-        {"DESI": "DESI"}, desi_kwargs=dict(_NARROW), use_xclass=True,
-        metals_on=True, sample_metals=True, sample_res=True, f_res_amp_sigma=0.02,
-        metal_prior="flatlog2node")
+        {"DESI": "DESI"},
+        desi_kwargs=dict(_NARROW),
+        use_xclass=True,
+        metals_on=True,
+        sample_metals=True,
+        sample_res=True,
+        f_res_amp_sigma=0.02,
+        metal_prior="flatlog2node",
+    )
     mock_legs, core = G.mock_for(ctx, d)
     return ctx, d, mock_legs, core
 
@@ -206,8 +230,9 @@ def joint1_setup():
 @pytest.fixture(scope="session")
 def eboss_single_setup():
     """A single-leg survey='eBOSS' build (prior reference for T6; ctx only)."""
-    ctx, d = C.build_legb_ctx(desi_kwargs=dict(_NARROW), use_xclass=True,
-                              with_eboss=True, survey="eBOSS")
+    ctx, d = C.build_legb_ctx(
+        desi_kwargs=dict(_NARROW), use_xclass=True, with_eboss=True, survey="eBOSS"
+    )
     return ctx, d
 
 
@@ -228,8 +253,13 @@ def test_ctx_fields_default_off():
     (dormant static branch — positional construction must not shift)."""
     f = C.LegBCtx._fields
     i = f.index("res_corr_on")
-    assert f[i + 1:i + 6] == ("per_leg_alpha", "alpha_hcd_mu_by_leg",
-                              "alpha_hcd_sigma_by_leg", "survey_by_leg", "per_leg_zslope")
+    assert f[i + 1 : i + 6] == (
+        "per_leg_alpha",
+        "alpha_hcd_mu_by_leg",
+        "alpha_hcd_sigma_by_leg",
+        "survey_by_leg",
+        "per_leg_zslope",
+    )
     d = C.LegBCtx._field_defaults
     assert d["per_leg_alpha"] is False and d["per_leg_zslope"] is False
     assert d["alpha_hcd_mu_by_leg"] is None and d["alpha_hcd_sigma_by_leg"] is None
@@ -243,8 +273,8 @@ def test_joint_builder_fields_and_poison(joint2_setup):
     to None (any legacy consumer fails loud), and restricts legs in build order."""
     ctx, d, _, _ = joint2_setup
     assert ctx.per_leg_alpha is True and ctx.per_leg_zslope is False
-    assert ctx.alpha_hcd_mu is None and ctx.alpha_hcd_sigma is None      # POISON
-    assert [l.name for l in ctx.legs] == ["DESI", "eBOSS"]               # build (list) order
+    assert ctx.alpha_hcd_mu is None and ctx.alpha_hcd_sigma is None  # POISON
+    assert [l.name for l in ctx.legs] == ["DESI", "eBOSS"]  # build (list) order
     assert ctx.survey_by_leg == {"DESI": "DESI", "eBOSS": "eBOSS"}
     assert set(ctx.alpha_hcd_mu_by_leg) == {"DESI", "eBOSS"}
     assert set(ctx.alpha_hcd_sigma_by_leg) == {"DESI", "eBOSS"}
@@ -260,23 +290,31 @@ def test_joint_builder_fields_and_poison(joint2_setup):
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have_joint, reason="real cache/ckpt/DESI/KS/eBOSS not present")
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
-def test_per_leg_priors_bitwise_match_single_leg_builds(joint2_setup, nuts_setup,
-                                                        eboss_single_setup):
+def test_per_leg_priors_bitwise_match_single_leg_builds(
+    joint2_setup, nuts_setup, eboss_single_setup
+):
     """Each leg's joint prior (mu, sigma) is BITWISE the prior that leg's single-leg
     build_legb_ctx(survey=L) deploys (coherence property: per-leg blind posteriors and
     the joint fit are prior-commensurable). Also the zslope center matches."""
     ctx_j, _, _, _ = joint2_setup
-    ctx_desi = nuts_setup[0]                     # survey="DESI" single build
-    ctx_eboss = eboss_single_setup[0]            # survey="eBOSS" single build
+    ctx_desi = nuts_setup[0]  # survey="DESI" single build
+    ctx_eboss = eboss_single_setup[0]  # survey="eBOSS" single build
     for name, ref in (("DESI", ctx_desi), ("eBOSS", ctx_eboss)):
         np.testing.assert_array_equal(
-            np.asarray(ctx_j.alpha_hcd_mu_by_leg[name]), np.asarray(ref.alpha_hcd_mu),
-            err_msg=f"{name} joint prior CENTER != single-leg build (bitwise)")
+            np.asarray(ctx_j.alpha_hcd_mu_by_leg[name]),
+            np.asarray(ref.alpha_hcd_mu),
+            err_msg=f"{name} joint prior CENTER != single-leg build (bitwise)",
+        )
         np.testing.assert_array_equal(
-            np.asarray(ctx_j.alpha_hcd_sigma_by_leg[name]), np.asarray(ref.alpha_hcd_sigma),
-            err_msg=f"{name} joint prior WIDTH != single-leg build (bitwise)")
-        np.testing.assert_array_equal(np.asarray(ctx_j.zslope_mu), np.asarray(ref.zslope_mu),
-                                      err_msg=f"{name} joint zslope center != single-leg")
+            np.asarray(ctx_j.alpha_hcd_sigma_by_leg[name]),
+            np.asarray(ref.alpha_hcd_sigma),
+            err_msg=f"{name} joint prior WIDTH != single-leg build (bitwise)",
+        )
+        np.testing.assert_array_equal(
+            np.asarray(ctx_j.zslope_mu),
+            np.asarray(ref.zslope_mu),
+            err_msg=f"{name} joint zslope center != single-leg",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -287,11 +325,22 @@ def test_per_leg_priors_bitwise_match_single_leg_builds(joint2_setup, nuts_setup
 def test_joint_trace_site_names_and_order(joint2_setup):
     ctx, d, mock_legs, core = joint2_setup
     s = _sites(C._legb_model, ctx, mock_legs, core)
-    assert s == ["theta_unit", "tau0_amp", "dtau0",
-                 "alpha_lls_DESI", "alpha_subdla_DESI", "alpha_dla_raw_DESI",
-                 "alpha_lls_eBOSS", "alpha_subdla_eBOSS", "alpha_dla_raw_eBOSS",
-                 "s_lls", "s_subdla", "s_dla",
-                 "alpha_res", "alpha_res_slope"]
+    assert s == [
+        "theta_unit",
+        "tau0_amp",
+        "dtau0",
+        "alpha_lls_DESI",
+        "alpha_subdla_DESI",
+        "alpha_dla_raw_DESI",
+        "alpha_lls_eBOSS",
+        "alpha_subdla_eBOSS",
+        "alpha_dla_raw_eBOSS",
+        "s_lls",
+        "s_subdla",
+        "s_dla",
+        "alpha_res",
+        "alpha_res_slope",
+    ]
     tr = _trace(C._legb_model, ctx, mock_legs, core)
     all_names = set(tr)
     # NO unsuffixed alpha names anywhere (sample OR deterministic): every legacy by-name
@@ -313,12 +362,25 @@ def test_joint_trace_per_leg_zslope_switch(joint2_setup):
     ctx, d, mock_legs, core = joint2_setup
     ctx_z = ctx._replace(per_leg_zslope=True)
     s = _sites(C._legb_model, ctx_z, mock_legs, core)
-    assert s == ["theta_unit", "tau0_amp", "dtau0",
-                 "alpha_lls_DESI", "alpha_subdla_DESI", "alpha_dla_raw_DESI",
-                 "alpha_lls_eBOSS", "alpha_subdla_eBOSS", "alpha_dla_raw_eBOSS",
-                 "s_lls_DESI", "s_subdla_DESI", "s_dla_DESI",
-                 "s_lls_eBOSS", "s_subdla_eBOSS", "s_dla_eBOSS",
-                 "alpha_res", "alpha_res_slope"]
+    assert s == [
+        "theta_unit",
+        "tau0_amp",
+        "dtau0",
+        "alpha_lls_DESI",
+        "alpha_subdla_DESI",
+        "alpha_dla_raw_DESI",
+        "alpha_lls_eBOSS",
+        "alpha_subdla_eBOSS",
+        "alpha_dla_raw_eBOSS",
+        "s_lls_DESI",
+        "s_subdla_DESI",
+        "s_dla_DESI",
+        "s_lls_eBOSS",
+        "s_subdla_eBOSS",
+        "s_dla_eBOSS",
+        "alpha_res",
+        "alpha_res_slope",
+    ]
     for nm in ("s_lls", "s_subdla", "s_dla"):
         assert nm not in s, f"per_leg_zslope leaked the SHARED slope site {nm!r}"
     # identical per-leg slope priors (same constants; spec Sec 2).
@@ -354,33 +416,37 @@ def test_dict_loglik_equals_per_leg_sum(joint2_setup):
     nzg = int(zg.shape[0])
     th = jnp.full(9, 0.5)
     from hcd_analysis.emulator.meanflux_prior import becker13_tau0
+
     tau0 = becker13_tau0(zg)
     shape_zg = ((1.0 + zg)[:, None] / (1.0 + C.HCD_Z_PIVOT)) ** jnp.asarray(C.HCD_INCIDENCE_SLOPE)
-    a_dict = {"DESI": jnp.asarray([0.20, 0.07, 0.015])[None, :] * shape_zg,
-              "eBOSS": jnp.asarray([0.45, 0.09, 0.012])[None, :] * shape_zg}
+    a_dict = {
+        "DESI": jnp.asarray([0.20, 0.07, 0.015])[None, :] * shape_zg,
+        "eBOSS": jnp.asarray([0.45, 0.09, 0.012])[None, :] * shape_zg,
+    }
     ll_dict = C._data_loglik_legcore(ctx, th, tau0, a_dict, mock_legs, core)
     ll_sum = 0.0
     for leg in mock_legs:
-        ll_sum = ll_sum + C._data_loglik_legcore(
-            ctx, th, tau0, a_dict[leg.name], [leg], core)
-    assert float(ll_dict) == float(ll_sum), \
-        f"dict loglik {float(ll_dict)!r} != per-leg-array sum {float(ll_sum)!r}"
+        ll_sum = ll_sum + C._data_loglik_legcore(ctx, th, tau0, a_dict[leg.name], [leg], core)
+    assert float(ll_dict) == float(
+        ll_sum
+    ), f"dict loglik {float(ll_dict)!r} != per-leg-array sum {float(ll_sum)!r}"
     # key set != leg set must FAIL LOUD, both directions.
     with pytest.raises(AssertionError, match="missing"):
         C._data_loglik_legcore(ctx, th, tau0, {"DESI": a_dict["DESI"]}, mock_legs, core)
-    extra = dict(a_dict); extra["KS"] = a_dict["DESI"]
+    extra = dict(a_dict)
+    extra["KS"] = a_dict["DESI"]
     with pytest.raises(AssertionError, match="extra"):
         C._data_loglik_legcore(ctx, th, tau0, extra, mock_legs, core)
     # a z-FLAT (3,) per-leg entry is the recurring z-flat bug: refused UNCONDITIONALLY in
     # the dict branch (consistency-audit hardening: under require_zresolved=False, jnp
     # fancy-indexing a (3,) with z-bin indices CLIPS silently and returns a finite wrong
     # loglik; a (3,) dict entry has no legitimate meaning).
-    flat = dict(a_dict); flat["DESI"] = jnp.asarray([0.20, 0.07, 0.015])
+    flat = dict(a_dict)
+    flat["DESI"] = jnp.asarray([0.20, 0.07, 0.015])
     with pytest.raises(AssertionError):
         C._data_loglik_legcore(ctx, th, tau0, flat, mock_legs, core)
     with pytest.raises(AssertionError, match="z-RESOLVED"):
-        C._data_loglik_legcore(ctx, th, tau0, flat, mock_legs, core,
-                               require_zresolved=False)
+        C._data_loglik_legcore(ctx, th, tau0, flat, mock_legs, core, require_zresolved=False)
     assert nzg == a_dict["DESI"].shape[0]
 
 
@@ -397,16 +463,24 @@ def test_joint_reconstruction_matches_replay(joint2_setup, per_leg_zslope):
     kw = dict(n_warmup=5, n_samples=5, seed=13, max_tree_depth=5, dense_mass=False)
     s_fast, _ = C._run_nuts_legb(ctx, mock_legs, core, fast_postprocess=True, **kw)
     s_slow, _ = C._run_nuts_legb(ctx, mock_legs, core, fast_postprocess=False, **kw)
-    for nm in ("tau0_vec", "alpha_dla_DESI", "alpha_dla_eBOSS",
-               "alpha_hcd_z_DESI", "alpha_hcd_z_eBOSS"):
+    for nm in (
+        "tau0_vec",
+        "alpha_dla_DESI",
+        "alpha_dla_eBOSS",
+        "alpha_hcd_z_DESI",
+        "alpha_hcd_z_eBOSS",
+    ):
         assert nm in s_fast, f"fast postprocess must reconstruct {nm!r}"
         assert nm in s_slow, f"slow replay must yield {nm!r}"
         np.testing.assert_array_equal(
-            np.asarray(s_fast[nm]), np.asarray(s_slow[nm]),
-            err_msg=f"{nm}: fast reconstruction != in-model replay (bitwise)")
+            np.asarray(s_fast[nm]),
+            np.asarray(s_slow[nm]),
+            err_msg=f"{nm}: fast reconstruction != in-model replay (bitwise)",
+        )
     for nm in ("alpha_lls", "alpha_subdla", "alpha_dla", "alpha_hcd_z"):
-        assert nm not in s_fast and nm not in s_slow, \
-            f"joint samples leaked the unsuffixed key {nm!r}"
+        assert (
+            nm not in s_fast and nm not in s_slow
+        ), f"joint samples leaked the unsuffixed key {nm!r}"
     if per_leg_zslope:
         assert "s_lls_DESI" in s_fast and "s_lls_eBOSS" in s_fast
 
@@ -432,17 +506,26 @@ def test_reconstruct_rejects_shared_samples_on_per_leg_zslope_ctx(joint2_setup):
     zg = np.asarray(ctx.z_global)
     shape_fix = ((1.0 + zg)[:, None] / 4.0) ** np.asarray(C.HCD_INCIDENCE_SLOPE)
     for nm in ("DESI", "eBOSS"):
-        piv = np.stack([np.asarray(s_noslope[f"alpha_lls_{nm}"]),
-                        np.asarray(s_noslope[f"alpha_subdla_{nm}"]),
-                        np.asarray(out[f"alpha_dla_{nm}"])], axis=-1)
-        np.testing.assert_allclose(np.asarray(out[f"alpha_hcd_z_{nm}"]),
-                                   piv[:, None, :] * shape_fix[None, :, :], rtol=1e-12)
+        piv = np.stack(
+            [
+                np.asarray(s_noslope[f"alpha_lls_{nm}"]),
+                np.asarray(s_noslope[f"alpha_subdla_{nm}"]),
+                np.asarray(out[f"alpha_dla_{nm}"]),
+            ],
+            axis=-1,
+        )
+        np.testing.assert_allclose(
+            np.asarray(out[f"alpha_hcd_z_{nm}"]),
+            piv[:, None, :] * shape_fix[None, :, :],
+            rtol=1e-12,
+        )
 
 
 def test_joint_driver_imports():
     """The driver must import cleanly (consistency-audit gap: grep-tested only). Importing
     must not execute a fit (main guard)."""
     import importlib
+
     mod = importlib.import_module("scripts.run_joint_fit")
     assert hasattr(mod, "main")
 
@@ -453,9 +536,13 @@ def test_joint_driver_imports():
 #  so this is simultaneously the rename-equivalence proof and the cross-feature
 #  byte certificate.
 # --------------------------------------------------------------------------- #
-_T5_NAME_MAP = {"alpha_lls": "alpha_lls_DESI", "alpha_subdla": "alpha_subdla_DESI",
-                "alpha_dla_raw": "alpha_dla_raw_DESI", "alpha_dla": "alpha_dla_DESI",
-                "alpha_hcd_z": "alpha_hcd_z_DESI"}
+_T5_NAME_MAP = {
+    "alpha_lls": "alpha_lls_DESI",
+    "alpha_subdla": "alpha_subdla_DESI",
+    "alpha_dla_raw": "alpha_dla_raw_DESI",
+    "alpha_dla": "alpha_dla_DESI",
+    "alpha_hcd_z": "alpha_hcd_z_DESI",
+}
 
 
 @pytest.mark.skipif(not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
@@ -478,16 +565,20 @@ def test_one_leg_joint_bitwise_rename_equivalence(joint1_setup):
     order_joint = [mapped.index(k) for k in sorted(mapped)]
     assert order_single == order_joint, (
         "the _DESI suffix REORDERS the sorted flatten layout — bitwise equivalence cannot "
-        f"hold via ravel_pytree; single {sorted(latents)} vs joint {sorted(mapped)}")
+        f"hold via ravel_pytree; single {sorted(latents)} vs joint {sorted(mapped)}"
+    )
     samples, n_div = G.run_short_nuts(ctx, mock_legs, core)
-    assert list(samples.keys()) == [_T5_NAME_MAP.get(k, k) for k in golden_keys], \
-        "joint samples-dict key order != name-mapped single-leg golden order"
+    assert list(samples.keys()) == [
+        _T5_NAME_MAP.get(k, k) for k in golden_keys
+    ], "joint samples-dict key order != name-mapped single-leg golden order"
     assert int(n_div) == int(g["n_div"])
     for k in golden_keys:
         np.testing.assert_array_equal(
-            np.asarray(samples[_T5_NAME_MAP.get(k, k)]), g[f"nuts::{k}"],
+            np.asarray(samples[_T5_NAME_MAP.get(k, k)]),
+            g[f"nuts::{k}"],
             err_msg=f"T5 bitwise equivalence failed at site {k!r} (joint "
-                    f"{_T5_NAME_MAP.get(k, k)!r})")
+            f"{_T5_NAME_MAP.get(k, k)!r})",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -568,7 +659,7 @@ def test_guard_multi_leg_sample_res_not_built():
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_guard_per_leg_zslope_requires_per_leg_alpha(nuts_setup):
     ctx, d, mock_legs, core = nuts_setup
-    ctx_bad = ctx._replace(per_leg_zslope=True)          # per_leg_alpha stays False
+    ctx_bad = ctx._replace(per_leg_zslope=True)  # per_leg_alpha stays False
     with pytest.raises(ValueError, match="per_leg_alpha"):
         _sites(C._legb_model, ctx_bad, mock_legs, core)
 
@@ -590,10 +681,10 @@ def test_joint_stamp_contents(joint2_setup):
         assert p["survey"] == name
         assert p["lls_boost"] == pytest.approx(INF.HCD_LLS_SURVEY_BOOST[name])
         assert p["lls_frac_sigma"] == pytest.approx(INF.HCD_LLS_SURVEY_FRAC_SIGMA[name])
-        np.testing.assert_allclose(p["alpha_hcd_mu"],
-                                   np.asarray(ctx.alpha_hcd_mu_by_leg[name]))
-        np.testing.assert_allclose(p["alpha_hcd_sigma"],
-                                   np.asarray(ctx.alpha_hcd_sigma_by_leg[name]))
+        np.testing.assert_allclose(p["alpha_hcd_mu"], np.asarray(ctx.alpha_hcd_mu_by_leg[name]))
+        np.testing.assert_allclose(
+            p["alpha_hcd_sigma"], np.asarray(ctx.alpha_hcd_sigma_by_leg[name])
+        )
         # embedded per-leg forward_stamp with BOTH signatures + the per_leg alpha_mode.
         fw = p["forward"]
         assert fw["forward_signature"] == FORWARD_SIGNATURE_PIN
@@ -637,11 +728,23 @@ def test_forward_stamp_alpha_mode_via_getattr():
     """forward_stamp gains alpha_mode ('shared'|'per_leg') via getattr default — buildable
     on pre-feature ctx stubs that lack the field entirely."""
     from types import SimpleNamespace
-    stub = dict(res_corr_on=False, fix_alpha_res=True, sample_res=True,
-                f_res_amp_sigma=0.02, metal_prior="flatlog2node", metal_node_z=(2.2, 4.2))
-    leg = SimpleNamespace(dla_cov_reduced=True, dla_forward_frac=1.0, use_snr3=False,
-                          cv_floor_on=False, cv_floor_rank1=False)
-    st_old = C.forward_stamp(SimpleNamespace(**stub), leg)          # no per_leg_alpha attr
+
+    stub = dict(
+        res_corr_on=False,
+        fix_alpha_res=True,
+        sample_res=True,
+        f_res_amp_sigma=0.02,
+        metal_prior="flatlog2node",
+        metal_node_z=(2.2, 4.2),
+    )
+    leg = SimpleNamespace(
+        dla_cov_reduced=True,
+        dla_forward_frac=1.0,
+        use_snr3=False,
+        cv_floor_on=False,
+        cv_floor_rank1=False,
+    )
+    st_old = C.forward_stamp(SimpleNamespace(**stub), leg)  # no per_leg_alpha attr
     assert st_old["alpha_mode"] == "shared"
     st_new = C.forward_stamp(SimpleNamespace(per_leg_alpha=True, **stub), leg)
     assert st_new["alpha_mode"] == "per_leg"
@@ -652,9 +755,13 @@ def test_forward_stamp_alpha_mode_via_getattr():
 # --------------------------------------------------------------------------- #
 def _legacy_samples(L=7, nzg=4):
     rng = np.random.default_rng(0)
-    return {"theta_unit": rng.random((L, 9)), "tau0_vec": rng.random((L, nzg)),
-            "alpha_lls": rng.random(L), "alpha_subdla": rng.random(L),
-            "alpha_dla": rng.random(L)}
+    return {
+        "theta_unit": rng.random((L, 9)),
+        "tau0_vec": rng.random((L, nzg)),
+        "alpha_lls": rng.random(L),
+        "alpha_subdla": rng.random(L),
+        "alpha_dla": rng.random(L),
+    }
 
 
 def _per_leg_samples(L=7, nzg=4, legs=("DESI", "KS")):
@@ -685,8 +792,14 @@ def test_draws_matrix_per_leg_columns_in_legs_order():
     m = C._draws_matrix(s, kept)
     assert m.shape == (7, 9 + 4 + 6)
     names = C._packed_names_for(s, kept)
-    assert names[-6:] == ["alpha_lls_DESI", "alpha_subdla_DESI", "alpha_dla_DESI",
-                          "alpha_lls_KS", "alpha_subdla_KS", "alpha_dla_KS"]
+    assert names[-6:] == [
+        "alpha_lls_DESI",
+        "alpha_subdla_DESI",
+        "alpha_dla_DESI",
+        "alpha_lls_KS",
+        "alpha_subdla_KS",
+        "alpha_dla_KS",
+    ]
     for j, nm in enumerate(names[-6:]):
         np.testing.assert_array_equal(m[:, 13 + j], s[nm], err_msg=nm)
 
@@ -716,4 +829,5 @@ def test_joint_driver_wiring_source_checks():
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(pytest.main([__file__, "-q"]))

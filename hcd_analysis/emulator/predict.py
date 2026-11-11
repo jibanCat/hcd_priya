@@ -19,6 +19,7 @@ free-amplitude form, cf. Rogers & Bird 2018 / PRIYA 2025); ∂P_obs/∂α_c = R_
 P_clean), now ≠0 for LLS. ``predict_P_tier_p`` (the structural Σ_c w_c·P_filt) remains
 for the clean-path diagnostics but is NOT the HCD forward model. See README.md §Forward-model.
 """
+
 from __future__ import annotations
 
 from typing import NamedTuple
@@ -57,10 +58,14 @@ def predict_P_filt(model, theta9, z_unit, tau0, pf_stats):
     x = jnp.concatenate([jnp.asarray(theta9), jnp.asarray(z_unit)[None]])
     members = getattr(model, "members", None)
     if members is not None:
-        per = jnp.stack([
-            reconstruct_P_filt_jax(p["P_filt_base"], p["P_filt_resid"], pf_stats)
-            for p in (m(x, tau0) for m in members)], axis=0)        # (M,4,K)
-        return jnp.mean(per, axis=0)                                # (4,K)
+        per = jnp.stack(
+            [
+                reconstruct_P_filt_jax(p["P_filt_base"], p["P_filt_resid"], pf_stats)
+                for p in (m(x, tau0) for m in members)
+            ],
+            axis=0,
+        )  # (M,4,K)
+        return jnp.mean(per, axis=0)  # (4,K)
     pred = model(x, tau0)
     return reconstruct_P_filt_jax(pred["P_filt_base"], pred["P_filt_resid"], pf_stats)
 
@@ -85,16 +90,19 @@ def _excess_from_P_filt(P_filt, dla_core):
     """
     P_clean = P_filt[0]
     P_dla_unf = P_filt[3] + jnp.asarray(dla_core)
-    return jnp.stack([P_filt[1] - P_clean,        # LLS    filtered  − clean
-                      P_filt[2] - P_clean,        # subDLA filtered  − clean
-                      P_dla_unf - P_clean])        # DLA    unfiltered − clean
+    return jnp.stack(
+        [
+            P_filt[1] - P_clean,  # LLS    filtered  − clean
+            P_filt[2] - P_clean,  # subDLA filtered  − clean
+            P_dla_unf - P_clean,
+        ]
+    )  # DLA    unfiltered − clean
 
 
 def predict_excess(model, theta9, z_unit, tau0, pf_stats, dla_core):
     """Live-emulated per-class HCD excess templates R_c = P_c − P_clean (3,K).
     Differentiable in (θ9, τ₀). See ``_excess_from_P_filt``."""
-    return _excess_from_P_filt(
-        predict_P_filt(model, theta9, z_unit, tau0, pf_stats), dla_core)
+    return _excess_from_P_filt(predict_P_filt(model, theta9, z_unit, tau0, pf_stats), dla_core)
 
 
 def predict_P_obs(model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_core):
@@ -117,9 +125,9 @@ def predict_P_obs(model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_core):
 
     Differentiable in (θ9, τ₀, α). ∂P_obs/∂α_c = (P_c − P_clean) (≠0 for LLS now).
     """
-    P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)   # (4,K) emulated
+    P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)  # (4,K) emulated
     P_clean = P_filt[0]
-    excess = _excess_from_P_filt(P_filt, dla_core)                   # (3,K)
+    excess = _excess_from_P_filt(P_filt, dla_core)  # (3,K)
     return P_clean + jnp.einsum("c,ck->k", jnp.asarray(alpha_hcd), excess)
 
 
@@ -128,6 +136,7 @@ class EmulatorPrediction(NamedTuple):
     this request's (z, theta) by kcoord.py (docs/kgrid_incident_2026-10.md). ``P_obs`` is the class combination
     WITHOUT a DLA core (the mode-indexed core is retired); the production forward, with the DLA core as a fixed
     function of physical k at the data bins, is ``forward.predict_leg``."""
+
     k_skm: jnp.ndarray
     P_filt: jnp.ndarray
     P_obs: jnp.ndarray
@@ -144,19 +153,24 @@ def _refuse_mode_indexed_dla_core(dla_core):
     whose values cannot be checked."""
     import jax
     import numpy as _np
+
     if dla_core is None:
         return
     try:
         c = _np.asarray(dla_core, dtype=float)
     except (jax.errors.TracerArrayConversionError, jax.errors.ConcretizationTypeError):
-        raise ValueError("predict_on_physical_grid: dla_core must be concrete (None or zeros) so that it can be "
-                         "checked; pass the DLA core to forward.predict_leg instead") from None
-    if _np.any(c != 0):                                     # NaN != 0 is True: a NaN core is refused as well
-        raise ValueError("predict_on_physical_grid: a non-zero dla_core is refused. A core added on the mode axis "
-                         "would sit at k_skm(z, theta) and move in physical k with theta; the DLA core is a fixed "
-                         "function of physical k (gate E amendment A1 rev 1 section 4). Use forward.predict_leg, "
-                         "which takes the core at the leg's data bins; here pass None or zeros (P_obs then carries "
-                         "no DLA core).")
+        raise ValueError(
+            "predict_on_physical_grid: dla_core must be concrete (None or zeros) so that it can be "
+            "checked; pass the DLA core to forward.predict_leg instead"
+        ) from None
+    if _np.any(c != 0):  # NaN != 0 is True: a NaN core is refused as well
+        raise ValueError(
+            "predict_on_physical_grid: a non-zero dla_core is refused. A core added on the mode axis "
+            "would sit at k_skm(z, theta) and move in physical k with theta; the DLA core is a fixed "
+            "function of physical k (gate E amendment A1 rev 1 section 4). Use forward.predict_leg, "
+            "which takes the core at the leg's data bins; here pass None or zeros (P_obs then carries "
+            "no DLA core)."
+        )
 
 
 def predict_on_physical_grid(model, meta, theta9_unit, z, tau0, alpha_hcd, pf_stats, dla_core=None):
@@ -167,23 +181,43 @@ def predict_on_physical_grid(model, meta, theta9_unit, z, tau0, alpha_hcd, pf_st
     refuses it (forward.py, the dla_core shape check). ``P_obs`` is therefore the class combination without a DLA
     core; for the HCD forward with the DLA core use ``forward.predict_leg``."""
     import numpy as _np
+
     _refuse_mode_indexed_dla_core(dla_core)
     from .data import PARAM_LIMITS, Z_LIMITS
     from .kcoord import kgrid
     from .schema import CHECKPOINT_SCHEMA_VERSION, SchemaCollapseError
+
     if meta.get("schema_version") != CHECKPOINT_SCHEMA_VERSION or "k_com_hmpc" not in meta:
-        raise SchemaCollapseError("predict_on_physical_grid needs a schema-2.0 meta with k_com_hmpc (see kcoord.py)")
-    if "param_limits" not in meta or not _np.allclose(_np.asarray(meta["param_limits"], float),
-                                                      _np.asarray(PARAM_LIMITS, float), rtol=0, atol=0):
-        raise SchemaCollapseError("checkpoint param_limits differ from data.PARAM_LIMITS: theta would be "
-                                  "denormalised with the wrong box")
+        raise SchemaCollapseError(
+            "predict_on_physical_grid needs a schema-2.0 meta with k_com_hmpc (see kcoord.py)"
+        )
+    if "param_limits" not in meta or not _np.allclose(
+        _np.asarray(meta["param_limits"], float), _np.asarray(PARAM_LIMITS, float), rtol=0, atol=0
+    ):
+        raise SchemaCollapseError(
+            "checkpoint param_limits differ from data.PARAM_LIMITS: theta would be "
+            "denormalised with the wrong box"
+        )
     kg = kgrid(jnp.asarray(meta["k_com_hmpc"]), float(z), theta9_unit)
     z_unit = (float(z) - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
     P_filt = predict_P_filt(model, theta9_unit, z_unit, tau0, pf_stats)
     if P_filt.shape[-1] != kg.k_skm.shape[-1]:
-        raise SchemaCollapseError(f"meta k_com_hmpc length {kg.k_skm.shape[-1]} != model output length "
-                                  f"{P_filt.shape[-1]}: meta and model do not belong together")
+        raise SchemaCollapseError(
+            f"meta k_com_hmpc length {kg.k_skm.shape[-1]} != model output length "
+            f"{P_filt.shape[-1]}: meta and model do not belong together"
+        )
     no_core = jnp.zeros(P_filt.shape[-1], dtype=P_filt.dtype)
-    P_obs = P_filt[0] + jnp.einsum("c,ck->k", jnp.asarray(alpha_hcd), _excess_from_P_filt(P_filt, no_core))
-    return EmulatorPrediction(kg.k_skm, P_filt, P_obs, float(z), jnp.asarray(theta9_unit), kg.hub, kg.omegamh2,
-                              kg.k_com_hmpc, kg.schema_version)
+    P_obs = P_filt[0] + jnp.einsum(
+        "c,ck->k", jnp.asarray(alpha_hcd), _excess_from_P_filt(P_filt, no_core)
+    )
+    return EmulatorPrediction(
+        kg.k_skm,
+        P_filt,
+        P_obs,
+        float(z),
+        jnp.asarray(theta9_unit),
+        kg.hub,
+        kg.omegamh2,
+        kg.k_com_hmpc,
+        kg.schema_version,
+    )

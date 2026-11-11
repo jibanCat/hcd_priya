@@ -20,7 +20,9 @@ Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     python -m pytest tests/test_res_corr_norc_injection.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import os
@@ -39,12 +41,15 @@ from tests.gate_helpers import external_path  # noqa: E402  (data roots come fro
 _CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 _CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
-_KS = (external_path("HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"))
+_KS = external_path(
+    "HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"
+)
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
 _have_ks = os.path.exists(_KS)
 
 pytestmark = pytest.mark.skipif(
-    not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present")
+    not (_have and _have_ks), reason="real cache/ckpt/DESI/KS not present"
+)
 
 
 # The helper lives in a SCRIPT (scripts/run_stepA.py), not an importable package module — load it
@@ -66,7 +71,8 @@ def norc():
 
     Mirrors run_prod_sbc_shard's NORC ctx: build_legb_ctx(res_corr_on=False) then
     ctx._replace(fix_alpha_res=True). Under NORC mf.res_corr(z) returns ones but the raw table is
-    still populated. The truth is a self-consistent NORC self-draw (make_truth_from_sim(mf=ctx.mf))."""
+    still populated. The truth is a self-consistent NORC self-draw (make_truth_from_sim(mf=ctx.mf)).
+    """
     ctx, d = C.build_legb_ctx(with_mf=True, mf_with_floor=True, res_corr_on=False)
     ctx = ctx._replace(fix_alpha_res=True)
     assert ctx.mf is not None and ctx.mf.res_corr_on is False and ctx.fix_alpha_res is True
@@ -81,15 +87,24 @@ def _leg(ctx, name):
 
 def _expected_bvec(leg, mf, anchor_mult):
     """Re-derive b = log(anchored res_corr) row-by-row (the reference for test b)."""
-    k = np.asarray(leg.k); zi = np.asarray(leg.z_idx); zl = np.asarray(leg.z)
+    k = np.asarray(leg.k)
+    zi = np.asarray(leg.z_idx)
+    zl = np.asarray(leg.z)
     exp = np.zeros(k.shape[0])
     for iz in range(leg.n_z):
         rsel = np.where(zi == iz)[0]
         if rsel.size == 0:
             continue
-        rc = np.asarray(interp_res_corr(mf.z_rc, mf.logk_rc, mf.rc_vals,
-                                        float(zl[iz]), jnp.asarray(k[rsel]),
-                                        anchor_mult=float(anchor_mult)))
+        rc = np.asarray(
+            interp_res_corr(
+                mf.z_rc,
+                mf.logk_rc,
+                mf.rc_vals,
+                float(zl[iz]),
+                jnp.asarray(k[rsel]),
+                anchor_mult=float(anchor_mult),
+            )
+        )
         exp[rsel] = np.log(rc)
     return exp
 
@@ -105,8 +120,11 @@ def test_noop_default_byte_identical(norc):
     legs2, _tp2, _i2 = C.make_legb_mock(ctx, truth, key, inject_res_corr=None)
     for l1, l2 in zip(legs1, legs2):
         # assert_array_equal treats NaN (dropped-z rows) in matching positions as equal.
-        np.testing.assert_array_equal(np.asarray(l1.P_data), np.asarray(l2.P_data),
-                                      err_msg=f"{l1.name}: NORC no-op mock not byte-identical")
+        np.testing.assert_array_equal(
+            np.asarray(l1.P_data),
+            np.asarray(l2.P_data),
+            err_msg=f"{l1.name}: NORC no-op mock not byte-identical",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -120,8 +138,9 @@ def test_bvec_matches_interp_res_corr(norc):
     b = rs._actual_res_corr_bvec(desi, ctx.mf, 5.0)
     exp = _expected_bvec(desi, ctx.mf, 5.0)
     assert b.shape == (np.asarray(desi.k).shape[0],)
-    np.testing.assert_allclose(b, exp, rtol=0.0, atol=1e-10,
-                               err_msg="DESI bvec != per-row log(interp_res_corr)")
+    np.testing.assert_allclose(
+        b, exp, rtol=0.0, atol=1e-10, err_msg="DESI bvec != per-row log(interp_res_corr)"
+    )
     # NORC genuinely drops a nonzero correction on DESI high-k (the b-vector is not all zero).
     assert np.max(np.abs(b)) > 1e-4, "expected a nonzero anchored res_corr on the DESI leg"
 
@@ -142,9 +161,13 @@ def test_inject_multiplies_truth_by_exp_b(norc):
         ti = np.asarray(info_inj["truth_on_leg"][leg.name])
         fin = np.isfinite(tc) & np.isfinite(ti)
         assert fin.any(), f"{leg.name}: no finite truth rows"
-        np.testing.assert_allclose(ti[fin] / tc[fin], np.exp(inj[leg.name][fin]),
-                                   rtol=1e-6, atol=0.0,
-                                   err_msg=f"{leg.name}: truth_inj/truth_clean != exp(b)")
+        np.testing.assert_allclose(
+            ti[fin] / tc[fin],
+            np.exp(inj[leg.name][fin]),
+            rtol=1e-6,
+            atol=0.0,
+            err_msg=f"{leg.name}: truth_inj/truth_clean != exp(b)",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -174,8 +197,9 @@ def test_expansion_none_when_mf_none():
         _rc_spec = chain.get("inject_res_corr", None)
         if isinstance(_rc_spec, dict) and _rc_spec.get("actual_res_corr"):
             _am = float(chain.get("mf_anchor_mult", 5.0))
-            _rc_inject = (None if ctx.mf is None
-                          else {leg.name: leg for leg in ctx.legs})  # (leg-value irrelevant here)
+            _rc_inject = (
+                None if ctx.mf is None else {leg.name: leg for leg in ctx.legs}
+            )  # (leg-value irrelevant here)
         else:
             _rc_inject = _rc_spec
         return _rc_inject
@@ -192,4 +216,5 @@ def test_expansion_none_when_mf_none():
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(pytest.main([__file__, "-q"]))

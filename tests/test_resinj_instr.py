@@ -7,6 +7,7 @@ tests/test_dnuis_inject.py alongside the existing scalar/none golden tests.
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python -m pytest tests/test_resinj_instr.py -q
 """
+
 import numpy as np
 import pytest
 from types import SimpleNamespace
@@ -30,13 +31,15 @@ def test_resolve_vector_shape_ok_and_bad():
     s, v = C._resolve_res_instr_inject({"b_res_vec": [0.0, 0.1, -0.1, 0.05]}, _leg(4))
     assert s is None and np.allclose(v, [0.0, 0.1, -0.1, 0.05])
     with pytest.raises(ValueError):
-        C._resolve_res_instr_inject({"b_res_vec": [0.0, 0.1]}, _leg(4))   # wrong length
+        C._resolve_res_instr_inject({"b_res_vec": [0.0, 0.1]}, _leg(4))  # wrong length
 
 
 def test_resolve_basis_form_loads_and_scales(tmp_path):
     npz = tmp_path / "b.npz"
     np.savez(npz, DESI_bres1=np.array([0.0, 0.1, 0.2, 0.3]))
-    s, v = C._resolve_res_instr_inject({"path": str(npz), "member": "bres1", "strength": 2.0}, _leg(4))
+    s, v = C._resolve_res_instr_inject(
+        {"path": str(npz), "member": "bres1", "strength": 2.0}, _leg(4)
+    )
     assert s is None and np.allclose(v, [0.0, 0.2, 0.4, 0.6])
     with pytest.raises(KeyError):
         C._resolve_res_instr_inject({"path": str(npz), "member": "bogus"}, _leg(4))
@@ -45,7 +48,7 @@ def test_resolve_basis_form_loads_and_scales(tmp_path):
 def test_guard_fires_on_active_unready():
     ready = SimpleNamespace(name="DESI", resolution_ready=True)
     unready = SimpleNamespace(name="KS", resolution_ready=False)
-    C._check_resolution_injectable([ready], active=True)             # ok
-    C._check_resolution_injectable([ready, unready], active=False)   # no-op
+    C._check_resolution_injectable([ready], active=True)  # ok
+    C._check_resolution_injectable([ready, unready], active=False)  # no-op
     with pytest.raises(ValueError):
         C._check_resolution_injectable([ready, unready], active=True)  # stray KS -> RAISE

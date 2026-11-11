@@ -10,7 +10,9 @@ Env:
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     python -m pytest tests/test_lit_dndx_kernel.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 
@@ -44,7 +46,7 @@ def test_subbin_powerlaw_integral_exact_on_synthetic_powerlaw():
     Nlo, Nhi = 10.0 ** edges[:-1], 10.0 ** edges[1:]
     fbar = C * (Nhi ** (a_true + 1) - Nlo ** (a_true + 1)) / (a_true + 1) / (Nhi - Nlo)
     got = LK.floor_piece_17p2_17p5(fbar[None, :], edges, method="subbin_powerlaw")[0]
-    want = C * ((10.0 ** 17.5) ** (a_true + 1) - (10.0 ** 17.2) ** (a_true + 1)) / (a_true + 1)
+    want = C * ((10.0**17.5) ** (a_true + 1) - (10.0**17.2) ** (a_true + 1)) / (a_true + 1)
     assert abs(got / want - 1.0) < 0.01
 
 
@@ -61,9 +63,9 @@ def test_bin_centre_trap_methods_differ():
     cf = LK.floor_piece_17p2_17p5(f, edges, method="const_f")[0]
     lo = LK.floor_piece_17p2_17p5(f, edges, method="naive_edge_17p4")[0]
     hi = LK.floor_piece_17p2_17p5(f, edges, method="naive_edge_17p6")[0]
-    assert pl > cf                                    # falling f: more mass below 17.5
-    assert lo < pl < hi                               # naive slices bracket the truth
-    assert abs(pl / cf - 1.0) > 0.02                  # the trap is material, not cosmetic
+    assert pl > cf  # falling f: more mass below 17.5
+    assert lo < pl < hi  # naive slices bracket the truth
+    assert abs(pl / cf - 1.0) > 0.02  # the trap is material, not cosmetic
 
 
 @needs_cache
@@ -105,8 +107,9 @@ def test_floor_factor_range(inputs):
 @needs_cache
 def test_cache_provenance(inputs):
     import h5py
+
     assert len(inputs["sha256_f_nhi"]) == 64
-    with h5py.File(_CACHE, "r") as f:                    # one CDDF block per (sim, snap) group of THIS cache
+    with h5py.File(_CACHE, "r") as f:  # one CDDF block per (sim, snap) group of THIS cache
         n_snaps = int(f.attrs["n_snaps"])
     assert inputs["shapes"]["snap_f_nhi"] == (n_snaps, 30)
     assert inputs["path"].endswith("observables_tau0_lf.h5")
@@ -115,8 +118,10 @@ def test_cache_provenance(inputs):
 def test_committed_json_was_derived_from_the_historical_cache():
     """Provenance of the committed kernel product: derived (2026-07-19) from the historical LF cache (1072 snapshot
     blocks). The S4/F8-repaired cache (1073 blocks) changes its kernel table by <= 1e-4 (z = 3.0 only; gate C record),
-    inside the 1e-3 reproducibility tolerance below; the product is not re-derived without a ruling."""
+    inside the 1e-3 reproducibility tolerance below; the product is not re-derived without a ruling.
+    """
     import json
+
     if not os.path.exists(_JSON):
         pytest.skip("emitted JSON not present")
     prov = json.load(open(_JSON))["cache_provenance"]
@@ -168,6 +173,7 @@ def test_fit_ordering_with_real_kernel(inputs):
     """The full ordering with the real cache kernel: K1a/K1b/K2/K3 all emitted; K3
     telescoping-consistent by construction; width variants sane."""
     from hcd_analysis.emulator import lit_dndx as LD
+
     k1_tab = LK.k1_table(inputs)
     F_tab = LK.floor_factor_table(inputs)
 
@@ -178,8 +184,9 @@ def test_fit_ordering_with_real_kernel(inputs):
         return LK.interp_ln1pz(F_tab["z_vals"], F_tab["F"], z)
 
     k1b = LK.k1_smooth_fit(inputs, _tab=k1_tab)
-    res = LD.run_fit_ordering(floor_factor, r_k1=r_k1, r_k1_smooth=k1b["r_at"],
-                              include_sensitivity=False)
+    res = LD.run_fit_ordering(
+        floor_factor, r_k1=r_k1, r_k1_smooth=k1b["r_at"], include_sensitivity=False
+    )
     for name in ("K1a", "K1b", "K2", "K3"):
         assert name in res, name
     # K3 is telescoping-consistent BY CONSTRUCTION (pulls ~0)
@@ -195,13 +202,15 @@ def test_fit_ordering_with_real_kernel(inputs):
 _JSON = f"{_REPO_ROOT}/hcd_analysis/emulator/hcd_lit_dndx_corrected.json"
 
 
-@pytest.mark.skipif(not (_HAS_CACHE and os.path.exists(_JSON)),
-                    reason="cache or emitted JSON not present")
+@pytest.mark.skipif(
+    not (_HAS_CACHE and os.path.exists(_JSON)), reason="cache or emitted JSON not present"
+)
 def test_emitted_json_kernel_reproducibility(inputs):
     """Spec test-5 analog: r(3.0) recomputed from the h5 under the pinned recipe matches
     the emitted JSON's kernel table to 1e-3; kernel_chosen is the PI-adopted K1a
     (PI 2026-07-18 decision 1) and the adopted (constrained-slope) alpha is recorded."""
     import json
+
     with open(_JSON) as fh:
         j = json.load(fh)
     assert j["kernel_chosen"] == "K1a"
@@ -222,8 +231,8 @@ def test_emitted_json_kernel_reproducibility(inputs):
     assert ad["gamma"] == 2.127
     assert ad["free_fit_evidence"]["gamma"] == pytest.approx(2.137, abs=0.01)
     assert abs(ad["free_fit_evidence"]["gamma"] - ad["gamma"]) < 0.5 * max(
-        ad["free_fit_evidence"]["sigma_gamma"], 1e-9), \
-        "constraint only justified if free gamma is consistent with 2.127"
+        ad["free_fit_evidence"]["sigma_gamma"], 1e-9
+    ), "constraint only justified if free gamma is consistent with 2.127"
     assert j["alpha_lls_z3"]["adopted"] == pytest.approx(0.172, abs=0.005)
     # adopted corrected points recorded for the cache-free reproduction test
     for k in ("z_bar", "lx", "sig_log", "r"):

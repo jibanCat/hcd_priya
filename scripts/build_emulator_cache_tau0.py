@@ -23,6 +23,7 @@ Usage:
         [--select SIM_SUBSTRING:SNAP ...] [--rehash-raw] [--n-skewers N] [--spot-check] \
         [--historical-reproduction REASON]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,7 +44,7 @@ from hcd_analysis import tau0_cache as T  # noqa: E402
 from hcd_analysis.tau0_rescale import make_alpha_grid_priya_aligned  # noqa: E402
 
 _N_K = {"lf": 172, "hr": 525}
-_COMPLETION_MARKERS = ("done_catalogue", "done")   # catalogue-only mode, full mode
+_COMPLETION_MARKERS = ("done_catalogue", "done")  # catalogue-only mode, full mode
 
 # Canonical LLS / subDLA / DLA log_NHI class boundaries (single source of truth).
 # 17.2 = clean->LLS, 19.0 = LLS->subDLA, 20.3 = subDLA->DLA. These MUST be members
@@ -63,12 +64,14 @@ def _assert_class_edges() -> None:
     and the Tier-C P1D partition (hcd_analysis.priya_p1d.FINE_NHI_EDGES).
     """
     from hcd_analysis.priya_p1d import FINE_NHI_EDGES
+
     for edge in COARSE_CLASS_EDGES:
         if not np.isclose(FINE_NHI_EDGES, edge, atol=1e-9).any():
             raise ValueError(
                 f"Class edge {edge} is not a member of FINE_NHI_EDGES "
                 f"({np.asarray(FINE_NHI_EDGES)}); the dN/dX class partition and the "
-                "Tier-C partition would disagree -> silent power misattribution.")
+                "Tier-C partition would disagree -> silent power misattribution."
+            )
 
 
 # Every Phase-1 catalogue directory snap_NNN was built on raw SPECTRA_NNN (same index; verified for every LF and HR
@@ -81,7 +84,7 @@ _PHASE1_Z_OVERRIDE = {
     ("ns0.907", 17): 3.0,
     ("ns0.907", 18): 2.8,
 }
-_Z_LABEL_TOL = 2e-5          # largest |meta z - header z| of a correctly labelled directory is 1.3e-5
+_Z_LABEL_TOL = 2e-5  # largest |meta z - header z| of a correctly labelled directory is 1.3e-5
 
 
 def vmax_from_header(hdr):
@@ -103,16 +106,22 @@ def catalogue_z_label(sim_name, snap, meta_z, raw_z):
     for (tag, s), z in _PHASE1_Z_OVERRIDE.items():
         if s == snap and tag in sim_name:
             if abs(float(meta_z) - float(raw_z)) <= _Z_LABEL_TOL:
-                raise ValueError(f"stale _PHASE1_Z_OVERRIDE entry {(tag, s)}: meta z {meta_z} already equals the header")
+                raise ValueError(
+                    f"stale _PHASE1_Z_OVERRIDE entry {(tag, s)}: meta z {meta_z} already equals the header"
+                )
             if abs(z - float(raw_z)) >= 1e-6:
-                raise ValueError(f"_PHASE1_Z_OVERRIDE {(tag, s)} = {z} disagrees with the raw header z {raw_z}")
+                raise ValueError(
+                    f"_PHASE1_Z_OVERRIDE {(tag, s)} = {z} disagrees with the raw header z {raw_z}"
+                )
             return float(z)
     return float(meta_z)
 
 
 def assert_label_matches_header(z_label, raw_z):
     if abs(float(z_label) - float(raw_z)) > _Z_LABEL_TOL:
-        raise ValueError(f"redshift label {z_label} is not the paired raw file's header redshift {raw_z}")
+        raise ValueError(
+            f"redshift label {z_label} is not the paired raw file's header redshift {raw_z}"
+        )
 
 
 def _catalogue_pix_max(catalog):
@@ -130,7 +139,9 @@ def assert_catalogue_built_on(meta, catalogue_pix_max, hdr):
     if abs(float(meta["dv_kms"]) / dv - 1.0) > 1e-12:
         raise ValueError(f"catalogue dv_kms {meta['dv_kms']} != paired raw file {dv}")
     if int(catalogue_pix_max) >= nb:
-        raise ValueError(f"catalogue pixel index {catalogue_pix_max} beyond the paired raw file ({nb} pixels)")
+        raise ValueError(
+            f"catalogue pixel index {catalogue_pix_max} beyond the paired raw file ({nb} pixels)"
+        )
 
 
 def locate_raw_tau_file(emu_root, sim_name: str, snap: int):
@@ -188,8 +199,7 @@ def _match_emu_folder_by_params(emu_root, sim_name, rtol=0.015):
         p = bec.parse_sim_params(d.name)
         if p is None:
             continue
-        if all(abs(p[k] - target[k]) <= rtol * max(abs(target[k]), 1e-30)
-               for k in target):
+        if all(abs(p[k] - target[k]) <= rtol * max(abs(target[k]), 1e-30) for k in target):
             if match is not None and match != d.name:
                 return None  # ambiguous -> refuse to guess
             match = d.name
@@ -231,6 +241,7 @@ def discover_tau0_pairs(hcd_root, emu_root, fidelity="lf", max_off_grid=0.05):
     normalization from off-grid snaps getting the wrong target_F).
     """
     import json
+
     if fidelity == "hr":
         root = Path(hcd_root) / "hires"
     else:
@@ -242,9 +253,11 @@ def discover_tau0_pairs(hcd_root, emu_root, fidelity="lf", max_off_grid=0.05):
             continue
         out.append((sim, snap, snap_dir, raw))
 
-    best = {}   # (sim, round(z_grid,4)) -> (off_grid_distance, pair)
+    best = {}  # (sim, round(z_grid,4)) -> (off_grid_distance, pair)
     for sim, snap, snap_dir, raw in out:
-        z_meta = catalogue_z_label(sim, snap, float(json.load(open(snap_dir / "meta.json"))["z"]), raw_header_z(raw))
+        z_meta = catalogue_z_label(
+            sim, snap, float(json.load(open(snap_dir / "meta.json"))["z"]), raw_header_z(raw)
+        )
         z_grid = _snap_z_to_priya_grid(z_meta)
         off = abs(z_meta - z_grid)
         key = (sim, round(z_grid, 4))
@@ -253,8 +266,10 @@ def discover_tau0_pairs(hcd_root, emu_root, fidelity="lf", max_off_grid=0.05):
     deduped = []
     for (sim, z_grid), (off, pair) in best.items():
         if off > max_off_grid:
-            print(f"  WARN: skip off-grid snap {pair[0][:20]} {pair[1]} "
-                  f"(z_grid={z_grid}, off={off:.3f} > {max_off_grid})")
+            print(
+                f"  WARN: skip off-grid snap {pair[0][:20]} {pair[1]} "
+                f"(z_grid={z_grid}, off={off:.3f} > {max_off_grid})"
+            )
             continue
         deduped.append(pair)
     return sorted(deduped, key=lambda p: (p[0], p[1]))
@@ -270,7 +285,9 @@ def select_pairs(pairs, selectors):
         if not hits:
             raise ValueError(f"selector {sel!r} matches no discovered pair")
         if len(hits) > 1:
-            raise ValueError(f"selector {sel!r} matches more than one pair: {[pairs[i][0] for i in hits]}")
+            raise ValueError(
+                f"selector {sel!r} matches more than one pair: {[pairs[i][0] for i in hits]}"
+            )
         keep.add(hits[0])
     return [p for i, p in enumerate(pairs) if i in keep]
 
@@ -316,6 +333,7 @@ def _read_priya_params(raw_tau_path):
     SimulationICs.json lives two parents up from the SPECTRA dir.
     """
     import json
+
     ics_path = Path(raw_tau_path).resolve().parents[2] / "SimulationICs.json"
     with open(ics_path) as f:
         ics = json.load(f)
@@ -335,8 +353,7 @@ def _read_priya_params(raw_tau_path):
     return np.array([vals[k] for k in bec.PARAM_ORDER], dtype=np.float64)
 
 
-def build_tau0_rows(sim_name, snap, inputs, raw_tau_path, alpha_slope_grid,
-                    n_k, n_skewers=None):
+def build_tau0_rows(sim_name, snap, inputs, raw_tau_path, alpha_slope_grid, n_k, n_skewers=None):
     """Build per-alpha rows (Tier-P total + Tier-C per-fine-bin P1D) and the
     per-snap CDDF block for one (sim, snap), driving fake_spectra directly.
     `inputs`: the snapshot's products as read by tau0_cache.load_snapshot_inputs
@@ -380,8 +397,13 @@ def build_tau0_rows(sim_name, snap, inputs, raw_tau_path, alpha_slope_grid,
     assert_label_matches_header(z_meta, z_raw)
     z_grid = _snap_z_to_priya_grid(z_meta)
 
-    from hcd_analysis.priya_p1d import (compute_tier_c_p1d, bin_sightlines_by_nhi,
-                                        N_TIER_C_BINS, _apply_priya_filter)
+    from hcd_analysis.priya_p1d import (
+        compute_tier_c_p1d,
+        bin_sightlines_by_nhi,
+        N_TIER_C_BINS,
+        _apply_priya_filter,
+    )
+
     tau_unfilt = _read_tau(raw_tau_path, n_skewers=n_skewers)
     rows = []
     for a_idx, alpha in enumerate(alpha_slope_grid):
@@ -398,19 +420,28 @@ def build_tau0_rows(sim_name, snap, inputs, raw_tau_path, alpha_slope_grid,
         tau_filt = tau_unfilt.copy()
         _apply_priya_filter(tau_filt, tau_thresh=1.0e6)
         kf_c, P_by_bin_filt, n_by_bin_filt, target_F, scale = compute_tier_c_p1d(
-            tau_filt, vmax, alpha_slope=alpha, z=z_grid, catalog=catalog)
+            tau_filt, vmax, alpha_slope=alpha, z=z_grid, catalog=catalog
+        )
         del tau_filt
         N_sl = int(n_by_bin_filt.sum())
         P_tier_p = (n_by_bin_filt[:, None] / N_sl * P_by_bin_filt).sum(axis=0)
         # Unfiltered Tier C (for the HCD add-back path), SAME scale/target_F:
         _, P_by_bin, n_by_bin, _, _ = compute_tier_c_p1d(
-            tau_unfilt, vmax, alpha_slope=alpha, z=z_grid, catalog=catalog,
-            external_scale=scale, external_target_F=target_F)
-        assert np.array_equal(n_by_bin, n_by_bin_filt), \
-            "N_HI class counts differ between filtered and unfiltered Tier C"
+            tau_unfilt,
+            vmax,
+            alpha_slope=alpha,
+            z=z_grid,
+            catalog=catalog,
+            external_scale=scale,
+            external_target_F=target_F,
+        )
+        assert np.array_equal(
+            n_by_bin, n_by_bin_filt
+        ), "N_HI class counts differ between filtered and unfiltered Tier C"
         if a_idx == 0:
-            assert len(kf_c) >= n_k, \
-                f"native grid {len(kf_c)} bins < n_k={n_k} for {sim_name} snap {snap}"
+            assert (
+                len(kf_c) >= n_k
+            ), f"native grid {len(kf_c)} bins < n_k={n_k} for {sim_name} snap {snap}"
         # Per-class <F> under the uniform rescale (for the shared-vs-per-class
         # target_F disentanglement). NaN sentinel for empty classes (count==0) —
         # consumers MUST mask on tier_c_counts>0 before reducing over mean_F_by_bin.
@@ -426,20 +457,27 @@ def build_tau0_rows(sim_name, snap, inputs, raw_tau_path, alpha_slope_grid,
             sel = tau_unfilt[cls == c]
             if sel.size:
                 mean_F_by_bin[c] = float(np.mean(np.exp(-scale * sel)))
-        rows.append({
-            "sim_name": sim_name, "snap": int(snap),
-            "alpha_slope": alpha, "alpha_idx": int(a_idx),
-            "z_meta": z_meta, "z_grid": float(z_grid),
-            "dv_kms": dv_kms, "nbins_native": nbins,
-            "target_F": float(target_F), "scale": float(scale),
-            "params": params,
-            "kfkms": kf_c[:n_k].astype(np.float64),
-            "P_tier_p": P_tier_p[:n_k].astype(np.float64),
-            "P_tier_c": P_by_bin[:, :n_k].astype(np.float64),
-            "P_tier_c_filtered": P_by_bin_filt[:, :n_k].astype(np.float64),
-            "tier_c_counts": n_by_bin.astype(np.int64),
-            "mean_F_by_bin": mean_F_by_bin.astype(np.float64),
-        })
+        rows.append(
+            {
+                "sim_name": sim_name,
+                "snap": int(snap),
+                "alpha_slope": alpha,
+                "alpha_idx": int(a_idx),
+                "z_meta": z_meta,
+                "z_grid": float(z_grid),
+                "dv_kms": dv_kms,
+                "nbins_native": nbins,
+                "target_F": float(target_F),
+                "scale": float(scale),
+                "params": params,
+                "kfkms": kf_c[:n_k].astype(np.float64),
+                "P_tier_p": P_tier_p[:n_k].astype(np.float64),
+                "P_tier_c": P_by_bin[:, :n_k].astype(np.float64),
+                "P_tier_c_filtered": P_by_bin_filt[:, :n_k].astype(np.float64),
+                "tier_c_counts": n_by_bin.astype(np.int64),
+                "mean_F_by_bin": mean_F_by_bin.astype(np.float64),
+            }
+        )
 
     snap_block = {
         "sim_name": sim_name,
@@ -456,10 +494,10 @@ def build_tau0_rows(sim_name, snap, inputs, raw_tau_path, alpha_slope_grid,
 
 _ROW_FLOAT_KEYS = T.ROW_FLOAT_KEYS
 _ROW_INT_KEYS = T.ROW_INT_KEYS
-_ROW_P1D_KEYS = T.ROW_P1D_KEYS          # 2-D (n_rows, n_k)
-_ROW_TIERC_KEYS = T.ROW_TIERC_KEYS      # 3-D (n_rows, N_TIER_C_BINS, n_k)
-_ROW_COUNT_KEYS = T.ROW_COUNT_KEYS      # 2-D (n_rows, N_TIER_C_BINS)
-_ROW_MEANF_KEYS = T.ROW_MEANF_KEYS      # 2-D (n_rows, N_TIER_C_BINS)
+_ROW_P1D_KEYS = T.ROW_P1D_KEYS  # 2-D (n_rows, n_k)
+_ROW_TIERC_KEYS = T.ROW_TIERC_KEYS  # 3-D (n_rows, N_TIER_C_BINS, n_k)
+_ROW_COUNT_KEYS = T.ROW_COUNT_KEYS  # 2-D (n_rows, N_TIER_C_BINS)
+_ROW_MEANF_KEYS = T.ROW_MEANF_KEYS  # 2-D (n_rows, N_TIER_C_BINS)
 _SNAP_FLOAT_KEYS = T.SNAP_FLOAT_KEYS
 _SNAP_2D_KEYS = T.SNAP_2D_KEYS
 
@@ -473,25 +511,36 @@ def cache_attrs(n_k, alpha_range):
         "priya_convention": (
             "Kim 2013 slope-alpha (obs_mean_tau=2.3e-3(1+z)^3.65); "
             "fake_spectra _filter_single_tau_complex(tau_thresh=1e6, thresh2=0.25); "
-            "flux_power window=False spec_res=0; native k-grid (first n_k FFT bins)"),
+            "flux_power window=False spec_res=0; native k-grid (first n_k FFT bins)"
+        ),
         "tau_thresh": 1.0e6,
-        "tier_c_recipe": "uniform",   # per-pixel freeze proven a no-op (diag_tau_freeze_sensitivity.py)
+        "tier_c_recipe": "uniform",  # per-pixel freeze proven a no-op (diag_tau_freeze_sensitivity.py)
         "alpha_range": np.asarray(alpha_range, dtype=np.float64),
         "k_convention": "angular (rad*s/km) native FFT grid, PRIYA convention",
         "tier_c_note": (
             "P_tier_c = per-class P1D on UNFILTERED tau (uniform rescale); the HCD "
             "add-back delta is P_tier_c - P_tier_c_filtered. "
             "P_tier_c_filtered = on PRIYA tau=1e6-filtered tau "
-            "(count-weighted sum == Tier P)."),
+            "(count-weighted sum == Tier P)."
+        ),
     }
 
 
-RECIPE_ATTRS = ("n_k", "priya_convention", "tau_thresh", "tier_c_recipe", "alpha_range", "k_convention", "tier_c_note")
+RECIPE_ATTRS = (
+    "n_k",
+    "priya_convention",
+    "tau_thresh",
+    "tier_c_recipe",
+    "alpha_range",
+    "k_convention",
+    "tier_c_note",
+)
 
 
 def stack_rows(rows, snap_blocks):
     """The cache datasets (tau0_cache layout) from per-alpha ``rows`` and per-snapshot ``snap_blocks``."""
     from hcd_analysis.priya_p1d import tier_c_labels, FINE_NHI_EDGES, N_TIER_C_BINS
+
     assert len(tier_c_labels()) == N_TIER_C_BINS == len(FINE_NHI_EDGES) + 1
     d = {
         "tier_c_labels": np.array(tier_c_labels(), dtype=object),
@@ -505,9 +554,13 @@ def stack_rows(rows, snap_blocks):
         "snap_snap": np.array([b["snap"] for b in snap_blocks], dtype=np.int32),
     }
     for b in snap_blocks[1:]:
-        if not (np.array_equal(b["log_nhi_edges"], d["log_nhi_edges"])
-                and np.array_equal(b["log_nhi_centres"], d["log_nhi_centres"])):
-            raise ValueError(f"CDDF bins of {b['sim_name']} {b['snap']} differ from the first group's")
+        if not (
+            np.array_equal(b["log_nhi_edges"], d["log_nhi_edges"])
+            and np.array_equal(b["log_nhi_centres"], d["log_nhi_centres"])
+        ):
+            raise ValueError(
+                f"CDDF bins of {b['sim_name']} {b['snap']} differ from the first group's"
+            )
     for key in _ROW_FLOAT_KEYS:
         d[key] = np.array([r[key] for r in rows], dtype=np.float64)
     for key in _ROW_INT_KEYS:
@@ -525,11 +578,22 @@ def stack_rows(rows, snap_blocks):
     return d
 
 
-def write_cache_tau0(rows, snap_blocks, output_path, alpha_range, n_k, *, inputs, settings,
-                     historical_reason=None, selection=None):
+def write_cache_tau0(
+    rows,
+    snap_blocks,
+    output_path,
+    alpha_range,
+    n_k,
+    *,
+    inputs,
+    settings,
+    historical_reason=None,
+    selection=None,
+):
     """Stack per-alpha `rows` + per-snap `snap_blocks` into one cache (format 3.4, tau0_cache.write_cache), with a
     lineage record listing `inputs` (the groups' snapshot, catalogue, CDDF and raw entries, and the simulations'
-    SimulationICs.json). Each row carries `snap_group_idx`, an index into the snap_* datasets. Returns the record."""
+    SimulationICs.json). Each row carries `snap_group_idx`, an index into the snap_* datasets. Returns the record.
+    """
     if not rows:
         raise ValueError("write_cache_tau0 called with no rows.")
     if not snap_blocks:
@@ -538,40 +602,87 @@ def write_cache_tau0(rows, snap_blocks, output_path, alpha_range, n_k, *, inputs
     z_of = {}
     for r in rows:
         z_of.setdefault((r["sim_name"], int(r["snap"])), float(r["z_grid"]))
-    groups = [{"sim": b["sim_name"], "snap": int(b["snap"]), "z_grid": z_of[(b["sim_name"], int(b["snap"]))],
-               "rows": T.ROWS_BUILT} for b in snap_blocks]
+    groups = [
+        {
+            "sim": b["sim_name"],
+            "snap": int(b["snap"]),
+            "z_grid": z_of[(b["sim_name"], int(b["snap"]))],
+            "rows": T.ROWS_BUILT,
+        }
+        for b in snap_blocks
+    ]
     attrs = dict(cache_attrs(n_k, alpha_range), n_rows=len(rows), n_snaps=len(snap_blocks))
-    return T.write_cache(output_path, d, attrs, inputs=T.combine_inputs(inputs), settings=settings, groups=groups,
-                         historical_reason=historical_reason, selection=selection)
+    return T.write_cache(
+        output_path,
+        d,
+        attrs,
+        inputs=T.combine_inputs(inputs),
+        settings=settings,
+        groups=groups,
+        historical_reason=historical_reason,
+        selection=selection,
+    )
 
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
-        description="Build the tau0-extended HCD-emulator cache (Phase 2, format 3.4).")
+        description="Build the tau0-extended HCD-emulator cache (Phase 2, format 3.4)."
+    )
     parser.add_argument("--fidelity", choices=("lf", "hr"), default="lf")
-    parser.add_argument("--hcd-root", type=Path, required=True,
-                        help="Snapshot root (the pipeline's output root; for hr its base, /hires is appended).")
-    parser.add_argument("--emu-root", type=Path, required=True, help="Raw spectra root (<sim>/output/SPECTRA_NNN).")
-    parser.add_argument("--output", type=Path, required=True, help="New cache file (an existing file is refused).")
-    parser.add_argument("--alpha-refine", type=int, default=2,
-                        help="PRIYA-aligned grid: refine*10 alpha containing "
-                             "PRIYA's 10 (default 2 -> 20 alpha).")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Process at most N (sim, snap) pairs.")
-    parser.add_argument("--offset", type=int, default=0,
-                        help="Skip the first M pairs (for sharded array jobs).")
-    parser.add_argument("--n-skewers", type=int, default=None,
-                        help="Limit skewers per snap (dry runs only; the output is not release-eligible).")
-    parser.add_argument("--select", action="append", default=None, metavar="SIM_SUBSTRING:SNAP",
-                        help="Build only these (sim, snap) groups (repeatable; each must match one discovered pair).")
-    parser.add_argument("--rehash-raw", action="store_true",
-                        help="Re-hash every raw spectra file against its catalogue's record (default: a matching "
-                             "size and mtime are accepted).")
-    parser.add_argument("--historical-reproduction", metavar="REASON", default=None,
-                        help="Read old snapshot directories without lineage (load_catalog_historical); the output "
-                             "is stamped not release-eligible with this reason.")
-    parser.add_argument("--spot-check", action="store_true",
-                        help="After writing, verify row 0 P_tier_p is finite.")
+    parser.add_argument(
+        "--hcd-root",
+        type=Path,
+        required=True,
+        help="Snapshot root (the pipeline's output root; for hr its base, /hires is appended).",
+    )
+    parser.add_argument(
+        "--emu-root", type=Path, required=True, help="Raw spectra root (<sim>/output/SPECTRA_NNN)."
+    )
+    parser.add_argument(
+        "--output", type=Path, required=True, help="New cache file (an existing file is refused)."
+    )
+    parser.add_argument(
+        "--alpha-refine",
+        type=int,
+        default=2,
+        help="PRIYA-aligned grid: refine*10 alpha containing "
+        "PRIYA's 10 (default 2 -> 20 alpha).",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None, help="Process at most N (sim, snap) pairs."
+    )
+    parser.add_argument(
+        "--offset", type=int, default=0, help="Skip the first M pairs (for sharded array jobs)."
+    )
+    parser.add_argument(
+        "--n-skewers",
+        type=int,
+        default=None,
+        help="Limit skewers per snap (dry runs only; the output is not release-eligible).",
+    )
+    parser.add_argument(
+        "--select",
+        action="append",
+        default=None,
+        metavar="SIM_SUBSTRING:SNAP",
+        help="Build only these (sim, snap) groups (repeatable; each must match one discovered pair).",
+    )
+    parser.add_argument(
+        "--rehash-raw",
+        action="store_true",
+        help="Re-hash every raw spectra file against its catalogue's record (default: a matching "
+        "size and mtime are accepted).",
+    )
+    parser.add_argument(
+        "--historical-reproduction",
+        metavar="REASON",
+        default=None,
+        help="Read old snapshot directories without lineage (load_catalog_historical); the output "
+        "is stamped not release-eligible with this reason.",
+    )
+    parser.add_argument(
+        "--spot-check", action="store_true", help="After writing, verify row 0 P_tier_p is finite."
+    )
     args = parser.parse_args(argv)
 
     _assert_class_edges()  # fail fast if dN/dX and Tier-C class edges have drifted
@@ -588,28 +699,36 @@ def main(argv=None) -> None:
         raise SystemExit("--historical-reproduction needs a non-empty reason")
     reason = historical
     if args.n_skewers is not None:
-        reason = "; ".join(x for x in (historical, f"dry run on the first {args.n_skewers} skewers per snapshot") if x)
+        reason = "; ".join(
+            x
+            for x in (historical, f"dry run on the first {args.n_skewers} skewers per snapshot")
+            if x
+        )
 
     pairs = discover_tau0_pairs(args.hcd_root, args.emu_root, fidelity=fid)
     print(f"[{fid}] Found {len(pairs)} tau0-buildable (sim, snap) pairs (n_k={n_k})")
     if args.select:
         pairs = select_pairs(pairs, args.select)
         print(f"[{fid}] --select kept {len(pairs)} pairs: {[(p[0][:24], p[1]) for p in pairs]}")
-    pairs = pairs[args.offset:]
+    pairs = pairs[args.offset :]
     if args.limit is not None:
         pairs = pairs[: args.limit]
-    print(f"Processing {len(pairs)} pairs (offset={args.offset}, limit={args.limit}); "
-          f"n_alpha={len(alpha_slope_grid)}")
+    print(
+        f"Processing {len(pairs)} pairs (offset={args.offset}, limit={args.limit}); "
+        f"n_alpha={len(alpha_slope_grid)}"
+    )
 
     all_rows, snap_blocks, entries = [], [], []
     for i, (sim, snap, snap_dir, raw) in enumerate(pairs):
         if historical is not None:
             inputs, group_entries = T.load_snapshot_inputs_historical(snap_dir, reason=historical)
         else:
-            inputs, group_entries = T.load_snapshot_inputs(snap_dir, raw, sim=sim, snap=snap,
-                                                           rehash_raw=args.rehash_raw)
-        rows, block = build_tau0_rows(sim, snap, inputs, raw, alpha_slope_grid,
-                                      n_k=n_k, n_skewers=args.n_skewers)
+            inputs, group_entries = T.load_snapshot_inputs(
+                snap_dir, raw, sim=sim, snap=snap, rehash_raw=args.rehash_raw
+            )
+        rows, block = build_tau0_rows(
+            sim, snap, inputs, raw, alpha_slope_grid, n_k=n_k, n_skewers=args.n_skewers
+        )
         gi = len(snap_blocks)
         for r in rows:
             r["snap_group_idx"] = gi
@@ -619,20 +738,46 @@ def main(argv=None) -> None:
         if (i + 1) % 10 == 0 or (i + 1) == len(pairs):
             print(f"  built {i+1}/{len(pairs)} pairs ({len(all_rows)} rows)")
 
-    settings = T.cache_settings(fidelity=fid, n_k=n_k, alpha_refine=args.alpha_refine, alpha_range=alpha_range,
-                                n_skewers=args.n_skewers)
-    selection = {"select": args.select, "offset": int(args.offset), "limit": args.limit, "max_off_grid": 0.05}
-    rec = write_cache_tau0(all_rows, snap_blocks, output, alpha_range=alpha_range, n_k=n_k, inputs=entries,
-                           settings=settings, historical_reason=reason, selection=selection)
-    print(f"Wrote {output} ({output.stat().st_size/1e6:.2f} MB, "
-          f"{len(all_rows)} rows, {len(snap_blocks)} snaps); release_eligible={rec['release_eligible']}"
-          + ("" if rec["release_eligible"] else f" ({'; '.join(rec['ineligible_reasons'][:3])}"
-                                                  f"{'; ...' if len(rec['ineligible_reasons']) > 3 else ''})"))
+    settings = T.cache_settings(
+        fidelity=fid,
+        n_k=n_k,
+        alpha_refine=args.alpha_refine,
+        alpha_range=alpha_range,
+        n_skewers=args.n_skewers,
+    )
+    selection = {
+        "select": args.select,
+        "offset": int(args.offset),
+        "limit": args.limit,
+        "max_off_grid": 0.05,
+    }
+    rec = write_cache_tau0(
+        all_rows,
+        snap_blocks,
+        output,
+        alpha_range=alpha_range,
+        n_k=n_k,
+        inputs=entries,
+        settings=settings,
+        historical_reason=reason,
+        selection=selection,
+    )
+    print(
+        f"Wrote {output} ({output.stat().st_size/1e6:.2f} MB, "
+        f"{len(all_rows)} rows, {len(snap_blocks)} snaps); release_eligible={rec['release_eligible']}"
+        + (
+            ""
+            if rec["release_eligible"]
+            else f" ({'; '.join(rec['ineligible_reasons'][:3])}"
+            f"{'; ...' if len(rec['ineligible_reasons']) > 3 else ''})"
+        )
+    )
 
     if args.spot_check and all_rows:
         with h5py.File(output, "r") as f:
-            assert np.isfinite(f["P_tier_p"][0]).any(), \
-                "spot-check failed: row 0 P_tier_p has no finite values"
+            assert np.isfinite(
+                f["P_tier_p"][0]
+            ).any(), "spot-check failed: row 0 P_tier_p has no finite values"
             med_target_F = float(np.median(f["target_F"][...]))
             med_scale = float(np.median(f["scale"][...]))
             # Cheap integrity invariant (NO flux_power): the stored Tier P must
@@ -647,10 +792,13 @@ def main(argv=None) -> None:
             recon = np.einsum("rc,rck->rk", w, pcf)
             m = np.isfinite(ptp) & np.isfinite(recon) & (ptp != 0)
             rel = np.abs(recon[m] / ptp[m] - 1.0)
-            assert rel.max() < 1e-10, \
-                f"integrity: Tier P != sum(filtered pieces), max|r-1|={rel.max():.2e}"
-        print(f"spot-check: row 0 P_tier_p finite OK; integrity max|r-1|={rel.max():.2e}; "
-              f"median target_F={med_target_F:.4f} scale={med_scale:.4f}")
+            assert (
+                rel.max() < 1e-10
+            ), f"integrity: Tier P != sum(filtered pieces), max|r-1|={rel.max():.2e}"
+        print(
+            f"spot-check: row 0 P_tier_p finite OK; integrity max|r-1|={rel.max():.2e}; "
+            f"median target_F={med_target_F:.4f} scale={med_scale:.4f}"
+        )
 
 
 if __name__ == "__main__":

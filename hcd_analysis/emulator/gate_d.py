@@ -6,6 +6,7 @@ held-out prediction is the mean of the other simulations, so the pooled residual
 indices it is zero; the registered band's small residual comes only from per-simulation band membership (k >= 0.0442
 maps to different modes for different v_box). The accuracy of the correction at high k is therefore read per held-out
 simulation."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -22,7 +23,11 @@ def _zsel(z):
 
 def _keep3(keep, n_cls):
     keep = np.asarray(keep, bool)
-    return np.broadcast_to(keep[:, None, :], (keep.shape[0], n_cls, keep.shape[1])) if keep.ndim == 2 else keep
+    return (
+        np.broadcast_to(keep[:, None, :], (keep.shape[0], n_cls, keep.shape[1]))
+        if keep.ndim == 2
+        else keep
+    )
 
 
 def registered_band(z, k_hr, keep, n_cls=4):
@@ -58,19 +63,31 @@ def d3_per_simulation(l_mf, l_lf, sim, z, k_hr, keep):
     n_cls = l_mf.shape[1]
     band = registered_band(z, k_hr, keep, n_cls)
     common = common_mode_band(z, k_hr, keep)[:, None, :] & _keep3(keep, n_cls)
-    out = {"pooled_registered_band": {}, "pooled_common_mode_band": {}, "per_simulation": {},
-           "rms_over_simulations": {},
-           "common_mode_band_first_mode": int(np.argmax(common_mode_band(z, k_hr, keep).any(axis=0))) + 1}
+    out = {
+        "pooled_registered_band": {},
+        "pooled_common_mode_band": {},
+        "per_simulation": {},
+        "rms_over_simulations": {},
+        "common_mode_band_first_mode": int(np.argmax(common_mode_band(z, k_hr, keep).any(axis=0)))
+        + 1,
+    }
     for c, name in enumerate(CLS[:n_cls]):
-        out["pooled_registered_band"][name] = dict(mf=_mean(l_mf[:, c], band[:, c]), lf=_mean(l_lf[:, c], band[:, c]))
-        out["pooled_common_mode_band"][name] = dict(mf=_mean(l_mf[:, c], common[:, c]),
-                                                    lf=_mean(l_lf[:, c], common[:, c]))
+        out["pooled_registered_band"][name] = dict(
+            mf=_mean(l_mf[:, c], band[:, c]), lf=_mean(l_lf[:, c], band[:, c])
+        )
+        out["pooled_common_mode_band"][name] = dict(
+            mf=_mean(l_mf[:, c], common[:, c]), lf=_mean(l_lf[:, c], common[:, c])
+        )
     sims = sorted(set(sim))
     for s in sims:
         r = sim == s
-        out["per_simulation"][s] = {name: dict(mf=_mean(l_mf[r, c], band[r, c]), lf=_mean(l_lf[r, c], band[r, c]))
-                                    for c, name in enumerate(CLS[:n_cls])}
+        out["per_simulation"][s] = {
+            name: dict(mf=_mean(l_mf[r, c], band[r, c]), lf=_mean(l_lf[r, c], band[r, c]))
+            for c, name in enumerate(CLS[:n_cls])
+        }
     for name in CLS[:n_cls]:
         out["rms_over_simulations"][name] = {
-            arm: float(np.sqrt(np.mean([out["per_simulation"][s][name][arm] ** 2 for s in sims]))) for arm in ("mf", "lf")}
+            arm: float(np.sqrt(np.mean([out["per_simulation"][s][name][arm] ** 2 for s in sims])))
+            for arm in ("mf", "lf")
+        }
     return out

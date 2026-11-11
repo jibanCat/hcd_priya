@@ -20,6 +20,7 @@ shape is derived from reviewed code (``model.Emulator`` under ``equinox.filter_e
 architecture config checked against an allowlist; every leaf is matched by name, shape and dtype before the network is
 assembled, and the normalizer must have the production structure, all float64. No pickle is read or written on this
 path."""
+
 from __future__ import annotations
 
 import hashlib
@@ -35,19 +36,31 @@ import numpy as np
 
 FORMAT = "hcd_priya.safe/1"
 # safetensors dtype codes this format writes; float64 stays float64 (never down-cast)
-_DTYPES = {"F64": np.dtype("<f8"), "F32": np.dtype("<f4"), "I64": np.dtype("<i8"), "I32": np.dtype("<i4"),
-           "U8": np.dtype("|u1"), "BOOL": np.dtype("|b1")}
+_DTYPES = {
+    "F64": np.dtype("<f8"),
+    "F32": np.dtype("<f4"),
+    "I64": np.dtype("<i8"),
+    "I32": np.dtype("<i4"),
+    "U8": np.dtype("|u1"),
+    "BOOL": np.dtype("|b1"),
+}
 _CODES = {v: k for k, v in _DTYPES.items()}
-_MAX_HEADER = 100_000_000                    # the official reader's limit
+_MAX_HEADER = 100_000_000  # the official reader's limit
 _MAX_NDIM = 8
-ARCH_KEYS = ("in_dim", "n_k", "n_basis", "baseline_n_layers", "baseline_width")   # Emulator(**arch_cfg)
+ARCH_KEYS = (
+    "in_dim",
+    "n_k",
+    "n_basis",
+    "baseline_n_layers",
+    "baseline_width",
+)  # Emulator(**arch_cfg)
 _ARCH_MAX = 1 << 16
-_INT_SEGMENT = re.compile(r"#(0|-?[1-9][0-9]{0,17})\Z")        # canonical, fits int64
+_INT_SEGMENT = re.compile(r"#(0|-?[1-9][0-9]{0,17})\Z")  # canonical, fits int64
 _MAX_DIM = 1 << 40
 _PLAIN_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*\Z")
 MANIFEST = "manifest.json"
-MAX_JSON_BYTES = 1 << 24                     # 16 MiB: a sidecar or a manifest
-MAX_DATA_BYTES = 1 << 30                     # 1 GiB: one member data file read into memory
+MAX_JSON_BYTES = 1 << 24  # 16 MiB: a sidecar or a manifest
+MAX_DATA_BYTES = 1 << 30  # 1 GiB: one member data file read into memory
 
 
 class SafeFormatError(ValueError):
@@ -66,8 +79,10 @@ def exact_hex64(x):
 def require_exact_hex64(x, what, err=SafeFormatError):
     """Refuse (``err``) a caller-given digest ``x`` that is not ``exact_hex64``; ``what`` names the argument."""
     if not exact_hex64(x):
-        raise err(f"{what} must be a sha256 (64 lowercase hex digits, an exact str; a str subclass is refused, not "
-                  f"compared), got a {type(x).__name__}")
+        raise err(
+            f"{what} must be a sha256 (64 lowercase hex digits, an exact str; a str subclass is refused, not "
+            f"compared), got a {type(x).__name__}"
+        )
 
 
 # --------------------------------------------------------------------------------------------- safetensors layer
@@ -83,6 +98,7 @@ def _no_duplicate_keys(pairs):
 def _json_loads(raw, where):
     """Strict JSON from bytes: UTF-8, no duplicate keys, no NaN or Infinity (neither the literals nor a number that
     overflows to infinity, such as 1e999); every failure is a SafeFormatError."""
+
     def no_constant(c):
         raise SafeFormatError(f"{where}: JSON constant {c} is not allowed")
 
@@ -91,9 +107,14 @@ def _json_loads(raw, where):
         if not math.isfinite(v):
             raise SafeFormatError(f"{where}: JSON number {t[:24]} is not finite")
         return v
+
     try:
-        return json.loads(bytes(raw).decode("utf-8", errors="strict"), object_pairs_hook=_no_duplicate_keys,
-                          parse_constant=no_constant, parse_float=finite_float)
+        return json.loads(
+            bytes(raw).decode("utf-8", errors="strict"),
+            object_pairs_hook=_no_duplicate_keys,
+            parse_constant=no_constant,
+            parse_float=finite_float,
+        )
     except SafeFormatError:
         raise
     except (UnicodeDecodeError, ValueError, RecursionError) as e:
@@ -106,7 +127,9 @@ def _is_int(x):
 
 def _require_finite(tensors, where):
     """Every float array finite: a member's weights and normalizer never hold NaN or inf."""
-    bad = sorted(n for n, a in tensors.items() if a.dtype.kind == "f" and not np.all(np.isfinite(a)))
+    bad = sorted(
+        n for n, a in tensors.items() if a.dtype.kind == "f" and not np.all(np.isfinite(a))
+    )
     if bad:
         raise SafeFormatError(f"{where}: non-finite values in {bad[:5]}")
 
@@ -131,11 +154,13 @@ def _publish(tmp, path, held):
         except OSError as e:
             raise SafeFormatError(f"{path} cannot be published ({e})") from None
         if not stat.S_ISREG(st_t.st_mode) or (st_t.st_dev, st_t.st_ino) != ident:
-            raise SafeFormatError(f"{path}: the temporary file was replaced before publishing; nothing published")
+            raise SafeFormatError(
+                f"{path}: the temporary file was replaced before publishing; nothing published"
+            )
         try:
             os.link(tmp, path, follow_symlinks=False)
         except FileExistsError:
-            pass                                                   # checked below: only our own inode is accepted
+            pass  # checked below: only our own inode is accepted
         except OSError as e:
             raise SafeFormatError(f"{path} cannot be published ({e})") from None
         try:
@@ -143,8 +168,10 @@ def _publish(tmp, path, held):
         except OSError as e:
             raise SafeFormatError(f"{path} cannot be published ({e})") from None
         if stat.S_ISLNK(st_p.st_mode) or (st_p.st_dev, st_p.st_ino) != ident:
-            raise SafeFormatError(f"{path} exists (or the temporary file was swapped just before linking): never "
-                                  f"overwritten; nothing of this call is published") from None
+            raise SafeFormatError(
+                f"{path} exists (or the temporary file was swapped just before linking): never "
+                f"overwritten; nothing of this call is published"
+            ) from None
     finally:
         held.close()
         try:
@@ -200,7 +227,9 @@ def _open_regular(path):
     if os.path.islink(path):
         raise SafeFormatError(f"{path} is a symlink")
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        fd = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        )
     except OSError as e:
         raise SafeFormatError(f"{path} cannot be read ({e})") from None
     st = os.fstat(fd)
@@ -237,7 +266,9 @@ def _sha256_regular(path, expected_bytes=None):
     fd, st = _open_regular(path)
     try:
         if expected_bytes is not None and st.st_size != expected_bytes:
-            raise SafeFormatError(f"{path}: {st.st_size} bytes, the manifest lists {expected_bytes}")
+            raise SafeFormatError(
+                f"{path}: {st.st_size} bytes, the manifest lists {expected_bytes}"
+            )
         h, n = hashlib.sha256(), 0
         while True:
             b = os.read(fd, 1 << 20)
@@ -254,6 +285,7 @@ def _write_exclusive(path, chunks):
     def writer(fh):
         for c in chunks:
             fh.write(c)
+
     tmp, held, digest = _write_tmp(path, "", writer)
     _publish(tmp, path, held)
     return digest
@@ -270,9 +302,15 @@ def write_safetensors(path, tensors, metadata=None):
         a = np.asarray(tensors[name])
         code = _code(a.dtype)
         if code is None or a.ndim > _MAX_NDIM:
-            raise SafeFormatError(f"tensor {name!r}: dtype {a.dtype} / ndim {a.ndim} is not supported")
+            raise SafeFormatError(
+                f"tensor {name!r}: dtype {a.dtype} / ndim {a.ndim} is not supported"
+            )
         buf = np.ascontiguousarray(a, dtype=_DTYPES[code]).tobytes()
-        header[name] = {"dtype": code, "shape": [int(s) for s in a.shape], "data_offsets": [offset, offset + len(buf)]}
+        header[name] = {
+            "dtype": code,
+            "shape": [int(s) for s in a.shape],
+            "data_offsets": [offset, offset + len(buf)],
+        }
         chunks.append(buf)
         offset += len(buf)
     if metadata:
@@ -293,15 +331,17 @@ def parse_safetensors(raw, where="<bytes>"):
         raise SafeFormatError(f"{where}: header length {n} is invalid for a {len(raw)}-byte file")
     if raw[8:9] != b"{":
         raise SafeFormatError(f"{where}: header does not start with '{{'")
-    header = _json_loads(raw[8:8 + n], where)
+    header = _json_loads(raw[8 : 8 + n], where)
     if not isinstance(header, dict):
         raise SafeFormatError(f"{where}: header is not a JSON object")
     meta = header.pop("__metadata__", {})
-    if not isinstance(meta, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in meta.items()):
+    if not isinstance(meta, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in meta.items()
+    ):
         raise SafeFormatError(f"{where}: __metadata__ must map str to str")
-    buf = memoryview(raw)[8 + n:]
+    buf = memoryview(raw)[8 + n :]
     spans, plan = [], []
-    for name, e in header.items():                     # pass 1: validate every entry; nothing is copied yet
+    for name, e in header.items():  # pass 1: validate every entry; nothing is copied yet
         if not name:
             raise SafeFormatError(f"{where}: empty tensor name")
         if not isinstance(e, dict) or set(e) != {"dtype", "shape", "data_offsets"}:
@@ -309,31 +349,42 @@ def parse_safetensors(raw, where="<bytes>"):
         if not isinstance(e["dtype"], str) or e["dtype"] not in _DTYPES:
             raise SafeFormatError(f"{where}: tensor {name!r} has unsupported dtype {e['dtype']!r}")
         shape, off = e["shape"], e["data_offsets"]
-        if (not isinstance(shape, list) or len(shape) > _MAX_NDIM
-                or not all(_is_int(s) and 0 <= s < _MAX_DIM for s in shape)
-                or not isinstance(off, list) or len(off) != 2 or not all(_is_int(o) for o in off)):
+        if (
+            not isinstance(shape, list)
+            or len(shape) > _MAX_NDIM
+            or not all(_is_int(s) and 0 <= s < _MAX_DIM for s in shape)
+            or not isinstance(off, list)
+            or len(off) != 2
+            or not all(_is_int(o) for o in off)
+        ):
             raise SafeFormatError(f"{where}: tensor {name!r} has a malformed shape or offsets")
         a, b = off
         dt = _DTYPES[e["dtype"]]
-        size = math.prod(shape) * dt.itemsize                 # Python ints: no overflow
+        size = math.prod(shape) * dt.itemsize  # Python ints: no overflow
         if not 0 <= a <= b <= len(buf) or b - a != size:
-            raise SafeFormatError(f"{where}: tensor {name!r} offsets {off} do not match its shape/dtype or the file")
+            raise SafeFormatError(
+                f"{where}: tensor {name!r} offsets {off} do not match its shape/dtype or the file"
+            )
         spans.append((a, b, name))
         plan.append((name, a, b, dt, shape))
     spans.sort()
     pos = 0
     for a, b, name in spans:
         if a != pos:
-            raise SafeFormatError(f"{where}: byte buffer has a gap or an overlap at tensor {name!r}")
+            raise SafeFormatError(
+                f"{where}: byte buffer has a gap or an overlap at tensor {name!r}"
+            )
         pos = b
     if pos != len(buf):
         raise SafeFormatError(f"{where}: {len(buf) - pos} trailing bytes not owned by any tensor")
     out = {}
-    for name, a, b, dt, shape in plan:                 # pass 2: the spans tile the buffer exactly; copy each once
+    for name, a, b, dt, shape in plan:  # pass 2: the spans tile the buffer exactly; copy each once
         try:
             out[name] = np.frombuffer(buf[a:b], dtype=dt).reshape(shape).copy()
         except ValueError as e:
-            raise SafeFormatError(f"{where}: tensor {name!r} cannot take shape {shape} ({e})") from None
+            raise SafeFormatError(
+                f"{where}: tensor {name!r} cannot take shape {shape} ({e})"
+            ) from None
     return out, meta
 
 
@@ -360,11 +411,14 @@ def sha256_file(path, chunk=1 << 20):
 def model_tensors(model):
     """``{"model<tree path>": array}`` for every array leaf of an Equinox model, names from the tree paths."""
     import jax
+
     leaves, _ = jax.tree_util.tree_flatten_with_path(model)
     out = {}
     for p, x in leaves:
         if not hasattr(x, "shape"):
-            raise SafeFormatError(f"non-array leaf at {jax.tree_util.keystr(p)}: the format stores arrays only")
+            raise SafeFormatError(
+                f"non-array leaf at {jax.tree_util.keystr(p)}: the format stores arrays only"
+            )
         out["model" + jax.tree_util.keystr(p)] = np.asarray(x)
     return out
 
@@ -377,7 +431,7 @@ def _norm_flatten(d, prefix, out):
             raise SafeFormatError(f"normalizer key {k!r} under {prefix!r} is neither str nor int")
         if isinstance(k, str) and (not k or "/" in k or k.startswith("#")):
             raise SafeFormatError(f"normalizer key {k!r} under {prefix!r} cannot be encoded")
-        if isinstance(k, int) and not -10 ** 18 < k < 10 ** 18:
+        if isinstance(k, int) and not -(10**18) < k < 10**18:
             raise SafeFormatError(f"normalizer key {k!r} under {prefix!r} has more than 18 digits")
         name = f"{prefix}/{'#%d' % k if isinstance(k, int) else k}"
         if isinstance(v, dict):
@@ -407,7 +461,9 @@ def norm_from_tensors(tensors):
         for s in segs:
             if s.startswith("#"):
                 if not _INT_SEGMENT.match(s):
-                    raise SafeFormatError(f"normalizer name {name!r}: integer segment {s!r} is not canonical")
+                    raise SafeFormatError(
+                        f"normalizer name {name!r}: integer segment {s!r} is not canonical"
+                    )
                 keys.append(int(s[1:]))
             elif s:
                 keys.append(s)
@@ -428,6 +484,7 @@ def norm_from_tensors(tensors):
 
 def _validate_norm(norm, n_k, n_cddf, n_dndx):
     """The production normalizer structure (train.fit_target_norm), every leaf float64."""
+
     def leaf(path, a, shape):
         if not isinstance(a, np.ndarray) or a.dtype != np.dtype("<f8") or a.shape != shape:
             got = (a.dtype, a.shape) if isinstance(a, np.ndarray) else type(a).__name__
@@ -435,8 +492,11 @@ def _validate_norm(norm, n_k, n_cddf, n_dndx):
 
     def keys(path, d, want):
         if not isinstance(d, dict) or set(d) != set(want):
-            raise SafeFormatError(f"normalizer {path}: keys {sorted(map(str, d)) if isinstance(d, dict) else d!r}, "
-                                  f"expected {sorted(want)}")
+            raise SafeFormatError(
+                f"normalizer {path}: keys {sorted(map(str, d)) if isinstance(d, dict) else d!r}, "
+                f"expected {sorted(want)}"
+            )
+
     keys("norm", norm, ("f_nhi", "dndx", "P_filt", "delta"))
     for top, shape in (("f_nhi", (n_cddf,)), ("dndx", (n_dndx,)), ("delta", (3, n_k))):
         keys(f"norm/{top}", norm[top], ("mean", "std"))
@@ -448,7 +508,9 @@ def _validate_norm(norm, n_k, n_cddf, n_dndx):
         leaf(f"norm/P_filt/{k}", pf[k], (4, n_k))
     cm = pf["cell_mean"]
     if not isinstance(cm, dict) or not cm or not all(_is_int(k) for k in cm):
-        raise SafeFormatError("normalizer norm/P_filt/cell_mean must be a non-empty dict with integer keys")
+        raise SafeFormatError(
+            "normalizer norm/P_filt/cell_mean must be a non-empty dict with integer keys"
+        )
     for k, a in cm.items():
         leaf(f"norm/P_filt/cell_mean/#{k}", a, (4, n_k))
 
@@ -456,39 +518,55 @@ def _validate_norm(norm, n_k, n_cddf, n_dndx):
 # --------------------------------------------------------------------------------------------- members
 def _validate_arch(arch):
     if not isinstance(arch, dict) or set(arch) != set(ARCH_KEYS):
-        raise SafeFormatError(f"arch_cfg keys {sorted(arch) if isinstance(arch, dict) else arch!r} are not the "
-                              f"allowlist {sorted(ARCH_KEYS)}")
+        raise SafeFormatError(
+            f"arch_cfg keys {sorted(arch) if isinstance(arch, dict) else arch!r} are not the "
+            f"allowlist {sorted(ARCH_KEYS)}"
+        )
     for k in ARCH_KEYS:
-        if k == "n_basis" and arch[k] is None:                   # train._arch_cfg_from_model: no basis head
+        if k == "n_basis" and arch[k] is None:  # train._arch_cfg_from_model: no basis head
             continue
         if not _is_int(arch[k]) or not 0 < arch[k] <= _ARCH_MAX:
-            raise SafeFormatError(f"arch_cfg[{k!r}] = {arch[k]!r} is not an int in [1, {_ARCH_MAX}]")
+            raise SafeFormatError(
+                f"arch_cfg[{k!r}] = {arch[k]!r} is not an int in [1, {_ARCH_MAX}]"
+            )
 
 
 def _validate_meta(meta, where):
     """The checkpoint-schema-2.0 meta checks of ``train.load_checkpoint``, plus the architecture allowlist and seed."""
     from .schema import CHECKPOINT_SCHEMA_VERSION
-    from .schema import SCHEMA2_REQUIRED as _SCHEMA2_REQUIRED, velocity_key_paths as _velocity_key_paths
+    from .schema import (
+        SCHEMA2_REQUIRED as _SCHEMA2_REQUIRED,
+        velocity_key_paths as _velocity_key_paths,
+    )
+
     if not isinstance(meta, dict) or meta.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
-        raise SafeFormatError(f"{where}: checkpoint schema "
-                              f"{meta.get('schema_version') if isinstance(meta, dict) else None!r}, expected "
-                              f"{CHECKPOINT_SCHEMA_VERSION}")
-    try:                                                         # plain, finite JSON that round-trips through the
-        same = json.loads(json.dumps(meta, sort_keys=True, allow_nan=False)) == meta   # writer's own sorted dump
+        raise SafeFormatError(
+            f"{where}: checkpoint schema "
+            f"{meta.get('schema_version') if isinstance(meta, dict) else None!r}, expected "
+            f"{CHECKPOINT_SCHEMA_VERSION}"
+        )
+    try:  # plain, finite JSON that round-trips through the
+        same = (
+            json.loads(json.dumps(meta, sort_keys=True, allow_nan=False)) == meta
+        )  # writer's own sorted dump
     except (TypeError, ValueError) as e:
         raise SafeFormatError(f"{where}: meta is not plain finite JSON ({e})"[:300]) from None
     if not same:
-        raise SafeFormatError(f"{where}: meta is not plain finite JSON (it does not round-trip: non-string keys or "
-                              f"tuples)")
+        raise SafeFormatError(
+            f"{where}: meta is not plain finite JSON (it does not round-trip: non-string keys or "
+            f"tuples)"
+        )
     missing = [k for k in _SCHEMA2_REQUIRED if meta.get(k) is None]
     if missing:
         raise SafeFormatError(f"{where}: schema-2.0 meta lacks {missing}")
     if not (isinstance(meta["cache_sha256"], str) and len(meta["cache_sha256"]) == 64):
         raise SafeFormatError(f"{where}: cache_sha256 is not a 64-hex digest")
     if _velocity_key_paths(meta):
-        raise SafeFormatError(f"{where}: meta carries a velocity grid key {_velocity_key_paths(meta)}")
+        raise SafeFormatError(
+            f"{where}: meta carries a velocity grid key {_velocity_key_paths(meta)}"
+        )
     _validate_arch(meta.get("arch_cfg"))
-    if not _is_int(meta.get("seed")) or not 0 <= meta["seed"] < 2 ** 32:
+    if not _is_int(meta.get("seed")) or not 0 <= meta["seed"] < 2**32:
         raise SafeFormatError(f"{where}: seed must be an int in [0, 2**32)")
 
 
@@ -498,9 +576,12 @@ def _abstract_network(arch, seed):
     import jax
 
     from .model import Emulator
+
     abstract = eqx.filter_eval_shape(lambda: Emulator(**arch, key=jax.random.PRNGKey(seed)))
     paths, treedef = jax.tree_util.tree_flatten_with_path(abstract)
-    return treedef, [("model" + jax.tree_util.keystr(p), tuple(x.shape), np.dtype(x.dtype)) for p, x in paths]
+    return treedef, [
+        ("model" + jax.tree_util.keystr(p), tuple(x.shape), np.dtype(x.dtype)) for p, x in paths
+    ]
 
 
 def export_member(prefix, model, meta, norm):
@@ -512,12 +593,22 @@ def export_member(prefix, model, meta, norm):
     _validate_meta(meta, prefix)
     tensors = {**model_tensors(model), **norm_tensors(norm)}
     _require_finite(tensors, prefix)
-    st_sha = write_safetensors(st, tensors, metadata={"format": FORMAT,
-                                                       "schema_version": str(meta.get("schema_version"))})
-    index = {n: {"shape": list(a.shape), "dtype": _code(a.dtype)} for n, a in sorted(tensors.items())}
-    doc = {"format": FORMAT, "meta": meta, "tensors": index, "safetensors_sha256": st_sha,
-           "safetensors_file": os.path.basename(st)}
-    _write_exclusive(js, [json.dumps(doc, indent=1, sort_keys=True, allow_nan=False).encode("utf-8")])
+    st_sha = write_safetensors(
+        st, tensors, metadata={"format": FORMAT, "schema_version": str(meta.get("schema_version"))}
+    )
+    index = {
+        n: {"shape": list(a.shape), "dtype": _code(a.dtype)} for n, a in sorted(tensors.items())
+    }
+    doc = {
+        "format": FORMAT,
+        "meta": meta,
+        "tensors": index,
+        "safetensors_sha256": st_sha,
+        "safetensors_file": os.path.basename(st),
+    }
+    _write_exclusive(
+        js, [json.dumps(doc, indent=1, sort_keys=True, allow_nan=False).encode("utf-8")]
+    )
     return st, js
 
 
@@ -532,29 +623,43 @@ def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None):
     import jax
     import jax.numpy as jnp
 
-    for name, v in (("expected_sha256", expected_sha256), ("expected_json_sha256", expected_json_sha256)):
+    for name, v in (
+        ("expected_sha256", expected_sha256),
+        ("expected_json_sha256", expected_json_sha256),
+    ):
         if v is not None:
             require_exact_hex64(v, f"load_member: {name}")
     js = f"{prefix}.json"
     raw_js = read_regular(js, MAX_JSON_BYTES)
-    if expected_json_sha256 is not None and hashlib.sha256(raw_js).hexdigest() != expected_json_sha256:
+    if (
+        expected_json_sha256 is not None
+        and hashlib.sha256(raw_js).hexdigest() != expected_json_sha256
+    ):
         raise SafeFormatError(f"{js}: sha256 does not match the manifest")
     doc = _json_loads(raw_js, js)
     need = ("format", "meta", "tensors", "safetensors_sha256", "safetensors_file")
     if not isinstance(doc, dict) or any(k not in doc for k in need):
-        raise SafeFormatError(f"{js}: sidecar lacks {[k for k in need if not isinstance(doc, dict) or k not in doc]}")
+        raise SafeFormatError(
+            f"{js}: sidecar lacks {[k for k in need if not isinstance(doc, dict) or k not in doc]}"
+        )
     if doc["format"] != FORMAT:
         raise SafeFormatError(f"{js}: format {doc['format']!r}, this loader reads {FORMAT}")
     meta = doc["meta"]
     _validate_meta(meta, js)
     if doc["safetensors_file"] != os.path.basename(prefix) + ".safetensors":
-        raise SafeFormatError(f"{js}: safetensors_file {doc['safetensors_file']!r} is not "
-                              f"{os.path.basename(prefix)}.safetensors")
+        raise SafeFormatError(
+            f"{js}: safetensors_file {doc['safetensors_file']!r} is not "
+            f"{os.path.basename(prefix)}.safetensors"
+        )
     st = f"{prefix}.safetensors"
     raw = read_regular(st, MAX_DATA_BYTES)
     digest = hashlib.sha256(raw).hexdigest()
-    if digest != doc["safetensors_sha256"] or (expected_sha256 is not None and digest != expected_sha256):
-        raise SafeFormatError(f"{st}: sha256 does not match {js}" + (" or the manifest" if expected_sha256 else ""))
+    if digest != doc["safetensors_sha256"] or (
+        expected_sha256 is not None and digest != expected_sha256
+    ):
+        raise SafeFormatError(
+            f"{st}: sha256 does not match {js}" + (" or the manifest" if expected_sha256 else "")
+        )
     tensors, smeta = parse_safetensors(raw, st)
     if smeta.get("format") != FORMAT:
         raise SafeFormatError(f"{st}: format {smeta.get('format')!r}, expected {FORMAT}")
@@ -563,26 +668,42 @@ def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None):
         raise SafeFormatError(f"{st}: tensor names differ from the JSON index")
     for n, a in tensors.items():
         e = index[n]
-        if not isinstance(e, dict) or e.get("shape") != list(a.shape) or e.get("dtype") != _CODES.get(a.dtype):
+        if (
+            not isinstance(e, dict)
+            or e.get("shape") != list(a.shape)
+            or e.get("dtype") != _CODES.get(a.dtype)
+        ):
             raise SafeFormatError(f"{st}: tensor {n!r} does not match its JSON index entry")
-    stray = [n for n in tensors if not (n.startswith("model.") or n.startswith("model[") or n.startswith("norm/"))]
+    stray = [
+        n
+        for n in tensors
+        if not (n.startswith("model.") or n.startswith("model[") or n.startswith("norm/"))
+    ]
     if stray:
         raise SafeFormatError(f"{st}: tensors outside model/norm: {sorted(stray)[:5]}")
     treedef, want = _abstract_network(meta["arch_cfg"], meta["seed"])
     names = {n for n, _, _ in want}
     have = {n for n in tensors if n.startswith("model")}
     if names != have:
-        raise SafeFormatError(f"{st}: model tensors differ from the network derived from code: missing "
-                              f"{sorted(names - have)[:5]}, extra {sorted(have - names)[:5]}")
+        raise SafeFormatError(
+            f"{st}: model tensors differ from the network derived from code: missing "
+            f"{sorted(names - have)[:5]}, extra {sorted(have - names)[:5]}"
+        )
     for n, shape, dt in want:
         a = tensors[n]
         if a.shape != shape or a.dtype != dt:
-            raise SafeFormatError(f"{st}: tensor {n!r} is {a.dtype}{a.shape}, the network expects {dt}{shape} "
-                                  "(a float64 file needs jax_enable_x64; it is never down-cast)")
+            raise SafeFormatError(
+                f"{st}: tensor {n!r} is {a.dtype}{a.shape}, the network expects {dt}{shape} "
+                "(a float64 file needs jax_enable_x64; it is never down-cast)"
+            )
     shapes = {n: s for n, s, _ in want}
     norm = norm_from_tensors(tensors)
-    _validate_norm(norm, meta["arch_cfg"]["n_k"], shapes["model.head_a.cddf.weight"][0],
-                   shapes["model.head_a.dndx.weight"][0])
+    _validate_norm(
+        norm,
+        meta["arch_cfg"]["n_k"],
+        shapes["model.head_a.cddf.weight"][0],
+        shapes["model.head_a.dndx.weight"][0],
+    )
     _require_finite(tensors, st)
     model = jax.tree_util.tree_unflatten(treedef, [jnp.asarray(tensors[n]) for n, _, _ in want])
     return model, meta, norm
@@ -591,12 +712,22 @@ def load_member(prefix, *, expected_sha256=None, expected_json_sha256=None):
 # --------------------------------------------------------------------------------------------- bundle manifest
 def _plain(name, what):
     if not isinstance(name, str) or not _PLAIN_NAME.match(name):
-        raise SafeFormatError(f"{what} {name!r} is not a plain file name (no directories, no leading dot)")
+        raise SafeFormatError(
+            f"{what} {name!r} is not a plain file name (no directories, no leading dot)"
+        )
     return name
 
 
-def write_manifest(bundle_dir, member_prefixes, provenance, *, data_ext=".safetensors", fmt=FORMAT, aux=None,
-                   extra=None):
+def write_manifest(
+    bundle_dir,
+    member_prefixes,
+    provenance,
+    *,
+    data_ext=".safetensors",
+    fmt=FORMAT,
+    aux=None,
+    extra=None,
+):
     """``manifest.json`` tying every file of the bundle together (sha256, size), in member order. Members must sit
     directly in ``bundle_dir`` under plain names. ``data_ext``/``fmt`` select the container (safe_h5 uses ``.h5``).
     ``aux`` {manifest key: file name in ``bundle_dir``} lists further files (each named under its key and pinned in
@@ -627,16 +758,28 @@ def write_manifest(bundle_dir, member_prefixes, provenance, *, data_ext=".safete
             raise SafeFormatError(f"manifest key {key!r} is taken")
         man[key] = value
     path = os.path.join(bd, MANIFEST)
-    _write_exclusive(path, [json.dumps(man, indent=1, sort_keys=True, allow_nan=False).encode("utf-8")])
+    _write_exclusive(
+        path, [json.dumps(man, indent=1, sort_keys=True, allow_nan=False).encode("utf-8")]
+    )
     return path
 
 
-def _manifest_entries(bundle_dir, expected_sha256=None, allow_extra=False, *, data_ext=".safetensors", fmt=FORMAT):
+def _manifest_entries(
+    bundle_dir, expected_sha256=None, allow_extra=False, *, data_ext=".safetensors", fmt=FORMAT
+):
     return read_manifest(bundle_dir, expected_sha256, allow_extra, data_ext=data_ext, fmt=fmt)[2]
 
 
-def read_manifest(bundle_dir, expected_sha256=None, allow_extra=False, *, data_ext=".safetensors", fmt=FORMAT,
-                  aux_keys=None, extra_keys=()):
+def read_manifest(
+    bundle_dir,
+    expected_sha256=None,
+    allow_extra=False,
+    *,
+    data_ext=".safetensors",
+    fmt=FORMAT,
+    aux_keys=None,
+    extra_keys=(),
+):
     """The verified manifest: ``(manifest, its sha256, [(member prefix, data sha256, json sha256)], {aux key: path})``.
     With ``aux_keys`` (a tuple, possibly empty) the top-level keys must be exactly format, members, files, provenance,
     the ``aux_keys`` (each naming one further listed file) and the ``extra_keys``; without it (the earlier formats) other
@@ -652,8 +795,10 @@ def read_manifest(bundle_dir, expected_sha256=None, allow_extra=False, *, data_e
         raise SafeFormatError(f"{mp}: sha256 does not match the expected digest")
     man = _json_loads(raw, mp)
     if not isinstance(man, dict) or man.get("format") != fmt:
-        raise SafeFormatError(f"manifest format {man.get('format') if isinstance(man, dict) else None!r}, "
-                              f"expected {fmt}")
+        raise SafeFormatError(
+            f"manifest format {man.get('format') if isinstance(man, dict) else None!r}, "
+            f"expected {fmt}"
+        )
     if aux_keys is not None:
         want_keys = {"format", "members", "files", "provenance", *aux_keys, *extra_keys}
         if set(man) != want_keys:
@@ -681,13 +826,17 @@ def read_manifest(bundle_dir, expected_sha256=None, allow_extra=False, *, data_e
         aux[key] = name
     want |= set(aux.values())
     if set(listed) != want:
-        raise SafeFormatError(f"manifest files {sorted(set(listed) ^ want)[:6]} do not match its members")
+        raise SafeFormatError(
+            f"manifest files {sorted(set(listed) ^ want)[:6]} do not match its members"
+        )
     for p, e in listed.items():
         fp = os.path.join(bd, p)
         if os.path.islink(fp) or not os.path.isfile(fp):
             raise SafeFormatError(f"bundle file {p} is missing, not a regular file, or a symlink")
         if not _is_int(e["bytes"]) or e["bytes"] < 0:
-            raise SafeFormatError(f"manifest entry {p}: bytes {e['bytes']!r} is not a non-negative int")
+            raise SafeFormatError(
+                f"manifest entry {p}: bytes {e['bytes']!r} is not a non-negative int"
+            )
         try:
             digest, _ = _sha256_regular(fp, expected_bytes=e["bytes"])
         except SafeFormatError:
@@ -696,14 +845,25 @@ def read_manifest(bundle_dir, expected_sha256=None, allow_extra=False, *, data_e
             raise SafeFormatError(f"bundle file {p} does not match the manifest")
     extra = sorted(set(os.listdir(bd)) - want - {MANIFEST})
     if extra and not allow_extra:
-        raise SafeFormatError(f"bundle directory holds files the manifest does not list: {extra[:6]}")
-    entries = [(os.path.join(bd, m), listed[m + data_ext]["sha256"], listed[m + ".json"]["sha256"]) for m in members]
-    return man, raw_sha, entries, {k: (os.path.join(bd, n), listed[n]["sha256"]) for k, n in aux.items()}
+        raise SafeFormatError(
+            f"bundle directory holds files the manifest does not list: {extra[:6]}"
+        )
+    entries = [
+        (os.path.join(bd, m), listed[m + data_ext]["sha256"], listed[m + ".json"]["sha256"])
+        for m in members
+    ]
+    return (
+        man,
+        raw_sha,
+        entries,
+        {k: (os.path.join(bd, n), listed[n]["sha256"]) for k, n in aux.items()},
+    )
 
 
 def verify_manifest(bundle_dir, *, expected_sha256=None, allow_extra=False):
     """Check ``manifest.json`` against the directory: exactly the members' two files each, plain names, no symlinks,
-    sizes and sha256, and (unless ``allow_extra``) no unlisted file. Returns the member prefixes in order."""
+    sizes and sha256, and (unless ``allow_extra``) no unlisted file. Returns the member prefixes in order.
+    """
     return [p for p, _, _ in _manifest_entries(bundle_dir, expected_sha256, allow_extra)]
 
 
@@ -713,12 +873,19 @@ def load_bundle_historical(bundle_dir, *, expected_manifest_sha256, reason):
     (non-empty) is logged, and nothing loaded this way is a release model. ``expected_manifest_sha256`` is required:
     the manifest anchor (``None`` explicitly loads an unanchored bundle)."""
     import logging
+
     if not (isinstance(reason, str) and reason.strip()):
         raise ValueError("a historical bundle load needs a non-empty reason")
-    logging.getLogger(__name__).warning("historical load of the %s bundle %s (%s): not a release model", FORMAT,
-                                        bundle_dir, reason.strip())
-    return [load_member(p, expected_sha256=s, expected_json_sha256=j)
-            for p, s, j in _manifest_entries(bundle_dir, expected_manifest_sha256)]
+    logging.getLogger(__name__).warning(
+        "historical load of the %s bundle %s (%s): not a release model",
+        FORMAT,
+        bundle_dir,
+        reason.strip(),
+    )
+    return [
+        load_member(p, expected_sha256=s, expected_json_sha256=j)
+        for p, s, j in _manifest_entries(bundle_dir, expected_manifest_sha256)
+    ]
 
 
 # --------------------------------------------------------------------------------------------- HDF5 tables
@@ -726,6 +893,7 @@ def write_table_h5(path, arrays, attrs):
     """Numeric datasets plus str/int/float/bool scalar attributes in a NEW file (``format`` is reserved), written to a
     temporary name and published by hard link like every other file of the format."""
     import h5py
+
     if "format" in attrs:
         raise SafeFormatError("attribute 'format' is reserved")
     for k, v in attrs.items():
@@ -733,18 +901,28 @@ def write_table_h5(path, arrays, attrs):
             raise SafeFormatError(f"attribute {k!r} must be a str, int, float or bool")
     for k, v in arrays.items():
         a = np.asarray(v)
-        if not isinstance(k, str) or not _PLAIN_NAME.match(k) or a.dtype == object or a.dtype.kind not in "fiub":
-            raise SafeFormatError(f"dataset {k!r}: dtype {a.dtype} is not numeric or the name is not plain")
+        if (
+            not isinstance(k, str)
+            or not _PLAIN_NAME.match(k)
+            or a.dtype == object
+            or a.dtype.kind not in "fiub"
+        ):
+            raise SafeFormatError(
+                f"dataset {k!r}: dtype {a.dtype} is not numeric or the name is not plain"
+            )
     if os.path.lexists(path):
         raise SafeFormatError(f"{path} exists: never overwritten")
 
     def writer(fh):
-        with h5py.File(fh, "w", libver=("earliest", "v110")) as f:   # our own descriptor; readable by libhdf5 1.10
+        with h5py.File(
+            fh, "w", libver=("earliest", "v110")
+        ) as f:  # our own descriptor; readable by libhdf5 1.10
             f.attrs["format"] = FORMAT
             for k, v in attrs.items():
                 f.attrs[k] = v
             for k, v in arrays.items():
                 f.create_dataset(k, data=np.asarray(v))
+
     tmp, held, _ = _write_tmp(path, ".h5", writer)
     _publish(tmp, path, held)
 
@@ -754,17 +932,18 @@ def read_table_h5(path, required):
     Refuses soft and external links, external or virtual storage, variable-length or object data, and attributes that
     are not str or numeric scalars."""
     import h5py
+
     out, attrs = {}, {}
     with h5py.File(path, "r") as f:
         for k in f.attrs:
-            if f.attrs.get_id(k).shape != ():                     # checked from metadata before the value is read
+            if f.attrs.get_id(k).shape != ():  # checked from metadata before the value is read
                 raise SafeFormatError(f"{path}: attribute {k!r} is not a scalar")
             v = f.attrs[k]
             try:
                 if isinstance(v, bytes):
                     v = v.decode("utf-8", errors="strict")
                 elif isinstance(v, str):
-                    v.encode("utf-8", errors="strict")        # h5py surrogate-escapes invalid bytes
+                    v.encode("utf-8", errors="strict")  # h5py surrogate-escapes invalid bytes
             except UnicodeError:
                 raise SafeFormatError(f"{path}: attribute {k!r} is not UTF-8") from None
             if not isinstance(v, (str, np.integer, np.floating, np.bool_, int, float, bool)):
@@ -774,17 +953,28 @@ def read_table_h5(path, required):
             raise SafeFormatError(f"{path}: format {attrs.get('format')!r}, expected {FORMAT}")
         for name, (dt, shape) in required.items():
             if not isinstance(name, str) or not _PLAIN_NAME.match(name):
-                raise SafeFormatError(f"{path}: dataset name {name!r} must be a plain top-level name")
+                raise SafeFormatError(
+                    f"{path}: dataset name {name!r} must be a plain top-level name"
+                )
             link = f.get(name, getlink=True)
             if link is None:
                 raise SafeFormatError(f"{path}: dataset {name!r} missing")
             if not isinstance(link, h5py.HardLink):
-                raise SafeFormatError(f"{path}: {name!r} is a {type(link).__name__}, only hard links are read")
+                raise SafeFormatError(
+                    f"{path}: {name!r} is a {type(link).__name__}, only hard links are read"
+                )
             d = f[name]
             if not isinstance(d, h5py.Dataset) or d.external or d.is_virtual:
                 raise SafeFormatError(f"{path}: {name!r} is not a plain dataset")
-            if (h5py.check_vlen_dtype(d.dtype) is not None or d.dtype.kind not in "fiub" or d.dtype != np.dtype(dt)
-                    or d.ndim != len(shape) or any(s is not None and s != g for s, g in zip(shape, d.shape))):
-                raise SafeFormatError(f"{path}: dataset {name!r} is {d.dtype}{d.shape}, expected {dt}{shape}")
+            if (
+                h5py.check_vlen_dtype(d.dtype) is not None
+                or d.dtype.kind not in "fiub"
+                or d.dtype != np.dtype(dt)
+                or d.ndim != len(shape)
+                or any(s is not None and s != g for s, g in zip(shape, d.shape))
+            ):
+                raise SafeFormatError(
+                    f"{path}: dataset {name!r} is {d.dtype}{d.shape}, expected {dt}{shape}"
+                )
             out[name] = d[...]
     return out, attrs

@@ -46,6 +46,7 @@ class SnapEntry:
 @dataclasses.dataclass
 class SimSnapshot:
     """All available snapshots within the z range for one simulation."""
+
     sim: SimInfo
     entries: List[SnapEntry]  # sorted by snap number
 

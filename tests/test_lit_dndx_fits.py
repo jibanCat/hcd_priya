@@ -10,7 +10,9 @@ Env:
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     python -m pytest tests/test_lit_dndx_fits.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import subprocess
 import sys
@@ -58,7 +60,9 @@ def test_wls_matches_old_inline_implementation_bitwise():
     e = np.array([0.05, 0.08, 0.14, 0.12, 0.07, 0.08, 0.15, 0.19])
     fit = LD.wls_powerlaw(z, v, e)
     # historical inline computation (verbatim port of derive_hcd_lls_width.py:44-78)
-    x = np.log(1.0 + z); y = np.log(v); w = 1.0 / (e / v) ** 2
+    x = np.log(1.0 + z)
+    y = np.log(v)
+    w = 1.0 / (e / v) ** 2
     X = np.vstack([np.ones_like(x), x]).T
     XtWX = X.T @ np.diag(w) @ X
     beta = np.linalg.solve(XtWX, X.T @ np.diag(w) @ y)
@@ -70,15 +74,29 @@ def test_derive_width_script_output_unchanged_after_refactor():
     """derive_hcd_lls_width.py (now importing the shared wls_powerlaw) must print the
     identical RESULT numbers (byte-identical behavior; spec step 3)."""
     r = subprocess.run(
-        [PY, f"{REPO}/scripts/derive_hcd_lls_width.py"], capture_output=True, text=True,
-        env={"PYTHONNOUSERSITE": "1", "PYTHONPATH": REPO, "JAX_PLATFORMS": "cpu",
-             "CUDA_VISIBLE_DEVICES": "", "PATH": "/usr/bin:/bin"},
-        timeout=300)
+        [PY, f"{REPO}/scripts/derive_hcd_lls_width.py"],
+        capture_output=True,
+        text=True,
+        env={
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONPATH": REPO,
+            "JAX_PLATFORMS": "cpu",
+            "CUDA_VISIBLE_DEVICES": "",
+            "PATH": "/usr/bin:/bin",
+        },
+        timeout=300,
+    )
     assert r.returncode == 0, r.stderr[-2000:]
     out = r.stdout
-    assert "LLS      1x sigma/mu = 0.160   2x sigma/mu = 0.320   (WLS gamma=+2.127, A=0.0201)" in out
-    assert "subDLA   1x sigma/mu = 0.102   2x sigma/mu = 0.205   (WLS gamma=+0.937, A=0.0211)" in out
-    assert "DLA      1x sigma/mu = 0.094   2x sigma/mu = 0.187   (WLS gamma=+1.592, A=0.0076)" in out
+    assert (
+        "LLS      1x sigma/mu = 0.160   2x sigma/mu = 0.320   (WLS gamma=+2.127, A=0.0201)" in out
+    )
+    assert (
+        "subDLA   1x sigma/mu = 0.102   2x sigma/mu = 0.205   (WLS gamma=+0.937, A=0.0211)" in out
+    )
+    assert (
+        "DLA      1x sigma/mu = 0.094   2x sigma/mu = 0.187   (WLS gamma=+1.592, A=0.0076)" in out
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -119,9 +137,10 @@ def test_poisson_glm_synthetic_recovery():
         n = rng.poisson(mu)
         g = LD.poisson_glm_powerlaw(z, n, dX)
         assert g["converged"]
-        gams.append(g["gamma"]); amps.append(g["A_pivot"])
-    assert abs(np.mean(gams) - g_true) < 0.045          # ~3 SE
-    assert abs(np.mean(amps) / (A_true * 4 ** g_true) - 1.0) < 0.01
+        gams.append(g["gamma"])
+        amps.append(g["A_pivot"])
+    assert abs(np.mean(gams) - g_true) < 0.045  # ~3 SE
+    assert abs(np.mean(amps) / (A_true * 4**g_true) - 1.0) < 0.01
 
 
 def test_poisson_glm_handles_low_counts():
@@ -129,9 +148,9 @@ def test_poisson_glm_handles_low_counts():
     a = LD.ELL_X_SUBDLA_BINNED_19P0_20P3_ZAFAR13_T3
     g = LD.poisson_glm_powerlaw(a["z_bar"], a["n"], a["dX"])
     assert g["converged"]
-    assert 0.004 < g["A"] < 0.008          # spec expected region (0.005-0.007)
-    assert 2.0 < g["gamma"] < 2.7          # spec expected region (2.2-2.5)
-    assert g["deviance_dof"] < 2.0         # healthy where the old law showed chi2/dof=5.41
+    assert 0.004 < g["A"] < 0.008  # spec expected region (0.005-0.007)
+    assert 2.0 < g["gamma"] < 2.7  # spec expected region (2.2-2.5)
+    assert g["deviance_dof"] < 2.0  # healthy where the old law showed chi2/dof=5.41
 
 
 def test_poisson_vs_logwls_comparison():
@@ -197,18 +216,18 @@ def test_gls_constrained_gamma_exact_slope_and_analytic_amplitude():
     sig = np.array([0.17, 0.24, 0.31, 0.21, 0.17, 0.15, 0.20, 0.23])
     gfix = 2.127
     g = LD.gls_powerlaw_log(z, v, sig, s_common=0.10, sigma_eta=0.05, gamma_fixed=gfix)
-    assert g["gamma"] == gfix                        # exact, not approx
+    assert g["gamma"] == gfix  # exact, not approx
     assert g["sigma_gamma"] == 0.0
     assert g.get("gamma_fixed") is True
     # closed form under the full Sigma
     x = np.log((1.0 + z) / 4.0)
-    S = np.diag(sig ** 2) + 0.10 ** 2 * np.ones((8, 8)) + 0.05 ** 2 * np.outer(x, x)
+    S = np.diag(sig**2) + 0.10**2 * np.ones((8, 8)) + 0.05**2 * np.outer(x, x)
     Si = np.linalg.inv(S)
     one = np.ones(8)
     lnAp = float(one @ Si @ (np.log(v) - gfix * x)) / float(one @ Si @ one)
     assert g["A_pivot"] == pytest.approx(np.exp(lnAp), rel=1e-12)
     assert g["sigma_lnAp"] == pytest.approx(np.sqrt(1.0 / float(one @ Si @ one)), rel=1e-12)
-    assert g["A"] == pytest.approx(np.exp(lnAp) / 4.0 ** gfix, rel=1e-12)
+    assert g["A"] == pytest.approx(np.exp(lnAp) / 4.0**gfix, rel=1e-12)
 
 
 def test_gls_constrained_at_free_gamma_matches_free_fit():
@@ -238,8 +257,7 @@ def test_fit_ordering_runs_and_gates():
     # module-vs-JSON pin lives in test_lit_dndx_corrected case 8b) — the consistency field
     # compares REFERENCE vs refit, never self-vs-self (review meta finding 6: the old
     # self-compare made the derive script's "[GATES] ALL PASS" vacuous).
-    deployed = {"subDLA": (0.004832763139114936, 2.438007767664778),
-                "DLA": (0.0076, 1.592)}
+    deployed = {"subDLA": (0.004832763139114936, 2.438007767664778), "DLA": (0.0076, 1.592)}
     res = LD.run_fit_ordering(floor_factor=_toy_floor_factor, reference_laws=deployed)
     for k in ("subDLA", "DLA", "cum_uncorrected", "K3"):
         assert k in res
@@ -261,8 +279,9 @@ def test_fit_ordering_runs_and_gates():
 
 def test_fit_ordering_gate_trips_on_wrong_object_reference():
     """The gate must actually FAIL when the reference is the tombstoned wrong-object law."""
-    res = LD.run_fit_ordering(floor_factor=_toy_floor_factor,
-                              reference_laws={"subDLA": (0.0211, 0.937)})
+    res = LD.run_fit_ordering(
+        floor_factor=_toy_floor_factor, reference_laws={"subDLA": (0.0211, 0.937)}
+    )
     assert res["subDLA"]["consistency_vs_refit"]["max_frac_dev"] > 0.30
 
 
@@ -306,5 +325,9 @@ def test_sensitivity_arms():
     assert arms["drop_z180"]["subDLA"]["deviance_dof"] < 3.0
     assert arms["drop_z180"]["subDLA"]["gamma"] != res["subDLA"]["gamma"]
     # larger-side errors and journal-fix arms perturb the cumulative law only mildly
-    assert abs(arms["larger_side"]["cum_uncorrected"]["gamma"] - res["cum_uncorrected"]["gamma"]) < 0.2
-    assert abs(arms["journal_fix"]["cum_uncorrected"]["gamma"] - res["cum_uncorrected"]["gamma"]) < 0.2
+    assert (
+        abs(arms["larger_side"]["cum_uncorrected"]["gamma"] - res["cum_uncorrected"]["gamma"]) < 0.2
+    )
+    assert (
+        abs(arms["journal_fix"]["cum_uncorrected"]["gamma"] - res["cum_uncorrected"]["gamma"]) < 0.2
+    )

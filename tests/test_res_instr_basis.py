@@ -13,6 +13,7 @@ Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      CUDA_VISIBLE_DEVICES="" python \
      -m pytest tests/test_res_instr_basis.py -q
 """
+
 from __future__ import annotations
 import os
 import numpy as np
@@ -36,12 +37,12 @@ from scripts.build_res_instr_injection_basis import (
 # ---------------------------------------------------------------------------- #
 def _synthetic(seed=0, n_z=7, n_k=4):
     rng = np.random.default_rng(seed)
-    z = np.linspace(2.2, 4.2, n_z)                    # 5 nodes are z>=2.8
-    R_z = 40.0 + 5.0 * rng.random(n_z)                # order-realistic R_z (s/km)
+    z = np.linspace(2.2, 4.2, n_z)  # 5 nodes are z>=2.8
+    R_z = 40.0 + 5.0 * rng.random(n_z)  # order-realistic R_z (s/km)
     # z-major flat grid: n_k cells per node
     z_idx = np.repeat(np.arange(n_z), n_k)
     N = z_idx.size
-    k = np.tile(np.linspace(0.01, 0.06, n_k), n_z)    # angular k per cell
+    k = np.tile(np.linspace(0.01, 0.06, n_k), n_z)  # angular k per cell
     # B[i, iz] = 2 k_i^2 R_z(iz)^2 on its own z-block (0 elsewhere)
     B = np.zeros((N, n_z))
     for iz in range(n_z):
@@ -56,9 +57,18 @@ def _synthetic(seed=0, n_z=7, n_k=4):
     zrow = z[z_idx]
     hiZ_cells = zrow >= Z_HEII
     hiZ_nodes = z >= Z_HEII
-    r_ns_P = rng.standard_normal(N)                   # arbitrary P-space n_s response
-    return dict(B=B, C_data=C_data, u1=u1, u2=u2, hiZ_cells=hiZ_cells,
-                hiZ_nodes=hiZ_nodes, r_ns_P=r_ns_P, z=z, n_z=n_z)
+    r_ns_P = rng.standard_normal(N)  # arbitrary P-space n_s response
+    return dict(
+        B=B,
+        C_data=C_data,
+        u1=u1,
+        u2=u2,
+        hiZ_cells=hiZ_cells,
+        hiZ_nodes=hiZ_nodes,
+        r_ns_P=r_ns_P,
+        z=z,
+        n_z=n_z,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -68,8 +78,15 @@ def synth():
 
 @pytest.fixture(scope="module")
 def res(synth):
-    return build_oos_bres(synth["B"], synth["C_data"], synth["u1"], synth["u2"],
-                          synth["hiZ_cells"], synth["hiZ_nodes"], synth["r_ns_P"])
+    return build_oos_bres(
+        synth["B"],
+        synth["C_data"],
+        synth["u1"],
+        synth["u2"],
+        synth["hiZ_cells"],
+        synth["hiZ_nodes"],
+        synth["r_ns_P"],
+    )
 
 
 # ---------------------------------------------------------------------------- #
@@ -127,7 +144,7 @@ def test_bres_are_M_unit(res):
 
 def test_pullback_identity_1e8(res, synth):
     """The r_ns M-pullback identity (why a naive B^T r_ns is WRONG):
-        <a, r_ns_bres>_M == <B_sub a, r_ns[hiZ]>_{C_sub^-1}   for all a.
+    <a, r_ns_bres>_M == <B_sub a, r_ns[hiZ]>_{C_sub^-1}   for all a.
     """
     M = res["M_sub"]
     B_sub, Cinv_sub = res["B_sub"], res["Cinv_sub"]
@@ -204,7 +221,7 @@ def test_analytic_worst_ns_is_the_argmax(res):
     for _ in range(20):
         v = _project_out(rng.standard_normal(n), ortho_span, M)
         nv = norm_M(v)
-        if nv < 1e-8:                      # degenerate random draw (rare) -- skip
+        if nv < 1e-8:  # degenerate random draw (rare) -- skip
             continue
         v = v / nv
         assert abs(cos_M(v, r_ns_bres)) <= f_perp + 1e-8
@@ -218,7 +235,7 @@ def test_analytic_worst_ns_degenerate_case():
     M = np.eye(3)
     q1 = np.array([1.0, 0.0, 0.0])
     q2 = np.array([0.0, 1.0, 0.0])
-    r_ns_bres = np.array([2.0, -1.0, 0.0])          # fully in span{q1,q2}
+    r_ns_bres = np.array([2.0, -1.0, 0.0])  # fully in span{q1,q2}
     bstar, f_perp, degenerate = analytic_worst_ns(r_ns_bres, [q1, q2], M)
     assert degenerate
     assert bstar is None
@@ -229,7 +246,8 @@ def test_build_oos_bres_bstar_matches_helper(res):
     """build_oos_bres's own bstar_sub/cos_bstar_ns must match calling the pure
     analytic_worst_ns helper directly on its own (r_ns_bres, ortho_span, M_sub)."""
     bstar_direct, f_perp, degenerate = analytic_worst_ns(
-        res["r_ns_bres"], res["ortho_span"], res["M_sub"])
+        res["r_ns_bres"], res["ortho_span"], res["M_sub"]
+    )
     assert res["bstar_degenerate"] == degenerate
     assert not degenerate
     assert np.allclose(res["bstar_sub"], bstar_direct, atol=1e-10)
@@ -254,7 +272,8 @@ def test_bstar_at_least_as_ns_aligned_as_dict(res):
 def test_raises_when_too_few_heII_nodes():
     s = _synthetic(n_z=7)
     # force only 2 He-II nodes -> cannot form a rank-2 basis beyond the 2-D span
-    hiZ_nodes = np.zeros(7, bool); hiZ_nodes[-2:] = True
+    hiZ_nodes = np.zeros(7, bool)
+    hiZ_nodes[-2:] = True
     z = s["z"]
     hiZ_cells = np.isin(np.repeat(np.arange(7), 4), np.where(hiZ_nodes)[0])
     with pytest.raises(ValueError):
@@ -328,8 +347,9 @@ def test_artifact_bstar_at_least_as_ns_aligned_as_dict(basis):
     for name in legs:
         cos_bstar_ns = abs(float(basis[f"{name}_cos_bstar_ns"]))
         cos_ns_dict = np.abs(np.asarray(basis[f"{name}_cos_ns"], float))
-        assert cos_bstar_ns >= float(np.max(cos_ns_dict)) - 1e-6, (
-            f"{name}: cos_bstar_ns={cos_bstar_ns:.4f} < max dict cos_ns={np.max(cos_ns_dict):.4f}")
+        assert (
+            cos_bstar_ns >= float(np.max(cos_ns_dict)) - 1e-6
+        ), f"{name}: cos_bstar_ns={cos_bstar_ns:.4f} < max dict cos_ns={np.max(cos_ns_dict):.4f}"
 
 
 @skip_if_no_npz

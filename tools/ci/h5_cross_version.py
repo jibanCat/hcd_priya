@@ -13,6 +13,7 @@ release loader's lineage checks run under the library under test too) and requir
 --max-hdf5 it also requires the reading libhdf5 to be older than that version, so a job meant to test an old library
 cannot pass on a new one. Exit status 1 on any mismatch.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,28 +28,37 @@ def _digests(model, norm):
     import jax
     import numpy as np
     from hcd_analysis.emulator import safe_io as S
+
     out = {}
     for path, leaf in jax.tree_util.tree_leaves_with_path(model):
         a = np.asarray(leaf)
         out["model" + jax.tree_util.keystr(path)] = hashlib.sha256(
-            f"{a.dtype.str}{a.shape}".encode() + a.tobytes()).hexdigest()
+            f"{a.dtype.str}{a.shape}".encode() + a.tobytes()
+        ).hexdigest()
     for name, a in sorted(S.norm_tensors(norm).items()):
         a = np.asarray(a)
-        out["norm/" + name] = hashlib.sha256(f"{a.dtype.str}{a.shape}".encode() + a.tobytes()).hexdigest()
+        out["norm/" + name] = hashlib.sha256(
+            f"{a.dtype.str}{a.shape}".encode() + a.tobytes()
+        ).hexdigest()
     return out
 
 
 def _versions():
     import h5py
+
     return {"h5py": h5py.version.version, "libhdf5": h5py.version.hdf5_version}
 
 
 def write(out_dir):
     from hcd_analysis.emulator import release_testing
+
     os.makedirs(out_dir)
     info = release_testing.write_synthetic_bundle(os.path.join(out_dir, "bundle"))
-    expected = {"manifest_sha256": info.manifest_sha256,
-                "members": [_digests(model, info.norm) for model in info.models], "writer": _versions()}
+    expected = {
+        "manifest_sha256": info.manifest_sha256,
+        "members": [_digests(model, info.norm) for model in info.models],
+        "writer": _versions(),
+    }
     with open(os.path.join(out_dir, "expected.json"), "x") as f:
         json.dump(expected, f, indent=1)
     print(f"wrote {info.bundle_dir} with libhdf5 {expected['writer']['libhdf5']}")
@@ -57,6 +67,7 @@ def write(out_dir):
 
 def read(in_dir, max_hdf5=None):
     from hcd_analysis.emulator import safe_h5 as H
+
     with open(os.path.join(in_dir, "expected.json")) as f:
         expected = json.load(f)
     reader = _versions()
@@ -66,19 +77,24 @@ def read(in_dir, max_hdf5=None):
         if have >= limit:
             print(f"FAIL: reading libhdf5 {reader['libhdf5']} is not older than {max_hdf5}")
             return 1
-    ensemble, metas, norm = H.load_ensemble(os.path.join(in_dir, "bundle"),
-                                            expected_manifest_sha256=expected["manifest_sha256"])
+    ensemble, metas, norm = H.load_ensemble(
+        os.path.join(in_dir, "bundle"), expected_manifest_sha256=expected["manifest_sha256"]
+    )
     problems = []
     if [m["seed"] for m in metas] != [0, 1]:
         problems.append(f"member seeds {[m['seed'] for m in metas]}")
     for i, (model, want) in enumerate(zip(ensemble.members, expected["members"])):
         got = _digests(model, norm)
-        problems += [f"member {i} {k}" for k in sorted(set(want) | set(got)) if want.get(k) != got.get(k)]
+        problems += [
+            f"member {i} {k}" for k in sorted(set(want) | set(got)) if want.get(k) != got.get(k)
+        ]
     for p in problems:
         print(f"MISMATCH {p}")
-    print(f"read with libhdf5 {reader['libhdf5']} (h5py {reader['h5py']}) a bundle written with libhdf5 "
-          f"{expected['writer']['libhdf5']}: {sum(len(m) for m in expected['members'])} arrays, {len(problems)} "
-          "mismatches")
+    print(
+        f"read with libhdf5 {reader['libhdf5']} (h5py {reader['h5py']}) a bundle written with libhdf5 "
+        f"{expected['writer']['libhdf5']}: {sum(len(m) for m in expected['members'])} arrays, {len(problems)} "
+        "mismatches"
+    )
     return 1 if problems else 0
 
 
@@ -86,7 +102,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("mode", choices=("write", "read"))
     ap.add_argument("dir")
-    ap.add_argument("--max-hdf5", help="read: require the reading libhdf5 to be older than MAJOR.MINOR")
+    ap.add_argument(
+        "--max-hdf5", help="read: require the reading libhdf5 to be older than MAJOR.MINOR"
+    )
     args = ap.parse_args(argv)
     return write(args.dir) if args.mode == "write" else read(args.dir, args.max_hdf5)
 

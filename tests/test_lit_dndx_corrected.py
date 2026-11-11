@@ -26,7 +26,9 @@ Env:
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     python -m pytest tests/test_lit_dndx_corrected.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import copy
 import hashlib
@@ -64,13 +66,18 @@ def test_case1_lls_law_reproduced_by_recorded_constrained_estimator(J):
     ad = J["adopted_law"]
     assert ad["kernel"] == "K1a" and ad["estimator"] == "gls_log_gamma_fixed"
     pts = ad["corrected_points"]
-    fit = LD.gls_powerlaw_log(np.asarray(pts["z_bar"]), np.asarray(pts["lx"]),
-                              np.asarray(pts["sig_log"]),
-                              s_common=ad["budget"]["s_r3"],
-                              sigma_eta=ad["budget"]["sigma_eta"],
-                              gamma_fixed=2.127)
+    fit = LD.gls_powerlaw_log(
+        np.asarray(pts["z_bar"]),
+        np.asarray(pts["lx"]),
+        np.asarray(pts["sig_log"]),
+        s_common=ad["budget"]["s_r3"],
+        sigma_eta=ad["budget"]["sigma_eta"],
+        gamma_fixed=2.127,
+    )
     A_dep, g_dep = INF.HCD_LIT_DNDX_LAW["LLS"]
-    assert abs(fit["A"] - A_dep) <= 16 * np.finfo(float).eps * abs(A_dep)   # recomputation: rounding only
+    assert abs(fit["A"] - A_dep) <= 16 * np.finfo(float).eps * abs(
+        A_dep
+    )  # recomputation: rounding only
     assert fit["gamma"] == g_dep == 2.127
     # the free-gamma fit recorded in the JSON is the consistency evidence for the
     # constraint (PI decision 1c): free gamma 2.137 within a small fraction of its sigma
@@ -82,10 +89,9 @@ def test_case1_subdla_law_reproduced_by_poisson_glm(J):
     """Deployed subDLA law == the Poisson GLM (the recorded estimator) re-run on the
     JSON's verified Zafar counts — bit-level equality."""
     a = J["input_arrays"]["ELL_X_SUBDLA_BINNED_19P0_20P3_ZAFAR13_T3"]
-    g = LD.poisson_glm_powerlaw(np.asarray(a["z_bar"]), np.asarray(a["n"]),
-                                np.asarray(a["dX"]))
+    g = LD.poisson_glm_powerlaw(np.asarray(a["z_bar"]), np.asarray(a["n"]), np.asarray(a["dX"]))
     A_dep, g_dep = INF.HCD_LIT_DNDX_LAW["subDLA"]
-    assert g["A"] == A_dep                            # bit-level
+    assert g["A"] == A_dep  # bit-level
     assert g["gamma"] == g_dep
 
 
@@ -94,8 +100,7 @@ def test_case1_dla_law_is_rounded_wls_anchor(J):
     deployed rounding (the refit is documented in the JSON even though numerically the
     constant is unchanged)."""
     a = J["input_arrays"]["ELL_X_DLA_GE20P3_PW09_T1"]
-    fit = LD.wls_powerlaw(np.asarray(a["z_bar"]), np.asarray(a["lx"]),
-                          np.asarray(a["err_hi"]))
+    fit = LD.wls_powerlaw(np.asarray(a["z_bar"]), np.asarray(a["lx"]), np.asarray(a["err_hi"]))
     A_dep, g_dep = INF.HCD_LIT_DNDX_LAW["DLA"]
     assert round(float(fit["A"]), 4) == A_dep == 0.0076
     assert round(float(fit["gamma"]), 3) == g_dep == 1.592
@@ -153,13 +158,13 @@ def test_case2_lls_law_distinct_from_tombstoned_cumulative_wls():
     immediately. subDLA carries the 3-sigma criterion (where it is meaningful)."""
     t = LD.LLS_TAU2_OLD_DEFECTS
     wrong = LD.wls_powerlaw(t["z"], t["lx"], t["err"])
-    assert round(float(wrong["A"]), 4) == 0.0201      # the tombstone reproduces the old law
+    assert round(float(wrong["A"]), 4) == 0.0201  # the tombstone reproduces the old law
     A_dep, g_dep = INF.HCD_LIT_DNDX_LAW["LLS"]
-    assert abs(A_dep / 0.0201 - 1.0) > 0.05           # the kernel correction moved A
+    assert abs(A_dep / 0.0201 - 1.0) > 0.05  # the kernel correction moved A
     assert A_dep != round(float(wrong["A"]), 4)
     assert A_dep != float(wrong["A"])
-    assert A_dep < 0.0201                             # cap-removal is a DOWNWARD correction
-    assert g_dep == 2.127                             # slope kept BY PI DECISION (1c)
+    assert A_dep < 0.0201  # cap-removal is a DOWNWARD correction
+    assert g_dep == 2.127  # slope kept BY PI DECISION (1c)
 
 
 # --------------------------------------------------------------------------- #
@@ -178,16 +183,19 @@ def test_case3_subdla_deviance_healthy_and_internal_consistency(J):
     # LLS: deployed vs the recorded constrained refit of the recorded corrected points
     ad = J["adopted_law"]
     pts = ad["corrected_points"]
-    con = LD.gls_powerlaw_log(np.asarray(pts["z_bar"]), np.asarray(pts["lx"]),
-                              np.asarray(pts["sig_log"]),
-                              s_common=ad["budget"]["s_r3"],
-                              sigma_eta=ad["budget"]["sigma_eta"], gamma_fixed=2.127)
+    con = LD.gls_powerlaw_log(
+        np.asarray(pts["z_bar"]),
+        np.asarray(pts["lx"]),
+        np.asarray(pts["sig_log"]),
+        s_common=ad["budget"]["s_r3"],
+        sigma_eta=ad["budget"]["sigma_eta"],
+        gamma_fixed=2.127,
+    )
     A_l, g_l = INF.HCD_LIT_DNDX_LAW["LLS"]
     assert LD.law_consistency_vs_refit(A_l, g_l, con, z_eval)["max_frac_dev"] < 0.05
     # DLA: deployed (rounded anchor) vs the WLS refit
     d = J["input_arrays"]["ELL_X_DLA_GE20P3_PW09_T1"]
-    wls = LD.wls_powerlaw(np.asarray(d["z_bar"]), np.asarray(d["lx"]),
-                          np.asarray(d["err_hi"]))
+    wls = LD.wls_powerlaw(np.asarray(d["z_bar"]), np.asarray(d["lx"]), np.asarray(d["err_hi"]))
     A_d, g_d = INF.HCD_LIT_DNDX_LAW["DLA"]
     assert LD.law_consistency_vs_refit(A_d, g_d, wls, z_eval)["max_frac_dev"] < 0.05
 
@@ -203,17 +211,19 @@ def test_case4_telescoping_k3_closure_and_k1a_expected_pulls(J):
     recorded in the JSON pi_adoption.telescoping_note) — so for K1a the test pins the
     RECORDED expected values, NOT closure."""
     k3_pull = np.asarray(J["telescoping"]["K3"]["pull"], float)
-    assert np.all(np.abs(k3_pull) < 1.0)              # closure where it applies
+    assert np.all(np.abs(k3_pull) < 1.0)  # closure where it applies
     # adopted (constrained K1a) pulls: recorded expected-values, PI-accepted tension
     pull = np.asarray(J["adopted_law"]["telescoping"]["pull"], float)
     z = np.asarray(J["adopted_law"]["telescoping"]["z"], float)
-    exp = np.array([0.87, 1.70, 2.39, 2.10])          # the recorded 2026-07-18 values
+    exp = np.array([0.87, 1.70, 2.39, 2.10])  # the recorded 2026-07-18 values
     np.testing.assert_allclose(pull, exp, rtol=0, atol=0.05)
     hi = pull[z >= 3.0]
-    assert np.all((hi > 1.5) & (hi < 2.6)), \
-        "K1a z>=3 pulls left the documented +1.7..+2.4 design window — re-open PI review"
-    assert "PI-accepted" in J["pi_adoption"]["telescoping_note"] or \
-        "PI-accepted" in J["pi_adoption"]["telescoping_note"].replace("; ", " ")
+    assert np.all(
+        (hi > 1.5) & (hi < 2.6)
+    ), "K1a z>=3 pulls left the documented +1.7..+2.4 design window — re-open PI review"
+    assert "PI-accepted" in J["pi_adoption"]["telescoping_note"] or "PI-accepted" in J[
+        "pi_adoption"
+    ]["telescoping_note"].replace("; ", " ")
 
 
 # --------------------------------------------------------------------------- #
@@ -224,6 +234,7 @@ def test_case5_kernel_r3_reproducible_from_cache(J):
     """r(3.0) recomputed from the h5 under the pinned K1 recipe matches the frozen JSON
     value to 1e-3 (else the committed kernel is unreproducible)."""
     from hcd_analysis.emulator import lit_dndx_kernel as LK
+
     inputs = LK.load_kernel_inputs(_CACHE)
     r3_live = LK.k1_r_at(inputs, np.array([3.0]))[0]
     z_vals = np.asarray(J["kernel_table"]["z_vals"], float)
@@ -239,12 +250,12 @@ def test_case5_kernel_r3_reproducible_from_cache(J):
 def test_case6_transcription_self_checks_raise_on_drift():
     bad = copy.deepcopy(LD.ELL_X_SUBDLA_BINNED_19P0_20P3_ZAFAR13_T3)
     bad["n"] = np.asarray(bad["n"]).copy()
-    bad["n"][3] += 1                                   # 89 -> 90
+    bad["n"][3] += 1  # 89 -> 90
     with pytest.raises(AssertionError):
         LD._check_zafar_subdla(bad)
     bad2 = copy.deepcopy(LD.ELL_X_SUBDLA_BINNED_19P0_20P3_ZAFAR13_T3)
     bad2["lx_gt203"] = np.asarray(bad2["lx_gt203"]).copy()
-    bad2["lx_gt203"][1] += 0.05                        # breaks the two-route <= 0.025
+    bad2["lx_gt203"][1] += 0.05  # breaks the two-route <= 0.025
     with pytest.raises(AssertionError):
         LD._check_zafar_subdla(bad2)
 
@@ -253,9 +264,11 @@ def test_case6_transcription_self_checks_raise_on_drift():
 #  Case 7 — Estimand machinery                                                 #
 # --------------------------------------------------------------------------- #
 def test_case7_estimand_dict_module_vs_json(J):
-    assert INF.HCD_LIT_DNDX_ESTIMAND == {"LLS": "binned_17.2_19.0",
-                                         "subDLA": "binned_19.0_20.3",
-                                         "DLA": "binned_ge20.3"}
+    assert INF.HCD_LIT_DNDX_ESTIMAND == {
+        "LLS": "binned_17.2_19.0",
+        "subDLA": "binned_19.0_20.3",
+        "DLA": "binned_ge20.3",
+    }
     assert INF.HCD_LIT_DNDX_ESTIMAND == J["hcd_lit_dndx_estimand"]
 
 
@@ -279,20 +292,34 @@ def test_case7_alpha_center_consumes_corrected_law():
         j = json.load(fh)
     a = INF.hcd_lls_realfit_alpha_center(0.632, z=3.0, boost=1.0)
     assert a == pytest.approx(j["alpha_lls_z3"]["adopted"], rel=1e-9)
-    assert a == pytest.approx(0.172, abs=5e-4)         # human-blessed tripwire (3 dp)
+    assert a == pytest.approx(0.172, abs=5e-4)  # human-blessed tripwire (3 dp)
 
 
 # --------------------------------------------------------------------------- #
 #  Case 8 — Freeze coverage: payload + signature                               #
 # --------------------------------------------------------------------------- #
-_PAYLOAD_KEYS = ("HCD_LIT_DNDX_LAW", "HCD_LIT_DNDX_ESTIMAND", "HCD_LIT_OVER_SIM",
-                 "HCD_LIT_OVER_SIM_SLOPE", "HCD_LLS_REALFIT_ZSLOPE",
-                 "HCD_PIVOT_LLS_ALPHA_Z3_BAND", "HCD_PIVOT_LLS_ALLZ_MEDIAN",
-                 "HCD_PIVOT_GUARD_REL", "HCD_PRIOR_FRAC_SIGMA", "HCD_LLS_SURVEY_BOOST",
-                 "HCD_LLS_SURVEY_FRAC_SIGMA", "HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X",
-                 "HCD_DLA_RESIDUAL_FRAC", "HCD_DLA_Z_RELIABLE", "HCD_Z_PIVOT", "adopted_kernel",
-                 "adopted_kernel_r3", "adopted_alpha_lls_z3", "bracket_alpha_lls_z3",
-                 "derivation_json_sha256")
+_PAYLOAD_KEYS = (
+    "HCD_LIT_DNDX_LAW",
+    "HCD_LIT_DNDX_ESTIMAND",
+    "HCD_LIT_OVER_SIM",
+    "HCD_LIT_OVER_SIM_SLOPE",
+    "HCD_LLS_REALFIT_ZSLOPE",
+    "HCD_PIVOT_LLS_ALPHA_Z3_BAND",
+    "HCD_PIVOT_LLS_ALLZ_MEDIAN",
+    "HCD_PIVOT_GUARD_REL",
+    "HCD_PRIOR_FRAC_SIGMA",
+    "HCD_LLS_SURVEY_BOOST",
+    "HCD_LLS_SURVEY_FRAC_SIGMA",
+    "HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X",
+    "HCD_DLA_RESIDUAL_FRAC",
+    "HCD_DLA_Z_RELIABLE",
+    "HCD_Z_PIVOT",
+    "adopted_kernel",
+    "adopted_kernel_r3",
+    "adopted_alpha_lls_z3",
+    "bracket_alpha_lls_z3",
+    "derivation_json_sha256",
+)
 
 
 def test_case8_payload_roundtrip_and_sha256():
@@ -354,12 +381,15 @@ def test_case8_signature_is_sha256_and_tracks_constants(monkeypatch):
     the tripwire gap forward_signature's docstring flags is closed."""
     s1 = INF.hcd_prior_signature()
     assert len(s1) == 64 and int(s1, 16) >= 0
-    assert s1 == hashlib.sha256(
-        json.dumps(INF.hcd_prior_constants_payload(), sort_keys=True).encode("utf-8")
-    ).hexdigest()
-    assert INF.hcd_prior_signature() == s1             # deterministic
+    assert (
+        s1
+        == hashlib.sha256(
+            json.dumps(INF.hcd_prior_constants_payload(), sort_keys=True).encode("utf-8")
+        ).hexdigest()
+    )
+    assert INF.hcd_prior_signature() == s1  # deterministic
     monkeypatch.setattr(INF, "HCD_LLS_REALFIT_ZSLOPE", 2.128)
-    assert INF.hcd_prior_signature() != s1             # a constant change moves it
+    assert INF.hcd_prior_signature() != s1  # a constant change moves it
 
 
 # --------------------------------------------------------------------------- #
@@ -377,8 +407,8 @@ def test_case9_dla_wls_anchor():
 # --------------------------------------------------------------------------- #
 def test_case10_atol0_discipline_on_cddf_scale():
     good = np.array([3.0e-21, 5.0e-22, 8.0e-23])
-    bad = good * 1.5                                   # 50% wrong; np.allclose says fine
-    assert np.allclose(good, bad)                      # the footgun is real
+    bad = good * 1.5  # 50% wrong; np.allclose says fine
+    assert np.allclose(good, bad)  # the footgun is real
     with pytest.raises(AssertionError):
         LD.assert_close_cddf(good, bad, rtol=1e-3, where="case10")
     LD.assert_close_cddf(good, good * (1 + 5e-4), rtol=1e-3, where="case10-ok")
@@ -386,4 +416,5 @@ def test_case10_atol0_discipline_on_cddf_scale():
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(pytest.main([__file__, "-q"]))

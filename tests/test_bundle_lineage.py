@@ -2,6 +2,7 @@
 digest): a bundle loads only when its lineage block establishes a clean lineage and the w_c map and the members agree
 with it; every refusal below is anchored on the edited manifest's own digest, so it is the lineage check that refuses,
 not the digest. Synthetic bundles (hcd_analysis.emulator.release_testing) only."""
+
 import json
 import os
 import warnings
@@ -36,32 +37,57 @@ def _forge_eligible(man):
 
 
 def test_a_synthetic_release_bundle_loads_and_is_marked_anchored(info):
-    ens, metas, norm = H.load_ensemble(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
-    assert len(ens.members) == 2 and metas.anchored and metas.lineage_verified and metas.format == H.FORMAT
+    ens, metas, norm = H.load_ensemble(
+        info.bundle_dir, expected_manifest_sha256=info.manifest_sha256
+    )
+    assert (
+        len(ens.members) == 2
+        and metas.anchored
+        and metas.lineage_verified
+        and metas.format == H.FORMAT
+    )
     assert metas.manifest_sha256 == info.manifest_sha256 and metas.lineage == info.lineage
     rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
-    assert rb.lineage["release_eligible"] and rb.wc_map.cache_sha256 == rb.lineage["cache"]["sha256"]
-    assert rb.lineage["finder_ids"] == [FINDER_ID] and rb.lineage["code_commit"] == RT.SYNTHETIC_COMMIT
-    assert rb.lineage["cache"]["rows"] == {"built": 2, "carried_validated": 0} and rb.lineage["cache"]["carried"] is None
+    assert (
+        rb.lineage["release_eligible"] and rb.wc_map.cache_sha256 == rb.lineage["cache"]["sha256"]
+    )
+    assert (
+        rb.lineage["finder_ids"] == [FINDER_ID] and rb.lineage["code_commit"] == RT.SYNTHETIC_COMMIT
+    )
+    assert (
+        rb.lineage["cache"]["rows"] == {"built": 2, "carried_validated": 0}
+        and rb.lineage["cache"]["carried"] is None
+    )
     man = json.load(open(os.path.join(info.bundle_dir, "manifest.json")))
     assert set(man) == {"format", "members", "files", "provenance", "wc_map", "lineage"}
     assert man["wc_map"] == H.WC_MAP_FILE and H.WC_MAP_FILE in {f["path"] for f in man["files"]}
     with h5py.File(info.prefixes[0] + ".h5", "r") as f:
         assert f.attrs["format"] == H.FORMAT
     for m in metas:
-        assert m["cache_sha256"] == info.lineage["cache"]["sha256"] and m["git_sha"] == info.lineage["code_commit"]
+        assert (
+            m["cache_sha256"] == info.lineage["cache"]["sha256"]
+            and m["git_sha"] == info.lineage["code_commit"]
+        )
 
 
 def test_a_carried_cache_is_labelled_in_the_block(tmp_path):
     info = RT.write_synthetic_bundle(str(tmp_path / "b"), carried=True)
-    c = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256).lineage["cache"]
+    c = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256).lineage[
+        "cache"
+    ]
     assert c["rows"] == {"built": 0, "carried_validated": 2}
-    assert c["carried"]["label"] == "carried_validated" and c["carried"]["promoted"]["passed"] is True
-    assert c["carried"]["validation_all_passed"] is True and len(c["carried"]["source_sha256"]) == 64
+    assert (
+        c["carried"]["label"] == "carried_validated" and c["carried"]["promoted"]["passed"] is True
+    )
+    assert (
+        c["carried"]["validation_all_passed"] is True and len(c["carried"]["source_sha256"]) == 64
+    )
 
 
 def test_the_unanchored_development_path_loads_marked_and_warns(info):
-    sha = _rewrite(info, lambda m: m["lineage"].update(release_eligible=False, ineligible_reasons=["dev"]))
+    sha = _rewrite(
+        info, lambda m: m["lineage"].update(release_eligible=False, ineligible_reasons=["dev"])
+    )
     with pytest.raises(H.SafeFormatError, match="does not establish a clean release"):
         H.load_ensemble(info.bundle_dir, expected_manifest_sha256=sha)
     with warnings.catch_warnings(record=True) as w:
@@ -71,32 +97,62 @@ def test_the_unanchored_development_path_loads_marked_and_warns(info):
     assert [x.category for x in w] == [H.UnanchoredBundleWarning] * 2
     assert not metas.anchored and not metas.lineage_verified and len(members) == 2
     with pytest.raises(TypeError):
-        H.load_ensemble(info.bundle_dir)                          # the keyword stays required
+        H.load_ensemble(info.bundle_dir)  # the keyword stays required
     for bad in (None, "", "f" * 63, 1):
         with pytest.raises(H.SafeFormatError, match="needs the published manifest sha256"):
             H.load_release(info.bundle_dir, expected_manifest_sha256=bad)
 
 
-@pytest.mark.parametrize("edit, match", [
-    (lambda m: m["lineage"].update(finder_ids=["hcd_priya.finder/1"]), "not in the release allow-list"),
-    (lambda m: m["lineage"].update(finder_ids=[]), "no finder id"),
-    (lambda m: m["lineage"]["cache"].update(release_eligible=False), "not a release-eligible tau0_cache"),
-    (lambda m: m["lineage"]["cache"].update(kind="catalog"), "not a release-eligible tau0_cache"),
-    (lambda m: m["lineage"]["catalogues"].update(n=0), "names no catalogue"),
-    (lambda m: m["lineage"].update(code_commit=None), "code commit is unknown"),
-    (lambda m: m["lineage"].update(code_commit="abc"), "code commit is unknown"),
-    (lambda m: m["lineage"]["export_code"].update(dirty=True), "dirty tree"),
-    (lambda m: m["lineage"]["export_code"].update(commit=None), "unknown commit"),
-    (lambda m: m["lineage"]["wc_map"].update(release_eligible=False), "w_c map is not release-eligible"),
-    (lambda m: m["lineage"]["wc_map"].update(cache_sha256="0" * 64), "fitted to another cache"),
-    (lambda m: m["lineage"].update(release_eligible=False, ineligible_reasons=["stated"]), "stated"),
-    (lambda m: m["lineage"]["cache"]["rows"].update(carried_validated=1), "carried rows without the carry"),
-    (lambda m: m["lineage"]["cache"]["rows"].update(built=1), "group count is not the sum"),
-    (lambda m: m["lineage"]["cache"].update(kind_version=2), "not a version 3.4 tau0_cache"),
-    (lambda m: m["lineage"]["cache"]["settings"].update(cache_version="3.3"), "not a version 3.4 tau0_cache"),
-    (lambda m: m["lineage"]["cache"]["settings"].pop("cache_version"), "not a version 3.4 tau0_cache"),
-    (lambda m: m["lineage"]["catalogues"].update(rule="another rule"), "not made by this format's rule"),
-])
+@pytest.mark.parametrize(
+    "edit, match",
+    [
+        (
+            lambda m: m["lineage"].update(finder_ids=["hcd_priya.finder/1"]),
+            "not in the release allow-list",
+        ),
+        (lambda m: m["lineage"].update(finder_ids=[]), "no finder id"),
+        (
+            lambda m: m["lineage"]["cache"].update(release_eligible=False),
+            "not a release-eligible tau0_cache",
+        ),
+        (
+            lambda m: m["lineage"]["cache"].update(kind="catalog"),
+            "not a release-eligible tau0_cache",
+        ),
+        (lambda m: m["lineage"]["catalogues"].update(n=0), "names no catalogue"),
+        (lambda m: m["lineage"].update(code_commit=None), "code commit is unknown"),
+        (lambda m: m["lineage"].update(code_commit="abc"), "code commit is unknown"),
+        (lambda m: m["lineage"]["export_code"].update(dirty=True), "dirty tree"),
+        (lambda m: m["lineage"]["export_code"].update(commit=None), "unknown commit"),
+        (
+            lambda m: m["lineage"]["wc_map"].update(release_eligible=False),
+            "w_c map is not release-eligible",
+        ),
+        (lambda m: m["lineage"]["wc_map"].update(cache_sha256="0" * 64), "fitted to another cache"),
+        (
+            lambda m: m["lineage"].update(release_eligible=False, ineligible_reasons=["stated"]),
+            "stated",
+        ),
+        (
+            lambda m: m["lineage"]["cache"]["rows"].update(carried_validated=1),
+            "carried rows without the carry",
+        ),
+        (lambda m: m["lineage"]["cache"]["rows"].update(built=1), "group count is not the sum"),
+        (lambda m: m["lineage"]["cache"].update(kind_version=2), "not a version 3.4 tau0_cache"),
+        (
+            lambda m: m["lineage"]["cache"]["settings"].update(cache_version="3.3"),
+            "not a version 3.4 tau0_cache",
+        ),
+        (
+            lambda m: m["lineage"]["cache"]["settings"].pop("cache_version"),
+            "not a version 3.4 tau0_cache",
+        ),
+        (
+            lambda m: m["lineage"]["catalogues"].update(rule="another rule"),
+            "not made by this format's rule",
+        ),
+    ],
+)
 def test_a_block_that_does_not_establish_a_clean_lineage_is_refused(info, edit, match):
     sha = _rewrite(info, edit)
     for load in (H.load_ensemble, H.load_bundle, H.load_release):
@@ -114,16 +170,28 @@ def test_carried_rows_must_be_promoted_and_labelled(tmp_path):
         H.load_ensemble(info.bundle_dir, expected_manifest_sha256=sha)
 
 
-@pytest.mark.parametrize("edit, match", [
-    (lambda m: m.pop("lineage"), "manifest keys"),
-    (lambda m: m.update(extra=1), "manifest keys"),
-    (lambda m: m.pop("wc_map"), "manifest keys"),
-    (lambda m: m["lineage"].pop("finder_ids"), "lineage block: keys"),
-    (lambda m: m["lineage"].update(format="hcd_priya.bundle_lineage/0"), "lineage block: format"),
-    (lambda m: m["lineage"]["cache"].update(sha256="xyz"), "malformed cache entry"),
-    (lambda m: m["lineage"].update(ineligible_reasons=["x"]), "disagrees with ineligible_reasons"),
-    (lambda m: m["lineage"]["wc_map"].update(sha256="0" * 64), "not the one the lineage block names"),
-])
+@pytest.mark.parametrize(
+    "edit, match",
+    [
+        (lambda m: m.pop("lineage"), "manifest keys"),
+        (lambda m: m.update(extra=1), "manifest keys"),
+        (lambda m: m.pop("wc_map"), "manifest keys"),
+        (lambda m: m["lineage"].pop("finder_ids"), "lineage block: keys"),
+        (
+            lambda m: m["lineage"].update(format="hcd_priya.bundle_lineage/0"),
+            "lineage block: format",
+        ),
+        (lambda m: m["lineage"]["cache"].update(sha256="xyz"), "malformed cache entry"),
+        (
+            lambda m: m["lineage"].update(ineligible_reasons=["x"]),
+            "disagrees with ineligible_reasons",
+        ),
+        (
+            lambda m: m["lineage"]["wc_map"].update(sha256="0" * 64),
+            "not the one the lineage block names",
+        ),
+    ],
+)
 def test_a_malformed_block_or_manifest_is_refused(info, edit, match):
     sha = _rewrite(info, edit)
     with pytest.raises(H.SafeFormatError, match=match):
@@ -141,6 +209,7 @@ def test_the_w_c_map_must_be_the_listed_one_and_fitted_to_the_cache(info, tmp_pa
     open(wc, "wb").write(raw)
     # a map of the same layout fitted to another cache, listed under its own digest: the block names another map
     from hcd_analysis.emulator import wc_map as W
+
     rec, ident = RT.synthetic_cache_record(n_groups=3)
     doc = RT.synthetic_wc_map_doc()
     other = tmp_path / "other.json"
@@ -152,31 +221,43 @@ def test_the_w_c_map_must_be_the_listed_one_and_fitted_to_the_cache(info, tmp_pa
         for f in m["files"]:
             if f["path"] == H.WC_MAP_FILE:
                 f["sha256"], f["bytes"] = H.sha256_file(wc), os.path.getsize(wc)
+
     sha = _rewrite(info, relist)
     with pytest.raises(H.SafeFormatError, match="not the one the lineage block names"):
         H.load_ensemble(info.bundle_dir, expected_manifest_sha256=sha)
 
 
-@pytest.mark.parametrize("key, value, match", [
-    ("cache_sha256", "1" * 64, "member 1 was trained on another cache"),
-    ("cache_lineage_sha256", "1" * 64, "member 1 does not name the cache's lineage record"),
-    ("git_sha", "6" * 40, "member 1 was trained at another or an unknown commit"),
-    ("code_dirty", True, "member 1 was trained from a tree not known to be clean"),
-    ("code_dirty", None, "member 1 was trained from a tree not known to be clean"),
-])
+@pytest.mark.parametrize(
+    "key, value, match",
+    [
+        ("cache_sha256", "1" * 64, "member 1 was trained on another cache"),
+        ("cache_lineage_sha256", "1" * 64, "member 1 does not name the cache's lineage record"),
+        ("git_sha", "6" * 40, "member 1 was trained at another or an unknown commit"),
+        ("code_dirty", True, "member 1 was trained from a tree not known to be clean"),
+        ("code_dirty", None, "member 1 was trained from a tree not known to be clean"),
+    ],
+)
 def test_members_not_described_by_the_block_are_refused(tmp_path, key, value, match):
     def differ(i, model, meta, nm):
         return model, (dict(meta, **{key: value}) if i == 1 else meta), nm
+
     info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=differ)
-    assert not info.lineage["release_eligible"] and any(match in r for r in info.lineage["ineligible_reasons"])
-    with pytest.raises(H.SafeFormatError, match="does not establish a clean release"):   # the block as written says so
+    assert not info.lineage["release_eligible"] and any(
+        match in r for r in info.lineage["ineligible_reasons"]
+    )
+    with pytest.raises(
+        H.SafeFormatError, match="does not establish a clean release"
+    ):  # the block as written says so
         H.load_ensemble(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
 
-    def forge(m):                                                  # a block forged eligible: the members refuse it
+    def forge(m):  # a block forged eligible: the members refuse it
         _forge_eligible(m)
         m["lineage"]["code_commit"] = RT.SYNTHETIC_COMMIT
+
     sha = _rewrite(info, forge)
-    with pytest.raises(H.SafeFormatError, match="members are not the ones the lineage block describes.*" + match):
+    with pytest.raises(
+        H.SafeFormatError, match="members are not the ones the lineage block describes.*" + match
+    ):
         H.load_ensemble(info.bundle_dir, expected_manifest_sha256=sha)
 
 
@@ -187,12 +268,19 @@ def test_the_member_count_must_be_the_blocks(info):
 
 
 def test_the_block_eligibility_is_computed_never_passed_in(tmp_path):
-    info = RT.write_synthetic_bundle(str(tmp_path / "b"), export_code={"commit": RT.SYNTHETIC_COMMIT, "dirty": True})
-    assert info.lineage["release_eligible"] is False and "[LIN_EXPORT_CODE] the export ran from an unknown commit or a " \
+    info = RT.write_synthetic_bundle(
+        str(tmp_path / "b"), export_code={"commit": RT.SYNTHETIC_COMMIT, "dirty": True}
+    )
+    assert (
+        info.lineage["release_eligible"] is False
+        and "[LIN_EXPORT_CODE] the export ran from an unknown commit or a "
         "dirty tree" in info.lineage["ineligible_reasons"]
+    )
     with pytest.raises(H.SafeFormatError, match="dirty tree"):
         H.load_ensemble(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
-    rec, ident = RT.synthetic_cache_record(code={"commit": None, "dirty": None})       # an ineligible cache
+    rec, ident = RT.synthetic_cache_record(
+        code={"commit": None, "dirty": None}
+    )  # an ineligible cache
     assert rec["release_eligible"] is False
     with pytest.raises(H.SafeFormatError, match="lineage block: keys"):
         H.check_lineage_block(dict(info.lineage, extra=1))
@@ -201,24 +289,32 @@ def test_the_block_eligibility_is_computed_never_passed_in(tmp_path):
 def test_an_h5_2_member_never_records_a_cache_path(tmp_path):
     import jax
     from hcd_analysis.emulator.model import Emulator
+
     rec, ident = RT.synthetic_cache_record()
     meta = dict(RT.synthetic_meta(0, rec, ident), cache_path="/some/where/cache.h5")
     with pytest.raises(H.SafeFormatError, match="records the cache's file name only"):
-        H.export_member(str(tmp_path / "m"), Emulator(**RT.SYNTHETIC_ARCH, key=jax.random.PRNGKey(0)), meta,
-                        RT.synthetic_norm())
+        H.export_member(
+            str(tmp_path / "m"),
+            Emulator(**RT.SYNTHETIC_ARCH, key=jax.random.PRNGKey(0)),
+            meta,
+            RT.synthetic_norm(),
+        )
     assert os.listdir(tmp_path) == []
 
 
 def test_the_writer_refuses_a_block_naming_another_map(tmp_path, info):
     bd = tmp_path / "copy"
     import shutil
+
     shutil.copytree(info.bundle_dir, bd)
     os.remove(bd / "manifest.json")
     block = json.loads(json.dumps(info.lineage))
     block["wc_map"]["sha256"] = "0" * 64
     with pytest.raises(H.SafeFormatError, match="not the w_c map the lineage block names"):
-        H.write_manifest(str(bd), [str(bd / os.path.basename(p)) for p in info.prefixes], {}, lineage=block)
-    assert L.canonical_json(info.lineage)                                  # the block is plain canonical JSON
+        H.write_manifest(
+            str(bd), [str(bd / os.path.basename(p)) for p in info.prefixes], {}, lineage=block
+        )
+    assert L.canonical_json(info.lineage)  # the block is plain canonical JSON
 
 
 # -------------------------------------------------------------- the production rule at the library boundary (D5)
@@ -231,82 +327,137 @@ def _recipe_fn(recipe_edit):
         r = dict(meta["recipe"])
         recipe_edit(r)
         return model, dict(meta, recipe=r), nm
+
     return fn
 
 
 def _fold(r):
-    r.update(all_sims=False, holdout_sims=["synthsim1"], fold=0, folds_sha256="f" * 64, n_train=36, n_val=4)
+    r.update(
+        all_sims=False,
+        holdout_sims=["synthsim1"],
+        fold=0,
+        folds_sha256="f" * 64,
+        n_train=36,
+        n_val=4,
+    )
 
 
 def _refused_by_every_release_loader(bundle_dir, sha, match):
-    for load in (lambda: H.load_release(bundle_dir, expected_manifest_sha256=sha),
-                 lambda: H.load_ensemble(bundle_dir, expected_manifest_sha256=sha),
-                 lambda: H.load_bundle(bundle_dir, expected_manifest_sha256=sha),
-                 lambda: hp.load_bundle(bundle_dir, sha)):
+    for load in (
+        lambda: H.load_release(bundle_dir, expected_manifest_sha256=sha),
+        lambda: H.load_ensemble(bundle_dir, expected_manifest_sha256=sha),
+        lambda: H.load_bundle(bundle_dir, expected_manifest_sha256=sha),
+        lambda: hp.load_bundle(bundle_dir, sha),
+    ):
         with pytest.raises(H.SafeFormatError, match=match):
             load()
 
 
 def test_every_reason_carries_a_stable_code(tmp_path):
-    info = RT.write_synthetic_bundle(str(tmp_path / "b"), export_code={"commit": None, "dirty": True},
-                                     member_fn=_recipe_fn(_fold))
+    info = RT.write_synthetic_bundle(
+        str(tmp_path / "b"),
+        export_code={"commit": None, "dirty": True},
+        member_fn=_recipe_fn(_fold),
+    )
     reasons = info.lineage["ineligible_reasons"]
     assert all(E.reason_code(r) for r in reasons)
     assert {E.code_class(r) for r in reasons} == {"lineage", "production"}
-    assert {E.reason_code(r) for r in reasons} >= {"LIN_EXPORT_CODE", "ALL_SIMS_NOT_TRUE",
-                                                   "RSV_KEY:recipe.holdout_sims", "RSV_KEY:recipe.fold"}
+    assert {E.reason_code(r) for r in reasons} >= {
+        "LIN_EXPORT_CODE",
+        "ALL_SIMS_NOT_TRUE",
+        "RSV_KEY:recipe.holdout_sims",
+        "RSV_KEY:recipe.fold",
+    }
     block = json.loads(json.dumps(info.lineage))
     block["code_commit"] = None
-    tie = H.member_tie_reasons(block, [dict(m, code_dirty=None) for m in json.loads(json.dumps(
-        [RT.synthetic_meta(0, info.cache_record, info.cache_identity)]))])
+    tie = H.member_tie_reasons(
+        block,
+        [
+            dict(m, code_dirty=None)
+            for m in json.loads(
+                json.dumps([RT.synthetic_meta(0, info.cache_record, info.cache_identity)])
+            )
+        ],
+    )
     assert {E.reason_code(r) for r in tie} == {"TIE_COUNT", "TIE_COMMIT", "TIE_DIRTY"}
 
 
-def test_a_fold_bundle_written_through_the_library_is_ineligible_and_every_release_loader_refuses_it(tmp_path):
+def test_a_fold_bundle_written_through_the_library_is_ineligible_and_every_release_loader_refuses_it(
+    tmp_path,
+):
     """T20/T21: the library writers write it (a research artefact), but it is never release-eligible, and a block
     forged eligible is refused by the recomputed production rule."""
     info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(_fold))
     assert info.lineage["release_eligible"] is False
-    assert any(E.reason_code(r) == "RSV_KEY:recipe.holdout_sims" for r in info.lineage["ineligible_reasons"])
-    _refused_by_every_release_loader(info.bundle_dir, info.manifest_sha256, "does not establish a clean release")
+    assert any(
+        E.reason_code(r) == "RSV_KEY:recipe.holdout_sims"
+        for r in info.lineage["ineligible_reasons"]
+    )
+    _refused_by_every_release_loader(
+        info.bundle_dir, info.manifest_sha256, "does not establish a clean release"
+    )
     sha = _rewrite(info, _forge_eligible)
-    _refused_by_every_release_loader(info.bundle_dir, sha, r"members are not the ones.*RSV_KEY:recipe\.holdout_sims")
+    _refused_by_every_release_loader(
+        info.bundle_dir, sha, r"members are not the ones.*RSV_KEY:recipe\.holdout_sims"
+    )
 
 
-@pytest.mark.parametrize("edit, code", [
-    (lambda r: r.update(fold=0), "RSV_KEY:recipe.fold"),
-    (lambda r: r.update(holdout_sims=[]), "RSV_KEY:recipe.holdout_sims"),
-    (lambda r: r.update(holdout_sim=""), "RSV_KEY:recipe.holdout_sim"),
-    (lambda r: r.update(all_sims="true"), "ALL_SIMS_NOT_TRUE"),
-    (lambda r: r.update(all_sims=1), "ALL_SIMS_NOT_TRUE"),
-    (lambda r: r.pop("all_sims"), "ALL_SIMS_NOT_TRUE"),
-    (lambda r: r.update(all_sims=None), "ALL_SIMS_NOT_TRUE"),
-    (lambda r: r.update(held_out_sims=["synthsim1"]), "RSV_KEY:recipe.held_out_sims"),
-    (lambda r: r.update(nested={"deeper": {"holdoutSims": ["synthsim1"]}}), "RSV_KEY:recipe.nested.deeper.holdoutSims"),
-    (lambda r: r.update(research={"purpose": "an ablation"}), "RECIPE_RESEARCH"),
-])
-def test_each_malformed_recipe_is_refused_at_the_loader_with_its_code(tmp_path, edit, code):     # T5-T14
+@pytest.mark.parametrize(
+    "edit, code",
+    [
+        (lambda r: r.update(fold=0), "RSV_KEY:recipe.fold"),
+        (lambda r: r.update(holdout_sims=[]), "RSV_KEY:recipe.holdout_sims"),
+        (lambda r: r.update(holdout_sim=""), "RSV_KEY:recipe.holdout_sim"),
+        (lambda r: r.update(all_sims="true"), "ALL_SIMS_NOT_TRUE"),
+        (lambda r: r.update(all_sims=1), "ALL_SIMS_NOT_TRUE"),
+        (lambda r: r.pop("all_sims"), "ALL_SIMS_NOT_TRUE"),
+        (lambda r: r.update(all_sims=None), "ALL_SIMS_NOT_TRUE"),
+        (lambda r: r.update(held_out_sims=["synthsim1"]), "RSV_KEY:recipe.held_out_sims"),
+        (
+            lambda r: r.update(nested={"deeper": {"holdoutSims": ["synthsim1"]}}),
+            "RSV_KEY:recipe.nested.deeper.holdoutSims",
+        ),
+        (lambda r: r.update(research={"purpose": "an ablation"}), "RECIPE_RESEARCH"),
+    ],
+)
+def test_each_malformed_recipe_is_refused_at_the_loader_with_its_code(
+    tmp_path, edit, code
+):  # T5-T14
     info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(edit))
     assert not info.lineage["release_eligible"]
-    sha = _rewrite(info, _forge_eligible)                                    # flags stripped: the block says eligible
-    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*" + code.replace(".", r"\."))
+    sha = _rewrite(info, _forge_eligible)  # flags stripped: the block says eligible
+    _refused_by_every_release_loader(
+        info.bundle_dir, sha, "members are not the ones.*" + code.replace(".", r"\.")
+    )
 
 
 def test_a_recipe_that_is_not_an_object_is_refused_at_the_loader(tmp_path):
     def none_recipe(i, model, meta, nm):
         return model, dict(meta, recipe=None), nm
+
     info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=none_recipe)
     sha = _rewrite(info, _forge_eligible)
-    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*RECIPE_NOT_DICT")
+    _refused_by_every_release_loader(
+        info.bundle_dir, sha, "members are not the ones.*RECIPE_NOT_DICT"
+    )
 
 
-@pytest.mark.parametrize("edit", [lambda r: r.update(threshold=0.5, lr_floor=1e-5, manifold_dim=3, loop=2),
-                                  lambda r: r.update(holdout_sim=None, fold=None),
-                                  lambda r: r.update(cv_selection={
-                                      "schema": "cv_selection/1", "source_cv_set_id": "synthetic cv set",
-                                      "source_folds_digest": "f" * 64,
-                                      "derived": {"synthetic": {"value": True, "rule": "kept as is"}}})])
-def test_ordinary_knobs_and_an_honest_selection_record_load(tmp_path, edit):                 # T14b
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda r: r.update(threshold=0.5, lr_floor=1e-5, manifold_dim=3, loop=2),
+        lambda r: r.update(holdout_sim=None, fold=None),
+        lambda r: r.update(
+            cv_selection={
+                "schema": "cv_selection/1",
+                "source_cv_set_id": "synthetic cv set",
+                "source_folds_digest": "f" * 64,
+                "derived": {"synthetic": {"value": True, "rule": "kept as is"}},
+            }
+        ),
+    ],
+)
+def test_ordinary_knobs_and_an_honest_selection_record_load(tmp_path, edit):  # T14b
     info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(edit))
     assert info.lineage["release_eligible"] and not info.lineage["ineligible_reasons"]
     rb = H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256)
@@ -317,7 +468,10 @@ def test_ordinary_knobs_and_an_honest_selection_record_load(tmp_path, edit):    
 def test_new_synthetic_bundles_declare_the_full_training_set(info):
     for p in info.prefixes:
         meta = json.load(open(p + ".json"))["meta"]
-        assert meta["recipe"] == {"synthetic": True, "all_sims": True} and not E.production_recipe_reasons(meta)
+        assert meta["recipe"] == {
+            "synthetic": True,
+            "all_sims": True,
+        } and not E.production_recipe_reasons(meta)
 
 
 def test_a_pre_d5_synthetic_bundle_is_historical_it_loads_only_through_the_dev_path(tmp_path):
@@ -325,11 +479,15 @@ def test_a_pre_d5_synthetic_bundle_is_historical_it_loads_only_through_the_dev_p
     eligible). The analogue reproduces the old recipe with the current writer, whose made-up w_c map counts the cache's
     groups; the old writer's map did not, so the refusals of the real pre-0.2.0 bundles also name WCMAP_NOT_FULL_CACHE
     (T25 checks those bundles)."""
+
     def pre_d5(i, model, meta, nm):
         return model, dict(meta, recipe={"synthetic": True}), nm
+
     info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=pre_d5)
-    sha = _rewrite(info, _forge_eligible)                                    # as written before D5: eligible
-    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*ALL_SIMS_NOT_TRUE")
+    sha = _rewrite(info, _forge_eligible)  # as written before D5: eligible
+    _refused_by_every_release_loader(
+        info.bundle_dir, sha, "members are not the ones.*ALL_SIMS_NOT_TRUE"
+    )
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         ens, metas, _ = H.load_ensemble(info.bundle_dir, expected_manifest_sha256=None)
@@ -348,66 +506,107 @@ def test_a_fold_subset_map_with_production_members_is_refused_by_every_productio
     """Reviewer R1's reproduction (8o): production members plus a research bundle's honest fold map, written by
     library calls, must not load as production."""
     res = RT.write_synthetic_research_bundle(str(tmp_path / "research"))
-    info = RT.write_synthetic_bundle(str(tmp_path / "b"), cache=(res.cache_record, res.cache_identity),
-                                     wc_map_path=os.path.join(res.bundle_dir, H.WC_MAP_FILE))
+    info = RT.write_synthetic_bundle(
+        str(tmp_path / "b"),
+        cache=(res.cache_record, res.cache_identity),
+        wc_map_path=os.path.join(res.bundle_dir, H.WC_MAP_FILE),
+    )
     assert info.lineage["release_eligible"] is False
-    assert [E.reason_code(r) for r in info.lineage["ineligible_reasons"]] == ["WCMAP_NOT_FULL_CACHE"]
+    assert [E.reason_code(r) for r in info.lineage["ineligible_reasons"]] == [
+        "WCMAP_NOT_FULL_CACHE"
+    ]
     assert E.code_class(info.lineage["ineligible_reasons"][0]) == "production"
     _refused_by_every_release_loader(info.bundle_dir, info.manifest_sha256, "WCMAP_NOT_FULL_CACHE")
-    sha = _rewrite(info, _forge_eligible)                                    # the block forged eligible
-    _refused_by_every_release_loader(info.bundle_dir, sha, "not fitted on the whole training cache.*"
-                                                           "WCMAP_NOT_FULL_CACHE")
+    sha = _rewrite(info, _forge_eligible)  # the block forged eligible
+    _refused_by_every_release_loader(
+        info.bundle_dir, sha, "not fitted on the whole training cache.*" "WCMAP_NOT_FULL_CACHE"
+    )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        assert len(H.load_ensemble(info.bundle_dir, expected_manifest_sha256=None)[0].members) == 2   # dev path
+        assert (
+            len(H.load_ensemble(info.bundle_dir, expected_manifest_sha256=None)[0].members) == 2
+        )  # dev path
 
 
 def test_the_map_rule_is_listed_after_the_member_rules(tmp_path):
     """A bundle with fold members AND a fold map names both (the member reasons first)."""
     res = RT.write_synthetic_research_bundle(str(tmp_path / "research"))
-    info = RT.write_synthetic_bundle(str(tmp_path / "b"), cache=(res.cache_record, res.cache_identity),
-                                     wc_map_path=os.path.join(res.bundle_dir, H.WC_MAP_FILE),
-                                     member_fn=_recipe_fn(_fold))
+    info = RT.write_synthetic_bundle(
+        str(tmp_path / "b"),
+        cache=(res.cache_record, res.cache_identity),
+        wc_map_path=os.path.join(res.bundle_dir, H.WC_MAP_FILE),
+        member_fn=_recipe_fn(_fold),
+    )
     sha = _rewrite(info, _forge_eligible)
-    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*ALL_SIMS_NOT_TRUE.*"
-                                                           "WCMAP_NOT_FULL_CACHE")
+    _refused_by_every_release_loader(
+        info.bundle_dir, sha, "members are not the ones.*ALL_SIMS_NOT_TRUE.*" "WCMAP_NOT_FULL_CACHE"
+    )
 
 
 # ------------------------------------ PI ruling 2026-11-04 (PU-0522): simulation subsets in any representation
-PRIYA_FORM = "ns0.91Ap2e-09herei3.5heref3alphaq2hub0.7omegamh20.14hireionz7bhfeedback0.05"   # made-up values
+PRIYA_FORM = (
+    "ns0.91Ap2e-09herei3.5heref3alphaq2hub0.7omegamh20.14hireionz7bhfeedback0.05"  # made-up values
+)
 
 
-@pytest.mark.parametrize("key, value", [
-    ("excluded", ["synthsim1"]), ("exclude", ["synthsim1"]), ("train_sims", ["synthsim0"]),     # the R1 m2 spellings
-    ("split", {"train": ["synthsim0"], "test": ["synthsim1"]}),
-    ("opts", {"runs": [["synthsim1"]]}),                                                     # nested, innocuous key
-    ("q9", "synthsim1; synthsim1"), ("w", {"synthsim0": 1.0}), ("zq7", [PRIYA_FORM])])
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("excluded", ["synthsim1"]),
+        ("exclude", ["synthsim1"]),
+        ("train_sims", ["synthsim0"]),  # the R1 m2 spellings
+        ("split", {"train": ["synthsim0"], "test": ["synthsim1"]}),
+        ("opts", {"runs": [["synthsim1"]]}),  # nested, innocuous key
+        ("q9", "synthsim1; synthsim1"),
+        ("w", {"synthsim0": 1.0}),
+        ("zq7", [PRIYA_FORM]),
+    ],
+)
 def test_a_simulation_list_under_any_key_is_refused_by_every_release_loader(tmp_path, key, value):
-    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(lambda r: r.update({key: value})))
+    info = RT.write_synthetic_bundle(
+        str(tmp_path / "b"), member_fn=_recipe_fn(lambda r: r.update({key: value}))
+    )
     codes = {E.reason_code(r) for r in info.lineage["ineligible_reasons"]}
-    assert info.lineage["release_eligible"] is False and codes and all(c.startswith(f"SIM_SET:recipe.{key}")
-                                                                       for c in codes), codes
+    assert (
+        info.lineage["release_eligible"] is False
+        and codes
+        and all(c.startswith(f"SIM_SET:recipe.{key}") for c in codes)
+    ), codes
     _refused_by_every_release_loader(info.bundle_dir, info.manifest_sha256, "SIM_SET")
 
 
 def test_a_hand_edited_block_hiding_a_simulation_list_is_refused_by_the_recomputation(tmp_path):
-    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(lambda r: r.update(zq7=[PRIYA_FORM])))
+    info = RT.write_synthetic_bundle(
+        str(tmp_path / "b"), member_fn=_recipe_fn(lambda r: r.update(zq7=[PRIYA_FORM]))
+    )
     sha = _rewrite(info, _forge_eligible)
-    _refused_by_every_release_loader(info.bundle_dir, sha, "members are not the ones.*SIM_SET:recipe.zq7")
+    _refused_by_every_release_loader(
+        info.bundle_dir, sha, "members are not the ones.*SIM_SET:recipe.zq7"
+    )
 
 
 def test_a_list_of_every_simulation_of_the_cache_is_production(tmp_path):
-    info = RT.write_synthetic_bundle(str(tmp_path / "b"), member_fn=_recipe_fn(
-        lambda r: r.update(sims_used=["synthsim1", "synthsim0"])))
+    info = RT.write_synthetic_bundle(
+        str(tmp_path / "b"),
+        member_fn=_recipe_fn(lambda r: r.update(sims_used=["synthsim1", "synthsim0"])),
+    )
     assert info.lineage["release_eligible"] is True
-    assert H.load_release(info.bundle_dir, expected_manifest_sha256=info.manifest_sha256).release_verified is True
+    assert (
+        H.load_release(
+            info.bundle_dir, expected_manifest_sha256=info.manifest_sha256
+        ).release_verified
+        is True
+    )
     assert type(hp.load_bundle(info.bundle_dir, info.manifest_sha256)).__name__ == "Bundle"
 
 
 def _named_cache(n_groups=2):
     """A synthetic cache record whose simulations carry names in the simulation-name form (made-up values)."""
     rec, ident = RT.synthetic_cache_record(n_groups=n_groups)
-    names = [f"ns0.9{g}Ap2e-09herei3.5heref3alphaq2hub0.7omegamh20.14hireionz7bhfeedback0.05" for g in range(n_groups)]
+    names = [
+        f"ns0.9{g}Ap2e-09herei3.5heref3alphaq2hub0.7omegamh20.14hireionz7bhfeedback0.05"
+        for g in range(n_groups)
+    ]
     raw = json.dumps(rec)
     for g, n in enumerate(names):
         raw = raw.replace(f"synthsim{g}", n)
@@ -416,13 +615,28 @@ def _named_cache(n_groups=2):
 
 def test_at_load_a_full_list_in_the_simulation_name_form_is_counted_against_the_map(tmp_path):
     cache, names = _named_cache()
-    full = RT.write_synthetic_bundle(str(tmp_path / "f"), cache=cache, member_fn=_recipe_fn(
-        lambda r: r.update(sims_used=list(names))))
+    full = RT.write_synthetic_bundle(
+        str(tmp_path / "f"),
+        cache=cache,
+        member_fn=_recipe_fn(lambda r: r.update(sims_used=list(names))),
+    )
     assert full.lineage["release_eligible"] is True
-    assert H.load_release(full.bundle_dir, expected_manifest_sha256=full.manifest_sha256).release_verified is True
+    assert (
+        H.load_release(
+            full.bundle_dir, expected_manifest_sha256=full.manifest_sha256
+        ).release_verified
+        is True
+    )
     assert type(hp.load_bundle(full.bundle_dir, full.manifest_sha256)).__name__ == "Bundle"
-    part = RT.write_synthetic_bundle(str(tmp_path / "p"), cache=cache, member_fn=_recipe_fn(
-        lambda r: r.update(sims_used=names[:1])))
-    assert {E.reason_code(r) for r in part.lineage["ineligible_reasons"]} == {"SIM_SET:recipe.sims_used"}
+    part = RT.write_synthetic_bundle(
+        str(tmp_path / "p"),
+        cache=cache,
+        member_fn=_recipe_fn(lambda r: r.update(sims_used=names[:1])),
+    )
+    assert {E.reason_code(r) for r in part.lineage["ineligible_reasons"]} == {
+        "SIM_SET:recipe.sims_used"
+    }
     sha = _rewrite(part, _forge_eligible)
-    _refused_by_every_release_loader(part.bundle_dir, sha, "members are not the ones.*SIM_SET:recipe.sims_used")
+    _refused_by_every_release_loader(
+        part.bundle_dir, sha, "members are not the ones.*SIM_SET:recipe.sims_used"
+    )

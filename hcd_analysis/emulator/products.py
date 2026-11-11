@@ -3,7 +3,9 @@
 Every product the forward loads carries its kind, the box-mode axis k_com = 2 pi n / L (never a velocity grid) and
 provenance with digests (code commit, the cache sha256, the sha256 of every input). Loaders take the expected kind and
 digests and refuse anything else, so an old product, an unlabelled product (e.g. the gate C error vector marked NOT
-FOR USE) or a product built from other checkpoints cannot enter the forward ("do not mix old and new products")."""
+FOR USE) or a product built from other checkpoints cannot enter the forward ("do not mix old and new products").
+"""
+
 from __future__ import annotations
 
 import json
@@ -25,8 +27,10 @@ class ProductRefused(ValueError):
 
 def _exact_digests(where, **digests):
     """Each caller-given digest (a list or tuple: each element) that is not None must be an exact str of 64 lowercase
-    hex digits (``safe_io.exact_hex64``): a str subclass could pass the comparisons below for any product."""
+    hex digits (``safe_io.exact_hex64``): a str subclass could pass the comparisons below for any product.
+    """
     from .safe_io import require_exact_hex64
+
     for name, v in digests.items():
         for x in (v if isinstance(v, (list, tuple)) else [v]):
             if x is not None:
@@ -35,7 +39,9 @@ def _exact_digests(where, **digests):
 
 def _check_kcom(k_com_hmpc):
     k = np.asarray(k_com_hmpc, float)
-    if k.ndim != 1 or not np.allclose(k, 2 * np.pi * np.arange(1, k.size + 1) / L_BOX_HMPC, rtol=1e-12, atol=0):
+    if k.ndim != 1 or not np.allclose(
+        k, 2 * np.pi * np.arange(1, k.size + 1) / L_BOX_HMPC, rtol=1e-12, atol=0
+    ):
         raise ProductRefused("k_com_hmpc must be the box modes 2 pi n / L, n = 1..K")
     return k
 
@@ -43,7 +49,9 @@ def _check_kcom(k_com_hmpc):
 def _check_names(names):
     bad = [n for n in names if n in _VELOCITY_KEYS]
     if bad:
-        raise ProductRefused(f"velocity-labelled keys refused (products live on the mode axis): {bad}")
+        raise ProductRefused(
+            f"velocity-labelled keys refused (products live on the mode axis): {bad}"
+        )
 
 
 def save_product(path, kind, *, k_com_hmpc, provenance, **arrays):
@@ -60,8 +68,14 @@ def save_product(path, kind, *, k_com_hmpc, provenance, **arrays):
     k = _check_kcom(k_com_hmpc)
     if os.path.exists(path):
         raise ProductRefused(f"{path} exists; products are written once")
-    np.savez(path, product_kind=kind, schema_version=CHECKPOINT_SCHEMA_VERSION, k_com_hmpc=k,
-             provenance=json.dumps(provenance, sort_keys=True), **{n: np.asarray(v) for n, v in arrays.items()})
+    np.savez(
+        path,
+        product_kind=kind,
+        schema_version=CHECKPOINT_SCHEMA_VERSION,
+        k_com_hmpc=k,
+        provenance=json.dumps(provenance, sort_keys=True),
+        **{n: np.asarray(v) for n, v in arrays.items()},
+    )
 
 
 def load_product(path, kind, *, cache_sha256, inputs=None):
@@ -71,12 +85,16 @@ def load_product(path, kind, *, cache_sha256, inputs=None):
     with np.load(path, allow_pickle=False) as f:
         files = set(f.files)
         if not {"product_kind", "schema_version", "k_com_hmpc", "provenance"} <= files:
-            raise ProductRefused(f"{path}: unlabelled or pre-2026-10 product (no kind/schema/mode axis/provenance)")
+            raise ProductRefused(
+                f"{path}: unlabelled or pre-2026-10 product (no kind/schema/mode axis/provenance)"
+            )
         got = str(f["product_kind"])
         if got != kind:
             raise ProductRefused(f"{path}: product kind {got!r} is not {kind!r}")
         if str(f["schema_version"]) != CHECKPOINT_SCHEMA_VERSION:
-            raise ProductRefused(f"{path}: schema {f['schema_version']} != {CHECKPOINT_SCHEMA_VERSION}")
+            raise ProductRefused(
+                f"{path}: schema {f['schema_version']} != {CHECKPOINT_SCHEMA_VERSION}"
+            )
         _check_names(files)
         k = _check_kcom(f["k_com_hmpc"])
         prov = json.loads(str(f["provenance"]))
@@ -85,14 +103,20 @@ def load_product(path, kind, *, cache_sha256, inputs=None):
     if missing:
         raise ProductRefused(f"{path}: provenance lacks {missing}")
     if prov["cache_sha256"] != cache_sha256:
-        raise ProductRefused(f"{path}: built from cache {prov['cache_sha256'][:12]}, expected {cache_sha256[:12]}")
+        raise ProductRefused(
+            f"{path}: built from cache {prov['cache_sha256'][:12]}, expected {cache_sha256[:12]}"
+        )
     for name, digest in (inputs or {}).items():
         if prov["inputs"].get(name) != digest:
-            raise ProductRefused(f"{path}: inputs[{name!r}] is {prov['inputs'].get(name)}, expected {digest}")
+            raise ProductRefused(
+                f"{path}: inputs[{name!r}] is {prov['inputs'].get(name)}, expected {digest}"
+            )
     return arrays, k, prov
 
 
-IMPLICIT_COMPOSITION = "all"      # a product written before compositions were recorded: fitted on every matched pair
+IMPLICIT_COMPOSITION = (
+    "all"  # a product written before compositions were recorded: fitted on every matched pair
+)
 
 
 def _composition(c):
@@ -110,9 +134,14 @@ def load_mf_product(path, *, lf_ckpt_sha256, lf_cache_sha256, hr_cache_sha256, c
     HR cache ``hr_cache_sha256``, with the composition ``composition`` (an id, or {id, excluded_sims}; a product that
     records none was fitted on every matched pair and has the composition ``IMPLICIT_COMPOSITION``). Read with
     ``allow_pickle=False``. The release MF is not this container: ``mf_release.load_mf_record``."""
-    _exact_digests("load_mf_product", lf_ckpt_sha256=list(lf_ckpt_sha256), lf_cache_sha256=lf_cache_sha256,
-                   hr_cache_sha256=hr_cache_sha256)
+    _exact_digests(
+        "load_mf_product",
+        lf_ckpt_sha256=list(lf_ckpt_sha256),
+        lf_cache_sha256=lf_cache_sha256,
+        hr_cache_sha256=hr_cache_sha256,
+    )
     from .mf_modes import ModeMF, load_mode_mf
+
     try:
         tables, k_com, prov = load_mode_mf(path)
     except (KeyError, ValueError) as e:
@@ -121,16 +150,24 @@ def load_mf_product(path, *, lf_ckpt_sha256, lf_cache_sha256, hr_cache_sha256, c
     if list(prov.get("lf_ckpt_sha256", [])) != list(lf_ckpt_sha256):
         raise ProductRefused(f"{path}: fitted against another LF ensemble than the forward's")
     if prov.get("lf_cache_sha256") != lf_cache_sha256:
-        raise ProductRefused(f"{path}: built from LF cache {str(prov.get('lf_cache_sha256'))[:12]}, "
-                             f"expected {lf_cache_sha256[:12]}")
+        raise ProductRefused(
+            f"{path}: built from LF cache {str(prov.get('lf_cache_sha256'))[:12]}, "
+            f"expected {lf_cache_sha256[:12]}"
+        )
     if prov.get("hr_cache_sha256") != hr_cache_sha256:
-        raise ProductRefused(f"{path}: built from HR cache {str(prov.get('hr_cache_sha256'))[:12]}, "
-                             f"expected {str(hr_cache_sha256)[:12]}")
+        raise ProductRefused(
+            f"{path}: built from HR cache {str(prov.get('hr_cache_sha256'))[:12]}, "
+            f"expected {str(hr_cache_sha256)[:12]}"
+        )
     got = _composition(prov.get("composition", IMPLICIT_COMPOSITION))
     if got != _composition(composition):
-        raise ProductRefused(f"{path}: composition {got[0]!r} excluding {got[1]}, expected {_composition(composition)}")
+        raise ProductRefused(
+            f"{path}: composition {got[0]!r} excluding {got[1]}, expected {_composition(composition)}"
+        )
     if prov.get("res_corr") != "off (NORC)":
-        raise ProductRefused(f"{path}: res_corr is retired in the gate E forward (provenance {prov.get('res_corr')!r})")
+        raise ProductRefused(
+            f"{path}: res_corr is retired in the gate E forward (provenance {prov.get('res_corr')!r})"
+        )
     return ModeMF.from_tables(tables), k_com, prov
 
 
@@ -140,6 +177,10 @@ def dla_core_at(k_data, k_grid, core_grid):
     g, c = np.asarray(k_grid, float), np.asarray(core_grid, float)
     fin = np.isfinite(c)
     kd = np.asarray(k_data, float)
-    if np.any(kd < g[fin][0]) or np.any(kd > g[fin][-1]) or not np.all(fin[(g >= kd.min()) & (g <= kd.max())]):
+    if (
+        np.any(kd < g[fin][0])
+        or np.any(kd > g[fin][-1])
+        or not np.all(fin[(g >= kd.min()) & (g <= kd.max())])
+    ):
         raise ValueError("data k outside the finite DLA-core grid")
     return np.interp(np.log(kd), np.log(g[fin]), c[fin])

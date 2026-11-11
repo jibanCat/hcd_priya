@@ -5,6 +5,7 @@ Every Phase-1 catalogue directory snap_NNN was built on raw SPECTRA_NNN (same in
 identity, takes the redshift label from the catalogue meta except for an enumerated table of mislabelled directories
 (each entry verified against the raw header), and refuses at build time any catalogue not built on the paired raw file.
 Runs in the suite environment (no fake_spectra)."""
+
 import json
 import os
 import sys
@@ -20,8 +21,11 @@ from hcd_analysis.paths import REPO_ROOT
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 import build_emulator_cache_tau0 as bt0  # noqa: E402
 
-NS0907 = "ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662omegamh20.144hireionz7.47bhfeedback0.0347"
+NS0907 = (
+    "ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662omegamh20.144hireionz7.47bhfeedback0.0347"
+)
 from tests.gate_helpers import external_path  # noqa: E402
+
 LF_RAW = Path(external_path("HCD_LF_RAW_DIR"))
 HR_RAW = Path(external_path("HCD_HR_RAW_DIR"))
 HCD = Path(external_path("HCD_OUTPUTS_DIR"))
@@ -37,9 +41,12 @@ def _require(*paths):
 
 def _hdr(nbins=1365, z=2.8, box=120000.0, hubble=0.662, omegam=0.3287):
     from types import SimpleNamespace
+
     a = 1.0 / (1.0 + z)
-    hz = 100.0 * hubble * np.sqrt(omegam / a ** 3 + 1.0 - omegam)
-    return SimpleNamespace(nbins=nbins, redshift=z, box=box, hubble=hubble, Hz=hz, omegam=omegam, omegal=1.0 - omegam)
+    hz = 100.0 * hubble * np.sqrt(omegam / a**3 + 1.0 - omegam)
+    return SimpleNamespace(
+        nbins=nbins, redshift=z, box=box, hubble=hubble, Hz=hz, omegam=omegam, omegal=1.0 - omegam
+    )
 
 
 # ------------------------------------------------------------------------------- pairing is by file identity
@@ -56,7 +63,14 @@ def test_locate_pairs_the_same_index_raw_file():
             (d / "lya_forest_spectra_grid_480.hdf5").write_bytes(b"")
         for s in (17, 18):
             got = bt0.locate_raw_tau_file(Path(tmp), NS0907, s)
-            assert got == Path(tmp) / NS0907 / "output" / f"SPECTRA_{s:03d}" / "lya_forest_spectra_grid_480.hdf5"
+            assert (
+                got
+                == Path(tmp)
+                / NS0907
+                / "output"
+                / f"SPECTRA_{s:03d}"
+                / "lya_forest_spectra_grid_480.hdf5"
+            )
 
 
 # ------------------------------------------------------------------------------- redshift label
@@ -71,12 +85,12 @@ def test_label_is_meta_z_when_not_overridden():
 def test_label_override_is_verified_against_the_raw_header():
     assert bt0.catalogue_z_label(NS0907, 17, 2.799998, 2.9999999999999982) == 3.0
     with pytest.raises(ValueError, match="header"):
-        bt0.catalogue_z_label(NS0907, 17, 2.799998, 2.8)          # override disagrees with the file
+        bt0.catalogue_z_label(NS0907, 17, 2.799998, 2.8)  # override disagrees with the file
 
 
 def test_label_override_refuses_a_stale_entry():
     with pytest.raises(ValueError, match="stale"):
-        bt0.catalogue_z_label(NS0907, 17, 3.0, 3.0)                # meta already right: entry must be removed
+        bt0.catalogue_z_label(NS0907, 17, 3.0, 3.0)  # meta already right: entry must be removed
 
 
 def test_label_must_match_header_within_2e5():
@@ -92,11 +106,14 @@ def test_catalogue_identity_accepts_the_file_it_was_built_on():
     bt0.assert_catalogue_built_on({"nbins": 1365, "dv_kms": vmax / 1365}, 1364, h)
 
 
-@pytest.mark.parametrize("meta,pix,what", [
-    ({"nbins": 1397, "dv_kms": None}, 1000, "nbins"),
-    ({"nbins": 1365, "dv_kms": "off"}, 1000, "dv_kms"),
-    ({"nbins": 1365, "dv_kms": None}, 1396, "pixel"),
-])
+@pytest.mark.parametrize(
+    "meta,pix,what",
+    [
+        ({"nbins": 1397, "dv_kms": None}, 1000, "nbins"),
+        ({"nbins": 1365, "dv_kms": "off"}, 1000, "dv_kms"),
+        ({"nbins": 1365, "dv_kms": None}, 1396, "pixel"),
+    ],
+)
 def test_catalogue_identity_refuses_another_file(meta, pix, what):
     h = _hdr()
     vmax = bt0.vmax_from_header(h)
@@ -115,8 +132,12 @@ def test_vmax_from_header_matches_fake_spectra_formula():
 
 # ------------------------------------------------------------------------------- group selection (targeted builds)
 def test_select_pairs_keeps_exactly_the_named_groups_and_refuses_unmatched_selectors():
-    pairs = [("ns0.803Ap2.2e-09x", 17, Path("a"), Path("ra")), (NS0907, 16, Path("b"), Path("rb")),
-             (NS0907, 17, Path("c"), Path("rc")), ("ns0.959Ap2.34e-09x", 20, Path("d"), Path("rd"))]
+    pairs = [
+        ("ns0.803Ap2.2e-09x", 17, Path("a"), Path("ra")),
+        (NS0907, 16, Path("b"), Path("rb")),
+        (NS0907, 17, Path("c"), Path("rc")),
+        ("ns0.959Ap2.34e-09x", 20, Path("d"), Path("rd")),
+    ]
     got = bt0.select_pairs(pairs, ["ns0.907:17", "ns0.959:20"])
     assert [(p[0][:7], p[1]) for p in got] == [("ns0.907", 17), ("ns0.959", 20)]
     with pytest.raises(ValueError, match="matches no"):
@@ -129,7 +150,9 @@ def test_select_pairs_keeps_exactly_the_named_groups_and_refuses_unmatched_selec
 def test_override_entries_match_the_raw_headers_and_meta():
     for (tag, snap), z in bt0._PHASE1_Z_OVERRIDE.items():
         assert tag in NS0907
-        raw = LF_RAW / NS0907 / "output" / f"SPECTRA_{snap:03d}" / "lya_forest_spectra_grid_480.hdf5"
+        raw = (
+            LF_RAW / NS0907 / "output" / f"SPECTRA_{snap:03d}" / "lya_forest_spectra_grid_480.hdf5"
+        )
         meta = HCD / NS0907 / f"snap_{snap:03d}" / "meta.json"
         _require(raw, meta)
         with h5py.File(raw, "r") as f:
@@ -142,10 +165,24 @@ def test_lf_discovery_pairs_ns0907_by_identity():
     _require(HCD, LF_RAW)
     pairs = bt0.discover_tau0_pairs(HCD, LF_RAW, fidelity="lf")
     assert len(pairs) == 1073
-    got = {snap: (raw, bt0._snap_z_to_priya_grid(bt0.catalogue_z_label(
-        sim, snap, float(json.load(open(sd / "meta.json"))["z"]), bt0.raw_header_z(raw))))
-        for sim, snap, sd, raw in pairs if sim == NS0907}
-    assert {s: round(v[1], 1) for s, v in got.items() if s in (16, 17, 18, 19)} == {16: 3.2, 17: 3.0, 18: 2.8, 19: 2.6}
+    got = {
+        snap: (
+            raw,
+            bt0._snap_z_to_priya_grid(
+                bt0.catalogue_z_label(
+                    sim, snap, float(json.load(open(sd / "meta.json"))["z"]), bt0.raw_header_z(raw)
+                )
+            ),
+        )
+        for sim, snap, sd, raw in pairs
+        if sim == NS0907
+    }
+    assert {s: round(v[1], 1) for s, v in got.items() if s in (16, 17, 18, 19)} == {
+        16: 3.2,
+        17: 3.0,
+        18: 2.8,
+        19: 2.6,
+    }
     for s, (raw, _) in got.items():
         assert Path(raw).parent.name == f"SPECTRA_{s:03d}"
 
@@ -157,6 +194,7 @@ def test_every_discovered_pair_satisfies_the_build_invariants(fid):
     raw_root = LF_RAW if fid == "lf" else HR_RAW
     _require(HCD, raw_root)
     from hcd_analysis.io import read_header
+
     pairs = bt0.discover_tau0_pairs(HCD, raw_root, fidelity=fid)
     assert len(pairs) == (1073 if fid == "lf" else 103)
     for sim, snap, sd, raw in pairs:
@@ -165,4 +203,6 @@ def test_every_discovered_pair_satisfies_the_build_invariants(fid):
             pix = int(c["pix_start"].max()) if c["pix_start"].size else -1
         hdr = read_header(raw)
         bt0.assert_catalogue_built_on(meta, pix, hdr)
-        bt0.assert_label_matches_header(bt0.catalogue_z_label(sim, snap, float(meta["z"]), hdr.redshift), hdr.redshift)
+        bt0.assert_label_matches_header(
+            bt0.catalogue_z_label(sim, snap, float(meta["z"]), hdr.redshift), hdr.redshift
+        )

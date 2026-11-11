@@ -9,6 +9,7 @@ Expected outcome: tauspace ratios drop well below 1 across the emulator k range
 (Rogers+2018 template-shape), while pixrange ratios remain ≈1 (confirming the
 pix-range mask is too narrow).
 """
+
 from __future__ import annotations
 
 import sys
@@ -16,6 +17,7 @@ import time
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,7 +31,13 @@ from hcd_analysis.io import read_header, pixel_dv_kms
 from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
-HDF5 = Path(external_path("HCD_LF_RAW_DIR")) / SIM / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5"
+HDF5 = (
+    Path(external_path("HCD_LF_RAW_DIR"))
+    / SIM
+    / "output"
+    / "SPECTRA_017"
+    / "lya_forest_spectra_grid_480.hdf5"
+)
 CAT_PATH = ROOT / "tests" / "out" / "snap_017_fastfix_catalog.npz"
 DIAG = ROOT / "figures" / "diagnostics"
 
@@ -46,6 +54,7 @@ def main():
     # 20k is enough for a visible signal; scale up to 200k for production
     # publication quality.
     import argparse
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--n-skewers", type=int, default=20000)
     args = ap.parse_args()
@@ -55,7 +64,9 @@ def main():
     print("\nCompute P1D variants with tauspace mask...")
     t0 = time.time()
     variants_ts = compute_all_p1d_variants(
-        HDF5, header.nbins, dv_kms,
+        HDF5,
+        header.nbins,
+        dv_kms,
         catalog=catalog,
         variants=["all", "no_LLS", "no_subDLA", "no_DLA", "no_HCD"],
         batch_size=4096,
@@ -69,7 +80,9 @@ def main():
     print("\nCompute P1D variants with pixrange mask (legacy)...")
     t0 = time.time()
     variants_px = compute_all_p1d_variants(
-        HDF5, header.nbins, dv_kms,
+        HDF5,
+        header.nbins,
+        dv_kms,
         catalog=catalog,
         variants=["all", "no_LLS", "no_subDLA", "no_DLA", "no_HCD"],
         batch_size=4096,
@@ -84,10 +97,10 @@ def main():
     fig, ax = plt.subplots(1, 2, figsize=(14, 5.5), sharey=True)
     k = ratios_ts["k"]
     for name, key, color in [
-        ("exclude DLA",   "ratio_noDLA_all",    "C3"),
-        ("exclude subDLA","ratio_nosubDLA_all", "C1"),
-        ("exclude LLS",   "ratio_noLLS_all",    "C2"),
-        ("exclude all HCD","ratio_noHCD_all",   "C0"),
+        ("exclude DLA", "ratio_noDLA_all", "C3"),
+        ("exclude subDLA", "ratio_nosubDLA_all", "C1"),
+        ("exclude LLS", "ratio_noLLS_all", "C2"),
+        ("exclude all HCD", "ratio_noHCD_all", "C0"),
     ]:
         if key in ratios_ts:
             ax[0].plot(k, ratios_ts[key], lw=1.8, label=name, color=color)
@@ -118,8 +131,12 @@ def main():
     print("\nRatios at key k (τ-space):")
     for kk in (0.002, 0.005, 0.01, 0.02):
         line = f"  k={kk:.3f}  "
-        for name, key in [("no_DLA", "ratio_noDLA_all"), ("no_subDLA","ratio_nosubDLA_all"),
-                           ("no_LLS","ratio_noLLS_all"), ("no_HCD","ratio_noHCD_all")]:
+        for name, key in [
+            ("no_DLA", "ratio_noDLA_all"),
+            ("no_subDLA", "ratio_nosubDLA_all"),
+            ("no_LLS", "ratio_noLLS_all"),
+            ("no_HCD", "ratio_noHCD_all"),
+        ]:
             if key in ratios_ts:
                 val = float(np.interp(kk, k, ratios_ts[key]))
                 line += f"{name}={val:.3f}  "
@@ -128,8 +145,12 @@ def main():
     print("\nRatios at key k (pixel-range legacy):")
     for kk in (0.002, 0.005, 0.01, 0.02):
         line = f"  k={kk:.3f}  "
-        for name, key in [("no_DLA", "ratio_noDLA_all"), ("no_subDLA","ratio_nosubDLA_all"),
-                           ("no_LLS","ratio_noLLS_all"), ("no_HCD","ratio_noHCD_all")]:
+        for name, key in [
+            ("no_DLA", "ratio_noDLA_all"),
+            ("no_subDLA", "ratio_nosubDLA_all"),
+            ("no_LLS", "ratio_noLLS_all"),
+            ("no_HCD", "ratio_noHCD_all"),
+        ]:
             if key in ratios_px:
                 val = float(np.interp(kk, k, ratios_px[key]))
                 line += f"{name}={val:.3f}  "

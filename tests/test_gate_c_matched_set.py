@@ -4,7 +4,9 @@ shrunk silently.
 Both analysis scripts used to drop entries with a non-finite residual before matching and to drop unmatched entries
 after it, printing (not asserting) the count 7790; the excluded entries F1 were selected by our simulation name.
 Now: every upstream (loo row, z) entry outside F1 is matched exactly once, F1 is identified on the upstream side by a
-pinned parameter vector, a non-finite residual in any member of a matched entry raises, and the count is pinned."""
+pinned parameter vector, a non-finite residual in any member of a matched entry raises, and the count is pinned.
+"""
+
 import json
 import os
 
@@ -14,6 +16,7 @@ import pytest
 from hcd_analysis.emulator import gate_c as G
 
 from tests.gate_helpers import external_path  # noqa: E402
+
 EVAL_DIR = external_path("HCD_EMULATOR_V2_DIR", "gateC_eval")
 UP_LOO = external_path("HCD_KS_BASEDIR", "loo_fps.hdf5")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -29,7 +32,7 @@ ZOUT = np.array([3.0, 2.2])
 
 def _upstream():
     sims = (P0, P1, G.F1_PARAMS)
-    up = np.array([[a, *p] for p in sims for a in RUNGS])          # sim-major, as upstream's loo_fps
+    up = np.array([[a, *p] for p in sims for a in RUNGS])  # sim-major, as upstream's loo_fps
     return up, ZOUT
 
 
@@ -57,7 +60,7 @@ def test_complete_set_excludes_exactly_the_pinned_f1_entries():
     entries, res = _ours()
     out = G.c4_matched_set(entries, res, up, zout, n_expected=10)
     assert len(out) == 10
-    assert {ue for _, ue in out}.isdisjoint({(4, 1), (5, 1)})       # F1 = sim 2 (rows 4, 5) at z 2.2
+    assert {ue for _, ue in out}.isdisjoint({(4, 1), (5, 1)})  # F1 = sim 2 (rows 4, 5) at z 2.2
     assert G.c4_f1_entries(up, zout, n_rungs=2) == {(4, 1), (5, 1)}
 
 
@@ -84,7 +87,9 @@ def test_a_non_finite_member_residual_of_a_matched_entry_raises():
 
 def test_non_finite_residuals_outside_the_compared_set_are_allowed():
     up, zout = _upstream()
-    entries, res = _ours(nan={(0, 1.0, 2.0), (0, 0.85, 3.0), (2, 0.7, 2.2)})   # extra z, odd rung, F1
+    entries, res = _ours(
+        nan={(0, 1.0, 2.0), (0, 0.85, 3.0), (2, 0.7, 2.2)}
+    )  # extra z, odd rung, F1
     assert len(G.c4_matched_set(entries, res, up, zout, n_expected=10)) == 10
 
 
@@ -92,7 +97,7 @@ def test_f1_is_identified_by_its_pinned_parameters_not_assumed():
     up, zout = _upstream()
     entries, res = _ours()
     up_wrong = up.copy()
-    up_wrong[4:6, 1] *= 1.001                                      # upstream no longer holds the pinned vector
+    up_wrong[4:6, 1] *= 1.001  # upstream no longer holds the pinned vector
     with pytest.raises(ValueError, match="F1"):
         G.c4_matched_set(entries, res, up_wrong, zout, n_expected=10)
 
@@ -107,13 +112,23 @@ def test_the_count_is_pinned():
 def test_collect_keeps_every_row_and_refuses_disagreeing_members():
     def ev(rows, res):
         n = len(rows)
-        return dict(rows=np.asarray(rows), k_ks=np.array([0.01, 0.02]), res_ks=np.asarray(res, float),
-                    sim_name=np.array(["simA"] * n), alpha=np.full(n, 1.0), z=np.array([3.0, 2.2][:n]))
+        return dict(
+            rows=np.asarray(rows),
+            k_ks=np.array([0.01, 0.02]),
+            res_ks=np.asarray(res, float),
+            sim_name=np.array(["simA"] * n),
+            alpha=np.full(n, 1.0),
+            z=np.array([3.0, 2.2][:n]),
+        )
+
     sim_params = {"simA": P0}
     a = ev([0, 1], [[0.01, np.nan], [0.02, 0.03]])
     b = ev([0, 1], [[0.02, 0.01], [0.01, 0.01]])
     entries, res, k = G.c4_collect([[a, b]], sim_params)
-    assert [e["key"] for e in entries] == [(0, 0), (0, 1)]           # the NaN row is kept for the matched-set check
+    assert [e["key"] for e in entries] == [
+        (0, 0),
+        (0, 1),
+    ]  # the NaN row is kept for the matched-set check
     assert res[(0, 0)].shape == (2, 2) and np.isnan(res[(0, 0)][0, 1])
     assert np.array_equal(k, [0.01, 0.02])
     with pytest.raises(ValueError, match="disagree"):
@@ -129,13 +144,16 @@ def _unavailable(msg):
 
 def _member_files(n, members):
     files = [f"{EVAL_DIR}/eval_loo60_s{n:02d}.npz"]
-    files += [f"{EVAL_DIR}/loo60_ensemble/eval_loo60_s{n:02d}_seed{s}.npz" for s in range(1, members)]
+    files += [
+        f"{EVAL_DIR}/loo60_ensemble/eval_loo60_s{n:02d}_seed{s}.npz" for s in range(1, members)
+    ]
     return files
 
 
 @pytest.mark.parametrize("members", [1, 5], ids=["C4_single_member", "S7_ensemble"])
 def test_c4_matched_set_is_complete(members):
     import h5py
+
     for p in (UP_LOO, CACHE, *_member_files(59, members)):
         if not os.path.exists(p):
             _unavailable(f"gate C product absent: {p}")
@@ -147,11 +165,16 @@ def test_c4_matched_set_is_complete(members):
     def evals():
         for n in range(60):
             yield [dict(np.load(p, allow_pickle=True)) for p in _member_files(n, members)]
+
     entries, res, _ = G.c4_collect(evals(), sim_params)
     out = G.c4_matched_set(entries, res, up_params, up_zout)
     assert len(out) == G.C4_N_ENTRIES == 7790
-    assert G.c4_f1_entries(up_params, up_zout) == {(r, 12) for r in range(470, 480)}   # upstream sim index 47, z 2.2
+    assert G.c4_f1_entries(up_params, up_zout) == {
+        (r, 12) for r in range(470, 480)
+    }  # upstream sim index 47, z 2.2
     assert all(np.isfinite(res[k]).all() for k, _ in out)
-    j = {1: ("gate_c_results.json", lambda d: d["criteria"]["C4"]["n_entries"]),
-         5: ("s7_ensemble_loo.json", lambda d: d["n_entries"])}[members]
+    j = {
+        1: ("gate_c_results.json", lambda d: d["criteria"]["C4"]["n_entries"]),
+        5: ("s7_ensemble_loo.json", lambda d: d["n_entries"]),
+    }[members]
     assert j[1](json.load(open(f"{EVAL_DIR}/{j[0]}"))) == 7790

@@ -8,6 +8,7 @@ DIST_DIR must hold exactly one wheel and one sdist (the output of `python -m bui
 a git checkout: the expected files are the .py files under hcd_analysis/ and the package-data files in the HEAD
 commit, each compared by its git blob id. Exit status 1 with the offending names on any violation.
 """
+
 from __future__ import annotations
 
 import glob
@@ -21,13 +22,31 @@ import zipfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 PACKAGES = ("hcd_analysis",)
-DIST = "hcd_priya"            # the distribution name hcd-priya as wheel, sdist and metadata directories spell it
-PACKAGE_DATA = ("hcd_analysis/comparison/phase0_v1.json", "hcd_analysis/emulator/hcd_lit_dndx_corrected.json")
-DIST_INFO_FILES = {"METADATA", "WHEEL", "RECORD", "entry_points.txt", "top_level.txt", "licenses/LICENSE"}
+DIST = (
+    "hcd_priya"  # the distribution name hcd-priya as wheel, sdist and metadata directories spell it
+)
+PACKAGE_DATA = (
+    "hcd_analysis/comparison/phase0_v1.json",
+    "hcd_analysis/emulator/hcd_lit_dndx_corrected.json",
+)
+DIST_INFO_FILES = {
+    "METADATA",
+    "WHEEL",
+    "RECORD",
+    "entry_points.txt",
+    "top_level.txt",
+    "licenses/LICENSE",
+}
 SDIST_COMMITTED = ("pyproject.toml", "LICENSE", "README.md", "MANIFEST.in")
 SDIST_GENERATED = {"PKG-INFO", "setup.cfg"}
-EGG_INFO_FILES = {"PKG-INFO", "SOURCES.txt", "dependency_links.txt", "entry_points.txt", "requires.txt",
-                  "top_level.txt"}
+EGG_INFO_FILES = {
+    "PKG-INFO",
+    "SOURCES.txt",
+    "dependency_links.txt",
+    "entry_points.txt",
+    "requires.txt",
+    "top_level.txt",
+}
 
 
 def git_blob_id(data, oid_length=40):
@@ -41,8 +60,11 @@ def git_blob_id(data, oid_length=40):
 def committed_files(repo=REPO):
     """{path: blob id} at HEAD for the package files (every .py under PACKAGES, and PACKAGE_DATA) and for the
     committed files the sdist carries (SDIST_COMMITTED). A tracked symlink among them is refused."""
-    out = subprocess.run(["git", "-C", repo, "ls-tree", "-r", "-z", "HEAD", "--", *PACKAGES, *SDIST_COMMITTED],
-                         capture_output=True, check=True).stdout.decode()
+    out = subprocess.run(
+        ["git", "-C", repo, "ls-tree", "-r", "-z", "HEAD", "--", *PACKAGES, *SDIST_COMMITTED],
+        capture_output=True,
+        check=True,
+    ).stdout.decode()
     package, top = {}, {}
     for rec in filter(None, out.split("\0")):
         meta, path = rec.split("\t", 1)
@@ -63,8 +85,11 @@ def _compare(prefix, found, expected):
     """Problems for a {path: bytes} found in a distribution against {path: blob id} expected."""
     problems = [f"{prefix}: unexpected file {p}" for p in sorted(set(found) - set(expected))]
     problems += [f"{prefix}: missing {p}" for p in sorted(set(expected) - set(found))]
-    problems += [f"{prefix}: {p} differs from HEAD" for p in sorted(set(found) & set(expected))
-                 if git_blob_id(found[p], len(expected[p])) != expected[p]]
+    problems += [
+        f"{prefix}: {p} differs from HEAD"
+        for p in sorted(set(found) & set(expected))
+        if git_blob_id(found[p], len(expected[p])) != expected[p]
+    ]
     return problems
 
 
@@ -82,7 +107,9 @@ def check_wheel(path, package):
                 found[name] = zf.read(name)
     problems += _compare("wheel", found, package)
     if top != set(PACKAGES):
-        problems.append(f"wheel: top_level.txt names {sorted(top or ())}, expected {sorted(PACKAGES)}")
+        problems.append(
+            f"wheel: top_level.txt names {sorted(top or ())}, expected {sorted(PACKAGES)}"
+        )
     return problems
 
 
@@ -102,8 +129,9 @@ def check_sdist(path, package, top):
             if m.isdir():
                 continue
             rel = "/".join(parts[1:])
-            if rel in SDIST_GENERATED or (parts[1] == DIST + ".egg-info"
-                                          and "/".join(parts[2:]) in EGG_INFO_FILES):
+            if rel in SDIST_GENERATED or (
+                parts[1] == DIST + ".egg-info" and "/".join(parts[2:]) in EGG_INFO_FILES
+            ):
                 continue
             data = tf.extractfile(m).read()
             (found_top if rel in SDIST_COMMITTED else found)[rel] = data
@@ -124,9 +152,13 @@ def main(argv=None):
     problems = check_wheel(wheels[0], package) + check_sdist(sdists[0], package, top)
     for p in problems:
         print(p)
-    head = subprocess.run(["git", "-C", REPO, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    print(f"{os.path.basename(wheels[0])}, {os.path.basename(sdists[0])} against HEAD {head}: {len(package)} package "
-          f"files ({len(PACKAGE_DATA)} package data), compared by git blob id; {len(problems)} problems")
+    head = subprocess.run(
+        ["git", "-C", REPO, "rev-parse", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    print(
+        f"{os.path.basename(wheels[0])}, {os.path.basename(sdists[0])} against HEAD {head}: {len(package)} package "
+        f"files ({len(PACKAGE_DATA)} package data), compared by git blob id; {len(problems)} problems"
+    )
     return 1 if problems else 0
 
 

@@ -10,7 +10,9 @@ expected one. Nothing outside the temporary directory is written.
     python docs/tutorials/run_tutorial.py --show     # also print each example's output
 
 Run it from a repository checkout with the package's environment (JAX with float64; a few minutes on one CPU). The
-test ``tests/test_tutorial_production_research.py`` runs the same function, so the tutorial cannot go stale."""
+test ``tests/test_tutorial_production_research.py`` runs the same function, so the tutorial cannot go stale.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -25,7 +27,9 @@ from typing import NamedTuple
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 TUTORIAL = os.path.join(HERE, "production_and_research_bundles.md")
-_BLOCK = re.compile(r"<!-- (example|expected): ([A-Za-z0-9_]+) -->\n```(python|text)\n(.*?)```", re.S)
+_BLOCK = re.compile(
+    r"<!-- (example|expected): ([A-Za-z0-9_]+) -->\n```(python|text)\n(.*?)```", re.S
+)
 
 
 class Example(NamedTuple):
@@ -63,7 +67,9 @@ def parse(text):
         if kind == "example":
             order.append(name)
     if set(code) != set(out):
-        raise ValueError(f"examples without an expected output or the reverse: {sorted(set(code) ^ set(out))}")
+        raise ValueError(
+            f"examples without an expected output or the reverse: {sorted(set(code) ^ set(out))}"
+        )
     return [Example(n, code[n], out[n]) for n in order]
 
 
@@ -74,13 +80,14 @@ def run(path=TUTORIAL, workdir=None):
     examples = parse(open(path, encoding="utf-8").read())
     saved_cwd, saved_path = os.getcwd(), list(sys.path)
     if REPO not in sys.path:
-        sys.path.insert(0, REPO)                    # the package and the test suite's synthetic cache writer
+        sys.path.insert(0, REPO)  # the package and the test suite's synthetic cache writer
     from hcd_analysis import lineage
+
     saved_identity = lineage.code_identity
     results = []
     with tempfile.TemporaryDirectory(dir=workdir) as tmp:
         os.chdir(tmp)
-        ns = {"__name__": "tutorial"}                 # the tutorial defines everything it uses
+        ns = {"__name__": "tutorial"}  # the tutorial defines everything it uses
         try:
             for ex in examples:
                 buf = io.StringIO()
@@ -103,9 +110,14 @@ def main(argv=None):
     for r in results:
         print(f"{'ok  ' if r.ok else 'DIFF'} {r.name}")
         if a.show or not r.ok:
-            print("  output:\n" + "\n".join("    " + line for line in r.output.rstrip().splitlines()))
+            print(
+                "  output:\n" + "\n".join("    " + line for line in r.output.rstrip().splitlines())
+            )
             if not r.ok:
-                print("  expected:\n" + "\n".join("    " + line for line in r.expected.rstrip().splitlines()))
+                print(
+                    "  expected:\n"
+                    + "\n".join("    " + line for line in r.expected.rstrip().splitlines())
+                )
     bad = [r.name for r in results if not r.ok]
     print(f"{len(results) - len(bad)} of {len(results)} examples print their documented output")
     return 1 if bad else 0

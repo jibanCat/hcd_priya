@@ -8,6 +8,7 @@ clean committed checkout only (otherwise the record is not release-eligible and 
 
   python scripts/refit_wc_map.py --cache CACHE.h5 --cache-sha256 HEX --out NEW_FILE.json
 """
+
 import argparse
 import os
 import sys
@@ -25,9 +26,10 @@ def main(argv=None):
     ap.add_argument("--out", required=True, help="the NEW map file (refused if it exists)")
     a = ap.parse_args(argv)
     from hcd_analysis.tau0_cache import CacheLineageError
+
     try:
         rec, sha = W.build(a.cache, a.out, expected_cache_sha256=a.cache_sha256)
-    except (W.WcMapError, CacheLineageError) as e:                   # the map, or the strict cache loader, refused
+    except (W.WcMapError, CacheLineageError) as e:  # the map, or the strict cache loader, refused
         print(f"refused: {e}", file=sys.stderr)
         return 2
     m = W.read_wc_map(a.out, expected_sha256=sha)

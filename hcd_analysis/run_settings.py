@@ -15,6 +15,7 @@ Layout of the record (format ``hcd_priya.run_settings/1``)::
 
     {"format": "hcd_priya.run_settings/1", "settings": {...compared...}, "info": {...not compared...}}
 """
+
 from __future__ import annotations
 
 import datetime
@@ -69,22 +70,33 @@ def read_record(path):
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
     except OSError as e:
-        raise RunSettingsMismatch(f"{path}: the run-settings record cannot be read ({e.strerror})") from None
+        raise RunSettingsMismatch(
+            f"{path}: the run-settings record cannot be read ({e.strerror})"
+        ) from None
     if not stat.S_ISREG(os.fstat(fd).st_mode):
         os.close(fd)
         raise RunSettingsMismatch(f"{path}: the run-settings record is not a regular file")
     with os.fdopen(fd, "rb") as fh:
         raw = fh.read(MAX_RECORD_BYTES + 1)
     if len(raw) > MAX_RECORD_BYTES:
-        raise RunSettingsMismatch(f"{path}: larger than {MAX_RECORD_BYTES} bytes; not a run-settings record")
+        raise RunSettingsMismatch(
+            f"{path}: larger than {MAX_RECORD_BYTES} bytes; not a run-settings record"
+        )
 
     def no_constant(c):
         raise ValueError(f"JSON constant {c}")
+
     try:
         doc = json.loads(raw.decode("utf-8"), parse_constant=no_constant)
     except (ValueError, RecursionError) as e:
-        raise RunSettingsMismatch(f"{path}: not a readable run-settings record ({type(e).__name__}: {e})") from None
-    if not isinstance(doc, dict) or doc.get("format") != FORMAT or not isinstance(doc.get("settings"), dict):
+        raise RunSettingsMismatch(
+            f"{path}: not a readable run-settings record ({type(e).__name__}: {e})"
+        ) from None
+    if (
+        not isinstance(doc, dict)
+        or doc.get("format") != FORMAT
+        or not isinstance(doc.get("settings"), dict)
+    ):
         raise RunSettingsMismatch(f"{path}: not a {FORMAT} record")
     return doc
 
@@ -103,25 +115,32 @@ def _publish(out_dir, path, doc):
         try:
             os.link(tmp, path)
         except FileExistsError:
-            pass                                    # another process recorded first: verified by the caller
+            pass  # another process recorded first: verified by the caller
     finally:
         os.unlink(tmp)
 
 
 def _holds_files(out_dir, ignore=()):
     """Whether ``out_dir`` holds any file (at any depth; empty directories do not count) besides a record, this
-    module's own temporary files and the top-level entries named in ``ignore``. Stops at the first file found."""
+    module's own temporary files and the top-level entries named in ``ignore``. Stops at the first file found.
+    """
+
     def walk(d, top):
         try:
             with os.scandir(d) as it:
                 for e in it:
-                    if top and (e.name == RUN_SETTINGS_FILE or e.name.startswith(_TMP_PREFIX) or e.name in ignore):
+                    if top and (
+                        e.name == RUN_SETTINGS_FILE
+                        or e.name.startswith(_TMP_PREFIX)
+                        or e.name in ignore
+                    ):
                         continue
                     if not e.is_dir(follow_symlinks=False) or walk(e.path, False):
                         return True
         except FileNotFoundError:
             pass
         return False
+
     return walk(out_dir, True)
 
 
@@ -144,17 +163,25 @@ def record_or_verify(out_dir, settings, info=None, ignore=()):
         if _holds_files(out_dir, ignore) and not os.path.lexists(path):
             raise RunSettingsMismatch(
                 f"{out_dir} holds files but no {RUN_SETTINGS_FILE}: the settings of what it holds are unknown, so a "
-                "run cannot be added to it. Nothing was read or written; use a new output directory.")
+                "run cannot be added to it. Nothing was read or written; use a new output directory."
+            )
         out_dir.mkdir(parents=True, exist_ok=True)
         extra = _canonical(info() if info is not None else {})
-        extra.setdefault("created_utc", datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        extra.setdefault(
+            "created_utc",
+            datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
         _publish(out_dir, path, {"format": FORMAT, "settings": want, "info": extra})
     recorded = read_record(path)["settings"]
     diff = _differences(recorded, want)
     if diff:
-        detail = "; ".join(f"{k}: recorded {_lookup(recorded, k)!r}, this run {_lookup(want, k)!r}" for k in diff[:12])
+        detail = "; ".join(
+            f"{k}: recorded {_lookup(recorded, k)!r}, this run {_lookup(want, k)!r}"
+            for k in diff[:12]
+        )
         more = f" (and {len(diff) - 12} more)" if len(diff) > 12 else ""
         raise RunSettingsMismatch(
             f"{out_dir} holds results made with different settings: {detail}{more}. Nothing was read or written; "
-            "use a new output directory for these settings.")
+            "use a new output directory for these settings."
+        )
     return path

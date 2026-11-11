@@ -15,7 +15,9 @@ Env-gated like the other closure tests. Run:
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
     python -m pytest tests/test_prod_sbc.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import glob
 import os
@@ -35,8 +37,9 @@ EV = f"{REPO}/checkpoints/error_vector.npz"
 _have = os.path.exists(CKPT + ".eqx") and os.path.exists(EV)
 _have_prod = len(glob.glob(PROD + "*.eqx")) >= 2
 gate = pytest.mark.skipif(not _have, reason="final_fold0 / error_vector absent")
-prodgate = pytest.mark.skipif(not (_have and _have_prod),
-                              reason="production ensemble / error_vector absent")
+prodgate = pytest.mark.skipif(
+    not (_have and _have_prod), reason="production ensemble / error_vector absent"
+)
 
 
 @pytest.fixture(scope="module")
@@ -81,8 +84,12 @@ def test_mock_for_index_deterministic_and_shard_invariant(ctx1):
 # ---------------------------------------------------------------------------
 def _fake_record(rng, n_z, L):
     P = 9 + n_z + 3
-    return dict(truth_vec=rng.normal(size=P), draws=rng.normal(size=(L, P)),
-                ll_true=float(rng.normal()), ll_draws=rng.normal(size=L))
+    return dict(
+        truth_vec=rng.normal(size=P),
+        draws=rng.normal(size=(L, P)),
+        ll_true=float(rng.normal()),
+        ll_draws=rng.normal(size=L),
+    )
 
 
 def test_aggregate_leg_a_merges_shards():
@@ -92,8 +99,8 @@ def test_aggregate_leg_a_merges_shards():
     shardA = [_fake_record(rng, n_z, 120) for _ in range(3)]
     shardB = [_fake_record(rng, n_z, 150) for _ in range(2)]
     res = S.aggregate_leg_a(shardA + shardB, n_z, prob=0.95)
-    assert res["ranks"].shape == (5, P + 1), res["ranks"].shape   # 5 kept, P params + loglik
-    assert res["L"] == 120                                        # common L_eff = min over mocks
+    assert res["ranks"].shape == (5, P + 1), res["ranks"].shape  # 5 kept, P params + loglik
+    assert res["L"] == 120  # common L_eff = min over mocks
     assert len(res["names"]) == P + 1
     assert res["gate_valid"] == (120 >= S.L_FLOOR)
     # ranks live in {0..L_eff}
@@ -111,13 +118,24 @@ def test_aggregate_leg_a_uses_record_names_with_metals_column():
     is an off-by-one that IndexErrors in sbc_ranks_multiparam."""
     rng = np.random.default_rng(2)
     n_z = 3
-    P = 9 + n_z + 3 + 1                       # + a_SiIII (the leg-path metals column)
-    names = ([f"p{i}" for i in range(9)] + [f"tau0_z{i}" for i in range(n_z)]
-             + ["alpha_lls", "alpha_subdla", "alpha_dla", "a_SiIII"])
-    recs = [dict(truth_vec=rng.normal(size=P), draws=rng.normal(size=(120, P)),
-                 ll_true=float(rng.normal()), ll_draws=rng.normal(size=120),
-                 names=names, n_div=0) for _ in range(4)]
-    res = S.aggregate_leg_a(recs, n_z, prob=0.95)            # must NOT raise
+    P = 9 + n_z + 3 + 1  # + a_SiIII (the leg-path metals column)
+    names = (
+        [f"p{i}" for i in range(9)]
+        + [f"tau0_z{i}" for i in range(n_z)]
+        + ["alpha_lls", "alpha_subdla", "alpha_dla", "a_SiIII"]
+    )
+    recs = [
+        dict(
+            truth_vec=rng.normal(size=P),
+            draws=rng.normal(size=(120, P)),
+            ll_true=float(rng.normal()),
+            ll_draws=rng.normal(size=120),
+            names=names,
+            n_div=0,
+        )
+        for _ in range(4)
+    ]
+    res = S.aggregate_leg_a(recs, n_z, prob=0.95)  # must NOT raise
     assert res["ranks"].shape == (4, P + 1)
     assert "a_SiIII" in res["names"] and res["names"][-1] == "loglik"
 
@@ -128,8 +146,16 @@ def test_aggregate_leg_a_uses_record_names_with_metals_column():
 @gate
 @pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_run_leg_a_sbc_return_per_mock_shards(ctx1):
-    kept = S.run_leg_a_sbc(ctx1, n_mocks=2, n_warmup=6, n_samples=6, seed=0,
-                           mock_indices=[1], return_per_mock=True, verbose=False)
+    kept = S.run_leg_a_sbc(
+        ctx1,
+        n_mocks=2,
+        n_warmup=6,
+        n_samples=6,
+        seed=0,
+        mock_indices=[1],
+        return_per_mock=True,
+        verbose=False,
+    )
     assert isinstance(kept, list)
     for r in kept:
         for k in ("truth_vec", "draws", "ll_true", "ll_draws"):

@@ -8,19 +8,26 @@ would not error).
 Complements the existing LAW-boundary guard (inference.assert_dndx_law_estimand,
 tests/test_lit_dndx_corrected.py); this file guards the DISPLAY boundary.
 """
+
 import pytest
 
 from hcd_analysis.emulator import lit_dndx
 from hcd_analysis.emulator.inference import HCD_LIT_DNDX_ESTIMAND
 
-
 CLS = ("LLS", "subDLA", "DLA")
 
 
 # ---------------------------------------------------------------- retired names
-@pytest.mark.parametrize("name", ["LIT_TAU2", "LLS_TAU2_COMPILATION",
-                                  "LLS_TAU2_DISPLAY", "lit_points_tau2",
-                                  "lls_tau2_points_for_display"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "LIT_TAU2",
+        "LLS_TAU2_COMPILATION",
+        "LLS_TAU2_DISPLAY",
+        "lit_points_tau2",
+        "lls_tau2_points_for_display",
+    ],
+)
 def test_retired_name_access_raises_tombstone(name):
     with pytest.raises(AttributeError, match="RETIRED"):
         getattr(lit_dndx, name)
@@ -70,13 +77,12 @@ def test_assert_display_estimand_rejects_wrong_and_retired():
     with pytest.raises(AssertionError, match="estimand"):
         lit_dndx.assert_display_estimand("LLS", "binned_19.0_20.3", where="test wrong")
     with pytest.raises(AssertionError, match="RETIRED"):
-        lit_dndx.assert_display_estimand("LLS", "cumulative_tau2_ge17.5",
-                                         where="test retired")
+        lit_dndx.assert_display_estimand("LLS", "cumulative_tau2_ge17.5", where="test retired")
 
 
-@pytest.mark.parametrize("bad", [r"$\tau_{\rm LL}\geq 2$ systems",
-                                 "tau_LL >= 2 (cumulative)",
-                                 "tau912>=2 compilation"])
+@pytest.mark.parametrize(
+    "bad", [r"$\tau_{\rm LL}\geq 2$ systems", "tau_LL >= 2 (cumulative)", "tau912>=2 compilation"]
+)
 def test_assert_display_labels_rejects_retired_tokens(bad):
     lab = dict(lit_dndx.ESTIMAND_LABEL)
     lab["LLS"] = bad

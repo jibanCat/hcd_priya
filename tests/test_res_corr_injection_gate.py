@@ -38,12 +38,12 @@ but in FIXED-reference units instead of the per-record bias_z):
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python -m pytest tests/test_res_corr_injection_gate.py -q
 """
+
 import importlib.util
 import os
 
 import numpy as np
 import pytest
-
 
 # The estimator lives in a SCRIPT (scripts/analyze_res_corr_injection.py), not an importable
 # package module -- load it by path so the test does not depend on scripts/ being on sys.path.
@@ -57,14 +57,16 @@ def _load_gate_fn():
     if spec is None or not os.path.exists(_SCRIPT):
         raise FileNotFoundError(
             f"{_SCRIPT} not yet implemented (CS partner Task 2.1). "
-            f"Expected a pure paired_injection_gate(clean_means, inj_means, sigma_ref).")
+            f"Expected a pure paired_injection_gate(clean_means, inj_means, sigma_ref)."
+        )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     if not hasattr(mod, "paired_injection_gate"):
         raise AttributeError(
             "scripts/analyze_res_corr_injection.py must expose paired_injection_gate("
             "clean_means, inj_means, sigma_ref) -> dict(delta_mean, delta_se, stat, "
-            "sigma_ref, passed).")
+            "sigma_ref, passed)."
+        )
     return mod.paired_injection_gate
 
 
@@ -86,7 +88,7 @@ def _paired_means(n, *, offset=0.0, shared_sd=0.20, indep_sd=0.01, seed=0):
     offset    : a systematic shift applied to the injected arm only (the leaked bias to detect).
     """
     rng = np.random.default_rng(seed)
-    shared = rng.normal(0.0, shared_sd, n)             # per-mock truth+noise realization
+    shared = rng.normal(0.0, shared_sd, n)  # per-mock truth+noise realization
     clean = shared + rng.normal(0.0, indep_sd, n)
     inj = shared + offset + rng.normal(0.0, indep_sd, n)
     return clean, inj
@@ -98,14 +100,14 @@ def _paired_means(n, *, offset=0.0, shared_sd=0.20, indep_sd=0.01, seed=0):
 def test_clean_pairs_stat_zero_and_pass():
     gate = _load_gate_fn()
     rng = np.random.default_rng(1)
-    means = rng.normal(0.0, 0.2, 12)                   # arbitrary post means
-    sigma_ref = 0.01                                   # a tight fixed yardstick
+    means = rng.normal(0.0, 0.2, 12)  # arbitrary post means
+    sigma_ref = 0.01  # a tight fixed yardstick
     out = gate(means.copy(), means.copy(), sigma_ref)  # inj IS clean -> every Delta == 0
     assert out["delta_mean"] == pytest.approx(0.0, abs=1e-12)
     assert out["delta_se"] == pytest.approx(0.0, abs=1e-12)
     assert out["stat"] == pytest.approx(0.0, abs=1e-12)
     assert out["sigma_ref"] == pytest.approx(sigma_ref)
-    assert out["passed"] is True                       # 0 < 0.3*sigma_ref for any sigma_ref>0
+    assert out["passed"] is True  # 0 < 0.3*sigma_ref for any sigma_ref>0
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -115,7 +117,7 @@ def test_clean_pairs_stat_zero_and_pass():
 def test_biased_pairs_exceed_threshold_and_fail():
     gate = _load_gate_fn()
     sigma_ref = 0.01
-    offset = 0.5 * sigma_ref                            # half a sigma_ref leak
+    offset = 0.5 * sigma_ref  # half a sigma_ref leak
     clean, inj = _paired_means(16, offset=offset, shared_sd=0.20, indep_sd=1e-4, seed=2)
     out = gate(clean, inj, sigma_ref)
     # mean Delta ~ +0.5*sigma_ref; |mean|+2SE must be > 0.3*sigma_ref -> FAIL
@@ -136,8 +138,8 @@ def test_gates_in_fixed_reference_units_not_inflated_sd():
     offset = 0.5 * sigma_ref
     clean, inj = _paired_means(16, offset=offset, shared_sd=0.20, indep_sd=1e-4, seed=3)
 
-    out_true = gate(clean, inj, sigma_ref)             # the honest, alpha-FIXED yardstick
-    out_infl = gate(clean, inj, 1.4 * sigma_ref)       # an alpha-INFLATED yardstick (the trap)
+    out_true = gate(clean, inj, sigma_ref)  # the honest, alpha-FIXED yardstick
+    out_infl = gate(clean, inj, 1.4 * sigma_ref)  # an alpha-INFLATED yardstick (the trap)
 
     # Delta and stat depend ONLY on the means -> identical regardless of sigma_ref.
     assert out_infl["delta_mean"] == pytest.approx(out_true["delta_mean"], abs=0, rel=0)
@@ -160,7 +162,7 @@ def test_gates_in_fixed_reference_units_not_inflated_sd():
 def test_paired_se_much_smaller_than_unpaired():
     gate = _load_gate_fn()
     n = 16
-    shared_sd, indep_sd = 0.30, 0.01                   # big shared noise, tiny arm jitter
+    shared_sd, indep_sd = 0.30, 0.01  # big shared noise, tiny arm jitter
     clean, inj = _paired_means(n, offset=0.0, shared_sd=shared_sd, indep_sd=indep_sd, seed=4)
     out = gate(clean, inj, sigma_ref=0.01)
 
@@ -214,23 +216,27 @@ def _load_module():
 def test_fres_ftag_glob_reads_f_arms_not_bare(tmp_path):
     mod = _load_module()
     d = str(tmp_path)
-    for stem in ("RCINJD_clean972", "RCINJD_inj972"):        # bare-D (no f_res) arm, 2 chains
+    for stem in ("RCINJD_clean972", "RCINJD_inj972"):  # bare-D (no f_res) arm, 2 chains
         for c in (0, 1):
             open(os.path.join(d, f"{stem}_c{c}.npz"), "w").close()
-    for stem in ("RCINJDF_clean920", "RCINJDF_inj920"):      # f_res 'DF' arm, 2 chains
+    for stem in ("RCINJDF_clean920", "RCINJDF_inj920"):  # f_res 'DF' arm, 2 chains
         for c in (0, 1):
             open(os.path.join(d, f"{stem}_c{c}.npz"), "w").close()
-    bare = mod._mock_ids_for_survey("DESI", d)               # default tag 'D' -> non-fres only
+    bare = mod._mock_ids_for_survey("DESI", d)  # default tag 'D' -> non-fres only
     assert set(bare) == {"RCINJD_clean972", "RCINJD_inj972"}
-    fres = mod._mock_ids_for_survey("DESI", d, tag="DF")     # 'DF' -> f_res only (was {} before fix)
+    fres = mod._mock_ids_for_survey("DESI", d, tag="DF")  # 'DF' -> f_res only (was {} before fix)
     assert set(fres) == {"RCINJDF_clean920", "RCINJDF_inj920"}
-    assert not (set(bare) & set(fres))                       # disjoint globs, no cross-contamination
+    assert not (set(bare) & set(fres))  # disjoint globs, no cross-contamination
 
 
 if __name__ == "__main__":
     # Allow a quick `python tests/test_res_corr_injection_gate.py` smoke run.
-    for fn in (test_clean_pairs_stat_zero_and_pass, test_biased_pairs_exceed_threshold_and_fail,
-               test_gates_in_fixed_reference_units_not_inflated_sd,
-               test_paired_se_much_smaller_than_unpaired, test_threshold_sense_strict_less_than):
+    for fn in (
+        test_clean_pairs_stat_zero_and_pass,
+        test_biased_pairs_exceed_threshold_and_fail,
+        test_gates_in_fixed_reference_units_not_inflated_sd,
+        test_paired_se_much_smaller_than_unpaired,
+        test_threshold_sense_strict_less_than,
+    ):
         fn()
     print("[res_corr-injection-gate] all tests OK")

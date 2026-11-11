@@ -10,6 +10,7 @@ original PRIYA ranges on herei/heref/alphaq while KEEPING n_s extended. This pin
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python -m pytest tests/test_sampling_box_restriction.py -q
 """
+
 import os
 import numpy as np
 import pytest
@@ -25,8 +26,12 @@ _DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
 
 # original PRIYA (coarse_grid.py defaults) for the IGM params we restrict
 _ORIG = {"herei": (3.5, 4.1), "heref": (2.6, 3.2), "alphaq": (1.3, 2.5)}
-_IDX = {n: i for i, n in enumerate(("ns", "Ap", "herei", "heref", "alphaq",
-                                    "hub", "omegamh2", "hireionz", "bhfeedback"))}
+_IDX = {
+    n: i
+    for i, n in enumerate(
+        ("ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2", "hireionz", "bhfeedback")
+    )
+}
 
 
 def test_sampling_limits_restrict_igm_keep_ns_extended():
@@ -61,7 +66,9 @@ def test_unit_bounds_values():
     np.testing.assert_allclose(C._THETA_UNIT_HI, hi)
 
 
-@pytest.mark.skipif(not os.path.exists(_DESI_NPZ), reason="DESI DR1 npz not present (set HCD_P1D_DATA_DIR)")
+@pytest.mark.skipif(
+    not os.path.exists(_DESI_NPZ), reason="DESI DR1 npz not present (set HCD_P1D_DATA_DIR)"
+)
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_prior_predictive_inside_original_priya_box():
     """Prior-predictive draws from the production model land inside the original PRIYA IGM box
@@ -73,12 +80,13 @@ def test_prior_predictive_inside_original_priya_box():
     ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "DESI"])
     pred = Predictive(C._legb_priors_only, num_samples=2000)
     draws = pred(jax.random.PRNGKey(0), ctx)
-    tu = np.asarray(draws["theta_unit"])              # (2000, 9), unit cube
+    tu = np.asarray(draws["theta_unit"])  # (2000, 9), unit cube
     phys = D.PARAM_LIMITS[:, 0] + tu * (D.PARAM_LIMITS[:, 1] - D.PARAM_LIMITS[:, 0])  # -> physical
     for name, (lo, hi) in _ORIG.items():
         col = phys[:, _IDX[name]]
-        assert col.min() >= lo - 1e-9 and col.max() <= hi + 1e-9, (
-            f"{name} prior draws [{col.min():.3f},{col.max():.3f}] escape original PRIYA [{lo},{hi}]")
+        assert (
+            col.min() >= lo - 1e-9 and col.max() <= hi + 1e-9
+        ), f"{name} prior draws [{col.min():.3f},{col.max():.3f}] escape original PRIYA [{lo},{hi}]"
     # n_s still reaches the extended ridge (> original 0.995) — KEEP extended, do not clip
     ns = phys[:, _IDX["ns"]]
     assert ns.max() > 0.995, "n_s prior should still reach the extended ridge (>0.995)"

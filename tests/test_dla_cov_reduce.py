@@ -25,6 +25,7 @@ Tests (PI requirements, verbatim list):
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python -m pytest tests/test_dla_cov_reduce.py -q
 """
+
 import os
 
 import hcd_analysis.emulator  # noqa: F401  enables jax_enable_x64 before jax arrays
@@ -42,16 +43,28 @@ _have_desi = os.path.exists(DESI_NPZ)
 _LAB2KEY = {
     "E_DLA_COMPLETENESS": "syst_e_dla_completeness",
     "E_BAL_COMPLETENESS": "syst_e_bal_completeness",
-    "E_RESOLUTION":       "syst_e_resolution",
-    "E_CONTINUUM":        "syst_e_continuum",
-    "E_CONTINUUM_ADD":    "syst_e_continuum_add",
-    "E_NOISE_SCALE":      "syst_e_noise_scale",
-    "E_NOISE_ADD":        "syst_e_noise_add",
+    "E_RESOLUTION": "syst_e_resolution",
+    "E_CONTINUUM": "syst_e_continuum",
+    "E_CONTINUUM_ADD": "syst_e_continuum_add",
+    "E_NOISE_SCALE": "syst_e_noise_scale",
+    "E_NOISE_ADD": "syst_e_noise_add",
 }
-_SYS_LABELS = ["E_DLA_COMPLETENESS", "E_BAL_COMPLETENESS", "E_RESOLUTION",
-               "E_CONTINUUM", "E_CONTINUUM_ADD", "E_NOISE_SCALE", "E_NOISE_ADD"]
-_CORR_FID = ["E_DLA_COMPLETENESS", "E_BAL_COMPLETENESS", "E_RESOLUTION",
-             "E_CONTINUUM", "E_NOISE_SCALE"]
+_SYS_LABELS = [
+    "E_DLA_COMPLETENESS",
+    "E_BAL_COMPLETENESS",
+    "E_RESOLUTION",
+    "E_CONTINUUM",
+    "E_CONTINUUM_ADD",
+    "E_NOISE_SCALE",
+    "E_NOISE_ADD",
+]
+_CORR_FID = [
+    "E_DLA_COMPLETENESS",
+    "E_BAL_COMPLETENESS",
+    "E_RESOLUTION",
+    "E_CONTINUUM",
+    "E_NOISE_SCALE",
+]
 _UCORR = ["E_NOISE_ADD", "E_CONTINUUM_ADD"]
 # cup1d data_DESIY1.compute_cov type_analysis="red" (the DEFAULT cosmology-fit covariance):
 # E_DLA_COMPLETENESS and E_RESOLUTION are dropped from the correlated set.
@@ -67,7 +80,7 @@ def _compute_cov_cup1d(z_col, syst_vecs, corr_labels, ucorr_labels):
     for lab in _SYS_LABELS:
         v = syst_vecs[lab]
         if lab in ucorr_labels:
-            C[diag] += v ** 2
+            C[diag] += v**2
         elif lab in corr_labels:
             for z in zz_unique:
                 ind = np.argwhere(z_col == z)[:, 0]
@@ -81,8 +94,12 @@ def _npz_and_keep():
     z_all = np.asarray(d["z"], float)
     k_all = np.asarray(d["k"], float)
     R_row = DL.desi_resolution_R(z_all)
-    keep = ((z_all >= 2.2 - 1e-6) & (z_all <= 4.2 + 1e-6)
-            & (k_all > DL.DESI_KMIN) & (k_all < 0.5 * np.pi / R_row))
+    keep = (
+        (z_all >= 2.2 - 1e-6)
+        & (z_all <= 4.2 + 1e-6)
+        & (k_all > DL.DESI_KMIN)
+        & (k_all < 0.5 * np.pi / R_row)
+    )
     return d, z_all, k_all, np.where(keep)[0]
 
 
@@ -115,9 +132,12 @@ def test_fid_rebuild_matches_shipped_on_kept_grid():
     d, z_all, k_all, idx = _npz_and_keep()
     syst = {lab: np.asarray(d[_LAB2KEY[lab]], float) for lab in _SYS_LABELS}
     cov_fid = np.asarray(d["cov_stat"], float) + _compute_cov_cup1d(z_all, syst, _CORR_FID, _UCORR)
-    np.testing.assert_allclose(cov_fid[np.ix_(idx, idx)],
-                               np.asarray(d["cov"], float)[np.ix_(idx, idx)],
-                               rtol=1e-12, atol=1e-18)
+    np.testing.assert_allclose(
+        cov_fid[np.ix_(idx, idx)],
+        np.asarray(d["cov"], float)[np.ix_(idx, idx)],
+        rtol=1e-12,
+        atol=1e-18,
+    )
 
 
 @pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
@@ -129,14 +149,16 @@ def test_reduced_equals_cup1d_red_build():
     diagonal term cup1d omits.)"""
     d, z_all, k_all, idx = _npz_and_keep()
     syst = {lab: np.asarray(d[_LAB2KEY[lab]], float) for lab in _SYS_LABELS}
-    cup1d_red = np.asarray(d["cov_stat"], float) + _compute_cov_cup1d(z_all, syst, _CORR_RED, _UCORR)
+    cup1d_red = np.asarray(d["cov_stat"], float) + _compute_cov_cup1d(
+        z_all, syst, _CORR_RED, _UCORR
+    )
 
     leg = DL.load_desi_leg(resolution_float=True, add_cov_diag_inflation=False, dla_cov_reduce=True)
     ours = np.asarray(leg.C_data, float)
     theirs = cup1d_red[np.ix_(idx, idx)]
     assert ours.shape == theirs.shape, "post-cut grid size mismatch"
     np.testing.assert_allclose(ours, theirs, rtol=1e-10, atol=1e-12)
-    assert np.max(np.abs(ours - theirs)) < 1e-11        # tight, not just within tolerance
+    assert np.max(np.abs(ours - theirs)) < 1e-11  # tight, not just within tolerance
     np.linalg.cholesky(ours)
     np.linalg.cholesky(theirs)
     assert np.linalg.eigvalsh(ours).min() > 0.0
@@ -189,8 +211,9 @@ def test_reduced_symmetric_spd_cholesky_every_z(inflation):
     """The deployed reduced covariance (resolution_float + dla_cov_reduce) is symmetric, SPD, and
     Cholesky-decomposable both as a whole and within every z block, with AND without the diagonal
     inflation (the no-inflation case is the conservative numerical check at z=4.0/4.2)."""
-    leg = DL.load_desi_leg(resolution_float=True, add_cov_diag_inflation=inflation,
-                           dla_cov_reduce=True)
+    leg = DL.load_desi_leg(
+        resolution_float=True, add_cov_diag_inflation=inflation, dla_cov_reduce=True
+    )
     C = np.asarray(leg.C_data, float)
     # the SHIPPED cov is itself asymmetric at ~1e-8 (a property of the released FITS, measured
     # max|cov-cov.T| = 1.0e-8); the surgery subtracts exactly-symmetric outers, so it must NOT
@@ -206,7 +229,7 @@ def test_reduced_symmetric_spd_cholesky_every_z(inflation):
     for i, zz in enumerate(np.asarray(leg.z)):
         rows = np.where(z_idx == i)[0]
         blk = C[np.ix_(rows, rows)]
-        np.linalg.cholesky(blk)                                  # per-z SPD (incl. z=4.0, 4.2)
+        np.linalg.cholesky(blk)  # per-z SPD (incl. z=4.0, 4.2)
         assert np.linalg.eigvalsh(blk).min() > 0.0, f"non-SPD z block at z={zz}"
 
 
@@ -227,9 +250,19 @@ def test_modeled_in_mean_invariant_raises_when_dla_forward_off():
     keep = np.ones(n_z * n_k, bool)
     e = np.full(n_z * n_k, 1e-3)
     with pytest.raises(ValueError, match="dla_forward_frac"):
-        DL._assemble_leg("DESI", z_all, k_all, P_all, cov_all, keep,
-                         R_func=DL.desi_resolution_R, metals_on=True, resolution_on=False,
-                         dla_forward_frac=0.0, dla_e=e)
+        DL._assemble_leg(
+            "DESI",
+            z_all,
+            k_all,
+            P_all,
+            cov_all,
+            keep,
+            R_func=DL.desi_resolution_R,
+            metals_on=True,
+            resolution_on=False,
+            dla_forward_frac=0.0,
+            dla_e=e,
+        )
 
 
 def test_forward_signature_sensitive_to_dla_cov_reduce(monkeypatch):
@@ -237,12 +270,13 @@ def test_forward_signature_sensitive_to_dla_cov_reduce(monkeypatch):
     review MINOR-1): a refactor dropping DESI_DLA_COV_REDUCE from the forward_signature payload
     would silently un-freeze the decision from analysis.lock."""
     import hcd_analysis.emulator.closure_legb as CL
+
     sig_on = CL.forward_signature()
     monkeypatch.setattr(DL, "DESI_DLA_COV_REDUCE", False)
     sig_off = CL.forward_signature()
     assert sig_on != sig_off, "forward_signature blind to DESI_DLA_COV_REDUCE"
     monkeypatch.undo()
-    assert CL.forward_signature() == sig_on            # deterministic + restored
+    assert CL.forward_signature() == sig_on  # deterministic + restored
 
 
 @pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
@@ -254,7 +288,9 @@ def test_optout_byte_identical_to_pre_change_behavior():
     corr_nores = [c for c in _CORR_FID if c != "E_RESOLUTION"]
     old = np.asarray(d["cov_stat"], float) + _compute_cov_cup1d(z_all, syst, corr_nores, _UCORR)
 
-    leg = DL.load_desi_leg(resolution_float=True, add_cov_diag_inflation=False,
-                           dla_cov_reduce=False)
-    np.testing.assert_allclose(np.asarray(leg.C_data, float), old[np.ix_(idx, idx)],
-                               rtol=1e-10, atol=1e-12)
+    leg = DL.load_desi_leg(
+        resolution_float=True, add_cov_diag_inflation=False, dla_cov_reduce=False
+    )
+    np.testing.assert_allclose(
+        np.asarray(leg.C_data, float), old[np.ix_(idx, idx)], rtol=1e-10, atol=1e-12
+    )

@@ -1,7 +1,9 @@
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import h5py, numpy as np
 from tests.emulator._fixture import write_synthetic_cache
+
 
 def test_fixture_is_valid_v33(tmp_path):
     path = tmp_path / "obs.h5"
@@ -10,51 +12,58 @@ def test_fixture_is_valid_v33(tmp_path):
         assert h.attrs["cache_version"] == "3.3"
         R = h["P_tier_p"].shape[0]
         assert R == 3 * 2 * 4
-        cnt = h["tier_c_counts"][:].astype(float)          # (R,15)
-        Pf = h["P_tier_c_filtered"][:]                      # (R,15,n_k)
-        Pp = h["P_tier_p"][:]                               # (R,n_k)
+        cnt = h["tier_c_counts"][:].astype(float)  # (R,15)
+        Pf = h["P_tier_c_filtered"][:]  # (R,15,n_k)
+        Pp = h["P_tier_p"][:]  # (R,n_k)
         w = cnt / cnt.sum(1, keepdims=True)
         recon = np.einsum("rc,rck->rk", w, Pf)
         ok = np.isfinite(Pp)
         assert np.allclose(recon[ok], Pp[ok], rtol=0, atol=1e-12)
         assert np.isnan(Pp).any()
 
+
 from hcd_analysis.emulator.data import load_cache_historical, COARSE_SLICES, _collapse_p1d
+
 
 def test_empty_class_collapses_to_zero_not_nan():
     # Only the clean class (fine bin 0) is populated; LLS/subDLA/DLA are empty.
     counts15 = np.zeros((1, 15), dtype=np.int64)
     counts15[0, 0] = 100
-    p15 = np.zeros((1, 15, 4))                     # finite zeros (cache convention)
-    out = _collapse_p1d(p15, counts15)             # (1, 4, 4)
+    p15 = np.zeros((1, 15, 4))  # finite zeros (cache convention)
+    out = _collapse_p1d(p15, counts15)  # (1, 4, 4)
     # Empty LLS class -> 0.0 and finite, NOT NaN (would poison structural sum).
     assert np.isfinite(out[0, 1]).all()
     assert np.allclose(out[0, 1], 0.0)
     # Genuine all-NaN segment (above native Nyquist) -> NaN, for masking.
     p15b = p15.copy()
-    p15b[0, 0, :] = np.nan                          # clean class entirely NaN
+    p15b[0, 0, :] = np.nan  # clean class entirely NaN
     outb = _collapse_p1d(p15b, counts15)
     assert np.isnan(outb[0, 0]).all()
 
+
 def test_load_collapses_15_to_4_and_builds_tau0_masks_weights(tmp_path):
-    path = tmp_path / "obs.h5"; write_synthetic_cache(path, n_k=8)
-    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
+    path = tmp_path / "obs.h5"
+    write_synthetic_cache(path, n_k=8)
+    d = load_cache_historical(path, reason="test: a cache in the pre-lineage 3.3 format")
     R = d["P_tier_p"].shape[0]
     assert d["P_filt"].shape == (R, 4, 8)
     assert d["delta"].shape == (R, 3, 8)
     assert np.allclose(d["tau0"], -np.log(d["target_F"]))
-    assert COARSE_SLICES == (slice(0,1), slice(1,8), slice(8,13), slice(13,15))
+    assert COARSE_SLICES == (slice(0, 1), slice(1, 8), slice(8, 13), slice(13, 15))
     assert d["mask"].shape == (R, 8)
     assert d["mask"].dtype == bool
     assert (d["mask"] == np.isfinite(d["P_tier_p"])).all()
     assert d["inv_nc"].shape == (R, 4)
     assert np.all(np.isfinite(d["inv_nc"]))
 
+
 from hcd_analysis.emulator.data import signed_log, signed_log_inv, fit_norm, apply_norm
+
 
 def test_signed_log_roundtrip_through_zero():
     x = np.array([-5.0, -1e-9, 0.0, 1e-9, 3.0])
     assert np.allclose(signed_log_inv(signed_log(x)), x, atol=1e-12)
+
 
 def test_norm_uses_only_train_rows():
     x = np.arange(20.0).reshape(10, 2)
@@ -82,9 +91,9 @@ def test_fit_norm_relative_std_floor_lifts_collapsed_columns():
     # the collapsed column's std is lifted to the relative floor (1% of the
     # median over the populated columns), well above its raw ~1e-7.
     median_std = float(np.median(base["std"]))
-    assert base["std"][0] < 1e-5                       # raw std is collapsed
+    assert base["std"][0] < 1e-5  # raw std is collapsed
     assert floored["std"][0] >= 0.01 * median_std * (1 - 1e-9)
-    assert floored["std"][0] > base["std"][0] * 100    # genuinely raised
+    assert floored["std"][0] > base["std"][0] * 100  # genuinely raised
     # well-conditioned columns (std >> floor) are untouched, bit-for-bit
     wc = base["std"] > 10 * 0.01 * median_std
     assert wc.sum() >= 3
@@ -92,16 +101,19 @@ def test_fit_norm_relative_std_floor_lifts_collapsed_columns():
     assert np.array_equal(floored["mean"], base["mean"])  # mean never touched
 
     # a normal off-train sample standardizes sanely under the floor (no blow-up).
-    probe = np.zeros(n_cols)                            # ~3.5e6 sigma raw on col 0
+    probe = np.zeros(n_cols)  # ~3.5e6 sigma raw on col 0
     z_raw = np.abs((probe - base["mean"]) / base["std"])[0]
     z_floored = np.abs((probe - floored["mean"]) / floored["std"])[0]
     assert z_raw > 1e4 and z_floored < 1e3 and z_floored < z_raw
 
+
 from hcd_analysis.emulator.data import kfold_loso, tau0_edge_holdout
 
+
 def test_kfold_loso_every_sim_held_once(tmp_path):
-    path = tmp_path / "obs.h5"; write_synthetic_cache(path, n_sims=6, snaps_per_sim=2, n_alpha=4)
-    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
+    path = tmp_path / "obs.h5"
+    write_synthetic_cache(path, n_sims=6, snaps_per_sim=2, n_alpha=4)
+    d = load_cache_historical(path, reason="test: a cache in the pre-lineage 3.3 format")
     folds = kfold_loso(d["sim_name"], n_folds=3)
     held = set()
     for tr, va in folds:
@@ -109,9 +121,11 @@ def test_kfold_loso_every_sim_held_once(tmp_path):
         held |= set(d["sim_name"][va])
     assert held == set(d["sim_name"])
 
+
 def test_tau0_edge_holdout_picks_extremes(tmp_path):
-    path = tmp_path / "obs.h5"; write_synthetic_cache(path, n_sims=4, snaps_per_sim=3, n_alpha=4)
-    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
+    path = tmp_path / "obs.h5"
+    write_synthetic_cache(path, n_sims=4, snaps_per_sim=3, n_alpha=4)
+    d = load_cache_historical(path, reason="test: a cache in the pre-lineage 3.3 format")
     tr, ho = tau0_edge_holdout(d["tau0"], frac=0.2)
     assert d["tau0"][ho].min() <= d["tau0"][tr].min()
     assert d["tau0"][ho].max() >= d["tau0"][tr].max()
@@ -125,7 +139,7 @@ def test_make_splits_holdout_disjoint_from_train_and_val(tmp_path):
     union covers all rows; LOSO (no sim straddles train/val)."""
     path = tmp_path / "obs.h5"
     write_synthetic_cache(path, n_sims=8, snaps_per_sim=2, n_alpha=4)
-    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
+    d = load_cache_historical(path, reason="test: a cache in the pre-lineage 3.3 format")
     n_rows = len(d["tau0"])
     for fold in range(8):
         tr, va, ho = make_splits(d, fold, n_folds=8, holdout_frac=0.15)
@@ -146,13 +160,12 @@ import pytest
 _REAL_LF_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 
 
-@pytest.mark.skipif(not os.path.exists(_REAL_LF_CACHE),
-                    reason="real merged LF cache not present")
+@pytest.mark.skipif(not os.path.exists(_REAL_LF_CACHE), reason="real merged LF cache not present")
 def test_make_splits_disjoint_on_real_lf_cache():
     """A-list referee guard: run make_splits' disjointness/LOSO/union invariants on
     the REAL merged LF cache (not just the synthetic fixture), since the production
     sweep splits this exact cache. Spot-checks a few folds across the LOSO set."""
-    d = load_cache_historical(_REAL_LF_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
+    d = load_cache_historical(_REAL_LF_CACHE, reason="test: a cache in the pre-lineage 3.3 format")
     n_rows = len(d["tau0"])
     n_folds = len(kfold_loso(d["sim_name"], n_folds=8))
     for fold in (0, n_folds // 2, n_folds - 1):
@@ -170,14 +183,16 @@ def test_make_splits_matches_inline_cli_logic(tmp_path):
     """make_splits reproduces the old inline tau0-holdout x LOSO composition."""
     path = tmp_path / "obs.h5"
     write_synthetic_cache(path, n_sims=6, snaps_per_sim=2, n_alpha=4)
-    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
+    d = load_cache_historical(path, reason="test: a cache in the pre-lineage 3.3 format")
     fold, n_folds, frac = 1, 4, 0.15
     # old inline logic
     tr_pool, holdout = tau0_edge_holdout(d["tau0"], frac=frac)
-    pool_mask = np.zeros(len(d["tau0"]), bool); pool_mask[tr_pool] = True
+    pool_mask = np.zeros(len(d["tau0"]), bool)
+    pool_mask[tr_pool] = True
     folds = kfold_loso(d["sim_name"], n_folds=n_folds)
     tr0, va0 = folds[fold]
-    tr0 = tr0[pool_mask[tr0]]; va0 = va0[pool_mask[va0]]
+    tr0 = tr0[pool_mask[tr0]]
+    va0 = va0[pool_mask[va0]]
     # new helper
     tr1, va1, ho1 = make_splits(d, fold, n_folds=n_folds, holdout_frac=frac)
     assert np.array_equal(np.sort(tr0), np.sort(tr1))
@@ -192,7 +207,7 @@ def test_valid_target_mask_shared(tmp_path):
     """M2: make_batch's f_nhi/dndx mask == fit_target_norm's masking predicate
     (both go through the single _valid_target_mask helper)."""
     d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
-    d["snap_f_nhi"][:, 0] = 0.0        # structural zero -> invalid
+    d["snap_f_nhi"][:, 0] = 0.0  # structural zero -> invalid
     R = d["x"].shape[0]
     norm = fit_target_norm(d, np.arange(R))
     idx = np.arange(R)
@@ -202,19 +217,24 @@ def test_valid_target_mask_shared(tmp_path):
     assert np.array_equal(b["t_f_nhi_mask"], _valid_target_mask(d["snap_f_nhi"][grp]))
     assert np.array_equal(b["t_dndx_mask"], _valid_target_mask(d["snap_dNdX"][grp]))
     # and the helper is the one fit_target_norm uses for f_nhi/dndx validity
-    assert np.array_equal(_valid_target_mask(d["snap_f_nhi"]),
-                          np.isfinite(d["snap_f_nhi"]) & (d["snap_f_nhi"] > 0))
+    assert np.array_equal(
+        _valid_target_mask(d["snap_f_nhi"]), np.isfinite(d["snap_f_nhi"]) & (d["snap_f_nhi"] > 0)
+    )
+
 
 from hcd_analysis.emulator.data import PARAM_LIMITS, normalize_params
+
 
 def test_param_limits_cover_nine_params_in_cache_order():
     # PARAM_LIMITS is (9,2) lo/hi aligned to the cache param order
     assert PARAM_LIMITS.shape == (9, 2)
     assert np.all(PARAM_LIMITS[:, 1] > PARAM_LIMITS[:, 0])
 
+
 def test_normalize_params_maps_to_unit_cube(tmp_path):
-    path = tmp_path / "obs.h5"; write_synthetic_cache(path)   # fixture params are uniform(0.5,1.5)
-    d = load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
+    path = tmp_path / "obs.h5"
+    write_synthetic_cache(path)  # fixture params are uniform(0.5,1.5)
+    d = load_cache_historical(path, reason="test: a cache in the pre-lineage 3.3 format")
     # load_cache must now expose normalized model input x = [params_unit (9), z_unit (1)]
     assert "x" in d and d["x"].shape == (d["params"].shape[0], 10)
     # real-cache params (when in-domain) normalize into [0,1]; synthetic may be out-of-domain ->
@@ -228,21 +248,26 @@ def test_normalize_params_maps_to_unit_cube(tmp_path):
 
 # --- A1: make_batch target-transform + train-split normalization --------------
 from hcd_analysis.emulator.data import (
-    fit_target_norm, make_batch, untransform_prediction, safe_log,
-    fit_baseline_residual_norm, reconstruct_P_filt, cell_id,
+    fit_target_norm,
+    make_batch,
+    untransform_prediction,
+    safe_log,
+    fit_baseline_residual_norm,
+    reconstruct_P_filt,
+    cell_id,
 )
 
 
 def _load_fixture(tmp_path, **kw):
     path = tmp_path / "obs.h5"
     write_synthetic_cache(path, **kw)
-    return load_cache_historical(path, reason='test: a cache in the pre-lineage 3.3 format')
+    return load_cache_historical(path, reason="test: a cache in the pre-lineage 3.3 format")
 
 
 def test_make_batch_keys_and_shapes(tmp_path):
     d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
     R = d["x"].shape[0]
-    train_idx = np.arange(R)[: R - 4]            # hold out the last snap-block's alphas
+    train_idx = np.arange(R)[: R - 4]  # hold out the last snap-block's alphas
     norm = fit_target_norm(d, train_idx)
     idx = np.array([0, 1, 5, 9, 13])
     b = make_batch(d, idx, norm)
@@ -263,8 +288,18 @@ def test_make_batch_keys_and_shapes(tmp_path):
     assert b["inv_nalpha"].shape == (n,)
     assert b["mean_F_clean"].shape == (n,)
     # all float64
-    for k in ("x", "tau0", "t_f_nhi", "t_dndx", "t_p_base", "t_p_resid", "t_delta",
-              "inv_nc", "inv_nalpha", "mean_F_clean"):
+    for k in (
+        "x",
+        "tau0",
+        "t_f_nhi",
+        "t_dndx",
+        "t_p_base",
+        "t_p_resid",
+        "t_delta",
+        "inv_nc",
+        "inv_nalpha",
+        "mean_F_clean",
+    ):
         assert b[k].dtype == np.float64, k
     # x must be the unit-cube input untouched
     assert np.allclose(b["x"], d["x"][idx])
@@ -282,10 +317,11 @@ def test_edge_emphasis_k_weight_shape_and_profile():
     """edge_emphasis_k_weight: mean-1 over finite bins, U-shaped (edges > mid in log k),
     all-ones when both gains are 0, and a noop on non-finite/zero k bins."""
     from hcd_analysis.emulator.data import edge_emphasis_k_weight
+
     kf = np.geomspace(4e-4, 7e-2, 172)
     w = edge_emphasis_k_weight(kf, edge_gain=3.0, lowk_extra=2.0)
     assert w.shape == kf.shape
-    assert np.isclose(w.mean(), 1.0, atol=1e-12)         # mean-1 normalization
+    assert np.isclose(w.mean(), 1.0, atol=1e-12)  # mean-1 normalization
     # both EDGES out-weight the geometric-centre bin (U-shape in log k)
     mid = int(np.argmin(np.abs(np.log10(kf) - np.log10(np.sqrt(kf[0] * kf[-1])))))
     assert w[0] > w[mid] and w[-1] > w[mid]
@@ -295,7 +331,9 @@ def test_edge_emphasis_k_weight_shape_and_profile():
     w0 = edge_emphasis_k_weight(kf, edge_gain=0.0, lowk_extra=0.0)
     assert np.allclose(w0, 1.0)
     # non-finite / zero k bins fall back to weight 1
-    kbad = kf.copy(); kbad[3] = np.nan; kbad[7] = 0.0
+    kbad = kf.copy()
+    kbad[3] = np.nan
+    kbad[7] = 0.0
     wb = edge_emphasis_k_weight(kbad, edge_gain=3.0, lowk_extra=2.0)
     assert wb[3] == 1.0 and wb[7] == 1.0
 
@@ -325,8 +363,12 @@ def test_target_norm_roundtrip_to_physical(tmp_path):
     norm = fit_target_norm(d, np.arange(R))
     # raw delta transform round-trip is exact (delta keeps the flat-norm path)
     from hcd_analysis.emulator.data import (
-        signed_log, signed_log_inv, apply_norm, invert_norm,
+        signed_log,
+        signed_log_inv,
+        apply_norm,
+        invert_norm,
     )
+
     Dl = d["delta"][:5]
     zd = apply_norm(signed_log(Dl), norm["delta"])
     Drt = signed_log_inv(invert_norm(zd, norm["delta"]))
@@ -336,9 +378,13 @@ def test_target_norm_roundtrip_to_physical(tmp_path):
     # and delta from standardized targets.
     idx = np.arange(5)
     b = make_batch(d, idx, norm)
-    pred = {"f_nhi": b["t_f_nhi"], "dndx": b["t_dndx"],
-            "P_filt_base": b["t_p_base"], "P_filt_resid": b["t_p_resid"],
-            "delta": b["t_delta"]}
+    pred = {
+        "f_nhi": b["t_f_nhi"],
+        "dndx": b["t_dndx"],
+        "P_filt_base": b["t_p_base"],
+        "P_filt_resid": b["t_p_resid"],
+        "delta": b["t_delta"],
+    }
     phys = untransform_prediction(pred, norm)
     okP = np.isfinite(d["P_filt"][idx])
     assert np.allclose(phys["P_filt"][okP], d["P_filt"][idx][okP], atol=1e-9)
@@ -353,8 +399,11 @@ def test_delta_channel_std_floor_tames_collapsed_bin(tmp_path):
     standardizing a normal val delta to ~9e4) no longer explodes the standardized
     target — while the well-conditioned bins stay untouched."""
     from hcd_analysis.emulator.data import (
-        DELTA_STD_FLOOR_FRAC, signed_log, apply_norm,
+        DELTA_STD_FLOOR_FRAC,
+        signed_log,
+        apply_norm,
     )
+
     d = _load_fixture(tmp_path, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=8)
     # Force a COLLAPSED delta bin (class 0, k 0): nearly identical across all rows
     # (the LOSO low-k delta-std-collapse the fix targets). delta is (R,3,K).
@@ -370,12 +419,12 @@ def test_delta_channel_std_floor_tames_collapsed_bin(tmp_path):
     # the collapsed bin's std is lifted to (at least) the relative floor.
     coll = std.reshape(3, -1)[0, 0]
     assert coll >= floor * (1 - 1e-9)
-    assert coll > 1e-6                                  # well above the raw ~1e-7 collapse
+    assert coll > 1e-6  # well above the raw ~1e-7 collapse
     # every populated std now respects the floor (no near-zero std survives).
     assert np.all(std[finite] >= floor * (1 - 1e-9))
 
     # a normal off-train delta standardizes sanely (no ~9e4 blow-up) on that bin.
-    probe = np.zeros((1,) + d["delta"].shape[1:])      # delta=0 everywhere
+    probe = np.zeros((1,) + d["delta"].shape[1:])  # delta=0 everywhere
     z = apply_norm(signed_log(probe), norm["delta"])
     assert np.abs(z.reshape(1, 3, -1)[0, 0, 0]) < 1e4
     assert np.isfinite(z).all()
@@ -478,15 +527,16 @@ def test_fnhi_zero_bin_masked_out_of_norm_and_loss(tmp_path):
     the mask actually changed the norm."""
     import jax, jax.numpy as jnp
     from hcd_analysis.emulator.model import joint_loss, Emulator
+
     d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
-    d["snap_f_nhi"][:, 0] = 0.0                     # bin 0 structurally all-zero
+    d["snap_f_nhi"][:, 0] = 0.0  # bin 0 structurally all-zero
     R = d["x"].shape[0]
     norm = fit_target_norm(d, np.arange(R))
     floor = safe_log(0.0)
 
     # (a) bin 0 norm is the neutral fallback (no valid data), NOT the floor value
     assert not np.isclose(norm["f_nhi"]["mean"][0], floor)
-    assert np.isclose(norm["f_nhi"]["mean"][0], 0.0)   # fit_norm neutral fallback
+    assert np.isclose(norm["f_nhi"]["mean"][0], 0.0)  # fit_norm neutral fallback
     assert np.isclose(norm["f_nhi"]["std"][0], 1.0)
     # a nonzero bin's norm is a real (non-floor, non-neutral) statistic
     assert norm["f_nhi"]["mean"][1] != 0.0
@@ -494,8 +544,8 @@ def test_fnhi_zero_bin_masked_out_of_norm_and_loss(tmp_path):
     # (b) make_batch masks bin 0 out of the Head-A loss
     b = make_batch(d, np.arange(R), norm)
     assert b["t_f_nhi_mask"].shape == b["t_f_nhi"].shape
-    assert not b["t_f_nhi_mask"][:, 0].any()           # bin 0 masked everywhere
-    assert b["t_f_nhi_mask"][:, 1:].all()              # other bins unmasked
+    assert not b["t_f_nhi_mask"][:, 0].any()  # bin 0 masked everywhere
+    assert b["t_f_nhi_mask"][:, 1:].all()  # other bins unmasked
 
     # the masked bin contributes zero gradient: corrupt the bin-0 TARGET only;
     # loss & model-grad must be unchanged (masked out).
@@ -503,18 +553,23 @@ def test_fnhi_zero_bin_masked_out_of_norm_and_loss(tmp_path):
     m = Emulator(in_dim=10, n_k=d["P_filt"].shape[2], key=jax.random.PRNGKey(0))
     v0, g0 = jax.value_and_grad(lambda mm: joint_loss(mm, bj))(m)
     t2 = bj["t_f_nhi"].at[:, 0].set(1e6)
-    bj2 = dict(bj); bj2["t_f_nhi"] = t2
+    bj2 = dict(bj)
+    bj2["t_f_nhi"] = t2
     v1, g1 = jax.value_and_grad(lambda mm: joint_loss(mm, bj2))(m)
     import equinox as eqx
+
     assert jnp.array_equal(v0, v1)
-    for a, c in zip(jax.tree_util.tree_leaves(eqx.filter(g0, eqx.is_array)),
-                    jax.tree_util.tree_leaves(eqx.filter(g1, eqx.is_array))):
+    for a, c in zip(
+        jax.tree_util.tree_leaves(eqx.filter(g0, eqx.is_array)),
+        jax.tree_util.tree_leaves(eqx.filter(g1, eqx.is_array)),
+    ):
         assert jnp.array_equal(a, c)
 
 
 # ---------------------------------------------------------------------------
 # Phase-2b normalization REDESIGN: θ-blind baseline + σ_cosmo-whitened residual.
 # ---------------------------------------------------------------------------
+
 
 def test_cell_id_groups_same_z_alpha(tmp_path):
     """cell_id encodes (round(z,4), alpha_idx): two rows share a cell iff same
@@ -529,8 +584,10 @@ def test_cell_id_groups_same_z_alpha(tmp_path):
     # rows with the same (z,α) get the same id; different (z,α) differ
     for i in range(R):
         for j in range(R):
-            same = (round(float(d["z_grid"][i]), 4) == round(float(d["z_grid"][j]), 4)
-                    and d["alpha_idx"][i] == d["alpha_idx"][j])
+            same = (
+                round(float(d["z_grid"][i]), 4) == round(float(d["z_grid"][j]), 4)
+                and d["alpha_idx"][i] == d["alpha_idx"][j]
+            )
             assert (cid[i] == cid[j]) == same
 
 
@@ -543,9 +600,9 @@ def test_residual_target_unit_variance(tmp_path):
     norm = fit_target_norm(d, np.arange(R))
     pf = norm["P_filt"]
     # pf computed standalone must match the one inside fit_target_norm
-    assert np.allclose(pf["sig_cosmo"],
-                       fit_baseline_residual_norm(d, np.arange(R))["sig_cosmo"],
-                       equal_nan=True)
+    assert np.allclose(
+        pf["sig_cosmo"], fit_baseline_residual_norm(d, np.arange(R))["sig_cosmo"], equal_nan=True
+    )
     b = make_batch(d, np.arange(R), norm)
     tpr = np.asarray(b["t_p_resid"])
     fin = np.isfinite(tpr)
@@ -592,7 +649,8 @@ def test_reconstruction_roundtrip(tmp_path):
     assert np.allclose(P_rt[ok], d["P_filt"][idx][ok], atol=1e-10, rtol=1e-10)
     # via untransform_prediction (the inference entry point)
     phys = untransform_prediction(
-        {"P_filt_base": b["t_p_base"], "P_filt_resid": b["t_p_resid"]}, norm)
+        {"P_filt_base": b["t_p_base"], "P_filt_resid": b["t_p_resid"]}, norm
+    )
     assert np.allclose(phys["P_filt"][ok], d["P_filt"][idx][ok], atol=1e-10, rtol=1e-10)
 
 
@@ -605,9 +663,10 @@ def test_loso_assert_fires_off_cells():
     import tempfile, os
     from tests.emulator._fixture import write_synthetic_cache
     from hcd_analysis.emulator.data import load_cache_historical
+
     p = os.path.join(tempfile.mkdtemp(), "obs.h5")
     write_synthetic_cache(p, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=8)
-    d = load_cache_historical(p, reason='test: a cache in the pre-lineage 3.3 format')
+    d = load_cache_historical(p, reason="test: a cache in the pre-lineage 3.3 format")
     cid = cell_id(d)
     # train = all rows EXCEPT one whole cell; val = that cell -> not in train_cells
     target_cell = int(cid[0])
@@ -623,11 +682,13 @@ def test_loso_assert_fires_off_cells():
 
 # --- FINALIZED RECIPE: cell/n_cells emission + data-range scoping --------------
 
+
 def test_make_batch_emits_cell_and_n_cells(tmp_path):
     """make_batch must carry the global (z,τ₀)-cell id per row + the STATIC scalar
     n_cells = n_z·n_alpha (the segment count for the coherent de-bias term). cell ids
     must be in [0, n_cells) and match cell_id(d, idx)."""
     from hcd_analysis.emulator.data import cell_id
+
     d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
     R = d["x"].shape[0]
     norm = fit_target_norm(d, np.arange(R))
@@ -664,14 +725,15 @@ def test_coherent_debias_term_jits_on_raw_make_batch(tmp_path):
     emission and passes with the python-int fix.)"""
     import jax, equinox as eqx
     from hcd_analysis.emulator.model import Emulator, coherent_debias_term
+
     d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
     R = d["x"].shape[0]
     norm = fit_target_norm(d, np.arange(R))
     idx = np.array([0, 1, 5, 9, 13, 20])
-    b = make_batch(d, idx, norm)                 # RAW dict (np arrays + python-int n_cells)
+    b = make_batch(d, idx, norm)  # RAW dict (np arrays + python-int n_cells)
     n_k = d["P_filt"].shape[2]
     model = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(0))
-    preds = jax.vmap(model)(b["x"], b["tau0"])   # P_filt_resid etc. (B,4,K)
+    preds = jax.vmap(model)(b["x"], b["tau0"])  # P_filt_resid etc. (B,4,K)
     # filter_jit WITHOUT _to_jnp_batch — python-int n_cells stays a static arg.
     val = eqx.filter_jit(coherent_debias_term)(preds, b)
     assert np.isfinite(float(val))
@@ -681,10 +743,12 @@ def test_datarange_mask_z_and_k_cut(tmp_path):
     """datarange_mask: in-range iff z∈[z_lo,z_hi] AND k≥k_min. Defaults z∈[2.2,4.6],
     k≥1e-3. NaN k -> out-of-range. Custom bounds honored."""
     from hcd_analysis.emulator.data import datarange_mask, DATA_RANGE
+
     d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
     # fixture z_grid is {2.0, 2.4}; k grid linspace(1e-3, 0.1, 8) (all >= 1e-3)
-    m = datarange_mask(d)                                # defaults
-    z = d["z_grid"]; kf = d["kfkms"]
+    m = datarange_mask(d)  # defaults
+    z = d["z_grid"]
+    kf = d["kfkms"]
     in_z = (z >= DATA_RANGE["z_lo"] - 1e-9) & (z <= DATA_RANGE["z_hi"] + 1e-9)
     in_k = np.isfinite(kf) & (kf >= DATA_RANGE["k_min"])
     assert np.array_equal(m, in_z[:, None] & in_k)
@@ -703,7 +767,11 @@ def test_datarange_loss_weight_soft_factor(tmp_path):
     """datarange_loss_weight: in-range bins -> 1.0, out-of-range -> oor_weight (~0.2,
     a SOFT factor, not 0). Shape (n,K); configurable factor."""
     from hcd_analysis.emulator.data import (
-        datarange_loss_weight, datarange_mask, DATARANGE_OOR_WEIGHT)
+        datarange_loss_weight,
+        datarange_mask,
+        DATARANGE_OOR_WEIGHT,
+    )
+
     d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
     idx = np.arange(d["x"].shape[0])
     w = datarange_loss_weight(d, idx)
@@ -712,7 +780,7 @@ def test_datarange_loss_weight_soft_factor(tmp_path):
     in_range = datarange_mask(d)[idx]
     assert np.allclose(w[in_range], 1.0)
     assert np.allclose(w[~in_range], DATARANGE_OOR_WEIGHT)
-    assert DATARANGE_OOR_WEIGHT > 0.0          # SOFT, not a hard zero
+    assert DATARANGE_OOR_WEIGHT > 0.0  # SOFT, not a hard zero
     # custom factor
     w2 = datarange_loss_weight(d, idx, oor_weight=0.5)
     assert np.allclose(w2[~in_range], 0.5)
@@ -721,6 +789,7 @@ def test_datarange_loss_weight_soft_factor(tmp_path):
 def test_make_batch_datarange_weight_emission(tmp_path):
     """make_batch(datarange=True) carries datarange_weight (n,K); absent by default."""
     from hcd_analysis.emulator.data import datarange_loss_weight
+
     d = _load_fixture(tmp_path, n_sims=3, snaps_per_sim=2, n_alpha=4, n_k=8)
     norm = fit_target_norm(d, np.arange(d["x"].shape[0]))
     idx = np.array([0, 1, 5, 9, 13])

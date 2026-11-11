@@ -22,7 +22,9 @@ Readers:
 The writer (``write_cache``) writes to a temporary file in the target directory, digests what it wrote, attaches the
 record and renames the file into place; it never overwrites an existing file.
 
-numpy and h5py only (no jax, no fake_spectra), so the builder, the carry tool and the training loader share it."""
+numpy and h5py only (no jax, no fake_spectra), so the builder, the carry tool and the training loader share it.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -47,21 +49,36 @@ CACHE_VERSION = "3.4"
 HISTORICAL_VERSIONS = ("3.3", "3.4")
 KIND = "tau0_cache"
 KIND_VERSION = 1
-LINEAGE_KEY = "lineage_json"              # the record's dataset
+LINEAGE_KEY = "lineage_json"  # the record's dataset
 
 # dataset layout (unchanged from 3.3; 3.4 adds the lineage record only)
 ROW_FLOAT_KEYS = ("alpha_slope", "target_F", "scale", "z_meta", "z_grid", "dv_kms")
 ROW_INT_KEYS = ("snap", "alpha_idx", "nbins_native", "snap_group_idx")
-ROW_P1D_KEYS = ("kfkms", "P_tier_p")                     # 2-D (n_rows, n_k)
-ROW_TIERC_KEYS = ("P_tier_c", "P_tier_c_filtered")       # 3-D (n_rows, N_TIER_C_BINS, n_k)
-ROW_COUNT_KEYS = ("tier_c_counts",)                      # 2-D (n_rows, N_TIER_C_BINS)
-ROW_MEANF_KEYS = ("mean_F_by_bin",)                      # 2-D (n_rows, N_TIER_C_BINS)
+ROW_P1D_KEYS = ("kfkms", "P_tier_p")  # 2-D (n_rows, n_k)
+ROW_TIERC_KEYS = ("P_tier_c", "P_tier_c_filtered")  # 3-D (n_rows, N_TIER_C_BINS, n_k)
+ROW_COUNT_KEYS = ("tier_c_counts",)  # 2-D (n_rows, N_TIER_C_BINS)
+ROW_MEANF_KEYS = ("mean_F_by_bin",)  # 2-D (n_rows, N_TIER_C_BINS)
 SNAP_FLOAT_KEYS = ("total_path_dX", "dNdX_LLS", "dNdX_subDLA", "dNdX_DLA")
 SNAP_2D_KEYS = ("f_nhi", "n_absorbers")
-STATIC_KEYS = ("tier_c_labels", "tier_c_nhi_edges", "param_names", "log_nhi_centres", "log_nhi_edges")
-ROW_KEYS = (("sim_name", "params") + ROW_P1D_KEYS + ROW_TIERC_KEYS + ROW_COUNT_KEYS + ROW_MEANF_KEYS
-            + ROW_FLOAT_KEYS + ROW_INT_KEYS)
-SNAP_KEYS = ("snap_sim_name", "snap_snap") + tuple("snap_" + k for k in SNAP_FLOAT_KEYS + SNAP_2D_KEYS)
+STATIC_KEYS = (
+    "tier_c_labels",
+    "tier_c_nhi_edges",
+    "param_names",
+    "log_nhi_centres",
+    "log_nhi_edges",
+)
+ROW_KEYS = (
+    ("sim_name", "params")
+    + ROW_P1D_KEYS
+    + ROW_TIERC_KEYS
+    + ROW_COUNT_KEYS
+    + ROW_MEANF_KEYS
+    + ROW_FLOAT_KEYS
+    + ROW_INT_KEYS
+)
+SNAP_KEYS = ("snap_sim_name", "snap_snap") + tuple(
+    "snap_" + k for k in SNAP_FLOAT_KEYS + SNAP_2D_KEYS
+)
 ALL_KEYS = frozenset(ROW_KEYS + SNAP_KEYS + STATIC_KEYS)
 STR_KEYS = frozenset({"sim_name", "snap_sim_name", "tier_c_labels", "param_names"})
 
@@ -69,13 +86,22 @@ ROWS_BUILT = "built"
 ROWS_CARRIED = "carried_validated"
 # the row fields the carry tool copies from a historical cache (functions of the raw optical depth, the sightline
 # labels and the mean-flux rung only); every other field of a carried group is rebuilt
-CARRIED_FIELDS = ("P_tier_p", "P_tier_c", "P_tier_c_filtered", "mean_F_by_bin", "scale", "target_F", "kfkms")
+CARRIED_FIELDS = (
+    "P_tier_p",
+    "P_tier_c",
+    "P_tier_c_filtered",
+    "mean_F_by_bin",
+    "scale",
+    "target_F",
+    "kfkms",
+)
 GROUP_INPUT_KINDS = ("snapshot", "catalog", "cddf", "raw_spectra")
 
 
 class CacheLineageError(ValueError):
     """A training cache, or a snapshot offered as its input, is refused: wrong format, no or a malformed lineage record,
-    a payload that differs from the record, not release-eligible, or inputs that are not what the record names."""
+    a payload that differs from the record, not release-eligible, or inputs that are not what the record names.
+    """
 
 
 # --------------------------------------------------------------------------------------------- coarse classes
@@ -123,7 +149,9 @@ def _collapse_p1d(p15, counts15):
 def dla_core_rows(P_tier_c, P_tier_c_filtered, tier_c_counts):
     """Per-row DLA core, the loader's ``delta[:, 2]``: the coarse DLA class of the unfiltered minus the filtered
     per-class P1D, collapsed with the rows' own counts."""
-    return (_collapse_p1d(P_tier_c, tier_c_counts) - _collapse_p1d(P_tier_c_filtered, tier_c_counts))[:, 3, :]
+    return (
+        _collapse_p1d(P_tier_c, tier_c_counts) - _collapse_p1d(P_tier_c_filtered, tier_c_counts)
+    )[:, 3, :]
 
 
 # ------------------------------------------------------------------------------------------------ the payload
@@ -131,7 +159,11 @@ def _digest_dataset(h, name, arr):
     arr = np.asarray(arr)
     if name in STR_KEYS or arr.dtype.kind in "OSU":
         h.update(json.dumps([name, "str", list(arr.shape)]).encode("utf-8"))
-        h.update(json.dumps([v.decode() if isinstance(v, bytes) else str(v) for v in arr.ravel().tolist()]).encode())
+        h.update(
+            json.dumps(
+                [v.decode() if isinstance(v, bytes) else str(v) for v in arr.ravel().tolist()]
+            ).encode()
+        )
     else:
         a = np.ascontiguousarray(arr)
         h.update(json.dumps([name, a.dtype.str, list(a.shape)]).encode("utf-8"))
@@ -175,12 +207,15 @@ def payload_sha256_of_file(path):
 # ------------------------------------------------------------------------------------------------------ readers
 def read_datasets(path):
     """``(datasets, attrs, record_text)`` of a cache file: every dataset but the record (strings as str), every
-    attribute, and the record's JSON text (None if the file has none). The key set must be the tau0 cache layout."""
+    attribute, and the record's JSON text (None if the file has none). The key set must be the tau0 cache layout.
+    """
     with h5py.File(path, "r") as f:
         keys = set(f.keys())
         if keys - {LINEAGE_KEY} != ALL_KEYS:
-            raise CacheLineageError(f"{path}: key set differs from the tau0 cache layout: missing "
-                                    f"{sorted(ALL_KEYS - keys)}, unknown {sorted(keys - ALL_KEYS - {LINEAGE_KEY})}")
+            raise CacheLineageError(
+                f"{path}: key set differs from the tau0 cache layout: missing "
+                f"{sorted(ALL_KEYS - keys)}, unknown {sorted(keys - ALL_KEYS - {LINEAGE_KEY})}"
+            )
         d = {k: (f[k].asstr()[...] if k in STR_KEYS else f[k][...]) for k in sorted(ALL_KEYS)}
         attrs = {k: f.attrs[k] for k in f.attrs}
         text = None
@@ -210,12 +245,15 @@ def read_cache_staged(path):
 def _read_release(path, *, staged_ok):
     def refuse(why):
         raise CacheLineageError(f"{path}: training cache refused ({why})")
+
     d, attrs, text = read_datasets(path)
     ver = str(_attr_value(attrs.get("cache_version")))
     if ver != CACHE_VERSION:
-        refuse(f"cache version {ver!r}; the release reader reads {CACHE_VERSION} only. A cache written before caches "
-               "carried lineage is historical: read it with read_cache_historical(path, reason=...) or "
-               "hcd_analysis.emulator.data.load_cache_historical, or rebuild it")
+        refuse(
+            f"cache version {ver!r}; the release reader reads {CACHE_VERSION} only. A cache written before caches "
+            "carried lineage is historical: read it with read_cache_historical(path, reason=...) or "
+            "hcd_analysis.emulator.data.load_cache_historical, or rebuild it"
+        )
     if text is None:
         refuse(f"no lineage record ({LINEAGE_KEY})")
     try:
@@ -223,9 +261,13 @@ def _read_release(path, *, staged_ok):
     except L.LineageError as e:
         refuse(str(e))
     if rec["kind"] != KIND or rec["kind_version"] != KIND_VERSION:
-        refuse(f"a {rec['kind']} record of version {rec['kind_version']}, not {KIND} {KIND_VERSION}")
+        refuse(
+            f"a {rec['kind']} record of version {rec['kind_version']}, not {KIND} {KIND_VERSION}"
+        )
     if rec["product"].get("payload_sha256") != payload_sha256(d, attrs):
-        refuse("its datasets or attributes differ from the record's payload digest (edited after it was written)")
+        refuse(
+            "its datasets or attributes differ from the record's payload digest (edited after it was written)"
+        )
     if not rec["release_eligible"]:
         refuse("not release-eligible: " + "; ".join(rec["ineligible_reasons"]))
     check_groups(rec, d, refuse, staged_ok=staged_ok)
@@ -243,8 +285,9 @@ def check_groups(rec, d, refuse, *, staged_ok=False):
     ids = list(zip([str(s) for s in d["snap_sim_name"]], [int(s) for s in d["snap_snap"]]))
     if not isinstance(groups, list) or [(g.get("sim"), g.get("snap")) for g in groups] != ids:
         refuse("the record's groups are not the file's snapshot blocks")
-    if rec["product"].get("n_rows") != int(np.asarray(d["sim_name"]).shape[0]) or rec["product"].get("n_snaps") \
-            != len(ids):
+    if rec["product"].get("n_rows") != int(np.asarray(d["sim_name"]).shape[0]) or rec[
+        "product"
+    ].get("n_snaps") != len(ids):
         refuse("the record's row or group count is not the file's")
     by_role = {}
     for i in rec["inputs"]:
@@ -252,39 +295,64 @@ def check_groups(rec, d, refuse, *, staged_ok=False):
     for g in groups:
         if g.get("rows") not in (ROWS_BUILT, ROWS_CARRIED):
             refuse(f"group {g.get('sim')} {g.get('snap')}: unknown row origin {g.get('rows')!r}")
-        missing = [k for k in GROUP_INPUT_KINDS if group_role(k, g["sim"], g["snap"]) not in by_role]
+        missing = [
+            k for k in GROUP_INPUT_KINDS if group_role(k, g["sim"], g["snap"]) not in by_role
+        ]
         if missing:
             refuse(f"group {g['sim']} {g['snap']}: no {missing} input in the record")
         for k in GROUP_INPUT_KINDS:
             role = group_role(k, g["sim"], g["snap"])
             hits = by_role[role]
             if len(hits) != 1 or hits[0]["kind"] != k:
-                refuse(f"group {g['sim']} {g['snap']}: the input {role} is not one input of kind {k}")
-            if k != "raw_spectra" and not (hits[0].get("finder_ids") and hits[0].get("release_eligible") is True):
-                refuse(f"group {g['sim']} {g['snap']}: the input {role} is not a release-eligible product with "
-                       "finder ids")
+                refuse(
+                    f"group {g['sim']} {g['snap']}: the input {role} is not one input of kind {k}"
+                )
+            if k != "raw_spectra" and not (
+                hits[0].get("finder_ids") and hits[0].get("release_eligible") is True
+            ):
+                refuse(
+                    f"group {g['sim']} {g['snap']}: the input {role} is not a release-eligible product with "
+                    "finder ids"
+                )
     validation = rec.get("validation") or {}
     validated = list(validation.get("validated_inputs") or [])
     carried_any = any(g["rows"] == ROWS_CARRIED for g in groups)
     if validated and not carried_any:
-        refuse("validated inputs without carried rows (only the carry's source may be named as validated)")
+        refuse(
+            "validated inputs without carried rows (only the carry's source may be named as validated)"
+        )
     if carried_any:
         car = rec["product"].get("carried") or {}
-        if list(car.get("fields") or []) != list(CARRIED_FIELDS) or not isinstance(car.get("source_sha256"), str):
+        if list(car.get("fields") or []) != list(CARRIED_FIELDS) or not isinstance(
+            car.get("source_sha256"), str
+        ):
             refuse("carried rows without the carry's source and field list")
         if not validation.get("all_passed") is True:
             refuse("carried rows without a passed validation")
         src = by_role.get(validated[0], []) if len(validated) == 1 else []
-        if not (len(src) == 1 and src[0]["kind"] == KIND and src[0]["sha256"] == car.get("source_sha256")
-                and src[0]["size"] == car.get("source_size")):
-            refuse("carried rows: the validated input must be exactly the carry's source (one tau0_cache input "
-                   "whose sha256 and size are the carry block's)")
+        if not (
+            len(src) == 1
+            and src[0]["kind"] == KIND
+            and src[0]["sha256"] == car.get("source_sha256")
+            and src[0]["size"] == car.get("source_size")
+        ):
+            refuse(
+                "carried rows: the validated input must be exactly the carry's source (one tau0_cache input "
+                "whose sha256 and size are the carry block's)"
+            )
         prom = car.get("promoted")
-        if not staged_ok and not (isinstance(prom, dict) and prom.get("passed") is True
-                                  and all(isinstance(prom.get(k), str) and len(prom[k]) == 64
-                                          for k in ("comparison_sha256", "staged_sha256"))):
-            refuse("carried rows not yet promoted: a staged carry is usable only after the fresh-row comparison "
-                   "passed (scripts/promote_carried_cache.py)")
+        if not staged_ok and not (
+            isinstance(prom, dict)
+            and prom.get("passed") is True
+            and all(
+                isinstance(prom.get(k), str) and len(prom[k]) == 64
+                for k in ("comparison_sha256", "staged_sha256")
+            )
+        ):
+            refuse(
+                "carried rows not yet promoted: a staged carry is usable only after the fresh-row comparison "
+                "passed (scripts/promote_carried_cache.py)"
+            )
 
 
 def read_cache_historical(path, *, reason):
@@ -296,14 +364,18 @@ def read_cache_historical(path, *, reason):
     d, attrs, text = read_datasets(path)
     ver = str(_attr_value(attrs.get("cache_version")))
     if ver not in HISTORICAL_VERSIONS:
-        raise CacheLineageError(f"{path}: cache version {ver!r} is not one of {HISTORICAL_VERSIONS}")
+        raise CacheLineageError(
+            f"{path}: cache version {ver!r} is not one of {HISTORICAL_VERSIONS}"
+        )
     rec = None
     if text is not None:
         try:
             rec = L.parse_record(text)
         except L.LineageError:
             rec = None
-    logger.warning("historical read of the cache %s (%s): not release-eligible", path, reason.strip())
+    logger.warning(
+        "historical read of the cache %s (%s): not release-eligible", path, reason.strip()
+    )
     return d, attrs, rec
 
 
@@ -316,13 +388,17 @@ def read_groups_historical(path, *, reason):
         attrs = {k: f.attrs[k] for k in f.attrs}
         ver = str(_attr_value(attrs.get("cache_version")))
         if ver not in HISTORICAL_VERSIONS:
-            raise CacheLineageError(f"{path}: cache version {ver!r} is not one of {HISTORICAL_VERSIONS}")
+            raise CacheLineageError(
+                f"{path}: cache version {ver!r} is not one of {HISTORICAL_VERSIONS}"
+            )
         sims, snaps = f["snap_sim_name"].asstr()[...], f["snap_snap"][...]
         gi, zg = f["snap_group_idx"][...], f["z_grid"][...]
     groups = []
     for b, (s, n) in enumerate(zip(sims, snaps)):
         rows = np.flatnonzero(gi == b)
-        groups.append((str(s), int(n), float(zg[rows[0]]) if rows.size else float("nan"), int(rows.size)))
+        groups.append(
+            (str(s), int(n), float(zg[rows[0]]) if rows.size else float("nan"), int(rows.size))
+        )
     logger.warning("historical read of the group list of %s (%s)", path, reason.strip())
     return groups, attrs
 
@@ -334,10 +410,18 @@ def group_role(kind, sim, snap):
 
 def cache_settings(*, fidelity, n_k, alpha_refine, alpha_range, n_skewers=None):
     """The product-determining settings a cache record holds (equal for caches that may be merged)."""
-    return L.canonicalise({"cache_version": CACHE_VERSION, "fidelity": str(fidelity), "n_k": int(n_k),
-                           "alpha_refine": int(alpha_refine), "alpha_range": [float(a) for a in alpha_range],
-                           "n_skewers": None if n_skewers is None else int(n_skewers), "tau_thresh": 1.0e6,
-                           "tier_c_recipe": "uniform"})
+    return L.canonicalise(
+        {
+            "cache_version": CACHE_VERSION,
+            "fidelity": str(fidelity),
+            "n_k": int(n_k),
+            "alpha_refine": int(alpha_refine),
+            "alpha_range": [float(a) for a in alpha_range],
+            "n_skewers": None if n_skewers is None else int(n_skewers),
+            "tau_thresh": 1.0e6,
+            "tier_c_recipe": "uniform",
+        }
+    )
 
 
 def combine_inputs(*entry_lists):
@@ -369,9 +453,14 @@ def publish_once(tmp, path):
             os.link(tmp, path, follow_symlinks=False)
         except FileExistsError:
             st_p = os.lstat(path)
-            if stat.S_ISLNK(st_p.st_mode) or (st_p.st_dev, st_p.st_ino) != (st_t.st_dev, st_t.st_ino):
-                raise FileExistsError(f"{path} exists (published by another writer after this run's check); a cache "
-                                      f"is never overwritten: nothing of this run is published") from None
+            if stat.S_ISLNK(st_p.st_mode) or (st_p.st_dev, st_p.st_ino) != (
+                st_t.st_dev,
+                st_t.st_ino,
+            ):
+                raise FileExistsError(
+                    f"{path} exists (published by another writer after this run's check); a cache "
+                    f"is never overwritten: nothing of this run is published"
+                ) from None
     finally:
         try:
             os.unlink(tmp)
@@ -387,8 +476,19 @@ def publish_once(tmp, path):
         pass
 
 
-def write_cache(path, datasets, attrs, *, inputs, settings, groups, carried=None, validation=None,
-                historical_reason=None, selection=None):
+def write_cache(
+    path,
+    datasets,
+    attrs,
+    *,
+    inputs,
+    settings,
+    groups,
+    carried=None,
+    validation=None,
+    historical_reason=None,
+    selection=None,
+):
     """Write a v3.4 cache and its lineage record; return the record. ``datasets`` is the full tau0 layout, ``attrs``
     the descriptive attributes (``cache_version`` is set here). Eligibility is computed from ``inputs`` and the code
     identity (lineage.build_record); ``historical_reason`` makes the product ineligible. The file is written under a
@@ -399,8 +499,10 @@ def write_cache(path, datasets, attrs, *, inputs, settings, groups, carried=None
     if path.exists():
         raise FileExistsError(f"{path} exists; a cache is never overwritten")
     if set(datasets) != ALL_KEYS:
-        raise CacheLineageError(f"datasets differ from the tau0 cache layout: missing {sorted(ALL_KEYS - set(datasets))}"
-                                f", unknown {sorted(set(datasets) - ALL_KEYS)}")
+        raise CacheLineageError(
+            f"datasets differ from the tau0 cache layout: missing {sorted(ALL_KEYS - set(datasets))}"
+            f", unknown {sorted(set(datasets) - ALL_KEYS)}"
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     os.close(fd)
@@ -413,27 +515,42 @@ def write_cache(path, datasets, attrs, *, inputs, settings, groups, carried=None
             for k in sorted(datasets):
                 v = datasets[k]
                 if k in STR_KEYS:
-                    f.create_dataset(k, data=np.array([str(x) for x in np.asarray(v).ravel()], dtype=object),
-                                     dtype=h5py.string_dtype())
+                    f.create_dataset(
+                        k,
+                        data=np.array([str(x) for x in np.asarray(v).ravel()], dtype=object),
+                        dtype=h5py.string_dtype(),
+                    )
                 else:
                     f.create_dataset(k, data=np.asarray(v))
-        product = {"payload_sha256": payload_sha256_of_file(tmp), "n_rows": int(np.asarray(datasets["sim_name"]).size),
-                   "n_snaps": int(np.asarray(datasets["snap_snap"]).size), "groups": groups}
+        product = {
+            "payload_sha256": payload_sha256_of_file(tmp),
+            "n_rows": int(np.asarray(datasets["sim_name"]).size),
+            "n_snaps": int(np.asarray(datasets["snap_snap"]).size),
+            "groups": groups,
+        }
         if carried is not None:
             product["carried"] = carried
         if selection is not None:
             product["selection"] = selection
         if historical_reason:
             product["historical_reason"] = str(historical_reason)
-        rec = L.build_record(KIND, KIND_VERSION, inputs=inputs, finder_ids=None, settings=settings,
-                             code=L.code_identity(), allowed_finder_ids=RELEASE_FINDER_IDS, product=product,
-                             validation=validation)
+        rec = L.build_record(
+            KIND,
+            KIND_VERSION,
+            inputs=inputs,
+            finder_ids=None,
+            settings=settings,
+            code=L.code_identity(),
+            allowed_finder_ids=RELEASE_FINDER_IDS,
+            product=product,
+            validation=validation,
+        )
         text = L.canonical_json(rec)
         if len(text) > L.MAX_RECORD_BYTES:
             raise CacheLineageError("the lineage record exceeds the readable size")
         with h5py.File(tmp, "a") as f:
             f.create_dataset(LINEAGE_KEY, data=text, dtype=h5py.string_dtype())
-        ffd = os.open(str(tmp), os.O_RDONLY)                       # the file's bytes on disk before the publish
+        ffd = os.open(str(tmp), os.O_RDONLY)  # the file's bytes on disk before the publish
         try:
             os.fsync(ffd)
         finally:
@@ -453,15 +570,31 @@ def load_snapshot_inputs(snap_dir, raw_path, *, sim=None, snap=None, rehash_raw=
     count; release eligibility of the catalogue, the cddf and the snapshot record; the copied flags; ``sim`` and
     ``snap`` when given) and ``entries`` the cache record's input entries for the group: the snapshot record
     (meta.json), the catalogue, the CDDF and the raw spectra file."""
-    v = verify_snapshot_dir(snap_dir, settings=RELEASE_FINDER_SETTINGS, raw_path=raw_path, rehash=rehash_raw,
-                            require_release_eligible=True, sim=sim, snap=snap)
+    v = verify_snapshot_dir(
+        snap_dir,
+        settings=RELEASE_FINDER_SETTINGS,
+        raw_path=raw_path,
+        rehash=rehash_raw,
+        require_release_eligible=True,
+        sim=sim,
+        snap=snap,
+    )
     s, n = v.catalog.sim_name, int(v.catalog.snap)
     raw = L.find_input(v.catalog.lineage, "raw_spectra")
     entries = [
         L.input_entry(group_role("snapshot", s, n), "snapshot", v.meta_identity, record=v.record),
-        L.input_entry(group_role("catalog", s, n), "catalog", v.products["catalog.npz"], record=v.catalog.lineage),
-        L.input_entry(group_role("cddf", s, n), "cddf", v.products["cddf.npz"], record=v.cddf_record),
-        L.input_entry(group_role("raw_spectra", s, n), "raw_spectra", raw, info={"path": str(raw_path)}),
+        L.input_entry(
+            group_role("catalog", s, n),
+            "catalog",
+            v.products["catalog.npz"],
+            record=v.catalog.lineage,
+        ),
+        L.input_entry(
+            group_role("cddf", s, n), "cddf", v.products["cddf.npz"], record=v.cddf_record
+        ),
+        L.input_entry(
+            group_role("raw_spectra", s, n), "raw_spectra", raw, info={"path": str(raw_path)}
+        ),
     ]
     return v, entries
 
@@ -486,10 +619,16 @@ def load_snapshot_inputs_historical(snap_dir, *, reason):
 
     def ident(name):
         return {k: v for k, v in L.file_identity(snap_dir / name).items() if k != "mtime_ns"}
-    entries = [L.input_entry(group_role("snapshot", s, n), "snapshot",
-                             {"sha256": hashlib.sha256(meta_bytes).hexdigest(), "size": len(meta_bytes)}),
-               L.input_entry(group_role("catalog", s, n), "catalog", ident("catalog.npz")),
-               L.input_entry(group_role("cddf", s, n), "cddf", ident("cddf.npz"))]
+
+    entries = [
+        L.input_entry(
+            group_role("snapshot", s, n),
+            "snapshot",
+            {"sha256": hashlib.sha256(meta_bytes).hexdigest(), "size": len(meta_bytes)},
+        ),
+        L.input_entry(group_role("catalog", s, n), "catalog", ident("catalog.npz")),
+        L.input_entry(group_role("cddf", s, n), "cddf", ident("cddf.npz")),
+    ]
     return HistoricalSnapshot(meta, cddf, catalog), entries
 
 
@@ -498,5 +637,9 @@ def sim_ics_entry(raw_path, sim):
     builder reads the parameter vector."""
     p = Path(raw_path).resolve().parents[2] / "SimulationICs.json"
     ident = L.file_identity(p)
-    return L.input_entry(f"sim_ics:{sim}", "sim_ics", {"sha256": ident["sha256"], "size": ident["size"]},
-                         info={"path": str(p)})
+    return L.input_entry(
+        f"sim_ics:{sim}",
+        "sim_ics",
+        {"sha256": ident["sha256"], "size": ident["size"]},
+        info={"path": str(p)},
+    )

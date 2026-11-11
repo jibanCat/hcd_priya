@@ -46,7 +46,9 @@ is the suspected n_s driver) but are NOT gated.
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python scripts/analyze_res_corr_injection.py
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse
 import functools
@@ -60,12 +62,14 @@ print = functools.partial(print, flush=True)
 
 REPO = _REPO_ROOT
 CKPT = f"{REPO}/checkpoints/stepA"
-NOTES_FIG = os.environ.get("HCD_FIGURES_DIR", "<HCD_FIGURES_DIR unset>")   # where the gate figure is written
+NOTES_FIG = os.environ.get(
+    "HCD_FIGURES_DIR", "<HCD_FIGURES_DIR unset>"
+)  # where the gate figure is written
 
 # The two blinded cosmology params this gate protects. n_s is index 0, A_p index 1 of the packed
 # draws (the theta9 block leads _draws_matrix), looked up BY NAME from each checkpoint's `names`.
 PARAMS = ("ns", "Ap")
-GATE_FRAC = 0.30                  # spec §4.2: stat < 0.30 * sigma_ref
+GATE_FRAC = 0.30  # spec §4.2: stat < 0.30 * sigma_ref
 
 # The alpha-inflation factor. Under NORC alpha_res is PINNED (fix_alpha_res), so the clean-arm post
 # sigma is NOT alpha-inflated and needs NO deflation → the default is 1.0 (sigma_ref = median(clean_sd)
@@ -106,12 +110,14 @@ def paired_injection_gate(clean_means, inj_means, sigma_ref):
     clean = np.asarray(clean_means, dtype=float)
     inj = np.asarray(inj_means, dtype=float)
     if clean.shape != inj.shape:
-        raise ValueError(f"clean_means {clean.shape} and inj_means {inj.shape} must be the same "
-                         f"shape (paired one-to-one).")
+        raise ValueError(
+            f"clean_means {clean.shape} and inj_means {inj.shape} must be the same "
+            f"shape (paired one-to-one)."
+        )
     if clean.ndim != 1 or clean.size == 0:
         raise ValueError("clean_means/inj_means must be non-empty 1-D arrays of posterior means.")
 
-    delta = inj - clean                              # paired -> shared cosmic noise cancels
+    delta = inj - clean  # paired -> shared cosmic noise cancels
     n = delta.size
     delta_mean = float(delta.mean())
     if n > 1:
@@ -123,8 +129,9 @@ def paired_injection_gate(clean_means, inj_means, sigma_ref):
     sigma_ref = float(sigma_ref)
     stat = abs(delta_mean) + 2.0 * delta_se
     passed = bool(stat < GATE_FRAC * sigma_ref)
-    return dict(delta_mean=delta_mean, delta_se=delta_se, stat=stat,
-                sigma_ref=sigma_ref, passed=passed)
+    return dict(
+        delta_mean=delta_mean, delta_se=delta_se, stat=stat, sigma_ref=sigma_ref, passed=passed
+    )
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -156,8 +163,12 @@ def _post_mean_sd(z, param):
 def _seed_key(z):
     """A stable per-mock pairing identity. The RCINJ pairs share (survey, sim, fold, seed); the
     clean and injected arms differ ONLY by the injection. We pair on (survey, sim, fold, seed)."""
-    return (str(z.get("survey", "")), str(z.get("sim", "")),
-            int(z.get("fold", -1)), int(z.get("seed", 0)))
+    return (
+        str(z.get("survey", "")),
+        str(z.get("sim", "")),
+        int(z.get("fold", -1)),
+        int(z.get("seed", 0)),
+    )
 
 
 def _pool_mock(paths):
@@ -167,12 +178,17 @@ def _pool_mock(paths):
     z0 = Z[0]
     packed = np.concatenate([np.asarray(z["packed"]) for z in Z], axis=0)
     names = [str(x) for x in z0["names"]]
-    rec = {"key": _seed_key(z0), "injected": _is_injected(z0),
-           "n_chains": len(Z), "n_draws": int(packed.shape[0]),
-           "div": int(sum(int(z["divergences"]) for z in Z)),
-           "sim": str(z0.get("sim", "")), "survey": str(z0.get("survey", "")),
-           "fold": int(z0.get("fold", -1)),
-           "seed": int(z0.get("seed", 0))}
+    rec = {
+        "key": _seed_key(z0),
+        "injected": _is_injected(z0),
+        "n_chains": len(Z),
+        "n_draws": int(packed.shape[0]),
+        "div": int(sum(int(z["divergences"]) for z in Z)),
+        "sim": str(z0.get("sim", "")),
+        "survey": str(z0.get("survey", "")),
+        "fold": int(z0.get("fold", -1)),
+        "seed": int(z0.get("seed", 0)),
+    }
     for p in PARAMS:
         i = names.index(p)
         rec[p] = (float(packed[:, i].mean()), float(packed[:, i].std()))
@@ -181,9 +197,9 @@ def _pool_mock(paths):
     # mean/sd of each per-draw scalar. NaN if the checkpoint has no tau0_z cols (guard).
     tau0_cols = [j for j, nm in enumerate(names) if nm.startswith("tau0_z")]
     if tau0_cols:
-        tblock = packed[:, tau0_cols]                       # (N, nz), z-ascending (kept_global order)
-        tmean = tblock.mean(axis=1)                         # per-draw mean tau0(z)
-        ttilt = tblock[:, -1] - tblock[:, 0]                # high-z minus low-z tau0_z
+        tblock = packed[:, tau0_cols]  # (N, nz), z-ascending (kept_global order)
+        tmean = tblock.mean(axis=1)  # per-draw mean tau0(z)
+        ttilt = tblock[:, -1] - tblock[:, 0]  # high-z minus low-z tau0_z
         rec["tau0_mean"] = (float(tmean.mean()), float(tmean.std()))
         rec["tau0_tilt"] = (float(ttilt.mean()), float(ttilt.std()))
     else:
@@ -199,12 +215,13 @@ def _mock_ids_for_survey(survey, ckpt_dir, tag=None):
 
     `tag` overrides the survey->tag map. This is what reads the f_res (option-b) arms, which
     run_stepA.py:547 names with a trailing 'F' (RCINJDF_/RCINJEF_): the glob RCINJ{tag}_* is
-    anchored on the '_' so a bare 'D'/'E' cannot match 'DF'/'EF'. Pass tag='DF' (via main --fres)."""
+    anchored on the '_' so a bare 'D'/'E' cannot match 'DF'/'EF'. Pass tag='DF' (via main --fres).
+    """
     if tag is None:
         tag = SURVEY_TAG[survey]
     out = {}
     for p in sorted(glob.glob(f"{ckpt_dir}/RCINJ{tag}_*.npz")):
-        base = os.path.basename(p)[:-4]                       # strip .npz
+        base = os.path.basename(p)[:-4]  # strip .npz
         if "_c" not in base:
             continue
         mock_id = base.rsplit("_c", 1)[0]
@@ -218,7 +235,8 @@ def load_pairs(survey, ckpt_dir=CKPT, tag=None):
     Returns (clean_means, inj_means) dicts keyed by param, plus diagnostics:
       {param: (clean_arr, inj_arr)}, n_pairs, n_div, clean_sd_by_param, unpaired_keys.
     Each (clean_arr[i], inj_arr[i]) is one paired mock (the clean & injected arm sharing the seed).
-    `tag` overrides the survey->tag map to read the f_res 'F'-suffixed arms (see _mock_ids_for_survey)."""
+    `tag` overrides the survey->tag map to read the f_res 'F'-suffixed arms (see _mock_ids_for_survey).
+    """
     by_id = _mock_ids_for_survey(survey, ckpt_dir, tag=tag)
     clean_recs, inj_recs = {}, {}
     n_div = 0
@@ -229,16 +247,16 @@ def load_pairs(survey, ckpt_dir=CKPT, tag=None):
     # Pair on the shared (survey, sim, fold, seed) key.
     keys = sorted(set(clean_recs) & set(inj_recs))
     unpaired = sorted((set(clean_recs) ^ set(inj_recs)))
-    all_params = PARAMS + REPORT_PARAMS                       # gated + report-only, paired identically
+    all_params = PARAMS + REPORT_PARAMS  # gated + report-only, paired identically
     means = {p: ([], []) for p in all_params}
     clean_sd = {p: [] for p in PARAMS}
     for k in keys:
         rc, ri = clean_recs[k], inj_recs[k]
         for p in all_params:
-            means[p][0].append(rc[p][0])                      # clean post mean
-            means[p][1].append(ri[p][0])                      # injected post mean
+            means[p][0].append(rc[p][0])  # clean post mean
+            means[p][1].append(ri[p][0])  # injected post mean
         for p in PARAMS:
-            clean_sd[p].append(rc[p][1])                      # clean-arm post sd (alpha-free)
+            clean_sd[p].append(rc[p][1])  # clean-arm post sd (alpha-free)
     means = {p: (np.asarray(c), np.asarray(i)) for p, (c, i) in means.items()}
     clean_sd = {p: np.asarray(v) for p, v in clean_sd.items()}
     return means, len(keys), n_div, clean_sd, unpaired
@@ -284,17 +302,28 @@ def main():
     ap.add_argument("--ckpt-dir", default=CKPT, help="dir with RCINJ*_c*.npz checkpoints")
     for survey in GATE_SURVEYS:
         for param in PARAMS:
-            ap.add_argument(f"--sigma-ref-{survey.lower()}-{param.lower()}", type=float, default=None,
-                            help=f"explicit reference sigma_ref for {survey} {param} "
-                                 f"(else median(clean post_sd) / --alpha-inflation)")
-    ap.add_argument("--alpha-inflation", type=float, default=ALPHA_INFLATION,
-                    help="deflate the derived sigma_ref by this (NORC pins alpha_res -> default 1.0; "
-                         "pass ~1.4 for a non-NORC alpha-free re-analysis)")
+            ap.add_argument(
+                f"--sigma-ref-{survey.lower()}-{param.lower()}",
+                type=float,
+                default=None,
+                help=f"explicit reference sigma_ref for {survey} {param} "
+                f"(else median(clean post_sd) / --alpha-inflation)",
+            )
+    ap.add_argument(
+        "--alpha-inflation",
+        type=float,
+        default=ALPHA_INFLATION,
+        help="deflate the derived sigma_ref by this (NORC pins alpha_res -> default 1.0; "
+        "pass ~1.4 for a non-NORC alpha-free re-analysis)",
+    )
     ap.add_argument("--no-fig", action="store_true", help="skip writing the figure")
-    ap.add_argument("--fres", action="store_true",
-                    help="read the f_res (option-b) arms: survey tag gets a trailing 'F' "
-                         "(RCINJDF_/RCINJEF_/RCINJKF_, run_stepA.py). DESI + eBOSS + KS (KS unblocked by the "
-                         "echelle R_z, task #5). Use with --ckpt-dir the f_res checkpoint dir.")
+    ap.add_argument(
+        "--fres",
+        action="store_true",
+        help="read the f_res (option-b) arms: survey tag gets a trailing 'F' "
+        "(RCINJDF_/RCINJEF_/RCINJKF_, run_stepA.py). DESI + eBOSS + KS (KS unblocked by the "
+        "echelle R_z, task #5). Use with --ckpt-dir the f_res checkpoint dir.",
+    )
     a = ap.parse_args()
     ckpt_dir = a.ckpt_dir
     explicit = _parse_explicit(a)
@@ -307,26 +336,38 @@ def main():
 
     print("\n=== NORC res_corr INJECTION-RECOVERY gate — paired clean-vs-injected, per leg ===")
     if fres:
-        print("    MODE: --fres (option-b f_res FLOATED). Reading the 'F'-tagged arms RCINJ{D,E,K}F_; DESI+eBOSS+KS.")
-        print("    NOTE: floating f_res inflates the CLEAN-arm post_sd -> the median(clean_sd) sigma_ref grows -> the")
-        print("    0.3*sigma_ref threshold LOOSENS. Prefer an explicit --sigma-ref-* (fixed f_res-off/Fisher yardstick);")
+        print(
+            "    MODE: --fres (option-b f_res FLOATED). Reading the 'F'-tagged arms RCINJ{D,E,K}F_; DESI+eBOSS+KS."
+        )
+        print(
+            "    NOTE: floating f_res inflates the CLEAN-arm post_sd -> the median(clean_sd) sigma_ref grows -> the"
+        )
+        print(
+            "    0.3*sigma_ref threshold LOOSENS. Prefer an explicit --sigma-ref-* (fixed f_res-off/Fisher yardstick);"
+        )
         print("    the invariant is the absolute stat |mean Delta| + 2*SE.")
     print("    Delta_i = post_mean(inj_i) - post_mean(clean_i)   (paired -> shared noise cancels)")
-    print(f"    GATE: |mean Delta| + 2*SE < {GATE_FRAC:.2f} * sigma_ref   (sigma_ref = reference yardstick)")
+    print(
+        f"    GATE: |mean Delta| + 2*SE < {GATE_FRAC:.2f} * sigma_ref   (sigma_ref = reference yardstick)"
+    )
     print("    NORC: no alpha_res (pinned). Measures the paired Delta(n_s,A_p) bias from the self-")
     print("    consistent NORC self-draw being BLIND to the res_corr the real universe carries.")
-    print(f"    PASS on A_p AND n_s for ALL legs ({', '.join(surveys)}) => the NORC drop is cosmology-safe.")
+    print(
+        f"    PASS on A_p AND n_s for ALL legs ({', '.join(surveys)}) => the NORC drop is cosmology-safe."
+    )
     print("    tau0_mean / tau0_tilt paired shifts are REPORTED (mean flux) but NOT gated.\n")
 
-    hdr = (f"  {'survey':<6} {'param':<4} {'N':>3} {'div':>4} "
-           f"{'mean_Delta':>11} {'SE':>9} {'|mean|+2SE':>11} {'sigma_ref':>10} "
-           f"{'0.3*sref':>9} {'sref_src':>16}  verdict")
+    hdr = (
+        f"  {'survey':<6} {'param':<4} {'N':>3} {'div':>4} "
+        f"{'mean_Delta':>11} {'SE':>9} {'|mean|+2SE':>11} {'sigma_ref':>10} "
+        f"{'0.3*sref':>9} {'sref_src':>16}  verdict"
+    )
     print(hdr)
     print("  " + "-" * (len(hdr) - 2))
 
     any_fail = False
     any_present = False
-    fig_rows = []                      # (survey, param, stat, thr, passed) for the figure
+    fig_rows = []  # (survey, param, stat, thr, passed) for the figure
     for survey in surveys:
         tag = SURVEY_TAG[survey] + ("F" if fres else "")
         means, n_pairs, n_div, clean_sd, unpaired = load_pairs(survey, ckpt_dir, tag=tag)
@@ -335,8 +376,10 @@ def main():
             continue
         any_present = True
         if unpaired:
-            print(f"  {survey:<6} [warn] {len(unpaired)} unpaired arm(s) (clean XOR injected, no "
-                  f"matching seed) DROPPED: {unpaired}")
+            print(
+                f"  {survey:<6} [warn] {len(unpaired)} unpaired arm(s) (clean XOR injected, no "
+                f"matching seed) DROPPED: {unpaired}"
+            )
         for param in PARAMS:
             clean_arr, inj_arr = means[param]
             sref, src = sigma_ref_for(survey, param, clean_sd, explicit, alpha_inflation)
@@ -345,9 +388,11 @@ def main():
             verdict = "PASS" if out["passed"] else "FAIL"
             if not out["passed"]:
                 any_fail = True
-            print(f"  {survey:<6} {param:<4} {n_pairs:>3} {n_div:>4} "
-                  f"{out['delta_mean']:>+11.4f} {out['delta_se']:>9.4f} {out['stat']:>11.4f} "
-                  f"{sref:>10.4f} {thr:>9.4f} {src:>16}  {verdict}")
+            print(
+                f"  {survey:<6} {param:<4} {n_pairs:>3} {n_div:>4} "
+                f"{out['delta_mean']:>+11.4f} {out['delta_se']:>9.4f} {out['stat']:>11.4f} "
+                f"{sref:>10.4f} {thr:>9.4f} {src:>16}  {verdict}"
+            )
             fig_rows.append((survey, param, out["stat"], thr, out["passed"], n_pairs))
         # REPORT-ONLY paired shifts (tau0 mean flux — the suspected n_s driver): print the paired
         # |mean Delta| + 2*SE but DO NOT gate (no sigma_ref / no verdict). Reuses the pure core.
@@ -355,25 +400,37 @@ def main():
             clean_arr, inj_arr = means[param]
             if not np.all(np.isfinite(clean_arr)) or not np.all(np.isfinite(inj_arr)):
                 continue
-            out = paired_injection_gate(clean_arr, inj_arr, sigma_ref=1.0)  # sref unused (report-only)
-            print(f"  {survey:<6} {param:<4} {n_pairs:>3} {n_div:>4} "
-                  f"{out['delta_mean']:>+11.4f} {out['delta_se']:>9.4f} {out['stat']:>11.4f} "
-                  f"{'--':>10} {'--':>9} {'report-only':>16}  (not gated)")
+            out = paired_injection_gate(
+                clean_arr, inj_arr, sigma_ref=1.0
+            )  # sref unused (report-only)
+            print(
+                f"  {survey:<6} {param:<4} {n_pairs:>3} {n_div:>4} "
+                f"{out['delta_mean']:>+11.4f} {out['delta_se']:>9.4f} {out['stat']:>11.4f} "
+                f"{'--':>10} {'--':>9} {'report-only':>16}  (not gated)"
+            )
 
     print("  " + "-" * (len(hdr) - 2))
     if not any_present:
-        print("\n  OVERALL: (pending) — no RCINJ checkpoints found. Launch the gate arm (compute-gated, "
-              "PI sign-off) then re-run this script.")
+        print(
+            "\n  OVERALL: (pending) — no RCINJ checkpoints found. Launch the gate arm (compute-gated, "
+            "PI sign-off) then re-run this script."
+        )
         return
     if any_fail:
-        print("\n  OVERALL: FAIL — at least one (leg, param) exceeds 0.3*sigma_ref. The NORC forward's "
-              "blindness to the real res_corr LEAKS into cosmology on that leg.")
-        print("           ACTION: a z-resolved res_corr treatment (or a per-leg res_corr nuisance) is "
-              "needed there; re-run the gate.")
+        print(
+            "\n  OVERALL: FAIL — at least one (leg, param) exceeds 0.3*sigma_ref. The NORC forward's "
+            "blindness to the real res_corr LEAKS into cosmology on that leg."
+        )
+        print(
+            "           ACTION: a z-resolved res_corr treatment (or a per-leg res_corr nuisance) is "
+            "needed there; re-run the gate."
+        )
     else:
         _legs = ", ".join(surveys)
-        print(f"\n  OVERALL: PASS — A_p & n_s within 0.3*sigma_ref on ALL run legs ({_legs}). The "
-              "deployed NORC drop is cosmology-safe: dropping res_corr does not leak into n_s/A_p.")
+        print(
+            f"\n  OVERALL: PASS — A_p & n_s within 0.3*sigma_ref on ALL run legs ({_legs}). The "
+            "deployed NORC drop is cosmology-safe: dropping res_corr does not leak into n_s/A_p."
+        )
 
     if not a.no_fig and fig_rows:
         _write_figure(fig_rows, any_fail)
@@ -382,6 +439,7 @@ def main():
 def _write_figure(fig_rows, any_fail):
     """Bar of stat vs 0.3*sigma_ref per (survey, param); bar GREEN if PASS, RED if FAIL."""
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -395,21 +453,31 @@ def _write_figure(fig_rows, any_fail):
 
     fig, ax = plt.subplots(figsize=(max(7.5, 1.4 * len(fig_rows) + 3), 4.8))
     colors = ["#2e7d32" if pz else "#c62828" for pz in passed]
-    ax.bar(x, stats, width=0.6, color=colors, alpha=0.85,
-           label="|mean Δ| + 2·SE (the gate statistic)")
+    ax.bar(
+        x, stats, width=0.6, color=colors, alpha=0.85, label="|mean Δ| + 2·SE (the gate statistic)"
+    )
     # the per-cell 0.3*sigma_ref threshold (varies by survey/param) as red caps.
     for xi, t in zip(x, thrs):
         ax.plot([xi - 0.32, xi + 0.32], [t, t], color="k", lw=2.0, zorder=5)
     ax.plot([], [], color="k", lw=2.0, label=r"$0.3\,\sigma_{\rm ref}$ threshold")
     for xi, st, t, npz in zip(x, stats, thrs, npairs):
-        ax.annotate(f"{st:.3f}\n(N={npz})", (xi, st), textcoords="offset points",
-                    xytext=(0, 5), ha="center", fontsize=8)
+        ax.annotate(
+            f"{st:.3f}\n(N={npz})",
+            (xi, st),
+            textcoords="offset points",
+            xytext=(0, 5),
+            ha="center",
+            fontsize=8,
+        )
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=10)
     ax.set_ylabel(r"$|\overline{\Delta}| + 2\,{\rm SE}$  (fixed-reference units)")
     verdict = "FAIL" if any_fail else "PASS"
-    ax.set_title("NORC res_corr injection-recovery gate — paired clean-vs-injected\n"
-                 f"OVERALL {verdict}  (bar < cap ⇒ PASS; per leg DESI/KS/eBOSS)", fontsize=11)
+    ax.set_title(
+        "NORC res_corr injection-recovery gate — paired clean-vs-injected\n"
+        f"OVERALL {verdict}  (bar < cap ⇒ PASS; per leg DESI/KS/eBOSS)",
+        fontsize=11,
+    )
     ax.legend(fontsize=9, loc="upper right")
     ax.set_ylim(0, max([*stats, *thrs, 1e-6]) * 1.35)
     fig.tight_layout()

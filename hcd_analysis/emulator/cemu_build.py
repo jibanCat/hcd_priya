@@ -2,7 +2,9 @@
 before any final product is built): simulation-level cross-validation folds, per-cell second moments of the
 leave-one-simulation-out ensemble residuals, PSD-preserving smoothing along ln(mode) and z, the Gaussian predictive
 score used for model selection, and the modes that bracket a leg's data bins over the whole sampling box.
-Products are calibrated uncertainty tables: nothing here is a function of the cosmological or nuisance parameters."""
+Products are calibrated uncertainty tables: nothing here is a function of the cosmological or nuisance parameters.
+"""
+
 from __future__ import annotations
 
 from typing import NamedTuple
@@ -10,19 +12,24 @@ from typing import NamedTuple
 import numpy as np
 
 from .kcoord import kbounds_over_box
-from .products import dla_core_at  # noqa: F401  (the reader; builders and tests use it from here too)
+from .products import (
+    dla_core_at,
+)  # noqa: F401  (the reader; builders and tests use it from here too)
 
 
 def load_loo_ensemble_residuals(eval_dir, d, sims=None, n_members=5):
     """The 60-fold leave-one-simulation-out ENSEMBLE residuals (gate C): for each held-out simulation index, the mean over
     its n_members evaluations (seed 0 ``eval_loo60_s{NN}.npz``, seeds 1.. ``loo60_ensemble/eval_loo60_s{NN}_seed{S}.npz``)
     of the per-class fractional residuals at every mode of every one of its cache rows (common truth, so the member
-    mean is the residual of the mean prediction). Returns rows (cache indices), sim, z, alpha_idx, tau0 and r (rows, 4, K)."""
+    mean is the residual of the mean prediction). Returns rows (cache indices), sim, z, alpha_idx, tau0 and r (rows, 4, K).
+    """
     sims = range(60) if sims is None else sims
     out = {k: [] for k in ("rows", "r")}
     for n in sims:
-        files = [f"{eval_dir}/eval_loo60_s{n:02d}.npz"] + [f"{eval_dir}/loo60_ensemble/eval_loo60_s{n:02d}_seed{s}.npz"
-                                                            for s in range(1, n_members)]
+        files = [f"{eval_dir}/eval_loo60_s{n:02d}.npz"] + [
+            f"{eval_dir}/loo60_ensemble/eval_loo60_s{n:02d}_seed{s}.npz"
+            for s in range(1, n_members)
+        ]
         ev = [np.load(p, allow_pickle=True) for p in files]
         rows = np.asarray(ev[0]["rows"])
         for e in ev[1:]:
@@ -31,9 +38,14 @@ def load_loo_ensemble_residuals(eval_dir, d, sims=None, n_members=5):
         out["rows"].append(rows)
         out["r"].append(np.mean([np.asarray(e["res_cls"], float) for e in ev], axis=0))
     rows = np.concatenate(out["rows"])
-    return dict(rows=rows, r=np.concatenate(out["r"]), sim=np.asarray(d["sim_name"]).astype(str)[rows],
-                z=np.asarray(d["z_grid"], float)[rows], alpha_idx=np.asarray(d["alpha_idx"])[rows],
-                tau0=np.asarray(d["tau0"], float)[rows])
+    return dict(
+        rows=rows,
+        r=np.concatenate(out["r"]),
+        sim=np.asarray(d["sim_name"]).astype(str)[rows],
+        z=np.asarray(d["z_grid"], float)[rows],
+        alpha_idx=np.asarray(d["alpha_idx"])[rows],
+        tau0=np.asarray(d["tau0"], float)[rows],
+    )
 
 
 def cv_folds(sim_names, n_folds=10):
@@ -59,7 +71,7 @@ def second_moment_cells(r, cell, n_cells):
 
 def _kernel(x, width):
     d = (np.asarray(x, float)[:, None] - np.asarray(x, float)[None, :]) / width
-    w = np.exp(-0.5 * d ** 2)
+    w = np.exp(-0.5 * d**2)
     return w / w.sum(axis=1, keepdims=True)
 
 
@@ -83,8 +95,8 @@ def smooth_z(rho, z, s_z):
 def gaussian_score(r, cov, jitter=1e-10):
     """Sum over rows and modes of the C-dimensional Gaussian log density of r (rows, C, K) under cov (rows, C, C, K),
     with the production jitter (jitter x the mean diagonal) added to each block."""
-    r = np.moveaxis(np.asarray(r, float), 2, 1)                      # (rows, K, C)
-    cov = np.moveaxis(np.asarray(cov, float), 3, 1)                  # (rows, K, C, C)
+    r = np.moveaxis(np.asarray(r, float), 2, 1)  # (rows, K, C)
+    cov = np.moveaxis(np.asarray(cov, float), 3, 1)  # (rows, K, C, C)
     C = r.shape[-1]
     diag_mean = np.einsum("...ii->...", cov) / C
     cov = cov + (jitter * diag_mean)[..., None, None] * np.eye(C)
@@ -128,16 +140,17 @@ def combined_variance(P, coef, rho):
     Shapes: P (..., C, K), coef (..., C), rho (..., C, C, K)."""
     P_obs = np.einsum("...c,...ck->...k", coef, P)
     var = np.einsum("...c,...d,...cdk,...ck,...dk->...k", coef, coef, rho, P, P)
-    return var / P_obs ** 2, P_obs
+    return var / P_obs**2, P_obs
 
 
 def combined_logpdf_modes(r, P, coef, rho, mask):
     """Per-mode Gaussian log density of the production-combined fractional residual e = sum_c coef_c P_c r_c / P_obs
-    under its predicted fractional variance; 0 outside ``mask`` (K,) or (..., K). r, P (..., C, K)."""
+    under its predicted fractional variance; 0 outside ``mask`` (K,) or (..., K). r, P (..., C, K).
+    """
     var, P_obs = combined_variance(P, coef, rho)
     e = np.einsum("...c,...ck,...ck->...k", coef, P, r) / P_obs
     with np.errstate(divide="ignore", invalid="ignore"):
-        lp = -0.5 * (e ** 2 / var + np.log(2.0 * np.pi * var))
+        lp = -0.5 * (e**2 / var + np.log(2.0 * np.pi * var))
     return np.where(mask, lp, 0.0)
 
 
@@ -149,8 +162,8 @@ def combined_logpdf(r, P, coef, rho, mask):
 def class_logpdf_modes(r, cov, mask, jitter=1e-10):
     """Per-mode 4 x 4 (cross-class) Gaussian log density of r (..., C, K) under cov (..., C, C, K) with the production
     jitter; 0 outside ``mask``. A non-positive-definite block inside the mask raises."""
-    rr = np.moveaxis(np.asarray(r, float), -1, -2)                       # (..., K, C)
-    cc = np.moveaxis(np.asarray(cov, float), -1, -3)                     # (..., K, C, C)
+    rr = np.moveaxis(np.asarray(r, float), -1, -2)  # (..., K, C)
+    cc = np.moveaxis(np.asarray(cov, float), -1, -3)  # (..., K, C, C)
     C = rr.shape[-1]
     cc = cc + (jitter * np.einsum("...ii->...", cc) / C)[..., None, None] * np.eye(C)
     sign, logdet = np.linalg.slogdet(cc)
@@ -180,7 +193,8 @@ def select_argmax(mean_scores, smooth_rank, tol=1e-6):
 
 def choose_tau0(banded, pooled, n_boot=1000, seed=0):
     """'banded' if the banded T1 beats the pooled one by more than 2 paired simulation-bootstrap SE in mean CV score,
-    else 'pooled' (amendment A1 rev 1 section 1: a banded win STOPS for the PI; the caller acts on it)."""
+    else 'pooled' (amendment A1 rev 1 section 1: a banded win STOPS for the PI; the caller acts on it).
+    """
     gain = float(np.mean(np.asarray(banded) - np.asarray(pooled)))
     return "banded" if gain > 2.0 * paired_se(banded, pooled, n_boot, seed) else "pooled"
 
@@ -189,19 +203,29 @@ def guard(scores, selected, n_boot=1000, seed=0, k_trigger=3.0, k_ok=1.0):
     """Hidden-feature guard. ``scores`` (n_sim, n_h, n_z, n_band): per-simulation CV scores per smoothing (index 0 = raw,
     increasing smoothing with index) per z cell and k band. A (z, band) cell triggers if raw beats ``selected`` by more
     than ``k_trigger`` paired SE; a triggered z cell (ALL its modes) takes the largest smoothing whose score is within
-    ``k_ok`` paired SE of raw in every triggering band (raw if none). Returns the smoothing index per z cell."""
+    ``k_ok`` paired SE of raw in every triggering band (raw if none). Returns the smoothing index per z cell.
+    """
     s = np.asarray(scores, float)
     n_h, n_z, n_band = s.shape[1:]
     out = np.full(n_z, int(selected))
     for z in range(n_z):
-        trig = [b for b in range(n_band)
-                if np.mean(s[:, 0, z, b] - s[:, selected, z, b])
-                > k_trigger * paired_se(s[:, 0, z, b], s[:, selected, z, b], n_boot, seed)]
+        trig = [
+            b
+            for b in range(n_band)
+            if np.mean(s[:, 0, z, b] - s[:, selected, z, b])
+            > k_trigger * paired_se(s[:, 0, z, b], s[:, selected, z, b], n_boot, seed)
+        ]
         if not trig:
             continue
-        ok = [h for h in range(n_h)
-              if all(np.mean(s[:, 0, z, b] - s[:, h, z, b]) <= k_ok * paired_se(s[:, 0, z, b], s[:, h, z, b], n_boot, seed)
-                     for b in trig)]
+        ok = [
+            h
+            for h in range(n_h)
+            if all(
+                np.mean(s[:, 0, z, b] - s[:, h, z, b])
+                <= k_ok * paired_se(s[:, 0, z, b], s[:, h, z, b], n_boot, seed)
+                for b in trig
+            )
+        ]
         out[z] = max(ok) if ok else 0
     return out
 
@@ -211,6 +235,7 @@ class T1Data(NamedTuple):
     coef (R, 4) production class coefficients; alpha (R,) tau0-ladder factor, band (R,) tau0 band, centres (B,) band
     centres; zc (R,) z cell index, sim (R,) simulation name; z_cells (n_z,); mask (n_z, K) scored modes; kband (n_z, K)
     k band of each mode (box-centre physical k)."""
+
     r: np.ndarray
     P: np.ndarray
     coef: np.ndarray
@@ -249,7 +274,9 @@ def t1_rho_rows(T, rows, rho, pooled):
     zc = np.asarray(T.zc)[rows]
     for iz in np.unique(zc):
         sel = zc == iz
-        out[sel] = rho_interp_alpha(np.moveaxis(rho[iz], 0, -1), centres, np.asarray(T.alpha)[rows][sel])
+        out[sel] = rho_interp_alpha(
+            np.moveaxis(rho[iz], 0, -1), centres, np.asarray(T.alpha)[rows][sel]
+        )
     return out
 
 
@@ -293,26 +320,45 @@ def t1_cv(T, cands, n_folds=10):
 def t1_select(cv, cands, n_boot=1000, seed=0):
     """Amendment A1 rev 1 section 1 rules on the CV scores: per tau0 option the (h, s_z) argmax (ties to more
     smoothing); pooled unless banded wins by > 2 paired SE (then ``tau0`` = 'banded' and the caller STOPS; the pooled
-    choice is the working one); the whole-z-cell guard against raw (h = 0, s_z = 0) at 3 paired SE."""
+    choice is the working one); the whole-z-cell guard against raw (h = 0, s_z = 0) at 3 paired SE.
+    """
     main = cv["main"]
     means = main.mean(axis=0)
     best = {}
     for pooled in sorted({c[2] for c in cands}):
         idx = [i for i, c in enumerate(cands) if c[2] == pooled]
         best[pooled] = idx[select_argmax(means[idx], _smooth_rank(cands, idx))]
-    tau0 = choose_tau0(main[:, best[False]], main[:, best[True]], n_boot, seed) if len(best) == 2 else \
-        ("pooled" if True in best else "banded")
+    tau0 = (
+        choose_tau0(main[:, best[False]], main[:, best[True]], n_boot, seed)
+        if len(best) == 2
+        else ("pooled" if True in best else "banded")
+    )
     chosen = best[True] if True in best else best[False]
     h_sel, s_sel, pooled = cands[chosen]
     raw_i = cands.index((0.0, 0.0, pooled))
-    ladder = [raw_i] + sorted((i for i, c in enumerate(cands) if c[2] == pooled and c[1] == s_sel and i != raw_i),
-                              key=lambda i: cands[i][0])
+    ladder = [raw_i] + sorted(
+        (i for i, c in enumerate(cands) if c[2] == pooled and c[1] == s_sel and i != raw_i),
+        key=lambda i: cands[i][0],
+    )
     g = guard(cv["cell"][:, ladder], ladder.index(chosen), n_boot, seed)
     h_of_z = [cands[ladder[i]][0] for i in g]
-    return dict(chosen=chosen, tau0=tau0, best_pooled=best.get(True), best_banded=best.get(False),
-                tau0_gain=(float(np.mean(main[:, best[False]] - main[:, best[True]])) if len(best) == 2 else None),
-                tau0_gain_se=(paired_se(main[:, best[False]], main[:, best[True]], n_boot, seed) if len(best) == 2 else None),
-                means=means.tolist(), h_of_z=h_of_z, guard_triggered=[int(iz) for iz in np.where(np.array(h_of_z) != h_sel)[0]])
+    return dict(
+        chosen=chosen,
+        tau0=tau0,
+        best_pooled=best.get(True),
+        best_banded=best.get(False),
+        tau0_gain=(
+            float(np.mean(main[:, best[False]] - main[:, best[True]])) if len(best) == 2 else None
+        ),
+        tau0_gain_se=(
+            paired_se(main[:, best[False]], main[:, best[True]], n_boot, seed)
+            if len(best) == 2
+            else None
+        ),
+        means=means.tolist(),
+        h_of_z=h_of_z,
+        guard_triggered=[int(iz) for iz in np.where(np.array(h_of_z) != h_sel)[0]],
+    )
 
 
 def t1_build(T, rows, cands, sel):
@@ -321,7 +367,7 @@ def t1_build(T, rows, cands, sel):
     return t1_smooth(t1_raw_cells(T, rows, pooled), sel["h_of_z"], s_z, T.z_cells)
 
 
-DLA_CORE_GRID = np.geomspace(4e-4, 0.1, 400)                  # s/km, amendment A1 rev 1 section 4
+DLA_CORE_GRID = np.geomspace(4e-4, 0.1, 400)  # s/km, amendment A1 rev 1 section 4
 
 
 def dla_core_z(kfkms, core, z_rows, z, k_grid=DLA_CORE_GRID):

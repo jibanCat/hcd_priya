@@ -8,7 +8,9 @@ Covers:
     mf_shape_cov=None is byte-identical (back-compat); C_shape scales as infl²; the loglik
     is finite + differentiable in θ through the shape covariance (the JAX-safety check).
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import hcd_analysis.emulator  # noqa: F401  enables jax_enable_x64
@@ -19,7 +21,9 @@ import pytest
 
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator import data_likelihood as DL
-from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
+from tests.regression import (
+    legacy_forward_pre2026_10 as LEG,
+)  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator.likelihood import gaussian_loglik
 from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
@@ -32,13 +36,21 @@ _have_desi = os.path.exists(DESI_NPZ)
 def _emu_ctx(n_k=172, n_basis=12, seed=0):
     rng = np.random.default_rng(seed)
     model = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis, key=jax.random.PRNGKey(seed))
-    pf = {"mu_marg": jnp.asarray(rng.normal(-2, 0.5, (4, n_k))),
-          "sig_marg": jnp.asarray(rng.uniform(0.5, 1.5, (4, n_k))),
-          "sig_cosmo": jnp.asarray(rng.uniform(0.02, 0.1, (4, n_k)))}
+    pf = {
+        "mu_marg": jnp.asarray(rng.normal(-2, 0.5, (4, n_k))),
+        "sig_marg": jnp.asarray(rng.uniform(0.5, 1.5, (4, n_k))),
+        "sig_cosmo": jnp.asarray(rng.uniform(0.02, 0.1, (4, n_k))),
+    }
     dla_core = jnp.asarray(rng.uniform(0.0, 0.5, n_k))
     cache_k = jnp.asarray(np.linspace(4.04e-4, 0.0694, n_k))
-    return dict(model=model, pf=pf, dla_core=dla_core, cache_k=cache_k,
-                alpha_hcd=jnp.asarray([0.06, 0.02, 0.003]), theta9=jnp.full(9, 0.5))
+    return dict(
+        model=model,
+        pf=pf,
+        dla_core=dla_core,
+        cache_k=cache_k,
+        alpha_hcd=jnp.asarray([0.06, 0.02, 0.003]),
+        theta9=jnp.full(9, 0.5),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -83,7 +95,7 @@ def test_mf_shape_cov_for_leg_psd_and_diagonal():
         zi = int(np.argmin(np.abs(sh.z - z_row[i])))
         w = LEG._logk_interp_weights(leg.k[i], sh.k)
         # diag(S F Sᵀ)_ii = wᵀ F[zi,zi-block] w  (the within-z k-block)
-        blk = sh.f_shape[zi * Nk:(zi + 1) * Nk, zi * Nk:(zi + 1) * Nk]
+        blk = sh.f_shape[zi * Nk : (zi + 1) * Nk, zi * Nk : (zi + 1) * Nk]
         assert abs(C[i, i] - w @ blk @ w) < 1e-12
 
 
@@ -96,8 +108,9 @@ def test_predict_with_shape_offdiag_pd_and_backcompat():
     tau0 = jnp.full(leg.n_z, 0.9)
     kw = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg)
     P0, C0 = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **kw)
-    P1, C1 = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
-                                     mf_shape_cov=Cfrac, mf_shape_infl=1.0, **kw)
+    P1, C1 = LEG.predict_P_obs_on_leg(
+        c["model"], c["theta9"], tau0, c["alpha_hcd"], mf_shape_cov=Cfrac, mf_shape_infl=1.0, **kw
+    )
     # back-compat: no shape cov → identical
     assert np.allclose(np.asarray(P0), np.asarray(P1))
     # the shape term adds a nonzero OFF-diagonal that the baseline (diagonal-only) lacks
@@ -119,10 +132,24 @@ def test_shape_offdiag_scales_as_infl_squared():
     tau0 = jnp.full(leg.n_z, 0.9)
     base_kw = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg)
     _, C_no = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"], **base_kw)
-    _, Ca = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
-                                    mf_shape_cov=Cfrac, mf_shape_infl=1.0, **base_kw)
-    _, Cb = LEG.predict_P_obs_on_leg(c["model"], c["theta9"], tau0, c["alpha_hcd"],
-                                    mf_shape_cov=Cfrac, mf_shape_infl=2.0, **base_kw)
+    _, Ca = LEG.predict_P_obs_on_leg(
+        c["model"],
+        c["theta9"],
+        tau0,
+        c["alpha_hcd"],
+        mf_shape_cov=Cfrac,
+        mf_shape_infl=1.0,
+        **base_kw,
+    )
+    _, Cb = LEG.predict_P_obs_on_leg(
+        c["model"],
+        c["theta9"],
+        tau0,
+        c["alpha_hcd"],
+        mf_shape_cov=Cfrac,
+        mf_shape_infl=2.0,
+        **base_kw,
+    )
     # the SHAPE CONTRIBUTION (C_total − baseline) scales as infl² everywhere (diag + off-diag).
     da = np.asarray(Ca) - np.asarray(C_no)
     db = np.asarray(Cb) - np.asarray(C_no)
@@ -141,9 +168,17 @@ def test_loglik_finite_and_differentiable_through_shape():
 
     def f(theta9):
         P, C = LEG.predict_P_obs_on_leg(
-            c["model"], theta9, tau0, c["alpha_hcd"], pf_stats=c["pf"],
-            dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
-            mf_shape_cov=Cfrac, mf_shape_infl=1.5)
+            c["model"],
+            theta9,
+            tau0,
+            c["alpha_hcd"],
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            leg=leg,
+            mf_shape_cov=Cfrac,
+            mf_shape_infl=1.5,
+        )
         return gaussian_loglik(P_data - P, C)
 
     val = f(c["theta9"])

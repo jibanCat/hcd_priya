@@ -27,6 +27,7 @@ fixed, reproducible, well-defined transform.
 This module is PURE / dependency-light (numpy + hashlib + json) so it is trivially unit-testable
 and carries no JAX import cost.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -113,8 +114,10 @@ def _shift(samples, offset, columns, sign):
     col_idx = _resolve_cols(columns)
     missing = [p for p in BLIND_PARAMS if p not in col_idx]
     if missing:
-        raise ValueError(f"blinded params {missing} absent from columns {columns} — refusing "
-                         f"to write a partially-blind artifact")
+        raise ValueError(
+            f"blinded params {missing} absent from columns {columns} — refusing "
+            f"to write a partially-blind artifact"
+        )
     for p, j in col_idx.items():
         out[:, j] = out[:, j] + sign * offset[p]
     return out
@@ -143,9 +146,13 @@ def git_commit(repo=None):
     if repo is None:
         from ..paths import REPO_ROOT_STR as repo
     try:
-        return subprocess.check_output(
-            ["git", "-C", repo, "rev-parse", "--short", "HEAD"],
-            stderr=subprocess.DEVNULL).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "-C", repo, "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL
+            )
+            .decode()
+            .strip()
+        )
     except Exception:
         return "nogit"
 
@@ -157,15 +164,16 @@ def make_seed_str(project_string, commit=None, repo=None):
     return f"{project_string}@{c}"
 
 
-def write_blind_lock(path, project_string, commit=None, repo=None,
-                     extra=None):
+def write_blind_lock(path, project_string, commit=None, repo=None, extra=None):
     """Write ``blind.lock`` (JSON): the project string + git commit + the derived SEED STRING,
     plus metadata. The OFFSET VALUES are DELIBERATELY NOT WRITTEN (the lock is committable; the
     offset is recomputed at unblind time from the seed). Refuses to overwrite an existing lock
     (a re-write would silently change the blind — the seed must be frozen)."""
     if os.path.exists(path):
-        raise FileExistsError(f"{path} already exists — the blind seed is frozen; refusing to "
-                              f"overwrite (delete it manually only if you intend to re-blind)")
+        raise FileExistsError(
+            f"{path} already exists — the blind seed is frozen; refusing to "
+            f"overwrite (delete it manually only if you intend to re-blind)"
+        )
     seed_str = make_seed_str(project_string, commit=commit, repo=repo)
     rec = dict(
         project_string=project_string,
@@ -175,8 +183,10 @@ def write_blind_lock(path, project_string, commit=None, repo=None,
         offset_sigma_multiple=OFFSET_SIGMA_MULTIPLE,
         prior_sigma={p: prior_sigma(p) for p in BLIND_PARAMS},
         created_utc=datetime.now(timezone.utc).isoformat(),
-        note=("BLIND SEED ONLY. The offset is derived from seed_str at view time and is NOT "
-              "stored here. Do not record the offset anywhere committable until UNBLINDING."),
+        note=(
+            "BLIND SEED ONLY. The offset is derived from seed_str at view time and is NOT "
+            "stored here. Do not record the offset anywhere committable until UNBLINDING."
+        ),
     )
     if extra:
         rec.update(extra)

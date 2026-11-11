@@ -35,6 +35,7 @@ precedence, with the config file (or ``--set``) as the explicit input and ``HCD_
 the variables (``hcd_analysis.config``). They are directories of simulation outputs, not digest-verified here: each
 catalogue records the identity of the snapshot it was built from.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -63,21 +64,25 @@ class DataProductConflict(DataProductError):
 @dataclasses.dataclass(frozen=True)
 class LoadRecord:
     """What one verified load of one file established."""
+
     product_id: str
     version: str
     file: str
-    sha256: str                    # the verified digest, equal to the registry's
-    source: str                    # "argument" or "environment variable <VAR>"
-    path: str                      # the path as given, or as built from the variable
-    real_path: str                 # os.path.realpath(path): symlinks and relative parts resolved
+    sha256: str  # the verified digest, equal to the registry's
+    source: str  # "argument" or "environment variable <VAR>"
+    path: str  # the path as given, or as built from the variable
+    real_path: str  # os.path.realpath(path): symlinks and relative parts resolved
 
     def line(self) -> str:
-        return (f"{self.product_id} {self.file}: {self.version} verified (sha256 {self.sha256[:12]}...), found by "
-                f"{self.source} at {self.path} (real path {self.real_path})")
+        return (
+            f"{self.product_id} {self.file}: {self.version} verified (sha256 {self.sha256[:12]}...), found by "
+            f"{self.source} at {self.path} (real path {self.real_path})"
+        )
 
 
 class ProductTuple(tuple):
     """A loader's tuple result that also carries the :class:`LoadRecord` of each file it read (``data_products``)."""
+
     data_products = ()
 
     def __new__(cls, items, data_products=()):
@@ -90,39 +95,57 @@ class ProductTuple(tuple):
 class DataProduct:
     product_id: str
     version: str
-    env: str                       # the environment variable naming the directory
-    subdir: str                    # the product's directory under it
-    files: Mapping[str, str]       # file name -> sha256 of its bytes
+    env: str  # the environment variable naming the directory
+    subdir: str  # the product's directory under it
+    files: Mapping[str, str]  # file name -> sha256 of its bytes
 
 
 PRODUCTS = {
     "desi_dr1_p1d": DataProduct(
-        "desi_dr1_p1d", "DESI DR1 P1D, SNR>1 baseline sample, npz from scripts/convert_desi_dr1_p1d.py",
-        "HCD_P1D_DATA_DIR", "desi_dr1_p1d",
-        {"desi_dr1_p1d.npz": "8d5153d861f21d2ac0a1894f99dd2a9d633a39cc07fa564aac1cba78429c9296"}),
+        "desi_dr1_p1d",
+        "DESI DR1 P1D, SNR>1 baseline sample, npz from scripts/convert_desi_dr1_p1d.py",
+        "HCD_P1D_DATA_DIR",
+        "desi_dr1_p1d",
+        {"desi_dr1_p1d.npz": "8d5153d861f21d2ac0a1894f99dd2a9d633a39cc07fa564aac1cba78429c9296"},
+    ),
     "desi_dr1_p1d_snr3": DataProduct(
-        "desi_dr1_p1d_snr3", "DESI DR1 P1D, SNR>3 sample (the DR1 cosmology baseline), npz",
-        "HCD_P1D_DATA_DIR", "desi_dr1_p1d",
-        {"desi_dr1_p1d_snr3.npz": "20c526b9d2be91ebb80ad44ed1cede23eb5a81e04903173e54e937039cce3b64"}),
+        "desi_dr1_p1d_snr3",
+        "DESI DR1 P1D, SNR>3 sample (the DR1 cosmology baseline), npz",
+        "HCD_P1D_DATA_DIR",
+        "desi_dr1_p1d",
+        {
+            "desi_dr1_p1d_snr3.npz": "20c526b9d2be91ebb80ad44ed1cede23eb5a81e04903173e54e937039cce3b64"
+        },
+    ),
     "eboss_dr14_p1d": DataProduct(
-        "eboss_dr14_p1d", "eBOSS DR14 P1D (Chabanier et al. 2019), npz from scripts/convert_eboss_dr14_p1d.py",
-        "HCD_P1D_DATA_DIR", "eboss_dr14_p1d",
-        {"eboss_dr14_p1d.npz": "843f8f246a9fb3fb3d3a3c180ab58c19b0b2f823aa738222e514eb351e886e96"}),
+        "eboss_dr14_p1d",
+        "eBOSS DR14 P1D (Chabanier et al. 2019), npz from scripts/convert_eboss_dr14_p1d.py",
+        "HCD_P1D_DATA_DIR",
+        "eboss_dr14_p1d",
+        {"eboss_dr14_p1d.npz": "843f8f246a9fb3fb3d3a3c180ab58c19b0b2f823aa738222e514eb351e886e96"},
+    ),
     "ks_p1d_conservative": DataProduct(
-        "ks_p1d_conservative", "KODIAQ-SQUAD P1D, conservative mode (Karacayli et al. 2021), as distributed with lyaemu",
-        "HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad",
-        {"final-conservative-p1d-karacayli_etal2021.txt":
-             "299b11cbb394848a04787498ba64fd1ba958db598c0fbadc082724347c1e9dbf",
-         "final-conservative-covariance-karacayli_etal2021.txt":
-             "a3f317d812c9afa2557837e25fdf06e2afdc268df438cd4a412203623f603d98",
-         "detailed-p1d-results-karacayli_etal2021.txt":
-             "f443a491eead6730f65e9e19a96a247d92947aed307323c95cf7304879975517"}),
+        "ks_p1d_conservative",
+        "KODIAQ-SQUAD P1D, conservative mode (Karacayli et al. 2021), as distributed with lyaemu",
+        "HCD_LYAEMU_PARENT",
+        "lyaemu/data/kodiaq_squad",
+        {
+            "final-conservative-p1d-karacayli_etal2021.txt": "299b11cbb394848a04787498ba64fd1ba958db598c0fbadc082724347c1e9dbf",
+            "final-conservative-covariance-karacayli_etal2021.txt": "a3f317d812c9afa2557837e25fdf06e2afdc268df438cd4a412203623f603d98",
+            "detailed-p1d-results-karacayli_etal2021.txt": "f443a491eead6730f65e9e19a96a247d92947aed307323c95cf7304879975517",
+        },
+    ),
     "mf_res_corr": DataProduct(
-        "mf_res_corr", "PRIYA L15n512/L15n384 resolution-correction table, the KS emulator directory's res_corr",
-        "HCD_KS_BASEDIR", "res_corr",
-        {"resolution_correction.txt": "7b3dded248ff050adac0313a675324dd736bcc8fb8d8893a9f2ec2dbb0710491",
-         "kfkms.txt": "2901188e1eb0de12bce17ebde474ca5d476022391c3d249c10c4d611899b4e90",
-         "zout.txt": "67715b9d068a0d26a631373e9248a3c3b90f12585cacacd180f4ea858b5aad87"}),
+        "mf_res_corr",
+        "PRIYA L15n512/L15n384 resolution-correction table, the KS emulator directory's res_corr",
+        "HCD_KS_BASEDIR",
+        "res_corr",
+        {
+            "resolution_correction.txt": "7b3dded248ff050adac0313a675324dd736bcc8fb8d8893a9f2ec2dbb0710491",
+            "kfkms.txt": "2901188e1eb0de12bce17ebde474ca5d476022391c3d249c10c4d611899b4e90",
+            "zout.txt": "67715b9d068a0d26a631373e9248a3c3b90f12585cacacd180f4ea858b5aad87",
+        },
+    ),
 }
 
 
@@ -152,7 +175,8 @@ def _explicit(p: DataProduct, explicit, name: Optional[str] = None) -> Optional[
         what = f"{p.subdir}/{name}" if name else f"{p.subdir}/"
         raise DataProductError(
             f"{p.product_id} ({p.version}): the path passed to the loader is empty. Pass the path of {what}, or pass "
-            f"None to use {p.env}.")
+            f"None to use {p.env}."
+        )
     return explicit
 
 
@@ -167,11 +191,13 @@ def _where(p: DataProduct, explicit: Optional[str], name: Optional[str] = None):
     if root is None:
         raise DataProductError(
             f"{p.product_id} ({p.version}): no location given. Set {p.env} to the directory under which "
-            f"{what} lies, or pass the path to the loader. There is no built-in default.")
+            f"{what} lies, or pass the path to the loader. There is no built-in default."
+        )
     if not root.strip():
         raise DataProductError(
             f"{p.product_id} ({p.version}): {p.env} is set but empty. Set it to the directory under which {what} "
-            f"lies, or unset it and pass the path to the loader.")
+            f"lies, or unset it and pass the path to the loader."
+        )
     return os.path.join(root, p.subdir), f"environment variable {p.env}"
 
 
@@ -179,17 +205,23 @@ def _verify(p: DataProduct, name: str, path: str, source: str) -> LoadRecord:
     if not os.path.isfile(path):
         raise DataProductError(
             f"{p.product_id} ({p.version}): {p.subdir}/{name} not found at {path} (from {source}). Point {p.env} at "
-            f"the directory that holds {p.subdir}/, or pass the file's path to the loader.")
+            f"the directory that holds {p.subdir}/, or pass the file's path to the loader."
+        )
     digest = _sha256_file(path)
     if digest != p.files[name]:
-        other = [(q.product_id, f) for q in PRODUCTS.values() for f, d in q.files.items() if d == digest]
+        other = [
+            (q.product_id, f) for q in PRODUCTS.values() for f, d in q.files.items() if d == digest
+        ]
         if other:
             raise DataProductError(
                 f"{p.product_id}: the file at {path} (from {source}) is {other[0][0]}'s {other[0][1]}, not "
-                f"{p.subdir}/{name}. Check {p.env} or the path passed to the loader.", other_product=other[0][0])
+                f"{p.subdir}/{name}. Check {p.env} or the path passed to the loader.",
+                other_product=other[0][0],
+            )
         raise DataProductError(
             f"{p.product_id}: the file at {path} (from {source}) is an unknown version of {p.subdir}/{name}: "
-            f"sha256 {digest[:12]}..., expected {p.files[name][:12]}... ({p.version}). Use the release's file.")
+            f"sha256 {digest[:12]}..., expected {p.files[name][:12]}... ({p.version}). Use the release's file."
+        )
     rec = LoadRecord(p.product_id, p.version, name, digest, source, path, os.path.realpath(path))
     _log.info("%s", rec.line())
     return rec
@@ -201,7 +233,7 @@ def resolve_file(product_id: str, name: str, explicit=None) -> LoadRecord:
     :class:`DataProductError` when the file cannot be found or is not the recorded bytes, or the explicit path or the
     variable is empty, and ``KeyError`` for an unlisted product or file."""
     p = PRODUCTS[product_id]
-    p.files[name]                                  # KeyError for a file the product does not list
+    p.files[name]  # KeyError for a file the product does not list
     explicit = _explicit(p, explicit, name)
     if explicit is not None:
         return _verify(p, name, explicit, "argument")

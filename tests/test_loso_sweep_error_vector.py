@@ -3,6 +3,7 @@ checkpoints, with provenance, and never overwrites another sweep's.
 
 Four gate C sweeps (repaired seeds 0, 1, 2 and the historical-cache seed 0) wrote ``<out parent>/error_vector.npz`` to
 the same directory; the surviving file was the repaired seed-1 sweep's and carried no provenance."""
+
 import hashlib
 import json
 import os
@@ -22,10 +23,38 @@ SWEEP = os.path.join(REPO, "scripts", "run_loso_sweep.py")
 def _sweep(cache, out, seed, workdir):
     env = dict(os.environ, PYTHONNOUSERSITE="1", PYTHONPATH=REPO, JAX_PLATFORMS="cpu")
     return subprocess.run(
-        [sys.executable, SWEEP, "--cache", str(cache), "--n-folds", "2", "--epochs", "1", "--patience", "1",
-         "--n-basis", "4", "--z-bands", "1", "--tau0-bands", "1", "--seed", str(seed), "--out", str(out),
-         "--figdir", str(workdir / f"figs_{seed}"), "--histdir", str(workdir / f"hist_{seed}")],
-        capture_output=True, text=True, env=env, cwd=str(workdir), timeout=900)
+        [
+            sys.executable,
+            SWEEP,
+            "--cache",
+            str(cache),
+            "--n-folds",
+            "2",
+            "--epochs",
+            "1",
+            "--patience",
+            "1",
+            "--n-basis",
+            "4",
+            "--z-bands",
+            "1",
+            "--tau0-bands",
+            "1",
+            "--seed",
+            str(seed),
+            "--out",
+            str(out),
+            "--figdir",
+            str(workdir / f"figs_{seed}"),
+            "--histdir",
+            str(workdir / f"hist_{seed}"),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(workdir),
+        timeout=900,
+    )
 
 
 def _sha(p):
@@ -36,9 +65,11 @@ def _sha(p):
 def two_sweeps(tmp_path_factory):
     """The sweep reads its cache with the strict ``data.load_cache`` (format 3.4, a release-eligible lineage record),
     so the test cache is a 3.4 synthetic cache written through the library's own writer (``tau0_cache.write_cache``,
-    by ``write_synthetic_cache_v34``), its record made with the code identity patched to a clean commit."""
+    by ``write_synthetic_cache_v34``), its record made with the code identity patched to a clean commit.
+    """
     from tests import tau0_fixtures as tf
     from tests.emulator._fixture import write_synthetic_cache_v34
+
     d = tmp_path_factory.mktemp("sweeps")
     cache = d / "obs.h5"
     with pytest.MonkeyPatch.context() as mp:
@@ -52,7 +83,7 @@ def test_loso_sweep_error_vector_is_run_specific(two_sweeps):
     d, cache, runs = two_sweeps
     for s, r in runs.items():
         assert r.returncode == 0, r.stderr[-3000:]
-    assert not (d / "error_vector.npz").exists()                 # nothing at the shared, run-agnostic path
+    assert not (d / "error_vector.npz").exists()  # nothing at the shared, run-agnostic path
     paths = {s: d / f"loso8_seed{s}.error_vector.npz" for s in (0, 1)}
     assert all(p.exists() for p in paths.values())
     assert _sha(paths[0]) != _sha(paths[1])
@@ -72,7 +103,7 @@ def test_loso_sweep_refuses_to_overwrite_an_error_vector_before_training(two_swe
     r = _sweep(cache, d / "loso8_seed0", 0, d)
     assert r.returncode != 0
     assert "refus" in (r.stderr + r.stdout).lower() and "error_vector" in (r.stderr + r.stdout)
-    assert "=== fold 0" not in r.stdout                          # refused before any training
+    assert "=== fold 0" not in r.stdout  # refused before any training
     assert _sha(p) == before
 
 
@@ -82,6 +113,7 @@ def test_git_sha_falls_back_to_the_launch_export_commit(monkeypatch):
 
     def no_git(*a, **k):
         raise FileNotFoundError("no git here")
+
     monkeypatch.setattr(T.subprocess, "run", no_git)
     monkeypatch.delenv("HCD_CODE_COMMIT", raising=False)
     assert T._git_sha() is None

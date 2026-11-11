@@ -1,6 +1,7 @@
 """scripts/derive_hcd_dndx_corrected.py is a historical derivation: its strict tier reads the cache through the strict
 loader and stops when that loader refuses the cache (a pre-lineage one included), never falling back to a pinned
 value. Synthetic cache only."""
+
 import importlib.util
 import os
 
@@ -13,8 +14,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def test_the_strict_tier_fails_loudly_on_a_cache_the_release_loader_refuses(tmp_path, monkeypatch):
-    spec = importlib.util.spec_from_file_location("derive_hcd_dndx_corrected",
-                                                  os.path.join(REPO, "scripts", "derive_hcd_dndx_corrected.py"))
+    spec = importlib.util.spec_from_file_location(
+        "derive_hcd_dndx_corrected", os.path.join(REPO, "scripts", "derive_hcd_dndx_corrected.py")
+    )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     assert mod.__doc__.startswith("HISTORICAL")

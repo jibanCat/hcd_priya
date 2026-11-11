@@ -13,6 +13,7 @@ get their links rewritten by ``rewrite_included_links``: a link to a file that i
 that page, and a link to any other repository file points to that file on GitHub (an image to its raw bytes, so it
 displays). A link to a file that does not exist stops the build.
 """
+
 from __future__ import annotations
 
 import os
@@ -39,7 +40,9 @@ release = version = _version()
 
 extensions = ["myst_parser", "autoapi.extension", "sphinxcontrib.mermaid"]
 source_suffix = {".md": "markdown"}
-myst_fence_as_directive = ["mermaid"]  # a ```mermaid block is drawn as a diagram, as GitHub draws it
+myst_fence_as_directive = [
+    "mermaid"
+]  # a ```mermaid block is drawn as a diagram, as GitHub draws it
 root_doc = "index"
 include_patterns = [
     "index.md",
@@ -60,11 +63,11 @@ myst_heading_anchors = 3
 
 autoapi_type = "python"
 autoapi_dirs = [os.path.join(REPO, "hcd_analysis")]
-autoapi_generate_api_docs = False      # only the modules named in api.md are documented
+autoapi_generate_api_docs = False  # only the modules named in api.md are documented
 autoapi_add_toctree_entry = False
 autoapi_member_order = "bysource"
 autoapi_options = ["members", "show-inheritance", "show-module-summary"]
-autosummary_generate = False           # autoapi loads autosummary; the site generates no autosummary pages
+autosummary_generate = False  # autoapi loads autosummary; the site generates no autosummary pages
 # autoapi parses every module, also those not on the site, and its static parser cannot follow a few names bound by
 # tuple unpacking (``A, B = ...``) that other modules import. Only that warning category is silenced.
 suppress_warnings = ["autoapi.python_import_resolution"]
@@ -104,7 +107,9 @@ def rewrite_included_links(app, relative_path, parent_docname, content):
         target, anchor = m.group(1), m.group(2) or ""
         rel = os.path.normpath(target)
         if not os.path.exists(os.path.join(REPO, rel)):
-            raise RuntimeError(f"{os.path.basename(path)} links to {target}, which is not in the repository")
+            raise RuntimeError(
+                f"{os.path.basename(path)} links to {target}, which is not in the repository"
+            )
         if rel in SITE_PAGES:
             return f"]({'../' * depth}{SITE_PAGES[rel]}.md{anchor})"
         kind = "raw" if rel.lower().endswith(IMAGE_SUFFIXES) else "blob"

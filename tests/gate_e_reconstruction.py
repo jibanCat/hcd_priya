@@ -6,6 +6,7 @@ mf_family, multifidelity, data_likelihood, closure_legb, forward, likelihood, en
 Everything is re-derived here: checkpoint deserialisation, the normalisation inversion, the ensemble mean, the MF table
 evaluation, the class combination with the DLA core, the physical k of each mode from first principles, the linear
 interpolation onto the data k, and the metal and resolution factors from their formulas."""
+
 import json
 import pickle
 
@@ -15,8 +16,8 @@ import numpy as np
 
 from hcd_analysis.emulator.model import Emulator
 
-L_BOX = 120.0                    # Mpc/h
-Z_LO, Z_HI = 2.0, 5.4            # the encoder's z_unit map
+L_BOX = 120.0  # Mpc/h
+Z_LO, Z_HI = 2.0, 5.4  # the encoder's z_unit map
 C_KMS = 299792.458
 LAM = dict(lya=1215.67, siiii=1206.50, siiia=1190.42, siiib=1193.28)
 R_DOUBLET = 0.5
@@ -27,7 +28,11 @@ def load_member(prefix):
     skeleton = Emulator(**meta["arch_cfg"], key=jax.random.PRNGKey(meta["seed"]))
     model = eqx.tree_deserialise_leaves(prefix + ".eqx", skeleton)
     norm = pickle.load(open(prefix + ".norm.pkl", "rb"))
-    return model, meta, {k: np.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
+    return (
+        model,
+        meta,
+        {k: np.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")},
+    )
 
 
 def ensemble_P_filt(members, theta_unit, z, tau0):
@@ -37,7 +42,7 @@ def ensemble_P_filt(members, theta_unit, z, tau0):
         pr = model(jax.numpy.asarray(x), jax.numpy.asarray(tau0))
         base, resid = np.asarray(pr["P_filt_base"]), np.asarray(pr["P_filt_resid"])
         out.append(np.exp(base * st["sig_marg"] + st["mu_marg"] + st["sig_cosmo"] * resid))
-    return np.mean(out, axis=0)                                                    # (4, K)
+    return np.mean(out, axis=0)  # (4, K)
 
 
 def mf_g(tables, z, tau0):
@@ -47,9 +52,12 @@ def mf_g(tables, z, tau0):
     zq = ((z - Z_LO) / (Z_HI - Z_LO)) * (Z_HI - Z_LO) + Z_LO
     iz = int(np.clip(np.searchsorted(zt, zq, side="right") - 1, 0, zt.size - 2))
     wz = float(np.clip((zq - zt[iz]) / (zt[iz + 1] - zt[iz]), 0.0, 1.0))
-    ladder = np.asarray(tables["tau_by_z"])[iz] * (1 - wz) + np.asarray(tables["tau_by_z"])[iz + 1] * wz
+    ladder = (
+        np.asarray(tables["tau_by_z"])[iz] * (1 - wz) + np.asarray(tables["tau_by_z"])[iz + 1] * wz
+    )
     rung = float(np.interp(tau0, ladder, tt))
-    gbz = np.asarray(tables["gbar_z_tab"]); gtt = np.asarray(tables["gtau_tab"])
+    gbz = np.asarray(tables["gbar_z_tab"])
+    gtt = np.asarray(tables["gtau_tab"])
     C, K = gbz.shape[1], gbz.shape[2]
     gz = np.array([[np.interp(zq, zt, gbz[:, c, k]) for k in range(K)] for c in range(C)])
     gt = np.array([[np.interp(rung, tt, gtt[:, c, k]) for k in range(K)] for c in range(C)])
@@ -62,8 +70,15 @@ def k_modes(z, theta_unit, param_limits, K):
     lim = np.asarray(param_limits, float)
     hub = lim[5, 0] + theta_unit[5] * (lim[5, 1] - lim[5, 0])
     omh2 = lim[6, 0] + theta_unit[6] * (lim[6, 1] - lim[6, 0])
-    om = omh2 / hub ** 2
-    return 2 * np.pi * np.arange(1, K + 1) / L_BOX * (1 + z) / (100.0 * np.sqrt(om * (1 + z) ** 3 + 1 - om))
+    om = omh2 / hub**2
+    return (
+        2
+        * np.pi
+        * np.arange(1, K + 1)
+        / L_BOX
+        * (1 + z)
+        / (100.0 * np.sqrt(om * (1 + z) ** 3 + 1 - om))
+    )
 
 
 def metal(k, a3, a2, k3, k2):
@@ -72,8 +87,12 @@ def metal(k, a3, a2, k3, k2):
     dvb = C_KMS * np.log(LAM["lya"] / LAM["siiib"])
     D3 = 2.0 - 2.0 / (1.0 + np.exp(-k / k3))
     D2 = 2.0 - 2.0 / (1.0 + np.exp(-k / k2))
-    f = a3 ** 2 + 2 * a3 * np.cos(k * dv3) * D3 + a2 ** 2 * (1 + R_DOUBLET ** 2) \
+    f = (
+        a3**2
+        + 2 * a3 * np.cos(k * dv3) * D3
+        + a2**2 * (1 + R_DOUBLET**2)
         + 2 * a2 * (np.cos(k * dvb) + R_DOUBLET * np.cos(k * dva)) * D2
+    )
     cb = C_KMS * np.log(LAM["siiib"] / LAM["siiii"])
     ca = C_KMS * np.log(LAM["siiia"] / LAM["siiii"])
     return 1.0 + f + 2 * a3 * a2 * (np.cos(k * cb) + R_DOUBLET * np.cos(k * ca))
@@ -93,11 +112,15 @@ def core_at(kd, grid, core):
     return np.interp(np.log(kd), np.log(np.asarray(grid)[fin]), np.asarray(core)[fin])
 
 
-def reconstruct_leg(members, tables, leg, theta_unit, tau0_leg, alpha_leg, core, param_limits, nuis):
+def reconstruct_leg(
+    members, tables, leg, theta_unit, tau0_leg, alpha_leg, core, param_limits, nuis
+):
     """Model P1D on every bin of ``leg`` (dict of arrays: z, k, z_idx, R_z, metals_on, resolution_on, dla_forward_frac);
     ``core`` = (k_grid, core on the grid), the physical-k DLA core product's arrays."""
     out = np.zeros(len(leg["k"]))
-    alpha_leg = np.asarray(alpha_leg, float) * np.array([1.0, 1.0, float(leg["dla_forward_frac"])])[None, :]
+    alpha_leg = (
+        np.asarray(alpha_leg, float) * np.array([1.0, 1.0, float(leg["dla_forward_frac"])])[None, :]
+    )
     for iz, z in enumerate(leg["z"]):
         rows = np.where(np.asarray(leg["z_idx"]) == iz)[0]
         if rows.size == 0:
@@ -112,15 +135,23 @@ def reconstruct_leg(members, tables, leg, theta_unit, tau0_leg, alpha_leg, core,
         a = alpha_leg[iz]
         Pz = Pc[0] + a[0] * (Pc[1] - Pc[0]) + a[1] * (Pc[2] - Pc[0]) + a[2] * (Pc[3] + cr - Pc[0])
         if leg["metals_on"]:
-            Pz = Pz * metal_model_cplus(kd, float(z), float(tau0_leg[iz]), nuis["metal_node_z"], nuis["f_SiIII_nodes"],
-                                        nuis["f_SiII_nodes"], nuis["k_SiIII_nodes"], nuis["k_SiII_nodes"])
+            Pz = Pz * metal_model_cplus(
+                kd,
+                float(z),
+                float(tau0_leg[iz]),
+                nuis["metal_node_z"],
+                nuis["f_SiIII_nodes"],
+                nuis["f_SiII_nodes"],
+                nuis["k_SiIII_nodes"],
+                nuis["k_SiII_nodes"],
+            )
         if leg["resolution_on"]:
-            Pz = Pz * np.exp(2.0 * nuis["b_res"] * kd ** 2 * float(leg["R_z"][iz]) ** 2)
+            Pz = Pz * np.exp(2.0 * nuis["b_res"] * kd**2 * float(leg["R_z"][iz]) ** 2)
         out[rows] = Pz
     return out
 
 
-KIM_AMP, KIM_SLOPE = 2.3e-3, 3.65          # the tau0 ladder anchor (Kim et al. 2007 central curve)
+KIM_AMP, KIM_SLOPE = 2.3e-3, 3.65  # the tau0 ladder anchor (Kim et al. 2007 central curve)
 
 
 def rho_tau0(rho_zb, centres, z, tau0):
@@ -137,14 +168,19 @@ def rho_tau0(rho_zb, centres, z, tau0):
     return out
 
 
-def reconstruct_cov_leg(members, leg, theta_unit, tau0_leg, alpha_leg, core, rho_leg, centres, t3, param_limits, nuis):
+def reconstruct_cov_leg(
+    members, leg, theta_unit, tau0_leg, alpha_leg, core, rho_leg, centres, t3, param_limits, nuis
+):
     """C_total on every bin of ``leg`` (dict as reconstruct_leg plus C_data, P_data): C_data + diag(max(T1, td)) + the
     off-diagonal of the fractional T3 term B B^T (B = P_data U sqrt(w)), T1 at the data bins = fac^2 sum_cc' coef_c
     coef_c' rho_cc'(k) A_c A_c' with rho and the LF per-class P_filt interpolated linearly in k at the bins and the DLA
-    core added to A_DLA (amendment A1 rev 1 sections 1 and 3). ``rho_leg`` (n_z, 4, 4, K, B); ``t3`` (U, w) or None."""
+    core added to A_DLA (amendment A1 rev 1 sections 1 and 3). ``rho_leg`` (n_z, 4, 4, K, B); ``t3`` (U, w) or None.
+    """
     N = len(leg["k"])
     t1 = np.zeros(N)
-    alpha_leg = np.asarray(alpha_leg, float) * np.array([1.0, 1.0, float(leg["dla_forward_frac"])])[None, :]
+    alpha_leg = (
+        np.asarray(alpha_leg, float) * np.array([1.0, 1.0, float(leg["dla_forward_frac"])])[None, :]
+    )
     for iz, z in enumerate(leg["z"]):
         rows = np.where(np.asarray(leg["z_idx"]) == iz)[0]
         if rows.size == 0:
@@ -161,11 +197,19 @@ def reconstruct_cov_leg(members, leg, theta_unit, tau0_leg, alpha_leg, core, rho
         v = np.einsum("c,e,cen,cn,en->n", coef, coef, rd, A, A)
         fac = np.ones(rows.size)
         if leg["metals_on"]:
-            fac = fac * metal_model_cplus(kd, float(z), float(tau0_leg[iz]), nuis["metal_node_z"], nuis["f_SiIII_nodes"],
-                                          nuis["f_SiII_nodes"], nuis["k_SiIII_nodes"], nuis["k_SiII_nodes"])
+            fac = fac * metal_model_cplus(
+                kd,
+                float(z),
+                float(tau0_leg[iz]),
+                nuis["metal_node_z"],
+                nuis["f_SiIII_nodes"],
+                nuis["f_SiII_nodes"],
+                nuis["k_SiIII_nodes"],
+                nuis["k_SiII_nodes"],
+            )
         if leg["resolution_on"]:
-            fac = fac * np.exp(2.0 * nuis["b_res"] * kd ** 2 * float(leg["R_z"][iz]) ** 2)
-        t1[rows] = v * fac ** 2
+            fac = fac * np.exp(2.0 * nuis["b_res"] * kd**2 * float(leg["R_z"][iz]) ** 2)
+        t1[rows] = v * fac**2
     C = np.array(leg["C_data"], float)
     if t3 is None:
         return C + np.diag(t1)

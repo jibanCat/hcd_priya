@@ -13,7 +13,9 @@ Covers the two pure pieces the new arm adds (mirroring tests/test_dnuis_inject.p
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python -m pytest tests/test_dla_selfdraw_arm.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 import pytest
@@ -27,10 +29,11 @@ def _toy_truth_pack(nZg=5):
     return dict(
         theta9=rng.uniform(0.2, 0.8, 9),
         tau0_global=rng.uniform(0.9, 1.1, nZg),
-        alpha_hcd=np.array([0.7, 0.3, 0.05]),                 # (3,) [LLS, subDLA, DLA] pivot
+        alpha_hcd=np.array([0.7, 0.3, 0.05]),  # (3,) [LLS, subDLA, DLA] pivot
         alpha_hcd_z=np.stack([np.array([0.7, 0.3, 0.05]) * (1.0 + 0.1 * i) for i in range(nZg)]),
         a_siiii=0.02,
-        kept_global_z=np.ones(nZg, bool))
+        kept_global_z=np.ones(nZg, bool),
+    )
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -43,7 +46,9 @@ def test_apply_dla_truth_boost_scales_only_dla():
     out = LB.apply_dla_truth_boost(tp, boost)
     # DLA pivot + z-resolved column scaled by boost
     np.testing.assert_allclose(out["alpha_hcd"][2], tp0["alpha_hcd"][2] * boost, rtol=1e-12)
-    np.testing.assert_allclose(out["alpha_hcd_z"][:, 2], tp0["alpha_hcd_z"][:, 2] * boost, rtol=1e-12)
+    np.testing.assert_allclose(
+        out["alpha_hcd_z"][:, 2], tp0["alpha_hcd_z"][:, 2] * boost, rtol=1e-12
+    )
     # LLS + subDLA columns/pivots UNTOUCHED
     np.testing.assert_allclose(out["alpha_hcd"][:2], tp0["alpha_hcd"][:2], rtol=0, atol=0)
     np.testing.assert_allclose(out["alpha_hcd_z"][:, :2], tp0["alpha_hcd_z"][:, :2], rtol=0, atol=0)
@@ -85,11 +90,14 @@ def test_apply_truth_boosts_dla_key_threads():
 def test_apply_truth_boosts_all_three_compose():
     tp = _toy_truth_pack()
     out = LB._apply_truth_boosts(
-        tp, {"lls_truth_boost": 2.0, "subdla_truth_boost": 3.0, "dla_truth_boost": 1.5})
-    np.testing.assert_allclose(out["alpha_hcd"],
-                               tp["alpha_hcd"] * np.array([2.0, 3.0, 1.5]), rtol=1e-12)
-    np.testing.assert_allclose(out["alpha_hcd_z"],
-                               tp["alpha_hcd_z"] * np.array([2.0, 3.0, 1.5]), rtol=1e-12)
+        tp, {"lls_truth_boost": 2.0, "subdla_truth_boost": 3.0, "dla_truth_boost": 1.5}
+    )
+    np.testing.assert_allclose(
+        out["alpha_hcd"], tp["alpha_hcd"] * np.array([2.0, 3.0, 1.5]), rtol=1e-12
+    )
+    np.testing.assert_allclose(
+        out["alpha_hcd_z"], tp["alpha_hcd_z"] * np.array([2.0, 3.0, 1.5]), rtol=1e-12
+    )
 
 
 def test_apply_truth_boosts_none_and_empty_are_identity():
@@ -109,7 +117,7 @@ def test_apply_truth_boosts_ignores_non_boost_keys():
 def test_apply_truth_boosts_unknown_key_raises():
     tp = _toy_truth_pack()
     with pytest.raises(ValueError, match="unknown inject_spec key"):
-        LB._apply_truth_boosts(tp, {"dla_truthboost": 1.5})     # the typo class, fail loud
+        LB._apply_truth_boosts(tp, {"dla_truthboost": 1.5})  # the typo class, fail loud
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -121,36 +129,59 @@ from types import SimpleNamespace  # noqa: E402
 
 
 def _stub_ctx(f_res_amp_sigma=0.02):
-    return SimpleNamespace(res_corr_on=False, fix_alpha_res=True, sample_res=True,
-                           f_res_amp_sigma=f_res_amp_sigma, metal_prior="flatlog2node",
-                           metal_node_z=(2.2, 4.2))
+    return SimpleNamespace(
+        res_corr_on=False,
+        fix_alpha_res=True,
+        sample_res=True,
+        f_res_amp_sigma=f_res_amp_sigma,
+        metal_prior="flatlog2node",
+        metal_node_z=(2.2, 4.2),
+    )
 
 
 def _stub_leg(**kw):
-    base = dict(dla_cov_reduced=True, dla_forward_frac=1.0,
-                use_snr3=False, cv_floor_on=False, cv_floor_rank1=False)
+    base = dict(
+        dla_cov_reduced=True,
+        dla_forward_frac=1.0,
+        use_snr3=False,
+        cv_floor_on=False,
+        cv_floor_rank1=False,
+    )
     base.update(kw)
     return SimpleNamespace(**base)
 
 
 def test_forward_stamp_authority_keys_and_signatures():
     from hcd_analysis.emulator import inference as INF
+
     st = LB.forward_stamp(_stub_ctx(), _stub_leg())
-    for k in ("res_corr_on", "fix_alpha_res", "sample_res", "f_res_amp_sigma", "metal_prior",
-              "metal_node_z", "dla_cov_reduced", "dla_forward_frac",
-              "use_snr3", "cv_floor_on", "cv_floor_rank1",
-              "forward_signature", "hcd_prior_signature"):
+    for k in (
+        "res_corr_on",
+        "fix_alpha_res",
+        "sample_res",
+        "f_res_amp_sigma",
+        "metal_prior",
+        "metal_node_z",
+        "dla_cov_reduced",
+        "dla_forward_frac",
+        "use_snr3",
+        "cv_floor_on",
+        "cv_floor_rank1",
+        "forward_signature",
+        "hcd_prior_signature",
+    ):
         assert k in st, k
     assert st["forward_signature"] == LB.forward_signature()
-    assert st["hcd_prior_signature"] == INF.hcd_prior_signature()   # F5: the prior stamp
+    assert st["hcd_prior_signature"] == INF.hcd_prior_signature()  # F5: the prior stamp
     assert st["sample_res"] is True and st["metal_prior"] == "flatlog2node"
     assert st["dla_cov_reduced"] is True and st["dla_forward_frac"] == 1.0
     assert st["use_snr3"] is False and st["cv_floor_on"] is False
 
 
 def test_forward_stamp_threads_env_data_flags():
-    st = LB.forward_stamp(_stub_ctx(), _stub_leg(use_snr3=True, cv_floor_on=True,
-                                                 cv_floor_rank1=True))
+    st = LB.forward_stamp(
+        _stub_ctx(), _stub_leg(use_snr3=True, cv_floor_on=True, cv_floor_rank1=True)
+    )
     assert st["use_snr3"] is True and st["cv_floor_on"] is True and st["cv_floor_rank1"] is True
 
 
@@ -166,6 +197,7 @@ def test_selfdraw_runner_uses_stamp_authority_and_smoke_suffix():
     with open(f"{_REPO_ROOT}/scripts/run_dla_selfdraw_shard.py") as fh:
         src = fh.read()
     assert "forward_stamp(" in src, "meta['forward'] must come from closure_legb.forward_stamp"
-    assert "latent reconstruction" in src, \
-        "the pre-2026-07-19 hcd_prior_signature stamp gap must be documented in the docstring"
+    assert (
+        "latent reconstruction" in src
+    ), "the pre-2026-07-19 hcd_prior_signature stamp gap must be documented in the docstring"
     assert '".smoke"' in src, "smoke mode must write a .smoke-suffixed pkl (width-study mirror)"

@@ -3,6 +3,7 @@
 The built-in values of hcd_analysis.config and config/default.yaml differ, and one approved set of defaults is not
 chosen yet, so a run without a config file must stop with a clear message before any work starts. Synthetic config
 values only."""
+
 import pytest
 from click.testing import CliRunner
 
@@ -21,8 +22,10 @@ def _required_args(command):
 @pytest.fixture
 def no_config_load(monkeypatch):
     """Fail the test if any subcommand reaches load_config."""
+
     def _refuse(*a, **k):
         raise AssertionError("load_config was reached")
+
     monkeypatch.setattr(run, "load_config", _refuse)
 
 
@@ -36,7 +39,9 @@ def test_every_subcommand_refuses_to_run_without_a_config(name, no_config_load):
 @pytest.mark.parametrize("name", sorted(run.cli.commands))
 def test_every_subcommand_refuses_a_missing_config_file(name, no_config_load, tmp_path):
     missing = tmp_path / "absent.yaml"
-    result = CliRunner().invoke(run.cli, [name, "--config", str(missing), *_required_args(run.cli.commands[name])])
+    result = CliRunner().invoke(
+        run.cli, [name, "--config", str(missing), *_required_args(run.cli.commands[name])]
+    )
     assert result.exit_code == 2, result.output
     assert "config file not found" in result.output
 
@@ -60,27 +65,44 @@ def test_benchmark_records_its_settings_before_writing_into_the_output_root(tmp_
     import hcd_analysis.pipeline as pipeline
     import hcd_analysis.report as report
     from hcd_analysis.run_settings import RUN_SETTINGS_FILE
+
     root = tmp_path / "out"
     seen = {}
 
     def fake_benchmark(cfg, n_sims=1, n_snaps=1):
         seen["record_first"] = (root / RUN_SETTINGS_FILE).is_file()
-        return dict(n_total_sims=1, n_total_snaps=1, avg_time_per_snap_s=1.0, campaign_serial_hr=1.0,
-                    n_workers_assumed=1, campaign_parallel_hr=1.0)
+        return dict(
+            n_total_sims=1,
+            n_total_snaps=1,
+            avg_time_per_snap_s=1.0,
+            campaign_serial_hr=1.0,
+            n_workers_assumed=1,
+            campaign_parallel_hr=1.0,
+        )
+
     monkeypatch.setattr(pipeline, "run_benchmark", fake_benchmark)
-    monkeypatch.setattr(report, "generate_benchmarking_md", lambda d, r: (d / "benchmarking.md").write_text("x"))
-    result = CliRunner().invoke(run.cli, ["benchmark", "--config", _benchmark_config(tmp_path, root)])
+    monkeypatch.setattr(
+        report, "generate_benchmarking_md", lambda d, r: (d / "benchmarking.md").write_text("x")
+    )
+    result = CliRunner().invoke(
+        run.cli, ["benchmark", "--config", _benchmark_config(tmp_path, root)]
+    )
     assert result.exit_code == 0, result.output
     assert seen["record_first"] and (root / "docs" / "benchmarking.md").is_file()
 
 
-def test_benchmark_is_refused_in_a_root_of_unrecorded_settings_before_anything_runs(tmp_path, monkeypatch):
+def test_benchmark_is_refused_in_a_root_of_unrecorded_settings_before_anything_runs(
+    tmp_path, monkeypatch
+):
     import hcd_analysis.pipeline as pipeline
     from hcd_analysis.run_settings import RunSettingsMismatch
+
     root = tmp_path / "out"
     root.mkdir()
     (root / "results_of_unknown_settings.npz").write_bytes(b"")
     monkeypatch.setattr(pipeline, "run_benchmark", lambda *a, **k: pytest.fail("the benchmark ran"))
-    result = CliRunner().invoke(run.cli, ["benchmark", "--config", _benchmark_config(tmp_path, root)])
+    result = CliRunner().invoke(
+        run.cli, ["benchmark", "--config", _benchmark_config(tmp_path, root)]
+    )
     assert isinstance(result.exception, RunSettingsMismatch)
     assert sorted(p.name for p in root.iterdir()) == ["results_of_unknown_settings.npz"]

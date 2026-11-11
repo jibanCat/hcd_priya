@@ -60,6 +60,7 @@ PURE and DIFFERENTIABLE so the whole P_MF(theta) chain is HMC-usable.
 
 x64 is enabled by importing the emulator package (``hcd_analysis.emulator`` sets it).
 """
+
 from __future__ import annotations
 
 import warnings as _warnings
@@ -76,11 +77,18 @@ import equinox as eqx
 # numpy norm arrays trips it even though that is exactly the intended use here.  Filter
 # that ONE benign message (everything else still surfaces).
 _warnings.filterwarnings(
-    "ignore", message="A JAX array is being set as static", category=UserWarning)
+    "ignore", message="A JAX array is being set as static", category=UserWarning
+)
 
 from .data import (
-    load_cache, load_cache_historical, normalize_params, reconstruct_P_filt, safe_log,
-    COARSE_NAMES, DATA_RANGE, Z_LIMITS,
+    load_cache,
+    load_cache_historical,
+    normalize_params,
+    reconstruct_P_filt,
+    safe_log,
+    COARSE_NAMES,
+    DATA_RANGE,
+    Z_LIMITS,
 )
 from .model import Emulator
 from . import train as T
@@ -90,8 +98,14 @@ from . import train as T
 # ---------------------------------------------------------------------------- #
 from ..paths import REPO_ROOT_STR as _REPO
 from .. import runtime_data as _RD
-from .mf_family import (FixedMeanHead, _rowkey, fixed_mean_table_resolved,  # noqa: F401  moved at gate E
-                        make_cond, match_hr_to_lf)
+from .mf_family import (
+    FixedMeanHead,
+    _rowkey,
+    fixed_mean_table_resolved,  # noqa: F401  moved at gate E
+    make_cond,
+    match_hr_to_lf,
+)
+
 HR_CACHE = f"{_REPO}/hcd_analysis/_emulator_data/observables_tau0_hr.h5"
 LF_CACHE = f"{_REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 # The resolution-correction table is the runtime data product ``mf_res_corr`` (hcd_analysis.runtime_data): found through
@@ -102,8 +116,8 @@ N_CLASSES = 4
 
 # KODIAQ reach (cut to the evaluated range; HF reaches ~0.29 s/km, but the historical MF
 # was evaluated to KODIAQ's ~0.1-0.2 s/km). The eval grid below caps here.
-KODIAQ_KMAX = 0.2            # s/km -- upper edge of the historical MF eval band
-KODIAQ_BAND = (0.07, 0.2)    # the high-k band the LF cannot reach on its own
+KODIAQ_KMAX = 0.2  # s/km -- upper edge of the historical MF eval band
+KODIAQ_BAND = (0.07, 0.2)  # the high-k band the LF cannot reach on its own
 
 
 # ---------------------------------------------------------------------------- #
@@ -148,9 +162,9 @@ def load_res_corr(res_dir=None):
     tuple also carries their ``runtime_data.LoadRecord`` s (``data_products``).
     """
     res_dir, recs = _RD.resolve_dir("mf_res_corr", explicit=res_dir)
-    rc = np.loadtxt(f"{res_dir}/resolution_correction.txt").astype(np.float64)   # (Nz, Nk)
-    kf = np.loadtxt(f"{res_dir}/kfkms.txt").astype(np.float64)                    # (Nz, Nk)
-    zo = np.loadtxt(f"{res_dir}/zout.txt").astype(np.float64)                     # (Nz,)
+    rc = np.loadtxt(f"{res_dir}/resolution_correction.txt").astype(np.float64)  # (Nz, Nk)
+    kf = np.loadtxt(f"{res_dir}/kfkms.txt").astype(np.float64)  # (Nz, Nk)
+    zo = np.loadtxt(f"{res_dir}/zout.txt").astype(np.float64)  # (Nz,)
     if rc.shape != kf.shape or rc.shape[0] != zo.shape[0]:
         raise ValueError(f"res_corr shape mismatch: rc{rc.shape} kf{kf.shape} z{zo.shape}")
     if not np.all(np.diff(kf, axis=1) > 0):
@@ -186,7 +200,9 @@ def interp_res_corr(z_rc, logk_rc, rc_vals, z_eval, k_eval, anchor_mult=5.0):
     ``anchor_mult=0.0`` DISABLES the anchor and reproduces the raw clamped table
     exactly (the regression reference; the ``anchor_mult>0`` guard is a STATIC python
     comparison on the kwarg, so the branch is traced-value-free / jittable)."""
-    z_rc = jnp.asarray(z_rc); logk_rc = jnp.asarray(logk_rc); rc_vals = jnp.asarray(rc_vals)
+    z_rc = jnp.asarray(z_rc)
+    logk_rc = jnp.asarray(logk_rc)
+    rc_vals = jnp.asarray(rc_vals)
     logk = jnp.log10(k_eval)
 
     # z bracket (clamped so [iz, iz+1] is valid), constant-edge in z.
@@ -197,8 +213,8 @@ def interp_res_corr(z_rc, logk_rc, rc_vals, z_eval, k_eval, anchor_mult=5.0):
         # 1-D log-log interp on z-row zi's OWN k-grid; jnp.interp clamps at edges.
         return jnp.interp(logk, logk_rc[zi], rc_vals[zi])
 
-    c0 = row_interp(iz)              # (K,)
-    c1 = row_interp(iz + 1)         # (K,)
+    c0 = row_interp(iz)  # (K,)
+    c1 = row_interp(iz + 1)  # (K,)
     rc = c0 * (1 - wz) + c1 * wz
 
     if anchor_mult > 0:
@@ -239,7 +255,7 @@ def lf_predict_logP(lf_model, lf_norm, x, tau0):
     pf = lf_norm["P_filt"]
     pred = _freeze(lf_model)(x, tau0)
     base = pred["P_filt_base"] * jnp.asarray(pf["sig_marg"]) + jnp.asarray(pf["mu_marg"])
-    logP = base + jnp.asarray(pf["sig_cosmo"]) * pred["P_filt_resid"]     # (4, K_lf)
+    logP = base + jnp.asarray(pf["sig_cosmo"]) * pred["P_filt_resid"]  # (4, K_lf)
     return logP
 
 
@@ -259,13 +275,15 @@ def loglog_interp_extrap(logk_src, logP_src, logk_dst, n_tail=6):
     steeply there).  The DeltaHead is what corrects this; this function just gives a
     smooth, differentiable LF "backbone" value to correct FROM.  Fully jittable.
     """
-    logk_src = jnp.asarray(logk_src); logP_src = jnp.asarray(logP_src)
+    logk_src = jnp.asarray(logk_src)
+    logP_src = jnp.asarray(logP_src)
     logk_dst = jnp.asarray(logk_dst)
     Ks = logk_src.shape[0]
     # least-squares slope/intercept over the last n_tail bins (smooth tail).
-    kt = logk_src[Ks - n_tail:]
-    pt = logP_src[Ks - n_tail:]
-    kbar = jnp.mean(kt); pbar = jnp.mean(pt)
+    kt = logk_src[Ks - n_tail :]
+    pt = logP_src[Ks - n_tail :]
+    kbar = jnp.mean(kt)
+    pbar = jnp.mean(pt)
     slope = jnp.sum((kt - kbar) * (pt - pbar)) / jnp.maximum(jnp.sum((kt - kbar) ** 2), 1e-30)
 
     kmax = logk_src[-1]
@@ -283,12 +301,14 @@ def lf_logP_on_eval_grid(lf_model, lf_norm, lf_logk, x, tau0, eval_logk, n_tail=
     each class to ``eval_logk``.  ``lf_logk (K_lf,)`` is log10 of the LF k-grid;
     ``eval_logk (K_eval,)`` is log10 of the eval k-grid.  Differentiable in (x, tau0).
     """
-    logP_lf = lf_predict_logP(lf_model, lf_norm, x, tau0)          # (4, K_lf) natural log
+    logP_lf = lf_predict_logP(lf_model, lf_norm, x, tau0)  # (4, K_lf) natural log
+
     # interp/extrap works in log10-k; logP itself stays natural-log (just the
     # y-values being interpolated, monotone-agnostic).
     def per_class(lp):
         return loglog_interp_extrap(lf_logk, lp, eval_logk, n_tail=n_tail)
-    return jax.vmap(per_class)(logP_lf)                            # (4, K_eval)
+
+    return jax.vmap(per_class)(logP_lf)  # (4, K_eval)
 
 
 # ---------------------------------------------------------------------------- #
@@ -305,18 +325,18 @@ def smooth_k_basis(eval_logk, n_basis=4):
     coherent tilt, few enough to fit from 6 HF sims.  Returns float64 (n_basis, K).
     """
     u = jnp.asarray(eval_logk)
-    u = 2.0 * (u - u.min()) / jnp.maximum(u.max() - u.min(), 1e-12) - 1.0   # -> [-1, 1]
+    u = 2.0 * (u - u.min()) / jnp.maximum(u.max() - u.min(), 1e-12) - 1.0  # -> [-1, 1]
     cols = [jnp.ones_like(u)]
     if n_basis >= 2:
-        cols.append(u)                                  # T1
+        cols.append(u)  # T1
     if n_basis >= 3:
-        cols.append(2.0 * u ** 2 - 1.0)                 # T2
+        cols.append(2.0 * u**2 - 1.0)  # T2
     if n_basis >= 4:
-        cols.append(4.0 * u ** 3 - 3.0 * u)             # T3
+        cols.append(4.0 * u**3 - 3.0 * u)  # T3
     for d in range(5, n_basis + 1):
         # higher Chebyshev via recurrence T_n = 2u T_{n-1} - T_{n-2}
         cols.append(2.0 * u * cols[-1] - cols[-2])
-    return jnp.stack(cols[:n_basis], axis=0)            # (n_basis, K)
+    return jnp.stack(cols[:n_basis], axis=0)  # (n_basis, K)
 
 
 class DeltaHead(eqx.Module):
@@ -337,12 +357,12 @@ class DeltaHead(eqx.Module):
     The head is differentiable in (theta, tau0); ``n_basis``/``n_classes``/widths are
     STATIC (set shapes).  Output: ``g`` (n_classes, K_eval) = coeffs @ basis.
     """
+
     layers: list
     n_basis: int = eqx.field(static=True)
     n_classes: int = eqx.field(static=True)
 
-    def __init__(self, n_basis=4, n_classes=N_CLASSES, in_dim=11,
-                 width=16, n_layers=1, key=None):
+    def __init__(self, n_basis=4, n_classes=N_CLASSES, in_dim=11, width=16, n_layers=1, key=None):
         # in_dim = 9 params + z_unit + tau0 = 11 by default.
         if n_layers < 0:
             raise ValueError("n_layers must be >= 0")
@@ -365,9 +385,7 @@ class DeltaHead(eqx.Module):
 
     def __call__(self, cond, basis):
         """g (n_classes, K) = coeffs(cond) @ basis. ``basis`` is (n_basis, K)."""
-        return self.coeffs(cond) @ basis                # (n_classes, K)
-
-
+        return self.coeffs(cond) @ basis  # (n_classes, K)
 
 
 class GlobalLinearHead(eqx.Module):
@@ -383,9 +401,10 @@ class GlobalLinearHead(eqx.Module):
     smooth, near-fixed correction.  Differentiable & jittable; coeffs() returns
     a(theta)*S (per-class basis coeffs, so the coeff-L2 term controls it).
     """
-    w: jax.Array               # (in_dim,) linear weights (cosmo + z_unit + tau0)
-    b: jax.Array               # () scalar bias
-    S: jax.Array               # (n_classes, n_basis) per-class smooth k-shape coeffs
+
+    w: jax.Array  # (in_dim,) linear weights (cosmo + z_unit + tau0)
+    b: jax.Array  # () scalar bias
+    S: jax.Array  # (n_classes, n_basis) per-class smooth k-shape coeffs
     n_classes: int = eqx.field(static=True)
     n_basis: int = eqx.field(static=True)
 
@@ -402,12 +421,10 @@ class GlobalLinearHead(eqx.Module):
         return jnp.dot(self.w, cond - 0.5) + self.b
 
     def coeffs(self, cond):
-        return self.amp(cond) * self.S                 # (n_classes, n_basis)
+        return self.amp(cond) * self.S  # (n_classes, n_basis)
 
     def __call__(self, cond, basis):
-        return self.coeffs(cond) @ basis               # (n_classes, K)
-
-
+        return self.coeffs(cond) @ basis  # (n_classes, K)
 
 
 # ---------------------------------------------------------------------------- #
@@ -465,6 +482,7 @@ class MultiFidelity(eqx.Module):
     optimized), so the default MF forward is a PURE fixed function of (theta,tau0)
     that is still fully HMC-differentiable in theta through f_LF.
     """
+
     delta_head: eqx.Module
     lf_model: Emulator
     basis: jax.Array
@@ -477,12 +495,26 @@ class MultiFidelity(eqx.Module):
     n_tail: int = eqx.field(static=True)
     delta_mode: str = eqx.field(static=True)
     anchor_mult: float = eqx.field(static=True)
-    res_corr_on: bool = eqx.field(static=True)   # NORC (Gate-A): False -> res_corr()==ones
+    res_corr_on: bool = eqx.field(static=True)  # NORC (Gate-A): False -> res_corr()==ones
     lf_norm: object = eqx.field(static=True)
 
-    def __init__(self, lf_model, lf_norm, eval_logk, lf_logk, delta_head, basis,
-                 log_rho, z_rc, logk_rc, rc_vals, n_tail=6, delta_mode="none",
-                 anchor_mult=5.0, res_corr_on=True):
+    def __init__(
+        self,
+        lf_model,
+        lf_norm,
+        eval_logk,
+        lf_logk,
+        delta_head,
+        basis,
+        log_rho,
+        z_rc,
+        logk_rc,
+        rc_vals,
+        n_tail=6,
+        delta_mode="none",
+        anchor_mult=5.0,
+        res_corr_on=True,
+    ):
         self.lf_model = lf_model
         # lf_norm is a STATIC field: a fixed host-side constant (the LF backbone's
         # P_filt/channel norm dict), read via jnp.asarray in the forward and never
@@ -492,7 +524,8 @@ class MultiFidelity(eqx.Module):
         # `is_array` flags numpy arrays too -- so that (benign, expected) warning is
         # filtered at module import; see the filterwarnings call at module top.
         self.lf_norm = jax.tree_util.tree_map(
-            lambda v: np.asarray(v) if isinstance(v, jax.Array) else v, lf_norm)
+            lambda v: np.asarray(v) if isinstance(v, jax.Array) else v, lf_norm
+        )
         self.eval_logk = jnp.asarray(eval_logk)
         self.lf_logk = jnp.asarray(lf_logk)
         self.delta_head = delta_head
@@ -503,8 +536,7 @@ class MultiFidelity(eqx.Module):
         self.rc_vals = jnp.asarray(rc_vals)
         self.n_tail = n_tail
         if delta_mode not in ("none", "linear", "mlp"):
-            raise ValueError(
-                f"delta_mode must be 'none'|'linear'|'mlp', got {delta_mode!r}")
+            raise ValueError(f"delta_mode must be 'none'|'linear'|'mlp', got {delta_mode!r}")
         self.delta_mode = delta_mode
         # res_corr low-k anchor multiple (anchor_mult * kbox(z)); 5.0 = production
         # default (byte-identical), 0.0 = NO anchor (raw clamped table — diagnostic).
@@ -518,8 +550,9 @@ class MultiFidelity(eqx.Module):
     # -- pieces -------------------------------------------------------------- #
     def lf_logP(self, x, tau0):
         """LF backbone log P_filt (4, K_eval) on the eval grid (interp/extrap)."""
-        return lf_logP_on_eval_grid(self.lf_model, self.lf_norm, self.lf_logk,
-                                    x, tau0, self.eval_logk, n_tail=self.n_tail)
+        return lf_logP_on_eval_grid(
+            self.lf_model, self.lf_norm, self.lf_logk, x, tau0, self.eval_logk, n_tail=self.n_tail
+        )
 
     def g(self, x, tau0):
         """Log-ratio correction g (4, K_eval) = log_rho + delta_head(cond, basis).
@@ -545,17 +578,18 @@ class MultiFidelity(eqx.Module):
         k_eval = jnp.power(10.0, self.eval_logk)
         if not self.res_corr_on:
             return jnp.ones_like(k_eval)
-        return interp_res_corr(self.z_rc, self.logk_rc, self.rc_vals, z, k_eval,
-                               anchor_mult=self.anchor_mult)
+        return interp_res_corr(
+            self.z_rc, self.logk_rc, self.rc_vals, z, k_eval, anchor_mult=self.anchor_mult
+        )
 
     # -- forward ------------------------------------------------------------- #
     def logP_mf(self, x, tau0, apply_res_corr=True):
         """log P_MF (4, K_eval): logP_LF + g + (log res_corr).  Differentiable."""
-        z = x[..., 9]                                    # z_unit is x[9]
+        z = x[..., 9]  # z_unit is x[9]
         # NOTE: res_corr table is in PHYSICAL z, but the LF input x[9] is z_unit.
         # convert: z = z_unit*(z_hi-z_lo)+z_lo.
         z_phys = z * (Z_LIMITS[1] - Z_LIMITS[0]) + Z_LIMITS[0]
-        lp = self.lf_logP(x, tau0) + self.g(x, tau0)     # (4, K_eval)
+        lp = self.lf_logP(x, tau0) + self.g(x, tau0)  # (4, K_eval)
         if apply_res_corr:
             lp = lp + jnp.log(self.res_corr(z_phys))[None, :]
         return lp
@@ -581,8 +615,6 @@ class MultiFidelity(eqx.Module):
 # ---------------------------------------------------------------------------- #
 
 
-
-
 def build_eval_grid(hr, k_max=KODIAQ_KMAX, n_k=48):
     """A log-uniform eval k-grid up to ``k_max`` s/km, spanning LF mid-band -> KODIAQ.
 
@@ -601,20 +633,20 @@ def hr_logP_on_eval_grid(hr, hr_row, eval_logk):
     Per class: log-log interp of the HR cache's finite, positive P_filt bins onto
     ``eval_logk``.  Returns (4, K_eval) with NaN where a class has < 2 finite bins
     (e.g. an empty HCD class) so the loss can mask it.  Host-side numpy."""
-    Phr = hr["P_filt"][hr_row]                           # (4, K_hr)
-    khr = hr["kfkms"][hr_row]                            # (K_hr,)
+    Phr = hr["P_filt"][hr_row]  # (4, K_hr)
+    khr = hr["kfkms"][hr_row]  # (K_hr,)
     out = np.full((N_CLASSES, len(eval_logk)), np.nan)
     for ci in range(N_CLASSES):
         m = np.isfinite(Phr[ci]) & (Phr[ci] > 0) & np.isfinite(khr)
         if m.sum() < 2:
             continue
-        out[ci] = np.interp(eval_logk, np.log10(khr[m]), np.log(Phr[ci][m]),
-                            left=np.nan, right=np.nan)
+        out[ci] = np.interp(
+            eval_logk, np.log10(khr[m]), np.log(Phr[ci][m]), left=np.nan, right=np.nan
+        )
     return out
 
 
-def measure_delta_targets(lf, hr, lf_model, lf_norm, lf_logk, eval_logk,
-                          pairs, n_tail=6):
+def measure_delta_targets(lf, hr, lf_model, lf_norm, lf_logk, eval_logk, pairs, n_tail=6):
     """Measure g = log P_HF - log P_hat_LF on every matched HR row, on the eval grid.
 
     Returns a dict of host-side numpy arrays over the matched rows (length M):
@@ -638,19 +670,30 @@ def measure_delta_targets(lf, hr, lf_model, lf_norm, lf_logk, eval_logk,
     # function of (rung, z), so raw-tau0 cells would each hold a SINGLE sim.
     aidx = lf.get("alpha_idx")
     for h, l in pairs:
-        x = jnp.asarray(lf["x"][l]); tau0 = jnp.asarray(lf["tau0"][l])
-        lp_lf = np.asarray(lf_logP_on_eval_grid(
-            lf_model, lf_norm, lf_logk_j, x, tau0, eval_logk_j, n_tail=n_tail))  # (4,K)
-        lp_hr = hr_logP_on_eval_grid(hr, h, eval_logk)                          # (4,K)
+        x = jnp.asarray(lf["x"][l])
+        tau0 = jnp.asarray(lf["tau0"][l])
+        lp_lf = np.asarray(
+            lf_logP_on_eval_grid(lf_model, lf_norm, lf_logk_j, x, tau0, eval_logk_j, n_tail=n_tail)
+        )  # (4,K)
+        lp_hr = hr_logP_on_eval_grid(hr, h, eval_logk)  # (4,K)
         g = lp_hr - lp_lf
-        Mx.append(np.asarray(lf["x"][l])); Mt.append(float(lf["tau0"][l]))
-        Mh.append(h); Ml.append(l)
+        Mx.append(np.asarray(lf["x"][l]))
+        Mt.append(float(lf["tau0"][l]))
+        Mh.append(h)
+        Ml.append(l)
         Ma.append(int(aidx[l]) if aidx is not None else -1)
-        G.append(g); LPlf.append(lp_lf); LPhr.append(lp_hr)
+        G.append(g)
+        LPlf.append(lp_lf)
+        LPhr.append(lp_hr)
     return dict(
-        x=np.asarray(Mx), tau0=np.asarray(Mt), alpha_idx=np.asarray(Ma),
-        hr_row=np.asarray(Mh), lf_row=np.asarray(Ml),
-        g=np.asarray(G), logP_lf=np.asarray(LPlf), logP_hr=np.asarray(LPhr),
+        x=np.asarray(Mx),
+        tau0=np.asarray(Mt),
+        alpha_idx=np.asarray(Ma),
+        hr_row=np.asarray(Mh),
+        lf_row=np.asarray(Ml),
+        g=np.asarray(G),
+        logP_lf=np.asarray(LPlf),
+        logP_hr=np.asarray(LPhr),
     )
 
 
@@ -665,7 +708,7 @@ def mean_log_ratio_rho(targets, eval_logk):
     ``MultiFidelity``, the DeltaHead then only learns the theta/z DEPARTURE from this
     mean tilt.  Returns (K,) float64.
     """
-    g = targets["g"]                                     # (M,4,K)
+    g = targets["g"]  # (M,4,K)
     with np.errstate(invalid="ignore"):
         return np.nanmean(g.reshape(-1, g.shape[-1]), axis=0)
 
@@ -682,9 +725,10 @@ def fixed_mean_table(targets, log_rho, *, train_mask_rows=None):
 
     Returns ``(tab (Nz, n_classes, K), z_tab (Nz,))`` -- host-side numpy, z ascending.
     """
-    rows = (np.arange(targets["x"].shape[0]) if train_mask_rows is None
-            else np.asarray(train_mask_rows))
-    g = targets["g"][rows]                               # (B,4,K)
+    rows = (
+        np.arange(targets["x"].shape[0]) if train_mask_rows is None else np.asarray(train_mask_rows)
+    )
+    g = targets["g"][rows]  # (B,4,K)
     z = np.round(targets["x"][rows, 9] * (Z_LIMITS[1] - Z_LIMITS[0]) + Z_LIMITS[0], 2)
     zvals = np.array(sorted(set(z)))
     K = g.shape[-1]
@@ -692,18 +736,15 @@ def fixed_mean_table(targets, log_rho, *, train_mask_rows=None):
     tab = np.zeros((len(zvals), N_CLASSES, K))
     with np.errstate(invalid="ignore"):
         for i, zz in enumerate(zvals):
-            m = (z == zz)
-            gm = np.nanmean(g[m], axis=0)                # (4,K) mean over sims&alpha at z
+            m = z == zz
+            gm = np.nanmean(g[m], axis=0)  # (4,K) mean over sims&alpha at z
             gm = np.where(np.isfinite(gm), gm, 0.0)
-            tab[i] = gm - log_rho[None, :]               # subtract per-k global mean
+            tab[i] = gm - log_rho[None, :]  # subtract per-k global mean
     return tab, zvals
 
 
-
-
 @eqx.filter_value_and_grad
-def _loss_and_grad(delta_head, basis, log_rho, cond, g_target, mask, w_k,
-                   coeff_l2, mean_prior_w):
+def _loss_and_grad(delta_head, basis, log_rho, cond, g_target, mask, w_k, coeff_l2, mean_prior_w):
     """Loss for the delta head ON ONE BATCH (vmapped over rows). Differentiable.
 
     Terms:
@@ -715,26 +756,40 @@ def _loss_and_grad(delta_head, basis, log_rho, cond, g_target, mask, w_k,
         anchored to rho so the few-sim fit cannot run away.
     """
     # vmap the head over the batch rows.
-    g_pred = jax.vmap(lambda c: delta_head(c, basis))(cond)        # (B,4,K)
-    g_full = log_rho[None, None, :] + g_pred                       # add rho
-    diff = jnp.where(mask, g_full - g_target, 0.0)                 # 0 on masked bins
+    g_pred = jax.vmap(lambda c: delta_head(c, basis))(cond)  # (B,4,K)
+    g_full = log_rho[None, None, :] + g_pred  # add rho
+    diff = jnp.where(mask, g_full - g_target, 0.0)  # 0 on masked bins
     wk = w_k[None, None, :]
     # weighted masked MEAN: numerator over masked diffs, denominator = Σ(w_k·mask).
-    data = jnp.sum((diff ** 2) * wk) / jnp.maximum(jnp.sum(wk * mask), 1.0)
+    data = jnp.sum((diff**2) * wk) / jnp.maximum(jnp.sum(wk * mask), 1.0)
 
-    coeffs = jax.vmap(delta_head.coeffs)(cond)                     # (B,4,n_basis)
-    l2 = coeff_l2 * jnp.mean(coeffs ** 2)
+    coeffs = jax.vmap(delta_head.coeffs)(cond)  # (B,4,n_basis)
+    l2 = coeff_l2 * jnp.mean(coeffs**2)
 
     # mean-ratio prior on the DELTA part (per row & class, mean over k).
-    mean_g = jnp.mean(g_pred, axis=2)                              # (B,4)
-    prior = mean_prior_w * jnp.mean(mean_g ** 2)
+    mean_g = jnp.mean(g_pred, axis=2)  # (B,4)
+    prior = mean_prior_w * jnp.mean(mean_g**2)
     return data + l2 + prior
 
 
-def train_delta_head(targets, basis, log_rho, eval_logk, *, train_mask_rows=None,
-                     n_basis=4, width=16, n_layers=1, lr=3e-3, epochs=400,
-                     coeff_l2=1e-2, mean_prior_w=1e-2, w_k=None, seed=0,
-                     verbose=False):
+def train_delta_head(
+    targets,
+    basis,
+    log_rho,
+    eval_logk,
+    *,
+    train_mask_rows=None,
+    n_basis=4,
+    width=16,
+    n_layers=1,
+    lr=3e-3,
+    epochs=400,
+    coeff_l2=1e-2,
+    mean_prior_w=1e-2,
+    w_k=None,
+    seed=0,
+    verbose=False,
+):
     """Fit the DeltaHead on the measured g targets (heavily regularized).
 
     ``targets`` from ``measure_delta_targets``; ``train_mask_rows`` selects the rows
@@ -743,25 +798,36 @@ def train_delta_head(targets, basis, log_rho, eval_logk, *, train_mask_rows=None
     Returns ``(delta_head, history)``.  Full-batch Adam (the data set is small).
     """
     import optax
+
     K = basis.shape[1]
-    rows = (np.arange(targets["x"].shape[0]) if train_mask_rows is None
-            else np.asarray(train_mask_rows))
-    cond = jnp.asarray(np.concatenate(
-        [targets["x"][rows], targets["tau0"][rows][:, None]], axis=1))   # (B,11)
-    g_target = jnp.asarray(np.nan_to_num(targets["g"][rows], nan=0.0))   # (B,4,K)
-    mask = jnp.asarray(np.isfinite(targets["g"][rows]))                  # (B,4,K)
+    rows = (
+        np.arange(targets["x"].shape[0]) if train_mask_rows is None else np.asarray(train_mask_rows)
+    )
+    cond = jnp.asarray(
+        np.concatenate([targets["x"][rows], targets["tau0"][rows][:, None]], axis=1)
+    )  # (B,11)
+    g_target = jnp.asarray(np.nan_to_num(targets["g"][rows], nan=0.0))  # (B,4,K)
+    mask = jnp.asarray(np.isfinite(targets["g"][rows]))  # (B,4,K)
     w_k = jnp.ones(K) if w_k is None else jnp.asarray(w_k)
 
-    head = DeltaHead(n_basis=n_basis, n_classes=N_CLASSES, in_dim=cond.shape[1],
-                     width=width, n_layers=n_layers, key=jax.random.PRNGKey(seed))
+    head = DeltaHead(
+        n_basis=n_basis,
+        n_classes=N_CLASSES,
+        in_dim=cond.shape[1],
+        width=width,
+        n_layers=n_layers,
+        key=jax.random.PRNGKey(seed),
+    )
     opt = optax.adam(lr)
     opt_state = opt.init(eqx.filter(head, eqx.is_array))
-    basis_j = jnp.asarray(basis); log_rho_j = jnp.asarray(log_rho)
+    basis_j = jnp.asarray(basis)
+    log_rho_j = jnp.asarray(log_rho)
 
     @eqx.filter_jit
     def step(head, opt_state):
-        loss, grad = _loss_and_grad(head, basis_j, log_rho_j, cond, g_target, mask,
-                                    w_k, coeff_l2, mean_prior_w)
+        loss, grad = _loss_and_grad(
+            head, basis_j, log_rho_j, cond, g_target, mask, w_k, coeff_l2, mean_prior_w
+        )
         updates, opt_state = opt.update(grad, opt_state, eqx.filter(head, eqx.is_array))
         head = eqx.apply_updates(head, updates)
         return head, opt_state, loss
@@ -775,10 +841,23 @@ def train_delta_head(targets, basis, log_rho, eval_logk, *, train_mask_rows=None
     return head, {"loss": history}
 
 
-def train_global_linear_head(targets, basis, log_rho, eval_logk, *,
-                             train_mask_rows=None, n_basis=4, lr=3e-3, epochs=400,
-                             coeff_l2=1e-1, mean_prior_w=1e-1, w_k=None, seed=0,
-                             ap_dir=None, ap_prior_w=0.0):
+def train_global_linear_head(
+    targets,
+    basis,
+    log_rho,
+    eval_logk,
+    *,
+    train_mask_rows=None,
+    n_basis=4,
+    lr=3e-3,
+    epochs=400,
+    coeff_l2=1e-1,
+    mean_prior_w=1e-1,
+    w_k=None,
+    seed=0,
+    ap_dir=None,
+    ap_prior_w=0.0,
+):
     """Fit the ``GlobalLinearHead`` (delta_mode='linear') on the measured g targets.
 
     The sweep's variant (b): ONE global linear-in-theta amplitude * a fixed per-class
@@ -792,18 +871,23 @@ def train_global_linear_head(targets, basis, log_rho, eval_logk, *,
     Returns ``(head, history)``.  Full-batch Adam.
     """
     import optax
+
     K = basis.shape[1]
-    rows = (np.arange(targets["x"].shape[0]) if train_mask_rows is None
-            else np.asarray(train_mask_rows))
-    cond = jnp.asarray(np.concatenate(
-        [targets["x"][rows], targets["tau0"][rows][:, None]], axis=1))   # (B,in)
+    rows = (
+        np.arange(targets["x"].shape[0]) if train_mask_rows is None else np.asarray(train_mask_rows)
+    )
+    cond = jnp.asarray(
+        np.concatenate([targets["x"][rows], targets["tau0"][rows][:, None]], axis=1)
+    )  # (B,in)
     g_target = jnp.asarray(np.nan_to_num(targets["g"][rows], nan=0.0))
     mask = jnp.asarray(np.isfinite(targets["g"][rows]))
     w_k = jnp.ones(K) if w_k is None else jnp.asarray(w_k)
-    basis_j = jnp.asarray(basis); log_rho_j = jnp.asarray(log_rho)
+    basis_j = jnp.asarray(basis)
+    log_rho_j = jnp.asarray(log_rho)
 
-    head = GlobalLinearHead(in_dim=cond.shape[1], n_classes=N_CLASSES,
-                            n_basis=n_basis, key=jax.random.PRNGKey(seed))
+    head = GlobalLinearHead(
+        in_dim=cond.shape[1], n_classes=N_CLASSES, n_basis=n_basis, key=jax.random.PRNGKey(seed)
+    )
     if ap_dir is not None and ap_prior_w > 0.0:
         u = jnp.asarray(ap_dir)
         u = u / jnp.maximum(jnp.linalg.norm(u), 1e-30)
@@ -812,20 +896,20 @@ def train_global_linear_head(targets, basis, log_rho, eval_logk, *,
 
     @eqx.filter_value_and_grad
     def loss_fn(head):
-        g_pred = jax.vmap(lambda c: head(c, basis_j))(cond)            # (B,4,K)
+        g_pred = jax.vmap(lambda c: head(c, basis_j))(cond)  # (B,4,K)
         g_full = log_rho_j[None, None, :] + g_pred
         diff = jnp.where(mask, g_full - g_target, 0.0)
         wk = w_k[None, None, :]
-        data = jnp.sum((diff ** 2) * wk) / jnp.maximum(jnp.sum(wk * mask), 1.0)
+        data = jnp.sum((diff**2) * wk) / jnp.maximum(jnp.sum(wk * mask), 1.0)
         coeffs = jax.vmap(head.coeffs)(cond)
-        l2 = coeff_l2 * jnp.mean(coeffs ** 2)
+        l2 = coeff_l2 * jnp.mean(coeffs**2)
         mean_g = jnp.mean(g_pred, axis=2)
-        prior = mean_prior_w * jnp.mean(mean_g ** 2)
+        prior = mean_prior_w * jnp.mean(mean_g**2)
         ap_term = 0.0
         if u is not None:
             # penalize the component of w ORTHOGONAL to the A_p direction.
             w_perp = head.w - jnp.dot(head.w, u) * u
-            ap_term = ap_prior_w * jnp.sum(w_perp ** 2)
+            ap_term = ap_prior_w * jnp.sum(w_perp**2)
         return data + l2 + prior + ap_term
 
     opt = optax.adam(lr)
@@ -845,8 +929,7 @@ def train_global_linear_head(targets, basis, log_rho, eval_logk, *,
     return head, {"loss": history}
 
 
-def build_default_head(targets, log_rho, *, train_mask_rows=None, n_basis=4,
-                       resolved=False):
+def build_default_head(targets, log_rho, *, train_mask_rows=None, n_basis=4, resolved=False):
     """Build the DEFAULT (delta_mode='none') ``FixedMeanHead`` from measured targets.
 
     Convenience wrapper.  NO fitting -- the fixed mean is a pure average over the
@@ -864,9 +947,17 @@ def build_default_head(targets, log_rho, *, train_mask_rows=None, n_basis=4,
         return FixedMeanHead(tab, ztab, n_basis=n_basis)
     c = fixed_mean_table_resolved(targets, log_rho, train_mask_rows=train_mask_rows)
     return FixedMeanHead(
-        c["gbar_z_tab"], c["z_tab"], n_basis=n_basis, resolved=True,
-        gtau_tab=c["gtau_tab"], tau_tab=c["tau_tab"], tau_by_z=c["tau_by_z"],
-        a_k=c["a_k"], u_z=c["u_z"], u_tau=c["u_tau"])
+        c["gbar_z_tab"],
+        c["z_tab"],
+        n_basis=n_basis,
+        resolved=True,
+        gtau_tab=c["gtau_tab"],
+        tau_tab=c["tau_tab"],
+        tau_by_z=c["tau_by_z"],
+        a_k=c["a_k"],
+        u_z=c["u_z"],
+        u_tau=c["u_tau"],
+    )
 
 
 # ---------------------------------------------------------------------------- #
@@ -895,33 +986,44 @@ def load_snap_cache(path):
     points at its snap row, so we read (params, z) of the FIRST P1D row in each group.
     """
     import h5py
+
     with h5py.File(path, "r") as f:
         sg = f["snap_group_idx"][:]
         z_row = np.round(f["z_grid"][:], 4)
         params_row = f["params"][:]
-        dndx = np.stack([f["snap_dNdX_LLS"][:], f["snap_dNdX_subDLA"][:],
-                         f["snap_dNdX_DLA"][:]], axis=1)          # (S,3)
-        f_nhi = f["snap_f_nhi"][:]                                # (S,30)
+        dndx = np.stack(
+            [f["snap_dNdX_LLS"][:], f["snap_dNdX_subDLA"][:], f["snap_dNdX_DLA"][:]], axis=1
+        )  # (S,3)
+        f_nhi = f["snap_f_nhi"][:]  # (S,30)
         log_nhi = f["log_nhi_centres"][:]
         ssim = f["snap_sim_name"][:]
     S = dndx.shape[0]
-    z = np.full(S, np.nan); params = np.full((S, 9), np.nan)
+    z = np.full(S, np.nan)
+    params = np.full((S, 9), np.nan)
     for gi in range(S):
         rows = np.where(sg == gi)[0]
         z[gi] = z_row[rows[0]]
         params[gi] = params_row[rows[0]]
     sim = np.array([s.decode() if isinstance(s, bytes) else s for s in ssim])
-    return dict(dndx=dndx, f_nhi=f_nhi, log_nhi=log_nhi, z=z,
-                params=params, pu=np.round(normalize_params(params), 6), sim=sim)
+    return dict(
+        dndx=dndx,
+        f_nhi=f_nhi,
+        log_nhi=log_nhi,
+        z=z,
+        params=params,
+        pu=np.round(normalize_params(params), 6),
+        sim=sim,
+    )
 
 
 def match_snap_hr_to_lf(lf_snap, hr_snap):
     """Match each HR snap row to its LF snap row on (params_unit, z).  Returns
     ``[(hr_row, lf_row), ...]``.  dN/dX is tau0-invariant so there is NO alpha key
     (unlike the P1D ``match_hr_to_lf``)."""
+
     def key(d):
-        return [(tuple(d["pu"][i]), round(float(d["z"][i]), 4))
-                for i in range(len(d["z"]))]
+        return [(tuple(d["pu"][i]), round(float(d["z"][i]), 4)) for i in range(len(d["z"]))]
+
     idx = {k: i for i, k in enumerate(key(lf_snap))}
     return [(h, idx[k]) for h, k in enumerate(key(hr_snap)) if k in idx]
 
@@ -939,8 +1041,10 @@ def build_dndx_res_corr(lf_dndx, lf_z, hr_dndx, hr_z, *, n_min=1):
     Returns ``{'z': (Nz,), 'ratio': (Nz,3)}`` host-side numpy, z ascending.  The ratio
     is a pure function of (z, class) -- NO cosmology dependence.
     """
-    lf_dndx = np.asarray(lf_dndx, float); hr_dndx = np.asarray(hr_dndx, float)
-    lf_z = np.round(np.asarray(lf_z, float), 4); hr_z = np.round(np.asarray(hr_z, float), 4)
+    lf_dndx = np.asarray(lf_dndx, float)
+    hr_dndx = np.asarray(hr_dndx, float)
+    lf_z = np.round(np.asarray(lf_z, float), 4)
+    hr_z = np.round(np.asarray(hr_z, float), 4)
     if not np.allclose(lf_z, hr_z):
         raise ValueError("lf_z and hr_z must match row-for-row (matched pairs)")
     valid = (lf_dndx > 0) & (hr_dndx > 0)
@@ -950,7 +1054,7 @@ def build_dndx_res_corr(lf_dndx, lf_z, hr_dndx, hr_z, *, n_min=1):
     counts = np.zeros((len(zvals), 3), int)
     with np.errstate(invalid="ignore"):
         for zi, zz in enumerate(zvals):
-            m = (hr_z == zz)
+            m = hr_z == zz
             counts[zi] = np.sum(valid[m], axis=0)
             ratio[zi] = np.nanmean(ratio_row[m], axis=0)
     # fill under-sampled / NaN cells from the nearest populated z (per class) so the
@@ -973,9 +1077,10 @@ def dndx_res_factor(tab, z):
     ratio in z (jnp.interp constant-edge beyond the table z-range, so HMC / z-edge
     queries get the boundary value -- never NaN, never a divergent extrapolation).
     A pure function of (z, class): no cosmology input, so d(factor)/d(theta) == 0."""
-    zt = jnp.asarray(tab["z"]); r = jnp.asarray(tab["ratio"])      # (Nz,), (Nz,3)
+    zt = jnp.asarray(tab["z"])
+    r = jnp.asarray(tab["ratio"])  # (Nz,), (Nz,3)
     z = jnp.asarray(z)
-    return jax.vmap(lambda col: jnp.interp(z, zt, col), in_axes=1)(r)   # (3,)
+    return jax.vmap(lambda col: jnp.interp(z, zt, col), in_axes=1)(r)  # (3,)
 
 
 def apply_dndx_res_corr(tab, dndx, z):
@@ -990,9 +1095,9 @@ def apply_dndx_res_corr(tab, dndx, z):
     dndx = jnp.asarray(dndx)
     z = jnp.asarray(z)
     if z.ndim == 0:
-        fac = dndx_res_factor(tab, z)                              # (3,)
+        fac = dndx_res_factor(tab, z)  # (3,)
     else:
-        fac = jax.vmap(lambda zz: dndx_res_factor(tab, zz))(z)     # (...,3)
+        fac = jax.vmap(lambda zz: dndx_res_factor(tab, zz))(z)  # (...,3)
     return dndx * fac
 
 
@@ -1008,8 +1113,10 @@ def build_cddf_res_corr(lf_fnhi, lf_z, hr_fnhi, hr_z, log_nhi, *, n_min=1):
     Returns ``{'z':(Nz,), 'log_nhi':(Nbin,), 'ratio':(Nz,Nbin)}`` -- the multiplicative
     CDDF resolution factor (equivalently an additive shift in log f_nhi).
     """
-    lf_fnhi = np.asarray(lf_fnhi, float); hr_fnhi = np.asarray(hr_fnhi, float)
-    lf_z = np.round(np.asarray(lf_z, float), 4); hr_z = np.round(np.asarray(hr_z, float), 4)
+    lf_fnhi = np.asarray(lf_fnhi, float)
+    hr_fnhi = np.asarray(hr_fnhi, float)
+    lf_z = np.round(np.asarray(lf_z, float), 4)
+    hr_z = np.round(np.asarray(hr_z, float), 4)
     if not np.allclose(lf_z, hr_z):
         raise ValueError("lf_z and hr_z must match row-for-row (matched pairs)")
     valid = (lf_fnhi > 0) & (hr_fnhi > 0) & np.isfinite(lf_fnhi) & np.isfinite(hr_fnhi)
@@ -1019,7 +1126,7 @@ def build_cddf_res_corr(lf_fnhi, lf_z, hr_fnhi, hr_z, log_nhi, *, n_min=1):
     ratio = np.ones((len(zvals), Nbin))
     with np.errstate(invalid="ignore"):
         for zi, zz in enumerate(zvals):
-            m = (hr_z == zz)
+            m = hr_z == zz
             cnt = np.sum(valid[m], axis=0)
             rm = np.nanmean(ratio_row[m], axis=0)
             ratio[zi] = np.where((cnt >= n_min) & np.isfinite(rm), rm, 1.0)
@@ -1031,9 +1138,10 @@ def cddf_res_factor(tab, z):
 
     Clamped-linear interp in z of the per-bin HR/LF f_nhi ratio (constant-edge).  Pure
     function of (z, log N_HI bin) -- no cosmology input."""
-    zt = jnp.asarray(tab["z"]); r = jnp.asarray(tab["ratio"])
+    zt = jnp.asarray(tab["z"])
+    r = jnp.asarray(tab["ratio"])
     z = jnp.asarray(z)
-    return jax.vmap(lambda col: jnp.interp(z, zt, col), in_axes=1)(r)   # (Nbin,)
+    return jax.vmap(lambda col: jnp.interp(z, zt, col), in_axes=1)(r)  # (Nbin,)
 
 
 # ---------------------------------------------------------------------------- #
@@ -1055,13 +1163,24 @@ def load_lf_backbone(fold=0, ckpt_dir=None):
     return model, meta, norm, lf_logk
 
 
-_HEAD_MODE = {"FixedMeanHead": "none", "GlobalLinearHead": "linear",
-              "DeltaHead": "mlp"}
+_HEAD_MODE = {"FixedMeanHead": "none", "GlobalLinearHead": "linear", "DeltaHead": "mlp"}
 
 
-def build_multifidelity(lf_model, lf_norm, lf_logk, delta_head, *, eval_logk,
-                        log_rho=None, n_basis=4, res_dir=None, n_tail=6,
-                        delta_mode=None, anchor_mult=5.0, res_corr_on=True):
+def build_multifidelity(
+    lf_model,
+    lf_norm,
+    lf_logk,
+    delta_head,
+    *,
+    eval_logk,
+    log_rho=None,
+    n_basis=4,
+    res_dir=None,
+    n_tail=6,
+    delta_mode=None,
+    anchor_mult=5.0,
+    res_corr_on=True,
+):
     """Assemble a ``MultiFidelity`` from a frozen LF backbone + a head.
 
     ``delta_head`` is one of ``FixedMeanHead`` (default 'none'), ``GlobalLinearHead``
@@ -1078,7 +1197,18 @@ def build_multifidelity(lf_model, lf_norm, lf_logk, delta_head, *, eval_logk,
         delta_mode = _HEAD_MODE.get(type(delta_head).__name__, "mlp")
     z_rc, logk_rc, rc_vals = load_res_corr(res_dir)
     return MultiFidelity(
-        lf_model=lf_model, lf_norm=lf_norm, eval_logk=eval_logk, lf_logk=lf_logk,
-        delta_head=delta_head, basis=basis, log_rho=log_rho,
-        z_rc=z_rc, logk_rc=logk_rc, rc_vals=rc_vals, n_tail=n_tail,
-        delta_mode=delta_mode, anchor_mult=anchor_mult, res_corr_on=res_corr_on)
+        lf_model=lf_model,
+        lf_norm=lf_norm,
+        eval_logk=eval_logk,
+        lf_logk=lf_logk,
+        delta_head=delta_head,
+        basis=basis,
+        log_rho=log_rho,
+        z_rc=z_rc,
+        logk_rc=logk_rc,
+        rc_vals=rc_vals,
+        n_tail=n_tail,
+        delta_mode=delta_mode,
+        anchor_mult=anchor_mult,
+        res_corr_on=res_corr_on,
+    )

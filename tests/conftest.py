@@ -11,6 +11,7 @@ and closure stack whose interface was retired at gate E is expected to fail ONLY
 Any other failure fails the test, and a pass fails it too (strict), so each marker is removed when the test is
 rebuilt against the current interface.
 """
+
 import re
 
 import jax
@@ -26,17 +27,23 @@ def pytest_sessionfinish(session, exitstatus):
     a project module imported from another checkout fails the session."""
     import sys
     from tests.gate_helpers import foreign_project_modules
+
     foreign = foreign_project_modules(sys.modules)
     if foreign:
-        print(f"\nCHECKOUT INTEGRITY FAILURE: project modules loaded from another checkout: {foreign[:10]}")
+        print(
+            f"\nCHECKOUT INTEGRITY FAILURE: project modules loaded from another checkout: {foreign[:10]}"
+        )
         session.exitstatus = 1
 
 
 def pytest_configure(config):
     # register the `slow` marker (the ~8-min NUTS 0-divergence funnel smoke is marked slow).
     config.addinivalue_line("markers", "slow: marks slow tests (deselect with '-m \"not slow\"')")
-    config.addinivalue_line("markers", "deferred_legacy(cause): retired pre-2026-10 interface; expected to fail "
-                                       "only with the cause's exact error (tests/DEFERRED.md)")
+    config.addinivalue_line(
+        "markers",
+        "deferred_legacy(cause): retired pre-2026-10 interface; expected to fail "
+        "only with the cause's exact error (tests/DEFERRED.md)",
+    )
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -47,12 +54,14 @@ def pytest_runtest_makereport(item, call):
         return
     rep = outcome.get_result()
     cause = marker.args[0]
-    pattern, reason = DEFERRED_CAUSES[cause]                 # an unknown cause is a KeyError: fail loudly
+    pattern, reason = DEFERRED_CAUSES[cause]  # an unknown cause is a KeyError: fail loudly
     if call.excinfo is not None and rep.failed and call.when in ("setup", "call"):
         if re.search(pattern, call.excinfo.exconly()):
             rep.outcome = "skipped"
             rep.wasxfail = f"deferred_legacy {cause}: {reason}"
     elif call.when == "call" and rep.passed:
         rep.outcome = "failed"
-        rep.longrepr = (f"[XPASS(strict)] deferred_legacy {cause} passed: the cause is gone, remove the marker "
-                        f"(tests/DEFERRED.md)")
+        rep.longrepr = (
+            f"[XPASS(strict)] deferred_legacy {cause} passed: the cause is gone, remove the marker "
+            f"(tests/DEFERRED.md)"
+        )

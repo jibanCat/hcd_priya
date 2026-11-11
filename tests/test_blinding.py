@@ -14,6 +14,7 @@ Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     python -m pytest tests/test_blinding.py -q
 """
+
 import json
 import os
 
@@ -100,10 +101,10 @@ def test_only_blind_params_touched():
     y = B.apply_blind(x, off)
     for j, nm in enumerate(PARAM_NAMES):
         if nm in B.BLIND_PARAMS:
-            assert not np.array_equal(y[:, j], x[:, j])           # moved
-            assert np.allclose(y[:, j] - x[:, j], off[nm])        # by exactly the offset
+            assert not np.array_equal(y[:, j], x[:, j])  # moved
+            assert np.allclose(y[:, j] - x[:, j], off[nm])  # by exactly the offset
         else:
-            assert np.array_equal(y[:, j], x[:, j])               # untouched, byte-exact
+            assert np.array_equal(y[:, j], x[:, j])  # untouched, byte-exact
 
 
 def test_extra_nuisance_columns_passthrough():
@@ -129,7 +130,7 @@ def test_offsets_independent_across_params():
     for s in range(200):
         off = B.blind_offset(f"indep/{s}")
         diffs.append((off["ns"] / B.prior_sigma("ns")) - (off["Ap"] / B.prior_sigma("Ap")))
-    assert np.std(diffs) > 0.1     # they genuinely differ
+    assert np.std(diffs) > 0.1  # they genuinely differ
 
 
 # ---- 6. blind.lock ------------------------------------------------------------------------- #

@@ -5,6 +5,7 @@ shard dropped into an n_shards=4 cell dir) could pool the SAME mock twice. It al
 that pooled pkls share a single forward stamp (seed + OOS member/strength), so two different
 forwards could be silently averaged into one gate cell.
 """
+
 import pickle
 
 import pytest
@@ -12,16 +13,37 @@ import pytest
 from scripts.analyze_dnuis_bias import load_shards
 
 
-def _write_shard(path, *, arm="resolution_oos", treatment="b", survey="desi", idxs,
-                 seed=20260615, member="bstar", strength=1.0):
+def _write_shard(
+    path,
+    *,
+    arm="resolution_oos",
+    treatment="b",
+    survey="desi",
+    idxs,
+    seed=20260615,
+    member="bstar",
+    strength=1.0,
+):
     """A minimal fake shard pkl carrying only the fields load_shards reads."""
     n = len(idxs)
     rec = {"n_div": 0}
-    meta = dict(seed=seed,
-               inject_spec={"resolution": {"path": "x.npz", "member": member, "strength": strength}})
+    meta = dict(
+        seed=seed,
+        inject_spec={"resolution": {"path": "x.npz", "member": member, "strength": strength}},
+    )
     with open(path, "wb") as f:
-        pickle.dump(dict(arm=arm, treatment=treatment, survey=survey, idxs=list(idxs),
-                         clean_per_mock=[rec] * n, inj_per_mock=[rec] * n, meta=meta), f)
+        pickle.dump(
+            dict(
+                arm=arm,
+                treatment=treatment,
+                survey=survey,
+                idxs=list(idxs),
+                clean_per_mock=[rec] * n,
+                inj_per_mock=[rec] * n,
+                meta=meta,
+            ),
+            f,
+        )
 
 
 def test_load_shards_pools_disjoint_idxs_fine(tmp_path):
@@ -46,8 +68,12 @@ def test_load_shards_raises_on_overlapping_idxs(tmp_path):
 def test_load_shards_raises_on_mismatched_forward_stamp(tmp_path):
     """Two pkls in the same (arm,treatment,survey) group but with a DIFFERENT OOS member/strength
     cannot be pooled -- that would silently average two different forwards' bias into one cell."""
-    _write_shard(tmp_path / "resolution_oos_b_desi_shard_000.pkl", idxs=[0], member="bstar", strength=1.0)
-    _write_shard(tmp_path / "resolution_oos_b_desi_shard_001.pkl", idxs=[1], member="bstar", strength=-1.0)
+    _write_shard(
+        tmp_path / "resolution_oos_b_desi_shard_000.pkl", idxs=[0], member="bstar", strength=1.0
+    )
+    _write_shard(
+        tmp_path / "resolution_oos_b_desi_shard_001.pkl", idxs=[1], member="bstar", strength=-1.0
+    )
     with pytest.raises(SystemExit):
         load_shards(str(tmp_path))
 
@@ -61,17 +87,29 @@ def test_load_shards_raises_on_mismatched_seed(tmp_path):
         load_shards(str(tmp_path))
 
 
-def _write_scalar_shard(path, *, idxs, seed=20260615, b_res=0.15,
-                        arm="resolution", treatment="b", survey="ks"):
+def _write_scalar_shard(
+    path, *, idxs, seed=20260615, b_res=0.15, arm="resolution", treatment="b", survey="ks"
+):
     """A minimal fake shard for the SCALAR in-span instrument-f_res arm: its resolution inject spec
     is {"b_res": <scalar>} with NO member/strength (the OOS-basis fields). Before PR#14 the stamp
-    ignored b_res, so two such shards at different --b-res stamped identically and pooled silently."""
+    ignored b_res, so two such shards at different --b-res stamped identically and pooled silently.
+    """
     n = len(idxs)
     rec = {"n_div": 0}
     meta = dict(seed=seed, inject_spec={"resolution": {"b_res": b_res}})
     with open(path, "wb") as f:
-        pickle.dump(dict(arm=arm, treatment=treatment, survey=survey, idxs=list(idxs),
-                         clean_per_mock=[rec] * n, inj_per_mock=[rec] * n, meta=meta), f)
+        pickle.dump(
+            dict(
+                arm=arm,
+                treatment=treatment,
+                survey=survey,
+                idxs=list(idxs),
+                clean_per_mock=[rec] * n,
+                inj_per_mock=[rec] * n,
+                meta=meta,
+            ),
+            f,
+        )
 
 
 def test_load_shards_raises_on_mismatched_scalar_bres(tmp_path):

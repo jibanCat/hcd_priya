@@ -4,7 +4,9 @@
 attribute, or a checkpoint ``meta["kfkms"]``) carries the marker 'PRE-2026-10 INTERFACE' in its docstring together
 with the later gate that replaces it, so that no reader mistakes it for the canonical coordinate.
 (b) No comment or docstring in hcd_analysis/, scripts/ (recursive) or tests/ (recursive) claims that per-row k grids
-are shared, the same across rows, or that row 0 is canonical. The isolated incident reproduction is exempt."""
+are shared, the same across rows, or that row 0 is canonical. The isolated incident reproduction is exempt.
+"""
+
 import ast
 import io
 import os
@@ -28,7 +30,11 @@ def _py_files(*subdirs):
 def _consumes_single_grid(fn_node, src):
     seg = ast.get_source_segment(src, fn_node) or ""
     args = {a.arg for a in fn_node.args.args + fn_node.args.kwonlyargs}
-    return "cache_k" in args or "ctx.cache_k" in seg or re.search(r"meta\[\s*['\"]kfkms['\"]\s*\]", seg) is not None
+    return (
+        "cache_k" in args
+        or "ctx.cache_k" in seg
+        or re.search(r"meta\[\s*['\"]kfkms['\"]\s*\]", seg) is not None
+    )
 
 
 def test_bt7a_single_grid_consumers_are_marked():
@@ -36,22 +42,33 @@ def test_bt7a_single_grid_consumers_are_marked():
     for path in _py_files("hcd_analysis"):
         src = open(path, encoding="utf-8").read()
         for node in ast.walk(ast.parse(src)):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _consumes_single_grid(node, src):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _consumes_single_grid(
+                node, src
+            ):
                 doc = ast.get_docstring(node) or ""
                 if MARKER not in doc or not GATE_RX.search(doc):
                     unmarked.append(f"{os.path.relpath(path, REPO_ROOT)}:{node.lineno} {node.name}")
-    assert not unmarked, f"single-grid consumers without '{MARKER} ... gate X' docstring: {unmarked}"
+    assert (
+        not unmarked
+    ), f"single-grid consumers without '{MARKER} ... gate X' docstring: {unmarked}"
 
 
 def test_bt7a_named_consumers_are_marked():
     from hcd_analysis.emulator import closure_legb, multifidelity
+
     for fn in (closure_legb.make_legb_mock, multifidelity.load_lf_backbone):
         assert MARKER in (fn.__doc__ or ""), fn.__name__
 
 
-_SHARED_RX = re.compile(r"same across rows|rows share the (cache )?(angular-?)?k|per-row, shared grid|"
-                        r"\(row-0\) grid|canonical row-0|row 0 (is )?canonical|representative k-grid", re.IGNORECASE)
-_EXEMPT = {os.path.join("tests", "regression", "test_incident_2026_kgrid.py"), os.path.join("tests", "test_interface_markers.py")}
+_SHARED_RX = re.compile(
+    r"same across rows|rows share the (cache )?(angular-?)?k|per-row, shared grid|"
+    r"\(row-0\) grid|canonical row-0|row 0 (is )?canonical|representative k-grid",
+    re.IGNORECASE,
+)
+_EXEMPT = {
+    os.path.join("tests", "regression", "test_incident_2026_kgrid.py"),
+    os.path.join("tests", "test_interface_markers.py"),
+}
 
 
 def _comments_and_strings(path):

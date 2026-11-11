@@ -16,6 +16,7 @@ pins the contract:
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
      python3 -m pytest tests/test_ensemble_emulator.py -q
 """
+
 import glob
 import os
 
@@ -32,20 +33,24 @@ from hcd_analysis.emulator.schema import SchemaCollapseError
 
 # The pre-2026-10 production checkpoints live only in the eBOSS checkout (historical artifact, schema v1).
 from tests.gate_helpers import external_path  # noqa: E402
+
 HISTORICAL_PROD_PREFIX = external_path("HCD_HISTORICAL_CHECKOUT", "checkpoints", "final_prod_seed")
 
 
 def _members(n=3, n_k=10, n_basis=6):
     """n independently-initialised synthetic Emulators (distinct keys = distinct weights)."""
-    return [Emulator(in_dim=10, n_k=n_k, n_basis=n_basis, key=jax.random.PRNGKey(s))
-            for s in range(n)]
+    return [
+        Emulator(in_dim=10, n_k=n_k, n_basis=n_basis, key=jax.random.PRNGKey(s)) for s in range(n)
+    ]
 
 
 def _pf(n_k=10, seed=0):
     rng = np.random.default_rng(seed)
-    return {"mu_marg": jnp.asarray(rng.normal(-2, 0.5, (4, n_k))),
-            "sig_marg": jnp.asarray(rng.uniform(0.5, 1.5, (4, n_k))),
-            "sig_cosmo": jnp.asarray(rng.uniform(0.02, 0.1, (4, n_k)))}
+    return {
+        "mu_marg": jnp.asarray(rng.normal(-2, 0.5, (4, n_k))),
+        "sig_marg": jnp.asarray(rng.uniform(0.5, 1.5, (4, n_k))),
+        "sig_cosmo": jnp.asarray(rng.uniform(0.02, 0.1, (4, n_k))),
+    }
 
 
 def test_ensemble_predict_P_filt_is_member_mean():
@@ -53,11 +58,12 @@ def test_ensemble_predict_P_filt_is_member_mean():
     members, pf = _members(3, n_k), _pf(n_k)
     theta9, z_unit, tau0 = jnp.full(9, 0.5), jnp.asarray(0.5), 0.40
     per = jnp.stack([predict_P_filt(m, theta9, z_unit, tau0, pf) for m in members])
-    expected = jnp.mean(per, axis=0)                                   # (4,K)
+    expected = jnp.mean(per, axis=0)  # (4,K)
     got = predict_P_filt(EnsembleEmulator(members), theta9, z_unit, tau0, pf)
     assert got.shape == expected.shape == (4, n_k)
-    assert jnp.allclose(got, expected, rtol=0, atol=1e-12), \
-        f"ensemble predict != member mean (max |Δ|={float(jnp.max(jnp.abs(got-expected))):.2e})"
+    assert jnp.allclose(
+        got, expected, rtol=0, atol=1e-12
+    ), f"ensemble predict != member mean (max |Δ|={float(jnp.max(jnp.abs(got-expected))):.2e})"
     # the mean must be NON-trivial (members actually differ) so the test has teeth
     assert float(jnp.max(jnp.abs(per[0] - per[1]))) > 1e-6
 
@@ -88,8 +94,6 @@ def test_ensemble_predict_P_obs_differentiable():
     assert float(jnp.max(jnp.abs(g))) > 0.0, "ensemble forward has zero θ-gradient"
 
 
-
-
 def _schema2_members(tmp_path, n=3, n_k=12):
     """n synthetic schema-2.0 checkpoints sharing one cache and one norm (only the init key differs).
     The pre-2026-10 production checkpoints are schema v1 and are refused by load_checkpoint by design
@@ -97,15 +101,25 @@ def _schema2_members(tmp_path, n=3, n_k=12):
     from tests.emulator._fixture import write_synthetic_cache
     from hcd_analysis.emulator.data import load_cache_historical, fit_target_norm
     from hcd_analysis.emulator.train import save_checkpoint
+
     write_synthetic_cache(tmp_path / "obs.h5", n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=n_k)
-    d = load_cache_historical(tmp_path / "obs.h5", reason='test: a cache in the pre-lineage 3.3 format')
+    d = load_cache_historical(
+        tmp_path / "obs.h5", reason="test: a cache in the pre-lineage 3.3 format"
+    )
     norm = fit_target_norm(d, np.arange(d["P_filt"].shape[0]))
     paths = []
     for s in range(n):
         m = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(s))
         p = str(tmp_path / f"m{s}")
-        save_checkpoint(p, m, {"in_dim": 10, "n_k": n_k, "n_basis": 4}, norm, seed=s, cache=d,
-                        cache_path=str(tmp_path / "obs.h5"))
+        save_checkpoint(
+            p,
+            m,
+            {"in_dim": 10, "n_k": n_k, "n_basis": 4},
+            norm,
+            seed=s,
+            cache=d,
+            cache_path=str(tmp_path / "obs.h5"),
+        )
         paths.append(p)
     return paths
 
@@ -122,8 +136,7 @@ def test_load_ensemble_shared_norm_and_members(tmp_path):
     # ensemble predict == numpy mean of per-member predict (matches validate_production_ensemble)
     pf = {k: jnp.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
     theta9, z_unit, tau0 = jnp.full(9, 0.5), jnp.asarray(0.5), 0.40
-    per = np.stack([np.asarray(predict_P_filt(m, theta9, z_unit, tau0, pf))
-                    for m in ens.members])
+    per = np.stack([np.asarray(predict_P_filt(m, theta9, z_unit, tau0, pf)) for m in ens.members])
     got = np.asarray(predict_P_filt(ens, theta9, z_unit, tau0, pf))
     assert np.allclose(got, per.mean(axis=0), rtol=0, atol=1e-10)
 
@@ -132,6 +145,7 @@ def test_load_ensemble_rejects_mismatched_norm(tmp_path):
     """load_ensemble must assert the members share a norm (same training data) — a member
     with a different norm is a wiring error that would silently corrupt the mean."""
     import pickle
+
     local = _schema2_members(tmp_path, n=2)
     with open(local[1] + ".norm.pkl", "rb") as fh:
         nrm = pickle.load(fh)
@@ -145,6 +159,7 @@ def test_load_ensemble_rejects_mismatched_norm(tmp_path):
 def test_load_ensemble_rejects_mismatched_k_com(tmp_path):
     """Members must share the comoving modes; a member whose k_com differs is refused."""
     import json
+
     local = _schema2_members(tmp_path, n=2)
     with open(local[1] + ".meta.json") as fh:
         meta = json.load(fh)
@@ -158,10 +173,13 @@ def test_load_ensemble_rejects_mismatched_k_com(tmp_path):
 def test_load_ensemble_refuses_pre_2026_10_production_checkpoints():
     """The historical production checkpoints (schema v1) are not loadable after gate A."""
     from hcd_analysis.emulator.schema import SchemaCollapseError
+
     paths = sorted(p[:-4] for p in glob.glob(HISTORICAL_PROD_PREFIX + "*.eqx"))
     if not paths:
-        msg = (f"historical production checkpoints not present at {HISTORICAL_PROD_PREFIX}*.eqx: set "
-               "HCD_HISTORICAL_CHECKOUT to the checkout holding checkpoints/")
+        msg = (
+            f"historical production checkpoints not present at {HISTORICAL_PROD_PREFIX}*.eqx: set "
+            "HCD_HISTORICAL_CHECKOUT to the checkout holding checkpoints/"
+        )
         if os.environ.get("HCD_GATE_RUN") == "1":
             pytest.fail(msg + " (HCD_GATE_RUN=1: gate runs require the historical checkpoints)")
         pytest.skip(msg)

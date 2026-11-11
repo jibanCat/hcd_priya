@@ -51,6 +51,7 @@ Tests in ``tests/test_lya_bias.py`` cover:
 4. Real-data sanity: the recovered b_F at z ≈ 2.3 lies in
    [-0.25, -0.12] (Slosar+2011 / du Mas des Bourboux+2020 envelope).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -61,10 +62,10 @@ import numpy as np
 from scipy.integrate import trapezoid as _trapezoid  # numpy 1.x has no _trapezoid
 from scipy.special import spherical_jn
 
-
 # ---------------------------------------------------------------------------
 # CAMB power-spectrum loader
 # ---------------------------------------------------------------------------
+
 
 def load_camb_pk(path: Path) -> Tuple[np.ndarray, np.ndarray]:
     """Load a PRIYA-format CAMB power spectrum.
@@ -94,18 +95,21 @@ def find_camb_pk_for_z(sim_output_dir: Path, z: float) -> Path:
     candidates = sorted(sim_output_dir.glob("powerspectrum-*.txt"))
     if not candidates:
         raise FileNotFoundError(f"no powerspectrum-*.txt under {sim_output_dir}")
+
     def _a_of(f: Path) -> float:
         # filename is powerspectrum-<a>.txt
         try:
             return float(f.stem.split("-")[1])
         except Exception:
             return -1.0
+
     return min(candidates, key=lambda f: abs(_a_of(f) - target_a))
 
 
 # ---------------------------------------------------------------------------
 # Unit conversion: (Mpc/h, h/Mpc) ↔ (km/s, s/km) at fixed z
 # ---------------------------------------------------------------------------
+
 
 def hMpc_to_kms_factor(z: float, hubble: float, Hz_kms_per_Mpc: float) -> float:
     """Conversion factor F such that
@@ -131,6 +135,7 @@ def hMpc_to_kms_factor(z: float, hubble: float, Hz_kms_per_Mpc: float) -> float:
 # ---------------------------------------------------------------------------
 # 1-D projection of P_lin_3D with Kaiser β_F enhancement
 # ---------------------------------------------------------------------------
+
 
 def project_pk_3d_to_p1d(
     k_par: np.ndarray,
@@ -200,7 +205,7 @@ def project_pk_3d_to_p1d(
         k3 = np.sqrt(kp * kp + k_perp * k_perp)
         mu = kp / k3
         kaiser = (1.0 + beta_F * mu * mu) ** 2
-        integrand = k_perp * kaiser * P_3d_eval(k3)        # k_perp · ...
+        integrand = k_perp * kaiser * P_3d_eval(k3)  # k_perp · ...
         # Trapezoidal integration ∫ f(k_perp) dk_perp.
         out[i] = _trapezoid(integrand, k_perp) / (2.0 * np.pi)
     return out
@@ -209,6 +214,7 @@ def project_pk_3d_to_p1d(
 # ---------------------------------------------------------------------------
 # Observed P1D over HCD-free sightlines (clean forest)
 # ---------------------------------------------------------------------------
+
 
 def compute_p1d_clean_sightlines(
     delta_F: np.ndarray,
@@ -246,17 +252,18 @@ def compute_p1d_clean_sightlines(
         raise ValueError("no HCD-free sightlines available")
 
     # FFT only the clean rows
-    df_clean = delta_F[clean_rows]                        # (n_clean, n_pix)
-    ft = np.fft.rfft(df_clean * dv_kms, axis=1)            # units: km/s
-    power = np.abs(ft) ** 2 / (n_pix * dv_kms)             # units: km/s
+    df_clean = delta_F[clean_rows]  # (n_clean, n_pix)
+    ft = np.fft.rfft(df_clean * dv_kms, axis=1)  # units: km/s
+    power = np.abs(ft) ** 2 / (n_pix * dv_kms)  # units: km/s
     P1D = power.mean(axis=0)
-    k_par = np.fft.rfftfreq(n_pix, d=dv_kms)               # s/km
+    k_par = np.fft.rfftfreq(n_pix, d=dv_kms)  # s/km
     return k_par, P1D, n_clean
 
 
 # ---------------------------------------------------------------------------
 # b_F fit
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class BFFitResult:
@@ -297,28 +304,29 @@ def fit_b_F(
     """
     # 1) observed P1D over clean sightlines
     k_par_kms, P1D_obs_kms, n_clean = compute_p1d_clean_sightlines(
-        delta_F=delta_F, dv_kms=dv_kms, pixel_mask=pixel_mask,
+        delta_F=delta_F,
+        dv_kms=dv_kms,
+        pixel_mask=pixel_mask,
     )
 
     # 2) load CAMB P_lin_3D, convert to (km/s) units
     k_hMpc, P_Mpch3 = load_camb_pk(P_lin_camb_path)
     F = hMpc_to_kms_factor(z, hubble, Hz_kms_per_Mpc)
-    k_3d_kms = k_hMpc * F                                  # s/km
+    k_3d_kms = k_hMpc * F  # s/km
     # P has units of length^3.  L_v = L_r / F, so P_v = P_r / F^3.
-    P_3d_kms = P_Mpch3 / (F ** 3)                          # (km/s)^3
+    P_3d_kms = P_Mpch3 / (F**3)  # (km/s)^3
 
     # 3) numerical projection at our k_par grid
     I_kpar = project_pk_3d_to_p1d(
-        k_par=k_par_kms, k_3d=k_3d_kms, P_3d=P_3d_kms,
+        k_par=k_par_kms,
+        k_3d=k_3d_kms,
+        P_3d=P_3d_kms,
         beta_F=beta_F_assume,
-    )                                                      # (km/s)
+    )  # (km/s)
 
     # 4) fit b_F² as the geometric-mean ratio over the linear window
     fit_mask = (
-        (k_par_kms >= k_min_kms) &
-        (k_par_kms <= k_max_kms) &
-        (I_kpar > 0) &
-        (P1D_obs_kms > 0)
+        (k_par_kms >= k_min_kms) & (k_par_kms <= k_max_kms) & (I_kpar > 0) & (P1D_obs_kms > 0)
     )
     n_pts = int(fit_mask.sum())
     if n_pts < 5:
@@ -339,7 +347,7 @@ def fit_b_F(
     # without bootstrap)
     P_template = b_F_sq * I_kpar
     residual = P1D_obs_kms[fit_mask] - P_template[fit_mask]
-    chi2 = float((residual ** 2 / np.maximum(P_template[fit_mask], 1e-30) ** 2).sum())
+    chi2 = float((residual**2 / np.maximum(P_template[fit_mask], 1e-30) ** 2).sum())
 
     return BFFitResult(
         b_F=b_F,
@@ -353,13 +361,14 @@ def fit_b_F(
         chi2=chi2,
         z=z,
         note=f"β_F fixed at {beta_F_assume}; fit on {n_pts} bins in "
-             f"[{k_min_kms:.3g}, {k_max_kms:.3g}] s/km",
+        f"[{k_min_kms:.3g}, {k_max_kms:.3g}] s/km",
     )
 
 
 # ---------------------------------------------------------------------------
 # Linear matter ξ_lin(r) monopole and the b_F fit from ξ_FF
 # ---------------------------------------------------------------------------
+
 
 def xi_lin_monopole(
     r: np.ndarray,
@@ -405,7 +414,7 @@ def xi_lin_monopole(
             integrand = k * k * P
         else:
             integrand = k * np.sin(k * ri) * P / ri
-        out[i] = float(_trapezoid(integrand, k)) / (2.0 * np.pi ** 2)
+        out[i] = float(_trapezoid(integrand, k)) / (2.0 * np.pi**2)
     return out
 
 
@@ -449,13 +458,14 @@ def xi_lin_quadrupole(
             out[i] = 0.0
             continue
         integrand = k * k * spherical_jn(2, k * ri) * P
-        out[i] = float(_trapezoid(integrand, k)) / (2.0 * np.pi ** 2)
+        out[i] = float(_trapezoid(integrand, k)) / (2.0 * np.pi**2)
     return out
 
 
 # ---------------------------------------------------------------------------
 # Hamilton multipole extraction from an (r, |μ|)-binned ξ grid
 # ---------------------------------------------------------------------------
+
 
 def _legendre(ell: int, mu: np.ndarray) -> np.ndarray:
     """Plain-Python Legendre polynomial for the ones we use.
@@ -527,16 +537,16 @@ def extract_multipoles_rmu(
         raise ValueError("xi_rmu and npairs_rmu must have the same shape")
     if xi_rmu.shape[1] != mu_centres.size:
         raise ValueError(
-            f"xi_rmu has {xi_rmu.shape[1]} μ-columns, mu_centres has "
-            f"{mu_centres.size}"
+            f"xi_rmu has {xi_rmu.shape[1]} μ-columns, mu_centres has " f"{mu_centres.size}"
         )
     if mu_centres.size < 2:
         raise ValueError("need at least 2 μ-bins to project multipoles")
     if not np.all(np.diff(mu_centres) > 0):
         raise ValueError("mu_centres must be strictly increasing")
     if mu_centres[0] < 0 or mu_centres[-1] > 1.0 + 1e-12:
-        raise ValueError(f"mu_centres must lie in [0, 1]; got "
-                         f"[{mu_centres[0]}, {mu_centres[-1]}]")
+        raise ValueError(
+            f"mu_centres must lie in [0, 1]; got " f"[{mu_centres[0]}, {mu_centres[-1]}]"
+        )
 
     # Approximate dμ per bin from the centres (assumes uniform μ-bins,
     # which is what production passes).  Deduce edges as midpoints; clip
@@ -545,7 +555,7 @@ def extract_multipoles_rmu(
     edges[1:-1] = 0.5 * (mu_centres[:-1] + mu_centres[1:])
     edges[0] = max(0.0, 2.0 * mu_centres[0] - edges[1])
     edges[-1] = min(1.0, 2.0 * mu_centres[-1] - edges[-2])
-    dmu = np.diff(edges)                                          # (n_mu,)
+    dmu = np.diff(edges)  # (n_mu,)
 
     n_r, n_mu = xi_rmu.shape
     valid = (npairs_rmu > 0) & np.isfinite(xi_rmu)
@@ -556,12 +566,12 @@ def extract_multipoles_rmu(
     # sum so the projection still targets ∫_0^1 instead of the
     # truncated integral.
     dmu_valid = np.where(valid, dmu[None, :], 0.0)
-    norm_per_r = dmu_valid.sum(axis=1)                            # (n_r,)
+    norm_per_r = dmu_valid.sum(axis=1)  # (n_r,)
 
     out = {}
     for ell in ells:
-        L = _legendre(ell, mu_centres)                            # (n_mu,)
-        weights = (L * dmu)[None, :]                              # (1, n_mu)
+        L = _legendre(ell, mu_centres)  # (n_mu,)
+        weights = (L * dmu)[None, :]  # (1, n_mu)
         contrib = np.where(valid, xi_rmu * weights, 0.0)
         proj_partial = contrib.sum(axis=1)
         # Hamilton: ξ^(ℓ)(r) = (2ℓ+1) · ∫_0^1 dμ ξ(r,μ) L_ℓ(μ).
@@ -592,6 +602,7 @@ def extract_multipoles_rmu(
 # the monopole estimator below is trusted on real data — the
 # quadrupole would need uniform-μ averaging at fixed r, which our
 # (r_⊥, r_∥)-binned pair counter does not provide.
+
 
 def extract_monopole(
     xi_2d: np.ndarray,
@@ -636,9 +647,7 @@ def extract_monopole(
         raise ValueError("r_bins must be strictly increasing")
 
     # 2-D r centre per bin
-    r_grid = np.sqrt(
-        r_perp_centres[:, None] ** 2 + r_par_centres[None, :] ** 2
-    )
+    r_grid = np.sqrt(r_perp_centres[:, None] ** 2 + r_par_centres[None, :] ** 2)
     # Drop NaN ξ bins (those with 0 pairs)
     valid = npairs_2d > 0
     r_flat = r_grid[valid]
@@ -666,6 +675,7 @@ def extract_monopole(
 # ---------------------------------------------------------------------------
 # b_F from ξ_FF monopole
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class BFFromXiResult:
@@ -705,17 +715,17 @@ def fit_b_F_from_xi_FF(
     """
     r_bins = np.linspace(r_min, r_max, n_r_bins + 1)
     r_centres, xi_mono, n_p = extract_monopole(
-        xi_2d=xi_2d, npairs_2d=npairs_2d,
-        r_perp_centres=r_perp_centres, r_par_centres=r_par_centres,
+        xi_2d=xi_2d,
+        npairs_2d=npairs_2d,
+        r_perp_centres=r_perp_centres,
+        r_par_centres=r_par_centres,
         r_bins=r_bins,
     )
     xi_lin = xi_lin_monopole(r_centres, k_lin, P_lin)
-    K = 1.0 + (2.0 / 3.0) * beta_F + (1.0 / 5.0) * beta_F ** 2
-    template = K * xi_lin                                # the ξ_FF / b_F² template
+    K = 1.0 + (2.0 / 3.0) * beta_F + (1.0 / 5.0) * beta_F**2
+    template = K * xi_lin  # the ξ_FF / b_F² template
 
-    fit_mask = (
-        np.isfinite(xi_mono) & (template != 0) & (n_p > 0)
-    )
+    fit_mask = np.isfinite(xi_mono) & (template != 0) & (n_p > 0)
     if int(fit_mask.sum()) < 4:
         raise ValueError(
             f"only {int(fit_mask.sum())} bins available for the ξ_FF fit "
@@ -735,7 +745,7 @@ def fit_b_F_from_xi_FF(
     log_b_F_sq = float(np.log(ratio).mean())
     log_b_F_sq_se = float(np.log(ratio).std(ddof=1) / np.sqrt(ratio.size))
     b_F_sq = float(np.exp(log_b_F_sq))
-    b_F = -np.sqrt(b_F_sq)                                 # Lyα convention
+    b_F = -np.sqrt(b_F_sq)  # Lyα convention
     b_F_err = abs(b_F) * 0.5 * log_b_F_sq_se
 
     return BFFromXiResult(
@@ -757,6 +767,7 @@ def fit_b_F_from_xi_FF(
 # ---------------------------------------------------------------------------
 # Cross-correlation: b_DLA from ξ_× given b_F
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class BDLAFromXiResult:
@@ -820,23 +831,20 @@ def fit_b_DLA_from_xi_cross(
     """
     r_bins = np.linspace(r_min, r_max, n_r_bins + 1)
     r_centres, xi_mono, n_p = extract_monopole(
-        xi_2d=xi_2d, npairs_2d=npairs_2d,
-        r_perp_centres=r_perp_centres, r_par_centres=r_par_centres,
+        xi_2d=xi_2d,
+        npairs_2d=npairs_2d,
+        r_perp_centres=r_perp_centres,
+        r_par_centres=r_par_centres,
         r_bins=r_bins,
     )
     xi_lin = xi_lin_monopole(r_centres, k_lin, P_lin)
-    K_cross = (
-        1.0
-        + (beta_DLA + beta_F) / 3.0
-        + (beta_DLA * beta_F) / 5.0
-    )
-    template = b_F * K_cross * xi_lin                      # ξ_× / b_DLA
+    K_cross = 1.0 + (beta_DLA + beta_F) / 3.0 + (beta_DLA * beta_F) / 5.0
+    template = b_F * K_cross * xi_lin  # ξ_× / b_DLA
 
     fit_mask = np.isfinite(xi_mono) & (template != 0) & (n_p > 0)
     if int(fit_mask.sum()) < 4:
         raise ValueError(
-            f"only {int(fit_mask.sum())} bins available for ξ_× fit "
-            f"in [{r_min}, {r_max}] Mpc/h"
+            f"only {int(fit_mask.sum())} bins available for ξ_× fit " f"in [{r_min}, {r_max}] Mpc/h"
         )
     # Sign expectation: b_F < 0; for r > 0 in the linear regime,
     # ξ_lin > 0; b_DLA > 0 for halos; cross ξ_× should be NEGATIVE
@@ -906,9 +914,11 @@ def fit_b_DLA_from_xi_cross(
 # At fixed (b_F, β_F), this is a 2-parameter (b_D, β_D) least-squares
 # fit on the joint mono + quad data vectors.
 
+
 @dataclass
 class JointBDLABetaResult:
     """Output of ``fit_b_beta_from_xi_cross_multipoles``."""
+
     b_DLA: float
     b_DLA_err: float
     beta_DLA: float
@@ -925,7 +935,7 @@ class JointBDLABetaResult:
     fit_mask: np.ndarray
     n_fit_bins: int
     chi2: float
-    cov: np.ndarray         # 2x2 covariance of (b_DLA, β_DLA)
+    cov: np.ndarray  # 2x2 covariance of (b_DLA, β_DLA)
 
 
 def _kaiser_K0_K2(beta_D: float, beta_F: float) -> Tuple[float, float]:
@@ -990,7 +1000,7 @@ def fit_b_beta_from_xi_cross_multipoles(
     -------
     JointBDLABetaResult
     """
-    from scipy.optimize import least_squares      # local import — heavy
+    from scipy.optimize import least_squares  # local import — heavy
 
     xi_rmu = np.asarray(xi_rmu, dtype=np.float64)
     npairs_rmu = np.asarray(npairs_rmu, dtype=np.int64)
@@ -1004,8 +1014,10 @@ def fit_b_beta_from_xi_cross_multipoles(
         )
 
     multipoles = extract_multipoles_rmu(
-        xi_rmu=xi_rmu, npairs_rmu=npairs_rmu,
-        mu_centres=mu_centres, ells=(0, 2),
+        xi_rmu=xi_rmu,
+        npairs_rmu=npairs_rmu,
+        mu_centres=mu_centres,
+        ells=(0, 2),
     )
     xi_mono = multipoles[0]
     xi_quad = multipoles[2]
@@ -1014,15 +1026,16 @@ def fit_b_beta_from_xi_cross_multipoles(
     npairs_per_r = npairs_rmu.sum(axis=1)
 
     fit_mask = (
-        np.isfinite(xi_mono) & np.isfinite(xi_quad)
-        & (r_centres >= r_min) & (r_centres <= r_max)
+        np.isfinite(xi_mono)
+        & np.isfinite(xi_quad)
+        & (r_centres >= r_min)
+        & (r_centres <= r_max)
         & (npairs_per_r > 0)
     )
     n_fit = int(fit_mask.sum())
     if n_fit < 4:
         raise ValueError(
-            f"only {n_fit} valid r-bins in [{r_min}, {r_max}]; "
-            f"need ≥ 4 for a 2-parameter fit"
+            f"only {n_fit} valid r-bins in [{r_min}, {r_max}]; " f"need ≥ 4 for a 2-parameter fit"
         )
 
     r_fit = r_centres[fit_mask]
@@ -1044,18 +1057,16 @@ def fit_b_beta_from_xi_cross_multipoles(
     mu_edges_inferred[1:-1] = 0.5 * (mu_centres[:-1] + mu_centres[1:])
     mu_edges_inferred[0] = max(0.0, 2.0 * mu_centres[0] - mu_edges_inferred[1])
     mu_edges_inferred[-1] = min(1.0, 2.0 * mu_centres[-1] - mu_edges_inferred[-2])
-    dmu = np.diff(mu_edges_inferred)                                # (n_mu,)
+    dmu = np.diff(mu_edges_inferred)  # (n_mu,)
     L0_mu = np.ones_like(mu_centres)
-    L2_mu = 0.5 * (3.0 * mu_centres ** 2 - 1.0)
-    inv_N = np.where(npairs_rmu > 0,
-                     1.0 / np.maximum(npairs_rmu, 1).astype(np.float64),
-                     0.0)
+    L2_mu = 0.5 * (3.0 * mu_centres**2 - 1.0)
+    inv_N = np.where(npairs_rmu > 0, 1.0 / np.maximum(npairs_rmu, 1).astype(np.float64), 0.0)
     # norm_per_r: same computation as inside extract_multipoles_rmu.
     dmu_valid = np.where(npairs_rmu > 0, dmu[None, :], 0.0)
-    norm_per_r = dmu_valid.sum(axis=1)                              # (n_r,)
-    norm_sq = np.maximum(norm_per_r ** 2, 1e-30)                   # guard ÷0
-    var0_per_r = ((L0_mu * dmu) ** 2 * inv_N).sum(axis=1) / norm_sq      # ∝ σ²(r, 0)
-    var2_per_r = (5.0 ** 2) * ((L2_mu * dmu) ** 2 * inv_N).sum(axis=1) / norm_sq  # ∝ σ²(r, 2)
+    norm_per_r = dmu_valid.sum(axis=1)  # (n_r,)
+    norm_sq = np.maximum(norm_per_r**2, 1e-30)  # guard ÷0
+    var0_per_r = ((L0_mu * dmu) ** 2 * inv_N).sum(axis=1) / norm_sq  # ∝ σ²(r, 0)
+    var2_per_r = (5.0**2) * ((L2_mu * dmu) ** 2 * inv_N).sum(axis=1) / norm_sq  # ∝ σ²(r, 2)
     eps = 1e-30
     w0 = 1.0 / np.sqrt(np.maximum(var0_per_r[fit_mask], eps))
     w2 = 1.0 / np.sqrt(np.maximum(var2_per_r[fit_mask], eps))
@@ -1068,10 +1079,12 @@ def fit_b_beta_from_xi_cross_multipoles(
         K0, K2 = _kaiser_K0_K2(beta_D, beta_F)
         model_0 = +b_D * b_F * K0 * xi_lin_j0
         model_2 = -b_D * b_F * K2 * xi_lin_j2
-        return np.concatenate([
-            (xi0_fit - model_0) * w0,
-            (xi2_fit - model_2) * w2,
-        ])
+        return np.concatenate(
+            [
+                (xi0_fit - model_0) * w0,
+                (xi2_fit - model_2) * w2,
+            ]
+        )
 
     res = least_squares(
         residuals,
@@ -1084,13 +1097,13 @@ def fit_b_beta_from_xi_cross_multipoles(
 
     # Covariance from the LM Jacobian: cov = (J^T J)^{-1} · σ²,
     # where σ² is the residual variance per d.o.f.
-    J = res.jac                                                    # (2N, 2)
+    J = res.jac  # (2N, 2)
     if J.size > 0 and n_fit > 1:
         # Residuals are already √npairs-weighted, so ignore the σ² term
         # if you trust the per-bin weighting; here we take the χ²-per-dof
         # rescaling so the reported errors are conservatively scaled to
         # the post-fit residuals.
-        chi2 = float((res.fun ** 2).sum())
+        chi2 = float((res.fun**2).sum())
         dof = max(1, 2 * n_fit - 2)
         sigma_sq = chi2 / dof
         try:

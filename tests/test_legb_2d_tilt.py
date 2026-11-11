@@ -30,7 +30,9 @@ Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     python -m pytest tests/test_legb_2d_tilt.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import numpy as np
@@ -48,7 +50,9 @@ from tests.gate_helpers import external_path  # noqa: E402  (data roots come fro
 _CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 _CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
-_KS = (external_path("HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"))
+_KS = external_path(
+    "HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"
+)
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
 _have_ks = os.path.exists(_KS)
 
@@ -60,15 +64,20 @@ def _sites(model, *a, seed=1):
 
 def _potential_at(model, *a, point):
     from numpyro.infer.util import log_density
+
     lp, _ = log_density(model, a, {}, point)
     return float(lp)
 
 
 def _build_small(hierarchical=False, two_d=False, ratio_infl=1.0):
     """A DESI-only narrow-z context so the FULL real-grid path runs in ~1 min/chain."""
-    ctx, d = C.build_legb_ctx(desi_kwargs=dict(z_lo=0.0, z_hi=2.6), use_xclass=True,
-                              hierarchical_hcd=hierarchical, hcd_2d_tilt=two_d,
-                              hcd_ratio_infl=ratio_infl)
+    ctx, d = C.build_legb_ctx(
+        desi_kwargs=dict(z_lo=0.0, z_hi=2.6),
+        use_xclass=True,
+        hierarchical_hcd=hierarchical,
+        hcd_2d_tilt=two_d,
+        hcd_ratio_infl=ratio_infl,
+    )
     ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "DESI"])
     return ctx, d
 
@@ -112,13 +121,26 @@ def test_off_legacy_byte_exact_when_2d_off():
     s = _sites(C._legb_model, ctx, mock_legs, core)
     # the legacy 3 independent α + the res_corr-amplitude nuisance block (alpha_res,
     # alpha_res_slope — added by d0de534/7a28e8d, ALWAYS sampled unless ctx.fix_alpha_res).
-    assert s == ["theta_unit", "tau0_amp", "dtau0",
-                 "alpha_lls", "alpha_subdla", "alpha_dla_raw",
-                 "alpha_res", "alpha_res_slope"]
-    point = dict(theta_unit=jnp.full(9, 0.5), tau0_amp=jnp.asarray(1.0),
-                 dtau0=jnp.asarray(0.0), alpha_lls=jnp.asarray(0.27),
-                 alpha_subdla=jnp.asarray(0.09), alpha_dla_raw=jnp.asarray(-2.0),
-                 alpha_res=jnp.asarray(1.0), alpha_res_slope=jnp.asarray(0.0))
+    assert s == [
+        "theta_unit",
+        "tau0_amp",
+        "dtau0",
+        "alpha_lls",
+        "alpha_subdla",
+        "alpha_dla_raw",
+        "alpha_res",
+        "alpha_res_slope",
+    ]
+    point = dict(
+        theta_unit=jnp.full(9, 0.5),
+        tau0_amp=jnp.asarray(1.0),
+        dtau0=jnp.asarray(0.0),
+        alpha_lls=jnp.asarray(0.27),
+        alpha_subdla=jnp.asarray(0.09),
+        alpha_dla_raw=jnp.asarray(-2.0),
+        alpha_res=jnp.asarray(1.0),
+        alpha_res_slope=jnp.asarray(0.0),
+    )
     lp = _potential_at(C._legb_model, ctx, mock_legs, core, point=point)
     # an explicitly-defaulted 2D field must not perturb the OFF math.
     ctx2 = ctx._replace(hcd_2d_tilt=False, hcd_dslope=None, hcd_btilt_mu=None, hcd_btilt_sigma=None)
@@ -136,15 +158,33 @@ def test_off_optionB_byte_exact_when_2d_off():
     s = _sites(C._legb_model, ctx, mock_legs, core)
     # Option-B reparam (A_hcd·r) + the per-class z-slope block + the res_corr-amplitude nuisance
     # block (alpha_res, alpha_res_slope — added by d0de534/7a28e8d, ALWAYS sampled).
-    assert s == ["theta_unit", "tau0_amp", "dtau0",
-                 "A_hcd", "r_subdla", "r_dla", "s_lls", "s_subdla", "s_dla",
-                 "alpha_res", "alpha_res_slope"]
+    assert s == [
+        "theta_unit",
+        "tau0_amp",
+        "dtau0",
+        "A_hcd",
+        "r_subdla",
+        "r_dla",
+        "s_lls",
+        "s_subdla",
+        "s_dla",
+        "alpha_res",
+        "alpha_res_slope",
+    ]
     assert "B_hcd" not in s
-    point = dict(theta_unit=jnp.full(9, 0.5), tau0_amp=jnp.asarray(1.0),
-                 dtau0=jnp.asarray(0.0), A_hcd=jnp.asarray(0.27),
-                 r_subdla=jnp.asarray(0.33), r_dla=jnp.asarray(0.016),
-                 s_lls=jnp.asarray(0.95), s_subdla=jnp.asarray(0.15), s_dla=jnp.asarray(0.40),
-                 alpha_res=jnp.asarray(1.0), alpha_res_slope=jnp.asarray(0.0))
+    point = dict(
+        theta_unit=jnp.full(9, 0.5),
+        tau0_amp=jnp.asarray(1.0),
+        dtau0=jnp.asarray(0.0),
+        A_hcd=jnp.asarray(0.27),
+        r_subdla=jnp.asarray(0.33),
+        r_dla=jnp.asarray(0.016),
+        s_lls=jnp.asarray(0.95),
+        s_subdla=jnp.asarray(0.15),
+        s_dla=jnp.asarray(0.40),
+        alpha_res=jnp.asarray(1.0),
+        alpha_res_slope=jnp.asarray(0.0),
+    )
     lp = _potential_at(C._legb_model, ctx, mock_legs, core, point=point)
     ctx2 = ctx._replace(hcd_2d_tilt=False, hcd_dslope=None, hcd_btilt_mu=None, hcd_btilt_sigma=None)
     lp2 = _potential_at(C._legb_model, ctx2, mock_legs, core, point=point)
@@ -165,9 +205,13 @@ def test_model_priors_only_site_order_match_2d(two_d, hierarchical, sample_metal
     A_hcd, B_hcd, r_subdla, r_dla (no s_* block — 2D sets its own slopes)."""
     if two_d and not hierarchical:
         pytest.skip("2D requires hierarchical_hcd (rejected at build) — covered separately")
-    ctx, d = C.build_legb_ctx(desi_kwargs=dict(z_lo=0.0, z_hi=2.6), use_xclass=True,
-                              hierarchical_hcd=hierarchical, hcd_2d_tilt=two_d,
-                              sample_metals=sample_metals)
+    ctx, d = C.build_legb_ctx(
+        desi_kwargs=dict(z_lo=0.0, z_hi=2.6),
+        use_xclass=True,
+        hierarchical_hcd=hierarchical,
+        hcd_2d_tilt=two_d,
+        sample_metals=sample_metals,
+    )
     ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "DESI"])
     mock_legs, core, _, _ = _mock(ctx, d)
     s_model = _sites(C._legb_model, ctx, mock_legs, core)
@@ -196,8 +240,9 @@ def test_2d_pivot_alpha_equals_A_times_r():
     z-tilt lives in alpha_hcd_z, NOT in the pivot α — back-compat for _draws_matrix/coverage)."""
     ctx, d = _build_small(hierarchical=True, two_d=True)
     mock_legs, core, _, _ = _mock(ctx, d)
-    tr = handlers.trace(handlers.seed(
-        lambda: C._legb_model(ctx, mock_legs, core), jax.random.PRNGKey(3))).get_trace()
+    tr = handlers.trace(
+        handlers.seed(lambda: C._legb_model(ctx, mock_legs, core), jax.random.PRNGKey(3))
+    ).get_trace()
     A = np.asarray(tr["A_hcd"]["value"])
     rs = np.asarray(tr["r_subdla"]["value"])
     rd = np.asarray(tr["r_dla"]["value"])
@@ -215,13 +260,16 @@ def test_2d_z_shape_uses_btilt_plus_dslope():
     """alpha_hcd_z follows the per-class slope s_c = B_hcd + δs_c (NOT a sampled s_* block)."""
     ctx, d = _build_small(hierarchical=True, two_d=True)
     mock_legs, core, _, _ = _mock(ctx, d)
-    tr = handlers.trace(handlers.seed(
-        lambda: C._legb_model(ctx, mock_legs, core), jax.random.PRNGKey(7))).get_trace()
-    A = float(tr["A_hcd"]["value"]); B = float(tr["B_hcd"]["value"])
-    rs = float(tr["r_subdla"]["value"]); rd = float(tr["r_dla"]["value"])
+    tr = handlers.trace(
+        handlers.seed(lambda: C._legb_model(ctx, mock_legs, core), jax.random.PRNGKey(7))
+    ).get_trace()
+    A = float(tr["A_hcd"]["value"])
+    B = float(tr["B_hcd"]["value"])
+    rs = float(tr["r_subdla"]["value"])
+    rd = float(tr["r_dla"]["value"])
     alpha_pivot = np.array([A, A * rs, A * rd])
     dslope = np.asarray(ctx.hcd_dslope)
-    s_c = B + dslope                                              # (3,)
+    s_c = B + dslope  # (3,)
     zg = np.asarray(ctx.z_global)
     shape = ((1.0 + zg)[:, None] / (1.0 + C.HCD_Z_PIVOT)) ** s_c  # (nZ,3)
     expect = alpha_pivot[None, :] * shape
@@ -241,12 +289,21 @@ def test_2d_slopes_match_incidence_slope_at_btilt_center():
     ctx, d = _build_small(hierarchical=True, two_d=True)
     mock_legs, core, _, _ = _mock(ctx, d)
     B_center = float(ctx.hcd_btilt_mu)
-    fixed_point = dict(theta_unit=jnp.full(9, 0.5), tau0_amp=jnp.asarray(1.0),
-                       dtau0=jnp.asarray(0.0), A_hcd=jnp.asarray(0.27), B_hcd=jnp.asarray(B_center),
-                       r_subdla=jnp.asarray(0.33), r_dla=jnp.asarray(0.016))
-    tr = handlers.trace(handlers.seed(handlers.substitute(
-        lambda: C._legb_model(ctx, mock_legs, core), fixed_point),
-        jax.random.PRNGKey(0))).get_trace()
+    fixed_point = dict(
+        theta_unit=jnp.full(9, 0.5),
+        tau0_amp=jnp.asarray(1.0),
+        dtau0=jnp.asarray(0.0),
+        A_hcd=jnp.asarray(0.27),
+        B_hcd=jnp.asarray(B_center),
+        r_subdla=jnp.asarray(0.33),
+        r_dla=jnp.asarray(0.016),
+    )
+    tr = handlers.trace(
+        handlers.seed(
+            handlers.substitute(lambda: C._legb_model(ctx, mock_legs, core), fixed_point),
+            jax.random.PRNGKey(0),
+        )
+    ).get_trace()
     got = np.asarray(tr["alpha_hcd_z"]["value"])
     # hand build: s_c = HCD_INCIDENCE_SLOPE exactly at B_hcd = center (B_center + δs_c).
     A, rs, rd = 0.27, 0.33, 0.016
@@ -269,6 +326,7 @@ def test_2d_loglik_grad_in_A_B_r_finite():
     zg = jnp.asarray(ctx.z_global)
     th = jnp.full(9, 0.5)
     from hcd_analysis.emulator.meanflux_prior import becker13_tau0
+
     tau0 = becker13_tau0(zg)
     dslope = jnp.asarray(ctx.hcd_dslope)
 
@@ -280,7 +338,8 @@ def test_2d_loglik_grad_in_A_B_r_finite():
         return C._data_loglik_legcore(ctx, th, tau0, alpha_hcd, mock_legs, core)
 
     g = jax.grad(ll, argnums=(0, 1, 2, 3))(
-        jnp.asarray(0.27), jnp.asarray(0.95), jnp.asarray(0.33), jnp.asarray(0.016))
+        jnp.asarray(0.27), jnp.asarray(0.95), jnp.asarray(0.33), jnp.asarray(0.016)
+    )
     assert all(np.isfinite(np.asarray(gi)) for gi in g), f"grad not finite: {g}"
 
 
@@ -295,11 +354,17 @@ def test_2d_draws_matrix_appends_A_B_r_columns():
     ctx, _ = _build_small(hierarchical=True, two_d=True)
     L = 5
     kept = np.ones(int(np.asarray(ctx.z_global).shape[0]), bool)
-    samples = {"theta_unit": np.zeros((L, 9)), "tau0_vec": np.zeros((L, kept.size)),
-               "alpha_lls": np.full(L, 0.27), "alpha_subdla": np.full(L, 0.09),
-               "alpha_dla": np.full(L, 0.016),
-               "A_hcd": np.full(L, 0.27), "B_hcd": np.full(L, 0.95),
-               "r_subdla": np.full(L, 0.33), "r_dla": np.full(L, 0.06)}
+    samples = {
+        "theta_unit": np.zeros((L, 9)),
+        "tau0_vec": np.zeros((L, kept.size)),
+        "alpha_lls": np.full(L, 0.27),
+        "alpha_subdla": np.full(L, 0.09),
+        "alpha_dla": np.full(L, 0.016),
+        "A_hcd": np.full(L, 0.27),
+        "B_hcd": np.full(L, 0.95),
+        "r_subdla": np.full(L, 0.33),
+        "r_dla": np.full(L, 0.06),
+    }
     draws = C._draws_matrix(samples, kept)
     names = C._packed_names_for(samples, kept)
     assert names[-4:] == ["A_hcd", "B_hcd", "r_subdla", "r_dla"]
@@ -311,8 +376,8 @@ def test_2d_draws_matrix_appends_A_B_r_columns():
     alpha_truth = np.array([0.27, 0.09, 0.016])
     tv = C._hcd_latent_truths_2d(alpha_truth, ctx)
     assert tv.shape == (4,)
-    np.testing.assert_allclose(tv[0], alpha_truth[0])               # A = w_LLS
-    np.testing.assert_allclose(tv[1], float(ctx.hcd_btilt_mu))      # B = s_LLS_center
+    np.testing.assert_allclose(tv[0], alpha_truth[0])  # A = w_LLS
+    np.testing.assert_allclose(tv[1], float(ctx.hcd_btilt_mu))  # B = s_LLS_center
     np.testing.assert_allclose(tv[2], alpha_truth[1] / alpha_truth[0])
     np.testing.assert_allclose(tv[3], alpha_truth[2] / alpha_truth[0])
 
@@ -327,10 +392,18 @@ def test_2d_reconstruct_deterministics_uses_btilt():
     (using B_hcd + δs_c) from the 2D latents."""
     ctx, _ = _build_small(hierarchical=True, two_d=True)
     L, nzg = 5, int(np.asarray(ctx.z_global).shape[0])
-    A = np.linspace(0.2, 0.35, L); B = np.linspace(0.8, 1.1, L)
-    rs = np.linspace(0.30, 0.36, L); rd = np.linspace(0.012, 0.020, L)
-    samples = {"A_hcd": A, "B_hcd": B, "r_subdla": rs, "r_dla": rd,
-               "tau0_amp": np.ones(L), "dtau0": np.zeros(L)}
+    A = np.linspace(0.2, 0.35, L)
+    B = np.linspace(0.8, 1.1, L)
+    rs = np.linspace(0.30, 0.36, L)
+    rd = np.linspace(0.012, 0.020, L)
+    samples = {
+        "A_hcd": A,
+        "B_hcd": B,
+        "r_subdla": rs,
+        "r_dla": rd,
+        "tau0_amp": np.ones(L),
+        "dtau0": np.zeros(L),
+    }
     out = C._legb_reconstruct_deterministics(ctx, samples)
     for nm in ("alpha_lls", "alpha_subdla", "alpha_dla", "alpha_hcd_z", "tau0_vec"):
         assert nm in out, f"reconstruction must re-insert {nm!r}"
@@ -339,9 +412,10 @@ def test_2d_reconstruct_deterministics_uses_btilt():
     np.testing.assert_allclose(np.asarray(out["alpha_dla"]), A * rd)
     assert np.asarray(out["alpha_hcd_z"]).shape == (L, nzg, 3)
     # verify the z-shape per draw uses B + δs_c.
-    zg = np.asarray(ctx.z_global); dslope = np.asarray(ctx.hcd_dslope)
-    pivot = np.stack([A, A * rs, A * rd], axis=-1)                 # (L,3)
-    s_c = B[:, None] + dslope[None, :]                            # (L,3)
+    zg = np.asarray(ctx.z_global)
+    dslope = np.asarray(ctx.hcd_dslope)
+    pivot = np.stack([A, A * rs, A * rd], axis=-1)  # (L,3)
+    s_c = B[:, None] + dslope[None, :]  # (L,3)
     ratio = (1.0 + zg)[None, :, None] / (1.0 + C.HCD_Z_PIVOT)
     expect = pivot[:, None, :] * ratio ** s_c[:, None, :]
     np.testing.assert_allclose(np.asarray(out["alpha_hcd_z"]), expect, rtol=1e-10)
@@ -362,8 +436,9 @@ def test_2d_fast_postprocess_yields_alpha_columns():
         assert nm in s_slow, f"slow replay 2D must yield {nm!r}"
     np.testing.assert_array_equal(np.asarray(s_fast["alpha_lls"]), np.asarray(s_slow["alpha_lls"]))
     for nm in ("alpha_subdla", "alpha_dla"):
-        np.testing.assert_allclose(np.asarray(s_fast[nm]), np.asarray(s_slow[nm]),
-                                   rtol=1e-12, atol=0.0)
+        np.testing.assert_allclose(
+            np.asarray(s_fast[nm]), np.asarray(s_slow[nm]), rtol=1e-12, atol=0.0
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -383,8 +458,10 @@ def test_2d_positivity_prior_draws():
 
     def one(k):
         tr = handlers.trace(handlers.seed(block, k)).get_trace()
-        A = tr["A_hcd"]["value"]; B = tr["B_hcd"]["value"]
-        rs = tr["r_subdla"]["value"]; rd = tr["r_dla"]["value"]
+        A = tr["A_hcd"]["value"]
+        B = tr["B_hcd"]["value"]
+        rs = tr["r_subdla"]["value"]
+        rd = tr["r_dla"]["value"]
         return jnp.array([A, A * rs, A * rd]).min()
 
     mins = jax.vmap(one)(keys)
@@ -417,8 +494,12 @@ def test_2d_requires_hierarchical():
     """hcd_2d_tilt=True without hierarchical_hcd=True is a configuration error (2D builds on the
     A_hcd × r reparam)."""
     with pytest.raises((AssertionError, ValueError)):
-        C.build_legb_ctx(desi_kwargs=dict(z_lo=0.0, z_hi=2.6), use_xclass=True,
-                         hierarchical_hcd=False, hcd_2d_tilt=True)
+        C.build_legb_ctx(
+            desi_kwargs=dict(z_lo=0.0, z_hi=2.6),
+            use_xclass=True,
+            hierarchical_hcd=False,
+            hcd_2d_tilt=True,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -429,8 +510,8 @@ def test_stepA_HT_arms_present_and_2d():
     """run_stepA.build_config emits HT_f6/HT_f4 arms (joint DESI+KS, sim_mean, hcd_2d_tilt=True,
     A_HCD-center 0/+1σ/−1σ via hcd_center_shift) — 24 chains (2 folds × 3 shifts × 4 chains)."""
     import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "run_stepA", f"{_REPO_ROOT}/scripts/run_stepA.py")
+
+    spec = importlib.util.spec_from_file_location("run_stepA", f"{_REPO_ROOT}/scripts/run_stepA.py")
     rs = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(rs)
     cfg = rs.build_config()
@@ -460,8 +541,16 @@ def test_2d_nuts_zero_divergences_and_finite():
     ctx, d = _build_small(hierarchical=True, two_d=True)
     mock_legs, core, _, _ = _mock(ctx, d)
     samples, n_div = C._run_nuts_legb(
-        ctx, mock_legs, core, n_warmup=40, n_samples=40, seed=0,
-        target_accept=0.9, dense_mass=False, max_tree_depth=8)
+        ctx,
+        mock_legs,
+        core,
+        n_warmup=40,
+        n_samples=40,
+        seed=0,
+        target_accept=0.9,
+        dense_mass=False,
+        max_tree_depth=8,
+    )
     assert n_div == 0, f"2D HCD: {n_div} divergence(s) on the centered path"
     for nm in ("A_hcd", "B_hcd", "r_subdla", "r_dla", "alpha_lls", "alpha_subdla", "alpha_dla"):
         assert np.all(np.isfinite(np.asarray(samples[nm]))), f"{nm} not finite"
@@ -475,18 +564,22 @@ def test_loglik_core_raises_on_zflat_by_default():
     ``predict_P_obs_on_leg``. A (n_zg,3) z-RESOLVED alpha must PASS. This catches a refactor that stops
     forwarding the flag or hard-codes it off (the exact recurrence mode of the z-flat bug)."""
     from hcd_analysis.emulator.meanflux_prior import becker13_tau0
+
     ctx, d = _build_small()
     mock_legs, core, _, tp = _mock(ctx, d)
     tau0 = becker13_tau0(jnp.asarray(ctx.z_global))
     th = jnp.full(9, 0.5)
-    alpha_flat = jnp.asarray(tp["alpha_hcd"])           # (3,) z-flat pivot
-    alpha_zres = jnp.asarray(tp["alpha_hcd_z"])         # (n_zg,3) z-resolved
+    alpha_flat = jnp.asarray(tp["alpha_hcd"])  # (3,) z-flat pivot
+    alpha_zres = jnp.asarray(tp["alpha_hcd_z"])  # (n_zg,3) z-resolved
     with pytest.raises(ValueError, match=r"z-RESOLVED"):
-        C._data_loglik_legcore(ctx, th, tau0, alpha_flat, mock_legs, core)   # no kwarg -> default True -> RAISE
+        C._data_loglik_legcore(
+            ctx, th, tau0, alpha_flat, mock_legs, core
+        )  # no kwarg -> default True -> RAISE
     ll = C._data_loglik_legcore(ctx, th, tau0, alpha_zres, mock_legs, core)  # z-resolved -> passes
     assert np.isfinite(float(ll))
 
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(pytest.main([__file__, "-q", "-m", "not slow"]))

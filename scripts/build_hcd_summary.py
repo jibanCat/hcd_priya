@@ -19,6 +19,7 @@ Usage:
 
 Tested against the catalog/meta format in place as of 2026-04-22.
 """
+
 from __future__ import annotations
 import os
 
@@ -33,34 +34,31 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from hcd_analysis.cddf import absorption_path_per_sightline
 
-
 # -----------------------------------------------------------------------------
 # Physical constants (cgs), used for Omega_HI
 # -----------------------------------------------------------------------------
 
-_M_H_G = 1.67353e-24      # hydrogen atom mass (g)
-_C_CM_S = 2.99792458e10   # speed of light (cm/s)
-_MPC_CM = 3.0857e24       # 1 Mpc in cm
+_M_H_G = 1.67353e-24  # hydrogen atom mass (g)
+_C_CM_S = 2.99792458e10  # speed of light (cm/s)
+_MPC_CM = 3.0857e24  # 1 Mpc in cm
 # H_0 in 1/s = h · 100 km/s/Mpc = h · 1e7 cm/s / (3.0857e24 cm/Mpc)
 #            = 3.2408e-18 h /s
-_H0_PER_H_1_S = 1.0e7 / _MPC_CM   # = 3.2408e-18  (H0 prefactor / h)
+_H0_PER_H_1_S = 1.0e7 / _MPC_CM  # = 3.2408e-18  (H0 prefactor / h)
 # ρ_crit,0 = 3 H_0^2 / (8πG) = 1.87847e-29 h^2 g/cm^3
 _RHO_CRIT_0_PER_H2 = 1.87847e-29  # g/cm^3 per h²
 
 LLS_MIN, SUBDLA_MIN, DLA_MIN = 17.2, 19.0, 20.3
-CLASSES = [("LLS", LLS_MIN, SUBDLA_MIN),
-           ("subDLA", SUBDLA_MIN, DLA_MIN),
-           ("DLA", DLA_MIN, 30.0)]
+CLASSES = [("LLS", LLS_MIN, SUBDLA_MIN), ("subDLA", SUBDLA_MIN, DLA_MIN), ("DLA", DLA_MIN, 30.0)]
 
 _SIM_PARAM = {
-    "ns":         r"ns([0-9.]+)",
-    "Ap":         r"Ap([0-9.e+-]+)",
-    "herei":      r"herei([0-9.]+)",
-    "heref":      r"heref([0-9.]+)",
-    "alphaq":     r"alphaq([0-9.]+)",
-    "hub":        r"hub([0-9.]+)",
-    "omegamh2":   r"omegamh2([0-9.]+)",
-    "hireionz":   r"hireionz([0-9.]+)",
+    "ns": r"ns([0-9.]+)",
+    "Ap": r"Ap([0-9.e+-]+)",
+    "herei": r"herei([0-9.]+)",
+    "heref": r"heref([0-9.]+)",
+    "alphaq": r"alphaq([0-9.]+)",
+    "hub": r"hub([0-9.]+)",
+    "omegamh2": r"omegamh2([0-9.]+)",
+    "hireionz": r"hireionz([0-9.]+)",
     "bhfeedback": r"bhfeedback([0-9.]+)",
 }
 PARAM_KEYS = list(_SIM_PARAM)
@@ -87,15 +85,14 @@ def omega_hi_from_catalog(sum_NHI_cm2: float, dX_total: float, hubble: float) ->
         return float("nan")
     # H_0 / c in cm^-1 · /h   → divide by h^2 from rho_crit gives /h final
     # prefactor (cgs): (m_H · H_0 / c) / ρ_crit,0
-    prefactor = (_M_H_G * (_H0_PER_H_1_S * hubble)) / (
-        _C_CM_S * (_RHO_CRIT_0_PER_H2 * hubble ** 2)
-    )
+    prefactor = (_M_H_G * (_H0_PER_H_1_S * hubble)) / (_C_CM_S * (_RHO_CRIT_0_PER_H2 * hubble**2))
     return prefactor * sum_NHI_cm2 / dX_total
 
 
 # -----------------------------------------------------------------------------
 # Per-(sim, snap) record builder
 # -----------------------------------------------------------------------------
+
 
 def build_record(sim_dir: Path, snap_dir: Path) -> dict | None:
     meta_p = snap_dir / "meta.json"
@@ -122,9 +119,7 @@ def build_record(sim_dir: Path, snap_dir: Path) -> dict | None:
     box_kpc_h = float(meta["box_kpc_h"])
     n_skewers = int(meta["n_skewers"])
 
-    dX_per_sightline = absorption_path_per_sightline(
-        box_kpc_h, hubble, omega_m, omega_l, z
-    )
+    dX_per_sightline = absorption_path_per_sightline(box_kpc_h, hubble, omega_m, omega_l, z)
     dX_total = dX_per_sightline * n_skewers
 
     # Per-class aggregates
@@ -205,26 +200,34 @@ def save_hdf5(recs: list[dict], path: Path) -> None:
         f.create_dataset("dX_per_sightline", data=dX_per)
 
         for cls in ["LLS", "subDLA", "DLA", "total"]:
-            f.create_dataset(f"counts/{cls}",
-                             data=np.array([r["counts"][cls] for r in recs], dtype=np.int64))
-            f.create_dataset(f"sum_NHI/{cls}",
-                             data=np.array([r["sum_NHI"][cls] for r in recs], dtype=np.float64))
-            f.create_dataset(f"dndx/{cls}",
-                             data=np.array([r["dndx"][cls] for r in recs], dtype=np.float64))
-            f.create_dataset(f"Omega_HI/{cls}",
-                             data=np.array([r["Omega_HI"][cls] for r in recs], dtype=np.float64))
+            f.create_dataset(
+                f"counts/{cls}", data=np.array([r["counts"][cls] for r in recs], dtype=np.int64)
+            )
+            f.create_dataset(
+                f"sum_NHI/{cls}", data=np.array([r["sum_NHI"][cls] for r in recs], dtype=np.float64)
+            )
+            f.create_dataset(
+                f"dndx/{cls}", data=np.array([r["dndx"][cls] for r in recs], dtype=np.float64)
+            )
+            f.create_dataset(
+                f"Omega_HI/{cls}",
+                data=np.array([r["Omega_HI"][cls] for r in recs], dtype=np.float64),
+            )
 
         for pk in PARAM_KEYS:
             col = np.array([r["params"].get(pk, np.nan) for r in recs], dtype=np.float64)
             f.create_dataset(f"params/{pk}", data=col)
 
         f.attrs["n_records"] = n
-        f.attrs["class_defs"] = f"LLS=[{LLS_MIN},{SUBDLA_MIN}), subDLA=[{SUBDLA_MIN},{DLA_MIN}), DLA>={DLA_MIN}"
+        f.attrs["class_defs"] = (
+            f"LLS=[{LLS_MIN},{SUBDLA_MIN}), subDLA=[{SUBDLA_MIN},{DLA_MIN}), DLA>={DLA_MIN}"
+        )
 
 
 def main():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from common import data_dir
+
     DATA = data_dir()
     SCRATCH = Path(os.environ.get("HCD_OUTPUTS_DIR", "<HCD_OUTPUTS_DIR unset>"))
 

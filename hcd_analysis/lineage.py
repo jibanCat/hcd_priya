@@ -32,6 +32,7 @@ product, not that it was made with the release settings or from a whole file; re
 themselves (for a catalogue, ``catalog.load_validated_catalog`` with its expectations).
 
 Standard library only; numpy is imported by the ``.npz`` helpers alone."""
+
 from __future__ import annotations
 
 import datetime
@@ -48,10 +49,32 @@ MAX_RECORD_BYTES = 1 << 22
 
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _HEX40 = re.compile(r"[0-9a-f]{40}\Z")
-_TOP_KEYS = {"format", "kind", "kind_version", "inputs", "finder_ids", "settings", "run_settings_sha256", "code",
-             "release_eligible", "ineligible_reasons", "product", "validation", "created_utc"}
+_TOP_KEYS = {
+    "format",
+    "kind",
+    "kind_version",
+    "inputs",
+    "finder_ids",
+    "settings",
+    "run_settings_sha256",
+    "code",
+    "release_eligible",
+    "ineligible_reasons",
+    "product",
+    "validation",
+    "created_utc",
+}
 _OPTIONAL_TOP_KEYS = {"validation", "created_utc"}
-_INPUT_KEYS = {"role", "kind", "sha256", "size", "mtime_ns", "finder_ids", "release_eligible", "info"}
+_INPUT_KEYS = {
+    "role",
+    "kind",
+    "sha256",
+    "size",
+    "mtime_ns",
+    "finder_ids",
+    "release_eligible",
+    "info",
+}
 # inputs that carry no lineage of their own and need none: simulation outputs read as they are (the raw spectra and
 # the simulation's initial-conditions parameter file). Any other input must be lineage-bearing, or be named as
 # validated in the record's validation block (``validation.validated_inputs``, the R1 carry's historical source).
@@ -87,7 +110,11 @@ def same_file(path, identity, rehash=False):
     st = os.stat(path)
     if int(st.st_size) != identity["size"]:
         return False
-    if not rehash and identity.get("mtime_ns") is not None and int(st.st_mtime_ns) == identity["mtime_ns"]:
+    if (
+        not rehash
+        and identity.get("mtime_ns") is not None
+        and int(st.st_mtime_ns) == identity["mtime_ns"]
+    ):
         return True
     return file_identity(path)["sha256"] == identity["sha256"]
 
@@ -96,6 +123,7 @@ def arrays_sha256(arrays):
     """Digest of named numpy arrays (name, dtype, shape and C-order bytes, in name order): the payload of an ``.npz``
     product without its embedded record."""
     import numpy as np
+
     h = hashlib.sha256()
     for name in sorted(arrays):
         a = np.ascontiguousarray(np.asarray(arrays[name]))
@@ -109,7 +137,9 @@ def arrays_sha256(arrays):
 # --------------------------------------------------------------------------------------------------- canonical JSON
 def canonical_json(obj):
     """The record's canonical text: sorted keys, no whitespace, ASCII, no non-finite numbers."""
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    return json.dumps(
+        obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+    )
 
 
 def canonicalise(obj):
@@ -125,10 +155,13 @@ def record_sha256(record):
 def parse_record(text):
     """A record from its JSON text: strict JSON (no NaN or Infinity), bounded, then ``check_record``."""
     if not isinstance(text, str) or len(text) > MAX_RECORD_BYTES:
-        raise LineageError("a lineage record must be JSON text of at most %d bytes" % MAX_RECORD_BYTES)
+        raise LineageError(
+            "a lineage record must be JSON text of at most %d bytes" % MAX_RECORD_BYTES
+        )
 
     def no_constant(c):
         raise ValueError(f"JSON constant {c}")
+
     try:
         record = json.loads(text, parse_constant=no_constant)
     except (ValueError, RecursionError) as e:
@@ -145,15 +178,31 @@ def code_identity(repo_dir=None):
     the checkout."""
     root = Path(repo_dir) if repo_dir is not None else Path(__file__).resolve().parent.parent
     try:
-        top = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=str(root),
-                                      stderr=subprocess.DEVNULL, timeout=10).decode().strip()
+        top = (
+            subprocess.check_output(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=str(root),
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+            .decode()
+            .strip()
+        )
         if Path(top).resolve() != root.resolve():
             return {"commit": None, "dirty": None}
-        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(root), stderr=subprocess.DEVNULL,
-                                         timeout=10).decode().strip()
-        status = subprocess.check_output(["git", "--no-optional-locks", "status", "--porcelain",
-                                          "--untracked-files=no"], cwd=str(root), stderr=subprocess.DEVNULL,
-                                         timeout=30)
+        commit = (
+            subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=str(root), stderr=subprocess.DEVNULL, timeout=10
+            )
+            .decode()
+            .strip()
+        )
+        status = subprocess.check_output(
+            ["git", "--no-optional-locks", "status", "--porcelain", "--untracked-files=no"],
+            cwd=str(root),
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
     except Exception:
         return {"commit": None, "dirty": None}
     return {"commit": commit if _HEX40.match(commit) else None, "dirty": bool(status.strip())}
@@ -165,18 +214,28 @@ def input_entry(role, kind, identity, record=None, info=None):
     ``file_identity``). ``record`` is the input's own lineage record when it is a lineage-bearing product: its finder
     ids and release eligibility are copied (a record a historical loader handed out is refused). Without ``record``
     the input is not lineage-bearing, and a product listing it is eligible only if its kind is in ``RAW_INPUT_KINDS``
-    or the product's validation names it. ``info`` holds facts recorded but not compared (a path, a header)."""
-    entry = {"role": str(role), "kind": str(kind), "sha256": identity["sha256"], "size": int(identity["size"])}
+    or the product's validation names it. ``info`` holds facts recorded but not compared (a path, a header).
+    """
+    entry = {
+        "role": str(role),
+        "kind": str(kind),
+        "sha256": identity["sha256"],
+        "size": int(identity["size"]),
+    }
     if identity.get("mtime_ns") is not None:
         entry["mtime_ns"] = int(identity["mtime_ns"])
     if record is not None:
         if not isinstance(record, dict):
-            raise LineageError(f"input {role!r}: a lineage-bearing input needs its parsed, checked record (a dict), "
-                               f"not {type(record).__name__}")
+            raise LineageError(
+                f"input {role!r}: a lineage-bearing input needs its parsed, checked record (a dict), "
+                f"not {type(record).__name__}"
+            )
         if (record.get("product") or {}).get("historical_reason"):
-            raise LineageError(f"input {role!r}: a record read through a historical loader is never listed as a "
-                               "lineage-bearing input (list the file without its record; the product is then not "
-                               "release-eligible)")
+            raise LineageError(
+                f"input {role!r}: a record read through a historical loader is never listed as a "
+                "lineage-bearing input (list the file without its record; the product is then not "
+                "release-eligible)"
+            )
         entry["finder_ids"] = sorted(record["finder_ids"])
         entry["release_eligible"] = record["release_eligible"] is True
     if info is not None:
@@ -189,14 +248,19 @@ def eligibility(record, allowed_finder_ids):
     """The reasons (a list; empty means eligible) why ``record`` is not release-eligible under the rule: a known commit
     and a clean tree (tracked files only), every finder id in ``allowed_finder_ids`` (at least one), every
     lineage-bearing input eligible with allowed finder ids, every other input raw (``RAW_INPUT_KINDS``) or named in
-    ``validation.validated_inputs``, and no historical marker. Provenance only (see the module docstring)."""
+    ``validation.validated_inputs``, and no historical marker. Provenance only (see the module docstring).
+    """
     allowed = frozenset(allowed_finder_ids)
     why = []
     code = record.get("code") or {}
     if not (isinstance(code.get("commit"), str) and _HEX40.match(code["commit"])):
         why.append("the code commit is unknown")
     if code.get("dirty") is not False:
-        why.append("the code tree was dirty" if code.get("dirty") is True else "the code tree state is unknown")
+        why.append(
+            "the code tree was dirty"
+            if code.get("dirty") is True
+            else "the code tree state is unknown"
+        )
     fids = record.get("finder_ids") or []
     if not fids:
         why.append("no finder id")
@@ -210,19 +274,35 @@ def eligibility(record, allowed_finder_ids):
                 why.append(f"input {inp.get('role')!r} is not release-eligible")
             ibad = sorted(f for f in inp.get("finder_ids") or [] if f not in allowed)
             if ibad or not inp.get("finder_ids"):
-                why.append(f"input {inp.get('role')!r} has finder ids {inp.get('finder_ids')} outside the allow-list")
+                why.append(
+                    f"input {inp.get('role')!r} has finder ids {inp.get('finder_ids')} outside the allow-list"
+                )
         elif inp.get("kind") not in RAW_INPUT_KINDS and inp.get("role") not in validated:
-            why.append(f"input {inp.get('role')!r} of kind {inp.get('kind')!r} carries no lineage record (only "
-                       f"{sorted(RAW_INPUT_KINDS)} inputs, or inputs the validation names, may)")
+            why.append(
+                f"input {inp.get('role')!r} of kind {inp.get('kind')!r} carries no lineage record (only "
+                f"{sorted(RAW_INPUT_KINDS)} inputs, or inputs the validation names, may)"
+            )
     if (record.get("product") or {}).get("historical_reason"):
         why.append("historical: " + str(record["product"]["historical_reason"]))
     return why
 
 
-def build_record(kind, kind_version, *, inputs, finder_ids, settings, code, allowed_finder_ids,
-                 run_settings_sha256=None, product=None, validation=None):
+def build_record(
+    kind,
+    kind_version,
+    *,
+    inputs,
+    finder_ids,
+    settings,
+    code,
+    allowed_finder_ids,
+    run_settings_sha256=None,
+    product=None,
+    validation=None,
+):
     """A complete, checked record. ``finder_ids`` is the product's own (a catalogue's finder) or None for the union of
-    the lineage-bearing inputs' ids. Release eligibility is computed here (``eligibility``), never passed in."""
+    the lineage-bearing inputs' ids. Release eligibility is computed here (``eligibility``), never passed in.
+    """
     if finder_ids is None:
         finder_ids = sorted({f for inp in inputs for f in inp.get("finder_ids", [])})
     record = {
@@ -256,11 +336,16 @@ def check_record(record, allowed_finder_ids=None):
     missing = (_TOP_KEYS - _OPTIONAL_TOP_KEYS) - keys
     extra = keys - _TOP_KEYS
     if missing or extra:
-        raise LineageError(f"lineage record keys: missing {sorted(missing)}, unknown {sorted(extra)}")
+        raise LineageError(
+            f"lineage record keys: missing {sorted(missing)}, unknown {sorted(extra)}"
+        )
     if not (isinstance(record["kind"], str) and record["kind"]):
         raise LineageError("lineage record: kind must be a non-empty string")
-    if not (isinstance(record["kind_version"], int) and not isinstance(record["kind_version"], bool)
-            and record["kind_version"] >= 1):
+    if not (
+        isinstance(record["kind_version"], int)
+        and not isinstance(record["kind_version"], bool)
+        and record["kind_version"] >= 1
+    ):
         raise LineageError("lineage record: kind_version must be a positive integer")
     if not isinstance(record["inputs"], list):
         raise LineageError("lineage record: inputs must be a list")
@@ -275,14 +360,18 @@ def check_record(record, allowed_finder_ids=None):
     code = record["code"]
     if not (isinstance(code, dict) and set(code) == {"commit", "dirty"}):
         raise LineageError("lineage record: code must be {commit, dirty}")
-    if code["commit"] is not None and not (isinstance(code["commit"], str) and _HEX40.match(code["commit"])):
+    if code["commit"] is not None and not (
+        isinstance(code["commit"], str) and _HEX40.match(code["commit"])
+    ):
         raise LineageError("lineage record: code.commit must be null or a 40-hex commit")
     if code["dirty"] not in (True, False, None):
         raise LineageError("lineage record: code.dirty must be true, false or null")
     if not isinstance(record["release_eligible"], bool):
         raise LineageError("lineage record: release_eligible must be a boolean")
-    if not (isinstance(record["ineligible_reasons"], list)
-            and all(isinstance(r, str) for r in record["ineligible_reasons"])):
+    if not (
+        isinstance(record["ineligible_reasons"], list)
+        and all(isinstance(r, str) for r in record["ineligible_reasons"])
+    ):
         raise LineageError("lineage record: ineligible_reasons must be a list of strings")
     if record["release_eligible"] == bool(record["ineligible_reasons"]):
         raise LineageError("lineage record: release_eligible disagrees with ineligible_reasons")
@@ -293,13 +382,21 @@ def check_record(record, allowed_finder_ids=None):
     if allowed_finder_ids is not None and record["release_eligible"]:
         why = eligibility(record, allowed_finder_ids)
         if why:
-            raise LineageError("lineage record claims release eligibility it does not have: " + "; ".join(why))
+            raise LineageError(
+                "lineage record claims release eligibility it does not have: " + "; ".join(why)
+            )
     return record
 
 
 def _check_finder_ids(fids, where):
-    if not (isinstance(fids, list) and all(isinstance(f, str) and f for f in fids) and fids == sorted(set(fids))):
-        raise LineageError(f"lineage record: {where} must be a sorted list of distinct non-empty strings")
+    if not (
+        isinstance(fids, list)
+        and all(isinstance(f, str) and f for f in fids)
+        and fids == sorted(set(fids))
+    ):
+        raise LineageError(
+            f"lineage record: {where} must be a sorted list of distinct non-empty strings"
+        )
 
 
 def _check_input(inp):
@@ -311,24 +408,34 @@ def _check_input(inp):
     if not (isinstance(inp.get("sha256"), str) and _HEX64.match(inp["sha256"])):
         raise LineageError(f"lineage record: input {inp.get('role')!r} has no 64-hex sha256")
     for k in ("size", "mtime_ns"):
-        if k in inp and not (isinstance(inp[k], int) and not isinstance(inp[k], bool) and inp[k] >= 0):
-            raise LineageError(f"lineage record: input {inp.get('role')!r} {k} must be a non-negative integer")
+        if k in inp and not (
+            isinstance(inp[k], int) and not isinstance(inp[k], bool) and inp[k] >= 0
+        ):
+            raise LineageError(
+                f"lineage record: input {inp.get('role')!r} {k} must be a non-negative integer"
+            )
     if "size" not in inp:
         raise LineageError(f"lineage record: input {inp.get('role')!r} has no size")
     if ("finder_ids" in inp) != ("release_eligible" in inp):
-        raise LineageError(f"lineage record: input {inp.get('role')!r} must carry both finder_ids and "
-                           "release_eligible, or neither")
+        raise LineageError(
+            f"lineage record: input {inp.get('role')!r} must carry both finder_ids and "
+            "release_eligible, or neither"
+        )
     if "finder_ids" in inp:
         _check_finder_ids(inp["finder_ids"], f"input {inp['role']!r} finder_ids")
         if not isinstance(inp["release_eligible"], bool):
-            raise LineageError(f"lineage record: input {inp['role']!r} release_eligible must be a boolean")
+            raise LineageError(
+                f"lineage record: input {inp['role']!r} release_eligible must be a boolean"
+            )
 
 
 def find_input(record, role):
     """The single input of ``record`` with this role (LineageError if there is not exactly one)."""
     hits = [i for i in record["inputs"] if i["role"] == role]
     if len(hits) != 1:
-        raise LineageError(f"lineage record ({record['kind']}): {len(hits)} inputs with role {role!r}, expected 1")
+        raise LineageError(
+            f"lineage record ({record['kind']}): {len(hits)} inputs with role {role!r}, expected 1"
+        )
     return hits[0]
 
 
@@ -337,7 +444,9 @@ def verify_input(record, role, path, rehash=False):
     (``same_file``)."""
     inp = find_input(record, role)
     if not same_file(path, inp, rehash=rehash):
-        raise LineageError(f"{path}: not the {role} input this {record['kind']} was made from (sha256 differs)")
+        raise LineageError(
+            f"{path}: not the {role} input this {record['kind']} was made from (sha256 differs)"
+        )
     return inp
 
 
@@ -347,11 +456,14 @@ def write_npz(path, arrays, record):
     then renamed into place, so a reader never sees a partial file. The record's ``product.payload_sha256`` must be
     the digest of ``arrays``."""
     import numpy as np
+
     check_record(record)
     if NPZ_KEY in arrays:
         raise LineageError(f"{NPZ_KEY} is reserved for the lineage record")
     if record["product"].get("payload_sha256") != arrays_sha256(arrays):
-        raise LineageError("the record's payload_sha256 is not the digest of the arrays being written")
+        raise LineageError(
+            "the record's payload_sha256 is not the digest of the arrays being written"
+        )
     path = Path(path)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
@@ -370,6 +482,7 @@ def read_npz(path, require_record=True):
     ``product.payload_sha256`` (a 64-hex digest), and the arrays must match it. Without a record: LineageError, or
     ``(arrays, None)`` when ``require_record`` is false."""
     import numpy as np
+
     with np.load(str(path), allow_pickle=False) as d:
         arrays = {k: d[k] for k in d.files}
     raw = arrays.pop(NPZ_KEY, None)
@@ -382,7 +495,11 @@ def read_npz(path, require_record=True):
     record = parse_record(str(raw[()]))
     payload = record["product"].get("payload_sha256")
     if not (isinstance(payload, str) and _HEX64.match(payload)):
-        raise LineageError(f"{path}: the record names no payload_sha256, so its arrays are not bound to it")
+        raise LineageError(
+            f"{path}: the record names no payload_sha256, so its arrays are not bound to it"
+        )
     if payload != arrays_sha256(arrays):
-        raise LineageError(f"{path}: the arrays do not match the record's payload_sha256 (edited after it was made)")
+        raise LineageError(
+            f"{path}: the arrays do not match the record's payload_sha256 (edited after it was made)"
+        )
     return arrays, record

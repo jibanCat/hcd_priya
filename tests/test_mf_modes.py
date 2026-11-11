@@ -1,5 +1,6 @@
 """Gate D: the LF->HF correction measured mode by mode at equal physical k (internal spec
 GATE_D_SPEC). Synthetic inputs; no caches."""
+
 import numpy as np
 import pytest
 
@@ -23,11 +24,23 @@ def _pair_caches(n_sims=3, zs=(2.8, 3.0, 3.2), n_rung=4, k_shift=0.0):
     a = np.array([r[3] for r in rows])
     vmax = 13000.0 + 100 * z + 50 * params[:, 5]
     n = np.arange(1, K + 1)
-    lf = dict(sim_name=np.array([f"s{r[0]}" for r in rows]), params=params, z_grid=z, alpha_idx=a,
-              tau0=0.3 + 0.1 * a + 0.05 * z, kfkms=2 * np.pi * n[None, :] / vmax[:, None])
+    lf = dict(
+        sim_name=np.array([f"s{r[0]}" for r in rows]),
+        params=params,
+        z_grid=z,
+        alpha_idx=a,
+        tau0=0.3 + 0.1 * a + 0.05 * z,
+        kfkms=2 * np.pi * n[None, :] / vmax[:, None],
+    )
     nh = np.arange(1, 2 * K + 1)
-    hr = dict(sim_name=lf["sim_name"].copy(), params=params.copy(), z_grid=z.copy(), alpha_idx=a.copy(),
-              tau0=lf["tau0"].copy(), kfkms=2 * np.pi * nh[None, :] / (vmax[:, None] * (1 + k_shift)))
+    hr = dict(
+        sim_name=lf["sim_name"].copy(),
+        params=params.copy(),
+        z_grid=z.copy(),
+        alpha_idx=a.copy(),
+        tau0=lf["tau0"].copy(),
+        kfkms=2 * np.pi * nh[None, :] / (vmax[:, None] * (1 + k_shift)),
+    )
     return lf, hr
 
 
@@ -50,13 +63,15 @@ def test_targets_are_log_ratios_mode_by_mode_with_no_interpolation():
     M = len(pairs)
     P_lf = np.full((M, 4, K), 2.0)
     P_hr_full = np.full((lf["z_grid"].size, 4, 2 * K), 3.0)
-    P_hr_full[:, :, K:] = 99.0                        # HR-only modes must be ignored
-    P_hr_full[0, 2, 1] = 0.0                          # empty class -> NaN target
+    P_hr_full[:, :, K:] = 99.0  # HR-only modes must be ignored
+    P_hr_full[0, 2, 1] = 0.0  # empty class -> NaN target
     hr["P_filt"] = P_hr_full
     x = np.zeros((lf["z_grid"].size, 10))
     t = MM.measure_mode_targets(lf, hr, pairs, P_lf, x=x, n_modes=K)
     assert t["g"].shape == (M, 4, K)
-    assert np.isnan(t["g"][0, 2, 1]) and np.allclose(np.delete(t["g"].ravel(), np.ravel_multi_index((0, 2, 1), (M, 4, K))), np.log(1.5))
+    assert np.isnan(t["g"][0, 2, 1]) and np.allclose(
+        np.delete(t["g"].ravel(), np.ravel_multi_index((0, 2, 1), (M, 4, K))), np.log(1.5)
+    )
 
 
 def _separable_targets(lf, truth_fn):
@@ -64,10 +79,21 @@ def _separable_targets(lf, truth_fn):
     z = lf["z_grid"]
     x = np.zeros((z.size, 10))
     from hcd_analysis.emulator.data import Z_LIMITS
+
     x[:, 9] = (z - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
     g = np.stack([truth_fn(zz, aa) for zz, aa in zip(z, lf["alpha_idx"])])
-    return dict(x=x, tau0=lf["tau0"], alpha_idx=lf["alpha_idx"], g=g, sim=lf["sim_name"],
-                hr_row=np.arange(z.size), lf_row=np.arange(z.size)), pairs
+    return (
+        dict(
+            x=x,
+            tau0=lf["tau0"],
+            alpha_idx=lf["alpha_idx"],
+            g=g,
+            sim=lf["sim_name"],
+            hr_row=np.arange(z.size),
+            lf_row=np.arange(z.size),
+        ),
+        pairs,
+    )
 
 
 def test_fit_and_apply_recover_a_separable_theta_independent_correction():
@@ -87,7 +113,7 @@ def test_held_out_rows_do_not_influence_the_fit_including_log_rho():
     train = np.where(t["sim"] != "s0")[0]
     a = MM.fit_mode_mf(t, train_rows=train)
     t2 = dict(t, g=t["g"].copy())
-    t2["g"][t["sim"] == "s0"] += 7.0                  # held-out rows changed wildly
+    t2["g"][t["sim"] == "s0"] += 7.0  # held-out rows changed wildly
     b = MM.fit_mode_mf(t2, train_rows=train)
     for k in a:
         assert np.allclose(np.asarray(a[k]), np.asarray(b[k]), equal_nan=True), k
@@ -105,14 +131,17 @@ def test_tables_round_trip_with_k_com_labels_and_refuse_velocity_keys(tmp_path):
     for k in tables:
         assert np.allclose(np.asarray(back[k]), np.asarray(tables[k]))
     with pytest.raises(ValueError, match="velocity"):
-        MM.save_mode_mf(tmp_path / "bad.npz", dict(tables, kfkms=np.ones(K)), k_com_hmpc=k_com, provenance={})
+        MM.save_mode_mf(
+            tmp_path / "bad.npz", dict(tables, kfkms=np.ones(K)), k_com_hmpc=k_com, provenance={}
+        )
     with pytest.raises(ValueError, match="2 pi n / L"):
         MM.save_mode_mf(tmp_path / "bad2.npz", tables, k_com_hmpc=k_com * 1.01, provenance={})
 
 
 def test_save_never_overwrites_an_existing_product(tmp_path):
     """An MF product is written once: an existing file (or a symlink, even a dangling one) at the target is refused and
-    left byte for byte unchanged; a name without .npz is refused when the .npz that np.savez would write exists."""
+    left byte for byte unchanged; a name without .npz is refused when the .npz that np.savez would write exists.
+    """
     lf, _ = _pair_caches()
     t, _ = _separable_targets(lf, lambda zz, aa: np.full((4, K), 0.05))
     tables = MM.fit_mode_mf(t)

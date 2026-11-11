@@ -24,6 +24,7 @@ Env (MANDATORY):
     CUDA_VISIBLE_DEVICES="" python \
     -m hcd_analysis.emulator.closure_legb --smoke
 """
+
 from __future__ import annotations
 
 import argparse
@@ -48,22 +49,46 @@ from numpyro.infer.util import constrain_fn
 from scipy.stats import norm as _scipy_norm
 
 from . import train as T
-from .data import load_cache, load_cache_historical, make_splits, KIM_AMP, KIM_SLOPE, Z_LIMITS, sampling_unit_bounds
-from .meanflux_prior import (meanflux_tau0_prior, becker13_tau0, tau0_alpha_priya,
-                             fit_tau0_alpha_priya, TAU0_AMP_RANGE, DTAU0_RANGE, TAU0_PIVOT_Z)
-from .inference import (PARAM_NAMES, hcd_incidence_prior,
-                        HCD_LIT_OVER_SIM_SLOPE, HCD_Z_PIVOT, HCD_DLA_RESIDUAL_FRAC,
-                        HCD_LLS_REALFIT_ZSLOPE, HCD_LLS_SURVEY_BOOST,
-                        HCD_LLS_SURVEY_FRAC_SIGMA, HCD_PRIOR_FRAC_SIGMA,
-                        hcd_lls_realfit_alpha_center, assert_hcd_pivot_z3,
-                        assert_known_survey,
-                        # KS dN/dX-mapped LLS reparameterization (V-A, W2 2026-07-22).
-                        # The KS_DNDX_* float constants are deliberately NOT from-imported:
-                        # the sampled sites and the freeze signature must read the SAME
-                        # binding (inference's), or a runtime override desyncs the effective
-                        # prior from hcd_prior_signature (JAX-specialist review 2026-07-22;
-                        # the HCD_LLS_SURVEY_BOOST rebinding trap, immutable-float variant).
-                        HCD_LIT_DNDX_LAW, assert_ks_mapped_pivot)
+from .data import (
+    load_cache,
+    load_cache_historical,
+    make_splits,
+    KIM_AMP,
+    KIM_SLOPE,
+    Z_LIMITS,
+    sampling_unit_bounds,
+)
+from .meanflux_prior import (
+    meanflux_tau0_prior,
+    becker13_tau0,
+    tau0_alpha_priya,
+    fit_tau0_alpha_priya,
+    TAU0_AMP_RANGE,
+    DTAU0_RANGE,
+    TAU0_PIVOT_Z,
+)
+from .inference import (
+    PARAM_NAMES,
+    hcd_incidence_prior,
+    HCD_LIT_OVER_SIM_SLOPE,
+    HCD_Z_PIVOT,
+    HCD_DLA_RESIDUAL_FRAC,
+    HCD_LLS_REALFIT_ZSLOPE,
+    HCD_LLS_SURVEY_BOOST,
+    HCD_LLS_SURVEY_FRAC_SIGMA,
+    HCD_PRIOR_FRAC_SIGMA,
+    hcd_lls_realfit_alpha_center,
+    assert_hcd_pivot_z3,
+    assert_known_survey,
+    # KS dN/dX-mapped LLS reparameterization (V-A, W2 2026-07-22).
+    # The KS_DNDX_* float constants are deliberately NOT from-imported:
+    # the sampled sites and the freeze signature must read the SAME
+    # binding (inference's), or a runtime override desyncs the effective
+    # prior from hcd_prior_signature (JAX-specialist review 2026-07-22;
+    # the HCD_LLS_SURVEY_BOOST rebinding trap, immutable-float variant).
+    HCD_LIT_DNDX_LAW,
+    assert_ks_mapped_pivot,
+)
 from .dndx_wc import HISTORICAL_DELTA_C, DeltaCMap, alpha_to_dndx_exact, w_c_corrected
 from .sampler_numpyro import _dla_raw_mu
 from . import data_likelihood as DL
@@ -71,14 +96,20 @@ from . import forward as FW
 from . import kcoord as KC
 from .schema import K_CONVENTION
 from .closure_diagnostics import (
-    thin_to_ess, central_interval, empirical_coverage, sbc_rank,
-    ecdf_pit_bands, loglik_rank,
+    thin_to_ess,
+    central_interval,
+    empirical_coverage,
+    sbc_rank,
+    ecdf_pit_bands,
+    loglik_rank,
 )
 
-assert jax.config.read("jax_enable_x64"), \
-    "x64 must be on (import hcd_analysis.emulator before jax)"
+assert jax.config.read("jax_enable_x64"), "x64 must be on (import hcd_analysis.emulator before jax)"
 
-from ..paths import REPO_ROOT_STR as REPO   # this checkout (emulator-debug 2026-10; never an absolute literal)
+from ..paths import (
+    REPO_ROOT_STR as REPO,
+)  # this checkout (emulator-debug 2026-10; never an absolute literal)
+
 # Products are passed explicitly and identity-checked (gate E, products.py); the pre-2026-10 default paths
 # (final_fold0, error_vector*.npz) are retired.
 CACHE_PATH = f"{REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
@@ -110,16 +141,19 @@ SIGMA_S = 0.5
 # a WIDE prior (cup1d's [-0.5,0.5] code default) opens the NORC failure mode on the weak legs. amp centered 0
 # (0 = no distortion; additive-in-exponent no-op). Sampled iff ctx.sample_res (default False → golden).
 F_RES_PIVOT_Z = 3.0
-F_RES_AMP_SIGMA = 0.02         # Normal(0, .) on f_res_amp — TIGHT (physics), NOT cup1d's wide default
-F_RES_SLOPE_SIGMA = 0.5        # Normal(0, .) on f_res_slope — modest z-slope (4-lens: tighter than 1.0)
+F_RES_AMP_SIGMA = 0.02  # Normal(0, .) on f_res_amp — TIGHT (physics), NOT cup1d's wide default
+F_RES_SLOPE_SIGMA = 0.5  # Normal(0, .) on f_res_slope — modest z-slope (4-lens: tighter than 1.0)
 
 
 def _bres_of_z(z, f_res_amp, f_res_slope, *, z_pivot=F_RES_PIVOT_Z):
     """Per-z spectral-resolution amplitude b_res(z) = f_res_amp·((1+z)/(1+z_pivot))^f_res_slope (the
     forward-only option-b nuisance; mirrors tau0_alpha_priya / the alpha_res α(z) power law). f_res_amp=0
-    ⇒ b_res≡0 for ANY slope ⇒ _resolution_factor=exp(0)=1 (the golden no-op). Differentiable in both."""
+    ⇒ b_res≡0 for ANY slope ⇒ _resolution_factor=exp(0)=1 (the golden no-op). Differentiable in both.
+    """
     z = jnp.asarray(z)
     return f_res_amp * ((1.0 + z) / (1.0 + z_pivot)) ** f_res_slope
+
+
 # FULL per-class HCD-incidence z-slope d ln w_c(z)/d ln(1+z), 60-sim-population median (measured
 # 2026-06-14, scripts/diag_hcd_zslope_nsbias.py). This is the slope the mock TRUTH actually carries
 # (the held-out sim's native w_c(z)) — the RIGHT center for the 2D B_HCD tilt. It is a DIFFERENT
@@ -148,7 +182,8 @@ def _assert_forward_zslope_center(center, where):
         f"HCD forward z-slope center [{where}] = {c0:.4f} is below {_FWD_ZSLOPE_FLOOR} — it must be "
         f"HCD_INCIDENCE_SLOPE (~2.4, the SIM incidence-weight slope), NOT the lit/sim RATIO slope "
         f"HCD_LIT_OVER_SIM_SLOPE (0.764 corrected 2026-07-18; 0.95 pre-swap). The forward exponent "
-        f"was reverted to the wrong object. See hcd-dndx-zslope-bug.")
+        f"was reverted to the wrong object. See hcd-dndx-zslope-bug."
+    )
 
 
 def hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT, z_tol=0.05):
@@ -164,11 +199,11 @@ def hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT, z_tol=0.05):
     Both are built from the SAME cache the all-z median came from, only restricted to the z=3 pivot
     rows (w_c) / fit and evaluated at z=3 (Xbar). See the dN/dX low-z overshoot CENTER-construction bug.
     """
-    wc = np.asarray(d["w_c_cache"])                      # (R,4) clean,LLS,subDLA,DLA
+    wc = np.asarray(d["w_c_cache"])  # (R,4) clean,LLS,subDLA,DLA
     zrow = np.asarray(d["z_grid"])
     sel = np.abs(zrow - float(z_pivot)) < float(z_tol)
     assert sel.sum() > 0, f"no cache rows within {z_tol} of z_pivot={z_pivot}"
-    w_c_z3 = np.nanmedian(wc[sel, 1:], axis=0)           # (3,) z=3 structural w_c
+    w_c_z3 = np.nanmedian(wc[sel, 1:], axis=0)  # (3,) z=3 structural w_c
 
     cf = hcd_xbar_polyfit(d)
     Xbar_z3 = float(np.polyval(cf, float(z_pivot)))
@@ -182,10 +217,12 @@ def hcd_xbar_polyfit(d):
     the IDENTICAL Xbar(z) object the deployed pivot path uses (numerically bit-equal: same
     numpy ops in the same order; same construction as plot_hcd_prior_dndx_overlay.build_xbar):
     per-group Xbar = X_tot / N_sl, N_sl from the telescoping clean-fraction, deg-2 fit in z."""
-    wc = np.asarray(d["w_c_cache"])                      # (R,4) clean,LLS,subDLA,DLA
+    wc = np.asarray(d["w_c_cache"])  # (R,4) clean,LLS,subDLA,DLA
     zrow = np.asarray(d["z_grid"])
-    gid = np.asarray(d["snap_group_idx"]); Xtot = np.asarray(d["snap_total_path_dX"])
-    dndx = np.asarray(d["snap_dNdX"]); Ng = dndx.shape[0]
+    gid = np.asarray(d["snap_group_idx"])
+    Xtot = np.asarray(d["snap_total_path_dX"])
+    dndx = np.asarray(d["snap_dNdX"])
+    Ng = dndx.shape[0]
     zg = np.array([zrow[gid == g][0] for g in range(Ng)])
     wc_g = np.array([np.nanmedian(wc[gid == g], axis=0) for g in range(Ng)])
     mu_sum = -np.log(np.clip(wc_g[:, 0], 1e-6, None))
@@ -220,11 +257,28 @@ _THETA_UNIT_LO, _THETA_UNIT_HI = sampling_unit_bounds()
 #     aa = f_SiIII/(1−⟨F⟩), NO decorrelation, SiIII only.
 # Amplitudes are f_X (the metal flux decrement); the effective oscillation amplitude is A_X =
 # f_X/(1−⟨F⟩). Defaults: f_SiIII≈0.009 (PRIYA-eBOSS), SiII/SiII-SiII sub-dominant.
-_LAMBDA_SiIIb = 1193.28      # second SiII doublet line [Å] (leading line DL.LAMBDA_SiII=1190.42)
+_LAMBDA_SiIIb = 1193.28  # second SiII doublet line [Å] (leading line DL.LAMBDA_SiII=1190.42)
 
-def metal_inject(P, k, mean_flux, *, form="desi_full", f_SiIII=0.009, f_SiII=0.004,
-                 f_SiII_SiII=0.002, r_doublet=0.5, k_damp=0.05, k_decorr=0.05, k_SiII=None,
-                 a_SiIII_direct=None, a_SiII_direct=None, damp="sigmoid", k_cross=None, cross=False):
+
+def metal_inject(
+    P,
+    k,
+    mean_flux,
+    *,
+    form="desi_full",
+    f_SiIII=0.009,
+    f_SiII=0.004,
+    f_SiII_SiII=0.002,
+    r_doublet=0.5,
+    k_damp=0.05,
+    k_decorr=0.05,
+    k_SiII=None,
+    a_SiIII_direct=None,
+    a_SiII_direct=None,
+    damp="sigmoid",
+    k_cross=None,
+    cross=False,
+):
     """Return the metal-contaminated mock P1D (numpy). ⟨F⟩=mean_flux (=exp(−τ_eff)); a=0 ⇒ P.
 
     ``a_SiIII_direct`` / ``a_SiII_direct`` (default None → the f/(1−⟨F⟩) map): when given, the
@@ -245,45 +299,50 @@ def metal_inject(P, k, mean_flux, *, form="desi_full", f_SiIII=0.009, f_SiII=0.0
     one_minus_F = max(1.0 - float(mean_flux), 1e-3)
     A3 = (f_SiIII / one_minus_F) if a_SiIII_direct is None else float(a_SiIII_direct)
     dv_SiIII = DL.C_KMS * np.log(DL.LAMBDA_LYA / DL.LAMBDA_SiIII)
-    if form == "ma2025":                                  # Ma+2025 sim: SiIII-only, DIRECT a, Ma/Gauss damp
+    if form == "ma2025":  # Ma+2025 sim: SiIII-only, DIRECT a, Ma/Gauss damp
         # Out-of-class structural stress: the damping REPLACES the forward's sigmoid D(k) (a genuine
         # shape misspecification). "ma" exp(k/k_cross) (k_cross<0 ⇒ decays); "gauss" exp(−(k/k_cross)²).
-        env = np.exp(-(k / k_cross) ** 2) if damp == "gauss" else np.exp(k / k_cross)
-        return P * (1.0 + A3 ** 2 + 2.0 * A3 * np.cos(dv_SiIII * k) * env)
-    if form == "eboss":                                   # McDonald/eBOSS SiIIIcorr, no decorrelation
+        env = np.exp(-((k / k_cross) ** 2)) if damp == "gauss" else np.exp(k / k_cross)
+        return P * (1.0 + A3**2 + 2.0 * A3 * np.cos(dv_SiIII * k) * env)
+    if form == "eboss":  # McDonald/eBOSS SiIIIcorr, no decorrelation
         # dv_SiIII from the code's own line constants (= 2269.96 km/s), consistent with the
         # desi_full branch below; previously a hardcoded 2271.0 (the rounded literature anchor).
         cross_t = 2.0 * A3 * np.cos(dv_SiIII * k)
-        if damp == "ma":                                  # Ma damping in place of the (absent) D(k)
+        if damp == "ma":  # Ma damping in place of the (absent) D(k)
             cross_t = cross_t * np.exp(k / k_cross)
         elif damp == "gauss":
-            cross_t = cross_t * np.exp(-(k / k_cross) ** 2)
-        return P * (1.0 + A3 ** 2 + cross_t)
+            cross_t = cross_t * np.exp(-((k / k_cross) ** 2))
+        return P * (1.0 + A3**2 + cross_t)
     # --- desi_full ---
-    k2 = k_decorr if k_SiII is None else float(k_SiII)          # SiII (+cross) decorrelation scale
-    dvA = dv_SiIII                                               # Lyα–SiIII
-    dva = DL.C_KMS * np.log(DL.LAMBDA_LYA / DL.LAMBDA_SiII)      # Lyα–SiII line a (1190.42)
-    dvb = DL.C_KMS * np.log(DL.LAMBDA_LYA / _LAMBDA_SiIIb)       # Lyα–SiII line b (1193.28)
-    dvd = DL.C_KMS * np.log(_LAMBDA_SiIIb / DL.LAMBDA_SiII)      # SiII intra-doublet (~719 km/s)
-    if damp == "ma":                                            # Ma damping in place of the sigmoid D
+    k2 = k_decorr if k_SiII is None else float(k_SiII)  # SiII (+cross) decorrelation scale
+    dvA = dv_SiIII  # Lyα–SiIII
+    dva = DL.C_KMS * np.log(DL.LAMBDA_LYA / DL.LAMBDA_SiII)  # Lyα–SiII line a (1190.42)
+    dvb = DL.C_KMS * np.log(DL.LAMBDA_LYA / _LAMBDA_SiIIb)  # Lyα–SiII line b (1193.28)
+    dvd = DL.C_KMS * np.log(_LAMBDA_SiIIb / DL.LAMBDA_SiII)  # SiII intra-doublet (~719 km/s)
+    if damp == "ma":  # Ma damping in place of the sigmoid D
         D3 = D2 = np.exp(k / k_cross)
     elif damp == "gauss":
-        D3 = D2 = np.exp(-(k / k_cross) ** 2)
-    else:                                                       # sigmoid decorrelation (DESI), default
-        D3 = 2.0 - 2.0 / (1.0 + np.exp(-k / k_decorr))          # SiIII scale (byte-exact when k2==k_decorr)
-        D2 = 2.0 - 2.0 / (1.0 + np.exp(-k / k2))                # SiII (+cross) scale
+        D3 = D2 = np.exp(-((k / k_cross) ** 2))
+    else:  # sigmoid decorrelation (DESI), default
+        D3 = 2.0 - 2.0 / (1.0 + np.exp(-k / k_decorr))  # SiIII scale (byte-exact when k2==k_decorr)
+        D2 = 2.0 - 2.0 / (1.0 + np.exp(-k / k2))  # SiII (+cross) scale
     A2 = (f_SiII / one_minus_F) if a_SiII_direct is None else float(a_SiII_direct)
-    C_LyaSiIII = A3 ** 2 + 2.0 * A3 * np.cos(dvA * k) * D3
-    C_LyaSiII = A2 ** 2 * (1.0 + r_doublet ** 2) \
+    C_LyaSiIII = A3**2 + 2.0 * A3 * np.cos(dvA * k) * D3
+    C_LyaSiII = (
+        A2**2 * (1.0 + r_doublet**2)
         + 2.0 * A2 * (np.cos(dvb * k) + r_doublet * np.cos(dva * k)) * D2
+    )
     # ADDITIVE same-ion SiII–SiII (Gaussian-damped) — unfittable by the multiplicative _metal_factor:
-    C_SiII_SiII = f_SiII_SiII * (1.0 + r_doublet ** 2 + 2.0 * r_doublet * np.cos(dvd * k)) \
-        * np.exp(-(k / k_damp) ** 2)
+    C_SiII_SiII = (
+        f_SiII_SiII
+        * (1.0 + r_doublet**2 + 2.0 * r_doublet * np.cos(dvd * k))
+        * np.exp(-((k / k_damp) ** 2))
+    )
     # SiIII–SiII metal-metal CROSS (Model C+, cup1d Cmm; ∝ A3·A2 ⇒ OFF when A2=0). UNDAMPED (cup1d
     # leaves Cmm undamped; the damped-vs-undamped choice is immaterial in band — see the forward).
     C_cross = 0.0
     if cross:
-        dvcb = DL.C_KMS * np.log(_LAMBDA_SiIIb / DL.LAMBDA_SiIII)   # SiIII–SiII line b
+        dvcb = DL.C_KMS * np.log(_LAMBDA_SiIIb / DL.LAMBDA_SiIII)  # SiIII–SiII line b
         dvca = DL.C_KMS * np.log(DL.LAMBDA_SiII / DL.LAMBDA_SiIII)  # SiIII–SiII line a
         C_cross = 2.0 * A3 * A2 * (np.cos(dvcb * k) + r_doublet * np.cos(dvca * k))
     return P * (1.0 + C_LyaSiIII + C_LyaSiII + C_SiII_SiII + C_cross)
@@ -293,11 +352,13 @@ def _metal_f_of_z(z, node_z, f_nodes):
     """Per-z metal flux decrement f(z) from the 2 flat-log nodes (numpy twin of the forward's
     jnp.interp): ``log10 f(z)`` LINEAR in ``log10(1+z)`` between the nodes (a single power-law in
     (1+z) → power-law-exact), CLAMPED to the node value beyond ``[node_z[0], node_z[1]]``
-    (np.interp default; eBOSS z>4.2 → f(4.2)). ``z`` scalar or array; ``node_z``/``f_nodes`` (2,)."""
+    (np.interp default; eBOSS z>4.2 → f(4.2)). ``z`` scalar or array; ``node_z``/``f_nodes`` (2,).
+    """
     node_z = np.asarray(node_z, float)
     f_nodes = np.asarray(f_nodes, float)
-    return 10.0 ** np.interp(np.log10(1.0 + np.asarray(z, float)),
-                             np.log10(1.0 + node_z), np.log10(f_nodes))
+    return 10.0 ** np.interp(
+        np.log10(1.0 + np.asarray(z, float)), np.log10(1.0 + node_z), np.log10(f_nodes)
+    )
 
 
 # metal_zevo gate — 3 BLIND-SAFE injection arms (Model C, gate-b-data-nuisance). Inject from the
@@ -317,19 +378,30 @@ def _metal_f_of_z(z, node_z, f_nodes):
 #                   (p<0) with a GAUSS damping exp(−(k/k_cross)²) the SIGMOID forward cannot reproduce
 #                   (genuinely OUT-of-class for the floated-decorrelation Model C+ forward). SiII OFF.
 METAL_ZEVO_ARMS = {
-    "arm1_decreasing": dict(form="zevo", f_SiIII_nodes=(0.010, 0.010),
-                            f_SiII_nodes=(0.006, 0.006), node_z=(2.2, 4.2),
-                            k_SiIII=0.05, k_SiII=0.05),
-    "arm2_increasing": dict(form="zevo", f_SiIII_nodes=(0.004, 0.020),
-                            f_SiII_nodes=(0.004, 0.013), node_z=(2.2, 4.2),
-                            k_SiIII=0.012, k_SiII=0.006),         # GENERIC in-prior increasing arm:
+    "arm1_decreasing": dict(
+        form="zevo",
+        f_SiIII_nodes=(0.010, 0.010),
+        f_SiII_nodes=(0.006, 0.006),
+        node_z=(2.2, 4.2),
+        k_SiIII=0.05,
+        k_SiII=0.05,
+    ),
+    "arm2_increasing": dict(
+        form="zevo",
+        f_SiIII_nodes=(0.004, 0.020),
+        f_SiII_nodes=(0.004, 0.013),
+        node_z=(2.2, 4.2),
+        k_SiIII=0.012,
+        k_SiII=0.006,
+    ),  # GENERIC in-prior increasing arm:
     #   NOT the DESI Table-D2 best fit (0.0074/0.0035) -- blind-safe per the 4-lens review (do not
     #   inject the published best-fit). f_SiIII_z1=0.020 keeps a(z) INCREASING (a +8%: the f-rise
     #   beats the 1/(1-<F>) fall; threshold f4>0.0186) yet sits 0.176 dex OFF the 0.03 prior ceiling
     #   (2.2x the headroom of the old railed 0.025, which could manufacture an A_p leak in the gate).
     "arm3_ma2025": dict(form="ma2025", node_z=(2.2, 4.2)),
-    "arm4_decreasing_ooc": dict(form="ma2025_gauss", a0=0.012, p=-0.6, k_cross=0.02,
-                                damp="gauss", node_z=(2.2, 4.2)),
+    "arm4_decreasing_ooc": dict(
+        form="ma2025_gauss", a0=0.012, p=-0.6, k_cross=0.02, damp="gauss", node_z=(2.2, 4.2)
+    ),
 }
 
 
@@ -355,9 +427,12 @@ class LegBCtx(NamedTuple):
       t2_per_leg / t3_per_leg       : {leg: (sigma_floor (n_z,), slope (n_z,))} MF floor and n_s-edge term;
                                       {leg: (U (N, m), w (m,))} k-coherence factor. None -> off.
     """
+
     model: object
     pf_stats: dict
-    dla_core_leg: dict          # {leg.name: (N,)} the physical-k DLA core at the leg's bins (A1 rev 1 section 4)
+    dla_core_leg: (
+        dict  # {leg.name: (N,)} the physical-k DLA core at the leg's bins (A1 rev 1 section 4)
+    )
     legs: list
     k_com_hmpc: jnp.ndarray
     z_global: np.ndarray
@@ -369,13 +444,13 @@ class LegBCtx(NamedTuple):
     alpha_hcd_sigma: jnp.ndarray
     cemu_inflate: float
     mf: object = None
-    t2_per_leg: object = None             # MF floor + n_s-edge term per leg (gate E T2; None -> off)
-    t3_per_leg: object = None             # k-coherence factor (U, w) per leg (gate E T3; None -> off)
-    sample_metals: bool = False          # opt-in (2026-06-13): sample a SHARED a_SiIII metal nuisance
-    a_siiii_max: float = 0.15            # and apply _metal_factor on metals_on legs (DESI/eBOSS). Off
-                                         # by default → golden byte-exact (a_SiIII=0 ⇒ factor≡1).
-    sample_a_siii: bool = False          # Stage C opt-in: also float the SiII DOUBLET amplitude a_SiII
-                                         # (after a_SiIII). Off → a_SiII=0 ⇒ byte-exact.
+    t2_per_leg: object = None  # MF floor + n_s-edge term per leg (gate E T2; None -> off)
+    t3_per_leg: object = None  # k-coherence factor (U, w) per leg (gate E T3; None -> off)
+    sample_metals: bool = False  # opt-in (2026-06-13): sample a SHARED a_SiIII metal nuisance
+    a_siiii_max: float = 0.15  # and apply _metal_factor on metals_on legs (DESI/eBOSS). Off
+    # by default → golden byte-exact (a_SiIII=0 ⇒ factor≡1).
+    sample_a_siii: bool = False  # Stage C opt-in: also float the SiII DOUBLET amplitude a_SiII
+    # (after a_SiIII). Off → a_SiII=0 ⇒ byte-exact.
     # OPT-IN FLAT-LOG metal-amplitude prior (Task A1, gate-b-data-nuisance). A STATIC python str
     # selects the prior on the SHARED a_SiIII/a_SiII oscillation-amplitude sites (resolved at TRACE
     # time → a legal python branch; NEVER trace this field):
@@ -387,39 +462,41 @@ class LegBCtx(NamedTuple):
     # oscillation (the n_s rail) likelihood-driven. Keeping the site NAMED a_SiIII/a_SiII preserves
     # every by-name downstream read (_draws_matrix/_packed_names/the re-score loglik/constrain_fn).
     metal_prior: str = "uniform"
-    metal_logf_lo: float = -11.0         # flat-log10(f) lower bound (f = metal flux decrement)
-    metal_logf_hi: float = -2.0          # flat-log10(f) upper bound
-    metal_one_minus_F_ref: float = None  # 1−F_ref: the ONE global scalar mapping f→a (a=f/(1−F_ref)).
-                                         # None → build_legb_ctx derives it from the fiducial mean flux
-                                         # exp(−Kim07(z)) on the union z-grid (a CONSTANT scale on a
-                                         # log-uniform → shape-neutral). Required for the flatlog branch.
-    marginalize_zslope: bool = True      # DEFAULT (2026-06-10): sample the HCD per-class z-slope
-                                         # s_c with the literature dN/dX slope±1σ prior — so the HCD
-                                         # incidence evolves on a PHYSICAL amplitude(pivot α)+slope,
-                                         # not a fixed power-law (mirrors the τ₀ amplitude+slope; the
-                                         # PI: break HCD–A_p–τ₀ degeneracy via physical priors on
-                                         # BOTH). Set False only for the fixed-slope ablation.
-    zslope_mu: object = None             # (3,) prior center on s_c (None → HCD_INCIDENCE_SLOPE ~2.4,
-                                         # the SIM incidence-weight slope; see _zslope_sites)
-    zslope_sigma: object = None          # (3,) prior width on s_c (default the literature WLS σ_s)
+    metal_logf_lo: float = -11.0  # flat-log10(f) lower bound (f = metal flux decrement)
+    metal_logf_hi: float = -2.0  # flat-log10(f) upper bound
+    metal_one_minus_F_ref: float = (
+        None  # 1−F_ref: the ONE global scalar mapping f→a (a=f/(1−F_ref)).
+    )
+    # None → build_legb_ctx derives it from the fiducial mean flux
+    # exp(−Kim07(z)) on the union z-grid (a CONSTANT scale on a
+    # log-uniform → shape-neutral). Required for the flatlog branch.
+    marginalize_zslope: bool = True  # DEFAULT (2026-06-10): sample the HCD per-class z-slope
+    # s_c with the literature dN/dX slope±1σ prior — so the HCD
+    # incidence evolves on a PHYSICAL amplitude(pivot α)+slope,
+    # not a fixed power-law (mirrors the τ₀ amplitude+slope; the
+    # PI: break HCD–A_p–τ₀ degeneracy via physical priors on
+    # BOTH). Set False only for the fixed-slope ablation.
+    zslope_mu: object = None  # (3,) prior center on s_c (None → HCD_INCIDENCE_SLOPE ~2.4,
+    # the SIM incidence-weight slope; see _zslope_sites)
+    zslope_sigma: object = None  # (3,) prior width on s_c (default the literature WLS σ_s)
     # PRIYA mean-flux model (replaces the 13 per-z τ₀ rungs): α(z)=τ₀·((1+z)/(1+z_p))^dτ₀, τ₀(z)=α·Kim07.
     # UNIFORM priors (model: Bird et al. 2023, arXiv:2306.05471, §2.7.1; uniform priors as in Ho et al. 2025,
     # arXiv:2509.18271). tau0_mu/tau0_sigma above are now legacy.
-    tau0_amp_range: object = TAU0_AMP_RANGE   # PRIYA uniform prior on amplitude τ₀ (center 1.0=Kim)
-    dtau0_range: object = DTAU0_RANGE         # PRIYA uniform prior on slope dτ₀ (center 0=Kim slope)
-    tau0_pivot_z: float = TAU0_PIVOT_Z        # the (1+z)/(1+z_p) pivot (PRIYA z_p=3)
+    tau0_amp_range: object = TAU0_AMP_RANGE  # PRIYA uniform prior on amplitude τ₀ (center 1.0=Kim)
+    dtau0_range: object = DTAU0_RANGE  # PRIYA uniform prior on slope dτ₀ (center 0=Kim slope)
+    tau0_pivot_z: float = TAU0_PIVOT_Z  # the (1+z)/(1+z_p) pivot (PRIYA z_p=3)
     # INFORMATIVE-τ₀ arm (2026-06-21): replace the UNIFORM prior on the two mean-flux sites with a
     # centered TruncatedNormal, truncated to the SAME physical range (tau0_amp_range/dtau0_range).
     # Each field is None (→ Uniform, the DEFAULT — byte-identical) OR a (mu, sigma) tuple (→
     # TruncatedNormal(mu, sigma, low=range[0], high=range[1])). Sampled via _sample_tau0_sites in
     # BOTH _legb_model and _legb_priors_only (identical site names/order). PRIYA/Bird+2023 note the
     # τ₀ amplitude is well measured by the data; this arm gives the closure a Kim-centered prior.
-    tau0_amp_gauss: object = None             # None → Uniform; (mu, sigma) → TruncatedNormal on τ₀ amp
-    dtau0_gauss: object = None                # None → Uniform; (mu, sigma) → TruncatedNormal on dτ₀
+    tau0_amp_gauss: object = None  # None → Uniform; (mu, sigma) → TruncatedNormal on τ₀ amp
+    dtau0_gauss: object = None  # None → Uniform; (mu, sigma) → TruncatedNormal on dτ₀
     # NUTS theta prior bounds in the UNIT cube (None → _THETA_UNIT_LO/_HI = IGM params restricted
     # to original PRIYA, n_s extended; see data.SAMPLING_LIMITS). Set both to 0/1 for the full box.
-    theta_unit_lo: object = None              # (9,) lower bound on theta_unit
-    theta_unit_hi: object = None              # (9,) upper bound on theta_unit
+    theta_unit_lo: object = None  # (9,) lower bound on theta_unit
+    theta_unit_hi: object = None  # (9,) upper bound on theta_unit
     # HIERARCHICAL HCD-incidence prior ("Option B", 2026-06-13): reparametrize the 3 independent
     # HCD α sites as ONE likelihood-constrained MULTIPLIER A_hcd (= the LLS prior verbatim) × two
     # prior-pinned RATIOS r_subdla/r_dla → α_LLS=A_hcd, α_subDLA=A_hcd·r_subdla, α_DLA=A_hcd·r_dla
@@ -427,17 +504,17 @@ class LegBCtx(NamedTuple):
     # subDLA↔DLA exchange direction (the n_s-leak source) onto one fixed-shape additive amplitude
     # + prior-pinned shape ratios. The existing per-class z-slope s_c is UNCHANGED, so the ratio
     # ALREADY evolves as r_c(z)=r_c·((1+z)/(1+z_p))^(s_c−s_LLS) (the differential-CDDF-slope fix).
-    hierarchical_hcd: bool = False            # OFF (default) → BYTE-IDENTICAL to the legacy 3-site code
-    hcd_noncentered: bool = False             # LocScaleReparam-style non-centered fallback (same site
-                                              # names → site-order test passes). Centered is correct
-                                              # by the BENIGN orientation; this is the tested fallback.
+    hierarchical_hcd: bool = False  # OFF (default) → BYTE-IDENTICAL to the legacy 3-site code
+    hcd_noncentered: bool = False  # LocScaleReparam-style non-centered fallback (same site
+    # names → site-order test passes). Centered is correct
+    # by the BENIGN orientation; this is the tested fallback.
     # The ratio prior centers/widths (2,) [r_subdla, r_dla]. CLOSURE (must-fix #1): centers from the
     # RAW sim w_c ratios (median(w_sub)/median(w_LLS), HCD_DLA_RESIDUAL_FRAC·median(w_DLA)/median(w_LLS))
     # so the held-out-sim closure TRUTH matches the center to within the per-sim CV; widths
     # (0.10, 0.12)·center × hcd_ratio_infl. None (default) → build_legb_ctx auto-derives.
-    hcd_ratio_mu: object = None               # (2,) [r_subdla, r_dla] prior centers
-    hcd_ratio_sigma: object = None            # (2,) [r_subdla, r_dla] prior widths
-    hcd_ratio_infl: float = 1.0               # the MANDATORY width-scan knob {0.5,1,2,3}×
+    hcd_ratio_mu: object = None  # (2,) [r_subdla, r_dla] prior centers
+    hcd_ratio_sigma: object = None  # (2,) [r_subdla, r_dla] prior widths
+    hcd_ratio_infl: float = 1.0  # the MANDATORY width-scan knob {0.5,1,2,3}×
     # 2D AMPLITUDE×TILT submanifold variant of the hierarchical prior ("hcd_2d_tilt", 2026-06-14):
     # Option B (1D A_HCD × FIXED ratios) RELOCATED the n_s coupling onto the A_HCD center (the gate
     # diagnosis). The fix: give the HCD sector a GENUINE 2D submanifold = pivot AMPLITUDE A_HCD × a
@@ -451,10 +528,10 @@ class LegBCtx(NamedTuple):
     # mock truth's full incidence slope HCD_INCIDENCE_SLOPE (~2.4 — the closure anchor). REQUIRES hierarchical_hcd=True
     # (it builds on the A_hcd × r reparam). OFF (default) → byte-identical (legacy OR Option B).
     hcd_2d_tilt: bool = False
-    hcd_dslope: object = None                 # (3,) δs_c FIXED class-differential slopes (δs_LLS≡0)
-    hcd_btilt_mu: float = None                # B_HCD prior center (= s_LLS slope center)
-    hcd_btilt_sigma: float = None             # B_HCD prior width (= the LLS slope-prior width)
-    fix_alpha_res: bool = False               # DIAGNOSTIC (default False → SAMPLE alpha_res, byte-
+    hcd_dslope: object = None  # (3,) δs_c FIXED class-differential slopes (δs_LLS≡0)
+    hcd_btilt_mu: float = None  # B_HCD prior center (= s_LLS slope center)
+    hcd_btilt_sigma: float = None  # B_HCD prior width (= the LLS slope-prior width)
+    fix_alpha_res: bool = False  # DIAGNOSTIC (default False → SAMPLE alpha_res, byte-
     #                                           identical to production). True → DO NOT sample the two
     #                                           res_corr-amplitude sites; pass the fixed no-op
     #                                           (alpha0=1, s=0) into the forward. Used by the decomp
@@ -467,23 +544,23 @@ class LegBCtx(NamedTuple):
     # per-z amplitude is a(z)=f(z)/(1−⟨F⟩(z)) with ⟨F⟩(z)=exp(−tau0_vec[iz]) the SAMPLED mean flux.
     # SiII nodes only on legs in metal_siII_legs. metal_one_minus_F_ref (A1 scalar) is UNUSED here (the
     # per-z map uses tau0_vec, not the global scalar) — kept for flatlog back-compat.
-    metal_node_z: tuple = (2.2, 4.2)          # STATIC ascending node redshifts (Chaves-Montero Sec 5.2)
-    metal_fnode_lo: float = 0.003             # flat-log10 f per-node lower bracket
-    metal_fnode_hi: float = 0.03              # upper bracket (spans eBOSS .006 / Ma .014 / DESI .016)
-    metal_siII_legs: tuple = ("DESI",)        # legs that ALSO sample the SiII doublet f-nodes
+    metal_node_z: tuple = (2.2, 4.2)  # STATIC ascending node redshifts (Chaves-Montero Sec 5.2)
+    metal_fnode_lo: float = 0.003  # flat-log10 f per-node lower bracket
+    metal_fnode_hi: float = 0.03  # upper bracket (spans eBOSS .006 / Ma .014 / DESI .016)
+    metal_siII_legs: tuple = ("DESI",)  # legs that ALSO sample the SiII doublet f-nodes
     # MODEL C+ — FLOAT the sigmoid decorrelation SCALE k_SiIII/k_SiII (cup1d s_Lya_SiIII/s_Lya_SiII;
     # we sample the SCALE, not its inverse). Per metals_on leg, per ion, a 2-node LogUniform site (per
     # z log-interp like f) ~ dist.LogUniform(metal_knode_lo, metal_knode_hi). Bracket [1e-3, 0.1] s/km
     # spans the DESI Table-D2 best fit (k_SiIII~0.0074, k_SiII~0.0035) and the old fixed 0.05; in
     # cup1d s units that is exp([2,7]) ≈ 1/[0.135, 0.0009] (input_pipeline.set_baseline s_Lya_*).
-    metal_knode_lo: float = 1e-3              # flat-log10 k (decorrelation scale, s/km) lower bracket
-    metal_knode_hi: float = 0.1               # upper bracket
-    sample_res: bool = False                  # option-b: sample the 2-param spectral-resolution f_res
+    metal_knode_lo: float = 1e-3  # flat-log10 k (decorrelation scale, s/km) lower bracket
+    metal_knode_hi: float = 0.1  # upper bracket
+    sample_res: bool = False  # option-b: sample the 2-param spectral-resolution f_res
     #                                           nuisance (b_res(z), forward-only). Default False → golden.
-    f_res_amp_sigma: float = None             # option-b prior width on f_res_amp; None → tight F_RES_AMP_SIGMA
+    f_res_amp_sigma: float = None  # option-b prior width on f_res_amp; None → tight F_RES_AMP_SIGMA
     #                                           (0.02). Set wider for arm-C (cup1d-faithful) or the eBOSS
     #                                           leg-matched prior (~0.05). Golden-safe (None → unchanged).
-    res_corr_on: bool = True                  # Gate-A NORC: default True = production (res_corr applied).
+    res_corr_on: bool = True  # Gate-A NORC: default True = production (res_corr applied).
     #                                           Mirrors ctx.mf.res_corr_on; False -> res_corr dropped +
     #                                           (in build_legb_ctx) KS capped at 0.045. A CONFIG field, NOT
     #                                           packed/sampled -> golden-safe (no _draws_matrix/truth_vec).
@@ -496,16 +573,16 @@ class LegBCtx(NamedTuple):
     # sampled PER LEG (ctx.legs LIST order, suffix `_{leg.name}` verbatim), each leg at ITS
     # deployed single-leg survey prior; the likelihood takes a {leg.name: (n_zg,3)} dict.
     # Build ONLY via build_legb_joint_ctx (it poisons the shared alpha_hcd_mu/sigma to None).
-    per_leg_alpha: bool = False               # sample the HCD alpha sites PER LEG (joint mode)
-    alpha_hcd_mu_by_leg: object = None        # {leg.name: (3,)} per-leg HCD prior centers
-    alpha_hcd_sigma_by_leg: object = None     # {leg.name: (3,)} per-leg HCD prior widths
-    survey_by_leg: object = None              # {leg.name: survey key} (audit/joint_stamp record)
+    per_leg_alpha: bool = False  # sample the HCD alpha sites PER LEG (joint mode)
+    alpha_hcd_mu_by_leg: object = None  # {leg.name: (3,)} per-leg HCD prior centers
+    alpha_hcd_sigma_by_leg: object = None  # {leg.name: (3,)} per-leg HCD prior widths
+    survey_by_leg: object = None  # {leg.name: survey key} (audit/joint_stamp record)
     # C1 plumbing (PI 2026-07-20, carried default = SHARED): per-leg z-slope sites
     # s_{lls,subdla,dla}_{leg.name} instead of the shared s_* block. v1 default False ->
     # _zslope_sites behaves exactly as today. The science choice (per-leg vs shared slopes
     # for the joint fit) is DEFERRED to the joint-fit campaign design (KS-challenge S
     # readout); both switch positions trace correctly (tests). Requires per_leg_alpha.
-    per_leg_zslope: bool = False              # per-leg HCD z-slope sites (plumbing; v1 OFF)
+    per_leg_zslope: bool = False  # per-leg HCD z-slope sites (plumbing; v1 OFF)
     # KS dN/dX-MAPPED LLS PRIOR (V-A, KS-ONLY; W2 2026-07-22, signed PI decision 1). DORMANT
     # static branch: default False -> every deployed non-KS path executes the textually
     # untouched legacy statements. Set ONLY by build_legb_ctx for survey == "KS" single-leg
@@ -517,12 +594,14 @@ class LegBCtx(NamedTuple):
     # alpha_hcd_mu/alpha_hcd_sigma retain the LEGACY alpha-space KS prior (consumed only by
     # the ks_legacy_alpha_param override arm and by-name audit readers) — the mapped sites
     # never read them.
-    ks_dndx_mapped: bool = False              # KS mapped parameterization ("dndx_mapped_v2")
-    ks_dndx_ref: object = None                # (n_zg,3) reference dN/dX(z) on z_global
-    ks_xbar_z: object = None                  # (n_zg,) cache Xbar(z) deg-2 fit on z_global
-    ks_dndx_ref_pivot: object = None          # (3,) reference dN/dX at z=HCD_Z_PIVOT
-    ks_xbar_pivot: object = None              # scalar Xbar(z=HCD_Z_PIVOT)
-    product_digests: object = None            # gate E: sha256 of every product the forward loaded (forward_stamp)
+    ks_dndx_mapped: bool = False  # KS mapped parameterization ("dndx_mapped_v2")
+    ks_dndx_ref: object = None  # (n_zg,3) reference dN/dX(z) on z_global
+    ks_xbar_z: object = None  # (n_zg,) cache Xbar(z) deg-2 fit on z_global
+    ks_dndx_ref_pivot: object = None  # (3,) reference dN/dX at z=HCD_Z_PIVOT
+    ks_xbar_pivot: object = None  # scalar Xbar(z=HCD_Z_PIVOT)
+    product_digests: object = (
+        None  # gate E: sha256 of every product the forward loaded (forward_stamp)
+    )
     # the delta_c(z) map of every w_c map call of this context (a dndx_wc.DeltaCMap): None on the historical path (the
     # historical, pre-fix map); on the release-cache path the caller's explicit map (build_legb_ctx refuses None there).
     # Every consumer of a context that calls a w_c map (dndx_wc) must pass this field (fisher_kit.forward_inputs does).
@@ -551,10 +630,27 @@ def _kim(z):
 # f_res_amp_sigma widths; wide sigma=0.15 reflects the certified out-of-span/instrument-bracket study.
 # No metals (its conservative covariance already subtracts+inflates metals/continuum/resolution).
 PROD_FORWARD_BY_LEG = {
-    "DESI":  dict(sample_res=True,  f_res_amp_sigma=0.02, metal_prior="flatlog2node", metals=True,  ks_kwargs=None),
-    "eBOSS": dict(sample_res=True,  f_res_amp_sigma=0.05, metal_prior="flatlog2node", metals=True,  ks_kwargs=None),
-    "KS":    dict(sample_res=True,  f_res_amp_sigma=0.15, metal_prior="uniform",      metals=False,
-                  ks_kwargs=dict(resolution_float=True, k_max=0.065)),
+    "DESI": dict(
+        sample_res=True,
+        f_res_amp_sigma=0.02,
+        metal_prior="flatlog2node",
+        metals=True,
+        ks_kwargs=None,
+    ),
+    "eBOSS": dict(
+        sample_res=True,
+        f_res_amp_sigma=0.05,
+        metal_prior="flatlog2node",
+        metals=True,
+        ks_kwargs=None,
+    ),
+    "KS": dict(
+        sample_res=True,
+        f_res_amp_sigma=0.15,
+        metal_prior="uniform",
+        metals=False,
+        ks_kwargs=dict(resolution_float=True, k_max=0.065),
+    ),
 }
 
 
@@ -568,8 +664,10 @@ def prod_forward_config(leg):
     try:
         return copy.deepcopy(PROD_FORWARD_BY_LEG[leg])
     except KeyError:
-        raise KeyError(f"no production forward config for leg {leg!r}; "
-                       f"expected one of {list(PROD_FORWARD_BY_LEG)}")
+        raise KeyError(
+            f"no production forward config for leg {leg!r}; "
+            f"expected one of {list(PROD_FORWARD_BY_LEG)}"
+        )
 
 
 # ============================================================================ #
@@ -619,11 +717,15 @@ def forward_signature():
     constants. Consumed by NOTHING in the deployed inference path (never a per-mock discriminator
     -> avoids universal-clash). Values must stay JSON-native: a non-JSON value in
     PROD_FORWARD_BY_LEG raises TypeError (fail-loud) rather than being silently coerced."""
-    payload = json.dumps({"PROD_FORWARD_BY_LEG": PROD_FORWARD_BY_LEG,
-                          "PROD_RES_CORR_ON": bool(PROD_RES_CORR_ON),
-                          "DESI_DLA_COV_REDUCE": bool(DL.DESI_DLA_COV_REDUCE),
-                          "COORDINATE": FORWARD_COORDINATE},
-                         sort_keys=True)
+    payload = json.dumps(
+        {
+            "PROD_FORWARD_BY_LEG": PROD_FORWARD_BY_LEG,
+            "PROD_RES_CORR_ON": bool(PROD_RES_CORR_ON),
+            "DESI_DLA_COV_REDUCE": bool(DL.DESI_DLA_COV_REDUCE),
+            "COORDINATE": FORWARD_COORDINATE,
+        },
+        sort_keys=True,
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -642,40 +744,48 @@ def forward_stamp(ctx, leg):
 
     ``leg`` is the (single, restricted) DataLeg the runner fits; getattr defaults keep the stamp
     buildable on pre-F2 DataLeg pickles/stubs. Pure host-side dict (pkl-friendly)."""
-    from hcd_analysis.emulator import inference as INF   # lazy: keep module import-order neutral
-    return dict(res_corr_on=bool(ctx.res_corr_on), fix_alpha_res=bool(ctx.fix_alpha_res),
-                sample_res=bool(ctx.sample_res),
-                f_res_amp_sigma=(None if ctx.f_res_amp_sigma is None
-                                 else float(ctx.f_res_amp_sigma)),
-                metal_prior=str(ctx.metal_prior),
-                metal_node_z=tuple(float(z) for z in ctx.metal_node_z),
-                dla_cov_reduced=bool(getattr(leg, "dla_cov_reduced", False)),
-                dla_forward_frac=float(getattr(leg, "dla_forward_frac", 1.0)),
-                use_snr3=bool(getattr(leg, "use_snr3", False)),
-                cv_floor_on=bool(getattr(leg, "cv_floor_on", False)),
-                cv_floor_rank1=bool(getattr(leg, "cv_floor_rank1", False)),
-                # per-leg alpha mode (2026-07-20 joint capability): getattr default keeps the
-                # stamp buildable on pre-feature ctx pickles/stubs; "shared" = the legacy
-                # single-alpha-block model, "per_leg" = suffixed per-leg alpha sites.
-                alpha_mode=("per_leg" if getattr(ctx, "per_leg_alpha", False) else "shared"),
-                # HCD alpha parameterization (W2, 2026-07-22): resolved from the BUILT ctx —
-                # "dndx_mapped_v2" on the KS mapped branch (ctx.ks_dndx_mapped), else the legacy
-                # "alpha_pivot_powerlaw_v1" (getattr default keeps pre-feature stubs buildable).
-                # NOTE (freeze-handoff rule): analyze_dnuis_bias.py pools shards by a frozenset
-                # over this WHOLE forward dict, so adding this key makes pre-land shards
-                # fail-loud against post-land ones — INTENDED: regenerate the shard group,
-                # never drop the key.
-                hcd_parameterization=(INF.HCD_ALPHA_PARAMETERIZATION["KS"]
-                                      if getattr(ctx, "ks_dndx_mapped", False)
-                                      else INF.HCD_ALPHA_PARAMETERIZATION["DESI"]),
-                forward_signature=forward_signature(),
-                hcd_prior_signature=INF.hcd_prior_signature(),
-                # gate E: the coordinate, the digests of every product the forward loaded (LF ensemble checkpoints,
-                # MF product, cache, emulator-error products) and the cache-derived HCD prior centres
-                coordinate=FORWARD_COORDINATE,
-                products=getattr(ctx, "product_digests", None),
-                hcd_prior_centres=(None if getattr(ctx, "alpha_hcd_mu", None) is None
-                                   else [float(v) for v in np.asarray(ctx.alpha_hcd_mu)]))
+    from hcd_analysis.emulator import inference as INF  # lazy: keep module import-order neutral
+
+    return dict(
+        res_corr_on=bool(ctx.res_corr_on),
+        fix_alpha_res=bool(ctx.fix_alpha_res),
+        sample_res=bool(ctx.sample_res),
+        f_res_amp_sigma=(None if ctx.f_res_amp_sigma is None else float(ctx.f_res_amp_sigma)),
+        metal_prior=str(ctx.metal_prior),
+        metal_node_z=tuple(float(z) for z in ctx.metal_node_z),
+        dla_cov_reduced=bool(getattr(leg, "dla_cov_reduced", False)),
+        dla_forward_frac=float(getattr(leg, "dla_forward_frac", 1.0)),
+        use_snr3=bool(getattr(leg, "use_snr3", False)),
+        cv_floor_on=bool(getattr(leg, "cv_floor_on", False)),
+        cv_floor_rank1=bool(getattr(leg, "cv_floor_rank1", False)),
+        # per-leg alpha mode (2026-07-20 joint capability): getattr default keeps the
+        # stamp buildable on pre-feature ctx pickles/stubs; "shared" = the legacy
+        # single-alpha-block model, "per_leg" = suffixed per-leg alpha sites.
+        alpha_mode=("per_leg" if getattr(ctx, "per_leg_alpha", False) else "shared"),
+        # HCD alpha parameterization (W2, 2026-07-22): resolved from the BUILT ctx —
+        # "dndx_mapped_v2" on the KS mapped branch (ctx.ks_dndx_mapped), else the legacy
+        # "alpha_pivot_powerlaw_v1" (getattr default keeps pre-feature stubs buildable).
+        # NOTE (freeze-handoff rule): analyze_dnuis_bias.py pools shards by a frozenset
+        # over this WHOLE forward dict, so adding this key makes pre-land shards
+        # fail-loud against post-land ones — INTENDED: regenerate the shard group,
+        # never drop the key.
+        hcd_parameterization=(
+            INF.HCD_ALPHA_PARAMETERIZATION["KS"]
+            if getattr(ctx, "ks_dndx_mapped", False)
+            else INF.HCD_ALPHA_PARAMETERIZATION["DESI"]
+        ),
+        forward_signature=forward_signature(),
+        hcd_prior_signature=INF.hcd_prior_signature(),
+        # gate E: the coordinate, the digests of every product the forward loaded (LF ensemble checkpoints,
+        # MF product, cache, emulator-error products) and the cache-derived HCD prior centres
+        coordinate=FORWARD_COORDINATE,
+        products=getattr(ctx, "product_digests", None),
+        hcd_prior_centres=(
+            None
+            if getattr(ctx, "alpha_hcd_mu", None) is None
+            else [float(v) for v in np.asarray(ctx.alpha_hcd_mu)]
+        ),
+    )
 
 
 def _assert_joint_signatures_uniform(per_leg_stamps):
@@ -683,12 +793,15 @@ def _assert_joint_signatures_uniform(per_leg_stamps):
     run must carry the SAME (forward_signature, hcd_prior_signature) pair — a leg built under a
     drifted forward or drifted prior constants must never be silently co-fit. ``per_leg_stamps``
     = ``{leg name: forward_stamp dict}``; raises ValueError naming the offending legs."""
-    sigs = {name: (st["forward_signature"], st["hcd_prior_signature"])
-            for name, st in per_leg_stamps.items()}
+    sigs = {
+        name: (st["forward_signature"], st["hcd_prior_signature"])
+        for name, st in per_leg_stamps.items()
+    }
     if len(set(sigs.values())) > 1:
         raise ValueError(
             f"mixed-signature legs in a joint run: {sigs}. Every leg must be built at the "
-            f"SAME forward_signature AND hcd_prior_signature (freeze-audit uniformity).")
+            f"SAME forward_signature AND hcd_prior_signature (freeze-audit uniformity)."
+        )
 
 
 def joint_stamp(ctx):
@@ -701,19 +814,26 @@ def joint_stamp(ctx):
     likelihood and must never be read as data-constrained. Mixed-signature legs are rejected
     (``_assert_joint_signatures_uniform``). Pure host-side dict (pkl/json-friendly)."""
     if not getattr(ctx, "per_leg_alpha", False):
-        raise ValueError("joint_stamp is only defined for per_leg_alpha=True ctxs "
-                         "(single-leg runs use forward_stamp directly)")
+        raise ValueError(
+            "joint_stamp is only defined for per_leg_alpha=True ctxs "
+            "(single-leg runs use forward_stamp directly)"
+        )
     per_leg = {}
-    for leg in ctx.legs:                      # LIST order — never dict iteration
+    for leg in ctx.legs:  # LIST order — never dict iteration
         nm = leg.name
         sv = ctx.survey_by_leg[nm]
         prior_only = float(getattr(leg, "dla_forward_frac", 1.0)) == 0.0
-        note = ("alpha_dla_raw_" + nm + " latent Normal SCALE hardcoded 1.0 (the freeze "
-                "sampled-width attestation, carried per leg verbatim); "
-                + ("PRIOR-ONLY: dla_forward_frac=0 on this leg, so the DLA site is inactive "
-                   "in the likelihood (structural uniformity, PI C3) and is NOT "
-                   "data-constrained" if prior_only else
-                   "likelihood-active (dla_forward_frac>0)"))
+        note = (
+            "alpha_dla_raw_" + nm + " latent Normal SCALE hardcoded 1.0 (the freeze "
+            "sampled-width attestation, carried per leg verbatim); "
+            + (
+                "PRIOR-ONLY: dla_forward_frac=0 on this leg, so the DLA site is inactive "
+                "in the likelihood (structural uniformity, PI C3) and is NOT "
+                "data-constrained"
+                if prior_only
+                else "likelihood-active (dla_forward_frac>0)"
+            )
+        )
         per_leg[nm] = dict(
             survey=str(sv),
             lls_boost=float(HCD_LLS_SURVEY_BOOST[sv]),
@@ -728,12 +848,15 @@ def joint_stamp(ctx):
             resolution_float=bool(getattr(leg, "resolution_ready", False)),
             dla_site_prior_only=bool(prior_only),
             dla_raw_latent_scale=1.0,
-            dla_width_note=note)
+            dla_width_note=note,
+        )
     _assert_joint_signatures_uniform({nm: p["forward"] for nm, p in per_leg.items()})
-    return dict(alpha_mode="per_leg",
-                legs=[leg.name for leg in ctx.legs],
-                per_leg_zslope=bool(getattr(ctx, "per_leg_zslope", False)),
-                per_leg=per_leg)
+    return dict(
+        alpha_mode="per_leg",
+        legs=[leg.name for leg in ctx.legs],
+        per_leg_zslope=bool(getattr(ctx, "per_leg_zslope", False)),
+        per_leg=per_leg,
+    )
 
 
 # ============================================================================ #
@@ -777,15 +900,21 @@ def _survey_alpha_prior(w_c_med, Xbar_z3, survey):
         # on a real-data path. hcd_incidence_prior (line above) guards its own lookups too.
         assert_known_survey(survey, "_survey_alpha_prior")
         _boost = HCD_LLS_SURVEY_BOOST[survey]
-        alpha_mu = alpha_mu.at[0].set(hcd_lls_realfit_alpha_center(Xbar_z3, z=HCD_Z_PIVOT, boost=_boost))
+        alpha_mu = alpha_mu.at[0].set(
+            hcd_lls_realfit_alpha_center(Xbar_z3, z=HCD_Z_PIVOT, boost=_boost)
+        )
         # keep the σ/μ width invariant (PI WIDTH RULE: 1× lit measurement error) at the new center.
         _fl = HCD_LLS_SURVEY_FRAC_SIGMA[survey]
         alpha_sd = alpha_sd.at[0].set(_fl * alpha_mu[0])
     # PIVOT GUARD (PI's explicit ask): the LLS α-pivot center MUST be the z=3 value, NOT the all-z
     # median (z≈3.6). A future revert to nanmedian(w_c_cache[...all z...]) trips this at build time.
     _guard_boost = HCD_LLS_SURVEY_BOOST[survey] if survey is not None else 1.0
-    assert_hcd_pivot_z3(float(np.asarray(alpha_mu)[0]), z=HCD_Z_PIVOT,
-                        where=f"_survey_alpha_prior survey={survey}", boost=_guard_boost)
+    assert_hcd_pivot_z3(
+        float(np.asarray(alpha_mu)[0]),
+        z=HCD_Z_PIVOT,
+        where=f"_survey_alpha_prior survey={survey}",
+        boost=_guard_boost,
+    )
 
     # REAL-FIT LLS forward z-slope (PI re-determination 2026-06-17; KEPT under the 2026-07-18
     # corrected-law re-derivation, PI decision 1c): when ``survey`` is given (a real-data fit), the
@@ -800,8 +929,9 @@ def _survey_alpha_prior(w_c_med, Xbar_z3, survey):
     if survey is not None:
         _incid = np.asarray(HCD_INCIDENCE_SLOPE, float)
         survey_zslope_mu = jnp.asarray([HCD_LLS_REALFIT_ZSLOPE, _incid[1], _incid[2]])
-        _assert_forward_zslope_center(survey_zslope_mu,
-                                      f"_survey_alpha_prior survey={survey} litWLS zslope_mu")
+        _assert_forward_zslope_center(
+            survey_zslope_mu, f"_survey_alpha_prior survey={survey} litWLS zslope_mu"
+        )
     return alpha_mu, alpha_sd, survey_zslope_mu
 
 
@@ -834,16 +964,22 @@ def _ks_dndx_reference(alpha_mu, xbar_cf, z_global, *, delta_map=None):
     survey-agnostic centres the boost-1.0 triple reuses); ``xbar_cf`` from hcd_xbar_polyfit.
     ``delta_map``: the delta_c(z) map of both map calls (None: the historical map, ``dndx_wc``)."""
     zg = np.asarray(z_global, float)
-    xbar_z = np.polyval(xbar_cf, zg)                                # (n_zg,)
+    xbar_z = np.polyval(xbar_cf, zg)  # (n_zg,)
     xbar_piv = float(np.polyval(xbar_cf, float(HCD_Z_PIVOT)))
     lls_b1 = float(hcd_lls_realfit_alpha_center(xbar_piv, z=HCD_Z_PIVOT, boost=1.0))
     # ORIGINAL-semantics pivot guard on the boost-1.0 UNMAPPED map input (band (0.14, 0.21) at
     # boost=1.0; trips if mu_piv[0]'s construction ever reverts to the all-z-median cache w_c).
-    assert_hcd_pivot_z3(lls_b1, z=HCD_Z_PIVOT, where="_ks_dndx_reference boost-1.0 input",
-                        boost=1.0)
+    assert_hcd_pivot_z3(
+        lls_b1, z=HCD_Z_PIVOT, where="_ks_dndx_reference boost-1.0 input", boost=1.0
+    )
     mu_piv = np.array([lls_b1, float(alpha_mu[1]), float(alpha_mu[2])])
-    s = np.array([float(HCD_LLS_REALFIT_ZSLOPE),
-                  float(HCD_INCIDENCE_SLOPE[1]), float(HCD_INCIDENCE_SLOPE[2])])
+    s = np.array(
+        [
+            float(HCD_LLS_REALFIT_ZSLOPE),
+            float(HCD_INCIDENCE_SLOPE[1]),
+            float(HCD_INCIDENCE_SLOPE[2]),
+        ]
+    )
     # evaluate on z_global + the pivot row (appended last, then split off) so the pivot
     # reference goes through the IDENTICAL construction as the curve rows.
     z_eval = np.concatenate([zg, [float(HCD_Z_PIVOT)]])
@@ -851,56 +987,104 @@ def _ks_dndx_reference(alpha_mu, xbar_cf, z_global, *, delta_map=None):
     alpha_ref_b1 = mu_piv[None, :] * ((1.0 + z_eval[:, None]) / (1.0 + HCD_Z_PIVOT)) ** s[None, :]
     # exact occupancy-map inverse (raises outside the simplex — the boost-1.0 triple is the
     # pinned invertible source; a raise here means the source triple drifted).
-    dndx_ref = alpha_to_dndx_exact(alpha_ref_b1, xb_eval, z_eval, delta_map=delta_map)   # (n_zg+1, 3)
+    dndx_ref = alpha_to_dndx_exact(
+        alpha_ref_b1, xb_eval, z_eval, delta_map=delta_map
+    )  # (n_zg+1, 3)
     A_lls, g_lls = HCD_LIT_DNDX_LAW["LLS"]
     boost = float(HCD_LLS_SURVEY_BOOST["KS"])
-    dndx_ref[:, 0] = boost * float(A_lls) * (1.0 + z_eval) ** float(g_lls)   # dndx_premap 2.5×
+    dndx_ref[:, 0] = boost * float(A_lls) * (1.0 + z_eval) ** float(g_lls)  # dndx_premap 2.5×
     dndx_piv = dndx_ref[-1]
     dndx_ref = dndx_ref[:-1]
     # MAPPED pivot-centre guard (the map OUTPUT band; assert_ks_mapped_pivot docstring).
-    a_piv = np.asarray(w_c_corrected(jnp.asarray(dndx_piv), jnp.asarray(xbar_piv),
-                                     jnp.asarray(float(HCD_Z_PIVOT)), delta_map=delta_map))[..., 1:]
+    a_piv = np.asarray(
+        w_c_corrected(
+            jnp.asarray(dndx_piv),
+            jnp.asarray(xbar_piv),
+            jnp.asarray(float(HCD_Z_PIVOT)),
+            delta_map=delta_map,
+        )
+    )[..., 1:]
     assert_ks_mapped_pivot(float(a_piv[0]), "_ks_dndx_reference mapped pivot")
     return dndx_ref, xbar_z, dndx_piv, xbar_piv
 
 
 def _check_ctx_delta_map(delta_map, historical_reason):
     """The delta_c map rule of ``build_legb_ctx``: the historical path takes the historical map (``delta_map`` None);
-    the strict (release-cache) path needs an explicit ``DeltaCMap`` that is not the historical one."""
+    the strict (release-cache) path needs an explicit ``DeltaCMap`` that is not the historical one.
+    """
     if historical_reason is not None:
         if delta_map is not None:
-            raise ValueError("delta_map is for the release-cache (strict) path; the historical path (historical_reason "
-                             "given) uses the historical delta_c and takes no delta_map")
+            raise ValueError(
+                "delta_map is for the release-cache (strict) path; the historical path (historical_reason "
+                "given) uses the historical delta_c and takes no delta_map"
+            )
         return
     if delta_map is None:
-        raise ValueError("the release-cache (strict) path needs an explicit delta_map: the default delta_c is "
-                         "HISTORICAL_DELTA_C, fitted to the pre-fix (box-edge duplicate) counts, and must not be "
-                         "paired with a clean cache. Pass the delta_c map fitted to clean counts (for example a model "
-                         "bundle's WcMap.delta_c_map()), or give historical_reason for a historical analysis")
+        raise ValueError(
+            "the release-cache (strict) path needs an explicit delta_map: the default delta_c is "
+            "HISTORICAL_DELTA_C, fitted to the pre-fix (box-edge duplicate) counts, and must not be "
+            "paired with a clean cache. Pass the delta_c map fitted to clean counts (for example a model "
+            "bundle's WcMap.delta_c_map()), or give historical_reason for a historical analysis"
+        )
     if not isinstance(delta_map, DeltaCMap):
         raise TypeError(f"delta_map must be a dndx_wc.DeltaCMap, got {type(delta_map).__name__}")
-    if delta_map is HISTORICAL_DELTA_C or (np.shape(delta_map.coeffs) == np.shape(HISTORICAL_DELTA_C.coeffs) and
-                                           np.array_equal(np.asarray(delta_map.coeffs, dtype=np.float64),
-                                                          HISTORICAL_DELTA_C.coeffs)):
-        raise ValueError("delta_map has the coefficients of HISTORICAL_DELTA_C (fitted to the pre-fix counts); the "
-                         "release-cache path needs a map fitted to clean counts")
+    if delta_map is HISTORICAL_DELTA_C or (
+        np.shape(delta_map.coeffs) == np.shape(HISTORICAL_DELTA_C.coeffs)
+        and np.array_equal(
+            np.asarray(delta_map.coeffs, dtype=np.float64), HISTORICAL_DELTA_C.coeffs
+        )
+    ):
+        raise ValueError(
+            "delta_map has the coefficients of HISTORICAL_DELTA_C (fitted to the pre-fix counts); the "
+            "release-cache path needs a map fitted to clean counts"
+        )
 
 
-def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
-                   metals_on=False, desi_kwargs=None, ks_kwargs=None,
-                   with_eboss=False, eboss_kwargs=None,
-                   mf_product=None, mf_hr_cache_sha256=None, mf_composition=None,
-                   t1_product=None, t2_product=None, t3_product=None, dla_core_product=None,
-                   res_corr_on=False, sample_metals=False, sample_res=False,
-                   coherent_res=False, coh_amp=1.0, f_res_amp_sigma=None, a_siiii_max=0.15,
-                   metal_prior="uniform", metal_logf_lo=-11.0, metal_logf_hi=-2.0,
-                   metal_one_minus_F_ref=None,
-                   metal_node_z=(2.2, 4.2), metal_fnode_lo=0.003, metal_fnode_hi=0.03,
-                   metal_siII_legs=("DESI",), metal_knode_lo=1e-3, metal_knode_hi=0.1,
-                   hierarchical_hcd=False, hcd_noncentered=False, hcd_ratio_infl=1.0,
-                   hcd_2d_tilt=False, survey=None, ks_legacy_alpha_param=False,
-                   theta_unit_lo=None, theta_unit_hi=None, cache_path=None, historical_reason=None,
-                   delta_map=None):
+def build_legb_ctx(
+    *,
+    ensemble_ckpts,
+    cemu_inflate=1.0,
+    metals_on=False,
+    desi_kwargs=None,
+    ks_kwargs=None,
+    with_eboss=False,
+    eboss_kwargs=None,
+    mf_product=None,
+    mf_hr_cache_sha256=None,
+    mf_composition=None,
+    t1_product=None,
+    t2_product=None,
+    t3_product=None,
+    dla_core_product=None,
+    res_corr_on=False,
+    sample_metals=False,
+    sample_res=False,
+    coherent_res=False,
+    coh_amp=1.0,
+    f_res_amp_sigma=None,
+    a_siiii_max=0.15,
+    metal_prior="uniform",
+    metal_logf_lo=-11.0,
+    metal_logf_hi=-2.0,
+    metal_one_minus_F_ref=None,
+    metal_node_z=(2.2, 4.2),
+    metal_fnode_lo=0.003,
+    metal_fnode_hi=0.03,
+    metal_siII_legs=("DESI",),
+    metal_knode_lo=1e-3,
+    metal_knode_hi=0.1,
+    hierarchical_hcd=False,
+    hcd_noncentered=False,
+    hcd_ratio_infl=1.0,
+    hcd_2d_tilt=False,
+    survey=None,
+    ks_legacy_alpha_param=False,
+    theta_unit_lo=None,
+    theta_unit_hi=None,
+    cache_path=None,
+    historical_reason=None,
+    delta_map=None,
+):
     """The gate E production context (GATE_E_SPEC v1 section 2). Returns ``(LegBCtx, cache dict)``.
 
     The training cache (``cache_path``, default ``CACHE_PATH``) is read through the strict ``data.load_cache`` unless
@@ -926,16 +1110,24 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
 
     Retired with the single-grid forward: ``ckpt``, the pre-2026-10 error vectors, ``with_mf`` / ``mf_fold`` (the
     runtime MF rebuild), ``mf_shape``, the old k-coherence table and res_corr (``res_corr_on`` must be False; the
-    alpha_res sites stay pinned). ``t2_product`` is held for PI ruling S14 (amendment A1 rev 1 section 2)."""
+    alpha_res sites stay pinned). ``t2_product`` is held for PI ruling S14 (amendment A1 rev 1 section 2).
+    """
     from .ensemble import load_ensemble
     from . import products as PR
+
     if res_corr_on:
-        raise ValueError("res_corr is retired in the gate E forward (NORC): res_corr_on must be False")
+        raise ValueError(
+            "res_corr is retired in the gate E forward (NORC): res_corr_on must be False"
+        )
     if t2_product is not None:
-        raise NotImplementedError("T2 is held for PI ruling S14 (gate E amendment A1 rev 1 section 2)")
+        raise NotImplementedError(
+            "T2 is held for PI ruling S14 (gate E amendment A1 rev 1 section 2)"
+        )
     _ks_kw = dict(ks_kwargs or {})
     if "k_max" not in _ks_kw:
-        raise ValueError("the KS k_max must be explicit (CACHE_KMAX and the NORC auto-cap are retired; production 0.065)")
+        raise ValueError(
+            "the KS k_max must be explicit (CACHE_KMAX and the NORC auto-cap are retired; production 0.065)"
+        )
     if not ensemble_ckpts:
         raise ValueError("ensemble_ckpts: the schema-2.0 LF checkpoint prefixes (one or more)")
     _check_ctx_delta_map(delta_map, historical_reason)
@@ -946,8 +1138,8 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     # every member was trained on
     cpath = CACHE_PATH if cache_path is None else str(cache_path)
     if historical_reason is None:
-        d = load_cache(cpath)                                         # strict: format 3.4, lineage, eligibility
-        cache_sha = d["cache_sha256"]                                 # hashed at load
+        d = load_cache(cpath)  # strict: format 3.4, lineage, eligibility
+        cache_sha = d["cache_sha256"]  # hashed at load
     else:
         d = load_cache_historical(cpath, reason=historical_reason)
         cache_sha = T._sha256_or_none(cpath)
@@ -956,15 +1148,24 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
         with open(str(p) + ".meta.json") as fh:
             member_shas.append(json.load(fh).get("cache_sha256"))
     if any(sha != cache_sha for sha in member_shas):
-        raise ValueError(f"the ensemble members were trained on caches {sorted(set(map(str, member_shas)))}, not on "
-                         f"the cache read here ({cache_sha}, {cpath})")
+        raise ValueError(
+            f"the ensemble members were trained on caches {sorted(set(map(str, member_shas)))}, not on "
+            f"the cache read here ({cache_sha}, {cpath})"
+        )
 
     # ARM-D (coherent-cov, no forward float) is a DISTINCT covariance treatment from option-b (sample_res):
     # it does NOT set ctx.sample_res (no f_res site), only the loader's resolution_coherent cov mode.
     if coherent_res and sample_res:
-        raise ValueError("build_legb_ctx: sample_res (option-b) and coherent_res (arm-D) are mutually exclusive")
-    desi = DL.load_desi_leg(metals_on=metals_on, resolution_float=sample_res,
-                            resolution_coherent=coherent_res, resolution_coh_amp=coh_amp, **(desi_kwargs or {}))
+        raise ValueError(
+            "build_legb_ctx: sample_res (option-b) and coherent_res (arm-D) are mutually exclusive"
+        )
+    desi = DL.load_desi_leg(
+        metals_on=metals_on,
+        resolution_float=sample_res,
+        resolution_coherent=coherent_res,
+        resolution_coh_amp=coh_amp,
+        **(desi_kwargs or {}),
+    )
     # (historical) Gate-A NORC: when res_corr was dropped, KS was capped at k<=0.045 (the residual high-k
     # particle-convergence uncertainty is then un-marginalized on KS, whose k_max reaches
     # furthest above the res_corr anchor 5*k_box(z) -- ~3.5x the typical anchor value, measured).
@@ -982,8 +1183,14 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     if with_eboss:
         # eBOSS option-b uses the "rescale" cov mode (its cov is corr⊙σσᵀ with resolution baked into σ, so
         # rebuild σ'²=σ²−res²; reference-verified 2026-07-02, SPD +0.05). sample_res wires DESI (rank1) + eBOSS.
-        legs.append(DL.load_eboss_leg(resolution_float=sample_res, resolution_coherent=coherent_res,
-                                      resolution_coh_amp=coh_amp, **(eboss_kwargs or {})))
+        legs.append(
+            DL.load_eboss_leg(
+                resolution_float=sample_res,
+                resolution_coherent=coherent_res,
+                resolution_coh_amp=coh_amp,
+                **(eboss_kwargs or {}),
+            )
+        )
 
     z_global = np.unique(np.round(np.concatenate([leg.z for leg in legs]), 6))
 
@@ -996,11 +1203,17 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     mf_obj = None
     if mf_product is not None:
         if mf_hr_cache_sha256 is None or mf_composition is None:
-            raise ValueError("mf_product needs mf_hr_cache_sha256 and mf_composition (products.load_mf_product checks "
-                             "every digest and the composition)")
+            raise ValueError(
+                "mf_product needs mf_hr_cache_sha256 and mf_composition (products.load_mf_product checks "
+                "every digest and the composition)"
+            )
         mf_obj, mf_k, _ = PR.load_mf_product(
-            mf_product, lf_ckpt_sha256=[T._sha256_or_none(p + ".eqx") for p in ensemble_ckpts],
-            lf_cache_sha256=cache_sha, hr_cache_sha256=mf_hr_cache_sha256, composition=mf_composition)
+            mf_product,
+            lf_ckpt_sha256=[T._sha256_or_none(p + ".eqx") for p in ensemble_ckpts],
+            lf_cache_sha256=cache_sha,
+            hr_cache_sha256=mf_hr_cache_sha256,
+            composition=mf_composition,
+        )
         if not np.allclose(mf_k, k_com, rtol=1e-14, atol=0):
             raise ValueError("the MF product's k_com_hmpc differ from the checkpoints'")
     # the DLA core at each leg's bins: a fixed function of physical k (amendment A1 rev 1 section 4).
@@ -1010,10 +1223,15 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
         rho_zb_per_leg, alpha_centres, t1_digest = _t1_per_leg(t1_product, legs, k_com, cache_sha)
     if t3_product is not None:
         t3_per_leg, t3_digest = _t3_per_leg(t3_product, legs, cache_sha)
-    product_digests = {"lf_ensemble_eqx_sha256": [T._sha256_or_none(p + ".eqx") for p in ensemble_ckpts],
-                       "mf_product_sha256": None if mf_product is None else T._sha256_or_none(mf_product),
-                       "cache_sha256": cache_sha, "dla_core_product_sha256": dla_digest,
-                       "t1_product_sha256": t1_digest, "t2_product_sha256": None, "t3_product_sha256": t3_digest}
+    product_digests = {
+        "lf_ensemble_eqx_sha256": [T._sha256_or_none(p + ".eqx") for p in ensemble_ckpts],
+        "mf_product_sha256": None if mf_product is None else T._sha256_or_none(mf_product),
+        "cache_sha256": cache_sha,
+        "dla_core_product_sha256": dla_digest,
+        "t1_product_sha256": t1_digest,
+        "t2_product_sha256": None,
+        "t3_product_sha256": t3_digest,
+    }
 
     # priors on the GLOBAL z grid: Becker+2013 τ₀ (production anchor) + HCD incidence.
     tau0_mu, tau0_sigma = meanflux_tau0_prior(jnp.asarray(z_global), center="becker13")
@@ -1025,7 +1243,9 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     # the LLS→n_s leak. hcd_pivot_wc_and_xbar restricts the SAME cache to the z=3 pivot rows. See the
     # dN/dX low-z overshoot bug. (2026-07-18: the lit-law numbers below are the CORRECTED laws of
     # record — see the HCD_LIT_DNDX_LAW provenance block in inference.py.)
-    w_c_med, Xbar_z3 = hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT)   # (3,) z=3 structural w_c, Xbar(z=3)
+    w_c_med, Xbar_z3 = hcd_pivot_wc_and_xbar(
+        d, z_pivot=HCD_Z_PIVOT
+    )  # (3,) z=3 structural w_c, Xbar(z=3)
     # survey=None (closure/SBC) → cosmic-average LLS pin; survey="DESI"/"KS"/… (real fit)
     # → the per-survey LLS center+width pin (DESI 1.0×/σ0.287, KS 2.5×/σ0.40; PI re-determination
     # 2026-06-17, width re-derived 2026-07-18). The PI WIDTH RULE 1× value is the corrected lit
@@ -1048,9 +1268,11 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
             raise ValueError(
                 "the KS dN/dX-mapped parameterization is incompatible with hierarchical_hcd / "
                 "hcd_2d_tilt (forbidden combination, W2 2026-07-22; use "
-                "ks_legacy_alpha_param=True only for the matched legacy-comparison arm)")
+                "ks_legacy_alpha_param=True only for the matched legacy-comparison arm)"
+            )
         ks_ref, ks_xbar, ks_ref_piv, ks_xbar_piv = _ks_dndx_reference(
-            np.asarray(alpha_mu), hcd_xbar_polyfit(d), z_global, delta_map=delta_map)
+            np.asarray(alpha_mu), hcd_xbar_polyfit(d), z_global, delta_map=delta_map
+        )
 
     # HIERARCHICAL HCD ratio-prior centers/widths (must-fix #1, the LOAD-BEARING fix). The ratio
     # centers are derived from the z=3 PIVOT sim w_c (``w_c_med`` is now the z=3 structural weight —
@@ -1067,7 +1289,9 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     r_sub_center = float(w_c_med[1] / w_c_med[0])
     r_dla_center = float(HCD_DLA_RESIDUAL_FRAC * w_c_med[2] / w_c_med[0])
     hcd_ratio_mu = jnp.asarray([r_sub_center, r_dla_center])
-    hcd_ratio_sigma = jnp.asarray([0.10 * r_sub_center, 0.12 * r_dla_center]) * float(hcd_ratio_infl)
+    hcd_ratio_sigma = jnp.asarray([0.10 * r_sub_center, 0.12 * r_dla_center]) * float(
+        hcd_ratio_infl
+    )
 
     # 2D AMPLITUDE×TILT submanifold (hcd_2d_tilt): the GLOBAL HCD z-tilt B_HCD + FIXED class-
     # differential slopes δs_c. CLOSURE defaults use the FULL per-class incidence z-slope the mock
@@ -1088,12 +1312,14 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     hcd_dslope = hcd_btilt_mu = hcd_btilt_sigma = None
     if hcd_2d_tilt:
         if not hierarchical_hcd:
-            raise ValueError("hcd_2d_tilt=True requires hierarchical_hcd=True "
-                             "(the 2D submanifold builds on the A_hcd × r reparam)")
+            raise ValueError(
+                "hcd_2d_tilt=True requires hierarchical_hcd=True "
+                "(the 2D submanifold builds on the A_hcd × r reparam)"
+            )
         _slope = np.asarray(HCD_INCIDENCE_SLOPE, float)
-        hcd_dslope = jnp.asarray(_slope - _slope[0])             # (3,) δs_c, δs_LLS≡0
-        hcd_btilt_mu = float(_slope[0])                          # B_HCD center = full LLS incidence slope
-        hcd_btilt_sigma = float(ZSLOPE_PRIOR_SIGMA[0])           # B_HCD width (wide → B floats)
+        hcd_dslope = jnp.asarray(_slope - _slope[0])  # (3,) δs_c, δs_LLS≡0
+        hcd_btilt_mu = float(_slope[0])  # B_HCD center = full LLS incidence slope
+        hcd_btilt_sigma = float(ZSLOPE_PRIOR_SIGMA[0])  # B_HCD width (wide → B floats)
         # GUARD: the 2D B_HCD center is the incidence slope (~2.4), never the lit/sim ratio
         # (0.764 dated 2026-07-18; 0.95 pre-swap).
         _assert_forward_zslope_center(hcd_btilt_mu, "build_legb_ctx hcd_btilt_mu (2D-tilt)")
@@ -1103,42 +1329,68 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
     # uses at the prior center (tau0_amp=1, dtau0=0 ⇒ τ₀(z)=Kim07(z)): F_ref = mean_z exp(−Kim(z)) on
     # the union z-grid. A CONSTANT scale on a log-uniform ⇒ shape-neutral (the prior stays flat-log f).
     if metal_one_minus_F_ref is None:
-        _F_z = np.exp(-np.asarray(_kim(jnp.asarray(z_global))))   # exp(−Kim07(z)) at the fiducial
+        _F_z = np.exp(-np.asarray(_kim(jnp.asarray(z_global))))  # exp(−Kim07(z)) at the fiducial
         metal_one_minus_F_ref = float(1.0 - np.mean(_F_z))
     else:
         metal_one_minus_F_ref = float(metal_one_minus_F_ref)
 
     ctx = LegBCtx(
-        model=model, pf_stats=pf, dla_core_leg=dla_core_leg, legs=legs, k_com_hmpc=jnp.asarray(k_com),
-        z_global=z_global, rho_zb_per_leg=rho_zb_per_leg,
-        alpha_centres=alpha_centres, tau0_mu=tau0_mu, tau0_sigma=tau0_sigma,
-        alpha_hcd_mu=jnp.asarray(alpha_mu), alpha_hcd_sigma=jnp.asarray(alpha_sd),
-        cemu_inflate=float(cemu_inflate), mf=mf_obj, t2_per_leg=None, t3_per_leg=t3_per_leg,
-        theta_unit_lo=theta_unit_lo, theta_unit_hi=theta_unit_hi, product_digests=product_digests, delta_map=delta_map,
-        sample_metals=bool(sample_metals), sample_res=bool(sample_res),
+        model=model,
+        pf_stats=pf,
+        dla_core_leg=dla_core_leg,
+        legs=legs,
+        k_com_hmpc=jnp.asarray(k_com),
+        z_global=z_global,
+        rho_zb_per_leg=rho_zb_per_leg,
+        alpha_centres=alpha_centres,
+        tau0_mu=tau0_mu,
+        tau0_sigma=tau0_sigma,
+        alpha_hcd_mu=jnp.asarray(alpha_mu),
+        alpha_hcd_sigma=jnp.asarray(alpha_sd),
+        cemu_inflate=float(cemu_inflate),
+        mf=mf_obj,
+        t2_per_leg=None,
+        t3_per_leg=t3_per_leg,
+        theta_unit_lo=theta_unit_lo,
+        theta_unit_hi=theta_unit_hi,
+        product_digests=product_digests,
+        delta_map=delta_map,
+        sample_metals=bool(sample_metals),
+        sample_res=bool(sample_res),
         f_res_amp_sigma=(None if f_res_amp_sigma is None else float(f_res_amp_sigma)),
         a_siiii_max=float(a_siiii_max),
-        metal_prior=str(metal_prior), metal_logf_lo=float(metal_logf_lo),
-        metal_logf_hi=float(metal_logf_hi), metal_one_minus_F_ref=metal_one_minus_F_ref,
-        metal_node_z=tuple(metal_node_z), metal_fnode_lo=float(metal_fnode_lo),
-        metal_fnode_hi=float(metal_fnode_hi), metal_siII_legs=tuple(metal_siII_legs),
-        metal_knode_lo=float(metal_knode_lo), metal_knode_hi=float(metal_knode_hi),
-        hierarchical_hcd=bool(hierarchical_hcd), hcd_noncentered=bool(hcd_noncentered),
-        hcd_ratio_mu=hcd_ratio_mu, hcd_ratio_sigma=hcd_ratio_sigma,
+        metal_prior=str(metal_prior),
+        metal_logf_lo=float(metal_logf_lo),
+        metal_logf_hi=float(metal_logf_hi),
+        metal_one_minus_F_ref=metal_one_minus_F_ref,
+        metal_node_z=tuple(metal_node_z),
+        metal_fnode_lo=float(metal_fnode_lo),
+        metal_fnode_hi=float(metal_fnode_hi),
+        metal_siII_legs=tuple(metal_siII_legs),
+        metal_knode_lo=float(metal_knode_lo),
+        metal_knode_hi=float(metal_knode_hi),
+        hierarchical_hcd=bool(hierarchical_hcd),
+        hcd_noncentered=bool(hcd_noncentered),
+        hcd_ratio_mu=hcd_ratio_mu,
+        hcd_ratio_sigma=hcd_ratio_sigma,
         hcd_ratio_infl=float(hcd_ratio_infl),
-        hcd_2d_tilt=hcd_2d_tilt, hcd_dslope=hcd_dslope,
-        hcd_btilt_mu=hcd_btilt_mu, hcd_btilt_sigma=hcd_btilt_sigma,
+        hcd_2d_tilt=hcd_2d_tilt,
+        hcd_dslope=hcd_dslope,
+        hcd_btilt_mu=hcd_btilt_mu,
+        hcd_btilt_sigma=hcd_btilt_sigma,
         # REAL-FIT (survey != None) litWLS LLS forward z-slope center (2.127, sim_sub, sim_DLA);
         # survey=None (closure/SBC) → None → _zslope_sites centers on HCD_INCIDENCE_SLOPE (sim-truth).
         zslope_mu=survey_zslope_mu,
-        res_corr_on=False, fix_alpha_res=True,
+        res_corr_on=False,
+        fix_alpha_res=True,
         # KS dN/dX-mapped prior (V-A): the deterministic reference (None/False on every
         # non-mapped build — byte-safety by the dormant static branch).
         ks_dndx_mapped=bool(ks_dndx_mapped),
         ks_dndx_ref=(None if ks_ref is None else jnp.asarray(ks_ref)),
         ks_xbar_z=(None if ks_xbar is None else jnp.asarray(ks_xbar)),
         ks_dndx_ref_pivot=(None if ks_ref_piv is None else jnp.asarray(ks_ref_piv)),
-        ks_xbar_pivot=(None if ks_xbar_piv is None else float(ks_xbar_piv)))
+        ks_xbar_pivot=(None if ks_xbar_piv is None else float(ks_xbar_piv)),
+    )
     return ctx, d
 
 
@@ -1146,8 +1398,9 @@ def build_legb_ctx(*, ensemble_ckpts, cemu_inflate=1.0,
 _JOINT_KNOWN_LEGS = ("DESI", "KS", "eBOSS")
 
 
-def build_legb_joint_ctx(survey_by_leg, *, per_leg_zslope=False, allow_cross_survey=False,
-                         **build_kwargs):
+def build_legb_joint_ctx(
+    survey_by_leg, *, per_leg_zslope=False, allow_cross_survey=False, **build_kwargs
+):
     """The PER-LEG-alpha (joint-fit) LegBCtx builder (PI decision 2c; spec 2026-07-20).
 
     ``survey_by_leg`` = ``{leg name: survey key}`` (e.g. ``{"DESI": "DESI", "KS": "KS"}``);
@@ -1186,12 +1439,15 @@ def build_legb_joint_ctx(survey_by_leg, *, per_leg_zslope=False, allow_cross_sur
     Returns ``(LegBCtx, cache)`` like ``build_legb_ctx``."""
     # ---- STATIC pre-build guards (cheap, fail-loud; no data load needed) ----
     if not isinstance(survey_by_leg, dict) or not survey_by_leg:
-        raise ValueError("build_legb_joint_ctx: survey_by_leg must be a non-empty "
-                         "{leg name: survey key} dict")
+        raise ValueError(
+            "build_legb_joint_ctx: survey_by_leg must be a non-empty " "{leg name: survey key} dict"
+        )
     if "survey" in build_kwargs:
-        raise ValueError("build_legb_joint_ctx: the shared `survey` kwarg is FORBIDDEN in "
-                         "joint mode — per-leg surveys come ONLY from survey_by_leg (the "
-                         "shared alpha prior is poisoned to None)")
+        raise ValueError(
+            "build_legb_joint_ctx: the shared `survey` kwarg is FORBIDDEN in "
+            "joint mode — per-leg surveys come ONLY from survey_by_leg (the "
+            "shared alpha prior is poisoned to None)"
+        )
     if any(v == "KS" for v in survey_by_leg.values()):
         raise ValueError(
             "build_legb_joint_ctx: a joint build including the KS survey is FORBIDDEN "
@@ -1200,23 +1456,31 @@ def build_legb_joint_ctx(survey_by_leg, *, per_leg_zslope=False, allow_cross_sur
             "path has NO mapped construction -- it would silently deploy the RETIRED legacy "
             "alpha-space KS prior (~55% of its mass outside the occupancy simplex). Fit KS "
             "as a single leg via build_legb_ctx(survey='KS'), or implement a mapped per-leg "
-            "construction first (new lock era).")
+            "construction first (new lock era)."
+        )
     if build_kwargs.get("hierarchical_hcd"):
-        raise ValueError("per_leg_alpha is incompatible with hierarchical_hcd "
-                         "(forbidden combination; spec Sec 1 item 10)")
+        raise ValueError(
+            "per_leg_alpha is incompatible with hierarchical_hcd "
+            "(forbidden combination; spec Sec 1 item 10)"
+        )
     if build_kwargs.get("hcd_2d_tilt"):
-        raise ValueError("per_leg_alpha is incompatible with hcd_2d_tilt "
-                         "(forbidden combination; spec Sec 1 item 10)")
+        raise ValueError(
+            "per_leg_alpha is incompatible with hcd_2d_tilt "
+            "(forbidden combination; spec Sec 1 item 10)"
+        )
     unknown = [n for n in survey_by_leg if n not in _JOINT_KNOWN_LEGS]
     if unknown:
-        raise ValueError(f"build_legb_joint_ctx: unknown leg name(s) {unknown}; "
-                         f"assemblable legs are {list(_JOINT_KNOWN_LEGS)}")
+        raise ValueError(
+            f"build_legb_joint_ctx: unknown leg name(s) {unknown}; "
+            f"assemblable legs are {list(_JOINT_KNOWN_LEGS)}"
+        )
     for name, sv in survey_by_leg.items():
         if sv is None:
             raise ValueError(
                 f"survey_by_leg[{name!r}] is None: a joint closure/SBC (survey=None per leg) "
                 f"is explicitly DEFERRED — per-leg truth-draw machinery is the recorded "
-                f"prerequisite. Every joint leg needs a real survey key.")
+                f"prerequisite. Every joint leg needs a real survey key."
+            )
         assert_known_survey(sv, f"build_legb_joint_ctx leg {name}")
         # panel required-fix 4: the blended legacy key must never seed a per-leg prior
         # (it passes assert_known_survey by dict membership but is not a leg's survey).
@@ -1224,12 +1488,14 @@ def build_legb_joint_ctx(survey_by_leg, *, per_leg_zslope=False, allow_cross_sur
             raise ValueError(
                 f"survey_by_leg[{name!r}] = 'DESI+KS': the blended legacy shared-alpha key "
                 f"is superseded for joint fits by per_leg_alpha and is FORBIDDEN as a "
-                f"per-leg survey key.")
+                f"per-leg survey key."
+            )
         if sv != name and not allow_cross_survey:
             raise ValueError(
                 f"survey_by_leg[{name!r}] = {sv!r}: survey<->leg cross-assignment (leg "
                 f"{name} priced with {sv}'s prior) is almost certainly a config bug. A "
-                f"deliberate cross-survey mock arm must pass allow_cross_survey=True.")
+                f"deliberate cross-survey mock arm must pass allow_cross_survey=True."
+            )
 
     def _res_guard(floated):
         if len(floated) > 1:
@@ -1239,7 +1505,8 @@ def build_legb_joint_ctx(survey_by_leg, *, per_leg_zslope=False, allow_cross_sur
                 f"deploy DIFFERENT certified widths (DESI 0.02 / eBOSS 0.05 / KS 0.15). "
                 f"FOLLOW-UP (PI decision C4, 2026-07-20): build per-leg f_res sites "
                 f"(f_res_amp_{{leg}}/f_res_slope_{{leg}}) before any multi-instrument "
-                f"resolution-floated joint fit.")
+                f"resolution-floated joint fit."
+            )
 
     if build_kwargs.get("sample_res"):
         # pre-build static count (DESI/eBOSS float via the loader's resolution_float=sample_res;
@@ -1259,18 +1526,25 @@ def build_legb_joint_ctx(survey_by_leg, *, per_leg_zslope=False, allow_cross_sur
 
     # authoritative post-build recount of resolution-floated legs (leg.resolution_ready).
     if ctx.sample_res:
-        _res_guard([l.name for l in ctx.legs
-                    if l.name in survey_by_leg and getattr(l, "resolution_ready", False)])
+        _res_guard(
+            [
+                l.name
+                for l in ctx.legs
+                if l.name in survey_by_leg and getattr(l, "resolution_ready", False)
+            ]
+        )
 
-    legs = [leg for leg in ctx.legs if leg.name in survey_by_leg]   # build order preserved
+    legs = [leg for leg in ctx.legs if leg.name in survey_by_leg]  # build order preserved
     if {l.name for l in legs} != set(survey_by_leg):
-        raise ValueError(f"requested joint legs {sorted(survey_by_leg)} but build assembled "
-                         f"{[l.name for l in ctx.legs]}")
+        raise ValueError(
+            f"requested joint legs {sorted(survey_by_leg)} but build assembled "
+            f"{[l.name for l in ctx.legs]}"
+        )
 
     # per-leg priors through the ONE deployed helper (each leg = its single-leg survey prior).
     w_c_med, Xbar_z3 = hcd_pivot_wc_and_xbar(d, z_pivot=HCD_Z_PIVOT)
     mu_by, sd_by, zslope_mu = {}, {}, None
-    for leg in legs:                          # LIST order — never dict iteration
+    for leg in legs:  # LIST order — never dict iteration
         mu, sd, z_mu = _survey_alpha_prior(w_c_med, Xbar_z3, survey_by_leg[leg.name])
         mu_by[leg.name] = mu
         sd_by[leg.name] = sd
@@ -1278,20 +1552,22 @@ def build_legb_joint_ctx(survey_by_leg, *, per_leg_zslope=False, allow_cross_sur
             zslope_mu = z_mu
         else:
             # the litWLS zslope center is survey-INDEPENDENT — identical across legs.
-            assert np.array_equal(np.asarray(zslope_mu), np.asarray(z_mu)), \
-                "per-leg zslope centers diverged (must be the survey-independent litWLS vector)"
+            assert np.array_equal(
+                np.asarray(zslope_mu), np.asarray(z_mu)
+            ), "per-leg zslope centers diverged (must be the survey-independent litWLS vector)"
 
     # CONGRUENCE assert vs the PRIMARY leg (live extraction-drift tripwire, PI C2): re-derive
     # the primary leg's prior through the ORIGINAL inline construction and require bitwise
     # equality with the shared helper's output.
     _sv0 = survey_by_leg[legs[0].name]
     _mu0, _sd0 = hcd_incidence_prior(jnp.asarray(w_c_med), z=HCD_Z_PIVOT, survey=_sv0)
-    _mu0 = _mu0.at[0].set(hcd_lls_realfit_alpha_center(
-        Xbar_z3, z=HCD_Z_PIVOT, boost=HCD_LLS_SURVEY_BOOST[_sv0]))
+    _mu0 = _mu0.at[0].set(
+        hcd_lls_realfit_alpha_center(Xbar_z3, z=HCD_Z_PIVOT, boost=HCD_LLS_SURVEY_BOOST[_sv0])
+    )
     _sd0 = _sd0.at[0].set(HCD_LLS_SURVEY_FRAC_SIGMA[_sv0] * _mu0[0])
-    assert (np.array_equal(np.asarray(_mu0), np.asarray(mu_by[legs[0].name]))
-            and np.array_equal(np.asarray(_sd0), np.asarray(sd_by[legs[0].name]))), \
-        "_survey_alpha_prior drifted from the inline single-leg construction (primary leg)"
+    assert np.array_equal(np.asarray(_mu0), np.asarray(mu_by[legs[0].name])) and np.array_equal(
+        np.asarray(_sd0), np.asarray(sd_by[legs[0].name])
+    ), "_survey_alpha_prior drifted from the inline single-leg construction (primary leg)"
 
     ctx = ctx._replace(
         legs=legs,
@@ -1300,16 +1576,19 @@ def build_legb_joint_ctx(survey_by_leg, *, per_leg_zslope=False, allow_cross_sur
         survey_by_leg={l.name: str(survey_by_leg[l.name]) for l in legs},
         alpha_hcd_mu_by_leg=mu_by,
         alpha_hcd_sigma_by_leg=sd_by,
-        alpha_hcd_mu=None, alpha_hcd_sigma=None,       # POISON the shared prior (fail-loud)
-        zslope_mu=zslope_mu)
+        alpha_hcd_mu=None,
+        alpha_hcd_sigma=None,  # POISON the shared prior (fail-loud)
+        zslope_mu=zslope_mu,
+    )
     return ctx, d
 
 
 def _fiducial_dla_core_per_leg(d, legs):
     """Mean DLA core (cache ``delta[:, 2]``, mode-indexed) over the cache rows at each leg z (|z - z_leg| < 0.05, else
-    the nearest z): {leg.name: (n_z, K)} on the mode axis. The forward places it at data k with the query binding."""
+    the nearest z): {leg.name: (n_z, K)} on the mode axis. The forward places it at data k with the query binding.
+    """
     z_grid = d["z_grid"]
-    delta = d["delta"]                              # (R, 3, K)
+    delta = d["delta"]  # (R, 3, K)
     out = {}
     for leg in legs:
         core_z = np.zeros((leg.n_z, delta.shape[-1]))
@@ -1329,12 +1608,17 @@ def _dla_core_data_per_leg(legs, product, cache_sha256):
     multiplied by 0). Kept bins must lie inside the core's finite grid; bins that are not kept get the clamped edge
     value (finite, never used)."""
     from . import products as PR
+
     if product is None:
         need = [leg.name for leg in legs if float(getattr(leg, "dla_forward_frac", 1.0)) > 0.0]
         if need:
-            raise ValueError(f"the DLA-core product is required: {need} forward the DLA class (A1 rev 1 section 4)")
-        return ({leg.name: jnp.zeros(np.asarray(leg.k).shape) for leg in legs},
-                "not used (no leg forwards the DLA class)")
+            raise ValueError(
+                f"the DLA-core product is required: {need} forward the DLA class (A1 rev 1 section 4)"
+            )
+        return (
+            {leg.name: jnp.zeros(np.asarray(leg.k).shape) for leg in legs},
+            "not used (no leg forwards the DLA class)",
+        )
     arr, _, prov = PR.load_product(product, "dla_core", cache_sha256=cache_sha256)
     grid = np.asarray(arr["k_grid"], float)
     out = {}
@@ -1342,12 +1626,14 @@ def _dla_core_data_per_leg(legs, product, cache_sha256):
         want = [float(z) for z in np.asarray(leg.z)]
         got = prov.get("leg_z", {}).get(leg.name)
         if got is None or len(got) != len(want) or not np.allclose(got, want, atol=1e-6):
-            raise ValueError(f"the DLA-core product's z-mean for {leg.name} is over z {got}, the leg has z {want}")
+            raise ValueError(
+                f"the DLA-core product's z-mean for {leg.name} is over z {got}, the leg has z {want}"
+            )
         c = np.asarray(arr[f"core_{leg.name}"], float)
         fin = np.isfinite(c)
         k = np.asarray(leg.k, float)
         keep = np.isfinite(np.asarray(leg.P_data))
-        PR.dla_core_at(k[keep], grid, c)                               # refuses kept bins outside the finite grid
+        PR.dla_core_at(k[keep], grid, c)  # refuses kept bins outside the finite grid
         out[leg.name] = jnp.asarray(np.interp(np.log(k), np.log(grid[fin]), c[fin]))
     return out, T._sha256_or_none(product)
 
@@ -1356,6 +1642,7 @@ def _t1_per_leg(product, legs, k_com, cache_sha256):
     """({leg.name: (n_z, 4, 4, K, B)}, tau0 centres (B,), digest) from the ``cemu_t1`` product: each leg z takes the
     product's z cell within 0.05 (amendment A1 rev 1 section 1)."""
     from . import products as PR
+
     arr, k_p, _ = PR.load_product(product, "cemu_t1", cache_sha256=cache_sha256)
     if not np.allclose(np.asarray(k_p), np.asarray(k_com), rtol=1e-14, atol=0):
         raise ValueError("the T1 product's k_com_hmpc differ from the checkpoints'")
@@ -1376,15 +1663,20 @@ def _t3_per_leg(product, legs, cache_sha256):
     """({leg.name: (U (N, m), w (m,))}, digest) from the ``cemu_t3`` product (fixed-physical-k representation P, on the
     leg's exact bins; a leg absent from the product carries no T3)."""
     from . import products as PR
+
     arr, _, prov = PR.load_product(product, "cemu_t3", cache_sha256=cache_sha256)
     if prov.get("representation") != "P":
-        raise NotImplementedError(f"T3 representation {prov.get('representation')!r}: only P is wired")
+        raise NotImplementedError(
+            f"T3 representation {prov.get('representation')!r}: only P is wired"
+        )
     out = {}
     for leg in legs:
         if f"U_{leg.name}" not in arr:
             continue
-        if not (np.allclose(arr[f"k_{leg.name}"], np.asarray(leg.k), rtol=1e-12, atol=0)
-                and np.allclose(arr[f"z_{leg.name}"], np.asarray(leg.z_row), atol=1e-9)):
+        if not (
+            np.allclose(arr[f"k_{leg.name}"], np.asarray(leg.k), rtol=1e-12, atol=0)
+            and np.allclose(arr[f"z_{leg.name}"], np.asarray(leg.z_row), atol=1e-9)
+        ):
             raise ValueError(f"the T3 product's {leg.name} bins differ from the leg's bins")
         out[leg.name] = (jnp.asarray(arr[f"U_{leg.name}"]), jnp.asarray(arr[f"w_{leg.name}"]))
     return out, T._sha256_or_none(product)
@@ -1392,19 +1684,24 @@ def _t3_per_leg(product, legs, cache_sha256):
 
 def _assert_bins_inside_modes(legs, k_com_hmpc, theta_unit_lo, theta_unit_hi):
     """Build-time refusal: every KEPT bin (finite P_data) of every leg must lie inside [k_skm,1, k_skm,K](z) for EVERY
-    theta in the sampling box [lo, hi] (worst case at the box's Omega_m corners; kcoord.kbounds_over_box)."""
+    theta in the sampling box [lo, hi] (worst case at the box's Omega_m corners; kcoord.kbounds_over_box).
+    """
     for leg in legs:
         keep = np.isfinite(np.asarray(leg.P_data))
         for iz, zz in enumerate(leg.z):
             rows = np.where((np.asarray(leg.z_idx) == iz) & keep)[0]
             if rows.size == 0:
                 continue
-            k1_max, kK_min = KC.kbounds_over_box(k_com_hmpc, float(zz), theta_unit_lo, theta_unit_hi)
+            k1_max, kK_min = KC.kbounds_over_box(
+                k_com_hmpc, float(zz), theta_unit_lo, theta_unit_hi
+            )
             k = np.asarray(leg.k)[rows]
             if k.min() < k1_max or k.max() > kK_min:
-                raise ValueError(f"leg {leg.name} z={float(zz):.2f}: kept bins [{k.min():.4g}, {k.max():.4g}] s/km fall "
-                                 f"outside the simulated modes [{k1_max:.4g}, {kK_min:.4g}] for some theta in the "
-                                 "sampling box (the forward never extrapolates)")
+                raise ValueError(
+                    f"leg {leg.name} z={float(zz):.2f}: kept bins [{k.min():.4g}, {k.max():.4g}] s/km fall "
+                    f"outside the simulated modes [{k1_max:.4g}, {kK_min:.4g}] for some theta in the "
+                    "sampling box (the forward never extrapolates)"
+                )
 
 
 def held_out_sims(d, fold=0):
@@ -1440,7 +1737,8 @@ def held_hr_set(d, hr_sim_names, fold=0, target_hr_sim=None):
         # fit the WRONG MF correction and corrupt the cert.
         if target not in hr_sims:
             raise ValueError(
-                f"target_hr_sim {target!r} is not an HR sim; HR sims = {sorted(hr_sims)}")
+                f"target_hr_sim {target!r} is not an HR sim; HR sims = {sorted(hr_sims)}"
+            )
         # defensive: the target must actually be held out of THIS fold's LF val group, else the cert
         # would fit a fold-N backbone with the wrong sim held (silent target<->fold mis-pairing).
         sims, _ = held_out_sims(d, fold=fold)
@@ -1448,7 +1746,8 @@ def held_hr_set(d, hr_sim_names, fold=0, target_hr_sim=None):
         if target not in fold_hr:
             raise ValueError(
                 f"target_hr_sim {target!r} is not in fold {fold}'s held HR group {sorted(fold_hr)} "
-                "— target<->fold mis-pairing")
+                "— target<->fold mis-pairing"
+            )
         return {target}
     sims, _ = held_out_sims(d, fold=fold)
     decoded_sims = (s.decode() if isinstance(s, bytes) else str(s) for s in sims)
@@ -1458,13 +1757,17 @@ def held_hr_set(d, hr_sim_names, fold=0, target_hr_sim=None):
 def make_truth_from_sim(*args, **kwargs):
     """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 held-out truth builder. Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
     own stored grid (GATE_E_SPEC v1 section 2)."""
-    raise NotImplementedError("make_truth_from_sim: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
+    raise NotImplementedError(
+        "make_truth_from_sim: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F"
+    )
 
 
 def make_hr_truth_from_cache(*args, **kwargs):
     """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 HR truth builder (target_k = one grid). Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
     own stored grid (GATE_E_SPEC v1 section 2)."""
-    raise NotImplementedError("make_hr_truth_from_cache: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
+    raise NotImplementedError(
+        "make_hr_truth_from_cache: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F"
+    )
 
 
 def _chol_jitter(C, jitter=1e-10):
@@ -1500,7 +1803,8 @@ def _resolve_res_corr_inject(inject_res_corr, leg_name, n_rows):
         return None
     if not isinstance(inject_res_corr, dict):
         raise TypeError(
-            f"inject_res_corr must be None or a dict, got {type(inject_res_corr).__name__}")
+            f"inject_res_corr must be None or a dict, got {type(inject_res_corr).__name__}"
+        )
     # (path, member, strength) form — the run_stepA arm's spec.
     if "path" in inject_res_corr or "member" in inject_res_corr:
         path = inject_res_corr["path"]
@@ -1510,11 +1814,13 @@ def _resolve_res_corr_inject(inject_res_corr, leg_name, n_rows):
         key = f"{leg_name}_{member}"
         if key not in basis.files:
             raise KeyError(
-                f"inject_res_corr: {key!r} not in basis {path!r} (have {sorted(basis.files)})")
+                f"inject_res_corr: {key!r} not in basis {path!r} (have {sorted(basis.files)})"
+            )
         b = np.asarray(basis[key], dtype=float)
         if b.shape != (n_rows,):
             raise ValueError(
-                f"inject_res_corr: basis {key} shape {b.shape} != leg-truth shape {(n_rows,)}")
+                f"inject_res_corr: basis {key} shape {b.shape} != leg-truth shape {(n_rows,)}"
+            )
         return strength * b
     # explicit {leg_name: b_vector} form.
     if leg_name not in inject_res_corr:
@@ -1522,7 +1828,8 @@ def _resolve_res_corr_inject(inject_res_corr, leg_name, n_rows):
     b = np.asarray(inject_res_corr[leg_name], dtype=float)
     if b.shape != (n_rows,):
         raise ValueError(
-            f"inject_res_corr[{leg_name!r}] shape {b.shape} != leg-truth shape {(n_rows,)}")
+            f"inject_res_corr[{leg_name!r}] shape {b.shape} != leg-truth shape {(n_rows,)}"
+        )
     return b
 
 
@@ -1542,7 +1849,9 @@ def _resolve_res_instr_inject(inject_resolution, leg):
     if inject_resolution is None:
         return (None, None)
     if not isinstance(inject_resolution, dict):
-        raise TypeError(f"inject_resolution must be None or a dict, got {type(inject_resolution).__name__}")
+        raise TypeError(
+            f"inject_resolution must be None or a dict, got {type(inject_resolution).__name__}"
+        )
     n_z = int(leg.n_z)
     if "b_res" in inject_resolution:
         return (float(inject_resolution["b_res"]), None)
@@ -1553,7 +1862,9 @@ def _resolve_res_instr_inject(inject_resolution, leg):
         basis = np.load(path, allow_pickle=True)
         key = f"{leg.name}_{member}"
         if key not in basis.files:
-            raise KeyError(f"inject_resolution: {key!r} not in basis {path!r} (have {sorted(basis.files)})")
+            raise KeyError(
+                f"inject_resolution: {key!r} not in basis {path!r} (have {sorted(basis.files)})"
+            )
         v = np.asarray(basis[key], dtype=float)
         if v.shape != (n_z,):
             raise ValueError(f"inject_resolution: basis {key} shape {v.shape} != leg n_z {(n_z,)}")
@@ -1569,7 +1880,9 @@ def _resolve_res_instr_inject(inject_resolution, leg):
 def make_legb_mock(*args, **kwargs):
     """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 held-out-simulation mock builder. Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
     own stored grid (GATE_E_SPEC v1 section 2)."""
-    raise NotImplementedError("make_legb_mock: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
+    raise NotImplementedError(
+        "make_legb_mock: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F"
+    )
 
 
 def draw_leg_a_leg_truth(ctx: LegBCtx, key):
@@ -1582,23 +1895,26 @@ def draw_leg_a_leg_truth(ctx: LegBCtx, key):
     the rank truth-vector, ``alpha_hcd_z`` (nZg,3) Z-RESOLVED for the forward, ``a_siiii``,
     ``kept_global_z`` (all True — Leg-A keeps every leg z), plus the raw latent sites (``raw``)."""
     from numpyro import handlers as _nph
+
     tr = _nph.trace(_nph.seed(_legb_priors_only, key)).get_trace(ctx)
     raw = {nm: site["value"] for nm, site in tr.items() if site.get("type") == "sample"}
-    samples1 = {k: jnp.asarray(v)[None] for k, v in raw.items()}      # length-1 L axis
+    samples1 = {k: jnp.asarray(v)[None] for k, v in raw.items()}  # length-1 L axis
     rec = _legb_reconstruct_deterministics(ctx, samples1)
     a_lls = float(rec["alpha_lls"][0]) if "alpha_lls" in rec else float(raw["alpha_lls"])
     a_sub = float(rec["alpha_subdla"][0]) if "alpha_subdla" in rec else float(raw["alpha_subdla"])
     a_dla = float(rec["alpha_dla"][0])
     return dict(
         theta9=np.asarray(raw["theta_unit"]),
-        tau0_global=np.asarray(rec["tau0_vec"][0]),                  # (nZg,)
-        alpha_hcd=np.array([a_lls, a_sub, a_dla]),                   # (3,) pivot (rank truth-vec)
-        alpha_hcd_z=np.asarray(rec["alpha_hcd_z"][0]),              # (nZg,3) z-resolved (forward)
+        tau0_global=np.asarray(rec["tau0_vec"][0]),  # (nZg,)
+        alpha_hcd=np.array([a_lls, a_sub, a_dla]),  # (3,) pivot (rank truth-vec)
+        alpha_hcd_z=np.asarray(rec["alpha_hcd_z"][0]),  # (nZg,3) z-resolved (forward)
         a_siiii=(float(raw["a_SiIII"]) if "a_SiIII" in raw else 0.0),
         # the mean-flux SITES (tau0_amp/dtau0) for the τ₀-bias report (feedback-report-tau0-dtau0-bias).
         tau0_amp=(float(raw["tau0_amp"]) if "tau0_amp" in raw else np.nan),
         dtau0=(float(raw["dtau0"]) if "dtau0" in raw else np.nan),
-        kept_global_z=np.ones(len(ctx.z_global), bool), raw=raw)
+        kept_global_z=np.ones(len(ctx.z_global), bool),
+        raw=raw,
+    )
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -1639,7 +1955,9 @@ def eval_boost_profile(profile, z):
         raise ValueError("boost profile evaluation grid contains non-finite z")
     keys = frozenset(profile)
     if keys == _BOOST_PROFILE_QUAD_KEYS:
-        b0 = float(profile["b_pivot"]); e1 = float(profile["eta1"]); e2 = float(profile["eta2"])
+        b0 = float(profile["b_pivot"])
+        e1 = float(profile["eta1"])
+        e2 = float(profile["eta2"])
         if not np.isfinite(b0) or b0 <= 0:
             raise ValueError(f"boost profile b_pivot must be finite and > 0, got {b0}")
         if not (np.isfinite(e1) and np.isfinite(e2)):
@@ -1662,13 +1980,15 @@ def eval_boost_profile(profile, z):
             raise ValueError(
                 f"tabulated boost profile [{zt[0]}, {zt[-1]}] does not cover the evaluation "
                 f"grid [{z_arr.min()}, {z_arr.max()}] — NO silent extrapolation (clamping must "
-                f"be explicit rows in the stored table)")
+                f"be explicit rows in the stored table)"
+            )
         B = np.exp(np.interp(np.log1p(z_arr), np.log1p(zt), np.log(bt)))
     else:
         raise ValueError(
             f"boost profile keys {sorted(keys)} are not one of the two allowed key-sets "
             f"{sorted(_BOOST_PROFILE_QUAD_KEYS)} (log-quadratic) or "
-            f"{sorted(_BOOST_PROFILE_TABLE_KEYS)} (tabulated)")
+            f"{sorted(_BOOST_PROFILE_TABLE_KEYS)} (tabulated)"
+        )
     if not np.all(np.isfinite(B)) or np.any(B <= 0):
         raise ValueError("evaluated boost profile B(z) is non-finite or non-positive")
     return B if np.ndim(z) else float(B[0])
@@ -1683,20 +2003,21 @@ def apply_class_truth_boost_profile(truth_pack, cls_idx, profile, z):
     if truth_pack.get("alpha_hcd_z") is None:
         raise ValueError(
             "z-profile truth boost against a pivot-only truth_pack (alpha_hcd_z=None) is "
-            "meaningless — refusing the silent pivot-only fallback")
+            "meaningless — refusing the silent pivot-only fallback"
+        )
     if z is None:
         raise ValueError(
             "z-profile truth boost requires the evaluation z grid (thread ctx.z_global); "
-            "it is NEVER inferred from array length")
+            "it is NEVER inferred from array length"
+        )
     z_arr = np.asarray(z, float)
-    az = np.array(truth_pack["alpha_hcd_z"], float)           # fresh (nZg,3)
+    az = np.array(truth_pack["alpha_hcd_z"], float)  # fresh (nZg,3)
     if z_arr.ndim != 1 or z_arr.size != az.shape[0]:
-        raise ValueError(
-            f"z grid length mismatch: {z_arr.shape} vs alpha_hcd_z rows {az.shape[0]}")
+        raise ValueError(f"z grid length mismatch: {z_arr.shape} vs alpha_hcd_z rows {az.shape[0]}")
     B_pivot = eval_boost_profile(profile, float(HCD_Z_PIVOT))  # exactly z_pivot, never a row
     B_z = eval_boost_profile(profile, z_arr)
-    out = dict(truth_pack)                                    # shallow copy of the dict
-    a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
+    out = dict(truth_pack)  # shallow copy of the dict
+    a = np.array(truth_pack["alpha_hcd"], float)  # fresh (3,) — input unmutated
     a[cls_idx] = a[cls_idx] * B_pivot
     out["alpha_hcd"] = a
     az[:, cls_idx] = az[:, cls_idx] * B_z
@@ -1716,12 +2037,12 @@ def apply_lls_truth_boost(truth_pack, boost, z=None):
     (cosmic-average / DESI) pin."""
     if isinstance(boost, dict):
         return apply_class_truth_boost_profile(truth_pack, 0, boost, z)
-    out = dict(truth_pack)                                    # shallow copy of the dict
-    a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
+    out = dict(truth_pack)  # shallow copy of the dict
+    a = np.array(truth_pack["alpha_hcd"], float)  # fresh (3,) — input unmutated
     a[0] = a[0] * float(boost)
     out["alpha_hcd"] = a
     if truth_pack.get("alpha_hcd_z") is not None:
-        az = np.array(truth_pack["alpha_hcd_z"], float)       # fresh (nZg,3)
+        az = np.array(truth_pack["alpha_hcd_z"], float)  # fresh (nZg,3)
         az[:, 0] = az[:, 0] * float(boost)
         out["alpha_hcd_z"] = az
     return out
@@ -1737,12 +2058,12 @@ def apply_subdla_truth_boost(truth_pack, boost, z=None):
     is the identity."""
     if isinstance(boost, dict):
         return apply_class_truth_boost_profile(truth_pack, 1, boost, z)
-    out = dict(truth_pack)                                    # shallow copy of the dict
-    a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
+    out = dict(truth_pack)  # shallow copy of the dict
+    a = np.array(truth_pack["alpha_hcd"], float)  # fresh (3,) — input unmutated
     a[1] = a[1] * float(boost)
     out["alpha_hcd"] = a
     if truth_pack.get("alpha_hcd_z") is not None:
-        az = np.array(truth_pack["alpha_hcd_z"], float)       # fresh (nZg,3)
+        az = np.array(truth_pack["alpha_hcd_z"], float)  # fresh (nZg,3)
         az[:, 1] = az[:, 1] * float(boost)
         out["alpha_hcd_z"] = az
     return out
@@ -1762,12 +2083,12 @@ def apply_dla_truth_boost(truth_pack, boost, z=None):
     NOT mutated. ``boost=1`` is the identity."""
     if isinstance(boost, dict):
         return apply_class_truth_boost_profile(truth_pack, 2, boost, z)
-    out = dict(truth_pack)                                    # shallow copy of the dict
-    a = np.array(truth_pack["alpha_hcd"], float)              # fresh (3,) — input unmutated
+    out = dict(truth_pack)  # shallow copy of the dict
+    a = np.array(truth_pack["alpha_hcd"], float)  # fresh (3,) — input unmutated
     a[2] = a[2] * float(boost)
     out["alpha_hcd"] = a
     if truth_pack.get("alpha_hcd_z") is not None:
-        az = np.array(truth_pack["alpha_hcd_z"], float)       # fresh (nZg,3)
+        az = np.array(truth_pack["alpha_hcd_z"], float)  # fresh (nZg,3)
         az[:, 2] = az[:, 2] * float(boost)
         out["alpha_hcd_z"] = az
     return out
@@ -1792,11 +2113,15 @@ def _apply_truth_boosts(truth_pack, inject_spec, z=None):
         return truth_pack
     unknown = set(inject_spec) - _INJECT_SPEC_KEYS
     if unknown:
-        raise ValueError(f"unknown inject_spec key(s) {sorted(unknown)}; "
-                         f"allowed: {sorted(_INJECT_SPEC_KEYS)}")
-    for key, fn in (("lls_truth_boost", apply_lls_truth_boost),
-                    ("subdla_truth_boost", apply_subdla_truth_boost),
-                    ("dla_truth_boost", apply_dla_truth_boost)):
+        raise ValueError(
+            f"unknown inject_spec key(s) {sorted(unknown)}; "
+            f"allowed: {sorted(_INJECT_SPEC_KEYS)}"
+        )
+    for key, fn in (
+        ("lls_truth_boost", apply_lls_truth_boost),
+        ("subdla_truth_boost", apply_subdla_truth_boost),
+        ("dla_truth_boost", apply_dla_truth_boost),
+    ):
         val = inject_spec.get(key)
         if val is not None:
             if isinstance(val, dict):
@@ -1817,10 +2142,10 @@ def _meanflux_on_leg(ctx, leg, truth_pack):
     array aligned with ``leg.z`` (nearest-z map onto z_global, mirroring make_leg_a_legmock's
     `sel`)."""
     zg = np.asarray(ctx.z_global)
-    tau_eff_global = np.asarray(truth_pack["tau0_global"])    # (nZg,) τ_eff = α·Kim = −ln⟨F⟩
+    tau_eff_global = np.asarray(truth_pack["tau0_global"])  # (nZg,) τ_eff = α·Kim = −ln⟨F⟩
     sel = np.array([int(np.argmin(np.abs(zg - zz))) for zz in leg.z])
-    tau_eff = tau_eff_global[sel]                             # (n_z,)
-    return np.exp(-tau_eff)                                   # ⟨F⟩(z)
+    tau_eff = tau_eff_global[sel]  # (n_z,)
+    return np.exp(-tau_eff)  # ⟨F⟩(z)
 
 
 def _check_resolution_injectable(legs, active):
@@ -1836,7 +2161,8 @@ def _check_resolution_injectable(legs, active):
             f"resolution injection requested on non-resolution_ready leg(s) {bad}: their R_z proxy is "
             "untrustworthy (KS is echelle sigma~3.2 km/s; the DESI proxy R_z is ~7-15x too large) so the "
             "injected distortion is un-fittable. Wire the leg's true R_z (flip resolution_ready) first, or "
-            "run the resolution arm on desi/eboss.")
+            "run the resolution arm on desi/eboss."
+        )
 
 
 def _check_single_instrument_for_res(legs, sample_res):
@@ -1856,13 +2182,16 @@ def _check_single_instrument_for_res(legs, sample_res):
             f"sample_res=True (option-b f_res) with a MULTI-instrument ctx {instruments}: f_res is a single "
             "GLOBAL site but spectral resolution is per-instrument (independent spectrographs). Run the "
             "resolution cert per-leg (single instrument), or implement per-instrument f_res sites "
-            "(f_res_amp_desi/f_res_amp_eboss) before a joint fit.")
+            "(f_res_amp_desi/f_res_amp_eboss) before a joint fit."
+        )
 
 
 def make_leg_a_legmock(*args, **kwargs):
     """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 Leg-A self-draw mock builder. Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
     own stored grid (GATE_E_SPEC v1 section 2)."""
-    raise NotImplementedError("make_leg_a_legmock: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
+    raise NotImplementedError(
+        "make_leg_a_legmock: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F"
+    )
 
 
 # ============================================================================ #
@@ -1870,10 +2199,23 @@ def make_leg_a_legmock(*args, **kwargs):
 #  forward (forward.predict_leg per leg with that leg's own DLA core; kept rows only; bins outside the
 #  simulated modes refused).
 # ============================================================================ #
-def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs,
-                         dla_core_per_leg, *, return_parts=False, a_siiii=0.0, a_siii=0.0,
-                         metal_nodes=None, alpha_res=None, b_res_global=None, require_zresolved=True,
-                         return_aux=False):
+def _data_loglik_legcore(
+    ctx: LegBCtx,
+    theta9,
+    tau0_global,
+    alpha_hcd,
+    mock_legs,
+    dla_core_per_leg,
+    *,
+    return_parts=False,
+    a_siiii=0.0,
+    a_siii=0.0,
+    metal_nodes=None,
+    alpha_res=None,
+    b_res_global=None,
+    require_zresolved=True,
+    return_aux=False,
+):
     """The log-likelihood of ``mock_legs`` under the gate E forward (``forward.predict_leg``): per leg, the model and
     its total covariance on the canonical coordinate, the Gaussian on the kept (finite P_data) rows, summed over legs.
     Any KEPT bin outside the simulated modes makes the result -inf (refusal; finite gradients because the binding
@@ -1882,19 +2224,28 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
     ``alpha_hcd``: (n_zg, 3) z-resolved per-z incidence shared by the legs, a per-leg dict {leg.name: (n_zg, 3)}
     (joint mode), or a (3,) z-flat triple only with ``require_zresolved=False`` (the z-flat bug class). ``metal_nodes``:
     {leg.name: (f3, f2, k3, k2)} Model C+ nodes (None: the scalar a_siiii / a_siii path). ``b_res_global``: per-z
-    resolution nuisance on the global z grid. ``alpha_res``: res_corr is retired; only the no-op (1, 0) is accepted."""
+    resolution nuisance on the global z grid. ``alpha_res``: res_corr is retired; only the no-op (1, 0) is accepted.
+    """
     from .likelihood import gaussian_loglik
-    if alpha_res is not None and not (isinstance(alpha_res[0], float) and isinstance(alpha_res[1], float)
-                                      and alpha_res[0] == 1.0 and alpha_res[1] == 0.0):
-        raise ValueError("res_corr is retired in the gate E forward: alpha_res must be the fixed no-op (1.0, 0.0)")
+
+    if alpha_res is not None and not (
+        isinstance(alpha_res[0], float)
+        and isinstance(alpha_res[1], float)
+        and alpha_res[0] == 1.0
+        and alpha_res[1] == 0.0
+    ):
+        raise ValueError(
+            "res_corr is retired in the gate E forward: alpha_res must be the fixed no-op (1.0, 0.0)"
+        )
     total = 0.0
     n_out = jnp.asarray(0)
     parts = {}
     zg = np.asarray(ctx.z_global)
     if isinstance(alpha_hcd, dict):
         _leg_names = {leg.name for leg in mock_legs}
-        assert set(alpha_hcd) == _leg_names, (
-            f"per-leg alpha_hcd keys {sorted(alpha_hcd)} != mock legs {sorted(_leg_names)}")
+        assert (
+            set(alpha_hcd) == _leg_names
+        ), f"per-leg alpha_hcd keys {sorted(alpha_hcd)} != mock legs {sorted(_leg_names)}"
     for leg in mock_legs:
         P_data = np.asarray(leg.P_data)
         keep = np.isfinite(P_data)
@@ -1904,24 +2255,46 @@ def _data_loglik_legcore(ctx: LegBCtx, theta9, tau0_global, alpha_hcd, mock_legs
         tau0_vec = tau0_global[sel]
         if isinstance(alpha_hcd, dict):
             alpha_full = alpha_hcd[leg.name]
-            assert np.ndim(alpha_full) == 2, f"per-leg alpha_hcd[{leg.name!r}] must be z-RESOLVED (n_zg, 3)"
+            assert (
+                np.ndim(alpha_full) == 2
+            ), f"per-leg alpha_hcd[{leg.name!r}] must be z-RESOLVED (n_zg, 3)"
             alpha_leg = alpha_full[sel]
         else:
             alpha_leg = alpha_hcd if np.ndim(alpha_hcd) == 1 else alpha_hcd[sel]
-        nuis = {"a_SiIII": a_siiii, "a_SiII": a_siii, "metal_node_z": getattr(ctx, "metal_node_z", (2.2, 4.2))}
+        nuis = {
+            "a_SiIII": a_siiii,
+            "a_SiII": a_siii,
+            "metal_node_z": getattr(ctx, "metal_node_z", (2.2, 4.2)),
+        }
         if metal_nodes is not None and leg.name in metal_nodes:
             f3, f2, k3, k2 = metal_nodes[leg.name]
             nuis.update(f_SiIII_nodes=f3, f_SiII_nodes=f2, k_SiIII_nodes=k3, k_SiII_nodes=k2)
         if b_res_global is not None:
             nuis["b_res_vec"] = b_res_global[sel]
-        t1 = ((ctx.rho_zb_per_leg[leg.name], ctx.alpha_centres)
-              if ctx.rho_zb_per_leg and leg.name in ctx.rho_zb_per_leg else None)
+        t1 = (
+            (ctx.rho_zb_per_leg[leg.name], ctx.alpha_centres)
+            if ctx.rho_zb_per_leg and leg.name in ctx.rho_zb_per_leg
+            else None
+        )
         t2 = ctx.t2_per_leg.get(leg.name) if ctx.t2_per_leg else None
         t3 = ctx.t3_per_leg.get(leg.name) if ctx.t3_per_leg else None
-        out = FW.predict_leg(ctx.model, theta9, tau0_vec, alpha_leg, leg=leg, k_com=ctx.k_com_hmpc,
-                             pf_stats=ctx.pf_stats, dla_core=dla_core_per_leg[leg.name], mf=ctx.mf, nuis=nuis,
-                             t1=t1, t2=t2, t3=t3, cemu_inflate=ctx.cemu_inflate,
-                             require_zresolved=require_zresolved)
+        out = FW.predict_leg(
+            ctx.model,
+            theta9,
+            tau0_vec,
+            alpha_leg,
+            leg=leg,
+            k_com=ctx.k_com_hmpc,
+            pf_stats=ctx.pf_stats,
+            dla_core=dla_core_per_leg[leg.name],
+            mf=ctx.mf,
+            nuis=nuis,
+            t1=t1,
+            t2=t2,
+            t3=t3,
+            cemu_inflate=ctx.cemu_inflate,
+            require_zresolved=require_zresolved,
+        )
         kr = jnp.asarray(np.where(keep)[0])
         n_out = n_out + jnp.sum(out.outside[kr])
         r = jnp.asarray(P_data[keep]) - out.P_model[kr]
@@ -1948,12 +2321,20 @@ def _sample_tau0_sites(ctx):
     """Sample (tau0_amp, dtau0): Uniform by default; TruncatedNormal centered on (mu,sigma),
     truncated to the physical range, when ctx.{tau0_amp_gauss,dtau0_gauss} is set (the
     informative-τ₀ arm). IDENTICAL site names/order to the legacy code in both model twins."""
-    la, ha = ctx.tau0_amp_range; ld, hd = ctx.dtau0_range
-    ga = getattr(ctx, "tau0_amp_gauss", None); gd = getattr(ctx, "dtau0_gauss", None)
-    tau0_amp = (numpyro.sample("tau0_amp", dist.Uniform(la, ha)) if ga is None
-                else numpyro.sample("tau0_amp", dist.TruncatedNormal(ga[0], ga[1], low=la, high=ha)))
-    dtau0 = (numpyro.sample("dtau0", dist.Uniform(ld, hd)) if gd is None
-             else numpyro.sample("dtau0", dist.TruncatedNormal(gd[0], gd[1], low=ld, high=hd)))
+    la, ha = ctx.tau0_amp_range
+    ld, hd = ctx.dtau0_range
+    ga = getattr(ctx, "tau0_amp_gauss", None)
+    gd = getattr(ctx, "dtau0_gauss", None)
+    tau0_amp = (
+        numpyro.sample("tau0_amp", dist.Uniform(la, ha))
+        if ga is None
+        else numpyro.sample("tau0_amp", dist.TruncatedNormal(ga[0], ga[1], low=la, high=ha))
+    )
+    dtau0 = (
+        numpyro.sample("dtau0", dist.Uniform(ld, hd))
+        if gd is None
+        else numpyro.sample("dtau0", dist.TruncatedNormal(gd[0], gd[1], low=ld, high=hd))
+    )
     return tau0_amp, dtau0
 
 
@@ -1982,9 +2363,10 @@ def _metal_amp_site(name, ctx, on):
         if omf is None:
             raise ValueError(
                 "metal_prior='flatlog' needs metal_one_minus_F_ref (1−F_ref); build_legb_ctx "
-                "derives it — construct the ctx via build_legb_ctx or pass it explicitly.")
+                "derives it — construct the ctx via build_legb_ctx or pass it explicitly."
+            )
         omf = float(omf)
-        a_lo = 10.0 ** float(ctx.metal_logf_lo) / omf       # python floats (static, untraced)
+        a_lo = 10.0 ** float(ctx.metal_logf_lo) / omf  # python floats (static, untraced)
         a_hi = 10.0 ** float(ctx.metal_logf_hi) / omf
         return numpyro.sample(name, dist.LogUniform(a_lo, a_hi))
     # "uniform" (default) — BYTE-EXACT legacy site.
@@ -2007,29 +2389,45 @@ def _metal_2node_sites(ctx):
     nodes = {}
     if not getattr(ctx, "sample_metals", False):
         return nodes
-    flo, fhi = float(ctx.metal_fnode_lo), float(ctx.metal_fnode_hi)   # python floats (static, untraced)
-    klo, khi = float(getattr(ctx, "metal_knode_lo", 1e-3)), float(getattr(ctx, "metal_knode_hi", 0.1))
+    flo, fhi = float(ctx.metal_fnode_lo), float(
+        ctx.metal_fnode_hi
+    )  # python floats (static, untraced)
+    klo, khi = float(getattr(ctx, "metal_knode_lo", 1e-3)), float(
+        getattr(ctx, "metal_knode_hi", 0.1)
+    )
     siII_legs = tuple(ctx.metal_siII_legs)
-    for leg in ctx.legs:                                            # FIXED order ⇒ identical both twins
+    for leg in ctx.legs:  # FIXED order ⇒ identical both twins
         if not leg.metals_on:
             continue
-        f3 = jnp.stack([
-            numpyro.sample(f"f_SiIII_{leg.name}_z0", dist.LogUniform(flo, fhi)),
-            numpyro.sample(f"f_SiIII_{leg.name}_z1", dist.LogUniform(flo, fhi))])
+        f3 = jnp.stack(
+            [
+                numpyro.sample(f"f_SiIII_{leg.name}_z0", dist.LogUniform(flo, fhi)),
+                numpyro.sample(f"f_SiIII_{leg.name}_z1", dist.LogUniform(flo, fhi)),
+            ]
+        )
         f2 = None
         if leg.name in siII_legs:
-            f2 = jnp.stack([
-                numpyro.sample(f"f_SiII_{leg.name}_z0", dist.LogUniform(flo, fhi)),
-                numpyro.sample(f"f_SiII_{leg.name}_z1", dist.LogUniform(flo, fhi))])
+            f2 = jnp.stack(
+                [
+                    numpyro.sample(f"f_SiII_{leg.name}_z0", dist.LogUniform(flo, fhi)),
+                    numpyro.sample(f"f_SiII_{leg.name}_z1", dist.LogUniform(flo, fhi)),
+                ]
+            )
         # Model C+: float the per-z sigmoid decorrelation scale (k), sampled like f (after the f-nodes).
-        k3 = jnp.stack([
-            numpyro.sample(f"k_SiIII_{leg.name}_z0", dist.LogUniform(klo, khi)),
-            numpyro.sample(f"k_SiIII_{leg.name}_z1", dist.LogUniform(klo, khi))])
+        k3 = jnp.stack(
+            [
+                numpyro.sample(f"k_SiIII_{leg.name}_z0", dist.LogUniform(klo, khi)),
+                numpyro.sample(f"k_SiIII_{leg.name}_z1", dist.LogUniform(klo, khi)),
+            ]
+        )
         k2 = None
         if leg.name in siII_legs:
-            k2 = jnp.stack([
-                numpyro.sample(f"k_SiII_{leg.name}_z0", dist.LogUniform(klo, khi)),
-                numpyro.sample(f"k_SiII_{leg.name}_z1", dist.LogUniform(klo, khi))])
+            k2 = jnp.stack(
+                [
+                    numpyro.sample(f"k_SiII_{leg.name}_z0", dist.LogUniform(klo, khi)),
+                    numpyro.sample(f"k_SiII_{leg.name}_z1", dist.LogUniform(klo, khi)),
+                ]
+            )
         nodes[leg.name] = (f3, f2, k3, k2)
     return nodes
 
@@ -2057,8 +2455,12 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     style fallback (same site names → site-order preserved); the 0-divergence gate is the empirical
     check (test_legb_hier_hcd.test_on_branch_nuts_zero_divergences_and_finite)."""
     zg = jnp.asarray(ctx.z_global)
-    _lo_u = jnp.asarray(_THETA_UNIT_LO if getattr(ctx, "theta_unit_lo", None) is None else ctx.theta_unit_lo)
-    _hi_u = jnp.asarray(_THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi)
+    _lo_u = jnp.asarray(
+        _THETA_UNIT_LO if getattr(ctx, "theta_unit_lo", None) is None else ctx.theta_unit_lo
+    )
+    _hi_u = jnp.asarray(
+        _THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi
+    )
     theta9 = numpyro.sample("theta_unit", dist.Uniform(_lo_u, _hi_u).to_event(1))
     kim = _kim(zg)
     # PRIYA mean-flux: α(z)=τ₀·((1+z)/(1+z_p))^dτ₀, τ₀(z)=α·Kim07 — 2 GLOBAL uniform params, NOT
@@ -2087,12 +2489,12 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
         assert s_override is None, "per_leg_alpha with an s_override cannot happen (guarded)"
         s_ret = _zslope_sites(ctx)
         alpha_hcd = {}
-        for leg in ctx.legs:                  # LIST order — never dict iteration
+        for leg in ctx.legs:  # LIST order — never dict iteration
             s_c_leg = s_ret[leg.name] if isinstance(s_ret, dict) else s_ret
             shape_leg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** s_c_leg
             alpha_hcd[leg.name] = numpyro.deterministic(
-                f"alpha_hcd_z_{leg.name}",
-                alpha_pivot[leg.name][None, :] * shape_leg)          # (n_zg,3) per leg
+                f"alpha_hcd_z_{leg.name}", alpha_pivot[leg.name][None, :] * shape_leg
+            )  # (n_zg,3) per leg
     else:
         # z-RESOLVED incidence α_c(z) = α_pivot · ((1+z)/(1+z_p))^s_c (the dN/dX slope) — the fix:
         # the forward must track the mock's per-z w_c(z) (rises ~3.5× over z), not a z-constant α.
@@ -2103,7 +2505,9 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
         # the global tilt B_hcd), which BYPASSES _zslope_sites / marginalize_zslope entirely.
         s_c = s_override if s_override is not None else _zslope_sites(ctx)
         shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** s_c
-        alpha_hcd = numpyro.deterministic("alpha_hcd_z", alpha_pivot[None, :] * shape_zg)  # (n_zg,3)
+        alpha_hcd = numpyro.deterministic(
+            "alpha_hcd_z", alpha_pivot[None, :] * shape_zg
+        )  # (n_zg,3)
     # SHARED SiIII metal amplitude (opt-in; eBOSS+DESI are metals_on, KS is not). OFF by default
     # (a_SiIII=0 ⇒ _metal_factor≡1 ⇒ golden byte-exact). The prior on this site is selected by the
     # STATIC ctx.metal_prior via _metal_amp_site: "uniform" (default, Uniform[0,a_siiii_max] — the
@@ -2143,16 +2547,31 @@ def _legb_model(ctx: LegBCtx, mock_legs, dla_core_per_leg):
     # Sites appended AFTER alpha_res; _legb_priors_only mirrors this order (constrain_fn parity).
     if getattr(ctx, "sample_res", False):
         _amp_sig = getattr(ctx, "f_res_amp_sigma", None)
-        _amp_sig = F_RES_AMP_SIGMA if _amp_sig is None else float(_amp_sig)   # arm-C wide / eBOSS leg-match
+        _amp_sig = (
+            F_RES_AMP_SIGMA if _amp_sig is None else float(_amp_sig)
+        )  # arm-C wide / eBOSS leg-match
         f_res_amp = numpyro.sample("f_res_amp", dist.Normal(0.0, _amp_sig))
         f_res_slope = numpyro.sample("f_res_slope", dist.Normal(0.0, F_RES_SLOPE_SIGMA))
         b_res_global = _bres_of_z(zg, f_res_amp, f_res_slope)
     else:
         b_res_global = None
-    numpyro.factor("loglik", _data_loglik_legcore(
-        ctx, theta9, tau0_global, alpha_hcd, mock_legs, dla_core_per_leg, a_siiii=a_siiii,
-        a_siii=a_siii, metal_nodes=metal_nodes, alpha_res=(alpha_res, alpha_res_slope),
-        b_res_global=b_res_global, require_zresolved=True))   # alpha_hcd = z-resolved alpha_hcd_z
+    numpyro.factor(
+        "loglik",
+        _data_loglik_legcore(
+            ctx,
+            theta9,
+            tau0_global,
+            alpha_hcd,
+            mock_legs,
+            dla_core_per_leg,
+            a_siiii=a_siiii,
+            a_siii=a_siii,
+            metal_nodes=metal_nodes,
+            alpha_res=(alpha_res, alpha_res_slope),
+            b_res_global=b_res_global,
+            require_zresolved=True,
+        ),
+    )  # alpha_hcd = z-resolved alpha_hcd_z
 
 
 # Sentinel returned by _hcd_sites in the s_override slot on the KS dN/dX-mapped branch (V-A,
@@ -2180,6 +2599,7 @@ def _INF_mod():
     """Module accessor for inference's OVERRIDABLE KS_DNDX_* constants (never from-import
     them: the freeze signature reads inference's namespace; see _ks_dndx_sites)."""
     from hcd_analysis.emulator import inference as INF
+
     return INF
 
 
@@ -2215,26 +2635,36 @@ def _ks_dndx_sites(ctx):
     KeyError on a mapped-KS samples dict (intended; censused in the W2 report).
 
     Returns ``(alpha_hcd_z (n_zg,3), _KS_DNDX_MAPPED)``."""
-    if getattr(ctx, "per_leg_alpha", False) or getattr(ctx, "hierarchical_hcd", False) \
-            or getattr(ctx, "hcd_2d_tilt", False):
+    if (
+        getattr(ctx, "per_leg_alpha", False)
+        or getattr(ctx, "hierarchical_hcd", False)
+        or getattr(ctx, "hcd_2d_tilt", False)
+    ):
         raise ValueError(
             "the KS dN/dX-mapped parameterization is incompatible with per_leg_alpha / "
             "hierarchical_hcd / hcd_2d_tilt (forbidden combination, W2 2026-07-22; KS joint "
-            "is not deployed)")
-    if getattr(ctx, "ks_dndx_ref", None) is None or getattr(ctx, "ks_xbar_z", None) is None \
-            or getattr(ctx, "ks_dndx_ref_pivot", None) is None \
-            or getattr(ctx, "ks_xbar_pivot", None) is None:
-        raise ValueError("ks_dndx_mapped=True but the ks_* reference fields are unset — "
-                         "build the ctx via build_legb_ctx(survey='KS')")
+            "is not deployed)"
+        )
+    if (
+        getattr(ctx, "ks_dndx_ref", None) is None
+        or getattr(ctx, "ks_xbar_z", None) is None
+        or getattr(ctx, "ks_dndx_ref_pivot", None) is None
+        or getattr(ctx, "ks_xbar_pivot", None) is None
+    ):
+        raise ValueError(
+            "ks_dndx_mapped=True but the ks_* reference fields are unset — "
+            "build the ctx via build_legb_ctx(survey='KS')"
+        )
     # MODULE-ATTRIBUTE ACCESS, not from-import (JAX-specialist review 2026-07-22): the freeze
     # payload/signature reads inference's bindings, so the sites MUST read the same namespace --
     # a from-imported copy here would make an inference-side override move the signature without
     # moving the effective prior (and vice versa). Same trap class as HCD_LLS_SURVEY_BOOST
     # (closure_legb.py _survey_alpha_prior docstring), but the floats have no mutate-in-place
     # escape, so the namespace discipline is the ONLY correct idiom.
-    from hcd_analysis.emulator import inference as INF   # lazy: import-order neutral
+    from hcd_analysis.emulator import inference as INF  # lazy: import-order neutral
+
     zg = jnp.asarray(ctx.z_global)
-    ratio = (1.0 + zg) / (1.0 + HCD_Z_PIVOT)                       # (n_zg,)
+    ratio = (1.0 + zg) / (1.0 + HCD_Z_PIVOT)  # (n_zg,)
     eps_lls = numpyro.sample("eps_lls", dist.Normal(0.0, INF.KS_DNDX_SIGMA_EPS))
     kappa_lls = numpyro.sample("kappa_lls", dist.Normal(0.0, INF.KS_DNDX_SIGMA_KAPPA))
     m_sub = numpyro.sample("m_sub", dist.Normal(0.0, INF.KS_DNDX_SIGMA_MSUB))
@@ -2242,21 +2672,32 @@ def _ks_dndx_sites(ctx):
     dla_raw = numpyro.sample("dla_raw", dist.Normal(INF.KS_DNDX_DLA_RAW_MU0, 1.0))
     t_dla = numpyro.sample("t_dla", dist.Normal(0.0, ZSLOPE_PRIOR_SIGMA[2]))
     dla_amp = jax.nn.softplus(dla_raw) / jax.nn.softplus(INF.KS_DNDX_DLA_RAW_MU0)
-    fac = jnp.stack([jnp.exp(eps_lls) * ratio ** kappa_lls,
-                     jnp.exp(m_sub) * ratio ** t_sub,
-                     dla_amp * ratio ** t_dla], axis=-1)           # (n_zg,3)
+    fac = jnp.stack(
+        [
+            jnp.exp(eps_lls) * ratio**kappa_lls,
+            jnp.exp(m_sub) * ratio**t_sub,
+            dla_amp * ratio**t_dla,
+        ],
+        axis=-1,
+    )  # (n_zg,3)
     dndx_z = jnp.asarray(ctx.ks_dndx_ref) * fac
     alpha_z = _simplex_tie_norm(
-        w_c_corrected(dndx_z, jnp.asarray(ctx.ks_xbar_z), zg,
-                      delta_map=getattr(ctx, "delta_map", None))[..., 1:])        # (n_zg,3)
+        w_c_corrected(
+            dndx_z, jnp.asarray(ctx.ks_xbar_z), zg, delta_map=getattr(ctx, "delta_map", None)
+        )[..., 1:]
+    )  # (n_zg,3)
     # PIVOT (z=3) deterministics through the IDENTICAL map at the exact pivot (ratio(z=3)=1, so
     # the exponent sites drop out): dndx_piv = ref_piv · [exp(eps_lls), exp(m_sub), dla_amp].
     fac_piv = jnp.stack([jnp.exp(eps_lls), jnp.exp(m_sub), dla_amp])
     dndx_piv = jnp.asarray(ctx.ks_dndx_ref_pivot) * fac_piv
     a_piv = _simplex_tie_norm(
-        w_c_corrected(dndx_piv, jnp.asarray(float(ctx.ks_xbar_pivot)),
-                      jnp.asarray(float(HCD_Z_PIVOT)),
-                      delta_map=getattr(ctx, "delta_map", None))[..., 1:])     # (3,)
+        w_c_corrected(
+            dndx_piv,
+            jnp.asarray(float(ctx.ks_xbar_pivot)),
+            jnp.asarray(float(HCD_Z_PIVOT)),
+            delta_map=getattr(ctx, "delta_map", None),
+        )[..., 1:]
+    )  # (3,)
     numpyro.deterministic("alpha_lls", a_piv[0])
     numpyro.deterministic("alpha_subdla", a_piv[1])
     numpyro.deterministic("alpha_dla", a_piv[2])
@@ -2307,15 +2748,18 @@ def _hcd_sites(ctx):
       prior. The dispatch lives HERE (inside the shared helper) so BOTH twins (``_legb_model``
       and ``_legb_priors_only``) pick it up with ZERO edits to the priors-only mirror."""
     if getattr(ctx, "ks_dndx_mapped", False):
-        return _ks_dndx_sites(ctx)               # (alpha_hcd_z (n_zg,3), _KS_DNDX_MAPPED)
+        return _ks_dndx_sites(ctx)  # (alpha_hcd_z (n_zg,3), _KS_DNDX_MAPPED)
     if getattr(ctx, "per_leg_alpha", False):
         return _hcd_sites_per_leg(ctx), None
     if not getattr(ctx, "hierarchical_hcd", False):
         # ---- LEGACY (byte-exact) ----
-        a_lls = numpyro.sample("alpha_lls",
-                               dist.TruncatedNormal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0], low=0.0))
-        a_sub = numpyro.sample("alpha_subdla",
-                               dist.TruncatedNormal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1], low=0.0))
+        a_lls = numpyro.sample(
+            "alpha_lls", dist.TruncatedNormal(ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0], low=0.0)
+        )
+        a_sub = numpyro.sample(
+            "alpha_subdla",
+            dist.TruncatedNormal(ctx.alpha_hcd_mu[1], ctx.alpha_hcd_sigma[1], low=0.0),
+        )
         # NOTE (PR#12 e2e-review): the latent Normal SCALE is hardcoded 1.0 — NOT ctx.alpha_hcd_sigma[2].
         # So α_DLA's encoded prior is a deliberately-BROAD one-sided softplus(Normal) with effective
         # σ/μ ≈ 1.2 (right-skewed) — ~2.5× the named HCD_PRIOR_FRAC_SIGMA[2]=0.50 — and the z>3.5
@@ -2323,16 +2767,17 @@ def _hcd_sites(ctx):
         # is un-certified by Leg B / needs arm A3). DO NOT rescale unilaterally: closure_mocks.py:56 and
         # sampler_numpyro.py draw the mock TRUTH from this IDENTICAL dist, so any width change must be
         # mirrored at all three sites or it breaks self-draw SBC rank-uniformity.
-        a_dla_raw = numpyro.sample("alpha_dla_raw",
-                                   dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0))
+        a_dla_raw = numpyro.sample(
+            "alpha_dla_raw", dist.Normal(_dla_raw_mu(ctx.alpha_hcd_mu[2]), 1.0)
+        )
         a_dla = numpyro.deterministic("alpha_dla", jax.nn.softplus(a_dla_raw))
         return jnp.stack([a_lls, a_sub, a_dla]), None
 
     # ---- HIERARCHICAL (Option B) / 2D AMPLITUDE×TILT ----
     two_d = getattr(ctx, "hcd_2d_tilt", False)
-    A_mu, A_sg = ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]        # A_hcd = the LLS prior verbatim
-    rmu = jnp.asarray(ctx.hcd_ratio_mu)                             # (2,) [r_sub, r_dla] centers
-    rsg = jnp.asarray(ctx.hcd_ratio_sigma)                          # (2,) widths
+    A_mu, A_sg = ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]  # A_hcd = the LLS prior verbatim
+    rmu = jnp.asarray(ctx.hcd_ratio_mu)  # (2,) [r_sub, r_dla] centers
+    rsg = jnp.asarray(ctx.hcd_ratio_sigma)  # (2,) widths
     if getattr(ctx, "hcd_noncentered", False):
         # LocScaleReparam-style: sample a standard base, transform to the truncated-at-0 quantity.
         # We use the (rare) explicit non-centered form numpyro's TransformReparam would synthesize,
@@ -2341,14 +2786,14 @@ def _hcd_sites(ctx):
         # to the centered TruncatedNormal(low=0), with the funnel-friendly geometry decoupled.
         z_A = numpyro.sample("A_hcd_base", dist.TruncatedNormal(0.0, 1.0, low=-A_mu / A_sg))
         A_hcd = numpyro.deterministic("A_hcd", A_mu + A_sg * z_A)
-        s_override = _btilt_site(ctx) if two_d else None           # B_hcd sampled AFTER A_hcd
+        s_override = _btilt_site(ctx) if two_d else None  # B_hcd sampled AFTER A_hcd
         z_rs = numpyro.sample("r_subdla_base", dist.TruncatedNormal(0.0, 1.0, low=-rmu[0] / rsg[0]))
         r_subdla = numpyro.deterministic("r_subdla", rmu[0] + rsg[0] * z_rs)
         z_rd = numpyro.sample("r_dla_base", dist.TruncatedNormal(0.0, 1.0, low=-rmu[1] / rsg[1]))
         r_dla = numpyro.deterministic("r_dla", rmu[1] + rsg[1] * z_rd)
     else:
         A_hcd = numpyro.sample("A_hcd", dist.TruncatedNormal(A_mu, A_sg, low=0.0))
-        s_override = _btilt_site(ctx) if two_d else None           # B_hcd sampled AFTER A_hcd
+        s_override = _btilt_site(ctx) if two_d else None  # B_hcd sampled AFTER A_hcd
         r_subdla = numpyro.sample("r_subdla", dist.TruncatedNormal(rmu[0], rsg[0], low=0.0))
         r_dla = numpyro.sample("r_dla", dist.TruncatedNormal(rmu[1], rsg[1], low=0.0))
     # derived α under the EXISTING names (so _draws_matrix / _loglik_of_draws / corner are unchanged).
@@ -2385,26 +2830,27 @@ def _hcd_sites_per_leg(ctx):
     Emits NO unsuffixed alpha names, so every legacy by-name reader fails loudly (KeyError)
     instead of silently reading one leg. Returns ``{leg.name: (3,) pivot α}``."""
     if getattr(ctx, "hierarchical_hcd", False) or getattr(ctx, "hcd_2d_tilt", False):
-        raise ValueError("per_leg_alpha is incompatible with hierarchical_hcd / hcd_2d_tilt "
-                         "(forbidden combination; spec Sec 1 item 10)")
+        raise ValueError(
+            "per_leg_alpha is incompatible with hierarchical_hcd / hcd_2d_tilt "
+            "(forbidden combination; spec Sec 1 item 10)"
+        )
     mu_by = getattr(ctx, "alpha_hcd_mu_by_leg", None)
     sd_by = getattr(ctx, "alpha_hcd_sigma_by_leg", None)
     if mu_by is None or sd_by is None:
-        raise ValueError("per_leg_alpha=True requires alpha_hcd_mu_by_leg / "
-                         "alpha_hcd_sigma_by_leg — build the ctx via build_legb_joint_ctx")
+        raise ValueError(
+            "per_leg_alpha=True requires alpha_hcd_mu_by_leg / "
+            "alpha_hcd_sigma_by_leg — build the ctx via build_legb_joint_ctx"
+        )
     out = {}
-    for leg in ctx.legs:                      # LIST order — deterministic site/PRNG order
+    for leg in ctx.legs:  # LIST order — deterministic site/PRNG order
         nm = leg.name
         mu = jnp.asarray(mu_by[nm])
         sd = jnp.asarray(sd_by[nm])
-        a_lls = numpyro.sample(f"alpha_lls_{nm}",
-                               dist.TruncatedNormal(mu[0], sd[0], low=0.0))
-        a_sub = numpyro.sample(f"alpha_subdla_{nm}",
-                               dist.TruncatedNormal(mu[1], sd[1], low=0.0))
+        a_lls = numpyro.sample(f"alpha_lls_{nm}", dist.TruncatedNormal(mu[0], sd[0], low=0.0))
+        a_sub = numpyro.sample(f"alpha_subdla_{nm}", dist.TruncatedNormal(mu[1], sd[1], low=0.0))
         # DLA latent SCALE hardcoded 1.0 — same deliberate broad one-sided prior as the
         # single-leg site (see the PR#12 note in _hcd_sites); per-leg verbatim.
-        a_dla_raw = numpyro.sample(f"alpha_dla_raw_{nm}",
-                                   dist.Normal(_dla_raw_mu(mu[2]), 1.0))
+        a_dla_raw = numpyro.sample(f"alpha_dla_raw_{nm}", dist.Normal(_dla_raw_mu(mu[2]), 1.0))
         a_dla = numpyro.deterministic(f"alpha_dla_{nm}", jax.nn.softplus(a_dla_raw))
         out[nm] = jnp.stack([a_lls, a_sub, a_dla])
     return out
@@ -2421,7 +2867,7 @@ def _btilt_site(ctx):
     # a future ctx._replace(hcd_btilt_mu=...) / new builder could otherwise slip past the build guard.
     _assert_forward_zslope_center(ctx.hcd_btilt_mu, "_btilt_site")
     B_hcd = numpyro.sample("B_hcd", dist.Normal(ctx.hcd_btilt_mu, ctx.hcd_btilt_sigma))
-    return B_hcd + jnp.asarray(ctx.hcd_dslope)                      # (3,) s_c = B_hcd + δs_c
+    return B_hcd + jnp.asarray(ctx.hcd_dslope)  # (3,) s_c = B_hcd + δs_c
 
 
 def _zslope_sites(ctx):
@@ -2444,9 +2890,11 @@ def _zslope_sites(ctx):
     priors-only twin mirrors it with ZERO edits (same pattern as the _hcd_sites dispatch)."""
     if getattr(ctx, "per_leg_zslope", False):
         if not getattr(ctx, "per_leg_alpha", False):
-            raise ValueError("per_leg_zslope=True requires per_leg_alpha=True (the per-leg "
-                             "slope sites are joint-mode plumbing; build via "
-                             "build_legb_joint_ctx(per_leg_zslope=True))")
+            raise ValueError(
+                "per_leg_zslope=True requires per_leg_alpha=True (the per-leg "
+                "slope sites are joint-mode plumbing; build via "
+                "build_legb_joint_ctx(per_leg_zslope=True))"
+            )
         return _zslope_sites_per_leg(ctx)
     if not getattr(ctx, "marginalize_zslope", False):
         _assert_forward_zslope_center(HCD_INCIDENCE_SLOPE, "_zslope_sites fixed")
@@ -2454,8 +2902,11 @@ def _zslope_sites(ctx):
     mu_src = HCD_INCIDENCE_SLOPE if ctx.zslope_mu is None else ctx.zslope_mu
     _assert_forward_zslope_center(mu_src, "_zslope_sites marginalize_zslope center")
     mu = jnp.asarray(mu_src)
-    sg = (jnp.asarray(ZSLOPE_PRIOR_SIGMA) if ctx.zslope_sigma is None
-          else jnp.asarray(ctx.zslope_sigma))
+    sg = (
+        jnp.asarray(ZSLOPE_PRIOR_SIGMA)
+        if ctx.zslope_sigma is None
+        else jnp.asarray(ctx.zslope_sigma)
+    )
     s_lls = numpyro.sample("s_lls", dist.Normal(mu[0], sg[0]))
     s_sub = numpyro.sample("s_subdla", dist.Normal(mu[1], sg[1]))
     s_dla = numpyro.sample("s_dla", dist.Normal(mu[2], sg[2]))
@@ -2478,15 +2929,21 @@ def _zslope_sites_per_leg(ctx):
     mu_src = HCD_INCIDENCE_SLOPE if ctx.zslope_mu is None else ctx.zslope_mu
     _assert_forward_zslope_center(mu_src, "_zslope_sites_per_leg marginalize_zslope center")
     mu = jnp.asarray(mu_src)
-    sg = (jnp.asarray(ZSLOPE_PRIOR_SIGMA) if ctx.zslope_sigma is None
-          else jnp.asarray(ctx.zslope_sigma))
+    sg = (
+        jnp.asarray(ZSLOPE_PRIOR_SIGMA)
+        if ctx.zslope_sigma is None
+        else jnp.asarray(ctx.zslope_sigma)
+    )
     out = {}
-    for leg in ctx.legs:                      # LIST order — deterministic site/PRNG order
+    for leg in ctx.legs:  # LIST order — deterministic site/PRNG order
         nm = leg.name
-        out[nm] = jnp.stack([
-            numpyro.sample(f"s_lls_{nm}", dist.Normal(mu[0], sg[0])),
-            numpyro.sample(f"s_subdla_{nm}", dist.Normal(mu[1], sg[1])),
-            numpyro.sample(f"s_dla_{nm}", dist.Normal(mu[2], sg[2]))])
+        out[nm] = jnp.stack(
+            [
+                numpyro.sample(f"s_lls_{nm}", dist.Normal(mu[0], sg[0])),
+                numpyro.sample(f"s_subdla_{nm}", dist.Normal(mu[1], sg[1])),
+                numpyro.sample(f"s_dla_{nm}", dist.Normal(mu[2], sg[2])),
+            ]
+        )
     return out
 
 
@@ -2496,8 +2953,12 @@ def _legb_priors_only(ctx):
     deterministics inside the shared _ks_dndx_sites helper — constrain_fn(return_deterministic
     =False) drops them; W2 2026-07-22) — used only as the model passed to ``constrain_fn`` in the cheap
     transform-only postprocess (below). Tracing this is cheap (priors, no 681×681 Cholesky)."""
-    _lo_u = jnp.asarray(_THETA_UNIT_LO if getattr(ctx, "theta_unit_lo", None) is None else ctx.theta_unit_lo)
-    _hi_u = jnp.asarray(_THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi)
+    _lo_u = jnp.asarray(
+        _THETA_UNIT_LO if getattr(ctx, "theta_unit_lo", None) is None else ctx.theta_unit_lo
+    )
+    _hi_u = jnp.asarray(
+        _THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi
+    )
     numpyro.sample("theta_unit", dist.Uniform(_lo_u, _hi_u).to_event(1))
     _sample_tau0_sites(ctx)
     # the HCD pivot α sites — SHARED with _legb_model via _hcd_sites so the sample-site order is
@@ -2508,7 +2969,7 @@ def _legb_priors_only(ctx):
     # 2D mode sets s_c via B_hcd (sampled inside _hcd_sites) and BYPASSES _zslope_sites — so mirror
     # _legb_model: only call _zslope_sites when _hcd_sites did NOT supply the slopes (legacy/Option B).
     if _s_override is None:
-        _zslope_sites(ctx)                        # mirrors _legb_model (s_c when marginalize_zslope)
+        _zslope_sites(ctx)  # mirrors _legb_model (s_c when marginalize_zslope)
     # MUST mirror _legb_model's metal sites EXACTLY (same name, order, distribution) — constrain_fn
     # traces this. SAME static branch as _legb_model: MODEL C ("flatlog2node") → the per-leg 2-node f
     # sites via the SHARED _metal_2node_sites (identical leg loop/order = constrain_fn parity); else the
@@ -2549,10 +3010,10 @@ def _legb_reconstruct_deterministics(ctx, samples):
     out = dict(samples)
     zg = jnp.asarray(ctx.z_global)
     kim = _kim(zg)
-    tau0_amp = jnp.asarray(samples["tau0_amp"])                      # (L,)
-    dtau0 = jnp.asarray(samples["dtau0"])                            # (L,)
+    tau0_amp = jnp.asarray(samples["tau0_amp"])  # (L,)
+    dtau0 = jnp.asarray(samples["dtau0"])  # (L,)
     alpha_z = tau0_amp[:, None] * ((1.0 + zg)[None, :] / (1.0 + ctx.tau0_pivot_z)) ** dtau0[:, None]
-    tau0_vec = alpha_z * kim[None, :]                                # (L, nZg)
+    tau0_vec = alpha_z * kim[None, :]  # (L, nZg)
     if getattr(ctx, "ks_dndx_mapped", False):
         # KS dN/dX-MAPPED branch (V-A, W2 2026-07-22; dispatched FIRST, mirroring _hcd_sites):
         # rebuild alpha_lls/alpha_subdla/alpha_dla (the mapped PIVOT values) and alpha_hcd_z
@@ -2564,28 +3025,42 @@ def _legb_reconstruct_deterministics(ctx, samples):
         # return_deterministic=False) drops the deterministics; _draws_matrix /
         # _loglik_of_draws read them BY NAME.
         out["tau0_vec"] = tau0_vec
-        ratio = (1.0 + zg)[None, :] / (1.0 + HCD_Z_PIVOT)            # (1, nZg)
-        eps = jnp.asarray(samples["eps_lls"])[:, None]               # (L, 1)
+        ratio = (1.0 + zg)[None, :] / (1.0 + HCD_Z_PIVOT)  # (1, nZg)
+        eps = jnp.asarray(samples["eps_lls"])[:, None]  # (L, 1)
         kap = jnp.asarray(samples["kappa_lls"])[:, None]
         msub = jnp.asarray(samples["m_sub"])[:, None]
         tsub = jnp.asarray(samples["t_sub"])[:, None]
-        dla_amp = (jax.nn.softplus(jnp.asarray(samples["dla_raw"]))
-                   / jax.nn.softplus(_INF_mod().KS_DNDX_DLA_RAW_MU0))[:, None]  # (L, 1)
+        dla_amp = (
+            jax.nn.softplus(jnp.asarray(samples["dla_raw"]))
+            / jax.nn.softplus(_INF_mod().KS_DNDX_DLA_RAW_MU0)
+        )[
+            :, None
+        ]  # (L, 1)
         tdla = jnp.asarray(samples["t_dla"])[:, None]
-        fac = jnp.stack([jnp.exp(eps) * ratio ** kap,
-                         jnp.exp(msub) * ratio ** tsub,
-                         dla_amp * ratio ** tdla], axis=-1)          # (L, nZg, 3)
+        fac = jnp.stack(
+            [jnp.exp(eps) * ratio**kap, jnp.exp(msub) * ratio**tsub, dla_amp * ratio**tdla], axis=-1
+        )  # (L, nZg, 3)
         dndx_z = jnp.asarray(ctx.ks_dndx_ref)[None, :, :] * fac
         out["alpha_hcd_z"] = _simplex_tie_norm(
-            w_c_corrected(dndx_z, jnp.asarray(ctx.ks_xbar_z)[None, :],
-                          zg[None, :], delta_map=getattr(ctx, "delta_map", None))[..., 1:])   # (L, nZg, 3)
-        fac_piv = jnp.stack([jnp.exp(eps[:, 0]), jnp.exp(msub[:, 0]),
-                             dla_amp[:, 0]], axis=-1)                # (L, 3)
+            w_c_corrected(
+                dndx_z,
+                jnp.asarray(ctx.ks_xbar_z)[None, :],
+                zg[None, :],
+                delta_map=getattr(ctx, "delta_map", None),
+            )[..., 1:]
+        )  # (L, nZg, 3)
+        fac_piv = jnp.stack(
+            [jnp.exp(eps[:, 0]), jnp.exp(msub[:, 0]), dla_amp[:, 0]], axis=-1
+        )  # (L, 3)
         dndx_piv = jnp.asarray(ctx.ks_dndx_ref_pivot)[None, :] * fac_piv
         a_piv = _simplex_tie_norm(
-            w_c_corrected(dndx_piv, jnp.asarray(float(ctx.ks_xbar_pivot)),
-                          jnp.asarray(float(HCD_Z_PIVOT)),
-                          delta_map=getattr(ctx, "delta_map", None))[..., 1:])      # (L, 3)
+            w_c_corrected(
+                dndx_piv,
+                jnp.asarray(float(ctx.ks_xbar_pivot)),
+                jnp.asarray(float(HCD_Z_PIVOT)),
+                delta_map=getattr(ctx, "delta_map", None),
+            )[..., 1:]
+        )  # (L, 3)
         out["alpha_lls"] = a_piv[:, 0]
         out["alpha_subdla"] = a_piv[:, 1]
         out["alpha_dla"] = a_piv[:, 2]
@@ -2598,43 +3073,55 @@ def _legb_reconstruct_deterministics(ctx, samples):
         # Slopes mirror _legb_model's dispatch: per-leg s_*_{name} sites (per_leg_zslope),
         # else the SHARED s_* block, else the FIXED incidence slope.
         out["tau0_vec"] = tau0_vec
-        ratio = (1.0 + zg)[None, :, None] / (1.0 + HCD_Z_PIVOT)      # (1, nZg, 1)
-        for leg in ctx.legs:                  # LIST order — never dict iteration
+        ratio = (1.0 + zg)[None, :, None] / (1.0 + HCD_Z_PIVOT)  # (1, nZg, 1)
+        for leg in ctx.legs:  # LIST order — never dict iteration
             nm = leg.name
-            a_lls = jnp.asarray(samples[f"alpha_lls_{nm}"])          # (L,)
+            a_lls = jnp.asarray(samples[f"alpha_lls_{nm}"])  # (L,)
             a_sub = jnp.asarray(samples[f"alpha_subdla_{nm}"])
             a_dla = jax.nn.softplus(jnp.asarray(samples[f"alpha_dla_raw_{nm}"]))
             out[f"alpha_dla_{nm}"] = a_dla
             alpha_pivot = jnp.stack([a_lls, a_sub, a_dla], axis=-1)  # (L, 3)
-            if getattr(ctx, "per_leg_zslope", False) and getattr(ctx, "marginalize_zslope",
-                                                                 False):
+            if getattr(ctx, "per_leg_zslope", False) and getattr(ctx, "marginalize_zslope", False):
                 # per-leg slope keys are REQUIRED when both flags are on: a silent fallback
                 # to the shared s_* block on a hand-mismatched ctx/samples pairing would
                 # reconstruct with the WRONG slopes (consistency-audit finding H5). With
                 # marginalize_zslope=False no slope SITES exist (the model's fixed branch),
                 # so that legal combo falls through to the fixed-slope else below —
                 # mirroring _zslope_sites_per_leg's dispatch (panel required-fix 2).
-                missing = [k for k in (f"s_lls_{nm}", f"s_subdla_{nm}", f"s_dla_{nm}")
-                           if k not in samples]
+                missing = [
+                    k for k in (f"s_lls_{nm}", f"s_subdla_{nm}", f"s_dla_{nm}") if k not in samples
+                ]
                 if missing:
                     raise KeyError(
                         f"per_leg_zslope=True but per-leg slope sites {missing} absent from "
                         f"samples — ctx/samples pairing mismatch (shared-slope samples fed "
-                        f"to a per-leg-slope ctx?)")
-                s_c = jnp.stack([jnp.asarray(samples[f"s_lls_{nm}"]),
-                                 jnp.asarray(samples[f"s_subdla_{nm}"]),
-                                 jnp.asarray(samples[f"s_dla_{nm}"])], axis=-1)   # (L, 3)
-                shape_zg = ratio ** s_c[:, None, :]                  # (L, nZg, 3)
+                        f"to a per-leg-slope ctx?)"
+                    )
+                s_c = jnp.stack(
+                    [
+                        jnp.asarray(samples[f"s_lls_{nm}"]),
+                        jnp.asarray(samples[f"s_subdla_{nm}"]),
+                        jnp.asarray(samples[f"s_dla_{nm}"]),
+                    ],
+                    axis=-1,
+                )  # (L, 3)
+                shape_zg = ratio ** s_c[:, None, :]  # (L, nZg, 3)
                 out[f"alpha_hcd_z_{nm}"] = alpha_pivot[:, None, :] * shape_zg
             elif getattr(ctx, "marginalize_zslope", False) and "s_lls" in samples:
-                s_c = jnp.stack([jnp.asarray(samples["s_lls"]),
-                                 jnp.asarray(samples["s_subdla"]),
-                                 jnp.asarray(samples["s_dla"])], axis=-1)         # (L, 3)
-                shape_zg = ratio ** s_c[:, None, :]                  # (L, nZg, 3)
+                s_c = jnp.stack(
+                    [
+                        jnp.asarray(samples["s_lls"]),
+                        jnp.asarray(samples["s_subdla"]),
+                        jnp.asarray(samples["s_dla"]),
+                    ],
+                    axis=-1,
+                )  # (L, 3)
+                shape_zg = ratio ** s_c[:, None, :]  # (L, nZg, 3)
                 out[f"alpha_hcd_z_{nm}"] = alpha_pivot[:, None, :] * shape_zg
             else:
-                shape_fix = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) \
-                    ** jnp.asarray(HCD_INCIDENCE_SLOPE)              # (nZg, 3)
+                shape_fix = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** jnp.asarray(
+                    HCD_INCIDENCE_SLOPE
+                )  # (nZg, 3)
                 out[f"alpha_hcd_z_{nm}"] = alpha_pivot[:, None, :] * shape_fix[None, :, :]
         return out
     if getattr(ctx, "hierarchical_hcd", False):
@@ -2646,16 +3133,17 @@ def _legb_reconstruct_deterministics(ctx, samples):
             r_dla = jnp.asarray(samples["r_dla"])
         else:
             A_mu, A_sg = ctx.alpha_hcd_mu[0], ctx.alpha_hcd_sigma[0]
-            rmu = jnp.asarray(ctx.hcd_ratio_mu); rsg = jnp.asarray(ctx.hcd_ratio_sigma)
+            rmu = jnp.asarray(ctx.hcd_ratio_mu)
+            rsg = jnp.asarray(ctx.hcd_ratio_sigma)
             A_hcd = A_mu + A_sg * jnp.asarray(samples["A_hcd_base"])
             r_subdla = rmu[0] + rsg[0] * jnp.asarray(samples["r_subdla_base"])
             r_dla = rmu[1] + rsg[1] * jnp.asarray(samples["r_dla_base"])
             out["A_hcd"] = A_hcd
             out["r_subdla"] = r_subdla
             out["r_dla"] = r_dla
-        alpha_lls = A_hcd                                            # (L,)
-        alpha_subdla = A_hcd * r_subdla                              # (L,)
-        alpha_dla = A_hcd * r_dla                                    # (L,)
+        alpha_lls = A_hcd  # (L,)
+        alpha_subdla = A_hcd * r_subdla  # (L,)
+        alpha_dla = A_hcd * r_dla  # (L,)
         out["alpha_lls"] = alpha_lls
         out["alpha_subdla"] = alpha_subdla
     else:
@@ -2666,34 +3154,51 @@ def _legb_reconstruct_deterministics(ctx, samples):
     if getattr(ctx, "hcd_2d_tilt", False) and "B_hcd" in samples:
         # 2D AMPLITUDE×TILT: the per-class slope s_c = B_hcd + δs_c (NOT a sampled s_* block). The
         # pivot α (A·r) carry the amplitude; the z-evolution is the B_hcd-driven power-law.
-        B = jnp.asarray(samples["B_hcd"])                            # (L,)
-        s_c = B[:, None] + jnp.asarray(ctx.hcd_dslope)[None, :]      # (L, 3)
+        B = jnp.asarray(samples["B_hcd"])  # (L,)
+        s_c = B[:, None] + jnp.asarray(ctx.hcd_dslope)[None, :]  # (L, 3)
         ratio = (1.0 + zg)[None, :, None] / (1.0 + HCD_Z_PIVOT)
-        shape_zg = ratio ** s_c[:, None, :]                          # (L, nZg, 3)
-        alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg             # (L, nZg, 3)
+        shape_zg = ratio ** s_c[:, None, :]  # (L, nZg, 3)
+        alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg  # (L, nZg, 3)
     elif getattr(ctx, "marginalize_zslope", False) and "s_lls" in samples:
-        s_c = jnp.stack([jnp.asarray(samples["s_lls"]),
-                         jnp.asarray(samples["s_subdla"]),
-                         jnp.asarray(samples["s_dla"])], axis=-1)     # (L, 3)
+        s_c = jnp.stack(
+            [
+                jnp.asarray(samples["s_lls"]),
+                jnp.asarray(samples["s_subdla"]),
+                jnp.asarray(samples["s_dla"]),
+            ],
+            axis=-1,
+        )  # (L, 3)
         # shape_zg per draw: ((1+z)/(1+z_p))^{s_c} → (L, nZg, 3)
         ratio = (1.0 + zg)[None, :, None] / (1.0 + HCD_Z_PIVOT)
-        shape_zg = ratio ** s_c[:, None, :]                          # (L, nZg, 3)
-        alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg             # (L, nZg, 3)
+        shape_zg = ratio ** s_c[:, None, :]  # (L, nZg, 3)
+        alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg  # (L, nZg, 3)
     else:
         # fixed-slope fallback (non-2D, non-marginalized readout) — byte-consistent with the
         # _zslope_sites FIXED branch: the SIM incidence slope HCD_INCIDENCE_SLOPE (~2.4), NOT the
         # lit/sim ratio HCD_LIT_OVER_SIM_SLOPE (0.764 dated 2026-07-18; the wrong-object slope).
         shape_zg = ((1.0 + zg)[:, None] / (1.0 + HCD_Z_PIVOT)) ** jnp.asarray(HCD_INCIDENCE_SLOPE)
-        alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg[None, :, :]      # (L, nZg, 3)
+        alpha_hcd_z = alpha_pivot[:, None, :] * shape_zg[None, :, :]  # (L, nZg, 3)
     out["tau0_vec"] = tau0_vec
     out["alpha_dla"] = alpha_dla
     out["alpha_hcd_z"] = alpha_hcd_z
     return out
 
 
-def _run_nuts_legb(ctx, mock_legs, dla_core_per_leg, *, n_warmup, n_samples, seed,
-                   target_accept=0.9, dense_mass=True, max_tree_depth=10,
-                   fast_postprocess=True, init_strategy=None, return_extra=False):
+def _run_nuts_legb(
+    ctx,
+    mock_legs,
+    dla_core_per_leg,
+    *,
+    n_warmup,
+    n_samples,
+    seed,
+    target_accept=0.9,
+    dense_mass=True,
+    max_tree_depth=10,
+    fast_postprocess=True,
+    init_strategy=None,
+    return_extra=False,
+):
     """NUTS on the Leg-B model. PRODUCTION uses ``dense_mass=True`` (the [θ,τ₀] correlation is
     the physics) + ``max_tree_depth=10``. The SMOKE caps ``max_tree_depth`` (and may use a
     diagonal mass) to bound the per-step leapfrog count — the dense-mass adaptation on the
@@ -2720,18 +3225,30 @@ def _run_nuts_legb(ctx, mock_legs, dla_core_per_leg, *, n_warmup, n_samples, see
     2026-07-22) ``alpha_hcd_z`` agrees to <= 2 ulp (XLA broadcast-vs-scalar fusion; the pivot
     deterministics are bit-equal). Set ``fast_postprocess=False`` to restore the legacy replay."""
     strat = init_to_median if init_strategy is None else init_strategy
-    kernel = NUTS(lambda: _legb_model(ctx, mock_legs, dla_core_per_leg),
-                  dense_mass=bool(dense_mass), target_accept_prob=float(target_accept),
-                  max_tree_depth=int(max_tree_depth), init_strategy=strat)
+    kernel = NUTS(
+        lambda: _legb_model(ctx, mock_legs, dla_core_per_leg),
+        dense_mass=bool(dense_mass),
+        target_accept_prob=float(target_accept),
+        max_tree_depth=int(max_tree_depth),
+        init_strategy=strat,
+    )
     postprocess_fn = None
     if fast_postprocess:
         # numpyro calls postprocess_fn(z_dict) per collected sample; constrain via the
         # priors-only trace (cheap) — no deterministic replay, no loglik factor.
         def postprocess_fn(z):
-            return constrain_fn(lambda: _legb_priors_only(ctx), (), {}, z,
-                                return_deterministic=False)
-    mcmc = MCMC(kernel, num_warmup=int(n_warmup), num_samples=int(n_samples),
-                num_chains=1, progress_bar=False, postprocess_fn=postprocess_fn)
+            return constrain_fn(
+                lambda: _legb_priors_only(ctx), (), {}, z, return_deterministic=False
+            )
+
+    mcmc = MCMC(
+        kernel,
+        num_warmup=int(n_warmup),
+        num_samples=int(n_samples),
+        num_chains=1,
+        progress_bar=False,
+        postprocess_fn=postprocess_fn,
+    )
     # accept either a PRNGKey (convergence path seeds chains on a separate fold_in axis) or an
     # int seed (the legacy base_seed+attempt retry stream).
     run_key = seed if isinstance(seed, jax.Array) else jax.random.PRNGKey(int(seed))
@@ -2743,9 +3260,11 @@ def _run_nuts_legb(ctx, mock_legs, dla_core_per_leg, *, n_warmup, n_samples, see
     diverging = np.asarray(ef.get("diverging", np.zeros(0, bool)))
     n_div = int(diverging.sum())
     if return_extra:
-        extra = dict(diverging=diverging,
-                     energy=np.asarray(ef.get("energy", np.zeros(0))),
-                     num_steps=np.asarray(ef.get("num_steps", np.zeros(0, int))))
+        extra = dict(
+            diverging=diverging,
+            energy=np.asarray(ef.get("energy", np.zeros(0))),
+            num_steps=np.asarray(ef.get("num_steps", np.zeros(0, int))),
+        )
         return samples, n_div, extra
     return samples, n_div
 
@@ -2773,7 +3292,7 @@ def _rank_normalize(x):
     uniq, inv, counts = np.unique(flat, return_inverse=True, return_counts=True)
     csum = np.cumsum(counts)
     start = csum - counts
-    mean_rank = (start + csum + 1) / 2.0     # mean of the integer ranks in [start+1, csum]
+    mean_rank = (start + csum + 1) / 2.0  # mean of the integer ranks in [start+1, csum]
     ranks = mean_rank[inv]
     z = _scipy_norm.ppf((ranks - 3.0 / 8.0) / (flat.size - 0.25))
     return z.reshape(C, N)
@@ -2785,13 +3304,12 @@ def _ess_indicator(x, q):
     x = np.asarray(x, float)
     thr = np.quantile(x, q)
     ind = (x <= thr).astype(float)
-    if ind.std() == 0:                        # degenerate (all on one side) → ESS undefined
+    if ind.std() == 0:  # degenerate (all on one side) → ESS undefined
         return np.nan
     return float(npd.effective_sample_size(ind))
 
 
-def convergence_battery(packed, names, *, energy=None, num_steps=None,
-                        max_tree_depth=10, n_div=0):
+def convergence_battery(packed, names, *, energy=None, num_steps=None, max_tree_depth=10, n_div=0):
     """The STEP-A convergence battery from MULTI-CHAIN packed draws.
 
     ``packed`` : (C, N, P) — C chains, N draws, P params (the ``_draws_matrix`` packing).
@@ -2808,16 +3326,17 @@ def convergence_battery(packed, names, *, energy=None, num_steps=None,
     rhat = np.full(P, np.nan)
     ess_bulk = np.full(P, np.nan)
     ess_tail = np.full(P, np.nan)
-    can_multichain = C >= 2 and N >= 4         # split_gelman_rubin needs draws ≥4
+    can_multichain = C >= 2 and N >= 4  # split_gelman_rubin needs draws ≥4
     for p in range(P):
-        col = packed[:, :, p]                  # (C, N)
-        zr = _rank_normalize(col)              # rank-normalized (folded by the normal scores)
+        col = packed[:, :, p]  # (C, N)
+        zr = _rank_normalize(col)  # rank-normalized (folded by the normal scores)
         if can_multichain:
             rhat[p] = float(npd.split_gelman_rubin(zr))
         # bulk-ESS = ESS of the rank-normalized draws.
         ess_bulk[p] = float(npd.effective_sample_size(zr))
         # tail-ESS = min ESS of the 5%/95% quantile-indicator series (on the RAW draws).
-        e05 = _ess_indicator(col, 0.05); e95 = _ess_indicator(col, 0.95)
+        e05 = _ess_indicator(col, 0.05)
+        e95 = _ess_indicator(col, 0.95)
         cands = [e for e in (e05, e95) if np.isfinite(e)]
         ess_tail[p] = float(min(cands)) if cands else np.nan
 
@@ -2849,22 +3368,40 @@ def convergence_battery(packed, names, *, energy=None, num_steps=None,
         return float(np.nanmax(a)) if a.size and np.isfinite(a).any() else np.nan
 
     return dict(
-        names=list(names), n_chains=C, n_draws=N,
+        names=list(names),
+        n_chains=C,
+        n_draws=N,
         rhat={names[p]: float(rhat[p]) for p in range(P)},
         ess_bulk={names[p]: float(ess_bulk[p]) for p in range(P)},
         ess_tail={names[p]: float(ess_tail[p]) for p in range(P)},
         rhat_max=_nanmax(rhat) if can_multichain else np.nan,
         ess_bulk_min=_nanmin(ess_bulk),
         ess_tail_min=_nanmin(ess_tail),
-        ebfmi=ebfmi, ebfmi_min=_nanmin(ebfmi),
-        n_divergent=int(n_div), max_tree_depth=int(max_tree_depth),
-        treedepth_sat_frac=sat_frac)
+        ebfmi=ebfmi,
+        ebfmi_min=_nanmin(ebfmi),
+        n_divergent=int(n_div),
+        max_tree_depth=int(max_tree_depth),
+        treedepth_sat_frac=sat_frac,
+    )
 
 
-def run_legb_convergence(ctx: LegBCtx, d, *, sim=None, mock_index=0, n_chains=4,
-                         n_warmup=250, n_samples=400, seed=0, fold=0,
-                         dense_mass=True, max_tree_depth=10, target_accept=0.9,
-                         chain_ids=None, verbose=True):
+def run_legb_convergence(
+    ctx: LegBCtx,
+    d,
+    *,
+    sim=None,
+    mock_index=0,
+    n_chains=4,
+    n_warmup=250,
+    n_samples=400,
+    seed=0,
+    fold=0,
+    dense_mass=True,
+    max_tree_depth=10,
+    target_accept=0.9,
+    chain_ids=None,
+    verbose=True,
+):
     """STEP-A convergence-MODE multichain fit of ONE mock (the R-hat path).
 
     Differs from ``run_legb`` (the coverage path) in three review-mandated ways:
@@ -2897,9 +3434,10 @@ def run_legb_convergence(ctx: LegBCtx, d, *, sim=None, mock_index=0, n_chains=4,
     core_per_leg = _mock_core_per_leg(ctx, truth_sim)
     kept_global = truth_pack["kept_global_z"]
 
-    truth_vec = np.concatenate([
-        truth_pack["theta9"], truth_pack["tau0_global"][kept_global], truth_pack["alpha_hcd"]])
-    if getattr(ctx, "hcd_2d_tilt", False):                # 2D: A_hcd, B_hcd, r_subdla, r_dla
+    truth_vec = np.concatenate(
+        [truth_pack["theta9"], truth_pack["tau0_global"][kept_global], truth_pack["alpha_hcd"]]
+    )
+    if getattr(ctx, "hcd_2d_tilt", False):  # 2D: A_hcd, B_hcd, r_subdla, r_dla
         truth_vec = np.concatenate([truth_vec, _hcd_latent_truths_2d(truth_pack["alpha_hcd"], ctx)])
     elif getattr(ctx, "hierarchical_hcd", False):
         truth_vec = np.concatenate([truth_vec, _hcd_latent_truths(truth_pack["alpha_hcd"])])
@@ -2910,39 +3448,61 @@ def run_legb_convergence(ctx: LegBCtx, d, *, sim=None, mock_index=0, n_chains=4,
         # SEPARATE seed axis: fold_in(k_nuts, chain_id) — distinct from base_seed+attempt.
         chain_key = jax.random.fold_in(k_nuts, int(cid))
         samples, n_div, extra = _run_nuts_legb(
-            ctx, mock_legs, core_per_leg, n_warmup=n_warmup, n_samples=n_samples,
-            seed=chain_key, target_accept=target_accept, dense_mass=dense_mass,
-            max_tree_depth=max_tree_depth, init_strategy=init_to_sample, return_extra=True)
-        draws = _draws_matrix(samples, kept_global)         # (N, P)
+            ctx,
+            mock_legs,
+            core_per_leg,
+            n_warmup=n_warmup,
+            n_samples=n_samples,
+            seed=chain_key,
+            target_accept=target_accept,
+            dense_mass=dense_mass,
+            max_tree_depth=max_tree_depth,
+            init_strategy=init_to_sample,
+            return_extra=True,
+        )
+        draws = _draws_matrix(samples, kept_global)  # (N, P)
         packed_chains.append(draws)
-        energies.append(extra["energy"]); num_steps_all.append(extra["num_steps"])
+        energies.append(extra["energy"])
+        num_steps_all.append(extra["num_steps"])
         per_chain_div.append(int(n_div))
         # record the per-chain INITIAL constrained draw (1st kept sample) to verify dispersion.
         init_vals.append(draws[0])
         if verbose:
-            print(f"  [conv chain {cid}] sim={sim[:20]}… draws={draws.shape[0]} div={n_div} "
-                  f"E-BFMI={_ebfmi1(extra['energy']):.2f}")
+            print(
+                f"  [conv chain {cid}] sim={sim[:20]}… draws={draws.shape[0]} div={n_div} "
+                f"E-BFMI={_ebfmi1(extra['energy']):.2f}"
+            )
 
-    packed = np.stack(packed_chains, axis=0)                # (C, N, P)
+    packed = np.stack(packed_chains, axis=0)  # (C, N, P)
     # the packed-draw column names mirror _draws_matrix EXACTLY (θ9, τ₀(kept), α3, [A_hcd/r…],
     # [a_SiIII]) — built from the last chain's samples dict so the hierarchical latents / metal
     # nuisance columns are named when present (must-fix #5: index by name, not position).
     packed_names = _packed_names_for(samples, kept_global)
 
     battery = convergence_battery(
-        packed, packed_names, energy=np.stack(energies) if energies else None,
+        packed,
+        packed_names,
+        energy=np.stack(energies) if energies else None,
         num_steps=np.stack(num_steps_all) if num_steps_all else None,
-        max_tree_depth=max_tree_depth, n_div=int(sum(per_chain_div)))
+        max_tree_depth=max_tree_depth,
+        n_div=int(sum(per_chain_div)),
+    )
     # per-chain init spread vs the within-chain posterior sd (dispersion check, R-hat validity).
-    init_arr = np.stack(init_vals)                          # (C, P)
+    init_arr = np.stack(init_vals)  # (C, P)
     post_sd = packed.reshape(-1, packed.shape[-1]).std(axis=0)
     init_spread = init_arr.std(axis=0)
     battery["init_spread"] = init_spread
     battery["post_sd"] = post_sd
     battery["init_spread_over_postsd"] = np.where(post_sd > 0, init_spread / post_sd, np.nan)
-    return dict(packed=packed, names=packed_names, truth_vec=truth_vec,
-                kept_global=kept_global, battery=battery,
-                per_chain_div=per_chain_div, sim=sim)
+    return dict(
+        packed=packed,
+        names=packed_names,
+        truth_vec=truth_vec,
+        kept_global=kept_global,
+        battery=battery,
+        per_chain_div=per_chain_div,
+        sim=sim,
+    )
 
 
 def _ebfmi1(energy):
@@ -2957,7 +3517,7 @@ def _ebfmi1(energy):
 def _mock_core_per_leg(ctx, truth_sim):
     """z-mean DLA core per leg from the mock's sim (the forward core matched to the truth)."""
     z_sim = np.asarray(truth_sim["z"])
-    core_sim = np.asarray(truth_sim["dla_core"])     # (nZs, K)
+    core_sim = np.asarray(truth_sim["dla_core"])  # (nZs, K)
     out = {}
     for leg in ctx.legs:
         # map each leg z to the nearest sim z, take that core; z-mean over the leg's z.
@@ -2966,7 +3526,9 @@ def _mock_core_per_leg(ctx, truth_sim):
             j = int(np.argmin(np.abs(z_sim - zz)))
             if abs(z_sim[j] - zz) <= 0.15:
                 cores.append(core_sim[j])
-        out[leg.name] = jnp.asarray(np.mean(cores, axis=0) if cores else np.zeros(core_sim.shape[1]))
+        out[leg.name] = jnp.asarray(
+            np.mean(cores, axis=0) if cores else np.zeros(core_sim.shape[1])
+        )
     return out
 
 
@@ -2978,7 +3540,7 @@ def _per_leg_alpha_leg_names(samples):
     """The joint-mode leg-name suffixes present in a samples dict, in the dict's insertion
     order (= the numpyro SITE order = ctx.legs LIST order — sites are created iterating
     ctx.legs, and both get_samples() and constrain_fn preserve site order)."""
-    return [k[len("alpha_lls_"):] for k in samples if k.startswith("alpha_lls_")]
+    return [k[len("alpha_lls_") :] for k in samples if k.startswith("alpha_lls_")]
 
 
 def _draws_matrix(samples, kept_global):
@@ -2989,24 +3551,27 @@ def _draws_matrix(samples, kept_global):
     present the LEGACY path runs verbatim (the shared 3-α block at its positional home);
     otherwise the PER-LEG suffixed columns (alpha_lls/subdla/dla per leg, legs order) are
     packed; NEITHER present → raise (never silently pack a matrix with no alpha block)."""
-    theta = np.asarray(samples["theta_unit"])               # (L,9)
+    theta = np.asarray(samples["theta_unit"])  # (L,9)
     tau0 = np.asarray(samples["tau0_vec"])[:, kept_global]  # (L, nKept)
     if "alpha_lls" in samples:
         a_lls = np.asarray(samples["alpha_lls"])[:, None]
         a_sub = np.asarray(samples["alpha_subdla"])[:, None]
         a_dla = np.asarray(samples["alpha_dla"])[:, None]
-        cols = [theta, tau0, a_lls, a_sub, a_dla]           # the derived α (back-compat: ALWAYS here)
+        cols = [theta, tau0, a_lls, a_sub, a_dla]  # the derived α (back-compat: ALWAYS here)
     else:
         leg_names = _per_leg_alpha_leg_names(samples)
         if not leg_names:
             raise KeyError(
                 "_draws_matrix: samples carry NEITHER the shared 'alpha_lls' block NOR any "
-                "per-leg 'alpha_lls_<leg>' sites — refusing to pack an alpha-less matrix")
+                "per-leg 'alpha_lls_<leg>' sites — refusing to pack an alpha-less matrix"
+            )
         cols = [theta, tau0]
-        for nm in leg_names:                                # legs order (site order)
-            cols += [np.asarray(samples[f"alpha_lls_{nm}"])[:, None],
-                     np.asarray(samples[f"alpha_subdla_{nm}"])[:, None],
-                     np.asarray(samples[f"alpha_dla_{nm}"])[:, None]]
+        for nm in leg_names:  # legs order (site order)
+            cols += [
+                np.asarray(samples[f"alpha_lls_{nm}"])[:, None],
+                np.asarray(samples[f"alpha_subdla_{nm}"])[:, None],
+                np.asarray(samples[f"alpha_dla_{nm}"])[:, None],
+            ]
     # HIERARCHICAL latents (Option B): append A_hcd/r_subdla/r_dla AFTER the derived α (back-compat
     # — the α block stays at its positional home; downstream indexes α by name, must-fix #5). The
     # truth_vec tail (w_LLS, w_sub/w_LLS, 0.10·w_DLA/w_LLS) is appended in the driver to match.
@@ -3015,9 +3580,9 @@ def _draws_matrix(samples, kept_global):
     for nm in ("A_hcd", "B_hcd", "r_subdla", "r_dla"):
         if nm in samples:
             cols.append(np.asarray(samples[nm])[:, None])
-    if "a_SiIII" in samples:                                 # opt-in metal nuisance (appended LAST)
+    if "a_SiIII" in samples:  # opt-in metal nuisance (appended LAST)
         cols.append(np.asarray(samples["a_SiIII"])[:, None])
-    if "a_SiII" in samples:                                  # SiII doublet (appended AFTER a_SiIII)
+    if "a_SiII" in samples:  # SiII doublet (appended AFTER a_SiIII)
         cols.append(np.asarray(samples["a_SiII"])[:, None])
     return np.concatenate(cols, axis=1)
 
@@ -3058,9 +3623,13 @@ def _packed_names_for(samples, kept_global):
         if not leg_names:
             raise KeyError(
                 "_packed_names_for: samples carry NEITHER the shared 'alpha_lls' block NOR "
-                "any per-leg 'alpha_lls_<leg>' sites — refusing to name an alpha-less matrix")
-        alpha_names = [f"{stem}_{nm}" for nm in leg_names
-                       for stem in ("alpha_lls", "alpha_subdla", "alpha_dla")]
+                "any per-leg 'alpha_lls_<leg>' sites — refusing to name an alpha-less matrix"
+            )
+        alpha_names = [
+            f"{stem}_{nm}"
+            for nm in leg_names
+            for stem in ("alpha_lls", "alpha_subdla", "alpha_dla")
+        ]
     names = list(PARAM_NAMES) + tau0_names + alpha_names
     for nm in ("A_hcd", "B_hcd", "r_subdla", "r_dla"):
         if nm in samples:
@@ -3089,10 +3658,14 @@ def _metal_node_truth(metal_misspec, ctx):
         if not getattr(leg, "metals_on", False):
             continue
         for i in (0, 1):
-            d[f"f_SiIII_{leg.name}_z{i}"] = float(_metal_f_of_z(fz[i], nz_inj, metal_misspec["f_SiIII_nodes"]))
+            d[f"f_SiIII_{leg.name}_z{i}"] = float(
+                _metal_f_of_z(fz[i], nz_inj, metal_misspec["f_SiIII_nodes"])
+            )
             d[f"k_SiIII_{leg.name}_z{i}"] = float(metal_misspec["k_SiIII"])
             if leg.name in siII:
-                d[f"f_SiII_{leg.name}_z{i}"] = float(_metal_f_of_z(fz[i], nz_inj, metal_misspec["f_SiII_nodes"]))
+                d[f"f_SiII_{leg.name}_z{i}"] = float(
+                    _metal_f_of_z(fz[i], nz_inj, metal_misspec["f_SiII_nodes"])
+                )
                 d[f"k_SiII_{leg.name}_z{i}"] = float(metal_misspec["k_SiII"])
     return d
 
@@ -3102,8 +3675,19 @@ def _metal_node_truth(metal_misspec, ctx):
 # run_prod_sbc_shard's truth_site_semantics stamp (module-attribute read). Everything else in
 # sites_extra (metal f/k nodes, f_res sites) is NOT self-drawn: its mock truth is pinned
 # (f_res at the prior center 0) or sits at/below the flat-log support edge (metal nodes).
-SELF_DRAWN_EXTRA_SITES = ("tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla",
-                          "eps_lls", "kappa_lls", "m_sub", "t_sub", "dla_raw", "t_dla")
+SELF_DRAWN_EXTRA_SITES = (
+    "tau0_amp",
+    "dtau0",
+    "s_lls",
+    "s_subdla",
+    "s_dla",
+    "eps_lls",
+    "kappa_lls",
+    "m_sub",
+    "t_sub",
+    "dla_raw",
+    "t_dla",
+)
 
 
 def _metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a):
@@ -3112,7 +3696,8 @@ def _metal_node_sites_extra(samples, step, L, inject_spec, ctx, leg_a):
     check is possible from the shard pkls. Stores thinned draws (SAME step/L as tau0_amp/dtau0) + the
     injected-arm truth (NaN when clean/out-of-class). EMPTY unless flatlog2node actually sampled
     ``f_``/``k_`` nodes ⇒ additive-only, byte-identical golden under uniform/flatlog/metals-off. The
-    scalar ``a_SiIII``/``a_SiII`` and the ``s_*`` slopes are NOT caught (they lack the f_/k_ prefix)."""
+    scalar ``a_SiIII``/``a_SiII`` and the ``s_*`` slopes are NOT caught (they lack the f_/k_ prefix).
+    """
     mspec = (inject_spec or {}).get("metal_misspec") if (leg_a and inject_spec) else None
     mz_truth = _metal_node_truth(mspec, ctx)
     out = {}
@@ -3137,10 +3722,10 @@ def _resolution_sites_extra(samples, step, L, inject_spec, leg_a):
     res_inj = (inject_spec or {}).get("resolution") if (leg_a and inject_spec) else None
     if res_inj is None:
         truth = {"f_res_amp": np.nan, "f_res_slope": np.nan}
-    elif "b_res" in res_inj:                      # scalar in-span injection: reproduced by (amp=b_res, slope=0)
+    elif "b_res" in res_inj:  # scalar in-span injection: reproduced by (amp=b_res, slope=0)
         truth = {"f_res_amp": float(res_inj["b_res"]), "f_res_slope": 0.0}
-    else:                                          # vector/basis OUT-OF-SPAN injection: orthogonal to the span
-        truth = {"f_res_amp": 0.0, "f_res_slope": 0.0}   # no in-span (amp,slope) reproduces it
+    else:  # vector/basis OUT-OF-SPAN injection: orthogonal to the span
+        truth = {"f_res_amp": 0.0, "f_res_slope": 0.0}  # no in-span (amp,slope) reproduces it
     out = {}
     for nm in ("f_res_amp", "f_res_slope"):
         if nm in samples:
@@ -3151,7 +3736,9 @@ def _resolution_sites_extra(samples, step, L, inject_spec, leg_a):
 def run_legb(*args, **kwargs):
     """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 Leg-B closure driver (mocks bound on the single grid). Retired at gate E with the single-grid forward; rebuilt at gate F with truth on each simulation's
     own stored grid (GATE_E_SPEC v1 section 2)."""
-    raise NotImplementedError("run_legb: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F")
+    raise NotImplementedError(
+        "run_legb: the pre-2026-10 mock/truth builder is retired; rebuilt at gate F"
+    )
 
 
 def _loglik_of_draws(ctx, mock_legs, core_per_leg, samples, kept_global):
@@ -3167,21 +3754,38 @@ def _loglik_of_draws(ctx, mock_legs, core_per_leg, samples, kept_global):
     scripts/run_real_fit.py::_loglik_chain — and pass require_zresolved=True so a regression to a
     z-flat alpha here fails LOUDLY (the deployed mean / param-rank SBC were always clean; only this
     loglik-rank path was contaminated)."""
-    theta = jnp.asarray(np.asarray(samples["theta_unit"]))      # (L,9)
-    tau0 = jnp.asarray(np.asarray(samples["tau0_vec"]))         # (L,nZg)
-    a_z = jnp.asarray(np.asarray(samples["alpha_hcd_z"]))       # (L,nZg,3) Z-RESOLVED (the fix)
-    a_si = (jnp.asarray(np.asarray(samples["a_SiIII"])) if "a_SiIII" in samples
-            else jnp.zeros(theta.shape[0]))
+    theta = jnp.asarray(np.asarray(samples["theta_unit"]))  # (L,9)
+    tau0 = jnp.asarray(np.asarray(samples["tau0_vec"]))  # (L,nZg)
+    a_z = jnp.asarray(np.asarray(samples["alpha_hcd_z"]))  # (L,nZg,3) Z-RESOLVED (the fix)
+    a_si = (
+        jnp.asarray(np.asarray(samples["a_SiIII"]))
+        if "a_SiIII" in samples
+        else jnp.zeros(theta.shape[0])
+    )
     # SiII DOUBLET amplitude (Stage C / Task A1): thread a_SiII into the re-score loglik too. The
     # de-double-count cell FLOATS a_SiII, so the SBC loglik-rank (Modrak) must score it; omitting it
     # (the pre-existing gap) ignored the sampled doublet nuisance → a wrong loglik rank. Absent key ⇒
     # zeros ⇒ a_SiII=0 ⇒ byte-exact back-compat with the prior (a_SiIII-only) behaviour.
-    a_si2 = (jnp.asarray(np.asarray(samples["a_SiII"])) if "a_SiII" in samples
-             else jnp.zeros(theta.shape[0]))
+    a_si2 = (
+        jnp.asarray(np.asarray(samples["a_SiII"]))
+        if "a_SiII" in samples
+        else jnp.zeros(theta.shape[0])
+    )
 
     def one(th, t0, al, asi, asi2):
-        return _data_loglik_legcore(ctx, th, t0, al, mock_legs, core_per_leg,
-                                    a_siiii=asi, a_siii=asi2, require_zresolved=True, return_aux=True)
+        return _data_loglik_legcore(
+            ctx,
+            th,
+            t0,
+            al,
+            mock_legs,
+            core_per_leg,
+            a_siiii=asi,
+            a_siii=asi2,
+            require_zresolved=True,
+            return_aux=True,
+        )
+
     ll, aux = jax.vmap(one)(theta, tau0, a_z, a_si, a_si2)
     if np.any(np.asarray(aux["n_out"]) != 0):
         raise ValueError("re-scored draws place kept data bins outside the simulated modes")
@@ -3214,7 +3818,7 @@ def _aggregate_legb(per_mock, *, q_levels):
         if j < n_theta:
             return j
         n_kept = int(np.asarray(rec["kept_global"]).sum())
-        return n_theta + n_kept + (j - n_theta)     # the α block start + the class offset (0,1,2)
+        return n_theta + n_kept + (j - n_theta)  # the α block start + the class offset (0,1,2)
 
     # coverage at each q for the cosmo+α params (the always-present block).
     coverage = {}
@@ -3227,7 +3831,8 @@ def _aggregate_legb(per_mock, *, q_levels):
                 tv = rec["truth_vec"]
                 draws_col = rec["draws"][:, col]
                 lo, hi = central_interval(draws_col, q)
-                truths.append(tv[col]); ints.append((lo, hi))
+                truths.append(tv[col])
+                ints.append((lo, hi))
             cov = empirical_coverage(np.array(truths), np.array(ints))
             cov_q[nm] = cov
         coverage[q] = cov_q
@@ -3239,13 +3844,16 @@ def _aggregate_legb(per_mock, *, q_levels):
         zs = []
         for rec in per_mock:
             col = _col_of(rec, j)
-            dc = rec["draws"][:, col]; sd = float(dc.std())
+            dc = rec["draws"][:, col]
+            sd = float(dc.std())
             if sd > 0:
                 zs.append((float(rec["truth_vec"][col]) - float(dc.mean())) / sd)
         zs = np.array(zs)
-        bias[nm] = dict(mean=float(zs.mean()) if zs.size else np.nan,
-                        se=float(zs.std() / np.sqrt(zs.size)) if zs.size else np.nan,
-                        n=int(zs.size))
+        bias[nm] = dict(
+            mean=float(zs.mean()) if zs.size else np.nan,
+            se=float(zs.std() / np.sqrt(zs.size)) if zs.size else np.nan,
+            n=int(zs.size),
+        )
 
     # loglik-rank ECDF — DIAGNOSTIC ONLY for Leg-B. Leg-B's null is NOT rank-uniform (the truth
     # is a held-out SIM, not an emulator draw), so this ECDF must NEVER gate the Leg-B verdict
@@ -3257,18 +3865,29 @@ def _aggregate_legb(per_mock, *, q_levels):
         ll_ranks.append(loglik_rank(rec["ll_true"], rec["ll_draws"][sub]))
     ll_ranks = np.array(ll_ranks, int)
 
-    gate_valid = bool(L_eff >= L_FLOOR)            # L-floor for the ECDF *band sizing* only
+    gate_valid = bool(L_eff >= L_FLOOR)  # L-floor for the ECDF *band sizing* only
     ll_ecdf_in_band = ecdf_ll = None
     if ll_ranks.size >= 2 and L_eff >= 2:
         lower, upper, ecdf, ok, grid = ecdf_pit_bands(ll_ranks, L_eff, prob=0.95)
-        ll_ecdf_in_band = bool(ok); ecdf_ll = (lower, upper, ecdf, grid)
+        ll_ecdf_in_band = bool(ok)
+        ecdf_ll = (lower, upper, ecdf, grid)
 
     n_divergent = sum(1 for rec in per_mock if rec["n_div"] > 0)
-    return dict(n_mocks=len(per_mock), names=names, coverage=coverage, bias=bias, L=L_eff,
-                gate_valid=gate_valid, n_divergent=n_divergent,
-                ll_ranks=ll_ranks, ll_ecdf_in_band=ll_ecdf_in_band,
-                ll_ecdf_diagnostic_only=True, ecdf_ll=ecdf_ll,
-                per_mock=per_mock, q_levels=q_levels)
+    return dict(
+        n_mocks=len(per_mock),
+        names=names,
+        coverage=coverage,
+        bias=bias,
+        L=L_eff,
+        gate_valid=gate_valid,
+        n_divergent=n_divergent,
+        ll_ranks=ll_ranks,
+        ll_ecdf_in_band=ll_ecdf_in_band,
+        ll_ecdf_diagnostic_only=True,
+        ecdf_ll=ecdf_ll,
+        per_mock=per_mock,
+        q_levels=q_levels,
+    )
 
 
 # ============================================================================ #
@@ -3281,45 +3900,84 @@ def _smoke(args):
 
 def _smoke_convergence(args):
     """PRE-2026-10 INTERFACE (retired at gate E; rebuilt at gate F). The pre-2026-10 Leg-B convergence smoke (mocks on the single grid). Rebuilt at gate F."""
-    raise NotImplementedError("_smoke_convergence: the pre-2026-10 closure smoke is retired; rebuilt at gate F")
+    raise NotImplementedError(
+        "_smoke_convergence: the pre-2026-10 closure smoke is retired; rebuilt at gate F"
+    )
 
 
 def main():
     from hcd_analysis import runtime_data as _RDATA
-    _RDATA.show_loads()      # each verified data load on stderr: product id, version, digest, path
+
+    _RDATA.show_loads()  # each verified data load on stderr: product id, version, digest, path
     ap = argparse.ArgumentParser(description="Phase-C T4b Leg-B closure on the real grids")
-    ap.add_argument("--smoke", action="store_true",
-                    help="tiny end-to-end Leg-B path (N≈4–8) + per-param coverage")
+    ap.add_argument(
+        "--smoke",
+        action="store_true",
+        help="tiny end-to-end Leg-B path (N≈4–8) + per-param coverage",
+    )
     ap.add_argument("--n-mocks", type=int, default=6)
     ap.add_argument("--n-warmup", type=int, default=80)
     ap.add_argument("--n-samples", type=int, default=120)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--cemu-inflate", type=float, default=1.0)
-    ap.add_argument("--diag-cemu", action="store_true",
-                    help="use the DIAGONAL C_emu instead of the cross-class (default)")
-    ap.add_argument("--diag-mass", action="store_true",
-                    help="SMOKE: use a diagonal NUTS mass (faster warmup than dense)")
-    ap.add_argument("--max-tree-depth", type=int, default=7,
-                    help="SMOKE: cap the NUTS tree depth (bounds leapfrogs/step; default 7)")
-    ap.add_argument("--z-lo", type=float, default=0.0,
-                    help="SMOKE: narrow the DESI z-range lower edge (fewer τ₀ params)")
-    ap.add_argument("--z-hi", type=float, default=4.2,
-                    help="SMOKE: narrow the DESI z-range upper edge")
-    ap.add_argument("--desi-only", action="store_true",
-                    help="SMOKE: DESI leg only (skip KS) for the fastest path proof")
-    ap.add_argument("--mf", action="store_true",
-                    help="route the Leg-B forward + mock truth through the MF correction "
-                         "(production through-MF path; the gate invariant)")
-    ap.add_argument("--no-floor", action="store_true",
-                    help="with --mf, DISABLE the MF C_emu floor (default ON)")
+    ap.add_argument(
+        "--diag-cemu",
+        action="store_true",
+        help="use the DIAGONAL C_emu instead of the cross-class (default)",
+    )
+    ap.add_argument(
+        "--diag-mass",
+        action="store_true",
+        help="SMOKE: use a diagonal NUTS mass (faster warmup than dense)",
+    )
+    ap.add_argument(
+        "--max-tree-depth",
+        type=int,
+        default=7,
+        help="SMOKE: cap the NUTS tree depth (bounds leapfrogs/step; default 7)",
+    )
+    ap.add_argument(
+        "--z-lo",
+        type=float,
+        default=0.0,
+        help="SMOKE: narrow the DESI z-range lower edge (fewer τ₀ params)",
+    )
+    ap.add_argument(
+        "--z-hi", type=float, default=4.2, help="SMOKE: narrow the DESI z-range upper edge"
+    )
+    ap.add_argument(
+        "--desi-only",
+        action="store_true",
+        help="SMOKE: DESI leg only (skip KS) for the fastest path proof",
+    )
+    ap.add_argument(
+        "--mf",
+        action="store_true",
+        help="route the Leg-B forward + mock truth through the MF correction "
+        "(production through-MF path; the gate invariant)",
+    )
+    ap.add_argument(
+        "--no-floor", action="store_true", help="with --mf, DISABLE the MF C_emu floor (default ON)"
+    )
     ap.add_argument("--figures", action="store_true", help="emit the 3 diagnostic figures")
-    ap.add_argument("--convergence", action="store_true",
-                    help="STEP-A convergence MODE: one mock, ≥2 dispersed-init chains, "
-                         "rank-R-hat / bulk+tail-ESS / E-BFMI battery (the multichain path)")
-    ap.add_argument("--chains", type=int, default=4,
-                    help="convergence mode: number of dispersed-init chains (default 4)")
-    ap.add_argument("--mock-index", type=int, default=0,
-                    help="convergence mode: which held-out mock (cycles the fold's sims)")
+    ap.add_argument(
+        "--convergence",
+        action="store_true",
+        help="STEP-A convergence MODE: one mock, ≥2 dispersed-init chains, "
+        "rank-R-hat / bulk+tail-ESS / E-BFMI battery (the multichain path)",
+    )
+    ap.add_argument(
+        "--chains",
+        type=int,
+        default=4,
+        help="convergence mode: number of dispersed-init chains (default 4)",
+    )
+    ap.add_argument(
+        "--mock-index",
+        type=int,
+        default=0,
+        help="convergence mode: which held-out mock (cycles the fold's sims)",
+    )
     args = ap.parse_args()
     if args.convergence:
         _smoke_convergence(args)
@@ -3327,6 +3985,7 @@ def main():
         ctx, d, res = _smoke(args)
         if args.figures:
             from . import closure_legb_figs as F  # lazy (matplotlib)
+
             F.make_all(ctx, d, res)
     else:
         ap.print_help()

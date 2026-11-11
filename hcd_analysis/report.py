@@ -44,8 +44,10 @@ def _get_plt():
     if _MPL_AVAILABLE is None:
         try:
             import matplotlib
+
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
+
             _MPL_AVAILABLE = plt
         except ImportError:
             _MPL_AVAILABLE = False
@@ -55,6 +57,7 @@ def _get_plt():
 # ---------------------------------------------------------------------------
 # Figures
 # ---------------------------------------------------------------------------
+
 
 def plot_discovery_summary(snap_map, out_dir: Path) -> None:
     """Heatmap of which (sim, snap) pairs exist."""
@@ -95,7 +98,8 @@ def plot_nhi_histograms(snap_results: List, out_dir: Path) -> None:
         return
 
     fig, axes = plt.subplots(
-        len(snap_results), 1,
+        len(snap_results),
+        1,
         figsize=(8, 3 * max(len(snap_results), 1)),
         squeeze=False,
     )
@@ -135,8 +139,11 @@ def plot_voigt_fit_examples(snap_result, hdf5_path, out_dir: Path, n_examples: i
     dv = snap_result.dv_kms
 
     # Pick absorbers with successful Voigt fits
-    candidates = [a for a in cat.absorbers
-                  if a.fit_success and not a.fast_mode and a.absorber_class in ("LLS", "subDLA", "DLA")]
+    candidates = [
+        a
+        for a in cat.absorbers
+        if a.fit_success and not a.fast_mode and a.absorber_class in ("LLS", "subDLA", "DLA")
+    ]
     if not candidates:
         candidates = [a for a in cat.absorbers if a.absorber_class in ("LLS", "subDLA", "DLA")]
 
@@ -149,7 +156,7 @@ def plot_voigt_fit_examples(snap_result, hdf5_path, out_dir: Path, n_examples: i
 
     for ax, ab in zip(axes, candidates):
         row_tau = read_tau_chunk(hdf5_path, ab.skewer_idx, ab.skewer_idx + 1)[0]
-        seg = row_tau[ab.pix_start:ab.pix_end + 1].astype(np.float64)
+        seg = row_tau[ab.pix_start : ab.pix_end + 1].astype(np.float64)
         n_pix = len(seg)
         v_arr = np.arange(n_pix) * dv
         v_model = np.linspace(v_arr[0], v_arr[-1], 500)
@@ -179,6 +186,7 @@ def plot_cddf(cddf_results: List[Dict], out_dir: Path) -> None:
 
     fig, ax = plt.subplots(figsize=(9, 6))
     import matplotlib.cm as cm
+
     cmap = cm.viridis
     zvals = [r.get("z", 0) for r in cddf_results]
     z_min, z_max = min(zvals), max(zvals) + 1e-6
@@ -197,7 +205,9 @@ def plot_cddf(cddf_results: List[Dict], out_dir: Path) -> None:
     ax.axvline(19.0, ls="--", color="gray", alpha=0.5)
     ax.axvline(20.3, ls="--", color="gray", alpha=0.5)
     ax.text(17.2, ax.get_ylim()[1] if ax.get_ylim()[1] > 1 else 1e-2, "LLS", fontsize=8, va="top")
-    ax.text(19.0, ax.get_ylim()[1] if ax.get_ylim()[1] > 1 else 1e-2, "subDLA", fontsize=8, va="top")
+    ax.text(
+        19.0, ax.get_ylim()[1] if ax.get_ylim()[1] > 1 else 1e-2, "subDLA", fontsize=8, va="top"
+    )
     ax.text(20.3, ax.get_ylim()[1] if ax.get_ylim()[1] > 1 else 1e-2, "DLA", fontsize=8, va="top")
     ax.set_xlabel("log10(NHI) [cm^-2]")
     ax.set_ylabel("f(NHI, X) = d^2n / (dNHI dX)")
@@ -232,8 +242,9 @@ def plot_cddf_perturbation(cddf_result: Dict, perturbations: list, out_dir: Path
         pert = CDDFPerturbation(A=A, alpha=alpha)
         f_pert = pert.perturbed_f_nhi(cddf_result)
         c = colors[i % len(colors)]
-        ax.semilogy(centres[mask], f_pert[mask], "--", color=c, lw=1.5,
-                    label=f"A={A}, alpha={alpha}")
+        ax.semilogy(
+            centres[mask], f_pert[mask], "--", color=c, lw=1.5, label=f"A={A}, alpha={alpha}"
+        )
 
     ax.set_xlabel("log10(NHI)")
     ax.set_ylabel("f(NHI, X)")
@@ -346,6 +357,7 @@ def plot_timing_summary(benchmark_result: Dict, out_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 # Markdown report generation
 # ---------------------------------------------------------------------------
+
 
 def _write(path: Path, content: str) -> None:
     with open(path, "w") as f:
@@ -940,8 +952,10 @@ and ~4–8 SLURM nodes (each 36–48 cores):
         lines.append(f"- Total (sim, snap) pairs: {benchmark_result['n_total_snaps']}")
         lines.append(f"- Average time per snap (full): {benchmark_result['avg_time_per_snap_s']} s")
         lines.append(f"- Campaign serial estimate: {benchmark_result['campaign_serial_hr']} hours")
-        lines.append(f"- Campaign parallel estimate ({benchmark_result['n_workers_assumed']} workers): "
-                     f"{benchmark_result['campaign_parallel_hr']} hours")
+        lines.append(
+            f"- Campaign parallel estimate ({benchmark_result['n_workers_assumed']} workers): "
+            f"{benchmark_result['campaign_parallel_hr']} hours"
+        )
         lines.append("\n## Per-snap timings (sampled)\n")
         lines.append("| sim | snap | z | n_skewers | catalog_est_s | p1d_est_s |")
         lines.append("|-----|------|---|-----------|---------------|-----------|")
@@ -970,7 +984,7 @@ def plot_p1d_excl_sweep(excl_result: Dict, out_dir: Path, z: float = 0.0) -> Non
     import matplotlib.cm as cm
 
     k = excl_result.get("k", np.array([]))
-    p1d_excl = excl_result.get("p1d_excl", np.zeros((0, 0)))   # (n_cuts, n_k)
+    p1d_excl = excl_result.get("p1d_excl", np.zeros((0, 0)))  # (n_cuts, n_k)
     frac_rem = excl_result.get("frac_remaining", np.array([]))
     log_cuts = excl_result.get("log_nhi_cuts", [])
 
@@ -989,8 +1003,14 @@ def plot_p1d_excl_sweep(excl_result: Dict, out_dir: Path, z: float = 0.0) -> Non
         p1d = p1d_excl[ci]
         valid = np.isfinite(p1d) & (p1d > 0) & (k > 0)
         if valid.any():
-            ax.loglog(k[valid], k[valid] * p1d[valid] / np.pi, "-",
-                      color=color, lw=1.2, label=f"logN>{cut:.1f}")
+            ax.loglog(
+                k[valid],
+                k[valid] * p1d[valid] / np.pi,
+                "-",
+                color=color,
+                lw=1.2,
+                label=f"logN>{cut:.1f}",
+            )
     ax.set_xlabel("k [s/km]")
     ax.set_ylabel("k P1D / pi")
     ax.set_title(f"P1D(k) – sightline exclusion (z={z:.2f})")
@@ -1005,8 +1025,7 @@ def plot_p1d_excl_sweep(excl_result: Dict, out_dir: Path, z: float = 0.0) -> Non
         valid = np.isfinite(p1d) & np.isfinite(p1d_ref) & (p1d_ref > 0) & (k > 0)
         if valid.any():
             ratio = p1d[valid] / p1d_ref[valid]
-            ax.semilogx(k[valid], ratio, "-", color=color, lw=1.2,
-                        label=f"logN>{cut:.1f}")
+            ax.semilogx(k[valid], ratio, "-", color=color, lw=1.2, label=f"logN>{cut:.1f}")
     ax.axhline(1.0, color="gray", ls="--", lw=0.8)
     ax.set_xlabel("k [s/km]")
     ax.set_ylabel("P1D(excl) / P1D(least excl)")
@@ -1066,23 +1085,31 @@ def plot_cddf_per_z_bin(stacked_cddf: Dict, out_dir: Path, sim_name: str = "") -
         if not mask.any():
             continue
 
-        ax.semilogy(centres[mask], f_mean[mask], "-", color=color, lw=1.5,
-                    label=f"z={z_mid:.2f}")
+        ax.semilogy(centres[mask], f_mean[mask], "-", color=color, lw=1.5, label=f"z={z_mid:.2f}")
 
         # Shade per-snapshot scatter if available
         if "f_nhi_per_snap" in cdata and len(cdata["f_nhi_per_snap"]) > 1:
             f_per = cdata["f_nhi_per_snap"]
             f_lo = np.nanmin(f_per, axis=0)
             f_hi = np.nanmax(f_per, axis=0)
-            ax.fill_between(centres[mask],
-                            np.where(f_lo[mask] > 0, f_lo[mask], np.nan),
-                            np.where(f_hi[mask] > 0, f_hi[mask], np.nan),
-                            alpha=0.15, color=color)
+            ax.fill_between(
+                centres[mask],
+                np.where(f_lo[mask] > 0, f_lo[mask], np.nan),
+                np.where(f_hi[mask] > 0, f_hi[mask], np.nan),
+                alpha=0.15,
+                color=color,
+            )
 
     for logN, cls in [(17.2, "LLS"), (19.0, "subDLA"), (20.3, "DLA")]:
         ax.axvline(logN, ls="--", color="gray", alpha=0.5, lw=0.8)
-        ax.text(logN + 0.05, ax.get_ylim()[0] if ax.get_ylim()[0] > 0 else 1e-30,
-                cls, fontsize=7, va="bottom", color="gray")
+        ax.text(
+            logN + 0.05,
+            ax.get_ylim()[0] if ax.get_ylim()[0] > 0 else 1e-30,
+            cls,
+            fontsize=7,
+            va="bottom",
+            color="gray",
+        )
 
     ax.set_xlabel("log10(NHI) [cm^-2]")
     ax.set_ylabel("f(NHI, X)")
@@ -1122,6 +1149,7 @@ def plot_convergence_ratios(
     fig, axes = plt.subplots(1, n_z, figsize=(5 * n_z, 5), squeeze=False)
 
     import matplotlib.cm as cm
+
     sim_names = list(convergence.keys())
     colors = [cm.tab10(i / max(len(sim_names) - 1, 1)) for i in range(len(sim_names))]
 
@@ -1135,8 +1163,7 @@ def plot_convergence_ratios(
                 T_k = z_data["all"]["T_k"]
                 valid = np.isfinite(T_k) & (k > 0)
                 if valid.any():
-                    ax.semilogx(k[valid], T_k[valid], "-", color=color, lw=1.2,
-                                label=sim_name[:20])
+                    ax.semilogx(k[valid], T_k[valid], "-", color=color, lw=1.2, label=sim_name[:20])
         ax.axhline(1.0, color="gray", ls="--", lw=0.8)
         ax.set_xlabel("k [s/km]")
         ax.set_ylabel("T(k) = P1D_hires / P1D_lf")

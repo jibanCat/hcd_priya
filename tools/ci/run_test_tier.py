@@ -29,6 +29,7 @@ one test passed. Besides passes, only these outcomes are allowed; each is counte
 In the wheel and source tiers, tests marked slow are deselected (-m "not slow") and listed as NOT RUN. The exit status
 is 1 if any file did not pass. The summary also lists the files of the tiers that CI does not run, with their reasons.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -52,8 +53,18 @@ TIERS_FILE = os.path.join(REPO, "tests", "ci_tiers.toml")
 CI_TIERS = ("wheel", "source")
 ASSET_JOB = "assets"
 FILE_TIMEOUT_S = 1800
-COUNT_KEYS = ("tests", "passed", "failures", "errors", "skipped", "xfailed", "bad_xfail", "asset_skipped",
-              "asset_ran", "asset_missing")
+COUNT_KEYS = (
+    "tests",
+    "passed",
+    "failures",
+    "errors",
+    "skipped",
+    "xfailed",
+    "bad_xfail",
+    "asset_skipped",
+    "asset_ran",
+    "asset_missing",
+)
 
 
 def load_tiers(path=TIERS_FILE):
@@ -68,28 +79,43 @@ def files_of(files, tier):
 
 def asset_job_files(files):
     """The files an assets job runs: the "assets" tier, and every CI-tier file that declares asset_tests."""
-    return sorted(p for p, entry in files.items()
-                  if entry["tier"] == ASSET_JOB or (entry["tier"] in CI_TIERS and entry.get("asset_tests")))
+    return sorted(
+        p
+        for p, entry in files.items()
+        if entry["tier"] == ASSET_JOB or (entry["tier"] in CI_TIERS and entry.get("asset_tests"))
+    )
 
 
 def tier_plan(tier, files):
     """What a run of `tier` does, as data: the files it runs (todo), the environment variables it adds (env), the
     pytest marker expression of each file's run (marker), and per file the declared skips (declared: asset_tests and
-    skipped_by_design) and the tests that must run (required: an assets job's asset_tests; none in a CI tier)."""
+    skipped_by_design) and the tests that must run (required: an assets job's asset_tests; none in a CI tier).
+    """
     assets = tier == ASSET_JOB
     todo = asset_job_files(files) if assets else files_of(files, tier)
-    return dict(todo=todo, env={"HCD_GATE_RUN": "1"} if assets else {}, marker=None if assets else "not slow",
-                declared={rel: files[rel].get("asset_tests", []) + files[rel].get("skipped_by_design", [])
-                          for rel in todo},
-                required={rel: list(files[rel].get("asset_tests", [])) if assets else [] for rel in todo})
+    return dict(
+        todo=todo,
+        env={"HCD_GATE_RUN": "1"} if assets else {},
+        marker=None if assets else "not slow",
+        declared={
+            rel: files[rel].get("asset_tests", []) + files[rel].get("skipped_by_design", [])
+            for rel in todo
+        },
+        required={rel: list(files[rel].get("asset_tests", [])) if assets else [] for rel in todo},
+    )
 
 
 def deferred_legacy_messages(path=os.path.join(REPO, "tests", "gate_helpers.py")):
     """The exact junit messages of the deferred_legacy causes, as tests/conftest.py writes them, read from the
     DEFERRED_CAUSES literal without importing the tests."""
     for node in ast.parse(open(path, encoding="utf-8").read()).body:
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "DEFERRED_CAUSES" for t in node.targets):
-            return {f"deferred_legacy {cause}: {reason}" for cause, (_, reason) in ast.literal_eval(node.value).items()}
+        if isinstance(node, ast.Assign) and any(
+            getattr(t, "id", None) == "DEFERRED_CAUSES" for t in node.targets
+        ):
+            return {
+                f"deferred_legacy {cause}: {reason}"
+                for cause, (_, reason) in ast.literal_eval(node.value).items()
+            }
     raise SystemExit(f"no DEFERRED_CAUSES in {path}")
 
 
@@ -133,11 +159,18 @@ def file_verdict(returncode, counts):
         return False, f"timeout after {FILE_TIMEOUT_S} s"
     if counts is None:
         return False, f"no readable junit report (exit {returncode})"
-    for key, what in (("failures", "failed"), ("errors", "errors"), ("skipped", "undeclared skips"),
-                      ("bad_xfail", "expected failures that are not declared deferrals"),
-                      ("asset_ran", "declared skips that did not skip"),
-                      ("asset_missing", "asset tests not run (skipped, not collected or deselected) in a job that "
-                                        "must have their assets")):
+    for key, what in (
+        ("failures", "failed"),
+        ("errors", "errors"),
+        ("skipped", "undeclared skips"),
+        ("bad_xfail", "expected failures that are not declared deferrals"),
+        ("asset_ran", "declared skips that did not skip"),
+        (
+            "asset_missing",
+            "asset tests not run (skipped, not collected or deselected) in a job that "
+            "must have their assets",
+        ),
+    ):
         if counts[key]:
             return False, f"{counts[key]} {what}"
     if counts["passed"] == 0:
@@ -148,8 +181,13 @@ def file_verdict(returncode, counts):
 
 
 def package_origin(python, cwd):
-    out = subprocess.run([python, "-c", "import hcd_analysis; print(hcd_analysis.__file__)"], cwd=cwd,
-                         capture_output=True, text=True, check=True)
+    out = subprocess.run(
+        [python, "-c", "import hcd_analysis; print(hcd_analysis.__file__)"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     return os.path.realpath(out.stdout.strip())
 
 
@@ -158,7 +196,9 @@ def check_origin(tier, origin):
     if tier == "wheel":
         site = {os.path.realpath(sysconfig.get_paths()[k]) for k in ("purelib", "platlib")}
         if pkg_parent not in site:
-            sys.exit(f"wheel tier: hcd_analysis imports from {origin}, not from this interpreter's site-packages")
+            sys.exit(
+                f"wheel tier: hcd_analysis imports from {origin}, not from this interpreter's site-packages"
+            )
     elif pkg_parent != REPO:
         sys.exit(f"{tier} tier: hcd_analysis imports from {origin}, not from the checkout {REPO}")
 
@@ -167,13 +207,19 @@ def check_installed_is(wheel):
     """Every package file the wheel's RECORD lists is installed with the same sha256 (read back from disk)."""
     with zipfile.ZipFile(wheel) as zf:
         (rec,) = [n for n in zf.namelist() if n.endswith(".dist-info/RECORD")]
-        want = {line.rsplit(",", 2)[0]: line.rsplit(",", 2)[1] for line in zf.read(rec).decode().splitlines()
-                if line.split("/")[0] == "hcd_analysis"}
+        want = {
+            line.rsplit(",", 2)[0]: line.rsplit(",", 2)[1]
+            for line in zf.read(rec).decode().splitlines()
+            if line.split("/")[0] == "hcd_analysis"
+        }
     dist = md.distribution("hcd-priya")
     bad = []
     for path, digest in sorted(want.items()):
         data = open(dist.locate_file(path), "rb").read()
-        got = "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+        got = (
+            "sha256="
+            + base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+        )
         if got != digest:
             bad.append(path)
     if bad or not want:
@@ -183,9 +229,15 @@ def check_installed_is(wheel):
 
 def slow_tests(cmd_base, cwd, env, todo):
     """The tests marked slow in the tier's files (deselected by the runs), from one collection-only pass."""
-    proc = subprocess.run(cmd_base + ["--collect-only", "-q", "-m", "slow", *todo], cwd=cwd, env=env,
-                          capture_output=True, text=True, timeout=FILE_TIMEOUT_S)
-    if proc.returncode not in (0, 5):                 # 5: nothing selected (no slow test in the tier)
+    proc = subprocess.run(
+        cmd_base + ["--collect-only", "-q", "-m", "slow", *todo],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=FILE_TIMEOUT_S,
+    )
+    if proc.returncode not in (0, 5):  # 5: nothing selected (no slow test in the tier)
         return None, proc.stdout + proc.stderr
     return sorted(line.strip() for line in proc.stdout.splitlines() if "::" in line), ""
 
@@ -200,8 +252,11 @@ def run_tier(tier, out, workdir=None, wheel=None):
         if workdir is None or os.path.exists(workdir):
             sys.exit("--workdir must name a directory that does not exist yet")
         os.makedirs(workdir)
-        shutil.copytree(os.path.join(REPO, "tests"), os.path.join(workdir, "tests"),
-                        ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(
+            os.path.join(REPO, "tests"),
+            os.path.join(workdir, "tests"),
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
         cwd = os.path.realpath(workdir)
     else:
         cwd = REPO
@@ -210,11 +265,26 @@ def run_tier(tier, out, workdir=None, wheel=None):
     check_origin(tier, origin)
     n_checked = check_installed_is(wheel) if wheel else None
     deferrals = deferred_legacy_messages()
-    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTEST_ADDOPTS", "PYTEST_PLUGINS")}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("PYTHONPATH", "PYTEST_ADDOPTS", "PYTEST_PLUGINS")
+    }
     env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     env.update(plan["env"])
-    cmd_base = [sys.executable, "-m", "pytest", "-c", os.path.join(REPO, "pyproject.toml"), "--rootdir", cwd,
-                "--confcutdir", cwd, "-p", "no:cacheprovider"]
+    cmd_base = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-c",
+        os.path.join(REPO, "pyproject.toml"),
+        "--rootdir",
+        cwd,
+        "--confcutdir",
+        cwd,
+        "-p",
+        "no:cacheprovider",
+    ]
     slow, slow_error = slow_tests(cmd_base, cwd, env, todo) if plan["marker"] else ([], "")
     results = []
     for rel in todo:
@@ -223,11 +293,21 @@ def run_tier(tier, out, workdir=None, wheel=None):
         t0 = time.time()
         try:
             marker = ["-m", plan["marker"]] if plan["marker"] else []
-            proc = subprocess.run(cmd_base + marker + ["-q", "-rA", f"--junitxml={xml}", rel], cwd=cwd,
-                                  env=env, capture_output=True, text=True, timeout=FILE_TIMEOUT_S)
+            proc = subprocess.run(
+                cmd_base + marker + ["-q", "-rA", f"--junitxml={xml}", rel],
+                cwd=cwd,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=FILE_TIMEOUT_S,
+            )
             rc, log = proc.returncode, proc.stdout + proc.stderr
         except subprocess.TimeoutExpired as exc:
-            partial = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+            partial = (
+                exc.stdout.decode(errors="replace")
+                if isinstance(exc.stdout, bytes)
+                else (exc.stdout or "")
+            )
             rc, log = None, f"timeout after {FILE_TIMEOUT_S} s; output so far:\n{partial}"
         with open(os.path.join(out, slug + ".log"), "w") as f:
             f.write(log)
@@ -235,30 +315,55 @@ def run_tier(tier, out, workdir=None, wheel=None):
         counts = None
         if rc is not None and os.path.exists(xml):
             try:
-                counts = junit_counts(xml, declared, deferrals | set(files[rel].get("deferred_xfails", [])), required)
+                counts = junit_counts(
+                    xml, declared, deferrals | set(files[rel].get("deferred_xfails", [])), required
+                )
             except ET.ParseError:
                 counts = None
         ok, why = file_verdict(rc, counts)
-        results.append(dict(file=rel, ok=ok, reason=why, exit=rc, seconds=round(time.time() - t0, 1),
-                            declared_skips=declared, **(counts or {})))
+        results.append(
+            dict(
+                file=rel,
+                ok=ok,
+                reason=why,
+                exit=rc,
+                seconds=round(time.time() - t0, 1),
+                declared_skips=declared,
+                **(counts or {}),
+            )
+        )
         print(f"{'PASS' if ok else 'FAIL'} {rel} ({why}; {results[-1]['seconds']} s)", flush=True)
     totals = {k: sum(r.get(k, 0) for r in results) for k in COUNT_KEYS}
     failed = [r["file"] for r in results if not r["ok"]]
-    summary = dict(tier=tier, python=sys.version.split()[0], hcd_analysis=origin, wheel=wheel,
-                   wheel_files_checked=n_checked, cwd=cwd, files=results, totals=totals, failed_files=failed,
-                   slow_not_run=slow, slow_listing_error=slow_error,
-                   not_run=not_run(files, ran=(ASSET_JOB,) if tier == ASSET_JOB else ()))
+    summary = dict(
+        tier=tier,
+        python=sys.version.split()[0],
+        hcd_analysis=origin,
+        wheel=wheel,
+        wheel_files_checked=n_checked,
+        cwd=cwd,
+        files=results,
+        totals=totals,
+        failed_files=failed,
+        slow_not_run=slow,
+        slow_listing_error=slow_error,
+        not_run=not_run(files, ran=(ASSET_JOB,) if tier == ASSET_JOB else ()),
+    )
     with open(os.path.join(out, "summary.json"), "w") as f:
         json.dump(summary, f, indent=1)
-    print(f"\n{tier} tier: {len(results)} files, {len(failed)} failed; {totals['tests']} tests: "
-          f"{totals['passed']} passed, {totals['failures']} failed, {totals['errors']} errors, "
-          f"{totals['skipped']} undeclared skips, {totals['bad_xfail']} undeclared expected failures, "
-          f"{totals['asset_missing']} asset tests not run in an assets job; "
-          f"{totals['xfailed']} declared deferrals (expected failures), "
-          f"{totals['asset_skipped']} declared skips NOT RUN (an asset absent here, or skipped by design)")
+    print(
+        f"\n{tier} tier: {len(results)} files, {len(failed)} failed; {totals['tests']} tests: "
+        f"{totals['passed']} passed, {totals['failures']} failed, {totals['errors']} errors, "
+        f"{totals['skipped']} undeclared skips, {totals['bad_xfail']} undeclared expected failures, "
+        f"{totals['asset_missing']} asset tests not run in an assets job; "
+        f"{totals['xfailed']} declared deferrals (expected failures), "
+        f"{totals['asset_skipped']} declared skips NOT RUN (an asset absent here, or skipped by design)"
+    )
     for r in results:
         if r.get("asset_skipped"):
-            print(f"  NOT RUN here (tests/ci_tiers.toml says why): {r['file']}: {', '.join(r['declared_skips'])}")
+            print(
+                f"  NOT RUN here (tests/ci_tiers.toml says why): {r['file']}: {', '.join(r['declared_skips'])}"
+            )
     if slow is None:
         print(f"  could not list the slow tests:\n{slow_error[-2000:]}")
     else:

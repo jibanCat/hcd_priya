@@ -61,8 +61,17 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from . import lineage as L
-from .catalog import (AbsorberCatalog, CatalogIntegrityError, CatalogProvenanceError, RELEASE_FINDER_IDS,
-                      build_catalog, finder_settings, load_validated_catalog, reconcile_counts, LOG_NHI_LLS_MIN)
+from .catalog import (
+    AbsorberCatalog,
+    CatalogIntegrityError,
+    CatalogProvenanceError,
+    RELEASE_FINDER_IDS,
+    build_catalog,
+    finder_settings,
+    load_validated_catalog,
+    reconcile_counts,
+    LOG_NHI_LLS_MIN,
+)
 from .cddf import (
     CDDFPerturbation,
     compute_perturbed_p1d,
@@ -81,8 +90,13 @@ from .p1d import (
     _DEFAULT_K_BINS,
 )
 from .snapshot_map import SimSnapshot, SnapEntry, build_snapshot_map
-from .snapshot_record import (DONE_CATALOGUE, DONE_FULL, PRODUCT_KINDS, SnapshotIntegrityError,  # noqa: F401
-                              verify_snapshot_dir)
+from .snapshot_record import (
+    DONE_CATALOGUE,
+    DONE_FULL,
+    PRODUCT_KINDS,
+    SnapshotIntegrityError,  # noqa: F401
+    verify_snapshot_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,11 +105,13 @@ logger = logging.getLogger(__name__)
 # Metadata helper
 # ---------------------------------------------------------------------------
 
+
 def _repo_dirty() -> Optional[bool]:
     """Whether the hcd_priya checkout has uncommitted changes (None when git cannot tell). Asked at each snapshot,
     with _repo_commit, so the two describe one moment; without git's optional index lock, so a run never writes into
     the checkout's git metadata."""
     import subprocess
+
     try:
         out = subprocess.check_output(
             ["git", "--no-optional-locks", "status", "--porcelain", "--untracked-files=no"],
@@ -111,6 +127,7 @@ def _repo_dirty() -> Optional[bool]:
 def _repo_commit() -> str:
     """Return short git commit hash of the hcd_priya repo, or 'unknown'."""
     import subprocess
+
     try:
         out = subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -133,9 +150,20 @@ def _repo_commit() -> str:
 # output location are not product settings and may change between runs; the per-snapshot products do not depend on
 # them, while <sim>/cddf_stacked.npz is rebuilt from the snapshots each invocation selects and lists them
 # (z_snapshots). A change of code alone is not refused; each snapshot's meta.json records the code commit.
-PRODUCT_SETTING_KEYS = ("data_root", "prefer_grid", "absorber_classes", "absorber", "p1d", "cddf", "benchmark", "debug",
-                        "catalogue_only")
-HIRES_SUBDIR = "hires"     # run_hires writes under <output_root>/hires, an output root with its own record
+PRODUCT_SETTING_KEYS = (
+    "data_root",
+    "prefer_grid",
+    "absorber_classes",
+    "absorber",
+    "p1d",
+    "cddf",
+    "benchmark",
+    "debug",
+    "catalogue_only",
+)
+HIRES_SUBDIR = (
+    "hires"  # run_hires writes under <output_root>/hires, an output root with its own record
+)
 CDDF_KIND_VERSION = 1
 SNAPSHOT_KIND_VERSION = 1
 # the completion markers, the product kinds a snapshot may list, SnapshotIntegrityError and the snapshot verifier live
@@ -155,13 +183,18 @@ def check_run_settings(cfg: PipelineConfig) -> Path:
     different settings (for example another ``absorber.tau_threshold``), or holds files but no record (results of
     unknown settings, such as an output root written before records existed). The hires subdirectory, an output root
     with its own record, does not count as the low-resolution root's contents."""
-    return record_or_verify(Path(cfg.output_root), product_settings(cfg), info=lambda: {"code_commit": _repo_commit()},
-                            ignore=(HIRES_SUBDIR,))
+    return record_or_verify(
+        Path(cfg.output_root),
+        product_settings(cfg),
+        info=lambda: {"code_commit": _repo_commit()},
+        ignore=(HIRES_SUBDIR,),
+    )
 
 
 # ---------------------------------------------------------------------------
 # Output path helpers
 # ---------------------------------------------------------------------------
+
 
 def snap_output_dir(cfg: PipelineConfig, sim_name: str, snap: int) -> Path:
     d = Path(cfg.output_root) / sim_name / f"snap_{snap:03d}"
@@ -188,8 +221,10 @@ def _refuse_other_mode(out_dir: Path, cfg: PipelineConfig) -> None:
     other = DONE_FULL if cfg.catalogue_only else DONE_CATALOGUE
     if (out_dir / other).exists():
         mode = "catalogue-only" if cfg.catalogue_only else "full"
-        raise RunSettingsMismatch(f"{out_dir} holds the marker {other} of the other mode; this {mode} run neither "
-                                  "resumes nor overwrites it. Nothing was read or written.")
+        raise RunSettingsMismatch(
+            f"{out_dir} holds the marker {other} of the other mode; this {mode} run neither "
+            "resumes nor overwrites it. Nothing was read or written."
+        )
 
 
 def write_error(cfg: PipelineConfig, sim_name: str, snap: int, msg: str) -> None:
@@ -202,32 +237,61 @@ def write_error(cfg: PipelineConfig, sim_name: str, snap: int, msg: str) -> None
 # Catalogue and lineage helpers
 # ---------------------------------------------------------------------------
 
+
 def _catalog_kwargs(cfg: PipelineConfig) -> dict:
     """The catalogue-determining arguments of build_catalog for this run (the keyword names of finder_settings)."""
     a = cfg.absorber
-    return dict(tau_threshold=a.tau_threshold, merge_dv_kms=a.merge_dv_kms, min_pixels=a.min_pixels,
-                b_init=a.b_init_kms, b_bounds=tuple(a.b_bounds), tau_fit_cap=a.tau_fit_cap,
-                voigt_max_iter=a.voigt_max_iter, n_skewers=cfg.p1d.n_skewers if cfg.debug else None,
-                fast_mode=a.fast_mode or cfg.benchmark, min_log_nhi=a.min_log_nhi)
+    return dict(
+        tau_threshold=a.tau_threshold,
+        merge_dv_kms=a.merge_dv_kms,
+        min_pixels=a.min_pixels,
+        b_init=a.b_init_kms,
+        b_bounds=tuple(a.b_bounds),
+        tau_fit_cap=a.tau_fit_cap,
+        voigt_max_iter=a.voigt_max_iter,
+        n_skewers=cfg.p1d.n_skewers if cfg.debug else None,
+        fast_mode=a.fast_mode or cfg.benchmark,
+        min_log_nhi=a.min_log_nhi,
+    )
 
 
 def _n_skewers_built(kw: dict, n_skewers_file: int) -> int:
-    return int(n_skewers_file) if kw["n_skewers"] is None else min(int(kw["n_skewers"]), int(n_skewers_file))
+    return (
+        int(n_skewers_file)
+        if kw["n_skewers"] is None
+        else min(int(kw["n_skewers"]), int(n_skewers_file))
+    )
 
 
-def _catalog_for_snap(cfg, entry, out_dir, header, dv_kms, sim_name, snap, z, run_settings_sha256) -> AbsorberCatalog:
+def _catalog_for_snap(
+    cfg, entry, out_dir, header, dv_kms, sim_name, snap, z, run_settings_sha256
+) -> AbsorberCatalog:
     """The snapshot's catalogue: a cached catalog.npz on resume, refused unless load_validated_catalog accepts it
-    with this run's finder settings, raw spectra file and skewer count; else built (stamped) and saved."""
+    with this run's finder settings, raw spectra file and skewer count; else built (stamped) and saved.
+    """
     catalog_path = out_dir / "catalog.npz"
     kw = _catalog_kwargs(cfg)
     if cfg.resume and catalog_path.exists():
-        catalog = load_validated_catalog(catalog_path, int(header.nbins), settings=finder_settings(**kw),
-                                         raw_path=entry.path, n_skewers_built=_n_skewers_built(kw, header.n_skewers))
+        catalog = load_validated_catalog(
+            catalog_path,
+            int(header.nbins),
+            settings=finder_settings(**kw),
+            raw_path=entry.path,
+            n_skewers_built=_n_skewers_built(kw, header.n_skewers),
+        )
         logger.info("  loaded catalog from cache (%d absorbers)", len(catalog.absorbers))
         return catalog
-    catalog = build_catalog(hdf5_path=entry.path, sim_name=sim_name, snap=snap, z=z, dv_kms=dv_kms,
-                            batch_size=cfg.skewer_batch_size, n_workers=cfg.n_workers_skewer,
-                            run_settings_sha256=run_settings_sha256, **kw)
+    catalog = build_catalog(
+        hdf5_path=entry.path,
+        sim_name=sim_name,
+        snap=snap,
+        z=z,
+        dv_kms=dv_kms,
+        batch_size=cfg.skewer_batch_size,
+        n_workers=cfg.n_workers_skewer,
+        run_settings_sha256=run_settings_sha256,
+        **kw,
+    )
     catalog.save_npz(catalog_path)
     return catalog
 
@@ -239,31 +303,58 @@ def _catalog_input(out_dir: Path, catalog: AbsorberCatalog) -> dict:
     with np.load(path, allow_pickle=False) as d:
         on_disk = L.parse_record(str(d[L.NPZ_KEY][()])) if L.NPZ_KEY in d.files else None
     if catalog.lineage is None or on_disk != catalog.lineage:
-        raise CatalogProvenanceError(f"{path}: the catalogue on disk is not the one this snapshot used")
+        raise CatalogProvenanceError(
+            f"{path}: the catalogue on disk is not the one this snapshot used"
+        )
     ident = L.file_identity(path)
-    return L.input_entry("catalog", "catalog", {"sha256": ident["sha256"], "size": ident["size"]},
-                         record=catalog.lineage)
+    return L.input_entry(
+        "catalog",
+        "catalog",
+        {"sha256": ident["sha256"], "size": ident["size"]},
+        record=catalog.lineage,
+    )
 
 
-def _write_cddf(out_dir: Path, cddf_result: Dict, catalog: AbsorberCatalog, catalog_entry: dict,
-                run_settings_sha256: Optional[str]) -> dict:
+def _write_cddf(
+    out_dir: Path,
+    cddf_result: Dict,
+    catalog: AbsorberCatalog,
+    catalog_entry: dict,
+    run_settings_sha256: Optional[str],
+) -> dict:
     """cddf.npz with its lineage record: the catalogue (sha256 of catalog.npz) and the raw spectra file whose header
     gives the absorption path. Returns the record."""
     arrays = {k: np.asarray(v) for k, v in cddf_result.items() if not isinstance(v, (str, dict))}
     raw = L.find_input(catalog.lineage, "raw_spectra")
     rec = L.build_record(
-        "cddf", CDDF_KIND_VERSION,
+        "cddf",
+        CDDF_KIND_VERSION,
         inputs=[catalog_entry, L.input_entry("raw_spectra_header", "raw_spectra", raw)],
-        finder_ids=None, settings={"log_nhi_edges": [float(x) for x in np.asarray(cddf_result["log_nhi_edges"])]},
-        code=L.code_identity(), allowed_finder_ids=RELEASE_FINDER_IDS, run_settings_sha256=run_settings_sha256,
-        product={"sim_name": catalog.sim_name, "snap": int(catalog.snap), "z": float(catalog.z),
-                 "n_absorbers": int(np.sum(arrays["n_absorbers"])), "payload_sha256": L.arrays_sha256(arrays)})
+        finder_ids=None,
+        settings={"log_nhi_edges": [float(x) for x in np.asarray(cddf_result["log_nhi_edges"])]},
+        code=L.code_identity(),
+        allowed_finder_ids=RELEASE_FINDER_IDS,
+        run_settings_sha256=run_settings_sha256,
+        product={
+            "sim_name": catalog.sim_name,
+            "snap": int(catalog.snap),
+            "z": float(catalog.z),
+            "n_absorbers": int(np.sum(arrays["n_absorbers"])),
+            "payload_sha256": L.arrays_sha256(arrays),
+        },
+    )
     L.write_npz(out_dir / "cddf.npz", arrays, rec)
     return rec
 
 
-def _write_meta(out_dir: Path, meta: dict, products: List[str], records: Dict[str, dict], mode: str,
-                run_settings_sha256: Optional[str]) -> None:
+def _write_meta(
+    out_dir: Path,
+    meta: dict,
+    products: List[str],
+    records: Dict[str, dict],
+    mode: str,
+    run_settings_sha256: Optional[str],
+) -> None:
     """meta.json, written last before the completion marker (atomically): ``mode``, ``products`` (sha256 and size of
     every product written for the snapshot) and ``lineage``, the snapshot's record listing those products as its
     inputs (with the records of the lineage-bearing ones, ``records``)."""
@@ -271,12 +362,21 @@ def _write_meta(out_dir: Path, meta: dict, products: List[str], records: Dict[st
     for name in products:
         ident = L.file_identity(out_dir / name)
         prods[name] = {"sha256": ident["sha256"], "size": ident["size"]}
-        entries.append(L.input_entry(name, PRODUCT_KINDS[name], prods[name], record=records.get(name)))
+        entries.append(
+            L.input_entry(name, PRODUCT_KINDS[name], prods[name], record=records.get(name))
+        )
     meta = dict(meta, mode=mode, products=prods)
     meta["lineage"] = L.build_record(
-        "snapshot", SNAPSHOT_KIND_VERSION, inputs=entries, finder_ids=None, settings={"mode": mode},
-        code=L.code_identity(), allowed_finder_ids=RELEASE_FINDER_IDS, run_settings_sha256=run_settings_sha256,
-        product={"sim_name": meta["sim_name"], "snap": int(meta["snap"]), "z": float(meta["z"])})
+        "snapshot",
+        SNAPSHOT_KIND_VERSION,
+        inputs=entries,
+        finder_ids=None,
+        settings={"mode": mode},
+        code=L.code_identity(),
+        allowed_finder_ids=RELEASE_FINDER_IDS,
+        run_settings_sha256=run_settings_sha256,
+        product={"sim_name": meta["sim_name"], "snap": int(meta["snap"]), "z": float(meta["z"])},
+    )
     tmp = out_dir / f".meta.json.{os.getpid()}.tmp"
     try:
         with open(tmp, "w") as f:
@@ -303,14 +403,16 @@ def _meta_base(header, sim_name, snap, z, dv_kms, n_absorbers, timing, ics_meta)
         "code_dirty": _repo_dirty(),
     }
     if ics_meta:
-        meta["sim_ics"] = {k: (float(v) if isinstance(v, (int, float)) else v)
-                           for k, v in ics_meta.items()}
+        meta["sim_ics"] = {
+            k: (float(v) if isinstance(v, (int, float)) else v) for k, v in ics_meta.items()
+        }
     return meta
 
 
 # ---------------------------------------------------------------------------
 # Level 1: one (sim, snap)
 # ---------------------------------------------------------------------------
+
 
 @dataclasses.dataclass
 class SnapResult:
@@ -319,7 +421,7 @@ class SnapResult:
     z: float
     dv_kms: float
     catalog: AbsorberCatalog
-    p1d_variants: Dict   # variant_name → (k, p1d, mean_F)
+    p1d_variants: Dict  # variant_name → (k, p1d, mean_F)
     p1d_ratios: Dict
     cddf_result: Dict
     timing: Dict[str, float]
@@ -347,7 +449,9 @@ def run_one_snap(
     sim_name = sim_snapshot.sim.name
     snap = entry.snap
     z = entry.z
-    rs_path = check_run_settings(cfg)          # refuses a rerun with other settings before anything is touched
+    rs_path = check_run_settings(
+        cfg
+    )  # refuses a rerun with other settings before anything is touched
     out_dir = snap_output_dir(cfg, sim_name, snap)
     _refuse_other_mode(out_dir, cfg)
 
@@ -377,13 +481,38 @@ def run_one_snap(
             t0 = time.perf_counter()
             cddf_result = measure_cddf(catalog, header)
             timing["cddf"] = time.perf_counter() - t0
-            _save_catalogue_outputs(out_dir, catalog, cddf_result, ics_meta, timing, header, sim_name, snap, z, dv_kms,
-                                    run_settings_sha256=rs_sha)
+            _save_catalogue_outputs(
+                out_dir,
+                catalog,
+                cddf_result,
+                ics_meta,
+                timing,
+                header,
+                sim_name,
+                snap,
+                z,
+                dv_kms,
+                run_settings_sha256=rs_sha,
+            )
             mark_done(cfg, sim_name, snap)
-            logger.info("DONE (catalogue): sim=%s snap=%03d z=%.2f  timing=%s", sim_name[:30], snap, z,
-                        {k: f"{v:.1f}s" for k, v in timing.items()})
-            return SnapResult(sim_name=sim_name, snap=snap, z=z, dv_kms=dv_kms, catalog=catalog, p1d_variants={},
-                              p1d_ratios={}, cddf_result=cddf_result, timing=timing)
+            logger.info(
+                "DONE (catalogue): sim=%s snap=%03d z=%.2f  timing=%s",
+                sim_name[:30],
+                snap,
+                z,
+                {k: f"{v:.1f}s" for k, v in timing.items()},
+            )
+            return SnapResult(
+                sim_name=sim_name,
+                snap=snap,
+                z=z,
+                dv_kms=dv_kms,
+                catalog=catalog,
+                p1d_variants={},
+                p1d_ratios={},
+                cddf_result=cddf_result,
+                timing=timing,
+            )
 
         # --- Compute P1D variants -----------------------------------------
         t0 = time.perf_counter()
@@ -413,7 +542,7 @@ def run_one_snap(
                 hdf5_path=entry.path,
                 nbins=header.nbins,
                 dv_kms=dv_kms,
-                catalog=catalog,   # AbsorberCatalog accepted directly; no pandas needed
+                catalog=catalog,  # AbsorberCatalog accepted directly; no pandas needed
                 log_nhi_cuts=nhi_cuts,
                 batch_size=cfg.skewer_batch_size,
                 n_skewers=n_skewers_p1d,
@@ -423,6 +552,7 @@ def run_one_snap(
         # --- Per-class subset P1D (Rogers template input) -----------------
         t0 = time.perf_counter()
         from .p1d import compute_p1d_per_class, save_p1d_per_class_hdf5
+
         per_class = compute_p1d_per_class(
             hdf5_path=entry.path,
             nbins=header.nbins,
@@ -434,7 +564,10 @@ def run_one_snap(
         save_p1d_per_class_hdf5(
             out_dir / "p1d_per_class.h5",
             per_class,
-            sim_name=sim_name, snap=snap, z=z, dv_kms=dv_kms,
+            sim_name=sim_name,
+            snap=snap,
+            z=z,
+            dv_kms=dv_kms,
             extra_attrs={
                 "nbins": int(header.nbins),
                 "n_skewers_file": int(header.n_skewers),
@@ -475,20 +608,45 @@ def run_one_snap(
             timing["perturbed_p1d"] = time.perf_counter() - t0
 
         # --- Save outputs -------------------------------------------------
-        _save_snap_outputs(out_dir, catalog, p1d_variants, p1d_ratios, cddf_result,
-                           perturbed_p1d, excl_result, ics_meta,
-                           timing, header, sim_name, snap, z, dv_kms,
-                           run_settings_sha256=rs_sha, written_before=("p1d_per_class.h5",))
+        _save_snap_outputs(
+            out_dir,
+            catalog,
+            p1d_variants,
+            p1d_ratios,
+            cddf_result,
+            perturbed_p1d,
+            excl_result,
+            ics_meta,
+            timing,
+            header,
+            sim_name,
+            snap,
+            z,
+            dv_kms,
+            run_settings_sha256=rs_sha,
+            written_before=("p1d_per_class.h5",),
+        )
         mark_done(cfg, sim_name, snap)
 
         result = SnapResult(
-            sim_name=sim_name, snap=snap, z=z, dv_kms=dv_kms,
-            catalog=catalog, p1d_variants=p1d_variants, p1d_ratios=p1d_ratios,
-            cddf_result=cddf_result, timing=timing, perturbed_p1d=perturbed_p1d,
+            sim_name=sim_name,
+            snap=snap,
+            z=z,
+            dv_kms=dv_kms,
+            catalog=catalog,
+            p1d_variants=p1d_variants,
+            p1d_ratios=p1d_ratios,
+            cddf_result=cddf_result,
+            timing=timing,
+            perturbed_p1d=perturbed_p1d,
         )
-        logger.info("DONE: sim=%s snap=%03d z=%.2f  timing=%s",
-                    sim_name[:30], snap, z,
-                    {k: f"{v:.1f}s" for k, v in timing.items()})
+        logger.info(
+            "DONE: sim=%s snap=%03d z=%.2f  timing=%s",
+            sim_name[:30],
+            snap,
+            z,
+            {k: f"{v:.1f}s" for k, v in timing.items()},
+        )
         return result
 
     except Exception:
@@ -518,10 +676,13 @@ def _save_snap_outputs(
     written_before=(),
 ) -> None:
     """Save all outputs for one (sim, snap) to out_dir; meta.json last, listing the sha256 of every product written
-    for the snapshot (``written_before``: the ones the caller wrote earlier, besides catalog.npz)."""
+    for the snapshot (``written_before``: the ones the caller wrote earlier, besides catalog.npz).
+    """
     # reconcile the absorber counts against the CDDF first: none of the files below is written if that fails
     # (catalog.npz was written earlier, only after the finder, overlap and value checks of build_catalog)
-    n_absorbers = reconcile_counts(catalog, cddf_result["n_absorbers"], cddf_result["log_nhi_edges"])
+    n_absorbers = reconcile_counts(
+        catalog, cddf_result["n_absorbers"], cddf_result["log_nhi_edges"]
+    )
     catalog_entry = _catalog_input(out_dir, catalog)
     written = ["catalog.npz", *written_before, "p1d.npz", "cddf.npz"]
 
@@ -555,39 +716,70 @@ def _save_snap_outputs(
 
     # Perturbed P1D → npz
     if perturbed_p1d is not None:
-        pert_save = {k: v for k, v in perturbed_p1d.items()
-                     if isinstance(v, np.ndarray)}
+        pert_save = {k: v for k, v in perturbed_p1d.items() if isinstance(v, np.ndarray)}
         np.savez(out_dir / "p1d_perturbed.npz", **pert_save)
         written.append("p1d_perturbed.npz")
 
     # Timing + metadata → JSON (includes SimulationICs fields), with the products' sha256 and the snapshot record
     meta = _meta_base(header, sim_name, snap, z, dv_kms, n_absorbers, timing, ics_meta)
-    _write_meta(out_dir, meta, written, {"catalog.npz": catalog.lineage, "cddf.npz": cddf_record}, "full",
-                run_settings_sha256)
+    _write_meta(
+        out_dir,
+        meta,
+        written,
+        {"catalog.npz": catalog.lineage, "cddf.npz": cddf_record},
+        "full",
+        run_settings_sha256,
+    )
 
 
-def _save_catalogue_outputs(out_dir: Path, catalog: AbsorberCatalog, cddf_result: Dict, ics_meta: Dict, timing: Dict,
-                            header, sim_name: str, snap: int, z: float, dv_kms: float, *,
-                            run_settings_sha256: Optional[str] = None) -> None:
+def _save_catalogue_outputs(
+    out_dir: Path,
+    catalog: AbsorberCatalog,
+    cddf_result: Dict,
+    ics_meta: Dict,
+    timing: Dict,
+    header,
+    sim_name: str,
+    snap: int,
+    z: float,
+    dv_kms: float,
+    *,
+    run_settings_sha256: Optional[str] = None,
+) -> None:
     """Catalogue-only mode: cddf.npz (with its lineage) and meta.json (counts, the sha256 of catalog.npz and
-    cddf.npz, the code commit and dirty flag, the snapshot record), after the same count reconciliation."""
-    n_absorbers = reconcile_counts(catalog, cddf_result["n_absorbers"], cddf_result["log_nhi_edges"])
+    cddf.npz, the code commit and dirty flag, the snapshot record), after the same count reconciliation.
+    """
+    n_absorbers = reconcile_counts(
+        catalog, cddf_result["n_absorbers"], cddf_result["log_nhi_edges"]
+    )
     catalog_entry = _catalog_input(out_dir, catalog)
     cddf_record = _write_cddf(out_dir, cddf_result, catalog, catalog_entry, run_settings_sha256)
     meta = _meta_base(header, sim_name, snap, z, dv_kms, n_absorbers, timing, ics_meta)
-    _write_meta(out_dir, meta, ["catalog.npz", "cddf.npz"], {"catalog.npz": catalog.lineage, "cddf.npz": cddf_record},
-                "catalogue", run_settings_sha256)
+    _write_meta(
+        out_dir,
+        meta,
+        ["catalog.npz", "cddf.npz"],
+        {"catalog.npz": catalog.lineage, "cddf.npz": cddf_record},
+        "catalogue",
+        run_settings_sha256,
+    )
 
 
-def _load_snap_result(out_dir: Path, sim_name: str, snap: int, z: float, cfg: PipelineConfig,
-                      raw_path) -> Optional[SnapResult]:
+def _load_snap_result(
+    out_dir: Path, sim_name: str, snap: int, z: float, cfg: PipelineConfig, raw_path
+) -> Optional[SnapResult]:
     """Load a previously-saved SnapResult (lightweight: the raw spectra file is only stat-ed). The snapshot must pass
     verify_snapshot_dir with this run's mode, finder settings and raw file: a readable meta.json, the catalogue through
     load_validated_catalog, every product matching the sha256 meta.json records, and records that agree. A refusal,
-    including a missing or unreadable meta.json, raises CatalogIntegrityError (SnapshotIntegrityError)."""
+    including a missing or unreadable meta.json, raises CatalogIntegrityError (SnapshotIntegrityError).
+    """
     try:
-        v = verify_snapshot_dir(out_dir, mode="catalogue" if cfg.catalogue_only else "full",
-                                settings=finder_settings(**_catalog_kwargs(cfg)), raw_path=raw_path)
+        v = verify_snapshot_dir(
+            out_dir,
+            mode="catalogue" if cfg.catalogue_only else "full",
+            settings=finder_settings(**_catalog_kwargs(cfg)),
+            raw_path=raw_path,
+        )
         meta, catalog, cddf_result = v.meta, v.catalog, v.cddf
 
         p1d_variants, p1d_ratios = {}, {}
@@ -606,7 +798,9 @@ def _load_snap_result(out_dir: Path, sim_name: str, snap: int, z: float, cfg: Pi
             p1d_ratios = dict(np.load(ratio_path)) if ratio_path.exists() else {}
 
         return SnapResult(
-            sim_name=sim_name, snap=snap, z=z,
+            sim_name=sim_name,
+            snap=snap,
+            z=z,
             dv_kms=meta["dv_kms"],
             catalog=catalog,
             p1d_variants=p1d_variants,
@@ -615,7 +809,7 @@ def _load_snap_result(out_dir: Path, sim_name: str, snap: int, z: float, cfg: Pi
             timing=meta.get("timing_s", {}),
         )
     except CatalogIntegrityError:
-        raise                                 # a refused catalogue is never reused, nor silently dropped from a stack
+        raise  # a refused catalogue is never reused, nor silently dropped from a stack
     except Exception as exc:
         logger.warning("Could not load cached result for snap %03d: %s", snap, exc)
         return None
@@ -624,6 +818,7 @@ def _load_snap_result(out_dir: Path, sim_name: str, snap: int, z: float, cfg: Pi
 # ---------------------------------------------------------------------------
 # Level 2: one sim, all z
 # ---------------------------------------------------------------------------
+
 
 def run_sim_all_z(
     sim_snapshot: SimSnapshot,
@@ -667,8 +862,13 @@ def _stack_and_save_cddf(
         bin_labels = []
         for label, cdata in stacked.items():
             safe_label = label.replace("-", "to").replace(".", "p")
-            for field in ("f_nhi", "n_absorbers", "log_nhi_centres", "log_nhi_edges",
-                          "f_nhi_per_snap"):
+            for field in (
+                "f_nhi",
+                "n_absorbers",
+                "log_nhi_centres",
+                "log_nhi_edges",
+                "f_nhi_per_snap",
+            ):
                 if field in cdata:
                     save_dict[f"{safe_label}__{field}"] = np.asarray(cdata[field])
             save_dict[f"{safe_label}__z_snapshots"] = np.array(cdata["z_snapshots"])
@@ -678,7 +878,9 @@ def _stack_and_save_cddf(
             bin_labels.append(label)
 
         np.savez(sim_dir / "cddf_stacked.npz", **save_dict)
-        logger.info("  CDDF stacked for sim=%s: %d z-bins", sim_snapshot.sim.name[:30], len(bin_labels))
+        logger.info(
+            "  CDDF stacked for sim=%s: %d z-bins", sim_snapshot.sim.name[:30], len(bin_labels)
+        )
     except Exception as exc:
         logger.warning("CDDF stacking failed for sim=%s: %s", sim_snapshot.sim.name[:30], exc)
 
@@ -686,6 +888,7 @@ def _stack_and_save_cddf(
 # ---------------------------------------------------------------------------
 # Level 3: all sims, all z
 # ---------------------------------------------------------------------------
+
 
 def run_all(cfg: PipelineConfig) -> Dict[str, List[Optional[SnapResult]]]:
     """
@@ -696,7 +899,7 @@ def run_all(cfg: PipelineConfig) -> Dict[str, List[Optional[SnapResult]]]:
     """
     from joblib import Parallel, delayed
 
-    check_run_settings(cfg)                    # before anything is read or written (config_used.yaml included)
+    check_run_settings(cfg)  # before anything is read or written (config_used.yaml included)
     snap_map = build_snapshot_map(
         data_root=cfg.data_root,
         z_min=cfg.z_min,
@@ -706,12 +909,11 @@ def run_all(cfg: PipelineConfig) -> Dict[str, List[Optional[SnapResult]]]:
     )
 
     if cfg.debug:
-        snap_map = snap_map[:cfg.debug_n_sims]
+        snap_map = snap_map[: cfg.debug_n_sims]
         for ss in snap_map:
-            ss.entries[:] = ss.entries[:cfg.debug_n_snaps]
+            ss.entries[:] = ss.entries[: cfg.debug_n_snaps]
 
-    logger.info("Running %d simulations, %d workers",
-                len(snap_map), cfg.n_workers)
+    logger.info("Running %d simulations, %d workers", len(snap_map), cfg.n_workers)
 
     # Save config for reproducibility
     Path(cfg.output_root).mkdir(parents=True, exist_ok=True)
@@ -719,19 +921,18 @@ def run_all(cfg: PipelineConfig) -> Dict[str, List[Optional[SnapResult]]]:
 
     if cfg.n_workers > 1:
         all_results_flat = Parallel(n_jobs=cfg.n_workers, verbose=10)(
-            delayed(run_sim_all_z)(ss, cfg)
-            for ss in snap_map
+            delayed(run_sim_all_z)(ss, cfg) for ss in snap_map
         )
     else:
         all_results_flat = [run_sim_all_z(ss, cfg) for ss in snap_map]
 
-    return {ss.sim.name: results
-            for ss, results in zip(snap_map, all_results_flat)}
+    return {ss.sim.name: results for ss, results in zip(snap_map, all_results_flat)}
 
 
 # ---------------------------------------------------------------------------
 # HiRes mode: process emu_full_hires and compute convergence ratios
 # ---------------------------------------------------------------------------
+
 
 def run_hires(cfg: PipelineConfig) -> Dict[str, List[Optional[SnapResult]]]:
     """
@@ -741,8 +942,10 @@ def run_hires(cfg: PipelineConfig) -> Dict[str, List[Optional[SnapResult]]]:
     from joblib import Parallel, delayed
 
     hires_cfg = dataclasses.replace(cfg, data_root=cfg.hires_data_root)
-    hires_cfg = dataclasses.replace(hires_cfg, output_root=str(Path(cfg.output_root) / HIRES_SUBDIR))
-    check_run_settings(hires_cfg)              # before anything is read or written (config_hires.yaml included)
+    hires_cfg = dataclasses.replace(
+        hires_cfg, output_root=str(Path(cfg.output_root) / HIRES_SUBDIR)
+    )
+    check_run_settings(hires_cfg)  # before anything is read or written (config_hires.yaml included)
 
     snap_map = build_snapshot_map(
         data_root=hires_cfg.data_root,
@@ -838,18 +1041,28 @@ def check_convergence_settings(lf_root: Path, hf_root: Path) -> None:
         recs[name] = read_record(p)["settings"] if os.path.lexists(p) else None
     missing = [n for n, r in recs.items() if r is None]
     if missing:
-        raise RunSettingsMismatch("convergence: " + "; ".join(f"the {n} root has no {RUN_SETTINGS_FILE}" for n in missing)
-                                  + f", so the settings of its products are unknown and {lf_root} / {hf_root} cannot "
-                                  "be combined")
+        raise RunSettingsMismatch(
+            "convergence: "
+            + "; ".join(f"the {n} root has no {RUN_SETTINGS_FILE}" for n in missing)
+            + f", so the settings of its products are unknown and {lf_root} / {hf_root} cannot "
+            "be combined"
+        )
     for name, r in recs.items():
         if r.get("catalogue_only"):
-            raise RunSettingsMismatch(f"convergence: the {name} root is a catalogue-only root (no P1D products)")
+            raise RunSettingsMismatch(
+                f"convergence: the {name} root is a catalogue-only root (no P1D products)"
+            )
     lf, hf = ({k: v for k, v in r.items() if k != "data_root"} for r in recs.values())
     from .run_settings import _differences, _lookup
+
     diff = _differences(lf, hf)
     if diff:
-        detail = "; ".join(f"{k}: low-resolution {_lookup(lf, k)!r}, hires {_lookup(hf, k)!r}" for k in diff[:12])
-        raise RunSettingsMismatch(f"convergence: {lf_root} and {hf_root} were made with different settings: {detail}")
+        detail = "; ".join(
+            f"{k}: low-resolution {_lookup(lf, k)!r}, hires {_lookup(hf, k)!r}" for k in diff[:12]
+        )
+        raise RunSettingsMismatch(
+            f"convergence: {lf_root} and {hf_root} were made with different settings: {detail}"
+        )
 
 
 def compute_convergence_ratios(
@@ -882,12 +1095,14 @@ def compute_convergence_ratios(
 
     # Find common sims
     lf_sims = {p.name for p in lf_root.iterdir() if p.is_dir() and not p.name.startswith(".")}
-    hf_sims = {p.name for p in hf_root.iterdir() if p.is_dir() and not p.name.startswith(".")
-               and p.name != "hires"}
+    hf_sims = {
+        p.name
+        for p in hf_root.iterdir()
+        if p.is_dir() and not p.name.startswith(".") and p.name != "hires"
+    }
     common_sims = lf_sims & hf_sims
 
-    logger.info("Convergence ratios: %d matching sims (z_tol=%.3f)",
-                len(common_sims), z_tol)
+    logger.info("Convergence ratios: %d matching sims (z_tol=%.3f)", len(common_sims), z_tol)
 
     ratios = {}
     for sim_name in sorted(common_sims):
@@ -919,12 +1134,20 @@ def compute_convergence_ratios(
                 sim_ratios[round(hf_z, 3)] = snap_ratios
                 logger.debug(
                     "matched %s/%s (z=%.3f) ↔ LF %s (z=%.3f), |Δz|=%.3f",
-                    sim_name, hf_name, hf_z, lf_name, lf_z, abs(hf_z - lf_z),
+                    sim_name,
+                    hf_name,
+                    hf_z,
+                    lf_name,
+                    lf_z,
+                    abs(hf_z - lf_z),
                 )
             except Exception as exc:
                 logger.warning(
                     "Convergence ratio failed for %s/%s↔%s: %s",
-                    sim_name, hf_name, lf_name, exc,
+                    sim_name,
+                    hf_name,
+                    lf_name,
+                    exc,
                 )
 
         if sim_ratios:
@@ -945,6 +1168,7 @@ def compute_convergence_ratios(
 # ---------------------------------------------------------------------------
 # Benchmark mode
 # ---------------------------------------------------------------------------
+
 
 def run_benchmark(cfg: PipelineConfig, n_sims: int = 1, n_snaps: int = 1) -> Dict:
     """
@@ -986,32 +1210,37 @@ def run_benchmark(cfg: PipelineConfig, n_sims: int = 1, n_snaps: int = 1) -> Dic
             n_skewers=min(10000, n_total),
             fast_mode=True,
             min_log_nhi=LOG_NHI_LLS_MIN,
-            record_lineage=False,             # a timing build, never saved: the whole-file hash would distort it
+            record_lineage=False,  # a timing build, never saved: the whole-file hash would distort it
         )
         t_cat_10k = time.perf_counter() - t0
 
         # Time P1D on 10k skewers
         from .p1d import compute_p1d_single
+
         t0 = time.perf_counter()
         _ = compute_p1d_single(
-            entry.path, header.nbins, dv_kms,
+            entry.path,
+            header.nbins,
+            dv_kms,
             n_skewers=min(10000, n_total),
             batch_size=cfg.skewer_batch_size,
         )
         t_p1d_10k = time.perf_counter() - t0
 
         scale = n_total / 10000.0
-        timing_records.append({
-            "sim": ss.sim.name[:40],
-            "snap": entry.snap,
-            "z": entry.z,
-            "n_skewers": n_total,
-            "t_catalog_10k_s": round(t_cat_10k, 2),
-            "t_p1d_10k_s": round(t_p1d_10k, 2),
-            "t_catalog_full_est_s": round(t_cat_10k * scale, 1),
-            "t_p1d_full_est_s": round(t_p1d_10k * scale, 1),
-            "t_snap_est_s": round((t_cat_10k + t_p1d_10k) * scale, 1),
-        })
+        timing_records.append(
+            {
+                "sim": ss.sim.name[:40],
+                "snap": entry.snap,
+                "z": entry.z,
+                "n_skewers": n_total,
+                "t_catalog_10k_s": round(t_cat_10k, 2),
+                "t_p1d_10k_s": round(t_p1d_10k, 2),
+                "t_catalog_full_est_s": round(t_cat_10k * scale, 1),
+                "t_p1d_full_est_s": round(t_p1d_10k * scale, 1),
+                "t_snap_est_s": round((t_cat_10k + t_p1d_10k) * scale, 1),
+            }
+        )
 
     # Extrapolate to full campaign
     if timing_records:

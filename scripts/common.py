@@ -10,6 +10,7 @@ override with the `HCD_DATA_DIR` environment variable to relocate
 Keeping one source of truth here means we can move the artifacts later
 without touching every analysis script.
 """
+
 from __future__ import annotations
 
 import os

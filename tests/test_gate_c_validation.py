@@ -2,6 +2,7 @@
 row split with an optional held-out simulation (upstream-matched 60-fold protocol), the coordinate-agreement check (C1),
 interpolation onto a fixed physical grid that refuses extrapolation, and matching of our held-out predictions to the
 upstream leave-one-out product (C4)."""
+
 import numpy as np
 import pytest
 
@@ -16,7 +17,9 @@ def _names():
 def test_production_split_without_holdout_is_the_historical_inline_split():
     names = _names()
     tr, va, held = D.production_row_split(names, val_seed=12345, val_frac=0.10)
-    perm = np.random.default_rng(12345).permutation(names.size)        # train_production_emulator.py inline split
+    perm = np.random.default_rng(12345).permutation(
+        names.size
+    )  # train_production_emulator.py inline split
     n_val = int(0.10 * names.size)
     assert np.array_equal(va, np.sort(perm[:n_val])) and np.array_equal(tr, np.sort(perm[n_val:]))
     assert held.size == 0
@@ -27,7 +30,9 @@ def test_production_split_with_a_held_out_simulation():
     tr, va, held = D.production_row_split(names, val_seed=12345, val_frac=0.10, holdout_sim="sim03")
     assert np.array_equal(held, np.where(names == "sim03")[0])
     assert not np.isin(names[tr], ["sim03"]).any() and not np.isin(names[va], ["sim03"]).any()
-    assert np.intersect1d(tr, va).size == 0 and np.union1d(np.union1d(tr, va), held).size == names.size
+    assert (
+        np.intersect1d(tr, va).size == 0 and np.union1d(np.union1d(tr, va), held).size == names.size
+    )
     assert va.size == int(0.10 * (names.size - held.size))
 
 
@@ -39,7 +44,10 @@ def test_production_split_refuses_an_unknown_simulation():
 def test_coordinate_agreement_ignores_padding_and_reports_the_worst_mode():
     k_row = np.array([1.0, 2.0, 3.0, np.nan])
     assert G.coordinate_agreement(k_row * (1 + 1e-14), k_row) < 2e-14
-    assert abs(G.coordinate_agreement(np.array([1.0, 2.0, 3.0 * (1 + 1e-4), 9.0]), k_row) - 1e-4) < 1e-12
+    assert (
+        abs(G.coordinate_agreement(np.array([1.0, 2.0, 3.0 * (1 + 1e-4), 9.0]), k_row) - 1e-4)
+        < 1e-12
+    )
 
 
 def test_interp_to_grid_matches_linear_and_refuses_extrapolation():
@@ -56,24 +64,30 @@ def test_class_rms_uses_only_kept_finite_modes():
     res[1, 1, 2] = np.nan
     keep = np.ones((2, 3), bool)
     keep[0, 2] = False
-    res[0, 1, 2] = 9.0                                      # excluded by keep
+    res[0, 1, 2] = 9.0  # excluded by keep
     rms = G.class_rms(res, keep)
     assert rms.shape == (4,) and rms[0] == 0.0
-    assert abs(rms[1] - np.sqrt(0.03 ** 2 / 4)) < 1e-15    # 4 kept finite modes in class 1 (one NaN, one masked)
+    assert (
+        abs(rms[1] - np.sqrt(0.03**2 / 4)) < 1e-15
+    )  # 4 kept finite modes in class 1 (one NaN, one masked)
 
 
 def test_ensemble_residual_is_the_residual_of_the_member_mean():
     P_true = np.array([2.0, 4.0])
     members = [np.array([2.2, 3.6]), np.array([1.8, 4.4]), np.array([2.0, 4.2])]
     res = [m / P_true - 1 for m in members]
-    assert np.allclose(G.ensemble_residual(res), np.mean(members, 0) / P_true - 1, rtol=0, atol=1e-15)
+    assert np.allclose(
+        G.ensemble_residual(res), np.mean(members, 0) / P_true - 1, rtol=0, atol=1e-15
+    )
 
 
 def test_match_upstream_loo_pairs_entries_by_parameters_rung_and_redshift():
     up_params = np.array([[0.7, 0.90, 1.5e-9], [0.8, 0.90, 1.5e-9], [0.7, 0.95, 2.0e-9]])
     up_zout = np.array([3.0, 2.8])
-    ours = [dict(params=np.array([0.90, 1.5e-9]), alpha=0.8, z=2.8, key="a"),
-            dict(params=np.array([0.95, 2.0e-9]), alpha=0.7, z=3.0, key="b"),
-            dict(params=np.array([0.99, 2.0e-9]), alpha=0.7, z=3.0, key="c")]
+    ours = [
+        dict(params=np.array([0.90, 1.5e-9]), alpha=0.8, z=2.8, key="a"),
+        dict(params=np.array([0.95, 2.0e-9]), alpha=0.7, z=3.0, key="b"),
+        dict(params=np.array([0.99, 2.0e-9]), alpha=0.7, z=3.0, key="c"),
+    ]
     got = G.match_upstream_loo(ours, up_params, up_zout)
     assert got == {"a": (1, 1), "b": (2, 0)}

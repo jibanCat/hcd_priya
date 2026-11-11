@@ -15,7 +15,9 @@ Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     python -m pytest tests/test_tau0_informative_prior.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 from collections import namedtuple
@@ -37,6 +39,7 @@ def _is_truncnorm(d):
     not a class) whose base_dist is Normal — assert that shape."""
     return isinstance(d, TwoSidedTruncatedDistribution) and isinstance(d.base_dist, dist.Normal)
 
+
 from hcd_analysis.emulator import closure_legb as C
 from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
@@ -46,12 +49,13 @@ _DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
 
 # The physical ranges _sample_tau0_sites truncates to (PRIYA Bird+2023 §2.7.1).
-_AMP_RANGE = C.TAU0_AMP_RANGE     # (0.75, 1.25)
-_DTAU0_RANGE = C.DTAU0_RANGE      # (-0.40, 0.25)
+_AMP_RANGE = C.TAU0_AMP_RANGE  # (0.75, 1.25)
+_DTAU0_RANGE = C.DTAU0_RANGE  # (-0.40, 0.25)
 
 # A MINIMAL stand-in ctx exposing only what _sample_tau0_sites reads (keeps the test fast).
-_MiniCtx = namedtuple("_MiniCtx", ["tau0_amp_range", "dtau0_range",
-                                   "tau0_amp_gauss", "dtau0_gauss"])
+_MiniCtx = namedtuple(
+    "_MiniCtx", ["tau0_amp_range", "dtau0_range", "tau0_amp_gauss", "dtau0_gauss"]
+)
 
 
 def _mini(tau0_amp_gauss=None, dtau0_gauss=None):
@@ -60,8 +64,9 @@ def _mini(tau0_amp_gauss=None, dtau0_gauss=None):
 
 def _trace_tau0(ctx, seed=0):
     """Trace the two τ₀ sites of _sample_tau0_sites on a mini ctx (cheap — no factor/Cholesky)."""
-    tr = handlers.trace(handlers.seed(
-        lambda: C._sample_tau0_sites(ctx), jax.random.PRNGKey(seed))).get_trace()
+    tr = handlers.trace(
+        handlers.seed(lambda: C._sample_tau0_sites(ctx), jax.random.PRNGKey(seed))
+    ).get_trace()
     return tr
 
 
@@ -95,10 +100,19 @@ def test_priors_only_site_order_unchanged_default():
     ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "DESI"])
     s = _sites(C._legb_priors_only, ctx)
     # default config: marginalize_zslope True, metals off, alpha_res sampled.
-    assert s == ["theta_unit", "tau0_amp", "dtau0",
-                 "alpha_lls", "alpha_subdla", "alpha_dla_raw",
-                 "s_lls", "s_subdla", "s_dla",
-                 "alpha_res", "alpha_res_slope"], s
+    assert s == [
+        "theta_unit",
+        "tau0_amp",
+        "dtau0",
+        "alpha_lls",
+        "alpha_subdla",
+        "alpha_dla_raw",
+        "s_lls",
+        "s_subdla",
+        "s_dla",
+        "alpha_res",
+        "alpha_res_slope",
+    ], s
 
 
 # --------------------------------------------------------------------------- #
@@ -117,12 +131,17 @@ def test_gauss_branch_is_truncated_normal():
     assert float(dd.base_dist.loc) == 0.0 and float(dd.base_dist.scale) == 0.05
     assert float(dd.low) == _DTAU0_RANGE[0] and float(dd.high) == _DTAU0_RANGE[1]
     # log_prob at the center is HIGHER than near the truncation edge (it IS centered).
-    assert float(da.log_prob(jnp.asarray(1.0))) > float(da.log_prob(jnp.asarray(_AMP_RANGE[1] - 1e-3)))
-    assert float(dd.log_prob(jnp.asarray(0.0))) > float(dd.log_prob(jnp.asarray(_DTAU0_RANGE[1] - 1e-3)))
+    assert float(da.log_prob(jnp.asarray(1.0))) > float(
+        da.log_prob(jnp.asarray(_AMP_RANGE[1] - 1e-3))
+    )
+    assert float(dd.log_prob(jnp.asarray(0.0))) > float(
+        dd.log_prob(jnp.asarray(_DTAU0_RANGE[1] - 1e-3))
+    )
     # the support stays strictly within the physical range over many draws.
     for sd in range(40):
         tr_s = _trace_tau0(ctx, seed=sd)
-        amp = float(tr_s["tau0_amp"]["value"]); dt = float(tr_s["dtau0"]["value"])
+        amp = float(tr_s["tau0_amp"]["value"])
+        dt = float(tr_s["dtau0"]["value"])
         assert _AMP_RANGE[0] <= amp <= _AMP_RANGE[1], amp
         assert _DTAU0_RANGE[0] <= dt <= _DTAU0_RANGE[1], dt
 
@@ -143,8 +162,9 @@ def test_gauss_branch_one_sided_amp_only():
 def test_site_order_identical_across_modes_mini():
     """The mini-ctx site list is the same (names + order) in uniform and gauss modes."""
     s_uni = [k for k, v in _trace_tau0(_mini()).items() if v["type"] == "sample"]
-    s_g = [k for k, v in _trace_tau0(_mini((1.0, 0.05), (0.0, 0.05))).items()
-           if v["type"] == "sample"]
+    s_g = [
+        k for k, v in _trace_tau0(_mini((1.0, 0.05), (0.0, 0.05))).items() if v["type"] == "sample"
+    ]
     assert s_uni == s_g == ["tau0_amp", "dtau0"]
 
 
@@ -176,7 +196,7 @@ def _truth_pack():
     return dict(
         theta9=rng.normal(size=9),
         tau0_global=rng.uniform(0.5, 1.5, size=5),
-        alpha_hcd=np.array([0.27, 0.09, 0.0012]),     # (3,) [LLS, subDLA, DLA]
+        alpha_hcd=np.array([0.27, 0.09, 0.0012]),  # (3,) [LLS, subDLA, DLA]
         alpha_hcd_z=rng.uniform(0.05, 0.5, size=(5, 3)),
         a_siiii=0.03,
     )

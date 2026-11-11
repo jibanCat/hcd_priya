@@ -1,4 +1,5 @@
 """Total-P1D likelihood contract (spec sec.6). Difference form is the DEFAULT."""
+
 from __future__ import annotations
 import jax
 import jax.numpy as jnp
@@ -25,9 +26,18 @@ def total_p1d_ratio(P_tier_p, alpha_hcd, ratio_hcd):
     return P_tier_p * (1.0 + jnp.einsum("...c,...ck->...k", alpha_hcd, ratio_hcd))
 
 
-def assemble_covariance(cosmic_cov, sigma_Pfilt, w_c, sigma_delta, alpha_hcd,
-                        P_filt, delta_scale, dla_shot_flag, shot_inflate=10.0,
-                        cemu_inflate=1.0):
+def assemble_covariance(
+    cosmic_cov,
+    sigma_Pfilt,
+    w_c,
+    sigma_delta,
+    alpha_hcd,
+    P_filt,
+    delta_scale,
+    dla_shot_flag,
+    shot_inflate=10.0,
+    cemu_inflate=1.0,
+):
     """Total covariance = cosmic covariance + diag(emulator-error variance).
 
     UNITS CONTRACT (the bug this signature fixes):
@@ -78,9 +88,11 @@ def assemble_covariance(cosmic_cov, sigma_Pfilt, w_c, sigma_delta, alpha_hcd,
     # data-range-restricted out-of-range cells arrive NaN -> contribute 0 variance.
     sigma_Pfilt = jnp.nan_to_num(jnp.asarray(sigma_Pfilt), nan=0.0)
     sigma_delta = jnp.nan_to_num(jnp.asarray(sigma_delta), nan=0.0)
-    emu_var = (jnp.einsum("c,ck,ck->k", w_c**2, sigma_Pfilt**2, P_filt**2)         # P_filt channel
-               + jnp.einsum("c,ck,ck->k", alpha_hcd**2, sigma_delta**2,           # delta channel
-                            delta_scale**2))
+    emu_var = jnp.einsum(
+        "c,ck,ck->k", w_c**2, sigma_Pfilt**2, P_filt**2
+    ) + jnp.einsum(  # P_filt channel
+        "c,ck,ck->k", alpha_hcd**2, sigma_delta**2, delta_scale**2  # delta channel
+    )
     emu_var = jnp.where(dla_shot_flag, emu_var * shot_inflate, emu_var)
     # CONSERVATIVE INFLATION (design §1.3d/e): the rank-≤12 SVD basis makes the emulator
     # error strongly k-CORRELATED, so a purely DIAGONAL C_emu under-states the
@@ -119,7 +131,7 @@ def sigma_at_tau0(sigma_zb, alpha_centres, z, tau0):
     # downstream nan_to_num does NOT fix -> jax.grad wrt τ₀ returns NaN and NUTS dies.
     sig = jnp.nan_to_num(jnp.asarray(sigma_zb), nan=0.0)
     interp1 = lambda s_tb: jnp.interp(alpha, jnp.asarray(alpha_centres), s_tb)
-    return jax.vmap(jax.vmap(interp1))(sig)                        # (C,K)
+    return jax.vmap(jax.vmap(interp1))(sig)  # (C,K)
 
 
 def rho_at_tau0(rho_zb, alpha_centres, z, tau0):
@@ -145,10 +157,10 @@ def rho_at_tau0(rho_zb, alpha_centres, z, tau0):
     Returns (C,C,K) cross-class block at the sampled τ₀.
     """
     alpha = jnp.asarray(tau0) / (_KIM_AMP * (1.0 + jnp.asarray(z)) ** _KIM_SLOPE)
-    rho = jnp.nan_to_num(jnp.asarray(rho_zb), nan=0.0)            # (C,C,K,Tb)
+    rho = jnp.nan_to_num(jnp.asarray(rho_zb), nan=0.0)  # (C,C,K,Tb)
     interp1 = lambda r_tb: jnp.interp(alpha, jnp.asarray(alpha_centres), r_tb)
     # vmap over the (C,C,K) leading axes; interp over the trailing Tb axis.
-    return jax.vmap(jax.vmap(jax.vmap(interp1)))(rho)            # (C,C,K)
+    return jax.vmap(jax.vmap(jax.vmap(interp1)))(rho)  # (C,C,K)
 
 
 def gaussian_loglik(r, C, jitter=1e-10):
@@ -171,5 +183,5 @@ def gaussian_loglik(r, C, jitter=1e-10):
     C = C + (jitter * jnp.mean(jnp.diag(C))) * jnp.eye(K)
     L = jnp.linalg.cholesky(C)
     sol = jax.scipy.linalg.cho_solve((L, True), r)
-    half_logdet = jnp.sum(jnp.log(jnp.diag(L)))     # ½ logdet C = Σ log diag(L)
+    half_logdet = jnp.sum(jnp.log(jnp.diag(L)))  # ½ logdet C = Σ log diag(L)
     return -0.5 * (r @ sol) - half_logdet

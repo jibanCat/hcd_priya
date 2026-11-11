@@ -9,6 +9,7 @@ second moment in two representations from simulations' per-z coherent vectors co
 Both use the production log-k binding weights. Held-out simulations are scored under N(0, F_r + diag(topup)), topup
 = the diagonal discarded by the truncation (the same definition for both; for M at the held-out theta). Builds no
 product; the registered decision rule is applied by the caller."""
+
 from __future__ import annotations
 
 import jax.numpy as jnp
@@ -39,7 +40,9 @@ def mode_set(k_com, z_cells, iz, k_bins, lo, hi):
     idx = []
     for c in np.unique(iz):
         k = np.asarray(k_bins)[iz == c]
-        first, last = bracket_modes(k_com, float(z_cells[c]), float(k.min()), float(k.max()), lo, hi)
+        first, last = bracket_modes(
+            k_com, float(z_cells[c]), float(k.min()), float(k.max()), lo, hi
+        )
         idx.extend(c * K + n - 1 for n in range(first, last + 1))
     return np.asarray(idx, int)
 
@@ -66,7 +69,20 @@ def logpdf(v, S, jitter=1e-10):
     return float(-0.5 * (x @ x) - np.sum(np.log(np.diag(L))) - 0.5 * len(v) * np.log(2 * np.pi))
 
 
-def compare(coh, thetas, bins, k_com, *, ranks=(5, 10, 15, 25), n_folds=10, lo, hi, names=None, C_frac=None, hook=None):
+def compare(
+    coh,
+    thetas,
+    bins,
+    k_com,
+    *,
+    ranks=(5, 10, 15, 25),
+    n_folds=10,
+    lo,
+    hi,
+    names=None,
+    C_frac=None,
+    hook=None,
+):
     """CV comparison of M and P on one leg. ``coh`` (n_sim, n_z, K), ``thetas`` (n_sim, 9) unit cube, ``bins`` dict
     (z: the z cells, iz: each bin's cell, k: the bins' k). Returns per held-out simulation and rank the log scores of
     both representations, and, with ``C_frac`` (the data covariance over P_data P_data^T on the bins), the calibration
@@ -79,13 +95,24 @@ def compare(coh, thetas, bins, k_com, *, ranks=(5, 10, 15, 25), n_folds=10, lo, 
     z, iz, kb = np.asarray(bins["z"]), np.asarray(bins["iz"]), np.asarray(bins["k"])
     flat = coh.reshape(n_sim, -1)
     Ws = [weights(k_com, thetas[s], z, iz, kb) for s in range(n_sim)]
-    V = np.stack([Ws[s] @ flat[s] for s in range(n_sim)])                       # P: each simulation at its own k
+    V = np.stack([Ws[s] @ flat[s] for s in range(n_sim)])  # P: each simulation at its own k
     Mi = mode_set(k_com, z, iz, kb, lo, hi)
     Cm = flat[:, Mi]
-    out = {"score": {"M": {r: np.zeros(n_sim) for r in ranks}, "P": {r: np.zeros(n_sim) for r in ranks}},
-           "quad": {"M": {r: np.zeros(n_sim) for r in ranks}, "P": {r: np.zeros(n_sim) for r in ranks}},
-           "trace": {"M": {r: np.zeros(n_sim) for r in ranks}, "P": {r: np.zeros(n_sim) for r in ranks}},
-           "hook": {"M": {r: {} for r in ranks}, "P": {r: {} for r in ranks}}}
+    out = {
+        "score": {
+            "M": {r: np.zeros(n_sim) for r in ranks},
+            "P": {r: np.zeros(n_sim) for r in ranks},
+        },
+        "quad": {
+            "M": {r: np.zeros(n_sim) for r in ranks},
+            "P": {r: np.zeros(n_sim) for r in ranks},
+        },
+        "trace": {
+            "M": {r: np.zeros(n_sim) for r in ranks},
+            "P": {r: np.zeros(n_sim) for r in ranks},
+        },
+        "hook": {"M": {r: {} for r in ranks}, "P": {r: {} for r in ranks}},
+    }
     for f in range(n_folds):
         tr, te = np.where(fold_of != f)[0], np.where(fold_of == f)[0]
         if te.size == 0:
@@ -98,10 +125,14 @@ def compare(coh, thetas, bins, k_com, *, ranks=(5, 10, 15, 25), n_folds=10, lo, 
             F_M = top_r(S_M, r)
             for s in te:
                 B = Ws[s][:, Mi]
-                if np.max(np.abs(Ws[s] @ flat[s] - B @ Cm[s])) > 1e-12 * max(1.0, np.max(np.abs(V[s]))):
+                if np.max(np.abs(Ws[s] @ flat[s] - B @ Cm[s])) > 1e-12 * max(
+                    1.0, np.max(np.abs(V[s]))
+                ):
                     raise ValueError("a bin's bracketing modes fall outside the mode set")
                 Sig_M = B @ F_M @ B.T
-                Sig_M = Sig_M + np.diag(np.maximum(np.einsum("ij,jk,ik->i", B, S_M, B) - np.diag(Sig_M), 0.0))
+                Sig_M = Sig_M + np.diag(
+                    np.maximum(np.einsum("ij,jk,ik->i", B, S_M, B) - np.diag(Sig_M), 0.0)
+                )
                 for rep, Sig in (("P", Sig_P), ("M", Sig_M)):
                     out["score"][rep][r][s] = logpdf(V[s], Sig)
                     if C_frac is not None:
@@ -123,4 +154,6 @@ def decide(res, ranks, *, n_boot=1000, seed=0, min_nats=1.0):
         best[rep] = ranks[int(np.argmax(np.round(means, 9)))]
     sM, sP = res["score"]["M"][best["M"]], res["score"]["P"][best["P"]]
     gain, se = float(np.mean(sM - sP)), paired_se(sM, sP, n_boot, seed)
-    return dict(best_rank=best, gain=gain, gain_se=se, m_wins_score=bool(gain > 2 * se and gain > min_nats))
+    return dict(
+        best_rank=best, gain=gain, gain_se=se, m_wins_score=bool(gain > 2 * se and gain > min_nats)
+    )

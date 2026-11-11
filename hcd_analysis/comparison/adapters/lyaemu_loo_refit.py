@@ -24,6 +24,7 @@ move a limit; one outside the limits makes the fold NOT_RUN). Nothing is saved. 
 tree hashes the same before and after; GPy ``Model.save`` is also replaced by a refusal, and a 'Saving GP' line in
 the fit log is refused after the fact. Fold failures: an input column that does not span the unit
 cube (upstream's assertion) or a ``LinAlgError`` makes the fold NOT_RUN, recorded with the reason."""
+
 from __future__ import annotations
 
 import argparse
@@ -38,7 +39,7 @@ import time
 import numpy as np
 
 THREAD_VARS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")
-N_RESTARTS = 10                       # upstream: optimize_restarts(num_restarts=10) when optimize() did not converge
+N_RESTARTS = 10  # upstream: optimize_restarts(num_restarts=10) when optimize() did not converge
 
 
 def adopted_run(runs, restarted):
@@ -61,7 +62,9 @@ def refuse_writable(root):
     for dp, ds, fs in os.walk(root):
         for p in [dp] + [os.path.join(dp, f) for f in fs]:
             if os.access(p, os.W_OK):
-                raise RefitRefused(f"the reference copy is writable ({p}); make it read-only (chmod -R a-w)")
+                raise RefitRefused(
+                    f"the reference copy is writable ({p}); make it read-only (chmod -R a-w)"
+                )
 
 
 def install_save_refusal():
@@ -70,12 +73,14 @@ def install_save_refusal():
 
     def refuse(*a, **k):
         raise RefitRefused("the refit tried to save a GP")
+
     GPy.core.Model.save = refuse
 
 
 def install_status_recorder():
     """Wrap paramz ``Model.optimize`` so that every call's optimizer status is appended to the returned list."""
     import paramz
+
     statuses = []
     orig = paramz.Model.optimize
 
@@ -83,6 +88,7 @@ def install_status_recorder():
         r = orig(self, *a, **k)
         statuses.append(str(getattr(r, "status", r)))
         return r
+
     paramz.Model.optimize = optimize
     return statuses
 
@@ -101,7 +107,8 @@ def span_ok(cube):
 def ulp_adjust_limits(plimits, X_all, max_ulp=4):
     """Upstream's ``map_to_unit_cube`` asserts every input inside the limits with a 1e-16 margin. An input outside a
     limit by at most ``max_ulp`` units in the last place (floating-point rounding of the computed limit) moves that
-    limit onto the input; anything farther is refused. Returns (limits, the recorded adjustments)."""
+    limit onto the input; anything farther is refused. Returns (limits, the recorded adjustments).
+    """
     lim = np.array(plimits, dtype=np.float64, copy=True)
     X_all = np.asarray(X_all, dtype=np.float64)
     adj = []
@@ -110,10 +117,19 @@ def ulp_adjust_limits(plimits, X_all, max_ulp=4):
             if (v < lim[c, 0]) if side == 0 else (v > lim[c, 1]):
                 n_ulp = abs(v - lim[c, side]) / np.spacing(abs(lim[c, side]))
                 if n_ulp > max_ulp:
-                    raise RefitRefused(f"input column {c} lies {n_ulp:.3g} ulp outside upstream's limit "
-                                       f"{lim[c, side]!r}")
-                adj.append({"column": c, "side": ("low", "high")[side], "limit": float(lim[c, side]),
-                            "set_to": float(v), "ulp": float(n_ulp)})
+                    raise RefitRefused(
+                        f"input column {c} lies {n_ulp:.3g} ulp outside upstream's limit "
+                        f"{lim[c, side]!r}"
+                    )
+                adj.append(
+                    {
+                        "column": c,
+                        "side": ("low", "high")[side],
+                        "limit": float(lim[c, side]),
+                        "set_to": float(v),
+                        "ulp": float(n_ulp),
+                    }
+                )
                 lim[c, side] = v
     return lim, adj
 
@@ -121,7 +137,8 @@ def ulp_adjust_limits(plimits, X_all, max_ulp=4):
 def match_reference_design(X, Y, z, ref_params, ref_fv, ref_zout):
     """Every input row (rung, 9 parameters) must equal exactly one row of upstream's training file (relative 1e-9),
     so the GP is refit on upstream's own design points. Returns, per redshift, the largest |Y / Y_upstream - 1| and
-    the number of rows above 1e-4 (the shared-truth parity: rows that differ are reported, not refused)."""
+    the number of rows above 1e-4 (the shared-truth parity: rows that differ are reported, not refused).
+    """
     ref_params, ref_fv, ref_zout = (np.asarray(a, float) for a in (ref_params, ref_fv, ref_zout))
     nk = ref_fv.shape[1] // ref_zout.size
     if Y.shape[2] != nk:
@@ -131,19 +148,30 @@ def match_reference_design(X, Y, z, ref_params, ref_fv, ref_zout):
         j = np.flatnonzero(np.abs(ref_zout - zz) < 1e-9)
         if j.size != 1:
             raise RefitRefused(f"z={zz} is not on upstream's training grid")
-        hit = np.all(np.isclose(X[i][:, None, :], ref_params[None, :, :], rtol=1e-9, atol=0), axis=2)
+        hit = np.all(
+            np.isclose(X[i][:, None, :], ref_params[None, :, :], rtol=1e-9, atol=0), axis=2
+        )
         if not np.all(hit.sum(axis=1) == 1):
-            raise RefitRefused(f"z={zz}: {int(np.sum(hit.sum(axis=1) != 1))} input rows are not exactly one of "
-                               f"upstream's training rows")
-        ref = ref_fv[hit.argmax(axis=1), int(j[0]) * nk:(int(j[0]) + 1) * nk]
+            raise RefitRefused(
+                f"z={zz}: {int(np.sum(hit.sum(axis=1) != 1))} input rows are not exactly one of "
+                f"upstream's training rows"
+            )
+        ref = ref_fv[hit.argmax(axis=1), int(j[0]) * nk : (int(j[0]) + 1) * nk]
         rel = np.max(np.abs(Y[i] / ref - 1.0), axis=1)
-        out.append({"z": float(zz), "max_rel": float(rel.max()), "n_rows_above_1e-4": int(np.sum(rel > 1e-4))})
+        out.append(
+            {
+                "z": float(zz),
+                "max_rel": float(rel.max()),
+                "n_rows_above_1e-4": int(np.sum(rel > 1e-4)),
+            }
+        )
     return out
 
 
 def fit_fold(X, Y, Xh, z, plimits, seed, *, statuses, sklearn_gp, to_cube):
     """Refit one fold: per redshift i, ``sklearn_gp`` (lyaemu ``SkLearnGP``) on X[i], Y[i], then predict Xh[i].
-    Returns (status, reason, per_z, mean, std); status NOT_RUN on a span failure or a LinAlgError."""
+    Returns (status, reason, per_z, mean, std); status NOT_RUN on a span failure or a LinAlgError.
+    """
     nz, m, nk = Xh.shape[0], Xh.shape[1], Y.shape[2]
     for i in range(nz):
         if not span_ok(np.asarray(to_cube(X[i], plimits))):
@@ -157,7 +185,9 @@ def fit_fold(X, Y, Xh, z, plimits, seed, *, statuses, sklearn_gp, to_cube):
         t0 = time.perf_counter()
         try:
             with contextlib.redirect_stdout(buf):
-                gp = sklearn_gp(params=X[i], powers=Y[i], param_limits=plimits, zbin=z[i], traindir=None)
+                gp = sklearn_gp(
+                    params=X[i], powers=Y[i], param_limits=plimits, zbin=z[i], traindir=None
+                )
             mu, sd = gp.predict(Xh[i])
         except np.linalg.LinAlgError as e:
             return "NOT_RUN", f"LinAlgError at z={z[i]}: {e}", per_z, None, None
@@ -166,17 +196,32 @@ def fit_fold(X, Y, Xh, z, plimits, seed, *, statuses, sklearn_gp, to_cube):
             raise RefitRefused(f"z={z[i]}: unexpected fit log {log!r}")
         st = statuses[n0:]
         restarted = "Restarting optimization" in log
-        runs = [(float(getattr(o, "f_opt", np.nan)), str(getattr(o, "status", "")))
-                for o in getattr(gp.gp, "optimization_runs", [])]
+        runs = [
+            (float(getattr(o, "f_opt", np.nan)), str(getattr(o, "status", "")))
+            for o in getattr(gp.gp, "optimization_runs", [])
+        ]
         k = adopted_run(runs, restarted)
-        per_z.append({"z": float(z[i]), "seed_z": seed_z, "statuses": st, "restarted": restarted,
-                      "runs": [{"f_opt": f, "status": t} for f, t in runs], "adopted_run": k,
-                      "converged_final": k is not None and runs[k][1] == "Converged",
-                      "converged_first": bool(st) and st[0] == "Converged",
-                      "converged_any": any(x == "Converged" for x in st),
-                      "hyperparameters": dict(zip(gp.gp.parameter_names_flat().tolist(),
-                                                  np.asarray(gp.gp.param_array, float).tolist())),
-                      "log_likelihood": float(gp.gp.log_likelihood()), "fit_seconds": time.perf_counter() - t0})
+        per_z.append(
+            {
+                "z": float(z[i]),
+                "seed_z": seed_z,
+                "statuses": st,
+                "restarted": restarted,
+                "runs": [{"f_opt": f, "status": t} for f, t in runs],
+                "adopted_run": k,
+                "converged_final": k is not None and runs[k][1] == "Converged",
+                "converged_first": bool(st) and st[0] == "Converged",
+                "converged_any": any(x == "Converged" for x in st),
+                "hyperparameters": dict(
+                    zip(
+                        gp.gp.parameter_names_flat().tolist(),
+                        np.asarray(gp.gp.param_array, float).tolist(),
+                    )
+                ),
+                "log_likelihood": float(gp.gp.log_likelihood()),
+                "fit_seconds": time.perf_counter() - t0,
+            }
+        )
         mean[i], std[i] = np.asarray(mu, float), np.asarray(sd, float)
     return "OK", "", per_z, mean, std
 
@@ -190,6 +235,7 @@ def run(args, environ=os.environ):
     lyaemu_pkg = os.path.join(args.lyaemu_parent, "lyaemu")
     sys.path.insert(0, args.repo)
     from hcd_analysis.comparison.adapters import lyaemu_priya as P
+
     pins = req["pins"]
     missing = {pins["emulator_json"], pins["training_file"]} - set(pins["artifacts_sha256"])
     if missing:
@@ -214,44 +260,93 @@ def run(args, environ=os.environ):
     install_save_refusal()
     statuses = install_status_recorder()
     import lyaemu
+
     if os.path.realpath(os.path.dirname(lyaemu.__file__)) != os.path.realpath(lyaemu_pkg):
         raise RefitRefused(f"imported lyaemu {lyaemu.__file__} is not the pinned copy")
     from lyaemu.gp_wrap import GPWrap
     from lyaemu.gpemulator import SkLearnGP
     from lyaemu.latin_hypercube import map_to_unit_cube_list
     import GPy
+
     with contextlib.redirect_stdout(io.StringIO()):
-        wrap = GPWrap(basedir=args.basedir, emulator_json_file=pins["emulator_json"],
-                      kf=np.logspace(-3, np.log10(0.04), 8), tau_thresh=1e6, use_res_corr=False)
+        wrap = GPWrap(
+            basedir=args.basedir,
+            emulator_json_file=pins["emulator_json"],
+            kf=np.logspace(-3, np.log10(0.04), 8),
+            tau_thresh=1e6,
+            use_res_corr=False,
+        )
     plimits = np.asarray(wrap.get_param_limits(include_dense=True), float)
     names = [str(x) for x in inp["param_names"]]
     if sorted(wrap.param_names, key=wrap.param_names.get) != names:
-        raise RefitRefused(f"input parameter order {names} is not the reference's {dict(wrap.param_names)}")
+        raise RefitRefused(
+            f"input parameter order {names} is not the reference's {dict(wrap.param_names)}"
+        )
     import h5py
+
     with h5py.File(os.path.join(args.basedir, pins["training_file"]), "r") as f:
         ref = (f["params"][...], f["flux_vectors"][...], f["zout"][...])
-    parity = {"train": match_reference_design(inp["X_train"], inp["Y_train"], inp["z"], *ref),
-              "truth": match_reference_design(inp["X_held"], inp["Y_held"], inp["z"], *ref)}
+    parity = {
+        "train": match_reference_design(inp["X_train"], inp["Y_train"], inp["z"], *ref),
+        "truth": match_reference_design(inp["X_held"], inp["Y_held"], inp["z"], *ref),
+    }
     plimits, adjusted = ulp_adjust_limits(plimits, inp["X_train"].reshape(-1, plimits.shape[0]))
     held = inp["X_held"].reshape(-1, plimits.shape[0])
     if np.any(held < plimits[:, 0]) or np.any(held > plimits[:, 1]):
-        status, reason, per_z, mean, std = "NOT_RUN", "held-out inputs outside the unit-cube limits", [], None, None
+        status, reason, per_z, mean, std = (
+            "NOT_RUN",
+            "held-out inputs outside the unit-cube limits",
+            [],
+            None,
+            None,
+        )
     else:
         status, reason, per_z, mean, std = fit_fold(
-            inp["X_train"], inp["Y_train"], inp["X_held"], inp["z"], plimits, int(req["seed"]), statuses=statuses,
-            sklearn_gp=SkLearnGP, to_cube=map_to_unit_cube_list)
+            inp["X_train"],
+            inp["Y_train"],
+            inp["X_held"],
+            inp["z"],
+            plimits,
+            int(req["seed"]),
+            statuses=statuses,
+            sklearn_gp=SkLearnGP,
+            to_cube=map_to_unit_cube_list,
+        )
     if P.tree_sha256(args.basedir) != before:
         raise RefitRefused("the reference basedir changed during the refit")
-    out = {"fold_sim": str(inp["holdout_sim"]), "seed": int(req["seed"]), "status": status, "reason": reason,
-           "z": inp["z"].tolist(), "rows_held": inp["rows_held"].tolist(), "rows_train": inp["rows_train"].tolist(),
-           "per_z": per_z, "training_parity": parity,
-           "mean": None if mean is None else mean.tolist(), "std": None if std is None else std.tolist(),
-           "param_limits": plimits.tolist(), "inputs_sha256": req["inputs_sha256"], "pins": pins,
-           "basedir_tree_sha256": before, "limit_adjustments": adjusted,
-           "changes_from_upstream": ["np.random.seed(seed*100 + z index) per fit", "optimizer statuses recorded"]
-           + (["unit-cube limits moved onto training inputs within 4 ulp (limit_adjustments)"] if adjusted else []),
-           "env": {"python": platform.python_version(), "numpy": np.__version__, "GPy": GPy.__version__,
-                   **{v: environ.get(v) for v in THREAD_VARS}}}
+    out = {
+        "fold_sim": str(inp["holdout_sim"]),
+        "seed": int(req["seed"]),
+        "status": status,
+        "reason": reason,
+        "z": inp["z"].tolist(),
+        "rows_held": inp["rows_held"].tolist(),
+        "rows_train": inp["rows_train"].tolist(),
+        "per_z": per_z,
+        "training_parity": parity,
+        "mean": None if mean is None else mean.tolist(),
+        "std": None if std is None else std.tolist(),
+        "param_limits": plimits.tolist(),
+        "inputs_sha256": req["inputs_sha256"],
+        "pins": pins,
+        "basedir_tree_sha256": before,
+        "limit_adjustments": adjusted,
+        "changes_from_upstream": [
+            "np.random.seed(seed*100 + z index) per fit",
+            "optimizer statuses recorded",
+        ]
+        + (
+            ["unit-cube limits moved onto training inputs within 4 ulp (limit_adjustments)"]
+            if adjusted
+            else []
+        ),
+        "env": {
+            "python": platform.python_version(),
+            "numpy": np.__version__,
+            "GPy": GPy.__version__,
+            **{v: environ.get(v) for v in THREAD_VARS},
+        },
+    }
     with open(args.out, "x") as f:
         json.dump(out, f)
     return out

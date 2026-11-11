@@ -24,7 +24,9 @@ File layout (UTF-8 JSON, finite numbers only)::
      "lineage": {the record}}
 
 The record's ``product.payload_sha256`` is the sha256 of the canonical JSON of the document without ``lineage``, so an
-edit of any number is refused. The predictor reads the file only through ``read_wc_map`` / ``parse_wc_map``."""
+edit of any number is refused. The predictor reads the file only through ``read_wc_map`` / ``parse_wc_map``.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -41,19 +43,30 @@ KIND = "wc_map"
 KIND_VERSION = 1
 DEG = 2
 CLASS_ORDER = ("clean", "LLS", "subDLA", "DLA")
-DELTA_C_Z_CLAMP = (2.0, 5.4)          # the PRIYA snapshot range: delta_c is never extrapolated beyond it
-XBAR_Z_FIT = (2.1, 4.7)               # the snapshot groups the Xbar(z) fit uses (closure_legb.hcd_xbar_polyfit)
+DELTA_C_Z_CLAMP = (2.0, 5.4)  # the PRIYA snapshot range: delta_c is never extrapolated beyond it
+XBAR_Z_FIT = (2.1, 4.7)  # the snapshot groups the Xbar(z) fit uses (closure_legb.hcd_xbar_polyfit)
 MAX_BYTES = 1 << 20
 _TOP = {"format", "class_order", "delta_c", "xbar", "lineage"}
-_DC_KEYS = {"coeffs", "deg", "z_clamp", "resid_std", "resid_max", "mean", "n_blocks", "n_sims", "z_min", "z_max"}
+_DC_KEYS = {
+    "coeffs",
+    "deg",
+    "z_clamp",
+    "resid_std",
+    "resid_max",
+    "mean",
+    "n_blocks",
+    "n_sims",
+    "z_min",
+    "z_max",
+}
 _XB_KEYS = {"coeffs", "deg", "z_fit", "n_groups"}
 ESTIMATORS = {
     "delta_c": "w_counted / w_M0(dN/dX, X_tot / N_sl) - 1 per snapshot block (one representative row; N_sl from the "
-               "coarse counts), one unweighted degree-2 np.polyfit in z per class over every block; the residual std "
-               "and max per class (scripts/calibrate_delta_c.py collect + fit)",
+    "coarse counts), one unweighted degree-2 np.polyfit in z per class over every block; the residual std "
+    "and max per class (scripts/calibrate_delta_c.py collect + fit)",
     "xbar": "Xbar = X_tot / N_sl per snapshot group, N_sl = sum(dN/dX) X_tot / mu_sum with mu_sum = -log(median "
-            "clean fraction clipped at 1e-6), groups with 2.1 <= z <= 4.7, one degree-2 np.polyfit in z "
-            "(closure_legb.hcd_xbar_polyfit)",
+    "clean fraction clipped at 1e-6), groups with 2.1 <= z <= 4.7, one degree-2 np.polyfit in z "
+    "(closure_legb.hcd_xbar_polyfit)",
 }
 
 
@@ -67,19 +80,22 @@ def delta_c_blocks(d):
     exactly as ``scripts/calibrate_delta_c.py`` ``collect`` builds them from one shard."""
     import jax.numpy as jnp
     from .dndx_wc import mu_from_dndx, w_c_from_mu
+
     z, wc, wm, sims = [], [], [], []
     g = d["snap_group_idx"]
     for gi in np.unique(g):
-        r = int(np.where(g == gi)[0][0])          # counts are tau0-invariant -> one rep row
+        r = int(np.where(g == gi)[0][0])  # counts are tau0-invariant -> one rep row
         cc = d["coarse_counts"][r].astype(float)  # (4,) clean,LLS,subDLA,DLA
         n_sl = cc.sum()
         if n_sl <= 0:
             continue
         w_counted = cc / n_sl
-        dndx = d["snap_dNdX"][gi]                  # (3,) LLS,subDLA,DLA
+        dndx = d["snap_dNdX"][gi]  # (3,) LLS,subDLA,DLA
         xbar = d["snap_total_path_dX"][gi] / n_sl
         w_m0 = np.asarray(w_c_from_mu(mu_from_dndx(jnp.asarray(dndx), jnp.asarray(xbar))))
-        z.append(float(d["z_grid"][r])); wc.append(w_counted); wm.append(w_m0)
+        z.append(float(d["z_grid"][r]))
+        wc.append(w_counted)
+        wm.append(w_m0)
         sims.append(d["sim_name"][r])
     return np.array(z), np.array(wc), np.array(wm), np.array(sims, dtype=object)
 
@@ -87,7 +103,7 @@ def delta_c_blocks(d):
 def fit_delta_c(z, wc, wm, deg=DEG):
     """``(coeffs (4, deg+1), delta (N,4), resid_std (4,), resid_max (4,))``: ``scripts/calibrate_delta_c.py`` ``fit``."""
     with np.errstate(divide="ignore", invalid="ignore"):
-        delta = np.where(wm > 0, wc / wm - 1.0, 0.0)   # (N,4)
+        delta = np.where(wm > 0, wc / wm - 1.0, 0.0)  # (N,4)
     coeffs = np.zeros((4, deg + 1))
     resid_std = np.zeros(4)
     resid_max = np.zeros(4)
@@ -103,10 +119,12 @@ def fit_delta_c(z, wc, wm, deg=DEG):
 def fit_xbar(d):
     """``(coeffs (3,), n_groups)``: the Xbar(z) fit of ``closure_legb.hcd_xbar_polyfit`` (the same numpy operations in
     the same order), plus the number of groups it used."""
-    wc = np.asarray(d["w_c_cache"])                      # (R,4) clean,LLS,subDLA,DLA
+    wc = np.asarray(d["w_c_cache"])  # (R,4) clean,LLS,subDLA,DLA
     zrow = np.asarray(d["z_grid"])
-    gid = np.asarray(d["snap_group_idx"]); Xtot = np.asarray(d["snap_total_path_dX"])
-    dndx = np.asarray(d["snap_dNdX"]); Ng = dndx.shape[0]
+    gid = np.asarray(d["snap_group_idx"])
+    Xtot = np.asarray(d["snap_total_path_dX"])
+    dndx = np.asarray(d["snap_dNdX"])
+    Ng = dndx.shape[0]
     zg = np.array([zrow[gid == g][0] for g in range(Ng)])
     wc_g = np.array([np.nanmedian(wc[gid == g], axis=0) for g in range(Ng)])
     mu_sum = -np.log(np.clip(wc_g[:, 0], 1e-6, None))
@@ -124,19 +142,45 @@ def refit(d):
     coeffs, delta, resid_std, resid_max = fit_delta_c(z, wc, wm, DEG)
     xcf, n_groups = fit_xbar(d)
     if n_groups <= DEG:
-        raise WcMapError(f"{n_groups} snapshot groups in {list(XBAR_Z_FIT)}: too few for a degree-{DEG} Xbar fit")
-    doc = {"format": FORMAT, "class_order": list(CLASS_ORDER),
-           "delta_c": {"coeffs": coeffs.tolist(), "deg": DEG, "z_clamp": list(DELTA_C_Z_CLAMP),
-                       "resid_std": resid_std.tolist(), "resid_max": resid_max.tolist(),
-                       "mean": delta.mean(axis=0).tolist(), "n_blocks": int(z.size),
-                       "n_sims": len(set(map(str, sims))), "z_min": float(z.min()), "z_max": float(z.max())},
-           "xbar": {"coeffs": np.asarray(xcf, dtype=np.float64).tolist(), "deg": DEG, "z_fit": list(XBAR_Z_FIT),
-                    "n_groups": n_groups}}
+        raise WcMapError(
+            f"{n_groups} snapshot groups in {list(XBAR_Z_FIT)}: too few for a degree-{DEG} Xbar fit"
+        )
+    doc = {
+        "format": FORMAT,
+        "class_order": list(CLASS_ORDER),
+        "delta_c": {
+            "coeffs": coeffs.tolist(),
+            "deg": DEG,
+            "z_clamp": list(DELTA_C_Z_CLAMP),
+            "resid_std": resid_std.tolist(),
+            "resid_max": resid_max.tolist(),
+            "mean": delta.mean(axis=0).tolist(),
+            "n_blocks": int(z.size),
+            "n_sims": len(set(map(str, sims))),
+            "z_min": float(z.min()),
+            "z_max": float(z.max()),
+        },
+        "xbar": {
+            "coeffs": np.asarray(xcf, dtype=np.float64).tolist(),
+            "deg": DEG,
+            "z_fit": list(XBAR_Z_FIT),
+            "n_groups": n_groups,
+        },
+    }
     _check_payload(doc, "refit")
     return doc
 
 
-_VIEW_ROW_KEYS = ("sim_name", "z_grid", "params", "x", "coarse_counts", "w_c_cache", "alpha_idx", "tau0")
+_VIEW_ROW_KEYS = (
+    "sim_name",
+    "z_grid",
+    "params",
+    "x",
+    "coarse_counts",
+    "w_c_cache",
+    "alpha_idx",
+    "tau0",
+)
 _VIEW_GROUP_KEYS = ("snap_dNdX", "snap_total_path_dX", "snap_f_nhi", "snap_n_absorbers")
 
 
@@ -149,8 +193,10 @@ def training_view(d, train_sims):
     sim = np.asarray(d["sim_name"]).astype(str)
     have = set(sim.tolist())
     if not sims or not set(sims) <= have:
-        raise WcMapError(f"the training simulations must be a non-empty subset of the cache's: "
-                         f"{sorted(set(sims) - have)[:5]} are not in it")
+        raise WcMapError(
+            f"the training simulations must be a non-empty subset of the cache's: "
+            f"{sorted(set(sims) - have)[:5]} are not in it"
+        )
     rows = np.flatnonzero(np.isin(sim, sims))
     old_g = np.asarray(d["snap_group_idx"])[rows]
     groups = np.unique(old_g)
@@ -181,26 +227,57 @@ def payload_sha256(doc):
 
 
 def settings():
-    return L.canonicalise({"deg": DEG, "delta_c_z_clamp": list(DELTA_C_Z_CLAMP), "xbar_z_fit": list(XBAR_Z_FIT),
-                           "estimators": ESTIMATORS})
+    return L.canonicalise(
+        {
+            "deg": DEG,
+            "delta_c_z_clamp": list(DELTA_C_Z_CLAMP),
+            "xbar_z_fit": list(XBAR_Z_FIT),
+            "estimators": ESTIMATORS,
+        }
+    )
 
 
-def make_record(doc, cache_record, cache_identity, *, code, allowed_finder_ids=None, cache_name=None):
+def make_record(
+    doc, cache_record, cache_identity, *, code, allowed_finder_ids=None, cache_name=None
+):
     """The ``wc_map`` lineage record of the payload ``doc``: its one input is the training cache (``cache_identity``
     {sha256, size}; ``cache_record`` its verified ``tau0_cache`` record, whose finder ids and eligibility are copied;
-    ``cache_name`` a plain file name recorded as information, never a path). Eligibility follows lineage.eligibility."""
+    ``cache_name`` a plain file name recorded as information, never a path). Eligibility follows lineage.eligibility.
+    """
     from ..catalog import RELEASE_FINDER_IDS
+
     allowed = RELEASE_FINDER_IDS if allowed_finder_ids is None else allowed_finder_ids
     if cache_record.get("kind") != "tau0_cache":
-        raise WcMapError(f"the w_c map is fitted to a tau0_cache, not a {cache_record.get('kind')!r}")
+        raise WcMapError(
+            f"the w_c map is fitted to a tau0_cache, not a {cache_record.get('kind')!r}"
+        )
     info = {"file": os.path.basename(str(cache_name))} if cache_name else None
-    entry = L.input_entry("cache", "tau0_cache", {"sha256": cache_identity["sha256"], "size": cache_identity["size"]},
-                          record=cache_record, info=info)
-    entry["info"] = dict(entry.get("info") or {}, lineage_record_sha256=L.record_sha256(cache_record))
-    product = {"payload_sha256": payload_sha256(doc), "n_blocks": doc["delta_c"]["n_blocks"],
-               "n_sims": doc["delta_c"]["n_sims"], "n_xbar_groups": doc["xbar"]["n_groups"]}
-    return L.build_record(KIND, KIND_VERSION, inputs=[entry], finder_ids=None, settings=settings(), code=code,
-                          allowed_finder_ids=allowed, product=product)
+    entry = L.input_entry(
+        "cache",
+        "tau0_cache",
+        {"sha256": cache_identity["sha256"], "size": cache_identity["size"]},
+        record=cache_record,
+        info=info,
+    )
+    entry["info"] = dict(
+        entry.get("info") or {}, lineage_record_sha256=L.record_sha256(cache_record)
+    )
+    product = {
+        "payload_sha256": payload_sha256(doc),
+        "n_blocks": doc["delta_c"]["n_blocks"],
+        "n_sims": doc["delta_c"]["n_sims"],
+        "n_xbar_groups": doc["xbar"]["n_groups"],
+    }
+    return L.build_record(
+        KIND,
+        KIND_VERSION,
+        inputs=[entry],
+        finder_ids=None,
+        settings=settings(),
+        code=code,
+        allowed_finder_ids=allowed,
+        product=product,
+    )
 
 
 def to_bytes(doc, record):
@@ -213,10 +290,11 @@ def to_bytes(doc, record):
 def write_wc_map(path, doc, record):
     """Write the map to the NEW file ``path`` (never overwritten; published only when complete). Returns its sha256."""
     from . import safe_io as S
+
     if os.path.lexists(path):
         raise WcMapError(f"{path} exists: a w_c map is never overwritten")
     raw = to_bytes(doc, record)
-    parse_wc_map(raw, str(path), require_release_eligible=False)        # what is written must read back
+    parse_wc_map(raw, str(path), require_release_eligible=False)  # what is written must read back
     return S._write_exclusive(str(path), [raw])
 
 
@@ -228,29 +306,43 @@ def build(cache_path, out_path, *, expected_cache_sha256=None, require_release_e
     refused before anything is written. Returns ``(record, sha256 of the written file)``."""
     from . import safe_io as S
     from .data import load_cache
-    if expected_cache_sha256 is not None:                    # an exact str only (safe_io.exact_hex64)
+
+    if expected_cache_sha256 is not None:  # an exact str only (safe_io.exact_hex64)
         S.require_exact_hex64(expected_cache_sha256, "build: expected_cache_sha256", WcMapError)
     if os.path.lexists(out_path):
         raise WcMapError(f"{out_path} exists: a w_c map is never overwritten")
     d = load_cache(cache_path)
     if expected_cache_sha256 is not None and d["cache_sha256"] != expected_cache_sha256:
-        raise WcMapError(f"{cache_path}: sha256 {d['cache_sha256']} is not the expected {expected_cache_sha256}")
+        raise WcMapError(
+            f"{cache_path}: sha256 {d['cache_sha256']} is not the expected {expected_cache_sha256}"
+        )
     doc = refit(d)
     ident = {"sha256": d["cache_sha256"], "size": int(os.stat(cache_path).st_size)}
-    rec = make_record(doc, d["lineage"], ident, code=L.code_identity(), cache_name=os.path.basename(str(cache_path)))
+    rec = make_record(
+        doc,
+        d["lineage"],
+        ident,
+        code=L.code_identity(),
+        cache_name=os.path.basename(str(cache_path)),
+    )
     if require_release_eligible and not rec["release_eligible"]:
-        raise WcMapError("the w_c map would not be release-eligible (nothing written): "
-                         + "; ".join(rec["ineligible_reasons"]))
+        raise WcMapError(
+            "the w_c map would not be release-eligible (nothing written): "
+            + "; ".join(rec["ineligible_reasons"])
+        )
     return rec, write_wc_map(out_path, doc, rec)
 
 
 # ------------------------------------------------------------------------------------------------------- reading
 class WcMap(NamedTuple):
     """A parsed, checked w_c map. Arrays are host numpy float64."""
-    delta_c_coeffs: np.ndarray         # (4, 3) np.polyval order, class order CLASS_ORDER
+
+    delta_c_coeffs: np.ndarray  # (4, 3) np.polyval order, class order CLASS_ORDER
     delta_c_z_clamp: tuple
-    delta_c_resid_std: np.ndarray      # (4,) fit residual std (information; the predictor applies no prior)
-    xbar_coeffs: np.ndarray            # (3,) np.polyval order
+    delta_c_resid_std: (
+        np.ndarray
+    )  # (4,) fit residual std (information; the predictor applies no prior)
+    xbar_coeffs: np.ndarray  # (3,) np.polyval order
     xbar_z_fit: tuple
     record: dict
     sha256: str
@@ -262,8 +354,13 @@ class WcMap(NamedTuple):
 
     def delta_c_map(self):
         from .dndx_wc import DeltaCMap
-        return DeltaCMap(coeffs=np.array(self.delta_c_coeffs, dtype=np.float64), z_lo=float(self.delta_c_z_clamp[0]),
-                         z_hi=float(self.delta_c_z_clamp[1]), label=f"wc_map {self.sha256}")
+
+        return DeltaCMap(
+            coeffs=np.array(self.delta_c_coeffs, dtype=np.float64),
+            z_lo=float(self.delta_c_z_clamp[0]),
+            z_hi=float(self.delta_c_z_clamp[1]),
+            label=f"wc_map {self.sha256}",
+        )
 
     def xbar(self, z):
         """Xbar(z) = np.polyval(xbar_coeffs, z) (not clamped: outside ``xbar_z_fit`` it is an extrapolation)."""
@@ -274,15 +371,22 @@ class WcMap(NamedTuple):
         with this map's Xbar(z) and delta_c. Host numpy in, host numpy out."""
         import jax.numpy as jnp
         from .dndx_wc import w_c_corrected
+
         z = np.asarray(z, dtype=np.float64)
-        out = w_c_corrected(jnp.asarray(np.asarray(dndx, dtype=np.float64)), jnp.asarray(self.xbar(z)),
-                            jnp.asarray(z), self.delta_c_map())
+        out = w_c_corrected(
+            jnp.asarray(np.asarray(dndx, dtype=np.float64)),
+            jnp.asarray(self.xbar(z)),
+            jnp.asarray(z),
+            self.delta_c_map(),
+        )
         return np.asarray(out, dtype=np.float64)
 
 
 def _num_list(x, shape, where, what):
     a = np.asarray(x, dtype=object)
-    if a.shape != shape or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in a.ravel()):
+    if a.shape != shape or not all(
+        isinstance(v, (int, float)) and not isinstance(v, bool) for v in a.ravel()
+    ):
         raise WcMapError(f"{where}: {what} must be numbers of shape {shape}")
     a = np.asarray(x, dtype=np.float64)
     if not np.all(np.isfinite(a)):
@@ -305,14 +409,20 @@ def _check_payload(doc, where):
     if doc["format"] != FORMAT:
         raise WcMapError(f"{where}: format {doc['format']!r}, this reader reads {FORMAT}")
     if doc["class_order"] != list(CLASS_ORDER):
-        raise WcMapError(f"{where}: class_order {doc['class_order']!r}, expected {list(CLASS_ORDER)}")
+        raise WcMapError(
+            f"{where}: class_order {doc['class_order']!r}, expected {list(CLASS_ORDER)}"
+        )
     dc, xb = doc["delta_c"], doc["xbar"]
     if not isinstance(dc, dict) or set(dc) != _DC_KEYS:
-        raise WcMapError(f"{where}: delta_c keys {sorted(dc) if isinstance(dc, dict) else dc!r}, expected "
-                         f"{sorted(_DC_KEYS)}")
+        raise WcMapError(
+            f"{where}: delta_c keys {sorted(dc) if isinstance(dc, dict) else dc!r}, expected "
+            f"{sorted(_DC_KEYS)}"
+        )
     if not isinstance(xb, dict) or set(xb) != _XB_KEYS:
-        raise WcMapError(f"{where}: xbar keys {sorted(xb) if isinstance(xb, dict) else xb!r}, expected "
-                         f"{sorted(_XB_KEYS)}")
+        raise WcMapError(
+            f"{where}: xbar keys {sorted(xb) if isinstance(xb, dict) else xb!r}, expected "
+            f"{sorted(_XB_KEYS)}"
+        )
     if dc["deg"] != DEG or xb["deg"] != DEG:
         raise WcMapError(f"{where}: polynomial degree must be {DEG}")
     _num_list(dc["coeffs"], (4, DEG + 1), where, "delta_c coeffs")
@@ -336,7 +446,8 @@ def parse_wc_map(raw, where="<w_c map>", *, expected_sha256=None, require_releas
     ``expected_sha256`` the bytes must hash to it first."""
     from . import safe_io as S
     from ..catalog import RELEASE_FINDER_IDS
-    if expected_sha256 is not None:                          # an exact str only (safe_io.exact_hex64)
+
+    if expected_sha256 is not None:  # an exact str only (safe_io.exact_hex64)
         S.require_exact_hex64(expected_sha256, f"{where}: expected_sha256", WcMapError)
     raw = bytes(raw)
     sha = hashlib.sha256(raw).hexdigest()
@@ -356,36 +467,57 @@ def parse_wc_map(raw, where="<w_c map>", *, expected_sha256=None, require_releas
     except L.LineageError as e:
         raise WcMapError(f"{where}: {e}") from None
     if rec["kind"] != KIND or rec["kind_version"] != KIND_VERSION:
-        raise WcMapError(f"{where}: a {rec['kind']} record of version {rec['kind_version']}, not {KIND} {KIND_VERSION}")
+        raise WcMapError(
+            f"{where}: a {rec['kind']} record of version {rec['kind_version']}, not {KIND} {KIND_VERSION}"
+        )
     if rec["product"].get("payload_sha256") != payload_sha256(doc):
-        raise WcMapError(f"{where}: the map differs from its record's payload digest (edited after it was made)")
+        raise WcMapError(
+            f"{where}: the map differs from its record's payload digest (edited after it was made)"
+        )
     if [i["role"] for i in rec["inputs"]] != ["cache"] or rec["inputs"][0]["kind"] != "tau0_cache":
         raise WcMapError(f"{where}: the record's inputs must be exactly the training cache")
     if require_release_eligible and not rec["release_eligible"]:
         raise WcMapError(f"{where}: not release-eligible: " + "; ".join(rec["ineligible_reasons"]))
     dc, xb = doc["delta_c"], doc["xbar"]
-    return WcMap(delta_c_coeffs=np.asarray(dc["coeffs"], dtype=np.float64),
-                 delta_c_z_clamp=tuple(float(v) for v in dc["z_clamp"]),
-                 delta_c_resid_std=np.asarray(dc["resid_std"], dtype=np.float64),
-                 xbar_coeffs=np.asarray(xb["coeffs"], dtype=np.float64),
-                 xbar_z_fit=tuple(float(v) for v in xb["z_fit"]), record=rec, sha256=sha, doc=doc)
+    return WcMap(
+        delta_c_coeffs=np.asarray(dc["coeffs"], dtype=np.float64),
+        delta_c_z_clamp=tuple(float(v) for v in dc["z_clamp"]),
+        delta_c_resid_std=np.asarray(dc["resid_std"], dtype=np.float64),
+        xbar_coeffs=np.asarray(xb["coeffs"], dtype=np.float64),
+        xbar_z_fit=tuple(float(v) for v in xb["z_fit"]),
+        record=rec,
+        sha256=sha,
+        doc=doc,
+    )
 
 
 def read_wc_map(path, *, expected_sha256=None, require_release_eligible=True):
     """``parse_wc_map`` of the file at ``path`` (a regular file, not a symlink, at most ``MAX_BYTES``)."""
     from . import safe_io as S
+
     try:
         raw = S.read_regular(str(path), MAX_BYTES)
     except S.SafeFormatError as e:
         raise WcMapError(str(e)) from None
-    return parse_wc_map(raw, str(path), expected_sha256=expected_sha256,
-                        require_release_eligible=require_release_eligible)
+    return parse_wc_map(
+        raw,
+        str(path),
+        expected_sha256=expected_sha256,
+        require_release_eligible=require_release_eligible,
+    )
 
 
 def dumps_summary(m):
     """A short human-readable summary (for the refit command's output)."""
-    return json.dumps({"sha256": m.sha256, "cache_sha256": m.cache_sha256,
-                       "release_eligible": m.record["release_eligible"],
-                       "ineligible_reasons": m.record["ineligible_reasons"],
-                       "delta_c_coeffs": m.delta_c_coeffs.tolist(), "xbar_coeffs": m.xbar_coeffs.tolist(),
-                       "delta_c_resid_std": m.delta_c_resid_std.tolist()}, indent=1)
+    return json.dumps(
+        {
+            "sha256": m.sha256,
+            "cache_sha256": m.cache_sha256,
+            "release_eligible": m.record["release_eligible"],
+            "ineligible_reasons": m.record["ineligible_reasons"],
+            "delta_c_coeffs": m.delta_c_coeffs.tolist(),
+            "xbar_coeffs": m.xbar_coeffs.tolist(),
+            "delta_c_resid_std": m.delta_c_resid_std.tolist(),
+        },
+        indent=1,
+    )

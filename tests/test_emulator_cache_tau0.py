@@ -6,6 +6,7 @@ Real-data tests need the emu-3.9 + GSL env:
 with the data directories set as listed in tests/gate_helpers.py (HCD_OUTPUTS_DIR, HCD_LF_RAW_DIR, ...).
 The synthetic write_cache_tau0 round-trip runs under plain python3.
 """
+
 import os
 import sys
 import tempfile
@@ -23,16 +24,20 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 # synthetic round-trip / merge tests are also exercised by test_emulator_cache.py,
 # which has no fake_spectra dependency.)
 import pytest
+
 pytest.importorskip("fake_spectra")
 
 
 def _unavailable(msg):
     """Real-data test cannot run here: skip normally, FAIL in gate mode (HCD_GATE_RUN=1). pytest is imported lazily so
-    the module still runs directly under emu-3.9's python (no pytest there) when the data are present."""
+    the module still runs directly under emu-3.9's python (no pytest there) when the data are present.
+    """
     import pytest
+
     if os.environ.get("HCD_GATE_RUN") == "1":
         pytest.fail(msg + " (HCD_GATE_RUN=1)")
     pytest.skip(msg)
+
 
 import build_emulator_cache_tau0 as bt0
 from hcd_analysis import priya_p1d as bt0_pp
@@ -41,7 +46,10 @@ from hcd_analysis import tau0_cache as T
 
 def _hist(snap_dir):
     """An old (pre-lineage) snapshot directory's products, read for the PRIYA bit-identity checks."""
-    return T.load_snapshot_inputs_historical(snap_dir, reason="PRIYA bit-identity test on an old snapshot root")[0]
+    return T.load_snapshot_inputs_historical(
+        snap_dir, reason="PRIYA bit-identity test on an old snapshot root"
+    )[0]
+
 
 # Data outside the repository, located by environment variable (tests/gate_helpers.py lists them; inlined here because
 # this file also runs as a plain script). An unset variable gives a path that does not exist.
@@ -72,8 +80,10 @@ def test_locate_raw_tau_file_returns_none_when_missing():
         assert bt0.locate_raw_tau_file(Path(tmp), "ns0.8Ap2e-09", 10) is None
 
 
-_NS0907 = ("ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662"
-           "omegamh20.144hireionz7.47bhfeedback0.0347")
+_NS0907 = (
+    "ns0.907Ap1.5e-09herei3.75heref2.77alphaq2.04hub0.662"
+    "omegamh20.144hireionz7.47bhfeedback0.0347"
+)
 
 
 # The two legacy tests that pinned the 2026-06-01 tau re-pointing (ns0.907 snap 17 -> SPECTRA_018) were removed in the
@@ -109,11 +119,21 @@ def test_read_priya_params_matches_priya_array():
     """_read_priya_params (SimulationICs.json + Ap pivot transform) must
     reproduce PRIYA's params row to machine precision for several sims."""
     import build_emulator_cache as bec
+
     # (sim_idx in PRIYA params, hcd_outputs folder, any snap with a grid file)
     cases = [
-        (44, "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"),
-        (0,  "ns0.842Ap1.36e-09herei3.51heref2.85alphaq2hub0.658omegamh20.14hireionz6.72bhfeedback0.0453"),
-        (29, "ns0.901Ap1.22e-09herei3.93heref2.87alphaq1.68hub0.712omegamh20.146hireionz6.97bhfeedback0.068"),
+        (
+            44,
+            "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056",
+        ),
+        (
+            0,
+            "ns0.842Ap1.36e-09herei3.51heref2.85alphaq2hub0.658omegamh20.14hireionz6.72bhfeedback0.0453",
+        ),
+        (
+            29,
+            "ns0.901Ap1.22e-09herei3.93heref2.87alphaq1.68hub0.712omegamh20.146hireionz6.97bhfeedback0.068",
+        ),
     ]
     with h5py.File(_PRIYA_FILE, "r") as f:
         priya_params = f["params"][...]
@@ -124,48 +144,67 @@ def test_read_priya_params_matches_priya_array():
         ours = bt0._read_priya_params(raw)
         theirs = priya_params[sim_idx, 1:].astype(np.float64)  # col 0 is alpha
         rel = np.max(np.abs(ours / theirs - 1.0))
-        assert rel < 1e-6, f"sim {sim_idx}: param mismatch max rel {rel:.3e}\nours={ours}\nPRIYA={theirs}"
+        assert (
+            rel < 1e-6
+        ), f"sim {sim_idx}: param mismatch max rel {rel:.3e}\nours={ours}\nPRIYA={theirs}"
     print("read_priya_params matches PRIYA params array (max rel < 1e-6): OK")
 
 
 def _fake_snap_block(sim, snap):
     return {
-        "sim_name": sim, "snap": snap,
-        "f_nhi": np.full(30, 1e-21), "n_absorbers": np.arange(30, dtype=np.int64),
+        "sim_name": sim,
+        "snap": snap,
+        "f_nhi": np.full(30, 1e-21),
+        "n_absorbers": np.arange(30, dtype=np.int64),
         "log_nhi_centres": np.linspace(17.1, 22.9, 30),
         "log_nhi_edges": np.linspace(17.0, 23.0, 31),
         "total_path_dX": 1234.5,
-        "dNdX_LLS": 0.5, "dNdX_subDLA": 0.2, "dNdX_DLA": 0.1,
+        "dNdX_LLS": 0.5,
+        "dNdX_subDLA": 0.2,
+        "dNdX_DLA": 0.1,
     }
 
 
 def _fake_rows(nk, nrows=3):
     from hcd_analysis.priya_p1d import N_TIER_C_BINS as NB
+
     rows = []
     for i in range(nrows):
-        rows.append({
-            "sim_name": f"sim{i%2}", "snap": 10 + i, "alpha_slope": 1.0 + 0.1*i,
-            "alpha_idx": i, "z_meta": 3.0, "z_grid": 3.0, "dv_kms": 10.0,
-            "nbins_native": 1228, "target_F": 0.7, "scale": 0.9,
-            "params": np.arange(9, dtype=np.float64),
-            "kfkms": np.linspace(5e-4, 0.08, nk),
-            "P_tier_p": np.full(nk, 5.0),
-            "P_tier_c": np.tile(np.arange(NB)[:, None], (1, nk)).astype(float),
-            "P_tier_c_filtered": np.tile(np.arange(NB)[:, None], (1, nk)).astype(float) * 0.9,
-            "tier_c_counts": np.arange(NB, dtype=np.int64),
-            "mean_F_by_bin": np.linspace(0.5, 0.9, NB),
-            "snap_group_idx": i,
-        })
+        rows.append(
+            {
+                "sim_name": f"sim{i%2}",
+                "snap": 10 + i,
+                "alpha_slope": 1.0 + 0.1 * i,
+                "alpha_idx": i,
+                "z_meta": 3.0,
+                "z_grid": 3.0,
+                "dv_kms": 10.0,
+                "nbins_native": 1228,
+                "target_F": 0.7,
+                "scale": 0.9,
+                "params": np.arange(9, dtype=np.float64),
+                "kfkms": np.linspace(5e-4, 0.08, nk),
+                "P_tier_p": np.full(nk, 5.0),
+                "P_tier_c": np.tile(np.arange(NB)[:, None], (1, nk)).astype(float),
+                "P_tier_c_filtered": np.tile(np.arange(NB)[:, None], (1, nk)).astype(float) * 0.9,
+                "tier_c_counts": np.arange(NB, dtype=np.int64),
+                "mean_F_by_bin": np.linspace(0.5, 0.9, NB),
+                "snap_group_idx": i,
+            }
+        )
     return rows
 
 
 def test_write_cache_tau0_round_trip(tmp_path):
     import hcd_analysis.priya_p1d as pp
+
     nk = 172
     rows = _fake_rows(nk)
     snap_blocks = [_fake_snap_block(f"sim{i%2}", 10 + i) for i in range(3)]
     out = tmp_path / "rt_tau0.h5"
-    bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(1.0, 1.2), n_k=nk, inputs=[], settings={})
+    bt0.write_cache_tau0(
+        rows, snap_blocks, out, alpha_range=(1.0, 1.2), n_k=nk, inputs=[], settings={}
+    )
     with h5py.File(out, "r") as f:
         assert f.attrs["cache_version"] == "3.4" and T.LINEAGE_KEY in f
         assert f.attrs["tier_c_recipe"] == "uniform"
@@ -173,7 +212,7 @@ def test_write_cache_tau0_round_trip(tmp_path):
         assert f["P_tier_p"].shape == (3, nk)
         assert f["kfkms"].shape == (3, nk)
         assert f["P_tier_c"].shape == (3, pp.N_TIER_C_BINS, nk)
-        assert "P_tier_c_frozen" not in f      # frozen tier removed (per-pixel freeze no-op)
+        assert "P_tier_c_frozen" not in f  # frozen tier removed (per-pixel freeze no-op)
         assert f["P_tier_c_filtered"].shape == (3, pp.N_TIER_C_BINS, nk)
         assert f["tier_c_counts"].shape == (3, pp.N_TIER_C_BINS)
         assert f["mean_F_by_bin"].shape == (3, pp.N_TIER_C_BINS)
@@ -191,8 +230,14 @@ def test_discover_dedups_one_snap_per_grid_z():
     # no duplicate (sim, z_grid)
     seen = {}
     import json as _json
-    def label(sim, snap, sd, raw):     # the builder's redshift label (meta z, corrected for the two mislabelled dirs)
-        return bt0.catalogue_z_label(sim, snap, float(_json.load(open(sd / "meta.json"))["z"]), bt0.raw_header_z(raw))
+
+    def label(
+        sim, snap, sd, raw
+    ):  # the builder's redshift label (meta z, corrected for the two mislabelled dirs)
+        return bt0.catalogue_z_label(
+            sim, snap, float(_json.load(open(sd / "meta.json"))["z"]), bt0.raw_header_z(raw)
+        )
+
     for sim, snap, sd, raw in pairs:
         zg = bt0._snap_z_to_priya_grid(label(sim, snap, sd, raw))
         key = (sim, round(zg, 4))
@@ -211,7 +256,10 @@ def test_discover_dedups_one_snap_per_grid_z():
 
 def test_build_tau0_rows_tier_p_matches_priya():
     SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
-    SNAP = 17; NK = 172; ZIDX = 8; ROW = 344
+    SNAP = 17
+    NK = 172
+    ZIDX = 8
+    ROW = 344
     snap_dir = _HCD_ROOT / SIM / f"snap_{SNAP:03d}"
     raw = _EMU_LF / SIM / "output" / f"SPECTRA_{SNAP:03d}" / "lya_forest_spectra_grid_480.hdf5"
     if not (snap_dir.exists() and raw.exists()):
@@ -219,10 +267,11 @@ def test_build_tau0_rows_tier_p_matches_priya():
     priya = _PRIYA_FILE
     with h5py.File(priya, "r") as f:
         alpha = float(f["params"][ROW, 0])
-        P_priya = f["flux_vectors"][ROW, ZIDX*NK:(ZIDX+1)*NK].astype(np.float64)
+        P_priya = f["flux_vectors"][ROW, ZIDX * NK : (ZIDX + 1) * NK].astype(np.float64)
         kp = f["kfkms"][ROW, ZIDX, :].astype(np.float64)
-    rows, _ = bt0.build_tau0_rows(SIM, SNAP, _hist(snap_dir), raw,
-                                  alpha_slope_grid=np.array([alpha]), n_k=NK)
+    rows, _ = bt0.build_tau0_rows(
+        SIM, SNAP, _hist(snap_dir), raw, alpha_slope_grid=np.array([alpha]), n_k=NK
+    )
     r = rows[0]
     assert r["kfkms"].shape == (NK,) and r["P_tier_p"].shape == (NK,)
     assert np.max(np.abs(r["kfkms"] / kp - 1)) < 1e-12, "native k-grid mismatch"
@@ -238,18 +287,31 @@ def test_build_tau0_rows_tier_p_matches_priya():
 def test_merge_v3_synthetic(tmp_path):
     import scripts.merge_tau0_cache as mg
     import hcd_analysis.priya_p1d as pp
+
     nk = 172
     for si in range(2):
         rows = _fake_rows(nk, nrows=2)
         for r in rows:
-            r["snap_group_idx"] = 0  # one snap per shard: every row belongs to the shard's one snap block
+            r["snap_group_idx"] = (
+                0  # one snap per shard: every row belongs to the shard's one snap block
+            )
             r["sim_name"], r["snap"] = f"sim{si}", 0
         blocks = [_fake_snap_block(f"sim{si}", 0)]
-        bt0.write_cache_tau0(rows, blocks, tmp_path / f"shard_{si}.h5",
-                             alpha_range=(1.0, 1.2), n_k=nk, inputs=[], settings={})
+        bt0.write_cache_tau0(
+            rows,
+            blocks,
+            tmp_path / f"shard_{si}.h5",
+            alpha_range=(1.0, 1.2),
+            n_k=nk,
+            inputs=[],
+            settings={},
+        )
     out = tmp_path / "merged.h5"
-    mg.merge_shards([str(tmp_path / f"shard_{i}.h5") for i in range(2)], out,
-                    historical_reason="synthetic shards without inputs")
+    mg.merge_shards(
+        [str(tmp_path / f"shard_{i}.h5") for i in range(2)],
+        out,
+        historical_reason="synthetic shards without inputs",
+    )
     with h5py.File(out, "r") as f:
         assert f.attrs["cache_version"] == "3.4"
         assert f.attrs["tier_c_recipe"] == "uniform"
@@ -262,7 +324,7 @@ def test_merge_v3_synthetic(tmp_path):
         assert f["tier_c_counts"].shape[0] == 4
         assert f["mean_F_by_bin"].shape == (4, pp.N_TIER_C_BINS)
         gi = f["snap_group_idx"][...]
-        assert gi.tolist() == [0, 0, 1, 1]   # second shard's snap remapped
+        assert gi.tolist() == [0, 0, 1, 1]  # second shard's snap remapped
         assert list(f["tier_c_labels"].asstr()[...]) == pp.tier_c_labels()
     print("OK merge v3.3 synthetic")
 
@@ -273,35 +335,54 @@ def test_v33_uniform_schema_roundtrip():
     freeze was proven a numerical no-op); tier_c_recipe='uniform'."""
     import os
     import hcd_analysis.priya_p1d as pp
+
     nk = bt0._N_K["lf"]
     NB = pp.N_TIER_C_BINS
 
     def _row(a):
-        return dict(sim_name="nsTEST", snap=1, alpha_slope=float(a), alpha_idx=a,
-                    z_meta=3.0, z_grid=3.0, dv_kms=10.0, nbins_native=2*nk,
-                    snap_group_idx=0, target_F=0.7, scale=0.8,
-                    params=np.zeros(9), kfkms=np.linspace(1e-3, 0.1, nk),
-                    P_tier_p=np.ones(nk), P_tier_c=np.ones((NB, nk)),
-                    P_tier_c_filtered=np.ones((NB, nk)),
-                    tier_c_counts=np.arange(NB, dtype=np.int64),
-                    mean_F_by_bin=np.linspace(0.5, 0.9, NB))
+        return dict(
+            sim_name="nsTEST",
+            snap=1,
+            alpha_slope=float(a),
+            alpha_idx=a,
+            z_meta=3.0,
+            z_grid=3.0,
+            dv_kms=10.0,
+            nbins_native=2 * nk,
+            snap_group_idx=0,
+            target_F=0.7,
+            scale=0.8,
+            params=np.zeros(9),
+            kfkms=np.linspace(1e-3, 0.1, nk),
+            P_tier_p=np.ones(nk),
+            P_tier_c=np.ones((NB, nk)),
+            P_tier_c_filtered=np.ones((NB, nk)),
+            tier_c_counts=np.arange(NB, dtype=np.int64),
+            mean_F_by_bin=np.linspace(0.5, 0.9, NB),
+        )
 
     rows = [_row(0), _row(1)]
     snap_blocks = [_fake_snap_block("nsTEST", 1)]
     out = os.path.join(tempfile.mkdtemp(), "c.h5")
-    bt0.write_cache_tau0(rows, snap_blocks, out, alpha_range=(0.0, 1.0), n_k=nk, inputs=[], settings={})
+    bt0.write_cache_tau0(
+        rows, snap_blocks, out, alpha_range=(0.0, 1.0), n_k=nk, inputs=[], settings={}
+    )
     with h5py.File(out, "r") as f:
-        assert f.attrs["cache_version"] == "3.4", \
-            f"expected cache_version='3.4', got '{f.attrs['cache_version']}'"
+        assert (
+            f.attrs["cache_version"] == "3.4"
+        ), f"expected cache_version='3.4', got '{f.attrs['cache_version']}'"
         assert f.attrs["tier_c_recipe"] == "uniform"
         assert "P_tier_c_frozen" not in f, "frozen tier should be removed in v3.3"
         assert "tau_freeze_tierc" not in f.attrs, "tau_freeze_tierc attr should be gone"
         assert f["P_tier_c"].shape == (2, NB, nk)
         assert f["P_tier_c_filtered"].shape == (2, NB, nk)
-        assert f["mean_F_by_bin"].shape == (2, NB), \
-            f"mean_F_by_bin shape mismatch: {f['mean_F_by_bin'].shape}"
-        assert np.allclose(f["mean_F_by_bin"][1], np.linspace(0.5, 0.9, NB)), \
-            "mean_F_by_bin[1] round-trip failed"
+        assert f["mean_F_by_bin"].shape == (
+            2,
+            NB,
+        ), f"mean_F_by_bin shape mismatch: {f['mean_F_by_bin'].shape}"
+        assert np.allclose(
+            f["mean_F_by_bin"][1], np.linspace(0.5, 0.9, NB)
+        ), "mean_F_by_bin[1] round-trip failed"
     print("OK v3.3 uniform-only schema round-trip (frozen tier removed)")
 
 
@@ -324,19 +405,26 @@ def test_filtered_tier_c_reconstructs_priya():
 
 def test_grid_in_dir_requires_grid_480(tmp_path=None):
     import tempfile, os
+
     base = Path(tempfile.mkdtemp())
     # dir A: only the low-res fallback -> must be skipped (None)
-    a = base / "SPECTRA_015"; a.mkdir()
+    a = base / "SPECTRA_015"
+    a.mkdir()
     (a / "lya_forest_spectra.hdf5").write_bytes(b"x")
     assert bt0._grid_in_dir(a) is None, "fallback-only dir must NOT be located"
     # dir B: has the grid_480 -> must be returned
-    b = base / "SPECTRA_016"; b.mkdir()
-    g = b / "lya_forest_spectra_grid_480.hdf5"; g.write_bytes(b"x")
+    b = base / "SPECTRA_016"
+    b.mkdir()
+    g = b / "lya_forest_spectra_grid_480.hdf5"
+    g.write_bytes(b"x")
     assert bt0._grid_in_dir(b) == g, "grid_480 must be located"
     # dir C: empty -> None
-    c = base / "SPECTRA_099"; c.mkdir()
+    c = base / "SPECTRA_099"
+    c.mkdir()
     assert bt0._grid_in_dir(c) is None
-    import shutil; shutil.rmtree(base)
+    import shutil
+
+    shutil.rmtree(base)
     print("OK _grid_in_dir requires grid_480")
 
 
@@ -345,11 +433,12 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
     N_K is READ from the ref (525), not hardcoded — confirms Tier P (tau_thresh=1e6)
     is bit-identical to PRIYA's hires flux vectors."""
     import json
+
     # The 6-simulation PRIYA HR product (60 rows = 6 sims x 10 rungs, 17 z, 525 modes); its scratch copy beside the
     # raw spectra is gone, the upstream copy is the reference (gate B, 2026-10).
     HR_REF = _ext("HCD_UPSTREAM_HR_DIR", "mf_emulator_flux_vectors_tau1000000.hdf5")
     EMU_HR = str(_EMU_HR)
-    HCD_BASE = str(_HCD_ROOT)   # discover appends /hires
+    HCD_BASE = str(_HCD_ROOT)  # discover appends /hires
     if not Path(HR_REF).exists():
         _unavailable("HR bit-identity: 6-sim reference unavailable")
     pairs = bt0.discover_tau0_pairs(HCD_BASE, EMU_HR, fidelity="hr")
@@ -359,7 +448,8 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
     for sim, snap, sd, raw in pairs:
         z = bt0._snap_z_to_priya_grid(json.load(open(sd / "meta.json"))["z"])
         if abs(z - 3.0) < 1e-6:
-            cand = (sim, snap, sd, raw); break
+            cand = (sim, snap, sd, raw)
+            break
     assert cand, "no HR z=3.0 pair"
     sim, snap, sd, raw = cand
     # The scratch copy of the HR runs has lost its SimulationICs.json (scratch purge; spectra re-copied 2026-08-18).
@@ -370,27 +460,36 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
         lf_ics = _EMU_LF / sim / "SimulationICs.json"
         if not lf_ics.exists():
             _unavailable(f"HR bit-identity: no SimulationICs.json for {sim} (HR or LF)")
-        lf_like = _EMU_LF / sim / "output" / "SPECTRA_000" / "unused.hdf5"   # only parents[2] is used
+        lf_like = (
+            _EMU_LF / sim / "output" / "SPECTRA_000" / "unused.hdf5"
+        )  # only parents[2] is used
 
         def read_params(_raw_tau_path, _f=bt0._read_priya_params, _p=lf_like):
             return _f(_p)
-    my_params = read_params(raw)                       # 9 cosmo in bec.PARAM_ORDER
+
+    my_params = read_params(raw)  # 9 cosmo in bec.PARAM_ORDER
     with h5py.File(HR_REF, "r") as f:
-        params = f["params"][...]; fv = f["flux_vectors"][...]
+        params = f["params"][...]
+        fv = f["flux_vectors"][...]
         zout = f["zout"][...]
-        NK = int(f["kfkms"].shape[-1])                 # 525, read from the ref
-        sim_rows = np.where(np.all(np.isclose(params[:, 1:], my_params[None, :],
-                                              rtol=1e-4), axis=1))[0]
+        NK = int(f["kfkms"].shape[-1])  # 525, read from the ref
+        sim_rows = np.where(
+            np.all(np.isclose(params[:, 1:], my_params[None, :], rtol=1e-4), axis=1)
+        )[0]
         assert len(sim_rows) > 0, "HR sim not found in PRIYA ref by params"
-        row = int(sim_rows[0]); alpha = float(params[row, 0])
+        row = int(sim_rows[0])
+        alpha = float(params[row, 0])
         zidx = int(np.argmin(np.abs(zout - 3.0)))
-        P_priya = fv[row, zidx*NK:(zidx+1)*NK].astype(np.float64)
+        P_priya = fv[row, zidx * NK : (zidx + 1) * NK].astype(np.float64)
         kp = f["kfkms"][row, zidx, :].astype(np.float64)
     orig = bt0._read_priya_params
-    bt0._read_priya_params = read_params               # build_tau0_rows reads the parameters through the same helper
+    bt0._read_priya_params = (
+        read_params  # build_tau0_rows reads the parameters through the same helper
+    )
     try:
-        rows, _ = bt0.build_tau0_rows(sim, snap, _hist(sd), raw,
-                                      alpha_slope_grid=np.array([alpha]), n_k=NK)
+        rows, _ = bt0.build_tau0_rows(
+            sim, snap, _hist(sd), raw, alpha_slope_grid=np.array([alpha]), n_k=NK
+        )
     finally:
         bt0._read_priya_params = orig
     r = rows[0]
@@ -398,13 +497,16 @@ def test_build_tau0_rows_hr_matches_priya_6sim():
     assert np.max(np.abs(r["kfkms"] / kp - 1)) < 1e-10, "HR native k-grid mismatch"
     rel = np.max(np.abs(r["P_tier_p"] / P_priya - 1))
     assert rel < 1e-4, f"HR Tier-P not bit-identical to PRIYA hires vectors: max|r-1|={rel:.3e}"
-    print(f"RESULT OK HR bit-identity sim={sim[:24]} z=3.0 alpha={alpha:.4f} N_K={NK} max|r-1|={rel:.3e}")
+    print(
+        f"RESULT OK HR bit-identity sim={sim[:24]} z=3.0 alpha={alpha:.4f} N_K={NK} max|r-1|={rel:.3e}"
+    )
 
 
 def test_dndx_class_edges_match_fine_nhi_edges():
     from hcd_analysis.priya_p1d import FINE_NHI_EDGES
     import numpy as np
     import scripts.build_emulator_cache_tau0 as bt0
+
     for edge in (17.2, 19.0, 20.3):
         assert np.isclose(FINE_NHI_EDGES, edge, atol=1e-9).any(), f"{edge} not in FINE_NHI_EDGES"
     assert bt0.COARSE_CLASS_EDGES == (17.2, 19.0, 20.3)
@@ -420,7 +522,9 @@ if __name__ == "__main__":
     test_discover_hr_pairs_six_sims()
     test_discover_dedups_one_snap_per_grid_z()
     test_read_priya_params_matches_priya_array()
-    test_write_cache_tau0_round_trip(Path(tempfile.mkdtemp()))       # a fresh directory per run, as pytest's tmp_path
+    test_write_cache_tau0_round_trip(
+        Path(tempfile.mkdtemp())
+    )  # a fresh directory per run, as pytest's tmp_path
     test_v33_uniform_schema_roundtrip()
     test_merge_v3_synthetic(Path(tempfile.mkdtemp()))
     test_build_tau0_rows_tier_p_matches_priya()

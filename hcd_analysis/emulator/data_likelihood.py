@@ -27,6 +27,7 @@ x64 is asserted (import ``hcd_analysis.emulator`` before jax). No donate.
 
 LYA-CONSULT items are tagged ``LYA-CONSULT:`` inline; see the module-level report.
 """
+
 from __future__ import annotations
 
 from typing import NamedTuple
@@ -41,26 +42,25 @@ from .. import runtime_data as _RD
 from .predict import predict_P_obs, predict_P_filt, _excess_from_P_filt
 from .likelihood import sigma_at_tau0, rho_at_tau0, gaussian_loglik
 
-assert jax.config.read("jax_enable_x64"), \
-    "x64 must be on (import hcd_analysis.emulator before jax)"
+assert jax.config.read("jax_enable_x64"), "x64 must be on (import hcd_analysis.emulator before jax)"
 
 # --- physical constants -------------------------------------------------------
 # res_corr AMPLITUDE nuisance pivot (Task 1.3): α(z) = α₀·((1+z)/(1+Z_PIVOT))^s. The
 # multi-fidelity res_corr (HF→n512 particle-convergence factor) amplitude is marginalized
 # FORWARD-ONLY at the chokepoint ``_mf_corr_on_cache`` via this z-slope around z=3.
 Z_PIVOT = 3.0
-C_KMS = 299792.458            # speed of light [km/s]
-LAMBDA_LYA = 1215.67          # Lyα rest wavelength [Å]
-LAMBDA_SiIII = 1206.50        # SiIII line [Å]
-LAMBDA_SiII = 1190.42         # SiII line [Å]  (1190/1193 doublet; 1190.42 leading line)
-LAMBDA_SiIIb = 1193.28        # SiII line [Å]  (the SECOND doublet line; r_doublet weights it)
-R_SiII_DOUBLET = 0.5          # intra-doublet ratio (matches closure_legb.metal_inject r_doublet)
+C_KMS = 299792.458  # speed of light [km/s]
+LAMBDA_LYA = 1215.67  # Lyα rest wavelength [Å]
+LAMBDA_SiIII = 1206.50  # SiIII line [Å]
+LAMBDA_SiII = 1190.42  # SiII line [Å]  (1190/1193 doublet; 1190.42 leading line)
+LAMBDA_SiIIb = 1193.28  # SiII line [Å]  (the SECOND doublet line; r_doublet weights it)
+R_SiII_DOUBLET = 0.5  # intra-doublet ratio (matches closure_legb.metal_inject r_doublet)
 # SiIII/SiII–Lyα decorrelation scale k_x [s/km] (DESI DR1 companion arXiv:2601.21432 Eq. 4.3).
 # NOTE: this sigmoid damping is the companion's ADDITION, NOT in McDonald 2006 (whose SiIII
 # cross-term is undamped). The cosine
 # cross-term is multiplied by the SIGMOID D_x(k)=2−2/(1+exp(−k/k_x)); k_x is a FREE nuisance
 # the sampler fits. These are off-state defaults (irrelevant when a=0; metals default OFF).
-K_SiIII_DEFAULT = 0.05         # s/km, sigmoid decorrelation scale (free nuisance)
+K_SiIII_DEFAULT = 0.05  # s/km, sigmoid decorrelation scale (free nuisance)
 K_SiII_DEFAULT = 0.05
 # DESI spectral pixel width used for the resolution proxy R_z [Å] (usage doc Eq. 4.8).
 DESI_PIXEL_ANGSTROM = 0.8
@@ -89,12 +89,13 @@ DESI_KMIN = 1e-3
 # HCD_P1D_DATA_DIR and verified by sha256 when loaded. This name is kept for older callers, for display and existence
 # checks only ("<HCD_P1D_DATA_DIR unset>/..." when the variable is unset).
 DESI_SNR3_NPZ = _RD.env_path("desi_dr1_p1d_snr3", "desi_dr1_p1d_snr3.npz")
-DESI_SNR3_STAT_INFLATE = 1.05         # +5% on the STAT uncertainty (paper baseline)
+DESI_SNR3_STAT_INFLATE = 1.05  # +5% on the STAT uncertainty (paper baseline)
 
 
 def _env_flag(name):
     """True iff the env var ``name`` is set to a truthy token (1/true/yes/on)."""
     import os
+
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
@@ -116,12 +117,14 @@ def assert_env_data_flags_unset(where, allow=False):
     if allow:
         return
     import os
+
     lit = {n: os.environ.get(n) for n in ENV_DATA_FLAGS if _env_flag(n)}
     assert not lit, (
         f"env data-selection flag(s) set at driver entry [{where}]: {lit}. These flags swap the "
         f"loaded measurement/covariance (SNR>3 npz / CV floor) silently under the production "
         f"likelihood. Unset them, or pass --allow-env-data-flags to run a deliberate "
-        f"non-baseline arm (the resolved values are stamped on the DataLeg + meta['forward']).")
+        f"non-baseline arm (the resolved values are stamped on the DataLeg + meta['forward'])."
+    )
 
 
 # ----------------------------------------------------------------------------#
@@ -133,15 +136,15 @@ def assert_env_data_flags_unset(where, allow=False):
 #  f_CV(k) = CV_FLOOR_FRAC for k ≤ CV_FLOOR_K_FULL, tapering linearly to 0 at
 #  CV_FLOOR_K_ZERO (so it is a smooth low-k-only floor, off above ~3e-3). DIAGONAL by
 #  default (HCD_CV_FLOOR_RANK1=1 makes it Fernandez's fully-correlated rank-1 σ_CV σ_CVᵀ).
-CV_FLOOR_FRAC = 0.02                  # 2% of P (Fernandez/PRIYA large-scale CV level)
-CV_FLOOR_K_FULL = 2.5e-3              # full amplitude at k ≤ this (s/km)
-CV_FLOOR_K_ZERO = 3.0e-3              # tapered to 0 by this k (negligible above)
+CV_FLOOR_FRAC = 0.02  # 2% of P (Fernandez/PRIYA large-scale CV level)
+CV_FLOOR_K_FULL = 2.5e-3  # full amplitude at k ≤ this (s/km)
+CV_FLOOR_K_ZERO = 3.0e-3  # tapered to 0 by this k (negligible above)
 
 
 def _cv_floor_frac(k):
     """The fractional σ_CV(k): CV_FLOOR_FRAC at k≤K_FULL, linearly →0 at K_ZERO, 0 above."""
     k = np.asarray(k, float)
-    t = (CV_FLOOR_K_ZERO - k) / (CV_FLOOR_K_ZERO - CV_FLOOR_K_FULL)   # 1 at K_FULL, 0 at K_ZERO
+    t = (CV_FLOOR_K_ZERO - k) / (CV_FLOOR_K_ZERO - CV_FLOOR_K_FULL)  # 1 at K_FULL, 0 at K_ZERO
     return CV_FLOOR_FRAC * np.clip(t, 0.0, 1.0)
 
 
@@ -149,12 +152,12 @@ def _add_cv_floor(C_data, k, P_data, *, rank1=False):
     """Add the σ_CV low-k floor to a leg's data covariance (Fix 2). Returns a NEW array.
     DIAGONAL: C += diag((f_CV·P)²).  RANK1 (Fernandez Eq 3.1 form): C += s sᵀ, s=f_CV·P
     (fully correlated across the low-k rows). Pure numpy, host-side (C_data is fixed)."""
-    s = _cv_floor_frac(k) * np.asarray(P_data, float)        # (N,) absolute σ_CV per row
+    s = _cv_floor_frac(k) * np.asarray(P_data, float)  # (N,) absolute σ_CV per row
     C = np.asarray(C_data, float).copy()
     if rank1:
         C += np.outer(s, s)
     else:
-        C[np.diag_indices_from(C)] += s ** 2
+        C[np.diag_indices_from(C)] += s**2
     return C
 
 
@@ -193,6 +196,7 @@ class _DataLegFields(NamedTuple):
                             ``dla_forward_frac · α_DLA · (P_DLA_unf − P_clean)``. Default 1.0
                             (back-compat: the full DLA forward, byte-identical for the DESI leg).
     """
+
     name: str
     z: np.ndarray
     z_unit: np.ndarray
@@ -316,11 +320,24 @@ def ks_resolution_R(z):
 # ============================================================================ #
 #  Loaders
 # ============================================================================ #
-def load_desi_leg(npz_path=None,
-                  *, z_lo=2.2, z_hi=4.2, k_min=DESI_KMIN, metals_on=True,
-                  resolution_on=False, add_cov_diag_inflation=True, mf_floor_on=False,
-                  use_snr3=None, snr3_stat_inflate=None, add_cv_floor=None, resolution_float=False,
-                  resolution_coherent=False, resolution_coh_amp=1.0, dla_cov_reduce=None):
+def load_desi_leg(
+    npz_path=None,
+    *,
+    z_lo=2.2,
+    z_hi=4.2,
+    k_min=DESI_KMIN,
+    metals_on=True,
+    resolution_on=False,
+    add_cov_diag_inflation=True,
+    mf_floor_on=False,
+    use_snr3=None,
+    snr3_stat_inflate=None,
+    add_cv_floor=None,
+    resolution_float=False,
+    resolution_coherent=False,
+    resolution_coh_amp=1.0,
+    dla_cov_reduce=None,
+):
     """Load DESI DR1 P1D → a post-cut ``DataLeg`` (usage doc §"Covariance + cuts").
 
     The data are the runtime data products ``desi_dr1_p1d`` (SNR>1) and ``desi_dr1_p1d_snr3`` (hcd_analysis.runtime_data):
@@ -364,32 +381,43 @@ def load_desi_leg(npz_path=None,
     dla_cov_reduce = DESI_DLA_COV_REDUCE if dla_cov_reduce is None else bool(dla_cov_reduce)
     add_cv_floor = _env_flag("HCD_CV_FLOOR") if add_cv_floor is None else bool(add_cv_floor)
     # Fix 1: SNR>3 selects the cosmology-paper baseline (SNR>3 measurement + its own covariance).
-    product, fname = (("desi_dr1_p1d_snr3", "desi_dr1_p1d_snr3.npz") if use_snr3
-                      else ("desi_dr1_p1d", "desi_dr1_p1d.npz"))
+    product, fname = (
+        ("desi_dr1_p1d_snr3", "desi_dr1_p1d_snr3.npz")
+        if use_snr3
+        else ("desi_dr1_p1d", "desi_dr1_p1d.npz")
+    )
     try:
         rec = _RD.resolve_file(product, fname, explicit=npz_path)
     except _RD.DataProductError as e:
         if npz_path is not None and e.other_product in ("desi_dr1_p1d", "desi_dr1_p1d_snr3"):
             import os
-            how = ("the use_snr3 argument" if _use_snr3_arg is not None
-                   else "HCD_DESI_SNR3" if os.environ.get("HCD_DESI_SNR3", "").strip()
-                   else "the default: HCD_DESI_SNR3 is unset")
+
+            how = (
+                "the use_snr3 argument"
+                if _use_snr3_arg is not None
+                else (
+                    "HCD_DESI_SNR3"
+                    if os.environ.get("HCD_DESI_SNR3", "").strip()
+                    else "the default: HCD_DESI_SNR3 is unset"
+                )
+            )
             raise _RD.DataProductConflict(
                 f"load_desi_leg: npz_path {npz_path} is the {e.other_product} file, but use_snr3={bool(use_snr3)} "
                 f"(from {how}) selects {product}. The loader never swaps one sample for the other: pass the "
-                f"{product} file, or set use_snr3 (or HCD_DESI_SNR3) to match the file.") from e
+                f"{product} file, or set use_snr3 (or HCD_DESI_SNR3) to match the file."
+            ) from e
         raise
     npz_path = rec.path
     d = np.load(npz_path, allow_pickle=True)
-    z = np.asarray(d["z"], float)              # (1020,) z-major
-    k = np.asarray(d["k"], float)              # (1020,) angular k
+    z = np.asarray(d["z"], float)  # (1020,) z-major
+    k = np.asarray(d["k"], float)  # (1020,) angular k
     P = np.asarray(d["plya"], float)
-    cov = np.asarray(d["cov"], float).copy()   # full STAT+SYST
+    cov = np.asarray(d["cov"], float).copy()  # full STAT+SYST
     if use_snr3:
         # Fix 1: +5% STAT-uncertainty inflation (paper's large-scale-bias allowance), applied
         # on the SEPARATE stat block so the syst part is untouched: cov += (f²−1)·cov_stat.
         f = DESI_SNR3_STAT_INFLATE if snr3_stat_inflate is None else float(snr3_stat_inflate)
-        cov = cov + (f ** 2 - 1.0) * np.asarray(d["cov_stat"], float)
+        cov = cov + (f**2 - 1.0) * np.asarray(d["cov_stat"], float)
     if add_cov_diag_inflation:
         cov[np.diag_indices_from(cov)] += np.asarray(d["cov_diag_inflation"], float)
     cv_floor_rank1 = _env_flag("HCD_CV_FLOOR_RANK1") if add_cv_floor else False
@@ -405,20 +433,36 @@ def load_desi_leg(npz_path=None,
 
     # read the per-bin resolution error ONLY on the option-b / arm-D paths (golden default must not depend
     # on a key it never uses -- code-lens #7).
-    res_e = np.asarray(d["syst_e_resolution"], float) if (resolution_float or resolution_coherent) else None
+    res_e = (
+        np.asarray(d["syst_e_resolution"], float)
+        if (resolution_float or resolution_coherent)
+        else None
+    )
     # reduced covariance (dla_cov_reduce): read the DLA-completeness column from the SAME npz that
     # supplied cov (SNR>1 baseline or the SNR>3 file -- each ships its own systematics vectors).
     dla_e = np.asarray(d["syst_e_dla_completeness"], float) if dla_cov_reduce else None
-    return _assemble_leg("DESI", z, k, P, cov, keep,
-                         R_func=desi_resolution_R, metals_on=metals_on,
-                         resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-                         dla_forward_frac=DESI_DLA_FORWARD_FRAC,
-                         resolution_e=res_e,
-                         resolution_float=resolution_float,
-                         resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp,
-                         dla_e=dla_e,
-                         use_snr3=use_snr3, cv_floor_on=add_cv_floor,
-                         cv_floor_rank1=cv_floor_rank1, data_products=(rec,))
+    return _assemble_leg(
+        "DESI",
+        z,
+        k,
+        P,
+        cov,
+        keep,
+        R_func=desi_resolution_R,
+        metals_on=metals_on,
+        resolution_on=resolution_on,
+        mf_floor_on=mf_floor_on,
+        dla_forward_frac=DESI_DLA_FORWARD_FRAC,
+        resolution_e=res_e,
+        resolution_float=resolution_float,
+        resolution_coherent=resolution_coherent,
+        resolution_coh_amp=resolution_coh_amp,
+        dla_e=dla_e,
+        use_snr3=use_snr3,
+        cv_floor_on=add_cv_floor,
+        cv_floor_rank1=cv_floor_rank1,
+        data_products=(rec,),
+    )
 
 
 def _read_ks_resolution_e(detail_path, z_grid, k_grid):
@@ -427,10 +471,11 @@ def _read_ks_resolution_e(detail_path, z_grid, k_grid):
     ``detailed-p1d-results-karacayli_etal2021.txt`` (14 cols; ``esyst_res_ks`` = index 9). The detailed
     table is a SUPERSET grid (315 rows: z=1.8 + extra high-k), so a positional read is WRONG -- we merge
     by an EXACT (z,k) lookup and RAISE on any unmatched conservative row (the alignment tripwire; never a
-    silent mis-map). This is the resolution variance removed from the conservative cov diagonal (diag mode)."""
+    silent mis-map). This is the resolution variance removed from the conservative cov diagonal (diag mode).
+    """
     lut = {}
     with open(detail_path) as f:
-        for ln in f.readlines()[1:]:                          # drop the header row
+        for ln in f.readlines()[1:]:  # drop the header row
             parts = [p.strip() for p in ln.strip().strip("|").split("|")]
             if len(parts) < 14:
                 continue
@@ -438,7 +483,7 @@ def _read_ks_resolution_e(detail_path, z_grid, k_grid):
                 zz, kk, ee = float(parts[0]), float(parts[1]), float(parts[9])
             except ValueError:
                 continue
-            if zz < 1.9:                                      # drop z=1.8 (not on the conservative grid)
+            if zz < 1.9:  # drop z=1.8 (not on the conservative grid)
                 continue
             lut[(round(zz, 3), round(kk, 8))] = ee
     e = np.empty(len(z_grid), float)
@@ -451,9 +496,17 @@ def _read_ks_resolution_e(detail_path, z_grid, k_grid):
     return e
 
 
-def load_ks_leg(base=None,
-                *, z_lo=2.4, z_hi=4.6, k_max=None,
-                metals_on=False, resolution_on=False, mf_floor_on=True, resolution_float=False):
+def load_ks_leg(
+    base=None,
+    *,
+    z_lo=2.4,
+    z_hi=4.6,
+    k_max=None,
+    metals_on=False,
+    resolution_on=False,
+    mf_floor_on=True,
+    resolution_float=False,
+):
     """Load KODIAQ-SQUAD conservative-mode P1D → a post-cut ``DataLeg``.
 
     The data are the runtime data product ``ks_p1d_conservative`` (hcd_analysis.runtime_data): the directory ``base``
@@ -476,17 +529,25 @@ def load_ks_leg(base=None,
     metals/continuum/resolution + inflates its covariance, so re-applying the SiIII/resolution
     MODEL terms would double-count.  LYA-CONSULT: confirm KS carries NO model systematics.
     """
-    _names = ["final-conservative-p1d-karacayli_etal2021.txt", "final-conservative-covariance-karacayli_etal2021.txt"]
-    base, recs = _RD.resolve_dir("ks_p1d_conservative", explicit=base,
-                                 names=_names + (["detailed-p1d-results-karacayli_etal2021.txt"] if resolution_float
-                                                 else []))
+    _names = [
+        "final-conservative-p1d-karacayli_etal2021.txt",
+        "final-conservative-covariance-karacayli_etal2021.txt",
+    ]
+    base, recs = _RD.resolve_dir(
+        "ks_p1d_conservative",
+        explicit=base,
+        names=_names
+        + (["detailed-p1d-results-karacayli_etal2021.txt"] if resolution_float else []),
+    )
     p1d_file = base.rstrip("/") + "/final-conservative-p1d-karacayli_etal2021.txt"
     cov_file = base.rstrip("/") + "/final-conservative-covariance-karacayli_etal2021.txt"
-    z, k, P = _read_ks_p1d(p1d_file)            # z-major (182,)
-    cov = np.loadtxt(cov_file)                  # (182,182) z-major
+    z, k, P = _read_ks_p1d(p1d_file)  # z-major (182,)
+    cov = np.loadtxt(cov_file)  # (182,182) z-major
 
     if k_max is None:
-        raise ValueError("load_ks_leg: k_max must be explicit (production 0.065); the single-grid default was retired")
+        raise ValueError(
+            "load_ks_leg: k_max must be explicit (production 0.065); the single-grid default was retired"
+        )
     keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k <= k_max + 1e-9)
 
     # DEFAULT (resolution_float=False): KS has no echelle R_z in this file, so the DESI pixel proxy is a
@@ -498,24 +559,60 @@ def load_ks_leg(base=None,
     # and REMOVE its resolution systematic from the conservative cov via the "diag" mode (diag -= esyst_res_ks^2;
     # KS adds systematics to the DIAGONAL only), then FLOAT f_res in the forward. resolution_ready -> True.
     if resolution_float:
-        res_e = _read_ks_resolution_e(base.rstrip("/") + "/detailed-p1d-results-karacayli_etal2021.txt", z, k)
-        return _assemble_leg("KS", z, k, P, cov, keep,
-                             R_func=ks_resolution_R, metals_on=metals_on,
-                             resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-                             dla_forward_frac=KS_DLA_FORWARD_FRAC,
-                             resolution_e=res_e, resolution_float=True, resolution_mode="diag",
-                             resolution_ready=True, data_products=recs)
-    return _assemble_leg("KS", z, k, P, cov, keep,
-                         R_func=desi_resolution_R, metals_on=metals_on,
-                         resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-                         dla_forward_frac=KS_DLA_FORWARD_FRAC, resolution_ready=False, data_products=recs)
+        res_e = _read_ks_resolution_e(
+            base.rstrip("/") + "/detailed-p1d-results-karacayli_etal2021.txt", z, k
+        )
+        return _assemble_leg(
+            "KS",
+            z,
+            k,
+            P,
+            cov,
+            keep,
+            R_func=ks_resolution_R,
+            metals_on=metals_on,
+            resolution_on=resolution_on,
+            mf_floor_on=mf_floor_on,
+            dla_forward_frac=KS_DLA_FORWARD_FRAC,
+            resolution_e=res_e,
+            resolution_float=True,
+            resolution_mode="diag",
+            resolution_ready=True,
+            data_products=recs,
+        )
+    return _assemble_leg(
+        "KS",
+        z,
+        k,
+        P,
+        cov,
+        keep,
+        R_func=desi_resolution_R,
+        metals_on=metals_on,
+        resolution_on=resolution_on,
+        mf_floor_on=mf_floor_on,
+        dla_forward_frac=KS_DLA_FORWARD_FRAC,
+        resolution_ready=False,
+        data_products=recs,
+    )
 
 
-def load_eboss_leg(npz_path=None,
-                   *, z_lo=2.2, z_hi=4.6, k_min=0.0, k_max=None,
-                   metals_on=True, resolution_on=False, mf_floor_on=False,
-                   dla_forward_frac=EBOSS_DLA_FORWARD_FRAC, add_cv_floor=None, resolution_float=False,
-                   resolution_coherent=False, resolution_coh_amp=1.0):
+def load_eboss_leg(
+    npz_path=None,
+    *,
+    z_lo=2.2,
+    z_hi=4.6,
+    k_min=0.0,
+    k_max=None,
+    metals_on=True,
+    resolution_on=False,
+    mf_floor_on=False,
+    dla_forward_frac=EBOSS_DLA_FORWARD_FRAC,
+    add_cv_floor=None,
+    resolution_float=False,
+    resolution_coherent=False,
+    resolution_coh_amp=1.0,
+):
     """Load eBOSS DR14 P1D (Chabanier+2019, 1812.03554) → a post-cut ``DataLeg`` (block-diag cov).
 
     The data are the runtime data product ``eboss_dr14_p1d`` (hcd_analysis.runtime_data): ``npz_path`` when given, else
@@ -544,10 +641,10 @@ def load_eboss_leg(npz_path=None,
     rec = _RD.resolve_file("eboss_dr14_p1d", "eboss_dr14_p1d.npz", explicit=npz_path)
     npz_path = rec.path
     d = np.load(npz_path, allow_pickle=True)
-    z = np.asarray(d["z"], float)              # (455,) z-major
-    k = np.asarray(d["k"], float)              # (455,) angular k
+    z = np.asarray(d["z"], float)  # (455,) z-major
+    k = np.asarray(d["k"], float)  # (455,) angular k
     P = np.asarray(d["plya"], float)
-    cov = np.asarray(d["cov"], float).copy()   # (455,455) block-diag STAT+SYST
+    cov = np.asarray(d["cov"], float).copy()  # (455,455) block-diag STAT+SYST
     cv_floor_rank1 = _env_flag("HCD_CV_FLOOR_RANK1") if add_cv_floor else False
     if add_cv_floor:
         # Fix 2 (2026-06-18): the Fernandez+2024 σ_CV ~2% finite-box floor at k<2.5e-3 — this
@@ -556,20 +653,36 @@ def load_eboss_leg(npz_path=None,
 
     keep = (z >= z_lo - 1e-6) & (z <= z_hi + 1e-6) & (k > k_min)
     if k_max is not None:
-        keep &= (k <= k_max + 1e-9)
+        keep &= k <= k_max + 1e-9
 
     # eBOSS has no resolution proxy in the table; reuse the DESI-style proxy as a placeholder for
     # the (default-OFF) resolution knob, exactly like load_ks_leg.
-    res_e = (np.asarray(d["syst_resolution"], float)
-             if (resolution_float or resolution_coherent) else None)  # option-b / arm-D only (code-lens #7)
-    return _assemble_leg("eBOSS", z, k, P, cov, keep,
-                         R_func=desi_resolution_R, metals_on=metals_on,
-                         resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-                         dla_forward_frac=dla_forward_frac,
-                         resolution_e=res_e,
-                         resolution_float=resolution_float, resolution_mode="rescale",
-                         resolution_coherent=resolution_coherent, resolution_coh_amp=resolution_coh_amp,
-                         cv_floor_on=add_cv_floor, cv_floor_rank1=cv_floor_rank1, data_products=(rec,))
+    res_e = (
+        np.asarray(d["syst_resolution"], float)
+        if (resolution_float or resolution_coherent)
+        else None
+    )  # option-b / arm-D only (code-lens #7)
+    return _assemble_leg(
+        "eBOSS",
+        z,
+        k,
+        P,
+        cov,
+        keep,
+        R_func=desi_resolution_R,
+        metals_on=metals_on,
+        resolution_on=resolution_on,
+        mf_floor_on=mf_floor_on,
+        dla_forward_frac=dla_forward_frac,
+        resolution_e=res_e,
+        resolution_float=resolution_float,
+        resolution_mode="rescale",
+        resolution_coherent=resolution_coherent,
+        resolution_coh_amp=resolution_coh_amp,
+        cv_floor_on=add_cv_floor,
+        cv_floor_rank1=cv_floor_rank1,
+        data_products=(rec,),
+    )
 
 
 def _read_ks_p1d(path):
@@ -577,7 +690,7 @@ def _read_ks_p1d(path):
     Returns (z, k, P) as float arrays in the file's z-major row order."""
     z, k, P = [], [], []
     with open(path) as f:
-        for ln in f.readlines()[1:]:           # drop the header row
+        for ln in f.readlines()[1:]:  # drop the header row
             parts = ln.split("|")
             if len(parts) < 4:
                 continue
@@ -585,7 +698,9 @@ def _read_ks_p1d(path):
                 zz, kk, pp = float(parts[1]), float(parts[2]), float(parts[3])
             except ValueError:
                 continue
-            z.append(zz); k.append(kk); P.append(pp)
+            z.append(zz)
+            k.append(kk)
+            P.append(pp)
     return np.array(z), np.array(k), np.array(P)
 
 
@@ -605,11 +720,31 @@ def _subtract_perz_rank1(C, e, z_idx, n_zbins):
     return C
 
 
-def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
-                  metals_on, resolution_on, mf_floor_on=False, dla_forward_frac=1.0,
-                  resolution_e=None, resolution_float=False, resolution_mode="rank1",
-                  resolution_ready=True, resolution_coherent=False, resolution_coh_amp=1.0,
-                  dla_e=None, use_snr3=False, cv_floor_on=False, cv_floor_rank1=False, data_products=()):
+def _assemble_leg(
+    name,
+    z_all,
+    k_all,
+    P_all,
+    cov_all,
+    keep,
+    *,
+    R_func,
+    metals_on,
+    resolution_on,
+    mf_floor_on=False,
+    dla_forward_frac=1.0,
+    resolution_e=None,
+    resolution_float=False,
+    resolution_mode="rank1",
+    resolution_ready=True,
+    resolution_coherent=False,
+    resolution_coh_amp=1.0,
+    dla_e=None,
+    use_snr3=False,
+    cv_floor_on=False,
+    cv_floor_rank1=False,
+    data_products=(),
+):
     """Sub-select the kept (z,k) rows + their covariance block, build the z-major flat
     DataLeg.  The covariance is row/col-sliced by the SAME boolean mask as the data so the
     flat-row ordering matches C_data exactly (CS-REVIEW: ordering invariant).
@@ -624,7 +759,7 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
     P_data = P_all[idx]
     C_data = cov_all[np.ix_(idx, idx)]
 
-    z = np.unique(np.round(z_row, 6))          # ascending unique z
+    z = np.unique(np.round(z_row, 6))  # ascending unique z
     z = np.array([z_row[np.argmin(np.abs(z_row - zz))] for zz in z])  # exact stored values
     z_idx = np.searchsorted(z, z_row)
     # guard floating round-off in searchsorted by snapping to the nearest unique z
@@ -645,15 +780,17 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
         # linear-Gaussian equivalent of floating a single amplitude; 2026-07-02-coherent-cov-vs-float doc).
         # A wrong mode breaks positive-definiteness; the Cholesky assert is the tripwire.
         if resolution_float and resolution_coherent:
-            raise ValueError(f"{name}: resolution_float (option-b) and resolution_coherent (arm-D) are "
-                             "mutually exclusive covariance treatments")
+            raise ValueError(
+                f"{name}: resolution_float (option-b) and resolution_coherent (arm-D) are "
+                "mutually exclusive covariance treatments"
+            )
         if resolution_e is None:
             raise ValueError(f"{name}: resolution_float/resolution_coherent needs resolution_e")
         e_res = np.asarray(resolution_e, float)[idx]
         C_data = np.array(C_data, float)
         if resolution_mode == "rescale":
-            sig2 = np.diag(C_data)                                   # eBOSS: diag(cov)=sigma^2 (corr diag 1)
-            ratio = np.sqrt(np.clip(1.0 - e_res ** 2 / sig2, 0.0, None))   # sigma'/sigma
+            sig2 = np.diag(C_data)  # eBOSS: diag(cov)=sigma^2 (corr diag 1)
+            ratio = np.sqrt(np.clip(1.0 - e_res**2 / sig2, 0.0, None))  # sigma'/sigma
             C_data = C_data * np.outer(ratio, ratio)
         elif resolution_mode == "diag":
             # "diag" (KS): the conservative cov adds each systematic in QUADRATURE to the DIAGONAL only
@@ -662,8 +799,8 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
             # the off-diagonal): for KS diag != sum_s e_s^2 (min 0.53 / max 4.09), so a rescale is ill-posed.
             # esyst_res_ks^2 is subdominant in-band (max ~0.17 of the diag) so C_data stays SPD (Cholesky guard).
             _di = np.diag_indices_from(C_data)
-            C_data[_di] = C_data[_di] - e_res ** 2
-        else:                                                        # "rank1" (DESI): drop the per-z mode
+            C_data[_di] = C_data[_di] - e_res**2
+        else:  # "rank1" (DESI): drop the per-z mode
             C_data = _subtract_perz_rank1(C_data, e_res, z_idx, len(z))
         if resolution_coherent:
             # ARM-D: re-add the resolution error as ONE coherent (cross-z) rank-1 mode. Restores the total
@@ -672,8 +809,8 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
             C_data = C_data + (float(resolution_coh_amp) ** 2) * np.outer(e_res, e_res)
             resolution_coherent_on = True
         else:
-            resolution_on = True                    # option-b floats f_res in the forward
-        np.linalg.cholesky(C_data)                 # SPD assert (fails loudly if the mode is mis-specified)
+            resolution_on = True  # option-b floats f_res in the forward
+        np.linalg.cholesky(C_data)  # SPD assert (fails loudly if the mode is mis-specified)
     dla_cov_reduced = False
     if dla_e is not None:
         # Reduced covariance (cup1d "red"): remove the DLA-completeness per-z rank-1 modes. The
@@ -683,27 +820,46 @@ def _assemble_leg(name, z_all, k_all, P_all, cov_all, keep, *, R_func,
             raise ValueError(
                 f"{name}: dla_e (reduced covariance) requires the alpha_DLA mean model to be live "
                 f"on this leg (dla_forward_frac > 0, got {dla_forward_frac!r}); removing the "
-                "DLA-completeness variance without modeling it in the mean would under-cover")
-        C_data = _subtract_perz_rank1(np.array(C_data, float),
-                                      np.asarray(dla_e, float)[idx], z_idx, len(z))
-        np.linalg.cholesky(C_data)                 # SPD assert (mathematically stat + remaining syst)
+                "DLA-completeness variance without modeling it in the mean would under-cover"
+            )
+        C_data = _subtract_perz_rank1(
+            np.array(C_data, float), np.asarray(dla_e, float)[idx], z_idx, len(z)
+        )
+        np.linalg.cholesky(C_data)  # SPD assert (mathematically stat + remaining syst)
         dla_cov_reduced = True
     R_z = np.asarray(R_func(z))
     return DataLeg(
-        name=name, z=z, z_unit=_z_unit(z), k=k, z_row=z_row, z_idx=z_idx,
-        P_data=P_data, C_data=C_data, R_z=R_z, n_z=len(z), n_per_z=n_per_z,
-        metals_on=metals_on, resolution_on=resolution_on, mf_floor_on=mf_floor_on,
-        dla_forward_frac=dla_forward_frac, resolution_ready=resolution_ready,
-        resolution_coherent_on=resolution_coherent_on, dla_cov_reduced=dla_cov_reduced,
-        use_snr3=bool(use_snr3), cv_floor_on=bool(cv_floor_on),
-        cv_floor_rank1=bool(cv_floor_rank1), data_products=data_products)
+        name=name,
+        z=z,
+        z_unit=_z_unit(z),
+        k=k,
+        z_row=z_row,
+        z_idx=z_idx,
+        P_data=P_data,
+        C_data=C_data,
+        R_z=R_z,
+        n_z=len(z),
+        n_per_z=n_per_z,
+        metals_on=metals_on,
+        resolution_on=resolution_on,
+        mf_floor_on=mf_floor_on,
+        dla_forward_frac=dla_forward_frac,
+        resolution_ready=resolution_ready,
+        resolution_coherent_on=resolution_coherent_on,
+        dla_cov_reduced=dla_cov_reduced,
+        use_snr3=bool(use_snr3),
+        cv_floor_on=bool(cv_floor_on),
+        cv_floor_rank1=bool(cv_floor_rank1),
+        data_products=data_products,
+    )
 
 
 # ============================================================================ #
 #  Forward-model nuisances (differentiable; per-leg-configurable, default OFF)
 # ============================================================================ #
-def _metal_factor(k, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT,
-                  cross=False):
+def _metal_factor(
+    k, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, cross=False
+):
     """Metal contamination multiplier — companion arXiv:2601.21432 Eq. 4.2–4.3:
 
         P → P · (1 + C_LyαSiIII + C_LyαSiII [+ C_SiIIISiII]),
@@ -731,41 +887,65 @@ def _metal_factor(k, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII
     a_SiII=0 ⇒ cross ≡ 0 (eBOSS / back-compat byte-exact)."""
     k = jnp.asarray(k)
     dv_SiIII = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiIII)
-    dv_SiIIa = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiII)        # leading doublet line 1190.42
-    dv_SiIIb = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiIIb)       # second doublet line 1193.28
+    dv_SiIIa = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiII)  # leading doublet line 1190.42
+    dv_SiIIb = C_KMS * jnp.log(LAMBDA_LYA / LAMBDA_SiIIb)  # second doublet line 1193.28
     r = R_SiII_DOUBLET
-    D_SiIII = 2.0 - 2.0 / (1.0 + jnp.exp(-k / k_SiIII))      # sigmoid decorrelation, →1 low-k →0 high-k
+    D_SiIII = 2.0 - 2.0 / (1.0 + jnp.exp(-k / k_SiIII))  # sigmoid decorrelation, →1 low-k →0 high-k
     D_SiII = 2.0 - 2.0 / (1.0 + jnp.exp(-k / k_SiII))
-    f = (a_SiIII ** 2 + 2.0 * a_SiIII * jnp.cos(k * dv_SiIII) * D_SiIII) \
-        + (a_SiII ** 2 * (1.0 + r ** 2)
-           + 2.0 * a_SiII * (jnp.cos(k * dv_SiIIb) + r * jnp.cos(k * dv_SiIIa)) * D_SiII)
+    f = (a_SiIII**2 + 2.0 * a_SiIII * jnp.cos(k * dv_SiIII) * D_SiIII) + (
+        a_SiII**2 * (1.0 + r**2)
+        + 2.0 * a_SiII * (jnp.cos(k * dv_SiIIb) + r * jnp.cos(k * dv_SiIIa)) * D_SiII
+    )
     if cross:
-        dv_cross_b = C_KMS * jnp.log(LAMBDA_SiIIb / LAMBDA_SiIII)   # SiIII–SiII line b (1193.28)
-        dv_cross_a = C_KMS * jnp.log(LAMBDA_SiII / LAMBDA_SiIII)    # SiIII–SiII line a (1190.42)
-        f = f + 2.0 * a_SiIII * a_SiII * (jnp.cos(k * dv_cross_b)
-                                          + r * jnp.cos(k * dv_cross_a))   # UNDAMPED: cup1d Cmm
+        dv_cross_b = C_KMS * jnp.log(LAMBDA_SiIIb / LAMBDA_SiIII)  # SiIII–SiII line b (1193.28)
+        dv_cross_a = C_KMS * jnp.log(LAMBDA_SiII / LAMBDA_SiIII)  # SiIII–SiII line a (1190.42)
+        f = f + 2.0 * a_SiIII * a_SiII * (
+            jnp.cos(k * dv_cross_b) + r * jnp.cos(k * dv_cross_a)
+        )  # UNDAMPED: cup1d Cmm
     return 1.0 + f
 
 
-def metal_factor_at_z(k_sub, z, tau0, *, a_SiIII=0.0, a_SiII=0.0, k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT,
-                      f_SiIII_nodes=None, f_SiII_nodes=None, metal_node_z=(2.2, 4.2), k_SiIII_nodes=None,
-                      k_SiII_nodes=None):
+def metal_factor_at_z(
+    k_sub,
+    z,
+    tau0,
+    *,
+    a_SiIII=0.0,
+    a_SiII=0.0,
+    k_SiIII=K_SiIII_DEFAULT,
+    k_SiII=K_SiII_DEFAULT,
+    f_SiIII_nodes=None,
+    f_SiII_nodes=None,
+    metal_node_z=(2.2, 4.2),
+    k_SiIII_nodes=None,
+    k_SiII_nodes=None,
+):
     """The metal factor at one leg z (data k only). MODEL C+ when ``f_SiIII_nodes`` is given: a(z) = f(z)/(1 - <F>(z))
     with <F>(z) = exp(-tau0) the SAMPLED mean flux (differentiable in tau0), log10 f(z) and log10 k-scale(z) LINEAR in
     log10(1+z) between ``metal_node_z`` (jnp.interp clamps beyond the nodes, eBOSS z > 4.2), SiIII-SiII cross term on
-    (it is proportional to a_SiII, so it vanishes on SiIII-only legs); otherwise the legacy scalar amplitudes."""
+    (it is proportional to a_SiII, so it vanishes on SiIII-only legs); otherwise the legacy scalar amplitudes.
+    """
     if f_SiIII_nodes is None:
         return _metal_factor(k_sub, a_SiIII=a_SiIII, a_SiII=a_SiII, k_SiIII=k_SiIII, k_SiII=k_SiII)
     _logz = jnp.log10(1.0 + z)
     _xp = jnp.log10(1.0 + jnp.asarray(metal_node_z))
     _omF = 1.0 - jnp.exp(-tau0)
     a3_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiIII_nodes))) / _omF
-    a2_z = ((10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiII_nodes))) / _omF
-            if f_SiII_nodes is not None else 0.0)
-    k3_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(k_SiIII_nodes))
-            if k_SiIII_nodes is not None else k_SiIII)
-    k2_z = (10.0 ** jnp.interp(_logz, _xp, jnp.log10(k_SiII_nodes))
-            if k_SiII_nodes is not None else k_SiII)
+    a2_z = (
+        (10.0 ** jnp.interp(_logz, _xp, jnp.log10(f_SiII_nodes))) / _omF
+        if f_SiII_nodes is not None
+        else 0.0
+    )
+    k3_z = (
+        10.0 ** jnp.interp(_logz, _xp, jnp.log10(k_SiIII_nodes))
+        if k_SiIII_nodes is not None
+        else k_SiIII
+    )
+    k2_z = (
+        10.0 ** jnp.interp(_logz, _xp, jnp.log10(k_SiII_nodes))
+        if k_SiII_nodes is not None
+        else k_SiII
+    )
     return _metal_factor(k_sub, a_SiIII=a3_z, a_SiII=a2_z, k_SiIII=k3_z, k_SiII=k2_z, cross=True)
 
 
@@ -776,65 +956,49 @@ def _resolution_factor(k, R_z, *, b_res=0.0):
     return jnp.exp(2.0 * b_res * jnp.asarray(k) ** 2 * jnp.asarray(R_z) ** 2)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def emu_var_modes(P_filt, z, tau0, alpha_hcd, *, dla_core, alpha_centres, sigma_zb=None, rho_zb=None,
-                  cemu_inflate=1.0):
+def emu_var_modes(
+    P_filt,
+    z,
+    tau0,
+    alpha_hcd,
+    *,
+    dla_core,
+    alpha_centres,
+    sigma_zb=None,
+    rho_zb=None,
+    cemu_inflate=1.0,
+):
     """The per-mode emulator variance at one z from the LF per-class ``P_filt`` (4, K) (the production C_emu uses the
     LF, not the MF-corrected, P_filt), the cross-class block ``rho_zb`` (4, 4, K, Tb) or the diagonal ``sigma_zb``
     (4, K, Tb), tau0-interpolated over ``alpha_centres``."""
     P_clean = P_filt[0]
     P_dla_unf = P_filt[3] + jnp.asarray(dla_core)
-    P_cls = jnp.stack([P_clean, P_filt[1], P_filt[2], P_dla_unf])         # (4,Kc)
+    P_cls = jnp.stack([P_clean, P_filt[1], P_filt[2], P_dla_unf])  # (4,Kc)
     a = jnp.asarray(alpha_hcd)
-    coef = jnp.concatenate([jnp.atleast_1d(1.0 - jnp.sum(a)), a])         # (4,)
+    coef = jnp.concatenate([jnp.atleast_1d(1.0 - jnp.sum(a)), a])  # (4,)
     if rho_zb is not None:
-        rho_ck = rho_at_tau0(rho_zb, alpha_centres, z, tau0)             # (4,4,Kc) τ₀-interp'd
+        rho_ck = rho_at_tau0(rho_zb, alpha_centres, z, tau0)  # (4,4,Kc) τ₀-interp'd
         # emu_var(k) = Σ_{c,c'} coef_c·coef_c'·ρ_cc'(k)·P_c·P_c'  (≥0: ρ SPD).
-        emu_var = jnp.einsum("c,d,cdk,ck,dk->k", coef, coef,
-                             jnp.nan_to_num(rho_ck), P_cls, P_cls)
+        emu_var = jnp.einsum("c,d,cdk,ck,dk->k", coef, coef, jnp.nan_to_num(rho_ck), P_cls, P_cls)
     else:
-        sigma_ck = sigma_at_tau0(sigma_zb, alpha_centres, z, tau0)        # (4,Kc) fractional
-        emu_var = jnp.einsum("c,ck,ck->k", coef ** 2,
-                             jnp.nan_to_num(sigma_ck) ** 2, P_cls ** 2)
+        sigma_ck = sigma_at_tau0(sigma_zb, alpha_centres, z, tau0)  # (4,Kc) fractional
+        emu_var = jnp.einsum("c,ck,ck->k", coef**2, jnp.nan_to_num(sigma_ck) ** 2, P_cls**2)
     return emu_var * cemu_inflate
 
 
 def emu_var_at_data(A, core, rho_d, alpha_hcd, cemu_inflate=1.0):
     """The T1 cross-class emulator variance at data bins (gate E amendment A1 rev 1 section 1): sum_cc' coef_c coef_c'
     rho_cc' A_c A_c' with A (4, n) the LF per-class P_filt bound to the bins, the DLA core (n,) added to the DLA
-    amplitude, rho_d (4, 4, n) the tau0-interpolated block bound to the bins, coef = (1 - sum alpha, alpha)."""
+    amplitude, rho_d (4, 4, n) the tau0-interpolated block bound to the bins, coef = (1 - sum alpha, alpha).
+    """
     A = jnp.asarray(A)
     A = A.at[3].add(jnp.asarray(core))
     a = jnp.asarray(alpha_hcd)
     coef = jnp.concatenate([jnp.atleast_1d(1.0 - jnp.sum(a)), a])
-    return jnp.einsum("c,d,cdn,cn,dn->n", coef, coef, jnp.nan_to_num(jnp.asarray(rho_d)), A, A) * cemu_inflate
+    return (
+        jnp.einsum("c,d,cdn,cn,dn->n", coef, coef, jnp.nan_to_num(jnp.asarray(rho_d)), A, A)
+        * cemu_inflate
+    )
 
 
 # ns is theta9[0] on the unit cube; PRIYA's design box maps it to physical ns.
@@ -845,11 +1009,3 @@ _NS_CUBE_LO, _NS_CUBE_HI = 0.8, 1.05
 def _ns_phys_from_theta9(theta9):
     """Physical n_s = 0.8 + 0.25·θ9[0] (PRIYA's unit-cube → ns design box)."""
     return _NS_CUBE_LO + (jnp.asarray(theta9)[0]) * (_NS_CUBE_HI - _NS_CUBE_LO)
-
-
-
-
-
-
-
-

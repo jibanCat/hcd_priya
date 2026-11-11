@@ -10,6 +10,7 @@ sampling box (width^2 / 12), none for tau0_amp and dtau0 (uniform priors), the p
 The map from parameters to the forward's (tau0 per z, alpha_hcd per z) is tested against the production numpyro
 model, with the context's delta_c map (``ctx.delta_map``: None on the historical path, the caller's explicit map on
 the release-cache path)."""
+
 from __future__ import annotations
 
 import jax
@@ -34,19 +35,28 @@ def _ks(ctx):
 def _refuse_unsupported(ctx):
     for f in ("hierarchical_hcd", "hcd_2d_tilt", "per_leg_alpha", "per_leg_zslope"):
         if getattr(ctx, f, False):
-            raise NotImplementedError(f"fisher_kit: the {f} branch is not a production configuration")
+            raise NotImplementedError(
+                f"fisher_kit: the {f} branch is not a production configuration"
+            )
     if getattr(ctx, "tau0_curv_sigma", None) is not None:
-        raise NotImplementedError("fisher_kit: the tau0 curvature diagnostic is not a production configuration")
+        raise NotImplementedError(
+            "fisher_kit: the tau0 curvature diagnostic is not a production configuration"
+        )
 
 
 def param_names(ctx):
-    return tuple(f"theta{i}" for i in range(9)) + TAU0_NAMES + (HCD_NAMES_KS if _ks(ctx) else HCD_NAMES_DEFAULT)
+    return (
+        tuple(f"theta{i}" for i in range(9))
+        + TAU0_NAMES
+        + (HCD_NAMES_KS if _ks(ctx) else HCD_NAMES_DEFAULT)
+    )
 
 
 def p_centre(ctx, theta9_unit):
     """The parameter vector at ``theta9_unit`` with tau0 at the Kim curve (amp 1, slope 0) and the HCD sites at their
     prior centres."""
     from . import inference as INF
+
     if _ks(ctx):
         hcd = [0.0, 0.0, float(INF.KS_DNDX_DLA_RAW_MU0)]
     else:
@@ -69,12 +79,18 @@ def forward_inputs(ctx, p):
     tau0 = tau0_alpha_priya(zg, p[9], p[10], z_pivot=ctx.tau0_pivot_z) * CL._kim(zg)
     if _ks(ctx):
         from . import inference as INF
+
         dla_amp = jax.nn.softplus(p[13]) / jax.nn.softplus(INF.KS_DNDX_DLA_RAW_MU0)
         ones = jnp.ones_like(zg)
         fac = jnp.stack([jnp.exp(p[11]) * ones, jnp.exp(p[12]) * ones, dla_amp * ones], axis=-1)
         alpha = CL._simplex_tie_norm(
-            w_c_corrected(jnp.asarray(ctx.ks_dndx_ref) * fac, jnp.asarray(ctx.ks_xbar_z), zg,
-                          delta_map=getattr(ctx, "delta_map", None))[..., 1:])   # the context's map, as the model
+            w_c_corrected(
+                jnp.asarray(ctx.ks_dndx_ref) * fac,
+                jnp.asarray(ctx.ks_xbar_z),
+                zg,
+                delta_map=getattr(ctx, "delta_map", None),
+            )[..., 1:]
+        )  # the context's map, as the model
     else:
         piv = jnp.stack([p[11], p[12], jax.nn.softplus(p[13])])
         alpha = piv[None, :] * ((1.0 + zg)[:, None] / (1.0 + CL.HCD_Z_PIVOT)) ** _zslopes(ctx)
@@ -87,15 +103,24 @@ def nuis_centre(ctx, leg):
         return {}
     if getattr(ctx, "metal_prior", "uniform") == "flatlog2node":
         f = float(np.sqrt(ctx.metal_fnode_lo * ctx.metal_fnode_hi))
-        k = float(np.sqrt(getattr(ctx, "metal_knode_lo", 1e-3) * getattr(ctx, "metal_knode_hi", 0.1)))
-        nu = {"f_SiIII_nodes": jnp.asarray([f, f]), "k_SiIII_nodes": jnp.asarray([k, k]),
-              "metal_node_z": tuple(getattr(ctx, "metal_node_z", (2.2, 4.2)))}
+        k = float(
+            np.sqrt(getattr(ctx, "metal_knode_lo", 1e-3) * getattr(ctx, "metal_knode_hi", 0.1))
+        )
+        nu = {
+            "f_SiIII_nodes": jnp.asarray([f, f]),
+            "k_SiIII_nodes": jnp.asarray([k, k]),
+            "metal_node_z": tuple(getattr(ctx, "metal_node_z", (2.2, 4.2))),
+        }
         if leg.name in tuple(getattr(ctx, "metal_siII_legs", ())):
             nu.update(f_SiII_nodes=jnp.asarray([f, f]), k_SiII_nodes=jnp.asarray([k, k]))
         return nu
     a3 = 0.5 * float(ctx.a_siiii_max) if getattr(ctx, "sample_metals", False) else 0.0
     a2 = 0.5 * float(ctx.a_siiii_max) if getattr(ctx, "sample_a_siii", False) else 0.0
-    return {"a_SiIII": a3, "a_SiII": a2, "metal_node_z": tuple(getattr(ctx, "metal_node_z", (2.2, 4.2)))}
+    return {
+        "a_SiIII": a3,
+        "a_SiII": a2,
+        "metal_node_z": tuple(getattr(ctx, "metal_node_z", (2.2, 4.2))),
+    }
 
 
 def kept(leg):
@@ -111,9 +136,20 @@ def mean_fn(ctx, leg, nuis=None):
 
     def f(p):
         th, tau0, alpha = forward_inputs(ctx, p)
-        out = FW.predict_leg(ctx.model, th, tau0[sel], alpha[sel], leg=leg, k_com=ctx.k_com_hmpc,
-                             pf_stats=ctx.pf_stats, dla_core=ctx.dla_core_leg[leg.name], mf=ctx.mf, nuis=nu)
+        out = FW.predict_leg(
+            ctx.model,
+            th,
+            tau0[sel],
+            alpha[sel],
+            leg=leg,
+            k_com=ctx.k_com_hmpc,
+            pf_stats=ctx.pf_stats,
+            dla_core=ctx.dla_core_leg[leg.name],
+            mf=ctx.mf,
+            nuis=nu,
+        )
         return out.P_model[kr]
+
     return f
 
 
@@ -126,10 +162,17 @@ def prior_precision(ctx):
     """Diagonal prior precision over ``param_names(ctx)`` (registered: box variance for theta9, none for tau0_amp and
     dtau0, production widths for the HCD sites)."""
     from . import inference as INF
-    lo = np.asarray(CL._THETA_UNIT_LO if getattr(ctx, "theta_unit_lo", None) is None else ctx.theta_unit_lo, float)
-    hi = np.asarray(CL._THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi, float)
+
+    lo = np.asarray(
+        CL._THETA_UNIT_LO if getattr(ctx, "theta_unit_lo", None) is None else ctx.theta_unit_lo,
+        float,
+    )
+    hi = np.asarray(
+        CL._THETA_UNIT_HI if getattr(ctx, "theta_unit_hi", None) is None else ctx.theta_unit_hi,
+        float,
+    )
     if _ks(ctx):
-        hcd = [1.0 / INF.KS_DNDX_SIGMA_EPS ** 2, 1.0 / INF.KS_DNDX_SIGMA_MSUB ** 2, 1.0]
+        hcd = [1.0 / INF.KS_DNDX_SIGMA_EPS**2, 1.0 / INF.KS_DNDX_SIGMA_MSUB**2, 1.0]
     else:
         sd = np.asarray(ctx.alpha_hcd_sigma, float)
         hcd = [1.0 / sd[0] ** 2, 1.0 / sd[1] ** 2, 1.0]
@@ -145,7 +188,9 @@ def fisher(J, C, P):
 def map_shift(J, C, P, r):
     """The linearized MAP shift of the parameters for a data-space residual r: F^-1 J^T C^-1 r."""
     J = np.asarray(J, float)
-    return np.linalg.solve(fisher(J, C, P), J.T @ cho_solve(cho_factor(np.asarray(C, float)), np.asarray(r, float)))
+    return np.linalg.solve(
+        fisher(J, C, P), J.T @ cho_solve(cho_factor(np.asarray(C, float)), np.asarray(r, float))
+    )
 
 
 def marginal_sigma(F):

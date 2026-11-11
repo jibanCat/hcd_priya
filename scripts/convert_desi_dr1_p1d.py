@@ -13,15 +13,36 @@ Run (SYSTEM python, NOT emu-jax):
     --inflation $HCD_P1D_DATA_DIR/desi_dr1_p1d/cov_diag_inflation.fits \
     --out $HCD_P1D_DATA_DIR/desi_dr1_p1d/desi_dr1_p1d.npz
 """
+
 from __future__ import annotations
 import argparse
 import numpy as np
 from astropy.io import fits
 
-P1D_COLS = ("Z", "K1", "K2", "K", "PLYA", "PRAW", "PNOISE", "PFID", "PSMOOTH",
-            "E_PK", "E_STAT", "E_SYST")
-SYST_COLS = ("E_DLA_COMPLETENESS", "E_BAL_COMPLETENESS", "E_RESOLUTION",
-             "E_CONTINUUM", "E_CONTINUUM_ADD", "E_NOISE_SCALE", "E_NOISE_ADD", "E_SYST")
+P1D_COLS = (
+    "Z",
+    "K1",
+    "K2",
+    "K",
+    "PLYA",
+    "PRAW",
+    "PNOISE",
+    "PFID",
+    "PSMOOTH",
+    "E_PK",
+    "E_STAT",
+    "E_SYST",
+)
+SYST_COLS = (
+    "E_DLA_COMPLETENESS",
+    "E_BAL_COMPLETENESS",
+    "E_RESOLUTION",
+    "E_CONTINUUM",
+    "E_CONTINUUM_ADD",
+    "E_NOISE_SCALE",
+    "E_NOISE_ADD",
+    "E_SYST",
+)
 
 
 def main():
@@ -34,19 +55,21 @@ def main():
     out = {}
     with fits.open(args.fits) as h:
         d = h["P1D_BLIND"].data
-        nz = int(h["P1D_BLIND"].header["NZ"]); nk = int(h["P1D_BLIND"].header["NK"])
+        nz = int(h["P1D_BLIND"].header["NZ"])
+        nk = int(h["P1D_BLIND"].header["NK"])
         for c in P1D_COLS:
             out[c.lower()] = np.asarray(d[c], dtype=np.float64)
         syst = h["SYSTEMATICS"].data
         for c in SYST_COLS:
             out["syst_" + c.lower()] = np.asarray(syst[c], dtype=np.float64)
-        out["cov"] = np.asarray(h["COVARIANCE"].data, dtype=np.float64)          # (1020,1020) total
+        out["cov"] = np.asarray(h["COVARIANCE"].data, dtype=np.float64)  # (1020,1020) total
         out["cov_stat"] = np.asarray(h["COVARIANCE_STAT"].data, dtype=np.float64)
         out["cov_syst"] = np.asarray(h["COVARIANCE_SYST"].data, dtype=np.float64)
-    out["nz"] = nz; out["nk"] = nk
-    out["z_unique"] = np.unique(out["z"])                                        # (NZ,)
+    out["nz"] = nz
+    out["nk"] = nk
+    out["z_unique"] = np.unique(out["z"])  # (NZ,)
     # the flat row order is z-major (NZ blocks of NK) or k-major? infer from Z column.
-    out["row_is_zmajor"] = bool(np.all(out["z"][:nk] == out["z"][0]))            # first nk share one z?
+    out["row_is_zmajor"] = bool(np.all(out["z"][:nk] == out["z"][0]))  # first nk share one z?
 
     if args.inflation:
         with fits.open(args.inflation) as h:
@@ -57,12 +80,18 @@ def main():
     np.savez_compressed(args.out, **out)
     print(f"wrote {args.out}")
     print(f"  grid NZ={nz} NK={nk} ({nz*nk} rows); z_unique={np.round(out['z_unique'],2)}")
-    print(f"  k angular [{out['k'].min():.5f},{out['k'].max():.5f}] s/km; "
-          f"z-major rows={out['row_is_zmajor']}")
-    print(f"  cov {out['cov'].shape} symmetric={np.allclose(out['cov'],out['cov'].T)} "
-          f"diag==E_PK^2: {diag_ok}")
-    print(f"  components: total/stat/syst cov + {len(SYST_COLS)} syst terms + diag_inflation"
-          f"={'cov_diag_inflation' in out}")
+    print(
+        f"  k angular [{out['k'].min():.5f},{out['k'].max():.5f}] s/km; "
+        f"z-major rows={out['row_is_zmajor']}"
+    )
+    print(
+        f"  cov {out['cov'].shape} symmetric={np.allclose(out['cov'],out['cov'].T)} "
+        f"diag==E_PK^2: {diag_ok}"
+    )
+    print(
+        f"  components: total/stat/syst cov + {len(SYST_COLS)} syst terms + diag_inflation"
+        f"={'cov_diag_inflation' in out}"
+    )
 
 
 if __name__ == "__main__":

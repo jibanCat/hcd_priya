@@ -32,6 +32,7 @@ Run::
 
     python3 tests/test_clustering.py
 """
+
 from __future__ import annotations
 
 import sys
@@ -193,10 +194,8 @@ class TestParPerpDecomposition(unittest.TestCase):
         delta = rng.normal(size=(n, 3))
         axis = rng.integers(0, 3, size=n)
         r_par_signed, r_perp = los_separation(delta, axis)
-        total_sq = (delta ** 2).sum(axis=1)
-        np.testing.assert_allclose(
-            r_par_signed ** 2 + r_perp ** 2, total_sq, rtol=1e-12, atol=1e-12
-        )
+        total_sq = (delta**2).sum(axis=1)
+        np.testing.assert_allclose(r_par_signed**2 + r_perp**2, total_sq, rtol=1e-12, atol=1e-12)
 
     def test_r_perp_nonnegative(self):
         rng = np.random.default_rng(6)
@@ -227,11 +226,13 @@ class TestParPerpDecomposition(unittest.TestCase):
     def test_pure_perp_pair_has_zero_par(self):
         """A pair separated only across the LOS axis has r_par = 0 and
         r_perp = |Δ|."""
-        delta = np.array([
-            [0.0, 4.0, 3.0],   # axis 0 → r_par=0, r_perp=5
-            [4.0, 0.0, 3.0],   # axis 1
-            [4.0, 3.0, 0.0],   # axis 2
-        ])
+        delta = np.array(
+            [
+                [0.0, 4.0, 3.0],  # axis 0 → r_par=0, r_perp=5
+                [4.0, 0.0, 3.0],  # axis 1
+                [4.0, 3.0, 0.0],  # axis 2
+            ]
+        )
         axis = np.array([0, 1, 2], dtype=np.int64)
         r_par_signed, r_perp = los_separation(delta, axis)
         np.testing.assert_allclose(r_par_signed, [0.0, 0.0, 0.0])
@@ -244,19 +245,27 @@ class TestSightlineGeometryGuards(unittest.TestCase):
     def test_axis_out_of_range_rejected(self):
         with self.assertRaises(ValueError):
             SightlineGeometry(
-                box=120.0, n_pix=10, dx_pix=12.0, n_sightlines=1,
+                box=120.0,
+                n_pix=10,
+                dx_pix=12.0,
+                n_sightlines=1,
                 axis=np.array([3], dtype=np.int8),
                 cofm_mpch=np.zeros((1, 3)),
-                z_snap=3.0, hubble=0.7,
+                z_snap=3.0,
+                hubble=0.7,
             )
 
     def test_cofm_shape_mismatch_rejected(self):
         with self.assertRaises(ValueError):
             SightlineGeometry(
-                box=120.0, n_pix=10, dx_pix=12.0, n_sightlines=2,
+                box=120.0,
+                n_pix=10,
+                dx_pix=12.0,
+                n_sightlines=2,
                 axis=np.array([0, 1], dtype=np.int8),
                 cofm_mpch=np.zeros((1, 3)),  # wrong: should be (2,3)
-                z_snap=3.0, hubble=0.7,
+                z_snap=3.0,
+                hubble=0.7,
             )
 
 
@@ -267,7 +276,10 @@ class TestRealSpectraLoad(unittest.TestCase):
     """
 
     SPEC = Path(
-        external_path("HCD_LF_RAW_DIR", "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056/output/SPECTRA_017/lya_forest_spectra_grid_480.hdf5")
+        external_path(
+            "HCD_LF_RAW_DIR",
+            "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056/output/SPECTRA_017/lya_forest_spectra_grid_480.hdf5",
+        )
     )
 
     @unittest.skipUnless(SPEC.exists(), "production spectra file unavailable (set HCD_LF_RAW_DIR)")
@@ -278,7 +290,7 @@ class TestRealSpectraLoad(unittest.TestCase):
         # Schema sanity
         self.assertEqual(geom.n_sightlines, 691200)
         self.assertEqual(geom.n_pix, 1250)
-        self.assertAlmostEqual(geom.box, 120.0, places=6)        # 120000 kpc/h → 120 Mpc/h
+        self.assertAlmostEqual(geom.box, 120.0, places=6)  # 120000 kpc/h → 120 Mpc/h
         self.assertAlmostEqual(geom.hubble, 0.735, places=3)
         self.assertAlmostEqual(geom.z_snap, 3.0, places=2)
         # axis must be 0-indexed
@@ -310,11 +322,11 @@ class TestXiCrossOnRandomField(unittest.TestCase):
 
         pixel_xyz = rng.uniform(0, box, size=(n_pix, 3))
         pixel_axis = rng.integers(0, 3, size=n_pix)
-        pixel_delta_F = rng.standard_normal(n_pix)        # mean 0, std 1
+        pixel_delta_F = rng.standard_normal(n_pix)  # mean 0, std 1
         dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
 
-        r_perp_edges = np.linspace(0.0, 25.0, 11)         # 5 Mpc/h bins
-        r_par_edges = np.linspace(-25.0, 25.0, 11)        # 5 Mpc/h, signed
+        r_perp_edges = np.linspace(0.0, 25.0, 11)  # 5 Mpc/h bins
+        r_par_edges = np.linspace(-25.0, 25.0, 11)  # 5 Mpc/h, signed
 
         xi, counts, npairs = xi_cross_dla_lya(
             pixel_xyz=pixel_xyz,
@@ -331,11 +343,11 @@ class TestXiCrossOnRandomField(unittest.TestCase):
 
         # Expected per-bin error: σ(δ_F) / sqrt(npairs).  We require
         # mean(xi_folded) consistent with 0 within 5 σ across all bins.
-        npairs_folded = npairs[:, npairs.shape[1] // 2:].sum(axis=0).sum()
-        self.assertGreater(npairs_folded, 5e5)              # sanity: enough pairs
+        npairs_folded = npairs[:, npairs.shape[1] // 2 :].sum(axis=0).sum()
+        self.assertGreater(npairs_folded, 5e5)  # sanity: enough pairs
         # The bin with the fewest pairs sets the worst-case error scale
-        min_pairs = npairs[:, npairs.shape[1] // 2:].min()
-        self.assertGreater(min_pairs, 50)                   # CLT regime
+        min_pairs = npairs[:, npairs.shape[1] // 2 :].min()
+        self.assertGreater(min_pairs, 50)  # CLT regime
         worst_err = 1.0 / np.sqrt(min_pairs)
         max_xi = np.nanmax(np.abs(xi_folded))
         self.assertLess(max_xi, 5.0 * worst_err)
@@ -351,7 +363,7 @@ class TestXiCrossOnRandomField(unittest.TestCase):
         # All pixels in a thin slab near x = 0
         pixel_xyz = rng.uniform(0, box, size=(n_pix, 3))
         pixel_xyz[:, 0] = rng.uniform(0, 1, size=n_pix)
-        pixel_axis = np.zeros(n_pix, dtype=np.int64)        # all x-axis sightlines
+        pixel_axis = np.zeros(n_pix, dtype=np.int64)  # all x-axis sightlines
         pixel_delta_F = rng.standard_normal(n_pix)
         # All DLAs in a thin slab near x = box (i.e. r_par ≈ 1 Mpc/h after wrap)
         dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
@@ -425,16 +437,18 @@ class TestPairCounterAxisSymmetry(unittest.TestCase):
         r_perp_edges = np.linspace(0.0, 25.0, 6)
         r_par_edges = np.linspace(-25.0, 25.0, 11)
 
-        xi_orig, _, _ = xi_auto_dla(dla_xyz, dla_axis, box, r_perp_edges, r_par_edges,
-                                    chunk_size=400)
+        xi_orig, _, _ = xi_auto_dla(
+            dla_xyz, dla_axis, box, r_perp_edges, r_par_edges, chunk_size=400
+        )
         # Swap x and y in both positions and the LOS-axis assignment
         swap_pos = dla_xyz.copy()
         swap_pos[:, [0, 1]] = swap_pos[:, [1, 0]]
         swap_axis = dla_axis.copy()
         # axis 0 ↔ axis 1; axis 2 unchanged
         swap_axis = np.where(swap_axis == 0, 1, np.where(swap_axis == 1, 0, swap_axis))
-        xi_swap, _, _ = xi_auto_dla(swap_pos, swap_axis, box, r_perp_edges, r_par_edges,
-                                    chunk_size=400)
+        xi_swap, _, _ = xi_auto_dla(
+            swap_pos, swap_axis, box, r_perp_edges, r_par_edges, chunk_size=400
+        )
         # Identity transformation up to FP rounding — element-wise equality
         np.testing.assert_allclose(xi_orig, xi_swap, rtol=1e-10, atol=1e-12)
 
@@ -462,12 +476,11 @@ class TestSignedRparSymmetry(unittest.TestCase):
         box = 60.0
         n_dla = 2500
         dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
-        dla_axis = np.zeros(n_dla, dtype=np.int64)        # all on axis 0
+        dla_axis = np.zeros(n_dla, dtype=np.int64)  # all on axis 0
         r_perp_edges = np.linspace(0.0, 25.0, 6)
-        r_par_edges = np.linspace(-20.0, 20.0, 21)        # symmetric around 0
+        r_par_edges = np.linspace(-20.0, 20.0, 21)  # symmetric around 0
 
-        xi, DD, RR = xi_auto_dla(dla_xyz, dla_axis, box, r_perp_edges, r_par_edges,
-                                 chunk_size=400)
+        xi, DD, RR = xi_auto_dla(dla_xyz, dla_axis, box, r_perp_edges, r_par_edges, chunk_size=400)
         n_par = DD.shape[1]
         for k in range(n_par // 2):
             mirror = n_par - 1 - k
@@ -485,7 +498,7 @@ class TestSignedRparSymmetry(unittest.TestCase):
         n_pix = 6000
         n_dla = 1200
         pixel_xyz = rng.uniform(0, box, size=(n_pix, 3))
-        pixel_axis = np.zeros(n_pix, dtype=np.int64)      # all on axis 0
+        pixel_axis = np.zeros(n_pix, dtype=np.int64)  # all on axis 0
         pixel_delta_F = rng.standard_normal(n_pix)
         dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
 
@@ -508,8 +521,11 @@ class TestSignedRparSymmetry(unittest.TestCase):
             avg = 0.5 * (npairs[:, k] + npairs[:, mirror])
             diff = npairs[:, k] - npairs[:, mirror]
             sigmas = np.abs(diff) / np.sqrt(np.maximum(avg, 1.0))
-            self.assertLess(float(sigmas.max()), 5.0,
-                            f"asymmetry at bin pair (k={k}, {mirror}): {sigmas.max():.2f} σ")
+            self.assertLess(
+                float(sigmas.max()),
+                5.0,
+                f"asymmetry at bin pair (k={k}, {mirror}): {sigmas.max():.2f} σ",
+            )
 
     def test_xcorr_signed_symmetry_mixed_axes_statistical(self):
         """With mixed axes, symmetry is only statistical (different axes
@@ -528,9 +544,13 @@ class TestSignedRparSymmetry(unittest.TestCase):
         r_par_edges = np.linspace(-20.0, 20.0, 21)
 
         _, _, npairs = xi_cross_dla_lya(
-            pixel_xyz=pixel_xyz, pixel_los_axis=pixel_axis,
-            pixel_delta_F=pixel_delta_F, dla_xyz=dla_xyz,
-            box=box, r_perp_bins=r_perp_edges, r_par_bins_signed=r_par_edges,
+            pixel_xyz=pixel_xyz,
+            pixel_los_axis=pixel_axis,
+            pixel_delta_F=pixel_delta_F,
+            dla_xyz=dla_xyz,
+            box=box,
+            r_perp_bins=r_perp_edges,
+            r_par_bins_signed=r_par_edges,
             chunk_size=400,
         )
         n_par = npairs.shape[1]
@@ -541,8 +561,11 @@ class TestSignedRparSymmetry(unittest.TestCase):
             diff = npairs[:, k] - npairs[:, mirror]
             poisson_err = np.sqrt(np.maximum(avg, 1.0))
             sigmas = np.abs(diff) / poisson_err
-            self.assertLess(float(sigmas.max()), 5.0,
-                            f"asymmetry at bin pair (k={k}, {mirror}): {sigmas.max():.2f} σ")
+            self.assertLess(
+                float(sigmas.max()),
+                5.0,
+                f"asymmetry at bin pair (k={k}, {mirror}): {sigmas.max():.2f} σ",
+            )
 
 
 class TestPairCounterPeriodicBoxClosure(unittest.TestCase):
@@ -561,6 +584,7 @@ class TestPairCounterPeriodicBoxClosure(unittest.TestCase):
 
     def test_bin_volume_helper(self):
         from hcd_analysis.clustering import _bin_volumes_2d
+
         # one bin: r_perp in [0, R], r_par in [-z, z]
         R = 5.0
         z = 3.0
@@ -579,13 +603,12 @@ class TestPairCounterPeriodicBoxClosure(unittest.TestCase):
         r_perp_edges = np.array([5.0, 15.0])
         r_par_edges = np.array([-10.0, 10.0])
 
-        _, DD, RR = xi_auto_dla(dla_xyz, dla_axis, box, r_perp_edges, r_par_edges,
-                                chunk_size=500)
+        _, DD, RR = xi_auto_dla(dla_xyz, dla_axis, box, r_perp_edges, r_par_edges, chunk_size=500)
         # DD/RR should be ~1; tolerance set by Poisson sqrt(DD).
         ratio = float(DD[0, 0]) / float(RR[0, 0])
         # σ(DD)/RR = sqrt(DD)/RR ≈ 1/sqrt(DD)
         sigma = 1.0 / np.sqrt(float(DD[0, 0]))
-        self.assertGreater(float(DD[0, 0]), 100)               # CLT regime
+        self.assertGreater(float(DD[0, 0]), 100)  # CLT regime
         self.assertAlmostEqual(ratio, 1.0, delta=5 * sigma)
 
 
@@ -596,7 +619,7 @@ class TestBuildDeltaFField(unittest.TestCase):
         """With an empty catalog, no pixels are masked and δ_F has zero
         mean across the (now all-unmasked) array."""
         rng = np.random.default_rng(0)
-        tau = rng.exponential(0.5, size=(10, 50))            # forest-like τ
+        tau = rng.exponential(0.5, size=(10, 50))  # forest-like τ
         empty = np.zeros(0, dtype=np.int64)
         empty_f = np.zeros(0, dtype=np.float64)
         res = build_delta_F_field(tau, empty, empty, empty, empty_f)
@@ -617,7 +640,7 @@ class TestBuildDeltaFField(unittest.TestCase):
         skewer = np.array([3], dtype=np.int64)
         s = np.array([10], dtype=np.int64)
         e = np.array([19], dtype=np.int64)
-        nhi = np.array([2.5e20], dtype=np.float64)            # log10 = 20.40 → DLA
+        nhi = np.array([2.5e20], dtype=np.float64)  # log10 = 20.40 → DLA
         res = build_delta_F_field(tau, skewer, s, e, nhi)
         # Mask shape
         self.assertTrue(res.mask[3, 10:20].all())
@@ -631,19 +654,19 @@ class TestBuildDeltaFField(unittest.TestCase):
     def test_mean_F_uses_only_unmasked(self):
         """⟨F⟩ is computed over UNMASKED pixels only; masking out the
         saturated DLA core changes ⟨F⟩ relative to the no-mask case."""
-        tau = np.full((1, 100), 0.2)         # forest τ
-        tau[0, 40:60] = 1e6                  # DLA — F(masked) ≈ 0
+        tau = np.full((1, 100), 0.2)  # forest τ
+        tau[0, 40:60] = 1e6  # DLA — F(masked) ≈ 0
         skewer = np.array([0], dtype=np.int64)
         s = np.array([40], dtype=np.int64)
         e = np.array([59], dtype=np.int64)
-        nhi = np.array([5.0e20], dtype=np.float64)             # DLA
+        nhi = np.array([5.0e20], dtype=np.float64)  # DLA
         res = build_delta_F_field(tau, skewer, s, e, nhi)
-        expected_mean = float(np.exp(-0.2))                    # only forest pixels
+        expected_mean = float(np.exp(-0.2))  # only forest pixels
         self.assertAlmostEqual(res.mean_F, expected_mean, places=10)
         # If we had averaged over the full array, ⟨F⟩ would be
         # 0.8·exp(-0.2) (80 % forest + 20 % near-zero), much smaller
         biased_mean = 0.8 * expected_mean
-        self.assertGreater(res.mean_F, biased_mean * 1.05)     # at least 5 % difference
+        self.assertGreater(res.mean_F, biased_mean * 1.05)  # at least 5 % difference
 
     def test_delta_F_zero_mean_over_unmasked(self):
         """By construction δ_F over UNMASKED pixels has zero mean."""
@@ -653,7 +676,7 @@ class TestBuildDeltaFField(unittest.TestCase):
         skewer = np.array([0, 5, 10], dtype=np.int64)
         s = np.array([10, 50, 100], dtype=np.int64)
         e = np.array([14, 55, 110], dtype=np.int64)
-        nhi = np.array([2e17, 5e19, 1e21], dtype=np.float64)   # LLS, subDLA, DLA
+        nhi = np.array([2e17, 5e19, 1e21], dtype=np.float64)  # LLS, subDLA, DLA
         # Saturate the τ inside the masks so F is near zero
         for sk, p0, p1 in zip(skewer, s, e):
             tau[sk, p0 : p1 + 1] = 1e6
@@ -693,7 +716,7 @@ class TestBuildDeltaFField(unittest.TestCase):
         skewer = np.array([0], dtype=np.int64)
         s = np.array([20], dtype=np.int64)
         e = np.array([24], dtype=np.int64)
-        nhi = np.array([5e16], dtype=np.float64)               # log10 = 16.7
+        nhi = np.array([5e16], dtype=np.float64)  # log10 = 16.7
         res = build_delta_F_field(tau, skewer, s, e, nhi)
         self.assertFalse(res.mask.any())
         self.assertEqual(sum(res.n_masked_per_class.values()), 0)
@@ -703,11 +726,15 @@ class TestBuildDeltaFField(unittest.TestCase):
         rand_spectra (1 sim/snap), confirm ⟨F⟩ ∈ [0.6, 0.95] (Lyα
         forest at z = 2-5).  Skipped if the file is missing."""
         spec = Path(
-            external_path("HCD_HR_RAW_DIR", "ns0.914Ap1.32e-09herei3.85heref2.65alphaq1.57hub0.742omegamh20.141hireionz6.88bhfeedback0.04/output/SPECTRA_017/rand_spectra_DLA.hdf5")
+            external_path(
+                "HCD_HR_RAW_DIR",
+                "ns0.914Ap1.32e-09herei3.85heref2.65alphaq1.57hub0.742omegamh20.141hireionz6.88bhfeedback0.04/output/SPECTRA_017/rand_spectra_DLA.hdf5",
+            )
         )
         if not spec.exists():
             self.skipTest("production HiRes spectra unavailable (set HCD_HR_RAW_DIR)")
         import h5py
+
         with h5py.File(spec, "r") as f:
             tau = f["tau/H/1/1215"][:].astype(np.float64)
         # Use an empty catalog for the smoke test (no HCD masking needed
@@ -737,16 +764,19 @@ class TestXiAutoLya(unittest.TestCase):
         r_perp_edges = np.linspace(0.0, 25.0, 6)
         r_par_edges = np.linspace(-25.0, 25.0, 11)
         xi, counts, npairs = xi_auto_lya(
-            pixel_xyz=xyz, pixel_los_axis=ax, pixel_delta_F=df,
+            pixel_xyz=xyz,
+            pixel_los_axis=ax,
+            pixel_delta_F=df,
             box=box,
-            r_perp_bins=r_perp_edges, r_par_bins_signed=r_par_edges,
+            r_perp_bins=r_perp_edges,
+            r_par_bins_signed=r_par_edges,
             chunk_size=400,
         )
         # Expected: ξ ≈ 0; per-bin error ≈ σ²(δ_F · δ_F) / sqrt(npairs).
         # For independent unit-variance δ_F, var(δ_F · δ_F') = 1 (E[δ²] · E[δ²]
         # − E[δ]² · E[δ']² = 1).  So per-bin error = 1/sqrt(npairs).
         valid = npairs > 50
-        self.assertTrue(valid.any())                   # at least one well-populated bin
+        self.assertTrue(valid.any())  # at least one well-populated bin
         sigmas = np.abs(xi[valid]) * np.sqrt(npairs[valid])
         self.assertLess(float(sigmas.max()), 5.0)
         self.assertLess(float(sigmas.mean()), 1.5)
@@ -762,15 +792,19 @@ class TestXiAutoLya(unittest.TestCase):
         r_perp = np.linspace(0.0, 20.0, 5)
         r_par = np.linspace(-20.0, 20.0, 9)
 
-        xi_a, _, _ = xi_auto_lya(xyz, ax, df, box, r_perp, r_par,
-                                 subsample_n=2000, rng_seed=42, chunk_size=300)
-        xi_b, _, _ = xi_auto_lya(xyz, ax, df, box, r_perp, r_par,
-                                 subsample_n=2000, rng_seed=42, chunk_size=300)
-        np.testing.assert_array_equal(np.where(np.isnan(xi_a), 0, xi_a),
-                                      np.where(np.isnan(xi_b), 0, xi_b))
+        xi_a, _, _ = xi_auto_lya(
+            xyz, ax, df, box, r_perp, r_par, subsample_n=2000, rng_seed=42, chunk_size=300
+        )
+        xi_b, _, _ = xi_auto_lya(
+            xyz, ax, df, box, r_perp, r_par, subsample_n=2000, rng_seed=42, chunk_size=300
+        )
+        np.testing.assert_array_equal(
+            np.where(np.isnan(xi_a), 0, xi_a), np.where(np.isnan(xi_b), 0, xi_b)
+        )
 
-        xi_c, _, _ = xi_auto_lya(xyz, ax, df, box, r_perp, r_par,
-                                 subsample_n=2000, rng_seed=99, chunk_size=300)
+        xi_c, _, _ = xi_auto_lya(
+            xyz, ax, df, box, r_perp, r_par, subsample_n=2000, rng_seed=99, chunk_size=300
+        )
         # Different seed → different bin contents (large prob)
         diff = np.nansum(np.abs(xi_a - xi_c))
         self.assertGreater(float(diff), 0.0)
@@ -796,17 +830,22 @@ class TestExcludeSelfNpairsBugRegression(unittest.TestCase):
         r_perp_edges = np.array([0.0, 0.5])
         r_par_edges = np.array([-0.5, 0.5])
         counts, npairs = pair_count_2d(
-            left_xyz=xyz, right_xyz=xyz, left_los_axis=ax,
+            left_xyz=xyz,
+            right_xyz=xyz,
+            left_los_axis=ax,
             box=100.0,
             r_perp_bins=r_perp_edges,
             r_par_bins_signed=r_par_edges,
-            weights_left=None, weights_right=None,
-            exclude_self=True, chunk_size=10,
+            weights_left=None,
+            weights_right=None,
+            exclude_self=True,
+            chunk_size=10,
         )
         # The (r_perp ≈ 0, r_par ≈ 0) bin should have NO self-pairs and
         # NO real pairs (the 3 points are 2 Mpc/h apart).
-        self.assertEqual(int(npairs[0, 0]), 0,
-                         f"self-pairs leaked into npairs (got {int(npairs[0,0])})")
+        self.assertEqual(
+            int(npairs[0, 0]), 0, f"self-pairs leaked into npairs (got {int(npairs[0,0])})"
+        )
         self.assertEqual(float(counts[0, 0]), 0.0)
 
 
@@ -823,8 +862,12 @@ class TestPairCountRMu(unittest.TestCase):
         r_edges = np.array([0.0, 4.0, 6.0, 10.0, 20.0, 50.0])
         mu_edges = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
         counts, npairs = pair_count_rmu(
-            L_xyz, R_xyz, L_axis, box=100.0,
-            r_bins=r_edges, mu_bins=mu_edges,
+            L_xyz,
+            R_xyz,
+            L_axis,
+            box=100.0,
+            r_bins=r_edges,
+            mu_bins=mu_edges,
             chunk_size=4,
         )
         # Pair lands in r ∈ [4, 6] (idx 1) and μ ∈ [0.75, 1.0] (idx 3).
@@ -840,8 +883,12 @@ class TestPairCountRMu(unittest.TestCase):
         r_edges = np.array([0.0, 4.0, 6.0, 10.0])
         mu_edges = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
         counts, npairs = pair_count_rmu(
-            L_xyz, R_xyz, L_axis, box=100.0,
-            r_bins=r_edges, mu_bins=mu_edges,
+            L_xyz,
+            R_xyz,
+            L_axis,
+            box=100.0,
+            r_bins=r_edges,
+            mu_bins=mu_edges,
             chunk_size=4,
         )
         # Pair lands in r ∈ [4, 6] (idx 1) and μ ∈ [0, 0.25] (idx 0).
@@ -856,8 +903,12 @@ class TestPairCountRMu(unittest.TestCase):
         r_edges = np.array([0.0, 4.0, 6.0])
         mu_edges = np.array([0.0, 0.5, 0.7, 1.0])
         counts, npairs = pair_count_rmu(
-            L_xyz, R_xyz, L_axis, box=100.0,
-            r_bins=r_edges, mu_bins=mu_edges,
+            L_xyz,
+            R_xyz,
+            L_axis,
+            box=100.0,
+            r_bins=r_edges,
+            mu_bins=mu_edges,
             chunk_size=4,
         )
         # μ = 0.6 → bin idx 1 ([0.5, 0.7])
@@ -872,15 +923,18 @@ class TestPairCountRMu(unittest.TestCase):
         r_edges = np.array([0.0, 0.5, 2.0])
         mu_edges = np.array([0.0, 0.5, 1.0])
         counts, npairs = pair_count_rmu(
-            xyz, xyz, L_axis, box=100.0,
-            r_bins=r_edges, mu_bins=mu_edges,
-            exclude_self=False,                        # explicitly off
+            xyz,
+            xyz,
+            L_axis,
+            box=100.0,
+            r_bins=r_edges,
+            mu_bins=mu_edges,
+            exclude_self=False,  # explicitly off
             chunk_size=4,
         )
         # No (r ≈ 0) bin should have entries — both self-pairs at r=0
         # are excluded by the finite_r filter.
-        self.assertEqual(int(npairs[0, :].sum()), 0,
-                         "r=0 self-pair leaked into npairs[0,:]")
+        self.assertEqual(int(npairs[0, :].sum()), 0, "r=0 self-pair leaked into npairs[0,:]")
         # The two off-diagonal pairs (i=0,j=1 and i=1,j=0) at r=1 mu=1
         # should both be counted.
         self.assertEqual(int(npairs[1, 1]), 2)
@@ -899,7 +953,7 @@ class TestXiCrossLyaRMuRandomZero(unittest.TestCase):
         pixel_xyz = rng.uniform(0, box, size=(n_pix, 3))
         pixel_axis = rng.integers(0, 3, size=n_pix).astype(np.int64)
         pixel_dF = rng.standard_normal(n_pix)
-        pixel_dF -= pixel_dF.mean()                         # exact zero mean
+        pixel_dF -= pixel_dF.mean()  # exact zero mean
         # Random DLAs
         dla_xyz = rng.uniform(0, box, size=(n_dla, 3))
 
@@ -907,17 +961,25 @@ class TestXiCrossLyaRMuRandomZero(unittest.TestCase):
         mu_edges = np.linspace(0.0, 1.0, 5)
 
         xi, counts, npairs = xi_cross_dla_lya_rmu(
-            pixel_xyz=pixel_xyz, pixel_los_axis=pixel_axis,
-            pixel_delta_F=pixel_dF, dla_xyz=dla_xyz, box=box,
-            r_bins=r_edges, mu_bins=mu_edges, chunk_size=64,
+            pixel_xyz=pixel_xyz,
+            pixel_los_axis=pixel_axis,
+            pixel_delta_F=pixel_dF,
+            dla_xyz=dla_xyz,
+            box=box,
+            r_bins=r_edges,
+            mu_bins=mu_edges,
+            chunk_size=64,
         )
         # Per-bin σ ~ 1/√npairs → check |ξ| < 5/√npairs in every bin.
         with np.errstate(invalid="ignore"):
             sigma = 5.0 / np.sqrt(np.maximum(npairs, 1))
-        bad = (np.abs(xi) > sigma) & (npairs >= 25)        # ignore tiny bins
-        self.assertEqual(int(bad.sum()), 0,
-                         f"ξ_× exceeded 5σ floor in {int(bad.sum())} bins; "
-                         f"max |ξ| / σ = {(np.abs(xi)/sigma)[npairs >= 25].max():.2f}")
+        bad = (np.abs(xi) > sigma) & (npairs >= 25)  # ignore tiny bins
+        self.assertEqual(
+            int(bad.sum()),
+            0,
+            f"ξ_× exceeded 5σ floor in {int(bad.sum())} bins; "
+            f"max |ξ| / σ = {(np.abs(xi)/sigma)[npairs >= 25].max():.2f}",
+        )
 
 
 class TestXiAutoDlaRMuPeriodicClosure(unittest.TestCase):
@@ -934,19 +996,24 @@ class TestXiAutoDlaRMuPeriodicClosure(unittest.TestCase):
         r_edges = np.array([0.0, 10.0, 20.0, 30.0, 40.0])
         mu_edges = np.linspace(0.0, 1.0, 5)
         xi, DD, RR = xi_auto_dla_rmu(
-            dla_xyz=xyz, dla_los_axis=axis, box=box,
-            r_bins=r_edges, mu_bins=mu_edges, chunk_size=512,
+            dla_xyz=xyz,
+            dla_los_axis=axis,
+            box=box,
+            r_bins=r_edges,
+            mu_bins=mu_edges,
+            chunk_size=512,
         )
         # Outside the noisiest r=0 shell, DD/RR should be ~ 1
         # within Poisson noise (~ 1/√DD).  Check ratio averaged
         # over μ at each r.
-        mean_ratio = (DD.sum(axis=1) / RR.sum(axis=1))
+        mean_ratio = DD.sum(axis=1) / RR.sum(axis=1)
         # Skip the smallest r-bin (very few pairs, big fractional noise).
         for i in range(1, len(mean_ratio)):
             self.assertAlmostEqual(
-                mean_ratio[i], 1.0, delta=0.05,
-                msg=f"r-bin {i}: ⟨DD/RR⟩_μ = {mean_ratio[i]:.3f} "
-                    f"(expected 1.0 within Poisson)",
+                mean_ratio[i],
+                1.0,
+                delta=0.05,
+                msg=f"r-bin {i}: ⟨DD/RR⟩_μ = {mean_ratio[i]:.3f} " f"(expected 1.0 within Poisson)",
             )
 
 

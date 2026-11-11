@@ -27,8 +27,10 @@ reason (a deliberate model change or a jax/numpyro env migration), via
 then commit the new npz together with the reason; the generating commit + jax/numpyro
 versions are stamped inside the npz for the audit trail.
 """
+
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import os
@@ -59,12 +61,19 @@ def build_trace_ctx():
     fc = CL.prod_forward_config("DESI")
     norc = CL.prod_norc_forward()
     ctx, d = CL.build_legb_ctx(
-        use_xclass=True, with_mf=True, mf_with_floor=True,
+        use_xclass=True,
+        with_mf=True,
+        mf_with_floor=True,
         res_corr_on=norc["res_corr_on"],
-        mf_emucoh=True, mf_emucoh_offdiag_only=True,
-        metals_on=True, sample_metals=True,
-        sample_res=fc["sample_res"], f_res_amp_sigma=fc["f_res_amp_sigma"],
-        metal_prior=fc["metal_prior"], survey="DESI")
+        mf_emucoh=True,
+        mf_emucoh_offdiag_only=True,
+        metals_on=True,
+        sample_metals=True,
+        sample_res=fc["sample_res"],
+        f_res_amp_sigma=fc["f_res_amp_sigma"],
+        metal_prior=fc["metal_prior"],
+        survey="DESI",
+    )
     if norc["fix_alpha_res"]:
         ctx = ctx._replace(fix_alpha_res=True)
     ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "DESI"])
@@ -78,10 +87,15 @@ def build_nuts_ctx():
     survey='DESI' prior pin — small enough for a 5+5 NUTS golden, rich enough to
     exercise every deployed site family's ordering."""
     ctx, d = CL.build_legb_ctx(
-        desi_kwargs=dict(z_lo=0.0, z_hi=2.6), use_xclass=True,
-        metals_on=True, sample_metals=True,
-        sample_res=True, f_res_amp_sigma=0.02,
-        metal_prior="flatlog2node", survey="DESI")
+        desi_kwargs=dict(z_lo=0.0, z_hi=2.6),
+        use_xclass=True,
+        metals_on=True,
+        sample_metals=True,
+        sample_res=True,
+        f_res_amp_sigma=0.02,
+        metal_prior="flatlog2node",
+        survey="DESI",
+    )
     ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "DESI"])
     return ctx, d
 
@@ -101,10 +115,12 @@ def trace_records(ctx, mock_legs, core, *, seed=TRACE_SEED):
     kinds: 'sample' / 'deterministic'; the _legb_model loglik factor value is returned
     separately (numpyro.factor emits an observed Unit site; its log_factor is the
     likelihood value at the traced prior draw)."""
-    tr_m = handlers.trace(handlers.seed(
-        lambda: CL._legb_model(ctx, mock_legs, core), jax.random.PRNGKey(seed))).get_trace()
-    tr_p = handlers.trace(handlers.seed(
-        lambda: CL._legb_priors_only(ctx), jax.random.PRNGKey(seed))).get_trace()
+    tr_m = handlers.trace(
+        handlers.seed(lambda: CL._legb_model(ctx, mock_legs, core), jax.random.PRNGKey(seed))
+    ).get_trace()
+    tr_p = handlers.trace(
+        handlers.seed(lambda: CL._legb_priors_only(ctx), jax.random.PRNGKey(seed))
+    ).get_trace()
 
     def _records(tr):
         rec = []
@@ -128,12 +144,16 @@ def trace_records(ctx, mock_legs, core, *, seed=TRACE_SEED):
 
 
 def _provenance():
-    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True,
-                            text=True, check=True).stdout.strip()
-    return dict(git_commit=commit,
-                generated_utc=datetime.now(timezone.utc).isoformat(),
-                jax_version=jax.__version__, numpyro_version=numpyro.__version__,
-                numpy_version=np.__version__)
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    return dict(
+        git_commit=commit,
+        generated_utc=datetime.now(timezone.utc).isoformat(),
+        jax_version=jax.__version__,
+        numpyro_version=numpyro.__version__,
+        numpy_version=np.__version__,
+    )
 
 
 def make_sites_golden(path):
@@ -146,23 +166,34 @@ def make_sites_golden(path):
         prior_names=np.asarray([n for n, _, _ in prior_rec]),
         prior_kinds=np.asarray([k for _, k, _ in prior_rec]),
         loglik_factor=np.asarray(model_factor),
-        trace_seed=np.asarray(TRACE_SEED), mock_key=np.asarray(MOCK_KEY),
+        trace_seed=np.asarray(TRACE_SEED),
+        mock_key=np.asarray(MOCK_KEY),
         **{f"model::{n}": v for n, _, v in model_rec},
         **{f"prior::{n}": v for n, _, v in prior_rec},
         **{k: np.asarray(v) for k, v in _provenance().items()},
     )
     np.savez(path, **payload)
-    print(f"[sites-golden] wrote {path}: {len(model_rec)} model sites "
-          f"({sum(1 for _, k, _ in model_rec if k == 'sample')} sample), "
-          f"{len(prior_rec)} priors-only sites, loglik={float(model_factor):.6f}")
+    print(
+        f"[sites-golden] wrote {path}: {len(model_rec)} model sites "
+        f"({sum(1 for _, k, _ in model_rec if k == 'sample')} sample), "
+        f"{len(prior_rec)} priors-only sites, loglik={float(model_factor):.6f}"
+    )
 
 
 def run_short_nuts(ctx, mock_legs, core):
     """The pinned short-NUTS config: 5 warmup / 5 samples, mtd 5, diag mass, fixed key,
     fast_postprocess (deployed default). Returns (samples dict, n_div)."""
-    return CL._run_nuts_legb(ctx, mock_legs, core, n_warmup=5, n_samples=5,
-                             seed=NUTS_SEED, target_accept=0.9, dense_mass=False,
-                             max_tree_depth=5)
+    return CL._run_nuts_legb(
+        ctx,
+        mock_legs,
+        core,
+        n_warmup=5,
+        n_samples=5,
+        seed=NUTS_SEED,
+        target_accept=0.9,
+        dense_mass=False,
+        max_tree_depth=5,
+    )
 
 
 def make_shortnuts_golden(path):
@@ -171,8 +202,10 @@ def make_shortnuts_golden(path):
     samples, n_div = run_short_nuts(ctx, mock_legs, core)
     keys = list(samples.keys())
     payload = dict(
-        sample_keys=np.asarray(keys), n_div=np.asarray(n_div),
-        nuts_seed=np.asarray(NUTS_SEED), mock_key=np.asarray(MOCK_KEY),
+        sample_keys=np.asarray(keys),
+        n_div=np.asarray(n_div),
+        nuts_seed=np.asarray(NUTS_SEED),
+        mock_key=np.asarray(MOCK_KEY),
         **{f"nuts::{k}": np.asarray(samples[k]) for k in keys},
         **{k: np.asarray(v) for k, v in _provenance().items()},
     )

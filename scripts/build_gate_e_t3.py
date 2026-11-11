@@ -10,6 +10,7 @@ Write-once ``cemu_t3`` product.
 ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu python3 \
      scripts/build_gate_e_t3.py --eval-dir <..> --comparison <t3_comparison.json> --out <product.npz>
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,12 +44,16 @@ def _sha(path):
 
 
 def legs():
-    return {"DESI": DL.load_desi_leg(metals_on=True, resolution_float=True, resolution_coherent=False),
-            "KS": DL.load_ks_leg(resolution_float=True, k_max=0.065)}
+    return {
+        "DESI": DL.load_desi_leg(metals_on=True, resolution_float=True, resolution_coherent=False),
+        "KS": DL.load_ks_leg(resolution_float=True, k_max=0.065),
+    }
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--eval-dir", required=True)
     ap.add_argument("--cache", required=True)
     ap.add_argument("--comparison", required=True)
@@ -64,33 +69,59 @@ def main(argv=None):
     arrays, ranks = {}, {}
     for name, leg in legs().items():
         if rec[name]["choice"] != "P" or rec[name].get("stop_2"):
-            raise SystemExit(f"{name}: recorded T3 choice {rec[name]['choice']} (stop_2 {rec[name].get('stop_2')}); "
-                             "only P is wired")
+            raise SystemExit(
+                f"{name}: recorded T3 choice {rec[name]['choice']} (stop_2 {rec[name].get('stop_2')}); "
+                "only P is wired"
+            )
         r = int(rec[name]["decision_stats"]["best_rank"]["P"])
         bins, B, kept, pos = CMP.leg_bins(leg)
         used = np.unique(bins["iz"])
         if not np.all(np.isfinite(coh[:, used])):
             raise SystemExit(f"{name}: a used z cell lacks rows")
         c = np.nan_to_num(coh)
-        V = np.stack([T3.weights(k_com, theta[s], bins["z"], bins["iz"], bins["k"]) @ c[s].ravel()
-                      for s in range(len(sims))])
+        V = np.stack(
+            [
+                T3.weights(k_com, theta[s], bins["z"], bins["iz"], bins["k"]) @ c[s].ravel()
+                for s in range(len(sims))
+            ]
+        )
         S = V.T @ V / V.shape[0]
         w, U = np.linalg.eigh(0.5 * (S + S.T))
         w, U = w[::-1][:r], U[:, ::-1][:, :r]
         Uleg = np.zeros((np.asarray(leg.k).size, r))
         Uleg[B] = U
-        arrays.update({f"U_{name}": Uleg, f"w_{name}": np.maximum(w, 0.0), f"k_{name}": np.asarray(leg.k),
-                       f"z_{name}": np.asarray(leg.z_row, float)})
+        arrays.update(
+            {
+                f"U_{name}": Uleg,
+                f"w_{name}": np.maximum(w, 0.0),
+                f"k_{name}": np.asarray(leg.k),
+                f"z_{name}": np.asarray(leg.z_row, float),
+            }
+        )
         ranks[name] = r
         print(f"{name}: rank {r}, {B.size} bins, captured trace {w.sum() / np.trace(S):.4f}")
-    commit = subprocess.run(["git", "-C", os.path.dirname(os.path.abspath(__file__)), "rev-parse", "HEAD"],
-                            capture_output=True, text=True).stdout.strip()
-    prov = dict(code_commit=commit, cache_sha256=_sha(a.cache), representation="P", ranks=ranks,
-                inputs={"eval_dir": a.eval_dir, "comparison": a.comparison, "comparison_sha256": _sha(a.comparison)},
-                row_rule=("coh_s(z, mode) = mean over simulation s's rows at z (all rungs) of the clean-class LOO ensemble "
-                          "residual; placed on the leg's kept bins with k >= 0.01 and z on 2.0-4.4 at s's own coordinate "
-                          "(production log-k weights); F = mean_s v v^T over all 60 simulations, top-r"),
-                amendment="GATE_E_AMENDMENT_A1 rev 1 section 3 (PU-0068)")
+    commit = subprocess.run(
+        ["git", "-C", os.path.dirname(os.path.abspath(__file__)), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    prov = dict(
+        code_commit=commit,
+        cache_sha256=_sha(a.cache),
+        representation="P",
+        ranks=ranks,
+        inputs={
+            "eval_dir": a.eval_dir,
+            "comparison": a.comparison,
+            "comparison_sha256": _sha(a.comparison),
+        },
+        row_rule=(
+            "coh_s(z, mode) = mean over simulation s's rows at z (all rungs) of the clean-class LOO ensemble "
+            "residual; placed on the leg's kept bins with k >= 0.01 and z on 2.0-4.4 at s's own coordinate "
+            "(production log-k weights); F = mean_s v v^T over all 60 simulations, top-r"
+        ),
+        amendment="GATE_E_AMENDMENT_A1 rev 1 section 3 (PU-0068)",
+    )
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     save_product(a.out, "cemu_t3", k_com_hmpc=k_com, provenance=prov, **arrays)
     print(f"wrote {a.out} sha256 {_sha(a.out)}")

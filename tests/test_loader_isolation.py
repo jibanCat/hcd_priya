@@ -1,6 +1,7 @@
 """The bundle loaders never import the trainer (``hcd_analysis.emulator.train``: pickle checkpoints and optax): a fresh
 process that imports the loaders, writes synthetic bundles and loads them through every loader ends without the
 trainer in ``sys.modules`` (D5 plan v3.1 E2, the isolation test). Synthetic bundles only."""
+
 import os
 import subprocess
 import sys
@@ -34,7 +35,12 @@ CODE = textwrap.dedent("""
 
 def test_no_loader_imports_the_trainer(tmp_path):
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", JAX_PLATFORMS="cpu")
-    r = subprocess.run([sys.executable, "-B", "-c", CODE, REPO, str(tmp_path)], capture_output=True, text=True,
-                       env=env, cwd=str(tmp_path))
+    r = subprocess.run(
+        [sys.executable, "-B", "-c", CODE, REPO, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+    )
     assert r.returncode == 0, r.stderr[-3000:]
     assert r.stdout.strip().splitlines()[-1] == "[]", r.stdout

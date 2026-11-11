@@ -19,6 +19,7 @@ is drawn from the convergence figure.  Per project convention
 Run with:
     python3 tests/test_convergence_z_match.py
 """
+
 from __future__ import annotations
 
 import json
@@ -34,16 +35,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # env). Skip cleanly when absent rather than failing collection (a single collection
 # error makes the whole ``pytest tests/`` run abort with zero tests).
 import pytest
+
 pytest.importorskip("yaml")
 pytest.importorskip("joblib")
 
 from hcd_analysis.config import PipelineConfig
 from hcd_analysis.pipeline import compute_convergence_ratios
 
-
 # ---------------------------------------------------------------------------
 # Test fixture helpers
 # ---------------------------------------------------------------------------
+
 
 def _write_snap(snap_dir: Path, z: float, p1d_value: float, n_k: int = 8) -> None:
     """
@@ -79,6 +81,7 @@ def _build_fake_tree(root: Path, sim: str, lf_snaps: dict, hr_snaps: dict) -> No
     """
     from hcd_analysis.pipeline import HIRES_SUBDIR, product_settings
     from hcd_analysis.run_settings import record_or_verify
+
     settings = product_settings(PipelineConfig(output_root=str(root)))
     record_or_verify(root / HIRES_SUBDIR, settings)
     record_or_verify(root, settings, ignore=(HIRES_SUBDIR,))
@@ -92,6 +95,7 @@ def _build_fake_tree(root: Path, sim: str, lf_snaps: dict, hr_snaps: dict) -> No
 # The actual tests
 # ---------------------------------------------------------------------------
 
+
 def test_exact_z_offset_matches_by_z_not_by_snap_name():
     """
     Real-data scenario: HR snap_N is at the same z as LF snap_(N-1)
@@ -103,11 +107,9 @@ def test_exact_z_offset_matches_by_z_not_by_snap_name():
     ratio T = p_HR / p_LF reveals which pair was picked.
     """
     sim = "test_sim"
-    lf_snaps = {f"snap_{i:03d}": (5.4 - 0.2 * (i - 4), float(i))
-                for i in range(4, 20)}
+    lf_snaps = {f"snap_{i:03d}": (5.4 - 0.2 * (i - 4), float(i)) for i in range(4, 20)}
     # HR shifted by one snap: HR snap_N should land at LF snap_(N-1)'s z
-    hr_snaps = {f"snap_{i:03d}": (5.4 - 0.2 * (i - 5), float(i))
-                for i in range(5, 21)}
+    hr_snaps = {f"snap_{i:03d}": (5.4 - 0.2 * (i - 5), float(i)) for i in range(5, 21)}
     # Sanity: HR snap_010 should be at z=5.4-0.2*5 = 4.4,
     # LF snap_009 should be at z=5.4-0.2*5 = 4.4 → |Δz|=0.0
     assert hr_snaps["snap_010"][0] == lf_snaps["snap_009"][0] == 4.4
@@ -160,16 +162,15 @@ def test_hr_with_no_lf_within_tolerance_is_skipped():
     # The resulting ratio should be keyed by that matched z = 5.4.
     assert sim in ratios
     assert len(ratios[sim]) == 1, (
-        f"expected 1 matched z, got {len(ratios[sim])}: "
-        f"{list(ratios[sim].keys())}"
+        f"expected 1 matched z, got {len(ratios[sim])}: " f"{list(ratios[sim].keys())}"
     )
     (z_key,) = ratios[sim].keys()
     assert abs(z_key - 5.4) < 1e-6
     # Matched pair should be HR snap_005 / LF snap_004 = 21.0 / 10.0 = 2.1
     T = ratios[sim][z_key]["all"]["T_k"]
-    assert np.allclose(T, 2.1, rtol=1e-10), (
-        f"T(k)={T[0]:.4f}, expected 2.1 (HR snap_005 / LF snap_004)"
-    )
+    assert np.allclose(
+        T, 2.1, rtol=1e-10
+    ), f"T(k)={T[0]:.4f}, expected 2.1 (HR snap_005 / LF snap_004)"
     print("  ✓ HR snap with no LF within z_tol is skipped")
 
 
@@ -179,8 +180,8 @@ def test_z_tol_controls_match_window():
     With z_tol=0.1, the same pair should match.
     """
     sim = "test_sim"
-    lf_snaps = {"snap_010": (4.25, 5.0)}    # z slightly off from HR
-    hr_snaps = {"snap_010": (4.20, 7.0)}    # |Δz| = 0.05
+    lf_snaps = {"snap_010": (4.25, 5.0)}  # z slightly off from HR
+    hr_snaps = {"snap_010": (4.20, 7.0)}  # |Δz| = 0.05
 
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -189,14 +190,14 @@ def test_z_tol_controls_match_window():
 
         # Tight tol: should skip (|Δz|=0.05 > 0.01)
         ratios_tight = compute_convergence_ratios(cfg, z_tol=0.01)
-        assert sim not in ratios_tight or len(ratios_tight.get(sim, {})) == 0, (
-            "tight z_tol=0.01 must skip |Δz|=0.05 pair"
-        )
+        assert (
+            sim not in ratios_tight or len(ratios_tight.get(sim, {})) == 0
+        ), "tight z_tol=0.01 must skip |Δz|=0.05 pair"
         # Loose tol: should match
         ratios_loose = compute_convergence_ratios(cfg, z_tol=0.1)
-        assert sim in ratios_loose and len(ratios_loose[sim]) == 1, (
-            "loose z_tol=0.1 must match |Δz|=0.05 pair"
-        )
+        assert (
+            sim in ratios_loose and len(ratios_loose[sim]) == 1
+        ), "loose z_tol=0.1 must match |Δz|=0.05 pair"
     print("  ✓ z_tol boundary controls inclusion (tight→skip, loose→match)")
 
 
@@ -210,7 +211,8 @@ def test_hr_without_done_sentinel_is_skipped():
         root = Path(td)
         # Build normal pair
         _build_fake_tree(
-            root, sim,
+            root,
+            sim,
             lf_snaps={"snap_009": (4.4, 1.0), "snap_010": (4.2, 2.0)},
             hr_snaps={"snap_010": (4.4, 3.0), "snap_011": (4.2, 4.0)},
         )
@@ -238,8 +240,8 @@ def test_tie_break_picks_closest_then_lowest_snap():
     """
     sim = "test_sim"
     lf_snaps = {
-        "snap_009": (4.5, 10.0),   # Δz = +0.1 from HR z=4.4
-        "snap_010": (4.3, 20.0),   # Δz = -0.1 from HR z=4.4  (equidistant)
+        "snap_009": (4.5, 10.0),  # Δz = +0.1 from HR z=4.4
+        "snap_010": (4.3, 20.0),  # Δz = -0.1 from HR z=4.4  (equidistant)
     }
     hr_snaps = {"snap_010": (4.4, 99.0)}
 
@@ -253,9 +255,9 @@ def test_tie_break_picks_closest_then_lowest_snap():
     (z_key,) = ratios[sim].keys()
     T = ratios[sim][z_key]["all"]["T_k"]
     # Lower snap number wins (snap_009): T = 99 / 10 = 9.9
-    assert np.allclose(T, 99.0 / 10.0, rtol=1e-10), (
-        f"tie-break failed: T(k)={T[0]:.4f}, expected 9.9 (HR/snap_009)"
-    )
+    assert np.allclose(
+        T, 99.0 / 10.0, rtol=1e-10
+    ), f"tie-break failed: T(k)={T[0]:.4f}, expected 9.9 (HR/snap_009)"
     print("  ✓ equidistant tie → lower-snap-number wins (deterministic)")
 
 
@@ -266,10 +268,8 @@ def test_saved_npz_roundtrips_to_matched_z():
     LF z of the same-snap-name partner.
     """
     sim = "test_sim"
-    lf_snaps = {f"snap_{i:03d}": (5.4 - 0.2 * (i - 4), float(i))
-                for i in range(4, 10)}
-    hr_snaps = {f"snap_{i:03d}": (5.4 - 0.2 * (i - 5), float(i))
-                for i in range(5, 11)}
+    lf_snaps = {f"snap_{i:03d}": (5.4 - 0.2 * (i - 4), float(i)) for i in range(4, 10)}
+    hr_snaps = {f"snap_{i:03d}": (5.4 - 0.2 * (i - 5), float(i)) for i in range(5, 11)}
 
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -287,15 +287,14 @@ def test_saved_npz_roundtrips_to_matched_z():
         # HR z spans {5.4, 5.2, ..., 4.4}; LF z spans {5.4, 5.2, ..., 4.4, 4.2}.
         # Every HR z is inside the LF range, so all 6 HR snaps match.
         expected = sorted(round(v[0], 3) for v in hr_snaps.values())
-        assert z_values == expected, (
-            f"saved z labels {z_values} != expected matched z {expected}"
-        )
+        assert z_values == expected, f"saved z labels {z_values} != expected matched z {expected}"
     print("  ✓ saved npz keys match the HR (anchor) z values")
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     print("Running compute_convergence_ratios z-match tests:")

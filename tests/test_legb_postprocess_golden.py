@@ -17,6 +17,7 @@ into a hard test failure at the seam.
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python -m pytest tests/test_legb_postprocess_golden.py -q
 """
+
 import os
 import numpy as np
 import pytest
@@ -57,17 +58,23 @@ def test_fast_postprocess_matches_replay_golden():
     # The raw latent sites must already match (same kernel, same seed) — sanity.
     for site in ("theta_unit", "tau0_amp", "dtau0", "alpha_lls", "alpha_subdla", "alpha_dla_raw"):
         np.testing.assert_array_equal(
-            np.asarray(s_fast[site]), np.asarray(s_slow[site]),
-            err_msg=f"latent site {site!r} differs across postprocess paths (seed mismatch?)")
+            np.asarray(s_fast[site]),
+            np.asarray(s_slow[site]),
+            err_msg=f"latent site {site!r} differs across postprocess paths (seed mismatch?)",
+        )
 
     # The headline guard: the reconstructed deterministics are BYTE-IDENTICAL.
     for site in _DET_SITES:
-        a = np.asarray(s_fast[site]); b = np.asarray(s_slow[site])
+        a = np.asarray(s_fast[site])
+        b = np.asarray(s_slow[site])
         assert a.shape == b.shape, f"{site!r} shape {a.shape} != replay {b.shape}"
         np.testing.assert_array_equal(
-            a, b, err_msg=f"deterministic site {site!r}: host-side reconstruction (fast_postprocess) "
-                          f"!= numpyro in-model replay — the τ₀/α reconstruction has drifted from the "
-                          f"model. Re-sync _legb_reconstruct_deterministics with _legb_model.")
+            a,
+            b,
+            err_msg=f"deterministic site {site!r}: host-side reconstruction (fast_postprocess) "
+            f"!= numpyro in-model replay — the τ₀/α reconstruction has drifted from the "
+            f"model. Re-sync _legb_reconstruct_deterministics with _legb_model.",
+        )
 
 
 if __name__ == "__main__":

@@ -1,13 +1,15 @@
 """PRIYA's mean-flux model as a conversion, with no prior: the Kim07 curve the training cache's tau0 ladder is built on,
 and the two-parameter PRIYA model (Bird et al. 2023, section 2.7.1) in the ladder coordinate. The public predictor
-imports these; ``meanflux_prior`` (the historical analyses' mean-flux priors) re-exports them unchanged."""
+imports these; ``meanflux_prior`` (the historical analyses' mean-flux priors) re-exports them unchanged.
+"""
+
 from __future__ import annotations
 
 import jax.numpy as jnp
 
 from .data import KIM_AMP, KIM_SLOPE
 
-TAU0_PIVOT_Z = 3.0               # the (1+z)/(1+z_p) pivot (PRIYA (1+z)/4, so z_p = 3)
+TAU0_PIVOT_Z = 3.0  # the (1+z)/(1+z_p) pivot (PRIYA (1+z)/4, so z_p = 3)
 
 
 def kim_tau0(z):

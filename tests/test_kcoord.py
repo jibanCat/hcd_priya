@@ -1,5 +1,6 @@
 """Gate A, task 2: the canonical physical k coordinate k_skm(z, theta).
 Incident: docs/kgrid_incident_2026-10.md"""
+
 import os
 
 import jax
@@ -12,11 +13,11 @@ from hcd_analysis.emulator.data import PARAM_LIMITS, normalize_params
 
 from tests.gate_helpers import real_cache_path, require_real_cache
 
-LF = real_cache_path("lf")   # inside this checkout; gate runs fail (not skip) when absent
+LF = real_cache_path("lf")  # inside this checkout; gate runs fail (not skip) when absent
 
 
 def _theta_unit(hub, omegamh2):
-    phys = np.array(PARAM_LIMITS, float).mean(axis=1)      # mid-box for the other 7
+    phys = np.array(PARAM_LIMITS, float).mean(axis=1)  # mid-box for the other 7
     phys[5] = hub
     phys[6] = omegamh2
     return np.asarray(normalize_params(phys), float)
@@ -25,7 +26,7 @@ def _theta_unit(hub, omegamh2):
 def test_first_principles_grid_matches_box_formula():
     kcom = 2 * np.pi * np.arange(1, 6) / S.L_BOX_HMPC
     for z, hub, omh2 in [(2.2, 0.735, 0.1405), (3.0, 0.652, 0.1413), (4.6, 0.748, 0.1429)]:
-        om = omh2 / hub ** 2
+        om = omh2 / hub**2
         E = np.sqrt(om * (1 + z) ** 3 + 1 - om)
         expect = 2 * np.pi * np.arange(1, 6) / (S.L_BOX_HMPC * 100 * E / (1 + z))
         got = np.asarray(KC.k_skm_from_theta9(kcom, z, _theta_unit(hub, omh2)))
@@ -34,8 +35,8 @@ def test_first_principles_grid_matches_box_formula():
 
 def test_h_cancels():
     kcom = 2 * np.pi * np.arange(1, 4) / S.L_BOX_HMPC
-    a = KC.k_skm_from_kcom(kcom, 3.0, 0.60, 0.30 * 0.60 ** 2)
-    b = KC.k_skm_from_kcom(kcom, 3.0, 0.80, 0.30 * 0.80 ** 2)
+    a = KC.k_skm_from_kcom(kcom, 3.0, 0.60, 0.30 * 0.60**2)
+    b = KC.k_skm_from_kcom(kcom, 3.0, 0.80, 0.30 * 0.80**2)
     assert np.allclose(np.asarray(a), np.asarray(b), rtol=1e-12)
 
 
@@ -43,7 +44,9 @@ def test_cosmology_response_is_exactly_minus_dlnE():
     kcom = 2 * np.pi * np.arange(1, 4) / S.L_BOX_HMPC
     z = 2.6
     for (h1, w1), (h2, w2) in [((0.70, 0.14), (0.70, 0.15)), ((0.66, 0.14), (0.74, 0.14))]:
-        r = np.asarray(KC.k_skm_from_kcom(kcom, z, h2, w2)) / np.asarray(KC.k_skm_from_kcom(kcom, z, h1, w1))
+        r = np.asarray(KC.k_skm_from_kcom(kcom, z, h2, w2)) / np.asarray(
+            KC.k_skm_from_kcom(kcom, z, h1, w1)
+        )
         assert np.allclose(r, float(KC.E_of_z(z, h1, w1) / KC.E_of_z(z, h2, w2)), rtol=1e-12)
 
 
@@ -70,6 +73,7 @@ def test_kgrid_object_carries_the_contract():
 def test_real_rows_reproduced_from_theta_within_tolerance():
     require_real_cache(LF)
     import h5py
+
     with h5py.File(LF, "r") as h:
         kf = h["kfkms"][...]
         nb = h["nbins_native"][...].astype(float)

@@ -17,6 +17,7 @@ Contract under test:
   * it accepts the joint driver's '+'-joined multi-leg label unchanged, so both drivers can
     share one implementation without either changing its stream
 """
+
 import importlib.util
 import os
 import subprocess
@@ -42,16 +43,19 @@ def _load_direct():
 def _in_subprocess(expr, hashseed):
     """Evaluate `expr` in a FRESH interpreter at a given PYTHONHASHSEED and return stdout."""
     env = dict(os.environ, PYTHONHASHSEED=str(hashseed))
-    code = (f"import importlib.util;"
-            f"spec=importlib.util.spec_from_file_location('m', r'{SEEDING}');"
-            f"m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
-            f"print({expr})")
+    code = (
+        f"import importlib.util;"
+        f"spec=importlib.util.spec_from_file_location('m', r'{SEEDING}');"
+        f"m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
+        f"print({expr})"
+    )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
     assert out.returncode == 0, out.stderr
     return out.stdout.strip()
 
 
 # ---------------------------------------------------------------- the derivation itself
+
 
 def test_nuts_fold_int_is_crc32_masked():
     m = _load_direct()
@@ -84,6 +88,7 @@ def test_joint_multileg_label_is_accepted_unchanged():
 
 # ---------------------------------------------------------------- cross-process stability
 
+
 def test_fold_is_stable_across_pythonhashseed_values():
     """The whole point: a recorded seed must reproduce the chain in a fresh interpreter."""
     a = _in_subprocess("m.nuts_fold_int('eboss')", hashseed=0)
@@ -97,17 +102,22 @@ def test_builtin_hash_control_proves_the_harness_detects_instability():
     does vary across PYTHONHASHSEED under the same harness, i.e. the harness has teeth."""
     a = _in_subprocess("hash('eboss') & 0x7fffffff", hashseed=0)
     b = _in_subprocess("hash('eboss') & 0x7fffffff", hashseed=12345)
-    assert a != b, ("builtin hash() did not vary across PYTHONHASHSEED; the stability test "
-                    "above is vacuous on this interpreter")
+    assert a != b, (
+        "builtin hash() did not vary across PYTHONHASHSEED; the stability test "
+        "above is vacuous on this interpreter"
+    )
 
 
 # ---------------------------------------------------------------- driver wiring
+
 
 def test_run_real_fit_uses_the_helper_not_builtin_hash():
     """The deployed driver must not carry the SipHash idiom any more. Source-level check so it
     cannot regress silently under a refactor that keeps the tests green."""
     src = (ROOT / "scripts" / "run_real_fit.py").read_text()
-    assert "hash(survey)" not in src, "run_real_fit.py still derives the NUTS key from builtin hash()"
+    assert (
+        "hash(survey)" not in src
+    ), "run_real_fit.py still derives the NUTS key from builtin hash()"
     assert "nuts_fold_int" in src, "run_real_fit.py does not use the shared seed helper"
 
 
@@ -115,6 +125,7 @@ def test_no_builtin_hash_on_config_values_in_deployed_drivers():
     """Sweep the deployed driver path for any other builtin hash( on a config value, which
     would reintroduce the same non-reproducibility elsewhere."""
     import re
+
     bad = []
     for name in ("run_real_fit.py", "run_joint_fit.py"):
         for i, line in enumerate((ROOT / "scripts" / name).read_text().splitlines(), 1):

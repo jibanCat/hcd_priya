@@ -1,7 +1,9 @@
 """scripts/compare_emulators.py: the exit status follows the verdict, and the L1c headline carries the k-grid check.
 
 A wrapper such as ``compare_emulators.py ... && record_pass`` must never record a FAIL, BLOCKED or NOT RUN level, or a
-run whose reference tree changed while it ran, as a pass. Synthetic values only; no external data."""
+run whose reference tree changed while it ran, as a pass. Synthetic values only; no external data.
+"""
+
 import importlib.util
 import json
 import os
@@ -15,8 +17,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _runner():
-    spec = importlib.util.spec_from_file_location("compare_emulators_under_test",
-                                                  os.path.join(REPO, "scripts", "compare_emulators.py"))
+    spec = importlib.util.spec_from_file_location(
+        "compare_emulators_under_test", os.path.join(REPO, "scripts", "compare_emulators.py")
+    )
     R = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(R)
     return R
@@ -24,18 +27,36 @@ def _runner():
 
 def _stub_main(monkeypatch, tmp_path, R, level_result, master_hashes=None):
     """Stub the reference design, the case list and the chosen level; return the argv for main()."""
-    monkeypatch.setattr(R, "ks_design", lambda basedir: {"params": np.zeros((2, 10)), "rungs": np.array([0.0])})
-    monkeypatch.setattr(R, "build_cases", lambda cfg, ks: [{"case_id": "c0", "support": {"status": "COMPARABLE"}}])
+    monkeypatch.setattr(
+        R, "ks_design", lambda basedir: {"params": np.zeros((2, 10)), "rungs": np.array([0.0])}
+    )
+    monkeypatch.setattr(
+        R, "build_cases", lambda cfg, ks: [{"case_id": "c0", "support": {"status": "COMPARABLE"}}]
+    )
     monkeypatch.setattr(R, "_git_head", lambda: "0" * 40)
     hashes = iter(master_hashes or [])
     monkeypatch.setattr(R, "tree_hash", lambda root: next(hashes) if root else None)
 
     def level(a, cfg, cases_or_ks, res_out):
         res_out.update(level_result)
+
     for name in ("level_L1b", "level_L1c", "level_L2LF"):
         monkeypatch.setattr(R, name, level)
-    argv = ["compare_emulators.py", "--level", "L1b", "--out", str(tmp_path / "out"), "--cache", "c.h5",
-            "--ks-basedir", "b", "--lyaemu-parent", "p", "--ks-python", "py"]
+    argv = [
+        "compare_emulators.py",
+        "--level",
+        "L1b",
+        "--out",
+        str(tmp_path / "out"),
+        "--cache",
+        "c.h5",
+        "--ks-basedir",
+        "b",
+        "--lyaemu-parent",
+        "p",
+        "--ks-python",
+        "py",
+    ]
     if master_hashes:
         argv += ["--ks-master", str(tmp_path / "master")]
     monkeypatch.setattr(R.sys, "argv", argv)
@@ -55,7 +76,9 @@ def test_every_non_pass_verdict_exits_nonzero(monkeypatch, tmp_path, verdict):
     code = _exit_code(R)
     assert code not in (0, None)
     assert code == R.EXIT_CODES[verdict]
-    assert json.loads((out / "result.json").read_text())["verdict"] == verdict      # the record is still written
+    assert (
+        json.loads((out / "result.json").read_text())["verdict"] == verdict
+    )  # the record is still written
 
 
 def test_non_pass_exit_codes_are_distinct():
@@ -103,9 +126,10 @@ def test_a_refusal_inside_a_level_exits_1_without_result_json(monkeypatch, tmp_p
 
     def refusing_level(a, cfg, cases_or_ks, res_out):
         sys.exit("refusing: synthetic")
+
     monkeypatch.setattr(R, "level_L1b", refusing_level)
     code = _exit_code(R)
-    assert isinstance(code, str) and code.startswith("refusing:")      # Python exits 1 for a message
+    assert isinstance(code, str) and code.startswith("refusing:")  # Python exits 1 for a message
     assert out.is_dir() and not (out / "result.json").exists()
 
 
@@ -113,14 +137,33 @@ def test_an_existing_out_dir_is_refused_with_exit_status_1(tmp_path):
     """The real process exit status of a refusal is 1, the same code as FAIL; no result.json is written."""
     out = tmp_path / "out"
     out.mkdir()
-    p = subprocess.run([sys.executable, "-B", os.path.join(REPO, "scripts", "compare_emulators.py"), "--level", "L1b",
-                        "--out", str(out), "--cache", "c.h5", "--ks-basedir", "b", "--lyaemu-parent", "p",
-                        "--ks-python", "py"], capture_output=True, text=True)
+    p = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            os.path.join(REPO, "scripts", "compare_emulators.py"),
+            "--level",
+            "L1b",
+            "--out",
+            str(out),
+            "--cache",
+            "c.h5",
+            "--ks-basedir",
+            "b",
+            "--lyaemu-parent",
+            "p",
+            "--ks-python",
+            "py",
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert p.returncode == 1 and "refusing:" in p.stderr
     assert list(out.iterdir()) == []
 
 
 # --- L1c: the k-grid label check is part of the headline verdict -------------------------------------------------
+
 
 def _l1c_inputs(tmp_path, kfkms_scale=1.0, p_scale=1.0, bad_k=None):
     """A two-row synthetic cache and the matching synthetic reference design, one rung, two redshifts.
@@ -130,6 +173,7 @@ def _l1c_inputs(tmp_path, kfkms_scale=1.0, p_scale=1.0, bad_k=None):
     reference side only (a finite label over zero)."""
     import h5py
     from hcd_analysis.comparison import conventions as C
+
     rng = np.random.default_rng(3)
     theta = rng.uniform(0.5, 1.5, size=len(C.PARAM_NAMES))
     zout, nk = np.array([3.0, 2.5]), 4
@@ -144,8 +188,13 @@ def _l1c_inputs(tmp_path, kfkms_scale=1.0, p_scale=1.0, bad_k=None):
         kf_cache[1, 2] = np.inf
     if bad_k == "x_over_0":
         kf_ref[1, 2] = 0.0
-    ks = {"params": np.concatenate([[0.0], theta])[None, :], "zout": zout, "kfmpc": np.arange(nk, dtype=float),
-          "flux_vectors": fv, "kfkms": kf_ref[None, :, :]}
+    ks = {
+        "params": np.concatenate([[0.0], theta])[None, :],
+        "zout": zout,
+        "kfmpc": np.arange(nk, dtype=float),
+        "flux_vectors": fv,
+        "kfkms": kf_ref[None, :, :],
+    }
     path = tmp_path / "cache.h5"
     with h5py.File(path, "w") as h:
         h["params"] = np.vstack([theta, theta])
@@ -162,6 +211,7 @@ def _l1c_inputs(tmp_path, kfkms_scale=1.0, p_scale=1.0, bad_k=None):
 def _run_l1c(tmp_path, **kw):
     R = _runner()
     from hcd_analysis.comparison import cases as CS
+
     ks, cache = _l1c_inputs(tmp_path, **kw)
     out = tmp_path / "l1c"
     out.mkdir()
@@ -173,7 +223,11 @@ def _run_l1c(tmp_path, **kw):
 
 def test_l1c_passes_when_power_and_k_labels_both_agree(tmp_path):
     res = _run_l1c(tmp_path)
-    assert res["lineage_verdict"] == "PASS" and res["kfkms_verdict"] == "PASS" and res["verdict"] == "PASS"
+    assert (
+        res["lineage_verdict"] == "PASS"
+        and res["kfkms_verdict"] == "PASS"
+        and res["verdict"] == "PASS"
+    )
 
 
 def test_l1c_k_label_mismatch_cannot_read_pass(tmp_path):
@@ -185,7 +239,11 @@ def test_l1c_k_label_mismatch_cannot_read_pass(tmp_path):
 
 def test_l1c_power_mismatch_still_fails(tmp_path):
     res = _run_l1c(tmp_path, p_scale=1.01)
-    assert res["lineage_verdict"] == "FAIL" and res["kfkms_verdict"] == "PASS" and res["verdict"] == "FAIL"
+    assert (
+        res["lineage_verdict"] == "FAIL"
+        and res["kfkms_verdict"] == "PASS"
+        and res["verdict"] == "FAIL"
+    )
 
 
 @pytest.mark.parametrize("bad_k", ["cache", "reference", "zero_over_zero", "inf_cache", "x_over_0"])
@@ -203,11 +261,29 @@ def test_l1c_non_finite_k_label_exits_nonzero_end_to_end(monkeypatch, tmp_path, 
     R = _runner()
     ks, cache = _l1c_inputs(tmp_path, bad_k="cache")
     monkeypatch.setattr(R, "ks_design", lambda basedir: dict(ks, rungs=np.array([0.0])))
-    monkeypatch.setattr(R, "build_cases", lambda cfg, k: [{"case_id": "c0", "support": {"status": "COMPARABLE"}}])
+    monkeypatch.setattr(
+        R, "build_cases", lambda cfg, k: [{"case_id": "c0", "support": {"status": "COMPARABLE"}}]
+    )
     monkeypatch.setattr(R, "_git_head", lambda: "0" * 40)
-    monkeypatch.setattr(R.sys, "argv", ["compare_emulators.py", "--level", "L1c", "--out", str(tmp_path / "out"),
-                                        "--cache", str(cache), "--ks-basedir", "b", "--lyaemu-parent", "p",
-                                        "--ks-python", "py"])
+    monkeypatch.setattr(
+        R.sys,
+        "argv",
+        [
+            "compare_emulators.py",
+            "--level",
+            "L1c",
+            "--out",
+            str(tmp_path / "out"),
+            "--cache",
+            str(cache),
+            "--ks-basedir",
+            "b",
+            "--lyaemu-parent",
+            "p",
+            "--ks-python",
+            "py",
+        ],
+    )
     assert _exit_code(R) == R.EXIT_CODES["FAIL"]
     assert capsys.readouterr().out.splitlines()[0] == "L1c: FAIL"
     assert json.loads((tmp_path / "out" / "result.json").read_text())["kfkms_verdict"] == "FAIL"
@@ -215,8 +291,17 @@ def test_l1c_non_finite_k_label_exits_nonzero_end_to_end(monkeypatch, tmp_path, 
 
 def test_l1c_terminal_prints_the_k_grid_verdict(monkeypatch, tmp_path, capsys):
     R = _runner()
-    _stub_main(monkeypatch, tmp_path, R, {"verdict": "FAIL", "lineage_verdict": "PASS", "kfkms_verdict": "FAIL",
-                                          "kfkms_max_rel": 1e-3})
+    _stub_main(
+        monkeypatch,
+        tmp_path,
+        R,
+        {
+            "verdict": "FAIL",
+            "lineage_verdict": "PASS",
+            "kfkms_verdict": "FAIL",
+            "kfkms_max_rel": 1e-3,
+        },
+    )
     assert _exit_code(R) == R.EXIT_CODES["FAIL"]
     out = capsys.readouterr().out
     assert "kfkms_verdict=FAIL" in out and "lineage_verdict=PASS" in out

@@ -2,6 +2,7 @@
 
 Run with: python3 tests/test_emulator_cache.py
 """
+
 import sys
 import tempfile
 from pathlib import Path
@@ -27,8 +28,10 @@ def test_discover_sim_snap_pairs_returns_nonempty():
     assert isinstance(snap, int)
     assert snap_dir.is_dir()
     assert (snap_dir / "meta.json").exists()
-    print(f"discover_sim_snap_pairs: {len(pairs)} pairs found; "
-          f"first = ({sim_name}, snap_{snap:03d})")
+    print(
+        f"discover_sim_snap_pairs: {len(pairs)} pairs found; "
+        f"first = ({sim_name}, snap_{snap:03d})"
+    )
 
 
 def test_per_file_readers_on_first_pair():
@@ -48,16 +51,30 @@ def test_per_file_readers_on_first_pair():
     assert cddf["n_absorbers"].shape == (30,)
 
     p1d = bec.read_p1d_per_class(snap_dir)
-    for key in ("k", "P_clean", "P_LLS_only", "P_subDLA_only", "P_DLA_only",
-                "mean_F_clean", "mean_F_LLS", "mean_F_subDLA", "mean_F_DLA",
-                "n_sightlines_clean", "n_sightlines_LLS", "n_sightlines_subDLA",
-                "n_sightlines_DLA", "n_total"):
+    for key in (
+        "k",
+        "P_clean",
+        "P_LLS_only",
+        "P_subDLA_only",
+        "P_DLA_only",
+        "mean_F_clean",
+        "mean_F_LLS",
+        "mean_F_subDLA",
+        "mean_F_DLA",
+        "n_sightlines_clean",
+        "n_sightlines_LLS",
+        "n_sightlines_subDLA",
+        "n_sightlines_DLA",
+        "n_total",
+    ):
         assert key in p1d, f"missing {key} in p1d_per_class.h5"
     assert p1d["k"].ndim == 1
     assert p1d["P_clean"].shape == p1d["k"].shape
-    print(f"readers: meta z={meta['z']:.3f} nbins={meta['nbins']} | "
-          f"cddf bins={len(cddf['log_nhi_centres'])} | "
-          f"p1d k.shape={p1d['k'].shape}")
+    print(
+        f"readers: meta z={meta['z']:.3f} nbins={meta['nbins']} | "
+        f"cddf bins={len(cddf['log_nhi_centres'])} | "
+        f"p1d k.shape={p1d['k'].shape}"
+    )
 
 
 def test_interp_p1d_loglog_pure_power_law_recovers_input():
@@ -102,15 +119,16 @@ def test_dndx_per_class_uses_unbinned_meta_counts():
     # Reference = exactly meta['n_absorbers'] / total_path (no binning).
     n = meta["n_absorbers"]
     ref = {
-        "dNdX_LLS":    float(n["LLS"])    / total_path,
+        "dNdX_LLS": float(n["LLS"]) / total_path,
         "dNdX_subDLA": float(n["subDLA"]) / total_path,
-        "dNdX_DLA":    float(n["DLA"])    / total_path,
+        "dNdX_DLA": float(n["DLA"]) / total_path,
     }
     for k in ref:
-        assert np.isclose(result[k], ref[k], rtol=1e-12), \
-            f"{k}: got {result[k]}, expected {ref[k]}"
-    print(f"dNdX (unbinned): LLS={result['dNdX_LLS']:.4f}  "
-          f"subDLA={result['dNdX_subDLA']:.4f}  DLA={result['dNdX_DLA']:.4f}")
+        assert np.isclose(result[k], ref[k], rtol=1e-12), f"{k}: got {result[k]}, expected {ref[k]}"
+    print(
+        f"dNdX (unbinned): LLS={result['dNdX_LLS']:.4f}  "
+        f"subDLA={result['dNdX_subDLA']:.4f}  DLA={result['dNdX_DLA']:.4f}"
+    )
 
 
 def test_dndx_unbinned_differs_from_bin_sum_at_class_boundary():
@@ -131,24 +149,29 @@ def test_dndx_unbinned_differs_from_bin_sum_at_class_boundary():
     centres = cddf["log_nhi_centres"]
     n_abs = cddf["n_absorbers"]
     binned = {
-        "dNdX_LLS":    float(n_abs[(centres >= 17.2) & (centres < 19.0)].sum()) / total_path,
+        "dNdX_LLS": float(n_abs[(centres >= 17.2) & (centres < 19.0)].sum()) / total_path,
         "dNdX_subDLA": float(n_abs[(centres >= 19.0) & (centres < 20.3)].sum()) / total_path,
-        "dNdX_DLA":    float(n_abs[centres >= 20.3].sum())                      / total_path,
+        "dNdX_DLA": float(n_abs[centres >= 20.3].sum()) / total_path,
     }
     # LLS bin edges align with the catalog floor and the 19.0 cut → match.
     assert np.isclose(unbinned["dNdX_LLS"], binned["dNdX_LLS"], rtol=1e-12)
     # subDLA + DLA boundaries don't align → must differ.
-    assert not np.isclose(unbinned["dNdX_subDLA"], binned["dNdX_subDLA"], rtol=1e-3), \
-        "subDLA dN/dX matched the binned approach — class-boundary regression broke."
-    assert not np.isclose(unbinned["dNdX_DLA"], binned["dNdX_DLA"], rtol=1e-3), \
-        "DLA dN/dX matched the binned approach — class-boundary regression broke."
-    print(f"dNdX divergence (binned vs unbinned) on first pair:  "
-          f"subDLA = {binned['dNdX_subDLA']/unbinned['dNdX_subDLA'] - 1:+.1%}  "
-          f"DLA = {binned['dNdX_DLA']/unbinned['dNdX_DLA'] - 1:+.1%}")
+    assert not np.isclose(
+        unbinned["dNdX_subDLA"], binned["dNdX_subDLA"], rtol=1e-3
+    ), "subDLA dN/dX matched the binned approach — class-boundary regression broke."
+    assert not np.isclose(
+        unbinned["dNdX_DLA"], binned["dNdX_DLA"], rtol=1e-3
+    ), "DLA dN/dX matched the binned approach — class-boundary regression broke."
+    print(
+        f"dNdX divergence (binned vs unbinned) on first pair:  "
+        f"subDLA = {binned['dNdX_subDLA']/unbinned['dNdX_subDLA'] - 1:+.1%}  "
+        f"DLA = {binned['dNdX_DLA']/unbinned['dNdX_DLA'] - 1:+.1%}"
+    )
 
 
 def test_build_row_schema_first_pair():
     from hcd_analysis.p1d import _DEFAULT_K_BINS
+
     pairs = bec.discover_sim_snap_pairs(HCD_ROOT)
     sim_name, snap, snap_dir = pairs[0]
 
@@ -169,12 +192,15 @@ def test_build_row_schema_first_pair():
     # dN/dX scalars
     for key in ("dNdX_LLS", "dNdX_subDLA", "dNdX_DLA"):
         assert key in row and np.isfinite(row[key])
-    print(f"build_row: z={row['z']:.3f}  "
-          f"P_clean finite frac = {np.isfinite(row['P_clean']).mean():.2f}")
+    print(
+        f"build_row: z={row['z']:.3f}  "
+        f"P_clean finite frac = {np.isfinite(row['P_clean']).mean():.2f}"
+    )
 
 
 def test_write_cache_two_row_round_trip():
     from hcd_analysis.p1d import _DEFAULT_K_BINS
+
     pairs = bec.discover_sim_snap_pairs(HCD_ROOT)[:2]
     k_target = 2.0 * np.pi * _DEFAULT_K_BINS  # angular, project convention
     rows = [bec.build_row(s, sn, sd, k_target) for s, sn, sd in pairs]
@@ -198,6 +224,7 @@ def test_write_cache_two_row_round_trip():
 
 def test_verify_round_trip_against_source_first_pair():
     from hcd_analysis.p1d import _DEFAULT_K_BINS
+
     pairs = bec.discover_sim_snap_pairs(HCD_ROOT)[:1]
     k_target = 2.0 * np.pi * _DEFAULT_K_BINS  # angular, project convention
     rows = [bec.build_row(s, sn, sd, k_target) for s, sn, sd in pairs]

@@ -5,6 +5,7 @@ environment (the hcd_analysis.emulator package imports JAX).
 
   python scripts/build_gp_loo_inputs.py --cache LF_CACHE.h5 --holdout-sim NAME --n-modes N --out NEW.npz
 """
+
 import argparse
 import hashlib
 import os
@@ -20,7 +21,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--cache", required=True)
     ap.add_argument("--holdout-sim", required=True)
-    ap.add_argument("--n-modes", type=int, required=True, help="modes 1..N (the reference training file's count)")
+    ap.add_argument(
+        "--n-modes",
+        type=int,
+        required=True,
+        help="modes 1..N (the reference training file's count)",
+    )
     ap.add_argument("--out", required=True, help="NEW .npz (refused if it exists)")
     a = ap.parse_args()
     c = L.read_cache_for_gp(a.cache)

@@ -4,7 +4,9 @@ property lives in tests/test_r6_pairing.py.
 
 Run: python -m pytest tests/test_cert_prereqs.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib
 import os
@@ -23,13 +25,27 @@ ksr = importlib.import_module("scripts.run_ks_selboost_shard")
 
 _DUMMY = dict(n_mocks=1, n_warmup=1, n_samples=1, max_tree_depth=1, seed=0, verbose=False)
 # the full modern closure-run stamp (survey=None etc. — the ARM-P-era defaults)
-_CLOSURE = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="KS", fold=0,
-                tau0_prior_sigma=0.0, subdla_truth_boost=1.0, res_corr_on=False,
-                sample_res=True, f_res_amp_sigma=0.15, metal_prior="uniform", ks_kmax=0.065,
-                survey=None, hcd_parameterization="alpha_pivot_powerlaw_v1",
-                hcd_prior_signature=None, single_member=False)
-_ARMP_KS = dict(_CLOSURE, survey="KS", hcd_parameterization="dndx_mapped_v2",
-                hcd_prior_signature="s" * 64)
+_CLOSURE = dict(
+    leg_a=True,
+    cemu_variant="current",
+    amp_sigma=0.0,
+    leg="KS",
+    fold=0,
+    tau0_prior_sigma=0.0,
+    subdla_truth_boost=1.0,
+    res_corr_on=False,
+    sample_res=True,
+    f_res_amp_sigma=0.15,
+    metal_prior="uniform",
+    ks_kmax=0.065,
+    survey=None,
+    hcd_parameterization="alpha_pivot_powerlaw_v1",
+    hcd_prior_signature=None,
+    single_member=False,
+)
+_ARMP_KS = dict(
+    _CLOSURE, survey="KS", hcd_parameterization="dndx_mapped_v2", hcd_prior_signature="s" * 64
+)
 
 
 def _write_stub(out_dir, m, run_cfg, marker="ondisk"):
@@ -42,6 +58,7 @@ def _write_stub(out_dir, m, run_cfg, marker="ondisk"):
 
 
 # ------------------------------- ARM-P pkl pooling (run_prod_sbc_shard) ----------------------
+
 
 def test_armp_request_clashes_with_closure_pkl(tmp_path):
     """An ARM-P run over an existing closure-prior pkl must CLASH (survey/signature differ)."""
@@ -70,9 +87,11 @@ def test_prestamp_pkl_resumes_under_default_new_keys(tmp_path):
     """A pkl WITHOUT the 2026-07-23 keys (survey/parameterization/signature/single_member)
     must resume under a request at those defaults — the back-compat pops."""
     out = str(tmp_path / "prestamp")
-    pre = {k: v for k, v in _CLOSURE.items()
-           if k not in ("survey", "hcd_parameterization", "hcd_prior_signature",
-                        "single_member")}
+    pre = {
+        k: v
+        for k, v in _CLOSURE.items()
+        if k not in ("survey", "hcd_parameterization", "hcd_prior_signature", "single_member")
+    }
     _write_stub(out, 0, pre, marker="old")
     rec = runner._run_mock(None, None, 0, out, run_cfg=dict(_CLOSURE), **_DUMMY)
     assert rec["_marker"] == "old"
@@ -81,9 +100,11 @@ def test_prestamp_pkl_resumes_under_default_new_keys(tmp_path):
 def test_armp_request_clashes_with_prestamp_pkl(tmp_path):
     """ARM-P over a PRE-STAMP pkl must CLASH (missing key excused only at the default)."""
     out = str(tmp_path / "prestamp_armp")
-    pre = {k: v for k, v in _CLOSURE.items()
-           if k not in ("survey", "hcd_parameterization", "hcd_prior_signature",
-                        "single_member")}
+    pre = {
+        k: v
+        for k, v in _CLOSURE.items()
+        if k not in ("survey", "hcd_parameterization", "hcd_prior_signature", "single_member")
+    }
     _write_stub(out, 0, pre)
     with pytest.raises(RuntimeError, match="config CLASH"):
         runner._run_mock(None, None, 0, out, run_cfg=dict(_ARMP_KS), **_DUMMY)
@@ -93,8 +114,7 @@ def test_single_member_discriminator(tmp_path):
     out = str(tmp_path / "single_member")
     _write_stub(out, 0, _CLOSURE)
     with pytest.raises(RuntimeError, match="config CLASH"):
-        runner._run_mock(None, None, 0, out, run_cfg=dict(_CLOSURE, single_member=True),
-                         **_DUMMY)
+        runner._run_mock(None, None, 0, out, run_cfg=dict(_CLOSURE, single_member=True), **_DUMMY)
 
 
 def test_effective_run_cfg_agrees_with_run_mock_pops(tmp_path):
@@ -114,8 +134,10 @@ def test_effective_run_cfg_agrees_with_run_mock_pops(tmp_path):
         out = str(tmp_path / f"agree_{i}")
         _write_stub(out, 0, ex, marker="pool")
         if may_pool:
-            assert runner._run_mock(None, None, 0, out, run_cfg=dict(req),
-                                    **_DUMMY)["_marker"] == "pool"
+            assert (
+                runner._run_mock(None, None, 0, out, run_cfg=dict(req), **_DUMMY)["_marker"]
+                == "pool"
+            )
         else:
             with pytest.raises(RuntimeError, match="config CLASH"):
                 runner._run_mock(None, None, 0, out, run_cfg=dict(req), **_DUMMY)
@@ -123,32 +145,48 @@ def test_effective_run_cfg_agrees_with_run_mock_pops(tmp_path):
 
 # ------------------------------- run_legb truth_fn guard -------------------------------------
 
+
 @pytest.mark.deferred_legacy("RETIRED_BUILDER")
 def test_truth_fn_held_out_guard():
     from hcd_analysis.emulator.closure_legb import run_legb
+
     with pytest.raises(ValueError, match="truth_fn"):
-        run_legb(None, None, n_mocks=1, n_warmup=1, n_samples=1, seed=0,
-                 leg_a=False, truth_fn=lambda k: None)
+        run_legb(
+            None,
+            None,
+            n_mocks=1,
+            n_warmup=1,
+            n_samples=1,
+            seed=0,
+            leg_a=False,
+            truth_fn=lambda k: None,
+        )
 
 
 # ------------------------------- era rules (analyze_ks_selboost) -----------------------------
 
+
 def test_stamp_era_value_rule():
     assert AKS.stamp_era({"hcd_parameterization": "dndx_mapped_v2"}) == "mapped"
     assert AKS.stamp_era({"hcd_parameterization": "alpha_pivot_powerlaw_v1"}) == "legacy"
-    assert AKS.stamp_era({}) == "legacy"          # pre-stamp 108-fit history
+    assert AKS.stamp_era({}) == "legacy"  # pre-stamp 108-fit history
     with pytest.raises(AssertionError):
         AKS.stamp_era({"hcd_parameterization": "unknown_v9"})
 
 
 def test_r6_shard_name_prefix():
     assert ksr.shard_pkl_name("K0_clean", 3, smoke=False) == "ks_selboost_clean_shard_003.pkl"
-    assert ksr.shard_pkl_name("K0_clean", 3, smoke=False, r6_arm="legacy") == \
-        "ks_r6_legacy_shard_003.pkl"
-    assert ksr.shard_pkl_name("K0_clean", 0, smoke=True, r6_arm="mapped") == \
-        "ks_r6_mapped_shard_000.smoke.pkl"
+    assert (
+        ksr.shard_pkl_name("K0_clean", 3, smoke=False, r6_arm="legacy")
+        == "ks_r6_legacy_shard_003.pkl"
+    )
+    assert (
+        ksr.shard_pkl_name("K0_clean", 0, smoke=True, r6_arm="mapped")
+        == "ks_r6_mapped_shard_000.smoke.pkl"
+    )
     # the campaign glob must never match an R6 name
     import fnmatch
+
     assert not fnmatch.fnmatch("ks_r6_legacy_shard_000.pkl", "ks_selboost_*_shard_*.pkl")
 
 
@@ -161,21 +199,30 @@ def _r6_rec(truth_vec, mean_shift=0.0, L=60, seed=0):
     rng = np.random.default_rng(seed)
     tv = np.asarray(truth_vec, float)
     return {
-        "truth_vec": tv, "names": list(_R6_NAMES),
+        "truth_vec": tv,
+        "names": list(_R6_NAMES),
         "draws": rng.normal(tv + mean_shift, 0.05, size=(L, len(tv))),
-        "truth_alpha_hcd_z": np.tile(tv[3:6], (4, 1)), "L": L, "n_div": 0,
-        "sites_extra": {"tau0_amp": {"draws": rng.normal(1, 0.02, L), "truth": 1.0},
-                        "dtau0": {"draws": rng.normal(0, 0.05, L), "truth": 0.0}},
+        "truth_alpha_hcd_z": np.tile(tv[3:6], (4, 1)),
+        "L": L,
+        "n_div": 0,
+        "sites_extra": {
+            "tau0_amp": {"draws": rng.normal(1, 0.02, L), "truth": 1.0},
+            "dtau0": {"draws": rng.normal(0, 0.05, L), "truth": 0.0},
+        },
     }
 
 
 def _r6_meta(arm):
     return dict(
         forward=dict(forward_signature="f" * 64, hcd_prior_signature="p" * 64),
-        prior_constants=dict(r6_override=True, r6_arm=arm,
-                             r6_truth_source="mapped-selfdraw",
-                             hcd_parameterization=("dndx_mapped_v2" if arm == "mapped"
-                                                   else "alpha_pivot_powerlaw_v1")),
+        prior_constants=dict(
+            r6_override=True,
+            r6_arm=arm,
+            r6_truth_source="mapped-selfdraw",
+            hcd_parameterization=(
+                "dndx_mapped_v2" if arm == "mapped" else "alpha_pivot_powerlaw_v1"
+            ),
+        ),
         run_kw=dict(n_warmup=250, n_samples=300, seed=1, max_tree_depth=10, dense_mass=True),
     )
 
@@ -185,10 +232,16 @@ def _write_r6(tmp_path, n_pairs=3, mapped_shift=0.02, break_pair=None):
         for m in range(n_pairs):
             tv = np.array([0.4, 0.8, 0.3, 0.18, 0.06, 0.004]) * (1 + 0.05 * m)
             if break_pair is not None and arm == "legacy" and m == break_pair:
-                tv = tv * 1.001                      # truth mismatch => not a shared-truth pair
+                tv = tv * 1.001  # truth mismatch => not a shared-truth pair
             rec = _r6_rec(tv, mean_shift=(mapped_shift if arm == "mapped" else 0.0), seed=m)
-            payload = dict(arm="K0_clean", survey="ks", mode="clean", idxs=[m],
-                           per_mock=[rec], meta=_r6_meta(arm))
+            payload = dict(
+                arm="K0_clean",
+                survey="ks",
+                mode="clean",
+                idxs=[m],
+                per_mock=[rec],
+                meta=_r6_meta(arm),
+            )
             with open(tmp_path / f"ks_r6_{arm}_shard_{m:03d}.pkl", "wb") as f:
                 pickle.dump(payload, f)
 
@@ -234,18 +287,39 @@ def test_leg_key_intentional_divergence_runner_vs_consumer(tmp_path):
     unconditional leg pop: dir-separation implies the leg) while the CONSUMER refuses
     (effective_run_cfg completes missing leg to "all"). Both behaviors are deliberate; this
     test pins the divergence so any change to either side is loud."""
-    ex = {k: v for k, v in _CLOSURE.items()
-          if k not in ("leg", "survey", "hcd_parameterization", "hcd_prior_signature",
-                       "single_member", "ks_kmax", "sample_res", "f_res_amp_sigma",
-                       "metal_prior", "res_corr_on")}
+    ex = {
+        k: v
+        for k, v in _CLOSURE.items()
+        if k
+        not in (
+            "leg",
+            "survey",
+            "hcd_parameterization",
+            "hcd_prior_signature",
+            "single_member",
+            "ks_kmax",
+            "sample_res",
+            "f_res_amp_sigma",
+            "metal_prior",
+            "res_corr_on",
+        )
+    }
     req = dict(ex, leg="KS")
     # runner: pools (every differing key is excused by its back-compat pop at the default)
     out = str(tmp_path / "leg_div")
     _write_stub(out, 0, ex, marker="straggler")
-    req_full = dict(req, res_corr_on=True, sample_res=False, f_res_amp_sigma=None,
-                    metal_prior="uniform", ks_kmax=None, survey=None,
-                    hcd_parameterization="alpha_pivot_powerlaw_v1",
-                    hcd_prior_signature=None, single_member=False)
+    req_full = dict(
+        req,
+        res_corr_on=True,
+        sample_res=False,
+        f_res_amp_sigma=None,
+        metal_prior="uniform",
+        ks_kmax=None,
+        survey=None,
+        hcd_parameterization="alpha_pivot_powerlaw_v1",
+        hcd_prior_signature=None,
+        single_member=False,
+    )
     rec = runner._run_mock(None, None, 0, out, run_cfg=req_full, **_DUMMY)
     assert rec["_marker"] == "straggler"
     # consumer: refuses (missing leg completes to "all" != "KS")
@@ -256,10 +330,22 @@ def test_self_drawn_sites_single_authority():
     """run_prod_sbc_shard's truth_site_semantics reads closure_legb.SELF_DRAWN_EXTRA_SITES —
     the same tuple run_legb's recording loop iterates. Pin its contents + the exclusions."""
     from hcd_analysis.emulator import closure_legb as CL
-    assert CL.SELF_DRAWN_EXTRA_SITES == ("tau0_amp", "dtau0", "s_lls", "s_subdla", "s_dla",
-                                         "eps_lls", "kappa_lls", "m_sub", "t_sub", "dla_raw",
-                                         "t_dla")
+
+    assert CL.SELF_DRAWN_EXTRA_SITES == (
+        "tau0_amp",
+        "dtau0",
+        "s_lls",
+        "s_subdla",
+        "s_dla",
+        "eps_lls",
+        "kappa_lls",
+        "m_sub",
+        "t_sub",
+        "dla_raw",
+        "t_dla",
+    )
     for nm in ("f_res_amp", "f_res_slope"):
         assert nm not in CL.SELF_DRAWN_EXTRA_SITES
-    assert not any(nm.startswith(("f_", "k_")) for nm in CL.SELF_DRAWN_EXTRA_SITES
-                   if nm not in ("f_res_amp",))
+    assert not any(
+        nm.startswith(("f_", "k_")) for nm in CL.SELF_DRAWN_EXTRA_SITES if nm not in ("f_res_amp",)
+    )

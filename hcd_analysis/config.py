@@ -18,14 +18,16 @@ import yaml
 @dataclasses.dataclass
 class CDDFConfig:
     """Parameters for the continuous CDDF perturbation model f'(N) = A * f(N) * (N/N_pivot)^alpha."""
-    A: float = 1.0          # amplitude multiplier (1.0 = no change)
-    alpha: float = 0.0      # power-law tilt (0.0 = no tilt)
-    N_pivot: float = 1.0e20 # pivot column density (cm^-2)
+
+    A: float = 1.0  # amplitude multiplier (1.0 = no change)
+    alpha: float = 0.0  # power-law tilt (0.0 = no tilt)
+    N_pivot: float = 1.0e20  # pivot column density (cm^-2)
 
 
 @dataclasses.dataclass
 class AbsorberConfig:
     """Thresholds and fitting parameters for absorber identification."""
+
     # Tau threshold to define the boundary of an absorption system
     tau_threshold: float = 1.0
     # Use the sum-rule (tau-integral) NHI estimator instead of a Voigt fit.
@@ -56,9 +58,10 @@ class AbsorberConfig:
 @dataclasses.dataclass
 class P1DConfig:
     """P1D computation parameters."""
+
     # k bins for output (s/km). None → use native FFT bins.
-    k_min: float = 1.0e-3   # s/km
-    k_max: float = 5.0e-2   # s/km  (Nyquist for dv≈10 km/s)
+    k_min: float = 1.0e-3  # s/km
+    k_max: float = 5.0e-2  # s/km  (Nyquist for dv≈10 km/s)
     n_k_bins: int = 35
     log_k_bins: bool = True
     # Number of skewers to use (None → all; for debugging use e.g. 10000)
@@ -75,11 +78,14 @@ class P1DConfig:
 @dataclasses.dataclass
 class PipelineConfig:
     """Top-level pipeline configuration."""
+
     # Simulation roots: the low-force suite (60 sims) and the HiRes suite (3 matching sims, 2x npart). Precedence: the
     # config file or --set, else the environment variable (HCD_LF_RAW_DIR, HCD_HR_RAW_DIR); there is no built-in
     # path, and simulation discovery refuses an empty or missing root (hcd_analysis.io.discover_simulations).
     data_root: str = dataclasses.field(default_factory=lambda: os.environ.get("HCD_LF_RAW_DIR", ""))
-    hires_data_root: str = dataclasses.field(default_factory=lambda: os.environ.get("HCD_HR_RAW_DIR", ""))
+    hires_data_root: str = dataclasses.field(
+        default_factory=lambda: os.environ.get("HCD_HR_RAW_DIR", "")
+    )
     # Output root
     output_root: str = "./outputs"
     # Redshift range filter (inclusive)
@@ -96,8 +102,8 @@ class PipelineConfig:
     p1d: P1DConfig = dataclasses.field(default_factory=P1DConfig)
     cddf: CDDFConfig = dataclasses.field(default_factory=CDDFConfig)
     # Parallelism
-    n_workers: int = 4           # parallel workers (sims or redshifts)
-    n_workers_skewer: int = 1    # intra-file parallelism (skewer batches)
+    n_workers: int = 4  # parallel workers (sims or redshifts)
+    n_workers_skewer: int = 1  # intra-file parallelism (skewer batches)
     skewer_batch_size: int = 4096  # number of skewers per batch (memory control)
     # Prefer grid_480 file over non-grid file
     prefer_grid: bool = True
@@ -154,7 +160,9 @@ def _dataclass_from_dict(cls, d: dict):
     return dataclasses.replace(cls(), **kwargs)
 
 
-def load_config(yaml_path: Optional[str] = None, overrides: Optional[Dict[str, Any]] = None) -> PipelineConfig:
+def load_config(
+    yaml_path: Optional[str] = None, overrides: Optional[Dict[str, Any]] = None
+) -> PipelineConfig:
     """
     Load config from YAML file + CLI overrides.
 

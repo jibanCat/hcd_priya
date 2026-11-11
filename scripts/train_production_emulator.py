@@ -20,8 +20,10 @@ overwritten, and never the historical ensemble's names or directory.
 ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python3 scripts/train_production_emulator.py --cache CACHE_v34.h5 --out-dir DIR --name NAME --seed 0
 """
+
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse, json, os, sys, time
 import numpy as np
@@ -36,20 +38,33 @@ REPO = _REPO_ROOT
 HISTORICAL_NAMES = ("final_prod", "prod_repaired", "prod_hist")
 HISTORICAL_DIR = os.path.join(REPO, "checkpoints")
 OUTPUT_EXTS = (".eqx", ".meta.json", ".norm.pkl", ".hist.json")
-VAL_SEED = 12345                                 # FIXED row-val split (shared across ALL ensemble members)
-VAL_FRAC = 0.10                                  # ~10% random rows held out for restore-best early-stop ONLY
+VAL_SEED = 12345  # FIXED row-val split (shared across ALL ensemble members)
+VAL_FRAC = 0.10  # ~10% random rows held out for restore-best early-stop ONLY
 
 # the VALIDATED recipe (run_loso_sweep.FINAL_RECIPE) — reused byte-for-byte
-RECIPE = dict(n_basis=24, p_resid_w=8.0, edge_gain=3.0, lowk_extra=2.0,
-              w_coh=80.0, weight_decay=3e-4, datarange=True,
-              epochs=180, patience=25, lr=1e-3, batch=512)
+RECIPE = dict(
+    n_basis=24,
+    p_resid_w=8.0,
+    edge_gain=3.0,
+    lowk_extra=2.0,
+    w_coh=80.0,
+    weight_decay=3e-4,
+    datarange=True,
+    epochs=180,
+    patience=25,
+    lr=1e-3,
+    batch=512,
+)
 
 
 def output_prefix(out_dir, name, seed):
     """``<out_dir>/<name>_seed<seed>``, refused (SystemExit) if ``name`` is not a plain file name, is one of the
-    historical ensembles' names, ``out_dir`` is the historical checkpoints directory, or any output file exists."""
+    historical ensembles' names, ``out_dir`` is the historical checkpoints directory, or any output file exists.
+    """
     if not name or os.sep in name or name.startswith(".") or name in HISTORICAL_NAMES:
-        sys.exit(f"refusing --name {name!r}: a plain file name, distinct from the historical {HISTORICAL_NAMES}")
+        sys.exit(
+            f"refusing --name {name!r}: a plain file name, distinct from the historical {HISTORICAL_NAMES}"
+        )
     if os.path.realpath(out_dir) == os.path.realpath(HISTORICAL_DIR):
         sys.exit(f"refusing --out-dir {out_dir}: the historical checkpoints directory")
     prefix = os.path.join(out_dir, f"{name}_seed{seed}")
@@ -61,59 +76,114 @@ def output_prefix(out_dir, name, seed):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--seed", type=int, required=True, help="ensemble-member seed (→ <name>_seed{S})")
+    ap.add_argument(
+        "--seed", type=int, required=True, help="ensemble-member seed (→ <name>_seed{S})"
+    )
     ap.add_argument("--cache", required=True, help="the release training cache (format 3.4)")
     ap.add_argument("--out-dir", required=True, help="output directory (created if missing)")
     ap.add_argument("--name", required=True, help="member basename (→ <out-dir>/<name>_seed{S}.*)")
-    ap.add_argument("--holdout-sim", default=None,
-                    help="leave this simulation out entirely (gate C upstream-matched leave-one-simulation-out)")
+    ap.add_argument(
+        "--holdout-sim",
+        default=None,
+        help="leave this simulation out entirely (gate C upstream-matched leave-one-simulation-out)",
+    )
     args = ap.parse_args(argv)
 
     try:
-        code = T.release_code_identity()                          # before anything is read
+        code = T.release_code_identity()  # before anything is read
     except ValueError as e:
         sys.exit(f"refusing: {e}")
     ckpt = output_prefix(args.out_dir, args.name, args.seed)
     t0 = time.time()
-    d = load_cache(args.cache)                                    # strict: 3.4, lineage, eligibility; hashed at load
-    print(f"[prod] code {code['commit']} (clean); cache sha256 {d['cache_sha256']} (hashed at load)")
-    n_rows = d["P_tier_p"].shape[0]; n_k = d["P_tier_p"].shape[1]
+    d = load_cache(args.cache)  # strict: 3.4, lineage, eligibility; hashed at load
+    print(
+        f"[prod] code {code['commit']} (clean); cache sha256 {d['cache_sha256']} (hashed at load)"
+    )
+    n_rows = d["P_tier_p"].shape[0]
+    n_k = d["P_tier_p"].shape[1]
     n_sims = len(set(d["sim_name"]))
     # ALL-SIMS split: fixed random row-val (same for every member), train on the rest. ALL τ₀ rungs
     # included (NO τ₀-edge holdout — the production model should be accurate everywhere it's evaluated).
     from hcd_analysis.emulator.data import production_row_split
-    train_idx, val_idx, held_idx = production_row_split(d["sim_name"], val_seed=VAL_SEED, val_frac=VAL_FRAC,
-                                                        holdout_sim=args.holdout_sim)
-    print(f"[prod] cache {args.cache}: {n_rows} rows, n_k={n_k}, {n_sims} sims  ({time.time()-t0:.1f}s)")
-    print(f"[prod] split: train={len(train_idx)} val={len(val_idx)} held-out sim rows={len(held_idx)} "
-          f"(row-val frac {VAL_FRAC}, VAL_SEED={VAL_SEED}, holdout_sim={args.holdout_sim}); member seed={args.seed}")
+
+    train_idx, val_idx, held_idx = production_row_split(
+        d["sim_name"], val_seed=VAL_SEED, val_frac=VAL_FRAC, holdout_sim=args.holdout_sim
+    )
+    print(
+        f"[prod] cache {args.cache}: {n_rows} rows, n_k={n_k}, {n_sims} sims  ({time.time()-t0:.1f}s)"
+    )
+    print(
+        f"[prod] split: train={len(train_idx)} val={len(val_idx)} held-out sim rows={len(held_idx)} "
+        f"(row-val frac {VAL_FRAC}, VAL_SEED={VAL_SEED}, holdout_sim={args.holdout_sim}); member seed={args.seed}"
+    )
 
     # FINAL_RECIPE weighting (identical to run_loso_sweep)
-    term_w = {"f_nhi": 1.0, "dndx": 1.0, "p_base": 1.0, "p_resid": RECIPE["p_resid_w"], "delta": 1.0}
-    k_weight = edge_emphasis_k_weight(d["k_com_hmpc"], edge_gain=RECIPE["edge_gain"],
-                                      lowk_extra=RECIPE["lowk_extra"])
+    term_w = {
+        "f_nhi": 1.0,
+        "dndx": 1.0,
+        "p_base": 1.0,
+        "p_resid": RECIPE["p_resid_w"],
+        "delta": 1.0,
+    }
+    k_weight = edge_emphasis_k_weight(
+        d["k_com_hmpc"], edge_gain=RECIPE["edge_gain"], lowk_extra=RECIPE["lowk_extra"]
+    )
 
     tf = time.time()
     model, norm_stats, history = T.train_fold(
-        d, train_idx, val_idx, n_basis=RECIPE["n_basis"], lr=RECIPE["lr"], epochs=RECIPE["epochs"],
-        batch_size=RECIPE["batch"], seed=args.seed, key=jax.random.PRNGKey(args.seed),
-        patience=RECIPE["patience"], n_k=n_k, term_w=term_w, k_weight=k_weight,
-        w_coh=RECIPE["w_coh"], datarange=RECIPE["datarange"], weight_decay=RECIPE["weight_decay"])
-    n_ep = len(history["train_loss"]); best_val = float(np.min(history["val_loss"]))
-    print(f"[prod] seed {args.seed}: {n_ep} epochs in {time.time()-tf:.0f}s; best_val={best_val:.6g}")
+        d,
+        train_idx,
+        val_idx,
+        n_basis=RECIPE["n_basis"],
+        lr=RECIPE["lr"],
+        epochs=RECIPE["epochs"],
+        batch_size=RECIPE["batch"],
+        seed=args.seed,
+        key=jax.random.PRNGKey(args.seed),
+        patience=RECIPE["patience"],
+        n_k=n_k,
+        term_w=term_w,
+        k_weight=k_weight,
+        w_coh=RECIPE["w_coh"],
+        datarange=RECIPE["datarange"],
+        weight_decay=RECIPE["weight_decay"],
+    )
+    n_ep = len(history["train_loss"])
+    best_val = float(np.min(history["val_loss"]))
+    print(
+        f"[prod] seed {args.seed}: {n_ep} epochs in {time.time()-tf:.0f}s; best_val={best_val:.6g}"
+    )
 
     arch_cfg = {"in_dim": 10, "n_k": n_k, "n_basis": RECIPE["n_basis"]}
-    recipe = dict(RECIPE, all_sims=args.holdout_sim is None, holdout_sim=args.holdout_sim,
-                  val_frac=VAL_FRAC, val_seed=VAL_SEED,
-                  n_train=int(len(train_idx)), n_val=int(len(val_idx)))
+    recipe = dict(
+        RECIPE,
+        all_sims=args.holdout_sim is None,
+        holdout_sim=args.holdout_sim,
+        val_frac=VAL_FRAC,
+        val_seed=VAL_SEED,
+        n_train=int(len(train_idx)),
+        n_val=int(len(val_idx)),
+    )
     os.makedirs(args.out_dir, exist_ok=True)
-    T.save_checkpoint(ckpt, model, arch_cfg, norm_stats, seed=args.seed,
-                      cache=d, cache_path=args.cache, recipe=recipe, release=True, code=code)
+    T.save_checkpoint(
+        ckpt,
+        model,
+        arch_cfg,
+        norm_stats,
+        seed=args.seed,
+        cache=d,
+        cache_path=args.cache,
+        recipe=recipe,
+        release=True,
+        code=code,
+    )
     hist_json = {k: np.asarray(v).astype(float).tolist() for k, v in history.items()}
     hist_json["recipe"] = recipe
     with open(f"{ckpt}.hist.json", "x") as fh:
         fh.write(json.dumps(hist_json, indent=2))
-    print(f"[prod] checkpoint → {ckpt}.eqx/.meta.json/.norm.pkl/.hist.json  (total {time.time()-t0:.0f}s)")
+    print(
+        f"[prod] checkpoint → {ckpt}.eqx/.meta.json/.norm.pkl/.hist.json  (total {time.time()-t0:.0f}s)"
+    )
 
 
 if __name__ == "__main__":

@@ -63,27 +63,42 @@ Env (HEAVY -- run via SLURM, NOT an interactive node):
     CUDA_VISIBLE_DEVICES="" python \
     scripts/build_res_instr_injection_basis.py
 """
+
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
 import os
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import functools
+
 print = functools.partial(print, flush=True)
 
 import numpy as np  # module top-level is numpy-ONLY so the pure helper imports cheap
 
 OUT_NPZ = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/res_instr_injection_basis.npz"
-FIG = os.path.join(os.environ.get("HCD_FIGURES_DIR", "<HCD_FIGURES_DIR unset>"), "res_instr_oos_basis.png")
+FIG = os.path.join(
+    os.environ.get("HCD_FIGURES_DIR", "<HCD_FIGURES_DIR unset>"), "res_instr_oos_basis.png"
+)
 
 # DESI/eBOSS raw-data sources for the (un-stored) 1-sigma resolution error re-read.
-DESI_NPZ = os.path.join(os.environ.get("HCD_P1D_DATA_DIR", "<HCD_P1D_DATA_DIR unset>"), "desi_dr1_p1d", "desi_dr1_p1d.npz")
-EBOSS_NPZ = os.path.join(os.environ.get("HCD_P1D_DATA_DIR", "<HCD_P1D_DATA_DIR unset>"), "eboss_dr14_p1d", "eboss_dr14_p1d.npz")
-KS_BASE = os.path.join(os.environ.get("HCD_LYAEMU_PARENT", "<HCD_LYAEMU_PARENT unset>"), "lyaemu/data/kodiaq_squad/")
+DESI_NPZ = os.path.join(
+    os.environ.get("HCD_P1D_DATA_DIR", "<HCD_P1D_DATA_DIR unset>"),
+    "desi_dr1_p1d",
+    "desi_dr1_p1d.npz",
+)
+EBOSS_NPZ = os.path.join(
+    os.environ.get("HCD_P1D_DATA_DIR", "<HCD_P1D_DATA_DIR unset>"),
+    "eboss_dr14_p1d",
+    "eboss_dr14_p1d.npz",
+)
+KS_BASE = os.path.join(
+    os.environ.get("HCD_LYAEMU_PARENT", "<HCD_LYAEMU_PARENT unset>"), "lyaemu/data/kodiaq_squad/"
+)
 
-Z_HEII = 2.8                 # He-II window lower edge (localization)
-F_RES_PIVOT_Z = 3.0          # the f_res(z) pivot (1+z)/(1+3) -- closure_legb.F_RES_PIVOT_Z
-ENVELOPE_FALLBACK = 0.05     # +-5% fallback envelope (res_corr constant) if resolution_e absent
-COS_GATE = 0.8               # assert cos_M(bres_j, span{u1,u2}) < this (OUT-OF-SPAN certificate)
+Z_HEII = 2.8  # He-II window lower edge (localization)
+F_RES_PIVOT_Z = 3.0  # the f_res(z) pivot (1+z)/(1+3) -- closure_legb.F_RES_PIVOT_Z
+ENVELOPE_FALLBACK = 0.05  # +-5% fallback envelope (res_corr constant) if resolution_e absent
+COS_GATE = 0.8  # assert cos_M(bres_j, span{u1,u2}) < this (OUT-OF-SPAN certificate)
 
 
 # ---------------------------------------------------------------------------- #
@@ -92,13 +107,17 @@ COS_GATE = 0.8               # assert cos_M(bres_j, span{u1,u2}) < this (OUT-OF-
 # ---------------------------------------------------------------------------- #
 def _whitened_inner(Cinv):
     """Return <a,b> = a^T Cinv b and the induced norm/cosine closures (Cinv SPD)."""
+
     def inner(a, b):
         return float(a @ Cinv @ b)
+
     def norm(a):
         return float(np.sqrt(max(a @ Cinv @ a, 0.0)))
+
     def cos(a, b):
         den = norm(a) * norm(b)
         return float(inner(a, b) / den) if den > 0 else float("nan")
+
     return inner, norm, cos
 
 
@@ -171,7 +190,7 @@ def analytic_worst_ns(r_ns_bres, ortho_span, M_sub, *, degenerate_tol=1e-8):
     if norm_rns <= 0.0 or norm_perp <= degenerate_tol * norm_rns:
         return None, 0.0, True
     bstar_sub = r_perp / norm_perp
-    f_perp = float(inner_M(bstar_sub, r_ns_bres) / norm_rns)   # == norm_perp/norm_rns, > 0
+    f_perp = float(inner_M(bstar_sub, r_ns_bres) / norm_rns)  # == norm_perp/norm_rns, > 0
     return bstar_sub, f_perp, False
 
 
@@ -182,15 +201,15 @@ def _scale_to_envelope(bres, B, band, env_target):
     Returns (bres_scaled, env_realized)."""
     bres = np.asarray(bres, float)
     band = np.asarray(band, bool)
-    p = B @ bres                                     # flat-P log-perturbation
+    p = B @ bres  # flat-P log-perturbation
     peak = np.max(np.abs(p[band])) if band.any() else np.max(np.abs(p))
     if peak <= 0:
         return bres, 0.0
-    s = np.log1p(env_target) / peak                  # max|exp(p_scaled)-1| == env_target
+    s = np.log1p(env_target) / peak  # max|exp(p_scaled)-1| == env_target
     bres_s = bres * s
     p_s = p * s
     imax = np.argmax(np.abs(np.where(band, p_s, 0.0)))
-    if p_s[imax] > 0:                                # largest |amp| cell -> a DEFICIT (negative)
+    if p_s[imax] > 0:  # largest |amp| cell -> a DEFICIT (negative)
         bres_s = -bres_s
         p_s = -p_s
     env_realized = float(np.max(np.abs(np.expm1(p_s[band]))))
@@ -200,8 +219,9 @@ def _scale_to_envelope(bres, B, band, env_target):
 # ---------------------------------------------------------------------------- #
 #  THE LOAD-BEARING PURE HELPER (numpy-only; unit-tested independently of ctx)
 # ---------------------------------------------------------------------------- #
-def build_oos_bres(B, C_data, u1, u2, hiZ_cells, hiZ_nodes, r_ns_P,
-                   *, cos_gate=COS_GATE, svd_rank_tol=1e-9):
+def build_oos_bres(
+    B, C_data, u1, u2, hiZ_cells, hiZ_nodes, r_ns_P, *, cos_gate=COS_GATE, svd_rank_tol=1e-9
+):
     """Build the top-2 out-of-span per-z resolution directions in the He-II
     sub-block PULLBACK metric ``M_sub = B_sub^T C_sub^-1 B_sub``.
 
@@ -246,45 +266,49 @@ def build_oos_bres(B, C_data, u1, u2, hiZ_cells, hiZ_nodes, r_ns_P,
     sub_nodes = np.where(hiZ_nodes)[0]
     n_heII = int(sub_nodes.size)
     if n_heII < 3:
-        raise ValueError(f"build_oos_bres: only {n_heII} He-II nodes (<3) -- cannot "
-                         "form a rank-2 out-of-span basis beyond the 2-D span")
+        raise ValueError(
+            f"build_oos_bres: only {n_heII} He-II nodes (<3) -- cannot "
+            "form a rank-2 out-of-span basis beyond the 2-D span"
+        )
 
     # ---- He-II sub-block pullback metric M_sub ----
     C_sub = C_data[np.ix_(cell_idx, cell_idx)]
     Cinv_sub = np.linalg.inv(C_sub)
-    B_sub = B[np.ix_(cell_idx, sub_nodes)]              # (n_heII_cells, n_heII_nodes)
+    B_sub = B[np.ix_(cell_idx, sub_nodes)]  # (n_heII_cells, n_heII_nodes)
     M_sub = B_sub.T @ Cinv_sub @ B_sub
-    M_sub = 0.5 * (M_sub + M_sub.T)                     # symmetrize (SPD by construction)
+    M_sub = 0.5 * (M_sub + M_sub.T)  # symmetrize (SPD by construction)
 
     u1_sub = u1[sub_nodes]
     u2_sub = u2[sub_nodes]
 
     inner_M, norm_M, cos_M = _whitened_inner(M_sub)
-    ortho_span = _gram_schmidt_whitened([u1_sub, u2_sub], M_sub)   # M-orthonormal span
+    ortho_span = _gram_schmidt_whitened([u1_sub, u2_sub], M_sub)  # M-orthonormal span
 
     # ---- candidate OUT-OF-SPAN z-shape dictionary on the He-II nodes ----
     ii = np.arange(n_heII)
-    s_incoh = (-1.0) ** ii                               # z-incoherent (sign-alternating in z)
-    s_curv = u2_sub ** 2 - np.mean(u2_sub ** 2)          # z-curvature (quadratic-in-logfac)
-    s_ramp = np.linspace(0.0, 1.0, n_heII)               # monotone within-He-II ramp
+    s_incoh = (-1.0) ** ii  # z-incoherent (sign-alternating in z)
+    s_curv = u2_sub**2 - np.mean(u2_sub**2)  # z-curvature (quadratic-in-logfac)
+    s_ramp = np.linspace(0.0, 1.0, n_heII)  # monotone within-He-II ramp
     dict_shapes = [s_incoh, s_curv, s_ramp]
 
     # ---- project each out of span, whiten in M_sub, stack + SVD, keep top-2 ----
-    L_M = np.linalg.cholesky(M_sub)                      # M_sub = L_M L_M^T
+    L_M = np.linalg.cholesky(M_sub)  # M_sub = L_M L_M^T
     cols = []
     for s in dict_shapes:
-        sp = _project_out(s, ortho_span, M_sub)          # M-orthogonal to span
-        cols.append(L_M.T @ sp)                          # whitened column
-    Mw = np.column_stack(cols)                           # (n_heII, n_dict)
+        sp = _project_out(s, ortho_span, M_sub)  # M-orthogonal to span
+        cols.append(L_M.T @ sp)  # whitened column
+    Mw = np.column_stack(cols)  # (n_heII, n_dict)
     U, S, Vt = np.linalg.svd(Mw, full_matrices=False)
     smax = S[0] if S.size else 0.0
     rank = int(np.sum(S > svd_rank_tol * max(smax, 1e-30)))
     Linv_T = np.linalg.inv(L_M.T)
-    bres1_sub = Linv_T @ U[:, 0]                         # M-unit, M-orthogonal to span
+    bres1_sub = Linv_T @ U[:, 0]  # M-unit, M-orthogonal to span
     bres2_sub = Linv_T @ U[:, 1]
 
-    bres1 = np.zeros(n_z); bres1[sub_nodes] = bres1_sub
-    bres2 = np.zeros(n_z); bres2[sub_nodes] = bres2_sub
+    bres1 = np.zeros(n_z)
+    bres1[sub_nodes] = bres1_sub
+    bres2 = np.zeros(n_z)
+    bres2[sub_nodes] = bres2_sub
 
     # ---- n_s response pulled into b_res-coords (the M-projection identity) ----
     rhs = B_sub.T @ Cinv_sub @ r_ns_P[cell_idx]
@@ -314,19 +338,38 @@ def build_oos_bres(B, C_data, u1, u2, hiZ_cells, hiZ_nodes, r_ns_P,
         bstar_sub = bstar_raw
         cos_bstar_ns = float(f_perp)
     bstar_cos_span = _cos_to_span(bstar_sub)
-    assert bstar_cos_span < 1e-6, (
-        f"bstar not out-of-span: cos_M(bstar,span)={bstar_cos_span:.3e} !< 1e-6")
-    bstar = np.zeros(n_z); bstar[sub_nodes] = bstar_sub
+    assert (
+        bstar_cos_span < 1e-6
+    ), f"bstar not out-of-span: cos_M(bstar,span)={bstar_cos_span:.3e} !< 1e-6"
+    bstar = np.zeros(n_z)
+    bstar[sub_nodes] = bstar_sub
 
     return dict(
-        sub_nodes=sub_nodes, cell_idx=cell_idx, C_sub=C_sub, Cinv_sub=Cinv_sub,
-        B_sub=B_sub, M_sub=M_sub, u1_sub=u1_sub, u2_sub=u2_sub, ortho_span=ortho_span,
-        bres1_sub=bres1_sub, bres2_sub=bres2_sub, bres1=bres1, bres2=bres2,
-        r_ns_bres=r_ns_bres, r_ns_P_sub=r_ns_P[cell_idx],
-        cos_span=cos_span, cos_ns=cos_ns, worst_ns_member=int(worst),
-        bstar_sub=bstar_sub, bstar=bstar, cos_bstar_ns=cos_bstar_ns,
+        sub_nodes=sub_nodes,
+        cell_idx=cell_idx,
+        C_sub=C_sub,
+        Cinv_sub=Cinv_sub,
+        B_sub=B_sub,
+        M_sub=M_sub,
+        u1_sub=u1_sub,
+        u2_sub=u2_sub,
+        ortho_span=ortho_span,
+        bres1_sub=bres1_sub,
+        bres2_sub=bres2_sub,
+        bres1=bres1,
+        bres2=bres2,
+        r_ns_bres=r_ns_bres,
+        r_ns_P_sub=r_ns_P[cell_idx],
+        cos_span=cos_span,
+        cos_ns=cos_ns,
+        worst_ns_member=int(worst),
+        bstar_sub=bstar_sub,
+        bstar=bstar,
+        cos_bstar_ns=cos_bstar_ns,
         bstar_degenerate=bool(bstar_degenerate),
-        S=S, rank=rank, cos_gate=float(cos_gate),
+        S=S,
+        rank=rank,
+        cos_gate=float(cos_gate),
     )
 
 
@@ -344,17 +387,26 @@ def reread_resolution_e(leg):
     signed residuals (the Phase-0 semantics gate -> Tier-R is FLAG not hard-gate).
     """
     import hcd_analysis.emulator.data_likelihood as DL
+
     name = leg.name
     z_row = np.asarray(leg.z_row, float)
     k_row = np.asarray(leg.k, float)
     try:
         if name == "DESI":
             d = np.load(DESI_NPZ, allow_pickle=True)
-            zr, kr, er = np.asarray(d["z"], float), np.asarray(d["k"], float), np.asarray(d["syst_e_resolution"], float)
+            zr, kr, er = (
+                np.asarray(d["z"], float),
+                np.asarray(d["k"], float),
+                np.asarray(d["syst_e_resolution"], float),
+            )
             res_e = _map_by_zk(z_row, k_row, zr, kr, er)
         elif name == "eBOSS":
             d = np.load(EBOSS_NPZ, allow_pickle=True)
-            zr, kr, er = np.asarray(d["z"], float), np.asarray(d["k"], float), np.asarray(d["syst_resolution"], float)
+            zr, kr, er = (
+                np.asarray(d["z"], float),
+                np.asarray(d["k"], float),
+                np.asarray(d["syst_resolution"], float),
+            )
             res_e = _map_by_zk(z_row, k_row, zr, kr, er)
         elif name == "KS":
             detail = KS_BASE.rstrip("/") + "/detailed-p1d-results-karacayli_etal2021.txt"
@@ -364,9 +416,9 @@ def reread_resolution_e(leg):
         res_e = np.asarray(res_e, float)
         if res_e.shape != k_row.shape or not np.all(np.isfinite(res_e)):
             return None, None
-        is_signed = bool(np.any(res_e < 0.0))     # all sources are all-positive -> False
+        is_signed = bool(np.any(res_e < 0.0))  # all sources are all-positive -> False
         return res_e, is_signed
-    except Exception as exc:               # pragma: no cover - robustness fallback
+    except Exception as exc:  # pragma: no cover - robustness fallback
         print(f"   [WARN] {name}: resolution_e re-read failed ({exc!r}) -> fallback envelope")
         return None, None
 
@@ -374,7 +426,9 @@ def reread_resolution_e(leg):
 def _map_by_zk(z_row, k_row, z_raw, k_raw, e_raw):
     """Nearest-(z,k) map of e_raw (on the raw grid) onto the leg's (z_row, k_row).
     Leg rows are a value-subset of the raw grid, so the nearest match is exact."""
-    z_raw = np.asarray(z_raw, float); k_raw = np.asarray(k_raw, float); e_raw = np.asarray(e_raw, float)
+    z_raw = np.asarray(z_raw, float)
+    k_raw = np.asarray(k_raw, float)
+    e_raw = np.asarray(e_raw, float)
     sz = max(np.ptp(z_raw), 1e-9)
     sk = max(np.ptp(k_raw), 1e-9)
     out = np.empty(z_row.shape, float)
@@ -393,6 +447,7 @@ def main():
     import jax
     import jax.numpy as jnp
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -404,9 +459,13 @@ def main():
     assert abs(pivot - F_RES_PIVOT_Z) < 1e-9, f"pivot drift {pivot} vs {F_RES_PIVOT_Z}"
 
     print("=== building production Leg-B ctx (MF forward, DESI+KS+eBOSS; f_res ON) ===")
-    ctx, _ = build_legb_ctx(with_mf=True, with_eboss=True, sample_res=True,
-                            f_res_amp_sigma=0.15,
-                            ks_kwargs={"resolution_float": True, "k_max": 0.065})
+    ctx, _ = build_legb_ctx(
+        with_mf=True,
+        with_eboss=True,
+        sample_res=True,
+        f_res_amp_sigma=0.15,
+        ks_kwargs={"resolution_float": True, "k_max": 0.065},
+    )
     model, pf_stats, mf = ctx.model, ctx.pf_stats, ctx.mf
     cache_k = np.asarray(ctx.cache_k)
     z_global = np.asarray(ctx.z_global)
@@ -417,8 +476,10 @@ def main():
     theta_phys_fid = 0.5 * (lim[:, 0] + lim[:, 1])
     theta_unit_fid = jnp.asarray(normalize_params(theta_phys_fid))
     ns_phys_fid = float(theta_phys_fid[0])
-    print(f"fiducial n_s={ns_phys_fid:.4f}; F_RES_PIVOT_Z={pivot}; Z_HEII={Z_HEII}; "
-          f"fallback envelope=+-{ENVELOPE_FALLBACK*100:.0f}%")
+    print(
+        f"fiducial n_s={ns_phys_fid:.4f}; F_RES_PIVOT_Z={pivot}; Z_HEII={Z_HEII}; "
+        f"fallback envelope=+-{ENVELOPE_FALLBACK*100:.0f}%"
+    )
 
     out, rows = {}, []
     n_leg = len(ctx.legs)
@@ -448,7 +509,7 @@ def main():
 
         # ---- span directions in b_res-space ----
         u1 = np.ones(n_z)
-        u2 = np.log((1.0 + z_leg) / (1.0 + pivot))       # logfac per node
+        u2 = np.log((1.0 + z_leg) / (1.0 + pivot))  # logfac per node
 
         hiZ_cells = zrow >= Z_HEII
         hiZ_nodes = z_leg >= Z_HEII
@@ -466,9 +527,16 @@ def main():
                 if rsel.size == 0:
                     continue
                 z_unit = float(leg.z_unit[iz])
-                P_cache = _predict_P_obs_mf(mf, model, theta, z_unit,
-                                            jnp.asarray(tau0_fid_np[iz]),
-                                            alpha_hcd_fid, pf_stats, dla_core[iz])
+                P_cache = _predict_P_obs_mf(
+                    mf,
+                    model,
+                    theta,
+                    z_unit,
+                    jnp.asarray(tau0_fid_np[iz]),
+                    alpha_hcd_fid,
+                    pf_stats,
+                    dla_core[iz],
+                )
                 P_z = jnp.interp(jnp.asarray(k_leg[rsel]), jnp.asarray(cache_k), P_cache)
                 P = P.at[jnp.asarray(rsel)].set(P_z)
             return jnp.log(P)
@@ -483,7 +551,9 @@ def main():
         bstar = res["bstar"]
         cos_bstar_ns, bstar_degenerate = res["cos_bstar_ns"], res["bstar_degenerate"]
         if res["rank"] < 2:
-            print(f"   [WARN] {name}: OOS residual rank={res['rank']} (<2); S={np.array2string(S, precision=2)}")
+            print(
+                f"   [WARN] {name}: OOS residual rank={res['rank']} (<2); S={np.array2string(S, precision=2)}"
+            )
 
         # ---- envelope target (measured 1-sigma if re-readable, else +-5%) ----
         z34 = (zrow >= 3.0) & (zrow <= 4.0)
@@ -502,7 +572,8 @@ def main():
         scaled, env_realized = [], []
         for bres in (bres1, bres2):
             bres_s, er = _scale_to_envelope(bres, B, band, env_target)
-            scaled.append(bres_s); env_realized.append(er)
+            scaled.append(bres_s)
+            env_realized.append(er)
         bres1_s, bres2_s = scaled
         env_realized = np.array(env_realized)
 
@@ -513,37 +584,62 @@ def main():
         # ---- k^2 R_z^2 at k_max (leg-triviality is empirical, blocker B3) ----
         imk = int(np.argmax(k_leg))
         k2Rz2_kmax = float(k_leg[imk] ** 2 * R_z[z_idx[imk]] ** 2)
-        k2Rz2_cellmax = float(np.max(k_leg ** 2 * R_z[z_idx] ** 2))
+        k2Rz2_cellmax = float(np.max(k_leg**2 * R_z[z_idx] ** 2))
 
         # ---- Tier-R (realistic) member from the measured resolution error ----
         bres_real, bres_real_isflag, bres_real_absent, kshape_uncaptured = _tier_r_member(
-            B, C_data, u1, u2, P_data, res_e, is_signed, n_z)
+            B, C_data, u1, u2, P_data, res_e, is_signed, n_z
+        )
 
         # ---- report + npz ----
         assert cos_span[0] < COS_GATE, f"[{name}] cos_M(bres1,span)={cos_span[0]:.4f} !< {COS_GATE}"
         assert cos_span[1] < COS_GATE, f"[{name}] cos_M(bres2,span)={cos_span[1]:.4f} !< {COS_GATE}"
 
-        print(f"\n[{name}] N={N} n_z={n_z} He-II nodes={int(hiZ_nodes.sum())} cells={int(hiZ_cells.sum())}"
-              f"  k[{k_leg.min():.4f},{k_leg.max():.4f}]")
-        print(f"   cos_M(bres1,span)={cos_span[0]:+.2e}  cos_M(bres2,span)={cos_span[1]:+.2e}  "
-              f"(gate < {COS_GATE}) -> OUT-OF-SPAN OK")
-        print(f"   cos_M(bres1,n_s)={cos_ns[0]:+.4f}  cos_M(bres2,n_s)={cos_ns[1]:+.4f}  "
-              f"-> worst-n_s member = bres{worst}")
-        print(f"   env_used={env_used} env_target={env_target*100:.3f}%  "
-              f"realized bres1={env_realized[0]*100:.3f}% bres2={env_realized[1]*100:.3f}%")
-        print(f"   k^2 R_z^2 @kmax={k2Rz2_kmax:.4g} (max cell {k2Rz2_cellmax:.4g})  "
-              f"Tier-R: isflag={bres_real_isflag} absent={bres_real_absent} "
-              f"kshape_uncaptured={kshape_uncaptured:.3f}")
-        print(f"   [Task 2A-2] cos_M(bstar,n_s)={cos_bstar_ns:+.4f} (analytic ARGMAX, vs dict-"
-              f"captured max={max(abs(cos_ns[0]), abs(cos_ns[1])):.4f})  degenerate={bstar_degenerate}  "
-              f"realized bstar={env_realized_bstar*100:.3f}%  -> PRIMARY gate_member={gate_member}")
+        print(
+            f"\n[{name}] N={N} n_z={n_z} He-II nodes={int(hiZ_nodes.sum())} cells={int(hiZ_cells.sum())}"
+            f"  k[{k_leg.min():.4f},{k_leg.max():.4f}]"
+        )
+        print(
+            f"   cos_M(bres1,span)={cos_span[0]:+.2e}  cos_M(bres2,span)={cos_span[1]:+.2e}  "
+            f"(gate < {COS_GATE}) -> OUT-OF-SPAN OK"
+        )
+        print(
+            f"   cos_M(bres1,n_s)={cos_ns[0]:+.4f}  cos_M(bres2,n_s)={cos_ns[1]:+.4f}  "
+            f"-> worst-n_s member = bres{worst}"
+        )
+        print(
+            f"   env_used={env_used} env_target={env_target*100:.3f}%  "
+            f"realized bres1={env_realized[0]*100:.3f}% bres2={env_realized[1]*100:.3f}%"
+        )
+        print(
+            f"   k^2 R_z^2 @kmax={k2Rz2_kmax:.4g} (max cell {k2Rz2_cellmax:.4g})  "
+            f"Tier-R: isflag={bres_real_isflag} absent={bres_real_absent} "
+            f"kshape_uncaptured={kshape_uncaptured:.3f}"
+        )
+        print(
+            f"   [Task 2A-2] cos_M(bstar,n_s)={cos_bstar_ns:+.4f} (analytic ARGMAX, vs dict-"
+            f"captured max={max(abs(cos_ns[0]), abs(cos_ns[1])):.4f})  degenerate={bstar_degenerate}  "
+            f"realized bstar={env_realized_bstar*100:.3f}%  -> PRIMARY gate_member={gate_member}"
+        )
 
-        rows.append(dict(name=name, cos_span=cos_span, cos_ns=cos_ns, worst=worst,
-                         env_used=env_used, env_realized=env_realized, k2Rz2_kmax=k2Rz2_kmax,
-                         isflag=bres_real_isflag, absent=bres_real_absent,
-                         kshape=kshape_uncaptured, n_heII=int(hiZ_nodes.sum()),
-                         cos_bstar_ns=cos_bstar_ns, bstar_degenerate=bstar_degenerate,
-                         gate_member=gate_member))
+        rows.append(
+            dict(
+                name=name,
+                cos_span=cos_span,
+                cos_ns=cos_ns,
+                worst=worst,
+                env_used=env_used,
+                env_realized=env_realized,
+                k2Rz2_kmax=k2Rz2_kmax,
+                isflag=bres_real_isflag,
+                absent=bres_real_absent,
+                kshape=kshape_uncaptured,
+                n_heII=int(hiZ_nodes.sum()),
+                cos_bstar_ns=cos_bstar_ns,
+                bstar_degenerate=bstar_degenerate,
+                gate_member=gate_member,
+            )
+        )
 
         out[f"{name}_bres1"] = bres1_s.astype(float)
         out[f"{name}_bres2"] = bres2_s.astype(float)
@@ -574,28 +670,38 @@ def main():
         ax = axes[0][col]
         ax.plot(z_leg, bres1_s, "-o", color="C3", lw=2, ms=4, label="bres1 (per-z)")
         ax.plot(z_leg, bres2_s, "-o", color="C2", lw=2, ms=4, label="bres2 (per-z)")
-        rb = np.zeros(n_z); rb[res["sub_nodes"]] = res["r_ns_bres"]
+        rb = np.zeros(n_z)
+        rb[res["sub_nodes"]] = res["r_ns_bres"]
         rb_s = rb * (np.max(np.abs(bres1_s)) / max(np.max(np.abs(rb)), 1e-30))
         ax.plot(z_leg, rb_s, "--", color="C0", lw=1.2, label="r_ns_bres (rescaled)")
         ax.axvline(Z_HEII, color="k", ls=":", lw=1, label=f"z={Z_HEII}")
         ax.axhline(0, color="k", lw=0.5)
-        ax.set_xlabel("z"); ax.set_ylabel("b_res(z) [log-mult /2k^2R^2]" if col == 0 else "")
-        ax.set_title(f"{name}  cos(bres,span)=[{cos_span[0]:.1e},{cos_span[1]:.1e}]\n"
-                     f"cos(bres,n_s)=[{cos_ns[0]:+.2f},{cos_ns[1]:+.2f}] worst=bres{worst}", fontsize=8.5)
+        ax.set_xlabel("z")
+        ax.set_ylabel("b_res(z) [log-mult /2k^2R^2]" if col == 0 else "")
+        ax.set_title(
+            f"{name}  cos(bres,span)=[{cos_span[0]:.1e},{cos_span[1]:.1e}]\n"
+            f"cos(bres,n_s)=[{cos_ns[0]:+.2f},{cos_ns[1]:+.2f}] worst=bres{worst}",
+            fontsize=8.5,
+        )
         ax.legend(fontsize=6.5, loc="best")
 
         ax2 = axes[1][col]
         p1 = B @ bres1_s
-        sc = ax2.scatter(k_leg, zrow, c=p1, cmap="RdBu_r",
-                         vmin=-env_realized[0], vmax=env_realized[0], s=14)
+        sc = ax2.scatter(
+            k_leg, zrow, c=p1, cmap="RdBu_r", vmin=-env_realized[0], vmax=env_realized[0], s=14
+        )
         ax2.axhline(Z_HEII, color="k", ls=":", lw=1)
-        ax2.set_xscale("log"); ax2.set_xlabel("k [s/km]")
+        ax2.set_xscale("log")
+        ax2.set_xlabel("k [s/km]")
         ax2.set_ylabel("z" if col == 0 else "")
         ax2.set_title(f"{name}  P-perturbation exp(B@bres1)-1  (env {env_used})", fontsize=8.5)
         fig.colorbar(sc, ax=ax2, fraction=0.046, pad=0.02, label="log-P pert")
 
-    fig.suptitle(f"OUT-OF-SPAN z-incoherent instrument-resolution basis (M=B^T C^-1 B pullback; "
-                 f"span{{1,logfac}}; He-II z>={Z_HEII}; fiducial n_s={ns_phys_fid:.3f})", fontsize=11)
+    fig.suptitle(
+        f"OUT-OF-SPAN z-incoherent instrument-resolution basis (M=B^T C^-1 B pullback; "
+        f"span{{1,logfac}}; He-II z>={Z_HEII}; fiducial n_s={ns_phys_fid:.3f})",
+        fontsize=11,
+    )
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     os.makedirs(os.path.dirname(FIG), exist_ok=True)
     fig.savefig(FIG, dpi=130)
@@ -621,7 +727,7 @@ def main():
         "cosine f_perp = ||P_perp_span(r_ns_bres)||_M/||r_ns_bres||_M (>= either dict "
         "member's |cos_ns|); {leg}_bstar_degenerate=True iff the n_s response is fully "
         "in-span (no out-of-span n_s direction exists -> bstar falls back to the dict "
-        "worst member); {leg}_gate_member = the PRIMARY member (\"bstar\" unless "
+        'worst member); {leg}_gate_member = the PRIMARY member ("bstar" unless '
         "degenerate) the Phase-2 adversarial injection should use."
     )
     os.makedirs(os.path.dirname(OUT_NPZ), exist_ok=True)
@@ -629,25 +735,35 @@ def main():
     print(f"saved basis -> {OUT_NPZ}")
 
     print("\n================ PER-LEG INSTRUMENT-RES BASIS REPORT ================")
-    print(f"{'leg':<7}{'cos(bres1,span)':>16}{'cos(bres2,span)':>16}"
-          f"{'cos(b1,ns)':>12}{'cos(b2,ns)':>12}{'worst':>7}{'env_used':>14}"
-          f"{'k2Rz2@kmax':>12}{'Tier-R':>18}")
+    print(
+        f"{'leg':<7}{'cos(bres1,span)':>16}{'cos(bres2,span)':>16}"
+        f"{'cos(b1,ns)':>12}{'cos(b2,ns)':>12}{'worst':>7}{'env_used':>14}"
+        f"{'k2Rz2@kmax':>12}{'Tier-R':>18}"
+    )
     for r in rows:
-        tr = ("absent" if r["absent"] else ("FLAG" if r["isflag"] else "residual")) + f"/{r['kshape']:.2f}"
-        print(f"{r['name']:<7}{r['cos_span'][0]:>16.2e}{r['cos_span'][1]:>16.2e}"
-              f"{r['cos_ns'][0]:>+12.3f}{r['cos_ns'][1]:>+12.3f}{'bres'+str(r['worst']):>7}"
-              f"{r['env_used']:>14}{r['k2Rz2_kmax']:>12.4g}{tr:>18}")
+        tr = (
+            "absent" if r["absent"] else ("FLAG" if r["isflag"] else "residual")
+        ) + f"/{r['kshape']:.2f}"
+        print(
+            f"{r['name']:<7}{r['cos_span'][0]:>16.2e}{r['cos_span'][1]:>16.2e}"
+            f"{r['cos_ns'][0]:>+12.3f}{r['cos_ns'][1]:>+12.3f}{'bres'+str(r['worst']):>7}"
+            f"{r['env_used']:>14}{r['k2Rz2_kmax']:>12.4g}{tr:>18}"
+        )
     allok = all(r["cos_span"][0] < COS_GATE and r["cos_span"][1] < COS_GATE for r in rows)
-    print(f"\nASSERT cos_M(bres, span f_res) < {COS_GATE} for ALL members, ALL legs: "
-          f"{'PASS' if allok else 'FAIL'}")
+    print(
+        f"\nASSERT cos_M(bres, span f_res) < {COS_GATE} for ALL members, ALL legs: "
+        f"{'PASS' if allok else 'FAIL'}"
+    )
     print("Dictionary worst-n_s member (bres1/bres2) per leg:")
     for r in rows:
         wc = r["cos_ns"][r["worst"] - 1]
         print(f"   {r['name']:<7} -> bres{r['worst']}  (cos_M(bres{r['worst']},n_s)={wc:+.4f})")
     print("\n(Task 2A-2) PRIMARY gate member (analytic worst-n_s b*, TRUE argmax) per leg:")
     for r in rows:
-        print(f"   {r['name']:<7} -> {r['gate_member']}  "
-              f"(cos_M(bstar,n_s)={r['cos_bstar_ns']:+.4f}, degenerate={r['bstar_degenerate']})")
+        print(
+            f"   {r['name']:<7} -> {r['gate_member']}  "
+            f"(cos_M(bstar,n_s)={r['cos_bstar_ns']:+.4f}, degenerate={r['bstar_degenerate']})"
+        )
 
 
 def _tier_r_member(B, C_data, u1, u2, P_data, res_e, is_signed, n_z):
@@ -662,7 +778,8 @@ def _tier_r_member(B, C_data, u1, u2, P_data, res_e, is_signed, n_z):
     """
     if res_e is None or P_data is None:
         return np.zeros(n_z), False, True, float("nan")
-    B = np.asarray(B, float); C_data = np.asarray(C_data, float)
+    B = np.asarray(B, float)
+    C_data = np.asarray(C_data, float)
     Cinv = np.linalg.inv(C_data)
     logfrac = np.asarray(res_e, float) / np.maximum(np.abs(np.asarray(P_data, float)), 1e-30)
 
@@ -682,10 +799,10 @@ def _tier_r_member(B, C_data, u1, u2, P_data, res_e, is_signed, n_z):
     ortho_span = _gram_schmidt_whitened([np.asarray(u1, float), np.asarray(u2, float)], M_full)
     bres_real = _project_out(b_meas, ortho_span, M_full)
 
-    isflag = not bool(is_signed)                   # env (not signed residual) -> FLAG not hard-gate
+    isflag = not bool(is_signed)  # env (not signed residual) -> FLAG not hard-gate
     n_meas = norm_M(b_meas)
     n_real = norm_M(bres_real)
-    if n_meas <= 0 or n_real < 1e-8 * n_meas:      # fully in-span -> the z-model captures it
+    if n_meas <= 0 or n_real < 1e-8 * n_meas:  # fully in-span -> the z-model captures it
         return np.zeros(n_z), isflag, True, kshape_uncaptured
     return bres_real.astype(float), isflag, False, kshape_uncaptured
 

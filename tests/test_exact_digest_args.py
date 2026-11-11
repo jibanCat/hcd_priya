@@ -2,6 +2,7 @@
 lowercase hex digits, as the predictor and release entry points take theirs. A str subclass can override == and != and
 so pass any digest comparison; it is refused, not compared. ``None`` keeps its meaning where a function allows it (an
 unanchored read). Synthetic values only."""
+
 import hashlib
 import os
 
@@ -40,7 +41,8 @@ def _sha(path):
 
 def _forged(right):
     """The values refused in place of a digest: a lying subclass of a WRONG digest, the right digest as np.str_ and
-    as a plain subclass (neither is an exact str), and an exact str that is not 64 lowercase hex digits."""
+    as a plain subclass (neither is an exact str), and an exact str that is not 64 lowercase hex digits.
+    """
     return [Liar(WRONG), np.str_(right), type("Sub", (str,), {})(right), "Z" * 64]
 
 
@@ -52,7 +54,9 @@ def bundle(tmp_path_factory):
 def test_safe_h5_member_load_takes_exact_digests(bundle):
     prefix = bundle.prefixes[0]
     h5, js = _sha(prefix + H.EXT), _sha(prefix + ".json")
-    _, meta, _ = H.load_member(prefix, expected_sha256=h5, expected_json_sha256=js)          # exact str: loads
+    _, meta, _ = H.load_member(
+        prefix, expected_sha256=h5, expected_json_sha256=js
+    )  # exact str: loads
     assert meta["seed"] == 0
     for bad in _forged(h5):
         with pytest.raises(H.SafeFormatError, match=EXACT):
@@ -64,7 +68,7 @@ def test_safe_h5_member_load_takes_exact_digests(bundle):
 
 def test_safe_h5_manifest_and_historical_loaders_take_exact_digests(bundle):
     bd, sha = bundle.bundle_dir, bundle.manifest_sha256
-    assert len(H.verify_manifest(bd, expected_sha256=sha)) == 1                              # exact str: verifies
+    assert len(H.verify_manifest(bd, expected_sha256=sha)) == 1  # exact str: verifies
     for bad in _forged(sha):
         with pytest.raises(H.SafeFormatError, match=EXACT):
             H.verify_manifest(bd, expected_sha256=bad)
@@ -101,14 +105,16 @@ def test_safe_io_digests_are_exact(tmp_path):
 def test_wc_map_digests_are_exact(bundle, tmp_path):
     path = os.path.join(bundle.bundle_dir, H.WC_MAP_FILE)
     raw, right = open(path, "rb").read(), _sha(path)
-    assert W.read_wc_map(path, expected_sha256=right).sha256 == right                      # exact str: reads
+    assert W.read_wc_map(path, expected_sha256=right).sha256 == right  # exact str: reads
     for bad in _forged(right):
         with pytest.raises(W.WcMapError, match=EXACT):
             W.read_wc_map(path, expected_sha256=bad)
         with pytest.raises(W.WcMapError, match=EXACT):
             W.parse_wc_map(raw, expected_sha256=bad)
         with pytest.raises(W.WcMapError, match=EXACT):
-            W.build(str(tmp_path / "absent.h5"), str(tmp_path / "m.json"), expected_cache_sha256=bad)
+            W.build(
+                str(tmp_path / "absent.h5"), str(tmp_path / "m.json"), expected_cache_sha256=bad
+            )
     assert not os.path.lexists(tmp_path / "m.json")
 
 
@@ -119,8 +125,14 @@ def test_product_loaders_take_exact_digests(tmp_path):
             PR.load_product(where, "dla_core", cache_sha256=bad)
         with pytest.raises(PR.ProductRefused, match=EXACT):
             PR.load_product(where, "dla_core", cache_sha256=GOOD, inputs={"x": bad})
-        for kw in ({"lf_ckpt_sha256": [GOOD, bad]}, {"lf_cache_sha256": bad}, {"hr_cache_sha256": bad}):
-            args = dict({"lf_ckpt_sha256": [GOOD], "lf_cache_sha256": GOOD, "hr_cache_sha256": GOOD}, **kw)
+        for kw in (
+            {"lf_ckpt_sha256": [GOOD, bad]},
+            {"lf_cache_sha256": bad},
+            {"hr_cache_sha256": bad},
+        ):
+            args = dict(
+                {"lf_ckpt_sha256": [GOOD], "lf_cache_sha256": GOOD, "hr_cache_sha256": GOOD}, **kw
+            )
             with pytest.raises(PR.ProductRefused, match=EXACT):
                 PR.load_mf_product(where, composition="c", **args)
         with pytest.raises(PM.ProductManifestError, match=EXACT):
@@ -132,10 +144,12 @@ def test_product_loaders_take_exact_digests(tmp_path):
 def test_content_checks_and_fold_assembly_take_exact_cache_digests(tmp_path):
     for bad in _forged(GOOD):
         with pytest.raises(E.EligibilityError, match=EXACT):
-            E.production_content_check([], [], None, cache_path=str(tmp_path / "absent.h5"),
-                                       expected_cache_sha256=bad)
+            E.production_content_check(
+                [], [], None, cache_path=str(tmp_path / "absent.h5"), expected_cache_sha256=bad
+            )
         with pytest.raises(E.EligibilityError, match=EXACT):
-            E.research_content_check([], [], None, {}, cache_path=str(tmp_path / "absent.h5"),
-                                     expected_cache_sha256=bad)
+            E.research_content_check(
+                [], [], None, {}, cache_path=str(tmp_path / "absent.h5"), expected_cache_sha256=bad
+            )
         with pytest.raises(ValueError, match=EXACT):
             LM.assemble_fold({}, "synthsim0", [], {}, cache_sha256=bad)

@@ -6,7 +6,9 @@ Everything the emulator produces stays on the mode axis n = 1..K: the ensemble's
 theta (``kcoord.kgrid`` + ``kcoord.bind``) places them at the leg's data k; the DLA core is a fixed function of physical
 k given at the data bins (gate E amendment A1 rev 1 section 4); the class combination, metals and resolution then act
 on the data bins exactly as before. Bins outside the simulated modes are counted (``n_out``); the
-likelihood refuses them. ``kcoord`` is called through the module so tests can intercept the coordinate."""
+likelihood refuses them. ``kcoord`` is called through the module so tests can intercept the coordinate.
+"""
+
 from __future__ import annotations
 
 from typing import NamedTuple
@@ -21,22 +23,49 @@ from .data import Z_LIMITS
 from .likelihood import rho_at_tau0
 from .predict import predict_P_filt
 
-_METAL_KEYS = ("a_SiIII", "a_SiII", "k_SiIII", "k_SiII", "f_SiIII_nodes", "f_SiII_nodes", "metal_node_z",
-               "k_SiIII_nodes", "k_SiII_nodes")
+_METAL_KEYS = (
+    "a_SiIII",
+    "a_SiII",
+    "k_SiIII",
+    "k_SiII",
+    "f_SiIII_nodes",
+    "f_SiII_nodes",
+    "metal_node_z",
+    "k_SiIII_nodes",
+    "k_SiII_nodes",
+)
 _NUIS_KEYS = _METAL_KEYS + ("b_res", "b_res_vec")
-NS_BOX = (0.86, 0.98)          # the HR n_s cluster box of the MF n_s-edge term (floor spec section 4)
-EDGE_SLOPE_MULT = 2.0          # 2 x the 6-simulation edge slope (floor spec section 4.1)
+NS_BOX = (0.86, 0.98)  # the HR n_s cluster box of the MF n_s-edge term (floor spec section 4)
+EDGE_SLOPE_MULT = 2.0  # 2 x the 6-simulation edge slope (floor spec section 4.1)
 
 
 class LegPrediction(NamedTuple):
-    P_model: jnp.ndarray          # (N,) flat, z-major (the leg's row order)
-    n_out: jnp.ndarray            # number of the leg's bins outside the simulated modes (all z)
-    C_total: jnp.ndarray          # (N, N) data covariance + the emulator-error terms supplied
-    outside: jnp.ndarray          # (N,) bool: the bin lies outside the simulated modes (the caller counts kept rows)
+    P_model: jnp.ndarray  # (N,) flat, z-major (the leg's row order)
+    n_out: jnp.ndarray  # number of the leg's bins outside the simulated modes (all z)
+    C_total: jnp.ndarray  # (N, N) data covariance + the emulator-error terms supplied
+    outside: (
+        jnp.ndarray
+    )  # (N,) bool: the bin lies outside the simulated modes (the caller counts kept rows)
 
 
-def predict_leg(model, theta9, tau0_vec, alpha_hcd, *, leg, k_com, pf_stats, dla_core, mf=None, nuis=None,
-                t1=None, t2=None, t3=None, cemu_inflate=1.0, require_zresolved=True):
+def predict_leg(
+    model,
+    theta9,
+    tau0_vec,
+    alpha_hcd,
+    *,
+    leg,
+    k_com,
+    pf_stats,
+    dla_core,
+    mf=None,
+    nuis=None,
+    t1=None,
+    t2=None,
+    t3=None,
+    cemu_inflate=1.0,
+    require_zresolved=True,
+):
     """The model P1D on every bin of ``leg`` and its total covariance. ``alpha_hcd`` is (n_z, 3) per-z incidence (LLS,
     subDLA, DLA); a z-flat (3,) alpha is refused unless ``require_zresolved=False`` (the z-flat broadcast bug class).
     ``dla_core`` is the leg's data-bin DLA core (N,): a fixed function of physical k at the leg's bins, no binding
@@ -55,8 +84,10 @@ def predict_leg(model, theta9, tau0_vec, alpha_hcd, *, leg, k_com, pf_stats, dla
     b_res, b_res_vec = nuis.get("b_res", 0.0), nuis.get("b_res_vec")
     alpha_hcd = jnp.asarray(alpha_hcd)
     if require_zresolved and alpha_hcd.ndim != 2:
-        raise ValueError(f"predict_leg: alpha_hcd must be z-RESOLVED (n_z, 3), got shape {tuple(alpha_hcd.shape)}; "
-                         "a z-flat alpha would be broadcast to every z (the z-flat bug class)")
+        raise ValueError(
+            f"predict_leg: alpha_hcd must be z-RESOLVED (n_z, 3), got shape {tuple(alpha_hcd.shape)}; "
+            "a z-flat alpha would be broadcast to every z (the z-flat bug class)"
+        )
     dff = float(getattr(leg, "dla_forward_frac", 1.0))
     if dff != 1.0:
         scale = jnp.array([1.0, 1.0, dff])
@@ -65,8 +96,10 @@ def predict_leg(model, theta9, tau0_vec, alpha_hcd, *, leg, k_com, pf_stats, dla
     dla_core = jnp.asarray(dla_core)
     k_leg = np.asarray(leg.k)
     if dla_core.shape != k_leg.shape:
-        raise ValueError(f"predict_leg: dla_core must be the leg's data-bin core of shape {k_leg.shape}, got "
-                         f"{tuple(dla_core.shape)} (the mode-indexed core is retired, amendment A1 rev 1 section 4)")
+        raise ValueError(
+            f"predict_leg: dla_core must be the leg's data-bin core of shape {k_leg.shape}, got "
+            f"{tuple(dla_core.shape)} (the mode-indexed core is retired, amendment A1 rev 1 section 4)"
+        )
     z_idx = np.asarray(leg.z_idx)
     R_z = jnp.asarray(leg.R_z)
     P_model = jnp.zeros(k_leg.shape[0])
@@ -86,30 +119,43 @@ def predict_leg(model, theta9, tau0_vec, alpha_hcd, *, leg, k_com, pf_stats, dla
         tau0 = tau0_vec[iz]
         core = dla_core[jnp.asarray(rows)]
         a = alpha_hcd if alpha_hcd.ndim == 1 else alpha_hcd[iz]
-        P_lf = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)                     # (4, K) on the modes
+        P_lf = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)  # (4, K) on the modes
         P_filt = P_lf
         if mf is not None:
             x = jnp.concatenate([jnp.asarray(theta9), jnp.asarray([z_unit])])
             P_filt = P_lf * jnp.exp(mf(x, tau0))
-        Pc = KC.at_data(b, P_filt)                                                         # (4, n) at data k
-        P_z = Pc[0] + a[0] * (Pc[1] - Pc[0]) + a[1] * (Pc[2] - Pc[0]) + a[2] * (Pc[3] + core - Pc[0])
+        Pc = KC.at_data(b, P_filt)  # (4, n) at data k
+        P_z = (
+            Pc[0] + a[0] * (Pc[1] - Pc[0]) + a[1] * (Pc[2] - Pc[0]) + a[2] * (Pc[3] + core - Pc[0])
+        )
         fac = jnp.ones(rows.size)
         if leg.metals_on:
             fac = fac * DL.metal_factor_at_z(k_sub, kg.z, tau0, **metal_kw)
         if leg.resolution_on:
-            fac = fac * DL._resolution_factor(k_sub, R_z[iz], b_res=b_res if b_res_vec is None else b_res_vec[iz])
+            fac = fac * DL._resolution_factor(
+                k_sub, R_z[iz], b_res=b_res if b_res_vec is None else b_res_vec[iz]
+            )
         P_model = P_model.at[jnp.asarray(rows)].set(P_z * fac)
         if t1 is not None:
             rho_leg, alpha_centres = t1
-            rho_d = KC.at_data(b, rho_at_tau0(rho_leg[iz], alpha_centres, kg.z, tau0))      # (4, 4, n) at data k
+            rho_d = KC.at_data(
+                b, rho_at_tau0(rho_leg[iz], alpha_centres, kg.z, tau0)
+            )  # (4, 4, n) at data k
             ev = DL.emu_var_at_data(KC.at_data(b, P_lf), core, rho_d, a, cemu_inflate=cemu_inflate)
-            emu_var = emu_var.at[jnp.asarray(rows)].set(ev * fac ** 2)
+            emu_var = emu_var.at[jnp.asarray(rows)].set(ev * fac**2)
         if t2 is not None:
-            floor_var = floor_var.at[jnp.asarray(rows)].set(t2_var(t2[0][iz], t2[1][iz], P_z * fac, ns_sg))
+            floor_var = floor_var.at[jnp.asarray(rows)].set(
+                t2_var(t2[0][iz], t2[1][iz], P_z * fac, ns_sg)
+            )
         n_out = n_out + b.n_out
         outside = outside.at[jnp.asarray(rows)].set((b.u < 1.0) | (b.u > kg.k_skm.shape[-1]))
-    C_total = assemble_cov(jnp.asarray(leg.C_data), emu_var, floor_var, t3=t3,
-                           P_fid=jnp.nan_to_num(jnp.asarray(leg.P_data)))
+    C_total = assemble_cov(
+        jnp.asarray(leg.C_data),
+        emu_var,
+        floor_var,
+        t3=t3,
+        P_fid=jnp.nan_to_num(jnp.asarray(leg.P_data)),
+    )
     return LegPrediction(P_model, n_out, C_total, outside)
 
 
@@ -130,12 +176,13 @@ def assemble_cov(C_data, t1_var, t2_var, t3=None, P_fid=None):
     """C_total with the production algebra (``data_likelihood.py`` 1286-1327 at 80bbc5d): without T3, C_data +
     diag(T1 + T2); with T3 = (U, w), the fractional k-coherence term B B^T, B = P_fid U sqrt(w), enters off-diagonal
     only, its diagonal absorbed into T1 by max (never under-counted), T2 topped up on the remaining diagonal.
-    PD: C_data PD + diag(>= 0) + (B B^T - diag) with the subtracted diagonal restored inside max(T1, diag)."""
+    PD: C_data PD + diag(>= 0) + (B B^T - diag) with the subtracted diagonal restored inside max(T1, diag).
+    """
     if t3 is None:
         return C_data + jnp.diag(t1_var + t2_var)
     U, w = t3
     B = jnp.asarray(P_fid)[:, None] * jnp.asarray(U) * jnp.sqrt(jnp.asarray(w))[None, :]
-    td = jnp.sum(B ** 2, axis=1)
+    td = jnp.sum(B**2, axis=1)
     C_shape = B @ B.T - jnp.diag(td)
     topup = jnp.maximum(0.0, t2_var - jnp.diag(C_shape))
     return C_data + jnp.diag(jnp.maximum(t1_var, td) + topup) + C_shape

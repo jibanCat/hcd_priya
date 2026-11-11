@@ -18,6 +18,7 @@ Report:
 Also plot Rogers' analytic template (with alpha=0.1 across classes) for
 magnitude sanity check.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,6 +27,7 @@ import time
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -43,7 +45,13 @@ from hcd_analysis.p1d import P1DAccumulator, compute_p1d_ratios
 from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
-HDF5 = Path(external_path("HCD_LF_RAW_DIR")) / SIM / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5"
+HDF5 = (
+    Path(external_path("HCD_LF_RAW_DIR"))
+    / SIM
+    / "output"
+    / "SPECTRA_017"
+    / "lya_forest_spectra_grid_480.hdf5"
+)
 CAT_PATH = ROOT / "tests" / "out" / "snap_017_fastfix_catalog.npz"
 DIAG = ROOT / "figures" / "diagnostics"
 
@@ -60,8 +68,9 @@ def rogers_dla_correction(kf, z, alpha):
     factor = np.ones_like(kf)
     contribs = {}
     for i, name in enumerate(["LLS", "Sub-DLA", "Small-DLA", "Large-DLA"]):
-        term = alpha[i] * ((1 + z) / (1 + z_0)) ** -3.55 \
-             * ((a_z[i] * np.exp(b_z[i] * kf) - 1) ** -2)
+        term = (
+            alpha[i] * ((1 + z) / (1 + z_0)) ** -3.55 * ((a_z[i] * np.exp(b_z[i] * kf) - 1) ** -2)
+        )
         factor += term
         contribs[name] = 1.0 + term
     return factor, contribs
@@ -69,8 +78,9 @@ def rogers_dla_correction(kf, z, alpha):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--n-skewers", type=int, default=None,
-                    help="Subsample for speed (None = all 691200)")
+    ap.add_argument(
+        "--n-skewers", type=int, default=None, help="Subsample for speed (None = all 691200)"
+    )
     ap.add_argument("--batch-size", type=int, default=4096)
     args = ap.parse_args()
 
@@ -90,8 +100,10 @@ def main():
             dirty_flag[ab.skewer_idx] = True
     n_dirty = int(dirty_flag.sum())
     n_clean = n_total - n_dirty
-    print(f"  n_total={n_total}  dirty={n_dirty} ({100*n_dirty/n_total:.1f}%)  "
-          f"clean={n_clean} ({100*n_clean/n_total:.1f}%)")
+    print(
+        f"  n_total={n_total}  dirty={n_dirty} ({100*n_dirty/n_total:.1f}%)  "
+        f"clean={n_clean} ({100*n_clean/n_total:.1f}%)"
+    )
 
     # Pass 1: compute <F> separately for the four samples we will FFT.
     #   <F>_clean     — normalisation for P_clean
@@ -110,47 +122,64 @@ def main():
     # computing <F> of masked subsets.  So do this in two passes:
     #   Pass 1a: global <F> (gives τ_eff; also gives <F>_clean and <F>_dirty).
     #   Pass 1b: <F> of masked-dirty subsets (requires τ_eff).
-    for row_start, row_end, tau_batch in iter_tau_batches(HDF5, batch_size=args.batch_size, n_skewers=n_total):
+    for row_start, row_end, tau_batch in iter_tau_batches(
+        HDF5, batch_size=args.batch_size, n_skewers=n_total
+    ):
         tau_batch = tau_batch.astype(np.float64)
         F = np.exp(-tau_batch)
         is_dirty = dirty_flag[row_start:row_end]
-        F_sum_all += F.sum(); F_n_all += F.size
+        F_sum_all += F.sum()
+        F_n_all += F.size
         if (~is_dirty).any():
-            F_sum_clean += F[~is_dirty].sum(); F_n_clean += F[~is_dirty].size
+            F_sum_clean += F[~is_dirty].sum()
+            F_n_clean += F[~is_dirty].size
         if is_dirty.any():
-            F_sum_dirty += F[is_dirty].sum(); F_n_dirty += F[is_dirty].size
+            F_sum_dirty += F[is_dirty].sum()
+            F_n_dirty += F[is_dirty].size
     mean_F_all = F_sum_all / F_n_all
     mean_F_clean = F_sum_clean / F_n_clean
     mean_F_dirty = F_sum_dirty / F_n_dirty
     tau_eff = -np.log(max(mean_F_all, 1e-30))
-    print(f"  pass 1a (unmasked <F>): {time.time()-t0:.1f}s  "
-          f"<F>_all={mean_F_all:.4f} <F>_clean={mean_F_clean:.4f} "
-          f"<F>_dirty={mean_F_dirty:.4f}  τ_eff={tau_eff:.4f}")
+    print(
+        f"  pass 1a (unmasked <F>): {time.time()-t0:.1f}s  "
+        f"<F>_all={mean_F_all:.4f} <F>_clean={mean_F_clean:.4f} "
+        f"<F>_dirty={mean_F_dirty:.4f}  τ_eff={tau_eff:.4f}"
+    )
 
     t0 = time.time()
-    for row_start, row_end, tau_batch in iter_tau_batches(HDF5, batch_size=args.batch_size, n_skewers=n_total):
+    for row_start, row_end, tau_batch in iter_tau_batches(
+        HDF5, batch_size=args.batch_size, n_skewers=n_total
+    ):
         tau_batch = tau_batch.astype(np.float64)
         is_dirty = dirty_flag[row_start:row_end]
         if not is_dirty.any():
             continue
         tau_A = apply_tauspace_mask_to_batch(
-            tau_batch, row_start, catalog,
+            tau_batch,
+            row_start,
+            catalog,
             mask_classes=["LLS", "subDLA", "DLA"],
             tau_eff=tau_eff,
         )
         tau_B = apply_mask_to_batch(
-            tau_batch, row_start, catalog,
+            tau_batch,
+            row_start,
+            catalog,
             mask_classes=["LLS", "subDLA", "DLA"],
             strategy="mean_flux",
         )
         FA = np.exp(-tau_A[is_dirty])
         FB = np.exp(-tau_B[is_dirty])
-        F_sum_A += FA.sum(); F_n_A += FA.size
-        F_sum_B += FB.sum(); F_n_B += FB.size
+        F_sum_A += FA.sum()
+        F_n_A += FA.size
+        F_sum_B += FB.sum()
+        F_n_B += FB.size
     mean_F_mask_A = F_sum_A / F_n_A
     mean_F_mask_B = F_sum_B / F_n_B
-    print(f"  pass 1b (masked <F>): {time.time()-t0:.1f}s  "
-          f"<F>_maskA={mean_F_mask_A:.4f} <F>_maskB={mean_F_mask_B:.4f}")
+    print(
+        f"  pass 1b (masked <F>): {time.time()-t0:.1f}s  "
+        f"<F>_maskA={mean_F_mask_A:.4f} <F>_maskB={mean_F_mask_B:.4f}"
+    )
 
     # Pass 2: four P1D accumulators, one pass over the file.
     t0 = time.time()
@@ -167,8 +196,7 @@ def main():
         mask_clean_batch = ~mask_dirty_batch
 
         if mask_clean_batch.any():
-            acc_clean.add_batch(tau_batch[mask_clean_batch],
-                                 mean_F_global=mean_F_clean)
+            acc_clean.add_batch(tau_batch[mask_clean_batch], mean_F_global=mean_F_clean)
 
         if mask_dirty_batch.any():
             dirty_rows = tau_batch[mask_dirty_batch]
@@ -176,21 +204,23 @@ def main():
 
             # τ-space mask on the dirty subset
             tau_masked_A = apply_tauspace_mask_to_batch(
-                tau_batch, row_start, catalog,
+                tau_batch,
+                row_start,
+                catalog,
                 mask_classes=["LLS", "subDLA", "DLA"],
                 tau_eff=tau_eff,
             )
-            acc_maskA.add_batch(tau_masked_A[mask_dirty_batch],
-                                 mean_F_global=mean_F_mask_A)
+            acc_maskA.add_batch(tau_masked_A[mask_dirty_batch], mean_F_global=mean_F_mask_A)
 
             # pixel-range mask
             tau_masked_B = apply_mask_to_batch(
-                tau_batch, row_start, catalog,
+                tau_batch,
+                row_start,
+                catalog,
                 mask_classes=["LLS", "subDLA", "DLA"],
                 strategy="mean_flux",
             )
-            acc_maskB.add_batch(tau_masked_B[mask_dirty_batch],
-                                 mean_F_global=mean_F_mask_B)
+            acc_maskB.add_batch(tau_masked_B[mask_dirty_batch], mean_F_global=mean_F_mask_B)
     print(f"  pass 2 (4 P1Ds): {time.time()-t0:.1f}s")
 
     k_clean, p_clean = acc_clean.result(None)
@@ -205,51 +235,66 @@ def main():
     # Rogers analytic prediction at z=3 with uniform alpha=0.1
     alpha_prior = np.array([0.1, 0.1, 0.1, 0.1])
     rogers_total, rogers_contribs = rogers_dla_correction(
-        k_clean, header.redshift, alpha_prior,
+        k_clean,
+        header.redshift,
+        alpha_prior,
     )
 
     # Numeric table
-    print(f"\n{'k [s/km]':>10}  {'template':>10}  {'leftover_A':>12}  "
-          f"{'leftover_B':>12}  {'Rogers α=0.1':>14}")
+    print(
+        f"\n{'k [s/km]':>10}  {'template':>10}  {'leftover_A':>12}  "
+        f"{'leftover_B':>12}  {'Rogers α=0.1':>14}"
+    )
     for k_tgt in [0.001, 0.002, 0.003, 0.005, 0.010, 0.020, 0.030]:
         j = int(np.argmin(np.abs(k_clean - k_tgt)))
-        print(f"  {k_clean[j]:>8.4f}  {template[j]:>10.3f}  "
-              f"{leftover_A[j]:>12.3f}  {leftover_B[j]:>12.3f}  "
-              f"{rogers_total[j]:>14.3f}")
+        print(
+            f"  {k_clean[j]:>8.4f}  {template[j]:>10.3f}  "
+            f"{leftover_A[j]:>12.3f}  {leftover_B[j]:>12.3f}  "
+            f"{rogers_total[j]:>14.3f}"
+        )
 
     # -- plot --
     fig, ax = plt.subplots(1, 2, figsize=(14, 5.5))
 
-    ax[0].plot(k_clean, template, lw=2.0, color="k",
-                label="P_dirty / P_clean  (measured template)")
-    ax[0].plot(k_clean, rogers_total, "--", lw=1.5, color="C3",
-                label="Rogers+2018 total (α=0.1 all classes)")
+    ax[0].plot(k_clean, template, lw=2.0, color="k", label="P_dirty / P_clean  (measured template)")
+    ax[0].plot(
+        k_clean,
+        rogers_total,
+        "--",
+        lw=1.5,
+        color="C3",
+        label="Rogers+2018 total (α=0.1 all classes)",
+    )
     for name, curve in rogers_contribs.items():
         ax[0].plot(k_clean, curve, ":", lw=1.0, alpha=0.7, label=f"Rogers {name}")
-    ax[0].set_xscale("log"); ax[0].set_yscale("log")
-    ax[0].set_xlabel("k [s/km]"); ax[0].set_ylabel("P1D ratio")
+    ax[0].set_xscale("log")
+    ax[0].set_yscale("log")
+    ax[0].set_xlabel("k [s/km]")
+    ax[0].set_ylabel("P1D ratio")
     ax[0].set_title("HCD template: contaminated vs clean subsets")
     ax[0].grid(alpha=0.3, which="both")
     ax[0].legend(fontsize=8)
     ax[0].set_xlim(1e-3, 5e-2)
 
-    ax[1].plot(k_clean, leftover_A, lw=2.0, color="C0",
-                label="τ-space mask:   P_masked / P_clean")
-    ax[1].plot(k_clean, leftover_B, lw=1.5, color="C1",
-                label="pixrange mask:  P_masked / P_clean")
-    ax[1].plot(k_clean, template, ":", color="k", lw=1.0,
-                label="unmasked dirty / clean  (template)")
+    ax[1].plot(k_clean, leftover_A, lw=2.0, color="C0", label="τ-space mask:   P_masked / P_clean")
+    ax[1].plot(k_clean, leftover_B, lw=1.5, color="C1", label="pixrange mask:  P_masked / P_clean")
+    ax[1].plot(
+        k_clean, template, ":", color="k", lw=1.0, label="unmasked dirty / clean  (template)"
+    )
     ax[1].axhline(1.0, color="gray", ls="--", alpha=0.5)
     ax[1].set_xscale("log")
-    ax[1].set_xlabel("k [s/km]"); ax[1].set_ylabel("P1D ratio")
+    ax[1].set_xlabel("k [s/km]")
+    ax[1].set_ylabel("P1D ratio")
     ax[1].set_title("Mask quality — closer to 1 is better")
     ax[1].grid(alpha=0.3, which="both")
     ax[1].legend(fontsize=8)
     ax[1].set_xlim(1e-3, 5e-2)
     ax[1].set_ylim(0.5, 2.5)
 
-    fig.suptitle(f"{SIM[:30]}...  snap_017  z={header.redshift:.2f}  "
-                  f"(n_skewers={n_total}, dirty={n_dirty})")
+    fig.suptitle(
+        f"{SIM[:30]}...  snap_017  z={header.redshift:.2f}  "
+        f"(n_skewers={n_total}, dirty={n_dirty})"
+    )
     fig.tight_layout()
     out = DIAG / "rogers_subset_test.png"
     fig.savefig(out, dpi=120)

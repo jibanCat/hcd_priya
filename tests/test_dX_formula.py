@@ -28,6 +28,7 @@ This test:
   3. Reports which convention is consistent with standard observational
      dN/dX normalisation.
 """
+
 from __future__ import annotations
 
 import sys
@@ -39,17 +40,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from hcd_analysis.cddf import absorption_path_per_sightline
 
 # Cosmology (PRIYA-like)
-H0 = 70.0            # km/s/Mpc (using h = 0.7 for this test)
+H0 = 70.0  # km/s/Mpc (using h = 0.7 for this test)
 Om = 0.3
 Ol = 0.7
 c_kms = 2.99792458e5
 
+
 def H(z):
-    return H0 * np.sqrt(Om * (1 + z)**3 + Ol)
+    return H0 * np.sqrt(Om * (1 + z) ** 3 + Ol)
+
 
 def dX_dz(z):
     """Canonical dX/dz."""
-    return (1 + z)**2 * H0 / H(z)
+    return (1 + z) ** 2 * H0 / H(z)
+
 
 def dX_box_convention_A(z, L_com_Mpc):
     """Convention A: treat sightline as a chunk of photon path through a
@@ -58,28 +62,38 @@ def dX_box_convention_A(z, L_com_Mpc):
     dz_box = H(z) * L_com_Mpc / c_kms
     return dX_dz(z) * dz_box
 
+
 def dX_box_convention_B(z, L_com_Mpc):
     """Convention B: Δz_box = H/c · L_phys = H L_com / [(1+z) c]."""
     dz_box = H(z) * L_com_Mpc / ((1 + z) * c_kms)
     return dX_dz(z) * dz_box
 
+
 def dX_code(z, L_com_Mpc):
     """What the code computes."""
     return absorption_path_per_sightline(
         box_kpc_h=L_com_Mpc * 1000 * 0.7,  # convert Mpc (h=0.7) → kpc/h
-        hubble=0.7, omegam=Om, omegal=Ol, z=z,
+        hubble=0.7,
+        omegam=Om,
+        omegal=Ol,
+        z=z,
     )
 
+
 # Sanity table
-print(f"\n{'z':>5}  {'conv A (1+z)² L H_0/c':>22}  {'conv B (1+z) L H_0/c':>22}  "
-      f"{'ratio A/B':>10}  {'code == conv B?':>18}")
-L_com = 120.0 / 0.7   # 120 Mpc/h box in Mpc
+print(
+    f"\n{'z':>5}  {'conv A (1+z)² L H_0/c':>22}  {'conv B (1+z) L H_0/c':>22}  "
+    f"{'ratio A/B':>10}  {'code == conv B?':>18}"
+)
+L_com = 120.0 / 0.7  # 120 Mpc/h box in Mpc
 for z in (0.0, 1.0, 2.0, 3.0, 4.0, 5.0):
     A = dX_box_convention_A(z, L_com)
     B = dX_box_convention_B(z, L_com)
     C = dX_code(z, L_com)
-    print(f"  {z:.2f}  {A:22.5f}  {B:22.5f}  {A/B if B else float('nan'):10.3f}  "
-          f"{'YES' if abs(C-B)/max(abs(B),1e-9) < 1e-6 else 'NO'}  (code={C:.5f})")
+    print(
+        f"  {z:.2f}  {A:22.5f}  {B:22.5f}  {A/B if B else float('nan'):10.3f}  "
+        f"{'YES' if abs(C-B)/max(abs(B),1e-9) < 1e-6 else 'NO'}  (code={C:.5f})"
+    )
 
 # --------------------------------------------------------------
 # Check against canonical integrated X(z) over a small Δz
@@ -87,13 +101,16 @@ for z in (0.0, 1.0, 2.0, 3.0, 4.0, 5.0):
 print(f"\nCross-check: numerically integrate dX/dz over Δz_box = H L/c")
 print(f"  expect to equal convention A's result exactly.")
 from scipy.integrate import quad
+
 z = 3.0
 L_com = 120.0 / 0.7
 dz_box_A = H(z) * L_com / c_kms
-X_integrated, _ = quad(dX_dz, z - dz_box_A/2, z + dz_box_A/2)
-print(f"  z={z}: Δz_box_A={dz_box_A:.5f},  "
-      f"X_integrated over that Δz = {X_integrated:.5f},  "
-      f"convention A = {dX_box_convention_A(z, L_com):.5f}")
+X_integrated, _ = quad(dX_dz, z - dz_box_A / 2, z + dz_box_A / 2)
+print(
+    f"  z={z}: Δz_box_A={dz_box_A:.5f},  "
+    f"X_integrated over that Δz = {X_integrated:.5f},  "
+    f"convention A = {dX_box_convention_A(z, L_com):.5f}"
+)
 
 # --------------------------------------------------------------
 # Compare to what fake_spectra / PRIYA convention actually is.

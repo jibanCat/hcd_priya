@@ -6,6 +6,7 @@ production ensemble manifest. Never hand-edited; regenerated here and committed 
 ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu python3 \
      scripts/gen_product_manifest.py --mf <..> --dla-core <..> --t1 <..> --t3 <..> [--t2 <..>] [--check]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,7 +23,9 @@ DEFAULT_OUT = os.path.join(_REPO_ROOT, "checkpoints", "product_manifest.json")
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--mf")
     ap.add_argument("--dla-core")
     ap.add_argument("--t1")
@@ -38,8 +41,11 @@ def main(argv=None):
         paths = PM.verify(a.out, cache_sha256=cache_sha, ensemble_manifest_sha256=ens_sha)
         print(f"[gen_product_manifest --check] OK: {json.dumps(paths)}")
         return 0
-    m = PM.build({"mf": a.mf, "dla_core": a.dla_core, "cemu_t1": a.t1, "cemu_t3": a.t3, "cemu_t2": a.t2},
-                 cache_sha256=cache_sha, ensemble_manifest_sha256=ens_sha)
+    m = PM.build(
+        {"mf": a.mf, "dla_core": a.dla_core, "cemu_t1": a.t1, "cemu_t3": a.t3, "cemu_t2": a.t2},
+        cache_sha256=cache_sha,
+        ensemble_manifest_sha256=ens_sha,
+    )
     with open(a.out, "w") as f:
         json.dump(m, f, indent=2)
         f.write("\n")

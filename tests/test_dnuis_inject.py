@@ -15,6 +15,7 @@ Hooks under test (closure_legb):
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python -m pytest tests/test_dnuis_inject.py -q
 """
+
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -34,10 +35,11 @@ def _toy_truth_pack(nZg=5):
     return dict(
         theta9=rng.uniform(0.2, 0.8, 9),
         tau0_global=rng.uniform(0.9, 1.1, nZg),
-        alpha_hcd=np.array([0.7, 0.3, 0.05]),                 # (3,) [LLS, subDLA, DLA] pivot
+        alpha_hcd=np.array([0.7, 0.3, 0.05]),  # (3,) [LLS, subDLA, DLA] pivot
         alpha_hcd_z=np.stack([np.array([0.7, 0.3, 0.05]) * (1.0 + 0.1 * i) for i in range(nZg)]),
         a_siiii=0.02,
-        kept_global_z=np.ones(nZg, bool))
+        kept_global_z=np.ones(nZg, bool),
+    )
 
 
 def test_apply_lls_truth_boost_scales_only_lls():
@@ -47,7 +49,9 @@ def test_apply_lls_truth_boost_scales_only_lls():
     out = LB.apply_lls_truth_boost(tp, boost)
     # LLS column / pivot scaled by boost
     np.testing.assert_allclose(out["alpha_hcd"][0], tp0["alpha_hcd"][0] * boost, rtol=1e-12)
-    np.testing.assert_allclose(out["alpha_hcd_z"][:, 0], tp0["alpha_hcd_z"][:, 0] * boost, rtol=1e-12)
+    np.testing.assert_allclose(
+        out["alpha_hcd_z"][:, 0], tp0["alpha_hcd_z"][:, 0] * boost, rtol=1e-12
+    )
     # subDLA + DLA columns/pivots UNTOUCHED
     np.testing.assert_allclose(out["alpha_hcd"][1:], tp0["alpha_hcd"][1:], rtol=0, atol=0)
     np.testing.assert_allclose(out["alpha_hcd_z"][:, 1:], tp0["alpha_hcd_z"][:, 1:], rtol=0, atol=0)
@@ -87,14 +91,16 @@ def ctx_d():
         # no MF/eBOSS → fast). DESI leg has metals_on=True, KS metals_on=False — exactly the
         # metals_on / non-metals split the metal-misspec test needs.
         return LB.build_legb_ctx(use_xclass=True, metals_on=True)
-    except Exception as e:                                   # data/checkpoint absent in this env
-        raise_if_deferred(e)                                 # a retired interface is deferred, not absent
+    except Exception as e:  # data/checkpoint absent in this env
+        raise_if_deferred(e)  # a retired interface is deferred, not absent
         pytest.skip(f"build_legb_ctx unavailable: {e}")
 
 
 def _core(ctx, d):
-    return {k: np.nanmean(np.asarray(v), axis=0)
-            for k, v in LB._fiducial_dla_core_per_leg(d, ctx.legs, ctx.cache_k).items()}
+    return {
+        k: np.nanmean(np.asarray(v), axis=0)
+        for k, v in LB._fiducial_dla_core_per_leg(d, ctx.legs, ctx.cache_k).items()
+    }
 
 
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
@@ -106,9 +112,17 @@ def test_metal_misspec_changes_metals_leg_not_clean_leg(ctx_d):
     # baseline (no injection) vs metal-misspec injection — SAME mock RNG key
     base_legs, base_info = LB.make_leg_a_legmock(ctx, core, tp, key)
     inj_legs, inj_info = LB.make_leg_a_legmock(
-        ctx, core, tp, key,
-        inject_metal_misspec={"form": "desi_full", "f_SiIII": 0.009, "f_SiII": 0.004,
-                              "f_SiII_SiII": 0.002})
+        ctx,
+        core,
+        tp,
+        key,
+        inject_metal_misspec={
+            "form": "desi_full",
+            "f_SiIII": 0.009,
+            "f_SiII": 0.004,
+            "f_SiII_SiII": 0.002,
+        },
+    )
     names = [l.name for l in ctx.legs]
     assert "DESI" in names and "KS" in names, f"expected DESI+KS legs, got {names}"
     for li, leg in enumerate(ctx.legs):
@@ -117,8 +131,9 @@ def test_metal_misspec_changes_metals_leg_not_clean_leg(ctx_d):
         assert np.all(np.isfinite(inj_truth)), f"{leg.name}: non-finite after injection"
         assert inj_truth.shape == base_truth.shape, f"{leg.name}: shape changed"
         if leg.metals_on:
-            assert not np.allclose(inj_truth, base_truth), \
-                f"{leg.name} (metals_on): metal-misspec injection did not change the noiseless P"
+            assert not np.allclose(
+                inj_truth, base_truth
+            ), f"{leg.name} (metals_on): metal-misspec injection did not change the noiseless P"
             # the contaminant amplitude A_X = f_X/(1−⟨F⟩) is largest at the MOST transmissive
             # (low-z) bins — physically real (metals matter most where the forest is thin). It is
             # a multiplicative factor on the order of unity, not a runaway: stay within a sane band.
@@ -127,11 +142,13 @@ def test_metal_misspec_changes_metals_leg_not_clean_leg(ctx_d):
             # but at the LEAST transmissive (high-z) bins ⟨F⟩ is low → A_X small → tiny perturbation
             z_idx = np.asarray(leg.z_idx)
             hiz_rows = np.where(z_idx == leg.n_z - 1)[0]
-            assert np.all(np.abs(frac[hiz_rows]) < 0.15), \
-                f"{leg.name}: high-z metal contaminant should be small (low A_X)"
+            assert np.all(
+                np.abs(frac[hiz_rows]) < 0.15
+            ), f"{leg.name}: high-z metal contaminant should be small (low A_X)"
         else:
-            assert np.allclose(inj_truth, base_truth, rtol=0, atol=0), \
-                f"{leg.name} (clean): metal-misspec must NOT touch a non-metals leg"
+            assert np.allclose(
+                inj_truth, base_truth, rtol=0, atol=0
+            ), f"{leg.name} (clean): metal-misspec must NOT touch a non-metals leg"
 
 
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
@@ -149,8 +166,9 @@ def test_meanflux_on_leg_is_exp_minus_tau0_global(ctx_d):
         expect = np.exp(-tau0_global[sel])
         got = np.asarray(LB._meanflux_on_leg(ctx, leg, tp))
         assert got.shape == (leg.n_z,), f"{leg.name}: shape {got.shape} != ({leg.n_z},)"
-        np.testing.assert_allclose(got, expect, rtol=1e-12, atol=0.0,
-                                   err_msg=f"{leg.name}: ⟨F⟩ != exp(−tau0_global[sel])")
+        np.testing.assert_allclose(
+            got, expect, rtol=1e-12, atol=0.0, err_msg=f"{leg.name}: ⟨F⟩ != exp(−tau0_global[sel])"
+        )
         # a sanity band: ⟨F⟩ ∈ (0,1) and the double-Kim bug would push it absurdly low at low z
         assert np.all((got > 0.0) & (got <= 1.0)), f"{leg.name}: ⟨F⟩ out of (0,1]"
 
@@ -164,9 +182,11 @@ def test_resolution_injection_is_exp_2b_k2_R2(ctx_d):
     tp0 = LB.draw_leg_a_leg_truth(ctx0, jax.random.PRNGKey(5))
     if any(not l.resolution_ready for l in ctx0.legs):
         import pytest
+
         with pytest.raises(ValueError, match="resolution_ready|[Kk][Ss]"):
-            LB.make_leg_a_legmock(ctx0, core0, tp0, jax.random.PRNGKey(6),
-                                  inject_resolution={"b_res": 0.02})
+            LB.make_leg_a_legmock(
+                ctx0, core0, tp0, jax.random.PRNGKey(6), inject_resolution={"b_res": 0.02}
+            )
     # ...and the exp(2 b k^2 R^2) math is verified on the resolution_ready legs (DESI/eBOSS).
     ctx = ctx0._replace(legs=[l for l in ctx0.legs if l.resolution_ready])
     assert ctx.legs, "no resolution_ready leg to test the injection math on"
@@ -175,8 +195,9 @@ def test_resolution_injection_is_exp_2b_k2_R2(ctx_d):
     key = jax.random.PRNGKey(6)
     b_res = 0.02
     base_legs, base_info = LB.make_leg_a_legmock(ctx, core, tp, key)
-    inj_legs, inj_info = LB.make_leg_a_legmock(ctx, core, tp, key,
-                                               inject_resolution={"b_res": b_res})
+    inj_legs, inj_info = LB.make_leg_a_legmock(
+        ctx, core, tp, key, inject_resolution={"b_res": b_res}
+    )
     for leg in ctx.legs:
         base_truth = np.asarray(base_info["truth_on_leg"][leg.name])
         inj_truth = np.asarray(inj_info["truth_on_leg"][leg.name])
@@ -186,10 +207,14 @@ def test_resolution_injection_is_exp_2b_k2_R2(ctx_d):
         R_z = np.asarray(leg.R_z)
         z_idx = np.asarray(leg.z_idx)
         k = np.asarray(leg.k)
-        expect = np.exp(2.0 * b_res * k ** 2 * R_z[z_idx] ** 2)
+        expect = np.exp(2.0 * b_res * k**2 * R_z[z_idx] ** 2)
         assert np.all(expect >= 1.0 - 1e-12), "resolution factor must be >= 1 for b_res>0"
-        np.testing.assert_allclose(inj_truth, base_truth * expect, rtol=1e-8,
-                                   err_msg=f"{leg.name}: resolution factor mismatch")
+        np.testing.assert_allclose(
+            inj_truth,
+            base_truth * expect,
+            rtol=1e-8,
+            err_msg=f"{leg.name}: resolution factor mismatch",
+        )
         # monotone in k within each z-block (R_z fixed per z)
         for iz in range(leg.n_z):
             rows = np.where(z_idx == iz)[0]
@@ -197,8 +222,9 @@ def test_resolution_injection_is_exp_2b_k2_R2(ctx_d):
                 continue
             order = np.argsort(k[rows])
             f_sorted = expect[rows][order]
-            assert np.all(np.diff(f_sorted) >= -1e-12), \
-                f"{leg.name} z{iz}: resolution factor not monotone in k"
+            assert np.all(
+                np.diff(f_sorted) >= -1e-12
+            ), f"{leg.name} z{iz}: resolution factor not monotone in k"
 
 
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
@@ -214,10 +240,11 @@ def test_resolution_vector_injection_is_per_z_exp(ctx_d):
     tp = LB.draw_leg_a_leg_truth(ctx, jax.random.PRNGKey(23))
     key = jax.random.PRNGKey(24)
     n_z = ctx.legs[0].n_z
-    v = np.linspace(-0.03, 0.03, n_z)                       # a NON-monotonic-safe per-z b_res(z)
+    v = np.linspace(-0.03, 0.03, n_z)  # a NON-monotonic-safe per-z b_res(z)
     base_legs, base_info = LB.make_leg_a_legmock(ctx, core, tp, key)
-    inj_legs, inj_info = LB.make_leg_a_legmock(ctx, core, tp, key,
-                                               inject_resolution={"b_res_vec": list(v)})
+    inj_legs, inj_info = LB.make_leg_a_legmock(
+        ctx, core, tp, key, inject_resolution={"b_res_vec": list(v)}
+    )
     for leg in ctx.legs:
         base_truth = np.asarray(base_info["truth_on_leg"][leg.name])
         inj_truth = np.asarray(inj_info["truth_on_leg"][leg.name])
@@ -226,9 +253,13 @@ def test_resolution_vector_injection_is_per_z_exp(ctx_d):
         R_z = np.asarray(leg.R_z)
         z_idx = np.asarray(leg.z_idx)
         k = np.asarray(leg.k)
-        expect = np.exp(2.0 * v[z_idx] * k ** 2 * R_z[z_idx] ** 2)
-        np.testing.assert_allclose(inj_truth, base_truth * expect, rtol=1e-8,
-                                   err_msg=f"{leg.name}: per-z resolution vector factor mismatch")
+        expect = np.exp(2.0 * v[z_idx] * k**2 * R_z[z_idx] ** 2)
+        np.testing.assert_allclose(
+            inj_truth,
+            base_truth * expect,
+            rtol=1e-8,
+            err_msg=f"{leg.name}: per-z resolution vector factor mismatch",
+        )
 
 
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
@@ -261,13 +292,16 @@ def test_inject_spec_none_is_noop(ctx_d):
     key0 = jax.random.PRNGKey(int(seed))
     k_truth, k_mock, _k_nuts = jax.random.split(jax.random.fold_in(key0, m), 3)
     tp = LB.draw_leg_a_leg_truth(ctx, k_truth)
-    core = {name: jnp.asarray(np.nanmean(np.asarray(v), axis=0))
-            for name, v in LB._fiducial_dla_core_per_leg(d, ctx.legs, ctx.cache_k).items()}
+    core = {
+        name: jnp.asarray(np.nanmean(np.asarray(v), axis=0))
+        for name, v in LB._fiducial_dla_core_per_leg(d, ctx.legs, ctx.cache_k).items()
+    }
 
     # direct (no injection args) vs explicit None-injection — must be identical
     legs_direct, _ = LB.make_leg_a_legmock(ctx, core, tp, k_mock)
-    legs_none, _ = LB.make_leg_a_legmock(ctx, core, tp, k_mock,
-                                         inject_metal_misspec=None, inject_resolution=None)
+    legs_none, _ = LB.make_leg_a_legmock(
+        ctx, core, tp, k_mock, inject_metal_misspec=None, inject_resolution=None
+    )
     for ld, ln in zip(legs_direct, legs_none):
         np.testing.assert_array_equal(np.asarray(ld.P_data), np.asarray(ln.P_data))
 
@@ -282,13 +316,16 @@ def test_run_legb_inject_spec_none_matches_default_mock(ctx_d):
     key0 = jax.random.PRNGKey(int(seed))
     k_truth, k_mock, _ = jax.random.split(jax.random.fold_in(key0, m), 3)
     tp = LB.draw_leg_a_leg_truth(ctx, k_truth)
-    fid_core = {name: jnp.asarray(np.nanmean(np.asarray(v), axis=0))
-                for name, v in LB._fiducial_dla_core_per_leg(d, ctx.legs, ctx.cache_k).items()}
+    fid_core = {
+        name: jnp.asarray(np.nanmean(np.asarray(v), axis=0))
+        for name, v in LB._fiducial_dla_core_per_leg(d, ctx.legs, ctx.cache_k).items()
+    }
     # default branch
     legs_default, _ = LB.make_leg_a_legmock(ctx, fid_core, tp, k_mock)
     # inject_spec=None branch (what run_legb takes)
     legs_none, _ = LB.make_leg_a_legmock(
-        ctx, fid_core, tp, k_mock, inject_metal_misspec=None, inject_resolution=None)
+        ctx, fid_core, tp, k_mock, inject_metal_misspec=None, inject_resolution=None
+    )
     for la, lb in zip(legs_default, legs_none):
         np.testing.assert_array_equal(np.asarray(la.P_data), np.asarray(lb.P_data))
 
@@ -299,11 +336,31 @@ def test_run_legb_with_lls_excess_runs_and_offsets_truth(ctx_d):
     the recorded truth_vec carries the boosted LLS (alpha_lls column) vs the un-boosted run."""
     ctx, d = ctx_d
     boost = 1.3
-    base = LB.run_legb(ctx, d, n_mocks=1, mock_indices=[0], return_per_mock=True, leg_a=True,
-                       n_warmup=4, n_samples=4, seed=11, verbose=False)
-    inj = LB.run_legb(ctx, d, n_mocks=1, mock_indices=[0], return_per_mock=True, leg_a=True,
-                      n_warmup=4, n_samples=4, seed=11, verbose=False,
-                      inject_spec={"lls_truth_boost": boost})
+    base = LB.run_legb(
+        ctx,
+        d,
+        n_mocks=1,
+        mock_indices=[0],
+        return_per_mock=True,
+        leg_a=True,
+        n_warmup=4,
+        n_samples=4,
+        seed=11,
+        verbose=False,
+    )
+    inj = LB.run_legb(
+        ctx,
+        d,
+        n_mocks=1,
+        mock_indices=[0],
+        return_per_mock=True,
+        leg_a=True,
+        n_warmup=4,
+        n_samples=4,
+        seed=11,
+        verbose=False,
+        inject_spec={"lls_truth_boost": boost},
+    )
     names = base[0]["names"]
     j = names.index("alpha_lls")
     np.testing.assert_allclose(inj[0]["truth_vec"][j], base[0]["truth_vec"][j] * boost, rtol=1e-10)

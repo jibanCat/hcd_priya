@@ -4,6 +4,7 @@ CI (.github/workflows/tests.yml, tools/ci/run_test_tier.py) runs the "wheel" and
 there except of a test named in its file's asset_tests or skipped_by_design, which is reported as not run, and any
 expected failure except a deferred_legacy deferral or one whose exact message is in the file's deferred_xfails; every
 other tier is reported as not run too, with the reason recorded here."""
+
 import ast
 import glob
 import os
@@ -39,10 +40,18 @@ def test_every_test_file_is_classified_exactly_once():
 
 def test_each_entry_has_a_known_tier_and_out_of_ci_entries_say_why():
     for path, entry in _doc()["files"].items():
-        assert set(entry) <= {"tier", "reason", "asset_tests", "skipped_by_design", "deferred_xfails"}, path
+        assert set(entry) <= {
+            "tier",
+            "reason",
+            "asset_tests",
+            "skipped_by_design",
+            "deferred_xfails",
+        }, path
         assert entry["tier"] in TIERS, path
         if entry["tier"] not in CI_TIERS or set(entry) & {"asset_tests", "skipped_by_design"}:
-            assert entry.get("reason", "").strip(), f"{path}: a file or test outside CI needs its reason"
+            assert entry.get(
+                "reason", ""
+            ).strip(), f"{path}: a file or test outside CI needs its reason"
 
 
 def test_declared_skips_are_test_functions_of_their_file():
@@ -56,7 +65,9 @@ def test_declared_skips_are_test_functions_of_their_file():
         assert entry["tier"] in CI_TIERS, path
         assert len(set(names)) == len(names), path
         with open(os.path.join(root, path), encoding="utf-8") as f:
-            defined = {n.name for n in ast.walk(ast.parse(f.read())) if isinstance(n, ast.FunctionDef)}
+            defined = {
+                n.name for n in ast.walk(ast.parse(f.read())) if isinstance(n, ast.FunctionDef)
+            }
         bases = {n.split("[")[0] for n in names}
         assert bases <= defined, f"{path}: not test functions here: {sorted(bases - defined)}"
 

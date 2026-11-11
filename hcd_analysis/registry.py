@@ -24,6 +24,7 @@ where released models are hosted is not decided yet.
   size and sha256 match; cached files are hashed again on every fetch; a symlink or any non-regular file in the cache
   is never trusted.
 """
+
 from __future__ import annotations
 
 import errno
@@ -99,7 +100,9 @@ def _keys(obj, required, where):
 
 def _segment(value, what, where):
     if not isinstance(value, str) or not _SEGMENT.match(value) or ".." in value:
-        raise ManifestError(f"{where}: {what} {value!r} is not a plain name (1-100 of A-Za-z0-9._+-, no '..')")
+        raise ManifestError(
+            f"{where}: {what} {value!r} is not a plain name (1-100 of A-Za-z0-9._+-, no '..')"
+        )
 
 
 def _url(value, where):
@@ -132,14 +135,18 @@ def validate_manifest(doc):
         for j, f in enumerate(m["files"]):
             fwhere = f"{where}.files[{j}]"
             _keys(f, _FILE_KEYS, fwhere)
-            _segment(f["path"], "path", fwhere)                     # a bundle is flat: one plain file name
+            _segment(f["path"], "path", fwhere)  # a bundle is flat: one plain file name
             if f["path"].lower() in names:
                 raise ManifestError(f"{fwhere}: path {f['path']!r} is listed twice (ignoring case)")
             names.add(f["path"].lower())
             if not isinstance(f["sha256"], str) or not _SHA256.match(f["sha256"]):
                 raise ManifestError(f"{fwhere}: sha256 must be 64 lower-case hex digits")
             size = f["size"]
-            if not isinstance(size, int) or isinstance(size, bool) or not 0 <= size <= MAX_FILE_BYTES:
+            if (
+                not isinstance(size, int)
+                or isinstance(size, bool)
+                or not 0 <= size <= MAX_FILE_BYTES
+            ):
                 raise ManifestError(f"{fwhere}: size must be an integer in [0, {MAX_FILE_BYTES}]")
             total += size
             _url(f["url"], fwhere)
@@ -181,7 +188,9 @@ def _real_dir(path):
     except FileExistsError:
         pass
     if not stat.S_ISDIR(os.lstat(path).st_mode):
-        raise RegistryError(f"{path} is not a plain directory (a symlink or a file): refusing to use it")
+        raise RegistryError(
+            f"{path} is not a plain directory (a symlink or a file): refusing to use it"
+        )
     return path
 
 
@@ -208,7 +217,9 @@ def _cached_digest(target, size):
 class _HttpsOnlyRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if urllib.parse.urlsplit(newurl).scheme != "https":
-            raise RegistryError(f"refused a redirect from {req.full_url} to {newurl}: only https is followed")
+            raise RegistryError(
+                f"refused a redirect from {req.full_url} to {newurl}: only https is followed"
+            )
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -231,16 +242,22 @@ def _download(f, partial_dir, target):
                     break
                 n += len(block)
                 if n > f["size"]:
-                    raise IntegrityError(f"{f['path']} from {f['url']}: more than the {f['size']} bytes listed")
+                    raise IntegrityError(
+                        f"{f['path']} from {f['url']}: more than the {f['size']} bytes listed"
+                    )
                 h.update(block)
                 out.write(block)
             out.flush()
             os.fsync(out.fileno())
         if n != f["size"]:
-            raise IntegrityError(f"{f['path']} from {f['url']}: {n} bytes, the manifest lists {f['size']}")
+            raise IntegrityError(
+                f"{f['path']} from {f['url']}: {n} bytes, the manifest lists {f['size']}"
+            )
         if h.hexdigest() != f["sha256"]:
-            raise IntegrityError(f"{f['path']} from {f['url']}: sha256 {h.hexdigest()}, the manifest lists "
-                                 f"{f['sha256']} ({n} bytes)")
+            raise IntegrityError(
+                f"{f['path']} from {f['url']}: sha256 {h.hexdigest()}, the manifest lists "
+                f"{f['sha256']} ({n} bytes)"
+            )
         os.replace(tmp, target)
     except BaseException:
         try:
@@ -255,7 +272,8 @@ def fetch(entry, cache=None, offline=None):
 
     The entry is validated again. Cached files are hashed again. Online, a file that is missing or does not verify
     is removed and downloaded again (with a warning when a cached copy changed), so a failed download leaves nothing
-    at its path; offline, it is reported. A file reaches the model's directory only after it verifies."""
+    at its path; offline, it is reported. A file reaches the model's directory only after it verifies.
+    """
     validate_manifest({"schema": SCHEMA, "models": [entry]})
     if offline is None:
         offline = os.environ.get("HCD_PRIYA_OFFLINE") == "1"
@@ -270,17 +288,24 @@ def fetch(entry, cache=None, offline=None):
             continue
         if offline:
             state = "missing from" if not os.path.lexists(target) else "not verified in"
-            raise OfflineError(f"{f['path']} of {entry['name']} {entry['version']} is {state} the cache {root} "
-                               "and downloads are off (HCD_PRIYA_OFFLINE=1 or offline=True)")
+            raise OfflineError(
+                f"{f['path']} of {entry['name']} {entry['version']} is {state} the cache {root} "
+                "and downloads are off (HCD_PRIYA_OFFLINE=1 or offline=True)"
+            )
         if digest is not None:
-            warnings.warn(f"{target}: the cached copy (sha256 {digest}) differs from the manifest (sha256 "
-                          f"{f['sha256']}); downloading it again", stacklevel=2)
+            warnings.warn(
+                f"{target}: the cached copy (sha256 {digest}) differs from the manifest (sha256 "
+                f"{f['sha256']}); downloading it again",
+                stacklevel=2,
+            )
         if os.path.lexists(target):
             if stat.S_ISDIR(os.lstat(target).st_mode):
                 raise RegistryError(f"{target} is a directory: refusing to replace it")
             os.unlink(target)
         if partial is None:
-            partial = _real_dir(_real_dir(_real_dir(base / ".partial") / entry["name"]) / entry["version"])
+            partial = _real_dir(
+                _real_dir(_real_dir(base / ".partial") / entry["name"]) / entry["version"]
+            )
         _download(f, partial, target)
     return root
 
@@ -293,7 +318,9 @@ def supported_formats():
 def _format_loader(fmt):
     spec = _FORMATS.get(fmt)
     if spec is None:
-        raise RegistryError(f"no loader for format {fmt!r} (supported: {', '.join(supported_formats()) or 'none'})")
+        raise RegistryError(
+            f"no loader for format {fmt!r} (supported: {', '.join(supported_formats()) or 'none'})"
+        )
     if callable(spec):
         return spec
     module, _, func = spec.partition(":")

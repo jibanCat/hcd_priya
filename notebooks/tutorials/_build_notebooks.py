@@ -116,10 +116,13 @@ def style_cell():
 
 
 def write_notebook(name: str, cells: list) -> Path:
-    nb = new_notebook(cells=cells, metadata={
-        "kernelspec": KERNEL,
-        "language_info": LANG,
-    })
+    nb = new_notebook(
+        cells=cells,
+        metadata={
+            "kernelspec": KERNEL,
+            "language_info": LANG,
+        },
+    )
     path = OUT_DIR / name
     nbf.write(nb, path)
     print(f"wrote {path}")
@@ -129,6 +132,7 @@ def write_notebook(name: str, cells: list) -> Path:
 # ============================================================================
 # Notebook 00 — dataset layout, parameter encoding, snapshot map
 # ============================================================================
+
 
 def build_00():
     cells = [
@@ -159,7 +163,6 @@ emulator-building.  The primer immediately below establishes the
 physical picture; if you already know the field, skim it and skip to
 the glossary in §0.
 """),
-
         md("""
 ## What is the Lyα forest? (and what is this project trying to do?)
 
@@ -226,7 +229,6 @@ A six-bullet primer for a first-day grad student.
   Prochaska 2005 before you start NB01.  Both are linked from
   `notebooks/tutorials/README.md` under "Background reading".
 """),
-
         md("""
 ## 0. Glossary of jargon used throughout
 
@@ -250,7 +252,6 @@ notebooks define them more carefully on first use.
 | **fast-mode NHI** vs **Voigt NHI** | Two ways to turn τ(v) into a column density.  The **fast** estimator applies the Ladenburg–Reiche sum rule directly to the τ array (`N_HI = Σ τ_i dv / σ_int`); this is *exact* for noise-free, complete profiles — the only error source is truncation of pixels below `τ_threshold`, which is `< 0.005 dex` worst case (full derivation in `docs/fast_mode_physics.md`).  The **Voigt** fit fits a single-component Voigt profile on a widened window; it agrees with fast mode to `< 0.001 dex` on clean profiles, but gives you `b` for free and is more robust to a single contaminating absorber inside the fit window.  Fast mode is the production LF setting; Voigt is the HR setting (HR has the SNR to use `b`). |
 | **`(1+z)·h` bug** | Historical absorption-distance bug: the original `cddf.npz` was **inflated** by a missing `(1+z)·h` factor in the path-length denominator.  The corrected file is the original divided by `patch_factor = (1+z)·h` (≈ 2.0 at z=2, h=0.67).  Always use `cddf_corrected.npz`. |
 """),
-
         md("""
 ## 1. The two storage locations
 
@@ -273,7 +274,6 @@ A few rules to internalise:
 * Both locations are read-only from your point of view as a student.
   Generate any new outputs into a fresh directory under your scratch.
 """),
-
         code("""
 # Imports used throughout this notebook
 import os
@@ -287,7 +287,6 @@ HCD_OUT_ROOT = Path(os.environ.get('HCD_OUTPUTS_DIR', '<HCD_OUTPUTS_DIR unset>')
 print('raw spectra root :', DATA_ROOT,  '->', DATA_ROOT.exists())
 print('processed root   :', HCD_OUT_ROOT, '->', HCD_OUT_ROOT.exists())
 """),
-
         md("""
 ## 2. Simulation folder names encode the parameter point
 
@@ -314,7 +313,6 @@ emulator parameter space:
 
 The package gives you a parser so you don't have to write a regex by hand:
 """),
-
         code("""
 from hcd_analysis.io import parse_sim_params, discover_simulations
 
@@ -323,7 +321,6 @@ params = parse_sim_params(example)
 for k, v in params.items():
     print(f'  {k:12s} = {v}')
 """),
-
         md("""
 ## 3. The full simulation list
 
@@ -332,7 +329,6 @@ name matches the 9-parameter pattern.  Use it on `HCD_OUT_ROOT` to see all
 LF (low-fidelity, 60 sims) entries; the 4 HR (high-fidelity) sims live in
 the `hires/` subdirectory.
 """),
-
         code("""
 sims_lf = discover_simulations(HCD_OUT_ROOT)
 sims_hr = discover_simulations(HCD_OUT_ROOT / 'hires')
@@ -344,7 +340,6 @@ print(f'HR sims discovered: {len(sims_hr)}')
 for s in sims_lf[:3]:
     print(s.name[:60], ' -> ns=%.3f Ap=%.2e' % (s.params['ns'], s.params['Ap']))
 """),
-
         md("""
 ## 4. Snapshot ↔ redshift mapping
 
@@ -385,7 +380,6 @@ sims that have *every* snapshot output:
 3. We ignore snap 016 (canonical z = 3.20) for some analyses where it
    overlaps awkwardly with neighbouring snaps; see the analysis docs.
 """),
-
         code("""
 # The authoritative per-(sim, snap) redshift is meta.json["z"] in each
 # processed-output snap directory.  Two ways to recover the full snap-z
@@ -417,7 +411,6 @@ for sd in snap_dirs:
 # this notebook.  Any sim that skipped a canonical snap will show a
 # mismatch; that's expected (the table is the "fully run" mapping).
 """),
-
         md("""
 ## 5. What's inside each `<sim>/snap_NNN/` directory
 
@@ -447,7 +440,6 @@ you have a specific reason:
 
 Let's verify the files exist for one (sim, snap):
 """),
-
         code("""
 import json
 SIM_DIR = HCD_OUT_ROOT / example
@@ -468,7 +460,6 @@ print('  dv_kms     =', meta['dv_kms'])
 print('  n_skewers  =', meta['n_skewers'])
 print('  n_absorbers=', meta['n_absorbers'])
 """),
-
         md("""
 ## 6. One important wrinkle: the k-grid is not shared across sims
 
@@ -498,7 +489,6 @@ every subsequent plot in NB03 — plus the in-repo cache at
 `hcd_analysis/_emulator_data/observables.h5` — is in angular units.
 When you read `k` directly off disk, multiply by `2π` first.
 """),
-
         md("""
 ## Where to next
 
@@ -527,6 +517,7 @@ what's in a file.
 # Notebook 01 — reading catalogs and raw spectra
 # ============================================================================
 
+
 def build_01():
     cells = [
         md("""
@@ -553,7 +544,6 @@ those averages you need to know what a single absorber looks like —
 this is the lowest-level "atoms of the analysis" view, and where every
 bug-hunting session starts.
 """),
-
         code("""
 import os
 from pathlib import Path
@@ -576,9 +566,7 @@ RAW_FILE = DATA_ROOT / SIM / 'output' / f'SPECTRA_{SNAP:03d}' / 'lya_forest_spec
 print('catalog dir :', SNAP_DIR)
 print('raw file    :', RAW_FILE, '->', RAW_FILE.exists())
 """),
-
         style_cell(),
-
         md("""
 ## 1. `meta.json` — the per-(sim, snap) metadata
 
@@ -587,7 +575,6 @@ snapshot you are looking at, what cosmology was used, and how many
 absorbers of each class were found.  Anything in `meta.json` is the
 authoritative answer for that (sim, snap).
 """),
-
         code("""
 with open(SNAP_DIR / 'meta.json') as f:
     meta = json.load(f)
@@ -603,7 +590,6 @@ for k, v in meta.items():
     else:
         print(f'  {k:14s} = {v}')
 """),
-
         md("""
 A few things worth noting in the above:
 
@@ -630,7 +616,6 @@ A few things worth noting in the above:
   at 17.2 corresponds to `τ_LL ≈ 1` (Lyman-limit optical depth of
   unity; `N_HI = 1/σ_LL ≈ 1.6 × 10¹⁷ cm⁻²`).
 """),
-
         md("""
 ## 2. `catalog.npz` — one row per absorber
 
@@ -638,7 +623,6 @@ A few things worth noting in the above:
 Total size = `n_LLS + n_subDLA + n_DLA` (e.g. 81 762 absorbers in the
 example sim).
 """),
-
         code("""
 cat = np.load(SNAP_DIR / 'catalog.npz', allow_pickle=True)
 
@@ -656,7 +640,6 @@ for i in range(n_show):
           f'{np.log10(cat["NHI"][i]):>8.3f} {cat["b_kms"][i]:>6.1f}'
           f'  {bool(cat["fit_success"][i])!s:>5} {bool(cat["fast_mode"][i])!s:>5}')
 """),
-
         md("""
 Field-by-field:
 
@@ -677,7 +660,6 @@ Field-by-field:
 A consistency check: the per-class counts in `meta.json` should match
 what we get from binning `NHI` ourselves.
 """),
-
         code("""
 log_nhi = np.log10(cat['NHI'])
 
@@ -690,7 +672,6 @@ print(f'meta:     LLS={meta["n_absorbers"]["LLS"]:,}  '
       f'subDLA={meta["n_absorbers"]["subDLA"]:,}  '
       f'DLA={meta["n_absorbers"]["DLA"]:,}')
 """),
-
         md("""
 **Expected output for the example sim/snap above** (z = 2.0):
 
@@ -705,7 +686,6 @@ write time, so the LLS count should reproduce exactly) or a different
 catalog file.  The `computed` row and the `meta` row should always
 agree because they're derived from the same NHI column.
 """),
-
         md("""
 ## 3. log NHI distribution
 
@@ -724,7 +704,6 @@ flat plateau on the low-NHI side is a catalog-construction effect (we
 detect any pixel run with τ > 100, but only assign NHI estimates above
 the 17.2 threshold).
 """),
-
         code("""
 fig, ax = plt.subplots(figsize=(7.5, 4.5))
 ax.hist(log_nhi, bins=np.arange(17.0, 22.0, 0.1), histtype='stepfilled',
@@ -740,7 +719,6 @@ ax.legend(loc='upper right')
 save_fig(fig, 'NB01_log_nhi_histogram')
 plt.show()
 """),
-
         md("""
 ## 4. The richer interface: `AbsorberCatalog`
 
@@ -748,7 +726,6 @@ plt.show()
 arrays with helpful accessors (`by_class`, `summary`, `to_dataframe`).  Use
 it when you want to operate on absorbers as objects rather than arrays.
 """),
-
         code("""
 from hcd_analysis.catalog import AbsorberCatalog
 
@@ -758,7 +735,6 @@ dlas = ac.by_class('DLA')
 print(f'first DLA in catalog: skewer={dlas[0].skewer_idx} '
       f'pix=({dlas[0].pix_start}, {dlas[0].pix_end}) log NHI={dlas[0].log_NHI:.3f}')
 """),
-
         md("""
 ## 5. Opening the raw spectra HDF5 — without loading it
 
@@ -785,7 +761,6 @@ sampling noise, not by float roundoff).  Seven significant digits gives
 than the sampling-noise floor.  Storing `τ` as float64 would double the
 3 GB raw files for no measurable gain in any downstream observable.
 """),
-
         code("""
 with h5py.File(RAW_FILE, 'r') as f:
     print('Header attrs:')
@@ -796,13 +771,11 @@ with h5py.File(RAW_FILE, 'r') as f:
         d = f[name]
         print(f'  {name:20s} shape={d.shape} dtype={d.dtype}')
 """),
-
         md("""
 A quick sanity check on the velocity-pixel width: `pixel_dv_kms()` from
 `hcd_analysis.io` recomputes `dv_kms` from cosmology and should match
 the value cached in `meta.json`.
 """),
-
         code("""
 from hcd_analysis.io import read_header, pixel_dv_kms
 hdr = read_header(RAW_FILE)
@@ -810,7 +783,6 @@ dv_recomputed = pixel_dv_kms(hdr)
 print(f'meta.dv_kms       = {meta["dv_kms"]:.6f}')
 print(f'recomputed dv_kms = {dv_recomputed:.6f}')
 """),
-
         md("""
 ## 6. Visualising one DLA
 
@@ -818,7 +790,6 @@ The per-absorber records hand you a `(skewer_idx, pix_start, pix_end)`
 triple.  To see what that absorber actually looks like in flux space,
 load just that one row of `tau`, convert to `F = exp(-tau)`, and plot.
 """),
-
         code("""
 # Pick the highest-NHI DLA in the catalog so the damping wings are
 # obvious.  ac.by_class('DLA') returns a list of Absorber objects.
@@ -866,7 +837,6 @@ ax_f.legend(loc='lower right')
 save_fig(fig, 'NB01_one_dla_tau_F')
 plt.show()
 """),
-
         md("""
 **What you're looking at.**  The catalog's `(pix_start, pix_end)` window
 (grey band) is the *core* of the absorber — the contiguous run where
@@ -893,6 +863,7 @@ be 10²⁰·⁵ — the catalog reports the column-density inferred from the
 # ============================================================================
 # Notebook 02 — CDDF and dN/dX
 # ============================================================================
+
 
 def build_02():
     cells = [
@@ -927,7 +898,6 @@ Together they answer "how many of each kind of HCD does this simulation
 predict?" — which is what observational papers like Prochaska+05 and
 Ho+21 report and what every HCD-emulator deliverable will reproduce.
 """),
-
         code("""
 import os
 from pathlib import Path
@@ -944,9 +914,7 @@ with open(SNAP_DIR / 'meta.json') as f:
     meta = json.load(f)
 print(f'sim={SIM[:50]}…  snap={SNAP}  z={meta["z"]}')
 """),
-
         style_cell(),
-
         md("""
 ## 1. The cached CDDF
 
@@ -966,7 +934,6 @@ this tutorial (`h = 0.668`) at z = 2.0, that is
 forward; only touch `cddf.npz` if you are auditing the bugfix itself
 (it's kept around for that purpose).
 """),
-
         code("""
 cddf = np.load(SNAP_DIR / 'cddf_corrected.npz', allow_pickle=True)
 print('Fields:')
@@ -981,7 +948,6 @@ print('total_path     :', float(cddf['total_path']))
 print('dx_bug_patched :', bool(cddf['dx_bug_patched']))
 print('patch_factor   :', float(cddf['patch_factor']))
 """),
-
         md("""
 **Definition reminder.**  The CDDF is
 
@@ -1066,7 +1032,6 @@ is what the bug-fix corrected in `cddf_corrected.npz`: the original
 Higher-NHI bins are exponentially harder to fill, so a CDDF plot is
 always log-log.
 """),
-
         code("""
 log_nhi_centres = cddf['log_nhi_centres']
 f_nhi           = cddf['f_nhi']
@@ -1090,7 +1055,6 @@ ax.legend(loc='lower left')
 save_fig(fig, 'NB02_cddf_cached')
 plt.show()
 """),
-
         md("""
 ## 2. Recompute it from the catalog
 
@@ -1098,7 +1062,6 @@ The cached file is just the result of running `measure_cddf` on the
 catalog.  Recomputing should reproduce it bitwise (modulo numpy
 histogram tie-breaking on bin edges, which never matters here):
 """),
-
         code("""
 import pandas as pd
 from hcd_analysis.cddf import measure_cddf_from_dataframe
@@ -1132,7 +1095,6 @@ diff = cddf_recompute['f_nhi'] - cddf['f_nhi']
 ok   = np.allclose(cddf_recompute['f_nhi'], cddf['f_nhi'], rtol=1e-6, atol=0)
 print(f'identical to cached: {ok}    max |diff| = {np.max(np.abs(diff)):.3e}')
 """),
-
         md("""
 **If your recomputation does not match,** the most likely cause is that
 the cached `cddf_corrected.npz` was patched in-place from a prior version
@@ -1154,7 +1116,6 @@ which gives the absorbers-per-unit-absorption-path expectation.  Compute
 it for each class and compare against the project-wide aggregate file
 `hcd_summary_lf.h5`:
 """),
-
         code("""
 import h5py
 
@@ -1191,7 +1152,6 @@ if SUMMARY.exists():
 else:
     print('(summary file not found; skipped cross-check)')
 """),
-
         md("""
 Expected agreement, with one subtlety:
 
@@ -1262,7 +1222,6 @@ This is exactly the figure that `scripts/plot_cddf_vs_ho21.py` produces
 for all four redshift bins; here we do just the one corresponding to our
 chosen snap.
 """),
-
         code("""
 HO21 = Path(os.environ.get('HCD_DLA_DATA_DIR', '<HCD_DLA_DATA_DIR unset>')) / 'ho21' / 'cddf_z225.txt'
 fig, ax = plt.subplots(figsize=(7.5, 5.5))
@@ -1295,7 +1254,6 @@ ax.legend(loc='lower left')
 save_fig(fig, 'NB02_cddf_vs_ho21')
 plt.show()
 """),
-
         md("""
 ## Suggested student exercises
 
@@ -1322,6 +1280,7 @@ ensemble.
 # ============================================================================
 # Notebook 03 — per-class P1D
 # ============================================================================
+
 
 def build_03():
     cells = [
@@ -1374,7 +1333,6 @@ the 9 PRIYA parameters — is the central job of this dataset.
   one power of `dv`).
 * `⟨F⟩` is dimensionless (transmitted-fraction).
 """),
-
         code("""
 import os
 from pathlib import Path
@@ -1394,9 +1352,7 @@ with open(SNAP_DIR / 'meta.json') as f:
     meta = json.load(f)
 print(f'sim={SIM[:50]}…  snap={SNAP}  z={meta["z"]}')
 """),
-
         style_cell(),
-
         md("""
 ## 1. The cached file
 
@@ -1405,7 +1361,6 @@ arrays, four mean-flux scalars, four sightline counts, and ~10 self-
 documenting attributes at the file root.  Run `f.visititems(print)` if
 you ever forget the schema.
 """),
-
         code("""
 with h5py.File(SNAP_DIR / 'p1d_per_class.h5', 'r') as f:
     print('--- root attributes ---')
@@ -1416,7 +1371,6 @@ with h5py.File(SNAP_DIR / 'p1d_per_class.h5', 'r') as f:
     f.visititems(lambda n, o: isinstance(o, h5py.Dataset)
                  and print(f'  {n}: shape={o.shape} dtype={o.dtype}'))
 """),
-
         code("""
 with h5py.File(SNAP_DIR / 'p1d_per_class.h5', 'r') as f:
     k       = f['k'][:]
@@ -1436,7 +1390,6 @@ print(f'k grid: len={len(k)}  k_min={k[1]:.4g} (k[0]=0 is DC)  k_max={k[-1]:.4g}
 print(f'sightlines: total={n_total:,}  clean={n_clean:,}  LLS={n_lls:,}  subDLA={n_sub:,}  DLA={n_dla:,}')
 print(f'<F>_clean = {mF_clean:.4f}    <F>_DLA = {mF_dla:.4f}')
 """),
-
         md("""
 ## 1b. The k convention used throughout this project: **angular k**
 
@@ -1459,12 +1412,10 @@ unchanged by this relabel (the prefactor cancels because of how
 Parseval's theorem partitions across the two conventions); only the
 x-axis shifts.
 """),
-
         code("""
 # From here on, work in angular k_ang = 2*pi * k_cyc throughout.
 k_ang = 2.0 * np.pi * k        # rad·s/km
 """),
-
         md("""
 ## 2. Plot the four templates
 
@@ -1483,7 +1434,6 @@ per-subset mean flux is what makes the ratio `P_<class>_only / P_clean`
 a clean *template* that depends only on HCD properties, not on the
 forest amplitude.
 """),
-
         code("""
 fig, ax = plt.subplots(figsize=(8, 5.5))
 
@@ -1501,7 +1451,6 @@ ax.legend(loc='lower left')
 save_fig(fig, 'NB03_per_class_p1d')
 plt.show()
 """),
-
         code("""
 # The Rogers-style template ratio: P_<class> / P_clean
 fig, ax = plt.subplots(figsize=(8, 4.5))
@@ -1520,7 +1469,6 @@ ax.legend(loc='upper left')
 save_fig(fig, 'NB03_per_class_p1d_ratio')
 plt.show()
 """),
-
         md("""
 **What you should see.**  The DLA template is well above 1 at all k —
 adding even one DLA to a sightline boosts its δF variance enormously.
@@ -1533,7 +1481,6 @@ These three ratio curves are exactly what the upstream Lyα emulator
 fits with the Rogers α-template, and what our two-headed emulator
 will need to learn as a function of the 9-D parameter vector.
 """),
-
         md("""
 ## 3. Recomputing P_DLA_only from scratch
 
@@ -1550,7 +1497,6 @@ at `n_skewers = 30000` (≈4 % of the sim) and verify shape + low-k
 agreement; the high-k tail will be noisier on the subsample but the
 template shape should be correct.
 """),
-
         code("""
 from hcd_analysis.catalog import AbsorberCatalog
 from hcd_analysis.p1d     import compute_p1d_per_class
@@ -1575,7 +1521,6 @@ print('P_DLA_only    :', result['P_DLA_only'].shape)
 print('mean_F_DLA    :', result['mean_F_DLA'])
 print('n_sightlines_DLA (subsample):', result['n_sightlines_DLA'])
 """),
-
         md("""
 **Caveats of running on a subsample.**  Because the subsample mostly
 contains low-NHI sightlines (DLAs are rare — about 1 in 70 sightlines),
@@ -1584,7 +1529,6 @@ cached version.  The clean / LLS / subDLA P1Ds will be in much better
 agreement.  Plot the cached and recomputed `P_clean` together so you
 can see the agreement at low/intermediate k:
 """),
-
         code("""
 k_re       = 2.0 * np.pi * result['k']        # convert to angular up-front
 p_clean_re = result['P_clean']
@@ -1612,7 +1556,6 @@ fig.suptitle(f'Round-trip check: cached vs recomputed per-class P1D  (z = {meta[
 save_fig(fig, 'NB03_round_trip_cached_vs_recomputed')
 plt.show()
 """),
-
         md("""
 **What you should see.**  `P_clean` agrees nearly perfectly across all k
 — ~26 000 of the 30 000 subsampled sightlines are clean.  `P_DLA_only`
@@ -1641,7 +1584,6 @@ For now, just be aware that **`P_DLA_only` on disk is at one specific
 `<F>`** and that the emulator work will need to broaden it into a
 2-argument function `P_DLA_only(params, τ_eff)`.
 """),
-
         md("""
 ## Suggested student exercises
 
@@ -1727,7 +1669,6 @@ there: starting from a 1D τ array, what algorithm produces a
 exists, what does "masking the HCD" actually mean numerically?  These
 two questions are the substrate of every science decision downstream.
 """),
-
         code("""
 import os
 from pathlib import Path
@@ -1754,9 +1695,7 @@ log_nhi = np.log10(cat['NHI'])
 print(f'sim={SIM[:50]}…  snap={SNAP}  z={meta["z"]}  dv={dv:.3f} km/s  nbins={nbins}')
 print(f'absorbers in catalog: {len(log_nhi):,}')
 """),
-
         style_cell(),
-
         md("""
 ## 1. Visual signatures of LLS, subDLA, DLA
 
@@ -1765,7 +1704,6 @@ on its sightline — so the visual signature isn't confused by neighbours.
 The skewer indices below were found by enumerating the catalog;
 recomputing them on the fly is left as an exercise.
 """),
-
         code("""
 EXAMPLES = [
     # (class label, skewer_idx, pix_start, pix_end, log_NHI from catalog)
@@ -1783,7 +1721,6 @@ with h5py.File(RAW_FILE, 'r') as f:
 
 print('loaded tau for skewers:', list(tau_examples.keys()))
 """),
-
         code("""
 fig, axes = plt.subplots(2, 3, figsize=(13, 6.0), sharex='col')
 for col, (cls, sk, ps, pe, ln) in enumerate(EXAMPLES):
@@ -1822,7 +1759,6 @@ fig.suptitle(r'$\\tau(v)$ (top) and $F(v)$ (bottom): one clean example per HCD c
 save_fig(fig, 'NB04_class_signatures')
 plt.show()
 """),
-
         md("""
 **Visual signatures:**
 
@@ -1843,7 +1779,6 @@ plt.show()
   any masking strategy that uses just that range *will* leave damping-
   wing power in the spectrum.  We come back to this in §4.
 """),
-
         md("""
 ## 2. The finder algorithm, step by step
 
@@ -1864,7 +1799,6 @@ Watch how the merge step in stage 3 *almost* combines them, but doesn't
 quite, because the gap exceeds the default `merge_dv_kms = 100 km/s`
 (≈ 10 pixels at this dv).
 """),
-
         code("""
 DEMO_SKEWER = 1172
 with h5py.File(RAW_FILE, 'r') as f:
@@ -1873,7 +1807,6 @@ v_demo = np.arange(len(tau_demo)) * dv
 print(f'skewer {DEMO_SKEWER}: max τ = {tau_demo.max():.2f}, '
       f'pixels above τ=100: {(tau_demo > 100).sum()}')
 """),
-
         md("""
 ### Stage 1 — threshold
 
@@ -1883,7 +1816,6 @@ The default `tau_threshold = 100` is far above any forest absorption
 (typical peak τ ~ 10⁴–10⁹ for HCDs).  This is a coarse first pass; the
 merging and Voigt-fitting stages refine it.
 """),
-
         code("""
 TAU_THRESHOLD = 100.0
 above = tau_demo > TAU_THRESHOLD
@@ -1902,7 +1834,6 @@ ax.legend(loc='upper right')
 save_fig(fig, 'NB04_finder_stage1_threshold')
 plt.show()
 """),
-
         md("""
 ### Stage 2 — connected runs (with periodic-box trick)
 
@@ -1915,7 +1846,6 @@ appear as runs that cross the `nbins` boundary.
 We reproduce the scan inline so you can see exactly what the catalog
 builder does:
 """),
-
         code("""
 def find_runs(boolean_array):
     '''Return list of (start, end_inclusive) for True runs.'''
@@ -1946,7 +1876,6 @@ for s, e in runs:
           f'  ({(e - s + 1):>3d} pixels)'
           f'{"   [WRAPS]" if wraps else ""}')
 """),
-
         md("""
 ### Stage 3 — merge close runs
 
@@ -1955,7 +1884,6 @@ Two distinct above-threshold runs that are separated by fewer than
 parts of the same physical system (e.g. a DLA whose damping wings dip
 just below the threshold for a couple of pixels in the middle).
 """),
-
         code("""
 MERGE_DV_KMS = 100.0   # default in catalog.build_catalog
 merge_gap_pixels = max(1, int(MERGE_DV_KMS / dv))
@@ -1974,7 +1902,6 @@ print(f'{len(runs)} → {len(merged)} runs after merging.')
 for s, e in merged:
     print(f'   pix {s:>5d} … {e:>5d}  ({(e - s + 1):>3d} pixels)')
 """),
-
         md("""
 ### Stage 4 — drop short runs
 
@@ -1982,7 +1909,6 @@ Single- or double-pixel above-threshold blips are noise and discarded
 (`min_pixels = 2` in production).  Whatever survives is what ends up in
 the catalog.
 """),
-
         code("""
 MIN_PIXELS = 2
 final = [(s, e) for s, e in merged if (e - s + 1) >= MIN_PIXELS]
@@ -2002,14 +1928,12 @@ print(f'Our reconstructed runs:')
 for s, e in final:
     print(f'   pix=({s:>4d}, {e:>4d})')
 """),
-
         md("""
 The reconstructed pixel ranges agree with the catalog (to within 1 pixel
 at the edges, where the threshold crossing is ambiguous).  What the
 catalog adds beyond our reconstruction is the **NHI per system**, which
 needs Voigt fitting and is the subject of the next section.
 """),
-
         md("""
 ## 2b. NHI estimation: fast vs Voigt
 
@@ -2071,7 +1995,6 @@ For a `log N_HI = 21`, `b = 25 km/s` DLA this works out to about
 which is why §2b widens the fit window).  Plug your numbers into the
 cell below to verify against one of the real DLAs in this snap.
 """),
-
         code("""
 # Voigt / damping-wing constants
 LAMBDA_ALPHA  = 1215.67e-8       # cm
@@ -2096,7 +2019,6 @@ def dv_crit_km_s(nhi_test):
 for log_nhi in (20.3, 21.0, 21.5):
     print(f'log NHI = {log_nhi}:  |Δv| where τ=1  ≈  {dv_crit_km_s(10**log_nhi):7.1f}  km/s')
 """),
-
         code("""
 from hcd_analysis.voigt_utils import nhi_from_tau_fast, fit_nhi_from_tau, tau_voigt
 
@@ -2124,7 +2046,6 @@ print(f'Catalog log NHI    = 21.27   (the production fast-mode value)')
 print(f'Fast estimator     = {np.log10(NHI_fast):.3f}   (recomputed here on core only)')
 print(f'Voigt fit          = {np.log10(NHI_fit):.3f}    (b = {b_fit:.1f} km/s, success={ok})')
 """),
-
         code("""
 # Plot the data and the Voigt-fit model on the same window
 v_full = np.arange(len(tau_dla)) * dv
@@ -2150,7 +2071,6 @@ ax.legend(loc='upper right')
 save_fig(fig, 'NB04_voigt_fit_one_dla')
 plt.show()
 """),
-
         md("""
 **What you should see.**  The Voigt model tracks both the saturated
 core (where any model would fit by saturation alone) AND the damping
@@ -2159,7 +2079,6 @@ catalog's grey band — this is why fitting *only* the core
 underestimates NHI for DLAs, and why a serious P1D analysis must mask
 the wings as well as the core.
 """),
-
         md("""
 ## 3. Three masking strategies, side by side
 
@@ -2175,7 +2094,6 @@ embodying a different definition of "where the absorber is":
 
 We apply all three to the DLA from §2 and overlay the masks on `F(v)`.
 """),
-
         code("""
 from hcd_analysis.catalog import AbsorberCatalog
 from hcd_analysis.masking import (
@@ -2201,7 +2119,6 @@ F_dla = np.exp(-tau_dla)
 tau_eff = -np.log(max(F_dla.mean(), 1e-30))
 print(f'\\ntau_eff (this-skewer proxy): {tau_eff:.4f}')
 """),
-
         code("""
 # Three masks
 mask_pixrange = build_skewer_mask(len(tau_dla), abs_on_skewer)
@@ -2217,7 +2134,6 @@ if mask_priya is None:
 print(f'pixels masked:  pixrange={mask_pixrange.sum():>4d}   '
       f'tauspace={mask_tauspace.sum():>4d}   priya={mask_priya.sum():>4d}')
 """),
-
         code("""
 v_full = np.arange(len(tau_dla)) * dv
 
@@ -2245,7 +2161,6 @@ for ax in axes:
 save_fig(fig, 'NB04_three_masks')
 plt.show()
 """),
-
         md("""
 **Reading the figure.**  All three masks cover the same saturated core,
 but they differ on what to do with the wings:
@@ -2268,7 +2183,6 @@ but they differ on what to do with the wings:
   and is the PRIYA recipe described in Bird et al. 2023 §2.7
   (arXiv:2306.05471).
 """),
-
         md("""
 ## 3b. Three fill strategies
 
@@ -2293,7 +2207,6 @@ That's the pair used by `compute_p1d_priya_masked` and the
 `no_DLA_priya` variant the upstream emulator consumes.  Any new
 ablation should be reported relative to this baseline.
 """),
-
         code("""
 from hcd_analysis.masking import _FILL_FUNCTIONS
 
@@ -2320,7 +2233,6 @@ ax.legend(loc='lower right')
 save_fig(fig, 'NB04_three_fills')
 plt.show()
 """),
-
         md("""
 **What you should see.**
 
@@ -2331,7 +2243,6 @@ plt.show()
 * `contiguous` linearly bridges the boundary values — visually smooth,
   but it can sneak in extra δF if the wing endpoints are very different.
 """),
-
         md("""
 ## Suggested student exercises
 

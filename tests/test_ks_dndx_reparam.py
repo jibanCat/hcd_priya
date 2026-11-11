@@ -24,7 +24,9 @@ Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     python -m pytest tests/test_ks_dndx_reparam.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import itertools
 import os
@@ -46,7 +48,9 @@ from tests.gate_helpers import external_path  # noqa: E402  (data roots come fro
 _CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 _CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
-_KS = (external_path("HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"))
+_KS = external_path(
+    "HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"
+)
 _MANIFEST = f"{_REPO_ROOT}/checkpoints/production_ensemble_manifest.json"
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ, _KS))
 _have_prod = _have and os.path.exists(_MANIFEST)
@@ -67,35 +71,55 @@ REF_PINS = {
 # the deployed alpha-space prior vectors the reparam must NOT move — incl. the KS row, which
 # the mapped branch keeps as the legacy/audit alpha-space prior).
 SURVEY_PRIOR_PINS = {
-    None:    (np.array([0.18811862702546295, 0.06218315972222222, 0.004409670138888889]),
-              np.array([0.02821779405381944, 0.02487326388888889, 0.0022048350694444446]),
-              None),
-    "DESI":  (np.array([0.17211216067355312, 0.06218315972222222, 0.004409670138888889]),
-              np.array([0.04939619011330974, 0.02487326388888889, 0.0022048350694444446]),
-              np.array([2.127, 2.758, 2.366])),
-    "eBOSS": (np.array([0.17211216067355312, 0.06218315972222222, 0.004409670138888889]),
-              np.array([0.04939619011330974, 0.02487326388888889, 0.0022048350694444446]),
-              np.array([2.127, 2.758, 2.366])),
-    "KS":    (np.array([0.4302804016838828, 0.06218315972222222, 0.004409670138888889]),
-              np.array([0.17211216067355314, 0.02487326388888889, 0.0022048350694444446]),
-              np.array([2.127, 2.758, 2.366])),
+    None: (
+        np.array([0.18811862702546295, 0.06218315972222222, 0.004409670138888889]),
+        np.array([0.02821779405381944, 0.02487326388888889, 0.0022048350694444446]),
+        None,
+    ),
+    "DESI": (
+        np.array([0.17211216067355312, 0.06218315972222222, 0.004409670138888889]),
+        np.array([0.04939619011330974, 0.02487326388888889, 0.0022048350694444446]),
+        np.array([2.127, 2.758, 2.366]),
+    ),
+    "eBOSS": (
+        np.array([0.17211216067355312, 0.06218315972222222, 0.004409670138888889]),
+        np.array([0.04939619011330974, 0.02487326388888889, 0.0022048350694444446]),
+        np.array([2.127, 2.758, 2.366]),
+    ),
+    "KS": (
+        np.array([0.4302804016838828, 0.06218315972222222, 0.004409670138888889]),
+        np.array([0.17211216067355314, 0.02487326388888889, 0.0022048350694444446]),
+        np.array([2.127, 2.758, 2.366]),
+    ),
 }
 
 MAPPED_SITES = ["eps_lls", "kappa_lls", "m_sub", "t_sub", "dla_raw", "t_dla"]
-LEGACY_KS_SITES = ["theta_unit", "tau0_amp", "dtau0",
-                   "alpha_lls", "alpha_subdla", "alpha_dla_raw",
-                   "s_lls", "s_subdla", "s_dla",
-                   "alpha_res", "alpha_res_slope"]
-MAPPED_KS_SITES = ["theta_unit", "tau0_amp", "dtau0"] + MAPPED_SITES + \
-                  ["alpha_res", "alpha_res_slope"]
+LEGACY_KS_SITES = [
+    "theta_unit",
+    "tau0_amp",
+    "dtau0",
+    "alpha_lls",
+    "alpha_subdla",
+    "alpha_dla_raw",
+    "s_lls",
+    "s_subdla",
+    "s_dla",
+    "alpha_res",
+    "alpha_res_slope",
+]
+MAPPED_KS_SITES = (
+    ["theta_unit", "tau0_amp", "dtau0"] + MAPPED_SITES + ["alpha_res", "alpha_res_slope"]
+)
 
 
 @pytest.fixture(scope="session")
 def ks_setup():
     """FULL-grid mapped KS ctx (default cuts so z_global carries the pinned rows up to 4.6)."""
     ctx, d = C.build_legb_ctx(use_xclass=True, survey="KS")
-    core = {leg.name: jnp.asarray(np.asarray(ctx.dla_core_leg[leg.name]).mean(axis=0))
-            for leg in ctx.legs}
+    core = {
+        leg.name: jnp.asarray(np.asarray(ctx.dla_core_leg[leg.name]).mean(axis=0))
+        for leg in ctx.legs
+    }
     return ctx, d, core
 
 
@@ -103,8 +127,10 @@ def ks_setup():
 def ks_legacy_setup():
     """The R6 legacy-override KS ctx (OLD alpha-space parameterization, byte-identical)."""
     ctx, d = C.build_legb_ctx(use_xclass=True, survey="KS", ks_legacy_alpha_param=True)
-    core = {leg.name: jnp.asarray(np.asarray(ctx.dla_core_leg[leg.name]).mean(axis=0))
-            for leg in ctx.legs}
+    core = {
+        leg.name: jnp.asarray(np.asarray(ctx.dla_core_leg[leg.name]).mean(axis=0))
+        for leg in ctx.legs
+    }
     return ctx, d, core
 
 
@@ -128,18 +154,27 @@ def test_reference_curve_pins(ks_setup):
     ctx, d, _ = ks_setup
     assert ctx.ks_dndx_mapped is True
     zg = np.asarray(ctx.z_global)
-    a_ref = np.asarray(w_c_corrected(jnp.asarray(ctx.ks_dndx_ref),
-                                     jnp.asarray(ctx.ks_xbar_z), jnp.asarray(zg)))[..., 1:]
+    a_ref = np.asarray(
+        w_c_corrected(jnp.asarray(ctx.ks_dndx_ref), jnp.asarray(ctx.ks_xbar_z), jnp.asarray(zg))
+    )[..., 1:]
     for zt, pin in REF_PINS.items():
         rows = np.isclose(zg, zt, atol=1e-6)
         assert rows.sum() == 1, f"pinned z={zt} not on the KS build z_global {zg}"
         np.testing.assert_allclose(
-            a_ref[rows][0], np.asarray(pin), rtol=1e-4, atol=5e-7,
-            err_msg=f"mapped KS reference alpha at z={zt} drifted from the pinned row")
+            a_ref[rows][0],
+            np.asarray(pin),
+            rtol=1e-4,
+            atol=5e-7,
+            err_msg=f"mapped KS reference alpha at z={zt} drifted from the pinned row",
+        )
     # the pivot fields go through the identical construction (z=3 row == pivot map output)
-    a_piv = np.asarray(w_c_corrected(jnp.asarray(ctx.ks_dndx_ref_pivot),
-                                     jnp.asarray(float(ctx.ks_xbar_pivot)),
-                                     jnp.asarray(3.0)))[..., 1:]
+    a_piv = np.asarray(
+        w_c_corrected(
+            jnp.asarray(ctx.ks_dndx_ref_pivot),
+            jnp.asarray(float(ctx.ks_xbar_pivot)),
+            jnp.asarray(3.0),
+        )
+    )[..., 1:]
     np.testing.assert_allclose(a_piv, np.asarray(REF_PINS[3.0]), rtol=1e-4, atol=5e-7)
     # documented centre moves: KS LLS pivot 0.4302804 (legacy) -> 0.393236 (mapped);
     # deployed subDLA pivot preserved to +0.38%.
@@ -174,10 +209,12 @@ def test_survey_alpha_prior_vectors_bit_unchanged(ks_setup):
     w_c_med, Xbar_z3 = C.hcd_pivot_wc_and_xbar(d)
     for sv, (mu_pin, sd_pin, zmu_pin) in SURVEY_PRIOR_PINS.items():
         mu, sd, zmu = C._survey_alpha_prior(w_c_med, Xbar_z3, sv)
-        np.testing.assert_array_equal(np.asarray(mu), mu_pin,
-                                      err_msg=f"{sv} prior CENTER moved (bit-level)")
-        np.testing.assert_array_equal(np.asarray(sd), sd_pin,
-                                      err_msg=f"{sv} prior WIDTH moved (bit-level)")
+        np.testing.assert_array_equal(
+            np.asarray(mu), mu_pin, err_msg=f"{sv} prior CENTER moved (bit-level)"
+        )
+        np.testing.assert_array_equal(
+            np.asarray(sd), sd_pin, err_msg=f"{sv} prior WIDTH moved (bit-level)"
+        )
         if zmu_pin is None:
             assert zmu is None
         else:
@@ -190,8 +227,7 @@ def test_non_ks_builds_have_no_mapped_fields():
     """DESI (narrow, cheap) and survey=None builds keep the dormant defaults — the mapped
     branch cannot activate off-KS (byte-safety by the static dispatch)."""
     for sv in ("DESI", None):
-        ctx, _ = C.build_legb_ctx(desi_kwargs=dict(z_lo=0.0, z_hi=2.6), use_xclass=True,
-                                  survey=sv)
+        ctx, _ = C.build_legb_ctx(desi_kwargs=dict(z_lo=0.0, z_hi=2.6), use_xclass=True, survey=sv)
         assert ctx.ks_dndx_mapped is False
         assert ctx.ks_dndx_ref is None and ctx.ks_xbar_z is None
         assert ctx.ks_dndx_ref_pivot is None and ctx.ks_xbar_pivot is None
@@ -217,8 +253,9 @@ def test_ks_legacy_override_reproduces_old_prior(ks_legacy_setup, ks_setup):
     scale = float(getattr(fn, "base_dist", fn).scale)
     assert loc == mu_pin[0] and scale == sd_pin[0]
     np.testing.assert_array_equal(np.asarray(ctx_l.alpha_hcd_mu), np.asarray(ctx_m.alpha_hcd_mu))
-    np.testing.assert_array_equal(np.asarray(ctx_l.alpha_hcd_sigma),
-                                  np.asarray(ctx_m.alpha_hcd_sigma))
+    np.testing.assert_array_equal(
+        np.asarray(ctx_l.alpha_hcd_sigma), np.asarray(ctx_m.alpha_hcd_sigma)
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -232,24 +269,29 @@ def test_structural_bound_extreme_draws(ks_setup):
     row and alpha >= 0 (float ties: sum == 1.0 with clean coef exactly 0.0 acceptable,
     never negative)."""
     ctx, _, _ = ks_setup
-    ext = dict(eps_lls=8.0 * INF.KS_DNDX_SIGMA_EPS,
-               kappa_lls=6.0 * INF.KS_DNDX_SIGMA_KAPPA,
-               m_sub=8.0 * INF.KS_DNDX_SIGMA_MSUB,
-               t_sub=6.0 * C.ZSLOPE_PRIOR_SIGMA[1],
-               dla_raw=8.0,
-               t_dla=6.0 * C.ZSLOPE_PRIOR_SIGMA[2])
+    ext = dict(
+        eps_lls=8.0 * INF.KS_DNDX_SIGMA_EPS,
+        kappa_lls=6.0 * INF.KS_DNDX_SIGMA_KAPPA,
+        m_sub=8.0 * INF.KS_DNDX_SIGMA_MSUB,
+        t_sub=6.0 * C.ZSLOPE_PRIOR_SIGMA[1],
+        dla_raw=8.0,
+        t_dla=6.0 * C.ZSLOPE_PRIOR_SIGMA[2],
+    )
     worst = -np.inf
     for signs in itertools.product((-1.0, 1.0), repeat=6):
-        sub = {nm: jnp.asarray(sg * ext[nm] + (INF.KS_DNDX_DLA_RAW_MU0 if nm == "dla_raw"
-                                               else 0.0))
-               for nm, sg in zip(MAPPED_SITES, signs)}
-        tr = handlers.trace(handlers.substitute(
-            handlers.seed(C._legb_priors_only, jax.random.PRNGKey(0)), sub)).get_trace(ctx)
+        sub = {
+            nm: jnp.asarray(sg * ext[nm] + (INF.KS_DNDX_DLA_RAW_MU0 if nm == "dla_raw" else 0.0))
+            for nm, sg in zip(MAPPED_SITES, signs)
+        }
+        tr = handlers.trace(
+            handlers.substitute(handlers.seed(C._legb_priors_only, jax.random.PRNGKey(0)), sub)
+        ).get_trace(ctx)
         az = np.asarray(tr["alpha_hcd_z"]["value"])
         s = az.sum(axis=1)
         assert (az >= 0.0).all(), f"negative alpha at signs={signs}"
-        assert (s <= 1.0).all() and not (s > 1.0).any(), \
-            f"sum(alpha) > 1 at signs={signs}: max {s.max()!r}"
+        assert (s <= 1.0).all() and not (
+            s > 1.0
+        ).any(), f"sum(alpha) > 1 at signs={signs}: max {s.max()!r}"
         assert (s < 1.0).all() or np.isclose(s.max(), 1.0), s.max()
         worst = max(worst, float(s.max()))
     print(f"[structural-bound] worst sum(alpha_hcd_z) over 64 extreme corners: {worst:.15f}")
@@ -272,8 +314,10 @@ def test_twin_parity_sites_and_values(ks_setup):
     tr_p = _trace(C._legb_priors_only, ctx, seed=7)
     for nm in MAPPED_KS_SITES:
         np.testing.assert_array_equal(
-            np.asarray(tr_m[nm]["value"]), np.asarray(tr_p[nm]["value"]),
-            err_msg=f"twin sample values diverged at site {nm!r} (fixed seed)")
+            np.asarray(tr_m[nm]["value"]),
+            np.asarray(tr_p[nm]["value"]),
+            err_msg=f"twin sample values diverged at site {nm!r} (fixed seed)",
+        )
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
@@ -288,8 +332,12 @@ def test_reconstruct_matches_model_deterministics(ks_setup):
     rec = C._legb_reconstruct_deterministics(ctx, raw)
     for nm in ("tau0_vec", "alpha_hcd_z", "alpha_lls", "alpha_subdla", "alpha_dla"):
         np.testing.assert_allclose(
-            np.asarray(rec[nm])[0], np.asarray(tr[nm]["value"]), rtol=1e-14, atol=0,
-            err_msg=f"reconstructed {nm!r} deviates from the model deterministic")
+            np.asarray(rec[nm])[0],
+            np.asarray(tr[nm]["value"]),
+            rtol=1e-14,
+            atol=0,
+            err_msg=f"reconstructed {nm!r} deviates from the model deterministic",
+        )
 
 
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI/KS not present")
@@ -329,12 +377,17 @@ def test_induced_geometry_vs_deployed_prior(ks_setup):
     dla_amp = np.log1p(np.exp(draw)) / np.log1p(np.exp(INF.KS_DNDX_DLA_RAW_MU0))
     fac = np.stack([np.exp(eps), np.exp(msub), dla_amp], axis=-1)
     dndx = np.asarray(ctx.ks_dndx_ref_pivot)[None, :] * fac
-    a = np.asarray(w_c_corrected(jnp.asarray(dndx),
-                                 jnp.asarray(np.full(N, float(ctx.ks_xbar_pivot))),
-                                 jnp.asarray(np.full(N, 3.0))))[:, 1:]
+    a = np.asarray(
+        w_c_corrected(
+            jnp.asarray(dndx),
+            jnp.asarray(np.full(N, float(ctx.ks_xbar_pivot))),
+            jnp.asarray(np.full(N, 3.0)),
+        )
+    )[:, 1:]
     q = np.quantile(a[:, 0], [0.05, 0.16, 0.5, 0.84, 0.95])
     np.testing.assert_allclose(q, [0.1913, 0.2562, 0.3904, 0.5613, 0.6778], atol=2e-3)
     from scipy.stats import truncnorm
+
     mu_pin, sd_pin, _ = SURVEY_PRIOR_PINS["KS"]
     loc, sc = float(mu_pin[0]), float(sd_pin[0])
     tn = truncnorm(a=(0.0 - loc) / sc, b=np.inf, loc=loc, scale=sc)
@@ -351,23 +404,34 @@ def test_induced_geometry_vs_deployed_prior(ks_setup):
 # --------------------------------------------------------------------------- #
 def test_signature_moved_and_payload_carries_new_constants():
     sig = INF.hcd_prior_signature()
-    assert sig != OLD_HCD_PRIOR_SIGNATURE, \
-        "hcd_prior_signature did NOT move — the W2 payload additions are missing"
+    assert (
+        sig != OLD_HCD_PRIOR_SIGNATURE
+    ), "hcd_prior_signature did NOT move — the W2 payload additions are missing"
     p = INF.hcd_prior_constants_payload()
-    for k in ("HCD_ALPHA_PARAMETERIZATION", "HCD_LLS_BOOST_SPACE", "KS_DNDX_SIGMA_EPS",
-              "KS_DNDX_SIGMA_KAPPA", "KS_DNDX_SIGMA_MSUB", "KS_DNDX_WIDTH_CONVENTION",
-              "KS_HEADROOM_SOURCE", "KS_DNDX_DLA_RAW_MU0", "KS_DNDX_MAPPED_PIVOT_BAND"):
+    for k in (
+        "HCD_ALPHA_PARAMETERIZATION",
+        "HCD_LLS_BOOST_SPACE",
+        "KS_DNDX_SIGMA_EPS",
+        "KS_DNDX_SIGMA_KAPPA",
+        "KS_DNDX_SIGMA_MSUB",
+        "KS_DNDX_WIDTH_CONVENTION",
+        "KS_HEADROOM_SOURCE",
+        "KS_DNDX_DLA_RAW_MU0",
+        "KS_DNDX_MAPPED_PIVOT_BAND",
+    ):
         assert k in p, f"payload missing the new constant {k!r}"
     assert p["HCD_ALPHA_PARAMETERIZATION"]["KS"] == "dndx_mapped_v2"
     assert p["HCD_LLS_BOOST_SPACE"]["KS"] == "dndx_premap"
     assert p["KS_DNDX_SIGMA_EPS"] == 0.5310
     assert p["KS_DNDX_SIGMA_KAPPA"] == 0.6681
     assert p["KS_DNDX_SIGMA_MSUB"] == 0.4130
-    assert p["KS_HEADROOM_SOURCE"] == \
-        "exact-inverse of the boost-1.0 deployed real-fit centre triple"
+    assert (
+        p["KS_HEADROOM_SOURCE"] == "exact-inverse of the boost-1.0 deployed real-fit centre triple"
+    )
     assert set(p["KS_DNDX_WIDTH_CONVENTION"]) == set(MAPPED_SITES)
     # JSON round-trip stability (the signature is canonical-JSON over this payload)
     import json
+
     json.dumps(p, sort_keys=True)
 
 
@@ -377,11 +441,23 @@ def test_forward_stamp_carries_hcd_parameterization():
     id. Adding the key makes analyze_dnuis_bias pool pre-land vs post-land shards fail-loud
     (intended freeze-handoff behaviour: regenerate the group)."""
     from types import SimpleNamespace
-    stub = dict(res_corr_on=False, fix_alpha_res=True, sample_res=True,
-                f_res_amp_sigma=0.15, metal_prior="uniform", metal_node_z=(2.2, 4.2))
-    leg = SimpleNamespace(dla_cov_reduced=False, dla_forward_frac=0.0, use_snr3=False,
-                          cv_floor_on=False, cv_floor_rank1=False)
-    st_old = C.forward_stamp(SimpleNamespace(**stub), leg)          # no ks_dndx_mapped attr
+
+    stub = dict(
+        res_corr_on=False,
+        fix_alpha_res=True,
+        sample_res=True,
+        f_res_amp_sigma=0.15,
+        metal_prior="uniform",
+        metal_node_z=(2.2, 4.2),
+    )
+    leg = SimpleNamespace(
+        dla_cov_reduced=False,
+        dla_forward_frac=0.0,
+        use_snr3=False,
+        cv_floor_on=False,
+        cv_floor_rank1=False,
+    )
+    st_old = C.forward_stamp(SimpleNamespace(**stub), leg)  # no ks_dndx_mapped attr
     assert st_old["hcd_parameterization"] == "alpha_pivot_powerlaw_v1"
     st_new = C.forward_stamp(SimpleNamespace(ks_dndx_mapped=True, **stub), leg)
     assert st_new["hcd_parameterization"] == "dndx_mapped_v2"
@@ -394,15 +470,23 @@ def test_forward_stamp_carries_hcd_parameterization():
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_forbidden_combinations_raise(ks_setup):
     with pytest.raises(ValueError, match="incompatible"):
-        C.build_legb_ctx(desi_kwargs=dict(z_lo=0.0, z_hi=2.6), use_xclass=True,
-                         survey="KS", hierarchical_hcd=True)
+        C.build_legb_ctx(
+            desi_kwargs=dict(z_lo=0.0, z_hi=2.6),
+            use_xclass=True,
+            survey="KS",
+            hierarchical_hcd=True,
+        )
     with pytest.raises(ValueError, match="incompatible"):
-        C.build_legb_ctx(desi_kwargs=dict(z_lo=0.0, z_hi=2.6), use_xclass=True,
-                         survey="KS", hierarchical_hcd=True, hcd_2d_tilt=True)
+        C.build_legb_ctx(
+            desi_kwargs=dict(z_lo=0.0, z_hi=2.6),
+            use_xclass=True,
+            survey="KS",
+            hierarchical_hcd=True,
+            hcd_2d_tilt=True,
+        )
     # a hand-built forbidden ctx (ctx._replace) fails loudly at trace time too
     ctx, _, _ = ks_setup
-    for bad in (dict(per_leg_alpha=True), dict(hierarchical_hcd=True),
-                dict(hcd_2d_tilt=True)):
+    for bad in (dict(per_leg_alpha=True), dict(hierarchical_hcd=True), dict(hcd_2d_tilt=True)):
         ctx_bad = ctx._replace(**bad)
         with pytest.raises(ValueError, match="incompatible"):
             _sites(C._legb_priors_only, ctx_bad)
@@ -467,12 +551,15 @@ def test_model_smoke_real_ks_ctx():
         val = logdens(params)
         grads = jax.grad(logdens)(params)
         ok = np.isfinite(float(val)) and all(
-            np.isfinite(np.asarray(g)).all() for g in jax.tree_util.tree_leaves(grads))
-        n_bad += (not ok)
+            np.isfinite(np.asarray(g)).all() for g in jax.tree_util.tree_leaves(grads)
+        )
+        n_bad += not ok
     t_eval = time.time() - t1
     assert n_bad == 0, f"{n_bad}/20 prior draws gave non-finite log-density or gradient"
-    print(f"[model-smoke] real KS ctx build {t_build:.1f}s; 20x (logp+grad) {t_eval:.1f}s "
-          f"({t_eval/20:.2f}s/draw); members={len(members)}")
+    print(
+        f"[model-smoke] real KS ctx build {t_build:.1f}s; 20x (logp+grad) {t_eval:.1f}s "
+        f"({t_eval/20:.2f}s/draw); members={len(members)}"
+    )
 
 
 if __name__ == "__main__":

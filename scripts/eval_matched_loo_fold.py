@@ -12,6 +12,7 @@ early-stopping rows. Writes a NEW json for scripts/matched_loo_readout.py.
   python scripts/eval_matched_loo_fold.py --cache LF_CACHE.h5 --holdout-sim NAME --member-dirs D1 D2 ...
       (--gp-record REC.json | --gp-not-run REASON) --out NEW.json [--expected-members 5] [--truth-weights]
 """
+
 import argparse
 import glob
 import json
@@ -37,9 +38,17 @@ def main():
     ap.add_argument("--expected-members", type=int, default=5)
     gp = ap.add_mutually_exclusive_group(required=True)
     gp.add_argument("--gp-record")
-    gp.add_argument("--gp-not-run", metavar="REASON", help="the GP job left no record (for example its time limit)")
+    gp.add_argument(
+        "--gp-not-run",
+        metavar="REASON",
+        help="the GP job left no record (for example its time limit)",
+    )
     ap.add_argument("--out", required=True, help="NEW json (refused if it exists)")
-    ap.add_argument("--truth-weights", action="store_true", help="context only: the held-out row's class fractions")
+    ap.add_argument(
+        "--truth-weights",
+        action="store_true",
+        help="context only: the held-out row's class fractions",
+    )
     a = ap.parse_args()
     if os.path.lexists(a.out):
         sys.exit(f"refusing: {a.out} exists")
@@ -50,7 +59,7 @@ def main():
         with open(os.path.join(md, "fold.json")) as f:
             fj = json.load(f)
         (meta_path,) = glob.glob(os.path.join(md, "*.meta.json"))
-        model, meta, norm = T.load_checkpoint(meta_path[:-len(".meta.json")])
+        model, meta, norm = T.load_checkpoint(meta_path[: -len(".meta.json")])
         members.append((md, fj, meta, (model, norm)))
     if a.gp_not_run is not None:
         if not a.gp_not_run.strip():
@@ -60,8 +69,15 @@ def main():
         with open(a.gp_record) as f:
             rec = json.load(f)
     try:
-        out = L.assemble_fold(d, a.holdout_sim, members, rec, cache_sha256=cache_sha,
-                              expected_members=a.expected_members, truth_weights=a.truth_weights)
+        out = L.assemble_fold(
+            d,
+            a.holdout_sim,
+            members,
+            rec,
+            cache_sha256=cache_sha,
+            expected_members=a.expected_members,
+            truth_weights=a.truth_weights,
+        )
     except ValueError as e:
         sys.exit(str(e))
     out.update(member_dirs=a.member_dirs, gp_record=a.gp_record)

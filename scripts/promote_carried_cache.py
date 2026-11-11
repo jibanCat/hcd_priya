@@ -17,6 +17,7 @@ file is left in place.
   python scripts/promote_carried_cache.py --staged STAGED.h5 --comparison REPORT.json --comparison-sha256 HEX \\
       --prereg PREREGISTRATION.json --output PROMOTED.h5
 """
+
 import argparse
 import json
 import os
@@ -48,8 +49,10 @@ def check_report(rep, prereg_path, car, staged_sha256):
     staged carry (module docstring). Returns ``(pre-registration sha256, sorted fresh sha256s)``."""
     pre_ref = rep.get("prereg") or {}
     if pre_ref.get("sha256") != PREREG_OF_RECORD_SHA256:
-        raise PromotionRefused(f"the report compares against the pre-registration {pre_ref.get('sha256')!r}, not the "
-                               f"one of record {PREREG_OF_RECORD_SHA256}")
+        raise PromotionRefused(
+            f"the report compares against the pre-registration {pre_ref.get('sha256')!r}, not the "
+            f"one of record {PREREG_OF_RECORD_SHA256}"
+        )
     if L.sha256_file(prereg_path) != PREREG_OF_RECORD_SHA256:
         raise PromotionRefused(f"{prereg_path} is not the pre-registration of record")
     pre = json.loads(Path(prereg_path).read_text())
@@ -57,35 +60,56 @@ def check_report(rep, prereg_path, car, staged_sha256):
         raise PromotionRefused(f"{prereg_path}: not a {FR.FORMAT} file with rtol {FR.RTOL}")
     source = (pre.get("historical_cache") or {}).get("sha256")
     if source != car.get("source_sha256"):
-        raise PromotionRefused(f"the pre-registration names the source {source}, the carry's source is "
-                               f"{car.get('source_sha256')}")
+        raise PromotionRefused(
+            f"the pre-registration names the source {source}, the carry's source is "
+            f"{car.get('source_sha256')}"
+        )
     if "source_sha256" in rep and rep["source_sha256"] != car.get("source_sha256"):
-        raise PromotionRefused(f"the report names the source {rep['source_sha256']}, not the carry's")
+        raise PromotionRefused(
+            f"the report names the source {rep['source_sha256']}, not the carry's"
+        )
     if rep.get("criterion") != pre["criterion"]:
         raise PromotionRefused("the report's criterion is not the pre-registered one")
     want = sorted((str(g["sim"]), int(g["snap"])) for g in pre.get("groups") or [])
     groups = rep.get("groups") or []
     got = sorted((str(g.get("sim")), int(g.get("snap", -1))) for g in groups)
     if not want or got != want:
-        raise PromotionRefused(f"the report compares {len(got)} groups, not exactly the {len(want)} pre-registered")
-    if not (rep.get("passed") is True and all(g.get("ok") is True and g.get("same_rebuilt_catalogue") is True
-                                              for g in groups)):
-        raise PromotionRefused("the fresh-row comparison did not pass for every pre-registered group")
+        raise PromotionRefused(
+            f"the report compares {len(got)} groups, not exactly the {len(want)} pre-registered"
+        )
+    if not (
+        rep.get("passed") is True
+        and all(g.get("ok") is True and g.get("same_rebuilt_catalogue") is True for g in groups)
+    ):
+        raise PromotionRefused(
+            "the fresh-row comparison did not pass for every pre-registered group"
+        )
     if (rep.get("carried") or {}).get("sha256") != staged_sha256:
-        raise PromotionRefused(f"the report compares the carried cache {(rep.get('carried') or {}).get('sha256')}, "
-                               f"not the staged file ({staged_sha256})")
+        raise PromotionRefused(
+            f"the report compares the carried cache {(rep.get('carried') or {}).get('sha256')}, "
+            f"not the staged file ({staged_sha256})"
+        )
     fresh = rep.get("fresh") or []
-    if not fresh or not all(isinstance(f, dict) and _hex64(f.get("sha256")) and f.get("path") for f in fresh):
+    if not fresh or not all(
+        isinstance(f, dict) and _hex64(f.get("sha256")) and f.get("path") for f in fresh
+    ):
         raise PromotionRefused("the report does not list its fresh files with their sha256")
     listed = {str(f["path"]) for f in fresh}
     if any(str(g.get("fresh_file")) not in listed for g in groups):
         raise PromotionRefused("a compared group's fresh file is not in the report's fresh list")
     for f in fresh:
         if not os.path.isfile(f["path"]) or L.sha256_file(f["path"]) != f["sha256"]:
-            raise PromotionRefused(f"the fresh file {f['path']} is missing or not the one the report lists")
+            raise PromotionRefused(
+                f"the fresh file {f['path']} is missing or not the one the report lists"
+            )
     code = rep.get("code") or {}
-    if not (isinstance(code.get("commit"), str) and len(code["commit"]) == 40) or code.get("dirty") is not False:
-        raise PromotionRefused(f"the report was not written from a clean, committed checkout (code {code})")
+    if (
+        not (isinstance(code.get("commit"), str) and len(code["commit"]) == 40)
+        or code.get("dirty") is not False
+    ):
+        raise PromotionRefused(
+            f"the report was not written from a clean, committed checkout (code {code})"
+        )
     return PREREG_OF_RECORD_SHA256, sorted(f["sha256"] for f in fresh)
 
 
@@ -95,7 +119,9 @@ def promote(staged, comparison, comparison_sha256, output, prereg):
         raise PromotionRefused(f"{output} exists; a cache is never overwritten")
     code = L.code_identity()
     if not (code.get("commit") and code.get("dirty") is False):
-        raise PromotionRefused(f"promotion runs from a clean, committed checkout only (code identity {code})")
+        raise PromotionRefused(
+            f"promotion runs from a clean, committed checkout only (code identity {code})"
+        )
     got = L.sha256_file(comparison)
     if got != comparison_sha256:
         raise PromotionRefused(f"{comparison}: sha256 {got} is not the pinned {comparison_sha256}")
@@ -114,29 +140,49 @@ def promote(staged, comparison, comparison_sha256, output, prereg):
     staged_groups = {(g["sim"], int(g["snap"])) for g in rec["product"]["groups"]}
     if not {(g["sim"], int(g["snap"])) for g in groups} <= staged_groups:
         raise PromotionRefused(f"{comparison}: compares groups that are not in {staged}")
-    promoted = {"passed": True, "comparison_sha256": got, "staged_sha256": ident["sha256"], "prereg_sha256": prereg_sha,
-                "fresh_sha256": fresh_shas, "n_groups_compared": len(groups)}
+    promoted = {
+        "passed": True,
+        "comparison_sha256": got,
+        "staged_sha256": ident["sha256"],
+        "prereg_sha256": prereg_sha,
+        "fresh_sha256": fresh_shas,
+        "n_groups_compared": len(groups),
+    }
     product = rec["product"]
-    out = T.write_cache(output, d, {k: v for k, v in attrs.items() if k != "cache_version"},
-                        inputs=rec["inputs"], settings=rec["settings"], groups=product["groups"],
-                        carried=dict(car, promoted=promoted), validation=rec.get("validation"),
-                        selection=product.get("selection"))
+    out = T.write_cache(
+        output,
+        d,
+        {k: v for k, v in attrs.items() if k != "cache_version"},
+        inputs=rec["inputs"],
+        settings=rec["settings"],
+        groups=product["groups"],
+        carried=dict(car, promoted=promoted),
+        validation=rec.get("validation"),
+        selection=product.get("selection"),
+    )
     if out["product"]["payload_sha256"] != product["payload_sha256"]:
         output.unlink()
         raise PromotionRefused("the promoted payload differs from the staged one (nothing kept)")
     if not out["release_eligible"]:
         output.unlink()
-        raise PromotionRefused("the promoted cache would not be release-eligible: " + "; ".join(out["ineligible_reasons"]))
-    T.read_cache(output)                                      # the release reader accepts it
+        raise PromotionRefused(
+            "the promoted cache would not be release-eligible: "
+            + "; ".join(out["ineligible_reasons"])
+        )
+    T.read_cache(output)  # the release reader accepts it
     return out
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--staged", type=Path, required=True)
-    ap.add_argument("--comparison", type=Path, required=True, help="fresh_row_sample.py compare's report")
+    ap.add_argument(
+        "--comparison", type=Path, required=True, help="fresh_row_sample.py compare's report"
+    )
     ap.add_argument("--comparison-sha256", required=True)
-    ap.add_argument("--prereg", type=Path, required=True, help="the pre-registration of record (re-read here)")
+    ap.add_argument(
+        "--prereg", type=Path, required=True, help="the pre-registration of record (re-read here)"
+    )
     ap.add_argument("--output", type=Path, required=True)
     a = ap.parse_args(argv)
     try:

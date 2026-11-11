@@ -56,8 +56,10 @@ Env (MANDATORY):
     CUDA_VISIBLE_DEVICES="" python \
     -m pytest tests/test_res_corr_inject.py -v
 """
+
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import numpy as np
@@ -94,7 +96,7 @@ def ctx():
 @pytest.fixture(scope="module")
 def hr_sim_name():
     """A concrete held-out HR sim name (the gate's hr_truth arm reads the HR cache)."""
-    d = MF.load_cache_historical(MF.HR_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
+    d = MF.load_cache_historical(MF.HR_CACHE, reason="test: a cache in the pre-lineage 3.3 format")
     names = np.array([s.decode() if isinstance(s, bytes) else s for s in d["sim_name"]])
     return sorted(set(map(str, names)))[0]
 
@@ -135,8 +137,7 @@ def test_inject_none_is_noop(ctx, truth_sim):
     # un-injected (baseline) — no kwarg at all.
     ml0, _tp0, info0 = make_legb_mock(ctx, truth_sim, key, inject_a_siiii=0.0)
     # explicit None — must be IDENTICAL (this is the contract for the new kwarg's default).
-    ml1, _tp1, info1 = make_legb_mock(
-        ctx, truth_sim, key, inject_a_siiii=0.0, inject_res_corr=None)
+    ml1, _tp1, info1 = make_legb_mock(ctx, truth_sim, key, inject_a_siiii=0.0, inject_res_corr=None)
 
     for leg0, leg1 in zip(ml0, ml1):
         name = leg0.name
@@ -162,8 +163,12 @@ def test_inject_b1_perturbs_truth(ctx, truth_sim, basis):
 
     _ml0, _tp0, info0 = make_legb_mock(ctx, truth_sim, key, inject_a_siiii=0.0)
     _ml1, _tp1, info1 = make_legb_mock(
-        ctx, truth_sim, key, inject_a_siiii=0.0,
-        inject_res_corr=_gate_spec(GATE_MEMBER, GATE_STRENGTH))
+        ctx,
+        truth_sim,
+        key,
+        inject_a_siiii=0.0,
+        inject_res_corr=_gate_spec(GATE_MEMBER, GATE_STRENGTH),
+    )
 
     any_leg_checked = False
     for leg in ctx.legs:
@@ -171,15 +176,20 @@ def test_inject_b1_perturbs_truth(ctx, truth_sim, basis):
         t0 = np.asarray(info0["truth_on_leg"][name])
         t1 = np.asarray(info1["truth_on_leg"][name])
         b = _member_vec(basis, name, GATE_MEMBER)
-        assert b.shape == t0.shape, f"{name}: basis {GATE_MEMBER} shape {b.shape} != leg truth {t0.shape}"
+        assert (
+            b.shape == t0.shape
+        ), f"{name}: basis {GATE_MEMBER} shape {b.shape} != leg truth {t0.shape}"
 
         ok = np.isfinite(t0) & np.isfinite(t1) & (np.abs(t0) > 0)
         assert ok.any(), f"{name}: no finite nonzero truth rows to compare"
         ratio = t1[ok] / t0[ok]
         expected = np.exp(GATE_STRENGTH * b[ok])
         np.testing.assert_allclose(
-            ratio, expected, rtol=1e-10,
-            err_msg=f"{name}: injected/clean truth ratio != exp(strength*b1)")
+            ratio,
+            expected,
+            rtol=1e-10,
+            err_msg=f"{name}: injected/clean truth ratio != exp(strength*b1)",
+        )
         # the dropped/NaN rows stay NaN (the inject must not resurrect them)
         assert np.array_equal(np.isnan(t0), np.isnan(t1)), f"{name}: NaN pattern changed by inject"
         any_leg_checked = True
@@ -198,8 +208,12 @@ def test_inject_is_z_ge_2p8_localized(ctx, truth_sim, basis):
 
     _ml0, _tp0, info0 = make_legb_mock(ctx, truth_sim, key, inject_a_siiii=0.0)
     _ml1, _tp1, info1 = make_legb_mock(
-        ctx, truth_sim, key, inject_a_siiii=0.0,
-        inject_res_corr=_gate_spec(GATE_MEMBER, GATE_STRENGTH))
+        ctx,
+        truth_sim,
+        key,
+        inject_a_siiii=0.0,
+        inject_res_corr=_gate_spec(GATE_MEMBER, GATE_STRENGTH),
+    )
 
     for leg in ctx.legs:
         name = leg.name
@@ -219,13 +233,18 @@ def test_inject_is_z_ge_2p8_localized(ctx, truth_sim, basis):
         lo = (~hiZ) & ok
         if lo.any():
             np.testing.assert_allclose(
-                ratio[lo], 1.0, rtol=1e-12, atol=1e-12,
-                err_msg=f"{name}: truth perturbed at z<2.8 (should be He-II localized)")
+                ratio[lo],
+                1.0,
+                rtol=1e-12,
+                atol=1e-12,
+                err_msg=f"{name}: truth perturbed at z<2.8 (should be He-II localized)",
+            )
         # (c) on the He-II window the perturbation is genuinely nonzero somewhere
         hi = hiZ & ok
         assert hi.any(), f"{name}: no finite z>=2.8 rows"
-        assert np.any(np.abs(ratio[hi] - 1.0) > 1e-6), \
-            f"{name}: injection vanished on the z>=2.8 He-II window"
+        assert np.any(
+            np.abs(ratio[hi] - 1.0) > 1e-6
+        ), f"{name}: injection vanished on the z>=2.8 He-II window"
 
 
 # ----------------------------------------------------------------------------
@@ -241,17 +260,24 @@ def test_inject_on_truth_not_forward(ctx, truth_sim, basis):
     alpha_hcd) — the exact call the likelihood makes — and assert it is independent
     of inject_res_corr. The injection must NOT touch the forward path."""
     import hcd_analysis.emulator.data_likelihood as DL
-    from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture)
+    from tests.regression import (
+        legacy_forward_pre2026_10 as LEG,
+    )  # the pre-2026-10 forward (historical fixture)
 
     key = jax.random.PRNGKey(SEED)
 
     # build the mock twice (clean + injected) to get matched truth_packs/cores.
     ml0, tp0, info0 = make_legb_mock(ctx, truth_sim, key, inject_a_siiii=0.0)
     ml1, tp1, info1 = make_legb_mock(
-        ctx, truth_sim, key, inject_a_siiii=0.0,
-        inject_res_corr=_gate_spec(GATE_MEMBER, GATE_STRENGTH))
+        ctx,
+        truth_sim,
+        key,
+        inject_a_siiii=0.0,
+        inject_res_corr=_gate_spec(GATE_MEMBER, GATE_STRENGTH),
+    )
 
     import jax.numpy as jnp
+
     zg = np.asarray(ctx.z_global)
     theta9 = jnp.asarray(tp0["theta9"])
     tau0_global = jnp.asarray(tp0["tau0_global"])
@@ -259,6 +285,7 @@ def test_inject_on_truth_not_forward(ctx, truth_sim, basis):
 
     # the per-leg DLA core the forward consumes (matched-closure core builder).
     from hcd_analysis.emulator.closure_legb import _mock_core_per_leg
+
     core_per_leg = _mock_core_per_leg(ctx, truth_sim)
 
     forward_changed = False
@@ -267,9 +294,18 @@ def test_inject_on_truth_not_forward(ctx, truth_sim, basis):
         sel = np.array([int(np.argmin(np.abs(zg - zz))) for zz in leg.z])
         ah = np.broadcast_to(np.asarray(alpha_hcd), (3,))
         P_fwd, _C = LEG.predict_P_obs_on_leg(
-            ctx.model, theta9, tau0_global[sel], jnp.asarray(ah), pf_stats=ctx.pf_stats,
-            dla_core=core_per_leg[name], cache_k=ctx.cache_k, leg=leg,
-            alpha_centres=ctx.alpha_centres, mf=ctx.mf, mf_floor=ctx.mf_floor)
+            ctx.model,
+            theta9,
+            tau0_global[sel],
+            jnp.asarray(ah),
+            pf_stats=ctx.pf_stats,
+            dla_core=core_per_leg[name],
+            cache_k=ctx.cache_k,
+            leg=leg,
+            alpha_centres=ctx.alpha_centres,
+            mf=ctx.mf,
+            mf_floor=ctx.mf_floor,
+        )
         P_fwd = np.asarray(P_fwd)
 
         # the forward is a function of (model, theta, tau0, alpha_hcd, leg, mf) ONLY —
@@ -288,7 +324,8 @@ def test_inject_on_truth_not_forward(ctx, truth_sim, basis):
             resid1 = t1[ok] - P_fwd[ok]
             # on legs where the injection is live, the residual must change (no cancellation).
             if np.any(np.abs(t1[ok] - t0[ok]) > 0):
-                assert np.any(np.abs(resid1 - resid0) > 0), \
-                    f"{name}: injection cancelled in the closure residual (forward absorbed it)"
+                assert np.any(
+                    np.abs(resid1 - resid0) > 0
+                ), f"{name}: injection cancelled in the closure residual (forward absorbed it)"
 
     assert forward_changed, "injection never moved the truth on any leg (harness inert)"

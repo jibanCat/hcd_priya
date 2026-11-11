@@ -6,4 +6,5 @@
 ``adapters``    hcd_priya (emu-jax), lyaemu PRIYA references (run in their own venv), LaCE (BLOCKED stub)
 
 The core modules import only numpy and the standard library, so a reference's own interpreter can write records.
-Comparison configurations and results are not part of this package; a run writes them to its own directory."""
+Comparison configurations and results are not part of this package; a run writes them to its own directory.
+"""

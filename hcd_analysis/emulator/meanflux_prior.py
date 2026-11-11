@@ -9,17 +9,18 @@ fraction of μ_z (the measurement width); ``flat=True`` gives a genuinely-wide-b
 prior for the ∞-prior scan (NOT σ=1e30 — that would make the Normal ill-conditioned and
 the ladder coord σ/Kim numerically huge; we use a wide MULTIPLE of the nominal width).
 """
+
 from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
 
 from .data import KIM_AMP, KIM_SLOPE
+
 # the conversions (no prior) live in mean_flux_model; re-exported here unchanged for the historical callers
 from .mean_flux_model import TAU0_PIVOT_Z, kim_tau0, tau0_alpha_priya  # noqa: F401
 
-assert jax.config.read("jax_enable_x64"), \
-    "x64 must be on (import hcd_analysis.emulator before jax)"
+assert jax.config.read("jax_enable_x64"), "x64 must be on (import hcd_analysis.emulator before jax)"
 
 # Nominal fractional width of the mean-flux prior, δτ₀/τ₀. The Kim07 / Becker19 ⟨F⟩(z)
 # is measured to a few-percent; 0.05 is a conservative measurement-width MVP value (the
@@ -40,7 +41,7 @@ FLAT_SIGMA_MULT = 20.0
 BECKER13_TAU0 = 0.751
 BECKER13_BETA = 2.90
 BECKER13_C = -0.132
-BECKER13_ZREF = 3.5     # the pivot (1+z)/(1+3.5) = (1+z)/4.5 in Becker+2013 Eq. 6
+BECKER13_ZREF = 3.5  # the pivot (1+z)/(1+3.5) = (1+z)/4.5 in Becker+2013 Eq. 6
 
 
 def becker13_tau0(z):
@@ -59,8 +60,8 @@ def becker13_tau0(z):
 # §5: "τ₀ absorbs residual HCD contamination at high k … should not be placed with a Gaussian prior
 # unless co-varied with a HCD a_HCD"). The degeneracy-break is the SMOOTH 2-param structure (no
 # per-z wiggle) + co-varying HCD, not a tight prior. These REPLACE the 13 independent per-z rungs.
-TAU0_AMP_RANGE = (0.75, 1.25)    # PRIYA uniform prior on amplitude τ₀ (×, center 1.0 = Kim07)
-DTAU0_RANGE = (-0.40, 0.25)      # PRIYA uniform prior on slope dτ₀ (center 0 = Kim07 slope)
+TAU0_AMP_RANGE = (0.75, 1.25)  # PRIYA uniform prior on amplitude τ₀ (×, center 1.0 = Kim07)
+DTAU0_RANGE = (-0.40, 0.25)  # PRIYA uniform prior on slope dτ₀ (center 0 = Kim07 slope)
 # TAU0_PIVOT_Z: the (1+z)/(1+z_p) pivot, with kim_tau0 and tau0_alpha_priya re-exported from mean_flux_model
 # (legacy τ₀-space power-law-with-C widths, kept for the Becker-anchored utility path only:)
 TAU0_LOGA_SIGMA = 0.05
@@ -71,9 +72,11 @@ def fit_tau0_alpha_priya(z, alpha_z, *, z_pivot=TAU0_PIVOT_Z):
     """LSQ (tau0_amp, dtau0) for a sim's per-z α(z)=τ₀/Kim — the CLOSURE truth params (and the
     real-fit prior center when fed Becker/Kim). Linear fit of log α vs log((1+z)/(1+z_pivot))."""
     import numpy as _np
-    z = _np.asarray(z, float); a = _np.asarray(alpha_z, float)
+
+    z = _np.asarray(z, float)
+    a = _np.asarray(alpha_z, float)
     x = _np.log((1.0 + z) / (1.0 + z_pivot))
-    b, c = _np.polyfit(x, _np.log(a), 1)       # slope b = dtau0, intercept c = log(tau0_amp)
+    b, c = _np.polyfit(x, _np.log(a), 1)  # slope b = dtau0, intercept c = log(tau0_amp)
     return float(_np.exp(c)), float(b)
 
 
@@ -96,14 +99,16 @@ def fit_tau0_powerlaw(z, tau0, *, zref=BECKER13_ZREF):
     (host-side; used to set the closure mock's true τ₀ amplitude+slope, and the
     closure prior center)."""
     import numpy as _np
-    z = _np.asarray(z, dtype=float); tau0 = _np.asarray(tau0, dtype=float)
+
+    z = _np.asarray(z, dtype=float)
+    tau0 = _np.asarray(tau0, dtype=float)
     best = None
     for c in _np.linspace(-0.20, 0.05, 26):
         y = tau0 - c
         if _np.any(y <= 0):
             continue
         x = _np.log((1.0 + z) / (1.0 + zref))
-        b, a = _np.polyfit(x, _np.log(y), 1)          # slope b, intercept a = logA
+        b, a = _np.polyfit(x, _np.log(y), 1)  # slope b, intercept a = logA
         resid = _np.sum((a + b * x - _np.log(y)) ** 2)
         if best is None or resid < best[0]:
             best = (resid, a, b, c)

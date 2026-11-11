@@ -3,6 +3,7 @@ tau_transform hook.
 
 Run with: python3 tests/test_tau0_rescale.py
 """
+
 import sys
 import tempfile
 from pathlib import Path
@@ -14,8 +15,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from hcd_analysis.tau0_rescale import (
-    freeze_core_rescale, make_alpha_grid, tau0_from_mean_flux,
-    TAU_FREEZE_DEFAULT, N_ALPHA_DEFAULT,
+    freeze_core_rescale,
+    make_alpha_grid,
+    tau0_from_mean_flux,
+    TAU_FREEZE_DEFAULT,
+    N_ALPHA_DEFAULT,
 )
 
 
@@ -77,11 +81,17 @@ def test_compute_p1d_per_class_tau_transform_changes_mean_flux():
 
         base = compute_p1d_per_class(path, nbins=nbins, dv_kms=10.0, catalog=cat)
         scaled = compute_p1d_per_class(
-            path, nbins=nbins, dv_kms=10.0, catalog=cat,
+            path,
+            nbins=nbins,
+            dv_kms=10.0,
+            catalog=cat,
             tau_transform=lambda t: 2.0 * t,
         )
         ident = compute_p1d_per_class(
-            path, nbins=nbins, dv_kms=10.0, catalog=cat,
+            path,
+            nbins=nbins,
+            dv_kms=10.0,
+            catalog=cat,
             tau_transform=lambda t: t,
         )
 
@@ -98,23 +108,29 @@ def test_kim_slope_alpha_to_target_F_matches_obs_mean_tau():
     """The Tier P / Tier C convention is target_F = exp(-alpha * obs_mean_tau_Kim(z)).
     Verify the helper agrees with the Kim et al. 2007 (0711.1862) formula."""
     from hcd_analysis.tau0_rescale import slope_alpha_to_target_F
+
     # at z=3, Kim et al. 2007: obs_mean_tau = 2.3e-3 * 4^3.65
     target = slope_alpha_to_target_F(alpha_slope=1.0, z=3.0)
-    expected = np.exp(-2.3e-3 * 4.0 ** 3.65)
+    expected = np.exp(-2.3e-3 * 4.0**3.65)
     assert np.isclose(target, expected, rtol=1e-12), f"got {target}, expected {expected}"
 
 
 def test_make_alpha_grid_priya_aligned_contains_priya():
     from hcd_analysis.tau0_rescale import (
-        make_alpha_grid_priya_aligned, PRIYA_ALPHA_LO, PRIYA_ALPHA_HI, N_ALPHA_PRIYA,
+        make_alpha_grid_priya_aligned,
+        PRIYA_ALPHA_LO,
+        PRIYA_ALPHA_HI,
+        N_ALPHA_PRIYA,
     )
+
     grid = make_alpha_grid_priya_aligned(refine=2)
     assert grid.shape == (20,), grid.shape
     assert np.all(np.diff(grid) > 0), "grid must be strictly increasing"
     # PRIYA's exact 10 alpha must land on the even indices to <1e-12.
     priya = np.linspace(PRIYA_ALPHA_LO, PRIYA_ALPHA_HI, N_ALPHA_PRIYA)
-    assert np.allclose(grid[::2], priya, atol=1e-12), \
-        f"PRIYA alpha not a subset:\n grid[::2]={grid[::2]}\n priya={priya}"
+    assert np.allclose(
+        grid[::2], priya, atol=1e-12
+    ), f"PRIYA alpha not a subset:\n grid[::2]={grid[::2]}\n priya={priya}"
     n_match = sum(np.any(np.abs(grid - p) < 1e-12) for p in priya)
     assert n_match == 10, n_match
 

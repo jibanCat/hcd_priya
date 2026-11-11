@@ -81,6 +81,7 @@ _C_KMS = 2.99792458e5
 # Absorption path length
 # ---------------------------------------------------------------------------
 
+
 def absorption_path_per_sightline(
     box_kpc_h: float,
     hubble: float,
@@ -109,19 +110,20 @@ def absorption_path_per_sightline(
     compounding bugs — missing (1+z) factor and missing h factor — that
     inflated the CDDF and dN/dX by (1+z)·h.  See docs/bugs_found.md §7.
     """
-    L_com_Mpc = box_kpc_h / 1000.0 / hubble    # comoving Mpc
-    H0 = hubble * _H0_KMS_MPC                   # km/s/Mpc, dimensional
-    return (1.0 + z)**2 * L_com_Mpc * H0 / _C_KMS
+    L_com_Mpc = box_kpc_h / 1000.0 / hubble  # comoving Mpc
+    H0 = hubble * _H0_KMS_MPC  # km/s/Mpc, dimensional
+    return (1.0 + z) ** 2 * L_com_Mpc * H0 / _C_KMS
 
 
 def hz_from_cosmology(omegam: float, omegal: float, z: float) -> float:
     """H(z)/H_0 (dimensionless) for flat ΛCDM."""
-    return np.sqrt(omegam * (1.0 + z)**3 + omegal)
+    return np.sqrt(omegam * (1.0 + z) ** 3 + omegal)
 
 
 # ---------------------------------------------------------------------------
 # CDDF measurement
 # ---------------------------------------------------------------------------
+
 
 def measure_cddf(
     catalog: AbsorberCatalog,
@@ -164,7 +166,7 @@ def measure_cddf(
 
     counts, edges = np.histogram(log_nhi_vals, bins=log_nhi_bins)
     dlogN = np.diff(edges)
-    dN = 10.0**edges[1:] - 10.0**edges[:-1]  # actual dN in cm^-2
+    dN = 10.0 ** edges[1:] - 10.0 ** edges[:-1]  # actual dN in cm^-2
 
     with np.errstate(divide="ignore", invalid="ignore"):
         f_nhi = np.where(dN > 0, counts / (dN * total_path), 0.0)
@@ -186,6 +188,7 @@ def measure_cddf(
 # ---------------------------------------------------------------------------
 # CDDF Perturbation model
 # ---------------------------------------------------------------------------
+
 
 class CDDFPerturbation:
     """
@@ -220,6 +223,7 @@ class CDDFPerturbation:
 # ---------------------------------------------------------------------------
 # Perturbation → P1D effect
 # ---------------------------------------------------------------------------
+
 
 def perturbed_mask_classes(
     catalog: AbsorberCatalog,
@@ -280,6 +284,7 @@ def perturbed_mask_classes(
 # DataFrame-compatible CDDF (used by pipeline when catalog is a pandas DF)
 # ---------------------------------------------------------------------------
 
+
 def measure_cddf_from_dataframe(
     df,
     z: float,
@@ -312,7 +317,7 @@ def measure_cddf_from_dataframe(
 
     log_nhi_vals = np.asarray(df["log_nhi"])
     counts, edges = np.histogram(log_nhi_vals, bins=log_nhi_bins)
-    dN = 10.0**edges[1:] - 10.0**edges[:-1]
+    dN = 10.0 ** edges[1:] - 10.0 ** edges[:-1]
 
     with np.errstate(divide="ignore", invalid="ignore"):
         f_nhi = np.where(dN > 0, counts / (dN * total_path), 0.0)
@@ -333,6 +338,7 @@ def measure_cddf_from_dataframe(
 # ---------------------------------------------------------------------------
 # Per-sim CDDF stacking with separate redshift bins
 # ---------------------------------------------------------------------------
+
 
 def stack_cddf_for_sim(
     cddf_list: List[Dict],
@@ -393,7 +399,7 @@ def stack_cddf_for_sim(
             z_snaps.append(c["z"])
             f_per_snap.append(c["f_nhi"])
 
-        dN = 10.0**log_nhi_edges[1:] - 10.0**log_nhi_edges[:-1]
+        dN = 10.0 ** log_nhi_edges[1:] - 10.0 ** log_nhi_edges[:-1]
         with np.errstate(divide="ignore", invalid="ignore"):
             f_stacked = np.where(dN > 0, counts_total / (dN * path_total), 0.0)
 
@@ -446,9 +452,15 @@ def compute_perturbed_p1d(
 
     # Compute baseline P1D (unperturbed mask)
     k, p1d_base, _ = compute_p1d_single(
-        hdf5_path, nbins, dv_kms, catalog=catalog,
-        mask_classes=base_mask_classes, batch_size=batch_size,
-        n_skewers=n_skewers, fill_strategy=fill_strategy, k_bins=k_bins,
+        hdf5_path,
+        nbins,
+        dv_kms,
+        catalog=catalog,
+        mask_classes=base_mask_classes,
+        batch_size=batch_size,
+        n_skewers=n_skewers,
+        fill_strategy=fill_strategy,
+        k_bins=k_bins,
     )
 
     # Generate perturbed realizations
@@ -467,9 +479,15 @@ def compute_perturbed_p1d(
             absorbers=abs_list,
         )
         _, p1d_r, _ = compute_p1d_single(
-            hdf5_path, nbins, dv_kms, catalog=tmp_cat,
-            mask_classes=base_mask_classes, batch_size=batch_size,
-            n_skewers=n_skewers, fill_strategy=fill_strategy, k_bins=k_bins,
+            hdf5_path,
+            nbins,
+            dv_kms,
+            catalog=tmp_cat,
+            mask_classes=base_mask_classes,
+            batch_size=batch_size,
+            n_skewers=n_skewers,
+            fill_strategy=fill_strategy,
+            k_bins=k_bins,
         )
         p1d_realizations.append(p1d_r)
 

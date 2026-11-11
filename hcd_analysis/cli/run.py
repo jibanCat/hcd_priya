@@ -67,11 +67,20 @@ def _parse_set_overrides(set_values):
 # ---------------------------------------------------------------------------
 
 _common_options = [
-    click.option("--config", "config_path", default=None,
-                 help="YAML config file (required; for example config/default.yaml in a checkout)"),
+    click.option(
+        "--config",
+        "config_path",
+        default=None,
+        help="YAML config file (required; for example config/default.yaml in a checkout)",
+    ),
     click.option("--output-root", default=None, help="Override output root directory"),
-    click.option("--set", "set_values", multiple=True, metavar="KEY=VALUE",
-                 help="Override config key (dot notation). Repeatable."),
+    click.option(
+        "--set",
+        "set_values",
+        multiple=True,
+        metavar="KEY=VALUE",
+        help="Override config key (dot notation). Repeatable.",
+    ),
     click.option("--debug", is_flag=True, default=False, help="Debug mode"),
     click.option("--fast", is_flag=True, default=False, help="Fast NHI (no Voigt fitting)"),
     click.option("-v", "--verbose", is_flag=True, default=False),
@@ -106,17 +115,21 @@ def make_config(config_path, output_root, set_values, debug, fast):
     if config_path is None:
         raise click.UsageError(
             "--config is required: the built-in defaults and config/default.yaml differ and no approved default "
-            "is chosen yet, so none is applied (pass --config config/default.yaml to use the repository's file)")
+            "is chosen yet, so none is applied (pass --config config/default.yaml to use the repository's file)"
+        )
     if not Path(config_path).is_file():
         raise click.UsageError(f"config file not found: {config_path}")
     digest = hashlib.sha256(Path(config_path).read_bytes()).hexdigest()
-    logging.getLogger(__name__).info("config %s (sha256 %s), overrides %s", config_path, digest, overrides)
+    logging.getLogger(__name__).info(
+        "config %s (sha256 %s), overrides %s", config_path, digest, overrides
+    )
     return load_config(config_path, overrides)
 
 
 # ---------------------------------------------------------------------------
 # CLI group
 # ---------------------------------------------------------------------------
+
 
 @click.group()
 def cli():
@@ -128,6 +141,7 @@ def cli():
 # coverage: show which (sim, snap) pairs exist
 # ---------------------------------------------------------------------------
 
+
 @cli.command()
 @add_common_options
 @click.option("--z-min", default=2.0, show_default=True)
@@ -136,8 +150,9 @@ def coverage(config_path, output_root, set_values, debug, fast, verbose, z_min, 
     """Print a coverage table of available (sim, snap) pairs."""
     setup_logging(verbose)
     cfg = make_config(config_path, output_root, set_values, debug, fast)
-    snap_map = build_snapshot_map(cfg.data_root, z_min=z_min, z_max=z_max,
-                                  prefer_grid=cfg.prefer_grid)
+    snap_map = build_snapshot_map(
+        cfg.data_root, z_min=z_min, z_max=z_max, prefer_grid=cfg.prefer_grid
+    )
     print_coverage_table(snap_map)
     click.echo(f"\n{len(snap_map)} simulations found.")
     total = sum(len(ss.entries) for ss in snap_map)
@@ -147,6 +162,7 @@ def coverage(config_path, output_root, set_values, debug, fast, verbose, z_min, 
 # ---------------------------------------------------------------------------
 # run-one: single (sim, snap)
 # ---------------------------------------------------------------------------
+
 
 @cli.command("run-one")
 @add_common_options
@@ -160,8 +176,13 @@ def run_one(config_path, output_root, set_values, debug, fast, verbose, sim, sna
     from hcd_analysis.snapshot_map import build_snapshot_map
     from hcd_analysis.pipeline import run_one_snap
 
-    snap_map = build_snapshot_map(cfg.data_root, z_min=cfg.z_min, z_max=cfg.z_max,
-                                  sim_filter=[sim], prefer_grid=cfg.prefer_grid)
+    snap_map = build_snapshot_map(
+        cfg.data_root,
+        z_min=cfg.z_min,
+        z_max=cfg.z_max,
+        sim_filter=[sim],
+        prefer_grid=cfg.prefer_grid,
+    )
     if not snap_map:
         click.echo(f"ERROR: No simulation matching '{sim}' found.", err=True)
         sys.exit(1)
@@ -187,6 +208,7 @@ def run_one(config_path, output_root, set_values, debug, fast, verbose, sim, sna
 # run-sim: one simulation, all redshifts
 # ---------------------------------------------------------------------------
 
+
 @cli.command("run-sim")
 @add_common_options
 @click.option("--sim", required=True, help="Simulation folder name (or fragment)")
@@ -198,8 +220,13 @@ def run_sim(config_path, output_root, set_values, debug, fast, verbose, sim):
     from hcd_analysis.snapshot_map import build_snapshot_map
     from hcd_analysis.pipeline import run_sim_all_z
 
-    snap_map = build_snapshot_map(cfg.data_root, z_min=cfg.z_min, z_max=cfg.z_max,
-                                  sim_filter=[sim], prefer_grid=cfg.prefer_grid)
+    snap_map = build_snapshot_map(
+        cfg.data_root,
+        z_min=cfg.z_min,
+        z_max=cfg.z_max,
+        sim_filter=[sim],
+        prefer_grid=cfg.prefer_grid,
+    )
     if not snap_map:
         click.echo(f"ERROR: No simulation matching '{sim}' found.", err=True)
         sys.exit(1)
@@ -212,6 +239,7 @@ def run_sim(config_path, output_root, set_values, debug, fast, verbose, sim):
 # ---------------------------------------------------------------------------
 # run-all: all simulations, all redshifts
 # ---------------------------------------------------------------------------
+
 
 @cli.command("run-all")
 @add_common_options
@@ -236,6 +264,7 @@ def run_all(config_path, output_root, set_values, debug, fast, verbose, n_worker
 # benchmark
 # ---------------------------------------------------------------------------
 
+
 @cli.command()
 @add_common_options
 @click.option("--n-sims", default=1, show_default=True, type=int)
@@ -259,7 +288,9 @@ def benchmark(config_path, output_root, set_values, debug, fast, verbose, n_sims
     click.echo(f"Total snaps: {result['n_total_snaps']}")
     click.echo(f"Avg time / snap: {result['avg_time_per_snap_s']} s")
     click.echo(f"Campaign serial: {result['campaign_serial_hr']} hr")
-    click.echo(f"Campaign ({result['n_workers_assumed']} workers): {result['campaign_parallel_hr']} hr")
+    click.echo(
+        f"Campaign ({result['n_workers_assumed']} workers): {result['campaign_parallel_hr']} hr"
+    )
 
     if out:
         with open(out, "w") as f:
@@ -275,6 +306,7 @@ def benchmark(config_path, output_root, set_values, debug, fast, verbose, n_sims
 # ---------------------------------------------------------------------------
 # report: generate all figures + markdown docs
 # ---------------------------------------------------------------------------
+
 
 @cli.command()
 @add_common_options
@@ -296,8 +328,9 @@ def report(config_path, output_root, set_values, debug, fast, verbose, figures_d
     figs.mkdir(parents=True, exist_ok=True)
     docs.mkdir(parents=True, exist_ok=True)
 
-    snap_map = build_snapshot_map(cfg.data_root, z_min=cfg.z_min, z_max=cfg.z_max,
-                                  prefer_grid=cfg.prefer_grid)
+    snap_map = build_snapshot_map(
+        cfg.data_root, z_min=cfg.z_min, z_max=cfg.z_max, prefer_grid=cfg.prefer_grid
+    )
     plot_discovery_summary(snap_map, figs)
     generate_all_markdown(docs)
     click.echo(f"Figures in {figs}/")
@@ -307,6 +340,7 @@ def report(config_path, output_root, set_values, debug, fast, verbose, figures_d
 # ---------------------------------------------------------------------------
 # run-hires: HiRes simulations
 # ---------------------------------------------------------------------------
+
 
 @cli.command("run-hires")
 @add_common_options
@@ -330,6 +364,7 @@ def run_hires(config_path, output_root, set_values, debug, fast, verbose, n_work
 # ---------------------------------------------------------------------------
 # convergence: compute HiRes/LF P1D ratios
 # ---------------------------------------------------------------------------
+
 
 @cli.command("convergence")
 @add_common_options

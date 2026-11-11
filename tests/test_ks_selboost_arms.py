@@ -19,6 +19,7 @@ Contract under test:
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python -m pytest tests/test_ks_selboost_arms.py -q
 """
+
 import numpy as np
 import pytest
 
@@ -32,16 +33,16 @@ Z_DENSE = np.linspace(2.4, 4.6, 441)
 # --------------------------------------------------------------------------------------------- #
 def test_signed_arm_matrix_verbatim():
     want = {
-        "K0_clean":      (None,                 16, "in",  True),
-        "K1_flat_lo":    ((0.714, 0.0, 0.0),    12, "out", True),
-        "K2_flat_hi":    ((1.667, 0.0, 0.0),    16, "in",  True),
-        "K3_rising":     ((1.25, 2.7, 0.0),     16, "in",  True),
-        "K4_u_paper":    ((0.81, -0.35, 13.0),  16, "in",  True),
-        "K6_inv_u":      ((2.67, 3.83, -22.0),  12, "in",  True),
-        "K7_falling":    ((2.00, -2.7, 0.0),    12, "in",  True),
-        "K5_joint_meas": ("measured",            8, "in",  True),
-        "C1_falling":    ((2.00, -2.7, 0.0),    12, "in",  False),
-        "C2_adversarial": ((1.30, 6.5, 0.0),     8, "out", False),
+        "K0_clean": (None, 16, "in", True),
+        "K1_flat_lo": ((0.714, 0.0, 0.0), 12, "out", True),
+        "K2_flat_hi": ((1.667, 0.0, 0.0), 16, "in", True),
+        "K3_rising": ((1.25, 2.7, 0.0), 16, "in", True),
+        "K4_u_paper": ((0.81, -0.35, 13.0), 16, "in", True),
+        "K6_inv_u": ((2.67, 3.83, -22.0), 12, "in", True),
+        "K7_falling": ((2.00, -2.7, 0.0), 12, "in", True),
+        "K5_joint_meas": ("measured", 8, "in", True),
+        "C1_falling": ((2.00, -2.7, 0.0), 12, "in", False),
+        "C2_adversarial": ((1.30, 6.5, 0.0), 8, "out", False),
     }
     assert set(AR.ARMS) == set(want)
     for aid, (prof, n, env, default) in want.items():
@@ -59,7 +60,7 @@ def test_signed_arm_matrix_verbatim():
 
 def test_default_campaign_totals_108_fits():
     total = sum(AR.ARMS[a]["n_mocks"] for a in AR.default_arm_ids())
-    assert total == 108                       # 16 clean + 92 boosted (second-ask restored Ns)
+    assert total == 108  # 16 clean + 92 boosted (second-ask restored Ns)
     assert "C1_falling" not in AR.default_arm_ids()
     assert "C2_adversarial" not in AR.default_arm_ids()
     # nominal cost bookkeeping at the planning number (5 CPU-h/fit): 540 nominal, 850 worst-case
@@ -77,8 +78,9 @@ def test_envelope_machine_check_all_in_arms():
         if e["envelope"] != "in" or e["quad"] is None:
             continue
         for B in AR.arm_boost_B(aid, Z_DENSE).values():
-            assert np.all(B >= lo - 1e-12) and np.all(B <= hi + 1e-12), \
-                f"{aid}: B(z) leaves the envelope [{lo},{hi}]: [{B.min()}, {B.max()}]"
+            assert np.all(B >= lo - 1e-12) and np.all(
+                B <= hi + 1e-12
+            ), f"{aid}: B(z) leaves the envelope [{lo},{hi}]: [{B.min()}, {B.max()}]"
 
 
 def test_envelope_out_arms_actually_violate():
@@ -95,7 +97,8 @@ def test_envelope_extremal_placement():
     mins, maxs = [], []
     for aid in ("K3_rising", "K4_u_paper", "K6_inv_u", "K7_falling"):
         B = AR.arm_boost_B(aid, Z_DENSE)["lls_truth_boost"]
-        mins.append(B.min()); maxs.append(B.max())
+        mins.append(B.min())
+        maxs.append(B.max())
     assert min(mins) == pytest.approx(0.8014, abs=2e-3)
     assert max(maxs) == pytest.approx(3.1543, abs=2e-3)
 
@@ -126,21 +129,27 @@ def test_registry_evaluator_matches_hook_evaluator():
     login-node analyzer honest against the cluster-side hook."""
     import hcd_analysis.emulator  # noqa: F401
     import hcd_analysis.emulator.closure_legb as LB
+
     z = np.linspace(2.4, 4.6, 45)
     for aid in AR.arm_ids():
         spec = AR.arm_inject_spec(aid)
         if spec is None:
             continue
         for cls, prof in spec.items():
-            np.testing.assert_allclose(AR.eval_profile(prof, z),
-                                       np.asarray(LB.eval_boost_profile(prof, z)),
-                                       rtol=1e-13, err_msg=f"{aid}/{cls}")
+            np.testing.assert_allclose(
+                AR.eval_profile(prof, z),
+                np.asarray(LB.eval_boost_profile(prof, z)),
+                rtol=1e-13,
+                err_msg=f"{aid}/{cls}",
+            )
             assert AR.eval_profile(prof, 3.0) == pytest.approx(
-                float(LB.eval_boost_profile(prof, 3.0)), rel=1e-13)
+                float(LB.eval_boost_profile(prof, 3.0)), rel=1e-13
+            )
 
 
 def test_pivot_convention_matches_deployed_constant():
     from hcd_analysis.emulator.inference import HCD_Z_PIVOT
+
     assert AR.Z_PIVOT == float(HCD_Z_PIVOT) == 3.0
 
 
@@ -149,7 +158,7 @@ def test_pivot_convention_matches_deployed_constant():
 # --------------------------------------------------------------------------------------------- #
 def test_k5_table_ingest_and_hash():
     t = AR.load_k5_measured_tables()
-    assert t["sha256"] == AR.K5_TABLE_SHA256          # pinned provenance: a swapped table fails
+    assert t["sha256"] == AR.K5_TABLE_SHA256  # pinned provenance: a swapped table fails
     z = np.asarray(t["z"])
     assert np.all(np.diff(z) > 0)
     # covers the KS band with explicit rows (the hook forbids silent extrapolation) AND the

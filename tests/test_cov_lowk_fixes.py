@@ -6,6 +6,7 @@ ENV-GATED and REVERSIBLE: env UNSET ⇒ byte-identical to the deployed path. The
   2. env-UNSET ⇒ the loaders return BYTE-IDENTICAL covariance (the back-compat guarantee);
   3. each flag, when SET, actually WIDENS the low-k covariance (no silent no-op).
 """
+
 import os
 
 import hcd_analysis.emulator  # noqa: F401  enables jax_enable_x64
@@ -40,18 +41,18 @@ def test_cv_floor_frac_taper():
 
 def test_add_cv_floor_diag_and_rank1():
     """_add_cv_floor adds (f·P)² on the diagonal (diag) or s sᵀ (rank1); off above K_ZERO it is 0."""
-    k = np.array([1e-4, DL.CV_FLOOR_K_FULL, 0.02, 0.05])      # 2 low-k rows + 2 high-k rows
+    k = np.array([1e-4, DL.CV_FLOOR_K_FULL, 0.02, 0.05])  # 2 low-k rows + 2 high-k rows
     P = np.array([0.2, 0.15, 0.1, 0.08])
     C0 = np.eye(4) * 1e-3
     Cd = DL._add_cv_floor(C0, k, P, rank1=False)
     s = DL._cv_floor_frac(k) * P
-    np.testing.assert_allclose(np.diag(Cd) - np.diag(C0), s ** 2, rtol=0, atol=1e-14)
+    np.testing.assert_allclose(np.diag(Cd) - np.diag(C0), s**2, rtol=0, atol=1e-14)
     # high-k rows (k≥K_ZERO) get ZERO floor
     assert Cd[2, 2] == C0[2, 2] and Cd[3, 3] == C0[3, 3]
     # rank1 adds the fully-correlated outer product (off-diagonals appear on the low-k block)
     Cr = DL._add_cv_floor(C0, k, P, rank1=True)
     np.testing.assert_allclose(Cr - C0, np.outer(s, s), rtol=0, atol=1e-14)
-    assert Cr[0, 1] != 0.0 and Cd[0, 1] == C0[0, 1]          # rank1 correlates; diag does not
+    assert Cr[0, 1] != 0.0 and Cd[0, 1] == C0[0, 1]  # rank1 correlates; diag does not
     # the input is not mutated
     assert np.array_equal(C0, np.eye(4) * 1e-3)
 
@@ -65,7 +66,7 @@ def test_desi_env_unset_byte_identical(monkeypatch):
     deployed path (use_snr3=False, add_cv_floor=False) — the reversibility guarantee."""
     for v in ("HCD_DESI_SNR3", "HCD_CV_FLOOR", "HCD_CV_FLOOR_RANK1"):
         monkeypatch.delenv(v, raising=False)
-    leg_env = DL.load_desi_leg()                              # env unset → reads the flags (all off)
+    leg_env = DL.load_desi_leg()  # env unset → reads the flags (all off)
     leg_explicit = DL.load_desi_leg(use_snr3=False, add_cv_floor=False)
     np.testing.assert_array_equal(leg_env.P_data, leg_explicit.P_data)
     np.testing.assert_array_equal(leg_env.C_data, leg_explicit.C_data)
@@ -102,7 +103,10 @@ def test_desi_cv_floor_widens_lowk_only():
         np.testing.assert_array_equal(d1[highk], d0[highk])  # high-k untouched
 
 
-@pytest.mark.skipif(not (_have_desi and _have_snr3), reason="DESI baseline or SNR3 npz not present (set HCD_P1D_DATA_DIR)")
+@pytest.mark.skipif(
+    not (_have_desi and _have_snr3),
+    reason="DESI baseline or SNR3 npz not present (set HCD_P1D_DATA_DIR)",
+)
 def test_desi_snr3_swaps_cov_and_inflates_stat():
     """use_snr3=True loads the SNR>3 measurement+cov (DIFFERENT from the SNR>1 baseline) and the
     +5% stat inflation rides along (the cov is not byte-identical to the SNR>1 path)."""
@@ -110,4 +114,6 @@ def test_desi_snr3_swaps_cov_and_inflates_stat():
     leg3 = DL.load_desi_leg(use_snr3=True)
     # same z/k grid, DIFFERENT covariance (different subsample + the stat inflation).
     assert leg1.C_data.shape == leg3.C_data.shape
-    assert not np.allclose(leg1.C_data, leg3.C_data), "SNR>3 cov must differ from the SNR>1 baseline"
+    assert not np.allclose(
+        leg1.C_data, leg3.C_data
+    ), "SNR>3 cov must differ from the SNR>1 baseline"

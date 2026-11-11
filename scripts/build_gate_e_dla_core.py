@@ -8,6 +8,7 @@ the data bins by linear interpolation in ln k (no binding, no theta-dependence).
 ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu python3 \
      scripts/build_gate_e_dla_core.py --cache <lf cache> --out <product.npz>
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,16 +25,20 @@ from hcd_analysis.emulator.data import load_cache
 from hcd_analysis.emulator.products import save_product
 from hcd_analysis.emulator.schema import L_BOX_HMPC
 
-ROW_RULE = ("per leg z: cache rows with |z_grid - z| < 0.05 (all simulations and rungs); each row's delta[:, 2] "
-            "interpolated linearly in k at fixed physical k from its own kfkms grid (finite modes; rows not covering a "
-            "point excluded there); mean over rows; mean over the leg's z; fixed log grid 400 points [4e-4, 0.1] s/km; "
-            "read at data bins by linear interpolation in ln k")
+ROW_RULE = (
+    "per leg z: cache rows with |z_grid - z| < 0.05 (all simulations and rungs); each row's delta[:, 2] "
+    "interpolated linearly in k at fixed physical k from its own kfkms grid (finite modes; rows not covering a "
+    "point excluded there); mean over rows; mean over the leg's z; fixed log grid 400 points [4e-4, 0.1] s/km; "
+    "read at data bins by linear interpolation in ln k"
+)
 
 
 def legs():
-    return [DL.load_desi_leg(metals_on=True, resolution_float=True, resolution_coherent=False),
-            DL.load_ks_leg(resolution_float=True, k_max=0.065),
-            DL.load_eboss_leg(resolution_float=True, resolution_coherent=False)]
+    return [
+        DL.load_desi_leg(metals_on=True, resolution_float=True, resolution_coherent=False),
+        DL.load_ks_leg(resolution_float=True, k_max=0.065),
+        DL.load_eboss_leg(resolution_float=True, resolution_coherent=False),
+    ]
 
 
 def _sha(path):
@@ -45,7 +50,9 @@ def _sha(path):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--cache", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args(argv)
@@ -64,17 +71,30 @@ def main(argv=None):
         zl = [float(z) for z in np.asarray(leg.z)]
         c = CB.dla_core_leg(kf, core, z_rows, zl, CB.DLA_CORE_GRID)
         keep = np.isfinite(np.asarray(leg.P_data))
-        at = CB.dla_core_at(np.asarray(leg.k)[keep], CB.DLA_CORE_GRID, c)        # refuses uncovered data k
+        at = CB.dla_core_at(
+            np.asarray(leg.k)[keep], CB.DLA_CORE_GRID, c
+        )  # refuses uncovered data k
         if not np.all(np.isfinite(at)):
             raise SystemExit(f"{leg.name}: non-finite core at a data bin")
         arrays[f"core_{leg.name}"] = c
         leg_z[leg.name] = zl
-        print(f"{leg.name}: z {zl[0]:.1f}-{zl[-1]:.1f} ({len(zl)}), finite grid points {int(np.isfinite(c).sum())}/400, "
-              f"kept bins {int(keep.sum())} covered")
-    commit = subprocess.run(["git", "-C", os.path.dirname(os.path.abspath(__file__)), "rev-parse", "HEAD"],
-                            capture_output=True, text=True).stdout.strip()
-    prov = dict(code_commit=commit, cache_sha256=_sha(a.cache), inputs={"cache": a.cache}, row_rule=ROW_RULE,
-                leg_z=leg_z, amendment="GATE_E_AMENDMENT_A1 rev 1 section 4 (PU-0068)")
+        print(
+            f"{leg.name}: z {zl[0]:.1f}-{zl[-1]:.1f} ({len(zl)}), finite grid points {int(np.isfinite(c).sum())}/400, "
+            f"kept bins {int(keep.sum())} covered"
+        )
+    commit = subprocess.run(
+        ["git", "-C", os.path.dirname(os.path.abspath(__file__)), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    prov = dict(
+        code_commit=commit,
+        cache_sha256=_sha(a.cache),
+        inputs={"cache": a.cache},
+        row_rule=ROW_RULE,
+        leg_z=leg_z,
+        amendment="GATE_E_AMENDMENT_A1 rev 1 section 4 (PU-0068)",
+    )
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     save_product(a.out, "dla_core", k_com_hmpc=k_com, provenance=prov, **arrays)
     print(f"wrote {a.out} sha256 {_sha(a.out)}")

@@ -13,6 +13,7 @@ superseded) + the logdet Gaussian (``likelihood.gaussian_loglik``) + a SMOOTH bo
 
 Everything is JAX-pure and differentiable in (θ_unit, tau0, alpha_hcd).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -27,8 +28,7 @@ from .predict import predict_P_filt
 from .likelihood import sigma_at_tau0, rho_at_tau0, gaussian_loglik
 
 # PRIYA / coarse_grid order — the names the Cobaya/numpyro adapters expose.
-PARAM_NAMES = ("ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2",
-               "hireionz", "bhfeedback")
+PARAM_NAMES = ("ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2", "hireionz", "bhfeedback")
 
 
 def unit_box_logprior(theta_unit, sharpness=1e3):
@@ -39,9 +39,9 @@ def unit_box_logprior(theta_unit, sharpness=1e3):
     everywhere (HMC can be pushed back in). ``sharpness`` sets the wall steepness.
     """
     t = jnp.asarray(theta_unit)
-    below = jnp.clip(-t, 0.0, None)            # >0 where t<0
-    above = jnp.clip(t - 1.0, 0.0, None)       # >0 where t>1
-    return -sharpness * jnp.sum(below ** 2 + above ** 2)
+    below = jnp.clip(-t, 0.0, None)  # >0 where t<0
+    above = jnp.clip(t - 1.0, 0.0, None)  # >0 where t>1
+    return -sharpness * jnp.sum(below**2 + above**2)
 
 
 def meanflux_logprior(tau0, mu, sigma):
@@ -62,7 +62,7 @@ def gaussian_logprior(value, mu, sigma):
 # (subDLA), Prochaska&Wolfe2009 (DLA)). Fractional widths σ/μ per class; LLS TIGHT
 # (cosmology-degenerate, DESI DR1). DLA on the per-leg unmasked-DLA residual
 # (PI-confirmed final intent 2026-06-09).
-HCD_PRIOR_FRAC_SIGMA = (0.15, 0.40, 0.50)   # σ/μ (survey=None closure/SBC path): LLS TIGHT
+HCD_PRIOR_FRAC_SIGMA = (0.15, 0.40, 0.50)  # σ/μ (survey=None closure/SBC path): LLS TIGHT
 #   (cosmology-degenerate; the closure mock truth is the SIM itself, so the lit-kernel
 #   systematic width 0.287 of the survey path deliberately does NOT cascade here); subDLA
 #   BROAD 0.40 as a residual-abundance marginalization — the old rationale "poor
@@ -81,12 +81,12 @@ HCD_PRIOR_FRAC_SIGMA = (0.15, 0.40, 0.50)   # σ/μ (survey=None closure/SBC pat
 # residual is leg-specific — KS fully masks DLAs (0% residual), DESI carries the 10% — handled
 # by the per-leg DataLeg.dla_forward_frac in data_likelihood (this prior is the DESI center).
 # α_DLA is one-sided (softplus, sampler_numpyro) → α_DLA ≥ 0 (a completeness fraction).
-HCD_DLA_RESIDUAL_FRAC = 0.10                 # DLA residual incidence = 0.10 × data incidence
+HCD_DLA_RESIDUAL_FRAC = 0.10  # DLA residual incidence = 0.10 × data incidence
 #   (the DESI 10% unmasked-DLA residual; was 0.30 for the WRONG ~70%-masking model, then 0.05
 #   for the WRONG "α_DLA≈0 / masked-to-clean" revert). With w_DLA≈0.04 the α_DLA prior center is
 #   ≈0.004 (σ/μ=0.50, one-sided softplus → a 10%-scale residual the forward marginalizes); the
 #   closure truth's α_DLA is 0.10·w_DLA on DESI / 0 on KS (per-leg DLA-forward axis).
-HCD_DLA_Z_RELIABLE = 3.5                     # DLA dN/dX unreliable beyond this z → widen σ_DLA
+HCD_DLA_Z_RELIABLE = 3.5  # DLA dN/dX unreliable beyond this z → widen σ_DLA
 HCD_Z_PIVOT = 3.0
 # PRIYA-sim-vs-observed dN/dX offset (literature / PRIYA-sim) per class, as a POWER-LAW in
 # (1+z) — mirroring the τ₀ Kim-curve+slope model. (lit/sim)@z_pivot + the slope
@@ -96,7 +96,7 @@ HCD_Z_PIVOT = 3.0
 # scripts/derive_hcd_dndx_corrected.py): the old 1.06 was cumulative-tau>=2-vs-binned-class
 # (wrong estimand pair); definition-matched, PRIYA's LLS incidence matches the corrected
 # literature at z=3 to 0.5% (ratio 0.995). subDLA/DLA slots unchanged (re-verified same run).
-HCD_LIT_OVER_SIM = (0.995, 1.00, 1.34)       # (LLS, subDLA, DLA): data/sim at z_pivot=3.0
+HCD_LIT_OVER_SIM = (0.995, 1.00, 1.34)  # (LLS, subDLA, DLA): data/sim at z_pivot=3.0
 # subDLA centered on the SIM (1.00) — KEPT by PI decision 9 (2026-07-18): PRIYA produces
 # subDLAs IN-SITU (Rahmati+2013 self-shielding) so the sim is the faithful prior here, and
 # the correction is CONSISTENT with the sim anchor (marginally: the corrected lit/sim subDLA ratio, recorded as
@@ -195,18 +195,26 @@ HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X = {"DESI": 0.574, "eBOSS": 0.574, "DESI+KS": 0
 # confirm-or-swap knob, so an override WILL happen; the namespace discipline is load-bearing.)
 # Which parameterization each survey key deploys (single-leg builds; recorded in forward_stamp
 # as "hcd_parameterization" resolved from the BUILT ctx):
-HCD_ALPHA_PARAMETERIZATION = {"DESI": "alpha_pivot_powerlaw_v1", "eBOSS": "alpha_pivot_powerlaw_v1",
-                              "DESI+KS": "alpha_pivot_powerlaw_v1", "KS": "dndx_mapped_v2"}
+HCD_ALPHA_PARAMETERIZATION = {
+    "DESI": "alpha_pivot_powerlaw_v1",
+    "eBOSS": "alpha_pivot_powerlaw_v1",
+    "DESI+KS": "alpha_pivot_powerlaw_v1",
+    "KS": "dndx_mapped_v2",
+}
 # WHERE the per-survey LLS boost acts. alpha_postmap = multiply the alpha-space prior centre
 # AFTER the dN/dX→alpha map (the legacy construction; inert at boost 1.0 for DESI/eBOSS/DESI+KS).
 # dndx_premap = the KS 2.5× multiplies the LITERATURE dN/dX law BEFORE the occupancy map
 # (dndx_ref_LLS(z) = 2.5·A_LLS·(1+z)^γ_LLS), so the map's saturation geometry bounds the result.
-HCD_LLS_BOOST_SPACE = {"DESI": "alpha_postmap(inert at 1.0)", "eBOSS": "alpha_postmap(inert at 1.0)",
-                       "DESI+KS": "alpha_postmap(inert at 1.0)", "KS": "dndx_premap"}
+HCD_LLS_BOOST_SPACE = {
+    "DESI": "alpha_postmap(inert at 1.0)",
+    "eBOSS": "alpha_postmap(inert at 1.0)",
+    "DESI+KS": "alpha_postmap(inert at 1.0)",
+    "KS": "dndx_premap",
+}
 # KS mapped-branch prior widths (PINNED literals; derived twice independently and
 # orchestrator-verified 2026-07-22). Width-space CONVENTION per site is in
 # KS_DNDX_WIDTH_CONVENTION below (carried in the freeze payload).
-KS_DNDX_SIGMA_EPS = 0.5310    # eps_lls ~ N(0, .): log dN/dX_LLS amplitude deviation.
+KS_DNDX_SIGMA_EPS = 0.5310  # eps_lls ~ N(0, .): log dN/dX_LLS amplitude deviation.
 #   = 0.40 / g_LLS with g_LLS = 0.75336 = d ln alpha_LLS / d ln A at the V-A KS reference pivot —
 #   the "full-map local-linear width translation" of the PI's alpha-space 0.40 fractional-width
 #   rule (the KS selection-driven width) into dN/dX log-amplitude space. Alternatives considered
@@ -215,21 +223,29 @@ KS_DNDX_SIGMA_KAPPA = 0.6681  # kappa_lls ~ N(0, .): dN/dX_LLS exponent deviatio
 #   = the lit GLS sigma_gamma of the corrected LLS law (hcd_lit_dndx_corrected.json K1a
 #   free-gamma fit: gamma = 2.137 +/- 0.6681; the deployed law is the same points CONSTRAINED
 #   to 2.127, so the free-fit sigma is the honest exponent width).
-KS_DNDX_SIGMA_MSUB = 0.4130   # m_sub ~ N(0, .): log dN/dX_subDLA amplitude deviation.
+KS_DNDX_SIGMA_MSUB = 0.4130  # m_sub ~ N(0, .): log dN/dX_subDLA amplitude deviation.
 #   = 0.40 / g_sub, g_sub = 0.96842 (same full-map local-linear translation convention as
 #   KS_DNDX_SIGMA_EPS; the subDLA alpha-space fractional width 0.40 = HCD_PRIOR_FRAC_SIGMA[1]).
 KS_DNDX_WIDTH_CONVENTION = {
-    "eps_lls": ("full-map local-linear width translation: 0.40/g_LLS, g_LLS=0.75336 = "
-                "dln(alpha_LLS)/dln(A) at the V-A KS reference pivot; alternatives 0.5315 "
-                "(hypot) / 0.543 (central-68%) listed as PI confirm-or-swap"),
-    "kappa_lls": ("lit GLS sigma_gamma of the corrected LLS law: hcd_lit_dndx_corrected.json "
-                  "K1a free-gamma fit 2.137 +/- 0.6681"),
-    "m_sub": ("full-map local-linear width translation: 0.40/g_sub, g_sub=0.96842 "
-              "(same convention as eps_lls)"),
+    "eps_lls": (
+        "full-map local-linear width translation: 0.40/g_LLS, g_LLS=0.75336 = "
+        "dln(alpha_LLS)/dln(A) at the V-A KS reference pivot; alternatives 0.5315 "
+        "(hypot) / 0.543 (central-68%) listed as PI confirm-or-swap"
+    ),
+    "kappa_lls": (
+        "lit GLS sigma_gamma of the corrected LLS law: hcd_lit_dndx_corrected.json "
+        "K1a free-gamma fit 2.137 +/- 0.6681"
+    ),
+    "m_sub": (
+        "full-map local-linear width translation: 0.40/g_sub, g_sub=0.96842 "
+        "(same convention as eps_lls)"
+    ),
     "t_sub": "ZSLOPE_PRIOR_SIGMA[1]=0.53 (deployed subDLA exponent width, unchanged)",
-    "dla_raw": ("deployed latent geometry: dla_amp = softplus(dla_raw)/softplus(raw_mu0), "
-                "dla_raw ~ Normal(raw_mu0=KS_DNDX_DLA_RAW_MU0, 1.0) — the broad one-sided "
-                "softplus(Normal) of the deployed DLA site, centred at amplitude 1"),
+    "dla_raw": (
+        "deployed latent geometry: dla_amp = softplus(dla_raw)/softplus(raw_mu0), "
+        "dla_raw ~ Normal(raw_mu0=KS_DNDX_DLA_RAW_MU0, 1.0) — the broad one-sided "
+        "softplus(Normal) of the deployed DLA site, centred at amplitude 1"
+    ),
     "t_dla": "ZSLOPE_PRIOR_SIGMA[2]=0.33 (deployed DLA exponent width, unchanged)",
 }
 # WHERE the mapped reference's sub/DLA dN/dX components come from (the LLS component is the
@@ -244,7 +260,7 @@ KS_HEADROOM_SOURCE = "exact-inverse of the boost-1.0 deployed real-fit centre tr
 # sampler_numpyro._dla_raw_mu at the natural amplitude x=1.0, so dla_amp = softplus(dla_raw)/
 # softplus(raw_mu0) is centred at EXACTLY 1 (the KS DLA site is PRIOR-ONLY, dla_forward_frac=0;
 # geometry fidelity to the deployed broad softplus is what matters, g_DLA=0.998).
-KS_DNDX_DLA_RAW_MU0 = math.log(math.expm1(1.0))     # = 0.5413248546129181
+KS_DNDX_DLA_RAW_MU0 = math.log(math.expm1(1.0))  # = 0.5413248546129181
 # Mapped-branch KS LLS pivot-centre guard band. The assert_hcd_pivot_z3 band scales
 # (0.14, 0.21)×boost, which assumes POST-map linearity — wrong for the mapped construction
 # (the map saturates). Derivation: same relative margins as the deployed band —
@@ -275,7 +291,8 @@ def assert_ks_mapped_pivot(alpha_lls_mapped, where):
         f"[{lo}, {hi}]. Expected ≈0.393236 (the dN/dX-premap 2.5× lit-law centre through the "
         f"exact occupancy map). NOTE the band (0.326,0.476) CONTAINS the legacy alpha-postmap centre 0.4303, so this guard alone does NOT detect a legacy-value reversion -- that drift is caught by the hcd_prior_signature pin (T8) and by assert_hcd_pivot_z3 on the unmapped boost-1.0 input; a centre "
         f"far above the band indicates a boost-space or double-boost bug. See "
-        f"HCD_LLS_BOOST_SPACE / KS_HEADROOM_SOURCE (W2, 2026-07-22).")
+        f"HCD_LLS_BOOST_SPACE / KS_HEADROOM_SOURCE (W2, 2026-07-22)."
+    )
 
 
 def assert_known_survey(survey, where):
@@ -290,7 +307,9 @@ def assert_known_survey(survey, where):
         f"{sorted(HCD_LLS_SURVEY_BOOST)}. A silent fallback here would hand this survey the "
         f"closure width HCD_PRIOR_FRAC_SIGMA[0]={HCD_PRIOR_FRAC_SIGMA[0]} (1.9x tighter than "
         f"the deployed DESI 0.287) on a real-data path. Pass survey=None for the closure/SBC "
-        f"constants; otherwise use one of the valid keys exactly (case-sensitive).")
+        f"constants; otherwise use one of the valid keys exactly (case-sensitive)."
+    )
+
 
 # --- REAL-FIT LLS forward z-slope (2026-06-17 PI re-determination; RE-JUSTIFIED 2026-07-18) -----
 # The LLS prior CENTER's z-EVOLUTION is the dominant low-z LLS→n_s leak lever (NOT the width). On
@@ -362,14 +381,19 @@ HCD_LLS_REALFIT_ZSLOPE = 2.127
 # bit-level, DLA at the deployed rounding, LLS amplitude to 16 eps relative; estimand regression,
 # telescoping record),
 # tests/test_lit_dndx{,_fits,_kernel}.py.
-HCD_LIT_DNDX_LAW = {"LLS": (0.01840091965972645, 2.127),
-                    "subDLA": (0.004832763139114936, 2.438007767664778),
-                    "DLA": (0.0076, 1.592)}
+HCD_LIT_DNDX_LAW = {
+    "LLS": (0.01840091965972645, 2.127),
+    "subDLA": (0.004832763139114936, 2.438007767664778),
+    "DLA": (0.0076, 1.592),
+}
 # The estimand each deployed law is a law OF (disjoint binned classes — NEVER cumulative; the
 # consumer telescopes disjoint classes). Guarded at the consumption boundary by
 # assert_dndx_law_estimand; test-enforced equal to the JSON's hcd_lit_dndx_estimand.
-HCD_LIT_DNDX_ESTIMAND = {"LLS": "binned_17.2_19.0", "subDLA": "binned_19.0_20.3",
-                         "DLA": "binned_ge20.3"}
+HCD_LIT_DNDX_ESTIMAND = {
+    "LLS": "binned_17.2_19.0",
+    "subDLA": "binned_19.0_20.3",
+    "DLA": "binned_ge20.3",
+}
 
 
 def assert_dndx_law_estimand(cls, expected, where):
@@ -383,7 +407,9 @@ def assert_dndx_law_estimand(cls, expected, where):
         f"HCD dN/dX law estimand mismatch [{where}]: HCD_LIT_DNDX_ESTIMAND[{cls!r}] = {got!r}, "
         f"consumer requires {expected!r}. The consumer telescopes DISJOINT binned classes — a "
         f"cumulative (or wrong-object) law here is the 2026-07-18 corrected-law bug recurring. "
-        f"See the HCD_LIT_DNDX_LAW provenance block.")
+        f"See the HCD_LIT_DNDX_LAW provenance block."
+    )
+
 
 # --- HCD prior PIVOT GUARD (PI 2026-06-17, the CENTER-construction bug; band re-derived
 # 2026-07-18 at the corrected laws) ---------------------------------------------------------------
@@ -397,9 +423,9 @@ def assert_dndx_law_estimand(cls, expected, where):
 # margins as before), 2-dp → (0.14, 0.21): contains the corrected lit-law center 0.172 (K1a,
 # constrained slope) AND the sim z=3 w_c center 0.2004 (closure-guard reuse), still EXCLUDES the
 # all-z-median 0.2909 (×boost). ALLZ_MEDIAN + GUARD_REL unchanged.
-HCD_PIVOT_LLS_ALPHA_Z3_BAND = (0.14, 0.21)   # z=3-consistent LLS α-pivot (DESI/cosmic-avg boost 1.0)
-HCD_PIVOT_LLS_ALLZ_MEDIAN = 0.2909           # the BUGGY all-z-median LLS α-pivot (z≈3.6) — must NOT recur
-HCD_PIVOT_GUARD_REL = 0.05                   # |α − all-z-median| must exceed this·all-z-median
+HCD_PIVOT_LLS_ALPHA_Z3_BAND = (0.14, 0.21)  # z=3-consistent LLS α-pivot (DESI/cosmic-avg boost 1.0)
+HCD_PIVOT_LLS_ALLZ_MEDIAN = 0.2909  # the BUGGY all-z-median LLS α-pivot (z≈3.6) — must NOT recur
+HCD_PIVOT_GUARD_REL = 0.05  # |α − all-z-median| must exceed this·all-z-median
 
 
 def hcd_lls_realfit_alpha_center(Xbar_z, z=HCD_Z_PIVOT, boost=1.0):
@@ -414,11 +440,12 @@ def hcd_lls_realfit_alpha_center(Xbar_z, z=HCD_Z_PIVOT, boost=1.0):
     bug), and NOT the pre-correction 0.194 (the cumulative-estimand bug)."""
     assert_dndx_law_estimand("LLS", "binned_17.2_19.0", "hcd_lls_realfit_alpha_center")
     from hcd_analysis.emulator.dndx_wc import alpha_from_dndx_law
+
     A = jnp.asarray([HCD_LIT_DNDX_LAW[c][0] for c in ("LLS", "subDLA", "DLA")])
     g = jnp.asarray([HCD_LIT_DNDX_LAW[c][1] for c in ("LLS", "subDLA", "DLA")])
     z_arr = jnp.atleast_1d(jnp.asarray(z, float))
     Xb_arr = jnp.atleast_1d(jnp.asarray(Xbar_z, float))
-    alpha = alpha_from_dndx_law(A, g, Xb_arr, z_arr)          # (...,3) (LLS,subDLA,DLA)
+    alpha = alpha_from_dndx_law(A, g, Xb_arr, z_arr)  # (...,3) (LLS,subDLA,DLA)
     return float(boost) * float(jnp.asarray(alpha).reshape(-1, 3)[0, 0])
 
 
@@ -429,25 +456,28 @@ def assert_hcd_pivot_z3(alpha_mu, z, where, *, boost=1.0):
     LLS α-center is ≈ the buggy all-z-median 0.291 (×boost) → a future revert to
     nanmedian(w_c_cache[...all z...]) trips here. See the HCD-pivot dN/dX low-z overshoot bug."""
     if abs(float(z) - float(HCD_Z_PIVOT)) > 1e-6:
-        return                                                # only meaningful at the z=3 pivot
+        return  # only meaningful at the z=3 pivot
     a = float(alpha_mu)
-    allz = float(HCD_PIVOT_LLS_ALLZ_MEDIAN) * float(boost)    # the buggy z≈3.6 value (per boost)
+    allz = float(HCD_PIVOT_LLS_ALLZ_MEDIAN) * float(boost)  # the buggy z≈3.6 value (per boost)
     lo, hi = (b * float(boost) for b in HCD_PIVOT_LLS_ALPHA_Z3_BAND)
     assert abs(a - allz) > HCD_PIVOT_GUARD_REL * allz, (
         f"HCD LLS α-PIVOT center [{where}] = {a:.4f} ≈ the all-z-median (z≈3.6) value {allz:.4f} — "
         f"the HCD pivot MUST use the z=3 w_c, NOT the median-over-all-z (= z≈3.6). See the dN/dX "
-        f"low-z overshoot bug (CENTER-construction fix 2026-06-17).")
+        f"low-z overshoot bug (CENTER-construction fix 2026-06-17)."
+    )
     assert lo <= a <= hi, (
         f"HCD LLS α-PIVOT center [{where}] = {a:.4f} outside the z=3-consistent band [{lo:.4f},{hi:.4f}] "
         f"(boost={boost}). Expected ≈0.172 (corrected lit-law, PI 2026-07-18) / ≈0.200 (sim z=3 w_c). "
         f"A center near the all-z-median {allz:.4f} (= z≈3.6) is the CENTER-construction bug. See the "
-        f"dN/dX low-z overshoot + the HCD_LIT_DNDX_LAW provenance block.")
+        f"dN/dX low-z overshoot + the HCD_LIT_DNDX_LAW provenance block."
+    )
 
 
 # --- HCD prior-constants freeze payload + signature (2026-07-18; closes the tripwire gap
 # forward_signature's docstring flags: prior constants were NOT covered by any signature) -------
-_HCD_DERIVATION_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                    "hcd_lit_dndx_corrected.json")
+_HCD_DERIVATION_JSON = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "hcd_lit_dndx_corrected.json"
+)
 
 
 def hcd_prior_constants_payload():
@@ -506,17 +536,20 @@ def hcd_prior_signature():
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def lit_over_sim_at_z(z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SLOPE,
-                      z_pivot=HCD_Z_PIVOT):
+def lit_over_sim_at_z(
+    z, ratio_pivot=HCD_LIT_OVER_SIM, slope=HCD_LIT_OVER_SIM_SLOPE, z_pivot=HCD_Z_PIVOT
+):
     """z-dependent (literature/sim) dN/dX ratio per class — a power-law in (1+z):
     r_c(z) = r_c(z_p)·((1+z)/(1+z_p))^s_c. The α-prior center tracks the OBSERVED dN/dX_c(z)
     evolution this way (the τ₀-analog: a fixed curve + slope, not a single number)."""
-    r = jnp.asarray(ratio_pivot); s = jnp.asarray(slope)
+    r = jnp.asarray(ratio_pivot)
+    s = jnp.asarray(slope)
     return r * ((1.0 + jnp.asarray(z)) / (1.0 + z_pivot)) ** s
 
 
-def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None,
-                        use_lls_width_hedge2x=False):
+def hcd_incidence_prior(
+    w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None, use_lls_width_hedge2x=False
+):
     """Per-class HCD incidence prior (μ, σ) on α_c (the effective per-class sightline weight
     in ``predict_P_obs``), centered on the OBSERVED incidence AT the data redshift ``z``
     (NOT the sim's), from the fiducial sim weights ``w_c_fid`` = (w_LLS, w_subDLA, w_DLA) ×
@@ -532,7 +565,7 @@ def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None,
     (half-normal/softplus) in the sampler — α_DLA ≥ 0 (a completeness fraction), sampled
     (marginalized) over the 10% residual center.
     """
-    w = jnp.asarray(w_c_fid)                                    # (3,)
+    w = jnp.asarray(w_c_fid)  # (3,)
     r = lit_over_sim_at_z(z) if lit_over_sim is None else jnp.asarray(lit_over_sim)
     fl, fs, fd = HCD_PRIOR_FRAC_SIGMA
     # PER-SURVEY effective-LLS pin (real fit only; survey=None leaves the closure cert untouched):
@@ -545,7 +578,11 @@ def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None,
         assert_known_survey(survey, "hcd_incidence_prior")
         lls_boost = HCD_LLS_SURVEY_BOOST[survey]
         # PI WIDTH RULE: 1× lit measurement error (primary) or the 2× cosmic-variance hedge.
-        _fsig = HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X if use_lls_width_hedge2x else HCD_LLS_SURVEY_FRAC_SIGMA
+        _fsig = (
+            HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X
+            if use_lls_width_hedge2x
+            else HCD_LLS_SURVEY_FRAC_SIGMA
+        )
         fl = _fsig[survey]
     mu = jnp.stack([lls_boost * r[0] * w[0], r[1] * w[1], HCD_DLA_RESIDUAL_FRAC * r[2] * w[2]])
     # DLA dN/dX is unreliable beyond z≈3.5 → widen σ_DLA above it (weak high-z prior) so the
@@ -555,10 +592,24 @@ def hcd_incidence_prior(w_c_fid, z=HCD_Z_PIVOT, lit_over_sim=None, survey=None,
     return mu, sigma
 
 
-def predict_P_obs_and_cov_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
-                                   pf_stats, sigma_zb, alpha_centres, cosmic_cov,
-                                   dla_core, dla_shot_flag, shot_inflate=10.0,
-                                   cemu_inflate=1.0, rho_zb=None):
+def predict_P_obs_and_cov_single_z(
+    model,
+    theta9,
+    z_unit,
+    z,
+    tau0,
+    alpha_hcd,
+    *,
+    pf_stats,
+    sigma_zb,
+    alpha_centres,
+    cosmic_cov,
+    dla_core,
+    dla_shot_flag,
+    shot_inflate=10.0,
+    cemu_inflate=1.0,
+    rho_zb=None,
+):
     """Per-z (P_obs (K,), C (K,K)) — the EXACT forward model + covariance the
     likelihood uses, factored out so the closure mock can draw its noise from the
     IDENTICAL C (Leg A's contract: C_mock == C_like; closure_mocks calls this).
@@ -583,33 +634,50 @@ def predict_P_obs_and_cov_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     No data, no residual, no jitter — JUST the model mean and covariance (the jitter is
     added inside ``gaussian_loglik`` / the mock's Cholesky). Differentiable in (θ9,τ₀,α).
     """
-    P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)          # (4,K) emulated
+    P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)  # (4,K) emulated
     P_clean = P_filt[0]
-    P_dla_unf = P_filt[3] + jnp.asarray(dla_core)                           # unfiltered DLA
-    P_cls = jnp.stack([P_clean, P_filt[1], P_filt[2], P_dla_unf])           # (4,K) class powers
-    a = jnp.asarray(alpha_hcd)                                              # (3,)
-    coef = jnp.concatenate([jnp.atleast_1d(1.0 - jnp.sum(a)), a])          # (4,) [clean,LLS,sub,DLA]
-    P_obs = jnp.einsum("c,ck->k", coef, P_cls)                             # = P_clean + Σ α_c(P_c−P_clean)
+    P_dla_unf = P_filt[3] + jnp.asarray(dla_core)  # unfiltered DLA
+    P_cls = jnp.stack([P_clean, P_filt[1], P_filt[2], P_dla_unf])  # (4,K) class powers
+    a = jnp.asarray(alpha_hcd)  # (3,)
+    coef = jnp.concatenate([jnp.atleast_1d(1.0 - jnp.sum(a)), a])  # (4,) [clean,LLS,sub,DLA]
+    P_obs = jnp.einsum("c,ck->k", coef, P_cls)  # = P_clean + Σ α_c(P_c−P_clean)
     # C_emu per-k variance: cross-class 4×4 block (opt-in) OR the per-class diagonal (default).
     if rho_zb is not None:
-        rho_ck = rho_at_tau0(rho_zb, alpha_centres, z, tau0)               # (4,4,K) τ₀-interp'd
+        rho_ck = rho_at_tau0(rho_zb, alpha_centres, z, tau0)  # (4,4,K) τ₀-interp'd
         # emu_var(k) = Σ_{c,c'} coef_c·coef_c'·ρ_cc'(k)·P_c·P_c'  (≥0: ρ SPD ⇒ coefᵀ(P∘ρ∘P)coef≥0).
-        emu_var = jnp.einsum("c,d,cdk,ck,dk->k", coef, coef,
-                             jnp.nan_to_num(rho_ck), P_cls, P_cls)
+        emu_var = jnp.einsum("c,d,cdk,ck,dk->k", coef, coef, jnp.nan_to_num(rho_ck), P_cls, P_cls)
     else:
-        sigma_ck = sigma_at_tau0(sigma_zb, alpha_centres, z, tau0)          # (4,K) fractional
-        emu_var = jnp.einsum("c,ck,ck->k", coef ** 2,
-                             jnp.nan_to_num(sigma_ck) ** 2, P_cls ** 2)     # Σ coef²·σ²·P_c²
+        sigma_ck = sigma_at_tau0(sigma_zb, alpha_centres, z, tau0)  # (4,K) fractional
+        emu_var = jnp.einsum(
+            "c,ck,ck->k", coef**2, jnp.nan_to_num(sigma_ck) ** 2, P_cls**2
+        )  # Σ coef²·σ²·P_c²
     emu_var = jnp.where(dla_shot_flag, emu_var * shot_inflate, emu_var) * cemu_inflate
     cosmic = jnp.asarray(cosmic_cov)
     C = (jnp.diag(cosmic) if cosmic.ndim == 1 else cosmic) + jnp.diag(emu_var)
     return P_obs, C
 
 
-def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
-                     pf_stats, sigma_zb, alpha_centres, cosmic_cov, P_data, dla_core,
-                     dla_shot_flag, shot_inflate=10.0, cemu_inflate=1.0,
-                     valid_k=None, include_logdet=True, rho_zb=None):
+def log_lik_single_z(
+    model,
+    theta9,
+    z_unit,
+    z,
+    tau0,
+    alpha_hcd,
+    *,
+    pf_stats,
+    sigma_zb,
+    alpha_centres,
+    cosmic_cov,
+    P_data,
+    dla_core,
+    dla_shot_flag,
+    shot_inflate=10.0,
+    cemu_inflate=1.0,
+    valid_k=None,
+    include_logdet=True,
+    rho_zb=None,
+):
     """Per-z Gaussian log-likelihood for the CORRECTED HCD forward model + the logdet term.
 
       P_obs = P_clean + Σ_{c∈HCD} α_c·(P_c − P_clean)          (clean-forest baseline)
@@ -636,10 +704,22 @@ def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     closure mock draws noise from the IDENTICAL covariance.
     """
     P_obs, C = predict_P_obs_and_cov_single_z(
-        model, theta9, z_unit, z, tau0, alpha_hcd, pf_stats=pf_stats, sigma_zb=sigma_zb,
-        alpha_centres=alpha_centres, cosmic_cov=cosmic_cov, dla_core=dla_core,
-        dla_shot_flag=dla_shot_flag, shot_inflate=shot_inflate, cemu_inflate=cemu_inflate,
-        rho_zb=rho_zb)
+        model,
+        theta9,
+        z_unit,
+        z,
+        tau0,
+        alpha_hcd,
+        pf_stats=pf_stats,
+        sigma_zb=sigma_zb,
+        alpha_centres=alpha_centres,
+        cosmic_cov=cosmic_cov,
+        dla_core=dla_core,
+        dla_shot_flag=dla_shot_flag,
+        shot_inflate=shot_inflate,
+        cemu_inflate=cemu_inflate,
+        rho_zb=rho_zb,
+    )
     # NaN-safe residual: sanitise P_data (out-of-range bins NaN) BEFORE the subtract so
     # the where-branch can't poison the gradient; valid_k zeroes those bins' residual.
     r = jnp.nan_to_num(jnp.asarray(P_data), nan=0.0) - P_obs
@@ -655,9 +735,27 @@ def log_lik_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     return -0.5 * (r @ sol)
 
 
-def log_lik_multiz(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, z, z_unit, sigma_zb,
-                   alpha_centres, cosmic_cov, P_data, dla_core, dla_shot_flag, valid_k,
-                   shot_inflate=10.0, cemu_inflate=1.0, include_logdet=True, rho_zb=None):
+def log_lik_multiz(
+    model,
+    theta9,
+    tau0_vec,
+    alpha_hcd,
+    *,
+    pf_stats,
+    z,
+    z_unit,
+    sigma_zb,
+    alpha_centres,
+    cosmic_cov,
+    P_data,
+    dla_core,
+    dla_shot_flag,
+    valid_k,
+    shot_inflate=10.0,
+    cemu_inflate=1.0,
+    include_logdet=True,
+    rho_zb=None,
+):
     """LIKELIHOOD-ONLY multi-z log-likelihood = Σ_z log_lik_single_z (no priors).
 
     The data-bin sum is **vmap'd over the z-axis** (K is fixed across bins → no padding; CS
@@ -671,29 +769,74 @@ def log_lik_multiz(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, z, z_unit, s
     like the other per-z leaves). Whether None is decided STATICALLY (python), so the vmap
     in_axes never traces over a None leaf and the diagonal path never recompiles."""
     use_xclass = rho_zb is not None
+
     def one(tau0_z, z_z, zu_z, sz, cc, pd, dc, flag, vk, rz):
         return log_lik_single_z(
-            model, theta9, zu_z, z_z, tau0_z, alpha_hcd, pf_stats=pf_stats, sigma_zb=sz,
-            alpha_centres=alpha_centres, cosmic_cov=cc, P_data=pd, dla_core=dc,
-            dla_shot_flag=flag, valid_k=vk, shot_inflate=shot_inflate,
-            cemu_inflate=cemu_inflate, include_logdet=include_logdet, rho_zb=rz)
+            model,
+            theta9,
+            zu_z,
+            z_z,
+            tau0_z,
+            alpha_hcd,
+            pf_stats=pf_stats,
+            sigma_zb=sz,
+            alpha_centres=alpha_centres,
+            cosmic_cov=cc,
+            P_data=pd,
+            dla_core=dc,
+            dla_shot_flag=flag,
+            valid_k=vk,
+            shot_inflate=shot_inflate,
+            cemu_inflate=cemu_inflate,
+            include_logdet=include_logdet,
+            rho_zb=rz,
+        )
+
     # rho_zb maps over the z-axis when present (in_axes 0), else is broadcast as None
     # (in_axes None — a non-array leaf vmap passes through unmapped).
     in_axes = (0,) * 9 + (0 if use_xclass else None,)
     rz_arg = jnp.asarray(rho_zb) if use_xclass else None
     per_z = jax.vmap(one, in_axes=in_axes)(
-        jnp.asarray(tau0_vec), jnp.asarray(z), jnp.asarray(z_unit),
-        jnp.asarray(sigma_zb), jnp.asarray(cosmic_cov), jnp.asarray(P_data),
-        jnp.asarray(dla_core), jnp.asarray(dla_shot_flag),
-        jnp.asarray(valid_k), rz_arg)
+        jnp.asarray(tau0_vec),
+        jnp.asarray(z),
+        jnp.asarray(z_unit),
+        jnp.asarray(sigma_zb),
+        jnp.asarray(cosmic_cov),
+        jnp.asarray(P_data),
+        jnp.asarray(dla_core),
+        jnp.asarray(dla_shot_flag),
+        jnp.asarray(valid_k),
+        rz_arg,
+    )
     return jnp.sum(per_z)
 
 
-def log_posterior_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
-                           pf_stats, sigma_zb, alpha_centres, cosmic_cov, P_data, dla_core,
-                           dla_shot_flag, tau0_mu, tau0_sigma, alpha_mu, alpha_sigma,
-                           shot_inflate=10.0, cemu_inflate=1.0, valid_k=None,
-                           include_logdet=True, box_sharpness=1e3, rho_zb=None):
+def log_posterior_single_z(
+    model,
+    theta9,
+    z_unit,
+    z,
+    tau0,
+    alpha_hcd,
+    *,
+    pf_stats,
+    sigma_zb,
+    alpha_centres,
+    cosmic_cov,
+    P_data,
+    dla_core,
+    dla_shot_flag,
+    tau0_mu,
+    tau0_sigma,
+    alpha_mu,
+    alpha_sigma,
+    shot_inflate=10.0,
+    cemu_inflate=1.0,
+    valid_k=None,
+    include_logdet=True,
+    box_sharpness=1e3,
+    rho_zb=None,
+):
     """Single-z log-POSTERIOR = log-likelihood + smooth unit-box prior + τ₀ mean-flux
     Gaussian + the per-class HCD **incidence prior** on α (TIGHT informative Gaussian
     centered on the structural w_c(dN/dX); LLS especially tight — it's cosmology-degenerate,
@@ -705,11 +848,26 @@ def log_posterior_single_z(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     raw-``log_prob`` (blackjax) path; production numpyro uses Uniform(0,1)+auto-bijector
     (exactly-flat in-box, finite grads) — set box_sharpness=0 there."""
     ll = log_lik_single_z(
-        model, theta9, z_unit, z, tau0, alpha_hcd, pf_stats=pf_stats, sigma_zb=sigma_zb,
-        alpha_centres=alpha_centres, cosmic_cov=cosmic_cov, P_data=P_data, dla_core=dla_core,
-        dla_shot_flag=dla_shot_flag, shot_inflate=shot_inflate, cemu_inflate=cemu_inflate,
-        valid_k=valid_k, include_logdet=include_logdet, rho_zb=rho_zb)
+        model,
+        theta9,
+        z_unit,
+        z,
+        tau0,
+        alpha_hcd,
+        pf_stats=pf_stats,
+        sigma_zb=sigma_zb,
+        alpha_centres=alpha_centres,
+        cosmic_cov=cosmic_cov,
+        P_data=P_data,
+        dla_core=dla_core,
+        dla_shot_flag=dla_shot_flag,
+        shot_inflate=shot_inflate,
+        cemu_inflate=cemu_inflate,
+        valid_k=valid_k,
+        include_logdet=include_logdet,
+        rho_zb=rho_zb,
+    )
     lp = unit_box_logprior(theta9, sharpness=box_sharpness)
     lp += meanflux_logprior(tau0, tau0_mu, tau0_sigma)
-    lp += jnp.sum(gaussian_logprior(alpha_hcd, alpha_mu, alpha_sigma))     # HCD incidence prior
+    lp += jnp.sum(gaussian_logprior(alpha_hcd, alpha_mu, alpha_sigma))  # HCD incidence prior
     return ll + lp

@@ -33,8 +33,10 @@ Env (MANDATORY for every process):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     OMP_NUM_THREADS=1 python scripts/run_stepA.py ...
 """
+
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 
 import argparse
@@ -63,6 +65,7 @@ PROD = dict(n_warmup=250, n_samples=400, dense_mass=True, max_tree_depth=10, tar
 ESS_TARGET = 400
 N_FOLDS = 8
 
+
 # ----------------------------------------------------------------------------- #
 #  Single-thread environment for every worker (1 chain ≈ 1 core).
 # ----------------------------------------------------------------------------- #
@@ -74,12 +77,19 @@ def _force_single_thread_env():
     # ~90% — not >100% — per-worker CPU; XLA still allocates an idle thread pool but does not run
     # it). xla_cpu_enable_fast_math left default (numerics unchanged).
     env = dict(
-        OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1",
-        NUMEXPR_NUM_THREADS="1", VECLIB_MAXIMUM_THREADS="1",
-        XLA_FLAGS=("--xla_cpu_multi_thread_eigen=false "
-                   "--xla_force_host_platform_device_count=1"),
-        JAX_PLATFORMS="cpu", CUDA_VISIBLE_DEVICES="",
-        PYTHONNOUSERSITE="1", PYTHONPATH=REPO)
+        OMP_NUM_THREADS="1",
+        OPENBLAS_NUM_THREADS="1",
+        MKL_NUM_THREADS="1",
+        NUMEXPR_NUM_THREADS="1",
+        VECLIB_MAXIMUM_THREADS="1",
+        XLA_FLAGS=(
+            "--xla_cpu_multi_thread_eigen=false " "--xla_force_host_platform_device_count=1"
+        ),
+        JAX_PLATFORMS="cpu",
+        CUDA_VISIBLE_DEVICES="",
+        PYTHONNOUSERSITE="1",
+        PYTHONPATH=REPO,
+    )
     os.environ.update(env)
     return env
 
@@ -105,15 +115,25 @@ def _actual_res_corr_bvec(leg, mf, anchor_mult=5.0):
     Read from the raw res_corr table (present even when mf.res_corr_on is False)."""
     import numpy as _np, jax.numpy as _jnp
     from hcd_analysis.emulator.multifidelity import interp_res_corr
-    k = _np.asarray(leg.k); zi = _np.asarray(leg.z_idx); zl = _np.asarray(leg.z)
+
+    k = _np.asarray(leg.k)
+    zi = _np.asarray(leg.z_idx)
+    zl = _np.asarray(leg.z)
     b = _np.zeros(k.shape[0])
     for iz in range(leg.n_z):
         rsel = _np.where(zi == iz)[0]
         if rsel.size == 0:
             continue
-        rc = _np.asarray(interp_res_corr(mf.z_rc, mf.logk_rc, mf.rc_vals,
-                                         float(zl[iz]), _jnp.asarray(k[rsel]),
-                                         anchor_mult=float(anchor_mult)))
+        rc = _np.asarray(
+            interp_res_corr(
+                mf.z_rc,
+                mf.logk_rc,
+                mf.rc_vals,
+                float(zl[iz]),
+                _jnp.asarray(k[rsel]),
+                anchor_mult=float(anchor_mult),
+            )
+        )
         b[rsel] = _np.log(rc)
     return b
 
@@ -131,7 +151,8 @@ def _rcinj_primary_spec(repo=REPO, environ=None):
     "did we miss a leak the in-span pass could not see" arm (the metals out-of-class precedent).
     ``{leg}_worst_ns_member`` in the basis is 1 for all legs -> member="b1".
 
-    RCINJ_RC_STRENGTH scales EITHER form (the +-1sigma systematic scan; the bias is ~linear in it)."""
+    RCINJ_RC_STRENGTH scales EITHER form (the +-1sigma systematic scan; the bias is ~linear in it).
+    """
     environ = os.environ if environ is None else environ
     strength = float(environ.get("RCINJ_RC_STRENGTH", "1.0"))
     member = environ.get("RCINJ_OOS_MEMBER")
@@ -150,7 +171,9 @@ def build_config(verbose=False):
     from hcd_analysis.emulator.data import PARAM_LIMITS
     from hcd_analysis.emulator.closure_legb import held_out_sims, CACHE_PATH, load_cache_historical
 
-    d = load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/run_stepA.py)')
+    d = load_cache_historical(
+        CACHE_PATH, reason="diagnostic of the historical cache (scripts/run_stepA.py)"
+    )
     # per-fold (ns, sim) sorted by ns.
     fold_sims = {}
     for f in range(N_FOLDS):
@@ -162,15 +185,42 @@ def build_config(verbose=False):
 
     cfg = []
 
-    def add_fiducial(mock_id, fold, target_ns=None, *, survey, prior_center="sim_mean",
-                     sigma_lls=None, sigma_subdla=None, tau0_extreme=False, n_chains=4, sim=None,
-                     lls_truth_boost=1.0, mf=False, hr_truth=False, mf_shape=0.0, desi_floor=False,
-                     mf_emucoh=0.0, mf_emucoh_offdiag_only=False, sample_metals=False,
-                     inject_a_siiii=0.0, inject_res_corr=None, subdla_center_shift=0.0,
-                     hierarchical_hcd=False, hcd_ratio_infl=1.0, hcd_center_shift=0.0,
-                     hcd_2d_tilt=False, z_slope_marginalized=False, zslope_realfit=False,
-                     res_corr_on=True, sample_res=False, f_res_amp_sigma=None, seed=0,
-                     ks_resolution_float=False, ks_kmax=None):
+    def add_fiducial(
+        mock_id,
+        fold,
+        target_ns=None,
+        *,
+        survey,
+        prior_center="sim_mean",
+        sigma_lls=None,
+        sigma_subdla=None,
+        tau0_extreme=False,
+        n_chains=4,
+        sim=None,
+        lls_truth_boost=1.0,
+        mf=False,
+        hr_truth=False,
+        mf_shape=0.0,
+        desi_floor=False,
+        mf_emucoh=0.0,
+        mf_emucoh_offdiag_only=False,
+        sample_metals=False,
+        inject_a_siiii=0.0,
+        inject_res_corr=None,
+        subdla_center_shift=0.0,
+        hierarchical_hcd=False,
+        hcd_ratio_infl=1.0,
+        hcd_center_shift=0.0,
+        hcd_2d_tilt=False,
+        z_slope_marginalized=False,
+        zslope_realfit=False,
+        res_corr_on=True,
+        sample_res=False,
+        f_res_amp_sigma=None,
+        seed=0,
+        ks_resolution_float=False,
+        ks_kmax=None,
+    ):
         # ``seed`` (default 0 = back-compat for every legacy battery) sets the PRNGKey root, hence the
         # MOCK-NOISE key k_mock = split(fold_in(PRNGKey(seed), mock_index)) in run_one_chain. Distinct
         # seeds at the SAME (survey, sim, fold) therefore give INDEPENDENT cosmic-noise realizations —
@@ -182,59 +232,107 @@ def build_config(verbose=False):
         else:
             ns = _ns_of_sim(d, sim, PARAM_LIMITS)
         for c in range(n_chains):
-            cfg.append(dict(
-                id=f"{mock_id}_c{c}", mock_id=mock_id, tier="P4", fold=fold, ckpt=ckpt_of(fold),
-                sim=sim, n_s=round(ns, 4), survey=survey, prior_center=prior_center,
-                sigma_lls=sigma_lls, sigma_subdla=sigma_subdla, tau0_extreme=tau0_extreme,
-                lls_truth_boost=lls_truth_boost,
-                mf=bool(mf), z_slope_marginalized=bool(z_slope_marginalized), hr_truth=bool(hr_truth),
-                mf_shape=float(mf_shape), desi_floor=bool(desi_floor), mf_emucoh=float(mf_emucoh),
-                mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
-                sample_metals=bool(sample_metals), inject_a_siiii=float(inject_a_siiii),
-                inject_res_corr=(dict(inject_res_corr) if inject_res_corr else None),
-                subdla_center_shift=float(subdla_center_shift),
-                hierarchical_hcd=bool(hierarchical_hcd), hcd_ratio_infl=float(hcd_ratio_infl),
-                hcd_center_shift=float(hcd_center_shift), hcd_2d_tilt=bool(hcd_2d_tilt),
-                zslope_realfit=bool(zslope_realfit), res_corr_on=bool(res_corr_on),
-                sample_res=bool(sample_res), f_res_amp_sigma=f_res_amp_sigma,
-                ks_resolution_float=bool(ks_resolution_float),
-                ks_kmax=(None if ks_kmax is None else float(ks_kmax)),
-                chain_id=c, n_chains=n_chains, seed=int(seed)))
+            cfg.append(
+                dict(
+                    id=f"{mock_id}_c{c}",
+                    mock_id=mock_id,
+                    tier="P4",
+                    fold=fold,
+                    ckpt=ckpt_of(fold),
+                    sim=sim,
+                    n_s=round(ns, 4),
+                    survey=survey,
+                    prior_center=prior_center,
+                    sigma_lls=sigma_lls,
+                    sigma_subdla=sigma_subdla,
+                    tau0_extreme=tau0_extreme,
+                    lls_truth_boost=lls_truth_boost,
+                    mf=bool(mf),
+                    z_slope_marginalized=bool(z_slope_marginalized),
+                    hr_truth=bool(hr_truth),
+                    mf_shape=float(mf_shape),
+                    desi_floor=bool(desi_floor),
+                    mf_emucoh=float(mf_emucoh),
+                    mf_emucoh_offdiag_only=bool(mf_emucoh_offdiag_only),
+                    sample_metals=bool(sample_metals),
+                    inject_a_siiii=float(inject_a_siiii),
+                    inject_res_corr=(dict(inject_res_corr) if inject_res_corr else None),
+                    subdla_center_shift=float(subdla_center_shift),
+                    hierarchical_hcd=bool(hierarchical_hcd),
+                    hcd_ratio_infl=float(hcd_ratio_infl),
+                    hcd_center_shift=float(hcd_center_shift),
+                    hcd_2d_tilt=bool(hcd_2d_tilt),
+                    zslope_realfit=bool(zslope_realfit),
+                    res_corr_on=bool(res_corr_on),
+                    sample_res=bool(sample_res),
+                    f_res_amp_sigma=f_res_amp_sigma,
+                    ks_resolution_float=bool(ks_resolution_float),
+                    ks_kmax=(None if ks_kmax is None else float(ks_kmax)),
+                    chain_id=c,
+                    n_chains=n_chains,
+                    seed=int(seed),
+                )
+            )
 
     # === Phase-4 SEPARATE-inference closure: PRIYA τ₀ + physical HCD slope, NON-circular center ===
     # Supersedes the old joint+13-rung STEP-A list. DESI-only + KS-only, sim-mean (NON-circular) HCD
     # prior center, spanning INTERIOR n_s (avoid the fold0 n_s wall). 4 dispersed chains each.
-    add_fiducial("D_f3", 3, 0.90, survey="DESI")     # n_s≈0.90
-    add_fiducial("D_f4", 4, 0.92, survey="DESI")     # n_s≈0.92
-    add_fiducial("D_f6", 6, 0.966, survey="DESI")    # n_s≈0.966 (Planck) — reference point
-    add_fiducial("D_f7", 7, 1.00, survey="DESI")     # n_s≈1.0 (eBOSS / extrapolation ridge)
-    add_fiducial("K_f4", 4, 0.92, survey="KS")       # KS leg, mid n_s
-    add_fiducial("K_f6", 6, 0.966, survey="KS")      # KS leg, Planck n_s
+    add_fiducial("D_f3", 3, 0.90, survey="DESI")  # n_s≈0.90
+    add_fiducial("D_f4", 4, 0.92, survey="DESI")  # n_s≈0.92
+    add_fiducial("D_f6", 6, 0.966, survey="DESI")  # n_s≈0.966 (Planck) — reference point
+    add_fiducial("D_f7", 7, 1.00, survey="DESI")  # n_s≈1.0 (eBOSS / extrapolation ridge)
+    add_fiducial("K_f4", 4, 0.92, survey="KS")  # KS leg, mid n_s
+    add_fiducial("K_f6", 6, 0.966, survey="KS")  # KS leg, Planck n_s
     # SENSITIVITY arms at the fold6 (Planck) DESI point:
-    add_fiducial("D_f6_lit", 6, 0.966, survey="DESI", prior_center="lit")     # real-fit prior center
-    add_fiducial("D_f6_sig40", 6, 0.966, survey="DESI", sigma_lls=0.40)       # looser LLS width
-    add_fiducial("D_f6_tau0x", 6, 0.966, survey="DESI", tau0_extreme=True)    # τ₀-funnel check
+    add_fiducial("D_f6_lit", 6, 0.966, survey="DESI", prior_center="lit")  # real-fit prior center
+    add_fiducial("D_f6_sig40", 6, 0.966, survey="DESI", sigma_lls=0.40)  # looser LLS width
+    add_fiducial("D_f6_tau0x", 6, 0.966, survey="DESI", tau0_extreme=True)  # τ₀-funnel check
 
     # === Phase-4b (2026-06-11): σ_LLS + σ_subDLA width scans + IGM-parameter stress fiducials ===
     # Width scans at the D_f6 Planck mock (same sim → same noise → clean bias-vs-width):
     for sl in (0.08, 0.25, 0.80):
-        add_fiducial(f"D_f6_sigL{int(round(sl*100)):02d}", 6, 0.966, survey="DESI", sigma_lls=sl, n_chains=3)
+        add_fiducial(
+            f"D_f6_sigL{int(round(sl*100)):02d}", 6, 0.966, survey="DESI", sigma_lls=sl, n_chains=3
+        )
     for ss in (0.20, 0.80, 1.50):
-        add_fiducial(f"D_f6_sigS{int(round(ss*100)):03d}", 6, 0.966, survey="DESI", sigma_subdla=ss, n_chains=3)
+        add_fiducial(
+            f"D_f6_sigS{int(round(ss*100)):03d}",
+            6,
+            0.966,
+            survey="DESI",
+            sigma_subdla=ss,
+            n_chains=3,
+        )
     # IGM-parameter stress fiducials (DESI, sim-mean center): the held-out sim at each IGM extreme.
     import numpy as _np
     from hcd_analysis.emulator.inference import PARAM_NAMES as _PN
-    _pidx = {n: i for i, n in enumerate(_PN)}; _sn = _np.asarray(d["sim_name"]); _pu = d["params_unit"]
+
+    _pidx = {n: i for i, n in enumerate(_PN)}
+    _sn = _np.asarray(d["sim_name"])
+    _pu = d["params_unit"]
     _all = sorted(set(s for lst in fold_sims.values() for _, s in lst))
-    def _punit(s, p): return float(_pu[_np.where(_sn == s)[0][0], _pidx[p]])
+
+    def _punit(s, p):
+        return float(_pu[_np.where(_sn == s)[0][0], _pidx[p]])
+
     def _fold_of(s):
         for f, lst in fold_sims.items():
-            if s in [ss for _, ss in lst]: return f
-    def _igm_pick(p, hi): return (max if hi else min)((_punit(s, p), s) for s in _all)[1]
-    for nm, p, hi in [("IGM_herei_hi", "herei", True), ("IGM_heref_lo", "heref", False),
-                      ("IGM_heref_hi", "heref", True), ("IGM_alphaq_lo", "alphaq", False),
-                      ("IGM_alphaq_hi", "alphaq", True), ("IGM_bhfb_lo", "bhfeedback", False)]:
-        s = _igm_pick(p, hi); add_fiducial(nm, _fold_of(s), survey="DESI", sim=s, n_chains=4)
+            if s in [ss for _, ss in lst]:
+                return f
+
+    def _igm_pick(p, hi):
+        return (max if hi else min)((_punit(s, p), s) for s in _all)[1]
+
+    for nm, p, hi in [
+        ("IGM_herei_hi", "herei", True),
+        ("IGM_heref_lo", "heref", False),
+        ("IGM_heref_hi", "heref", True),
+        ("IGM_alphaq_lo", "alphaq", False),
+        ("IGM_alphaq_hi", "alphaq", True),
+        ("IGM_bhfb_lo", "bhfeedback", False),
+    ]:
+        s = _igm_pick(p, hi)
+        add_fiducial(nm, _fold_of(s), survey="DESI", sim=s, n_chains=4)
 
     # === Phase-4c (2026-06-11): per-survey LLS pin VALIDATION (real-fit "lit" prior) ===
     # Each survey's MOCK carries that survey's effective LLS level, fit with that survey's pin:
@@ -245,28 +343,53 @@ def build_config(verbose=False):
     #           cosmology + the boosted α_LLS when the data genuinely carries the excess.
     # NOTE: D_lls/D_lls_m pinned to the ORIGINAL σ_LLS=0.15 (the DESI default was later moved to 0.30,
     # b5cc088) so the σ0.15-vs-σ0.30 contrast (D_lls_m vs D_lls_m30) stays reproducible from config.
-    add_fiducial("D_lls", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.0, sigma_lls=0.15)
-    add_fiducial("K_lls", 6, 0.966, survey="KS",   prior_center="lit", lls_truth_boost=2.65)
+    add_fiducial(
+        "D_lls", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.0, sigma_lls=0.15
+    )
+    add_fiducial("K_lls", 6, 0.966, survey="KS", prior_center="lit", lls_truth_boost=2.65)
     # MATCHED-center arms (mock LLS == the survey pin center): isolates pin self-consistency from
     # the center-OFFSET sensitivity. D_lls (boost 1.0) is 6% below the DESI 1.06× pin → the
     # center-sensitivity arm; D_lls_m (boost 1.06) sits ON the DESI pin center → the clean DESI case.
-    add_fiducial("D_lls_m", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15)
+    add_fiducial(
+        "D_lls_m", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15
+    )
     # D_lls_m30: matched DESI at the MODERATE σ_LLS=0.30 (the then-deployed 2026-06-11
     # HCD_LLS_SURVEY_FRAC_SIGMA[DESI]; SUPERSEDED — the deployed DESI width is 0.287 since
     # 2026-07-18) — re-validated that DESI recovers A_p in-gate at the moderate width (D_lls_m at
     # the old σ0.15 gave +1.01σ). Uses the survey pin center (1.06×) with the explicit 0.30 width.
-    add_fiducial("D_lls_m30", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
-                 sigma_lls=0.30)
+    add_fiducial(
+        "D_lls_m30",
+        6,
+        0.966,
+        survey="DESI",
+        prior_center="lit",
+        lls_truth_boost=1.06,
+        sigma_lls=0.30,
+    )
     # UN-CONFOUND width-vs-center (Bayesian referee 2026-06-11): the D_lls_m fold6-Planck sim is
     # LLS-POOR (w_LLS≈77.5% of the population median the DESI prior centers on) → its "matched" arm
     # was actually +0.8σ HIGH. Re-run on a sim whose w_LLS ≈ the population median (ratio 0.992) so
     # the lit prior center genuinely EQUALS the mock truth — then σ0.15 vs σ0.30 isolates the WIDTH
     # effect alone. If σ0.15 STILL biases A_p here, it is the width; if it recovers, it was the center.
     _SIM_MED = "ns0.972Ap1.69e-09herei3.87heref2.65alphaq2.12hub0.722omegamh20.144hireionz7.53bhfeedback0.0507"
-    add_fiducial("D_llsmed",   6, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
-                 sigma_lls=0.15, sim=_SIM_MED)
-    add_fiducial("D_llsmed30", 6, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
-                 sigma_lls=0.30, sim=_SIM_MED)
+    add_fiducial(
+        "D_llsmed",
+        6,
+        survey="DESI",
+        prior_center="lit",
+        lls_truth_boost=1.06,
+        sigma_lls=0.15,
+        sim=_SIM_MED,
+    )
+    add_fiducial(
+        "D_llsmed30",
+        6,
+        survey="DESI",
+        prior_center="lit",
+        lls_truth_boost=1.06,
+        sigma_lls=0.30,
+        sim=_SIM_MED,
+    )
     # MULTI-FOLD width check (PI 2026-06-11): repeat the matched-center σ0.15 vs σ0.30 contrast across
     # folds spanning n_s, to test whether the n_s −0.94σ (D_llsmed σ0.15) is the LLS WIDTH or this
     # sim's LOSO scatter (sign-flips across folds ⇒ scatter), and whether σ0.15-matched recovers A_p
@@ -277,10 +400,24 @@ def build_config(verbose=False):
         7: "ns0.982Ap1.81e-09herei3.62heref2.78alphaq1.78hub0.72omegamh20.143hireionz7.55bhfeedback0.0421",
     }
     for _f, _s in _MED_FOLDS.items():
-        add_fiducial(f"D_lmed{_f}_15", _f, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
-                     sigma_lls=0.15, sim=_s)
-        add_fiducial(f"D_lmed{_f}_30", _f, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
-                     sigma_lls=0.30, sim=_s)
+        add_fiducial(
+            f"D_lmed{_f}_15",
+            _f,
+            survey="DESI",
+            prior_center="lit",
+            lls_truth_boost=1.06,
+            sigma_lls=0.15,
+            sim=_s,
+        )
+        add_fiducial(
+            f"D_lmed{_f}_30",
+            _f,
+            survey="DESI",
+            prior_center="lit",
+            lls_truth_boost=1.06,
+            sigma_lls=0.30,
+            sim=_s,
+        )
 
     # === FINALIZED-PRIOR VALIDATING CLOSURE SWEEP (DV arms, PI 2026-06-17) =================== #
     # Re-validate the CORRECTED + FINALIZED HCD prior (a04d501 litWLS γ_LLS=2.127 + 25a51bc z=3
@@ -306,16 +443,58 @@ def build_config(verbose=False):
     #                  center ≈ mock truth at boost=1.0 (ratio 0.992), so boost=1.0 puts the truth AT
     #                  the center (the zero-offset leak gate), distinct from sig15's deliberate +6%
     #                  truth-vs-center offset (boost 1.06). DO NOT set this back to 1.06 — that is sig15.
-    add_fiducial("DV_f3", 3, 0.90, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
-                 sigma_lls=0.15, zslope_realfit=True)
-    add_fiducial("DV_XS_f6_s0", 6, 0.966, survey="DESI+KS", prior_center="lit", sigma_lls=0.15,
-                 subdla_center_shift=0.0, zslope_realfit=True)
-    add_fiducial("DV_sig15", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
-                 sigma_lls=0.15, sim=_SIM_MED, zslope_realfit=True)
-    add_fiducial("DV_sig30", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06,
-                 sigma_lls=0.30, sim=_SIM_MED, zslope_realfit=True)
-    add_fiducial("DV_littruth", 6, survey="DESI", prior_center="lit", lls_truth_boost=1.0,
-                 sigma_lls=0.15, sim=_SIM_MED, zslope_realfit=True)
+    add_fiducial(
+        "DV_f3",
+        3,
+        0.90,
+        survey="DESI",
+        prior_center="lit",
+        lls_truth_boost=1.06,
+        sigma_lls=0.15,
+        zslope_realfit=True,
+    )
+    add_fiducial(
+        "DV_XS_f6_s0",
+        6,
+        0.966,
+        survey="DESI+KS",
+        prior_center="lit",
+        sigma_lls=0.15,
+        subdla_center_shift=0.0,
+        zslope_realfit=True,
+    )
+    add_fiducial(
+        "DV_sig15",
+        6,
+        0.966,
+        survey="DESI",
+        prior_center="lit",
+        lls_truth_boost=1.06,
+        sigma_lls=0.15,
+        sim=_SIM_MED,
+        zslope_realfit=True,
+    )
+    add_fiducial(
+        "DV_sig30",
+        6,
+        0.966,
+        survey="DESI",
+        prior_center="lit",
+        lls_truth_boost=1.06,
+        sigma_lls=0.30,
+        sim=_SIM_MED,
+        zslope_realfit=True,
+    )
+    add_fiducial(
+        "DV_littruth",
+        6,
+        survey="DESI",
+        prior_center="lit",
+        lls_truth_boost=1.0,
+        sigma_lls=0.15,
+        sim=_SIM_MED,
+        zslope_realfit=True,
+    )
 
     # === Phase-5a EMUCOH closure validation (2026-06-12): the BLOCKING referee gate for the
     # 60-sim LF-emulator k-coherent C_emu term ("emucoh"). The term is wired (run_one_chain
@@ -337,18 +516,34 @@ def build_config(verbose=False):
     # SHRINKS, σ_Ap/σ_ns WIDEN (PSD monotonicity — a SHRINK is the θ-dependent-covariance bug
     # signature), |bias z| coverage → nominal.
     _EMUCOH_BASE = [
-        ("D_f3",       3, dict(target_ns=0.90)),
-        ("D_f4",       4, dict(target_ns=0.92)),
-        ("D_f6",       6, dict(target_ns=0.966)),
-        ("D_f7",       7, dict(target_ns=1.00)),
-        ("D_lmed3_15", 3, dict(prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15, sim=_MED_FOLDS[3])),
-        ("D_lmed5_15", 5, dict(prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15, sim=_MED_FOLDS[5])),
-        ("D_lmed7_15", 7, dict(prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15, sim=_MED_FOLDS[7])),
-        ("D_llsmed",   6, dict(prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15, sim=_SIM_MED)),
+        ("D_f3", 3, dict(target_ns=0.90)),
+        ("D_f4", 4, dict(target_ns=0.92)),
+        ("D_f6", 6, dict(target_ns=0.966)),
+        ("D_f7", 7, dict(target_ns=1.00)),
+        (
+            "D_lmed3_15",
+            3,
+            dict(prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15, sim=_MED_FOLDS[3]),
+        ),
+        (
+            "D_lmed5_15",
+            5,
+            dict(prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15, sim=_MED_FOLDS[5]),
+        ),
+        (
+            "D_lmed7_15",
+            7,
+            dict(prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15, sim=_MED_FOLDS[7]),
+        ),
+        (
+            "D_llsmed",
+            6,
+            dict(prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15, sim=_SIM_MED),
+        ),
     ]
     for _base, _fld, _kw in _EMUCOH_BASE:
-        add_fiducial(f"{_base}_EC0", _fld, survey="DESI", mf_emucoh=0.0, **_kw)   # OFF control
-        add_fiducial(f"{_base}_EC1", _fld, survey="DESI", mf_emucoh=1.0, **_kw)   # ON (infl=1)
+        add_fiducial(f"{_base}_EC0", _fld, survey="DESI", mf_emucoh=0.0, **_kw)  # OFF control
+        add_fiducial(f"{_base}_EC1", _fld, survey="DESI", mf_emucoh=1.0, **_kw)  # ON (infl=1)
 
     # EC2: per-term DIAGONAL ALLOCATION re-validation (cosmology referee follow-on, 2026-06-12) —
     # same as EC1 (emucoh ON, infl=1) but mf_emucoh_offdiag_only=True: absorb emucoh's diagonal into
@@ -358,8 +553,14 @@ def build_config(verbose=False):
     _EMUCOH_ODA = {"D_f3", "D_f6", "D_lmed7_15", "D_llsmed"}
     for _base, _fld, _kw in _EMUCOH_BASE:
         if _base in _EMUCOH_ODA:
-            add_fiducial(f"{_base}_EC2", _fld, survey="DESI", mf_emucoh=1.0,
-                         mf_emucoh_offdiag_only=True, **_kw)
+            add_fiducial(
+                f"{_base}_EC2",
+                _fld,
+                survey="DESI",
+                mf_emucoh=1.0,
+                mf_emucoh_offdiag_only=True,
+                **_kw,
+            )
 
     # === eBOSS DR14 closure cert (2026-06-13): the low-k PRODUCTION SHAKEDOWN before KS. Held-out-sim
     # recovery on the eBOSS leg (survey="eBOSS" → run_one_chain builds build_legb_ctx with_eboss and
@@ -393,8 +594,14 @@ def build_config(verbose=False):
     # for 2 mocks, run the subDLA prior center at 0 / +1σ / −1σ and verify n_s/A_p MEANS stay <0.3σ.
     for _xnm, _xf, _xns in [("XS_f6", 6, 0.966), ("XS_f4", 4, 0.92)]:
         for _sh, _tag in [(0.0, "_s0"), (1.0, "_sp"), (-1.0, "_sm")]:
-            add_fiducial(_xnm + _tag, _xf, _xns, survey="DESI+KS",
-                         prior_center="sim_mean", subdla_center_shift=_sh)
+            add_fiducial(
+                _xnm + _tag,
+                _xf,
+                _xns,
+                survey="DESI+KS",
+                prior_center="sim_mean",
+                subdla_center_shift=_sh,
+            )
 
     # === HIERARCHICAL HCD-prior closure ("Option B", 2026-06-13): PAIRED ON-vs-OFF validation ===
     # The A_hcd × {r_subdla, r_dla} reparam collapses the flat subDLA↔DLA exchange direction (the
@@ -410,17 +617,46 @@ def build_config(verbose=False):
     # NOT launched here — config only. (run_stepA.run_one_chain threads hierarchical_hcd through
     # build_legb_ctx; the ratio centers/widths auto-derive from the raw sim w_c, must-fix #1.)
     for _hnm, _hf, _hns in [("HB_f6", 6, 0.966), ("HB_f4", 4, 0.92)]:
-        add_fiducial(_hnm + "_HB0", _hf, _hns, survey="DESI+KS", prior_center="sim_mean",
-                     hierarchical_hcd=False)
-        add_fiducial(_hnm + "_HB1", _hf, _hns, survey="DESI+KS", prior_center="sim_mean",
-                     hierarchical_hcd=True, hcd_ratio_infl=1.0)
+        add_fiducial(
+            _hnm + "_HB0",
+            _hf,
+            _hns,
+            survey="DESI+KS",
+            prior_center="sim_mean",
+            hierarchical_hcd=False,
+        )
+        add_fiducial(
+            _hnm + "_HB1",
+            _hf,
+            _hns,
+            survey="DESI+KS",
+            prior_center="sim_mean",
+            hierarchical_hcd=True,
+            hcd_ratio_infl=1.0,
+        )
         # A_HCD-center ±1σ cosmology-safety arm (design must-fix #3, gate-side): under Option B the
         # n_s coupling relocates onto the overall HCD amplitude, so mis-specify the A_HCD center ±1σ
         # and verify n_s/A_p MEANS stay <0.3σ (the hierarchical analog of the XS subDLA-center arm).
-        add_fiducial(_hnm + "_HBp", _hf, _hns, survey="DESI+KS", prior_center="sim_mean",
-                     hierarchical_hcd=True, hcd_ratio_infl=1.0, hcd_center_shift=1.0)
-        add_fiducial(_hnm + "_HBm", _hf, _hns, survey="DESI+KS", prior_center="sim_mean",
-                     hierarchical_hcd=True, hcd_ratio_infl=1.0, hcd_center_shift=-1.0)
+        add_fiducial(
+            _hnm + "_HBp",
+            _hf,
+            _hns,
+            survey="DESI+KS",
+            prior_center="sim_mean",
+            hierarchical_hcd=True,
+            hcd_ratio_infl=1.0,
+            hcd_center_shift=1.0,
+        )
+        add_fiducial(
+            _hnm + "_HBm",
+            _hf,
+            _hns,
+            survey="DESI+KS",
+            prior_center="sim_mean",
+            hierarchical_hcd=True,
+            hcd_ratio_infl=1.0,
+            hcd_center_shift=-1.0,
+        )
 
     # === v2 SUBMANIFOLD test (PI insight 2026-06-14): hierarchical-HCD + z-slope MARGINALIZED ===
     # HB_f6 showed Option B (1D A_HCD, FIXED slopes) RELOCATES the n_s coupling onto the A_HCD center
@@ -434,12 +670,38 @@ def build_config(verbose=False):
     # tight 1–2 param submanifold (one CDDF z-tilt + class-differential slopes fixed from the HR dN/dX).
     # NOT launched here — config only; launch after HB_f4 lands (run_hz_pool.py).
     for _zfn, _zff, _zfns in [("HZ_f6", 6, 0.966), ("HZ_f4", 4, 0.92)]:
-        add_fiducial(_zfn + "_z0", _zff, _zfns, survey="DESI+KS", prior_center="sim_mean",
-                     hierarchical_hcd=True, hcd_ratio_infl=1.0, z_slope_marginalized=True)
-        add_fiducial(_zfn + "_zp", _zff, _zfns, survey="DESI+KS", prior_center="sim_mean",
-                     hierarchical_hcd=True, hcd_ratio_infl=1.0, z_slope_marginalized=True, hcd_center_shift=1.0)
-        add_fiducial(_zfn + "_zm", _zff, _zfns, survey="DESI+KS", prior_center="sim_mean",
-                     hierarchical_hcd=True, hcd_ratio_infl=1.0, z_slope_marginalized=True, hcd_center_shift=-1.0)
+        add_fiducial(
+            _zfn + "_z0",
+            _zff,
+            _zfns,
+            survey="DESI+KS",
+            prior_center="sim_mean",
+            hierarchical_hcd=True,
+            hcd_ratio_infl=1.0,
+            z_slope_marginalized=True,
+        )
+        add_fiducial(
+            _zfn + "_zp",
+            _zff,
+            _zfns,
+            survey="DESI+KS",
+            prior_center="sim_mean",
+            hierarchical_hcd=True,
+            hcd_ratio_infl=1.0,
+            z_slope_marginalized=True,
+            hcd_center_shift=1.0,
+        )
+        add_fiducial(
+            _zfn + "_zm",
+            _zff,
+            _zfns,
+            survey="DESI+KS",
+            prior_center="sim_mean",
+            hierarchical_hcd=True,
+            hcd_ratio_infl=1.0,
+            z_slope_marginalized=True,
+            hcd_center_shift=-1.0,
+        )
 
     # === 2D AMPLITUDE×TILT submanifold closure (HT arms, PI refinement 2026-06-14) ===
     # The PI's 2D submanifold: a GENUINE 2-dof HCD sector = pivot AMPLITUDE A_HCD × a GLOBAL z-TILT
@@ -457,12 +719,38 @@ def build_config(verbose=False):
     # here — config only. (run_one_chain threads hcd_2d_tilt → build_legb_ctx; the closure δs_c /
     # B_HCD center/width auto-derive from HCD_INCIDENCE_SLOPE, self-consistent with the forward.)
     for _tfn, _tff, _tfns in [("HT_f6", 6, 0.966), ("HT_f4", 4, 0.92)]:
-        add_fiducial(_tfn + "_t0", _tff, _tfns, survey="DESI+KS", prior_center="sim_mean",
-                     hierarchical_hcd=True, hcd_2d_tilt=True, hcd_ratio_infl=1.0)
-        add_fiducial(_tfn + "_tp", _tff, _tfns, survey="DESI+KS", prior_center="sim_mean",
-                     hierarchical_hcd=True, hcd_2d_tilt=True, hcd_ratio_infl=1.0, hcd_center_shift=1.0)
-        add_fiducial(_tfn + "_tm", _tff, _tfns, survey="DESI+KS", prior_center="sim_mean",
-                     hierarchical_hcd=True, hcd_2d_tilt=True, hcd_ratio_infl=1.0, hcd_center_shift=-1.0)
+        add_fiducial(
+            _tfn + "_t0",
+            _tff,
+            _tfns,
+            survey="DESI+KS",
+            prior_center="sim_mean",
+            hierarchical_hcd=True,
+            hcd_2d_tilt=True,
+            hcd_ratio_infl=1.0,
+        )
+        add_fiducial(
+            _tfn + "_tp",
+            _tff,
+            _tfns,
+            survey="DESI+KS",
+            prior_center="sim_mean",
+            hierarchical_hcd=True,
+            hcd_2d_tilt=True,
+            hcd_ratio_infl=1.0,
+            hcd_center_shift=1.0,
+        )
+        add_fiducial(
+            _tfn + "_tm",
+            _tff,
+            _tfns,
+            survey="DESI+KS",
+            prior_center="sim_mean",
+            hierarchical_hcd=True,
+            hcd_2d_tilt=True,
+            hcd_ratio_infl=1.0,
+            hcd_center_shift=-1.0,
+        )
 
     # === Phase-5a Test A (2026-06-11): MF gate-invariant M-tier re-run at HR cosmologies ===
     # with_mf=True → truth = MF-corrected LF AND forward = MF-corrected LF (the GATE INVARIANT: the
@@ -477,8 +765,13 @@ def build_config(verbose=False):
         if _hr["sim"] in _hr_seen:
             continue
         _hr_seen.add(_hr["sim"])
-        add_fiducial(f"M_hr{int(round(_hr['n_s'] * 1000))}", _hr["fold"], survey="DESI",
-                     sim=_hr["sim"], mf=True)
+        add_fiducial(
+            f"M_hr{int(round(_hr['n_s'] * 1000))}",
+            _hr["fold"],
+            survey="DESI",
+            sim=_hr["sim"],
+            mf=True,
+        )
 
     # === Phase-5a Test B (2026-06-11): GENUINE HF-LOSO — real HR truth + MF correction EXCLUDING it ===
     # For each of the 6 HR sims: truth = its REAL measured P1D (make_hr_truth_from_cache, no MF);
@@ -486,14 +779,29 @@ def build_config(verbose=False):
     # MF-resolution GENERALIZATION in the inference (the integrated MF-LOSO). prior_center="truth"
     # centers the HCD α on the HR sim's own w_c → isolates the resolution from the LLS-center lever.
     from hcd_analysis.emulator import multifidelity as _MF
-    _hrn = sorted(set(s.decode() if isinstance(s, bytes) else s for s in _MF.load_cache_historical(_MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/run_stepA.py)')["sim_name"]))
+
+    _hrn = sorted(
+        set(
+            s.decode() if isinstance(s, bytes) else s
+            for s in _MF.load_cache_historical(
+                _MF.HR_CACHE, reason="diagnostic of the historical cache (scripts/run_stepA.py)"
+            )["sim_name"]
+        )
+    )
     for _hs in _hrn:
         _f = _fold_of(_hs)
         if _f is None:
             continue
         _ns = _ns_of_sim(d, _hs, PARAM_LIMITS)
-        add_fiducial(f"HFLOSO{int(round(_ns * 1000))}", _f, survey="DESI", sim=_hs,
-                     mf=True, hr_truth=True, prior_center="truth")
+        add_fiducial(
+            f"HFLOSO{int(round(_ns * 1000))}",
+            _f,
+            survey="DESI",
+            sim=_hs,
+            mf=True,
+            hr_truth=True,
+            prior_center="truth",
+        )
 
     # === Phase-5a MF n_s HIGH-K CERTIFICATION on DESI+KS (PI-approved 2026-06-14) ===
     # The open item (notes 2026-06-12-phase5a-mf-hf-closure §"Next steps": "re-run Test B on BOTH
@@ -512,8 +820,15 @@ def build_config(verbose=False):
         if _f is None:
             continue
         _ns = _ns_of_sim(d, _hs, PARAM_LIMITS)
-        add_fiducial(f"HFLOSO_DK{int(round(_ns * 1000))}", _f, survey="DESI+KS", sim=_hs,
-                     mf=True, hr_truth=True, prior_center="truth")
+        add_fiducial(
+            f"HFLOSO_DK{int(round(_ns * 1000))}",
+            _f,
+            survey="DESI+KS",
+            sim=_hs,
+            mf=True,
+            hr_truth=True,
+            prior_center="truth",
+        )
 
     # === Phase-5a MF n_s HIGH-K CERTIFICATION on KS-ONLY (PI-approved 2026-06-14) — PER-SURVEY ===
     # The real fits are SEPARATE per survey, so the cert must be per-survey too: the DESI-only
@@ -532,8 +847,15 @@ def build_config(verbose=False):
         if _f is None:
             continue
         _ns = _ns_of_sim(d, _hs, PARAM_LIMITS)
-        add_fiducial(f"HFLOSO_KS{int(round(_ns * 1000))}", _f, survey="KS", sim=_hs,
-                     mf=True, hr_truth=True, prior_center="truth")
+        add_fiducial(
+            f"HFLOSO_KS{int(round(_ns * 1000))}",
+            _f,
+            survey="KS",
+            sim=_hs,
+            mf=True,
+            hr_truth=True,
+            prior_center="truth",
+        )
 
     # === Phase-2 NORC res_corr INJECTION-RECOVERY gate (TASK-2.1, spec §4.2) — the DECISIVE
     # n_s-safety gate under the DEPLOYED Gate-A NORC forward. NORC drops the res_corr correction
@@ -562,11 +884,14 @@ def build_config(verbose=False):
     #  * Interior sims (fold4 n_s≈0.92, fold6 n_s≈0.966) — avoid the fold0 n_s wall.
     #  * N=8 independent mock-noise SEEDS × 2 sims = 16 paired mocks/leg; clean & injected SHARE each
     #    seed so Δ_i cancels the shared noise; distinct seeds give independent realizations.
-    _RCINJ_SEEDS = tuple(range(8)); _RCINJ_NCHAINS = 2
+    _RCINJ_SEEDS = tuple(range(8))
+    _RCINJ_NCHAINS = 2
     # RCINJ_RC_STRENGTH scales the injected res_corr amplitude for the +/-1sigma SYSTEMATIC scan (treat the
     # unvalidated small-box res_corr as a bounded systematic, not a fixed truth; the bias is ~linear in it).
-    _rc_primary = _rcinj_primary_spec()   # actual res_corr table by default; OUT-OF-SPAN basis if RCINJ_OOS_MEMBER set
-    _RCINJ_POINTS = ((4, 0.92), (6, 0.966))      # interior sims, avoid the fold0 n_s wall
+    _rc_primary = (
+        _rcinj_primary_spec()
+    )  # actual res_corr table by default; OUT-OF-SPAN basis if RCINJ_OOS_MEMBER set
+    _RCINJ_POINTS = ((4, 0.92), (6, 0.966))  # interior sims, avoid the fold0 n_s wall
     # OPTION-1 (RCINJ_FRES=1): FLOAT f_res (option-b) so the DEPLOYED resolution marginalization absorbs the
     # injected res_corr. DESI/eBOSS ONLY (KS resolution_ready=False -- its proxy R_z is 7-15x too large; f_res
     # stays OFF on KS until the echelle R_z lands). f_res arms get a distinct 'F' tag (no ckpt collision with
@@ -581,32 +906,54 @@ def build_config(verbose=False):
     # f_res band so we get the HONEST fixed sigma_ref at 0.065 (not the 0.045-capped 0.1795) AND the 0.065
     # no-f_res baseline leak (to decompose a f_res-arm fail). Unset -> the NORC 0.045 cap (the 0.385 baseline).
     _KS_KMAX = os.environ.get("RCINJ_KS_KMAX")
-    _FRES_SIGMA = {"DESI": 0.02, "eBOSS": 0.05, "KS": _KS_FRES_SIGMA}   # per-leg option-b prior width
+    _FRES_SIGMA = {
+        "DESI": 0.02,
+        "eBOSS": 0.05,
+        "KS": _KS_FRES_SIGMA,
+    }  # per-leg option-b prior width
     for _survey, _tag in (("DESI", "D"), ("KS", "K"), ("eBOSS", "E")):
         _fres = _RCINJ_FRES and _survey in ("DESI", "eBOSS", "KS")
-        _ksf = _fres and _survey == "KS"                     # KS echelle R_z + diag surgery via ks_kwargs
+        _ksf = _fres and _survey == "KS"  # KS echelle R_z + diag surgery via ks_kwargs
         # KS k_max: the f_res arm is always 0.065; the no-f_res KS control uses RCINJ_KS_KMAX (else NORC 0.045).
-        _ks_km = 0.065 if _ksf else ((float(_KS_KMAX) if _KS_KMAX else None) if _survey == "KS" else None)
+        _ks_km = (
+            0.065
+            if _ksf
+            else ((float(_KS_KMAX) if _KS_KMAX else None) if _survey == "KS" else None)
+        )
         _tagf = _tag + ("F" if _fres else "")
         for _f, _ns in _RCINJ_POINTS:
-            _base = dict(survey=_survey, mf=True, prior_center="truth",
-                         sample_metals=(_survey in ("DESI", "eBOSS")), inject_a_siiii=0.0,
-                         sample_res=_fres, f_res_amp_sigma=(_FRES_SIGMA[_survey] if _fres else None),
-                         ks_resolution_float=_ksf, ks_kmax=_ks_km,
-                         # match the DEPLOYED production C_emu: the 60-sim LF-emu off-diagonal k-coherent
-                         # term (mf_emucoh; top-15 ~96.8% of trace). NB the "78% rank-1" is the SEPARATE
-                         # MFShape LF->HR resolution-residual term (mf_shape), OFF in the deployed "current"
-                         # variant -- do not conflate. Production fires mf_emucoh on DESI+KS (eBOSS sits
-                         # below the emucoh band k>=0.01), so keep eBOSS emucoh OFF as production does.
-                         mf_emucoh=(1.0 if _survey in ("DESI", "KS") else 0.0),
-                         mf_emucoh_offdiag_only=True,
-                         res_corr_on=False, n_chains=_RCINJ_NCHAINS)
+            _base = dict(
+                survey=_survey,
+                mf=True,
+                prior_center="truth",
+                sample_metals=(_survey in ("DESI", "eBOSS")),
+                inject_a_siiii=0.0,
+                sample_res=_fres,
+                f_res_amp_sigma=(_FRES_SIGMA[_survey] if _fres else None),
+                ks_resolution_float=_ksf,
+                ks_kmax=_ks_km,
+                # match the DEPLOYED production C_emu: the 60-sim LF-emu off-diagonal k-coherent
+                # term (mf_emucoh; top-15 ~96.8% of trace). NB the "78% rank-1" is the SEPARATE
+                # MFShape LF->HR resolution-residual term (mf_shape), OFF in the deployed "current"
+                # variant -- do not conflate. Production fires mf_emucoh on DESI+KS (eBOSS sits
+                # below the emucoh band k>=0.01), so keep eBOSS emucoh OFF as production does.
+                mf_emucoh=(1.0 if _survey in ("DESI", "KS") else 0.0),
+                mf_emucoh_offdiag_only=True,
+                res_corr_on=False,
+                n_chains=_RCINJ_NCHAINS,
+            )
             _t = int(round(_ns * 1000))
             for _sd in _RCINJ_SEEDS:
                 # clean & injected SHARE _sd (→ shared base truth + noise; differ only by exp(b)).
                 add_fiducial(f"RCINJ{_tagf}_clean{_t}s{_sd}", _f, _ns, seed=_sd, **_base)
-                add_fiducial(f"RCINJ{_tagf}_inj{_t}s{_sd}",   _f, _ns, seed=_sd,
-                             inject_res_corr=_rc_primary, **_base)
+                add_fiducial(
+                    f"RCINJ{_tagf}_inj{_t}s{_sd}",
+                    _f,
+                    _ns,
+                    seed=_sd,
+                    inject_res_corr=_rc_primary,
+                    **_base,
+                )
 
     # === Phase-5a SHAPE-FLOOR validation (2026-06-12): the genuine HF-LOSO worst cases re-run
     # with the shape-aware MF floor (fires on the DESI leg). Compares: the existing DIAGONAL floor
@@ -621,10 +968,10 @@ def build_config(verbose=False):
             continue
         _base = dict(survey="DESI", sim=_hs, mf=True, hr_truth=True, prior_center="truth")
         _tag = int(round(_ns * 1000))
-        add_fiducial(f"HFSFdiag{_tag}", _f, desi_floor=True, **_base)              # diagonal floor on DESI
-        add_fiducial(f"HFSF10_{_tag}", _f, mf_shape=1.0, **_base)                  # shape floor infl 1.0
-        add_fiducial(f"HFSF15_{_tag}", _f, mf_shape=1.5, **_base)                  # shape floor infl 1.5
-        add_fiducial(f"HFSF20_{_tag}", _f, mf_shape=2.0, **_base)                  # shape floor infl 2.0
+        add_fiducial(f"HFSFdiag{_tag}", _f, desi_floor=True, **_base)  # diagonal floor on DESI
+        add_fiducial(f"HFSF10_{_tag}", _f, mf_shape=1.0, **_base)  # shape floor infl 1.0
+        add_fiducial(f"HFSF15_{_tag}", _f, mf_shape=1.5, **_base)  # shape floor infl 1.5
+        add_fiducial(f"HFSF20_{_tag}", _f, mf_shape=2.0, **_base)  # shape floor infl 2.0
 
     # === 2D-TILT HCD-MODEL OVERRIDE (env-gated, 2026-06-17) ============================== #
     # HCD-slope-model SELECTION re-run: the 1D re-centered power-law (the slfix batch) ran the 4
@@ -639,8 +986,11 @@ def build_config(verbose=False):
     # (=checkpoints/stepA_2dtilt) so the slfix checkpoints are never overwritten.
     _2d_env = os.environ.get("STEPA_2DTILT_MOCKS", "").strip()
     if _2d_env:
-        _2d_mocks = ({"D_f3", "K_f4", "XS_f6_s0", "E_f5"} if _2d_env.lower() == "default"
-                     else set(m.strip() for m in _2d_env.split(",") if m.strip()))
+        _2d_mocks = (
+            {"D_f3", "K_f4", "XS_f6_s0", "E_f5"}
+            if _2d_env.lower() == "default"
+            else set(m.strip() for m in _2d_env.split(",") if m.strip())
+        )
         _n_flipped = 0
         for c in cfg:
             if c["mock_id"] in _2d_mocks:
@@ -649,8 +999,10 @@ def build_config(verbose=False):
                 c["hcd_ratio_infl"] = 1.0
                 _n_flipped += 1
         if verbose:
-            print(f"[config] STEPA_2DTILT_MOCKS={_2d_env!r} -> 2D-tilt+hierarchical on "
-                  f"{sorted(_2d_mocks)} ({_n_flipped} chains flipped)")
+            print(
+                f"[config] STEPA_2DTILT_MOCKS={_2d_env!r} -> 2D-tilt+hierarchical on "
+                f"{sorted(_2d_mocks)} ({_n_flipped} chains flipped)"
+            )
 
     if verbose:
         print(f"[config] resolved {len(cfg)} chains")
@@ -662,12 +1014,16 @@ def _resolve_hr_sim(d, fold_sims, PARAM_LIMITS, target_ns=0.979):
     contains the SAME sim name (so make_truth_from_sim can read its LF cache rows for the
     MF-resolution truth). Returns dict(sim, fold, n_s)."""
     from hcd_analysis.emulator import multifidelity as MF
-    hr = MF.load_cache_historical(MF.HR_CACHE, reason='diagnostic of the historical cache (scripts/run_stepA.py)')
+
+    hr = MF.load_cache_historical(
+        MF.HR_CACHE, reason="diagnostic of the historical cache (scripts/run_stepA.py)"
+    )
     hrs = np.array([s.decode() if isinstance(s, bytes) else s for s in hr["sim_name"]])
     if "params_unit" in hr:
         pu = hr["params_unit"]
     else:
         from hcd_analysis.emulator.data import normalize_params
+
         pu = normalize_params(hr["params"])
     lo, hi = PARAM_LIMITS[0]
     cand = []
@@ -688,20 +1044,27 @@ def _resolve_hr_sim(d, fold_sims, PARAM_LIMITS, target_ns=0.979):
 
 
 def print_table(cfg):
-    print(f"\n=== STEP-A config: {len(cfg)} chains "
-          f"({len(set(c['mock_id'] for c in cfg))} mocks) ===")
-    hdr = (f"{'id':22s} {'tier':6s} {'fold':>4s} {'sim n_s':>8s} {'mf':>3s} "
-           f"{'zslope':>6s} {'hr':>3s} {'τ0ext':>6s} {'cid':>3s}  sim")
+    print(
+        f"\n=== STEP-A config: {len(cfg)} chains "
+        f"({len(set(c['mock_id'] for c in cfg))} mocks) ==="
+    )
+    hdr = (
+        f"{'id':22s} {'tier':6s} {'fold':>4s} {'sim n_s':>8s} {'mf':>3s} "
+        f"{'zslope':>6s} {'hr':>3s} {'τ0ext':>6s} {'cid':>3s}  sim"
+    )
     print(hdr)
     print("-" * len(hdr))
     for c in cfg:
-        print(f"{c['id']:22s} {c['tier']:6s} {c['fold']:>4d} {c['n_s']:>8.4f} "
-              f"{'Y' if c['mf'] else '.':>3s} {'Y' if c['z_slope_marginalized'] else '.':>6s} "
-              f"{'Y' if c['hr_truth'] else '.':>3s} "
-              f"{'Y' if c['tau0_extreme'] else '.':>6s} {c['chain_id']:>3d}  {c['sim'][:46]}")
+        print(
+            f"{c['id']:22s} {c['tier']:6s} {c['fold']:>4d} {c['n_s']:>8.4f} "
+            f"{'Y' if c['mf'] else '.':>3s} {'Y' if c['z_slope_marginalized'] else '.':>6s} "
+            f"{'Y' if c['hr_truth'] else '.':>3s} "
+            f"{'Y' if c['tau0_extreme'] else '.':>6s} {c['chain_id']:>3d}  {c['sim'][:46]}"
+        )
     # per-tier counts
     from collections import Counter
-    tc = Counter(c['tier'] for c in cfg)
+
+    tc = Counter(c["tier"] for c in cfg)
     print(f"\nchain counts by tier: {dict(tc)}  TOTAL={len(cfg)}")
 
 
@@ -718,7 +1081,7 @@ def _atomic_write(path, text):
         f.write(text)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp, path)        # atomic on POSIX same-fs rename
+    os.replace(tmp, path)  # atomic on POSIX same-fs rename
 
 
 def _load_health():
@@ -739,8 +1102,10 @@ def _render_txt(health):
         c = chains[cid]
         extra = ""
         if c.get("status") == "done":
-            extra = (f" n={c.get('n_samples')} div={c.get('divergences')} "
-                     f"mtdsat={c.get('treedepth_sat_frac')}")
+            extra = (
+                f" n={c.get('n_samples')} div={c.get('divergences')} "
+                f"mtdsat={c.get('treedepth_sat_frac')}"
+            )
         if c.get("status") == "FAILED":
             extra = f"  ERR: {str(c.get('error',''))[:120]}"
         lines.append(f"  {c.get('status','?'):8s} {cid:24s}{extra}")
@@ -749,10 +1114,12 @@ def _render_txt(health):
     if fids:
         lines += ["", "# fiducial batteries (all-chains-in):"]
         for mid, b in sorted(fids.items()):
-            lines.append(f"  {mid:12s} Rhat_max={b.get('rhat_max')} "
-                         f"ESSbulk_min={b.get('ess_bulk_min')} "
-                         f"ESStail_min={b.get('ess_tail_min')} "
-                         f"ns_bias={b.get('bias_ns')} Ap_bias={b.get('bias_Ap')}")
+            lines.append(
+                f"  {mid:12s} Rhat_max={b.get('rhat_max')} "
+                f"ESSbulk_min={b.get('ess_bulk_min')} "
+                f"ESStail_min={b.get('ess_tail_min')} "
+                f"ns_bias={b.get('bias_ns')} Ap_bias={b.get('bias_Ap')}"
+            )
     counts = health.get("counts", {})
     lines += ["", f"# counts: {counts}"]
     return "\n".join(lines) + "\n"
@@ -777,6 +1144,7 @@ def update_health(updates_per_chain=None, fiducial=None, counts_recompute=True):
         h["fiducials"][mid] = battery
     if counts_recompute:
         from collections import Counter
+
         cc = Counter(c.get("status", "?") for c in h["chains"].values())
         h["counts"] = dict(cc)
     _atomic_write(HEALTH_JSON, json.dumps(h, indent=2, default=_json_default))
@@ -811,23 +1179,48 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     import hcd_analysis.emulator  # noqa: F401
     from hcd_analysis.emulator import closure_legb as C
     from hcd_analysis.emulator.closure_legb import (
-        build_legb_ctx, held_out_sims, make_truth_from_sim, make_hr_truth_from_cache, make_legb_mock,
-        _mock_core_per_leg, _run_nuts_legb, _draws_matrix, _packed_names_for, _hcd_latent_truths,
-        _hcd_latent_truths_2d, CACHE_PATH, ZSLOPE_PRIOR_SIGMA, HCD_INCIDENCE_SLOPE,
-        hcd_pivot_wc_and_xbar)
+        build_legb_ctx,
+        held_out_sims,
+        make_truth_from_sim,
+        make_hr_truth_from_cache,
+        make_legb_mock,
+        _mock_core_per_leg,
+        _run_nuts_legb,
+        _draws_matrix,
+        _packed_names_for,
+        _hcd_latent_truths,
+        _hcd_latent_truths_2d,
+        CACHE_PATH,
+        ZSLOPE_PRIOR_SIGMA,
+        HCD_INCIDENCE_SLOPE,
+        hcd_pivot_wc_and_xbar,
+    )
+
     # NB: HCD_LIT_OVER_SIM_SLOPE is deliberately NOT imported — it is the lit/sim RATIO slope
     # (prior-center at the z=3 PIVOT only), NEVER the forward z-exponent. The forward z-slope is
     # closure_legb.HCD_INCIDENCE_SLOPE (imported above). See hcd-dndx-zslope-bug.
-    from hcd_analysis.emulator.inference import (PARAM_NAMES, hcd_incidence_prior,
-        hcd_lls_realfit_alpha_center, assert_hcd_pivot_z3, HCD_LLS_SURVEY_BOOST,
-        HCD_LLS_SURVEY_FRAC_SIGMA, HCD_PRIOR_FRAC_SIGMA, HCD_Z_PIVOT)
+    from hcd_analysis.emulator.inference import (
+        PARAM_NAMES,
+        hcd_incidence_prior,
+        hcd_lls_realfit_alpha_center,
+        assert_hcd_pivot_z3,
+        HCD_LLS_SURVEY_BOOST,
+        HCD_LLS_SURVEY_FRAC_SIGMA,
+        HCD_PRIOR_FRAC_SIGMA,
+        HCD_Z_PIVOT,
+    )
 
     fold = chain["fold"]
     # MOCK INDEX: run_legb_convergence selects the sim by mock_index OR an explicit sim. We pass
     # sim explicitly, but the SEED stream uses mock_index — so derive a STABLE mock_index from the
     # sim's position in the fold's held-out list (so all of a mock's chains share one noise draw,
     # and distinct mocks get distinct noise). This makes the seed reproducible + per-mock unique.
-    sims, _ = held_out_sims(C.load_cache_historical(CACHE_PATH, reason='diagnostic of the historical cache (scripts/run_stepA.py)'), fold=fold)
+    sims, _ = held_out_sims(
+        C.load_cache_historical(
+            CACHE_PATH, reason="diagnostic of the historical cache (scripts/run_stepA.py)"
+        ),
+        fold=fold,
+    )
     try:
         mock_index = sims.index(chain["sim"])
     except ValueError:
@@ -840,8 +1233,8 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     # tested leg (the survey of this chain) at that inflation; desi_floor turns the EXISTING
     # diagonal MF floor ON for DESI (the simpler-fix comparison arm).
     _infl = float(chain.get("mf_shape", 0.0) or 0.0)
-    _einfl = float(chain.get("mf_emucoh", 0.0) or 0.0)   # 60-sim LF-emulator-coherence C_emu term
-    _eoda = bool(chain.get("mf_emucoh_offdiag_only", False))   # per-term diagonal allocation
+    _einfl = float(chain.get("mf_emucoh", 0.0) or 0.0)  # 60-sim LF-emulator-coherence C_emu term
+    _eoda = bool(chain.get("mf_emucoh_offdiag_only", False))  # per-term diagonal allocation
     _survey = chain.get("survey", "DESI")
     _desi_kw = {"mf_floor_on": True} if chain.get("desi_floor") else None
     # KS f_res (task #5): opt in the KS echelle R_z + diag cov surgery via ks_kwargs (resolution_float
@@ -850,27 +1243,39 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     if bool(chain.get("ks_resolution_float", False)) or chain.get("ks_kmax") is not None:
         _ks_kwargs = {}
         if bool(chain.get("ks_resolution_float", False)):
-            _ks_kwargs["resolution_float"] = True            # KS echelle R_z + diag surgery
+            _ks_kwargs["resolution_float"] = True  # KS echelle R_z + diag surgery
         if chain.get("ks_kmax") is not None:
-            _ks_kwargs["k_max"] = float(chain["ks_kmax"])    # also the no-f_res 0.065 control band
+            _ks_kwargs["k_max"] = float(chain["ks_kmax"])  # also the no-f_res 0.065 control band
     ctx, d = build_legb_ctx(
-        ckpt=chain["ckpt"], with_mf=bool(chain["mf"]),
-        mf_fold=fold, mf_with_floor=bool(chain["mf"]),
-        res_corr_on=bool(chain.get("res_corr_on", True)),      # NORC (Gate-A): False → drop res_corr + cap KS
-        sample_res=bool(chain.get("sample_res", False)),       # option-b f_res float (DESI/eBOSS; KS via ks_kwargs)
+        ckpt=chain["ckpt"],
+        with_mf=bool(chain["mf"]),
+        mf_fold=fold,
+        mf_with_floor=bool(chain["mf"]),
+        res_corr_on=bool(
+            chain.get("res_corr_on", True)
+        ),  # NORC (Gate-A): False → drop res_corr + cap KS
+        sample_res=bool(
+            chain.get("sample_res", False)
+        ),  # option-b f_res float (DESI/eBOSS; KS via ks_kwargs)
         f_res_amp_sigma=chain.get("f_res_amp_sigma", None),
-        ks_kwargs=_ks_kwargs,                                  # KS echelle R_z + diag surgery (task #5); None=proxy
-        mf_exclude_held=bool(chain.get("hr_truth", False)),    # HF-LOSO: MF fit EXCLUDING this HR sim
+        ks_kwargs=_ks_kwargs,  # KS echelle R_z + diag surgery (task #5); None=proxy
+        mf_exclude_held=bool(chain.get("hr_truth", False)),  # HF-LOSO: MF fit EXCLUDING this HR sim
         # TRUE leave-ONE-out (Task 1.5): drop EXACTLY this HR sim from the MF head fit, not the
         # whole LF fold group (two HR sims can share a group → leave-TWO-out → an inflated bias).
         # Only the hr_truth (HF-LOSO) arms opt in; None for every other caller (back-compat).
         mf_target_hr_sim=(chain["sim"] if chain.get("hr_truth", False) else None),
-        with_eboss=(_survey == "eBOSS"),                       # eBOSS DR14 leg (low-k shakedown)
-        sample_metals=bool(chain.get("sample_metals", False)), # shared a_SiIII nuisance (eBOSS/DESI)
-        mf_shape=(_infl > 0), mf_shape_infl=(_infl if _infl > 0 else 1.0),
+        with_eboss=(_survey == "eBOSS"),  # eBOSS DR14 leg (low-k shakedown)
+        sample_metals=bool(
+            chain.get("sample_metals", False)
+        ),  # shared a_SiIII nuisance (eBOSS/DESI)
+        mf_shape=(_infl > 0),
+        mf_shape_infl=(_infl if _infl > 0 else 1.0),
         mf_shape_legs=(_survey,),
-        mf_emucoh=(_einfl > 0), mf_emucoh_infl=(_einfl if _einfl > 0 else 1.0),
-        mf_emucoh_legs=(_survey,), mf_emucoh_offdiag_only=_eoda, desi_kwargs=_desi_kw,
+        mf_emucoh=(_einfl > 0),
+        mf_emucoh_infl=(_einfl if _einfl > 0 else 1.0),
+        mf_emucoh_legs=(_survey,),
+        mf_emucoh_offdiag_only=_eoda,
+        desi_kwargs=_desi_kw,
         # DIAGNOSTIC (decomp): res_corr low-k anchor multiple. Default 5.0 = production anchor
         # (byte-identical for every existing chain); 0.0 = NO anchor (raw clamped res_corr table).
         # The decomp diagnostic sets chain["mf_anchor_mult"]=0.0 for the "minus-anchor" variant.
@@ -882,7 +1287,8 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         # 2D AMPLITUDE×TILT submanifold (HT arms): A_hcd × global z-tilt B_hcd × FIXED ratios; the
         # per-class slope s_c = B_hcd + δs_c REPLACES the marginalize_zslope sampling. Requires
         # hierarchical_hcd; the closure δs_c / B_hcd center+width auto-derive from the forward slopes.
-        hcd_2d_tilt=bool(chain.get("hcd_2d_tilt", False)))
+        hcd_2d_tilt=bool(chain.get("hcd_2d_tilt", False)),
+    )
 
     # NORC (Gate-A, mirrors run_prod_sbc_shard.py): res_corr_on=False also PINS the (now inert)
     # alpha_res sites (fix_alpha_res=True), so the NORC self-draw truth AND forward both drop the
@@ -910,16 +1316,21 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         for _leg in ctx.legs:
             _key = f"{_leg.name}_cov"
             if _key not in _cd.files:
-                continue                                   # leg not covered by this cov → skip
+                continue  # leg not covered by this cov → skip
             _cov = np.asarray(_cd[_key], float)
             _n = np.asarray(_leg.k).shape[0]
-            assert _cov.shape == (_n, _n), (
-                f"res_corr_shape_cov[{_leg.name}] {_cov.shape} != leg ({_n},{_n})")
-            assert np.allclose(np.asarray(_leg.k), np.asarray(_cd[f"{_leg.name}_k"])), \
-                f"res_corr_shape_cov[{_leg.name}]: leg k grid mismatch (cov built on a different grid)"
+            assert _cov.shape == (
+                _n,
+                _n,
+            ), f"res_corr_shape_cov[{_leg.name}] {_cov.shape} != leg ({_n},{_n})"
+            assert np.allclose(
+                np.asarray(_leg.k), np.asarray(_cd[f"{_leg.name}_k"])
+            ), f"res_corr_shape_cov[{_leg.name}]: leg k grid mismatch (cov built on a different grid)"
             _per_leg[_leg.name] = jnp.asarray(_cov)
-        ctx = ctx._replace(mf_shape_per_leg=_per_leg,
-                           mf_shape_infl=float(chain.get("res_corr_shape_cov_infl", 1.0)))
+        ctx = ctx._replace(
+            mf_shape_per_leg=_per_leg,
+            mf_shape_infl=float(chain.get("res_corr_shape_cov_infl", 1.0)),
+        )
 
     # CLOSURE/SBC sim-truth z-slope center (PI re-determination 2026-06-17): run_stepA is the
     # CLOSURE driver — its held-out-sim mocks carry the SIM incidence slope HCD_INCIDENCE_SLOPE
@@ -935,10 +1346,13 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
             # litWLS γ_LLS=2.127 (sim subDLA/DLA), the slope the REAL fit uses — to validate the
             # real-fit-direction LLS→n_s leak against this mock. subDLA/DLA stay sim incidence slope.
             from hcd_analysis.emulator.inference import HCD_LLS_REALFIT_ZSLOPE
+
             _inc = np.asarray(HCD_INCIDENCE_SLOPE, float)
-            ctx = ctx._replace(marginalize_zslope=True,
-                               zslope_mu=jnp.asarray([HCD_LLS_REALFIT_ZSLOPE, _inc[1], _inc[2]]),
-                               zslope_sigma=jnp.asarray(ZSLOPE_PRIOR_SIGMA))
+            ctx = ctx._replace(
+                marginalize_zslope=True,
+                zslope_mu=jnp.asarray([HCD_LLS_REALFIT_ZSLOPE, _inc[1], _inc[2]]),
+                zslope_sigma=jnp.asarray(ZSLOPE_PRIOR_SIGMA),
+            )
         else:
             # CLOSURE default: CENTER on the SIM incidence-weight slope HCD_INCIDENCE_SLOPE (~2.4, the
             # slope the held-out-sim mock truth's w_c(z) carries — dN/dX(z) RISES with z), NOT the
@@ -947,8 +1361,9 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
             # Matches the _zslope_sites None-default + the 2D-tilt anchor. Pinned marginalized or fixed.
             ctx = ctx._replace(zslope_mu=jnp.asarray(HCD_INCIDENCE_SLOPE))
             if chain["z_slope_marginalized"]:
-                ctx = ctx._replace(marginalize_zslope=True,
-                                   zslope_sigma=jnp.asarray(ZSLOPE_PRIOR_SIGMA))
+                ctx = ctx._replace(
+                    marginalize_zslope=True, zslope_sigma=jnp.asarray(ZSLOPE_PRIOR_SIGMA)
+                )
 
     # SEPARATE per-survey inference (2026-06-10): keep only this chain's leg(s). A "+"-joined survey
     # (e.g. "DESI+KS", the cosmology-safety arm) keeps BOTH legs for a genuine joint fit.
@@ -967,8 +1382,14 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         # (LF emu × held-out MF) vs this real HR truth tests the MF-resolution GENERALIZATION.
         truth_sim = make_hr_truth_from_cache(chain["sim"], ctx.cache_k, tau0_anchor=tau0_anchor)
     else:
-        truth_sim = make_truth_from_sim(d, chain["sim"], fold=fold, tau0_anchor=tau0_anchor,
-                                        mf=ctx.mf, lls_truth_boost=float(chain.get("lls_truth_boost", 1.0)))
+        truth_sim = make_truth_from_sim(
+            d,
+            chain["sim"],
+            fold=fold,
+            tau0_anchor=tau0_anchor,
+            mf=ctx.mf,
+            lls_truth_boost=float(chain.get("lls_truth_boost", 1.0)),
+        )
 
     # PRIOR CENTER (non-circular closure, 2026-06-10): re-center the HCD α prior.
     #   "lit"      = build_legb_ctx default (lit/sim·w_c_med) — the real-fit prior.
@@ -990,21 +1411,27 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         amu = amu.at[0].set(hcd_lls_realfit_alpha_center(Xbar_z3, z=HCD_Z_PIVOT, boost=_boost))
         _fl = HCD_LLS_SURVEY_FRAC_SIGMA.get(survey, float(HCD_PRIOR_FRAC_SIGMA[0]))
         asd = asd.at[0].set(_fl * amu[0])
-        assert_hcd_pivot_z3(float(np.asarray(amu)[0]), z=HCD_Z_PIVOT,
-                            where=f"run_stepA pc=lit survey={survey}", boost=_boost)
+        assert_hcd_pivot_z3(
+            float(np.asarray(amu)[0]),
+            z=HCD_Z_PIVOT,
+            where=f"run_stepA pc=lit survey={survey}",
+            boost=_boost,
+        )
         ctx = ctx._replace(alpha_hcd_mu=amu, alpha_hcd_sigma=asd)
     else:
         # NON-circular closure cert: center on the sim population z=3 w_c (sim_mean) or this sim's z=3
         # w_c (truth); lit_over_sim=1 → no literature/survey offset (the cert tests recovery, not the
         # real prior). Uses the z=3 STRUCTURAL w_c (not the all-z median) — the CENTER-construction fix.
-        wc_c = (wc_z3 if pc == "sim_mean" else np.asarray(truth_sim["w_c"]))
+        wc_c = wc_z3 if pc == "sim_mean" else np.asarray(truth_sim["w_c"])
         amu, asd = hcd_incidence_prior(jnp.asarray(wc_c), z=HCD_Z_PIVOT, lit_over_sim=jnp.ones(3))
         ctx = ctx._replace(alpha_hcd_mu=amu, alpha_hcd_sigma=asd)
-    if chain.get("sigma_lls"):     # σ_LLS width-sensitivity arm
+    if chain.get("sigma_lls"):  # σ_LLS width-sensitivity arm
         sig = ctx.alpha_hcd_sigma.at[0].set(float(chain["sigma_lls"]) * float(ctx.alpha_hcd_mu[0]))
         ctx = ctx._replace(alpha_hcd_sigma=sig)
     if chain.get("sigma_subdla"):  # σ_subDLA width-sensitivity arm
-        sig = ctx.alpha_hcd_sigma.at[1].set(float(chain["sigma_subdla"]) * float(ctx.alpha_hcd_mu[1]))
+        sig = ctx.alpha_hcd_sigma.at[1].set(
+            float(chain["sigma_subdla"]) * float(ctx.alpha_hcd_mu[1])
+        )
         ctx = ctx._replace(alpha_hcd_sigma=sig)
     # subDLA prior-CENTER shift (cosmology-safety arm, #9 panel must-do 2026-06-13): deliberately
     # MIS-SPECIFY the subDLA incidence prior center by shift·σ_subDLA and ask whether it drags the
@@ -1038,51 +1465,82 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     _rc_spec = chain.get("inject_res_corr", None)
     if isinstance(_rc_spec, dict) and _rc_spec.get("actual_res_corr"):
         _am = float(chain.get("mf_anchor_mult", 5.0))
-        _rcs = float(_rc_spec.get("strength", 1.0))   # amplitude scale for the +/-1sigma res_corr systematic scan
-        _rc_inject = (None if ctx.mf is None
-                      else {leg.name: _rcs * _actual_res_corr_bvec(leg, ctx.mf, _am) for leg in ctx.legs})
+        _rcs = float(
+            _rc_spec.get("strength", 1.0)
+        )  # amplitude scale for the +/-1sigma res_corr systematic scan
+        _rc_inject = (
+            None
+            if ctx.mf is None
+            else {leg.name: _rcs * _actual_res_corr_bvec(leg, ctx.mf, _am) for leg in ctx.legs}
+        )
     else:
         _rc_inject = _rc_spec
     mock_legs, truth_pack, info = make_legb_mock(
-        ctx, truth_sim, k_mock, inject_a_siiii=float(chain.get("inject_a_siiii", 0.0) or 0.0),
-        inject_res_corr=_rc_inject)
+        ctx,
+        truth_sim,
+        k_mock,
+        inject_a_siiii=float(chain.get("inject_a_siiii", 0.0) or 0.0),
+        inject_res_corr=_rc_inject,
+    )
     core_per_leg = _mock_core_per_leg(ctx, truth_sim)
     kept_global = truth_pack["kept_global_z"]
 
     chain_key = jax.random.fold_in(k_nuts, int(chain["chain_id"]))
     t0 = time.time()
     samples, n_div, extra = _run_nuts_legb(
-        ctx, mock_legs, core_per_leg, n_warmup=n_warmup, n_samples=n_samples,
-        seed=chain_key, target_accept=target_accept, dense_mass=dense_mass,
-        max_tree_depth=max_tree_depth, init_strategy=init_to_sample, return_extra=True)
+        ctx,
+        mock_legs,
+        core_per_leg,
+        n_warmup=n_warmup,
+        n_samples=n_samples,
+        seed=chain_key,
+        target_accept=target_accept,
+        dense_mass=dense_mass,
+        max_tree_depth=max_tree_depth,
+        init_strategy=init_to_sample,
+        return_extra=True,
+    )
     wall = time.time() - t0
 
-    draws = _draws_matrix(samples, kept_global)            # (N, P) — appends A_hcd/r_…/a_SiIII if present
+    draws = _draws_matrix(samples, kept_global)  # (N, P) — appends A_hcd/r_…/a_SiIII if present
     # the packed column NAMES mirror _draws_matrix EXACTLY: θ9, τ₀(kept), α3, [A_hcd/r_subdla/r_dla
     # when hierarchical], [a_SiIII when sampled] (must-fix #5: index α by name downstream).
     packed_names = list(_packed_names_for(samples, kept_global))
-    truth_vec = np.concatenate([
-        truth_pack["theta9"], truth_pack["tau0_global"][kept_global], truth_pack["alpha_hcd"]])
-    if bool(chain.get("hcd_2d_tilt", False)):              # match the A_hcd/B_hcd/r_subdla/r_dla columns
+    truth_vec = np.concatenate(
+        [truth_pack["theta9"], truth_pack["tau0_global"][kept_global], truth_pack["alpha_hcd"]]
+    )
+    if bool(chain.get("hcd_2d_tilt", False)):  # match the A_hcd/B_hcd/r_subdla/r_dla columns
         truth_vec = np.concatenate([truth_vec, _hcd_latent_truths_2d(truth_pack["alpha_hcd"], ctx)])
-    elif bool(chain.get("hierarchical_hcd", False)):       # match the A_hcd/r_subdla/r_dla draw columns
+    elif bool(chain.get("hierarchical_hcd", False)):  # match the A_hcd/r_subdla/r_dla draw columns
         truth_vec = np.concatenate([truth_vec, _hcd_latent_truths(truth_pack["alpha_hcd"])])
-    if bool(chain.get("sample_metals", False)):            # match the a_SiIII column _draws_matrix added
+    if bool(chain.get("sample_metals", False)):  # match the a_SiIII column _draws_matrix added
         truth_vec = np.concatenate([truth_vec, [float(chain.get("inject_a_siiii", 0.0) or 0.0)]])
 
     num_steps = np.asarray(extra["num_steps"])
-    mtd_sat = float(np.mean(num_steps >= (2 ** int(max_tree_depth) - 1))) if num_steps.size else float("nan")
+    mtd_sat = (
+        float(np.mean(num_steps >= (2 ** int(max_tree_depth) - 1)))
+        if num_steps.size
+        else float("nan")
+    )
 
     out = dict(
-        chain_id=chain["id"], mock_id=chain["mock_id"], tier=chain["tier"], fold=fold,
-        sim=chain["sim"], n_s=chain["n_s"], mf=bool(chain["mf"]),
-        survey=chain.get("survey", "DESI"), prior_center=chain.get("prior_center", "lit"),
+        chain_id=chain["id"],
+        mock_id=chain["mock_id"],
+        tier=chain["tier"],
+        fold=fold,
+        sim=chain["sim"],
+        n_s=chain["n_s"],
+        mf=bool(chain["mf"]),
+        survey=chain.get("survey", "DESI"),
+        prior_center=chain.get("prior_center", "lit"),
         sigma_lls=(float(chain["sigma_lls"]) if chain.get("sigma_lls") else 0.0),
         sigma_subdla=(float(chain["sigma_subdla"]) if chain.get("sigma_subdla") else 0.0),
         lls_truth_boost=float(chain.get("lls_truth_boost", 1.0)),
         z_slope_marginalized=bool(chain["z_slope_marginalized"]),
-        hr_truth=bool(chain["hr_truth"]), tau0_extreme=bool(chain["tau0_extreme"]),
-        mf_shape=float(chain.get("mf_shape", 0.0) or 0.0), desi_floor=bool(chain.get("desi_floor", False)),
+        hr_truth=bool(chain["hr_truth"]),
+        tau0_extreme=bool(chain["tau0_extreme"]),
+        mf_shape=float(chain.get("mf_shape", 0.0) or 0.0),
+        desi_floor=bool(chain.get("desi_floor", False)),
         mf_emucoh=float(chain.get("mf_emucoh", 0.0) or 0.0),
         mf_emucoh_offdiag_only=bool(chain.get("mf_emucoh_offdiag_only", False)),
         sample_metals=bool(chain.get("sample_metals", False)),
@@ -1101,15 +1559,22 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         # mock-noise SEED (the PRNGKey root → k_mock). The RCINJ injection gate pairs the clean &
         # injected arms by (survey, sim, fold, seed); distinct seeds = independent noise draws.
         seed=int(chain.get("seed", 0)),
-        chain_index=int(chain["chain_id"]), n_chains_target=int(chain["n_chains"]),
+        chain_index=int(chain["chain_id"]),
+        n_chains_target=int(chain["n_chains"]),
         # battery inputs: the per-chain packed draws + the extra fields (energy/num_steps/diverg).
-        packed=draws.astype(np.float64), names=np.array(packed_names),
-        truth_vec=truth_vec.astype(np.float64), kept_global=kept_global,
-        energy=np.asarray(extra["energy"]), num_steps=num_steps,
+        packed=draws.astype(np.float64),
+        names=np.array(packed_names),
+        truth_vec=truth_vec.astype(np.float64),
+        kept_global=kept_global,
+        energy=np.asarray(extra["energy"]),
+        num_steps=num_steps,
         diverging=np.asarray(extra["diverging"]),
-        n_samples=int(draws.shape[0]), divergences=int(n_div),
-        treedepth_sat_frac=mtd_sat, wall_s=float(wall),
-        dropped=json.dumps(info["dropped"], default=str))
+        n_samples=int(draws.shape[0]),
+        divergences=int(n_div),
+        treedepth_sat_frac=mtd_sat,
+        wall_s=float(wall),
+        dropped=json.dumps(info["dropped"], default=str),
+    )
     ckpt_path = f"{CKPT_DIR}/{chain['id']}.npz"
     os.makedirs(CKPT_DIR, exist_ok=True)
     # ATOMIC write: np.savez_compressed APPENDS ".npz" if the name lacks it, so the temp name
@@ -1118,8 +1583,12 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
     tmp = f"{CKPT_DIR}/{chain['id']}.tmp{os.getpid()}.npz"
     np.savez_compressed(tmp, **out)
     os.replace(tmp, ckpt_path)
-    return dict(n_samples=int(draws.shape[0]), divergences=int(n_div),
-                treedepth_sat_frac=mtd_sat, wall_s=float(wall))
+    return dict(
+        n_samples=int(draws.shape[0]),
+        divergences=int(n_div),
+        treedepth_sat_frac=mtd_sat,
+        wall_s=float(wall),
+    )
 
 
 # ----------------------------------------------------------------------------- #
@@ -1145,6 +1614,7 @@ def _battery_over_chains(chain_ids):
     checkpoints all exist. Shared by aggregate_fiducial (all 4 chains) + the smoke proof (2)."""
     import hcd_analysis.emulator  # noqa: F401
     from hcd_analysis.emulator.closure_legb import convergence_battery
+
     paths = [f"{CKPT_DIR}/{cid}.npz" for cid in chain_ids]
     if not all(os.path.exists(p) for p in paths):
         return None
@@ -1160,35 +1630,55 @@ def _battery_over_chains(chain_ids):
         kept = z["kept_global"] if kept is None else kept
     # truncate to a common draw count (chains should match; guard anyway).
     nmin = min(p.shape[0] for p in packs)
-    packed = np.stack([p[:nmin] for p in packs], axis=0)         # (C, N, P)
+    packed = np.stack([p[:nmin] for p in packs], axis=0)  # (C, N, P)
     mtd = int(PROD["max_tree_depth"])
     battery = convergence_battery(
-        packed, names,
+        packed,
+        names,
         energy=np.stack([e[:nmin] for e in energies]) if all(e.size for e in energies) else None,
-        num_steps=np.stack([n[:nmin] for n in num_steps_all]) if all(n.size for n in num_steps_all) else None,
-        max_tree_depth=mtd, n_div=int(sum(divs)))
+        num_steps=(
+            np.stack([n[:nmin] for n in num_steps_all])
+            if all(n.size for n in num_steps_all)
+            else None
+        ),
+        max_tree_depth=mtd,
+        n_div=int(sum(divs)),
+    )
     # n_s / A_p bias-z (truth − pooled-mean)/pooled-sd.
     pooled = packed.reshape(-1, packed.shape[-1])
+
     def bias_z(pname):
         if pname not in names:
             return None
         j = names.index(pname)
         sd = float(pooled[:, j].std())
         return float((truth_vec[j] - pooled[:, j].mean()) / sd) if sd > 0 else None
+
     summary = dict(
-        n_chains=int(packed.shape[0]), n_draws=int(packed.shape[1]),
-        rhat_max=_r4(battery["rhat_max"]), ess_bulk_min=_r1(battery["ess_bulk_min"]),
-        ess_tail_min=_r1(battery["ess_tail_min"]), ebfmi_min=_r3(battery["ebfmi_min"]),
-        treedepth_sat_frac=_r4(battery["treedepth_sat_frac"]), n_divergent=int(sum(divs)),
-        bias_ns=_r3(bias_z("ns")), bias_Ap=_r3(bias_z("Ap")),
-        ess_target=ESS_TARGET, completed=_now())
+        n_chains=int(packed.shape[0]),
+        n_draws=int(packed.shape[1]),
+        rhat_max=_r4(battery["rhat_max"]),
+        ess_bulk_min=_r1(battery["ess_bulk_min"]),
+        ess_tail_min=_r1(battery["ess_tail_min"]),
+        ebfmi_min=_r3(battery["ebfmi_min"]),
+        treedepth_sat_frac=_r4(battery["treedepth_sat_frac"]),
+        n_divergent=int(sum(divs)),
+        bias_ns=_r3(bias_z("ns")),
+        bias_Ap=_r3(bias_z("Ap")),
+        ess_target=ESS_TARGET,
+        completed=_now(),
+    )
     return summary
 
 
 def _r4(x):
     return None if x is None or (isinstance(x, float) and np.isnan(x)) else round(float(x), 4)
+
+
 def _r3(x):
     return None if x is None or (isinstance(x, float) and np.isnan(x)) else round(float(x), 3)
+
+
 def _r1(x):
     return None if x is None or (isinstance(x, float) and np.isnan(x)) else round(float(x), 1)
 
@@ -1210,13 +1700,20 @@ def dispatch(cfg, *, workers, nuts_kwargs, smoke=False):
     for c in cfg:
         ckpt = f"{CKPT_DIR}/{c['id']}.npz"
         if os.path.exists(ckpt):
-            rec = dict(status="done", note="checkpoint exists (skipped)",
-                       tier=c["tier"], mock_id=c["mock_id"])
-            try:                                  # populate the human log from the existing ckpt
+            rec = dict(
+                status="done",
+                note="checkpoint exists (skipped)",
+                tier=c["tier"],
+                mock_id=c["mock_id"],
+            )
+            try:  # populate the human log from the existing ckpt
                 z = np.load(ckpt, allow_pickle=True)
-                rec.update(n_samples=int(z["n_samples"]), divergences=int(z["divergences"]),
-                           treedepth_sat_frac=_r4(float(z["treedepth_sat_frac"])),
-                           wall_s=round(float(z["wall_s"]), 1))
+                rec.update(
+                    n_samples=int(z["n_samples"]),
+                    divergences=int(z["divergences"]),
+                    treedepth_sat_frac=_r4(float(z["treedepth_sat_frac"])),
+                    wall_s=round(float(z["wall_s"]), 1),
+                )
             except Exception:
                 pass
             init[c["id"]] = rec
@@ -1224,8 +1721,11 @@ def dispatch(cfg, *, workers, nuts_kwargs, smoke=False):
             init[c["id"]] = dict(status="queued", tier=c["tier"], mock_id=c["mock_id"])
             todo.append(c)
     update_health(updates_per_chain=init)
-    print(f"[dispatch] {len(cfg)} chains total; {len(cfg)-len(todo)} already done (skipped); "
-          f"{len(todo)} to run on {workers} workers", flush=True)
+    print(
+        f"[dispatch] {len(cfg)} chains total; {len(cfg)-len(todo)} already done (skipped); "
+        f"{len(todo)} to run on {workers} workers",
+        flush=True,
+    )
 
     base_env = dict(os.environ)
     base_env.update(_force_single_thread_env())
@@ -1240,18 +1740,31 @@ def dispatch(cfg, *, workers, nuts_kwargs, smoke=False):
     # PIN to the ALLOWED cpuset: a SLURM cgroup gives a NON-CONTIGUOUS set (e.g.
     # [1,2,5,6,9,10,14,18,...]); range(workers) would taskset out-of-set ids -> "Invalid
     # argument" and FAIL those chains. Use os.sched_getaffinity. (fixed 2026-06-09)
-    _allowed = sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") \
+    _allowed = (
+        sorted(os.sched_getaffinity(0))
+        if hasattr(os, "sched_getaffinity")
         else list(range(os.cpu_count() or workers))
+    )
     free_cores = _allowed[:workers]
 
     def launch(chain, core):
         cmd = []
         if have_taskset and core is not None:
             cmd += ["taskset", "-c", str(core)]
-        cmd += [PY, os.path.abspath(__file__), "--run-one", chain["id"],
-                "--n-warmup", str(nk["n_warmup"]), "--n-samples", str(nk["n_samples"]),
-                "--max-tree-depth", str(nk["max_tree_depth"]),
-                "--target-accept", str(nk["target_accept"])]
+        cmd += [
+            PY,
+            os.path.abspath(__file__),
+            "--run-one",
+            chain["id"],
+            "--n-warmup",
+            str(nk["n_warmup"]),
+            "--n-samples",
+            str(nk["n_samples"]),
+            "--max-tree-depth",
+            str(nk["max_tree_depth"]),
+            "--target-accept",
+            str(nk["target_accept"]),
+        ]
         if not nk["dense_mass"]:
             cmd.append("--diag-mass")
         if smoke:
@@ -1264,7 +1777,7 @@ def dispatch(cfg, *, workers, nuts_kwargs, smoke=False):
         p._t0 = time.time()
         return p
 
-    running = {}        # pid -> Popen
+    running = {}  # pid -> Popen
     queue = list(todo)
     completed_mocks = set()
 
@@ -1275,18 +1788,39 @@ def dispatch(cfg, *, workers, nuts_kwargs, smoke=False):
         ckpt = f"{CKPT_DIR}/{chain['id']}.npz"
         if rc == 0 and os.path.exists(ckpt):
             z = np.load(ckpt, allow_pickle=True)
-            update_health(updates_per_chain={chain["id"]: dict(
-                status="done", tier=chain["tier"], mock_id=chain["mock_id"],
-                end=_now(), wall_s=round(float(z["wall_s"]), 1),
-                n_samples=int(z["n_samples"]), divergences=int(z["divergences"]),
-                treedepth_sat_frac=_r4(float(z["treedepth_sat_frac"])))})
-            print(f"[done] {chain['id']} ({float(z['wall_s']):.0f}s "
-                  f"n={int(z['n_samples'])} div={int(z['divergences'])})", flush=True)
+            update_health(
+                updates_per_chain={
+                    chain["id"]: dict(
+                        status="done",
+                        tier=chain["tier"],
+                        mock_id=chain["mock_id"],
+                        end=_now(),
+                        wall_s=round(float(z["wall_s"]), 1),
+                        n_samples=int(z["n_samples"]),
+                        divergences=int(z["divergences"]),
+                        treedepth_sat_frac=_r4(float(z["treedepth_sat_frac"])),
+                    )
+                }
+            )
+            print(
+                f"[done] {chain['id']} ({float(z['wall_s']):.0f}s "
+                f"n={int(z['n_samples'])} div={int(z['divergences'])})",
+                flush=True,
+            )
         else:
             tail = _tail_file(f"{CKPT_DIR}/{chain['id']}.log", 1500)
-            update_health(updates_per_chain={chain["id"]: dict(
-                status="FAILED", tier=chain["tier"], mock_id=chain["mock_id"],
-                end=_now(), returncode=rc, error=tail)})
+            update_health(
+                updates_per_chain={
+                    chain["id"]: dict(
+                        status="FAILED",
+                        tier=chain["tier"],
+                        mock_id=chain["mock_id"],
+                        end=_now(),
+                        returncode=rc,
+                        error=tail,
+                    )
+                }
+            )
             print(f"[FAILED] {chain['id']} rc={rc}\n  {tail[-300:]}", flush=True)
         # if this chain's fiducial is now complete, compute + log the battery.
         mid = chain["mock_id"]
@@ -1295,9 +1829,12 @@ def dispatch(cfg, *, workers, nuts_kwargs, smoke=False):
             if summ is not None:
                 completed_mocks.add(mid)
                 update_health(fiducial=(mid, summ))
-                print(f"[battery] {mid}: Rhat_max={summ['rhat_max']} "
-                      f"ESSbulk_min={summ['ess_bulk_min']} ESStail_min={summ['ess_tail_min']} "
-                      f"ns_bias={summ['bias_ns']} Ap_bias={summ['bias_Ap']}", flush=True)
+                print(
+                    f"[battery] {mid}: Rhat_max={summ['rhat_max']} "
+                    f"ESSbulk_min={summ['ess_bulk_min']} ESStail_min={summ['ess_tail_min']} "
+                    f"ns_bias={summ['bias_ns']} Ap_bias={summ['bias_Ap']}",
+                    flush=True,
+                )
 
     while queue or running:
         while queue and len(running) < workers:
@@ -1305,11 +1842,22 @@ def dispatch(cfg, *, workers, nuts_kwargs, smoke=False):
             core = free_cores.pop(0) if free_cores else None
             p = launch(c, core)
             running[p.pid] = p
-            update_health(updates_per_chain={c["id"]: dict(
-                status="running", tier=c["tier"], mock_id=c["mock_id"], start=_now(),
-                core=core)})
-            print(f"[launch] {c['id']} (pid {p.pid}, core {core}); "
-                  f"running={len(running)} queued={len(queue)}", flush=True)
+            update_health(
+                updates_per_chain={
+                    c["id"]: dict(
+                        status="running",
+                        tier=c["tier"],
+                        mock_id=c["mock_id"],
+                        start=_now(),
+                        core=core,
+                    )
+                }
+            )
+            print(
+                f"[launch] {c['id']} (pid {p.pid}, core {core}); "
+                f"running={len(running)} queued={len(queue)}",
+                flush=True,
+            )
         # poll for any finished worker.
         done_pids = []
         for pid, p in list(running.items()):
@@ -1318,7 +1866,7 @@ def dispatch(cfg, *, workers, nuts_kwargs, smoke=False):
         for pid in done_pids:
             p = running.pop(pid)
             if getattr(p, "_core", None) is not None:
-                free_cores.append(p._core)          # recycle the core slot
+                free_cores.append(p._core)  # recycle the core slot
             on_finish(p)
         if not done_pids:
             time.sleep(2.0)
@@ -1335,6 +1883,7 @@ def dispatch(cfg, *, workers, nuts_kwargs, smoke=False):
 
 def _which(name):
     from shutil import which
+
     return which(name) is not None
 
 
@@ -1354,25 +1903,42 @@ def _tail_file(path, n_bytes):
 # ----------------------------------------------------------------------------- #
 def main():
     from hcd_analysis import runtime_data as _RDATA
-    _RDATA.show_loads()      # each verified data load on stderr: product id, version, digest, path
+
+    _RDATA.show_loads()  # each verified data load on stderr: product id, version, digest, path
     ap = argparse.ArgumentParser(description="STEP-A closure-mock launcher")
     ap.add_argument("--print-table", action="store_true", help="resolve + print the 44-chain table")
     ap.add_argument("--run", action="store_true", help="run the FULL battery (pool of workers)")
-    ap.add_argument("--smoke", action="store_true",
-                    help="SMOKE: 1 L1b single-chain + 1 fiducial's 2 chains @ ~40/40")
-    ap.add_argument("--run-one", type=str, default=None,
-                    help="(internal) run ONE chain by id + write its checkpoint")
-    ap.add_argument("--only", type=str, default=None,
-                    help="filter the cfg to chains whose id startswith PREFIX (e.g. --only RCINJ)")
-    ap.add_argument("--workers", type=int, default=14, help="pool size (default 14; 2 cores headroom)")
+    ap.add_argument(
+        "--smoke",
+        action="store_true",
+        help="SMOKE: 1 L1b single-chain + 1 fiducial's 2 chains @ ~40/40",
+    )
+    ap.add_argument(
+        "--run-one",
+        type=str,
+        default=None,
+        help="(internal) run ONE chain by id + write its checkpoint",
+    )
+    ap.add_argument(
+        "--only",
+        type=str,
+        default=None,
+        help="filter the cfg to chains whose id startswith PREFIX (e.g. --only RCINJ)",
+    )
+    ap.add_argument(
+        "--workers", type=int, default=14, help="pool size (default 14; 2 cores headroom)"
+    )
     # NUTS knobs (the worker reads these; the pool forwards them).
     ap.add_argument("--n-warmup", type=int, default=PROD["n_warmup"])
     ap.add_argument("--n-samples", type=int, default=PROD["n_samples"])
     ap.add_argument("--max-tree-depth", type=int, default=PROD["max_tree_depth"])
     ap.add_argument("--target-accept", type=float, default=PROD["target_accept"])
     ap.add_argument("--diag-mass", action="store_true", help="diagonal NUTS mass (smoke/debug)")
-    ap.add_argument("--smoke-cfg", action="store_true",
-                    help="(internal) the worker is part of a SMOKE pool (uses the smoke subset)")
+    ap.add_argument(
+        "--smoke-cfg",
+        action="store_true",
+        help="(internal) the worker is part of a SMOKE pool (uses the smoke subset)",
+    )
     args = ap.parse_args()
 
     if args.run_one is not None:
@@ -1389,9 +1955,13 @@ def main():
             sys.exit(2)
         try:
             r = run_one_chain(
-                chain, n_warmup=args.n_warmup, n_samples=args.n_samples,
-                dense_mass=not args.diag_mass, max_tree_depth=args.max_tree_depth,
-                target_accept=args.target_accept)
+                chain,
+                n_warmup=args.n_warmup,
+                n_samples=args.n_samples,
+                dense_mass=not args.diag_mass,
+                max_tree_depth=args.max_tree_depth,
+                target_accept=args.target_accept,
+            )
             print(f"[run-one] {args.run_one} OK: {r}")
         except Exception:
             traceback.print_exc()
@@ -1402,16 +1972,22 @@ def main():
     cfg = build_config(verbose=True)
     if args.only:
         cfg = [c for c in cfg if c["id"].startswith(args.only)]
-        print(f"[--only {args.only!r}] filtered to {len(cfg)} chains "
-              f"({len(set(c['mock_id'] for c in cfg))} mocks)")
+        print(
+            f"[--only {args.only!r}] filtered to {len(cfg)} chains "
+            f"({len(set(c['mock_id'] for c in cfg))} mocks)"
+        )
 
     if args.print_table:
         print_table(cfg)
         return
 
-    nuts_kwargs = dict(n_warmup=args.n_warmup, n_samples=args.n_samples,
-                       dense_mass=not args.diag_mass, max_tree_depth=args.max_tree_depth,
-                       target_accept=args.target_accept)
+    nuts_kwargs = dict(
+        n_warmup=args.n_warmup,
+        n_samples=args.n_samples,
+        dense_mass=not args.diag_mass,
+        max_tree_depth=args.max_tree_depth,
+        target_accept=args.target_accept,
+    )
 
     if args.smoke:
         smoke_cfg = _smoke_subset(cfg)
@@ -1420,8 +1996,12 @@ def main():
         print("\n=== STEP-A SMOKE ===")
         print_table(smoke_cfg)
         print(f"\n[smoke] NUTS knobs: {nuts_kwargs}; workers={min(args.workers, len(smoke_cfg))}")
-        dispatch(smoke_cfg, workers=min(args.workers, len(smoke_cfg)),
-                 nuts_kwargs=nuts_kwargs, smoke=True)
+        dispatch(
+            smoke_cfg,
+            workers=min(args.workers, len(smoke_cfg)),
+            nuts_kwargs=nuts_kwargs,
+            smoke=True,
+        )
         _print_smoke_report(smoke_cfg)
         return
 
@@ -1436,7 +2016,7 @@ def main():
 def _smoke_subset(cfg):
     """1 L1b single-chain + 1 fiducial's first 2 chains (the cheapest end-to-end proof)."""
     l1b = next(c for c in cfg if c["tier"] == "L1b")
-    fid = [c for c in cfg if c["mock_id"] == "L1a_fold0"][:2]   # 2 of the 4 chains
+    fid = [c for c in cfg if c["mock_id"] == "L1a_fold0"][:2]  # 2 of the 4 chains
     return [l1b] + fid
 
 
@@ -1451,13 +2031,17 @@ def _print_smoke_report(smoke_cfg):
     for cid, ok in ok_ckpt:
         if ok:
             z = np.load(f"{CKPT_DIR}/{cid}.npz", allow_pickle=True)
-            print(f"  {cid:24s} OK  (n={int(z['n_samples'])} div={int(z['divergences'])} "
-                  f"wall={float(z['wall_s']):.0f}s packed={np.asarray(z['packed']).shape})")
+            print(
+                f"  {cid:24s} OK  (n={int(z['n_samples'])} div={int(z['divergences'])} "
+                f"wall={float(z['wall_s']):.0f}s packed={np.asarray(z['packed']).shape})"
+            )
         else:
             print(f"  {cid:24s} MISSING")
     print(f"\nhealth.json counts: {h.get('counts')}")
-    print(f"health.json valid JSON: {os.path.exists(HEALTH_JSON)}  "
-          f"(fiducials logged: {list(h.get('fiducials', {}).keys())})")
+    print(
+        f"health.json valid JSON: {os.path.exists(HEALTH_JSON)}  "
+        f"(fiducials logged: {list(h.get('fiducials', {}).keys())})"
+    )
 
     # PROVE the battery path on the 2 smoke L1a chains (the full gate needs all 4; the smoke runs
     # 2, so aggregate them directly here as a path proof — same convergence_battery code).
@@ -1466,15 +2050,19 @@ def _print_smoke_report(smoke_cfg):
         b = _battery_over_chains([c["id"] for c in l1a])
         if b is not None:
             print(f"\n[battery PROOF on {len(l1a)} smoke chains of L1a_fold0]:")
-            print(f"  Rhat_max={b['rhat_max']}  ESSbulk_min={b['ess_bulk_min']}  "
-                  f"ESStail_min={b['ess_tail_min']}  ns_bias={b['bias_ns']}σ  "
-                  f"Ap_bias={b['bias_Ap']}σ  (smoke depth → values indicative only)")
+            print(
+                f"  Rhat_max={b['rhat_max']}  ESSbulk_min={b['ess_bulk_min']}  "
+                f"ESStail_min={b['ess_tail_min']}  ns_bias={b['bias_ns']}σ  "
+                f"Ap_bias={b['bias_Ap']}σ  (smoke depth → values indicative only)"
+            )
     print("\nTo launch the FULL run (14 workers) in the BACKGROUND:")
     print(f"  bash {REPO}/scripts/run_stepA_bg.sh")
-    print(f"  (or: nohup env PYTHONNOUSERSITE=1 PYTHONPATH={REPO} JAX_PLATFORMS=cpu "
-          f"CUDA_VISIBLE_DEVICES='' OMP_NUM_THREADS=1 {PY} "
-          f"{REPO}/scripts/run_stepA.py --run --workers 14 "
-          f"> {CKPT_DIR}/run_stepA.out 2>&1 &)")
+    print(
+        f"  (or: nohup env PYTHONNOUSERSITE=1 PYTHONPATH={REPO} JAX_PLATFORMS=cpu "
+        f"CUDA_VISIBLE_DEVICES='' OMP_NUM_THREADS=1 {PY} "
+        f"{REPO}/scripts/run_stepA.py --run --workers 14 "
+        f"> {CKPT_DIR}/run_stepA.out 2>&1 &)"
+    )
 
 
 if __name__ == "__main__":

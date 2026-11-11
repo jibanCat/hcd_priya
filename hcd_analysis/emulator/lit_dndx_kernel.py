@@ -22,6 +22,7 @@ reproduced by the naive 17.5->17.6 EDGE-SNAP floor (over-removal of the whole
 
 numpy + h5py only (no JAX); datasets are read lazily (a few MB of the ~1 GB cache).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -33,8 +34,14 @@ from ..paths import REPO_ROOT_STR as _REPO
 
 CACHE_PATH = f"{_REPO}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 
-_KERNEL_DATASETS = ("snap_dNdX_LLS", "snap_dNdX_subDLA", "snap_dNdX_DLA",
-                    "snap_f_nhi", "snap_total_path_dX", "log_nhi_edges")
+_KERNEL_DATASETS = (
+    "snap_dNdX_LLS",
+    "snap_dNdX_subDLA",
+    "snap_dNdX_DLA",
+    "snap_f_nhi",
+    "snap_total_path_dX",
+    "log_nhi_edges",
+)
 
 
 def load_kernel_inputs(path=CACHE_PATH):
@@ -50,17 +57,28 @@ def load_kernel_inputs(path=CACHE_PATH):
         total_dX = h["snap_total_path_dX"][:].astype(float)
         gid = h["snap_group_idx"][:]
         zrow = h["z_grid"][:].astype(float)
-        sim = np.array([s.decode() if isinstance(s, bytes) else s
-                        for s in h["snap_sim_name"][:]])
+        sim = np.array([s.decode() if isinstance(s, bytes) else s for s in h["snap_sim_name"][:]])
     ng = lls.shape[0]
     order = np.argsort(gid, kind="stable")
     firsts = order[np.searchsorted(gid[order], np.arange(ng))]
     zg = zrow[firsts]
-    return dict(path=path, zg=zg, sim=sim, lls=lls, sub=sub, dla=dla, f_nhi=f_nhi,
-                edges=edges, total_dX=total_dX,
-                sha256_f_nhi=hashlib.sha256(np.ascontiguousarray(f_nhi).tobytes()).hexdigest(),
-                shapes=dict(snap_f_nhi=tuple(f_nhi.shape), log_nhi_edges=tuple(edges.shape),
-                            snap_dNdX_LLS=tuple(lls.shape)))
+    return dict(
+        path=path,
+        zg=zg,
+        sim=sim,
+        lls=lls,
+        sub=sub,
+        dla=dla,
+        f_nhi=f_nhi,
+        edges=edges,
+        total_dX=total_dX,
+        sha256_f_nhi=hashlib.sha256(np.ascontiguousarray(f_nhi).tobytes()).hexdigest(),
+        shapes=dict(
+            snap_f_nhi=tuple(f_nhi.shape),
+            log_nhi_edges=tuple(edges.shape),
+            snap_dNdX_LLS=tuple(lls.shape),
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -82,9 +100,9 @@ def floor_piece_17p2_17p5(f_nhi, edges, method="subbin_powerlaw"):
     f = np.asarray(f_nhi, float)
     edges = np.asarray(edges, float)
     assert abs(edges[1] - 17.2) < 1e-9 and abs(edges[2] - 17.4) < 1e-9, edges[:4]
-    N = 10.0 ** edges
-    full_b1 = f[:, 1] * (N[2] - N[1])                    # [17.2,17.4), exact edges
-    N0, N1, Nm = 10.0 ** 17.4, 10.0 ** 17.6, 10.0 ** 17.5
+    N = 10.0**edges
+    full_b1 = f[:, 1] * (N[2] - N[1])  # [17.2,17.4), exact edges
+    N0, N1, Nm = 10.0**17.4, 10.0**17.6, 10.0**17.5
     if method == "naive_edge_17p4":
         return full_b1
     if method == "naive_edge_17p6":
@@ -99,13 +117,13 @@ def floor_piece_17p2_17p5(f_nhi, edges, method="subbin_powerlaw"):
         lnf1 = np.log(f[:, 1])
         lnf3 = np.log(f[:, 3])
         a = (lnf3 - lnf1) / (lnNc[3] - lnNc[1])
-    a = np.where(np.isfinite(a), a, 0.0)                 # fallback: constant f
+    a = np.where(np.isfinite(a), a, 0.0)  # fallback: constant f
     ap1 = a + 1.0
     # guard a ~ -1 (log integral); |ap1| floor keeps it well-conditioned
     ap1 = np.where(np.abs(ap1) < 1e-6, 1e-6, ap1)
-    denom = N1 ** ap1 - N0 ** ap1
-    C = f[:, 2] * (N1 - N0) * ap1 / denom                # preserve the bin total
-    partial = C * (Nm ** ap1 - N0 ** ap1) / ap1
+    denom = N1**ap1 - N0**ap1
+    C = f[:, 2] * (N1 - N0) * ap1 / denom  # preserve the bin total
+    partial = C * (Nm**ap1 - N0**ap1) / ap1
     return full_b1 + partial
 
 
@@ -121,7 +139,7 @@ def lx_above_17p5_sibling(f_nhi, edges):
     """The sibling's ``_lx_above`` construction: l(>=17.5) from f_nhi with the partial
     bin [17.5,17.6) integrated as const-f (f2*(10^17.6-10^17.5)) + full bins above."""
     f = np.asarray(f_nhi, float)
-    part = f[:, 2] * (10.0 ** 17.6 - 10.0 ** 17.5)
+    part = f[:, 2] * (10.0**17.6 - 10.0**17.5)
     return part + _lx_fnhi_range(f_nhi, edges, 3, f.shape[1])
 
 
@@ -149,8 +167,9 @@ def _per_z(zg, vals, aggregate="median"):
 
 def interp_ln1pz(z_tab, y_tab, z):
     """Linear interpolation in ln(1+z) (the pinned r(z) interpolation)."""
-    return np.interp(np.log1p(np.asarray(z, float)), np.log1p(np.asarray(z_tab, float)),
-                     np.asarray(y_tab, float))
+    return np.interp(
+        np.log1p(np.asarray(z, float)), np.log1p(np.asarray(z_tab, float)), np.asarray(y_tab, float)
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -173,8 +192,9 @@ def k1_table(inputs, floor_method="subbin_powerlaw", aggregate="median"):
     kernel is only ever EVALUATED at the lit z_bar, so the saturation is cosmetic."""
     r = k1_per_group(inputs, floor_method=floor_method)
     z_vals, agg, p16, p84, n = _per_z(inputs["zg"], r, aggregate=aggregate)
-    return dict(z_vals=z_vals, r=agg, r16=p16, r84=p84, n=n,
-                floor_method=floor_method, aggregate=aggregate)
+    return dict(
+        z_vals=z_vals, r=agg, r16=p16, r84=p84, n=n, floor_method=floor_method, aggregate=aggregate
+    )
 
 
 def k1_r_at(inputs, z, floor_method="subbin_powerlaw", aggregate="median", _tab=None):
@@ -189,7 +209,7 @@ def k1_smooth_fit(inputs, z_pivot=3.0, z_lo=2.0, z_hi=4.6, _tab=None):
     sel = (tab["z_vals"] >= z_lo) & (tab["z_vals"] <= z_hi)
     x = np.log((1.0 + tab["z_vals"][sel]) / (1.0 + z_pivot))
     y = np.log(tab["r"][sel])
-    coef = np.polyfit(x, y, 1)                            # [eta, ln r_pivot]
+    coef = np.polyfit(x, y, 1)  # [eta, ln r_pivot]
     r_p = float(np.exp(coef[1]))
     eta = float(coef[0])
 
@@ -230,13 +250,21 @@ def kernel_budget(inputs, r_k2_at, z_pivot=3.0, _tab=None):
     # slopes eta = d ln r / d ln(1+z) at the pivot (finite difference for K2; fit for K1)
     eta_k1 = k1_smooth_fit(inputs, z_pivot=z_pivot, _tab=tab)["eta"]
     dz = 0.2
-    r_lo, r_hi = (float(np.asarray(r_k2_at(np.array([zz])))[0])
-                  for zz in (z_pivot - dz, z_pivot + dz))
+    r_lo, r_hi = (
+        float(np.asarray(r_k2_at(np.array([zz])))[0]) for zz in (z_pivot - dz, z_pivot + dz)
+    )
     eta_k2 = (np.log(r_hi) - np.log(r_lo)) / (np.log(1 + z_pivot + dz) - np.log(1 + z_pivot - dz))
     sigma_eta = float(0.5 * abs(eta_k1 - eta_k2))
-    return dict(s_r3=s_r3, suite_half=float(suite_half), model_half=float(model_half),
-                sigma_eta=sigma_eta, eta_k1=float(eta_k1), eta_k2=float(eta_k2),
-                r3_k1=r3_k1, r3_k2=r3_k2)
+    return dict(
+        s_r3=s_r3,
+        suite_half=float(suite_half),
+        model_half=float(model_half),
+        sigma_eta=sigma_eta,
+        eta_k1=float(eta_k1),
+        eta_k2=float(eta_k2),
+        r3_k1=r3_k1,
+        r3_k2=r3_k2,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -250,9 +278,12 @@ def same_file_consistency(inputs):
     csum = inputs["lls"] + inputs["sub"] + inputs["dla"]
     l_int = _lx_fnhi_range(inputs["f_nhi"], inputs["edges"], 1, inputs["f_nhi"].shape[1])
     ratio = csum / l_int
-    return dict(median_ratio=float(np.median(ratio)),
-                p16=float(np.percentile(ratio, 16)), p84=float(np.percentile(ratio, 84)),
-                flag="same-file check only (hcd_summary_lf.h5 absent)")
+    return dict(
+        median_ratio=float(np.median(ratio)),
+        p16=float(np.percentile(ratio, 16)),
+        p84=float(np.percentile(ratio, 84)),
+        flag="same-file check only (hcd_summary_lf.h5 absent)",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -280,45 +311,61 @@ def adjudication(inputs, z_eval=ADJUDICATION_Z):
     r_n174 = k1_per_group(inputs, floor_method="naive_edge_17p4")
     r_n176 = k1_per_group(inputs, floor_method="naive_edge_17p6")
     # sibling _lx_above: pure f_nhi integration for BOTH num and den, const-f partial
-    num_f = _lx_fnhi_range(inputs["f_nhi"], inputs["edges"], 1, 10)     # [17.2,19.0)
+    num_f = _lx_fnhi_range(inputs["f_nhi"], inputs["edges"], 1, 10)  # [17.2,19.0)
     den_f = lx_above_17p5_sibling(inputs["f_nhi"], inputs["edges"])
     r_sib = num_f / den_f
     # no-floor-removal candidate (den = l(>=17.2)): NOT any team's number, shown for span
     r_nofloor = inputs["lls"] / (inputs["lls"] + inputs["sub"] + inputs["dla"])
 
     recipes = {
-        "pinned_k1": dict(r=per_z_at(r_pin), note="class columns + subbin powerlaw floor "
-                                                  "+ suite median (THE pinned recipe)"),
+        "pinned_k1": dict(
+            r=per_z_at(r_pin),
+            note="class columns + subbin powerlaw floor " "+ suite median (THE pinned recipe)",
+        ),
         "pinned_k1_mean": dict(r=per_z_at(r_pin, "mean"), note="pinned but suite MEAN"),
-        "pinned_k1_constf_floor": dict(r=per_z_at(r_cf), note="pinned but const-f partial "
-                                                              "bin (sibling sub-bin treatment)"),
-        "sibling_lx_above": dict(r=per_z_at(r_sib), note="all-f_nhi integration, const-f "
-                                                         "partial (their 0.877@z3 family)"),
-        "naive_edge_17p4": dict(r=per_z_at(r_n174), note="17.5 snapped DOWN to 17.4 edge "
-                                                         "(under-removal; trap)"),
-        "naive_edge_17p6": dict(r=per_z_at(r_n176), note="17.5 snapped UP to 17.6 edge "
-                                                         "(over-removal; reproduces the "
-                                                         "impact-team A1 ~0.96 family)"),
-        "no_floor_removal": dict(r=per_z_at(r_nofloor), note="den = l(>=17.2) (floor never "
-                                                             "removed; span reference only)"),
+        "pinned_k1_constf_floor": dict(
+            r=per_z_at(r_cf), note="pinned but const-f partial " "bin (sibling sub-bin treatment)"
+        ),
+        "sibling_lx_above": dict(
+            r=per_z_at(r_sib),
+            note="all-f_nhi integration, const-f " "partial (their 0.877@z3 family)",
+        ),
+        "naive_edge_17p4": dict(
+            r=per_z_at(r_n174), note="17.5 snapped DOWN to 17.4 edge " "(under-removal; trap)"
+        ),
+        "naive_edge_17p6": dict(
+            r=per_z_at(r_n176),
+            note="17.5 snapped UP to 17.6 edge "
+            "(over-removal; reproduces the "
+            "impact-team A1 ~0.96 family)",
+        ),
+        "no_floor_removal": dict(
+            r=per_z_at(r_nofloor),
+            note="den = l(>=17.2) (floor never " "removed; span reference only)",
+        ),
     }
     i3 = int(np.argmin(np.abs(z_eval - 3.0)))
     attribution = {
         "floor_subbin_treatment": dict(
-            delta_r3_pinned_minus_constf=float(recipes["pinned_k1"]["r"][i3]
-                                               - recipes["pinned_k1_constf_floor"]["r"][i3]),
-            delta_r3_naive176_minus_pinned=float(recipes["naive_edge_17p6"]["r"][i3]
-                                                 - recipes["pinned_k1"]["r"][i3]),
+            delta_r3_pinned_minus_constf=float(
+                recipes["pinned_k1"]["r"][i3] - recipes["pinned_k1_constf_floor"]["r"][i3]
+            ),
+            delta_r3_naive176_minus_pinned=float(
+                recipes["naive_edge_17p6"]["r"][i3] - recipes["pinned_k1"]["r"][i3]
+            ),
             note="const-f vs power-law sub-bin = the ENTIRE sibling-vs-pinned gap; the "
-                 "17.6 edge-snap = the A1 ~0.96 artifact"),
+            "17.6 edge-snap = the A1 ~0.96 artifact",
+        ),
         "mean_vs_median": dict(
-            delta_r3=float(recipes["pinned_k1_mean"]["r"][i3]
-                           - recipes["pinned_k1"]["r"][i3]),
-            note="suite mean vs median: negligible"),
+            delta_r3=float(recipes["pinned_k1_mean"]["r"][i3] - recipes["pinned_k1"]["r"][i3]),
+            note="suite mean vs median: negligible",
+        ),
         "fnhi_vs_class_columns": dict(
-            delta_r3=float(recipes["sibling_lx_above"]["r"][i3]
-                           - recipes["pinned_k1_constf_floor"]["r"][i3]),
+            delta_r3=float(
+                recipes["sibling_lx_above"]["r"][i3] - recipes["pinned_k1_constf_floor"]["r"][i3]
+            ),
             note="class columns are numerically IDENTICAL to the f_nhi bin integrals in "
-                 "this cache (same-file construction); zero contribution"),
+            "this cache (same-file construction); zero contribution",
+        ),
     }
     return dict(z_eval=z_eval, recipes=recipes, attribution=attribution)

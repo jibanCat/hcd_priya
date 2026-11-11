@@ -6,6 +6,7 @@ These functions place every emulator mode on ONE velocity grid ``cache_k`` for e
 of the incident. They are kept only as (a) the equivalence reference of the gate E forward (fed each z's own grid,
 the old forward IS the correct forward) and (b) the subject of the historical-behaviour tests. Production code never
 imports this module (gate E criterion E1c)."""
+
 from __future__ import annotations
 
 from typing import NamedTuple
@@ -15,13 +16,29 @@ import jax
 import jax.numpy as jnp
 
 from hcd_analysis.emulator.data import Z_LIMITS
-from hcd_analysis.emulator.data_likelihood import (K_SiIII_DEFAULT, K_SiII_DEFAULT, Z_PIVOT, DataLeg,  # noqa: F401
-                                                   _ns_phys_from_theta9, _resolution_factor, emu_var_modes,
-                                                   load_desi_leg, load_ks_leg, metal_factor_at_z)
-from hcd_analysis.emulator.likelihood import gaussian_loglik, rho_at_tau0, sigma_at_tau0  # noqa: F401
-from hcd_analysis.emulator.predict import _excess_from_P_filt, predict_P_filt, predict_P_obs  # noqa: F401
+from hcd_analysis.emulator.data_likelihood import (
+    K_SiIII_DEFAULT,
+    K_SiII_DEFAULT,
+    Z_PIVOT,
+    DataLeg,  # noqa: F401
+    _ns_phys_from_theta9,
+    _resolution_factor,
+    emu_var_modes,
+    load_desi_leg,
+    load_ks_leg,
+    metal_factor_at_z,
+)
+from hcd_analysis.emulator.likelihood import (
+    gaussian_loglik,
+    rho_at_tau0,
+    sigma_at_tau0,
+)  # noqa: F401
+from hcd_analysis.emulator.predict import (
+    _excess_from_P_filt,
+    predict_P_filt,
+    predict_P_obs,
+)  # noqa: F401
 from hcd_analysis.paths import REPO_ROOT_STR as _REPO
-
 
 # The emulator cache k-grid Nyquist (angular k, s/km == 1/Å in the velocity-equiv
 # convention the data + cache share). The emulator cannot predict above this.
@@ -70,19 +87,20 @@ def _mf_corr_on_cache(mf, theta9, z_unit, tau0, alpha_res=None):
     α≡1 ⇒ this returns ``g + log res_corr`` BIT-IDENTICALLY (the multiply is skipped, so
     the Task-1.2 MF golden is byte-exact). ``(1.0, 0.0)`` is the explicit no-op.
     """
-    x = jnp.concatenate([jnp.asarray(theta9), jnp.atleast_1d(z_unit)])   # (10,)
-    g = mf.g(x, tau0)                                                    # (4, Kc)
+    x = jnp.concatenate([jnp.asarray(theta9), jnp.atleast_1d(z_unit)])  # (10,)
+    g = mf.g(x, tau0)  # (4, Kc)
     z_phys = z_unit * (Z_LIMITS[1] - Z_LIMITS[0]) + Z_LIMITS[0]
-    log_rc = jnp.log(mf.res_corr(z_phys))[None, :]                       # (1, Kc) bcast
+    log_rc = jnp.log(mf.res_corr(z_phys))[None, :]  # (1, Kc) bcast
     if alpha_res is None:
-        return g + log_rc                                               # (4, Kc) byte-exact no-op
+        return g + log_rc  # (4, Kc) byte-exact no-op
     alpha0, s = alpha_res
-    alpha_z = alpha0 * ((1.0 + z_phys) / (1.0 + Z_PIVOT)) ** s          # scalar (per z)
-    return g + alpha_z * log_rc                                         # (4, Kc) additive
+    alpha_z = alpha0 * ((1.0 + z_phys) / (1.0 + Z_PIVOT)) ** s  # scalar (per z)
+    return g + alpha_z * log_rc  # (4, Kc) additive
 
 
-def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_core,
-                      alpha_res=None):
+def _predict_P_obs_mf(
+    mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_core, alpha_res=None
+):
     """P_obs (Kc,) through the MF forward — mirror of the gate's ``predict_P_obs_mf``.
 
     ``alpha_res`` (Task 1.3): threaded FORWARD-ONLY into ``_mf_corr_on_cache`` to scale the
@@ -96,12 +114,13 @@ def _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_hcd, pf_stats, dla_
     backbone object the MF was built from), we use the passed ``model`` as the LF P_filt
     source; the caller passes the SAME frozen backbone object as both ``model`` and
     ``mf.lf_model``. Differentiable in (θ9, τ₀, α)."""
-    P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)       # (4,Kc) LF
-    corr = jnp.exp(_mf_corr_on_cache(mf, theta9, z_unit, tau0,
-                                     alpha_res=alpha_res))               # (4,Kc) MF factor
-    P_filt_mf = P_filt * corr                                            # corrected per class
+    P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)  # (4,Kc) LF
+    corr = jnp.exp(
+        _mf_corr_on_cache(mf, theta9, z_unit, tau0, alpha_res=alpha_res)
+    )  # (4,Kc) MF factor
+    P_filt_mf = P_filt * corr  # corrected per class
     P_clean = P_filt_mf[0]
-    excess = _excess_from_P_filt(P_filt_mf, dla_core)                    # (3,Kc)
+    excess = _excess_from_P_filt(P_filt_mf, dla_core)  # (3,Kc)
     return P_clean + jnp.einsum("c,ck->k", jnp.asarray(alpha_hcd), excess)
 
 
@@ -139,6 +158,7 @@ class MFFloor(NamedTuple):
       floor_min    : float         the FLOOR_MIN lower bound on σ_floor.
       edge_slope_mult : float      the 2× on the (noisy 6-sim) edge slope (spec §4.1).
     """
+
     z_grid: np.ndarray
     sigma_floor: np.ndarray
     slope: np.ndarray
@@ -153,8 +173,12 @@ class MFFloor(NamedTuple):
 MF_FLOOR_K_BAND_SPLIT = 0.07
 
 
-def load_mf_floor(npz_path=f"{_REPO}/figures/analysis/04_emulator/mf_cemu_floor.npz",
-                  *, k_band_split=MF_FLOOR_K_BAND_SPLIT, edge_slope_mult=2.0):
+def load_mf_floor(
+    npz_path=f"{_REPO}/figures/analysis/04_emulator/mf_cemu_floor.npz",
+    *,
+    k_band_split=MF_FLOOR_K_BAND_SPLIT,
+    edge_slope_mult=2.0,
+):
     """Load the certified MF C_emu floor table → an ``MFFloor`` (spec §2/§4).
 
     Reads the z-resolved per-band ``sigma_floor`` (in-cluster generalization) + ``slope``
@@ -164,12 +188,13 @@ def load_mf_floor(npz_path=f"{_REPO}/figures/analysis/04_emulator/mf_cemu_floor.
     d = np.load(npz_path, allow_pickle=True)
     return MFFloor(
         z_grid=np.asarray(d["z_grid"], float),
-        sigma_floor=np.asarray(d["sigma_floor"], float),       # (Nz,2)
-        slope=np.asarray(d["slope"], float),                   # (Nz,2)
+        sigma_floor=np.asarray(d["sigma_floor"], float),  # (Nz,2)
+        slope=np.asarray(d["slope"], float),  # (Nz,2)
         k_band_split=float(k_band_split),
-        ns_box=np.asarray(d["ns_box"], float),                 # (2,)
+        ns_box=np.asarray(d["ns_box"], float),  # (2,)
         floor_min=float(d["FLOOR_MIN"]),
-        edge_slope_mult=float(edge_slope_mult))
+        edge_slope_mult=float(edge_slope_mult),
+    )
 
 
 def _mf_floor_sigma_at_z(floor: MFFloor, z):
@@ -199,18 +224,19 @@ def _mf_floor_var_on_k(floor: MFFloor, z, k_sub, P_obs_sub, ns):
     MAP (spec §4.1). P_obs_sub IS differentiable (the floor is fractional on the model
     P_obs), so the term grows/shrinks with the predicted power — exactly the spec's
     ``(σ·P_obs)²``. Returns a (len(k_sub),) variance, in ABSOLUTE P² units."""
-    sig_z, slp_z = _mf_floor_sigma_at_z(floor, z)              # (2,), (2,) host
+    sig_z, slp_z = _mf_floor_sigma_at_z(floor, z)  # (2,), (2,) host
     # d_ns: 0 inside [ns_lo, ns_hi]; the distance outside otherwise (stop-grad'd by caller).
     ns_lo, ns_hi = float(floor.ns_box[0]), float(floor.ns_box[1])
     d_ns = jnp.maximum(jnp.maximum(ns - ns_hi, ns_lo - ns), 0.0)
     # per-band → per-row via the k mask (LFres band 0, extrap band 1).
     k_sub = jnp.asarray(k_sub)
-    is_extrap = (k_sub >= floor.k_band_split)
-    sig_floor_row = jnp.where(is_extrap, sig_z[1], sig_z[0])   # (Nrow,)
+    is_extrap = k_sub >= floor.k_band_split
+    sig_floor_row = jnp.where(is_extrap, sig_z[1], sig_z[0])  # (Nrow,)
     slope_row = jnp.where(is_extrap, slp_z[1], slp_z[0])
     # σ_edge(z, band; ns) = max( mult·|slope|·d_ns , 0.5·σ_floor·(d_ns/0.03) )   (spec §4.1).
-    sig_edge_row = jnp.maximum(floor.edge_slope_mult * jnp.abs(slope_row) * d_ns,
-                               0.5 * sig_floor_row * (d_ns / 0.03))
+    sig_edge_row = jnp.maximum(
+        floor.edge_slope_mult * jnp.abs(slope_row) * d_ns, 0.5 * sig_floor_row * (d_ns / 0.03)
+    )
     P = jnp.asarray(P_obs_sub)
     # ADD in quadrature on the variance: (σ_floor·P)² + (σ_edge·P)².
     return (sig_floor_row * P) ** 2 + (sig_edge_row * P) ** 2
@@ -238,11 +264,12 @@ def _mf_floor_var_on_k(floor: MFFloor, z, k_sub, P_obs_sub, ns):
 # ============================================================================ #
 class MFShape(NamedTuple):
     """The shape-aware MF C_emu floor table (from ``mf_cemu_shape.npz``).
-      z       : (Nz_c,)            cache z grid (≤ z_max, the legs only reach z≤4.6).
-      k       : (Nk_c,)            cache angular-k grid (the LF Nyquist band 0.01–0.069 s/km).
-      f_shape : (Nz_c·Nk_c, ...)   fractional LOSO-eps second-moment (z-major flat, symmetric PSD).
-      n_sim   : int                the number of held-out HR sims it was built from.
+    z       : (Nz_c,)            cache z grid (≤ z_max, the legs only reach z≤4.6).
+    k       : (Nk_c,)            cache angular-k grid (the LF Nyquist band 0.01–0.069 s/km).
+    f_shape : (Nz_c·Nk_c, ...)   fractional LOSO-eps second-moment (z-major flat, symmetric PSD).
+    n_sim   : int                the number of held-out HR sims it was built from.
     """
+
     z: np.ndarray
     k: np.ndarray
     f_shape: np.ndarray
@@ -252,21 +279,27 @@ class MFShape(NamedTuple):
 def load_mf_shape(npz_path=f"{_REPO}/hcd_analysis/_emulator_data/mf_cemu_shape.npz"):
     """Load the shape-aware MF floor table → an ``MFShape`` (scripts/build_mf_shape_floor.py)."""
     d = np.load(npz_path, allow_pickle=True)
-    return MFShape(z=np.asarray(d["z"], float), k=np.asarray(d["k"], float),
-                   f_shape=np.asarray(d["f_shape"], float), n_sim=int(d["n_sim"]))
+    return MFShape(
+        z=np.asarray(d["z"], float),
+        k=np.asarray(d["k"], float),
+        f_shape=np.asarray(d["f_shape"], float),
+        n_sim=int(d["n_sim"]),
+    )
 
 
 def _logk_interp_weights(k_target, k_grid):
     """Linear-in-log10(k) interpolation weights of one target k onto ``k_grid`` (Nk,).
     Two nonzero entries (the bracketing cache-k bins); ZERO outside [k_grid.min, k_grid.max]
     (the shape floor is NOT extrapolated beyond the LF Nyquist band it was measured on)."""
-    lk = np.log10(np.asarray(k_grid, float)); x = np.log10(float(k_target))
+    lk = np.log10(np.asarray(k_grid, float))
+    x = np.log10(float(k_target))
     w = np.zeros(len(lk))
     if x < lk[0] - 1e-12 or x > lk[-1] + 1e-12:
         return w
     j = int(min(max(np.searchsorted(lk, x) - 1, 0), len(lk) - 2))
     t = (x - lk[j]) / (lk[j + 1] - lk[j])
-    w[j] = 1.0 - t; w[j + 1] = t
+    w[j] = 1.0 - t
+    w[j + 1] = t
     return w
 
 
@@ -284,15 +317,15 @@ def mf_shape_cov_for_leg(shape, leg, z_tol=0.1):
     KS's z=4.6 bin (the one row beyond the table) correctly vanishes."""
     zc, kc, F = shape.z, shape.k, shape.f_shape
     Nz_c, Nk_c = len(zc), len(kc)
-    z_row = np.asarray(leg.z)[np.asarray(leg.z_idx)]   # (N,) z of each flat row
-    k_row = np.asarray(leg.k)                          # (N,)
+    z_row = np.asarray(leg.z)[np.asarray(leg.z_idx)]  # (N,) z of each flat row
+    k_row = np.asarray(leg.k)  # (N,)
     N = len(k_row)
     S = np.zeros((N, Nz_c * Nk_c))
     for i in range(N):
-        zi = int(np.argmin(np.abs(zc - z_row[i])))     # nearest cache z
+        zi = int(np.argmin(np.abs(zc - z_row[i])))  # nearest cache z
         if abs(float(zc[zi]) - float(z_row[i])) > z_tol:
-            continue                                   # leg z outside the table's z support → zero row
-        S[i, zi * Nk_c:(zi + 1) * Nk_c] = _logk_interp_weights(k_row[i], kc)
+            continue  # leg z outside the table's z support → zero row
+        S[i, zi * Nk_c : (zi + 1) * Nk_c] = _logk_interp_weights(k_row[i], kc)
     return S @ F @ S.T
 
 
@@ -314,6 +347,7 @@ class MFEmuCoh(NamedTuple):
     ``offdiag_only=False`` (the class DEFAULT, NOT the deployed path) is the term added in full: the
     coherent diagonal then lands ON TOP of ``emu_var`` — a small CONSERVATIVE over-count (over-widens
     the clean diagonal, never biases)."""
+
     z: np.ndarray
     k: np.ndarray
     f_shape: np.ndarray
@@ -323,16 +357,32 @@ class MFEmuCoh(NamedTuple):
 def load_mf_emucoh(npz_path=f"{_REPO}/hcd_analysis/_emulator_data/mf_cemu_emucoh.npz"):
     """Load the 60-sim LF-emulator-coherence table → an ``MFEmuCoh`` (scripts/build_mf_emucoh_floor.py)."""
     d = np.load(npz_path, allow_pickle=True)
-    return MFEmuCoh(z=np.asarray(d["z"], float), k=np.asarray(d["k"], float),
-                    f_shape=np.asarray(d["f_shape"], float), n_sim=int(d["n_sim"]))
+    return MFEmuCoh(
+        z=np.asarray(d["z"], float),
+        k=np.asarray(d["k"], float),
+        f_shape=np.asarray(d["f_shape"], float),
+        n_sim=int(d["n_sim"]),
+    )
 
 
 # ============================================================================ #
 #  Model → leg binding
 # ============================================================================ #
-def _emu_var_on_cache(model, theta9, z_unit, z, tau0, alpha_hcd, *,
-                      pf_stats, sigma_zb, alpha_centres, dla_core, cemu_inflate,
-                      rho_zb=None):
+def _emu_var_on_cache(
+    model,
+    theta9,
+    z_unit,
+    z,
+    tau0,
+    alpha_hcd,
+    *,
+    pf_stats,
+    sigma_zb,
+    alpha_centres,
+    dla_core,
+    cemu_inflate,
+    rho_zb=None,
+):
     """Per-z emulator-error variance on the CACHE k-grid (K_cache,), assembled EXACTLY as
     ``inference.predict_P_obs_and_cov_single_z`` does. ONE of two forms (C stays DIAGONAL
     IN k either way — only the per-k class structure changes):
@@ -349,22 +399,56 @@ def _emu_var_on_cache(model, theta9, z_unit, z, tau0, alpha_hcd, *,
     NaN-guard via ``rho_at_tau0``). NaN-safe (out-of-range cache cells σ/ρ→0).
     Differentiable in (θ9, τ₀, α)."""
     from hcd_analysis.emulator.predict import predict_P_filt
-    P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)        # (4,Kc)
-    return emu_var_modes(P_filt, z, tau0, alpha_hcd, dla_core=dla_core, sigma_zb=sigma_zb,
-                         alpha_centres=alpha_centres, cemu_inflate=cemu_inflate, rho_zb=rho_zb)
+
+    P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf_stats)  # (4,Kc)
+    return emu_var_modes(
+        P_filt,
+        z,
+        tau0,
+        alpha_hcd,
+        dla_core=dla_core,
+        sigma_zb=sigma_zb,
+        alpha_centres=alpha_centres,
+        cemu_inflate=cemu_inflate,
+        rho_zb=rho_zb,
+    )
 
 
-def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_core,
-                         cache_k, leg, sigma_zb=None, alpha_centres=None,
-                         cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
-                         k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0, b_res_vec=None,
-                         rho_zb=None, mf=None, mf_floor=None,
-                         mf_shape_cov=None, mf_shape_infl=1.0,
-                         mf_emucoh_cov=None, mf_emucoh_infl=1.0,
-                         mf_emucoh_offdiag_only=False, alpha_res=None,
-                         f_SiIII_nodes=None, f_SiII_nodes=None, metal_node_z=(2.2, 4.2),
-                         k_SiIII_nodes=None, k_SiII_nodes=None,
-                         require_zresolved=False):
+def predict_P_obs_on_leg(
+    model,
+    theta9,
+    tau0_vec,
+    alpha_hcd,
+    *,
+    pf_stats,
+    dla_core,
+    cache_k,
+    leg,
+    sigma_zb=None,
+    alpha_centres=None,
+    cemu_inflate=1.0,
+    a_SiIII=0.0,
+    a_SiII=0.0,
+    k_SiIII=K_SiIII_DEFAULT,
+    k_SiII=K_SiII_DEFAULT,
+    b_res=0.0,
+    b_res_vec=None,
+    rho_zb=None,
+    mf=None,
+    mf_floor=None,
+    mf_shape_cov=None,
+    mf_shape_infl=1.0,
+    mf_emucoh_cov=None,
+    mf_emucoh_infl=1.0,
+    mf_emucoh_offdiag_only=False,
+    alpha_res=None,
+    f_SiIII_nodes=None,
+    f_SiII_nodes=None,
+    metal_node_z=(2.2, 4.2),
+    k_SiIII_nodes=None,
+    k_SiII_nodes=None,
+    require_zresolved=False,
+):
     """Bind the emulator forward model to ONE leg's grid → flat (P_model (N,), C_total (N,N)).
 
     For each z in ``leg.z``:
@@ -446,13 +530,16 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     (loglik / C_emu sizing / residual diagnostics) MUST build alpha via
     ``closure_legb_figs._truth_alpha_zresolved_on_leg`` and pass ``require_zresolved=True``; the comparison
     core ``_data_loglik_legcore`` DEFAULTS ``require_zresolved=True`` so the loglik / SBC re-scoring layer is
-    safe-by-default. The raw forward stays permissive so byte-identity uniform-alpha references pass."""
+    safe-by-default. The raw forward stays permissive so byte-identity uniform-alpha references pass.
+    """
     cache_k = jnp.asarray(cache_k)
     k_leg = jnp.asarray(leg.k)
     z_idx = np.asarray(leg.z_idx)
     R_z = jnp.asarray(leg.R_z)
     tau0_vec = jnp.asarray(tau0_vec)
-    alpha_hcd = jnp.asarray(alpha_hcd)   # (n_z,3) z-RESOLVED per-z incidence (the DEPLOYED forward), OR
+    alpha_hcd = jnp.asarray(
+        alpha_hcd
+    )  # (n_z,3) z-RESOLVED per-z incidence (the DEPLOYED forward), OR
     #                                      (3,) z-flat broadcast to all z (byte-identity references only).
     # ===================== z-FLAT-ALPHA BUG CLASS (read before writing a diagnostic) =====================
     # A (3,) z-FLAT alpha is SILENTLY broadcast to EVERY z (ndim==1 -> the same incidence at all z). On a
@@ -475,14 +562,15 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
             f"predict_P_obs_on_leg(require_zresolved=True): alpha_hcd must be z-RESOLVED (n_z,3), got "
             f"ndim={alpha_hcd.ndim} shape={tuple(alpha_hcd.shape)}. A (3,) z-flat alpha would be broadcast "
             f"to every z and produce a spurious z-ramp vs the z-resolved truth (the recurring z-flat bug; "
-            f"once a phantom n_s shift). Build alpha via _truth_alpha_zresolved_on_leg.")
+            f"once a phantom n_s shift). Build alpha via _truth_alpha_zresolved_on_leg."
+        )
     # PER-LEG DLA-forward scaling (§0c): the sampled α_DLA's DLA-excess contribution is scaled by
     # leg.dla_forward_frac (DESI 1.0 → full residual; KS 0.0 → the forward DLA term is 0, matching
     # the 0% KS closure target). We fold the per-leg fraction into the DLA component of α so BOTH
     # the forward P_obs AND the C_emu DLA-class coefficient stay consistent (KS → 0 on both).
     dff = float(getattr(leg, "dla_forward_frac", 1.0))
     if dff != 1.0:
-        dla_scale = jnp.array([1.0, 1.0, dff])             # (3,) [LLS, subDLA, DLA]
+        dla_scale = jnp.array([1.0, 1.0, dff])  # (3,) [LLS, subDLA, DLA]
         alpha_hcd = alpha_hcd * (dla_scale if alpha_hcd.ndim == 1 else dla_scale[None, :])
     N = k_leg.shape[0]
 
@@ -491,8 +579,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     floor_var_flat = jnp.zeros(N)
     # C_emu fires if EITHER the diagonal σ OR the cross-class ρ is supplied (with the
     # τ₀-interp abscissa). The cross-class path reads ρ only; the diagonal reads σ only.
-    have_emu = ((sigma_zb is not None or rho_zb is not None)
-                and alpha_centres is not None)
+    have_emu = (sigma_zb is not None or rho_zb is not None) and alpha_centres is not None
     # The MF C_emu floor fires only THROUGH the MF forward, on the small-scale leg(s).
     have_floor = (mf is not None) and (mf_floor is not None) and bool(leg.mf_floor_on)
     if have_floor:
@@ -502,7 +589,8 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
         assert float(np.max(leg.z)) <= 4.6 + 1e-6, (
             f"MF floor: leg {leg.name} z max {float(np.max(leg.z)):.3f} > 4.6 — the floor "
             f"table above z=4.6 (incl. the z=5.4 spike) is NOT trustworthy and must not be "
-            f"indexed (spec PI note)")
+            f"indexed (spec PI note)"
+        )
         # the n_s-edge term is a FIXED function of ns that carries NO gradient toward the MAP
         # (it widens the posterior near the cluster edge; it must not pull θ). stop_gradient.
         ns_phys_sg = jax.lax.stop_gradient(_ns_phys_from_theta9(theta9))
@@ -521,8 +609,9 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
         if mf is None:
             P_cache = predict_P_obs(model, theta9, z_unit, tau0, alpha_z, pf_stats, dla_core)
         else:
-            P_cache = _predict_P_obs_mf(mf, model, theta9, z_unit, tau0, alpha_z,
-                                        pf_stats, dla_core, alpha_res=alpha_res)
+            P_cache = _predict_P_obs_mf(
+                mf, model, theta9, z_unit, tau0, alpha_z, pf_stats, dla_core, alpha_res=alpha_res
+            )
         # (3) interp to the leg's k (bin centres); model is smooth → linear interp.
         P_z = jnp.interp(k_sub, cache_k, P_cache)
         # (2) forward-model nuisances (gated; default OFF → factor ≡ 1). Compute the metal factor
@@ -530,10 +619,20 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
         # C_emu variance transform (ev_z·mfac²) so the two can never drift to a stale amplitude.
         mfac = None
         if leg.metals_on:
-            mfac = metal_factor_at_z(k_sub, z, tau0, a_SiIII=a_SiIII, a_SiII=a_SiII, k_SiIII=k_SiIII,
-                                     k_SiII=k_SiII, f_SiIII_nodes=f_SiIII_nodes, f_SiII_nodes=f_SiII_nodes,
-                                     metal_node_z=metal_node_z, k_SiIII_nodes=k_SiIII_nodes,
-                                     k_SiII_nodes=k_SiII_nodes)
+            mfac = metal_factor_at_z(
+                k_sub,
+                z,
+                tau0,
+                a_SiIII=a_SiIII,
+                a_SiII=a_SiII,
+                k_SiIII=k_SiIII,
+                k_SiII=k_SiII,
+                f_SiIII_nodes=f_SiIII_nodes,
+                f_SiII_nodes=f_SiII_nodes,
+                metal_node_z=metal_node_z,
+                k_SiIII_nodes=k_SiIII_nodes,
+                k_SiII_nodes=k_SiII_nodes,
+            )
             P_z = P_z * mfac
         if leg.resolution_on:
             # option-b: a per-z sampled b_res(z) (b_res_vec) overrides the scalar b_res (default None →
@@ -547,14 +646,24 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
             rho_zb_z = rho_zb[iz] if rho_zb is not None else None
             sigma_zb_z = sigma_zb[iz] if sigma_zb is not None else None
             ev_cache = _emu_var_on_cache(
-                model, theta9, z_unit, z, tau0, alpha_z, pf_stats=pf_stats,
-                sigma_zb=sigma_zb_z, alpha_centres=alpha_centres, dla_core=dla_core,
-                cemu_inflate=cemu_inflate, rho_zb=rho_zb_z)
+                model,
+                theta9,
+                z_unit,
+                z,
+                tau0,
+                alpha_z,
+                pf_stats=pf_stats,
+                sigma_zb=sigma_zb_z,
+                alpha_centres=alpha_centres,
+                dla_core=dla_core,
+                cemu_inflate=cemu_inflate,
+                rho_zb=rho_zb_z,
+            )
             ev_z = jnp.interp(k_sub, cache_k, ev_cache)
             # emu var transforms by the SAME multiplicative nuisance factors² (variance units) —
             # REUSE the per-iz mfac computed above for P_z (Model C per-z OR the legacy scalar).
             if leg.metals_on:
-                ev_z = ev_z * mfac ** 2
+                ev_z = ev_z * mfac**2
             if leg.resolution_on:
                 b_res_iz = b_res if b_res_vec is None else b_res_vec[iz]
                 ev_z = ev_z * _resolution_factor(k_sub, R_z[iz], b_res=b_res_iz) ** 2
@@ -581,7 +690,9 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
     if mf_shape_cov is not None:
         shape_terms.append((jnp.asarray(mf_shape_cov), mf_shape_infl, False))
     if mf_emucoh_cov is not None:
-        shape_terms.append((jnp.asarray(mf_emucoh_cov), mf_emucoh_infl, bool(mf_emucoh_offdiag_only)))
+        shape_terms.append(
+            (jnp.asarray(mf_emucoh_cov), mf_emucoh_infl, bool(mf_emucoh_offdiag_only))
+        )
 
     if not shape_terms:
         # LF / diagonal-floor path — byte-identical to before (back-compat).
@@ -601,7 +712,7 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
         # — impossible for a fixed PSD add, hence diagnostic of the θ-dependence). A fixed fiducial
         # makes each term a CONSTANT matrix ⇒ adding it can only WIDEN the marginal (PSD
         # monotonicity) and the MAP de-biases per the linear GLS analysis.
-        P_fid = jnp.nan_to_num(jnp.asarray(leg.P_data))          # θ-independent fiducial amplitude
+        P_fid = jnp.nan_to_num(jnp.asarray(leg.P_data))  # θ-independent fiducial amplitude
         PP = P_fid[:, None] * P_fid[None, :]
         # Build Σ of terms. For an offdiag_only term, absorb its diagonal into emu_var via max (so it
         # is neither double-counted nor under-counted) and add only its off-diagonal. PD-safe: with
@@ -611,11 +722,11 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
         C_shape = jnp.zeros_like(jnp.asarray(leg.C_data))
         emu_var_eff = emu_var_flat
         for cov, infl, offdiag_only in shape_terms:
-            term = (infl ** 2) * cov * PP                        # PSD
+            term = (infl**2) * cov * PP  # PSD
             if offdiag_only:
                 td = jnp.diagonal(term)
-                emu_var_eff = jnp.maximum(emu_var_eff, td)        # absorb diagonal (never under-count)
-                term = term - jnp.diag(td)                        # add only off-diagonal
+                emu_var_eff = jnp.maximum(emu_var_eff, td)  # absorb diagonal (never under-count)
+                term = term - jnp.diag(td)  # add only off-diagonal
             C_shape = C_shape + term
         topup = jnp.maximum(0.0, floor_var_flat - jnp.diag(C_shape))
         C_total = jnp.asarray(leg.C_data) + jnp.diag(emu_var_eff + topup) + C_shape
@@ -625,14 +736,36 @@ def predict_P_obs_on_leg(model, theta9, tau0_vec, alpha_hcd, *, pf_stats, dla_co
 # ============================================================================ #
 #  Multi-leg likelihood
 # ============================================================================ #
-def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_core,
-                cache_k, z_global=None, sigma_zb_per_leg=None, alpha_centres=None,
-                cemu_inflate=1.0, a_SiIII=0.0, a_SiII=0.0,
-                k_SiIII=K_SiIII_DEFAULT, k_SiII=K_SiII_DEFAULT, b_res=0.0,
-                jitter=1e-10, return_parts=False, rho_zb_per_leg=None, mf=None,
-                mf_floor=None, mf_shape_per_leg=None, mf_shape_infl=1.0,
-                mf_emucoh_per_leg=None, mf_emucoh_infl=1.0,
-                mf_emucoh_offdiag_only=False):
+def data_loglik(
+    model,
+    theta9,
+    tau0_global,
+    alpha_hcd,
+    legs,
+    *,
+    pf_stats,
+    dla_core,
+    cache_k,
+    z_global=None,
+    sigma_zb_per_leg=None,
+    alpha_centres=None,
+    cemu_inflate=1.0,
+    a_SiIII=0.0,
+    a_SiII=0.0,
+    k_SiIII=K_SiIII_DEFAULT,
+    k_SiII=K_SiII_DEFAULT,
+    b_res=0.0,
+    jitter=1e-10,
+    return_parts=False,
+    rho_zb_per_leg=None,
+    mf=None,
+    mf_floor=None,
+    mf_shape_per_leg=None,
+    mf_shape_infl=1.0,
+    mf_emucoh_per_leg=None,
+    mf_emucoh_infl=1.0,
+    mf_emucoh_offdiag_only=False,
+):
     """PRE-2026-10 INTERFACE (single cache_k grid for every leg and z; replaced at gate E).
 
     Multi-leg Gaussian log-likelihood against the REAL data.
@@ -676,7 +809,7 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
     for leg in legs:
         # per-leg τ₀ vector: nearest-z pull from the global ladder (each leg z ⊂ global).
         if z_global is None:
-            tau0_vec = tau0_global              # already per-leg-z
+            tau0_vec = tau0_global  # already per-leg-z
         else:
             sel = np.array([int(np.argmin(np.abs(z_global - zz))) for zz in leg.z])
             tau0_vec = tau0_global[jnp.asarray(sel)]
@@ -691,13 +824,31 @@ def data_loglik(model, theta9, tau0_global, alpha_hcd, legs, *, pf_stats, dla_co
         msc = mf_shape_per_leg.get(leg.name) if mf_shape_per_leg is not None else None
         mec = mf_emucoh_per_leg.get(leg.name) if mf_emucoh_per_leg is not None else None
         P_model, C_total = predict_P_obs_on_leg(
-            model, theta9, tau0_vec, alpha_hcd, pf_stats=pf_stats, dla_core=dla_core,
-            cache_k=cache_k, leg=leg, sigma_zb=szb, alpha_centres=alpha_centres,
-            cemu_inflate=cemu_inflate, a_SiIII=a_SiIII, a_SiII=a_SiII,
-            k_SiIII=k_SiIII, k_SiII=k_SiII, b_res=b_res, rho_zb=rzb, mf=mf,
-            mf_floor=mf_floor, mf_shape_cov=msc, mf_shape_infl=mf_shape_infl,
-            mf_emucoh_cov=mec, mf_emucoh_infl=mf_emucoh_infl,
-            mf_emucoh_offdiag_only=mf_emucoh_offdiag_only)
+            model,
+            theta9,
+            tau0_vec,
+            alpha_hcd,
+            pf_stats=pf_stats,
+            dla_core=dla_core,
+            cache_k=cache_k,
+            leg=leg,
+            sigma_zb=szb,
+            alpha_centres=alpha_centres,
+            cemu_inflate=cemu_inflate,
+            a_SiIII=a_SiIII,
+            a_SiII=a_SiII,
+            k_SiIII=k_SiIII,
+            k_SiII=k_SiII,
+            b_res=b_res,
+            rho_zb=rzb,
+            mf=mf,
+            mf_floor=mf_floor,
+            mf_shape_cov=msc,
+            mf_shape_infl=mf_shape_infl,
+            mf_emucoh_cov=mec,
+            mf_emucoh_infl=mf_emucoh_infl,
+            mf_emucoh_offdiag_only=mf_emucoh_offdiag_only,
+        )
         r = jnp.asarray(leg.P_data) - P_model
         ll = gaussian_loglik(r, C_total, jitter=jitter)
         total = total + ll

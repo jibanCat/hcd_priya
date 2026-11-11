@@ -53,6 +53,7 @@ Needs fake_spectra (run it in the environment that builds the emulator cache). E
       --input z2.2=/path/SPECTRA_021/lya_forest_spectra_grid_480.hdf5 --input z3.0=... \\
       --thresholds 30 50 100 200 300 --alpha ALPHA --anchor-cache CACHE.h5 --self-check 40000
 """
+
 from __future__ import annotations
 
 import argparse
@@ -103,27 +104,38 @@ def collapse(p15, counts15):
 def templates(pf4, pu4):
     """Class templates as the forward model uses them: filtered LLS and subDLA, unfiltered DLA, over filtered clean."""
     clean = pf4[0]
-    with np.errstate(divide="ignore", invalid="ignore"):              # an empty clean set: undefined, refused later
-        return {"LLS": pf4[1] / clean - 1.0, "subDLA": pf4[2] / clean - 1.0, "DLA": pu4[3] / clean - 1.0}
+    with np.errstate(
+        divide="ignore", invalid="ignore"
+    ):  # an empty clean set: undefined, refused later
+        return {
+            "LLS": pf4[1] / clean - 1.0,
+            "subDLA": pf4[2] / clean - 1.0,
+            "DLA": pu4[3] / clean - 1.0,
+        }
 
 
 def compare(t, t_ref):
     """Amplitude ratio a (least squares of t on t_ref) and shape residual s = rms(t - a t_ref) / rms(t_ref)."""
     t, t_ref = np.asarray(t, dtype=np.float64), np.asarray(t_ref, dtype=np.float64)
-    with np.errstate(invalid="ignore", over="ignore"):                # non-finite templates give NaN, refused later
+    with np.errstate(
+        invalid="ignore", over="ignore"
+    ):  # non-finite templates give NaN, refused later
         ref2 = float(np.sum(t_ref * t_ref))
         if not (ref2 > 0 and np.isfinite(ref2)):
             return float("nan"), float("nan")
         a = float(np.sum(t * t_ref)) / ref2
-        s = float(np.sqrt(np.mean((t - a * t_ref) ** 2)) / np.sqrt(np.mean(t_ref ** 2)))
+        s = float(np.sqrt(np.mean((t - a * t_ref) ** 2)) / np.sqrt(np.mean(t_ref**2)))
     return a, s
 
 
 def class_counts(log_nhi):
     """Absorber counts per HCD class from catalogue log N_HI values (edges 17.2, 19.0, 20.3)."""
     x = np.asarray(log_nhi, dtype=np.float64)
-    return {"LLS": int(((x >= 17.2) & (x < 19.0)).sum()), "subDLA": int(((x >= 19.0) & (x < 20.3)).sum()),
-            "DLA": int((x >= 20.3).sum())}
+    return {
+        "LLS": int(((x >= 17.2) & (x < 19.0)).sum()),
+        "subDLA": int(((x >= 19.0) & (x < 20.3)).sum()),
+        "DLA": int((x >= 20.3).sum()),
+    }
 
 
 def lowk_change(t, t_ref, kf, kmax, kmin=0.0):
@@ -150,7 +162,7 @@ def summarize(results, reference, n_k, lowk_kmax=0.01, lowk_kmin=1e-3):
     stored). ``results`` maps (tag, threshold) to dicts with kf, counts15, pf15, pu15 and abs_counts
     (class -> count)."""
     out = {}
-    for (tag, thr) in sorted(results):
+    for tag, thr in sorted(results):
         ref = results.get((tag, reference))
         if ref is None:
             raise KeyError(f"no reference threshold {reference} for {tag}")
@@ -160,20 +172,30 @@ def summarize(results, reference, n_k, lowk_kmax=0.01, lowk_kmin=1e-3):
         pf_r, pu_r = collapse(ref["pf15"], ref["counts15"]), collapse(ref["pu15"], ref["counts15"])
         t, t_r = templates(pf[:, sl], pu[:, sl]), templates(pf_r[:, sl], pu_r[:, sl])
         kf = np.asarray(cur["kf"])[sl]
-        row = {"tag": tag, "threshold": float(thr), "n_k": int(kf.size),
-               "clean_max_frac_change": _clean_change(pf[0, sl], pf_r[0, sl]),
-               "sightlines": {c: int(n) for c, n in zip(CLASSES, (cur["counts15"][lo:hi].sum()
-                                                                  for lo, hi in COARSE_RANGES))}}
+        row = {
+            "tag": tag,
+            "threshold": float(thr),
+            "n_k": int(kf.size),
+            "clean_max_frac_change": _clean_change(pf[0, sl], pf_r[0, sl]),
+            "sightlines": {
+                c: int(n)
+                for c, n in zip(CLASSES, (cur["counts15"][lo:hi].sum() for lo, hi in COARSE_RANGES))
+            },
+        }
         for i, c in enumerate(CLASSES[1:], 1):
             lo, hi = COARSE_RANGES[i]
             if cur["counts15"][lo:hi].sum() == 0 or ref["counts15"][lo:hi].sum() == 0:
-                a = s = low = float("nan")                         # no sightline of the class: nothing to compare
+                a = s = low = float("nan")  # no sightline of the class: nothing to compare
             else:
                 a, s = compare(t[c], t_r[c])
                 low = lowk_change(t[c], t_r[c], kf, lowk_kmax, lowk_kmin)
             n, n_r = cur["abs_counts"][c], ref["abs_counts"][c]
-            row[c] = {"count_ratio": (n / n_r) if n_r else float("nan"), "amplitude_ratio": a, "shape_residual": s,
-                      "lowk_change": low}
+            row[c] = {
+                "count_ratio": (n / n_r) if n_r else float("nan"),
+                "amplitude_ratio": a,
+                "shape_residual": s,
+                "lowk_change": low,
+            }
         out[f"{tag}|T{thr:g}"] = row
     return out
 
@@ -195,15 +217,29 @@ def verdict(summary, headline, reference):
     rows = [v for v in summary.values() if v["threshold"] in headline]
     if not rows:
         raise ValueError(f"no summary rows for the headline thresholds {sorted(headline)}")
-    values = [v["clean_max_frac_change"] for v in rows] + [v[c][k] for v in rows for c in TEMPLATE_CLASSES
-                                                           for k in ("amplitude_ratio", "shape_residual")]
+    values = [v["clean_max_frac_change"] for v in rows] + [
+        v[c][k]
+        for v in rows
+        for c in TEMPLATE_CLASSES
+        for k in ("amplitude_ratio", "shape_residual")
+    ]
     if not all(np.isfinite(x) for x in values):
-        bad = sorted(f"{v['tag']}|T{v['threshold']:g}" for v in rows
-                     if not all(np.isfinite(x) for x in [v["clean_max_frac_change"]] + [
-                         v[c][k] for c in TEMPLATE_CLASSES for k in ("amplitude_ratio", "shape_residual")]))
-        return {"headline_thresholds": sorted(headline), "reference": reference,
-                "reading": f"invalid: undefined comparison (a class or the clean set without sightlines) in {bad}",
-                "valid": False, "per_class": {c: {"reading": "invalid"} for c in TEMPLATE_CLASSES}}
+        bad = sorted(
+            f"{v['tag']}|T{v['threshold']:g}"
+            for v in rows
+            if not all(
+                np.isfinite(x)
+                for x in [v["clean_max_frac_change"]]
+                + [v[c][k] for c in TEMPLATE_CLASSES for k in ("amplitude_ratio", "shape_residual")]
+            )
+        )
+        return {
+            "headline_thresholds": sorted(headline),
+            "reference": reference,
+            "reading": f"invalid: undefined comparison (a class or the clean set without sightlines) in {bad}",
+            "valid": False,
+            "per_class": {c: {"reading": "invalid"} for c in TEMPLATE_CLASSES},
+        }
     worst_a = max(abs(v[c]["amplitude_ratio"] - 1.0) for v in rows for c in TEMPLATE_CLASSES)
     worst_s = max(v[c]["shape_residual"] for v in rows for c in TEMPLATE_CLASSES)
     worst_clean = max(v["clean_max_frac_change"] for v in rows)
@@ -211,24 +247,40 @@ def verdict(summary, headline, reference):
     for c in TEMPLATE_CLASSES:
         wa = max(abs(v[c]["amplitude_ratio"] - 1.0) for v in rows)
         ws = max(v[c]["shape_residual"] for v in rows)
-        per_class[c] = {"max_abs_a_minus_1": wa, "max_s": ws,
-                        "max_lowk_change": _nan_max(v[c]["lowk_change"] for v in rows), "reading": _reading(wa, ws)}
-    return {"headline_thresholds": sorted(headline), "reference": reference,
-            "reading": _reading(worst_a, worst_s, worst_clean),
-            "max_abs_a_minus_1": worst_a, "max_s": worst_s, "max_clean_frac_change": worst_clean,
-            "per_class": per_class}
+        per_class[c] = {
+            "max_abs_a_minus_1": wa,
+            "max_s": ws,
+            "max_lowk_change": _nan_max(v[c]["lowk_change"] for v in rows),
+            "reading": _reading(wa, ws),
+        }
+    return {
+        "headline_thresholds": sorted(headline),
+        "reference": reference,
+        "reading": _reading(worst_a, worst_s, worst_clean),
+        "max_abs_a_minus_1": worst_a,
+        "max_s": worst_s,
+        "max_clean_frac_change": worst_clean,
+        "per_class": per_class,
+    }
 
 
 # ------------------------------------------------------------------------------------------------ the run
 def _file_identity(path):
     """Identity of a raw input without hashing gigabytes: size, mtime and the header fields the path depends on."""
     import h5py
+
     st = os.stat(path)
     with h5py.File(path, "r") as f:
         h = f["Header"].attrs
         shape = f["tau/H/1/1215"].shape
-        return {"path": str(path), "bytes": st.st_size, "mtime_ns": st.st_mtime_ns,
-                "redshift": float(h["redshift"]), "nbins": int(h["nbins"]), "n_skewers": int(shape[0])}
+        return {
+            "path": str(path),
+            "bytes": st.st_size,
+            "mtime_ns": st.st_mtime_ns,
+            "redshift": float(h["redshift"]),
+            "nbins": int(h["nbins"]),
+            "n_skewers": int(shape[0]),
+        }
 
 
 def _link_once(path, write):
@@ -252,6 +304,7 @@ def _save_once(path, **arrays):
 
 def _read_rows(path, s, e):
     import h5py
+
     with h5py.File(path, "r") as f:
         return f["tau/H/1/1215"][s:e].astype(np.float64)
 
@@ -271,9 +324,12 @@ def _filter_rows(tau, tau_eff):
     function itself would take the block's)."""
     from types import SimpleNamespace
     from hcd_analysis.priya_p1d import _filter_single_tau_complex
+
     stub = SimpleNamespace(nbins=tau.shape[1])
     for i in np.where(np.max(tau, axis=1) > 1.0e6)[0]:
-        tau[i], _ = _filter_single_tau_complex(stub, tau[i], tau_eff, tau_thresh=1.0e6, thresh2=0.25)
+        tau[i], _ = _filter_single_tau_complex(
+            stub, tau[i], tau_eff, tau_thresh=1.0e6, thresh2=0.25
+        )
     return tau
 
 
@@ -298,8 +354,21 @@ def _solve_scale(path, n_total, chunk, tau_eff, target_f):
     raise RuntimeError("mean-flux scale did not converge")
 
 
-def chunked_tier_c(path, n_total, thresholds, absorber, dv, vmax, alpha, z_grid, tau_eff, scale, target_f, chunk,
-                   batch_size=4096):
+def chunked_tier_c(
+    path,
+    n_total,
+    thresholds,
+    absorber,
+    dv,
+    vmax,
+    alpha,
+    z_grid,
+    tau_eff,
+    scale,
+    target_f,
+    chunk,
+    batch_size=4096,
+):
     """For every threshold: the catalogue's absorbers (production process_skewer_batch with global skewer indices; it
     treats every skewer on its own, so where the batches start does not matter) and the filtered and unfiltered
     Tier-C P1D (production compute_tier_c_p1d at the given scale and target flux), over the first n_total skewers in
@@ -309,6 +378,7 @@ def chunked_tier_c(path, n_total, thresholds, absorber, dv, vmax, alpha, z_grid,
     from types import SimpleNamespace
     from hcd_analysis.catalog import process_skewer_batch
     from hcd_analysis.priya_p1d import compute_tier_c_p1d
+
     acc = {t: {"absorbers": [], "sf": None, "su": None, "n": None, "kf": None} for t in thresholds}
     for s in range(0, n_total, chunk):
         e = min(n_total, s + chunk)
@@ -317,38 +387,82 @@ def chunked_tier_c(path, n_total, thresholds, absorber, dv, vmax, alpha, z_grid,
         for thr in thresholds:
             new = []
             for b0 in range(0, e - s, batch_size):
-                new.extend(process_skewer_batch(
-                    tau[b0:b0 + batch_size], s + b0, dv, float(thr), absorber["merge_dv_kms"], absorber["min_pixels"],
-                    absorber["b_init_kms"], tuple(absorber["b_bounds"]), absorber["tau_fit_cap"],
-                    absorber["voigt_max_iter"], absorber["fast_mode"], min_log_nhi=absorber["min_log_nhi"]))
+                new.extend(
+                    process_skewer_batch(
+                        tau[b0 : b0 + batch_size],
+                        s + b0,
+                        dv,
+                        float(thr),
+                        absorber["merge_dv_kms"],
+                        absorber["min_pixels"],
+                        absorber["b_init_kms"],
+                        tuple(absorber["b_bounds"]),
+                        absorber["tau_fit_cap"],
+                        absorber["voigt_max_iter"],
+                        absorber["fast_mode"],
+                        min_log_nhi=absorber["min_log_nhi"],
+                    )
+                )
             a = acc[thr]
             a["absorbers"].extend(new)
-            local = SimpleNamespace(absorbers=[SimpleNamespace(skewer_idx=x.skewer_idx - s, log_NHI=x.log_NHI)
-                                               for x in new])
-            kf, pf, nf, _, _ = compute_tier_c_p1d(tau_f, vmax, alpha_slope=alpha, z=z_grid, catalog=local,
-                                                  external_scale=scale, external_target_F=target_f)
-            _, pu, nu, _, _ = compute_tier_c_p1d(tau, vmax, alpha_slope=alpha, z=z_grid, catalog=local,
-                                                 external_scale=scale, external_target_F=target_f)
+            local = SimpleNamespace(
+                absorbers=[
+                    SimpleNamespace(skewer_idx=x.skewer_idx - s, log_NHI=x.log_NHI) for x in new
+                ]
+            )
+            kf, pf, nf, _, _ = compute_tier_c_p1d(
+                tau_f,
+                vmax,
+                alpha_slope=alpha,
+                z=z_grid,
+                catalog=local,
+                external_scale=scale,
+                external_target_F=target_f,
+            )
+            _, pu, nu, _, _ = compute_tier_c_p1d(
+                tau,
+                vmax,
+                alpha_slope=alpha,
+                z=z_grid,
+                catalog=local,
+                external_scale=scale,
+                external_target_F=target_f,
+            )
             assert np.array_equal(nf, nu)
             if a["n"] is None:
-                a["sf"], a["su"], a["n"], a["kf"] = np.zeros_like(pf), np.zeros_like(pu), np.zeros_like(nf), kf
+                a["sf"], a["su"], a["n"], a["kf"] = (
+                    np.zeros_like(pf),
+                    np.zeros_like(pu),
+                    np.zeros_like(nf),
+                    kf,
+                )
             a["sf"] += nf[:, None] * pf
             a["su"] += nu[:, None] * pu
             a["n"] += nf
     out = {}
     for thr, a in acc.items():
         w = np.where(a["n"] > 0, a["n"], 1)[:, None]
-        out[thr] = {"absorbers": a["absorbers"], "kf": a["kf"], "pf15": a["sf"] / w, "pu15": a["su"] / w,
-                    "counts15": a["n"]}
+        out[thr] = {
+            "absorbers": a["absorbers"],
+            "kf": a["kf"],
+            "pf15": a["sf"] / w,
+            "pu15": a["su"] / w,
+            "counts15": a["n"],
+        }
     return out
 
 
 def _check_catalogue(absorbers, nbins, sim, z, dv):
     """build_catalog's own checks on a finished catalogue: no overlapping entries, finite values."""
     from hcd_analysis.catalog import AbsorberCatalog, check_catalog_values, validate_catalog_entries
+
     if absorbers:
-        validate_catalog_entries([a.skewer_idx for a in absorbers], [a.pix_start for a in absorbers],
-                                 [a.pix_end for a in absorbers], nbins)
+        validate_catalog_entries(
+            [a.skewer_idx for a in absorbers],
+            [a.pix_start for a in absorbers],
+            [a.pix_end for a in absorbers],
+            nbins,
+        )
     cat = AbsorberCatalog(sim_name=sim, snap=-1, z=z, dv_kms=dv)
     cat.absorbers.extend(absorbers)
     check_catalog_values(cat)
@@ -358,6 +472,7 @@ def _scale_and_target(path, n_total, chunk, tau_eff, alpha, z_grid, cache_row):
     if cache_row is not None:
         return float(cache_row["scale"]), float(cache_row["target_F"]), "cache"
     from hcd_analysis.priya_p1d import obs_mean_tau
+
     target_f = float(np.exp(-alpha * obs_mean_tau(z_grid)))
     return _solve_scale(path, n_total, chunk, tau_eff, target_f), target_f, "solved"
 
@@ -367,44 +482,81 @@ def cache_row_for(cache, sim, z_grid, alpha):
     if cache is None:
         return None
     import h5py
+
     with h5py.File(cache, "r") as h:
         names = np.array([x.decode() if isinstance(x, bytes) else x for x in h["sim_name"][:]])
-        rows = np.where((names == sim) & np.isclose(h["z_grid"][:], z_grid, atol=1e-6, rtol=0)
-                        & np.isclose(h["alpha_slope"][:], alpha, atol=1e-12, rtol=0))[0]
+        rows = np.where(
+            (names == sim)
+            & np.isclose(h["z_grid"][:], z_grid, atol=1e-6, rtol=0)
+            & np.isclose(h["alpha_slope"][:], alpha, atol=1e-12, rtol=0)
+        )[0]
         if len(rows) != 1:
             raise ValueError(f"{len(rows)} cache rows for {sim} z_grid {z_grid} alpha {alpha}")
         i = int(rows[0])
         return {"row": i, "scale": float(h["scale"][i]), "target_F": float(h["target_F"][i])}
 
 
-def run_input(tag, path, thresholds, alpha, absorber, sim, out_dir, log, n_skewers=None, chunk=40000, cache=None):
+def run_input(
+    tag,
+    path,
+    thresholds,
+    alpha,
+    absorber,
+    sim,
+    out_dir,
+    log,
+    n_skewers=None,
+    chunk=40000,
+    cache=None,
+):
     todo = [t for t in thresholds if not (out_dir / f"result_{tag}_T{t:g}.npz").exists()]
     if not todo:
-        return                                                      # all results exist: nothing imported or read
+        return  # all results exist: nothing imported or read
     from hcd_analysis.io import pixel_dv_kms, read_header
-    import build_emulator_cache_tau0 as bt                          # scripts/: the cache builder's own helpers
+    import build_emulator_cache_tau0 as bt  # scripts/: the cache builder's own helpers
+
     hdr = read_header(path)
     dv, vmax = pixel_dv_kms(hdr), bt.vmax_from_header(hdr)
     z_grid = bt._snap_z_to_priya_grid(float(hdr.redshift))
     n_total = int(hdr.n_skewers) if n_skewers is None else min(int(n_skewers), int(hdr.n_skewers))
     t0 = time.time()
     tau_eff = _global_tau_eff(path, n_total, chunk)
-    scale, target_f, src = _scale_and_target(path, n_total, chunk, tau_eff, alpha, z_grid,
-                                             cache_row_for(cache, sim, z_grid, alpha) if n_skewers is None else None)
-    log(f"{tag}: {n_total} skewers in blocks of {chunk}, tau_eff {tau_eff:.6g}, scale {scale:.10g} ({src}), "
+    scale, target_f, src = _scale_and_target(
+        path,
+        n_total,
+        chunk,
+        tau_eff,
+        alpha,
+        z_grid,
+        cache_row_for(cache, sim, z_grid, alpha) if n_skewers is None else None,
+    )
+    log(
+        f"{tag}: {n_total} skewers in blocks of {chunk}, tau_eff {tau_eff:.6g}, scale {scale:.10g} ({src}), "
         f"target_F {target_f:.10g}; "
-        f"{time.time() - t0:.0f} s")
+        f"{time.time() - t0:.0f} s"
+    )
     t1 = time.time()
-    res = chunked_tier_c(path, n_total, todo, absorber, dv, vmax, alpha, z_grid, tau_eff, scale, target_f, chunk)
+    res = chunked_tier_c(
+        path, n_total, todo, absorber, dv, vmax, alpha, z_grid, tau_eff, scale, target_f, chunk
+    )
     log(f"{tag}: {len(todo)} thresholds in {time.time() - t1:.0f} s")
     for thr in todo:
         r = res[thr]
         _check_catalogue(r["absorbers"], int(hdr.nbins), sim, float(hdr.redshift), dv)
-        _save_once(out_dir / f"result_{tag}_T{thr:g}.npz", kf=r["kf"], pf15=r["pf15"], pu15=r["pu15"],
-                   counts15=r["counts15"], log_nhi=np.array([a.log_NHI for a in r["absorbers"]], dtype=np.float64),
-                   skewer_idx=np.array([a.skewer_idx for a in r["absorbers"]], dtype=np.int64),
-                   target_F=np.array(target_f), scale=np.array(scale), z_grid=np.array(z_grid),
-                   tau_eff=np.array(tau_eff), scale_source=np.array(src))
+        _save_once(
+            out_dir / f"result_{tag}_T{thr:g}.npz",
+            kf=r["kf"],
+            pf15=r["pf15"],
+            pu15=r["pu15"],
+            counts15=r["counts15"],
+            log_nhi=np.array([a.log_NHI for a in r["absorbers"]], dtype=np.float64),
+            skewer_idx=np.array([a.skewer_idx for a in r["absorbers"]], dtype=np.int64),
+            target_F=np.array(target_f),
+            scale=np.array(scale),
+            z_grid=np.array(z_grid),
+            tau_eff=np.array(tau_eff),
+            scale_source=np.array(src),
+        )
         log(f"{tag} T={thr:g}: {len(r['absorbers'])} absorbers")
 
 
@@ -423,10 +575,15 @@ def self_check_passed(doc):
     """The self-check's criterion: identical catalogue and counts, P1D and tau_eff within SELF_CHECK_REL_TOL, the solved
     scale within SELF_CHECK_SCALE_TOL. A missing or NaN entry fails."""
     try:
-        return bool(doc["catalogue_identical"] is True and doc["counts_identical"] is True
-                    and all(float(doc[k]) <= SELF_CHECK_REL_TOL
-                            for k in ("max_rel_diff_filtered", "max_rel_diff_unfiltered", "tau_eff_rel_diff"))
-                    and float(doc["scale_solved_rel_diff"]) <= SELF_CHECK_SCALE_TOL)
+        return bool(
+            doc["catalogue_identical"] is True
+            and doc["counts_identical"] is True
+            and all(
+                float(doc[k]) <= SELF_CHECK_REL_TOL
+                for k in ("max_rel_diff_filtered", "max_rel_diff_unfiltered", "tau_eff_rel_diff")
+            )
+            and float(doc["scale_solved_rel_diff"]) <= SELF_CHECK_SCALE_TOL
+        )
     except (KeyError, TypeError, ValueError):
         return False
 
@@ -443,42 +600,89 @@ def self_check(tag, path, n, reference, alpha, absorber, sim, out_dir, log):
     from hcd_analysis.io import pixel_dv_kms, read_header
     from hcd_analysis.priya_p1d import _apply_priya_filter, compute_tier_c_p1d
     import build_emulator_cache_tau0 as bt
+
     hdr = read_header(path)
     dv, vmax = pixel_dv_kms(hdr), bt.vmax_from_header(hdr)
     z_grid = bt._snap_z_to_priya_grid(float(hdr.redshift))
     tau = bt._read_tau(path, n_skewers=n)
-    tau_eff = float(-np.log(np.mean(np.exp(-tau))))                  # what _apply_priya_filter computes
+    tau_eff = float(-np.log(np.mean(np.exp(-tau))))  # what _apply_priya_filter computes
     tau_f = _apply_priya_filter(tau.copy(), tau_thresh=1.0e6)
-    cat = build_catalog(Path(path), sim_name=sim, snap=-1, z=float(hdr.redshift), dv_kms=dv,
-                        tau_threshold=float(reference), merge_dv_kms=absorber["merge_dv_kms"],
-                        min_pixels=absorber["min_pixels"], b_init=absorber["b_init_kms"],
-                        b_bounds=tuple(absorber["b_bounds"]), tau_fit_cap=absorber["tau_fit_cap"],
-                        voigt_max_iter=absorber["voigt_max_iter"], fast_mode=absorber["fast_mode"], n_workers=1,
-                        min_log_nhi=absorber["min_log_nhi"], n_skewers=n)
-    kf, pf, nf, target_f, scale = compute_tier_c_p1d(tau_f, vmax, alpha_slope=alpha, z=z_grid, catalog=cat)
-    _, pu, _, _, _ = compute_tier_c_p1d(tau, vmax, alpha_slope=alpha, z=z_grid, catalog=cat,
-                                        external_scale=scale, external_target_F=target_f)
+    cat = build_catalog(
+        Path(path),
+        sim_name=sim,
+        snap=-1,
+        z=float(hdr.redshift),
+        dv_kms=dv,
+        tau_threshold=float(reference),
+        merge_dv_kms=absorber["merge_dv_kms"],
+        min_pixels=absorber["min_pixels"],
+        b_init=absorber["b_init_kms"],
+        b_bounds=tuple(absorber["b_bounds"]),
+        tau_fit_cap=absorber["tau_fit_cap"],
+        voigt_max_iter=absorber["voigt_max_iter"],
+        fast_mode=absorber["fast_mode"],
+        n_workers=1,
+        min_log_nhi=absorber["min_log_nhi"],
+        n_skewers=n,
+    )
+    kf, pf, nf, target_f, scale = compute_tier_c_p1d(
+        tau_f, vmax, alpha_slope=alpha, z=z_grid, catalog=cat
+    )
+    _, pu, _, _, _ = compute_tier_c_p1d(
+        tau,
+        vmax,
+        alpha_slope=alpha,
+        z=z_grid,
+        catalog=cat,
+        external_scale=scale,
+        external_target_F=target_f,
+    )
     del tau, tau_f
     block = _self_check_block(n)
     tau_eff_blocked = _global_tau_eff(path, n, block)
     scale_solved = _solve_scale(path, n, block, tau_eff_blocked, target_f)
-    ch = chunked_tier_c(path, n, [reference], absorber, dv, vmax, alpha, z_grid, tau_eff_blocked, scale, target_f,
-                        chunk=block)[reference]
-    key = lambda a: (a.skewer_idx, a.pix_start, a.pix_end, a.log_NHI)   # noqa: E731
+    ch = chunked_tier_c(
+        path,
+        n,
+        [reference],
+        absorber,
+        dv,
+        vmax,
+        alpha,
+        z_grid,
+        tau_eff_blocked,
+        scale,
+        target_f,
+        chunk=block,
+    )[reference]
+    key = lambda a: (a.skewer_idx, a.pix_start, a.pix_end, a.log_NHI)  # noqa: E731
     ok = nf > 0
 
     def rel(x, y):
         return float(np.max(np.abs(x[ok] / y[ok] - 1.0)))
-    doc = {"n_skewers": n, "threshold": reference, "block": block, "n_absorbers": len(cat.absorbers),
-           "catalogue_identical": sorted(map(key, cat.absorbers)) == sorted(map(key, ch["absorbers"])),
-           "counts_identical": bool(np.array_equal(nf, ch["counts15"])),
-           "max_rel_diff_filtered": rel(ch["pf15"], pf), "max_rel_diff_unfiltered": rel(ch["pu15"], pu),
-           "tau_eff_rel_diff": abs(tau_eff_blocked / tau_eff - 1.0),
-           "scale_solved_rel_diff": abs(scale_solved / scale - 1.0),
-           "tolerances": {"p1d_and_tau_eff": SELF_CHECK_REL_TOL, "scale": SELF_CHECK_SCALE_TOL}}
+
+    doc = {
+        "n_skewers": n,
+        "threshold": reference,
+        "block": block,
+        "n_absorbers": len(cat.absorbers),
+        "catalogue_identical": sorted(map(key, cat.absorbers)) == sorted(map(key, ch["absorbers"])),
+        "counts_identical": bool(np.array_equal(nf, ch["counts15"])),
+        "max_rel_diff_filtered": rel(ch["pf15"], pf),
+        "max_rel_diff_unfiltered": rel(ch["pu15"], pu),
+        "tau_eff_rel_diff": abs(tau_eff_blocked / tau_eff - 1.0),
+        "scale_solved_rel_diff": abs(scale_solved / scale - 1.0),
+        "tolerances": {"p1d_and_tau_eff": SELF_CHECK_REL_TOL, "scale": SELF_CHECK_SCALE_TOL},
+    }
     doc["passed"] = self_check_passed(doc)
-    _link_once(dest, lambda fh: fh.write(
-        (json.dumps(_finite_or_none(doc), indent=1, sort_keys=True, allow_nan=False) + "\n").encode()))
+    _link_once(
+        dest,
+        lambda fh: fh.write(
+            (
+                json.dumps(_finite_or_none(doc), indent=1, sort_keys=True, allow_nan=False) + "\n"
+            ).encode()
+        ),
+    )
     log(f"self-check {tag}: {doc}")
     return doc
 
@@ -494,10 +698,15 @@ def load_results(out_dir, tags, thresholds):
             res[(tag, thr)]["abs_counts"] = class_counts(res[(tag, thr)]["log_nhi"])
         first = res[(tag, thresholds[0])]
         for k in ("scale", "target_F", "tau_eff", "z_grid", "kf"):
-            same = (lambda x, y: np.array_equal(x, y)) if k in ("z_grid", "kf") else \
-                (lambda x, y: x is not None and np.allclose(x, y, rtol=1e-12, atol=0))   # block size: last bits only
+            same = (
+                (lambda x, y: np.array_equal(x, y))
+                if k in ("z_grid", "kf")
+                else (lambda x, y: x is not None and np.allclose(x, y, rtol=1e-12, atol=0))
+            )  # block size: last bits only
             if k in first and not all(same(res[(tag, t)].get(k), first[k]) for t in thresholds):
-                raise ValueError(f"{tag}: the result files disagree on {k}; they are not from one pass")
+                raise ValueError(
+                    f"{tag}: the result files disagree on {k}; they are not from one pass"
+                )
     return res
 
 
@@ -505,6 +714,7 @@ def anchor(results, cache, sim, alpha, reference, n_k):
     """The reference threshold against the cache row of the same simulation, z grid and alpha, over the first n_k
     stored k bins."""
     import h5py
+
     out = {}
     with h5py.File(cache, "r") as h:
         names = np.array([s.decode() if isinstance(s, bytes) else s for s in h["sim_name"][:]])
@@ -512,8 +722,11 @@ def anchor(results, cache, sim, alpha, reference, n_k):
         for (tag, thr), r in results.items():
             if thr != reference:
                 continue
-            rows = np.where((names == sim) & np.isclose(zg, float(r["z_grid"]), atol=1e-6, rtol=0)
-                            & np.isclose(al, alpha, atol=1e-12, rtol=0))[0]
+            rows = np.where(
+                (names == sim)
+                & np.isclose(zg, float(r["z_grid"]), atol=1e-6, rtol=0)
+                & np.isclose(al, alpha, atol=1e-12, rtol=0)
+            )[0]
             if len(rows) != 1:
                 out[tag] = {"error": f"{len(rows)} matching cache rows"}
                 continue
@@ -525,10 +738,14 @@ def anchor(results, cache, sim, alpha, reference, n_k):
             def rel(cache_key, mine):
                 a, b = h[cache_key][i][ok, :m], mine[ok, :m]
                 return float(np.max(np.abs(b / a - 1.0)))
-            out[tag] = {"cache_row": i, "count_diff_by_bin": (r["counts15"] - c_counts).astype(int).tolist(),
-                        "max_rel_diff_filtered": rel("P_tier_c_filtered", r["pf15"]),
-                        "max_rel_diff_unfiltered": rel("P_tier_c", r["pu15"]),
-                        "scale_rel_diff": float(r["scale"] / h["scale"][i] - 1.0)}
+
+            out[tag] = {
+                "cache_row": i,
+                "count_diff_by_bin": (r["counts15"] - c_counts).astype(int).tolist(),
+                "max_rel_diff_filtered": rel("P_tier_c_filtered", r["pf15"]),
+                "max_rel_diff_unfiltered": rel("P_tier_c", r["pu15"]),
+                "scale_rel_diff": float(r["scale"] / h["scale"][i] - 1.0),
+            }
     return out
 
 
@@ -557,7 +774,9 @@ def _finite_or_none(obj):
 
 def _git(*args):
     try:
-        return subprocess.check_output(["git", *args], cwd=str(REPO_ROOT), text=True, stderr=subprocess.DEVNULL).strip()
+        return subprocess.check_output(
+            ["git", *args], cwd=str(REPO_ROOT), text=True, stderr=subprocess.DEVNULL
+        ).strip()
     except Exception:
         return None
 
@@ -565,30 +784,82 @@ def _git(*args):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--sim", required=True, help="simulation name (catalogue label; cache lookup for --anchor-cache)")
-    ap.add_argument("--input", action="append", required=True, metavar="TAG=PATH",
-                    help="a raw fake_spectra grid file, tagged (repeatable)")
-    ap.add_argument("--thresholds", type=float, nargs="+", default=[30.0, 50.0, 100.0, 200.0, 300.0],
-                    help="at most 6 significant digits each (they name the result files)")
+    ap.add_argument(
+        "--sim",
+        required=True,
+        help="simulation name (catalogue label; cache lookup for --anchor-cache)",
+    )
+    ap.add_argument(
+        "--input",
+        action="append",
+        required=True,
+        metavar="TAG=PATH",
+        help="a raw fake_spectra grid file, tagged (repeatable)",
+    )
+    ap.add_argument(
+        "--thresholds",
+        type=float,
+        nargs="+",
+        default=[30.0, 50.0, 100.0, 200.0, 300.0],
+        help="at most 6 significant digits each (they name the result files)",
+    )
     ap.add_argument("--reference", type=float, default=100.0)
-    ap.add_argument("--headline", type=float, nargs="+", default=[50.0, 200.0],
-                    help="thresholds the reading rule is applied to")
+    ap.add_argument(
+        "--headline",
+        type=float,
+        nargs="+",
+        default=[50.0, 200.0],
+        help="thresholds the reading rule is applied to",
+    )
     ap.add_argument("--alpha", type=float, required=True, help="mean-flux scaling alpha_slope")
-    ap.add_argument("--n-k", type=int, default=172, help="stored native k bins compared (172: the LF emulator grid)")
-    ap.add_argument("--lowk-kmax", type=float, default=0.01, help="upper k (s/km) of the low-k change")
-    ap.add_argument("--lowk-kmin", type=float, default=1e-3,
-                    help="lower k (s/km) of the low-k change (1e-3: the lower edge of the data range)")
-    ap.add_argument("--config", type=Path, default=REPO_ROOT / "config" / "default.yaml",
-                    help="every catalogue setting except tau_threshold is read from here")
+    ap.add_argument(
+        "--n-k",
+        type=int,
+        default=172,
+        help="stored native k bins compared (172: the LF emulator grid)",
+    )
+    ap.add_argument(
+        "--lowk-kmax", type=float, default=0.01, help="upper k (s/km) of the low-k change"
+    )
+    ap.add_argument(
+        "--lowk-kmin",
+        type=float,
+        default=1e-3,
+        help="lower k (s/km) of the low-k change (1e-3: the lower edge of the data range)",
+    )
+    ap.add_argument(
+        "--config",
+        type=Path,
+        default=REPO_ROOT / "config" / "default.yaml",
+        help="every catalogue setting except tau_threshold is read from here",
+    )
     ap.add_argument("--anchor-cache", type=Path, default=None)
-    ap.add_argument("--n-skewers", type=int, default=None,
-                    help="only the first N skewers of each input (a quick look; the anchor then does not apply)")
-    ap.add_argument("--chunk", type=int, default=40000,
-                    help="skewers per block (memory: about 3 x chunk x nbins x 8 B)")
-    ap.add_argument("--self-check", type=int, default=0, metavar="N",
-                    help="compare the blocked path with the whole-array production path on the first N skewers")
-    ap.add_argument("--only", action="append", default=None, metavar="TAG",
-                    help="process only these inputs (parallel workers; the summary is written once all results exist)")
+    ap.add_argument(
+        "--n-skewers",
+        type=int,
+        default=None,
+        help="only the first N skewers of each input (a quick look; the anchor then does not apply)",
+    )
+    ap.add_argument(
+        "--chunk",
+        type=int,
+        default=40000,
+        help="skewers per block (memory: about 3 x chunk x nbins x 8 B)",
+    )
+    ap.add_argument(
+        "--self-check",
+        type=int,
+        default=0,
+        metavar="N",
+        help="compare the blocked path with the whole-array production path on the first N skewers",
+    )
+    ap.add_argument(
+        "--only",
+        action="append",
+        default=None,
+        metavar="TAG",
+        help="process only these inputs (parallel workers; the summary is written once all results exist)",
+    )
     a = ap.parse_args(argv)
 
     thresholds = sorted(set(a.thresholds))
@@ -597,7 +868,9 @@ def main(argv=None):
             ap.error(f"threshold {t!r}: give a positive value with at most 6 significant digits")
     if a.reference not in thresholds or not set(a.headline) <= set(thresholds):
         ap.error("--reference and every --headline threshold must be among --thresholds")
-    if not (np.isfinite(a.lowk_kmin) and np.isfinite(a.lowk_kmax) and 0 <= a.lowk_kmin < a.lowk_kmax):
+    if not (
+        np.isfinite(a.lowk_kmin) and np.isfinite(a.lowk_kmax) and 0 <= a.lowk_kmin < a.lowk_kmax
+    ):
         ap.error("--lowk-kmin and --lowk-kmax: need 0 <= kmin < kmax")
     for name in ("n_k", "chunk"):
         if getattr(a, name) < 1:
@@ -616,6 +889,7 @@ def main(argv=None):
         ap.error(f"--only {a.only}: not among the inputs {sorted(inputs)}")
 
     import yaml
+
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
     cfg_bytes = a.config.read_bytes()
     absorber = dict(yaml.safe_load(cfg_bytes)["absorber"])
@@ -624,25 +898,43 @@ def main(argv=None):
     # it supplies the scale; the config file by its hash, deliberately conservative). Not compared: the block size
     # (rounding only; in log.txt), the self-check size (in each self_check file) and the summary's parameters
     # (reference, headline, n_k, low-k window; in summary.json).
-    settings = {"tool": "tau_threshold_sensitivity/3", "sim": a.sim,
-                "inputs": {t: _file_identity(p) for t, p in sorted(inputs.items())},
-                "thresholds": thresholds, "alpha_slope": a.alpha, "absorber_except_threshold": absorber,
-                "config": {"path": str(a.config.resolve()), "sha256": hashlib.sha256(cfg_bytes).hexdigest()},
-                "anchor_cache": _cache_identity(a.anchor_cache),
-                "n_skewers": a.n_skewers,
-                "scale": "the cache row's (production) scale and target flux" if a.anchor_cache and a.n_skewers is None
-                         else "solved over the skewers used (Newton, 1e-12)"}
+    settings = {
+        "tool": "tau_threshold_sensitivity/3",
+        "sim": a.sim,
+        "inputs": {t: _file_identity(p) for t, p in sorted(inputs.items())},
+        "thresholds": thresholds,
+        "alpha_slope": a.alpha,
+        "absorber_except_threshold": absorber,
+        "config": {
+            "path": str(a.config.resolve()),
+            "sha256": hashlib.sha256(cfg_bytes).hexdigest(),
+        },
+        "anchor_cache": _cache_identity(a.anchor_cache),
+        "n_skewers": a.n_skewers,
+        "scale": (
+            "the cache row's (production) scale and target flux"
+            if a.anchor_cache and a.n_skewers is None
+            else "solved over the skewers used (Newton, 1e-12)"
+        ),
+    }
 
     def info():
         import h5py
+
         try:
             import fake_spectra
+
             fs = getattr(fake_spectra, "__version__", fake_spectra.__file__)
         except Exception:
             fs = None
-        return {"code_commit": _git("rev-parse", "HEAD") or "unknown", "code_dirty": _dirty(),
-                "python": platform.python_version(), "numpy": np.__version__, "h5py": h5py.__version__,
-                "fake_spectra": fs}
+        return {
+            "code_commit": _git("rev-parse", "HEAD") or "unknown",
+            "code_dirty": _dirty(),
+            "python": platform.python_version(),
+            "numpy": np.__version__,
+            "h5py": h5py.__version__,
+            "fake_spectra": fs,
+        }
 
     too_big = [t for t, ident in settings["inputs"].items() if a.self_check > ident["n_skewers"]]
     if too_big:
@@ -665,33 +957,65 @@ def _run(a, inputs, thresholds, absorber, logf):
             continue
         if a.self_check:
             self_check(tag, p, a.self_check, a.reference, a.alpha, absorber, a.sim, a.out, log)
-        run_input(tag, p, thresholds, a.alpha, absorber, a.sim, a.out, log, n_skewers=a.n_skewers, chunk=a.chunk,
-                  cache=a.anchor_cache)
-    missing = [f"result_{t}_T{x:g}.npz" for t in sorted(inputs) for x in thresholds
-               if not (a.out / f"result_{t}_T{x:g}.npz").exists()]
+        run_input(
+            tag,
+            p,
+            thresholds,
+            a.alpha,
+            absorber,
+            a.sim,
+            a.out,
+            log,
+            n_skewers=a.n_skewers,
+            chunk=a.chunk,
+            cache=a.anchor_cache,
+        )
+    missing = [
+        f"result_{t}_T{x:g}.npz"
+        for t in sorted(inputs)
+        for x in thresholds
+        if not (a.out / f"result_{t}_T{x:g}.npz").exists()
+    ]
     if missing:
         log(f"summary deferred: {len(missing)} result files not yet written")
         return 0
     results = load_results(a.out, sorted(inputs), thresholds)
     summary = summarize(results, a.reference, a.n_k, a.lowk_kmax, a.lowk_kmin)
-    doc = {"rows": summary, "verdict": verdict(summary, set(a.headline), a.reference),
-           "summary_settings": {"reference": a.reference, "headline": sorted(a.headline), "n_k": a.n_k,
-                                "lowk_kmin": a.lowk_kmin, "lowk_kmax": a.lowk_kmax,
-                                "code_commit": _git("rev-parse", "HEAD") or "unknown", "code_dirty": _dirty()}}
+    doc = {
+        "rows": summary,
+        "verdict": verdict(summary, set(a.headline), a.reference),
+        "summary_settings": {
+            "reference": a.reference,
+            "headline": sorted(a.headline),
+            "n_k": a.n_k,
+            "lowk_kmin": a.lowk_kmin,
+            "lowk_kmax": a.lowk_kmax,
+            "code_commit": _git("rev-parse", "HEAD") or "unknown",
+            "code_dirty": _dirty(),
+        },
+    }
     if a.anchor_cache:
         doc["anchor"] = anchor(results, a.anchor_cache, a.sim, a.alpha, a.reference, a.n_k)
-    checks = {c.stem[len("self_check_"):]: json.loads(c.read_text()) for c in sorted(a.out.glob("self_check_*.json"))}
+    checks = {
+        c.stem[len("self_check_") :]: json.loads(c.read_text())
+        for c in sorted(a.out.glob("self_check_*.json"))
+    }
     if checks:
         doc["self_check"] = checks
-    failed = sorted(t for t, c in checks.items()
-                    if not self_check_passed(c) or c.get("threshold") != a.reference)
-    if a.self_check or checks:                                      # once any input is checked, every input must be
+    failed = sorted(
+        t
+        for t, c in checks.items()
+        if not self_check_passed(c) or c.get("threshold") != a.reference
+    )
+    if a.self_check or checks:  # once any input is checked, every input must be
         failed += sorted(set(inputs) - set(checks))
     valid = doc["verdict"].get("valid", True) and not failed
     if failed:
         msg = f"invalid: self-check failed or missing for {sorted(failed)}"
         prior = doc["verdict"]["reading"]
-        doc["verdict"]["reading"] = msg if not prior.startswith("invalid") else f"{prior}; {msg[len('invalid: '):]}"
+        doc["verdict"]["reading"] = (
+            msg if not prior.startswith("invalid") else f"{prior}; {msg[len('invalid: '):]}"
+        )
         for c in doc["verdict"]["per_class"].values():
             c["reading"] = "invalid"
     doc["verdict"]["valid"] = valid
@@ -699,7 +1023,7 @@ def _run(a, inputs, thresholds, absorber, logf):
     with os.fdopen(fd, "w") as fh:
         fh.write(json.dumps(_finite_or_none(doc), indent=1, sort_keys=True, allow_nan=False) + "\n")
     os.chmod(tmp, 0o644)
-    os.replace(tmp, a.out / "summary.json")                         # derived from the result files; recomputable
+    os.replace(tmp, a.out / "summary.json")  # derived from the result files; recomputable
     log(f"verdict: {doc['verdict']['reading']}")
     return 0 if valid else 2
 

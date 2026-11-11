@@ -5,6 +5,7 @@ mapping error cannot hide behind "the known 4.4e-10". BT-D2 D3 is reported per h
 mode-index band (the pooled value of a leave-one-out mean correction is fixed by construction). BT-D3 the MF prediction
 does not depend on log_rho or on the held-out rows (the historical "log_rho leak" was a misstatement). BT-D4 the R-D1
 products (the R-D1 summary and its k-resolved table) are complete and consistent."""
+
 import json
 import os
 
@@ -35,8 +36,11 @@ def _need(*paths):
 def test_gate_d_d1_failure_pinned_to_parameter_precision():
     from tests.raw_headers import _raw_headers
     from hcd_analysis.emulator.kcoord import k_skm_from_kcom
+
     _need(LF, HR, RAW_LF, RAW_HR)
-    lf, hr = load_cache_historical(LF, reason='test: a cache in the pre-lineage 3.3 format'), load_cache_historical(HR, reason='test: a cache in the pre-lineage 3.3 format')
+    lf, hr = load_cache_historical(
+        LF, reason="test: a cache in the pre-lineage 3.3 format"
+    ), load_cache_historical(HR, reason="test: a cache in the pre-lineage 3.3 format")
     pairs = MM.match_pairs(lf, hr)
     K = 172
     hdr = {}
@@ -50,18 +54,26 @@ def test_gate_d_d1_failure_pinned_to_parameter_precision():
         s_lf, s_hr = str(lf["sim_name"][l]), str(hr["sim_name"][h])
         assert NS0914 in s_lf and NS0914 in s_hr, (s_lf, dev)
         z = float(hr["z_grid"][h])
-        vh = min(hdr.setdefault(("hr", s_hr), _raw_headers(RAW_HR, s_hr)), key=lambda e: abs(e["z"] - z))["vmax"]
-        vl = min(hdr.setdefault(("lf", s_lf), _raw_headers(RAW_LF, s_lf)), key=lambda e: abs(e["z"] - z))["vmax"]
+        vh = min(
+            hdr.setdefault(("hr", s_hr), _raw_headers(RAW_HR, s_hr)), key=lambda e: abs(e["z"] - z)
+        )["vmax"]
+        vl = min(
+            hdr.setdefault(("lf", s_lf), _raw_headers(RAW_LF, s_lf)), key=lambda e: abs(e["z"] - z)
+        )["vmax"]
         assert abs(dev - abs(vl / vh - 1)) <= 1e-15 and dev < 5e-10, (dev, vl / vh - 1)
         n_pinned += 1
     assert n_pinned == 340
-    for cache in (lf, hr):                         # each grid is the canonical coordinate of its OWN parameters
+    for cache in (lf, hr):  # each grid is the canonical coordinate of its OWN parameters
         p = np.asarray(cache["params"], float)
         k = np.asarray(cache["kfkms"], float)[:, :K]
-        kc = np.stack([np.asarray(k_skm_from_kcom(np.asarray(cache["k_com_hmpc"])[:K], float(zz), hub, om))
-                       for zz, hub, om in zip(cache["z_grid"], p[:, 5], p[:, 6])])
+        kc = np.stack(
+            [
+                np.asarray(k_skm_from_kcom(np.asarray(cache["k_com_hmpc"])[:K], float(zz), hub, om))
+                for zz, hub, om in zip(cache["z_grid"], p[:, 5], p[:, 6])
+            ]
+        )
         fin = np.isfinite(k)
-        assert np.max(np.abs(kc[fin] / k[fin] - 1)) <= 2e-15      # round-off (C1 measured 1.1e-15)
+        assert np.max(np.abs(kc[fin] / k[fin] - 1)) <= 2e-15  # round-off (C1 measured 1.1e-15)
 
 
 # ---------------------------------------------------------------------------------------------------------- BT-D2
@@ -75,13 +87,17 @@ def _toy(n_sims=6, n_rows=4, K=10, seed=0):
 
 def test_d3_per_simulation_and_common_mode_band_helpers():
     sims, z, k, keep = _toy()
-    l_mf = np.zeros((sims.size, 4, k.shape[1])); l_lf = np.full_like(l_mf, -0.01)
+    l_mf = np.zeros((sims.size, 4, k.shape[1]))
+    l_lf = np.full_like(l_mf, -0.01)
     for i, s in enumerate(np.unique(sims)):
         l_mf[sims == s] = 0.01 * (i - 2.5)
     out = GD.d3_per_simulation(l_mf, l_lf, sims, z, k, keep)
     assert set(out["per_simulation"]) == set(np.unique(sims))
-    np.testing.assert_allclose(out["rms_over_simulations"]["clean"]["mf"],
-                               np.sqrt(np.mean((0.01 * (np.arange(6) - 2.5)) ** 2)), rtol=1e-12)
+    np.testing.assert_allclose(
+        out["rms_over_simulations"]["clean"]["mf"],
+        np.sqrt(np.mean((0.01 * (np.arange(6) - 2.5)) ** 2)),
+        rtol=1e-12,
+    )
     np.testing.assert_allclose(out["rms_over_simulations"]["clean"]["lf"], 0.01, rtol=1e-12)
     band = GD.common_mode_band(z, k, keep)
     n0 = int(np.argmax(band[0]))
@@ -95,10 +111,12 @@ def test_d3_on_the_frozen_product_is_reported_per_simulation():
     l_mf, l_lf = np.log1p(a["r_mf"]), np.log1p(a["r_lf"])
     keep = a["in_range"][:, None, :] & np.isfinite(a["r_mf"]) & np.isfinite(a["r_lf"])
     out = GD.d3_per_simulation(l_mf, l_lf, a["sim"], a["z"], a["k_hr"], keep)
-    for c in GD.CLS:                                                  # the registered pooled values are reproduced
+    for c in GD.CLS:  # the registered pooled values are reproduced
         assert abs(out["pooled_registered_band"][c]["mf"] - R["D3"]["mean_log_mf"][c]) < 1e-12
         assert abs(out["pooled_registered_band"][c]["lf"] - R["D3"]["mean_log_lf"][c]) < 1e-12
-        assert abs(out["pooled_common_mode_band"][c]["mf"]) < 1e-12     # fixed by leave-one-out averaging
+        assert (
+            abs(out["pooled_common_mode_band"][c]["mf"]) < 1e-12
+        )  # fixed by leave-one-out averaging
     assert len(out["per_simulation"]) == 6
     p = f"{GATED}/gate_d_d3_per_simulation.json"
     _need(p)
@@ -108,13 +126,20 @@ def test_d3_on_the_frozen_product_is_reported_per_simulation():
 # ---------------------------------------------------------------------------------------------------------- BT-D3
 def _real_targets():
     _need(LF, HR, f"{GATED}/gate_d_arrays.npz")
-    lf, hr = load_cache_historical(LF, reason='test: a cache in the pre-lineage 3.3 format'), load_cache_historical(HR, reason='test: a cache in the pre-lineage 3.3 format')
+    lf, hr = load_cache_historical(
+        LF, reason="test: a cache in the pre-lineage 3.3 format"
+    ), load_cache_historical(HR, reason="test: a cache in the pre-lineage 3.3 format")
     pairs = MM.match_pairs(lf, hr)
     a = np.load(f"{GATED}/gate_d_arrays.npz")
     l_rows = np.array([p[1] for p in pairs])
-    assert np.allclose(np.asarray(lf["z_grid"])[l_rows], a["z"])        # the product's pair order
-    return dict(x=np.asarray(lf["x"])[l_rows], tau0=np.asarray(lf["tau0"])[l_rows],
-                alpha_idx=np.asarray(lf["alpha_idx"])[l_rows], sim=a["sim"].astype(str), g=a["g_measured"].copy())
+    assert np.allclose(np.asarray(lf["z_grid"])[l_rows], a["z"])  # the product's pair order
+    return dict(
+        x=np.asarray(lf["x"])[l_rows],
+        tau0=np.asarray(lf["tau0"])[l_rows],
+        alpha_idx=np.asarray(lf["alpha_idx"])[l_rows],
+        sim=a["sim"].astype(str),
+        g=a["g_measured"].copy(),
+    )
 
 
 def test_mode_mf_prediction_invariant_to_log_rho_and_heldout_rows_real():
@@ -125,12 +150,17 @@ def test_mode_mf_prediction_invariant_to_log_rho_and_heldout_rows_real():
         train = np.where(t["sim"] != s)[0]
         tab = MM.fit_mode_mf(t, train_rows=train)
         c = rng.normal(0, 0.05, tab["log_rho"].shape)
-        tab2 = dict(tab, log_rho=tab["log_rho"] + c, gbar_z_tab=tab["gbar_z_tab"] - c[None, None, :])
-        t7 = dict(t, g=t["g"].copy()); t7["g"][held] += 7.0
+        tab2 = dict(
+            tab, log_rho=tab["log_rho"] + c, gbar_z_tab=tab["gbar_z_tab"] - c[None, None, :]
+        )
+        t7 = dict(t, g=t["g"].copy())
+        t7["g"][held] += 7.0
         tab7 = MM.fit_mode_mf(t7, train_rows=train)
         for i in held[:: max(1, held.size // 12)]:
             g0 = MM.apply_mode_mf(tab, t["x"][i], t["tau0"][i])
-            np.testing.assert_allclose(MM.apply_mode_mf(tab2, t["x"][i], t["tau0"][i]), g0, rtol=0, atol=1e-15)
+            np.testing.assert_allclose(
+                MM.apply_mode_mf(tab2, t["x"][i], t["tau0"][i]), g0, rtol=0, atol=1e-15
+            )
             assert np.array_equal(MM.apply_mode_mf(tab7, t["x"][i], t["tau0"][i]), g0)
 
 
@@ -144,9 +174,11 @@ def test_gate_d_rd1_report_matches_json():
     zs = sorted(R, key=float)
     assert all(len(R[zz]) == len(GD.CLS) for zz in zs)
     band = [zz for zz in zs if np.isfinite(R[zz][0])]
-    assert band and band == zs[zs.index(band[0]): zs.index(band[-1]) + 1]          # one contiguous data band
+    assert (
+        band and band == zs[zs.index(band[0]) : zs.index(band[-1]) + 1]
+    )  # one contiguous data band
     assert all(np.all(np.isfinite(R[zz])) for zz in band)
-    assert all(np.all(np.isnan(R[zz])) for zz in zs if zz not in band)               # NaN outside the band
+    assert all(np.all(np.isnan(R[zz])) for zz in zs if zz not in band)  # NaN outside the band
     kres = json.load(open(f"{GATED}/gate_d_rd1_k_resolved.json"))
     nk = len(kres["k_skm"])
     for zz in ("2.2", "3.0", "4.6"):
@@ -156,4 +188,7 @@ def test_gate_d_rd1_report_matches_json():
             assert row.shape == (nk,) and np.all(np.isfinite(row))
             lo = np.asarray(kres["spread_over_sims"][c][zz]["min"], dtype=float)
             hi = np.asarray(kres["spread_over_sims"][c][zz]["max"], dtype=float)
-            assert lo.shape == hi.shape == (nk,) and np.all(lo <= row) and np.all(row <= hi), (c, zz)
+            assert lo.shape == hi.shape == (nk,) and np.all(lo <= row) and np.all(row <= hi), (
+                c,
+                zz,
+            )

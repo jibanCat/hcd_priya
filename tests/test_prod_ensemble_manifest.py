@@ -20,7 +20,9 @@ deployed ensemble. This suite pins the replacement contract
 Fake fixtures use tiny files: every red path fires in ``verify_manifest`` BEFORE any
 equinox/jax deserialization, so no real checkpoints are needed for the red battery.
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import hashlib
 import json
@@ -37,7 +39,8 @@ COMMITTED_MANIFEST = ROOT / "checkpoints" / PE.MANIFEST_BASENAME
 README = ROOT / "checkpoints" / "README_production_ensemble.md"
 ANALYSIS_LOCK = ROOT / "analysis.lock"
 from tests.gate_helpers import external_path  # noqa: E402
-REAL_CKPT_DIR = Path(external_path("HCD_CHECKPOINTS_DIR"))   # gate C members
+
+REAL_CKPT_DIR = Path(external_path("HCD_CHECKPOINTS_DIR"))  # gate C members
 BASE = PE.PROD_BASENAME
 
 
@@ -49,12 +52,17 @@ FAKE_CACHE = "d9" * 32
 
 def _meta(i, schema="2.0", cache=FAKE_CACHE):
     import math
-    return {"seed": i, "schema_version": schema, "cache_sha256": cache,
-            "k_com_hmpc": [2 * math.pi * n / 120.0 for n in range(1, 5)]}
+
+    return {
+        "seed": i,
+        "schema_version": schema,
+        "cache_sha256": cache,
+        "k_com_hmpc": [2 * math.pi * n / 120.0 for n in range(1, 5)],
+    }
 
 
 def _make_fake_members(d):
-    norm_bytes = b"NORM-IDENTICAL-BYTES-v1" * 8       # byte-identical across members (as in prod)
+    norm_bytes = b"NORM-IDENTICAL-BYTES-v1" * 8  # byte-identical across members (as in prod)
     for i in range(5):
         (d / f"{BASE}{i}.eqx").write_bytes(f"EQX-MEMBER-{i}-".encode() * 16)
         (d / f"{BASE}{i}.norm.pkl").write_bytes(norm_bytes)
@@ -69,7 +77,9 @@ def fake(tmp_path):
     d.mkdir()
     _make_fake_members(d)
     mpath = d / PE.MANIFEST_BASENAME
-    rc = GEN.main(["--checkpoints-dir", str(d), "--manifest", str(mpath), "--record-checkpoints-dir"])
+    rc = GEN.main(
+        ["--checkpoints-dir", str(d), "--manifest", str(mpath), "--record-checkpoints-dir"]
+    )
     assert rc == 0
     return d, mpath
 
@@ -99,8 +109,7 @@ def test_fake_happy_path_verify_and_paths(fake):
     manifest, prefixes = _verify(fake)
     assert manifest["n_members"] == 5 and len(prefixes) == 5
     assert [os.path.basename(p) for p in prefixes] == [f"{BASE}{i}" for i in range(5)]
-    assert prefixes == PE.production_member_paths(checkpoints_dir=str(d),
-                                                  manifest_path=str(mpath))
+    assert prefixes == PE.production_member_paths(checkpoints_dir=str(d), manifest_path=str(mpath))
     # generated manifest records the byte-identical normalizers truthfully
     assert manifest["normalizers_byte_identical"] is True
 
@@ -134,7 +143,7 @@ def test_manifest_digest_edit_rejected(fake):
     _edit_manifest(mpath, mutate)
     with pytest.raises(PE.ProductionEnsembleError, match="DIGEST MISMATCH") as e:
         _verify(fake)
-    assert "0" * 64 in str(e.value)          # expected digest quoted
+    assert "0" * 64 in str(e.value)  # expected digest quoted
     assert f"{BASE}2.eqx" in str(e.value)
 
 
@@ -159,8 +168,7 @@ def test_missing_normalizer_rejected(fake):
 
 def test_missing_manifest_rejected(tmp_path):
     with pytest.raises(PE.ProductionEnsembleError, match="manifest not found"):
-        PE.verify_manifest(checkpoints_dir=str(tmp_path),
-                           manifest_path=str(tmp_path / "nope.json"))
+        PE.verify_manifest(checkpoints_dir=str(tmp_path), manifest_path=str(tmp_path / "nope.json"))
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -212,7 +220,7 @@ def test_wrong_n_members_rejected(fake):
 
 def test_dropped_member_entry_rejected(fake):
     _, mpath = fake
-    _edit_manifest(mpath, lambda m: m["members"].pop())      # 4 entries, n_members still 5
+    _edit_manifest(mpath, lambda m: m["members"].pop())  # 4 entries, n_members still 5
     with pytest.raises(PE.ProductionEnsembleError, match="count mismatch"):
         _verify(fake)
 
@@ -230,8 +238,8 @@ def test_mispaired_normalizer_in_manifest_rejected(fake):
     _edit_manifest(mpath, mutate)
     with pytest.raises(PE.ProductionEnsembleError, match="MIS-PAIRED") as e:
         _verify(fake)
-    assert f"{BASE}0.norm.pkl" in str(e.value)       # expected
-    assert f"{BASE}1.norm.pkl" in str(e.value)       # got
+    assert f"{BASE}0.norm.pkl" in str(e.value)  # expected
+    assert f"{BASE}1.norm.pkl" in str(e.value)  # got
 
 
 def test_on_disk_checkpoint_swap_rejected(fake):
@@ -239,7 +247,9 @@ def test_on_disk_checkpoint_swap_rejected(fake):
     the per-file digests then disagree with the manifest."""
     d, _ = fake
     a, b, t = d / f"{BASE}0.eqx", d / f"{BASE}1.eqx", d / "tmp.swap"
-    a.rename(t); b.rename(a); t.rename(b)
+    a.rename(t)
+    b.rename(a)
+    t.rename(b)
     with pytest.raises(PE.ProductionEnsembleError, match="DIGEST MISMATCH"):
         _verify(fake)
 
@@ -265,7 +275,7 @@ def test_renamed_index_rejected(fake):
     def mutate(m):
         m["members"][0], m["members"][1] = m["members"][1], m["members"][0]
         for i, mem in enumerate(m["members"]):
-            mem["index"] = i                                  # hide the swap from the index check
+            mem["index"] = i  # hide the swap from the index check
 
     _edit_manifest(mpath, mutate)
     with pytest.raises(PE.ProductionEnsembleError, match="name mismatch"):
@@ -312,8 +322,11 @@ def test_gen_verify_helper_is_subprocess_free(fake):
 def _real_files_present():
     if not COMMITTED_MANIFEST.exists() or not REAL_CKPT_DIR.is_dir():
         return False
-    return all((REAL_CKPT_DIR / f"{BASE}{i}{ext}").exists()
-               for i in range(5) for ext in (".eqx", ".norm.pkl", ".meta.json"))
+    return all(
+        (REAL_CKPT_DIR / f"{BASE}{i}{ext}").exists()
+        for i in range(5)
+        for ext in (".eqx", ".norm.pkl", ".meta.json")
+    )
 
 
 def _unavailable(msg):
@@ -325,18 +338,21 @@ def _unavailable(msg):
 
 def needs_real():
     """Called first in each real-member test (a call, not a fixture, so a gate run reports FAILED, not ERROR): the
-    real members (gitignored binaries) in HCD_CHECKPOINTS_DIR. The red battery above still pins the contract."""
+    real members (gitignored binaries) in HCD_CHECKPOINTS_DIR. The red battery above still pins the contract.
+    """
     if not _real_files_present():
-        _unavailable(f"real production checkpoints not present at {REAL_CKPT_DIR}: set HCD_CHECKPOINTS_DIR to the "
-                     f"directory holding {BASE}0..4 (.eqx, .norm.pkl, .meta.json)")
+        _unavailable(
+            f"real production checkpoints not present at {REAL_CKPT_DIR}: set HCD_CHECKPOINTS_DIR to the "
+            f"directory holding {BASE}0..4 (.eqx, .norm.pkl, .meta.json)"
+        )
 
 
 def test_real_checkpoints_verify_against_committed_manifest():
     needs_real()
-    manifest, prefixes = PE.verify_manifest(checkpoints_dir=str(REAL_CKPT_DIR),
-                                            manifest_path=str(COMMITTED_MANIFEST))
-    assert [os.path.basename(p) for p in prefixes] == \
-        [f"{BASE}{i}" for i in range(5)]
+    manifest, prefixes = PE.verify_manifest(
+        checkpoints_dir=str(REAL_CKPT_DIR), manifest_path=str(COMMITTED_MANIFEST)
+    )
+    assert [os.path.basename(p) for p in prefixes] == [f"{BASE}{i}" for i in range(5)]
     # the five real normalizers are byte-identical (single sha) and the manifest says so
     assert manifest["normalizers_byte_identical"] is True
     assert len({m["norm_sha256"] for m in manifest["members"]}) == 1
@@ -345,7 +361,8 @@ def test_real_checkpoints_verify_against_committed_manifest():
 def test_real_load_production_ensemble():
     needs_real()
     ens, meta0, norm0, manifest = PE.load_production_ensemble(
-        checkpoints_dir=str(REAL_CKPT_DIR), manifest_path=str(COMMITTED_MANIFEST))
+        checkpoints_dir=str(REAL_CKPT_DIR), manifest_path=str(COMMITTED_MANIFEST)
+    )
     assert len(ens.members) == 5
     assert "P_filt" in norm0 and "arch_cfg" in meta0
     assert manifest["n_members"] == 5
@@ -353,8 +370,9 @@ def test_real_load_production_ensemble():
 
 def test_gen_check_green_on_real_dir():
     needs_real()
-    rc = GEN.main(["--check", "--checkpoints-dir", str(REAL_CKPT_DIR),
-                   "--manifest", str(COMMITTED_MANIFEST)])
+    rc = GEN.main(
+        ["--check", "--checkpoints-dir", str(REAL_CKPT_DIR), "--manifest", str(COMMITTED_MANIFEST)]
+    )
     assert rc == 0
 
 
@@ -367,12 +385,15 @@ def test_readme_digest_table_matches_manifest():
     manifest = json.loads(COMMITTED_MANIFEST.read_text())
     text = README.read_text()
     for mem in manifest["members"]:
-        assert mem["eqx_sha256"] in text, \
-            f"README digest table drifted: {mem['name']} eqx sha absent"
-        assert mem["norm_sha256"] in text, \
-            f"README digest table drifted: {mem['name']} norm sha absent"
-        assert mem["meta_sha256"] in text, \
-            f"README digest table drifted: {mem['name']} meta sha absent"
+        assert (
+            mem["eqx_sha256"] in text
+        ), f"README digest table drifted: {mem['name']} eqx sha absent"
+        assert (
+            mem["norm_sha256"] in text
+        ), f"README digest table drifted: {mem['name']} norm sha absent"
+        assert (
+            mem["meta_sha256"] in text
+        ), f"README digest table drifted: {mem['name']} meta sha absent"
 
 
 # PI ruling 2026-10-21 (D2 = a): the schema-2 manifest is canonical; the July analysis.lock and the schema-1 manifest
@@ -384,7 +405,9 @@ V1_MANIFEST = ROOT / "checkpoints" / "production_ensemble_manifest_v1_pre2026-10
 
 def _july_lock_emulator():
     if not ANALYSIS_LOCK.exists() and not (ROOT / ".git").exists():
-        pytest.skip("analysis.lock is export-ignored from source archives; run this test from a git checkout")
+        pytest.skip(
+            "analysis.lock is export-ignored from source archives; run this test from a git checkout"
+        )
     return json.loads(ANALYSIS_LOCK.read_text())["emulator"]
 
 
@@ -411,7 +434,9 @@ def test_july_lock_does_not_certify_the_current_manifest():
 
 def test_current_loader_refuses_the_manifest_the_july_lock_pins():
     """Current code rejects the artifact the July lock certifies, loudly and before touching any file."""
-    with pytest.raises(PE.ProductionEnsembleError, match=r"schema_version=1, .*superseded at gate E"):
+    with pytest.raises(
+        PE.ProductionEnsembleError, match=r"schema_version=1, .*superseded at gate E"
+    ):
         PE.verify_manifest(manifest_path=str(V1_MANIFEST))
 
 
@@ -423,9 +448,13 @@ def test_v2_manifest_names_its_directory_and_the_cache(fake, monkeypatch):
     """A recorded directory beats HCD_CHECKPOINTS_DIR (set here to an absent directory)."""
     d, mpath = fake
     m = json.loads(Path(mpath).read_text())
-    assert m["schema_version"] == 2 and m["checkpoints_dir"] == str(d) and m["cache_sha256"] == FAKE_CACHE
+    assert (
+        m["schema_version"] == 2
+        and m["checkpoints_dir"] == str(d)
+        and m["cache_sha256"] == FAKE_CACHE
+    )
     monkeypatch.setenv("HCD_CHECKPOINTS_DIR", str(d / "absent"))
-    _, prefixes = PE.verify_manifest(manifest_path=str(mpath))          # directory taken from the manifest
+    _, prefixes = PE.verify_manifest(manifest_path=str(mpath))  # directory taken from the manifest
     assert prefixes == [os.path.join(str(d), f"{BASE}{i}") for i in range(5)]
 
 
@@ -482,8 +511,9 @@ def test_v2_schema1_manifest_refused(fake):
         _verify(fake)
 
 
-@pytest.mark.parametrize("field,value,msg", [("schema_version", "1.0", "schema"),
-                                             ("cache_sha256", "ee" * 32, "cache")])
+@pytest.mark.parametrize(
+    "field,value,msg", [("schema_version", "1.0", "schema"), ("cache_sha256", "ee" * 32, "cache")]
+)
 def test_v2_member_meta_must_be_schema2_on_the_manifest_cache(tmp_path, field, value, msg):
     d = tmp_path / "checkpoints"
     d.mkdir()
@@ -510,6 +540,7 @@ def test_v2_sha256sums_cross_check(fake):
 # --------------------------------------------------------------------------------------------- #
 def _c1_pins():
     from hcd_analysis.comparison import cases as CS
+
     return CS.load_config("phase0_v1")["comparators"]["C1"]
 
 
@@ -524,9 +555,10 @@ def test_phase0_pin_is_the_committed_manifest():
 def test_adapter_refuses_a_manifest_that_is_not_the_pinned_one(tmp_path, monkeypatch):
     """hcd_priya.predict checks the manifest's sha256 against the pin before it loads anything."""
     from hcd_analysis.comparison.adapters import hcd_priya as H
+
     monkeypatch.setenv("HCD_CHECKPOINTS_DIR", str(tmp_path / "absent"))
     edited = tmp_path / PE.MANIFEST_BASENAME
-    edited.write_bytes(COMMITTED_MANIFEST.read_bytes() + b"\n")          # same content, other bytes
+    edited.write_bytes(COMMITTED_MANIFEST.read_bytes() + b"\n")  # same content, other bytes
     pins = _c1_pins()
     with pytest.raises(RuntimeError, match="does not match the pinned sha256"):
         H.predict([], cache_path=str(tmp_path / "absent.h5"), pins=pins, manifest_path=str(edited))

@@ -18,7 +18,9 @@ Env (MANDATORY):
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     python -m pytest tests/test_norc_forward.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import numpy as np
@@ -30,7 +32,9 @@ import jax.numpy as jnp
 
 from hcd_analysis.emulator import closure_legb as C
 from hcd_analysis.emulator import data_likelihood as DL
-from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
+from tests.regression import (
+    legacy_forward_pre2026_10 as LEG,
+)  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import meanflux_prior as MF
 from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
@@ -39,13 +43,16 @@ MF_GOLDEN = os.path.join(GOLDEN_DIR, "legb_mf_golden.npz")
 _CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
 _CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
 _DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
-_KS = (external_path("HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"))
+_KS = external_path(
+    "HCD_LYAEMU_PARENT", "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"
+)
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
 _have_ks = os.path.exists(_KS)
 
 pytestmark = pytest.mark.skipif(
     not (_have and _have_ks and os.path.exists(MF_GOLDEN)),
-    reason="real cache/ckpt/DESI/KS or MF golden not present")
+    reason="real cache/ckpt/DESI/KS or MF golden not present",
+)
 
 
 def _fwd(ctx, leg, theta9, alpha3, **kw):
@@ -56,10 +63,21 @@ def _fwd(ctx, leg, theta9, alpha3, **kw):
     rzb = ctx.rho_zb_per_leg.get(leg.name) if ctx.rho_zb_per_leg is not None else None
     core = jnp.mean(jnp.asarray(ctx.dla_core_leg[leg.name]), axis=0)
     P_model, _ = LEG.predict_P_obs_on_leg(
-        ctx.model, theta9, tau0_vec, alpha3, pf_stats=ctx.pf_stats,
-        dla_core=core, cache_k=ctx.cache_k, leg=leg, sigma_zb=szb,
-        alpha_centres=ctx.alpha_centres, cemu_inflate=ctx.cemu_inflate, rho_zb=rzb,
-        mf=ctx.mf, **kw)
+        ctx.model,
+        theta9,
+        tau0_vec,
+        alpha3,
+        pf_stats=ctx.pf_stats,
+        dla_core=core,
+        cache_k=ctx.cache_k,
+        leg=leg,
+        sigma_zb=szb,
+        alpha_centres=ctx.alpha_centres,
+        cemu_inflate=ctx.cemu_inflate,
+        rho_zb=rzb,
+        mf=ctx.mf,
+        **kw,
+    )
     return np.asarray(P_model)
 
 
@@ -85,11 +103,17 @@ def test_default_reproduces_mf_golden():
     g = np.load(MF_GOLDEN, allow_pickle=True)
     ctx, _ = C.build_legb_ctx(with_mf=True, mf_with_floor=True)
     assert ctx.mf is not None and ctx.mf.res_corr_on is True
-    theta9 = jnp.asarray(g["theta9"]); alpha3 = jnp.asarray(g["alpha3"])
+    theta9 = jnp.asarray(g["theta9"])
+    alpha3 = jnp.asarray(g["alpha3"])
     for leg in ctx.legs:
         P = _fwd(ctx, leg, theta9, alpha3)
-        np.testing.assert_allclose(P, g[f"{leg.name}_P"], rtol=1e-10, atol=0.0,
-                                   err_msg=f"{leg.name}: default != MF golden (field perturbed it)")
+        np.testing.assert_allclose(
+            P,
+            g[f"{leg.name}_P"],
+            rtol=1e-10,
+            atol=0.0,
+            err_msg=f"{leg.name}: default != MF golden (field perturbed it)",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -98,12 +122,14 @@ def test_default_reproduces_mf_golden():
 @pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_res_corr_off_returns_ones():
     ctx_on, _ = C.build_legb_ctx(with_mf=True, mf_with_floor=True)
-    ctx_off, _ = C.build_legb_ctx(with_mf=True, mf_with_floor=True, res_corr_on=False,
-                                  ks_kwargs={"k_max": 0.069})  # keep KS grid for later reuse
+    ctx_off, _ = C.build_legb_ctx(
+        with_mf=True, mf_with_floor=True, res_corr_on=False, ks_kwargs={"k_max": 0.069}
+    )  # keep KS grid for later reuse
     for z in (2.4, 3.0, 3.6, 4.2):
         rc_off = np.asarray(ctx_off.mf.res_corr(float(z)))
-        np.testing.assert_array_equal(rc_off, np.ones_like(rc_off),
-                                      err_msg=f"res_corr_on=False must return ones at z={z}")
+        np.testing.assert_array_equal(
+            rc_off, np.ones_like(rc_off), err_msg=f"res_corr_on=False must return ones at z={z}"
+        )
         rc_on = np.asarray(ctx_on.mf.res_corr(float(z)))
         assert np.max(np.abs(rc_on - 1.0)) > 1e-3, f"res_corr_on table ~1 at z={z} (no signal)"
 
@@ -116,22 +142,33 @@ def test_norc_forward_drops_log_rc():
     """On the SAME KS grid (ks_kwargs k_max=0.069 override), turning res_corr off multiplies
     P_obs by exp(-log_rc) per row: genuinely different on KS high-k, negligible on DESI low-k."""
     g = np.load(MF_GOLDEN, allow_pickle=True)
-    theta9 = jnp.asarray(g["theta9"]); alpha3 = jnp.asarray(g["alpha3"])
+    theta9 = jnp.asarray(g["theta9"])
+    alpha3 = jnp.asarray(g["alpha3"])
     ctx_on, _ = C.build_legb_ctx(with_mf=True, mf_with_floor=True)
-    ctx_off, _ = C.build_legb_ctx(with_mf=True, mf_with_floor=True, res_corr_on=False,
-                                  ks_kwargs={"k_max": 0.069})
+    ctx_off, _ = C.build_legb_ctx(
+        with_mf=True, mf_with_floor=True, res_corr_on=False, ks_kwargs={"k_max": 0.069}
+    )
     on_legs = {l.name: l for l in ctx_on.legs}
     off_legs = {l.name: l for l in ctx_off.legs}
 
     # KS: nonzero, tracks exp(-log_rc)
     ks_on, ks_off = on_legs["KS"], off_legs["KS"]
-    assert np.asarray(ks_on.k).shape == np.asarray(ks_off.k).shape, "KS grid drifted (override failed)"
+    assert (
+        np.asarray(ks_on.k).shape == np.asarray(ks_off.k).shape
+    ), "KS grid drifted (override failed)"
     P_on = _fwd(ctx_on, ks_on, theta9, alpha3)
     P_off = _fwd(ctx_off, ks_off, theta9, alpha3)
     log_rc_KS = _expected_log_rc(ctx_on, ks_on)
-    assert np.max(np.abs(P_off / P_on - 1.0)) > 1e-4, "KS: NORC did not change P (res_corr not dropped)"
-    np.testing.assert_allclose(P_off / P_on, np.exp(-log_rc_KS), rtol=1e-5, atol=2e-5,
-                               err_msg="KS: P_off/P_on != exp(-log_rc)")
+    assert (
+        np.max(np.abs(P_off / P_on - 1.0)) > 1e-4
+    ), "KS: NORC did not change P (res_corr not dropped)"
+    np.testing.assert_allclose(
+        P_off / P_on,
+        np.exp(-log_rc_KS),
+        rtol=1e-5,
+        atol=2e-5,
+        err_msg="KS: P_off/P_on != exp(-log_rc)",
+    )
 
     # DESI: the SAME exp(-log_rc) mechanism holds; the shift is concentrated at DESI's high-k
     # bins (res_corr < 1 ABOVE the 5*kbox anchor, ~2-3%) and is ~0 at the anchored low-k bins.
@@ -139,8 +176,13 @@ def test_norc_forward_drops_log_rc():
     Pd_on = _fwd(ctx_on, d_on, theta9, alpha3)
     Pd_off = _fwd(ctx_off, d_off, theta9, alpha3)
     log_rc_DESI = _expected_log_rc(ctx_on, d_on)
-    np.testing.assert_allclose(Pd_off / Pd_on, np.exp(-log_rc_DESI), rtol=1e-5, atol=2e-5,
-                               err_msg="DESI: P_off/P_on != exp(-log_rc)")
+    np.testing.assert_allclose(
+        Pd_off / Pd_on,
+        np.exp(-log_rc_DESI),
+        rtol=1e-5,
+        atol=2e-5,
+        err_msg="DESI: P_off/P_on != exp(-log_rc)",
+    )
     # the anchored low-k DESI bins (res_corr ~ 1 => log_rc ~ 0) are negligibly shifted (the
     # design's "near-no-op on DESI's constraining low-k" claim); high-k CAN move a few percent.
     lowk = np.abs(log_rc_DESI) < 1e-3
@@ -168,7 +210,10 @@ def test_norc_ks_kmax_cap():
     assert np.asarray(ks_norc.k).max() <= 0.045 + 1e-9, "NORC did not cap KS at 0.045"
 
     # explicit override wins over the NORC default
-    ctx_ov, _ = C.build_legb_ctx(with_mf=True, mf_with_floor=True, res_corr_on=False,
-                                 ks_kwargs={"k_max": 0.069})
+    ctx_ov, _ = C.build_legb_ctx(
+        with_mf=True, mf_with_floor=True, res_corr_on=False, ks_kwargs={"k_max": 0.069}
+    )
     ks_ov = [l for l in ctx_ov.legs if l.name == "KS"][0]
-    assert np.asarray(ks_ov.k).max() > 0.045, "explicit ks_kwargs k_max should override the NORC cap"
+    assert (
+        np.asarray(ks_ov.k).max() > 0.045
+    ), "explicit ks_kwargs k_max should override the NORC cap"

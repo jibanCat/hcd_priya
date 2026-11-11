@@ -20,6 +20,7 @@ post-1876a14 (by-name indexing, exact t-quantile pooling, smoke filtering) with 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python -m pytest tests/test_analyze_ks_selboost.py -q
 """
+
 import pickle
 
 import numpy as np
@@ -30,12 +31,19 @@ import scripts.analyze_ks_selboost as AN
 
 SIG = "68f71a3d" + "0" * 56
 NAMES = ["ns", "Ap", "tau0_z0", "alpha_lls", "alpha_subdla", "alpha_dla"]
-ZG = [2.2, 2.4, 3.0, 3.6, 4.4]          # includes one sub-KS-band row (the DESI-union row)
-PRIOR = dict(lls_survey_boost_ks=2.5, lls_frac_sigma_ks=0.40, lit_over_sim_lls=0.995,
-             lit_over_sim_slope_lls=0.764, lls_base_frac_sigma=0.287,
-             lls_hedge2x_frac_sigma=0.574, lls_realfit_zslope=2.127,
-             hcd_prior_signature="p" * 64, alpha_lls_center_built=0.4303,
-             alpha_lls_sigma_built=0.17212)
+ZG = [2.2, 2.4, 3.0, 3.6, 4.4]  # includes one sub-KS-band row (the DESI-union row)
+PRIOR = dict(
+    lls_survey_boost_ks=2.5,
+    lls_frac_sigma_ks=0.40,
+    lit_over_sim_lls=0.995,
+    lit_over_sim_slope_lls=0.764,
+    lls_base_frac_sigma=0.287,
+    lls_hedge2x_frac_sigma=0.574,
+    lls_realfit_zslope=2.127,
+    hcd_prior_signature="p" * 64,
+    alpha_lls_center_built=0.4303,
+    alpha_lls_sigma_built=0.17212,
+)
 RUN_KW = dict(n_warmup=250, n_samples=300, seed=20260615, dense_mass=True, max_tree_depth=10)
 REG_SIG = AR.registry_signature()
 
@@ -44,10 +52,12 @@ TEST_ARMS = {
     "K2_flat_hi": {"lls_truth_boost": {"b_pivot": 1.667, "eta1": 0.0, "eta2": 0.0}},
     "K3_rising": {"lls_truth_boost": {"b_pivot": 1.25, "eta1": 2.7, "eta2": 0.0}},
     "K5_joint_meas": {
-        "lls_truth_boost": {"z": [2.0, 3.0, 5.0], "boost": [1.12, 1.048, 1.03],
-                            "interp": "loglog"},
-        "subdla_truth_boost": {"z": [2.0, 3.0, 5.0], "boost": [1.29, 1.162, 1.07],
-                               "interp": "loglog"},
+        "lls_truth_boost": {"z": [2.0, 3.0, 5.0], "boost": [1.12, 1.048, 1.03], "interp": "loglog"},
+        "subdla_truth_boost": {
+            "z": [2.0, 3.0, 5.0],
+            "boost": [1.29, 1.162, 1.07],
+            "interp": "loglog",
+        },
     },
 }
 N_BY_ARM = {"K0_clean": 3, "K2_flat_hi": 3, "K3_rising": 3, "K5_joint_meas": 2}
@@ -56,8 +66,10 @@ N_BY_ARM = {"K0_clean": 3, "K2_flat_hi": 3, "K3_rising": 3, "K5_joint_meas": 2}
 def _profiles_B(arm, z):
     spec = TEST_ARMS.get(arm)
     if spec is None:
-        return {"lls_truth_boost": np.ones(len(np.atleast_1d(z))),
-                "subdla_truth_boost": np.ones(len(np.atleast_1d(z)))}
+        return {
+            "lls_truth_boost": np.ones(len(np.atleast_1d(z))),
+            "subdla_truth_boost": np.ones(len(np.atleast_1d(z))),
+        }
     out = {}
     for cls, prof in spec.items():
         out[cls] = np.atleast_1d(AR.eval_profile(prof, np.asarray(z, float)))
@@ -69,8 +81,13 @@ def _rec(truth, mean_shift=0.0, L=90, seed=0, alpha_z=None):
     truth = np.asarray(truth, float)
     draws = rng.normal(truth + mean_shift, 0.05, size=(L, len(NAMES)))
     return {
-        "sim": "leg_a_prior", "truth_vec": truth, "draws": draws, "L": L,
-        "names": list(NAMES), "kept_global": np.ones(len(ZG), bool), "n_div": 0,
+        "sim": "leg_a_prior",
+        "truth_vec": truth,
+        "draws": draws,
+        "L": L,
+        "names": list(NAMES),
+        "kept_global": np.ones(len(ZG), bool),
+        "n_div": 0,
         "truth_alpha_hcd_z": np.asarray(alpha_z, float),
         "sites_extra": {
             "tau0_amp": {"draws": rng.normal(1.0, 0.02, L), "truth": 1.0},
@@ -103,30 +120,55 @@ def _boosted(tv, alpha_z, arm):
 
 def _meta(arm, n_mocks, **over):
     m = dict(
-        arm_id=arm, n_mocks=n_mocks, seed=20260615, mode=("clean" if arm == "K0_clean"
-                                                          else "boost"),
+        arm_id=arm,
+        n_mocks=n_mocks,
+        seed=20260615,
+        mode=("clean" if arm == "K0_clean" else "boost"),
         run_kw=dict(RUN_KW, n_mocks=n_mocks),
-        forward=dict(res_corr_on=False, fix_alpha_res=True, sample_res=True,
-                     f_res_amp_sigma=0.15, metal_prior="uniform", dla_forward_frac=0.0,
-                     forward_signature=SIG, hcd_prior_signature=PRIOR["hcd_prior_signature"]),
+        forward=dict(
+            res_corr_on=False,
+            fix_alpha_res=True,
+            sample_res=True,
+            f_res_amp_sigma=0.15,
+            metal_prior="uniform",
+            dla_forward_frac=0.0,
+            forward_signature=SIG,
+            hcd_prior_signature=PRIOR["hcd_prior_signature"],
+        ),
         prior_constants=dict(PRIOR),
-        arm_stamp=dict(arm_id=arm, profiles=TEST_ARMS.get(arm),
-                       B_pivot={cls: AR.eval_profile(p, 3.0)
-                                for cls, p in (TEST_ARMS.get(arm) or {}).items()},
-                       B_z_global={cls: list(v) for cls, v in _profiles_B(arm, ZG).items()
-                                   if TEST_ARMS.get(arm) and cls in TEST_ARMS[arm]},
-                       z_global=list(ZG), registry_signature=REG_SIG,
-                       envelope=("in" if arm != "K1_flat_lo" else "out"), k5_table=None),
-        span=dict(cache_alpha_max=[1.0, 1.0, 1.0], truth_alpha_max=[0.5, 0.2, 0.05],
-                  out_of_span_classes=[]),
+        arm_stamp=dict(
+            arm_id=arm,
+            profiles=TEST_ARMS.get(arm),
+            B_pivot={cls: AR.eval_profile(p, 3.0) for cls, p in (TEST_ARMS.get(arm) or {}).items()},
+            B_z_global={
+                cls: list(v)
+                for cls, v in _profiles_B(arm, ZG).items()
+                if TEST_ARMS.get(arm) and cls in TEST_ARMS[arm]
+            },
+            z_global=list(ZG),
+            registry_signature=REG_SIG,
+            envelope=("in" if arm != "K1_flat_lo" else "out"),
+            k5_table=None,
+        ),
+        span=dict(
+            cache_alpha_max=[1.0, 1.0, 1.0],
+            truth_alpha_max=[0.5, 0.2, 0.05],
+            out_of_span_classes=[],
+        ),
     )
     m.update(over)
     return m
 
 
 def _pkl(path, arm, mock, rec, n_mocks, **meta_over):
-    payload = dict(arm=arm, survey="ks", mode=("clean" if arm == "K0_clean" else "boost"),
-                   idxs=[mock], per_mock=[rec], meta=_meta(arm, n_mocks, **meta_over))
+    payload = dict(
+        arm=arm,
+        survey="ks",
+        mode=("clean" if arm == "K0_clean" else "boost"),
+        idxs=[mock],
+        per_mock=[rec],
+        meta=_meta(arm, n_mocks, **meta_over),
+    )
     with open(path, "wb") as f:
         pickle.dump(payload, f)
 
@@ -149,9 +191,14 @@ def _write_campaign(tmp_path, bias=None, mutate=None):
                     shift[j] = s
                 rec = _rec(tvb, mean_shift=shift, seed=m, alpha_z=azb)
                 name = f"ks_selboost_{arm}_shard_{m:03d}.pkl"
-            payload = dict(arm=arm, survey="ks",
-                           mode=("clean" if arm == "K0_clean" else "boost"),
-                           idxs=[m], per_mock=[rec], meta=_meta(arm, n))
+            payload = dict(
+                arm=arm,
+                survey="ks",
+                mode=("clean" if arm == "K0_clean" else "boost"),
+                idxs=[m],
+                per_mock=[rec],
+                meta=_meta(arm, n),
+            )
             if mutate is not None:
                 mutate(payload, name)
             with open(tmp_path / name, "wb") as f:
@@ -178,12 +225,15 @@ def test_ingest_filters_smoke(tmp_path):
     assert len(arms["K3_rising"]) == 3
 
 
-@pytest.mark.parametrize("field,frag", [
-    ("forward_signature", "signature"),
-    ("registry_signature", "registry"),
-    ("prior", "prior"),
-    ("run_kw", "run_kw"),
-])
+@pytest.mark.parametrize(
+    "field,frag",
+    [
+        ("forward_signature", "signature"),
+        ("registry_signature", "registry"),
+        ("prior", "prior"),
+        ("run_kw", "run_kw"),
+    ],
+)
 def test_ingest_rejects_mixed_stamps(tmp_path, field, frag):
     def mutate(payload, name):
         if "K3_rising_shard_001" not in name:
@@ -196,6 +246,7 @@ def test_ingest_rejects_mixed_stamps(tmp_path, field, frag):
             payload["meta"]["prior_constants"]["lls_frac_sigma_ks"] = 0.29
         elif field == "run_kw":
             payload["meta"]["run_kw"]["n_samples"] = 600
+
     _write_campaign(tmp_path, mutate=mutate)
     with pytest.raises(AssertionError, match=frag):
         AN.load_campaign(str(tmp_path))
@@ -204,7 +255,8 @@ def test_ingest_rejects_mixed_stamps(tmp_path, field, frag):
 def test_ingest_rejects_theta_pairing_violation(tmp_path):
     def mutate(payload, name):
         if "K2_flat_hi_shard_000" in name:
-            payload["per_mock"][0]["truth_vec"][0] += 1e-6      # theta drifts vs clean partner
+            payload["per_mock"][0]["truth_vec"][0] += 1e-6  # theta drifts vs clean partner
+
     _write_campaign(tmp_path, mutate=mutate)
     with pytest.raises(AssertionError, match="theta"):
         AN.load_campaign(str(tmp_path))
@@ -213,7 +265,8 @@ def test_ingest_rejects_theta_pairing_violation(tmp_path):
 def test_ingest_rejects_pivot_contract_violation(tmp_path):
     def mutate(payload, name):
         if "K2_flat_hi_shard_000" in name:
-            payload["per_mock"][0]["truth_vec"][3] *= 1.01      # pivot != B(3) x clean
+            payload["per_mock"][0]["truth_vec"][3] *= 1.01  # pivot != B(3) x clean
+
     _write_campaign(tmp_path, mutate=mutate)
     with pytest.raises(AssertionError, match="pivot"):
         AN.load_campaign(str(tmp_path))
@@ -223,6 +276,7 @@ def test_ingest_rejects_row_contract_violation(tmp_path):
     def mutate(payload, name):
         if "K3_rising_shard_002" in name:
             payload["per_mock"][0]["truth_alpha_hcd_z"][2, 0] *= 1.001
+
     _write_campaign(tmp_path, mutate=mutate)
     with pytest.raises(AssertionError, match="row"):
         AN.load_campaign(str(tmp_path))
@@ -231,7 +285,8 @@ def test_ingest_rejects_row_contract_violation(tmp_path):
 def test_ingest_rejects_nonboosted_truth_drift(tmp_path):
     def mutate(payload, name):
         if "K2_flat_hi_shard_001" in name:
-            payload["per_mock"][0]["truth_alpha_hcd_z"][1, 1] *= 1.001   # subDLA row (not K5)
+            payload["per_mock"][0]["truth_alpha_hcd_z"][1, 1] *= 1.001  # subDLA row (not K5)
+
     _write_campaign(tmp_path, mutate=mutate)
     with pytest.raises(AssertionError):
         AN.load_campaign(str(tmp_path))
@@ -241,6 +296,7 @@ def test_ingest_k5_subdla_row_contract_enforced(tmp_path):
     def mutate(payload, name):
         if "K5_joint_meas_shard_001" in name:
             payload["per_mock"][0]["truth_alpha_hcd_z"][3, 1] *= 1.001
+
     _write_campaign(tmp_path, mutate=mutate)
     with pytest.raises(AssertionError):
         AN.load_campaign(str(tmp_path))
@@ -257,8 +313,10 @@ def test_ingest_rejects_registry_drift(tmp_path):
     """A campaign whose pkls were stamped under a DIFFERENT registry than the current module
     (homogeneous among themselves) must be rejected: gate membership is read from the live
     registry, so silent drift would change the binding gate set."""
+
     def mutate(payload, name):
-        payload["meta"]["arm_stamp"]["registry_signature"] = "d" * 64   # homogeneous but stale
+        payload["meta"]["arm_stamp"]["registry_signature"] = "d" * 64  # homogeneous but stale
+
     _write_campaign(tmp_path, mutate=mutate)
     with pytest.raises(AssertionError, match="CURRENT|registry"):
         AN.load_campaign(str(tmp_path))
@@ -304,6 +362,7 @@ def test_ingest_rejects_stamped_B_mismatch(tmp_path):
     def mutate(payload, name):
         if "K3_rising_shard_000" in name:
             payload["meta"]["arm_stamp"]["B_z_global"]["lls_truth_boost"][2] *= 1.01
+
     _write_campaign(tmp_path, mutate=mutate)
     with pytest.raises(AssertionError, match="B_z|stamped"):
         AN.load_campaign(str(tmp_path))
@@ -323,15 +382,18 @@ def test_design_coords_flat_and_slope_and_quad():
     # pure log-quadratic member recovered exactly (basis-exact)
     lnB = np.log(1.25) + 2.7 * x + 13.0 * x * x
     dA, de1, de2, r = AN.design_coords(lnB, z)
-    assert (dA, de1, de2) == (pytest.approx(np.log(1.25), rel=1e-9),
-                              pytest.approx(2.7, rel=1e-9), pytest.approx(13.0, rel=1e-9))
+    assert (dA, de1, de2) == (
+        pytest.approx(np.log(1.25), rel=1e-9),
+        pytest.approx(2.7, rel=1e-9),
+        pytest.approx(13.0, rel=1e-9),
+    )
     assert r == pytest.approx(0.0, abs=1e-9)
 
 
 def test_displacement_scalar_flat():
     z = np.linspace(2.4, 4.6, 12)
     D = AN.displacement_D(np.log(1.667) * np.ones(z.size), 0.40)
-    assert D == pytest.approx(abs(np.log(1.667)) / 0.40, rel=1e-12)   # = 1.278
+    assert D == pytest.approx(abs(np.log(1.667)) / 0.40, rel=1e-12)  # = 1.278
 
 
 def test_arm_coordinates_restrict_to_ks_band(tmp_path):
@@ -352,7 +414,7 @@ def test_arm_coordinates_restrict_to_ks_band(tmp_path):
 def test_pooled_surface_recovers_linear_response(tmp_path):
     # inject a pure amplitude response on ns: delta = S_A * dA  (S_A = 0.5/ln-unit)
     S_A = 0.5
-    d2 = S_A * np.log(1.667) * 0.05      # posterior sd is 0.05 -> mean shift in raw units
+    d2 = S_A * np.log(1.667) * 0.05  # posterior sd is 0.05 -> mean shift in raw units
     d3 = S_A * np.log(1.25) * 0.05
     _write_campaign(tmp_path, bias={"K2_flat_hi": {0: d2}, "K3_rising": {0: d3}})
     res = AN.summarize_campaign(str(tmp_path))
@@ -391,7 +453,7 @@ def test_report_runs_and_mentions_tau0(tmp_path, capsys):
     _write_campaign(tmp_path)
     AN.main_report(str(tmp_path))
     out = capsys.readouterr().out
-    assert "tau0_amp" in out and "dtau0" in out          # mandatory tau0/dtau0 reporting
+    assert "tau0_amp" in out and "dtau0" in out  # mandatory tau0/dtau0 reporting
     assert "PART 1" in out and "PART 2" in out and "PART 3" in out
     assert "alpha_lls" in out
 
@@ -406,7 +468,8 @@ _MAPPED_GEOM = dict(
     alpha_lls_mapped_pivot_center=0.3932,
     ks_dndx_ref_z=[[0.013, 0.004, 0.001]] * len(ZG),
     ks_xbar_z=[30.0] * len(ZG),
-    ks_dndx_sigma_eps=0.5310, ks_dndx_sigma_kappa=0.6681,
+    ks_dndx_sigma_eps=0.5310,
+    ks_dndx_sigma_kappa=0.6681,
 )
 
 
@@ -444,6 +507,7 @@ def test_mixed_era_campaign_refused(tmp_path):
     def _mutate_one_arm(payload, name):
         if payload["arm"] == "K2_flat_hi":
             _mapped_mutate(payload, name)
+
     _write_campaign(tmp_path, mutate=_mutate_one_arm)
     with pytest.raises(AssertionError, match="ERA mismatch|prior_constants|hcd_prior"):
         AN.load_campaign(str(tmp_path))

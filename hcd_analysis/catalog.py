@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 # (tests/test_catalog_systems.py) and, after review, the new id to RELEASE_FINDER_IDS.
 FINDER_ID = "hcd_priya.finder/2"
 RELEASE_FINDER_IDS = frozenset({FINDER_ID})
-CATALOG_KIND_VERSION = 2          # catalog.npz layout: the seven entry arrays, four scalars, lineage_json
+CATALOG_KIND_VERSION = 2  # catalog.npz layout: the seven entry arrays, four scalars, lineage_json
 
 # ---------------------------------------------------------------------------
 # Classification thresholds (log10 NHI)
@@ -96,36 +96,43 @@ def classify_system(NHI: float) -> str:
 # Absorber data structure
 # ---------------------------------------------------------------------------
 
+
 @dataclasses.dataclass
 class Absorber:
-    skewer_idx: int       # row index in the HDF5 file
-    pix_start: int        # first pixel index (inclusive)
-    pix_end: int          # last pixel index (inclusive)
-    v_center: float       # velocity of flux minimum (km/s from skewer start)
-    NHI: float            # column density (cm^-2)
-    b_kms: float          # Doppler parameter (km/s); NaN if fast-mode estimate
-    log_NHI: float        # log10(NHI)
-    absorber_class: str   # "LLS" | "subDLA" | "DLA" | "forest"
-    fit_success: bool     # True if Voigt fit converged
-    fast_mode: bool       # True if NHI came from fast estimator
+    skewer_idx: int  # row index in the HDF5 file
+    pix_start: int  # first pixel index (inclusive)
+    pix_end: int  # last pixel index (inclusive)
+    v_center: float  # velocity of flux minimum (km/s from skewer start)
+    NHI: float  # column density (cm^-2)
+    b_kms: float  # Doppler parameter (km/s); NaN if fast-mode estimate
+    log_NHI: float  # log10(NHI)
+    absorber_class: str  # "LLS" | "subDLA" | "DLA" | "forest"
+    fit_success: bool  # True if Voigt fit converged
+    fast_mode: bool  # True if NHI came from fast estimator
 
 
 @dataclasses.dataclass
 class AbsorberCatalog:
     """Collection of absorbers for one (sim, snap)."""
+
     sim_name: str
     snap: int
     z: float
     dv_kms: float
     absorbers: List[Absorber] = dataclasses.field(default_factory=list)
-    lineage: Optional[dict] = None             # the hcd_priya.lineage/1 record (build_catalog, load_npz)
-    historical_reason: Optional[str] = None    # set by load_catalog_historical only
-    original_lineage_json: Optional[str] = None   # load_catalog_historical: the stored record's text, audit only
+    lineage: Optional[dict] = None  # the hcd_priya.lineage/1 record (build_catalog, load_npz)
+    historical_reason: Optional[str] = None  # set by load_catalog_historical only
+    original_lineage_json: Optional[str] = (
+        None  # load_catalog_historical: the stored record's text, audit only
+    )
 
     @property
     def release_eligible(self) -> bool:
-        return (self.historical_reason is None and self.lineage is not None
-                and self.lineage.get("release_eligible") is True)
+        return (
+            self.historical_reason is None
+            and self.lineage is not None
+            and self.lineage.get("release_eligible") is True
+        )
 
     def by_class(self, cls: str) -> List[Absorber]:
         return [a for a in self.absorbers if a.absorber_class == cls]
@@ -160,15 +167,16 @@ class AbsorberCatalog:
         """
         arrays = {
             "skewer_idx": np.array([a.skewer_idx for a in self.absorbers], dtype=np.int32),
-            "pix_start":  np.array([a.pix_start  for a in self.absorbers], dtype=np.int32),
-            "pix_end":    np.array([a.pix_end    for a in self.absorbers], dtype=np.int32),
-            "NHI":        np.array([a.NHI        for a in self.absorbers], dtype=np.float64),
-            "log_nhi":    np.array([a.log_NHI    for a in self.absorbers], dtype=np.float64),
-            "b_kms":      np.array([a.b_kms      for a in self.absorbers], dtype=np.float64),
+            "pix_start": np.array([a.pix_start for a in self.absorbers], dtype=np.int32),
+            "pix_end": np.array([a.pix_end for a in self.absorbers], dtype=np.int32),
+            "NHI": np.array([a.NHI for a in self.absorbers], dtype=np.float64),
+            "log_nhi": np.array([a.log_NHI for a in self.absorbers], dtype=np.float64),
+            "b_kms": np.array([a.b_kms for a in self.absorbers], dtype=np.float64),
             "absorber_class": np.array([a.absorber_class for a in self.absorbers]),
         }
         try:
             import pandas as pd
+
             return pd.DataFrame(arrays)
         except ImportError:
             return arrays  # plain dict of numpy arrays — works with compute_p1d_excl_nhi
@@ -193,19 +201,26 @@ class AbsorberCatalog:
     def save_npz(self, path: str | Path) -> None:
         """Write catalog.npz with its lineage record. Refused (CatalogProvenanceError) unless the catalogue carries the
         record build_catalog stamped with a finder id, and its entries are still the ones that record digested: a
-        catalogue read by load_catalog_historical, or changed after it was built, cannot be written."""
+        catalogue read by load_catalog_historical, or changed after it was built, cannot be written.
+        """
         rec = self.lineage
         if self.historical_reason is not None:
-            raise CatalogProvenanceError(f"{path}: a catalogue read as historical ({self.historical_reason}) is never "
-                                         "written again")
+            raise CatalogProvenanceError(
+                f"{path}: a catalogue read as historical ({self.historical_reason}) is never "
+                "written again"
+            )
         if rec is None or rec.get("kind") != "catalog" or not rec.get("finder_ids"):
-            raise CatalogProvenanceError(f"{path}: refusing to save a catalogue without a finder-stamped lineage record "
-                                         "(only build_catalog, with the finder cross-check run, stamps one)")
+            raise CatalogProvenanceError(
+                f"{path}: refusing to save a catalogue without a finder-stamped lineage record "
+                "(only build_catalog, with the finder cross-check run, stamps one)"
+            )
         try:
             L.write_npz(path, self._arrays(), rec)
         except L.LineageError as e:
-            raise CatalogProvenanceError(f"{path}: refusing to save: {e} (the catalogue was changed after "
-                                         "build_catalog stamped it)") from None
+            raise CatalogProvenanceError(
+                f"{path}: refusing to save: {e} (the catalogue was changed after "
+                "build_catalog stamped it)"
+            ) from None
 
     @classmethod
     def load_npz(cls, path: str | Path) -> "AbsorberCatalog":
@@ -221,9 +236,12 @@ class AbsorberCatalog:
             raise CatalogProvenanceError(
                 f"{path}: no lineage record: written before catalogues carried one (before the box-edge fix, "
                 "docs/bugs_found.md, bug 8, or by a pre-lineage build). It is historical: read it with "
-                "load_catalog_historical(path, reason=...), or rebuild it")
+                "load_catalog_historical(path, reason=...), or rebuild it"
+            )
         if rec["kind"] != "catalog":
-            raise CatalogProvenanceError(f"{path}: the lineage record describes a {rec['kind']!r}, not a catalog")
+            raise CatalogProvenanceError(
+                f"{path}: the lineage record describes a {rec['kind']!r}, not a catalog"
+            )
         cat = cls._from_arrays(arrays)
         cat.lineage = rec
         return cat
@@ -250,24 +268,27 @@ class AbsorberCatalog:
         absorbers = cat.absorbers
         for i in range(len(si)):
             NHI_i = float(NHI[i])
-            absorbers.append(Absorber(
-                skewer_idx=int(si[i]),
-                pix_start=int(ps[i]),
-                pix_end=int(pe[i]),
-                v_center=float(ps[i] + pe[i]) / 2.0 * dv,
-                NHI=NHI_i,
-                b_kms=float(bkms[i]),
-                log_NHI=float(log_NHI_arr[i]),
-                absorber_class=classify_system(NHI_i),
-                fit_success=bool(fs[i]),
-                fast_mode=bool(fm[i]),
-            ))
+            absorbers.append(
+                Absorber(
+                    skewer_idx=int(si[i]),
+                    pix_start=int(ps[i]),
+                    pix_end=int(pe[i]),
+                    v_center=float(ps[i] + pe[i]) / 2.0 * dv,
+                    NHI=NHI_i,
+                    b_kms=float(bkms[i]),
+                    log_NHI=float(log_NHI_arr[i]),
+                    absorber_class=classify_system(NHI_i),
+                    fit_success=bool(fs[i]),
+                    fast_mode=bool(fm[i]),
+                )
+            )
         return cat
 
 
 # ---------------------------------------------------------------------------
 # Per-skewer system finder
 # ---------------------------------------------------------------------------
+
 
 def find_systems_in_skewer(
     tau: np.ndarray,
@@ -370,7 +391,7 @@ def find_systems_in_skewer_reference(
     if below.size == 0:
         return [(0, n - 1)] if n >= min_pixels else []
     r = int(below[0])
-    rot = np.roll(above, -r)                                    # rot[0] is below threshold
+    rot = np.roll(above, -r)  # rot[0] is below threshold
     d = np.diff(np.concatenate([[0], rot.astype(np.int8), [0]]))
     starts, ends = np.flatnonzero(d == 1), np.flatnonzero(d == -1) - 1
     runs = []
@@ -384,7 +405,7 @@ def find_systems_in_skewer_reference(
         if len(runs) == 1:
             return [(0, n - 1)] if n >= min_pixels else []
         first = runs.pop(0)
-        runs[-1][1] = first[1] + n                              # the last run continues through the array start
+        runs[-1][1] = first[1] + n  # the last run continues through the array start
     out = []
     for s, e in runs:
         if e - s + 1 >= min_pixels:
@@ -395,7 +416,8 @@ def find_systems_in_skewer_reference(
 
 class CatalogIntegrityError(ValueError):
     """An absorber catalogue failed an integrity check (independent finders disagree, entries overlap, counts do not
-    reconcile, or a cached catalogue loaded for reuse is invalid). Nothing is written past a failed check."""
+    reconcile, or a cached catalogue loaded for reuse is invalid). Nothing is written past a failed check.
+    """
 
 
 class CatalogProvenanceError(CatalogIntegrityError):
@@ -418,40 +440,79 @@ def find_wrap_duplicates(skewer_idx, pix_start, pix_end, n: int) -> np.ndarray:
     return ((~wrap) & np.isin(key, target)) | (pe - ps + 1 > n)
 
 
-def finder_settings(*, tau_threshold, merge_dv_kms, min_pixels, b_init, b_bounds, tau_fit_cap, voigt_max_iter,
-                    n_skewers, fast_mode, min_log_nhi) -> dict:
+def finder_settings(
+    *,
+    tau_threshold,
+    merge_dv_kms,
+    min_pixels,
+    b_init,
+    b_bounds,
+    tau_fit_cap,
+    voigt_max_iter,
+    n_skewers,
+    fast_mode,
+    min_log_nhi,
+) -> dict:
     """The catalogue-determining settings, as build_catalog records them (and as a caller compares them before reusing
     a catalogue). The Voigt-only settings are recorded in fast mode too."""
-    return L.canonicalise({
-        "tau_threshold": float(tau_threshold), "merge_dv_kms": float(merge_dv_kms), "min_pixels": int(min_pixels),
-        "b_init_kms": float(b_init), "b_bounds": [float(b_bounds[0]), float(b_bounds[1])],
-        "tau_fit_cap": float(tau_fit_cap), "voigt_max_iter": int(voigt_max_iter),
-        "n_skewers": None if n_skewers is None else int(n_skewers), "fast_mode": bool(fast_mode),
-        "min_log_nhi": float(min_log_nhi), "lls_only_above": True,
-    })
+    return L.canonicalise(
+        {
+            "tau_threshold": float(tau_threshold),
+            "merge_dv_kms": float(merge_dv_kms),
+            "min_pixels": int(min_pixels),
+            "b_init_kms": float(b_init),
+            "b_bounds": [float(b_bounds[0]), float(b_bounds[1])],
+            "tau_fit_cap": float(tau_fit_cap),
+            "voigt_max_iter": int(voigt_max_iter),
+            "n_skewers": None if n_skewers is None else int(n_skewers),
+            "fast_mode": bool(fast_mode),
+            "min_log_nhi": float(min_log_nhi),
+            "lls_only_above": True,
+        }
+    )
 
 
 # The finder settings of the release catalogues (config/default.yaml, absorber section, all skewers). A release consumer
 # compares a catalogue's recorded settings with these (release eligibility is provenance only); a test pins them to
 # the configuration file.
-RELEASE_FINDER_SETTINGS = finder_settings(tau_threshold=100.0, merge_dv_kms=100.0, min_pixels=2, b_init=30.0,
-                                          b_bounds=(1.0, 300.0), tau_fit_cap=1.0e6, voigt_max_iter=200,
-                                          n_skewers=None, fast_mode=True, min_log_nhi=17.2)
+RELEASE_FINDER_SETTINGS = finder_settings(
+    tau_threshold=100.0,
+    merge_dv_kms=100.0,
+    min_pixels=2,
+    b_init=30.0,
+    b_bounds=(1.0, 300.0),
+    tau_fit_cap=1.0e6,
+    voigt_max_iter=200,
+    n_skewers=None,
+    fast_mode=True,
+    min_log_nhi=17.2,
+)
 
 
-def check_catalog_record(cat: "AbsorberCatalog", nbins: Optional[int] = None, *, settings: Optional[dict] = None,
-                         raw_path=None, n_skewers_built: Optional[int] = None,
-                         require_release_eligible: bool = False) -> dict:
+def check_catalog_record(
+    cat: "AbsorberCatalog",
+    nbins: Optional[int] = None,
+    *,
+    settings: Optional[dict] = None,
+    raw_path=None,
+    n_skewers_built: Optional[int] = None,
+    require_release_eligible: bool = False,
+) -> dict:
     """Refuse (CatalogProvenanceError) a catalogue whose lineage record is not that of a catalogue built by an allowed
     finder with the cross-check run, or that differs from what the caller expects: the skewer length ``nbins``, the
     finder ``settings`` (``finder_settings``), the raw spectra file ``raw_path`` (its sha256; a matching size and mtime
     are accepted without rereading), the number of skewers searched, and, with ``require_release_eligible``, release
     eligibility. A release-eligible load must state all three expectations (``settings``, usually
     ``RELEASE_FINDER_SETTINGS``, ``raw_path`` and ``n_skewers_built``, the file's skewer count) and refuses a partial
-    build (a recorded skewer limit, or fewer skewers than the raw file holds). Returns the record."""
-    if require_release_eligible and (settings is None or raw_path is None or n_skewers_built is None):
-        raise CatalogProvenanceError("a release-eligible load must state the expected finder settings, raw spectra "
-                                     "file and skewer count (settings, raw_path, n_skewers_built)")
+    build (a recorded skewer limit, or fewer skewers than the raw file holds). Returns the record.
+    """
+    if require_release_eligible and (
+        settings is None or raw_path is None or n_skewers_built is None
+    ):
+        raise CatalogProvenanceError(
+            "a release-eligible load must state the expected finder settings, raw spectra "
+            "file and skewer count (settings, raw_path, n_skewers_built)"
+        )
     rec = cat.lineage
     if cat.historical_reason is not None:
         raise CatalogProvenanceError(f"read as historical ({cat.historical_reason}); never reused")
@@ -462,16 +523,25 @@ def check_catalog_record(cat: "AbsorberCatalog", nbins: Optional[int] = None, *,
     except L.LineageError as e:
         raise CatalogProvenanceError(str(e)) from None
     if rec["kind"] != "catalog" or rec["kind_version"] != CATALOG_KIND_VERSION:
-        raise CatalogProvenanceError(f"a {rec['kind']} record of version {rec['kind_version']}, not catalog "
-                                     f"{CATALOG_KIND_VERSION}")
+        raise CatalogProvenanceError(
+            f"a {rec['kind']} record of version {rec['kind_version']}, not catalog "
+            f"{CATALOG_KIND_VERSION}"
+        )
     bad = [f for f in rec["finder_ids"] if f not in RELEASE_FINDER_IDS]
     if not rec["finder_ids"] or bad:
-        raise CatalogProvenanceError(f"finder ids {rec['finder_ids']} are not in the release allow-list "
-                                     f"{sorted(RELEASE_FINDER_IDS)}")
+        raise CatalogProvenanceError(
+            f"finder ids {rec['finder_ids']} are not in the release allow-list "
+            f"{sorted(RELEASE_FINDER_IDS)}"
+        )
     prod = rec["product"]
-    if not (isinstance(prod.get("payload_sha256"), str) and len(prod["payload_sha256"]) == 64
-            and prod["payload_sha256"] == L.arrays_sha256(cat._arrays())):
-        raise CatalogProvenanceError("the record's payload_sha256 is missing or is not the digest of the entries")
+    if not (
+        isinstance(prod.get("payload_sha256"), str)
+        and len(prod["payload_sha256"]) == 64
+        and prod["payload_sha256"] == L.arrays_sha256(cat._arrays())
+    ):
+        raise CatalogProvenanceError(
+            "the record's payload_sha256 is missing or is not the digest of the entries"
+        )
     finder = prod.get("finder") or {}
     if finder.get("verified") is not True:
         raise CatalogProvenanceError("the record does not say the finder cross-check ran")
@@ -480,17 +550,24 @@ def check_catalog_record(cat: "AbsorberCatalog", nbins: Optional[int] = None, *,
     if mine != theirs:
         raise CatalogProvenanceError(f"the record describes {theirs}, the file holds {mine}")
     if nbins is not None and prod.get("nbins") != int(nbins):
-        raise CatalogProvenanceError(f"built on skewers of {prod.get('nbins')} pixels, expected {int(nbins)}")
+        raise CatalogProvenanceError(
+            f"built on skewers of {prod.get('nbins')} pixels, expected {int(nbins)}"
+        )
     if settings is not None:
         want = L.canonicalise(settings)
         if rec["settings"] != want:
             from .run_settings import _differences, _lookup
+
             diff = _differences(rec["settings"], want)
-            detail = "; ".join(f"{k}: recorded {_lookup(rec['settings'], k)!r}, expected {_lookup(want, k)!r}"
-                               for k in diff[:12])
+            detail = "; ".join(
+                f"{k}: recorded {_lookup(rec['settings'], k)!r}, expected {_lookup(want, k)!r}"
+                for k in diff[:12]
+            )
             raise CatalogProvenanceError(f"built with other finder settings: {detail}")
     if n_skewers_built is not None and prod.get("n_skewers_built") != int(n_skewers_built):
-        raise CatalogProvenanceError(f"built from {prod.get('n_skewers_built')} skewers, expected {int(n_skewers_built)}")
+        raise CatalogProvenanceError(
+            f"built from {prod.get('n_skewers_built')} skewers, expected {int(n_skewers_built)}"
+        )
     if raw_path is not None:
         try:
             L.verify_input(rec, "raw_spectra", raw_path)
@@ -498,12 +575,18 @@ def check_catalog_record(cat: "AbsorberCatalog", nbins: Optional[int] = None, *,
             raise CatalogProvenanceError(str(e)) from None
     if require_release_eligible:
         if not rec["release_eligible"]:
-            raise CatalogProvenanceError("not release-eligible: " + "; ".join(rec["ineligible_reasons"]))
+            raise CatalogProvenanceError(
+                "not release-eligible: " + "; ".join(rec["ineligible_reasons"])
+            )
         raw_info = L.find_input(rec, "raw_spectra").get("info") or {}
-        if rec["settings"].get("n_skewers") is not None or prod.get("n_skewers_built") != raw_info.get("n_skewers"):
-            raise CatalogProvenanceError(f"a partial build ({prod.get('n_skewers_built')} of "
-                                         f"{raw_info.get('n_skewers')} skewers, limit "
-                                         f"{rec['settings'].get('n_skewers')}); a release catalogue covers the file")
+        if rec["settings"].get("n_skewers") is not None or prod.get(
+            "n_skewers_built"
+        ) != raw_info.get("n_skewers"):
+            raise CatalogProvenanceError(
+                f"a partial build ({prod.get('n_skewers_built')} of "
+                f"{raw_info.get('n_skewers')} skewers, limit "
+                f"{rec['settings'].get('n_skewers')}); a release catalogue covers the file"
+            )
     return rec
 
 
@@ -534,13 +617,21 @@ def _historical_record(rec: dict, reason: str) -> dict:
     out = L.canonicalise(rec)
     out["product"] = dict(out["product"], historical_reason=reason)
     out["release_eligible"] = False
-    out["ineligible_reasons"] = list(out["ineligible_reasons"]) + [f"read by load_catalog_historical: {reason}"]
+    out["ineligible_reasons"] = list(out["ineligible_reasons"]) + [
+        f"read by load_catalog_historical: {reason}"
+    ]
     return L.check_record(out)
 
 
-def load_validated_catalog(path, n: int, *, settings: Optional[dict] = None, raw_path=None,
-                           n_skewers_built: Optional[int] = None,
-                           require_release_eligible: bool = False) -> "AbsorberCatalog":
+def load_validated_catalog(
+    path,
+    n: int,
+    *,
+    settings: Optional[dict] = None,
+    raw_path=None,
+    n_skewers_built: Optional[int] = None,
+    require_release_eligible: bool = False,
+) -> "AbsorberCatalog":
     """The release loader of a cached catalogue. Refused (CatalogIntegrityError, or its subclass
     CatalogProvenanceError for the record) unless:
       1. it carries a lineage record from build_catalog with an allowed finder id and the finder cross-check run, and
@@ -552,28 +643,44 @@ def load_validated_catalog(path, n: int, *, settings: Optional[dict] = None, raw
     with ``load_catalog_historical``, or rebuild it."""
     try:
         cat = AbsorberCatalog.load_npz(path)
-        check_catalog_record(cat, n, settings=settings, raw_path=raw_path, n_skewers_built=n_skewers_built,
-                             require_release_eligible=require_release_eligible)
+        check_catalog_record(
+            cat,
+            n,
+            settings=settings,
+            raw_path=raw_path,
+            n_skewers_built=n_skewers_built,
+            require_release_eligible=require_release_eligible,
+        )
     except CatalogProvenanceError as e:
         msg = str(e)
         prefix = f"{path}: "
-        raise CatalogProvenanceError(f"{path}: cached catalogue refused "
-                                     f"({msg[len(prefix):] if msg.startswith(prefix) else msg})") from None
+        raise CatalogProvenanceError(
+            f"{path}: cached catalogue refused "
+            f"({msg[len(prefix):] if msg.startswith(prefix) else msg})"
+        ) from None
     if cat.absorbers:
         try:
-            validate_catalog_entries([a.skewer_idx for a in cat.absorbers], [a.pix_start for a in cat.absorbers],
-                                     [a.pix_end for a in cat.absorbers], n)
+            validate_catalog_entries(
+                [a.skewer_idx for a in cat.absorbers],
+                [a.pix_start for a in cat.absorbers],
+                [a.pix_end for a in cat.absorbers],
+                n,
+            )
             check_catalog_values(cat)
         except CatalogIntegrityError as e:
-            raise CatalogIntegrityError(f"{path}: cached catalogue refused ({e}); it was built before the box-edge "
-                                        f"fix (docs/bugs_found.md, bug 8) or is damaged; rebuild it") from None
+            raise CatalogIntegrityError(
+                f"{path}: cached catalogue refused ({e}); it was built before the box-edge "
+                f"fix (docs/bugs_found.md, bug 8) or is damaged; rebuild it"
+            ) from None
     return cat
 
 
 def _class_counts(catalog: "AbsorberCatalog"):
     nhi = np.array([a.NHI for a in catalog.absorbers], dtype=np.float64)
     if not np.all(np.isfinite(nhi)):
-        raise CatalogIntegrityError(f"{int(np.sum(~np.isfinite(nhi)))} absorbers with a non-finite N_HI")
+        raise CatalogIntegrityError(
+            f"{int(np.sum(~np.isfinite(nhi)))} absorbers with a non-finite N_HI"
+        )
     labels = [a.absorber_class for a in catalog.absorbers]
     by_label = {c: labels.count(c) for c in ("LLS", "subDLA", "DLA", "forest")}
     logn = np.log10(np.maximum(nhi, 1e1))
@@ -584,7 +691,9 @@ def _class_counts(catalog: "AbsorberCatalog"):
         "forest": int(np.sum(logn < LOG_NHI_LLS_MIN)),
     }
     if by_label != by_value:
-        raise CatalogIntegrityError(f"class counts from labels {by_label} != from NHI values {by_value}")
+        raise CatalogIntegrityError(
+            f"class counts from labels {by_label} != from NHI values {by_value}"
+        )
     return by_label, logn
 
 
@@ -606,15 +715,19 @@ def validate_catalog_entries(skewer_idx, pix_start, pix_end, n: int) -> None:
     bad = np.flatnonzero((ps < 0) | (ps >= n) | (pe < ps) | (pe >= ps + n))
     if bad.size:
         i = int(bad[0])
-        raise CatalogIntegrityError(f"{bad.size} entries with impossible pixel spans, first: skewer {sk[i]} "
-                                    f"({ps[i]}, {pe[i]}), n = {n}")
+        raise CatalogIntegrityError(
+            f"{bad.size} entries with impossible pixel spans, first: skewer {sk[i]} "
+            f"({ps[i]}, {pe[i]}), n = {n}"
+        )
     o = np.lexsort((ps, sk))
     s, a, b = sk[o], ps[o], pe[o]
     lin = np.flatnonzero((s[1:] == s[:-1]) & (a[1:] <= b[:-1]))
     if lin.size:
         i = int(lin[0])
-        raise CatalogIntegrityError(f"{lin.size} overlapping neighbours, first on skewer {s[i]}: ({a[i]}, {b[i]}) and "
-                                    f"({a[i + 1]}, {b[i + 1]})")
+        raise CatalogIntegrityError(
+            f"{lin.size} overlapping neighbours, first on skewer {s[i]}: ({a[i]}, {b[i]}) and "
+            f"({a[i + 1]}, {b[i + 1]})"
+        )
     keys = s * (2 * n) + a
     w = np.flatnonzero(b >= n)
     lo = np.searchsorted(keys, s[w] * (2 * n), "left")
@@ -622,8 +735,10 @@ def validate_catalog_entries(skewer_idx, pix_start, pix_end, n: int) -> None:
     hit = np.flatnonzero(hi > lo)
     if hit.size:
         j = int(w[hit[0]])
-        raise CatalogIntegrityError(f"{hit.size} wrapping entries overlap an entry at the start of their skewer "
-                                    f"(box-edge duplicate), first on skewer {s[j]}: ({a[j]}, {b[j]})")
+        raise CatalogIntegrityError(
+            f"{hit.size} wrapping entries overlap an entry at the start of their skewer "
+            f"(box-edge duplicate), first on skewer {s[j]}: ({a[j]}, {b[j]})"
+        )
 
 
 def reconcile_counts(catalog: "AbsorberCatalog", cddf_counts, cddf_edges) -> Dict[str, int]:
@@ -636,8 +751,10 @@ def reconcile_counts(catalog: "AbsorberCatalog", cddf_counts, cddf_edges) -> Dic
     edges = np.asarray(cddf_edges, dtype=np.float64)
     inside = int(np.sum((logn >= edges[0]) & (logn <= edges[-1])))
     if int(np.sum(cddf_counts)) != inside:
-        raise CatalogIntegrityError(f"CDDF holds {int(np.sum(cddf_counts))} absorbers, the catalogue {inside} inside "
-                                    f"its edges [{edges[0]}, {edges[-1]}]")
+        raise CatalogIntegrityError(
+            f"CDDF holds {int(np.sum(cddf_counts))} absorbers, the catalogue {inside} inside "
+            f"its edges [{edges[0]}, {edges[-1]}]"
+        )
     return by_label
 
 
@@ -673,9 +790,9 @@ def measure_nhi_for_system(
     n = len(tau)
     if pix_end >= n:
         # Periodic boundary wrap: build the full wrapped segment
-        core = np.concatenate([tau[pix_start:], tau[:pix_end - n + 1]])
+        core = np.concatenate([tau[pix_start:], tau[: pix_end - n + 1]])
     else:
-        core = tau[pix_start:pix_end + 1]
+        core = tau[pix_start : pix_end + 1]
 
     if fast_mode:
         NHI = nhi_from_tau_fast(core.astype(np.float64), dv_kms)
@@ -689,7 +806,7 @@ def measure_nhi_for_system(
     else:
         lo = max(0, pix_start - _WING_PIXELS)
         hi = min(n - 1, pix_end + _WING_PIXELS)
-        seg = tau[lo:hi + 1].astype(np.float64)
+        seg = tau[lo : hi + 1].astype(np.float64)
         # Peak index within the expanded segment
         peak_idx = np.argmax(seg)
 
@@ -697,7 +814,8 @@ def measure_nhi_for_system(
 
     try:
         NHI, b, success = fit_nhi_from_tau(
-            seg, v_arr,
+            seg,
+            v_arr,
             b_init=b_init,
             b_bounds=b_bounds,
             tau_cap=tau_fit_cap,
@@ -715,6 +833,7 @@ def measure_nhi_for_system(
 # ---------------------------------------------------------------------------
 # Batch processor
 # ---------------------------------------------------------------------------
+
 
 def process_skewer_batch(
     tau_batch: np.ndarray,
@@ -745,9 +864,22 @@ def process_skewer_batch(
                     find_systems_in_skewer_reference and the batch is refused (CatalogIntegrityError) unless the two
                     agree exactly
     """
-    return _scan_skewer_batch(tau_batch, batch_start, dv_kms, tau_threshold, merge_dv_kms, min_pixels, b_init, b_bounds,
-                              tau_fit_cap, max_iter, fast_mode, lls_only_above=lls_only_above, min_log_nhi=min_log_nhi,
-                              verify_finder=verify_finder)[0]
+    return _scan_skewer_batch(
+        tau_batch,
+        batch_start,
+        dv_kms,
+        tau_threshold,
+        merge_dv_kms,
+        min_pixels,
+        b_init,
+        b_bounds,
+        tau_fit_cap,
+        max_iter,
+        fast_mode,
+        lls_only_above=lls_only_above,
+        min_log_nhi=min_log_nhi,
+        verify_finder=verify_finder,
+    )[0]
 
 
 def _scan_skewer_batch(
@@ -778,6 +910,7 @@ def _scan_skewer_batch(
     # tau_peak = NHI * _SIGMA_PREFACTOR / (sqrt(pi) * b_kms)
     from .voigt_utils import _SIGMA_PREFACTOR as _SP
     import math
+
     _b_ref = 30.0  # km/s reference b
     _tau_min = (10.0**min_log_nhi) * _SP / (math.sqrt(math.pi) * _b_ref) * 0.1
     tau_lls_floor = max(tau_threshold, _tau_min)
@@ -789,38 +922,49 @@ def _scan_skewer_batch(
         if lls_only_above and tau_row.max() < tau_lls_floor:
             continue
 
-        systems = find_systems_in_skewer(
-            tau_row, tau_threshold, merge_gap_pixels, min_pixels
-        )
+        systems = find_systems_in_skewer(tau_row, tau_threshold, merge_gap_pixels, min_pixels)
         n_searched += 1
         if verify_finder:
-            ref = find_systems_in_skewer_reference(tau_row, tau_threshold, merge_gap_pixels, min_pixels)
+            ref = find_systems_in_skewer_reference(
+                tau_row, tau_threshold, merge_gap_pixels, min_pixels
+            )
             if systems != ref:
-                raise CatalogIntegrityError(f"skewer {global_idx}: the two system finders disagree: {systems} != {ref}")
+                raise CatalogIntegrityError(
+                    f"skewer {global_idx}: the two system finders disagree: {systems} != {ref}"
+                )
             n_verified += 1
 
         for pix_start, pix_end in systems:
             NHI, b, success = measure_nhi_for_system(
-                tau_row, pix_start, pix_end, dv_kms,
-                b_init, b_bounds, tau_fit_cap, max_iter, fast_mode,
+                tau_row,
+                pix_start,
+                pix_end,
+                dv_kms,
+                b_init,
+                b_bounds,
+                tau_fit_cap,
+                max_iter,
+                fast_mode,
             )
             NHI = max(NHI, 1.0)  # clip to positive
             v_center = (pix_start + pix_end) / 2.0 * dv_kms
             log_NHI = np.log10(max(NHI, 1.0))
             if log_NHI < min_log_nhi:
                 continue  # below minimum threshold (forest absorber)
-            absorbers.append(Absorber(
-                skewer_idx=global_idx,
-                pix_start=pix_start,
-                pix_end=pix_end,
-                v_center=v_center,
-                NHI=NHI,
-                b_kms=b,
-                log_NHI=log_NHI,
-                absorber_class=classify_system(NHI),
-                fit_success=success,
-                fast_mode=fast_mode,
-            ))
+            absorbers.append(
+                Absorber(
+                    skewer_idx=global_idx,
+                    pix_start=pix_start,
+                    pix_end=pix_end,
+                    v_center=v_center,
+                    NHI=NHI,
+                    b_kms=b,
+                    log_NHI=log_NHI,
+                    absorber_class=classify_system(NHI),
+                    fit_success=success,
+                    fast_mode=fast_mode,
+                )
+            )
 
     return absorbers, n_searched, n_verified
 
@@ -828,6 +972,7 @@ def _scan_skewer_batch(
 # ---------------------------------------------------------------------------
 # Main catalog builder (iterates file in batches)
 # ---------------------------------------------------------------------------
+
 
 def build_catalog(
     hdf5_path: Path,
@@ -870,9 +1015,20 @@ def build_catalog(
 
     catalog = AbsorberCatalog(sim_name=sim_name, snap=snap, z=z, dv_kms=dv_kms)
     t0 = time.perf_counter()
-    raw = L.file_identity(hdf5_path) if record_lineage else None    # before the scan: the bytes it reads
-    scan_args = (dv_kms, tau_threshold, merge_dv_kms, min_pixels, b_init, b_bounds, tau_fit_cap, voigt_max_iter,
-                 fast_mode)
+    raw = (
+        L.file_identity(hdf5_path) if record_lineage else None
+    )  # before the scan: the bytes it reads
+    scan_args = (
+        dv_kms,
+        tau_threshold,
+        merge_dv_kms,
+        min_pixels,
+        b_init,
+        b_bounds,
+        tau_fit_cap,
+        voigt_max_iter,
+        fast_mode,
+    )
     n_rows = n_searched = n_verified = 0
 
     if n_workers > 1:
@@ -883,8 +1039,13 @@ def build_catalog(
         logger.info("Processing %d batches in parallel (n_workers=%d)", len(batches), n_workers)
 
         results = Parallel(n_jobs=n_workers)(
-            delayed(_scan_skewer_batch)(tau_batch, row_start, *scan_args, min_log_nhi=min_log_nhi,
-                                        verify_finder=verify_finder)
+            delayed(_scan_skewer_batch)(
+                tau_batch,
+                row_start,
+                *scan_args,
+                min_log_nhi=min_log_nhi,
+                verify_finder=verify_finder,
+            )
             for row_start, _, tau_batch in batches
         )
         for abs_list, n_s, n_v in results:
@@ -899,29 +1060,61 @@ def build_catalog(
         for row_start, row_end, tau_batch in iter_tau_batches(
             hdf5_path, batch_size=batch_size, n_skewers=n_skewers
         ):
-            batch_abs, n_s, n_v = _scan_skewer_batch(tau_batch, row_start, *scan_args, min_log_nhi=min_log_nhi,
-                                                     verify_finder=verify_finder)
+            batch_abs, n_s, n_v = _scan_skewer_batch(
+                tau_batch,
+                row_start,
+                *scan_args,
+                min_log_nhi=min_log_nhi,
+                verify_finder=verify_finder,
+            )
             catalog.absorbers.extend(batch_abs)
             n_searched += n_s
             n_verified += n_v
-            n_rows += (row_end - row_start)
+            n_rows += row_end - row_start
             nbins = tau_batch.shape[1]
 
-    if nbins is not None and catalog.absorbers:                # refuse overlapping entries (independent of the finder)
-        validate_catalog_entries([a.skewer_idx for a in catalog.absorbers], [a.pix_start for a in catalog.absorbers],
-                                 [a.pix_end for a in catalog.absorbers], nbins)
-    check_catalog_values(catalog)                              # before any caller can save it
+    if (
+        nbins is not None and catalog.absorbers
+    ):  # refuse overlapping entries (independent of the finder)
+        validate_catalog_entries(
+            [a.skewer_idx for a in catalog.absorbers],
+            [a.pix_start for a in catalog.absorbers],
+            [a.pix_end for a in catalog.absorbers],
+            nbins,
+        )
+    check_catalog_values(catalog)  # before any caller can save it
     if record_lineage:
-        settings = finder_settings(tau_threshold=tau_threshold, merge_dv_kms=merge_dv_kms, min_pixels=min_pixels,
-                                   b_init=b_init, b_bounds=b_bounds, tau_fit_cap=tau_fit_cap,
-                                   voigt_max_iter=voigt_max_iter, n_skewers=n_skewers, fast_mode=fast_mode,
-                                   min_log_nhi=min_log_nhi)
-        catalog.lineage = _catalog_record(hdf5_path, raw, catalog, settings, n_rows, n_searched, n_verified,
-                                          verify_finder, run_settings_sha256)
+        settings = finder_settings(
+            tau_threshold=tau_threshold,
+            merge_dv_kms=merge_dv_kms,
+            min_pixels=min_pixels,
+            b_init=b_init,
+            b_bounds=b_bounds,
+            tau_fit_cap=tau_fit_cap,
+            voigt_max_iter=voigt_max_iter,
+            n_skewers=n_skewers,
+            fast_mode=fast_mode,
+            min_log_nhi=min_log_nhi,
+        )
+        catalog.lineage = _catalog_record(
+            hdf5_path,
+            raw,
+            catalog,
+            settings,
+            n_rows,
+            n_searched,
+            n_verified,
+            verify_finder,
+            run_settings_sha256,
+        )
     elapsed = time.perf_counter() - t0
     logger.info(
         "Catalog built: %d absorbers in %.1f s (sim=%s snap=%03d z=%.2f)",
-        len(catalog.absorbers), elapsed, sim_name[:20], snap, z,
+        len(catalog.absorbers),
+        elapsed,
+        sim_name[:20],
+        snap,
+        z,
     )
     return catalog
 
@@ -929,6 +1122,7 @@ def build_catalog(
 def _source_digests() -> Dict[str, Optional[str]]:
     """sha256 of the finder's and the N_HI estimator's module files (information: what ran)."""
     from . import voigt_utils
+
     out: Dict[str, Optional[str]] = {}
     for name, f in (("catalog.py", __file__), ("voigt_utils.py", voigt_utils.__file__)):
         try:
@@ -944,36 +1138,78 @@ def _estimator_source_sha256() -> Optional[str]:
     import hashlib
     import inspect
     from . import voigt_utils as V
+
     try:
-        parts = [inspect.getsource(f) for f in (measure_nhi_for_system, V.nhi_from_tau_fast, V.fit_nhi_from_tau,
-                                                V._residuals, V.tau_voigt, V.voigt_profile_phi)]
+        parts = [
+            inspect.getsource(f)
+            for f in (
+                measure_nhi_for_system,
+                V.nhi_from_tau_fast,
+                V.fit_nhi_from_tau,
+                V._residuals,
+                V.tau_voigt,
+                V.voigt_profile_phi,
+            )
+        ]
     except (OSError, TypeError):
         return None
     parts.append(repr((_WING_PIXELS, V._SIGMA_PREFACTOR, V._VOIGT_A_PREFACTOR)))
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
 
-def _catalog_record(hdf5_path, raw, catalog, settings, n_rows, n_searched, n_verified, verify_finder,
-                    run_settings_sha256) -> dict:
+def _catalog_record(
+    hdf5_path,
+    raw,
+    catalog,
+    settings,
+    n_rows,
+    n_searched,
+    n_verified,
+    verify_finder,
+    run_settings_sha256,
+) -> dict:
     """The catalogue's lineage record. FINDER_ID only when the reference finder checked every searched skewer."""
     from .io import read_header
+
     st = Path(hdf5_path).stat()
     if (int(st.st_size), int(st.st_mtime_ns)) != (raw["size"], raw["mtime_ns"]):
-        raise CatalogProvenanceError(f"{hdf5_path}: the raw spectra file changed while the catalogue was built")
+        raise CatalogProvenanceError(
+            f"{hdf5_path}: the raw spectra file changed while the catalogue was built"
+        )
     hdr = read_header(hdf5_path)
     verified = bool(verify_finder) and n_verified == n_searched
     product = {
-        "sim_name": catalog.sim_name, "snap": int(catalog.snap), "z": float(catalog.z),
-        "dv_kms": float(catalog.dv_kms), "nbins": int(hdr.nbins), "n_skewers_built": int(n_rows),
-        "n_absorbers": len(catalog.absorbers), "payload_sha256": L.arrays_sha256(catalog._arrays()),
-        "finder": {"verified": verified, "n_skewers_searched": int(n_searched), "n_skewers_verified": int(n_verified),
-                   "source_sha256": _source_digests(), "estimator_source_sha256": _estimator_source_sha256()},
+        "sim_name": catalog.sim_name,
+        "snap": int(catalog.snap),
+        "z": float(catalog.z),
+        "dv_kms": float(catalog.dv_kms),
+        "nbins": int(hdr.nbins),
+        "n_skewers_built": int(n_rows),
+        "n_absorbers": len(catalog.absorbers),
+        "payload_sha256": L.arrays_sha256(catalog._arrays()),
+        "finder": {
+            "verified": verified,
+            "n_skewers_searched": int(n_searched),
+            "n_skewers_verified": int(n_verified),
+            "source_sha256": _source_digests(),
+            "estimator_source_sha256": _estimator_source_sha256(),
+        },
     }
-    info = {"path": str(Path(hdf5_path).resolve()), "nbins": int(hdr.nbins), "n_skewers": int(hdr.n_skewers),
-            "redshift": float(hdr.redshift), "box_kpc_h": float(hdr.box)}
+    info = {
+        "path": str(Path(hdf5_path).resolve()),
+        "nbins": int(hdr.nbins),
+        "n_skewers": int(hdr.n_skewers),
+        "redshift": float(hdr.redshift),
+        "box_kpc_h": float(hdr.box),
+    }
     return L.build_record(
-        "catalog", CATALOG_KIND_VERSION,
+        "catalog",
+        CATALOG_KIND_VERSION,
         inputs=[L.input_entry("raw_spectra", "raw_spectra", raw, info=info)],
         finder_ids=[FINDER_ID] if verified else [],
-        settings=settings, code=L.code_identity(), allowed_finder_ids=RELEASE_FINDER_IDS,
-        run_settings_sha256=run_settings_sha256, product=product)
+        settings=settings,
+        code=L.code_identity(),
+        allowed_finder_ids=RELEASE_FINDER_IDS,
+        run_settings_sha256=run_settings_sha256,
+        product=product,
+    )

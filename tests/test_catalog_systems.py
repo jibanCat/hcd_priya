@@ -12,6 +12,7 @@ once as its own head [s', pix_end - n]. The guards make that class of error impo
     catalogue without one, and load_catalog_historical is the only reader of an old one. A golden output pins
     FINDER_ID to what the finder and the N_HI estimator produce.
 Synthetic optical depths only."""
+
 import dataclasses
 import json
 import shutil
@@ -49,7 +50,10 @@ def test_a_system_straddling_the_box_edge_is_listed_once():
 
 
 def test_a_straddling_system_and_a_middle_system_give_two_entries():
-    assert _both(_tau(list(range(N - 5, N + 10)) + list(range(600, 620)))) == [(600, 619), (N - 5, N + 9)]
+    assert _both(_tau(list(range(N - 5, N + 10)) + list(range(600, 620)))) == [
+        (600, 619),
+        (N - 5, N + 9),
+    ]
 
 
 def test_a_head_merged_across_a_gap_at_the_edge_is_one_entry():
@@ -61,13 +65,13 @@ def test_tau_above_threshold_everywhere_is_one_entry_covering_the_skewer_once():
 
 
 def test_all_gaps_merged_is_one_entry_covering_the_skewer_once():
-    on = [i for i in range(N) if i % 7]                         # gaps of 1 pixel everywhere, merged
+    on = [i for i in range(N) if i % 7]  # gaps of 1 pixel everywhere, merged
     assert _both(_tau(on)) == [(0, N - 1)]
 
 
 def test_no_wrap_and_one_pixel_cases_are_unchanged():
     assert _both(_tau(list(range(10, 20)) + list(range(400, 450)))) == [(10, 19), (400, 449)]
-    assert _both(_tau([700])) == []                             # shorter than min_pixels
+    assert _both(_tau([700])) == []  # shorter than min_pixels
     assert _both(_tau([700]), minpix=1) == [(700, 700)]
     assert _both(np.zeros(N)) == []
 
@@ -82,12 +86,14 @@ def test_production_and_reference_finders_agree_on_random_skewers(n, gap, minpix
             tau = np.where(rng.random(n) < density, 1e3, 0.0)
             out = _both(tau, gap=gap, minpix=minpix)
             if out:
-                C.validate_catalog_entries([0] * len(out), [s for s, _ in out], [e for _, e in out], n)
+                C.validate_catalog_entries(
+                    [0] * len(out), [s for s, _ in out], [e for _, e in out], n
+                )
 
 
 # ----------------------------------------------------------------------------- guards
 def test_validator_and_audit_catch_the_pre_fix_duplicate():
-    sk, ps, pe = [5, 5, 6], [N - 5, 0, 10], [N + 9, 9, 20]      # skewer 5: whole (wraps) and its head
+    sk, ps, pe = [5, 5, 6], [N - 5, 0, 10], [N + 9, 9, 20]  # skewer 5: whole (wraps) and its head
     dup = C.find_wrap_duplicates(sk, ps, pe, N)
     assert dup.tolist() == [False, True, False]
     with pytest.raises(C.CatalogIntegrityError, match="box-edge duplicate"):
@@ -96,13 +102,21 @@ def test_validator_and_audit_catch_the_pre_fix_duplicate():
     C.validate_catalog_entries(np.asarray(sk)[keep], np.asarray(ps)[keep], np.asarray(pe)[keep], N)
 
 
-@pytest.mark.parametrize("sk,ps,pe,match", [
-    ([1, 1], [10, 15], [20, 30], "overlapping neighbours"),
-    ([1], [N], [N + 3], "impossible pixel spans"),
-    ([1], [5], [N + 5], "impossible pixel spans"),
-    ([1], [9], [8], "impossible pixel spans"),
-    ([5, 5], [N - 5, 9], [N + 9, 9], "box-edge duplicate"),          # the head ends exactly at the wrapped tail end
-])
+@pytest.mark.parametrize(
+    "sk,ps,pe,match",
+    [
+        ([1, 1], [10, 15], [20, 30], "overlapping neighbours"),
+        ([1], [N], [N + 3], "impossible pixel spans"),
+        ([1], [5], [N + 5], "impossible pixel spans"),
+        ([1], [9], [8], "impossible pixel spans"),
+        (
+            [5, 5],
+            [N - 5, 9],
+            [N + 9, 9],
+            "box-edge duplicate",
+        ),  # the head ends exactly at the wrapped tail end
+    ],
+)
 def test_validator_refuses_other_impossible_catalogues(sk, ps, pe, match):
     with pytest.raises(C.CatalogIntegrityError, match=match):
         C.validate_catalog_entries(sk, ps, pe, N)
@@ -116,13 +130,14 @@ def _batch(n_sk=24, n=N, seed=3):
             c = int(rng.integers(0, n))
             w = int(rng.integers(3, 40))
             tau[i, np.arange(c - w, c + w) % n] = 10 ** rng.uniform(3, 7)
-    tau[0, np.arange(N - 6, N + 12) % n] = 1e6                  # one certain straddler
+    tau[0, np.arange(N - 6, N + 12) % n] = 1e6  # one certain straddler
     return tau
 
 
 def _process(tau, **kw):
-    return C.process_skewer_batch(tau, 0, 10.0, THR, 100.0, MINPIX, 30.0, (1.0, 300.0), 1e6, 50, True,
-                                  min_log_nhi=17.0, **kw)
+    return C.process_skewer_batch(
+        tau, 0, 10.0, THR, 100.0, MINPIX, 30.0, (1.0, 300.0), 1e6, 50, True, min_log_nhi=17.0, **kw
+    )
 
 
 def test_batch_catalogue_has_no_duplicates_and_validates():
@@ -137,15 +152,26 @@ def test_batch_refuses_when_the_finders_disagree(monkeypatch):
     monkeypatch.setattr(C, "find_systems_in_skewer_reference", lambda *a, **k: [(0, 1)])
     with pytest.raises(C.CatalogIntegrityError, match="finders disagree"):
         _process(_batch())
-    assert _process(_batch(), verify_finder=False)               # the guard is what refused
+    assert _process(_batch(), verify_finder=False)  # the guard is what refused
 
 
 def _cat(logn, labels=None):
     cat = C.AbsorberCatalog(sim_name="synthetic", snap=1, z=3.0, dv_kms=10.0)
     for i, l in enumerate(logn):
-        cat.absorbers.append(C.Absorber(skewer_idx=i, pix_start=0, pix_end=3, v_center=1.0, NHI=10 ** l, b_kms=np.nan,
-                                        log_NHI=l, absorber_class=(labels[i] if labels else C.classify_system(10 ** l)),
-                                        fit_success=True, fast_mode=True))
+        cat.absorbers.append(
+            C.Absorber(
+                skewer_idx=i,
+                pix_start=0,
+                pix_end=3,
+                v_center=1.0,
+                NHI=10**l,
+                b_kms=np.nan,
+                log_NHI=l,
+                absorber_class=(labels[i] if labels else C.classify_system(10**l)),
+                fit_success=True,
+                fast_mode=True,
+            )
+        )
     return cat
 
 
@@ -158,13 +184,27 @@ def _stamp(cat, nbins=N, finder_ids=(C.FINDER_ID,), verified=True, code=CLEAN):
     """Attach a lineage record to a hand-made catalogue, as a hand edit could (the stated limit of the record check:
     the value checks are the second line). Not a code path of the package."""
     raw = {"sha256": "0" * 64, "size": 1, "mtime_ns": 1}
-    product = {"sim_name": cat.sim_name, "snap": int(cat.snap), "z": float(cat.z), "dv_kms": float(cat.dv_kms),
-               "nbins": int(nbins), "n_skewers_built": 4, "n_absorbers": len(cat.absorbers),
-               "payload_sha256": L.arrays_sha256(cat._arrays()), "finder": {"verified": verified}}
-    cat.lineage = L.build_record("catalog", C.CATALOG_KIND_VERSION,
-                                 inputs=[L.input_entry("raw_spectra", "raw_spectra", raw)],
-                                 finder_ids=list(finder_ids), settings={}, code=code,
-                                 allowed_finder_ids=C.RELEASE_FINDER_IDS, product=product)
+    product = {
+        "sim_name": cat.sim_name,
+        "snap": int(cat.snap),
+        "z": float(cat.z),
+        "dv_kms": float(cat.dv_kms),
+        "nbins": int(nbins),
+        "n_skewers_built": 4,
+        "n_absorbers": len(cat.absorbers),
+        "payload_sha256": L.arrays_sha256(cat._arrays()),
+        "finder": {"verified": verified},
+    }
+    cat.lineage = L.build_record(
+        "catalog",
+        C.CATALOG_KIND_VERSION,
+        inputs=[L.input_entry("raw_spectra", "raw_spectra", raw)],
+        finder_ids=list(finder_ids),
+        settings={},
+        code=code,
+        allowed_finder_ids=C.RELEASE_FINDER_IDS,
+        product=product,
+    )
     return cat
 
 
@@ -172,7 +212,12 @@ def test_counts_reconcile_three_ways_or_refuse():
     logn = [17.5, 18.2, 19.4, 20.1, 20.5, 21.3]
     edges = np.linspace(17.0, 23.0, 31)
     counts = np.histogram(logn, bins=edges)[0]
-    assert C.reconcile_counts(_cat(logn), counts, edges) == {"LLS": 2, "subDLA": 2, "DLA": 2, "forest": 0}
+    assert C.reconcile_counts(_cat(logn), counts, edges) == {
+        "LLS": 2,
+        "subDLA": 2,
+        "DLA": 2,
+        "forest": 0,
+    }
     with pytest.raises(C.CatalogIntegrityError, match="labels"):
         C.reconcile_counts(_cat(logn, ["LLS"] * 6), counts, edges)
     with pytest.raises(C.CatalogIntegrityError, match="CDDF holds"):
@@ -183,26 +228,49 @@ def test_pipeline_writes_reconciled_counts_and_refuses_a_mismatch(tmp_path, monk
     PL = _pipeline(monkeypatch)
     logn = [17.5, 19.4, 20.5]
     edges = np.linspace(17.0, 23.0, 31)
-    cddf = {"log_nhi_edges": edges, "n_absorbers": np.histogram(logn, bins=edges)[0], "f_nhi": np.zeros(30)}
+    cddf = {
+        "log_nhi_edges": edges,
+        "n_absorbers": np.histogram(logn, bins=edges)[0],
+        "f_nhi": np.zeros(30),
+    }
     hdr = types.SimpleNamespace(nbins=N, n_skewers=3, box=120000.0, hubble=0.7)
-    args = dict(p1d_variants={}, p1d_ratios={}, perturbed_p1d=None, excl_result=None, ics_meta={}, timing={},
-                header=hdr, sim_name="synthetic", snap=1, z=3.0, dv_kms=10.0)
+    args = dict(
+        p1d_variants={},
+        p1d_ratios={},
+        perturbed_p1d=None,
+        excl_result=None,
+        ics_meta={},
+        timing={},
+        header=hdr,
+        sim_name="synthetic",
+        snap=1,
+        z=3.0,
+        dv_kms=10.0,
+    )
     cat = _stamp(_cat(logn))
     cat.save_npz(tmp_path / "catalog.npz")
     PL._save_snap_outputs(tmp_path, cat, cddf_result=cddf, **args)
     meta = json.load(open(tmp_path / "meta.json"))
     assert meta["n_absorbers"] == {"LLS": 1, "subDLA": 1, "DLA": 1, "forest": 0}
-    assert meta["mode"] == "full" and sorted(meta["products"]) == ["catalog.npz", "cddf.npz", "p1d.npz"]
+    assert meta["mode"] == "full" and sorted(meta["products"]) == [
+        "catalog.npz",
+        "cddf.npz",
+        "p1d.npz",
+    ]
     for name, ident in meta["products"].items():
-        assert ident == {k: v for k, v in L.file_identity(tmp_path / name).items() if k != "mtime_ns"}
+        assert ident == {
+            k: v for k, v in L.file_identity(tmp_path / name).items() if k != "mtime_ns"
+        }
     bad = tmp_path / "bad"
     bad.mkdir()
     with pytest.raises(C.CatalogIntegrityError):
-        PL._save_snap_outputs(bad, cat, cddf_result=dict(cddf, n_absorbers=cddf["n_absorbers"] * 2), **args)
-    assert not any(bad.iterdir())                                    # nothing written past the failed check
+        PL._save_snap_outputs(
+            bad, cat, cddf_result=dict(cddf, n_absorbers=cddf["n_absorbers"] * 2), **args
+        )
+    assert not any(bad.iterdir())  # nothing written past the failed check
     other = tmp_path / "other"
     other.mkdir()
-    _stamp(_cat(logn[:2])).save_npz(other / "catalog.npz")         # not the catalogue in memory
+    _stamp(_cat(logn[:2])).save_npz(other / "catalog.npz")  # not the catalogue in memory
     with pytest.raises(C.CatalogProvenanceError, match="not the one this snapshot used"):
         PL._save_snap_outputs(other, cat, cddf_result=cddf, **args)
     assert sorted(p.name for p in other.iterdir()) == ["catalog.npz"]
@@ -211,15 +279,24 @@ def test_pipeline_writes_reconciled_counts_and_refuses_a_mismatch(tmp_path, monk
 # ----------------------------------------------------------------------------- review follow-ups
 def test_a_whole_skewer_system_shorter_than_min_pixels_is_dropped_by_both_finders():
     short = 5
-    assert _both(np.full(short, 1e3), gap=1, minpix=6) == []                       # above threshold everywhere
-    assert _both(np.array([1e3, 1e3, 1e3, 1e3, 0.0]), gap=1, minpix=6) == []       # every gap merged
+    assert _both(np.full(short, 1e3), gap=1, minpix=6) == []  # above threshold everywhere
+    assert _both(np.array([1e3, 1e3, 1e3, 1e3, 0.0]), gap=1, minpix=6) == []  # every gap merged
     assert _both(np.array([1e3, 1e3, 1e3, 1e3, 0.0]), gap=1, minpix=5) == [(0, 4)]
     assert _both(np.full(short, 1e3), gap=1, minpix=5) == [(0, 4)]
 
 
 def test_audit_flags_over_span_entries_and_ignores_valid_ones():
-    sk, ps, pe = [3, 4, 4, 5], [0, 10, N - 2, 0], [2 * N - 1, 20, N + 4, N - 1]   # skewer 3: the pre-fix all-above
-    assert C.find_wrap_duplicates(sk, ps, pe, N).tolist() == [True, False, False, False]   # skewer 5: valid (0, n-1)
+    sk, ps, pe = (
+        [3, 4, 4, 5],
+        [0, 10, N - 2, 0],
+        [2 * N - 1, 20, N + 4, N - 1],
+    )  # skewer 3: the pre-fix all-above
+    assert C.find_wrap_duplicates(sk, ps, pe, N).tolist() == [
+        True,
+        False,
+        False,
+        False,
+    ]  # skewer 5: valid (0, n-1)
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])
@@ -242,24 +319,44 @@ def test_a_cached_catalogue_with_valid_spans_and_a_non_finite_column_density_is_
     cat = _cat([17.5, 19.4])
     cat.absorbers[1].skewer_idx, cat.absorbers[1].pix_start, cat.absorbers[1].pix_end = 1, 30, 40
     cat.absorbers[1].NHI = float("nan")
-    _stamp(cat).save_npz(tmp_path / "nan.npz")                         # a record cannot vouch for the values
+    _stamp(cat).save_npz(tmp_path / "nan.npz")  # a record cannot vouch for the values
     with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused .*non-finite N_HI"):
         C.load_validated_catalog(tmp_path / "nan.npz", N)
 
 
 def test_a_cached_pre_fix_catalogue_is_refused_on_reuse(tmp_path):
     good = _cat([17.5, 19.4])
-    good.absorbers[1].skewer_idx, good.absorbers[1].pix_start, good.absorbers[1].pix_end = 0, N - 5, N + 9
-    good.absorbers[0].skewer_idx, good.absorbers[0].pix_start, good.absorbers[0].pix_end = 0, 100, 120
+    good.absorbers[1].skewer_idx, good.absorbers[1].pix_start, good.absorbers[1].pix_end = (
+        0,
+        N - 5,
+        N + 9,
+    )
+    good.absorbers[0].skewer_idx, good.absorbers[0].pix_start, good.absorbers[0].pix_end = (
+        0,
+        100,
+        120,
+    )
     _stamp(good).save_npz(tmp_path / "good.npz")
     assert len(C.load_validated_catalog(tmp_path / "good.npz", N).absorbers) == 2
     bad = _cat([17.5, 19.4])
-    bad.absorbers[1].skewer_idx, bad.absorbers[1].pix_start, bad.absorbers[1].pix_end = 0, N - 5, N + 9
-    bad.absorbers[0].skewer_idx, bad.absorbers[0].pix_start, bad.absorbers[0].pix_end = 0, 0, 9   # its own head
-    _legacy_save(bad, tmp_path / "bad.npz")                            # as the pre-fix finder wrote it: no record
-    with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused .*no lineage record"):
+    bad.absorbers[1].skewer_idx, bad.absorbers[1].pix_start, bad.absorbers[1].pix_end = (
+        0,
+        N - 5,
+        N + 9,
+    )
+    bad.absorbers[0].skewer_idx, bad.absorbers[0].pix_start, bad.absorbers[0].pix_end = (
+        0,
+        0,
+        9,
+    )  # its own head
+    _legacy_save(bad, tmp_path / "bad.npz")  # as the pre-fix finder wrote it: no record
+    with pytest.raises(
+        C.CatalogIntegrityError, match="cached catalogue refused .*no lineage record"
+    ):
         C.load_validated_catalog(tmp_path / "bad.npz", N)
-    _stamp(bad).save_npz(tmp_path / "bad_forged.npz")                  # a hand-copied record: the value check refuses
+    _stamp(bad).save_npz(
+        tmp_path / "bad_forged.npz"
+    )  # a hand-copied record: the value check refuses
     with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused .*overlap"):
         C.load_validated_catalog(tmp_path / "bad_forged.npz", N)
 
@@ -277,27 +374,34 @@ def _pipeline(monkeypatch):
 
         def _absent(name):
             if name.startswith("__") and name.endswith("__"):
-                raise AttributeError(name)                         # so hasattr / inspect see a plain module
-            raise ImportError(f"PyYAML is not installed (yaml.{name} requested; "
-                              "stub from tests/test_catalog_systems.py)")
+                raise AttributeError(name)  # so hasattr / inspect see a plain module
+            raise ImportError(
+                f"PyYAML is not installed (yaml.{name} requested; "
+                "stub from tests/test_catalog_systems.py)"
+            )
+
         stub.__getattr__ = _absent
         monkeypatch.setitem(sys.modules, "yaml", stub)
     from hcd_analysis import pipeline as PL
+
     return PL
 
 
 def _synthetic_snapshot(root, nb=64, n_sk=4, z=3.0):
     """A tiny tau file: skewer 0 holds a system straddling the box edge, skewer 1 a system in the middle."""
     import h5py
+
     root.mkdir(parents=True, exist_ok=True)
     p = root / "s.hdf5"
     tau = np.random.default_rng(0).uniform(0.0, 0.3, size=(n_sk, nb)).astype(np.float32)
-    tau[0, nb - 5:] = 1e5
+    tau[0, nb - 5 :] = 1e5
     tau[0, :4] = 1e5
     tau[1, 20:26] = 1e5
     with h5py.File(p, "w") as f:
         g = f.create_group("Header")
-        for k, v in dict(redshift=z, hubble=0.7, omegam=0.3, omegal=0.7, box=1200.0, nbins=nb, omegab=0.05).items():
+        for k, v in dict(
+            redshift=z, hubble=0.7, omegam=0.3, omegal=0.7, box=1200.0, nbins=nb, omegab=0.05
+        ).items():
             g.attrs[k] = v
         f.create_dataset("tau/H/1/1215", data=tau)
     return p
@@ -307,10 +411,22 @@ def _restamp(cat, like):
     """``cat`` with a copy of the lineage record of ``like`` (a catalogue build_catalog made for the same snapshot),
     its payload digest and count re-made to fit: what a hand edit of the record could produce."""
     rec = like.lineage
-    product = dict(rec["product"], n_absorbers=len(cat.absorbers), payload_sha256=L.arrays_sha256(cat._arrays()))
-    cat.lineage = L.build_record("catalog", rec["kind_version"], inputs=rec["inputs"], finder_ids=rec["finder_ids"],
-                                 settings=rec["settings"], code=rec["code"], allowed_finder_ids=C.RELEASE_FINDER_IDS,
-                                 run_settings_sha256=rec["run_settings_sha256"], product=product)
+    product = dict(
+        rec["product"],
+        n_absorbers=len(cat.absorbers),
+        payload_sha256=L.arrays_sha256(cat._arrays()),
+    )
+    cat.lineage = L.build_record(
+        "catalog",
+        rec["kind_version"],
+        inputs=rec["inputs"],
+        finder_ids=rec["finder_ids"],
+        settings=rec["settings"],
+        code=rec["code"],
+        allowed_finder_ids=C.RELEASE_FINDER_IDS,
+        run_settings_sha256=rec["run_settings_sha256"],
+        product=product,
+    )
     return cat
 
 
@@ -318,9 +434,20 @@ def _pre_fix_catalogue(PL, hdr, nb, snap=1, z=3.0):
     """What the pre-fix finder wrote for that file: the straddling system on skewer 0 AND its own head."""
     cat = C.AbsorberCatalog(sim_name="synthsim", snap=snap, z=z, dv_kms=PL.pixel_dv_kms(hdr))
     for sk, ps, pe in ((0, nb - 5, nb + 3), (0, 0, 3), (1, 20, 25)):
-        cat.absorbers.append(C.Absorber(skewer_idx=sk, pix_start=ps, pix_end=pe, v_center=0.0, NHI=10 ** 20.5,
-                                        b_kms=np.nan, log_NHI=20.5, absorber_class="DLA", fit_success=True,
-                                        fast_mode=True))
+        cat.absorbers.append(
+            C.Absorber(
+                skewer_idx=sk,
+                pix_start=ps,
+                pix_end=pe,
+                v_center=0.0,
+                NHI=10**20.5,
+                b_kms=np.nan,
+                log_NHI=20.5,
+                absorber_class="DLA",
+                fit_success=True,
+                fast_mode=True,
+            )
+        )
     return cat
 
 
@@ -329,18 +456,23 @@ def test_pipeline_resume_refuses_a_cached_pre_fix_catalogue_done_or_not(tmp_path
     from hcd_analysis.config import PipelineConfig
     from hcd_analysis.io import SimInfo, read_header
     from hcd_analysis.snapshot_map import SimSnapshot, SnapEntry
+
     h5 = _synthetic_snapshot(tmp_path)
     hdr = read_header(h5)
     nb = int(hdr.nbins)
     entry = SnapEntry(snap=1, a=0.25, z=3.0, path=h5)
-    entry2 = SnapEntry(snap=2, a=1 / 4.1, z=3.1, path=_synthetic_snapshot(tmp_path / "second", z=3.1))
+    entry2 = SnapEntry(
+        snap=2, a=1 / 4.1, z=3.1, path=_synthetic_snapshot(tmp_path / "second", z=3.1)
+    )
     sim = SimInfo(name="synthsim", path=tmp_path / "simroot", params={})
     ss, ss2 = SimSnapshot(sim=sim, entries=[entry]), SimSnapshot(sim=sim, entries=[entry, entry2])
 
     def cfg(name):
         c = PipelineConfig(output_root=str(tmp_path / name), resume=True, n_workers=1)
         c.p1d.nhi_excl_thresholds = []
-        PL.check_run_settings(c)              # record the root's settings before the scenarios below place files in it
+        PL.check_run_settings(
+            c
+        )  # record the root's settings before the scenarios below place files in it
         return c
 
     def files(d):
@@ -361,7 +493,9 @@ def test_pipeline_resume_refuses_a_cached_pre_fix_catalogue_done_or_not(tmp_path
     shutil.copy2(d0 / "catalog.npz", dv / "catalog.npz")
     stamp = (dv / "catalog.npz").stat().st_mtime_ns
     reused = PL.run_one_snap(ss, entry, cv)
-    assert reused is not None and len(reused.catalog.absorbers) == 2 and PL.is_done(cv, "synthsim", 1)
+    assert (
+        reused is not None and len(reused.catalog.absorbers) == 2 and PL.is_done(cv, "synthsim", 1)
+    )
     assert (dv / "catalog.npz").stat().st_mtime_ns == stamp
     # the refused catalogues: the pre-fix one as it was written (no lineage record), the pre-fix one with a record
     # copied onto it by hand (the value check is the second line), and a valid one damaged to hold a non-finite N_HI
@@ -377,10 +511,14 @@ def test_pipeline_resume_refuses_a_cached_pre_fix_catalogue_done_or_not(tmp_path
 
     def saved(cat):
         return lambda d: cat.save_npz(d / "catalog.npz")
+
     # not done, with a cached refused catalogue: the snapshot fails before anything else is written (no per-class
     # P1D, no meta.json, not marked done)
-    for name, put, why in (("cached", legacy, "no lineage record"), ("cached_forged", saved(forged), "overlap"),
-                           ("cached_nan", saved(nan_cat), "non-finite N_HI")):
+    for name, put, why in (
+        ("cached", legacy, "no lineage record"),
+        ("cached_forged", saved(forged), "overlap"),
+        ("cached_nan", saved(nan_cat), "non-finite N_HI"),
+    ):
         c1 = cfg(name)
         d1 = PL.snap_output_dir(c1, "synthsim", 1)
         put(d1)
@@ -400,11 +538,15 @@ def test_pipeline_resume_refuses_a_cached_pre_fix_catalogue_done_or_not(tmp_path
     # done, with a refused catalogue: refused loudly, never reused, nothing written, and the simulation's other
     # snapshot (which on its own is stacked: control below) is not stacked without it
     done_cases = []
-    for name, put in (("done", legacy), ("done_forged", saved(forged)), ("done_nan", saved(nan_cat))):
+    for name, put in (
+        ("done", legacy),
+        ("done_forged", saved(forged)),
+        ("done_nan", saved(nan_cat)),
+    ):
         c = cfg(name)
         d = PL.snap_output_dir(c, "synthsim", 1)
-        shutil.copytree(d0, d, dirs_exist_ok=True)                 # a completed snapshot ...
-        put(d)                                                     # ... whose catalogue was then replaced
+        shutil.copytree(d0, d, dirs_exist_ok=True)  # a completed snapshot ...
+        put(d)  # ... whose catalogue was then replaced
         done_cases.append((c, d))
     for c, d in done_cases:
         before = files(d)
@@ -413,34 +555,46 @@ def test_pipeline_resume_refuses_a_cached_pre_fix_catalogue_done_or_not(tmp_path
             PL.run_one_snap(ss, entry, c)
         with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
             PL.run_sim_all_z(ss2, c)
-        assert files(d) == before and not (sim_dir / "snap_002").exists()          # the run stopped at snapshot 1
+        assert (
+            files(d) == before and not (sim_dir / "snap_002").exists()
+        )  # the run stopped at snapshot 1
         assert not (sim_dir / "cddf_stacked.npz").exists()
         with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused"):
-            PL.run_sim_all_z(SimSnapshot(sim=sim, entries=[entry2, entry]), c)      # the refused snapshot second
+            PL.run_sim_all_z(
+                SimSnapshot(sim=sim, entries=[entry2, entry]), c
+            )  # the refused snapshot second
         assert files(d) == before and not (sim_dir / "cddf_stacked.npz").exists()
     c4 = cfg("control")
     PL.run_sim_all_z(SimSnapshot(sim=sim, entries=[entry2]), c4)
     assert (Path(c4.output_root) / "synthsim" / "cddf_stacked.npz").exists()
 
 
-def test_a_fresh_build_refuses_a_non_finite_column_density_before_saving_the_catalogue(tmp_path, monkeypatch):
+def test_a_fresh_build_refuses_a_non_finite_column_density_before_saving_the_catalogue(
+    tmp_path, monkeypatch
+):
     PL = _pipeline(monkeypatch)
     from hcd_analysis.config import PipelineConfig
     from hcd_analysis.io import SimInfo
     from hcd_analysis.snapshot_map import SimSnapshot, SnapEntry
+
     entry = SnapEntry(snap=1, a=0.25, z=3.0, path=_synthetic_snapshot(tmp_path))
-    ss = SimSnapshot(sim=SimInfo(name="synthsim", path=tmp_path / "simroot", params={}), entries=[entry])
+    ss = SimSnapshot(
+        sim=SimInfo(name="synthsim", path=tmp_path / "simroot", params={}), entries=[entry]
+    )
     measure = C.measure_nhi_for_system
 
     def nan_for_the_middle_system(tau_row, pix_start, *args):
         nhi, b, ok = measure(tau_row, pix_start, *args)
         return (float("nan") if pix_start == 20 else nhi), b, ok
+
     monkeypatch.setattr(C, "measure_nhi_for_system", nan_for_the_middle_system)
     c = PipelineConfig(output_root=str(tmp_path / "out"), resume=True, n_workers=1)
     c.p1d.nhi_excl_thresholds = []
     d = PL.snap_output_dir(c, "synthsim", 1)
     assert PL.run_one_snap(ss, entry, c) is None
-    assert sorted(p.name for p in d.iterdir()) == ["error.txt"]       # no catalog.npz: refused inside build_catalog
+    assert sorted(p.name for p in d.iterdir()) == [
+        "error.txt"
+    ]  # no catalog.npz: refused inside build_catalog
     assert "non-finite N_HI" in (d / "error.txt").read_text()
 
 
@@ -451,25 +605,25 @@ def _golden_tau():
     t = np.full((12, n), 0.5)
     lls, sub, dla = 13440.0, 673000.0, 6720000.0
     t[0, 392:] = dla
-    t[0, :8] = dla                                          # a DLA straddling the box edge
+    t[0, :8] = dla  # a DLA straddling the box edge
     t[1, 100:110] = lls
-    t[1, 115:125] = lls                                     # two blocks merged across a short gap ...
-    t[1, 300:310] = sub                                     # ... and a separate subDLA
+    t[1, 115:125] = lls  # two blocks merged across a short gap ...
+    t[1, 300:310] = sub  # ... and a separate subDLA
     t[2, 396:] = sub
-    t[2, 3:9] = sub                                         # a head merged across a gap at the edge
+    t[2, 3:9] = sub  # a head merged across a gap at the edge
     t[3, :] = 200.0
-    t[3, 50:60] = lls                                       # above threshold everywhere: one whole-skewer system
-    t[4, 200] = dla                                         # one pixel: shorter than min_pixels
-    t[5, 10:20] = 300.0                                     # below the pre-filter floor: not searched
-    t[6, 10:20] = 1000.0                                    # searched, below min_log_nhi: dropped
+    t[3, 50:60] = lls  # above threshold everywhere: one whole-skewer system
+    t[4, 200] = dla  # one pixel: shorter than min_pixels
+    t[5, 10:20] = 300.0  # below the pre-filter floor: not searched
+    t[6, 10:20] = 1000.0  # searched, below min_log_nhi: dropped
     t[7, :] = lls
-    t[7, ::7] = 0.5                                         # every gap merged: one whole-skewer system
-    t[8, :] = 0.0                                           # empty
+    t[7, ::7] = 0.5  # every gap merged: one whole-skewer system
+    t[8, :] = 0.0  # empty
     t[9, 20:30] = lls
-    t[9, 200:230] = dla                                     # an LLS and a DLA
-    t[10, 100:160] = lls                                    # a wide block (b_eff clipped at 300 km/s)
+    t[9, 200:230] = dla  # an LLS and a DLA
+    t[10, 100:160] = lls  # a wide block (b_eff clipped at 300 km/s)
     t[11, 395:] = sub
-    t[11, 15:25] = sub                                      # a block touching the edge and a separate one
+    t[11, 15:25] = sub  # a block touching the edge and a separate one
     return t.astype(np.float32)
 
 
@@ -495,16 +649,31 @@ GOLDEN = {
         ],
     },
 }
-GOLDEN_KW = dict(dv_kms=10.0, tau_threshold=THR, merge_dv_kms=100.0, min_pixels=2, fast_mode=True, min_log_nhi=17.2)
+GOLDEN_KW = dict(
+    dv_kms=10.0,
+    tau_threshold=THR,
+    merge_dv_kms=100.0,
+    min_pixels=2,
+    fast_mode=True,
+    min_log_nhi=17.2,
+)
 
 
 def _write_tau(path, tau, z=3.0):
     import h5py
+
     path.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(path, "w") as f:
         g = f.create_group("Header")
-        for k, v in dict(redshift=z, hubble=0.7, omegam=0.3, omegal=0.7, box=1200.0, nbins=tau.shape[1],
-                         omegab=0.05).items():
+        for k, v in dict(
+            redshift=z,
+            hubble=0.7,
+            omegam=0.3,
+            omegal=0.7,
+            box=1200.0,
+            nbins=tau.shape[1],
+            omegab=0.05,
+        ).items():
             g.attrs[k] = v
         f.create_dataset("tau/H/1/1215", data=tau)
     return path
@@ -514,16 +683,19 @@ def _golden_build(tmp_path, monkeypatch, code=CLEAN, **kw):
     pytest.importorskip("h5py")
     monkeypatch.setattr(L, "code_identity", lambda repo_dir=None: dict(code))
     h5 = _write_tau(tmp_path / "golden" / "tau.hdf5", _golden_tau())
-    args = dict(GOLDEN_KW, batch_size=5)                   # several batches, one of them short
+    args = dict(GOLDEN_KW, batch_size=5)  # several batches, one of them short
     args.update(kw)
     return h5, C.build_catalog(h5, "synthsim", 7, 3.0, **args)
 
 
 def test_the_golden_catalogue_is_pinned_to_the_finder_id(tmp_path, monkeypatch):
-    golden = GOLDEN[C.FINDER_ID]                                   # a new FINDER_ID needs its golden output
+    golden = GOLDEN[C.FINDER_ID]  # a new FINDER_ID needs its golden output
     assert C.FINDER_ID in C.RELEASE_FINDER_IDS
     h5, cat = _golden_build(tmp_path, monkeypatch)
-    got = [(a.skewer_idx, a.pix_start, a.pix_end, float.hex(float(a.NHI)), a.absorber_class) for a in cat.absorbers]
+    got = [
+        (a.skewer_idx, a.pix_start, a.pix_end, float.hex(float(a.NHI)), a.absorber_class)
+        for a in cat.absorbers
+    ]
     assert got == golden["entries"]
     assert all(a.fast_mode and a.fit_success and np.isnan(a.b_kms) for a in cat.absorbers)
     fin = cat.lineage["product"]["finder"]
@@ -541,23 +713,43 @@ def test_build_catalog_stamps_the_record(tmp_path, monkeypatch):
     raw = L.find_input(rec, "raw_spectra")
     assert {k: raw[k] for k in ("sha256", "size", "mtime_ns")} == L.file_identity(h5)
     assert raw["info"]["nbins"] == 400 and raw["info"]["n_skewers"] == 12
-    assert rec["settings"] == C.finder_settings(tau_threshold=THR, merge_dv_kms=100.0, min_pixels=2, b_init=30.0,
-                                                b_bounds=(1.0, 300.0), tau_fit_cap=1e6, voigt_max_iter=200,
-                                                n_skewers=None, fast_mode=True, min_log_nhi=17.2)
+    assert rec["settings"] == C.finder_settings(
+        tau_threshold=THR,
+        merge_dv_kms=100.0,
+        min_pixels=2,
+        b_init=30.0,
+        b_bounds=(1.0, 300.0),
+        tau_fit_cap=1e6,
+        voigt_max_iter=200,
+        n_skewers=None,
+        fast_mode=True,
+        min_log_nhi=17.2,
+    )
     prod = rec["product"]
-    assert (prod["sim_name"], prod["snap"], prod["nbins"], prod["n_skewers_built"], prod["n_absorbers"]) == \
-        ("synthsim", 7, 400, 12, 11)
+    assert (
+        prod["sim_name"],
+        prod["snap"],
+        prod["nbins"],
+        prod["n_skewers_built"],
+        prod["n_absorbers"],
+    ) == ("synthsim", 7, 400, 12, 11)
     assert prod["payload_sha256"] == L.arrays_sha256(cat._arrays())
     src = prod["finder"]["source_sha256"]
     assert set(src) == {"catalog.py", "voigt_utils.py"} and all(len(v) == 64 for v in src.values())
-    assert src["catalog.py"] == L.sha256_file(C.__file__) and len(prod["finder"]["estimator_source_sha256"]) == 64
+    assert (
+        src["catalog.py"] == L.sha256_file(C.__file__)
+        and len(prod["finder"]["estimator_source_sha256"]) == 64
+    )
     _, few = _golden_build(tmp_path / "few", monkeypatch, n_skewers=7)
-    assert few.lineage["product"]["n_skewers_built"] == 7 and few.lineage["settings"]["n_skewers"] == 7
+    assert (
+        few.lineage["product"]["n_skewers_built"] == 7 and few.lineage["settings"]["n_skewers"] == 7
+    )
 
 
 def _default_yaml_absorber():
     """The absorber section of config/default.yaml, read without PyYAML (flat ``key: value  # comment`` lines)."""
     from hcd_analysis.paths import REPO_ROOT
+
     out, inside = {}, False
     for line in (REPO_ROOT / "config" / "default.yaml").read_text().splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
@@ -568,21 +760,38 @@ def _default_yaml_absorber():
         if inside:
             key, val = line.split("#")[0].split(":", 1)
             val = val.strip()
-            out[key.strip()] = (json.loads(val) if val.startswith("[") else {"true": True, "false": False}.get(val, val))
+            out[key.strip()] = (
+                json.loads(val)
+                if val.startswith("[")
+                else {"true": True, "false": False}.get(val, val)
+            )
     return out
 
 
 def test_the_release_finder_settings_are_those_of_the_default_configuration():
     a = _default_yaml_absorber()
-    want = C.finder_settings(tau_threshold=float(a["tau_threshold"]), merge_dv_kms=float(a["merge_dv_kms"]),
-                             min_pixels=int(a["min_pixels"]), b_init=float(a["b_init_kms"]),
-                             b_bounds=tuple(a["b_bounds"]), tau_fit_cap=float(a["tau_fit_cap"]),
-                             voigt_max_iter=int(a["voigt_max_iter"]), n_skewers=None, fast_mode=a["fast_mode"],
-                             min_log_nhi=float(a["min_log_nhi"]))
-    assert C.RELEASE_FINDER_SETTINGS == want and want["fast_mode"] is True and want["n_skewers"] is None
+    want = C.finder_settings(
+        tau_threshold=float(a["tau_threshold"]),
+        merge_dv_kms=float(a["merge_dv_kms"]),
+        min_pixels=int(a["min_pixels"]),
+        b_init=float(a["b_init_kms"]),
+        b_bounds=tuple(a["b_bounds"]),
+        tau_fit_cap=float(a["tau_fit_cap"]),
+        voigt_max_iter=int(a["voigt_max_iter"]),
+        n_skewers=None,
+        fast_mode=a["fast_mode"],
+        min_log_nhi=float(a["min_log_nhi"]),
+    )
+    assert (
+        C.RELEASE_FINDER_SETTINGS == want
+        and want["fast_mode"] is True
+        and want["n_skewers"] is None
+    )
 
 
-def test_a_release_eligible_load_needs_its_expectations_and_a_whole_file_build(tmp_path, monkeypatch):
+def test_a_release_eligible_load_needs_its_expectations_and_a_whole_file_build(
+    tmp_path, monkeypatch
+):
     """Eligibility is provenance only, so the release load states what it expects (settings, raw file, whole file)."""
     h5, cat = _golden_build(tmp_path, monkeypatch, tau_threshold=100.0)
     p = tmp_path / "c.npz"
@@ -591,39 +800,77 @@ def test_a_release_eligible_load_needs_its_expectations_and_a_whole_file_build(t
     C.load_validated_catalog(p, 400, require_release_eligible=True, **full)
     for missing in full:
         with pytest.raises(C.CatalogProvenanceError, match="must state the expected"):
-            C.load_validated_catalog(p, 400, require_release_eligible=True,
-                                     **{k: v for k, v in full.items() if k != missing})
-    h5b, part = _golden_build(tmp_path / "part", monkeypatch, n_skewers=3)             # 3 of 12 skewers
+            C.load_validated_catalog(
+                p,
+                400,
+                require_release_eligible=True,
+                **{k: v for k, v in full.items() if k != missing},
+            )
+    h5b, part = _golden_build(tmp_path / "part", monkeypatch, n_skewers=3)  # 3 of 12 skewers
     part.save_npz(tmp_path / "part.npz")
     with pytest.raises(C.CatalogProvenanceError, match="partial build"):
-        C.load_validated_catalog(tmp_path / "part.npz", 400, require_release_eligible=True,
-                                 settings=part.lineage["settings"], raw_path=h5b, n_skewers_built=3)
-    C.load_validated_catalog(tmp_path / "part.npz", 400, settings=part.lineage["settings"], raw_path=h5b,
-                             n_skewers_built=3)                                         # a debug resume still loads
-    for kw in (dict(tau_threshold=50.0), dict(fast_mode=False)):                       # other settings, Voigt mode
+        C.load_validated_catalog(
+            tmp_path / "part.npz",
+            400,
+            require_release_eligible=True,
+            settings=part.lineage["settings"],
+            raw_path=h5b,
+            n_skewers_built=3,
+        )
+    C.load_validated_catalog(
+        tmp_path / "part.npz",
+        400,
+        settings=part.lineage["settings"],
+        raw_path=h5b,
+        n_skewers_built=3,
+    )  # a debug resume still loads
+    for kw in (dict(tau_threshold=50.0), dict(fast_mode=False)):  # other settings, Voigt mode
         h5c, other = _golden_build(tmp_path / str(len(kw)) / next(iter(kw)), monkeypatch, **kw)
         q = tmp_path / f"{next(iter(kw))}.npz"
         other.save_npz(q)
-        assert other.release_eligible                                                  # provenance only ...
-        with pytest.raises(C.CatalogProvenanceError, match="other finder settings"):  # ... the settings are checked
-            C.load_validated_catalog(q, 400, require_release_eligible=True, settings=dict(
-                C.RELEASE_FINDER_SETTINGS, n_skewers=None), raw_path=h5c, n_skewers_built=12)
+        assert other.release_eligible  # provenance only ...
+        with pytest.raises(
+            C.CatalogProvenanceError, match="other finder settings"
+        ):  # ... the settings are checked
+            C.load_validated_catalog(
+                q,
+                400,
+                require_release_eligible=True,
+                settings=dict(C.RELEASE_FINDER_SETTINGS, n_skewers=None),
+                raw_path=h5c,
+                n_skewers_built=12,
+            )
 
 
-@pytest.mark.parametrize("code, why", [({"commit": "c" * 40, "dirty": True}, "dirty"),
-                                       ({"commit": None, "dirty": None}, "commit is unknown")])
-def test_a_build_from_a_dirty_or_unknown_tree_is_stamped_but_not_release_eligible(tmp_path, monkeypatch, code, why):
+@pytest.mark.parametrize(
+    "code, why",
+    [
+        ({"commit": "c" * 40, "dirty": True}, "dirty"),
+        ({"commit": None, "dirty": None}, "commit is unknown"),
+    ],
+)
+def test_a_build_from_a_dirty_or_unknown_tree_is_stamped_but_not_release_eligible(
+    tmp_path, monkeypatch, code, why
+):
     h5, cat = _golden_build(tmp_path, monkeypatch, code=code)
     assert cat.lineage["finder_ids"] == [C.FINDER_ID] and not cat.release_eligible
     assert any(why in r for r in cat.lineage["ineligible_reasons"])
-    cat.save_npz(tmp_path / "c.npz")                                 # saved and reusable, never release-eligible
+    cat.save_npz(tmp_path / "c.npz")  # saved and reusable, never release-eligible
     C.load_validated_catalog(tmp_path / "c.npz", 400)
     with pytest.raises(C.CatalogProvenanceError, match="not release-eligible"):
-        C.load_validated_catalog(tmp_path / "c.npz", 400, settings=cat.lineage["settings"], raw_path=h5,
-                                 n_skewers_built=12, require_release_eligible=True)
+        C.load_validated_catalog(
+            tmp_path / "c.npz",
+            400,
+            settings=cat.lineage["settings"],
+            raw_path=h5,
+            n_skewers_built=12,
+            require_release_eligible=True,
+        )
 
 
-def test_without_the_finder_cross_check_no_finder_id_is_stamped_and_nothing_can_be_saved(tmp_path, monkeypatch):
+def test_without_the_finder_cross_check_no_finder_id_is_stamped_and_nothing_can_be_saved(
+    tmp_path, monkeypatch
+):
     h5, cat = _golden_build(tmp_path, monkeypatch, verify_finder=False)
     assert cat.lineage["finder_ids"] == [] and not cat.release_eligible
     assert cat.lineage["product"]["finder"]["verified"] is False
@@ -631,9 +878,10 @@ def test_without_the_finder_cross_check_no_finder_id_is_stamped_and_nothing_can_
         cat.save_npz(tmp_path / "c.npz")
     real = C._scan_skewer_batch
 
-    def one_unchecked(*a, **k):                                    # a batch whose count shows a skewer unchecked
+    def one_unchecked(*a, **k):  # a batch whose count shows a skewer unchecked
         ab, n_s, n_v = real(*a, **k)
         return ab, n_s, max(n_v - 1, 0)
+
     monkeypatch.setattr(C, "_scan_skewer_batch", one_unchecked)
     h5, cat = _golden_build(tmp_path / "partial", monkeypatch)
     assert cat.lineage["finder_ids"] == []
@@ -663,16 +911,22 @@ def test_round_trip_and_the_release_loader_expectations(tmp_path, monkeypatch):
     h5, cat = _golden_build(tmp_path, monkeypatch)
     p = tmp_path / "catalog.npz"
     cat.save_npz(p)
-    with np.load(p, allow_pickle=False) as d:                      # readable without pickle
+    with np.load(p, allow_pickle=False) as d:  # readable without pickle
         assert L.NPZ_KEY in d.files
     back = C.AbsorberCatalog.load_npz(p)
     assert back.lineage == cat.lineage and back._arrays().keys() == cat._arrays().keys()
-    assert all(np.array_equal(back._arrays()[k], cat._arrays()[k], equal_nan=k == "b_kms") for k in cat._arrays())
+    assert all(
+        np.array_equal(back._arrays()[k], cat._arrays()[k], equal_nan=k == "b_kms")
+        for k in cat._arrays()
+    )
     settings = cat.lineage["settings"]
-    ok = C.load_validated_catalog(p, 400, settings=settings, raw_path=h5, n_skewers_built=12,
-                                  require_release_eligible=True)
+    ok = C.load_validated_catalog(
+        p, 400, settings=settings, raw_path=h5, n_skewers_built=12, require_release_eligible=True
+    )
     assert ok.release_eligible and len(ok.absorbers) == 11
-    with pytest.raises(C.CatalogProvenanceError, match="tau_threshold: recorded 100.0, expected 50.0"):
+    with pytest.raises(
+        C.CatalogProvenanceError, match="tau_threshold: recorded 100.0, expected 50.0"
+    ):
         C.load_validated_catalog(p, 400, settings=dict(settings, tau_threshold=50.0))
     with pytest.raises(C.CatalogProvenanceError, match="built from 12 skewers, expected 13"):
         C.load_validated_catalog(p, 400, n_skewers_built=13)
@@ -682,7 +936,8 @@ def test_round_trip_and_the_release_loader_expectations(tmp_path, monkeypatch):
     with pytest.raises(C.CatalogProvenanceError, match="not the raw_spectra input"):
         C.load_validated_catalog(p, 400, raw_path=other)
     import os
-    os.utime(h5, ns=(1, 1))                                          # same bytes, another mtime: still accepted
+
+    os.utime(h5, ns=(1, 1))  # same bytes, another mtime: still accepted
     C.load_validated_catalog(p, 400, raw_path=h5)
 
 
@@ -696,7 +951,7 @@ def test_a_catalogue_changed_after_stamping_is_refused(tmp_path, monkeypatch):
     cat.save_npz(p)
     with np.load(p, allow_pickle=False) as d:
         arrays = {k: d[k] for k in d.files}
-    arrays["NHI"] = arrays["NHI"] * 1.001                            # the file edited, its record kept
+    arrays["NHI"] = arrays["NHI"] * 1.001  # the file edited, its record kept
     np.savez(str(p), **arrays)
     for load in (C.AbsorberCatalog.load_npz, lambda q: C.load_validated_catalog(q, 400)):
         with pytest.raises(C.CatalogProvenanceError, match="edited after it was made"):
@@ -707,25 +962,51 @@ def test_a_catalogue_record_without_its_payload_digest_is_refused(tmp_path, monk
     """A record rebuilt without product.payload_sha256, with N_HI tripled, is refused."""
     h5, cat = _golden_build(tmp_path, monkeypatch)
     rec = cat.lineage
-    bad = C.AbsorberCatalog(sim_name=cat.sim_name, snap=cat.snap, z=cat.z, dv_kms=cat.dv_kms,
-                            absorbers=[dataclasses.replace(a, NHI=3 * a.NHI) for a in cat.absorbers])
+    bad = C.AbsorberCatalog(
+        sim_name=cat.sim_name,
+        snap=cat.snap,
+        z=cat.z,
+        dv_kms=cat.dv_kms,
+        absorbers=[dataclasses.replace(a, NHI=3 * a.NHI) for a in cat.absorbers],
+    )
     product = {k: v for k, v in rec["product"].items() if k != "payload_sha256"}
-    bad.lineage = L.build_record("catalog", rec["kind_version"], inputs=rec["inputs"], finder_ids=rec["finder_ids"],
-                                 settings=rec["settings"], code=rec["code"], allowed_finder_ids=C.RELEASE_FINDER_IDS,
-                                 run_settings_sha256=rec["run_settings_sha256"], product=product)
+    bad.lineage = L.build_record(
+        "catalog",
+        rec["kind_version"],
+        inputs=rec["inputs"],
+        finder_ids=rec["finder_ids"],
+        settings=rec["settings"],
+        code=rec["code"],
+        allowed_finder_ids=C.RELEASE_FINDER_IDS,
+        run_settings_sha256=rec["run_settings_sha256"],
+        product=product,
+    )
     p = tmp_path / "catalog.npz"
     np.savez(str(p), **bad._arrays(), **{L.NPZ_KEY: np.array(L.canonical_json(bad.lineage))})
-    for load in (C.AbsorberCatalog.load_npz,
-                 lambda q: C.load_validated_catalog(q, 400, settings=rec["settings"], raw_path=h5, n_skewers_built=12,
-                                                    require_release_eligible=True)):
+    for load in (
+        C.AbsorberCatalog.load_npz,
+        lambda q: C.load_validated_catalog(
+            q,
+            400,
+            settings=rec["settings"],
+            raw_path=h5,
+            n_skewers_built=12,
+            require_release_eligible=True,
+        ),
+    ):
         with pytest.raises(C.CatalogProvenanceError, match="payload_sha256"):
             load(p)
     with pytest.raises(C.CatalogProvenanceError, match="payload_sha256 is missing"):
         C.check_catalog_record(bad, 400)
 
 
-@pytest.mark.parametrize("finder_ids, verified, why", [(["hcd_priya.finder/1"], True, "not in the release allow-list"),
-                                                       ([C.FINDER_ID], False, "cross-check ran")])
+@pytest.mark.parametrize(
+    "finder_ids, verified, why",
+    [
+        (["hcd_priya.finder/1"], True, "not in the release allow-list"),
+        ([C.FINDER_ID], False, "cross-check ran"),
+    ],
+)
 def test_an_unknown_finder_id_or_an_unchecked_build_is_refused(tmp_path, finder_ids, verified, why):
     cat = _cat([17.5, 19.4])
     cat.absorbers[1].skewer_idx = 1
@@ -736,29 +1017,46 @@ def test_an_unknown_finder_id_or_an_unchecked_build_is_refused(tmp_path, finder_
 
 def test_an_old_catalogue_is_read_only_through_the_historical_loader(tmp_path, caplog):
     old = _cat([17.5, 19.4])
-    old.absorbers[1].skewer_idx, old.absorbers[1].pix_start, old.absorbers[1].pix_end = 0, N - 5, N + 9
-    old.absorbers[0].skewer_idx, old.absorbers[0].pix_start, old.absorbers[0].pix_end = 0, 0, 9   # its own head
+    old.absorbers[1].skewer_idx, old.absorbers[1].pix_start, old.absorbers[1].pix_end = (
+        0,
+        N - 5,
+        N + 9,
+    )
+    old.absorbers[0].skewer_idx, old.absorbers[0].pix_start, old.absorbers[0].pix_end = (
+        0,
+        0,
+        9,
+    )  # its own head
     p = tmp_path / "catalog.npz"
     _legacy_save(old, p)
-    with pytest.raises(C.CatalogProvenanceError, match=r"no lineage record.*load_catalog_historical"):
+    with pytest.raises(
+        C.CatalogProvenanceError, match=r"no lineage record.*load_catalog_historical"
+    ):
         C.AbsorberCatalog.load_npz(p)
     for reason in ("", "  ", None):
         with pytest.raises(ValueError, match="non-empty reason"):
             C.load_catalog_historical(p, reason=reason)
     h = C.load_catalog_historical(p, reason="synthetic reproduction")
     assert "synthetic reproduction" in caplog.text
-    assert len(h.absorbers) == 2 and h.lineage is None and not h.release_eligible    # read as it is: duplicates kept
+    assert (
+        len(h.absorbers) == 2 and h.lineage is None and not h.release_eligible
+    )  # read as it is: duplicates kept
     assert h.historical_reason == "synthetic reproduction"
     with pytest.raises(C.CatalogProvenanceError, match="read as historical"):
         h.save_npz(tmp_path / "again.npz")
     with pytest.raises(C.CatalogProvenanceError, match="read as historical"):
         C.check_catalog_record(h, N)
     assert not (tmp_path / "again.npz").exists()
-    stamped = _stamp(_cat([17.5]))                                        # a stamped one read historically ...
+    stamped = _stamp(_cat([17.5]))  # a stamped one read historically ...
     stamped.save_npz(tmp_path / "s.npz")
     hs = C.load_catalog_historical(tmp_path / "s.npz", reason="audit")
-    assert json.loads(hs.original_lineage_json) == stamped.lineage and not hs.release_eligible  # ... keeps its record
-    assert hs.lineage["release_eligible"] is False and hs.lineage["product"]["historical_reason"] == "audit"  # as text
+    assert (
+        json.loads(hs.original_lineage_json) == stamped.lineage and not hs.release_eligible
+    )  # ... keeps its record
+    assert (
+        hs.lineage["release_eligible"] is False
+        and hs.lineage["product"]["historical_reason"] == "audit"
+    )  # as text
     assert h.original_lineage_json is None
 
 
@@ -773,17 +1071,31 @@ def test_nothing_built_from_a_historically_read_catalogue_is_release_eligible(tm
     assert good.release_eligible
 
     def child(entry):
-        return L.build_record("child", 1, inputs=[entry], finder_ids=None, settings={}, code=CLEAN,
-                              allowed_finder_ids=C.RELEASE_FINDER_IDS)
-    assert child(L.input_entry("catalog", "catalog", ident, record=good.lineage))["release_eligible"]
+        return L.build_record(
+            "child",
+            1,
+            inputs=[entry],
+            finder_ids=None,
+            settings={},
+            code=CLEAN,
+            allowed_finder_ids=C.RELEASE_FINDER_IDS,
+        )
+
+    assert child(L.input_entry("catalog", "catalog", ident, record=good.lineage))[
+        "release_eligible"
+    ]
     hs = C.load_catalog_historical(p, reason="probe")
     with pytest.raises(L.LineageError, match="historical loader"):
         L.input_entry("catalog", "catalog", ident, record=hs.lineage)
-    with pytest.raises(L.LineageError, match="parsed, checked record"):        # the stored record, kept as text
+    with pytest.raises(
+        L.LineageError, match="parsed, checked record"
+    ):  # the stored record, kept as text
         L.input_entry("catalog", "catalog", ident, record=hs.original_lineage_json)
     assert not hasattr(hs, "original_lineage")
-    r = child(L.input_entry("catalog", "catalog", ident, record=None))    # listed bare
-    assert not r["release_eligible"] and any("carries no lineage" in w for w in r["ineligible_reasons"])
+    r = child(L.input_entry("catalog", "catalog", ident, record=None))  # listed bare
+    assert not r["release_eligible"] and any(
+        "carries no lineage" in w for w in r["ineligible_reasons"]
+    )
 
 
 # ----------------------------------------------------------------------------- catalogue-only mode, product hashes
@@ -793,30 +1105,58 @@ def _modes_setup(tmp_path, monkeypatch, code=CLEAN):
     from hcd_analysis.config import PipelineConfig
     from hcd_analysis.io import SimInfo
     from hcd_analysis.snapshot_map import SimSnapshot, SnapEntry
+
     entry = SnapEntry(snap=1, a=0.25, z=3.0, path=_synthetic_snapshot(tmp_path / "data"))
-    entry2 = SnapEntry(snap=2, a=1 / 4.1, z=3.1, path=_synthetic_snapshot(tmp_path / "data2", z=3.1))
+    entry2 = SnapEntry(
+        snap=2, a=1 / 4.1, z=3.1, path=_synthetic_snapshot(tmp_path / "data2", z=3.1)
+    )
     sim = SimInfo(name="synthsim", path=tmp_path / "simroot", params={})
 
     def cfg(name, catalogue_only=True, **absorber):
-        c = PipelineConfig(output_root=str(tmp_path / name), resume=True, n_workers=1, catalogue_only=catalogue_only)
+        c = PipelineConfig(
+            output_root=str(tmp_path / name),
+            resume=True,
+            n_workers=1,
+            catalogue_only=catalogue_only,
+        )
         c.p1d.nhi_excl_thresholds = []
         for k, v in absorber.items():
             setattr(c.absorber, k, v)
         return c
-    return PL, SimSnapshot(sim=sim, entries=[entry]), SimSnapshot(sim=sim, entries=[entry, entry2]), entry, entry2, cfg
+
+    return (
+        PL,
+        SimSnapshot(sim=sim, entries=[entry]),
+        SimSnapshot(sim=sim, entries=[entry, entry2]),
+        entry,
+        entry2,
+        cfg,
+    )
 
 
 def _tree(root):
     return sorted((str(p.relative_to(root)), p.stat().st_mtime_ns) for p in Path(root).rglob("*"))
 
 
-def test_catalogue_only_mode_writes_the_catalogue_its_cddf_and_meta_and_no_p1d(tmp_path, monkeypatch):
+def test_catalogue_only_mode_writes_the_catalogue_its_cddf_and_meta_and_no_p1d(
+    tmp_path, monkeypatch
+):
     PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
     c = cfg("cat")
     res = PL.run_one_snap(ss, entry, c)
     d = PL.snap_output_dir(c, "synthsim", 1)
-    assert res is not None and res.p1d_variants == {} and res.p1d_ratios == {} and len(res.catalog.absorbers) == 2
-    assert sorted(p.name for p in d.iterdir()) == ["catalog.npz", "cddf.npz", "done_catalogue", "meta.json"]
+    assert (
+        res is not None
+        and res.p1d_variants == {}
+        and res.p1d_ratios == {}
+        and len(res.catalog.absorbers) == 2
+    )
+    assert sorted(p.name for p in d.iterdir()) == [
+        "catalog.npz",
+        "cddf.npz",
+        "done_catalogue",
+        "meta.json",
+    ]
     assert PL.is_done(c, "synthsim", 1) and not (d / "done").exists()
     root_rec = json.loads((Path(c.output_root) / "run_settings.json").read_text())
     assert root_rec["settings"]["catalogue_only"] is True
@@ -826,42 +1166,75 @@ def test_catalogue_only_mode_writes_the_catalogue_its_cddf_and_meta_and_no_p1d(t
     assert sorted(meta["products"]) == ["catalog.npz", "cddf.npz"]
     for name, ident in meta["products"].items():
         assert ident == {k: v for k, v in L.file_identity(d / name).items() if k != "mtime_ns"}
-    cat = C.load_validated_catalog(d / "catalog.npz", 64, raw_path=entry.path, require_release_eligible=True,
-                                   settings=PL.finder_settings(**PL._catalog_kwargs(c)), n_skewers_built=4)
+    cat = C.load_validated_catalog(
+        d / "catalog.npz",
+        64,
+        raw_path=entry.path,
+        require_release_eligible=True,
+        settings=PL.finder_settings(**PL._catalog_kwargs(c)),
+        n_skewers_built=4,
+    )
     raw = L.find_input(cat.lineage, "raw_spectra")
     assert {k: raw[k] for k in ("sha256", "size", "mtime_ns")} == L.file_identity(entry.path)
-    assert cat.lineage["run_settings_sha256"] == L.sha256_file(Path(c.output_root) / "run_settings.json")
+    assert cat.lineage["run_settings_sha256"] == L.sha256_file(
+        Path(c.output_root) / "run_settings.json"
+    )
     _, crec = L.read_npz(d / "cddf.npz")
-    assert crec["kind"] == "cddf" and crec["release_eligible"] and crec["finder_ids"] == [C.FINDER_ID]
+    assert (
+        crec["kind"] == "cddf" and crec["release_eligible"] and crec["finder_ids"] == [C.FINDER_ID]
+    )
     assert L.find_input(crec, "catalog")["sha256"] == meta["products"]["catalog.npz"]["sha256"]
     assert L.find_input(crec, "raw_spectra_header")["sha256"] == raw["sha256"]
     snap_rec = L.check_record(meta["lineage"], C.RELEASE_FINDER_IDS)
-    assert snap_rec["kind"] == "snapshot" and snap_rec["release_eligible"] and snap_rec["settings"] == {"mode":
-                                                                                                         "catalogue"}
+    assert (
+        snap_rec["kind"] == "snapshot"
+        and snap_rec["release_eligible"]
+        and snap_rec["settings"] == {"mode": "catalogue"}
+    )
     # done: reused, nothing rewritten; the simulation level stacks the CDDFs as in a full run
     before = _tree(c.output_root)
     again = PL.run_one_snap(ss, entry, c)
-    assert again is not None and len(again.catalog.absorbers) == 2 and _tree(c.output_root) == before
-    assert set(again.cddf_result) >= {"f_nhi", "n_absorbers", "log_nhi_edges"} and L.NPZ_KEY not in again.cddf_result
+    assert (
+        again is not None and len(again.catalog.absorbers) == 2 and _tree(c.output_root) == before
+    )
+    assert (
+        set(again.cddf_result) >= {"f_nhi", "n_absorbers", "log_nhi_edges"}
+        and L.NPZ_KEY not in again.cddf_result
+    )
     out = PL.run_sim_all_z(ss2, c)
-    assert all(r is not None for r in out) and (Path(c.output_root) / "synthsim" / "cddf_stacked.npz").exists()
+    assert (
+        all(r is not None for r in out)
+        and (Path(c.output_root) / "synthsim" / "cddf_stacked.npz").exists()
+    )
 
 
 def test_a_dirty_tree_writes_products_that_are_not_release_eligible(tmp_path, monkeypatch):
-    PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch, code={"commit": "c" * 40, "dirty": True})
+    PL, ss, ss2, entry, entry2, cfg = _modes_setup(
+        tmp_path, monkeypatch, code={"commit": "c" * 40, "dirty": True}
+    )
     c = cfg("cat")
     assert PL.run_one_snap(ss, entry, c) is not None
     d = PL.snap_output_dir(c, "synthsim", 1)
     meta = json.loads((d / "meta.json").read_text())
-    assert not meta["lineage"]["release_eligible"] and not L.read_npz(d / "cddf.npz")[1]["release_eligible"]
-    assert PL.run_one_snap(ss, entry, c) is not None                       # resumable, never eligible
+    assert (
+        not meta["lineage"]["release_eligible"]
+        and not L.read_npz(d / "cddf.npz")[1]["release_eligible"]
+    )
+    assert PL.run_one_snap(ss, entry, c) is not None  # resumable, never eligible
     with pytest.raises(C.CatalogProvenanceError, match="not release-eligible"):
-        C.load_validated_catalog(d / "catalog.npz", 64, require_release_eligible=True, raw_path=entry.path,
-                                 settings=PL.finder_settings(**PL._catalog_kwargs(c)), n_skewers_built=4)
+        C.load_validated_catalog(
+            d / "catalog.npz",
+            64,
+            require_release_eligible=True,
+            raw_path=entry.path,
+            settings=PL.finder_settings(**PL._catalog_kwargs(c)),
+            n_skewers_built=4,
+        )
 
 
 def test_catalogue_only_and_full_runs_never_share_a_root_or_a_snapshot(tmp_path, monkeypatch):
     from hcd_analysis.run_settings import RunSettingsMismatch
+
     PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
     full = cfg("root", catalogue_only=False)
     assert PL.run_one_snap(ss, entry, full) is not None
@@ -871,11 +1244,16 @@ def test_catalogue_only_and_full_runs_never_share_a_root_or_a_snapshot(tmp_path,
     assert _tree(full.output_root) == before
     # a snapshot directory of one mode copied into a root of the other: refused, nothing touched
     for src_mode, dst_mode in ((False, True), (True, False)):
-        src, dst = cfg(f"src_{src_mode}", catalogue_only=src_mode), cfg(f"dst_{src_mode}", catalogue_only=dst_mode)
+        src, dst = cfg(f"src_{src_mode}", catalogue_only=src_mode), cfg(
+            f"dst_{src_mode}", catalogue_only=dst_mode
+        )
         assert PL.run_one_snap(ss, entry, src) is not None
         PL.check_run_settings(dst)
-        shutil.copytree(PL.snap_output_dir(src, "synthsim", 1), PL.snap_output_dir(dst, "synthsim", 1),
-                        dirs_exist_ok=True)
+        shutil.copytree(
+            PL.snap_output_dir(src, "synthsim", 1),
+            PL.snap_output_dir(dst, "synthsim", 1),
+            dirs_exist_ok=True,
+        )
         before = _tree(dst.output_root)
         with pytest.raises(RunSettingsMismatch, match="of the other mode"):
             PL.run_one_snap(ss, entry, dst)
@@ -883,30 +1261,39 @@ def test_catalogue_only_and_full_runs_never_share_a_root_or_a_snapshot(tmp_path,
 
 
 @pytest.mark.parametrize("catalogue_only", [True, False])
-def test_a_completed_snapshot_whose_products_do_not_match_meta_is_refused(tmp_path, monkeypatch, catalogue_only):
+def test_a_completed_snapshot_whose_products_do_not_match_meta_is_refused(
+    tmp_path, monkeypatch, catalogue_only
+):
     PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
     good = cfg("good", catalogue_only=catalogue_only)
-    assert PL.run_one_snap(ss2, entry2, good) is not None and PL.run_one_snap(ss, entry, good) is not None
+    assert (
+        PL.run_one_snap(ss2, entry2, good) is not None
+        and PL.run_one_snap(ss, entry, good) is not None
+    )
     d_good = PL.snap_output_dir(good, "synthsim", 1)
     other = PL.snap_output_dir(good, "synthsim", 2)
 
     def swap(name):
         def f(d):
-            shutil.copy2(other / name, d / name)                           # another snapshot's product
+            shutil.copy2(other / name, d / name)  # another snapshot's product
+
         return f
 
     def drop_products(d):
         meta = json.loads((d / "meta.json").read_text())
-        del meta["products"]                                               # as written before meta listed them
+        del meta["products"]  # as written before meta listed them
         (d / "meta.json").write_text(json.dumps(meta))
 
     def edit_record(d):
         meta = json.loads((d / "meta.json").read_text())
         meta["lineage"]["inputs"][0]["sha256"] = "0" * 64
         (d / "meta.json").write_text(json.dumps(meta))
-    cases = [("swapped_cddf", swap("cddf.npz"), "cddf.npz does not match"),
-             ("no_products", drop_products, "lists no product hashes"),
-             ("edited_record", edit_record, "does not list the products")]
+
+    cases = [
+        ("swapped_cddf", swap("cddf.npz"), "cddf.npz does not match"),
+        ("no_products", drop_products, "lists no product hashes"),
+        ("edited_record", edit_record, "does not list the products"),
+    ]
     if not catalogue_only:
         cases.append(("swapped_p1d", swap("p1d.npz"), "p1d.npz does not match"))
     for name, damage, why in cases:
@@ -928,7 +1315,9 @@ def test_a_completed_snapshot_whose_products_do_not_match_meta_is_refused(tmp_pa
     shutil.copytree(d_good, d, dirs_exist_ok=True)
     shutil.copy2(other / "cddf.npz", d / "cddf.npz")
     meta = json.loads((d / "meta.json").read_text())
-    meta["products"]["cddf.npz"] = {k: v for k, v in L.file_identity(d / "cddf.npz").items() if k != "mtime_ns"}
+    meta["products"]["cddf.npz"] = {
+        k: v for k, v in L.file_identity(d / "cddf.npz").items() if k != "mtime_ns"
+    }
     for inp in meta["lineage"]["inputs"]:
         if inp["role"] == "cddf.npz":
             inp["sha256"] = meta["products"]["cddf.npz"]["sha256"]
@@ -938,55 +1327,81 @@ def test_a_completed_snapshot_whose_products_do_not_match_meta_is_refused(tmp_pa
 
 
 @pytest.mark.parametrize("catalogue_only", [True, False])
-def test_a_cached_catalogue_of_other_settings_or_another_raw_file_is_refused(tmp_path, monkeypatch, catalogue_only):
+def test_a_cached_catalogue_of_other_settings_or_another_raw_file_is_refused(
+    tmp_path, monkeypatch, catalogue_only
+):
     PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
     src = cfg("src", catalogue_only=catalogue_only, min_pixels=3)
     assert PL.run_one_snap(ss, entry, src) is not None
     assert PL.run_one_snap(ss2, entry2, src) is not None
-    for name, from_snap, why in (("settings", 1, "other finder settings: min_pixels: recorded 3, expected 2"),
-                                 ("raw", 2, "not the raw_spectra input")):
+    for name, from_snap, why in (
+        ("settings", 1, "other finder settings: min_pixels: recorded 3, expected 2"),
+        ("raw", 2, "not the raw_spectra input"),
+    ):
         c = cfg(name, catalogue_only=catalogue_only)
         PL.check_run_settings(c)
         d = PL.snap_output_dir(c, "synthsim", 1)
-        if name == "raw":                                                  # the same settings, another snapshot's file
+        if name == "raw":  # the same settings, another snapshot's file
             c_src = cfg("src_raw", catalogue_only=catalogue_only)
             assert PL.run_one_snap(ss2, entry2, c_src) is not None
             cached = PL.snap_output_dir(c_src, "synthsim", 2) / "catalog.npz"
             arrays, rec = L.read_npz(cached)
-            arrays["snap"] = np.array(1, dtype=np.int64)                   # relabelled by hand to this snapshot
-            rec = dict(rec, product=dict(rec["product"], snap=1, payload_sha256=L.arrays_sha256(arrays)))
+            arrays["snap"] = np.array(1, dtype=np.int64)  # relabelled by hand to this snapshot
+            rec = dict(
+                rec, product=dict(rec["product"], snap=1, payload_sha256=L.arrays_sha256(arrays))
+            )
             L.write_npz(d / "catalog.npz", arrays, rec)
         else:
-            shutil.copy2(PL.snap_output_dir(src, "synthsim", from_snap) / "catalog.npz", d / "catalog.npz")
-        assert PL.run_one_snap(ss, entry, c) is None                      # not done: fails, nothing else written
+            shutil.copy2(
+                PL.snap_output_dir(src, "synthsim", from_snap) / "catalog.npz", d / "catalog.npz"
+            )
+        assert PL.run_one_snap(ss, entry, c) is None  # not done: fails, nothing else written
         assert sorted(p.name for p in d.iterdir()) == ["catalog.npz", "error.txt"]
         err = (d / "error.txt").read_text()
         assert "cached catalogue refused" in err and why in err
 
 
-def test_the_snapshot_verifier_compares_the_copied_finder_ids_and_eligibility(tmp_path, monkeypatch):
+def test_the_snapshot_verifier_compares_the_copied_finder_ids_and_eligibility(
+    tmp_path, monkeypatch
+):
     """A meta.json whose snapshot record copies other flags than its products' own records hold is refused,
     even when the record is kept self-consistent."""
     from hcd_analysis.snapshot_record import verify_snapshot_dir
+
     PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
     c = cfg("cat")
     assert PL.run_one_snap(ss, entry, c) is not None
     d = PL.snap_output_dir(c, "synthsim", 1)
-    kw = dict(mode="catalogue", settings=PL.finder_settings(**PL._catalog_kwargs(c)), raw_path=entry.path)
-    v = verify_snapshot_dir(d, require_release_eligible=True, rehash=True, sim="synthsim", snap=1, **kw)
-    assert v.record["release_eligible"] and v.catalog.release_eligible and v.cddf_record["kind"] == "cddf"
-    assert v.meta_identity == {k: x for k, x in L.file_identity(d / "meta.json").items() if k != "mtime_ns"}
+    kw = dict(
+        mode="catalogue", settings=PL.finder_settings(**PL._catalog_kwargs(c)), raw_path=entry.path
+    )
+    v = verify_snapshot_dir(
+        d, require_release_eligible=True, rehash=True, sim="synthsim", snap=1, **kw
+    )
+    assert (
+        v.record["release_eligible"]
+        and v.catalog.release_eligible
+        and v.cddf_record["kind"] == "cddf"
+    )
+    assert v.meta_identity == {
+        k: x for k, x in L.file_identity(d / "meta.json").items() if k != "mtime_ns"
+    }
     good = (d / "meta.json").read_text()
-    for role, change in (("catalog.npz", dict(release_eligible=False)), ("cddf.npz", dict(finder_ids=["other/1"]))):
+    for role, change in (
+        ("catalog.npz", dict(release_eligible=False)),
+        ("cddf.npz", dict(finder_ids=["other/1"])),
+    ):
         meta = json.loads(good)
         rec = meta["lineage"]
         for inp in rec["inputs"]:
             if inp["role"] == role:
                 inp.update(change)
         why = L.eligibility(rec, C.RELEASE_FINDER_IDS)
-        rec.update(release_eligible=not why, ineligible_reasons=why)            # the record kept consistent
+        rec.update(release_eligible=not why, ineligible_reasons=why)  # the record kept consistent
         (d / "meta.json").write_text(json.dumps(meta))
-        with pytest.raises(PL.SnapshotIntegrityError, match=f"copy of the {role} finder ids or eligibility"):
+        with pytest.raises(
+            PL.SnapshotIntegrityError, match=f"copy of the {role} finder ids or eligibility"
+        ):
             verify_snapshot_dir(d, **kw)
     (d / "meta.json").write_text(good)
     with pytest.raises(PL.SnapshotIntegrityError, match=r"expected \('other', 1\)"):
@@ -994,7 +1409,9 @@ def test_the_snapshot_verifier_compares_the_copied_finder_ids_and_eligibility(tm
 
 
 @pytest.mark.parametrize("damage", ["missing", "unreadable", "no_nbins"])
-def test_a_done_snapshot_without_a_readable_meta_json_is_refused_not_dropped(tmp_path, monkeypatch, damage):
+def test_a_done_snapshot_without_a_readable_meta_json_is_refused_not_dropped(
+    tmp_path, monkeypatch, damage
+):
     """On the done path a missing or unreadable meta.json stops the run (run-one and run-sim); it is never
     logged and skipped, so a stacked CDDF never silently loses a snapshot."""
     PL, ss, ss2, entry, entry2, cfg = _modes_setup(tmp_path, monkeypatch)
@@ -1022,45 +1439,80 @@ def test_a_catalogue_only_snapshot_written_by_the_rebuild_commit_still_verifies(
     release eligibility under the current rule."""
     from hcd_analysis.paths import REPO_ROOT
     from hcd_analysis.snapshot_record import verify_snapshot_dir
+
     src = REPO_ROOT / "tests" / "golden" / "fe77e0f_catalogue_only"
     d = tmp_path / "synthsim" / "snap_001"
     shutil.copytree(src / "snap_001", d)
     raw = tmp_path / "s.hdf5"
-    shutil.copy(src / "s.hdf5", raw)                                     # another path and mtime: matched by content
-    v = verify_snapshot_dir(d, mode="catalogue", settings=C.RELEASE_FINDER_SETTINGS, raw_path=raw, rehash=True,
-                            require_release_eligible=True, sim="synthsim", snap=1)
+    shutil.copy(src / "s.hdf5", raw)  # another path and mtime: matched by content
+    v = verify_snapshot_dir(
+        d,
+        mode="catalogue",
+        settings=C.RELEASE_FINDER_SETTINGS,
+        raw_path=raw,
+        rehash=True,
+        require_release_eligible=True,
+        sim="synthsim",
+        snap=1,
+    )
     for rec in (v.catalog.lineage, v.cddf_record, v.record):
         assert L.check_record(rec, C.RELEASE_FINDER_IDS)["release_eligible"] is True
-        assert rec["finder_ids"] == [C.FINDER_ID] and rec["code"]["dirty"] is False and len(rec["code"]["commit"]) == 40
-        assert not L.eligibility(rec, C.RELEASE_FINDER_IDS)                  # the current rule, recomputed
-    assert v.catalog.lineage["kind_version"] == C.CATALOG_KIND_VERSION and v.catalog.lineage["settings"] == \
-        C.RELEASE_FINDER_SETTINGS
-    assert len(v.catalog.absorbers) == sum(v.meta["n_absorbers"].values()) == int(v.cddf["n_absorbers"].sum())
+        assert (
+            rec["finder_ids"] == [C.FINDER_ID]
+            and rec["code"]["dirty"] is False
+            and len(rec["code"]["commit"]) == 40
+        )
+        assert not L.eligibility(rec, C.RELEASE_FINDER_IDS)  # the current rule, recomputed
+    assert (
+        v.catalog.lineage["kind_version"] == C.CATALOG_KIND_VERSION
+        and v.catalog.lineage["settings"] == C.RELEASE_FINDER_SETTINGS
+    )
+    assert (
+        len(v.catalog.absorbers)
+        == sum(v.meta["n_absorbers"].values())
+        == int(v.cddf["n_absorbers"].sum())
+    )
 
 
-@pytest.mark.parametrize("edit, match", [
-    (lambda m: m.update(n_absorbers={"LLS": 7, "subDLA": 3, "DLA": 1, "forest": 0}), "n_absorbers"),
-    (lambda m: m.update(z=2.2), "meta.json z"),
-    (lambda m: m.update(dv_kms=m["dv_kms"] * (1 + 1e-12)), "meta.json dv_kms"),
-    (lambda m: m.update(nbins=m["nbins"] + 1), "nbins|skewers of 64 pixels"),
-    (lambda m: m.update(n_skewers=m["n_skewers"] - 1), "n_skewers|skewer"),
-    (lambda m: m.pop("z"), "meta.json z"),
-])
+@pytest.mark.parametrize(
+    "edit, match",
+    [
+        (
+            lambda m: m.update(n_absorbers={"LLS": 7, "subDLA": 3, "DLA": 1, "forest": 0}),
+            "n_absorbers",
+        ),
+        (lambda m: m.update(z=2.2), "meta.json z"),
+        (lambda m: m.update(dv_kms=m["dv_kms"] * (1 + 1e-12)), "meta.json dv_kms"),
+        (lambda m: m.update(nbins=m["nbins"] + 1), "nbins|skewers of 64 pixels"),
+        (lambda m: m.update(n_skewers=m["n_skewers"] - 1), "n_skewers|skewer"),
+        (lambda m: m.pop("z"), "meta.json z"),
+    ],
+)
 def test_meta_json_fields_are_bound_to_the_catalogue(tmp_path, edit, match):
     """meta.json's own fields (the counts the builder turns into dN/dX, the redshift label, the pixel facts) must agree
     with the catalogue and its record; the products and records are left untouched."""
     from hcd_analysis.paths import REPO_ROOT
     from hcd_analysis.snapshot_record import SnapshotIntegrityError, verify_snapshot_dir
+
     src = REPO_ROOT / "tests" / "golden" / "fe77e0f_catalogue_only"
     d = tmp_path / "synthsim" / "snap_001"
     shutil.copytree(src / "snap_001", d)
     raw = tmp_path / "s.hdf5"
     shutil.copy(src / "s.hdf5", raw)
-    kw = dict(mode="catalogue", settings=C.RELEASE_FINDER_SETTINGS, raw_path=raw, rehash=True,
-              require_release_eligible=True, sim="synthsim", snap=1)
+    kw = dict(
+        mode="catalogue",
+        settings=C.RELEASE_FINDER_SETTINGS,
+        raw_path=raw,
+        rehash=True,
+        require_release_eligible=True,
+        sim="synthsim",
+        snap=1,
+    )
     verify_snapshot_dir(d, **kw)
     meta = json.loads((d / "meta.json").read_text())
     edit(meta)
     (d / "meta.json").write_text(json.dumps(meta))
-    with pytest.raises((SnapshotIntegrityError, C.CatalogIntegrityError, C.CatalogProvenanceError), match=match):
+    with pytest.raises(
+        (SnapshotIntegrityError, C.CatalogIntegrityError, C.CatalogProvenanceError), match=match
+    ):
         verify_snapshot_dir(d, **kw)

@@ -19,6 +19,7 @@ Usage:
     python3 scripts/merge_tau0_cache.py --shards 'SHARD_DIR/observables_tau0_*.h5' --output MERGED.h5 \
         [--expect-rows N] [--expect-pairs M] [--historical-reproduction REASON]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,14 +38,21 @@ from hcd_analysis import tau0_cache as T  # noqa: E402
 
 _TOP_LEVEL = T.STATIC_KEYS
 _ROW_STR = ("sim_name",)
-_ROW_ARR = (("params",) + T.ROW_P1D_KEYS + T.ROW_TIERC_KEYS + T.ROW_COUNT_KEYS + T.ROW_MEANF_KEYS)
+_ROW_ARR = ("params",) + T.ROW_P1D_KEYS + T.ROW_TIERC_KEYS + T.ROW_COUNT_KEYS + T.ROW_MEANF_KEYS
 _ROW_FLOAT = T.ROW_FLOAT_KEYS
 _ROW_INT = T.ROW_INT_KEYS  # includes snap_group_idx (remapped specially)
 _SNAP_STR = ("snap_sim_name",)
 _SNAP_INT = ("snap_snap",)
 _SNAP_FLOAT = tuple("snap_" + k for k in T.SNAP_FLOAT_KEYS)
 _SNAP_2D = tuple("snap_" + k for k in T.SNAP_2D_KEYS)
-_REPLACED_ATTRS = ("created_utc", "git_sha", "n_rows", "n_snaps", "merged_from_n_shards", "cache_version")
+_REPLACED_ATTRS = (
+    "created_utc",
+    "git_sha",
+    "n_rows",
+    "n_snaps",
+    "merged_from_n_shards",
+    "cache_version",
+)
 
 
 def read_source(path, historical_reason=None):
@@ -57,8 +65,13 @@ def read_source(path, historical_reason=None):
 def source_entry(role, path, rec):
     """The input entry of a source cache: its file identity, and its record's finder ids and eligibility."""
     ident = L.file_identity(path)
-    return L.input_entry(role, T.KIND, {"sha256": ident["sha256"], "size": ident["size"]}, record=rec,
-                         info={"path": str(path)})
+    return L.input_entry(
+        role,
+        T.KIND,
+        {"sha256": ident["sha256"], "size": ident["size"]},
+        record=rec,
+        info={"path": str(path)},
+    )
 
 
 def groups_of(d, rec):
@@ -66,11 +79,20 @@ def groups_of(d, rec):
     if rec is not None and isinstance(rec.get("product", {}).get("groups"), list):
         return [dict(g) for g in rec["product"]["groups"]]
     gi = np.asarray(d["snap_group_idx"])
-    return [{"sim": str(s), "snap": int(n), "z_grid": float(np.asarray(d["z_grid"])[np.flatnonzero(gi == b)[0]]),
-             "rows": T.ROWS_BUILT} for b, (s, n) in enumerate(zip(d["snap_sim_name"], d["snap_snap"]))]
+    return [
+        {
+            "sim": str(s),
+            "snap": int(n),
+            "z_grid": float(np.asarray(d["z_grid"])[np.flatnonzero(gi == b)[0]]),
+            "rows": T.ROWS_BUILT,
+        }
+        for b, (s, n) in enumerate(zip(d["snap_sim_name"], d["snap_snap"]))
+    ]
 
 
-def merge_shards(shard_paths, output_path, expect_rows=None, expect_pairs=None, *, historical_reason=None):
+def merge_shards(
+    shard_paths, output_path, expect_rows=None, expect_pairs=None, *, historical_reason=None
+):
     shard_paths = sorted(shard_paths)
     if not shard_paths:
         raise ValueError("no shard files matched")
@@ -108,8 +130,16 @@ def merge_shards(shard_paths, output_path, expect_rows=None, expect_pairs=None, 
             snap_data.setdefault(k, []).append(d[k])
         n_snaps_so_far += n_snaps
         groups.extend(groups_of(d, rec))
-        entries.append([source_entry(f"shard:{si}", sp, rec if rec is not None and historical_reason is None
-                                     else None)] + (list(rec["inputs"]) if rec is not None else []))
+        entries.append(
+            [
+                source_entry(
+                    f"shard:{si}",
+                    sp,
+                    rec if rec is not None and historical_reason is None else None,
+                )
+            ]
+            + (list(rec["inputs"]) if rec is not None else [])
+        )
 
     total_rows = sum(len(a) for a in row_data["sim_name"])
     total_snaps = sum(len(a) for a in snap_data["snap_snap"])
@@ -119,12 +149,18 @@ def merge_shards(shard_paths, output_path, expect_rows=None, expect_pairs=None, 
     if len(set(ids)) != len(ids):
         raise ValueError("a (sim, snap) group appears in more than one shard")
     n_pairs = len(ids)
-    print(f"  merged {total_rows} rows across {n_pairs} unique (sim,snap) pairs "
-          f"from {len(shard_paths)} shards")
+    print(
+        f"  merged {total_rows} rows across {n_pairs} unique (sim,snap) pairs "
+        f"from {len(shard_paths)} shards"
+    )
     if expect_rows is not None and total_rows != expect_rows:
-        raise ValueError(f"row-count mismatch: merged {total_rows} != expected {expect_rows} (failed shard?)")
+        raise ValueError(
+            f"row-count mismatch: merged {total_rows} != expected {expect_rows} (failed shard?)"
+        )
     if expect_pairs is not None and n_pairs != expect_pairs:
-        raise ValueError(f"pair-count mismatch: merged {n_pairs} != expected {expect_pairs} (missing shard?)")
+        raise ValueError(
+            f"pair-count mismatch: merged {n_pairs} != expected {expect_pairs} (missing shard?)"
+        )
 
     d = dict(top)
     for k, lst in row_data.items():
@@ -137,30 +173,59 @@ def merge_shards(shard_paths, output_path, expect_rows=None, expect_pairs=None, 
         raise ValueError(f"snap_group_idx out of range [0,{total_snaps}): [{gi.min()},{gi.max()}]")
     attrs = {k: v for k, v in attrs0.items() if k not in _REPLACED_ATTRS}
     fresh = bt0.cache_attrs(int(attrs0["n_k"]), attrs0["alpha_range"])
-    attrs.update(created_utc=fresh["created_utc"], git_sha=fresh["git_sha"], n_rows=total_rows, n_snaps=total_snaps,
-                 merged_from_n_shards=len(shard_paths))
-    rec = T.write_cache(output_path, d, attrs, inputs=T.combine_inputs(*entries),
-                        settings=settings0 if settings0 is not None else {}, groups=groups,
-                        historical_reason=historical_reason)
-    print(f"Wrote {output_path}  ({Path(output_path).stat().st_size/1e6:.1f} MB, {total_rows} rows, {total_snaps} "
-          f"snaps); release_eligible={rec['release_eligible']}")
+    attrs.update(
+        created_utc=fresh["created_utc"],
+        git_sha=fresh["git_sha"],
+        n_rows=total_rows,
+        n_snaps=total_snaps,
+        merged_from_n_shards=len(shard_paths),
+    )
+    rec = T.write_cache(
+        output_path,
+        d,
+        attrs,
+        inputs=T.combine_inputs(*entries),
+        settings=settings0 if settings0 is not None else {},
+        groups=groups,
+        historical_reason=historical_reason,
+    )
+    print(
+        f"Wrote {output_path}  ({Path(output_path).stat().st_size/1e6:.1f} MB, {total_rows} rows, {total_snaps} "
+        f"snaps); release_eligible={rec['release_eligible']}"
+    )
     return rec
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Merge sharded tau0 caches.")
-    ap.add_argument("--shards", required=True,
-                    help="glob pattern for shard .h5 files (quote it).")
+    ap.add_argument("--shards", required=True, help="glob pattern for shard .h5 files (quote it).")
     ap.add_argument("--output", type=Path, required=True)
-    ap.add_argument("--expect-rows", type=int, default=None,
-                    help="assert merged row count (= n_pairs * n_alpha); catches failed shards.")
-    ap.add_argument("--expect-pairs", type=int, default=None,
-                    help="assert merged unique (sim,snap) count; catches missing shards.")
-    ap.add_argument("--historical-reproduction", metavar="REASON", default=None,
-                    help="read shards without lineage checks; the output is stamped not release-eligible")
+    ap.add_argument(
+        "--expect-rows",
+        type=int,
+        default=None,
+        help="assert merged row count (= n_pairs * n_alpha); catches failed shards.",
+    )
+    ap.add_argument(
+        "--expect-pairs",
+        type=int,
+        default=None,
+        help="assert merged unique (sim,snap) count; catches missing shards.",
+    )
+    ap.add_argument(
+        "--historical-reproduction",
+        metavar="REASON",
+        default=None,
+        help="read shards without lineage checks; the output is stamped not release-eligible",
+    )
     args = ap.parse_args(argv)
-    merge_shards(glob.glob(args.shards), args.output, expect_rows=args.expect_rows, expect_pairs=args.expect_pairs,
-                 historical_reason=args.historical_reproduction)
+    merge_shards(
+        glob.glob(args.shards),
+        args.output,
+        expect_rows=args.expect_rows,
+        expect_pairs=args.expect_pairs,
+        historical_reason=args.historical_reproduction,
+    )
 
 
 if __name__ == "__main__":

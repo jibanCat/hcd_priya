@@ -1,6 +1,7 @@
 """The derivation script of the packaged dN/dX record writes the cache's repository-relative path (review m2): a
 regeneration of hcd_analysis/emulator/hcd_lit_dndx_corrected.json must not bring back this machine's absolute path.
 Synthetic inputs; the JSON is not regenerated."""
+
 import importlib.util
 import os
 
@@ -14,11 +15,17 @@ _spec.loader.exec_module(D)
 
 
 def test_the_cache_provenance_block_records_a_repository_relative_path():
-    inputs = dict(path=os.path.join(D.REPO, "hcd_analysis", "_emulator_data", "observables_tau0_lf.h5"),
-                  shapes={"snap_f_nhi": (3, 30)}, sha256_f_nhi="0" * 64)
+    inputs = dict(
+        path=os.path.join(D.REPO, "hcd_analysis", "_emulator_data", "observables_tau0_lf.h5"),
+        shapes={"snap_f_nhi": (3, 30)},
+        sha256_f_nhi="0" * 64,
+    )
     assert D.cache_provenance(inputs, {"flag": "x"}) == dict(
-        path="hcd_analysis/_emulator_data/observables_tau0_lf.h5", shapes={"snap_f_nhi": (3, 30)},
-        sha256_f_nhi="0" * 64, same_file_consistency={"flag": "x"})
+        path="hcd_analysis/_emulator_data/observables_tau0_lf.h5",
+        shapes={"snap_f_nhi": (3, 30)},
+        sha256_f_nhi="0" * 64,
+        same_file_consistency={"flag": "x"},
+    )
 
 
 def test_a_cache_outside_the_repository_is_refused():

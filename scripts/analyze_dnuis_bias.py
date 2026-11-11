@@ -22,6 +22,7 @@ per-mock kept-z count), so it stays aligned with the metals/hierarchical appende
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python scripts/analyze_dnuis_bias.py --shard-dir <dir>
 """
+
 import argparse
 import functools
 import glob
@@ -35,9 +36,9 @@ print = functools.partial(print, flush=True)
 from hcd_analysis.emulator.inference import PARAM_NAMES
 
 N_THETA = 9
-GATE = 0.30                       # |mean Δbias_z| + 2·SE pass threshold (σ)
-LLS_BUDGET = 0.50                 # documented irreducible HCD→n_s budget (flag, not auto-fail)
-PARAMS = ("Ap", "ns")            # the two blinded cosmology params we gate
+GATE = 0.30  # |mean Δbias_z| + 2·SE pass threshold (σ)
+LLS_BUDGET = 0.50  # documented irreducible HCD→n_s budget (flag, not auto-fail)
+PARAMS = ("Ap", "ns")  # the two blinded cosmology params we gate
 
 
 def _col_of(rec, j):
@@ -81,8 +82,9 @@ def paired_delta_bias(clean_per_mock, inj_per_mock, param):
     deltas, clean_zs = [], []
     for m in range(n):
         rc, ri = clean_per_mock[m], inj_per_mock[m]
-        assert _rec_key(rc) == _rec_key(ri), \
-            f"clean/injected mock {m} misaligned: {_rec_key(rc)} != {_rec_key(ri)}"
+        assert _rec_key(rc) == _rec_key(
+            ri
+        ), f"clean/injected mock {m} misaligned: {_rec_key(rc)} != {_rec_key(ri)}"
         zc, zi = _bias_z(rc, j), _bias_z(ri, j)
         if zc is None or zi is None:
             continue
@@ -138,8 +140,8 @@ def load_shards(shard_dir, arm=None, survey=None, treatment=None):
     changes the pooled clean/inj ORDERING (the positional clean<->injected pairing relies on it)."""
     pat = os.path.join(shard_dir, "*_shard_*.pkl")
     groups = {}
-    seen_idxs = {}    # (arm,t,s) -> {mock_idx: pkl_path} -- disjointness guard
-    stamps = {}       # (arm,t,s) -> (stamp_tuple, pkl_path) -- single-forward guard
+    seen_idxs = {}  # (arm,t,s) -> {mock_idx: pkl_path} -- disjointness guard
+    stamps = {}  # (arm,t,s) -> (stamp_tuple, pkl_path) -- single-forward guard
     for p in sorted(glob.glob(pat)):
         with open(p, "rb") as f:
             d = pickle.load(f)
@@ -154,7 +156,8 @@ def load_shards(shard_dir, arm=None, survey=None, treatment=None):
         if "clean_per_mock" not in d or "inj_per_mock" not in d:
             raise SystemExit(
                 f"{p}: not a PAIRED shard (missing clean_per_mock/inj_per_mock). Re-run the shard "
-                f"with the paired run_dnuis_bias_shard.py.")
+                f"with the paired run_dnuis_bias_shard.py."
+            )
         key = (a, t, s)
         meta = d.get("meta") or {}
 
@@ -168,7 +171,8 @@ def load_shards(shard_dir, arm=None, survey=None, treatment=None):
                         f"load_shards: duplicate mock idx {ix} pooled into group {key} from both "
                         f"{seen[ix]!r} and {p!r} -- a mis-specified FILL shard (check --n-shards on "
                         f"these pkls) would otherwise silently double-count this mock into the "
-                        f"paired gate.")
+                        f"paired gate."
+                    )
                 seen[ix] = p
 
         # (2) single-forward-stamp guard: seed + the resolved injection (the "resolution" block of
@@ -184,23 +188,34 @@ def load_shards(shard_dir, arm=None, survey=None, treatment=None):
         res_spec = (meta.get("inject_spec") or {}).get("resolution")
         _rs = res_spec if isinstance(res_spec, dict) else {}
         _fw = meta.get("forward")
-        _fw_key = (frozenset((k, tuple(v) if isinstance(v, list) else v) for k, v in _fw.items())
-                   if isinstance(_fw, dict) else _fw)
-        stamp = (meta.get("seed"), _rs.get("member"), _rs.get("strength"), _rs.get("b_res"),
-                 _fw_key, meta.get("strength"))
+        _fw_key = (
+            frozenset((k, tuple(v) if isinstance(v, list) else v) for k, v in _fw.items())
+            if isinstance(_fw, dict)
+            else _fw
+        )
+        stamp = (
+            meta.get("seed"),
+            _rs.get("member"),
+            _rs.get("strength"),
+            _rs.get("b_res"),
+            _fw_key,
+            meta.get("strength"),
+        )
         prev = stamps.get(key)
         if prev is not None and prev[0] != stamp:
             raise SystemExit(
                 f"load_shards: mismatched forward stamp pooling into group {key}: {p!r} has "
                 f"(seed,member,strength,b_res)={stamp} but {prev[1]!r} has {prev[0]} -- two different "
-                f"forwards cannot be pooled into one gate cell.")
+                f"forwards cannot be pooled into one gate cell."
+            )
         stamps[key] = (stamp, p)
 
         cl, inj, nd, om = groups.setdefault(key, ([], [], [0], [None]))
         cl.extend(d["clean_per_mock"])
         inj.extend(d["inj_per_mock"])
-        nd[0] += (sum(int(r.get("n_div", 0) > 0) for r in d["clean_per_mock"])
-                  + sum(int(r.get("n_div", 0) > 0) for r in d["inj_per_mock"]))
+        nd[0] += sum(int(r.get("n_div", 0) > 0) for r in d["clean_per_mock"]) + sum(
+            int(r.get("n_div", 0) > 0) for r in d["inj_per_mock"]
+        )
         if om[0] is None:
             om[0] = (d.get("meta") or {}).get("b_res_oos_member")
     return groups
@@ -218,7 +233,8 @@ def _dnuis_verdict(arm, member, ub, param):
     needs a PI-signed waiver, not an auto-FLAG. So ``param`` gates whether the FLAG band is even in
     play: for ``param != 'ns'`` (i.e. A_p) the threshold is always GATE, same as a non-flag arm."""
     is_flag_arm = (param == "ns") and (
-        (arm == "lls_excess") or (arm == "resolution_oos" and member in ("bres1", "bres2", "bstar")))
+        (arm == "lls_excess") or (arm == "resolution_oos" and member in ("bres1", "bres2", "bstar"))
+    )
     thr = LLS_BUDGET if is_flag_arm else GATE
     ok = ub < GATE
     if is_flag_arm and not ok and ub < LLS_BUDGET:
@@ -235,7 +251,8 @@ def _bias_z_extra(rec, name):
     se = rec.get("sites_extra") or {}
     if name not in se:
         return None
-    dc = np.asarray(se[name]["draws"]); sd = float(dc.std())
+    dc = np.asarray(se[name]["draws"])
+    sd = float(dc.std())
     if not np.isfinite(sd) or sd == 0:
         return None
     return (float(dc.mean()) - float(se[name]["truth"])) / sd
@@ -250,7 +267,8 @@ def paired_delta_extra(clean_per_mock, inj_per_mock, name):
         zi = _bias_z_extra(inj_per_mock[m], name)
         if zc is None or zi is None:
             continue
-        deltas.append(zi - zc); cleans.append(zc)
+        deltas.append(zi - zc)
+        cleans.append(zc)
     return np.array(deltas), np.array(cleans)
 
 
@@ -287,33 +305,52 @@ def _overall_summary(any_fail, any_flag):
     if any_fail:
         return "FAIL — at least one non-LLS arm exceeds the confidence-bound gate."
     if any_flag:
-        return ("PASS (with FLAGS) — all non-LLS arms are within the confidence-bound gate or the "
-                "documented adversarial FLAG budget; see FLAG rows above.")
+        return (
+            "PASS (with FLAGS) — all non-LLS arms are within the confidence-bound gate or the "
+            "documented adversarial FLAG budget; see FLAG rows above."
+        )
     return "PASS — all non-LLS arms within the confidence-bound bias gate."
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--shard-dir", required=True)
-    ap.add_argument("--arm", default=None,
-                    choices=[None, "metal_misspec", "resolution", "resolution_oos", "lls_excess",
-                             "metal_matched"])
+    ap.add_argument(
+        "--arm",
+        default=None,
+        choices=[
+            None,
+            "metal_misspec",
+            "resolution",
+            "resolution_oos",
+            "lls_excess",
+            "metal_matched",
+        ],
+    )
     ap.add_argument("--survey", default=None, choices=[None, "desi", "ks", "eboss"])
-    ap.add_argument("--treatment", default=None, choices=[None, "a", "b", "c", "d"],
-                    help="filter the 4-arm resolution bracket: a=option-a, b=option-b tight, "
-                         "c=option-b wide, d=arm-D (coherent cov). Default: report all.")
+    ap.add_argument(
+        "--treatment",
+        default=None,
+        choices=[None, "a", "b", "c", "d"],
+        help="filter the 4-arm resolution bracket: a=option-a, b=option-b tight, "
+        "c=option-b wide, d=arm-D (coherent cov). Default: report all.",
+    )
     a = ap.parse_args()
 
     groups = load_shards(a.shard_dir, a.arm, a.survey, a.treatment)
     if not groups:
-        raise SystemExit(f"no shard pkls in {a.shard_dir} (arm={a.arm} survey={a.survey} treat={a.treatment})")
+        raise SystemExit(
+            f"no shard pkls in {a.shard_dir} (arm={a.arm} survey={a.survey} treat={a.treatment})"
+        )
 
-    hdr = (f"{'arm/treat/survey':<22} {'param':<4} {'n':>4} {'ndiv':>4} "
-           f"{'Δmean_z':>9} {'SE':>7} {'|Δ|+2SE':>8} {'clean_z':>8}  verdict")
+    hdr = (
+        f"{'arm/treat/survey':<22} {'param':<4} {'n':>4} {'ndiv':>4} "
+        f"{'Δmean_z':>9} {'SE':>7} {'|Δ|+2SE':>8} {'clean_z':>8}  verdict"
+    )
     print(hdr)
     print("-" * len(hdr))
     any_fail = False
-    any_flag = False                # FIX 3: tracks a FLAGGED (not failed) NON-LLS arm
+    any_flag = False  # FIX 3: tracks a FLAGGED (not failed) NON-LLS arm
     for (arm, treatment, survey), (clean_pm, inj_pm, nd, om) in sorted(groups.items()):
         n_div = nd[0]
         member = om[0]
@@ -321,22 +358,29 @@ def main():
             deltas, clean_zs = paired_delta_bias(clean_pm, inj_pm, param)
             n = deltas.size
             mean = float(deltas.mean()) if n else np.nan
-            se = float(deltas.std(ddof=1) / np.sqrt(n)) if n > 1 else (
-                float(abs(deltas[0])) if n == 1 else np.nan)
-            ub = abs(mean) + 2.0 * se if n else np.nan       # the confidence-bound gate statistic
+            se = (
+                float(deltas.std(ddof=1) / np.sqrt(n))
+                if n > 1
+                else (float(abs(deltas[0])) if n == 1 else np.nan)
+            )
+            ub = abs(mean) + 2.0 * se if n else np.nan  # the confidence-bound gate statistic
             clean_mean = float(clean_zs.mean()) if clean_zs.size else np.nan
             verdict = _dnuis_verdict(arm, member, ub, param)
             if verdict == "FAIL":
                 any_fail = True
             elif verdict.startswith("FLAG") and arm != "lls_excess":
                 any_flag = True
-            print(f"{arm + '/' + treatment + '/' + survey:<22} {param:<4} {n:>4} {n_div:>4} "
-                  f"{mean:>+9.3f} {se:>7.3f} {ub:>8.3f} {clean_mean:>+8.3f}  {verdict}")
+            print(
+                f"{arm + '/' + treatment + '/' + survey:<22} {param:<4} {n:>4} {n_div:>4} "
+                f"{mean:>+9.3f} {se:>7.3f} {ub:>8.3f} {clean_mean:>+8.3f}  {verdict}"
+            )
     print("-" * len(hdr))
-    print(f"GATE: |mean Δbias_z| + 2·SE < {GATE:.2f}σ for Ap & ns "
-          f"(lls_excess flagged up to {LLS_BUDGET:.2f}σ, not auto-failed; resolution_oos adversarial "
-          f"members bres1/bres2/bstar are flagged the SAME way, bres_real stays hard-gated). "
-          f"clean_z is the unpaired clean-arm bias (sanity ~0).")
+    print(
+        f"GATE: |mean Δbias_z| + 2·SE < {GATE:.2f}σ for Ap & ns "
+        f"(lls_excess flagged up to {LLS_BUDGET:.2f}σ, not auto-failed; resolution_oos adversarial "
+        f"members bres1/bres2/bstar are flagged the SAME way, bres_real stays hard-gated). "
+        f"clean_z is the unpaired clean-arm bias (sanity ~0)."
+    )
     print("OVERALL:", _overall_summary(any_fail, any_flag))
 
     # --- standing-rule mean-flux + metal-nuisance report (NOT gated): the model samples the per-z
@@ -345,14 +389,19 @@ def main():
     # mean flux is the suspected n_s channel — does a contaminant push it? ---
     print()
     print("MEAN-FLUX (tau0_z ladder, paired Δbias_z) + a_SiIII — report only, not gated:")
-    rh = (f"{'arm/treat/survey':<22} {'tau0z mean':>10} {'tau0z[min,max]':>18} "
-          f"{'a_SiIII Δ':>10} {'a_SiIII clean':>13}")
+    rh = (
+        f"{'arm/treat/survey':<22} {'tau0z mean':>10} {'tau0z[min,max]':>18} "
+        f"{'a_SiIII Δ':>10} {'a_SiIII clean':>13}"
+    )
     print(rh)
     print("-" * len(rh))
     for (arm, treatment, survey), (clean_pm, inj_pm, nd, _om) in sorted(groups.items()):
         tau0_nms = [nm for nm in list(clean_pm[0]["names"]) if nm.startswith("tau0_z")]
-        tz = [float(d[0].mean()) for d in (paired_delta_named(clean_pm, inj_pm, nm)
-                                           for nm in tau0_nms) if d[0].size]
+        tz = [
+            float(d[0].mean())
+            for d in (paired_delta_named(clean_pm, inj_pm, nm) for nm in tau0_nms)
+            if d[0].size
+        ]
         da, da_clean = paired_delta_named(clean_pm, inj_pm, "a_SiIII")
         tz_mean = f"{np.mean(tz):>+10.3f}" if tz else f"{'n/a':>10}"
         rng = f"[{min(tz):+.2f},{max(tz):+.2f}]" if tz else ""
@@ -364,18 +413,25 @@ def main():
     # gate above (feedback-report-tau0-dtau0-bias: mean flux is the suspected n_s channel, so ALWAYS
     # surface the τ₀ amplitude+slope bias next to n_s/A_p). Present only if the runner stored
     # sites_extra (run_legb >= Model C+); silently skipped on older shards. ---
-    if any((clean_pm and (clean_pm[0].get("sites_extra")))
-           for clean_pm, _inj, _nd, _om in groups.values()):
+    if any(
+        (clean_pm and (clean_pm[0].get("sites_extra")))
+        for clean_pm, _inj, _nd, _om in groups.values()
+    ):
         print()
         print("MEAN-FLUX SITES (tau0_amp/dtau0 paired Δbias_z) — report only, not gated:")
-        rh2 = (f"{'arm/treat/survey':<22} {'tau0_amp Δ':>11} {'tau0_amp clean':>15} "
-               f"{'dtau0 Δ':>10} {'dtau0 clean':>12}")
-        print(rh2); print("-" * len(rh2))
+        rh2 = (
+            f"{'arm/treat/survey':<22} {'tau0_amp Δ':>11} {'tau0_amp clean':>15} "
+            f"{'dtau0 Δ':>10} {'dtau0 clean':>12}"
+        )
+        print(rh2)
+        print("-" * len(rh2))
         for (arm, treatment, survey), (clean_pm, inj_pm, nd, _om) in sorted(groups.items()):
             da, dac = paired_delta_extra(clean_pm, inj_pm, "tau0_amp")
             dd, ddc = paired_delta_extra(clean_pm, inj_pm, "dtau0")
             f = lambda v, w: (f"{v.mean():>+{w}.3f}" if v.size else f"{'n/a':>{w}}")
-            print(f"{arm + '/' + treatment + '/' + survey:<22} {f(da,11)} {f(dac,15)} {f(dd,10)} {f(ddc,12)}")
+            print(
+                f"{arm + '/' + treatment + '/' + survey:<22} {f(da,11)} {f(dac,15)} {f(dd,10)} {f(ddc,12)}"
+            )
 
     # --- IGM / thermal NUISANCES (theta9, paired Δbias_z) — report only, not gated. These live in
     # theta9 (already packed), surfaced so the metal-injection pull on the IGM block is visible next
@@ -386,7 +442,8 @@ def main():
     print("IGM NUISANCES (theta9 paired Δbias_z) — report only, not gated:")
     IGM = ("alphaq", "heref", "herei", "hireionz")
     rh3 = f"{'arm/treat/survey':<22} " + " ".join(f"{p:>9}" for p in IGM)
-    print(rh3); print("-" * len(rh3))
+    print(rh3)
+    print("-" * len(rh3))
     for (arm, treatment, survey), (clean_pm, inj_pm, nd, _om) in sorted(groups.items()):
         cells = []
         for p in IGM:
@@ -398,17 +455,23 @@ def main():
     # the gate on BOTH Ap & ns, prefer the SMALLEST ABSOLUTE sigma(n_s). Only shown when a (arm, survey)
     # carries >1 treatment (i.e. an actual A/B/C/D comparison run). ---
     from collections import defaultdict
+
     by_as = defaultdict(dict)
     for (arm, treatment, survey), payload in groups.items():
         by_as[(arm, survey)][treatment] = payload
     brackets = {k: v for k, v in by_as.items() if len(v) > 1}
     if brackets:
         print()
-        print("4-ARM RESOLUTION BRACKET — per treatment: n_s gate + ABSOLUTE sigma(n_s); "
-              "WINNER = smallest honest sigma(n_s) among gate-passers (panel M1):")
-        bh = (f"{'arm/survey':<20} {'treat':<6} {'ns Δmean':>9} {'ns|Δ|+2SE':>10} {'ns σ_post':>10} "
-              f"{'Ap|Δ|+2SE':>10} {'gate':>5}")
-        print(bh); print("-" * (len(bh) + 12))
+        print(
+            "4-ARM RESOLUTION BRACKET — per treatment: n_s gate + ABSOLUTE sigma(n_s); "
+            "WINNER = smallest honest sigma(n_s) among gate-passers (panel M1):"
+        )
+        bh = (
+            f"{'arm/survey':<20} {'treat':<6} {'ns Δmean':>9} {'ns|Δ|+2SE':>10} {'ns σ_post':>10} "
+            f"{'Ap|Δ|+2SE':>10} {'gate':>5}"
+        )
+        print(bh)
+        print("-" * (len(bh) + 12))
         LABEL = {"a": "a option-a", "b": "b opt-b tight", "c": "c opt-b wide", "d": "d arm-D coh"}
         for (arm, survey), treats in sorted(brackets.items()):
             rows = []
@@ -418,19 +481,34 @@ def main():
                 dap, _ = paired_delta_bias(clean_pm, inj_pm, "Ap")
                 ub_ns, ub_ap = _ub(dns), _ub(dap)
                 passed = (ub_ns < GATE) and (ub_ap < GATE)
-                rows.append((t, float(dns.mean()) if dns.size else np.nan, ub_ns,
-                             _post_std_mean(inj_pm, "ns"), ub_ap, passed))
+                rows.append(
+                    (
+                        t,
+                        float(dns.mean()) if dns.size else np.nan,
+                        ub_ns,
+                        _post_std_mean(inj_pm, "ns"),
+                        ub_ap,
+                        passed,
+                    )
+                )
             passers = [r for r in rows if r[5] and np.isfinite(r[3])]
             winner = min(passers, key=lambda r: r[3]) if passers else None
-            for (t, dm, ubn, sig, uba, passed) in rows:
-                mark = ("  <-- WINNER (smallest σ_ns)" if (winner and t == winner[0])
-                        else ("" if passed else "  gate-FAIL"))
-                print(f"{arm + '/' + survey:<20} {LABEL.get(t, t):<6} {dm:>+9.3f} {ubn:>10.3f} "
-                      f"{sig:>10.4f} {uba:>10.3f} {'PASS' if passed else 'FAIL':>5}{mark}")
+            for t, dm, ubn, sig, uba, passed in rows:
+                mark = (
+                    "  <-- WINNER (smallest σ_ns)"
+                    if (winner and t == winner[0])
+                    else ("" if passed else "  gate-FAIL")
+                )
+                print(
+                    f"{arm + '/' + survey:<20} {LABEL.get(t, t):<6} {dm:>+9.3f} {ubn:>10.3f} "
+                    f"{sig:>10.4f} {uba:>10.3f} {'PASS' if passed else 'FAIL':>5}{mark}"
+                )
         print("-" * (len(bh) + 12))
-        print(f"DECISION RULE (panel M1): among treatments passing |mean Δbias_z|+2·SE < {GATE:.2f} on BOTH "
-              "Ap & ns, prefer the SMALLEST ABSOLUTE σ(n_s) -- an arm that 'passes' only by ballooning "
-              "σ(n_s) is not a win. Then cross-check the z-incoherent out-of-span arm before certifying n_s.")
+        print(
+            f"DECISION RULE (panel M1): among treatments passing |mean Δbias_z|+2·SE < {GATE:.2f} on BOTH "
+            "Ap & ns, prefer the SMALLEST ABSOLUTE σ(n_s) -- an arm that 'passes' only by ballooning "
+            "σ(n_s) is not a win. Then cross-check the z-incoherent out-of-span arm before certifying n_s."
+        )
 
 
 if __name__ == "__main__":

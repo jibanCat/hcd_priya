@@ -19,6 +19,7 @@ GitHub-hosted runners come with different CPU models. So:
 
 ``HCD_PINNED_STACK=1`` keeps its meaning: the run declares itself the supported pinned stack, and a numpy that is not
 the pinned one fails the run (``check_declared_pinned_stack``)."""
+
 import os
 import re
 
@@ -33,25 +34,31 @@ EXACT_REPLAY_PACKAGES = ("numpy", "jax", "jaxlib")
 # copy of tests/ alone); test_wc_map.py checks that they equal the file's pins.
 PINNED_RECORDED = {"numpy": ("2.4.6",), "jax": ("0.10.1",), "jaxlib": ("0.10.1",)}
 
-_STRICT_REQUIREMENT = re.compile(r"(?P<name>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\s*(?:\[[^\]]*\])?\s*"
-                                 r"(?P<spec>[^;]*?)\s*(?:;(?P<marker>.*))?")
+_STRICT_REQUIREMENT = re.compile(
+    r"(?P<name>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\s*(?:\[[^\]]*\])?\s*"
+    r"(?P<spec>[^;]*?)\s*(?:;(?P<marker>.*))?"
+)
 _EXACT_SPEC = re.compile(r"===?\s*(?P<version>[0-9][0-9A-Za-z.+!_-]*)")
 
 
 def _requirement_strict(line):
     """``(canonical name, exact version or None)`` of one requirement line, without ``packaging``: a name (``-``,
     ``_`` and ``.`` runs equal, any case), optional extras, the specifiers and an optional environment marker. The
-    version is returned only for one ``==`` or ``===`` specifier without a wildcard. Unparsable: ValueError."""
+    version is returned only for one ``==`` or ``===`` specifier without a wildcard. Unparsable: ValueError.
+    """
     m = _STRICT_REQUIREMENT.fullmatch(line)
     if m is None or (m.group("marker") is not None and not m.group("marker").strip()):
         raise ValueError(f"unparsable requirement line {line!r}")
     e = _EXACT_SPEC.fullmatch(m.group("spec").strip())
-    return re.sub(r"[-_.]+", "-", m.group("name")).lower(), e.group("version") if e and "*" not in e.group(0) else None
+    return re.sub(r"[-_.]+", "-", m.group("name")).lower(), (
+        e.group("version") if e and "*" not in e.group(0) else None
+    )
 
 
 def _requirement(line):
     """``(canonical name, exact version or None)`` of one requirement line, with the standard requirement grammar
-    (``packaging.requirements``, a pytest dependency) when it is importable, else ``_requirement_strict``."""
+    (``packaging.requirements``, a pytest dependency) when it is importable, else ``_requirement_strict``.
+    """
     try:
         from packaging.requirements import InvalidRequirement, Requirement
         from packaging.utils import canonicalize_name
@@ -97,14 +104,17 @@ def pinned_versions(name, path=CONSTRAINTS_FILE):
     - When the constraints file (``tools/ci/constraints-devenv.txt``) exists, its exact pins of ``name``,
       read by ``package_pins``. Fail closed: a file that pins no version of ``name``, or whose line for it is not one
       exact pin, raises ValueError.
-    - Only when the file is absent (a tests-only copy, or a tree without it): ``PINNED_RECORDED``."""
+    - Only when the file is absent (a tests-only copy, or a tree without it): ``PINNED_RECORDED``.
+    """
     if not os.path.exists(path):
         return PINNED_RECORDED[name]
     with open(path) as fh:
         pins = package_pins(fh.read(), name)
     if not pins:
-        raise ValueError(f"{path} exists but pins no {name} version ({name}==X): the pinned stack cannot be told, so "
-                         "the bit-level digests cannot be placed; fix the constraints file or this parser")
+        raise ValueError(
+            f"{path} exists but pins no {name} version ({name}==X): the pinned stack cannot be told, so "
+            "the bit-level digests cannot be placed; fix the constraints file or this parser"
+        )
     return pins
 
 
@@ -134,12 +144,15 @@ def running_versions():
 def check_declared_pinned_stack(versions=None, environ=None, pins=None):
     """A run that declares the pinned stack (``pinned_stack_declared``) MUST be on a pinned numpy: otherwise
     ValueError, so a supported job that drifted to another numpy fails instead of quietly passing. ``versions``: as
-    ``running_versions()`` (default); ``pins``: ``{name: versions}`` (default ``pinned_versions``)."""
+    ``running_versions()`` (default); ``pins``: ``{name: versions}`` (default ``pinned_versions``).
+    """
     version = (running_versions() if versions is None else versions)["numpy"]
     allowed = pinned_numpy_versions() if pins is None else tuple(pins["numpy"])
     if pinned_stack_declared(environ) and version not in allowed:
-        raise ValueError(f"{PINNED_STACK_ENV}=1 declares the supported pinned stack, but numpy {version} is not one of "
-                         f"the pinned versions {allowed}: fix the environment or the pin")
+        raise ValueError(
+            f"{PINNED_STACK_ENV}=1 declares the supported pinned stack, but numpy {version} is not one of "
+            f"the pinned versions {allowed}: fix the environment or the pin"
+        )
 
 
 def exact_replay(environ=None, versions=None, pins=None):
@@ -148,7 +161,8 @@ def exact_replay(environ=None, versions=None, pins=None):
     True only when ``HCD_EXACT_REPLAY`` is exactly ``"1"``. Then it is refused (ValueError, never a silent fallback)
     on a GitHub runner (``GITHUB_ACTIONS`` is ``"true"``), without ``HCD_PINNED_STACK=1``, or when numpy, jax or
     jaxlib is not at its pinned version. Unset, empty or any other value: False, the tolerance comparison alone (the
-    default, and the only mode on a GitHub runner). ``check_declared_pinned_stack`` runs first, in every mode."""
+    default, and the only mode on a GitHub runner). ``check_declared_pinned_stack`` runs first, in every mode.
+    """
     env = os.environ if environ is None else environ
     versions = running_versions() if versions is None else versions
     pins = {n: pinned_versions(n) for n in EXACT_REPLAY_PACKAGES} if pins is None else pins
@@ -156,20 +170,29 @@ def exact_replay(environ=None, versions=None, pins=None):
     if env.get(EXACT_REPLAY_ENV) != "1":
         return False
     if env.get("GITHUB_ACTIONS") == "true":
-        raise ValueError(f"{EXACT_REPLAY_ENV}=1 on a GitHub runner (GITHUB_ACTIONS=true): the exact digests are for a "
-                         "same-machine replay with the pinned stack; a hosted runner's CPU is not known in advance")
+        raise ValueError(
+            f"{EXACT_REPLAY_ENV}=1 on a GitHub runner (GITHUB_ACTIONS=true): the exact digests are for a "
+            "same-machine replay with the pinned stack; a hosted runner's CPU is not known in advance"
+        )
     if not pinned_stack_declared(env):
-        raise ValueError(f"{EXACT_REPLAY_ENV}=1 needs {PINNED_STACK_ENV}=1: the exact digests hold only on the pinned "
-                         "stack")
-    off = [f"{n} {versions.get(n)} (pinned {tuple(pins[n])})" for n in EXACT_REPLAY_PACKAGES
-           if versions.get(n) not in tuple(pins[n])]
+        raise ValueError(
+            f"{EXACT_REPLAY_ENV}=1 needs {PINNED_STACK_ENV}=1: the exact digests hold only on the pinned "
+            "stack"
+        )
+    off = [
+        f"{n} {versions.get(n)} (pinned {tuple(pins[n])})"
+        for n in EXACT_REPLAY_PACKAGES
+        if versions.get(n) not in tuple(pins[n])
+    ]
     if off:
         raise ValueError(f"{EXACT_REPLAY_ENV}=1, but not on the pinned stack: {'; '.join(off)}")
     return True
 
 
-SKIP_REASON = ("exact digests not requested: set HCD_EXACT_REPLAY=1 with HCD_PINNED_STACK=1 for a same-machine "
-               "replay on the pinned stack (never on a GitHub runner); the per-field tolerance tests ran instead")
+SKIP_REASON = (
+    "exact digests not requested: set HCD_EXACT_REPLAY=1 with HCD_PINNED_STACK=1 for a same-machine "
+    "replay on the pinned stack (never on a GitHub runner); the per-field tolerance tests ran instead"
+)
 
 
 def require_exact_replay(environ=None, versions=None, pins=None):
@@ -177,14 +200,17 @@ def require_exact_replay(environ=None, versions=None, pins=None):
     report always says the digests were not checked. Its refusals (ValueError) propagate: a contradictory request
     fails, it is never skipped."""
     import pytest
+
     if not exact_replay(environ, versions, pins):
         pytest.skip(SKIP_REASON)
 
 
 def call_unskipped(fn, *args, **kwargs):
     """``fn(*args, **kwargs)``, with a pytest SKIP raised inside turned into a failure: for a test that checks a call
-    which must run (a skip would otherwise mark the whole checking test skipped, hiding the defect)."""
+    which must run (a skip would otherwise mark the whole checking test skipped, hiding the defect).
+    """
     import pytest
+
     try:
         return fn(*args, **kwargs)
     except pytest.skip.Exception as e:
@@ -200,8 +226,10 @@ def field_mismatches(got, want, tols):
     exactly, and its tolerance must be ``(0, 0)``; a float field must have the same non-finite entries in the same
     places, and every finite element must satisfy ``|got - want| <= atol + rtol * |want|``."""
     if set(tols) != set(want):
-        raise ValueError(f"every reference field needs its own tolerance: missing {sorted(set(want) - set(tols))}, "
-                         f"unknown {sorted(set(tols) - set(want))}")
+        raise ValueError(
+            f"every reference field needs its own tolerance: missing {sorted(set(want) - set(tols))}, "
+            f"unknown {sorted(set(tols) - set(want))}"
+        )
     out = ["keys"] if set(got) != set(want) else []
     for name in sorted(want):
         if name not in got:
@@ -215,7 +243,9 @@ def field_mismatches(got, want, tols):
             continue
         if w.dtype.kind != "f":
             if (rtol, atol) != (0, 0):
-                raise ValueError(f"{name}: a {w.dtype} field is compared exactly; its tolerance must be (0, 0)")
+                raise ValueError(
+                    f"{name}: a {w.dtype} field is compared exactly; its tolerance must be (0, 0)"
+                )
             if not np.array_equal(g, w):
                 out.append(name)
             continue

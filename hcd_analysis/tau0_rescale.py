@@ -10,6 +10,7 @@ design spec of 2026-05-17, section 3).
 A uniform rescale ("Tier A", a deliberately-wrong systematic twin) is
 recovered with tau_freeze = inf.
 """
+
 from __future__ import annotations
 
 import numpy as np

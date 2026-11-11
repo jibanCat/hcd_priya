@@ -19,6 +19,7 @@ Usage (<repo> = this checkout):
         --remove SIM:SNAP:ZGRID [--remove ...] --record-json RECORD.json --output REPAIRED.h5 \
         [--historical-reproduction REASON]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -42,8 +43,15 @@ SNAP_KEYS = mg._SNAP_STR + mg._SNAP_INT + mg._SNAP_FLOAT + mg._SNAP_2D
 STATIC_KEYS = mg._TOP_LEVEL
 ALL_KEYS = set(ROW_KEYS) | set(SNAP_KEYS) | set(STATIC_KEYS)
 STR_KEYS = set(T.STR_KEYS)
-_REPLACED_ATTRS = ("created_utc", "git_sha", "n_rows", "n_snaps", "merged_from_n_shards", "repair_record",
-                   "cache_version")
+_REPLACED_ATTRS = (
+    "created_utc",
+    "git_sha",
+    "n_rows",
+    "n_snaps",
+    "merged_from_n_shards",
+    "repair_record",
+    "cache_version",
+)
 _GROUP_KINDS = T.GROUP_INPUT_KINDS
 
 
@@ -91,8 +99,12 @@ def _check_canonical(groups, d, path):
 def _git_head():
     """Full git HEAD of this checkout, or None when it cannot be read (for example a git-archive export)."""
     try:
-        r = subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], capture_output=True, text=True,
-                           timeout=10)
+        r = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
@@ -101,10 +113,14 @@ def _git_head():
 def _refuse_existing_output(out_path):
     p = Path(out_path)
     if p.exists() or p.is_symlink():
-        raise FileExistsError(f"refusing to overwrite an existing path: {p} (the splice writes a NEW file only)")
+        raise FileExistsError(
+            f"refusing to overwrite an existing path: {p} (the splice writes a NEW file only)"
+        )
 
 
-def splice_cache(base_path, shard_paths, remove, out_path, *, record, code_commit, historical_reason=None):
+def splice_cache(
+    base_path, shard_paths, remove, out_path, *, record, code_commit, historical_reason=None
+):
     """Write a NEW cache = base minus the groups `remove` [(sim, snap, z_grid)] plus every group of `shard_paths`.
     Returns the repair record written to the ``repair_record`` attribute.
 
@@ -112,7 +128,9 @@ def splice_cache(base_path, shard_paths, remove, out_path, *, record, code_commi
     attribute (the lineage record takes the commit from git). An existing `out_path` is refused before any input is
     opened."""
     if not code_commit or str(code_commit).strip().lower() == "unknown":
-        raise ValueError("refusing: no code commit given (pass the commit that produced this splice)")
+        raise ValueError(
+            "refusing: no code commit given (pass the commit that produced this splice)"
+        )
     if Path(out_path).resolve() in {Path(p).resolve() for p in [base_path, *shard_paths]}:
         raise ValueError("refusing to overwrite an input cache")
     _refuse_existing_output(out_path)
@@ -130,8 +148,13 @@ def splice_cache(base_path, shard_paths, remove, out_path, *, record, code_commi
         del keep[(sim, int(snap))]
         removed.append([sim, int(snap), float(zg)])
     gone = {T.group_role(k, s_, n) for s_, n, _ in removed for k in _GROUP_KINDS}
-    base_inputs = [i for i in (base_rec["inputs"] if base_rec is not None else []) if i["role"] not in gone]
-    entries = [[mg.source_entry("base", base_path, base_rec if historical_reason is None else None)], base_inputs]
+    base_inputs = [
+        i for i in (base_rec["inputs"] if base_rec is not None else []) if i["role"] not in gone
+    ]
+    entries = [
+        [mg.source_entry("base", base_path, base_rec if historical_reason is None else None)],
+        base_inputs,
+    ]
     sources = {"base": base}
     added, shard_meta = [], []
     for i, sp in enumerate(shard_paths):
@@ -141,9 +164,11 @@ def splice_cache(base_path, shard_paths, remove, out_path, *, record, code_commi
         for k in STATIC_KEYS:
             if not np.array_equal(d[k], base[k]):
                 raise ValueError(f"shard {sp}: static table {k} differs from the base")
-        for a in ("n_k", "tier_c_recipe", "tau_thresh"):            # cache_version: 3.4 by the release reader
+        for a in ("n_k", "tier_c_recipe", "tau_thresh"):  # cache_version: 3.4 by the release reader
             if str(attrs.get(a)) != str(base_attrs.get(a)):
-                raise ValueError(f"shard {sp}: attribute {a} {attrs.get(a)!r} != base {base_attrs.get(a)!r}")
+                raise ValueError(
+                    f"shard {sp}: attribute {a} {attrs.get(a)!r} != base {base_attrs.get(a)!r}"
+                )
         if not np.allclose(attrs["alpha_range"], base_attrs["alpha_range"], rtol=0, atol=0):
             raise ValueError(f"shard {sp}: alpha_range differs from the base")
         if rec is not None and base_rec is not None and rec["settings"] != base_rec["settings"]:
@@ -161,8 +186,10 @@ def splice_cache(base_path, shard_paths, remove, out_path, *, record, code_commi
             keep[ident] = (src, b, rows)
             added.append([ident[0], ident[1], float(d["z_grid"][rows[0]])])
         shard_meta.append({"path": str(sp), "sha256": sha256(sp)})
-        entries.append([mg.source_entry(f"shard:{i}", sp, rec if historical_reason is None else None)]
-                       + (list(rec["inputs"]) if rec is not None else []))
+        entries.append(
+            [mg.source_entry(f"shard:{i}", sp, rec if historical_reason is None else None)]
+            + (list(rec["inputs"]) if rec is not None else [])
+        )
 
     order = sorted(keep)
     rows_out = {k: [] for k in ROW_KEYS}
@@ -173,12 +200,19 @@ def splice_cache(base_path, shard_paths, remove, out_path, *, record, code_commi
         for k in ROW_KEYS:
             rows_out[k].append(np.full(rows.size, gnew) if k == "snap_group_idx" else d[k][rows])
         for k in SNAP_KEYS:
-            snap_out[k].append(d[k][b:b + 1])
+            snap_out[k].append(d[k][b : b + 1])
     n_rows = sum(len(x) for x in rows_out["sim_name"])
     rec = dict(record)
-    rec.update(base=str(base_path), base_sha256=sha256(base_path), shards=shard_meta, removed=removed, added=added,
-               n_rows=[int(len(base["sim_name"])), n_rows], n_snaps=[int(len(base["snap_snap"])), len(order)],
-               code_commit=code_commit)
+    rec.update(
+        base=str(base_path),
+        base_sha256=sha256(base_path),
+        shards=shard_meta,
+        removed=removed,
+        added=added,
+        n_rows=[int(len(base["sim_name"])), n_rows],
+        n_snaps=[int(len(base["snap_snap"])), len(order)],
+        code_commit=code_commit,
+    )
     out = {k: base[k] for k in STATIC_KEYS}
     for k in ROW_KEYS:
         out[k] = _cast(np.concatenate(rows_out[k], axis=0), k, base_dt)
@@ -186,17 +220,29 @@ def splice_cache(base_path, shard_paths, remove, out_path, *, record, code_commi
         out[k] = _cast(np.concatenate(snap_out[k], axis=0), k, base_dt)
     attrs = {k: v for k, v in base_attrs.items() if k not in _REPLACED_ATTRS}
     fresh = bt0.cache_attrs(int(base_attrs["n_k"]), base_attrs["alpha_range"])
-    attrs.update(created_utc=fresh["created_utc"], git_sha=code_commit, n_rows=n_rows, n_snaps=len(order),
-                 repair_record=json.dumps(rec, sort_keys=True))
+    attrs.update(
+        created_utc=fresh["created_utc"],
+        git_sha=code_commit,
+        n_rows=n_rows,
+        n_snaps=len(order),
+        repair_record=json.dumps(rec, sort_keys=True),
+    )
     carried = validation = None
     if base_rec is not None and base_rec["product"].get("carried"):
         carried, validation = base_rec["product"]["carried"], base_rec.get("validation")
     # write_cache writes a temporary file and publishes it write-once (a hard link): a path that appeared after the
     # up-front check is refused, never truncated or replaced.
-    T.write_cache(out_path, out, attrs, inputs=T.combine_inputs(*entries),
-                  settings=base_rec["settings"] if base_rec is not None else {},
-                  groups=[meta_of[i] for i in order], carried=carried, validation=validation,
-                  historical_reason=historical_reason)
+    T.write_cache(
+        out_path,
+        out,
+        attrs,
+        inputs=T.combine_inputs(*entries),
+        settings=base_rec["settings"] if base_rec is not None else {},
+        groups=[meta_of[i] for i in order],
+        carried=carried,
+        validation=validation,
+        historical_reason=historical_reason,
+    )
     return rec
 
 
@@ -232,7 +278,9 @@ def cache_delta(hist_path, new_path):
     rep["static_equal"] = not rep["static_diffs"]
 
     def rows_by_id(d):
-        ids = list(zip(d["sim_name"].tolist(), np.round(d["z_grid"], 6).tolist(), d["alpha_idx"].tolist()))
+        ids = list(
+            zip(d["sim_name"].tolist(), np.round(d["z_grid"], 6).tolist(), d["alpha_idx"].tolist())
+        )
         if len(set(ids)) != len(ids):
             raise ValueError("duplicate row identities")
         return {i: r for r, i in enumerate(ids)}
@@ -281,25 +329,46 @@ def main():
     ap.add_argument("--shard", action="append", required=True, type=Path)
     ap.add_argument("--remove", action="append", default=[], metavar="SIM:SNAP:ZGRID")
     ap.add_argument("--record-json", type=Path, required=True)
-    ap.add_argument("--code-commit", default=None, help="default: this checkout's git HEAD (refused if unreadable); "
-                                                         "recorded in the repair record and the git_sha attribute "
-                                                         "(the lineage record takes the commit from git)")
+    ap.add_argument(
+        "--code-commit",
+        default=None,
+        help="default: this checkout's git HEAD (refused if unreadable); "
+        "recorded in the repair record and the git_sha attribute "
+        "(the lineage record takes the commit from git)",
+    )
     ap.add_argument("--output", required=True, type=Path)
-    ap.add_argument("--historical-reproduction", metavar="REASON", default=None,
-                    help="read caches without lineage checks; the output is stamped not release-eligible")
+    ap.add_argument(
+        "--historical-reproduction",
+        metavar="REASON",
+        default=None,
+        help="read caches without lineage checks; the output is stamped not release-eligible",
+    )
     a = ap.parse_args()
     if a.output.exists() or a.output.is_symlink():
         sys.exit(f"refusing: --output {a.output} exists (the splice writes a NEW file only)")
     commit = a.code_commit or _git_head()
     if not commit:
-        sys.exit("refusing: no git HEAD readable here; pass --code-commit (no 'unknown' commit is recorded)")
+        sys.exit(
+            "refusing: no git HEAD readable here; pass --code-commit (no 'unknown' commit is recorded)"
+        )
     remove = []
     for r in a.remove:
         sim, snap, zg = r.rsplit(":", 2)
         remove.append((sim, int(snap), float(zg)))
-    rec = splice_cache(a.base, a.shard, remove, a.output, record=json.load(open(a.record_json)),
-                       code_commit=commit, historical_reason=a.historical_reproduction)
-    print(json.dumps({k: rec[k] for k in ("removed", "added", "n_rows", "n_snaps", "base_sha256")}, indent=1))
+    rec = splice_cache(
+        a.base,
+        a.shard,
+        remove,
+        a.output,
+        record=json.load(open(a.record_json)),
+        code_commit=commit,
+        historical_reason=a.historical_reproduction,
+    )
+    print(
+        json.dumps(
+            {k: rec[k] for k in ("removed", "added", "n_rows", "n_snaps", "base_sha256")}, indent=1
+        )
+    )
     print(f"wrote {a.output} sha256 {sha256(a.output)}")
 
 

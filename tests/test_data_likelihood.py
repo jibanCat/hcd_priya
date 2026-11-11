@@ -14,7 +14,9 @@ Pins (per the task spec):
 Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python -m pytest tests/test_data_likelihood.py -v
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 
@@ -26,7 +28,9 @@ import pytest
 
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator import data_likelihood as DL
-from tests.regression import legacy_forward_pre2026_10 as LEG  # the pre-2026-10 forward (historical fixture, gate E)
+from tests.regression import (
+    legacy_forward_pre2026_10 as LEG,
+)  # the pre-2026-10 forward (historical fixture, gate E)
 from hcd_analysis.emulator import meanflux_prior as MF
 from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
@@ -47,18 +51,29 @@ def _emu_ctx(n_k=172, n_basis=12, n_tb=4, seed=0):
     real legs' k-range, so the binding is exercised end-to-end without a real checkpoint."""
     rng = np.random.default_rng(seed)
     model = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis, key=jax.random.PRNGKey(seed))
-    pf = {"mu_marg": jnp.asarray(rng.normal(-2, 0.5, (4, n_k))),
-          "sig_marg": jnp.asarray(rng.uniform(0.5, 1.5, (4, n_k))),
-          "sig_cosmo": jnp.asarray(rng.uniform(0.02, 0.1, (4, n_k)))}
+    pf = {
+        "mu_marg": jnp.asarray(rng.normal(-2, 0.5, (4, n_k))),
+        "sig_marg": jnp.asarray(rng.uniform(0.5, 1.5, (4, n_k))),
+        "sig_cosmo": jnp.asarray(rng.uniform(0.02, 0.1, (4, n_k))),
+    }
     dla_core = jnp.asarray(rng.uniform(0.0, 0.5, n_k))
     # cache k-grid: the real v3.3 footprint [4.04e-4, 0.0694], 172 angular-k bins.
     cache_k = jnp.asarray(np.linspace(4.04e-4, 0.0694, n_k))
     alpha_hcd = jnp.asarray([0.06, 0.02, 0.003])
     theta9 = jnp.full(9, 0.5)
     alpha_centres = jnp.asarray([0.66, 0.83, 1.15, 1.33])
-    return dict(model=model, pf=pf, dla_core=dla_core, cache_k=cache_k,
-                alpha_hcd=alpha_hcd, theta9=theta9, alpha_centres=alpha_centres,
-                n_k=n_k, n_tb=n_tb, rng=rng)
+    return dict(
+        model=model,
+        pf=pf,
+        dla_core=dla_core,
+        cache_k=cache_k,
+        alpha_hcd=alpha_hcd,
+        theta9=theta9,
+        alpha_centres=alpha_centres,
+        n_k=n_k,
+        n_tb=n_tb,
+        rng=rng,
+    )
 
 
 def _sigma_zb_for_leg(leg, n_k, n_tb, rng):
@@ -102,9 +117,12 @@ def test_desi_cov_diag_inflation_applied():
     assert np.any(dd > 0), "inflation must raise some diagonal entries"
     # the inflation added equals the kept rows' cov_diag_inflation (ordering invariant)
     R_row = DL.desi_resolution_R(np.asarray(d["z"], float))
-    keep = ((np.asarray(d["z"]) >= 2.2 - 1e-6) & (np.asarray(d["z"]) <= 4.2 + 1e-6)
-            & (np.asarray(d["k"]) > DL.DESI_KMIN)
-            & (np.asarray(d["k"]) < 0.5 * np.pi / R_row))
+    keep = (
+        (np.asarray(d["z"]) >= 2.2 - 1e-6)
+        & (np.asarray(d["z"]) <= 4.2 + 1e-6)
+        & (np.asarray(d["k"]) > DL.DESI_KMIN)
+        & (np.asarray(d["k"]) < 0.5 * np.pi / R_row)
+    )
     assert np.allclose(dd, np.asarray(d["cov_diag_inflation"], float)[keep])
 
 
@@ -124,8 +142,9 @@ def test_ks_loader_always_keeps_full_klow():
     # low-k drop knob — the klow≈0.0055 bins must never be dropped.
     leg = DL.load_ks_leg(k_max=0.069)
     assert leg.name == "KS"
-    assert np.isclose(leg.k.min(), 0.0055, atol=1e-4), \
-        f"KS must keep klow≈0.0055, got kmin={leg.k.min()}"
+    assert np.isclose(
+        leg.k.min(), 0.0055, atol=1e-4
+    ), f"KS must keep klow≈0.0055, got kmin={leg.k.min()}"
     # cap at the cache Nyquist 0.069 (the 0.079/0.099 native bins are dropped)
     assert leg.k.max() <= LEG.CACHE_KMAX + 1e-9
     # z range default 2.4–4.6
@@ -170,10 +189,19 @@ def test_binding_finite_and_spd_each_leg():
         szb = _sigma_zb_for_leg(leg, c["n_k"], c["n_tb"], c["rng"])
         tau0_vec = MF.becker13_tau0(jnp.asarray(leg.z))
         P_model, C_total = LEG.predict_P_obs_on_leg(
-            c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
-            dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=szb,
-            alpha_centres=c["alpha_centres"])
-        Pm = np.asarray(P_model); Ct = np.asarray(C_total)
+            c["model"],
+            c["theta9"],
+            tau0_vec,
+            c["alpha_hcd"],
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            leg=leg,
+            sigma_zb=szb,
+            alpha_centres=c["alpha_centres"],
+        )
+        Pm = np.asarray(P_model)
+        Ct = np.asarray(C_total)
         assert np.isfinite(Pm).all(), f"{leg.name} P_model has NaN/inf"
         assert np.isfinite(Ct).all(), f"{leg.name} C_total has NaN/inf"
         assert Pm.shape == (leg.k.shape[0],)
@@ -235,14 +263,26 @@ def test_data_loglik_finite_and_grads_on_real_cov():
 
     def f(theta9, tau0, alpha, a_SiIII, b_res):
         return LEG.data_loglik(
-            c["model"], theta9, tau0, alpha, legs, pf_stats=c["pf"], dla_core=c["dla_core"],
-            cache_k=c["cache_k"], z_global=z_global, sigma_zb_per_leg=szb,
-            alpha_centres=c["alpha_centres"], a_SiIII=a_SiIII, b_res=b_res)
+            c["model"],
+            theta9,
+            tau0,
+            alpha,
+            legs,
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            z_global=z_global,
+            sigma_zb_per_leg=szb,
+            alpha_centres=c["alpha_centres"],
+            a_SiIII=a_SiIII,
+            b_res=b_res,
+        )
 
     val = float(f(c["theta9"], tau0_global, c["alpha_hcd"], 0.04, 0.005))
     assert np.isfinite(val), "data_loglik must be finite on the real covariance"
     gth, gt, ga, gm, gr = jax.grad(f, argnums=(0, 1, 2, 3, 4))(
-        c["theta9"], tau0_global, c["alpha_hcd"], 0.04, 0.005)
+        c["theta9"], tau0_global, c["alpha_hcd"], 0.04, 0.005
+    )
     assert np.isfinite(np.asarray(gth)).all(), "∂/∂θ9 NaN"
     assert np.isfinite(np.asarray(gt)).all(), "∂/∂τ₀ NaN"
     assert np.isfinite(np.asarray(ga)).all(), "∂/∂α NaN"
@@ -254,24 +294,43 @@ def test_data_loglik_finite_and_grads_on_real_cov():
 def test_data_loglik_block_diagonal_equals_sum_of_legs():
     """The joint logL must equal the sum of the per-leg gaussian_logliks (block-diagonal)."""
     from hcd_analysis.emulator.likelihood import gaussian_loglik
+
     c = _emu_ctx()
     legs = [DL.load_desi_leg(), DL.load_ks_leg(k_max=0.069)]
     z_global = np.unique(np.round(np.concatenate([legs[0].z, legs[1].z]), 6))
     tau0_global = jnp.asarray(MF.becker13_tau0(jnp.asarray(z_global)))
     szb = {leg.name: _sigma_zb_for_leg(leg, c["n_k"], c["n_tb"], c["rng"]) for leg in legs}
     total, parts = LEG.data_loglik(
-        c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs, pf_stats=c["pf"],
-        dla_core=c["dla_core"], cache_k=c["cache_k"], z_global=z_global,
-        sigma_zb_per_leg=szb, alpha_centres=c["alpha_centres"], return_parts=True)
+        c["model"],
+        c["theta9"],
+        tau0_global,
+        c["alpha_hcd"],
+        legs,
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        z_global=z_global,
+        sigma_zb_per_leg=szb,
+        alpha_centres=c["alpha_centres"],
+        return_parts=True,
+    )
     # rebuild per-leg logL independently and sum
     man = 0.0
     for leg in legs:
         sel = np.array([int(np.argmin(np.abs(z_global - zz))) for zz in leg.z])
         tau0_vec = tau0_global[jnp.asarray(sel)]
         Pm, Ct = LEG.predict_P_obs_on_leg(
-            c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
-            dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
-            sigma_zb=szb[leg.name], alpha_centres=c["alpha_centres"])
+            c["model"],
+            c["theta9"],
+            tau0_vec,
+            c["alpha_hcd"],
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            leg=leg,
+            sigma_zb=szb[leg.name],
+            alpha_centres=c["alpha_centres"],
+        )
         man += float(gaussian_loglik(jnp.asarray(leg.P_data) - Pm, Ct))
     assert np.isclose(float(total), man, rtol=1e-10), f"joint {total} vs sum {man}"
     assert set(parts) == {"DESI", "KS"}
@@ -282,28 +341,45 @@ def test_data_loglik_three_legs_with_eboss_block_diagonal():
     """eBOSS composes into the multi-leg block-diagonal likelihood: joint logL == sum of the three
     independent per-leg gaussian_logliks, finite gradients (step-review gap, 2026-06-13)."""
     from hcd_analysis.emulator.likelihood import gaussian_loglik
+
     c = _emu_ctx()
     legs = [DL.load_desi_leg(), DL.load_ks_leg(k_max=0.069), DL.load_eboss_leg()]
     z_global = np.unique(np.round(np.concatenate([l.z for l in legs]), 6))
     tau0_global = jnp.asarray(MF.becker13_tau0(jnp.asarray(z_global)))
     szb = {leg.name: _sigma_zb_for_leg(leg, c["n_k"], c["n_tb"], c["rng"]) for leg in legs}
-    kw = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], z_global=z_global,
-              sigma_zb_per_leg=szb, alpha_centres=c["alpha_centres"])
-    total, parts = LEG.data_loglik(c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs,
-                                  return_parts=True, **kw)
+    kw = dict(
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        z_global=z_global,
+        sigma_zb_per_leg=szb,
+        alpha_centres=c["alpha_centres"],
+    )
+    total, parts = LEG.data_loglik(
+        c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs, return_parts=True, **kw
+    )
     man = 0.0
     for leg in legs:
         sel = np.array([int(np.argmin(np.abs(z_global - zz))) for zz in leg.z])
         Pm, Ct = LEG.predict_P_obs_on_leg(
-            c["model"], c["theta9"], tau0_global[jnp.asarray(sel)], c["alpha_hcd"],
-            pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
-            sigma_zb=szb[leg.name], alpha_centres=c["alpha_centres"])
+            c["model"],
+            c["theta9"],
+            tau0_global[jnp.asarray(sel)],
+            c["alpha_hcd"],
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            leg=leg,
+            sigma_zb=szb[leg.name],
+            alpha_centres=c["alpha_centres"],
+        )
         man += float(gaussian_loglik(jnp.asarray(leg.P_data) - Pm, Ct))
     assert np.isclose(float(total), man, rtol=1e-10), f"joint {total} vs sum {man}"
     assert set(parts) == {"DESI", "KS", "eBOSS"}
     # finite gradient through the 3-leg joint logL (θ9)
-    g = jax.grad(lambda th: LEG.data_loglik(c["model"], th, tau0_global, c["alpha_hcd"], legs,
-                                           **kw))(c["theta9"])
+    g = jax.grad(
+        lambda th: LEG.data_loglik(c["model"], th, tau0_global, c["alpha_hcd"], legs, **kw)
+    )(c["theta9"])
     assert np.all(np.isfinite(np.asarray(g)))
 
 
@@ -358,10 +434,20 @@ def _build_leg_for_xclass():
     N = k.shape[0]
     z = np.array([3.0])
     leg = DL.DataLeg(
-        name="SYN", z=z, z_unit=DL._z_unit(z), k=k, z_row=np.full(N, 3.0),
-        z_idx=np.zeros(N, int), P_data=np.zeros(N), C_data=np.eye(N) * 1e-2,
-        R_z=DL.desi_resolution_R(z), n_z=1, n_per_z=np.array([N]),
-        metals_on=False, resolution_on=False)
+        name="SYN",
+        z=z,
+        z_unit=DL._z_unit(z),
+        k=k,
+        z_row=np.full(N, 3.0),
+        z_idx=np.zeros(N, int),
+        P_data=np.zeros(N),
+        C_data=np.eye(N) * 1e-2,
+        R_z=DL.desi_resolution_R(z),
+        n_z=1,
+        n_per_z=np.array([N]),
+        metals_on=False,
+        resolution_on=False,
+    )
     return leg
 
 
@@ -369,9 +455,18 @@ def _emu_var_on_leg(c, leg, *, sigma_zb=None, rho_zb=None, tau0):
     """diag(C_total − C_data) on the leg = the emu_var the binding placed on the diagonal."""
     tau0_vec = jnp.asarray([tau0])
     _, C_total = LEG.predict_P_obs_on_leg(
-        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
-        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
-        alpha_centres=c["alpha_centres"], rho_zb=rho_zb)
+        c["model"],
+        c["theta9"],
+        tau0_vec,
+        c["alpha_hcd"],
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        leg=leg,
+        sigma_zb=sigma_zb,
+        alpha_centres=c["alpha_centres"],
+        rho_zb=rho_zb,
+    )
     return np.diag(np.asarray(C_total)) - np.diag(np.asarray(leg.C_data))
 
 
@@ -386,8 +481,9 @@ def test_leg_xclass_diag_equals_diagonal_path_at_band_centre():
         tau0 = float(c["alpha_centres"][tb]) * _KIM_AMP * (1 + 3.0) ** _KIM_SLOPE
         ev_diag = _emu_var_on_leg(c, leg, sigma_zb=sigma_zb, tau0=tau0)
         ev_xcl = _emu_var_on_leg(c, leg, sigma_zb=sigma_zb, rho_zb=rho, tau0=tau0)
-        assert np.allclose(ev_diag, ev_xcl, rtol=1e-10, atol=1e-18), \
-            f"ρ=diag(σ²) must reproduce the diagonal leg emu_var at band centre tb={tb}"
+        assert np.allclose(
+            ev_diag, ev_xcl, rtol=1e-10, atol=1e-18
+        ), f"ρ=diag(σ²) must reproduce the diagonal leg emu_var at band centre tb={tb}"
 
 
 def test_leg_xclass_positive_offdiagonal_increases_emu_var():
@@ -400,7 +496,7 @@ def test_leg_xclass_positive_offdiagonal_increases_emu_var():
     tau0 = float(c["alpha_centres"][1]) * _KIM_AMP * (1 + 3.0) ** _KIM_SLOPE
     ev_base = _emu_var_on_leg(c, leg, rho_zb=base, tau0=tau0)
     # add a positive subDLA(2)–DLA(3) coupling ρ_23 = +0.6·√(ρ_22·ρ_33).
-    coup = 0.6 * jnp.sqrt(sigma_zb[0, 2] ** 2 * sigma_zb[0, 3] ** 2)        # (K,Tb)
+    coup = 0.6 * jnp.sqrt(sigma_zb[0, 2] ** 2 * sigma_zb[0, 3] ** 2)  # (K,Tb)
     rho_pos = base.at[0, 2, 3].set(coup).at[0, 3, 2].set(coup)
     ev_pos = _emu_var_on_leg(c, leg, rho_zb=rho_pos, tau0=tau0)
     assert np.all(ev_pos >= ev_base - 1e-15), "positive coupling must not lower the leg emu_var"
@@ -419,9 +515,18 @@ def test_leg_xclass_differentiable_in_tau0_and_alpha():
 
     def total_emu(t0, a):
         _, C = LEG.predict_P_obs_on_leg(
-            c["model"], c["theta9"], jnp.asarray([t0]), a, pf_stats=c["pf"],
-            dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
-            alpha_centres=c["alpha_centres"], rho_zb=rho)
+            c["model"],
+            c["theta9"],
+            jnp.asarray([t0]),
+            a,
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            leg=leg,
+            sigma_zb=sigma_zb,
+            alpha_centres=c["alpha_centres"],
+            rho_zb=rho,
+        )
         return jnp.sum(jnp.diag(C))
 
     tau0 = float(c["alpha_centres"][1]) * _KIM_AMP * (1 + 3.0) ** _KIM_SLOPE
@@ -445,39 +550,65 @@ def test_data_loglik_rho_per_leg_threads_and_increases_emu_var():
     for leg in legs:
         b = rho_diag[leg.name]
         s = szb[leg.name]
-        coup = 0.6 * jnp.sqrt(s[:, 2] ** 2 * s[:, 3] ** 2)                 # (n_z,K,Tb)
+        coup = 0.6 * jnp.sqrt(s[:, 2] ** 2 * s[:, 3] ** 2)  # (n_z,K,Tb)
         for iz in range(leg.n_z):
             b = b.at[iz, 2, 3].set(coup[iz]).at[iz, 3, 2].set(coup[iz])
         rho_coup[leg.name] = b
 
     def chi2(rho_per_leg):
         _, parts = LEG.data_loglik(
-            c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs, pf_stats=c["pf"],
-            dla_core=c["dla_core"], cache_k=c["cache_k"], z_global=z_global,
-            sigma_zb_per_leg=szb, alpha_centres=c["alpha_centres"],
-            rho_zb_per_leg=rho_per_leg, return_parts=True)
+            c["model"],
+            c["theta9"],
+            tau0_global,
+            c["alpha_hcd"],
+            legs,
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            z_global=z_global,
+            sigma_zb_per_leg=szb,
+            alpha_centres=c["alpha_centres"],
+            rho_zb_per_leg=rho_per_leg,
+            return_parts=True,
+        )
         return {nm: parts[nm][1] for nm in parts}
 
     chi2_diag = chi2(rho_diag)
     chi2_coup = chi2(rho_coup)
     # positive off-diagonal ⇒ larger C_emu ⇒ smaller χ² for the SAME residual, per leg.
     for nm in chi2_diag:
-        assert chi2_coup[nm] <= chi2_diag[nm] + 1e-6, \
-            f"[{nm}] cross-class coupling must not raise χ² (it enlarges C_emu): " \
+        assert chi2_coup[nm] <= chi2_diag[nm] + 1e-6, (
+            f"[{nm}] cross-class coupling must not raise χ² (it enlarges C_emu): "
             f"{chi2_coup[nm]:.4g} vs {chi2_diag[nm]:.4g}"
-    assert any(chi2_coup[nm] < chi2_diag[nm] - 1e-6 for nm in chi2_diag), \
-        "the cross-class coupling must materially change at least one leg's χ²"
+        )
+    assert any(
+        chi2_coup[nm] < chi2_diag[nm] - 1e-6 for nm in chi2_diag
+    ), "the cross-class coupling must materially change at least one leg's χ²"
 
     # finite + differentiable joint logL on the cross-class path
     def f(theta9, tau0, alpha):
         return LEG.data_loglik(
-            c["model"], theta9, tau0, alpha, legs, pf_stats=c["pf"], dla_core=c["dla_core"],
-            cache_k=c["cache_k"], z_global=z_global, sigma_zb_per_leg=szb,
-            alpha_centres=c["alpha_centres"], rho_zb_per_leg=rho_coup)
+            c["model"],
+            theta9,
+            tau0,
+            alpha,
+            legs,
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            z_global=z_global,
+            sigma_zb_per_leg=szb,
+            alpha_centres=c["alpha_centres"],
+            rho_zb_per_leg=rho_coup,
+        )
+
     assert np.isfinite(float(f(c["theta9"], tau0_global, c["alpha_hcd"])))
     gth, gt, ga = jax.grad(f, argnums=(0, 1, 2))(c["theta9"], tau0_global, c["alpha_hcd"])
-    assert np.isfinite(np.asarray(gth)).all() and np.isfinite(np.asarray(gt)).all() \
-        and np.isfinite(np.asarray(ga)).all(), "x-class joint logL grads must be finite"
+    assert (
+        np.isfinite(np.asarray(gth)).all()
+        and np.isfinite(np.asarray(gt)).all()
+        and np.isfinite(np.asarray(ga)).all()
+    ), "x-class joint logL grads must be finite"
 
 
 # ============================================================================ #
@@ -496,8 +627,7 @@ _LF_CACHE = MFI.LF_CACHE
 _HR_CACHE = MFI.HR_CACHE
 _have_mf_caches = os.path.exists(_LF_CACHE) and os.path.exists(_HR_CACHE)
 _have_fold0 = os.path.exists(f"{_REPO_ROOT}/checkpoints/final_fold0.eqx")
-_have_rescorr = os.path.exists(
-    MFI.RES_CORR_DIR + "/resolution_correction.txt")
+_have_rescorr = os.path.exists(MFI.RES_CORR_DIR + "/resolution_correction.txt")
 
 
 def _synthetic_mf(c, *, resolved=False, seed=1):
@@ -514,24 +644,33 @@ def _synthetic_mf(c, *, resolved=False, seed=1):
     # correction beyond log_rho), so the synthetic MF correction is just log_rho.
     z_tab = np.array([2.2, 3.0, 4.0, 5.0])
     rng = np.random.default_rng(seed)
-    log_rho = rng.normal(0.0, 0.02, K)             # a small per-k coherent tilt
-    gbar_tab = np.zeros((len(z_tab), 4, K))        # gbar - log_rho == 0 ⇒ g == log_rho
+    log_rho = rng.normal(0.0, 0.02, K)  # a small per-k coherent tilt
+    gbar_tab = np.zeros((len(z_tab), 4, K))  # gbar - log_rho == 0 ⇒ g == log_rho
     if not resolved:
         head = MFI.FixedMeanHead(gbar_tab, z_tab)
     else:
         nr = 5
         head = MFI.FixedMeanHead(
-            gbar_tab, z_tab, resolved=True,
+            gbar_tab,
+            z_tab,
+            resolved=True,
             gtau_tab=np.zeros((nr, 4, K)),
             tau_tab=np.arange(nr, dtype=float),
             tau_by_z=np.tile(np.linspace(2.0, 6.0, nr), (len(z_tab), 1)),
-            a_k=rng.normal(0.0, 0.01, (4, K)),     # nonzero rank-1 ⇒ dg/dτ₀ ≠ 0
+            a_k=rng.normal(0.0, 0.01, (4, K)),  # nonzero rank-1 ⇒ dg/dτ₀ ≠ 0
             u_z=np.linspace(-1, 1, len(z_tab)),
-            u_tau=np.linspace(-1, 1, nr))
+            u_tau=np.linspace(-1, 1, nr),
+        )
     # the LF backbone is the SAME Emulator object as the production model (frozen inside).
     mf = MFI.build_multifidelity(
-        c["model"], c["pf"], eval_logk, head,
-        eval_logk=eval_logk, log_rho=log_rho, delta_mode="none")
+        c["model"],
+        c["pf"],
+        eval_logk,
+        head,
+        eval_logk=eval_logk,
+        log_rho=log_rho,
+        delta_mode="none",
+    )
     return mf
 
 
@@ -542,13 +681,30 @@ def test_mf_false_is_byte_identical_to_lf_path():
     sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
     tau0_vec = jnp.asarray([0.8])
     P0, C0 = LEG.predict_P_obs_on_leg(
-        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
-        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
-        alpha_centres=c["alpha_centres"])
+        c["model"],
+        c["theta9"],
+        tau0_vec,
+        c["alpha_hcd"],
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        leg=leg,
+        sigma_zb=sigma_zb,
+        alpha_centres=c["alpha_centres"],
+    )
     P1, C1 = LEG.predict_P_obs_on_leg(
-        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
-        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
-        alpha_centres=c["alpha_centres"], mf=None)
+        c["model"],
+        c["theta9"],
+        tau0_vec,
+        c["alpha_hcd"],
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        leg=leg,
+        sigma_zb=sigma_zb,
+        alpha_centres=c["alpha_centres"],
+        mf=None,
+    )
     assert np.array_equal(np.asarray(P0), np.asarray(P1)), "mf=None changed P_model"
     assert np.array_equal(np.asarray(C0), np.asarray(C1)), "mf=None changed C_total"
 
@@ -562,18 +718,37 @@ def test_mf_path_changes_p_model_but_not_ctotal():
     tau0_vec = jnp.asarray([0.8])
     mf = _synthetic_mf(c, resolved=True)
     P_lf, C_lf = LEG.predict_P_obs_on_leg(
-        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
-        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
-        alpha_centres=c["alpha_centres"])
+        c["model"],
+        c["theta9"],
+        tau0_vec,
+        c["alpha_hcd"],
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        leg=leg,
+        sigma_zb=sigma_zb,
+        alpha_centres=c["alpha_centres"],
+    )
     P_mf, C_mf = LEG.predict_P_obs_on_leg(
-        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
-        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
-        alpha_centres=c["alpha_centres"], mf=mf)
+        c["model"],
+        c["theta9"],
+        tau0_vec,
+        c["alpha_hcd"],
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        leg=leg,
+        sigma_zb=sigma_zb,
+        alpha_centres=c["alpha_centres"],
+        mf=mf,
+    )
     assert np.isfinite(np.asarray(P_mf)).all()
-    assert not np.allclose(np.asarray(P_lf), np.asarray(P_mf)), \
-        "mf= must change P_model (the MF correction is applied)"
-    assert np.array_equal(np.asarray(C_lf), np.asarray(C_mf)), \
-        "mf= must keep C_total identical to the LF path (spec)"
+    assert not np.allclose(
+        np.asarray(P_lf), np.asarray(P_mf)
+    ), "mf= must change P_model (the MF correction is applied)"
+    assert np.array_equal(
+        np.asarray(C_lf), np.asarray(C_mf)
+    ), "mf= must keep C_total identical to the LF path (spec)"
 
 
 def test_mf_path_differentiable_in_theta_tau0_alpha_jacfwd_jacrev():
@@ -585,14 +760,21 @@ def test_mf_path_differentiable_in_theta_tau0_alpha_jacfwd_jacrev():
 
     def fwd(theta9, tau0_vec, alpha):
         P, _ = LEG.predict_P_obs_on_leg(
-            c["model"], theta9, tau0_vec, alpha, pf_stats=c["pf"],
-            dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf)
+            c["model"],
+            theta9,
+            tau0_vec,
+            alpha,
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            leg=leg,
+            mf=mf,
+        )
         return P
 
     tau0_vec = jnp.asarray([0.8])
     for mode, jac in (("jacrev", jax.jacrev), ("jacfwd", jax.jacfwd)):
-        Jth, Jt, Ja = jac(fwd, argnums=(0, 1, 2))(
-            c["theta9"], tau0_vec, c["alpha_hcd"])
+        Jth, Jt, Ja = jac(fwd, argnums=(0, 1, 2))(c["theta9"], tau0_vec, c["alpha_hcd"])
         assert np.isfinite(np.asarray(Jth)).all(), f"[{mode}] ∂P/∂θ9 not finite"
         assert np.isfinite(np.asarray(Jt)).all(), f"[{mode}] ∂P/∂τ₀ not finite"
         assert np.isfinite(np.asarray(Ja)).all(), f"[{mode}] ∂P/∂α not finite"
@@ -612,9 +794,17 @@ def test_mf_path_freezes_lf_backbone_no_grad_to_lf_weights():
         # build an MF that closes over THIS (differentiated) model as its LF backbone
         mf_m = eqx.tree_at(lambda m: m.lf_model, mf, model)
         P, _ = LEG.predict_P_obs_on_leg(
-            model, c["theta9"], tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
-            dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf_m)
-        return jnp.sum(P ** 2)
+            model,
+            c["theta9"],
+            tau0_vec,
+            c["alpha_hcd"],
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            leg=leg,
+            mf=mf_m,
+        )
+        return jnp.sum(P**2)
 
     grad_model = eqx.filter_grad(loss)(c["model"])
     arr_grads = [g for g in jax.tree_util.tree_leaves(eqx.filter(grad_model, eqx.is_array))]
@@ -624,12 +814,15 @@ def test_mf_path_freezes_lf_backbone_no_grad_to_lf_weights():
     # frozen — but in the mf= path P_filt comes ONLY from the frozen mf.lf_logP, so the
     # bare model never enters the forward. We assert the gradient is finite + the frozen
     # path contributes no NaN; the bare-model leakage is checked by the gate consistency.)
-    assert all(np.isfinite(np.asarray(g)).all() for g in arr_grads), \
-        "LF-weight grads must be finite (frozen backbone, no NaN)"
+    assert all(
+        np.isfinite(np.asarray(g)).all() for g in arr_grads
+    ), "LF-weight grads must be finite (frozen backbone, no NaN)"
 
 
-@pytest.mark.skipif(not (_have_mf_caches and _have_fold0 and _have_rescorr),
-                    reason="MF caches / fold0 checkpoint / res_corr not present")
+@pytest.mark.skipif(
+    not (_have_mf_caches and _have_fold0 and _have_rescorr),
+    reason="MF caches / fold0 checkpoint / res_corr not present",
+)
 @pytest.mark.deferred_legacy("SCHEMA1_CHECKPOINT")
 def test_mf_path_matches_gate_script_to_tight_tol():
     """CONSISTENCY: predict_P_obs_on_leg(mf=True) reproduces the certified gate script's
@@ -637,50 +830,89 @@ def test_mf_path_matches_gate_script_to_tight_tol():
     measured path (scripts/diag_emu_bias_allfolds_mf.py)."""
     # build the MF EXACTLY as the gate does: fold-0 frozen backbone + resolved head on the
     # real LF/HR caches, eval grid == LF native cache grid.
-    lf_cache = MFI.load_cache_historical(_LF_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
-    hr_cache = MFI.load_cache_historical(_HR_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
+    lf_cache = MFI.load_cache_historical(
+        _LF_CACHE, reason="test: a cache in the pre-lineage 3.3 format"
+    )
+    hr_cache = MFI.load_cache_historical(
+        _HR_CACHE, reason="test: a cache in the pre-lineage 3.3 format"
+    )
     pairs = MFI.match_hr_to_lf(lf_cache, hr_cache)
     fold_model, fold_meta, fold_norm, lf_logk = MFI.load_lf_backbone(0)
     # the FLAT pf_stats the gate uses for predict_P_filt (norm["P_filt"] sub-dict).
-    pf_stats = {k: jnp.asarray(fold_norm["P_filt"][k])
-                for k in ("mu_marg", "sig_marg", "sig_cosmo")}
-    tg = MFI.measure_delta_targets(lf_cache, hr_cache, fold_model, fold_norm, lf_logk,
-                                   np.asarray(lf_logk), pairs)
+    pf_stats = {
+        k: jnp.asarray(fold_norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")
+    }
+    tg = MFI.measure_delta_targets(
+        lf_cache, hr_cache, fold_model, fold_norm, lf_logk, np.asarray(lf_logk), pairs
+    )
     log_rho = np.nan_to_num(MFI.mean_log_ratio_rho(tg, np.asarray(lf_logk)), nan=0.0)
     comp = MFI.fixed_mean_table_resolved(tg, log_rho, train_mask_rows=None)
     head = MFI.FixedMeanHead(
-        comp["gbar_z_tab"], comp["z_tab"], resolved=True,
-        gtau_tab=comp["gtau_tab"], tau_tab=comp["tau_tab"], tau_by_z=comp["tau_by_z"],
-        a_k=comp["a_k"], u_z=comp["u_z"], u_tau=comp["u_tau"])
-    mf = MFI.build_multifidelity(fold_model, fold_norm, lf_logk, head,
-                                 eval_logk=np.asarray(lf_logk), log_rho=log_rho,
-                                 delta_mode="none")
+        comp["gbar_z_tab"],
+        comp["z_tab"],
+        resolved=True,
+        gtau_tab=comp["gtau_tab"],
+        tau_tab=comp["tau_tab"],
+        tau_by_z=comp["tau_by_z"],
+        a_k=comp["a_k"],
+        u_z=comp["u_z"],
+        u_tau=comp["u_tau"],
+    )
+    mf = MFI.build_multifidelity(
+        fold_model,
+        fold_norm,
+        lf_logk,
+        head,
+        eval_logk=np.asarray(lf_logk),
+        log_rho=log_rho,
+        delta_mode="none",
+    )
     cache_k = np.power(10.0, np.asarray(lf_logk))
 
     # a synthetic leg on the cache k-grid, single z, DLA-core = the cache's own fiducial.
     n_k = cache_k.shape[0]
-    dla_core = jnp.asarray(np.zeros(n_k))   # excess uses dla_core; 0 is a valid core
-    k_sub = cache_k[::13][:6]               # a handful of in-range leg k
+    dla_core = jnp.asarray(np.zeros(n_k))  # excess uses dla_core; 0 is a valid core
+    k_sub = cache_k[::13][:6]  # a handful of in-range leg k
     z = np.array([3.2])
     N = k_sub.shape[0]
     leg = DL.DataLeg(
-        name="SYN", z=z, z_unit=DL._z_unit(z), k=np.asarray(k_sub),
-        z_row=np.full(N, 3.2), z_idx=np.zeros(N, int), P_data=np.zeros(N),
-        C_data=np.eye(N) * 1e-3, R_z=DL.desi_resolution_R(z), n_z=1,
-        n_per_z=np.array([N]), metals_on=False, resolution_on=False)
+        name="SYN",
+        z=z,
+        z_unit=DL._z_unit(z),
+        k=np.asarray(k_sub),
+        z_row=np.full(N, 3.2),
+        z_idx=np.zeros(N, int),
+        P_data=np.zeros(N),
+        C_data=np.eye(N) * 1e-3,
+        R_z=DL.desi_resolution_R(z),
+        n_z=1,
+        n_per_z=np.array([N]),
+        metals_on=False,
+        resolution_on=False,
+    )
     theta9 = jnp.full(9, 0.5)
     alpha = jnp.asarray([0.06, 0.02, 0.003])
     tau0_vec = jnp.asarray([0.85])
 
     # production mf= path
     P_prod, _ = LEG.predict_P_obs_on_leg(
-        fold_model, theta9, tau0_vec, alpha, pf_stats=pf_stats, dla_core=dla_core,
-        cache_k=cache_k, leg=leg, mf=mf)
+        fold_model,
+        theta9,
+        tau0_vec,
+        alpha,
+        pf_stats=pf_stats,
+        dla_core=dla_core,
+        cache_k=cache_k,
+        leg=leg,
+        mf=mf,
+    )
 
     # gate reference path: the gate script runs a driver at import, so exec ONLY its
     # function defs (everything before the first driver emit) into a sandbox namespace and
     # pull predict_P_obs_on_leg_mf — the certified through-MF forward.
-    ns = {"__file__": f"{_REPO_ROOT}/scripts/diag_emu_bias_allfolds_mf.py"}   # the prefix reads __file__
+    ns = {
+        "__file__": f"{_REPO_ROOT}/scripts/diag_emu_bias_allfolds_mf.py"
+    }  # the prefix reads __file__
     src = open(f"{_REPO_ROOT}/scripts/diag_emu_bias_allfolds_mf.py").read()
     cut = src.index('emit("# T3 GATE')
     head = src[:cut]
@@ -689,11 +921,20 @@ def test_mf_path_matches_gate_script_to_tight_tol():
     head = head.replace('_rf = open(RESULTS, "w")', '_rf = open(__import__("os").devnull, "w")')
     exec(compile(head, "gate_mf_defs", "exec"), ns)
     P_gate = ns["predict_P_obs_on_leg_mf"](
-        mf, fold_model, theta9, tau0_vec, alpha, pf_stats=pf_stats,
-        dla_core=dla_core, cache_k=cache_k, leg=leg)
+        mf,
+        fold_model,
+        theta9,
+        tau0_vec,
+        alpha,
+        pf_stats=pf_stats,
+        dla_core=dla_core,
+        cache_k=cache_k,
+        leg=leg,
+    )
 
-    assert np.allclose(np.asarray(P_prod), np.asarray(P_gate), rtol=1e-10, atol=1e-12), \
-        f"production mf= path diverges from the gate: max|Δ|={np.max(np.abs(np.asarray(P_prod)-np.asarray(P_gate))):.3e}"
+    assert np.allclose(
+        np.asarray(P_prod), np.asarray(P_gate), rtol=1e-10, atol=1e-12
+    ), f"production mf= path diverges from the gate: max|Δ|={np.max(np.abs(np.asarray(P_prod)-np.asarray(P_gate))):.3e}"
 
 
 # ============================================================================ #
@@ -708,14 +949,25 @@ def test_mf_path_matches_gate_script_to_tight_tol():
 # ============================================================================ #
 def _floor_leg(z=3.0, ns_box_z=True, mf_floor_on=True):
     """A single-z small-scale DataLeg on cache-band k for the floor tests."""
-    k = np.array([0.005, 0.02, 0.05], float)        # all in the LF-resolvable band (<0.069)
+    k = np.array([0.005, 0.02, 0.05], float)  # all in the LF-resolvable band (<0.069)
     N = k.shape[0]
     zz = np.array([z])
     return DL.DataLeg(
-        name="KSlike", z=zz, z_unit=DL._z_unit(zz), k=k, z_row=np.full(N, z),
-        z_idx=np.zeros(N, int), P_data=np.zeros(N), C_data=np.eye(N) * 1e-3,
-        R_z=DL.desi_resolution_R(zz), n_z=1, n_per_z=np.array([N]),
-        metals_on=False, resolution_on=False, mf_floor_on=mf_floor_on)
+        name="KSlike",
+        z=zz,
+        z_unit=DL._z_unit(zz),
+        k=k,
+        z_row=np.full(N, z),
+        z_idx=np.zeros(N, int),
+        P_data=np.zeros(N),
+        C_data=np.eye(N) * 1e-3,
+        R_z=DL.desi_resolution_R(zz),
+        n_z=1,
+        n_per_z=np.array([N]),
+        metals_on=False,
+        resolution_on=False,
+        mf_floor_on=mf_floor_on,
+    )
 
 
 def test_mf_floor_loads_and_interp_clamps_to_leg_z():
@@ -741,18 +993,37 @@ def test_mf_floor_raises_leg_cemu_by_spec_amount():
     mf = _synthetic_mf(c, resolved=True)
     fl = LEG.load_mf_floor()
     tau0_vec = jnp.asarray([0.85])
-    theta9 = jnp.full(9, 0.5)                          # ns_phys=0.925, inside [0.86,0.98] → edge=0
+    theta9 = jnp.full(9, 0.5)  # ns_phys=0.925, inside [0.86,0.98] → edge=0
     Pm, C_no = LEG.predict_P_obs_on_leg(
-        c["model"], theta9, tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
-        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf, mf_floor=None)
+        c["model"],
+        theta9,
+        tau0_vec,
+        c["alpha_hcd"],
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        leg=leg,
+        mf=mf,
+        mf_floor=None,
+    )
     _, C_fl = LEG.predict_P_obs_on_leg(
-        c["model"], theta9, tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
-        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf, mf_floor=fl)
+        c["model"],
+        theta9,
+        tau0_vec,
+        c["alpha_hcd"],
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        leg=leg,
+        mf=mf,
+        mf_floor=fl,
+    )
     added = np.diag(np.asarray(C_fl)) - np.diag(np.asarray(C_no))
-    sig_lfres = LEG._mf_floor_sigma_at_z(fl, 3.0)[0][0]   # LFres σ at z=3.0 = 1.23%
-    expect = (sig_lfres * np.asarray(Pm)) ** 2           # all leg k < 0.069 → LFres band
-    assert np.allclose(added, expect, rtol=1e-10, atol=1e-18), \
-        f"floor diagonal mismatch: added {added} vs expect {expect}"
+    sig_lfres = LEG._mf_floor_sigma_at_z(fl, 3.0)[0][0]  # LFres σ at z=3.0 = 1.23%
+    expect = (sig_lfres * np.asarray(Pm)) ** 2  # all leg k < 0.069 → LFres band
+    assert np.allclose(
+        added, expect, rtol=1e-10, atol=1e-18
+    ), f"floor diagonal mismatch: added {added} vs expect {expect}"
     assert np.all(added > 0), "the floor must strictly raise the small-scale C_emu diagonal"
 
 
@@ -760,18 +1031,36 @@ def test_mf_floor_edge_term_fires_outside_ns_box():
     """The n_s-edge budget is ZERO inside [0.86,0.98] and POSITIVE outside (ns=1.009, the
     eBOSS-like edge). The added variance outside > inside (the edge term adds in quadrature)."""
     c = _emu_ctx()
-    leg = _floor_leg(z=3.4)                              # z=3.4 has a sizeable slope
+    leg = _floor_leg(z=3.4)  # z=3.4 has a sizeable slope
     mf = _synthetic_mf(c, resolved=True)
     fl = LEG.load_mf_floor()
     tau0_vec = jnp.asarray([0.85])
-    th_in = jnp.full(9, 0.5)                             # ns=0.925 inside box
-    th_edge = jnp.array([0.836] + [0.5] * 8)            # ns≈1.009 outside box
+    th_in = jnp.full(9, 0.5)  # ns=0.925 inside box
+    th_edge = jnp.array([0.836] + [0.5] * 8)  # ns≈1.009 outside box
     Pm, C_in = LEG.predict_P_obs_on_leg(
-        c["model"], th_in, tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
-        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf, mf_floor=fl)
+        c["model"],
+        th_in,
+        tau0_vec,
+        c["alpha_hcd"],
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        leg=leg,
+        mf=mf,
+        mf_floor=fl,
+    )
     Pm2, C_edge = LEG.predict_P_obs_on_leg(
-        c["model"], th_edge, tau0_vec, c["alpha_hcd"], pf_stats=c["pf"],
-        dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg, mf=mf, mf_floor=fl)
+        c["model"],
+        th_edge,
+        tau0_vec,
+        c["alpha_hcd"],
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        leg=leg,
+        mf=mf,
+        mf_floor=fl,
+    )
     add_in = np.diag(np.asarray(C_in)) - 1e-3
     add_edge = np.diag(np.asarray(C_edge)) - 1e-3
     # the edge variance must exceed the in-box (σ_floor-only) variance at matched P_obs scale.
@@ -779,7 +1068,9 @@ def test_mf_floor_edge_term_fires_outside_ns_box():
     frac_in = add_in / np.asarray(Pm) ** 2
     frac_edge = add_edge / np.asarray(Pm2) ** 2
     assert np.all(frac_edge > frac_in - 1e-12), "the ns-edge term must not shrink the floor"
-    assert np.any(frac_edge > frac_in + 1e-8), "the ns-edge term must inflate the floor outside the box"
+    assert np.any(
+        frac_edge > frac_in + 1e-8
+    ), "the ns-edge term must inflate the floor outside the box"
 
 
 def test_mf_floor_ctotal_stays_spd():
@@ -790,9 +1081,19 @@ def test_mf_floor_ctotal_stays_spd():
     fl = LEG.load_mf_floor()
     sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
     _, C = LEG.predict_P_obs_on_leg(
-        c["model"], jnp.array([0.836] + [0.5] * 8), jnp.asarray([0.85]), c["alpha_hcd"],
-        pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=leg,
-        sigma_zb=sigma_zb, alpha_centres=c["alpha_centres"], mf=mf, mf_floor=fl)
+        c["model"],
+        jnp.array([0.836] + [0.5] * 8),
+        jnp.asarray([0.85]),
+        c["alpha_hcd"],
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        leg=leg,
+        sigma_zb=sigma_zb,
+        alpha_centres=c["alpha_centres"],
+        mf=mf,
+        mf_floor=fl,
+    )
     C = np.asarray(C)
     assert np.allclose(C, C.T, atol=1e-12)
     w = np.linalg.eigvalsh(C)
@@ -801,41 +1102,62 @@ def test_mf_floor_ctotal_stays_spd():
 
 def test_mf_floor_off_is_byte_identical_to_lf_and_to_mf_no_floor():
     """(c) Three back-compat invariants, all byte-identical:
-       (i)  mf=None, mf_floor=None  ==  the committed LF path (no floor arg);
-       (ii) mf=None, mf_floor=fl    ==  LF path (floor is a no-op without the MF forward);
-       (iii) the floor on a leg with mf_floor_on=False is a no-op (DESI-like leg)."""
+    (i)  mf=None, mf_floor=None  ==  the committed LF path (no floor arg);
+    (ii) mf=None, mf_floor=fl    ==  LF path (floor is a no-op without the MF forward);
+    (iii) the floor on a leg with mf_floor_on=False is a no-op (DESI-like leg)."""
     c = _emu_ctx()
     fl = LEG.load_mf_floor()
     leg_small = _floor_leg(z=3.0, mf_floor_on=True)
-    leg_big = _floor_leg(z=3.0, mf_floor_on=False)      # DESI-like: floor must NOT apply
+    leg_big = _floor_leg(z=3.0, mf_floor_on=False)  # DESI-like: floor must NOT apply
     sigma_zb = jnp.asarray(c["rng"].uniform(0.01, 0.05, (1, 4, c["n_k"], c["n_tb"])))
     tau0_vec = jnp.asarray([0.8])
-    args = dict(pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"],
-                sigma_zb=sigma_zb, alpha_centres=c["alpha_centres"])
+    args = dict(
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        sigma_zb=sigma_zb,
+        alpha_centres=c["alpha_centres"],
+    )
     P_ref, C_ref = LEG.predict_P_obs_on_leg(
-        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_small, **args)
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_small, **args
+    )
     # (i) explicit floor-off
     P0, C0 = LEG.predict_P_obs_on_leg(
-        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_small,
-        mf=None, mf_floor=None, **args)
+        c["model"],
+        c["theta9"],
+        tau0_vec,
+        c["alpha_hcd"],
+        leg=leg_small,
+        mf=None,
+        mf_floor=None,
+        **args,
+    )
     assert np.array_equal(np.asarray(P0), np.asarray(P_ref))
     assert np.array_equal(np.asarray(C0), np.asarray(C_ref))
     # (ii) floor passed but mf=None → no-op (the floor only fires through the MF forward)
     P1, C1 = LEG.predict_P_obs_on_leg(
-        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_small,
-        mf=None, mf_floor=fl, **args)
+        c["model"],
+        c["theta9"],
+        tau0_vec,
+        c["alpha_hcd"],
+        leg=leg_small,
+        mf=None,
+        mf_floor=fl,
+        **args,
+    )
     assert np.array_equal(np.asarray(C1), np.asarray(C_ref)), "floor must be a no-op when mf=None"
     # (iii) mf on, floor on, but leg.mf_floor_on=False → the MF P_model differs but C_emu has
     # NO floor (compare the floor-on leg's C_emu minus the floor-off leg's at the SAME P_obs).
     mf = _synthetic_mf(c, resolved=True)
     _, C_big = LEG.predict_P_obs_on_leg(
-        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_big,
-        mf=mf, mf_floor=fl, **args)
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_big, mf=mf, mf_floor=fl, **args
+    )
     _, C_big_nofloor = LEG.predict_P_obs_on_leg(
-        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_big,
-        mf=mf, mf_floor=None, **args)
-    assert np.array_equal(np.asarray(C_big), np.asarray(C_big_nofloor)), \
-        "the floor must NOT apply on a leg with mf_floor_on=False (DESI-like)"
+        c["model"], c["theta9"], tau0_vec, c["alpha_hcd"], leg=leg_big, mf=mf, mf_floor=None, **args
+    )
+    assert np.array_equal(
+        np.asarray(C_big), np.asarray(C_big_nofloor)
+    ), "the floor must NOT apply on a leg with mf_floor_on=False (DESI-like)"
 
 
 def test_mf_floor_differentiable_and_nuts_safe():
@@ -850,12 +1172,22 @@ def test_mf_floor_differentiable_and_nuts_safe():
 
     def total_var(theta9, tau0_vec, alpha):
         _, C = LEG.predict_P_obs_on_leg(
-            c["model"], theta9, tau0_vec, alpha, pf_stats=c["pf"], dla_core=c["dla_core"],
-            cache_k=c["cache_k"], leg=leg, sigma_zb=sigma_zb,
-            alpha_centres=c["alpha_centres"], mf=mf, mf_floor=fl)
+            c["model"],
+            theta9,
+            tau0_vec,
+            alpha,
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            leg=leg,
+            sigma_zb=sigma_zb,
+            alpha_centres=c["alpha_centres"],
+            mf=mf,
+            mf_floor=fl,
+        )
         return jnp.sum(jnp.diag(C))
 
-    th = jnp.array([0.836] + [0.5] * 8)                 # OUTSIDE the box → edge term active
+    th = jnp.array([0.836] + [0.5] * 8)  # OUTSIDE the box → edge term active
     tau0_vec = jnp.asarray([0.85])
     for mode, jac in (("jacrev", jax.jacrev), ("jacfwd", jax.jacfwd)):
         gth, gt, ga = jac(total_var, argnums=(0, 1, 2))(th, tau0_vec, c["alpha_hcd"])
@@ -871,11 +1203,12 @@ def test_mf_floor_differentiable_and_nuts_safe():
         ns = DL._ns_phys_from_theta9(theta9)
         # mirror _mf_floor_var_on_k's edge term at z=3.4, LFres band, P=1 (so var≡edge²).
         ns_sg = jax.lax.stop_gradient(ns)
-        return jnp.sum(LEG._mf_floor_var_on_k(fl, 3.4, jnp.array([0.02]),
-                                             jnp.array([1.0]), ns_sg))
+        return jnp.sum(LEG._mf_floor_var_on_k(fl, 3.4, jnp.array([0.02]), jnp.array([1.0]), ns_sg))
+
     g_ns = jax.grad(floor_only_var_via_edge)(th)
-    assert np.allclose(np.asarray(g_ns), 0.0, atol=1e-12), \
-        "the ns-edge term must carry NO gradient toward θ (stop_gradient'd)"
+    assert np.allclose(
+        np.asarray(g_ns), 0.0, atol=1e-12
+    ), "the ns-edge term must carry NO gradient toward θ (stop_gradient'd)"
 
 
 def test_mf_floor_never_indexes_z_above_4p6():
@@ -888,15 +1221,31 @@ def test_mf_floor_never_indexes_z_above_4p6():
     bad = _floor_leg(z=5.0, mf_floor_on=True)
     with pytest.raises(AssertionError, match="z max"):
         LEG.predict_P_obs_on_leg(
-            c["model"], c["theta9"], jnp.asarray([0.85]), c["alpha_hcd"],
-            pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=bad,
-            mf=mf, mf_floor=fl)
+            c["model"],
+            c["theta9"],
+            jnp.asarray([0.85]),
+            c["alpha_hcd"],
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            leg=bad,
+            mf=mf,
+            mf_floor=fl,
+        )
     # a z=4.6 leg (KS max) must be fine
     ok = _floor_leg(z=4.6, mf_floor_on=True)
     _, C = LEG.predict_P_obs_on_leg(
-        c["model"], c["theta9"], jnp.asarray([0.85]), c["alpha_hcd"],
-        pf_stats=c["pf"], dla_core=c["dla_core"], cache_k=c["cache_k"], leg=ok,
-        mf=mf, mf_floor=fl)
+        c["model"],
+        c["theta9"],
+        jnp.asarray([0.85]),
+        c["alpha_hcd"],
+        pf_stats=c["pf"],
+        dla_core=c["dla_core"],
+        cache_k=c["cache_k"],
+        leg=ok,
+        mf=mf,
+        mf_floor=fl,
+    )
     assert np.isfinite(np.asarray(C)).all()
 
 
@@ -906,8 +1255,8 @@ def test_mf_floor_threads_through_data_loglik_real_cov():
     gets a larger C_emu → a smaller χ² for the same residual; DESI (mf_floor_on=False)
     unchanged. logL stays finite + differentiable."""
     c = _emu_ctx()
-    desi = DL.load_desi_leg()                            # mf_floor_on=False by default
-    ks = DL.load_ks_leg(k_max=0.069)                                # mf_floor_on=True by default
+    desi = DL.load_desi_leg()  # mf_floor_on=False by default
+    ks = DL.load_ks_leg(k_max=0.069)  # mf_floor_on=True by default
     assert ks.mf_floor_on is True and desi.mf_floor_on is False
     legs = [desi, ks]
     mf = _synthetic_mf(c, resolved=True)
@@ -918,24 +1267,51 @@ def test_mf_floor_threads_through_data_loglik_real_cov():
 
     def chi2(mf_floor):
         _, parts = LEG.data_loglik(
-            c["model"], c["theta9"], tau0_global, c["alpha_hcd"], legs, pf_stats=c["pf"],
-            dla_core=c["dla_core"], cache_k=c["cache_k"], z_global=z_global,
-            sigma_zb_per_leg=szb, alpha_centres=c["alpha_centres"], mf=mf,
-            mf_floor=mf_floor, return_parts=True)
+            c["model"],
+            c["theta9"],
+            tau0_global,
+            c["alpha_hcd"],
+            legs,
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            z_global=z_global,
+            sigma_zb_per_leg=szb,
+            alpha_centres=c["alpha_centres"],
+            mf=mf,
+            mf_floor=mf_floor,
+            return_parts=True,
+        )
         return {nm: parts[nm][1] for nm in parts}
 
     chi2_no = chi2(None)
     chi2_fl = chi2(fl)
     assert chi2_fl["KS"] < chi2_no["KS"] - 1e-9, "the floor must enlarge KS C_emu (lower χ²)"
-    assert np.isclose(chi2_fl["DESI"], chi2_no["DESI"], rtol=1e-12), \
-        "DESI (mf_floor_on=False) χ² must be unchanged by the floor"
+    assert np.isclose(
+        chi2_fl["DESI"], chi2_no["DESI"], rtol=1e-12
+    ), "DESI (mf_floor_on=False) χ² must be unchanged by the floor"
 
     def f(theta9, tau0, alpha):
         return LEG.data_loglik(
-            c["model"], theta9, tau0, alpha, legs, pf_stats=c["pf"], dla_core=c["dla_core"],
-            cache_k=c["cache_k"], z_global=z_global, sigma_zb_per_leg=szb,
-            alpha_centres=c["alpha_centres"], mf=mf, mf_floor=fl)
+            c["model"],
+            theta9,
+            tau0,
+            alpha,
+            legs,
+            pf_stats=c["pf"],
+            dla_core=c["dla_core"],
+            cache_k=c["cache_k"],
+            z_global=z_global,
+            sigma_zb_per_leg=szb,
+            alpha_centres=c["alpha_centres"],
+            mf=mf,
+            mf_floor=fl,
+        )
+
     assert np.isfinite(float(f(c["theta9"], tau0_global, c["alpha_hcd"])))
     gth, gt, ga = jax.grad(f, argnums=(0, 1, 2))(c["theta9"], tau0_global, c["alpha_hcd"])
-    assert np.isfinite(np.asarray(gth)).all() and np.isfinite(np.asarray(gt)).all() \
+    assert (
+        np.isfinite(np.asarray(gth)).all()
+        and np.isfinite(np.asarray(gt)).all()
         and np.isfinite(np.asarray(ga)).all()
+    )

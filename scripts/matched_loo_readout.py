@@ -8,6 +8,7 @@ job stopped at its time limit, or never run) is reported as NOT_RUN and counts a
   python scripts/matched_loo_readout.py --expected-folds SIMS.txt --folds F1.json F2.json ... --out NEW.json
       [--n-boot 10000]
 """
+
 import argparse
 import json
 import os
@@ -23,12 +24,17 @@ from hcd_analysis.comparison import loo_readout as R  # noqa: E402
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--expected-folds", required=True, help="text file: every held-out simulation, one per line")
+    ap.add_argument(
+        "--expected-folds", required=True, help="text file: every held-out simulation, one per line"
+    )
     ap.add_argument("--folds", nargs="+", required=True)
     ap.add_argument("--out", required=True, help="NEW json (refused if it exists)")
     ap.add_argument("--n-boot", type=int, default=R.N_BOOT)
-    ap.add_argument("--truth-weights-context", action="store_true",
-                    help="read out fold files made with --truth-weights (context only: uses held-out truth)")
+    ap.add_argument(
+        "--truth-weights-context",
+        action="store_true",
+        help="read out fold files made with --truth-weights (context only: uses held-out truth)",
+    )
     a = ap.parse_args()
     want = "truth (context only)" if a.truth_weights_context else "head_a_per_fold"
     if os.path.lexists(a.out):
@@ -39,8 +45,12 @@ def main():
             rec = json.load(f)
         if rec.get("weights") != want:
             sys.exit(f"{p}: weights {rec.get('weights')!r}, expected {want!r}")
-        folds.append({k: (np.asarray(v, dtype=np.float64) if k in ("e_c1", "e_gp", "k_skm", "z") else v)
-                      for k, v in rec.items()})
+        folds.append(
+            {
+                k: (np.asarray(v, dtype=np.float64) if k in ("e_c1", "e_gp", "k_skm", "z") else v)
+                for k, v in rec.items()
+            }
+        )
     with open(a.expected_folds) as f:
         expected = [x.strip() for x in f if x.strip()]
     if len(set(expected)) != len(expected):

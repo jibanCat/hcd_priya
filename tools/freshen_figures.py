@@ -26,6 +26,7 @@ any time before `git add`.
 
 Dependencies: `Pillow` (already a matplotlib dependency).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -89,6 +90,7 @@ def _head_pixel_bytes(rel_path: Path) -> bytes | None:
     except subprocess.CalledProcessError:
         return None
     from io import BytesIO
+
     with Image.open(BytesIO(data)) as im:
         im = im.convert("RGBA")
         width, height = im.size
@@ -122,9 +124,10 @@ def check(paths: list[Path]) -> tuple[list[Path], list[Path]]:
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
-        "--apply", action="store_true",
+        "--apply",
+        action="store_true",
         help="git-checkout the unchanged-pixel files; without this flag, "
-             "only report what would be done.",
+        "only report what would be done.",
     )
     args = ap.parse_args()
 

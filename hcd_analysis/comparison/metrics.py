@@ -1,5 +1,6 @@
 """Summaries of r = (P_test - P_ref) / P_ref and the max-|r| threshold verdict. No clipping, no cuts: every point the
 caller passes is counted."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -19,9 +20,16 @@ def summarize(r, threshold):
     if r.size == 0:
         return {"n": 0}
     a = np.abs(r)
-    return {"n": int(r.size), "median_abs": float(np.median(a)), "rms": float(np.sqrt(np.mean(r ** 2))),
-            "p95_abs": float(np.percentile(a, 95)), "max_abs": float(a.max()), "mean": float(r.mean()),
-            "exceed_frac": float(np.mean(a > threshold)), "threshold": float(threshold)}
+    return {
+        "n": int(r.size),
+        "median_abs": float(np.median(a)),
+        "rms": float(np.sqrt(np.mean(r**2))),
+        "p95_abs": float(np.percentile(a, 95)),
+        "max_abs": float(a.max()),
+        "mean": float(r.mean()),
+        "exceed_frac": float(np.mean(a > threshold)),
+        "threshold": float(threshold),
+    }
 
 
 def verdict(r, threshold):

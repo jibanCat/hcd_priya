@@ -7,7 +7,9 @@ Conventions:
   * P1D in km/s is P in comoving Mpc/h times 100 E(z) / (1+z);
   * PRIYA mean flux: alpha(z) = tau0_amp ((1+z)/(1+z_pivot))^dtau0 times Kim07 0.0023 (1+z)^3.65.
     PRIYA's ``tau0`` is the dimensionless amplitude ``tau0_amp``; hcd_priya's emulator input ``tau0`` is the optical
-    depth alpha(z) tau_Kim07(z). They are different quantities and are only ever converted through this module."""
+    depth alpha(z) tau_Kim07(z). They are different quantities and are only ever converted through this module.
+"""
+
 from __future__ import annotations
 
 import numpy as np
@@ -68,7 +70,10 @@ def check_mean_flux(mf):
 def alpha_priya(z, mean_flux):
     """PRIYA ladder coordinate alpha(z) = tau_eff / tau_Kim07 of a (tau0_amp, dtau0, z_pivot) state."""
     check_mean_flux(mean_flux)
-    return mean_flux["tau0_amp"] * ((1.0 + np.asarray(z, float)) / (1.0 + mean_flux["z_pivot"])) ** mean_flux["dtau0"]
+    return (
+        mean_flux["tau0_amp"]
+        * ((1.0 + np.asarray(z, float)) / (1.0 + mean_flux["z_pivot"])) ** mean_flux["dtau0"]
+    )
 
 
 def hcd_priya_tau0_input(z, mean_flux):
@@ -91,7 +96,9 @@ def vector_from_names(params, index):
     """Physical vector ordered by a reference's own ``{name: position}`` map (never by assumed position)."""
     check_params(params)
     if set(index) != set(PARAM_NAMES) or sorted(index.values()) != list(range(len(PARAM_NAMES))):
-        raise ConventionError(f"reference parameter index {index!r} is not a permutation of {PARAM_NAMES}")
+        raise ConventionError(
+            f"reference parameter index {index!r} is not a permutation of {PARAM_NAMES}"
+        )
     v = np.empty(len(PARAM_NAMES))
     for name, i in index.items():
         v[i] = params[name]

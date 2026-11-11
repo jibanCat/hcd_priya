@@ -51,6 +51,7 @@ These tests are EXPECTED TO FAIL before the fix:
       held set of size 2 for fold 2 (leave-two-out), so the target-only assertion
       cannot hold under current code.
 """
+
 import numpy as np
 import pytest
 
@@ -68,8 +69,10 @@ def _decode(a):
 
 @pytest.fixture(scope="module")
 def caches():
-    d = load_cache_historical(CACHE_PATH, reason='test: a cache in the pre-lineage 3.3 format')
-    hr_cache = MF.load_cache_historical(MF.HR_CACHE, reason='test: a cache in the pre-lineage 3.3 format')
+    d = load_cache_historical(CACHE_PATH, reason="test: a cache in the pre-lineage 3.3 format")
+    hr_cache = MF.load_cache_historical(
+        MF.HR_CACHE, reason="test: a cache in the pre-lineage 3.3 format"
+    )
     hr_sim_names = hr_cache["sim_name"]
     hr_sims = sorted(set(_decode(hr_sim_names)))
     return d, hr_sim_names, hr_sims
@@ -95,8 +98,7 @@ def leave_two_out(caches):
         held_hr = [s for s in _decode(sims) if s in hrset]
         if len(held_hr) >= 2:
             target, fold_mate = held_hr[0], held_hr[1]
-            return dict(fold=fold, target=target, fold_mate=fold_mate,
-                        group_held=held_hr)
+            return dict(fold=fold, target=target, fold_mate=fold_mate, group_held=held_hr)
     pytest.skip("no LF fold groups a pair of HR sims (no leave-two-out case)")
 
 
@@ -125,17 +127,16 @@ def test_true_loo_excludes_only_target(caches, leave_two_out):
     held = set(held_hr_set(d, hr_sim_names, fold=fold, target_hr_sim=target))
 
     # The held set is EXACTLY the one target sim -- not the whole group.
-    assert held == {target}, (
-        f"true-LOO must drop only the target; got held={sorted(held)}")
+    assert held == {target}, f"true-LOO must drop only the target; got held={sorted(held)}"
 
     # The fold-mate is RETAINED (the leave-two-out -> leave-one-out fix).
     retained = _train_retained(held, hr_sims)
-    assert fold_mate in retained, (
-        f"fold-mate {fold_mate!r} must be retained in the MF train set")
+    assert fold_mate in retained, f"fold-mate {fold_mate!r} must be retained in the MF train set"
 
     # 5 HR sims retained for the head fit, not 4.
-    assert len(retained) == len(hr_sims) - 1 == 5, (
-        f"expected 5 retained HR sims, got {len(retained)}: {sorted(retained)}")
+    assert (
+        len(retained) == len(hr_sims) - 1 == 5
+    ), f"expected 5 retained HR sims, got {len(retained)}: {sorted(retained)}"
 
 
 # --------------------------------------------------------------------------- #
@@ -159,10 +160,12 @@ def test_default_unchanged(caches, leave_two_out):
 
     assert held_default == expected_whole_group, (
         f"default must reproduce the whole-group held set "
-        f"{sorted(expected_whole_group)}; got {sorted(held_default)}")
+        f"{sorted(expected_whole_group)}; got {sorted(held_default)}"
+    )
 
     # And for this leave-two-out fold that whole group is the 2-element set
     # (the very behavior the cert misuses) -- a guard that the back-compat path
     # is genuinely the old, group-based one.
-    assert len(held_default) >= 2, (
-        "back-compat default on a leave-two-out fold must hold >=2 HR sims")
+    assert (
+        len(held_default) >= 2
+    ), "back-compat default on a leave-two-out fold must hold >=2 HR sims"

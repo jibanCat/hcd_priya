@@ -30,8 +30,10 @@ those pkls as a drifted prior.
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES=""
 """
+
 import argparse, functools, os, pickle, time
 import numpy as np
+
 print = functools.partial(print, flush=True)
 
 import hcd_analysis.emulator  # noqa: F401 (x64)
@@ -49,24 +51,40 @@ def main():
     ap.add_argument("--n-warmup", type=int, default=250)
     ap.add_argument("--n-samples", type=int, default=300)
     ap.add_argument("--max-tree-depth", type=int, default=10)
-    ap.add_argument("--boost", type=float, default=1.5,
-                    help="truth alpha_DLA multiplier (pivot + z-resolved column). 1.5 puts the "
-                         "prior-drawn truth median at 0.15 x (lit/sim) x w_DLA = the 15%% residual "
-                         "of the OBSERVED DLA incidence (prior center = 0.10). Stamped into meta.")
+    ap.add_argument(
+        "--boost",
+        type=float,
+        default=1.5,
+        help="truth alpha_DLA multiplier (pivot + z-resolved column). 1.5 puts the "
+        "prior-drawn truth median at 0.15 x (lit/sim) x w_DLA = the 15%% residual "
+        "of the OBSERVED DLA incidence (prior center = 0.10). Stamped into meta.",
+    )
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--smoke", action="store_true")
     a = ap.parse_args()
     if a.smoke:
-        a.n_mocks = 1; a.n_warmup = min(a.n_warmup, 20); a.n_samples = min(a.n_samples, 30)
+        a.n_mocks = 1
+        a.n_warmup = min(a.n_warmup, 20)
+        a.n_samples = min(a.n_samples, 30)
 
     # DEPLOYED forward (single source: prod_forward_config + NORC via build_arm_ctx use_prod_forward),
     # mirroring run_dla_completeness_shard.py's parity asserts — fail LOUD before any NUTS.
     ctx, d, _ = build_arm_ctx("metal_misspec", "desi", True, use_prod_forward=True)
-    fc = CL.prod_forward_config("DESI"); norc = CL.prod_norc_forward(); L = ctx.legs[0]
-    assert bool(ctx.res_corr_on) == norc["res_corr_on"], "selfdraw forward != deployed NORC res_corr"
-    assert bool(ctx.fix_alpha_res) == norc["fix_alpha_res"], "selfdraw fix_alpha_res != deployed NORC"
-    assert bool(ctx.sample_res) == fc["sample_res"], "prod f_res float not wired into the selfdraw arm"
-    assert ctx.f_res_amp_sigma == fc["f_res_amp_sigma"], "f_res prior width mismatch vs deployed DESI"
+    fc = CL.prod_forward_config("DESI")
+    norc = CL.prod_norc_forward()
+    L = ctx.legs[0]
+    assert (
+        bool(ctx.res_corr_on) == norc["res_corr_on"]
+    ), "selfdraw forward != deployed NORC res_corr"
+    assert (
+        bool(ctx.fix_alpha_res) == norc["fix_alpha_res"]
+    ), "selfdraw fix_alpha_res != deployed NORC"
+    assert (
+        bool(ctx.sample_res) == fc["sample_res"]
+    ), "prod f_res float not wired into the selfdraw arm"
+    assert (
+        ctx.f_res_amp_sigma == fc["f_res_amp_sigma"]
+    ), "f_res prior width mismatch vs deployed DESI"
     assert ctx.metal_prior == fc["metal_prior"], "prod metal model (flatlog2node) not wired"
     assert tuple(ctx.metal_node_z) == (2.2, 4.2), "Gate-C metal_node_z drifted"
     assert ctx.sample_metals is True and L.metals_on is True, "DESI leg must sample+apply metals"
@@ -74,18 +92,30 @@ def main():
     assert getattr(L, "dla_cov_reduced", False) is True, (
         "DESI leg C_data is NOT the reduced covariance (syst_e_dla_completeness still inside); "
         "the selfdraw closure must run on the final production likelihood — check "
-        "data_likelihood.DESI_DLA_COV_REDUCE")
+        "data_likelihood.DESI_DLA_COV_REDUCE"
+    )
     assert float(L.dla_forward_frac) == 1.0, "DESI alpha_DLA mean model must be live (frac 1.0)"
-    print(f"[forward] DEPLOYED DESI: res_corr_on={bool(ctx.res_corr_on)} fix_alpha_res={bool(ctx.fix_alpha_res)} "
-          f"sample_res={bool(ctx.sample_res)} f_res_amp_sigma={ctx.f_res_amp_sigma} "
-          f"metal_prior={ctx.metal_prior!r} dla_cov_reduced={L.dla_cov_reduced} "
-          f"dla_forward_frac={L.dla_forward_frac} boost={a.boost} "
-          f"(== prod_forward_config('DESI') + NORC + reduced cov)")
+    print(
+        f"[forward] DEPLOYED DESI: res_corr_on={bool(ctx.res_corr_on)} fix_alpha_res={bool(ctx.fix_alpha_res)} "
+        f"sample_res={bool(ctx.sample_res)} f_res_amp_sigma={ctx.f_res_amp_sigma} "
+        f"metal_prior={ctx.metal_prior!r} dla_cov_reduced={L.dla_cov_reduced} "
+        f"dla_forward_frac={L.dla_forward_frac} boost={a.boost} "
+        f"(== prod_forward_config('DESI') + NORC + reduced cov)"
+    )
 
     idxs = [m for m in range(a.n_mocks) if m % a.n_shards == a.shard]
-    run_kw = dict(n_mocks=a.n_mocks, mock_indices=idxs, return_per_mock=True, leg_a=True,
-                  n_warmup=a.n_warmup, n_samples=a.n_samples, seed=a.seed, dense_mass=True,
-                  max_tree_depth=a.max_tree_depth, verbose=True)
+    run_kw = dict(
+        n_mocks=a.n_mocks,
+        mock_indices=idxs,
+        return_per_mock=True,
+        leg_a=True,
+        n_warmup=a.n_warmup,
+        n_samples=a.n_samples,
+        seed=a.seed,
+        dense_mass=True,
+        max_tree_depth=a.max_tree_depth,
+        verbose=True,
+    )
     t0 = time.time()
     print(f"[dla selfdraw shard {a.shard}] CLEAN run (boost=1, reduced cov) ...")
     clean = run_legb(ctx, d, inject_spec=None, **run_kw)
@@ -102,11 +132,24 @@ def main():
     # F5: the closure_legb.forward_stamp SINGLE AUTHORITY (adds hcd_prior_signature + the env
     # data-selection stamps on top of the old inline dict — see the docstring provenance note).
     meta["forward"] = CL.forward_stamp(ctx, L)
-    pickle.dump(dict(arm="dla_selfdraw", survey="desi", idxs=idxs, clean_per_mock=clean,
-                     boost_per_mock=boosted, meta=meta), open(out, "wb"))
-    nd = sum(int(r.get("n_div", 0) > 0) for r in clean) + sum(int(r.get("n_div", 0) > 0) for r in boosted)
-    print(f"[dla selfdraw shard {a.shard}] wrote {len(boosted)} paired mocks ({nd} div) -> {out} "
-          f"wall={wall:.1f}s")
+    pickle.dump(
+        dict(
+            arm="dla_selfdraw",
+            survey="desi",
+            idxs=idxs,
+            clean_per_mock=clean,
+            boost_per_mock=boosted,
+            meta=meta,
+        ),
+        open(out, "wb"),
+    )
+    nd = sum(int(r.get("n_div", 0) > 0) for r in clean) + sum(
+        int(r.get("n_div", 0) > 0) for r in boosted
+    )
+    print(
+        f"[dla selfdraw shard {a.shard}] wrote {len(boosted)} paired mocks ({nd} div) -> {out} "
+        f"wall={wall:.1f}s"
+    )
 
 
 if __name__ == "__main__":

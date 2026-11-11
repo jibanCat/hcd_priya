@@ -4,6 +4,7 @@ Head A consumes ONLY the latent (no tau0) so its outputs (f_nhi, dN/dX) are
 tau0-invariant by construction (spec sec.3). Head B consumes concat(latent, tau0).
 P_tier_p is the structural sum Sum_c w_c * P_c^filt (spec sec.3/sec.6).
 """
+
 from __future__ import annotations
 import jax, jax.numpy as jnp, equinox as eqx
 
@@ -28,7 +29,8 @@ def svd_basis_init(P_filt_transformed, n_basis):
         raise ValueError(
             f"n_basis={n_basis} exceeds available singular vectors {Vh.shape[0]} "
             f"(= min(rows*classes, n_k) for input {M.shape}); the warm-start would "
-            f"be rank-deficient. Reduce n_basis to <= {Vh.shape[0]}.")
+            f"be rank-deficient. Reduce n_basis to <= {Vh.shape[0]}."
+        )
     return Vh[:n_basis]
 
 
@@ -85,6 +87,7 @@ class BaselineHead(eqx.Module):
     ``n_layers``/``width``/``n_k``/``n_basis`` are STATIC fields (they set array
     shapes / layer counts and must be known at trace time for jit).
     """
+
     layers: list
     p_filt_basis: jax.Array | None
     n_k: int = eqx.field(static=True)
@@ -92,8 +95,9 @@ class BaselineHead(eqx.Module):
     n_layers: int = eqx.field(static=True)
     width: int = eqx.field(static=True)
 
-    def __init__(self, n_k=172, width=256, n_layers=3, n_basis=None,
-                 p_filt_basis_init=None, key=None):
+    def __init__(
+        self, n_k=172, width=256, n_layers=3, n_basis=None, p_filt_basis_init=None, key=None
+    ):
         if n_layers < 1:
             raise ValueError(f"BaselineHead n_layers must be >= 1, got {n_layers}")
         self.n_k = n_k
@@ -103,7 +107,7 @@ class BaselineHead(eqx.Module):
         out_dim = 4 * n_k if n_basis is None else 4 * n_basis
         # n_layers hidden Linears (input ONLY [z, tau0]) + a final output Linear.
         ks = jax.random.split(key, n_layers + 2)
-        dims = [2] + [width] * n_layers          # [2, w, w, ..., w]
+        dims = [2] + [width] * n_layers  # [2, w, w, ..., w]
         hidden = [eqx.nn.Linear(dims[i], dims[i + 1], key=ks[i]) for i in range(n_layers)]
         out = eqx.nn.Linear(width, out_dim, key=ks[n_layers])
         self.layers = hidden + [out]
@@ -115,11 +119,13 @@ class BaselineHead(eqx.Module):
                 if basis.shape != (n_basis, n_k):
                     raise ValueError(
                         f"p_filt_basis_init shape {basis.shape} != (n_basis, n_k) "
-                        f"= ({n_basis}, {n_k})")
+                        f"= ({n_basis}, {n_k})"
+                    )
                 self.p_filt_basis = basis
             else:
                 self.p_filt_basis = jax.nn.initializers.orthogonal()(
-                    ks[n_layers + 1], (n_basis, n_k))
+                    ks[n_layers + 1], (n_basis, n_k)
+                )
 
     def __call__(self, z, tau0):
         # θ-BLIND: only (z, τ₀) enter; the shared latent (which encodes θ) is NEVER
@@ -131,7 +137,7 @@ class BaselineHead(eqx.Module):
         if self.n_basis is None:
             return y.reshape(4, self.n_k)
         coeffs = y.reshape(4, self.n_basis)
-        return coeffs @ self.p_filt_basis                # (4, n_k)
+        return coeffs @ self.p_filt_basis  # (4, n_k)
 
 
 class HeadB(eqx.Module):
@@ -164,6 +170,7 @@ class HeadB(eqx.Module):
     construction via ``p_filt_basis_init`` (see ``svd_basis_init``); if omitted, the
     basis is orthogonal-initialised from the key (full-rank, no rank-collapse).
     """
+
     trunk: eqx.nn.Linear
     out: eqx.nn.Linear
     p_filt_basis: jax.Array | None
@@ -187,7 +194,8 @@ class HeadB(eqx.Module):
                 if basis.shape != (n_basis, n_k):
                     raise ValueError(
                         f"p_filt_basis_init shape {basis.shape} != (n_basis, n_k) "
-                        f"= ({n_basis}, {n_k})")
+                        f"= ({n_basis}, {n_k})"
+                    )
                 self.p_filt_basis = basis
             else:
                 # orthogonal init -> rows are orthonormal => basis is full rank
@@ -201,9 +209,9 @@ class HeadB(eqx.Module):
             y = y.reshape(7, self.n_k)
             return {"P_filt_resid": y[:4], "delta": y[4:]}
         nb = self.n_basis
-        coeffs = y[: 4 * nb].reshape(4, nb)          # (4, n_basis)
-        delta = y[4 * nb:].reshape(3, self.n_k)      # (3, n_k) dense
-        P_filt_resid = coeffs @ self.p_filt_basis    # (4, n_basis) @ (n_basis, n_k)
+        coeffs = y[: 4 * nb].reshape(4, nb)  # (4, n_basis)
+        delta = y[4 * nb :].reshape(3, self.n_k)  # (3, n_k) dense
+        P_filt_resid = coeffs @ self.p_filt_basis  # (4, n_basis) @ (n_basis, n_k)
         return {"P_filt_resid": P_filt_resid, "delta": delta}
 
 
@@ -218,24 +226,39 @@ class Emulator(eqx.Module):
     consumes LINEAR P_filt downstream. ∂logP̂/∂θ = sig_cosmo·∂P_filt_resid/∂θ
     (the baseline is θ-blind).
     """
+
     enc: Encoder
     head_a: HeadA
     head_base: BaselineHead
     head_b: HeadB
 
-    def __init__(self, in_dim=10, n_k=172, n_basis=None, p_filt_basis_init=None,
-                 baseline_basis_init=None, baseline_n_layers=3, baseline_width=256,
-                 key=None):
+    def __init__(
+        self,
+        in_dim=10,
+        n_k=172,
+        n_basis=None,
+        p_filt_basis_init=None,
+        baseline_basis_init=None,
+        baseline_n_layers=3,
+        baseline_width=256,
+        key=None,
+    ):
         k1, k2, k3, k4 = jax.random.split(key, 4)
         self.enc = Encoder(in_dim=in_dim, key=k1)
         self.head_a = HeadA(latent=64, key=k2)
         # DEEP θ-blind baseline (validated recipe): default 3 hidden layers × w256
         # so term (b) collapses from ~0.84·σ_cosmo to ~0.03–0.05·σ_cosmo.
-        self.head_base = BaselineHead(n_k=n_k, n_basis=n_basis,
-                                      n_layers=baseline_n_layers, width=baseline_width,
-                                      p_filt_basis_init=baseline_basis_init, key=k3)
-        self.head_b = HeadB(latent=64, n_k=n_k, n_basis=n_basis,
-                            p_filt_basis_init=p_filt_basis_init, key=k4)
+        self.head_base = BaselineHead(
+            n_k=n_k,
+            n_basis=n_basis,
+            n_layers=baseline_n_layers,
+            width=baseline_width,
+            p_filt_basis_init=baseline_basis_init,
+            key=k3,
+        )
+        self.head_b = HeadB(
+            latent=64, n_k=n_k, n_basis=n_basis, p_filt_basis_init=p_filt_basis_init, key=k4
+        )
 
     def __call__(self, x, tau0):
         lat = self.enc(x)
@@ -278,7 +301,7 @@ def masked_mse(pred, target, mask, weight=None):
     unchanged."""
     target_safe = jnp.nan_to_num(target, nan=0.0)
     diff = jnp.where(mask, pred - target_safe, 0.0)
-    sq = diff ** 2
+    sq = diff**2
     if weight is not None:
         # effective per-element weight = weight at UNMASKED bins, exactly 0 at masked.
         # Use jnp.where (NOT weight*mask): a non-finite weight at a masked bin would
@@ -314,8 +337,8 @@ def _k_weight_from_batch(batch):
     kw = batch.get("k_weight")
     if kw is None:
         return None
-    kw = jnp.atleast_2d(kw)          # (B,K) (or (K,) -> (1,K))
-    return kw[0][None, None, :]      # (1,1,K), row-invariant profile
+    kw = jnp.atleast_2d(kw)  # (B,K) (or (K,) -> (1,K))
+    return kw[0][None, None, :]  # (1,1,K), row-invariant profile
 
 
 def _datarange_weight_from_batch(batch):
@@ -334,8 +357,8 @@ def _datarange_weight_from_batch(batch):
     dw = batch.get("datarange_weight")
     if dw is None:
         return None
-    dw = jnp.atleast_2d(dw)          # (B,K)
-    return dw[:, None, :]            # (B,1,K)
+    dw = jnp.atleast_2d(dw)  # (B,K)
+    return dw[:, None, :]  # (B,1,K)
 
 
 def coherent_debias_term(preds, batch):
@@ -366,18 +389,18 @@ def coherent_debias_term(preds, batch):
     (it sets the segment-sum output shape and so must be static at trace time — it is
     a fold-level constant, traced once)."""
     n_cells = int(batch["n_cells"])
-    rhat = preds["P_filt_resid"]                            # (B,4,K)
-    t = jnp.nan_to_num(batch["t_p_resid"], nan=0.0)         # (B,4,K)
-    m = batch["mask"][:, None, :]                           # (B,1,K) Nyquist mask
-    err = jnp.where(m, rhat - t, 0.0)                       # (B,4,K) per-row resid error
-    seg = batch["cell"]                                     # (B,) global cell id
+    rhat = preds["P_filt_resid"]  # (B,4,K)
+    t = jnp.nan_to_num(batch["t_p_resid"], nan=0.0)  # (B,4,K)
+    m = batch["mask"][:, None, :]  # (B,1,K) Nyquist mask
+    err = jnp.where(m, rhat - t, 0.0)  # (B,4,K) per-row resid error
+    seg = batch["cell"]  # (B,) global cell id
     # per-cell sum of err and of the mask (# finite sims contributing per (c,k))
-    num = jax.ops.segment_sum(err, seg, num_segments=n_cells)             # (N,4,K)
+    num = jax.ops.segment_sum(err, seg, num_segments=n_cells)  # (N,4,K)
     cnt = jax.ops.segment_sum(
-        jnp.broadcast_to(m.astype(err.dtype), err.shape), seg,
-        num_segments=n_cells)                                            # (N,4,K)
+        jnp.broadcast_to(m.astype(err.dtype), err.shape), seg, num_segments=n_cells
+    )  # (N,4,K)
     cell_mean_err = jnp.where(cnt > 0, num / jnp.maximum(cnt, 1.0), 0.0)  # ⟨r̂−t⟩_θ
-    sq = cell_mean_err ** 2
+    sq = cell_mean_err**2
     valid = (cnt > 0).astype(sq.dtype)
     denom = jnp.maximum(jnp.sum(valid), 1.0)
     return jnp.sum(sq) / denom
@@ -412,16 +435,15 @@ def joint_loss(model, batch, term_w=None, w_coh=0.0):
 
     A3: the old meanF term was removed (zero model gradient; structural mean-flux).
     """
-    term_w = term_w or {"f_nhi": 1.0, "dndx": 1.0,
-                        "p_base": 1.0, "p_resid": 1.0, "delta": 1.0}
+    term_w = term_w or {"f_nhi": 1.0, "dndx": 1.0, "p_base": 1.0, "p_resid": 1.0, "delta": 1.0}
     preds = jax.vmap(model)(batch["x"], batch["tau0"])
     # A4b: Head-A masks exclude the safe_log-floored structural-zero CDDF/dN/dX bins.
-    la_cddf = masked_mse(preds["f_nhi"], batch["t_f_nhi"],
-                         batch["t_f_nhi_mask"],
-                         weight=batch["inv_nalpha"][:, None])
-    la_dndx = masked_mse(preds["dndx"], batch["t_dndx"],
-                         batch["t_dndx_mask"],
-                         weight=batch["inv_nalpha"][:, None])
+    la_cddf = masked_mse(
+        preds["f_nhi"], batch["t_f_nhi"], batch["t_f_nhi_mask"], weight=batch["inv_nalpha"][:, None]
+    )
+    la_dndx = masked_mse(
+        preds["dndx"], batch["t_dndx"], batch["t_dndx_mask"], weight=batch["inv_nalpha"][:, None]
+    )
     m3 = batch["mask"][:, None, :]
     wcls4 = batch["inv_nc"][:, :, None]
     wcls3 = batch["inv_nc"][:, 1:, None]
@@ -430,7 +452,7 @@ def joint_loss(model, batch, term_w=None, w_coh=0.0):
     # z>4.6/low-k regularizing signal but focuses capacity in the DESI data range.
     # Applied to the residual + baseline + delta terms (the P_filt channels) so the
     # standardized-space MSE attends in-range; None when the batch omits it.
-    rng_w = _datarange_weight_from_batch(batch)              # (B,1,K) or None
+    rng_w = _datarange_weight_from_batch(batch)  # (B,1,K) or None
     # BASELINE term: θ-blind cell-mean fit (σ_marg-standardized). inv_nc-weighted.
     w_base = wcls4 if rng_w is None else wcls4 * rng_w
     lb_base = masked_mse(preds["P_filt_base"], batch["t_p_base"], mask4, weight=w_base)
@@ -445,11 +467,16 @@ def joint_loss(model, batch, term_w=None, w_coh=0.0):
         w_resid = w_resid * rng_w
     lb_resid = masked_mse(preds["P_filt_resid"], batch["t_p_resid"], mask4, weight=w_resid)
     w_dl = wcls3 if rng_w is None else wcls3 * rng_w
-    lb_dl = masked_mse(preds["delta"], batch["t_delta"],
-                       m3 & jnp.ones_like(batch["t_delta"], bool), weight=w_dl)
-    total = (term_w["f_nhi"]*la_cddf + term_w["dndx"]*la_dndx
-             + term_w["p_base"]*lb_base + term_w["p_resid"]*lb_resid
-             + term_w["delta"]*lb_dl)
+    lb_dl = masked_mse(
+        preds["delta"], batch["t_delta"], m3 & jnp.ones_like(batch["t_delta"], bool), weight=w_dl
+    )
+    total = (
+        term_w["f_nhi"] * la_cddf
+        + term_w["dndx"] * la_dndx
+        + term_w["p_base"] * lb_base
+        + term_w["p_resid"] * lb_resid
+        + term_w["delta"] * lb_dl
+    )
     if w_coh > 0.0:
         total = total + w_coh * coherent_debias_term(preds, batch)
     return total

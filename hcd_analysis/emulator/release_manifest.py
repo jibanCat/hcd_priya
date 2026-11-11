@@ -12,7 +12,9 @@ so that ONE published digest anchors the whole release.
 The anchor is the sha256 of ``release.json``. Each ``dir`` is one plain path segment inside the release directory
 (never a path, ``..`` or a symlink). The MF part is required: an LF-only bundle is not a release of this format (PI
 ruling 2026-11-06a item 2) and keeps loading with ``predictor.load_bundle``. The record pins its backbone's manifest
-digest, so a manifest naming a mismatched pair is refused when the parts are loaded (``predictor.load_release``)."""
+digest, so a manifest naming a mismatched pair is refused when the parts are loaded (``predictor.load_release``).
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -38,25 +40,35 @@ def check_release_manifest(m):
     """Validate a manifest dict (closed keys, the format, both parts with a plain directory name and a digest)."""
     if not isinstance(m, dict) or set(m) != KEYS:
         got = set(m) if isinstance(m, dict) else set()
-        raise ReleaseManifestError(f"release manifest keys must be exactly {sorted(KEYS)} (missing "
-                                   f"{sorted(KEYS - got)}, unknown {sorted(got - KEYS)})")
+        raise ReleaseManifestError(
+            f"release manifest keys must be exactly {sorted(KEYS)} (missing "
+            f"{sorted(KEYS - got)}, unknown {sorted(got - KEYS)})"
+        )
     if m["format"] != FORMAT:
         raise ReleaseManifestError(f"release manifest format {m['format']!r}, expected {FORMAT}")
     if not isinstance(m["release_version"], str) or not m["release_version"].strip():
         raise ReleaseManifestError("release_version must be a non-empty string")
     if m["mf"] is None:
-        raise ReleaseManifestError("the release names no MF record: an LF-only bundle is not an LF+MF release (load "
-                                   "it with predictor.load_bundle)")
+        raise ReleaseManifestError(
+            "the release names no MF record: an LF-only bundle is not an LF+MF release (load "
+            "it with predictor.load_bundle)"
+        )
     for part, (dk, hk) in PARTS.items():
         p = m[part]
         if not isinstance(p, dict) or set(p) != {dk, hk}:
             raise ReleaseManifestError(f"{part}: keys must be exactly {sorted((dk, hk))}")
         if not isinstance(p[dk], str) or not _PLAIN.match(p[dk]):
-            raise ReleaseManifestError(f"{part}.{dk} must be one plain path segment inside the release, never a path")
+            raise ReleaseManifestError(
+                f"{part}.{dk} must be one plain path segment inside the release, never a path"
+            )
         if not isinstance(p[hk], str) or not _HEX64.match(p[hk]):
             raise ReleaseManifestError(f"{part}.{hk} must be 64 lowercase hex digits")
-        if type(p[dk]) is not str or type(p[hk]) is not str:       # a parsed manifest always holds exact str
-            raise ReleaseManifestError(f"{part}: {dk} and {hk} must be exact str (a str subclass is refused)")
+        if (
+            type(p[dk]) is not str or type(p[hk]) is not str
+        ):  # a parsed manifest always holds exact str
+            raise ReleaseManifestError(
+                f"{part}: {dk} and {hk} must be exact str (a str subclass is refused)"
+            )
     if m["backbone"]["dir"] == m["mf"]["dir"]:
         raise ReleaseManifestError("the backbone and the MF record are two different directories")
     return m
@@ -67,8 +79,10 @@ def _part_dirs(d, m):
     for part in PARTS:
         sub = os.path.join(d, m[part]["dir"])
         if os.path.islink(sub) or not os.path.isdir(sub):
-            raise ReleaseManifestError(f"{part}: {m[part]['dir']!r} is not a directory inside the release (a symlink "
-                                       "is refused)")
+            raise ReleaseManifestError(
+                f"{part}: {m[part]['dir']!r} is not a directory inside the release (a symlink "
+                "is refused)"
+            )
         out[part] = sub
     return out
 
@@ -77,9 +91,13 @@ def read_release_manifest(release_dir, expected_sha256):
     """Read ``release.json`` through a no-follow descriptor, compare its sha256 with the published one BEFORE parsing
     (strict JSON: no duplicate keys, no NaN), validate it, and resolve the two part directories. Returns
     (manifest dict, {"backbone": path, "mf": path})."""
-    if type(expected_sha256) is not str or not _HEX64.match(expected_sha256):    # exact str (delta review R1-2)
-        raise ReleaseManifestError("a release loads only with its published sha256 (64 lowercase hex digits, an "
-                                   "exact str)")
+    if type(expected_sha256) is not str or not _HEX64.match(
+        expected_sha256
+    ):  # exact str (delta review R1-2)
+        raise ReleaseManifestError(
+            "a release loads only with its published sha256 (64 lowercase hex digits, an "
+            "exact str)"
+        )
     d = os.path.abspath(os.fspath(release_dir))
     if os.path.islink(d) or not os.path.isdir(d):
         raise ReleaseManifestError(f"{release_dir}: not a release directory")
@@ -98,13 +116,23 @@ def read_release_manifest(release_dir, expected_sha256):
     return m, _part_dirs(d, m)
 
 
-def write_release_manifest(release_dir, *, release_version, backbone_dir, backbone_manifest_sha256, mf_dir,
-                           mf_record_sha256):
+def write_release_manifest(
+    release_dir,
+    *,
+    release_version,
+    backbone_dir,
+    backbone_manifest_sha256,
+    mf_dir,
+    mf_record_sha256,
+):
     """Write ``release.json`` ONCE (an existing one is refused) into ``release_dir``, which already holds both parts
     under the given directory names. Returns (path, sha256: the anchor to publish)."""
-    m = {"format": FORMAT, "release_version": release_version,
-         "backbone": {"dir": backbone_dir, "manifest_sha256": backbone_manifest_sha256},
-         "mf": {"dir": mf_dir, "record_sha256": mf_record_sha256}}
+    m = {
+        "format": FORMAT,
+        "release_version": release_version,
+        "backbone": {"dir": backbone_dir, "manifest_sha256": backbone_manifest_sha256},
+        "mf": {"dir": mf_dir, "record_sha256": mf_record_sha256},
+    }
     check_release_manifest(m)
     d = os.fspath(release_dir)
     _part_dirs(d, m)

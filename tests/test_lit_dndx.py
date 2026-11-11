@@ -11,7 +11,9 @@ Env:
   PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
     python -m pytest tests/test_lit_dndx.py -q
 """
+
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
 _REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import numpy as np
 import pytest
@@ -40,23 +42,25 @@ def test_zafar_two_route_subdla_agreement():
 def test_self_checks_raise_on_transcription_drift():
     """The module's self-check function must raise if a count drifts (anti-drift tripwire)."""
     import copy
+
     bad = copy.deepcopy(LD.ELL_X_SUBDLA_BINNED_19P0_20P3_ZAFAR13_T3)
     bad["n"] = np.asarray(bad["n"]).copy()
-    bad["n"][0] += 1                                   # 89 -> 90
+    bad["n"][0] += 1  # 89 -> 90
     with pytest.raises(AssertionError):
         LD._check_zafar_subdla(bad)
     bad2 = copy.deepcopy(LD.ELL_X_SUBDLA_BINNED_19P0_20P3_ZAFAR13_T3)
     bad2["lx_gt19"] = np.asarray(bad2["lx_gt19"]).copy()
-    bad2["lx_gt19"][2] += 0.05                          # breaks the two-route identity
+    bad2["lx_gt19"][2] += 0.05  # breaks the two-route identity
     with pytest.raises(AssertionError):
         LD._check_zafar_subdla(bad2)
 
 
 def test_pow10_self_checks_raise_on_drift():
     import copy
+
     bad = copy.deepcopy(LD.POW10_T4)
     bad["lx"] = np.asarray(bad["lx"]).copy()
-    bad["lx"][0] = 0.45                                # breaks m/dX identity
+    bad["lx"][0] = 0.45  # breaks m/dX identity
     with pytest.raises(AssertionError):
         LD._check_pow10(bad)
 
@@ -65,9 +69,11 @@ def test_pow10_self_checks_raise_on_drift():
 #  Estimand naming + metadata                                                  #
 # --------------------------------------------------------------------------- #
 def test_every_source_array_has_estimand_and_cite():
-    for name in ("ELL_X_CUMULATIVE_GE17P5_TAU2",
-                 "ELL_X_SUBDLA_BINNED_19P0_20P3_ZAFAR13_T3",
-                 "ELL_X_DLA_GE20P3_PW09_T1"):
+    for name in (
+        "ELL_X_CUMULATIVE_GE17P5_TAU2",
+        "ELL_X_SUBDLA_BINNED_19P0_20P3_ZAFAR13_T3",
+        "ELL_X_DLA_GE20P3_PW09_T1",
+    ):
         a = getattr(LD, name)
         assert isinstance(a.get("estimand"), str) and len(a["estimand"]) > 10, name
         assert isinstance(a.get("cite"), str) and len(a["cite"]) > 5, name
@@ -99,20 +105,26 @@ def test_subdla_estimand_is_binned_counts():
     assert "binned" in a["estimand"].lower()
     # the pure rate is n/dX, exact Poisson counts (4,11,24,23,19,8)
     assert list(np.asarray(a["n"], int)) == [4, 11, 24, 23, 19, 8]
-    np.testing.assert_allclose(np.asarray(a["dX"], float),
-                               [87.3, 156.8, 162.8, 124.5, 91.7, 41.0], rtol=0, atol=1e-12)
-    np.testing.assert_allclose(np.asarray(a["z_bar"], float),
-                               [1.80, 2.26, 2.76, 3.21, 3.72, 4.18], rtol=0, atol=1e-12)
+    np.testing.assert_allclose(
+        np.asarray(a["dX"], float), [87.3, 156.8, 162.8, 124.5, 91.7, 41.0], rtol=0, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        np.asarray(a["z_bar"], float), [1.80, 2.26, 2.76, 3.21, 3.72, 4.18], rtol=0, atol=1e-12
+    )
 
 
 def test_dla_array_counts_representation():
     a = LD.ELL_X_DLA_GE20P3_PW09_T1
     assert list(np.asarray(a["m"], int)) == [79, 132, 169, 227, 86, 46]
-    np.testing.assert_allclose(np.asarray(a["dX"], float),
-                               [1652.7, 2405.8, 2539.7, 2702.5, 1139.2, 432.8],
-                               rtol=0, atol=1e-12)
-    np.testing.assert_allclose(np.asarray(a["lx"], float),
-                               [0.048, 0.055, 0.067, 0.084, 0.075, 0.106], rtol=0, atol=1e-12)
+    np.testing.assert_allclose(
+        np.asarray(a["dX"], float),
+        [1652.7, 2405.8, 2539.7, 2702.5, 1139.2, 432.8],
+        rtol=0,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(a["lx"], float), [0.048, 0.055, 0.067, 0.084, 0.075, 0.106], rtol=0, atol=1e-12
+    )
     assert "20.3" in a["estimand"]
 
 
@@ -121,26 +133,38 @@ def test_dla_array_counts_representation():
 # --------------------------------------------------------------------------- #
 def test_tombstone_lls_old_defects_matches_deployed_wrong_arrays():
     t = LD.LLS_TAU2_OLD_DEFECTS
-    np.testing.assert_allclose(np.asarray(t["z"], float),
-                               [2.4, 2.8, 3.35, 3.47, 3.58, 3.74, 3.97, 4.23],
-                               rtol=0, atol=1e-12)
-    np.testing.assert_allclose(np.asarray(t["lx"], float),
-                               [0.29, 0.33, 0.35, 0.57, 0.41, 0.52, 0.72, 0.78],
-                               rtol=0, atol=1e-12)
-    np.testing.assert_allclose(np.asarray(t["err"], float),
-                               [0.05, 0.08, 0.14, 0.12, 0.07, 0.08, 0.15, 0.19],
-                               rtol=0, atol=1e-12)
+    np.testing.assert_allclose(
+        np.asarray(t["z"], float),
+        [2.4, 2.8, 3.35, 3.47, 3.58, 3.74, 3.97, 4.23],
+        rtol=0,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(t["lx"], float),
+        [0.29, 0.33, 0.35, 0.57, 0.41, 0.52, 0.72, 0.78],
+        rtol=0,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(t["err"], float),
+        [0.05, 0.08, 0.14, 0.12, 0.07, 0.08, 0.15, 0.19],
+        rtol=0,
+        atol=1e-12,
+    )
     assert "cumulative" in t["defect"].lower()
 
 
 def test_tombstone_zafar_dla_block_matches_deployed_wrong_subdla():
     t = LD.ZAFAR13_T3_DLA_BLOCK_WRONG_SUBDLA_LABEL
-    np.testing.assert_allclose(np.asarray(t["z"], float),
-                               [2.27, 2.73, 3.25, 3.77, 4.20], rtol=0, atol=1e-12)
-    np.testing.assert_allclose(np.asarray(t["lx"], float),
-                               [0.07, 0.06, 0.08, 0.10, 0.10], rtol=0, atol=1e-12)
-    np.testing.assert_allclose(np.asarray(t["err"], float),
-                               [0.01, 0.01, 0.02, 0.02, 0.03], rtol=0, atol=1e-12)
+    np.testing.assert_allclose(
+        np.asarray(t["z"], float), [2.27, 2.73, 3.25, 3.77, 4.20], rtol=0, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        np.asarray(t["lx"], float), [0.07, 0.06, 0.08, 0.10, 0.10], rtol=0, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        np.asarray(t["err"], float), [0.01, 0.01, 0.02, 0.02, 0.03], rtol=0, atol=1e-12
+    )
     d = t["defect"].lower()
     assert "dla" in d and ("peroux" in d or "péroux" in d or "wrong" in d)
 
@@ -152,8 +176,8 @@ def test_atol0_helper_catches_cddf_scale_mismatch():
     """np.allclose's default atol=1e-8 is vacuously true on f(N)~1e-21; the module helper
     must use rtol with atol=0 and FAIL on a deliberately wrong 1e-21-scale array."""
     good = np.array([1.0e-21, 2.0e-21])
-    bad = np.array([2.0e-21, 4.0e-21])                 # 2x wrong — but np.allclose says fine
-    assert np.allclose(good, bad)                      # demonstrate the footgun is real
+    bad = np.array([2.0e-21, 4.0e-21])  # 2x wrong — but np.allclose says fine
+    assert np.allclose(good, bad)  # demonstrate the footgun is real
     with pytest.raises(AssertionError):
         LD.assert_close_cddf(good, bad, rtol=1e-3, where="test")
     LD.assert_close_cddf(good, good * (1 + 1e-6), rtol=1e-3, where="test")  # passes
@@ -233,12 +257,12 @@ def test_journal_fix_switch():
 def test_omeara_variant_switch():
     wm = LD.lls_compilation(omeara_variant="wmean")
     t5 = LD.lls_compilation(omeara_variant="table5")
-    i = 0                                              # O'Meara is the lowest-z point
+    i = 0  # O'Meara is the lowest-z point
     assert wm["z_bar"][i] == pytest.approx(2.21)
     assert wm["lx"][i] == pytest.approx(0.29) and wm["err_hi"][i] == pytest.approx(0.05)
     assert t5["lx"][i] == pytest.approx(0.28) and t5["err_hi"][i] == pytest.approx(0.06)
     with pytest.raises(ValueError):
-        LD.lls_compilation(omeara_variant="table9")    # Table 9 EXCLUDED (unverified)
+        LD.lls_compilation(omeara_variant="table9")  # Table 9 EXCLUDED (unverified)
 
 
 def test_omeara_z_is_221_not_24():
@@ -265,6 +289,7 @@ def test_lit_points_for_display_corrected_estimands():
     committed derivation JSON; subDLA = Zafar counts n/dX (Gehrels errors); DLA = PW09
     binned points. Kills the LIT-dict hard-coding across the six consumer scripts."""
     import json
+
     pts = LD.lit_points_for_display()
     for cls in ("LLS", "subDLA", "DLA"):
         z, v, e, src = pts[cls]
@@ -272,20 +297,19 @@ def test_lit_points_for_display_corrected_estimands():
         assert np.all(np.asarray(e) > 0), cls
     with open(f"{_REPO_ROOT}/hcd_analysis/emulator/hcd_lit_dndx_corrected.json") as fh:
         j = json.load(fh)
-    np.testing.assert_allclose(pts["LLS"][1], j["adopted_law"]["corrected_points"]["lx"],
-                               rtol=0, atol=0)
+    np.testing.assert_allclose(
+        pts["LLS"][1], j["adopted_law"]["corrected_points"]["lx"], rtol=0, atol=0
+    )
     a = LD.ELL_X_SUBDLA_BINNED_19P0_20P3_ZAFAR13_T3
-    np.testing.assert_allclose(pts["subDLA"][1],
-                               np.asarray(a["n"], float) / np.asarray(a["dX"], float),
-                               rtol=0, atol=0)
-    np.testing.assert_allclose(pts["DLA"][1], LD.ELL_X_DLA_GE20P3_PW09_T1["lx"],
-                               rtol=0, atol=0)
+    np.testing.assert_allclose(
+        pts["subDLA"][1], np.asarray(a["n"], float) / np.asarray(a["dX"], float), rtol=0, atol=0
+    )
+    np.testing.assert_allclose(pts["DLA"][1], LD.ELL_X_DLA_GE20P3_PW09_T1["lx"], rtol=0, atol=0)
     # the estimand labels ride along (the estimand-assert hook for plot scripts)
     assert "binned" in pts["estimand"]["LLS"] and "17.2" in pts["estimand"]["LLS"]
     assert "19.0" in pts["estimand"]["subDLA"]
     # the OLD wrong-object values are NOT what is served (the rewire is real)
-    assert not np.allclose(pts["LLS"][1],
-                           [0.29, 0.33, 0.35, 0.57, 0.41, 0.52, 0.72, 0.78])
+    assert not np.allclose(pts["LLS"][1], [0.29, 0.33, 0.35, 0.57, 0.41, 0.52, 0.72, 0.78])
     assert not np.allclose(pts["subDLA"][1][:5], [0.07, 0.06, 0.08, 0.10, 0.10])
 
 

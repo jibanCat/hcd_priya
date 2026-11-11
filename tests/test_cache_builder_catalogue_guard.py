@@ -13,6 +13,7 @@ re-digested to match, so the record check passes and only the entry check (``val
 it. Synthetic optical depths only; the fake_spectra and PyYAML stand-ins of ``tests/tau0_world.py``; no external data.
 The historical-reproduction path (``load_snapshot_inputs_historical``) reads a pre-fix catalogue on purpose, with a
 reason, and nothing built from it is release-eligible; it is not tested here."""
+
 import copy
 import importlib.util
 import os
@@ -34,12 +35,14 @@ from tests import tau0_world as W
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 SIM, SNAP, Z = W.GROUPS[0]
-NB = W.NBINS[(SIM, SNAP)]                     # synthetic skewer length (pixels) of the raw file
+NB = W.NBINS[(SIM, SNAP)]  # synthetic skewer length (pixels) of the raw file
 PRE_FIX = ("box_edge_duplicate", "whole_skewer_twice")
 
 
 def _module(name):
-    spec = importlib.util.spec_from_file_location(f"{name}_under_test", REPO_ROOT / "scripts" / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(
+        f"{name}_under_test", REPO_ROOT / "scripts" / f"{name}.py"
+    )
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
@@ -54,7 +57,7 @@ def world(tmp_path_factory):
         W.use_yaml_stand_in(mp)
         W.use_fake_spectra_stand_in(mp)
         raw = W.write_raw(base / "emu", SIM, SNAP, Z, seed=0)
-        past = 1_700_000_000_000_000_000                       # the raw file is older than everything else
+        past = 1_700_000_000_000_000_000  # the raw file is older than everything else
         os.utime(raw, ns=(past, past))
         snap_dir = W.rebuild_snapshot(base / "rebuilt", base / "emu", SIM, SNAP, Z)
     return {"emu": base / "emu", "raw": raw, "snap_dir": snap_dir}
@@ -78,12 +81,26 @@ def _pre_fix(snap_dir, kind):
     rec = copy.deepcopy(cat.lineage)
 
     def absorber(sk, start, end, nhi):
-        return C.Absorber(skewer_idx=sk, pix_start=start, pix_end=end, v_center=0.0, NHI=nhi, b_kms=np.nan,
-                          log_NHI=float(np.log10(nhi)), absorber_class=C.classify_system(nhi), fit_success=True,
-                          fast_mode=True)
-    if kind == "box_edge_duplicate":            # the old finder listed the head of a wrapping system again
-        extra = [absorber(a.skewer_idx, 0, a.pix_end - NB, 0.5 * a.NHI) for a in cat.absorbers if a.pix_end >= NB]
-    else:                                       # an all-merged skewer spanning 2n pixels
+        return C.Absorber(
+            skewer_idx=sk,
+            pix_start=start,
+            pix_end=end,
+            v_center=0.0,
+            NHI=nhi,
+            b_kms=np.nan,
+            log_NHI=float(np.log10(nhi)),
+            absorber_class=C.classify_system(nhi),
+            fit_success=True,
+            fast_mode=True,
+        )
+
+    if kind == "box_edge_duplicate":  # the old finder listed the head of a wrapping system again
+        extra = [
+            absorber(a.skewer_idx, 0, a.pix_end - NB, 0.5 * a.NHI)
+            for a in cat.absorbers
+            if a.pix_end >= NB
+        ]
+    else:  # an all-merged skewer spanning 2n pixels
         extra = [absorber(3, 0, 2 * NB - 1, 1e19)]
     assert extra
     cat.absorbers.extend(extra)
@@ -100,13 +117,16 @@ def test_the_fixtures_are_what_the_guard_says(world, tmp_path):
     for kind in PRE_FIX:
         q = _copy(world, tmp_path / kind)
         _pre_fix(q, kind)
-        C.check_catalog_record(C.AbsorberCatalog.load_npz(q / "catalog.npz"), NB)      # the record check passes
+        C.check_catalog_record(
+            C.AbsorberCatalog.load_npz(q / "catalog.npz"), NB
+        )  # the record check passes
         with pytest.raises(C.CatalogIntegrityError, match="box-edge fix") as e:
             C.load_validated_catalog(q / "catalog.npz", NB)
-        assert e.type is C.CatalogIntegrityError                                       # not a provenance refusal
+        assert e.type is C.CatalogIntegrityError  # not a provenance refusal
 
 
 # --- scripts/build_emulator_cache_tau0.py ------------------------------------------------------------------------
+
 
 class _Reached(Exception):
     """Raised by a stub placed just after the catalogue use: the build got past the catalogue guard."""
@@ -117,6 +137,7 @@ def test_builder_accepts_a_post_fix_catalogue(world, tmp_path, monkeypatch):
 
     def reached(*a, **k):
         raise _Reached
+
     monkeypatch.setattr(bt0, "catalogue_z_label", reached)
     sd = _copy(world, tmp_path)
     inputs, _ = T.load_snapshot_inputs(sd, world["raw"], sim=SIM, snap=SNAP)
@@ -129,11 +150,24 @@ def test_builder_refuses_a_pre_fix_catalogue(world, tmp_path, monkeypatch, kind)
     """The builder's main reads every snapshot through load_snapshot_inputs: a pre-fix catalogue is refused there, by
     the entry check, before any row (P1D or dN/dX) is built, and no cache is written."""
     bt0 = _module("build_emulator_cache_tau0")
-    monkeypatch.setattr(bt0, "build_tau0_rows", lambda *a, **k: (_ for _ in ()).throw(AssertionError("rows built")))
+    monkeypatch.setattr(
+        bt0, "build_tau0_rows", lambda *a, **k: (_ for _ in ()).throw(AssertionError("rows built"))
+    )
     _pre_fix(_copy(world, tmp_path / "hcd"), kind)
     out = tmp_path / "cache.h5"
-    with pytest.raises(C.CatalogIntegrityError, match="cached catalogue refused.*box-edge fix") as e:
-        bt0.main(["--hcd-root", str(tmp_path / "hcd"), "--emu-root", str(world["emu"]), "--output", str(out)])
+    with pytest.raises(
+        C.CatalogIntegrityError, match="cached catalogue refused.*box-edge fix"
+    ) as e:
+        bt0.main(
+            [
+                "--hcd-root",
+                str(tmp_path / "hcd"),
+                "--emu-root",
+                str(world["emu"]),
+                "--output",
+                str(out),
+            ]
+        )
     assert e.type is C.CatalogIntegrityError and not out.exists()
 
 
@@ -149,6 +183,7 @@ def test_builder_validates_with_the_paired_files_skewer_length(world, tmp_path, 
     def spy(path, n, **kw):
         seen.append(n)
         return real(path, n, **kw)
+
     monkeypatch.setattr(SR, "load_validated_catalog", spy)
     with pytest.raises(C.CatalogIntegrityError, match="box-edge fix"):
         T.load_snapshot_inputs(sd, world["raw"], sim=SIM, snap=SNAP)
@@ -156,6 +191,7 @@ def test_builder_validates_with_the_paired_files_skewer_length(world, tmp_path, 
 
 
 # --- scripts/patch_per_class_p1d.py: patch_one -------------------------------------------------------------------
+
 
 def _patch_snapdir(world, tmp_path, monkeypatch, kind=None):
     P = _module("patch_per_class_p1d")
@@ -166,7 +202,9 @@ def _patch_snapdir(world, tmp_path, monkeypatch, kind=None):
     (tmp_path / "lf" / SIM).mkdir(parents=True)
     monkeypatch.setattr(P, "OUTPUT_ROOT", root)
     monkeypatch.setattr(P, "LF_DATA_ROOT", tmp_path / "lf")
-    monkeypatch.setattr(P, "spectra_files_for_sim", lambda info, prefer_grid=True: {SNAP: world["raw"]})
+    monkeypatch.setattr(
+        P, "spectra_files_for_sim", lambda info, prefer_grid=True: {SNAP: world["raw"]}
+    )
     calls = []
 
     def compute(**kw):
@@ -175,6 +213,7 @@ def _patch_snapdir(world, tmp_path, monkeypatch, kind=None):
 
     def save(path, res, **kw):
         Path(path).write_text("written")
+
     monkeypatch.setattr(P, "compute_p1d_per_class", compute)
     monkeypatch.setattr(P, "save_p1d_per_class_hdf5", save)
     return P, sd, calls
