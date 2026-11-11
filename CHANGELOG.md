@@ -52,6 +52,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 - The `hcd` command needs an explicit `--config` file and refuses to run without one. Keys the file leaves out
   still take the built-in values of `hcd_analysis.config`, and keys it does not know are ignored.
 - The install name is `hcd-priya`; the import name stays `hcd_analysis`.
+- The Python code is formatted with black (line length 100), with no change in behaviour. Catalogues built from
+  now on record different finder source digests than earlier catalogues built from the same code, and a cache
+  carry needs a newly reviewed row-path diff ([`CONTRIBUTING.md`](CONTRIBUTING.md), "What a reformat changes").
 
 ### Removed
 - Historical analysis and campaign scripts, batch scripts, write-ups, figures and old manifests that neither the

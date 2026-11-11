@@ -72,3 +72,18 @@ black .
 
 The CI job "Format" runs `black --check .` and fails if any file would change. One file is excluded and never
 reformatted: `scripts/gen_analysis_lock.py`, the generator of the historical analysis lock.
+
+**What a reformat changes.** A format-only commit changes source text, not behaviour. Two provenance mechanisms
+follow the source text, so they see a reformat:
+
+- **Catalogue lineage records** name the finder's source by digest: the sha256 of `hcd_analysis/catalog.py` and
+  `hcd_analysis/voigt_utils.py`, and a digest of the N_HI estimator's source (`catalog._source_digests` and
+  `catalog._estimator_source_sha256`). A catalogue built after the black format commit (`3f58b5e`) therefore
+  records different finder source digests than an earlier catalogue built from identical code. The records of
+  existing catalogues are kept as they are. The catalogue acceptance script
+  (`scripts/accept_rebuilt_catalogues.py`) already requires one code commit and one set of finder digests across
+  the groups it accepts, so catalogues built before and after a reformat are never accepted together.
+- **The cache-carry tool** (`scripts/carry_validated_cache.py`) compares the row-path code at the builder commits
+  of record with the code at HEAD, as text. At a head after the format commit, that comparison shows
+  formatting-only differences. The rule is unchanged: such a carry still needs the diff reviewed and its sha256
+  passed with `--accept-row-path-diff`. No diff is accepted in advance.

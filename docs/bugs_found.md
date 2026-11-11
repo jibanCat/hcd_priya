@@ -42,7 +42,7 @@ _SIGMA_PREFACTOR = (
 # Units: cm^2 * (km/s).  Numeric value: 1.3435e-12.
 ```
 
-and the compensating `* 1e5` factors in `fit_nhi_from_tau`'s initial guess (line 206) and `nhi_from_tau_fast`'s thick-mode inversion (line 278) were removed. Matching `_tau_min` calculation in `catalog.py:382` was also updated.
+and the compensating `* 1e5` factors in `fit_nhi_from_tau`'s initial guess and `nhi_from_tau_fast`'s thick-mode inversion were removed. Matching `_tau_min` calculation in `catalog.py` (`_scan_skewer_batch`) was also updated.
 
 **Blast radius**. All 925 production `catalog.npz` files were built with the broken prefactor and have N_HI values biased too low by ≈5 dex for any saturated absorber; most true DLAs are missing entirely (filtered by min_log_nhi=17.2). Downstream `cddf.npz`, `p1d_ratios.npz` with class-based masks, `p1d_excl.npz`, `cddf_stacked.npz`, and the perturbed-P1D products are affected. Unaffected: `p1d_all`, `p1d_no_DLA_priya` (tau-based, no NHI dependence), headers/metadata. Full rerun needed.
 
@@ -81,7 +81,7 @@ and the compensating `* 1e5` factors in `fit_nhi_from_tau`'s initial guess (line
 
 ## 4. `fake_spectra` integration is documented but not wired
 
-**Location**: `docs/fake_spectra_integration.md` + `hcd_analysis/voigt_utils.py:59–73`.
+**Location**: `docs/fake_spectra_integration.md` + `hcd_analysis/voigt_utils.py` (the optional `fake_spectra` import block that sets `_HAVE_FAKE_SPECTRA` and `_FS_VOIGT_OK`).
 
 **What's documented**. README and the integration doc describe fake_spectra as a live dependency whose line parameters, Voigt profile, and absorber-finder are used by the pipeline.
 
