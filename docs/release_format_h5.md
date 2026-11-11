@@ -2,8 +2,12 @@
 
 Status: the pickle-free format for single-fidelity emulator bundles (see Scope below; the multi-fidelity correction
 is a separate record, "The multi-fidelity record" and "The release manifest" below), adopted subject to an independent review of
-its loader and a compatibility test with an older HDF5 library (passed locally with libhdf5 1.10.8 reading a bundle
-written with 2.0.0; not yet run in continuous integration). The trained models themselves are not distributed yet.
+its loader and a compatibility test with an older HDF5 library. That test runs in continuous integration (job "HDF5
+release format with an older libhdf5"): a synthetic two-member single-fidelity bundle (small untrained networks, a
+made-up lineage block and w_c map) written with the pinned stack is read bit for bit with h5py built against
+Ubuntu's libhdf5 1.10, and the loader's tests pass there. It covers the member files and the manifest of that
+synthetic bundle, not a trained release bundle or the multi-fidelity record. The trained models themselves are not
+distributed yet.
 The training
 checkpoints (`.eqx` + `.norm.pkl` + `.meta.json`, written by `train.save_checkpoint`) remain the working format; a
 release converts them once (`scripts/export_safe_bundle.py`). `hcd_priya.h5/2` adds to the earlier `hcd_priya.h5/1`

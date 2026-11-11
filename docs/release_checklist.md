@@ -37,9 +37,10 @@ code release (see the last section).
         example domain, or removed.
       - CI runs the same scan against `tools/ci/dist_content_known.txt`, the known findings still to be cleaned
         (listed by rule, file and line digest, one line per occurrence), so that CI fails on any new or stale one;
-        that list must be empty at a release. One of them, a path in the package-data file
-        `hcd_analysis/emulator/hcd_lit_dndx_corrected.json`, can only be fixed together with a re-cut of the
-        analysis lock, which needs the maintainer's separate approval.
+        that list must be empty at a release. It is empty now. Its last entry, a private path in the package-data
+        file `hcd_analysis/emulator/hcd_lit_dndx_corrected.json` (`cache_provenance.path`), was fixed by rewriting
+        that path to the repository-relative one; no analysis-lock re-cut was needed, and the historical lock is
+        unchanged. The release-mode scan above remains blocking for every release.
 - [ ] The wheel installs into a fresh environment with the pinned constraints, and `hcd --help` runs.
 
 ## 4. Public content

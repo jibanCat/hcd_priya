@@ -2,7 +2,8 @@
 
 Status: PROTOTYPE, kept as evidence; it is NOT the release format. The release format is HDF5 + JSON
 (`hcd_priya.h5/2`, specified in `docs/release_format_h5.md`), adopted subject to its loader hardening, an independent
-review and a compatibility test with an older HDF5 library. The training checkpoints (`.eqx` + `.norm.pkl` + `.meta.json`, written by
+review and a compatibility test with an older HDF5 library (now run in continuous integration on a synthetic
+bundle; see `docs/release_format_h5.md`). The training checkpoints (`.eqx` + `.norm.pkl` + `.meta.json`, written by
 `train.save_checkpoint`) remain the working format. Nothing here is a second required release format.
 
 ## Why
