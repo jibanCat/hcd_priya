@@ -209,8 +209,8 @@ step-by-step guide to production and research bundles, with executable examples:
 The low-fidelity (LF) emulator predicts the per-class P1D of the low-resolution PRIYA simulations. A multi-fidelity
 (MF) record, fitted on matched high- and low-resolution simulation pairs, calibrates it to high resolution:
 P_MF = P_LF exp(g(z, tau0, k)), where g does not depend on the cosmological parameters and is bound to exactly one LF
-backbone bundle. **No validated release MF exists yet.** The build of the release MF record and its grouped (K-fold)
-cross-validation are both pending, and the PI approves the K-fold acceptance criteria before any MF is released. The
+backbone bundle. The release MF record has been produced, and its grouped (K-fold) cross-validation results are
+under review; no MF is released before that review is complete. The
 calls below show the interface only; every path and digest in them is a placeholder.
 
 ```python
