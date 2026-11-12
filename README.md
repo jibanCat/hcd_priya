@@ -47,7 +47,7 @@ PRIYA: Bird, Fernandez, Ho et al. 2023, JCAP 10 037
 Fernandez, Bird & Ho 2024, JCAP 07 029
 ([arXiv:2309.03943](https://arxiv.org/abs/2309.03943)).
 
-hcd_priya is the continuation of, and the maintained production software for, the analysis of Ho et al. 2026,
+hcd_priya is the continuation of the analysis of Ho et al. 2026,
 "Small-scale Lyman alpha forest cosmology with PRIYA: constraints from XQ100 and KODIAQ-SQUAD one-dimensional flux
 power spectra", JCAP 2026 (07) 094
 ([doi:10.1088/1475-7516/2026/07/094](https://doi.org/10.1088/1475-7516/2026/07/094),
