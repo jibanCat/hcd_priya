@@ -1,13 +1,27 @@
 # API reference
 
 The modules a user of a released model needs. The package's other modules (the simulation pipeline, training,
-inference and the validation tools) are documented in their docstrings and are not part of this reference.
+inference and the validation tools) are documented in their docstrings and are not part of this reference, except
+the data-leg loaders below, which are listed as a research interface.
 
 ## The predictor
+
+The supported public interface of this release. `predict` and `predict_many` are methods of a loaded model
+(`Bundle`, or `ResearchPredictor` for a research model); `load_release`, `load_bundle` and `load_research_bundle`
+return one.
 
 ```{eval-rst}
 .. autoapimodule:: hcd_analysis.predictor
    :members:
+   :exclude-members: Bundle, ResearchPredictor
+
+.. autoapiclass:: hcd_analysis.predictor.Bundle
+   :members:
+   :inherited-members:
+
+.. autoapiclass:: hcd_analysis.predictor.ResearchPredictor
+   :members:
+   :inherited-members:
 ```
 
 ## The release format loaders
@@ -28,6 +42,58 @@ The loaders of `hcd_analysis.emulator.safe_h5`; the format itself is described i
 .. autoapiclass:: hcd_analysis.emulator.safe_h5.MemberMetas
    :members:
 .. autoapiexception:: hcd_analysis.emulator.safe_h5.UnanchoredBundleWarning
+```
+
+## Runtime data inputs
+
+Where the package finds the observed P1D files and how it checks them: an explicit path, else the product's
+environment variable, with every file verified by sha256 before it is read. The variables and folders are listed in
+the README, section "Data and checkpoints"; the product ids are in the module docstring of `hcd_analysis.runtime_data`.
+
+```{eval-rst}
+.. autoapifunction:: hcd_analysis.runtime_data.resolve_file
+.. autoapifunction:: hcd_analysis.runtime_data.resolve_dir
+.. autoapifunction:: hcd_analysis.runtime_data.product_file
+.. autoapifunction:: hcd_analysis.runtime_data.product_dir
+.. autoapifunction:: hcd_analysis.runtime_data.show_loads
+.. autoapiclass:: hcd_analysis.runtime_data.LoadRecord
+.. autoapiexception:: hcd_analysis.runtime_data.DataProductError
+.. autoapiexception:: hcd_analysis.runtime_data.DataProductConflict
+```
+
+## Data-leg loaders (research interface)
+
+**Outside the supported scope of this release.** These functions of `hcd_analysis.emulator.data_likelihood` load a
+measured P1D with its cuts and covariance for the research likelihood. They are listed here because they are how the
+verified data files are read. No fit runs from this repository at this commit (README, "Scope and limitations of
+this release"). Their full docstrings are in the source.
+
+```{eval-rst}
+.. py:currentmodule:: hcd_analysis.emulator.data_likelihood
+
+.. py:function:: load_eboss_leg(npz_path=None, *, z_lo=2.2, z_hi=4.6, k_min=0.0, k_max=None, metals_on=True, resolution_on=False, mf_floor_on=False, dla_forward_frac=EBOSS_DLA_FORWARD_FRAC, add_cv_floor=None, resolution_float=False, resolution_coherent=False, resolution_coh_amp=1.0)
+
+   Load the eBOSS DR14 P1D (Chabanier et al. 2019) as a ``DataLeg``. The file is the runtime data product
+   ``eboss_dr14_p1d``: ``npz_path`` when given, else ``$HCD_P1D_DATA_DIR/eboss_dr14_p1d/``, verified by sha256.
+
+.. py:function:: load_desi_leg(npz_path=None, *, z_lo=2.2, z_hi=4.2, k_min=DESI_KMIN, metals_on=True, resolution_on=False, add_cov_diag_inflation=True, mf_floor_on=False, use_snr3=None, snr3_stat_inflate=None, add_cv_floor=None, resolution_float=False, resolution_coherent=False, resolution_coh_amp=1.0, dla_cov_reduce=None)
+
+   Load the DESI DR1 P1D as a ``DataLeg``. The file is the runtime data product ``desi_dr1_p1d`` (SNR>1) or
+   ``desi_dr1_p1d_snr3``: ``npz_path`` when given, else ``$HCD_P1D_DATA_DIR/desi_dr1_p1d/``, verified by sha256.
+   ``use_snr3`` (or the variable ``HCD_DESI_SNR3``) selects the sample; a file of the other sample is refused.
+
+.. py:function:: load_ks_leg(base=None, *, z_lo=2.4, z_hi=4.6, k_max=None, metals_on=False, resolution_on=False, mf_floor_on=True, resolution_float=False)
+
+   Load the KODIAQ-SQUAD conservative-mode P1D as a ``DataLeg``. The files are the runtime data product
+   ``ks_p1d_conservative``: the directory ``base`` when given, else ``$HCD_LYAEMU_PARENT/lyaemu/data/kodiaq_squad/``,
+   verified by sha256. ``k_max`` must be given explicitly.
+
+.. py:class:: DataLeg
+
+   One measured P1D after the cuts, ordered by redshift and then by k: ``z`` (the kept redshifts) and, per row,
+   ``z_row``, ``k``, ``P_data`` and the covariance ``C_data``, with the survey's flags (``metals_on``,
+   ``dla_forward_frac`` and others). A leg returned by a loader also carries ``data_products``, one
+   ``runtime_data.LoadRecord`` per verified file it read.
 ```
 
 ## Lineage records
