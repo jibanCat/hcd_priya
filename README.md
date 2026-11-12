@@ -261,53 +261,47 @@ release manifest".
 
 Throughout the rest of this README, each stage is marked with what it needs:
 **requires the full data / Great Lakes (not in this repo)** for anything that
-builds the catalogs, the full cache, or trains the emulator; and
-**runnable anywhere with a checkpoint + a cache slice** for the portable pieces
-(the forward-model API, reading the data structure).
+builds the catalogs, the full cache, or trains the emulator;
+**needs the release files** for the public predictor; and **research code** for
+the likelihood and the fits, which do not run from this repository at this commit.
 
 ---
 
 ## Quickstart
 
-**Runnable anywhere with a checkpoint + a cache slice** (one LOSO fold of the
-cache is sufficient; see [Data and checkpoints](#data-and-checkpoints)). It does
-not require the full 1.1 GB cache or a cluster, but it does need the trained
-checkpoint and at least the one cache row it reads, neither of which is in the
-repository.
+**Needs the release files** (the LF backbone bundle, the MF record and `release.json`), which are not public yet; see
+[Data and checkpoints](#data-and-checkpoints). Run it in the installed environment with `JAX_PLATFORMS=cpu`, as given
+above.
 
-The smallest end-to-end example loads the trained emulator and calls the forward
-model to predict a contaminated P1D. Run it in the installed environment with
-`JAX_PLATFORMS=cpu`, as given above.
+The smallest end-to-end example loads a release, predicts the per-class P1D at one redshift and mixes in the HCD
+classes. The path and the digest are placeholders: use the release directory and the sha256 published with it.
 
 ```python
-import hcd_analysis.emulator                       # enables JAX float64 on import
-import jax.numpy as jnp
-from hcd_analysis.emulator import train as T
-from hcd_analysis.emulator.data import load_cache
-from hcd_analysis.emulator.predict import predict_P_obs, predict_P_filt
+import hcd_analysis.predictor as hp
 
-# 1. load a trained emulator checkpoint (the canonical stand-in default)
-model, meta, norm = T.load_checkpoint("checkpoints/final_fold0")
-pf = norm["P_filt"]                                 # structured P_filt norm dict
+# 1. load a release: the directory that holds release.json, and the sha256 published with it
+emu = hp.load_release("path/to/release", "<published release sha256>")
 
-# 2. grab one example input row from the training cache
-d   = load_cache("hcd_analysis/_emulator_data/observables_tau0_lf.h5")
-row = 0
-theta9   = jnp.asarray(d["params_unit"][row])       # (9,) cosmology+astro, UNIT cube
-z_unit   = float(d["x"][row, 9])                    # (z - 2.0) / 3.4
-tau0     = float(d["tau0"][row])                    # mean-flux optical depth = -ln(<F>)
-alpha    = jnp.asarray(d["w_c_cache"][row, 1:])     # (3,) HCD incidence: LLS, subDLA, DLA
-dla_core = jnp.asarray(d["delta"][row, 2])          # (K,) DLA-core add-back
+# 2. the nine PRIYA parameters, by name; here the centre of the parameter box
+params = {n: 0.5 * (lo + hi) for n, (lo, hi) in zip(hp.PARAM_NAMES, hp.PARAM_LIMITS)}
 
-# 3. predict
-P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf)                  # (4,K) per class
-P_obs  = predict_P_obs(model, theta9, z_unit, tau0, alpha, pf, dla_core)  # (K,)  total, contaminated
-print(P_obs.shape)
+# 3. predict at one PRIYA snapshot redshift; the mean flux is (tau0_amp, dtau0), or tau_eff
+pred = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
+print(pred.k.shape, pred.P_class.shape)    # (172,) (4, 172): k in s/km; P1D in km/s of clean, LLS, subDLA, DLA
+print(pred.labels["product"])              # LF+MF
+
+# 4. mix in the HCD classes, here with the model's own sightline fractions
+P_total = hp.add_hcd(pred, pred.w_c)
+print(P_total.shape)                       # (172,)
 ```
 
-Every input to the emulator is mapped onto the unit cube `[0,1]`. The full input
-contract, including parameter order, the z and τ₀ maps, and how to construct your
-own inputs, is given in the emulator README linked below.
+Read `pred.flags` before using the numbers: a parameter outside the training box, or an LF+MF prediction above
+z 4.6, is returned and flagged, not refused. Without the release files, the same `predict` and `add_hcd` calls run on
+a synthetic bundle (untrained networks, so it shows the interface and behaviour, not science):
+`hcd_analysis.emulator.release_testing.write_synthetic_bundle` writes one that `hp.load_bundle` loads, and the
+tutorial [`docs/tutorials/production_and_research_bundles.md`](docs/tutorials/production_and_research_bundles.md)
+walks through production and research bundles on synthetic data. The low-level differentiable forward is described
+in the emulator README linked below.
 
 ---
 
@@ -420,10 +414,10 @@ Build the τ₀ cache for the emulator:
 ### Stage 2 — the HCD-marginalised emulator
 
 **Training requires the full data / Great Lakes (not in this repo)** — the LOSO
-sweep needs the full τ₀ cache. **Using a trained emulator is runnable anywhere
-with a checkpoint + a cache slice** (the [Quickstart](#quickstart) above and the
-emulator README's forward-model API), once a checkpoint and at least one cache
-row are obtained from the PI.
+sweep needs the full τ₀ cache. **Using a released model needs only the release
+files** (the [Quickstart](#quickstart) above). The emulator README's low-level
+forward-model API needs a current-format checkpoint and a slice of the training
+cache, neither of which is public.
 
 A differentiable JAX/Equinox network learns the per-class P1D as a smooth
 function of the cosmology θ, the redshift z and τ₀. The central design choice is
