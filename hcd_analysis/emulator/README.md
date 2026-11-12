@@ -300,18 +300,18 @@ The figures below are from the **deployed production ensemble** walkthrough (com
 raw numbers in `06_performance_walkthrough/headline_numbers.json` (dual-keyed:
 `loso_held_out` = generalisation, `ensemble_in_sample` = the deployed all-sims fit).
 
-**Headline frac-P1D RMS** (in-range, per class clean / LLS / subDLA / DLA):
+**Headline frac-P1D RMS** (historical, pre-2026-10; in-range, per class clean / LLS / subDLA / DLA):
 - **Deployed ensemble (in-sample fit quality):** **0.5 / 0.6 / 0.7 / 1.6 %**
 - **LOSO held-out (the generalisation accuracy claim):** **1.1 / 1.2 / 1.3 / 2.5 %**
 
 ![B1: predicted vs true P1D](../../figures/analysis/06_performance_walkthrough/B1_pred_vs_true_p1d.png)
 
-*B1: reconstructed linear P1D vs cache, per class (solid = true, dashed = LOSO **held-out**, dotted
+*B1 (historical, pre-2026-10): reconstructed linear P1D vs cache, per class (solid = true, dashed = LOSO **held-out**, dotted
 = **in-sample** ensemble). Both hug zero across the resolved band.*
 
 ![B2: deployed fractional P1D error vs k](../../figures/analysis/06_performance_walkthrough/B2_deployed_frac_err_vs_k.png)
 
-*B2: `|pred/true − 1|` vs k over all folds' val rows: solid+IQR = LOSO **held-out** (the accuracy
+*B2 (historical, pre-2026-10): `|pred/true − 1|` vs k over all folds' val rows: solid+IQR = LOSO **held-out** (the accuracy
 claim, 1.1/1.2/1.3/2.5%), dashed = **in-sample** ensemble (~2× lower, the deployed-fit reference),
 dotted = cosmic-variance floor.*
 
@@ -323,7 +323,7 @@ k; `A_p`/`h` carry the largest coherent amplitudes.*
 
 ![A1: dN/dX predicted vs true](../../figures/analysis/06_performance_walkthrough/A1_dndx_pred_vs_true.png)
 
-*A1: Head-A `dN/dX` accuracy vs z (solid/dashed = LOSO **held-out** median/p95 ≈ 1.3–1.7%; dotted =
+*A1 (historical, pre-2026-10): Head-A `dN/dX` accuracy vs z (solid/dashed = LOSO **held-out** median/p95 ≈ 1.3–1.7%; dotted =
 **in-sample** ensemble ≈ 0.5–0.6%). Error rises only at the count-limited off-DESI z extremes.*
 
 Companion accuracy figures: B5 (per-fold A_p/n_s Fisher bias, the inference gate; historical,
@@ -585,8 +585,8 @@ k ≤ 0.06 s/km.
 
 ![Per-class predicted vs cache P1D, fold 0, residual on the used band](../../figures/analysis/04_emulator/pred_vs_true_p1d_fold0_inrange.png)
 
-***(a) What the figure shows.*** A fold-0 example prediction (dashed) vs the cache (solid), per HCD
-class. Inside the analysis band the residual is ~1–2% (median ≈ 0.7%); the grey region (above the
+***(a) What the figure shows.*** Historical (pre-2026-10): a fold-0 example prediction (dashed) vs the cache (solid), per HCD
+class. Inside the analysis band the residual was ~1–2% (median ≈ 0.7%); the grey region (above the
 top stored mode) is not used. The rigorous all-folds error lives in the notes validation doc
 (`2026-06-14-validation-loso-emulator-lf-mf.md` §2), which resolves the held-out error per
 wavenumber k (the rigorous "where in k does the error live" answer). Demo C below shows the
@@ -951,9 +951,9 @@ the priors, which is everything a sampler needs.
   [arXiv:2211.02383](https://arxiv.org/abs/2211.02383)), `whitening_test`, `empirical_coverage`,
   `calibrate_cemu_inflate`. All NUTS-free and fast.
 
-The closures these tools drive validate the architecture that the production all-sims N=5 ensemble
-inherits; the ensemble-level production SBC is the final inference-calibration gate and remains
-pending before the real fit (notes `2026-06-14-validation-likelihood-production.md` §6).
+Before 2026-10 the closures these tools drove checked the architecture that the production all-sims N=5
+ensemble inherits; the ensemble-level production SBC is the final inference-calibration gate and remains
+pending before the real fit.
 
 See `2026-06-04-phase-c-t4-closure-plan.md` (in the maintainers' private notes) for the closure/SBC harness
 (Phase-C T4, in progress) and `2026-06-04-phase-c-checkpoint-review.md` (in the maintainers' private notes) for the
