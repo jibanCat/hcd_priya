@@ -93,6 +93,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import os
+import warnings
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -1572,6 +1573,213 @@ def load_research_bundle(
         bundle_dir, expected_manifest_sha256=expected_manifest_sha256, purpose=purpose
     )
     return ResearchPredictor(rb, mf=_load_mf(rb, mf_dir, mf_record_sha256, "fold"))
+
+
+# -------------------------------------------------------------------------------------------- published models
+class NoPublishedModelError(LookupError):
+    """``load_published`` was asked for a model that the installed model package does not hold.
+
+    The message lists the models it holds. A model whose files you hold yourself loads with
+    ``load_release(release_dir, sha256)``.
+    """
+
+
+class ModelPackageError(RuntimeError):
+    """The model package ``hcd-priya-models`` is missing, or it is not one this ``hcd-priya`` accepts.
+
+    The message says which: the package is not installed; its version is not listed in
+    ``hcd_analysis.published_models``; or it is a synthetic test build. It names the installed
+    version and the accepted ones.
+    """
+
+
+def example_params() -> dict[str, float]:
+    """The nine PRIYA parameters at the centre of the parameter box, by name.
+
+    A convenient starting point for a first prediction: it is a synthetic point (the midpoint of
+    each parameter's training range, ``PARAM_LIMITS``), not a best fit and not a simulation.
+
+    Returns
+    -------
+    dict
+        ``{name: value}`` for the nine names in ``PARAM_NAMES``.
+
+    Examples
+    --------
+    >>> import hcd_analysis.predictor as hp
+    >>> params = hp.example_params()
+    >>> list(params) == list(hp.PARAM_NAMES)
+    True
+    >>> bool(params["ns"] == 0.5 * (hp.PARAM_LIMITS[0][0] + hp.PARAM_LIMITS[0][1]))
+    True
+    """
+    return {n: 0.5 * (float(lo) + float(hi)) for n, (lo, hi) in zip(PARAM_NAMES, PARAM_LIMITS)}
+
+
+def published_models() -> list[tuple[str, str]]:
+    """The models this version of hcd_priya accepts, as (name, version) pairs.
+
+    They are the entries of ``hcd_analysis.published_models.MODELS``. The list is empty until a
+    model is published.
+
+    Examples
+    --------
+    >>> import hcd_analysis.predictor as hp
+    >>> isinstance(hp.published_models(), list)
+    True
+    """
+    from . import published_models as _PM
+
+    return [(m["name"], m["version"]) for m in _PM.MODELS]
+
+
+def _model_package():
+    """The installed model package, its version and its manifest (checked for shape, not trusted)."""
+    try:
+        import hcd_priya_models as mp
+    except ImportError as exc:
+        raise ModelPackageError(
+            "the model package hcd-priya-models is not installed. hcd-priya requires it (it holds "
+            "the trained models); the install section of the README says how to get it. A release "
+            "whose files you hold loads with load_release(release_dir, sha256). "
+            f"[{type(exc).__name__}: {exc}]"
+        ) from exc
+    version = str(mp.__version__)
+    try:
+        doc = mp.manifest()
+    except (OSError, ValueError) as exc:
+        raise ModelPackageError(
+            f"hcd-priya-models {version} is installed but its list of models cannot be read: {exc}"
+        ) from exc
+    models = doc.get("models")
+    ok = (
+        doc.get("version") == version
+        and isinstance(doc.get("synthetic"), bool)
+        and isinstance(models, list)
+        and all(
+            isinstance(m, dict)
+            and set(m) == {"name", "format", "path", "anchor_sha256"}
+            and all(isinstance(v, str) for v in m.values())
+            for m in models
+        )
+        and len({m["name"] for m in models}) == len(models)
+    )
+    if not ok:
+        raise ModelPackageError(
+            f"hcd-priya-models {version}: its list of models is malformed, or names another "
+            f"version ({doc.get('version')!r})"
+        )
+    return mp, version, doc
+
+
+def load_published(name: str = "lfmf") -> Bundle:
+    """Load a published model by name from the installed model package.
+
+    The shortest way to a prediction::
+
+        import hcd_analysis.predictor as hp
+        emu = hp.load_published("lfmf")
+        pred = emu.predict(hp.example_params(), z=3.0, tau0_amp=1.0, dtau0=0.0)
+        pred.P_class            # (4, K): the P1D of clean, LLS, subDLA, DLA
+
+    The trained models come in the companion package ``hcd-priya-models``, which ``hcd-priya``
+    requires: once both are published, ``pip install hcd-priya`` installs both. Nothing is
+    downloaded when you load.
+    What happens here: the model's files are found in the installed model package; the package's
+    version must be one that this version of hcd_priya lists in
+    ``hcd_analysis.published_models``; and the release is loaded with ``load_release`` against
+    the sha256 listed there, which verifies every file. For a published model the digest comes
+    from the code package, never from the model package, so changed model files are refused.
+
+    Parameters
+    ----------
+    name : str, optional
+        The model's name. ``"lfmf"`` is the LF+MF release.
+
+    Returns
+    -------
+    Bundle
+        The loaded model, as from ``load_release``.
+
+    Raises
+    ------
+    ModelPackageError
+        If ``hcd-priya-models`` is not installed; if its version is not one this version of
+        hcd_priya accepts (the message names the installed and the accepted versions); or if it
+        is a synthetic test build and the test switch is off.
+    NoPublishedModelError
+        If the installed model package holds no model of that name. The message lists what it
+        holds.
+    ReleaseManifestError, SafeFormatError, MFRecordError
+        As in ``load_release``, if the files do not verify against the listed digest.
+
+    Notes
+    -----
+    If you hold a release's files yourself, ``load_release(release_dir, sha256)`` loads them
+    directly, without the model package.
+
+    A model package built with a synthetic bundle (untrained networks; its version ends in
+    ``+synthetic``, which a package index refuses) exists so that tests never need a real model.
+    It loads only when the environment variable ``HCD_PRIYA_ALLOW_SYNTHETIC`` is ``1``, with a
+    warning and against the digest the package states for itself; its numbers are not science,
+    and ``provenance["release"]["synthetic_build"]`` is True on the model and its predictions.
+
+    Examples
+    --------
+    Here the installed model package is a synthetic test build, and the test switch is on:
+
+    >>> import hcd_analysis.predictor as hp
+    >>> emu = hp.load_published("lfmf")
+    >>> pred = emu.predict(hp.example_params(), z=3.0, tau0_amp=1.0, dtau0=0.0)
+    >>> pred.labels["product"], pred.P_class.shape[0]
+    ('LF+MF', 4)
+    """
+    from . import published_models as _PM
+
+    mp, version, doc = _model_package()
+    held = [m for m in doc["models"] if m["name"] == name]
+    if not held:
+        have = ", ".join(m["name"] for m in doc["models"]) or "none"
+        raise NoPublishedModelError(
+            f"hcd-priya-models {version} holds no model {name!r} (it holds: {have}). A release "
+            "whose files you hold loads with load_release(release_dir, sha256)."
+        )
+    pins = [m for m in _PM.MODELS if m["name"] == name and m["version"] == version]
+    synthetic = False
+    if len(pins) == 1:
+        fmt, anchor = pins[0]["format"], pins[0]["anchor_sha256"]
+    elif doc["synthetic"] and version.endswith("+synthetic") and not pins:
+        if os.environ.get("HCD_PRIYA_ALLOW_SYNTHETIC") != "1":
+            raise ModelPackageError(
+                f"the installed hcd-priya-models {version} is a synthetic test build (untrained "
+                "networks), not a published model. Install a published hcd-priya-models; tests "
+                "load the synthetic build with HCD_PRIYA_ALLOW_SYNTHETIC=1."
+            )
+        warnings.warn(
+            f"hcd-priya-models {version} is a synthetic test build: the model {name!r} has "
+            "untrained networks and its numbers are not science",
+            stacklevel=2,
+        )
+        fmt, anchor, synthetic = held[0]["format"], held[0]["anchor_sha256"], True
+    else:
+        accepted = ", ".join(v for n, v in published_models() if n == name) or "none yet"
+        raise ModelPackageError(
+            f"hcd-priya-models {version} is installed, but this version of hcd_priya accepts for "
+            f"{name!r} the model versions: {accepted}. Install a pair of versions that match "
+            "(the list is hcd_analysis.published_models)."
+        )
+    if fmt != "hcd_priya.release/1":
+        raise ModelPackageError(f"{name!r}: the format {fmt!r} is not one load_published loads")
+    try:
+        root = mp.model_dir(name)
+    except (KeyError, ValueError, OSError) as exc:
+        raise ModelPackageError(
+            f"hcd-priya-models {version}: the files of {name!r} are missing ({exc})"
+        ) from exc
+    emu = load_release(root, anchor)
+    if synthetic:  # visible in every prediction's provenance, also when warnings are filtered
+        emu._release = dict(emu._release, synthetic_build=True)
+    return emu
 
 
 def _predictor(pred, what):
